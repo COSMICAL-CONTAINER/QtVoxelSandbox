@@ -1,0 +1,15 @@
+# 统一行尾：源码 LF（跨 Win/Linux/Android 一致）
+* text=auto eol=lf
+# 二进制不做行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.flac binary
+*.qsb binary
+*.ttf binary
+*.otf binary
+*.pdf binary

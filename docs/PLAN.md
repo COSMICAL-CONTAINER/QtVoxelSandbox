@@ -1,7 +1,19 @@
 # Qt 体素沙盒 — 设计与路线图
 
-> 状态：**待讨论稿**（plan mode）。本文档经"研究(4 路并行查证) → 综合 → 对抗性审查(2 路)"三轮打磨，已把审查挖出的致命缺陷作为硬不变量纳入。
+> 状态：**活文档（已批准，持续修订）**。经"研究(4 路并行查证) → 综合 → 对抗性审查(2 路)"三轮打磨。
+> 最近修订：**pin Qt 6.11.1**（你已安装）；**性能目标改为 MC 官方现行最低/推荐配**（现行最低配已要求 Vulkan 1.3）；补 **Phase 0 引导、.gitattributes、CI 轻量版、TL;DR**。
 > 目标读者：你（单人、业余、主导者）。
+
+---
+
+## TL;DR
+
+- **做什么**：Qt6.11.1 / C++20 体素沙盒，**机制对标 Minecraft Java 1.0.0**（仅机制，非视觉/专有名词），原创资产与名称。
+- **栈**：CMake + QML(UI) + 自研 RHI 体素渲染层（Vulkan 为主，D3D11/GL 兜底）；SQLite 存档；miniaudio；后期自有协议联机（Qt↔Qt）。
+- **分期**：Phase 0 引导 → **1.0 引擎纵切（创造沙盒，真正的成功线）** → 1.1 存档+最小生存 → 1.x 完整 1.0.0 桌面 → 2 安卓 → 3 联机 → 4 Linux+打磨。
+- **现实**：单人业余，多年级（完整"逼近 1.0.0" ≈ 4–8 年）；Phase 1.0 是验收闸，带退出阀。
+- **性能目标**：对齐 MC 官方现行最低配（Vulkan 1.3 GPU / ≥2GB VRAM、8–12GB RAM、四核）→ 1080p @ ≥30fps（Fast 档）；推荐配 → 60fps（Fancy 档）。
+- **红线**：不用 MC 任何资产 / 名称 / 专有名词；不与正版互通。
 
 ---
 
@@ -15,6 +27,8 @@
   3. 渲染 = **QML 做 UI + 自研 Qt6 RHI 体素渲染层**。
   4. 投入 = **你一个人，业余时间**。
   5. 可参考开源代码，但**资产/名称必须原创**。
+  6. **Qt 版本 = 6.11.1**（你已安装，直接 pin）。
+  7. **桌面性能目标 = MC 官方现行最低/推荐配**（让大多数人能玩，见 §4）。
 - **核心现实**（最重要的一句）：这是**多年级**工程。连"桌面单机 1.0.0 核心"都是数月到年级。**真正的成功线是 Phase 1.0（引擎纵切）**——能玩、能交给朋友。完整"逼近 1.0.0"按诚实估计是 **4–8 年**，且大多数单人项目做不完。所以本计划围绕"最小可玩纵切 + 预先写好的砍单清单 + 退出阀"来排。
 
 ---
@@ -23,11 +37,11 @@
 
 | 关注点 | 决定 | 关键纠错 / 依据 |
 |---|---|---|
-| Qt 版本 | **6.8.x LTS**，按发布 pin，不漂移 | ⚠️ "支持到 2029-10"是**商业**支持；**OSS 补丁滞后**，最终 OSS 补丁约 **2028-10**（KDE Free Qt Foundation）。要么接受滞后补丁/cherry-pick，要么预算商业授权。pin 策略本身正确。 |
+| Qt 版本 | **6.11.1（已安装，pin）** | 非 LTS（当前 LTS 是 6.8）。你已装 6.11.1 → 直接 pin、省一次安装、RHI 更新。代价：6.11 是非 LTS，补丁窗口短（6.12 发布即停），OSS 补丁本就滞后于商业。缓解：QRhi **无源/二进制兼容保证**的 churn 靠**不变量 A（RHI 囚禁）+ "渲染器对下一 Qt 小版本编译"CI job** 兜住。日后若求最长稳定期，可并行装 LTS。 |
 | C++ 标准 | **C++20** | `std::span`/`std::jthread`/ranges/`std::format`；避开 C++23（工具链参差）。 |
 | 构建 | **CMake + Qt CMake API**（`qt_standard_project_setup`、`qt_add_executable`、`qt_add_qml_module`、`qt_add_shader`） | 一棵树出 Win/Linux/Android。 |
 | UI | **Qt Quick 2 + QML**（HUD/背包/合成/菜单） | **不用** Qt Quick 3D 画体素世界（它不为海量动态区块设计）。 |
-| 桌面后端 | **Vulkan 主**，D3D11(Win)/OpenGL(Linux) 兜底 | Vulkan 是 Win+Linux+Android 共有的唯一后端 → 单一主代码路径。 |
+| 桌面后端 | **Vulkan 主**，D3D11(Win)/OpenGL(Linux) 兜底 | Vulkan 是 Win+Linux+Android 共有的唯一后端 → 单一主代码路径。**且 MC 官方现行最低配已要求 Vulkan 1.3**，印证此选择；D3D11/GL 仅作安全兜底。 |
 | 安卓后端 | **OpenGL ES 主**（覆盖率），Vulkan 可选 | GLES 是 QRhi 在安卓的默认，几乎所有设备可用。 |
 | RHI 集成 | **`QQuickRhiItem` + `QQuickRhiItemRenderer`** | 6.7 起公开（⚠️"6.11 仍 Preliminary"经核实为**误**）；但 **QRhi 全家无源/二进制兼容保证**，跨小版本会破 → 必须囚禁（见不变量 A）。 |
 | 纹理 | **纹理数组为快路径 + 半像素内缩/逐 tile mipmap 图集为可移植兜底** | ⚠️ `TextureArrays` 是**运行期 feature-gated**（Qt 6.11 文档确认），GLES 与桌面 GL 都可能不支持。**第一天就要备好图集兜底**，并在 `initialize()` 里 `isFeatureSupported()` probe。禁止"只做数组、图集以后再说"。 |
@@ -72,7 +86,7 @@
 - **C. 世界锁模型**：per-chunk `std::shared_mutex`（读共享/写独占）。所有非所属线程的 voxel 读走共享锁。ThreadSanitizer CI 强制此不变量。
 - **D. 单一输入路径**：边缘统一把原始事件翻译成 `InputAction` → `InputBus`（桌面 `VoxelView` override 与安卓 PointerHandler **都**翻译）；绑定表（`QKeySequence → InputAction`）放 `Config`、在边缘读；渲染线程只消费 `synchronize()` 准备好的 InputAction 快照。→ 使"按键重绑"可实现。
 - **E. 错误模型**：fallible 的 World/Renderer 操作用 `Result<T>`；chunk 加载失败 → "错误块"（品红）兜底（世界一致而非崩溃）；shader 编译失败 → 内置 unlit 兜底 + 大声告警；存档损坏 → 停机 + **迁移前先备份**。
-- **F. 日志 + F3 叠层**：`QLoggingCategory` 按模块（`vo.world`/`vo.render`/...）+ 滚动文件 sink + **F3 QML 调试叠层**（fps / chunk / mesh / 线程计数）。没有它，60fps 验收无法诊断帧抖。
+- **F. 日志 + F3 叠层**：`QLoggingCategory` 按模块（`vo.world`/`vo.render`/...）+ 滚动文件 sink + **F3 QML 调试叠层**（fps / chunk / mesh / 线程计数）。没有它，帧率验收无法诊断帧抖。
 - **G. Core 决定**：**Config = JSON**（原生 `QJsonDocument`，避免引入 toml++）；**EventBus = 类型化 QObject 信号 + `Qt::QueuedConnection` 跨线程**（无字符串派发）。
 - **H. 光照模型**（删除"旋转方向光"）：**MC 1.0 的 per-column 天光**——自顶向下首个实体的 heightmap，顶点"见天"则天光；昼夜用**天光亮度乘子** lerp（不是旋转方向光）；方块光（火把/岩浆）独立 flood-fill、时间不变。平滑光照=逐顶点混合(**M**)，AO(**S**)。
 - **I. 顶点格式（贪婪/AO-ready，day-1）**：`{vec3 pos, vec3 normal, vec2 uv, uint tileIndex, uint8 ao[4]}`，即使初期 `ao≡1.0`。避免将来开 AO 时重网格化所有缓存 buffer。
@@ -105,6 +119,18 @@ QtMinecraft/
 
 每模块职责见 §2 分层说明；依赖方向严格向下。
 
+### Phase 0 — 项目初始化（bootstrap，进行中）
+
+把上面的骨架立起来、确认工具链就位、让一个空 Qt6.11.1 窗口能编译运行。这是 Phase 1.0 的前置，也是**最早的去风险**（验证 Qt6.11.1 + RHI 工具链在你机器上能跑通）。
+
+- [x] git 仓库初始化（`main`）+ `.gitignore`（Qt/C++/CMake/安卓）+ `.gitattributes`（统一 LF 行尾）。
+- [x] 本计划文档落地 `docs/PLAN.md` 并入库。
+- [ ] 顶层 `CMakeLists.txt`（`find_package(Qt6 6.11.1 COMPONENTS Core Gui Quick QuickControls2 ...)`、`qt_standard_project_setup()`）。
+- [ ] 一个最小 `QQuickWindow` / `QQuickRhiItem` 空集成**能编译并在桌面跑出空窗口**（Vulkan 后端）。
+- [ ] 工具链核实：Qt 6.11.1 路径、编译器（MSVC/MinGW/Clang）、CMake、Ninja。
+
+**验收**：空窗口启动不崩、Vulkan 后端生效（F3 叠层或日志可见）、Windows 构建配置绿。
+
 ---
 
 ## 4. Phase 1.0 — 引擎纵切（engine spike，**第一个真正的成功线**）
@@ -124,7 +150,10 @@ QtMinecraft/
 - **F3 调试叠层**。
 
 **验收（全部可证伪）**
-- [ ] 命名机器（建议 **Intel UHD 630 / Ryzen 5 3600 / 16GB**）@1080p、RD=8 列 → **CPU ≤12ms + GPU ≤8ms**；写死 draw-call / 三角面上限。
+- [ ] **性能（分档，对齐 MC 官方现行最低/推荐配）**：
+  - **最低配**（官方现行 min：64 位、四核 CPU、**8GB RAM（独显）/ 12GB（核显）**、**Vulkan 1.3 + ≥2GB VRAM 的 GPU**）→ **1080p @ ≥30fps**，Fast 档（降视距/降画质）。⚠️ 官方现行最低配**已要求 Vulkan 1.3**，印证我们 Vulkan 为主；D3D11/GL 仍作安全兜底。
+  - **推荐配**（16GB RAM、现代 CPU、≥6GB VRAM）→ **1080p @ ≥60fps**，Fancy 档。
+  - 写死帧时间切分（CPU/GPU ms）、draw-call / 三角面上限 → 可 pass/fail，非"感觉还行"。来源：[minecraft.net 现行系统要求](https://www.minecraft.net/en-us/article/minecraft-java-edition-system-requirements)，落地前以官方页面最终核对。
 - [ ] 鼠标看/WASD/跳/fly 无抖动。
 - [ ] 射线命中 + 线框高亮渲染在命中面。
 - [ ] 左破/右放 + hotbar 1–9/滚轮，选中槽视觉高亮。
@@ -133,7 +162,7 @@ QtMinecraft/
 - [ ] **`isFeatureSupported(TextureArrays)` 已 probe**；不支持则走图集兜底或拒启（有代码路径）。
 - [ ] **零 Minecraft 资产 / 零专有名词**（Creeper 等已改名）。
 - [ ] Windows(Vulkan) `-Wall -Wextra` / `/W4` 项目自有代码零警告。
-- [ ] **Win + Linux CI 绿**（从 Phase 1.0 起，不等 Phase 4）。
+- [ ] **Win + Linux CI 绿**（从 Phase 1.0 起，轻量"仅编译"版，见 §10）。
 - [ ] **资产门通过**（每文件具名来源）。
 
 **工时（已应用 triple-it）**：原始估 3–5 月（熟 RHI）/ 5–9 月（生）→ 诚实 **~9–15 / 15–27 hobbyist-month**（1 hobbyist-month ≈ 40–60 业余小时）。
@@ -178,7 +207,7 @@ QtMinecraft/
 
 1. **单人范围 / 动力悬崖**（最高）。地形+渲染+破放 ~20% 工作量；UI/背包/合成/存档/生存/光照传播/音频/打磨是另外 80%，项目死在这里。
 2. **资产获取是门而非勾选框**（新晋 #2）。$0、非美术、**无现成 CC0 MC 风格子集**、法律禁用正版衍生 → ~90 方块×N 面变体 + 羊毛色 + GUI 图标 + 像素字体全要手画/委托，**数百小时坐在关键路径上**。
-3. **QRhi 无兼容保证**（升档 top-3）。⚠️"6.11 Preliminary"说法**未证实**（6.7 起公开）；但病更重：**整个渲染器建在半私有 API 上，跨 Qt 小版本会破**。→ 囚禁(不变量 A) + "对下一小版本编译"CI job。
+3. **QRhi 无兼容保证**（升档 top-3）。⚠️"6.11 Preliminary"说法**未证实**（6.7 起公开）；但病更重：**整个渲染器建在半私有 API 上，跨 Qt 小版本会破**（在非 LTS 的 6.11 上尤其要靠此纪律）。→ 囚禁(不变量 A) + "对下一小版本编译"CI job。
 4. **安卓性能 + 驱动碎片**（桌面后最大技术风险）。Adreno/Mali/PowerVR 驱动方差大；后台 context loss；内存压力杀后台应用。
 5. **法律 / IP（半边没画）**。版权半边 ✓（原创资产/名/不互通）；**商业外观(trade dress)半边缺失**——专有名词(Creeper 等)、UI 布局、美术方向都要区隔（见 §9）。
 6. **存档 / 版本化腐蚀**。20 小时后存档损坏永久杀动力。
@@ -201,15 +230,17 @@ QtMinecraft/
 
 ## 10. 验证（端到端怎么测）
 
-- **CI（从 Phase 1.0 起）**：Win + Linux 每 push 绿；渲染器对"下一个 Qt 小版本"编译 job（提早发现 QRhi 破坏）；ThreadSanitizer build（世界锁不变量 C）。
+- **CI（从 Phase 1.0 起，单人可承受的轻量版）**：先**仅编译**矩阵（Win + Linux），每 push 绿——**不上设备/图形测试**（对单人太重）。后续逐步加：渲染器对"下一个 Qt 小版本"编译 job（提早发现 QRhi 破坏）、ThreadSanitizer build（世界锁不变量 C）、golden 回归。
 - **Golden 回归**：世界生成高度图（同 seed 同版本 diff）+ 存档每版本一个 fixture round-trip + 光照传播确定性。
-- **性能预算**：命名机器 + 帧时间切分 + draw-call/三角面上限（可 pass/fail，非"感觉还行"）。
+- **性能预算**：分档命名机器（最低配/推荐配，§4）+ 帧时间切分 + draw-call/三角面上限（可 pass/fail，非"感觉还行"）。
 - **物理安卓机**从 Phase 1.x 起每次 tag 烟测三端。
 - **F3 叠层**人工诊断帧抖/区块/mesh。
 
 ---
 
 ## 11. 待你拍板的开放决策（影响计划形状）
+
+> 已定：**Qt 6.11.1**；**桌面性能目标 = MC 官方现行最低/推荐配**。以下仍待拍板：
 
 1. **项目名**（原创，不含 mine/craft）。
 2. **许可证**：MIT / GPLv3 / 专有 —— 决定合法资产池。建议 MIT 或 GPLv3。
@@ -223,8 +254,8 @@ QtMinecraft/
 ---
 
 ## 引用来源（关键）
-Qt 6.11.1 文档（`QQuickRhiItem`、`QRhi` TextureArrays 运行期 gating、无兼容保证）、Qt 维护期/OSS 滞后(qutebrowser #8464)、Qt 6.7 发布说明(QQuickRhiItem 公开)、Qt RHI Texture Item 示例("limited compatibility guarantee")、Minecraft Wiki(Java 1.0.0/919 天/Anvil vs Region/128 高度)、Luanti(Minetest 2024 改名)wiki+GitHub、fogleman/Craft、0fps《Meshing in a Minecraft Game》、miniaudio、gamedeveloper.com 单人 postmortem(Bass Monkey/Last Humble Bee "triple-it")、OpenGameArt-CC0。
+Qt 6.11.1 文档（`QQuickRhiItem`、`QRhi` TextureArrays 运行期 gating、无兼容保证）、Qt 维护期/OSS 滞后(qutebrowser #8464)、Qt 6.7 发布说明(QQuickRhiItem 公开)、Qt RHI Texture Item 示例("limited compatibility guarantee")、**[minecraft.net — Minecraft Java Edition System Requirements（更新版：现行最低配要求 Vulkan 1.3、1080p@30fps Fast）](https://www.minecraft.net/en-us/article/minecraft-java-edition-system-requirements)**、Minecraft Wiki(Java 1.0.0/919 天/Anvil vs Region/128 高度)、Luanti(Minetest 2024 改名)wiki+GitHub、fogleman/Craft、0fps《Meshing in a Minecraft Game》、miniaudio、gamedeveloper.com 单人 postmortem(Bass Monkey/Last Humble Bee "triple-it")、OpenGameArt-CC0。
 
 ---
 
-*本计划骨头是对的（Phase 1.0 作为成功线、culled-meshing-first、纹理数组、SQLite、服务端权威、C++20/Qt6.8 LTS/CMake）。审查的价值在于把 ~6 处"看起来是决定、其实只是结果描述"的地方补上了机制，并纠正了 2 处自相矛盾的锁定决策（纹理数组+GLES、LocalServer 回环）。把这些修了，架构才站得住。*
+*本计划骨头是对的（Phase 1.0 作为成功线、culled-meshing-first、纹理数组、SQLite、服务端权威、C++20/Qt6.11.1/CMake）。审查的价值在于把 ~6 处"看起来是决定、其实只是结果描述"的地方补上了机制，并纠正了 2 处自相矛盾的锁定决策（纹理数组+GLES、LocalServer 回环）。把这些修了，架构才站得住。*
