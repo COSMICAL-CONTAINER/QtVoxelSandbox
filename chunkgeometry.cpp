@@ -1,11 +1,11 @@
 #include "chunkgeometry.h"
 #include "blockregistry.h"
+#include "chunk.h"
 #include "world.h"
 
 #include <QByteArray>
 #include <QVector3D>
 
-#include <cmath>
 #include <cstddef>
 #include <cstring>
 
@@ -37,15 +37,46 @@ ChunkGeometry::ChunkGeometry(QQuick3DObject *parent) : QQuick3DGeometry(parent) 
 void ChunkGeometry::setWorld(World *w)
 {
     if (m_world == w) return;
-    if (m_world) disconnect(m_world, &World::worldChanged, this, &ChunkGeometry::buildMesh);
+    if (m_world) disconnect(m_world, &World::worldChanged, this, &ChunkGeometry::onWorldChanged);
     m_world = w;
-    if (m_world) connect(m_world, &World::worldChanged, this, &ChunkGeometry::buildMesh);
+    if (m_world) connect(m_world, &World::worldChanged, this, &ChunkGeometry::onWorldChanged);
     emit worldChanged();
-    buildMesh();
+    onWorldChanged();
 }
 
-// 查表（单一权威：BlockRegistry）。行为与历史硬编码一致：草顶/草侧/草底、
-// 其余各面统一；新增 cobble/log/planks/leaves 的瓦片 5..9 暂不在图集中（t12 重建）。
+void ChunkGeometry::setCx(int cx)
+{
+    if (m_cx == cx) return;
+    m_cx = cx;
+    emit cxChanged();
+    onWorldChanged();
+}
+
+void ChunkGeometry::setCz(int cz)
+{
+    if (m_cz == cz) return;
+    m_cz = cz;
+    emit czChanged();
+    onWorldChanged();
+}
+
+// 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
+// 故 world 重建（recreate 销毁旧 chunk）后不会悬空：拿到的是新 chunk。
+Chunk *ChunkGeometry::myChunk() const
+{
+    if (!m_world) return nullptr;
+    return m_world->chunks().chunk(m_cx, m_cz); // cx/cz 越界 → nullptr
+}
+
+// dirty 驱动（dev-spec t03 验收）：仅当本 chunk 脏才重建。worldChanged 每次编辑都发，
+// 但 9 个 ChunkGeometry 各检各的 chunk 脏标记 → rebuild 次数 = dirty chunk 数（非脏跳过）。
+void ChunkGeometry::onWorldChanged()
+{
+    Chunk *c = myChunk();
+    if (c && c->dirty()) buildMesh();
+}
+
+// 查表（单一权威：BlockRegistry）。行为与历史硬编码一致：草顶/草侧/草底、其余各面统一。
 int ChunkGeometry::tileFor(quint8 block, int face) const
 {
     // face: 0=+X 1=-X 2=+Y(顶) 3=-Y(底) 4=+Z 5=-Z（须与 BlockRegistry::Face 一致）
@@ -54,13 +85,14 @@ int ChunkGeometry::tileFor(quint8 block, int face) const
 
 void ChunkGeometry::buildMesh()
 {
-    const int W = m_world ? m_world->width() : 0;
+    Chunk *c = myChunk();
     const int H = m_world ? m_world->height() : 0;
-    const int D = m_world ? m_world->depth() : 0;
+    constexpr int S = Chunk::kSize; // 16（X、Z chunk 边长）
+    const int originX = m_cx * S, originZ = m_cz * S; // chunk 世界起点
 
     QVector<Vtx> verts;
     QVector<quint32> idx;
-    if (m_world) {
+    if (c && m_world) {
         verts.reserve(4096);
         idx.reserve(8192);
     }
@@ -74,29 +106,32 @@ void ChunkGeometry::buildMesh()
     constexpr float hy = 0.5f / 16;
     const float v0 = 0.0f + hy, v1 = 1.0f - hy;
 
-    if (m_world) {
-        for (int y = 0; y < H; ++y) {
-            for (int z = 0; z < D; ++z) {
-                for (int x = 0; x < W; ++x) {
-                    const quint8 b = blockAt(x, y, z);
+    if (c && m_world) {
+        // 逐局部格：世界坐标取体素 + 邻居（跨 chunk 边界经 world.blockAt 路由 → 共边实体面
+        // 剔除、一侧空气画出、世界越界=空气）。顶点写 chunk 局部坐标（Model 负责世界定位）。
+        for (int ly = 0; ly < H; ++ly) {
+            for (int lz = 0; lz < S; ++lz) {
+                for (int lx = 0; lx < S; ++lx) {
+                    const int wx = originX + lx, wz = originZ + lz;
+                    const quint8 b = blockAtWorld(wx, ly, wz);
                     if (b == 0) continue; // 空气
                     for (int f = 0; f < 6; ++f) {
                         const FaceDef &F = kFaces[f];
-                        if (blockAt(x + F.dir[0], y + F.dir[1], z + F.dir[2]) != 0)
-                            continue; // 邻居实体 → 剔除
+                        if (blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]) != 0)
+                            continue; // 邻居实体 → 剔除（跨 chunk 边界同样正确）
 
                         const int t = tileFor(b, f);
                         const float u0 = t * tileW + hx, u1 = (t + 1) * tileW - hx;
 
                         const quint32 base = quint32(verts.size());
-                        for (int c = 0; c < 4; ++c) {
-                            const float dx = F.c[c][0], dy = F.c[c][1], dz = F.c[c][2];
+                        for (int cc = 0; cc < 4; ++cc) {
+                            const float dx = F.c[cc][0], dy = F.c[cc][1], dz = F.c[cc][2];
                             float cu, cv;
                             if (f == 0 || f == 1) { cu = dz; cv = dy; }       // ±X
                             else if (f == 4 || f == 5) { cu = dx; cv = dy; }  // ±Z
                             else { cu = dx; cv = dz; }                        // ±Y
                             Vtx v;
-                            v.x = float(x) + dx; v.y = float(y) + dy; v.z = float(z) + dz;
+                            v.x = float(lx) + dx; v.y = float(ly) + dy; v.z = float(lz) + dz; // 局部坐标
                             v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
                             v.u = u0 + cu * (u1 - u0);
                             v.v = v0 + cv * (v1 - v0);
@@ -110,7 +145,7 @@ void ChunkGeometry::buildMesh()
         }
     }
 
-    // 写入 QQuick3DGeometry（文档顺序：clear → 数据 → stride → bounds → 原语 → 属性）
+    // 写入 QQuick3DGeometry（文档顺序：clear → 数据 → stride → bounds → 原语 → 属性 → update）
     clear();
 
     QByteArray vb;
@@ -126,7 +161,7 @@ void ChunkGeometry::buildMesh()
         std::memcpy(ib.data(), idx.constData(), size_t(ib.size()));
     setIndexData(ib);
 
-    setBounds(QVector3D(0, 0, 0), QVector3D(W, H, D));
+    setBounds(QVector3D(0, 0, 0), QVector3D(S, H, S)); // 局部 bounds（Model 摆位负责世界定位）
     setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);
 
     addAttribute(QQuick3DGeometry::Attribute::PositionSemantic,
@@ -139,4 +174,11 @@ void ChunkGeometry::buildMesh()
                  0, QQuick3DGeometry::Attribute::U32Type);
 
     update(); // 通知后端重新上传到 GPU
+
+    if (c) c->clearDirty(); // mesh 已刷新 → chunk 不再脏（下次 worldChanged 跳过它）
+
+    // 可观测性（dev-spec t03 验收「日志证明 rebuild 次数 = dirty chunk 数」）：仅脏 chunk 走到此，
+    // 非脏 chunk 在 onWorldChanged 已 return。读此日志可知每次 worldChanged 后实际重建了哪些 chunk。
+    qInfo("vo.render: chunk(%d,%d) rebuilt - %lld verts / %lld idx",
+          m_cx, m_cz, qint64(verts.size()), qint64(idx.size()));
 }

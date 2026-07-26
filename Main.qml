@@ -40,12 +40,66 @@ Window {
 
         DirectionalLight { eulerRotation.x: -40; eulerRotation.y: -25; brightness: 1.5 }
 
-        Model {
-            geometry: ChunkGeometry { world: theWorld }
-            materials: PrincipledMaterial {
-                lighting: PrincipledMaterial.NoLighting
-                baseColorMap: Texture { source: "qrc:/textures/atlas.png"; generateMipmaps: false }
-            }
+        // 共享图集纹理：3×3=9 个 per-chunk Model 共用一份 atlas（声明一次、按 id 引用）。
+        Texture { id: voxelAtlas; source: "qrc:/textures/atlas.png"; generateMipmaps: false }
+
+        // 每 chunk culled mesh（t03）：3×3=9 个 Model/ChunkGeometry，**直接作为 View3D 的 3D 场景
+        // 子节点**（与原单 Model 同路径，渲染已验证可靠）。各 Model 摆到其 chunk 世界起点
+        // (cx*16, 0, cz*16)；ChunkGeometry 产出该 chunk 的局部 culled mesh（顶点=chunk 局部坐标）。
+        // 跨 chunk 边界面剔除经 world.blockAt 路由：相邻两 chunk 实体→共边面剔除（无夹层黑缝）、
+        // 一侧空气→画出、世界越界=空气 → 3×3 肉眼无缝。
+        // dirty 驱动：setBlock 经 ChunkManager 标目标 + 边界邻接 chunk dirty；worldChanged → 各
+        // ChunkGeometry::onWorldChanged() 检 myChunk().dirty()，仅脏的重建并清脏（rebuild 次数 =
+        // dirty chunk 数），非脏跳过。
+        //
+        // 注：不在此用 Repeater 创建 3D Model delegate——Repeater 是 QQuickItem，将其 3D Model
+        // delegate 领养到非纯 3D 场景 parent 时会触发「Delegate must not be of Item type」告警且
+        // 有成孤儿不渲染之虞（类 t16 Loader 3D 领养坑）。固定 3×3 用显式 9 Model 最稳；t07 放大到
+        // 16×16 时再换 C++ 侧批量管理（ChunkMeshManager）或经场景 Node 领养的 Repeater 方案。
+        Model { // chunk (0,0) → 世界 (0,0)
+            position: Qt.vector3d(0, 0, 0)
+            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 0 }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+        }
+        Model { // chunk (1,0) → 世界 (16,0)
+            position: Qt.vector3d(16, 0, 0)
+            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 0 }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+        }
+        Model { // chunk (2,0) → 世界 (32,0)
+            position: Qt.vector3d(32, 0, 0)
+            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 0 }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+        }
+        Model { // chunk (0,1) → 世界 (0,16)
+            position: Qt.vector3d(0, 0, 16)
+            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 1 }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+        }
+        Model { // chunk (1,1) → 世界 (16,16)
+            position: Qt.vector3d(16, 0, 16)
+            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 1 }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+        }
+        Model { // chunk (2,1) → 世界 (32,16)
+            position: Qt.vector3d(32, 0, 16)
+            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 1 }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+        }
+        Model { // chunk (0,2) → 世界 (0,32)
+            position: Qt.vector3d(0, 0, 32)
+            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 2 }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+        }
+        Model { // chunk (1,2) → 世界 (16,32)
+            position: Qt.vector3d(16, 0, 32)
+            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 2 }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+        }
+        Model { // chunk (2,2) → 世界 (32,32)
+            position: Qt.vector3d(32, 0, 32)
+            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 2 }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
 
         // 命中面线框（射线选体 t04）：贴在视线命中的方块面上，随准星实时更新。

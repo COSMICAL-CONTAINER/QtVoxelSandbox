@@ -26,6 +26,10 @@ class World : public QObject
     Q_PROPERTY(int depth  READ depth  WRITE setDepth  NOTIFY depthChanged)
     Q_PROPERTY(int height READ height WRITE setHeight NOTIFY heightChanged)
     Q_PROPERTY(int seed   READ seed   WRITE setSeed   NOTIFY seedChanged)
+    // chunk 列网格尺寸（= ceil(width/16)、ceil(depth/16)）；暴露给 Renderer/QML，供 t03 每
+    // chunk mesher 的 Repeater 决定 Model 数量、t10 F3 计数。仅随 width/depth 变化。
+    Q_PROPERTY(int chunksX READ chunksX NOTIFY widthChanged)
+    Q_PROPERTY(int chunksZ READ chunksZ NOTIFY depthChanged)
 
 public:
     explicit World(QObject *parent = nullptr);
@@ -34,6 +38,8 @@ public:
     int depth() const  { return m_depth; }
     int height() const { return m_height; }
     int seed() const   { return m_seed; }
+    int chunksX() const { return m_chunks.chunksX(); }
+    int chunksZ() const { return m_chunks.chunksZ(); }
     void setWidth(int w);
     void setDepth(int d);
     void setHeight(int h);
