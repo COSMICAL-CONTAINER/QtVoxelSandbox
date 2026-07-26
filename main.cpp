@@ -42,7 +42,13 @@ int main(int argc, char *argv[])
 
     static QFile logFile;
     logFile.setFileName(QCoreApplication::applicationDirPath() + "/voxelsandbox.log");
-    logFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
+    // open() 带 [[nodiscard]]，必须检查返回值。失败则降级：logHandler 在 !isOpen() 时
+    // 静默丢弃消息，应用仍可运行（PLAN §2-E 错误模型：保持运行而非崩溃）。
+    if (!logFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        qWarning("无法打开日志文件 %s（%s）；运行期日志将被丢弃。",
+                 qPrintable(logFile.fileName()),
+                 qPrintable(logFile.errorString()));
+    }
     g_log = &logFile;
     qInstallMessageHandler(logHandler);
     // 收紧：关掉最啰嗦的 debug category，只留警告（日志从 ~1.2MB 降到几 KB）。

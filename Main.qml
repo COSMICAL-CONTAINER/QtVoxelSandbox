@@ -6,105 +6,114 @@ Window {
     width: 1280
     height: 720
     visible: true
-    title: "Voxel Sandbox — 16×16 区块 (可见面剔除 + 图集贴图)"
+    title: "Voxel Sandbox — FPS 视角 · 暂停菜单 · 三模式"
     color: "#101010"
 
-    property int fps: 0
-    property var keys: ({})
+    property int fps: 0 // main.cpp 经 frameSwapped 回填
+
+    // 单一体素世界：网格(ChunkGeometry)与物理(PlayerController)共用同一份栅格
+    World { id: theWorld; width: 16; depth: 16; height: 16; seed: 1337 }
+
+    // 玩家控制器：指针锁定鼠标 + WASD/跳/飞 + 三模式物理
+    PlayerController { id: player; world: theWorld }
 
     View3D {
         anchors.fill: parent
         environment: SceneEnvironment {
             clearColor: "#9ec6e8"
             backgroundMode: SceneEnvironment.Color
-            // 显式关闭 AA（默认即关；避免任何多余开销）
             antialiasingMode: SceneEnvironment.NoAA
         }
 
         PerspectiveCamera {
             id: cam
-            property real yaw: 0
-            property real pitch: -42
-            position: Qt.vector3d(8, 16, 22) // 看向 16×16×16 区块中心 (8, 0, 8)
-            eulerRotation.x: cam.pitch
-            eulerRotation.y: cam.yaw
+            position: player.position                                // 眼睛位置
+            eulerRotation: Qt.vector3d(player.pitch, player.yaw, 0)  // pitch→X, yaw→Y
             clipNear: 0.05
             clipFar: 1000
         }
 
         DirectionalLight { eulerRotation.x: -40; eulerRotation.y: -25; brightness: 1.5 }
 
-        // 整个区块一个 Model：自建几何（只生成可见面）+ 单一图集材质。
         Model {
-            geometry: ChunkGeometry { width: 16; depth: 16; height: 16; seed: 1337 }
+            geometry: ChunkGeometry { world: theWorld }
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
-                baseColorMap: Texture {
-                    source: "qrc:/textures/atlas.png"
-                    generateMipmaps: false
-                }
+                baseColorMap: Texture { source: "qrc:/textures/atlas.png"; generateMipmaps: false }
             }
         }
     }
 
-    // 鼠标按住拖动 → 转视角
-    MouseArea {
-        anchors.fill: parent
-        property real lastX
-        property real lastY
-        onPressed: (mouse) => { lastX = mouse.x; lastY = mouse.y }
-        onPositionChanged: (mouse) => {
-            cam.yaw -= (mouse.x - lastX) * 0.3
-            cam.pitch -= (mouse.y - lastY) * 0.3
-            cam.pitch = Math.max(-89, Math.min(89, cam.pitch))
-            lastX = mouse.x
-            lastY = mouse.y
-        }
-    }
-
+    // 键盘：N 切模式、1/2/3 直选、WASD/Space/Shift 传给控制器。Esc 由 C++ 事件过滤器拦截。
     Item {
         id: keyInput
         anchors.fill: parent
         focus: true
-        Keys.onPressed: (event) => { window.keys[event.key] = true }
-        Keys.onReleased: (event) => { window.keys[event.key] = false }
+        Keys.onPressed: (e) => {
+            if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
+            if (e.key === Qt.Key_N) { player.cycleMode(); e.accepted = true; return }
+            if (e.key === Qt.Key_1) { player.setMode(PlayerController.Spectator); e.accepted = true; return }
+            if (e.key === Qt.Key_2) { player.setMode(PlayerController.Creative); e.accepted = true; return }
+            if (e.key === Qt.Key_3) { player.setMode(PlayerController.Survival); e.accepted = true; return }
+            player.setKey(e.key, true)
+        }
+        Keys.onReleased: (e) => { if (e.isAutoRepeat) return; player.setKey(e.key, false) }
     }
 
-    // WASD/Space/Shift 飞行
-    Timer {
-        interval: 16
-        repeat: true
-        running: true
-        onTriggered: {
-            const yr = cam.yaw * Math.PI / 180.0
-            const fx = -Math.sin(yr), fz = -Math.cos(yr)
-            const rx = Math.cos(yr), rz = -Math.sin(yr)
-            let dx = 0, dy = 0, dz = 0
-            if (window.keys[Qt.Key_W]) { dx += fx; dz += fz }
-            if (window.keys[Qt.Key_S]) { dx -= fx; dz -= fz }
-            if (window.keys[Qt.Key_D]) { dx += rx; dz += rz }
-            if (window.keys[Qt.Key_A]) { dx -= rx; dz -= rz }
-            if (window.keys[Qt.Key_Space]) dy += 1
-            if (window.keys[Qt.Key_Shift]) dy -= 1
-            if (dx !== 0 || dy !== 0 || dz !== 0) {
-                const len = Math.sqrt(dx * dx + dy * dy + dz * dz)
-                const sp = 0.3
-                cam.position = Qt.vector3d(cam.position.x + dx / len * sp,
-                                           cam.position.y + dy / len * sp,
-                                           cam.position.z + dz / len * sp)
+    // 暂停 / 未捕获 覆盖层：点击任意处 → 进入（锁定指针）
+    Item {
+        id: pauseOverlay
+        anchors.fill: parent
+        visible: !player.captured
+        z: 100
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.55)
+            MouseArea { anchors.fill: parent; onClicked: { player.grab(); keyInput.forceActiveFocus() } }
+        }
+        Rectangle {
+            width: 360; height: 210; radius: 10
+            anchors.centerIn: parent
+            color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
+            Column {
+                anchors.centerIn: parent; spacing: 12
+                Text { text: "PAUSED"; color: "#eeeeee"; font.pixelSize: 26; font.bold: true
+                       anchors.horizontalCenter: parent.horizontalCenter }
+                Text { text: "click to play"; color: "#bbbbbb"; font.pixelSize: 15
+                       anchors.horizontalCenter: parent.horizontalCenter }
+                Text { text: "[N] cycle mode   [1/2/3] Spectator/Creative/Survival"
+                       color: "#999999"; font.pixelSize: 12
+                       anchors.horizontalCenter: parent.horizontalCenter }
+                Text { text: "[Esc] release   WASD move   Space jump/fly   Shift down"
+                       color: "#999999"; font.pixelSize: 12
+                       anchors.horizontalCenter: parent.horizontalCenter }
             }
         }
     }
 
+    // 准星（仅捕获时）
+    Item {
+        visible: player.captured
+        anchors.centerIn: parent
+        width: 22; height: 22
+        Rectangle { color: "#ffffff"; anchors.centerIn: parent; width: 20; height: 2 }
+        Rectangle { color: "#ffffff"; anchors.centerIn: parent; width: 2; height: 20 }
+    }
+
+    // HUD：模式 + 地面状态 + FPS
     Text {
         x: 12; y: 8
         color: "#7fe57f"; font.pixelSize: 20; font.bold: true
         style: Text.Outline; styleColor: "#000000"
-        text: "FPS: " + window.fps + "   cam: " + Math.round(cam.position.x * 10) / 10 + "," + Math.round(cam.position.y * 10) / 10 + "," + Math.round(cam.position.z * 10) / 10
+        text: "MODE: " + (player.mode === PlayerController.Spectator ? "SPECTATOR (noclip fly)" :
+               player.mode === PlayerController.Creative ? ("CREATIVE " + (player.flying ? "(flying)" : "(walk · dbl-tap Space to fly)")) : "SURVIVAL (gravity + jump)")
+              + "    FPS: " + window.fps
     }
     Text {
-        x: 12; y: 38
-        color: "#dddddd"; font.pixelSize: 14
-        text: "16×16×16 区块 · 可见面剔除(culled meshing) + 图集贴图。WASD/鼠标/Space·Shift"
+        x: 12; y: 36
+        color: "#cccccc"; font.pixelSize: 13
+        text: "pos: " + player.position.x.toFixed(1) + ", " + player.position.y.toFixed(1) + ", " + player.position.z.toFixed(1)
+              + "   yaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch)
+              + (player.captured ? ("   ground: " + (player.onGround ? "yes" : "no")) : "   pointer free")
     }
 }

@@ -12,8 +12,14 @@ qt_standard_project_setup()
 
 qt_add_executable(voxelsandbox
     main.cpp
+    blockregistry.cpp
+    blockregistry.h
     chunkgeometry.cpp
     chunkgeometry.h
+    world.cpp
+    world.h
+    playercontroller.cpp
+    playercontroller.h
 )
 
 qt_add_qml_module(voxelsandbox
