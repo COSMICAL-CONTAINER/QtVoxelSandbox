@@ -6,10 +6,26 @@ Window {
     width: 1280
     height: 720
     visible: true
-    title: "Voxel Sandbox — FPS 视角 · 暂停菜单 · 三模式"
+    title: "Voxel Sandbox — 主菜单 · 创造沙盒"
     color: "#101010"
 
     property int fps: 0 // main.cpp 经 frameSwapped 回填
+
+    // app 状态机（t17）：menu（启动首显主菜单）↔ playing（显 View3D/HUD + grab 指针）。
+    // 初始 menu：启动不直接进游戏，先显主菜单（开始/退出）。准星/HUD 仅 playing 态显。
+    property string appState: "menu"
+
+    // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
+    function startGame() {
+        appState = "playing"
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
+    // 返回主菜单：先释放指针（恢复光标 + 清按住的按键），再切 menu 态。
+    function returnToMenu() {
+        player.release()
+        appState = "menu"
+    }
 
     // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
     // 与物理(PlayerController)共用同一份栅格。
@@ -187,11 +203,12 @@ Window {
         }
     }
 
-    // 暂停 / 未捕获 覆盖层：点击任意处 → 进入（锁定指针）
+    // 暂停 / 未捕获 覆盖层（仅 playing 态）：点击任意处 → 进入（锁定指针）。
+    // 主菜单态（appState="menu"）不显本叠层（由 MainMenu 覆盖全屏）。
     Item {
         id: pauseOverlay
         anchors.fill: parent
-        visible: !player.captured
+        visible: window.appState === "playing" && !player.captured
         z: 100
         Rectangle {
             anchors.fill: parent
@@ -199,7 +216,7 @@ Window {
             MouseArea { anchors.fill: parent; onClicked: { player.grab(); keyInput.forceActiveFocus() } }
         }
         Rectangle {
-            width: 360; height: 210; radius: 10
+            width: 360; height: 250; radius: 10
             anchors.centerIn: parent
             color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
             Column {
@@ -217,21 +234,38 @@ Window {
                 Text { text: "[LMB] break block   [RMB] place block"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
+                // 返回主菜单（playing ↔ menu 双向切换，t17）：消费点击，不冒泡到背景 grab。
+                Rectangle {
+                    width: 150; height: 32; radius: 6
+                    color: backMenuArea.containsMouse ? "#2a3a2a" : "#1a2a1a"
+                    border.color: "#3a6a3a"; border.width: 1
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    Text { anchors.centerIn: parent; text: "Main Menu"
+                           color: "#7fe57f"; font.pixelSize: 13 }
+                    MouseArea {
+                        id: backMenuArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: window.returnToMenu()
+                    }
+                }
             }
         }
     }
 
-    // 准星（仅捕获时）
+    // 准星（仅 playing 且捕获时）
     Item {
-        visible: player.captured
+        visible: window.appState === "playing" && player.captured
         anchors.centerIn: parent
         width: 22; height: 22
         Rectangle { color: "#ffffff"; anchors.centerIn: parent; width: 20; height: 2 }
         Rectangle { color: "#ffffff"; anchors.centerIn: parent; width: 2; height: 20 }
     }
 
-    // HUD：模式 + 地面状态 + FPS
+    // HUD：模式 + 地面状态 + FPS（仅 playing 态显）
     Text {
+        visible: window.appState === "playing"
         x: 12; y: 8
         color: "#7fe57f"; font.pixelSize: 20; font.bold: true
         style: Text.Outline; styleColor: "#000000"
@@ -240,6 +274,7 @@ Window {
               + "    FPS: " + window.fps
     }
     Text {
+        visible: window.appState === "playing"
         x: 12; y: 36
         color: "#cccccc"; font.pixelSize: 13
         text: "pos: " + player.position.x.toFixed(1) + ", " + player.position.y.toFixed(1) + ", " + player.position.z.toFixed(1)
@@ -254,6 +289,7 @@ Window {
     // 选中态用缩放 + 描边 + 键位角标，而非白框；仅做 hotbar 本身（其余 HUD 已差异化）。
     Row {
         id: hotbarRow
+        visible: window.appState === "playing"
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 18
         anchors.horizontalCenter: parent.horizontalCenter
@@ -305,5 +341,17 @@ Window {
                 }
             }
         }
+    }
+
+    // 主菜单（t17）：启动首显（appState="menu"）；Start/Quit 信号连到 startGame / Qt.quit。
+    // 仅 menu 态可见，z 高于暂停叠层（100）与所有 HUD，全屏覆盖。「退出」→ Qt.quit() 直接退进程。
+    // 仅依赖 QtQuick（无特殊模块），直接实例化（非 Loader 隔离）——加载失败即 app 致命，故无需降级。
+    MainMenu {
+        id: mainMenu
+        anchors.fill: parent
+        visible: window.appState === "menu"
+        z: 200
+        onStartRequested: window.startGame()
+        onQuitRequested: Qt.quit()
     }
 }

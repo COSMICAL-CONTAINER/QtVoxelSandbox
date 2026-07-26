@@ -38,6 +38,7 @@ qt_add_qml_module(voxelsandbox
     QML_FILES
         Main.qml
         BlockParticles.qml
+        MainMenu.qml
 )
 
 qt_add_resources(voxelsandbox "voxel_textures"
