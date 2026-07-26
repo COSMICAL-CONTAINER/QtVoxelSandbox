@@ -15,6 +15,10 @@ Window {
     // 初始 menu：启动不直接进游戏，先显主菜单（开始/退出）。准星/HUD 仅 playing 态显。
     property string appState: "menu"
 
+    // 背包子态（t18）：仅 playing 态有意义。开 → 释放指针（光标可见，可点格子，类暂停）；
+    // 关 → 恢复 grab。Esc/E/点遮罩均可关。开时抑制暂停叠层（二者互斥：都是 !captured 态）。
+    property bool inventoryOpen: false
+
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
     function startGame() {
         appState = "playing"
@@ -23,8 +27,25 @@ Window {
     }
     // 返回主菜单：先释放指针（恢复光标 + 清按住的按键），再切 menu 态。
     function returnToMenu() {
+        inventoryOpen = false
         player.release()
         appState = "menu"
+    }
+    // 背包开关（t18）：E 键调。开 → release（光标可见点格子）；关 → grab + 焦点回键位层。
+    function toggleInventory() {
+        if (inventoryOpen) closeInventory()
+        else openInventory()
+    }
+    function openInventory() {
+        if (appState !== "playing" || inventoryOpen) return
+        inventoryOpen = true
+        player.release() // 释放指针 → 光标可见（点击背包格子）；暂停叠层被 inventoryOpen 抑制
+    }
+    function closeInventory() {
+        if (!inventoryOpen) return
+        inventoryOpen = false
+        player.grab()                  // 恢复指针锁定（隐藏光标 + 居中）
+        keyInput.forceActiveFocus()
     }
 
     // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
@@ -184,6 +205,14 @@ Window {
         focus: true
         Keys.onPressed: (e) => {
             if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
+            // 背包（t18）：E 开关。Esc 在背包打开时关闭（captured=false 时 Esc 不被 C++ 事件过滤器
+            // 拦截，落到 QML；captured=true 时 Esc 仍走 C++ → release → 暂停叠层，原行为不变）。
+            if (e.key === Qt.Key_E && window.appState === "playing") {
+                window.toggleInventory(); e.accepted = true; return
+            }
+            if (e.key === Qt.Key_Escape && window.inventoryOpen) {
+                window.closeInventory(); e.accepted = true; return
+            }
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
             if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) {            // 1–9 直选 hotbar 槽 0..8（属性赋值走 WRITE setter）
                 hotbarVM.selectedSlot = e.key - Qt.Key_1; e.accepted = true; return
@@ -205,10 +234,11 @@ Window {
 
     // 暂停 / 未捕获 覆盖层（仅 playing 态）：点击任意处 → 进入（锁定指针）。
     // 主菜单态（appState="menu"）不显本叠层（由 MainMenu 覆盖全屏）。
+    // 背包打开时（同为 !captured 态）抑制本叠层 —— 二者互斥，避免背包下面透出暂停叠层（t18）。
     Item {
         id: pauseOverlay
         anchors.fill: parent
-        visible: window.appState === "playing" && !player.captured
+        visible: window.appState === "playing" && !player.captured && !window.inventoryOpen
         z: 100
         Rectangle {
             anchors.fill: parent
@@ -296,7 +326,12 @@ Window {
         spacing: 5
 
         Repeater {
-            model: hotbarVM.slotCount
+            // model = 槽内容（QVariantList<方块id>）。触碰 slotRevision 建立 NOTIFY 依赖：setSlotBlock
+            // 改槽内容 → slotsChanged → slotRevision 自增 → 本绑定重算 → 返回新数组 → Repeater 整列重建，
+            // 背包装备的新方块图标随即在对应槽刷新（invokable 返回值不被 NOTIFY 跟踪，故用版本号触发；
+            // modelData = 该槽方块 id，air=0 即空槽）。为何不直接 Q_PROPERTY(QVariantList slots)：本工具链
+            // moc 拒绝 Q_PROPERTY 里的 QVariantList，故 slots() 走 Q_INVOKABLE + slotRevision 做 NOTIFY。
+            model: { hotbarVM.slotRevision; return hotbarVM.slotList() }
             delegate: Item {
                 width: 50; height: 50
                 // 选中槽放大强调
@@ -319,13 +354,13 @@ Window {
                     }
                 }
 
-                // 方块图标（等距立方体，统一 64×64 源 → PreserveAspectFit 强制等比缩放进固定框，
-                // 无论源贴图原始尺寸如何，槽内显示尺寸完全一致；空槽 source="" → 不显示）。
+                // 方块图标（等距立方体，统一源 → PreserveAspectFit 强制等比缩放进固定框，
+                // 无论源贴图原始尺寸如何，槽内显示尺寸完全一致；空槽 modelData=0 → 不显示）。
                 Image {
                     anchors.centerIn: parent
                     width: 38; height: 38
-                    visible: hotbarVM.iconSourceAt(index) !== ""
-                    source: hotbarVM.iconSourceAt(index)
+                    visible: modelData !== 0
+                    source: hotbarVM.iconSourceForBlock(modelData)
                     fillMode: Image.PreserveAspectFit
                     smooth: true
                 }
@@ -353,5 +388,17 @@ Window {
         z: 200
         onStartRequested: window.startGame()
         onQuitRequested: Qt.quit()
+    }
+
+    // 创造风格背包（t18）：仅 playing && inventoryOpen 时显。z 高于暂停叠层(100)/HUD，低于主菜单(200)。
+    // 方块集 / 图标 / 槽位改写全部经 hotbar VM（ViewModel 读 BlockRegistry）；本组件只做呈现 + 点击转发。
+    // 关闭（closed 信号）→ 宿主恢复 grab。仅依赖 QtQuick（无特殊模块），直接实例化（非 Loader 隔离）。
+    Inventory {
+        id: inventoryPanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        visible: window.appState === "playing" && window.inventoryOpen
+        z: 150
+        onClosed: window.closeInventory()
     }
 }
