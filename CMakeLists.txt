@@ -24,6 +24,8 @@ qt_add_executable(voxelsandbox
     raycast.h
     wiresquare.cpp
     wiresquare.h
+    hotbar.cpp
+    hotbar.h
 )
 
 qt_add_qml_module(voxelsandbox

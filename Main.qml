@@ -14,8 +14,12 @@ Window {
     // 单一体素世界：网格(ChunkGeometry)与物理(PlayerController)共用同一份栅格
     World { id: theWorld; width: 16; depth: 16; height: 16; seed: 1337 }
 
-    // 玩家控制器：指针锁定鼠标 + WASD/跳/飞 + 三模式物理
-    PlayerController { id: player; world: theWorld }
+    // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
+    Hotbar { id: hotbarVM }
+
+    // 玩家控制器：指针锁定鼠标 + WASD/跳/飞 + 三模式物理。
+    // 右键放置用 hotbar 当前选中槽的方块 id（绑定 hotbarVM.selectedBlockId）。
+    PlayerController { id: player; world: theWorld; selectedBlock: hotbarVM.selectedBlockId }
 
     View3D {
         anchors.fill: parent
@@ -57,7 +61,9 @@ Window {
         }
     }
 
-    // 键盘：N 切模式、1/2/3 直选、WASD/Space/Shift 传给控制器。Esc 由 C++ 事件过滤器拦截。
+    // 键盘：N 切模式、1–9 直选 hotbar 槽、WASD/Space/Shift 传给控制器。Esc 由 C++ 事件过滤器拦截。
+    // 注：原 1/2/3 用于直选模式，现让位给 hotbar（t06 验收要求 1–9 选槽）；模式切换统一由 N 循环。
+    // 切换在指针捕获与未捕获时都可用 —— keyInput 始终持焦点（未捕获时也可预选槽）。
     Item {
         id: keyInput
         anchors.fill: parent
@@ -65,12 +71,22 @@ Window {
         Keys.onPressed: (e) => {
             if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
             if (e.key === Qt.Key_N) { player.cycleMode(); e.accepted = true; return }
-            if (e.key === Qt.Key_1) { player.setMode(PlayerController.Spectator); e.accepted = true; return }
-            if (e.key === Qt.Key_2) { player.setMode(PlayerController.Creative); e.accepted = true; return }
-            if (e.key === Qt.Key_3) { player.setMode(PlayerController.Survival); e.accepted = true; return }
+            if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) {            // 1–9 直选 hotbar 槽 0..8（属性赋值走 WRITE setter）
+                hotbarVM.selectedSlot = e.key - Qt.Key_1; e.accepted = true; return
+            }
             player.setKey(e.key, true)
         }
         Keys.onReleased: (e) => { if (e.isAutoRepeat) return; player.setKey(e.key, false) }
+
+        // 滚轮循环切换 hotbar。WheelHandler 按指针位置抓取，与光标显隐/锁定无关，
+        // 故捕获与未捕获都生效。只消费滚轮 —— 鼠标按键仍走 C++ 窗口级事件过滤（破/放）。
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: (event) => {
+                if (event.angleDelta.y > 0)      hotbarVM.scroll(-1) // 上滚 → 左移（下标-1，环绕）
+                else if (event.angleDelta.y < 0) hotbarVM.scroll(1)  // 下滚 → 右移
+            }
+        }
     }
 
     // 暂停 / 未捕获 覆盖层：点击任意处 → 进入（锁定指针）
@@ -94,7 +110,7 @@ Window {
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "click to play"; color: "#bbbbbb"; font.pixelSize: 15
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[N] cycle mode   [1/2/3] Spectator/Creative/Survival"
+                Text { text: "[N] cycle mode   [1-9] select block   wheel cycle"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "[Esc] release   WASD move   Space jump/fly   Shift down"
@@ -131,6 +147,64 @@ Window {
         text: "pos: " + player.position.x.toFixed(1) + ", " + player.position.y.toFixed(1) + ", " + player.position.z.toFixed(1)
               + "   yaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch)
               + (player.captured ? ("   ground: " + (player.onGround ? "yes" : "no")
-                                   + "   place: " + player.selectedBlock) : "   pointer free")
+                                   + "   held: " + hotbarVM.nameAt(hotbarVM.selectedSlot)
+                                   + " (#" + player.selectedBlock + ")") : "   pointer free")
+    }
+
+    // Hotbar（9 槽）：底部居中，1–9 直选 + 滚轮循环 + 选中槽高亮。
+    // 布局/高亮风格与 MC 差异化（PLAN §9）：圆角槽、HUD 绿系强调色（#7fe57f，对齐既有 HUD）、
+    // 选中态用缩放 + 描边 + 键位角标，而非白框；仅做 hotbar 本身（其余 HUD 已差异化）。
+    Row {
+        id: hotbarRow
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 18
+        anchors.horizontalCenter: parent.horizontalCenter
+        spacing: 5
+
+        Repeater {
+            model: hotbarVM.slotCount
+            delegate: Item {
+                width: 50; height: 50
+                // 选中槽放大强调
+                scale: hotbarVM.selectedSlot === index ? 1.18 : 1.0
+                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 7
+                    color: Qt.rgba(0, 0, 0, 0.45)
+                    border.color: hotbarVM.selectedSlot === index ? "#7fe57f" : "#3a3a3a"
+                    border.width: hotbarVM.selectedSlot === index ? 3 : 1
+                    // 选中槽外发光层（更柔的强调）
+                    Rectangle {
+                        visible: hotbarVM.selectedSlot === index
+                        z: -1
+                        anchors.fill: parent; anchors.margins: -3
+                        radius: 10; color: "transparent"
+                        border.color: Qt.rgba(0.5, 0.9, 0.5, 0.35); border.width: 2
+                    }
+                }
+
+                // 方块图标（空槽 source="" → 不显示）
+                Image {
+                    anchors.centerIn: parent
+                    width: 36; height: 36
+                    visible: hotbarVM.iconSourceAt(index) !== ""
+                    source: hotbarVM.iconSourceAt(index)
+                    fillMode: Image.Pad
+                    smooth: false
+                }
+
+                // 键位角标 1–9
+                Text {
+                    anchors.left: parent.left; anchors.top: parent.top
+                    anchors.leftMargin: 4; anchors.topMargin: 1
+                    color: hotbarVM.selectedSlot === index ? "#7fe57f" : "#888888"
+                    font.pixelSize: 11; font.bold: true
+                    style: Text.Outline; styleColor: "#000000"
+                    text: (index + 1)
+                }
+            }
+        }
     }
 }
