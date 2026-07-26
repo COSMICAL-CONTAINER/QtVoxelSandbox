@@ -10,8 +10,9 @@
 #include <QVector3D>
 #include <QtQml/qqml.h>
 
-#include "raycast.h" // RayHit（射线选体结果）
-#include "world.h"   // Q_PROPERTY(World*) 需要 World 完整定义
+#include "blockregistry.h" // 方块 id（默认手持方块 / 破放校验）
+#include "raycast.h"       // RayHit（射线选体结果）
+#include "world.h"         // Q_PROPERTY(World*) 需要 World 完整定义
 
 // 玩家控制器（一个对象全包）：指针锁定式鼠标视角 + WASD/跳/飞 + 三模式物理。
 // 继承 QQuickItem 以拿到 QQuickWindow（指针锁定需要 QCursor 居中 warp）。
@@ -38,6 +39,8 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(QVector3D hitNormal READ hitNormal NOTIFY hitChanged)
     Q_PROPERTY(QVector3D hitFaceCenter READ hitFaceCenter NOTIFY hitChanged)
     Q_PROPERTY(QVector3D hitFaceEuler READ hitFaceEuler NOTIFY hitChanged)
+    // 当前手持方块（右键放置用它；t06 hotbar 会绑定此属性）。默认 Stone。
+    Q_PROPERTY(int selectedBlock READ selectedBlock WRITE setSelectedBlock NOTIFY selectedBlockChanged)
 
 public:
     enum Mode { Spectator, Creative, Survival };
@@ -62,11 +65,17 @@ public:
     QVector3D hitFaceCenter() const; // 命中面中心世界坐标（贴面，略外推防 z-fight）
     QVector3D hitFaceEuler() const;  // 把规范线框（+Z 法线）摆到命中面的欧拉角（度）
 
+    int selectedBlock() const { return m_selectedBlock; }
+    void setSelectedBlock(int id);
+
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
     Q_INVOKABLE void setMode(Mode m);
     Q_INVOKABLE void grab();
     Q_INVOKABLE void release();
+    // 破/放（t05）：仅指针捕获时生效；走当前射线命中结果 → World::setBlock。
+    Q_INVOKABLE void breakBlock(); // 左键：命中格置 air
+    Q_INVOKABLE void placeBlock(); // 右键：命中面相邻空格置 selectedBlock（不覆盖实体 / 不埋玩家）
 
 signals:
     void worldChanged();
@@ -78,6 +87,7 @@ signals:
     void onGroundChanged();
     void flyingChanged();
     void hitChanged();
+    void selectedBlockChanged();
 
 protected:
     void componentComplete() override;
@@ -98,6 +108,7 @@ private:
     QVector3D lookDirection() const;             // 视线方向（与相机 eulerRotation 同源）
     void updateRaycast();                        // 每帧沿视线 DDA，更新命中态
     void clearHit();                             // 暂停/失焦时隐藏线框
+    bool overlapsPlayerAABB(int bx, int by, int bz) const; // 放置校验：该格方块是否与玩家 AABB 相交
 
     World *m_world = nullptr;
     QQuickWindow *m_window = nullptr;
@@ -114,6 +125,7 @@ private:
     bool m_flying = false;          // 创造模式飞行子状态（双击空格切换；进创造默认走）
     qint64 m_lastSpaceMs = -100000; // 双击空格检测时间戳
     bool m_spacePrev = false;       // 跳跃边沿触发（长按空格只跳一次）
+    int m_selectedBlock = BlockRegistry::Stone; // 当前手持方块（右键放置；默认 Stone，t06 hotbar 绑定）
 
     // 射线选体命中态（整数格坐标 + 整数法线分量；仅变化时 emit hitChanged，避免每帧抖动 QML）
     bool m_hasHit = false;

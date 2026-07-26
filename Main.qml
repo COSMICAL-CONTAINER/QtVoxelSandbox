@@ -100,6 +100,9 @@ Window {
                 Text { text: "[Esc] release   WASD move   Space jump/fly   Shift down"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
+                Text { text: "[LMB] break block   [RMB] place block"
+                       color: "#999999"; font.pixelSize: 12
+                       anchors.horizontalCenter: parent.horizontalCenter }
             }
         }
     }
@@ -127,6 +130,7 @@ Window {
         color: "#cccccc"; font.pixelSize: 13
         text: "pos: " + player.position.x.toFixed(1) + ", " + player.position.y.toFixed(1) + ", " + player.position.z.toFixed(1)
               + "   yaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch)
-              + (player.captured ? ("   ground: " + (player.onGround ? "yes" : "no")) : "   pointer free")
+              + (player.captured ? ("   ground: " + (player.onGround ? "yes" : "no")
+                                   + "   place: " + player.selectedBlock) : "   pointer free")
     }
 }

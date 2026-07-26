@@ -4,6 +4,7 @@
 #include <QEvent>
 #include <QGuiApplication>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QQuaternion>
 
 #include <algorithm>
@@ -127,6 +128,15 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
             if (k->key() == Qt::Key_Escape && m_captured) { release(); return true; }
         } else if (e->type() == QEvent::WindowDeactivate || e->type() == QEvent::FocusOut) {
             if (m_captured) release(); // 切走绝不留「锁住的光标」
+        } else if (e->type() == QEvent::MouseButtonPress) {
+            // 破/放（t05）：仅指针捕获时由窗口级事件过滤接管（未捕获时不消费 → 让暂停层 grab）。
+            // 走事件过滤而非 MouseArea —— 指针锁定下光标每帧被 warp 回中，MouseArea 依赖的指针
+            // 位置不可靠；窗口级 MouseButtonPress 与光标位置无关，最稳。
+            auto *me = static_cast<QMouseEvent *>(e);
+            if (m_captured) {
+                if (me->button() == Qt::LeftButton)  { breakBlock(); return true; }
+                if (me->button() == Qt::RightButton) { placeBlock();  return true; }
+            }
         }
     }
     return QQuickItem::eventFilter(o, e);
@@ -194,6 +204,45 @@ QVector3D PlayerController::hitFaceEuler() const
     if (m_hitNy < 0) return QVector3D(-90, 0, 0);   // -Y（底）面
     if (m_hitNz < 0) return QVector3D(0, 180, 0);   // -Z 面
     return QVector3D(0, 0, 0);                      // +Z 面（与规范同向，不转）
+}
+
+// ---- 方块编辑（t05）----
+// 编辑入口属 Game/Physics 层：输入 →（已有）射线命中 → World::setBlock。Renderer 不直接改栅格。
+void PlayerController::setSelectedBlock(int id)
+{
+    if (id < 0 || id >= int(BlockRegistry::Count)) return; // 仅 clamp 到合法 id 区间
+    if (id == m_selectedBlock) return;
+    m_selectedBlock = id;
+    emit selectedBlockChanged();
+}
+
+// 左键：命中格置 air。要求已捕获指针且有命中（未捕获 = 暂停，不破坏）。
+void PlayerController::breakBlock()
+{
+    if (!m_world || !m_captured || !m_hasHit) return;
+    m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Air);
+}
+
+// 右键：命中面法线方向的相邻空格置当前手持方块。
+// 校验：目标格须为空气（不覆盖实体）；且不与玩家 AABB 重叠（防自埋/卡死）。
+void PlayerController::placeBlock()
+{
+    if (!m_world || !m_captured || !m_hasHit) return;
+    const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
+    if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放
+    if (overlapsPlayerAABB(tx, ty, tz)) return;                    // 与玩家重叠 → 不放
+    m_world->setBlock(tx, ty, tz, quint8(m_selectedBlock));
+}
+
+// 方块格 [bx,bx+1]×[by,by+1]×[bz,bz+1] 与玩家 AABB 是否相交（严格重叠；仅贴面不算）。
+bool PlayerController::overlapsPlayerAABB(int bx, int by, int bz) const
+{
+    const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
+    const float miny = m_pos.y(),           maxy = m_pos.y() + kHeight;
+    const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
+    return minx < float(bx + 1) && maxx > float(bx)
+        && miny < float(by + 1) && maxy > float(by)
+        && minz < float(bz + 1) && maxz > float(bz);
 }
 
 QVector3D PlayerController::wishHoriz() const

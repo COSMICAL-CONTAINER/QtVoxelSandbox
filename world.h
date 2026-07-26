@@ -38,12 +38,20 @@ public:
     Q_INVOKABLE quint8 blockAt(int x, int y, int z) const;
     Q_INVOKABLE bool isSolid(int x, int y, int z) const { return blockAt(x, y, z) != 0; }
 
+    // 写入栅格并标记脏（当前单 chunk = 整个 mesh 视为脏）。越界 / 无变化返回 false。
+    // 成功改动后发 blockBroken/blockPlaced（语义事件，供 t14 粒子 / t11 音效消费）
+    // 与 worldChanged（驱动 ChunkGeometry 重建整个单 mesh）。
+    Q_INVOKABLE bool setBlock(int x, int y, int z, quint8 id);
+
 signals:
     void widthChanged();
     void depthChanged();
     void heightChanged();
     void seedChanged();
     void worldChanged(); // 生成/编辑后发出 → 网格重建
+    // 编辑语义事件（id：broken 带被破的原方块 id；placed 带新放方块 id）。
+    void blockBroken(int x, int y, int z, int id);
+    void blockPlaced(int x, int y, int z, int id);
 
 private:
     void generate(); // 填充 m_voxels（静默，不 emit）

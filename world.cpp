@@ -22,6 +22,24 @@ quint8 World::blockAt(int x, int y, int z) const
     return m_voxels[size_t(x + m_width * (z + m_depth * y))];
 }
 
+// 写栅格的唯一入口（PLAN §2-C 精神：当前 GUI 线程单写者）。越界不编辑（单 chunk 无邻接失效，
+// 跨边界破放推迟到放大阶段 t03）。先写值再发信号 —— ChunkGeometry 同步读重建时已见新值。
+bool World::setBlock(int x, int y, int z, quint8 id)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return false; // 越界：单 chunk 无邻接，直接拒绝
+    const size_t idx = size_t(x + m_width * (z + m_depth * y));
+    const quint8 oldId = m_voxels[idx];
+    if (oldId == id) return false; // 无变化
+    m_voxels[idx] = id;
+    if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
+        emit blockBroken(x, y, z, int(oldId)); // 破：带原方块 id（粒子/音效按它取色/取声）
+    else if (id != BlockRegistry::Air)
+        emit blockPlaced(x, y, z, int(id));    // 放：带新方块 id
+    emit worldChanged(); // 触发 ChunkGeometry 重建整个单 mesh
+    return true;
+}
+
 // --- 改进版 Perlin（2D）---
 static double fade(double t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
 static double lerp(double a, double b, double t) { return a + t * (b - a); }
