@@ -2,17 +2,22 @@
 #define WORLD_H
 
 #include <QObject>
-#include <QVector>
 #include <QtQml/qqml.h>
 
 #include <vector>
 
-// 体素世界（单一数据源）：Perlin fBm 生成地形，被网格(ChunkGeometry)与
-// 物理(PlayerController)共同查询 —— 二者读同一份栅格，保证「看得见的方块=碰得到的方块」。
+#include "chunkmanager.h" // 内部多 chunk 存储（World 层，不外泄到 QML）
+
+// 体素世界（QML façade + 单一数据源）：内部由 ChunkManager 持一片 chunk 列网格路由（本回合
+// 3×3=9 chunk，世界 48×48×16）；Perlin fBm 生成地形，被网格(ChunkGeometry)与物理
+// (PlayerController)共同查询 —— 二者读同一份栅格，保证「看得见的方块=碰得到的方块」。
+//
+// 对外 QML API：blockAt/isSolid/setBlock/width/depth/height/seed/worldChanged/blockBroken/
+// blockPlaced（与单 chunk 版完全一致；Main.qml 仅改 width/depth=48）。多 chunk 化是实现细节，
+// 不外泄（PLAN §2 不变量 J：单层 chunk 抽象，不引入 chunklet）。
 //
 // 方块 id（定义见 BlockRegistry）：0=air 1=grass 2=dirt 3=stone 4=cobble
-// 5=log 6=planks 7=leaves 8=sand。+Y 朝上。
-// 线性索引 x + width*(z + depth*y)（y 最慢），越界 blockAt 返回 0(空气)。
+// 5=log 6=planks 7=leaves 8=sand。+Y 朝上。世界坐标越界 blockAt 返回 0(空气)。
 class World : public QObject
 {
     Q_OBJECT
@@ -34,14 +39,18 @@ public:
     void setHeight(int h);
     void setSeed(int s);
 
-    // 越界返回 0（空气）。网格与物理都用它。
+    // 越界返回 0（空气）。跨 chunk 由 ChunkManager 路由；网格与物理都用它。
     Q_INVOKABLE quint8 blockAt(int x, int y, int z) const;
     Q_INVOKABLE bool isSolid(int x, int y, int z) const { return blockAt(x, y, z) != 0; }
 
-    // 写入栅格并标记脏（当前单 chunk = 整个 mesh 视为脏）。越界 / 无变化返回 false。
-    // 成功改动后发 blockBroken/blockPlaced（语义事件，供 t14 粒子 / t11 音效消费）
-    // 与 worldChanged（驱动 ChunkGeometry 重建整个单 mesh）。
+    // 写栅格的唯一入口（PLAN §2-C 精神：当前 GUI 线程单写者）。经 ChunkManager 跨 chunk 写入 +
+    // 标目标 chunk 脏；该格贴 chunk 边沿（x/z 在 16 边）→ 同标邻接 chunk 脏（为 t03 跨边界剔除）。
+    // 越界 / 无变化返回 false。成功改动后发 blockBroken/blockPlaced（语义事件，供 t14 粒子 / t11 音效）
+    // 与 worldChanged（驱动 ChunkGeometry 重建；本回合仍重建整个单 mesh，mesher 拆分归 t03）。
     Q_INVOKABLE bool setBlock(int x, int y, int z, quint8 id);
+
+    // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
+    const ChunkManager &chunks() const { return m_chunks; }
 
 signals:
     void widthChanged();
@@ -54,14 +63,15 @@ signals:
     void blockPlaced(int x, int y, int z, int id);
 
 private:
-    void generate(); // 填充 m_voxels（静默，不 emit）
+    void generate();          // 重建置换表 + ChunkManager + 填充地形（静默，不 emit）
+    void buildPermutation();  // 由 seed 填 512 置换表（线性同余，可复现）
     double noise2(double x, double z) const;
     double fbm(double x, double z) const;
     int heightAt(int x, int z) const;
 
-    QVector<quint8> m_voxels;
-    std::vector<int> m_perm; // 512 置换表
+    std::vector<int> m_perm;  // 512 置换表（Perlin）
     int m_width = 16, m_depth = 16, m_height = 16, m_seed = 1337;
+    ChunkManager m_chunks;    // 多 chunk 存储 + 跨 chunk 路由（World 层；默认空，generate 重建）
 };
 
 #endif // WORLD_H

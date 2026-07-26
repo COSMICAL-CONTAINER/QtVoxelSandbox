@@ -11,8 +11,9 @@ Window {
 
     property int fps: 0 // main.cpp 经 frameSwapped 回填
 
-    // 单一体素世界：网格(ChunkGeometry)与物理(PlayerController)共用同一份栅格
-    World { id: theWorld; width: 16; depth: 16; height: 16; seed: 1337 }
+    // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
+    // 与物理(PlayerController)共用同一份栅格。
+    World { id: theWorld; width: 48; depth: 48; height: 16; seed: 1337 }
 
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }

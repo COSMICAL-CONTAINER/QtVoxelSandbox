@@ -14,6 +14,10 @@ qt_add_executable(voxelsandbox
     main.cpp
     blockregistry.cpp
     blockregistry.h
+    chunk.cpp
+    chunk.h
+    chunkmanager.cpp
+    chunkmanager.h
     chunkgeometry.cpp
     chunkgeometry.h
     world.cpp
