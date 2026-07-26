@@ -60,16 +60,34 @@ Window {
             }
         }
 
-        // 破/放粒子（t14）：粒子节点经 Loader 动态加载独立 BlockParticles.qml（内含 Particles3D import）。
+        // 破/放粒子（t14/t16）：BlockParticles.qml 经 Loader 动态加载，隔离 Particles3D import，
+        // 使该模块运行期缺失时仅 Loader 失败、顶层 Main.qml 仍正常加载（不命中 objectCreationFailed→exit(-1)）。
         // 分层（PLAN §2）：触发由 World(Game 层) 发，呈现层只消费、绝不反向写栅格。
-        // Particles3D 运行期缺失时仅该 Loader 失败、静默降级（§2-E），顶层 Main.qml 仍正常加载
-        // （不命中 objectCreationFailed→exit(-1)）。块内 maxAmount 池化 → 连点不堆积爆量。
+        //
+        // t16 根因修复：Loader 是 2D QQuickItem，其加载出的 3D Node 默认 parent=null（孤儿），
+        // 不会并入 View3D 场景图 → 粒子永不渲染（「不可见」根因，实测 parent=null 证实）。
+        // 故在此放一个场景内锚点 Node，Loader.onLoaded 时把加载到的 Node 领养进它，
+        // 使整棵粒子子树并入 3D 场景图。Particles3D 不可用 → Loader Error → item 为 null，
+        // onLoaded 不触发 → 无领养 → 粒子静默降级（§2-E「保持运行而非崩溃」），且状态落 console 可核验。
+        Node { id: particlesHost } // 场景内锚点：粒子内容被领养进此节点才渲染
+
         Loader {
             id: particleLoader
             active: true
             source: "BlockParticles.qml"
-            onStatusChanged: if (status === Loader.Error)
-                console.warn("[t14] Particles3D 运行期不可用，粒子已降级关闭")
+            onLoaded: {
+                // 关键：领养进场景锚点 Node（否则加载到的 Node parent=null → 孤儿 → 不渲染）。
+                particleLoader.item.parent = particlesHost
+                console.info("[t16] BlockParticles adopted into scene graph (parent=Node)")
+            }
+            onStatusChanged: {
+                // 加载状态落 console（落 voxelsandbox.log），使「粒子节点加载状态在 console
+                // 可见且非 Error」可被运行期核验；Error 时显式告警（§2-E：不得静默吞）。
+                if (status === Loader.Ready)
+                    console.info("[t16] BlockParticles Loader status = Ready")
+                else if (status === Loader.Error)
+                    console.warn("[t16] BlockParticles Loader status = Error — Particles3D 运行期不可用，粒子已降级关闭（§2-E）")
+            }
         }
     }
 
