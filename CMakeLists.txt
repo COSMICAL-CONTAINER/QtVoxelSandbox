@@ -20,6 +20,10 @@ qt_add_executable(voxelsandbox
     world.h
     playercontroller.cpp
     playercontroller.h
+    raycast.cpp
+    raycast.h
+    wiresquare.cpp
+    wiresquare.h
 )
 
 qt_add_qml_module(voxelsandbox

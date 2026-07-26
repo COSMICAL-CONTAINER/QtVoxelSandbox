@@ -42,6 +42,19 @@ Window {
                 baseColorMap: Texture { source: "qrc:/textures/atlas.png"; generateMipmaps: false }
             }
         }
+
+        // 命中面线框（射线选体 t04）：贴在视线命中的方块面上，随准星实时更新。
+        // 未命中 / 暂停（未捕获）时 hasHit=false → 隐藏。
+        Model {
+            visible: player.hasHit
+            position: player.hitFaceCenter
+            eulerRotation: player.hitFaceEuler
+            geometry: WireSquare {}
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                baseColor: "#101010"
+            }
+        }
     }
 
     // 键盘：N 切模式、1/2/3 直选、WASD/Space/Shift 传给控制器。Esc 由 C++ 事件过滤器拦截。

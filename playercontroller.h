@@ -10,7 +10,8 @@
 #include <QVector3D>
 #include <QtQml/qqml.h>
 
-#include "world.h" // Q_PROPERTY(World*) 需要 World 完整定义
+#include "raycast.h" // RayHit（射线选体结果）
+#include "world.h"   // Q_PROPERTY(World*) 需要 World 完整定义
 
 // 玩家控制器（一个对象全包）：指针锁定式鼠标视角 + WASD/跳/飞 + 三模式物理。
 // 继承 QQuickItem 以拿到 QQuickWindow（指针锁定需要 QCursor 居中 warp）。
@@ -30,6 +31,13 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(bool captured READ captured NOTIFY capturedChanged)
     Q_PROPERTY(bool onGround READ onGround NOTIFY onGroundChanged)
     Q_PROPERTY(bool flying READ flying NOTIFY flyingChanged)
+    // 射线选体（t04）：每帧沿视线 DDA 步进，命中首个实体方块。无命中 / 暂停时 hasHit=false。
+    // hitBlock=命中格整数坐标；hitNormal=命中面外法线；hitFaceCenter/hitFaceEuler 供线框 Model 直接摆位。
+    Q_PROPERTY(bool hasHit READ hasHit NOTIFY hitChanged)
+    Q_PROPERTY(QVector3D hitBlock READ hitBlock NOTIFY hitChanged)
+    Q_PROPERTY(QVector3D hitNormal READ hitNormal NOTIFY hitChanged)
+    Q_PROPERTY(QVector3D hitFaceCenter READ hitFaceCenter NOTIFY hitChanged)
+    Q_PROPERTY(QVector3D hitFaceEuler READ hitFaceEuler NOTIFY hitChanged)
 
 public:
     enum Mode { Spectator, Creative, Survival };
@@ -48,6 +56,12 @@ public:
     bool onGround() const { return m_onGround; }
     bool flying() const { return m_flying; }
 
+    bool hasHit() const { return m_hasHit; }
+    QVector3D hitBlock() const { return QVector3D(m_hitBx, m_hitBy, m_hitBz); }
+    QVector3D hitNormal() const { return QVector3D(m_hitNx, m_hitNy, m_hitNz); }
+    QVector3D hitFaceCenter() const; // 命中面中心世界坐标（贴面，略外推防 z-fight）
+    QVector3D hitFaceEuler() const;  // 把规范线框（+Z 法线）摆到命中面的欧拉角（度）
+
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
     Q_INVOKABLE void setMode(Mode m);
@@ -63,6 +77,7 @@ signals:
     void capturedChanged();
     void onGroundChanged();
     void flyingChanged();
+    void hitChanged();
 
 protected:
     void componentComplete() override;
@@ -80,6 +95,9 @@ private:
     bool aabbHitsSolid() const;
     void setCaptured(bool c);
     QPoint windowCenterGlobal() const;
+    QVector3D lookDirection() const;             // 视线方向（与相机 eulerRotation 同源）
+    void updateRaycast();                        // 每帧沿视线 DDA，更新命中态
+    void clearHit();                             // 暂停/失焦时隐藏线框
 
     World *m_world = nullptr;
     QQuickWindow *m_window = nullptr;
@@ -97,6 +115,11 @@ private:
     qint64 m_lastSpaceMs = -100000; // 双击空格检测时间戳
     bool m_spacePrev = false;       // 跳跃边沿触发（长按空格只跳一次）
 
+    // 射线选体命中态（整数格坐标 + 整数法线分量；仅变化时 emit hitChanged，避免每帧抖动 QML）
+    bool m_hasHit = false;
+    qint32 m_hitBx = 0, m_hitBy = 0, m_hitBz = 0;
+    qint32 m_hitNx = 0, m_hitNy = 0, m_hitNz = 0;
+
     static constexpr float kHalfW = 0.3f;      // 宽 0.6
     static constexpr float kHeight = 1.8f;
     static constexpr float kEyeHeight = 1.62f;
@@ -107,6 +130,7 @@ private:
     static constexpr float kMaxFall = 78.4f;
     static constexpr float kSens = 0.25f;      // 度/像素
     static constexpr float kDeg = 0.017453292519943295f;
+    static constexpr float kReach = 5.0f;      // 射线选体射程（格）
 };
 
 #endif // PLAYERCONTROLLER_H

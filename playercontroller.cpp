@@ -4,6 +4,7 @@
 #include <QEvent>
 #include <QGuiApplication>
 #include <QKeyEvent>
+#include <QQuaternion>
 
 #include <algorithm>
 #include <cmath>
@@ -87,6 +88,7 @@ void PlayerController::release()
     QGuiApplication::restoreOverrideCursor(); // 恢复光标 = 可点暂停菜单
     m_keys.clear();                           // 丢弃按住的 WASD，防恢复时前冲
     setCaptured(false);
+    clearHit();                               // 暂停 → 隐藏线框（未捕获时不选中）
 }
 
 void PlayerController::setCaptured(bool c)
@@ -137,6 +139,61 @@ void PlayerController::tick()
     if (!m_captured) return;                                  // 暂停：冻结
     pollMouse();
     step(dt);
+    updateRaycast(); // 沿视线 DDA 选体 → 更新线框命中态
+}
+
+// 视线方向：用与相机相同的欧拉→四元数（QQuaternion::fromEulerAngles(pitch,yaw,0)）旋转
+// 相机本地 -Z，保证射线与渲染出的视线**完全同向**（不靠手写 pitch 符号约定，消除方向歧义）。
+// pitch=0 时退化为水平前向 (-sin(yaw),0,-cos(yaw))，与 wishHoriz 一致。
+QVector3D PlayerController::lookDirection() const
+{
+    const QQuaternion q = QQuaternion::fromEulerAngles(m_pitch, m_yaw, 0.0f);
+    return q.rotatedVector(QVector3D(0.0f, 0.0f, -1.0f));
+}
+
+void PlayerController::updateRaycast()
+{
+    if (!m_world) { clearHit(); return; }
+    const RayHit h = raycastVoxel(*m_world, position(), lookDirection(), kReach);
+
+    // 仅在命中态/格坐标/法线真正变化时 emit，避免每帧无谓刷新 QML 绑定。
+    const bool changed = (h.valid != m_hasHit)
+        || (h.valid && (h.bx != m_hitBx || h.by != m_hitBy || h.bz != m_hitBz
+                        || qint32(h.nx) != m_hitNx || qint32(h.ny) != m_hitNy || qint32(h.nz) != m_hitNz));
+    if (!changed) return;
+
+    m_hasHit = h.valid;
+    m_hitBx = h.bx; m_hitBy = h.by; m_hitBz = h.bz;
+    m_hitNx = qint32(h.nx); m_hitNy = qint32(h.ny); m_hitNz = qint32(h.nz);
+    emit hitChanged();
+}
+
+void PlayerController::clearHit()
+{
+    if (!m_hasHit) return;
+    m_hasHit = false;
+    m_hitNx = m_hitNy = m_hitNz = 0;
+    emit hitChanged();
+}
+
+// 命中面中心 = 方块中心 + (0.5 + eps)*法线：贴在该面上（非方块几何中心），
+// eps 外推防与方块自身面 z-fight。
+QVector3D PlayerController::hitFaceCenter() const
+{
+    constexpr float eps = 0.01f;
+    return QVector3D(m_hitBx + 0.5f, m_hitBy + 0.5f, m_hitBz + 0.5f)
+         + QVector3D(m_hitNx, m_hitNy, m_hitNz) * (0.5f + eps);
+}
+
+// 把规范线框（XY 平面、+Z 法线）摆到命中面：六种法线各对应一个欧拉角。
+QVector3D PlayerController::hitFaceEuler() const
+{
+    if (m_hitNx > 0) return QVector3D(0, 90, 0);    // +X 面
+    if (m_hitNx < 0) return QVector3D(0, -90, 0);   // -X 面
+    if (m_hitNy > 0) return QVector3D(90, 0, 0);    // +Y（顶）面
+    if (m_hitNy < 0) return QVector3D(-90, 0, 0);   // -Y（底）面
+    if (m_hitNz < 0) return QVector3D(0, 180, 0);   // -Z 面
+    return QVector3D(0, 0, 0);                      // +Z 面（与规范同向，不转）
 }
 
 QVector3D PlayerController::wishHoriz() const
