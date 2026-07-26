@@ -85,8 +85,9 @@ Window {
         }
     }
 
-    // 键盘：N 切模式、1–9 直选 hotbar 槽、WASD/Space/Shift 传给控制器。Esc 由 C++ 事件过滤器拦截。
-    // 注：原 1/2/3 用于直选模式，现让位给 hotbar（t06 验收要求 1–9 选槽）；模式切换统一由 N 循环。
+    // 键盘：G 切模式、1–9 直选 hotbar 槽、WASD/Space/Shift 传给控制器。Esc 由 C++ 事件过滤器拦截。
+    // 注：原 1/2/3 用于直选模式，现让位给 hotbar（t06 验收要求 1–9 选槽）；模式切换统一由 G 循环
+    // （N 与数字键无冲突认知，但 G 是更通用的「Game mode」约定，避免与未来键位争用）。
     // 切换在指针捕获与未捕获时都可用 —— keyInput 始终持焦点（未捕获时也可预选槽）。
     Item {
         id: keyInput
@@ -94,7 +95,7 @@ Window {
         focus: true
         Keys.onPressed: (e) => {
             if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
-            if (e.key === Qt.Key_N) { player.cycleMode(); e.accepted = true; return }
+            if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
             if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) {            // 1–9 直选 hotbar 槽 0..8（属性赋值走 WRITE setter）
                 hotbarVM.selectedSlot = e.key - Qt.Key_1; e.accepted = true; return
             }
@@ -134,7 +135,7 @@ Window {
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "click to play"; color: "#bbbbbb"; font.pixelSize: 15
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[N] cycle mode   [1-9] select block   wheel cycle"
+                Text { text: "[G] cycle mode   [1-9] select block   wheel cycle"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "[Esc] release   WASD move   Space jump/fly   Shift down"
@@ -209,14 +210,15 @@ Window {
                     }
                 }
 
-                // 方块图标（空槽 source="" → 不显示）
+                // 方块图标（等距立方体，统一 64×64 源 → PreserveAspectFit 强制等比缩放进固定框，
+                // 无论源贴图原始尺寸如何，槽内显示尺寸完全一致；空槽 source="" → 不显示）。
                 Image {
                     anchors.centerIn: parent
-                    width: 36; height: 36
+                    width: 38; height: 38
                     visible: hotbarVM.iconSourceAt(index) !== ""
                     source: hotbarVM.iconSourceAt(index)
-                    fillMode: Image.Pad
-                    smooth: false
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
                 }
 
                 // 键位角标 1–9

@@ -40,7 +40,7 @@ public:
 
     // 每槽方块 id（air=0 即空槽）。越界返回 0。
     Q_INVOKABLE int blockIdAt(int slot) const;
-    // 每槽图标 qrc 路径（取该方块最具代表性的面贴图；空槽返回 ""）。
+    // 每槽图标 qrc 路径（统一尺寸的等距立方体图标；空槽返回 ""）。
     Q_INVOKABLE QString iconSourceAt(int slot) const;
     // 每槽方块内部名（调试/HUD 用）。空槽返回 "empty"。
     Q_INVOKABLE QString nameAt(int slot) const;

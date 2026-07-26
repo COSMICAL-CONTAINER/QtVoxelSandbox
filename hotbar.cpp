@@ -40,21 +40,23 @@ int Hotbar::blockIdAt(int slot) const
     return int(m_slots[size_t(slot)]);
 }
 
-// 每方块最具代表性的面贴图（侧/单一），用于 hotbar 缩略图。
-// 文件名与 textures/ 下自带 PNG 对齐（已在 CMake qt_add_resources 中，非 MC 资产）。
+// 每方块的等距立方体图标（顶 + 两侧，统一尺寸），由 tools/build_cube_icons.py
+// 从 textures/ 下既有面贴图烘焙而成（复用图集 tile 合成，非 MC 资产；PLAN §2-L）。
+// 用立方体而非单面平面贴图：源贴图尺寸不一（16/48 混排）→ 单面图会大小不统一；
+// 立方体图标统一画布尺寸 + 顶/侧明暗强化可辨性（grass 顶绿侧褐、log 顶年轮侧树皮…）。
 QString Hotbar::iconSourceAt(int slot) const
 {
     const quint8 id = quint8(blockIdAt(slot));
     const char *file = nullptr;
     switch (id) {
-    case BlockRegistry::Grass:  file = "default_grass_side.png"; break; // 草：侧最可辨
-    case BlockRegistry::Dirt:   file = "default_dirt.png";       break;
-    case BlockRegistry::Stone:  file = "default_stone.png";      break;
-    case BlockRegistry::Cobble: file = "default_cobble.png";     break;
-    case BlockRegistry::Log:    file = "default_tree.png";       break; // 原木：侧
-    case BlockRegistry::Planks: file = "default_wood.png";       break;
-    case BlockRegistry::Leaves: file = "default_leaves.png";     break;
-    case BlockRegistry::Sand:   file = "default_sand.png";       break;
+    case BlockRegistry::Grass:  file = "icon_grass.png";  break;
+    case BlockRegistry::Dirt:   file = "icon_dirt.png";   break;
+    case BlockRegistry::Stone:  file = "icon_stone.png";  break;
+    case BlockRegistry::Cobble: file = "icon_cobble.png"; break;
+    case BlockRegistry::Log:    file = "icon_log.png";    break;
+    case BlockRegistry::Planks: file = "icon_planks.png"; break;
+    case BlockRegistry::Leaves: file = "icon_leaves.png"; break;
+    case BlockRegistry::Sand:   file = "icon_sand.png";   break;
     default: return QString(); // 空 / 未知槽：无图标
     }
     return QStringLiteral("qrc:/textures/") + QString::fromLatin1(file);

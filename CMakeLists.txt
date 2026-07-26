@@ -50,6 +50,14 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_tree.png
         textures/default_tree_top.png
         textures/default_wood.png
+        textures/icon_cobble.png
+        textures/icon_dirt.png
+        textures/icon_grass.png
+        textures/icon_leaves.png
+        textures/icon_log.png
+        textures/icon_planks.png
+        textures/icon_sand.png
+        textures/icon_stone.png
 )
 
 set_target_properties(voxelsandbox PROPERTIES
