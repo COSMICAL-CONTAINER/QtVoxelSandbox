@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-# Phase 0+：用 QtQuick3D 显示一个贴图方块（公开 API，默认 D3D11 后端）。
-# 待 Qt 私有头装上后做真正的体素渲染器（QRhi）。代号 voxelsandbox（最终名待定，见 docs/PLAN.md §9）。
+# Phase 0+：Perlin 噪声区块 + 飞行相机（QtQuick3D 实例化）。代号 voxelsandbox（最终名待定，见 docs/PLAN.md §9）。
 project(voxelsandbox LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -13,6 +12,8 @@ qt_standard_project_setup()
 
 qt_add_executable(voxelsandbox
     main.cpp
+    chunkgeometry.cpp
+    chunkgeometry.h
 )
 
 qt_add_qml_module(voxelsandbox
@@ -25,10 +26,19 @@ qt_add_qml_module(voxelsandbox
 qt_add_resources(voxelsandbox "voxel_textures"
     PREFIX "/"
     FILES
+        textures/atlas.png
         textures/default_cobble.png
+        textures/default_dirt.png
+        textures/default_grass_side.png
+        textures/default_grass_top.png
+        textures/default_leaves.png
+        textures/default_sand.png
+        textures/default_stone.png
+        textures/default_tree.png
+        textures/default_tree_top.png
+        textures/default_wood.png
 )
 
-# 先用控制台子系统，方便我自测崩溃；确认 OK 后切回 WIN32 GUI。
 set_target_properties(voxelsandbox PROPERTIES
     WIN32_EXECUTABLE ON
     MACOSX_BUNDLE ON
