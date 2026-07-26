@@ -7,14 +7,14 @@ Chunk::Chunk(int originX, int originZ, int height)
 
 quint8 Chunk::blockAt(int lx, int ly, int lz) const
 {
-    if (lx < 0 || ly < 0 || lz < 0 || lx >= kSize || ly >= m_height)
+    if (lx < 0 || ly < 0 || lz < 0 || lx >= kSize || lz >= kSize || ly >= m_height)
         return 0; // 局部越界 = 空气（防御；正常路由不应到达）
     return m_voxels[size_t(lx + kSize * (lz + kSize * ly))];
 }
 
 void Chunk::setBlock(int lx, int ly, int lz, quint8 id)
 {
-    if (lx < 0 || ly < 0 || lz < 0 || lx >= kSize || ly >= m_height)
+    if (lx < 0 || ly < 0 || lz < 0 || lx >= kSize || lz >= kSize || ly >= m_height)
         return; // 局部越界：忽略（防御）
     m_voxels[size_t(lx + kSize * (lz + kSize * ly))] = id;
 }

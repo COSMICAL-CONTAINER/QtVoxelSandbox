@@ -3,6 +3,7 @@
 
 #include <QtGlobal> // quint8
 
+#include <atomic>
 #include <vector>
 
 // 体素 chunk 列（PLAN §2 不变量 J 的存储单元）：16(X) × 16(Z) × 全世界高度(Y)。
@@ -36,7 +37,7 @@ private:
     int m_originZ;                       // 世界 Z 起点（= cz*kSize）
     int m_height;                        // Y 向高度（= 世界高度；chunk 跨满高）
     std::vector<quint8> m_voxels;        // kSize × kSize × height，索引 lx + kSize*(lz + kSize*ly)
-    bool m_dirty = true;                 // 新建即脏（首帧需 mesh）
+    std::atomic<bool> m_dirty{true};     // 新建即脏（首帧需 mesh）。atomic：未来 mesh-worker 读脏标记无 TSan 数据竞争（voxel 数组仍需 §2-C per-chunk 锁，线程化时补）
 };
 
 #endif // CHUNK_H

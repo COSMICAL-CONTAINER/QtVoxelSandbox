@@ -87,6 +87,7 @@ QString Hotbar::iconSourceAt(int slot) const
 
 QString Hotbar::iconSourceForBlock(int blockId) const
 {
+    if (blockId < 0 || blockId >= int(BlockRegistry::Count)) return QString(); // 越界先判再 cast，防 quint8 截断别名（如 id=257→grass）
     const char *file = iconFileForBlock(quint8(blockId));
     if (!file) return QString(); // air / 未知槽：无图标
     return QStringLiteral("qrc:/textures/") + QString::fromLatin1(file);

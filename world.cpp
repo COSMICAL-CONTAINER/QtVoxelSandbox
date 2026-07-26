@@ -10,10 +10,10 @@ World::World(QObject *parent) : QObject(parent)
     generate(); // 默认参数生成（静默，不 emit）
 }
 
-void World::setWidth(int w)  { if (w == m_width)  return; m_width = w;  emit widthChanged();  generate(); emit worldChanged(); }
-void World::setDepth(int d)  { if (d == m_depth)  return; m_depth = d;  emit depthChanged();  generate(); emit worldChanged(); }
-void World::setHeight(int h) { if (h == m_height) return; m_height = h; emit heightChanged(); generate(); emit worldChanged(); }
-void World::setSeed(int s)   { if (s == m_seed)   return; m_seed = s;   emit seedChanged();   generate(); emit worldChanged(); }
+void World::setWidth(int w)  { if (w == m_width)  return; m_width = w;  generate(); emit widthChanged();  emit worldChanged(); }
+void World::setDepth(int d)  { if (d == m_depth)  return; m_depth = d;  generate(); emit depthChanged();  emit worldChanged(); }
+void World::setHeight(int h) { if (h == m_height) return; m_height = h; generate(); emit heightChanged(); emit worldChanged(); }
+void World::setSeed(int s)   { if (s == m_seed)   return; m_seed = s;   generate(); emit seedChanged();   emit worldChanged(); }
 
 quint8 World::blockAt(int x, int y, int z) const
 {
