@@ -33,6 +33,7 @@ qt_add_qml_module(voxelsandbox
     VERSION 1.0
     QML_FILES
         Main.qml
+        BlockParticles.qml
 )
 
 qt_add_resources(voxelsandbox "voxel_textures"
@@ -63,3 +64,21 @@ target_link_libraries(voxelsandbox PRIVATE
     Qt6::Qml
     Qt6::Quick3D
 )
+
+# 运行期部署（Windows）：windeployqt 把 Qt 运行时 + QML 模块插件拷进 exe 同级目录。
+# --qmldir 扫描 QML 源目录的 import 语句，确保「按需引入」的 QML 模块（如 t14 的
+# QtQuick3D.Particles3D）也被部署；否则新增 QML 依赖不会随旧依赖一起部署 → 运行期
+# "模块没有安装" → Main.qml 加载失败 → app 退 -1。每次构建重跑，保证 fresh build 自洽。
+if(WIN32)
+    find_program(WINDEPLOYQT_EXECUTABLE NAMES windeployqt HINTS "${Qt6_DIR}/../../../bin")
+    if(WINDEPLOYQT_EXECUTABLE)
+        add_custom_command(TARGET voxelsandbox POST_BUILD
+            COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+                    --no-translations
+                    --qmldir "${CMAKE_CURRENT_SOURCE_DIR}"
+                    "$<TARGET_FILE:voxelsandbox>"
+            COMMENT "Deploying Qt runtime + QML plugins (incl. Particles3D) to build dir")
+    else()
+        message(WARNING "windeployqt 未找到；Qt 运行时/QML 插件需手动部署")
+    endif()
+endif()

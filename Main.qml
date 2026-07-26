@@ -59,6 +59,30 @@ Window {
                 baseColor: "#101010"
             }
         }
+
+        // 破/放粒子（t14）：粒子节点经 Loader 动态加载独立 BlockParticles.qml（内含 Particles3D import）。
+        // 分层（PLAN §2）：触发由 World(Game 层) 发，呈现层只消费、绝不反向写栅格。
+        // Particles3D 运行期缺失时仅该 Loader 失败、静默降级（§2-E），顶层 Main.qml 仍正常加载
+        // （不命中 objectCreationFailed→exit(-1)）。块内 maxAmount 池化 → 连点不堆积爆量。
+        Loader {
+            id: particleLoader
+            active: true
+            source: "BlockParticles.qml"
+            onStatusChanged: if (status === Loader.Error)
+                console.warn("[t14] Particles3D 运行期不可用，粒子已降级关闭")
+        }
+    }
+
+    // 破/放信号 → 粒子迸发（呈现层消费 World 语义事件）。
+    // 现代函数式 Connections（Qt6）；粒子降级（Loader.item 为 null）时安全跳过（PLAN §2-E）。
+    Connections {
+        target: theWorld
+        function onBlockBroken(x, y, z, id) {
+            if (particleLoader.item) particleLoader.item.burstBreak(x, y, z, id)
+        }
+        function onBlockPlaced(x, y, z, id) {
+            if (particleLoader.item) particleLoader.item.burstPlace(x, y, z, id)
+        }
     }
 
     // 键盘：N 切模式、1–9 直选 hotbar 槽、WASD/Space/Shift 传给控制器。Esc 由 C++ 事件过滤器拦截。
