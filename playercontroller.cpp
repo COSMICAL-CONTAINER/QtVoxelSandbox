@@ -47,7 +47,8 @@ void PlayerController::onWindowChanged(QQuickWindow *win)
 void PlayerController::setKey(int key, bool pressed)
 {
     const bool wasDown = m_keys.value(key);
-    // 创造模式：真实按下空格（非按住自动重复）→ 双击 ≤300ms 切换飞行
+    // 飞行门控（t21）：双击空格切飞仅 Creative（Spectator 常驻 noclip 无需切；Survival canFly()=false，
+    // 永不进入此分支 → 双击空格不触发飞行，重力生效）。真实按下（非按住自动重复）→ 双击 ≤300ms 切换。
     if (key == Qt::Key_Space && pressed && !wasDown && m_mode == Creative) {
         const qint64 now = m_evtClock.elapsed();
         if (now - m_lastSpaceMs < 300) {
@@ -217,16 +218,20 @@ void PlayerController::setSelectedBlock(int id)
 }
 
 // 左键：命中格置 air。要求已捕获指针且有命中（未捕获 = 暂停，不破坏）。
+// 模式门控（t21）：观察者不能破块（用户核心诉求）——在调用 World::setBlock 前拦截。
 void PlayerController::breakBlock()
 {
+    if (!canBreak()) return; // 观察者不能破块
     if (!m_world || !m_captured || !m_hasHit) return;
     m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Air);
 }
 
 // 右键：命中面法线方向的相邻空格置当前手持方块。
 // 校验：目标格须为空气（不覆盖实体）；且不与玩家 AABB 重叠（防自埋/卡死）。
+// 模式门控（t21）：观察者不能放块（用户核心诉求）——在调用 World::setBlock 前拦截。
 void PlayerController::placeBlock()
 {
+    if (!canPlace()) return; // 观察者不能放块
     if (!m_world || !m_captured || !m_hasHit) return;
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
     if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放

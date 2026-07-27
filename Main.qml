@@ -302,7 +302,7 @@ Window {
         x: 12; y: 8
         color: "#7fe57f"; font.pixelSize: 20; font.bold: true
         style: Text.Outline; styleColor: "#000000"
-        text: "MODE: " + (player.mode === PlayerController.Spectator ? "SPECTATOR (noclip fly)" :
+        text: "MODE: " + (player.mode === PlayerController.Spectator ? "SPECTATOR (noclip · no break/place)" :
                player.mode === PlayerController.Creative ? ("CREATIVE " + (player.flying ? "(flying)" : "(walk · dbl-tap Space to fly)")) : "SURVIVAL (gravity + jump)")
               + "    FPS: " + window.fps
     }

@@ -41,6 +41,11 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(QVector3D hitFaceEuler READ hitFaceEuler NOTIFY hitChanged)
     // 当前手持方块（右键放置用它；t06 hotbar 会绑定此属性）。默认 Stone。
     Q_PROPERTY(int selectedBlock READ selectedBlock WRITE setSelectedBlock NOTIFY selectedBlockChanged)
+    // 模式行为门控（t21）：由当前模式派生的能力标志（随 modeChanged 通知 QML）。
+    // Spectator 禁放破（用户核心诉求：观察者不能破坏/放置）；飞仅 Creative/Spectator 可用。
+    Q_PROPERTY(bool canBreak READ canBreak NOTIFY modeChanged)
+    Q_PROPERTY(bool canPlace READ canPlace NOTIFY modeChanged)
+    Q_PROPERTY(bool canFly READ canFly NOTIFY modeChanged)
 
 public:
     enum Mode { Spectator, Creative, Survival };
@@ -67,6 +72,12 @@ public:
 
     int selectedBlock() const { return m_selectedBlock; }
     void setSelectedBlock(int id);
+
+    // 模式行为门控（t21，PLAN §2-D：模式标志由 PlayerController 持有，输入边缘统一查）。
+    // 三模式差异化：Spectator 禁放破 + 可飞；Creative 可放破 + 可飞（双击空格切）；生存可放破 + 禁飞。
+    bool canBreak() const { return m_mode != Spectator; } // 观察者不能破块
+    bool canPlace() const { return m_mode != Spectator; } // 观察者不能放块
+    bool canFly() const   { return m_mode != Survival; }  // 生存走重力+跳，禁飞
 
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
