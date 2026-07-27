@@ -64,6 +64,11 @@ Window {
     // 下面的 Connections 路由到 takeDamage（呈现层只读，绝不反向写数值；PLAN §2 分层）。
     PlayerState { id: playerState }
 
+    // 方块掉落实体管理器（t35）：生存破可掉落方块时在该格生成 item entity（旋转 / 浮动小方块
+    // 图标），等 t36 拾取。纯数据持有（pos + itemId），呈现层（下方 View3D 的 Repeater）只读。
+    // 触发由 PlayerController 发 spawnItem 信号，下面 Connections 转发到 spawnItem()（单向事件流）。
+    ItemEntityManager { id: itemEntities }
+
     // 玩家控制器：指针锁定鼠标 + WASD/跳/飞 + 三模式物理。
     //   selectedBlock（右键放置用）绑 hotbarVM.selectedBlockId（工具槽→Air→不放置）。
     //   selectedItem（t34 挖掘速度用）绑 hotbarVM.selectedItemId（工具段透传 → ToolRegistry 算速度）。
@@ -80,6 +85,10 @@ Window {
     Connections {
         target: player
         function onFallDamageTaken(hp) { playerState.takeDamage(hp) }
+        // t35：生存破可掉落方块（drop=true）→ player 发 spawnItem → 转发到 manager 生成实体。
+        // 创造 / 不可采掘时 player 不发本信号（无实体产出）。ViewModel 不持有 PlayerController，
+        // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
+        function onSpawnItem(x, y, z, id) { itemEntities.spawnItem(x, y, z, id) }
         // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换
         // 则保留背包打开，面板由各组件 visible 绑定 player.mode 自动换（创造背包↔生存背包）。避免任一
         // 背包在不兼容模式下滞留（Spectator 无背包/破放，t21）。
@@ -376,6 +385,63 @@ Window {
                     console.info("[t16] BlockParticles Loader status = Ready")
                 else if (status === Loader.Error)
                     console.warn("[t16] BlockParticles Loader status = Error — Particles3D 运行期不可用，粒子已降级关闭（§2-E）")
+            }
+        }
+
+        // 方块掉落实体渲染（t35）：item entity 的小方块图标在此渲染。Repeater 父节点 = 场景内
+        // 3D Node（itemHost）→ delegate（Node/Model，3D 对象）被领养进 3D 场景图（lessons-learned
+        // 「动态 3D 对象必须挂到场景 Node，否则孤儿不渲染」—— t03 Repeater 直接挂 View3D 会成孤儿
+        // / 告警；此处挂 Node 下，delegate.parent = itemHost = 3D Node → 进场景）。
+        //
+        // 触发：itemEntities.count 随 spawn 自增（NOTIFY entitiesChanged）→ Repeater 追加 delegate
+        // （int model 不重建已有 → 各实体动画连续不被打断）。
+        // 分层（PLAN §2）：实体数据属 Game（ItemEntityManager），呈现属 View（本 Repeater）；
+        // 旋转 / 浮动是纯呈现动画，呈现层自发、不反向写数据。
+        Node {
+            id: itemHost
+            Component.onCompleted: console.info("[t35] itemHost UP parent=" + itemHost.parent + " (须为 3D Node)")
+
+            Repeater {
+                model: itemEntities.count
+                delegate: Node {
+                    // 基准位置（实体不动直到 t36 拾取）：posAt 在 delegate 创建时求值一次（实体不动
+                    // → 不需 NOTIFY 跟踪）。外层 Node 持基准 pos + 绕 Y 旋转；内层 Model 持浮动偏移。
+                    position: itemEntities.posAt(index)
+                    property real rotY: 0       // 绕 Y 旋转角（度）
+                    property real bobY: 0       // 上下浮动偏移（格）
+                    eulerRotation: Qt.vector3d(0, rotY, 0)
+
+                    // 首个 delegate 诊断（落 log）：确认进场景图（parent = QQuick3DNode* 而非 null）。
+                    // needs-run 项：若 parent=null → 孤儿不渲染（类 t16）；运行期核验。
+                    Component.onCompleted: {
+                        if (index === 0)
+                            console.info("[t35] item delegate[0] UP parent=" + parent + " pos=" + position
+                                         + " id=" + itemEntities.itemIdAt(index))
+                    }
+
+                    Model {
+                        // 小方块图标（~0.3）：BlockCube 按 itemId 取图集 per-face UV（草顶 / 草侧…），
+                        // 复用 voxelAtlas（与地形同贴图，零 MC 资产）。NoLighting 保证可见（本工程所有
+                        // 可见 Model 的已验证路径；默认 lit 不渲染，见 lessons-learned）。
+                        geometry: BlockCube { blockId: itemEntities.itemIdAt(index) }
+                        scale: Qt.vector3d(0.3, 0.3, 0.3)
+                        // 浮动：本地 Y 偏移。外层 Node 绕 Y 旋转不改变 Y 轴方向 → 世界 Y 偏移保留
+                        // （item 边绕垂直轴自转边上下浮）。
+                        position: Qt.vector3d(0, parent.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColorMap: voxelAtlas
+                        }
+                    }
+                    // 绕 Y 匀速自转（~3s 一圈），loops 无限。
+                    NumberAnimation on rotY { from: 0; to: 360; duration: 3000; loops: Animation.Infinite }
+                    // 上下浮动 0.15 格（~2s 周期），InOutSine 近似 sin 手感（spec：上下浮动 sin）。
+                    SequentialAnimation on bobY {
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 0; to: 0.15; duration: 1000; easing.type: Easing.InOutSine }
+                        NumberAnimation { from: 0.15; to: 0; duration: 1000; easing.type: Easing.InOutSine }
+                    }
+                }
             }
         }
     }

@@ -43,10 +43,13 @@ CrackBox::CrackBox(QQuick3DObject *parent) : QQuick3DGeometry(parent)
         20,21,22, 20,22,23,   // -Z
     };
 
-    // 写入顺序（lessons-learned）：clear → setVertexData → setStride → setBounds
-    // → setPrimitiveType(Triangles) → addAttribute(...) → update()。漏 update() 后端不上传 GPU。
+    // 写入顺序（lessons-learned）：clear → setVertexData → setIndexData → setStride
+    // → setBounds → setPrimitiveType(Triangles) → addAttribute(...) → update()。
+    // 漏 update() 后端不上传 GPU；漏 setIndexData 则 idx 数组未用（-Wunused 警告）且
+    // 36 索引永不进 GPU —— IndexSemantic 只声明布局，数据须 setIndexData 单独上传（同 chunkgeometry）。
     clear();
     setVertexData(QByteArray(reinterpret_cast<const char *>(verts), int(sizeof(verts))));
+    setIndexData(QByteArray(reinterpret_cast<const char *>(idx), int(sizeof(idx)))); // 36 索引独立上传
     setStride(int(sizeof(CrackVtx)));
     setBounds(QVector3D(-h, -h, -h), QVector3D(h, h, h)); // 局部 AABB = ±0.5（与几何一致，配合 Model 摆位 + 微放大）
     setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);

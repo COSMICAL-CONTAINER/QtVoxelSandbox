@@ -312,7 +312,10 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     if (!m_world) return;
     const quint8 brokenId = m_world->blockAt(x, y, z);
     m_world->setBlock(x, y, z, BlockRegistry::Air); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
-    emit playerMined(x, y, z, int(brokenId), drop); // t35 据此 spawn item entity（当前任务仅发，消费端未接）
+    emit playerMined(x, y, z, int(brokenId), drop); // 破块语义事件（含 drop 标志；当前无消费端，留扩展）
+    // t35：可掉落（生存 + canHarvest）→ 发 spawnItem 生成 item entity。创造 drop=false / 不可采掘
+    // 不掉落（spec）。坐标传被破格整数坐标，id 传原方块 id（manager 内偏移到格中心 + 渲染对应贴图）。
+    if (drop) emit spawnItem(x, y, z, int(brokenId));
     emit swingArm();                                // 破块成功 → 第一人称手挥动（t29）
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）
 }

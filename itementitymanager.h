@@ -1,0 +1,68 @@
+#ifndef ITEMENTITYMANAGER_H
+#define ITEMENTITYMANAGER_H
+
+#include <QObject>
+#include <QVector3D>
+#include <QtQml/qqml.h>
+
+#include <vector>
+
+// 方块掉落实体管理器（t35；Entities/Game ViewModel 层）。
+//
+// 生存模式破坏**可掉落**方块时，在该格生成一个 item entity（旋转 / 浮动的小方块图标），
+// 等待 t36 拾取。创造秒破不产出（PlayerController 不发 spawnItem 信号）；生存不可采掘
+// （canHarvest=false，如空手破石）也不产出。
+//
+// 数据形态（纯持有，无物理 / 渲染）：每个实体 = {世界坐标 pos, 物品 id}。呈现层（Main.qml
+// 的 Repeater）经 count + posAt + itemIdAt 读数据，自发旋转 / 浮动动画（不反向写）。
+// 拾取 / 丢弃 / 销毁（t36）后续扩展 removeAt / clear（本轮只做 spawn）。
+//
+// 实体数量有上限（防溢出，spec「>200 跳过 / 合并」）：达到上限 kCap 时新 spawn 被跳过 +
+// 告警，保留已有实体（最简策略；合并 / LRU 推迟）。
+//
+// 分层（PLAN §2）：本层属 ViewModel，只依赖 Core（QtGlobal / QVector3D），**不**依赖
+// Renderer / Physics / QtQuick3D / World。触发由 PlayerController（Game/Physics 层）发
+// spawnItem 信号，Main.qml 的 Connections 转发到本类 spawnItem() —— 单向事件流，本类
+// 不持有 PlayerController（保持分层干净，同 blockBroken→粒子 / fallDamageTaken→PlayerState 模式）。
+class ItemEntityManager : public QObject
+{
+    Q_OBJECT
+    QML_NAMED_ELEMENT(ItemEntityManager)
+    // count：当前实体数（Repeater 作 int model → 生成 0..count-1 delegate）。NOTIFY entitiesChanged
+    // 驱动 spawn 后 Repeater 追加新 delegate（不重建已有 → 动画连续不被打断）。
+    Q_PROPERTY(int count READ count NOTIFY entitiesChanged)
+    // revision：实体集版本号（随 spawn / 未来 remove 自增）。供需要整列重建的消费者「触碰」
+    // 绑定作 NOTIFY 触发器（同 Hotbar.slotRevision 模式）；当前 Repeater 直接用 count，预留。
+    Q_PROPERTY(int revision READ revision NOTIFY entitiesChanged)
+
+public:
+    explicit ItemEntityManager(QObject *parent = nullptr);
+
+    int count() const { return int(m_entities.size()); }
+    int revision() const { return m_revision; }
+
+    // 在方块格 (x,y,z)（整数坐标）生成一个 itemId 的掉落实体。位置存该格中心
+    // (x+0.5, y+0.5, z+0.5)（实体悬浮在格中央）。达到 kCap → 跳过 + qWarning（防溢出）。
+    // itemId<=0（air / 非法）拒（caller 应已过滤；双保险）。
+    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId);
+
+    // 第 i 个实体的世界坐标（呈现层 Repeater delegate 绑它摆位）。越界返回 (0,0,0)。
+    Q_INVOKABLE QVector3D posAt(int i) const;
+    // 第 i 个实体的物品 id（呈现层据它设 BlockCube.blockId）。越界返回 0。
+    Q_INVOKABLE int itemIdAt(int i) const;
+
+signals:
+    void entitiesChanged(); // spawn / 未来 remove 触发；驱动 count/revision + QML 绑定刷新
+
+private:
+    struct ItemEntity {
+        QVector3D pos;
+        int itemId;
+    };
+    std::vector<ItemEntity> m_entities;
+    int m_revision = 0;
+
+    static constexpr int kCap = 200; // 实体数上限（spec：>200 跳过 / 合并）
+};
+
+#endif // ITEMENTITYMANAGER_H

@@ -151,6 +151,11 @@ signals:
     // blockBroken（World 已发）仍触发粒子；本信号额外区分「玩家挖」+「是否掉落」（创造 / 不可采掘
     // 不掉）。坐标 + 原方块 id。
     void playerMined(int x, int y, int z, int blockId, bool drop);
+    // 方块掉落实体（t35）：生存破块且 ToolRegistry::canHarvest 判定掉落（drop=true）时发；
+    // 创造瞬破（drop=false）/ 不可采掘（canHarvest=false，如空手破石）不发。坐标 = 被破格整数
+    // 坐标，id = 原方块 id。Main.qml Connections 转发到 ItemEntityManager.spawnItem 生成实体。
+    // 分层（PLAN §2）：Game/Physics 层发语义事件，呈现层 / ViewModel 只消费（同 blockBroken→粒子）。
+    void spawnItem(int x, int y, int z, int blockId);
     void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState
     // 第一人称手挥动（t29）：breakBlock/placeBlock 在通过模式门控 + 动作真发生后发（观察者不发；
     // 未命中/放置被拒也不发）。同 blockBroken 模式——Game/Physics 层发语义事件，呈现层 Connections

@@ -38,6 +38,10 @@ qt_add_executable(voxelsandbox
     toolregistry.h
     crackbox.cpp
     crackbox.h
+    blockcube.cpp
+    blockcube.h
+    itementitymanager.cpp
+    itementitymanager.h
 )
 
 qt_add_qml_module(voxelsandbox
