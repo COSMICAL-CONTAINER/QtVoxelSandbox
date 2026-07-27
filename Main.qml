@@ -194,6 +194,66 @@ Window {
             }
         }
 
+        // 玩家 3D 模型（t28）：方块化人形（头/躯干/双臂/双腿），跟随玩家脚底位置 + yaw 朝向。
+        // 纯色 PrincipledMaterial 自绘原创（肤色/上衣/裤色，对齐 SurvivalInventory 预览配色），不拷贝任何
+        // MC 皮肤/玩家贴图（§9 override (a)）。模型属呈现层、纯装饰——碰撞仍走 PlayerController 的 AABB，
+        // 模型不进 World/Physics（PLAN §2 分层）。
+        // 显隐：仅第三人称可见（第一人称看不到自己身体，visible 绑 cameraMode）。不透明度绑模式：观察者
+        // = 半透幽灵 0.35（opacity<1 时 PrincipledMaterial 自动走透明混合），创造/生存=不透明 1.0。
+        // 身体只随水平 yaw 转、不随 pitch 倾（抬头只动相机，不动身体）。
+        Node {
+            id: playerModel
+            visible: player.cameraMode !== PlayerController.FirstPerson
+            position: player.feetPosition
+            eulerRotation: Qt.vector3d(0, player.yaw, 0)
+
+            // 半透幽灵态（各 body Part 的材质读此属性）：观察者半透 0.35，其余不透明。
+            readonly property real bodyOpacity: player.mode === PlayerController.Spectator ? 0.35 : 1.0
+
+            // 头（≈0.5³，肤色）。模型以脚底为原点（y=0 贴地），总高≈1.8 对齐玩家 AABB(kHeight)。
+            Model {
+                source: "#Cube"
+                position: Qt.vector3d(0, 1.55, 0)
+                scale: Qt.vector3d(0.5, 0.5, 0.5)
+                materials: PrincipledMaterial { baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+            }
+            // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）
+            Model {
+                source: "#Cube"
+                position: Qt.vector3d(0, 0.95, 0)
+                scale: Qt.vector3d(0.5, 0.7, 0.3)
+                materials: PrincipledMaterial { baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+            }
+            // 左臂（上衣色；挂躯干两侧，与躯干同高）
+            Model {
+                source: "#Cube"
+                position: Qt.vector3d(-0.375, 0.95, 0)
+                scale: Qt.vector3d(0.25, 0.7, 0.25)
+                materials: PrincipledMaterial { baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+            }
+            // 右臂
+            Model {
+                source: "#Cube"
+                position: Qt.vector3d(0.375, 0.95, 0)
+                scale: Qt.vector3d(0.25, 0.7, 0.25)
+                materials: PrincipledMaterial { baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+            }
+            // 左腿（裤色；y 0→0.6）
+            Model {
+                source: "#Cube"
+                position: Qt.vector3d(-0.125, 0.3, 0)
+                scale: Qt.vector3d(0.25, 0.6, 0.25)
+                materials: PrincipledMaterial { baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+            }
+            // 右腿
+            Model {
+                source: "#Cube"
+                position: Qt.vector3d(0.125, 0.3, 0)
+                scale: Qt.vector3d(0.25, 0.6, 0.25)
+                materials: PrincipledMaterial { baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+            }
+        }
+
         // 破/放粒子（t14/t16）：BlockParticles.qml 经 Loader 动态加载，隔离 Particles3D import，
         // 使该模块运行期缺失时仅 Loader 失败、顶层 Main.qml 仍正常加载（不命中 objectCreationFailed→exit(-1)）。
         // 分层（PLAN §2）：触发由 World(Game 层) 发，呈现层只消费、绝不反向写栅格。
