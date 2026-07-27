@@ -1,38 +1,58 @@
 import QtQuick
 
-// 创造风格背包（t18）：E 键开关，列出全部 8 方块网格；点击方块 → 装入 hotbar 当前选中槽。
-// 本文件只做**呈现 + 点击转发**：方块集 / 图标映射 / 槽位改写全部经注入的 hotbar VM
-// （ViewModel 读 BlockRegistry，PLAN §2 分层：UI 不另持方块表副本）。零 MC 名词/资产（§9）。
+// 创造模式物品栏 1.0（t23）：E 键开关（仅 Creative 模式 —— 宿主 Main.qml 已按模式分流：Creative
+// 开本面板、Survival 开 t24 生存背包、Spectator E 无反应）。
 //
-// 区隔（PLAN §9）：不照搬 MC 的「物品栏 + 玩家模型预览 + 标签页」整组布局；只做单页方块网格，
-// 深色面板 + 圆角槽 + 绿系强调色（对齐既有 hotbar/HUD 配色）。
+// 三段式 1.0 布局：
+//   ① 顶部可滚动全方块调色板（8 实方块 + 扩展空槽；Flickable 支持未来 ~40 方块扩容滚动）；
+//   ② 底部 9 槽 hotbar 栏（与游戏内 hotbar 同步：读同一 hotbar VM，选中槽选框高亮、点击切换选中）；
+//   ③ 销毁槽（拖入 hotbar 槽内容 → setSlotBlock(slot, air=0) 清空该槽）。
+// 调色板点击方块 → 装入当前选中 hotbar 槽（保留 t18 行为）；中文方块名作状态行/悬停标签（§9 override (b)）。
 //
-// 宿主（Main.qml）负责指针态：背包打开时已 release（光标可见，可点格子）；点击格子只调
-// hotbar.setSlotBlock，不直接改指针态。关闭（Esc/E/点遮罩）发 closed() → 宿主恢复 grab。
+// 本组件只做**呈现 + 输入转发**：方块集 / 图标 / 中文名 / 槽位改写全部经注入的 hotbar VM
+// （ViewModel 读 BlockRegistry，PLAN §2 分层：UI 不另持方块表副本）。全部槽框/选框/销毁图标本项目
+// 自绘原创（Rectangle + Canvas，无外部 MC GUI PNG；§9 override (a)）。零 MC 专有名词（§9）。
+//
+// 宿主负责指针态：背包打开时已 release（光标可见，可点/拖）；关闭（closed 信号）→ 宿主恢复 grab。
+
 Item {
     id: root
 
-    // 宿主注入：hotbar 视图模型（提供 creativeBlocks / iconSourceForBlock / nameForBlock /
-    // setSlotBlock / selectedSlot）。
+    // 宿主注入：hotbar 视图模型（提供 creativeBlocks / slotList / iconSourceForBlock /
+    // nameForBlock / setSlotBlock / selectedSlot / slotRevision）。
     property Hotbar hotbar
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
     signal closed()
+
+    // ① 调色板数据：8 实方块（creativeBlocks，air 除外）+ 扩展空槽（id=0 → 渲染为空占位）。
+    // 一次性求值的绑定（方块集恒定；root.hotbar 由 null→对象 时重新求值）。空槽既是「可滚动」的内容，
+    // 也占位示意未来 Phase 1.x 的 ~40 方块扩容（MC 1.0 创造页也是多行大网格）。
+    readonly property var paletteModel: root.hotbar
+        ? root.hotbar.creativeBlocks().concat([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]) // 8 + 19 = 27（9 列 × 3 行）
+        : []
+
+    // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
+    property string hoveredName: ""
+
+    // ── 尺寸常量（集中一处便于对齐）──
+    readonly property int paletteCols: 9
+    readonly property int cellSize: 42       // 调色板单格
+    readonly property int slotSize: 40       // hotbar 单格（与游戏内 hotbar 视觉一致）
+    readonly property int bevelDark: 0       // 凹陷斜面：顶/左 暗边
+    readonly property int bevelLight: 0      // 凹陷斜面：底/右 亮边
 
     // 半透明遮罩：点击遮罩任意空白处 → 关闭（类暂停叠层的「点外恢复」交互）。
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.6)
-        MouseArea {
-            anchors.fill: parent
-            onClicked: root.closed()
-        }
+        MouseArea { anchors.fill: parent; onClicked: root.closed() }
     }
 
-    // 面板：深色圆角，居中。宽高按 4 列网格 + 标题区预留。
+    // 面板：深色圆角，居中。
     Rectangle {
         id: panel
-        width: 380
-        height: 300
+        width: 470
+        height: 312
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -40,80 +60,239 @@ Item {
         border.width: 1
 
         Column {
-            anchors.centerIn: parent
-            spacing: 14
+            anchors.fill: parent
+            anchors.margins: 14
+            spacing: 10
 
-            Text {
-                text: "Inventory"
-                color: "#eaf2ea"
-                font.pixelSize: 22
-                font.bold: true
-                anchors.horizontalCenter: parent.horizontalCenter
+            // 标题行：左标题，右关闭提示。
+            Item {
+                width: parent.width
+                height: 24
+                Text {
+                    text: "创造物品栏"
+                    color: "#eaf2ea"
+                    font.pixelSize: 20
+                    font.bold: true
+                    anchors.left: parent.left
+                }
+                Text {
+                    text: "[E] / [Esc] 关闭"
+                    color: "#7fae7f"
+                    font.pixelSize: 11
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                }
             }
-            // 目标槽提示：点格子会装入 hotbar 当前选中槽（#selectedSlot+1）。selectedSlot 变化即刷新。
+
+            // 状态行：当前选中槽 + 悬停方块中文名（hoveredName 随 hover 更新）。
             Text {
-                text: "click a block to equip into hotbar slot #" + (root.hotbar.selectedSlot + 1)
+                width: parent.width
                 color: "#9fb0c0"
                 font.pixelSize: 12
-                anchors.horizontalCenter: parent.horizontalCenter
+                text: "当前选中：第 " + (root.hotbar ? root.hotbar.selectedSlot + 1 : 1) + " 槽 · "
+                      + (root.hotbar ? root.hotbar.nameAt(root.hotbar.selectedSlot) : "")
+                      + (root.hoveredName !== "" ? "    |    悬停：" + root.hoveredName : "")
             }
+
+            // ① 调色板（Flickable 垂直可滚动）。
+            Flickable {
+                id: paletteFlick
+                width: parent.width
+                height: root.cellSize * 2 + 8 // 视口约 2 行；内容 3 行 → 可向下滚动一格
+                clip: true
+                contentWidth: paletteGrid.width
+                contentHeight: paletteGrid.height
+                flickableDirection: Flickable.VerticalFlick
+                boundsBehavior: Flickable.StopAtBounds
+
+                Grid {
+                    id: paletteGrid
+                    columns: root.paletteCols
+                    spacing: 4
+                    width: root.paletteCols * root.cellSize + (root.paletteCols - 1) * 4
+                    anchors.horizontalCenter: parent.horizontalCenter
+
+                    Repeater {
+                        model: root.paletteModel
+                        delegate: Item {
+                            width: root.cellSize
+                            height: root.cellSize
+
+                            // 凹陷斜面槽框（顶/左 暗、底/右 亮 → 凹陷观感；与游戏内 hotbar 同风格）。
+                            Rectangle { anchors.fill: parent; color: "#222831" } // 井底
+                            Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                            Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                            Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                            Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+
+                            // 实体方块：图标（统一尺寸 PreserveAspectFit 强制等比缩放进固定框）。
+                            Image {
+                                anchors.centerIn: parent
+                                width: 30; height: 30
+                                visible: modelData !== 0
+                                source: root.hotbar.iconSourceForBlock(modelData)
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
+                            }
+                            // hover 高亮边框（仅实体方块）。
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "transparent"
+                                radius: 2
+                                border.color: cellHover.hovered && modelData !== 0 ? "#7fe57f" : "transparent"
+                                border.width: 2
+                            }
+
+                            // hover → 状态行中文名；click → 装入当前选中 hotbar 槽（t18 行为保留）。
+                            HoverHandler {
+                                id: cellHover
+                                enabled: modelData !== 0
+                                onHoveredChanged: if (hovered) root.hoveredName = root.hotbar.nameForBlock(modelData)
+                            }
+                            TapHandler {
+                                enabled: modelData !== 0
+                                onTapped: root.hotbar.setSlotBlock(root.hotbar.selectedSlot, modelData)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 销毁槽用法提示。
             Text {
-                text: "[E] / [Esc] close"
-                color: "#7fae7f"
+                width: parent.width
+                color: "#7d8893"
                 font.pixelSize: 11
-                anchors.horizontalCenter: parent.horizontalCenter
+                text: "把 hotbar 方块拖到右侧销毁槽可清空该槽"
             }
 
-            // 8 方块网格（4 列 × 2 行）。model = hotbar.creativeBlocks（方块 id 列表）；
-            // delegate 按 id 取图标/名，点击 → setSlotBlock(当前选中槽, id)。
-            Grid {
-                columns: 4
-                spacing: 10
-                anchors.horizontalCenter: parent.horizontalCenter
+            // ② 底部 9 槽 hotbar 栏（同步游戏内 hotbar） + ③ 销毁槽。
+            Item {
+                width: parent.width
+                height: root.slotSize
 
-                Repeater {
-                    model: root.hotbar.creativeBlocks()
-                    delegate: Item {
-                        width: 72
-                        height: 72
+                // hotbar 栏（左）：凹陷槽 + 选中槽选框（与游戏内 hotbar 视觉一致；点击切换选中、可拖到销毁槽）。
+                Item {
+                    id: hbBar
+                    width: 9 * root.slotSize
+                    height: root.slotSize
+                    anchors.left: parent.left
 
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 8
-                            color: cellArea.containsPress ? "#2c3540"
-                                 : cellArea.containsMouse ? "#262d36" : "#222831"
-                            border.color: cellArea.containsMouse ? "#7fe57f" : "#3a444f"
-                            border.width: cellArea.containsMouse ? 2 : 1
-                            Behavior on border.width { NumberAnimation { duration: 70 } }
+                    Row {
+                        id: hbRow
+                        spacing: 0
+                        Repeater {
+                            // model = 槽内容（QVariantList<方块id>）。触碰 slotRevision 建立 NOTIFY 依赖：setSlotBlock
+                            // 改槽内容 → slotsChanged → slotRevision 自增 → 本绑定重算返回新数组 → Repeater 整列重建
+                            // （invokable 返回值不被 NOTIFY 跟踪，故用版本号触发；modelData = 该槽方块 id，air=0 空槽）。
+                            model: { root.hotbar.slotRevision; return root.hotbar.slotList() }
+                            delegate: Item {
+                                width: root.slotSize
+                                height: root.slotSize
+                                Rectangle { anchors.fill: parent; color: "#2f2f2f" } // 井底
+                                // 凹陷斜面：顶/左 暗、底/右 亮
+                                Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                                Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                                Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                                Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+
+                                // 拖动源：图标 wrapper（仅非空槽可拖到销毁槽；hbIndex 标识源槽，供 DropArea 取用）。
+                                // Drag.Automatic：拖动时图标跟随指针移动、释放后归位；落在 DropArea 内则触发 onDropped。
+                                Item {
+                                    id: dragIcon
+                                    anchors.centerIn: parent
+                                    width: 30; height: 30
+                                    visible: modelData !== 0
+                                    property int hbIndex: index // 自定义属性：被拖源所属 hotbar 槽下标
+                                    Drag.active: iconDrag.active
+                                    Drag.dragType: Drag.Automatic
+                                    Drag.hotSpot.x: width / 2
+                                    Drag.hotSpot.y: height / 2
+                                    Image {
+                                        anchors.fill: parent
+                                        source: root.hotbar.iconSourceForBlock(modelData)
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                    }
+                                    DragHandler {
+                                        id: iconDrag
+                                        target: dragIcon
+                                        xAxis.enabled: true; yAxis.enabled: true
+                                    }
+                                }
+
+                                // hover → 状态行中文名；tap → 选中该槽（下次点调色板即装入此处）。
+                                HoverHandler {
+                                    id: slotHover
+                                    onHoveredChanged: if (hovered) root.hoveredName = root.hotbar.nameForBlock(modelData)
+                                }
+                                TapHandler { onTapped: root.hotbar.selectedSlot = index }
+                            }
                         }
+                    }
 
-                        // 方块图标（等距立方体，与 hotbar 完全一致的源；统一 PreserveAspectFit 进框）。
-                        Image {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: -6
-                            width: 46
-                            height: 46
-                            source: root.hotbar.iconSourceForBlock(modelData)
-                            fillMode: Image.PreserveAspectFit
-                            smooth: true
+                    // 选中槽选框（raised bevel：顶/左 亮、底/右 暗 → 凸起观感），随 selectedSlot 位移。
+                    // 单独 overlay（不放进 Repeater）→ 选中态唯一；Behavior 让点击切换有平滑滑动感（同游戏内 hotbar）。
+                    Item {
+                        x: root.hotbar.selectedSlot * root.slotSize - 1
+                        y: -1
+                        width: root.slotSize + 2
+                        height: root.slotSize + 2
+                        Behavior on x { NumberAnimation { duration: 70; easing.type: Easing.OutQuad } }
+                        Rectangle { color: "#e8e8e8"; width: parent.width; height: 2; anchors.top: parent.top }
+                        Rectangle { color: "#e8e8e8"; width: 2; height: parent.height; anchors.left: parent.left }
+                        Rectangle { color: "#3a3a3a"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
+                        Rectangle { color: "#3a3a3a"; width: 2; height: parent.height; anchors.right: parent.right }
+                    }
+                }
+
+                // ③ 销毁槽（DropArea：拖入 hotbar 槽内容 → setSlotBlock(src 槽, air=0) 清空）。
+                // 自绘原创垃圾桶图标（Canvas 像素图，§9 override (a)）；凹陷斜面 + 暗红井底表「销毁」语义。
+                Item {
+                    id: destroyWrap
+                    width: root.slotSize
+                    height: root.slotSize
+                    anchors.right: parent.right
+
+                    Rectangle { anchors.fill: parent; color: destroyDrop.containsDrag ? "#3a1a1a" : "#2a1414" }
+                    Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                    Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                    Rectangle { color: "#7a3a3a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                    Rectangle { color: "#7a3a3a"; width: 1; height: parent.height; anchors.right: parent.right }
+
+                    // 自绘垃圾桶像素图（原创；无外部 PNG）。
+                    Canvas {
+                        anchors.centerIn: parent
+                        width: 22; height: 22
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.reset()
+                            ctx.imageSmoothingEnabled = false // 像素硬边（1.0 风格）
+                            const lit = "#c9c9c9"   // 桶身亮色
+                            const cut = "#2a1414"   // 桶身竖纹镂空（=井底色，形成竖条）
+                            // 顶把手
+                            ctx.fillStyle = lit; ctx.fillRect(8, 1, 6, 2)
+                            // 桶盖
+                            ctx.fillRect(4, 4, 14, 2)
+                            // 桶身（梯形：上宽下窄）
+                            ctx.beginPath()
+                            ctx.moveTo(6, 7); ctx.lineTo(16, 7); ctx.lineTo(14, 19); ctx.lineTo(8, 19); ctx.closePath()
+                            ctx.fillStyle = lit; ctx.fill()
+                            // 桶身竖纹镂空
+                            ctx.fillStyle = cut
+                            ctx.fillRect(9, 9, 1, 8)
+                            ctx.fillRect(12, 9, 1, 8)
                         }
+                    }
 
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 4
-                            text: root.hotbar.nameForBlock(modelData)
-                            color: "#9fb0c0"
-                            font.pixelSize: 10
-                        }
-
-                        MouseArea {
-                            id: cellArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.hotbar.setSlotBlock(root.hotbar.selectedSlot, modelData)
+                    DropArea {
+                        id: destroyDrop
+                        anchors.fill: parent
+                        // drop.source = 被拖的 dragIcon（持有 hbIndex）；落在销毁槽 → 清空该 hotbar 槽。
+                        onDropped: (drop) => {
+                            const src = drop.source
+                            if (src && src.hbIndex !== undefined)
+                                root.hotbar.setSlotBlock(src.hbIndex, 0) // 0 = air → 清空该槽
                         }
                     }
                 }
