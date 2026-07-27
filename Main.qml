@@ -288,8 +288,12 @@ Window {
             geometry: CrackBox {}
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
+                // alphaCutoff：裂纹贴图含 alpha（透明底 alpha=0 + 半透黑裂纹 alpha≈220）。设 0.5 启用
+                // alpha-test：透明底像素被丢弃（不遮方块本色）、裂纹像素保留为不透明黑。比「靠 opacity=1 时
+                // PrincipledMaterial 自动 blend」可靠——后者透明底可能被当不透明渲染成黑块遮住整个方块（t34
+                // correctness 报告标记的风险）。MC 风格硬边裂纹，走 opaque 通道无 blend 排序问题。
+                alphaCutoff: 0.5
                 // 6 阶裂纹贴图按 miningStage（0..5）取（id 引用全文件可见；数组内联构造）。
-                // 贴图含 alpha（透明底 + 半透黑裂纹）→ PrincipledMaterial 自动按 a 通道 blend。
                 // miningStage=-1（无累积）时 Model 已 visible=false，此处仍需合法索引防 undefined →
                 // Math.max(0, ...) 钳到 0（不可见时取哪张贴图无所谓，避免 WRN 噪音）。
                 baseColorMap: [crack0, crack1, crack2, crack3, crack4, crack5][Math.max(0, player.miningStage)]
