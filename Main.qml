@@ -284,13 +284,16 @@ Window {
         }
     }
 
-    // 准星（仅 playing 且捕获时）
+    // 准星（仅 playing 且捕获时）：中心十字，白色核心 + 黑色描边 → 亮/暗背景均可见。
+    // 自绘原创（Rectangle 组合，非 MC GUI PNG；§9 override (a)）。Spectator 亦显（导航辅助）。
     Item {
         visible: window.appState === "playing" && player.captured
         anchors.centerIn: parent
-        width: 22; height: 22
-        Rectangle { color: "#ffffff"; anchors.centerIn: parent; width: 20; height: 2 }
-        Rectangle { color: "#ffffff"; anchors.centerIn: parent; width: 2; height: 20 }
+        width: 24; height: 24
+        Rectangle { color: "#000000"; anchors.centerIn: parent; width: 22; height: 4 } // 横 描边
+        Rectangle { color: "#000000"; anchors.centerIn: parent; width: 4; height: 22 } // 竖 描边
+        Rectangle { color: "#ffffff"; anchors.centerIn: parent; width: 20; height: 2 } // 横 核心
+        Rectangle { color: "#ffffff"; anchors.centerIn: parent; width: 2; height: 20 } // 竖 核心
     }
 
     // HUD：模式 + 地面状态 + FPS（仅 playing 态显）
@@ -314,67 +317,72 @@ Window {
                                    + " (#" + player.selectedBlock + ")") : "   pointer free")
     }
 
-    // Hotbar（9 槽）：底部居中，1–9 直选 + 滚轮循环 + 选中槽高亮。
-    // 布局/高亮风格与 MC 差异化（PLAN §9）：圆角槽、HUD 绿系强调色（#7fe57f，对齐既有 HUD）、
-    // 选中态用缩放 + 描边 + 键位角标，而非白框；仅做 hotbar 本身（其余 HUD 已差异化）。
-    Row {
-        id: hotbarRow
+    // Hotbar（9 槽，1.0 风格）：底部居中，方形凹槽槽框 + 选中槽选框（凸起边框，随 selectedSlot 位移）。
+    // 全部槽框/选框/准星为本项目自绘原创（Rectangle 组合，无外部 MC PNG；§9 override (a)）。
+    // Spectator 模式不显（1.0 spectator 无 hotbar）；保留 1–9/滚轮选槽 + 选中高亮。
+    Item {
+        id: hotbarBar
         visible: window.appState === "playing"
+                 && player.mode !== PlayerController.Spectator
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 18
         anchors.horizontalCenter: parent.horizontalCenter
-        spacing: 5
+        width: 9 * hotbarBar.slotSize
+        height: hotbarBar.slotSize
 
-        Repeater {
-            // model = 槽内容（QVariantList<方块id>）。触碰 slotRevision 建立 NOTIFY 依赖：setSlotBlock
-            // 改槽内容 → slotsChanged → slotRevision 自增 → 本绑定重算 → 返回新数组 → Repeater 整列重建，
-            // 背包装备的新方块图标随即在对应槽刷新（invokable 返回值不被 NOTIFY 跟踪，故用版本号触发；
-            // modelData = 该槽方块 id，air=0 即空槽）。为何不直接 Q_PROPERTY(QVariantList slots)：本工具链
-            // moc 拒绝 Q_PROPERTY 里的 QVariantList，故 slots() 走 Q_INVOKABLE + slotRevision 做 NOTIFY。
-            model: { hotbarVM.slotRevision; return hotbarVM.slotList() }
-            delegate: Item {
-                width: 50; height: 50
-                // 选中槽放大强调
-                scale: hotbarVM.selectedSlot === index ? 1.18 : 1.0
-                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
+        readonly property int slotSize: 46 // 单格方形尺寸（图标 38 居中，留井边呼吸）
+        readonly property int selMargin: 1 // 选框相对槽的外扩（凸起边框略大于槽）
 
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 7
-                    color: Qt.rgba(0, 0, 0, 0.45)
-                    border.color: hotbarVM.selectedSlot === index ? "#7fe57f" : "#3a3a3a"
-                    border.width: hotbarVM.selectedSlot === index ? 3 : 1
-                    // 选中槽外发光层（更柔的强调）
-                    Rectangle {
-                        visible: hotbarVM.selectedSlot === index
-                        z: -1
-                        anchors.fill: parent; anchors.margins: -3
-                        radius: 10; color: "transparent"
-                        border.color: Qt.rgba(0.5, 0.9, 0.5, 0.35); border.width: 2
+        // 9 个方形凹槽槽框（sunken bevel：顶/左 1px 暗边=阴影、底/右 1px 亮边=受光 → 凹陷观感）。
+        Row {
+            id: slotRow
+            spacing: 0
+            Repeater {
+                // model = 槽内容（QVariantList<方块id>）。触碰 slotRevision 建立 NOTIFY 依赖：setSlotBlock
+                // 改槽内容 → slotsChanged → slotRevision 自增 → 本绑定重算返回新数组 → Repeater 整列重建
+                // （invokable 返回值不被 NOTIFY 跟踪，故用版本号触发；modelData = 该槽方块 id，air=0 空槽）。
+                // 为何不直接 Q_PROPERTY(QVariantList slots)：本工具链 moc 拒绝 Q_PROPERTY 里的 QVariantList，
+                // 故 slotList() 走 Q_INVOKABLE + slotRevision 做 NOTIFY。
+                model: { hotbarVM.slotRevision; return hotbarVM.slotList() }
+                delegate: Item {
+                    width: hotbarBar.slotSize
+                    height: hotbarBar.slotSize
+                    Rectangle { anchors.fill: parent; color: "#2f2f2f" } // 槽内深色井底
+                    // 凹陷斜面：顶/左 1px 暗边（阴影）
+                    Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                    Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                    // 凹陷斜面：底/右 1px 亮边（受光）
+                    Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                    Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+
+                    // 方块图标（等距立方体，统一源 → PreserveAspectFit 强制等比缩放进固定框，
+                    // 无论源贴图原始尺寸如何，槽内显示尺寸完全一致；空槽 modelData=0 → 不显示）。
+                    Image {
+                        anchors.centerIn: parent
+                        width: 38; height: 38
+                        visible: modelData !== 0
+                        source: hotbarVM.iconSourceForBlock(modelData)
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true
                     }
                 }
-
-                // 方块图标（等距立方体，统一源 → PreserveAspectFit 强制等比缩放进固定框，
-                // 无论源贴图原始尺寸如何，槽内显示尺寸完全一致；空槽 modelData=0 → 不显示）。
-                Image {
-                    anchors.centerIn: parent
-                    width: 38; height: 38
-                    visible: modelData !== 0
-                    source: hotbarVM.iconSourceForBlock(modelData)
-                    fillMode: Image.PreserveAspectFit
-                    smooth: true
-                }
-
-                // 键位角标 1–9
-                Text {
-                    anchors.left: parent.left; anchors.top: parent.top
-                    anchors.leftMargin: 4; anchors.topMargin: 1
-                    color: hotbarVM.selectedSlot === index ? "#7fe57f" : "#888888"
-                    font.pixelSize: 11; font.bold: true
-                    style: Text.Outline; styleColor: "#000000"
-                    text: (index + 1)
-                }
             }
+        }
+
+        // 选中槽选框（raised bevel：顶/左 亮、底/右 暗 → 凸起观感），随 selectedSlot 位移。
+        // 单独 overlay（不放进 Repeater）→ 选中态唯一；Behavior 让 1–9/滚轮切换有平滑滑动感。
+        Item {
+            x: hotbarVM.selectedSlot * hotbarBar.slotSize - hotbarBar.selMargin
+            y: -hotbarBar.selMargin
+            width: hotbarBar.slotSize + 2 * hotbarBar.selMargin
+            height: hotbarBar.slotSize + 2 * hotbarBar.selMargin
+            Behavior on x { NumberAnimation { duration: 70; easing.type: Easing.OutQuad } }
+            // 凸起边框：顶/左 亮
+            Rectangle { color: "#e8e8e8"; width: parent.width; height: 2; anchors.top: parent.top }
+            Rectangle { color: "#e8e8e8"; width: 2; height: parent.height; anchors.left: parent.left }
+            // 凸起边框：底/右 暗
+            Rectangle { color: "#3a3a3a"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
+            Rectangle { color: "#3a3a3a"; width: 2; height: parent.height; anchors.right: parent.right }
         }
     }
 
