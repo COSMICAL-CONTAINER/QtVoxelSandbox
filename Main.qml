@@ -80,6 +80,9 @@ Window {
         function onModeChanged() {
             if (window.inventoryOpen && player.mode === PlayerController.Spectator)
                 window.closeInventory()
+            // t32：按模式重置 hotbar 栈内容（创造=8 方块满栈 / 生存=全空；观察者不动）。spec 验收
+            // 「创造初始满、生存初始全空」。无持久化前（t36+ 存档/拾取），切模式即重置为新模式的默认态。
+            hotbarVM.resetForMode(player.mode)
         }
     }
 
@@ -346,6 +349,13 @@ Window {
         }
         function onBlockPlaced(x, y, z, id) {
             if (particleLoader.item) particleLoader.item.burstPlace(x, y, z, id)
+            // t32：生存放置消耗 1 件（创造=无限源不耗）。worldgen 经 m_chunks.setBlock 直写、不经
+            // World::setBlock → 不会发 blockPlaced；游戏内该信号仅玩家 placeBlock 触发，故此处即
+            // 「玩家放置成功」语义事件。ViewModel 观察 World 事件做栈突变（PLAN §2 分层：VM 只依赖
+            // World/Game 数据，不反向写）。takeStack 取至 0 → 选中栈变 Air → player.selectedBlock
+            // 经 selectedBlockId 绑定变 Air → 右键不再放置（playercontroller 守 Air）。
+            if (player.mode === PlayerController.Survival)
+                hotbarVM.takeStack(hotbarVM.selectedSlot, 1)
         }
     }
 
@@ -473,7 +483,8 @@ Window {
               + "   yaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch)
               + (player.captured ? ("   ground: " + (player.onGround ? "yes" : "no")
                                    + "   held: " + hotbarVM.nameAt(hotbarVM.selectedSlot)
-                                   + " (#" + player.selectedBlock + ")") : "   pointer free")
+                                   + " (#" + player.selectedBlock + ")"
+                                   + " ×" + hotbarVM.countAt(hotbarVM.selectedSlot)) : "   pointer free")
     }
 
     // Hotbar（9 槽，1.0 风格）：底部居中，方形凹槽槽框 + 选中槽选框（凸起边框，随 selectedSlot 位移）。
@@ -523,6 +534,20 @@ Window {
                         source: hotbarVM.iconSourceForBlock(modelData)
                         fillMode: Image.PreserveAspectFit
                         smooth: true
+                    }
+                    // 栈数量（t32）：count>1 时右下角显数字（MC 风格：单件不显数）。countAt 是 Q_INVOKABLE，
+                    // 不被 NOTIFY 自动跟踪，靠 slotRevision 触碰 model 绑定 → Repeater 整列重建时本 delegate
+                    // 重新求值刷新（同 iconSourceForBlock 模式）。白字黑描边保证亮/暗槽底均可读。
+                    Text {
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.rightMargin: 3
+                        anchors.bottomMargin: 1
+                        visible: hotbarVM.countAt(index) > 1
+                        text: hotbarVM.countAt(index)
+                        color: "#ffffff"
+                        style: Text.Outline; styleColor: "#000000"
+                        font.pixelSize: 14; font.bold: true
                     }
                 }
             }
@@ -638,8 +663,9 @@ Window {
         onClosed: window.closeInventory()
     }
 
-    // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品；hotbarVM.heldBlock 驱动）。
+    // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品栈；hotbarVM.heldBlock/heldCount 驱动）。
     // 仅背包打开且手持非空时显，z 最高（盖过背包面板 z=150）。位置跟随 cursorTracker（窗口坐标）。
+    // t32：count>1 时右下角显数量（手持整栈移动时可见剩余数）。
     Item {
         visible: window.inventoryOpen && hotbarVM.heldBlock !== 0
         z: 300
@@ -651,6 +677,15 @@ Window {
             source: hotbarVM.iconSourceForBlock(hotbarVM.heldBlock)
             fillMode: Image.PreserveAspectFit
             smooth: true
+        }
+        Text {
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            visible: hotbarVM.heldCount > 1
+            text: hotbarVM.heldCount
+            color: "#ffffff"
+            style: Text.Outline; styleColor: "#000000"
+            font.pixelSize: 13; font.bold: true
         }
     }
 }

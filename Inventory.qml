@@ -153,7 +153,11 @@ Item {
                             }
                             TapHandler {
                                 enabled: modelData !== 0
-                                onTapped: root.hotbar.heldBlock = modelData // 拾取到光标（无限源，不清减调色板）
+                                // 拾取到光标（创造调色板=无限源，不清减调色板；t32：满栈 64）。
+                                onTapped: {
+                                    root.hotbar.heldBlock = modelData
+                                    root.hotbar.heldCount = 64
+                                }
                             }
                         }
                     }
@@ -223,9 +227,23 @@ Item {
                                     }
                                 }
 
-                                // hover → 状态行中文名；tap → 拾取/放置（MC 背包交互）：
-                                //   空手点有物槽 → 拾取（槽清空、手持=该方块）；
-                                //   持物点任意槽 → 放入（与槽内现有物互换：槽←手持、手持←旧槽内容）。
+                                // 栈数量（t32）：count>1 时右下角显数字（MC 风格：单件不显数）。
+                                // countAt 是 Q_INVOKABLE，靠 slotRevision 触碰 model 绑定 → 整列重建时刷新。
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: 3
+                                    anchors.bottomMargin: 1
+                                    visible: root.hotbar.countAt(index) > 1
+                                    text: root.hotbar.countAt(index)
+                                    color: "#ffffff"
+                                    style: Text.Outline; styleColor: "#000000"
+                                    font.pixelSize: 13; font.bold: true
+                                }
+
+                                // hover → 状态行中文名；tap → 拾取/放置（MC 背包交互，t32 栈感知）：
+                                //   空手点有物槽 → 拾取整栈（槽清空、手持=该栈 {id,count}）；
+                                //   持物点任意槽 → 放入手持栈（与槽内现有栈互换：槽←手持、手持←旧槽内容）。
                                 //   同时选中该槽（右键放置即用此槽方块）。拖到销毁槽仍走上面的 DragHandler。
                                 HoverHandler {
                                     id: slotHover
@@ -234,11 +252,17 @@ Item {
                                 TapHandler {
                                     onTapped: {
                                         const cur = root.hotbar.blockIdAt(index)
+                                        const curCount = root.hotbar.countAt(index)
                                         if (root.hotbar.heldBlock === 0) {
-                                            if (cur !== 0) { root.hotbar.heldBlock = cur; root.hotbar.setSlotBlock(index, 0) }
+                                            if (cur !== 0) {
+                                                root.hotbar.heldBlock = cur
+                                                root.hotbar.heldCount = curCount
+                                                root.hotbar.setStack(index, 0, 0) // 清空源槽
+                                            }
                                         } else {
-                                            root.hotbar.setSlotBlock(index, root.hotbar.heldBlock)
+                                            root.hotbar.setStack(index, root.hotbar.heldBlock, root.hotbar.heldCount)
                                             root.hotbar.heldBlock = cur
+                                            root.hotbar.heldCount = curCount
                                         }
                                         root.hotbar.selectedSlot = index
                                     }

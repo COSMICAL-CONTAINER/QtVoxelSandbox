@@ -31,12 +31,15 @@ Item {
     readonly property int mainRows: 3
     readonly property int armorCount: 4
 
-    // 主栏 / 合成格的本地物品存储（真实物品系统 / 合成配方解析属 Phase 1.1；本屏先支持点击拾取/放置，
-    // 把「物品在背包内移动」核心交互打通——与 hotbar 槽共享同一 hotbar VM 的 heldBlock 光标手持物）。
-    // air=0=空槽。数组元素改写不触发 QML 绑定，故配 mainRev/craftRev 版本号让 Image source 重算。
+    // 主栏 / 合成格的本地物品栈存储（真实物品系统 / 合成配方解析属 Phase 1.1；本屏先支持点击拾取/放置，
+    // 把「物品在背包内移动」核心交互打通——与 hotbar 槽共享同一 hotbar VM 的 heldBlock/heldCount 光标手持栈）。
+    // air=0=空栈。t32：栈数量平行存于 mainCounts/craftCounts（与 hotbar VM 的 ItemStack 同模型）。
+    // 数组元素改写不触发 QML 绑定，故配 mainRev/craftRev 版本号让 Image source / count 重算。
     property var mainSlots: [0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0] // 3×9=27
+    property var mainCounts:[0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0] // 平行数量
     property int mainRev: 0
     property var craftSlots: [0,0,0,0] // 2×2 合成格（占位；配方解析属 Phase 1.1，结果槽暂不产出）
+    property var craftCounts:[0,0,0,0] // 平行数量
     property int craftRev: 0
 
     // 半透明遮罩：仅吸收点击（防穿透到背后游戏层），**不关闭背包**——用户要求背包只能 E / Esc 关闭。
@@ -99,15 +102,30 @@ Item {
                                 source: root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0)
                                 fillMode: Image.PreserveAspectFit; smooth: true
                             }
-                            // 点击拾取/放置（与主栏同模式；配方解析属 Phase 1.1，结果槽暂不产出）。
+                            // 栈数量（t32）：count>1 时右下角显数字。触碰 craftRev 刷新（数组突变靠版本号触发）。
+                            Text {
+                                anchors.right: parent.right; anchors.bottom: parent.bottom
+                                anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                visible: { root.craftRev; return (root.craftCounts[index] || 0) > 1 }
+                                text: { root.craftRev; return root.craftCounts[index] || 0 }
+                                color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                                font.pixelSize: 13; font.bold: true
+                            }
+                            // 点击拾取/放置（t32 栈感知；与主栏同模式；配方解析属 Phase 1.1，结果槽暂不产出）。
                             TapHandler {
                                 onTapped: {
                                     const cur = root.craftSlots[index] || 0
+                                    const curCount = root.craftCounts[index] || 0
                                     if (root.hotbar.heldBlock === 0) {
-                                        if (cur !== 0) { root.craftSlots[index] = 0; root.craftRev++ }
+                                        if (cur !== 0) {
+                                            root.craftSlots[index] = 0; root.craftCounts[index] = 0; root.craftRev++
+                                            root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
+                                        }
                                     } else {
-                                        root.craftSlots[index] = root.hotbar.heldBlock; root.craftRev++
-                                        root.hotbar.heldBlock = cur
+                                        root.craftSlots[index] = root.hotbar.heldBlock
+                                        root.craftCounts[index] = root.hotbar.heldCount
+                                        root.craftRev++
+                                        root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
                                     }
                                 }
                             }
@@ -229,14 +247,29 @@ Item {
                             source: root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0)
                             fillMode: Image.PreserveAspectFit; smooth: true
                         }
+                        // 栈数量（t32）：count>1 时右下角显数字。触碰 mainRev 刷新（数组突变靠版本号触发）。
+                        Text {
+                            anchors.right: parent.right; anchors.bottom: parent.bottom
+                            anchors.rightMargin: 3; anchors.bottomMargin: 1
+                            visible: { root.mainRev; return (root.mainCounts[index] || 0) > 1 }
+                            text: { root.mainRev; return root.mainCounts[index] || 0 }
+                            color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                            font.pixelSize: 13; font.bold: true
+                        }
                         TapHandler {
                             onTapped: {
                                 const cur = root.mainSlots[index] || 0
+                                const curCount = root.mainCounts[index] || 0
                                 if (root.hotbar.heldBlock === 0) {
-                                    if (cur !== 0) { root.mainSlots[index] = 0; root.mainRev++ }
+                                    if (cur !== 0) {
+                                        root.mainSlots[index] = 0; root.mainCounts[index] = 0; root.mainRev++
+                                        root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
+                                    }
                                 } else {
-                                    root.mainSlots[index] = root.hotbar.heldBlock; root.mainRev++
-                                    root.hotbar.heldBlock = cur
+                                    root.mainSlots[index] = root.hotbar.heldBlock
+                                    root.mainCounts[index] = root.hotbar.heldCount
+                                    root.mainRev++
+                                    root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
                                 }
                             }
                         }
@@ -266,15 +299,29 @@ Item {
                                 fillMode: Image.PreserveAspectFit
                                 smooth: true
                             }
-                            // tap → 拾取/放置（同创造背包 hotbar 槽；并选中该槽 = 游戏内 1–9 / 滚轮等效）。
+                            // 栈数量（t32）：count>1 时右下角显数字。countAt 是 Q_INVOKABLE，靠 slotRevision
+                            // 触碰 model 绑定 → 整列重建时刷新。
+                            Text {
+                                anchors.right: parent.right; anchors.bottom: parent.bottom
+                                anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                visible: root.hotbar.countAt(index) > 1
+                                text: root.hotbar.countAt(index)
+                                color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                                font.pixelSize: 13; font.bold: true
+                            }
+                            // tap → 拾取/放置（t32 栈感知；同创造背包 hotbar 槽；并选中该槽 = 游戏内 1–9 / 滚轮等效）。
                             TapHandler {
                                 onTapped: {
                                     const cur = root.hotbar.blockIdAt(index)
+                                    const curCount = root.hotbar.countAt(index)
                                     if (root.hotbar.heldBlock === 0) {
-                                        if (cur !== 0) { root.hotbar.heldBlock = cur; root.hotbar.setSlotBlock(index, 0) }
+                                        if (cur !== 0) {
+                                            root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
+                                            root.hotbar.setStack(index, 0, 0)
+                                        }
                                     } else {
-                                        root.hotbar.setSlotBlock(index, root.hotbar.heldBlock)
-                                        root.hotbar.heldBlock = cur
+                                        root.hotbar.setStack(index, root.hotbar.heldBlock, root.hotbar.heldCount)
+                                        root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
                                     }
                                     root.hotbar.selectedSlot = index
                                 }

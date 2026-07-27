@@ -249,6 +249,7 @@ void PlayerController::placeBlock()
 {
     if (!canPlace()) return; // 观察者不能放块
     if (!m_world || !m_captured || !m_hasHit) return;
+    if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
     if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放
     if (overlapsPlayerAABB(tx, ty, tz)) return;                    // 与玩家重叠 → 不放
