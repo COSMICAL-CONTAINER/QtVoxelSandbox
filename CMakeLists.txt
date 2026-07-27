@@ -28,6 +28,8 @@ qt_add_executable(voxelsandbox
     raycast.h
     wiresquare.cpp
     wiresquare.h
+    unitcube.cpp
+    unitcube.h
     hotbar.cpp
     hotbar.h
     playerstate.cpp

@@ -134,13 +134,15 @@ Window {
 
                 // 手臂方块：从肩枢沿局部 -Y 延伸（手在下方），随 Node 一起绕肩枢旋转。
                 Model {
-                    source: "#Cube"
+                    geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                     position: Qt.vector3d(0, -0.1, 0)
                     scale: Qt.vector3d(0.16, 0.2, 0.16)
                     // NoLighting：本工程所有可见 Model（地形/线框/粒子）均用 NoLighting——默认 lit
                     // PrincipledMaterial 在本场景不渲染（手因此「完全透明」不可见）。改 NoLighting 后可见。
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472" }
                 }
+                // [t31] 诊断：确认手 Node 加载 + parent（相机）。
+                Component.onCompleted: console.info("[t31] viewModelHand UP parent=" + viewModelHand.parent + " vis=" + visible)
             }
         }
 
@@ -182,6 +184,7 @@ Window {
             position: Qt.vector3d(0, 0, 0)
             geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 0 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            Component.onCompleted: console.info("[t31] chunk(0,0) UP parent=" + parent + " (对照：已知可见)")
         }
         Model { // chunk (1,0) → 世界 (16,0)
             position: Qt.vector3d(16, 0, 0)
@@ -253,44 +256,50 @@ Window {
             // 半透幽灵态（各 body Part 的材质读此属性）：观察者半透 0.35，其余不透明。
             readonly property real bodyOpacity: player.mode === PlayerController.Spectator ? 0.35 : 1.0
 
+            // [t31] 诊断：确认本 Node 已加载、parent=场景节点（非 null 孤儿）、feetPosition 合法、visible 状态。
+            // 打印到 voxelsandbox.log。若运行后日志无此行 → Main.qml 未进二进制（stale build）。
+            Component.onCompleted: console.info("[t31] playerModel UP  parent=" + playerModel.parent
+                + "  feet=" + player.feetPosition + "  vis=" + visible
+                + "  cam=" + player.cameraMode + "  mode=" + player.mode)
+
             // 头（≈0.5³，肤色）。模型以脚底为原点（y=0 贴地），总高≈1.8 对齐玩家 AABB(kHeight)。
             Model {
-                source: "#Cube"
+                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                 position: Qt.vector3d(0, 1.55, 0)
                 scale: Qt.vector3d(0.5, 0.5, 0.5)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
             }
             // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）
             Model {
-                source: "#Cube"
+                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                 position: Qt.vector3d(0, 0.95, 0)
                 scale: Qt.vector3d(0.5, 0.7, 0.3)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
             // 左臂（上衣色；挂躯干两侧，与躯干同高）
             Model {
-                source: "#Cube"
+                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                 position: Qt.vector3d(-0.375, 0.95, 0)
                 scale: Qt.vector3d(0.25, 0.7, 0.25)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
             // 右臂
             Model {
-                source: "#Cube"
+                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                 position: Qt.vector3d(0.375, 0.95, 0)
                 scale: Qt.vector3d(0.25, 0.7, 0.25)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
             // 左腿（裤色；y 0→0.6）
             Model {
-                source: "#Cube"
+                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                 position: Qt.vector3d(-0.125, 0.3, 0)
                 scale: Qt.vector3d(0.25, 0.6, 0.25)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
             }
             // 右腿
             Model {
-                source: "#Cube"
+                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                 position: Qt.vector3d(0.125, 0.3, 0)
                 scale: Qt.vector3d(0.25, 0.6, 0.25)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
