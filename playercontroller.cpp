@@ -36,6 +36,20 @@ void PlayerController::setWorld(World *w)
     emit worldChanged();
 }
 
+void PlayerController::setHotbar(Hotbar *h)
+{
+    if (m_hotbar == h) return;
+    m_hotbar = h;
+    emit hotbarChanged();
+}
+
+void PlayerController::setItemEntities(ItemEntityManager *m)
+{
+    if (m_itemEntities == m) return;
+    m_itemEntities = m;
+    emit itemEntitiesChanged();
+}
+
 void PlayerController::onWindowChanged(QQuickWindow *win)
 {
     if (m_window) m_window->removeEventFilter(this);
@@ -180,6 +194,7 @@ void PlayerController::tick()
     step(dt);
     updateRaycast();   // 沿视线 DDA 选体 → 更新线框命中态
     updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
+    pickupScan();      // t36：扫附近掉落实体 → Hotbar.addStack → 命中则销毁实体
 }
 
 // 视线方向：用与相机相同的欧拉→四元数（QQuaternion::fromEulerAngles(pitch,yaw,0)）旋转
@@ -391,6 +406,42 @@ void PlayerController::placeBlock()
     if (overlapsPlayerAABB(tx, ty, tz)) return;                    // 与玩家重叠 → 不放
     m_world->setBlock(tx, ty, tz, quint8(m_selectedBlock));
     emit swingArm(); // 放块成功 → 第一人称手挥动（t29）
+}
+
+// Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格）。
+// 仅指针捕获时生效（spec：「Q 键（captured 时）」）。取失败（空栈 / 无 hotbar）→ 不丢。
+// spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem（同破块掉落 t35 路径），
+// 丢弃后实体在前方生成 → 可被重新拾取（闭环）。丢弃位置取眼位 + 视线 * 1.5，floor 到格坐标。
+void PlayerController::dropHeld()
+{
+    if (!m_captured) return;        // spec：仅捕获时
+    if (!m_hotbar) return;
+    const int id = m_hotbar->selectedItemId();
+    if (id == 0) return;            // 空手 → 不丢
+    const int took = m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
+    if (took <= 0) return;          // 取失败（空栈）→ 不丢
+    // 眼位前方 1.5 格，floor 到整数格（ItemEntityManager 存格中心 = 整数+0.5）。
+    const QVector3D fwd = lookDirection();
+    const QVector3D p = position() + fwd * 1.5f;
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id);
+}
+
+// 拾取扫描（t36）：每帧扫附近掉落实体 → Hotbar.addStack（先选中槽、再空槽，「入手」语义）。
+// addStack 返 0（全放入）→ ItemEntityManager.removeAt 销毁实体（spec：拾取后销毁）；
+// 返 >0（背包满）→ 不拾取（entity 留；spec：全满 → 不拾取）。距离从玩家 AABB 中心（脚底 + 半高）
+// 3D 起算，阈值 kPickupDist；从后往前扫 → erase 不影响前面索引（安全边删边迭代）。
+void PlayerController::pickupScan()
+{
+    if (!m_itemEntities || !m_hotbar) return;
+    const QVector3D center = m_pos + QVector3D(0.0f, kHeight * 0.5f, 0.0f);
+    const float r2 = kPickupDist * kPickupDist;
+    for (int i = m_itemEntities->count() - 1; i >= 0; --i) {
+        const QVector3D d = m_itemEntities->posAt(i) - center;
+        if (d.lengthSquared() > r2) continue;          // 超阈值 → 跳过
+        const int id = m_itemEntities->itemIdAt(i);
+        const int leftover = m_hotbar->addStack(id, 1); // 先选中槽（空/同 id）→ 再空槽
+        if (leftover == 0) m_itemEntities->removeAt(i); // 全入 → 销毁实体；背包满则留（leftover>0）
+    }
 }
 
 // 方块格 [bx,bx+1]×[by,by+1]×[bz,bz+1] 与玩家 AABB 是否相交（严格重叠；仅贴面不算）。

@@ -115,7 +115,8 @@ public:
     // 直接写入栈 (slot, id, count)；范围 + id 合法性 + count 上限校验；id==0 或 count<=0 → 清空该槽。
     // 改当前选中槽时补发 selectedSlotChanged（驱动 selectedBlockId → player.selectedBlock 刷新）。
     Q_INVOKABLE void setStack(int slot, int id, int count);
-    // 智能堆叠放入：同 id 槽先累加至 maxStackSize(id)，再入首个空槽；返回未放入数（0=全入）。
+    // 智能堆叠放入（t36 拾取消费）：先选中槽（空 / 同 id 可入 ——「入手」语义，用户核心诉求
+    // 「手持空→入手；手持有(异)物→入背包」），再其它同 id 槽合并，再空槽；返回未放入数（0=全入）。
     // 非法 id 全额退回。改了选中槽内容时补发 selectedSlotChanged。
     Q_INVOKABLE int addStack(int id, int n);
     // 从 slot 取最多 n 件（不超过该栈实际持有）；返回实际取走数；栈空则 id 归 0。

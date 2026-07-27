@@ -15,7 +15,8 @@
 //
 // 数据形态（纯持有，无物理 / 渲染）：每个实体 = {世界坐标 pos, 物品 id}。呈现层（Main.qml
 // 的 Repeater）经 count + posAt + itemIdAt 读数据，自发旋转 / 浮动动画（不反向写）。
-// 拾取 / 丢弃 / 销毁（t36）后续扩展 removeAt / clear（本轮只做 spawn）。
+// 拾取（t36）：PlayerController 每帧扫附近实体 → Hotbar.addStack 成功 → removeAt 销毁该实体。
+// 丢弃（t36）：PlayerController Q 键 → 经 spawnItem 信号（onSpawnItem 转发）回流入本类 spawnItem。
 //
 // 实体数量有上限（防溢出，spec「>200 跳过 / 合并」）：达到上限 kCap 时新 spawn 被跳过 +
 // 告警，保留已有实体（最简策略；合并 / LRU 推迟）。
@@ -50,6 +51,10 @@ public:
     Q_INVOKABLE QVector3D posAt(int i) const;
     // 第 i 个实体的物品 id（呈现层据它设 BlockCube.blockId）。越界返回 0。
     Q_INVOKABLE int itemIdAt(int i) const;
+    // 销毁第 i 个实体（t36 拾取后调用）。erase-shift（保持其余实体位置 / 索引连续；非 swap-remove，
+    // 否则末位 delegate 会瞬移到被拾取位 → 视觉跳变）。越界静默。bump revision → QML Repeater
+    // delegate 的 posAt/itemIdAt 绑定（触碰 revision）整列重算，shift 后各 delegate 对齐新数据。
+    Q_INVOKABLE void removeAt(int i);
 
 signals:
     void entitiesChanged(); // spawn / 未来 remove 触发；驱动 count/revision + QML 绑定刷新

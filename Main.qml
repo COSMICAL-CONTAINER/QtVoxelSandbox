@@ -72,9 +72,13 @@ Window {
     // 玩家控制器：指针锁定鼠标 + WASD/跳/飞 + 三模式物理。
     //   selectedBlock（右键放置用）绑 hotbarVM.selectedBlockId（工具槽→Air→不放置）。
     //   selectedItem（t34 挖掘速度用）绑 hotbarVM.selectedItemId（工具段透传 → ToolRegistry 算速度）。
+    //   hotbar / itemEntities（t36）：PlayerController 持 peer VM 指针做拾取扫描 / 丢弃（经 Q_PROPERTY
+    //   绑定注入，同 world 模式）。拾取 = tick 扫附近实体 → addStack；丢弃 = Q 键 takeStack → spawnItem。
     PlayerController {
         id: player
         world: theWorld
+        hotbar: hotbarVM
+        itemEntities: itemEntities
         selectedBlock: hotbarVM.selectedBlockId
         selectedItem: hotbarVM.selectedItemId
     }
@@ -404,9 +408,11 @@ Window {
             Repeater {
                 model: itemEntities.count
                 delegate: Node {
-                    // 基准位置（实体不动直到 t36 拾取）：posAt 在 delegate 创建时求值一次（实体不动
-                    // → 不需 NOTIFY 跟踪）。外层 Node 持基准 pos + 绕 Y 旋转；内层 Model 持浮动偏移。
-                    position: itemEntities.posAt(index)
+                    // 基准位置 + 物品 id：触碰 itemEntities.revision（Q_PROPERTY NOTIFY=entitiesChanged）
+                    // 建立依赖。t36 removeAt 用 erase-shift（前移后续实体），revision 自增 → 本绑定重算
+                    // → shift 后 delegate[k] 对齐新 entity[k] 的 pos/itemId（否则 posAt 是 Q_INVOKABLE 不
+                    // 被 NOTIFY 跟踪、shift 后 delegate 显示陈旧数据）。外层 Node 持基准 pos + 绕 Y 旋转。
+                    position: { itemEntities.revision; return itemEntities.posAt(index) }
                     property real rotY: 0       // 绕 Y 旋转角（度）
                     property real bobY: 0       // 上下浮动偏移（格）
                     eulerRotation: Qt.vector3d(0, rotY, 0)
@@ -423,7 +429,9 @@ Window {
                         // 小方块图标（~0.3）：BlockCube 按 itemId 取图集 per-face UV（草顶 / 草侧…），
                         // 复用 voxelAtlas（与地形同贴图，零 MC 资产）。NoLighting 保证可见（本工程所有
                         // 可见 Model 的已验证路径；默认 lit 不渲染，见 lessons-learned）。
-                        geometry: BlockCube { blockId: itemEntities.itemIdAt(index) }
+                        // blockId 绑定同样触碰 revision：拾取 erase 后 shift 的 delegate 重新读 itemIdAt
+                        // → BlockCube.setBlockId 触发 rebuild 重算 UV（setBlockId 内 emit + rebuild）。
+                        geometry: BlockCube { blockId: { itemEntities.revision; return itemEntities.itemIdAt(index) } }
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         // 浮动：本地 Y 偏移。外层 Node 绕 Y 旋转不改变 Y 轴方向 → 世界 Y 偏移保留
                         // （item 边绕垂直轴自转边上下浮）。
@@ -485,6 +493,7 @@ Window {
             }
             if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
+            if (e.key === Qt.Key_Q) { player.dropHeld(); e.accepted = true; return }     // 丢弃手持 1 件（t36）
             if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) {            // 1–9 直选 hotbar 槽 0..8（属性赋值走 WRITE setter）
                 hotbarVM.selectedSlot = e.key - Qt.Key_1; e.accepted = true; return
             }
@@ -536,7 +545,7 @@ Window {
                 Text { text: "[Esc] release   WASD move   Space jump/fly   Shift down"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[LMB] break block   [RMB] place block"
+                Text { text: "[LMB] break block   [RMB] place block   [Q] drop item"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 // 返回主菜单（playing ↔ menu 双向切换，t17）：消费点击，不冒泡到背景 grab。

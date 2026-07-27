@@ -35,3 +35,15 @@ int ItemEntityManager::itemIdAt(int i) const
     if (i < 0 || i >= int(m_entities.size())) return 0;
     return m_entities[size_t(i)].itemId;
 }
+
+// 销毁第 i 个实体（t36 拾取消费）。erase-shift：其后元素前移、size--，保持位置 / 索引连续。
+// bump revision 驱动 QML Repeater delegate 的 posAt/itemIdAt 绑定（触碰 revision）重算 →
+// shift 后 delegate[k] 对齐新的 entity[k] 数据。count-- 同时让 Repeater 移除末位多余 delegate。
+void ItemEntityManager::removeAt(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    m_entities.erase(m_entities.begin() + i);
+    ++m_revision;
+    emit entitiesChanged();
+    qCInfo(lcItem) << "picked up item entity at index" << i << "(remaining" << m_entities.size() << ")";
+}

@@ -10,10 +10,12 @@
 #include <QVector3D>
 #include <QtQml/qqml.h>
 
-#include "blockregistry.h" // 方块 id（默认手持方块 / 破放校验）
-#include "raycast.h"       // RayHit（射线选体结果）
-#include "toolregistry.h"  // 工具感知挖掘速度 / 掉落判定（t34）
-#include "world.h"         // Q_PROPERTY(World*) 需要 World 完整定义
+#include "blockregistry.h"      // 方块 id（默认手持方块 / 破放校验）
+#include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
+#include "itementitymanager.h"  // 掉落实体管理器（t36 拾取扫描 / removeAt）
+#include "raycast.h"            // RayHit（射线选体结果）
+#include "toolregistry.h"       // 工具感知挖掘速度 / 掉落判定（t34）
+#include "world.h"              // Q_PROPERTY(World*) 需要 World 完整定义
 
 // 玩家控制器（一个对象全包）：指针锁定式鼠标视角 + WASD/跳/飞 + 三模式物理。
 // 继承 QQuickItem 以拿到 QQuickWindow（指针锁定需要 QCursor 居中 warp）。
@@ -26,6 +28,14 @@ class PlayerController : public QQuickItem
     Q_OBJECT
     QML_NAMED_ELEMENT(PlayerController)
     Q_PROPERTY(World *world READ world WRITE setWorld NOTIFY worldChanged)
+    // 拾取 / 丢弃（t36）：PlayerController 经 Q_PROPERTY 持 Hotbar* / ItemEntityManager*（同 world 模式，
+    // QML 注入 peer ViewModel）。拾取 = 每帧扫附近掉落实体 → Hotbar.addStack（先选中槽、再空槽）→
+    // addStack 返 0（全入）时 ItemEntityManager.removeAt 销毁实体；丢弃 = Q 键 Hotbar.takeStack 1 件 →
+    // 发 spawnItem（玩家前方，经 QML Connections 回流 ItemEntityManager.spawnItem）。
+    // 分层（PLAN §2）：PlayerController 属 Game/Physics，Hotbar/ItemEntityManager 属 ViewModel/Entities，
+    // 经 QML 绑定注入（运行期连接、非编译期反向依赖；同 world 属性先例）。
+    Q_PROPERTY(Hotbar *hotbar READ hotbar WRITE setHotbar NOTIFY hotbarChanged)
+    Q_PROPERTY(ItemEntityManager *itemEntities READ itemEntities WRITE setItemEntities NOTIFY itemEntitiesChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -82,6 +92,10 @@ public:
 
     World *world() const { return m_world; }
     void setWorld(World *w);
+    Hotbar *hotbar() const { return m_hotbar; }
+    void setHotbar(Hotbar *h);
+    ItemEntityManager *itemEntities() const { return m_itemEntities; }
+    void setItemEntities(ItemEntityManager *m);
 
     QVector3D position() const { return m_pos + QVector3D(0, kEyeHeight, 0); }
     float yaw() const { return m_yaw; }
@@ -129,9 +143,15 @@ public:
     Q_INVOKABLE void placeBlock(); // 右键：命中面相邻空格置 selectedBlock（不覆盖实体 / 不埋玩家）
     Q_INVOKABLE void beginMining(); // 左键按下：创造瞬破 / 生存开始累积进度（t34）
     Q_INVOKABLE void endMining();   // 左键松开：清生存累积进度（t34）
+    // Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格）。仅指针捕获时生效
+    // （spec）。空手 / 取失败 → 不丢。spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem
+    // （同破块掉落 t35 路径）；丢弃后实体可被重新拾取（闭环）。
+    Q_INVOKABLE void dropHeld();
 
 signals:
     void worldChanged();
+    void hotbarChanged();
+    void itemEntitiesChanged();
     void positionChanged();
     void yawChanged();
     void pitchChanged();
@@ -188,8 +208,14 @@ private:
     void cancelMining();
     // 完成（progress 满）：写 air + 发 playerMined + 清态。drop 由 caller 算（生存走 ToolRegistry）。
     void finishMiningAt(int x, int y, int z, bool drop);
+    // 拾取扫描（t36）：每帧扫附近掉落实体 → Hotbar.addStack（先选中槽、再空槽）。addStack 返 0
+    // （全入）→ ItemEntityManager.removeAt 销毁实体；返 >0（背包满）→ 不拾取（entity 留）。
+    // 距离从玩家 AABB 中心（脚底 + 半高）3D 起算，阈值 kPickupDist；从后往前扫便于 erase。
+    void pickupScan();
 
     World *m_world = nullptr;
+    Hotbar *m_hotbar = nullptr;                  // 拾取 addStack / 丢弃 takeStack 的栈操作目标（Q_PROPERTY 绑定）
+    ItemEntityManager *m_itemEntities = nullptr; // 拾取扫描数据源 + removeAt 销毁（Q_PROPERTY 绑定）
     QQuickWindow *m_window = nullptr;
     QTimer m_timer;
     QElapsedTimer m_clock;
@@ -232,6 +258,7 @@ private:
     static constexpr float kSens = 0.25f;      // 度/像素
     static constexpr float kDeg = 0.017453292519943295f;
     static constexpr float kReach = 5.0f;      // 射线选体射程（格）
+    static constexpr float kPickupDist = 1.5f; // 拾取距离阈值（格；玩家 AABB 中心起算，spec ~1.2 量级）
 };
 
 #endif // PLAYERCONTROLLER_H
