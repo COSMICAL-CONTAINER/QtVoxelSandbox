@@ -19,12 +19,16 @@ Node {
         // 设迸发器位置到方块中心再 burst(2 参)：旧 burst(3 参带 position) 的第 3 参被 Q_INVOKABLE 静默
         // 忽略（不强校验参数数）→ 粒子全迸发在系统原点而非方块处。改设 emitter.position 再 burst。
         breakEmitter.position = Qt.vector3d(x + 0.5, y + 0.5, z + 0.5)
-        breakEmitter.burst(16, 80)
+        // t30：碎屑必须「分散小颗粒、明显小于方块」。第 5 轮 burst(16,80) 与 particleScale 0.15 叠加
+        // 仍聚成「比方块还大的一坨」——根因是粒子多 + 横向速度大 + 单粒仍偏大，三因子堆叠。
+        // 数量收到 10（单次迸发上限），单粒大小靠 emitter.particleScale 决定（见下）。
+        breakEmitter.burst(10, 80)
     }
     function burstPlace(x, y, z, id) {
         placeParticle.color = blockColor(id)
         placeEmitter.position = Qt.vector3d(x + 0.5, y + 0.5, z + 0.5)
-        placeEmitter.burst(10, 60)
+        // t30：扬尘更少更弱——放置是「轻撒」非「迸裂」，6 颗已足。
+        placeEmitter.burst(6, 60)
     }
 
     // 运行期就绪日志（t16）：落 voxelsandbox.log，使「粒子节点加载状态在 console 可见且非 Error」
@@ -91,20 +95,23 @@ Node {
             magnitude: 6
         }
 
-        // 破块迸发器：emitRate=0（仅按信号 burst）；velocity 向上+外散。
+        // 破块迸发器：emitRate=0（仅按信号 burst）；velocity 主上抛、横向收束。
         ParticleEmitter3D {
             id: breakEmitter
             particle: breakParticle
             emitRate: 0
             lifeSpan: 900
             lifeSpanVariation: 200
-            particleScale: 0.15  // 碎屑实际大小由此值决定（实测：delegate 显式 scale 被 ModelParticle3D
-                                 // 忽略——旧 particleScale 1.0 时即便 delegate scale 0.12 仍渲染成 1 格大方块
-                                 // 迸发满屏；故改为小 particleScale 直接缩放实例。delegate 仍留 0.12 作双保险）。
+            // t30：碎屑「单粒边长 < 0.15 格」。particleScale ≤ 0.07（实测 0.15 仍聚成「比方块还大的一坨」，
+            // 因多粒 + 大横向速度把一群小粒挤在同一团里互相堆叠——缩小单粒 + 收束方向后自然分散）。
+            // 大小由此值决定（delegate 显式 scale 被 ModelParticle3D 实例化忽略，仅留 0.12 作双保险）。
+            particleScale: 0.07
             particleRotationVelocityVariation: Qt.vector3d(200, 200, 200)
+            // t30：主上抛（direction.y=4）、横向 variation 收到 1.5。旧 (3,2,3) 让粒子四向炸开，
+            // 叠满屏后视觉成一坨——收束后方块中心向上散出、受重力回落，是「碎屑」而非「火球」。
             velocity: VectorDirection3D {
-                direction: Qt.vector3d(0, 3.5, 0)
-                directionVariation: Qt.vector3d(3, 2, 3)
+                direction: Qt.vector3d(0, 4, 0)
+                directionVariation: Qt.vector3d(1.5, 1.5, 1.5)
             }
         }
 
@@ -115,10 +122,12 @@ Node {
             emitRate: 0
             lifeSpan: 700
             lifeSpanVariation: 150
-            particleScale: 0.12  // 同 breakEmitter：大小由 particleScale 直接缩放（见上注）。
+            // t30：同 breakEmitter——大小由 particleScale 决定，收到 0.06（≤ 0.06）。
+            particleScale: 0.06
+            // t30：扬尘「更弱」——方向偏弱（y=2）、横向 variation 收到 1.0（避免横向炸开聚团）。
             velocity: VectorDirection3D {
-                direction: Qt.vector3d(0, 1.0, 0)
-                directionVariation: Qt.vector3d(2.5, 1.5, 2.5)
+                direction: Qt.vector3d(0, 2, 0)
+                directionVariation: Qt.vector3d(1.0, 1.0, 1.0)
             }
         }
     }
