@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "blockregistry.h" // 物品 id（方块段 0..Count-1；图标/中文名走单一注册表）
+#include "toolregistry.h"  // 工具段 id（>=0x100）；工具判定 / tier / 中文名 / 创造调色板走工具注册表（t33）
 
 // 物品栈（t32 基础数据模型）：槽位从单一 quint8 block-id 升级为 {itemId, count}，支持堆叠。
 //   - id 复用 BlockRegistry id（方块段 0..Count-1，air=0 即空栈）；
@@ -27,7 +28,7 @@ struct ItemStack {
 // 暴露给 QML（moc 安全：列表数据走 Q_INVOKABLE + slotRevision，**勿**用 Q_PROPERTY(QVariantList)
 // —— 本工具链 moc 拒绝后者，见 lessons-learned）：
 //   - selectedSlot（当前槽 0..8，可读写）
-//   - selectedBlockId（从选中栈 id 派生；空栈→Air→右键不放置，t32）
+//   - selectedBlockId（从选中栈 id 派生；空栈 / 工具栈→Air→右键不放置。工具非方块不可放置，t33）
 //   - slotCount（恒 9）
 //   - slotRevision（int，随槽内容变更自增；NOTIFY slotsChanged。QML 把它「触碰」进 Repeater 的
 //     model 绑定 → 槽内容改写后整列重建，图标/数量同步刷新）
@@ -41,7 +42,10 @@ struct ItemStack {
 //   - maxStackSize(id)（方块 64 / 工具段 1）
 //   - resetForMode(mode)（创造=满栈 / 生存=全空；mode 切换时 QML 调）
 //   - heldBlock / heldCount（光标手持物 id + 数量；背包点击拾取/放置用，跨创造/生存共享同一手持栈）
-//   - scroll(delta) / creativeBlocks() / iconSourceForBlock / nameForBlock（同前）
+//   - isTool / toolTier / creativeTools（t33：工具段判定 / 等级 / 创造调色板；QML 据 isTool 切方块
+//     Image vs ToolIcon Canvas 自绘图标）
+//   - scroll(delta) / creativeBlocks() / iconSourceForBlock / nameForBlock（同前；nameForBlock 工具段
+//     走 ToolRegistry::displayName，iconSourceForBlock 工具段返空串 → QML 用 ToolIcon 自绘）
 //
 // 分层（PLAN §2）：本层属 ViewModel，只依赖 World 的 BlockRegistry 数据，**不**依赖
 // Renderer/Physics/QtQuick3D。物品→id / 物品→图标 的映射只查 BlockRegistry，不另持方块表副本。
@@ -72,6 +76,14 @@ public:
     void setHeldBlock(int id);
     int heldCount() const { return m_heldStack.count; }
     void setHeldCount(int n);
+
+    // 工具段判定与属性（t33；供 QML delegate 据 isTool 选方块 Image vs ToolIcon Canvas 自绘）：
+    //   - isTool(id)：id 是否工具段（>=0x100）。
+    //   - toolTier(id)：工具等级（1=木 2=石 3=铁；0=非工具）。ToolIcon.qml 据 tier 着色镐头。
+    //   - creativeTools()：创造调色板的 3 档镐 id（工具不可堆叠，拾取时 heldCount=1）。
+    Q_INVOKABLE bool isTool(int itemId) const;
+    Q_INVOKABLE int toolTier(int itemId) const;
+    Q_INVOKABLE QVariantList creativeTools() const;
 
     // 每槽物品 id（air=0 即空栈）。越界返回 0。兼容旧消费者（player.selectedBlock 绑定 / 背包 swap）。
     Q_INVOKABLE int blockIdAt(int slot) const;

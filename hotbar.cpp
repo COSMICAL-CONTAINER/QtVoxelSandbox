@@ -68,12 +68,31 @@ void Hotbar::setSelectedSlot(int slot)
     emit selectedSlotChanged(); // selectedBlockId 从新选中栈派生，随之刷新
 }
 
-// 选中栈 id（空栈→Air）。player.selectedBlock 绑它 → 空栈时右键不放置（playercontroller 守 Air）。
+// 选中栈 id（空栈 / 工具栈→Air）。player.selectedBlock 绑它 → 空栈或工具栈时右键不放置
+// （playercontroller 守 Air）。工具非方块、不可放置（t33）：选中工具槽时 selectedBlockId 返 Air，
+// 同时 HUD 的 player.selectedBlock 显 #0（无可放置方块），与「工具用于挖掘、非放置」语义一致。
 int Hotbar::selectedBlockId() const
 {
     if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size()))
         return int(BlockRegistry::Air);
-    return m_slots[size_t(m_selectedSlot)].id;
+    const int id = m_slots[size_t(m_selectedSlot)].id;
+    if (ToolRegistry::isTool(id)) return int(BlockRegistry::Air); // 工具槽 → 视作无可放置方块
+    return id;
+}
+
+// ── 工具段桥接（t33）── 查 ToolRegistry 单一权威，QML delegate 据此选方块 Image vs ToolIcon Canvas。
+bool Hotbar::isTool(int itemId) const { return ToolRegistry::isTool(itemId); }
+
+int Hotbar::toolTier(int itemId) const
+{
+    const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);
+    return t ? t->tier : 0; // 非工具 → 0（ToolIcon 兜底木镐配色）
+}
+
+QVariantList Hotbar::creativeTools() const
+{
+    // 创造调色板 3 档镐（无限源：拾取时 heldCount=1，工具不可堆叠）。
+    return {int(ToolRegistry::PickaxeWood), int(ToolRegistry::PickaxeStone), int(ToolRegistry::PickaxeIron)};
 }
 
 int Hotbar::blockIdAt(int slot) const
@@ -122,7 +141,8 @@ QString Hotbar::iconSourceAt(int slot) const
 
 QString Hotbar::iconSourceForBlock(int blockId) const
 {
-    // 方块段才查图标；工具段（>=0x100）暂无图标（t33 落地）。越界先判再 cast，防 quint8 截断别名。
+    // 方块段才返回 PNG 路径；工具段（>=0x100，t33）图标由 QML ToolIcon.qml Canvas 自绘（§9a）→ 返空串，
+    // 调用方据 isTool(id) 切到 ToolIcon。越界先判再 cast，防 quint8 截断别名。
     if (blockId <= 0 || blockId >= int(BlockRegistry::Count)) return QString();
     const char *file = iconFileForBlock(quint8(blockId));
     if (!file) return QString();
@@ -136,8 +156,11 @@ QString Hotbar::nameAt(int slot) const
 
 QString Hotbar::nameForBlock(int blockId) const
 {
-    // 走 BlockRegistry::displayName（单一权威；PLAN §9：UI 不另存方块名副本）。air/越界/工具段 → 空串。
-    if (blockId <= 0 || blockId >= int(BlockRegistry::Count)) return QString();
+    // 走单一权威：方块段→BlockRegistry::displayName；工具段→ToolRegistry::displayName（t33）。
+    // air / 越界 → 空串。PLAN §9：UI 不另存方块 / 工具名副本。
+    if (blockId <= 0) return QString();
+    if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
+    if (blockId >= int(BlockRegistry::Count)) return QString();
     return BlockRegistry::displayName(quint8(blockId));
 }
 

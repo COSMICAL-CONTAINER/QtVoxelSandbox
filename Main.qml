@@ -525,15 +525,25 @@ Window {
                     Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                     Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
 
-                    // 方块图标（等距立方体，统一源 → PreserveAspectFit 强制等比缩放进固定框，
-                    // 无论源贴图原始尺寸如何，槽内显示尺寸完全一致；空槽 modelData=0 → 不显示）。
-                    Image {
+                    // 物品图标：方块段 → 等距立方体 Image（统一源 PreserveAspectFit）；工具段（t33，
+                    // isTool(id)）→ ToolIcon.qml Canvas 自绘像素镐（§9a，非 MC 资产）。空槽 modelData=0 → 不显。
+                    // 二者同尺寸同居中，互斥 visible（按 isTool 切换），槽内显示尺寸完全一致。
+                    Item {
                         anchors.centerIn: parent
                         width: 38; height: 38
                         visible: modelData !== 0
-                        source: hotbarVM.iconSourceForBlock(modelData)
-                        fillMode: Image.PreserveAspectFit
-                        smooth: true
+                        Image {
+                            anchors.fill: parent
+                            visible: !hotbarVM.isTool(modelData)
+                            source: hotbarVM.iconSourceForBlock(modelData)
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                        }
+                        ToolIcon {
+                            anchors.fill: parent
+                            visible: hotbarVM.isTool(modelData)
+                            tier: hotbarVM.toolTier(modelData)
+                        }
                     }
                     // 栈数量（t32）：count>1 时右下角显数字（MC 风格：单件不显数）。countAt 是 Q_INVOKABLE，
                     // 不被 NOTIFY 自动跟踪，靠 slotRevision 触碰 model 绑定 → Repeater 整列重建时本 delegate
@@ -665,7 +675,7 @@ Window {
 
     // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品栈；hotbarVM.heldBlock/heldCount 驱动）。
     // 仅背包打开且手持非空时显，z 最高（盖过背包面板 z=150）。位置跟随 cursorTracker（窗口坐标）。
-    // t32：count>1 时右下角显数量（手持整栈移动时可见剩余数）。
+    // t32：count>1 时右下角显数量（手持整栈移动时可见剩余数）。t33：手持工具 → ToolIcon 自绘（非 Image）。
     Item {
         visible: window.inventoryOpen && hotbarVM.heldBlock !== 0
         z: 300
@@ -674,9 +684,15 @@ Window {
         width: 32; height: 32
         Image {
             anchors.fill: parent
+            visible: !hotbarVM.isTool(hotbarVM.heldBlock)
             source: hotbarVM.iconSourceForBlock(hotbarVM.heldBlock)
             fillMode: Image.PreserveAspectFit
             smooth: true
+        }
+        ToolIcon {
+            anchors.fill: parent
+            visible: hotbarVM.isTool(hotbarVM.heldBlock)
+            tier: hotbarVM.toolTier(hotbarVM.heldBlock)
         }
         Text {
             anchors.right: parent.right

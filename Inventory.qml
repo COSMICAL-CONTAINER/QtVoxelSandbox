@@ -24,11 +24,12 @@ Item {
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
     signal closed()
 
-    // ① 调色板数据：8 实方块（creativeBlocks，air 除外）+ 扩展空槽（id=0 → 渲染为空占位）。
-    // 一次性求值的绑定（方块集恒定；root.hotbar 由 null→对象 时重新求值）。空槽既是「可滚动」的内容，
-    // 也占位示意未来 Phase 1.x 的 ~40 方块扩容（MC 1.0 创造页也是多行大网格）。
+    // ① 调色板数据：8 实方块（creativeBlocks）+ 3 档镐（creativeTools，t33）+ 扩展空槽（id=0 → 空占位）。
+    // 一次性求值的绑定（方块 / 工具集恒定；root.hotbar 由 null→对象 时重新求值）。空槽既是「可滚动」
+    // 的内容，也占位示意未来 Phase 1.x 的 ~40 方块扩容（MC 1.0 创造页也是多行大网格）。
     readonly property var paletteModel: root.hotbar
-        ? root.hotbar.creativeBlocks().concat([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]) // 8 + 19 = 27（9 列 × 3 行）
+        ? root.hotbar.creativeBlocks().concat(root.hotbar.creativeTools())
+                                .concat([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]) // 8 + 3 + 16 = 27（9 列 × 3 行）
         : []
 
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
@@ -126,14 +127,23 @@ Item {
                             Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                             Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
 
-                            // 实体方块：图标（统一尺寸 PreserveAspectFit 强制等比缩放进固定框）。
-                            Image {
+                            // 物品图标：方块段 → 等距立方体 Image；工具段（t33 isTool）→ ToolIcon 自绘镐。
+                            Item {
                                 anchors.centerIn: parent
                                 width: 30; height: 30
                                 visible: modelData !== 0
-                                source: root.hotbar.iconSourceForBlock(modelData)
-                                fillMode: Image.PreserveAspectFit
-                                smooth: true
+                                Image {
+                                    anchors.fill: parent
+                                    visible: !root.hotbar.isTool(modelData)
+                                    source: root.hotbar.iconSourceForBlock(modelData)
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
+                                }
+                                ToolIcon {
+                                    anchors.fill: parent
+                                    visible: root.hotbar.isTool(modelData)
+                                    tier: root.hotbar.toolTier(modelData)
+                                }
                             }
                             // hover 高亮边框（仅实体方块）。
                             Rectangle {
@@ -153,10 +163,11 @@ Item {
                             }
                             TapHandler {
                                 enabled: modelData !== 0
-                                // 拾取到光标（创造调色板=无限源，不清减调色板；t32：满栈 64）。
+                                // 拾取到光标（创造调色板=无限源，不清减调色板）。方块满栈 64；工具不可堆叠 →
+                                // count=1（t33）。setHeldBlock 已对工具段 id 校验合法（isValidItemId 含工具段）。
                                 onTapped: {
                                     root.hotbar.heldBlock = modelData
-                                    root.hotbar.heldCount = 64
+                                    root.hotbar.heldCount = root.hotbar.isTool(modelData) ? 1 : 64
                                 }
                             }
                         }
@@ -216,9 +227,15 @@ Item {
                                     Drag.hotSpot.y: height / 2
                                     Image {
                                         anchors.fill: parent
+                                        visible: !root.hotbar.isTool(modelData)
                                         source: root.hotbar.iconSourceForBlock(modelData)
                                         fillMode: Image.PreserveAspectFit
                                         smooth: true
+                                    }
+                                    ToolIcon {
+                                        anchors.fill: parent
+                                        visible: root.hotbar.isTool(modelData)
+                                        tier: root.hotbar.toolTier(modelData)
                                     }
                                     DragHandler {
                                         id: iconDrag

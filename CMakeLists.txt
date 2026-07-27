@@ -34,6 +34,8 @@ qt_add_executable(voxelsandbox
     hotbar.h
     playerstate.cpp
     playerstate.h
+    toolregistry.cpp
+    toolregistry.h
 )
 
 qt_add_qml_module(voxelsandbox
@@ -47,6 +49,7 @@ qt_add_qml_module(voxelsandbox
         InvSlot.qml
         SurvivalInventory.qml
         VitalIcon.qml
+        ToolIcon.qml
 )
 
 qt_add_resources(voxelsandbox "voxel_textures"

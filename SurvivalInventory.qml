@@ -95,12 +95,21 @@ Item {
                         delegate: Item {
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent; wellColor: "#262b30" }
-                            Image {
+                            Item {
                                 anchors.centerIn: parent
                                 width: 30; height: 30
                                 visible: { root.craftRev; return (root.craftSlots[index] || 0) !== 0 }
-                                source: root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0)
-                                fillMode: Image.PreserveAspectFit; smooth: true
+                                Image {
+                                    anchors.fill: parent
+                                    visible: { root.craftRev; return !root.hotbar.isTool(root.craftSlots[index] || 0) }
+                                    source: root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0)
+                                    fillMode: Image.PreserveAspectFit; smooth: true
+                                }
+                                ToolIcon {
+                                    anchors.fill: parent
+                                    visible: { root.craftRev; return root.hotbar.isTool(root.craftSlots[index] || 0) }
+                                    tier: root.hotbar.toolTier(root.craftSlots[index] || 0)
+                                }
                             }
                             // 栈数量（t32）：count>1 时右下角显数字。触碰 craftRev 刷新（数组突变靠版本号触发）。
                             Text {
@@ -240,12 +249,21 @@ Item {
                     delegate: Item {
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent }
-                        Image {
+                        Item {
                             anchors.centerIn: parent
                             width: 30; height: 30
                             visible: { root.mainRev; return (root.mainSlots[index] || 0) !== 0 }
-                            source: root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0)
-                            fillMode: Image.PreserveAspectFit; smooth: true
+                            Image {
+                                anchors.fill: parent
+                                visible: { root.mainRev; return !root.hotbar.isTool(root.mainSlots[index] || 0) }
+                                source: root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0)
+                                fillMode: Image.PreserveAspectFit; smooth: true
+                            }
+                            ToolIcon {
+                                anchors.fill: parent
+                                visible: { root.mainRev; return root.hotbar.isTool(root.mainSlots[index] || 0) }
+                                tier: root.hotbar.toolTier(root.mainSlots[index] || 0)
+                            }
                         }
                         // 栈数量（t32）：count>1 时右下角显数字。触碰 mainRev 刷新（数组突变靠版本号触发）。
                         Text {
@@ -291,13 +309,22 @@ Item {
                         delegate: Item {
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent }
-                            Image {
+                            Item {
                                 anchors.centerIn: parent
                                 width: 30; height: 30
                                 visible: modelData !== 0
-                                source: root.hotbar.iconSourceForBlock(modelData)
-                                fillMode: Image.PreserveAspectFit
-                                smooth: true
+                                Image {
+                                    anchors.fill: parent
+                                    visible: !root.hotbar.isTool(modelData)
+                                    source: root.hotbar.iconSourceForBlock(modelData)
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
+                                }
+                                ToolIcon {
+                                    anchors.fill: parent
+                                    visible: root.hotbar.isTool(modelData)
+                                    tier: root.hotbar.toolTier(modelData)
+                                }
                             }
                             // 栈数量（t32）：count>1 时右下角显数字。countAt 是 Q_INVOKABLE，靠 slotRevision
                             // 触碰 model 绑定 → 整列重建时刷新。
