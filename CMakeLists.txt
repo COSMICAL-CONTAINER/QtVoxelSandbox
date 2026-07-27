@@ -30,6 +30,8 @@ qt_add_executable(voxelsandbox
     wiresquare.h
     hotbar.cpp
     hotbar.h
+    playerstate.cpp
+    playerstate.h
 )
 
 qt_add_qml_module(voxelsandbox
@@ -40,6 +42,7 @@ qt_add_qml_module(voxelsandbox
         BlockParticles.qml
         MainMenu.qml
         Inventory.qml
+        VitalIcon.qml
 )
 
 qt_add_resources(voxelsandbox "voxel_textures"

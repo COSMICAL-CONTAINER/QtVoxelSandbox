@@ -23,6 +23,7 @@ void PlayerController::componentComplete()
     QQuickItem::componentComplete();
     if (!m_window && (m_window = window()))
         m_window->installEventFilter(this); // 拦截 Esc + 失焦
+    m_peakY = m_pos.y(); // 掉落伤害基准：以脚底初始 Y 起（首帧不误判大落差）
     m_clock.start();
     m_evtClock.start();
     m_timer.start();
@@ -70,6 +71,7 @@ void PlayerController::setMode(Mode m)
     m_mode = m;
     m_vel = QVector3D(0, 0, 0); // 切模式清速度，避免半空切走生存被甩飞
     m_onGround = false;
+    m_peakY = m_pos.y();        // 重置掉落基准：避免从创造飞行高度切生存时累计陈旧落差
     if (m_flying) { m_flying = false; emit flyingChanged(); } // 进入新模式默认走（不飞）
     emit modeChanged();
     emit onGroundChanged();
@@ -368,6 +370,20 @@ void PlayerController::step(qreal dt)
     if (aabbHitsSolid()) m_onGround = true;
     m_pos.setY(oy);
     if (m_onGround && m_vel.y() < 0) m_vel.setY(0);
+
+    // 掉落伤害（t22，仅 Survival）：滞空期间记录最高点 m_peakY，着地瞬间按 MC 1.0 公式
+    // floor(落差-3) 结算（fall>3 才伤，每整格 1 HP = 半心）。上 tick 已着地 → 重置基准；
+    // 上升（跳跃）更新峰；本 tick 刚着地 → 结算并复位。
+    if (wasGround) m_peakY = m_pos.y();
+    else if (m_pos.y() > m_peakY) m_peakY = m_pos.y();
+    if (!wasGround && m_onGround) {
+        const float fall = m_peakY - m_pos.y();
+        if (m_mode == Survival && fall > 3.0f) {
+            const int dmg = int(std::floor(fall - 3.0f));
+            if (dmg > 0) emit fallDamageTaken(dmg); // 呈现层 Connections 路由到 PlayerState.takeDamage
+        }
+        m_peakY = m_pos.y();
+    }
 
     if (wasGround != m_onGround) emit onGroundChanged();
     emit positionChanged();

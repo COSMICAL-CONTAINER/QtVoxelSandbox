@@ -55,9 +55,21 @@ Window {
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }
 
+    // 玩家状态（生命/饥饿，t22）：满血满饥初值。心/饥饿条读其 health/hunger；掉落伤害经
+    // 下面的 Connections 路由到 takeDamage（呈现层只读，绝不反向写数值；PLAN §2 分层）。
+    PlayerState { id: playerState }
+
     // 玩家控制器：指针锁定鼠标 + WASD/跳/飞 + 三模式物理。
     // 右键放置用 hotbar 当前选中槽的方块 id（绑定 hotbarVM.selectedBlockId）。
     PlayerController { id: player; world: theWorld; selectedBlock: hotbarVM.selectedBlockId }
+
+    // 玩家掉落伤害 → 生命（t22）：PlayerController 在 Survival 着地结算时发 fallDamageTaken(hp)，
+    // 呈现层经此 Connections 路由到 PlayerState.takeDamage（与破/放信号→粒子同模式：Game 层发
+    // 语义事件，呈现层只消费）。PlayerController 不持有 PlayerState，保持单向事件流、分层干净。
+    Connections {
+        target: player
+        function onFallDamageTaken(hp) { playerState.takeDamage(hp) }
+    }
 
     View3D {
         anchors.fill: parent
@@ -383,6 +395,58 @@ Window {
             // 凸起边框：底/右 暗
             Rectangle { color: "#3a3a3a"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
             Rectangle { color: "#3a3a3a"; width: 2; height: parent.height; anchors.right: parent.right }
+        }
+    }
+
+    // 生命心 + 饥饿鼓腿条（t22，仅 Survival）：hotbar 上方，左 10 心、右 10 鼓腿。
+    // 每心/鼓腿 = 2 点；满/半/空三态自绘原创像素图（VitalIcon.qml 的 Canvas，§9 override (a)：
+    // 非 MC GUI PNG）。Creative/Spectator 不显（1.0：非生存模式无生命/饥饿）。
+    // 心/鼓腿的「每格 full/half/empty」由 delegate 据 playerState.health/hunger 直接算出
+    // （绑定 NOTIFY 自动刷新，无需 Q_PROPERTY(QVariantList)，避开 moc 限制）。
+    // 第 index 格代表的点数余额 = health - index*2；右侧（index 大）先空（符合 MC 心从右耗尽）。
+    Item {
+        id: vitalsBar
+        visible: window.appState === "playing"
+                 && player.mode === PlayerController.Survival
+        anchors.bottom: hotbarBar.top
+        anchors.bottomMargin: 5
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: hotbarBar.width
+        height: 18
+
+        readonly property int iconSize: 18
+        // 心/鼓腿三态：据点数余额返回 2=full 1=half 0=empty（每格 2 点）。
+        function levelFor(curValue, index) {
+            const bal = curValue - index * 2
+            return bal >= 2 ? 2 : (bal >= 1 ? 1 : 0)
+        }
+
+        // 左：10 颗生命心（index 0 = 最左；右耗尽）。底部对齐 hotbar。
+        Row {
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            spacing: 0
+            Repeater {
+                model: 10
+                delegate: VitalIcon {
+                    kind: "heart"
+                    level: vitalsBar.levelFor(playerState.health, index)
+                }
+            }
+        }
+
+        // 右：10 根饥饿鼓腿（index 0 = 最左；右耗尽；与心对称）。
+        Row {
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            spacing: 0
+            Repeater {
+                model: 10
+                delegate: VitalIcon {
+                    kind: "hunger"
+                    level: vitalsBar.levelFor(playerState.hunger, index)
+                }
+            }
         }
     }
 

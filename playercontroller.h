@@ -46,6 +46,10 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(bool canBreak READ canBreak NOTIFY modeChanged)
     Q_PROPERTY(bool canPlace READ canPlace NOTIFY modeChanged)
     Q_PROPERTY(bool canFly READ canFly NOTIFY modeChanged)
+    // 掉落伤害事件（t22）：生存模式着地时按落差结算，发出本次应扣 HP（每 HP = 半心）。
+    // 不直接持有 PlayerState（保持 Physics/Game→呈现 的单向事件流，分层干净；与 blockBroken
+    // 同模式）：呈现层经 Connections 路由到 PlayerState.takeDamage。0 表示无伤害（不路出）。
+    // 注：发射正值仅 Survival；Creative 无伤、Spectator noclip 不走重力分支。
 
 public:
     enum Mode { Spectator, Creative, Survival };
@@ -99,6 +103,7 @@ signals:
     void flyingChanged();
     void hitChanged();
     void selectedBlockChanged();
+    void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState
 
 protected:
     void componentComplete() override;
@@ -137,6 +142,7 @@ private:
     qint64 m_lastSpaceMs = -100000; // 双击空格检测时间戳
     bool m_spacePrev = false;       // 跳跃边沿触发（长按空格只跳一次）
     int m_selectedBlock = BlockRegistry::Stone; // 当前手持方块（右键放置；默认 Stone，t06 hotbar 绑定）
+    float m_peakY = 0.0f;           // 滞空期间最高点 Y（掉落伤害结算基准；componentComplete 设为脚底 Y）
 
     // 射线选体命中态（整数格坐标 + 整数法线分量；仅变化时 emit hitChanged，避免每帧抖动 QML）
     bool m_hasHit = false;
