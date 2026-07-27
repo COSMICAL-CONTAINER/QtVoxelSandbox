@@ -2,6 +2,7 @@
 #define WORLD_H
 
 #include <QObject>
+#include <QtGlobal> // quint32（hashColumn 确定性哈希返回类型）
 #include <QtQml/qqml.h>
 
 #include <vector>
@@ -74,6 +75,13 @@ private:
     double noise2(double x, double z) const;
     double fbm(double x, double z) const;
     int heightAt(int x, int z) const;
+
+    // 确定性树木生成（PLAN §2-K）：在 generate() 末段于 grass 表层种橡树（原木主干+树叶球冠）。
+    // 位置/形状纯由 seed 决定；禁用任何运行期随机源（QTime/时钟/全局 RNG）。
+    void placeTrees();                                  // 遍历列、密度+间距筛选后散布
+    void placeTreeAt(int x, int surfaceY, int z, int trunkH); // 单棵树（主干 trunkH 格 + 球冠）
+    void setVoxelIfAir(int x, int y, int z, quint8 id);       // 仅写空气格（树冠不覆盖主干/地形）
+    quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希 → 确定性伪随机
 
     std::vector<int> m_perm;  // 512 置换表（Perlin）
     int m_width = 16, m_depth = 16, m_height = 16, m_seed = 1337;

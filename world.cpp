@@ -2,6 +2,7 @@
 
 #include "blockregistry.h"
 
+#include <QDebug>
 #include <algorithm>
 #include <cmath>
 
@@ -117,4 +118,113 @@ void World::generate()
             }
         }
     }
+
+    placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
+}
+
+// 整数哈希（FNV-1a + avalanche）：seed/x/z → 32 位确定性伪随机。纯函数，不依赖任何运行期随机源
+// （PLAN §2-K：固定 seed → 完全一致的树分布）。与 Perlin 置换表独立，避免树位与高度噪声耦合。
+quint32 World::hashColumn(int seed, int x, int z) const
+{
+    quint32 h = 0x811c9dc5u; // FNV-1a basis
+    auto step = [&h](quint32 v) {
+        h ^= v;
+        h *= 0x01000193u; // FNV-1a prime
+    };
+    step(quint32(seed));
+    step(quint32(x));
+    step(quint32(z));
+    // FNV-1a 单轮扩散偏弱，补一轮 xorshift-mix 提高 avalanche（低位用于密度判定，须质量好）。
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    return h;
+}
+
+// 仅在合法边界且当前为空气时写入。树冠据此不覆盖主干/地形；跨 chunk 写入 + 脏标记由 ChunkManager 处理。
+void World::setVoxelIfAir(int x, int y, int z, quint8 id)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return; // 世界越界跳过（setVoxelIfAir 已含边界判，配合 placeTrees 的钳制双重保险）
+    if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air)
+        return;
+    m_chunks.setBlock(x, y, z, id);
+}
+
+// 单棵橡树：surfaceY=草顶 y；主干 trunkH 格原木(id5)从 surfaceY+1 起；顶部树叶(id7)球冠。
+// 球冠形状：紧贴主干顶两层 3×3 去中心（绕主干八邻格叶）→ 其上一层 3×3 去角（十字 5 叶）→ 顶尖 1 叶。
+// 主干先置、树冠后置且仅写空气格 → 树冠绝不覆盖主干。
+void World::placeTreeAt(int x, int surfaceY, int z, int trunkH)
+{
+    const int trunkBase = surfaceY + 1;
+    const int trunkTopY = trunkBase + trunkH - 1;
+
+    // 主干（地表上方空气，逐格置原木）。
+    for (int y = trunkBase; y <= trunkTopY; ++y)
+        setVoxelIfAir(x, y, z, BlockRegistry::Log);
+
+    // 紧贴主干顶两层（trunkTopY-1、trunkTopY）：3×3 去中心 → 绕主干八邻格叶。
+    for (int dy = -1; dy <= 0; ++dy) {
+        const int y = trunkTopY + dy;
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -1; dz <= 1; ++dz) {
+                if (dx == 0 && dz == 0) continue; // 主干所在列 → 保留原木
+                setVoxelIfAir(x + dx, y, z + dz, BlockRegistry::Leaves);
+            }
+    }
+    // 其上一层（trunkTopY+1）：3×3 去角 → 十字（中心+四正交），圆润收口。
+    for (int dx = -1; dx <= 1; ++dx)
+        for (int dz = -1; dz <= 1; ++dz) {
+            if (dx != 0 && dz != 0) continue; // 去四角
+            setVoxelIfAir(x + dx, trunkTopY + 1, z + dz, BlockRegistry::Leaves);
+        }
+    // 顶尖单叶。
+    setVoxelIfAir(x, trunkTopY + 2, z, BlockRegistry::Leaves);
+}
+
+// 确定性树木散布：遍历列，按哈希(seed,x,z) 决定是否尝试种树；占用栅格保证主干间距 ≥2 列。
+// 仅在 grass 表层（heightAt > sandLevel，与 generate() 地形填充同阈值）种；沙地/越界/近邻有树干 → 跳过。
+// 主干高度按世界高度钳制（留出树冠空间），放不下最小树则确定性跳过。全部纯函数于 seed → 可复现。
+void World::placeTrees()
+{
+    std::vector<char> occupied(size_t(m_width) * size_t(m_depth), 0); // 主干占用栅格（1=该列已有树干）
+
+    constexpr int kSandLevel   = 3; // 与 generate() 同阈值（h<=此为沙地，不种树）
+    constexpr int kMinTrunk    = 4; // 主干最少格数（dev-spec：4-6）
+    constexpr int kMaxTrunk    = 6;
+    constexpr int kCanopyExtra = 2; // 树冠在主干顶之上再升的格数（十字冠层 + 尖顶）
+    constexpr int kDensityPct  = 2; // 每 grass 列 ~2% 尝试 → 经间距筛选后零星分布（不密集成林）
+
+    int placed = 0;
+    for (int z = 0; z < m_depth; ++z) {
+        for (int x = 0; x < m_width; ++x) {
+            const int surfaceY = heightAt(x, z);
+            if (surfaceY <= kSandLevel) continue; // 沙地不种树
+
+            const quint32 r = hashColumn(m_seed, x, z);
+            if (r % 100u >= unsigned(kDensityPct)) continue; // 密度筛选
+
+            // 间距：主干列的 3×3 邻域（chebyshev 距离 ≤1）不得已有树干 → 保证主干间距 ≥2 列。
+            bool tooClose = false;
+            for (int dz = -1; dz <= 1 && !tooClose; ++dz) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const int nx = x + dx, nz = z + dz;
+                    if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
+                    if (occupied[size_t(nx) + size_t(m_width) * size_t(nz)]) { tooClose = true; break; }
+                }
+            }
+            if (tooClose) continue;
+
+            // 主干高度（哈希高位取 [kMinTrunk,kMaxTrunk]），按世界高度钳制使其不越界。
+            int trunkH = kMinTrunk + int((r >> 8) % unsigned(kMaxTrunk - kMinTrunk + 1));
+            const int maxTrunkH = (m_height - 1) - surfaceY - kCanopyExtra; // 留出树冠空间后主干上限
+            if (maxTrunkH < kMinTrunk) continue; // 此列放不下最小树 → 确定性跳过
+            if (trunkH > maxTrunkH) trunkH = maxTrunkH;
+
+            placeTreeAt(x, surfaceY, z, trunkH);
+            occupied[size_t(x) + size_t(m_width) * size_t(z)] = 1;
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: trees placed =" << placed; // 可观测：同 seed → 同计数（确定性核对）
 }
