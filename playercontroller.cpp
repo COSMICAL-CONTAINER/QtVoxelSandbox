@@ -65,6 +65,14 @@ void PlayerController::setKey(int key, bool pressed)
 }
 
 void PlayerController::cycleMode() { setMode(static_cast<Mode>((static_cast<int>(m_mode) + 1) % 3)); }
+
+// F5 相机模式循环（t27）：第一人称 → 第三人称-后 → 第三人称-前 → 回第一人称（0→1→2→0）。
+// 仅改标志 + 通知 QML（相机摆位在 Main.qml 据 cameraMode 算 position/eulerRotation）。
+void PlayerController::cycleCamera()
+{
+    m_cameraMode = static_cast<CameraMode>((static_cast<int>(m_cameraMode) + 1) % 3);
+    emit cameraModeChanged();
+}
 void PlayerController::setMode(Mode m)
 {
     if (m == m_mode) return;
@@ -119,6 +127,7 @@ void PlayerController::pollMouse()
         m_pitch = std::clamp(m_pitch - dy * kSens, -89.0f, 89.0f); // 屏幕Y下→上抬；夹±89防翻转
         emit yawChanged();
         emit pitchChanged();
+        emit lookChanged(); // 视线方向随 yaw/pitch 变（第三人称相机偏移绑定刷新，t27）
         QCursor::setPos(c); // 每帧回中 → 永不撞屏边（无限旋转）
     }
 }

@@ -93,8 +93,26 @@ Window {
 
         PerspectiveCamera {
             id: cam
-            position: player.position                                // 眼睛位置
-            eulerRotation: Qt.vector3d(player.pitch, player.yaw, 0)  // pitch→X, yaw→Y
+            // F5 相机模式循环（t27）：第一人称 / 第三人称-后 / 第三人称-前。
+            //   第一人称：眼位 + 欧拉 (pitch,yaw,0)
+            //   第三人称-后：眼位 − look·d + 欧拉 (pitch,yaw,0) —— 相机退到玩家身后朝前看，玩家在视野下前方
+            //   第三人称-前：眼位 + look·d + 欧拉 (−pitch,yaw+180,0) —— 相机绕到玩家正前方回看其正面
+            // lookVector 由 yaw/pitch 派生（PlayerController.lookDirection）；偏移沿视线方向，旋转据模式翻转。
+            // mode 标志属控制器（Game 层），摆位属 QML 呈现层（PLAN §2 分层）。
+            position: {
+                const eye = player.position
+                const look = player.lookVector
+                const d = 3.5
+                const m = player.cameraMode
+                if (m === PlayerController.FirstPerson) return eye
+                const s = (m === PlayerController.ThirdPersonBack) ? -d : d  // 后退 vs 前推
+                return Qt.vector3d(eye.x + look.x * s, eye.y + look.y * s, eye.z + look.z * s)
+            }
+            eulerRotation: {
+                if (player.cameraMode === PlayerController.ThirdPersonFront)
+                    return Qt.vector3d(-player.pitch, player.yaw + 180, 0) // 回看正面：俯仰反向 + 偏航 +180
+                return Qt.vector3d(player.pitch, player.yaw, 0)             // 第一人称 & 第三人称-后：朝前看
+            }
             clipNear: 0.05
             clipFar: 1000
         }
@@ -237,6 +255,7 @@ Window {
             if (e.key === Qt.Key_Escape && window.inventoryOpen) {
                 window.closeInventory(); e.accepted = true; return
             }
+            if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
             if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) {            // 1–9 直选 hotbar 槽 0..8（属性赋值走 WRITE setter）
                 hotbarVM.selectedSlot = e.key - Qt.Key_1; e.accepted = true; return
@@ -279,7 +298,7 @@ Window {
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "click to play"; color: "#bbbbbb"; font.pixelSize: 15
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[G] cycle mode   [1-9] select block   wheel cycle"
+                Text { text: "[G] cycle mode   [1-9] select block   wheel cycle   [F5] camera"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "[Esc] release   WASD move   Space jump/fly   Shift down"

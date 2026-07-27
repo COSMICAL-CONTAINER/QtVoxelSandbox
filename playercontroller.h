@@ -29,6 +29,12 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
     Q_PROPERTY(Mode mode READ mode NOTIFY modeChanged)
+    // 相机模式（t27）：F5 循环 第一人称→第三人称-后→第三人称-前→第一人称。模式标志属 PlayerController，
+    // 相机摆位属 QML 呈现层（按 cameraMode 算 position/eulerRotation）。feetPosition=脚底 m_pos
+    // （第三人称玩家模型绑它，t28）；lookVector=视线方向（第三人称相机沿视线偏移绑它）。
+    Q_PROPERTY(CameraMode cameraMode READ cameraMode NOTIFY cameraModeChanged)
+    Q_PROPERTY(QVector3D feetPosition READ feetPosition NOTIFY positionChanged)
+    Q_PROPERTY(QVector3D lookVector READ lookVector NOTIFY lookChanged)
     Q_PROPERTY(bool captured READ captured NOTIFY capturedChanged)
     Q_PROPERTY(bool onGround READ onGround NOTIFY onGroundChanged)
     Q_PROPERTY(bool flying READ flying NOTIFY flyingChanged)
@@ -54,6 +60,9 @@ class PlayerController : public QQuickItem
 public:
     enum Mode { Spectator, Creative, Survival };
     Q_ENUM(Mode)
+    // 相机视角（t27）：F5 循环 0→1→2→0。相机摆位在 QML（PerspectiveCamera）按此模式算。
+    enum CameraMode { FirstPerson, ThirdPersonBack, ThirdPersonFront };
+    Q_ENUM(CameraMode)
 
     explicit PlayerController(QQuickItem *parent = nullptr);
 
@@ -64,6 +73,9 @@ public:
     float yaw() const { return m_yaw; }
     float pitch() const { return m_pitch; }
     Mode mode() const { return m_mode; }
+    CameraMode cameraMode() const { return m_cameraMode; }
+    QVector3D feetPosition() const { return m_pos; }          // 脚底位置（= m_pos；第三人称玩家模型绑它）
+    QVector3D lookVector() const { return lookDirection(); }  // 视线方向（第三人称相机沿视线偏移绑它）
     bool captured() const { return m_captured; }
     bool onGround() const { return m_onGround; }
     bool flying() const { return m_flying; }
@@ -86,6 +98,7 @@ public:
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
     Q_INVOKABLE void setMode(Mode m);
+    Q_INVOKABLE void cycleCamera(); // F5 相机模式循环（0→1→2→0，t27）
     Q_INVOKABLE void grab();
     Q_INVOKABLE void release();
     // 破/放（t05）：仅指针捕获时生效；走当前射线命中结果 → World::setBlock。
@@ -98,6 +111,8 @@ signals:
     void yawChanged();
     void pitchChanged();
     void modeChanged();
+    void cameraModeChanged();
+    void lookChanged();
     void capturedChanged();
     void onGroundChanged();
     void flyingChanged();
@@ -136,6 +151,7 @@ private:
     QVector3D m_vel{0, 0, 0};
     float m_yaw = 0, m_pitch = -42;
     Mode m_mode = Spectator;
+    CameraMode m_cameraMode = FirstPerson; // F5 相机模式（默认第一人称，t27）
     bool m_captured = false, m_onGround = false;
     QHash<int, bool> m_keys;
     bool m_flying = false;          // 创造模式飞行子状态（双击空格切换；进创造默认走）
