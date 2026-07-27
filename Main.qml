@@ -137,7 +137,9 @@ Window {
                     source: "#Cube"
                     position: Qt.vector3d(0, -0.1, 0)
                     scale: Qt.vector3d(0.16, 0.2, 0.16)
-                    materials: PrincipledMaterial { baseColor: "#caa472" } // 肤色（与玩家模型头/手一致）
+                    // NoLighting：本工程所有可见 Model（地形/线框/粒子）均用 NoLighting——默认 lit
+                    // PrincipledMaterial 在本场景不渲染（手因此「完全透明」不可见）。改 NoLighting 后可见。
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472" }
                 }
             }
         }
@@ -256,42 +258,42 @@ Window {
                 source: "#Cube"
                 position: Qt.vector3d(0, 1.55, 0)
                 scale: Qt.vector3d(0.5, 0.5, 0.5)
-                materials: PrincipledMaterial { baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
             }
             // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）
             Model {
                 source: "#Cube"
                 position: Qt.vector3d(0, 0.95, 0)
                 scale: Qt.vector3d(0.5, 0.7, 0.3)
-                materials: PrincipledMaterial { baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
             // 左臂（上衣色；挂躯干两侧，与躯干同高）
             Model {
                 source: "#Cube"
                 position: Qt.vector3d(-0.375, 0.95, 0)
                 scale: Qt.vector3d(0.25, 0.7, 0.25)
-                materials: PrincipledMaterial { baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
             // 右臂
             Model {
                 source: "#Cube"
                 position: Qt.vector3d(0.375, 0.95, 0)
                 scale: Qt.vector3d(0.25, 0.7, 0.25)
-                materials: PrincipledMaterial { baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
             // 左腿（裤色；y 0→0.6）
             Model {
                 source: "#Cube"
                 position: Qt.vector3d(-0.125, 0.3, 0)
                 scale: Qt.vector3d(0.25, 0.6, 0.25)
-                materials: PrincipledMaterial { baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
             }
             // 右腿
             Model {
                 source: "#Cube"
                 position: Qt.vector3d(0.125, 0.3, 0)
                 scale: Qt.vector3d(0.25, 0.6, 0.25)
-                materials: PrincipledMaterial { baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
             }
         }
 
@@ -364,6 +366,10 @@ Window {
             player.setKey(e.key, true)
         }
         Keys.onReleased: (e) => { if (e.isAutoRepeat) return; player.setKey(e.key, false) }
+
+        // 光标位置追踪（背包内「手持物」浮动图标跟随鼠标用）。keyInput anchors.fill 窗口 →
+        // point.position 即窗口坐标，供下方 cursorHeld Item 定位。
+        HoverHandler { id: cursorTracker }
 
         // 滚轮循环切换 hotbar。WheelHandler 按指针位置抓取，与光标显隐/锁定无关，
         // 故捕获与未捕获都生效。只消费滚轮 —— 鼠标按键仍走 C++ 窗口级事件过滤（破/放）。
@@ -521,12 +527,11 @@ Window {
             width: hotbarBar.slotSize + 2 * hotbarBar.selMargin
             height: hotbarBar.slotSize + 2 * hotbarBar.selMargin
             Behavior on x { NumberAnimation { duration: 70; easing.type: Easing.OutQuad } }
-            // 凸起边框：顶/左 亮
-            Rectangle { color: "#e8e8e8"; width: parent.width; height: 2; anchors.top: parent.top }
-            Rectangle { color: "#e8e8e8"; width: 2; height: parent.height; anchors.left: parent.left }
-            // 凸起边框：底/右 暗
-            Rectangle { color: "#3a3a3a"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
-            Rectangle { color: "#3a3a3a"; width: 2; height: parent.height; anchors.right: parent.right }
+            // 选框：四边统一白色（用户反馈「只左/上白、右/下灰不协调」→ 去掉 raised bevel 的暗底/右）。
+            Rectangle { color: "#ffffff"; width: parent.width; height: 2; anchors.top: parent.top }
+            Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.left: parent.left }
+            Rectangle { color: "#ffffff"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
+            Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.right: parent.right }
         }
     }
 
@@ -622,5 +627,21 @@ Window {
                  && player.mode === PlayerController.Survival
         z: 150
         onClosed: window.closeInventory()
+    }
+
+    // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品；hotbarVM.heldBlock 驱动）。
+    // 仅背包打开且手持非空时显，z 最高（盖过背包面板 z=150）。位置跟随 cursorTracker（窗口坐标）。
+    Item {
+        visible: window.inventoryOpen && hotbarVM.heldBlock !== 0
+        z: 300
+        x: cursorTracker.point.position.x - 16
+        y: cursorTracker.point.position.y - 16
+        width: 32; height: 32
+        Image {
+            anchors.fill: parent
+            source: hotbarVM.iconSourceForBlock(hotbarVM.heldBlock)
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+        }
     }
 }

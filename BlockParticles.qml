@@ -98,9 +98,9 @@ Node {
             emitRate: 0
             lifeSpan: 900
             lifeSpanVariation: 200
-            particleScale: 1.0   // 不依赖 emitter.particleScale 缩 #Cube（对内置 primitive delegate 不可靠，
-                                 // 且 delegate 显式 scale 会覆盖它 → 旧值 0.14 失效、渲染成满屏大方块）；
-                                 // 碎屑实际大小由 debrisDelegate 自身 scale 决定（0.12 单位 ≈ 一成方块）。
+            particleScale: 0.15  // 碎屑实际大小由此值决定（实测：delegate 显式 scale 被 ModelParticle3D
+                                 // 忽略——旧 particleScale 1.0 时即便 delegate scale 0.12 仍渲染成 1 格大方块
+                                 // 迸发满屏；故改为小 particleScale 直接缩放实例。delegate 仍留 0.12 作双保险）。
             particleRotationVelocityVariation: Qt.vector3d(200, 200, 200)
             velocity: VectorDirection3D {
                 direction: Qt.vector3d(0, 3.5, 0)
@@ -115,7 +115,7 @@ Node {
             emitRate: 0
             lifeSpan: 700
             lifeSpanVariation: 150
-            particleScale: 1.0   // 同 breakEmitter：大小由 delegate 自身 scale 决定，不靠 particleScale。
+            particleScale: 0.12  // 同 breakEmitter：大小由 particleScale 直接缩放（见上注）。
             velocity: VectorDirection3D {
                 direction: Qt.vector3d(0, 1.0, 0)
                 directionVariation: Qt.vector3d(2.5, 1.5, 2.5)
@@ -124,8 +124,8 @@ Node {
     }
 
     // 小体素碎屑：白色 PrincipledMaterial 使粒子 color 着色生效；NoLighting 保证亮度恒定（与地形 Model 同策略，
-    // 不受方向光/昼夜影响）。**尺寸由 delegate 自身 scale 决定（0.12 单位 ≈ 一成方块大小的碎屑）**——
-    // 不靠 emitter.particleScale（其对 #Cube 内置 primitive 缩放不可靠，旧值 0.14 失效 → 渲染成满屏大方块）。
+    // 不受方向光/昼夜影响）。**尺寸由 emitter.particleScale 决定**（实测 delegate 显式 scale 被
+    // ModelParticle3D 实例化忽略——仅留 0.12 作双保险，真实缩放见上 emitter.particleScale 注释）。
     Component {
         id: debrisDelegate
         Model {

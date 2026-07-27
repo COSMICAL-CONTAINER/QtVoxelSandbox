@@ -129,3 +129,12 @@ void Hotbar::setSlotBlock(int slot, int blockId)
     // 刷新；非选中槽变更不发，避免无谓重算。
     if (slot == m_selectedSlot) emit selectedSlotChanged();
 }
+
+// 光标手持物写入（背包点击拾取/放置）。clamp 到合法 id 区间（air=0 允许 = 丢弃手持）；变化才发信号。
+void Hotbar::setHeldBlock(int id)
+{
+    if (id < 0 || id >= int(BlockRegistry::Count)) return;
+    if (id == m_heldBlock) return;
+    m_heldBlock = id;
+    emit heldBlockChanged();
+}

@@ -151,10 +151,11 @@ void World::setVoxelIfAir(int x, int y, int z, quint8 id)
     m_chunks.setBlock(x, y, z, id);
 }
 
-// 单棵橡树：surfaceY=草顶 y；主干 trunkH 格原木(id5)从 surfaceY+1 起；顶部树叶(id7)球冠。
-// 球冠形状：紧贴主干顶两层 3×3 去中心（绕主干八邻格叶）→ 其上一层 3×3 去角（十字 5 叶）→ 顶尖 1 叶。
-// 主干先置、树冠后置且仅写空气格 → 树冠绝不覆盖主干。
-void World::placeTreeAt(int x, int surfaceY, int z, int trunkH)
+// 单棵橡树：surfaceY=草顶 y；主干 trunkH 格原木(id5)从 surfaceY+1 起；顶部树叶(id7)树冠。
+// 树冠四层（贴近 MC 橡树「底宽上尖」）：底层 5×5（四角按 leafRand 随机有无 → 每棵轮廓各异）、
+// 次层 3×3 去中心、第三层 3×3 去角（十字）、顶尖 1 叶。leafRand 由调用方从 hashColumn 高位传入
+// （PLAN §2-K：纯 seed 派生，确定性）。主干先置、树冠后置且仅写空气格 → 树冠绝不覆盖主干。
+void World::placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand)
 {
     const int trunkBase = surfaceY + 1;
     const int trunkTopY = trunkBase + trunkH - 1;
@@ -163,16 +164,28 @@ void World::placeTreeAt(int x, int surfaceY, int z, int trunkH)
     for (int y = trunkBase; y <= trunkTopY; ++y)
         setVoxelIfAir(x, y, z, BlockRegistry::Log);
 
-    // 紧贴主干顶两层（trunkTopY-1、trunkTopY）：3×3 去中心 → 绕主干八邻格叶。
-    for (int dy = -1; dy <= 0; ++dy) {
-        const int y = trunkTopY + dy;
-        for (int dx = -1; dx <= 1; ++dx)
-            for (int dz = -1; dz <= 1; ++dz) {
-                if (dx == 0 && dz == 0) continue; // 主干所在列 → 保留原木
-                setVoxelIfAir(x + dx, y, z + dz, BlockRegistry::Leaves);
+    const auto absi = [](int v) { return v < 0 ? -v : v; };
+
+    // 底层（trunkTopY-1）：5×5 去中心。四角（|dx|=2 且 |dz|=2）按 leafRand 低 4 位各一位决定有无
+    // → 树冠底部轮廓每棵不同（有的方、有的圆/缺角）。边中点(±2,0)/(0,±2) 与 (±1,±1) 常置。
+    const int yLow = trunkTopY - 1;
+    for (int dx = -2; dx <= 2; ++dx) {
+        for (int dz = -2; dz <= 2; ++dz) {
+            if (dx == 0 && dz == 0) continue; // 主干列保留原木
+            if (absi(dx) == 2 && absi(dz) == 2) {
+                const unsigned bit = (dx > 0 ? 1u : 0u) + (dz > 0 ? 2u : 0u); // 0..3 → 四角各一位
+                if (!((leafRand >> bit) & 1u)) continue; // 该角本轮不生叶
             }
+            setVoxelIfAir(x + dx, yLow, z + dz, BlockRegistry::Leaves);
+        }
     }
-    // 其上一层（trunkTopY+1）：3×3 去角 → 十字（中心+四正交），圆润收口。
+    // 次层（trunkTopY）：3×3 去中心 → 绕主干八邻格叶。
+    for (int dx = -1; dx <= 1; ++dx)
+        for (int dz = -1; dz <= 1; ++dz) {
+            if (dx == 0 && dz == 0) continue;
+            setVoxelIfAir(x + dx, trunkTopY, z + dz, BlockRegistry::Leaves);
+        }
+    // 第三层（trunkTopY+1）：3×3 去角 → 十字（中心+四正交），圆润收口。
     for (int dx = -1; dx <= 1; ++dx)
         for (int dz = -1; dz <= 1; ++dz) {
             if (dx != 0 && dz != 0) continue; // 去四角
@@ -190,8 +203,8 @@ void World::placeTrees()
     std::vector<char> occupied(size_t(m_width) * size_t(m_depth), 0); // 主干占用栅格（1=该列已有树干）
 
     constexpr int kSandLevel   = 3; // 与 generate() 同阈值（h<=此为沙地，不种树）
-    constexpr int kMinTrunk    = 4; // 主干最少格数（dev-spec：4-6）
-    constexpr int kMaxTrunk    = 6;
+    constexpr int kMinTrunk    = 4; // 主干最少格数
+    constexpr int kMaxTrunk    = 7; // 最多 7（低洼处可达）；高处按世界高度钳到 4 → 高度自然参差（用户诉求）
     constexpr int kCanopyExtra = 2; // 树冠在主干顶之上再升的格数（十字冠层 + 尖顶）
     constexpr int kDensityPct  = 2; // 每 grass 列 ~2% 尝试 → 经间距筛选后零星分布（不密集成林）
 
@@ -221,7 +234,8 @@ void World::placeTrees()
             if (maxTrunkH < kMinTrunk) continue; // 此列放不下最小树 → 确定性跳过
             if (trunkH > maxTrunkH) trunkH = maxTrunkH;
 
-            placeTreeAt(x, surfaceY, z, trunkH);
+            // leafRand = 哈希高位 → 驱动树冠四角叶随机（每棵轮廓各异）；与密度(低位)/高度(>>8)字段不重叠。
+            placeTreeAt(x, surfaceY, z, trunkH, r >> 16);
             occupied[size_t(x) + size_t(m_width) * size_t(z)] = 1;
             ++placed;
         }

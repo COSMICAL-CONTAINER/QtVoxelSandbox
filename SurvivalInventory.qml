@@ -31,11 +31,19 @@ Item {
     readonly property int mainRows: 3
     readonly property int armorCount: 4
 
-    // 半透明遮罩：点击空白处 → 关闭（同创造背包交互）。
+    // 主栏 / 合成格的本地物品存储（真实物品系统 / 合成配方解析属 Phase 1.1；本屏先支持点击拾取/放置，
+    // 把「物品在背包内移动」核心交互打通——与 hotbar 槽共享同一 hotbar VM 的 heldBlock 光标手持物）。
+    // air=0=空槽。数组元素改写不触发 QML 绑定，故配 mainRev/craftRev 版本号让 Image source 重算。
+    property var mainSlots: [0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0] // 3×9=27
+    property int mainRev: 0
+    property var craftSlots: [0,0,0,0] // 2×2 合成格（占位；配方解析属 Phase 1.1，结果槽暂不产出）
+    property int craftRev: 0
+
+    // 半透明遮罩：仅吸收点击（防穿透到背后游戏层），**不关闭背包**——用户要求背包只能 E / Esc 关闭。
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.6)
-        MouseArea { anchors.fill: parent; onClicked: root.closed() }
+        MouseArea { anchors.fill: parent } // 吸收点击（无 onClicked → 不关闭）
     }
 
     // 面板：深色圆角，居中。尺寸由内容（标题 + 顶部区 + 主栏 + hotbar）精确推出。
@@ -83,7 +91,26 @@ Item {
                         model: 4
                         delegate: Item {
                             width: root.slotSize; height: root.slotSize
-                            InvSlot { anchors.fill: parent; wellColor: "#262b30" } // 更暗井底表「占位 / 无内容」
+                            InvSlot { anchors.fill: parent; wellColor: "#262b30" }
+                            Image {
+                                anchors.centerIn: parent
+                                width: 30; height: 30
+                                visible: { root.craftRev; return (root.craftSlots[index] || 0) !== 0 }
+                                source: root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0)
+                                fillMode: Image.PreserveAspectFit; smooth: true
+                            }
+                            // 点击拾取/放置（与主栏同模式；配方解析属 Phase 1.1，结果槽暂不产出）。
+                            TapHandler {
+                                onTapped: {
+                                    const cur = root.craftSlots[index] || 0
+                                    if (root.hotbar.heldBlock === 0) {
+                                        if (cur !== 0) { root.craftSlots[index] = 0; root.craftRev++ }
+                                    } else {
+                                        root.craftSlots[index] = root.hotbar.heldBlock; root.craftRev++
+                                        root.hotbar.heldBlock = cur
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -185,7 +212,7 @@ Item {
                 }
             }
 
-            // ③ 3×9 主栏（27 槽）：占位空槽（物品栈 / 采集属 Phase 1.1）。
+            // ③ 3×9 主栏（27 槽）：点击拾取/放置方块（本地 mainSlots 存储；与 hotbar/合成格共享光标手持物）。
             Grid {
                 width: root.mainCols * root.slotSize
                 height: root.mainRows * root.slotSize
@@ -195,6 +222,24 @@ Item {
                     delegate: Item {
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent }
+                        Image {
+                            anchors.centerIn: parent
+                            width: 30; height: 30
+                            visible: { root.mainRev; return (root.mainSlots[index] || 0) !== 0 }
+                            source: root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0)
+                            fillMode: Image.PreserveAspectFit; smooth: true
+                        }
+                        TapHandler {
+                            onTapped: {
+                                const cur = root.mainSlots[index] || 0
+                                if (root.hotbar.heldBlock === 0) {
+                                    if (cur !== 0) { root.mainSlots[index] = 0; root.mainRev++ }
+                                } else {
+                                    root.mainSlots[index] = root.hotbar.heldBlock; root.mainRev++
+                                    root.hotbar.heldBlock = cur
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -221,8 +266,19 @@ Item {
                                 fillMode: Image.PreserveAspectFit
                                 smooth: true
                             }
-                            // tap → 选中该槽（与游戏内 1–9 / 滚轮同效果；选中后右键放置 = 该槽方块）。
-                            TapHandler { onTapped: root.hotbar.selectedSlot = index }
+                            // tap → 拾取/放置（同创造背包 hotbar 槽；并选中该槽 = 游戏内 1–9 / 滚轮等效）。
+                            TapHandler {
+                                onTapped: {
+                                    const cur = root.hotbar.blockIdAt(index)
+                                    if (root.hotbar.heldBlock === 0) {
+                                        if (cur !== 0) { root.hotbar.heldBlock = cur; root.hotbar.setSlotBlock(index, 0) }
+                                    } else {
+                                        root.hotbar.setSlotBlock(index, root.hotbar.heldBlock)
+                                        root.hotbar.heldBlock = cur
+                                    }
+                                    root.hotbar.selectedSlot = index
+                                }
+                            }
                         }
                     }
                 }
@@ -235,10 +291,11 @@ Item {
                     y: -1
                     width: root.slotSize + 2; height: root.slotSize + 2
                     Behavior on x { NumberAnimation { duration: 70; easing.type: Easing.OutQuad } }
-                    Rectangle { color: "#e8e8e8"; width: parent.width; height: 2; anchors.top: parent.top }
-                    Rectangle { color: "#e8e8e8"; width: 2; height: parent.height; anchors.left: parent.left }
-                    Rectangle { color: "#3a3a3a"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
-                    Rectangle { color: "#3a3a3a"; width: 2; height: parent.height; anchors.right: parent.right }
+                    // 选框四边统一白色（用户反馈右/下灰不协调 → 去 raised bevel 暗边）。
+                    Rectangle { color: "#ffffff"; width: parent.width; height: 2; anchors.top: parent.top }
+                    Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.left: parent.left }
+                    Rectangle { color: "#ffffff"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
+                    Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.right: parent.right }
                 }
             }
         }

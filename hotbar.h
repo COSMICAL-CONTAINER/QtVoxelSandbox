@@ -39,6 +39,9 @@ class Hotbar : public QObject
     Q_PROPERTY(int selectedBlockId READ selectedBlockId NOTIFY selectedSlotChanged)
     Q_PROPERTY(int slotCount READ slotCount CONSTANT)
     Q_PROPERTY(int slotRevision READ slotRevision NOTIFY slotsChanged)
+    // 光标手持方块（背包内点击拾取/放置的「拿在鼠标上的物品」，0=空手）。创造/生存背包共用同一 VM
+    // → 两面板共享同一「手持物」状态（在创造背包拾起、切生存背包仍持着）。Main.qml 据此画跟随光标的浮动图标。
+    Q_PROPERTY(int heldBlock READ heldBlock WRITE setHeldBlock NOTIFY heldBlockChanged)
 
 public:
     explicit Hotbar(QObject *parent = nullptr);
@@ -48,6 +51,8 @@ public:
     void setSelectedSlot(int slot);
     int selectedBlockId() const;
     int slotRevision() const { return m_slotRevision; }
+    int heldBlock() const { return m_heldBlock; }
+    void setHeldBlock(int id);
 
     // 每槽方块 id（air=0 即空槽）。越界返回 0。
     Q_INVOKABLE int blockIdAt(int slot) const;
@@ -72,6 +77,7 @@ signals:
     void selectedSlotChanged();
     // 槽内容变更（setSlotBlock）。同时驱动 slotRevision 自增 → QML model 绑定整列重建。
     void slotsChanged();
+    void heldBlockChanged(); // 光标手持物变更（拾取/放置/丢弃）→ Main.qml 浮动图标显隐刷新
 
 private:
     // 9 槽（可写：创造背包装备改写）；预置 §4 的 8 方块，第 9 槽留空（air =「无放置」槽）。
@@ -79,6 +85,7 @@ private:
     std::vector<quint8> m_slots;
     int m_selectedSlot = 0;
     int m_slotRevision = 0; // 槽内容版本号：每次 setSlotBlock 自增，供 QML 绑定作 NOTIFY 触发器
+    int m_heldBlock = 0;    // 光标手持方块 id（背包点击拾取/放置；0=空手）。跨创造/生存背包共享。
 };
 
 #endif // HOTBAR_H

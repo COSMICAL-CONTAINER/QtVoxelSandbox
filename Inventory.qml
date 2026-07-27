@@ -41,11 +41,12 @@ Item {
     readonly property int bevelDark: 0       // 凹陷斜面：顶/左 暗边
     readonly property int bevelLight: 0      // 凹陷斜面：底/右 亮边
 
-    // 半透明遮罩：点击遮罩任意空白处 → 关闭（类暂停叠层的「点外恢复」交互）。
+    // 半透明遮罩：仅吸收点击（防穿透到背后的游戏/暂停层），**不关闭背包**——用户要求背包只能由
+    // E / Esc 关闭（点背包 UI 外部不应关闭）。
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.6)
-        MouseArea { anchors.fill: parent; onClicked: root.closed() }
+        MouseArea { anchors.fill: parent } // 吸收点击（无 onClicked → 不关闭）
     }
 
     // 面板：深色圆角，居中。
@@ -143,7 +144,8 @@ Item {
                                 border.width: 2
                             }
 
-                            // hover → 状态行中文名；click → 装入当前选中 hotbar 槽（t18 行为保留）。
+                            // hover → 状态行中文名；click → 拾取到光标（创造调色板=无限源：点击即「拿在鼠标上」，
+                            // 再点 hotbar 槽放置。MC 创造背包交互）。
                             HoverHandler {
                                 id: cellHover
                                 enabled: modelData !== 0
@@ -151,7 +153,7 @@ Item {
                             }
                             TapHandler {
                                 enabled: modelData !== 0
-                                onTapped: root.hotbar.setSlotBlock(root.hotbar.selectedSlot, modelData)
+                                onTapped: root.hotbar.heldBlock = modelData // 拾取到光标（无限源，不清减调色板）
                             }
                         }
                     }
@@ -221,12 +223,26 @@ Item {
                                     }
                                 }
 
-                                // hover → 状态行中文名；tap → 选中该槽（下次点调色板即装入此处）。
+                                // hover → 状态行中文名；tap → 拾取/放置（MC 背包交互）：
+                                //   空手点有物槽 → 拾取（槽清空、手持=该方块）；
+                                //   持物点任意槽 → 放入（与槽内现有物互换：槽←手持、手持←旧槽内容）。
+                                //   同时选中该槽（右键放置即用此槽方块）。拖到销毁槽仍走上面的 DragHandler。
                                 HoverHandler {
                                     id: slotHover
                                     onHoveredChanged: if (hovered) root.hoveredName = root.hotbar.nameForBlock(modelData)
                                 }
-                                TapHandler { onTapped: root.hotbar.selectedSlot = index }
+                                TapHandler {
+                                    onTapped: {
+                                        const cur = root.hotbar.blockIdAt(index)
+                                        if (root.hotbar.heldBlock === 0) {
+                                            if (cur !== 0) { root.hotbar.heldBlock = cur; root.hotbar.setSlotBlock(index, 0) }
+                                        } else {
+                                            root.hotbar.setSlotBlock(index, root.hotbar.heldBlock)
+                                            root.hotbar.heldBlock = cur
+                                        }
+                                        root.hotbar.selectedSlot = index
+                                    }
+                                }
                             }
                         }
                     }
@@ -239,10 +255,11 @@ Item {
                         width: root.slotSize + 2
                         height: root.slotSize + 2
                         Behavior on x { NumberAnimation { duration: 70; easing.type: Easing.OutQuad } }
-                        Rectangle { color: "#e8e8e8"; width: parent.width; height: 2; anchors.top: parent.top }
-                        Rectangle { color: "#e8e8e8"; width: 2; height: parent.height; anchors.left: parent.left }
-                        Rectangle { color: "#3a3a3a"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
-                        Rectangle { color: "#3a3a3a"; width: 2; height: parent.height; anchors.right: parent.right }
+                        // 选框四边统一白色（用户反馈右/下灰不协调 → 去 raised bevel 暗边）。
+                        Rectangle { color: "#ffffff"; width: parent.width; height: 2; anchors.top: parent.top }
+                        Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.left: parent.left }
+                        Rectangle { color: "#ffffff"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
+                        Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.right: parent.right }
                     }
                 }
 
@@ -285,6 +302,8 @@ Item {
                         }
                     }
 
+                    // 点击销毁槽 → 丢弃当前手持物（与拖入销毁等效，提供点击路径）。
+                    TapHandler { onTapped: root.hotbar.heldBlock = 0 }
                     DropArea {
                         id: destroyDrop
                         anchors.fill: parent
