@@ -42,6 +42,8 @@ qt_add_qml_module(voxelsandbox
         BlockParticles.qml
         MainMenu.qml
         Inventory.qml
+        InvSlot.qml
+        SurvivalInventory.qml
         VitalIcon.qml
 )
 

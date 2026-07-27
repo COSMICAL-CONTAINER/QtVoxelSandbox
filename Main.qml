@@ -38,9 +38,11 @@ Window {
     }
     function openInventory() {
         if (appState !== "playing" || inventoryOpen) return
-        // t23：E 键按模式分流 —— 仅创造模式开创造背包（t23）；生存模式开 t24 生存背包（未实现 → 暂无操作）；
-        // 观察者模式 E 无反应（t21：观察者无背包/破放）。指针捕获/未捕获都走此分流（keyInput 始终持焦点）。
-        if (player.mode !== PlayerController.Creative) return
+        // t23/t24：E 键按模式分流 —— 创造模式开创造背包（t23 Inventory）；生存模式开生存背包（t24
+        // SurvivalInventory）；观察者模式 E 无反应（t21：观察者无背包/破放）。inventoryOpen 只是「背包层
+        // 在显」，显哪个面板由各组件 visible 绑定 player.mode 决定（Creative→Inventory / Survival→SurvivalInventory）。
+        // 指针捕获/未捕获都走此分流（keyInput 始终持焦点）。
+        if (player.mode === PlayerController.Spectator) return
         inventoryOpen = true
         player.release() // 释放指针 → 光标可见（点击/拖拽背包格子）；暂停叠层被 inventoryOpen 抑制
     }
@@ -72,10 +74,11 @@ Window {
     Connections {
         target: player
         function onFallDamageTaken(hp) { playerState.takeDamage(hp) }
-        // t23：离开创造模式（G 循环切走）时若创造背包仍开 → 关闭。避免创造背包在生存/观察者态下滞留
-        // （创造背包仅 Creative 有意义；切走即收起，与「Survival/Spectator E 不开创造背包」一致）。
+        // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换
+        // 则保留背包打开，面板由各组件 visible 绑定 player.mode 自动换（创造背包↔生存背包）。避免任一
+        // 背包在不兼容模式下滞留（Spectator 无背包/破放，t21）。
         function onModeChanged() {
-            if (window.inventoryOpen && player.mode !== PlayerController.Creative)
+            if (window.inventoryOpen && player.mode === PlayerController.Spectator)
                 window.closeInventory()
         }
     }
@@ -472,15 +475,31 @@ Window {
     }
 
     // 创造背包 1.0（t23，t18 升级）：可滚动全方块调色板 + 底部 9 槽 hotbar 栏（同步游戏内）+ 销毁槽。
-    // 仅 playing && inventoryOpen 时显；openInventory 已按模式分流（Creative 才开，Survival→t24/Spectator 无反应）。
-    // z 高于暂停叠层(100)/HUD，低于主菜单(200)。方块集 / 图标 / 中文名 / 槽位改写全部经 hotbar VM
-    // （ViewModel 读 BlockRegistry）；本组件只做呈现 + 输入转发。关闭（closed 信号）→ 宿主恢复 grab。
+    // 仅 playing && inventoryOpen && Creative 时显（t23/t24 E 键分流：Creative→本面板，Survival→生存背包，
+    // Spectator 无反应）。z 高于暂停叠层(100)/HUD，低于主菜单(200)。方块集 / 图标 / 中文名 / 槽位改写
+    // 全部经 hotbar VM（ViewModel 读 BlockRegistry）；本组件只做呈现 + 输入转发。关闭（closed 信号）→ 宿主恢复 grab。
     // 仅依赖 QtQuick（无特殊模块），直接实例化（非 Loader 隔离）。
     Inventory {
         id: inventoryPanel
         anchors.fill: parent
         hotbar: hotbarVM
         visible: window.appState === "playing" && window.inventoryOpen
+                 && player.mode === PlayerController.Creative
+        z: 150
+        onClosed: window.closeInventory()
+    }
+
+    // 生存背包 1.0（t24）：2×2 合成 + 结果槽 + 4 护甲槽 + 角色预览 + 3×9 主栏 + 9 槽 hotbar 栏。
+    // 仅 playing && inventoryOpen && Survival 时显（与创造背包互斥共享 E 键分流）。合成 / 护甲 / 主栏
+    // 为占位（Phase 1.1 真实逻辑），槽位布局存在且不崩即满足验收。hotbar 栏同步游戏内 hotbar（读 VM、
+    // 点击切换选中槽）。全部槽框 / 护甲图 / 角色预览自绘原创（§9 override (a)）。关闭（closed 信号）→ 宿主恢复 grab。
+    // 仅依赖 QtQuick（无特殊模块），直接实例化（非 Loader 隔离）—— 加载失败即 app 致命，故无需降级。
+    SurvivalInventory {
+        id: survivalPanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        visible: window.appState === "playing" && window.inventoryOpen
+                 && player.mode === PlayerController.Survival
         z: 150
         onClosed: window.closeInventory()
     }
