@@ -22,7 +22,8 @@
 //
 // 方块 id 与每面瓦片映射见 BlockRegistry（单一权威）；本类只读它做网格化。
 // 图集瓦片顺序（须与 tools/build_atlas.py 一致）：
-//   0=grass_top 1=grass_side 2=dirt 3=stone 4=sand（5..9 待 t12 重建图集后生效）
+//   0=grass_top 1=grass_side 2=dirt 3=stone 4=sand
+//   5=cobble 6=log_top 7=log_side 8=planks 9=leaves（N=10）
 class ChunkGeometry : public QQuick3DGeometry
 {
     Q_OBJECT

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """把地形瓦片拼成水平条带纹理图集 atlas.png。
 
-瓦片顺序必须与 chunkgeometry.cpp 里的图集索引一致：
-  0 grass_top, 1 grass_side, 2 dirt, 3 stone, 4 sand
+瓦片顺序必须与 chunkgeometry.cpp 的 N + BlockRegistry::tileIndex 注释一致
+（一个偏差即渗色/错贴）：
+  0 grass_top / 1 grass_side / 2 dirt / 3 stone / 4 sand
+  5 cobble / 6 log_top / 7 log_side / 8 planks / 9 leaves
 （CC0 资产，来源见 docs/PLAN.md §L 资产管线。）
 """
 import os
@@ -10,11 +12,16 @@ from PIL import Image
 
 TILE = 16
 TILES = [
-    "default_grass_top",
-    "default_grass_side",
-    "default_dirt",
-    "default_stone",
-    "default_sand",
+    "default_grass_top",   # 0 grass_top
+    "default_grass_side",  # 1 grass_side
+    "default_dirt",        # 2 dirt
+    "default_stone",       # 3 stone
+    "default_sand",        # 4 sand
+    "default_cobble",      # 5 cobble
+    "default_tree_top",    # 6 log_top
+    "default_tree",        # 7 log_side
+    "default_wood",        # 8 planks
+    "default_leaves",      # 9 leaves
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

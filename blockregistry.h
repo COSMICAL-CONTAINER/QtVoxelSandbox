@@ -50,7 +50,7 @@ public:
     // 瓦片顺序（一个偏差即渗色/错贴）：
     //   0=grass_top 1=grass_side 2=dirt 3=stone 4=sand
     //   5=cobble 6=log_top 7=log_side 8=planks 9=leaves
-    // 当前图集仅打包前 5 瓦片（0..4）；5..9 为新增方块预留，t12 重建图集后生效。
+    // 图集由 tools/build_atlas.py 打包全部 10 瓦片；mesher N=10 与之严格对齐。
     static int tileIndex(quint8 blockId, Face face);
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；其余均 true。

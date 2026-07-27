@@ -97,10 +97,12 @@ void ChunkGeometry::buildMesh()
         idx.reserve(8192);
     }
 
-    // 图集瓦片横排：当前 5 瓦片（80×16）。BlockRegistry 已为 8 方块定义 0..9 序号，
-    // 但新增 4 方块的瓦片（5..9）要等 t12 重建图集后才打包进来——届时 N 提到 10。
-    // 半纹素内缩防溢出。
-    constexpr int N = 5;
+    // 图集瓦片横排：10 瓦片（160×16）。BlockRegistry 为 8 方块定义 0..9 序号，
+    // 与 tools/build_atlas.py 打包顺序严格一致（一个偏差即渗色/错贴）：
+    //   0=grass_top 1=grass_side 2=dirt 3=stone 4=sand
+    //   5=cobble 6=log_top 7=log_side 8=planks 9=leaves
+    // 半纹素内缩防渗色（线性采样跨瓦片）。
+    constexpr int N = 10;
     constexpr float tileW = 1.0f / N;
     constexpr float hx = 0.5f / (N * 16);
     constexpr float hy = 0.5f / 16;
