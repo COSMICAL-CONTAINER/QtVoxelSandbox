@@ -5,16 +5,18 @@ import QtQuick
 //
 // 贴近 MC 1.0 生存背包布局（spec 验收项；左右方位修正：人物装备栏在**左**、合成在**右**，对齐 1.0）：
 //   ① 左上 4 护甲槽（头 / 胸 / 腿 / 脚，纵向）+ 角色预览（自绘人形剪影占位；真实装备 / 3D 模型属 Phase 1.1）；
-//   ② 右上 2×2 合成格 + 箭头 + 结果槽（合成功能属 Phase 1.1，本屏为**占位空槽**，spec 明确标注）；
-//   ③ 下部 3×9=27 主栏（物品栈 / 采集属 Phase 1.1，本屏为**占位空槽**）；
-//   ④ 最底 9 槽 hotbar 栏（同步游戏内 hotbar：读 hotbar VM，点击切换选中槽 + 选中选框）。
+//   ② 右上 2×2 合成格 + 箭头 + 结果槽（合成**功能**属 Phase 1.1；槽位本身参与 t38 物品移动）；
+//   ③ 下部 3×9=27 主栏（t32/t38：本地 ItemStack store，左键整组拾取 / 放置 / 合并 / 互换）；
+//   ④ 最底 9 槽 hotbar 栏（同步游戏内 hotbar：读 hotbar VM，左键同 t38 栈操作 + 选中该槽）。
 //
-// 本组件只做**呈现 + hotbar 选择转发**：方块集 / 图标 / 中文名 / 槽位数据全部经注入的 hotbar VM
-// （ViewModel 读 BlockRegistry，PLAN §2 分层：UI 不另持方块表副本）。合成 / 护甲 / 主栏为占位
-// （Phase 1.1 真实逻辑），槽位布局存在且不崩即满足本任务验收。全部槽框 / 护甲图 / 角色预览本项目
-// 自绘原创（InvSlot 凹陷槽 + Canvas 像素图，无外部 MC GUI PNG；§9 override (a)）。零 MC 专有名词（§9）。
+// 本组件做**呈现 + 左键整组栈操作**：方块集 / 图标 / 中文名 / 槽位数据全部经注入的 hotbar VM
+// （ViewModel 读 BlockRegistry，PLAN §2 分层：UI 不另持方块表副本）。主栏 / 合成格为本地 ItemStack
+// store（与 hotbar 9 槽共享同一 hotbar VM 的 heldBlock/heldCount 光标手持栈）；合成配方解析 / 护甲装备
+// 真实逻辑属 Phase 1.1。全部槽框 / 护甲图 / 角色预览本项目自绘原创（InvSlot 凹陷槽 + Canvas 像素图，
+// 无外部 MC GUI PNG；§9 override (a)）。零 MC 专有名词（§9）。
 //
 // 宿主负责指针态：背包打开时已 release（光标可见，可点 hotbar 槽）；关闭（closed 信号）→ 宿主恢复 grab。
+// 光标手持物浮动图标在宿主 Main.qml（z=300，enabled:false 不挡点击 —— 见 t37 修复）。
 
 Item {
     id: root
@@ -41,6 +43,41 @@ Item {
     property var craftSlots: [0,0,0,0] // 2×2 合成格（占位；配方解析属 Phase 1.1，结果槽暂不产出）
     property var craftCounts:[0,0,0,0] // 平行数量
     property int craftRev: 0
+
+    // t38 生存左键整组栈操作的核心算法。给定目标槽当前 (curId, curCount) 与 hotbar VM 的手持栈
+    // (heldBlock, heldCount)，返回应写入的 {slotId, slotCount, heldId, heldCount}；返回 null = 无操作。
+    // 4 种 case（spec「左键 → 整组到 heldStack；点空槽放整组；点同 id 合并至 64 余留 held；点异 id 互换」）：
+    //   A 手持空 + 槽非空：拾取整栈（槽清空、held ← 该栈）。
+    //   B 手持非空 + 槽空：放置整栈（槽 ← held、held 清空）。
+    //   C 手持非空 + 同 id：合并至 maxStackSize(id)（方块 64 / 工具段 1），余数留 held；槽已满则无操作。
+    //   D 手持非空 + 异 id：互换（槽 ↔ held）。
+    // 主栏 / 合成格 / hotbar 槽三类槽位共用此算法：调用方据返回值写入对应存储
+    // （主栏 / 合成格 → 本地数组 + bump 对应 rev；hotbar 槽 → 走 hotbar.setStack）。手持栈状态由
+    // hotbar VM 单一持有（heldBlock/heldCount），创造 / 生存共享，跨面板一致（PLAN §2：VM 单一权威）。
+    function resolveClick(curId, curCount) {
+        const heldId = root.hotbar.heldBlock
+        const heldCount = root.hotbar.heldCount
+        if (heldId === 0) {
+            if (curId === 0) return null                                       // 空手点空槽：无操作
+            return { slotId: 0, slotCount: 0, heldId: curId, heldCount: curCount } // A 拾取整栈
+        }
+        if (curId === 0) {
+            return { slotId: heldId, slotCount: heldCount, heldId: 0, heldCount: 0 } // B 放整栈
+        }
+        if (curId === heldId) {
+            // C 合并：min(剩余空间, 手持数) 移入槽；手持余 0 → heldId 归 0（保持空栈不变式）。
+            const cap = root.hotbar.maxStackSize(curId)
+            const space = cap - curCount
+            if (space <= 0) return null                                        // 槽已满（含工具段 cap=1）：无操作
+            const move = Math.min(space, heldCount)
+            const remain = heldCount - move
+            return {
+                slotId: curId, slotCount: curCount + move,
+                heldId: remain > 0 ? heldId : 0, heldCount: remain
+            }
+        }
+        return { slotId: heldId, slotCount: heldCount, heldId: curId, heldCount: curCount } // D 互换
+    }
 
     // 半透明遮罩：仅吸收点击（防穿透到背后游戏层），**不关闭背包**——用户要求背包只能 E / Esc 关闭。
     Rectangle {
@@ -120,22 +157,17 @@ Item {
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
-                            // 点击拾取/放置（t32 栈感知；与主栏同模式；配方解析属 Phase 1.1，结果槽暂不产出）。
+                            // 点击拾取/放置/合并/互换（t38 栈感知；统一走 resolveClick；配方解析属 Phase 1.1，
+                            // 结果槽暂不产出）。返回 null（空点空 / 同 id 槽已满）时不写、不 bump rev。
                             TapHandler {
                                 onTapped: {
-                                    const cur = root.craftSlots[index] || 0
-                                    const curCount = root.craftCounts[index] || 0
-                                    if (root.hotbar.heldBlock === 0) {
-                                        if (cur !== 0) {
-                                            root.craftSlots[index] = 0; root.craftCounts[index] = 0; root.craftRev++
-                                            root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
-                                        }
-                                    } else {
-                                        root.craftSlots[index] = root.hotbar.heldBlock
-                                        root.craftCounts[index] = root.hotbar.heldCount
-                                        root.craftRev++
-                                        root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
-                                    }
+                                    const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
+                                    if (!r) return
+                                    root.craftSlots[index] = r.slotId
+                                    root.craftCounts[index] = r.slotCount
+                                    root.craftRev++
+                                    root.hotbar.heldBlock = r.heldId
+                                    root.hotbar.heldCount = r.heldCount
                                 }
                             }
                         }
@@ -274,21 +306,17 @@ Item {
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
+                        // t38 生存左键整组操作（拾取 / 放置 / 合并 / 互换）：统一走 resolveClick。
+                        // 同 id 槽合并至 maxStack（方块 64 / 工具 1），余数留 held；异 id 互换；空点空无操作。
                         TapHandler {
                             onTapped: {
-                                const cur = root.mainSlots[index] || 0
-                                const curCount = root.mainCounts[index] || 0
-                                if (root.hotbar.heldBlock === 0) {
-                                    if (cur !== 0) {
-                                        root.mainSlots[index] = 0; root.mainCounts[index] = 0; root.mainRev++
-                                        root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
-                                    }
-                                } else {
-                                    root.mainSlots[index] = root.hotbar.heldBlock
-                                    root.mainCounts[index] = root.hotbar.heldCount
-                                    root.mainRev++
-                                    root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
-                                }
+                                const r = root.resolveClick(root.mainSlots[index] || 0, root.mainCounts[index] || 0)
+                                if (!r) return
+                                root.mainSlots[index] = r.slotId
+                                root.mainCounts[index] = r.slotCount
+                                root.mainRev++
+                                root.hotbar.heldBlock = r.heldId
+                                root.hotbar.heldCount = r.heldCount
                             }
                         }
                     }
@@ -336,19 +364,16 @@ Item {
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
-                            // tap → 拾取/放置（t32 栈感知；同创造背包 hotbar 槽；并选中该槽 = 游戏内 1–9 / 滚轮等效）。
+                            // tap → t38 生存左键整组操作（拾取 / 放置 / 合并 / 互换）：统一走 resolveClick。
+                            // hotbar 槽内容写经 hotbar.setStack（VM 单一权威；同 id 合并至 maxStack、异 id 互换）。
+                            // 并选中该槽 = 游戏内 1–9 / 滚轮等效（与主栏 / 合成格的差异：hotbar 槽有「选中」语义）。
                             TapHandler {
                                 onTapped: {
-                                    const cur = root.hotbar.blockIdAt(index)
-                                    const curCount = root.hotbar.countAt(index)
-                                    if (root.hotbar.heldBlock === 0) {
-                                        if (cur !== 0) {
-                                            root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
-                                            root.hotbar.setStack(index, 0, 0)
-                                        }
-                                    } else {
-                                        root.hotbar.setStack(index, root.hotbar.heldBlock, root.hotbar.heldCount)
-                                        root.hotbar.heldBlock = cur; root.hotbar.heldCount = curCount
+                                    const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                    if (r) {
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                        root.hotbar.heldBlock = r.heldId
+                                        root.hotbar.heldCount = r.heldCount
                                     }
                                     root.hotbar.selectedSlot = index
                                 }
