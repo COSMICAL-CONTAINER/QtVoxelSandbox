@@ -36,6 +36,8 @@ qt_add_executable(voxelsandbox
     playerstate.h
     toolregistry.cpp
     toolregistry.h
+    crackbox.cpp
+    crackbox.h
 )
 
 qt_add_qml_module(voxelsandbox
@@ -56,6 +58,12 @@ qt_add_resources(voxelsandbox "voxel_textures"
     PREFIX "/"
     FILES
         textures/atlas.png
+        textures/crack_0.png
+        textures/crack_1.png
+        textures/crack_2.png
+        textures/crack_3.png
+        textures/crack_4.png
+        textures/crack_5.png
         textures/default_cobble.png
         textures/default_dirt.png
         textures/default_grass_side.png

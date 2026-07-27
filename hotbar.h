@@ -56,6 +56,10 @@ class Hotbar : public QObject
     QML_NAMED_ELEMENT(Hotbar)
     Q_PROPERTY(int selectedSlot READ selectedSlot WRITE setSelectedSlot NOTIFY selectedSlotChanged)
     Q_PROPERTY(int selectedBlockId READ selectedBlockId NOTIFY selectedSlotChanged)
+    // 选中栈的**原始**物品 id（t34 工具感知挖掘用）：含工具段（>=0x100），不归一为 Air。
+    // 与 selectedBlockId 的差异：选中工具槽时 selectedBlockId→Air（右键不放置），但 selectedItemId
+    // 仍是工具 id → player.selectedItem 绑定 → ToolRegistry 据此算挖掘速度 / 掉落判定。
+    Q_PROPERTY(int selectedItemId READ selectedItemId NOTIFY selectedSlotChanged)
     Q_PROPERTY(int slotCount READ slotCount CONSTANT)
     Q_PROPERTY(int slotRevision READ slotRevision NOTIFY slotsChanged)
     // 光标手持物（背包内点击拾取/放置的「拿在鼠标上的物品栈」，id=0 即空手）。创造/生存背包共用同一
@@ -71,6 +75,7 @@ public:
     int selectedSlot() const { return m_selectedSlot; }
     void setSelectedSlot(int slot);
     int selectedBlockId() const;
+    int selectedItemId() const; // 选中栈原始 id（工具段透传；不归一 Air）
     int slotRevision() const { return m_slotRevision; }
     int heldBlock() const { return m_heldStack.id; }
     void setHeldBlock(int id);

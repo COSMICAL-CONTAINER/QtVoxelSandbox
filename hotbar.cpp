@@ -80,6 +80,15 @@ int Hotbar::selectedBlockId() const
     return id;
 }
 
+// 选中栈的**原始** id（t34 工具感知挖掘用）：含工具段，不归一 Air。空栈 / 越界 → 0（=Air，
+// ToolRegistry 视作空手挖 → speedMul=1、不掉需工具方块）。player.selectedItem 绑它。
+int Hotbar::selectedItemId() const
+{
+    if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size()))
+        return 0;
+    return m_slots[size_t(m_selectedSlot)].id;
+}
+
 // ── 工具段桥接（t33）── 查 ToolRegistry 单一权威，QML delegate 据此选方块 Image vs ToolIcon Canvas。
 bool Hotbar::isTool(int itemId) const { return ToolRegistry::isTool(itemId); }
 

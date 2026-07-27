@@ -12,6 +12,7 @@
 
 #include "blockregistry.h" // 方块 id（默认手持方块 / 破放校验）
 #include "raycast.h"       // RayHit（射线选体结果）
+#include "toolregistry.h"  // 工具感知挖掘速度 / 掉落判定（t34）
 #include "world.h"         // Q_PROPERTY(World*) 需要 World 完整定义
 
 // 玩家控制器（一个对象全包）：指针锁定式鼠标视角 + WASD/跳/飞 + 三模式物理。
@@ -47,6 +48,19 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(QVector3D hitFaceEuler READ hitFaceEuler NOTIFY hitChanged)
     // 当前手持方块（右键放置用它；t06 hotbar 会绑定此属性）。默认 Stone。
     Q_PROPERTY(int selectedBlock READ selectedBlock WRITE setSelectedBlock NOTIFY selectedBlockChanged)
+    // 当前手持物品的**原始 id**（t34 工具感知挖掘用）：方块段直接透传；工具段（>=0x100）由
+    // hotbar 暴露的 selectedItemId 绑定而来。与 selectedBlock 的差异：选中工具槽时 selectedBlock
+    // →Air（右键不放置），但 selectedItem 仍是工具 id → 挖掘速度按工具 tier 算（t33 表）。
+    Q_PROPERTY(int selectedItem READ selectedItem WRITE setSelectedItem NOTIFY selectedItemChanged)
+    // 持续挖掘态（t34）：生存模式按住左键累积进度；创造模式按下即瞬破（不进入此态）。
+    //   mining = 是否正在累积（生存）；miningProgress = 0..1；miningStage = -1（无裂纹）/0..5
+    //   （裂纹叠层阶，按进度 0/20/40/60/80/100% 切）；miningBlock = 当前目标格整数坐标。
+    //   呈现层（Main.qml 的裂纹叠层 Model）据此绑定：visible=miningStage>=0；baseColorMap 切
+    //   crack_{stage}.png；position=miningBlock+0.5。spec：换目标 / 松开 / 失焦 / 暂停 → 清零。
+    Q_PROPERTY(bool mining READ mining NOTIFY miningStateChanged)
+    Q_PROPERTY(float miningProgress READ miningProgress NOTIFY miningProgressChanged)
+    Q_PROPERTY(int miningStage READ miningStage NOTIFY miningStateChanged)
+    Q_PROPERTY(QVector3D miningBlock READ miningBlock NOTIFY miningStateChanged)
     // 模式行为门控（t21）：由当前模式派生的能力标志（随 modeChanged 通知 QML）。
     // Spectator 禁放破（用户核心诉求：观察者不能破坏/放置）；飞仅 Creative/Spectator 可用。
     Q_PROPERTY(bool canBreak READ canBreak NOTIFY modeChanged)
@@ -88,6 +102,13 @@ public:
 
     int selectedBlock() const { return m_selectedBlock; }
     void setSelectedBlock(int id);
+    int selectedItem() const { return m_selectedItem; }
+    void setSelectedItem(int id);
+
+    bool mining() const { return m_mining; }
+    float miningProgress() const { return m_miningProgress; }
+    int miningStage() const { return m_miningStage; }
+    QVector3D miningBlock() const { return QVector3D(m_mineBx, m_mineBy, m_mineBz); }
 
     // 模式行为门控（t21，PLAN §2-D：模式标志由 PlayerController 持有，输入边缘统一查）。
     // 三模式差异化：Spectator 禁放破 + 可飞；Creative 可放破 + 可飞（双击空格切）；生存可放破 + 禁飞。
@@ -102,8 +123,12 @@ public:
     Q_INVOKABLE void grab();
     Q_INVOKABLE void release();
     // 破/放（t05）：仅指针捕获时生效；走当前射线命中结果 → World::setBlock。
+    //   breakBlock()（兼容 t05 单击）：创造=瞬破；生存=开始累积（同 beginMining）。
+    //   beginMining() / endMining()（t34）：左键按下 / 松开的事件边缘；生存累积进度。
     Q_INVOKABLE void breakBlock(); // 左键：命中格置 air
     Q_INVOKABLE void placeBlock(); // 右键：命中面相邻空格置 selectedBlock（不覆盖实体 / 不埋玩家）
+    Q_INVOKABLE void beginMining(); // 左键按下：创造瞬破 / 生存开始累积进度（t34）
+    Q_INVOKABLE void endMining();   // 左键松开：清生存累积进度（t34）
 
 signals:
     void worldChanged();
@@ -118,6 +143,14 @@ signals:
     void flyingChanged();
     void hitChanged();
     void selectedBlockChanged();
+    void selectedItemChanged(); // 手持原始 id 变（含工具段切换；驱动 t34 速度重算）
+    void miningStateChanged();  // mining / miningStage / miningBlock 三者同变（一次性发，少抖动）
+    void miningProgressChanged(); // 进度连续变化（HUD 可选显示百分比；高频，独立信号）
+    // 玩家挖掘产出（t34 → t35）：生存破块时按 ToolRegistry::canHarvest 判 drop；创造 drop=false
+    // （瞬破不掉落，spec）。t35 据此 spawn item entity；当前任务仅发信号、消费端未接（无副作用）。
+    // blockBroken（World 已发）仍触发粒子；本信号额外区分「玩家挖」+「是否掉落」（创造 / 不可采掘
+    // 不掉）。坐标 + 原方块 id。
+    void playerMined(int x, int y, int z, int blockId, bool drop);
     void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState
     // 第一人称手挥动（t29）：breakBlock/placeBlock 在通过模式门控 + 动作真发生后发（观察者不发；
     // 未命中/放置被拒也不发）。同 blockBroken 模式——Game/Physics 层发语义事件，呈现层 Connections
@@ -144,6 +177,12 @@ private:
     void updateRaycast();                        // 每帧沿视线 DDA，更新命中态
     void clearHit();                             // 暂停/失焦时隐藏线框
     bool overlapsPlayerAABB(int bx, int by, int bz) const; // 放置校验：该格方块是否与玩家 AABB 相交
+    // 持续挖掘（t34）：每 tick 累积进度 / 检目标变更 / 完成时破块。由 tick() 调（captured 时）。
+    void updateMining(float dt);
+    // 清掉累积态（松开 / 换目标 / 失焦 / 完成）。无变化时静默（不发信号）。
+    void cancelMining();
+    // 完成（progress 满）：写 air + 发 playerMined + 清态。drop 由 caller 算（生存走 ToolRegistry）。
+    void finishMiningAt(int x, int y, int z, bool drop);
 
     World *m_world = nullptr;
     QQuickWindow *m_window = nullptr;
@@ -162,7 +201,15 @@ private:
     qint64 m_lastSpaceMs = -100000; // 双击空格检测时间戳
     bool m_spacePrev = false;       // 跳跃边沿触发（长按空格只跳一次）
     int m_selectedBlock = BlockRegistry::Stone; // 当前手持方块（右键放置；默认 Stone，t06 hotbar 绑定）
+    int m_selectedItem = BlockRegistry::Stone;  // 手持物品原始 id（含工具段；t34 挖掘速度用，绑定 hotbar.selectedItemId）
     float m_peakY = 0.0f;           // 滞空期间最高点 Y（掉落伤害结算基准；componentComplete 设为脚底 Y）
+
+    // 持续挖掘态（t34）：仅 Survival 进入累积（Creative 单击瞬破不进入）；progress 0..1；
+    // stage = clamp(progress*6, 0, 5)，-1 = 无累积（裂纹叠层隐藏）。mineBx/y/z = 目标格整数坐标。
+    bool m_mining = false;
+    float m_miningProgress = 0.0f;
+    int m_miningStage = -1;
+    qint32 m_mineBx = 0, m_mineBy = 0, m_mineBz = 0;
 
     // 射线选体命中态（整数格坐标 + 整数法线分量；仅变化时 emit hitChanged，避免每帧抖动 QML）
     bool m_hasHit = false;

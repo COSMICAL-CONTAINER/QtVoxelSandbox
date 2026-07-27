@@ -65,8 +65,14 @@ Window {
     PlayerState { id: playerState }
 
     // 玩家控制器：指针锁定鼠标 + WASD/跳/飞 + 三模式物理。
-    // 右键放置用 hotbar 当前选中槽的方块 id（绑定 hotbarVM.selectedBlockId）。
-    PlayerController { id: player; world: theWorld; selectedBlock: hotbarVM.selectedBlockId }
+    //   selectedBlock（右键放置用）绑 hotbarVM.selectedBlockId（工具槽→Air→不放置）。
+    //   selectedItem（t34 挖掘速度用）绑 hotbarVM.selectedItemId（工具段透传 → ToolRegistry 算速度）。
+    PlayerController {
+        id: player
+        world: theWorld
+        selectedBlock: hotbarVM.selectedBlockId
+        selectedItem: hotbarVM.selectedItemId
+    }
 
     // 玩家掉落伤害 → 生命（t22）：PlayerController 在 Survival 着地结算时发 fallDamageTaken(hp)，
     // 呈现层经此 Connections 路由到 PlayerState.takeDamage（与破/放信号→粒子同模式：Game 层发
@@ -170,6 +176,16 @@ Window {
         // 共享图集纹理：3×3=9 个 per-chunk Model 共用一份 atlas（声明一次、按 id 引用）。
         Texture { id: voxelAtlas; source: "qrc:/textures/atlas.png"; generateMipmaps: false }
 
+        // 挖掘裂纹 6 阶贴图（t34）：tools/build_cracks.py 程序生成（透明底 + 黑裂纹，§9a 自绘）。
+        // 裂纹叠层 Model 据 player.miningStage（0..5）取对应 Texture 作 baseColorMap。
+        // 索引即 stage：0=0% / 1=20% / 2=40% / 3=60% / 4=80% / 5=100%（progress 满 = 破）。
+        Texture { id: crack0; source: "qrc:/textures/crack_0.png"; generateMipmaps: false }
+        Texture { id: crack1; source: "qrc:/textures/crack_1.png"; generateMipmaps: false }
+        Texture { id: crack2; source: "qrc:/textures/crack_2.png"; generateMipmaps: false }
+        Texture { id: crack3; source: "qrc:/textures/crack_3.png"; generateMipmaps: false }
+        Texture { id: crack4; source: "qrc:/textures/crack_4.png"; generateMipmaps: false }
+        Texture { id: crack5; source: "qrc:/textures/crack_5.png"; generateMipmaps: false }
+
         // 每 chunk culled mesh（t03）：3×3=9 个 Model/ChunkGeometry，**直接作为 View3D 的 3D 场景
         // 子节点**（与原单 Model 同路径，渲染已验证可靠）。各 Model 摆到其 chunk 世界起点
         // (cx*16, 0, cz*16)；ChunkGeometry 产出该 chunk 的局部 culled mesh（顶点=chunk 局部坐标）。
@@ -240,6 +256,30 @@ Window {
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 baseColor: "#101010"
+            }
+        }
+
+        // 挖掘裂纹叠层（t34）：仅生存持续挖掘时显（miningStage >= 0；创造瞬破不进入累积态，
+        // stage=-1 → 隐藏）。叠在目标方块上（position = miningBlock + 0.5 中心），略放大 1.005
+        // 防 z-fight；baseColorMap 按 miningStage 切 6 阶裂纹 PNG（0/20/40/60/80/100%）。
+        // 分层（PLAN §2）：呈现层只读 player.miningStage（Game 层算），不反向写进度；裂纹贴图
+        // 自绘原创（tools/build_cracks.py 程序生成，§9 override (a)）。
+        // 材质：NoLighting + hasTransparency → 透明底（alpha=0）不遮方块本色，仅黑裂纹显示。
+        // cullMode 默认 Back（仅外法线面可见）→ 玩家看得到的几面才显裂纹（背向面被剔除）。
+        Model {
+            visible: player.miningStage >= 0
+            position: Qt.vector3d(player.miningBlock.x + 0.5,
+                                  player.miningBlock.y + 0.5,
+                                  player.miningBlock.z + 0.5)
+            scale: Qt.vector3d(1.005, 1.005, 1.005) // 微放大防与方块面 z-fight
+            geometry: CrackBox {}
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                // 6 阶裂纹贴图按 miningStage（0..5）取（id 引用全文件可见；数组内联构造）。
+                // 贴图含 alpha（透明底 + 半透黑裂纹）→ PrincipledMaterial 自动按 a 通道 blend。
+                // miningStage=-1（无累积）时 Model 已 visible=false，此处仍需合法索引防 undefined →
+                // Math.max(0, ...) 钳到 0（不可见时取哪张贴图无所谓，避免 WRN 噪音）。
+                baseColorMap: [crack0, crack1, crack2, crack3, crack4, crack5][Math.max(0, player.miningStage)]
             }
         }
 

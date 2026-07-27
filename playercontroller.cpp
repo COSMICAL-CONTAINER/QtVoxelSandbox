@@ -41,7 +41,10 @@ void PlayerController::onWindowChanged(QQuickWindow *win)
     if (m_window) m_window->removeEventFilter(this);
     m_window = win;
     if (m_window) m_window->installEventFilter(this);
-    else if (m_captured) release(); // 窗口销毁 → 安全释放
+    else {
+        if (m_captured) release(); // 窗口销毁 → 安全释放
+        cancelMining();            // 防御：清累积挖掘态（避免失窗口后仍在 tick）
+    }
 }
 
 // ---- 输入 ----
@@ -101,6 +104,7 @@ void PlayerController::release()
     m_keys.clear();                           // 丢弃按住的 WASD，防恢复时前冲
     setCaptured(false);
     clearHit();                               // 暂停 → 隐藏线框（未捕获时不选中）
+    cancelMining();                           // t34：暂停 / 失焦 → 清累积挖掘态（spec：失焦清零）
 }
 
 void PlayerController::setCaptured(bool c)
@@ -141,13 +145,23 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
         } else if (e->type() == QEvent::WindowDeactivate || e->type() == QEvent::FocusOut) {
             if (m_captured) release(); // 切走绝不留「锁住的光标」
         } else if (e->type() == QEvent::MouseButtonPress) {
-            // 破/放（t05）：仅指针捕获时由窗口级事件过滤接管（未捕获时不消费 → 让暂停层 grab）。
+            // 破/放（t05 + t34）：仅指针捕获时由窗口级事件过滤接管（未捕获时不消费 → 让暂停层 grab）。
             // 走事件过滤而非 MouseArea —— 指针锁定下光标每帧被 warp 回中，MouseArea 依赖的指针
             // 位置不可靠；窗口级 MouseButtonPress 与光标位置无关，最稳。
+            // t34：左键按下走 beginMining（创造瞬破 / 生存开始累积），不再单击直破 —— 由 beginMining
+            // 内按模式分流（spec：创造单击瞬破 = 单次边缘；生存 = 按住累积）。
             auto *me = static_cast<QMouseEvent *>(e);
             if (m_captured) {
-                if (me->button() == Qt::LeftButton)  { breakBlock(); return true; }
+                if (me->button() == Qt::LeftButton)  { beginMining(); return true; }
                 if (me->button() == Qt::RightButton) { placeBlock();  return true; }
+            }
+        } else if (e->type() == QEvent::MouseButtonRelease) {
+            // t34：左键松开 → 清生存累积进度（创造不进入累积态，endMining 内 no-op）。
+            // 仍只在捕获时消费（与 press 对称；未捕获时 release 不应破坏其它层的光标交互）。
+            auto *me = static_cast<QMouseEvent *>(e);
+            if (m_captured && me->button() == Qt::LeftButton) {
+                endMining();
+                return true;
             }
         }
     }
@@ -158,10 +172,14 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
 void PlayerController::tick()
 {
     const qreal dt = qMin(m_clock.restart() / 1000.0, 0.05); // 钳 50ms，防卡顿后穿墙
-    if (!m_captured) return;                                  // 暂停：冻结
+    if (!m_captured) {
+        cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
+        return;
+    }
     pollMouse();
     step(dt);
-    updateRaycast(); // 沿视线 DDA 选体 → 更新线框命中态
+    updateRaycast();   // 沿视线 DDA 选体 → 更新线框命中态
+    updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
 }
 
 // 视线方向：用与相机相同的欧拉→四元数（QQuaternion::fromEulerAngles(pitch,yaw,0)）旋转
@@ -218,7 +236,7 @@ QVector3D PlayerController::hitFaceEuler() const
     return QVector3D(0, 0, 0);                      // +Z 面（与规范同向，不转）
 }
 
-// ---- 方块编辑（t05）----
+// ---- 方块编辑（t05 + t34）----
 // 编辑入口属 Game/Physics 层：输入 →（已有）射线命中 → World::setBlock。Renderer 不直接改栅格。
 void PlayerController::setSelectedBlock(int id)
 {
@@ -228,16 +246,131 @@ void PlayerController::setSelectedBlock(int id)
     emit selectedBlockChanged();
 }
 
-// 左键：命中格置 air。要求已捕获指针且有命中（未捕获 = 暂停，不破坏）。
-// 模式门控（t21）：观察者不能破块（用户核心诉求）——在调用 World::setBlock 前拦截。
-// t29：破块动作真发生（通过门控且有命中→射线只命中实体方块，必破）时发 swingArm，
-// 呈现层启动第一人称手挥动。未命中/观察者不发（仅动作真发生时，spec）。
+// 手持物品原始 id（t34）：方块段直接透传；工具段（>=0x100）合法也接受（挖掘速度查 ToolRegistry
+// 用）。非法 / 越段 id 静默拒（与 setSelectedBlock 不同：此处无上界，因工具段 > BlockRegistry::Count）。
+void PlayerController::setSelectedItem(int id)
+{
+    if (id == m_selectedItem) return;
+    m_selectedItem = id;
+    emit selectedItemChanged();
+}
+
+// 左键按下（t34）：按模式分流。
+//   Creative：瞬破（progress 等价 1.0）→ 立即 setBlock(air) + swingArm + playerMined(drop=false)。
+//             spec：创造单击瞬破、不掉落。
+//   Survival：进入累积态（mining=true，记录目标格，progress=0），由 updateMining 每 tick 推进。
+//             spec：按住左键累积进度，进度满才破。
+//   Spectator：canBreak()=false → 直接返回（不破 / 不进累积）。
+// 共用门控：未捕获 / 无命中 → 不动作。无世界 / 无窗口 → 不动作。
+// 兼容：breakBlock()（旧 Q_INVOKABLE）等价调本方法（创造瞬破 / 生存开始累积）。
+void PlayerController::beginMining()
+{
+    if (!canBreak()) return; // 观察者不能破块（t21）
+    if (!m_world || !m_captured || !m_hasHit) return;
+
+    if (m_mode == Creative) {
+        // 创造：瞬破（progress 直接 1.0 等价），不掉落。仍发 swingArm（动作真发生）。
+        // 不进入累积态（mining 留 false）→ 不显裂纹叠层（瞬破无需裂纹）。
+        // finishMiningAt 内自行取原方块 id（setBlock 前）发 playerMined；此处无需重复读取。
+        finishMiningAt(m_hitBx, m_hitBy, m_hitBz, /*drop=*/false);
+        return;
+    }
+
+    // Survival：开始累积。重置目标 / 进度 / stage；stage 从 0 起（裂纹首阶立显，反馈即时）。
+    m_mining = true;
+    m_mineBx = m_hitBx; m_mineBy = m_hitBy; m_mineBz = m_hitBz;
+    m_miningProgress = 0.0f;
+    m_miningStage = 0;
+    emit miningStateChanged();
+    emit miningProgressChanged();
+    emit swingArm(); // 起手挥动（持续挖掘期间每阶切换再补发，形成挥动循环）
+}
+
+// 左键松开（t34）：清累积进度。创造模式下未进入累积态（mining=false）→ no-op。
+void PlayerController::endMining()
+{
+    if (!m_mining) return;
+    cancelMining();
+}
+
+// 清累积挖掘态（松开 / 换目标 / 失焦 / 暂停 / 完成）。无累积时静默（不发信号，免抖动）。
+void PlayerController::cancelMining()
+{
+    if (!m_mining && m_miningStage < 0) return;
+    m_mining = false;
+    m_miningProgress = 0.0f;
+    m_miningStage = -1;
+    emit miningStateChanged();
+    emit miningProgressChanged();
+}
+
+// 完成（progress 满 / 创造瞬破）：写 air + 发 playerMined + swingArm + 清态。
+// drop 由 caller 决定（创造=false；生存=ToolRegistry::canHarvest(原方块, 手持物)）。
+// 取原方块 id（setBlock 前）作 playerMined 的 blockId 参数（t35 据此 spawn 对应物品）。
+void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
+{
+    if (!m_world) return;
+    const quint8 brokenId = m_world->blockAt(x, y, z);
+    m_world->setBlock(x, y, z, BlockRegistry::Air); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
+    emit playerMined(x, y, z, int(brokenId), drop); // t35 据此 spawn item entity（当前任务仅发，消费端未接）
+    emit swingArm();                                // 破块成功 → 第一人称手挥动（t29）
+    cancelMining();                                 // 清累积态（裂纹叠层隐藏）
+}
+
+// 每 tick 推进生存挖掘进度（t34）。创造不进入此态（beginMining 内瞬破已 return）。
+// spec：progress += dt * speed(block, tool)；speed = 1 / miningTime（ToolRegistry 已含 hardness/speedMul）。
+//   - 失命中 / 目标已被破（变 air）→ cancelMining。
+//   - 目标换（玩家转头）→ 重置 progress（spec：换目标清零），目标格更新。
+//   - stage 推进（progress 跨 1/6 阈值）→ 发 miningStateChanged（驱动 QML 切裂纹贴图）+ swingArm（挥动循环）。
+//   - progress >= 1.0 → finishMiningAt（drop = canHarvest）。
+void PlayerController::updateMining(float dt)
+{
+    if (!m_mining) return;
+    if (!m_world || !m_hasHit) { cancelMining(); return; }
+
+    // 目标换：清进度（保留 mining=true），更新目标格。stage 同步重置为 0（裂纹首阶）。
+    if (m_hitBx != m_mineBx || m_hitBy != m_mineBy || m_hitBz != m_mineBz) {
+        m_mineBx = m_hitBx; m_mineBy = m_hitBy; m_mineBz = m_hitBz;
+        m_miningProgress = 0.0f;
+        if (m_miningStage != 0) {
+            m_miningStage = 0;
+            emit miningStateChanged();
+        }
+        emit miningProgressChanged();
+    }
+
+    // 目标已被破（其它途径，如 t36 拾取销毁——当前无）→ 取消。
+    const quint8 bid = m_world->blockAt(m_mineBx, m_mineBy, m_mineBz);
+    if (bid == BlockRegistry::Air) { cancelMining(); return; }
+
+    // 速度：miningTime = hardness / speedMul（ToolRegistry），progress 增量 = dt / miningTime。
+    // miningTime 地板 0.05s（防空手秒破致抖动）；air / 越界已早 return。
+    const float miningTime = ToolRegistry::miningTime(bid, m_selectedItem);
+    if (miningTime <= 0.0f) { cancelMining(); return; }
+    m_miningProgress += dt / miningTime;
+
+    // stage 推进：clamp(progress*6, 0, 5)。每跨一阶发 miningStateChanged（切贴图）+ swingArm（挥动循环）。
+    const int newStage = std::clamp(int(m_miningProgress * 6.0f), 0, 5);
+    if (newStage != m_miningStage) {
+        m_miningStage = newStage;
+        emit miningStateChanged();
+        emit swingArm();
+    }
+    emit miningProgressChanged();
+
+    // 完成：progress 满 → 破块。drop 走 ToolRegistry::canHarvest（生存可采掘判定）。
+    if (m_miningProgress >= 1.0f) {
+        const bool drop = ToolRegistry::canHarvest(bid, m_selectedItem);
+        finishMiningAt(m_mineBx, m_mineBy, m_mineBz, drop);
+    }
+}
+
+// 左键单击（兼容 t05 旧调用 / QML）：等价 beginMining —— 创造瞬破 / 生存开始累积。
+// 注：mouseRelease 路径下若仅调用本方法（无对应 endMining），生存会一直累积 —— 故 t34 已把
+// MouseButtonRelease 也接入 endMining。直接调本方法的调用者（如有）需自行配对 endMining。
 void PlayerController::breakBlock()
 {
-    if (!canBreak()) return; // 观察者不能破块
-    if (!m_world || !m_captured || !m_hasHit) return;
-    m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Air);
-    emit swingArm(); // 破块成功 → 第一人称手挥动（t29）
+    beginMining();
 }
 
 // 右键：命中面法线方向的相邻空格置当前手持方块。
