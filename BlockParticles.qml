@@ -16,11 +16,15 @@ Node {
     // 破/放信号 → 粒子迸发（由 Main.qml 的 Connections 转发到此）。先按方块 id 设主色，再 burst。
     function burstBreak(x, y, z, id) {
         breakParticle.color = blockColor(id)
-        breakEmitter.burst(16, 80, Qt.vector3d(x + 0.5, y + 0.5, z + 0.5))
+        // 设迸发器位置到方块中心再 burst(2 参)：旧 burst(3 参带 position) 的第 3 参被 Q_INVOKABLE 静默
+        // 忽略（不强校验参数数）→ 粒子全迸发在系统原点而非方块处。改设 emitter.position 再 burst。
+        breakEmitter.position = Qt.vector3d(x + 0.5, y + 0.5, z + 0.5)
+        breakEmitter.burst(16, 80)
     }
     function burstPlace(x, y, z, id) {
         placeParticle.color = blockColor(id)
-        placeEmitter.burst(10, 60, Qt.vector3d(x + 0.5, y + 0.5, z + 0.5))
+        placeEmitter.position = Qt.vector3d(x + 0.5, y + 0.5, z + 0.5)
+        placeEmitter.burst(10, 60)
     }
 
     // 运行期就绪日志（t16）：落 voxelsandbox.log，使「粒子节点加载状态在 console 可见且非 Error」
@@ -94,8 +98,9 @@ Node {
             emitRate: 0
             lifeSpan: 900
             lifeSpanVariation: 200
-            particleScale: 0.14
-            particleScaleVariation: 0.05
+            particleScale: 1.0   // 不依赖 emitter.particleScale 缩 #Cube（对内置 primitive delegate 不可靠，
+                                 // 且 delegate 显式 scale 会覆盖它 → 旧值 0.14 失效、渲染成满屏大方块）；
+                                 // 碎屑实际大小由 debrisDelegate 自身 scale 决定（0.12 单位 ≈ 一成方块）。
             particleRotationVelocityVariation: Qt.vector3d(200, 200, 200)
             velocity: VectorDirection3D {
                 direction: Qt.vector3d(0, 3.5, 0)
@@ -110,8 +115,7 @@ Node {
             emitRate: 0
             lifeSpan: 700
             lifeSpanVariation: 150
-            particleScale: 0.08
-            particleScaleVariation: 0.03
+            particleScale: 1.0   // 同 breakEmitter：大小由 delegate 自身 scale 决定，不靠 particleScale。
             velocity: VectorDirection3D {
                 direction: Qt.vector3d(0, 1.0, 0)
                 directionVariation: Qt.vector3d(2.5, 1.5, 2.5)
@@ -119,14 +123,14 @@ Node {
         }
     }
 
-    // 小体素碎屑：白色 PrincipledMaterial 使粒子 color 着色生效；NoLighting 保证亮度恒定
-    // （与地形 Model 同策略，不受方向光/昼夜影响），delegate 用单位 Cube、尺寸由 emitter
-    // 的 particleScale 统一控（破=0.14、放=0.08，约一成方块大小的碎屑/扬尘）。
+    // 小体素碎屑：白色 PrincipledMaterial 使粒子 color 着色生效；NoLighting 保证亮度恒定（与地形 Model 同策略，
+    // 不受方向光/昼夜影响）。**尺寸由 delegate 自身 scale 决定（0.12 单位 ≈ 一成方块大小的碎屑）**——
+    // 不靠 emitter.particleScale（其对 #Cube 内置 primitive 缩放不可靠，旧值 0.14 失效 → 渲染成满屏大方块）。
     Component {
         id: debrisDelegate
         Model {
             source: "#Cube"
-            scale: Qt.vector3d(1, 1, 1)
+            scale: Qt.vector3d(0.12, 0.12, 0.12)
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting }
         }
     }

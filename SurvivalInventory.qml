@@ -3,9 +3,9 @@ import QtQuick
 // 生存模式物品栏 1.0（t24）：E 键开关（仅 Survival 模式 —— 宿主 Main.qml 已按模式分流：Survival
 // 开本屏、Creative 开 t23 创造背包、Spectator E 无反应）。
 //
-// 贴近 MC 1.0 生存背包布局（spec 验收项）：
-//   ① 左上 2×2 合成格 + 箭头 + 结果槽（合成功能属 Phase 1.1，本屏为**占位空槽**，spec 明确标注）；
-//   ② 右上 4 护甲槽（头 / 胸 / 腿 / 脚，纵向）+ 角色预览（自绘人形剪影占位；真实装备 / 3D 模型属 Phase 1.1）；
+// 贴近 MC 1.0 生存背包布局（spec 验收项；左右方位修正：人物装备栏在**左**、合成在**右**，对齐 1.0）：
+//   ① 左上 4 护甲槽（头 / 胸 / 腿 / 脚，纵向）+ 角色预览（自绘人形剪影占位；真实装备 / 3D 模型属 Phase 1.1）；
+//   ② 右上 2×2 合成格 + 箭头 + 结果槽（合成功能属 Phase 1.1，本屏为**占位空槽**，spec 明确标注）；
 //   ③ 下部 3×9=27 主栏（物品栈 / 采集属 Phase 1.1，本屏为**占位空槽**）；
 //   ④ 最底 9 槽 hotbar 栏（同步游戏内 hotbar：读 hotbar VM，点击切换选中槽 + 选中选框）。
 //
@@ -70,14 +70,14 @@ Item {
                 }
             }
 
-            // ① 顶部区（合成 + 护甲 + 角色预览）。高度由护甲 4 槽纵向（4×slotSize）决定。
+            // ① 顶部区（左：护甲 + 角色预览；右：合成）—— 修正：人物装备栏在左，对齐 MC 1.0。高度由护甲 4 槽纵向决定。
             Item {
                 width: root.mainCols * root.slotSize   // 360
                 height: root.armorCount * root.slotSize // 160
 
-                // 2×2 合成格（左上）：占位空槽（合成功能属 Phase 1.1）。
+                // 2×2 合成格（右上）：占位空槽（合成功能属 Phase 1.1）。左右修正：合成在右，对齐 MC 1.0。
                 Grid {
-                    x: 0; y: 0
+                    x: parent.width - root.slotSize - 24 - 4 - 80; y: 40
                     columns: 2; spacing: 0
                     Repeater {
                         model: 4
@@ -88,9 +88,9 @@ Item {
                     }
                 }
 
-                // 合成箭头（指向结果槽）：自绘像素图（§9 override (a)）。纵向居中于合成格中线（y≈40）。
+                // 合成箭头（指向结果槽）：自绘像素图（§9 override (a)）。居中于右侧合成区（y 居中 160 高）。
                 Canvas {
-                    x: 86; y: 30
+                    x: parent.width - root.slotSize - 24; y: 70
                     width: 24; height: 20
                     onPaint: {
                         const ctx = getContext("2d"); ctx.reset()
@@ -103,17 +103,17 @@ Item {
                     }
                 }
 
-                // 结果槽（合成输出）：占位空槽（Phase 1.1）。纵向居中于合成格中线。
+                // 结果槽（合成输出，最右）：占位空槽（Phase 1.1）。居中于右侧合成区（y 居中 160 高）。
                 Item {
-                    x: 116; y: 20
+                    x: parent.width - root.slotSize; y: 60
                     width: root.slotSize; height: root.slotSize
                     InvSlot { anchors.fill: parent; wellColor: "#262b30" }
                 }
 
-                // 角色预览（右上）：自绘人形剪影占位（真实 3D 玩家模型属 Phase 1.1）。80 宽 × 160 高，
-                // 贴右侧；内部坐标以左上为原点居中绘制（头 / 躯干 / 双臂 / 双腿）。
+                // 角色预览（护甲右侧，左半区）：自绘人形剪影占位（真实 3D 玩家模型属 Phase 1.1）。80 宽 × 160 高；
+                // 内部坐标以左上为原点居中绘制（头 / 躯干 / 双臂 / 双腿）。
                 Item {
-                    x: parent.width - 80
+                    x: root.slotSize + 6
                     y: 0
                     width: 80
                     height: parent.height
@@ -138,10 +138,10 @@ Item {
                     }
                 }
 
-                // 4 护甲槽（角色预览左侧，纵向：头 / 胸 / 腿 / 脚）：占位自绘图标（Phase 1.1 装备逻辑）。
+                // 4 护甲槽（最左，纵向：头 / 胸 / 腿 / 脚）：占位自绘图标（Phase 1.1 装备逻辑）。
                 // 据槽 index 画 头盔 / 胸甲 / 护腿 / 靴 的暗灰金属像素图（§9 override (a) 原创，非 MC 资产）。
                 Column {
-                    x: parent.width - 80 - 8 - root.slotSize   // 预览左 8px + 1 槽宽
+                    x: 0   // 最左（人物装备栏在左，对齐 MC 1.0）
                     y: 0
                     spacing: 0
                     Repeater {
