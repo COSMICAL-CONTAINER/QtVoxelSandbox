@@ -22,8 +22,8 @@
 //     Q_INVOKABLE slots() 取数据 + int slotRevision 做 NOTIFY 触发器，行为等价且 moc 安全）
 //   - slots()（QVariantList<int>：每槽方块 id；Repeater model）
 //   - creativeBlocks()（QVariantList：全部可放置方块 id；创造背包网格用，恒定不变）
-//   - blockIdAt / iconSourceAt / nameAt：每槽方块 id / 图标 qrc 路径 / 内部名
-//   - iconSourceForBlock / nameForBlock：按方块 id 取图标/名（创造背包按 id 列方块，复用同一映射）
+//   - blockIdAt / iconSourceAt / nameAt：每槽方块 id / 图标 qrc 路径 / 中文显示名（空槽空串）
+//   - iconSourceForBlock / nameForBlock：按方块 id 取图标/中文显示名（创造背包按 id 列方块，复用同一映射）
 //   - scroll(delta)：滚轮循环切换（指针捕获/未捕获都可用）
 //   - setSlotBlock(slot,id)：创造风格背包（t18）把某槽方块改写（air=清空）
 //
@@ -53,9 +53,9 @@ public:
     Q_INVOKABLE int blockIdAt(int slot) const;
     // 每槽图标 qrc 路径（统一尺寸的等距立方体图标；空槽返回 ""）。
     Q_INVOKABLE QString iconSourceAt(int slot) const;
-    // 每槽方块内部名（调试/HUD 用）。空槽返回 "empty"。
+    // 每槽方块的中文显示名（HUD/背包标签用；走 BlockRegistry::displayName）。空槽返回空串。
     Q_INVOKABLE QString nameAt(int slot) const;
-    // 由方块 id 取图标 qrc 路径 / 内部名（创造背包按 id 列方块，复用 hotbar 同一套图标映射）。
+    // 由方块 id 取图标 qrc 路径 / 中文显示名（创造背包按 id 列方块，复用 hotbar 同一套映射）。
     Q_INVOKABLE QString iconSourceForBlock(int blockId) const;
     Q_INVOKABLE QString nameForBlock(int blockId) const;
     // 槽内容（QVariantList<int>）。QML Repeater 以之为 model；配合 slotRevision 触碰绑定实现刷新。

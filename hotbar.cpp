@@ -100,9 +100,9 @@ QString Hotbar::nameAt(int slot) const
 
 QString Hotbar::nameForBlock(int blockId) const
 {
-    if (blockId == BlockRegistry::Air) return QStringLiteral("empty");
-    if (blockId < 0 || blockId >= int(BlockRegistry::Count)) return QStringLiteral("unknown");
-    return QString::fromLatin1(BlockRegistry::blockName(quint8(blockId)));
+    // 走 BlockRegistry::displayName（单一权威；PLAN §9：UI 不另存方块名副本）。air/越界 → 空串。
+    if (blockId < 0 || blockId >= int(BlockRegistry::Count)) return QString();
+    return BlockRegistry::displayName(quint8(blockId));
 }
 
 void Hotbar::scroll(int delta)

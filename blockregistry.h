@@ -2,6 +2,7 @@
 #define BLOCKREGISTRY_H
 
 #include <QtGlobal> // quint8
+#include <QString>  // displayName() 返回 QString（用户可见中文名）
 
 // 方块注册表（单一权威数据源；World 层）。
 //
@@ -58,6 +59,14 @@ public:
 
     // 内部/调试用方块名（**非**面向用户字串；通用词）。越界/未知 id 返回 "unknown"。
     static const char *blockName(quint8 blockId);
+
+    // 用户可见的**中文**显示名（PLAN §9 override (b)：通用描述词）。
+    //   air → 空串；越界/未知 id → 空串（兜底）。
+    // 与 blockName()（内部英文标识符）分离：本方法供 HUD/背包等面向用户文本消费；
+    // 字面量为 UTF-8，由 fromUtf8 解码（与项目既有中文注释同源）。
+    //   grass=草方块 dirt=泥土 stone=石头 cobble=圆石 log=橡木原木
+    //   planks=橡木木板 leaves=橡树树叶 sand=沙子
+    static QString displayName(quint8 blockId);
 
 private:
     BlockRegistry() = delete; // 纯静态数据表，无实例。
