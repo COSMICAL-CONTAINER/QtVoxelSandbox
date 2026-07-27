@@ -166,8 +166,9 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
             // 内按模式分流（spec：创造单击瞬破 = 单次边缘；生存 = 按住累积）。
             auto *me = static_cast<QMouseEvent *>(e);
             if (m_captured) {
-                if (me->button() == Qt::LeftButton)  { beginMining(); return true; }
-                if (me->button() == Qt::RightButton) { placeBlock();  return true; }
+                if (me->button() == Qt::LeftButton)   { beginMining(); return true; }
+                if (me->button() == Qt::RightButton)  { placeBlock();  return true; }
+                if (me->button() == Qt::MiddleButton) { pickBlock();   return true; } // t37 pick block
             }
         } else if (e->type() == QEvent::MouseButtonRelease) {
             // t34：左键松开 → 清生存累积进度（创造不进入累积态，endMining 内 no-op）。
@@ -424,6 +425,20 @@ void PlayerController::dropHeld()
     const QVector3D fwd = lookDirection();
     const QVector3D p = position() + fwd * 1.5f;
     emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id);
+}
+
+// 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 写入 hotbar 当前选中槽。
+// 仅指针捕获时生效（与破/放同窗口级事件过滤路径；spec）。命中空气 / 无命中 / 无世界 / 无 hotbar → 不动作。
+// 数量按模式分（spec 示意 {id,1}；此处对齐模式语义：创造源无限 → 满栈，与 resetForMode 创造默认一致、
+// 不把既有 64 回退成 1 造成视觉突兀；生存有限背包 → 单件）。pick 属「选择」不改栅格，三模式均允许。
+// 走 Hotbar::setStack 直接覆盖选中槽（Hotbar 内部校验范围 + id 合法性 + count 上限）。
+void PlayerController::pickBlock()
+{
+    if (!m_captured || !m_hasHit || !m_world || !m_hotbar) return;
+    const quint8 id = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+    if (id == BlockRegistry::Air) return; // 命中空气 → 无可拾取
+    const int count = (m_mode == Creative) ? m_hotbar->maxStackSize(int(id)) : 1;
+    m_hotbar->setStack(m_hotbar->selectedSlot(), int(id), count);
 }
 
 // 拾取扫描（t36）：每帧扫附近掉落实体 → Hotbar.addStack（先选中槽、再空槽，「入手」语义）。

@@ -258,9 +258,10 @@ Item {
                                     font.pixelSize: 13; font.bold: true
                                 }
 
-                                // hover → 状态行中文名；tap → 拾取/放置（MC 背包交互，t32 栈感知）：
-                                //   空手点有物槽 → 拾取整栈（槽清空、手持=该栈 {id,count}）；
-                                //   持物点任意槽 → 放入手持栈（与槽内现有栈互换：槽←手持、手持←旧槽内容）。
+                                // hover → 状态行中文名；tap → 拾取/放置（t37 创造覆盖语义）：
+                                //   空手点有物槽 → 拾取整栈到光标（槽清空、手持=该栈 {id,count}）；空槽 → 无操作。
+                                //   持物点任意槽 → 放置**覆盖**：槽 ← 手持栈，原槽内容直接丢弃（创造源无限，
+                                //                   不回收到 held），held 清空。区别于生存的「互换」（t38）。
                                 //   同时选中该槽（右键放置即用此槽方块）。拖到销毁槽仍走上面的 DragHandler。
                                 HoverHandler {
                                     id: slotHover
@@ -268,18 +269,18 @@ Item {
                                 }
                                 TapHandler {
                                     onTapped: {
-                                        const cur = root.hotbar.blockIdAt(index)
-                                        const curCount = root.hotbar.countAt(index)
-                                        if (root.hotbar.heldBlock === 0) {
+                                        const heldId = root.hotbar.heldBlock
+                                        if (heldId === 0) {
+                                            const cur = root.hotbar.blockIdAt(index)
                                             if (cur !== 0) {
                                                 root.hotbar.heldBlock = cur
-                                                root.hotbar.heldCount = curCount
-                                                root.hotbar.setStack(index, 0, 0) // 清空源槽
+                                                root.hotbar.heldCount = root.hotbar.countAt(index)
+                                                root.hotbar.setStack(index, 0, 0) // 清空源槽（拾取整栈）
                                             }
                                         } else {
-                                            root.hotbar.setStack(index, root.hotbar.heldBlock, root.hotbar.heldCount)
-                                            root.hotbar.heldBlock = cur
-                                            root.hotbar.heldCount = curCount
+                                            // 创造覆盖：放置手持栈到该槽，原物丢弃、held 清空（不互换）。
+                                            root.hotbar.setStack(index, heldId, root.hotbar.heldCount)
+                                            root.hotbar.heldBlock = 0
                                         }
                                         root.hotbar.selectedSlot = index
                                     }

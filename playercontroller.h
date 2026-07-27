@@ -143,6 +143,11 @@ public:
     Q_INVOKABLE void placeBlock(); // 右键：命中面相邻空格置 selectedBlock（不覆盖实体 / 不埋玩家）
     Q_INVOKABLE void beginMining(); // 左键按下：创造瞬破 / 生存开始累积进度（t34）
     Q_INVOKABLE void endMining();   // 左键松开：清生存累积进度（t34）
+    // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 写入 hotbar 当前选中槽（覆盖；
+    // 创造源无限 → 满栈，生存 → 单件）。仅指针捕获时生效（与破/放同窗口级 MouseButtonPress 路径）。
+    // spec：「无论背包开关」—— captured=true 蕴含背包已关，故等价于「游戏内中键」；命中空气 / 无
+    // 世界 / 无 hotbar → 不动作。pick 属「选择」语义（不改栅格），三模式均允许（观察者亦可查方块）。
+    Q_INVOKABLE void pickBlock();
     // Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格）。仅指针捕获时生效
     // （spec）。空手 / 取失败 → 不丢。spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem
     // （同破块掉落 t35 路径）；丢弃后实体可被重新拾取（闭环）。

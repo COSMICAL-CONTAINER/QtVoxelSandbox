@@ -791,8 +791,12 @@ Window {
     // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品栈；hotbarVM.heldBlock/heldCount 驱动）。
     // 仅背包打开且手持非空时显，z 最高（盖过背包面板 z=150）。位置跟随 cursorTracker（窗口坐标）。
     // t32：count>1 时右下角显数量（手持整栈移动时可见剩余数）。t33：手持工具 → ToolIcon 自绘（非 Image）。
+    // t37：enabled:false 显式声明本 Item 不参与指针事件——z=300 浮在背包面板(z=150)之上，若参与事件
+    // 捕获会抢走下方槽位 TapHandler 的点击（第 5 轮 bug 嫌疑「能拾取但放不下」根因之一）。纯呈现层，
+    // 无 MouseArea/TapHandler；enabled:false 是防御性兜底，保证点 slot 事件必落到槽位 TapHandler。
     Item {
         visible: window.inventoryOpen && hotbarVM.heldBlock !== 0
+        enabled: false
         z: 300
         x: cursorTracker.point.position.x - 16
         y: cursorTracker.point.position.y - 16
