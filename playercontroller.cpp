@@ -230,16 +230,21 @@ void PlayerController::setSelectedBlock(int id)
 
 // 左键：命中格置 air。要求已捕获指针且有命中（未捕获 = 暂停，不破坏）。
 // 模式门控（t21）：观察者不能破块（用户核心诉求）——在调用 World::setBlock 前拦截。
+// t29：破块动作真发生（通过门控且有命中→射线只命中实体方块，必破）时发 swingArm，
+// 呈现层启动第一人称手挥动。未命中/观察者不发（仅动作真发生时，spec）。
 void PlayerController::breakBlock()
 {
     if (!canBreak()) return; // 观察者不能破块
     if (!m_world || !m_captured || !m_hasHit) return;
     m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Air);
+    emit swingArm(); // 破块成功 → 第一人称手挥动（t29）
 }
 
 // 右键：命中面法线方向的相邻空格置当前手持方块。
 // 校验：目标格须为空气（不覆盖实体）；且不与玩家 AABB 重叠（防自埋/卡死）。
 // 模式门控（t21）：观察者不能放块（用户核心诉求）——在调用 World::setBlock 前拦截。
+// t29：放块动作真发生（通过门控 + 目标为空 + 不埋玩家，实际写入）时才发 swingArm；
+// 已有方块/重叠被拒不发（仅动作真发生时，spec）。
 void PlayerController::placeBlock()
 {
     if (!canPlace()) return; // 观察者不能放块
@@ -248,6 +253,7 @@ void PlayerController::placeBlock()
     if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放
     if (overlapsPlayerAABB(tx, ty, tz)) return;                    // 与玩家重叠 → 不放
     m_world->setBlock(tx, ty, tz, quint8(m_selectedBlock));
+    emit swingArm(); // 放块成功 → 第一人称手挥动（t29）
 }
 
 // 方块格 [bx,bx+1]×[by,by+1]×[bz,bz+1] 与玩家 AABB 是否相交（严格重叠；仅贴面不算）。

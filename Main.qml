@@ -115,6 +115,47 @@ Window {
             }
             clipNear: 0.05
             clipFar: 1000
+
+            // 第一人称手 viewmodel（t29）：手臂 Model 作 PerspectiveCamera 子节点 → 随相机移动/转向
+            // （相机本地空间：+X=右、-Y=下、-Z=前向）。纯色肤色 PrincipledMaterial 自绘原创（§9 override (a)，
+            // 不拷贝 MC 皮肤/手贴图）。模型属呈现层、纯装饰——不进 World/Physics（PLAN §2 分层）。
+            // 显隐：仅第一人称可见（第三人称看玩家全身模型 t28，手隐藏；与 playerModel 的 visible 互补）。
+            // 挥动由下方 Connections(onSwingArm) → SequentialAnimation 驱动 viewModelHand.swingAngle，
+            // 其 eulerRotation.x 绑定自动跟随：手臂从「略前抬」下挥（前推/下劈）再回位 ~200ms。
+            Node {
+                id: viewModelHand
+                visible: player.cameraMode === PlayerController.FirstPerson
+                // 肩枢位于视野右下：距相机 0.4 格前、右 0.35、略下。在近裁面(0.05)之后、竖直 FOV(60°)
+                // 投影内 → 整条手臂肉眼可见（手挥最低点仍留在画面内）。
+                position: Qt.vector3d(0.35, -0.05, -0.4)
+                readonly property real baseTilt: 65.0  // 静态前抬：手臂略前伸入视野（非纯下垂），更像持物姿态
+                property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
+                eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
+
+                // 手臂方块：从肩枢沿局部 -Y 延伸（手在下方），随 Node 一起绕肩枢旋转。
+                Model {
+                    source: "#Cube"
+                    position: Qt.vector3d(0, -0.1, 0)
+                    scale: Qt.vector3d(0.16, 0.2, 0.16)
+                    materials: PrincipledMaterial { baseColor: "#caa472" } // 肤色（与玩家模型头/手一致）
+                }
+            }
+        }
+
+        // 第一人称手挥动动画（t29）：破/放动作真发生（player.swingArm）时启动。手臂绕肩枢轴下挥 ~50°
+        // （手向下/前劈）再回位 ~200ms。SequentialAnimation 直接改 viewModelHand.swingAngle，其
+        // eulerRotation.x 绑定自动跟随刷新。连续点击：start() 重启进行中的动画（即重新挥一次），契合快速
+        // 挖掘手感。分层（PLAN §2）：swing 信号由 Game/Physics 层(breakBlock/placeBlock)发，呈现层只消费
+        // （同 blockBroken→粒子 / fallDamageTaken→PlayerState 模式）。
+        Connections {
+            target: player
+            function onSwingArm() { armSwingAnim.start() }
+        }
+        SequentialAnimation {
+            id: armSwingAnim
+            loops: 1
+            NumberAnimation { target: viewModelHand; property: "swingAngle"; to: -50; duration: 80; easing.type: Easing.InQuad }
+            NumberAnimation { target: viewModelHand; property: "swingAngle"; to: 0; duration: 120; easing.type: Easing.OutQuad }
         }
 
         DirectionalLight { eulerRotation.x: -40; eulerRotation.y: -25; brightness: 1.5 }
