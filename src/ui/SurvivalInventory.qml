@@ -28,6 +28,8 @@ Item {
     property Hotbar hotbar
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
     signal closed()
+    // t49：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区时；宿主接 player.dropHeldCursor）。
+    signal discardHeldRequested()
 
     // ── 尺寸常量（集中一处便于对齐）──
     readonly property int slotSize: 40        // 统一槽尺寸（主栏 / hotbar / 合成 / 护甲同尺寸，贴近 1.0）
@@ -39,8 +41,9 @@ Item {
     // 把「物品在背包内移动」核心交互打通——与 hotbar 槽共享同一 hotbar VM 的 heldBlock/heldCount 光标手持栈）。
     // air=0=空栈。t32：栈数量平行存于 mainCounts/craftCounts（与 hotbar VM 的 ItemStack 同模型）。
     // 数组元素改写不触发 QML 绑定，故配 mainRev/craftRev 版本号让 Image source / count 重算。
-    property var mainSlots: [1,2,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0] // [test] 槽0=草(id1)×5, 槽1=泥土(id2)×3，供测试移动/互换
-    property var mainCounts:[5,3,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0] // 平行数量
+    // t49：主栏初始全空（spec point 2「空背包起」；删 [test] 草/泥土预置数据）。
+    property var mainSlots: [0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0]
+    property var mainCounts:[0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0]
     property int mainRev: 0
     property var craftSlots: [0,0,0,0] // 2×2 合成格（占位；配方解析属 Phase 1.1，结果槽暂不产出）
     property var craftCounts:[0,0,0,0] // 平行数量
@@ -81,11 +84,63 @@ Item {
         return { slotId: heldId, slotCount: heldCount, heldId: curId, heldCount: curCount } // D 互换
     }
 
+    // t49 右键语义（MC 1.0）：空手→拾取一半（floor(count/2)，单件特例取 1）；持物→放 1 个（空槽开新栈 /
+    // 同 id 未满 +1；异 id 槽 / 已满无操作，**不互换**）。返回与 resolveClick 同形的 {slotId, slotCount,
+    // heldId, heldCount}；null = 无操作。主栏 / 合成格 / hotbar 槽三类共用（与 Inventory.qml 一致）。
+    function resolveRightClick(curId, curCount) {
+        const heldId = root.hotbar.heldBlock
+        const heldCount = root.hotbar.heldCount
+        if (heldId === 0) {
+            if (curId === 0) return null                                     // 空手点空槽：无操作
+            let half = Math.floor(curCount / 2)
+            if (half < 1) half = 1                                           // 单件：整件拿起
+            return {
+                slotId: curCount - half > 0 ? curId : 0, slotCount: curCount - half,
+                heldId: curId, heldCount: half
+            }
+        }
+        if (curId !== 0 && curId !== heldId) return null                     // 异 id 槽：无操作（不互换）
+        const cap = root.hotbar.maxStackSize(heldId)
+        if (curId === heldId && curCount >= cap) return null                 // 同 id 已满：无操作
+        const remain = heldCount - 1
+        return {
+            slotId: heldId, slotCount: curCount + 1,
+            heldId: remain > 0 ? heldId : 0, heldCount: remain
+        }
+    }
+
+    // t49 关包归还合成栏（spec point 6）：面板隐藏（visible→false）时把 craftSlots 内容 addStack 回 hotbar
+    // （合并同类，同拾取），清空 craftSlots。MC 行为：合成格不持久化，关包即退回玩家背包。仅本屏有合成格。
+    // 初始 craftSlots 全 0 → 首次 onVisibleChanged（构造期 visible=false）遍历为空，无副作用。
+    function returnCraftToHotbar() {
+        if (!root.hotbar) return
+        for (let i = 0; i < root.craftSlots.length; ++i) {
+            const id = root.craftSlots[i] || 0
+            const n = root.craftCounts[i] || 0
+            if (id !== 0 && n > 0) root.hotbar.addStack(id, n)
+        }
+        for (let i = 0; i < root.craftSlots.length; ++i) {
+            root.craftSlots[i] = 0
+            root.craftCounts[i] = 0
+        }
+        root.craftRev++
+    }
+
+    // t49：关包（visible→false）归还合成栏。visible=true（打开）时不动作。
+    onVisibleChanged: if (!visible) returnCraftToHotbar()
+
     // 半透明遮罩：仅吸收点击（防穿透到背后游戏层），**不关闭背包**——用户要求背包只能 E / Esc 关闭。
+    // t49：手持物时点遮罩区（面板外）→ 整栈丢弃为实体（同 Q 丢弃）。
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.6)
-        MouseArea { anchors.fill: parent } // 吸收点击（无 onClicked → 不关闭）
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                // 拖出丢弃（spec point 5）：手持物点背包外 → 请求宿主丢弃；空手仅吸收点击。
+                if (root.hotbar && root.hotbar.heldBlock !== 0) root.discardHeldRequested()
+            }
+        }
     }
 
     // 面板：深色圆角，居中。尺寸由内容（标题 + 顶部区 + 主栏 + hotbar）精确推出。
@@ -159,11 +214,24 @@ Item {
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
-                            // 点击拾取/放置/合并/互换（t38 栈感知；统一走 resolveClick；配方解析属 Phase 1.1，
-                            // 结果槽暂不产出）。返回 null（空点空 / 同 id 槽已满）时不写、不 bump rev。
+                            // 点击拾取/放置/合并/互换（t38 栈感知；左键走 resolveClick；t49 右键走 resolveRightClick）。
+                            // 配方解析属 Phase 1.1，结果槽暂不产出。返回 null（空点空 / 同 id 槽已满）时不写、不 bump rev。
                             TapHandler {
+                                acceptedButtons: Qt.LeftButton
                                 onTapped: {
                                     const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
+                                    if (!r) return
+                                    root.craftSlots[index] = r.slotId
+                                    root.craftCounts[index] = r.slotCount
+                                    root.craftRev++
+                                    root.hotbar.heldBlock = r.heldId
+                                    root.hotbar.heldCount = r.heldCount
+                                }
+                            }
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
                                     if (!r) return
                                     root.craftSlots[index] = r.slotId
                                     root.craftCounts[index] = r.slotCount
@@ -309,10 +377,24 @@ Item {
                             font.pixelSize: 13; font.bold: true
                         }
                         // t38 生存左键整组操作（拾取 / 放置 / 合并 / 互换）：统一走 resolveClick。
-                        // 同 id 槽合并至 maxStack（方块 64 / 工具 1），余数留 held；异 id 互换；空点空无操作。
+                        // t49 右键 = 拿一半 / 放一个（resolveRightClick）。同 id 合并至 maxStack（方块 64 / 工具 1），
+                        // 余数留 held；异 id 互换（左键）/ 不操作（右键）；空点空无操作。
                         TapHandler {
+                            acceptedButtons: Qt.LeftButton
                             onTapped: {
                                 const r = root.resolveClick(root.mainSlots[index] || 0, root.mainCounts[index] || 0)
+                                if (!r) return
+                                root.mainSlots[index] = r.slotId
+                                root.mainCounts[index] = r.slotCount
+                                root.mainRev++
+                                root.hotbar.heldBlock = r.heldId
+                                root.hotbar.heldCount = r.heldCount
+                            }
+                        }
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: {
+                                const r = root.resolveRightClick(root.mainSlots[index] || 0, root.mainCounts[index] || 0)
                                 if (!r) return
                                 root.mainSlots[index] = r.slotId
                                 root.mainCounts[index] = r.slotCount
@@ -368,8 +450,10 @@ Item {
                             }
                             // tap → t38 生存左键整组操作（拾取 / 放置 / 合并 / 互换）：统一走 resolveClick。
                             // hotbar 槽内容写经 hotbar.setStack（VM 单一权威；同 id 合并至 maxStack、异 id 互换）。
-                            // 并选中该槽 = 游戏内 1–9 / 滚轮等效（与主栏 / 合成格的差异：hotbar 槽有「选中」语义）。
+                            // t49：背包内点 hotbar 行**不切真实选中**（删 selectedSlot 赋值；真实选中仅由游戏内
+                            // 1–9 / 滚轮改）；右键 = 拿一半 / 放一个（resolveRightClick）。
                             TapHandler {
+                                acceptedButtons: Qt.LeftButton
                                 onTapped: {
                                     const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
                                     if (r) {
@@ -377,7 +461,17 @@ Item {
                                         root.hotbar.heldBlock = r.heldId
                                         root.hotbar.heldCount = r.heldCount
                                     }
-                                    root.hotbar.selectedSlot = index
+                                }
+                            }
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                    if (r) {
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                        root.hotbar.heldBlock = r.heldId
+                                        root.hotbar.heldCount = r.heldCount
+                                    }
                                 }
                             }
                         }

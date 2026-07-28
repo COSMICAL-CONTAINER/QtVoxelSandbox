@@ -491,7 +491,21 @@ void PlayerController::dropHeld()
     emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id);
 }
 
-// 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 写入 hotbar 当前选中槽。
+// 拖出背包丢弃（t49）：光标手持栈整栈丢弃为实体（玩家前方）。不限捕获态（背包打开时正是未捕获）。
+// 清空 hotbar 光标手持栈（setHeldBlock(0) 同步清 count），再 emit spawnItem。空手 / 无 hotbar → 不丢。
+// 位置同 dropHeld：眼位 + 视线 * 1.5，floor 到格坐标（ItemEntityManager 存格中心 = 整数+0.5）。
+void PlayerController::dropHeldCursor()
+{
+    if (!m_hotbar) return;
+    const int id = m_hotbar->heldBlock();
+    if (id == 0 || m_hotbar->heldCount() <= 0) return; // 空手 → 不丢
+    m_hotbar->setHeldBlock(0);                         // 清空光标手持栈（id=0 同步清 count）
+    const QVector3D fwd = lookDirection();
+    const QVector3D p = position() + fwd * 1.5f;
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id);
+}
+
+// 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 写入 hotbar 当前选中槽（覆盖；
 // 仅指针捕获时生效（与破/放同窗口级事件过滤路径；spec）。命中空气 / 无命中 / 无世界 / 无 hotbar → 不动作。
 // 数量按模式分（spec 示意 {id,1}；此处对齐模式语义：创造源无限 → 满栈，与 resetForMode 创造默认一致、
 // 不把既有 64 回退成 1 造成视觉突兀；生存有限背包 → 单件）。pick 属「选择」不改栅格，三模式均允许。

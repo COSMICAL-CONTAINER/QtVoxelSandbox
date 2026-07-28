@@ -168,6 +168,12 @@ public:
     // （spec）。空手 / 取失败 → 不丢。spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem
     // （同破块掉落 t35 路径）；丢弃后实体可被重新拾取（闭环）。
     Q_INVOKABLE void dropHeld();
+    // 拖出背包丢弃（t49）：光标手持栈（hotbar.heldBlock/heldCount）整栈丢弃为实体（玩家前方 1.5 格）。
+    // 与 dropHeld 的差异：后者取**选中槽** 1 件且仅捕获时；本方法取**光标手持栈**整栈、**不限捕获态**
+    // （背包打开时未捕获正是此场景）。spawnItem 仅产 1 实体（ItemEntityManager 无 count 概念）→ 多件
+    // 手持栈丢弃时仅 1 件可拾回（已知限制，与 spawnItem 单实体语义一致；spec point 5 明示「清 heldBlock
+    // + emit spawnItem」）。空手 → 不丢。经 QML Connections 转发（同 dropHeld）。
+    Q_INVOKABLE void dropHeldCursor();
 
 signals:
     void worldChanged();

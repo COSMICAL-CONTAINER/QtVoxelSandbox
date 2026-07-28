@@ -40,7 +40,7 @@ struct ItemStack {
 //   - setStack(slot, id, count)（直接写栈；背包点击放置/互换用）
 //   - setSlotBlock(slot, id)（兼容旧调用：等同 setStack(slot, id, id==0?0:1)；销毁槽清空用）
 //   - maxStackSize(id)（方块 64 / 工具段 1）
-//   - resetForMode(mode)（创造=满栈 / 生存=全空；mode 切换时 QML 调）
+//   - resetForMode(mode)（t49：创造 / 生存均清空 9 槽；创造物品改由调色板点取→放入 hotbar 槽）
 //   - heldBlock / heldCount（光标手持物 id + 数量；背包点击拾取/放置用，跨创造/生存共享同一手持栈）
 //   - isTool / toolTier / creativeTools（t33：工具段判定 / 等级 / 创造调色板；QML 据 isTool 切方块
 //     Image vs ToolIcon Canvas 自绘图标）
@@ -123,7 +123,7 @@ public:
     Q_INVOKABLE int takeStack(int slot, int n);
     // 单件最大堆叠：方块段 64、工具段（id>=0x100，t33 预留）1（不可堆叠）。
     Q_INVOKABLE int maxStackSize(int id) const;
-    // 按模式重置槽内容（创造=8 可放置方块各满栈 + 第 9 空槽 / 生存=全空 / 观察者=不动）。
+    // 按模式重置槽内容（t49：创造 / 生存均清空 9 槽；创造物品改由调色板点取→放入 hotbar 槽 / 观察者=不动）。
     // mode 取 PlayerController::Mode 序数：0=Spectator 1=Creative 2=Survival。同时清空光标手持物。
     Q_INVOKABLE void resetForMode(int mode);
     // 兼容旧调用（t18 setSlotBlock）：等同 setStack(slot, id, id==0?0:1)。保留以防遗漏迁移点（如销毁槽清空）。
@@ -137,7 +137,7 @@ signals:
     void heldBlockChanged(); // 光标手持物变更（id 或 count；拾取/放置/丢弃）→ Main.qml 浮动图标 + 数量刷新
 
 private:
-    // 9 槽物品栈。构造期填创造风格默认（8 方块满栈 + 第 9 空槽）；切生存由 resetForMode 清空。
+    // 9 槽物品栈。t49：构造期全空（创造物品改由调色板点取→放入 hotbar 槽；不再预置 8 满栈）。
     std::vector<ItemStack> m_slots;
     int m_selectedSlot = 0;
     int m_slotRevision = 0;   // 槽内容版本号：每次栈写入自增，供 QML 绑定作 NOTIFY 触发器

@@ -38,19 +38,8 @@ bool isValidItemId(int id)
 
 Hotbar::Hotbar(QObject *parent)
     : QObject(parent)
-    , m_slots{
-          // 创造风格默认：8 可放置方块各满栈 + 第 9 槽空（与原 hotbar 预置一致，切生存由 resetForMode 清空）。
-          // 满栈数走 BlockRegistry::BlockDef.maxStack（t42 单一权威；改某方块 maxStack 即自动同步）。
-          ItemStack{BlockRegistry::Grass,  BlockRegistry::maxStack(BlockRegistry::Grass)},
-          ItemStack{BlockRegistry::Dirt,   BlockRegistry::maxStack(BlockRegistry::Dirt)},
-          ItemStack{BlockRegistry::Stone,  BlockRegistry::maxStack(BlockRegistry::Stone)},
-          ItemStack{BlockRegistry::Cobble, BlockRegistry::maxStack(BlockRegistry::Cobble)},
-          ItemStack{BlockRegistry::Log,    BlockRegistry::maxStack(BlockRegistry::Log)},
-          ItemStack{BlockRegistry::Planks, BlockRegistry::maxStack(BlockRegistry::Planks)},
-          ItemStack{BlockRegistry::Leaves, BlockRegistry::maxStack(BlockRegistry::Leaves)},
-          ItemStack{BlockRegistry::Sand,   BlockRegistry::maxStack(BlockRegistry::Sand)},
-          ItemStack{BlockRegistry::Air,    0}, // 第 9 槽：空（选中后右键不放置）
-      }
+    // t49：构造期 9 槽全空（创造物品改由调色板点取到光标→放入 hotbar 槽才有；spec point 2「初始全空」）。
+    , m_slots(9, ItemStack{0, 0})
 {
 }
 
@@ -292,21 +281,12 @@ int Hotbar::maxStackSize(int id) const
     return BlockRegistry::maxStack(quint8(id));
 }
 
-// 按模式重置：Creative 满 / Survival 空 / Spectator 不动。同时清空光标手持物。
+// 按模式重置：t49 改为 Creative 与 Survival **都**清空 9 槽（删创造 8 满栈预置；创造物品改由调色板
+// 点取到光标→放入 hotbar 槽；spec point 2）。Spectator（mode==0）不动（hotbar 隐藏）。同时清空光标手持物。
 void Hotbar::resetForMode(int mode)
 {
-    if (mode == 1) {
-        // Creative：8 可放置方块各满栈 + 第 9 空槽（创造=无限源，每槽充足）。
-        // 满栈数走 BlockRegistry::BlockDef.maxStack（t42 单一权威；改某方块 maxStack 即自动同步）。
-        const int ids[8] = {BlockRegistry::Grass,  BlockRegistry::Dirt,   BlockRegistry::Stone,
-                            BlockRegistry::Cobble, BlockRegistry::Log,    BlockRegistry::Planks,
-                            BlockRegistry::Leaves, BlockRegistry::Sand};
-        for (size_t i = 0; i < m_slots.size(); ++i) {
-            if (i < 8) m_slots[i] = ItemStack{ids[i], BlockRegistry::maxStack(quint8(ids[i]))};
-            else       m_slots[i] = ItemStack{0, 0};
-        }
-    } else if (mode == 2) {
-        // Survival：全空（用户诉求：空背包起；采集/拾取由 t34-t36 填入）。
+    if (mode == 1 || mode == 2) {
+        // Creative / Survival：全空（创造源=调色板无限拾取；生存=空背包起，采集/拾取由 t34-t36 填入）。
         for (ItemStack &s : m_slots) s = ItemStack{0, 0};
     }
     // mode==0（Spectator）：不动（hotbar 隐藏，槽内容无意义）。

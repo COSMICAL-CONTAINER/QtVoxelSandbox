@@ -25,6 +25,8 @@ Item {
     property Hotbar hotbar
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
     signal closed()
+    // t49：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区时；宿主接 player.dropHeldCursor）。
+    signal discardHeldRequested()
 
     // ① 调色板数据：8 实方块（creativeBlocks）+ 3 档镐（creativeTools，t33）+ 扩展空槽（id=0 → 空占位）。
     // 一次性求值的绑定（方块 / 工具集恒定；root.hotbar 由 null→对象 时重新求值）。空槽既是「可滚动」
@@ -78,12 +80,43 @@ Item {
         return { slotId: heldId, slotCount: heldCount, heldId: curId, heldCount: curCount } // D 互换
     }
 
+    // t49 右键语义（MC 1.0）：空手→拾取一半（floor(count/2)，单件特例取 1，否则 floor(1/2)=0 为无操作）；
+    // 持物→放 1 个（空槽开新栈 / 同 id 未满 +1；异 id 槽 / 已满无操作，**不互换**）。返回与 resolveClick
+    // 同形的 {slotId, slotCount, heldId, heldCount}；null = 无操作。与 SurvivalInventory.qml 的同名函数一致。
+    function resolveRightClick(curId, curCount) {
+        const heldId = root.hotbar.heldBlock
+        const heldCount = root.hotbar.heldCount
+        if (heldId === 0) {
+            if (curId === 0) return null                                     // 空手点空槽：无操作
+            let half = Math.floor(curCount / 2)
+            if (half < 1) half = 1                                           // 单件：整件拿起
+            return {
+                slotId: curCount - half > 0 ? curId : 0, slotCount: curCount - half,
+                heldId: curId, heldCount: half
+            }
+        }
+        if (curId !== 0 && curId !== heldId) return null                     // 异 id 槽：无操作（不互换）
+        const cap = root.hotbar.maxStackSize(heldId)
+        if (curId === heldId && curCount >= cap) return null                 // 同 id 已满：无操作
+        const remain = heldCount - 1
+        return {
+            slotId: heldId, slotCount: curCount + 1,
+            heldId: remain > 0 ? heldId : 0, heldCount: remain
+        }
+    }
+
     // 半透明遮罩：仅吸收点击（防穿透到背后的游戏/暂停层），**不关闭背包**——用户要求背包只能由
-    // E / Esc 关闭（点背包 UI 外部不应关闭）。
+    // E / Esc 关闭（点背包 UI 外部不应关闭）。t49：手持物时点遮罩区（面板外）→ 整栈丢弃为实体（同 Q 丢弃）。
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.6)
-        MouseArea { anchors.fill: parent } // 吸收点击（无 onClicked → 不关闭）
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                // 拖出丢弃（spec point 5）：手持物点背包外 → 请求宿主丢弃；空手仅吸收点击。
+                if (root.hotbar && root.hotbar.heldBlock !== 0) root.discardHeldRequested()
+            }
+        }
     }
 
     // 面板：深色圆角，居中。
@@ -297,12 +330,14 @@ Item {
                                 // hover → 状态行中文名；tap → t46 与主栏/生存背包统一的栈操作（拾取/放置/合并/互换）。
                                 //   旧版用「创造覆盖」（持物点异 id 槽 → 原物丢弃），用户反馈「hotbar 行不能左键
                                 //   交互」——现统一走 resolveClick：持物点异 id 槽 → 互换（原物入手持，不丢失）。
-                                //   同时选中该槽（右键放置即用此槽方块）。拖到销毁槽仍走上面的 DragHandler。
+                                //   t49：背包内点 hotbar 行**不切真实选中**（删 selectedSlot 赋值；真实选中仅由游戏内
+                                //   1–9 / 滚轮改）。右键 = 拿一半 / 放一个（resolveRightClick）。拖到销毁槽仍走 DragHandler。
                                 HoverHandler {
                                     id: slotHover
                                     onHoveredChanged: if (hovered) root.hoveredName = root.hotbar.nameForBlock(modelData)
                                 }
                                 TapHandler {
+                                    acceptedButtons: Qt.LeftButton
                                     onTapped: {
                                         const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
                                         if (r) {
@@ -310,7 +345,17 @@ Item {
                                             root.hotbar.heldBlock = r.heldId
                                             root.hotbar.heldCount = r.heldCount
                                         }
-                                        root.hotbar.selectedSlot = index
+                                    }
+                                }
+                                TapHandler {
+                                    acceptedButtons: Qt.RightButton
+                                    onTapped: {
+                                        const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                        if (r) {
+                                            root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                            root.hotbar.heldBlock = r.heldId
+                                            root.hotbar.heldCount = r.heldCount
+                                        }
                                     }
                                 }
                             }

@@ -1007,6 +1007,8 @@ Window {
                  && player.mode === PlayerController.Creative
         z: 150
         onClosed: window.closeInventory()
+        // t49：拖出丢弃（手持物点遮罩区）→ player 把光标手持栈丢为前方实体（同 Q 丢弃）。
+        onDiscardHeldRequested: player.dropHeldCursor()
     }
 
     // 生存背包 1.0（t24）：2×2 合成 + 结果槽 + 4 护甲槽 + 角色预览 + 3×9 主栏 + 9 槽 hotbar 栏。
@@ -1022,6 +1024,8 @@ Window {
                  && player.mode === PlayerController.Survival
         z: 150
         onClosed: window.closeInventory()
+        // t49：拖出丢弃（手持物点遮罩区）→ player 把光标手持栈丢为前方实体（同 Q 丢弃）。
+        onDiscardHeldRequested: player.dropHeldCursor()
     }
 
     // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品栈；hotbarVM.heldBlock/heldCount 驱动）。
