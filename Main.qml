@@ -180,8 +180,8 @@ Window {
         SequentialAnimation {
             id: armSwingAnim
             loops: 1
-            NumberAnimation { target: viewModelHand; property: "swingAngle"; to: -50; duration: 80; easing.type: Easing.InQuad }
-            NumberAnimation { target: viewModelHand; property: "swingAngle"; to: 0; duration: 120; easing.type: Easing.OutQuad }
+            NumberAnimation { target: viewModelHand; property: "swingAngle"; to: -75; duration: 90; easing.type: Easing.InQuad }
+            NumberAnimation { target: viewModelHand; property: "swingAngle"; to: 0; duration: 140; easing.type: Easing.OutQuad }
         }
 
         DirectionalLight { eulerRotation.x: -40; eulerRotation.y: -25; brightness: 1.5 }
@@ -293,6 +293,8 @@ Window {
                 // PrincipledMaterial 自动 blend」可靠——后者透明底可能被当不透明渲染成黑块遮住整个方块（t34
                 // correctness 报告标记的风险）。MC 风格硬边裂纹，走 opaque 通道无 blend 排序问题。
                 alphaCutoff: 0.5
+                opacity: 0.99   // B1 修复：opacity<1 强制走透明通道 → 贴图 alpha 被尊重（透明底 alpha=0 不渲染、仅裂纹显）。
+                                 // 旧 opacity=1 时纹理 alpha 被忽略，透明底（RGB 0,0,0）被当不透明渲染 → 整个方块变黑。
                 // 6 阶裂纹贴图按 miningStage（0..5）取（id 引用全文件可见；数组内联构造）。
                 // miningStage=-1（无累积）时 Model 已 visible=false，此处仍需合法索引防 undefined →
                 // Math.max(0, ...) 钳到 0（不可见时取哪张贴图无所谓，避免 WRN 噪音）。
