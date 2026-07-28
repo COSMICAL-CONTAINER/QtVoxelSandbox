@@ -57,6 +57,23 @@ Window {
     // 与物理(PlayerController)共用同一份栅格。
     World { id: theWorld; width: 48; depth: 48; height: 16; seed: 1337 }
 
+    // 昼夜时钟（t09，PLAN §2-H）：~20 分钟周期的天光亮度乘子 lerp（**非**旋转方向光）。
+    // dayPhase 0..1 循环（0=正午 / 0.5=子夜）；skyLight [0,1] 是纯函数派生的天光乘子，供下面
+    // SceneEnvironment.clearColor 与 DirectionalLight.brightness lerp 昼(#9ec6e8/1.5)↔夜(#0b1026/0.25)。
+    // 呈现层只读消费、绝不反向写时间（PLAN §2 分层）。F6 切调试加速（~30s 一周期）便于肉眼验收。
+    WorldClock { id: worldClock }
+
+    // 昼↔夜颜色 / 亮度 lerp 辅助（t09）：m=worldClock.skyLight ∈ [0,1]（0=子夜、1=正午）。
+    // day 颜色 #9ec6e8 = (0.620,0.776,0.910)；night 颜色 #0b1026 = (0.043,0.063,0.149)。
+    // 不影响 NoLighting 材质方块的自发光（地形仍按其材质常数显——昼夜只改环境/天光，spec）。
+    function dayNightColor(m) {
+        return Qt.rgba(0.043 + (0.620 - 0.043) * m,
+                       0.063 + (0.776 - 0.063) * m,
+                       0.149 + (0.910 - 0.149) * m,
+                       1.0)
+    }
+    function dayNightBrightness(m) { return 0.25 + (1.5 - 0.25) * m }
+
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }
 
@@ -108,7 +125,9 @@ Window {
     View3D {
         anchors.fill: parent
         environment: SceneEnvironment {
-            clearColor: "#9ec6e8"
+            // t09：clearColor 随天光乘子 lerp 昼(#9ec6e8)↔夜(#0b1026)；方向固定（PLAN §2-H 非
+            // 旋转方向光）。绑定 skyLight → 每周期 tick 自动刷新（debugFast 下 ~30s 一圈）。
+            clearColor: dayNightColor(worldClock.skyLight)
             backgroundMode: SceneEnvironment.Color
             antialiasingMode: SceneEnvironment.NoAA
         }
@@ -186,7 +205,14 @@ Window {
             NumberAnimation { target: viewModelHand; property: "swingAngle"; to: 0; duration: 140; easing.type: Easing.OutQuad }
         }
 
-        DirectionalLight { eulerRotation.x: -40; eulerRotation.y: -25; brightness: 1.5 }
+        // t09 昼夜：brightness 随天光乘子 lerp 1.5(昼)↔0.25(夜)；**方向固定不变**（PLAN §2-H：
+        // 亮度乘子 lerp，非旋转方向光）。NoLighting 材质地形不受 DirectionalLight 影响（自发光恒定），
+        // 故地形不会变暗——昼夜视觉由 sky clearColor 渲染；DirectionalLight 只影响场景内 lit 元素。
+        DirectionalLight {
+            eulerRotation.x: -40
+            eulerRotation.y: -25
+            brightness: dayNightBrightness(worldClock.skyLight)
+        }
 
         // 共享图集纹理：3×3=9 个 per-chunk Model 共用一份 atlas（声明一次、按 id 引用）。
         Texture { id: voxelAtlas; source: "qrc:/textures/atlas.png"; generateMipmaps: false }
@@ -542,6 +568,7 @@ Window {
                 window.closeInventory(); e.accepted = true; return
             }
             if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
+            if (e.key === Qt.Key_F6) { worldClock.toggleDebugFast(); e.accepted = true; return } // 昼夜调试加速（t09）
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
             if (e.key === Qt.Key_Q) { player.dropHeld(); e.accepted = true; return }     // 丢弃手持 1 件（t36）
             if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) {            // 1–9 直选 hotbar 槽 0..8（属性赋值走 WRITE setter）
@@ -596,6 +623,9 @@ Window {
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "[LMB] break block   [RMB] place block   [Q] drop item"
+                       color: "#999999"; font.pixelSize: 12
+                       anchors.horizontalCenter: parent.horizontalCenter }
+                Text { text: "[F6] toggle fast day/night (" + (worldClock.debugFast ? "ON · ~30s" : "OFF · ~20min") + ")"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 // 返回主菜单（playing ↔ menu 双向切换，t17）：消费点击，不冒泡到背景 grab。

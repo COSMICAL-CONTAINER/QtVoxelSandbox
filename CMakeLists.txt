@@ -42,6 +42,8 @@ qt_add_executable(voxelsandbox
     blockcube.h
     itementitymanager.cpp
     itementitymanager.h
+    worldclock.cpp
+    worldclock.h
 )
 
 qt_add_qml_module(voxelsandbox
