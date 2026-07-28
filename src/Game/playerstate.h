@@ -51,6 +51,11 @@ public:
 signals:
     void healthChanged();
     void hungerChanged();
+    // 受伤闪烁触发（t51）：takeDamage 实扣 HP 时发；呈现层（Main.qml）Connections 据此启动
+    // 红色半透全屏叠层的 alpha 0.4→0 淡出动画（~600ms）。amount = 本次请求扣血量（不计 clamp 截断）。
+    // 与 healthChanged 分离：healthChanged 驱动心条数值刷新（每半心切态），damaged 驱动一次性的视觉闪烁
+    // （即便扣血未跨整心边界也要闪）。分层（PLAN §2）：Game 层发语义事件，呈现层只消费（同 fallDamageTaken）。
+    void damaged(int amount);
 
 private:
     static constexpr int kMaxHealth = 20; // 10 心 × 2 HP

@@ -396,6 +396,12 @@ Window {
             // 行走动画混合系数（t45）：moveSpeed>0.1 → 1（四肢摆动），否则 0（中性位）。QML 据此缩放
             //   腿/臂的 sin() 摆幅 → 静止时四肢归零（不再生硬平移）。0/1 二值切换（spec：静止归零）。
             readonly property real walkBlend: player.moveSpeed > 0.1 ? 1.0 : 0.0
+            // t51 状态驱动摆动幅度：疾跑 ×1.4（更夸张的大步）、蹲下 ×0.5（拘谨小步）、走 ×1.0。
+            //   频率由 moveSpeed 自带（speedMul 已乘入 → walkPhase 推进速率随之变）；幅度在此缩放四肢摆角。
+            //   接 t45 动画：spec「状态驱动模型动画频率/幅度」。
+            readonly property real swingAmp: player.moveState === PlayerController.Sprint ? 1.4
+                                           : player.moveState === PlayerController.Crouch ? 0.5
+                                           : 1.0
             // 挖掘挥臂混合系数（t45）：onSwingArm 触发 NumberAnimation 0→1→0（~240ms）。>0 时双臂
             //   前抬（覆盖行走摆臂），呈现「挖掘挥动」。0 = 无挖掘（行走摆臂正常）。
             property real mineBlend: 0.0
@@ -458,7 +464,8 @@ Window {
                 position: Qt.vector3d(-0.375, 1.3, 0)
                 eulerRotation: {
                     // 行走摆臂：与右腿同相（+sin；右腿前则左臂前）。静止 walkBlend=0 → 行走项归零。
-                    const walk = Math.sin(player.walkPhase) * 22 * playerModel.walkBlend
+                    // t51：摆幅 ×swingAmp（疾跑夸张 / 蹲下拘谨）。
+                    const walk = Math.sin(player.walkPhase) * 22 * playerModel.walkBlend * playerModel.swingAmp
                     // 挖掘挥臂（mineBlend 0→1→0，onSwingArm 动画）：前抬 70°，覆盖行走摆动。
                     const x = walk * (1 - playerModel.mineBlend) + 70 * playerModel.mineBlend
                     return Qt.vector3d(x, 0, 0)
@@ -483,7 +490,8 @@ Window {
                 id: rightArmPivot
                 position: Qt.vector3d(0.375, 1.3, 0)
                 eulerRotation: {
-                    const walk = -Math.sin(player.walkPhase) * 22 * playerModel.walkBlend
+                    // t51：摆幅 ×swingAmp（与左臂对称；疾跑夸张 / 蹲下拘谨）。
+                    const walk = -Math.sin(player.walkPhase) * 22 * playerModel.walkBlend * playerModel.swingAmp
                     const x = walk * (1 - playerModel.mineBlend) + 70 * playerModel.mineBlend
                     return Qt.vector3d(x, 0, 0)
                 }
@@ -506,7 +514,8 @@ Window {
             Node {
                 id: leftLegPivot
                 position: Qt.vector3d(-0.125, 0.6, 0)
-                eulerRotation: Qt.vector3d(-Math.sin(player.walkPhase) * 28 * playerModel.walkBlend, 0, 0)
+                // t51：摆幅 ×swingAmp（疾跑大步 / 蹲下小步）。
+                eulerRotation: Qt.vector3d(-Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp, 0, 0)
                 Model {
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.3, 0)
@@ -518,7 +527,8 @@ Window {
             Node {
                 id: rightLegPivot
                 position: Qt.vector3d(0.125, 0.6, 0)
-                eulerRotation: Qt.vector3d(Math.sin(player.walkPhase) * 28 * playerModel.walkBlend, 0, 0)
+                // t51：摆幅 ×swingAmp（与左腿对称；疾跑大步 / 蹲下小步）。
+                eulerRotation: Qt.vector3d(Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp, 0, 0)
                 Model {
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.3, 0)
@@ -651,6 +661,38 @@ Window {
         color: Qt.rgba(0.043, 0.063, 0.149, nightTintAlpha(worldClock.skyLight))
     }
 
+    // t51 受伤红色半透全屏闪烁叠层：PlayerState.takeDamage 实扣血时发 damaged(amount) → 本 Connections
+    //   立即把 opacity 设到 0.4（满红），随后 NumberAnimation 用 ~600ms 淡出到 0（spec「红色半透闪烁」）。
+    //   连击受伤：再次触发时 opacity 重置到 0.4 + 重启动画（damageFadeAnim.start() 重启进行中的动画）。
+    //   z=250：高于 HUD / 背包面板（z=150）/ F3（z=50）/ 暂停（z=100），低于主菜单（z=200 仅 menu 态显，
+    //   与本叠层 playing 态互斥）。enabled:false → 不拦截破/放/背包点击（纯呈现层）。
+    //   分层（PLAN §2）：呈现层只消费 PlayerState 语义事件，绝不反向写数值（同 fallDamageTaken→takeDamage）。
+    Rectangle {
+        id: damageOverlay
+        visible: window.appState === "playing"
+        anchors.fill: parent
+        color: "#ff0000"
+        opacity: 0.0
+        z: 250
+        enabled: false   // 不参与指针事件（防挡破/放/背包点击）
+    }
+    NumberAnimation {
+        id: damageFadeAnim
+        target: damageOverlay
+        property: "opacity"
+        duration: 600
+        from: 0.4
+        to: 0.0
+        easing.type: Easing.OutQuad
+    }
+    Connections {
+        target: playerState
+        function onDamaged(amount) {
+            damageOverlay.opacity = 0.4    // 立即满红
+            damageFadeAnim.start()          // 600ms 淡出（重启进行中的动画 → 连击重新闪）
+        }
+    }
+
     // 破/放信号 → 粒子迸发（呈现层消费 World 语义事件）。
     // 现代函数式 Connections（Qt6）；粒子降级（Loader.item 为 null）时安全跳过（PLAN §2-E）。
     Connections {
@@ -752,7 +794,7 @@ Window {
                 Text { text: "[G] cycle mode   [1-9] select block   wheel cycle   [F5] camera"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[Esc] release   WASD move   Space jump/fly   Shift down"
+                Text { text: "[Esc] release   WASD move   dbl-tap W sprint   Shift crouch/sneak   Space jump/fly"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "[LMB] break block   [RMB] place block   [Q] drop item"
@@ -848,13 +890,16 @@ Window {
                            : player.mode === PlayerController.Creative ? "CREATIVE" : "SURVIVAL"
             const camName = player.cameraMode === PlayerController.FirstPerson ? "1st"
                           : player.cameraMode === PlayerController.ThirdPersonBack ? "3rd-back" : "3rd-front"
+            // t51：移动态（walk/sprint/crouch）入 F3 叠层，便于核对疾跑 / 蹲下触发。
+            const moveName = player.moveState === PlayerController.Sprint ? "sprint"
+                           : player.moveState === PlayerController.Crouch ? "crouch" : "walk"
             const ncx = theWorld.chunksX, ncz = theWorld.chunksZ
             return "voxelsandbox  [F3 debug]"
                  + "\nfps: " + window.fps
                  + "\npos: " + player.position.x.toFixed(2) + "  " + player.position.y.toFixed(2) + "  " + player.position.z.toFixed(2)
                  + "  (feet " + player.feetPosition.x.toFixed(1) + "," + player.feetPosition.y.toFixed(1) + "," + player.feetPosition.z.toFixed(1) + ")"
                  + "\nyaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch) + "  look " + camName
-                 + "\nmode: " + modeName + (player.flying ? " (fly)" : "") + "  ground: " + (player.onGround ? "yes" : "no")
+                 + "\nmode: " + modeName + (player.flying ? " (fly)" : "") + "  move: " + moveName + "  ground: " + (player.onGround ? "yes" : "no")
                  + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
                  + "\nworld: " + theWorld.width + "×" + theWorld.depth + "×" + theWorld.height
                  + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"

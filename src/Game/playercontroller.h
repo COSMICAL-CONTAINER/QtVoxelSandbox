@@ -62,6 +62,13 @@ class PlayerController : public QQuickItem
     //   绝不反向写（同 blockBroken→粒子 / swingArm→手挥动 模式）。腿/臂的实际欧拉角算在 QML（呈现层）。
     Q_PROPERTY(float moveSpeed READ moveSpeed NOTIFY moveSpeedChanged)
     Q_PROPERTY(float walkPhase READ walkPhase NOTIFY walkPhaseChanged)
+    // 移动状态机（t51）：双击 W 进 Sprint（水平移速 ×1.3、四肢摆动幅度 ×1.4）；Shift 按住进 Crouch
+    //   （×0.4、AABB 高 1.8→1.5、相机随之降低、且「边缘安全」= 蹲下时若脚下将无支撑则不水平移动）。
+    //   Walk 为默认。仅走路模式（Survival / Creative-未飞）有效：飞/Spectator 恒 Walk（Shift 在飞态作
+    //   「下降」用，不触发蹲；W 无疾跑语义）。状态驱动模型动画频率（speedMul 已乘入 moveSpeed →
+    //   walkPhase 推进速率随之变）与幅度（QML 据 moveState 缩放四肢摆角，接 t45）。
+    //   分层（PLAN §2）：状态属 Game/Physics 层、由输入边缘统一推进（§2-D）；呈现层只读消费。
+    Q_PROPERTY(MoveState moveState READ moveState NOTIFY moveStateChanged)
     // 射线选体（t04）：每帧沿视线 DDA 步进，命中首个实体方块。无命中 / 暂停时 hasHit=false。
     // hitBlock=命中格整数坐标；hitNormal=命中面外法线；hitFaceCenter/hitFaceEuler 供线框 Model 直接摆位。
     Q_PROPERTY(bool hasHit READ hasHit NOTIFY hitChanged)
@@ -100,6 +107,10 @@ public:
     // 相机视角（t27）：F5 循环 0→1→2→0。相机摆位在 QML（PerspectiveCamera）按此模式算。
     enum CameraMode { FirstPerson, ThirdPersonBack, ThirdPersonFront };
     Q_ENUM(CameraMode)
+    // 移动状态机（t51）：Walk=默认走；Sprint=双击 W 疾跑；Crouch=按住 Shift 蹲下。
+    //   仅 Walk↔Sprint↔Crouch 三态；详见 moveState 属性注释。
+    enum MoveState { Walk, Sprint, Crouch };
+    Q_ENUM(MoveState)
 
     explicit PlayerController(QQuickItem *parent = nullptr);
 
@@ -110,10 +121,11 @@ public:
     ItemEntityManager *itemEntities() const { return m_itemEntities; }
     void setItemEntities(ItemEntityManager *m);
 
-    QVector3D position() const { return m_pos + QVector3D(0, kEyeHeight, 0); }
+    QVector3D position() const { return m_pos + QVector3D(0, m_eyeHeight, 0); }
     float yaw() const { return m_yaw; }
     float pitch() const { return m_pitch; }
     Mode mode() const { return m_mode; }
+    MoveState moveState() const { return m_moveState; } // 当前移动态（t51；驱动 QML 摆幅 + 速度因子）
     CameraMode cameraMode() const { return m_cameraMode; }
     QVector3D feetPosition() const { return m_pos; }          // 脚底位置（= m_pos；第三人称玩家模型绑它）
     QVector3D lookVector() const { return lookDirection(); }  // 视线方向（第三人称相机沿视线偏移绑它）
@@ -191,6 +203,7 @@ signals:
     void flyingChanged();
     void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）
     void walkPhaseChanged();  // 行走相位推进（t45；走时每 tick 发，QML 据 sin() 算四肢欧拉角）
+    void moveStateChanged();  // 移动态切（Walk/Sprint/Crouch；t51；驱动 QML 摆幅 + 速率因子）
     void hitChanged();
     void selectedBlockChanged();
     void selectedItemChanged(); // 手持原始 id 变（含工具段切换；驱动 t34 速度重算）
@@ -237,6 +250,15 @@ private:
     void updateCameraDistance();                 // 每帧算第三人称相机距离（钳制防穿墙，t40）
     void clearHit();                             // 暂停/失焦时隐藏线框
     bool overlapsPlayerAABB(int bx, int by, int bz) const; // 放置校验：该格方块是否与玩家 AABB 相交
+    // 移动状态速率因子（t51）：Sprint×1.3 / Crouch×0.4 / Walk×1.0。仅走路模式水平速度乘此值
+    //   （飞 / 观察者 noclip 恒 1，状态机不进入 Sprint/Crouch）。同时驱动 moveSpeed 报告 → walkPhase 频率。
+    float speedMul() const;
+    // 切移动态（t51）：同步更新 AABB 高 / 眼位（蹲下 1.5/相机随之降低；站起 1.8/1.62）。无变化静默。
+    void setMoveState(MoveState s);
+    // 蹲下「边缘安全」（t51）：给定水平位置 (x,z) 在当前脚位下方是否有支撑方块（脚底 0.05 处那一格
+    //   在 AABB footprint 内任一列实体即算支撑）。step() 据此判定「蹲下时若水平移动后脚下将无方块
+    //   则不水平移动」（防走下方块边缘）。仅读 World（isSolid），与碰撞同层。
+    bool hasGroundBelowAt(float x, float z) const;
     // 持续挖掘（t34）：每 tick 累积进度 / 检目标变更 / 完成时破块。由 tick() 调（captured 时）。
     void updateMining(float dt);
     // 清掉累积态（松开 / 换目标 / 失焦 / 完成）。无变化时静默（不发信号）。
@@ -267,7 +289,11 @@ private:
     bool m_flying = false;          // 创造模式飞行子状态（双击空格切换；进创造默认走）
     float m_moveSpeed = 0.0f;       // 当前行走速度（仅走路模式非零；驱动 QML 腿/臂摆动频率，t45）
     float m_walkPhase = 0.0f;       // 行走相位（弧度；走时累加、2π 回绕；供 QML sin() 算四肢摆角，t45）
+    MoveState m_moveState = Walk;   // 移动态（t51；Walk/Sprint/Crouch；仅走路模式有效，飞/Spectator 恒 Walk）
+    float m_height = kHeight;       // 当前 AABB 高（蹲下变 kCrouchHeight=1.5；默认 kHeight=1.8；t51）
+    float m_eyeHeight = kEyeHeight; // 当前眼位（蹲下降低到 kCrouchEye；相机 position 据此 → 蹲下相机降低，t51）
     qint64 m_lastSpaceMs = -100000; // 双击空格检测时间戳
+    qint64 m_lastWms = -100000;     // W 双击检测时间戳（疾跑触发；t51）
     bool m_spacePrev = false;       // 跳跃边沿触发（长按空格只跳一次）
     int m_selectedBlock = BlockRegistry::Stone; // 当前手持方块（右键放置；默认 Stone，t06 hotbar 绑定）
     int m_selectedItem = BlockRegistry::Stone;  // 手持物品原始 id（含工具段；t34 挖掘速度用，绑定 hotbar.selectedItemId）
@@ -293,6 +319,8 @@ private:
     static constexpr float kHalfW = 0.3f;      // 宽 0.6
     static constexpr float kHeight = 1.8f;
     static constexpr float kEyeHeight = 1.62f;
+    static constexpr float kCrouchHeight = 1.5f; // 蹲下 AABB 高（spec t51：1.8→1.5）
+    static constexpr float kCrouchEye = 1.35f;   // 蹲下眼位（相机随之降低；≈ MC 蹲/站比例）
     static constexpr float kFly = 8.0f;        // 飞/观察 移速
     static constexpr float kWalk = 4.3f;       // 走 移速
     static constexpr float kGravity = 28.0f;

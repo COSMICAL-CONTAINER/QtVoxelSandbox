@@ -73,9 +73,38 @@ void PlayerController::setKey(int key, bool pressed)
             m_flying = !m_flying;
             m_lastSpaceMs = -100000; // 防三连误触
             m_vel.setY(0);
+            // t51：起飞退出疾跑/蹲下（飞行态 Walk 状态机不适用；spec「疾跑/蹲下仅走路模式」）。
+            if (m_moveState != Walk) setMoveState(Walk);
             emit flyingChanged();
         } else {
             m_lastSpaceMs = now;
+        }
+    }
+    // 移动状态机（t51）：双击 W 疾跑 / Shift 按住蹲下。仅走路模式（Survival / Creative-未飞）有效；
+    // Spectator 与 Creative-飞态下 Shift 作「下降」用、W 无疾跑语义 → 不触发状态切换。
+    // 优先级：Shift（蹲）覆盖 W（疾跑）—— 蹲下时按/松 W 不动蹲态，仅松 Shift 才回 Walk。
+    //   双击 W 仅从 Walk 进 Sprint（蹲态不进）；松 W 退 Sprint；松 Shift 退 Crouch。
+    //   真实按下（非自动重复）才参与双击检测（与 Space 同；QML 已过滤 autorepeat，此处 wasDown 再保险）。
+    if (key == Qt::Key_Shift) {
+        const bool canCrouch = (m_mode == Survival || (m_mode == Creative && !m_flying));
+        if (pressed && canCrouch) {
+            if (m_moveState != Crouch) setMoveState(Crouch);
+        } else if (!pressed) {
+            if (m_moveState == Crouch) setMoveState(Walk);
+        }
+    } else if (key == Qt::Key_W) {
+        const bool canSprint = (m_mode == Survival || (m_mode == Creative && !m_flying));
+        if (pressed && !wasDown && canSprint) {
+            const qint64 now = m_evtClock.elapsed();
+            if (m_moveState == Walk && (now - m_lastWms < 300)) {
+                setMoveState(Sprint);
+                m_lastWms = -100000; // 防三连误触（双击成功后立即消费）
+            } else {
+                m_lastWms = now;
+            }
+        } else if (!pressed) {
+            // 松 W 退出疾跑（spec「松 W 回 Walk」）。蹲态下松 W 不动（Shift 仍按 → 仍蹲）。
+            if (m_moveState == Sprint) setMoveState(Walk);
         }
     }
     m_keys.insert(key, pressed);
@@ -98,6 +127,8 @@ void PlayerController::setMode(Mode m)
     m_onGround = false;
     m_peakY = m_pos.y();        // 重置掉落基准：避免从创造飞行高度切生存时累计陈旧落差
     if (m_flying) { m_flying = false; emit flyingChanged(); } // 进入新模式默认走（不飞）
+    // t51：切模式清移动状态机（疾跑/蹲下不跨模式延续；新模式的 Shift/W 上下文不同，从 Walk 起最稳）。
+    if (m_moveState != Walk) setMoveState(Walk);
     emit modeChanged();
     emit onGroundChanged();
 }
@@ -120,6 +151,8 @@ void PlayerController::release()
     clearHit();                               // 暂停 → 隐藏线框（未捕获时不选中）
     cancelMining();                           // t34：暂停 / 失焦 → 清累积挖掘态（spec：失焦清零）
     m_leftDown = false;                       // t44：暂停 / 失焦 → 视同松手（切断续挖）
+    // t51：暂停 / 失焦时退出疾跑 / 蹲下（恢复时从 Walk 起；避免遗留蹲态卡低视角 / 疾跑余速）。
+    if (m_moveState != Walk) setMoveState(Walk);
 }
 
 void PlayerController::setCaptured(bool c)
@@ -530,10 +563,11 @@ void PlayerController::pickBlock()
 // addStack 返 0（全放入）→ ItemEntityManager.removeAt 销毁实体（spec：拾取后销毁）；
 // 返 >0（背包满）→ 不拾取（entity 留；spec：全满 → 不拾取）。距离从玩家 AABB 中心（脚底 + 半高）
 // 3D 起算，阈值 kPickupDist；从后往前扫 → erase 不影响前面索引（安全边删边迭代）。
+// t51：AABB 高用 m_height（蹲下变矮 → 中心随之降低，仍贴近玩家实际占据空间）。
 void PlayerController::pickupScan()
 {
     if (!m_itemEntities || !m_hotbar) return;
-    const QVector3D center = m_pos + QVector3D(0.0f, kHeight * 0.5f, 0.0f);
+    const QVector3D center = m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f);
     const float r2 = kPickupDist * kPickupDist;
     for (int i = m_itemEntities->count() - 1; i >= 0; --i) {
         const QVector3D d = m_itemEntities->posAt(i) - center;
@@ -545,10 +579,11 @@ void PlayerController::pickupScan()
 }
 
 // 方块格 [bx,bx+1]×[by,by+1]×[bz,bz+1] 与玩家 AABB 是否相交（严格重叠；仅贴面不算）。
+// t51：AABB 高用 m_height（蹲下变矮 → 放置校验随之放宽，玩家头顶不再误判阻挡）。
 bool PlayerController::overlapsPlayerAABB(int bx, int by, int bz) const
 {
     const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
-    const float miny = m_pos.y(),           maxy = m_pos.y() + kHeight;
+    const float miny = m_pos.y(),           maxy = m_pos.y() + m_height;
     const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
     return minx < float(bx + 1) && maxx > float(bx)
         && miny < float(by + 1) && maxy > float(by)
@@ -570,11 +605,62 @@ QVector3D PlayerController::wishHoriz() const
     return w;
 }
 
+// 移动状态速率因子（t51）：Sprint×1.3 / Crouch×0.4 / Walk×1.0。
+//   仅走路模式（Survival / Creative-未飞）的水平速度乘此值；飞 / Spectator 恒 Walk（speedMul=1）。
+//   spec「疾跑移速 ×1.3、蹲下 ×0.4」。同时驱动 moveSpeed 报告 → walkPhase 推进频率 → 四肢摆频。
+float PlayerController::speedMul() const
+{
+    switch (m_moveState) {
+    case Sprint: return 1.3f;
+    case Crouch: return 0.4f;
+    default:     return 1.0f; // Walk
+    }
+}
+
+// 切移动态（t51）：同步更新 AABB 高 / 眼位（蹲下变矮、相机随之降低）。无变化静默。
+//   蹲下：m_height=kCrouchHeight(1.5) / m_eyeHeight=kCrouchEye(1.35)；
+//   站起（Walk/Sprint）：m_height=kHeight(1.8) / m_eyeHeight=kEyeHeight(1.62)。
+//   相机 position 读 m_eyeHeight → 蹲下相机自动降低（无需 QML 额外处理）。
+void PlayerController::setMoveState(MoveState s)
+{
+    if (s == m_moveState) return;
+    m_moveState = s;
+    if (s == Crouch) {
+        m_height = kCrouchHeight;
+        m_eyeHeight = kCrouchEye;
+    } else {
+        m_height = kHeight;
+        m_eyeHeight = kEyeHeight;
+    }
+    emit moveStateChanged();
+    emit positionChanged(); // 眼位随蹲 / 站变 → 相机 position 绑定刷新（蹲下相机降低）
+}
+
+// 蹲下「边缘安全」支撑判定（t51）：给定水平位置 (x,z)，当前脚位 m_pos.y() 下方 0.05 处那一格
+//   在 AABB footprint（kHalfW 宽）内任一列实体即算「有支撑」。step() 据此判定蹲下时是否允许
+//   水平移动（无支撑 → 不移动，防走下边缘）。仅读 World（isSolid），与碰撞同层。
+//   注：脚底 y = 站立方块顶面（整数 + eps）；其下一格 = floor(y - 0.05)。仅着地时调用（见 step）。
+bool PlayerController::hasGroundBelowAt(float x, float z) const
+{
+    if (!m_world) return false;
+    const float checkY = m_pos.y() - 0.05f;          // 脚底略下 → 支撑方块所在格
+    const int by = int(std::floor(checkY));
+    const float minx = x - kHalfW, maxx = x + kHalfW;
+    const float minz = z - kHalfW, maxz = z + kHalfW;
+    // 严格覆盖（与 aabbHitsSolid 同取样策略）：AABB footprint 内所有可能列
+    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
+    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
+    for (int zz = z0; zz <= z1; ++zz)
+        for (int xx = x0; xx <= x1; ++xx)
+            if (m_world->isSolid(xx, by, zz)) return true;
+    return false;
+}
+
 bool PlayerController::aabbHitsSolid() const
 {
     if (!m_world) return false;
     const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
-    const float miny = m_pos.y(), maxy = m_pos.y() + kHeight;
+    const float miny = m_pos.y(), maxy = m_pos.y() + m_height; // t51：蹲下用 m_height（变矮）
     const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
     // 严格重叠：ceil(max)-1 排除「仅贴面」的方块 → 防卡缝
     const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
@@ -588,6 +674,7 @@ bool PlayerController::aabbHitsSolid() const
 }
 
 // 沿单轴移动 amount；碰撞则贴面 + eps + 清该轴速度。无世界则自由移动。
+// t51：AABB 高用 m_height（蹲下变矮 → 头顶碰撞 / 着地贴面随之变；顶头贴面按当前高度算）。
 void PlayerController::moveAxis(int axis, float amount)
 {
     if (amount == 0) return;
@@ -599,7 +686,7 @@ void PlayerController::moveAxis(int axis, float amount)
     if (!m_world || !aabbHitsSolid()) return;
 
     const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
-    const float miny = m_pos.y(), maxy = m_pos.y() + kHeight;
+    const float miny = m_pos.y(), maxy = m_pos.y() + m_height;
     const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
     const float eps = 1e-4f;
     switch (axis) {
@@ -608,8 +695,8 @@ void PlayerController::moveAxis(int axis, float amount)
         else            m_pos.setX(std::floor(minx) + 1.f + kHalfW + eps);
         m_vel.setX(0); break;
     case 1:
-        if (amount > 0) m_pos.setY(std::floor(maxy) - kHeight - eps); // 顶头
-        else            m_pos.setY(std::floor(miny) + 1.f + eps);     // 着地
+        if (amount > 0) m_pos.setY(std::floor(maxy) - m_height - eps); // 顶头（按当前高度）
+        else            m_pos.setY(std::floor(miny) + 1.f + eps);      // 着地
         m_vel.setY(0); break;
     case 2:
         if (amount > 0) m_pos.setZ(std::floor(maxz) - kHalfW - eps);
@@ -629,11 +716,12 @@ void PlayerController::step(qreal dt)
     //   Spectator / Creative-飞 → 0（飞行/幽灵态无走步动画，spec 未要求；为未来泳/飞姿留接口）。
     //   walkPhase 仅在走时累加（speed*dt*kStrideRate），2π 回绕；静止不累加 → QML 据此 sin*0=0 中性位。
     //   「按住 WASD 撞墙」时 wish 仍非零（玩家在「尝试」走）→ 腿仍摆，对齐 MC 行为。
+    //   t51：moveSpeed 乘 speedMul（疾跑 ×1.3 / 蹲 ×0.4）→ walkPhase 推进速率随状态变（动画频率）。
     //   分层：动画驱动数据由 Game/Physics tick 算出，QML 呈现层只读消费（同 swingArm 模式）。
     {
         const bool moving = wish.lengthSquared() > 0.001f; // wish 已 normalize：非零即有 WASD 输入
         const float walk = (moving && (m_mode == Survival || (m_mode == Creative && !m_flying)))
-                         ? kWalk : 0.0f;
+                         ? kWalk * speedMul() : 0.0f;
         if (walk != m_moveSpeed) { m_moveSpeed = walk; emit moveSpeedChanged(); }
         // 相位推进（仅走时；走时每 tick 发 walkPhaseChanged 供 QML 重算四肢欧拉角，~60Hz）。
         if (m_moveSpeed > 0.1f) {
@@ -665,8 +753,9 @@ void PlayerController::step(qreal dt)
     }
 
     // 走（生存 / 创造-未飞）：重力 + 跳跃 + 逐轴解算
-    m_vel.setX(wish.x() * kWalk);
-    m_vel.setZ(wish.z() * kWalk);
+    // t51：水平速度乘 speedMul（疾跑 ×1.3 / 蹲 ×0.4 / 走 ×1.0）；spec「疾跑移速 +、蹲下 -」。
+    m_vel.setX(wish.x() * kWalk * speedMul());
+    m_vel.setZ(wish.z() * kWalk * speedMul());
     m_vel.setY(std::max(float(m_vel.y() - kGravity * dt), -kMaxFall));
     if (spaceEdge && m_onGround) m_vel.setY(kJump);
 
@@ -676,14 +765,25 @@ void PlayerController::step(qreal dt)
     const int sub = std::max(1, int(std::ceil(md / 0.4f)));
     delta /= float(sub);
 
+    // t51 蹲下「边缘安全」：蹲下且着地时，若整帧水平位移的目的位置脚下无支撑方块（hasGroundBelowAt），
+    //   则跳过本帧水平移动（仅重力 / 跳跃仍生效）→ 蹲下不会从方块边缘走下（spec「防走下边缘」）。
+    //   检查目的位置 = 当前 m_pos + delta*sub（一帧位移 << 1 格 → 等价「贴边即停」）。MC 行为对齐。
+    //   仅蹲态 + 着地触发；走 / 疾跑 / 滞空不限制（走下边缘正常掉落）。
+    const bool crouchEdgeBlock = (m_moveState == Crouch && m_onGround
+                                  && (delta.x() != 0.0f || delta.z() != 0.0f)
+                                  && !hasGroundBelowAt(m_pos.x() + delta.x() * float(sub),
+                                                        m_pos.z() + delta.z() * float(sub)));
+
     const bool wasGround = m_onGround;
     m_onGround = false;
     for (int i = 0; i < sub; ++i) {
         const float dy = delta.y();
         moveAxis(1, dy);
         if (dy < 0 && m_vel.y() == 0) m_onGround = true; // 下落被挡 = 着地
-        moveAxis(0, delta.x());
-        moveAxis(2, delta.z());
+        if (!crouchEdgeBlock) {
+            moveAxis(0, delta.x());
+            moveAxis(2, delta.z());
+        }
     }
     // 稳健地面复探：脚底下方 0.05 有实体即算着地
     const float oy = m_pos.y();
