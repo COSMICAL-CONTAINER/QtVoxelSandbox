@@ -121,12 +121,14 @@ Window {
             //   第三人称-前：眼位 + look·d + 欧拉 (−pitch,yaw+180,0) —— 相机绕到玩家正前方回看其正面
             // lookVector 由 yaw/pitch 派生（PlayerController.lookDirection）；偏移沿视线方向，旋转据模式翻转。
             // mode 标志属控制器（Game 层），摆位属 QML 呈现层（PLAN §2 分层）。
+            // t40：第三人称距离 d 不再写死 3.5，改读 player.cameraDistance（控制器每帧沿偏移方向 DDA 钳制到
+            // 首个实体命中距离；无命中=3.5，命中则贴在面前）→ 相机贴墙不穿入。Math.min 为安全钳（值已 ≤3.5）。
             position: {
                 const eye = player.position
                 const look = player.lookVector
-                const d = 3.5
                 const m = player.cameraMode
                 if (m === PlayerController.FirstPerson) return eye
+                const d = Math.min(3.5, player.cameraDistance)
                 const s = (m === PlayerController.ThirdPersonBack) ? -d : d  // 后退 vs 前推
                 return Qt.vector3d(eye.x + look.x * s, eye.y + look.y * s, eye.z + look.z * s)
             }

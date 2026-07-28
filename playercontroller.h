@@ -46,6 +46,12 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(CameraMode cameraMode READ cameraMode NOTIFY cameraModeChanged)
     Q_PROPERTY(QVector3D feetPosition READ feetPosition NOTIFY positionChanged)
     Q_PROPERTY(QVector3D lookVector READ lookVector NOTIFY lookChanged)
+    // 第三人称相机距离钳制（t40）：每帧从眼位沿相机偏移方向（ThirdPersonBack=−look，Front=+look）
+    // DDA 步进（max=kCamMax=3.5），返回首个实体命中距离（留 kCamMargin 余量贴在面前）；无命中=kCamMax。
+    // Main.qml 相机 position 用 ±cameraDistance 偏移 → 相机贴墙不穿入。第一人称恒 0（不偏移）。
+    // 复用 raycastVoxel（RayHit.dist 已暴露命中距离）。仅值真变时发 cameraDistanceChanged（DDA 对同输入
+    // 确定 → 玩家不动/不转时距离稳定，无抖动）。
+    Q_PROPERTY(float cameraDistance READ cameraDistance NOTIFY cameraDistanceChanged)
     Q_PROPERTY(bool captured READ captured NOTIFY capturedChanged)
     Q_PROPERTY(bool onGround READ onGround NOTIFY onGroundChanged)
     Q_PROPERTY(bool flying READ flying NOTIFY flyingChanged)
@@ -104,6 +110,7 @@ public:
     CameraMode cameraMode() const { return m_cameraMode; }
     QVector3D feetPosition() const { return m_pos; }          // 脚底位置（= m_pos；第三人称玩家模型绑它）
     QVector3D lookVector() const { return lookDirection(); }  // 视线方向（第三人称相机沿视线偏移绑它）
+    float cameraDistance() const { return m_cameraDistance; } // 第三人称相机距离（钳制后；t40）
     bool captured() const { return m_captured; }
     bool onGround() const { return m_onGround; }
     bool flying() const { return m_flying; }
@@ -163,6 +170,7 @@ signals:
     void modeChanged();
     void cameraModeChanged();
     void lookChanged();
+    void cameraDistanceChanged(); // 第三人称相机距离变（t40；值真变才发，免抖动）
     void capturedChanged();
     void onGroundChanged();
     void flyingChanged();
@@ -205,6 +213,7 @@ private:
     QPoint windowCenterGlobal() const;
     QVector3D lookDirection() const;             // 视线方向（与相机 eulerRotation 同源）
     void updateRaycast();                        // 每帧沿视线 DDA，更新命中态
+    void updateCameraDistance();                 // 每帧算第三人称相机距离（钳制防穿墙，t40）
     void clearHit();                             // 暂停/失焦时隐藏线框
     bool overlapsPlayerAABB(int bx, int by, int bz) const; // 放置校验：该格方块是否与玩家 AABB 相交
     // 持续挖掘（t34）：每 tick 累积进度 / 检目标变更 / 完成时破块。由 tick() 调（captured 时）。
@@ -231,6 +240,7 @@ private:
     float m_yaw = 0, m_pitch = -42;
     Mode m_mode = Spectator;
     CameraMode m_cameraMode = FirstPerson; // F5 相机模式（默认第一人称，t27）
+    float m_cameraDistance = 0.0f;         // 第三人称相机距离（钳制后；FirstPerson 恒 0；t40）
     bool m_captured = false, m_onGround = false;
     QHash<int, bool> m_keys;
     bool m_flying = false;          // 创造模式飞行子状态（双击空格切换；进创造默认走）
@@ -264,6 +274,8 @@ private:
     static constexpr float kDeg = 0.017453292519943295f;
     static constexpr float kReach = 5.0f;      // 射线选体射程（格）
     static constexpr float kPickupDist = 1.5f; // 拾取距离阈值（格；玩家 AABB 中心起算，spec ~1.2 量级）
+    static constexpr float kCamMax = 3.5f;     // 第三人称相机最大距离（格；t40，与 Main.qml 默认 d 对齐）
+    static constexpr float kCamMargin = 0.1f;  // 相机贴命中面前的余量（防卡面 z-fight / 近裁面穿插；t40）
 };
 
 #endif // PLAYERCONTROLLER_H

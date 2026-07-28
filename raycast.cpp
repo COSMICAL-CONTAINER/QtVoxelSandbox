@@ -61,6 +61,7 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
             h.valid = true;
             h.bx = x; h.by = y; h.bz = z;
             h.nx = float(nx); h.ny = float(ny); h.nz = float(nz);
+            h.dist = t; // 命中面距起点欧氏距离（dir 已归一 → t 即距离）；t40 相机钳制复用
             return h;
         }
     }

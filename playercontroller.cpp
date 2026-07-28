@@ -194,6 +194,7 @@ void PlayerController::tick()
     pollMouse();
     step(dt);
     updateRaycast();   // 沿视线 DDA 选体 → 更新线框命中态
+    updateCameraDistance(); // t40：第三人称相机距离钳制（防穿墙）
     updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
     pickupScan();      // t36：扫附近掉落实体 → Hotbar.addStack → 命中则销毁实体
 }
@@ -230,6 +231,39 @@ void PlayerController::clearHit()
     m_hasHit = false;
     m_hitNx = m_hitNy = m_hitNz = 0;
     emit hitChanged();
+}
+
+// 第三人称相机距离钳制（t40）：每帧从眼位沿相机偏移方向 DDA，返回首个实体命中距离（留余量贴在面前）。
+//   ThirdPersonBack：相机在玩家身后 → 偏移方向 = -look（射线往身后打）；
+//   ThirdPersonFront：相机在玩家身前 → 偏移方向 = +look。
+// 复用 raycastVoxel（RayHit.dist = 起点到命中面的欧氏距离）。命中 → dist - kCamMargin（贴面前、防
+// z-fight / 近裁面穿插），floor 到 0（墙贴近眼 → 退到眼位）；无命中（含起点嵌实体的退化）→ kCamMax。
+// 第一人称恒 0（不偏移，相机贴眼）。仅值真变时发 cameraDistanceChanged——DDA 对同一 (eye,look,世界)
+// 输入确定，玩家不动/不转时距离帧间稳定，无抖动。
+// 分层（PLAN §2）：本层只读 World（blockAt/isSolid），与选体 raycast 同源；相机摆位仍在 QML 呈现层。
+void PlayerController::updateCameraDistance()
+{
+    if (m_cameraMode == FirstPerson) {
+        if (m_cameraDistance != 0.0f) {
+            m_cameraDistance = 0.0f;
+            emit cameraDistanceChanged();
+        }
+        return;
+    }
+    float d = kCamMax;
+    if (m_world) {
+        const QVector3D look = lookDirection();
+        const QVector3D dir = (m_cameraMode == ThirdPersonBack) ? -look : look;
+        const RayHit h = raycastVoxel(*m_world, position(), dir, kCamMax);
+        if (h.valid) {
+            d = h.dist - kCamMargin;
+            if (d < 0.0f) d = 0.0f; // 墙贴近眼位 → 退到眼（极端情形，相机近乎第一人称）
+        }
+    }
+    if (d != m_cameraDistance) {
+        m_cameraDistance = d;
+        emit cameraDistanceChanged();
+    }
 }
 
 // 命中面中心 = 方块中心 + (0.5 + eps)*法线：贴在该面上（非方块几何中心），
