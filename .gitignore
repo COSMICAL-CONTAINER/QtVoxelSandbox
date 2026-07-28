@@ -1,6 +1,7 @@
 # Build output
 build/
 docs/
+logs/
 out/
 cmake-build-*/
 # CMake
