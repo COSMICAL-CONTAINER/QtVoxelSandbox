@@ -1,4 +1,6 @@
 import QtQuick
+// t41：迁入 src/ui/ 子目录后需显式 import 自身模块，以解析下方 `property Hotbar hotbar` 等 C++ 类型。
+import VoxelSandbox
 
 // 生存模式物品栏 1.0（t24）：E 键开关（仅 Survival 模式 —— 宿主 Main.qml 已按模式分流：Survival
 // 开本屏、Creative 开 t23 创造背包、Spectator E 无反应）。

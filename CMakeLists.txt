@@ -12,52 +12,66 @@ qt_standard_project_setup()
 
 qt_add_executable(voxelsandbox
     main.cpp
-    blockregistry.cpp
-    blockregistry.h
-    chunk.cpp
-    chunk.h
-    chunkmanager.cpp
-    chunkmanager.h
-    chunkgeometry.cpp
-    chunkgeometry.h
-    world.cpp
-    world.h
-    playercontroller.cpp
-    playercontroller.h
-    raycast.cpp
-    raycast.h
-    wiresquare.cpp
-    wiresquare.h
-    unitcube.cpp
-    unitcube.h
-    hotbar.cpp
-    hotbar.h
-    playerstate.cpp
-    playerstate.h
-    toolregistry.cpp
-    toolregistry.h
-    crackbox.cpp
-    crackbox.h
-    blockcube.cpp
-    blockcube.h
-    itementitymanager.cpp
-    itementitymanager.h
-    worldclock.cpp
-    worldclock.h
+    src/Core/blockregistry.cpp
+    src/Core/blockregistry.h
+    src/World/chunk.cpp
+    src/World/chunk.h
+    src/World/chunkmanager.cpp
+    src/World/chunkmanager.h
+    src/World/chunkgeometry.cpp
+    src/World/chunkgeometry.h
+    src/World/world.cpp
+    src/World/world.h
+    src/World/worldclock.cpp
+    src/World/worldclock.h
+    src/Renderer/wiresquare.cpp
+    src/Renderer/wiresquare.h
+    src/Renderer/unitcube.cpp
+    src/Renderer/unitcube.h
+    src/Renderer/crackbox.cpp
+    src/Renderer/crackbox.h
+    src/Renderer/blockcube.cpp
+    src/Renderer/blockcube.h
+    src/Game/playercontroller.cpp
+    src/Game/playercontroller.h
+    src/Game/playerstate.cpp
+    src/Game/playerstate.h
+    src/Game/hotbar.cpp
+    src/Game/hotbar.h
+    src/Game/toolregistry.cpp
+    src/Game/toolregistry.h
+    src/Game/itementitymanager.cpp
+    src/Game/itementitymanager.h
+    src/Game/raycast.cpp
+    src/Game/raycast.h
+)
+
+# 分层（PLAN §2 铁律：依赖只向下）。把各层子目录加入 include 搜索路径，使
+# 既有的 `#include "xxx.h"`（无子目录前缀）跨目录仍可解析——这是「搬迁中性重构」
+# 的关键：移动文件不改动任何 #include 语句，行为零回归。
+#   src/Core      ← math/数据原语（blockregistry）
+#   src/World     ← chunks/worldgen/mesher 数据层
+#   src/Renderer  ← QQuick3DGeometry 呈现层
+#   src/Game      ← 玩家/物品/工具/射线（Physics-Game 逻辑层）
+target_include_directories(voxelsandbox PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/World
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Game
 )
 
 qt_add_qml_module(voxelsandbox
     URI VoxelSandbox
     VERSION 1.0
     QML_FILES
-        Main.qml
-        BlockParticles.qml
-        MainMenu.qml
-        Inventory.qml
-        InvSlot.qml
-        SurvivalInventory.qml
-        VitalIcon.qml
-        ToolIcon.qml
+        src/ui/Main.qml
+        src/ui/BlockParticles.qml
+        src/ui/MainMenu.qml
+        src/ui/Inventory.qml
+        src/ui/InvSlot.qml
+        src/ui/SurvivalInventory.qml
+        src/ui/VitalIcon.qml
+        src/ui/ToolIcon.qml
 )
 
 qt_add_resources(voxelsandbox "voxel_textures"
@@ -113,7 +127,7 @@ if(WIN32)
         add_custom_command(TARGET voxelsandbox POST_BUILD
             COMMAND "${WINDEPLOYQT_EXECUTABLE}"
                     --no-translations
-                    --qmldir "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/src/ui"
                     "$<TARGET_FILE:voxelsandbox>"
             COMMENT "Deploying Qt runtime + QML plugins (incl. Particles3D) to build dir")
     else()

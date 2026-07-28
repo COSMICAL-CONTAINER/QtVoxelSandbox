@@ -1,5 +1,9 @@
 import QtQuick
 import QtQuick3D
+// t41：QML 源文件迁入 src/ui/ 子目录后，不再位于模块根 → 丢失对模块 C++ 类型
+// （World / Hotbar / PlayerController / ChunkGeometry / CrackBox …）的隐式访问。
+// 显式 import 自身模块以恢复类型解析（Qt6 子目录 QML 文件的标准做法）。行为不变。
+import VoxelSandbox
 
 Window {
     id: window
