@@ -44,6 +44,40 @@ Item {
     readonly property int bevelDark: 0       // 凹陷斜面：顶/左 暗边
     readonly property int bevelLight: 0      // 凹陷斜面：底/右 亮边
 
+    // t46：背包内 hotbar 行左键交互与主栏统一（用户反馈「现在背包内 hotbar 行不能左键交互」——
+    // 旧版 hotbar 行用「创造覆盖」语义：持物点异 id 槽 → 原物被丢弃，等同于「不能正常移动/互换」）。
+    // 本函数与 SurvivalInventory.qml 的 resolveClick 完全一致（拾取/放置/合并/互换 4 case），让创造
+    // hotbar 行支持把物品在槽间搬动/互换，而不是覆盖销毁。调色板点击仍是「无限源拾取」（不变）。
+    //   A 手持空 + 槽非空：拾取整栈（槽清空、held ← 该栈）。
+    //   B 手持非空 + 槽空：放置整栈（槽 ← held、held 清空）。
+    //   C 手持非空 + 同 id：合并至 maxStackSize(id)（方块 64 / 工具段 1），余数留 held；槽已满则无操作。
+    //   D 手持非空 + 异 id：互换（槽 ↔ held）。
+    // 返回 null = 无操作（空点空 / 同 id 槽已满）。手持栈状态由 hotbar VM 单一持有（PLAN §2：VM 单一权威）。
+    function resolveClick(curId, curCount) {
+        const heldId = root.hotbar.heldBlock
+        const heldCount = root.hotbar.heldCount
+        if (heldId === 0) {
+            if (curId === 0) return null                                       // 空手点空槽：无操作
+            return { slotId: 0, slotCount: 0, heldId: curId, heldCount: curCount } // A 拾取整栈
+        }
+        if (curId === 0) {
+            return { slotId: heldId, slotCount: heldCount, heldId: 0, heldCount: 0 } // B 放整栈
+        }
+        if (curId === heldId) {
+            // C 合并：min(剩余空间, 手持数) 移入槽；手持余 0 → heldId 归 0（保持空栈不变式）。
+            const cap = root.hotbar.maxStackSize(curId)
+            const space = cap - curCount
+            if (space <= 0) return null                                        // 槽已满（含工具段 cap=1）：无操作
+            const move = Math.min(space, heldCount)
+            const remain = heldCount - move
+            return {
+                slotId: curId, slotCount: curCount + move,
+                heldId: remain > 0 ? heldId : 0, heldCount: remain
+            }
+        }
+        return { slotId: heldId, slotCount: heldCount, heldId: curId, heldCount: curCount } // D 互换
+    }
+
     // 半透明遮罩：仅吸收点击（防穿透到背后的游戏/暂停层），**不关闭背包**——用户要求背包只能由
     // E / Esc 关闭（点背包 UI 外部不应关闭）。
     Rectangle {
@@ -260,10 +294,9 @@ Item {
                                     font.pixelSize: 13; font.bold: true
                                 }
 
-                                // hover → 状态行中文名；tap → 拾取/放置（t37 创造覆盖语义）：
-                                //   空手点有物槽 → 拾取整栈到光标（槽清空、手持=该栈 {id,count}）；空槽 → 无操作。
-                                //   持物点任意槽 → 放置**覆盖**：槽 ← 手持栈，原槽内容直接丢弃（创造源无限，
-                                //                   不回收到 held），held 清空。区别于生存的「互换」（t38）。
+                                // hover → 状态行中文名；tap → t46 与主栏/生存背包统一的栈操作（拾取/放置/合并/互换）。
+                                //   旧版用「创造覆盖」（持物点异 id 槽 → 原物丢弃），用户反馈「hotbar 行不能左键
+                                //   交互」——现统一走 resolveClick：持物点异 id 槽 → 互换（原物入手持，不丢失）。
                                 //   同时选中该槽（右键放置即用此槽方块）。拖到销毁槽仍走上面的 DragHandler。
                                 HoverHandler {
                                     id: slotHover
@@ -271,18 +304,11 @@ Item {
                                 }
                                 TapHandler {
                                     onTapped: {
-                                        const heldId = root.hotbar.heldBlock
-                                        if (heldId === 0) {
-                                            const cur = root.hotbar.blockIdAt(index)
-                                            if (cur !== 0) {
-                                                root.hotbar.heldBlock = cur
-                                                root.hotbar.heldCount = root.hotbar.countAt(index)
-                                                root.hotbar.setStack(index, 0, 0) // 清空源槽（拾取整栈）
-                                            }
-                                        } else {
-                                            // 创造覆盖：放置手持栈到该槽，原物丢弃、held 清空（不互换）。
-                                            root.hotbar.setStack(index, heldId, root.hotbar.heldCount)
-                                            root.hotbar.heldBlock = 0
+                                        const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                        if (r) {
+                                            root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                            root.hotbar.heldBlock = r.heldId
+                                            root.hotbar.heldCount = r.heldCount
                                         }
                                         root.hotbar.selectedSlot = index
                                     }

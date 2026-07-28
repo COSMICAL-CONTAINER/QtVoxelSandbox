@@ -170,11 +170,13 @@ Window {
             // （相机本地空间：+X=右、-Y=下、-Z=前向）。纯色肤色 PrincipledMaterial 自绘原创（§9 override (a)，
             // 不拷贝 MC 皮肤/手贴图）。模型属呈现层、纯装饰——不进 World/Physics（PLAN §2 分层）。
             // 显隐：仅第一人称可见（第三人称看玩家全身模型 t28，手隐藏；与 playerModel 的 visible 互补）。
+            //   t46：观察者模式第一人称也隐手（与观察者禁放破 / 幽灵半透一致——观察者无动作，无需显手）。
             // 挥动由下方 Connections(onSwingArm) → SequentialAnimation 驱动 viewModelHand.swingAngle，
             // 其 eulerRotation.x 绑定自动跟随：手臂从「略前抬」下挥（前推/下劈）再回位 ~200ms。
             Node {
                 id: viewModelHand
                 visible: player.cameraMode === PlayerController.FirstPerson
+                         && player.mode !== PlayerController.Spectator
                 // 肩枢位于视野右下：距相机 0.4 格前、右 0.35、略下。在近裁面(0.05)之后、竖直 FOV(60°)
                 // 投影内 → 整条手臂肉眼可见（手挥最低点仍留在画面内）。
                 position: Qt.vector3d(0.35, -0.05, -0.4)
