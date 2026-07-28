@@ -139,13 +139,13 @@ Item {
                                 Image {
                                     anchors.fill: parent
                                     visible: { root.craftRev; return !root.hotbar.isTool(root.craftSlots[index] || 0) }
-                                    source: root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0)
+                                    source: { root.craftRev; return root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0) }
                                     fillMode: Image.PreserveAspectFit; smooth: true
                                 }
                                 ToolIcon {
                                     anchors.fill: parent
                                     visible: { root.craftRev; return root.hotbar.isTool(root.craftSlots[index] || 0) }
-                                    tier: root.hotbar.toolTier(root.craftSlots[index] || 0)
+                                    tier: { root.craftRev; return root.hotbar.toolTier(root.craftSlots[index] || 0) }
                                 }
                             }
                             // 栈数量（t32）：count>1 时右下角显数字。触碰 craftRev 刷新（数组突变靠版本号触发）。
@@ -288,13 +288,13 @@ Item {
                             Image {
                                 anchors.fill: parent
                                 visible: { root.mainRev; return !root.hotbar.isTool(root.mainSlots[index] || 0) }
-                                source: root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0)
+                                source: { root.mainRev; return root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0) }
                                 fillMode: Image.PreserveAspectFit; smooth: true
                             }
                             ToolIcon {
                                 anchors.fill: parent
                                 visible: { root.mainRev; return root.hotbar.isTool(root.mainSlots[index] || 0) }
-                                tier: root.hotbar.toolTier(root.mainSlots[index] || 0)
+                                tier: { root.mainRev; return root.hotbar.toolTier(root.mainSlots[index] || 0) }
                             }
                         }
                         // 栈数量（t32）：count>1 时右下角显数字。触碰 mainRev 刷新（数组突变靠版本号触发）。
