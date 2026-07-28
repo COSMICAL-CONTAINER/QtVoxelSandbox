@@ -55,6 +55,13 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(bool captured READ captured NOTIFY capturedChanged)
     Q_PROPERTY(bool onGround READ onGround NOTIFY onGroundChanged)
     Q_PROPERTY(bool flying READ flying NOTIFY flyingChanged)
+    // 第三人称模型动画驱动（t45）：moveSpeed = 当前行走速度（仅走路模式非零，供 QML 驱动腿/臂摆动频率）；
+    //   walkPhase = 行走相位（弧度，走时按 speed*dt*kStrideRate 累加、2π 回绕；静止不累加 → sin*0=0 中性位）。
+    //   仅 Survival / Creative-未飞 推进；Spectator / Creative-飞 = 0（飞行/幽灵态无走步动画，spec 未要求）。
+    //   分层（PLAN §2）：动画驱动数据（速度 + 相位）由 Game/Physics 层 tick 算出，QML 呈现层只读消费、
+    //   绝不反向写（同 blockBroken→粒子 / swingArm→手挥动 模式）。腿/臂的实际欧拉角算在 QML（呈现层）。
+    Q_PROPERTY(float moveSpeed READ moveSpeed NOTIFY moveSpeedChanged)
+    Q_PROPERTY(float walkPhase READ walkPhase NOTIFY walkPhaseChanged)
     // 射线选体（t04）：每帧沿视线 DDA 步进，命中首个实体方块。无命中 / 暂停时 hasHit=false。
     // hitBlock=命中格整数坐标；hitNormal=命中面外法线；hitFaceCenter/hitFaceEuler 供线框 Model 直接摆位。
     Q_PROPERTY(bool hasHit READ hasHit NOTIFY hitChanged)
@@ -114,6 +121,8 @@ public:
     bool captured() const { return m_captured; }
     bool onGround() const { return m_onGround; }
     bool flying() const { return m_flying; }
+    float moveSpeed() const { return m_moveSpeed; } // 当前行走速度（仅走路模式非零；t45 QML 腿/臂摆频）
+    float walkPhase() const { return m_walkPhase; } // 行走相位（弧度；走时累加、2π 回绕；t45 QML sin() 算摆角）
 
     bool hasHit() const { return m_hasHit; }
     QVector3D hitBlock() const { return QVector3D(m_hitBx, m_hitBy, m_hitBz); }
@@ -174,6 +183,8 @@ signals:
     void capturedChanged();
     void onGroundChanged();
     void flyingChanged();
+    void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）
+    void walkPhaseChanged();  // 行走相位推进（t45；走时每 tick 发，QML 据 sin() 算四肢欧拉角）
     void hitChanged();
     void selectedBlockChanged();
     void selectedItemChanged(); // 手持原始 id 变（含工具段切换；驱动 t34 速度重算）
@@ -244,6 +255,8 @@ private:
     bool m_captured = false, m_onGround = false;
     QHash<int, bool> m_keys;
     bool m_flying = false;          // 创造模式飞行子状态（双击空格切换；进创造默认走）
+    float m_moveSpeed = 0.0f;       // 当前行走速度（仅走路模式非零；驱动 QML 腿/臂摆动频率，t45）
+    float m_walkPhase = 0.0f;       // 行走相位（弧度；走时累加、2π 回绕；供 QML sin() 算四肢摆角，t45）
     qint64 m_lastSpaceMs = -100000; // 双击空格检测时间戳
     bool m_spacePrev = false;       // 跳跃边沿触发（长按空格只跳一次）
     int m_selectedBlock = BlockRegistry::Stone; // 当前手持方块（右键放置；默认 Stone，t06 hotbar 绑定）
@@ -276,6 +289,7 @@ private:
     static constexpr float kJump = 8.4f;       // 顶点约 1.25 格
     static constexpr float kMaxFall = 78.4f;
     static constexpr float kSens = 0.25f;      // 度/像素
+    static constexpr float kStrideRate = 2.2f; // 步频系数（rad/米）：speed*dt*kStrideRate = walkPhase 增量（t45）
     static constexpr float kDeg = 0.017453292519943295f;
     static constexpr float kReach = 5.0f;      // 射线选体射程（格）
     static constexpr float kPickupDist = 1.5f; // 拾取距离阈值（格；玩家 AABB 中心起算，spec ~1.2 量级）

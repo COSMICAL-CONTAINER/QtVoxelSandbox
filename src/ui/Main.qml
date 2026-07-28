@@ -196,20 +196,32 @@ Window {
             }
         }
 
-        // 第一人称手挥动动画（t29）：破/放动作真发生（player.swingArm）时启动。手臂绕肩枢轴下挥 ~50°
-        // （手向下/前劈）再回位 ~200ms。SequentialAnimation 直接改 viewModelHand.swingAngle，其
-        // eulerRotation.x 绑定自动跟随刷新。连续点击：start() 重启进行中的动画（即重新挥一次），契合快速
-        // 挖掘手感。分层（PLAN §2）：swing 信号由 Game/Physics 层(breakBlock/placeBlock)发，呈现层只消费
-        // （同 blockBroken→粒子 / fallDamageTaken→PlayerState 模式）。
+        // 第一人称手挥动动画（t29）+ 第三人称挖掘挥臂动画（t45）：破/放动作真发生（player.swingArm）时
+        //   同时启动两条 SequentialAnimation——
+        //   (1) armSwingAnim：第一人称手 viewmodel 绕肩枢轴下挥 ~75° 再回位（同 t29）。
+        //   (2) bodySwingAnim：第三人称玩家模型双臂 mineBlend 0→1→0，前抬 70° 覆盖行走摆臂再回落（t45）。
+        //   连续点击：start() 重启进行中的动画（重新挥一次），契合快速挖掘手感。
+        //   分层（PLAN §2）：swing 信号由 Game/Physics 层(breakBlock/placeBlock)发，呈现层只消费
+        //   （同 blockBroken→粒子 / fallDamageTaken→PlayerState 模式）。两条动画都在 View3D 内（playerModel
+        //   与 viewModelHand 均在此作用域），按 id 直接 target。
         Connections {
             target: player
-            function onSwingArm() { armSwingAnim.start() }
+            function onSwingArm() { armSwingAnim.start(); bodySwingAnim.start() }
         }
         SequentialAnimation {
             id: armSwingAnim
             loops: 1
             NumberAnimation { target: viewModelHand; property: "swingAngle"; to: -75; duration: 90; easing.type: Easing.InQuad }
             NumberAnimation { target: viewModelHand; property: "swingAngle"; to: 0; duration: 140; easing.type: Easing.OutQuad }
+        }
+        // 第三人称挖掘挥臂（t45）：mineBlend 0→1（前 80ms 抬臂）→ 0（后 160ms 回落），总 ~240ms。
+        //   双臂枢轴的 eulerRotation 绑定读 mineBlend：>0 时双臂前抬 70°（覆盖行走摆臂），=0 时正常行走/中性。
+        //   仅第三人称可见时显效（第一人称 playerModel.visible=false，动画仍跑但肉眼不见——无副作用）。
+        SequentialAnimation {
+            id: bodySwingAnim
+            loops: 1
+            NumberAnimation { target: playerModel; property: "mineBlend"; to: 1.0; duration: 80; easing.type: Easing.OutQuad }
+            NumberAnimation { target: playerModel; property: "mineBlend"; to: 0.0; duration: 160; easing.type: Easing.InQuad }
         }
 
         // t09 昼夜：brightness 随天光乘子 lerp 1.5(昼)↔0.25(夜)；**方向固定不变**（PLAN §2-H：
@@ -353,6 +365,13 @@ Window {
             // 半透幽灵态（各 body Part 的材质读此属性）：观察者半透 0.35，其余不透明。
             readonly property real bodyOpacity: player.mode === PlayerController.Spectator ? 0.35 : 1.0
 
+            // 行走动画混合系数（t45）：moveSpeed>0.1 → 1（四肢摆动），否则 0（中性位）。QML 据此缩放
+            //   腿/臂的 sin() 摆幅 → 静止时四肢归零（不再生硬平移）。0/1 二值切换（spec：静止归零）。
+            readonly property real walkBlend: player.moveSpeed > 0.1 ? 1.0 : 0.0
+            // 挖掘挥臂混合系数（t45）：onSwingArm 触发 NumberAnimation 0→1→0（~240ms）。>0 时双臂
+            //   前抬（覆盖行走摆臂），呈现「挖掘挥动」。0 = 无挖掘（行走摆臂正常）。
+            property real mineBlend: 0.0
+
             // [t31] 诊断：确认本 Node 已加载、parent=场景节点（非 null 孤儿）、feetPosition 合法、visible 状态。
             // 打印到 voxelsandbox.log。若运行后日志无此行 → Main.qml 未进二进制（stale build）。
             Component.onCompleted: console.info("[t31] playerModel UP  parent=" + playerModel.parent
@@ -401,47 +420,83 @@ Window {
                 scale: Qt.vector3d(0.5, 0.7, 0.3)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
-            // 左臂袖段（上衣色；t39 把原整段臂拆成「袖 + 手」，袖段 y 0.8→1.3）
-            Model {
-                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(-0.375, 1.05, 0)
-                scale: Qt.vector3d(0.25, 0.5, 0.25)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+            // 左臂枢轴（t45 走/挖动画）：枢轴位于左肩 (-0.375, 1.3, 0)，袖+手作子节点本地 -Y 偏移
+            //   （袖中心 -0.25、手中心 -0.6）→ 绕肩旋转时手在弧线末端摆动（自然关节运动，非整体平移）。
+            //   静止时几何中心与重组前完全一致（袖 y=1.05、手 y=0.7），总高不变。
+            //   摆动：行走时左臂与左腿反相（左腿前=−sin → 左臂后=+sin；对侧臂腿同相）；挖掘时 mineBlend>0
+            //   双臂前抬 70° 覆盖行走摆臂。+eulerRotation.x = 臂尖前摆（-Y→-Z，朝玩家前向）。
+            Node {
+                id: leftArmPivot
+                position: Qt.vector3d(-0.375, 1.3, 0)
+                eulerRotation: {
+                    // 行走摆臂：与右腿同相（+sin；右腿前则左臂前）。静止 walkBlend=0 → 行走项归零。
+                    const walk = Math.sin(player.walkPhase) * 22 * playerModel.walkBlend
+                    // 挖掘挥臂（mineBlend 0→1→0，onSwingArm 动画）：前抬 70°，覆盖行走摆动。
+                    const x = walk * (1 - playerModel.mineBlend) + 70 * playerModel.mineBlend
+                    return Qt.vector3d(x, 0, 0)
+                }
+                // 袖段（上衣色 #3a6a9a；y 0.8→1.3 = 肩下 0.25..0.5）
+                Model {
+                    geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 自定义 UnitCube（同地形/线框已验证路径）
+                    position: Qt.vector3d(0, -0.25, 0)
+                    scale: Qt.vector3d(0.25, 0.5, 0.25)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+                }
+                // 手（肤色 #caa472；臂末端 y 0.6→0.8 = 肩下 0.5..0.7）
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, -0.6, 0)
+                    scale: Qt.vector3d(0.25, 0.2, 0.25)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+                }
             }
-            // 左手（肤色 #caa472；臂末端 y 0.6→0.8；t39 用户反馈「全是衣服色没手」→ 末端加肤色小段）
-            Model {
-                geometry: UnitCube {}
-                position: Qt.vector3d(-0.375, 0.7, 0)
-                scale: Qt.vector3d(0.25, 0.2, 0.25)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+            // 右臂枢轴（t45）：与左臂对称（右肩 0.375, 1.3, 0），行走与左腿同相（−sin；左腿前则右臂前）。
+            Node {
+                id: rightArmPivot
+                position: Qt.vector3d(0.375, 1.3, 0)
+                eulerRotation: {
+                    const walk = -Math.sin(player.walkPhase) * 22 * playerModel.walkBlend
+                    const x = walk * (1 - playerModel.mineBlend) + 70 * playerModel.mineBlend
+                    return Qt.vector3d(x, 0, 0)
+                }
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, -0.25, 0)
+                    scale: Qt.vector3d(0.25, 0.5, 0.25)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+                }
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, -0.6, 0)
+                    scale: Qt.vector3d(0.25, 0.2, 0.25)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+                }
             }
-            // 右臂袖段（上衣色；t39 同左臂拆分）
-            Model {
-                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(0.375, 1.05, 0)
-                scale: Qt.vector3d(0.25, 0.5, 0.25)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+            // 左腿枢轴（t45）：枢轴位于左髋 (-0.125, 0.6, 0)，腿段作子节点本地 -Y 偏移（中心 -0.3）。
+            //   行走与右臂同相（−sin → 与右腿反相；右腿前则左腿后）。+eulerRotation.x = 腿前摆。
+            //   静止归零（walkBlend=0）；仅走路模式有 walkPhase 推进（Spectator/飞=0 → 腿不摆）。
+            Node {
+                id: leftLegPivot
+                position: Qt.vector3d(-0.125, 0.6, 0)
+                eulerRotation: Qt.vector3d(-Math.sin(player.walkPhase) * 28 * playerModel.walkBlend, 0, 0)
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, -0.3, 0)
+                    scale: Qt.vector3d(0.25, 0.6, 0.25)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                }
             }
-            // 右手（肤色 #caa472；臂末端 y 0.6→0.8）
-            Model {
-                geometry: UnitCube {}
-                position: Qt.vector3d(0.375, 0.7, 0)
-                scale: Qt.vector3d(0.25, 0.2, 0.25)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
-            }
-            // 左腿（裤色；y 0→0.6）
-            Model {
-                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(-0.125, 0.3, 0)
-                scale: Qt.vector3d(0.25, 0.6, 0.25)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
-            }
-            // 右腿
-            Model {
-                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(0.125, 0.3, 0)
-                scale: Qt.vector3d(0.25, 0.6, 0.25)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+            // 右腿枢轴（t45）：与左腿对称（右髋 0.125, 0.6, 0），行走与左臂同相（+sin）。
+            Node {
+                id: rightLegPivot
+                position: Qt.vector3d(0.125, 0.6, 0)
+                eulerRotation: Qt.vector3d(Math.sin(player.walkPhase) * 28 * playerModel.walkBlend, 0, 0)
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, -0.3, 0)
+                    scale: Qt.vector3d(0.25, 0.6, 0.25)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                }
             }
         }
 

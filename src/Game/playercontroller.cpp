@@ -190,6 +190,9 @@ void PlayerController::tick()
     const qreal dt = qMin(m_clock.restart() / 1000.0, 0.05); // 钳 50ms，防卡顿后穿墙
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
+        // t45：暂停时清行走动画驱动（moveSpeed→0；walkPhase 不动，QML 据此 sin*0=0 → 四肢归中性位）。
+        // 仅值真变时发，免每 tick 无谓刷新 QML 绑定。
+        if (m_moveSpeed != 0.0f) { m_moveSpeed = 0.0f; emit moveSpeedChanged(); }
         return;
     }
     pollMouse();
@@ -600,6 +603,24 @@ void PlayerController::step(qreal dt)
     const bool space = m_keys.value(Qt::Key_Space), shift = m_keys.value(Qt::Key_Shift);
     const bool spaceEdge = space && !m_spacePrev; // 跳跃边沿：长按只跳一次（生存/创造-走路统一）
     m_spacePrev = space;
+
+    // 行走动画驱动（t45）：moveSpeed 仅走路模式（Survival / Creative-未飞）按住 WASD 时非零；
+    //   Spectator / Creative-飞 → 0（飞行/幽灵态无走步动画，spec 未要求；为未来泳/飞姿留接口）。
+    //   walkPhase 仅在走时累加（speed*dt*kStrideRate），2π 回绕；静止不累加 → QML 据此 sin*0=0 中性位。
+    //   「按住 WASD 撞墙」时 wish 仍非零（玩家在「尝试」走）→ 腿仍摆，对齐 MC 行为。
+    //   分层：动画驱动数据由 Game/Physics tick 算出，QML 呈现层只读消费（同 swingArm 模式）。
+    {
+        const bool moving = wish.lengthSquared() > 0.001f; // wish 已 normalize：非零即有 WASD 输入
+        const float walk = (moving && (m_mode == Survival || (m_mode == Creative && !m_flying)))
+                         ? kWalk : 0.0f;
+        if (walk != m_moveSpeed) { m_moveSpeed = walk; emit moveSpeedChanged(); }
+        // 相位推进（仅走时；走时每 tick 发 walkPhaseChanged 供 QML 重算四肢欧拉角，~60Hz）。
+        if (m_moveSpeed > 0.1f) {
+            m_walkPhase += m_moveSpeed * float(dt) * kStrideRate;
+            if (m_walkPhase >= 6.28318530718f) m_walkPhase -= 6.28318530718f; // 2π 回绕
+            emit walkPhaseChanged();
+        }
+    }
 
     if (m_mode == Spectator) {
         QVector3D v = wish * kFly;
