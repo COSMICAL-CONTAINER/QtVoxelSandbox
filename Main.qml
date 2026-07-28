@@ -331,6 +331,34 @@ Window {
                 scale: Qt.vector3d(0.5, 0.5, 0.5)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
             }
+            // 眼睛（t39）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）的两个对称
+            // 小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
+            // （§9 override (a)，无 MC 皮肤）。z=-0.28 略外飘于头前面 (z=-0.25) 防 z-fight；y 略高于
+            // 头中心（眼位偏上）。随 playerModel 的 yaw 一起转（身体只水平转、不随 pitch 倾）。
+            Model {
+                geometry: UnitCube {}
+                position: Qt.vector3d(-0.1, 1.62, -0.30)
+                scale: Qt.vector3d(0.1, 0.12, 0.02)
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
+            }
+            Model {
+                geometry: UnitCube {}
+                position: Qt.vector3d(0.1, 1.62, -0.30)
+                scale: Qt.vector3d(0.1, 0.12, 0.02)
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
+            }
+            Model {
+                geometry: UnitCube {}
+                position: Qt.vector3d(-0.1, 1.62, -0.31)
+                scale: Qt.vector3d(0.05, 0.06, 0.02)
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
+            }
+            Model {
+                geometry: UnitCube {}
+                position: Qt.vector3d(0.1, 1.62, -0.31)
+                scale: Qt.vector3d(0.05, 0.06, 0.02)
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
+            }
             // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）
             Model {
                 geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
@@ -338,19 +366,33 @@ Window {
                 scale: Qt.vector3d(0.5, 0.7, 0.3)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
-            // 左臂（上衣色；挂躯干两侧，与躯干同高）
+            // 左臂袖段（上衣色；t39 把原整段臂拆成「袖 + 手」，袖段 y 0.8→1.3）
             Model {
                 geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(-0.375, 0.95, 0)
-                scale: Qt.vector3d(0.25, 0.7, 0.25)
+                position: Qt.vector3d(-0.375, 1.05, 0)
+                scale: Qt.vector3d(0.25, 0.5, 0.25)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
-            // 右臂
+            // 左手（肤色 #caa472；臂末端 y 0.6→0.8；t39 用户反馈「全是衣服色没手」→ 末端加肤色小段）
+            Model {
+                geometry: UnitCube {}
+                position: Qt.vector3d(-0.375, 0.7, 0)
+                scale: Qt.vector3d(0.25, 0.2, 0.25)
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+            }
+            // 右臂袖段（上衣色；t39 同左臂拆分）
             Model {
                 geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(0.375, 0.95, 0)
-                scale: Qt.vector3d(0.25, 0.7, 0.25)
+                position: Qt.vector3d(0.375, 1.05, 0)
+                scale: Qt.vector3d(0.25, 0.5, 0.25)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+            }
+            // 右手（肤色 #caa472；臂末端 y 0.6→0.8）
+            Model {
+                geometry: UnitCube {}
+                position: Qt.vector3d(0.375, 0.7, 0)
+                scale: Qt.vector3d(0.25, 0.2, 0.25)
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
             }
             // 左腿（裤色；y 0→0.6）
             Model {
