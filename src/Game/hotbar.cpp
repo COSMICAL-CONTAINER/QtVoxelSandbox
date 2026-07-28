@@ -26,7 +26,8 @@ const char *iconFileForBlock(quint8 id)
 
 // 物品 id 段：方块段 0..BlockRegistry::Count-1；工具段 id>=0x100（t33 预留，本任务仅留段）。
 constexpr int kToolIdBase = 0x100;
-constexpr int kBlockMaxStack = 64; // MC 1.0 方块标准堆叠上限
+// 方块单栈上限走 BlockRegistry::BlockDef.maxStack（t42 单一权威；MC 1.0 方块标准 64）。
+// 创造风格默认填充直接读 maxStack(id)，不再本地硬编码 64（改表即同步）。
 
 // id 合法性：air(0) / 方块段 (0,Count) / 工具段 (>=0x100)。越段 id 一律拒（防 quint8 截断别名）。
 bool isValidItemId(int id)
@@ -39,14 +40,15 @@ Hotbar::Hotbar(QObject *parent)
     : QObject(parent)
     , m_slots{
           // 创造风格默认：8 可放置方块各满栈 + 第 9 槽空（与原 hotbar 预置一致，切生存由 resetForMode 清空）。
-          ItemStack{BlockRegistry::Grass,  kBlockMaxStack},
-          ItemStack{BlockRegistry::Dirt,   kBlockMaxStack},
-          ItemStack{BlockRegistry::Stone,  kBlockMaxStack},
-          ItemStack{BlockRegistry::Cobble, kBlockMaxStack},
-          ItemStack{BlockRegistry::Log,    kBlockMaxStack},
-          ItemStack{BlockRegistry::Planks, kBlockMaxStack},
-          ItemStack{BlockRegistry::Leaves, kBlockMaxStack},
-          ItemStack{BlockRegistry::Sand,   kBlockMaxStack},
+          // 满栈数走 BlockRegistry::BlockDef.maxStack（t42 单一权威；改某方块 maxStack 即自动同步）。
+          ItemStack{BlockRegistry::Grass,  BlockRegistry::maxStack(BlockRegistry::Grass)},
+          ItemStack{BlockRegistry::Dirt,   BlockRegistry::maxStack(BlockRegistry::Dirt)},
+          ItemStack{BlockRegistry::Stone,  BlockRegistry::maxStack(BlockRegistry::Stone)},
+          ItemStack{BlockRegistry::Cobble, BlockRegistry::maxStack(BlockRegistry::Cobble)},
+          ItemStack{BlockRegistry::Log,    BlockRegistry::maxStack(BlockRegistry::Log)},
+          ItemStack{BlockRegistry::Planks, BlockRegistry::maxStack(BlockRegistry::Planks)},
+          ItemStack{BlockRegistry::Leaves, BlockRegistry::maxStack(BlockRegistry::Leaves)},
+          ItemStack{BlockRegistry::Sand,   BlockRegistry::maxStack(BlockRegistry::Sand)},
           ItemStack{BlockRegistry::Air,    0}, // 第 9 槽：空（选中后右键不放置）
       }
 {
@@ -285,7 +287,9 @@ int Hotbar::takeStack(int slot, int n)
 int Hotbar::maxStackSize(int id) const
 {
     if (id >= kToolIdBase) return 1; // 工具段（t33）：不可堆叠
-    return kBlockMaxStack;           // 方块段：64
+    if (id <= 0 || id >= int(BlockRegistry::Count)) return 0; // air / 越界：不可堆叠（无意义）
+    // 方块段走 BlockRegistry::BlockDef.maxStack（t42 单一权威；旧硬编码 64 迁移到表查，行为不变）。
+    return BlockRegistry::maxStack(quint8(id));
 }
 
 // 按模式重置：Creative 满 / Survival 空 / Spectator 不动。同时清空光标手持物。
@@ -293,11 +297,12 @@ void Hotbar::resetForMode(int mode)
 {
     if (mode == 1) {
         // Creative：8 可放置方块各满栈 + 第 9 空槽（创造=无限源，每槽充足）。
+        // 满栈数走 BlockRegistry::BlockDef.maxStack（t42 单一权威；改某方块 maxStack 即自动同步）。
         const int ids[8] = {BlockRegistry::Grass,  BlockRegistry::Dirt,   BlockRegistry::Stone,
                             BlockRegistry::Cobble, BlockRegistry::Log,    BlockRegistry::Planks,
                             BlockRegistry::Leaves, BlockRegistry::Sand};
         for (size_t i = 0; i < m_slots.size(); ++i) {
-            if (i < 8) m_slots[i] = ItemStack{ids[i], kBlockMaxStack};
+            if (i < 8) m_slots[i] = ItemStack{ids[i], BlockRegistry::maxStack(quint8(ids[i]))};
             else       m_slots[i] = ItemStack{0, 0};
         }
     } else if (mode == 2) {

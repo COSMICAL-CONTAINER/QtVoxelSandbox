@@ -4,18 +4,20 @@
 #include <QtGlobal> // quint8
 #include <QString>  // displayName() 返回 QString（用户可见中文名）
 
-// 方块注册表（单一权威数据源；World 层）。
+// 方块注册表（单一权威数据源；Core 层）。
 //
-// 把「方块 id → 每面图集瓦片 / 是否实体 / 内部名」收敛到此处，取代散落在
-// chunkgeometry::tileFor 与 worldgen 字面量里的硬编码。mesher(Renderer) 与
-// worldgen(World) 都**只读**本表，不得各持副本（PLAN §2：世界数据单一）。
+// 把「方块 id → 外观瓦片 / 是否实体 / 中文名 / 硬度 / 采掘要求 / 掉落 / 堆叠上限」全部
+// 收敛到**一处** BlockDef 表，取代散落在 chunkgeometry::tileFor、toolregistry::kBlockMine、
+// hotbar::kBlockMaxStack 里的硬编码。mesher(Renderer) / worldgen(World) / 挖掘系统(Game) /
+// 背包 Hotbar(ViewModel) 都**只读**本表，不得各持副本（PLAN §2：世界数据单一）。
 //
-// 分层（PLAN §2）：本层只依赖 Core（QtGlobal），**不得**依赖 Renderer/QtQuick3D/
-// Physics/QtQuick。依赖只向下。
+// 分层（PLAN §2）：本层属 Core（仅依赖 QtGlobal/QString），**不得**依赖
+// Renderer/QtQuick3D/Physics/QtQuick/World/Game。依赖只向下。ToolType 枚举放本层是因为
+// 「方块需要何种工具采掘」本质是方块的属性；ToolRegistry(Game) 复用之（向下依赖 Core）。
 //
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand
-// air 恒 solid=false。方块名用通用词，零 MC 专有名词（PLAN §9）。
+// air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
 public:
@@ -44,6 +46,35 @@ public:
         NegZ   = 5,
     };
 
+    // 工具类型（决定能采掘哪类方块；BlockDef.toolType 与 ToolRegistry::ToolDef.type 共用同一枚举）。
+    // 当前仅镐；未来扩铲 / 斧时按序追加。放 Core 层是因为它属「方块的采掘属性」。
+    enum ToolType : int {
+        NoTool  = 0, // 空手可采且掉落
+        Pickaxe = 1, // 镐：采掘石类方块（stone / cobble）
+    };
+
+    // 方块定义（每方块一项；单一权威数据源）。改方块任何属性只改 kDefs 一行，全工程生效。
+    // 行索引 == 方块 id（air 行同时作越界 / 不可挖掘 / 不掉落兜底）。
+    struct BlockDef {
+        int id;              // 方块 id（= 行索引；自描述，便于日志 / 调试对照）
+        int topTile;         // +Y(Top) 图集瓦片序号
+        int bottomTile;      // -Y(Bottom) 瓦片序号
+        int sideTile;        // ±X / ±Z（四个侧面统一）瓦片序号
+        bool solid;          // 实体（参与碰撞 / culled 面剔除）；air=false
+        float hardness;      // 基础硬度（挖掘耗时基准；<=0 → 不可挖掘，canMine=false）
+        int toolType;        // 采掘所需工具类型（ToolType；NoTool=空手可采且掉落）
+        int minToolTier;     // 采掘所需最低工具等级（toolType=NoTool 时忽略，恒 0）
+        int dropId;          // 破坏后掉落物品 id（<=0 → 不掉落；stone→cobble 等「冶炼转化」在此表达）
+        int dropCount;       // 掉落数量（生存破块产出物品实体数；创造秒破不掉落，由 caller 判）
+        int maxStack;        // 单栈最大堆叠（Hotbar / 背包上限；air=0；工具段另走 ToolRegistry，恒 1）
+        const char *name;    // 内部 / 调试用名（通用词，英文标识符；非面向用户）
+        const char *display; // 用户可见中文显示名（UTF-8；PLAN §9 override (b) 通用描述词；air=空串）
+    };
+
+    // 取方块定义（const 引用）。air / 越界 → 返回 air 行（不可挖掘、不掉落、不实体）。
+    // 供 ToolRegistry（挖掘 / 掉落判定）与 Hotbar（maxStack）等只读查询，避免各持副本。
+    static const BlockDef &def(quint8 blockId);
+
     // 给定方块 id 与面，返回**图集瓦片序号**（须与 tools/build_atlas.py 打包顺序一致）。
     // 越界/未知 id 返回 0（兜底，与旧 tileFor 同语义）。
     //
@@ -56,6 +87,14 @@ public:
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；其余均 true。
     // 越界/未知 id 返回 false。
     static bool isSolid(quint8 blockId);
+
+    // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
+    static float hardness(quint8 blockId);    // 基础硬度
+    static int toolType(quint8 blockId);      // 采掘所需工具类型（ToolType）
+    static int minToolTier(quint8 blockId);   // 最低工具等级
+    static int dropId(quint8 blockId);        // 破坏后掉落物品 id（<=0=不掉落）
+    static int dropCount(quint8 blockId);     // 掉落数量
+    static int maxStack(quint8 blockId);      // 单栈最大堆叠
 
     // 内部/调试用方块名（**非**面向用户字串；通用词）。越界/未知 id 返回 "unknown"。
     static const char *blockName(quint8 blockId);
