@@ -31,6 +31,12 @@ class ChunkGeometry : public QQuick3DGeometry
     Q_PROPERTY(World *world READ world WRITE setWorld NOTIFY worldChanged)
     Q_PROPERTY(int cx READ cx WRITE setCx NOTIFY cxChanged)
     Q_PROPERTY(int cz READ cz WRITE setCz NOTIFY czChanged)
+    // 网格统计（t10 F3 调试叠层，PLAN §2-F）：buildMesh 完成后暴露本 chunk 的顶点 / 三角面数，
+    // 供 F3 叠层汇总诊断 meshing 吞吐与帧抖根因（§2-F 明言「没有 F3 叠层，帧率验收无法诊断帧抖」）。
+    // 仅在 buildMesh 末尾经 meshRebuilt 通知；呈现层只读、不反向写。三角面 = idx/3（实际索引计数
+    // 派生，不依赖内部「每可见面 4 顶点 + 6 索引」约定，将来换贪婪网格化仍正确）。
+    Q_PROPERTY(int vertexCount READ vertexCount NOTIFY meshRebuilt)
+    Q_PROPERTY(int triangleCount READ triangleCount NOTIFY meshRebuilt)
 
 public:
     explicit ChunkGeometry(QQuick3DObject *parent = nullptr);
@@ -43,10 +49,16 @@ public:
     int cz() const { return m_cz; }
     void setCz(int cz);
 
+    // 网格统计（t10 F3 叠层）：上次 buildMesh 产出的顶点 / 三角面数。
+    int vertexCount() const { return m_vertexCount; }
+    int triangleCount() const { return m_triangleCount; }
+
 signals:
     void worldChanged();
     void cxChanged();
     void czChanged();
+    // buildMesh 完成（顶点 / 三角面数已更新；t10 F3 叠层据此刷新汇总）。
+    void meshRebuilt();
 
 private:
     void onWorldChanged();            // worldChanged 槽：仅 dirty chunk 才重建
@@ -61,6 +73,8 @@ private:
     World *m_world = nullptr;
     int m_cx = -1; // -1 = 未赋值（myChunk 返回 nullptr，待 QML 赋 cx/cz 后才建）
     int m_cz = -1;
+    int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
+    int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）
 };
 
 #endif // CHUNKGEOMETRY_H

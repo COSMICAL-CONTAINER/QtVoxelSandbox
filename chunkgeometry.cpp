@@ -147,6 +147,10 @@ void ChunkGeometry::buildMesh()
         }
     }
 
+    // 网格统计（t10 F3 叠层）：顶点 / 三角面数（idx/3）在数据 finalize 后、上传前记录。
+    m_vertexCount = int(verts.size());
+    m_triangleCount = int(idx.size() / 3);
+
     // 写入 QQuick3DGeometry（文档顺序：clear → 数据 → stride → bounds → 原语 → 属性 → update）
     clear();
 
@@ -183,4 +187,7 @@ void ChunkGeometry::buildMesh()
     // 非脏 chunk 在 onWorldChanged 已 return。读此日志可知每次 worldChanged 后实际重建了哪些 chunk。
     qInfo("vo.render: chunk(%d,%d) rebuilt - %lld verts / %lld idx",
           m_cx, m_cz, qint64(verts.size()), qint64(idx.size()));
+
+    // 通知 F3 叠层刷新（顶点 / 三角面数已更新；t10）。
+    emit meshRebuilt();
 }

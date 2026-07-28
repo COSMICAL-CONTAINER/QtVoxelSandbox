@@ -10,6 +10,9 @@ Window {
     color: "#101010"
 
     property int fps: 0 // main.cpp 经 frameSwapped 回填
+    // F3 调试叠层显隐（t10，PLAN §2-F）：playing 态按 F3 切换左上角多行调试文本（fps / pos /
+    // yaw,pitch / 模式 / chunk 数 / 总顶点 / 地面态）。仅 playing 态显；z 高于 HUD。
+    property bool f3Visible: false
 
     // app 状态机（t17）：menu（启动首显主菜单）↔ playing（显 View3D/HUD + grab 指针）。
     // 初始 menu：启动不直接进游戏，先显主菜单（开始/退出）。准星/HUD 仅 playing 态显。
@@ -242,48 +245,48 @@ Window {
         // 16×16 时再换 C++ 侧批量管理（ChunkMeshManager）或经场景 Node 领养的 Repeater 方案。
         Model { // chunk (0,0) → 世界 (0,0)
             position: Qt.vector3d(0, 0, 0)
-            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 0 }
+            geometry: ChunkGeometry { id: geo00; world: theWorld; cx: 0; cz: 0 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
             Component.onCompleted: console.info("[t31] chunk(0,0) UP parent=" + parent + " (对照：已知可见)")
         }
         Model { // chunk (1,0) → 世界 (16,0)
             position: Qt.vector3d(16, 0, 0)
-            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 0 }
+            geometry: ChunkGeometry { id: geo10; world: theWorld; cx: 1; cz: 0 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
         Model { // chunk (2,0) → 世界 (32,0)
             position: Qt.vector3d(32, 0, 0)
-            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 0 }
+            geometry: ChunkGeometry { id: geo20; world: theWorld; cx: 2; cz: 0 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
         Model { // chunk (0,1) → 世界 (0,16)
             position: Qt.vector3d(0, 0, 16)
-            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 1 }
+            geometry: ChunkGeometry { id: geo01; world: theWorld; cx: 0; cz: 1 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
         Model { // chunk (1,1) → 世界 (16,16)
             position: Qt.vector3d(16, 0, 16)
-            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 1 }
+            geometry: ChunkGeometry { id: geo11; world: theWorld; cx: 1; cz: 1 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
         Model { // chunk (2,1) → 世界 (32,16)
             position: Qt.vector3d(32, 0, 16)
-            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 1 }
+            geometry: ChunkGeometry { id: geo21; world: theWorld; cx: 2; cz: 1 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
         Model { // chunk (0,2) → 世界 (0,32)
             position: Qt.vector3d(0, 0, 32)
-            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 2 }
+            geometry: ChunkGeometry { id: geo02; world: theWorld; cx: 0; cz: 2 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
         Model { // chunk (1,2) → 世界 (16,32)
             position: Qt.vector3d(16, 0, 32)
-            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 2 }
+            geometry: ChunkGeometry { id: geo12; world: theWorld; cx: 1; cz: 2 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
         Model { // chunk (2,2) → 世界 (32,32)
             position: Qt.vector3d(32, 0, 32)
-            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 2 }
+            geometry: ChunkGeometry { id: geo22; world: theWorld; cx: 2; cz: 2 }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
 
@@ -567,6 +570,11 @@ Window {
             if (e.key === Qt.Key_Escape && window.inventoryOpen) {
                 window.closeInventory(); e.accepted = true; return
             }
+            // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
+            // 仅 playing 态有意义（menu 态主菜单全屏覆盖，叠层不可见）；切换不依赖指针捕获。
+            if (e.key === Qt.Key_F3 && window.appState === "playing") {
+                window.f3Visible = !window.f3Visible; e.accepted = true; return
+            }
             if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
             if (e.key === Qt.Key_F6) { worldClock.toggleDebugFast(); e.accepted = true; return } // 昼夜调试加速（t09）
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
@@ -628,6 +636,9 @@ Window {
                 Text { text: "[F6] toggle fast day/night (" + (worldClock.debugFast ? "ON · ~30s" : "OFF · ~20min") + ")"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
+                Text { text: "[F3] toggle debug overlay (fps / pos / chunks / vertices)"
+                       color: "#999999"; font.pixelSize: 12
+                       anchors.horizontalCenter: parent.horizontalCenter }
                 // 返回主菜单（playing ↔ menu 双向切换，t17）：消费点击，不冒泡到背景 grab。
                 Rectangle {
                     width: 150; height: 32; radius: 6
@@ -680,6 +691,53 @@ Window {
                                    + "   held: " + hotbarVM.nameAt(hotbarVM.selectedSlot)
                                    + " (#" + player.selectedBlock + ")"
                                    + " ×" + hotbarVM.countAt(hotbarVM.selectedSlot)) : "   pointer free")
+    }
+
+    // F3 调试叠层（t10，PLAN §2-F）：左上角多行调试文本，绑各运行期计数 / 玩家态 / chunk 网格统计，
+    // 用于诊断帧抖与 meshing 吞吐（§2-F：无此叠层则帧率验收无法诊断）。F3 切换显隐；仅 playing 态显；
+    // z 高于 HUD（叠层 z=50，HUD 默认 0）；不遮挡准星核心区（准星居中，叠层在左上角）。
+    //
+    // 分层（§2）：叠层属 UI；计数一律从 World/Renderer 的公共属性取（chunk 数读 theWorld.chunksX/Z、
+    // 顶点/三角面读各 ChunkGeometry.vertexCount/triangleCount），**不**在 UI 层持有副本。各 geo_NN 的
+    // NOTIFY=meshRebuilt → 任一 chunk 重建即刷新汇总（编辑后立刻反映新顶点数）。
+    //
+    // 占位字段（spec：不得伪造数字）：draw-call 当前 n/a —— QtQuick3D 路径不暴露逐帧 draw-call 计数，
+    // 取值接口留给 t13 性能 benchmark（届时走 QSGRendererInterface / RHI stats）；工作线程 0/0 —— 当前
+    // meshing 同步在 GUI 线程（onWorldChanged 内），无 worker 池，t13 线程化后填实数。
+    Text {
+        visible: window.appState === "playing" && window.f3Visible
+        x: 12; y: 62
+        z: 50
+        color: "#ffff00"                        // 单色（黄）+ 黑描边，亮/暗背景均高对比可读
+        style: Text.Outline; styleColor: "#000000"
+        font.pixelSize: 12; font.family: "monospace"
+        text: {
+            // 9 chunk 的顶点 / 三角面汇总（触碰各 geo_NN.vertexCount 建立 meshRebuilt 依赖）。
+            const vx = geo00.vertexCount + geo10.vertexCount + geo20.vertexCount
+                     + geo01.vertexCount + geo11.vertexCount + geo21.vertexCount
+                     + geo02.vertexCount + geo12.vertexCount + geo22.vertexCount
+            const tr = geo00.triangleCount + geo10.triangleCount + geo20.triangleCount
+                     + geo01.triangleCount + geo11.triangleCount + geo21.triangleCount
+                     + geo02.triangleCount + geo12.triangleCount + geo22.triangleCount
+            const modeName = player.mode === PlayerController.Spectator ? "SPECTATOR"
+                           : player.mode === PlayerController.Creative ? "CREATIVE" : "SURVIVAL"
+            const camName = player.cameraMode === PlayerController.FirstPerson ? "1st"
+                          : player.cameraMode === PlayerController.ThirdPersonBack ? "3rd-back" : "3rd-front"
+            const ncx = theWorld.chunksX, ncz = theWorld.chunksZ
+            return "voxelsandbox  [F3 debug]"
+                 + "\nfps: " + window.fps
+                 + "\npos: " + player.position.x.toFixed(2) + "  " + player.position.y.toFixed(2) + "  " + player.position.z.toFixed(2)
+                 + "  (feet " + player.feetPosition.x.toFixed(1) + "," + player.feetPosition.y.toFixed(1) + "," + player.feetPosition.z.toFixed(1) + ")"
+                 + "\nyaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch) + "  look " + camName
+                 + "\nmode: " + modeName + (player.flying ? " (fly)" : "") + "  ground: " + (player.onGround ? "yes" : "no")
+                 + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
+                 + "\nworld: " + theWorld.width + "×" + theWorld.depth + "×" + theWorld.height
+                 + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"
+                 + "\nvertices: " + vx + "  triangles: " + tr
+                 + "\ndraw-calls: n/a (QtQuick3D path, see t13)  threads: 0/0 (sync meshing)"
+                 + "\nday: phase " + worldClock.dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
+                 + (worldClock.debugFast ? "  (fast)" : "")
+        }
     }
 
     // Hotbar（9 槽，1.0 风格）：底部居中，方形凹槽槽框 + 选中槽选框（凸起边框，随 selectedSlot 位移）。
