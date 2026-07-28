@@ -1,5 +1,6 @@
 #include "hotbar.h"
 
+#include <QDebug>
 #include <algorithm>
 
 namespace {
@@ -198,6 +199,7 @@ void Hotbar::setStack(int slot, int id, int count)
     const ItemStack &cur = m_slots[size_t(slot)];
     if (cur.id == target.id && cur.count == target.count) return;
     m_slots[size_t(slot)] = target;
+    qInfo().noquote() << "[inv] setStack slot=" << slot << "id=" << target.id << "count=" << target.count;
     bumpRevision();
     // 改当前选中槽 → 手持方块（selectedBlockId）也变了。selectedBlockId 的 NOTIFY 只能挂一个
     // 信号（selectedSlotChanged），故此处补发它，让消费者（player.selectedBlock 绑定 / HUD 手持名）
@@ -260,6 +262,9 @@ int Hotbar::addStack(int id, int n)
         // 无条件补发（罕见操作，开销可忽）。
         emit selectedSlotChanged();
     }
+    qInfo().noquote() << "[inv] addStack id=" << id << " n=" << n << " remaining=" << remaining
+                      << " slots=[" << m_slots[0].id << m_slots[1].id << m_slots[2].id << m_slots[3].id
+                      << m_slots[4].id << m_slots[5].id << m_slots[6].id << m_slots[7].id << m_slots[8].id << "]";
     return remaining;
 }
 
@@ -318,6 +323,7 @@ void Hotbar::setHeldBlock(int id)
         m_heldStack.id = id;
         if (m_heldStack.count <= 0) m_heldStack.count = 1;
     }
+    qInfo().noquote() << "[inv] setHeldBlock -> id=" << id << " count=" << m_heldStack.count;
     emit heldBlockChanged();
 }
 
