@@ -81,6 +81,12 @@ Window {
     }
     function dayNightBrightness(m) { return 0.25 + (1.5 - 0.25) * m }
 
+    // t47：夜间全屏 tint 叠层 alpha（spec 方案 A）。地形 chunk 用 NoLighting 自发光恒定 → t09 的
+    //   天光/方向光 lerp 只改了天空 clearColor，地形亮度始终不变。在此叠一层半透深蓝遮罩，alpha 随
+    //   天光乘子反向 lerp：m=1(正午)→0 全透、m=0(子夜)→0.6 把地形拉向夜色 #0b1026（仍可辨识轮廓，
+    //   spec t09「黑夜仍可辨识地形轮廓」）。深蓝取夜空同色 → 夜间天空已是该色、混合不偏移，仅地形亮色被拉暗。
+    function nightTintAlpha(m) { return 0.6 * (1.0 - m) }
+
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }
 
@@ -607,6 +613,22 @@ Window {
                 }
             }
         }
+    }
+
+    // t47：昼夜影响地形光照（全屏 tint 叠层，spec 方案 A）。
+    // 根因：地形 chunk 用 PrincipledMaterial.NoLighting（自发光恒定）→ t09 的环境光 lerp 只改了天空
+    //   clearColor、DirectionalLight.brightness 对 NoLighting 材质无效 → 地形白天/黑夜亮度不变（用户反馈）。
+    //   lit 材质在本场景实测不渲染（lessons-learned），故不换材质、改走全屏叠层：在 View3D（先绘制）之上、
+    //   所有 HUD/背包/暂停叠层（后绘制）之前，叠一层半透深蓝 Rectangle，alpha 随天光乘子反向 lerp。
+    //   深蓝取夜空同色 #0b1026：夜间天空已是该色、与之混合无额外偏移，仅地形亮色被拉向夜色（对症根因）。
+    // 不影响 GUI 亮度（spec 验收）：本 Rectangle 无显式 z（=0）、声明在 View3D 之后、所有 HUD 之前 →
+    //   同 z=0 的 HUD（准星/Hotbar/HUD Text）靠声明序在后绘制、盖在 tint 之上；显式 z 的叠层（F3 z=50、
+    //   暂停 z=100、背包 z=150、菜单 z=200）更在其上 → 均不被压暗。无 MouseArea → 不拦截破/放/背包点击。
+    // 仅 playing 态显（menu 被 MainMenu z=200 覆盖；显式 gate 更清晰、避免菜单态多余的叠层合成）。
+    Rectangle {
+        visible: window.appState === "playing"
+        anchors.fill: parent
+        color: Qt.rgba(0.043, 0.063, 0.149, nightTintAlpha(worldClock.skyLight))
     }
 
     // 破/放信号 → 粒子迸发（呈现层消费 World 语义事件）。
