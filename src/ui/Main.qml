@@ -25,6 +25,9 @@ Window {
     // 背包子态（t18）：仅 playing 态有意义。开 → 释放指针（光标可见，可点格子，类暂停）；
     // 关 → 恢复 grab。Esc/E/点遮罩均可关。开时抑制暂停叠层（二者互斥：都是 !captured 态）。
     property bool inventoryOpen: false
+    // t50 工作台子态：右键工作台方块 → player.craftingTableOpened → 显本面板（3×3 合成）+ 释放指针。
+    // 与 inventoryOpen 互斥（关一个再开另一个）；E/Esc 关 → 恢复 grab。开时抑制暂停叠层。
+    property bool craftingTableOpen: false
 
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
     function startGame() {
@@ -35,6 +38,7 @@ Window {
     // 返回主菜单：先释放指针（恢复光标 + 清按住的按键），再切 menu 态。
     function returnToMenu() {
         inventoryOpen = false
+        craftingTableOpen = false
         player.release()
         appState = "menu"
     }
@@ -57,6 +61,20 @@ Window {
         if (!inventoryOpen) return
         inventoryOpen = false
         player.grab()                  // 恢复指针锁定（隐藏光标 + 居中）
+        keyInput.forceActiveFocus()
+    }
+    // t50 打开 / 关闭工作台面板。打开 → release（光标可见点 3×3 格）；关 → grab + 焦点回键位层。
+    // 与 inventoryOpen 互斥（开工作台前关背包，反之同）。
+    function openCraftingTable() {
+        if (appState !== "playing" || craftingTableOpen) return
+        if (inventoryOpen) closeInventory()
+        craftingTableOpen = true
+        player.release()
+    }
+    function closeCraftingTable() {
+        if (!craftingTableOpen) return
+        craftingTableOpen = false
+        player.grab()
         keyInput.forceActiveFocus()
     }
 
@@ -123,6 +141,8 @@ Window {
         // 创造 / 不可采掘时 player 不发本信号（无实体产出）。ViewModel 不持有 PlayerController，
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
         function onSpawnItem(x, y, z, id) { itemEntities.spawnItem(x, y, z, id) }
+        // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
+        function onCraftingTableOpened() { window.openCraftingTable() }
         // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换
         // 则保留背包打开，面板由各组件 visible 绑定 player.mode 自动换（创造背包↔生存背包）。避免任一
         // 背包在不兼容模式下滞留（Spectator 无背包/破放，t21）。
@@ -662,11 +682,17 @@ Window {
             if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
             // 背包（t18）：E 开关。Esc 在背包打开时关闭（captured=false 时 Esc 不被 C++ 事件过滤器
             // 拦截，落到 QML；captured=true 时 Esc 仍走 C++ → release → 暂停叠层，原行为不变）。
+            // t50：工作台面板同样 E/Esc 关（与背包互斥）。
             if (e.key === Qt.Key_E && window.appState === "playing") {
-                window.toggleInventory(); e.accepted = true; return
+                if (window.craftingTableOpen) window.closeCraftingTable()
+                else window.toggleInventory()
+                e.accepted = true; return
             }
             if (e.key === Qt.Key_Escape && window.inventoryOpen) {
                 window.closeInventory(); e.accepted = true; return
+            }
+            if (e.key === Qt.Key_Escape && window.craftingTableOpen) {
+                window.closeCraftingTable(); e.accepted = true; return
             }
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
             // 仅 playing 态有意义（menu 态主菜单全屏覆盖，叠层不可见）；切换不依赖指针捕获。
@@ -701,11 +727,12 @@ Window {
 
     // 暂停 / 未捕获 覆盖层（仅 playing 态）：点击任意处 → 进入（锁定指针）。
     // 主菜单态（appState="menu"）不显本叠层（由 MainMenu 覆盖全屏）。
-    // 背包打开时（同为 !captured 态）抑制本叠层 —— 二者互斥，避免背包下面透出暂停叠层（t18）。
+    // 背包 / 工作台打开时（同为 !captured 态）抑制本叠层 —— 三者互斥，避免面板下面透出暂停叠层。
     Item {
         id: pauseOverlay
         anchors.fill: parent
-        visible: window.appState === "playing" && !player.captured && !window.inventoryOpen
+        visible: window.appState === "playing" && !player.captured
+                 && !window.inventoryOpen && !window.craftingTableOpen
         z: 100
         Rectangle {
             anchors.fill: parent
@@ -877,15 +904,15 @@ Window {
                     Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
 
                     // 物品图标：方块段 → 等距立方体 Image（统一源 PreserveAspectFit）；工具段（t33，
-                    // isTool(id)）→ ToolIcon.qml Canvas 自绘像素镐（§9a，非 MC 资产）。空槽 modelData=0 → 不显。
-                    // 二者同尺寸同居中，互斥 visible（按 isTool 切换），槽内显示尺寸完全一致。
+                    // isTool(id)）→ ToolIcon.qml Canvas 自绘像素镐；材料段（t50 木棒）→ MaterialIcon
+                    // 自绘（§9a，非 MC 资产）。空槽 modelData=0 → 不显。三者同尺寸同居中，互斥 visible。
                     Item {
                         anchors.centerIn: parent
                         width: 38; height: 38
                         visible: modelData !== 0
                         Image {
                             anchors.fill: parent
-                            visible: !hotbarVM.isTool(modelData)
+                            visible: !hotbarVM.isTool(modelData) && !hotbarVM.isMaterial(modelData)
                             source: hotbarVM.iconSourceForBlock(modelData)
                             fillMode: Image.PreserveAspectFit
                             smooth: true
@@ -894,6 +921,11 @@ Window {
                             anchors.fill: parent
                             visible: hotbarVM.isTool(modelData)
                             tier: hotbarVM.toolTier(modelData)
+                        }
+                        MaterialIcon {
+                            anchors.fill: parent
+                            visible: hotbarVM.isMaterial(modelData)
+                            materialId: modelData
                         }
                     }
                     // 栈数量（t32）：count>1 时右下角显数字（MC 风格：单件不显数）。countAt 是 Q_INVOKABLE，
@@ -1028,14 +1060,27 @@ Window {
         onDiscardHeldRequested: player.dropHeldCursor()
     }
 
+    // t50 工作台 3×3 合成面板：右键工作台方块打开（player.craftingTableOpened → openCraftingTable）。
+    // 仅 playing && craftingTableOpen 时显（与背包面板互斥）。E/Esc/关闭信号关 → 宿主恢复 grab。
+    // z 与背包面板一致（150），低于主菜单（200）；光标手持物浮动图标 z=300 仍在其上。合成检测 /
+    // 栈操作经 hotbar VM（recipeMatch / addStack / setStack）；关包时 onVisibleChanged 归还合成栏。
+    CraftingTableUI {
+        id: craftingTablePanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        visible: window.appState === "playing" && window.craftingTableOpen
+        z: 150
+        onClosed: window.closeCraftingTable()
+        onDiscardHeldRequested: player.dropHeldCursor()
+    }
+
     // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品栈；hotbarVM.heldBlock/heldCount 驱动）。
-    // 仅背包打开且手持非空时显，z 最高（盖过背包面板 z=150）。位置跟随 cursorTracker（窗口坐标）。
-    // t32：count>1 时右下角显数量（手持整栈移动时可见剩余数）。t33：手持工具 → ToolIcon 自绘（非 Image）。
-    // t37：enabled:false 显式声明本 Item 不参与指针事件——z=300 浮在背包面板(z=150)之上，若参与事件
-    // 捕获会抢走下方槽位 TapHandler 的点击（第 5 轮 bug 嫌疑「能拾取但放不下」根因之一）。纯呈现层，
-    // 无 MouseArea/TapHandler；enabled:false 是防御性兜底，保证点 slot 事件必落到槽位 TapHandler。
+    // 仅背包 / 工作台打开且手持非空时显，z 最高（盖过背包面板 z=150）。位置跟随 cursorTracker（窗口坐标）。
+    // t32：count>1 时右下角显数量（手持整栈移动时可见剩余数）。t33：手持工具 → ToolIcon 自绘（非 Image）；
+    // t50：手持材料 → MaterialIcon 自绘（木棒）。t37：enabled:false 显式声明本 Item 不参与指针事件——
+    // z=300 浮在面板(z=150)之上，若参与事件捕获会抢走下方槽位 TapHandler 的点击。纯呈现层。
     Item {
-        visible: window.inventoryOpen && hotbarVM.heldBlock !== 0
+        visible: (window.inventoryOpen || window.craftingTableOpen) && hotbarVM.heldBlock !== 0
         enabled: false
         z: 300
         x: cursorTracker.point.position.x - 16
@@ -1043,7 +1088,7 @@ Window {
         width: 32; height: 32
         Image {
             anchors.fill: parent
-            visible: !hotbarVM.isTool(hotbarVM.heldBlock)
+            visible: !hotbarVM.isTool(hotbarVM.heldBlock) && !hotbarVM.isMaterial(hotbarVM.heldBlock)
             source: hotbarVM.iconSourceForBlock(hotbarVM.heldBlock)
             fillMode: Image.PreserveAspectFit
             smooth: true
@@ -1052,6 +1097,11 @@ Window {
             anchors.fill: parent
             visible: hotbarVM.isTool(hotbarVM.heldBlock)
             tier: hotbarVM.toolTier(hotbarVM.heldBlock)
+        }
+        MaterialIcon {
+            anchors.fill: parent
+            visible: hotbarVM.isMaterial(hotbarVM.heldBlock)
+            materialId: hotbarVM.heldBlock
         }
         Text {
             anchors.right: parent.right

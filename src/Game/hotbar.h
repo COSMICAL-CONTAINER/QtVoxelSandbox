@@ -4,11 +4,13 @@
 #include <QObject>
 #include <QString>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QtQml/qqml.h>
 
 #include <vector>
 
 #include "blockregistry.h" // 物品 id（方块段 0..Count-1；图标/中文名走单一注册表）
+#include "recipe.h"        // 材料段 id（>=0x200，t50 木棒）；nameForBlock 材料段查 RecipeRegistry::StickId
 #include "toolregistry.h"  // 工具段 id（>=0x100）；工具判定 / tier / 中文名 / 创造调色板走工具注册表（t33）
 
 // 物品栈（t32 基础数据模型）：槽位从单一 quint8 block-id 升级为 {itemId, count}，支持堆叠。
@@ -89,6 +91,9 @@ public:
     Q_INVOKABLE bool isTool(int itemId) const;
     Q_INVOKABLE int toolTier(int itemId) const;
     Q_INVOKABLE QVariantList creativeTools() const;
+    // 材料段判定（t50：合成产物木棒等，id >= RecipeRegistry::MaterialIdBase=0x200）。供 QML delegate
+    // 据 isMaterial 切到材料图标 Canvas 自绘（细长棕色矩形 = 木棒）。与 isTool 互斥（材料段 > 工具段上界）。
+    Q_INVOKABLE bool isMaterial(int itemId) const;
 
     // 每槽物品 id（air=0 即空栈）。越界返回 0。兼容旧消费者（player.selectedBlock 绑定 / 背包 swap）。
     Q_INVOKABLE int blockIdAt(int slot) const;
@@ -123,6 +128,14 @@ public:
     Q_INVOKABLE int takeStack(int slot, int n);
     // 单件最大堆叠：方块段 64、工具段（id>=0x100，t33 预留）1（不可堆叠）。
     Q_INVOKABLE int maxStackSize(int id) const;
+    // t50 合成桥接（QML 不能直接调 C++ 静态类 RecipeRegistry，经 VM 透传）：
+    //   - recipeMatch(slotIds, gridSize)：slotIds 为行优先 id 数组（QVariantList<int>，0=空格），
+    //     gridSize = 2（背包 2×2）/ 3（工作台 3×3）。返回匹配配方（QVariantMap：outputId/outputCount/
+    //     consumeCount）或空 Map（无匹配）。UI 据此显产物图标 + 点击合成。
+    //   - recipeCanTake(outId, outCount, heldId, heldCount, maxStack)：产物能否放入光标（空 / 同 id
+    //     且累加不超 maxStack）。UI 点击结果槽前置判定。
+    Q_INVOKABLE QVariantMap recipeMatch(const QVariantList &slotIds, int gridSize) const;
+    Q_INVOKABLE bool recipeCanTake(int outId, int outCount, int heldId, int heldCount, int maxStack) const;
     // 按模式重置槽内容（t49：创造 / 生存均清空 9 槽；创造物品改由调色板点取→放入 hotbar 槽 / 观察者=不动）。
     // mode 取 PlayerController::Mode 序数：0=Spectator 1=Creative 2=Survival。同时清空光标手持物。
     Q_INVOKABLE void resetForMode(int mode);

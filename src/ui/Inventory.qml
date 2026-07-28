@@ -196,14 +196,15 @@ Item {
                             Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                             Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
 
-                            // 物品图标：方块段 → 等距立方体 Image；工具段（t33 isTool）→ ToolIcon 自绘镐。
+                            // 物品图标：方块段 → 等距立方体 Image；工具段（t33 isTool）→ ToolIcon 自绘镐；
+                            // 材料段（t50 isMaterial）→ MaterialIcon 自绘木棒（创造一般不直接取材料，但兼容）。
                             Item {
                                 anchors.centerIn: parent
                                 width: 30; height: 30
                                 visible: modelData !== 0
                                 Image {
                                     anchors.fill: parent
-                                    visible: !root.hotbar.isTool(modelData)
+                                    visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
                                     source: root.hotbar.iconSourceForBlock(modelData)
                                     fillMode: Image.PreserveAspectFit
                                     smooth: true
@@ -212,6 +213,11 @@ Item {
                                     anchors.fill: parent
                                     visible: root.hotbar.isTool(modelData)
                                     tier: root.hotbar.toolTier(modelData)
+                                }
+                                MaterialIcon {
+                                    anchors.fill: parent
+                                    visible: root.hotbar.isMaterial(modelData)
+                                    materialId: modelData
                                 }
                             }
                             // hover 高亮边框（仅实体方块）。
@@ -296,7 +302,7 @@ Item {
                                     Drag.hotSpot.y: height / 2
                                     Image {
                                         anchors.fill: parent
-                                        visible: !root.hotbar.isTool(modelData)
+                                        visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
                                         source: root.hotbar.iconSourceForBlock(modelData)
                                         fillMode: Image.PreserveAspectFit
                                         smooth: true
@@ -305,6 +311,11 @@ Item {
                                         anchors.fill: parent
                                         visible: root.hotbar.isTool(modelData)
                                         tier: root.hotbar.toolTier(modelData)
+                                    }
+                                    MaterialIcon {
+                                        anchors.fill: parent
+                                        visible: root.hotbar.isMaterial(modelData)
+                                        materialId: modelData
                                     }
                                     DragHandler {
                                         id: iconDrag

@@ -211,6 +211,10 @@ signals:
     // 未命中/放置被拒也不发）。同 blockBroken 模式——Game/Physics 层发语义事件，呈现层 Connections
     // 消费启动手臂挥动动画（PLAN §2 分层：手 viewmodel 属呈现层，绝不反向写）。
     void swingArm();
+    // 右键工作台（t50）：placeBlock 检测到命中格为 CraftingTable → 发本信号（不放置）→ 呈现层
+    // Connections 打开 3×3 工作台 UI（释放指针 / 关包归还合成栏）。机制等价 MC 右键工作台开合成界面。
+    // 分层（PLAN §2）：Game/Physics 层发语义事件，呈现层只消费（同 spawnItem / swingArm 模式）。
+    void craftingTableOpened();
 
 protected:
     void componentComplete() override;

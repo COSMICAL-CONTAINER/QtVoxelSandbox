@@ -28,14 +28,15 @@ FACE_RES = 32  # 每面采样前统一缩到此分辨率（保证 8 方块采样
 
 # 每方块 → (顶面贴图, 侧面贴图) 文件名（不含扩展名）。来源 textures/，非 MC 资产。
 BLOCKS = [
-    ("grass",   "default_grass_top", "default_grass_side"),
-    ("dirt",    "default_dirt",      "default_dirt"),
-    ("stone",   "default_stone",     "default_stone"),
-    ("cobble",  "default_cobble",    "default_cobble"),
-    ("log",     "default_tree_top",  "default_tree"),
-    ("planks",  "default_wood",      "default_wood"),
-    ("leaves",  "default_leaves",    "default_leaves"),
-    ("sand",    "default_sand",      "default_sand"),
+    ("grass",           "default_grass_top", "default_grass_side"),
+    ("dirt",            "default_dirt",      "default_dirt"),
+    ("stone",           "default_stone",     "default_stone"),
+    ("cobble",          "default_cobble",    "default_cobble"),
+    ("log",             "default_tree_top",  "default_tree"),
+    ("planks",          "default_wood",      "default_wood"),
+    ("leaves",          "default_leaves",    "default_leaves"),
+    ("sand",            "default_sand",      "default_sand"),
+    ("crafting_table",  "default_crafting_table_top", "default_crafting_table_side"),  # t50
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

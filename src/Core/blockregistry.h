@@ -16,23 +16,24 @@
 // 「方块需要何种工具采掘」本质是方块的属性；ToolRegistry(Game) 复用之（向下依赖 Core）。
 //
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
-//   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand
+//   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
 public:
     // 方块 id（与体素栅格的 quint8 存储对齐；底层类型 quint8 便于直接赋给栅格）。
     enum Id : quint8 {
-        Air    = 0,
-        Grass  = 1,
-        Dirt   = 2,
-        Stone  = 3,
-        Cobble = 4,
-        Log    = 5,
-        Planks = 6,
-        Leaves = 7,
-        Sand   = 8,
-        Count  = 9, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Air           = 0,
+        Grass         = 1,
+        Dirt          = 2,
+        Stone         = 3,
+        Cobble        = 4,
+        Log           = 5,
+        Planks        = 6,
+        Leaves        = 7,
+        Sand          = 8,
+        CraftingTable = 9, // 工作台：右键打开 3×3 合成（t50）；机制等价 MC 工作台，名称/贴图原创（§9）。
+        Count         = 10, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：

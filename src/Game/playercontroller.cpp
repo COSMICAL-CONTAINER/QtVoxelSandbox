@@ -461,10 +461,17 @@ void PlayerController::breakBlock()
 // 模式门控（t21）：观察者不能放块（用户核心诉求）——在调用 World::setBlock 前拦截。
 // t29：放块动作真发生（通过门控 + 目标为空 + 不埋玩家，实际写入）时才发 swingArm；
 // 已有方块/重叠被拒不发（仅动作真发生时，spec）。
+// t50：命中格若为工作台（CraftingTable）→ 右键打开 3×3 合成 UI（不放置；发 craftingTableOpened）。
+// 机制等价 MC 右键工作台。在所有放置校验之前拦截（无论手持何物，右键工作台即开界面）。
 void PlayerController::placeBlock()
 {
     if (!canPlace()) return; // 观察者不能放块
     if (!m_world || !m_captured || !m_hasHit) return;
+    // t50：右键工作台 → 打开 3×3 合成 UI（优先于放置；spec「右键工作台开 3×3」）。
+    if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
+        emit craftingTableOpened();
+        return;
+    }
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
     if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放

@@ -44,6 +44,8 @@ qt_add_executable(voxelsandbox
     src/Game/itementitymanager.h
     src/Game/raycast.cpp
     src/Game/raycast.h
+    src/Game/recipe.cpp
+    src/Game/recipe.h
 )
 
 # 分层（PLAN §2 铁律：依赖只向下）。把各层子目录加入 include 搜索路径，使
@@ -70,8 +72,10 @@ qt_add_qml_module(voxelsandbox
         src/ui/Inventory.qml
         src/ui/InvSlot.qml
         src/ui/SurvivalInventory.qml
+        src/ui/CraftingTableUI.qml
         src/ui/VitalIcon.qml
         src/ui/ToolIcon.qml
+        src/ui/MaterialIcon.qml
 )
 
 qt_add_resources(voxelsandbox "voxel_textures"
@@ -85,6 +89,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/crack_4.png
         textures/crack_5.png
         textures/default_cobble.png
+        textures/default_crafting_table_side.png
+        textures/default_crafting_table_top.png
         textures/default_dirt.png
         textures/default_grass_side.png
         textures/default_grass_top.png
@@ -95,6 +101,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_tree_top.png
         textures/default_wood.png
         textures/icon_cobble.png
+        textures/icon_crafting_table.png
         textures/icon_dirt.png
         textures/icon_grass.png
         textures/icon_leaves.png

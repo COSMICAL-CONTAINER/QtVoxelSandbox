@@ -12,24 +12,28 @@ namespace {
 const char *iconFileForBlock(quint8 id)
 {
     switch (id) {
-    case BlockRegistry::Grass:  return "icon_grass.png";
-    case BlockRegistry::Dirt:   return "icon_dirt.png";
-    case BlockRegistry::Stone:  return "icon_stone.png";
-    case BlockRegistry::Cobble: return "icon_cobble.png";
-    case BlockRegistry::Log:    return "icon_log.png";
-    case BlockRegistry::Planks: return "icon_planks.png";
-    case BlockRegistry::Leaves: return "icon_leaves.png";
-    case BlockRegistry::Sand:   return "icon_sand.png";
+    case BlockRegistry::Grass:         return "icon_grass.png";
+    case BlockRegistry::Dirt:          return "icon_dirt.png";
+    case BlockRegistry::Stone:         return "icon_stone.png";
+    case BlockRegistry::Cobble:        return "icon_cobble.png";
+    case BlockRegistry::Log:           return "icon_log.png";
+    case BlockRegistry::Planks:        return "icon_planks.png";
+    case BlockRegistry::Leaves:        return "icon_leaves.png";
+    case BlockRegistry::Sand:          return "icon_sand.png";
+    case BlockRegistry::CraftingTable: return "icon_crafting_table.png"; // t50 工作台立方体图标
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
 
-// 物品 id 段：方块段 0..BlockRegistry::Count-1；工具段 id>=0x100（t33 预留，本任务仅留段）。
-constexpr int kToolIdBase = 0x100;
+// 物品 id 段：方块段 0..BlockRegistry::Count-1；工具段 id>=0x100（t33，不可堆叠）；
+// 材料段 id>=0x200（t50 合成产物：木棒等，可堆叠 64）。
+constexpr int kToolIdBase     = 0x100;
+constexpr int kMaterialIdBase = 0x200; // 与 RecipeRegistry::MaterialIdBase 同源（t50）
 // 方块单栈上限走 BlockRegistry::BlockDef.maxStack（t42 单一权威；MC 1.0 方块标准 64）。
 // 创造风格默认填充直接读 maxStack(id)，不再本地硬编码 64（改表即同步）。
 
-// id 合法性：air(0) / 方块段 (0,Count) / 工具段 (>=0x100)。越段 id 一律拒（防 quint8 截断别名）。
+// id 合法性：air(0) / 方块段 (0,Count) / 工具段 (>=0x100) / 材料段 (>=0x200)。越段 id 一律拒
+// （防 quint8 截断别名）。材料段 t50 新增（木棒等合成产物）。
 bool isValidItemId(int id)
 {
     return id == 0 || (id > 0 && id < int(BlockRegistry::Count)) || id >= kToolIdBase;
@@ -84,6 +88,9 @@ int Hotbar::selectedItemId() const
 // ── 工具段桥接（t33）── 查 ToolRegistry 单一权威，QML delegate 据此选方块 Image vs ToolIcon Canvas。
 bool Hotbar::isTool(int itemId) const { return ToolRegistry::isTool(itemId); }
 
+// ── 材料段判定（t50）── id >= RecipeRegistry::MaterialIdBase（0x200）。与 isTool 互斥（材料段在工具段之上）。
+bool Hotbar::isMaterial(int itemId) const { return itemId >= RecipeRegistry::MaterialIdBase; }
+
 int Hotbar::toolTier(int itemId) const
 {
     const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);
@@ -128,11 +135,13 @@ QVariantList Hotbar::countList() const
 }
 
 // 创造背包网格用：所有可放置方块 id（实体方块，air 除外）。id 取自 BlockRegistry（单一权威）。
+// t50：追加工作台（可在创造调色板直接取用，便于测试 3×3 合成）。
 QVariantList Hotbar::creativeBlocks() const
 {
-    return { int(BlockRegistry::Grass),  int(BlockRegistry::Dirt),  int(BlockRegistry::Stone),
-             int(BlockRegistry::Cobble), int(BlockRegistry::Log),   int(BlockRegistry::Planks),
-             int(BlockRegistry::Leaves), int(BlockRegistry::Sand) };
+    return { int(BlockRegistry::Grass),         int(BlockRegistry::Dirt),  int(BlockRegistry::Stone),
+             int(BlockRegistry::Cobble),        int(BlockRegistry::Log),   int(BlockRegistry::Planks),
+             int(BlockRegistry::Leaves),        int(BlockRegistry::Sand),
+             int(BlockRegistry::CraftingTable) };
 }
 
 QString Hotbar::iconSourceAt(int slot) const
@@ -142,8 +151,9 @@ QString Hotbar::iconSourceAt(int slot) const
 
 QString Hotbar::iconSourceForBlock(int blockId) const
 {
-    // 方块段才返回 PNG 路径；工具段（>=0x100，t33）图标由 QML ToolIcon.qml Canvas 自绘（§9a）→ 返空串，
-    // 调用方据 isTool(id) 切到 ToolIcon。越界先判再 cast，防 quint8 截断别名。
+    // 方块段才返回 PNG 路径；工具段（>=0x100，t33）/ 材料段（>=0x200，t50 木棒）图标由 QML 自绘
+    // （ToolIcon / 材料图标 Canvas，§9a）→ 返空串，调用方据 isTool / isMaterial 切到对应自绘 delegate。
+    // 越界先判再 cast，防 quint8 截断别名。
     if (blockId <= 0 || blockId >= int(BlockRegistry::Count)) return QString();
     const char *file = iconFileForBlock(quint8(blockId));
     if (!file) return QString();
@@ -157,9 +167,15 @@ QString Hotbar::nameAt(int slot) const
 
 QString Hotbar::nameForBlock(int blockId) const
 {
-    // 走单一权威：方块段→BlockRegistry::displayName；工具段→ToolRegistry::displayName（t33）。
+    // 走单一权威：方块段→BlockRegistry::displayName；工具段→ToolRegistry::displayName（t33）；
+    // 材料段（t50 木棒）→ 本地通用名（材料段无注册表，名简单且少，就近返回）。
     // air / 越界 → 空串。PLAN §9：UI 不另存方块 / 工具名副本。
     if (blockId <= 0) return QString();
+    if (blockId >= kMaterialIdBase) {
+        // 材料段：当前仅木棒（RecipeRegistry::StickId = 0x200）。
+        if (blockId == RecipeRegistry::StickId) return QStringLiteral("木棒");
+        return QString();
+    }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
     if (blockId >= int(BlockRegistry::Count)) return QString();
     return BlockRegistry::displayName(quint8(blockId));
@@ -275,10 +291,46 @@ int Hotbar::takeStack(int slot, int n)
 
 int Hotbar::maxStackSize(int id) const
 {
-    if (id >= kToolIdBase) return 1; // 工具段（t33）：不可堆叠
+    if (id >= kMaterialIdBase) return 64; // 材料段（t50 木棒等）：可堆叠 64（MC 标准）
+    if (id >= kToolIdBase) return 1;      // 工具段（t33）：不可堆叠
     if (id <= 0 || id >= int(BlockRegistry::Count)) return 0; // air / 越界：不可堆叠（无意义）
     // 方块段走 BlockRegistry::BlockDef.maxStack（t42 单一权威；旧硬编码 64 迁移到表查，行为不变）。
     return BlockRegistry::maxStack(quint8(id));
+}
+
+// t50 合成桥接：QML 不能直接调 C++ 静态 RecipeRegistry，经 VM 透传（VM 属 Game 同层，向下查 RecipeRegistry）。
+// slotIds 为 QVariantList<int>（行优先 id，0=空格）；gridSize = 2 / 3。返回匹配配方的 QVariantMap
+// （outputId / outputCount / consumeCount）或空 Map（无匹配 / 输入尺寸非法）。
+QVariantMap Hotbar::recipeMatch(const QVariantList &slotIds, int gridSize) const
+{
+    QVariantMap empty;
+    if (gridSize < 2 || gridSize > 3) return empty;
+    const int n = gridSize * gridSize;
+    if (slotIds.size() < n) return empty;
+    // 提取 id 到栈缓冲（RecipeRegistry::match 取 const int*；2×2/3×3 最多 9 格）。
+    int grid[9] = {0};
+    for (int i = 0; i < n; ++i) {
+        bool ok = false;
+        const int id = slotIds.at(i).toInt(&ok);
+        grid[i] = ok ? id : 0;
+    }
+    const RecipeRegistry::Recipe *r = RecipeRegistry::match(grid, gridSize);
+    if (!r) return empty;
+    QVariantMap m;
+    m.insert(QStringLiteral("outputId"), r->outputId);
+    m.insert(QStringLiteral("outputCount"), r->outputCount);
+    m.insert(QStringLiteral("consumeCount"), r->consumeCount);
+    return m;
+}
+
+// t50：产物能否放入光标（空 / 同 id 且累加不超 maxStack）。透传 RecipeRegistry::canTake。
+bool Hotbar::recipeCanTake(int outId, int outCount, int heldId, int heldCount, int maxStack) const
+{
+    // 构造临时 Recipe 走 canTake（canTake 只读 outputId/outputCount，其余字段无关）。
+    RecipeRegistry::Recipe r{};
+    r.outputId = outId;
+    r.outputCount = outCount;
+    return RecipeRegistry::canTake(r, heldId, heldCount, maxStack);
 }
 
 // 按模式重置：t49 改为 Creative 与 Survival **都**清空 9 槽（删创造 8 满栈预置；创造物品改由调色板

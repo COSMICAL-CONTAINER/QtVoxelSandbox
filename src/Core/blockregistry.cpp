@@ -8,21 +8,24 @@
 // 字段填值依据（机制等价 MC 1.0，对齐机制而非精确数值；PLAN §9 通用名）：
 //   - tile 序号：与 tools/build_atlas.py 打包顺序严格一致（一个偏差即渗色 / 错贴）。
 //     grass 顶=grass_top(0) 底=dirt(2) 侧=grass_side(1)；log 顶/底=log_top(6) 侧=log_side(7)。
-//   - hardness：grass/dirt/sand≈0.5~0.6；stone 1.5 / cobble 2.0（需镐）；log/planks 2.0；leaves 0.2。
+//     crafting_table 顶=crafting_table_top(10) 底=planks(8) 侧=crafting_table_side(11)（t50）。
+//   - hardness：grass/dirt/sand≈0.5~0.6；stone 1.5 / cobble 2.0（需镐）；log/planks 2.0；leaves 0.2；
+//     crafting_table 2.5（木制，同 MC 工作台量级）。
 //   - toolType：本工程仅有镐 → 石类（stone/cobble）需 Pickaxe；其余 NoTool（空手采且掉落）。
 //   - dropId：方块自掉（id==自身），唯独 stone→cobble（MC：原石采下变圆石）；air 不掉。
 //   - maxStack：MC 1.0 方块标准 64；air=0（不可拾取 / 不可放置）。
 namespace {
 constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
-    /* air    */ {int(BlockRegistry::Air),    0, 0, 0, false, 0.0f, int(BlockRegistry::NoTool),  0,                       0, 0,  0, "air",    ""},
-    /* grass  */ {int(BlockRegistry::Grass),  0, 2, 1, true,  0.6f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Grass),  1, 64, "grass",  "草方块"}, // 顶=grass_top 底=dirt 侧=grass_side
-    /* dirt   */ {int(BlockRegistry::Dirt),   2, 2, 2, true,  0.5f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Dirt),   1, 64, "dirt",   "泥土"},
-    /* stone  */ {int(BlockRegistry::Stone),  3, 3, 3, true,  1.5f, int(BlockRegistry::Pickaxe), 1, int(BlockRegistry::Cobble), 1, 64, "stone",  "石头"}, // 需木镐+ 采掘；掉圆石（原石→圆石）
-    /* cobble */ {int(BlockRegistry::Cobble), 5, 5, 5, true,  2.0f, int(BlockRegistry::Pickaxe), 1, int(BlockRegistry::Cobble), 1, 64, "cobble", "圆石"},
-    /* log    */ {int(BlockRegistry::Log),    6, 6, 7, true,  2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Log),    1, 64, "log",    "橡木原木"}, // 顶/底=log_top 侧=log_side
-    /* planks */ {int(BlockRegistry::Planks), 8, 8, 8, true,  2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Planks), 1, 64, "planks", "橡木木板"},
-    /* leaves */ {int(BlockRegistry::Leaves), 9, 9, 9, true,  0.2f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Leaves), 1, 64, "leaves", "橡树树叶"},
-    /* sand   */ {int(BlockRegistry::Sand),   4, 4, 4, true,  0.5f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Sand),   1, 64, "sand",   "沙子"},
+    /* air            */ {int(BlockRegistry::Air),           0,  0, 0,  false, 0.0f, int(BlockRegistry::NoTool),  0,                            0, 0,  0, "air",            ""},
+    /* grass          */ {int(BlockRegistry::Grass),         0,  2, 1,  true,  0.6f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Grass),         1, 64, "grass",          "草方块"}, // 顶=grass_top 底=dirt 侧=grass_side
+    /* dirt           */ {int(BlockRegistry::Dirt),          2,  2, 2,  true,  0.5f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Dirt),          1, 64, "dirt",           "泥土"},
+    /* stone          */ {int(BlockRegistry::Stone),         3,  3, 3,  true,  1.5f, int(BlockRegistry::Pickaxe), 1, int(BlockRegistry::Cobble),        1, 64, "stone",          "石头"}, // 需木镐+ 采掘；掉圆石（原石→圆石）
+    /* cobble         */ {int(BlockRegistry::Cobble),        5,  5, 5,  true,  2.0f, int(BlockRegistry::Pickaxe), 1, int(BlockRegistry::Cobble),        1, 64, "cobble",         "圆石"},
+    /* log            */ {int(BlockRegistry::Log),           6,  6, 7,  true,  2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Log),            1, 64, "log",            "橡木原木"}, // 顶/底=log_top 侧=log_side
+    /* planks         */ {int(BlockRegistry::Planks),        8,  8, 8,  true,  2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Planks),         1, 64, "planks",         "橡木木板"},
+    /* leaves         */ {int(BlockRegistry::Leaves),        9,  9, 9,  true,  0.2f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Leaves),         1, 64, "leaves",         "橡树树叶"},
+    /* sand           */ {int(BlockRegistry::Sand),          4,  4, 4,  true,  0.5f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Sand),           1, 64, "sand",           "沙子"},
+    /* crafting_table */ {int(BlockRegistry::CraftingTable), 10, 8, 11, true,  2.5f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::CraftingTable),  1, 64, "crafting_table", "工作台"}, // 顶=crafting_table_top(10) 底=planks(8) 侧=crafting_table_side(11)（t50）
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。

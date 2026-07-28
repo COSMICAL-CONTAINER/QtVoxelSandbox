@@ -109,6 +109,42 @@ Item {
         }
     }
 
+    // t50 合成检测：读 2×2 craftSlots（行优先：[0]=TL [1]=TR [2]=BL [3]=BR）查 RecipeRegistry::match
+    // （经 hotbar.recipeMatch 透传）。返回匹配配方的 QVariantMap（outputId/outputCount/consumeCount）或
+    // 空 Map（无匹配）。触碰 craftRev 让绑定刷新时重算。
+    function matchedRecipe() {
+        if (!root.hotbar) return null
+        root.craftRev
+        const m = root.hotbar.recipeMatch(root.craftSlots, 2)
+        return (m && m.outputId !== undefined) ? m : null
+    }
+
+    // t50 点击结果槽 → 合成（MC 式：消耗每原料 1、产出 outputCount 到光标；剩余留槽可连点）。
+    function craftOne() {
+        if (!root.hotbar) return
+        root.craftRev
+        const r = root.matchedRecipe()
+        if (!r) return
+        const heldId = root.hotbar.heldBlock
+        const heldCount = root.hotbar.heldCount
+        const cap = root.hotbar.maxStackSize(r.outputId)
+        if (!root.hotbar.recipeCanTake(r.outputId, r.outputCount, heldId, heldCount, cap)) return
+        // 消耗：每个非空原料格 count-1（归 0 清 id）。原料用量恒 1。
+        for (let i = 0; i < root.craftSlots.length; ++i) {
+            if ((root.craftSlots[i] || 0) !== 0) {
+                root.craftCounts[i] = (root.craftCounts[i] || 0) - 1
+                if ((root.craftCounts[i] || 0) <= 0) {
+                    root.craftSlots[i] = 0
+                    root.craftCounts[i] = 0
+                }
+            }
+        }
+        // 产出：加 outputCount 到光标。
+        root.hotbar.heldBlock = r.outputId
+        root.hotbar.heldCount = (heldId === r.outputId ? heldCount : 0) + r.outputCount
+        root.craftRev++
+    }
+
     // t49 关包归还合成栏（spec point 6）：面板隐藏（visible→false）时把 craftSlots 内容 addStack 回 hotbar
     // （合并同类，同拾取），清空 craftSlots。MC 行为：合成格不持久化，关包即退回玩家背包。仅本屏有合成格。
     // 初始 craftSlots 全 0 → 首次 onVisibleChanged（构造期 visible=false）遍历为空，无副作用。
@@ -195,7 +231,8 @@ Item {
                                 visible: { root.craftRev; return (root.craftSlots[index] || 0) !== 0 }
                                 Image {
                                     anchors.fill: parent
-                                    visible: { root.craftRev; return !root.hotbar.isTool(root.craftSlots[index] || 0) }
+                                    visible: { root.craftRev; return !root.hotbar.isTool(root.craftSlots[index] || 0)
+                                                              && !root.hotbar.isMaterial(root.craftSlots[index] || 0) }
                                     source: { root.craftRev; return root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0) }
                                     fillMode: Image.PreserveAspectFit; smooth: true
                                 }
@@ -203,6 +240,12 @@ Item {
                                     anchors.fill: parent
                                     visible: { root.craftRev; return root.hotbar.isTool(root.craftSlots[index] || 0) }
                                     tier: { root.craftRev; return root.hotbar.toolTier(root.craftSlots[index] || 0) }
+                                }
+                                // t50 材料段（木棒）：MaterialIcon 自绘（§9a 原创，非 MC 资产）。
+                                MaterialIcon {
+                                    anchors.fill: parent
+                                    visible: { root.craftRev; return root.hotbar.isMaterial(root.craftSlots[index] || 0) }
+                                    materialId: { root.craftRev; return root.craftSlots[index] || 0 }
                                 }
                             }
                             // 栈数量（t32）：count>1 时右下角显数字。触碰 craftRev 刷新（数组突变靠版本号触发）。
@@ -259,11 +302,48 @@ Item {
                     }
                 }
 
-                // 结果槽（合成输出，最右）：占位空槽（Phase 1.1）。居中于右侧合成区（y 居中 160 高）。
+                // t50 结果槽（合成输出，最右）：显匹配配方产物图标；点击 → 合成一批（消耗每原料 1、
+                // 产出 outputCount 到光标；剩余留槽可连点）。无匹配时空。居中于右侧合成区（y 居中 160 高）。
                 Item {
                     x: parent.width - root.slotSize; y: 60
                     width: root.slotSize; height: root.slotSize
                     InvSlot { anchors.fill: parent; wellColor: "#262b30" }
+                    Item {
+                        anchors.centerIn: parent
+                        width: 30; height: 30
+                        property int outId: { root.craftRev; const r = root.matchedRecipe(); return (r && r.outputId) || 0 }
+                        property int outCount: { root.craftRev; const r = root.matchedRecipe(); return (r && r.outputCount) || 0 }
+                        visible: outId !== 0
+                        Image {
+                            anchors.fill: parent
+                            visible: parent.outId !== 0 && !root.hotbar.isTool(parent.outId) && !root.hotbar.isMaterial(parent.outId)
+                            source: parent.outId !== 0 ? root.hotbar.iconSourceForBlock(parent.outId) : ""
+                            fillMode: Image.PreserveAspectFit; smooth: true
+                        }
+                        ToolIcon {
+                            anchors.fill: parent
+                            visible: parent.outId !== 0 && root.hotbar.isTool(parent.outId)
+                            tier: root.hotbar.toolTier(parent.outId)
+                        }
+                        MaterialIcon {
+                            anchors.fill: parent
+                            visible: parent.outId !== 0 && root.hotbar.isMaterial(parent.outId)
+                            materialId: parent.outId
+                        }
+                        Text {
+                            anchors.right: parent.right; anchors.bottom: parent.bottom
+                            anchors.rightMargin: 3; anchors.bottomMargin: 1
+                            visible: parent.outCount > 1
+                            text: parent.outCount
+                            color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                            font.pixelSize: 13; font.bold: true
+                        }
+                    }
+                    // 左/右键均触发合成（MC：结果槽左键取一批）。
+                    TapHandler {
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onTapped: root.craftOne()
+                    }
                 }
 
                 // 角色预览（护甲右侧，左半区）：自绘人形剪影占位（真实 3D 玩家模型属 Phase 1.1）。80 宽 × 160 高；
@@ -357,7 +437,8 @@ Item {
                             visible: { root.mainRev; return (root.mainSlots[index] || 0) !== 0 }
                             Image {
                                 anchors.fill: parent
-                                visible: { root.mainRev; return !root.hotbar.isTool(root.mainSlots[index] || 0) }
+                                visible: { root.mainRev; return !root.hotbar.isTool(root.mainSlots[index] || 0)
+                                                          && !root.hotbar.isMaterial(root.mainSlots[index] || 0) }
                                 source: { root.mainRev; return root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0) }
                                 fillMode: Image.PreserveAspectFit; smooth: true
                             }
@@ -365,6 +446,11 @@ Item {
                                 anchors.fill: parent
                                 visible: { root.mainRev; return root.hotbar.isTool(root.mainSlots[index] || 0) }
                                 tier: { root.mainRev; return root.hotbar.toolTier(root.mainSlots[index] || 0) }
+                            }
+                            MaterialIcon {
+                                anchors.fill: parent
+                                visible: { root.mainRev; return root.hotbar.isMaterial(root.mainSlots[index] || 0) }
+                                materialId: { root.mainRev; return root.mainSlots[index] || 0 }
                             }
                         }
                         // 栈数量（t32）：count>1 时右下角显数字。触碰 mainRev 刷新（数组突变靠版本号触发）。
@@ -427,7 +513,7 @@ Item {
                                 visible: modelData !== 0
                                 Image {
                                     anchors.fill: parent
-                                    visible: !root.hotbar.isTool(modelData)
+                                    visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
                                     source: root.hotbar.iconSourceForBlock(modelData)
                                     fillMode: Image.PreserveAspectFit
                                     smooth: true
@@ -436,6 +522,11 @@ Item {
                                     anchors.fill: parent
                                     visible: root.hotbar.isTool(modelData)
                                     tier: root.hotbar.toolTier(modelData)
+                                }
+                                MaterialIcon {
+                                    anchors.fill: parent
+                                    visible: root.hotbar.isMaterial(modelData)
+                                    materialId: modelData
                                 }
                             }
                             // 栈数量（t32）：count>1 时右下角显数字。countAt 是 Q_INVOKABLE，靠 slotRevision
