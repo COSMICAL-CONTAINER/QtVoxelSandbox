@@ -203,10 +203,13 @@ Window {
                 id: viewModelHand
                 visible: player.cameraMode === PlayerController.FirstPerson
                          && player.mode !== PlayerController.Spectator
-                // 肩枢位于视野右下：距相机 0.4 格前、右 0.35、略下。在近裁面(0.05)之后、竖直 FOV(60°)
-                // 投影内 → 整条手臂肉眼可见（手挥最低点仍留在画面内）。
-                position: Qt.vector3d(0.35, -0.05, -0.4)
-                readonly property real baseTilt: 65.0  // 静态前抬：手臂略前伸入视野（非纯下垂），更像持物姿态
+                // t52 手不穿模（渲染于地形之上）：旧 pivot z=-0.4 + baseTilt 65° 使手指尖伸到相机本地
+                //   z=-0.49，深于玩家 AABB 半宽 0.3（实体方块最近可到 z=-0.3）→ 手被前方邻块遮挡 / 穿进墙。
+                //   修法：pivot 收到 z=-0.2、baseTilt 减到 30°（少前伸）→ 手中心相机本地 z∈[-0.25(静止),
+                //   -0.13(挥峰)]，始终近于 0.3 → depth 测试恒胜地形 → 手恒在所有实体方块之前（不穿模）。
+                //   缩放相应收小（近则显大）：0.16→0.09 保持视感尺寸；pivot.y 上移到 0.05 使手仍落视野下中。
+                position: Qt.vector3d(0.35, 0.05, -0.2)
+                readonly property real baseTilt: 30.0  // 静态前抬：手臂略前伸入视野（非纯下垂），更像持物姿态
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
 
@@ -214,10 +217,25 @@ Window {
                 Model {
                     geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                     position: Qt.vector3d(0, -0.1, 0)
-                    scale: Qt.vector3d(0.16, 0.2, 0.16)
+                    scale: Qt.vector3d(0.09, 0.12, 0.06)
                     // NoLighting：本工程所有可见 Model（地形/线框/粒子）均用 NoLighting——默认 lit
                     // PrincipledMaterial 在本场景不渲染（手因此「完全透明」不可见）。改 NoLighting 后可见。
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472" }
+                }
+                // 手持方块（t52）：持有方块（selectedBlock≠0）时，手前显该方块小图标。
+                //   BlockCube + 共享图集 voxelAtlas → per-face 贴图（草顶 / 草侧…），复用地形贴图（零 MC 资产）。
+                //   作 viewModelHand 子节点 → 随挥动同步运动（块在手中）。本地 z=+0.01（向相机略移）→ 块在手前
+                //   （相机侧），depth 比手皮更近 → 不被手皮遮挡。selectedBlock=0 时 BlockCube 兜底为 Stone 但
+                //   Model.visible=false 不渲染（blockId 兜底仅防空 UV，不影响显隐）。
+                Model {
+                    visible: player.selectedBlock !== 0
+                    geometry: BlockCube { blockId: player.selectedBlock }
+                    position: Qt.vector3d(0, -0.1, 0.01)
+                    scale: Qt.vector3d(0.08, 0.08, 0.08)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColorMap: voxelAtlas
+                    }
                 }
                 // [t31] 诊断：确认手 Node 加载 + parent（相机）。
                 Component.onCompleted: console.info("[t31] viewModelHand UP parent=" + viewModelHand.parent + " vis=" + visible)
@@ -334,13 +352,17 @@ Window {
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
         }
 
-        // 命中面线框（射线选体 t04）：贴在视线命中的方块面上，随准星实时更新。
+        // 选中立方体框（射线选体 t04 / t52）：从「命中面方框 (WireSquare)」改为「整个立方体框」，
+        // 12 棱包住命中方块 8 角。Model 摆到命中方块中心（hitBlock + 0.5），略放大 1.02 防 z-fight；
+        // 几何对称、与朝向无关 → 无需 eulerRotation（不似 WireSquare 需按命中面法线旋转）。
         // 未命中 / 暂停（未捕获）时 hasHit=false → 隐藏。
         Model {
             visible: player.hasHit
-            position: player.hitFaceCenter
-            eulerRotation: player.hitFaceEuler
-            geometry: WireSquare {}
+            position: Qt.vector3d(player.hitBlock.x + 0.5,
+                                  player.hitBlock.y + 0.5,
+                                  player.hitBlock.z + 0.5)
+            scale: Qt.vector3d(1.02, 1.02, 1.02)
+            geometry: WireCube {}
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 baseColor: "#101010"
@@ -419,31 +441,35 @@ Window {
                 scale: Qt.vector3d(0.5, 0.5, 0.5)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
             }
-            // 眼睛（t39）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）的两个对称
-            // 小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
-            // （§9 override (a)，无 MC 皮肤）。z=-0.28 略外飘于头前面 (z=-0.25) 防 z-fight；y 略高于
-            // 头中心（眼位偏上）。随 playerModel 的 yaw 一起转（身体只水平转、不随 pitch 倾）。
+            // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
+            // 的两个对称小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
+            // （§9 override (a)，无 MC 皮肤）。随 playerModel 的 yaw 一起转（身体只水平转、不随 pitch 倾）。
+            //
+            // t52：旧 z=-0.30 / -0.31 让眼悬浮在头前 0.05（头半厚 0.25，头前面在 z=-0.25）→ 用户反馈「眼
+            // 睛悬浮在头前」。改为贴脸：白眼底 z=-0.25（厚 0.02 → 前面 -0.26，略凸出 0.01），瞳 z=-0.26
+            // （前面 -0.27，在白眼底前 0.01）。|z|≈头半径 0.25 → 贴在头表面而非外飘（spec「贴近头面」）。
+            // （注：z 略小于头半径会陷进不透明头内被前面遮挡 → 必须在 z≤-0.25 才可见；故取 -0.25/-0.26。）
             Model {
                 geometry: UnitCube {}
-                position: Qt.vector3d(-0.1, 1.62, -0.30)
+                position: Qt.vector3d(-0.1, 1.62, -0.25)
                 scale: Qt.vector3d(0.1, 0.12, 0.02)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
             }
             Model {
                 geometry: UnitCube {}
-                position: Qt.vector3d(0.1, 1.62, -0.30)
+                position: Qt.vector3d(0.1, 1.62, -0.25)
                 scale: Qt.vector3d(0.1, 0.12, 0.02)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
             }
             Model {
                 geometry: UnitCube {}
-                position: Qt.vector3d(-0.1, 1.62, -0.31)
+                position: Qt.vector3d(-0.1, 1.62, -0.26)
                 scale: Qt.vector3d(0.05, 0.06, 0.02)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
             }
             Model {
                 geometry: UnitCube {}
-                position: Qt.vector3d(0.1, 1.62, -0.31)
+                position: Qt.vector3d(0.1, 1.62, -0.26)
                 scale: Qt.vector3d(0.05, 0.06, 0.02)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
             }
@@ -454,21 +480,20 @@ Window {
                 scale: Qt.vector3d(0.5, 0.7, 0.3)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
-            // 左臂枢轴（t45 走/挖动画）：枢轴位于左肩 (-0.375, 1.3, 0)，袖+手作子节点本地 -Y 偏移
+            // 左臂枢轴（t45 走 / t52 仅右手挖）：枢轴位于左肩 (-0.375, 1.3, 0)，袖+手作子节点本地 -Y 偏移
             //   （袖中心 -0.25、手中心 -0.6）→ 绕肩旋转时手在弧线末端摆动（自然关节运动，非整体平移）。
             //   静止时几何中心与重组前完全一致（袖 y=1.05、手 y=0.7），总高不变。
-            //   摆动：行走时左臂与左腿反相（左腿前=−sin → 左臂后=+sin；对侧臂腿同相）；挖掘时 mineBlend>0
-            //   双臂前抬 70° 覆盖行走摆臂。+eulerRotation.x = 臂尖前摆（-Y→-Z，朝玩家前向）。
+            //   摆动：行走时左臂与左腿反相（左腿前=−sin → 左臂后=+sin；对侧臂腿同相）。
+            //   t52：挖掘/放置只动右手——左臂仅行走摆动，不读 mineBlend（旧版双臂同挖，用户反馈「双手都动」）。
+            //   +eulerRotation.x = 臂尖前摆（-Y→-Z，朝玩家前向）。
             Node {
                 id: leftArmPivot
                 position: Qt.vector3d(-0.375, 1.3, 0)
                 eulerRotation: {
-                    // 行走摆臂：与右腿同相（+sin；右腿前则左臂前）。静止 walkBlend=0 → 行走项归零。
+                    // 行走摆臂：与右腿同相（+sin；右腿前则左臂前）。静止 walkBlend=0 → 归零。
                     // t51：摆幅 ×swingAmp（疾跑夸张 / 蹲下拘谨）。
                     const walk = Math.sin(player.walkPhase) * 22 * playerModel.walkBlend * playerModel.swingAmp
-                    // 挖掘挥臂（mineBlend 0→1→0，onSwingArm 动画）：前抬 70°，覆盖行走摆动。
-                    const x = walk * (1 - playerModel.mineBlend) + 70 * playerModel.mineBlend
-                    return Qt.vector3d(x, 0, 0)
+                    return Qt.vector3d(walk, 0, 0)
                 }
                 // 袖段（上衣色 #3a6a9a；y 0.8→1.3 = 肩下 0.25..0.5）
                 Model {
@@ -485,7 +510,8 @@ Window {
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
                 }
             }
-            // 右臂枢轴（t45）：与左臂对称（右肩 0.375, 1.3, 0），行走与左腿同相（−sin；左腿前则右臂前）。
+            // 右臂枢轴（t45 / t52 持方块）：与左臂对称（右肩 0.375, 1.3, 0），行走与左腿同相（−sin；左腿前则右臂前）。
+            //   t52：挖掘/放置只动右手——仅右臂读 mineBlend（挖掘挥臂前抬 70°）；左臂已不读（见上）。
             Node {
                 id: rightArmPivot
                 position: Qt.vector3d(0.375, 1.3, 0)
@@ -506,6 +532,21 @@ Window {
                     position: Qt.vector3d(0, -0.6, 0)
                     scale: Qt.vector3d(0.25, 0.2, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+                }
+                // 手持方块（t52）：持有方块（selectedBlock≠0）时，第三人称右手上显该方块小图标。
+                //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步运动（块在手中，自然跟随）。
+                //   BlockCube + 共享图集 → per-face 贴图（草顶 / 草侧…），复用地形贴图（零 MC 资产）。
+                //   仅第三人称 + 非观察者显（第一人称见 viewModelHand 的手持；观察者无动作不持物）。
+                Model {
+                    visible: player.selectedBlock !== 0 && player.mode !== PlayerController.Spectator
+                    geometry: BlockCube { blockId: player.selectedBlock }
+                    position: Qt.vector3d(0, -0.6, -0.08)
+                    scale: Qt.vector3d(0.2, 0.2, 0.2)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColorMap: voxelAtlas
+                        opacity: playerModel.bodyOpacity
+                    }
                 }
             }
             // 左腿枢轴（t45）：枢轴位于左髋 (-0.125, 0.6, 0)，腿段作子节点本地 -Y 偏移（中心 -0.3）。

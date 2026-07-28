@@ -26,6 +26,8 @@ qt_add_executable(voxelsandbox
     src/World/worldclock.h
     src/Renderer/wiresquare.cpp
     src/Renderer/wiresquare.h
+    src/Renderer/wirecube.cpp
+    src/Renderer/wirecube.h
     src/Renderer/unitcube.cpp
     src/Renderer/unitcube.h
     src/Renderer/crackbox.cpp
