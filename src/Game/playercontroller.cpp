@@ -363,12 +363,12 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     const quint8 brokenId = m_world->blockAt(x, y, z);
     m_world->setBlock(x, y, z, BlockRegistry::Air); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
     emit playerMined(x, y, z, int(brokenId), drop); // 破块语义事件（含 drop 标志；当前无消费端，留扩展）
-    // t35/B5：生存挖出可掉落方块 → **直接 auto-collect 进 hotbar**（addStack 先选中槽/同 id 槽/空槽），
-    // 保证背包有物品可操作（不再依赖 item entity 渲染/拾取链肉眼是否正常——用户反馈生存拿不到物品）。
-    // hotbar 满或无 VM → 溢出退回地面实体（原 t35 spawnItem 路径，留 t36 走近拾取）。
+    // t43：生存挖出可掉落方块 → **走实体流**（emit spawnItem），移除 commit a3e9300 的 auto-collect
+    // （原直接 addStack）。掉落物落到该格地面、玩家走近 ≤kPickupDist 时经 pickupScan 拾取 → addStack
+    // （先选中槽、再空槽，智能堆叠至 maxStack）。满栈不进背包则实体留地面（spec：全满→不拾取）。
+    // drop 由 caller 算（生存走 ToolRegistry::canHarvest；创造瞬破 drop=false 不发）。
     if (drop) {
-        if (!m_hotbar || m_hotbar->addStack(int(brokenId), 1) > 0)
-            emit spawnItem(x, y, z, int(brokenId));
+        emit spawnItem(x, y, z, int(brokenId));
     }
     emit swingArm();                                // 破块成功 → 第一人称手挥动（t29）
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）

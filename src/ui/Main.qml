@@ -524,6 +524,21 @@ Window {
                             baseColorMap: voxelAtlas
                         }
                     }
+                    // t43：浅灰半透外壳（spec「外裹浅灰半透球 / 半透外壳」）—— 略大于内方块的
+                    // UnitCube 半透壳，包裹小方块图标形成「光晕包裹」视觉。用 UnitCube（本工程静态
+                    // #Cube/#Sphere 内置 mesh 实测不渲染 → 自定义几何是已验证可见路径，见 lessons-learned）
+                    // + NoLighting + opacity<1（<1 自动走透明混合，同观察者幽灵半透模式 bodyOpacity 0.35）。
+                    // 与内方块共享外层 Node 的绕 Y 旋转 + 浮动（position 读 parent.bobY 同步上下浮）。
+                    Model {
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(0.45, 0.45, 0.45)
+                        position: Qt.vector3d(0, parent.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#b0b0b0"   // 浅灰
+                            opacity: 0.35          // 半透（<1 触发透明混合）
+                        }
+                    }
                     // 绕 Y 匀速自转（~3s 一圈），loops 无限。
                     NumberAnimation on rotY { from: 0; to: 360; duration: 3000; loops: Animation.Infinite }
                     // 上下浮动 0.15 格（~2s 周期），InOutSine 近似 sin 手感（spec：上下浮动 sin）。
