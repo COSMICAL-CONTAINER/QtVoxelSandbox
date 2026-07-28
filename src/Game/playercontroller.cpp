@@ -119,6 +119,7 @@ void PlayerController::release()
     setCaptured(false);
     clearHit();                               // 暂停 → 隐藏线框（未捕获时不选中）
     cancelMining();                           // t34：暂停 / 失焦 → 清累积挖掘态（spec：失焦清零）
+    m_leftDown = false;                       // t44：暂停 / 失焦 → 视同松手（切断续挖）
 }
 
 void PlayerController::setCaptured(bool c)
@@ -315,6 +316,9 @@ void PlayerController::setSelectedItem(int id)
 // 兼容：breakBlock()（旧 Q_INVOKABLE）等价调本方法（创造瞬破 / 生存开始累积）。
 void PlayerController::beginMining()
 {
+    // t44 连续挖掘：记录物理左键按下态。置于所有早 return 之前 —— 即便当前不能开始累积
+    // （观察者 / 无命中 / 暂停），按钮按下这一事实仍成立，后续 updateMining 据此 + 新命中自动续挖。
+    m_leftDown = true;
     if (!canBreak()) return; // 观察者不能破块（t21）
     if (!m_world || !m_captured || !m_hasHit) return;
 
@@ -337,8 +341,10 @@ void PlayerController::beginMining()
 }
 
 // 左键松开（t34）：清累积进度。创造模式下未进入累积态（mining=false）→ no-op。
+// t44：同步清 m_leftDown（按钮物理松开）—— 切断连续挖掘的续挖条件（spec：松手清零）。
 void PlayerController::endMining()
 {
+    m_leftDown = false;
     if (!m_mining) return;
     cancelMining();
 }
@@ -374,14 +380,30 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）
 }
 
-// 每 tick 推进生存挖掘进度（t34）。创造不进入此态（beginMining 内瞬破已 return）。
+// 每 tick 推进生存挖掘进度（t34）+ 连续续挖（t44）。创造不进入此态（beginMining 内瞬破已 return）。
 // spec：progress += dt * speed(block, tool)；speed = 1 / miningTime（ToolRegistry 已含 hardness/speedMul）。
 //   - 失命中 / 目标已被破（变 air）→ cancelMining。
 //   - 目标换（玩家转头）→ 重置 progress（spec：换目标清零），目标格更新。
 //   - stage 推进（progress 跨 1/6 阈值）→ 发 miningStateChanged（驱动 QML 切裂纹贴图）+ swingArm（挥动循环）。
 //   - progress >= 1.0 → finishMiningAt（drop = canHarvest）。
+// t44 连续挖掘：finishMiningAt 内 cancelMining 清 m_mining，但 m_leftDown 仍 true（左键未松）。下一 tick
+//   顶部检测到「未在累积 + 左键仍按 + Survival + 命中新可挖块」→ 自动 beginMining 新目标（progress 归 0
+//   继续），不松手连挖。停止条件：松手（m_leftDown=false）/ 视线无命中（m_hasHit=false，含出射程——
+//   raycast 限 kReach）/ 新目标不可挖。spec：长按沿一直线连续破多块直到射程外。速度 / 掉落 / 可挖
+//   全走 ToolRegistry（t42 方块表）：canMine(可挖) / miningTime(速度) / canHarvest(掉落)。
 void PlayerController::updateMining(float dt)
 {
+    // t44 连续挖掘：左键仍按但当前未累积（刚破完一块 m_mining 被 cancelMining 清 / 或目标刚进入视线）
+    // → 若命中可挖块则自动 beginMining 新目标（progress 归 0），无需松手重按。仅 Survival：Creative
+    // 单击瞬破不进 updateMining（beginMining 内直接 finishMiningAt return）；Spectator canBreak=false。
+    // 用 ToolRegistry::canMine 判可挖（走 BlockDef：实体且 hardness>0），air / 越界 / 不可破坏 → false。
+    if (!m_mining && m_leftDown && m_mode == Survival && m_world && m_hasHit) {
+        const quint8 hb = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+        if (ToolRegistry::canMine(hb)) {
+            beginMining(); // 重新进入累积：m_mining=true / 目标=当前命中 / progress=0 / stage=0
+        }
+    }
+
     if (!m_mining) return;
     if (!m_world || !m_hasHit) { cancelMining(); return; }
 
@@ -396,14 +418,14 @@ void PlayerController::updateMining(float dt)
         emit miningProgressChanged();
     }
 
-    // 目标已被破（其它途径，如 t36 拾取销毁——当前无）→ 取消。
+    // 目标已被破（其它途径）/ 不可挖 → 取消。可挖判定走 ToolRegistry::canMine（t42 方块表：
+    // 实体且 hardness>0；air / 越界 / 基岩=false），取代原 bid==Air 硬比较（spec：可挖走 BlockDef）。
     const quint8 bid = m_world->blockAt(m_mineBx, m_mineBy, m_mineBz);
-    if (bid == BlockRegistry::Air) { cancelMining(); return; }
+    if (!ToolRegistry::canMine(bid)) { cancelMining(); return; }
 
     // 速度：miningTime = hardness / speedMul（ToolRegistry），progress 增量 = dt / miningTime。
-    // miningTime 地板 0.05s（防空手秒破致抖动）；air / 越界已早 return。
+    // canMine 已保 hardness>0 → miningTime 经 max(t,0.05) 地板恒 >0，无除零。
     const float miningTime = ToolRegistry::miningTime(bid, m_selectedItem);
-    if (miningTime <= 0.0f) { cancelMining(); return; }
     m_miningProgress += dt / miningTime;
 
     // stage 推进：clamp(progress*6, 0, 5)。每跨一阶发 miningStateChanged（切贴图）+ swingArm（挥动循环）。
@@ -416,6 +438,7 @@ void PlayerController::updateMining(float dt)
     emit miningProgressChanged();
 
     // 完成：progress 满 → 破块。drop 走 ToolRegistry::canHarvest（生存可采掘判定）。
+    // finishMiningAt 内 cancelMining 清 m_mining=false；m_leftDown 不动 → 下一 tick 顶部续挖分支接手。
     if (m_miningProgress >= 1.0f) {
         const bool drop = ToolRegistry::canHarvest(bid, m_selectedItem);
         finishMiningAt(m_mineBx, m_mineBy, m_mineBz, drop);
