@@ -761,6 +761,22 @@ Window {
         }
     }
 
+    // [t55] 诊断：HUD hotbar 刷新追踪。slotsChanged（setStack/addStack/takeStack/resetForMode）时打印
+    //   全 9 槽 id + 选中槽，与 hotbar.cpp 的 `[inv] addStack ... slots=[...]` 交叉验证 ——
+    //   若 [inv] 有数据但 [hud] 这行没出 = NOTIFY 未到 QML（绑定断）；两行都有但 HUD 仍空 = 绑定重算
+    //   了但取值错（应不可能，blockIdAt 直读 m_slots）；最常见是 [hud] 这行出了 + HUD 图标随之刷新
+    //   = 修复生效。无论 hotbarBar 是否可见都打（playing 全程诊断），便于和 [inv] 同时间线对照。
+    Connections {
+        target: hotbarVM
+        function onSlotsChanged() {
+            console.info("[hud] slotsChanged rev=" + hotbarVM.slotRevision
+                + " ids=[" + hotbarVM.blockIdAt(0) + " " + hotbarVM.blockIdAt(1) + " " + hotbarVM.blockIdAt(2)
+                + " " + hotbarVM.blockIdAt(3) + " " + hotbarVM.blockIdAt(4) + " " + hotbarVM.blockIdAt(5)
+                + " " + hotbarVM.blockIdAt(6) + " " + hotbarVM.blockIdAt(7) + " " + hotbarVM.blockIdAt(8) + "]"
+                + " sel=" + hotbarVM.selectedSlot)
+        }
+    }
+
     // 键盘：G 切模式、1–9 直选 hotbar 槽、WASD/Space/Shift 传给控制器。Esc 由 C++ 事件过滤器拦截。
     // 注：原 1/2/3 用于直选模式，现让位给 hotbar（t06 验收要求 1–9 选槽）；模式切换统一由 G 循环
     // （N 与数字键无冲突认知，但 G 是更通用的「Game mode」约定，避免与未来键位争用）。
@@ -980,12 +996,23 @@ Window {
             id: slotRow
             spacing: 0
             Repeater {
-                // model = 槽内容（QVariantList<方块id>）。触碰 slotRevision 建立 NOTIFY 依赖：setSlotBlock
-                // 改槽内容 → slotsChanged → slotRevision 自增 → 本绑定重算返回新数组 → Repeater 整列重建
-                // （invokable 返回值不被 NOTIFY 跟踪，故用版本号触发；modelData = 该槽方块 id，air=0 空槽）。
-                // 为何不直接 Q_PROPERTY(QVariantList slots)：本工具链 moc 拒绝 Q_PROPERTY 里的 QVariantList，
-                // 故 slotList() 走 Q_INVOKABLE + slotRevision 做 NOTIFY。
-                model: { hotbarVM.slotRevision; return hotbarVM.slotList() }
+                // t55 修复（HUD hotbar 拾取/放入后不显图标）：
+                //   根因 —— 旧 `model: { slotRevision; slotList() }` 用 JS 数组（QVariantList）作 Repeater
+                //   model。slotRevision 变时绑定虽重算、返回新数组，但**新数组长度恒 9（不变）** →
+                //   QQuickRepeater 视作「count 未变」→ **复用既有 delegate、不重建**，而 modelData 在
+                //   delegate 创建期一次性注入、不复算 → 图标 / 数量永停在初值（全空）。背包内面板
+                //   「能看见」是假象：面板 visible 切换时其 Repeater delegate 被销毁重建，偶发读到新值；
+                //   持久 HUD 的 Repeater 自启动起 9 delegate 一直复用 → 必然空。
+                //
+                //   修法（参照 SurvivalInventory 主栏已验证的 revision-touch 模式）：改用**固定整数 model**
+                //   （slotCount=9，CONSTANT → delegate 一次创建永驻），把「刷新」责任从「Repeater 重建」
+                //   下放到**每个依赖槽内容的绑定**：每绑定显式 `触碰 slotRevision`（Q_PROPERTY，NOTIFY=
+                //   slotsChanged）→ NOTIFY 触发该绑定重算 → 经 Q_INVOKABLE blockIdAt(index)/countAt(index)
+                //   取**最新**栈值。Q_INVOKABLE 返回值本身不被 NOTIFY 跟踪，但只要同绑定内先读了 NOTIFY
+                //   属性（slotRevision），整绑定就挂在该信号上 → slotsChanged 后重算。这与 SurvivalInventory
+                //   主栏（mainRev 触碰 + mainSlots[index] 读取）同构，是「数组突变靠版本号触发刷新」的
+                //   通用稳健写法（不依赖 Repeater 对等长数组的重建行为，那在不同 Qt 版本表现不一致）。
+                model: hotbarVM.slotCount
                 delegate: Item {
                     width: hotbarBar.slotSize
                     height: hotbarBar.slotSize
@@ -997,45 +1024,50 @@ Window {
                     Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                     Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
 
-                    // 物品图标：方块段 → 等距立方体 Image（统一源 PreserveAspectFit）；工具段（t33，
-                    // isTool(id)）→ ToolIcon.qml Canvas 自绘像素镐；材料段（t50 木棒）→ MaterialIcon
-                    // 自绘（§9a，非 MC 资产）。空槽 modelData=0 → 不显。三者同尺寸同居中，互斥 visible。
+                    // 物品图标：方块段 → 等距立方体 Image；工具段（t33，isTool）→ ToolIcon Canvas 自绘像素镐；
+                    // 材料段（t50 木棒，isMaterial）→ MaterialIcon 自绘（§9a，非 MC 资产）。空槽 id=0 → 不显。
+                    // 三者同尺寸同居中、互斥 visible。每绑定触碰 slotRevision → 拾取/放入后重算 blockIdAt(index)。
                     Item {
                         anchors.centerIn: parent
                         width: 38; height: 38
-                        visible: modelData !== 0
+                        visible: { hotbarVM.slotRevision; return hotbarVM.blockIdAt(index) !== 0 }
                         Image {
                             anchors.fill: parent
-                            visible: !hotbarVM.isTool(modelData) && !hotbarVM.isMaterial(modelData)
-                            source: hotbarVM.iconSourceForBlock(modelData)
+                            visible: { hotbarVM.slotRevision; const id = hotbarVM.blockIdAt(index)
+                                       return !hotbarVM.isTool(id) && !hotbarVM.isMaterial(id) }
+                            source: { hotbarVM.slotRevision; return hotbarVM.iconSourceForBlock(hotbarVM.blockIdAt(index)) }
                             fillMode: Image.PreserveAspectFit
                             smooth: true
                         }
                         ToolIcon {
                             anchors.fill: parent
-                            visible: hotbarVM.isTool(modelData)
-                            tier: hotbarVM.toolTier(modelData)
+                            visible: { hotbarVM.slotRevision; return hotbarVM.isTool(hotbarVM.blockIdAt(index)) }
+                            tier: { hotbarVM.slotRevision; return hotbarVM.toolTier(hotbarVM.blockIdAt(index)) }
                         }
                         MaterialIcon {
                             anchors.fill: parent
-                            visible: hotbarVM.isMaterial(modelData)
-                            materialId: modelData
+                            visible: { hotbarVM.slotRevision; return hotbarVM.isMaterial(hotbarVM.blockIdAt(index)) }
+                            materialId: { hotbarVM.slotRevision; return hotbarVM.blockIdAt(index) }
                         }
                     }
-                    // 栈数量（t32）：count>1 时右下角显数字（MC 风格：单件不显数）。countAt 是 Q_INVOKABLE，
-                    // 不被 NOTIFY 自动跟踪，靠 slotRevision 触碰 model 绑定 → Repeater 整列重建时本 delegate
-                    // 重新求值刷新（同 iconSourceForBlock 模式）。白字黑描边保证亮/暗槽底均可读。
+                    // 栈数量（t32）：count>1 时右下角显数字（MC 风格：单件不显数）。触碰 slotRevision 刷新
+                    // （countAt 是 Q_INVOKABLE，靠版本号触发）。白字黑描边保证亮/暗槽底均可读。
                     Text {
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
                         anchors.rightMargin: 3
                         anchors.bottomMargin: 1
-                        visible: hotbarVM.countAt(index) > 1
-                        text: hotbarVM.countAt(index)
+                        visible: { hotbarVM.slotRevision; return hotbarVM.countAt(index) > 1 }
+                        text: { hotbarVM.slotRevision; return hotbarVM.countAt(index) }
                         color: "#ffffff"
                         style: Text.Outline; styleColor: "#000000"
                         font.pixelSize: 14; font.bold: true
                     }
+
+                    // [t55] 诊断：delegate 创建时打一行 —— 确认恰好 9 个 delegate 生成 + 初始 id（启动全空=0）。
+                    // 若日志只见 9 行且 id=0，之后拾取无新日志 = delegate 未重建（预期，因 model 是常数）；
+                    // 此时刷新靠下方 onSlotsChanged 打印 + 各绑定 slotRevision 触碰（应见图标更新）。
+                    Component.onCompleted: console.info("[hud] slot " + index + " delegate created id=" + hotbarVM.blockIdAt(index))
                 }
             }
         }
