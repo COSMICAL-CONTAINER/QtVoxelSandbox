@@ -28,12 +28,12 @@ Item {
     // t49：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区时；宿主接 player.dropHeldCursor）。
     signal discardHeldRequested()
 
-    // ① 调色板数据：8 实方块（creativeBlocks）+ 3 档镐（creativeTools，t33）+ 扩展空槽（id=0 → 空占位）。
-    // 一次性求值的绑定（方块 / 工具集恒定；root.hotbar 由 null→对象 时重新求值）。空槽既是「可滚动」
-    // 的内容，也占位示意未来 Phase 1.x 的 ~40 方块扩容（MC 1.0 创造页也是多行大网格）。
+    // ① 调色板数据：9 实方块（creativeBlocks，含工作台 CraftingTable，t59）+ 3 档镐（creativeTools，t33）
+    // + 扩展空槽（id=0 → 空占位）。一次性求值的绑定（方块 / 工具集恒定；root.hotbar 由 null→对象 时重新求值）。
+    // 空槽既是「可滚动」的内容，也占位示意未来 Phase 1.x 的 ~40 方块扩容（MC 1.0 创造页也是多行大网格）。
     readonly property var paletteModel: root.hotbar
         ? root.hotbar.creativeBlocks().concat(root.hotbar.creativeTools())
-                                .concat([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]) // 8 + 3 + 16 = 27（9 列 × 3 行）
+                                .concat([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]) // 9 + 3 + 15 = 27（9 列 × 3 行）
         : []
 
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
