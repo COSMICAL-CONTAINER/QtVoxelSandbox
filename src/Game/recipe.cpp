@@ -77,8 +77,10 @@ BBox minBBox(const int *grid, int n)
 }
 
 // 无序匹配：输入与 pattern 的非空格多重集相同（位置无关）。
-// pattern 定义在 patN×patN（recipe.gridSize），输入在 inputN×inputN。两种尺寸极小（≤9 格）→ O(n²) 可接受。
-bool shapelessEqual(const int *input, int inputN, const int *pattern, int patN)
+// **pattern 恒为 3×3=9 格行优先**（与 gridSize 无关：2×2 配方也用 9 格存，末位补 0）；
+// 输入网格 inputN×inputN（2 或 3）。两种尺寸极小 → O(n²) 可接受。
+// （旧实现误把 patN=gridSize 当 pattern 步长 → 2×2 配方只读前 4 格、漏计数 → code review 关键 bug）
+bool shapelessEqual(const int *input, int inputN, const int *pattern)
 {
     int inIds[9], inCnt[9], inKinds = 0;
     for (int i = 0; i < inputN * inputN; ++i) {
@@ -89,7 +91,7 @@ bool shapelessEqual(const int *input, int inputN, const int *pattern, int patN)
         if (j == inKinds) { inIds[inKinds] = id; inCnt[inKinds] = 1; ++inKinds; }
     }
     int patIds[9], patCnt[9], patKinds = 0;
-    for (int i = 0; i < patN * patN; ++i) {
+    for (int i = 0; i < 9; ++i) { // pattern 恒 9 格
         const int id = pattern[i];
         if (id == 0) continue;
         int j = 0;
@@ -110,11 +112,11 @@ bool shapelessEqual(const int *input, int inputN, const int *pattern, int patN)
 
 // 有序匹配（MC 最小包围盒规则）：输入与 pattern 各自收缩到最小非空包围盒，尺寸相同且逐格 id 相同。
 // 允许图案在网格内任意平移（包围盒对齐后比内容）；pattern 内的 0（如 T 形木镐的中部空格）要求
-// 输入对应位也为 0。
-bool shapedEqual(const int *input, int inputN, const int *pattern, int patN)
+// 输入对应位也为 0。**pattern 恒以步长 3 读**（3×3 行优先），输入以 inputN 读。
+bool shapedEqual(const int *input, int inputN, const int *pattern)
 {
     const BBox ib = minBBox(input, inputN);
-    const BBox pb = minBBox(pattern, patN);
+    const BBox pb = minBBox(pattern, 3); // pattern 恒 3×3
     if (ib.empty || pb.empty) return false;
     const int iw = ib.x1 - ib.x0 + 1, ih = ib.y1 - ib.y0 + 1;
     const int pw = pb.x1 - pb.x0 + 1, ph = pb.y1 - pb.y0 + 1;
@@ -122,7 +124,7 @@ bool shapedEqual(const int *input, int inputN, const int *pattern, int patN)
     for (int y = 0; y < ih; ++y) {
         for (int x = 0; x < iw; ++x) {
             const int ic = input[(ib.y0 + y) * inputN + (ib.x0 + x)];
-            const int pc = pattern[(pb.y0 + y) * patN + (pb.x0 + x)];
+            const int pc = pattern[(pb.y0 + y) * 3 + (pb.x0 + x)]; // 步长 3
             if (ic != pc) return false;
         }
     }
@@ -140,9 +142,9 @@ const RecipeRegistry::Recipe *RecipeRegistry::match(const int *grid, int gridSiz
     for (const Recipe &r : kRecipes) {
         if (r.gridSize > gridSize) continue; // 3×3 配方不在 2×2 输入里合
         if (r.shapeless) {
-            if (shapelessEqual(grid, gridSize, r.pattern, r.gridSize)) return &r;
+            if (shapelessEqual(grid, gridSize, r.pattern)) return &r;
         } else {
-            if (shapedEqual(grid, gridSize, r.pattern, r.gridSize)) return &r;
+            if (shapedEqual(grid, gridSize, r.pattern)) return &r;
         }
     }
     return nullptr;
