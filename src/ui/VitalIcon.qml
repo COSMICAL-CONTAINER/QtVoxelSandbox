@@ -66,7 +66,9 @@ Canvas {
                 ctx.fillStyle = dim
                 ctx.fillRect(px, py, scale, scale)
                 // 叠亮：full=整格；half=仅左半（像素中心落于左半才亮）。
-                if (root.level >= 2 || (c + 0.5) * scale < cols * scale / 2) {
+                // half 分支必须 `level >= 1` 守门，否则 level=0（空）时左半仍被涂亮 → 空心视觉等同半心，
+                // 扣血时无法分辨「剩 1 点」与「已耗尽」。守门后：0=全暗、1=左半亮、2=整格亮，三态可分。
+                if (root.level >= 2 || (root.level >= 1 && (c + 0.5) * scale < cols * scale / 2)) {
                     ctx.fillStyle = bright
                     ctx.fillRect(px, py, scale, scale)
                 }
