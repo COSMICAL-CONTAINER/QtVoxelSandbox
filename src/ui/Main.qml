@@ -163,7 +163,8 @@ Window {
         // t35：生存破可掉落方块（drop=true）→ player 发 spawnItem → 转发到 manager 生成实体。
         // 创造 / 不可采掘时 player 不发本信号（无实体产出）。ViewModel 不持有 PlayerController，
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
-        function onSpawnItem(x, y, z, id) { itemEntities.spawnItem(x, y, z, id) }
+        // t64：spawnItem 信号带 count 参数（整栈丢弃为 1 实体；破块掉落走 BlockDef.dropCount）。
+        function onSpawnItem(x, y, z, id, count) { itemEntities.spawnItem(x, y, z, id, count) }
         // t61：挖掘过程粒子 —— 生存累积挖掘时每跨一阶，player 发 miningParticle（被挖方块坐标+id），
         // 转发到 BlockParticles.burstMine（复用破块碎屑 emitter / 色逻辑 / 重力，少量迸发，进度反馈）。
         // 破块完成时的 +30% 大迸发仍由 onBlockBroken → burstBreak 驱动（burstBreak 已在此任务内 +30%）。
@@ -656,11 +657,15 @@ Window {
             Repeater {
                 model: itemEntities.count
                 delegate: Node {
-                    // 基准位置 + 物品 id：触碰 itemEntities.revision（Q_PROPERTY NOTIFY=entitiesChanged）
+                    // 基准位置 + 物品 id + count：触碰 itemEntities.revision（Q_PROPERTY NOTIFY=entitiesChanged）
                     // 建立依赖。t36 removeAt 用 erase-shift（前移后续实体），revision 自增 → 本绑定重算
-                    // → shift 后 delegate[k] 对齐新 entity[k] 的 pos/itemId（否则 posAt 是 Q_INVOKABLE 不
-                    // 被 NOTIFY 跟踪、shift 后 delegate 显示陈旧数据）。外层 Node 持基准 pos + 绕 Y 旋转。
+                    // → shift 后 delegate[k] 对齐新 entity[k] 的 pos/itemId/count（否则 posAt/itemIdAt/countAt
+                    // 是 Q_INVOKABLE 不被 NOTIFY 跟踪、shift 后 delegate 显示陈旧数据）。外层 Node 持基准
+                    // pos + 绕 Y 旋转。t64 加 count 触碰：部分拾取后 setCountAt bump revision → 数量重算。
+                    id: entRoot
                     position: { itemEntities.revision; return itemEntities.posAt(index) }
+                    property int entId: { itemEntities.revision; return itemEntities.itemIdAt(index) }
+                    property int entCount: { itemEntities.revision; return itemEntities.countAt(index) }
                     property real rotY: 0       // 绕 Y 旋转角（度）
                     property real bobY: 0       // 上下浮动偏移（格）
                     eulerRotation: Qt.vector3d(0, rotY, 0)
@@ -671,35 +676,82 @@ Window {
                     Component.onCompleted: {
                         if (parent === null) parent = itemHost
                         console.info("[t53] entity delegate[" + index + "] parent=" + parent
-                            + " pos=" + position + " id=" + itemEntities.itemIdAt(index)
+                            + " pos=" + position + " id=" + entRoot.entId + " count=" + entRoot.entCount
                             + " (须 QQuick3DNode 非 null)")
                     }
 
+                    // —— t64 实体贴图按 id 段分流（修「木棒/木镐 Q 丢弃后贴图是 Stone」根因）——
+                    //   根因：原 BlockCube.setBlockId 对越界 id（>= BlockRegistry::Count，如工具段 0x100 / 材料
+                    //   段 0x200）兜底为 Stone → 整段外观坍缩成石头。HUD hotbar 早已 isTool/isMaterial 分流到
+                    //   ToolIcon/MaterialIcon 自绘；掉落实体 Repeater 没有这层分流，故坍缩。
+                    //   分流（机制等价 HUD hotbar delegate 的三分互斥 visible 模式）：
+                    //   - 方块段（!isTool && !isMaterial）→ BlockCube + 共享图集 voxelAtlas（现状不变）；
+                    //   - 工具段（isTool）→ CrackBox（每面全幅 UV 0..1）+ Texture.sourceItem = ToolIcon Canvas
+                    //     （tier 据 entId 查 hotbarVM.toolTier；tier=1 木镐 / 2 石镐 / 3 铁镐 各自配色）；
+                    //   - 材料段（isMaterial）→ CrackBox + Texture.sourceItem = MaterialIcon Canvas（木棒）。
+                    //   CrackBox 每面独立全幅 UV → 把 sourceItem 渲出的整张 2D 图完整铺到该面；六面同图 →
+                    //   绕 Y 自转时正面恒有图标可见（不靠 billboard）。
+                    //   Texture.flipV=true：sourceItem 的 QtQuick Item 以左上为原点，3D 纹理以左下为原点 →
+                    //   不翻转会把「木棒从左下到右上」渲染成「从左上到右下」（镐头朝下），故 flipV。
+                    //   分层（PLAN §2）：呈现层只消费 ItemEntityManager 数据；ToolIcon/MaterialIcon 是纯呈现
+                    //   层 QML 自绘（§9a 原创），无 MC 资产 / 反向写栅格。
+
+                    // 方块段：BlockCube 走图集 per-face UV（草顶 / 草侧 …）。
                     Model {
-                        // 小方块图标（~0.3）：BlockCube 按 itemId 取图集 per-face UV（草顶 / 草侧…），
-                        // 复用 voxelAtlas（与地形同贴图，零 MC 资产）。NoLighting 保证可见（本工程所有
-                        // 可见 Model 的已验证路径；默认 lit 不渲染，见 lessons-learned）。
-                        // blockId 绑定同样触碰 revision：拾取 erase 后 shift 的 delegate 重新读 itemIdAt
-                        // → BlockCube.setBlockId 触发 rebuild 重算 UV（setBlockId 内 emit + rebuild）。
-                        geometry: BlockCube { blockId: { itemEntities.revision; return itemEntities.itemIdAt(index) } }
+                        visible: !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
+                        geometry: BlockCube { blockId: entRoot.entId }
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
-                        // 浮动：本地 Y 偏移。外层 Node 绕 Y 旋转不改变 Y 轴方向 → 世界 Y 偏移保留
-                        // （item 边绕垂直轴自转边上下浮）。
-                        position: Qt.vector3d(0, parent.bobY, 0)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
+                        }
+                    }
+                    // 工具段：CrackBox + ToolIcon sourceItem（镐形按 tier 着色）。
+                    Model {
+                        visible: hotbarVM.isTool(entRoot.entId)
+                        geometry: CrackBox {}
+                        scale: Qt.vector3d(0.3, 0.3, 0.3)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColorMap: Texture {
+                                // flipV：见上 flipV 注释（Item 左上原点 vs 3D 纹理左下原点）。
+                                flipV: true
+                                sourceItem: ToolIcon {
+                                    tier: hotbarVM.toolTier(entRoot.entId)
+                                    width: 64; height: 64
+                                }
+                            }
+                        }
+                    }
+                    // 材料段：CrackBox + MaterialIcon sourceItem（木棒棕色长条）。
+                    Model {
+                        visible: hotbarVM.isMaterial(entRoot.entId)
+                        geometry: CrackBox {}
+                        scale: Qt.vector3d(0.3, 0.3, 0.3)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColorMap: Texture {
+                                flipV: true
+                                sourceItem: MaterialIcon {
+                                    materialId: entRoot.entId
+                                    width: 64; height: 64
+                                }
+                            }
                         }
                     }
                     // t43：浅灰半透外壳（spec「外裹浅灰半透球 / 半透外壳」）—— 略大于内方块的
                     // UnitCube 半透壳，包裹小方块图标形成「光晕包裹」视觉。用 UnitCube（本工程静态
                     // #Cube/#Sphere 内置 mesh 实测不渲染 → 自定义几何是已验证可见路径，见 lessons-learned）
                     // + NoLighting + opacity<1（<1 自动走透明混合，同观察者幽灵半透模式 bodyOpacity 0.35）。
-                    // 与内方块共享外层 Node 的绕 Y 旋转 + 浮动（position 读 parent.bobY 同步上下浮）。
+                    // 与内方块共享外层 Node 的绕 Y 旋转 + 浮动（position 读 entRoot.bobY 同步上下浮）。
+                    // 三类图标共用此壳（外观统一，与内方块图标类型无关）。
                     Model {
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
-                        position: Qt.vector3d(0, parent.bobY, 0)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#b0b0b0"   // 浅灰

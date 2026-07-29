@@ -14,9 +14,13 @@
 // 等待 t36 拾取。创造秒破不产出（PlayerController 不发 spawnItem 信号）；生存不可采掘
 // （canHarvest=false，如空手破石）也不产出。
 //
-// 数据形态（pos / id / 物理态）：每个实体 = {世界坐标 pos, 物品 id, 垂直速度 vy, 是否已落地 resting}。
-// 呈现层（Main.qml 的 Repeater）经 count + posAt + itemIdAt 读数据，自发旋转 / 浮动动画（不反向写）。
-// 拾取（t36）：PlayerController 每帧扫附近实体 → Hotbar.addStack 成功 → removeAt 销毁该实体。
+// 数据形态（pos / id / count / 物理态）：每个实体 = {世界坐标 pos, 物品 id, 数量 count,
+// 垂直速度 vy, 是否已落地 resting}。count 字段（t64）支持「整栈丢弃为 1 实体」（如 4 木棒丢出
+// 仍为 1 实体 count=4）；拾取时把 count 全数交 Hotbar::addStack，装不下则 entity.count 留余数。
+// 呈现层（Main.qml 的 Repeater）经 count + posAt + itemIdAt + countAt 读数据，自发旋转 / 浮动
+// 动画（不反向写）；count>1 时 delegate 显数量数字。
+// 拾取（t36）：PlayerController 每帧扫附近实体 → Hotbar.addStack 成功 → removeAt 销毁该实体；
+//   t64：拾取按 entity.count 全数尝试入背包，余数（背包满）回写 entity.count，entity 保留。
 // 丢弃（t36）：PlayerController Q 键 → 经 spawnItem 信号（onSpawnItem 转发）回流入本类 spawnItem。
 //
 // 实体数量有上限（防溢出，spec「>200 跳过 / 合并」）：达到上限 kCap 时新 spawn 被跳过 +
@@ -53,13 +57,22 @@ public:
 
     // 在方块格 (x,y,z)（整数坐标）生成一个 itemId 的掉落实体。位置存该格中心
     // (x+0.5, y+0.5, z+0.5)（实体悬浮在格中央）。达到 kCap → 跳过 + qWarning（防溢出）。
-    // itemId<=0（air / 非法）拒（caller 应已过滤；双保险）。
-    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId);
+    // itemId<=0（air / 非法）拒（caller 应已过滤；双保险）。count 为实体携带数量（t64：整栈
+    // 丢弃为 1 实体；缺省 1 = 单件，与历史调用兼容）；count<=0 视作 1，>maxStack 由 caller 分流
+    // （本类不查 maxStack —— PlayerController 拾取时把全数交 Hotbar.addStack 自然分流到多槽）。
+    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1);
 
     // 第 i 个实体的世界坐标（呈现层 Repeater delegate 绑它摆位）。越界返回 (0,0,0)。
     Q_INVOKABLE QVector3D posAt(int i) const;
-    // 第 i 个实体的物品 id（呈现层据它设 BlockCube.blockId）。越界返回 0。
+    // 第 i 个实体的物品 id（呈现层据它设 BlockCube.blockId / 分流到 ToolIcon / MaterialIcon 外观）。
+    // 越界返回 0。
     Q_INVOKABLE int itemIdAt(int i) const;
+    // 第 i 个实体的数量（t64：呈现层 count>1 时显数字；PlayerController 拾取按它入背包）。越界返回 0。
+    Q_INVOKABLE int countAt(int i) const;
+    // 把第 i 个实体的数量设为 n（t64：拾取装不下时把余数回写、保留 entity）。n<=0 销毁该实体
+    // （余数为 0 = 全拾走）。边界安全（越界静默）。仅 PlayerController::pickupScan 调（拾取路径），
+    // 非 QML 调用入口。bump revision 驱动 QML delegate 数量绑定重算。
+    Q_INVOKABLE void setCountAt(int i, int n);
     // 销毁第 i 个实体（t36 拾取后调用）。erase-shift（保持其余实体位置 / 索引连续；非 swap-remove，
     // 否则末位 delegate 会瞬移到被拾取位 → 视觉跳变）。越界静默。bump revision → QML Repeater
     // delegate 的 posAt/itemIdAt 绑定（触碰 revision）整列重算，shift 后各 delegate 对齐新数据。
@@ -89,9 +102,10 @@ private:
     struct ItemEntity {
         QVector3D pos;
         int itemId;
-        qint64 spawnMs = 0; // 生成时刻（m_clock.elapsed()）；t53 isPickupReady 算 age 用
-        float vy = 0.0f;        // t60：垂直速度（blocks/s；向下为负）；落地后归 0
-        bool resting = false;   // t60：是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
+        int count = 1;       // t64：实体携带数量（整栈丢弃为 1 实体；拾取按此数入背包）
+        qint64 spawnMs = 0;  // 生成时刻（m_clock.elapsed()）；t53 isPickupReady 算 age 用
+        float vy = 0.0f;     // t60：垂直速度（blocks/s；向下为负）；落地后归 0
+        bool resting = false;// t60：是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
     };
     std::vector<ItemEntity> m_entities;
     int m_revision = 0;

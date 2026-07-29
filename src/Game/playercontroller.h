@@ -182,9 +182,9 @@ public:
     Q_INVOKABLE void dropHeld();
     // 拖出背包丢弃（t49）：光标手持栈（hotbar.heldBlock/heldCount）整栈丢弃为实体（玩家前方 1.5 格）。
     // 与 dropHeld 的差异：后者取**选中槽** 1 件且仅捕获时；本方法取**光标手持栈**整栈、**不限捕获态**
-    // （背包打开时未捕获正是此场景）。spawnItem 仅产 1 实体（ItemEntityManager 无 count 概念）→ 多件
-    // 手持栈丢弃时仅 1 件可拾回（已知限制，与 spawnItem 单实体语义一致；spec point 5 明示「清 heldBlock
-    // + emit spawnItem」）。空手 → 不丢。经 QML Connections 转发（同 dropHeld）。
+    // （背包打开时未捕获正是此场景）。t64：spawnItem 传 heldCount → 1 实体携带整栈数量（修「丢 4 木棒
+    // 捡回只剩 1」bug；spec 验收「4 木棒丢出捡回仍 4」）。清空 hotbar 光标手持栈（setHeldBlock(0) 同步清
+    // count）。空手 → 不丢。经 QML Connections 转发（同 dropHeld）。
     Q_INVOKABLE void dropHeldCursor();
 
 signals:
@@ -222,9 +222,10 @@ signals:
     void playerMined(int x, int y, int z, int blockId, bool drop);
     // 方块掉落实体（t35）：生存破块且 ToolRegistry::canHarvest 判定掉落（drop=true）时发；
     // 创造瞬破（drop=false）/ 不可采掘（canHarvest=false，如空手破石）不发。坐标 = 被破格整数
-    // 坐标，id = 原方块 id。Main.qml Connections 转发到 ItemEntityManager.spawnItem 生成实体。
-    // 分层（PLAN §2）：Game/Physics 层发语义事件，呈现层 / ViewModel 只消费（同 blockBroken→粒子）。
-    void spawnItem(int x, int y, int z, int blockId);
+    // 坐标，id = 原方块 id，count = 掉落数量（走 BlockRegistry::dropCount；t64）。Main.qml Connections
+    // 转发到 ItemEntityManager.spawnItem 生成实体。分层（PLAN §2）：Game/Physics 层发语义事件，
+    // 呈现层 / ViewModel 只消费（同 blockBroken→粒子）。
+    void spawnItem(int x, int y, int z, int blockId, int count);
     void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState
     // 第一人称手挥动（t29）：breakBlock/placeBlock 在通过模式门控 + 动作真发生后发（观察者不发；
     // 未命中/放置被拒也不发）。同 blockBroken 模式——Game/Physics 层发语义事件，呈现层 Connections

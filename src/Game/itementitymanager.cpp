@@ -13,19 +13,21 @@ ItemEntityManager::ItemEntityManager(QObject *parent) : QObject(parent)
     m_clock.start(); // t53：拾取延迟判定的墙钟起点（elapsed 单调递增，免 dt 耦合）
 }
 
-// 生成掉落实体：存格中心坐标 + id，bump 版本号发 entitiesChanged → QML Repeater 追加 delegate。
+// 生成掉落实体：存格中心坐标 + id + count，bump 版本号发 entitiesChanged → QML Repeater 追加 delegate。
 // spec「实体数量有上限（防溢出）」：达 kCap 跳过 + 告警（保留已有；最简防溢出策略）。
-void ItemEntityManager::spawnItem(int x, int y, int z, int itemId)
+// t64：count 字段支持整栈丢弃为 1 实体（如 4 木棒丢出仍 1 实体 count=4）；count<=0 视作 1。
+void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count)
 {
     if (itemId <= 0) return; // air / 非法：不产出（PlayerController 仅在 drop=true 时发，已过滤）
     if (int(m_entities.size()) >= kCap) {
         qCWarning(lcItem) << "item entity cap reached (" << kCap << "); spawn skipped at" << x << y << z;
         return;
     }
-    m_entities.push_back(ItemEntity{QVector3D(x + 0.5f, y + 0.5f, z + 0.5f), itemId, m_clock.elapsed()});
+    if (count < 1) count = 1; // 缺省 / 非法 → 单件（与历史调用兼容）
+    m_entities.push_back(ItemEntity{QVector3D(x + 0.5f, y + 0.5f, z + 0.5f), itemId, count, m_clock.elapsed()});
     ++m_revision;
     emit entitiesChanged();
-    qCInfo(lcItem) << "spawned item entity id=" << itemId << "at" << x << y << z
+    qCInfo(lcItem) << "spawned item entity id=" << itemId << "count=" << count << "at" << x << y << z
                    << "(total" << m_entities.size() << ")";
 }
 
@@ -39,6 +41,33 @@ int ItemEntityManager::itemIdAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return 0;
     return m_entities[size_t(i)].itemId;
+}
+
+// t64：实体携带数量。呈现层据 count>1 显数量数字；PlayerController 拾取按它入背包。
+int ItemEntityManager::countAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    return m_entities[size_t(i)].count;
+}
+
+// t64：拾取装不下时把余数回写、保留 entity（dropHeldCursor 整栈丢弃后部分拾取的回退路径）。
+// n<=0 销毁该实体（余数为 0 = 全拾走 → removeAt 语义）。bump revision 驱动 QML 数量绑定重算。
+void ItemEntityManager::setCountAt(int i, int n)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    ItemEntity &e = m_entities[size_t(i)];
+    if (e.count == n) return;
+    if (n <= 0) {
+        // 余数为 0 = 全拾走 → 销毁实体（同 removeAt 路径，但走 setCountAt(0) 调用方语义统一）。
+        m_entities.erase(m_entities.begin() + i);
+        qCInfo(lcItem) << "item entity at index" << i << "consumed fully (remaining" << m_entities.size() << ")";
+    } else {
+        e.count = n;
+        qCInfo(lcItem) << "item entity at index" << i << "count ->" << n
+                       << "(partially picked; remaining in world)";
+    }
+    ++m_revision;
+    emit entitiesChanged();
 }
 
 // 销毁第 i 个实体（t36 拾取消费）。erase-shift：其后元素前移、size--，保持位置 / 索引连续。

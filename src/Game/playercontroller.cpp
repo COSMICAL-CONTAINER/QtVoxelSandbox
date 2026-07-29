@@ -415,8 +415,10 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     // （原直接 addStack）。掉落物落到该格地面、玩家走近 ≤kPickupDist 时经 pickupScan 拾取 → addStack
     // （先选中槽、再空槽，智能堆叠至 maxStack）。满栈不进背包则实体留地面（spec：全满→不拾取）。
     // drop 由 caller 算（生存走 ToolRegistry::canHarvest；创造瞬破 drop=false 不发）。
+    // t64：spawnItem 带 count（= BlockRegistry::dropCount；当前表内全 1，留扩展位对齐方块表）。
     if (drop) {
-        emit spawnItem(x, y, z, int(brokenId));
+        const int dropCount = std::max(1, BlockRegistry::dropCount(brokenId));
+        emit spawnItem(x, y, z, int(brokenId), dropCount);
     }
     emit swingArm();                                // 破块成功 → 第一人称手挥动（t29）
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）
@@ -534,12 +536,13 @@ void PlayerController::placeBlock()
     emit swingArm(); // 放块成功 → 第一人称手挥动（t29）
 }
 
-// Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格）。
+// Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格，count=1）。
 // 仅指针捕获时生效（spec：「Q 键（captured 时）」）。取失败（空栈 / 无 hotbar）→ 不丢。
 // spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem（同破块掉落 t35 路径），
 // 丢弃后实体在前方生成 → 可被重新拾取（闭环）。丢弃位置取眼位 + 视线 * 1.5，floor 到格坐标。
 // t56：选中槽为空时直接早退（id==0）—— 若用户从背包拾取到光标后关包，光标手持栈（heldBlock）
 //   须经 Main.qml::returnHeldToHotbar 在关包时归还进 hotbar（优先选中槽），否则 Q 读空槽不丢。
+// t64：Q 键每次只丢 1 件（dropHeld 的语义不变；整栈丢弃走 dropHeldCursor）。
 void PlayerController::dropHeld()
 {
     if (!m_captured) return;        // spec：仅捕获时
@@ -551,21 +554,24 @@ void PlayerController::dropHeld()
     // 眼位前方 1.5 格，floor 到整数格（ItemEntityManager 存格中心 = 整数+0.5）。
     const QVector3D fwd = lookDirection();
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id);
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, 1);
 }
 
-// 拖出背包丢弃（t49）：光标手持栈整栈丢弃为实体（玩家前方）。不限捕获态（背包打开时正是未捕获）。
+// 拖出背包丢弃（t49 / t64）：光标手持栈整栈丢弃为**单个实体携带整栈数量**（玩家前方）。不限捕获态
+// （背包打开时正是未捕获）。t64 修复：原 emit 仅传 id（count 走默认 1）→ 4 木棒丢出只生 1 实体 count=1，
+// 捡回只剩 1（用户：「4 木棒丢出去捡起来只剩 1 个」）。现传 heldCount → 1 实体携带整栈 → 捡回原数。
 // 清空 hotbar 光标手持栈（setHeldBlock(0) 同步清 count），再 emit spawnItem。空手 / 无 hotbar → 不丢。
 // 位置同 dropHeld：眼位 + 视线 * 1.5，floor 到格坐标（ItemEntityManager 存格中心 = 整数+0.5）。
 void PlayerController::dropHeldCursor()
 {
     if (!m_hotbar) return;
     const int id = m_hotbar->heldBlock();
-    if (id == 0 || m_hotbar->heldCount() <= 0) return; // 空手 → 不丢
-    m_hotbar->setHeldBlock(0);                         // 清空光标手持栈（id=0 同步清 count）
+    const int cnt = m_hotbar->heldCount();
+    if (id == 0 || cnt <= 0) return; // 空手 → 不丢
+    m_hotbar->setHeldBlock(0);       // 清空光标手持栈（id=0 同步清 count）
     const QVector3D fwd = lookDirection();
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id);
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, cnt);
 }
 
 // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 写入 hotbar 当前选中槽（覆盖；
@@ -582,10 +588,13 @@ void PlayerController::pickBlock()
     m_hotbar->setStack(m_hotbar->selectedSlot(), int(id), count);
 }
 
-// 拾取扫描（t36）：每帧扫附近掉落实体 → Hotbar.addStack（先选中槽、再空槽，「入手」语义）。
-// addStack 返 0（全放入）→ ItemEntityManager.removeAt 销毁实体（spec：拾取后销毁）；
-// 返 >0（背包满）→ 不拾取（entity 留；spec：全满 → 不拾取）。距离从玩家 AABB 中心（脚底 + 半高）
-// 3D 起算，阈值 kPickupDist；从后往前扫 → erase 不影响前面索引（安全边删边迭代）。
+// 拾取扫描（t36 / t64）：每帧扫附近掉落实体 → Hotbar.addStack（先选中槽、再空槽，「入手」语义）。
+// t64：拾取按 entity.count 全数尝试入背包；addStack 返回未放入数（leftover）：
+//   - leftover == 0：全入 → removeAt 销毁实体（spec：拾取后销毁）。
+//   - 0 < leftover < entity.count：部分入 → setCountAt(i, leftover) 把余数回写、保留 entity（玩家背包
+//     只剩空槽位不足 maxStack 时常见；spec「超 maxStack 分裂」由 addStack 自然分到多槽，entity 留余）。
+//   - leftover == entity.count：背包完全装不下（同 id 槽全满 + 无空槽）→ 不动 entity（spec：全满→不拾取）。
+// 距离从玩家 AABB 中心（脚底 + 半高）3D 起算，阈值 kPickupDist；从后往前扫 → erase 不影响前面索引。
 // t51：AABB 高用 m_height（蹲下变矮 → 中心随之降低，仍贴近玩家实际占据空间）。
 // t53：跳过新生免拾取期内的实体（isPickupReady=false）——破块瞬间实体常在玩家近旁（脚下方块 ~1.4 格
 //   < kPickupDist 1.5），若无延迟则下一帧即被收走、玩家永远看不见（疑似 auto-collect 根因）。让实体
@@ -600,8 +609,14 @@ void PlayerController::pickupScan()
         const QVector3D d = m_itemEntities->posAt(i) - center;
         if (d.lengthSquared() > r2) continue;          // 超阈值 → 跳过
         const int id = m_itemEntities->itemIdAt(i);
-        const int leftover = m_hotbar->addStack(id, 1); // 先选中槽（空/同 id）→ 再空槽
-        if (leftover == 0) m_itemEntities->removeAt(i); // 全入 → 销毁实体；背包满则留（leftover>0）
+        const int have = m_itemEntities->countAt(i);    // t64：实体携带数量（整栈丢弃场景）
+        if (have <= 0) { m_itemEntities->removeAt(i); continue; } // 防御：count 已为 0 → 销毁
+        const int leftover = m_hotbar->addStack(id, have); // 全数尝试入背包；addStack 内按 maxStack 分流
+        if (leftover <= 0) {
+            m_itemEntities->removeAt(i);                // 全入 → 销毁实体
+        } else if (leftover < have) {
+            m_itemEntities->setCountAt(i, leftover);    // 部分入 → 余数回写、entity 保留
+        } // else leftover == have：背包完全装不下 → entity 不动（spec：全满→不拾取）
     }
 }
 
