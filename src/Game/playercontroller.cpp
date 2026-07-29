@@ -354,7 +354,7 @@ void PlayerController::setSelectedItem(int id)
 //   Survival：进入累积态（mining=true，记录目标格，progress=0），由 updateMining 每 tick 推进。
 //             spec：按住左键累积进度，进度满才破。
 //   Spectator：canBreak()=false → 直接返回（不破 / 不进累积）。
-// 共用门控：未捕获 / 无命中 → 不动作。无世界 / 无窗口 → 不动作。
+// 共用门控：未捕获 / 无世界 → 不动作。无命中 → 挥空手（t68，见下）。无窗口 → 不动作。
 // 兼容：breakBlock()（旧 Q_INVOKABLE）等价调本方法（创造瞬破 / 生存开始累积）。
 void PlayerController::beginMining()
 {
@@ -362,7 +362,16 @@ void PlayerController::beginMining()
     // （观察者 / 无命中 / 暂停），按钮按下这一事实仍成立，后续 updateMining 据此 + 新命中自动续挖。
     m_leftDown = true;
     if (!canBreak()) return; // 观察者不能破块（t21）
-    if (!m_world || !m_captured || !m_hasHit) return;
+    if (!m_world || !m_captured) return;
+    // t68 挥空手：左键对空气（无命中方块）时仍 emit swingArm（挥臂动画反馈），但**不进入**
+    // mining 状态（不破块、不扣耐久、不显裂纹）。这是「动作反馈应独立于是否命中」的通用原则 ——
+    // 挥臂是玩家主观动作的呈现，命不命中只决定后续语义（破块 / 未来攻击判定），不应阻塞挥臂反馈。
+    // 此分支为后续攻击系统（打怪）铺垫：攻击判定走同一 raycast，但挥臂本身无目标也要触发。
+    // 第一 / 二 / 第三人称均消费 swingArm 驱动手臂挥动（见 Main.qml）。
+    if (!m_hasHit) {
+        emit swingArm();
+        return;
+    }
 
     if (m_mode == Creative) {
         // 创造：瞬破（progress 直接 1.0 等价），不掉落。仍发 swingArm（动作真发生）。
