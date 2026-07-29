@@ -651,10 +651,6 @@ Window {
             id: itemHost
             Component.onCompleted: {
                 console.info("[t53] itemHost UP parent=" + itemHost.parent + " (须为 3D Node 非 null；null=孤儿不渲染)")
-                // [bug1 诊断] 启动即 spawn 一个测试实体（草方块@出生点上方 8,15,8）→ 看 Repeater delegate
-                //   是否创建+渲染：log 会打 [t53] entity delegate[0] parent=... pos=...；parent 须 QQuick3DNode
-                //   非 null（null=孤儿不渲染）。玩家可肉眼确认出生点上方有无旋转浮动的浅灰球壳小草方块。
-                itemEntities.spawnItem(8, 15, 8, 1)
             }
 
             Repeater {

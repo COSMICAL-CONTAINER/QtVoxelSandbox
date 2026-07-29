@@ -99,7 +99,9 @@ void PlayerController::setKey(int key, bool pressed)
             if (m_moveState == Walk && (now - m_lastWms < 300)) {
                 setMoveState(Sprint);
                 m_lastWms = -100000; // 防三连误触（双击成功后立即消费）
-            } else {
+            } else if (m_moveState == Walk) {
+                // 仅 Walk 态记「双击第一击候选」；Crouch/Sprint 态按 W 不进双击检测、不刷 m_lastWms。
+                // 否则蹲态按 W 会留下时间戳，松 Shift 回 Walk 后单按 W（now - 旧戳 < 300）被误判双击 → 误触发疾跑。
                 m_lastWms = now;
             }
         } else if (!pressed) {
