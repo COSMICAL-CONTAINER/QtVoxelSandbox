@@ -96,7 +96,7 @@ void PlayerController::setKey(int key, bool pressed)
         const bool canSprint = (m_mode == Survival || (m_mode == Creative && !m_flying));
         if (pressed && !wasDown && canSprint) {
             const qint64 now = m_evtClock.elapsed();
-            if (m_moveState == Walk && (now - m_lastWms < 300)) {
+            if (m_moveState == Walk && (now - m_lastWms < 250)) {
                 setMoveState(Sprint);
                 m_lastWms = -100000; // 防三连误触（双击成功后立即消费）
             } else if (m_moveState == Walk) {
@@ -131,6 +131,7 @@ void PlayerController::setMode(Mode m)
     if (m_flying) { m_flying = false; emit flyingChanged(); } // 进入新模式默认走（不飞）
     // t51：切模式清移动状态机（疾跑/蹲下不跨模式延续；新模式的 Shift/W 上下文不同，从 Walk 起最稳）。
     if (m_moveState != Walk) setMoveState(Walk);
+    m_lastWms = -100000; // t70：切模式清双击窗口脏残留（防切换后首按 W 被旧戳误判双击 → 误触发疾跑）
     emit modeChanged();
     emit onGroundChanged();
 }
@@ -154,7 +155,9 @@ void PlayerController::release()
     cancelMining();                           // t34：暂停 / 失焦 → 清累积挖掘态（spec：失焦清零）
     m_leftDown = false;                       // t44：暂停 / 失焦 → 视同松手（切断续挖）
     // t51：暂停 / 失焦时退出疾跑 / 蹲下（恢复时从 Walk 起；避免遗留蹲态卡低视角 / 疾跑余速）。
+    // t70：同时清双击窗口脏残留（防暂停恢复后首按 W 被旧戳误判双击 → 误触发疾跑）。
     if (m_moveState != Walk) setMoveState(Walk);
+    m_lastWms = -100000;
 }
 
 void PlayerController::setCaptured(bool c)

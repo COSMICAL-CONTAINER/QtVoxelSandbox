@@ -658,8 +658,9 @@ Window {
                 Model {
                     visible: player.selectedBlock !== 0 && player.mode !== PlayerController.Spectator
                     geometry: BlockCube { blockId: player.selectedBlock }
-                    position: Qt.vector3d(0, -0.6, -0.08)
-                    scale: Qt.vector3d(0.2, 0.2, 0.2)
+                    position: Qt.vector3d(0, -0.55, -0.30)   // t72：移到手前方（手心前缘 z≈-0.125 前），不嵌进手里
+                    scale: Qt.vector3d(0.22, 0.22, 0.22)
+                    eulerRotation: Qt.vector3d(-12, 42, 0)   // t72：绕 Y ~42° 倾斜 + 微 pitch，像 MC 手持姿态
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
