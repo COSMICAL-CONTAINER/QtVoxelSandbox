@@ -240,34 +240,44 @@ Window {
                 id: viewModelHand
                 visible: player.cameraMode === PlayerController.FirstPerson
                          && player.mode !== PlayerController.Spectator
-                // t52 手不穿模（渲染于地形之上）：旧 pivot z=-0.4 + baseTilt 65° 使手指尖伸到相机本地
-                //   z=-0.49，深于玩家 AABB 半宽 0.3（实体方块最近可到 z=-0.3）→ 手被前方邻块遮挡 / 穿进墙。
-                //   修法：pivot 收到 z=-0.2、baseTilt 减到 30°（少前伸）→ 手中心相机本地 z∈[-0.25(静止),
-                //   -0.13(挥峰)]，始终近于 0.3 → depth 测试恒胜地形 → 手恒在所有实体方块之前（不穿模）。
-                //   缩放相应收小（近则显大）：0.16→0.09 保持视感尺寸；pivot.y 上移到 0.05 使手仍落视野下中。
-                position: Qt.vector3d(0.35, -0.05, -0.4)
-                readonly property real baseTilt: 65.0  // 静态前抬：手臂略前伸入视野（非纯下垂），更像持物姿态
+                // t52/t73 手不穿模（渲染于地形之上）：旧 pivot z=-0.4 + baseTilt 65° + scale 0.16 使手指尖伸到
+                //   相机本地 z≈-0.49，深于玩家 AABB 半宽 0.3（实体方块最近可到 z=-0.3）→ 手被前方邻块遮挡 / 穿进墙。
+                //   t52 注释写了修法但代码没改（仍 z=-0.4/tilt65/scale0.16）；t73 落实：pivot 收到 z=-0.2、baseTilt
+                //   减到 30°、臂段 scale 收到 0.09 → 手段中心相机本地 z∈[-0.25(静止), -0.13(挥峰)]，始终近于 0.3 →
+                //   depth 测试恒胜地形 → 手臂恒在所有实体方块之前（不穿模）。pivot.y 上移到 0.05 使手仍落视野下中。
+                position: Qt.vector3d(0.35, 0.05, -0.2)
+                readonly property real baseTilt: 30.0  // 静态前抬：手臂略前伸入视野（非纯下垂），更像持物姿态
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
 
-                // 手臂方块：从肩枢沿局部 -Y 延伸（手在下方），随 Node 一起绕肩枢旋转。
+                // 上臂袖段（t73 蓝袖子）：覆盖肩-肘（上半段），上衣色 #3a6a9a（hurtTint 0.227/0.416/0.604，与
+                //   第三人称左/右臂袖段同色）。原第一人称手臂单肉色无袖子（蓝袖子只在第三人称）→ 加此段对齐。
+                //   作 viewModelHand 子节点 → 随挥动同步旋转。UnitCube + NoLighting（同地形/线框已验证可见路径）。
                 Model {
-                    geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                    position: Qt.vector3d(0, -0.1, 0)
-                    scale: Qt.vector3d(0.16, 0.2, 0.16)
-                    // NoLighting：本工程所有可见 Model（地形/线框/粒子）均用 NoLighting——默认 lit
-                    // PrincipledMaterial 在本场景不渲染（手因此「完全透明」不可见）。改 NoLighting 后可见。
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, 0.02, 0)      // 肘上（本地 y -0.05..0.09 = 上半段）
+                    scale: Qt.vector3d(0.09, 0.14, 0.09)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604) }
+                }
+                // 前臂/手（肤色 #caa472；肘下手段）。原整臂一色，t73 拆为袖+手两段（上半蓝袖、下半肤色手）。
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, -0.10, 0)    // 肘下（本地 y -0.16..-0.04 = 下半段）
+                    scale: Qt.vector3d(0.085, 0.12, 0.085)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447) }
                 }
-                // 手持方块（t52）：持有方块（selectedBlock≠0）时，手前显该方块小图标。
-                //   BlockCube + 共享图集 voxelAtlas → per-face 贴图（草顶 / 草侧…），复用地形贴图（零 MC 资产）。
-                //   作 viewModelHand 子节点 → 随挥动同步运动（块在手中）。本地 z=+0.01（向相机略移）→ 块在手前
-                //   （相机侧），depth 比手皮更近 → 不被手皮遮挡。selectedBlock=0 时 BlockCube 兜底为 Stone 但
-                //   Model.visible=false 不渲染（blockId 兜底仅防空 UV，不影响显隐）。
+                // 手持方块（t73 可见性修复）：持有方块（selectedBlock≠0）时，手前显该方块。
+                //   根因：旧 position(0,-0.1,0.01) scale0.12 被手臂(scale0.16/0.2)几何完全包住（手臂 z 范围
+                //     [-0.16,0.16] 吞掉方块 z=0.01）+ 65°tilt 使 z=0.01 的前移失效 → 方块被手皮遮挡不可见。
+                //   修：方块前移到 z=-0.11（脱离手段 z 包围 [-0.0425,0.0425]，方块 z 范围 [-0.17,-0.05] 全在手前）、
+                //     scale 0.12（大于手段 0.085，更显眼）→ 方块整段在手前方，从相机侧可见、不被手皮遮挡。
+                //   BlockCube + 共享图集 voxelAtlas → per-face 贴图（草顶/草侧…），复用地形贴图（零 MC 资产）。
+                //   作 viewModelHand 子节点 → 随挥动同步运动（块在手中）。selectedBlock=0 时 BlockCube 兜底为
+                //   Stone 但 Model.visible=false 不渲染（blockId 兜底仅防空 UV，不影响显隐）。
                 Model {
                     visible: player.selectedBlock !== 0
                     geometry: BlockCube { blockId: player.selectedBlock }
-                    position: Qt.vector3d(0, -0.1, 0.01)
+                    position: Qt.vector3d(0, -0.10, -0.11)   // 手前方（z=-0.11；方块 z 范围 [-0.17,-0.05] 全在手前）
                     scale: Qt.vector3d(0.12, 0.12, 0.12)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
