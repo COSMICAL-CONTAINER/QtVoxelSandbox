@@ -39,8 +39,29 @@ Window {
     function returnToMenu() {
         inventoryOpen = false
         craftingTableOpen = false
+        returnHeldToHotbar()           // t56：返回菜单前归还光标手持栈（防遗留 heldBlock）
         player.release()
         appState = "menu"
+    }
+    // t56：把光标手持栈（heldBlock/heldCount）归还进 hotbar。关背包 / 工作台 / 返回菜单时调。
+    //   根因：旧版关包只 returnCraftToHotbar（合成格），**不归还 heldBlock** → 用户从调色板拾取到光标后
+    //   关包，heldBlock 残留为隐形孤儿（浮动图标仅背包开时显）。此后按 Q → dropHeld 读选中槽（空）→
+    //   早退无丢弃（spec 现象「手持物按 Q 看不到丢弃 + 打开背包还在手上」：手上=heldBlock 残留）。
+    //   修法：关包时 addStack 把 heldBlock 全部塞回 hotbar（addStack 优先选中槽 → 「入手」语义 →
+    //   Q 能读到），再清空 heldBlock。hotbar 满（极端）则把余量丢弃为前方实体（dropHeldCursor，
+    //   同拖出丢弃；不静默吞，§2-E）。
+    function returnHeldToHotbar() {
+        if (!hotbarVM.heldBlock || hotbarVM.heldCount <= 0) return
+        const leftover = hotbarVM.addStack(hotbarVM.heldBlock, hotbarVM.heldCount)
+        if (leftover > 0) {
+            // hotbar 满：余量丢弃为实体（先把 heldCount 收到余量再 dropHeldCursor，它清 heldBlock + 发 spawnItem）。
+            // 注：heldBlock/heldCount 是 Q_PROPERTY（WRITE setter），不能当函数调（.setHeldBlock(0) 会 TypeError），
+            //   经赋值触发 setter。
+            hotbarVM.heldCount = leftover
+            player.dropHeldCursor()
+        } else {
+            hotbarVM.heldBlock = 0 // 全入 → 清光标手持栈（setHeldBlock(0) 同步清 count）
+        }
     }
     // 背包开关（t18）：E 键调。开 → release（光标可见点格子）；关 → grab + 焦点回键位层。
     function toggleInventory() {
@@ -60,6 +81,7 @@ Window {
     function closeInventory() {
         if (!inventoryOpen) return
         inventoryOpen = false
+        returnHeldToHotbar()           // t56：关包归还光标手持栈（防 Q 读空槽无丢弃）
         player.grab()                  // 恢复指针锁定（隐藏光标 + 居中）
         keyInput.forceActiveFocus()
     }
@@ -74,6 +96,7 @@ Window {
     function closeCraftingTable() {
         if (!craftingTableOpen) return
         craftingTableOpen = false
+        returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeInventory）
         player.grab()
         keyInput.forceActiveFocus()
     }

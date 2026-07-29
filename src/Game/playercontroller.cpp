@@ -517,6 +517,8 @@ void PlayerController::placeBlock()
 // 仅指针捕获时生效（spec：「Q 键（captured 时）」）。取失败（空栈 / 无 hotbar）→ 不丢。
 // spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem（同破块掉落 t35 路径），
 // 丢弃后实体在前方生成 → 可被重新拾取（闭环）。丢弃位置取眼位 + 视线 * 1.5，floor 到格坐标。
+// t56：选中槽为空时直接早退（id==0）—— 若用户从背包拾取到光标后关包，光标手持栈（heldBlock）
+//   须经 Main.qml::returnHeldToHotbar 在关包时归还进 hotbar（优先选中槽），否则 Q 读空槽不丢。
 void PlayerController::dropHeld()
 {
     if (!m_captured) return;        // spec：仅捕获时
