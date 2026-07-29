@@ -459,9 +459,18 @@ void PlayerController::updateMining(float dt)
     const quint8 bid = m_world->blockAt(m_mineBx, m_mineBy, m_mineBz);
     if (!ToolRegistry::canMine(bid)) { cancelMining(); return; }
 
+    // t57：手持物品 id **直接读 hotbar（单一权威）**，不读 m_selectedItem 副本。m_selectedItem 经
+    //   Q_PROPERTY 绑定 hotbarVM.selectedItemId（NOTIFY=selectedSlotChanged）刷新，但 QML 绑定重算
+    //   可能被引擎延迟到下一事件循环 → 同一 tick 内 m_selectedItem 可能滞后于真实选中槽（拾取 / 切槽
+    //   边缘与 mining tick 同帧时）。canHarvest / miningTime 是掉落与速度的判定输入，必须用**当下**
+    //   选中槽的真实 id：空手挖需工具方块（石 / 圆石）→ canHarvest=false → 不掉落（spec「仅 AIR」）；
+    //   持匹配工具 → 掉落。直读 hotbar 消除绑定滞后窗口，保证空手挖石头永不误掉。
+    //   m_hotbar 在 QML 绑定注入（同 world / itemEntities）；无 hotbar（极端）→ 0=空手兜底。
+    const int heldItemId = m_hotbar ? m_hotbar->selectedItemId() : 0;
+
     // 速度：miningTime = hardness / speedMul（ToolRegistry），progress 增量 = dt / miningTime。
     // canMine 已保 hardness>0 → miningTime 经 max(t,0.05) 地板恒 >0，无除零。
-    const float miningTime = ToolRegistry::miningTime(bid, m_selectedItem);
+    const float miningTime = ToolRegistry::miningTime(bid, heldItemId);
     m_miningProgress += dt / miningTime;
 
     // stage 推进：clamp(progress*6, 0, 5)。每跨一阶发 miningStateChanged（切贴图）+ swingArm（挥动循环）。
@@ -474,9 +483,11 @@ void PlayerController::updateMining(float dt)
     emit miningProgressChanged();
 
     // 完成：progress 满 → 破块。drop 走 ToolRegistry::canHarvest（生存可采掘判定）。
+    //   空手（heldItemId=0 / 非工具）挖需工具方块（石 / 圆石）→ canHarvest=false → 仅 AIR 不掉落；
+    //   泥土 / 草 / 木 / 叶 / 沙（NoTool）→ canHarvest=true → 掉落（spec）。
     // finishMiningAt 内 cancelMining 清 m_mining=false；m_leftDown 不动 → 下一 tick 顶部续挖分支接手。
     if (m_miningProgress >= 1.0f) {
-        const bool drop = ToolRegistry::canHarvest(bid, m_selectedItem);
+        const bool drop = ToolRegistry::canHarvest(bid, heldItemId);
         finishMiningAt(m_mineBx, m_mineBy, m_mineBz, drop);
     }
 }
