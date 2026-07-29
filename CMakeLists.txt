@@ -34,6 +34,8 @@ qt_add_executable(voxelsandbox
     src/Renderer/crackbox.h
     src/Renderer/blockcube.cpp
     src/Renderer/blockcube.h
+    src/Renderer/pickaxe.cpp
+    src/Renderer/pickaxe.h
     src/Game/playercontroller.cpp
     src/Game/playercontroller.h
     src/Game/playerstate.cpp

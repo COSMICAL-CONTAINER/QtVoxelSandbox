@@ -284,6 +284,26 @@ Window {
                         baseColorMap: voxelAtlas
                     }
                 }
+                // 手持工具（t75 木镐 3D）：选中工具槽（isTool(selectedItem)）时，手前显镐形 3D。
+                //   根因：旧分支只看 selectedBlock（工具槽→Air→selectedBlock=0）→ 选工具时无渲染分支 → 木镐不可见。
+                //   修：加本分支，可见性读 isTool(player.selectedItem)（selectedItem 含工具段，selectedBlockId 不再
+                //   把工具「归零隐藏」——放置语义仍走 selectedBlock=Air 不放置，互不干扰）。
+                //   PickaxeGeometry 是纯实色体素几何（无贴图 / 无 alpha）→ 永不黑（修「工具贴图黑」根因）。
+                //   baseColor 按 tier 着色（木镐褐 / 石镐灰 / 铁镐银白，同 2D ToolIcon 配色）。
+                //   作 viewModelHand 子节点 → 随挥动同步运动（镐在手中）；eulerRotation 给对角手持姿态。
+                Model {
+                    visible: hotbarVM.isTool(player.selectedItem)
+                    geometry: PickaxeGeometry {}
+                    position: Qt.vector3d(0.02, -0.08, -0.22)   // 手前方（脱离手臂 z 包围）
+                    scale: Qt.vector3d(0.42, 0.42, 0.42)
+                    eulerRotation: Qt.vector3d(15, -20, -15)    // 对角手持（柄下右、镐头上左，类 MC 手持）
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁镐银白
+                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石镐中灰
+                                 : "#8a5a2e"                                                 // 木镐褐（默认 / tier 1）
+                    }
+                }
                 // [t31] 诊断：确认手 Node 加载 + parent（相机）。
                 Component.onCompleted: console.info("[t31] viewModelHand UP parent=" + viewModelHand.parent + " vis=" + visible)
             }
@@ -695,6 +715,24 @@ Window {
                             opacity: playerModel.bodyOpacity
                         }
                     }
+                    // 手持工具（t75 木镐 3D）：选中工具槽时，第三人称右手上显镐形 3D（同第一人称分支，
+                    //   读 isTool(selectedItem)；不再 CrackBox 兜底）。PickaxeGeometry 纯实色体素 → 永不黑。
+                    //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步（镐在手中）；握把（几何 y≈-0.45）
+                    //   落在手位（rightArmPivot 本地 y≈-0.6），故 position.y=-0.55 使握把贴手心。
+                    Model {
+                        visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
+                        geometry: PickaxeGeometry {}
+                        position: Qt.vector3d(0, -0.55, -0.18)
+                        scale: Qt.vector3d(0.5, 0.5, 0.5)
+                        eulerRotation: Qt.vector3d(0, 20, -35)   // 柄沿小臂方向、镐头斜上，自然手持
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                     : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                     : "#8a5a2e"
+                            opacity: playerModel.bodyOpacity
+                        }
+                    }
                 }
             }
             // 左腿枢轴（t45 走 / t65 蹲下膝盖弯曲）：枢轴位于左髋 (-0.125, 0.6, 0)，蹲下时髋随上半身
@@ -860,22 +898,20 @@ Window {
                             baseColorMap: voxelAtlas
                         }
                     }
-                    // 工具段：CrackBox + ToolIcon sourceItem（镐形按 tier 着色）。
+                    // 工具段（t75 改用 PickaxeGeometry 3D 镐形，不再 CrackBox 兜底）：
+                    //   旧 CrackBox + ToolIcon(透明底 RGB0) 贴图无 alphaCutoff → 透明底被当不透明黑 → 6 面黑立方体
+                    //   （「工具贴图黑」根因）。PickaxeGeometry 是纯实色体素几何（无贴图 / 无 alpha）→ 永不黑。
+                    //   baseColor 按 tier 着色（木镐褐 / 石镐灰 / 铁镐银白）；绕 Y 自转时正面恒有镐形可见。
                     Model {
                         visible: hotbarVM.isTool(entRoot.entId)
-                        geometry: CrackBox {}
-                        scale: Qt.vector3d(0.3, 0.3, 0.3)
+                        geometry: PickaxeGeometry {}
+                        scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColorMap: Texture {
-                                // flipV：见上 flipV 注释（Item 左上原点 vs 3D 纹理左下原点）。
-                                flipV: true
-                                sourceItem: ToolIcon {
-                                    tier: hotbarVM.toolTier(entRoot.entId)
-                                    width: 64; height: 64
-                                }
-                            }
+                            baseColor: hotbarVM.toolTier(entRoot.entId) === 3 ? "#d8d8e6"
+                                     : hotbarVM.toolTier(entRoot.entId) === 2 ? "#9a9a9a"
+                                     : "#8a5a2e"
                         }
                     }
                     // 材料段：CrackBox + MaterialIcon sourceItem（木棒棕色长条）。
