@@ -215,10 +215,17 @@ Window {
                 return Qt.vector3d(eye.x + look.x * s, eye.y + look.y * s, eye.z + look.z * s)
             }
             eulerRotation: {
+                // t67 受伤视角晃动：shakePitch/shakeYaw 小幅抖动叠加进相机俯仰/偏航（onDamaged 触发 shakeAnim，
+                //   ~0.2s 衰减到 0 → 平时为 0 不影响视角）。三模式都加（第一人称最显；第三人称相机方向微抖）。
+                const sp = cam.shakePitch, sy = cam.shakeYaw
                 if (player.cameraMode === PlayerController.ThirdPersonFront)
-                    return Qt.vector3d(-player.pitch, player.yaw + 180, 0) // 回看正面：俯仰反向 + 偏航 +180
-                return Qt.vector3d(player.pitch, player.yaw, 0)             // 第一人称 & 第三人称-后：朝前看
+                    return Qt.vector3d(-player.pitch + sp, player.yaw + 180 + sy, 0) // 回看正面：俯仰反向 + 偏航 +180
+                return Qt.vector3d(player.pitch + sp, player.yaw + sy, 0)            // 第一人称 & 第三人称-后：朝前看
             }
+            // 受伤视角晃动偏移（t67）：由 shakeAnim 驱动（衰减抖动，静止恒 0）。读 cam.shakePitch/shakeYaw 进
+            //   上方 eulerRotation 绑定 → NOTIFY 触发绑定重算 → 视角随抖动偏移；静止时 = 0 不影响。
+            property real shakePitch: 0.0
+            property real shakeYaw: 0.0
             clipNear: 0.05
             clipFar: 1000
 
@@ -250,7 +257,7 @@ Window {
                     scale: Qt.vector3d(0.16, 0.2, 0.16)
                     // NoLighting：本工程所有可见 Model（地形/线框/粒子）均用 NoLighting——默认 lit
                     // PrincipledMaterial 在本场景不渲染（手因此「完全透明」不可见）。改 NoLighting 后可见。
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472" }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447) }
                 }
                 // 手持方块（t52）：持有方块（selectedBlock≠0）时，手前显该方块小图标。
                 //   BlockCube + 共享图集 voxelAtlas → per-face 贴图（草顶 / 草侧…），复用地形贴图（零 MC 资产）。
@@ -298,6 +305,39 @@ Window {
             loops: 1
             NumberAnimation { target: playerModel; property: "mineBlend"; to: 1.0; duration: 80; easing.type: Easing.OutQuad }
             NumberAnimation { target: playerModel; property: "mineBlend"; to: 0.0; duration: 160; easing.type: Easing.InQuad }
+        }
+
+        // t67 受伤反馈动画（替换 t51 全屏 damageOverlay 红闪）：
+        //   hurtAnim：playerModel.hurt 1→0（~0.4s）→ 各身体部件 baseColor 经 hurtTint lerp 回正色（模型变红后回正）。
+        //   shakeAnim：cam.shakePitch / shakeYaw 衰减抖动 0→±幅→0（~0.2s）→ 相机轻微晃动。
+        //   两者都由 PlayerState.damaged 触发（onDamaged 里 start()）；连击 start() 重启进行中的动画。
+        //   分层（PLAN §2）：纯呈现层动画，消费 Game 层语义事件（同 swingArm 模式）。
+        NumberAnimation {
+            id: hurtAnim
+            target: playerModel
+            property: "hurt"
+            from: 1.0
+            to: 0.0
+            duration: 400
+            easing.type: Easing.OutQuad
+        }
+        ParallelAnimation {
+            id: shakeAnim
+            loops: 1
+            // pitch 抖动（上下）：4 段衰减，总 ~0.2s（45+45+45+65=200ms）
+            SequentialAnimation {
+                NumberAnimation { target: cam; property: "shakePitch"; from: 0; to: 3.5; duration: 45; easing.type: Easing.OutQuad }
+                NumberAnimation { target: cam; property: "shakePitch"; to: -2.5; duration: 45 }
+                NumberAnimation { target: cam; property: "shakePitch"; to: 1.5; duration: 45 }
+                NumberAnimation { target: cam; property: "shakePitch"; to: 0; duration: 65; easing.type: Easing.InQuad }
+            }
+            // yaw 抖动（左右）：与 pitch 反向相位，更自然（同 ~0.2s 总长）
+            SequentialAnimation {
+                NumberAnimation { target: cam; property: "shakeYaw"; from: 0; to: -3.0; duration: 45; easing.type: Easing.OutQuad }
+                NumberAnimation { target: cam; property: "shakeYaw"; to: 2.0; duration: 45 }
+                NumberAnimation { target: cam; property: "shakeYaw"; to: -1.0; duration: 45 }
+                NumberAnimation { target: cam; property: "shakeYaw"; to: 0; duration: 65; easing.type: Easing.InQuad }
+            }
         }
 
         // t09 昼夜：brightness 随天光乘子 lerp 1.5(昼)↔0.25(夜)；**方向固定不变**（PLAN §2-H：
@@ -445,6 +485,19 @@ Window {
             // 半透幽灵态（各 body Part 的材质读此属性）：观察者半透 0.35，其余不透明。
             readonly property real bodyOpacity: player.mode === PlayerController.Spectator ? 0.35 : 1.0
 
+            // 受伤变红混合系数（t67，替换 t51 全屏 damageOverlay 红闪）：PlayerState.damaged 触发 hurtAnim
+            //   把 hurt 从 1.0 淡到 0（~0.4s）。各身体部件 baseColor 经 hurtTint(hurt,...) lerp 向纯红 →
+            //   「模型本身变红」（非全屏叠层）。0 = 正常肤色/衣色。连击受伤：start() 重启动画 → 重新变红。
+            //   分层（PLAN §2）：hurt 是纯呈现层态（QML 动画），由 Game 层语义事件 damaged 驱动；呈现层
+            //   只消费 PlayerState 信号，绝不反向写数值（同 fallDamageTaken→takeDamage）。
+            property real hurt: 0.0
+            // 把基础 RGB（0..1 三通道）按 hurt 系数 lerp 向纯红 (1,0,0)。hurt 作参数显式传入 → 绑定依赖
+            //   挂在 hurt 上（与 dayNightColor(worldClock.skyLight) 同模式：变化的 NOTIFY 属性作函数参数）。
+            //   hurt=0 返回原色、hurt=1 返回纯红。纯函数（不存状态）。眼睛（白/瞳）不调此函数 → 不变红。
+            function hurtTint(hurt, r, g, b) {
+                return Qt.rgba(r + (1.0 - r) * hurt, g * (1.0 - hurt), b * (1.0 - hurt), 1.0)
+            }
+
             // 行走动画混合系数（t45）：moveSpeed>0.1 → 1（四肢摆动），否则 0（中性位）。QML 据此缩放
             //   腿/臂的 sin() 摆幅 → 静止时四肢归零（不再生硬平移）。0/1 二值切换（spec：静止归零）。
             readonly property real walkBlend: player.moveSpeed > 0.1 ? 1.0 : 0.0
@@ -503,7 +556,7 @@ Window {
                     geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                     position: Qt.vector3d(0, 0.25, 0)
                     scale: Qt.vector3d(0.5, 0.5, 0.5)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
                 }
                 // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
                 // 的两个对称小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
@@ -543,7 +596,7 @@ Window {
                 geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                 position: Qt.vector3d(0, 0.95 - playerModel.crouchDrop, 0)
                 scale: Qt.vector3d(0.5, 0.7, 0.3)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
             }
             // 左臂枢轴（t45 走 / t52 仅右手挖）：枢轴位于左肩 (-0.375, 1.3, 0)，袖+手作子节点本地 -Y 偏移
             //   （袖中心 -0.25、手中心 -0.6）→ 绕肩旋转时手在弧线末端摆动（自然关节运动，非整体平移）。
@@ -565,14 +618,14 @@ Window {
                     geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 自定义 UnitCube（同地形/线框已验证路径）
                     position: Qt.vector3d(0, -0.25, 0)
                     scale: Qt.vector3d(0.25, 0.5, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
                 }
                 // 手（肤色 #caa472；臂末端 y 0.6→0.8 = 肩下 0.5..0.7）
                 Model {
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.6, 0)
                     scale: Qt.vector3d(0.25, 0.2, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
                 }
             }
             // 右臂枢轴（t45 / t52 持方块）：与左臂对称（右肩 0.375, 1.3, 0），行走与左腿同相（−sin；左腿前则右臂前）。
@@ -590,13 +643,13 @@ Window {
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.25, 0)
                     scale: Qt.vector3d(0.25, 0.5, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
                 }
                 Model {
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.6, 0)
                     scale: Qt.vector3d(0.25, 0.2, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
                 }
                 // 手持方块（t52）：持有方块（selectedBlock≠0）时，第三人称右手上显该方块小图标。
                 //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步运动（块在手中，自然跟随）。
@@ -633,7 +686,7 @@ Window {
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                 }
                 // 膝盖关节（t65）：位于大腿末端（髋下 0.3）。站立 0°（小腿续大腿成直线）；蹲下回折
                 //   crouchKnee（=−crouchThigh）→ 小腿相对大腿弯折、整体腿弯曲，有效竖直高度缩短配合身体下沉。
@@ -646,7 +699,7 @@ Window {
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                     }
                 }
             }
@@ -663,7 +716,7 @@ Window {
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                 }
                 Node {
                     id: rightKneePivot
@@ -673,7 +726,7 @@ Window {
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                     }
                 }
             }
@@ -857,35 +910,21 @@ Window {
         color: Qt.rgba(0.043, 0.063, 0.149, nightTintAlpha(worldClock.skyLight))
     }
 
-    // t51 受伤红色半透全屏闪烁叠层：PlayerState.takeDamage 实扣血时发 damaged(amount) → 本 Connections
-    //   立即把 opacity 设到 0.4（满红），随后 NumberAnimation 用 ~600ms 淡出到 0（spec「红色半透闪烁」）。
-    //   连击受伤：再次触发时 opacity 重置到 0.4 + 重启动画（damageFadeAnim.start() 重启进行中的动画）。
-    //   z=250：高于 HUD / 背包面板（z=150）/ F3（z=50）/ 暂停（z=100），低于主菜单（z=200 仅 menu 态显，
-    //   与本叠层 playing 态互斥）。enabled:false → 不拦截破/放/背包点击（纯呈现层）。
-    //   分层（PLAN §2）：呈现层只消费 PlayerState 语义事件，绝不反向写数值（同 fallDamageTaken→takeDamage）。
-    Rectangle {
-        id: damageOverlay
-        visible: window.appState === "playing"
-        anchors.fill: parent
-        color: "#ff0000"
-        opacity: 0.0
-        z: 250
-        enabled: false   // 不参与指针事件（防挡破/放/背包点击）
-    }
-    NumberAnimation {
-        id: damageFadeAnim
-        target: damageOverlay
-        property: "opacity"
-        duration: 600
-        from: 0.4
-        to: 0.0
-        easing.type: Easing.OutQuad
-    }
+    // t67 受伤反馈：模型变红 + 视角晃动（替换 t51 的全屏 damageOverlay 红闪）。
+    //   根因：旧受伤 = 全屏 #ff0000 半透 Rectangle 淡出 600ms（damageOverlay），playerModel 本身无 hurt
+    //   材质绑定。用户要改为「人物模型本身变红 + 视角稍微晃动」。现 PlayerState.damaged(amount) 触发两条
+    //   呈现层动画（非全屏叠层）：
+    //   (1) hurtAnim：playerModel.hurt 1→0（~0.4s）→ 各身体部件 baseColor 经 hurtTint(hurt,...) lerp 向纯红。
+    //   (2) shakeAnim：cam.shakePitch/shakeYaw 衰减抖动 0→±幅→0（~0.2s），叠加进相机 eulerRotation → 视角晃。
+    //   连击受伤：start() 重启进行中的动画（重新变红 + 重新晃）。分层（PLAN §2）：呈现层只消费 PlayerState
+    //   语义事件，绝不反向写数值（同 fallDamageTaken→takeDamage）。仅 Survival 触发（damaged 由 Survival
+    //   掉落伤害经 takeDamage 发出；Creative 无伤 / Spectator noclip 不走重力分支）。
     Connections {
         target: playerState
         function onDamaged(amount) {
-            damageOverlay.opacity = 0.4    // 立即满红
-            damageFadeAnim.start()          // 600ms 淡出（重启进行中的动画 → 连击重新闪）
+            playerModel.hurt = 1.0    // 立即满红（hurtAnim 从 1.0 淡到 0）
+            hurtAnim.start()           // 400ms 回正（重启进行中的动画 → 连击重新变红）
+            shakeAnim.start()          // 200ms 视角晃动
         }
     }
 
