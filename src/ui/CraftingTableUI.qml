@@ -2,18 +2,19 @@ import QtQuick
 // t41：迁入 src/ui/ 子目录后需显式 import 自身模块，以解析下方 `property Hotbar hotbar` 等 C++ 类型。
 import VoxelSandbox
 
-// 工作台 3×3 合成面板（t50）：右键工作台方块打开（PlayerController::craftingTableOpened →
+// 工作台 3×3 合成面板（t50 / t63 完整 UI）：右键工作台方块打开（PlayerController::craftingTableOpened →
 // Main.qml Connections → 显本面板 + 释放指针）。Esc / E / 关闭信号关闭（宿主恢复 grab）。
 //
-// 布局贴近 MC 1.0 工作台：左 3×3 合成格 + 箭头 + 右结果槽。合成检测走 C++ RecipeRegistry
-// （Game 层单一权威；本组件只读查 match）。**MC 式数量**：点结果槽 → 取 outputCount 件到光标；
-// 输入槽每原料格 consume 1 份（count-1，归 0 清 id，不清空整槽 → 可连点合多批）。
+// t63 布局贴近 MC 1.0 工作台：上部「左 3×3 合成格 + 箭头 + 右结果槽」，下部「3×9=27 主物品栏 + 9 hotbar 行」
+// （无装备槽 / 无人偶预览，区别于生存背包）。合成检测走 C++ RecipeRegistry（Game 层单一权威；本组件只读查
+// match）。**MC 式数量**：点结果槽 → 取 outputCount 件到光标；输入槽每原料格 consume 1 份（count-1，归 0
+// 清 id，不清空整槽 → 可连点合多批）。
 //
-// 物品移动（合成格 ↔ 光标手持栈）：左键整组 / 右键半份 / 单放，与 SurvivalInventory.qml 的
+// 物品移动（合成格 / 主栏 / hotbar 间任意搬动）：左键整组 / 右键半份 / 单放，与 SurvivalInventory.qml 的
 // resolveClick / resolveRightClick 同算法（共享 hotbar VM 的 heldBlock / heldCount 光标手持栈）。
 //
 // 关包（visible→false）：把 craft3 内容 addStack 回 hotbar（合并同类，同拾取），清空 craft3
-// （MC 行为：合成格不持久化，关包即退回玩家背包）。
+// （MC 行为：合成格不持久化，关包即退回玩家背包）。主栏 mainSlots 为面板本地存储，组件不销毁 → 跨开关持久。
 //
 // 全部槽框 / 箭头自绘原创（InvSlot 凹陷槽 + Canvas 像素图，无外部 MC GUI PNG；§9 override (a)）。
 // 零 MC 专有名词（§9）。宿主负责指针态：打开时 release（光标可见点格子），关闭 → grab。
@@ -32,12 +33,24 @@ Item {
     // ── 尺寸常量 ──
     readonly property int slotSize: 40
     readonly property int gridN: 3
+    // t63：3×9 主物品栏 + 9 hotbar 行（MC 1.0 工作台布局：上部 3×3 合成 + 产物，下部 3×9 物品栏 + hotbar）。
+    readonly property int mainCols: 9
+    readonly property int mainRows: 3
 
     // 3×3 合成格本地栈存储（与 hotbar VM 共享同一光标手持栈 heldBlock/heldCount）。
     // 数组改写不触发 QML 绑定 → 配 craftRev 版本号让 Image source / count / 结果槽重算。
     property var craftSlots: [0,0,0, 0,0,0, 0,0,0]
     property var craftCounts:[0,0,0, 0,0,0, 0,0,0]
     property int craftRev: 0
+
+    // t63 3×9=27 主物品栏本地栈存储（复用 SurvivalInventory 主栏的 mainSlots/mainCounts/mainRev 本地数组 +
+    // revision-touch 绑定模式）。与合成格 / hotbar 共享同一 hotbar VM 的 heldBlock/heldCount 光标手持栈；
+    // 左键整组 / 右键半份同 resolveClick / resolveRightClick。数组突变靠 mainRev 版本号触发绑定刷新。
+    // 注：本数组为面板本地（组件不销毁仅 visible=false → 跨开关持久），与 SurvivalInventory 主栏分立存储
+    // （共享主栏需上移至 C++ VM，非本任务范围；hotbar 9 槽经 VM 共享是物品进出工作台的主通道）。
+    property var mainSlots: [0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0]
+    property var mainCounts:[0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0]
+    property int mainRev: 0
 
     // resolveClick / resolveRightClick：与 SurvivalInventory.qml 完全一致（拾取/放置/合并/互换 4 case）。
     // 复制而非抽公共组件，保持两文件独立可读（§9 自绘原创，不引入新公共依赖）。
@@ -124,11 +137,12 @@ Item {
         }
     }
 
-    // 面板：深色圆角，居中。
+    // 面板：深色圆角，居中。t63 宽度容纳 3×9 主栏（9×40=360 + 2×16 边距 = 392）；高度 = 标题 + 3×3 合成 +
+    // 提示 + 3×9 主栏 + 9 hotbar 行 + 间距/边距。
     Rectangle {
         id: panel
-        width: root.gridN * root.slotSize + 24 + root.slotSize + 32  // 3×3(120) + 箭头区(24) + 结果(40) + 边距(32) = 216
-        height: root.gridN * root.slotSize + 80                       // 120 + 标题/边距
+        width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
+        height: 400                                  // 标题(22) + 合成(120) + 提示(16) + 主栏(120) + hotbar(40) + 间距/边距
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -327,6 +341,149 @@ Item {
                 width: parent.width
                 color: "#7d8893"; font.pixelSize: 11
                 text: "3×3 合成：放入原料 → 取产物。木镐 = 顶行 3 木板 + 中列 2 木棒"
+            }
+
+            // t63 3×9 主物品栏（27 槽）：左键整组 / 右键半份取放（与 SurvivalInventory 主栏同模式）。
+            // 本地 mainSlots/mainCounts/mainRev 存储；与合成格 / hotbar 共享同一 hotbar VM 光标手持栈。
+            // 数组突变靠 mainRev 触发各绑定重算（图标 / 数量）。物品可在 主栏 ↔ 合成格 ↔ hotbar 间任意搬动。
+            Grid {
+                width: root.mainCols * root.slotSize
+                height: root.mainRows * root.slotSize
+                columns: root.mainCols; spacing: 0
+                Repeater {
+                    model: root.mainCols * root.mainRows   // 27
+                    delegate: Item {
+                        width: root.slotSize; height: root.slotSize
+                        InvSlot { anchors.fill: parent }
+                        Item {
+                            anchors.centerIn: parent
+                            width: 30; height: 30
+                            visible: { root.mainRev; return (root.mainSlots[index] || 0) !== 0 }
+                            Image {
+                                anchors.fill: parent
+                                visible: { root.mainRev; return !root.hotbar.isTool(root.mainSlots[index] || 0)
+                                                          && !root.hotbar.isMaterial(root.mainSlots[index] || 0) }
+                                source: { root.mainRev; return root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0) }
+                                fillMode: Image.PreserveAspectFit; smooth: true
+                            }
+                            ToolIcon {
+                                anchors.fill: parent
+                                visible: { root.mainRev; return root.hotbar.isTool(root.mainSlots[index] || 0) }
+                                tier: { root.mainRev; return root.hotbar.toolTier(root.mainSlots[index] || 0) }
+                            }
+                            MaterialIcon {
+                                anchors.fill: parent
+                                visible: { root.mainRev; return root.hotbar.isMaterial(root.mainSlots[index] || 0) }
+                                materialId: { root.mainRev; return root.mainSlots[index] || 0 }
+                            }
+                        }
+                        // 栈数量（count>1 显数字）。触碰 mainRev 刷新。
+                        Text {
+                            anchors.right: parent.right; anchors.bottom: parent.bottom
+                            anchors.rightMargin: 3; anchors.bottomMargin: 1
+                            visible: { root.mainRev; return (root.mainCounts[index] || 0) > 1 }
+                            text: { root.mainRev; return root.mainCounts[index] || 0 }
+                            color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                            font.pixelSize: 13; font.bold: true
+                        }
+                        // 左键整组 / 右键半份（resolveClick / resolveRightClick；与合成格 / SurvivalInventory 同算法）。
+                        TapHandler {
+                            acceptedButtons: Qt.LeftButton
+                            onTapped: {
+                                const r = root.resolveClick(root.mainSlots[index] || 0, root.mainCounts[index] || 0)
+                                if (!r) return
+                                root.mainSlots[index] = r.slotId
+                                root.mainCounts[index] = r.slotCount
+                                root.mainRev++
+                                root.hotbar.heldBlock = r.heldId
+                                root.hotbar.heldCount = r.heldCount
+                            }
+                        }
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: {
+                                const r = root.resolveRightClick(root.mainSlots[index] || 0, root.mainCounts[index] || 0)
+                                if (!r) return
+                                root.mainSlots[index] = r.slotId
+                                root.mainCounts[index] = r.slotCount
+                                root.mainRev++
+                                root.hotbar.heldBlock = r.heldId
+                                root.hotbar.heldCount = r.heldCount
+                            }
+                        }
+                    }
+                }
+            }
+
+            // t63 底部 9 槽 hotbar 行（同步游戏内 hotbar）：model 用固定整数 slotCount + delegate 持 slotId
+            // 属性触碰 slotRevision（t55/t63 已验证写法，**不**用 slotList() 等长数组以免 Repeater 不重建）。
+            // 左键整组 / 右键半份同主栏（hotbar 槽写经 hotbar.setStack；VM 单一权威）。不切真实选中（同 SurvivalInventory）。
+            Item {
+                width: root.mainCols * root.slotSize
+                height: root.slotSize
+
+                Row {
+                    spacing: 0
+                    Repeater {
+                        model: root.hotbar.slotCount
+                        delegate: Item {
+                            property int slotId: { root.hotbar.slotRevision; return root.hotbar.blockIdAt(index) }
+                            width: root.slotSize; height: root.slotSize
+                            InvSlot { anchors.fill: parent }
+                            Item {
+                                anchors.centerIn: parent
+                                width: 30; height: 30
+                                visible: slotId !== 0
+                                Image {
+                                    anchors.fill: parent
+                                    visible: { root.hotbar.slotRevision; return !root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId) }
+                                    source: { root.hotbar.slotRevision; return root.hotbar.iconSourceForBlock(slotId) }
+                                    fillMode: Image.PreserveAspectFit; smooth: true
+                                }
+                                ToolIcon {
+                                    anchors.fill: parent
+                                    visible: { root.hotbar.slotRevision; return root.hotbar.isTool(slotId) }
+                                    tier: { root.hotbar.slotRevision; return root.hotbar.toolTier(slotId) }
+                                }
+                                MaterialIcon {
+                                    anchors.fill: parent
+                                    visible: { root.hotbar.slotRevision; return root.hotbar.isMaterial(slotId) }
+                                    materialId: { root.hotbar.slotRevision; return slotId }
+                                }
+                            }
+                            Text {
+                                anchors.right: parent.right; anchors.bottom: parent.bottom
+                                anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                visible: { root.hotbar.slotRevision; return root.hotbar.countAt(index) > 1 }
+                                text: { root.hotbar.slotRevision; return root.hotbar.countAt(index) }
+                                color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                                font.pixelSize: 13; font.bold: true
+                            }
+                            TapHandler {
+                                acceptedButtons: Qt.LeftButton
+                                onTapped: {
+                                    const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                    if (r) {
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                        root.hotbar.heldBlock = r.heldId
+                                        root.hotbar.heldCount = r.heldCount
+                                    }
+                                }
+                            }
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                    if (r) {
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                        root.hotbar.heldBlock = r.heldId
+                                        root.hotbar.heldCount = r.heldCount
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

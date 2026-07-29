@@ -274,11 +274,17 @@ Item {
                         id: hbRow
                         spacing: 0
                         Repeater {
-                            // model = 槽内容（QVariantList<方块id>）。触碰 slotRevision 建立 NOTIFY 依赖：setSlotBlock
-                            // 改槽内容 → slotsChanged → slotRevision 自增 → 本绑定重算返回新数组 → Repeater 整列重建
-                            // （invokable 返回值不被 NOTIFY 跟踪，故用版本号触发；modelData = 该槽方块 id，air=0 空槽）。
-                            model: { root.hotbar.slotRevision; return root.hotbar.slotList() }
+                            // t63 修复（hotbar 行拾取/放入后不显图标，t55 复发；与 SurvivalInventory / HUD hotbar 同根因）：
+                            //   旧 `model: { slotRevision; slotList() }` 返回长度恒 9 的 JS 数组（QVariantList）作 Repeater
+                            //   model → 长度不变 → QQuickRepeater 复用 delegate、不重建 → modelData 停在初值（全空）。
+                            //   修法（与 Main.qml HUD hotbar t55 已验证写法一致）：model 改用固定整数 slotCount=9
+                            //   （CONSTANT → delegate 一次创建永驻），刷新责任下放到每个依赖槽内容的绑定：触碰
+                            //   slotRevision → 经 Q_INVOKABLE blockIdAt(index) 取最新值。delegate 持 slotId 属性集中
+                            //   此模式（dragIcon / 图标 / hover 全用 slotId，不再依赖 modelData）。
+                            model: root.hotbar.slotCount
                             delegate: Item {
+                                // 槽物品 id（触碰 slotRevision → 拾取/放入后重算 blockIdAt(index)；air=0 空槽）。
+                                property int slotId: { root.hotbar.slotRevision; return root.hotbar.blockIdAt(index) }
                                 width: root.slotSize
                                 height: root.slotSize
                                 Rectangle { anchors.fill: parent; color: "#2f2f2f" } // 井底
@@ -294,7 +300,7 @@ Item {
                                     id: dragIcon
                                     anchors.centerIn: parent
                                     width: 30; height: 30
-                                    visible: modelData !== 0
+                                    visible: slotId !== 0
                                     property int hbIndex: index // 自定义属性：被拖源所属 hotbar 槽下标
                                     Drag.active: iconDrag.active
                                     Drag.dragType: Drag.Automatic
@@ -302,20 +308,20 @@ Item {
                                     Drag.hotSpot.y: height / 2
                                     Image {
                                         anchors.fill: parent
-                                        visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
-                                        source: root.hotbar.iconSourceForBlock(modelData)
+                                        visible: { root.hotbar.slotRevision; return !root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId) }
+                                        source: { root.hotbar.slotRevision; return root.hotbar.iconSourceForBlock(slotId) }
                                         fillMode: Image.PreserveAspectFit
                                         smooth: true
                                     }
                                     ToolIcon {
                                         anchors.fill: parent
-                                        visible: root.hotbar.isTool(modelData)
-                                        tier: root.hotbar.toolTier(modelData)
+                                        visible: { root.hotbar.slotRevision; return root.hotbar.isTool(slotId) }
+                                        tier: { root.hotbar.slotRevision; return root.hotbar.toolTier(slotId) }
                                     }
                                     MaterialIcon {
                                         anchors.fill: parent
-                                        visible: root.hotbar.isMaterial(modelData)
-                                        materialId: modelData
+                                        visible: { root.hotbar.slotRevision; return root.hotbar.isMaterial(slotId) }
+                                        materialId: { root.hotbar.slotRevision; return slotId }
                                     }
                                     DragHandler {
                                         id: iconDrag
@@ -325,14 +331,15 @@ Item {
                                 }
 
                                 // 栈数量（t32）：count>1 时右下角显数字（MC 风格：单件不显数）。
-                                // countAt 是 Q_INVOKABLE，靠 slotRevision 触碰 model 绑定 → 整列重建时刷新。
+                                // 触碰 slotRevision 刷新（countAt 是 Q_INVOKABLE，靠版本号触发；model 现为固定整数，
+                                // 不再靠「整列重建」刷新数量，故每绑定显式触碰版本号）。
                                 Text {
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom
                                     anchors.rightMargin: 3
                                     anchors.bottomMargin: 1
-                                    visible: root.hotbar.countAt(index) > 1
-                                    text: root.hotbar.countAt(index)
+                                    visible: { root.hotbar.slotRevision; return root.hotbar.countAt(index) > 1 }
+                                    text: { root.hotbar.slotRevision; return root.hotbar.countAt(index) }
                                     color: "#ffffff"
                                     style: Text.Outline; styleColor: "#000000"
                                     font.pixelSize: 13; font.bold: true
@@ -345,7 +352,7 @@ Item {
                                 //   1–9 / 滚轮改）。右键 = 拿一半 / 放一个（resolveRightClick）。拖到销毁槽仍走 DragHandler。
                                 HoverHandler {
                                     id: slotHover
-                                    onHoveredChanged: if (hovered) root.hoveredName = root.hotbar.nameForBlock(modelData)
+                                    onHoveredChanged: if (hovered) root.hoveredName = root.hotbar.nameForBlock(slotId)
                                 }
                                 TapHandler {
                                     acceptedButtons: Qt.LeftButton

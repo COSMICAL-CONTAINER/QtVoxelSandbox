@@ -501,41 +501,53 @@ Item {
                 Row {
                     spacing: 0
                     Repeater {
-                        // 同创造背包 hotbar 栏：触碰 slotRevision 建 NOTIFY 依赖 → setSlotBlock 改槽内容时整列重建
-                        // （invokable 返回值不被 NOTIFY 跟踪，故用版本号触发；modelData = 该槽方块 id，air=0 空槽）。
-                        model: { root.hotbar.slotRevision; return root.hotbar.slotList() }
+                        // t63 修复（hotbar 行拾取/放入后不显图标，t55 复发）：
+                        //   根因 —— 旧 `model: { slotRevision; slotList() }` 返回长度恒 9 的 JS 数组（QVariantList）
+                        //   作 Repeater model。slotRevision 变时绑定重算返回新数组，但**长度不变（恒 9）** →
+                        //   QQuickRepeater 视作「count 未变」→ 复用既有 delegate、不重建 → modelData 停在初值（全空）。
+                        //   主栏用本地数组 + 本地版本号（mainRev）刷新正常，唯独 hotbar 行因「读 VM 的等长数组」踩此坑。
+                        //
+                        //   修法（与 Main.qml HUD hotbar t55 已验证写法一致）：model 改用**固定整数**（slotCount=9，
+                        //   CONSTANT → delegate 一次创建永驻），把「刷新」责任下放到**每个依赖槽内容的绑定**：
+                        //   每绑定显式触碰 slotRevision（Q_PROPERTY，NOTIFY=slotsChanged）→ 经 Q_INVOKABLE
+                        //   blockIdAt(index)/countAt(index) 取最新栈值。Q_INVOKABLE 返回值不被 NOTIFY 跟踪，
+                        //   但同绑定内先读 NOTIFY 属性 → 整绑定挂在该信号 → slotsChanged 后重算。delegate 持有
+                        //   slotId 属性集中此模式，下游图标 / 数量全用 slotId / countAt(index) 而非 modelData。
+                        model: root.hotbar.slotCount
                         delegate: Item {
+                            // 槽物品 id（触碰 slotRevision → 拾取/放入后重算 blockIdAt(index)；air=0 空槽）。
+                            property int slotId: { root.hotbar.slotRevision; return root.hotbar.blockIdAt(index) }
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent }
                             Item {
                                 anchors.centerIn: parent
                                 width: 30; height: 30
-                                visible: modelData !== 0
+                                visible: slotId !== 0
                                 Image {
                                     anchors.fill: parent
-                                    visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
-                                    source: root.hotbar.iconSourceForBlock(modelData)
+                                    visible: { root.hotbar.slotRevision; return !root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId) }
+                                    source: { root.hotbar.slotRevision; return root.hotbar.iconSourceForBlock(slotId) }
                                     fillMode: Image.PreserveAspectFit
                                     smooth: true
                                 }
                                 ToolIcon {
                                     anchors.fill: parent
-                                    visible: root.hotbar.isTool(modelData)
-                                    tier: root.hotbar.toolTier(modelData)
+                                    visible: { root.hotbar.slotRevision; return root.hotbar.isTool(slotId) }
+                                    tier: { root.hotbar.slotRevision; return root.hotbar.toolTier(slotId) }
                                 }
                                 MaterialIcon {
                                     anchors.fill: parent
-                                    visible: root.hotbar.isMaterial(modelData)
-                                    materialId: modelData
+                                    visible: { root.hotbar.slotRevision; return root.hotbar.isMaterial(slotId) }
+                                    materialId: { root.hotbar.slotRevision; return slotId }
                                 }
                             }
-                            // 栈数量（t32）：count>1 时右下角显数字。countAt 是 Q_INVOKABLE，靠 slotRevision
-                            // 触碰 model 绑定 → 整列重建时刷新。
+                            // 栈数量（t32）：count>1 时右下角显数字。触碰 slotRevision 刷新（countAt 是 Q_INVOKABLE，
+                            // 靠版本号触发）。
                             Text {
                                 anchors.right: parent.right; anchors.bottom: parent.bottom
                                 anchors.rightMargin: 3; anchors.bottomMargin: 1
-                                visible: root.hotbar.countAt(index) > 1
-                                text: root.hotbar.countAt(index)
+                                visible: { root.hotbar.slotRevision; return root.hotbar.countAt(index) > 1 }
+                                text: { root.hotbar.slotRevision; return root.hotbar.countAt(index) }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
