@@ -21,6 +21,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Leaves:        return "icon_leaves.png";
     case BlockRegistry::Sand:          return "icon_sand.png";
     case BlockRegistry::CraftingTable: return "icon_crafting_table.png"; // t50 工作台立方体图标
+    case BlockRegistry::Furnace:       return "icon_furnace.png";        // t80 熔炉立方体图标
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
@@ -135,13 +136,13 @@ QVariantList Hotbar::countList() const
 }
 
 // 创造背包网格用：所有可放置方块 id（实体方块，air 除外）。id 取自 BlockRegistry（单一权威）。
-// t50：追加工作台（可在创造调色板直接取用，便于测试 3×3 合成）。
+// t50：追加工作台；t80：追加熔炉（均可在创造调色板直接取用，便于测试合成 / 放置）。
 QVariantList Hotbar::creativeBlocks() const
 {
     return { int(BlockRegistry::Grass),         int(BlockRegistry::Dirt),  int(BlockRegistry::Stone),
              int(BlockRegistry::Cobble),        int(BlockRegistry::Log),   int(BlockRegistry::Planks),
              int(BlockRegistry::Leaves),        int(BlockRegistry::Sand),
-             int(BlockRegistry::CraftingTable) };
+             int(BlockRegistry::CraftingTable), int(BlockRegistry::Furnace) };
 }
 
 QString Hotbar::iconSourceAt(int slot) const

@@ -17,6 +17,7 @@
 //
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
+//   10=furnace
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -33,7 +34,8 @@ public:
         Leaves        = 7,
         Sand          = 8,
         CraftingTable = 9, // 工作台：右键打开 3×3 合成（t50）；机制等价 MC 工作台，名称/贴图原创（§9）。
-        Count         = 10, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Furnace       = 10, // 熔炉：8 圆石围圈合成（t80）；机制等价 MC 熔炉，名称/贴图原创（§9）。
+        Count         = 11, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：
@@ -60,7 +62,8 @@ public:
         int id;              // 方块 id（= 行索引；自描述，便于日志 / 调试对照）
         int topTile;         // +Y(Top) 图集瓦片序号
         int bottomTile;      // -Y(Bottom) 瓦片序号
-        int sideTile;        // ±X / ±Z（四个侧面统一）瓦片序号
+        int sideTile;        // +X / -X / +Z（三个侧面统一）瓦片序号
+        int frontTile;       // -Z(NegZ「前面」) 瓦片序号（熔炉炉口等有朝向的方块用）；多数 == sideTile
         bool solid;          // 实体（参与碰撞 / culled 面剔除）；air=false
         float hardness;      // 基础硬度（挖掘耗时基准；<=0 → 不可挖掘，canMine=false）
         int toolType;        // 采掘所需工具类型（ToolType；NoTool=空手可采且掉落）
@@ -82,7 +85,10 @@ public:
     // 瓦片顺序（一个偏差即渗色/错贴）：
     //   0=grass_top 1=grass_side 2=dirt 3=stone 4=sand
     //   5=cobble 6=log_top 7=log_side 8=planks 9=leaves
-    // 图集由 tools/build_atlas.py 打包全部 10 瓦片；mesher N=10 与之严格对齐。
+    //   10=crafting_table_top 11=crafting_table_side
+    //   12=furnace_top 13=furnace_side 14=furnace_front（t80；炉口朝 -Z）
+    // 图集由 tools/build_atlas.py 打包全部 15 瓦片；mesher / BlockCube 的 N=15 与之严格对齐。
+    // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；其余均 true。
@@ -105,7 +111,7 @@ public:
     // 与 blockName()（内部英文标识符）分离：本方法供 HUD/背包等面向用户文本消费；
     // 字面量为 UTF-8，由 fromUtf8 解码（与项目既有中文注释同源）。
     //   grass=草方块 dirt=泥土 stone=石头 cobble=圆石 log=橡木原木
-    //   planks=橡木木板 leaves=橡树树叶 sand=沙子
+    //   planks=橡木木板 leaves=橡树树叶 sand=沙子 crafting_table=工作台 furnace=熔炉
     static QString displayName(quint8 blockId);
 
 private:

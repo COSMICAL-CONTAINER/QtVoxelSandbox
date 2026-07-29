@@ -96,6 +96,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
+        textures/default_furnace_front.png
+        textures/default_furnace_side.png
+        textures/default_furnace_top.png
         textures/default_grass_side.png
         textures/default_grass_top.png
         textures/default_leaves.png
@@ -107,6 +110,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_cobble.png
         textures/icon_crafting_table.png
         textures/icon_dirt.png
+        textures/icon_furnace.png
         textures/icon_grass.png
         textures/icon_leaves.png
         textures/icon_log.png

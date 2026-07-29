@@ -6,8 +6,9 @@
   0 grass_top / 1 grass_side / 2 dirt / 3 stone / 4 sand
   5 cobble / 6 log_top / 7 log_side / 8 planks / 9 leaves
   10 crafting_table_top / 11 crafting_table_side
-（CC0 资产，来源见 docs/PLAN.md §L 资产管线；工作台贴图由 tools/build_crafting_table.py
- 程序生成原创像素图，§9 override (a)。）
+  12 furnace_top / 13 furnace_side / 14 furnace_front
+（CC0 资产，来源见 docs/PLAN.md §L 资产管线；工作台贴图由 tools/build_crafting_table.py、
+ 熔炉贴图由 tools/build_furnace.py 程序生成原创像素图，§9 override (a)。）
 """
 import os
 from PIL import Image
@@ -26,6 +27,9 @@ TILES = [
     "default_leaves",               # 9 leaves
     "default_crafting_table_top",   # 10 crafting_table_top（t50）
     "default_crafting_table_side",  # 11 crafting_table_side（t50）
+    "default_furnace_top",          # 12 furnace_top（t80）
+    "default_furnace_side",         # 13 furnace_side（t80）
+    "default_furnace_front",        # 14 furnace_front（t80，炉口朝 -Z）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

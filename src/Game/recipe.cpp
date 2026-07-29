@@ -44,6 +44,13 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                       kStickId,                 0,
         0,                       kStickId,                 0 },
       int(ToolRegistry::PickaxeWood), 1, 1, "wood_pickaxe" },
+    // furnace：8 圆石围圈（中空）→ 1 熔炉（有序 3×3，仅工作台）。机制等价 MC 熔炉配方；
+    // 满包围盒 3×3（中心空）→ 输入也须 3×3 围圈（中心为空格），9 圆石（实心）不匹配。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble),
+        int(BlockRegistry::Cobble), 0,                         int(BlockRegistry::Cobble),
+        int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble) },
+      int(BlockRegistry::Furnace), 1, 1, "furnace" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
