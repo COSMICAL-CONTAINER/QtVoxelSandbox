@@ -435,7 +435,7 @@ Window {
         // 模型不进 World/Physics（PLAN §2 分层）。
         // 显隐：仅第三人称可见（第一人称看不到自己身体，visible 绑 cameraMode）。不透明度绑模式：观察者
         // = 半透幽灵 0.35（opacity<1 时 PrincipledMaterial 自动走透明混合），创造/生存=不透明 1.0。
-        // 身体只随水平 yaw 转、不随 pitch 倾（抬头只动相机，不动身体）。
+        // 身体（躯干/四肢）只随水平 yaw 转、不随 pitch 倾；抬头只动相机 + 头部 Node（t66），不动身体躯干。
         Node {
             id: playerModel
             visible: player.cameraMode !== PlayerController.FirstPerson
@@ -480,46 +480,63 @@ Window {
                 + "  feet=" + player.feetPosition + "  vis=" + visible
                 + "  cam=" + player.cameraMode + "  mode=" + player.mode)
 
-            // 头（≈0.5³，肤色）。模型以脚底为原点（y=0 贴地），总高≈1.8 对齐玩家 AABB(kHeight)。
-            // t65：蹲下时随上半身下沉 crouchDrop（position.y 减去）。
-            Model {
-                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(0, 1.55 - playerModel.crouchDrop, 0)
-                scale: Qt.vector3d(0.5, 0.5, 0.5)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
-            }
-            // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
-            // 的两个对称小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
-            // （§9 override (a)，无 MC 皮肤）。随 playerModel 的 yaw 一起转（身体只水平转、不随 pitch 倾）。
-            //
-            // t52：旧 z=-0.30 / -0.31 让眼悬浮在头前 0.05（头半厚 0.25，头前面在 z=-0.25）→ 用户反馈「眼
-            // 睛悬浮在头前」。改为贴脸：白眼底 z=-0.25（厚 0.02 → 前面 -0.26，略凸出 0.01），瞳 z=-0.26
-            // （前面 -0.27，在白眼底前 0.01）。|z|≈头半径 0.25 → 贴在头表面而非外飘（spec「贴近头面」）。
-            // （注：z 略小于头半径会陷进不透明头内被前面遮挡 → 必须在 z≤-0.25 才可见；故取 -0.25/-0.26。）
-            // t65：眼随头下沉 crouchDrop（position.y 减去）；贴脸 z 不变。
-            Model {
-                geometry: UnitCube {}
-                position: Qt.vector3d(-0.1, 1.62 - playerModel.crouchDrop, -0.25)
-                scale: Qt.vector3d(0.1, 0.12, 0.02)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
-            }
-            Model {
-                geometry: UnitCube {}
-                position: Qt.vector3d(0.1, 1.62 - playerModel.crouchDrop, -0.25)
-                scale: Qt.vector3d(0.1, 0.12, 0.02)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
-            }
-            Model {
-                geometry: UnitCube {}
-                position: Qt.vector3d(-0.1, 1.62 - playerModel.crouchDrop, -0.26)
-                scale: Qt.vector3d(0.05, 0.06, 0.02)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
-            }
-            Model {
-                geometry: UnitCube {}
-                position: Qt.vector3d(0.1, 1.62 - playerModel.crouchDrop, -0.26)
-                scale: Qt.vector3d(0.05, 0.06, 0.02)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
+            // 头部枢轴 Node（t66）：头 + 双眼打包成一个子 Node，绕「颈部」(y=1.3 = 头底/躯干顶) 俯仰，
+            // 让第三人称头部跟随视线 pitch——抬头/低头时头部俯仰，眼睛看向鼠标所指方向。
+            //   旋转符号：与相机一致用 +player.pitch（相机 eulerRotation.x = +pitch；pollMouse 中鼠标上推 →
+            //     m_pitch 增大 → 抬头看上方，故 pitch>0 = 抬头）。头部作为身体(yaw)的子节点，世界旋转 =
+            //     Ry(yaw)·Rx(+pitch)，与相机 Ry(yaw)·Rx(pitch) 完全同向 → 头朝视线方向。dev-spec 原稿写
+            //     「-pitch」是符号笔误：-pitch 会让头反向倾（抬头时低头），眼背离视线，违验收「眼睛看向鼠标
+            //     所指方向」。此处据相机约定修正为 +pitch。
+            //   clamp ±60°：player.pitch 全程 ±89°，头部限 ±60° 即可表达俯仰且不至「折颈」过倾穿身。
+            //   颈枢（非头心）：头绕脖子转（解剖正确），低头下巴前伸 / 抬头后仰，比绕头心转自然；极端低头
+            //     时下巴与胸口轻微相贴（与真人低头一致，非穿模瑕疵）。
+            //   t65 蹲下：颈枢随上半身下沉 crouchDrop（头部整体跟随）；pitch 旋转在下沉后的颈位进行。
+            //   分层（PLAN §2）：pitch 是 Game 层 Q_PROPERTY（playercontroller.h 已暴露 + pitchChanged），
+            //     头部俯仰纯呈现层（QML 绑定只读，绝不反向写 player.pitch），同 yaw/crouchBlend 模式。
+            Node {
+                id: headNode
+                position: Qt.vector3d(0, 1.3 - playerModel.crouchDrop, 0)   // 颈枢：头底/躯干顶，蹲下随上半身下沉
+                eulerRotation: Qt.vector3d(Math.max(-60, Math.min(60, player.pitch)), 0, 0)
+
+                // 头（≈0.5³，肤色）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。pitch=0 时与重组前完全一致。
+                Model {
+                    geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
+                    position: Qt.vector3d(0, 0.25, 0)
+                    scale: Qt.vector3d(0.5, 0.5, 0.5)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
+                }
+                // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
+                // 的两个对称小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
+                // （§9 override (a)，无 MC 皮肤）。作 headNode 子节点 → 随头部俯仰（眼贴头表面 → 跟随看视线方向）。
+                //
+                // t52：贴脸 z（头半厚 0.25，头前面 z=-0.25）：白眼底 z=-0.25、瞳 z=-0.26（略凸出 0.01，
+                //   在白眼底前；z 须 ≤-0.25 才不被不透明头遮挡）。|z|≈头半径 0.25 → 贴头表面而非外飘。
+                // t66：眼从 playerModel 直系子迁入 headNode（颈枢本地坐标）；眼相对颈 y=0.32（世界 1.62-1.3），
+                //   pitch=0 时绝对坐标与重组前一致（无回归）；贴脸 z 不变。
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(-0.1, 0.32, -0.25)
+                    scale: Qt.vector3d(0.1, 0.12, 0.02)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
+                }
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0.1, 0.32, -0.25)
+                    scale: Qt.vector3d(0.1, 0.12, 0.02)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
+                }
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(-0.1, 0.32, -0.26)
+                    scale: Qt.vector3d(0.05, 0.06, 0.02)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
+                }
+                Model {
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0.1, 0.32, -0.26)
+                    scale: Qt.vector3d(0.05, 0.06, 0.02)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
+                }
             }
             // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）。t65：蹲下随上半身下沉 crouchDrop。
             Model {
