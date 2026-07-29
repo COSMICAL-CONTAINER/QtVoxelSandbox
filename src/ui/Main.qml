@@ -511,19 +511,23 @@ Window {
             //   前抬（覆盖行走摆臂），呈现「挖掘挥动」。0 = 无挖掘（行走摆臂正常）。
             property real mineBlend: 0.0
 
-            // 蹲下姿态（t65）：Shift 蹲下时身体下沉 + 腿弯（膝盖旋转），非仅 swingAmp 步幅变小。
-            //   crouchBlend = 1（Crouch）/ 0（Walk/Sprint）；据此驱动上半身下沉 + 腿膝盖弯曲。
-            //   crouchDrop ≈ 0.18（对齐相机蹲下降低 kEyeHeight-kCrouchEye=1.62-1.35=0.27；取略小使腿几何
-            //     可与膝盖弯曲自洽——蹲下时髋随身体下沉，腿加膝盖关节弯折后脚仍贴近地面，不陷太深）。
-            //   上半身（头/眼/躯干/双臂）各自 position.y 减 crouchDrop；双肩/双髋枢轴同步下移 →
-            //     躯干底（0.6-crouchDrop）仍贴髋（0.6-crouchDrop），无断身缝隙。
+            // 蹲下姿态（t65 下沉+腿弯；t71 改为上半身绕髋前倾鞠躬）：Shift 蹲下时上半身绕髋 pitch 前倾
+            //   （鞠躬），腿弯（大腿前抬 + 膝盖回折）使髋下沉、脚仍贴地——取代 t65「上半身逐件平移下沉」。
+            //   crouchBlend = 1（Crouch）/ 0（Walk/Sprint）；据此驱动上半身鞠躬 + 腿膝盖弯曲。
+            //   crouchDrop ≈ 0.18：髋枢轴下沉量（upperBody 枢轴与双腿枢轴共用 → 躯干底贴髋无断身缝隙；
+            //     腿加膝盖关节弯折后脚仍贴近地面，不陷太深）。
+            //   crouchBow ≈ 35°：上半身绕髋前倾幅值（t71 新增）；鞠躬方向 = 躯干顶（+Y）旋向玩家前方（-Z），
+            //     按右手法则这是 -x 旋转（+x 会把 +Y 旋向 +Z=身后=后仰）→ upperBody 用 -crouchBow，见其注释。
             //   腿分大腿 + 小腿两段 + 膝盖 Node：站立膝盖 0° → 腿直立（与重组前一致，无回归）；
             //     蹲下大腿前抬 crouchThigh、小腿在膝处回折 crouchKnee（=−crouchThigh，使小腿保持竖直、
-            //     脚前移落地）→ 大腿近水平 / 小腿竖直的蹲姿轮廓（spec「膝盖旋转」，机制等价 MC 蹲）。
-            //   Walk/Sprint（crouchBlend=0）所有蹲量归零 → 恢复直立。分层（PLAN §2）：姿态纯呈现层
-            //   （QML 据 moveState 算），只读 Game 层 moveState，绝不反向写（同 swingAmp/walkBlend 模式）。
+            //     脚前移落地）→ 大腿近水平 / 小腿竖直的蹲姿轮廓（机制等价 MC 蹲）。
+            //   ⚠️ crouchKnee/crouchThigh/crouchBow 必须乘 crouchBlend（曾出过 crouchKnee 自引用 crouchKnee
+            //     的递归笔误 → 蹲下膝盖不弯；此处统一以 crouchBlend 为唯一蹲态开关，杜绝自引用）。
+            //   Walk/Sprint（crouchBlend=0）所有蹲量归零 → 上半身直立、腿直立（无回归）。分层（PLAN §2）：
+            //   姿态纯呈现层（QML 据 moveState 算），只读 Game 层 moveState，绝不反向写（同 swingAmp 模式）。
             readonly property real crouchBlend: player.moveState === PlayerController.Crouch ? 1.0 : 0.0
             readonly property real crouchDrop: 0.18 * playerModel.crouchBlend
+            readonly property real crouchBow: 35.0 * playerModel.crouchBlend      // t71：上半身绕髋前倾鞠躬幅值（度；前倾= -x，见 upperBody 注释）
             readonly property real crouchThigh: 60.0 * playerModel.crouchBlend   // 蹲时大腿前抬（度；+x = 腿尖前摆 = -Z）
             readonly property real crouchKnee: -60.0 * playerModel.crouchBlend     // 蹲时膝盖回折（度；= −crouchThigh → 小腿保持竖直、脚前移落地）
 
@@ -533,138 +537,153 @@ Window {
                 + "  feet=" + player.feetPosition + "  vis=" + visible
                 + "  cam=" + player.cameraMode + "  mode=" + player.mode)
 
-            // 头部枢轴 Node（t66）：头 + 双眼打包成一个子 Node，绕「颈部」(y=1.3 = 头底/躯干顶) 俯仰，
-            // 让第三人称头部跟随视线 pitch——抬头/低头时头部俯仰，眼睛看向鼠标所指方向。
-            //   旋转符号：与相机一致用 +player.pitch（相机 eulerRotation.x = +pitch；pollMouse 中鼠标上推 →
-            //     m_pitch 增大 → 抬头看上方，故 pitch>0 = 抬头）。头部作为身体(yaw)的子节点，世界旋转 =
-            //     Ry(yaw)·Rx(+pitch)，与相机 Ry(yaw)·Rx(pitch) 完全同向 → 头朝视线方向。dev-spec 原稿写
-            //     「-pitch」是符号笔误：-pitch 会让头反向倾（抬头时低头），眼背离视线，违验收「眼睛看向鼠标
-            //     所指方向」。此处据相机约定修正为 +pitch。
-            //   clamp ±60°：player.pitch 全程 ±89°，头部限 ±60° 即可表达俯仰且不至「折颈」过倾穿身。
-            //   颈枢（非头心）：头绕脖子转（解剖正确），低头下巴前伸 / 抬头后仰，比绕头心转自然；极端低头
-            //     时下巴与胸口轻微相贴（与真人低头一致，非穿模瑕疵）。
-            //   t65 蹲下：颈枢随上半身下沉 crouchDrop（头部整体跟随）；pitch 旋转在下沉后的颈位进行。
-            //   分层（PLAN §2）：pitch 是 Game 层 Q_PROPERTY（playercontroller.h 已暴露 + pitchChanged），
-            //     头部俯仰纯呈现层（QML 绑定只读，绝不反向写 player.pitch），同 yaw/crouchBlend 模式。
+            // 上半身枢轴 Node（t71）：包 head/躯干/双臂，枢轴在髋（y = 0.6 - crouchDrop，与双腿枢轴同高 →
+            //   躯干底贴髋、无断身缝隙）。蹲下绕髋 pitch 前倾鞠躬，取代 t65「上半身逐件 position.y − crouchDrop
+            //   平移下沉」——头/躯干/臂在此用「相对髋」的固定本地坐标（站立时世界坐标与重组前完全一致，无
+            //   回归），鞠躬由本 Node 旋转统一驱动。
+            //   旋转符号（关键，同 t66 pitch 一族易错）：鞠躬 = 躯干顶（+Y）旋向玩家前方（-Z）。按右手法则绕 +x
+            //     转 +θ 把 +Y 旋向 +Z（= 玩家身后 = 后仰），故前倾鞠躬须用 -θ：eulerRotation.x = -crouchBow。
+            //     dev-spec 原稿写「+crouchBow」是符号直觉误（误把「+x=前摆」（仅对 -Y 下垂的手臂成立）套用到
+            //     +Y 上挺的躯干）——此处据几何修正为 -，否则蹲下会变成后仰看天。
+            //   Walk/Sprint（crouchBlend=0 → crouchBow=0）upperBody 归零直立（无回归）。分层（PLAN §2）：纯呈现
+            //   层姿态，只读 moveState，不反向写（同 crouchBlend 模式）。
             Node {
-                id: headNode
-                position: Qt.vector3d(0, 1.3 - playerModel.crouchDrop, 0)   // 颈枢：头底/躯干顶，蹲下随上半身下沉
-                eulerRotation: Qt.vector3d(Math.max(-60, Math.min(60, player.pitch)), 0, 0)
+                id: upperBody
+                position: Qt.vector3d(0, 0.6 - playerModel.crouchDrop, 0)   // 髋枢：与双腿枢轴同高，蹲下随髋下沉
+                eulerRotation: Qt.vector3d(-playerModel.crouchBow, 0, 0)     // t71：前倾鞠躬（-x；+x 会后仰，见上注）
 
-                // 头（≈0.5³，肤色）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。pitch=0 时与重组前完全一致。
+                // 头部枢轴 Node（t66）：头 + 双眼打包成一个子 Node，绕「颈部」俯仰，让第三人称头部跟随视线 pitch。
+                //   t71：迁入 upperBody；本地颈枢 y=0.7（髋枢 0.6 + 0.7 = 世界 1.3，与重组前一致），鞠躬时随上半身
+                //     绕髋前倾（头世界旋转 = Ry(yaw)·Rx(−crouchBow)·Rx(+pitch)，鞠躬 ∘ 视线俯仰）。
+                //   旋转符号：与相机一致用 +player.pitch（相机 eulerRotation.x = +pitch；pollMouse 中鼠标上推 →
+                //     m_pitch 增大 → 抬头看上方，故 pitch>0 = 抬头）。头部作为身体(yaw)的子节点，世界旋转与相机
+                //     同向 → 头朝视线方向。dev-spec 原稿写「-pitch」是符号笔误，此处据相机约定修正为 +pitch。
+                //   clamp ±60°：player.pitch 全程 ±89°，头部限 ±60° 即可表达俯仰且不至「折颈」过倾穿身。
+                //   颈枢（非头心）：头绕脖子转（解剖正确），低头下巴前伸 / 抬头后仰，比绕头心转自然；极端低头
+                //     时下巴与胸口轻微相贴（与真人低头一致，非穿模瑕疵）。
+                //   分层（PLAN §2）：pitch 是 Game 层 Q_PROPERTY（playercontroller.h 已暴露 + pitchChanged），
+                //     头部俯仰纯呈现层（QML 绑定只读，绝不反向写 player.pitch），同 yaw/crouchBlend 模式。
+                Node {
+                    id: headNode
+                    position: Qt.vector3d(0, 0.7, 0)   // 颈枢（相对 upperBody）：头底/躯干顶；世界 = 髋枢+0.7
+                    eulerRotation: Qt.vector3d(Math.max(-60, Math.min(60, player.pitch)), 0, 0)
+
+                    // 头（≈0.5³，肤色）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。pitch=0 时与重组前完全一致。
+                    Model {
+                        geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
+                        position: Qt.vector3d(0, 0.25, 0)
+                        scale: Qt.vector3d(0.5, 0.5, 0.5)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
+                    }
+                    // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
+                    // 的两个对称小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
+                    // （§9 override (a)，无 MC 皮肤）。作 headNode 子节点 → 随头部俯仰（眼贴头表面 → 跟随看视线方向）。
+                    //
+                    // t52：贴脸 z（头半厚 0.25，头前面 z=-0.25）：白眼底 z=-0.25、瞳 z=-0.26（略凸出 0.01，
+                    //   在白眼底前；z 须 ≤-0.25 才不被不透明头遮挡）。|z|≈头半径 0.25 → 贴头表面而非外飘。
+                    // t66：眼从 playerModel 直系子迁入 headNode（颈枢本地坐标）；眼相对颈 y=0.32（世界 1.62-1.3），
+                    //   pitch=0 时绝对坐标与重组前一致（无回归）；贴脸 z 不变。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(-0.1, 0.32, -0.25)
+                        scale: Qt.vector3d(0.1, 0.12, 0.02)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
+                    }
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0.1, 0.32, -0.25)
+                        scale: Qt.vector3d(0.1, 0.12, 0.02)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
+                    }
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(-0.1, 0.32, -0.26)
+                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
+                    }
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0.1, 0.32, -0.26)
+                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
+                    }
+                }
+                // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）。t71：迁入 upperBody；本地中心 y=0.35（髋枢+0.35=世界 0.95），
+                //   蹲下随上半身绕髋前倾鞠躬（非 t65 逐件下沉）。
                 Model {
                     geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                    position: Qt.vector3d(0, 0.25, 0)
-                    scale: Qt.vector3d(0.5, 0.5, 0.5)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
-                }
-                // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
-                // 的两个对称小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
-                // （§9 override (a)，无 MC 皮肤）。作 headNode 子节点 → 随头部俯仰（眼贴头表面 → 跟随看视线方向）。
-                //
-                // t52：贴脸 z（头半厚 0.25，头前面 z=-0.25）：白眼底 z=-0.25、瞳 z=-0.26（略凸出 0.01，
-                //   在白眼底前；z 须 ≤-0.25 才不被不透明头遮挡）。|z|≈头半径 0.25 → 贴头表面而非外飘。
-                // t66：眼从 playerModel 直系子迁入 headNode（颈枢本地坐标）；眼相对颈 y=0.32（世界 1.62-1.3），
-                //   pitch=0 时绝对坐标与重组前一致（无回归）；贴脸 z 不变。
-                Model {
-                    geometry: UnitCube {}
-                    position: Qt.vector3d(-0.1, 0.32, -0.25)
-                    scale: Qt.vector3d(0.1, 0.12, 0.02)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
-                }
-                Model {
-                    geometry: UnitCube {}
-                    position: Qt.vector3d(0.1, 0.32, -0.25)
-                    scale: Qt.vector3d(0.1, 0.12, 0.02)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
-                }
-                Model {
-                    geometry: UnitCube {}
-                    position: Qt.vector3d(-0.1, 0.32, -0.26)
-                    scale: Qt.vector3d(0.05, 0.06, 0.02)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
-                }
-                Model {
-                    geometry: UnitCube {}
-                    position: Qt.vector3d(0.1, 0.32, -0.26)
-                    scale: Qt.vector3d(0.05, 0.06, 0.02)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
-                }
-            }
-            // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）。t65：蹲下随上半身下沉 crouchDrop。
-            Model {
-                geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(0, 0.95 - playerModel.crouchDrop, 0)
-                scale: Qt.vector3d(0.5, 0.7, 0.3)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
-            }
-            // 左臂枢轴（t45 走 / t52 仅右手挖）：枢轴位于左肩 (-0.375, 1.3, 0)，袖+手作子节点本地 -Y 偏移
-            //   （袖中心 -0.25、手中心 -0.6）→ 绕肩旋转时手在弧线末端摆动（自然关节运动，非整体平移）。
-            //   静止时几何中心与重组前完全一致（袖 y=1.05、手 y=0.7），总高不变。
-            //   摆动：行走时左臂与左腿反相（左腿前=−sin → 左臂后=+sin；对侧臂腿同相）。
-            //   t52：挖掘/放置只动右手——左臂仅行走摆动，不读 mineBlend（旧版双臂同挖，用户反馈「双手都动」）。
-            //   +eulerRotation.x = 臂尖前摆（-Y→-Z，朝玩家前向）。
-            Node {
-                id: leftArmPivot
-                position: Qt.vector3d(-0.375, 1.3 - playerModel.crouchDrop, 0)   // t65：肩随上半身下沉
-                eulerRotation: {
-                    // 行走摆臂：与右腿同相（+sin；右腿前则左臂前）。静止 walkBlend=0 → 归零。
-                    // t51：摆幅 ×swingAmp（疾跑夸张 / 蹲下拘谨）。
-                    const walk = Math.sin(player.walkPhase) * 22 * playerModel.walkBlend * playerModel.swingAmp
-                    return Qt.vector3d(walk, 0, 0)
-                }
-                // 袖段（上衣色 #3a6a9a；y 0.8→1.3 = 肩下 0.25..0.5）
-                Model {
-                    geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 自定义 UnitCube（同地形/线框已验证路径）
-                    position: Qt.vector3d(0, -0.25, 0)
-                    scale: Qt.vector3d(0.25, 0.5, 0.25)
+                    position: Qt.vector3d(0, 0.35, 0)
+                    scale: Qt.vector3d(0.5, 0.7, 0.3)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
                 }
-                // 手（肤色 #caa472；臂末端 y 0.6→0.8 = 肩下 0.5..0.7）
-                Model {
-                    geometry: UnitCube {}
-                    position: Qt.vector3d(0, -0.6, 0)
-                    scale: Qt.vector3d(0.25, 0.2, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
+                // 左臂枢轴（t45 走 / t52 仅右手挖）：枢轴位于左肩（相对 upperBody：-0.375, 0.7, 0；世界 -0.375, 1.3, 0），
+                //   袖+手作子节点本地 -Y 偏移（袖中心 -0.25、手中心 -0.6）→ 绕肩旋转时手在弧线末端摆动（自然关节运动）。
+                //   静止时几何中心与重组前完全一致（袖 y=1.05、手 y=0.7），总高不变。
+                //   摆动：行走时左臂与左腿反相（左腿前=−sin → 左臂后=+sin；对侧臂腿同相）。
+                //   t52：挖掘/放置只动右手——左臂仅行走摆动，不读 mineBlend（旧版双臂同挖，用户反馈「双手都动」）。
+                //   +eulerRotation.x = 臂尖前摆（-Y→-Z，朝玩家前向）。t71：随 upperBody 鞠躬前倾。
+                Node {
+                    id: leftArmPivot
+                    position: Qt.vector3d(-0.375, 0.7, 0)   // 左肩（相对 upperBody）；世界 = 髋枢+0.7
+                    eulerRotation: {
+                        // 行走摆臂：与右腿同相（+sin；右腿前则左臂前）。静止 walkBlend=0 → 归零。
+                        // t51：摆幅 ×swingAmp（疾跑夸张 / 蹲下拘谨）。
+                        const walk = Math.sin(player.walkPhase) * 22 * playerModel.walkBlend * playerModel.swingAmp
+                        return Qt.vector3d(walk, 0, 0)
+                    }
+                    // 袖段（上衣色 #3a6a9a；y 0.8→1.3 = 肩下 0.25..0.5）
+                    Model {
+                        geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 自定义 UnitCube（同地形/线框已验证路径）
+                        position: Qt.vector3d(0, -0.25, 0)
+                        scale: Qt.vector3d(0.25, 0.5, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
+                    }
+                    // 手（肤色 #caa472；臂末端 y 0.6→0.8 = 肩下 0.5..0.7）
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.6, 0)
+                        scale: Qt.vector3d(0.25, 0.2, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
+                    }
                 }
-            }
-            // 右臂枢轴（t45 / t52 持方块）：与左臂对称（右肩 0.375, 1.3, 0），行走与左腿同相（−sin；左腿前则右臂前）。
-            //   t52：挖掘/放置只动右手——仅右臂读 mineBlend（挖掘挥臂前抬 70°）；左臂已不读（见上）。
-            Node {
-                id: rightArmPivot
-                position: Qt.vector3d(0.375, 1.3 - playerModel.crouchDrop, 0)   // t65：肩随上半身下沉
-                eulerRotation: {
-                    // t51：摆幅 ×swingAmp（与左臂对称；疾跑夸张 / 蹲下拘谨）。
-                    const walk = -Math.sin(player.walkPhase) * 22 * playerModel.walkBlend * playerModel.swingAmp
-                    const x = walk * (1 - playerModel.mineBlend) + 70 * playerModel.mineBlend
-                    return Qt.vector3d(x, 0, 0)
-                }
-                Model {
-                    geometry: UnitCube {}
-                    position: Qt.vector3d(0, -0.25, 0)
-                    scale: Qt.vector3d(0.25, 0.5, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
-                }
-                Model {
-                    geometry: UnitCube {}
-                    position: Qt.vector3d(0, -0.6, 0)
-                    scale: Qt.vector3d(0.25, 0.2, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
-                }
-                // 手持方块（t52）：持有方块（selectedBlock≠0）时，第三人称右手上显该方块小图标。
-                //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步运动（块在手中，自然跟随）。
-                //   BlockCube + 共享图集 → per-face 贴图（草顶 / 草侧…），复用地形贴图（零 MC 资产）。
-                //   仅第三人称 + 非观察者显（第一人称见 viewModelHand 的手持；观察者无动作不持物）。
-                Model {
-                    visible: player.selectedBlock !== 0 && player.mode !== PlayerController.Spectator
-                    geometry: BlockCube { blockId: player.selectedBlock }
-                    position: Qt.vector3d(0, -0.55, -0.30)   // t72：移到手前方（手心前缘 z≈-0.125 前），不嵌进手里
-                    scale: Qt.vector3d(0.22, 0.22, 0.22)
-                    eulerRotation: Qt.vector3d(-12, 42, 0)   // t72：绕 Y ~42° 倾斜 + 微 pitch，像 MC 手持姿态
-                    materials: PrincipledMaterial {
-                        lighting: PrincipledMaterial.NoLighting
-                        baseColorMap: voxelAtlas
-                        opacity: playerModel.bodyOpacity
+                // 右臂枢轴（t45 / t52 持方块）：与左臂对称（右肩相对 upperBody：0.375, 0.7, 0），行走与左腿同相（−sin）。
+                //   t52：挖掘/放置只动右手——仅右臂读 mineBlend（挖掘挥臂前抬 70°）；左臂已不读（见上）。t71：随 upperBody 鞠躬。
+                Node {
+                    id: rightArmPivot
+                    position: Qt.vector3d(0.375, 0.7, 0)   // 右肩（相对 upperBody）；世界 = 髋枢+0.7
+                    eulerRotation: {
+                        // t51：摆幅 ×swingAmp（与左臂对称；疾跑夸张 / 蹲下拘谨）。
+                        const walk = -Math.sin(player.walkPhase) * 22 * playerModel.walkBlend * playerModel.swingAmp
+                        const x = walk * (1 - playerModel.mineBlend) + 70 * playerModel.mineBlend
+                        return Qt.vector3d(x, 0, 0)
+                    }
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.25, 0)
+                        scale: Qt.vector3d(0.25, 0.5, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
+                    }
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.6, 0)
+                        scale: Qt.vector3d(0.25, 0.2, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
+                    }
+                    // 手持方块（t52）：持有方块（selectedBlock≠0）时，第三人称右手上显该方块小图标。
+                    //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步运动（块在手中，自然跟随）。
+                    //   BlockCube + 共享图集 → per-face 贴图（草顶 / 草侧…），复用地形贴图（零 MC 资产）。
+                    //   仅第三人称 + 非观察者显（第一人称见 viewModelHand 的手持；观察者无动作不持物）。
+                    Model {
+                        visible: player.selectedBlock !== 0 && player.mode !== PlayerController.Spectator
+                        geometry: BlockCube { blockId: player.selectedBlock }
+                        position: Qt.vector3d(0, -0.55, -0.30)   // t72：移到手前方（手心前缘 z≈-0.125 前），不嵌进手里
+                        scale: Qt.vector3d(0.22, 0.22, 0.22)
+                        eulerRotation: Qt.vector3d(-12, 42, 0)   // t72：绕 Y ~42° 倾斜 + 微 pitch，像 MC 手持姿态
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColorMap: voxelAtlas
+                            opacity: playerModel.bodyOpacity
+                        }
                     }
                 }
             }
