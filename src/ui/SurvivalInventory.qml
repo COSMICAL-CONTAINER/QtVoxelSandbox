@@ -49,6 +49,17 @@ Item {
     property var craftCounts:[0,0,0,0] // 平行数量
     property int craftRev: 0
 
+    // t79 右键拖拽均分（spec：右键按下拖过 N 格 → 松手等分，每格 floor(count/N)，余数留手）。
+    // 手势由 root 级 TapHandler(WithinBounds, RightButton) 总控：press 快照光标栈 + 起点槽、逐槽
+    // HoverHandler 收集扫过格子、release 据 N 决定均分(>1) / 单格右键(==1)。dragSlots 存「组:下标」
+    // 字符串（去重 / 比较简单）；rightDragActive 标手势进行中；dragHeld* 为按下瞬间的光标栈快照
+    // （均分按原始量算，避免拖拽中途槽内容变化干扰）。背包主栏 / hotbar / 合成格统一支持。
+    property bool rightDragActive: false
+    property var dragSlots: []              // 字符串数组（"craft:2" / "main:5" / "hotbar:0"）
+    property string hoveredKey: ""          // 当前指针所在槽 key（HoverHandler 维护；beginRightDrag 取起点槽）
+    property int dragHeldId: 0
+    property int dragHeldCount: 0
+
     // t38 生存左键整组栈操作的核心算法。给定目标槽当前 (curId, curCount) 与 hotbar VM 的手持栈
     // (heldBlock, heldCount)，返回应写入的 {slotId, slotCount, heldId, heldCount}；返回 null = 无操作。
     // 4 种 case（spec「左键 → 整组到 heldStack；点空槽放整组；点同 id 合并至 64 余留 held；点异 id 互换」）：
@@ -109,6 +120,88 @@ Item {
         }
     }
 
+    // ── t79 右键拖拽均分辅助 ──
+    // 槽 key（"组:下标"）。用字符串而非对象：去重 / 比较 / 拆分都直接，无需手写对象相等。
+    function slotKey(group, index) { return group + ":" + index }
+    function dragHasKey(key) {
+        for (let i = 0; i < root.dragSlots.length; ++i) if (root.dragSlots[i] === key) return true
+        return false
+    }
+    function addDragSlot(key) {
+        if (root.dragHasKey(key)) return
+        root.dragSlots = root.dragSlots.concat([key])   // 新数组引用 → 依赖 dragSlots 的绑定刷新
+    }
+    // 按组路由读 / 写某槽（合成格 / 主栏 走本地数组 + 版本号；hotbar 走 VM.setStack 单一权威）。
+    function readSlot(group, index) {
+        if (group === "craft")  return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0 }
+        if (group === "main")   return { id: root.mainSlots[index] || 0,  count: root.mainCounts[index] || 0 }
+        if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index) }
+        return { id: 0, count: 0 }
+    }
+    function writeSlot(group, index, id, count) {
+        if (group === "craft")       { root.craftSlots[index] = id; root.craftCounts[index] = count; root.craftRev++ }
+        else if (group === "main")   { root.mainSlots[index] = id;  root.mainCounts[index] = count;  root.mainRev++ }
+        else if (group === "hotbar") { root.hotbar.setStack(index, id, count) }
+    }
+    // 手势生命周期（root TapHandler 调）。
+    function beginRightDrag() {
+        root.dragHeldId = root.hotbar.heldBlock
+        root.dragHeldCount = root.hotbar.heldCount
+        root.dragSlots = []
+        root.rightDragActive = true
+        if (root.hoveredKey !== "") root.addDragSlot(root.hoveredKey)   // 起点槽（按下时指针所在格）
+    }
+    function endRightDrag() {
+        if (!root.rightDragActive) return
+        root.rightDragActive = false
+        const n = root.dragSlots.length
+        if (n > 1) {
+            root.applyDragDistribute()                                  // 多格 → 均分
+        } else if (n === 1) {
+            const p = root.dragSlots[0].split(":")                      // 退化为单格 → 现有右键语义
+            root.singleRightClick(p[0], parseInt(p[1], 10))
+        }
+        root.dragSlots = []
+    }
+    // 均分核心：把按下瞬间的光标栈快照按 floor(count/N) 分到「空 / 同 id 未满」的扫过槽；余数留手。
+    // 仅认空槽与同 id 未满槽为合格目标（异物 / 已满槽跳过，不计数）—— MC 行为。share<=0（不够每格 1 件）
+    // 则不分（余数全留手）。同 id 未满槽受 maxStack 钳制，溢出部分留手。
+    function applyDragDistribute() {
+        const heldId = root.dragHeldId
+        let remaining = root.dragHeldCount
+        if (heldId === 0 || remaining <= 0) return
+        const cap = root.hotbar.maxStackSize(heldId)
+        const eligible = []
+        for (let i = 0; i < root.dragSlots.length; ++i) {
+            const p = root.dragSlots[i].split(":")
+            const cur = root.readSlot(p[0], parseInt(p[1], 10))
+            if (cur.id === 0 || (cur.id === heldId && cur.count < cap)) eligible.push(root.dragSlots[i])
+        }
+        const N = eligible.length
+        if (N <= 0) return
+        const share = Math.floor(remaining / N)
+        if (share <= 0) return
+        for (let i = 0; i < eligible.length; ++i) {
+            const p = eligible[i].split(":")
+            const idx = parseInt(p[1], 10)
+            const cur = root.readSlot(p[0], idx)
+            const give = Math.min(share, cap - cur.count)               // 同 id 槽受 maxStack 钳制
+            root.writeSlot(p[0], idx, heldId, cur.count + give)
+            remaining -= give
+        }
+        root.hotbar.heldBlock = remaining > 0 ? heldId : 0
+        root.hotbar.heldCount = remaining
+    }
+    // 单格右键（手势未拖动时的语义 = resolveRightClick：空手拿半 / 持物放一）。
+    function singleRightClick(group, index) {
+        const cur = root.readSlot(group, index)
+        const r = root.resolveRightClick(cur.id, cur.count)
+        if (!r) return
+        root.writeSlot(group, index, r.slotId, r.slotCount)
+        root.hotbar.heldBlock = r.heldId
+        root.hotbar.heldCount = r.heldCount
+    }
+
     // t50 合成检测：读 2×2 craftSlots（行优先：[0]=TL [1]=TR [2]=BL [3]=BR）查 RecipeRegistry::match
     // （经 hotbar.recipeMatch 透传）。返回匹配配方的 QVariantMap（outputId/outputCount/consumeCount）或
     // 空 Map（无匹配）。触碰 craftRev 让绑定刷新时重算。
@@ -164,6 +257,19 @@ Item {
 
     // t49：关包（visible→false）归还合成栏。visible=true（打开）时不动作。
     onVisibleChanged: if (!visible) returnCraftToHotbar()
+
+    // t79 右键拖拽均分总控：bounds = root 整个遮罩区（大），WithinBounds 让 pressed 在拖拽跨格期间保持
+    // true（DragThreshold 默认会在跨阈值时置 false 提前结束，故必须用 WithinBounds）。右键单格 / 多格均
+    // 由这里 onPressedChanged 驱动 begin/end；逐槽 HoverHandler 负责收集扫过的格子。左键不受影响（各槽
+    // 左键 TapHandler 独立工作）。遮罩 MouseArea 仅接 LeftButton，右键透传到本 TapHandler。
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        gesturePolicy: TapHandler.WithinBounds
+        onPressedChanged: {
+            if (pressed) root.beginRightDrag()
+            else root.endRightDrag()
+        }
+    }
 
     // 半透明遮罩：仅吸收点击（防穿透到背后游戏层），**不关闭背包**——用户要求背包只能 E / Esc 关闭。
     // t49：手持物时点遮罩区（面板外）→ 整栈丢弃为实体（同 Q 丢弃）。
@@ -257,8 +363,9 @@ Item {
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
-                            // 点击拾取/放置/合并/互换（t38 栈感知；左键走 resolveClick；t49 右键走 resolveRightClick）。
-                            // 配方解析属 Phase 1.1，结果槽暂不产出。返回 null（空点空 / 同 id 槽已满）时不写、不 bump rev。
+                            // 点击拾取/放置/合并/互换（t38 栈感知；左键走 resolveClick）。右键改由 root TapHandler
+                            // 统一处理（t49 单格右键 + t79 拖拽均分都走 root → endRightDrag → singleRightClick /
+                            // applyDragDistribute），故此槽仅留 HoverHandler 收集。配方解析属 Phase 1.1。
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 onTapped: {
@@ -271,17 +378,21 @@ Item {
                                     root.hotbar.heldCount = r.heldCount
                                 }
                             }
-                            TapHandler {
-                                acceptedButtons: Qt.RightButton
-                                onTapped: {
-                                    const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
-                                    if (!r) return
-                                    root.craftSlots[index] = r.slotId
-                                    root.craftCounts[index] = r.slotCount
-                                    root.craftRev++
-                                    root.hotbar.heldBlock = r.heldId
-                                    root.hotbar.heldCount = r.heldCount
+                            HoverHandler {
+                                onHoveredChanged: {
+                                    const key = root.slotKey("craft", index)
+                                    if (hovered) root.hoveredKey = key
+                                    else if (root.hoveredKey === key) root.hoveredKey = ""
+                                    if (hovered && root.rightDragActive) root.addDragSlot(key)
                                 }
+                            }
+                            // t79 均分拖拽高亮（扫过且待分发的合格格绿框；rightDragActive 期间才显）。
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "transparent"
+                                border.color: "#7fe57f"; border.width: 2
+                                visible: { root.dragSlots; root.rightDragActive; return root.rightDragActive && root.dragHasKey(root.slotKey("craft", index)) }
+                                z: 10
                             }
                         }
                     }
@@ -463,8 +574,7 @@ Item {
                             font.pixelSize: 13; font.bold: true
                         }
                         // t38 生存左键整组操作（拾取 / 放置 / 合并 / 互换）：统一走 resolveClick。
-                        // t49 右键 = 拿一半 / 放一个（resolveRightClick）。同 id 合并至 maxStack（方块 64 / 工具 1），
-                        // 余数留 held；异 id 互换（左键）/ 不操作（右键）；空点空无操作。
+                        // 右键改由 root TapHandler 统一处理（t49 单格右键 + t79 拖拽均分）；此槽仅留 HoverHandler 收集。
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
                             onTapped: {
@@ -477,17 +587,21 @@ Item {
                                 root.hotbar.heldCount = r.heldCount
                             }
                         }
-                        TapHandler {
-                            acceptedButtons: Qt.RightButton
-                            onTapped: {
-                                const r = root.resolveRightClick(root.mainSlots[index] || 0, root.mainCounts[index] || 0)
-                                if (!r) return
-                                root.mainSlots[index] = r.slotId
-                                root.mainCounts[index] = r.slotCount
-                                root.mainRev++
-                                root.hotbar.heldBlock = r.heldId
-                                root.hotbar.heldCount = r.heldCount
+                        HoverHandler {
+                            onHoveredChanged: {
+                                const key = root.slotKey("main", index)
+                                if (hovered) root.hoveredKey = key
+                                else if (root.hoveredKey === key) root.hoveredKey = ""
+                                if (hovered && root.rightDragActive) root.addDragSlot(key)
                             }
+                        }
+                        // t79 均分拖拽高亮。
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"
+                            border.color: "#7fe57f"; border.width: 2
+                            visible: { root.dragSlots; root.rightDragActive; return root.rightDragActive && root.dragHasKey(root.slotKey("main", index)) }
+                            z: 10
                         }
                     }
                 }
@@ -553,8 +667,8 @@ Item {
                             }
                             // tap → t38 生存左键整组操作（拾取 / 放置 / 合并 / 互换）：统一走 resolveClick。
                             // hotbar 槽内容写经 hotbar.setStack（VM 单一权威；同 id 合并至 maxStack、异 id 互换）。
-                            // t49：背包内点 hotbar 行**不切真实选中**（删 selectedSlot 赋值；真实选中仅由游戏内
-                            // 1–9 / 滚轮改）；右键 = 拿一半 / 放一个（resolveRightClick）。
+                            // t49：背包内点 hotbar 行**不切真实选中**（真实选中仅由游戏内 1–9 / 滚轮改）。
+                            // 右键改由 root TapHandler 统一处理（t49 单格右键 + t79 拖拽均分）；此槽仅留 HoverHandler。
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 onTapped: {
@@ -566,16 +680,21 @@ Item {
                                     }
                                 }
                             }
-                            TapHandler {
-                                acceptedButtons: Qt.RightButton
-                                onTapped: {
-                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
-                                    if (r) {
-                                        root.hotbar.setStack(index, r.slotId, r.slotCount)
-                                        root.hotbar.heldBlock = r.heldId
-                                        root.hotbar.heldCount = r.heldCount
-                                    }
+                            HoverHandler {
+                                onHoveredChanged: {
+                                    const key = root.slotKey("hotbar", index)
+                                    if (hovered) root.hoveredKey = key
+                                    else if (root.hoveredKey === key) root.hoveredKey = ""
+                                    if (hovered && root.rightDragActive) root.addDragSlot(key)
                                 }
+                            }
+                            // t79 均分拖拽高亮。
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "transparent"
+                                border.color: "#7fe57f"; border.width: 2
+                                visible: { root.dragSlots; root.rightDragActive; return root.rightDragActive && root.dragHasKey(root.slotKey("hotbar", index)) }
+                                z: 10
                             }
                         }
                     }

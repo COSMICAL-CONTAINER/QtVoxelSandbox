@@ -39,6 +39,15 @@ Item {
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
     property string hoveredName: ""
 
+    // t79 右键拖拽均分（spec：右键按下拖过 N 格 → 松手等分，每格 floor(count/N)，余数留手）。创造背包仅
+    // hotbar 行为分发目标（调色板=无限源，不作目标）。手势由 root 级 TapHandler(WithinBounds, RightButton)
+    // 总控；逐槽 HoverHandler 收集。dragSlots 存「组:下标」字符串；dragHeld* 为按下瞬间光标栈快照。
+    property bool rightDragActive: false
+    property var dragSlots: []              // "hotbar:0" ..
+    property string hoveredKey: ""
+    property int dragHeldId: 0
+    property int dragHeldCount: 0
+
     // ── 尺寸常量（集中一处便于对齐）──
     readonly property int paletteCols: 9
     readonly property int cellSize: 42       // 调色板单格
@@ -102,6 +111,87 @@ Item {
         return {
             slotId: heldId, slotCount: curCount + 1,
             heldId: remain > 0 ? heldId : 0, heldCount: remain
+        }
+    }
+
+    // ── t79 右键拖拽均分辅助（创造背包仅 hotbar 行参与；调色板=无限源不作目标）──
+    function slotKey(group, index) { return group + ":" + index }
+    function dragHasKey(key) {
+        for (let i = 0; i < root.dragSlots.length; ++i) if (root.dragSlots[i] === key) return true
+        return false
+    }
+    function addDragSlot(key) {
+        if (root.dragHasKey(key)) return
+        root.dragSlots = root.dragSlots.concat([key])
+    }
+    function readSlot(group, index) {
+        if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index) }
+        return { id: 0, count: 0 }
+    }
+    function writeSlot(group, index, id, count) {
+        if (group === "hotbar") root.hotbar.setStack(index, id, count)
+    }
+    function beginRightDrag() {
+        root.dragHeldId = root.hotbar.heldBlock
+        root.dragHeldCount = root.hotbar.heldCount
+        root.dragSlots = []
+        root.rightDragActive = true
+        if (root.hoveredKey !== "") root.addDragSlot(root.hoveredKey)
+    }
+    function endRightDrag() {
+        if (!root.rightDragActive) return
+        root.rightDragActive = false
+        const n = root.dragSlots.length
+        if (n > 1) root.applyDragDistribute()
+        else if (n === 1) {
+            const p = root.dragSlots[0].split(":")
+            root.singleRightClick(p[0], parseInt(p[1], 10))
+        }
+        root.dragSlots = []
+    }
+    function applyDragDistribute() {
+        const heldId = root.dragHeldId
+        let remaining = root.dragHeldCount
+        if (heldId === 0 || remaining <= 0) return
+        const cap = root.hotbar.maxStackSize(heldId)
+        const eligible = []
+        for (let i = 0; i < root.dragSlots.length; ++i) {
+            const p = root.dragSlots[i].split(":")
+            const cur = root.readSlot(p[0], parseInt(p[1], 10))
+            if (cur.id === 0 || (cur.id === heldId && cur.count < cap)) eligible.push(root.dragSlots[i])
+        }
+        const N = eligible.length
+        if (N <= 0) return
+        const share = Math.floor(remaining / N)
+        if (share <= 0) return
+        for (let i = 0; i < eligible.length; ++i) {
+            const p = eligible[i].split(":")
+            const idx = parseInt(p[1], 10)
+            const cur = root.readSlot(p[0], idx)
+            const give = Math.min(share, cap - cur.count)
+            root.writeSlot(p[0], idx, heldId, cur.count + give)
+            remaining -= give
+        }
+        root.hotbar.heldBlock = remaining > 0 ? heldId : 0
+        root.hotbar.heldCount = remaining
+    }
+    function singleRightClick(group, index) {
+        const cur = root.readSlot(group, index)
+        const r = root.resolveRightClick(cur.id, cur.count)
+        if (!r) return
+        root.writeSlot(group, index, r.slotId, r.slotCount)
+        root.hotbar.heldBlock = r.heldId
+        root.hotbar.heldCount = r.heldCount
+    }
+
+    // t79 右键拖拽均分总控（WithinBounds 让 pressed 跨格保持 true；右键单格 / 多格均由此驱动）。
+    // 调色板左键拾取不受影响；遮罩 MouseArea 仅接 LeftButton，右键透传到本 TapHandler。
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        gesturePolicy: TapHandler.WithinBounds
+        onPressedChanged: {
+            if (pressed) root.beginRightDrag()
+            else root.endRightDrag()
         }
     }
 
@@ -352,7 +442,13 @@ Item {
                                 //   1–9 / 滚轮改）。右键 = 拿一半 / 放一个（resolveRightClick）。拖到销毁槽仍走 DragHandler。
                                 HoverHandler {
                                     id: slotHover
-                                    onHoveredChanged: if (hovered) root.hoveredName = root.hotbar.nameForBlock(slotId)
+                                    onHoveredChanged: {
+                                        if (hovered) root.hoveredName = root.hotbar.nameForBlock(slotId)
+                                        const key = root.slotKey("hotbar", index)
+                                        if (hovered) root.hoveredKey = key
+                                        else if (root.hoveredKey === key) root.hoveredKey = ""
+                                        if (hovered && root.rightDragActive) root.addDragSlot(key)
+                                    }
                                 }
                                 TapHandler {
                                     acceptedButtons: Qt.LeftButton
@@ -365,16 +461,14 @@ Item {
                                         }
                                     }
                                 }
-                                TapHandler {
-                                    acceptedButtons: Qt.RightButton
-                                    onTapped: {
-                                        const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
-                                        if (r) {
-                                            root.hotbar.setStack(index, r.slotId, r.slotCount)
-                                            root.hotbar.heldBlock = r.heldId
-                                            root.hotbar.heldCount = r.heldCount
-                                        }
-                                    }
+                                // t79：右键改由 root TapHandler 统一处理（单格右键 + 拖拽均分）；此处不再有右键 TapHandler。
+                                // 均分拖拽高亮（扫过且待分发的合格格绿框；rightDragActive 期间才显）。
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "transparent"
+                                    border.color: "#7fe57f"; border.width: 2
+                                    visible: { root.dragSlots; root.rightDragActive; return root.rightDragActive && root.dragHasKey(root.slotKey("hotbar", index)) }
+                                    z: 10
                                 }
                             }
                         }
