@@ -564,12 +564,16 @@ void PlayerController::pickBlock()
 // 返 >0（背包满）→ 不拾取（entity 留；spec：全满 → 不拾取）。距离从玩家 AABB 中心（脚底 + 半高）
 // 3D 起算，阈值 kPickupDist；从后往前扫 → erase 不影响前面索引（安全边删边迭代）。
 // t51：AABB 高用 m_height（蹲下变矮 → 中心随之降低，仍贴近玩家实际占据空间）。
+// t53：跳过新生免拾取期内的实体（isPickupReady=false）——破块瞬间实体常在玩家近旁（脚下方块 ~1.4 格
+//   < kPickupDist 1.5），若无延迟则下一帧即被收走、玩家永远看不见（疑似 auto-collect 根因）。让实体
+//   先可见 0.5s 再开放拾取（机制等价 MC block-break pickup delay）。
 void PlayerController::pickupScan()
 {
     if (!m_itemEntities || !m_hotbar) return;
     const QVector3D center = m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f);
     const float r2 = kPickupDist * kPickupDist;
     for (int i = m_itemEntities->count() - 1; i >= 0; --i) {
+        if (!m_itemEntities->isPickupReady(i)) continue; // t53：新生 0.5s 免拾取（让实体先可见再可拾）
         const QVector3D d = m_itemEntities->posAt(i) - center;
         if (d.lengthSquared() > r2) continue;          // 超阈值 → 跳过
         const int id = m_itemEntities->itemIdAt(i);

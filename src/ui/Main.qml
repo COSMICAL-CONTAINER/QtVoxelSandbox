@@ -620,7 +620,7 @@ Window {
         // 旋转 / 浮动是纯呈现动画，呈现层自发、不反向写数据。
         Node {
             id: itemHost
-            Component.onCompleted: console.info("[t35] itemHost UP parent=" + itemHost.parent + " (须为 3D Node)")
+            Component.onCompleted: console.info("[t53] itemHost UP parent=" + itemHost.parent + " (须为 3D Node 非 null；null=孤儿不渲染)")
 
             Repeater {
                 model: itemEntities.count
@@ -634,13 +634,13 @@ Window {
                     property real bobY: 0       // 上下浮动偏移（格）
                     eulerRotation: Qt.vector3d(0, rotY, 0)
 
-                    // 首个 delegate 诊断（落 log）：确认进场景图（parent = QQuick3DNode* 而非 null）。
-                    // needs-run 项：若 parent=null → 孤儿不渲染（类 t16）；运行期核验。
-                    Component.onCompleted: {
-                        if (index === 0)
-                            console.info("[t35] item delegate[0] UP parent=" + parent + " pos=" + position
-                                         + " id=" + itemEntities.itemIdAt(index))
-                    }
+                    // [t53] 诊断（每个 delegate 创建时落 log）：确认 parent = QQuick3DNode* 非 null
+                    //（孤儿不渲染，类 t16/t03 lessons）；pos 须为方块中心 = 整数 + 0.5（ItemEntityManager
+                    // 存格中心）。needs-run：主编排 run 后核 log 见 parent 非 null + pos 合理 → 实体已进场景。
+                    Component.onCompleted: console.info(
+                        "[t53] entity delegate[" + index + "] parent=" + parent
+                        + " pos=" + position + " id=" + itemEntities.itemIdAt(index)
+                        + " (parent 须 QQuick3DNode 非 null；pos 须 = 整数+0.5)")
 
                     Model {
                         // 小方块图标（~0.3）：BlockCube 按 itemId 取图集 per-face UV（草顶 / 草侧…），

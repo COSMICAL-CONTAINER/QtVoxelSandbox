@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QVector3D>
+#include <QElapsedTimer>
 #include <QtQml/qqml.h>
 
 #include <vector>
@@ -56,6 +57,13 @@ public:
     // delegate 的 posAt/itemIdAt 绑定（触碰 revision）整列重算，shift 后各 delegate 对齐新数据。
     Q_INVOKABLE void removeAt(int i);
 
+    // t53：第 i 个实体是否已过「新生免拾取期」（spawn 后 kPickupDelayMs 内 false → pickupScan 跳过）。
+    // 破块瞬间实体常落在玩家近旁（如脚下方块中心距玩家中心仅 ~1.4 格 < kPickupDist 1.5），若无免拾窗
+    // 则下一帧即被 pickupScan 收走、玩家永远看不见实体（用户反馈「仍 auto-collect 入背包」的根因）。
+    // 加 0.5s 免拾窗（机制等价 MC block-break 的短暂 pickup delay）让实体先可见、再入背包。越界 /
+    // 时钟未启 → true（保守可拾，防卡死、防延迟机制误伤合法拾取）。
+    bool isPickupReady(int i) const;
+
 signals:
     void entitiesChanged(); // spawn / 未来 remove 触发；驱动 count/revision + QML 绑定刷新
 
@@ -63,11 +71,14 @@ private:
     struct ItemEntity {
         QVector3D pos;
         int itemId;
+        qint64 spawnMs = 0; // 生成时刻（m_clock.elapsed()）；t53 isPickupReady 算 age 用
     };
     std::vector<ItemEntity> m_entities;
     int m_revision = 0;
+    QElapsedTimer m_clock; // 构造时 start()；spawn 记 elapsed、拾取算 age（墙钟，暂停期照常流逝无残留锁）
 
-    static constexpr int kCap = 200; // 实体数上限（spec：>200 跳过 / 合并）
+    static constexpr int kCap = 200;             // 实体数上限（spec：>200 跳过 / 合并）
+    static constexpr qint64 kPickupDelayMs = 500; // 新生免拾取期（ms；t53 让实体先可见再可拾）
 };
 
 #endif // ITEMENTITYMANAGER_H
