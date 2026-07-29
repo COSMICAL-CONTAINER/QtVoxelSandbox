@@ -483,6 +483,10 @@ void PlayerController::updateMining(float dt)
         m_miningStage = newStage;
         emit miningStateChanged();
         emit swingArm();
+        // t61：每跨一阶迸发少量碎屑（被挖方块色），驱动「挖的过程中」进度反馈粒子。bid 上面已读（当前
+        // tick 的目标方块 id，setBlock 前的原值），传给呈现层复用破块 emitter 迸发。破块完成时
+        // 的 +30% 大迸发走 finishMiningAt → setBlock → World::blockBroken（已 +30%），与此互补。
+        emit miningParticle(m_mineBx, m_mineBy, m_mineBz, int(bid));
     }
     emit miningProgressChanged();
 

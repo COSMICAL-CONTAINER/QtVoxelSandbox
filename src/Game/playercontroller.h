@@ -209,6 +209,12 @@ signals:
     void selectedItemChanged(); // 手持原始 id 变（含工具段切换；驱动 t34 速度重算）
     void miningStateChanged();  // mining / miningStage / miningBlock 三者同变（一次性发，少抖动）
     void miningProgressChanged(); // 进度连续变化（HUD 可选显示百分比；高频，独立信号）
+    // 挖掘过程碎屑粒子（t61）：生存累积挖掘时每跨一阶（progress 推进触发 stage 1..5 切换）发一次，
+    // 携被挖方块坐标 + id（呈现层据此迸发少量对应色碎屑，复用破块 emitter / 重力）。破块完成时
+    // 的「+30% 大迸发」仍走 World 的 blockBroken → burstBreak（已在此任务内 +30%），本信号仅驱动
+    // 「挖的过程中」的进度反馈粒子。创造瞬破不进累积态 → 不发；仅 Survival 推进 stage 时发。
+    // 分层（PLAN §2）：Game/Physics 层发语义事件，呈现层只消费（同 blockBroken→粒子 / swingArm 模式）。
+    void miningParticle(int x, int y, int z, int blockId);
     // 玩家挖掘产出（t34 → t35）：生存破块时按 ToolRegistry::canHarvest 判 drop；创造 drop=false
     // （瞬破不掉落，spec）。t35 据此 spawn item entity；当前任务仅发信号、消费端未接（无副作用）。
     // blockBroken（World 已发）仍触发粒子；本信号额外区分「玩家挖」+「是否掉落」（创造 / 不可采掘

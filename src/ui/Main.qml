@@ -164,6 +164,12 @@ Window {
         // 创造 / 不可采掘时 player 不发本信号（无实体产出）。ViewModel 不持有 PlayerController，
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
         function onSpawnItem(x, y, z, id) { itemEntities.spawnItem(x, y, z, id) }
+        // t61：挖掘过程粒子 —— 生存累积挖掘时每跨一阶，player 发 miningParticle（被挖方块坐标+id），
+        // 转发到 BlockParticles.burstMine（复用破块碎屑 emitter / 色逻辑 / 重力，少量迸发，进度反馈）。
+        // 破块完成时的 +30% 大迸发仍由 onBlockBroken → burstBreak 驱动（burstBreak 已在此任务内 +30%）。
+        function onMiningParticle(x, y, z, id) {
+            if (particleLoader.item) particleLoader.item.burstMine(x, y, z, id)
+        }
         // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
         function onCraftingTableOpened() { window.openCraftingTable() }
         // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换

@@ -19,10 +19,18 @@ Node {
         // 设迸发器位置到方块中心再 burst(2 参)：旧 burst(3 参带 position) 的第 3 参被 Q_INVOKABLE 静默
         // 忽略（不强校验参数数）→ 粒子全迸发在系统原点而非方块处。改设 emitter.position 再 burst。
         breakEmitter.position = Qt.vector3d(x + 0.5, y + 0.5, z + 0.5)
-        // t30：碎屑必须「分散小颗粒、明显小于方块」。第 5 轮 burst(16,80) 与 particleScale 0.15 叠加
-        // 仍聚成「比方块还大的一坨」——根因是粒子多 + 横向速度大 + 单粒仍偏大，三因子堆叠。
-        // 数量收到 10（单次迸发上限），单粒大小靠 emitter.particleScale 决定（见下）。
-        breakEmitter.burst(6, 80)
+        // t61：破块完成迸发量 +30%（spec：破块完成时比现 break 多 30%）。原 6 → 8（6×1.3≈7.8 取整）。
+        //   与「挖的过程」每阶段 burstMine(3) 互补：本函数是破块那一击的大迸发，过程粒子走 burstMine。
+        breakEmitter.burst(8, 80)
+    }
+    // 挖掘过程碎屑（t61）：生存累积挖掘时每跨一阶段（player 发 miningParticle）迸发少量碎屑，
+    //   复用破块碎屑的色逻辑 / emitter / 重力（spec「复用 burstBreak 机制、色=被挖方块」）。
+    //   数量收少（3 < 破块 8，spec「少量」），表征「正在挖」的进度反馈；破块完成时的 +30% 大迸发
+    //   仍走 burstBreak（blockBroken 触发）。色 / 位置 / 横向收束策略与 burstBreak 一致，故走同一 emitter。
+    function burstMine(x, y, z, id) {
+        breakParticle.color = blockColor(id)
+        breakEmitter.position = Qt.vector3d(x + 0.5, y + 0.5, z + 0.5)
+        breakEmitter.burst(3, 80)
     }
     function burstPlace(x, y, z, id) {
         placeParticle.color = blockColor(id)
@@ -58,7 +66,7 @@ Node {
         // 碎屑方块（破块）：小体素块向上/外散、受重力下落、短命后淡出。
         ModelParticle3D {
             id: breakParticle
-            maxAmount: 80 // 池容上限：单次迸发 16 → 最多约 5 组并存即回收最老
+            maxAmount: 80 // 池容上限：单次迸发 8（破块）/ 3（挖的过程）+ 并发上限内即回收最老（t61）
             color: "#ffffff"
             colorVariation: Qt.vector4d(0.15, 0.15, 0.15, 0.0)
             fadeInEffect: ModelParticle3D.FadeScale
