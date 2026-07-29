@@ -458,6 +458,22 @@ Window {
             //   前抬（覆盖行走摆臂），呈现「挖掘挥动」。0 = 无挖掘（行走摆臂正常）。
             property real mineBlend: 0.0
 
+            // 蹲下姿态（t65）：Shift 蹲下时身体下沉 + 腿弯（膝盖旋转），非仅 swingAmp 步幅变小。
+            //   crouchBlend = 1（Crouch）/ 0（Walk/Sprint）；据此驱动上半身下沉 + 腿膝盖弯曲。
+            //   crouchDrop ≈ 0.18（对齐相机蹲下降低 kEyeHeight-kCrouchEye=1.62-1.35=0.27；取略小使腿几何
+            //     可与膝盖弯曲自洽——蹲下时髋随身体下沉，腿加膝盖关节弯折后脚仍贴近地面，不陷太深）。
+            //   上半身（头/眼/躯干/双臂）各自 position.y 减 crouchDrop；双肩/双髋枢轴同步下移 →
+            //     躯干底（0.6-crouchDrop）仍贴髋（0.6-crouchDrop），无断身缝隙。
+            //   腿分大腿 + 小腿两段 + 膝盖 Node：站立膝盖 0° → 腿直立（与重组前一致，无回归）；
+            //     蹲下大腿前抬 crouchThigh、小腿在膝处回折 crouchKnee（=−crouchThigh，使小腿保持竖直、
+            //     脚前移落地）→ 大腿近水平 / 小腿竖直的蹲姿轮廓（spec「膝盖旋转」，机制等价 MC 蹲）。
+            //   Walk/Sprint（crouchBlend=0）所有蹲量归零 → 恢复直立。分层（PLAN §2）：姿态纯呈现层
+            //   （QML 据 moveState 算），只读 Game 层 moveState，绝不反向写（同 swingAmp/walkBlend 模式）。
+            readonly property real crouchBlend: player.moveState === PlayerController.Crouch ? 1.0 : 0.0
+            readonly property real crouchDrop: 0.18 * playerModel.crouchBlend
+            readonly property real crouchThigh: 60.0 * playerModel.crouchBlend   // 蹲时大腿前抬（度；+x = 腿尖前摆 = -Z）
+            readonly property real crouchKnee: -60.0 * playerModel.crouchBlend     // 蹲时膝盖回折（度；= −crouchThigh → 小腿保持竖直、脚前移落地）
+
             // [t31] 诊断：确认本 Node 已加载、parent=场景节点（非 null 孤儿）、feetPosition 合法、visible 状态。
             // 打印到 voxelsandbox.log。若运行后日志无此行 → Main.qml 未进二进制（stale build）。
             Component.onCompleted: console.info("[t31] playerModel UP  parent=" + playerModel.parent
@@ -465,9 +481,10 @@ Window {
                 + "  cam=" + player.cameraMode + "  mode=" + player.mode)
 
             // 头（≈0.5³，肤色）。模型以脚底为原点（y=0 贴地），总高≈1.8 对齐玩家 AABB(kHeight)。
+            // t65：蹲下时随上半身下沉 crouchDrop（position.y 减去）。
             Model {
                 geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(0, 1.55, 0)
+                position: Qt.vector3d(0, 1.55 - playerModel.crouchDrop, 0)
                 scale: Qt.vector3d(0.5, 0.5, 0.5)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472"; opacity: playerModel.bodyOpacity }
             }
@@ -479,34 +496,35 @@ Window {
             // 睛悬浮在头前」。改为贴脸：白眼底 z=-0.25（厚 0.02 → 前面 -0.26，略凸出 0.01），瞳 z=-0.26
             // （前面 -0.27，在白眼底前 0.01）。|z|≈头半径 0.25 → 贴在头表面而非外飘（spec「贴近头面」）。
             // （注：z 略小于头半径会陷进不透明头内被前面遮挡 → 必须在 z≤-0.25 才可见；故取 -0.25/-0.26。）
+            // t65：眼随头下沉 crouchDrop（position.y 减去）；贴脸 z 不变。
             Model {
                 geometry: UnitCube {}
-                position: Qt.vector3d(-0.1, 1.62, -0.25)
+                position: Qt.vector3d(-0.1, 1.62 - playerModel.crouchDrop, -0.25)
                 scale: Qt.vector3d(0.1, 0.12, 0.02)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
             }
             Model {
                 geometry: UnitCube {}
-                position: Qt.vector3d(0.1, 1.62, -0.25)
+                position: Qt.vector3d(0.1, 1.62 - playerModel.crouchDrop, -0.25)
                 scale: Qt.vector3d(0.1, 0.12, 0.02)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
             }
             Model {
                 geometry: UnitCube {}
-                position: Qt.vector3d(-0.1, 1.62, -0.26)
+                position: Qt.vector3d(-0.1, 1.62 - playerModel.crouchDrop, -0.26)
                 scale: Qt.vector3d(0.05, 0.06, 0.02)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
             }
             Model {
                 geometry: UnitCube {}
-                position: Qt.vector3d(0.1, 1.62, -0.26)
+                position: Qt.vector3d(0.1, 1.62 - playerModel.crouchDrop, -0.26)
                 scale: Qt.vector3d(0.05, 0.06, 0.02)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
             }
-            // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）
+            // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）。t65：蹲下随上半身下沉 crouchDrop。
             Model {
                 geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
-                position: Qt.vector3d(0, 0.95, 0)
+                position: Qt.vector3d(0, 0.95 - playerModel.crouchDrop, 0)
                 scale: Qt.vector3d(0.5, 0.7, 0.3)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a6a9a"; opacity: playerModel.bodyOpacity }
             }
@@ -518,7 +536,7 @@ Window {
             //   +eulerRotation.x = 臂尖前摆（-Y→-Z，朝玩家前向）。
             Node {
                 id: leftArmPivot
-                position: Qt.vector3d(-0.375, 1.3, 0)
+                position: Qt.vector3d(-0.375, 1.3 - playerModel.crouchDrop, 0)   // t65：肩随上半身下沉
                 eulerRotation: {
                     // 行走摆臂：与右腿同相（+sin；右腿前则左臂前）。静止 walkBlend=0 → 归零。
                     // t51：摆幅 ×swingAmp（疾跑夸张 / 蹲下拘谨）。
@@ -544,7 +562,7 @@ Window {
             //   t52：挖掘/放置只动右手——仅右臂读 mineBlend（挖掘挥臂前抬 70°）；左臂已不读（见上）。
             Node {
                 id: rightArmPivot
-                position: Qt.vector3d(0.375, 1.3, 0)
+                position: Qt.vector3d(0.375, 1.3 - playerModel.crouchDrop, 0)   // t65：肩随上半身下沉
                 eulerRotation: {
                     // t51：摆幅 ×swingAmp（与左臂对称；疾跑夸张 / 蹲下拘谨）。
                     const walk = -Math.sin(player.walkPhase) * 22 * playerModel.walkBlend * playerModel.swingAmp
@@ -579,32 +597,67 @@ Window {
                     }
                 }
             }
-            // 左腿枢轴（t45）：枢轴位于左髋 (-0.125, 0.6, 0)，腿段作子节点本地 -Y 偏移（中心 -0.3）。
-            //   行走与右臂同相（−sin → 与右腿反相；右腿前则左腿后）。+eulerRotation.x = 腿前摆。
+            // 左腿枢轴（t45 走 / t65 蹲下膝盖弯曲）：枢轴位于左髋 (-0.125, 0.6, 0)，蹲下时髋随上半身
+            //   下沉 crouchDrop（与躯干底对齐，无断身缝隙）。腿分大腿 + 小腿两段 + 膝盖关节 Node：
+            //   站立膝盖 0° → 大腿小腿成直线（总长 0.6，脚在 y=0，与重组前一致无回归）；蹲下大腿前抬
+            //   crouchThigh、小腿在膝处回折 crouchKnee（=−crouchThigh → 小腿保持竖直、脚前移落地）→ 蹲姿。
+            //   行走摆动叠加在大腿上（与右臂同相 −sin → 与右腿反相；右腿前则左腿后）。+eulerRotation.x = 腿前摆。
             //   静止归零（walkBlend=0）；仅走路模式有 walkPhase 推进（Spectator/飞=0 → 腿不摆）。
             Node {
                 id: leftLegPivot
-                position: Qt.vector3d(-0.125, 0.6, 0)
-                // t51：摆幅 ×swingAmp（疾跑大步 / 蹲下小步）。
-                eulerRotation: Qt.vector3d(-Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp, 0, 0)
+                position: Qt.vector3d(-0.125, 0.6 - playerModel.crouchDrop, 0)
+                eulerRotation: {
+                    // 行走摆幅（t51 ×swingAmp）+ 蹲下大腿前抬（t65 crouchThigh）。
+                    const walk = -Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp
+                    return Qt.vector3d(walk + playerModel.crouchThigh, 0, 0)
+                }
+                // 大腿段（裤色 #3a3a5a；髋下 0..0.3，中心 -0.15、scale.y=0.3）
                 Model {
                     geometry: UnitCube {}
-                    position: Qt.vector3d(0, -0.3, 0)
-                    scale: Qt.vector3d(0.25, 0.6, 0.25)
+                    position: Qt.vector3d(0, -0.15, 0)
+                    scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
                 }
+                // 膝盖关节（t65）：位于大腿末端（髋下 0.3）。站立 0°（小腿续大腿成直线）；蹲下回折
+                //   crouchKnee（=−crouchThigh）→ 小腿相对大腿弯折、整体腿弯曲，有效竖直高度缩短配合身体下沉。
+                Node {
+                    id: leftKneePivot
+                    position: Qt.vector3d(0, -0.3, 0)
+                    eulerRotation: Qt.vector3d(playerModel.crouchKnee, 0, 0)
+                    // 小腿段（膝下 0..0.3，中心 -0.15、scale.y=0.3）
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.15, 0)
+                        scale: Qt.vector3d(0.25, 0.3, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                    }
+                }
             }
-            // 右腿枢轴（t45）：与左腿对称（右髋 0.125, 0.6, 0），行走与左臂同相（+sin）。
+            // 右腿枢轴（t45 / t65）：与左腿对称（右髋 0.125, 0.6, 0），行走与左臂同相（+sin）；蹲下同步下沉+膝盖弯。
             Node {
                 id: rightLegPivot
-                position: Qt.vector3d(0.125, 0.6, 0)
-                // t51：摆幅 ×swingAmp（与左腿对称；疾跑大步 / 蹲下小步）。
-                eulerRotation: Qt.vector3d(Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp, 0, 0)
+                position: Qt.vector3d(0.125, 0.6 - playerModel.crouchDrop, 0)
+                eulerRotation: {
+                    // 行走摆幅（t51 ×swingAmp；与左腿对称）+ 蹲下大腿前抬（t65 crouchThigh）。
+                    const walk = Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp
+                    return Qt.vector3d(walk + playerModel.crouchThigh, 0, 0)
+                }
                 Model {
                     geometry: UnitCube {}
-                    position: Qt.vector3d(0, -0.3, 0)
-                    scale: Qt.vector3d(0.25, 0.6, 0.25)
+                    position: Qt.vector3d(0, -0.15, 0)
+                    scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                }
+                Node {
+                    id: rightKneePivot
+                    position: Qt.vector3d(0, -0.3, 0)
+                    eulerRotation: Qt.vector3d(playerModel.crouchKnee, 0, 0)
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.15, 0)
+                        scale: Qt.vector3d(0.25, 0.3, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#3a3a5a"; opacity: playerModel.bodyOpacity }
+                    }
                 }
             }
         }
