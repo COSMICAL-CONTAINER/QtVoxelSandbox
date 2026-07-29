@@ -453,15 +453,20 @@ Window {
         }
 
         // 选中立方体框（射线选体 t04 / t52）：从「命中面方框 (WireSquare)」改为「整个立方体框」，
-        // 12 棱包住命中方块 8 角。Model 摆到命中方块中心（hitBlock + 0.5），略放大 1.02 防 z-fight；
+        // 12 棱包住命中方块 8 角。Model 摆到命中方块中心（hitBlock + 0.5）；几何本身 ±0.5 居中、
         // 几何对称、与朝向无关 → 无需 eulerRotation（不似 WireSquare 需按命中面法线旋转）。
         // 未命中 / 暂停（未捕获）时 hasHit=false → 隐藏。
+        //
+        // 放大系数 1.005（t76 收紧，原 1.02）：WireCube 几何 ±0.5，scale 1.02 → ±0.51 超出方块 0.01，
+        // 既在近面与方块之间留出可见空隙、又使远侧棱线落入邻接方块单元内被其 depth 吞噬（邻块不透明面
+        // 挡住棱）。1.005 → ±0.5025，仅微凸 0.0025（与 CrackBox 叠层同防 z-fight 量级），紧贴方块边、
+        // 邻块不再吞噬远侧棱。
         Model {
             visible: player.hasHit
             position: Qt.vector3d(player.hitBlock.x + 0.5,
                                   player.hitBlock.y + 0.5,
                                   player.hitBlock.z + 0.5)
-            scale: Qt.vector3d(1.02, 1.02, 1.02)
+            scale: Qt.vector3d(1.005, 1.005, 1.005)
             geometry: WireCube {}
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
