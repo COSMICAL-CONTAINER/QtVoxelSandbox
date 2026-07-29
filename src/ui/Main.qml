@@ -208,8 +208,8 @@ Window {
                 //   修法：pivot 收到 z=-0.2、baseTilt 减到 30°（少前伸）→ 手中心相机本地 z∈[-0.25(静止),
                 //   -0.13(挥峰)]，始终近于 0.3 → depth 测试恒胜地形 → 手恒在所有实体方块之前（不穿模）。
                 //   缩放相应收小（近则显大）：0.16→0.09 保持视感尺寸；pivot.y 上移到 0.05 使手仍落视野下中。
-                position: Qt.vector3d(0.35, 0.05, -0.2)
-                readonly property real baseTilt: 30.0  // 静态前抬：手臂略前伸入视野（非纯下垂），更像持物姿态
+                position: Qt.vector3d(0.35, -0.05, -0.4)
+                readonly property real baseTilt: 65.0  // 静态前抬：手臂略前伸入视野（非纯下垂），更像持物姿态
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
 
@@ -217,7 +217,7 @@ Window {
                 Model {
                     geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
                     position: Qt.vector3d(0, -0.1, 0)
-                    scale: Qt.vector3d(0.09, 0.12, 0.06)
+                    scale: Qt.vector3d(0.16, 0.2, 0.16)
                     // NoLighting：本工程所有可见 Model（地形/线框/粒子）均用 NoLighting——默认 lit
                     // PrincipledMaterial 在本场景不渲染（手因此「完全透明」不可见）。改 NoLighting 后可见。
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#caa472" }
@@ -231,7 +231,7 @@ Window {
                     visible: player.selectedBlock !== 0
                     geometry: BlockCube { blockId: player.selectedBlock }
                     position: Qt.vector3d(0, -0.1, 0.01)
-                    scale: Qt.vector3d(0.08, 0.08, 0.08)
+                    scale: Qt.vector3d(0.12, 0.12, 0.12)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
@@ -620,7 +620,13 @@ Window {
         // 旋转 / 浮动是纯呈现动画，呈现层自发、不反向写数据。
         Node {
             id: itemHost
-            Component.onCompleted: console.info("[t53] itemHost UP parent=" + itemHost.parent + " (须为 3D Node 非 null；null=孤儿不渲染)")
+            Component.onCompleted: {
+                console.info("[t53] itemHost UP parent=" + itemHost.parent + " (须为 3D Node 非 null；null=孤儿不渲染)")
+                // [bug1 诊断] 启动即 spawn 一个测试实体（草方块@出生点上方 8,15,8）→ 看 Repeater delegate
+                //   是否创建+渲染：log 会打 [t53] entity delegate[0] parent=... pos=...；parent 须 QQuick3DNode
+                //   非 null（null=孤儿不渲染）。玩家可肉眼确认出生点上方有无旋转浮动的浅灰球壳小草方块。
+                itemEntities.spawnItem(8, 15, 8, 1)
+            }
 
             Repeater {
                 model: itemEntities.count
@@ -634,13 +640,15 @@ Window {
                     property real bobY: 0       // 上下浮动偏移（格）
                     eulerRotation: Qt.vector3d(0, rotY, 0)
 
-                    // [t53] 诊断（每个 delegate 创建时落 log）：确认 parent = QQuick3DNode* 非 null
-                    //（孤儿不渲染，类 t16/t03 lessons）；pos 须为方块中心 = 整数 + 0.5（ItemEntityManager
-                    // 存格中心）。needs-run：主编排 run 后核 log 见 parent 非 null + pos 合理 → 实体已进场景。
-                    Component.onCompleted: console.info(
-                        "[t53] entity delegate[" + index + "] parent=" + parent
-                        + " pos=" + position + " id=" + itemEntities.itemIdAt(index)
-                        + " (parent 须 QQuick3DNode 非 null；pos 须 = 整数+0.5)")
+                    // [bug1 修复] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染——同 t16 Loader
+                    //   坑、t03 Repeater 坑：QQuickRepeater 不会把 3D delegate 领养进 3D 场景图）。实测 log
+                    //   曾打 parent=null。修法同 t16：onCompleted 显式 reparent 进 itemHost（3D Node）→ 进场景渲染。
+                    Component.onCompleted: {
+                        if (parent === null) parent = itemHost
+                        console.info("[t53] entity delegate[" + index + "] parent=" + parent
+                            + " pos=" + position + " id=" + itemEntities.itemIdAt(index)
+                            + " (须 QQuick3DNode 非 null)")
+                    }
 
                     Model {
                         // 小方块图标（~0.3）：BlockCube 按 itemId 取图集 per-face UV（草顶 / 草侧…），
