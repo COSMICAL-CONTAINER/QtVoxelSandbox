@@ -14,18 +14,26 @@
 // 等待 t36 拾取。创造秒破不产出（PlayerController 不发 spawnItem 信号）；生存不可采掘
 // （canHarvest=false，如空手破石）也不产出。
 //
-// 数据形态（纯持有，无物理 / 渲染）：每个实体 = {世界坐标 pos, 物品 id}。呈现层（Main.qml
-// 的 Repeater）经 count + posAt + itemIdAt 读数据，自发旋转 / 浮动动画（不反向写）。
+// 数据形态（pos / id / 物理态）：每个实体 = {世界坐标 pos, 物品 id, 垂直速度 vy, 是否已落地 resting}。
+// 呈现层（Main.qml 的 Repeater）经 count + posAt + itemIdAt 读数据，自发旋转 / 浮动动画（不反向写）。
 // 拾取（t36）：PlayerController 每帧扫附近实体 → Hotbar.addStack 成功 → removeAt 销毁该实体。
 // 丢弃（t36）：PlayerController Q 键 → 经 spawnItem 信号（onSpawnItem 转发）回流入本类 spawnItem。
 //
 // 实体数量有上限（防溢出，spec「>200 跳过 / 合并」）：达到上限 kCap 时新 spawn 被跳过 +
 // 告警，保留已有实体（最简策略；合并 / LRU 推迟）。
 //
-// 分层（PLAN §2）：本层属 ViewModel，只依赖 Core（QtGlobal / QVector3D），**不**依赖
-// Renderer / Physics / QtQuick3D / World。触发由 PlayerController（Game/Physics 层）发
-// spawnItem 信号，Main.qml 的 Connections 转发到本类 spawnItem() —— 单向事件流，本类
-// 不持有 PlayerController（保持分层干净，同 blockBroken→粒子 / fallDamageTaken→PlayerState 模式）。
+// t60 掉落物重力：spawn 时实体悬浮在格中央（pos.y = y + 0.5），落地前每帧 tick() 施加重力
+// （vy -= g*dt，钳到 -kMaxFall），下移后扫实体所在列查首个实体方块 → 落到其顶面停下（resting=true，
+// vy=0）。落地后仍保留旋转 / 浮动动画（呈现层自发，不受 resting 影响）。落地后再检测到下方方块
+// 被挖空（支撑格变空气）→ 解除 resting 续落（防悬空）。tick 由 PlayerController::tick() 每帧驱动
+// （独立于玩家捕获态 → 菜单 / 暂停时世界照常模拟），传入 World* 做只读 solidity 查询。
+//
+// 分层（PLAN §2）：本层属 Entities（PLAN §2 分层「Entities: ... 掉落物」位于 Game / Physics 之下、
+// World 之上）。t60 引入**向下**只读依赖 World（isSolid），方向合规（PLAN §2「依赖只向下」）；不依赖
+// Renderer / Physics / QtQuick3D。spawnItem 触发由 PlayerController（Game/Physics 层）发信号，Main.qml
+// 的 Connections 转发到本类 spawnItem() —— 单向事件流，本类不持有 PlayerController（同
+// blockBroken→粒子 / fallDamageTaken→PlayerState 模式）。
+class World; // 前向声明（t60 tick 只读 World::isSolid；完整定义在 .cpp include）
 class ItemEntityManager : public QObject
 {
     Q_OBJECT
@@ -64,6 +72,16 @@ public:
     // 时钟未启 → true（保守可拾，防卡死、防延迟机制误伤合法拾取）。
     bool isPickupReady(int i) const;
 
+    // t60 掉落物重力：每帧推进所有未落地实体的垂直运动。vy -= g*dt（钳 -kMaxFall），按 dy 下移 pos.y，
+    // 下移路径上扫实体所在列（cx = floor(pos.x)、cz = floor(pos.z)）查首个实体方块 → 命中则贴其顶面停下
+    // （pos.y = solidCellY + 1 + kRestOffset、vy=0、resting=true）。已 resting 的实体复探支撑格
+    // （= floor(pos.y) - 1）仍实体才续落（防下方被挖后悬空）。任一实体 pos / resting 真变 → 末尾 bump
+    // revision + emit entitiesChanged（驱动 QML delegate 的 {revision; posAt(index)} 绑定重算 →
+    // 呈现位置实时下落；count 不变 → Repeater 不重建 delegate，旋转 / 浮动动画连续不被打断）。
+    // world 为 null / 无实体 → 早 return（保守不动作）。**C++ 直调**（PlayerController::tick 每帧调），
+    // 非 QML 调 → 不挂 Q_INVOKABLE（避开 moc 对 World* 前向类型的 metatype 处理）。
+    void tick(qreal dt, World *world);
+
 signals:
     void entitiesChanged(); // spawn / 未来 remove 触发；驱动 count/revision + QML 绑定刷新
 
@@ -72,6 +90,8 @@ private:
         QVector3D pos;
         int itemId;
         qint64 spawnMs = 0; // 生成时刻（m_clock.elapsed()）；t53 isPickupReady 算 age 用
+        float vy = 0.0f;        // t60：垂直速度（blocks/s；向下为负）；落地后归 0
+        bool resting = false;   // t60：是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
     };
     std::vector<ItemEntity> m_entities;
     int m_revision = 0;
@@ -79,6 +99,12 @@ private:
 
     static constexpr int kCap = 200;             // 实体数上限（spec：>200 跳过 / 合并）
     static constexpr qint64 kPickupDelayMs = 500; // 新生免拾取期（ms；t53 让实体先可见再可拾）
+    // t60 物理常量（与 PlayerController 同值：保持世界重力手感一致；lessons-learned「重力/跳跃常量」）。
+    static constexpr float kGravity = 28.0f;  // 重力加速度（blocks/s²）
+    static constexpr float kMaxFall = 78.4f;  // 终端下落速度（blocks/s；防无限加速）
+    // 落地后实体中心相对支撑方块顶面的静止偏移（格）。图标 Model scale 0.3（半高 0.15）→ 中心高于顶面
+    // 0.3 时图标底贴顶面 +0.15、留余量给浮动动画（bobY 0..0.15）不穿地；半透外壳 scale 0.45 略大无碍。
+    static constexpr float kRestOffset = 0.3f;
 };
 
 #endif // ITEMENTITYMANAGER_H
