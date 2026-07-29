@@ -43,6 +43,21 @@ Window {
         player.release()
         appState = "menu"
     }
+    // t78 立即重生（死亡界面按钮）：满血 + 清死亡态 + 传回出生点 + 清挖掘/飞行态 + 重新锁定指针回游戏。
+    //   PlayerState.respawn 复位血量/死亡态；PlayerController.respawn 传回出生点 + 清物理态；
+    //   重新 grab（死亡时已 release 让光标点按钮）→ 回到 captured 游戏态。
+    function respawnPlayer() {
+        playerState.respawn()   // 清 dead（visible 绑自动隐死亡界面）+ 满血满饥
+        player.respawn()        // 传回出生点 + 清速度/挖掘/飞行/蹲下疾跑
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
+    // t78 死亡界面 → 回主菜单：清死亡态（dismiss 死亡遮罩 + 满血，下次 Start Game 干净）+ 走标准 returnToMenu。
+    //   不复用 returnToMenu 内的复位：returnToMenu 也被暂停叠层「Main Menu」按钮用（非死亡流），保持其语义单一。
+    function deathReturnToMenu() {
+        playerState.respawn()   // 清 dead（visible 绑自动隐）+ 满血（防死亡态遗留到下次进游戏）
+        window.returnToMenu()
+    }
     // t56：把光标手持栈（heldBlock/heldCount）归还进 hotbar。关背包 / 工作台 / 返回菜单时调。
     //   根因：旧版关包只 returnCraftToHotbar（合成格），**不归还 heldBlock** → 用户从调色板拾取到光标后
     //   关包，heldBlock 残留为隐形孤儿（浮动图标仅背包开时显）。此后按 Q → dropHeld 读选中槽（空）→
@@ -997,6 +1012,15 @@ Window {
             hurtAnim.start()           // 400ms 回正（重启进行中的动画 → 连击重新变红）
             shakeAnim.start()          // 200ms 视角晃动
         }
+        // t78：死亡 → 释放指针（光标可见点死亡界面按钮）+ 关背包 / 工作台（防面板卡在死亡遮罩下）+
+        //   归还光标手持栈（防遗留 heldBlock）。died 由 takeDamage 扣血到 ≤0 时发（仅 Survival 走此路径）。
+        //   死亡界面 visible 绑 playerState.dead（deadChanged NOTIFY 自动显），无需在此手动切显隐。
+        function onDied() {
+            if (window.inventoryOpen) window.inventoryOpen = false
+            if (window.craftingTableOpen) window.craftingTableOpen = false
+            window.returnHeldToHotbar()
+            player.release()           // 释放指针 → 光标可见（点「立即重生 / 回主菜单」按钮）
+        }
     }
 
     // 破/放信号 → 粒子迸发（呈现层消费 World 语义事件）。
@@ -1092,11 +1116,14 @@ Window {
     // 暂停 / 未捕获 覆盖层（仅 playing 态）：点击任意处 → 进入（锁定指针）。
     // 主菜单态（appState="menu"）不显本叠层（由 MainMenu 覆盖全屏）。
     // 背包 / 工作台打开时（同为 !captured 态）抑制本叠层 —— 三者互斥，避免面板下面透出暂停叠层。
+    // t78：死亡态（playerState.dead）也抑制本叠层 —— 死亡时同样 !captured，但应由死亡界面（z=180）接管，
+    //   不让「点击恢复」的暂停叠层透出（死亡必须走按钮，不可点击恢复）。
     Item {
         id: pauseOverlay
         anchors.fill: parent
         visible: window.appState === "playing" && !player.captured
                  && !window.inventoryOpen && !window.craftingTableOpen
+                 && !playerState.dead
         z: 100
         Rectangle {
             anchors.fill: parent
@@ -1142,6 +1169,79 @@ Window {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: window.returnToMenu()
+                    }
+                }
+            }
+        }
+    }
+
+    // t78 死亡界面（仅 Survival 血量 0 触发）：半透黑遮罩 + 「你死了」+ [立即重生] / [回主菜单]。
+    //   触发链：PlayerState.takeDamage 扣血到 ≤0 → dead=true + emit died → 上方 Connections(onDied) 释放指针
+    //   + 关背包/工作台；本叠层 visible 绑 playerState.dead（deadChanged NOTIFY 自动显隐）。
+    //   z=180（高于暂停 100 / 背包 150，低于主菜单 200 → 「回主菜单」后 MainMenu 覆盖）。
+    //   立即重生 = window.respawnPlayer()（满血 + 传回出生点 + 重新 grab）；回主菜单 = window.deathReturnToMenu()
+    //   （清死亡态 + returnToMenu）。遮罩 MouseArea 仅吸收点击（死亡态不可点恢复，必须走按钮；§9 lessons
+    //   「全屏遮罩 onClicked 会让点外部误关」 → 这里无 close 语义，纯吸收防穿透到背后游戏层）。
+    //   分层（PLAN §2）：死亡态属 PlayerState（Game 层），呈现层只读消费 + 按钮调 Q_INVOKABLE（不反向写数值）。
+    //   GUI 自绘原创（Rectangle 组合，无 MC GUI PNG；§9 override (a)）。
+    Item {
+        id: deathOverlay
+        anchors.fill: parent
+        visible: window.appState === "playing" && playerState.dead
+        z: 180
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.65)
+            MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后游戏层
+        }
+        Rectangle {
+            width: 360; height: 210; radius: 10
+            anchors.centerIn: parent
+            color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
+            Column {
+                anchors.centerIn: parent; spacing: 22
+                Text {
+                    text: "你死了"
+                    color: "#ff5555"; font.pixelSize: 30; font.bold: true
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    style: Text.Outline; styleColor: "#000000"
+                }
+                // 立即重生（主操作，绿色强调；按钮风格对齐 MainMenu）
+                Rectangle {
+                    width: 220; height: 44; radius: 8
+                    color: deathRespawnArea.containsPress ? "#335c33"
+                          : deathRespawnArea.containsMouse ? "#4f8a4f" : "#3a6a3a"
+                    border.color: "#7fe57f"
+                    border.width: deathRespawnArea.containsMouse ? 2 : 1
+                    Behavior on border.width { NumberAnimation { duration: 80 } }
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    Text { anchors.centerIn: parent; text: "立即重生"
+                           color: "#eaf6ea"; font.pixelSize: 16; font.bold: true }
+                    MouseArea {
+                        id: deathRespawnArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: window.respawnPlayer()
+                    }
+                }
+                // 回主菜单（次操作，中性；对齐 MainMenu「Quit」配色）
+                Rectangle {
+                    width: 220; height: 44; radius: 8
+                    color: deathMenuArea.containsPress ? "#272f37"
+                          : deathMenuArea.containsMouse ? "#333c47" : "#222a32"
+                    border.color: "#3a444f"
+                    border.width: deathMenuArea.containsMouse ? 2 : 1
+                    Behavior on border.width { NumberAnimation { duration: 80 } }
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    Text { anchors.centerIn: parent; text: "回主菜单"
+                           color: "#cdd6dd"; font.pixelSize: 16 }
+                    MouseArea {
+                        id: deathMenuArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: window.deathReturnToMenu()
                     }
                 }
             }

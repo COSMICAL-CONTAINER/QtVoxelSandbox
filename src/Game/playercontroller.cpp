@@ -145,6 +145,22 @@ void PlayerController::grab()
     QCursor::setPos(windowCenterGlobal());                         // 先居中，首次 delta 从中心起算
 }
 
+// t78 重生定位：传回出生点 + 清速度 / 挖掘态 / 飞行 / 蹲下疾跑（spec「立即重生」的物理态复位部分）。
+//   血量 / 死亡态由 PlayerState::respawn() 复位（呈现层按钮同时调两者；分层：定位属 Physics、数值属 Game）。
+//   m_peakY 重置到出生点 Y → respawn 后下落从出生点起算（同 componentComplete 首帧，不误判陈旧落差致死）。
+//   emit positionChanged → 相机绑定（眼位 + 第三人称偏移）重算跟随；feetPosition 同 NOTIFY 一并刷新。
+void PlayerController::respawn()
+{
+    cancelMining();           // 清生存累积挖掘态（裂纹叠层随之隐）
+    m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
+    m_pos = QVector3D(kSpawnX, kSpawnY, kSpawnZ);
+    m_vel = QVector3D(0, 0, 0);
+    m_peakY = m_pos.y();      // 重置掉落伤害基准（同 componentComplete / setMode 语义）
+    if (m_flying) { m_flying = false; emit flyingChanged(); }
+    setMoveState(Walk);       // 蹲下 / 疾跑归 Walk（同时复位 AABB 高 / 眼位；无变化静默）
+    emit positionChanged();   // 相机 / 第三人称模型跟随刷新
+}
+
 void PlayerController::release()
 {
     if (!m_captured) return;

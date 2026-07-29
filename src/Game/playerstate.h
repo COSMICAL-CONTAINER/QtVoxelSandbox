@@ -15,12 +15,15 @@
 // 自动刷新），无需把列表做成 Q_PROPERTY(QVariantList)（本工具链 moc 拒绝后者，见 lessons-learned）。
 //
 // 数值变更入口（Game/Physics 调用，呈现层绝不反向写）：
-//   - takeDamage(amount)  受伤钩子（如掉落伤害，t22）：扣 HP，clamp 到 0
+//   - takeDamage(amount)  受伤钩子（如掉落伤害，t22）：扣 HP，clamp 到 0；扣到 0 → 置 dead 态 + emit died
 //   - heal(amount)        恢复（进食/治疗，Phase 1.1 用）：加 HP，clamp 到 maxHealth
 //   - setHunger(value)    设饥饿（进食消耗，Phase 1.1 用；留接口）：clamp 到 [0, maxHunger]
+//   - respawn()           t78 重生：清 dead 态 + 恢复满血满饥（玩家「立即重生」按钮调；定位由 PlayerController）
 //
-// 初值：满血满饥。本轮（Phase 1.0）做**呈现 + 受伤钩子**（掉落高处扣血，仅 Survival）；
-// 真实战斗/饥饿消耗/死亡重生属 Phase 1.1，本类只暴露接口供后续接入。
+// 死亡态（t78）：health ≤ 0 时 dead=true 并 emit died + deadChanged；dead 期间 takeDamage 早退（不再继续扣，
+// spec「且不再继续扣」）。respawn() 把 dead 翻回 false（emit deadChanged）+ 拉满血饥。呈现层据 dead 显死亡界面。
+//
+// 初值：满血满饥、未死。本轮（Phase 1.0）做**呈现 + 受伤钩子 + 死亡/重生**（掉落高处扣血到 0 → 死亡界面）。
 //
 // 分层（PLAN §2）：Game/Entities 层，只依赖 Core（Qt）。不依赖 Renderer/World/Physics。
 // §4 法律 + §9：零 MC 名词；心/鼓腿图标在呈现层自绘原创（见 VitalIcon.qml，非 MC GUI PNG）。
@@ -32,6 +35,9 @@ class PlayerState : public QObject
     Q_PROPERTY(int maxHealth READ maxHealth CONSTANT)
     Q_PROPERTY(int hunger READ hunger NOTIFY hungerChanged)
     Q_PROPERTY(int maxHunger READ maxHunger CONSTANT)
+    // 死亡态（t78）：health ≤ 0 → true（died 信号触发时刻置位）；respawn() 翻回 false。
+    // NOTIFY=deadChanged（dead 翻 true/false 都发 → QML 绑定据 dead 显/隐死亡界面）。
+    Q_PROPERTY(bool dead READ dead NOTIFY deadChanged)
 
 public:
     explicit PlayerState(QObject *parent = nullptr);
@@ -40,17 +46,27 @@ public:
     int maxHealth() const { return kMaxHealth; }
     int hunger() const { return m_hunger; }
     int maxHunger() const { return kMaxHunger; }
+    bool dead() const { return m_dead; }
 
-    // 受伤钩子（Game/Physics 调用）：扣 amount HP，clamp 到 0。amount<=0 忽略（无治疗语义）。
+    // 受伤钩子（Game/Physics 调用）：扣 amount HP，clamp 到 0；扣到 0 → 置 dead + emit died（且此后不再继续扣，
+    // spec t78）。amount<=0 忽略（无治疗语义）。dead 期间早退（不再扣血、不再发 damaged）。
     Q_INVOKABLE void takeDamage(int amount);
     // 恢复生命：加 amount HP，clamp 到 maxHealth。amount<=0 忽略。
     Q_INVOKABLE void heal(int amount);
     // 设饥饿值（进食消耗属 Phase 1.1；留接口）：clamp 到 [0, maxHunger]。无变化不发信号。
     Q_INVOKABLE void setHunger(int value);
+    // t78 重生：清 dead 态（emit deadChanged）+ 恢复满血满饥。仅复位 PlayerState 数值；
+    //   玩家定位（传回出生点）由 PlayerController::respawn() 负责（分层：状态属 Game 层，定位属 Physics 层）。
+    //   呈现层「立即重生」按钮同时调本方法 + PlayerController.respawn()。
+    Q_INVOKABLE void respawn();
 
 signals:
     void healthChanged();
     void hungerChanged();
+    void deadChanged(); // dead 翻转（true/false 都发；驱动 QML 死亡界面显隐，t78）
+    // t78 死亡一次性事件：health 首次降到 ≤0 时发（与 deadChanged 同帧发；died 语义=「刚死」，供呈现层
+    //   释放指针 / 关面板等一次性副作用；deadChanged 驱动持续可见性绑定）。
+    void died();
     // 受伤闪烁触发（t51）：takeDamage 实扣 HP 时发；呈现层（Main.qml）Connections 据此启动
     // 红色半透全屏叠层的 alpha 0.4→0 淡出动画（~600ms）。amount = 本次请求扣血量（不计 clamp 截断）。
     // 与 healthChanged 分离：healthChanged 驱动心条数值刷新（每半心切态），damaged 驱动一次性的视觉闪烁
@@ -63,6 +79,7 @@ private:
 
     int m_health = kMaxHealth; // 初值满血
     int m_hunger = kMaxHunger; // 初值满饥
+    bool m_dead = false;       // t78 死亡态（health ≤ 0 → true；respawn 翻回 false）
 };
 
 #endif // PLAYERSTATE_H

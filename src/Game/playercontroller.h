@@ -186,6 +186,11 @@ public:
     // 捡回只剩 1」bug；spec 验收「4 木棒丢出捡回仍 4」）。清空 hotbar 光标手持栈（setHeldBlock(0) 同步清
     // count）。空手 → 不丢。经 QML Connections 转发（同 dropHeld）。
     Q_INVOKABLE void dropHeldCursor();
+    // t78 重生定位：传回出生点（kSpawn）+ 清速度 / 挖掘态 / 飞行 / 蹲下疾跑（spec「立即重生」的定位部分）。
+    //   由呈现层「立即重生」按钮调（与 PlayerState::respawn 配对：本方法管定位/物理态，PlayerState 管
+    //   血量/死亡态）。出生点与构造期 m_pos 初值同源（kSpawn）；m_peakY 重置 → respawn 后下落从出生点
+    //   起算（同 componentComplete 首帧，不误判陈旧落差）。emit positionChanged → 相机绑定重算跟随。
+    Q_INVOKABLE void respawn();
 
 signals:
     void worldChanged();
@@ -285,7 +290,12 @@ private:
     QElapsedTimer m_clock;
     QElapsedTimer m_evtClock; // 事件时间戳（双击检测；不被 tick restart）
 
-    QVector3D m_pos{8, 14, 8}; // 脚底
+    // 出生点（t78 重生定位）：与构造期 m_pos 初值同源，respawn() 传回此处。脚底中心坐标。
+    // 必须声明在 m_pos 之前（m_pos 默认成员初始化器引用本常量；C++ 不允许前向引用）。
+    static constexpr float kSpawnX = 8.0f;
+    static constexpr float kSpawnY = 14.0f;
+    static constexpr float kSpawnZ = 8.0f;
+    QVector3D m_pos{kSpawnX, kSpawnY, kSpawnZ}; // 脚底（= 出生点；respawn 传回此处，t78）
     QVector3D m_vel{0, 0, 0};
     float m_yaw = 0, m_pitch = -42;
     Mode m_mode = Spectator;
