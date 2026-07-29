@@ -782,25 +782,27 @@ void PlayerController::step(qreal dt)
     const int sub = std::max(1, int(std::ceil(md / 0.4f)));
     delta /= float(sub);
 
-    // t51 蹲下「边缘安全」：蹲下且着地时，若整帧水平位移的目的位置脚下无支撑方块（hasGroundBelowAt），
-    //   则跳过本帧水平移动（仅重力 / 跳跃仍生效）→ 蹲下不会从方块边缘走下（spec「防走下边缘」）。
-    //   检查目的位置 = 当前 m_pos + delta*sub（一帧位移 << 1 格 → 等价「贴边即停」）。MC 行为对齐。
-    //   仅蹲态 + 着地触发；走 / 疾跑 / 滞空不限制（走下边缘正常掉落）。
-    const bool crouchEdgeBlock = (m_moveState == Crouch && m_onGround
-                                  && (delta.x() != 0.0f || delta.z() != 0.0f)
-                                  && !hasGroundBelowAt(m_pos.x() + delta.x() * float(sub),
-                                                        m_pos.z() + delta.z() * float(sub)));
-
+    // t58 蹲下「边缘安全」（逐轴后查回滚）：原 t51 实现「整帧目的位置（m_pos + delta*sub）预查 →
+    //   通过则整帧放行水平移动」在多轴合成位移 / 子步内 wall snap 下会与 moveAxis 后的真实 m_pos
+    //   错位 → 玩家可能落到无支撑格而坠下方块边缘。改为 moveAxis(0) → 立即查脚下（新位置 -Y）有无
+    //   支撑方块 → 无则回滚 X 位移；moveAxis(2) → 同样查 → 回滚 Z。判定点 = moveAxis 后的真实 m_pos
+    //   （含本子步 wall snap），与 aabbHitsSolid 同源 → 边缘安全与实际碰撞一致。仅蹲态 + 本子步着地
+    //   （m_onGround）时启用：走 / 疾跑 / 滞空 / 起跳子步不限制（防走下边缘，不干预跳跃 / 坠落）。
     const bool wasGround = m_onGround;
     m_onGround = false;
     for (int i = 0; i < sub; ++i) {
         const float dy = delta.y();
         moveAxis(1, dy);
         if (dy < 0 && m_vel.y() == 0) m_onGround = true; // 下落被挡 = 着地
-        if (!crouchEdgeBlock) {
-            moveAxis(0, delta.x());
-            moveAxis(2, delta.z());
-        }
+        const bool crouchSafe = (m_moveState == Crouch && m_onGround);
+        const float prevX = m_pos.x();
+        moveAxis(0, delta.x());
+        if (crouchSafe && delta.x() != 0.0f && !hasGroundBelowAt(m_pos.x(), m_pos.z()))
+            m_pos.setX(prevX); // 蹲下边缘安全：X 移动后脚下无支撑 → 回滚该轴位移
+        const float prevZ = m_pos.z();
+        moveAxis(2, delta.z());
+        if (crouchSafe && delta.z() != 0.0f && !hasGroundBelowAt(m_pos.x(), m_pos.z()))
+            m_pos.setZ(prevZ); // 蹲下边缘安全：Z 移动后脚下无支撑 → 回滚该轴位移
     }
     // 稳健地面复探：脚底下方 0.05 有实体即算着地
     const float oy = m_pos.y();
