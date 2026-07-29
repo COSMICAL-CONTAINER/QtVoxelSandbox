@@ -36,9 +36,15 @@ const FaceCorner kFaceCorners[6][4] = {
     {{ kH, -kH, -kH, 1, 0}, {-kH, -kH, -kH, 0, 0}, {-kH,  kH, -kH, 0, 1}, { kH,  kH, -kH, 1, 1}},
 };
 
-// 图集：10 瓦片横排（与 chunkgeometry N=10 / tools/build_atlas.py 严格一致）。
+// 图集瓦片数：**必须**与 src/World/chunkgeometry.cpp 的 N、tools/build_atlas.py 的 TILES
+// 长度三处严格一致（一个偏差即贴图错位 / 渗色）。当前 12 瓦片横排（t50 加工作台 top/side）：
+//   0 grass_top / 1 grass_side / 2 dirt / 3 stone / 4 sand
+//   5 cobble / 6 log_top / 7 log_side / 8 planks / 9 leaves
+//   10 crafting_table_top / 11 crafting_table_side
 // 瓦片序号由 BlockRegistry::tileIndex(blockId, face) 给出（单一权威）。
-constexpr int kAtlasN = 10;
+// 历史 bug（t54）：本处曾停在 10，而 chunkgeometry 已升到 12 → BlockCube 的 u 区间按 1/10 算
+// 偏宽偏右，泥土(2)采到半块石头、树叶(9)采到木板；与 chunkgeometry 对齐到 12 后修复。
+constexpr int kAtlasN = 12;
 constexpr float kTileW = 1.0f / kAtlasN;
 constexpr float kHx = 0.5f / (kAtlasN * 16); // 半纹素内缩（线性采样防跨瓦片渗色）
 constexpr float kHy = 0.5f / 16;
