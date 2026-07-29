@@ -220,11 +220,14 @@ void Hotbar::setSlotBlock(int slot, int blockId)
     setStack(slot, blockId, blockId == 0 ? 0 : 1);
 }
 
-// 智能堆叠放入（t36 拾取消费）。优先序（spec「先选中槽（空/同 id 可入），否则找空槽」）：
-//   0) 选中槽：同 id 未满 → 累加（与手持合并）；空槽 → 开新栈（入手）。二选一，同 id 优先于开新栈。
-//   1) 其它同 id 槽合并（跳过选中槽）。
-//   2) 其它空槽开新栈（跳过选中槽）。
+// 智能堆叠放入（t36 拾取消费）。优先序（t74 重排）：
+//   0) 所有同 id 未满槽合并（含选中槽）——合并优先于空槽开新。
+//   1) 空槽开新栈（选中槽优先，再按索引序）。
 // 返回未放入数（0=全入；>0=背包满，caller 据此判「不拾取，entity 留」）。
+//
+// t74 根因：旧序把「选中槽空→开新栈」排在「合并同 id 槽」前 → 选中槽空时直接开新栈，
+// 不查别处已有同 id 未满槽。例：第1槽草(未满) + 第2槽(选中,空) 挖草 → 草应进第1槽却进第2槽，
+// 形成同物分散两栈的反直觉结果。新序：合并全程优先于开新，避免「同物分散」。
 int Hotbar::addStack(int id, int n)
 {
     if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
@@ -232,28 +235,23 @@ int Hotbar::addStack(int id, int n)
     int remaining = n;
     bool changed = false;
 
-    // 0) 选中槽优先（「入手」语义：手持空 → 入手；手持同物 → 合并入手）。
-    if (m_selectedSlot >= 0 && m_selectedSlot < int(m_slots.size())) {
-        ItemStack &sel = m_slots[size_t(m_selectedSlot)];
-        if (remaining > 0 && sel.id == id && sel.count < cap) {
-            const int add = std::min(cap - sel.count, remaining);
-            sel.count += add; remaining -= add; changed = true;
-        } else if (remaining > 0 && sel.id == 0) {
-            const int add = std::min(cap, remaining);
-            sel = ItemStack{id, add}; remaining -= add; changed = true;
-        }
-    }
-    // 1) 其它同 id 槽合并（跳过选中槽，已在上步处理）。
+    // 0) 先扫所有已有同 id 未满槽合并（含选中槽）。合并优先于空槽开新（t74）。
     for (size_t i = 0; i < m_slots.size(); ++i) {
         if (remaining <= 0) break;
-        if (int(i) == m_selectedSlot) continue;
         ItemStack &s = m_slots[i];
         if (s.id == id && s.count < cap) {
             const int add = std::min(cap - s.count, remaining);
             s.count += add; remaining -= add; changed = true;
         }
     }
-    // 2) 其它空槽开新栈（跳过选中槽）。
+    // 1) 空槽开新栈：选中槽优先（「入手」语义：选中空时优先入手），再按索引序补其余空槽。
+    if (remaining > 0 && m_selectedSlot >= 0 && m_selectedSlot < int(m_slots.size())) {
+        ItemStack &sel = m_slots[size_t(m_selectedSlot)];
+        if (sel.id == 0) {
+            const int add = std::min(cap, remaining);
+            sel = ItemStack{id, add}; remaining -= add; changed = true;
+        }
+    }
     for (size_t i = 0; i < m_slots.size(); ++i) {
         if (remaining <= 0) break;
         if (int(i) == m_selectedSlot) continue;
