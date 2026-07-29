@@ -138,11 +138,11 @@ Item {
     }
 
     // 面板：深色圆角，居中。t63 宽度容纳 3×9 主栏（9×40=360 + 2×16 边距 = 392）；高度 = 标题 + 3×3 合成 +
-    // 提示 + 3×9 主栏 + 9 hotbar 行 + 间距/边距。
+    // 3×9 主栏 + 9 hotbar 行 + 间距/边距（t77 删去提示行，高度随减 28）。
     Rectangle {
         id: panel
         width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
-        height: 400                                  // 标题(22) + 合成(120) + 提示(16) + 主栏(120) + hotbar(40) + 间距/边距
+        height: 372                                  // 标题(22) + 合成(120) + 主栏(120) + hotbar(40) + 间距/边距
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -170,15 +170,21 @@ Item {
                 }
             }
 
-            // 合成区：左 3×3 格 + 箭头 + 右结果槽。
+            // 合成区：左 3×3 格 + 箭头 + 右结果槽。t77：合成行整体水平居中——本 Item 是 Column 子项，
+            // 不能用 anchors（Qt Column positioner 禁止子项 anchors，见 Qt 文档），故算出左偏移 rowOffsetX
+            // 加到 3 个绝对定位子元素的 x 上：3×3(120) + 间隙(28) + 结果槽(40) = 188 宽，在 360 行宽内居中，
+            // 消除原左对齐（x=0..188）导致面板右侧大段空白的问题。
             Item {
+                id: craftRow
                 width: parent.width
                 height: root.gridN * root.slotSize
+                // 合成行整体宽（gridN*slotSize + 28 + slotSize = 188）居中所需的左偏移。
+                readonly property real rowOffsetX: (width - (root.gridN * root.slotSize + 28 + root.slotSize)) / 2
 
                 // 3×3 合成格。
                 Grid {
                     id: craftGrid
-                    x: 0; y: 0
+                    x: craftRow.rowOffsetX; y: 0
                     columns: root.gridN; spacing: 0
                     Repeater {
                         model: root.gridN * root.gridN  // 9
@@ -249,7 +255,7 @@ Item {
 
                 // 合成箭头（指向结果槽）：自绘像素图（§9a）。
                 Canvas {
-                    x: root.gridN * root.slotSize + 2; y: root.slotSize + 10
+                    x: craftRow.rowOffsetX + root.gridN * root.slotSize + 2; y: root.slotSize + 10
                     width: 24; height: 20
                     onPaint: {
                         const ctx = getContext("2d"); ctx.reset()
@@ -264,7 +270,7 @@ Item {
 
                 // 结果槽（最右）：显匹配配方产物图标；点击 → 合成一批（消耗每原料 1、产出 outputCount 到光标）。
                 Item {
-                    x: root.gridN * root.slotSize + 28; y: root.slotSize
+                    x: craftRow.rowOffsetX + root.gridN * root.slotSize + 28; y: root.slotSize
                     width: root.slotSize; height: root.slotSize
                     InvSlot { anchors.fill: parent; wellColor: "#262b30" }
 
@@ -334,13 +340,6 @@ Item {
                         }
                     }
                 }
-            }
-
-            // 提示行。
-            Text {
-                width: parent.width
-                color: "#7d8893"; font.pixelSize: 11
-                text: "3×3 合成：放入原料 → 取产物。木镐 = 顶行 3 木板 + 中列 2 木棒"
             }
 
             // t63 3×9 主物品栏（27 槽）：左键整组 / 右键半份取放（与 SurvivalInventory 主栏同模式）。
