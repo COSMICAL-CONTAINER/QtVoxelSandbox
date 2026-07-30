@@ -44,10 +44,15 @@ public:
     };
 
     // 材料段基址（合成产物中「既非方块也非工具、可堆叠」的材料物品 id 区间，>= 0x200）。
-    // 当前仅有木棒（StickMaterialBase = 0x200）。与 Hotbar 的材料段判定（id >= 0x200）同源；
-    // 改一处须同步另一处（.cpp 有 static_assert 对齐）。
+    // 当前成员：木棒(0x200) / 煤炭(0x201) / 铁原矿(0x202) / 铁锭(0x203)。与 Hotbar 的材料段判定
+    // （id >= 0x200）同源；改一处须同步另一处（.cpp 有 static_assert 对齐）。
+    // 矿石→材料掉落由 BlockRegistry::BlockDef.dropId 引用（Core 层不依赖 Game，故 blockregistry.cpp
+    // 用字面量 0x201/0x202；本处给字面量命名，全工程通过 RecipeRegistry::CoalId 等引用）。
     static constexpr int MaterialIdBase = 0x200;
     static constexpr int StickId        = 0x200; // 木棒：4 件产出（stick 配方）+ 木镐配方原料
+    static constexpr int CoalId         = 0x201; // 煤炭：煤矿石挖掘掉落（BlockRegistry::CoalOre.dropId）；可作燃料 / 未来冶炼原料
+    static constexpr int IronOreDropId  = 0x202; // 铁原矿：铁矿石挖掘掉落（BlockRegistry::IronOre.dropId）；熔炉冶炼为铁锭
+    static constexpr int IronIngotId    = 0x203; // 铁锭：铁原矿冶炼产物；石镐 / 铁镐配方原料
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

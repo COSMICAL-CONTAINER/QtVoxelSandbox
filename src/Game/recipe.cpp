@@ -58,6 +58,12 @@ static_assert(kStickId == 0x200, "木棒 id 须与 Hotbar 材料段基址 0x200 
 // 木棒 id 经 recipe.h 的 RecipeRegistry::StickId（static constexpr）对外暴露（Hotbar 读它识别材料段）；
 // 此处再断言 .cpp 内部常量与头文件常量一致（防漂移）。
 static_assert(RecipeRegistry::StickId == kStickId, "recipe.h StickId 与 .cpp kStickId 须一致");
+// 材料段矿石掉落 id（t85 命名）：Core 层 blockregistry.cpp 不依赖 Game，CoalOre/IronOre 的 dropId 用
+// 字面量 0x201/0x202（见该文件注释「t85 命名」）；本处用 static_assert 钉死 recipe.h 常量 == 字面量，
+// 任一处改动值而忘了同步另一处 → 编译失败（跨层数据契约的保护，因 Core 不能 include Game 头）。
+static_assert(RecipeRegistry::CoalId        == 0x201, "CoalId 须与 BlockRegistry::CoalOre.dropId 字面量 0x201 一致");
+static_assert(RecipeRegistry::IronOreDropId == 0x202, "IronOreDropId 须与 BlockRegistry::IronOre.dropId 字面量 0x202 一致");
+static_assert(RecipeRegistry::IronIngotId   == 0x203, "IronIngotId 须为材料段序号 0x203");
 } // namespace
 
 // ── 匹配算法 ──

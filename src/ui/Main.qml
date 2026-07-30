@@ -934,7 +934,14 @@ Window {
                                      : "#8a5a2e"
                         }
                     }
-                    // 材料段：CrackBox + MaterialIcon sourceItem（木棒棕色长条）。
+                    // 材料段：CrackBox + MaterialIcon sourceItem + alphaCutoff（t85）。
+                    //   木棒 / 煤 / 铁原矿 / 铁锭（RecipeRegistry::*Id，0x200 段）均无等距立方体 PNG，
+                    //   走 MaterialIcon Canvas 自绘 → 经 Texture.sourceItem 贴到 CrackBox 六面。
+                    //   **alphaCutoff + opacity<1**（复用上方裂纹叠层 / t64 工具段同款 alpha-test 契约）：
+                    //   MaterialIcon 的 Canvas 透明底（RGBA 0,0,0,0）若不丢弃，会被当不透明黑渲染 →
+                    //   整个掉落实体坍缩成黑立方体（旧「材料段兜底成黑/石块」根因，同 t64 工具段旧坑）。
+                    //   设 alphaCutoff:0.5 + opacity:0.99 → 透明底像素被 alpha-test 丢弃、仅图标像素显，
+                    //   绕 Y 自转时六面同图恒有图标可见（不靠 billboard）。flipV 同上（2D 左上原点 → 3D 左下）。
                     Model {
                         visible: hotbarVM.isMaterial(entRoot.entId)
                         geometry: CrackBox {}
@@ -942,6 +949,8 @@ Window {
                         position: Qt.vector3d(0, entRoot.bobY, 0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
                             baseColorMap: Texture {
                                 flipV: true
                                 sourceItem: MaterialIcon {

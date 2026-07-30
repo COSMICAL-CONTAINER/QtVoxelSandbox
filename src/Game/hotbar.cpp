@@ -172,12 +172,16 @@ QString Hotbar::nameAt(int slot) const
 QString Hotbar::nameForBlock(int blockId) const
 {
     // 走单一权威：方块段→BlockRegistry::displayName；工具段→ToolRegistry::displayName（t33）；
-    // 材料段（t50 木棒）→ 本地通用名（材料段无注册表，名简单且少，就近返回）。
+    // 材料段（t50 木棒 / t85 煤炭·铁原矿·铁锭）→ 本地通用名（材料段无注册表，名简单且少，就近返回）。
     // air / 越界 → 空串。PLAN §9：UI 不另存方块 / 工具名副本。
     if (blockId <= 0) return QString();
     if (blockId >= kMaterialIdBase) {
-        // 材料段：当前仅木棒（RecipeRegistry::StickId = 0x200）。
-        if (blockId == RecipeRegistry::StickId) return QStringLiteral("木棒");
+        // 材料段：木棒 / 煤炭 / 铁原矿 / 铁锭（id 取自 RecipeRegistry 常量，与 blockregistry.cpp 矿石
+        // dropId 字面量同源）。任一漏返 → 空串（兜底，UI 不显名但不崩）。
+        if (blockId == RecipeRegistry::StickId)       return QStringLiteral("木棒");
+        if (blockId == RecipeRegistry::CoalId)        return QStringLiteral("煤炭");
+        if (blockId == RecipeRegistry::IronOreDropId) return QStringLiteral("铁原矿");
+        if (blockId == RecipeRegistry::IronIngotId)   return QStringLiteral("铁锭");
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
