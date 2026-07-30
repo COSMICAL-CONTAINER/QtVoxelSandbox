@@ -46,6 +46,9 @@ qt_add_executable(voxelsandbox
     src/Game/toolregistry.h
     src/Game/itementitymanager.cpp
     src/Game/itementitymanager.h
+    # t95 统一实体管理器（Entities 层）：测试生物 / 玩家推动 / 重力。为后续 Mob/AI 系统铺垫统一基类。
+    src/Entities/entitymanager.cpp
+    src/Entities/entitymanager.h
     src/Game/raycast.cpp
     src/Game/raycast.h
     src/Game/recipe.cpp
@@ -67,12 +70,14 @@ qt_add_executable(voxelsandbox
 #   src/World     ← chunks/worldgen/mesher 数据层
 #   src/Renderer  ← QQuick3DGeometry 呈现层
 #   src/Game      ← 玩家/物品/工具/射线（Physics-Game 逻辑层）
+#   src/Entities  ← 统一实体（测试生物 / 掉落物基类；t95）
 #   src/Audio     ← miniaudio 封装（Core/Platform 层，t89）
 target_include_directories(voxelsandbox PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/World
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Game
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Entities
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Audio
 )
 

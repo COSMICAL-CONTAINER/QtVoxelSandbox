@@ -140,6 +140,16 @@ Window {
     // 与物理(PlayerController)共用同一份栅格。
     World { id: theWorld; width: 48; depth: 48; height: 16; seed: 1337 }
 
+    // t95：世界就绪后（Window Component.onCompleted 跑在所有子组件含 theWorld 完成之后），在地图中间
+    // 高处生成 1 个测试生物，由重力 tick 落到地表（无需查地表高度——避开与 worldChanged 触发时机的
+    // 耦合：setWidth/setDepth 的 worldChanged 在本 Connections 建立前已发，hook 不到；onCompleted 稳定
+    // 一次性触发）。spec「地图中间地表生成 1 个纯方块纯色生物」。
+    Component.onCompleted: {
+        const cx = Math.floor(theWorld.width / 2)
+        const cz = Math.floor(theWorld.depth / 2)
+        entityManager.spawnMob(cx, theWorld.height - 1, cz)
+    }
+
     // 昼夜时钟（t09，PLAN §2-H）：~20 分钟周期的天光亮度乘子 lerp（**非**旋转方向光）。
     // dayPhase 0..1 循环（0=正午 / 0.5=子夜）；skyLight [0,1] 是纯函数派生的天光乘子，供下面
     // SceneEnvironment.clearColor 与 DirectionalLight.brightness lerp 昼(#9ec6e8/1.5)↔夜(#0b1026/0.25)。
@@ -175,6 +185,13 @@ Window {
     // 触发由 PlayerController 发 spawnItem 信号，下面 Connections 转发到 spawnItem()（单向事件流）。
     ItemEntityManager { id: itemEntities }
 
+    // t95 统一实体管理器（Entities 层）：为后续 Mob/AI 系统铺垫的统一实体基类（pos / 半径 / 可推动
+    // 标志 / 渲染外观）。本轮持有测试生物（pushable=true，纯色方块），玩家走碰可推动；掉落物
+    // （itemEntities）机制等价「pushable=false、被拾取」的实体变体（本轮不迁移、仅确立基类形态）。
+    // 重力 / 推动物理由 PlayerController.tick 驱动（持 EntityManager*）；呈现层（下方 mobHost Repeater）
+    // 只读 count/posAt/colorAt 自发渲染（PLAN §2 分层：呈现只消费 Entities 数据）。
+    EntityManager { id: entityManager }
+
     // t89 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 脚步 3 原创 SFX。
     //   触发由 Game 层信号发出（World::blockBroken/blockPlaced、PlayerController::walkPhaseChanged），
     //   呈现层经 Connections 转发到 playBreak/playPlace/playStep（音频层只消费，PLAN §2 分层）。
@@ -197,6 +214,7 @@ Window {
         world: theWorld
         hotbar: hotbarVM
         itemEntities: itemEntities
+        entityManager: entityManager
         selectedBlock: hotbarVM.selectedBlockId
         selectedItem: hotbarVM.selectedItemId
     }
@@ -1038,6 +1056,50 @@ Window {
                         loops: Animation.Infinite
                         NumberAnimation { from: 0; to: 0.15; duration: 1000; easing.type: Easing.InOutSine }
                         NumberAnimation { from: 0.15; to: 0; duration: 1000; easing.type: Easing.InOutSine }
+                    }
+                }
+            }
+        }
+
+        // t95 测试生物渲染（统一 EntityManager 的 pushable 实体）：Repeater 父节点 = 场景内 3D Node
+        // （mobHost）→ delegate（Node/Model，3D 对象）被领养进 3D 场景图（lessons-learned「动态 3D 对象
+        // 必须挂到场景 Node，否则孤儿不渲染」—— 同 itemHost / torchHost 模式）。
+        //
+        // 触发：entityManager.count 随 spawnMob 自增（NOTIFY entitiesChanged）→ Repeater 追加 delegate
+        // （int model 不重建已有）。位置随玩家推动 / 重力下落 bump revision → {revision; posAt} 绑定重算。
+        // 分层（PLAN §2）：实体数据属 Entities（EntityManager），呈现属 View（本 Repeater）；只读消费、
+        // 绝不反向写（同 itemEntities Repeater 模式）。
+        Node {
+            id: mobHost
+            Component.onCompleted: {
+                console.info("[t95] mobHost UP parent=" + mobHost.parent + " (须为 3D Node 非 null)")
+            }
+
+            Repeater {
+                model: entityManager.count
+                delegate: Node {
+                    // 触碰 revision 建立依赖（push 位移 / 重力下落 bump revision → 位置 / 配色重算）。
+                    // t36 erase-shift 不适用于本轮（无 remove），但 revision 仍是 posAt/colorAt 这类
+                    // Q_INVOKABLE 绑定的 NOTIFY 触发器（同 itemEntities delegate 模式）。
+                    position: { entityManager.revision; return entityManager.posAt(index) }
+                    Component.onCompleted: {
+                        // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
+                        // onCompleted 显式 reparent 进 mobHost（同 itemHost / torchHost delegate）。
+                        if (parent === null) parent = mobHost
+                        console.info("[t95] mob delegate[" + index + "] parent=" + parent
+                            + " pos=" + position + " (须 QQuick3DNode 非 null)")
+                    }
+
+                    // UnitCube = ±0.5 居中单位立方体（与地形 / 线框 / 玩家模型同基准，lessons-learned）。
+                    // scale=1（1×1×1 方块实体）；NoLighting（lessons：可见 Model 必须 NoLighting，lit 不渲染）。
+                    // baseColor = 实体配色（#ff5555 醒目纯色，spec「纯色突出」）。
+                    Model {
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: { entityManager.revision; return entityManager.colorAt(index) }
+                        }
                     }
                 }
             }

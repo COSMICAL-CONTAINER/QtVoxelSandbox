@@ -11,6 +11,7 @@
 #include <QtQml/qqml.h>
 
 #include "blockregistry.h"      // 方块 id（默认手持方块 / 破放校验）
+#include "entitymanager.h"      // 统一实体管理器（t95 测试生物 / 玩家推动）
 #include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
 #include "itementitymanager.h"  // 掉落实体管理器（t36 拾取扫描 / removeAt）
 #include "raycast.h"            // RayHit（射线选体结果）
@@ -36,6 +37,12 @@ class PlayerController : public QQuickItem
     // 经 QML 绑定注入（运行期连接、非编译期反向依赖；同 world 属性先例）。
     Q_PROPERTY(Hotbar *hotbar READ hotbar WRITE setHotbar NOTIFY hotbarChanged)
     Q_PROPERTY(ItemEntityManager *itemEntities READ itemEntities WRITE setItemEntities NOTIFY itemEntitiesChanged)
+    // 统一实体管理器（t95）：PlayerController 经 Q_PROPERTY 持 EntityManager*（同 world/hotbar/itemEntities
+    // 模式，QML 注入 peer ViewModel）。每帧调 entityManager.tick(dt, world)（重力 / 地面静止，独立于
+    // 捕获态——菜单 / 暂停时实体仍模拟）+ captured 时 resolvePlayerPush（玩家走碰可推动实体，把玩家
+    // 位移解析后传给实体）。分层（PLAN §2）：PlayerController 属 Game/Physics，EntityManager 属 Entities，
+    // 经 QML 绑定注入（运行期连接、非编译期反向依赖，同 itemEntities 先例）。
+    Q_PROPERTY(EntityManager *entityManager READ entityManager WRITE setEntityManager NOTIFY entityManagerChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -120,6 +127,8 @@ public:
     void setHotbar(Hotbar *h);
     ItemEntityManager *itemEntities() const { return m_itemEntities; }
     void setItemEntities(ItemEntityManager *m);
+    EntityManager *entityManager() const { return m_entityManager; }
+    void setEntityManager(EntityManager *m);
 
     QVector3D position() const { return m_pos + QVector3D(0, m_eyeHeight, 0); }
     float yaw() const { return m_yaw; }
@@ -196,6 +205,7 @@ signals:
     void worldChanged();
     void hotbarChanged();
     void itemEntitiesChanged();
+    void entityManagerChanged();
     void positionChanged();
     void yawChanged();
     void pitchChanged();
@@ -290,6 +300,7 @@ private:
     World *m_world = nullptr;
     Hotbar *m_hotbar = nullptr;                  // 拾取 addStack / 丢弃 takeStack 的栈操作目标（Q_PROPERTY 绑定）
     ItemEntityManager *m_itemEntities = nullptr; // 拾取扫描数据源 + removeAt 销毁（Q_PROPERTY 绑定）
+    EntityManager *m_entityManager = nullptr;    // 统一实体（t95 测试生物）：重力 tick + 玩家推动（Q_PROPERTY 绑定）
     QQuickWindow *m_window = nullptr;
     QTimer m_timer;
     QElapsedTimer m_clock;

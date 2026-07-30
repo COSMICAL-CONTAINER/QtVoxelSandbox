@@ -50,6 +50,16 @@ void PlayerController::setItemEntities(ItemEntityManager *m)
     emit itemEntitiesChanged();
 }
 
+// t95：注入统一实体管理器（QML 绑定）。同 setItemEntities 模式：仅记录指针 + 发信号（QML 注入 peer
+// ViewModel，运行期连接、非编译期反向依赖；PLAN §2 分层）。PlayerController 是唯一同时持 World* +
+// EntityManager* 的对象，故由 tick 驱动实体的重力 / 推动物理（实体物理态住在 EntityManager 内部数据）。
+void PlayerController::setEntityManager(EntityManager *m)
+{
+    if (m_entityManager == m) return;
+    m_entityManager = m;
+    emit entityManagerChanged();
+}
+
 void PlayerController::onWindowChanged(QQuickWindow *win)
 {
     if (m_window) m_window->removeEventFilter(this);
@@ -246,6 +256,9 @@ void PlayerController::tick()
     // PlayerController 是唯一同时持 World* + ItemEntityManager* 的对象，故由此驱动；实体物理态
     // （vy / resting）与 pos 同住在 ItemEntityManager 内部数据里（分层：Entities→World 向下只读）。
     if (m_itemEntities && m_world) m_itemEntities->tick(dt, m_world);
+    // t95：统一实体（测试生物）重力 + 地面静止，同掉落物常开（菜单 / 暂停时仍模拟）。机制同源
+    // （EntityManager::tick 向下只读 World::isSolid）。PlayerController 现亦持 EntityManager* → 由它驱动。
+    if (m_entityManager && m_world) m_entityManager->tick(dt, m_world);
     // t92：拾取扫描提到 m_captured 早 return **之前**——打开背包（release→m_captured=false）时
     // 原 pickupScan 落在早 return 之后永不执行，玩家走近掉落物拾不起（仅见实体掉地）。掉落物物理
     // （itemEntities->tick）本就在早 return 前跑（独立于捕获态），拾取与之同级、同样常开才一致。
@@ -260,6 +273,10 @@ void PlayerController::tick()
     }
     pollMouse();
     step(dt);
+    // t95：玩家推动可推动实体（仅 captured/playing；玩家主动移动后才有位移可传给实体）。在 step() 解析
+    // 完玩家与世界碰撞后调 —— 用已贴墙的玩家 AABB 做圆-vs-AABB 推解，把穿透量传给实体（swept 碰撞解析
+    // 玩家位移传给实体，spec）。m_height 用当前 AABB 高（蹲下变矮 → 推动区间随之收，与碰撞同源）。
+    if (m_entityManager) m_entityManager->resolvePlayerPush(m_pos, kHalfW, m_height, m_world);
     updateRaycast();   // 沿视线 DDA 选体 → 更新线框命中态
     updateCameraDistance(); // t40：第三人称相机距离钳制（防穿墙）
     updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
