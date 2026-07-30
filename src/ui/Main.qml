@@ -314,7 +314,8 @@ Window {
                 //   t52 注释写了修法但代码没改（仍 z=-0.4/tilt65/scale0.16）；t73 落实：pivot 收到 z=-0.2、baseTilt
                 //   减到 30°、臂段 scale 收到 0.09 → 手段中心相机本地 z∈[-0.25(静止), -0.13(挥峰)]，始终近于 0.3 →
                 //   depth 测试恒胜地形 → 手臂恒在所有实体方块之前（不穿模）。pivot.y 上移到 0.05 使手仍落视野下中。
-                position: Qt.vector3d(0.35, 0.05, -0.2)
+                //   t91：pivot.x 0.35→0.20 整手左移（旧 0.35 偏右，手持方块出右框）；y/z 不动（不穿模余量不变）。
+                position: Qt.vector3d(0.20, 0.05, -0.2)
                 readonly property real baseTilt: 40.0  // t81：30→40 前抬多一点（手伸出来）；z 余量 0.05+ 仍不穿模
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
@@ -324,14 +325,14 @@ Window {
                 //   作 viewModelHand 子节点 → 随挥动同步旋转。UnitCube + NoLighting（同地形/线框已验证可见路径）。
                 Model {
                     geometry: UnitCube {}
-                    position: Qt.vector3d(0, 0.02, 0)      // 肘上（本地 y -0.05..0.09 = 上半段）
+                    position: Qt.vector3d(0, -0.10, 0)     // t91：袖段下移（旧 +0.02 在上=右上蓝，应袖近躯干在下）
                     scale: Qt.vector3d(0.12, 0.18, 0.12)   // t81：加粗（0.09→0.12），手明显变大（零穿模：z 深度未动）
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604) }
                 }
                 // 前臂/手（肤色 #caa472；肘下手段）。原整臂一色，t73 拆为袖+手两段（上半蓝袖、下半肤色手）。
                 Model {
                     geometry: UnitCube {}
-                    position: Qt.vector3d(0, -0.10, 0)    // 肘下（本地 y -0.16..-0.04 = 下半段）
+                    position: Qt.vector3d(0, 0.02, 0)     // t91：手段上移（旧 -0.10 在下，应手前伸在上=左上肤色）
                     scale: Qt.vector3d(0.11, 0.16, 0.11)  // t81：加粗+加长 Y（0.085/0.12→0.11/0.16），手变长变大
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447) }
                 }
@@ -346,7 +347,7 @@ Window {
                 Model {
                     visible: player.selectedBlock !== 0
                     geometry: BlockCube { blockId: player.selectedBlock }
-                    position: Qt.vector3d(0, -0.10, -0.11)   // 手前方（z=-0.11；方块 z 范围 [-0.17,-0.05] 全在手前）
+                    position: Qt.vector3d(0, 0.02, -0.11)    // t91：Y 跟手上移（旧 -0.10→+0.02）；z=-0.11 仍全在手前
                     scale: Qt.vector3d(0.12, 0.12, 0.12)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
@@ -363,7 +364,7 @@ Window {
                 Model {
                     visible: hotbarVM.isTool(player.selectedItem)
                     geometry: PickaxeGeometry {}
-                    position: Qt.vector3d(0.02, -0.08, -0.22)   // 手前方（脱离手臂 z 包围）
+                    position: Qt.vector3d(0.02, 0.04, -0.22)    // t91：Y 跟手同 delta 上移（旧 -0.08→+0.04，保 +0.02 高于手段）；z=-0.22 脱离手臂 z 包围
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, -15)    // 对角手持（柄下右、镐头上左，类 MC 手持）
                     materials: PrincipledMaterial {
