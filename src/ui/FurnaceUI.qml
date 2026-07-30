@@ -262,11 +262,11 @@ Item {
     }
 
     // 面板：深色圆角，居中。宽度与 CraftingTableUI 一致（392）便于复用主栏布局；
-    // 高度 = 标题 + 熔炉行 + 主栏 + hotbar + 间距/边距。
+    // 高度 = 内容（标题+熔炉行+主栏+hotbar）+ 3×spacing + 2×margin，刚好容纳 → hotbar 贴底无空白带（同工作台）。
     Rectangle {
         id: panel
         width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
-        height: 368                                  // 标题(22) + 熔炉行(84) + 主栏(120) + hotbar(40) + 边距/间距
+        height: 334                                  // 22+84+120+40(=266) + 3×12 spacing(36) + 2×16 margin(32) = 334
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
