@@ -17,7 +17,7 @@
 //
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
-//   10=furnace
+//   10=furnace 11=coal_ore 12=iron_ore
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -35,7 +35,9 @@ public:
         Sand          = 8,
         CraftingTable = 9, // 工作台：右键打开 3×3 合成（t50）；机制等价 MC 工作台，名称/贴图原创（§9）。
         Furnace       = 10, // 熔炉：8 圆石围圈合成（t80）；机制等价 MC 熔炉，名称/贴图原创（§9）。
-        Count         = 11, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        CoalOre       = 11, // 煤矿石：散布于 stone 区段（t84）；机制等价 MC 煤矿，名称/贴图原创（§9）。
+        IronOre       = 12, // 铁矿石：散布于 stone 区段（t84）；机制等价 MC 铁矿，名称/贴图原创（§9）。
+        Count         = 13, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：
@@ -87,7 +89,8 @@ public:
     //   5=cobble 6=log_top 7=log_side 8=planks 9=leaves
     //   10=crafting_table_top 11=crafting_table_side
     //   12=furnace_top 13=furnace_side 14=furnace_front（t80；炉口朝 -Z）
-    // 图集由 tools/build_atlas.py 打包全部 15 瓦片；mesher / BlockCube 的 N=15 与之严格对齐。
+    //   15=coal_ore 16=iron_ore（t84；矿石各面同贴图）
+    // 图集由 tools/build_atlas.py 打包全部 17 瓦片；mesher / BlockCube 的 N=17 与之严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
@@ -112,6 +115,7 @@ public:
     // 字面量为 UTF-8，由 fromUtf8 解码（与项目既有中文注释同源）。
     //   grass=草方块 dirt=泥土 stone=石头 cobble=圆石 log=橡木原木
     //   planks=橡木木板 leaves=橡树树叶 sand=沙子 crafting_table=工作台 furnace=熔炉
+    //   coal_ore=煤矿石 iron_ore=铁矿石
     static QString displayName(quint8 blockId);
 
 private:

@@ -82,8 +82,12 @@ private:
     // 单棵树：主干 trunkH 格 + 树冠。leafRand = 该列哈希的高位，驱动树冠四角叶的有无 → 每棵树冠轮廓
     // 各异（贴近 MC 橡树自然参差）。纯由 seed 派生（确定性，PLAN §2-K）。
     void placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
+    // 确定性矿石散布（t84，PLAN §2-K）：地形填充后遍历 stone 区段，按 hashVoxel(seed,x,y,z)
+    // 决定是否替换为煤矿/铁矿。仅替换 Stone；同 seed → 同矿脉分布；禁用任何运行期随机源。
+    void scatterOres();
     void setVoxelIfAir(int x, int y, int z, quint8 id);       // 仅写空气格（树冠不覆盖主干/地形）
-    quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希 → 确定性伪随机
+    quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希（列级 seed/x/z）→ 确定性伪随机
+    quint32 hashVoxel(int seed, int x, int y, int z) const;   // 整数哈希（体素级 seed/x/y/z）→ 矿石散布用
 
     std::vector<int> m_perm;  // 512 置换表（Perlin）
     int m_width = 16, m_depth = 16, m_height = 16, m_seed = 1337;

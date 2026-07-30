@@ -38,6 +38,8 @@ BLOCKS = [
     ("sand",            "default_sand",      "default_sand"),
     ("crafting_table",  "default_crafting_table_top", "default_crafting_table_side"),  # t50
     ("furnace",         "default_furnace_top", "default_furnace_side"),  # t80（图标显顶+侧，不显炉口前面）
+    ("coal_ore",        "default_coal_ore", "default_coal_ore"),  # t84 煤矿石（各面同贴图）
+    ("iron_ore",        "default_iron_ore", "default_iron_ore"),  # t84 铁矿石（各面同贴图）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

@@ -119,6 +119,7 @@ void World::generate()
         }
     }
 
+    scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
 }
 
@@ -135,6 +136,25 @@ quint32 World::hashColumn(int seed, int x, int z) const
     step(quint32(x));
     step(quint32(z));
     // FNV-1a 单轮扩散偏弱，补一轮 xorshift-mix 提高 avalanche（低位用于密度判定，须质量好）。
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    return h;
+}
+
+// 体素级哈希（FNV-1a + 同款 avalanche）：seed/x/y/z → 32 位确定性伪随机。与 hashColumn 同算法、
+// 多喂一个 y，供 scatterOres 做 3D 散布（矿石按体素而非按列分布）。纯函数（PLAN §2-K）。
+quint32 World::hashVoxel(int seed, int x, int y, int z) const
+{
+    quint32 h = 0x811c9dc5u; // FNV-1a basis
+    auto step = [&h](quint32 v) {
+        h ^= v;
+        h *= 0x01000193u; // FNV-1a prime
+    };
+    step(quint32(seed));
+    step(quint32(x));
+    step(quint32(y));
+    step(quint32(z));
     h ^= h >> 16;
     h *= 0x7feb352du;
     h ^= h >> 15;
@@ -241,4 +261,45 @@ void World::placeTrees()
         }
     }
     qInfo() << "worldgen: trees placed =" << placed; // 可观测：同 seed → 同计数（确定性核对）
+}
+
+// 确定性矿石散布（t84，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 且非低洼沙地的格填 Stone），
+// 按 hashVoxel(seed,x,y,z) 的低 16 位（% 10000）做密度筛选 → 替换为煤矿/铁矿。仅替换 Stone
+// （不动 dirt/grass/sand/log/leaves，也不动已生成的另一种矿：判定只针对 Stone 格）。铁矿比煤矿
+// 略稀（贴近 MC 1.0 铁比煤少）；两矿共用同一 hash 的不同阈值段 → 互斥（一格至多一种矿）。
+// 全程纯函数于 seed → 可复现；禁用任何运行期随机源（QTime/时钟/全局 RNG）。
+//
+// 密度（/10000）：煤矿 0.8%、铁矿 0.5%（散点式，非 MC 的脉状集群——脉状留后续 worldgen 增强）。
+// 铁矿判定先于煤矿（pct < kIronPct 优先），使铁的稀有度不被煤矿阈值「吃掉」。
+void World::scatterOres()
+{
+    constexpr unsigned kIronPct = 50;  // /10000 → 0.5%（铁，需石镐）
+    constexpr unsigned kCoalPct = 80;  // /10000 → 0.8%（煤，木镐可挖）
+    constexpr int kSandLevel   = 3;    // 与 generate() / placeTrees() 同阈值（h<=此为沙地，整柱沙无 stone）
+
+    int coalPlaced = 0, ironPlaced = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            const int h = std::min(heightAt(x, z), m_height - 1);
+            if (h <= kSandLevel) continue; // 沙地柱无 stone，跳过（与 placeTrees 同判）
+
+            // stone 区段：y < h-2（与 generate 填 Stone 同阈值；y in [h-2,h] 是 dirt/grass）。
+            // 上界 h-3 即「< h-2」的最大整数；y 非负由循环保证。
+            const int stoneTop = h - 3;
+            for (int y = 0; y <= stoneTop; ++y) {
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone)
+                    continue; // 仅替换 stone（防御：树根/边界异常格不动）
+                const quint32 r = hashVoxel(m_seed, x, y, z);
+                const unsigned pct = unsigned(r % 10000u);
+                if (pct < kIronPct) {
+                    m_chunks.setBlock(x, y, z, BlockRegistry::IronOre);
+                    ++ironPlaced;
+                } else if (pct < kIronPct + kCoalPct) {
+                    m_chunks.setBlock(x, y, z, BlockRegistry::CoalOre);
+                    ++coalPlaced;
+                }
+            }
+        }
+    }
+    qInfo() << "worldgen: ores placed = coal" << coalPlaced << "iron" << ironPlaced; // 同 seed → 同计数（确定性核对）
 }

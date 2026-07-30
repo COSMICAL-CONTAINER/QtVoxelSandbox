@@ -97,14 +97,15 @@ void ChunkGeometry::buildMesh()
         idx.reserve(8192);
     }
 
-    // 图集瓦片横排：15 瓦片（240×16）。BlockRegistry 为 10 方块定义 0..14 序号，
+    // 图集瓦片横排：17 瓦片（272×16）。BlockRegistry 为 12 方块定义 0..16 序号，
     // 与 tools/build_atlas.py 打包顺序严格一致（一个偏差即渗色/错贴）：
     //   0=grass_top 1=grass_side 2=dirt 3=stone 4=sand
     //   5=cobble 6=log_top 7=log_side 8=planks 9=leaves
     //   10=crafting_table_top 11=crafting_table_side（t50）
     //   12=furnace_top 13=furnace_side 14=furnace_front（t80）
+    //   15=coal_ore 16=iron_ore（t84；矿石各面同贴图）
     // 半纹素内缩防渗色（线性采样跨瓦片）。
-    constexpr int N = 15;
+    constexpr int N = 17;
     constexpr float tileW = 1.0f / N;
     constexpr float hx = 0.5f / (N * 16);
     constexpr float hy = 0.5f / 16;

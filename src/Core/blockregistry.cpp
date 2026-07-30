@@ -13,8 +13,11 @@
 //     frontTile 仅「有朝向」方块用（熔炉炉口）；其余方块 frontTile == sideTile，-Z 面与其它侧面无差异。
 //   - hardness：grass/dirt/sand≈0.5~0.6；stone 1.5 / cobble 2.0（需镐）；log/planks 2.0；leaves 0.2；
 //     crafting_table 2.5（木制，同 MC 工作台量级）；furnace 1.5（同石头，需镐；spec t80「同石头」）。
-//   - toolType：本工程仅有镐 → 石类（stone/cobble/furnace）需 Pickaxe；其余 NoTool（空手采且掉落）。
-//   - dropId：方块自掉（id==自身），唯独 stone→cobble（MC：原石采下变圆石）；air 不掉。
+//   - toolType：本工程仅有镐 → 石类（stone/cobble/furnace/coal_ore/iron_ore）需 Pickaxe；其余 NoTool（空手采且掉落）。
+//   - minToolTier：coal_ore=1（木镐可挖、掉煤材料）；iron_ore=2（需石镐，木镐挖了不掉落，机制等价 MC 铁矿）。
+//   - dropId：方块自掉（id==自身），唯独 stone→cobble（MC：原石采下变圆石）；矿石→材料段 id（>=0x200，
+//     由 RecipeRegistry::MaterialIdBase 契约定址；Core 层不依赖 Game，故此处用字面量 0x201=Coal /
+//     0x202=IronOreDrop，t85 在 recipe.h 给这两个 id 命名 + 加图标/中文名）；air 不掉。
 //   - maxStack：MC 1.0 方块标准 64；air=0（不可拾取 / 不可放置）。
 namespace {
 constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
@@ -29,6 +32,8 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* sand           */ {int(BlockRegistry::Sand),          4,  4, 4,  4,  true,  0.5f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Sand),           1, 64, "sand",           "沙子"},
     /* crafting_table */ {int(BlockRegistry::CraftingTable), 10, 8, 11, 11, true,  2.5f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::CraftingTable),  1, 64, "crafting_table", "工作台"}, // 顶=crafting_table_top(10) 底=planks(8) 侧=crafting_table_side(11)（t50）
     /* furnace        */ {int(BlockRegistry::Furnace),       12, 12, 13, 14, true, 1.5f, int(BlockRegistry::Pickaxe), 1, int(BlockRegistry::Furnace),        1, 64, "furnace",        "熔炉"}, // 顶=furnace_top(12) 底=furnace_top(12) 侧=furnace_side(13) 前(-Z)=furnace_front(14)（t80）；8 圆石围圈合成；同石头（需镐）
+    /* coal_ore       */ {int(BlockRegistry::CoalOre),       15, 15, 15, 15, true, 3.0f, int(BlockRegistry::Pickaxe), 1, 0x201,                              1, 64, "coal_ore",       "煤矿石"}, // 各面=coal_ore(15)（t84）；散布于 stone 区段；木镐可挖；掉煤材料(0x201，t85 命名)
+    /* iron_ore       */ {int(BlockRegistry::IronOre),       16, 16, 16, 16, true, 3.0f, int(BlockRegistry::Pickaxe), 2, 0x202,                              1, 64, "iron_ore",       "铁矿石"}, // 各面=iron_ore(16)（t84）；散布于 stone 区段；**需石镐**（minTier2，木镐挖不掉落）；掉铁原矿材料(0x202，t85 命名)
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
