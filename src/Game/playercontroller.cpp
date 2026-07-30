@@ -417,6 +417,12 @@ void PlayerController::beginMining()
         // 创造：瞬破（progress 直接 1.0 等价），不掉落。仍发 swingArm（动作真发生）。
         // 不进入累积态（mining 留 false）→ 不显裂纹叠层（瞬破无需裂纹）。
         // finishMiningAt 内自行取原方块 id（setBlock 前）发 playerMined；此处无需重复读取。
+        // t119 canMine 守卫：基岩（hardness=-1.0 → ToolRegistry::canMine=false）即便创造也**不可秒破**。
+        //   生存路径已由 updateMining 顶部 + line 517 的 canMine 双重守卫（不会进入累积态）；创造瞬破分支
+        //   此前**漏守卫** → 创造左键基岩会被秒破。此处补 canMine 拦截：不可挖则给挥臂反馈（动作真发生）
+        //   但 return（不调 finishMiningAt），任何模式挖基岩无裂纹不破（spec 验收）。
+        const quint8 hb = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+        if (!ToolRegistry::canMine(hb)) { emit swingArm(); return; } // 基岩：挥臂但不破
         finishMiningAt(m_hitBx, m_hitBy, m_hitBz, /*drop=*/false);
         return;
     }

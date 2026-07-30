@@ -314,8 +314,10 @@ private:
 
     // 出生点（t78 重生定位）：与构造期 m_pos 初值同源，respawn() 传回此处。脚底中心坐标。
     // 必须声明在 m_pos 之前（m_pos 默认成员初始化器引用本常量；C++ 不允许前向引用）。
+    // t119：世界高度 16→64、地表重定标到 16..40 → 出生 Y 抬到 44（高于最高地表 40，玩家落 / 浮于地表之上，
+    //   不会卡进地形）。默认 Spectator 模式无重力（漂浮）；切重力模式时 setMode 重置 m_peakY 防误判落差。
     static constexpr float kSpawnX = 8.0f;
-    static constexpr float kSpawnY = 14.0f;
+    static constexpr float kSpawnY = 44.0f;
     static constexpr float kSpawnZ = 8.0f;
     QVector3D m_pos{kSpawnX, kSpawnY, kSpawnZ}; // 脚底（= 出生点；respawn 传回此处，t78）
     QVector3D m_vel{0, 0, 0};

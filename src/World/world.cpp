@@ -103,8 +103,11 @@ double World::fbm(double x, double z) const
 
 int World::heightAt(int x, int z) const
 {
+    // t119：高度由 16 重定标到 64（地表抬升、留出基岩底层 + 更厚石层 + 更高天空间）。
+    // 原 7+n*4（地表 ~3..11）→ 28+n*12（地表 ~16..40）：基岩层 y 0..4 在地表之下，石层 12..36
+    // 厚度（散布矿石有空间），天空间 24..48（树 / 飞行）。同 seed 仍确定（fbm 纯函数）。
     const double n = fbm((x + m_seed) * 0.09, (z + m_seed) * 0.09); // [-1,1]
-    const int h = int(std::lround(7.0 + n * 4.0));                  // ~3..11
+    const int h = int(std::lround(28.0 + n * 12.0));               // ~16..40
     return std::max(0, h);
 }
 
@@ -150,6 +153,7 @@ void World::generate()
     }
     qInfo() << "worldgen: desert columns =" << desertCols << "/" << (m_width * m_depth);
 
+    placeBedrock(); // t119：底层基岩（y 0..4 坑洼，底实顶疏；不可破坏）。先于矿石 / 树（仅覆盖最底几格）
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
 }
@@ -293,6 +297,35 @@ void World::placeTrees()
         }
     }
     qInfo() << "worldgen: trees placed =" << placed; // 可观测：同 seed → 同计数（确定性核对）
+}
+
+// t119 底层基岩：遍历列，在 y 0..4 铺一层 Bedrock（不可破坏方块，hardness=-1.0 → canMine=false）。
+// 厚度按 hashVoxel(seed,x,y,z) 确定 —— 底层（y 小）近乎全实，顶层（y=4）稀疏（坑洼露出上方石层），
+// 机制等价 MC 1.0 基岩层「底实顶疏」。具体阈值：(hash%100) < (5-y)*25 → 置 Bedrock，否则保留地形原样：
+//   y=0 → <125（恒真）→ 100% 基岩（实心底，防世界底部 void / 玩家坠落出界）
+//   y=1 → <100（恒真）→ 100% 基岩
+//   y=2 → <75 → 75% 基岩（开始有坑洼）
+//   y=3 → <50 → 50% 基岩
+//   y=4 → <25 → 25% 基岩（最疏，向上过渡到普通石层）
+// 注：spec 原文「(hash%100) < (5-y)*25 留 air，否则 Bedrock」的「留 air」语义会把 y=0 全置空气（底部 void，
+//   世界无底、玩家坠落出界）——与「基岩作不可破坏底」的机制目标矛盾。此处把判定结果置为 Bedrock（而非 air），
+//   既满足 spec 验收「基岩层坑洼」（坑洼=上层基岩稀疏处露出石），又保证底部实心不 void。
+//   越界（y>=m_height）天然由循环上界挡住；hashVoxel 纯函数于 seed → 同 seed 同基岩分布（PLAN §2-K）。
+void World::placeBedrock()
+{
+    constexpr int kBedrockTop = 4; // 基岩层上界（含）；y 0..4 共 5 层
+    if (m_height <= 0) return;     // 极端：无高度世界不铺基岩（防御）
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            const int top = std::min(kBedrockTop, m_height - 1); // 高度不足时只铺到顶
+            for (int y = 0; y <= top; ++y) {
+                const quint32 r = hashVoxel(m_seed, x, y, z);
+                if ((r % 100u) < unsigned((5 - y) * 25))
+                    m_chunks.setBlock(x, y, z, BlockRegistry::Bedrock);
+                // 否则保留 generate() 已填的 Stone（坑洼 = 上层基岩缺位处露出石）
+            }
+        }
+    }
 }
 
 // 确定性矿石散布（t84，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 且非低洼沙地的格填 Stone），

@@ -174,7 +174,7 @@ Window {
 
     // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
     // 与物理(PlayerController)共用同一份栅格。
-    World { id: theWorld; width: 48; depth: 48; height: 16; seed: 1337 }
+    World { id: theWorld; width: 48; depth: 48; height: 64; seed: 1337 } // t119：高度 16→64（地表 16..40 + 基岩底层）
 
     // t95：世界就绪后（Window Component.onCompleted 跑在所有子组件含 theWorld 完成之后），在地图中间
     // 高处生成 1 个测试生物，由重力 tick 落到地表（无需查地表高度——避开与 worldChanged 触发时机的

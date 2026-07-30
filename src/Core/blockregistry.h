@@ -17,7 +17,7 @@
 //
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
-//   10=furnace 11=coal_ore 12=iron_ore 13=torch
+//   10=furnace 11=coal_ore 12=iron_ore 13=torch 14=bedrock
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -41,7 +41,11 @@ public:
                            // hardness=0 瞬破、NoTool；掉落自身。**视觉光源走伪光源**（Main.qml 发光
                            // Model + 光晕，NoLighting 高 baseColor 暖色），**非** QtQuick3D PointLight
                            // （lit 材质渲染红线，lessons-learned；真 flood-fill 方块光留 PLAN §M）。
-        Count         = 14, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Bedrock       = 14, // 基岩：世界底层不可破坏方块（t119）；机制等价 MC 基岩。solid=true 实体碰撞、
+                           // **hardness=-1.0**（负值 → ToolRegistry::canMine 自动 false，任何模式任何工具
+                           // 均不可破，防创造秒破底层）、dropId=0（破不掉落，但实际不可破故永不触发）、
+                           // 各面同贴图（tile 18）。worldgen 在 y 0..4 按 hashVoxel 坑洼铺一层（底实顶疏）。
+        Count         = 15, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：
@@ -114,7 +118,8 @@ public:
     //   12=furnace_top 13=furnace_side 14=furnace_front（t80；炉口朝 -Z）
     //   15=coal_ore 16=iron_ore（t84；矿石各面同贴图）
     //   17=torch（t88；6 面同贴图，近黑底+火焰图案）
-    // 图集由 tools/build_atlas.py 打包全部 18 瓦片；mesher / BlockCube 的 N=18 与之严格对齐。
+    //   18=bedrock（t119；6 面同贴图，深灰斑驳不可破坏底岩）
+    // 图集由 tools/build_atlas.py 打包全部 19 瓦片；mesher / BlockCube 的 N=19 与之严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
@@ -139,7 +144,7 @@ public:
     // 字面量为 UTF-8，由 fromUtf8 解码（与项目既有中文注释同源）。
     //   grass=草方块 dirt=泥土 stone=石头 cobble=圆石 log=橡木原木
     //   planks=橡木木板 leaves=橡树树叶 sand=沙子 crafting_table=工作台 furnace=熔炉
-    //   coal_ore=煤矿石 iron_ore=铁矿石
+    //   coal_ore=煤矿石 iron_ore=铁矿石 bedrock=基岩
     static QString displayName(quint8 blockId);
 
     // 音效材质分组（t118）：id → MaterialGroup 纯函数。AudioManager 据此选 break / mining / step

@@ -124,6 +124,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_grass_top.png
         textures/default_iron_ore.png
         textures/default_leaves.png
+        textures/default_bedrock.png
         textures/default_sand.png
         textures/default_stone.png
         textures/default_tree.png
