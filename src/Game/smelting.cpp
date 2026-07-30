@@ -10,6 +10,8 @@
 // 燃料表（MC burn ticks / 20 = 秒；1 件冶炼 = 10s = 200 ticks）：
 //   - 煤炭 / 木炭：80s（8 件）—— 煤炭是 MC 主流燃料；木炭与煤等价（spec 扩展，便于「原木→木炭→再当燃料」闭环）。
 //   - 原木：15s（1.5 件）；木板：15s（1.5 件）—— MC 经典「1 原木 = 1.5 件，但拆 4 木板 = 6 件」由数据自然表达。
+//   - 工作台：15s（1.5 件，同木板——工作台由木板合成，燃料值等价木板；spec t93）。
+//   - 木棒：5s（0.5 件——2 木板→4 木棒→共 2 件冶炼，「拆棒」反而不划算，由数据自然表达；spec t93）。
 namespace {
 struct SmeltEntry { int inputId; int outputId; const char *name; };
 struct FuelEntry  { int itemId;   float burnSecs; const char *name; };
@@ -21,10 +23,12 @@ constexpr SmeltEntry kSmelt[] = {
 };
 
 constexpr FuelEntry kFuel[] = {
-    { RecipeRegistry::CoalId,     80.f, "coal"     }, // 煤炭 80s（8 件）
-    { RecipeRegistry::CharcoalId, 80.f, "charcoal" }, // 木炭 80s（与煤等价）
-    { int(BlockRegistry::Log),    15.f, "log"      }, // 原木 15s（1.5 件）
-    { int(BlockRegistry::Planks), 15.f, "planks"   }, // 木板 15s（1.5 件）
+    { RecipeRegistry::CoalId,     80.f, "coal"           }, // 煤炭 80s（8 件）
+    { RecipeRegistry::CharcoalId, 80.f, "charcoal"       }, // 木炭 80s（与煤等价）
+    { int(BlockRegistry::Log),           15.f, "log"     }, // 原木 15s（1.5 件）
+    { int(BlockRegistry::Planks),        15.f, "planks"  }, // 木板 15s（1.5 件）
+    { int(BlockRegistry::CraftingTable), 15.f, "crafting_table" }, // 工作台 15s（同木板；t93）
+    { RecipeRegistry::StickId,     5.f, "stick"          }, // 木棒 5s（0.5 件；t93）
 };
 
 // 编译期断言：冶炼产物 / 燃料 id 均在合法段（材料段 >= 0x200 或方块段 < Count）。
