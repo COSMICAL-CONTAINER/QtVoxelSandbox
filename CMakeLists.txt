@@ -52,6 +52,12 @@ qt_add_executable(voxelsandbox
     src/Game/recipe.h
     src/Game/smelting.cpp
     src/Game/smelting.h
+    # t89 音效（Core/Platform 层）：miniaudio 单头 + AudioManager 封装。
+    #   miniaudio.h 是 vendored 第三方单头（~4MB），仅 miniaudio_impl.cpp 含 MINIAUDIO_IMPLEMENTATION；
+    #   audiomanager.h/cpp 是项目自有代码（pimpl 隔离重头）。
+    src/Audio/audiomanager.cpp
+    src/Audio/audiomanager.h
+    src/Audio/miniaudio_impl.cpp
 )
 
 # 分层（PLAN §2 铁律：依赖只向下）。把各层子目录加入 include 搜索路径，使
@@ -61,11 +67,13 @@ qt_add_executable(voxelsandbox
 #   src/World     ← chunks/worldgen/mesher 数据层
 #   src/Renderer  ← QQuick3DGeometry 呈现层
 #   src/Game      ← 玩家/物品/工具/射线（Physics-Game 逻辑层）
+#   src/Audio     ← miniaudio 封装（Core/Platform 层，t89）
 target_include_directories(voxelsandbox PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/World
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Game
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Audio
 )
 
 qt_add_qml_module(voxelsandbox
@@ -127,6 +135,27 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_stone.png
         textures/icon_torch.png
 )
+
+# t89 音效资源（3 原创 SFX，§4；tools/build_sounds.py 程序合成，零 MC 资产）。
+# 经 qrc 打包（:/sounds/*.wav）；AudioManager 从 qrc 读 WAV → miniaudio 解码播放。
+# 注：PLAN §2-L 终态是从磁盘加载（便于热补丁），本任务先 qrc 跑通 + 留接口（见 audiomanager.cpp）。
+qt_add_resources(voxelsandbox "voxel_sounds"
+    PREFIX "/"
+    FILES
+        sounds/break.wav
+        sounds/place.wav
+        sounds/step.wav
+)
+
+# miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。
+# PLAN §4 允许抑制第三方头警告（该零警告门只扫项目自有代码）。
+# miniaudio_impl.cpp 含 MINIAUDIO_IMPLEMENTATION，编进整个实现体 → 整 TU 关警告（-w）。
+# audiomanager.cpp 仅 include 头（已在源内用 #pragma GCC diagnostic 包裹 include 抑制）。
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/Audio/miniaudio_impl.cpp
+        PROPERTIES COMPILE_OPTIONS "-w")
+endif()
 
 set_target_properties(voxelsandbox PROPERTIES
     WIN32_EXECUTABLE ON

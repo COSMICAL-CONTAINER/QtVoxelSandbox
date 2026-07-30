@@ -175,6 +175,18 @@ Window {
     // 触发由 PlayerController 发 spawnItem 信号，下面 Connections 转发到 spawnItem()（单向事件流）。
     ItemEntityManager { id: itemEntities }
 
+    // t89 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 脚步 3 原创 SFX。
+    //   触发由 Game 层信号发出（World::blockBroken/blockPlaced、PlayerController::walkPhaseChanged），
+    //   呈现层经 Connections 转发到 playBreak/playPlace/playStep（音频层只消费，PLAN §2 分层）。
+    //   引擎初始化 / 音频加载失败时 AudioManager 内部静默降级（§2-E），此处无需守卫。
+    //   _prevWalkPhase / _walkAccum 是脚步节律追踪态（QML 实例局部属性，非音频引擎态）：
+    //   walkPhaseChanged 累加相位差（2π 回绕感知），每半步（Δ≥π）播一次脚步音。
+    AudioManager {
+        id: audio
+        property real _prevWalkPhase: 0.0
+        property real _walkAccum: 0.0
+    }
+
     // 玩家控制器：指针锁定鼠标 + WASD/跳/飞 + 三模式物理。
     //   selectedBlock（右键放置用）绑 hotbarVM.selectedBlockId（工具槽→Air→不放置）。
     //   selectedItem（t34 挖掘速度用）绑 hotbarVM.selectedItemId（工具段透传 → ToolRegistry 算速度）。
@@ -219,6 +231,26 @@ Window {
             // t32：按模式重置 hotbar 栈内容（创造=8 方块满栈 / 生存=全空；观察者不动）。spec 验收
             // 「创造初始满、生存初始全空」。无持久化前（t36+ 存档/拾取），切模式即重置为新模式的默认态。
             hotbarVM.resetForMode(player.mode)
+        }
+    }
+
+    // t89 脚步音节律（PLAN §2 分层：Game 层 walkPhase 信号驱动，音频层只消费）。
+    //   walkPhaseChanged 仅在走时（moveSpeed>0.1）发 —— Survival / Creative-未飞 按住 WASD 才推进；
+    //   飞行 / Spectator moveSpeed=0 不发（playercontroller.cpp:805 守），故天然无脚步音（spec 验收项）。
+    //   半步节律：一个完整 stride = 2π 含两次脚落地（左+右），故每累积 Δphase≥π 播一次脚步音。
+    //   2π 回绕感知：phase 从 ~2π 跳回 0 时 raw delta<0 → 补 2π（playercontroller 在 >=2π 时减 2π 回绕）。
+    Connections {
+        target: player
+        function onWalkPhaseChanged() {
+            const phase = player.walkPhase
+            let d = phase - audio._prevWalkPhase
+            if (d < 0) d += 6.28318530718  // 2π 回绕（phase 从 ~2π 跳回 0）
+            audio._prevWalkPhase = phase
+            audio._walkAccum += d
+            if (audio._walkAccum >= Math.PI) {
+                audio._walkAccum -= Math.PI
+                audio.playStep()
+            }
         }
     }
 
@@ -1118,12 +1150,16 @@ Window {
         target: theWorld
         function onBlockBroken(x, y, z, id) {
             if (particleLoader.item) particleLoader.item.burstBreak(x, y, z, id)
+            // t89：破块音（按被破方块 id；AudioManager 当前统一一份，id 留分流接口）。
+            audio.playBreak(id)
             // t88：火把被破 → 从伪光源列表移除（id=13=BlockRegistry::Torch；C++ 侧未把枚举暴露 QML，
             // 此处用字面量 13 + 注释，与 blockregistry.h Id 枚举同源）。
             if (id === 13) removeTorchAt(x, y, z)
         }
         function onBlockPlaced(x, y, z, id) {
             if (particleLoader.item) particleLoader.item.burstPlace(x, y, z, id)
+            // t89：放块音（按新放方块 id）。
+            audio.playPlace(id)
             // t88：火把被放 → 追加伪光源（id=13=BlockRegistry::Torch，见上注释）。
             if (id === 13) torchPositions.append({x: x, y: y, z: z})
             // t32：生存放置消耗 1 件（创造=无限源不耗）。worldgen 经 m_chunks.setBlock 直写、不经
