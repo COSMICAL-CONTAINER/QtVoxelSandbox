@@ -138,6 +138,14 @@ Item {
     }
     function addDragSlot(key) {
         if (root.dragHasKey(key)) return
+        // t108：异物槽不入 dragSlots（addDragSlot 前判）。仅在分发态（dragHeldId≠0）过滤——读槽当前栈，
+        // 非空且 id≠dragHeldId 则跳过（与 redistributeLive 的 eligible 过滤一致；让绿框只亮真正会收物的
+        // 空/同 id 槽）。dragHeldId=0（拿半手势）不过滤，让起点槽入 dragSlots 供 endRightDrag→singleRightClick。
+        if (root.dragHeldId !== 0) {
+            const p0 = key.split(":")
+            const cur = root.readSlot(p0[0], parseInt(p0[1], 10))
+            if (cur.id !== 0 && cur.id !== root.dragHeldId) return
+        }
         root.dragSlots = root.dragSlots.concat([key])   // 新数组引用 → 依赖 dragSlots 的绑定刷新
         root.redistributeLive()                          // t98：每滑入新格实时重算 N 等分（撤销 + 重分）
     }
@@ -198,7 +206,7 @@ Item {
         const cap = root.hotbar.maxStackSize(heldId)
 
         // 2) 重建合格清单；首次 encounter 的槽拍原始栈快照（此后该槽读到的是本轮写入值，须靠快照还原）。
-        const eligible = []
+        let eligible = []
         const seen = {}
         for (let i = 0; i < root.dragSlots.length; ++i) {
             const key = root.dragSlots[i]
@@ -215,7 +223,10 @@ Item {
                 eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count })
         }
 
-        const n = eligible.length
+        // t108：n>total 截断 eligible 到 total 项（每格至少 1 件；N≤count）。如 8 件拖 9 格 → 第 9 格不分，
+        // 避免被「扫过即亮绿框」错觉（与 redistributeLive 的「异物/已满跳过」一致）。截断在 n<=1 早退之前。
+        let n = eligible.length
+        if (n > total) { eligible = eligible.slice(0, total); n = eligible.length }
         // N≤1 / 空手 / 无物：不分（保留单格右键给 endRightDrag；空手 drag 无意义）。余数 = 原始快照。
         if (n <= 1 || heldId === 0 || total <= 0) {
             root.hotbar.heldBlock = heldId
@@ -497,15 +508,30 @@ Item {
                                     const key = root.slotKey("craft", index)
                                     if (hovered) root.hoveredKey = key
                                     else if (root.hoveredKey === key) root.hoveredKey = ""
-                                    if (hovered && root.rightDragActive) root.addDragSlot(key)
+                                    if (hovered && root.rightDragActive) {
+                                        root.addDragSlot(key)
+                                    } else if (!hovered && root.rightDragActive && root.dragHasKey(key)) {
+                                        // t108 回滑减格：离开已选格 → 从 dragSlots 移除并重算（撤销机制
+                                        // 据快照恢复该槽原始态，再按新 N 重分 → 与滑入方向对称的实时反馈）。
+                                        root.dragSlots = root.dragSlots.filter(k => k !== key)
+                                        root.redistributeLive()
+                                    }
                                 }
                             }
                             // t79 均分拖拽高亮（扫过且待分发的合格格绿框；rightDragActive 期间才显）。
+                            // t108：绿框加 (槽空||槽==heldId) 条件——异物槽纵使被扫过也不亮（addDragSlot 已过滤
+                            // 入 dragSlots，此处显式条件双重保险：heldId/槽态在 drag 途中变化时仍准确）。
                             Rectangle {
                                 anchors.fill: parent
                                 color: "transparent"
                                 border.color: "#7fe57f"; border.width: 2
-                                visible: { root.dragSlots; root.rightDragActive; return root.rightDragActive && root.dragHasKey(root.slotKey("craft", index)) }
+                                visible: {
+                                    root.dragSlots; root.rightDragActive; root.craftRev
+                                    const sid = root.craftSlots[index] || 0
+                                    return root.rightDragActive
+                                        && root.dragHasKey(root.slotKey("craft", index))
+                                        && (sid === 0 || sid === root.dragHeldId)
+                                }
                                 z: 10
                             }
                         }
@@ -753,15 +779,28 @@ Item {
                                 const key = root.slotKey("main", index)
                                 if (hovered) root.hoveredKey = key
                                 else if (root.hoveredKey === key) root.hoveredKey = ""
-                                if (hovered && root.rightDragActive) root.addDragSlot(key)
+                                if (hovered && root.rightDragActive) {
+                                    root.addDragSlot(key)
+                                } else if (!hovered && root.rightDragActive && root.dragHasKey(key)) {
+                                    // t108 回滑减格：离开已选格 → 从 dragSlots 移除并重算（撤销机制
+                                    // 据快照恢复该槽原始态，再按新 N 重分 → 与滑入方向对称的实时反馈）。
+                                    root.dragSlots = root.dragSlots.filter(k => k !== key)
+                                    root.redistributeLive()
+                                }
                             }
                         }
                         // t79 均分拖拽高亮。
+                        // t108：绿框加 (槽空||槽==heldId) 条件——异物槽纵使被扫过也不亮。
                         Rectangle {
                             anchors.fill: parent
                             color: "transparent"
                             border.color: "#7fe57f"; border.width: 2
-                            visible: { root.dragSlots; root.rightDragActive; return root.rightDragActive && root.dragHasKey(root.slotKey("main", index)) }
+                            visible: {
+                                root.dragSlots; root.rightDragActive; root.hotbar.mainRevision
+                                return root.rightDragActive
+                                    && root.dragHasKey(root.slotKey("main", index))
+                                    && (mainId === 0 || mainId === root.dragHeldId)
+                            }
                             z: 10
                         }
                     }
@@ -869,15 +908,28 @@ Item {
                                     const key = root.slotKey("hotbar", index)
                                     if (hovered) root.hoveredKey = key
                                     else if (root.hoveredKey === key) root.hoveredKey = ""
-                                    if (hovered && root.rightDragActive) root.addDragSlot(key)
+                                    if (hovered && root.rightDragActive) {
+                                        root.addDragSlot(key)
+                                    } else if (!hovered && root.rightDragActive && root.dragHasKey(key)) {
+                                        // t108 回滑减格：离开已选格 → 从 dragSlots 移除并重算（撤销机制
+                                        // 据快照恢复该槽原始态，再按新 N 重分 → 与滑入方向对称的实时反馈）。
+                                        root.dragSlots = root.dragSlots.filter(k => k !== key)
+                                        root.redistributeLive()
+                                    }
                                 }
                             }
                             // t79 均分拖拽高亮。
+                            // t108：绿框加 (槽空||槽==heldId) 条件——异物槽纵使被扫过也不亮。
                             Rectangle {
                                 anchors.fill: parent
                                 color: "transparent"
                                 border.color: "#7fe57f"; border.width: 2
-                                visible: { root.dragSlots; root.rightDragActive; return root.rightDragActive && root.dragHasKey(root.slotKey("hotbar", index)) }
+                                visible: {
+                                    root.dragSlots; root.rightDragActive; root.hotbar.slotRevision
+                                    return root.rightDragActive
+                                        && root.dragHasKey(root.slotKey("hotbar", index))
+                                        && (slotId === 0 || slotId === root.dragHeldId)
+                                }
                                 z: 10
                             }
                         }
