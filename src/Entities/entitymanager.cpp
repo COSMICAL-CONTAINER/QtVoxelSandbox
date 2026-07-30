@@ -94,8 +94,10 @@ QString EntityManager::colorAt(int i) const
 //   3) 世界碰撞钳制（t104：mob AABB footprint 全格扫，仿 player aabbHitsSolid）：推动后扫 mob 立方体
 //      AABB 覆盖的所有格子（非旧版「只查中心格」），任一实体方块 → 撤回该轴推动。X/Z 两轴独立判定
 //      （斜推各自检查），保证实体贴墙滑动不穿入；全格扫消除「中心在空气但 3/4 入墙」的 jitter。
-//   4) 被推动 → resting=false（解除静止，让重力复探支撑：可能被推下阶梯 → 自然落）。任一 pos 真变 →
-//      dirty，末尾统一 bump revision + emit（驱动 QML {revision; posAt} 绑定重算）。
+//   4) 被推动后按「新 XZ 位置下方一格 isSolid」决定是否解除 resting（t115；仿 player hasGroundBelowAt）：
+//      新位置下方仍有支撑 → 保持 resting（平地推动不下沉）；下方变空气（推下阶梯 / 推离支撑面）才
+//      resting=false 让重力复探。任一 pos 真变 → dirty，末尾统一 bump revision + emit（驱动 QML
+//      {revision; posAt} 绑定重算）。
 void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, float height, World *world)
 {
     if (m_entities.empty()) return;
@@ -149,7 +151,22 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
         if (newX != e.pos.x() || newZ != e.pos.z()) {
             e.pos.setX(newX);
             e.pos.setZ(newZ);
-            e.resting = false; // 被推动后可能离支撑面 → 解除静止，让重力复探（防悬空 / 阶梯推落）
+            // t115：旧版无条件 e.resting=false → 平地推动后 tick 重力下沉几帧再弹回 restY（下移扫描
+            //   只覆盖实体中心高度的空气格、够不到下方支撑格 → 误判无命中 → 自由下落 → 几帧后扫到支撑
+            //   才弹回）→ 帧帧 Y 抖（用户感知为缩小 / scale 闪烁）。改为按新 XZ 位置下方一格 isSolid
+            //   判定（仿 player hasGroundBelowAt）：新位置仍有支撑 → 保持 resting → 下帧 tick 复探支撑
+            //   格仍实体 → 跳过重力 → pos.y 不变 → 无抖；推下阶梯 / 推离支撑面时下方变空气 → 解除 →
+            //   重力自然落（防悬空）。支撑判定与 tick 的 resting 复探同公式（同列 floor(pos.y−r)−1）→
+            //   保证「此处判保留」必与「tick 下帧判保留」一致 → 永不因二者分歧再抖。
+            if (world) {
+                const int ncx = qFloor(newX);
+                const int ncz = qFloor(newZ);
+                const int supportY = qFloor(e.pos.y() - r) - 1; // 实体底面下方一格（与 tick 复探同公式）
+                if (supportY < 0 || !world->isSolid(ncx, supportY, ncz))
+                    e.resting = false; // 新位置失支撑 → 解除静止让重力复探（推下阶梯 / 推离支撑面）
+            } else {
+                e.resting = false; // 无世界可查 → 保守解除（world=null 时 tick 早 return，不影响）
+            }
             dirty = true;
         }
     }
