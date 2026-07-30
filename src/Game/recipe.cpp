@@ -15,6 +15,10 @@
 //     原料 Cobble（BlockRegistry）+ 木棒（材料段 0x200）。产物 = 石镐（PickaxeStone，tier 2）。
 //   - ironPickaxe（有序 3×3）：顶行 3 铁锭 + 中列 2 木棒（T 形）→ 1 铁镐。机制等价 MC 铁镐配方；
 //     原料 IronIngot（材料段 RecipeRegistry::IronIngotId=0x203）+ 木棒。产物 = 铁镐（PickaxeIron，tier 3）。
+//   - furnace（有序 3×3）：8 圆石围圈（中空）→ 1 熔炉。机制等价 MC 熔炉配方；中心空格，
+//     9 圆石实心不匹配。仅工作台可合（gridSize=3）。
+//   - torchCoal / torchCharcoal（无序 2×2）：煤炭+木棒 / 木炭+木棒 → 4 火把。机制等价 MC 火把配方；
+//     煤与木炭等价（木炭由原木冶炼产出），合出火把供 t88 伪光源用。2 原料任意位置（2×2 / 3×3 均可）。
 //
 // ── 木棒 id（材料段）──
 // spec t50 要求木棒作为独立可堆叠物品（4 件产出 + 木镐配方用 2 根）。本工程物品 id 段：
@@ -68,6 +72,16 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::Cobble), 0,                         int(BlockRegistry::Cobble),
         int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble) },
       int(BlockRegistry::Furnace), 1, 1, "furnace" },
+    // torchCoal：煤炭+木棒 → 4 火把（无序 2×2）。机制等价 MC 火把配方；煤炭来自煤矿石挖掘掉落。
+    // 2 原料任意位置即可（2×2 背包栏 / 3×3 工作台均可）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::CoalId, kStickId, 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::Torch), 4, 1, "torch_coal" },
+    // torchCharcoal：木炭+木棒 → 4 火把（无序 2×2）。机制等价 MC 木炭火把；煤与木炭等价
+    // （木炭由原木冶炼产出），与 torchCoal 合出同一火把方块 → 闭环「原木→木炭→火把」。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::CharcoalId, kStickId, 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::Torch), 4, 1, "torch_charcoal" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
