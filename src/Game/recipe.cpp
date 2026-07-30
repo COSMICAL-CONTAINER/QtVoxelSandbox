@@ -11,6 +11,10 @@
 //   - craftingTable（无序）：4 木板 → 1 工作台。pattern 2×2 全木板；多重集 {Planks:4}。
 //   - woodPickaxe（有序 3×3）：顶行 3 木板 + 中列 2 木棒（T 形）→ 1 木镐。最小包围盒 3×3（满），
 //     只能在工作台合（gridSize=3）。产物 = 木镐（ToolRegistry::PickaxeWood）。
+//   - stonePickaxe（有序 3×3）：顶行 3 圆石 + 中列 2 木棒（T 形）→ 1 石镐。机制等价 MC 石镐配方；
+//     原料 Cobble（BlockRegistry）+ 木棒（材料段 0x200）。产物 = 石镐（PickaxeStone，tier 2）。
+//   - ironPickaxe（有序 3×3）：顶行 3 铁锭 + 中列 2 木棒（T 形）→ 1 铁镐。机制等价 MC 铁镐配方；
+//     原料 IronIngot（材料段 RecipeRegistry::IronIngotId=0x203）+ 木棒。产物 = 铁镐（PickaxeIron，tier 3）。
 //
 // ── 木棒 id（材料段）──
 // spec t50 要求木棒作为独立可堆叠物品（4 件产出 + 木镐配方用 2 根）。本工程物品 id 段：
@@ -44,6 +48,19 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                       kStickId,                 0,
         0,                       kStickId,                 0 },
       int(ToolRegistry::PickaxeWood), 1, 1, "wood_pickaxe" },
+    // stonePickaxe：3 圆石顶行 + 中列 2 木棒（T 形）→ 1 石镐（有序 3×3，仅工作台）。机制等价 MC 石镐。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble),
+        0,                       kStickId,                 0,
+        0,                       kStickId,                 0 },
+      int(ToolRegistry::PickaxeStone), 1, 1, "stone_pickaxe" },
+    // ironPickaxe：3 铁锭顶行 + 中列 2 木棒（T 形）→ 1 铁镐（有序 3×3，仅工作台）。机制等价 MC 铁镐。
+    // 铁锭为材料段物品（IronIngotId=0x203，由铁原矿冶炼产出），非方块段 → 用命名常量引用。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
+        0,                           kStickId,                    0,
+        0,                           kStickId,                    0 },
+      int(ToolRegistry::PickaxeIron), 1, 1, "iron_pickaxe" },
     // furnace：8 圆石围圈（中空）→ 1 熔炉（有序 3×3，仅工作台）。机制等价 MC 熔炉配方；
     // 满包围盒 3×3（中心空）→ 输入也须 3×3 围圈（中心为空格），9 圆石（实心）不匹配。
     { int(RecipeRegistry::Table3x3), false,
