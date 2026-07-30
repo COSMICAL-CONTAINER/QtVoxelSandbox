@@ -246,6 +246,11 @@ void PlayerController::tick()
     // PlayerController 是唯一同时持 World* + ItemEntityManager* 的对象，故由此驱动；实体物理态
     // （vy / resting）与 pos 同住在 ItemEntityManager 内部数据里（分层：Entities→World 向下只读）。
     if (m_itemEntities && m_world) m_itemEntities->tick(dt, m_world);
+    // t92：拾取扫描提到 m_captured 早 return **之前**——打开背包（release→m_captured=false）时
+    // 原 pickupScan 落在早 return 之后永不执行，玩家走近掉落物拾不起（仅见实体掉地）。掉落物物理
+    // （itemEntities->tick）本就在早 return 前跑（独立于捕获态），拾取与之同级、同样常开才一致。
+    // 安全：pickupScan 内自检 m_itemEntities/m_hotbar 非空，t53 新生免拾取窗已在内部（0.5s 后才可拾）。
+    pickupScan();
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
         // t45：暂停时清行走动画驱动（moveSpeed→0；walkPhase 不动，QML 据此 sin*0=0 → 四肢归中性位）。
@@ -258,7 +263,6 @@ void PlayerController::tick()
     updateRaycast();   // 沿视线 DDA 选体 → 更新线框命中态
     updateCameraDistance(); // t40：第三人称相机距离钳制（防穿墙）
     updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
-    pickupScan();      // t36：扫附近掉落实体 → Hotbar.addStack → 命中则销毁实体
 }
 
 // 视线方向：用与相机相同的欧拉→四元数（QQuaternion::fromEulerAngles(pitch,yaw,0)）旋转
