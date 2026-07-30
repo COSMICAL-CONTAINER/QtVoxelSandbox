@@ -1314,9 +1314,9 @@ Window {
         }
         Keys.onReleased: (e) => { if (e.isAutoRepeat) return; player.setKey(e.key, false) }
 
-        // 光标位置追踪（背包内「手持物」浮动图标跟随鼠标用）。keyInput anchors.fill 窗口 →
-        // point.position 即窗口坐标，供下方 cursorHeld Item 定位。
-        HoverHandler { id: cursorTracker }
+        // 光标位置追踪已上移到独立 cursorTrackLayer（z=250，高于背包/工作台/熔炉面板 z=150）——
+        // 见下方浮动光标前。原放 keyInput（z=0）内被 z=150 面板截断 hover → 浮动光标按下期间
+        // point.position 停旧位（偏离鼠标，拿起卡顿）。t107 修复。
 
         // 滚轮循环切换 hotbar。WheelHandler 按指针位置抓取，与光标显隐/锁定无关，
         // 故捕获与未捕获都生效。只消费滚轮 —— 鼠标按键仍走 C++ 窗口级事件过滤（破/放）。
@@ -1792,6 +1792,20 @@ Window {
     Connections {
         target: worldClock
         function onTicked(dt) { furnacePanel.tick(dt) }
+    }
+
+    // 光标位置追踪层（t107）：独立全屏层，z=250 高于所有背包/工作台/熔炉面板（z=150）。
+    // 原 cursorTracker HoverHandler 放在 keyInput（z=0，anchors.fill 窗口）内 —— 面板 z=150 在其
+    // 之上截断 hover：按下 TapHandler/DragHandler 期间 point.position 停在旧位 → 浮动手持图标偏离
+    // 鼠标（拿起卡顿）。提到面板之上后 hover 不再被截断，光标实时跟鼠标。
+    // HoverHandler 为被动追踪（passive grab），**不消费 press/click** —— 不抢下方槽 TapHandler/DragHandler
+    // 的 grab（本 Item 无任何 press handler，点击穿透到面板）。注意：enabled:false 会连 HoverHandler 一起
+    // 禁用，故本层保持默认 enabled；纯被动 hover 不阻断下方点击（与 z=300 浮动光标 enabled:false 同理）。
+    Item {
+        id: cursorTrackLayer
+        anchors.fill: parent
+        z: 250
+        HoverHandler { id: cursorTracker }
     }
 
     // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品栈；hotbarVM.heldBlock/heldCount 驱动）。

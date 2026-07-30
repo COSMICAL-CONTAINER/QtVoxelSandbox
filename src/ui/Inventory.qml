@@ -535,6 +535,13 @@ Item {
                                     DragHandler {
                                         id: iconDrag
                                         target: dragIcon
+                                        // t107：原默认全按 → 与同槽左键 TapHandler 抢 grab（左键按下被
+                                        // DragHandler 截），左键 tap 不发 → setStack 不调 → 格子不刷新。
+                                        // 限定右键：左键归 TapHandler（拾取/放置/互换/双击合并）；右键拖到销毁槽
+                                        // 仍可用（root 右键 TapHandler 走 WithinBounds 手势：拖动超阈值归本
+                                        // DragHandler，原地单击归 Tap —— 二者按手势分流，互不冲突）。SurvivalInventory
+                                        // 本就无此 DragHandler，故无该冲突。
+                                        acceptedButtons: Qt.RightButton
                                         xAxis.enabled: true; yAxis.enabled: true
                                     }
                                 }
