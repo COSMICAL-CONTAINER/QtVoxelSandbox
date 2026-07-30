@@ -203,11 +203,16 @@ Window {
     }
     function dayNightBrightness(m) { return 0.25 + (1.5 - 0.25) * m }
 
-    // t47：夜间全屏 tint 叠层 alpha（spec 方案 A）。地形 chunk 用 NoLighting 自发光恒定 → t09 的
-    //   天光/方向光 lerp 只改了天空 clearColor，地形亮度始终不变。在此叠一层半透深蓝遮罩，alpha 随
-    //   天光乘子反向 lerp：m=1(正午)→0 全透、m=0(子夜)→0.6 把地形拉向夜色 #0b1026（仍可辨识轮廓，
-    //   spec t09「黑夜仍可辨识地形轮廓」）。深蓝取夜空同色 → 夜间天空已是该色、混合不偏移，仅地形亮色被拉暗。
-    function nightTintAlpha(m) { return 0.6 * (1.0 - m) }
+    // t121：地形 chunk 顶点色现已承载天光遮蔽（见天 1.0 / 地下 0.2，mesher 按 chunk heightmap 烘焙进
+    //   ColorSemantic）。移除原 nightTint 全屏叠层后，昼夜天光乘子改由材质 baseColor（灰阶亮度）承载——
+    //   PrincipledMaterial vertexColorsEnabled=true 时最终色 = baseColor × vertexColor × 贴图，即
+    //   「昼夜乘子 × 天光遮蔽 × 贴图」：地表昼 = 1.0×1.0×tex、地表夜 = 0.4×1.0×tex、洞穴昼 = 1.0×0.2×tex。
+    //   m=skyLight ∈ [0,1]（0=子夜、1=正午）；floor 0.4 ≈ 原 nightTint alpha 0.6 把地形拉暗的等效量级
+    //   （夜间仍可辨识地形轮廓，spec t09）。纯灰阶乘子（不偏色）——夜色基调由 sky clearColor 提供。
+    function terrainLight(m) {
+        const b = 0.4 + (1.0 - 0.4) * m
+        return Qt.rgba(b, b, b, 1.0)
+    }
 
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }
@@ -564,48 +569,48 @@ Window {
         Model { // chunk (0,0) → 世界 (0,0)
             position: Qt.vector3d(0, 0, 0)
             geometry: ChunkGeometry { id: geo00; world: theWorld; cx: 0; cz: 0 }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
             Component.onCompleted: console.info("[t31] chunk(0,0) UP parent=" + parent + " (对照：已知可见)")
         }
         Model { // chunk (1,0) → 世界 (16,0)
             position: Qt.vector3d(16, 0, 0)
             geometry: ChunkGeometry { id: geo10; world: theWorld; cx: 1; cz: 0 }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (2,0) → 世界 (32,0)
             position: Qt.vector3d(32, 0, 0)
             geometry: ChunkGeometry { id: geo20; world: theWorld; cx: 2; cz: 0 }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (0,1) → 世界 (0,16)
             position: Qt.vector3d(0, 0, 16)
             geometry: ChunkGeometry { id: geo01; world: theWorld; cx: 0; cz: 1 }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (1,1) → 世界 (16,16)
             position: Qt.vector3d(16, 0, 16)
             geometry: ChunkGeometry { id: geo11; world: theWorld; cx: 1; cz: 1 }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (2,1) → 世界 (32,16)
             position: Qt.vector3d(32, 0, 16)
             geometry: ChunkGeometry { id: geo21; world: theWorld; cx: 2; cz: 1 }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (0,2) → 世界 (0,32)
             position: Qt.vector3d(0, 0, 32)
             geometry: ChunkGeometry { id: geo02; world: theWorld; cx: 0; cz: 2 }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (1,2) → 世界 (16,32)
             position: Qt.vector3d(16, 0, 32)
             geometry: ChunkGeometry { id: geo12; world: theWorld; cx: 1; cz: 2 }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (2,2) → 世界 (32,32)
             position: Qt.vector3d(32, 0, 32)
             geometry: ChunkGeometry { id: geo22; world: theWorld; cx: 2; cz: 2 }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
 
         // 选中立方体框（射线选体 t04 / t52）：从「命中面方框 (WireSquare)」改为「整个立方体框」，
@@ -1417,20 +1422,10 @@ Window {
 
     // t88 火把位置列表（火把伪光源 Repeater 的 model；blockPlaced/blockBroken/worldChanged 维护）。
     ListModel { id: torchPositions }
-    // 根因：地形 chunk 用 PrincipledMaterial.NoLighting（自发光恒定）→ t09 的环境光 lerp 只改了天空
-    //   clearColor、DirectionalLight.brightness 对 NoLighting 材质无效 → 地形白天/黑夜亮度不变（用户反馈）。
-    //   lit 材质在本场景实测不渲染（lessons-learned），故不换材质、改走全屏叠层：在 View3D（先绘制）之上、
-    //   所有 HUD/背包/暂停叠层（后绘制）之前，叠一层半透深蓝 Rectangle，alpha 随天光乘子反向 lerp。
-    //   深蓝取夜空同色 #0b1026：夜间天空已是该色、与之混合无额外偏移，仅地形亮色被拉向夜色（对症根因）。
-    // 不影响 GUI 亮度（spec 验收）：本 Rectangle 无显式 z（=0）、声明在 View3D 之后、所有 HUD 之前 →
-    //   同 z=0 的 HUD（准星/Hotbar/HUD Text）靠声明序在后绘制、盖在 tint 之上；显式 z 的叠层（F3 z=50、
-    //   暂停 z=100、背包 z=150、菜单 z=200）更在其上 → 均不被压暗。无 MouseArea → 不拦截破/放/背包点击。
-    // 仅 playing 态显（menu 被 MainMenu z=200 覆盖；显式 gate 更清晰、避免菜单态多余的叠层合成）。
-    Rectangle {
-        visible: window.appState === "playing"
-        anchors.fill: parent
-        color: Qt.rgba(0.043, 0.063, 0.149, nightTintAlpha(worldClock.skyLight))
-    }
+    // t121：原此处为 nightTint 全屏深蓝 Rectangle（地形 NoLighting 不随昼夜变暗的兜底）。
+    //   现顶点色承载天光遮蔽 + 材质 baseColor 承载昼夜乘子（见 terrainLight）后已移除该叠层——
+    //   全屏 tint 会再压暗 HUD/粒子等非地形层；改走 per-vertex + baseColor 后地形由网格数据精确控光、
+    //   其余呈现层（HUD/背包/暂停）不再被夜色叠层误伤。
 
     // t67 受伤反馈：模型变红 + 视角晃动（替换 t51 的全屏 damageOverlay 红闪）。
     //   根因：旧受伤 = 全屏 #ff0000 半透 Rectangle 淡出 600ms（damageOverlay），playerModel 本身无 hurt

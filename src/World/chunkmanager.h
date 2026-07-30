@@ -32,6 +32,8 @@ public:
     // setBlock 成功写入后：标目标 chunk 脏；该格贴 chunk 边沿 → 同标邻接 chunk 脏（t03 准备）。
     quint8 blockAt(int x, int y, int z) const;
     bool setBlock(int x, int y, int z, quint8 id);
+    // t121：世界坐标列的「自顶向下首个非空气」y（越界 / 空列 → -1）。mesher 据此判顶点见天（PLAN §2-H）。
+    int heightmapAt(int x, int z) const;
 
     // 取 chunk（网格坐标 cx,cz；越界返回 nullptr）。
     Chunk *chunk(int cx, int cz) const;

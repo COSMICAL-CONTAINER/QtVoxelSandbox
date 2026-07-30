@@ -46,6 +46,15 @@ quint8 ChunkManager::blockAt(int x, int y, int z) const
     return c ? c->blockAt(x - (x / kSize) * kSize, y, z - (z / kSize) * kSize) : quint8(0);
 }
 
+// t121：世界坐标 (x,z) 列的 heightmap（PLAN §2-H）。路由到所在 chunk 的局部列；越界 / 无 chunk → -1。
+int ChunkManager::heightmapAt(int x, int z) const
+{
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth)
+        return -1; // 世界越界 = 无实体（mesher 对越界列本就无面可画）
+    Chunk *c = chunk(x / kSize, z / kSize);
+    return c ? c->heightmapAt(x - (x / kSize) * kSize, z - (z / kSize) * kSize) : -1;
+}
+
 bool ChunkManager::setBlock(int x, int y, int z, quint8 id)
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)

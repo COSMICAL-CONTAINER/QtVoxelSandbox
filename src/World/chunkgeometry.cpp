@@ -9,11 +9,17 @@
 #include <cstddef>
 #include <cstring>
 
-// 顶点：pos(3) + normal(3) + uv(2) = 8 float = 32 字节。
+// 顶点：pos(3) + normal(3) + uv(2) + color(4, rgba) = 12 float = 48 字节。
+// color.rgb 承载 t121 天光遮蔽（见天 1.0 / 地下 0.2，mesher 按 chunk heightmap 判定）；a 恒 1.0。
+// 注：QtQuick3D 的 ColorSemantic 按官方示例（quick3d/custommorphing/morphgeometry.cpp）按 vec4（RGBA）
+//   读取——Attribute 无 componentCount 字段（语义→分量数由运行期固定表派生），若只写 3 float，第 4 分量
+//   会越界读到下一顶点 / 缓冲尾外。故 color 用 4 float（a=1.0），stride = 48 字节（spec 原「11 float/44 字节」
+//   乃按 rgb 计；此处为正确性改 rgba。最终色 = baseColor × vertexColor × 贴图，见 Main.qml）。
 struct Vtx {
     float x, y, z;
     float nx, ny, nz;
     float u, v;
+    float r, g, b, a;
 };
 
 // 6 个面：邻居偏移 dir、外法线 nrm、4 角偏移（从外侧看逆时针，叉积验证 = 外法线）。
@@ -126,6 +132,14 @@ void ChunkGeometry::buildMesh()
                     // 由 QML Model 渲染，朝向据邻居 solid 推断）。mesher 在此跳过立方面，否则会出现
                     // 「黑底 6 面大立方 + 上叠小模型」的重复畸形。其他异形方块（未来如花/草）按同模式加。
                     if (b == BlockRegistry::Torch) continue;
+
+                    // t121 天光（PLAN §2-H「per-column 天光」）：本列首个非空气方块的 y（heightmap）。
+                    // 此块在体素 y=ly：ly >= hm → 见天（地表/天空间）→ 天光满 1.0；否则地下 → 暗 0.2。
+                    // hm 由 setBlock 增量维护（见 chunk.h）；此块为实体故 hm >= ly 恒真（顶块 = 此块或更高），
+                    // 故「ly >= hm」等价「此块即本列顶块」。该值写进本块 6 面 24 角顶点的 color.rgb。
+                    const int hm = m_world->heightmapAt(wx, wz);
+                    const float sky = (ly >= hm) ? 1.0f : 0.2f;
+
                     for (int f = 0; f < 6; ++f) {
                         const FaceDef &F = kFaces[f];
                         if (blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]) != 0)
@@ -146,6 +160,7 @@ void ChunkGeometry::buildMesh()
                             v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
                             v.u = u0 + cu * (u1 - u0);
                             v.v = v0 + cv * (v1 - v0);
+                            v.r = sky; v.g = sky; v.b = sky; v.a = 1.0f; // 天光遮蔽（t121）
                             verts.append(v);
                         }
                         idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);
@@ -168,7 +183,7 @@ void ChunkGeometry::buildMesh()
     if (!vb.isEmpty())
         std::memcpy(vb.data(), verts.constData(), size_t(vb.size()));
     setVertexData(vb);
-    setStride(int(sizeof(Vtx))); // 32
+    setStride(int(sizeof(Vtx))); // 48（pos3 + normal3 + uv2 + color4 rgba）
 
     QByteArray ib;
     ib.resize(int(idx.size() * sizeof(quint32)));
@@ -185,6 +200,9 @@ void ChunkGeometry::buildMesh()
                  int(offsetof(Vtx, nx)), QQuick3DGeometry::Attribute::F32Type);
     addAttribute(QQuick3DGeometry::Attribute::TexCoord0Semantic,
                  int(offsetof(Vtx, u)), QQuick3DGeometry::Attribute::F32Type);
+    // t121：顶点色（vec4 rgba）。PrincipledMaterial vertexColorsEnabled=true 时最终色 = baseColor × vertexColor × 贴图。
+    addAttribute(QQuick3DGeometry::Attribute::ColorSemantic,
+                 int(offsetof(Vtx, r)), QQuick3DGeometry::Attribute::F32Type);
     addAttribute(QQuick3DGeometry::Attribute::IndexSemantic,
                  0, QQuick3DGeometry::Attribute::U32Type);
 
