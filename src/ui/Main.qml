@@ -335,7 +335,7 @@ Window {
                 //   depth 测试恒胜地形 → 手臂恒在所有实体方块之前（不穿模）。pivot.y 上移到 0.05 使手仍落视野下中。
                 //   t91：pivot.x 0.35→0.20 整手左移（旧 0.35 偏右，手持方块出右框）；y/z 不动（不穿模余量不变）。
                 position: Qt.vector3d(0.20, 0.05, -0.15)
-                readonly property real baseTilt: 100.0  // t103：40→100 前旋 ~60°（用户要手往前伸）；同步 position.z 收 -0.15 防穿模
+                readonly property real baseTilt: -100.0  // t106：翻转（t103 +100 让袖段旋到前、手段到后=「前蓝后手」反了）；-100 反向 → 手在前袖在后
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
 
