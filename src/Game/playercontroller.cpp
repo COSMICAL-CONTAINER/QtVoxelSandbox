@@ -446,7 +446,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     // t64：spawnItem 带 count（= BlockRegistry::dropCount；当前表内全 1，留扩展位对齐方块表）。
     if (drop) {
         const int dropCount = std::max(1, BlockRegistry::dropCount(brokenId));
-        emit spawnItem(x, y, z, int(brokenId), dropCount);
+        emit spawnItem(x, y, z, BlockRegistry::dropId(brokenId), dropCount); // t83：传 dropId（Stone→Cobble / 矿石→材料），非 brokenId
     }
     emit swingArm();                                // 破块成功 → 第一人称手挥动（t29）
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）

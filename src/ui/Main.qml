@@ -261,7 +261,7 @@ Window {
                 //   减到 30°、臂段 scale 收到 0.09 → 手段中心相机本地 z∈[-0.25(静止), -0.13(挥峰)]，始终近于 0.3 →
                 //   depth 测试恒胜地形 → 手臂恒在所有实体方块之前（不穿模）。pivot.y 上移到 0.05 使手仍落视野下中。
                 position: Qt.vector3d(0.35, 0.05, -0.2)
-                readonly property real baseTilt: 30.0  // 静态前抬：手臂略前伸入视野（非纯下垂），更像持物姿态
+                readonly property real baseTilt: 40.0  // t81：30→40 前抬多一点（手伸出来）；z 余量 0.05+ 仍不穿模
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
 
@@ -271,14 +271,14 @@ Window {
                 Model {
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, 0.02, 0)      // 肘上（本地 y -0.05..0.09 = 上半段）
-                    scale: Qt.vector3d(0.09, 0.14, 0.09)
+                    scale: Qt.vector3d(0.12, 0.18, 0.12)   // t81：加粗（0.09→0.12），手明显变大（零穿模：z 深度未动）
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604) }
                 }
                 // 前臂/手（肤色 #caa472；肘下手段）。原整臂一色，t73 拆为袖+手两段（上半蓝袖、下半肤色手）。
                 Model {
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.10, 0)    // 肘下（本地 y -0.16..-0.04 = 下半段）
-                    scale: Qt.vector3d(0.085, 0.12, 0.085)
+                    scale: Qt.vector3d(0.11, 0.16, 0.11)  // t81：加粗+加长 Y（0.085/0.12→0.11/0.16），手变长变大
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447) }
                 }
                 // 手持方块（t73 可见性修复）：持有方块（selectedBlock≠0）时，手前显该方块。
