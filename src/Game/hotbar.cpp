@@ -356,12 +356,16 @@ int Hotbar::mainAddStack(int id, int n)
     return remaining;
 }
 
-// 跨 main + hotbar 的智能堆叠（拾取 / 丢弃回栏合并）。优先序（spec t97）：
-//   0) main 同 id 未满槽合并
+// 跨 main + hotbar 的智能堆叠（拾取 / 丢弃回栏合并）。优先序（spec t109）：
+//   0) main 同 id 未满槽合并（合并全程优先于开新，避免同物分散两栈；spec「main 同 id 合并已在先」）
 //   1) hotbar 同 id 未满槽合并
-//   2) 空槽开新栈（main 优先 → hotbar）
+//   2) 空槽开新栈：**hotbar 优先 → main**
 // 返回未放入数。returnHeldToHotbar（关包归还光标）+ pickupScan（世界拾取）改调它 → 拾取 / 丢弃回栏能
 // 合并进主栏同 id（修「主栏不同步、丢弃回栏不合并」根因；旧 addStack 只看 hotbar 9 槽）。
+//
+// t109 根因：旧序「main 空 → hotbar 空」让空手拾取先塞主栏空槽，玩家挖块却要翻主栏找 → 违直觉。
+// 拾取应优先落入可直接看见的 hotbar（MC 行为同此），故交换两空槽循环：hotbar 空优先于 main 空。
+// main 同 id 合并仍先于 hotbar 同 id（已存在栈就地补满优于跨栏开新，保持「同物不分散」）。
 int Hotbar::addToAny(int id, int n)
 {
     if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
@@ -387,21 +391,21 @@ int Hotbar::addToAny(int id, int n)
             s.count += add; remaining -= add; slotChanged = true;
         }
     }
-    // 2) 空槽开新栈：main 优先 → hotbar。
-    for (size_t i = 0; i < m_mainSlots.size(); ++i) {
-        if (remaining <= 0) break;
-        ItemStack &s = m_mainSlots[i];
-        if (s.id == 0) {
-            const int add = std::min(cap, remaining);
-            s = ItemStack{id, add}; remaining -= add; mainChanged = true;
-        }
-    }
+    // 2) 空槽开新栈：hotbar 优先 → main（t109：拾取优先 hotbar，玩家挖块直接落在可见栏）。
     for (size_t i = 0; i < m_slots.size(); ++i) {
         if (remaining <= 0) break;
         ItemStack &s = m_slots[i];
         if (s.id == 0) {
             const int add = std::min(cap, remaining);
             s = ItemStack{id, add}; remaining -= add; slotChanged = true;
+        }
+    }
+    for (size_t i = 0; i < m_mainSlots.size(); ++i) {
+        if (remaining <= 0) break;
+        ItemStack &s = m_mainSlots[i];
+        if (s.id == 0) {
+            const int add = std::min(cap, remaining);
+            s = ItemStack{id, add}; remaining -= add; mainChanged = true;
         }
     }
     if (mainChanged) bumpMainRevision();
