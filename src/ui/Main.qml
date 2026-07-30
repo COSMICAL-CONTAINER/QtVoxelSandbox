@@ -32,6 +32,25 @@ Window {
     // / craftingTableOpen 互斥（关一个再开另一个）；E/Esc 关 → 恢复 grab。开时抑制暂停叠层。
     property bool furnaceOpen: false
 
+    // t110 Shift/数字键守卫所需 window 级态：
+    //   - shiftHeld：Shift 按下态（keyInput Keys.onPressed/Released 始终追踪，**不论背包是否开**）。
+    //     各背包面板的槽 TapHandler 读此属性 → 区分普通左键 vs Shift+左键搬运。不放进各面板是因为 Shift
+    //     按下/松开是窗口级键盘事件（keyInput 持焦点），面板自身不接收 Keys。
+    //   - hoveredSlotKey：当前指针所在槽的「组:下标」字符串（如 "main:5" / "hotbar:0" / "craft:2"）。
+    //     由当前可见的背包面板的 hoveredKey 提升而来（keyInput 数字键交换需 window 级读，见 spec t110
+    //     「需 window.hoveredSlotKey 提升到 window 级」）。面板隐藏 / 无背包开 → ""。
+    property bool shiftHeld: false
+    property string hoveredSlotKey: {
+        if (window.appState !== "playing") return ""
+        // 据当前可见面板绑定（hoveredKey 由各面板 HoverHandler 维护；面板 visible=false 时其 HoverHandler
+        // 不触发，但显式判 visible 更稳，避免读隐藏面板的陈旧 hoveredKey）。
+        if (craftingTablePanel.visible) return craftingTablePanel.hoveredKey
+        if (furnacePanel.visible)        return furnacePanel.hoveredKey
+        if (inventoryPanel.visible)      return inventoryPanel.hoveredKey
+        if (survivalPanel.visible)       return survivalPanel.hoveredKey
+        return ""
+    }
+
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
     function startGame() {
         appState = "playing"
@@ -83,6 +102,18 @@ Window {
             hotbarVM.heldBlock = 0 // 全入 → 清光标手持栈（setHeldBlock(0) 同步清 count）
         }
     }
+    // t110 数字键交换（spec「数字键 1-9：背包开 + hoveredKey → 与 hotbar[idx] 交换」）：把当前指针 hover 的
+    //   槽内容与 hotbar[idx] 整栈互换（MC 1.0 数字键快捷栏交换）。逻辑分发到当前可见的背包面板 —— 各面板持
+    //   readSlot/writeSlot 知道如何读 / 写其本地槽组（craft / in / fuel / out）+ 经 VM 的 main/hotbar；故把
+    //   「源 / 目标读写」下放到面板、Main.qml 只做路由（不在 window 层复制读写逻辑，避免漏 craft / 熔炉 3 槽
+    //   等面板本地存储）。无面板开 → 无操作。
+    function swapHoveredWithHotbar(hotbarIdx) {
+        if (craftingTablePanel.visible)      craftingTablePanel.swapHoveredWithHotbar(hotbarIdx)
+        else if (furnacePanel.visible)       furnacePanel.swapHoveredWithHotbar(hotbarIdx)
+        else if (inventoryPanel.visible)     inventoryPanel.swapHoveredWithHotbar(hotbarIdx)
+        else if (survivalPanel.visible)      survivalPanel.swapHoveredWithHotbar(hotbarIdx)
+    }
+
     // 背包开关（t18）：E 键调。开 → release（光标可见点格子）；关 → grab + 焦点回键位层。
     function toggleInventory() {
         if (inventoryOpen) closeInventory()
@@ -1307,12 +1338,43 @@ Window {
             if (e.key === Qt.Key_F6) { worldClock.toggleDebugFast(); e.accepted = true; return } // 昼夜调试加速（t09）
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
             if (e.key === Qt.Key_Q) { player.dropHeld(); e.accepted = true; return }     // 丢弃手持 1 件（t36）
+
+            // t110 背包开时的 Shift / 数字键守卫（spec「背包开时 Shift/数字键不透传到 player」+「数字键交换」）。
+            //   根因：原代码无差别地把 Shift 与数字键透传给 player —— Shift 进 m_keys → 关包后 release 已清，
+            //   但若「关包瞬间 Shift 仍按住」会重新捕获进 m_keys → 蹲下；数字键在背包开时仍改 selectedSlot，
+            //   与背包内整理物品的语义冲突（MC 1.0 背包开时数字键 = 与该 hotbar 槽交换 hover 物品，非切选中）。
+            const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen
+
+            // Shift：始终追踪 shiftHeld（供背包槽 TapHandler 读做 Shift+左键搬运）；背包开时不透传给 player。
+            //   shiftHeld 不论背包开关都更新 —— 闭包后若用户仍按住 Shift，下一次 TapHandler 读到的 shiftHeld
+            //   仍准确（松开时 Keys.onReleased 翻回 false）。
+            if (e.key === Qt.Key_Shift) {
+                window.shiftHeld = true
+                if (bagOpen) { e.accepted = true; return }    // 蹲下守卫：背包开时不让 Shift 进 player.m_keys
+            }
+
             if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) {            // 1–9 直选 hotbar 槽 0..8（属性赋值走 WRITE setter）
-                hotbarVM.selectedSlot = e.key - Qt.Key_1; e.accepted = true; return
+                if (bagOpen) {
+                    // 数字键：背包开 + 当前 hover 槽 → 与 hotbar[idx] 整栈互换（MC 1.0）；无 hover → 不动 selectedSlot。
+                    if (window.hoveredSlotKey !== "") window.swapHoveredWithHotbar(e.key - Qt.Key_1)
+                } else {
+                    hotbarVM.selectedSlot = e.key - Qt.Key_1
+                }
+                e.accepted = true; return
             }
             player.setKey(e.key, true)
         }
-        Keys.onReleased: (e) => { if (e.isAutoRepeat) return; player.setKey(e.key, false) }
+        Keys.onReleased: (e) => {
+            if (e.isAutoRepeat) return
+            // t110：Shift 松开同步 shiftHeld；背包开时不透传 player.setKey（与 press 守卫对称，防 Shift 状态
+            //   与 player.m_keys 不同步）。非 Shift / 非背包态照旧透传。
+            if (e.key === Qt.Key_Shift) {
+                window.shiftHeld = false
+                const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen
+                if (bagOpen) return
+            }
+            player.setKey(e.key, false)
+        }
 
         // 光标位置追踪已上移到独立 cursorTrackLayer（z=250，高于背包/工作台/熔炉面板 z=150）——
         // 见下方浮动光标前。原放 keyInput（z=0）内被 z=150 面板截断 hover → 浮动光标按下期间

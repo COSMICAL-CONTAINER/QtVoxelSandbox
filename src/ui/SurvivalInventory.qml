@@ -260,6 +260,50 @@ Item {
         root.hotbar.heldCount = r.heldCount
     }
 
+    // t110 Shift+左键搬运（MC 1.0 背包）：main 槽→首个空 hotbar 槽；hotbar 槽→首个空 main 槽；其它组（craft）
+    //   无操作（spec 仅定义 main↔hotbar）。整栈搬：源清空、目标写入源原内容。「空位」= id==0 的槽（spec「空位」）。
+    //   无空位 → 无操作（不退化到普通左键，shift 是显式搬运语义，与普通左键的拾取/放置区分）。读 / 写经
+    //   readSlot/writeSlot 路由（main/hotbar 走 VM 单一权威），与 Inventory / CraftingTableUI / FurnaceUI 同算法。
+    function slotShiftLeft(group, index) {
+        if (group === "main") {
+            const src = root.readSlot("main", index)
+            if (src.id === 0) return
+            for (let i = 0; i < root.hotbar.slotCount; ++i) {
+                if (root.readSlot("hotbar", i).id === 0) {
+                    root.writeSlot("main", index, 0, 0)
+                    root.writeSlot("hotbar", i, src.id, src.count)
+                    return
+                }
+            }
+        } else if (group === "hotbar") {
+            const src = root.readSlot("hotbar", index)
+            if (src.id === 0) return
+            for (let i = 0; i < root.hotbar.mainCount; ++i) {
+                if (root.readSlot("main", i).id === 0) {
+                    root.writeSlot("hotbar", index, 0, 0)
+                    root.writeSlot("main", i, src.id, src.count)
+                    return
+                }
+            }
+        }
+    }
+
+    // t110 数字键交换（spec「数字键 1-9：背包开 + hoveredKey → 与 hotbar[idx] 交换」）：当前 hover 槽 ↔
+    //   hotbar[idx] 整栈互换。源 = root.hoveredKey（"组:下标"）；经 readSlot/writeSlot 路由（main/hotbar/craft
+    //   均覆盖）。hotbar 段读 / 写经 VM 单一权威。group==hotbar 且 srcIdx==idx 时退化为自交换（写入相同值，无副作用）。
+    function swapHoveredWithHotbar(hotbarIdx) {
+        if (root.hoveredKey === "") return
+        const parts = root.hoveredKey.split(":")
+        if (parts.length !== 2) return
+        const group = parts[0]
+        const srcIdx = parseInt(parts[1], 10)
+        if (Number.isNaN(srcIdx)) return
+        const src = root.readSlot(group, srcIdx)
+        const dst = root.readSlot("hotbar", hotbarIdx)
+        root.writeSlot(group, srcIdx, dst.id, dst.count)
+        root.writeSlot("hotbar", hotbarIdx, src.id, src.count)
+    }
+
     // t98 双击合并（MC：双击某槽 → 扫 main + hotbar 同 id 物品，累加成满栈 64 一组，余数留光标）。targetId
     // 取光标手持 id（典型流程：首次左键拾起该槽 → 二次点击同槽合并），fallback 到所点槽 id（首次为放置时光
     // 标空）。依赖 t97 main VM 共享（main + hotbar 同一份）。守恒：合并后 (各槽 + 光标) 总量 = 合并前。
@@ -478,6 +522,9 @@ Item {
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 onTapped: {
+                                    // t110：Shift+左键搬运（craft 槽不在 main↔hotbar 范畴，slotShiftLeft 对 craft
+                                    //   组无操作；普通左键走 resolveClick）。
+                                    if (window.shiftHeld) { root.slotShiftLeft("craft", index); return }
                                     const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
                                     if (!r) return
                                     root.craftSlots[index] = r.slotId
@@ -744,6 +791,8 @@ Item {
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
                             onTapped: {
+                                // t110：Shift+左键 → main 槽搬运到首个空 hotbar 槽（早于双击合并 / 普通左键）。
+                                if (window.shiftHeld) { root.slotShiftLeft("main", index); return }
                                 // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId（拾起 + 合并）。
                                 const key = root.slotKey("main", index)
                                 const now = Date.now()
@@ -873,6 +922,8 @@ Item {
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 onTapped: {
+                                    // t110：Shift+左键 → hotbar 槽搬运到首个空 main 槽（早于双击合并 / 普通左键）。
+                                    if (window.shiftHeld) { root.slotShiftLeft("hotbar", index); return }
                                     // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId。
                                     const key = root.slotKey("hotbar", index)
                                     const now = Date.now()

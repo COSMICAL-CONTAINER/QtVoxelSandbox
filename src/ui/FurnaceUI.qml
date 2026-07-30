@@ -66,6 +66,11 @@ Item {
     // 火焰闪烁动画驱动：燃烧时 0..1 循环（NumberAnimation），Canvas 据此调火焰高度 / 宽度 → 视觉跳动。
     property real flameFlicker: 0.0
 
+    // t110：当前指针所在槽的「组:下标」key（供 window.hoveredSlotKey 提升 → 数字键交换）。各槽 HoverHandler
+    //   onHoveredChanged 维护（进入写、离开按 key 守卫清除，防相邻槽进出竞态互清）。组名与 readSlot/writeSlot
+    //   一致：in / fuel / out / main / hotbar。
+    property string hoveredKey: ""
+
     // ── 栈操作（与 CraftingTableUI.qml 完全一致：拾取/放置/合并/互换 4 case）──
     function resolveClick(curId, curCount) {
         const heldId = root.hotbar.heldBlock
@@ -126,13 +131,59 @@ Item {
     }
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
+    // t110：slotLeft 入口先查 window.shiftHeld → 走 Shift+左键搬运（slotShiftLeft），与 SurvivalInventory /
+    //   CraftingTableUI / Inventory 的「TapHandler 内 if (window.shiftHeld) slotShiftLeft(...) return」等效但
+    //   集中在一处（本文件 5 类槽均经 slotLeft 路由，单点拦截最简洁）。
     function slotLeft(group, index) {
+        if (window.shiftHeld) { root.slotShiftLeft(group, index); return }
         const cur = root.readSlot(group, index)
         const r = root.resolveClick(cur.id, cur.count)
         if (!r) return
         root.writeSlot(group, index, r.slotId, r.slotCount)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
+    }
+
+    // t110 Shift+左键搬运（MC 1.0 背包）：main 槽→首个空 hotbar 槽；hotbar 槽→首个空 main 槽；其它组
+    //   （in / fuel / out）无操作（spec 仅定义 main↔hotbar；熔炉 3 槽不参与搬运，避免误把冶炼输入搬走）。
+    //   与 SurvivalInventory / CraftingTableUI / Inventory 同算法。
+    function slotShiftLeft(group, index) {
+        if (group === "main") {
+            const src = root.readSlot("main", index)
+            if (src.id === 0) return
+            for (let i = 0; i < root.hotbar.slotCount; ++i) {
+                if (root.readSlot("hotbar", i).id === 0) {
+                    root.writeSlot("main", index, 0, 0)
+                    root.writeSlot("hotbar", i, src.id, src.count)
+                    return
+                }
+            }
+        } else if (group === "hotbar") {
+            const src = root.readSlot("hotbar", index)
+            if (src.id === 0) return
+            for (let i = 0; i < root.hotbar.mainCount; ++i) {
+                if (root.readSlot("main", i).id === 0) {
+                    root.writeSlot("hotbar", index, 0, 0)
+                    root.writeSlot("main", i, src.id, src.count)
+                    return
+                }
+            }
+        }
+    }
+
+    // t110 数字键交换：当前 hover 槽 ↔ hotbar[idx] 整栈互换（与 SurvivalInventory / CraftingTableUI 同算法）。
+    //   hoveredKey 覆盖 in/fuel/out/main/hotbar 五类组（HoverHandler 维护），均可与 hotbar[idx] 互换。
+    function swapHoveredWithHotbar(hotbarIdx) {
+        if (root.hoveredKey === "") return
+        const parts = root.hoveredKey.split(":")
+        if (parts.length !== 2) return
+        const group = parts[0]
+        const srcIdx = parseInt(parts[1], 10)
+        if (Number.isNaN(srcIdx)) return
+        const src = root.readSlot(group, srcIdx)
+        const dst = root.readSlot("hotbar", hotbarIdx)
+        root.writeSlot(group, srcIdx, dst.id, dst.count)
+        root.writeSlot("hotbar", hotbarIdx, src.id, src.count)
     }
     function slotRight(group, index) {
         const cur = root.readSlot(group, index)
@@ -297,6 +348,10 @@ Item {
                             } else if (root.hoveredItemId === root.inId) {
                                 root.hoveredItemId = 0
                             }
+                            // t110：track hoveredKey 供数字键交换（in:0）。
+                            const key = "in:0"
+                            if (hovered) root.hoveredKey = key
+                            else if (root.hoveredKey === key) root.hoveredKey = ""
                         }
                     }
                 }
@@ -346,6 +401,10 @@ Item {
                             } else if (root.hoveredItemId === root.fuelId) {
                                 root.hoveredItemId = 0
                             }
+                            // t110：track hoveredKey 供数字键交换（fuel:0）。
+                            const key = "fuel:0"
+                            if (hovered) root.hoveredKey = key
+                            else if (root.hoveredKey === key) root.hoveredKey = ""
                         }
                     }
                 }
@@ -459,6 +518,10 @@ Item {
                             } else if (root.hoveredItemId === root.outId) {
                                 root.hoveredItemId = 0
                             }
+                            // t110：track hoveredKey 供数字键交换（out:0）。
+                            const key = "out:0"
+                            if (hovered) root.hoveredKey = key
+                            else if (root.hoveredKey === key) root.hoveredKey = ""
                         }
                     }
                 }
@@ -528,6 +591,10 @@ Item {
                                 } else if (root.hoveredItemId === itemId) {
                                     root.hoveredItemId = 0
                                 }
+                                // t110：track hoveredKey 供数字键交换（main:index）。
+                                const key = "main:" + index
+                                if (hovered) root.hoveredKey = key
+                                else if (root.hoveredKey === key) root.hoveredKey = ""
                             }
                         }
                     }
@@ -594,6 +661,10 @@ Item {
                                     } else if (root.hoveredItemId === slotId) {
                                         root.hoveredItemId = 0
                                     }
+                                    // t110：track hoveredKey 供数字键交换（hotbar:index）。
+                                    const key = "hotbar:" + index
+                                    if (hovered) root.hoveredKey = key
+                                    else if (root.hoveredKey === key) root.hoveredKey = ""
                                 }
                             }
                         }
