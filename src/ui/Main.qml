@@ -1174,22 +1174,35 @@ Window {
             Repeater {
                 model: entityManager.count
                 delegate: Node {
-                    // 触碰 revision 建立依赖（push 位移 / 重力下落 bump revision → 位置 / 配色重算）。
-                    // t36 erase-shift 不适用于本轮（无 remove），但 revision 仍是 posAt/colorAt 这类
-                    // Q_INVOKABLE 绑定的 NOTIFY 触发器（同 itemEntities delegate 模式）。
+                    // 触碰 revision 建立依赖（push 位移 / 重力下落 / FallingBlock 移除 bump revision → 位置 /
+                    // 配色 / kind 重算）。t117 FallingBlock 着地 erase-shift 后 revision 自增 → delegate 对齐
+                    // 新 entity 数据（同 itemEntities delegate 模式）。
                     position: { entityManager.revision; return entityManager.posAt(index) }
+                    property int entKind: { entityManager.revision; return entityManager.kindAt(index) }
                     Component.onCompleted: {
                         // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
                         // onCompleted 显式 reparent 进 mobHost（同 itemHost / torchHost delegate）。
                         if (parent === null) parent = mobHost
-                        console.info("[t95] mob delegate[" + index + "] parent=" + parent
+                        console.info("[t95] entity delegate[" + index + "] parent=" + parent
                             + " pos=" + position + " (须 QQuick3DNode 非 null)")
                     }
 
-                    // UnitCube = ±0.5 居中单位立方体（与地形 / 线框 / 玩家模型同基准，lessons-learned）。
-                    // scale=1（1×1×1 方块实体）；NoLighting（lessons：可见 Model 必须 NoLighting，lit 不渲染）。
-                    // baseColor = 实体配色（#ff5555 醒目纯色，spec「纯色突出」）。
+                    // t117 FallingBlock：贴图方块（BlockCube + 共享图集 voxelAtlas，复用地形贴图），scale 1.0
+                    //   = 1×1×1（与地形方块外观一致；落体过程视觉读作「移动的方块」）。NoLighting（可见 Model
+                    //   必须 NoLighting，lessons-learned）。blockId 据 entity 携带值（沙=8，与地形同贴图）。
                     Model {
+                        visible: entKind === EntityManager.FallingBlock
+                        geometry: BlockCube { blockId: { entityManager.revision; return entityManager.blockIdAt(index) } }
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColorMap: voxelAtlas
+                        }
+                    }
+                    // Mob（原 t95 测试生物）：UnitCube = ±0.5 居中单位立方体（与地形 / 线框 / 玩家模型同基准）。
+                    //   scale=1（1×1×1）；NoLighting；baseColor = 实体配色（#ff5555 醒目纯色，spec「纯色突出」）。
+                    Model {
+                        visible: entKind === EntityManager.Mob
                         geometry: UnitCube {}
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
@@ -1426,6 +1439,8 @@ Window {
             // t88：火把被破 → 从伪光源列表移除（id=13=BlockRegistry::Torch；C++ 侧未把枚举暴露 QML，
             // 此处用字面量 13 + 注释，与 blockregistry.h Id 枚举同源）。
             if (id === 13) removeTorchAt(x, y, z)
+            // t117：被破格上方若为沙 → 失支撑塌落（maybeTrigger 内部 setBlock(air) 递归触发更上方沙链）。
+            maybeTriggerFallingBlock(x, y + 1, z)
         }
         function onBlockPlaced(x, y, z, id) {
             if (particleLoader.item) particleLoader.item.burstPlace(x, y, z, id)
@@ -1438,8 +1453,11 @@ Window {
             // 「玩家放置成功」语义事件。ViewModel 观察 World 事件做栈突变（PLAN §2 分层：VM 只依赖
             // World/Game 数据，不反向写）。takeStack 取至 0 → 选中栈变 Air → player.selectedBlock
             // 经 selectedBlockId 绑定变 Air → 右键不再放置（playercontroller 守 Air）。
+            // t117：FallingBlock 着地走 World::setBlockFromEntity（不发 blockPlaced）→ 不会误触本分支。
             if (player.mode === PlayerController.Survival)
                 hotbarVM.takeStack(hotbarVM.selectedSlot, 1)
+            // t117：新放的沙若下方空气 → 自身塌落（玩家在半空放沙立即落）。
+            if (id === 8) maybeTriggerFallingBlock(x, y, z)
         }
         // t88：worldgen 重生（seed 变 / 初始生成）清除旧火把 → 伪光源列表校验清理。worldgen 不发
         // blockBroken（m_chunks.setBlock 直写），故旧火把位置不会经 onBlockBroken 移除；此处扫描
@@ -1459,6 +1477,22 @@ Window {
             const e = torchPositions.get(i)
             if (e.x === x && e.y === y && e.z === z) { torchPositions.remove(i); return }
         }
+    }
+
+    // t117 沙子重力触发：查 (x,y,z) 是否为沙且下方空气 → 先把沙格置 air（经 World::setBlock 发 blockBroken
+    //   递归触发上方沙链）再 spawn 下落方块实体。仅 id=8（BlockRegistry::Sand）参与；其余方块无重力。
+    //   「先置 air 再 spawn」使链式塌落自然：setBlock(air) → blockBroken(x,y,z,Sand) → onBlockBroken 再查
+    //   (x,y+1,z) 沙并递归 trigger（沙柱一次塌完，机制等价 MC 沙链）。
+    //   分层（PLAN §2）：呈现层（Main.qml）消费 World 语义事件（blockPlaced/broken）→ EntityManager 生成
+    //   实体；实体物理（重力 / 着地）由 Game/Entities 层 tick 自治（同 spawnItem→掉落物 模式），呈现层不反向写。
+    function maybeTriggerFallingBlock(x, y, z) {
+        if (y < 0 || y >= theWorld.height) return
+        if (x < 0 || z < 0 || x >= theWorld.width || z >= theWorld.depth) return
+        if (theWorld.blockAt(x, y, z) !== 8) return // 仅沙（BlockRegistry::Sand=8）
+        if (y > 0 && theWorld.blockAt(x, y - 1, z) !== 0) return // 下方非空气 → 有支撑，不落
+        // 下方空气 → 触发：先置 air（递归触发上方沙链），再 spawn 下落实体。
+        theWorld.setBlock(x, y, z, 0)
+        entityManager.spawnFallingBlock(x, y, z, 8)
     }
 
     // [t55] 诊断：HUD hotbar 刷新追踪。slotsChanged（setStack/addStack/takeStack/resetForMode）时打印

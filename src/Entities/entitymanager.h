@@ -11,11 +11,12 @@
 // 统一实体管理器（t95；Entities 层）。
 //
 // 为后续 Mob/AI 系统铺垫的「统一实体基类」：每个实体 = {世界坐标 pos, 半径 radius, 可推动标志
-// pushable, 渲染外观（kind/color）, 物理态（vy/resting）}。本轮持有一类测试生物（pushable=true），
-// 玩家走碰可被推动（swept 碰撞解析玩家位移传给实体）。掉落物（src/Game 的 ItemEntityManager）机制
-// 等价「pushable=false、被拾取」的实体变体——本轮不迁移既有的掉落系统（已深度集成 t35-t64：
-// 拾取 / 丢弃 / 重力 / 数量 / 免拾取窗），仅在此确立统一基类形态，为后续把掉落物并入统一
-// EntityManager 留形（spec「统一 EntityManager 设计」「为后续 Mob/AI 系统铺垫（统一实体基类）」）。
+// pushable, 渲染外观（kind/color/blockId）, 物理态（vy/resting）}。持有一类测试生物（pushable=true，
+// 玩家走碰可被推动，swept 碰撞解析玩家位移传给实体）+ t117 沙子重力方块（pushable=false，下落到着地
+// 转 setBlock + 移除）。掉落物（src/Game 的 ItemEntityManager）机制等价「pushable=false、被拾取」的
+// 实体变体——本轮不迁移既有的掉落系统（已深度集成 t35-t64：拾取 / 丢弃 / 重力 / 数量 / 免拾取窗），
+// 仅在此确立统一基类形态，为后续把掉落物并入统一 EntityManager 留形（spec「统一 EntityManager 设计」
+// 「为后续 Mob/AI 系统铺垫（统一实体基类）」）。
 //
 // 物理：
 //   - 重力 + 地面静止（tick(dt, world)）：未 resting 的实体 vy -= g*dt（钳 -kMaxFall），按 dy 下移并
@@ -52,8 +53,8 @@ public:
     int count() const { return int(m_entities.size()); }
     int revision() const { return m_revision; }
 
-    // 实体外观种类（Q_ENUM 供 QML 渲染分流；本轮仅 Mob，预留 Item 等后续扩展）。
-    enum Kind { Mob, Item };
+    // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / FallingBlock=贴图方块）。
+    enum Kind { Mob, Item, FallingBlock };
     Q_ENUM(Kind)
 
     // 在方块格 (x,y,z)（整数坐标）生成一个测试生物。位置存该格中心 (x+0.5, y+0.5, z+0.5)；从高处
@@ -61,12 +62,22 @@ public:
     // （玩家可推动），color=#ff5555（醒目纯色，spec「纯色突出」）。达 kCap → 跳过 + 告警（防溢出）。
     Q_INVOKABLE void spawnMob(int x, int y, int z);
 
+    // t117 沙子重力方块：在方块格 (x,y,z) 生成一个下落方块实体（携带 blockId）。位置存该格中心
+    // (x+0.5, y+0.5, z+0.5)；pushable=false（不被玩家推动，同掉落物变体）；kind=FallingBlock；
+    // blockId 存实体携带的方块 id（着地放置用它）。重力 tick 下落，着地时 world->setBlockFromEntity
+    // 放置 blockId 并移除自身。链式塌落由调用方先把沙格置 air（经 World::setBlock → blockBroken →
+    // 呈现层 onBlockBroken 递归触发上方沙）实现。达 kCap → 跳过 + 告警（防溢出）。
+    Q_INVOKABLE void spawnFallingBlock(int x, int y, int z, int blockId);
+
     // 第 i 个实体的渲染数据（呈现层 Repeater delegate 绑它摆位 + 配色）。越界返回安全默认。
     Q_INVOKABLE QVector3D posAt(int i) const;
     Q_INVOKABLE float radiusAt(int i) const;
     Q_INVOKABLE bool pushableAt(int i) const;
     Q_INVOKABLE int kindAt(int i) const;
     Q_INVOKABLE QString colorAt(int i) const;
+    // t117：第 i 个实体携带的方块 id（FallingBlock 着地 setBlock 用；呈现层据它设 BlockCube.blockId
+    // 贴图渲染）。非 FallingBlock 实体返回 0。越界返回 0。
+    Q_INVOKABLE int blockIdAt(int i) const;
 
     // 玩家推动解析（C++ 直调；PlayerController::tick 每帧调，captured 时）。
     //   playerFeet=玩家脚底中心，halfW=玩家 AABB 半宽，height=玩家 AABB 高，world=只读世界（钳制穿墙用）。
@@ -87,7 +98,8 @@ private:
         QVector3D pos;
         float radius = 0.5f;     // 碰撞半径（1×1 方块半宽）；XZ 圆碰撞 + 垂直区间用
         bool pushable = true;    // 玩家是否可推动（掉落物变体 pushable=false，统一基类预留）
-        int kind = Mob;          // 渲染分流（Mob/Item；Q_ENUM）
+        int kind = Mob;          // 渲染分流（Mob/Item/FallingBlock；Q_ENUM）
+        int blockId = 0;         // t117 FallingBlock 携带的方块 id（着地 setBlock 用；其余 kind=0）
         QString color = QStringLiteral("#ff5555"); // 渲染配色（醒目纯色）
         float vy = 0.0f;         // 垂直速度（blocks/s；向下为负）；落地后归 0
         bool resting = false;    // 是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）

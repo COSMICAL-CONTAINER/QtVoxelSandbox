@@ -55,6 +55,28 @@ void EntityManager::spawnMob(int x, int y, int z)
     qCInfo(lcEnt) << "spawned mob at" << x << y << z << "(total" << m_entities.size() << ")";
 }
 
+// t117 生成下落方块实体：存格中心 + blockId + pushable=false + kind=FallingBlock。bump revision →
+// QML Repeater 追加 delegate（BlockCube 贴图渲染，复用地形图集）。达 kCap 跳过 + 告警（防溢出）。
+// 重力 tick 下落，着地时 world->setBlockFromEntity 放置 blockId 并移除（链式塌落由 caller 控制）。
+void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
+{
+    if (int(m_entities.size()) >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); falling block spawn skipped at" << x << y << z;
+        return;
+    }
+    Entity e;
+    e.pos = QVector3D(x + 0.5f, y + 0.5f, z + 0.5f);
+    e.radius = 0.5f;
+    e.pushable = false; // 下落方块不被玩家推动（同掉落物变体）
+    e.kind = FallingBlock;
+    e.blockId = blockId;
+    m_entities.push_back(std::move(e));
+    ++m_revision;
+    emit entitiesChanged();
+    qCInfo(lcEnt) << "spawned falling block id=" << blockId << "at" << x << y << z
+                  << "(total" << m_entities.size() << ")";
+}
+
 QVector3D EntityManager::posAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return QVector3D();
@@ -83,6 +105,13 @@ QString EntityManager::colorAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return QStringLiteral("#ff5555");
     return m_entities[size_t(i)].color;
+}
+
+// t117：FallingBlock 携带的方块 id（着地 setBlock 用；呈现层 BlockCube.blockId 贴图渲染）。
+int EntityManager::blockIdAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    return m_entities[size_t(i)].blockId;
 }
 
 // 玩家推动解析：对每个 pushable 实体做「玩家 AABB（XZ 矩形）vs 实体圆（XZ，半径=entity.radius）」
@@ -180,15 +209,53 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
 //      扫实体所在列首个实体方块 → 命中则贴其顶面（solidCellY+1+kRestOffset）停下、vy=0、resting=true。
 //      越界（cy<0）查 isSolid 返 false → 不误判虚空地面，实体继续落。
 //   3) pos / resting 任一真变 → dirty，末尾统一 bump revision + emit（驱动 QML {revision; posAt} 绑定重算）。
+//
+// t117 FallingBlock 分支：无 resting 态（落到底即转为方块 + 移除）。重力 + 列扫同 Mob/Item，命中固体时
+//   inline 调 world->setBlockFromEntity(cx, solidCellY+1, cz, blockId) 放置并标记移除。**inline 放置**使
+//   同 tick 后续 FallingBlock 的列扫能见到此新固体 → 同柱多块依次堆叠到不同格（不撞同一格）。着地格
+//   solidCellY+1 由「自顶向下首个固体」扫描保证为空气。移除用索引收集 + 循环后逆序 erase（保索引有效）。
 void EntityManager::tick(qreal dt, World *world)
 {
     if (!world || m_entities.empty()) return;
     bool dirty = false;
-    for (auto &e : m_entities) {
+    std::vector<int> toRemove; // t117：着地 / 跌出底部的 FallingBlock 索引（循环后逆序 erase）
+
+    for (int idx = 0; idx < int(m_entities.size()); ++idx) {
+        Entity &e = m_entities[size_t(idx)];
         const int cx = qFloor(e.pos.x());
         const int cz = qFloor(e.pos.z());
         if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过
 
+        // t117 FallingBlock：重力 + 着地放置 + 移除（无 resting 态；落到底即转为方块）。
+        if (e.kind == FallingBlock) {
+            e.vy -= kGravity * float(dt);
+            if (e.vy < -kMaxFall) e.vy = -kMaxFall;
+            const float newY = e.pos.y() + e.vy * float(dt);
+            const int topCell = qFloor(e.pos.y());
+            int botCell = qFloor(newY);
+            if (botCell > topCell) botCell = topCell; // 防浮点噪声致 botCell>topCell
+            int solidCellY = -1;
+            for (int cy = topCell; cy >= botCell; --cy) {
+                if (cy < 0) break; // 越界下方=空气 → 不视作地面
+                if (world->isSolid(cx, cy, cz)) { solidCellY = cy; break; }
+            }
+            if (solidCellY >= 0) {
+                // 着地：在支撑方块上方一格放置 blockId + 标记移除。
+                world->setBlockFromEntity(cx, solidCellY + 1, cz, quint8(e.blockId));
+                toRemove.push_back(idx);
+                dirty = true;
+            } else if (newY <= 0.0f) {
+                // 全列无固体且已跌出世界底部 → 移除（防永久下落；正常世界 y=0 有石头层不触发）。
+                toRemove.push_back(idx);
+                dirty = true;
+            } else if (newY != e.pos.y()) {
+                e.pos.setY(newY); // 继续自由下落
+                dirty = true;
+            }
+            continue; // 不走 Mob/Item 的 resting / 落地静止逻辑
+        }
+
+        // --- Mob/Item：原有 resting + 重力 + 落地静止逻辑 ---
         // 已落地：复探支撑格是否仍实体。失支撑 → 续落。
         if (e.resting) {
             const int supportY = qFloor(e.pos.y() - e.radius) - 1; // 实体底面下方那一格（= 支撑方块 cellY）
@@ -200,30 +267,35 @@ void EntityManager::tick(qreal dt, World *world)
         // 重力 + 下移（vy 向下为负）。
         e.vy -= kGravity * float(dt);
         if (e.vy < -kMaxFall) e.vy = -kMaxFall;
-        const float newY = e.pos.y() + e.vy * float(dt);
+        const float mobNewY = e.pos.y() + e.vy * float(dt);
 
         // 下移路径自顶向下扫实体所在列，找首个实体方块（防大 dt 穿过薄层；lessons「子步防穿墙」精神）。
-        const int topCell = qFloor(e.pos.y()); // 当前中心所在格（一般为空气）
-        int botCell = qFloor(newY);
-        if (botCell > topCell) botCell = topCell; // 防浮点噪声致 botCell>topCell（vy≈0 时 newY 微高于 pos.y）
-        int solidCellY = -1;
-        for (int cy = topCell; cy >= botCell; --cy) {
+        const int mobTopCell = qFloor(e.pos.y()); // 当前中心所在格（一般为空气）
+        int mobBotCell = qFloor(mobNewY);
+        if (mobBotCell > mobTopCell) mobBotCell = mobTopCell; // 防浮点噪声
+        int mobSolidY = -1;
+        for (int cy = mobTopCell; cy >= mobBotCell; --cy) {
             if (cy < 0) break; // 越界下方=空气（World 约定）→ 不视作地面，实体继续落
-            if (world->isSolid(cx, cy, cz)) { solidCellY = cy; break; }
+            if (world->isSolid(cx, cy, cz)) { mobSolidY = cy; break; }
         }
 
-        if (solidCellY >= 0) {
-            // 落地：贴支撑方块顶面 + 静止偏移（底面 = solidCellY+1 = 支撑方块顶）。钳 newY 防穿越。
-            const float restY = float(solidCellY + 1) + kRestOffset;
-            if (newY <= restY || e.vy < 0.0f) {
+        if (mobSolidY >= 0) {
+            // 落地：贴支撑方块顶面 + 静止偏移（底面 = mobSolidY+1 = 支撑方块顶）。钳 mobNewY 防穿越。
+            const float restY = float(mobSolidY + 1) + kRestOffset;
+            if (mobNewY <= restY || e.vy < 0.0f) {
                 if (e.pos.y() != restY) { e.pos.setY(restY); dirty = true; }
                 if (e.vy != 0.0f) { e.vy = 0.0f; dirty = true; }
                 e.resting = true;
             }
-        } else if (newY != e.pos.y()) {
-            e.pos.setY(newY); // 自由下落（无命中）
+        } else if (mobNewY != e.pos.y()) {
+            e.pos.setY(mobNewY); // 自由下落（无命中）
             dirty = true;
         }
     }
-    if (dirty) { ++m_revision; emit entitiesChanged(); }
+
+    // t117：逆序 erase 已着地 / 跌出的 FallingBlock（逆序保未处理索引有效）。
+    for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it)
+        m_entities.erase(m_entities.begin() + *it);
+
+    if (dirty || !toRemove.empty()) { ++m_revision; emit entitiesChanged(); }
 }

@@ -66,6 +66,13 @@ public:
     // 与 worldChanged（驱动 ChunkGeometry 重建；本回合仍重建整个单 mesh，mesher 拆分归 t03）。
     Q_INVOKABLE bool setBlock(int x, int y, int z, quint8 id);
 
+    // t117 FallingBlock 着地专用：经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + 边界邻接，同 setBlock
+    // 的写入路径）+ emit worldChanged（驱动 mesh 重建），但**不**发 blockPlaced（与玩家放置语义分离）。
+    // 沿用 worldgen 经 m_chunks.setBlock 直写不触发 blockPlaced 的既有约定——避免 onBlockPlaced 的 survival
+    // takeStack 误触、多余粒子 / 音效把链式塌落刷成噪音。仅在目标格当前为空气时写入（着地格由 FallingBlock
+    // 列扫保证为空气；防御：已占用则不覆盖）。越界 / 非空 → false。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
+    bool setBlockFromEntity(int x, int y, int z, quint8 id);
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 
@@ -85,6 +92,10 @@ private:
     double noise2(double x, double z) const;
     double fbm(double x, double z) const;
     int heightAt(int x, int z) const;
+    // t117 沙漠群系判定（二次 fBm biome，PLAN §2-K 确定性）：与高度噪声独立采样（不同空间频率 + seed
+    // 偏移），低频 → 大区块连续（沙丘 / 平原成片，非逐格斑点）。阈值化得干旱 / 普通二分群系。纯函数
+    // 于 seed → 同 seed 同群系分布（与 heightAt 同源确定性）。
+    bool isDesert(int x, int z) const;
 
     // 确定性树木生成（PLAN §2-K）：在 generate() 末段于 grass 表层种橡树（原木主干+树叶球冠）。
     // 位置/形状纯由 seed 决定；禁用任何运行期随机源（QTime/时钟/全局 RNG）。

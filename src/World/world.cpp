@@ -39,6 +39,18 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     return true;
 }
 
+// t117 FallingBlock 着地专用：m_chunks.setBlock 直写 + emit worldChanged，不发 blockPlaced（与玩家放置
+// 语义分离，沿用 worldgen 直写不触发 blockPlaced 的既有约定）。仅在目标为空气时写入（防御）。越界 / 非空 → false。
+bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return false; // 越界拒绝
+    if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) return false; // 已占用 → 不覆盖
+    m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
+    emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
+    return true;
+}
+
 // --- Perlin（2D fBm）---
 static double fade(double t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
 static double lerp(double a, double b, double t) { return a + t * (b - a); }
@@ -96,6 +108,16 @@ int World::heightAt(int x, int z) const
     return std::max(0, h);
 }
 
+// t117 沙漠群系判定（二次 fBm biome，PLAN §2-K 确定性）：用与高度噪声**不同**的空间频率（0.018 vs
+// 0.09）+ seed 偏移（+7919）独立采样同一 fBm → 群系图与高度图解耦（低洼 / 高地与干旱 / 普通独立）。
+// 低频 → 大区块连续（沙丘成片，非逐格斑点，机制等价 MC 1.0 沙漠群系的大尺度分布）。阈值 0.25 →
+// ~36% 干旱（fbm 近似正态，>0.25 约三分之一面积）。纯函数于 seed → 同 seed 同群系分布。
+bool World::isDesert(int x, int z) const
+{
+    const double b = fbm((x + m_seed + 7919) * 0.018, (z + m_seed + 7919) * 0.018); // [-1,1]
+    return b > 0.25;
+}
+
 void World::generate()
 {
     buildPermutation();
@@ -103,21 +125,30 @@ void World::generate()
 
     // 填充地形（逐列规则与单 chunk 版完全一致，仅放大到 width×depth）：表层 grass / 下 dirt /
     // 深 stone / 低洼 sand。逐列独立 → 跨 chunk 边界天然连续，无浮空/悬崖；同 seed 确定。
+    // t117 沙漠群系（二次 fBm biome）：干旱区表层沙替代草（机制等价 MC 沙漠），低洼处仍用沙（同既有规则）。
     // 走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
     constexpr int sandLevel = 3;
+    int desertCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
+            const bool desert = isDesert(x, z); // t117：干旱群系 → 表层沙替代草
+            if (desert) ++desertCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
-                if (h <= sandLevel)   b = BlockRegistry::Sand;   // sand
-                else if (y == h)      b = BlockRegistry::Grass;  // grass
-                else if (y >= h - 2)  b = BlockRegistry::Dirt;   // dirt
-                else                  b = BlockRegistry::Stone;  // stone
+                if (desert || h <= sandLevel) {
+                    // 干旱群系或低洼：表层 + 下 3 格沙（机制等价 MC 沙漠沙层），再下石头。
+                    if (y == h)      b = BlockRegistry::Sand;  // 表层沙
+                    else if (y >= h - 2) b = BlockRegistry::Sand; // 表层下 3 格沙
+                    else             b = BlockRegistry::Stone;
+                } else if (y == h)  b = BlockRegistry::Grass;  // grass
+                else if (y >= h - 2) b = BlockRegistry::Dirt;   // dirt
+                else                b = BlockRegistry::Stone;  // stone
                 m_chunks.setBlock(x, y, z, b);
             }
         }
     }
+    qInfo() << "worldgen: desert columns =" << desertCols << "/" << (m_width * m_depth);
 
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
@@ -233,6 +264,7 @@ void World::placeTrees()
         for (int x = 0; x < m_width; ++x) {
             const int surfaceY = heightAt(x, z);
             if (surfaceY <= kSandLevel) continue; // 沙地不种树
+            if (isDesert(x, z)) continue;         // t117 沙漠群系不种树（机制等价 MC 沙漠无树）
 
             const quint32 r = hashColumn(m_seed, x, z);
             if (r % 100u >= unsigned(kDensityPct)) continue; // 密度筛选
