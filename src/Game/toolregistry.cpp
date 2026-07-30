@@ -36,9 +36,14 @@ const ToolRegistry::ToolDef *ToolRegistry::tool(int itemId)
 
 bool ToolRegistry::canMine(quint8 blockId)
 {
-    // 可挖 = 实体方块 AND hardness > 0。air / 越界 → def() 返 air（solid=false / hardness=0）→ false。
-    // 本工程无基岩；若将来加不可破坏实体方块，把 hardness 设 <=0 即被本判定排除（无需特殊分支）。
-    return BlockRegistry::isSolid(blockId) && BlockRegistry::hardness(blockId) > 0.0f;
+    // 可挖 = 实存方块（非 air / 非越界）AND hardness >= 0。
+    //   - air / 越界 → def() 返 air 行（id=Air）→ 排除（d.id == Air）。
+    //   - hardness == 0 → 瞬破可挖（如火把 t88；miningTime 走 0.05s 地板 ≈ 瞬）。
+    //   - hardness < 0 → 不可挖（留给未来基岩类方块，无需特殊分支）。
+    // 注：早先版本要求 isSolid && hardness>0，但「实心」与「可挖」是两个正交概念——火把 non-solid
+    //   却应可挖（玩家右键放置、左键瞬破回收）。改为按「实存 + hardness>=0」判定，语义更准。
+    const BlockRegistry::BlockDef &d = BlockRegistry::def(blockId);
+    return int(d.id) != int(BlockRegistry::Air) && d.hardness >= 0.0f;
 }
 
 float ToolRegistry::miningSpeedMul(quint8 blockId, int itemId)
@@ -57,7 +62,9 @@ float ToolRegistry::miningSpeedMul(quint8 blockId, int itemId)
 float ToolRegistry::miningTime(quint8 blockId, int itemId)
 {
     const float hardness = BlockRegistry::hardness(blockId);
-    if (hardness <= 0.0f) return 1.0f; // air / 越界：返回非零（防 t34 进度异常；实际不可挖掘）
+    // hardness<=0（火把瞬破 / air 越界）：走 0.05s 地板。air / 越界实际不会被挖（canMine 已排除），
+    // 故此分支仅火把等 hardness=0 方块命中 → ≈ 瞬破（spec t88「hardness 0 瞬破」）。
+    if (hardness <= 0.0f) return 0.05f;
     const float mul = miningSpeedMul(blockId, itemId);
     // 挖掘耗时 = hardness / speedMul（spec）。mul >= 1.0 → 耗时 <= hardness。
     const float t = hardness / std::max(mul, 0.0001f);

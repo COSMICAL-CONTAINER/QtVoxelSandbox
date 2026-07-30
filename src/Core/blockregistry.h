@@ -17,7 +17,7 @@
 //
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
-//   10=furnace 11=coal_ore 12=iron_ore
+//   10=furnace 11=coal_ore 12=iron_ore 13=torch
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -37,7 +37,11 @@ public:
         Furnace       = 10, // 熔炉：8 圆石围圈合成（t80）；机制等价 MC 熔炉，名称/贴图原创（§9）。
         CoalOre       = 11, // 煤矿石：散布于 stone 区段（t84）；机制等价 MC 煤矿，名称/贴图原创（§9）。
         IronOre       = 12, // 铁矿石：散布于 stone 区段（t84）；机制等价 MC 铁矿，名称/贴图原创（§9）。
-        Count         = 13, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Torch         = 13, // 火把：伪光源方块（t88）；机制等价 MC 火把。solid=false 非实体碰撞、
+                           // hardness=0 瞬破、NoTool；掉落自身。**视觉光源走伪光源**（Main.qml 发光
+                           // Model + 光晕，NoLighting 高 baseColor 暖色），**非** QtQuick3D PointLight
+                           // （lit 材质渲染红线，lessons-learned；真 flood-fill 方块光留 PLAN §M）。
+        Count         = 14, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：
@@ -90,7 +94,8 @@ public:
     //   10=crafting_table_top 11=crafting_table_side
     //   12=furnace_top 13=furnace_side 14=furnace_front（t80；炉口朝 -Z）
     //   15=coal_ore 16=iron_ore（t84；矿石各面同贴图）
-    // 图集由 tools/build_atlas.py 打包全部 17 瓦片；mesher / BlockCube 的 N=17 与之严格对齐。
+    //   17=torch（t88；6 面同贴图，近黑底+火焰图案）
+    // 图集由 tools/build_atlas.py 打包全部 18 瓦片；mesher / BlockCube 的 N=18 与之严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 

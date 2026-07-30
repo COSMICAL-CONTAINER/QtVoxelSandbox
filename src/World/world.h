@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "blockregistry.h" // isCollidable 走 BlockDef.solid（t88 火把 non-solid 不挡玩家）
 #include "chunkmanager.h" // 内部多 chunk 存储（World 层，不外泄到 QML）
 
 // 体素世界（QML façade + 单一数据源）：内部由 ChunkManager 持一片 chunk 列网格路由（本回合
@@ -48,7 +49,16 @@ public:
 
     // 越界返回 0（空气）。跨 chunk 由 ChunkManager 路由；网格与物理都用它。
     Q_INVOKABLE quint8 blockAt(int x, int y, int z) const;
+    // 是否「存在方块」（非 air）：raycast 选体 / 掉落实体着地 / mesher 邻居剔除 等用。
+    // 注：名为 isSolid 但语义是「非 air 实存」（保留以兼容既有调用点）。碰撞语义见 isCollidable。
     Q_INVOKABLE bool isSolid(int x, int y, int z) const { return blockAt(x, y, z) != 0; }
+    // 是否「实体碰撞」：走 BlockRegistry::BlockDef.solid（air=false；火把 t88 solid=false 不挡玩家；
+    // 其余常规方块 solid=true）。t88 引入：火把为伪光源方块，玩家应能穿过它（spec「非实体碰撞」）。
+    // 与 isSolid 的差异：isSolid=「有方块」（raycast 应命中火把 / 物品可着地于火把上方）；
+    // isCollidable=「挡玩家」（火把不挡）。两者在 t88 前对所有方块同义，火把使其分离。
+    Q_INVOKABLE bool isCollidable(int x, int y, int z) const {
+        return BlockRegistry::isSolid(blockAt(x, y, z));
+    }
 
     // 写栅格的唯一入口（PLAN §2-C 精神：当前 GUI 线程单写者）。经 ChunkManager 跨 chunk 写入 +
     // 标目标 chunk 脏；该格贴 chunk 边沿（x/z 在 16 边）→ 同标邻接 chunk 脏（为 t03 跨边界剔除）。

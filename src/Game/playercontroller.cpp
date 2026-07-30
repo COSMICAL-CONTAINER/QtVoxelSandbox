@@ -565,7 +565,9 @@ void PlayerController::placeBlock()
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
     if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放
-    if (overlapsPlayerAABB(tx, ty, tz)) return;                    // 与玩家重叠 → 不放
+    // 与玩家重叠 → 不放（防自埋 / 卡死）。t88：非实体方块（如火把，BlockDef.solid=false）例外——
+    // 它不挡玩家，放进玩家所在格也不会卡死（spec「非实体碰撞」），允许放置（如脚下插火把）。
+    if (BlockRegistry::isSolid(quint8(m_selectedBlock)) && overlapsPlayerAABB(tx, ty, tz)) return;
     m_world->setBlock(tx, ty, tz, quint8(m_selectedBlock));
     emit swingArm(); // 放块成功 → 第一人称手挥动（t29）
 }
@@ -728,7 +730,7 @@ bool PlayerController::hasGroundBelowAt(float x, float z) const
     const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
     for (int zz = z0; zz <= z1; ++zz)
         for (int xx = x0; xx <= x1; ++xx)
-            if (m_world->isSolid(xx, by, zz)) return true;
+            if (m_world->isCollidable(xx, by, zz)) return true; // t88：火把 non-solid 不挡玩家
     return false;
 }
 
@@ -745,7 +747,7 @@ bool PlayerController::aabbHitsSolid() const
     for (int y = y0; y <= y1; ++y)
         for (int z = z0; z <= z1; ++z)
             for (int x = x0; x <= x1; ++x)
-                if (m_world->isSolid(x, y, z)) return true;
+                if (m_world->isCollidable(x, y, z)) return true; // t88：火把 non-solid 不挡玩家
     return false;
 }
 

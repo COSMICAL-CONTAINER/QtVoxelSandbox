@@ -40,6 +40,7 @@ BLOCKS = [
     ("furnace",         "default_furnace_top", "default_furnace_side"),  # t80（图标显顶+侧，不显炉口前面）
     ("coal_ore",        "default_coal_ore", "default_coal_ore"),  # t84 煤矿石（各面同贴图）
     ("iron_ore",        "default_iron_ore", "default_iron_ore"),  # t84 铁矿石（各面同贴图）
+    ("torch",           "default_torch", "default_torch"),  # t88 火把（各面同贴图；近黑底+火焰）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

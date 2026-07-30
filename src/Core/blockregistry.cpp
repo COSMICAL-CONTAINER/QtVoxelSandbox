@@ -34,6 +34,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* furnace        */ {int(BlockRegistry::Furnace),       12, 12, 13, 14, true, 1.5f, int(BlockRegistry::Pickaxe), 1, int(BlockRegistry::Furnace),        1, 64, "furnace",        "熔炉"}, // 顶=furnace_top(12) 底=furnace_top(12) 侧=furnace_side(13) 前(-Z)=furnace_front(14)（t80）；8 圆石围圈合成；同石头（需镐）
     /* coal_ore       */ {int(BlockRegistry::CoalOre),       15, 15, 15, 15, true, 3.0f, int(BlockRegistry::Pickaxe), 1, 0x201,                              1, 64, "coal_ore",       "煤矿石"}, // 各面=coal_ore(15)（t84）；散布于 stone 区段；木镐可挖；掉煤材料(0x201，t85 命名)
     /* iron_ore       */ {int(BlockRegistry::IronOre),       16, 16, 16, 16, true, 3.0f, int(BlockRegistry::Pickaxe), 2, 0x202,                              1, 64, "iron_ore",       "铁矿石"}, // 各面=iron_ore(16)（t84）；散布于 stone 区段；**需石镐**（minTier2，木镐挖不掉落）；掉铁原矿材料(0x202，t85 命名)
+    /* torch          */ {int(BlockRegistry::Torch),         17, 17, 17, 17, false, 0.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Torch),         1, 64, "torch",          "火把"}, // 各面=torch(17)（t88）；solid=false 非实体碰撞、hardness=0 瞬破、NoTool；掉自身；伪光源（Main.qml 发光 Model，非 PointLight）
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。

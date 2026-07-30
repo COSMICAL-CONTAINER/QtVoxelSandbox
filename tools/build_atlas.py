@@ -8,8 +8,10 @@
   10 crafting_table_top / 11 crafting_table_side
   12 furnace_top / 13 furnace_side / 14 furnace_front
   15 coal_ore / 16 iron_ore
+  17 torch（t88，程序生成原创像素图）
 （CC0 资产，来源见 docs/PLAN.md §L 资产管线；工作台贴图由 tools/build_crafting_table.py、
- 熔炉贴图由 tools/build_furnace.py、矿石贴图由 tools/build_ore.py 程序生成原创像素图，§9 override (a)。）
+ 熔炉贴图由 tools/build_furnace.py、矿石贴图由 tools/build_ore.py、火把贴图由 tools/build_torch.py
+ 程序生成原创像素图，§9 override (a)。）
 """
 import os
 from PIL import Image
@@ -33,6 +35,7 @@ TILES = [
     "default_furnace_front",        # 14 furnace_front（t80，炉口朝 -Z）
     "default_coal_ore",             # 15 coal_ore（t84，程序生成原创像素图）
     "default_iron_ore",             # 16 iron_ore（t84，程序生成原创像素图）
+    "default_torch",                # 17 torch（t88，程序生成原创像素图；6 面同贴图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

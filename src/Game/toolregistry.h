@@ -66,7 +66,7 @@ public:
     static float miningSpeedMul(quint8 blockId, int itemId);
 
     // 挖掘耗时（秒）= hardness / miningSpeedMul，地板 0.05s（防空手秒破致 t34 进度抖动 / 除零）。
-    // air / 越界（hardness<=0）→ 返回 1.0（不会被实际挖掘：raycast 只命中实体方块）。
+    //   hardness<=0（火把瞬破 / air 越界）→ 0.05s 地板（air 越界实际不挖：canMine 已排除）。
     static float miningTime(quint8 blockId, int itemId);
 
     // 是否采掘掉落（破块后是否产出物品实体，供 t35 判定；掉落 id / 数量走 BlockRegistry::BlockDef）。
@@ -74,8 +74,10 @@ public:
     //   需工具 → 须持匹配类型 AND tier >= minToolTier，否则 false（破后仅 AIR，不掉落）。
     static bool canHarvest(quint8 blockId, int itemId);
 
-    // 方块是否可挖（spec t42）：实体方块且 hardness > 0（air / 越界 / 不可破坏方块 → false）。
-    // 本工程未实装基岩；若将来加基岩，将其 hardness 设 <=0 即可被本判定排除（无需特殊分支）。
+    // 方块是否可挖（spec t42）：实存方块（非 air / 非越界）且 hardness >= 0。
+    //   - hardness == 0 → 瞬破可挖（如火把 t88）；
+    //   - hardness < 0 → 不可挖（留给未来基岩类方块，无需特殊分支）。
+    // 注：「实心」（碰撞）与「可挖」正交——火把 non-solid 但可挖。solid 不再作可挖前置。
     static bool canMine(quint8 blockId);
 
     // 用户可见中文显示名（工具段；PLAN §9 override (b) 通用词）。

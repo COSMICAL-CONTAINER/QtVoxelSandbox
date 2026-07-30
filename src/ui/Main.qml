@@ -1009,9 +1009,66 @@ Window {
                 }
             }
         }
+
+        // t88 火把伪光源：在每个火把方块位置渲染「内焰 + 光晕」发光 Model（NoLighting 高 baseColor
+        // 暖色，**非** PointLight）。根因：lit 材质 / PointLight 在本场景不可行（lessons-learned 红线
+        // 「lit 材质不渲染」），故火把动态光源走伪光源——一组纯色自发光小立方 + 半透光晕，视觉上
+        // 读作「发光点」，不参与场景实际光照计算（真 flood-fill 方块光留 PLAN §M）。
+        //
+        // 火把位置列表（ListModel）：World::blockPlaced(id=Torch) 时追加、blockBroken 时移除；
+        // worldChanged 时校验清理（worldgen 重生会清除旧火把，blockPlaced 不会对 worldgen 触发）。
+        // 分层（PLAN §2）：呈现层只消费 World 的 blockPlaced/blockBroken 语义事件，绝不反向写栅格
+        // （同 blockBroken→粒子 / spawnItem→实体 模式）。
+        //
+        // Repeater 父节点 = 场景内 3D Node（torchHost）→ delegate（Node/Model，3D 对象）被领养进 3D
+        // 场景图（lessons-learned「动态 3D 对象必须挂到场景 Node，否则孤儿不渲染」—— 同 itemHost /
+        // particlesHost 模式）。
+        Node {
+            id: torchHost
+            Component.onCompleted: {
+                console.info("[t88] torchHost UP parent=" + torchHost.parent + " (须为 3D Node 非 null)")
+            }
+
+            Repeater {
+                model: torchPositions
+                delegate: Node {
+                    id: torchGlow
+                    // 火把格中心 + 偏上 0.7（贴火焰位置：mesher 把火把画成 1×1×1 立方，火焰图案在该
+                    // 立方顶段；光晕放火焰处）。
+                    position: Qt.vector3d(model.x + 0.5, model.y + 0.7, model.z + 0.5)
+
+                    // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
+                    // onCompleted 显式 reparent 进 torchHost（同 itemHost delegate 模式）。
+                    Component.onCompleted: {
+                        if (parent === null) parent = torchHost
+                    }
+
+                    // 内焰：明亮暖白小立方（NoLighting 高 baseColor；视觉发光点核心）。
+                    Model {
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(0.16, 0.16, 0.16)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#fff4cc"   // 焰心暖白（spec「高 baseColor 暖色 #ffcc66」的更亮内核）
+                        }
+                    }
+                    // 光晕：较大半透暖色立方（opacity<1 自动走透明混合 → 视觉发光晕染，非 PointLight）。
+                    Model {
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(0.42, 0.42, 0.42)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#ffcc66"   // spec 暖色光晕
+                            opacity: 0.32          // 半透（<1 触发透明混合，同观察者幽灵半透模式）
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    // t47：昼夜影响地形光照（全屏 tint 叠层，spec 方案 A）。
+    // t88 火把位置列表（火把伪光源 Repeater 的 model；blockPlaced/blockBroken/worldChanged 维护）。
+    ListModel { id: torchPositions }
     // 根因：地形 chunk 用 PrincipledMaterial.NoLighting（自发光恒定）→ t09 的环境光 lerp 只改了天空
     //   clearColor、DirectionalLight.brightness 对 NoLighting 材质无效 → 地形白天/黑夜亮度不变（用户反馈）。
     //   lit 材质在本场景实测不渲染（lessons-learned），故不换材质、改走全屏叠层：在 View3D（先绘制）之上、
@@ -1061,9 +1118,14 @@ Window {
         target: theWorld
         function onBlockBroken(x, y, z, id) {
             if (particleLoader.item) particleLoader.item.burstBreak(x, y, z, id)
+            // t88：火把被破 → 从伪光源列表移除（id=13=BlockRegistry::Torch；C++ 侧未把枚举暴露 QML，
+            // 此处用字面量 13 + 注释，与 blockregistry.h Id 枚举同源）。
+            if (id === 13) removeTorchAt(x, y, z)
         }
         function onBlockPlaced(x, y, z, id) {
             if (particleLoader.item) particleLoader.item.burstPlace(x, y, z, id)
+            // t88：火把被放 → 追加伪光源（id=13=BlockRegistry::Torch，见上注释）。
+            if (id === 13) torchPositions.append({x: x, y: y, z: z})
             // t32：生存放置消耗 1 件（创造=无限源不耗）。worldgen 经 m_chunks.setBlock 直写、不经
             // World::setBlock → 不会发 blockPlaced；游戏内该信号仅玩家 placeBlock 触发，故此处即
             // 「玩家放置成功」语义事件。ViewModel 观察 World 事件做栈突变（PLAN §2 分层：VM 只依赖
@@ -1071,6 +1133,24 @@ Window {
             // 经 selectedBlockId 绑定变 Air → 右键不再放置（playercontroller 守 Air）。
             if (player.mode === PlayerController.Survival)
                 hotbarVM.takeStack(hotbarVM.selectedSlot, 1)
+        }
+        // t88：worldgen 重生（seed 变 / 初始生成）清除旧火把 → 伪光源列表校验清理。worldgen 不发
+        // blockBroken（m_chunks.setBlock 直写），故旧火把位置不会经 onBlockBroken 移除；此处扫描
+        // torchPositions，把已不再是火把的条目删掉。setBlock 编辑也会触发 worldChanged，但此时
+        // 火把刚放/刚破已被 onBlockPlaced/broken 同步，本扫描是幂等校验（不重复加 / 不误删）。
+        function onWorldChanged() {
+            for (let i = torchPositions.count - 1; i >= 0; --i) {
+                const e = torchPositions.get(i)
+                if (theWorld.blockAt(e.x, e.y, e.z) !== 13) torchPositions.remove(i)
+            }
+        }
+    }
+
+    // t88 工具：按坐标移除火把伪光源（破块 / 校验清理共用）。从后往前扫找到首个匹配 (x,y,z) 删一个。
+    function removeTorchAt(x, y, z) {
+        for (let i = torchPositions.count - 1; i >= 0; --i) {
+            const e = torchPositions.get(i)
+            if (e.x === x && e.y === y && e.z === z) { torchPositions.remove(i); return }
         }
     }
 
