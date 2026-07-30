@@ -27,6 +27,11 @@ Item {
     signal closed()
     // t49：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区时；宿主接 player.dropHeldCursor）。
     signal discardHeldRequested()
+    // t120：创造拿物品（调色板点击 → 拿到光标 / 手）→ 请求宿主弹手动画（Main.qml 接 handPopAnim.start）。
+    //   机制等价生存拾取的手弹反馈，但创造无实体销毁、不发 player.itemPickedUp（那是实体拾取专用信号）；
+    //   故经此信号让宿主单独触发手弹（spec「创造拿物品到手也触发 handPopAnim」）。仅调色板「无限源拿取」
+    //   发，hotbar 槽间搬动 / 互换不算「拿新物」。
+    signal itemTaken()
 
     // ① 调色板数据：9 实方块（creativeBlocks，含工作台 CraftingTable，t59）+ 3 档镐（creativeTools，t33）
     // + 6 材料（creativeMaterials，t114：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃）+ 扩展空槽（id=0 → 空占位）。
@@ -497,6 +502,7 @@ Item {
                                 onTapped: {
                                     root.hotbar.heldBlock = modelData
                                     root.hotbar.heldCount = root.hotbar.isTool(modelData) ? 1 : 64
+                                    root.itemTaken()  // t120：创造拿物品 → 宿主弹手（handPopAnim）
                                 }
                             }
                         }

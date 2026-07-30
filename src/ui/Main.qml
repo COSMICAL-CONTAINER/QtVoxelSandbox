@@ -279,8 +279,8 @@ Window {
         }
         // t118：拾取掉落实体 → player 发 itemPickedUp(id, count) → 拾取音（pickup clip，不分材质）。
         // 信号在 pickupScan 实际入栈时（全 / 部分）才发；全满装不下不发（无伪触发）。机制等价 MC
-        // 「拾起物品啵一声」。t120 后续亦消费同一信号驱动手弹跳动画（互不冲突）。
-        function onItemPickedUp(id, count) { audio.playPickup() }
+        // 「拾起物品啵一声」。t120：同时启动 handPopAnim（手 Y 弹跳，音 + 手弹双反馈）。
+        function onItemPickedUp(id, count) { audio.playPickup(); handPopAnim.start() }
         // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
         function onCraftingTableOpened() { window.openCraftingTable() }
         // t87：右键熔炉 → player 发 furnaceOpened → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
@@ -385,9 +385,14 @@ Window {
                 //   减到 30°、臂段 scale 收到 0.09 → 手段中心相机本地 z∈[-0.25(静止), -0.13(挥峰)]，始终近于 0.3 →
                 //   depth 测试恒胜地形 → 手臂恒在所有实体方块之前（不穿模）。pivot.y 上移到 0.05 使手仍落视野下中。
                 //   t91：pivot.x 0.35→0.20 整手左移（旧 0.35 偏右，手持方块出右框）；y/z 不动（不穿模余量不变）。
-                position: Qt.vector3d(0.20, 0.05, -0.15)
+                // t120 popY：拾取/拿取时整手 Y 弹跳（0→-0.08→0，~200ms；下方 handPopAnim 驱动）。
+                //   叠加进 position.y → 手下沉一点再回位（「拿到东西手一沉」反馈）。与 swingAngle 正交：
+                //   swing 改 eulerRotation.x（绕肩挥动）、pop 改 position.y（位移），互不干扰、可叠加
+                //   （拾取时手不挥、破/放时手挥不弹）。
+                position: Qt.vector3d(0.20, 0.05 + viewModelHand.popY, -0.15)
                 readonly property real baseTilt: -100.0  // t106：翻转（t103 +100 让袖段旋到前、手段到后=「前蓝后手」反了）；-100 反向 → 手在前袖在后
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
+                property real popY: 0.0                 // t120：拾取/拿取弹跳位移（Y）；0=静止，负=下沉
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
 
                 // 上臂袖段（t73 蓝袖子）：覆盖肩-肘（上半段），上衣色 #3a6a9a（hurtTint 0.227/0.416/0.604，与
@@ -466,6 +471,17 @@ Window {
             loops: 1
             NumberAnimation { target: viewModelHand; property: "swingAngle"; to: -75; duration: 90; easing.type: Easing.InQuad }
             NumberAnimation { target: viewModelHand; property: "swingAngle"; to: 0; duration: 140; easing.type: Easing.OutQuad }
+        }
+        // t120 拾取/拿取手弹跳动画：player.itemPickedUp（生存走过掉落物拾取）或创造背包拿取
+        //   （Inventory.itemTaken → 宿主 onItemTaken）时启动。整手 Y 下沉 0.08 再回位（~200ms），
+        //   「拿到东西手一沉」反馈。与 armSwingAnim 正交（改 popY 位移 vs swingAngle 旋转），
+        //   拾取时不挥手、挥动时不弹；连点 start() 重启进行中的动画。
+        //   分层（PLAN §2）：纯呈现层动画，消费 Game 层语义事件（同 armSwingAnim / 粒子模式）。
+        SequentialAnimation {
+            id: handPopAnim
+            loops: 1
+            NumberAnimation { target: viewModelHand; property: "popY"; to: -0.08; duration: 100; easing.type: Easing.InQuad }
+            NumberAnimation { target: viewModelHand; property: "popY"; to: 0; duration: 100; easing.type: Easing.OutQuad }
         }
         // 第三人称挖掘挥臂（t45）：mineBlend 0→1（前 80ms 抬臂）→ 0（后 160ms 回落），总 ~240ms。
         //   双臂枢轴的 eulerRotation 绑定读 mineBlend：>0 时双臂前抬 70°（覆盖行走摆臂），=0 时正常行走/中性。
@@ -2035,6 +2051,8 @@ Window {
         onClosed: window.closeInventory()
         // t49：拖出丢弃（手持物点遮罩区）→ player 把光标手持栈丢为前方实体（同 Q 丢弃）。
         onDiscardHeldRequested: player.dropHeldCursor()
+        // t120：创造拿物品（调色板点击）→ 手弹跳（同生存拾取的手弹反馈，spec「创造拿物品到手也触发」）。
+        onItemTaken: handPopAnim.start()
     }
 
     // 生存背包 1.0（t24）：2×2 合成 + 结果槽 + 4 护甲槽 + 角色预览 + 3×9 主栏 + 9 槽 hotbar 栏。
