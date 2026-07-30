@@ -339,7 +339,18 @@ Item {
                             HoverHandler {
                                 id: cellHover
                                 enabled: modelData !== 0
-                                onHoveredChanged: if (hovered) root.hoveredName = root.hotbar.nameForBlock(modelData)
+                                onHoveredChanged: {
+                                    // t94：进入写 hoveredItemId + 槽顶中心位置（root 坐标系）驱动 tooltip；
+                                    // 离开按 id 守卫清除（防相邻槽进出竞态互清，见文件末 itemTip 注释）。
+                                    if (hovered) {
+                                        root.hoveredName = root.hotbar.nameForBlock(modelData)
+                                        root.hoveredItemId = modelData
+                                        const p = parent.mapToItem(root, parent.width / 2, 0)
+                                        root.hoveredTipPos = Qt.point(p.x, p.y)
+                                    } else if (root.hoveredItemId === modelData) {
+                                        root.hoveredItemId = 0
+                                    }
+                                }
                             }
                             TapHandler {
                                 enabled: modelData !== 0
@@ -458,7 +469,17 @@ Item {
                                 HoverHandler {
                                     id: slotHover
                                     onHoveredChanged: {
-                                        if (hovered) root.hoveredName = root.hotbar.nameForBlock(slotId)
+                                        // t94 tooltip（仅非空槽显名；空槽不动 hoveredItemId，免覆盖邻槽态）。
+                                        if (hovered) {
+                                            root.hoveredName = root.hotbar.nameForBlock(slotId)
+                                            if (slotId !== 0) {
+                                                root.hoveredItemId = slotId
+                                                const p = parent.mapToItem(root, parent.width / 2, 0)
+                                                root.hoveredTipPos = Qt.point(p.x, p.y)
+                                            }
+                                        } else if (root.hoveredItemId === slotId) {
+                                            root.hoveredItemId = 0
+                                        }
                                         const key = root.slotKey("hotbar", index)
                                         if (hovered) root.hoveredKey = key
                                         else if (root.hoveredKey === key) root.hoveredKey = ""
@@ -558,6 +579,45 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // t94 物品名悬停 tooltip（纯 QtQuick 自绘；不引入 QtQuick.Controls —— 项目未链接 Qt6::QuickControls2，
+    // 顶层 import 新模块有「未部署→整文档加载失败」风险，见 lessons-learned）。各槽 HoverHandler 进入时写
+    // hoveredItemId + hoveredTipPos（槽顶中心在 root 坐标系下）；离开按 id 守卫清除（防相邻槽进出竞态互清）。
+    // 名字走 hotbar.nameForBlock：方块→BlockRegistry::displayName、工具→ToolRegistry::displayName、
+    // 材料段→本地通用名；air/空槽→空串→不显。工具后续将加「+攻击力」等字段，现阶段只名字。
+    property int hoveredItemId: 0
+    property point hoveredTipPos: Qt.point(0, 0)
+    Rectangle {
+        id: itemTip
+        visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
+        z: 1000
+        width: tipLabel.implicitWidth + 14
+        height: tipLabel.implicitHeight + 8
+        color: "#101216"
+        opacity: 0.94
+        border.color: "#3a444f"
+        border.width: 1
+        radius: 3
+        x: {
+            let px = root.hoveredTipPos.x - width / 2
+            if (px < 2) px = 2
+            const maxX = root.width - width - 2
+            if (px > maxX) px = maxX
+            return px
+        }
+        y: {
+            let py = root.hoveredTipPos.y - height - 6
+            if (py < 2) py = root.hoveredTipPos.y + 6 // 顶部空间不足 → 翻到槽位下方
+            return py
+        }
+        Text {
+            id: tipLabel
+            anchors.centerIn: parent
+            text: root.hotbar ? root.hotbar.nameForBlock(root.hoveredItemId) : ""
+            color: "#f2f2f2"
+            font.pixelSize: 12
         }
     }
 }
