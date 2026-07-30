@@ -17,6 +17,10 @@ Window {
     // F3 调试叠层显隐（t10，PLAN §2-F）：playing 态按 F3 切换左上角多行调试文本（fps / pos /
     // yaw,pitch / 模式 / chunk 数 / 总顶点 / 地面态）。仅 playing 态显；z 高于 HUD。
     property bool f3Visible: false
+    // t116 F3+B 碰撞箱（PLAN §2-F F3 调试叠层扩展）：显隐各实体（mob / 掉落物 / 玩家）的
+    //   WireCube AABB + 朝向箭头。MC F3+B 语义——B 键仅在 f3Visible 时生效（必须先按 F3 开叠层才能 toggle）；
+    //   showHitboxes 一旦开启，关 F3 叠层不影响（独立 bool，同 MC：关 F3 后碰撞箱仍显直到再 F3+B 关）。
+    property bool showHitboxes: false
 
     // app 状态机（t17）：menu（启动首显主菜单）↔ playing（显 View3D/HUD + grab 指针）。
     // 初始 menu：启动不直接进游戏，先显主菜单（开始/退出）。准星/HUD 仅 playing 态显。
@@ -925,6 +929,33 @@ Window {
             }
         }
 
+        // t116 F3+B 玩家碰撞箱（spec「玩家 0.6×1.8×0.6」+ 朝向箭头）：玩家 AABB 0.6×1.8×0.6，
+        //   WireCube ±0.5 居中 → 摆到 AABB 中心 = feet + (0, 0.9, 0)（feet.y 到 feet.y+1.8 的中点），
+        //   scale (0.6, 1.8, 0.6) → 各轴覆盖 ±0.3 / ±0.9 = AABB 实际范围。玩家 AABB 内是人形部件（无立方
+        //   表面）→ 无 z-fight，scale 用精确值即可（不似 mob / 掉落物需 1% 外扩避面重叠）。
+        //   朝向箭头：眼位高度（feet + 1.62）的细 UnitCube 棒，绕 Y 转 yaw；本地 -Z = 玩家前向（与
+        //   playerModel / camera 同约定：yaw=0 时前向 (0,0,-1)）。棒中心前移 0.3（半长）→ 从眼位延伸到 -0.6
+        //   处（视线方向 0.6 格长的红色指示棒，机制等价 MC 的 eye-line）。
+        //   分层（PLAN §2）：纯呈现层调试叠层，只读 player.feetPosition/yaw（Game 层 Q_PROPERTY），绝不反向写。
+        Model {
+            visible: window.showHitboxes
+            position: Qt.vector3d(player.feetPosition.x, player.feetPosition.y + 0.9, player.feetPosition.z)
+            scale: Qt.vector3d(0.6, 1.8, 0.6)
+            geometry: WireCube {}
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
+        }
+        Node {
+            visible: window.showHitboxes
+            position: Qt.vector3d(player.feetPosition.x, player.feetPosition.y + 1.62, player.feetPosition.z)
+            eulerRotation: Qt.vector3d(0, player.yaw, 0)
+            Model {
+                geometry: UnitCube {}
+                position: Qt.vector3d(0, 0, -0.3)
+                scale: Qt.vector3d(0.03, 0.03, 0.6)
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
+            }
+        }
+
         // 破/放粒子（t14/t16）：BlockParticles.qml 经 Loader 动态加载，隔离 Particles3D import，
         // 使该模块运行期缺失时仅 Loader 失败、顶层 Main.qml 仍正常加载（不命中 objectCreationFailed→exit(-1)）。
         // 分层（PLAN §2）：触发由 World(Game 层) 发，呈现层只消费、绝不反向写栅格。
@@ -1090,6 +1121,30 @@ Window {
                             opacity: 0.35          // 半透（<1 触发透明混合）
                         }
                     }
+                    // t116 F3+B 掉落物碰撞箱（spec「掉落物 0.3」+ 朝向箭头）：掉落物 AABB = 0.3 立方（与图标
+                    //   Model scale 0.3 一致）。WireCube ±0.5 scale 0.31（+1% 外扩避与图标 / 浅灰外壳立方表面
+                    //   z-fight——三立方共面，精确 0.3 会让线被面遮挡看不见）。随浮动跟随 bobY。
+                    //   ⚠ AABB 轴对齐：父 entRoot 自转 rotY（eulerRotation.y=rotY）会被继承 → AABB 跟着转，
+                    //   但 AABB 应世界轴对齐（不随物品自转）。子节点本地 eulerRotation.y = -rotY 抵消继承 →
+                    //   世界 Y 旋转 = rotY + (-rotY) = 0（轴对齐）。
+                    //   朝向箭头：相反——应「绑 yaw」，对掉落物即绑自转 rotY（物品唯一朝向态）。父已转 rotY →
+                    //   子本地不加额外旋转即世界 yaw=rotY，箭头随物品自转指向（与 MC 实体 eye-line 等价的朝向指示）。
+                    //   分层（PLAN §2）：纯呈现层调试叠层，只读 entRoot.bobY/rotY（呈现层自发动画态）。
+                    Model {
+                        visible: window.showHitboxes
+                        geometry: WireCube {}
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        eulerRotation: Qt.vector3d(0, -entRoot.rotY, 0)   // 抵消父自转 → AABB 轴对齐
+                        scale: Qt.vector3d(0.31, 0.31, 0.31)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
+                    }
+                    Model {
+                        visible: window.showHitboxes
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, entRoot.bobY, -0.15)     // 棒中心前移 0.15（半长）→ -Z 方向延伸 0.3
+                        scale: Qt.vector3d(0.02, 0.02, 0.3)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
+                    }
                     // 绕 Y 匀速自转（~3s 一圈），loops 无限。
                     NumberAnimation on rotY { from: 0; to: 360; duration: 3000; loops: Animation.Infinite }
                     // 上下浮动 0.15 格（~2s 周期），InOutSine 近似 sin 手感（spec：上下浮动 sin）。
@@ -1141,6 +1196,25 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: { entityManager.revision; return entityManager.colorAt(index) }
                         }
+                    }
+                    // t116 F3+B mob 碰撞箱（spec「mob scale 1.0」+ 朝向箭头）：mob AABB = 1×1×1 立方（与 mob
+                    //   Model scale 1.0 一致）。WireCube ±0.5 scale 1.01（+1% 外扩避与 mob 立方表面 z-fight——
+                    //   共面时线被面遮挡看不见）。mob delegate Node 无旋转（仅 position）→ 子节点本地旋转 0 即
+                    //   世界轴对齐。mob 无 yaw 朝向态（EntityManager 仅 pos/radius，无 orientation）→ 朝向箭头
+                    //   固定指向 -Z（北，yaw=0）；spec「细 Model 绑 yaw」对无朝向实体退化为固定向。
+                    //   分层（PLAN §2）：纯呈现层调试叠层，只读 delegate 位置（entityManager 数据）。
+                    Model {
+                        visible: window.showHitboxes
+                        geometry: WireCube {}
+                        scale: Qt.vector3d(1.01, 1.01, 1.01)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
+                    }
+                    Model {
+                        visible: window.showHitboxes
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0, -0.25)     // 棒中心前移 0.25（半长）→ -Z 方向延伸 0.5
+                        scale: Qt.vector3d(0.03, 0.03, 0.5)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
                 }
             }
@@ -1436,6 +1510,12 @@ Window {
             if (e.key === Qt.Key_F3 && window.appState === "playing") {
                 window.f3Visible = !window.f3Visible; e.accepted = true; return
             }
+            // F3+B 碰撞箱（t116，PLAN §2-F）：MC F3+B 语义——B 键仅在 f3Visible 时 toggle showHitboxes
+            //   （必须先按 F3 开叠层；f3Visible=false 时 B 不响应，避免与未来键位争用）。
+            //   showHitboxes 独立于 f3Visible：关 F3 后碰撞箱仍显直到再 F3+B 关（同 MC 行为）。
+            if (e.key === Qt.Key_B && window.appState === "playing" && window.f3Visible) {
+                window.showHitboxes = !window.showHitboxes; e.accepted = true; return
+            }
             if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
             if (e.key === Qt.Key_F6) { worldClock.toggleDebugFast(); e.accepted = true; return } // 昼夜调试加速（t09）
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
@@ -1532,7 +1612,7 @@ Window {
                 Text { text: "[F6] toggle fast day/night (" + (worldClock.debugFast ? "ON · ~30s" : "OFF · ~20min") + ")"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[F3] toggle debug overlay (fps / pos / chunks / vertices)"
+                Text { text: "[F3] toggle debug overlay (fps / pos / chunks / vertices)   [F3+B] toggle hitboxes"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 // 返回主菜单（playing ↔ menu 双向切换，t17）：消费点击，不冒泡到背景 grab。
@@ -1709,6 +1789,7 @@ Window {
                  + "\ndraw-calls: n/a (QtQuick3D path, see t13)  threads: 0/0 (sync meshing)"
                  + "\nday: phase " + worldClock.dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
                  + (worldClock.debugFast ? "  (fast)" : "")
+                 + "\n[B] hitboxes: " + (window.showHitboxes ? "ON" : "off")
         }
     }
 
