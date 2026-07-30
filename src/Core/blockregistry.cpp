@@ -80,3 +80,25 @@ QString BlockRegistry::displayName(quint8 blockId)
     // UTF-8 字节，fromUtf8 正确解码（与项目既有中文注释同源；跨编译器稳健靠「UTF-8 字面量 + fromUtf8」）。
     return QString::fromUtf8(kDefs[int(blockId)].display);
 }
+
+// 音效材质分组（t118）：id → MaterialGroup 纯函数（按 BlockRegistry::Id 枚举值分支，单一权威）。
+// AudioManager 据此选 break / mining / step 音色；越界 / air / torch / 未知 → GroupDefault
+// （AudioManager 内部用 GroupStone 兜底播放，避免缺组静默）。
+// 机制等价 MC「方块 → SoundType」（机制对齐，非名词照搬）。新方块追加时按材质归入对应组或补新组。
+BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
+{
+    switch (blockId) {
+    case Stone: case Cobble: case Furnace: case CoalOre: case IronOre:
+        return GroupStone;
+    case Log: case Planks: case CraftingTable:
+        return GroupWood;
+    case Grass: case Dirt:
+        return GroupGrass;
+    case Sand:
+        return GroupSand;
+    case Leaves:
+        return GroupLeaves;
+    default:
+        return GroupDefault; // air / torch / 越界 / 未知 → 兜底（AudioManager 复用 Stone 音色）
+    }
+}

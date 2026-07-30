@@ -230,6 +230,12 @@ signals:
     // 「挖的过程中」的进度反馈粒子。创造瞬破不进累积态 → 不发；仅 Survival 推进 stage 时发。
     // 分层（PLAN §2）：Game/Physics 层发语义事件，呈现层只消费（同 blockBroken→粒子 / swingArm 模式）。
     void miningParticle(int x, int y, int z, int blockId);
+    // 拾取掉落实体（t118 / t120）：pickupScan 把实体入背包（addToAny 成功入栈，无论全 / 部分）时发；
+    // id = 物品 id、count = 本次实际拾取数（have - leftover；spec「拾取后销毁」的「拾取」语义事件）。
+    // 全满装不下（leftover == have）不发（无拾取发生）。t118 据此 → AudioManager.playPickup（拾取音）；
+    // t120 后续亦据此驱动手弹跳动画（同一事件多消费者，分层干净）。分层（PLAN §2）：Game 层发语义
+    // 事件，呈现层 / 音频层只消费（同 miningParticle / swingArm 模式）。
+    void itemPickedUp(int itemId, int count);
     // 玩家挖掘产出（t34 → t35）：生存破块时按 ToolRegistry::canHarvest 判 drop；创造 drop=false
     // （瞬破不掉落，spec）。t35 据此 spawn item entity；当前任务仅发信号、消费端未接（无副作用）。
     // blockBroken（World 已发）仍触发粒子；本信号额外区分「玩家挖」+「是否掉落」（创造 / 不可采掘

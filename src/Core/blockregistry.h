@@ -62,6 +62,25 @@ public:
         Pickaxe = 1, // 镐：采掘石类方块（stone / cobble）
     };
 
+    // 音效材质分组（t118）：决定破 / 挖 / 走音色按方块材质分流（石 / 木 / 草 / 沙 / 叶 5 组 +
+    // 兜底 Default）。放 Core 层是因为「方块敲起来听感是哪类材质」本质是方块的属性（与 hardness /
+    // toolType 同性质），由 BlockRegistry 单一权威给出，AudioManager（Core/Platform）只读查询、
+    // 不另持映射副本（PLAN §2：世界数据单一）。groupFor() 是 id → MaterialGroup 的纯函数。
+    //   - Stone：stone / cobble / furnace / coal_ore / iron_ore（石质，硬、脆、明亮敲击）
+    //   - Wood：log / planks / crafting_table（木质，中空闷击）
+    //   - Grass：grass / dirt（软土 / 草皮，柔垫）
+    //   - Sand：sand（颗粒沙响）
+    //   - Leaves：leaves（叶沙沙）
+    //   - Default：air / torch / 未知（用 Stone 兜底音色；多数无 mining 音路径）
+    enum MaterialGroup : int {
+        GroupStone   = 0,
+        GroupWood    = 1,
+        GroupGrass   = 2,
+        GroupSand    = 3,
+        GroupLeaves  = 4,
+        GroupDefault = 5, // 哨兵：合法组上界（实际播放时 GroupDefault → 复用 GroupStone 兜底）
+    };
+
     // 方块定义（每方块一项；单一权威数据源）。改方块任何属性只改 kDefs 一行，全工程生效。
     // 行索引 == 方块 id（air 行同时作越界 / 不可挖掘 / 不掉落兜底）。
     struct BlockDef {
@@ -122,6 +141,11 @@ public:
     //   planks=橡木木板 leaves=橡树树叶 sand=沙子 crafting_table=工作台 furnace=熔炉
     //   coal_ore=煤矿石 iron_ore=铁矿石
     static QString displayName(quint8 blockId);
+
+    // 音效材质分组（t118）：id → MaterialGroup 纯函数。AudioManager 据此选 break / mining / step
+    // 音色（spec「按方块材质分组 clip 池」）。越界 / 未知 → GroupDefault（AudioManager 内部兜底
+    // 复用 GroupStone 音色）。机制等价 MC「按方块材质 SoundType 选声」（机制对齐，非名词照搬）。
+    static MaterialGroup materialGroup(quint8 blockId);
 
 private:
     BlockRegistry() = delete; // 纯静态数据表，无实例。

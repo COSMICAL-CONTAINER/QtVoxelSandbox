@@ -4,6 +4,9 @@
 #include <QFile>
 #include <QLoggingCategory>
 
+#include <array>
+#include <deque>
+#include <string>
 #include <vector>
 
 // miniaudio 单头库（vendored src/Audio/miniaudio.h，MIT-0 / public domain）。
@@ -25,6 +28,31 @@
 Q_LOGGING_CATEGORY(lcAudio, "vo.audio")  // PLAN §2-F：模块化日志（vo.audio category）
 
 namespace {
+// 材质组数（不含 GroupDefault 哨兵；GroupDefault → 兜底用 GroupStone，见 groupIndex()）。
+constexpr int kNumGroups = int(BlockRegistry::GroupDefault);  // 5（Stone..Leaves）
+
+// 把 BlockRegistry::materialGroup 折成 [0, kNumGroups) 的 clip 池下标。
+// GroupDefault（air / 未知 / 越界）→ 0（Stone 组兜底，spec「缺组永不静默」用最常见材质音色）。
+int groupIndex(int blockId)
+{
+    const int g = int(BlockRegistry::materialGroup(quint8(blockId)));
+    if (g >= kNumGroups) return 0; // GroupDefault / 越界 → Stone 兜底
+    return g;
+}
+
+// 材质组名（仅用于日志可读 + qrc 路径拼接）。
+const char *groupName(int idx)
+{
+    switch (idx) {
+    case 0: return "stone";
+    case 1: return "wood";
+    case 2: return "grass";
+    case 3: return "sand";
+    case 4: return "leaves";
+    default: return "stone"; // 兜底（理论不可达；防 -Wreturn-type）
+    }
+}
+
 // 从 qrc（:/sounds/xxx.wav）读 WAV 原始字节；失败返空（调用方降级）。PLAN §2-L：本任务先 qrc。
 QByteArray loadWavResource(const char *qrcPath)
 {
@@ -38,7 +66,7 @@ QByteArray loadWavResource(const char *qrcPath)
 }
 } // namespace
 
-// pimpl 数据：ma_engine + 3 SFX clip（解码后 PCM + 零拷贝 data_source ref + sound）。
+// pimpl 数据：ma_engine + 材质分组 clip 池（5 组 × {break, mining, step}）+ 单件 clip（place/pickup）。
 //   PCM 缓冲（std::vector<ma_int16>）由 Clip 持有、与 ma_sound 同寿命 —— ma_audio_buffer_ref
 //   零拷贝指向其内存，故 resize 须在 initSound 前完成、之后不再动（否则指针悬挂）。
 struct AudioManager::Data
@@ -55,12 +83,30 @@ struct AudioManager::Data
         ma_sound sound;
         bool ok = false;                // PCM 解码成功（initSound 前置）；initSound 失败会再降级
     };
-    Clip breakClip{":/sounds/break.wav"};
+
+    // 材质分组 clip 池：[groupIndex][kinds]，kinds = {break, mining, step}（顺序见 kKindNames）。
+    // std::array<std::array<Clip, 3>, 5>：行=组、列=音类。qrcPath 在构造时按 group/kind 拼出。
+    enum Kind { Break = 0, Mining = 1, Step = 2, NumKinds = 3 };
+    // 路径拼接用缓冲：每 Clip 持自己的 const char*（指向 pathStore 内 string 的 .c_str()）→ 须常驻。
+    // 用 std::deque<std::string>（非 vector）：deque 的 push_back **不失效**已有元素引用 / 指针，
+    // 故循环内 emplace_back 拼出 15 条路径时，先前已赋进 Clip::qrcPath 的 .c_str() 不悬挂
+    // （vector 扩容会迁内存、使所有先前 .c_str() 失效 → qrcPath 全悬空，是潜在 hard-bug）。
+    std::deque<std::string> pathStore;
+    std::array<std::array<Clip, NumKinds>, kNumGroups> groupClips{};
+
+    // 单件 clip（放置 / 拾取不分材质）。
     Clip placeClip{":/sounds/place.wav"};
-    Clip stepClip{":/sounds/step.wav"};
+    Clip pickupClip{":/sounds/pickup.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     static constexpr ma_uint32 kSampleRate = 22050;
+
+    // 在 pathStore 内构造一条 qrc 路径（:/sounds/{kind}_{group}.wav），返回其 .c_str()（长寿命）。
+    const char *makePath(const char *kind, int groupIdx)
+    {
+        pathStore.emplace_back(std::string(":/sounds/") + kind + "_" + groupName(groupIdx) + ".wav");
+        return pathStore.back().c_str();
+    }
 
     // 解码 WAV 字节 → s16 mono PCM @ kSampleRate，包进 ref；失败 ok=false。
     void loadClip(Clip &c)
@@ -112,6 +158,9 @@ struct AudioManager::Data
         ma_sound_set_volume(&c.sound, vol);
         ma_sound_start(&c.sound);
     }
+
+    // 按 groupIndex 取某音类的 clip（Break / Mining / Step）。
+    Clip &groupClip(int groupIdx, Kind kind) { return groupClips[size_t(groupIdx)][size_t(kind)]; }
 };
 
 AudioManager::AudioManager(QObject *parent)
@@ -125,31 +174,81 @@ AudioManager::AudioManager(QObject *parent)
         return;
     }
     d->engineOk = true;
-    // 3 SFX 解码 + sound 初始化：任一 clip 失败仅自身降级，不影响其余（局部降级）。
-    d->loadClip(d->breakClip);
+
+    // 材质分组 clip 池：每组 × {break, mining, step} 的 qrc 路径在 makePath 内拼接长寿命化。
+    // groupClips 默认初始化时 qrcPath=nullptr → 此处补设（Data 的 pathStore 持字符串长寿命）。
+    static constexpr const char *kKindNames[Data::NumKinds] = {"break", "mining", "step"};
+    for (int g = 0; g < kNumGroups; ++g) {
+        for (int k = 0; k < int(Data::NumKinds); ++k) {
+            d->groupClips[size_t(g)][size_t(k)].qrcPath = d->makePath(kKindNames[k], g);
+        }
+    }
+
+    // 解码 + sound 初始化：任一 clip 失败仅自身降级，不影响其余（局部降级）。
+    for (int g = 0; g < kNumGroups; ++g) {
+        for (int k = 0; k < int(Data::NumKinds); ++k) {
+            d->loadClip(d->groupClips[size_t(g)][size_t(k)]);
+            d->initSound(d->groupClips[size_t(g)][size_t(k)]);
+        }
+    }
     d->loadClip(d->placeClip);
-    d->loadClip(d->stepClip);
-    d->initSound(d->breakClip);
+    d->loadClip(d->pickupClip);
     d->initSound(d->placeClip);
-    d->initSound(d->stepClip);
-    qCInfo(lcAudio) << "AudioManager init: engine =" << d->engineOk
-                    << " break/place/step =" << d->breakClip.ok << d->placeClip.ok << d->stepClip.ok;
+    d->initSound(d->pickupClip);
+
+    qCInfo(lcAudio).nospace().noquote()
+        << "AudioManager init: engine=" << d->engineOk
+        << " groups(stone/wood/grass/sand/leaves)×(break/mining/step)="
+        << d->groupClips[0][0].ok << "/" << d->groupClips[0][1].ok << "/" << d->groupClips[0][2].ok << " | "
+        << d->groupClips[1][0].ok << "/" << d->groupClips[1][1].ok << "/" << d->groupClips[1][2].ok << " | "
+        << d->groupClips[2][0].ok << "/" << d->groupClips[2][1].ok << "/" << d->groupClips[2][2].ok << " | "
+        << d->groupClips[3][0].ok << "/" << d->groupClips[3][1].ok << "/" << d->groupClips[3][2].ok << " | "
+        << d->groupClips[4][0].ok << "/" << d->groupClips[4][1].ok << "/" << d->groupClips[4][2].ok
+        << " place=" << d->placeClip.ok << " pickup=" << d->pickupClip.ok;
 }
 
 AudioManager::~AudioManager()
 {
     if (!d->engineOk) return;
     // 先 uninit sounds（释放对 ref/data_source 的引用），再 uninit engine（顺序：依赖反向拆解）。
-    if (d->breakClip.ok) ma_sound_uninit(&d->breakClip.sound);
+    for (int g = 0; g < kNumGroups; ++g) {
+        for (int k = 0; k < int(Data::NumKinds); ++k) {
+            if (d->groupClips[size_t(g)][size_t(k)].ok)
+                ma_sound_uninit(&d->groupClips[size_t(g)][size_t(k)].sound);
+        }
+    }
     if (d->placeClip.ok) ma_sound_uninit(&d->placeClip.sound);
-    if (d->stepClip.ok) ma_sound_uninit(&d->stepClip.sound);
+    if (d->pickupClip.ok) ma_sound_uninit(&d->pickupClip.sound);
     ma_engine_uninit(&d->engine);
 }
 
-void AudioManager::playBreak(int blockId) { d->replay(d->breakClip, m_volume); }
-void AudioManager::playPlace(int blockId) { d->replay(d->placeClip, m_volume); }
-// 脚步音量略低（避免连击疲劳；spec「音量合理」）。
-void AudioManager::playStep() { d->replay(d->stepClip, m_volume * 0.7f); }
+void AudioManager::playBreak(int blockId)
+{
+    d->replay(d->groupClip(groupIndex(blockId), Data::Break), m_volume);
+}
+
+void AudioManager::playPlace(int blockId)
+{
+    Q_UNUSED(blockId);  // 放置不分材质（单件 place clip）
+    d->replay(d->placeClip, m_volume);
+}
+
+void AudioManager::playStep(int blockId)
+{
+    // 脚步音量略低（避免连击疲劳；spec「音量合理」）。
+    d->replay(d->groupClip(groupIndex(blockId), Data::Step), m_volume * 0.7f);
+}
+
+void AudioManager::playMining(int blockId)
+{
+    // 挖掘音量略低于 break（每阶反馈，spec「每挥一次响」不应过响）。
+    d->replay(d->groupClip(groupIndex(blockId), Data::Mining), m_volume * 0.8f);
+}
+
+void AudioManager::playPickup()
+{
+    d->replay(d->pickupClip, m_volume);
+}
 
 void AudioManager::setVolume(float v)
 {

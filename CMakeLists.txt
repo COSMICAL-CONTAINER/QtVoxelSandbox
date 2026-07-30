@@ -145,15 +145,31 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_torch.png
 )
 
-# t89 音效资源（3 原创 SFX，§4；tools/build_sounds.py 程序合成，零 MC 资产）。
+# t89 / t118 音效资源（tools/build_sounds.py 程序合成，§4 原创 SFX；零 MC 资产）。
 # 经 qrc 打包（:/sounds/*.wav）；AudioManager 从 qrc 读 WAV → miniaudio 解码播放。
 # 注：PLAN §2-L 终态是从磁盘加载（便于热补丁），本任务先 qrc 跑通 + 留接口（见 audiomanager.cpp）。
+# t118：按方块材质分组（石/木/草/沙/叶）clip 池 —— break/mining/step 各 5 个变体（按 BlockRegistry::
+# materialGroup 选播，spec「按方块材质分组」）；place / pickup 单件（放置 / 拾取不分材质）。
 qt_add_resources(voxelsandbox "voxel_sounds"
     PREFIX "/"
     FILES
-        sounds/break.wav
+        sounds/break_stone.wav
+        sounds/break_wood.wav
+        sounds/break_grass.wav
+        sounds/break_sand.wav
+        sounds/break_leaves.wav
+        sounds/mining_stone.wav
+        sounds/mining_wood.wav
+        sounds/mining_grass.wav
+        sounds/mining_sand.wav
+        sounds/mining_leaves.wav
+        sounds/step_stone.wav
+        sounds/step_wood.wav
+        sounds/step_grass.wav
+        sounds/step_sand.wav
+        sounds/step_leaves.wav
         sounds/place.wav
-        sounds/step.wav
+        sounds/pickup.wav
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。

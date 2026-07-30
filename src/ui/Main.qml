@@ -228,9 +228,11 @@ Window {
     // 只读 count/posAt/colorAt 自发渲染（PLAN §2 分层：呈现只消费 Entities 数据）。
     EntityManager { id: entityManager }
 
-    // t89 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 脚步 3 原创 SFX。
-    //   触发由 Game 层信号发出（World::blockBroken/blockPlaced、PlayerController::walkPhaseChanged），
-    //   呈现层经 Connections 转发到 playBreak/playPlace/playStep（音频层只消费，PLAN §2 分层）。
+    // t89 / t118 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 SFX，
+    //   按方块材质分组（石/木/草/沙/叶）clip 池（spec「playBreak/playMining/playStep 按 group 选」）。
+    //   触发由 Game 层信号发出（World::blockBroken/blockPlaced、PlayerController::miningParticle /
+    //   itemPickedUp / walkPhaseChanged），呈现层经 Connections 转发到 playBreak/playPlace/playMining /
+    //   playPickup/playStep（音频层只消费，PLAN §2 分层）。
     //   引擎初始化 / 音频加载失败时 AudioManager 内部静默降级（§2-E），此处无需守卫。
     //   _prevWalkPhase / _walkAccum 是脚步节律追踪态（QML 实例局部属性，非音频引擎态）：
     //   walkPhaseChanged 累加相位差（2π 回绕感知），每半步（Δ≥π）播一次脚步音。
@@ -269,9 +271,16 @@ Window {
         // t61：挖掘过程粒子 —— 生存累积挖掘时每跨一阶，player 发 miningParticle（被挖方块坐标+id），
         // 转发到 BlockParticles.burstMine（复用破块碎屑 emitter / 色逻辑 / 重力，少量迸发，进度反馈）。
         // 破块完成时的 +30% 大迸发仍由 onBlockBroken → burstBreak 驱动（burstBreak 已在此任务内 +30%）。
+        // t118：miningParticle 同时驱动 playMining（每挥一次响 —— 信号本就是「stage 跨阶 = 一次挥击」
+        // 的语义点，spec「miningParticle 每 stage 接音」）；id 给 AudioManager 按材质组选 mining clip。
         function onMiningParticle(x, y, z, id) {
             if (particleLoader.item) particleLoader.item.burstMine(x, y, z, id)
+            audio.playMining(id)
         }
+        // t118：拾取掉落实体 → player 发 itemPickedUp(id, count) → 拾取音（pickup clip，不分材质）。
+        // 信号在 pickupScan 实际入栈时（全 / 部分）才发；全满装不下不发（无伪触发）。机制等价 MC
+        // 「拾起物品啵一声」。t120 后续亦消费同一信号驱动手弹跳动画（互不冲突）。
+        function onItemPickedUp(id, count) { audio.playPickup() }
         // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
         function onCraftingTableOpened() { window.openCraftingTable() }
         // t87：右键熔炉 → player 发 furnaceOpened → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
@@ -293,6 +302,8 @@ Window {
     //   飞行 / Spectator moveSpeed=0 不发（playercontroller.cpp:805 守），故天然无脚步音（spec 验收项）。
     //   半步节律：一个完整 stride = 2π 含两次脚落地（左+右），故每累积 Δphase≥π 播一次脚步音。
     //   2π 回绕感知：phase 从 ~2π 跳回 0 时 raw delta<0 → 补 2π（playercontroller 在 >=2π 时减 2π 回绕）。
+    //   t118：脚步音按脚下表面方块材质分流（spec「playStep 按 group 选」）。表面 = 脚底 -0.1 那一格
+    //   （脚底 m_pos.y 减一点防恰在整数边界踩空 → 越界返 air → GroupDefault 兜底 Stone step，仍响）。
     Connections {
         target: player
         function onWalkPhaseChanged() {
@@ -303,7 +314,12 @@ Window {
             audio._walkAccum += d
             if (audio._walkAccum >= Math.PI) {
                 audio._walkAccum -= Math.PI
-                audio.playStep()
+                // 脚下表面方块 id（材质组判定用）；越界 / air → 0 → GroupDefault 兜底 Stone step。
+                const feet = player.feetPosition
+                const sid = theWorld.blockAt(Math.floor(feet.x),
+                                             Math.floor(feet.y - 0.1),
+                                             Math.floor(feet.z))
+                audio.playStep(sid)
             }
         }
     }

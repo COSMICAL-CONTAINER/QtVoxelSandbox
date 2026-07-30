@@ -685,9 +685,13 @@ void PlayerController::pickupScan()
         const int leftover = m_hotbar->addToAny(id, have); // t97：跨 main + hotbar 智能堆叠；按 maxStack 分流
         if (leftover <= 0) {
             m_itemEntities->removeAt(i);                // 全入 → 销毁实体
+            // t118：拾取语义事件（驱动 AudioManager.playPickup 拾取音；t120 亦据此驱动手弹跳动画）。
+            emit itemPickedUp(id, have);
         } else if (leftover < have) {
             m_itemEntities->setCountAt(i, leftover);    // 部分入 → 余数回写、entity 保留
-        } // else leftover == have：背包完全装不下 → entity 不动（spec：全满→不拾取）
+            // t118：部分拾取也算拾取事件（按实际入栈数计；spec「拾取」语义覆盖「全 / 部分」两路）。
+            emit itemPickedUp(id, have - leftover);
+        } // else leftover == have：背包完全装不下 → entity 不动（spec：全满→不拾取；不发事件）
     }
 }
 
