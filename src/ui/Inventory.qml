@@ -149,28 +149,58 @@ Item {
         }
         root.dragSlots = []
     }
+    // t82 右键均分持续到填满（替代 t79 单次 floor(count/N)）：MC 风格循环 +1 —— 每轮给每个合格槽 +1，
+    // 循环到 remaining=0（手空）或所有槽到 cap（背包填满）。合格槽 = 空或同 id 未满；**自动纳入未 hover
+    // 的 hotbar 槽**（旧版只分 dragSlots 里 hover 过的格 → 拖几格只分几格，无法持续填满）。创造背包无
+    // main 栏，目标仅 hotbar 9 槽（调色板=无限源不作目标）。与 SurvivalInventory / CraftingTableUI 同算法
+    //（仅"额外槽"范围不同：本文件无 main）。
     function applyDragDistribute() {
         const heldId = root.dragHeldId
         let remaining = root.dragHeldCount
         if (heldId === 0 || remaining <= 0) return
         const cap = root.hotbar.maxStackSize(heldId)
+
+        // 合格槽去重收集。先纳入 dragSlots（hover 过的格，保留"拖到哪填到哪"直觉），再补齐其余 hotbar 槽。
+        // eligible 存 {group,index,count}：count 在内存累加（每轮 +1），末尾一次性写回，避免循环内反复
+        // setStack 触发版本号 / 信号风暴。
         const eligible = []
+        const seen = {}
+        const tryAdd = (group, index) => {
+            const key = group + ":" + index
+            if (seen[key]) return
+            seen[key] = true
+            const cur = root.readSlot(group, index)
+            if (cur.id === 0 || (cur.id === heldId && cur.count < cap))
+                eligible.push({ group: group, index: index, count: cur.count })
+        }
         for (let i = 0; i < root.dragSlots.length; ++i) {
             const p = root.dragSlots[i].split(":")
-            const cur = root.readSlot(p[0], parseInt(p[1], 10))
-            if (cur.id === 0 || (cur.id === heldId && cur.count < cap)) eligible.push(root.dragSlots[i])
+            if (p[0] === "craft") continue                              // 合成格排除（本文件无，防御）
+            tryAdd(p[0], parseInt(p[1], 10))
         }
-        const N = eligible.length
-        if (N <= 0) return
-        const share = Math.floor(remaining / N)
-        if (share <= 0) return
+        const hbN = root.hotbar.slotCount
+        for (let i = 0; i < hbN; ++i) tryAdd("hotbar", i)              // 自动纳入未 hover 的 hotbar 槽
+
+        if (eligible.length <= 0) return
+
+        // 循环 +1：每轮每个仍有空间（count<cap）的合格槽加 1；一轮无人进展 = 全到 cap（背包填满）→ 退出。
+        while (remaining > 0) {
+            let progressed = false
+            for (let i = 0; i < eligible.length; ++i) {
+                if (remaining <= 0) break
+                const e = eligible[i]
+                if (e.count >= cap) continue
+                e.count += 1
+                remaining -= 1
+                progressed = true
+            }
+            if (!progressed) break
+        }
+
+        // 一次性写回最终态（按内存累计量覆盖写）。
         for (let i = 0; i < eligible.length; ++i) {
-            const p = eligible[i].split(":")
-            const idx = parseInt(p[1], 10)
-            const cur = root.readSlot(p[0], idx)
-            const give = Math.min(share, cap - cur.count)
-            root.writeSlot(p[0], idx, heldId, cur.count + give)
-            remaining -= give
+            const e = eligible[i]
+            root.writeSlot(e.group, e.index, heldId, e.count)
         }
         root.hotbar.heldBlock = remaining > 0 ? heldId : 0
         root.hotbar.heldCount = remaining
