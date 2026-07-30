@@ -215,7 +215,7 @@ Item {
     Rectangle {
         id: panel
         width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
-        height: 332                                  // 标题(22) + 熔炉行(48) + 主栏(120) + hotbar(40) + 边距/间距
+        height: 368                                  // 标题(22) + 熔炉行(84) + 主栏(120) + hotbar(40) + 边距/间距
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -248,7 +248,7 @@ Item {
             Item {
                 id: furnaceRow
                 width: parent.width
-                height: root.slotSize + 8   // 输入/输出槽高 + 燃料槽下偏移余量
+                height: root.slotSize + 4 + root.slotSize   // 顶槽(slotSize) + 间距(4) + 燃料槽完整高(slotSize)，容纳燃料槽不溢出
                 readonly property real rowOffsetX: (width - (2 * root.slotSize + 28 + root.slotSize)) / 2
 
                 // 输入槽（左上）。
