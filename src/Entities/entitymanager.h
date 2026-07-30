@@ -24,8 +24,9 @@
 //     只读 World::isSolid，PLAN §2 合规）。
 //   - 玩家推动（resolvePlayerPush）：对每个 pushable 实体，用「玩家 AABB（XZ 矩形）vs 实体圆（XZ）」
 //     求穿透，把实体沿「AABB 最近点 → 实体中心」方向推出穿透量（玩家位移传给实体）。仅在实体与玩家
-//     AABB 垂直区间重叠时推动（防跨层误推——玩家从实体头顶跳过不应推开它）。推动后做轻量世界碰撞
-//     钳制（实体中心若陷入实体方块 → 撤回该轴推动，防穿墙）。
+//     AABB 垂直区间重叠时推动（防跨层误推——玩家从实体头顶跳过不应推开它）。推动后做世界碰撞钳制：
+//     扫 mob AABB footprint 覆盖的所有格子（仿 player aabbHitsSolid；非旧版「只查中心格」），任一实体
+//     方块 → 撤回该轴推动（防穿墙 + 消除斜推角落 jitter——旧版单格检查致 mob 入墙反复跳变）。
 //
 // 分层（PLAN §2）：本层属 Entities（位于 Game/Physics 之下、World 之上）。向下只读 World（isSolid），
 // 不依赖 Renderer/Physics/QtQuick3D。tick / resolvePlayerPush 由 PlayerController（Game/Physics 层）每帧

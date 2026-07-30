@@ -8,7 +8,30 @@
 
 namespace {
 Q_LOGGING_CATEGORY(lcEnt, "vo.entity") // 模块化日志（PLAN §2-F）；未在 main.cpp 过滤，落 log 可见
+
+// mob AABB footprint 全格扫（t104；仿 player aabbHitsSolid，playercontroller.cpp:761）。
+// 给定实体立方体中心 (cx,cy,cz) 与半径 r，扫其 AABB [cx−r,cx+r]×[cy−r,cy+r]×[cz−r,cz+r]「严格覆盖」
+// 的所有格子，任一实体方块 → true。「严格重叠」取样（ceil(max)−1 排除仅贴面的方块 → 防卡缝 / 不误判
+// 正下方支撑格）。取代 resolvePlayerPush 旧版「只查 mob 中心格」的单格检查：斜推角落时 mob 中心可能
+// 仍在空气格但 3/4 身体已入墙 → 旧版不撤回 → 下帧中心才入墙 → 撤回 → 再下帧又被推入 → 反复跳变 =
+// jitter（用户感知为 scale 闪烁 + revision 每帧 bump）。全格扫使「mob AABB 任一部分触墙」即撤回 →
+// mob 永不入墙 → 无跳变。
+bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float r)
+{
+    if (!world) return false;
+    const float minx = cx - r, maxx = cx + r;
+    const float miny = cy - r, maxy = cy + r;
+    const float minz = cz - r, maxz = cz + r;
+    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
+    const int y0 = int(std::floor(miny)), y1 = int(std::ceil(maxy)) - 1;
+    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
+    for (int y = y0; y <= y1; ++y)
+        for (int z = z0; z <= z1; ++z)
+            for (int x = x0; x <= x1; ++x)
+                if (world->isSolid(x, y, z)) return true;
+    return false;
 }
+} // namespace
 
 EntityManager::EntityManager(QObject *parent) : QObject(parent) {}
 
@@ -68,8 +91,9 @@ QString EntityManager::colorAt(int i) const
 //      才推动（玩家从头顶跳过 / 跨层时不应误推）。
 //   2) XZ 穿透：AABB 最近点 cx/cz = clamp(entity 中心, [px−halfW, px+halfW])；d = entity − 最近点。
 //      dist < r → 穿透 push = r − dist，沿 d/dist 推出；d≈0（中心在 AABB 内）→ 沿最近面推出（min 四向）。
-//   3) 世界碰撞钳制：新位置实体中心所在格（身体中段 Y）若为实体方块 → 撤回该轴推动（防把实体推进墙）。
-//      X/Z 两轴独立判定（斜推时各自检查），保证实体贴墙滑动不穿入。
+//   3) 世界碰撞钳制（t104：mob AABB footprint 全格扫，仿 player aabbHitsSolid）：推动后扫 mob 立方体
+//      AABB 覆盖的所有格子（非旧版「只查中心格」），任一实体方块 → 撤回该轴推动。X/Z 两轴独立判定
+//      （斜推各自检查），保证实体贴墙滑动不穿入；全格扫消除「中心在空气但 3/4 入墙」的 jitter。
 //   4) 被推动 → resting=false（解除静止，让重力复探支撑：可能被推下阶梯 → 自然落）。任一 pos 真变 →
 //      dirty，末尾统一 bump revision + emit（驱动 QML {revision; posAt} 绑定重算）。
 void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, float height, World *world)
@@ -113,16 +137,13 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
             else                  newZ = pz + halfW + r;
         }
 
-        // 世界碰撞钳制：实体身体中段 Y 所在格若为实体方块 → 撤回该轴推动（防穿墙）。X/Z 独立判定。
+        // 世界碰撞钳制（t104：mob AABB footprint 全格扫，仿 player aabbHitsSolid）：扫 mob 立方体 AABB
+        // 覆盖的所有格子（非旧版「只查中心格」），任一实体方块 → 撤回该轴推动（防穿墙）。X/Z 两轴独立
+        // 判定，Z 轴参照可能已撤回的 newX（两轴独立但顺序敏感）。旧版单格检查在斜推角落时 mob 中心可能
+        // 仍在空气 → 不撤回 → 下帧中心入墙才撤回 → 反复跳变 = jitter；全格扫使任一部分触墙即撤回 → 消除。
         if (world) {
-            const int by = qFloor(e.pos.y()); // 实体中心所在格（身体中段；resting 时为支撑方块上方空气格）
-            const int oldCellX = qFloor(e.pos.x());
-            const int oldCellZ = qFloor(e.pos.z());
-            const int newCellX = qFloor(newX);
-            if (newCellX != oldCellX && world->isSolid(newCellX, by, oldCellZ)) newX = e.pos.x();
-            const int newCellZ = qFloor(newZ);
-            const int refCellX = qFloor(newX); // 用可能已撤回的 newX 重算参照列（斜推两轴独立）
-            if (newCellZ != oldCellZ && world->isSolid(refCellX, by, newCellZ)) newZ = e.pos.z();
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), r)) newX = e.pos.x();
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, r))     newZ = e.pos.z();
         }
 
         if (newX != e.pos.x() || newZ != e.pos.z()) {
