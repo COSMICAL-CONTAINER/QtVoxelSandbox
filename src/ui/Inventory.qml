@@ -39,14 +39,24 @@ Item {
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
     property string hoveredName: ""
 
-    // t79 右键拖拽均分（spec：右键按下拖过 N 格 → 松手等分，每格 floor(count/N)，余数留手）。创造背包仅
-    // hotbar 行为分发目标（调色板=无限源，不作目标）。手势由 root 级 TapHandler(WithinBounds, RightButton)
-    // 总控；逐槽 HoverHandler 收集。dragSlots 存「组:下标」字符串；dragHeld* 为按下瞬间光标栈快照。
+    // t79/t98 右键拖拽实时均分（spec t98：右键按下拖过 N 格 → 每滑入新格实时重算 floor(count/N) 等分、
+    // 余数实时回光标浮动图标；松手不再二次均分）。创造背包仅 hotbar 行作分发目标（调色板=无限源，不作
+    // 目标）。手势由 root 级 TapHandler(WithinBounds, RightButton) 总控；逐槽 HoverHandler 收集（addDragSlot
+    // 即触发 redistributeLive）；release 据 N 决定（N≥2 已实时分完 / N==1 退化为单格右键）。dragSlots 存
+    // 「组:下标」字符串；dragHeld* 为按下瞬间光标栈快照；dragOriginal/dragWritten 支撑实时重分的撤销机制。
     property bool rightDragActive: false
     property var dragSlots: []              // "hotbar:0" ..
     property string hoveredKey: ""
     property int dragHeldId: 0
     property int dragHeldCount: 0
+    // t98 实时重分撤销机制：dragOriginal 记每槽 drag 前原始栈（首次 encounter 快照）；dragWritten 记本轮
+    // 已写槽。每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginRightDrag / endRightDrag 重置。
+    property var dragOriginal: ({})
+    property var dragWritten: ({})
+    // t98 双击合并：lastTapMs/lastTapKey 记上次左键点击（槽 key）的时间戳与 key；400ms 内同槽二次点击 →
+    // doMergeSameId（扫 main+hotbar 同 id 累加成满栈 64 一组、余数留光标）。
+    property real lastTapMs: 0
+    property string lastTapKey: ""
 
     // ── 尺寸常量（集中一处便于对齐）──
     readonly property int paletteCols: 9
@@ -123,18 +133,25 @@ Item {
     function addDragSlot(key) {
         if (root.dragHasKey(key)) return
         root.dragSlots = root.dragSlots.concat([key])
+        root.redistributeLive()                          // t98：每滑入新格实时重算 N 等分（撤销 + 重分）
     }
+    // t98：补 main 分支（与 SurvivalInventory / CraftingTableUI 对齐），让 doMergeSameId 扫 main 同 id 时能
+    // 正确读 / 写（创造一般 main 全空，无副作用；防 main 残留时清不掉致复制）。
     function readSlot(group, index) {
+        if (group === "main")   return { id: root.hotbar.mainBlockIdAt(index), count: root.hotbar.mainCountAt(index) }
         if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index) }
         return { id: 0, count: 0 }
     }
     function writeSlot(group, index, id, count) {
-        if (group === "hotbar") root.hotbar.setStack(index, id, count)
+        if (group === "main")   root.hotbar.mainSetStack(index, id, count)
+        else if (group === "hotbar") root.hotbar.setStack(index, id, count)
     }
     function beginRightDrag() {
         root.dragHeldId = root.hotbar.heldBlock
         root.dragHeldCount = root.hotbar.heldCount
         root.dragSlots = []
+        root.dragOriginal = ({})                        // t98：重置原始栈快照
+        root.dragWritten = ({})                         // t98：重置已写槽记录
         root.rightDragActive = true
         if (root.hoveredKey !== "") root.addDragSlot(root.hoveredKey)
     }
@@ -142,25 +159,37 @@ Item {
         if (!root.rightDragActive) return
         root.rightDragActive = false
         const n = root.dragSlots.length
-        if (n > 1) root.applyDragDistribute()
-        else if (n === 1) {
+        // t98：N≥2 已在 drag 途中实时分完（redistributeLive 每滑入新格重算），此处不再均分。
+        // N===1 退化为单格右键（拿半 / 放一）—— 按下未拖动的常规右键语义。N===0 无操作。
+        if (n === 1) {
             const p = root.dragSlots[0].split(":")
             root.singleRightClick(p[0], parseInt(p[1], 10))
         }
         root.dragSlots = []
+        root.dragOriginal = ({})
+        root.dragWritten = ({})
     }
-    // t90 右键拖拽均分修复（t82 回归）：**仅遍历真正滑过的 dragSlots（hover 过的 N 格）**，单次
-    // floor(total/N) 等分入格、余数留手；**删 t82 的自动扫 hotbar + 删 while +1 循环**（那个版本会把未
-    // 拖到的背包格也填满 → 刷物品）。异物 / 已满槽跳过（MC 行为：不同物品的槽不分）；craft 合成格排除
-    //（本文件无，防御）。守恒：写回总量 + 余数 = 拖拽前手持总量。与 SurvivalInventory / CraftingTableUI
-    // 同算法。
-    function applyDragDistribute() {
+    // t98 实时均分（替代 t90 松手一次性 applyDragDistribute）：每滑入新格（addDragSlot 触发）即重算
+    // floor(dragHeldCount/N) 入格、余数实时回光标（heldBlock/heldCount → Main.qml 浮动图标实时变）。撤销
+    // 机制：dragOriginal 快照每槽 drag 前原始栈（首次 encounter 拍），dragWritten 记本轮已写槽；下次重分前
+    // 先据 dragOriginal 把已写格恢复，再按新 N 重分 → 用户看到「滑第 2 格变对半、第 3 格变三等分」的实时
+    // 反馈。合格过滤：空槽 / 同 id 未满；craft 合成格排除（本文件无，防御）；异物 / 已满槽跳过。守恒：写回
+    // 总量 + 余数 = dragHeldCount 快照。N≤1 不分（保留单格右键给 endRightDrag 处理）。与 SurvivalInventory /
+    // CraftingTableUI 同算法。
+    function redistributeLive() {
+        // 1) 撤销上一轮写入（恢复 dragOriginal 记录的原始栈），确保重分前所有 dragSlots 回到 drag 前态。
+        for (const key in root.dragWritten) {
+            const wp = key.split(":")
+            const orig = root.dragOriginal[key]
+            root.writeSlot(wp[0], parseInt(wp[1], 10), orig.id, orig.count)
+        }
+        root.dragWritten = ({})
+
         const heldId = root.dragHeldId
         const total = root.dragHeldCount
-        if (heldId === 0 || total <= 0) return
         const cap = root.hotbar.maxStackSize(heldId)
 
-        // 仅遍历 dragSlots（真正滑过的格），去重 + 过滤合格（空 或 同 id 未满）。不自动扫全 hotbar。
+        // 2) 重建合格清单；首次 encounter 的槽拍原始栈快照（此后该槽读到的是本轮写入值，须靠快照还原）。
         const eligible = []
         const seen = {}
         for (let i = 0; i < root.dragSlots.length; ++i) {
@@ -169,23 +198,35 @@ Item {
             seen[key] = true
             const p = key.split(":")
             if (p[0] === "craft") continue                              // 合成格排除（本文件无，防御）
-            const cur = root.readSlot(p[0], parseInt(p[1], 10))
-            if (cur.id === 0 || (cur.id === heldId && cur.count < cap))
-                eligible.push({ group: p[0], index: parseInt(p[1], 10), count: cur.count })
+            if (!root.dragOriginal[key]) {
+                const cur = root.readSlot(p[0], parseInt(p[1], 10))
+                root.dragOriginal[key] = { id: cur.id, count: cur.count }
+            }
+            const orig = root.dragOriginal[key]
+            if (orig.id === 0 || (orig.id === heldId && orig.count < cap))
+                eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count })
         }
-        const n = eligible.length
-        if (n <= 0) return
 
-        // 单次 floor(total/N) 入格（cap 钳制防溢出），余数留手；不循环、不扫全背包。
+        const n = eligible.length
+        // N≤1 / 空手 / 无物：不分（保留单格右键给 endRightDrag；空手 drag 无意义）。余数 = 原始快照。
+        if (n <= 1 || heldId === 0 || total <= 0) {
+            root.hotbar.heldBlock = heldId
+            root.hotbar.heldCount = total
+            return
+        }
+
+        // 3) floor(total/N) 入格（cap 钳制防溢出），余数留光标；记 dragWritten 供下轮撤销。
         const per = Math.floor(total / n)
-        if (per <= 0) return
         let remaining = total
-        for (let i = 0; i < n; ++i) {
-            const e = eligible[i]
-            const place = Math.min(per, cap - e.count)
-            e.count += place
-            remaining -= place
-            root.writeSlot(e.group, e.index, heldId, e.count)
+        if (per > 0) {
+            for (let i = 0; i < n; ++i) {
+                const e = eligible[i]
+                const place = Math.min(per, cap - e.base)
+                if (place <= 0) continue
+                root.writeSlot(e.group, e.index, heldId, e.base + place)
+                root.dragWritten[e.key] = true
+                remaining -= place
+            }
         }
         root.hotbar.heldBlock = remaining > 0 ? heldId : 0
         root.hotbar.heldCount = remaining
@@ -197,6 +238,58 @@ Item {
         root.writeSlot(group, index, r.slotId, r.slotCount)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
+    }
+
+    // t98 双击合并（MC：双击某槽 → 扫 main + hotbar 同 id 物品，累加成满栈 64 一组，余数留光标）。targetId
+    // 取光标手持 id（典型流程：首次左键拾起该槽 → 二次点击同槽合并），fallback 到所点槽 id（首次为放置时光
+    // 标空）。依赖 t97 main VM 共享（main + hotbar 同一份；创造一般 main 全空，等效只扫 hotbar）。守恒：合并
+    // 后 (各槽 + 光标) 总量 = 合并前。与 SurvivalInventory / CraftingTableUI 同算法。
+    function doMergeSameId(group, index) {
+        if (!root.hotbar) return
+        let targetId = root.hotbar.heldBlock
+        if (targetId === 0) {
+            const cur = root.readSlot(group, index)
+            targetId = cur.id
+        }
+        if (targetId === 0) return
+        const cap = root.hotbar.maxStackSize(targetId)
+
+        // 收集所有同 id 槽位 + 光标，求总量。
+        const slots = []
+        let total = 0
+        if (root.hotbar.heldBlock === targetId) total += root.hotbar.heldCount
+        for (let i = 0; i < root.hotbar.mainCount; ++i) {
+            if (root.hotbar.mainBlockIdAt(i) === targetId) {
+                total += root.hotbar.mainCountAt(i)
+                slots.push({ group: "main", index: i })
+            }
+        }
+        for (let i = 0; i < root.hotbar.slotCount; ++i) {
+            if (root.hotbar.blockIdAt(i) === targetId) {
+                total += root.hotbar.countAt(i)
+                slots.push({ group: "hotbar", index: i })
+            }
+        }
+        if (total <= 0) return
+
+        // 清空所有同 id 槽 + 光标（即将重新打包）。
+        for (let i = 0; i < slots.length; ++i) {
+            root.writeSlot(slots[i].group, slots[i].index, 0, 0)
+        }
+        root.hotbar.heldBlock = 0
+        root.hotbar.heldCount = 0
+
+        // 重打包：满栈（cap）按扫描顺序填回前 numFull 个槽，余数（< cap）留光标。槽位充足（total 来自这些
+        // 槽 + 光标，cap*(槽数+1) ≥ total），不会丢物品。
+        const numFull = Math.min(Math.floor(total / cap), slots.length)
+        for (let i = 0; i < numFull; ++i) {
+            root.writeSlot(slots[i].group, slots[i].index, targetId, cap)
+        }
+        const cursorCount = total - numFull * cap
+        if (cursorCount > 0) {
+            root.hotbar.heldBlock = targetId
+            root.hotbar.heldCount = cursorCount
+        }
     }
 
     // t79 右键拖拽均分总控（WithinBounds 让 pressed 跨格保持 true；右键单格 / 多格均由此驱动）。
@@ -489,6 +582,13 @@ Item {
                                 TapHandler {
                                     acceptedButtons: Qt.LeftButton
                                     onTapped: {
+                                        // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId。
+                                        const key = root.slotKey("hotbar", index)
+                                        const now = Date.now()
+                                        const isDouble = (now - root.lastTapMs < 400) && (root.lastTapKey === key)
+                                        root.lastTapMs = now
+                                        root.lastTapKey = key
+                                        if (isDouble) { root.doMergeSameId("hotbar", index); return }
                                         const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
                                         if (r) {
                                             root.hotbar.setStack(index, r.slotId, r.slotCount)
