@@ -43,14 +43,11 @@ Item {
     property var craftCounts:[0,0,0, 0,0,0, 0,0,0]
     property int craftRev: 0
 
-    // t63 3×9=27 主物品栏本地栈存储（复用 SurvivalInventory 主栏的 mainSlots/mainCounts/mainRev 本地数组 +
-    // revision-touch 绑定模式）。与合成格 / hotbar 共享同一 hotbar VM 的 heldBlock/heldCount 光标手持栈；
-    // 左键整组 / 右键半份同 resolveClick / resolveRightClick。数组突变靠 mainRev 版本号触发绑定刷新。
-    // 注：本数组为面板本地（组件不销毁仅 visible=false → 跨开关持久），与 SurvivalInventory 主栏分立存储
-    // （共享主栏需上移至 C++ VM，非本任务范围；hotbar 9 槽经 VM 共享是物品进出工作台的主通道）。
-    property var mainSlots: [0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0]
-    property var mainCounts:[0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0]
-    property int mainRev: 0
+    // t97：27 主物品栏自本任务起上移至 hotbar VM（m_mainSlots），与 SurvivalInventory / FurnaceUI 三菜单共享
+    // 同一份 → 三菜单主栏同步、returnHeldToHotbar/pickupScan 经 addToAny 能合并进主栏（修「主栏不同步 /
+    // 丢弃回栏不合并」根因）。原本地 mainSlots/mainCounts/mainRev 数组删除，delegate 改读 VM（触碰
+    // mainRevision + mainBlockIdAt/mainCountAt，同 SurvivalInventory 主栏模式）。与合成格 / hotbar 共享同一
+    // hotbar VM 光标手持栈；左键整组 / 右键半份同 resolveClick / resolveRightClick。
 
     // t79 右键拖拽均分（spec：右键按下拖过 N 格 → 松手等分，每格 floor(count/N)，余数留手）。手势由 root
     // 级 TapHandler(WithinBounds, RightButton) 总控；逐槽 HoverHandler 收集扫过格子。合成格 / 主栏 / hotbar
@@ -114,13 +111,13 @@ Item {
     }
     function readSlot(group, index) {
         if (group === "craft")  return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0 }
-        if (group === "main")   return { id: root.mainSlots[index] || 0,  count: root.mainCounts[index] || 0 }
+        if (group === "main")   return { id: root.hotbar.mainBlockIdAt(index), count: root.hotbar.mainCountAt(index) }
         if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index) }
         return { id: 0, count: 0 }
     }
     function writeSlot(group, index, id, count) {
         if (group === "craft")       { root.craftSlots[index] = id; root.craftCounts[index] = count; root.craftRev++ }
-        else if (group === "main")   { root.mainSlots[index] = id;  root.mainCounts[index] = count;  root.mainRev++ }
+        else if (group === "main")   { root.hotbar.mainSetStack(index, id, count) }
         else if (group === "hotbar") { root.hotbar.setStack(index, id, count) }
     }
     function beginRightDrag() {
@@ -476,46 +473,50 @@ Item {
                 }
             }
 
-            // t63 3×9 主物品栏（27 槽）：左键整组 / 右键半份取放（与 SurvivalInventory 主栏同模式）。
-            // 本地 mainSlots/mainCounts/mainRev 存储；与合成格 / hotbar 共享同一 hotbar VM 光标手持栈。
-            // 数组突变靠 mainRev 触发各绑定重算（图标 / 数量）。物品可在 主栏 ↔ 合成格 ↔ hotbar 间任意搬动。
+            // t63 / t97 3×9 主物品栏（27 槽）：读 hotbar VM（m_mainSlots，三菜单共享）；左键整组 / 右键半份
+            // 取放（与 SurvivalInventory 主栏同模式）。主栏栈写经 hotbar.mainSetStack；与合成格 / hotbar 共享
+            // 同一 hotbar VM 光标手持栈。物品可在 主栏 ↔ 合成格 ↔ hotbar 间任意搬动。
             Grid {
                 width: root.mainCols * root.slotSize
                 height: root.mainRows * root.slotSize
                 columns: root.mainCols; spacing: 0
                 Repeater {
-                    model: root.mainCols * root.mainRows   // 27
+                    // model 用固定整数 mainCount（VM CONSTANT=27）；刷新靠每绑定触碰 mainRevision
+                    // （Q_PROPERTY，NOTIFY=mainSlotsChanged）→ 经 mainBlockIdAt/mainCountAt 取最新栈值
+                    // （同 hotbar 行 slotRevision 模式，t55/t63 已验证）。
+                    model: root.hotbar.mainCount
                     delegate: Item {
+                        property int mainId: { root.hotbar.mainRevision; return root.hotbar.mainBlockIdAt(index) }
+                        property int mainCount: { root.hotbar.mainRevision; return root.hotbar.mainCountAt(index) }
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent }
                         Item {
                             anchors.centerIn: parent
                             width: 30; height: 30
-                            visible: { root.mainRev; return (root.mainSlots[index] || 0) !== 0 }
+                            visible: mainId !== 0
                             Image {
                                 anchors.fill: parent
-                                visible: { root.mainRev; return !root.hotbar.isTool(root.mainSlots[index] || 0)
-                                                          && !root.hotbar.isMaterial(root.mainSlots[index] || 0) }
-                                source: { root.mainRev; return root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0) }
+                                visible: { root.hotbar.mainRevision; return !root.hotbar.isTool(mainId) && !root.hotbar.isMaterial(mainId) }
+                                source: { root.hotbar.mainRevision; return root.hotbar.iconSourceForBlock(mainId) }
                                 fillMode: Image.PreserveAspectFit; smooth: true
                             }
                             ToolIcon {
                                 anchors.fill: parent
-                                visible: { root.mainRev; return root.hotbar.isTool(root.mainSlots[index] || 0) }
-                                tier: { root.mainRev; return root.hotbar.toolTier(root.mainSlots[index] || 0) }
+                                visible: { root.hotbar.mainRevision; return root.hotbar.isTool(mainId) }
+                                tier: { root.hotbar.mainRevision; return root.hotbar.toolTier(mainId) }
                             }
                             MaterialIcon {
                                 anchors.fill: parent
-                                visible: { root.mainRev; return root.hotbar.isMaterial(root.mainSlots[index] || 0) }
-                                materialId: { root.mainRev; return root.mainSlots[index] || 0 }
+                                visible: { root.hotbar.mainRevision; return root.hotbar.isMaterial(mainId) }
+                                materialId: { root.hotbar.mainRevision; return mainId }
                             }
                         }
-                        // 栈数量（count>1 显数字）。触碰 mainRev 刷新。
+                        // 栈数量（count>1 显数字）。触碰 mainRevision 刷新（VM NOTIFY 驱动）。
                         Text {
                             anchors.right: parent.right; anchors.bottom: parent.bottom
                             anchors.rightMargin: 3; anchors.bottomMargin: 1
-                            visible: { root.mainRev; return (root.mainCounts[index] || 0) > 1 }
-                            text: { root.mainRev; return root.mainCounts[index] || 0 }
+                            visible: { root.hotbar.mainRevision; return mainCount > 1 }
+                            text: { root.hotbar.mainRevision; return mainCount }
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
@@ -523,19 +524,17 @@ Item {
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
                             onTapped: {
-                                const r = root.resolveClick(root.mainSlots[index] || 0, root.mainCounts[index] || 0)
+                                const r = root.resolveClick(mainId, mainCount)
                                 if (!r) return
-                                root.mainSlots[index] = r.slotId
-                                root.mainCounts[index] = r.slotCount
-                                root.mainRev++
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount)
                                 root.hotbar.heldBlock = r.heldId
                                 root.hotbar.heldCount = r.heldCount
                             }
                         }
                         HoverHandler {
                             onHoveredChanged: {
-                                // t94 tooltip（mainSlots[index] 取当前栈 id）。
-                                const itemId = root.mainSlots[index] || 0
+                                // t94 tooltip（mainId 由 delegate 持有；触碰 mainRevision 刷新）。
+                                const itemId = mainId
                                 if (hovered && itemId !== 0) {
                                     root.hoveredItemId = itemId
                                     const p = parent.mapToItem(root, parent.width / 2, 0)

@@ -49,6 +49,11 @@ struct ItemStack {
 //     Image vs ToolIcon Canvas 自绘图标）
 //   - scroll(delta) / creativeBlocks() / iconSourceForBlock / nameForBlock（同前；nameForBlock 工具段
 //     走 ToolRegistry::displayName，iconSourceForBlock 工具段返空串 → QML 用 ToolIcon 自绘）
+//   - t97 主栏 VM 共享：27 主栏槽（生存背包 / 工作台 / 熔炉三菜单共享同一份；熔炉 3 槽 + 合成格仍本地）。
+//     mainCount（恒 27）/ mainRevision（NOTIFY=mainSlotsChanged）/ mainBlockIdAt / mainCountAt /
+//     mainSetStack / mainAddStack。QML 三菜单删本地 mainSlots 数组，改读 VM（delegate 触碰 mainRevision，
+//     同 hotbar 行 t55/t63 已验证模式）→ 三菜单主栏同步。addToAny(id,n) = 先合并 main 同 id 未满 → 再 hotbar
+//     同 id → 再空槽（main → hotbar）；returnHeldToHotbar + pickupScan 改调它（拾取 / 丢弃回栏合并进主栏）。
 //
 // 分层（PLAN §2）：本层属 ViewModel，只依赖 World 的 BlockRegistry 数据，**不**依赖
 // Renderer/Physics/QtQuick3D。物品→id / 物品→图标 的映射只查 BlockRegistry，不另持方块表副本。
@@ -70,6 +75,10 @@ class Hotbar : public QObject
     // heldCount 与 heldBlock 共享 NOTIFY=heldBlockChanged（二者强耦合：有 id 必有 count）。
     Q_PROPERTY(int heldBlock READ heldBlock WRITE setHeldBlock NOTIFY heldBlockChanged)
     Q_PROPERTY(int heldCount READ heldCount WRITE setHeldCount NOTIFY heldBlockChanged)
+    // t97 主栏 VM 共享：27 主栏槽（生存背包 / 工作台 / 熔炉三菜单共享同一份）。mainRevision NOTIFY 驱动
+    // 三菜单 delegate 触碰刷新（同 hotbar 行 slotRevision 模式）；mainCount CONSTANT=27 供 Repeater model。
+    Q_PROPERTY(int mainCount READ mainCount CONSTANT)
+    Q_PROPERTY(int mainRevision READ mainRevision NOTIFY mainSlotsChanged)
 
 public:
     explicit Hotbar(QObject *parent = nullptr);
@@ -84,6 +93,10 @@ public:
     void setHeldBlock(int id);
     int heldCount() const { return m_heldStack.count; }
     void setHeldCount(int n);
+
+    // t97 主栏 VM（27 槽，三菜单共享）。mainCount 恒 27；mainRevision 随主栏栈写入自增。
+    int mainCount() const { return int(m_mainSlots.size()); }
+    int mainRevision() const { return m_mainRevision; }
 
     // 工具段判定与属性（t33；供 QML delegate 据 isTool 选方块 Image vs ToolIcon Canvas 自绘）：
     //   - isTool(id)：id 是否工具段（>=0x100）。
@@ -148,12 +161,30 @@ public:
     // 兼容旧调用（t18 setSlotBlock）：等同 setStack(slot, id, id==0?0:1)。保留以防遗漏迁移点（如销毁槽清空）。
     Q_INVOKABLE void setSlotBlock(int slot, int blockId);
 
+    // ── t97 主栏 VM 栈操作（27 槽，生存背包 / 工作台 / 熔炉三菜单共享同一份；熔炉 3 槽 + 合成格仍本地）──
+    //   - mainBlockIdAt(slot) / mainCountAt(slot)：每主栏槽栈数据（air=0=空栈；越界返 0）。QML delegate 触碰
+    //     mainRevision 取最新值（同 hotbar 行 slotRevision 模式）。
+    //   - mainSetStack(slot, id, count)：直接写主栏栈（背包点击放置 / 互换 / 拖拽均分写回主栏用）。校验同 setStack。
+    //   - mainAddStack(id, n)：智能堆叠放入主栏（同 id 合并 → 空槽开新）；返回未放入数（关包归还合成栏到主栏可走它，
+    //     但当前 returnCraftToHotbar 仍 addStack 回 hotbar；保留以备主栏级归还）。
+    //   - addToAny(id, n)：跨 main + hotbar 的智能堆叠（拾取 / 丢弃回栏合并）。先合并 main 同 id 未满槽 → 再
+    //     hotbar 同 id → 再空槽（main → hotbar）；返回未放入数。returnHeldToHotbar / pickupScan 改调它，
+    //     使丢弃回栏 / 世界拾取能合并进主栏同 id（修「主栏不同步 / 回栏不合并」根因）。
+    Q_INVOKABLE int mainBlockIdAt(int slot) const;
+    Q_INVOKABLE int mainCountAt(int slot) const;
+    Q_INVOKABLE void mainSetStack(int slot, int id, int count);
+    Q_INVOKABLE int mainAddStack(int id, int n);
+    Q_INVOKABLE int addToAny(int id, int n);
+
 signals:
     void selectedSlotChanged();
     // 槽内容变更（setStack/addStack/takeStack/resetForMode）。同时驱动 slotRevision 自增 → QML model
     // 绑定整列重建。
     void slotsChanged();
     void heldBlockChanged(); // 光标手持物变更（id 或 count；拾取/放置/丢弃）→ Main.qml 浮动图标 + 数量刷新
+    // t97 主栏栈变更（mainSetStack / mainAddStack / addToAny 的 main 分支 / resetForMode）。同时驱动
+    // mainRevision 自增 → 三菜单 delegate 触碰 mainRevision 的绑定重算（图标 / 数量同步刷新）。
+    void mainSlotsChanged();
 
 private:
     // 9 槽物品栈。t49：构造期全空（创造物品改由调色板点取→放入 hotbar 槽；不再预置 8 满栈）。
@@ -162,7 +193,12 @@ private:
     int m_slotRevision = 0;   // 槽内容版本号：每次栈写入自增，供 QML 绑定作 NOTIFY 触发器
     ItemStack m_heldStack;    // 光标手持物（背包点击拾取/放置；id=0=空手）
 
-    void bumpRevision();      // ++m_slotRevision + emit slotsChanged（统一槽内容变更通知）
+    // t97 主栏 VM（27 槽，三菜单共享）。构造期全空（生存空背包起；创造主栏不显，但仍持空数据无副作用）。
+    std::vector<ItemStack> m_mainSlots;
+    int m_mainRevision = 0;   // 主栏内容版本号：每次主栏栈写入自增，供三菜单 delegate 绑定作 NOTIFY 触发器
+
+    void bumpRevision();      // ++m_slotRevision + emit slotsChanged（统一 hotbar 9 槽内容变更通知）
+    void bumpMainRevision();  // ++m_mainRevision + emit mainSlotsChanged（统一主栏 27 槽内容变更通知）
 };
 
 #endif // HOTBAR_H

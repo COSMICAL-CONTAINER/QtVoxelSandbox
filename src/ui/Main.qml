@@ -62,18 +62,19 @@ Window {
         playerState.respawn()   // 清 dead（visible 绑自动隐）+ 满血（防死亡态遗留到下次进游戏）
         window.returnToMenu()
     }
-    // t56：把光标手持栈（heldBlock/heldCount）归还进 hotbar。关背包 / 工作台 / 返回菜单时调。
+    // t56：把光标手持栈（heldBlock/heldCount）归还进背包。关背包 / 工作台 / 返回菜单时调。
     //   根因：旧版关包只 returnCraftToHotbar（合成格），**不归还 heldBlock** → 用户从调色板拾取到光标后
     //   关包，heldBlock 残留为隐形孤儿（浮动图标仅背包开时显）。此后按 Q → dropHeld 读选中槽（空）→
     //   早退无丢弃（spec 现象「手持物按 Q 看不到丢弃 + 打开背包还在手上」：手上=heldBlock 残留）。
-    //   修法：关包时 addStack 把 heldBlock 全部塞回 hotbar（addStack 优先选中槽 → 「入手」语义 →
-    //   Q 能读到），再清空 heldBlock。hotbar 满（极端）则把余量丢弃为前方实体（dropHeldCursor，
-    //   同拖出丢弃；不静默吞，§2-E）。
+    //   修法：关包时把 heldBlock 全部塞回背包，再清空 heldBlock。背包满（极端）则把余量丢弃为前方实体
+    //   （dropHeldCursor，同拖出丢弃；不静默吞，§2-E）。
+    // t97：原走 addStack（只看 hotbar 9 槽），主栏 VM 后改走 addToAny（跨 main + hotbar：先合并 main 同 id →
+    //   再 hotbar 同 id → 再空槽 main→hotbar）→ 关包归还的物品能合并进主栏同 id（修「丢弃回栏不合并」根因）。
     function returnHeldToHotbar() {
         if (!hotbarVM.heldBlock || hotbarVM.heldCount <= 0) return
-        const leftover = hotbarVM.addStack(hotbarVM.heldBlock, hotbarVM.heldCount)
+        const leftover = hotbarVM.addToAny(hotbarVM.heldBlock, hotbarVM.heldCount)
         if (leftover > 0) {
-            // hotbar 满：余量丢弃为实体（先把 heldCount 收到余量再 dropHeldCursor，它清 heldBlock + 发 spawnItem）。
+            // 背包满：余量丢弃为实体（先把 heldCount 收到余量再 dropHeldCursor，它清 heldBlock + 发 spawnItem）。
             // 注：heldBlock/heldCount 是 Q_PROPERTY（WRITE setter），不能当函数调（.setHeldBlock(0) 会 TypeError），
             //   经赋值触发 setter。
             hotbarVM.heldCount = leftover
@@ -1581,9 +1582,9 @@ Window {
                 //   下放到**每个依赖槽内容的绑定**：每绑定显式 `触碰 slotRevision`（Q_PROPERTY，NOTIFY=
                 //   slotsChanged）→ NOTIFY 触发该绑定重算 → 经 Q_INVOKABLE blockIdAt(index)/countAt(index)
                 //   取**最新**栈值。Q_INVOKABLE 返回值本身不被 NOTIFY 跟踪，但只要同绑定内先读了 NOTIFY
-                //   属性（slotRevision），整绑定就挂在该信号上 → slotsChanged 后重算。这与 SurvivalInventory
-                //   主栏（mainRev 触碰 + mainSlots[index] 读取）同构，是「数组突变靠版本号触发刷新」的
-                //   通用稳健写法（不依赖 Repeater 对等长数组的重建行为，那在不同 Qt 版本表现不一致）。
+                //   属性（slotRevision），整绑定就挂在该信号上 → slotsChanged 后重算。这与 t97 主栏
+                //   （mainRevision 触碰 + mainBlockIdAt(index) 读 VM）同构，是「栈写入靠版本号 NOTIFY
+                //   触发刷新」的通用稳健写法（不依赖 Repeater 对等长数组的重建行为，那在不同 Qt 版本表现不一致）。
                 model: hotbarVM.slotCount
                 delegate: Item {
                     width: hotbarBar.slotSize

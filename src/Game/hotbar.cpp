@@ -48,6 +48,8 @@ Hotbar::Hotbar(QObject *parent)
     : QObject(parent)
     // t49：构造期 9 槽全空（创造物品改由调色板点取到光标→放入 hotbar 槽才有；spec point 2「初始全空」）。
     , m_slots(9, ItemStack{0, 0})
+    // t97：构造期 27 主栏槽全空（生存空背包起；三菜单共享同一份 VM 数据）。
+    , m_mainSlots(27, ItemStack{0, 0})
 {
 }
 
@@ -55,6 +57,14 @@ void Hotbar::bumpRevision()
 {
     ++m_slotRevision;
     emit slotsChanged();
+}
+
+// t97：主栏版本号 bump（同 bumpRevision 的主栏版）。mainSetStack / mainAddStack / addToAny 的 main 分支 /
+// resetForMode 调 → 三菜单 delegate 触碰 mainRevision 的绑定重算。
+void Hotbar::bumpMainRevision()
+{
+    ++m_mainRevision;
+    emit mainSlotsChanged();
 }
 
 void Hotbar::setSelectedSlot(int slot)
@@ -287,6 +297,122 @@ int Hotbar::addStack(int id, int n)
     return remaining;
 }
 
+// ── t97 主栏 VM 栈操作（27 槽，三菜单共享）──
+
+int Hotbar::mainBlockIdAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_mainSlots.size())) return int(BlockRegistry::Air);
+    return m_mainSlots[size_t(slot)].id;
+}
+
+int Hotbar::mainCountAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_mainSlots.size())) return 0;
+    return m_mainSlots[size_t(slot)].count;
+}
+
+// 直接写入主栏栈（背包点击放置 / 互换 / 拖拽均分写回主栏用）。校验同 setStack；air/非法 id/count<=0 → 清空。
+// 主栏槽与 selectedSlot 无关（不驱动 selectedBlockId），故无 selectedSlotChanged 补发。
+void Hotbar::mainSetStack(int slot, int id, int count)
+{
+    if (slot < 0 || slot >= int(m_mainSlots.size())) return;
+    if (!isValidItemId(id)) return;
+    ItemStack target;
+    if (id != 0 && count > 0) {
+        const int cap = maxStackSize(id);
+        target = ItemStack{id, std::min(count, cap)};
+    }
+    const ItemStack &cur = m_mainSlots[size_t(slot)];
+    if (cur.id == target.id && cur.count == target.count) return;
+    m_mainSlots[size_t(slot)] = target;
+    qInfo().noquote() << "[inv] mainSetStack slot=" << slot << "id=" << target.id << "count=" << target.count;
+    bumpMainRevision();
+}
+
+// 智能堆叠放入主栏（同 id 合并 → 空槽开新）。返回未放入数。仅主栏范围（hotbar 由 addStack / addToAny 管）。
+int Hotbar::mainAddStack(int id, int n)
+{
+    if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
+    const int cap = maxStackSize(id);
+    int remaining = n;
+    bool changed = false;
+    for (size_t i = 0; i < m_mainSlots.size(); ++i) {
+        if (remaining <= 0) break;
+        ItemStack &s = m_mainSlots[i];
+        if (s.id == id && s.count < cap) {
+            const int add = std::min(cap - s.count, remaining);
+            s.count += add; remaining -= add; changed = true;
+        }
+    }
+    for (size_t i = 0; i < m_mainSlots.size(); ++i) {
+        if (remaining <= 0) break;
+        ItemStack &s = m_mainSlots[i];
+        if (s.id == 0) {
+            const int add = std::min(cap, remaining);
+            s = ItemStack{id, add}; remaining -= add; changed = true;
+        }
+    }
+    if (changed) bumpMainRevision();
+    return remaining;
+}
+
+// 跨 main + hotbar 的智能堆叠（拾取 / 丢弃回栏合并）。优先序（spec t97）：
+//   0) main 同 id 未满槽合并
+//   1) hotbar 同 id 未满槽合并
+//   2) 空槽开新栈（main 优先 → hotbar）
+// 返回未放入数。returnHeldToHotbar（关包归还光标）+ pickupScan（世界拾取）改调它 → 拾取 / 丢弃回栏能
+// 合并进主栏同 id（修「主栏不同步、丢弃回栏不合并」根因；旧 addStack 只看 hotbar 9 槽）。
+int Hotbar::addToAny(int id, int n)
+{
+    if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
+    const int cap = maxStackSize(id);
+    int remaining = n;
+    bool mainChanged = false, slotChanged = false;
+
+    // 0) main 同 id 未满槽合并。
+    for (size_t i = 0; i < m_mainSlots.size(); ++i) {
+        if (remaining <= 0) break;
+        ItemStack &s = m_mainSlots[i];
+        if (s.id == id && s.count < cap) {
+            const int add = std::min(cap - s.count, remaining);
+            s.count += add; remaining -= add; mainChanged = true;
+        }
+    }
+    // 1) hotbar 同 id 未满槽合并。
+    for (size_t i = 0; i < m_slots.size(); ++i) {
+        if (remaining <= 0) break;
+        ItemStack &s = m_slots[i];
+        if (s.id == id && s.count < cap) {
+            const int add = std::min(cap - s.count, remaining);
+            s.count += add; remaining -= add; slotChanged = true;
+        }
+    }
+    // 2) 空槽开新栈：main 优先 → hotbar。
+    for (size_t i = 0; i < m_mainSlots.size(); ++i) {
+        if (remaining <= 0) break;
+        ItemStack &s = m_mainSlots[i];
+        if (s.id == 0) {
+            const int add = std::min(cap, remaining);
+            s = ItemStack{id, add}; remaining -= add; mainChanged = true;
+        }
+    }
+    for (size_t i = 0; i < m_slots.size(); ++i) {
+        if (remaining <= 0) break;
+        ItemStack &s = m_slots[i];
+        if (s.id == 0) {
+            const int add = std::min(cap, remaining);
+            s = ItemStack{id, add}; remaining -= add; slotChanged = true;
+        }
+    }
+    if (mainChanged) bumpMainRevision();
+    if (slotChanged) {
+        bumpRevision();
+        // 选中槽可能被填入新物品（id 变化）→ selectedBlockId 刷新；与 addStack 同理无条件补发。
+        emit selectedSlotChanged();
+    }
+    return remaining;
+}
+
 // 从 slot 取最多 n 件。返回实际取走数；栈空则 id 归 0（保持空栈不变式）。
 int Hotbar::takeStack(int slot, int n)
 {
@@ -359,15 +485,18 @@ int Hotbar::fuelBurnSeconds(int fuelId) const
 
 // 按模式重置：t49 改为 Creative 与 Survival **都**清空 9 槽（删创造 8 满栈预置；创造物品改由调色板
 // 点取到光标→放入 hotbar 槽；spec point 2）。Spectator（mode==0）不动（hotbar 隐藏）。同时清空光标手持物。
+// t97：主栏 27 槽同清（创造 / 生存切换归零；主栏现 VM 共享，不随面板销毁，需显式清防跨模式残留）。
 void Hotbar::resetForMode(int mode)
 {
     if (mode == 1 || mode == 2) {
         // Creative / Survival：全空（创造源=调色板无限拾取；生存=空背包起，采集/拾取由 t34-t36 填入）。
         for (ItemStack &s : m_slots) s = ItemStack{0, 0};
+        for (ItemStack &s : m_mainSlots) s = ItemStack{0, 0};
     }
     // mode==0（Spectator）：不动（hotbar 隐藏，槽内容无意义）。
     m_heldStack = ItemStack{};
     bumpRevision();
+    bumpMainRevision();
     emit heldBlockChanged();           // 手持物被清空 → 浮动图标隐
     emit selectedSlotChanged();        // selectedBlockId 可能因栈变空而变 Air
 }

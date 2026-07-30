@@ -645,11 +645,14 @@ void PlayerController::pickBlock()
     m_hotbar->setStack(m_hotbar->selectedSlot(), int(id), count);
 }
 
-// 拾取扫描（t36 / t64）：每帧扫附近掉落实体 → Hotbar.addStack（先选中槽、再空槽，「入手」语义）。
-// t64：拾取按 entity.count 全数尝试入背包；addStack 返回未放入数（leftover）：
+// 拾取扫描（t36 / t64 / t97）：每帧扫附近掉落实体 → Hotbar::addToAny（跨 main + hotbar 智能堆叠，
+// 先合并 main 同 id → 再 hotbar 同 id → 再空槽 main→hotbar）。
+// t97：原走 addStack（只看 hotbar 9 槽），主栏物品拾取进不去主栏、丢弃回栏不合并 → 改 addToAny 让拾取
+// 能进主栏（修「主栏不同步」根因）。
+// t64：拾取按 entity.count 全数尝试入背包；addToAny 返回未放入数（leftover）：
 //   - leftover == 0：全入 → removeAt 销毁实体（spec：拾取后销毁）。
 //   - 0 < leftover < entity.count：部分入 → setCountAt(i, leftover) 把余数回写、保留 entity（玩家背包
-//     只剩空槽位不足 maxStack 时常见；spec「超 maxStack 分裂」由 addStack 自然分到多槽，entity 留余）。
+//     只剩空槽位不足 maxStack 时常见；spec「超 maxStack 分裂」由 addToAny 自然分到多槽，entity 留余）。
 //   - leftover == entity.count：背包完全装不下（同 id 槽全满 + 无空槽）→ 不动 entity（spec：全满→不拾取）。
 // 距离从玩家 AABB 中心（脚底 + 半高）3D 起算，阈值 kPickupDist；从后往前扫 → erase 不影响前面索引。
 // t51：AABB 高用 m_height（蹲下变矮 → 中心随之降低，仍贴近玩家实际占据空间）。
@@ -668,7 +671,7 @@ void PlayerController::pickupScan()
         const int id = m_itemEntities->itemIdAt(i);
         const int have = m_itemEntities->countAt(i);    // t64：实体携带数量（整栈丢弃场景）
         if (have <= 0) { m_itemEntities->removeAt(i); continue; } // 防御：count 已为 0 → 销毁
-        const int leftover = m_hotbar->addStack(id, have); // 全数尝试入背包；addStack 内按 maxStack 分流
+        const int leftover = m_hotbar->addToAny(id, have); // t97：跨 main + hotbar 智能堆叠；按 maxStack 分流
         if (leftover <= 0) {
             m_itemEntities->removeAt(i);                // 全入 → 销毁实体
         } else if (leftover < have) {

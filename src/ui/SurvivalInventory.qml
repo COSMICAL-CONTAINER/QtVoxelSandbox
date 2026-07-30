@@ -37,14 +37,13 @@ Item {
     readonly property int mainRows: 3
     readonly property int armorCount: 4
 
-    // 主栏 / 合成格的本地物品栈存储（真实物品系统 / 合成配方解析属 Phase 1.1；本屏先支持点击拾取/放置，
-    // 把「物品在背包内移动」核心交互打通——与 hotbar 槽共享同一 hotbar VM 的 heldBlock/heldCount 光标手持栈）。
-    // air=0=空栈。t32：栈数量平行存于 mainCounts/craftCounts（与 hotbar VM 的 ItemStack 同模型）。
-    // 数组元素改写不触发 QML 绑定，故配 mainRev/craftRev 版本号让 Image source / count 重算。
-    // t49：主栏初始全空（spec point 2「空背包起」；删 [test] 草/泥土预置数据）。
-    property var mainSlots: [0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0]
-    property var mainCounts:[0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0]
-    property int mainRev: 0
+    // 主栏 / 合成格的物品栈存储。主栏（27 槽）自 t97 起上移至 hotbar VM（m_mainSlots），三菜单（生存背包 /
+    // 工作台 / 熔炉）共享同一份 → 三菜单主栏同步、returnHeldToHotbar/pickupScan 经 addToAny 能合并进主栏
+    // （修「主栏不同步 / 丢弃回栏不合并」根因）。合成格（2×2）仍本地（合成态属本面板，关包归还）。
+    // 真实物品系统 / 合成配方解析属 Phase 1.1；本屏先支持点击拾取/放置，把「物品在背包内移动」核心交互打通
+    // ——与 hotbar 槽共享同一 hotbar VM 的 heldBlock/heldCount 光标手持栈。air=0=空栈。数组元素改写不触发
+    // QML 绑定，故配 craftRev 版本号让 Image source / count 重算（主栏走 VM 的 mainRevision NOTIFY）。
+    // t49：主栏初始全空（spec point 2「空背包起」；VM 构造期 m_mainSlots 全 0）。
     property var craftSlots: [0,0,0,0] // 2×2 合成格（占位；配方解析属 Phase 1.1，结果槽暂不产出）
     property var craftCounts:[0,0,0,0] // 平行数量
     property int craftRev: 0
@@ -131,16 +130,16 @@ Item {
         if (root.dragHasKey(key)) return
         root.dragSlots = root.dragSlots.concat([key])   // 新数组引用 → 依赖 dragSlots 的绑定刷新
     }
-    // 按组路由读 / 写某槽（合成格 / 主栏 走本地数组 + 版本号；hotbar 走 VM.setStack 单一权威）。
+    // 按组路由读 / 写某槽（合成格 走本地数组 + 版本号；主栏 / hotbar 走 VM 单一权威 —— main 自 t97 起上移 VM）。
     function readSlot(group, index) {
         if (group === "craft")  return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0 }
-        if (group === "main")   return { id: root.mainSlots[index] || 0,  count: root.mainCounts[index] || 0 }
+        if (group === "main")   return { id: root.hotbar.mainBlockIdAt(index), count: root.hotbar.mainCountAt(index) }
         if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index) }
         return { id: 0, count: 0 }
     }
     function writeSlot(group, index, id, count) {
         if (group === "craft")       { root.craftSlots[index] = id; root.craftCounts[index] = count; root.craftRev++ }
-        else if (group === "main")   { root.mainSlots[index] = id;  root.mainCounts[index] = count;  root.mainRev++ }
+        else if (group === "main")   { root.hotbar.mainSetStack(index, id, count) }
         else if (group === "hotbar") { root.hotbar.setStack(index, id, count) }
     }
     // 手势生命周期（root TapHandler 调）。
@@ -565,65 +564,70 @@ Item {
                 }
             }
 
-            // ③ 3×9 主栏（27 槽）：点击拾取/放置方块（本地 mainSlots 存储；与 hotbar/合成格共享光标手持物）。
+            // ③ 3×9 主栏（27 槽）：t97 起读 hotbar VM（m_mainSlots，三菜单共享）。点击拾取/放置方块
+            // （主栏栈写经 hotbar.mainSetStack，VM 单一权威；与 hotbar/合成格共享光标手持物）。
             Grid {
                 width: root.mainCols * root.slotSize
                 height: root.mainRows * root.slotSize
                 columns: root.mainCols; spacing: 0
                 Repeater {
-                    model: root.mainCols * root.mainRows   // 27
+                    // model 用固定整数 mainCount（VM CONSTANT=27）→ delegate 一次创建永驻；「刷新」靠
+                    // 每绑定显式触碰 mainRevision（Q_PROPERTY，NOTIFY=mainSlotsChanged）→ 经 Q_INVOKABLE
+                    // mainBlockIdAt/mainCountAt 取最新栈值（同 hotbar 行 slotRevision 模式，t55/t63 已验证）。
+                    model: root.hotbar.mainCount
                     delegate: Item {
+                        // 主栏槽栈 id / 数量（触碰 mainRevision → 主栏栈写入后重算；air=0 空槽）。
+                        property int mainId: { root.hotbar.mainRevision; return root.hotbar.mainBlockIdAt(index) }
+                        property int mainCount: { root.hotbar.mainRevision; return root.hotbar.mainCountAt(index) }
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent }
                         Item {
                             anchors.centerIn: parent
                             width: 30; height: 30
-                            visible: { root.mainRev; return (root.mainSlots[index] || 0) !== 0 }
+                            visible: mainId !== 0
                             Image {
                                 anchors.fill: parent
-                                visible: { root.mainRev; return !root.hotbar.isTool(root.mainSlots[index] || 0)
-                                                          && !root.hotbar.isMaterial(root.mainSlots[index] || 0) }
-                                source: { root.mainRev; return root.hotbar.iconSourceForBlock(root.mainSlots[index] || 0) }
+                                visible: { root.hotbar.mainRevision; return !root.hotbar.isTool(mainId) && !root.hotbar.isMaterial(mainId) }
+                                source: { root.hotbar.mainRevision; return root.hotbar.iconSourceForBlock(mainId) }
                                 fillMode: Image.PreserveAspectFit; smooth: true
                             }
                             ToolIcon {
                                 anchors.fill: parent
-                                visible: { root.mainRev; return root.hotbar.isTool(root.mainSlots[index] || 0) }
-                                tier: { root.mainRev; return root.hotbar.toolTier(root.mainSlots[index] || 0) }
+                                visible: { root.hotbar.mainRevision; return root.hotbar.isTool(mainId) }
+                                tier: { root.hotbar.mainRevision; return root.hotbar.toolTier(mainId) }
                             }
                             MaterialIcon {
                                 anchors.fill: parent
-                                visible: { root.mainRev; return root.hotbar.isMaterial(root.mainSlots[index] || 0) }
-                                materialId: { root.mainRev; return root.mainSlots[index] || 0 }
+                                visible: { root.hotbar.mainRevision; return root.hotbar.isMaterial(mainId) }
+                                materialId: { root.hotbar.mainRevision; return mainId }
                             }
                         }
-                        // 栈数量（t32）：count>1 时右下角显数字。触碰 mainRev 刷新（数组突变靠版本号触发）。
+                        // 栈数量（t32）：count>1 时右下角显数字。触碰 mainRevision 刷新（VM NOTIFY 驱动）。
                         Text {
                             anchors.right: parent.right; anchors.bottom: parent.bottom
                             anchors.rightMargin: 3; anchors.bottomMargin: 1
-                            visible: { root.mainRev; return (root.mainCounts[index] || 0) > 1 }
-                            text: { root.mainRev; return root.mainCounts[index] || 0 }
+                            visible: { root.hotbar.mainRevision; return mainCount > 1 }
+                            text: { root.hotbar.mainRevision; return mainCount }
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
                         // t38 生存左键整组操作（拾取 / 放置 / 合并 / 互换）：统一走 resolveClick。
+                        // 主栏槽写经 hotbar.mainSetStack（VM 单一权威；同 id 合并至 maxStack、异 id 互换）。
                         // 右键改由 root TapHandler 统一处理（t49 单格右键 + t79 拖拽均分）；此槽仅留 HoverHandler 收集。
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
                             onTapped: {
-                                const r = root.resolveClick(root.mainSlots[index] || 0, root.mainCounts[index] || 0)
+                                const r = root.resolveClick(mainId, mainCount)
                                 if (!r) return
-                                root.mainSlots[index] = r.slotId
-                                root.mainCounts[index] = r.slotCount
-                                root.mainRev++
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount)
                                 root.hotbar.heldBlock = r.heldId
                                 root.hotbar.heldCount = r.heldCount
                             }
                         }
                         HoverHandler {
                             onHoveredChanged: {
-                                // t94 tooltip（mainSlots[index] 取当前栈 id）。
-                                const itemId = root.mainSlots[index] || 0
+                                // t94 tooltip（mainId 由 delegate 持有；触碰 mainRevision 刷新）。
+                                const itemId = mainId
                                 if (hovered && itemId !== 0) {
                                     root.hoveredItemId = itemId
                                     const p = parent.mapToItem(root, parent.width / 2, 0)
@@ -661,7 +665,8 @@ Item {
                         //   根因 —— 旧 `model: { slotRevision; slotList() }` 返回长度恒 9 的 JS 数组（QVariantList）
                         //   作 Repeater model。slotRevision 变时绑定重算返回新数组，但**长度不变（恒 9）** →
                         //   QQuickRepeater 视作「count 未变」→ 复用既有 delegate、不重建 → modelData 停在初值（全空）。
-                        //   主栏用本地数组 + 本地版本号（mainRev）刷新正常，唯独 hotbar 行因「读 VM 的等长数组」踩此坑。
+                        //   主栏（t97 前本地数组 + 本地版本号 mainRev；t97 起亦读 VM mainRevision）刷新正常，唯独
+                        //   hotbar 行因「读 VM 的等长数组」踩此坑。
                         //
                         //   修法（与 Main.qml HUD hotbar t55 已验证写法一致）：model 改用**固定整数**（slotCount=9，
                         //   CONSTANT → delegate 一次创建永驻），把「刷新」责任下放到**每个依赖槽内容的绑定**：
