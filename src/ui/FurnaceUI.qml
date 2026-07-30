@@ -282,6 +282,13 @@ Item {
                     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("in", 0) }
                     // t94 tooltip：悬停显输入物品名（inId 经 slotRev 刷新；空槽不显）。
                     HoverHandler {
+                        // t99：跟踪槽显示 id。槽变空时 hover 仍 true → onHoveredChanged 不重发 → tooltip
+                        // 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                        property int trackedId: { root.slotRev; return root.inId }
+                        onTrackedIdChanged: {
+                            if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                root.hoveredItemId = 0
+                        }
                         onHoveredChanged: {
                             if (hovered && root.inId !== 0) {
                                 root.hoveredItemId = root.inId
@@ -324,6 +331,13 @@ Item {
                     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("fuel", 0) }
                     // t94 tooltip：悬停显燃料物品名（fuelId 经 slotRev 刷新）。
                     HoverHandler {
+                        // t99：跟踪槽显示 id。槽变空时 hover 仍 true → onHoveredChanged 不重发 → tooltip
+                        // 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                        property int trackedId: { root.slotRev; return root.fuelId }
+                        onTrackedIdChanged: {
+                            if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                root.hoveredItemId = 0
+                        }
                         onHoveredChanged: {
                             if (hovered && root.fuelId !== 0) {
                                 root.hoveredItemId = root.fuelId
@@ -430,6 +444,13 @@ Item {
                     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("out", 0) }
                     // t94 tooltip：悬停显产物物品名（outId 经 slotRev 刷新）。
                     HoverHandler {
+                        // t99：跟踪槽显示 id。槽变空时 hover 仍 true → onHoveredChanged 不重发 → tooltip
+                        // 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                        property int trackedId: { root.slotRev; return root.outId }
+                        onTrackedIdChanged: {
+                            if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                root.hoveredItemId = 0
+                        }
                         onHoveredChanged: {
                             if (hovered && root.outId !== 0) {
                                 root.hoveredItemId = root.outId
@@ -491,6 +512,13 @@ Item {
                         TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("main", index) }
                         // t94 tooltip：悬停显主栏槽物品名（mainId 由 delegate 持有；触碰 mainRevision 刷新）。
                         HoverHandler {
+                            // t99：跟踪槽显示 id。槽变空时 hover 仍 true → onHoveredChanged 不重发 → tooltip
+                            // 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                            property int trackedId: mainId
+                            onTrackedIdChanged: {
+                                if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                    root.hoveredItemId = 0
+                            }
                             onHoveredChanged: {
                                 const itemId = mainId
                                 if (hovered && itemId !== 0) {
@@ -551,6 +579,13 @@ Item {
                             TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("hotbar", index) }
                             // t94 tooltip：悬停显 hotbar 槽物品名（slotId 触碰 slotRevision 刷新）。
                             HoverHandler {
+                                // t99：跟踪槽显示 id。槽变空时 hover 仍 true → onHoveredChanged 不重发 → tooltip
+                                // 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                                property int trackedId: slotId
+                                onTrackedIdChanged: {
+                                    if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                        root.hoveredItemId = 0
+                                }
                                 onHoveredChanged: {
                                     if (hovered && slotId !== 0) {
                                         root.hoveredItemId = slotId

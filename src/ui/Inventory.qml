@@ -561,6 +561,13 @@ Item {
                                 //   1–9 / 滚轮改）。右键 = 拿一半 / 放一个（resolveRightClick）。拖到销毁槽仍走 DragHandler。
                                 HoverHandler {
                                     id: slotHover
+                                    // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
+                                    // 不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                                    property int trackedId: slotId
+                                    onTrackedIdChanged: {
+                                        if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                            root.hoveredItemId = 0
+                                    }
                                     onHoveredChanged: {
                                         // t94 tooltip（仅非空槽显名；空槽不动 hoveredItemId，免覆盖邻槽态）。
                                         if (hovered) {

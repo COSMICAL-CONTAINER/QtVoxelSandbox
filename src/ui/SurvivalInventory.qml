@@ -477,6 +477,13 @@ Item {
                                 }
                             }
                             HoverHandler {
+                                // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
+                                // 不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                                property int trackedId: { root.craftRev; return root.craftSlots[index] || 0 }
+                                onTrackedIdChanged: {
+                                    if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                        root.hoveredItemId = 0
+                                }
                                 onHoveredChanged: {
                                     // t94 tooltip（craftSlots[index] 取当前栈 id；空栈不动 hoveredItemId）。
                                     const itemId = root.craftSlots[index] || 0
@@ -534,6 +541,13 @@ Item {
                         visible: outId !== 0
                         // t94 tooltip：仅在有产物时（visible）悬停显产物名。parent = 本 30×30 图标 Item。
                         HoverHandler {
+                            // t99：跟踪槽显示 id（产物）。槽变空时 hover 仍 true → onHoveredChanged 不重发 →
+                            // tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                            property int trackedId: parent.outId
+                            onTrackedIdChanged: {
+                                if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                    root.hoveredItemId = 0
+                            }
                             onHoveredChanged: {
                                 if (hovered && parent.outId !== 0) {
                                     root.hoveredItemId = parent.outId
@@ -719,6 +733,13 @@ Item {
                             }
                         }
                         HoverHandler {
+                            // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
+                            // 不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                            property int trackedId: mainId
+                            onTrackedIdChanged: {
+                                if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                    root.hoveredItemId = 0
+                            }
                             onHoveredChanged: {
                                 // t94 tooltip（mainId 由 delegate 持有；触碰 mainRevision 刷新）。
                                 const itemId = mainId
@@ -829,6 +850,13 @@ Item {
                                 }
                             }
                             HoverHandler {
+                                // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
+                                // 不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                                property int trackedId: slotId
+                                onTrackedIdChanged: {
+                                    if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                        root.hoveredItemId = 0
+                                }
                                 onHoveredChanged: {
                                     // t94 tooltip（slotId 由 delegate 持有；触碰 slotRevision 刷新）。
                                     if (hovered && slotId !== 0) {
