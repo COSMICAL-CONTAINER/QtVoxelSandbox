@@ -163,59 +163,42 @@ Item {
         }
         root.dragSlots = []
     }
-    // t82 右键均分持续到填满（替代 t79 单次 floor(count/N)）：MC 风格循环 +1 —— 每轮给每个合格槽 +1，
-    // 循环到 remaining=0（手空）或所有槽到 cap（背包填满）。合格槽 = 空或同 id 未满；**自动纳入未 hover
-    // 的背包槽（main + hotbar）**（旧版只分 dragSlots 里 hover 过的格 → 拖几格只分几格，无法持续填满）。
-    // craft 合成格**排除**（避免拖拽均分改写合成输入、干扰 recipeMatch）。异物 / 已满槽跳过不计。
-    // 与 Inventory / CraftingTableUI 同算法（仅"额外槽"范围不同：本文件含 main + hotbar）。
+    // t90 右键拖拽均分修复（t82 回归）：**仅遍历真正滑过的 dragSlots（hover 过的 N 格）**，单次
+    // floor(total/N) 等分入格、余数留手；**删 t82 的自动扫 main + hotbar + 删 while +1 循环**（那个版本会
+    // 把未拖到的背包格也填满 → 刷物品）。异物 / 已满槽跳过（MC 行为：不同物品的槽不分）；craft 合成格
+    // 排除（避免改写合成输入、干扰 recipeMatch）。守恒：写回总量 + 余数 = 拖拽前手持总量。与 Inventory /
+    // CraftingTableUI 同算法。
     function applyDragDistribute() {
         const heldId = root.dragHeldId
-        let remaining = root.dragHeldCount
-        if (heldId === 0 || remaining <= 0) return
+        const total = root.dragHeldCount
+        if (heldId === 0 || total <= 0) return
         const cap = root.hotbar.maxStackSize(heldId)
 
-        // 合格槽去重收集。先纳入 dragSlots（hover 过的格，保留"拖到哪填到哪"直觉；craft 跳过），再补齐
-        // main + hotbar 其余槽。eligible 存 {group,index,count}：count 内存累加（每轮 +1），末尾一次性写回，
-        // 避免循环内反复 setStack / bump rev 触发信号风暴。
+        // 仅遍历 dragSlots（真正滑过的格），去重 + 过滤合格（空 或 同 id 未满）。不自动扫 main/hotbar。
         const eligible = []
         const seen = {}
-        const tryAdd = (group, index) => {
-            const key = group + ":" + index
-            if (seen[key]) return
-            seen[key] = true
-            const cur = root.readSlot(group, index)
-            if (cur.id === 0 || (cur.id === heldId && cur.count < cap))
-                eligible.push({ group: group, index: index, count: cur.count })
-        }
         for (let i = 0; i < root.dragSlots.length; ++i) {
-            const p = root.dragSlots[i].split(":")
+            const key = root.dragSlots[i]
+            if (seen[key]) continue
+            seen[key] = true
+            const p = key.split(":")
             if (p[0] === "craft") continue                              // 合成格排除（避免影响 recipeMatch）
-            tryAdd(p[0], parseInt(p[1], 10))
+            const cur = root.readSlot(p[0], parseInt(p[1], 10))
+            if (cur.id === 0 || (cur.id === heldId && cur.count < cap))
+                eligible.push({ group: p[0], index: parseInt(p[1], 10), count: cur.count })
         }
-        const mainN = root.mainSlots.length
-        for (let i = 0; i < mainN; ++i) tryAdd("main", i)              // 自动纳入未 hover 的主栏槽
-        const hbN = root.hotbar.slotCount
-        for (let i = 0; i < hbN; ++i) tryAdd("hotbar", i)
+        const n = eligible.length
+        if (n <= 0) return
 
-        if (eligible.length <= 0) return
-
-        // 循环 +1：每轮每个仍有空间（count<cap）的合格槽加 1；一轮无人进展 = 全到 cap（背包填满）→ 退出。
-        while (remaining > 0) {
-            let progressed = false
-            for (let i = 0; i < eligible.length; ++i) {
-                if (remaining <= 0) break
-                const e = eligible[i]
-                if (e.count >= cap) continue
-                e.count += 1
-                remaining -= 1
-                progressed = true
-            }
-            if (!progressed) break
-        }
-
-        // 一次性写回最终态（按内存累计量覆盖写）。
-        for (let i = 0; i < eligible.length; ++i) {
+        // 单次 floor(total/N) 入格（cap 钳制防溢出），余数留手；不循环、不扫全背包。
+        const per = Math.floor(total / n)
+        if (per <= 0) return
+        let remaining = total
+        for (let i = 0; i < n; ++i) {
             const e = eligible[i]
+            const place = Math.min(per, cap - e.count)
+            e.count += place
+            remaining -= place
             root.writeSlot(e.group, e.index, heldId, e.count)
         }
         root.hotbar.heldBlock = remaining > 0 ? heldId : 0
