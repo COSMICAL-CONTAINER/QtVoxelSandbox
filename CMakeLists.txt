@@ -36,6 +36,10 @@ qt_add_executable(voxelsandbox
     src/Renderer/blockcube.h
     src/Renderer/pickaxe.cpp
     src/Renderer/pickaxe.h
+    # t112 广告牌四边形（单面 +Z 法线）：煤/木炭/铁原矿/木棒/铁锭/玻璃 掉落实体材料段
+    #   从 CrackBox 6 面立方改为单面平图标 + 朝相机（billboard），消除「6 面未封闭超立方体」观感。
+    src/Renderer/billboardquad.cpp
+    src/Renderer/billboardquad.h
     src/Game/playercontroller.cpp
     src/Game/playercontroller.h
     src/Game/playerstate.cpp

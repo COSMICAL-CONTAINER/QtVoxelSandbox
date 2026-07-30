@@ -1002,11 +1002,9 @@ Window {
                     //   ToolIcon/MaterialIcon 自绘；掉落实体 Repeater 没有这层分流，故坍缩。
                     //   分流（机制等价 HUD hotbar delegate 的三分互斥 visible 模式）：
                     //   - 方块段（!isTool && !isMaterial）→ BlockCube + 共享图集 voxelAtlas（现状不变）；
-                    //   - 工具段（isTool）→ CrackBox（每面全幅 UV 0..1）+ Texture.sourceItem = ToolIcon Canvas
-                    //     （tier 据 entId 查 hotbarVM.toolTier；tier=1 木镐 / 2 石镐 / 3 铁镐 各自配色）；
-                    //   - 材料段（isMaterial）→ CrackBox + Texture.sourceItem = MaterialIcon Canvas（木棒）。
-                    //   CrackBox 每面独立全幅 UV → 把 sourceItem 渲出的整张 2D 图完整铺到该面；六面同图 →
-                    //   绕 Y 自转时正面恒有图标可见（不靠 billboard）。
+                    //   - 工具段（isTool）→ PickaxeGeometry 3D 镐形（t75，纯实色体素，baseColor 按 tier）；
+                    //   - 材料段（isMaterial）→ BillboardQuad（t112，单面 +Z 法线）+ Texture.sourceItem =
+                    //     MaterialIcon Canvas + eulerRotation 朝相机（billboard 平图标，替代旧 CrackBox 6 面立方）。
                     //   Texture.flipV=true：sourceItem 的 QtQuick Item 以左上为原点，3D 纹理以左下为原点 →
                     //   不翻转会把「木棒从左下到右上」渲染成「从左上到右下」（镐头朝下），故 flipV。
                     //   分层（PLAN §2）：呈现层只消费 ItemEntityManager 数据；ToolIcon/MaterialIcon 是纯呈现
@@ -1039,19 +1037,30 @@ Window {
                                      : "#8a5a2e"
                         }
                     }
-                    // 材料段：CrackBox + MaterialIcon sourceItem + alphaCutoff（t85）。
-                    //   木棒 / 煤 / 铁原矿 / 铁锭（RecipeRegistry::*Id，0x200 段）均无等距立方体 PNG，
-                    //   走 MaterialIcon Canvas 自绘 → 经 Texture.sourceItem 贴到 CrackBox 六面。
-                    //   **alphaCutoff + opacity<1**（复用上方裂纹叠层 / t64 工具段同款 alpha-test 契约）：
-                    //   MaterialIcon 的 Canvas 透明底（RGBA 0,0,0,0）若不丢弃，会被当不透明黑渲染 →
-                    //   整个掉落实体坍缩成黑立方体（旧「材料段兜底成黑/石块」根因，同 t64 工具段旧坑）。
-                    //   设 alphaCutoff:0.5 + opacity:0.99 → 透明底像素被 alpha-test 丢弃、仅图标像素显，
-                    //   绕 Y 自转时六面同图恒有图标可见（不靠 billboard）。flipV 同上（2D 左上原点 → 3D 左下）。
+                    // 材料段（t112 改 BillboardQuad + 朝相机）：木棒 / 煤 / 铁原矿 / 铁锭 / 玻璃 / 木炭
+                    //   （RecipeRegistry::*Id，0x200 段）均无等距立方体 PNG，走 MaterialIcon Canvas 自绘。
+                    //   旧 CrackBox 把同一张 2D 图标贴到立方体 6 面 → 斜视时 6 个半透面互相穿插、呈
+                    //   「未封闭超立方体」观感（图标边缘透明底露出后面面的图标像素）。改单面 BillboardQuad
+                    //   （+Z 法线）+ 令其世界朝向 = 相机朝向 → 恒以一张完整平图标正对玩家（MC 1.0 掉落物 billboard）。
+                    //   **朝相机实现**：QQuick3DNode 无 lookAt 属性（仅 QQuick3DCamera 有 lookAt()/lookAtNode；
+                    //   写 `Node{ lookAt: cam.position }` 是不存在的属性 → 运行期 objectCreationFailed，见
+                    //   lessons-learned qmlcachegen 坑）。故用 eulerRotation 显式算：承载 Model 的**世界**欧拉
+                    //   = 相机欧拉（cam.eulerRotation）→ 其 +Z 法线恒 = -相机 forward → 指回相机 → 正面恒可见。
+                    //   本 Model 是 entRoot（绕 Y 自转 rotY，服务于 block/tool 立方段）的子节点，会继承 rotY 自转，
+                    //   故本地 yaw 减 rotY 抵消继承：世界 = Ry(rotY)·Ry(camYaw-rotY)·Rx(camPitch) = Ry(camYaw)·Rx(camPitch)
+                    //   = 相机旋转（QtQuick3D eulerRotation 按 fromEulerAngles(pitch,yaw,roll)=Ry·Rx 当 roll=0）。
+                    //   cam.eulerRotation NOTIFY eulerRotationChanged（每帧随玩家视角 / 受伤抖动变）+ rotY 自转
+                    //   NOTIFY → 绑定每帧重算，billboard 始终贴脸相机。第一/第三人称-后/前三模式都对（相机恒朝
+                    //   玩家区域看，billboard 镜像相机朝向即恒正对相机）。
+                    //   **alphaCutoff + opacity<1**（沿用 t85 alpha-test 契约）：MaterialIcon Canvas 透明底若不
+                    //   丢弃会被当不透明黑 → 图标坍成黑块。alphaCutoff:0.5 + opacity:0.99 → 仅图标像素显。
+                    //   flipV 同上方（2D 左上原点 → 3D 左下原点）。
                     Model {
                         visible: hotbarVM.isMaterial(entRoot.entId)
-                        geometry: CrackBox {}
+                        geometry: BillboardQuad {}
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
+                        eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y - entRoot.rotY, 0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             alphaCutoff: 0.5
