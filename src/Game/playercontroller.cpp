@@ -547,6 +547,7 @@ void PlayerController::breakBlock()
 // 已有方块/重叠被拒不发（仅动作真发生时，spec）。
 // t50：命中格若为工作台（CraftingTable）→ 右键打开 3×3 合成 UI（不放置；发 craftingTableOpened）。
 // 机制等价 MC 右键工作台。在所有放置校验之前拦截（无论手持何物，右键工作台即开界面）。
+// t87：命中格若为熔炉（Furnace）→ 右键打开 FurnaceUI（不放置；发 furnaceOpened），同工作台模式。
 void PlayerController::placeBlock()
 {
     if (!canPlace()) return; // 观察者不能放块
@@ -554,6 +555,11 @@ void PlayerController::placeBlock()
     // t50：右键工作台 → 打开 3×3 合成 UI（优先于放置；spec「右键工作台开 3×3」）。
     if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
         emit craftingTableOpened();
+        return;
+    }
+    // t87：右键熔炉 → 打开 FurnaceUI 冶炼界面（同工作台模式：优先于放置，无论手持何物右键熔炉即开）。
+    if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Furnace) {
+        emit furnaceOpened();
         return;
     }
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）

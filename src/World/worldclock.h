@@ -51,6 +51,11 @@ public:
 signals:
     void dayPhaseChanged();   // 每 tick 发（phase 推进）；skyLight 派生于 phase，同信号刷新
     void debugFastChanged();
+    // t87 游戏时间 tick：每 kTickMs（100ms）发一次，携带本 tick 推进的秒数（恒 kTickMs/1000=0.1）。
+    // 用途：熔炉冶炼等「按游戏时间推进」的系统据此 tick（FurnaceUI.tick）。与昼夜相位解耦——本信号
+    // 每 tick 无条件发（不似 dayPhaseChanged 仅 phase 真变才发），保证冶炼节律稳定 10Hz。
+    // 单一时间权威：所有按时间推进的子系统都消费本信号，不在 QML 各自起 Timer（PLAN §2：时钟单一）。
+    void ticked(qreal deltaSecs);
 
 private:
     void onTick();

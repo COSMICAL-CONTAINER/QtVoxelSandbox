@@ -8,14 +8,16 @@ import QtQuick
 //   0x201 煤炭   —— 黑色八边形块（顶面高光 + 底面阴影 + 矿物亮斑）。
 //   0x202 铁原矿 —— 石质八边形块 + 橙棕色铁矿斑簇（表「含铁」，与铁矿石贴图同语义）。
 //   0x203 铁锭   —— 银白水平梯形锭（顶受光 + 底阴影 + 两端斜切暗边）。
-// 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭同理 → 均独立自绘。
+//   0x204 玻璃   —— 浅青半透方块（高光斜面 + 暗边框，表「透明硅块」；t87 沙子冶炼产物）。
+//   0x205 木炭   —— 深棕黑八边形块（与煤同形、偏暖棕色，表「烧过的木」；t87 原木冶炼产物）。
+// 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭同理 → 均独立自绘。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体 Repeater（sourceItem），
 // Inventory.qml / SurvivalInventory.qml / CraftingTableUI.qml 各槽 —— 凡 hotbarVM.isMaterial(id) 为真
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -131,12 +133,61 @@ Item {
                 R(19, 9, 1, 4, edge)
             }
 
+            // 玻璃（0x204）：浅青半透方块。MC 风格玻璃为青白色透明硅块 + 高光斜面 + 暗边框。
+            // 配色：face #b8d8e0（青白主体）/ light #e0f0f4（左上高光）/ edge #6a8a92（边框暗边）/
+            // streak #f8ffff（高光斜线）。半透感靠浅色 + 高光表达（Canvas 无 alpha 渐变需求）。
+            const drawGlass = () => {
+                const face = "#b8d8e0", light = "#e0f0f4", edge = "#6a8a92", streak = "#f8ffff"
+                // 方块主体（rows 6..18，cols 5..19，15×13）
+                R(5, 6, 15, 13, face)
+                // 左上高光（受光面，前两行两列）
+                R(5, 6, 15, 1, light)
+                R(5, 7, 2, 1, light)
+                R(5, 6, 1, 4, light)
+                // 暗边框（底 / 右，表玻璃块边棱）
+                R(5, 18, 15, 1, edge)
+                R(19, 6, 1, 13, edge)
+                // 高光斜线（左上→右下，表玻璃反光）
+                R(8, 9, 1, 1, streak)
+                R(9, 10, 1, 1, streak)
+                R(10, 11, 1, 1, streak)
+                R(11, 12, 1, 1, streak)
+            }
+
+            // 木炭（0x205）：深棕黑八边形块。与煤同外轮廓（都是「烧过的碳块」族），靠偏暖深棕色
+            // + 木纹裂痕区分「木炭」（vs 煤的纯黑）。配色：body #2a1e16 / light #3e2e22 / dark #160e08 /
+            // streak #4a3424（木纹亮痕，表「木的碳化残留」）。
+            const drawCharcoal = () => {
+                const body = "#2a1e16", light = "#3e2e22", dark = "#160e08", streak = "#4a3424"
+                // 八边形外轮廓（同 coal）
+                R(7, 7, 11, 1, body)
+                R(6, 8, 13, 1, body)
+                R(5, 9, 15, 7, body)   // 主体 rows 9..15
+                R(6, 16, 13, 1, body)
+                R(7, 17, 11, 1, body)
+                // 顶面受光（暖棕）
+                R(7, 7, 11, 1, light)
+                R(6, 8, 13, 1, light)
+                R(5, 9, 4, 1, light)
+                // 底面阴影
+                R(6, 16, 13, 1, dark)
+                R(7, 17, 11, 1, dark)
+                R(11, 15, 4, 1, dark)
+                // 木纹裂痕（几道亮痕，表「碳化的木纹」——与煤的纯矿物亮斑区分）
+                R(8, 11, 3, 1, streak)
+                R(12, 12, 2, 1, streak)
+                R(9, 14, 4, 1, streak)
+                R(14, 10, 1, 1, streak)
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             switch (root.materialId) {
             case 0x200: drawStick();     break
             case 0x201: drawCoal();      break
             case 0x202: drawIronOre();   break
             case 0x203: drawIronIngot(); break
+            case 0x204: drawGlass();     break
+            case 0x205: drawCharcoal();  break
             default:    drawStick();     break
             }
         }

@@ -240,6 +240,11 @@ signals:
     // Connections 打开 3×3 工作台 UI（释放指针 / 关包归还合成栏）。机制等价 MC 右键工作台开合成界面。
     // 分层（PLAN §2）：Game/Physics 层发语义事件，呈现层只消费（同 spawnItem / swingArm 模式）。
     void craftingTableOpened();
+    // 右键熔炉（t87）：placeBlock 检测到命中格为 Furnace → 发本信号（不放置）→ 呈现层 Connections
+    // 打开 FurnaceUI（释放指针）。机制等价 MC 右键熔炉开冶炼界面。同 craftingTableOpened 模式：
+    // Game/Physics 层发语义事件，呈现层只消费（PLAN §2 分层）。熔炉槽状态 / 冶炼 tick 由 FurnaceUI
+    // 自持（面板常驻、visible 切换；WorldClock.ticked 驱动 tick）。
+    void furnaceOpened();
 
 protected:
     void componentComplete() override;

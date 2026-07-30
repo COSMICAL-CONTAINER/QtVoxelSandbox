@@ -53,6 +53,9 @@ public:
     static constexpr int CoalId         = 0x201; // 煤炭：煤矿石挖掘掉落（BlockRegistry::CoalOre.dropId）；可作燃料 / 未来冶炼原料
     static constexpr int IronOreDropId  = 0x202; // 铁原矿：铁矿石挖掘掉落（BlockRegistry::IronOre.dropId）；熔炉冶炼为铁锭
     static constexpr int IronIngotId    = 0x203; // 铁锭：铁原矿冶炼产物；石镐 / 铁镐配方原料
+    // t87 冶炼产物（SmeltingRegistry 用；与 Coal/铁系列同属材料段 >= 0x200，可堆叠 64）：
+    static constexpr int GlassId        = 0x204; // 玻璃：沙子冶炼产物（spec 可选项）
+    static constexpr int CharcoalId     = 0x205; // 木炭：原木冶炼产物（spec 可选项；与煤等价燃料）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

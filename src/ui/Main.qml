@@ -28,6 +28,9 @@ Window {
     // t50 工作台子态：右键工作台方块 → player.craftingTableOpened → 显本面板（3×3 合成）+ 释放指针。
     // 与 inventoryOpen 互斥（关一个再开另一个）；E/Esc 关 → 恢复 grab。开时抑制暂停叠层。
     property bool craftingTableOpen: false
+    // t87 熔炉子态：右键熔炉方块 → player.furnaceOpened → 显本面板（冶炼）+ 释放指针。与 inventoryOpen
+    // / craftingTableOpen 互斥（关一个再开另一个）；E/Esc 关 → 恢复 grab。开时抑制暂停叠层。
+    property bool furnaceOpen: false
 
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
     function startGame() {
@@ -39,6 +42,7 @@ Window {
     function returnToMenu() {
         inventoryOpen = false
         craftingTableOpen = false
+        furnaceOpen = false
         returnHeldToHotbar()           // t56：返回菜单前归还光标手持栈（防遗留 heldBlock）
         player.release()
         appState = "menu"
@@ -115,6 +119,22 @@ Window {
         player.grab()
         keyInput.forceActiveFocus()
     }
+    // t87 打开 / 关闭熔炉面板。打开 → release（光标可见点槽位）；关 → grab + 焦点回键位层。
+    // 与 inventoryOpen / craftingTableOpen 互斥（开熔炉前关其它两个，反之同）。
+    function openFurnace() {
+        if (appState !== "playing" || furnaceOpen) return
+        if (inventoryOpen) closeInventory()
+        if (craftingTableOpen) closeCraftingTable()
+        furnaceOpen = true
+        player.release()
+    }
+    function closeFurnace() {
+        if (!furnaceOpen) return
+        furnaceOpen = false
+        returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeInventory / closeCraftingTable）
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
 
     // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
     // 与物理(PlayerController)共用同一份栅格。
@@ -188,6 +208,8 @@ Window {
         }
         // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
         function onCraftingTableOpened() { window.openCraftingTable() }
+        // t87：右键熔炉 → player 发 furnaceOpened → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
+        function onFurnaceOpened() { window.openFurnace() }
         // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换
         // 则保留背包打开，面板由各组件 visible 绑定 player.mode 自动换（创造背包↔生存背包）。避免任一
         // 背包在不兼容模式下滞留（Spectator 无背包/破放，t21）。
@@ -1027,6 +1049,7 @@ Window {
         function onDied() {
             if (window.inventoryOpen) window.inventoryOpen = false
             if (window.craftingTableOpen) window.craftingTableOpen = false
+            if (window.furnaceOpen) window.furnaceOpen = false
             window.returnHeldToHotbar()
             player.release()           // 释放指针 → 光标可见（点「立即重生 / 回主菜单」按钮）
         }
@@ -1079,9 +1102,10 @@ Window {
             if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
             // 背包（t18）：E 开关。Esc 在背包打开时关闭（captured=false 时 Esc 不被 C++ 事件过滤器
             // 拦截，落到 QML；captured=true 时 Esc 仍走 C++ → release → 暂停叠层，原行为不变）。
-            // t50：工作台面板同样 E/Esc 关（与背包互斥）。
+            // t50：工作台面板同样 E/Esc 关（与背包互斥）。t87：熔炉面板亦同（E / Esc 关）。
             if (e.key === Qt.Key_E && window.appState === "playing") {
                 if (window.craftingTableOpen) window.closeCraftingTable()
+                else if (window.furnaceOpen) window.closeFurnace()
                 else window.toggleInventory()
                 e.accepted = true; return
             }
@@ -1090,6 +1114,9 @@ Window {
             }
             if (e.key === Qt.Key_Escape && window.craftingTableOpen) {
                 window.closeCraftingTable(); e.accepted = true; return
+            }
+            if (e.key === Qt.Key_Escape && window.furnaceOpen) {
+                window.closeFurnace(); e.accepted = true; return
             }
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
             // 仅 playing 态有意义（menu 态主菜单全屏覆盖，叠层不可见）；切换不依赖指针捕获。
@@ -1131,7 +1158,7 @@ Window {
         id: pauseOverlay
         anchors.fill: parent
         visible: window.appState === "playing" && !player.captured
-                 && !window.inventoryOpen && !window.craftingTableOpen
+                 && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen
                  && !playerState.dead
         z: 100
         Rectangle {
@@ -1566,13 +1593,34 @@ Window {
         onDiscardHeldRequested: player.dropHeldCursor()
     }
 
+    // t87 熔炉冶炼面板：右键熔炉方块打开（player.furnaceOpened → openFurnace）。仅 playing &&
+    // furnaceOpen 时显（与背包 / 工作台面板互斥）。E/Esc/关闭信号关 → 宿主恢复 grab。
+    // 冶炼 tick 由 WorldClock.ticked 驱动（下方 Connections 转发，10Hz）；槽状态 / 进度面板自持、跨开关持久。
+    FurnaceUI {
+        id: furnacePanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        visible: window.appState === "playing" && window.furnaceOpen
+        z: 150
+        onClosed: window.closeFurnace()
+        onDiscardHeldRequested: player.dropHeldCursor()
+    }
+
+    // t87 冶炼 tick：WorldClock 每 100ms 发 ticked(0.1) → 转发到 furnacePanel.tick 推进冶炼。
+    // 单一时间权威（PLAN §2）：所有按时间推进的子系统都消费 WorldClock，不在 QML 各自起 Timer。
+    // tick 内自检无活干（无燃料 / 无输入）即静默 return，故常驻连接无开销。
+    Connections {
+        target: worldClock
+        function onTicked(dt) { furnacePanel.tick(dt) }
+    }
+
     // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品栈；hotbarVM.heldBlock/heldCount 驱动）。
     // 仅背包 / 工作台打开且手持非空时显，z 最高（盖过背包面板 z=150）。位置跟随 cursorTracker（窗口坐标）。
     // t32：count>1 时右下角显数量（手持整栈移动时可见剩余数）。t33：手持工具 → ToolIcon 自绘（非 Image）；
     // t50：手持材料 → MaterialIcon 自绘（木棒）。t37：enabled:false 显式声明本 Item 不参与指针事件——
     // z=300 浮在面板(z=150)之上，若参与事件捕获会抢走下方槽位 TapHandler 的点击。纯呈现层。
     Item {
-        visible: (window.inventoryOpen || window.craftingTableOpen) && hotbarVM.heldBlock !== 0
+        visible: (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen) && hotbarVM.heldBlock !== 0
         enabled: false
         z: 300
         x: cursorTracker.point.position.x - 16

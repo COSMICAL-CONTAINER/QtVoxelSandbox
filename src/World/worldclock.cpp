@@ -49,4 +49,7 @@ void WorldClock::onTick()
         m_phase = newPhase;
         emit dayPhaseChanged(); // skyLight 派生于 phase，QML 同信号刷新
     }
+    // t87：游戏时间 tick（每 100ms 无条件发，携带本 tick 秒数）。熔炉等按时间推进的子系统消费。
+    // 放在末尾发，保证消费者读到的 phase / skyLight 已是本 tick 最新值。
+    emit ticked(qreal(kTickMs) / 1000.0);
 }

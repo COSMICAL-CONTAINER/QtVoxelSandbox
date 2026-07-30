@@ -50,6 +50,8 @@ qt_add_executable(voxelsandbox
     src/Game/raycast.h
     src/Game/recipe.cpp
     src/Game/recipe.h
+    src/Game/smelting.cpp
+    src/Game/smelting.h
 )
 
 # 分层（PLAN §2 铁律：依赖只向下）。把各层子目录加入 include 搜索路径，使
@@ -77,6 +79,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/InvSlot.qml
         src/ui/SurvivalInventory.qml
         src/ui/CraftingTableUI.qml
+        src/ui/FurnaceUI.qml
         src/ui/VitalIcon.qml
         src/ui/ToolIcon.qml
         src/ui/MaterialIcon.qml

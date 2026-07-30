@@ -182,6 +182,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::CoalId)        return QStringLiteral("煤炭");
         if (blockId == RecipeRegistry::IronOreDropId) return QStringLiteral("铁原矿");
         if (blockId == RecipeRegistry::IronIngotId)   return QStringLiteral("铁锭");
+        // t87 冶炼产物（spec 可选）：沙子→玻璃、原木→木炭。
+        if (blockId == RecipeRegistry::GlassId)       return QStringLiteral("玻璃");
+        if (blockId == RecipeRegistry::CharcoalId)    return QStringLiteral("木炭");
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
@@ -337,6 +340,18 @@ bool Hotbar::recipeCanTake(int outId, int outCount, int heldId, int heldCount, i
     r.outputId = outId;
     r.outputCount = outCount;
     return RecipeRegistry::canTake(r, heldId, heldCount, maxStack);
+}
+
+// t87 冶炼 / 燃料桥接：透传 SmeltingRegistry 静态查询给 QML（FurnaceUI 的 tick / 槽校验消费）。
+// 返回 int（产物 id / 燃烧秒数；0 = 不可冶炼 / 不可燃），QML 友好且与 recipeMatch 的整数语义一致。
+int Hotbar::smeltResult(int inputId) const
+{
+    return SmeltingRegistry::smeltResult(inputId);
+}
+
+int Hotbar::fuelBurnSeconds(int fuelId) const
+{
+    return int(SmeltingRegistry::fuelBurnSeconds(fuelId));
 }
 
 // 按模式重置：t49 改为 Creative 与 Survival **都**清空 9 槽（删创造 8 满栈预置；创造物品改由调色板

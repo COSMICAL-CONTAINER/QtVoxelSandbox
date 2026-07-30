@@ -11,6 +11,7 @@
 
 #include "blockregistry.h" // 物品 id（方块段 0..Count-1；图标/中文名走单一注册表）
 #include "recipe.h"        // 材料段 id（>=0x200，t50 木棒）；nameForBlock 材料段查 RecipeRegistry::StickId
+#include "smelting.h"      // t87 冶炼 / 燃料判定（smeltResult / fuelBurnSeconds 桥接到 QML）
 #include "toolregistry.h"  // 工具段 id（>=0x100）；工具判定 / tier / 中文名 / 创造调色板走工具注册表（t33）
 
 // 物品栈（t32 基础数据模型）：槽位从单一 quint8 block-id 升级为 {itemId, count}，支持堆叠。
@@ -136,6 +137,11 @@ public:
     //     且累加不超 maxStack）。UI 点击结果槽前置判定。
     Q_INVOKABLE QVariantMap recipeMatch(const QVariantList &slotIds, int gridSize) const;
     Q_INVOKABLE bool recipeCanTake(int outId, int outCount, int heldId, int heldCount, int maxStack) const;
+    // t87 冶炼 / 燃料桥接（QML 不能直接调 C++ 静态类 SmeltingRegistry，经 VM 透传；同 recipeMatch 模式）：
+    //   - smeltResult(inputId)：输入物品 → 冶炼产物 id（0=不可冶炼）。
+    //   - fuelBurnSeconds(fuelId)：燃料 → 燃烧秒数（0=不可燃；返回 int 秒，QML 友好且本表值均整数）。
+    Q_INVOKABLE int smeltResult(int inputId) const;
+    Q_INVOKABLE int fuelBurnSeconds(int fuelId) const;
     // 按模式重置槽内容（t49：创造 / 生存均清空 9 槽；创造物品改由调色板点取→放入 hotbar 槽 / 观察者=不动）。
     // mode 取 PlayerController::Mode 序数：0=Spectator 1=Creative 2=Survival。同时清空光标手持物。
     Q_INVOKABLE void resetForMode(int mode);
