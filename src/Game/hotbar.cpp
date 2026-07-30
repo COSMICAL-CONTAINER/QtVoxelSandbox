@@ -117,6 +117,22 @@ QVariantList Hotbar::creativeTools() const
     return {int(ToolRegistry::PickaxeWood), int(ToolRegistry::PickaxeStone), int(ToolRegistry::PickaxeIron)};
 }
 
+// 创造调色板材料段（t114）：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃（材料段 id >= 0x200，
+// RecipeRegistry::*Id 命名常量；与 hotbar.cpp 材料段判定 / MaterialIcon 自绘图标同源）。
+// 无限源（拾取时满栈 64；创造不耗）。非方块 → 右键不放置（playercontroller selectedBlock 守 Air），
+// 与工具段同属「调色板可取、世界不可放」的非方块物品段。
+QVariantList Hotbar::creativeMaterials() const
+{
+    return {
+        int(RecipeRegistry::StickId),       // 木棒
+        int(RecipeRegistry::CoalId),        // 煤炭
+        int(RecipeRegistry::CharcoalId),    // 木炭
+        int(RecipeRegistry::IronOreDropId), // 铁原矿
+        int(RecipeRegistry::IronIngotId),   // 铁锭
+        int(RecipeRegistry::GlassId)        // 玻璃
+    };
+}
+
 int Hotbar::blockIdAt(int slot) const
 {
     if (slot < 0 || slot >= int(m_slots.size())) return int(BlockRegistry::Air);

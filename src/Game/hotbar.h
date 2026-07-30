@@ -105,6 +105,10 @@ public:
     Q_INVOKABLE bool isTool(int itemId) const;
     Q_INVOKABLE int toolTier(int itemId) const;
     Q_INVOKABLE QVariantList creativeTools() const;
+    // 创造调色板材料段（t114）：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃（材料段 id >= 0x200，
+    // 由 recipe.h RecipeRegistry::*Id 命名常量定义）。材料段与方块段分离 —— 非方块不可右键放置
+    // （与工具段同为非方块调色板项），玩家据需取用到 hotbar 槽（合成 / 冶炼原料 / 装饰）。
+    Q_INVOKABLE QVariantList creativeMaterials() const;
     // 材料段判定（t50：合成产物木棒等，id >= RecipeRegistry::MaterialIdBase=0x200）。供 QML delegate
     // 据 isMaterial 切到材料图标 Canvas 自绘（细长棕色矩形 = 木棒）。与 isTool 互斥（材料段 > 工具段上界）。
     Q_INVOKABLE bool isMaterial(int itemId) const;

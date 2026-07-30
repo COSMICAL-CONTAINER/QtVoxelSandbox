@@ -1146,10 +1146,17 @@ Window {
             }
         }
 
-        // t88 火把伪光源：在每个火把方块位置渲染「内焰 + 光晕」发光 Model（NoLighting 高 baseColor
-        // 暖色，**非** PointLight）。根因：lit 材质 / PointLight 在本场景不可行（lessons-learned 红线
-        // 「lit 材质不渲染」），故火把动态光源走伪光源——一组纯色自发光小立方 + 半透光晕，视觉上
-        // 读作「发光点」，不参与场景实际光照计算（真 flood-fill 方块光留 PLAN §M）。
+        // t88/t114 火把伪光源 + 异形模型：在每个火把方块位置渲染「木柄 + 火焰 + 光晕」三个 Model
+        // （NoLighting 高 baseColor 暖色，**非** PointLight）。根因：lit 材质 / PointLight 在本场景不可行
+        // （lessons-learned 红线「lit 材质不渲染」），故火把动态光源走伪光源——纯色自发光小立方 + 半透
+        // 光晕，视觉读作「发光点」，不参与场景实际光照计算（真 flood-fill 方块光留 PLAN §M）。
+        //
+        // t114 异形：mesher 不再为火把画 1×1×1 立方面（chunkgeometry.cpp Torch 特例 continue）→ 火把外观
+        // 全部由此 delegate 负责：木柄（细长棕立方）+ 火焰（暖白小立方 + 闪烁动画）+ 光晕（保留 t88 半透）。
+        //
+        // t114 朝向：运行期据邻居 solid 推断 —— 下格 solid=垂直插地；侧格 solid=横插该向（贴墙伸出）。
+        // 邻居查询走 theWorld.isCollidable（BlockRegistry::isSolid 语义；只认实体方块，不挂到另一火把 /
+        // 空气）。worldChanged 时重算（破/放邻居后火把朝向随之更新，机制等价 MC「插墙火把朝向跟随墙面」）。
         //
         // 火把位置列表（ListModel）：World::blockPlaced(id=Torch) 时追加、blockBroken 时移除；
         // worldChanged 时校验清理（worldgen 重生会清除旧火把，blockPlaced 不会对 worldgen 触发）。
@@ -1169,28 +1176,114 @@ Window {
                 model: torchPositions
                 delegate: Node {
                     id: torchGlow
-                    // 火把格中心 + 偏上 0.7（贴火焰位置：mesher 把火把画成 1×1×1 立方，火焰图案在该
-                    // 立方顶段；光晕放火焰处）。
-                    position: Qt.vector3d(model.x + 0.5, model.y + 0.7, model.z + 0.5)
+                    // 火把格底面中心（cell [x,x+1]×[y,y+1]×[z,z+1] 的底面中心）；子 Model 在此局部坐标内摆位。
+                    position: Qt.vector3d(model.x + 0.5, model.y, model.z + 0.5)
 
-                    // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
-                    // onCompleted 显式 reparent 进 torchHost（同 itemHost delegate 模式）。
-                    Component.onCompleted: {
-                        if (parent === null) parent = torchHost
+                    // t114 朝向态：up=垂直插地；px/nx/pz/nz=横插 ±X/±Z 向（贴对应墙、柄伸向 cell 中央）。
+                    // 默认 up；recomputeOrient 据邻居 solid 实时改写。
+                    property string orient: "up"
+
+                    // 据邻居实体性推断朝向（按下 / 4 侧顺序；首个实体邻居定方向，无任何实体则兜底 up）。
+                    // 用 theWorld.isCollidable（BlockRegistry::isSolid）—— 只认实体方块，不把另一火把 /
+                    // 空气当支撑（避免两火把互挂成悬空）。顺序：下 > -X > +X > -Z > +Z（与 MC「下优先」一致）。
+                    function recomputeOrient() {
+                        const x = model.x, y = model.y, z = model.z
+                        if (theWorld.isCollidable(x, y - 1, z)) { torchGlow.orient = "up"; return }
+                        if (theWorld.isCollidable(x - 1, y, z)) { torchGlow.orient = "px"; return }
+                        if (theWorld.isCollidable(x + 1, y, z)) { torchGlow.orient = "nx"; return }
+                        if (theWorld.isCollidable(x, y, z - 1)) { torchGlow.orient = "pz"; return }
+                        if (theWorld.isCollidable(x, y, z + 1)) { torchGlow.orient = "nz"; return }
+                        torchGlow.orient = "up" // 兜底：火把悬空（无支撑，放置预检本应拦截）仍按垂直画，避免不可见
                     }
 
-                    // 内焰：明亮暖白小立方（NoLighting 高 baseColor；视觉发光点核心）。
+                    // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
+                    // onCompleted 显式 reparent 进 torchHost + 首次算朝向（同 itemHost delegate 模式）。
+                    Component.onCompleted: {
+                        if (parent === null) parent = torchHost
+                        torchGlow.recomputeOrient()
+                    }
+
+                    // t114：邻居破/放后火把朝向重算（worldChanged 信号）。多重 Connections 可同 target
+                    // （主 onWorldChanged 在文件下方做火把列表清理，本处只刷朝向）。
+                    Connections {
+                        target: theWorld
+                        function onWorldChanged() { torchGlow.recomputeOrient() }
+                    }
+
+                    // 木柄：细长棕立方（UnitCube scale 0.12×0.6×0.12；原木暗棕 #6b4f24，与木棒
+                    // MaterialIcon 同色系）。竖直时贴 cell 底部上伸（柄中心 0.3、柄顶 0.6）；水平时
+                    // 旋转 90° 贴墙伸入 cell 中央（柄中心 Y=0.5、沿墙法线偏移 ±0.2 让柄端贴墙面）。
                     Model {
                         geometry: UnitCube {}
-                        scale: Qt.vector3d(0.16, 0.16, 0.16)
+                        scale: Qt.vector3d(0.12, 0.6, 0.12)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#6b4f24"   // 木柄暗棕（原木色，与木棒图标同色系）
+                        }
+                        // 柄中心位置（局部坐标，相对 torchGlow 底面中心）。
+                        position: {
+                            switch (torchGlow.orient) {
+                            case "up": return Qt.vector3d(0.0, 0.30, 0.0)
+                            case "px": return Qt.vector3d(-0.20, 0.50, 0.0) // 贴 -X 墙、柄伸 +X
+                            case "nx": return Qt.vector3d( 0.20, 0.50, 0.0) // 贴 +X 墙、柄伸 -X
+                            case "pz": return Qt.vector3d(0.0, 0.50, -0.20) // 贴 -Z 墙、柄伸 +Z
+                            case "nz": return Qt.vector3d(0.0, 0.50,  0.20) // 贴 +Z 墙、柄伸 -Z
+                            }
+                            return Qt.vector3d(0.0, 0.30, 0.0)
+                        }
+                        // 旋转：水平时把竖柄（默认沿 +Y）旋到对应水平轴。
+                        //   ±X 向：绕 Z 轴 ±90°（+Y → ±X）。
+                        //   ±Z 向：绕 X 轴 ∓90°（+Y → ±Z）。
+                        eulerRotation: {
+                            switch (torchGlow.orient) {
+                            case "px": return Qt.vector3d(0, 0, -90)
+                            case "nx": return Qt.vector3d(0, 0,  90)
+                            case "pz": return Qt.vector3d( 90, 0, 0)
+                            case "nz": return Qt.vector3d(-90, 0, 0)
+                            }
+                            return Qt.vector3d(0, 0, 0)
+                        }
+                    }
+
+                    // 火焰：暖白小立方（UnitCube scale ~0.18 + 闪烁动画；spec「scale 0.18 黄 + 闪」）。
+                    // 摆在柄顶端（竖直时柄顶 Y=0.65；水平时柄延伸方向的端点）。
+                    Model {
+                        id: torchFlame
+                        geometry: UnitCube {}
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#fff4cc"   // 焰心暖白（spec「高 baseColor 暖色 #ffcc66」的更亮内核）
                         }
+                        position: {
+                            switch (torchGlow.orient) {
+                            case "up": return Qt.vector3d(0.0, 0.65, 0.0)
+                            case "px": return Qt.vector3d( 0.10, 0.50, 0.0) // 柄 +X 端
+                            case "nx": return Qt.vector3d(-0.10, 0.50, 0.0)
+                            case "pz": return Qt.vector3d(0.0, 0.50,  0.10)
+                            case "nz": return Qt.vector3d(0.0, 0.50, -0.10)
+                            }
+                            return Qt.vector3d(0.0, 0.65, 0.0)
+                        }
+                        // 闪烁：自定义 flickerS（标量）由 SequentialAnimation 循环驱动；scale 绑它派生
+                        // （Y 轴略加长 = 火苗上窜感）。本工具链 Vector3DAnimation 未注册（运行期「is not a
+                        // type」），故走「NumberAnimation on 标量属性 + scale 绑定」等价路径（与 cam.shakeYaw
+                        // / itemHost bobY 同 NumberAnimation 模式）。
+                        property real flickerS: 0.18
+                        scale: Qt.vector3d(flickerS, flickerS * 1.08, flickerS)
+                        SequentialAnimation on flickerS {
+                            loops: Animation.Infinite
+                            NumberAnimation { from: 0.18; to: 0.21; duration: 110 }
+                            NumberAnimation { from: 0.21; to: 0.16; duration: 150 }
+                            NumberAnimation { from: 0.16; to: 0.19; duration: 90 }
+                            NumberAnimation { from: 0.19; to: 0.18; duration: 130 }
+                        }
                     }
-                    // 光晕：较大半透暖色立方（opacity<1 自动走透明混合 → 视觉发光晕染，非 PointLight）。
+
+                    // 光晕（保留 t88）：半透暖色立方包覆火焰（opacity<1 自动走透明混合 → 视觉发光晕染，
+                    // 非 PointLight）。跟随火焰位置（绑 torchFlame.position）。
                     Model {
                         geometry: UnitCube {}
+                        position: torchFlame.position
                         scale: Qt.vector3d(0.42, 0.42, 0.42)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting

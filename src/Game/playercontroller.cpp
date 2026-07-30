@@ -589,6 +589,17 @@ void PlayerController::placeBlock()
     // 与玩家重叠 → 不放（防自埋 / 卡死）。t88：非实体方块（如火把，BlockDef.solid=false）例外——
     // 它不挡玩家，放进玩家所在格也不会卡死（spec「非实体碰撞」），允许放置（如脚下插火把）。
     if (BlockRegistry::isSolid(quint8(m_selectedBlock)) && overlapsPlayerAABB(tx, ty, tz)) return;
+    // t114 火把放置预检：火把需挂到实体邻居（下 / 四侧之一为实体方块），否则拒绝（机制等价 MC「火把
+    // 需要支撑面」—— 平地或墙面）。判定用 BlockRegistry::isSolid（实体方块语义；不挂到空气 / 另一火把
+    // / 工作台等非实体方块）。torchHost 据同样语义在运行期推断朝向（下 solid=垂直 / 侧 solid=横插）。
+    if (m_selectedBlock == BlockRegistry::Torch) {
+        const bool below = BlockRegistry::isSolid(m_world->blockAt(tx, ty - 1, tz));
+        const bool px = BlockRegistry::isSolid(m_world->blockAt(tx + 1, ty, tz));
+        const bool nx = BlockRegistry::isSolid(m_world->blockAt(tx - 1, ty, tz));
+        const bool pz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz + 1));
+        const bool nz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz - 1));
+        if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
+    }
     m_world->setBlock(tx, ty, tz, quint8(m_selectedBlock));
     emit swingArm(); // 放块成功 → 第一人称手挥动（t29）
 }

@@ -121,6 +121,10 @@ void ChunkGeometry::buildMesh()
                     const int wx = originX + lx, wz = originZ + lz;
                     const quint8 b = blockAtWorld(wx, ly, wz);
                     if (b == 0) continue; // 空气
+                    // t114 异形特例：火把不画 1×1×1 立方面 —— 它是「木柄 + 火焰」小模型（在 torchHost
+                    // 由 QML Model 渲染，朝向据邻居 solid 推断）。mesher 在此跳过立方面，否则会出现
+                    // 「黑底 6 面大立方 + 上叠小模型」的重复畸形。其他异形方块（未来如花/草）按同模式加。
+                    if (b == BlockRegistry::Torch) continue;
                     for (int f = 0; f < 6; ++f) {
                         const FaceDef &F = kFaces[f];
                         if (blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]) != 0)
