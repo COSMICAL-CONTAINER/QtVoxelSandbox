@@ -33,10 +33,10 @@ class ChunkGeometry : public QQuick3DGeometry
     Q_PROPERTY(int cx READ cx WRITE setCx NOTIFY cxChanged)
     Q_PROPERTY(int cz READ cz WRITE setCz NOTIFY czChanged)
     // t123 动态太阳光照（太阳方向单位向量，由 WorldClock 派生、经 QML 绑定注入）。t151 真光场后顶点色
-    //   改采 per-voxel flood-fill 光场（faceNormal·sunDir + heightmap 列投影已移除），故 buildMesh 不再读
-    //   sunDir 算光；本属性保留供 t153 PCF 软影重做（按 sunDir 采样 heightmap 正交深度图）+ QML 太阳摆位
-    //   绑定。设值仍触发 buildMesh（t153 前为无副作用的等值重建）。分层（PLAN §2）：只接收「裸 QVector3D」
-    //   （不 include worldclock.h、不依赖 Game 层时间源），保持 Renderer→向下 依赖方向。
+    //   基底改采 per-voxel flood-fill 光场；t153 PCF 软影复用本 sunDir —— sunShadowAt 据此沿太阳水平方向
+    //   步进采样 heightmap 正交深度图、压暗天光分量。设值触发 buildMesh（顶点色 PCF 软影需随太阳重算）。
+    //   分层（PLAN §2）：只接收「裸 QVector3D」（不 include worldclock.h、不依赖 Game 层时间源），保持
+    //   Renderer→向下 依赖方向。
     Q_PROPERTY(QVector3D sunDir READ sunDir WRITE setSunDir NOTIFY sunInputChanged)
     // t148 水渲染分流：waterOnly=true → 本几何只网格化 Water 方块（独立透明段，Main.qml 用 opacity=0.7
     //   材质渲染）；waterOnly=false（默认）→ 只网格化非水方块（地形 / 异形 / ...，跳过 Water，避免与水段
@@ -87,6 +87,11 @@ private:
     void onWorldChanged();            // worldChanged 槽：仅 dirty chunk 才重建
     void buildMesh();                 // 局部 culled mesh + 写入 QQuick3DGeometry + 清脏
     int tileFor(quint8 block, int face) const;
+    // t153 PCF 软影（方案③：t151 顶点光基底 + heightmap 正交深度图）：给定世界空间顶点，沿 sunDir 水平
+    //   方向步进 kMaxShadow 格、2×2 PCF 采样路径列 heightmap，返回 [0,1] 软影因子（0=全亮、1=全影）。
+    //   mesher 据此把天光分量乘 (1-sh)，火把方光取 max 保留。只读 World::heightmapAt + 裸 sunDir（不依赖
+    //   Game 层 WorldClock，保持 Renderer→向下）。
+    float sunShadowAt(float wx, float wy, float wz) const;
     Chunk *myChunk() const;           // 本几何负责的 chunk（world/cx/cz 无效 → nullptr）
     // 世界坐标查询（跨 chunk 经 world.blockAt 路由 → 边界面剔除正确）
     quint8 blockAtWorld(int wx, int wy, int wz) const {

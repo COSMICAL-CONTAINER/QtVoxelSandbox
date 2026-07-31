@@ -99,9 +99,10 @@ private:
     //     归一 sunDir.y → intensity∈[0,1]）。
     //   kSunSteps：一周期太阳方向的量化步数。t135 72→360：调试 30s 周期约每 0.083s 跨一步
     //     （原 72 步每 0.42s 一步 → 影子跳跃明显），360 步使影子随太阳移动更连续平滑；正常
-    //     1200s 周期则约每 3.3s 一步（顶点光更新频次仍远低于 10Hz tick，mesh 重建开销可控）。
-    //     步进而非每 tick 刷 = 把「全量 mesh 重建」从 10Hz 降到 ~步数/周期 Hz，代价是顶点光按
-    //     步进变化（baseColor 仍平滑补昼夜过渡，故整体明暗无跳变）。
+    //     1200s 周期则约每 3.3s 一步（每步太阳移 ~1° → 影位移 <0.1 格，肉眼无感）。
+    //     t153 PCF 软影进一步柔化跨步过渡：影因子是 sunDir 的连续 0..1 函数（2×2 邻列平均 + 门附近
+    //     kSunFade 淡入），小步进 ΔsunDir → 小 Δ影，跨步无突变。步进而非每 tick 刷 = 把「全量 mesh
+    //     重建」从 10Hz 降到 ~步数/周期 Hz，代价是顶点光按步进变化（baseColor 仍平滑补昼夜过渡）。
     static constexpr float kSunMaxElevDeg = 50.f;
     static constexpr int   kSunSteps      = 360;
 
