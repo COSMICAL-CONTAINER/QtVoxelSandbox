@@ -1779,9 +1779,12 @@ Window {
 
         // 滚轮循环切换 hotbar。WheelHandler 按指针位置抓取，与光标显隐/锁定无关，
         // 故捕获与未捕获都生效。只消费滚轮 —— 鼠标按键仍走 C++ 窗口级事件过滤（破/放）。
+        // t140：背包 / 工作台 / 熔炉面板打开时滚轮应滚动面板（调色板 Flickable），不切 hotbar。
+        //   未守时背包内滚轮会偷切选中槽 → 右键放置方块跟着变，与「调面板里滚轮浏览」的预期冲突。
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: (event) => {
+                if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen) return
                 if (event.angleDelta.y > 0)      hotbarVM.scroll(-1) // 上滚 → 左移（下标-1，环绕）
                 else if (event.angleDelta.y < 0) hotbarVM.scroll(1)  // 下滚 → 右移
             }
