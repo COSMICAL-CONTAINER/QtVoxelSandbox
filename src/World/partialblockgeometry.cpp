@@ -29,7 +29,7 @@
 namespace {
 // 顶点光常量（镜像 chunkgeometry.cpp 同名常量；改一处须同步另一处 —— 二者须渲染一致）。
 constexpr float kSunRange = 1.5f;
-constexpr float kSunMin   = 0.3f;
+constexpr float kSunMin   = 0.15f;  // codereview H1: 与 chunkgeometry.cpp t135 的 kSunMin 镜像（0.3→0.15），否则部分方块阴影区亮 2 倍断层
 constexpr float kSunMax   = 1.0f;
 
 // 单面顶点色（同 chunkgeometry 立方面公式：地下恒暗 0.2；见天按 faceNormal·sunDir + 投影阴影调制）。

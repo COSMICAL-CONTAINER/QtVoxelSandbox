@@ -110,7 +110,7 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       { int(BlockRegistry::Planks), 0, 0,
         int(BlockRegistry::Planks), 0, 0,
         int(BlockRegistry::Planks), 0, 0 },
-      int(BlockRegistry::WoodDoor), 3, 1, "wood_door" },
+      int(BlockRegistry::WoodDoor), 1, 1, "wood_door" }, // codereview C1: outputCount 3→1（门 maxStack=1，canTake 一次取不满 3；MC 输出槽暂存 3 门，本项目 canTake 不支持暂存）
     //   trapdoor：6 木板 2×3（两行三列）→ 2 木活板门（有序 3×3，仅工作台）。MC 活板门配方（产 2）。
     //     注：spec 原注「4 板方形→1(2x2)」与 craftingTable（无序 4 板 → 1 工作台）冲突 —— 4 板 2×2 输入
     //     的多重集 {Planks:4} 必先命中 shapeless 的 craftingTable，trapdoor 永不可合。spec 顶层指令
