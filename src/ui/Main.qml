@@ -568,48 +568,48 @@ Window {
         // 16×16 时再换 C++ 侧批量管理（ChunkMeshManager）或经场景 Node 领养的 Repeater 方案。
         Model { // chunk (0,0) → 世界 (0,0)
             position: Qt.vector3d(0, 0, 0)
-            geometry: ChunkGeometry { id: geo00; world: theWorld; cx: 0; cz: 0 }
+            geometry: ChunkGeometry { id: geo00; world: theWorld; cx: 0; cz: 0; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
             Component.onCompleted: console.info("[t31] chunk(0,0) UP parent=" + parent + " (对照：已知可见)")
         }
         Model { // chunk (1,0) → 世界 (16,0)
             position: Qt.vector3d(16, 0, 0)
-            geometry: ChunkGeometry { id: geo10; world: theWorld; cx: 1; cz: 0 }
+            geometry: ChunkGeometry { id: geo10; world: theWorld; cx: 1; cz: 0; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (2,0) → 世界 (32,0)
             position: Qt.vector3d(32, 0, 0)
-            geometry: ChunkGeometry { id: geo20; world: theWorld; cx: 2; cz: 0 }
+            geometry: ChunkGeometry { id: geo20; world: theWorld; cx: 2; cz: 0; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (0,1) → 世界 (0,16)
             position: Qt.vector3d(0, 0, 16)
-            geometry: ChunkGeometry { id: geo01; world: theWorld; cx: 0; cz: 1 }
+            geometry: ChunkGeometry { id: geo01; world: theWorld; cx: 0; cz: 1; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (1,1) → 世界 (16,16)
             position: Qt.vector3d(16, 0, 16)
-            geometry: ChunkGeometry { id: geo11; world: theWorld; cx: 1; cz: 1 }
+            geometry: ChunkGeometry { id: geo11; world: theWorld; cx: 1; cz: 1; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (2,1) → 世界 (32,16)
             position: Qt.vector3d(32, 0, 16)
-            geometry: ChunkGeometry { id: geo21; world: theWorld; cx: 2; cz: 1 }
+            geometry: ChunkGeometry { id: geo21; world: theWorld; cx: 2; cz: 1; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (0,2) → 世界 (0,32)
             position: Qt.vector3d(0, 0, 32)
-            geometry: ChunkGeometry { id: geo02; world: theWorld; cx: 0; cz: 2 }
+            geometry: ChunkGeometry { id: geo02; world: theWorld; cx: 0; cz: 2; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (1,2) → 世界 (16,32)
             position: Qt.vector3d(16, 0, 32)
-            geometry: ChunkGeometry { id: geo12; world: theWorld; cx: 1; cz: 2 }
+            geometry: ChunkGeometry { id: geo12; world: theWorld; cx: 1; cz: 2; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (2,2) → 世界 (32,32)
             position: Qt.vector3d(32, 0, 32)
-            geometry: ChunkGeometry { id: geo22; world: theWorld; cx: 2; cz: 2 }
+            geometry: ChunkGeometry { id: geo22; world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
 

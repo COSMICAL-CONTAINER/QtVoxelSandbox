@@ -6,7 +6,9 @@
 #include <QByteArray>
 #include <QVector3D>
 
+#include <algorithm> // std::clamp / std::max（t123 顶点光方向调制）
 #include <cstddef>
+#include <cmath>     // std::sqrt / std::fabs / std::round（t123 投影阴影回扫）
 #include <cstring>
 
 // 顶点：pos(3) + normal(3) + uv(2) + color(4, rgba) = 12 float = 48 字节。
@@ -66,6 +68,17 @@ void ChunkGeometry::setCz(int cz)
     onWorldChanged();
 }
 
+// t123：太阳方向变（WorldClock 量化跨步 → sunChanged → QML 绑定重算 → 本 setter）。
+//   体素未变、仅光照变 → 直接 buildMesh（绕过 chunk dirty：dirty 是「体素改动」标记，与此无关）。
+//   值未变（WorldClock 跨步但量化值恰好相同 / QML 重绑）则早退，避免无谓重建。
+void ChunkGeometry::setSunDir(const QVector3D &dir)
+{
+    if (m_sunDir == dir) return;
+    m_sunDir = dir;
+    emit sunInputChanged();
+    buildMesh();
+}
+
 // 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
 // 故 world 重建（recreate 销毁旧 chunk）后不会悬空：拿到的是新 chunk。
 Chunk *ChunkGeometry::myChunk() const
@@ -119,6 +132,30 @@ void ChunkGeometry::buildMesh()
     constexpr float hy = 0.5f / 16;
     const float v0 = 0.0f + hy, v1 = 1.0f - hy;
 
+    // t123 动态太阳顶点光常量（方案②：顶点色承载方向调制，PLAN §2-H 非 lit/shadowmap）：
+    //   kSunRange：方向对比强度。朝太阳面（lit - litAvg > 0）超过 1 → 夹到 kSunMax（最亮=贴图原色）；
+    //     背阳 / 投影阴影面（< 0）低于 1，呈暗。
+    //   kSunMin / kSunMax：vc 钳制范围。下限 0.3 防阴影面黑死、上限 1.0 不超过贴图原色（NoLighting 无法 overbright）。
+    //   kMaxShadow：heightmap 列投影阴影回扫最大列距离（界性能；低空太阳 tanElev 小 → 自然长阴影，超距截断）。
+    constexpr float kSunRange   = 1.5f;
+    constexpr float kSunMin     = 0.3f;
+    constexpr float kSunMax     = 1.0f;
+    constexpr int   kMaxShadow  = 10;
+    // 太阳派生量（由 m_sunDir 算一次，供本 chunk 全部顶点光照复用）：
+    //   sunIntensity：太阳高度归一（sin(kSunMaxElevDeg)=0.766 为满日照基准）。sunDir.y<0（地平下）→ 0
+    //     → 白天方向调制生效、夜间归零（vc=1，与 t121 等亮，无夜间变暗回归）。
+    //   sunHx/Hz：太阳水平单位方向（投影阴影回扫方向）；hlen≈0（天顶）时无水平阴影（短至零长）。
+    //   sunTanElev：仰角正切 = sunDir.y/hlen。低空 → 小 → 同样高的列在更远处仍挡（长阴影）。
+    //   sunLitAvg：6 轴面方向 lit 的均值（|sx|+|sy|+|sz|)/6。「均值归一」使全天平均亮度 ≈ 天光：
+    //     direction 对比在均值附近对称展开，朝太阳 +、背阳 −，整体不净变暗。
+    const float sdx = m_sunDir.x(), sdy = m_sunDir.y(), sdz = m_sunDir.z();
+    const float sunIntensity = std::clamp(sdy / 0.766f, 0.f, 1.f);
+    const float sunHlen = std::sqrt(sdx * sdx + sdz * sdz);
+    const float sunHx = (sunHlen > 1e-3f) ? sdx / sunHlen : 0.f;
+    const float sunHz = (sunHlen > 1e-3f) ? sdz / sunHlen : 0.f;
+    const float sunTanElev = (sunHlen > 1e-3f) ? sdy / sunHlen : 0.f;
+    const float sunLitAvg = (std::fabs(sdx) + std::fabs(sdy) + std::fabs(sdz)) / 6.f;
+
     if (c && m_world) {
         // 逐局部格：世界坐标取体素 + 邻居（跨 chunk 边界经 world.blockAt 路由 → 共边实体面
         // 剔除、一侧空气画出、世界越界=空气）。顶点写 chunk 局部坐标（Model 负责世界定位）。
@@ -133,12 +170,29 @@ void ChunkGeometry::buildMesh()
                     // 「黑底 6 面大立方 + 上叠小模型」的重复畸形。其他异形方块（未来如花/草）按同模式加。
                     if (b == BlockRegistry::Torch) continue;
 
-                    // t121 天光（PLAN §2-H「per-column 天光」）：本列首个非空气方块的 y（heightmap）。
-                    // 此块在体素 y=ly：ly >= hm → 见天（地表/天空间）→ 天光满 1.0；否则地下 → 暗 0.2。
-                    // hm 由 setBlock 增量维护（见 chunk.h）；此块为实体故 hm >= ly 恒真（顶块 = 此块或更高），
-                    // 故「ly >= hm」等价「此块即本列顶块」。该值写进本块 6 面 24 角顶点的 color.rgb。
+                    // t121 天光 heightmap（PLAN §2-H「per-column 天光」）：本列首个非空气方块的 y。
+                    // ly >= hm → 见天（地表/天空间）；否则地下。t123 改：见天块叠方向太阳光 + 投影阴影，
+                    //   地下块恒暗 0.2（天光 flood-fill 留后续轮次）。
                     const int hm = m_world->heightmapAt(wx, wz);
-                    const float sky = (ly >= hm) ? 1.0f : 0.2f;
+                    const bool surface = (ly >= hm);
+
+                    // t123 heightmap 列投影阴影：本块见天且太阳在地平线上时，沿太阳水平方向（朝太阳）
+                    //   回扫邻接列 heightmap；若有列足够高（挡住本块到太阳的视线：colHm >= ly + d·tanElev）
+                    //   则本块被投影阴影（shade=0 → 朝太阳的面失去直射贡献、呈阴影）。跨 chunk 经
+                    //   world.heightmapAt 路由 → 阴影无缝跨越边界。太阳低空时 tanElev 小 → 长阴影。
+                    //   本量为「每块」算一次（块内 6 面共享），界性能（仅见天块 + 太阳在上时算）。
+                    float shade = 1.0f;
+                    if (surface && sunIntensity > 1e-3f && sunHlen > 0.05f) {
+                        for (int d = 1; d <= kMaxShadow; ++d) {
+                            const int qx = wx + int(std::round(sunHx * float(d)));
+                            const int qz = wz + int(std::round(sunHz * float(d)));
+                            const int chm = m_world->heightmapAt(qx, qz); // 越界 / 空列 → -1（不挡）
+                            if (chm >= 0 && float(chm) >= float(ly) + float(d) * sunTanElev) {
+                                shade = 0.0f;
+                                break;
+                            }
+                        }
+                    }
 
                     for (int f = 0; f < 6; ++f) {
                         const FaceDef &F = kFaces[f];
@@ -147,6 +201,22 @@ void ChunkGeometry::buildMesh()
 
                         const int t = tileFor(b, f);
                         const float u0 = t * tileW + hx, u1 = (t + 1) * tileW - hx;
+
+                        // t123 顶点光方向调制（写进 color.rgb，PrincipledMaterial NoLighting×vertexColor）：
+                        //   地下块：恒暗 0.2（无天光 / 太阳）。
+                        //   见天块：vc = clamp(1 + kSunRange·sunIntensity·(lit·shade − sunLitAvg), kSunMin, kSunMax)。
+                        //     lit = max(0, faceNormal·sunDir)（朝太阳的面 >0、背阳 =0）；shade 门控投影阴影。
+                        //     「均值归一」（减 sunLitAvg）使全天平均 ≈ 天光：sunIntensity=0（夜）→ vc=1（与 t121
+                        //     等亮、无夜间变暗）；白天朝太阳面 >1（夹 kSunMax）、背阳/阴影面 <1（暗）。
+                        //   方向感 + 投影阴影由此显现，且随 sunDir 量化跨步演变（太阳「时间流逝移动」）。
+                        float vc;
+                        if (!surface) {
+                            vc = 0.2f;
+                        } else {
+                            const float lit = std::max(0.f, F.nrm[0] * sdx + F.nrm[1] * sdy + F.nrm[2] * sdz);
+                            const float contrast = lit * shade - sunLitAvg;
+                            vc = std::clamp(1.f + kSunRange * sunIntensity * contrast, kSunMin, kSunMax);
+                        }
 
                         const quint32 base = quint32(verts.size());
                         for (int cc = 0; cc < 4; ++cc) {
@@ -160,7 +230,7 @@ void ChunkGeometry::buildMesh()
                             v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
                             v.u = u0 + cu * (u1 - u0);
                             v.v = v0 + cv * (v1 - v0);
-                            v.r = sky; v.g = sky; v.b = sky; v.a = 1.0f; // 天光遮蔽（t121）
+                            v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f; // t123 顶点光（方向太阳 + 天光遮蔽）
                             verts.append(v);
                         }
                         idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);
