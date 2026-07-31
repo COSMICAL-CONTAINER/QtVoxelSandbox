@@ -13,7 +13,7 @@
 //     frontTile 仅「有朝向」方块用（熔炉炉口）；其余方块 frontTile == sideTile，-Z 面与其它侧面无差异。
 //   - hardness：grass/dirt/sand≈0.5~0.6；stone 1.5 / cobble 2.0（需镐）；log/planks 2.0；leaves 0.2；
 //     crafting_table 2.5（木制，同 MC 工作台量级）；furnace 1.5（同石头，需镐；spec t80「同石头」）；
-//     bedrock=-1.0（负值 → ToolRegistry::canMine 自动 false，任何模式 / 工具不可破，防创造秒破底层；t119）。
+//     bedrock=-1.0（负值 → ToolRegistry::canMine 自动 false：t141 后生存不可破——updateMining 守 finishMiningAt；创造可瞬破，t141 移除 beginMining 守卫）。
 //   - toolType：本工程仅有镐 → 石类（stone/cobble/furnace/coal_ore/iron_ore）需 Pickaxe；其余 NoTool（空手采且掉落）。
 //   - minToolTier：coal_ore=1（木镐可挖、掉煤材料）；iron_ore=2（需石镐，木镐挖了不掉落，机制等价 MC 铁矿）。
 //   - dropId：方块自掉（id==自身），唯独 stone→cobble（MC：原石采下变圆石）；矿石→材料段 id（>=0x200，

@@ -430,15 +430,12 @@ void PlayerController::beginMining()
     }
 
     if (m_mode == Creative) {
-        // 创造：瞬破（progress 直接 1.0 等价），不掉落。仍发 swingArm（动作真发生）。
+        // 创造：瞬破（progress 直接 1.0 等价），不掉落。仍发 swingArm（finishMiningAt 末尾发，动作真发生）。
         // 不进入累积态（mining 留 false）→ 不显裂纹叠层（瞬破无需裂纹）。
         // finishMiningAt 内自行取原方块 id（setBlock 前）发 playerMined；此处无需重复读取。
-        // t119 canMine 守卫：基岩（hardness=-1.0 → ToolRegistry::canMine=false）即便创造也**不可秒破**。
-        //   生存路径已由 updateMining 顶部 + line 517 的 canMine 双重守卫（不会进入累积态）；创造瞬破分支
-        //   此前**漏守卫** → 创造左键基岩会被秒破。此处补 canMine 拦截：不可挖则给挥臂反馈（动作真发生）
-        //   但 return（不调 finishMiningAt），任何模式挖基岩无裂纹不破（spec 验收）。
-        const quint8 hb = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
-        if (!ToolRegistry::canMine(hb)) { emit swingArm(); return; } // 基岩：挥臂但不破
+        // t141：删 t119 的创造 canMine 守卫 —— 创造模式下基岩**可秒破**（spec「基岩创造可破」）。原守卫
+        //   拦截基岩（hardness<0 → canMine=false）仅给挥臂不破；现移除，基岩与普通方块同走瞬破（仍发
+        //   swingArm）。生存基岩仍不可破：updateMining 内 if(canMine(bid)&&progress>=1.0) 守 finishMiningAt。
         finishMiningAt(m_hitBx, m_hitBy, m_hitBz, /*drop=*/false);
         return;
     }
@@ -513,7 +510,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
 //   - 失命中 / 目标已被破（变 air）→ cancelMining。
 //   - 目标换（玩家转头）→ 重置 progress（spec：换目标清零），目标格更新。
 //   - stage 推进（progress 跨 1/6 阈值）→ 发 miningStateChanged（驱动 QML 切裂纹贴图）+ swingArm（挥动循环）。
-//   - progress >= 1.0 → finishMiningAt（drop = canHarvest）。
+//   - progress >= 1.0（且 canMine）→ finishMiningAt（drop = canHarvest）；基岩 canMine=false 永不破（t141）。
 // t44 连续挖掘：finishMiningAt 内 cancelMining 清 m_mining，但 m_leftDown 仍 true（左键未松）。下一 tick
 //   顶部检测到「未在累积 + 左键仍按 + Survival + 命中新可挖块」→ 自动 beginMining 新目标（progress 归 0
 //   继续），不松手连挖。停止条件：松手（m_leftDown=false）/ 视线无命中（m_hasHit=false，含出射程——
@@ -546,10 +543,12 @@ void PlayerController::updateMining(float dt)
         emit miningProgressChanged();
     }
 
-    // 目标已被破（其它途径）/ 不可挖 → 取消。可挖判定走 ToolRegistry::canMine（t42 方块表：
-    // 实体且 hardness>0；air / 越界 / 基岩=false），取代原 bid==Air 硬比较（spec：可挖走 BlockDef）。
+    // 目标变 air（已被其它途径破 / 越界）→ 取消累积。t141：不再对「不可挖（基岩）」取消 —— 基岩保留在
+    //   累积挖掘态推 stage（挥臂 + miningParticle 音）给反馈，仅由下方完成守卫 if(canMine(bid)&&progress
+    //   >=1.0) 阻止 finishMiningAt（不破）。原 canMine 取消会把基岩立即清出累积态 → 无任何挖掘反馈。
+    //   air / 越界 = 已破 / 无目标，取消合理（blockAt 越界返 Air）。
     const quint8 bid = m_world->blockAt(m_mineBx, m_mineBy, m_mineBz);
-    if (!ToolRegistry::canMine(bid)) { cancelMining(); return; }
+    if (int(bid) == int(BlockRegistry::Air)) { cancelMining(); return; }
 
     // t57：手持物品 id **直接读 hotbar（单一权威）**，不读 m_selectedItem 副本。m_selectedItem 经
     //   Q_PROPERTY 绑定 hotbarVM.selectedItemId（NOTIFY=selectedSlotChanged）刷新，但 QML 绑定重算
@@ -561,12 +560,15 @@ void PlayerController::updateMining(float dt)
     const int heldItemId = m_hotbar ? m_hotbar->selectedItemId() : 0;
 
     // 速度：miningTime = hardness / speedMul（ToolRegistry），progress 增量 = dt / miningTime。
-    // canMine 已保 hardness>0 → miningTime 经 max(t,0.05) 地板恒 >0，无除零。
+    // t141：基岩（hardness<0，canMine=false）现也走到此累积路径给反馈 —— miningTime 对 hardness<=0 走
+    //   0.05s 地板（不除 hardness），故恒 >0，无除零；基岩 progress 快速达 1.0 但被完成守卫拦下不破。
     const float miningTime = ToolRegistry::miningTime(bid, heldItemId);
     m_miningProgress += dt / miningTime;
 
     // stage 推进：clamp(progress*6, 0, 5)。每跨一阶发 miningStateChanged（切贴图）+ swingArm（挥动循环）。
-    const int newStage = std::clamp(int(m_miningProgress * 6.0f), 0, 5);
+    // t141：基岩永不 finishMiningAt → progress 无界增长；min(progress,1.0) 把 int 转换输入钳到 6.0，杜绝
+    //   长时挂挖的 int 溢出 UB（stage 本就 clamp 到 0..5，钳 1.0 不改变任何可观测行为）。
+    const int newStage = std::clamp(int(std::min(m_miningProgress, 1.0f) * 6.0f), 0, 5);
     if (newStage != m_miningStage) {
         m_miningStage = newStage;
         emit miningStateChanged();
@@ -582,7 +584,10 @@ void PlayerController::updateMining(float dt)
     //   空手（heldItemId=0 / 非工具）挖需工具方块（石 / 圆石）→ canHarvest=false → 仅 AIR 不掉落；
     //   泥土 / 草 / 木 / 叶 / 沙（NoTool）→ canHarvest=true → 掉落（spec）。
     // finishMiningAt 内 cancelMining 清 m_mining=false；m_leftDown 不动 → 下一 tick 顶部续挖分支接手。
-    if (m_miningProgress >= 1.0f) {
+    // t141：完成守卫加 canMine —— 不可挖方块（基岩 hardness<0）即便 progress 满（miningTime 走 0.05s
+    //   地板使 progress 快速达 1.0）也**不**调 finishMiningAt（不破）。spec「if(canMine(bid)&&progress
+    //   >=1.0) 守 finishMiningAt 不破」。基岩留累积态持续推 stage 反馈（挥臂 + 挖掘音），但永不破。
+    if (ToolRegistry::canMine(bid) && m_miningProgress >= 1.0f) {
         const bool drop = ToolRegistry::canHarvest(bid, heldItemId);
         finishMiningAt(m_mineBx, m_mineBy, m_mineBz, drop);
     }

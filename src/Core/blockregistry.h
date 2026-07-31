@@ -41,10 +41,11 @@ public:
                            // hardness=0 瞬破、NoTool；掉落自身。**视觉光源走伪光源**（Main.qml 发光
                            // Model + 光晕，NoLighting 高 baseColor 暖色），**非** QtQuick3D PointLight
                            // （lit 材质渲染红线，lessons-learned；真 flood-fill 方块光留 PLAN §M）。
-        Bedrock       = 14, // 基岩：世界底层不可破坏方块（t119）；机制等价 MC 基岩。solid=true 实体碰撞、
-                           // **hardness=-1.0**（负值 → ToolRegistry::canMine 自动 false，任何模式任何工具
-                           // 均不可破，防创造秒破底层）、dropId=0（破不掉落，但实际不可破故永不触发）、
-                           // 各面同贴图（tile 18）。worldgen 在 y 0..4 按 hashVoxel 坑洼铺一层（底实顶疏）。
+        Bedrock       = 14, // 基岩：世界底层方块（t119）；机制等价 MC 基岩。solid=true 实体碰撞、
+                           // **hardness=-1.0**（负值 → ToolRegistry::canMine 自动 false → 生存不可破：
+                           // updateMining 内 if(canMine&&progress>=1.0) 守 finishMiningAt；t141 后创造可瞬破，
+                           // beginMining 守卫已移除）、dropId=0（破不掉落）、各面同贴图（tile 18）。
+                           // worldgen 在 y 0..4 按 hashVoxel 坑洼铺一层（底实顶疏）。
         // ── t134 不完整方块（异形几何段，id >= FirstPartial）：6 类木制半方块，机制等价 MC 1.0
         //   (id, metadata) 方块模型。solid=false（同 torch：非整立方 → 不挡邻居面剔除，避免相邻整立方
         //   被错误剔除出「洞」；逐形状精确碰撞留后续任务）。各面同贴图=planks(8)、hardness=2.0（木质）、
