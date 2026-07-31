@@ -1304,20 +1304,38 @@ Window {
                     position: Qt.vector3d(model.x + 0.5, model.y, model.z + 0.5)
 
                     // t114 朝向态：up=垂直插地；px/nx/pz/nz=横插 ±X/±Z 向（贴对应墙、柄伸向 cell 中央）。
-                    // 默认 up；recomputeOrient 据邻居 solid 实时改写。
+                    //   t125：定向权威改为「玩家点击面」（prefOrient，由 placeBlock 经 torchPlaced 传入的命中面
+                    //   外法线推导），recomputeOrient 优先采用之；旧固定优先级（下>-X>+X>-Z>+Z）仅作退化兜底。
                     property string orient: "up"
 
-                    // 据邻居实体性推断朝向（按下 / 4 侧顺序；首个实体邻居定方向，无任何实体则兜底 up）。
-                    // 用 theWorld.isCollidable（BlockRegistry::isSolid）—— 只认实体方块，不把另一火把 /
-                    // 空气当支撑（避免两火把互挂成悬空）。顺序：下 > -X > +X > -Z > +Z（与 MC「下优先」一致）。
+                    // t125 判定某朝向对应的支撑邻居是否实体（柄要嵌的那面墙 / 地是否还在）。
+                    //   用 theWorld.isCollidable（BlockRegistry::isSolid）—— 只认实体方块，不把另一火把 /
+                    //   空气当支撑（避免两火把互挂成悬空）。orient→邻居：柄伸 +X(px) 嵌 -X 墙、余类推。
+                    function orientNeighborSolid(o, x, y, z) {
+                        switch (o) {
+                        case "up": return theWorld.isCollidable(x, y - 1, z)
+                        case "px": return theWorld.isCollidable(x - 1, y, z)
+                        case "nx": return theWorld.isCollidable(x + 1, y, z)
+                        case "pz": return theWorld.isCollidable(x, y, z - 1)
+                        case "nz": return theWorld.isCollidable(x, y, z + 1)
+                        }
+                        return false
+                    }
+
+                    // 定向火把：优先玩家点击面（prefOrient）—— 只要对应支撑邻居仍实体即采用，修正旧固定
+                    //   优先级在「墙+地并存」（墙插火把下方恰有地面）时误判垂直立柱、违背玩家点墙意图的 bug。
+                    //   退化：玩家所点面支撑被挖掉 → 按下 / 4 侧顺序首个实体邻居兜底；全无实体则保留玩家意图
+                    //   方向（无 pop-off 机制，宁可按原朝向画也不突兀翻转）。
                     function recomputeOrient() {
                         const x = model.x, y = model.y, z = model.z
+                        const pref = model.prefOrient || "up"
+                        if (orientNeighborSolid(pref, x, y, z)) { torchGlow.orient = pref; return }
                         if (theWorld.isCollidable(x, y - 1, z)) { torchGlow.orient = "up"; return }
                         if (theWorld.isCollidable(x - 1, y, z)) { torchGlow.orient = "px"; return }
                         if (theWorld.isCollidable(x + 1, y, z)) { torchGlow.orient = "nx"; return }
                         if (theWorld.isCollidable(x, y, z - 1)) { torchGlow.orient = "pz"; return }
                         if (theWorld.isCollidable(x, y, z + 1)) { torchGlow.orient = "nz"; return }
-                        torchGlow.orient = "up" // 兜底：火把悬空（无支撑，放置预检本应拦截）仍按垂直画，避免不可见
+                        torchGlow.orient = pref // 悬空（支撑已无）→ 保留玩家意图方向，避免不可见
                     }
 
                     // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
@@ -1473,8 +1491,8 @@ Window {
             if (particleLoader.item) particleLoader.item.burstPlace(x, y, z, id)
             // t89：放块音（按新放方块 id）。
             audio.playPlace(id)
-            // t88：火把被放 → 追加伪光源（id=13=BlockRegistry::Torch，见上注释）。
-            if (id === 13) torchPositions.append({x: x, y: y, z: z})
+            // t125：火把伪光源改由下方 player.onTorchPlaced 追加（需携带玩家点击面法线定向）；本通用
+            //   放块信号不再处理火把，避免「两处追加」重复。
             // t32：生存放置消耗 1 件（创造=无限源不耗）。worldgen 经 m_chunks.setBlock 直写、不经
             // World::setBlock → 不会发 blockPlaced；游戏内该信号仅玩家 placeBlock 触发，故此处即
             // 「玩家放置成功」语义事件。ViewModel 观察 World 事件做栈突变（PLAN §2 分层：VM 只依赖
@@ -1503,6 +1521,28 @@ Window {
         for (let i = torchPositions.count - 1; i >= 0; --i) {
             const e = torchPositions.get(i)
             if (e.x === x && e.y === y && e.z === z) { torchPositions.remove(i); return }
+        }
+    }
+
+    // t125 命中面外法线 → 火把定向串。法线指向玩家侧（射线进入面外法线）：
+    //   +Y(顶面)→up 垂直；+X 面→火把贴 -X 墙、柄伸 +X(px)；-X 面→贴 +X 墙、柄伸 -X(nx)；±Z 同理(pz/nz)。
+    //   与 torchHost delegate 内柄位姿 switch 同源约定（柄嵌命中面、火焰在柄自由端）。
+    function orientFromNormal(nx, ny, nz) {
+        if (ny > 0) return "up"
+        if (nx > 0) return "px"
+        if (nx < 0) return "nx"
+        if (nz > 0) return "pz"
+        if (nz < 0) return "nz"
+        return "up"
+    }
+
+    // t125 火把放置 → 追加伪光源 + 记录玩家点击面定向（prefOrient）。携带命中面外法线的语义事件由
+    //   placeBlock 发出（见 playercontroller torchPlaced）；呈现层据此定向，绝不反向写栅格（PLAN §2 分层）。
+    //   火把生命周期仍对称走 World 信号（破 → onBlockBroken 移除 / worldChanged 校验清理），此处仅「加」。
+    Connections {
+        target: player
+        function onTorchPlaced(x, y, z, nx, ny, nz) {
+            torchPositions.append({x: x, y: y, z: z, prefOrient: orientFromNormal(nx, ny, nz)})
         }
     }
 

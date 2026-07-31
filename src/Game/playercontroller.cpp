@@ -607,6 +607,11 @@ void PlayerController::placeBlock()
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
     }
     m_world->setBlock(tx, ty, tz, quint8(m_selectedBlock));
+    // t125 火把朝向：把玩家点击面外法线随放置事件传出，供呈现层按玩家意图定向（柄嵌所点墙面，
+    //   非旧固定优先级误判）。法线为射线命中面外法线（指向玩家侧），值在 placeBlock 入口已由 updateRaycast
+    //   确定、此处不变；按值传出无后效依赖（即便下一帧 raycast 改向也不影响本火把）。
+    if (m_selectedBlock == BlockRegistry::Torch)
+        emit torchPlaced(tx, ty, tz, m_hitNx, m_hitNy, m_hitNz);
     emit swingArm(); // 放块成功 → 第一人称手挥动（t29）
 }
 

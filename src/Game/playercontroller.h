@@ -261,6 +261,12 @@ signals:
     // Game/Physics 层发语义事件，呈现层只消费（PLAN §2 分层）。熔炉槽状态 / 冶炼 tick 由 FurnaceUI
     // 自持（面板常驻、visible 切换；WorldClock.ticked 驱动 tick）。
     void furnaceOpened();
+    // 火把放置（t125 朝向修正）：placeBlock 成功放置 Torch 后发，携带玩家点击面的外法线（指向玩家侧，
+    //   = m_hitNx/Ny/Nz）。呈现层（torchHost）据此把火把定向为「柄嵌玩家所点墙面」——替代旧 recomputeOrient
+    //   固定优先级（下>-X>+X>-Z>+Z）：旧逻辑在「墙+地并存」（墙插火把下方恰有地面）时误判垂直立柱，
+    //   违背玩家点击墙面的意图。法线为原始几何量，定向串（up/px/nx/pz/nz）由呈现层推导（PLAN §2 分层：
+    //   Game 层只发几何语义事件，呈现决定如何画；同 swingArm / spawnItem 模式）。
+    void torchPlaced(int x, int y, int z, int nx, int ny, int nz);
 
 protected:
     void componentComplete() override;
