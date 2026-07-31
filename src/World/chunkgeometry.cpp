@@ -196,8 +196,13 @@ void ChunkGeometry::buildMesh()
 
                     for (int f = 0; f < 6; ++f) {
                         const FaceDef &F = kFaces[f];
-                        if (blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]) != 0)
-                            continue; // 邻居实体 → 剔除（跨 chunk 边界同样正确）
+                        // 邻居实体 → 剔除（跨 chunk 边界同样正确）。走 BlockRegistry::isSolid 单一权威，
+                        // 与 playercontroller/raycast 的 isSolid 判定同源（PLAN §2：世界数据单一）。
+                        //   原 `!= 0` 把任意非空气方块当 solid，导致火把(solid=false) 误判为挡面 →
+                        //   火把下方地板的顶面被错误剔除 → 地板透明（t130 修复根因）。
+                        //   越界 / air / torch 等 solid=false 方块不挡邻居面（应画出）。
+                        if (BlockRegistry::isSolid(blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2])))
+                            continue;
 
                         const int t = tileFor(b, f);
                         const float u0 = t * tileW + hx, u1 = (t + 1) * tileW - hx;
