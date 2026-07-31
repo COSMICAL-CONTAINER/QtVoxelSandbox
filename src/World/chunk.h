@@ -40,6 +40,19 @@ public:
     // → 每格 setBlock 都维护 → generate 末各列 heightmap 即正确，无需额外全扫。
     int heightmapAt(int lx, int lz) const;
 
+    // t151 真光场（PLAN §2-H「方块光独立 flood-fill、时间不变」+ §M 真光场）：per-voxel 光场存本 chunk
+    //   第三数组 m_lightField，一字节打包两通道（机制等价 MC 1.0 的 nibble 光照：高 4 位天光 sky、低 4 位
+    //   方块光 block，各 0..15）。两通道由 World::recomputeLightField() 做 BFS flood-fill 写入：
+    //   - 天光 sky：列首遮光方块（isSolid）以上的非遮光格种 sky=15，向邻接非遮光格传播衰减 1（洞穴入口
+    //     让天光渗入、自顶向下照亮地表 / 天空间）。
+    //   - 方块光 block：火把格种 block=14（radius14），向邻接非遮光格传播衰减 1（火把在地下 / 室内打出光池）。
+    //   mesher 据本格 / 邻格光场值写顶点色（替代 t123 方向太阳 faceVc）；昼夜乘子仍由 QML baseColor 承担
+    //   （平滑），故光场本身时间不变 —— 仅 setBlock / worldgen 改变栅格时重算。越界读返回 0。
+    quint8 skyLightAt(int lx, int ly, int lz) const;
+    quint8 blockLightAt(int lx, int ly, int lz) const;
+    void setLight(int lx, int ly, int lz, quint8 sky, quint8 block); // 写两通道（各夹到 0..15 后打包）
+    void clearLight();                                                // 全格光场归零（re-flood 前清场）
+
     // 脏标记：体素被改 → 置脏；mesher(t03) 只重建脏 chunk。新建即脏（首帧需 mesh）。
     bool dirty() const { return m_dirty; }
     void markDirty() { m_dirty = true; }
@@ -57,6 +70,9 @@ private:
     std::vector<quint8> m_states;
     // t121：每列「自顶向下首个非空气」的 y（-1=全空列）。setBlock 增量维护（见 heightmapAt 注释）。
     int m_heightmap[kSize * kSize];
+    // t151：per-voxel 光场（sky<<4 | block，各 4 位 0..15）。recreate / clearLight 归零；flood-fill 写入。
+    //   mesher 只读。与 m_voxels / m_states 同尺寸 / 同索引（lx + kSize*(lz + kSize*ly)）。
+    std::vector<quint8> m_lightField;
     std::atomic<bool> m_dirty{true};     // 新建即脏（首帧需 mesh）。atomic：未来 mesh-worker 读脏标记无 TSan 数据竞争（voxel 数组仍需 §2-C per-chunk 锁，线程化时补）
 };
 

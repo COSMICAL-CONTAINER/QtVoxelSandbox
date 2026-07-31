@@ -7,9 +7,8 @@
 #include <QByteArray>
 #include <QVector3D>
 
-#include <algorithm> // std::clamp / std::max（t123 顶点光方向调制）
+#include <algorithm> // std::clamp / std::max（t151 真光场顶点色钳制）
 #include <cstddef>
-#include <cmath>     // std::sqrt / std::fabs / std::round（t123 投影阴影回扫）
 #include <cstring>
 
 // Vtx（chunk 顶点格式：pos3 + normal3 + uv2 + color4 rgba = 12 float = 48 字节）定义在
@@ -134,31 +133,16 @@ void ChunkGeometry::buildMesh()
     constexpr float hy = 0.5f / 16;
     const float v0 = 0.0f + hy, v1 = 1.0f - hy;
 
-    // t123 动态太阳顶点光常量（方案②：顶点色承载方向调制，PLAN §2-H 非 lit/shadowmap）：
-    //   kSunRange：方向对比强度。朝太阳面（lit - litAvg > 0）超过 1 → 夹到 kSunMax（最亮=贴图原色）；
-    //     背阳 / 投影阴影面（< 0）低于 1，呈暗。
-    //   kSunMin / kSunMax：vc 钳制范围。t135 下限 0.3→0.15 放宽对比（阴影面更暗、朝太阳面更亮，
-    //     方向感与投影对比更明显；仍不黑死）；上限 1.0 不超过贴图原色（NoLighting 无法 overbright）。
-    //   kMaxShadow：heightmap 列投影阴影回扫最大列距离（界性能；低空太阳 tanElev 小 → 自然长阴影，超距截断）。
-    //     t135 10→32：低空 / 接近正午时仍能扫到挡光列，阴影更长更连续（影子跟随太阳移动更平滑）。
-    constexpr float kSunRange   = 1.5f;
-    constexpr float kSunMin     = 0.15f;
-    constexpr float kSunMax     = 1.0f;
-    constexpr int   kMaxShadow  = 32;
-    // 太阳派生量（由 m_sunDir 算一次，供本 chunk 全部顶点光照复用）：
-    //   sunIntensity：太阳高度归一（sin(kSunMaxElevDeg)=0.766 为满日照基准）。sunDir.y<0（地平下）→ 0
-    //     → 白天方向调制生效、夜间归零（vc=1，与 t121 等亮，无夜间变暗回归）。
-    //   sunHx/Hz：太阳水平单位方向（投影阴影回扫方向）；hlen≈0（天顶）时无水平阴影（短至零长）。
-    //   sunTanElev：仰角正切 = sunDir.y/hlen。低空 → 小 → 同样高的列在更远处仍挡（长阴影）。
-    //   sunLitAvg：6 轴面方向 lit 的均值（|sx|+|sy|+|sz|)/6。「均值归一」使全天平均亮度 ≈ 天光：
-    //     direction 对比在均值附近对称展开，朝太阳 +、背阳 −，整体不净变暗。
-    const float sdx = m_sunDir.x(), sdy = m_sunDir.y(), sdz = m_sunDir.z();
-    const float sunIntensity = std::clamp(sdy / 0.766f, 0.f, 1.f);
-    const float sunHlen = std::sqrt(sdx * sdx + sdz * sdz);
-    const float sunHx = (sunHlen > 1e-3f) ? sdx / sunHlen : 0.f;
-    const float sunHz = (sunHlen > 1e-3f) ? sdz / sunHlen : 0.f;
-    const float sunTanElev = (sunHlen > 1e-3f) ? sdy / sunHlen : 0.f;
-    const float sunLitAvg = (std::fabs(sdx) + std::fabs(sdy) + std::fabs(sdz)) / 6.f;
+    // t151 真光场顶点色常量（PLAN §2-H / §M，替代 t123 方向太阳 faceVc）：
+    //   光场值 = 邻格（面所朝向的空气格）的 max(sky, block)/15，直接作顶点色。天光 / 火把方光由 World 的
+    //   BFS flood-fill 算出（存 chunk 第三数组），mesher 只读采样。昼夜乘子仍由 QML baseColor 承担
+    //   （terrainLight(skyLight) 平滑 lerp），故光场时间不变 —— 不随 sunDir 重建而变（sunDir 保留供 t153
+    //   PCF 软影重用，方向阴影那套 faceNormal·sunDir + heightmap 列投影已由此真光场替代）。
+    //   kVcMin：未照明格（深洞无天光 / 无火把）的底亮度 —— 防纯黑撕裂、保留微弱可辨识（MC 为纯黑，
+    //     此处取小底兼顾可玩性；火把光池 0.93 与之强对比，洞穴暗 / 火把亮一目了然）。
+    //   kVcMax：满光封顶 1.0（NoLighting 无法 overbright，贴图原色即最亮）。
+    constexpr float kVcMin = 0.05f;
+    constexpr float kVcMax = 1.0f;
 
     if (c && m_world) {
         // 逐局部格：世界坐标取体素 + 邻居（跨 chunk 边界经 world.blockAt 路由 → 共边实体面
@@ -181,32 +165,12 @@ void ChunkGeometry::buildMesh()
                     //   水段不会到此（水 != Torch，已被 isWater != m_waterOnly 跳过），故仅地形段需此守卫。
                     if (!isWater && b == BlockRegistry::Torch) continue;
 
-                    // t121 天光 heightmap（PLAN §2-H「per-column 天光」）：本列首个非空气方块的 y。
-                    // ly >= hm → 见天（地表/天空间）；否则地下。t123 改：见天块叠方向太阳光 + 投影阴影，
-                    //   地下块恒暗 0.2（天光 flood-fill 留后续轮次）。
-                    const int hm = m_world->heightmapAt(wx, wz);
-                    const bool surface = (ly >= hm);
-
-                    // t123 heightmap 列投影阴影：本块见天且太阳在地平线上时，沿太阳水平方向（朝太阳）
-                    //   回扫邻接列 heightmap；若有列足够高（挡住本块到太阳的视线：colHm >= ly + d·tanElev）
-                    //   则本块被投影阴影（shade=0 → 朝太阳的面失去直射贡献、呈阴影）。跨 chunk 经
-                    //   world.heightmapAt 路由 → 阴影无缝跨越边界。太阳低空时 tanElev 小 → 长阴影。
-                    //   本量为「每块」算一次（块内 6 面共享），界性能（仅见天块 + 太阳在上时算）。
-                    //   t135 门控放宽：原 `sunIntensity > 1e-3f` 在正午（sunDir 接近天顶，水平投影小）与黄昏
-                    //     （sunIntensity 趋 0）都不投影 → 一大坨无阴影。改判 `sdy > 0.f`：太阳只要在地平线上就
-                    //     算投影（含正午低水平角与黄昏），影子在全天白昼段都生效（更连续）。
-                    float shade = 1.0f;
-                    if (surface && sdy > 0.f && sunHlen > 0.05f) {
-                        for (int d = 1; d <= kMaxShadow; ++d) {
-                            const int qx = wx + int(std::round(sunHx * float(d)));
-                            const int qz = wz + int(std::round(sunHz * float(d)));
-                            const int chm = m_world->heightmapAt(qx, qz); // 越界 / 空列 → -1（不挡）
-                            if (chm >= 0 && float(chm) >= float(ly) + float(d) * sunTanElev) {
-                                shade = 0.0f;
-                                break;
-                            }
-                        }
-                    }
+                    // t151 真光场：本格光场值（max(sky,block)/15）用于异形方块各面顶点色（近似：异形小体
+                    //   各面共用以本格光场，因其面所朝向的「邻格」在子格尺度上歧义；异形格非遮光 → 光场
+                    //   已 flood 反映周围天光 / 火把光）。采样本格（wx,ly,wz）；立方体面则采邻格（下方）。
+                    const quint8 cSky = m_world->skyLightAt(wx, ly, wz);
+                    const quint8 cBlock = m_world->blockLightAt(wx, ly, wz);
+                    const float cellLight = std::clamp(std::max(cSky, cBlock) / 15.0f, kVcMin, kVcMax);
 
                     // t133 不完整方块异形分支：id >= FirstPartial 的方块不走 1×1×1 立方面路径，交由
                     //   PartialBlockGeometry::append 生成异形顶点并**合批进同一 chunk mesh**（复用本顶点
@@ -219,11 +183,8 @@ void ChunkGeometry::buildMesh()
                     //   无 Water case → default 返 0 不画 → 水面丢失）。
                     if (!isWater && b >= BlockRegistry::FirstPartial) {
                         const quint8 st = stateAtWorld(wx, ly, wz);
-                        const PartialLightCtx lctx{
-                            sdx, sdy, sdz,
-                            sunIntensity, sunLitAvg,
-                            shade, surface
-                        };
+                        // t151：异形方块各面共用本格光场值作顶点色（PartialLightCtx.light）。
+                        const PartialLightCtx lctx{ cellLight };
                         PartialBlockGeometry::append(verts, idx, lx, ly, lz, b, st,
                                                      lctx, tileW, hx, hy, v0, v1);
                         continue;
@@ -249,21 +210,14 @@ void ChunkGeometry::buildMesh()
                         const int t = tileFor(b, f);
                         const float u0 = t * tileW + hx, u1 = (t + 1) * tileW - hx;
 
-                        // t123 顶点光方向调制（写进 color.rgb，PrincipledMaterial NoLighting×vertexColor）：
-                        //   地下块：恒暗 0.2（无天光 / 太阳）。
-                        //   见天块：vc = clamp(1 + kSunRange·sunIntensity·(lit·shade − sunLitAvg), kSunMin, kSunMax)。
-                        //     lit = max(0, faceNormal·sunDir)（朝太阳的面 >0、背阳 =0）；shade 门控投影阴影。
-                        //     「均值归一」（减 sunLitAvg）使全天平均 ≈ 天光：sunIntensity=0（夜）→ vc=1（与 t121
-                        //     等亮、无夜间变暗）；白天朝太阳面 >1（夹 kSunMax）、背阳/阴影面 <1（暗）。
-                        //   方向感 + 投影阴影由此显现，且随 sunDir 量化跨步演变（太阳「时间流逝移动」）。
-                        float vc;
-                        if (!surface) {
-                            vc = 0.2f;
-                        } else {
-                            const float lit = std::max(0.f, F.nrm[0] * sdx + F.nrm[1] * sdy + F.nrm[2] * sdz);
-                            const float contrast = lit * shade - sunLitAvg;
-                            vc = std::clamp(1.f + kSunRange * sunIntensity * contrast, kSunMin, kSunMax);
-                        }
+                        // t151 真光场顶点色（替代 t123 方向太阳 faceVc）：本面照明 = 邻格（面所朝向的空气格）
+                        //   的光场值 max(sky,block)/15。邻格为非 solid（空气 / 火 / 水 / 异形）→ 已 flood 得天光 /
+                        //   火把光。越界 y>=height 视作开阔天光 15（顶面采样）。clamped [kVcMin, kVcMax]。
+                        //   方向阴影（faceNormal·sunDir + heightmap 列投影）已移除，留 t153 PCF 软影重做。
+                        const int ax = wx + F.dir[0], ay = ly + F.dir[1], az = wz + F.dir[2];
+                        const quint8 nbSky = m_world->skyLightAt(ax, ay, az);
+                        const quint8 nbBlock = m_world->blockLightAt(ax, ay, az);
+                        const float vc = std::clamp(std::max(nbSky, nbBlock) / 15.0f, kVcMin, kVcMax);
 
                         const quint32 base = quint32(verts.size());
                         for (int cc = 0; cc < 4; ++cc) {
@@ -277,7 +231,7 @@ void ChunkGeometry::buildMesh()
                             v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
                             v.u = u0 + cu * (u1 - u0);
                             v.v = v0 + cv * (v1 - v0);
-                            v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f; // t123 顶点光（方向太阳 + 天光遮蔽）
+                            v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f; // t151 真光场顶点色（邻格 max(sky,block)/15）
                             verts.append(v);
                         }
                         idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);

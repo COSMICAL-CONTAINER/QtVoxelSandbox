@@ -1,8 +1,5 @@
 #include "partialblockgeometry.h"
 
-#include <algorithm> // std::clamp / std::max
-#include <cmath>     // std::fabs（faceVc 复算用；与 chunkgeometry 同源公式）
-
 // t134 不完整方块异形几何：为 6 类木制半方块（WoodSlab/WoodStairs/WoodFence/WoodPressurePlate/
 // WoodDoor/WoodTrapdoor）生成异形顶点，**合批进同一 chunk mesh**（复用 chunkgeometry 顶点色光照管线 +
 // 单 draw call，lessons-learned t03「大网格不要用 QML Repeater」）。
@@ -11,8 +8,8 @@
 //   - 复用 chunkgeometry 的「kFaces 法线 + uv 规则」：每面外法线 + 4 角（从外看 CCW）+ per-face UV 映射
 //     （±X 面 cu,cv=(z,y)；±Z 面 (x,y)；±Y 面 (x,z)），三角形按 (0,1,2),(0,2,3)。本文件本地定义同款
 //     Face 表（chunkgeometry 的 kFaces 是其 .cpp 内 static，无法 import；此处镜像，注释钉死同源）。
-//   - 顶点色 vc 按各面外法线复算（与 chunkgeometry 立方面同公式：地下 0.2 / 见天 clamp(1+kSunRange·
-//     sunIntensity·(lit·shade − sunLitAvg), kSunMin, kSunMax)），使异形方块与立方面光照一致、无缝混排。
+//   - t151 真光场：各面顶点色 = 本格光场值 max(sky,block)/15（由 chunkgeometry 算好经 PartialLightCtx.light
+//     传入），异形方块与立方面光照一致、无缝混排（替代 t123 方向太阳 faceVc）。
 //   - 各 shape 生成器把异形拆成 1~2 个轴对齐子盒（pushBox 推 6 面），不剔内面 —— 异形小体的内/底面被
 //     自身遮挡（overdraw 可忽），且 partial 方块 solid=false 不参与整立方邻居剔除，需自画全部面。
 //
@@ -27,18 +24,11 @@
 // 文件位置（分层 PLAN §2）：与唯一调用者 chunkgeometry 同放 src/World/（mesher 子系统同层），见 .h 注释。
 
 namespace {
-// 顶点光常量（镜像 chunkgeometry.cpp 同名常量；改一处须同步另一处 —— 二者须渲染一致）。
-constexpr float kSunRange = 1.5f;
-constexpr float kSunMin   = 0.15f;  // codereview H1: 与 chunkgeometry.cpp t135 的 kSunMin 镜像（0.3→0.15），否则部分方块阴影区亮 2 倍断层
-constexpr float kSunMax   = 1.0f;
-
-// 单面顶点色（同 chunkgeometry 立方面公式：地下恒暗 0.2；见天按 faceNormal·sunDir + 投影阴影调制）。
+// t151：异形方块各面共用本格光场值作顶点色（faceVc 直接返回 L.light，法线参数保留供未来按面分流）。
 float faceVc(const float nrm[3], const PartialLightCtx &L)
 {
-    if (!L.surface) return 0.2f;
-    const float lit = std::max(0.f, nrm[0] * L.sdx + nrm[1] * L.sdy + nrm[2] * L.sdz);
-    const float contrast = lit * L.shade - L.sunLitAvg;
-    return std::clamp(1.f + kSunRange * L.sunIntensity * contrast, kSunMin, kSunMax);
+    (void)nrm; // t151：异形方块面光近似为本格光场（不按法线复算）；保留形参供未来按面采样邻格。
+    return L.light;
 }
 
 // 轴对齐盒体 6 面定义（normal + 4 角 + per-corner (cu,cv)）。角序与 chunkgeometry kFaces 完全一致

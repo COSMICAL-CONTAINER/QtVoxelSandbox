@@ -55,6 +55,38 @@ int ChunkManager::heightmapAt(int x, int z) const
     return c ? c->heightmapAt(x - (x / kSize) * kSize, z - (z / kSize) * kSize) : -1;
 }
 
+// t151 光场路由（世界坐标 → chunk 局部）。越界读返回 0（无光）。flood-fill 与 mesher 经此访问光场。
+quint8 ChunkManager::skyLightAt(int x, int y, int z) const
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return 0;
+    Chunk *c = chunk(x / kSize, z / kSize);
+    return c ? c->skyLightAt(x - (x / kSize) * kSize, y, z - (z / kSize) * kSize) : quint8(0);
+}
+
+quint8 ChunkManager::blockLightAt(int x, int y, int z) const
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return 0;
+    Chunk *c = chunk(x / kSize, z / kSize);
+    return c ? c->blockLightAt(x - (x / kSize) * kSize, y, z - (z / kSize) * kSize) : quint8(0);
+}
+
+void ChunkManager::setLight(int x, int y, int z, quint8 sky, quint8 block)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return; // 越界忽略（flood 自行跳过 OOB 邻居）
+    Chunk *c = chunk(x / kSize, z / kSize);
+    if (c) c->setLight(x - (x / kSize) * kSize, y, z - (z / kSize) * kSize, sky, block);
+}
+
+// 全部 chunk 光场归零（re-flood 前清场，World::recomputeLightField 调）。
+void ChunkManager::clearAllLight()
+{
+    for (auto &cp : m_chunks)
+        if (cp) cp->clearLight();
+}
+
 // t133：世界坐标 state 读（跨 chunk 路由，同 blockAt）。越界 / 无 chunk → 0（常规方块无 state）。
 quint8 ChunkManager::stateAt(int x, int y, int z) const
 {

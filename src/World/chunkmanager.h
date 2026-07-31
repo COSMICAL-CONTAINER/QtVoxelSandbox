@@ -38,6 +38,12 @@ public:
     bool setBlock(int x, int y, int z, quint8 id, quint8 state);
     // t121：世界坐标列的「自顶向下首个非空气」y（越界 / 空列 → -1）。mesher 据此判顶点见天（PLAN §2-H）。
     int heightmapAt(int x, int z) const;
+    // t151 光场路由（世界坐标 ↔ chunk 局部）：sky/block 读 + 写 + 全清。越界读返回 0、写忽略。
+    //   flood-fill（World）与 mesher 经此访问 per-voxel 光场（跨 chunk 自动路由）。OOB 语义统一交 caller。
+    quint8 skyLightAt(int x, int y, int z) const;
+    quint8 blockLightAt(int x, int y, int z) const;
+    void setLight(int x, int y, int z, quint8 sky, quint8 block);
+    void clearAllLight();
 
     // 取 chunk（网格坐标 cx,cz；越界返回 nullptr）。
     Chunk *chunk(int cx, int cz) const;

@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <algorithm>
 #include <cmath>
+#include <queue>   // t151：recomputeLightField 的 BFS flood-fill 队列
 
 // t149 海平面（水位）：worldgen 沙滩带 / 沙漠水位 / 填水 / 树·矿石阈值的单一权威常量。
 //   spec 原文 waterLevel=8 是 t119 重定标（heightAt 3..11 → 16..40）**之前**的旧地形范围；
@@ -45,6 +46,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
         emit blockBroken(x, y, z, int(oldId)); // 破：带原方块 id（粒子/音效按它取色/取声）
     else if (id != BlockRegistry::Air)
         emit blockPlaced(x, y, z, int(id));    // 放：带新方块 id
+    recomputeLightField(); // t151：栅格变 → 重算光场（mesher 重建前已新鲜）
     emit worldChanged(); // 触发 ChunkGeometry 重建（本回合整个单 mesh；mesher 拆分归 t03）
     return true;
 }
@@ -53,6 +55,20 @@ bool World::setBlock(int x, int y, int z, quint8 id)
 quint8 World::stateAt(int x, int y, int z) const
 {
     return m_chunks.stateAt(x, y, z);
+}
+
+// t151 光场读（PLAN §2-H / §M）。OOB 语义：y >= height = 开阔天空（天光 15，供顶面采样）/ 方块光 0；
+//   y < 0 或 x/z 越界 → 0。in-bounds 经 ChunkManager 路由到 chunk 局部。mesher 经 m_world 调用。
+quint8 World::skyLightAt(int x, int y, int z) const
+{
+    if (y >= m_height) return 15; // 世界顶之上 = 开阔天空（顶面 / 高墙顶采样得满天光）
+    return m_chunks.skyLightAt(x, y, z); // 其余越界（y<0 / x/z 出界）→ ChunkManager 返回 0
+}
+
+quint8 World::blockLightAt(int x, int y, int z) const
+{
+    if (y >= m_height) return 0; // 世界顶之上无方块光（火把光不溢出世界）
+    return m_chunks.blockLightAt(x, y, z);
 }
 
 // t146 给定格的碰撞 sub-AABB（世界坐标）。读 blockAt + stateAt → BlockRegistry::collisionAABBs 取 cell-local
@@ -90,6 +106,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
         else if (id != BlockRegistry::Air)
             emit blockPlaced(x, y, z, int(id));
     }
+    recomputeLightField(); // t151：栅格变 → 重算光场（mesher 重建前已新鲜）
     emit worldChanged(); // 异形方块 state 变（开合 / 朝向）需 mesh 重建
     return true;
 }
@@ -102,6 +119,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
         return false; // 越界拒绝
     if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) return false; // 已占用 → 不覆盖
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
+    recomputeLightField(); // t151：栅格变 → 重算光场
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
     return true;
 }
@@ -221,6 +239,7 @@ void World::generate()
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
+    recomputeLightField(); // t151：地形 / 树定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
 }
 
 // 整数哈希（FNV-1a + avalanche）：seed/x/z → 32 位确定性伪随机。纯函数，不依赖任何运行期随机源
@@ -462,4 +481,88 @@ void World::fillWater()
         }
     }
     qInfo() << "worldgen: water cells =" << waterCells; // 同 seed → 同计数（确定性核对）
+}
+
+// t151 真光场 BFS flood-fill（PLAN §2-H「方块光独立 flood-fill、时间不变」+ §M）。
+//   两通道（天光 sky / 方块光 block，各 0..15）分别 flood，规则相同：种子格赋初值，向 6 邻接「非遮光格」
+//   （!isSolid —— air/torch/水/异形透光；leaves/solid 等遮光）传播、每步衰减 1、取 max。结果存 chunk 第三数组。
+//
+//   天光种子：逐列自顶向下找首个遮光方块（isSolid）；其上方所有非遮光格 = 「见天」→ sky=15（地表 / 天空间
+//     全亮；洞穴入口以下的空气靠 BFS 横向渗入并衰减，越深越暗，模拟 MC 天光 flood）。
+//   方块光种子：火把格（id==Torch）→ block=14（radius14；机制等价 MC 火把光，泛光照亮 14 格半径内的洞穴 /
+//     室内）。衰减 1 / 步 → 曼哈顿距离 d 处 block=14-d（d>=14 无光）。
+//
+//   时间不变：昼夜乘子由 QML baseColor（terrainLight(skyLight) 平滑 lerp）承担；光场只随栅格变（worldgen 末 +
+//     setBlock 后重算）。世界小（48×48×64）→ 全量 re-flood 一次约数十毫秒，click-rate 编辑可接受；增量 flood
+//     留后续优化。无随机源（纯栅格派生）。跨 chunk 经 ChunkManager 路由 → 光场无缝跨越边界。
+void World::recomputeLightField()
+{
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return; // 极端：无尺寸不 flood
+
+    m_chunks.clearAllLight(); // 清场：两通道从种子重新传播
+
+    struct Cell { int x, y, z; };
+    std::queue<Cell> skyQ, blockQ;
+
+    // 6 向邻居偏移（轴对齐；光按曼哈顿距离衰减）。
+    static const int dk[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+
+    // 种子 1 — 天光：逐列自顶向下找首个遮光方块；其上方非遮光格种 sky=15。
+    for (int x = 0; x < W; ++x) {
+        for (int z = 0; z < D; ++z) {
+            int firstOpaque = H; // 遮光顶（H = 整列无遮光 → 全列见天）
+            for (int y = H - 1; y >= 0; --y) {
+                if (BlockRegistry::isSolid(m_chunks.blockAt(x, y, z))) { firstOpaque = y; break; }
+            }
+            for (int y = firstOpaque + 1; y < H; ++y) {
+                // 这些格必为非遮光（首个遮光之上）→ sky=15 种子；block 此时为 0（清场后）。
+                m_chunks.setLight(x, y, z, 15, m_chunks.blockLightAt(x, y, z));
+                skyQ.push({x, y, z});
+            }
+        }
+    }
+
+    // 种子 2 — 方块光（火把）：扫所有格，Torch → block=14（保留其天光值）。
+    for (int x = 0; x < W; ++x)
+        for (int y = 0; y < H; ++y)
+            for (int z = 0; z < D; ++z)
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Torch) {
+                    m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), 14);
+                    blockQ.push({x, y, z});
+                }
+
+    // BFS 天光传播：从种子向非遮光邻格衰减 1、取 max。
+    while (!skyQ.empty()) {
+        const Cell c = skyQ.front(); skyQ.pop();
+        const quint8 cur = m_chunks.skyLightAt(c.x, c.y, c.z);
+        if (cur <= 1) continue; // 衰减到 1 以下不再传播（下一步 = 0 无意义）
+        const quint8 nv = quint8(cur - 1);
+        for (const auto &d : dk) {
+            const int nx = c.x + d[0], ny = c.y + d[1], nz = c.z + d[2];
+            if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue; // 越界跳过
+            if (BlockRegistry::isSolid(m_chunks.blockAt(nx, ny, nz))) continue; // 遮光格不传光
+            if (nv > m_chunks.skyLightAt(nx, ny, nz)) {
+                m_chunks.setLight(nx, ny, nz, nv, m_chunks.blockLightAt(nx, ny, nz)); // 更新 sky，保留 block
+                skyQ.push({nx, ny, nz});
+            }
+        }
+    }
+
+    // BFS 方块光（火把）传播：同规则，独立通道。
+    while (!blockQ.empty()) {
+        const Cell c = blockQ.front(); blockQ.pop();
+        const quint8 cur = m_chunks.blockLightAt(c.x, c.y, c.z);
+        if (cur <= 1) continue;
+        const quint8 nv = quint8(cur - 1);
+        for (const auto &d : dk) {
+            const int nx = c.x + d[0], ny = c.y + d[1], nz = c.z + d[2];
+            if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            if (BlockRegistry::isSolid(m_chunks.blockAt(nx, ny, nz))) continue;
+            if (nv > m_chunks.blockLightAt(nx, ny, nz)) {
+                m_chunks.setLight(nx, ny, nz, m_chunks.skyLightAt(nx, ny, nz), nv); // 更新 block，保留 sky
+                blockQ.push({nx, ny, nz});
+            }
+        }
+    }
 }

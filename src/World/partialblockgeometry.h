@@ -8,8 +8,8 @@
 
 // chunk 顶点格式（pos3 + normal3 + uv2 + color4 rgba = 12 float = 48 字节）。
 // 由 chunkgeometry.cpp（1×1×1 立方面）与 PartialBlockGeometry::append（异形方块）共用，二者合批进
-// 同一 chunk mesh 的同一顶点缓冲。color.rgb 承载 t123 方案②顶点光（天光遮蔽 + 方向太阳光调制），
-// a 恒 1.0。
+// 同一 chunk mesh 的同一顶点缓冲。color.rgb 承载 t151 真光场（per-voxel flood-fill 天光 + 火把方光，
+// max(sky,block)/15），a 恒 1.0。
 //
 // 注：QtQuick3D 的 ColorSemantic 按官方示例（quick3d/custommorphing/morphgeometry.cpp）按 vec4（RGBA）
 //   读取——Attribute 无 componentCount 字段（语义→分量数由运行期固定表派生），若只写 3 float，第 4 分量
@@ -22,18 +22,12 @@ struct Vtx {
     float r, g, b, a;
 };
 
-// 逐面顶点光的上下文（t123 方案②；由 chunkgeometry::buildMesh 按本块算好后传入，append 据各面外法线
-// 复算 vc —— 与 chunkgeometry 立方面同公式：
-//   vc = clamp(1 + kSunRange·sunIntensity·(lit·shade − sunLitAvg), kSunMin, kSunMax)，lit=max(0,n·sunDir)；
-//   地下块（surface=false）恒 vc=0.2）。
-// 本结构把「按块算好、按面复用」的量打包，避免签名里堆 7 个 float 形参（可读性 + t134 各 shape
-// 生成器共用）。
+// 逐块光场上下文（t151 真光场；由 chunkgeometry::buildMesh 按本块算好后传入，append 把它直接作各面顶点色）。
+//   light = 本格光场值 max(sky,block)/15（已 clamp 到 [kVcMin, 1]）；异形方块各面共用此值（近似：异形
+//   小体面所朝向的「邻格」在子格尺度上歧义，故取本格光场；异形格非遮光 → 光场已 flood 反映周围）。
+//   替代 t123 方向太阳 faceVc（faceNormal·sunDir + heightmap 列投影）—— 方向阴影留 t153 PCF 软影。
 struct PartialLightCtx {
-    float sdx, sdy, sdz;  // 太阳方向单位向量分量（指向太阳；mesher 据此算 faceNormal·sunDir）
-    float sunIntensity;   // 太阳高度归一 [0,1]（地平下 → 0；夜间方向调制归零，vc=1 与天光等亮）
-    float sunLitAvg;      // 6 轴面方向 lit 均值（均值归一：全天平均 ≈ 天光，不净变暗）
-    float shade;          // 本块列投影阴影（0=被挡、1=直射；heightmap 列回扫得）
-    bool  surface;        // 本块见天（ly >= heightmap）；false → 地下 → vc=0.2
+    float light;  // 本格光场值 [0,1]（max(sky,block)/15，已 clamp）；异形方块各面顶点色共用
 };
 
 // 不完整方块异形几何（t133 基础设施）：为 slab/stairs/fence/door/trapdoor/pressure plate 等「非

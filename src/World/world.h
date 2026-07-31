@@ -79,6 +79,13 @@ public:
     //   （含增量）。出生用 heightAt —— 贴 worldgen 地表，语义稳定（同 seed 同地表）。只读查询，不改栅格。
     Q_INVOKABLE int heightAt(int x, int z) const;
 
+    // t151 真光场查询（PLAN §2-H / §M）：世界坐标 per-voxel 天光 / 方块光（各 0..15）。mesher 据此写顶点色。
+    //   光场由 recomputeLightField() 的 BFS flood-fill 算出（worldgen 末 + 每次 setBlock 后重算），存 chunk
+    //   第三数组。OOB 语义：y >= height → 天光 15（开阔天空，顶面采样）/ 方块光 0；y < 0 或 x/z 越界 → 0。
+    //   Q_INVOKABLE 便于 F3 调试叠层（规划）查光；mesher 经 m_world 调用。只读，不改栅格。
+    Q_INVOKABLE quint8 skyLightAt(int x, int y, int z) const;
+    Q_INVOKABLE quint8 blockLightAt(int x, int y, int z) const;
+
     // 写栅格的唯一入口（PLAN §2-C 精神：当前 GUI 线程单写者）。经 ChunkManager 跨 chunk 写入 +
     // 标目标 chunk 脏；该格贴 chunk 边沿（x/z 在 16 边）→ 同标邻接 chunk 脏（为 t03 跨边界剔除）。
     // 越界 / 无变化返回 false。成功改动后发 blockBroken/blockPlaced（语义事件，供 t14 粒子 / t11 音效）
@@ -137,6 +144,10 @@ private:
     //   填 Water（机制等价 MC 海洋 / 湖泊）。仅写空气格；同 seed → 同水域分布。waterLevel 见 .cpp 注释
     //   （spec 8 为 t119 前地形，现重定标到 24 以与 [16,40] 地形相交使水域可见）。
     void fillWater();
+    // t151 真光场重算（PLAN §2-H / §M）：per-voxel BFS flood-fill 天光（自顶，sky=15）+ 火把方块光
+    //   （radius14，block=14），衰减 1、仅穿过非遮光格、取 max。worldgen 末 + 每次 setBlock 后调。
+    //   存 chunk 第三数组（m_lightField）。时间不变（昼夜乘子由 QML baseColor 承担）。无随机源（纯栅格）。
+    void recomputeLightField();
     void setVoxelIfAir(int x, int y, int z, quint8 id);       // 仅写空气格（树冠不覆盖主干/地形）
     quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希（列级 seed/x/z）→ 确定性伪随机
     quint32 hashVoxel(int seed, int x, int y, int z) const;   // 整数哈希（体素级 seed/x/y/z）→ 矿石散布用

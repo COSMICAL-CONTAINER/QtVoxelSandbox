@@ -1,11 +1,14 @@
 #include "chunk.h"
 #include "blockregistry.h" // t150b：heightmap 跳过 Torch 判定（BlockRegistry::Torch 单一权威 id）
 
+#include <algorithm> // std::fill（clearLight 归零光场）
+
 Chunk::Chunk(int originX, int originZ, int height)
     : m_originX(originX), m_originZ(originZ), m_height(height),
       // 声明顺序：m_height 先于 m_voxels / m_states 初始化，故此处可安全引用 m_height。
       m_voxels(size_t(kSize * kSize * m_height), 0),
-      m_states(size_t(kSize * kSize * m_height), 0) // t133：并行 state 数组（全 0；常规方块无 state）
+      m_states(size_t(kSize * kSize * m_height), 0), // t133：并行 state 数组（全 0；常规方块无 state）
+      m_lightField(size_t(kSize * kSize * m_height), 0) // t151：光场第三数组（全 0；flood-fill 写入）
 {
     // 新建即全空气 → 每列无实体 → heightmap = -1（全空列无面可画，sky 判定无副作用）。
     // worldgen 自底向上逐格 setBlock 时每格都会维护 heightmap，generate 末即正确。
@@ -62,6 +65,37 @@ int Chunk::heightmapAt(int lx, int lz) const
 {
     if (lx < 0 || lz < 0 || lx >= kSize || lz >= kSize) return -1;
     return m_heightmap[lx + kSize * lz];
+}
+
+// t151 光场读（越界 / 常规 → 0）。sky 取高 4 位、block 取低 4 位。mesher 与 flood（经 ChunkManager）只读。
+quint8 Chunk::skyLightAt(int lx, int ly, int lz) const
+{
+    if (lx < 0 || ly < 0 || lz < 0 || lx >= kSize || lz >= kSize || ly >= m_height)
+        return 0;
+    return quint8((m_lightField[size_t(lx + kSize * (lz + kSize * ly))] >> 4) & 0x0F);
+}
+
+quint8 Chunk::blockLightAt(int lx, int ly, int lz) const
+{
+    if (lx < 0 || ly < 0 || lz < 0 || lx >= kSize || lz >= kSize || ly >= m_height)
+        return 0;
+    return quint8(m_lightField[size_t(lx + kSize * (lz + kSize * ly))] & 0x0F);
+}
+
+// 写两通道：各夹到 0..15 后打包成一字节（sky<<4 | block）。flood-fill 增量更新用（取 max 后写入）。
+void Chunk::setLight(int lx, int ly, int lz, quint8 sky, quint8 block)
+{
+    if (lx < 0 || ly < 0 || lz < 0 || lx >= kSize || lz >= kSize || ly >= m_height)
+        return; // 局部越界：忽略（防御）
+    if (sky > 15) sky = 15;
+    if (block > 15) block = 15;
+    m_lightField[size_t(lx + kSize * (lz + kSize * ly))] = quint8((sky << 4) | block);
+}
+
+// re-flood 前清场：全格光场归零（天光 / 方块光都从种子重新传播）。
+void Chunk::clearLight()
+{
+    std::fill(m_lightField.begin(), m_lightField.end(), quint8(0));
 }
 
 // 单列自顶向下重扫：找首个非空气作新顶（破顶块用），列全空 → -1。仅 setBlock 破顶块时调用。
