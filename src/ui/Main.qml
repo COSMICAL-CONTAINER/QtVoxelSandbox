@@ -192,16 +192,6 @@ Window {
     // 与物理(PlayerController)共用同一份栅格。
     World { id: theWorld; width: 48; depth: 48; height: 64; seed: 1337 } // t119：高度 16→64（地表 16..40 + 基岩底层）
 
-    // t95：世界就绪后（Window Component.onCompleted 跑在所有子组件含 theWorld 完成之后），在地图中间
-    // 高处生成 1 个测试生物，由重力 tick 落到地表（无需查地表高度——避开与 worldChanged 触发时机的
-    // 耦合：setWidth/setDepth 的 worldChanged 在本 Connections 建立前已发，hook 不到；onCompleted 稳定
-    // 一次性触发）。spec「地图中间地表生成 1 个纯方块纯色生物」。
-    Component.onCompleted: {
-        const cx = Math.floor(theWorld.width / 2)
-        const cz = Math.floor(theWorld.depth / 2)
-        entityManager.spawnMob(cx, theWorld.height - 1, cz)
-    }
-
     // 昼夜时钟（t09，PLAN §2-H）：~20 分钟周期的天光亮度乘子 lerp（**非**旋转方向光）。
     // dayPhase 0..1 循环（0=正午 / 0.5=子夜）；skyLight [0,1] 是纯函数派生的天光乘子，供下面
     // SceneEnvironment.clearColor 与 DirectionalLight.brightness lerp 昼(#9ec6e8/1.5)↔夜(#0b1026/0.25)。
