@@ -25,16 +25,16 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CoalOre:       return "icon_coal_ore.png";       // t84 煤矿石立方体图标
     case BlockRegistry::IronOre:       return "icon_iron_ore.png";       // t84 铁矿石立方体图标
     case BlockRegistry::Torch:         return "icon_torch.png";          // t88 火把立方体图标（伪光源）
-    // t134 不完整方块：v1 共用木纹（planks）立方体图标 + displayName 区分（spec「6 PNG 程序生成 或
-    //   v1 共用木纹+displayName 区分」）。6 类同为木板材质 → 复用 icon_planks，由中文显示名（木板台阶 /
-    //   木板楼梯 / 木栅栏 / 木板压力板 / 木板门 / 木活板门）在 HUD/调色板 tooltip 区分。后续可走
-    //   build_cube_icons.py 程序生成各异 flat 2D 图标。
-    case BlockRegistry::WoodSlab:
-    case BlockRegistry::WoodStairs:
-    case BlockRegistry::WoodFence:
-    case BlockRegistry::WoodPressurePlate:
-    case BlockRegistry::WoodDoor:
-    case BlockRegistry::WoodTrapdoor:  return "icon_planks.png";
+    // t145 不完整方块：6 类木制半方块各走自己的 flat 2D 区分图标（tools/build_cube_icons.py
+    //   render_partial_2d 程序生成，木板贴图填充异形剪影）。6 类同为木板材质 → 共享木纹观感，
+    //   但剪影各异（半高 / L 阶 / 柱档 / 高板 / 方格 / 薄条）→ hotbar / 创造调色板肉眼即可辨图，
+    //   不再依赖 v1 的「共用 icon_planks + 仅 displayName 区分」（6 格同图难辨）。
+    case BlockRegistry::WoodSlab:          return "icon_wood_slab.png";          // 木板台阶：半高
+    case BlockRegistry::WoodStairs:        return "icon_wood_stairs.png";        // 木板楼梯：L 阶
+    case BlockRegistry::WoodFence:         return "icon_wood_fence.png";         // 木栅栏：柱档
+    case BlockRegistry::WoodDoor:          return "icon_wood_door.png";          // 木板门：高板
+    case BlockRegistry::WoodTrapdoor:      return "icon_wood_trapdoor.png";      // 木活板门：方格
+    case BlockRegistry::WoodPressurePlate: return "icon_wood_pressure_plate.png";// 木板压力板：薄
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }

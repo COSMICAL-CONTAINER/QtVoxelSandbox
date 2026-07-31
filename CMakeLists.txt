@@ -151,6 +151,12 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_sand.png
         textures/icon_stone.png
         textures/icon_torch.png
+        textures/icon_wood_slab.png           # t145 不完整方块 flat 2D 区分图标
+        textures/icon_wood_stairs.png
+        textures/icon_wood_fence.png
+        textures/icon_wood_door.png
+        textures/icon_wood_trapdoor.png
+        textures/icon_wood_pressure_plate.png
 )
 
 # t89 / t118 音效资源（tools/build_sounds.py 程序合成，§4 原创 SFX；零 MC 资产）。
