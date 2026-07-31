@@ -226,6 +226,16 @@ Window {
         return Qt.rgba(b, b, b, 1.0)
     }
 
+    // t144：把任意颜色按天光亮度乘子调暗（掉落实体材质昼夜适配）。
+    //   与 terrainLight(m) 同 floor 0.4 公式，但作用于给定 (r,g,b)∈[0,1] 而非纯灰阶——
+    //   掉落物的工具 tier 色（木褐 / 石灰 / 铁银白）与浅灰外壳也须夜间变暗，与地形 / 方块段
+    //   统一。机制等价地形 baseColor=terrainLight × vertexColor：掉落物 BlockCube 无顶点色（恒白=1.0），
+    //   故昼夜乘子只由 baseColor 承载；本函数给「带自身色调」的材质（工具 / 外壳）用。
+    function tintBySkyLight(r, g, b, m) {
+        const k = 0.4 + (1.0 - 0.4) * m
+        return Qt.rgba(r * k, g * k, b * k, 1.0)
+    }
+
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }
 
@@ -1136,6 +1146,10 @@ Window {
                     //   层 QML 自绘（§9a 原创），无 MC 资产 / 反向写栅格。
 
                     // 方块段：BlockCube 走图集 per-face UV（草顶 / 草侧 …）。
+                    //   t144：baseColor 乘 terrainLight(skyLight)（0.4..1.0 灰阶）与地形 chunk 同公式——
+                    //   掉落物浮空无天光遮蔽（BlockCube 无顶点色，等效 vertexColor=1.0），故仅靠 baseColor
+                    //   承载昼夜乘子；夜间随地形一起变暗（spec「阴影/夜间变暗」）。绑定 skyLight NOTIFY
+                    //   → 每周期 tick 自动刷新（同 chunk Model）。
                     Model {
                         visible: !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
                         geometry: BlockCube { blockId: entRoot.entId }
@@ -1144,6 +1158,7 @@ Window {
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
+                            baseColor: terrainLight(worldClock.skyLight)
                         }
                     }
                     // 工具段（t75 改用 PickaxeGeometry 3D 镐形，不再 CrackBox 兜底）：
@@ -1157,9 +1172,15 @@ Window {
                         position: Qt.vector3d(0, entRoot.bobY, 0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: hotbarVM.toolTier(entRoot.entId) === 3 ? "#d8d8e6"
-                                     : hotbarVM.toolTier(entRoot.entId) === 2 ? "#9a9a9a"
-                                     : "#8a5a2e"
+                            // t144：tier 色乘天光乘子（tintBySkyLight）夜间变暗，与方块段统一。
+                            //   原 hex #d8d8e6 / #9a9a9a / #8a5a2e = (216,216,230)/(154,154,154)/(138,90,46)。
+                            baseColor: {
+                                const m = worldClock.skyLight
+                                const t = hotbarVM.toolTier(entRoot.entId)
+                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                     : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
+                                     : tintBySkyLight(138/255, 90/255, 46/255, m)
+                            }
                         }
                     }
                     // 材料段（t112 改 BillboardQuad + 朝相机）：木棒 / 煤 / 铁原矿 / 铁锭 / 玻璃 / 木炭
@@ -1190,6 +1211,9 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             alphaCutoff: 0.5
                             opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                            // t144：baseColor 乘 terrainLight(skyLight) 灰阶夜间变暗，与方块段统一
+                            //   （MaterialIcon 贴图 × baseColor × 不变 alpha；alpha=1.0 不与 opacity/alphaCutoff 冲突）。
+                            baseColor: terrainLight(worldClock.skyLight)
                             baseColorMap: Texture {
                                 flipV: true
                                 sourceItem: MaterialIcon {
@@ -1205,13 +1229,16 @@ Window {
                     // + NoLighting + opacity<1（<1 自动走透明混合，同观察者幽灵半透模式 bodyOpacity 0.35）。
                     // 与内方块共享外层 Node 的绕 Y 旋转 + 浮动（position 读 entRoot.bobY 同步上下浮）。
                     // 三类图标共用此壳（外观统一，与内方块图标类型无关）。
+                    //   t144：外壳 baseColor 也乘天光乘子（tintBySkyLight）—— 内方块夜间变暗时外壳
+                    //   同步变暗，否则夜间「亮光晕裹暗方块」割裂（spec「阴影/夜间变暗」覆盖整掉落物）。
+                    //   #b0b0b0 = (176,176,176)；半透 opacity 0.35 与 baseColor 解耦，不变。
                     Model {
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: "#b0b0b0"   // 浅灰
+                            baseColor: tintBySkyLight(176/255, 176/255, 176/255, worldClock.skyLight)
                             opacity: 0.35          // 半透（<1 触发透明混合）
                         }
                     }
