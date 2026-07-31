@@ -388,7 +388,7 @@ Item {
         //   事件穿透落遮罩 → 误丢弃）。Pointer Handlers 协作语义：子 palette/hotbar/销毁槽的 TapHandler 仍
         //   优先处理（更深的 handler 先 fire 各自 onTapped），本 handler 仅兜住未被处理的左键空点击；
         //   其 passive grab 同时阻止事件继续下沉到遮罩 MouseArea（Qt6：handler 截获则 MouseArea 不收）。
-        //   仅左键：右键归 root TapHandler（右键均分拖拽）与 hotbar DragHandler（拖销毁槽），互不冲突。
+        //   仅左键：右键全归 root 右键 TapHandler 独占（t79 拿半/均分手势），互不冲突（t138：销毁槽已无 DragHandler）。
         TapHandler {
             acceptedButtons: Qt.LeftButton
         }
@@ -541,7 +541,7 @@ Item {
                 width: parent.width
                 color: "#7d8893"
                 font.pixelSize: 11
-                text: "把 hotbar 方块拖到右侧销毁槽可清空该槽"
+                text: "点击右侧销毁槽可丢弃当前手持物"
             }
 
             // ② 底部 9 槽 hotbar 栏（同步游戏内 hotbar） + ③ 销毁槽。
@@ -580,18 +580,12 @@ Item {
                                 Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                                 Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
 
-                                // 拖动源：图标 wrapper（仅非空槽可拖到销毁槽；hbIndex 标识源槽，供 DropArea 取用）。
-                                // Drag.Automatic：拖动时图标跟随指针移动、释放后归位；落在 DropArea 内则触发 onDropped。
+                                // 物品图标 wrapper（仅非空槽显图标）。
                                 Item {
                                     id: dragIcon
                                     anchors.centerIn: parent
                                     width: 30; height: 30
                                     visible: slotId !== 0
-                                    property int hbIndex: index // 自定义属性：被拖源所属 hotbar 槽下标
-                                    Drag.active: iconDrag.active
-                                    Drag.dragType: Drag.Automatic
-                                    Drag.hotSpot.x: width / 2
-                                    Drag.hotSpot.y: height / 2
                                     Image {
                                         anchors.fill: parent
                                         visible: { root.hotbar.slotRevision; return !root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId) }
@@ -608,18 +602,6 @@ Item {
                                         anchors.fill: parent
                                         visible: { root.hotbar.slotRevision; return root.hotbar.isMaterial(slotId) }
                                         materialId: { root.hotbar.slotRevision; return slotId }
-                                    }
-                                    DragHandler {
-                                        id: iconDrag
-                                        target: dragIcon
-                                        // t107：原默认全按 → 与同槽左键 TapHandler 抢 grab（左键按下被
-                                        // DragHandler 截），左键 tap 不发 → setStack 不调 → 格子不刷新。
-                                        // 限定右键：左键归 TapHandler（拾取/放置/互换/双击合并）；右键拖到销毁槽
-                                        // 仍可用（root 右键 TapHandler 走 WithinBounds 手势：拖动超阈值归本
-                                        // DragHandler，原地单击归 Tap —— 二者按手势分流，互不冲突）。SurvivalInventory
-                                        // 本就无此 DragHandler，故无该冲突。
-                                        acceptedButtons: Qt.RightButton
-                                        xAxis.enabled: true; yAxis.enabled: true
                                     }
                                 }
 
@@ -642,7 +624,7 @@ Item {
                                 //   旧版用「创造覆盖」（持物点异 id 槽 → 原物丢弃），用户反馈「hotbar 行不能左键
                                 //   交互」——现统一走 resolveClick：持物点异 id 槽 → 互换（原物入手持，不丢失）。
                                 //   t49：背包内点 hotbar 行**不切真实选中**（删 selectedSlot 赋值；真实选中仅由游戏内
-                                //   1–9 / 滚轮改）。右键 = 拿一半 / 放一个（resolveRightClick）。拖到销毁槽仍走 DragHandler。
+                                //   1–9 / 滚轮改）。右键 = 拿一半 / 放一个（resolveRightClick）；销毁走点击销毁槽（t138：无 DragHandler）。
                                 HoverHandler {
                                     id: slotHover
                                     // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
@@ -734,15 +716,18 @@ Item {
                     }
                 }
 
-                // ③ 销毁槽（DropArea：拖入 hotbar 槽内容 → setSlotBlock(src 槽, air=0) 清空）。
+                // ③ 销毁槽（点击 → 丢弃当前光标手持栈；setHeldBlock(0) 清 id+count）。
                 // 自绘原创垃圾桶图标（Canvas 像素图，§9 override (a)）；凹陷斜面 + 暗红井底表「销毁」语义。
+                // t138：原 DragHandler(右键)+DropArea「拖入销毁」与 root 右键 TapHandler 抢右键 grab → 右键拿半/均分
+                //   手势失效；删 DragHandler/DropArea，销毁改纯点击（左键），右键全归 root TapHandler 独占。
+                //   销毁能力不丢：点 hotbar 槽拾取到光标 → 点销毁槽丢弃（setHeldBlock(0) 同步清 count）。
                 Item {
                     id: destroyWrap
                     width: root.slotSize
                     height: root.slotSize
                     anchors.right: parent.right
 
-                    Rectangle { anchors.fill: parent; color: destroyDrop.containsDrag ? "#3a1a1a" : "#2a1414" }
+                    Rectangle { anchors.fill: parent; color: "#2a1414" }
                     Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
                     Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
                     Rectangle { color: "#7a3a3a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
@@ -773,17 +758,11 @@ Item {
                         }
                     }
 
-                    // 点击销毁槽 → 丢弃当前手持物（与拖入销毁等效，提供点击路径）。
-                    TapHandler { onTapped: root.hotbar.heldBlock = 0 }
-                    DropArea {
-                        id: destroyDrop
-                        anchors.fill: parent
-                        // drop.source = 被拖的 dragIcon（持有 hbIndex）；落在销毁槽 → 清空该 hotbar 槽。
-                        onDropped: (drop) => {
-                            const src = drop.source
-                            if (src && src.hbIndex !== undefined)
-                                root.hotbar.setSlotBlock(src.hbIndex, 0) // 0 = air → 清空该槽
-                        }
+                    // 点击销毁槽 → 丢弃当前光标手持栈（setHeldBlock(0) 一并清 id+count）。
+                    // 仅左键：右键全归 root 右键 TapHandler 独占（t79 拿半/均分手势），避免再抢右键 grab（t138）。
+                    TapHandler {
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: root.hotbar.heldBlock = 0
                     }
                 }
             }
