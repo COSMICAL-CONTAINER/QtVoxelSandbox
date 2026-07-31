@@ -1361,8 +1361,8 @@ Window {
                     }
 
                     // 木柄：细长棕立方（UnitCube scale 0.12×0.6×0.12；原木暗棕 #6b4f24，与木棒
-                    // MaterialIcon 同色系）。竖直时贴 cell 底部上伸（柄中心 0.3、柄顶 0.6）；水平时
-                    // 旋转 90° 贴墙伸入 cell 中央（柄中心 Y=0.5、沿墙法线偏移 ±0.2 让柄端贴墙面）。
+                    // MaterialIcon 同色系）。竖直时贴 cell 底部上伸（柄中心 0.3、柄顶 0.6）；墙火把
+                    // 旋转 60° 倾斜上伸（柄中心 Y=0.5、沿墙法线偏移 ±0.2 让柄根贴墙面；t132 自 90° 水平改）。
                     Model {
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.12, 0.6, 0.12)
@@ -1373,13 +1373,13 @@ Window {
                         // 柄中心位置（局部坐标，相对 torchGlow 底面中心）。t126 抽出 torchHandleLocalPos
                         //   与选中框共用同一份 switch，确保选中框位姿与渲染出的火把柄完全一致。
                         position: torchHandleLocalPos(torchGlow.orient)
-                        // 旋转：水平时把竖柄（默认沿 +Y）旋到对应水平轴（t126 抽出 torchHandleEuler 与选中框共用）。
-                        //   ±X 向：绕 Z 轴 ±90°（+Y → ±X）；±Z 向：绕 X 轴 ∓90°（+Y → ±Z）。
+                        // 旋转：墙火把把竖柄（默认沿 +Y）倾斜到对应朝向（t126 抽出 torchHandleEuler 与选中框共用）。
+                        //   ±X 向：绕 Z 轴 ±60°；±Z 向：绕 X 轴 ±60°（t132：自 ±90° 水平改 ±60° 上倾）。
                         eulerRotation: torchHandleEuler(torchGlow.orient)
                     }
 
                     // 火焰：暖白小立方（UnitCube scale ~0.18 + 闪烁动画；spec「scale 0.18 黄 + 闪」）。
-                    // 摆在柄顶端（竖直时柄顶 Y=0.65；水平时柄延伸方向的端点）。
+                    // 摆在柄顶端（竖直时柄顶 Y=0.65；墙火把 60° 倾斜后柄末端，见 torchFlameLocalPos）。
                     Model {
                         id: torchFlame
                         geometry: UnitCube {}
@@ -1387,16 +1387,8 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#fff4cc"   // 焰心暖白（spec「高 baseColor 暖色 #ffcc66」的更亮内核）
                         }
-                        position: {
-                            switch (torchGlow.orient) {
-                            case "up": return Qt.vector3d(0.0, 0.65, 0.0)
-                            case "px": return Qt.vector3d( 0.10, 0.50, 0.0) // 柄 +X 端
-                            case "nx": return Qt.vector3d(-0.10, 0.50, 0.0)
-                            case "pz": return Qt.vector3d(0.0, 0.50,  0.10)
-                            case "nz": return Qt.vector3d(0.0, 0.50, -0.10)
-                            }
-                            return Qt.vector3d(0.0, 0.65, 0.0)
-                        }
+                        // t132：焰位改读 torchFlameLocalPos（柄 60° 倾斜后末端，非旧水平偏移 0.10/y=0.50）。
+                        position: torchFlameLocalPos(torchGlow.orient)
                         // 闪烁：自定义 flickerS（标量）由 SequentialAnimation 循环驱动；scale 绑它派生
                         // （Y 轴略加长 = 火苗上窜感）。本工具链 Vector3DAnimation 未注册（运行期「is not a
                         // type」），故走「NumberAnimation on 标量属性 + scale 绑定」等价路径（与 cam.shakeYaw
@@ -1584,16 +1576,32 @@ Window {
         return Qt.vector3d(x + 0.5 + lp.x, y + lp.y, z + 0.5 + lp.z)
     }
 
-    // 火把木柄 euler 旋转：水平朝向把竖柄（默认沿 +Y）旋到对应水平轴。
-    //   ±X 向：绕 Z 轴 ±90°（+Y → ±X）；±Z 向：绕 X 轴 ∓90°（+Y → ±Z）；up 不转。
+    // 火把木柄 euler 旋转：墙火把把竖柄（默认沿 +Y）自竖直倾 ~60°（**非** 90° 水平贴墙）——
+    //   柄自墙根斜向上伸（柄端高于柄根，机制等价 MC 墙火把上倾），不再是水平贴墙。
+    //   ±X 向：绕 Z 轴 ±60°；±Z 向：绕 X 轴 ±60°；up 不转。t132：原 ±90°（水平）改 ±60°（倾斜）。
     function torchHandleEuler(o) {
         switch (o) {
-        case "px": return Qt.vector3d(0, 0, -90)
-        case "nx": return Qt.vector3d(0, 0,  90)
-        case "pz": return Qt.vector3d( 90, 0, 0)
-        case "nz": return Qt.vector3d(-90, 0, 0)
+        case "px": return Qt.vector3d(0, 0, -60)
+        case "nx": return Qt.vector3d(0, 0,  60)
+        case "pz": return Qt.vector3d( 60, 0, 0)
+        case "nz": return Qt.vector3d(-60, 0, 0)
         }
         return Qt.vector3d(0, 0, 0)
+    }
+
+    // 火把火焰局部位置（相对 cell 底面中心）= 木柄中心 + 沿「旋转后柄轴」半柄长 0.30 到柄末端。
+    //   t132：柄改 60° 倾斜后，柄末端不再位于水平偏移 (±0.10, y=0.50)，而是上抬到 y=0.65、墙法线方向
+    //   收敛到 ±0.06（柄根 ±0.20 + 0.30·sin60°≈0.26 沿墙法线分量 − 0.20 = 0.06；0.30·cos60°=0.15 抬升）。
+    //   up：柄竖直，焰心略高于柄顶（0.65 vs 柄顶 0.60）让焰立方叠在柄顶端（不变）。
+    function torchFlameLocalPos(o) {
+        switch (o) {
+        case "up": return Qt.vector3d(0.0, 0.65, 0.0)
+        case "px": return Qt.vector3d( 0.06, 0.65, 0.0)
+        case "nx": return Qt.vector3d(-0.06, 0.65, 0.0)
+        case "pz": return Qt.vector3d(0.0, 0.65,  0.06)
+        case "nz": return Qt.vector3d(0.0, 0.65, -0.06)
+        }
+        return Qt.vector3d(0.0, 0.65, 0.0)
     }
 
     // t126 查 torchPositions 里某 cell 的 prefOrient（玩家放置时记的命中面定向）；未找到返回 "up"
