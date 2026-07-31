@@ -53,7 +53,7 @@ public:
         //   NoTool（空手可采且掉落）。掉落自身。mesher 经 PartialBlockGeometry::append 按 (id,state) 生成
         //   异形顶点并合批进 chunk mesh。state 编码朝向 / 开合 / 半位（见各枚举注释 + partialblockgeometry.cpp）。
         WoodSlab          = 15, // 木板台阶：半高（上/下半）。state bit0 = 上半(1)/下半(0)。
-        WoodStairs        = 16, // 木板楼梯：下层整步 + 上层背墙。state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开）。
+        WoodStairs        = 16, // 木板楼梯：整步 + 背墙。state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开）；bit2=上下倒置（整步在上、背墙在下）。
         WoodFence         = 17, // 木栅栏：中心立柱（0.4 见方）。state=0（单格；连接邻居留后续）。
         WoodPressurePlate = 18, // 木板压力板：贴地薄板。state=0。
         WoodDoor          = 19, // 木板门：两格高（下/上格同 id）。state: bit3=上格(1)/下格(0)、bit2=开(1)/合(0)、
@@ -116,7 +116,7 @@ public:
         ShapeNone     = 0, // air / torch：无碰撞 sub-AABB（torch 不挡玩家；选中框由 Main.qml isTorch 分支）
         ShapeFull     = 1, // 常规整立方：collision/selection = {0,0,0,1,1,1}
         ShapeSlab     = 2, // 木板台阶：半高（state bit0=上半 → {0,0.5,0,1,1,1}；下半 → {0,0,0,1,0.5,1}）
-        ShapeStairs   = 3, // 木板楼梯：下层整步 {0,0,0,1,0.5,1} + 上层背墙半（朝向 state[1:0]）
+        ShapeStairs   = 3, // 木板楼梯：整步 + 背墙（朝向 state[1:0]；bit2=倒置 → 整步/背墙 y 区间垂直镜像）
         ShapeFence    = 4, // 木栅栏：中心立柱 {0.3,0,0.3,0.7,1,0.7}
         ShapePlate    = 5, // 木板压力板：贴地薄板 {0.0625,0,0.0625,0.9375,0.0625,0.9375}
         ShapeDoor     = 6, // 木板门：满高薄板（state 朝向/开合；上下半由所在格的 y 自然分，bit3 标识上下）

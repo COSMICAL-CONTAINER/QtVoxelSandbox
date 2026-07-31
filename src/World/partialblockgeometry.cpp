@@ -18,7 +18,7 @@
 //
 // state 编码（与 BlockRegistry::Id 注释 + playercontroller placeBlock 一致；机制等价 MC (id,metadata)）：
 //   slab        bit0      = 上半(1)/下半(0)
-//   stairs      bit[1:0]  = 朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 / 背墙在对侧）
+//   stairs      bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 / 背墙在对侧） bit2=上下倒置（整步在上、背墙在下）
 //   fence       —         （单格中心立柱；state=0，连接邻居留后续）
 //   pressure_plate —      （贴地薄板；state=0）
 //   door        bit[1:0]=朝向(0=+X 1=-X 2=+Z 3=-Z) bit2=开(1)/合(0) bit3=上格(1)/下格(0)
@@ -112,9 +112,15 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::WoodStairs: {
-        // 下层整步（y 0..0.5 全 footprint）+ 上层背墙（y 0.5..1，背墙在朝向对侧的半 footprint）。
-        // 朝向 state[1:0]：0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 → 背墙在对侧 -d 半）。
-        pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, 0.5f, 0.f, 1.f, tile, light, tileW, hx, hy, v0, v1);
+        // 楼梯 = 整步（全 footprint 半高）+ 背墙（朝向对侧半 footprint 的另半高）。
+        //   state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 → 背墙在对侧 -d 半）。
+        //   t147 state bit2=上下倒置：正置整步在下层(y 0..0.5)+背墙在上层(y 0.5..1)；
+        //     倒置则垂直镜像（整步在上层 + 背墙在下层），机制等价 MC 倒置楼梯（天花板挂装）。
+        //     y 区间据 bit2 翻转（与 blockregistry ShapeStairs 同编码 —— 改一处须同步）。
+        const bool inverted = (state & 4) != 0;
+        const float stepY0 = inverted ? 0.5f : 0.0f, stepY1 = inverted ? 1.0f : 0.5f; // 整步 y 区间
+        const float wallY0 = inverted ? 0.0f : 0.5f, wallY1 = inverted ? 0.5f : 1.0f; // 背墙 y 区间
+        pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, stepY0, stepY1, 0.f, 1.f, tile, light, tileW, hx, hy, v0, v1);
         float bx0 = 0.f, bx1 = 1.f, bz0 = 0.f, bz1 = 1.f;
         switch (state & 3) {
         case 0: bx0 = 0.0f; bx1 = 0.5f; break; // 朝 +X 开 → 背墙 -X 侧 x[0,0.5]
@@ -122,7 +128,7 @@ int PartialBlockGeometry::append(
         case 2: bz0 = 0.0f; bz1 = 0.5f; break; // 朝 +Z 开 → 背墙 -Z 侧 z[0,0.5]
         case 3: bz0 = 0.5f; bz1 = 1.0f; break; // 朝 -Z 开 → 背墙 +Z 侧 z[0.5,1]
         }
-        pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.5f, 1.0f, bz0, bz1, tile, light, tileW, hx, hy, v0, v1);
+        pushBox(verts, idx, lx, ly, lz, bx0, bx1, wallY0, wallY1, bz0, bz1, tile, light, tileW, hx, hy, v0, v1);
         break;
     }
     case BlockRegistry::WoodFence: {

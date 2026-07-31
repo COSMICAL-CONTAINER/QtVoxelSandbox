@@ -674,7 +674,10 @@ void PlayerController::placeBlock()
         // 命中顶面（ny=+1，放在方块上方）→ 下半(state=0)；命中底面（ny=-1，天花板下方）→ 上半(state=1)。
         placeState = quint8(m_hitNy < 0 ? 1 : 0);
     } else if (m_selectedBlock == BlockRegistry::WoodStairs) {
-        placeState = quint8(horizontalFacing() & 3);
+        // t147：state[1:0]=水平朝向（horizontalFacing）；bit2=上下倒置。
+        //   命中底面（天花板下方，m_hitNy<0）→ 倒置（整步在上、背墙在下）；否则正置。镜像 slab 的
+        //   「ny<0 → 上半」约定，使「点方块下方」在所有半方块（slab/stairs）统一得到「倒挂」变体。
+        placeState = quint8((horizontalFacing() & 3) | (m_hitNy < 0 ? 4 : 0));
     }
     const bool isDoor = (m_selectedBlock == BlockRegistry::WoodDoor);
     const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
