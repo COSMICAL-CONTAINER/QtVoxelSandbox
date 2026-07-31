@@ -6,6 +6,14 @@
 #include <algorithm>
 #include <cmath>
 
+// t149 海平面（水位）：worldgen 沙滩带 / 沙漠水位 / 填水 / 树·矿石阈值的单一权威常量。
+//   spec 原文 waterLevel=8 是 t119 重定标（heightAt 3..11 → 16..40）**之前**的旧地形范围；
+//   t119 后 heightAt∈[16,40]，8 < min(16) → 无任何列满足 h<8 → 填水为零、沙滩不可见。故按
+//   重定标同源取 24：约 11% 低洼列被淹（散布湖泊），出生列(8,8) h=27>24 保持陆地、近处低洼可见
+//   水域（同 seed 复算核对）。语义不变（海平面淹低洼），仅数值随地形重定标。
+//   全程纯函数于 seed + heightAt（fbm）→ 同 seed 同水域 / 沙滩分布（PLAN §2-K）。
+constexpr int kWaterLevel = 24;
+
 World::World(QObject *parent) : QObject(parent)
 {
     generate(); // 默认参数生成（静默，不 emit）
@@ -173,32 +181,41 @@ void World::generate()
     buildPermutation();
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
 
-    // 填充地形（逐列规则与单 chunk 版完全一致，仅放大到 width×depth）：表层 grass / 下 dirt /
-    // 深 stone / 低洼 sand。逐列独立 → 跨 chunk 边界天然连续，无浮空/悬崖；同 seed 确定。
-    // t117 沙漠群系（二次 fBm biome）：干旱区表层沙替代草（机制等价 MC 沙漠），低洼处仍用沙（同既有规则）。
-    // 走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
-    constexpr int sandLevel = 3;
-    int desertCols = 0;
+    // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 水位」决定，下层 dirt / 深 stone。
+    //   - 沙漠群系（isDesert）：整柱沙（y 0..h 全 Sand，机制等价 MC 沙漠沙层）；底层基岩由 placeBedrock 覆盖。
+    //   - 非沙漠且 h <= waterLevel+1：沙滩带 / 水下沙底。spec 显式沙滩带 h∈[wl-1,wl+1]（海平面 ±1 的可见沙滩），
+    //     h<wl 的更低列被 fillWater 淹没 → 其表层同样取沙（水下沙底，草不生于水下）。表层 Sand / 下 Dirt / 深 Stone。
+    //   - 非沙漠且 h > waterLevel+1：正常陆地（表层 Grass / 下 Dirt / 深 Stone）。
+    //   旧的 sandLevel=3 低洼沙判定被水位阈值（24+1=25）完全覆盖（h<=3 << 25 必属水下沙底），故删除。
+    //   逐列独立 → 跨 chunk 边界天然连续，无浮空/悬崖；同 seed 确定（fbm/纯函数，PLAN §2-K）。
+    //   走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
+    int desertCols = 0, sandyCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
-            const bool desert = isDesert(x, z); // t117：干旱群系 → 表层沙替代草
+            const bool desert = isDesert(x, z);
+            const bool sandy = (!desert) && (h <= kWaterLevel + 1); // 沙滩带(wl±1) + 水下(h<wl)
             if (desert) ++desertCols;
+            else if (sandy) ++sandyCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
-                if (desert || h <= sandLevel) {
-                    // 干旱群系或低洼：表层 + 下 3 格沙（机制等价 MC 沙漠沙层），再下石头。
-                    if (y == h)      b = BlockRegistry::Sand;  // 表层沙
-                    else if (y >= h - 2) b = BlockRegistry::Sand; // 表层下 3 格沙
-                    else             b = BlockRegistry::Stone;
-                } else if (y == h)  b = BlockRegistry::Grass;  // grass
-                else if (y >= h - 2) b = BlockRegistry::Dirt;   // dirt
-                else                b = BlockRegistry::Stone;  // stone
+                if (desert) {
+                    b = BlockRegistry::Sand; // 整柱沙
+                } else if (sandy) {
+                    if (y == h)          b = BlockRegistry::Sand;  // 沙表层（沙滩 / 水下沙底）
+                    else if (y >= h - 2) b = BlockRegistry::Dirt;  // 表层下土
+                    else                 b = BlockRegistry::Stone; // 深石
+                } else {
+                    if (y == h)          b = BlockRegistry::Grass; // 草地表层
+                    else if (y >= h - 2) b = BlockRegistry::Dirt;  // 土
+                    else                 b = BlockRegistry::Stone; // 石
+                }
                 m_chunks.setBlock(x, y, z, b);
             }
         }
     }
-    qInfo() << "worldgen: desert columns =" << desertCols << "/" << (m_width * m_depth);
+    qInfo() << "worldgen: desert =" << desertCols << "beach/underwater =" << sandyCols
+            << "/" << (m_width * m_depth);
 
     placeBedrock(); // t119：底层基岩（y 0..4 坑洼，底实顶疏；不可破坏）。先于矿石 / 树（仅覆盖最底几格）
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
@@ -299,13 +316,12 @@ void World::placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand
 }
 
 // 确定性树木散布：遍历列，按哈希(seed,x,z) 决定是否尝试种树；占用栅格保证主干间距 ≥2 列。
-// 仅在 grass 表层（heightAt > sandLevel，与 generate() 地形填充同阈值）种；沙地/越界/近邻有树干 → 跳过。
-// 主干高度按世界高度钳制（留出树冠空间），放不下最小树则确定性跳过。全部纯函数于 seed → 可复现。
+// 仅在 grass 表层（heightAt > waterLevel+1，与 generate() 沙层判定同阈值）种；沙滩/水下/沙漠/越界/近邻有
+// 树干 → 跳过。主干高度按世界高度钳制（留出树冠空间），放不下最小树则确定性跳过。全部纯函数于 seed → 可复现。
 void World::placeTrees()
 {
     std::vector<char> occupied(size_t(m_width) * size_t(m_depth), 0); // 主干占用栅格（1=该列已有树干）
 
-    constexpr int kSandLevel   = 3; // 与 generate() 同阈值（h<=此为沙地，不种树）
     constexpr int kMinTrunk    = 4; // 主干最少格数
     constexpr int kMaxTrunk    = 7; // 最多 7（低洼处可达）；高处按世界高度钳到 4 → 高度自然参差（用户诉求）
     constexpr int kCanopyExtra = 2; // 树冠在主干顶之上再升的格数（十字冠层 + 尖顶）
@@ -315,7 +331,8 @@ void World::placeTrees()
     for (int z = 0; z < m_depth; ++z) {
         for (int x = 0; x < m_width; ++x) {
             const int surfaceY = heightAt(x, z);
-            if (surfaceY <= kSandLevel) continue; // 沙地不种树
+            // t149：水位阈值取代旧 kSandLevel=3 —— 沙滩带(wl±1)/水下(h<wl)/低洼不种树（机制等价 MC 树不生于沙滩/水下）。
+            if (surfaceY <= kWaterLevel + 1) continue;
             if (isDesert(x, z)) continue;         // t117 沙漠群系不种树（机制等价 MC 沙漠无树）
 
             const quint32 r = hashColumn(m_seed, x, z);
@@ -376,7 +393,7 @@ void World::placeBedrock()
     }
 }
 
-// 确定性矿石散布（t84，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 且非低洼沙地的格填 Stone），
+// 确定性矿石散布（t84，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 的格填 Stone，沙漠/沙滩表层除外），
 // 按 hashVoxel(seed,x,y,z) 的低 16 位（% 10000）做密度筛选 → 替换为煤矿/铁矿。仅替换 Stone
 // （不动 dirt/grass/sand/log/leaves，也不动已生成的另一种矿：判定只针对 Stone 格）。铁矿比煤矿
 // 略稀（贴近 MC 1.0 铁比煤少）；两矿共用同一 hash 的不同阈值段 → 互斥（一格至多一种矿）。
@@ -388,13 +405,14 @@ void World::scatterOres()
 {
     constexpr unsigned kIronPct = 50;  // /10000 → 0.5%（铁，需石镐）
     constexpr unsigned kCoalPct = 80;  // /10000 → 0.8%（煤，木镐可挖）
-    constexpr int kSandLevel   = 3;    // 与 generate() / placeTrees() 同阈值（h<=此为沙地，整柱沙无 stone）
 
     int coalPlaced = 0, ironPlaced = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
-            if (h <= kSandLevel) continue; // 沙地柱无 stone，跳过（与 placeTrees 同判）
+            // t149：水位阈值取代旧 kSandLevel=3 —— 沙滩带(wl±1)/水下(h<wl) 列表层为沙、沙漠整柱沙，
+            //   这些列无 stone 区段（或被水位淹没），跳过（与 generate / placeTrees 同阈值）。
+            if (h <= kWaterLevel + 1) continue;
 
             // stone 区段：y < h-2（与 generate 填 Stone 同阈值；y in [h-2,h] 是 dirt/grass）。
             // 上界 h-3 即「< h-2」的最大整数；y 非负由循环保证。
@@ -422,22 +440,20 @@ void World::scatterOres()
 //   基岩 / 矿石）。经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + 边界邻接 + heightmap 增量维护），
 //   不触发 blockPlaced（同 worldgen 既有约定——系统事件非玩家放置）。
 //
-//   waterLevel 取值：spec 原文为 8，那是 t119 把 heightAt 重定标（3..11 → 16..40）**之前**的地形范围
-//   （8 处于旧 3..11 中高位，故低洼列成海）。t119 后 heightAt ∈ [16,40]，8 < min(16) → 无任何列满足
-//   h<8 → 填水为零、特性不可见。此处把海平面重定标到 24：在新地形 [19,40] 下约 11% 列被淹（散布湖泊），
-//   出生列(8,8) h=27 > 24 → 出生保持陆地、近处低洼可见水域（同 seed 复算核对）。语义不变（海平面淹低洼），
-//   仅数值随地形重定标；t149 沙滩带 / 沙漠水位再细化时同源调整。
+//   waterLevel 取文件级 kWaterLevel（=24，见 world.cpp 顶部注释）：spec 原文 8 为 t119 重定标前地形范围
+//   （旧 heightAt 3..11），现 heightAt∈[16,40] → 8 < min(16) 无列满足 → 重定标到 24，约 11% 列被淹（散布
+//   湖泊），出生列(8,8) h=27>24 保持陆地、近处低洼可见水域。t149 沙滩带/沙漠水位/树·矿石阈值均同源用此
+//   常量（generate 沙表层 / placeTrees / scatterOres 阈值 = waterLevel+1）。
 //   全程纯函数于 seed + heightAt（fbm）→ 同 seed 同水域分布；禁用任何运行期随机源（PLAN §2-K）。
 void World::fillWater()
 {
-    constexpr int waterLevel = 24; // 海平面（见上注：spec 8 为 t119 前地形；现 16..40 → 重定标 24）
     int waterCells = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
-            if (h >= waterLevel) continue; // 此列地表高于海平面 → 无水
-            // 从地表上方一格到海平面填水（h+1..waterLevel）。低洼列被水淹没到统一海平面。
-            for (int y = h + 1; y <= waterLevel && y < m_height; ++y) {
+            if (h >= kWaterLevel) continue; // 此列地表高于海平面 → 无水
+            // 从地表上方一格到海平面填水（h+1..kWaterLevel）。低洼列被水淹没到统一海平面。
+            for (int y = h + 1; y <= kWaterLevel && y < m_height; ++y) {
                 if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air)
                     continue; // 仅写空气格（防御：不动已存在方块）
                 m_chunks.setBlock(x, y, z, BlockRegistry::Water);
