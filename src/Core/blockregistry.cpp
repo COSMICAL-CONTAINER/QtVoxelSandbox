@@ -80,6 +80,19 @@ int BlockRegistry::tileIndex(quint8 blockId, Face face)
 
 bool BlockRegistry::isSolid(quint8 blockId)      { return def(blockId).solid; }
 BlockRegistry::Shape BlockRegistry::shape(quint8 blockId) { return def(blockId).shape; }
+
+// t152 门 / 活版门「合态挡 / 开态通」碰撞谓词：开门 → false（玩家穿过），关门 / 其余有碰撞形状 → true。
+//   air / torch / water（ShapeNone）→ false。越界 → false（air 兜底）。单一权威：isCollidable 与
+//   collisionAABBs 共用，保证「预判」与「精确碰撞」对开合态一致（开门既不预判挡、也无 sub-AABB）。
+bool BlockRegistry::isCollidableWhenClosed(quint8 blockId, quint8 state)
+{
+    switch (def(blockId).shape) {
+    case ShapeDoor:     return (state & 4) == 0; // bit2=开 → false（开门通）；合 → true（关门挡）
+    case ShapeTrapdoor: return (state & 1) == 0; // bit0=开 → false；合 → true
+    case ShapeNone:     return false;            // air / torch / water：无碰撞
+    default:            return true;             // Full/Slab/Stairs/Fence/Plate：无开合概念，恒挡
+    }
+}
 float BlockRegistry::hardness(quint8 blockId)    { return def(blockId).hardness; }
 int   BlockRegistry::toolType(quint8 blockId)    { return def(blockId).toolType; }
 int   BlockRegistry::minToolTier(quint8 blockId) { return def(blockId).minToolTier; }
@@ -205,8 +218,11 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
 
 // 当前 collision 与 selection 同数据（异形方块 VoxelShape 与 outline shape 多数一致；机制等价 MC）。
 //   分离接口备将来分歧（如某些方块选中框略放宽 / 碰撞略收紧）。两者都走 shapeBoxes —— 改形状只改一处。
+//   t152：collision 在开门态返回空（isCollidableWhenClosed=false → 玩家穿过），selection 仍画实际板形
+//   （开门 = 竖直薄板，选中框跟随可见形状；与渲染同源 shapeBoxes 不变）。
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 blockId, quint8 state)
 {
+    if (!isCollidableWhenClosed(blockId, state)) return {}; // 开门 / 活版门 → 无碰撞 sub-AABB（玩家穿过）
     return shapeBoxes(def(blockId).shape, state);
 }
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 blockId, quint8 state)

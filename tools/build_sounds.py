@@ -18,6 +18,8 @@
 2. **单件音**：
    - place.wav：放块 plonk（保留 t89 既有合成；放置不分材质，单份）。
    - pickup.wav：拾取反馈 —— 短上扬正弦双音（~0.16s），轻快提示。
+   - door_open.wav：开门 —— 木质嘎吱上扬 + 起始短扣响（门闩松脱）~0.22s（t152）。
+   - door_close.wav：关门 —— 低频闷击（门框撞上）+ 末尾扣响（门闩扣合）~0.20s（t152）。
 
 确定性合成（每组固定 random.seed），同次运行产出字节一致的 WAV（便于 git/CI diff）。
 运行：python tools/build_sounds.py（输出到工程根 sounds/）。
@@ -132,6 +134,54 @@ def gen_pickup():
     return out
 
 
+def gen_door_open():
+    """开门音（t152）：木质嘎吱上扬 + 起始短扣响（门闩松脱）~0.22s。
+    机制等价 MC 木门开启声（原创程序合成，§9 法律：零 MC 资产）。门/活板门右键开合时由
+    PlayerController::doorToggled(open=true) → AudioManager::playDoorOpen 触发。
+    """
+    dur = 0.22
+    n = int(SR * dur)
+    random.seed(310152)
+    out = []
+    for i in range(n):
+        t = i / SR
+        # 嘎吱：基频从 ~180 缓升到 ~320Hz（门轴转动摩擦的 pitch bend）
+        f = 180.0 + 140.0 * (t / dur)
+        creak = math.sin(2 * math.pi * f * t) * 0.5
+        # 高频摩擦噪声（嘎吱质感）
+        grit = random.uniform(-1, 1) * 0.18 * math.sin(2 * math.pi * 2400 * t)
+        # 起始扣响（门闩松脱瞬态）—— 起点窄峰
+        click_env = math.exp(-((t - 0.0) ** 2) / (2 * 0.010 ** 2))
+        click = random.uniform(-1, 1) * 0.40 * click_env
+        e = env_exp(t, 11.0)
+        s = (creak + grit + click) * e
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
+def gen_door_close():
+    """关门音（t152）：低频闷击（门框撞上）+ 末尾扣响（门闩扣合）~0.20s。
+    机制等价 MC 木门关闭声（原创程序合成，§9 法律：零 MC 资产）。doorToggled(open=false) 触发。
+    """
+    dur = 0.20
+    n = int(SR * dur)
+    random.seed(310153)
+    out = []
+    for i in range(n):
+        t = i / SR
+        # 低频闷击（门撞门框）+ 低频重量感
+        thunk = math.sin(2 * math.pi * 95 * t) * 0.6
+        body = math.sin(2 * math.pi * 55 * t) * 0.25
+        # 末尾扣响（门闩扣合）—— 在 t≈dur*0.7 附近爆发的窄高斯峰
+        center = dur * 0.7
+        click_env = math.exp(-((t - center) ** 2) / (2 * 0.006 ** 2))
+        latch = random.uniform(-1, 1) * 0.45 * click_env
+        e = env_exp(t, 14.0)
+        s = (thunk + body + latch) * e
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -143,8 +193,9 @@ def main():
             path = out_dir / f"{kind}_{name}.wav"
             write_wav(path, samples)
             print(f"wrote {path} ({len(samples)} frames, {len(samples)/SR:.2f}s)")
-    # 单件音：place（保留）+ pickup（新）
-    for name, gen in [("place", gen_place), ("pickup", gen_pickup)]:
+    # 单件音：place（保留）+ pickup + door_open / door_close（t152 门/活板门开关声）
+    for name, gen in [("place", gen_place), ("pickup", gen_pickup),
+                      ("door_open", gen_door_open), ("door_close", gen_door_close)]:
         samples = gen()
         path = out_dir / f"{name}.wav"
         write_wav(path, samples)

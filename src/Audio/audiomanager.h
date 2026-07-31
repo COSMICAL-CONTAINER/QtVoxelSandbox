@@ -59,6 +59,12 @@ public:
     Q_INVOKABLE void playMining(int blockId);
     // 拾取音（t118）：拾起掉落实体时响（itemPickedUp → 此处）。轻快双音不分材质。
     Q_INVOKABLE void playPickup();
+    // 门 / 活版门开合音（t152）：右键 useBlock 翻开合时由 PlayerController::doorToggled(open) → Main.qml
+    //   路由到本方法（open=true→开门 / false→关门）。单件音（木质，不分材质）；机制等价 MC 木门开关声
+    //   （原创程序合成，§9）。由 useBlock 开合语义触发（与 place 的放块声区分：右键已放置的门是「使用」
+    //   非放置）。spec「playDoorOpen/Close + doorToggled 信号」。
+    Q_INVOKABLE void playDoorOpen();
+    Q_INVOKABLE void playDoorClose();
 
     float volume() const { return m_volume; }
     void setVolume(float v);

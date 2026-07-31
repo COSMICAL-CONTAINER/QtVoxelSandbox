@@ -52,14 +52,15 @@ public:
     // 是否「存在方块」（非 air）：raycast 选体 / 掉落实体着地 / mesher 邻居剔除 等用。
     // 注：名为 isSolid 但语义是「非 air 实存」（保留以兼容既有调用点）。碰撞语义见 isCollidable。
     Q_INVOKABLE bool isSolid(int x, int y, int z) const { return blockAt(x, y, z) != 0; }
-    // 是否「实体碰撞」：t146 改走 BlockRegistry::BlockDef.shape（**不再是 solid**）。solid 仅作 mesher
-    //   邻居面剔除依据（不完整方块 solid=false → 不挡邻居整面）；**碰撞**看 shape：常规整立方 /
-    //   不完整方块（slab/stairs/...）shape != ShapeNone → 挡玩家（逐形状 sub-AABB 精确，见 collisionAABBsAt）；
-    //   air/torch shape=ShapeNone → 不挡。与 isSolid（「有方块」= blockAt!=0，raycast 命中用）分离：
-    //   不完整方块 isSolid=true（射线命中）且 isCollidable=true（挡玩家，但只在其 sub-AABB 范围内）；
-    //   torch isSolid=true（可着地/命中）但 isCollidable=false（穿过）。
+    // 是否「实体碰撞」：t146 走 BlockRegistry::BlockDef.shape；t152 改读 state + isCollidableWhenClosed
+    //   （门/活版门合态挡、开态通）。solid 仅作 mesher 邻居面剔除依据（不完整方块 solid=false → 不挡邻居
+    //   整面）；**碰撞**看 shape + 开合态：常规整立方 / 不完整方块（slab/stairs/...）恒挡玩家（逐形状 sub-AABB
+    //   精确，见 collisionAABBsAt）；门 / 活版门**合态**挡、**开态**通（玩家穿过）；air/torch/water 不挡。
+    //   与 isSolid（「有方块」= blockAt!=0，raycast 命中用）分离：不完整方块 isSolid=true（射线命中）且
+    //   isCollidable=true（合态挡玩家，但只在其 sub-AABB 范围内）；torch isSolid=true（可着地/命中）但
+    //   isCollidable=false（穿过）；开门 isSolid=true（射线命中）但 isCollidable=false（穿过，spec「开门通」）。
     Q_INVOKABLE bool isCollidable(int x, int y, int z) const {
-        return BlockRegistry::shape(blockAt(x, y, z)) != BlockRegistry::ShapeNone;
+        return BlockRegistry::isCollidableWhenClosed(blockAt(x, y, z), stateAt(x, y, z));
     }
     // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
     //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/

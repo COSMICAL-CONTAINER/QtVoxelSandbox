@@ -267,6 +267,12 @@ signals:
     //   违背玩家点击墙面的意图。法线为原始几何量，定向串（up/px/nx/pz/nz）由呈现层推导（PLAN §2 分层：
     //   Game 层只发几何语义事件，呈现决定如何画；同 swingArm / spawnItem 模式）。
     void torchPlaced(int x, int y, int z, int nx, int ny, int nz);
+    // 门 / 活版门开合（t152）：右键 useBlock（命中格为门/活版门）翻开合态后发，open=true=开（→ playDoorOpen）、
+    //   false=关（→ playDoorClose）。机制等价 MC 右键门/活版门开关声。与 swingArm 同发（开合也是一次「使用」
+    //   动作，挥手），呈现层 Connections 路由 open 到 AudioManager.playDoor*（音频层只消费，PLAN §2 分层）。
+    //   spec「useBlock 发 doorToggled(open) 信号 → Main.qml 路由」。门两格同翻时只发一次（玩家点的是其中一格，
+    //   配对格被动跟随；一次开合动作 = 一次音）。
+    void doorToggled(bool open);
 
 protected:
     void componentComplete() override;

@@ -186,6 +186,16 @@ public:
     static bool isSolid(quint8 blockId);
     // t146 方块碰撞/选中形状（BlockDef.shape；越界 → air 行 = ShapeNone）。
     static Shape shape(quint8 blockId);
+    // t152 门 / 活版门「合态挡 / 开态通」碰撞谓词（spec「isCollidableWhenClosed(id,state)(门/活版门合态
+    //   true/开态 false) → world isCollidable 读 state → 关门挡/开门通」）。
+    //   - 门（ShapeDoor）：state bit2=开(1) → false（开门通）；合(0) → true（关门挡）。
+    //   - 活版门（ShapeTrapdoor）：state bit0=开(1) → false；合(0) → true。
+    //   - 其余有碰撞形状（Full/Slab/Stairs/Fence/Plate）→ true（无开合概念，恒挡）。
+    //   - air / torch / water（ShapeNone）→ false。
+    //   越界 → false（air 兜底）。World::isCollidable 与 BlockRegistry::collisionAABBs 共用此谓词，
+    //   使「isCollidable 预判」与「collisionAABBsAt 精确碰撞」对开合态同源 —— 开门同时 isCollidable=false
+    //   且 collisionAABBs 空（玩家穿过）；关门两者皆挡。机制等价 MC「门打开可穿过、关上挡路」。
+    static bool isCollidableWhenClosed(quint8 blockId, quint8 state);
     // t146 方块碰撞 sub-AABB（cell-local [0,1]^3；复用 partialblockgeometry state 解码 → 与渲染形状同源）。
     //   玩家碰撞迭代玩家 AABB 覆盖的格子，逐 sub-AABB（+ 格偏移到世界坐标）做 3 轴重叠测试。
     //   air/torch → 空；常规整立方 → 单盒 {0,0,0,1,1,1}；异形 → 形状对应的多盒（stairs 2 盒 等）。

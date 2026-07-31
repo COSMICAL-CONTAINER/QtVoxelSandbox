@@ -312,6 +312,9 @@ Window {
         function onCraftingTableOpened() { window.openCraftingTable() }
         // t87：右键熔炉 → player 发 furnaceOpened → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
         function onFurnaceOpened() { window.openFurnace() }
+        // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
+        //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
+        function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
         // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换
         // 则保留背包打开，面板由各组件 visible 绑定 player.mode 自动换（创造背包↔生存背包）。避免任一
         // 背包在不兼容模式下滞留（Spectator 无背包/破放，t21）。

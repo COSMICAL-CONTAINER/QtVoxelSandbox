@@ -677,6 +677,8 @@ void PlayerController::placeBlock()
                 m_world->setBlock(m_hitBx, py, m_hitBz, BlockRegistry::WoodDoor, pflipped);
             }
             m_lastPlaceMs = now;
+            // t152：开合音（门两格同翻只发一次 = 一次动作一次音）。flipped.bit2 = 新的开合态。
+            emit doorToggled((flipped & 4) != 0);
             emit swingArm();
             return;
         }
@@ -690,6 +692,8 @@ void PlayerController::placeBlock()
             }
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, ns);
             m_lastPlaceMs = now;
+            // t152：开合音（ns.bit0 = 新的开合态；willOpen 已是本次结果，等价 (ns & 1)）。
+            emit doorToggled(willOpen);
             emit swingArm();
             return;
         }

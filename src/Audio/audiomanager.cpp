@@ -97,6 +97,9 @@ struct AudioManager::Data
     // 单件 clip（放置 / 拾取不分材质）。
     Clip placeClip{":/sounds/place.wav"};
     Clip pickupClip{":/sounds/pickup.wav"};
+    // t152 门 / 活版门开合单件（木质；右键 useBlock 翻开合时播，与 place 放块声区分）。
+    Clip doorOpenClip{":/sounds/door_open.wav"};
+    Clip doorCloseClip{":/sounds/door_close.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     static constexpr ma_uint32 kSampleRate = 22050;
@@ -193,8 +196,12 @@ AudioManager::AudioManager(QObject *parent)
     }
     d->loadClip(d->placeClip);
     d->loadClip(d->pickupClip);
+    d->loadClip(d->doorOpenClip);
+    d->loadClip(d->doorCloseClip);
     d->initSound(d->placeClip);
     d->initSound(d->pickupClip);
+    d->initSound(d->doorOpenClip);
+    d->initSound(d->doorCloseClip);
 
     qCInfo(lcAudio).nospace().noquote()
         << "AudioManager init: engine=" << d->engineOk
@@ -204,7 +211,8 @@ AudioManager::AudioManager(QObject *parent)
         << d->groupClips[2][0].ok << "/" << d->groupClips[2][1].ok << "/" << d->groupClips[2][2].ok << " | "
         << d->groupClips[3][0].ok << "/" << d->groupClips[3][1].ok << "/" << d->groupClips[3][2].ok << " | "
         << d->groupClips[4][0].ok << "/" << d->groupClips[4][1].ok << "/" << d->groupClips[4][2].ok
-        << " place=" << d->placeClip.ok << " pickup=" << d->pickupClip.ok;
+        << " place=" << d->placeClip.ok << " pickup=" << d->pickupClip.ok
+        << " door_open=" << d->doorOpenClip.ok << " door_close=" << d->doorCloseClip.ok;
 }
 
 AudioManager::~AudioManager()
@@ -219,6 +227,8 @@ AudioManager::~AudioManager()
     }
     if (d->placeClip.ok) ma_sound_uninit(&d->placeClip.sound);
     if (d->pickupClip.ok) ma_sound_uninit(&d->pickupClip.sound);
+    if (d->doorOpenClip.ok) ma_sound_uninit(&d->doorOpenClip.sound);
+    if (d->doorCloseClip.ok) ma_sound_uninit(&d->doorCloseClip.sound);
     ma_engine_uninit(&d->engine);
 }
 
@@ -248,6 +258,16 @@ void AudioManager::playMining(int blockId)
 void AudioManager::playPickup()
 {
     d->replay(d->pickupClip, m_volume);
+}
+
+void AudioManager::playDoorOpen()
+{
+    d->replay(d->doorOpenClip, m_volume);
+}
+
+void AudioManager::playDoorClose()
+{
+    d->replay(d->doorCloseClip, m_volume);
 }
 
 void AudioManager::setVolume(float v)

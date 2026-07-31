@@ -169,6 +169,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
 # 注：PLAN §2-L 终态是从磁盘加载（便于热补丁），本任务先 qrc 跑通 + 留接口（见 audiomanager.cpp）。
 # t118：按方块材质分组（石/木/草/沙/叶）clip 池 —— break/mining/step 各 5 个变体（按 BlockRegistry::
 # materialGroup 选播，spec「按方块材质分组」）；place / pickup 单件（放置 / 拾取不分材质）。
+# t152：door_open / door_close 单件（门/活板门右键开合声；doorToggled 信号 → AudioManager.playDoor*）。
 qt_add_resources(voxelsandbox "voxel_sounds"
     PREFIX "/"
     FILES
@@ -189,6 +190,8 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/step_leaves.wav
         sounds/place.wav
         sounds/pickup.wav
+        sounds/door_open.wav
+        sounds/door_close.wav
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。
