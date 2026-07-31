@@ -623,11 +623,30 @@ Window {
         // 挡住棱）。1.005 → ±0.5025，仅微凸 0.0025（与 CrackBox 叠层同防 z-fight 量级），紧贴方块边、
         // 邻块不再吞噬远侧棱。
         Model {
+            id: selectionBox
             visible: player.hasHit
-            position: Qt.vector3d(player.hitBlock.x + 0.5,
-                                  player.hitBlock.y + 0.5,
-                                  player.hitBlock.z + 0.5)
-            scale: Qt.vector3d(1.005, 1.005, 1.005)
+            // t126：选中框按命中方块实际形状分流。Torch(id13) → 小立柱（scale 0.12/0.6/0.12 + 木柄
+            //   位姿），其余 → 全格 1.005（原行为，见上方 1.005 放大系数注释）。Torch 分支镜像 torchHost
+            //   delegate 的木柄 Model（同一份 computeTorchOrient + torchHandleLocalPos/Euler），故选中框
+            //   贴合火把外缘、非全格。13 = BlockRegistry::Torch（魔法数与下方 onWorldChanged 火把校验同源）。
+            //   分层（PLAN §2）：呈现层只读 World（blockAt/isCollidable），不写栅格。
+            property int worldRev: 0   // 邻居破/放会改火把有效朝向 → worldChanged ++ 触发 torchOrient 重算
+            Connections { target: theWorld; function onWorldChanged() { ++selectionBox.worldRev } }
+            readonly property int hitId: player.hasHit ? theWorld.blockAt(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z) : 0
+            readonly property bool isTorch: hitId === 13
+            readonly property string torchOrient: {
+                // Q_INVOKABLE（isCollidable/blockAt）无自带 QML 绑定依赖 → 显式读 worldRev，使
+                //   worldChanged 后本绑定重算（邻居破/放会改火把有效朝向）。
+                selectionBox.worldRev;
+                return isTorch ? computeTorchOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z,
+                                                    findTorchPrefOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z))
+                               : "up"
+            }
+            position: isTorch
+                ? torchHandleWorldPos(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z, torchOrient)
+                : Qt.vector3d(player.hitBlock.x + 0.5, player.hitBlock.y + 0.5, player.hitBlock.z + 0.5)
+            scale: isTorch ? Qt.vector3d(0.12, 0.6, 0.12) : Qt.vector3d(1.005, 1.005, 1.005)
+            eulerRotation: isTorch ? torchHandleEuler(torchOrient) : Qt.vector3d(0, 0, 0)
             geometry: WireCube {}
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
@@ -1308,34 +1327,12 @@ Window {
                     //   外法线推导），recomputeOrient 优先采用之；旧固定优先级（下>-X>+X>-Z>+Z）仅作退化兜底。
                     property string orient: "up"
 
-                    // t125 判定某朝向对应的支撑邻居是否实体（柄要嵌的那面墙 / 地是否还在）。
-                    //   用 theWorld.isCollidable（BlockRegistry::isSolid）—— 只认实体方块，不把另一火把 /
-                    //   空气当支撑（避免两火把互挂成悬空）。orient→邻居：柄伸 +X(px) 嵌 -X 墙、余类推。
-                    function orientNeighborSolid(o, x, y, z) {
-                        switch (o) {
-                        case "up": return theWorld.isCollidable(x, y - 1, z)
-                        case "px": return theWorld.isCollidable(x - 1, y, z)
-                        case "nx": return theWorld.isCollidable(x + 1, y, z)
-                        case "pz": return theWorld.isCollidable(x, y, z - 1)
-                        case "nz": return theWorld.isCollidable(x, y, z + 1)
-                        }
-                        return false
-                    }
-
-                    // 定向火把：优先玩家点击面（prefOrient）—— 只要对应支撑邻居仍实体即采用，修正旧固定
-                    //   优先级在「墙+地并存」（墙插火把下方恰有地面）时误判垂直立柱、违背玩家点墙意图的 bug。
-                    //   退化：玩家所点面支撑被挖掉 → 按下 / 4 侧顺序首个实体邻居兜底；全无实体则保留玩家意图
-                    //   方向（无 pop-off 机制，宁可按原朝向画也不突兀翻转）。
+                    // t126 朝向逻辑抽出为顶层 computeTorchOrient（与选中框共用同一份判定，确保两者
+                    //   orient 永远一致 → 选中框贴合火把实际形状）。语义不变（t125）：优先 prefOrient
+                    //   （玩家点击面）、其支撑邻居仍实体即采用；否则按下 / 4 侧顺序首个实体邻居兜底；
+                    //   全无实体则保留玩家意图方向（无 pop-off 机制，宁可按原朝向画也不突兀翻转）。
                     function recomputeOrient() {
-                        const x = model.x, y = model.y, z = model.z
-                        const pref = model.prefOrient || "up"
-                        if (orientNeighborSolid(pref, x, y, z)) { torchGlow.orient = pref; return }
-                        if (theWorld.isCollidable(x, y - 1, z)) { torchGlow.orient = "up"; return }
-                        if (theWorld.isCollidable(x - 1, y, z)) { torchGlow.orient = "px"; return }
-                        if (theWorld.isCollidable(x + 1, y, z)) { torchGlow.orient = "nx"; return }
-                        if (theWorld.isCollidable(x, y, z - 1)) { torchGlow.orient = "pz"; return }
-                        if (theWorld.isCollidable(x, y, z + 1)) { torchGlow.orient = "nz"; return }
-                        torchGlow.orient = pref // 悬空（支撑已无）→ 保留玩家意图方向，避免不可见
+                        torchGlow.orient = computeTorchOrient(model.x, model.y, model.z, model.prefOrient || "up")
                     }
 
                     // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
@@ -1362,29 +1359,12 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#6b4f24"   // 木柄暗棕（原木色，与木棒图标同色系）
                         }
-                        // 柄中心位置（局部坐标，相对 torchGlow 底面中心）。
-                        position: {
-                            switch (torchGlow.orient) {
-                            case "up": return Qt.vector3d(0.0, 0.30, 0.0)
-                            case "px": return Qt.vector3d(-0.20, 0.50, 0.0) // 贴 -X 墙、柄伸 +X
-                            case "nx": return Qt.vector3d( 0.20, 0.50, 0.0) // 贴 +X 墙、柄伸 -X
-                            case "pz": return Qt.vector3d(0.0, 0.50, -0.20) // 贴 -Z 墙、柄伸 +Z
-                            case "nz": return Qt.vector3d(0.0, 0.50,  0.20) // 贴 +Z 墙、柄伸 -Z
-                            }
-                            return Qt.vector3d(0.0, 0.30, 0.0)
-                        }
-                        // 旋转：水平时把竖柄（默认沿 +Y）旋到对应水平轴。
-                        //   ±X 向：绕 Z 轴 ±90°（+Y → ±X）。
-                        //   ±Z 向：绕 X 轴 ∓90°（+Y → ±Z）。
-                        eulerRotation: {
-                            switch (torchGlow.orient) {
-                            case "px": return Qt.vector3d(0, 0, -90)
-                            case "nx": return Qt.vector3d(0, 0,  90)
-                            case "pz": return Qt.vector3d( 90, 0, 0)
-                            case "nz": return Qt.vector3d(-90, 0, 0)
-                            }
-                            return Qt.vector3d(0, 0, 0)
-                        }
+                        // 柄中心位置（局部坐标，相对 torchGlow 底面中心）。t126 抽出 torchHandleLocalPos
+                        //   与选中框共用同一份 switch，确保选中框位姿与渲染出的火把柄完全一致。
+                        position: torchHandleLocalPos(torchGlow.orient)
+                        // 旋转：水平时把竖柄（默认沿 +Y）旋到对应水平轴（t126 抽出 torchHandleEuler 与选中框共用）。
+                        //   ±X 向：绕 Z 轴 ±90°（+Y → ±X）；±Z 向：绕 X 轴 ∓90°（+Y → ±Z）。
+                        eulerRotation: torchHandleEuler(torchGlow.orient)
                     }
 
                     // 火焰：暖白小立方（UnitCube scale ~0.18 + 闪烁动画；spec「scale 0.18 黄 + 闪」）。
@@ -1533,6 +1513,79 @@ Window {
         if (nx < 0) return "nx"
         if (nz > 0) return "pz"
         if (nz < 0) return "nz"
+        return "up"
+    }
+
+    // t126 火把朝向 / 木柄位姿公共逻辑：抽出供「伪光源 delegate」与「选中框」共用，确保两者算出
+    //   同一 orient 与同一柄 transform → 选中框贴合火把实际形状（小立柱）而非全格。语义与原 delegate
+    //   内联 switch 完全一致，仅去重为单一权威（DRY：改定向规则只改一处）。
+    //
+    // orient→支撑邻居：up 看下方、px 嵌 -X 墙、nx 嵌 +X 墙、pz 嵌 -Z 墙、nz 嵌 +Z 墙。
+    //   用 isCollidable（BlockRegistry::isSolid）—— 只认实体方块，不把另一火把 / 空气当支撑
+    //   （避免两火把互挂成悬空）。
+    function torchNeighborSolid(o, x, y, z) {
+        switch (o) {
+        case "up": return theWorld.isCollidable(x, y - 1, z)
+        case "px": return theWorld.isCollidable(x - 1, y, z)
+        case "nx": return theWorld.isCollidable(x + 1, y, z)
+        case "pz": return theWorld.isCollidable(x, y, z - 1)
+        case "nz": return theWorld.isCollidable(x, y, z + 1)
+        }
+        return false
+    }
+
+    // 火把有效朝向（原 delegate recomputeOrient 抽出）：优先 prefOrient（玩家点击面），其支撑邻居
+    //   仍实体即采用；否则按下 / -X / +X / -Z / +Z 顺序首个实体邻居兜底；全无实体则保留 prefOrient
+    //   （悬空不翻转，无 pop-off 机制）。
+    function computeTorchOrient(x, y, z, prefOrient) {
+        const pref = prefOrient || "up"
+        if (torchNeighborSolid(pref, x, y, z)) return pref
+        if (theWorld.isCollidable(x, y - 1, z)) return "up"
+        if (theWorld.isCollidable(x - 1, y, z)) return "px"
+        if (theWorld.isCollidable(x + 1, y, z)) return "nx"
+        if (theWorld.isCollidable(x, y, z - 1)) return "pz"
+        if (theWorld.isCollidable(x, y, z + 1)) return "nz"
+        return pref
+    }
+
+    // 火把木柄中心局部位置（相对 cell 底面中心 [x+0.5, y, z+0.5]）。竖直时贴 cell 底上伸（柄中心 0.3）；
+    //   水平时沿墙法线偏移 ±0.20（柄端贴墙面、柄身伸向 cell 中央），Y=0.5。
+    function torchHandleLocalPos(o) {
+        switch (o) {
+        case "up": return Qt.vector3d(0.0, 0.30, 0.0)
+        case "px": return Qt.vector3d(-0.20, 0.50, 0.0) // 贴 -X 墙、柄伸 +X
+        case "nx": return Qt.vector3d( 0.20, 0.50, 0.0) // 贴 +X 墙、柄伸 -X
+        case "pz": return Qt.vector3d(0.0, 0.50, -0.20) // 贴 -Z 墙、柄伸 +Z
+        case "nz": return Qt.vector3d(0.0, 0.50,  0.20) // 贴 +Z 墙、柄伸 -Z
+        }
+        return Qt.vector3d(0.0, 0.30, 0.0)
+    }
+
+    // 火把木柄世界位置 = cell 底面中心 + 局部位姿。供选中框 Model.position 直接绑定。
+    function torchHandleWorldPos(x, y, z, o) {
+        const lp = torchHandleLocalPos(o)
+        return Qt.vector3d(x + 0.5 + lp.x, y + lp.y, z + 0.5 + lp.z)
+    }
+
+    // 火把木柄 euler 旋转：水平朝向把竖柄（默认沿 +Y）旋到对应水平轴。
+    //   ±X 向：绕 Z 轴 ±90°（+Y → ±X）；±Z 向：绕 X 轴 ∓90°（+Y → ±Z）；up 不转。
+    function torchHandleEuler(o) {
+        switch (o) {
+        case "px": return Qt.vector3d(0, 0, -90)
+        case "nx": return Qt.vector3d(0, 0,  90)
+        case "pz": return Qt.vector3d( 90, 0, 0)
+        case "nz": return Qt.vector3d(-90, 0, 0)
+        }
+        return Qt.vector3d(0, 0, 0)
+    }
+
+    // t126 查 torchPositions 里某 cell 的 prefOrient（玩家放置时记的命中面定向）；未找到返回 "up"
+    //   （理论上不会出现 —— 火把仅经 onTorchPlaced 入表、worldChanged 校验清理；退化安全）。
+    function findTorchPrefOrient(x, y, z) {
+        for (let i = 0; i < torchPositions.count; ++i) {
+            const e = torchPositions.get(i)
+            if (e.x === x && e.y === y && e.z === z) return e.prefOrient || "up"
+        }
         return "up"
     }
 
