@@ -1,4 +1,8 @@
 import QtQuick
+// t127：创造调色板 ScrollBar（拖动指示）来自 QtQuick.Controls。纯 QML 模块不经 C++ 链接（同 t14
+//   Particles3D）——CMakeLists 的 windeployqt POST_BUILD 已用 `--qmldir src/ui` 扫 import 语句自动部署
+//   匹配的 QML 模块插件，故无 t94 tooltip 注释担心的「未部署→整文档加载失败」之忧（见 lessons-learned）。
+import QtQuick.Controls
 // t41：迁入 src/ui/ 子目录后需显式 import 自身模块，以解析下方 `property Hotbar hotbar` 等 C++ 类型。
 import VoxelSandbox
 
@@ -413,16 +417,22 @@ Item {
                       + (root.hoveredName !== "" ? "    |    悬停：" + root.hoveredName : "")
             }
 
-            // ① 调色板（Flickable 垂直可滚动）。
+            // ① 调色板（Flickable 垂直可滚动 + ScrollBar 指示拖动；t127）。
+            //   t127 根因：原视口仅 cellSize*2+8（2 行）+ 无 ScrollBar → 火把（第 13 项，9 列排第 2 行第 4 格）
+            //   贴在视口边缘、下方工具/材料（第 3-4 行）既滚不出也无指示。修：(a) 视口抬到 cellSize*3+12 容 3 行
+            //   → 火把完整可见且下方留滚动余量；(b) 挂 ScrollBar.vertical(policy AsNeeded) → 内容超视口时显
+            //   拖动条，可拖 / 滚轮滚到第 4 行的工具 / 材料。视口抬升后整列内容 272 ≤ 面板可用高 284，不破布局。
             Flickable {
                 id: paletteFlick
                 width: parent.width
-                height: root.cellSize * 2 + 8 // 视口约 2 行；内容 3 行 → 可向下滚动一格
+                height: root.cellSize * 3 + 12 // t127：视口容 3 行（火把第 2 行完整可见 + 下方可滚）
                 clip: true
                 contentWidth: paletteGrid.width
                 contentHeight: paletteGrid.height
                 flickableDirection: Flickable.VerticalFlick
                 boundsBehavior: Flickable.StopAtBounds
+                // t127：内容超出视口（4 行 > 3 行视口）时显垂直拖动条；policy=AsNeeded 即不足时不占空间。
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                 Grid {
                     id: paletteGrid
