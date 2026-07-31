@@ -126,14 +126,14 @@ Half facingWall(int facing) {
     switch (facing & 3) {
     case 0: return {0.0f, 0.5f};  // 朝 +X 开 → 板在 -X 半
     case 1: return {0.5f, 1.0f};  // 朝 -X 开 → 板在 +X 半
-    default: return {0.0f, 0.0f}; // +Z/-Z 向（X 轴全 footprint）
+    default: return {0.0f, 1.0f}; // codereview H1: +Z/-Z 向（X 轴全 footprint）——原 {0,0} 零体积致楼梯墙无碰撞
     }
 }
 Half facingWallZ(int facing) {
     switch (facing & 3) {
     case 2: return {0.0f, 0.5f};  // 朝 +Z 开 → 板在 -Z 半
     case 3: return {0.5f, 1.0f};  // 朝 -Z 开 → 板在 +Z 半
-    default: return {0.0f, 0.0f}; // +X/-X 向（Z 轴全 footprint）
+    default: return {0.0f, 1.0f}; // codereview H1: +X/-X 向（Z 轴全 footprint）——原 {0,0} 零体积致楼梯墙无碰撞
     }
 }
 std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8 state)
