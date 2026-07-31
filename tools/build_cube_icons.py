@@ -40,7 +40,7 @@ BLOCKS = [
     ("furnace",         "default_furnace_top", "default_furnace_side"),  # t80（图标显顶+侧，不显炉口前面）
     ("coal_ore",        "default_coal_ore", "default_coal_ore"),  # t84 煤矿石（各面同贴图）
     ("iron_ore",        "default_iron_ore", "default_iron_ore"),  # t84 铁矿石（各面同贴图）
-    ("torch",           "default_torch", "default_torch"),  # t88 火把（各面同贴图；近黑底+火焰）
+    ("torch",           "default_torch", "default_torch"),  # t88 火把（透明底+木柄+火焰；走平面 2D 分支非立方体投影）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----
@@ -120,9 +120,27 @@ def render(top_name, side_name):
     return img.resize((OUT, OUT), Image.LANCZOS)
 
 
+def render_flat_2d(name):
+    """平面 2D 图标（异形 / 半透方块如火把）：源贴图透明底直接 NEAREST 放大到 OUT×OUT，保留 alpha。
+
+    根因：火把贴图（default_torch.png）是 16×16 透明底只含火把本体（木柄 + 火焰）。若走立方体投影
+    (render)，load_face 会用不透明像素平均色填掉透明像素 → 图标糊成实心方块、且投影本身把整块
+    16×16 当立方体面渲染 → 黑底方块。火把游戏内本就是异形（torchHost 木柄 + 火焰小立方，非
+    1×1×1 立方体；mesher 对 Torch continue），图标应反映其 2D 形态：直接放大、保留 alpha →
+    「纯火把无方块底」。
+    """
+    p = os.path.join(SRC, name + ".png")
+    img = Image.open(p).convert("RGBA")
+    return img.resize((OUT, OUT), Image.NEAREST)
+
+
 def main():
     for out_name, top_name, side_name in BLOCKS:
-        img = render(top_name, side_name)
+        if out_name == "torch":
+            # 火把走平面 2D 路径（透明底保留 alpha），非立方体投影（见 render_flat_2d 注释）。
+            img = render_flat_2d(top_name)
+        else:
+            img = render(top_name, side_name)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)

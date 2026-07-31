@@ -4,13 +4,14 @@
 机制等价 MC 1.0 火把（小光源方块，solid=false 非实体碰撞、hardness=0 瞬破），但贴图为本项目
 程序生成的原创像素图，**不**拷贝任何 MC 资产。
 
-本工程 mesher 只产立方体几何（无 cross-billboard 特殊形），火把被当作「6 面同贴图的 1×1×1
-立方体」渲染。故贴图须在 16×16 内自含一个完整可读的火把图案（木柄 + 火焰），让任一面都读
-得出「这是火把」；底色取近黑暖棕（非透明）——透明底在 PrincipledMaterial 默认 Mask blend 下
-会被当不透明渲染成黑块（lessons-learned「裂纹叠层」同族坑），故走实心暗底。
+火把在游戏中由异形渲染（Main.qml torchHost：木柄 + 火焰小立方，t114），mesher 对 Torch 特例
+continue（不画 1×1×1 立方面，见 chunkgeometry.cpp），故贴图不参与世界内立方体面渲染。贴图采用
+**全透明底**（alpha=0），只画火把本体（木柄 + 火焰）；背包/hotbar 图标走平面 2D 放大
+（build_cube_icons.py torch 分支保留 alpha），呈现「纯火把无方块底」。t88 早期「实心暗底防 Mask
+blend 渲成黑块」的前提（火把当 1×1×1 立方体渲染）已随 t114 异形化失效，故回退到透明底。
 
 图案（固定，无随机源 → 确定性，便于 CI 校验 & 与 build_atlas.py 顺序对齐）：
-  - 底色：近黑暖棕（#1a120a），读作「未点亮 / 焦炭」暗块；
+  - 底色：全透明（alpha=0）；
   - 木柄：垂直棕色矩形（#6b4a2a）居中、下半段；
   - 火焰：木柄上方黄→橙→暖白三段渐变焰心（外橙 #ff8a1a、中黄 #ffd23c、心 #fff4c4）。
 
@@ -29,19 +30,17 @@ TS = 16  # 贴图边长（像素）
 
 
 def blank():
-    """近黑暖棕底（实心 alpha=255；防 Mask blend 渲成黑块，lessons-learned）。"""
+    """全透明底（alpha=0）。火把本体由 draw_torch 写入的像素经 px() 单独置 alpha=255。"""
     canvas = np.zeros((TS, TS, 4), dtype=np.float64)
-    canvas[..., 0] = 26.0   # R
-    canvas[..., 1] = 18.0   # G
-    canvas[..., 2] = 10.0   # B
-    canvas[..., 3] = 255.0  # A（实心）
+    canvas[..., 3] = 0.0  # A（全透明底；RGB 留 0，透明像素的 RGB 不被采样故无所谓）
     return canvas
 
 
 def px(canvas, x, y, rgb):
-    """单像素写入（越界忽略）。"""
+    """单像素写入（越界忽略）。同时置 alpha=255（火把本体不透明，与全透明底区分）。"""
     if 0 <= x < TS and 0 <= y < TS:
         canvas[y, x, 0:3] = rgb
+        canvas[y, x, 3] = 255.0
 
 
 def rect(canvas, x0, y0, x1, y1, rgb):
