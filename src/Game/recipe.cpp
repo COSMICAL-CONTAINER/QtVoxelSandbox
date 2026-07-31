@@ -82,6 +82,44 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { RecipeRegistry::CharcoalId, kStickId, 0, 0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::Torch), 4, 1, "torch_charcoal" },
+    // ── t134 不完整方块（木制半方块，机制等价 MC 配方；产物 id >= FirstPartial 走异形渲染）──
+    //   slab：3 木板横排 → 6 木板台阶（有序 3×3，仅工作台）。MC「3 板横排→6 台阶」。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoodSlab), 6, 1, "wood_slab" },
+    //   stairs：6 木板阶梯（顶满 / 中左两 / 底左一）→ 4 木板楼梯（有序 3×3，仅工作台）。MC 楼梯配方。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), 0,                         0,
+        int(BlockRegistry::Planks), int(BlockRegistry::Planks), 0,
+        int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks) },
+      int(BlockRegistry::WoodStairs), 4, 1, "wood_stairs" },
+    //   fence：6 木板 + 2 木棒（板-棒-板 ×2 行）→ 3 木栅栏（有序 3×3，仅工作台）。MC 栅栏配方。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), kStickId,                  int(BlockRegistry::Planks),
+        int(BlockRegistry::Planks), kStickId,                  int(BlockRegistry::Planks),
+        0, 0, 0 },
+      int(BlockRegistry::WoodFence), 3, 1, "wood_fence" },
+    //   pressure_plate：2 木板横排 → 1 木板压力板（有序 2×2 背包栏；最小包围盒 2×1）。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks), 0,
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoodPressurePlate), 1, 1, "wood_pressure_plate" },
+    //   door：3 木板纵列 → 3 木板门（有序 3×3，仅工作台；最小包围盒 1×3）。MC 门配方（产 3）。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), 0, 0,
+        int(BlockRegistry::Planks), 0, 0,
+        int(BlockRegistry::Planks), 0, 0 },
+      int(BlockRegistry::WoodDoor), 3, 1, "wood_door" },
+    //   trapdoor：6 木板 2×3（两行三列）→ 2 木活板门（有序 3×3，仅工作台）。MC 活板门配方（产 2）。
+    //     注：spec 原注「4 板方形→1(2x2)」与 craftingTable（无序 4 板 → 1 工作台）冲突 —— 4 板 2×2 输入
+    //     的多重集 {Planks:4} 必先命中 shapeless 的 craftingTable，trapdoor 永不可合。spec 顶层指令
+    //     「MC 配方照搬」据此优先：用 MC 实际配方（6 板 2×3 → 2），避开冲突且对齐 MC。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
+        int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
+        0, 0, 0 },
+      int(BlockRegistry::WoodTrapdoor), 2, 1, "wood_trapdoor" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

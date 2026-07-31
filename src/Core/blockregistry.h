@@ -45,15 +45,26 @@ public:
                            // **hardness=-1.0**（负值 → ToolRegistry::canMine 自动 false，任何模式任何工具
                            // 均不可破，防创造秒破底层）、dropId=0（破不掉落，但实际不可破故永不触发）、
                            // 各面同贴图（tile 18）。worldgen 在 y 0..4 按 hashVoxel 坑洼铺一层（底实顶疏）。
-        Count         = 15, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t134 不完整方块（异形几何段，id >= FirstPartial）：6 类木制半方块，机制等价 MC 1.0
+        //   (id, metadata) 方块模型。solid=false（同 torch：非整立方 → 不挡邻居面剔除，避免相邻整立方
+        //   被错误剔除出「洞」；逐形状精确碰撞留后续任务）。各面同贴图=planks(8)、hardness=2.0（木质）、
+        //   NoTool（空手可采且掉落）。掉落自身。mesher 经 PartialBlockGeometry::append 按 (id,state) 生成
+        //   异形顶点并合批进 chunk mesh。state 编码朝向 / 开合 / 半位（见各枚举注释 + partialblockgeometry.cpp）。
+        WoodSlab          = 15, // 木板台阶：半高（上/下半）。state bit0 = 上半(1)/下半(0)。
+        WoodStairs        = 16, // 木板楼梯：下层整步 + 上层背墙。state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开）。
+        WoodFence         = 17, // 木栅栏：中心立柱（0.4 见方）。state=0（单格；连接邻居留后续）。
+        WoodPressurePlate = 18, // 木板压力板：贴地薄板。state=0。
+        WoodDoor          = 19, // 木板门：两格高（下/上格同 id）。state: bit3=上格(1)/下格(0)、bit2=开(1)/合(0)、
+                                //   bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z。maxStack=1（单件，不可堆叠）。
+        WoodTrapdoor      = 20, // 木板活板门：水平/竖直薄板。state bit0=开(1，竖直贴边)/合(0，水平贴地)，
+                                //   bit[2:1]=开时朝向 0=+X 1=-X 2=+Z 3=-Z。
+        Count         = 21, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起点哨兵：WoodSlab(15) 起的 id 走 PartialBlockGeometry 异形渲染（mesher 合批进
-    //   chunk mesh，不走 1×1×1 立方面路径）。具体方块定义在 t134 落地（WoodSlab=15 / WoodStairs=16 /
-    //   WoodFence=17 / WoodPressurePlate=18 / WoodDoor=19 / WoodTrapdoor=20，Count=21）。t133 仅设此
-    //   哨兵 + 渲染基础设施 + chunk state 数组。当前 Count=15 = FirstPartial → 任何合法 id 都 <
-    //   FirstPartial → mesher 的 `b >= FirstPartial` 分支静默不触发，等 t134 加方块后激活。
-    //   机制等价 MC 1.0 (id, metadata) 方块模型：id >= FirstPartial 即「异形方块」（非整立方）。
+    //   chunk mesh，不走 1×1×1 立方面路径）。t134 已落地 6 类（WoodSlab=15 ... WoodTrapdoor=20，Count=21）；
+    //   mesher 的 `b >= FirstPartial` 分支现对这 6 id 激活。机制等价 MC 1.0 (id, metadata) 方块模型：
+    //   id >= FirstPartial 即「异形方块」（非整立方）。
     static constexpr int FirstPartial = 15;
 
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：

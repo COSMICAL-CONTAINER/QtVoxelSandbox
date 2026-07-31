@@ -298,6 +298,10 @@ private:
     //   在 AABB footprint 内任一列实体即算支撑）。step() 据此判定「蹲下时若水平移动后脚下将无方块
     //   则不水平移动」（防走下方块边缘）。仅读 World（isSolid），与碰撞同层。
     bool hasGroundBelowAt(float x, float z) const;
+    // t134 玩家水平朝向（据 yaw 推 4 向）：前向 = (-sin(yaw), -cos(yaw))（与 wishHoriz/lookDirection 同源）。
+    //   返回 0=+X 1=-X 2=+Z 3=-Z（与不完整方块 state 朝向编码一致：stairs/door/trapdoor 均用此编码）。
+    //   供 placeBlock 放 stairs/door 时定朝向、useBlock 开 trapdoor 时定开向。
+    int horizontalFacing() const;
     // 持续挖掘（t34）：每 tick 累积进度 / 检目标变更 / 完成时破块。由 tick() 调（captured 时）。
     void updateMining(float dt);
     // 清掉累积态（松开 / 换目标 / 失焦 / 完成）。无变化时静默（不发信号）。

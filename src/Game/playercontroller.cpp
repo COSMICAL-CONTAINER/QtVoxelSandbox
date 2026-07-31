@@ -464,7 +464,20 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
 {
     if (!m_world) return;
     const quint8 brokenId = m_world->blockAt(x, y, z);
+    // t134 门两格破坏联动：破任一格 → 同步清配对格（另一格），防留半截悬空门。配对格据本格 state bit3
+    //   （isUpper）判上 / 下：本格上格 → 配对 y-1；本格下格 → 配对 y+1。仅当配对格同为 WoodDoor 才清
+    //   （防御：state 不一致时不误清异格）。drop 仅对本格发（配对格静默清，避免双掉落）。
+    //   ⚠️ brokenState 必须在 setBlock(Air) **之前**读：4 参数 setBlock 委托 5 参数版以 state=0 写入
+    //   （chunk.cpp「id 变更时重置 state=0」契约），之后 stateAt 永返 0 → 配对方向恒算成 y+1 →
+    //   破上格（bit3=1 本应 y-1 找下格）时下格不清，留半截悬空门。useBlock 路径在 setBlock 前读 st 故无此坑。
+    const quint8 brokenState = (brokenId == BlockRegistry::WoodDoor)
+        ? m_world->stateAt(x, y, z) : quint8(0);
     m_world->setBlock(x, y, z, BlockRegistry::Air); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
+    if (brokenId == BlockRegistry::WoodDoor) {
+        const int py = ((brokenState & 8) != 0) ? y - 1 : y + 1;
+        if (m_world->blockAt(x, py, z) == BlockRegistry::WoodDoor)
+            m_world->setBlock(x, py, z, BlockRegistry::Air);
+    }
     emit playerMined(x, y, z, int(brokenId), drop); // 破块语义事件（含 drop 标志；当前无消费端，留扩展）
     // t43：生存挖出可掉落方块 → **走实体流**（emit spawnItem），移除 commit a3e9300 的 auto-collect
     // （原直接 addStack）。掉落物落到该格地面、玩家走近 ≤kPickupDist 时经 pickupScan 拾取 → addStack
@@ -594,11 +607,46 @@ void PlayerController::placeBlock()
         emit furnaceOpened();
         return;
     }
+    // t134 右键门 / 活板门 → 翻 state 开合（useBlock 语义；spec「door/trapdoor 右键 useBlock 翻 state 开合」）。
+    //   优先于放置（同工作台 / 熔炉模式：右键已放置的门 / 活板门即开合，不另放块）。空手亦可（开合是
+    //   「使用」语义，与手持何物无关）。id 不变只 state 变 → World::setBlock 5 参数版走重网格化路径
+    //   （发 worldChanged 不发 broken/placed）。门两格同翻（找配对格：据本格 state bit3 判上 / 下）。
+    {
+        const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+        if (hitId == BlockRegistry::WoodDoor) {
+            const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+            const quint8 flipped = quint8((st & ~4) | (((st & 4) == 0) ? 4 : 0)); // 翻 bit2（开合）
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, flipped);
+            // 配对格（上 / 下）同步翻：本格 isUpper(bit3)=1 → 配对在 y-1；否则 y+1。
+            const int py = ((st & 8) != 0) ? m_hitBy - 1 : m_hitBy + 1;
+            if (m_world->blockAt(m_hitBx, py, m_hitBz) == BlockRegistry::WoodDoor) {
+                const quint8 pst = m_world->stateAt(m_hitBx, py, m_hitBz);
+                const quint8 pflipped = quint8((pst & ~4) | (((pst & 4) == 0) ? 4 : 0));
+                m_world->setBlock(m_hitBx, py, m_hitBz, BlockRegistry::WoodDoor, pflipped);
+            }
+            m_lastPlaceMs = now;
+            emit swingArm();
+            return;
+        }
+        if (hitId == BlockRegistry::WoodTrapdoor) {
+            const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+            const bool willOpen = (st & 1) == 0;
+            quint8 ns = quint8(st ^ 1); // 翻 bit0（开合）
+            if (willOpen) {
+                // 开时记录朝向 = 玩家当前水平朝向（bit[2:1]），合时不清朝向（保留下次开向）。
+                ns = quint8((ns & ~6) | quint8((horizontalFacing() & 3) << 1));
+            }
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, ns);
+            m_lastPlaceMs = now;
+            emit swingArm();
+            return;
+        }
+    }
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
     if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放
-    // 与玩家重叠 → 不放（防自埋 / 卡死）。t88：非实体方块（如火把，BlockDef.solid=false）例外——
-    // 它不挡玩家，放进玩家所在格也不会卡死（spec「非实体碰撞」），允许放置（如脚下插火把）。
+    // 与玩家重叠 → 不放（防自埋 / 卡死）。t88：非实体方块（如火把 / 不完整方块，BlockDef.solid=false）例外——
+    // 它不挡玩家，放进玩家所在格也不会卡死（spec「非实体碰撞」），允许放置。
     if (BlockRegistry::isSolid(quint8(m_selectedBlock)) && overlapsPlayerAABB(tx, ty, tz)) return;
     // t114 火把放置预检：火把需挂到实体邻居（下 / 四侧之一为实体方块），否则拒绝（机制等价 MC「火把
     // 需要支撑面」—— 平地或墙面）。判定用 BlockRegistry::isSolid（实体方块语义；不挂到空气 / 另一火把
@@ -611,7 +659,28 @@ void PlayerController::placeBlock()
         const bool nz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz - 1));
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
     }
-    m_world->setBlock(tx, ty, tz, quint8(m_selectedBlock));
+    // t134 不完整方块放置：door 占两格（下格 + 上格），需上格也为空气；其余单格。state 据命中面 / 玩家
+    //   朝向算（slab 上下半据命中面 ny；stairs/door 朝向据玩家水平朝向；fence/pressure_plate/trapdoor
+    //   state=0）。走 setBlock 5 参数版（写 id + state）。
+    const quint8 idByte = quint8(m_selectedBlock);
+    if (m_selectedBlock == BlockRegistry::WoodDoor) {
+        if (m_world->blockAt(tx, ty + 1, tz) != BlockRegistry::Air) return; // 上格非空 → 门放不下
+        const quint8 facing = quint8(horizontalFacing() & 3);
+        const quint8 lowerState = facing;            // bit3=0(下格) bit2=0(合) bit[1:0]=朝向
+        const quint8 upperState = quint8(facing | 8); // bit3=1(上格)
+        m_world->setBlock(tx, ty, tz, idByte, lowerState);
+        m_world->setBlock(tx, ty + 1, tz, idByte, upperState);
+    } else {
+        quint8 state = 0;
+        if (m_selectedBlock == BlockRegistry::WoodSlab) {
+            // 命中顶面（ny=+1，放在方块上方）→ 下半(state=0)；命中底面（ny=-1，天花板下方）→ 上半(state=1)。
+            state = quint8(m_hitNy < 0 ? 1 : 0);
+        } else if (m_selectedBlock == BlockRegistry::WoodStairs) {
+            state = quint8(horizontalFacing() & 3);
+        }
+        // fence / pressure_plate / trapdoor：state=0（trapdoor 默认水平合）。
+        m_world->setBlock(tx, ty, tz, idByte, state);
+    }
     m_lastPlaceMs = now; // 放置成功 → 刷新 CD 计时（t128；now 为入口时间戳，同帧无意义漂移）
     // t125 火把朝向：把玩家点击面外法线随放置事件传出，供呈现层按玩家意图定向（柄嵌所点墙面，
     //   非旧固定优先级误判）。法线为射线命中面外法线（指向玩家侧），值在 placeBlock 入口已由 updateRaycast
@@ -722,6 +791,16 @@ bool PlayerController::overlapsPlayerAABB(int bx, int by, int bz) const
     return minx < float(bx + 1) && maxx > float(bx)
         && miny < float(by + 1) && maxy > float(by)
         && minz < float(bz + 1) && maxz > float(bz);
+}
+
+// t134 玩家水平朝向（4 向，据 yaw 推）：前向 = (-sin(yaw), -cos(yaw))（与 wishHoriz/lookDirection 同源）。
+//   主轴（|fx| vs |fz|）+ 符号 → 0=+X 1=-X 2=+Z 3=-Z（与 stairs/door/trapdoor state 朝向编码一致）。
+int PlayerController::horizontalFacing() const
+{
+    const float yr = m_yaw * kDeg;
+    const float fx = -std::sin(yr), fz = -std::cos(yr);
+    if (std::fabs(fx) >= std::fabs(fz)) return fx > 0.0f ? 0 : 1; // +X / -X
+    return fz > 0.0f ? 2 : 3;                                     // +Z / -Z
 }
 
 QVector3D PlayerController::wishHoriz() const

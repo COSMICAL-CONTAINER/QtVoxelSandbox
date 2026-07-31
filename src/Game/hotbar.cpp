@@ -25,6 +25,16 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CoalOre:       return "icon_coal_ore.png";       // t84 煤矿石立方体图标
     case BlockRegistry::IronOre:       return "icon_iron_ore.png";       // t84 铁矿石立方体图标
     case BlockRegistry::Torch:         return "icon_torch.png";          // t88 火把立方体图标（伪光源）
+    // t134 不完整方块：v1 共用木纹（planks）立方体图标 + displayName 区分（spec「6 PNG 程序生成 或
+    //   v1 共用木纹+displayName 区分」）。6 类同为木板材质 → 复用 icon_planks，由中文显示名（木板台阶 /
+    //   木板楼梯 / 木栅栏 / 木板压力板 / 木板门 / 木活板门）在 HUD/调色板 tooltip 区分。后续可走
+    //   build_cube_icons.py 程序生成各异 flat 2D 图标。
+    case BlockRegistry::WoodSlab:
+    case BlockRegistry::WoodStairs:
+    case BlockRegistry::WoodFence:
+    case BlockRegistry::WoodPressurePlate:
+    case BlockRegistry::WoodDoor:
+    case BlockRegistry::WoodTrapdoor:  return "icon_planks.png";
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
@@ -166,7 +176,8 @@ QVariantList Hotbar::countList() const
 
 // 创造背包网格用：所有可放置方块 id（实体方块，air 除外）。id 取自 BlockRegistry（单一权威）。
 // t50：追加工作台；t80：追加熔炉；t84：追加煤矿/铁矿石；t88：追加火把（伪光源方块，可在创造调色板
-// 直接取用，便于测试放置 + 发光精灵效果）。
+// 直接取用，便于测试放置 + 发光精灵效果）。t134：追加 6 类木制半方块（slab/stairs/fence/pressure_plate/
+// door/trapdoor），可在创造直接取用测试异形放置 / 开合。
 QVariantList Hotbar::creativeBlocks() const
 {
     return { int(BlockRegistry::Grass),         int(BlockRegistry::Dirt),  int(BlockRegistry::Stone),
@@ -174,7 +185,11 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Leaves),        int(BlockRegistry::Sand),
              int(BlockRegistry::CraftingTable), int(BlockRegistry::Furnace),
              int(BlockRegistry::CoalOre),       int(BlockRegistry::IronOre),
-             int(BlockRegistry::Torch) };
+             int(BlockRegistry::Torch),
+             // t134 木制半方块：
+             int(BlockRegistry::WoodSlab),          int(BlockRegistry::WoodStairs),
+             int(BlockRegistry::WoodFence),         int(BlockRegistry::WoodPressurePlate),
+             int(BlockRegistry::WoodDoor),          int(BlockRegistry::WoodTrapdoor) };
 }
 
 QString Hotbar::iconSourceAt(int slot) const

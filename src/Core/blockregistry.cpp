@@ -37,6 +37,16 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* iron_ore       */ {int(BlockRegistry::IronOre),       16, 16, 16, 16, true, 3.0f, int(BlockRegistry::Pickaxe), 2, 0x202,                              1, 64, "iron_ore",       "铁矿石"}, // 各面=iron_ore(16)（t84）；散布于 stone 区段；**需石镐**（minTier2，木镐挖不掉落）；掉铁原矿材料(0x202，t85 命名)
     /* torch          */ {int(BlockRegistry::Torch),         17, 17, 17, 17, false, 0.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Torch),         1, 64, "torch",          "火把"}, // 各面=torch(17)（t88）；solid=false 非实体碰撞、hardness=0 瞬破、NoTool；掉自身；伪光源（Main.qml 发光 Model，非 PointLight）
     /* bedrock        */ {int(BlockRegistry::Bedrock),       18, 18, 18, 18, true,  -1.0f, int(BlockRegistry::Pickaxe), 0,                            0, 0, 64, "bedrock",        "基岩"}, // 各面=bedrock(18)（t119）；solid=true 实体碰撞、**hardness=-1.0**（负值 → ToolRegistry::canMine 自动 false，任何模式/工具不可破，防创造秒破底层）、dropId=0 不掉落；worldgen y 0..4 坑洼层
+    // ── t134 不完整方块（异形段 id >= FirstPartial=15）：6 类木制半方块。各面贴图=planks(8)、
+    //   solid=false（非整立方 → 不挡邻居面剔除，避免相邻整立方被误剔出洞；逐形状精确碰撞留后续）、
+    //   hardness=2.0（木质）、NoTool（空手可采且掉落）、dropId=自身、dropCount=1。mesher 经
+    //   PartialBlockGeometry::append 按 (id,state) 生成异形顶点。maxStack：door=1（单件不可堆叠），其余 64。
+    /* wood_slab      */ {int(BlockRegistry::WoodSlab),          8,  8, 8,  8, false, 2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodSlab),          1, 64, "wood_slab",          "木板台阶"}, // state bit0=上半(1)/下半(0)；半高 0.5
+    /* wood_stairs    */ {int(BlockRegistry::WoodStairs),        8,  8, 8,  8, false, 2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodStairs),        1, 64, "wood_stairs",        "木板楼梯"}, // state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z
+    /* wood_fence     */ {int(BlockRegistry::WoodFence),         8,  8, 8,  8, false, 2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodFence),         1, 64, "wood_fence",         "木栅栏"}, // 中心立柱 0.4 见方；state=0
+    /* wood_pressure_plate */ {int(BlockRegistry::WoodPressurePlate), 8, 8, 8, 8, false, 2.0f, int(BlockRegistry::NoTool), 0, int(BlockRegistry::WoodPressurePlate), 1, 64, "wood_pressure_plate", "木板压力板"}, // 贴地薄板；state=0
+    /* wood_door      */ {int(BlockRegistry::WoodDoor),          8,  8, 8,  8, false, 2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodDoor),          1,  1, "wood_door",          "木板门"}, // 两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向
+    /* wood_trapdoor  */ {int(BlockRegistry::WoodTrapdoor),      8,  8, 8,  8, false, 2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodTrapdoor),      1, 64, "wood_trapdoor",      "木活板门"}, // state bit0=开/合 bit[2:1]=开时朝向
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -93,6 +103,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Stone: case Cobble: case Furnace: case CoalOre: case IronOre:
         return GroupStone;
     case Log: case Planks: case CraftingTable:
+    case WoodSlab: case WoodStairs: case WoodFence:
+    case WoodPressurePlate: case WoodDoor: case WoodTrapdoor: // t134 木制半方块 → 木质音色
         return GroupWood;
     case Grass: case Dirt:
         return GroupGrass;
