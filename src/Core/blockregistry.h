@@ -48,6 +48,14 @@ public:
         Count         = 15, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
+    // t133 不完整方块段起点哨兵：WoodSlab(15) 起的 id 走 PartialBlockGeometry 异形渲染（mesher 合批进
+    //   chunk mesh，不走 1×1×1 立方面路径）。具体方块定义在 t134 落地（WoodSlab=15 / WoodStairs=16 /
+    //   WoodFence=17 / WoodPressurePlate=18 / WoodDoor=19 / WoodTrapdoor=20，Count=21）。t133 仅设此
+    //   哨兵 + 渲染基础设施 + chunk state 数组。当前 Count=15 = FirstPartial → 任何合法 id 都 <
+    //   FirstPartial → mesher 的 `b >= FirstPartial` 分支静默不触发，等 t134 加方块后激活。
+    //   机制等价 MC 1.0 (id, metadata) 方块模型：id >= FirstPartial 即「异形方块」（非整立方）。
+    static constexpr int FirstPartial = 15;
+
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：
     //   0=+X 1=-X 2=+Y(顶) 3=-Y(底) 4=+Z 5=-Z
     enum Face : int {

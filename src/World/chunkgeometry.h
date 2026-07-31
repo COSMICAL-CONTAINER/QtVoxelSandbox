@@ -81,6 +81,11 @@ private:
     quint8 blockAtWorld(int wx, int wy, int wz) const {
         return m_world ? m_world->blockAt(wx, wy, wz) : quint8(0);
     }
+    // t133：世界坐标 state 查询（异形方块朝向/开合；经 world.stateAt 跨 chunk 路由）。
+    //   常规方块 / 越界 → 0。PartialBlockGeometry::append 据此选朝向变体。
+    quint8 stateAtWorld(int wx, int wy, int wz) const {
+        return m_world ? m_world->stateAt(wx, wy, wz) : quint8(0);
+    }
 
     World *m_world = nullptr;
     int m_cx = -1; // -1 = 未赋值（myChunk 返回 nullptr，待 QML 赋 cx/cz 后才建）

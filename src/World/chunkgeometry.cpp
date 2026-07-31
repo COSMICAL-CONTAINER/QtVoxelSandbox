@@ -1,6 +1,7 @@
 #include "chunkgeometry.h"
 #include "blockregistry.h"
 #include "chunk.h"
+#include "partialblockgeometry.h" // t133：Vtx（chunk 顶点格式）+ PartialBlockGeometry 异形分支
 #include "world.h"
 
 #include <QByteArray>
@@ -11,18 +12,9 @@
 #include <cmath>     // std::sqrt / std::fabs / std::round（t123 投影阴影回扫）
 #include <cstring>
 
-// 顶点：pos(3) + normal(3) + uv(2) + color(4, rgba) = 12 float = 48 字节。
-// color.rgb 承载 t121 天光遮蔽（见天 1.0 / 地下 0.2，mesher 按 chunk heightmap 判定）；a 恒 1.0。
-// 注：QtQuick3D 的 ColorSemantic 按官方示例（quick3d/custommorphing/morphgeometry.cpp）按 vec4（RGBA）
-//   读取——Attribute 无 componentCount 字段（语义→分量数由运行期固定表派生），若只写 3 float，第 4 分量
-//   会越界读到下一顶点 / 缓冲尾外。故 color 用 4 float（a=1.0），stride = 48 字节（spec 原「11 float/44 字节」
-//   乃按 rgb 计；此处为正确性改 rgba。最终色 = baseColor × vertexColor × 贴图，见 Main.qml）。
-struct Vtx {
-    float x, y, z;
-    float nx, ny, nz;
-    float u, v;
-    float r, g, b, a;
-};
+// Vtx（chunk 顶点格式：pos3 + normal3 + uv2 + color4 rgba = 12 float = 48 字节）定义在
+// partialblockgeometry.h —— 由本文件（1×1×1 立方面）与 PartialBlockGeometry::append（异形方块）
+// 共用，二者合批进同一 chunk mesh 的同一顶点缓冲。color.rgb 承载 t121 天光遮蔽 + t123 方向太阳光调制。
 
 // 6 个面：邻居偏移 dir、外法线 nrm、4 角偏移（从外侧看逆时针，叉积验证 = 外法线）。
 // 三角形按 (0,1,2),(0,2,3) 画。UV 按角点位置单独计算（保证侧面「上=草」）。
@@ -192,6 +184,24 @@ void ChunkGeometry::buildMesh()
                                 break;
                             }
                         }
+                    }
+
+                    // t133 不完整方块异形分支：id >= FirstPartial 的方块不走 1×1×1 立方面路径，交由
+                    //   PartialBlockGeometry::append 生成异形顶点并**合批进同一 chunk mesh**（复用本顶点
+                    //   缓冲 + 顶点色光照管线 + 单 draw call，非另起 Model）。本块的光照上下文（surface /
+                    //   shade / sun 量）已在上方算好，打包进 PartialLightCtx 传入；append 据各面外法线按
+                    //   同款公式复算 vc。当前 FirstPartial=15=BlockRegistry::Count → 任何合法 id <
+                    //   FirstPartial → 此分支永不进入（无任何异形方块定义）；t134 加 WoodSlab=15.. 后激活。
+                    if (b >= BlockRegistry::FirstPartial) {
+                        const quint8 st = stateAtWorld(wx, ly, wz);
+                        const PartialLightCtx lctx{
+                            sdx, sdy, sdz,
+                            sunIntensity, sunLitAvg,
+                            shade, surface
+                        };
+                        PartialBlockGeometry::append(verts, idx, lx, ly, lz, b, st,
+                                                     lctx, tileW, hx, hy, v0, v1);
+                        continue;
                     }
 
                     for (int f = 0; f < 6; ++f) {

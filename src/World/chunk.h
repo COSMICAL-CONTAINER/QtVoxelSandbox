@@ -26,6 +26,12 @@ public:
     // 局部坐标查询/写入：lx,lz ∈ [0,kSize)，ly ∈ [0,height)。越界读返回 0(空气)，写忽略。
     quint8 blockAt(int lx, int ly, int lz) const;
     void setBlock(int lx, int ly, int lz, quint8 id);
+    // t133 不完整方块 state（朝向 / 开合；PLAN §2「(id,metadata) 方块模型」精神）：并行于 m_voxels 的
+    //   逐格状态字节。常规方块 state 恒 0；异形方块（id >= BlockRegistry::FirstPartial）用 state 编码
+    //   朝向（stairs 4 向 / door 朝向 / slab 上下半）与开合（door/trapdoor 开关）。mesher 经
+    //   PartialBlockGeometry::append(blockId, state) 据此生成异形顶点。setBlock 默认 state=0（兼容旧调用）。
+    quint8 stateAt(int lx, int ly, int lz) const;
+    void setBlock(int lx, int ly, int lz, quint8 id, quint8 state); // 写 id + state（4 参数版默认 state=0）
 
     // t121 天光 heightmap（PLAN §2-H「per-column 天光——自顶向下首个实体的 heightmap」）：
     // 每列「自顶向下首个非空气方块」的 y（列全空 → -1）。mesher 据此判定顶点是否见天：
@@ -46,6 +52,9 @@ private:
     int m_originZ;                       // 世界 Z 起点（= cz*kSize）
     int m_height;                        // Y 向高度（= 世界高度；chunk 跨满高）
     std::vector<quint8> m_voxels;        // kSize × kSize × height，索引 lx + kSize*(lz + kSize*ly)
+    // t133 不完整方块 state 并行数组（同 m_voxels 尺寸 / 索引）：常规方块恒 0；异形方块存朝向/开合。
+    //   setBlock 写入时同步刷新；worldgen / 4 参数 setBlock 默认写 0（兼容）。mesher 经 stateAt 读。
+    std::vector<quint8> m_states;
     // t121：每列「自顶向下首个非空气」的 y（-1=全空列）。setBlock 增量维护（见 heightmapAt 注释）。
     int m_heightmap[kSize * kSize];
     std::atomic<bool> m_dirty{true};     // 新建即脏（首帧需 mesh）。atomic：未来 mesh-worker 读脏标记无 TSan 数据竞争（voxel 数组仍需 §2-C per-chunk 锁，线程化时补）

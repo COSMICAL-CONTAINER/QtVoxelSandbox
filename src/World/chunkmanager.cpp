@@ -55,7 +55,22 @@ int ChunkManager::heightmapAt(int x, int z) const
     return c ? c->heightmapAt(x - (x / kSize) * kSize, z - (z / kSize) * kSize) : -1;
 }
 
+// t133：世界坐标 state 读（跨 chunk 路由，同 blockAt）。越界 / 无 chunk → 0（常规方块无 state）。
+quint8 ChunkManager::stateAt(int x, int y, int z) const
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return 0; // 世界越界 = 无 state
+    Chunk *c = chunk(x / kSize, z / kSize);
+    return c ? c->stateAt(x - (x / kSize) * kSize, y, z - (z / kSize) * kSize) : quint8(0);
+}
+
 bool ChunkManager::setBlock(int x, int y, int z, quint8 id)
+{
+    return setBlock(x, y, z, id, quint8(0)); // t133：默认 state=0（兼容；新方块重置 state 防 stale）
+}
+
+// t133：写 id + state + 标脏（含边界邻接）。与 4 参数版同一路径，仅多写一字节 state。
+bool ChunkManager::setBlock(int x, int y, int z, quint8 id, quint8 state)
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return false; // 世界越界：拒绝
@@ -63,7 +78,7 @@ bool ChunkManager::setBlock(int x, int y, int z, quint8 id)
     const int lx = x - cx * kSize, lz = z - cz * kSize;
     Chunk *c = chunk(cx, cz);
     if (!c) return false;
-    c->setBlock(lx, y, lz, id);
+    c->setBlock(lx, y, lz, id, state);
     c->markDirty();
     // 边界格（local x/z 贴 chunk 边沿）→ 该格面可见性可能影响邻接 chunk 的边界剔除，
     // 标邻接 chunk 脏（dev-spec t02 验收；为 t03「跨边界破放不破坏邻居 mesh」准备）。

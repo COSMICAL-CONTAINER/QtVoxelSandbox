@@ -24,18 +24,48 @@ quint8 World::blockAt(int x, int y, int z) const
 // 写栅格的唯一入口（PLAN §2-C 精神：GUI 线程单写者）。先读旧值判断有无变化（无变化不发信号，
 // 避免误触发 mesh 重建 / 粒子），再经 ChunkManager 跨 chunk 写入 + 标脏（含边界邻接）。
 // 信号语义不变：破带原 id、放带新 id；worldChanged 触发网格重建（本回合整个单 mesh）。
+// t133：不改 state 语义 —— 此 4 参数版仅在 id 变化时走写入路径（经 ChunkManager 4 参数 → 委托
+//   5 参数 (id,0)，新方块重置 state=0）。异形方块的 state 由 5 参数 setBlock 显式管理（下方）。
 bool World::setBlock(int x, int y, int z, quint8 id)
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return false; // 越界拒绝
     const quint8 oldId = m_chunks.blockAt(x, y, z);
     if (oldId == id) return false; // 无变化
-    m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
+    m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏（→5 参数 id,0 重置 state）
     if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
         emit blockBroken(x, y, z, int(oldId)); // 破：带原方块 id（粒子/音效按它取色/取声）
     else if (id != BlockRegistry::Air)
         emit blockPlaced(x, y, z, int(id));    // 放：带新方块 id
     emit worldChanged(); // 触发 ChunkGeometry 重建（本回合整个单 mesh；mesher 拆分归 t03）
+    return true;
+}
+
+// t133：世界坐标 state 读（跨 chunk 路由，经 ChunkManager）。越界 → 0。供 mesher / QML 查异形方块朝向。
+quint8 World::stateAt(int x, int y, int z) const
+{
+    return m_chunks.stateAt(x, y, z);
+}
+
+// t133：写 id + state + 标脏（含边界邻接）。变化判定含 state：oldId==id && oldState==state 才视为无变化
+//   （id 不变只 state 变 —— 如 door/trapdoor 右键开合 —— 仍需重网格化，故走写入 + worldChanged）。
+//   信号语义：仅 id 变化发 broken/placed；id 不变只 state 变不发（非破 / 放，是开合动作），仅 worldChanged。
+bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return false; // 越界拒绝
+    const quint8 oldId = m_chunks.blockAt(x, y, z);
+    const quint8 oldState = m_chunks.stateAt(x, y, z);
+    if (oldId == id && oldState == state) return false; // id 与 state 均无变化
+    m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
+    if (oldId != id) {
+        // id 变化 → 发 broken/placed（同 4 参数语义：破带原 id、放带新 id）；id 不变只 state 变（门开合）不发。
+        if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
+            emit blockBroken(x, y, z, int(oldId));
+        else if (id != BlockRegistry::Air)
+            emit blockPlaced(x, y, z, int(id));
+    }
+    emit worldChanged(); // 异形方块 state 变（开合 / 朝向）需 mesh 重建
     return true;
 }
 

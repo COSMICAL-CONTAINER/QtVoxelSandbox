@@ -32,6 +32,10 @@ public:
     // setBlock 成功写入后：标目标 chunk 脏；该格贴 chunk 边沿 → 同标邻接 chunk 脏（t03 准备）。
     quint8 blockAt(int x, int y, int z) const;
     bool setBlock(int x, int y, int z, quint8 id);
+    // t133 不完整方块 state（朝向/开合）：世界坐标读 / 写（跨 chunk 路由，同 blockAt/setBlock）。
+    //   setBlock 默认 state=0（兼容）；4 参数 setBlock 委托 5 参数 (id, 0)（新方块重置 state，防 stale）。
+    quint8 stateAt(int x, int y, int z) const;
+    bool setBlock(int x, int y, int z, quint8 id, quint8 state);
     // t121：世界坐标列的「自顶向下首个非空气」y（越界 / 空列 → -1）。mesher 据此判顶点见天（PLAN §2-H）。
     int heightmapAt(int x, int z) const;
 
