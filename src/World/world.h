@@ -52,13 +52,22 @@ public:
     // 是否「存在方块」（非 air）：raycast 选体 / 掉落实体着地 / mesher 邻居剔除 等用。
     // 注：名为 isSolid 但语义是「非 air 实存」（保留以兼容既有调用点）。碰撞语义见 isCollidable。
     Q_INVOKABLE bool isSolid(int x, int y, int z) const { return blockAt(x, y, z) != 0; }
-    // 是否「实体碰撞」：走 BlockRegistry::BlockDef.solid（air=false；火把 t88 solid=false 不挡玩家；
-    // 其余常规方块 solid=true）。t88 引入：火把为伪光源方块，玩家应能穿过它（spec「非实体碰撞」）。
-    // 与 isSolid 的差异：isSolid=「有方块」（raycast 应命中火把 / 物品可着地于火把上方）；
-    // isCollidable=「挡玩家」（火把不挡）。两者在 t88 前对所有方块同义，火把使其分离。
+    // 是否「实体碰撞」：t146 改走 BlockRegistry::BlockDef.shape（**不再是 solid**）。solid 仅作 mesher
+    //   邻居面剔除依据（不完整方块 solid=false → 不挡邻居整面）；**碰撞**看 shape：常规整立方 /
+    //   不完整方块（slab/stairs/...）shape != ShapeNone → 挡玩家（逐形状 sub-AABB 精确，见 collisionAABBsAt）；
+    //   air/torch shape=ShapeNone → 不挡。与 isSolid（「有方块」= blockAt!=0，raycast 命中用）分离：
+    //   不完整方块 isSolid=true（射线命中）且 isCollidable=true（挡玩家，但只在其 sub-AABB 范围内）；
+    //   torch isSolid=true（可着地/命中）但 isCollidable=false（穿过）。
     Q_INVOKABLE bool isCollidable(int x, int y, int z) const {
-        return BlockRegistry::isSolid(blockAt(x, y, z));
+        return BlockRegistry::shape(blockAt(x, y, z)) != BlockRegistry::ShapeNone;
     }
+    // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
+    //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/
+    //   trapdoor，state 解码同 partialblockgeometry）。玩家碰撞迭代玩家 AABB 覆盖的所有格，逐 sub-AABB
+    //   做 3 轴严格重叠测试（aabbHitsSolid / moveAxis 贴面 / overlapsPlayerAABB 放置校验）。
+    //   分层（PLAN §2）：本方法属 World 层，只读 ChunkManager（blockAt + stateAt）+ BlockRegistry，
+    //   不依赖 Renderer/Physics；PlayerController（Game/Physics）只读消费。
+    std::vector<BlockRegistry::BlockAABB> collisionAABBsAt(int x, int y, int z) const;
 
     // t121 天光 heightmap（PLAN §2-H「per-column 天光——自顶向下首个实体」）：世界坐标列首个非空气的 y
     //（越界 / 空列 → -1）。mesher 据此判顶点见天（ly >= hm → 天光 1.0）/ 地下（暗 0.2）。经 ChunkManager

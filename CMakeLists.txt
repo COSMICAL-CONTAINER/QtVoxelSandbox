@@ -34,6 +34,10 @@ qt_add_executable(voxelsandbox
     src/Renderer/wiresquare.h
     src/Renderer/wirecube.cpp
     src/Renderer/wirecube.h
+    # t146 异形方块选中框线框（按 BlockRegistry::selectionAABBs 画 sub-AABB 12 棱）：dynamic 几何，
+    #   blockId/state Q_PROPERTY 改变即 rebuild。Main.qml selectionBoxPartial Model 绑此几何。
+    src/Renderer/selectionwireboxes.cpp
+    src/Renderer/selectionwireboxes.h
     src/Renderer/unitcube.cpp
     src/Renderer/unitcube.h
     src/Renderer/crackbox.cpp

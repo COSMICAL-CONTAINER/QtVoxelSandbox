@@ -288,7 +288,14 @@ private:
     void updateRaycast();                        // 每帧沿视线 DDA，更新命中态
     void updateCameraDistance();                 // 每帧算第三人称相机距离（钳制防穿墙，t40）
     void clearHit();                             // 暂停/失焦时隐藏线框
-    bool overlapsPlayerAABB(int bx, int by, int bz) const; // 放置校验：该格方块是否与玩家 AABB 相交
+    // t146 放置校验：按「将放置方块的实际形状 sub-AABB」判是否与玩家 AABB 相交（不完整方块可能只占
+    //   半格，玩家在另半格内仍可放；air/torch 无 sub-AABB → 不挡）。id/state = 放置态（slab 据命中面、
+    //   stairs/door 据朝向）。与碰撞（overlapSubAABBs）共用 collisionAABBs 单一权威。
+    bool overlapsPlayerAABB(int bx, int by, int bz, quint8 id, quint8 state) const;
+    // t146 玩家 AABB vs 世界碰撞 sub-AABB 重叠测试（3 轴严格重叠）。axis∈{0,1,2} 时记录沿该轴的相交
+    //   sub-AABB 表面（outMinSurf/outMaxSurf）供 moveAxis 贴面；axis<0 仅判命中（aabbHitsSolid 用）。
+    //   取样范围与旧 aabbHitsSolid 同策略（floor(min)..ceil(max)-1，严格重叠排除仅贴面）。
+    bool overlapSubAABBs(int axis, float *outMinSurf, float *outMaxSurf) const;
     // 移动状态速率因子（t51）：Sprint×1.3 / Crouch×0.4 / Walk×1.0。仅走路模式水平速度乘此值
     //   （飞 / 观察者 noclip 恒 1，状态机不进入 Sprint/Crouch）。同时驱动 moveSpeed 报告 → walkPhase 频率。
     float speedMul() const;

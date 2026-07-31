@@ -670,7 +670,9 @@ Window {
         // 邻块不再吞噬远侧棱。
         Model {
             id: selectionBox
-            visible: player.hasHit
+            // t146：完整方块 / Torch 走本框（WireCube 全格 + Torch 木柄定向）；不完整方块（id >= FirstPartial=15）
+            //   走下方 selectionBoxPartial（按 selectionAABBs 画 sub-AABB 棱，贴合实际形状）。两者 visible 互斥。
+            visible: player.hasHit && !isPartial
             // t126：选中框按命中方块实际形状分流。Torch(id13) → 小立柱（scale 0.12/0.6/0.12 + 木柄
             //   位姿），其余 → 全格 1.005（原行为，见上方 1.005 放大系数注释）。Torch 分支镜像 torchHost
             //   delegate 的木柄 Model（同一份 computeTorchOrient + torchHandleLocalPos/Euler），故选中框
@@ -680,6 +682,15 @@ Window {
             Connections { target: theWorld; function onWorldChanged() { ++selectionBox.worldRev } }
             readonly property int hitId: player.hasHit ? theWorld.blockAt(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z) : 0
             readonly property bool isTorch: hitId === 13
+            // t146 不完整方块（异形段 id >= FirstPartial=15）：选中框按形状 sub-AABB 画（selectionBoxPartial），
+            //   不走本全格框。15 = BlockRegistry::FirstPartial（魔法数；新增异形方块时此阈值不变）。
+            readonly property bool isPartial: hitId >= 15
+            // t146 命中方块的 state（异形方块朝向/开合）：供 selectionBoxPartial 的 SelectionWireBoxes 几何
+            //   重建用。读 worldRev 使 worldChanged（编辑改 state，如活板门开合）后重算 → 选中框棱随之更新。
+            readonly property int hitState: {
+                selectionBox.worldRev;
+                return player.hasHit ? theWorld.stateAt(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z) : 0
+            }
             readonly property string torchOrient: {
                 // Q_INVOKABLE（isCollidable/blockAt）无自带 QML 绑定依赖 → 显式读 worldRev，使
                 //   worldChanged 后本绑定重算（邻居破/放会改火把有效朝向）。
@@ -694,6 +705,28 @@ Window {
             scale: isTorch ? Qt.vector3d(0.12, 0.6, 0.12) : Qt.vector3d(1.005, 1.005, 1.005)
             eulerRotation: isTorch ? torchHandleEuler(torchOrient) : Qt.vector3d(0, 0, 0)
             geometry: WireCube {}
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                baseColor: "#101010"
+            }
+        }
+
+        // t146 不完整方块选中框（异形段 id >= FirstPartial）：按 BlockRegistry::selectionAABBs(id,state)
+        //   画每个 sub-AABB 的 12 棱 → 贴合实际形状（下半砖只画下半盒棱、楼梯画下步+背墙两盒棱）。
+        //   SelectionWireBoxes 几据据 blockId/state 重建（hitBlock 变 / 编辑改 state 时自动重画）。
+        //   与上方 selectionBox（完整 / Torch）visible 互斥（isPartial 守门）。Model 摆命中方块中心 +
+        //   scale 1.005 微放大（同 selectionBox 的 1.005 防 z-fight 量级）。
+        //   分层（PLAN §2）：呈现层只读 World（blockAt/stateAt），经 BlockRegistry 单一权威取形状，不写栅格。
+        Model {
+            id: selectionBoxPartial
+            visible: player.hasHit && selectionBox.isPartial
+            position: Qt.vector3d(player.hitBlock.x + 0.5, player.hitBlock.y + 0.5, player.hitBlock.z + 0.5)
+            scale: Qt.vector3d(1.005, 1.005, 1.005)
+            eulerRotation: Qt.vector3d(0, 0, 0)
+            geometry: SelectionWireBoxes {
+                blockId: selectionBox.hitId
+                state: selectionBox.hitState
+            }
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 baseColor: "#101010"

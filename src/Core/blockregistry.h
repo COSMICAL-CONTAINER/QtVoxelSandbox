@@ -3,6 +3,7 @@
 
 #include <QtGlobal> // quint8
 #include <QString>  // displayName() 返回 QString（用户可见中文名）
+#include <vector>   // collisionAABBs/selectionAABBs 返回 std::vector<BlockAABB>
 
 // 方块注册表（单一权威数据源；Core 层）。
 //
@@ -105,6 +106,31 @@ public:
         GroupDefault = 5, // 哨兵：合法组上界（实际播放时 GroupDefault → 复用 GroupStone 兜底）
     };
 
+    // t146 方块碰撞 / 选中形状（决定 collisionAABBs/selectionAABBs）。机制等价 MC「方块 VoxelShape」：
+    //   完整立方（常规方块）走 ShapeFull；air/torch 走 ShapeNone（无碰撞 sub-AABB，torch 选中框由
+    //   Main.qml isTorch 分支特殊定向、不走 selectionAABBs 几何）；不完整方块段（id >= FirstPartial）
+    //   各 shape 复用 partialblockgeometry.cpp 的 state 解码生成对应子 AABB（slab/stairs/fence/plate/
+    //   door/trapdoor），使「碰撞/选中形状」与「渲染形状」同源 —— 改一处 state 编码须同步另一处。
+    //   分层：本枚举属 Core（仅数据属性），不依赖 Renderer/Mesher。
+    enum Shape : int {
+        ShapeNone     = 0, // air / torch：无碰撞 sub-AABB（torch 不挡玩家；选中框由 Main.qml isTorch 分支）
+        ShapeFull     = 1, // 常规整立方：collision/selection = {0,0,0,1,1,1}
+        ShapeSlab     = 2, // 木板台阶：半高（state bit0=上半 → {0,0.5,0,1,1,1}；下半 → {0,0,0,1,0.5,1}）
+        ShapeStairs   = 3, // 木板楼梯：下层整步 {0,0,0,1,0.5,1} + 上层背墙半（朝向 state[1:0]）
+        ShapeFence    = 4, // 木栅栏：中心立柱 {0.3,0,0.3,0.7,1,0.7}
+        ShapePlate    = 5, // 木板压力板：贴地薄板 {0.0625,0,0.0625,0.9375,0.0625,0.9375}
+        ShapeDoor     = 6, // 木板门：满高薄板（state 朝向/开合；上下半由所在格的 y 自然分，bit3 标识上下）
+        ShapeTrapdoor = 7, // 木活板门：合=水平薄板 / 开=竖直薄板（state bit0 开合 + bit[2:1] 朝向）
+    };
+
+    // t146 方块子碰撞/选中盒（**cell-local [0,1]^3 AABB**；世界坐标由 caller + (bx,by,bz) 偏移）。
+    //   min/max 各轴，min <= max。完整方块单盒 {0,0,0,1,1,1}；异形方块可能多盒（stairs = 下步 + 背墙）。
+    //   纯数据结构（POD），可值拷贝进 std::vector 返回。Core 层定义，World/Physics 只读消费。
+    struct BlockAABB {
+        float minX, minY, minZ;
+        float maxX, maxY, maxZ;
+    };
+
     // 方块定义（每方块一项；单一权威数据源）。改方块任何属性只改 kDefs 一行，全工程生效。
     // 行索引 == 方块 id（air 行同时作越界 / 不可挖掘 / 不掉落兜底）。
     struct BlockDef {
@@ -113,7 +139,10 @@ public:
         int bottomTile;      // -Y(Bottom) 瓦片序号
         int sideTile;        // +X / -X / +Z（三个侧面统一）瓦片序号
         int frontTile;       // -Z(NegZ「前面」) 瓦片序号（熔炉炉口等有朝向的方块用）；多数 == sideTile
-        bool solid;          // 实体（参与碰撞 / culled 面剔除）；air=false
+        bool solid;          // 实体（参与碰撞 / culled 面剔除）；air=false。t146 注：solid 仅作 **mesher
+                             //   邻居面剔除** 的依据（不完整方块 solid=false → 不挡邻居整面，避免相邻整立方
+                             //   被误剔出洞）。**碰撞**改走 shape（solid=false 的不完整方块仍有碰撞 sub-AABB）。
+        Shape shape;         // t146 碰撞/选中形状（Shape 枚举）。决定 collisionAABBs/selectionAABBs。
         float hardness;      // 基础硬度（挖掘耗时基准；<=0 → 不可挖掘，canMine=false）
         int toolType;        // 采掘所需工具类型（ToolType；NoTool=空手可采且掉落）
         int minToolTier;     // 采掘所需最低工具等级（toolType=NoTool 时忽略，恒 0）
@@ -147,6 +176,17 @@ public:
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
     //   切勿在渲染层另写 `!= 0`（会把 torch 当 solid → 误剔邻居面 → 透明 bug，见 t130）。
     static bool isSolid(quint8 blockId);
+    // t146 方块碰撞/选中形状（BlockDef.shape；越界 → air 行 = ShapeNone）。
+    static Shape shape(quint8 blockId);
+    // t146 方块碰撞 sub-AABB（cell-local [0,1]^3；复用 partialblockgeometry state 解码 → 与渲染形状同源）。
+    //   玩家碰撞迭代玩家 AABB 覆盖的格子，逐 sub-AABB（+ 格偏移到世界坐标）做 3 轴重叠测试。
+    //   air/torch → 空；常规整立方 → 单盒 {0,0,0,1,1,1}；异形 → 形状对应的多盒（stairs 2 盒 等）。
+    //   越界 / air 行 → 空。机制等价 MC「方块 VoxelShape」（机制对齐，非名词照搬）。
+    static std::vector<BlockAABB> collisionAABBs(quint8 blockId, quint8 state);
+    // t146 方块选中框 sub-AABB（cell-local [0,1]^3；选中框线框按此画棱）。当前与 collisionAABBs 同数据
+    //   （异形方块 VoxelShape 与 outline shape 多数一致）；分离接口备将来分歧（如某些方块选中框略放宽）。
+    //   Main.qml 的 SelectionWireBoxes 几何据本方法画每个 sub-AABB 的 12 棱（贴合实际形状，非全格）。
+    static std::vector<BlockAABB> selectionAABBs(quint8 blockId, quint8 state);
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度

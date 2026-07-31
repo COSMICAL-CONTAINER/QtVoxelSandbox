@@ -47,6 +47,23 @@ quint8 World::stateAt(int x, int y, int z) const
     return m_chunks.stateAt(x, y, z);
 }
 
+// t146 给定格的碰撞 sub-AABB（世界坐标）。读 blockAt + stateAt → BlockRegistry::collisionAABBs 取 cell-local
+//   子盒 → 偏移到世界坐标。越界 blockAt=0(air) → collisionAABBs 空 → 返回空。玩家碰撞（PlayerController）
+//   逐格逐 sub-AABB 测试。同源 partialblockgeometry 的 state 解码（碰撞形状 == 渲染形状）。
+std::vector<BlockRegistry::BlockAABB> World::collisionAABBsAt(int x, int y, int z) const
+{
+    const quint8 id = m_chunks.blockAt(x, y, z);
+    const quint8 st = m_chunks.stateAt(x, y, z);
+    const std::vector<BlockRegistry::BlockAABB> local = BlockRegistry::collisionAABBs(id, st);
+    std::vector<BlockRegistry::BlockAABB> out;
+    out.reserve(local.size());
+    const float fx = float(x), fy = float(y), fz = float(z);
+    for (const BlockRegistry::BlockAABB &a : local)
+        out.push_back({a.minX + fx, a.minY + fy, a.minZ + fz,
+                       a.maxX + fx, a.maxY + fy, a.maxZ + fz});
+    return out;
+}
+
 // t133：写 id + state + 标脏（含边界邻接）。变化判定含 state：oldId==id && oldState==state 才视为无变化
 //   （id 不变只 state 变 —— 如 door/trapdoor 右键开合 —— 仍需重网格化，故走写入 + worldChanged）。
 //   信号语义：仅 id 变化发 broken/placed；id 不变只 state 变不发（非破 / 放，是开合动作），仅 worldChanged。

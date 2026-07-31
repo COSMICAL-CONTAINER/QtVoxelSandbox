@@ -666,9 +666,23 @@ void PlayerController::placeBlock()
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
     if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放
-    // 与玩家重叠 → 不放（防自埋 / 卡死）。t88：非实体方块（如火把 / 不完整方块，BlockDef.solid=false）例外——
-    // 它不挡玩家，放进玩家所在格也不会卡死（spec「非实体碰撞」），允许放置。
-    if (BlockRegistry::isSolid(quint8(m_selectedBlock)) && overlapsPlayerAABB(tx, ty, tz)) return;
+    const quint8 idByte = quint8(m_selectedBlock);
+    // t146 放置态先算（供「重叠校验」+「实际写入」复用，逻辑同源）：slab 据命中面 ny、stairs/door 据
+    //   玩家水平朝向、fence/pressure_plate/trapdoor 默认 0（trapdoor 默认水平合）。door 占两格 → 另算上格。
+    quint8 placeState = 0;
+    if (m_selectedBlock == BlockRegistry::WoodSlab) {
+        // 命中顶面（ny=+1，放在方块上方）→ 下半(state=0)；命中底面（ny=-1，天花板下方）→ 上半(state=1)。
+        placeState = quint8(m_hitNy < 0 ? 1 : 0);
+    } else if (m_selectedBlock == BlockRegistry::WoodStairs) {
+        placeState = quint8(horizontalFacing() & 3);
+    }
+    const bool isDoor = (m_selectedBlock == BlockRegistry::WoodDoor);
+    const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
+    // 与玩家重叠 → 不放（防自埋 / 卡死）。t146：按「将放置方块的实际形状 sub-AABB」判 —— 不完整方块可能
+    //   只占半格，玩家在另半格内仍可放；air/torch 无 sub-AABB → 不挡（允许放入玩家格，机制等价 MC）。
+    //   door 占两格 → 上下格都查。
+    if (overlapsPlayerAABB(tx, ty, tz, idByte, isDoor ? doorFacing : placeState)) return;
+    if (isDoor && overlapsPlayerAABB(tx, ty + 1, tz, idByte, quint8(doorFacing | 8))) return;
     // t114 火把放置预检：火把需挂到实体邻居（下 / 四侧之一为实体方块），否则拒绝（机制等价 MC「火把
     // 需要支撑面」—— 平地或墙面）。判定用 BlockRegistry::isSolid（实体方块语义；不挂到空气 / 另一火把
     // / 工作台等非实体方块）。torchHost 据同样语义在运行期推断朝向（下 solid=垂直 / 侧 solid=横插）。
@@ -680,27 +694,15 @@ void PlayerController::placeBlock()
         const bool nz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz - 1));
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
     }
-    // t134 不完整方块放置：door 占两格（下格 + 上格），需上格也为空气；其余单格。state 据命中面 / 玩家
-    //   朝向算（slab 上下半据命中面 ny；stairs/door 朝向据玩家水平朝向；fence/pressure_plate/trapdoor
-    //   state=0）。走 setBlock 5 参数版（写 id + state）。
-    const quint8 idByte = quint8(m_selectedBlock);
-    if (m_selectedBlock == BlockRegistry::WoodDoor) {
+    // t134 不完整方块放置：door 占两格（下格 + 上格），需上格也为空气；其余单格。走 setBlock 5 参数版
+    //   （写 id + state）。state 复用上方算出的 placeState / doorFacing（逻辑同源，无重复推导）。
+    if (isDoor) {
         if (m_world->blockAt(tx, ty + 1, tz) != BlockRegistry::Air) return; // 上格非空 → 门放不下
-        const quint8 facing = quint8(horizontalFacing() & 3);
-        const quint8 lowerState = facing;            // bit3=0(下格) bit2=0(合) bit[1:0]=朝向
-        const quint8 upperState = quint8(facing | 8); // bit3=1(上格)
-        m_world->setBlock(tx, ty, tz, idByte, lowerState);
-        m_world->setBlock(tx, ty + 1, tz, idByte, upperState);
+        m_world->setBlock(tx, ty, tz, idByte, doorFacing);              // 下格：bit3=0(下格) bit2=0(合) bit[1:0]=朝向
+        m_world->setBlock(tx, ty + 1, tz, idByte, quint8(doorFacing | 8)); // 上格：bit3=1
     } else {
-        quint8 state = 0;
-        if (m_selectedBlock == BlockRegistry::WoodSlab) {
-            // 命中顶面（ny=+1，放在方块上方）→ 下半(state=0)；命中底面（ny=-1，天花板下方）→ 上半(state=1)。
-            state = quint8(m_hitNy < 0 ? 1 : 0);
-        } else if (m_selectedBlock == BlockRegistry::WoodStairs) {
-            state = quint8(horizontalFacing() & 3);
-        }
-        // fence / pressure_plate / trapdoor：state=0（trapdoor 默认水平合）。
-        m_world->setBlock(tx, ty, tz, idByte, state);
+        // fence / pressure_plate / trapdoor：placeState=0（trapdoor 默认水平合）。
+        m_world->setBlock(tx, ty, tz, idByte, placeState);
     }
     m_lastPlaceMs = now; // 放置成功 → 刷新 CD 计时（t128；now 为入口时间戳，同帧无意义漂移）
     // t125 火把朝向：把玩家点击面外法线随放置事件传出，供呈现层按玩家意图定向（柄嵌所点墙面，
@@ -802,16 +804,59 @@ void PlayerController::pickupScan()
     }
 }
 
-// 方块格 [bx,bx+1]×[by,by+1]×[bz,bz+1] 与玩家 AABB 是否相交（严格重叠；仅贴面不算）。
-// t51：AABB 高用 m_height（蹲下变矮 → 放置校验随之放宽，玩家头顶不再误判阻挡）。
-bool PlayerController::overlapsPlayerAABB(int bx, int by, int bz) const
+// t146 放置校验：按「将放置方块的实际形状 sub-AABB」判是否与玩家 AABB 相交（3 轴严格重叠）。
+//   id/state = 放置态（placeBlock 算好后传入）。air/torch（shape=ShapeNone）→ collisionAABBs 空 →
+//   不相交 → 允许放入玩家格（机制等价 MC「非实体方块可放入玩家所在格」）。t51：AABB 高用 m_height。
+bool PlayerController::overlapsPlayerAABB(int bx, int by, int bz, quint8 id, quint8 state) const
 {
     const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
     const float miny = m_pos.y(),           maxy = m_pos.y() + m_height;
     const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
-    return minx < float(bx + 1) && maxx > float(bx)
-        && miny < float(by + 1) && maxy > float(by)
-        && minz < float(bz + 1) && maxz > float(bz);
+    const float fx = float(bx), fy = float(by), fz = float(bz);
+    for (const BlockRegistry::BlockAABB &a : BlockRegistry::collisionAABBs(id, state)) {
+        if (minx < a.maxX + fx && maxx > a.minX + fx &&
+            miny < a.maxY + fy && maxy > a.minY + fy &&
+            minz < a.maxZ + fz && maxz > a.minZ + fz) return true;
+    }
+    return false;
+}
+
+// t146 玩家 AABB vs 世界碰撞 sub-AABB 重叠测试（3 轴严格重叠）。axis∈{0,1,2} 时记录沿该轴的相交
+//   sub-AABB 表面（outMinSurf = 相交盒 min 表面；outMaxSurf = 相交盒 max 表面），供 moveAxis 贴面：
+//   向 + 移动贴到 minSurf（玩家 max 边 = 最近进入面）、向 - 移动贴到 maxSurf（玩家 min 边 = 最近阻挡面）。
+//   axis<0 仅判命中（aabbHitsSolid 用，不填表面）。取样范围与旧 aabbHitsSolid 同策略。
+bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMaxSurf) const
+{
+    if (!m_world) return false;
+    const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
+    const float miny = m_pos.y(),           maxy = m_pos.y() + m_height; // t51：蹲下用 m_height（变矮）
+    const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
+    // 严格重叠：ceil(max)-1 排除「仅贴面」的方块 → 防卡缝
+    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
+    const int y0 = int(std::floor(miny)), y1 = int(std::ceil(maxy)) - 1;
+    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
+    bool hit = false, haveMin = false, haveMax = false;
+    float minSurf = 0.f, maxSurf = 0.f;
+    for (int y = y0; y <= y1; ++y)
+        for (int z = z0; z <= z1; ++z)
+            for (int x = x0; x <= x1; ++x) {
+                for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(x, y, z)) {
+                    if (!(minx < b.maxX && maxx > b.minX &&
+                          miny < b.maxY && maxy > b.minY &&
+                          minz < b.maxZ && maxz > b.minZ)) continue; // 3 轴任一仅贴面 / 不重叠 → 跳过
+                    hit = true;
+                    if (axis < 0) continue; // 仅判命中（aabbHitsSolid）
+                    const float bmin = (axis == 0) ? b.minX : (axis == 1) ? b.minY : b.minZ;
+                    const float bmax = (axis == 0) ? b.maxX : (axis == 1) ? b.maxY : b.maxZ;
+                    if (outMinSurf && (!haveMin || bmin < minSurf)) { minSurf = bmin; haveMin = true; }
+                    if (outMaxSurf && (!haveMax || bmax > maxSurf)) { maxSurf = bmax; haveMax = true; }
+                }
+            }
+    if (hit) {
+        if (outMinSurf && haveMin) *outMinSurf = minSurf;
+        if (outMaxSurf && haveMax) *outMaxSurf = maxSurf;
+    }
+    return hit;
 }
 
 // t134 玩家水平朝向（4 向，据 yaw 推）：前向 = (-sin(yaw), -cos(yaw))（与 wishHoriz/lookDirection 同源）。
@@ -892,23 +937,14 @@ bool PlayerController::hasGroundBelowAt(float x, float z) const
 
 bool PlayerController::aabbHitsSolid() const
 {
-    if (!m_world) return false;
-    const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
-    const float miny = m_pos.y(), maxy = m_pos.y() + m_height; // t51：蹲下用 m_height（变矮）
-    const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
-    // 严格重叠：ceil(max)-1 排除「仅贴面」的方块 → 防卡缝
-    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
-    const int y0 = int(std::floor(miny)), y1 = int(std::ceil(maxy)) - 1;
-    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
-    for (int y = y0; y <= y1; ++y)
-        for (int z = z0; z <= z1; ++z)
-            for (int x = x0; x <= x1; ++x)
-                if (m_world->isCollidable(x, y, z)) return true; // t88：火把 non-solid 不挡玩家
-    return false;
+    // t146：委托 overlapSubAABBs（axis<0 仅判命中）。逐格逐 sub-AABB 测试 → 不完整方块精确碰撞
+    //   （下半砖只在 y[0,0.5] 挡玩家，上半空气可穿过）。火把 shape=ShapeNone → 无 sub-AABB → 不挡。
+    return overlapSubAABBs(-1, nullptr, nullptr);
 }
 
 // 沿单轴移动 amount；碰撞则贴面 + eps + 清该轴速度。无世界则自由移动。
 // t51：AABB 高用 m_height（蹲下变矮 → 头顶碰撞 / 着地贴面随之变；顶头贴面按当前高度算）。
+// t146：贴面到相交 sub-AABB 的实际表面（非整格边界）—— 落下半砖着地于 y=0.5，撞栅栏柱贴到柱面。
 void PlayerController::moveAxis(int axis, float amount)
 {
     if (amount == 0) return;
@@ -917,24 +953,23 @@ void PlayerController::moveAxis(int axis, float amount)
     case 1: m_pos.setY(m_pos.y() + amount); break;
     case 2: m_pos.setZ(m_pos.z() + amount); break;
     }
-    if (!m_world || !aabbHitsSolid()) return;
-
-    const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
-    const float miny = m_pos.y(), maxy = m_pos.y() + m_height;
-    const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
+    if (!m_world) return;
+    float minSurf = 0.f, maxSurf = 0.f;
+    if (!overlapSubAABBs(axis, &minSurf, &maxSurf)) return; // 无碰撞 → 自由
     const float eps = 1e-4f;
     switch (axis) {
     case 0:
-        if (amount > 0) m_pos.setX(std::floor(maxx) - kHalfW - eps);
-        else            m_pos.setX(std::floor(minx) + 1.f + kHalfW + eps);
+        // 向 +：玩家 max 边贴到最近 sub-AABB 的 min 面；向 -：玩家 min 边贴到最近 sub-AABB 的 max 面。
+        if (amount > 0) m_pos.setX(minSurf - kHalfW - eps);
+        else            m_pos.setX(maxSurf + kHalfW + eps);
         m_vel.setX(0); break;
     case 1:
-        if (amount > 0) m_pos.setY(std::floor(maxy) - m_height - eps); // 顶头（按当前高度）
-        else            m_pos.setY(std::floor(miny) + 1.f + eps);      // 着地
+        if (amount > 0) m_pos.setY(minSurf - m_height - eps); // 顶头（按当前高度）
+        else            m_pos.setY(maxSurf + eps);             // 着地（贴 sub-AABB 顶面，如半砖 y=0.5）
         m_vel.setY(0); break;
     case 2:
-        if (amount > 0) m_pos.setZ(std::floor(maxz) - kHalfW - eps);
-        else            m_pos.setZ(std::floor(minz) + 1.f + kHalfW + eps);
+        if (amount > 0) m_pos.setZ(minSurf - kHalfW - eps);
+        else            m_pos.setZ(maxSurf + kHalfW + eps);
         m_vel.setZ(0); break;
     }
 }
