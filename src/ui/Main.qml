@@ -55,6 +55,17 @@ Window {
         return ""
     }
 
+    // t129 临时调试：第一人称手臂 viewmodel 的角度 / 位置 window 级中转属性。生存背包
+    //   （SurvivalInventory）的 ArmSlider 写这些属性 → viewModelHand（下方 PerspectiveCamera 子节点）绑定
+    //   读取 → 手臂 baseTilt / position 实时变。默认值 = t122/t73 不穿模几何定下来的值
+    //   （baseTilt 100°、position (0.20, 0.05, -0.15)）。
+    //   ⚠️ position.z 拉到 < -0.3 会让手伸进前方实体方块（穿模，见 viewModelHand 注释 t52/t73）；
+    //      baseTilt 大幅偏离 ±100 会破坏袖 / 手前后顺序。仅临时调试用，确定值后回填进 viewModelHand 默认。
+    property real handBaseTilt: 100.0
+    property real handPosX: 0.20
+    property real handPosY: 0.05
+    property real handPosZ: -0.15
+
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
     function startGame() {
         appState = "playing"
@@ -394,8 +405,8 @@ Window {
                 //   叠加进 position.y → 手下沉一点再回位（「拿到东西手一沉」反馈）。与 swingAngle 正交：
                 //   swing 改 eulerRotation.x（绕肩挥动）、pop 改 position.y（位移），互不干扰、可叠加
                 //   （拾取时手不挥、破/放时手挥不弹）。
-                position: Qt.vector3d(0.20, 0.05 + viewModelHand.popY, -0.15)
-                readonly property real baseTilt: 100.0  // t122：t106 几何判断写反（-100 让袖 Z=-0.05 在前、手 Z=-0.17 在后=反）；+100 才是手 Z=-0.13 在前、袖 Z=-0.25 在后=正确
+                position: Qt.vector3d(window.handPosX, window.handPosY + viewModelHand.popY, window.handPosZ)
+                readonly property real baseTilt: window.handBaseTilt  // t129: 读 window 级（生存背包 ArmSlider 实时调）；默认 100.0 见 window.handBaseTilt 注释（t122 几何依据）
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 property real popY: 0.0                 // t120：拾取/拿取弹跳位移（Y）；0=静止，负=下沉
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
