@@ -395,7 +395,7 @@ Window {
                 //   swing 改 eulerRotation.x（绕肩挥动）、pop 改 position.y（位移），互不干扰、可叠加
                 //   （拾取时手不挥、破/放时手挥不弹）。
                 position: Qt.vector3d(0.20, 0.05 + viewModelHand.popY, -0.15)
-                readonly property real baseTilt: -100.0  // t106：翻转（t103 +100 让袖段旋到前、手段到后=「前蓝后手」反了）；-100 反向 → 手在前袖在后
+                readonly property real baseTilt: 100.0  // t122：t106 几何判断写反（-100 让袖 Z=-0.05 在前、手 Z=-0.17 在后=反）；+100 才是手 Z=-0.13 在前、袖 Z=-0.25 在后=正确
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 property real popY: 0.0                 // t120：拾取/拿取弹跳位移（Y）；0=静止，负=下沉
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
