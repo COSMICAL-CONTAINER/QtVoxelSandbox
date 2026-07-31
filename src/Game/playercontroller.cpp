@@ -492,6 +492,24 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             m_world->setBlock(x, py, z, BlockRegistry::Air);
     }
     emit playerMined(x, y, z, int(brokenId), drop); // 破块语义事件（含 drop 标志；当前无消费端，留扩展）
+    // t150c/d 火把支撑联动：破块可能挖掉邻接火把的唯一支撑（如破墙→墙上火把悬空）。扫 6 邻火把，
+    //   无支撑者（torchHasSupport 返 false）掉落为物品（setBlock(Air) + spawnItem）。
+    //   机制等价 MC「火把附着面被移除则火把脱落」。torchHasSupport 查 5 向 solid 邻居（下 / 四侧），
+    //   与 placeBlock 预检 + computeTorchOrient 同语义 → 火把有任一 solid 邻居即保留（不会因次要支撑被
+    //   破而误掉）。掉落的火把走 setBlock(Air) → World 发 blockBroken + worldChanged → Main.qml 移除伪
+    //   光源（removeTorchAt / onWorldChanged 兜底）+ mesh 重建，消除「破支撑后火把悬空残像」（t150c）。
+    //   火把非 solid → 不支撑他火把 → 单趟 6 邻扫即足够（无级联，破一块不会链式掉一串）。
+    if (m_world) {
+        constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for (const auto &d : kNb) {
+            const int tx = x + d[0], ty = y + d[1], tz = z + d[2];
+            if (m_world->blockAt(tx, ty, tz) == BlockRegistry::Torch && !torchHasSupport(tx, ty, tz)) {
+                m_world->setBlock(tx, ty, tz, BlockRegistry::Air);
+                emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Torch),
+                               std::max(1, BlockRegistry::dropCount(BlockRegistry::Torch)));
+            }
+        }
+    }
     // t43：生存挖出可掉落方块 → **走实体流**（emit spawnItem），移除 commit a3e9300 的 auto-collect
     // （原直接 addStack）。掉落物落到该格地面、玩家走近 ≤kPickupDist 时经 pickupScan 拾取 → addStack
     // （先选中槽、再空槽，智能堆叠至 maxStack）。满栈不进背包则实体留地面（spec：全满→不拾取）。
@@ -503,6 +521,19 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     }
     emit swingArm();                                // 破块成功 → 第一人称手挥动（t29）
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）
+}
+
+// t150d 火把支撑判定：5 向（下 / ±X / ±Z）任一为 solid 方块即有支撑。与 placeBlock 火把放置预检 +
+//   Main.qml computeTorchOrient/torchNeighborSolid 同语义（同走 BlockRegistry::isSolid 单一权威）。
+//   火把 / 空气等 solid=false 方块不算支撑（防两火把互挂悬空）。无世界 → 视为无支撑（保守掉落）。
+bool PlayerController::torchHasSupport(int x, int y, int z) const
+{
+    if (!m_world) return false;
+    return BlockRegistry::isSolid(m_world->blockAt(x, y - 1, z))
+        || BlockRegistry::isSolid(m_world->blockAt(x - 1, y, z))
+        || BlockRegistry::isSolid(m_world->blockAt(x + 1, y, z))
+        || BlockRegistry::isSolid(m_world->blockAt(x, y, z - 1))
+        || BlockRegistry::isSolid(m_world->blockAt(x, y, z + 1));
 }
 
 // 每 tick 推进生存挖掘进度（t34）+ 连续续挖（t44）。创造不进入此态（beginMining 内瞬破已 return）。

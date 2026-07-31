@@ -1,4 +1,5 @@
 #include "chunk.h"
+#include "blockregistry.h" // t150b：heightmap 跳过 Torch 判定（BlockRegistry::Torch 单一权威 id）
 
 Chunk::Chunk(int originX, int originZ, int height)
     : m_originX(originX), m_originZ(originZ), m_height(height),
@@ -37,12 +38,16 @@ void Chunk::setBlock(int lx, int ly, int lz, quint8 id, quint8 state)
     // t121：增量维护本列 heightmap（PLAN §2-H「per-column 天光」）。
     //   置非空气：若高于现顶则抬升（worldgen 自底向上逐格置实 → 每列被抬到其最高实体 y）。
     //   置空气：若破的是顶块（ly == hm）则自顶向下回扫找新顶（仅此情形 O(height)，其余 O(1)）。
+    //   t150b：Torch 不计入 heightmap —— 它是细立柱（非整立方），既不该挡天光（让火把下方地块被误判
+    //   地下变暗），也不该在投影阴影回扫里被当成整格遮阳体（让火把列投出整格黑影）。故 Torch 视同空气：
+    //   放置 Torch 不抬升 hm；破块回扫跳过 Torch。两者均修「火把所在列的整格阴影 / 地块变暗」。
     int &hm = m_heightmap[lx + kSize * lz];
-    if (id != 0) {
-        if (ly > hm) hm = ly;
-    } else if (ly == hm) {
-        recomputeColumnHeightmap(lx, lz);
+    if (id == 0) {
+        if (ly == hm) recomputeColumnHeightmap(lx, lz); // 破顶块 → 重扫找新顶
+    } else if (id != BlockRegistry::Torch) {
+        if (ly > hm) hm = ly; // 放置非 Torch 实体 → 抬升
     }
+    // 放置 Torch：不计入 heightmap（透明于天光 / 阴影），hm 不变
 }
 
 // t133：读取本格 state（朝向 / 开合）。越界 / 常规方块 → 0。mesher 据此为异形方块选朝向变体。
@@ -60,10 +65,13 @@ int Chunk::heightmapAt(int lx, int lz) const
 }
 
 // 单列自顶向下重扫：找首个非空气作新顶（破顶块用），列全空 → -1。仅 setBlock 破顶块时调用。
+//   t150b：跳过 Torch —— Torch 不计入 heightmap（见 setBlock 注释），重扫时亦跳过，使火把不再被
+//   当作列顶（否则火把上方地块 / 邻列阴影会受其影响）。
 void Chunk::recomputeColumnHeightmap(int lx, int lz)
 {
     for (int y = m_height - 1; y >= 0; --y) {
-        if (m_voxels[size_t(lx + kSize * (lz + kSize * y))] != 0) {
+        const quint8 v = m_voxels[size_t(lx + kSize * (lz + kSize * y))];
+        if (v != 0 && v != BlockRegistry::Torch) {
             m_heightmap[lx + kSize * lz] = y;
             return;
         }

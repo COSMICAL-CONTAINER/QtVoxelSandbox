@@ -454,6 +454,12 @@ Window {
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
+                        // t150a 火把黑边修复：火把贴图（tile 17）是透明底（alpha=0）+ 火把像素（alpha=255）。
+                        //   BlockCube 把它铺到 1×1×1 立方体六面，材质无 alpha 处理时透明底被当不透明 → 渲成
+                        //   黑色填充整面（用户实测「黑边 / 黑方块」）。alpha-test（alphaCutoff 0.5）丢弃透明底
+                        //   像素、仅留火把像素 → 透明底不再显黑（机制等价 CrackBox 的 alphaCutoff 路径）。
+                        //   仅火把（id 13）启用；其余方块贴图无 alpha，保持 alphaCutoff=0（默认不透明）。
+                        alphaCutoff: player.selectedBlock === 13 ? 0.5 : 0.0
                     }
                 }
                 // 手持工具（t75 木镐 3D）：选中工具槽（isTool(selectedItem)）时，手前显镐形 3D。
@@ -754,7 +760,7 @@ Window {
             position: isTorch
                 ? torchHandleWorldPos(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z, torchOrient)
                 : Qt.vector3d(player.hitBlock.x + 0.5, player.hitBlock.y + 0.5, player.hitBlock.z + 0.5)
-            scale: isTorch ? Qt.vector3d(0.12, 0.6, 0.12) : Qt.vector3d(1.005, 1.005, 1.005)
+            scale: isTorch ? torchHandleScale(torchOrient) : Qt.vector3d(1.005, 1.005, 1.005)
             eulerRotation: isTorch ? torchHandleEuler(torchOrient) : Qt.vector3d(0, 0, 0)
             geometry: WireCube {}
             materials: PrincipledMaterial {
@@ -1499,12 +1505,13 @@ Window {
                         function onWorldChanged() { torchGlow.recomputeOrient() }
                     }
 
-                    // 木柄：细长棕立方（UnitCube scale 0.12×0.6×0.12；原木暗棕 #6b4f24，与木棒
-                    // MaterialIcon 同色系）。竖直时贴 cell 底部上伸（柄中心 0.3、柄顶 0.6）；墙火把
-                    // 旋转 60° 倾斜上伸（柄中心 Y=0.5、沿墙法线偏移 ±0.2 让柄根贴墙面；t132 自 90° 水平改）。
+                    // 木柄：细长棕立方（UnitCube；原木暗棕 #6b4f24，与木棒 MaterialIcon 同色系）。竖直时贴
+                    //   cell 底部上伸（柄中心 0.3、scale Y 0.6 → 柄顶 0.6）；墙火把 30° 倾斜上伸 + ±0.30 深嵌
+                    //   + scale Y 0.7（t150e/f：柄更长、嵌更深、上扬更陡）。scale 走 torchHandleScale（墙 0.7 /
+                    //   地 0.6），与选中框共用同一份（DRY）。
                     Model {
                         geometry: UnitCube {}
-                        scale: Qt.vector3d(0.12, 0.6, 0.12)
+                        scale: torchHandleScale(torchGlow.orient)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#6b4f24"   // 木柄暗棕（原木色，与木棒图标同色系）
@@ -1518,7 +1525,7 @@ Window {
                     }
 
                     // 火焰：暖白小立方（UnitCube scale ~0.18 + 闪烁动画；spec「scale 0.18 黄 + 闪」）。
-                    // 摆在柄顶端（竖直时柄顶 Y=0.65；墙火把 60° 倾斜后柄末端，见 torchFlameLocalPos）。
+                    // 摆在柄顶端（竖直时柄顶 Y=0.65；墙火把 30° 倾斜 + ±0.30 深嵌后柄末端，见 torchFlameLocalPos）。
                     Model {
                         id: torchFlame
                         geometry: UnitCube {}
@@ -1526,7 +1533,7 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#fff4cc"   // 焰心暖白（spec「高 baseColor 暖色 #ffcc66」的更亮内核）
                         }
-                        // t132：焰位改读 torchFlameLocalPos（柄 60° 倾斜后末端，非旧水平偏移 0.10/y=0.50）。
+                        // t150f：焰位读 torchFlameLocalPos（柄 30° 倾斜 + ±0.30 深嵌 + scale 0.7 后末端重算）。
                         position: torchFlameLocalPos(torchGlow.orient)
                         // 闪烁：自定义 flickerS（标量）由 SequentialAnimation 循环驱动；scale 绑它派生
                         // （Y 轴略加长 = 火苗上窜感）。本工具链 Vector3DAnimation 未注册（运行期「is not a
@@ -1697,16 +1704,23 @@ Window {
     }
 
     // 火把木柄中心局部位置（相对 cell 底面中心 [x+0.5, y, z+0.5]）。竖直时贴 cell 底上伸（柄中心 0.3）；
-    //   水平时沿墙法线偏移 ±0.20（柄端贴墙面、柄身伸向 cell 中央），Y=0.5。
+    //   t150e 墙火把沿墙法线偏移 ±0.30（旧 ±0.20 → 深嵌：柄根更贴墙、视觉更牢嵌墙面），Y=0.5。
     function torchHandleLocalPos(o) {
         switch (o) {
         case "up": return Qt.vector3d(0.0, 0.30, 0.0)
-        case "px": return Qt.vector3d(-0.20, 0.50, 0.0) // 贴 -X 墙、柄伸 +X
-        case "nx": return Qt.vector3d( 0.20, 0.50, 0.0) // 贴 +X 墙、柄伸 -X
-        case "pz": return Qt.vector3d(0.0, 0.50, -0.20) // 贴 -Z 墙、柄伸 +Z
-        case "nz": return Qt.vector3d(0.0, 0.50,  0.20) // 贴 +Z 墙、柄伸 -Z
+        case "px": return Qt.vector3d(-0.30, 0.50, 0.0) // 贴 -X 墙、柄伸 +X（t150e 深嵌）
+        case "nx": return Qt.vector3d( 0.30, 0.50, 0.0) // 贴 +X 墙、柄伸 -X（t150e 深嵌）
+        case "pz": return Qt.vector3d(0.0, 0.50, -0.30) // 贴 -Z 墙、柄伸 +Z（t150e 深嵌）
+        case "nz": return Qt.vector3d(0.0, 0.50,  0.30) // 贴 +Z 墙、柄伸 -Z（t150e 深嵌）
         }
         return Qt.vector3d(0.0, 0.30, 0.0)
+    }
+
+    // t150e 火把木柄 scale：墙火把柄加长 0.6→0.7（spec「柄 scale 0.7」），配合 ±0.30 深嵌 + 30° 上倾
+    //   （t150f），柄伸出更长、火焰更高。地面立柱保持 0.6（加长会下沉穿地：中心 0.30 + 半 0.35 = 0.65
+    //   顶、−0.05 底穿地）。选中框镜像同值（贴合实际形状，非全格）。
+    function torchHandleScale(o) {
+        return o === "up" ? Qt.vector3d(0.12, 0.6, 0.12) : Qt.vector3d(0.12, 0.7, 0.12)
     }
 
     // 火把木柄世界位置 = cell 底面中心 + 局部位姿。供选中框 Model.position 直接绑定。
@@ -1715,30 +1729,32 @@ Window {
         return Qt.vector3d(x + 0.5 + lp.x, y + lp.y, z + 0.5 + lp.z)
     }
 
-    // 火把木柄 euler 旋转：墙火把把竖柄（默认沿 +Y）自竖直倾 ~60°（**非** 90° 水平贴墙）——
+    // 火把木柄 euler 旋转：墙火把把竖柄（默认沿 +Y）自竖直倾 ~30°（**非** 90° 水平贴墙）——
     //   柄自墙根斜向上伸（柄端高于柄根，机制等价 MC 墙火把上倾），不再是水平贴墙。
-    //   ±X 向：绕 Z 轴 ±60°；±Z 向：绕 X 轴 ±60°；up 不转。t132：原 ±90°（水平）改 ±60°（倾斜）。
+    //   ±X 向：绕 Z 轴 ±30°；±Z 向：绕 X 轴 ±30°；up 不转。
+    //   t132：原 ±90°（水平）改 ±60°（倾斜）；t150f：±60° → ±30°（更陡上扬，柄端更高、贴近 MC 墙火把观感）。
     function torchHandleEuler(o) {
         switch (o) {
-        case "px": return Qt.vector3d(0, 0, -60)
-        case "nx": return Qt.vector3d(0, 0,  60)
-        case "pz": return Qt.vector3d( 60, 0, 0)
-        case "nz": return Qt.vector3d(-60, 0, 0)
+        case "px": return Qt.vector3d(0, 0, -30)
+        case "nx": return Qt.vector3d(0, 0,  30)
+        case "pz": return Qt.vector3d( 30, 0, 0)
+        case "nz": return Qt.vector3d(-30, 0, 0)
         }
         return Qt.vector3d(0, 0, 0)
     }
 
-    // 火把火焰局部位置（相对 cell 底面中心）= 木柄中心 + 沿「旋转后柄轴」半柄长 0.30 到柄末端。
-    //   t132：柄改 60° 倾斜后，柄末端不再位于水平偏移 (±0.10, y=0.50)，而是上抬到 y=0.65、墙法线方向
-    //   收敛到 ±0.06（柄根 ±0.20 + 0.30·sin60°≈0.26 沿墙法线分量 − 0.20 = 0.06；0.30·cos60°=0.15 抬升）。
-    //   up：柄竖直，焰心略高于柄顶（0.65 vs 柄顶 0.60）让焰立方叠在柄顶端（不变）。
+    // 火把火焰局部位置（相对 cell 底面中心）= 木柄末端（柄中心 + 沿「旋转后柄轴」半柄长到自由端）。
+    //   t150f：柄改 30° 上倾 + ±0.30 深嵌 + 墙柄半长 0.35（scale 0.7）后重算。半柄长沿墙法线分量 =
+    //   0.35·sin30°=0.175、垂直分量 0.35·cos30°≈0.303。墙柄中心 (±0.30, 0.50, ±0.30) + 这两分量：
+    //     px：(-0.30+0.175, 0.50+0.303, 0) = (-0.125, 0.803, 0) → 取 (-0.13, 0.80, 0)
+    //   up：柄竖直半长 0.30，焰心略高于柄顶（0.65 vs 柄顶 0.60）让焰立方叠在柄顶端（不变）。
     function torchFlameLocalPos(o) {
         switch (o) {
         case "up": return Qt.vector3d(0.0, 0.65, 0.0)
-        case "px": return Qt.vector3d( 0.06, 0.65, 0.0)
-        case "nx": return Qt.vector3d(-0.06, 0.65, 0.0)
-        case "pz": return Qt.vector3d(0.0, 0.65,  0.06)
-        case "nz": return Qt.vector3d(0.0, 0.65, -0.06)
+        case "px": return Qt.vector3d(-0.13, 0.80, 0.0)
+        case "nx": return Qt.vector3d( 0.13, 0.80, 0.0)
+        case "pz": return Qt.vector3d(0.0, 0.80, -0.13)
+        case "nz": return Qt.vector3d(0.0, 0.80,  0.13)
         }
         return Qt.vector3d(0.0, 0.65, 0.0)
     }

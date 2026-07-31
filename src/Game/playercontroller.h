@@ -315,6 +315,9 @@ private:
     void cancelMining();
     // 完成（progress 满）：写 air + 发 playerMined + 清态。drop 由 caller 算（生存走 ToolRegistry）。
     void finishMiningAt(int x, int y, int z, bool drop);
+    // t150d 火把支撑判定：火把在 (x,y,z) 是否仍有实体支撑（下 / 四侧任一为 solid）。与 placeBlock 的
+    //   火把放置预检 + Main.qml computeTorchOrient 同语义（5 向任一 solid = 有支撑）。无支撑的火把应掉落。
+    bool torchHasSupport(int x, int y, int z) const;
     // 拾取扫描（t36）：每帧扫附近掉落实体 → Hotbar.addStack（先选中槽、再空槽）。addStack 返 0
     // （全入）→ ItemEntityManager.removeAt 销毁实体；返 >0（背包满）→ 不拾取（entity 留）。
     // 距离从玩家 AABB 中心（脚底 + 半高）3D 起算，阈值 kPickupDist；从后往前扫便于 erase。
