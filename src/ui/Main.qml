@@ -17,9 +17,15 @@ Window {
     // F3 调试叠层显隐（t10，PLAN §2-F）：playing 态按 F3 切换左上角多行调试文本（fps / pos /
     // yaw,pitch / 模式 / chunk 数 / 总顶点 / 地面态）。仅 playing 态显；z 高于 HUD。
     property bool f3Visible: false
+    // t143 F3+B 修饰键语义：f3Held 跟踪 F3 键物理按下态（pressed=true / released=false），无条件更新
+    //   （与 shiftHeld 同模式——状态跟踪不受 appState 守卫影响）。B 键切换碰撞箱的条件用 f3Held 而非
+    //   f3Visible，对齐 MC 真实行为：F3+B 是「按住 F3 同时按 B」的组合键（F3 作 B 的修饰键），而非
+    //   「先开 F3 叠层再单独按 B」。差异场景：按 F3 开叠层后松开 F3（f3Held=false 但 f3Visible 仍 true），
+    //   此时单独按 B 不触发 hitbox 切换（F3 未按住）。
+    property bool f3Held: false
     // t116 F3+B 碰撞箱（PLAN §2-F F3 调试叠层扩展）：显隐各实体（mob / 掉落物 / 玩家）的
-    //   WireCube AABB + 朝向箭头。MC F3+B 语义——B 键仅在 f3Visible 时生效（必须先按 F3 开叠层才能 toggle）；
-    //   showHitboxes 一旦开启，关 F3 叠层不影响（独立 bool，同 MC：关 F3 后碰撞箱仍显直到再 F3+B 关）。
+    //   WireCube AABB + 朝向箭头。MC F3+B 语义——B 键仅在 F3 按住时生效（见 f3Held，t143）；
+    //   showHitboxes 一旦开启，松开 F3 不影响（独立 bool，同 MC：关 F3 后碰撞箱仍显直到再 F3+B 关）。
     property bool showHitboxes: false
 
     // app 状态机（t17）：menu（启动首显主菜单）↔ playing（显 View3D/HUD + grab 指针）。
@@ -1023,15 +1029,17 @@ Window {
         //   playerModel / camera 同约定：yaw=0 时前向 (0,0,-1)）。棒中心前移 0.3（半长）→ 从眼位延伸到 -0.6
         //   处（视线方向 0.6 格长的红色指示棒，机制等价 MC 的 eye-line）。
         //   分层（PLAN §2）：纯呈现层调试叠层，只读 player.feetPosition/yaw（Game 层 Q_PROPERTY），绝不反向写。
+        //   t143：第一人称（cameraMode===FirstPerson）看不到自己身体 → 玩家 hitbox 额外加 cameraMode 门控隐藏；
+        //   mob / 掉落物 hitbox 无此门控（全视角可见，见各自 delegate）。
         Model {
-            visible: window.showHitboxes
+            visible: window.showHitboxes && player.cameraMode !== PlayerController.FirstPerson
             position: Qt.vector3d(player.feetPosition.x, player.feetPosition.y + 0.9, player.feetPosition.z)
             scale: Qt.vector3d(0.6, 1.8, 0.6)
             geometry: WireCube {}
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
         }
         Node {
-            visible: window.showHitboxes
+            visible: window.showHitboxes && player.cameraMode !== PlayerController.FirstPerson
             position: Qt.vector3d(player.feetPosition.x, player.feetPosition.y + 1.62, player.feetPosition.z)
             eulerRotation: Qt.vector3d(0, player.yaw, 0)
             Model {
@@ -1711,14 +1719,17 @@ Window {
                 window.closeFurnace(); e.accepted = true; return
             }
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
-            // 仅 playing 态有意义（menu 态主菜单全屏覆盖，叠层不可见）；切换不依赖指针捕获。
-            if (e.key === Qt.Key_F3 && window.appState === "playing") {
-                window.f3Visible = !window.f3Visible; e.accepted = true; return
+            //   t143：同时跟踪 f3Held=true（无条件，menu 态也设，与 shiftHeld 同模式），供 B 键修饰判定。
+            //   f3Visible 仅 playing 态 toggle（menu 态主菜单全屏覆盖，叠层不可见）；切换不依赖指针捕获。
+            if (e.key === Qt.Key_F3) {
+                window.f3Held = true
+                if (window.appState === "playing") window.f3Visible = !window.f3Visible
+                e.accepted = true; return
             }
-            // F3+B 碰撞箱（t116，PLAN §2-F）：MC F3+B 语义——B 键仅在 f3Visible 时 toggle showHitboxes
-            //   （必须先按 F3 开叠层；f3Visible=false 时 B 不响应，避免与未来键位争用）。
-            //   showHitboxes 独立于 f3Visible：关 F3 后碰撞箱仍显直到再 F3+B 关（同 MC 行为）。
-            if (e.key === Qt.Key_B && window.appState === "playing" && window.f3Visible) {
+            // F3+B 碰撞箱（t116/t143，PLAN §2-F）：MC F3+B 真实语义——B 键仅在 F3 按住（f3Held）时
+            //   toggle showHitboxes，即「按住 F3 同时按 B」的组合键（F3 作 B 修饰键），而非「先开叠层再按 B」。
+            //   showHitboxes 独立于 f3Held/f3Visible：松开 F3 后碰撞箱仍显直到再按 F3+B 关（同 MC 行为）。
+            if (e.key === Qt.Key_B && window.appState === "playing" && window.f3Held) {
                 window.showHitboxes = !window.showHitboxes; e.accepted = true; return
             }
             if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
@@ -1753,6 +1764,8 @@ Window {
         }
         Keys.onReleased: (e) => {
             if (e.isAutoRepeat) return
+            // t143：F3 松开同步 f3Held=false（无条件，与 shiftHeld 同模式）；F3 不透传 player.setKey。
+            if (e.key === Qt.Key_F3) { window.f3Held = false; return }
             // t110：Shift 松开同步 shiftHeld；背包开时不透传 player.setKey（与 press 守卫对称，防 Shift 状态
             //   与 player.m_keys 不同步）。非 Shift / 非背包态照旧透传。
             if (e.key === Qt.Key_Shift) {
