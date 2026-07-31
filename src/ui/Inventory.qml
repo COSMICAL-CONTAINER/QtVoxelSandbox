@@ -382,6 +382,17 @@ Item {
         border.color: "#3a444f"
         border.width: 1
 
+        // t136：兜底吸收面板内「空点击」（落空调色板格 / 标题 / 状态行 / 间距等无子 handler 区域），
+        //   不让事件穿透到背后遮罩 MouseArea——该 MouseArea 持物时 onDiscardHeldRequested 会把光标手持栈
+        //   丢弃为实体（用户报「创造拿物后点空调色板，物品消失」根因：空格 TapHandler enabled:false →
+        //   事件穿透落遮罩 → 误丢弃）。Pointer Handlers 协作语义：子 palette/hotbar/销毁槽的 TapHandler 仍
+        //   优先处理（更深的 handler 先 fire 各自 onTapped），本 handler 仅兜住未被处理的左键空点击；
+        //   其 passive grab 同时阻止事件继续下沉到遮罩 MouseArea（Qt6：handler 截获则 MouseArea 不收）。
+        //   仅左键：右键归 root TapHandler（右键均分拖拽）与 hotbar DragHandler（拖销毁槽），互不冲突。
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+        }
+
         Column {
             anchors.fill: parent
             anchors.margins: 14
@@ -510,6 +521,11 @@ Item {
                                 // 拾取到光标（创造调色板=无限源，不清减调色板）。方块满栈 64；工具不可堆叠 →
                                 // count=1（t33）。setHeldBlock 已对工具段 id 校验合法（isValidItemId 含工具段）。
                                 onTapped: {
+                                    // t136：换拿前先把旧光标手持栈丢为实体（创造调色板=无限源，旧物应「丢回世界」
+                                    //   而非被下方赋值直接覆盖凭空消失）。discardHeldRequested → dropHeldCursor
+                                    //   同步清 heldBlock/heldCount 并在玩家前方 spawn 实体；信号同线程直连，
+                                    //   返回时 heldBlock 已为 0，随后赋新值安全。空手（heldBlock===0）跳过丢弃。
+                                    if (root.hotbar.heldBlock !== 0) root.discardHeldRequested()
                                     root.hotbar.heldBlock = modelData
                                     root.hotbar.heldCount = root.hotbar.isTool(modelData) ? 1 : 64
                                     root.itemTaken()  // t120：创造拿物品 → 宿主弹手（handPopAnim）
