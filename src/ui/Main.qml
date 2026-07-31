@@ -1499,6 +1499,9 @@ Window {
         // blockBroken（m_chunks.setBlock 直写），故旧火把位置不会经 onBlockBroken 移除；此处扫描
         // torchPositions，把已不再是火把的条目删掉。setBlock 编辑也会触发 worldChanged，但此时
         // 火把刚放/刚破已被 onBlockPlaced/broken 同步，本扫描是幂等校验（不重复加 / 不误删）。
+        // t131 兜底：作为「清孤儿」的最后一道防线 —— 即便 onTorchPlaced 去重 + removeTorchAt 删全部
+        //   仍漏（如 setBlockFromEntity 着地改写 / 未来的实体改写栅格路径不经 blockBroken），本扫描按
+        //   blockAt 真值清掉一切 blockAt != Torch 的残留条目，保证光源列表与栅格一致。
         function onWorldChanged() {
             for (let i = torchPositions.count - 1; i >= 0; --i) {
                 const e = torchPositions.get(i)
@@ -1507,11 +1510,14 @@ Window {
         }
     }
 
-    // t88 工具：按坐标移除火把伪光源（破块 / 校验清理共用）。从后往前扫找到首个匹配 (x,y,z) 删一个。
+    // t88 工具：按坐标移除火把伪光源（破块 / 校验清理共用）。从后往前扫，删**所有**匹配 (x,y,z) 的条目。
+    //   t131：原版仅删首个即 return —— onTorchPlaced 旧无去重 + 信号竞态会产生同坐标重复条目，单删留孤儿
+    //   → 挖掉火把后伪光源仍在（用户实测「火把挖掉光源残留」）。改删全部，配合 onTorchPlaced 源头去重
+    //   + onWorldChanged 兜底清孤儿，三重保险确保「挖掉火把 → 光源即消失」。
     function removeTorchAt(x, y, z) {
         for (let i = torchPositions.count - 1; i >= 0; --i) {
             const e = torchPositions.get(i)
-            if (e.x === x && e.y === y && e.z === z) { torchPositions.remove(i); return }
+            if (e.x === x && e.y === y && e.z === z) torchPositions.remove(i)
         }
     }
 
@@ -1603,9 +1609,16 @@ Window {
     // t125 火把放置 → 追加伪光源 + 记录玩家点击面定向（prefOrient）。携带命中面外法线的语义事件由
     //   placeBlock 发出（见 playercontroller torchPlaced）；呈现层据此定向，绝不反向写栅格（PLAN §2 分层）。
     //   火把生命周期仍对称走 World 信号（破 → onBlockBroken 移除 / worldChanged 校验清理），此处仅「加」。
+    //   t131 去重：插入前查同坐标已存在则跳过 —— placeBlock 走 setBlock(Torch) 后才发 torchPlaced，但
+    //   信号竞态 / CD 前的连点 / 重入路径可能对同坐标二次追加，旧版无条件 append 产生重复条目。源头去重
+    //   与 removeTorchAt（删全部）+ onWorldChanged（兜底清孤儿）共同保证挖掉火把后光源不留残。
     Connections {
         target: player
         function onTorchPlaced(x, y, z, nx, ny, nz) {
+            for (let i = 0; i < torchPositions.count; ++i) {
+                const e = torchPositions.get(i)
+                if (e.x === x && e.y === y && e.z === z) return
+            }
             torchPositions.append({x: x, y: y, z: z, prefOrient: orientFromNormal(nx, ny, nz)})
         }
     }
