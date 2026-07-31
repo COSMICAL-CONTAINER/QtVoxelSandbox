@@ -577,6 +577,11 @@ void PlayerController::breakBlock()
 // t87：命中格若为熔炉（Furnace）→ 右键打开 FurnaceUI（不放置；发 furnaceOpened），同工作台模式。
 void PlayerController::placeBlock()
 {
+    // t128：放置 CD（200ms = 5 次/秒）防连点放沙等触发多次塌落链溢出。spec「入口 if(now - m_lastPlaceMs
+    //   < 200) return」；仅成功放置后刷新 m_lastPlaceMs（下方 setBlock 后）。now 走 m_evtClock（事件
+    //   时间戳，与双击检测 m_lastSpaceMs/m_lastWms 同源）。初值 -100000 = 远古 → 首次放置不限。
+    const qint64 now = m_evtClock.elapsed();
+    if (now - m_lastPlaceMs < 200) return;
     if (!canPlace()) return; // 观察者不能放块
     if (!m_world || !m_captured || !m_hasHit) return;
     // t50：右键工作台 → 打开 3×3 合成 UI（优先于放置；spec「右键工作台开 3×3」）。
@@ -607,6 +612,7 @@ void PlayerController::placeBlock()
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
     }
     m_world->setBlock(tx, ty, tz, quint8(m_selectedBlock));
+    m_lastPlaceMs = now; // 放置成功 → 刷新 CD 计时（t128；now 为入口时间戳，同帧无意义漂移）
     // t125 火把朝向：把玩家点击面外法线随放置事件传出，供呈现层按玩家意图定向（柄嵌所点墙面，
     //   非旧固定优先级误判）。法线为射线命中面外法线（指向玩家侧），值在 placeBlock 入口已由 updateRaycast
     //   确定、此处不变；按值传出无后效依赖（即便下一帧 raycast 改向也不影响本火把）。

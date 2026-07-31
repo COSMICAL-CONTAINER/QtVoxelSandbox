@@ -341,6 +341,10 @@ private:
     float m_eyeHeight = kEyeHeight; // 当前眼位（蹲下降低到 kCrouchEye；相机 position 据此 → 蹲下相机降低，t51）
     qint64 m_lastSpaceMs = -100000; // 双击空格检测时间戳
     qint64 m_lastWms = -100000;     // W 双击检测时间戳（疾跑触发；t51）
+    // 放置节流时间戳（t128）：上次成功放置的 m_evtClock 时间戳。placeBlock 入口据此判 200ms CD
+    //   （5 次/秒），防连点放沙等触发多次塌落链溢出（spec t128）。仅成功放置后刷新；初值 -100000
+    //   = 远古 → 首次放置不受限。与 m_lastSpaceMs/m_lastWms 同走 m_evtClock（事件时间戳，不被 tick restart）。
+    qint64 m_lastPlaceMs = -100000;
     bool m_spacePrev = false;       // 跳跃边沿触发（长按空格只跳一次）
     int m_selectedBlock = BlockRegistry::Stone; // 当前手持方块（右键放置；默认 Stone，t06 hotbar 绑定）
     int m_selectedItem = BlockRegistry::Stone;  // 手持物品原始 id（含工具段；t34 挖掘速度用，绑定 hotbar.selectedItemId）
