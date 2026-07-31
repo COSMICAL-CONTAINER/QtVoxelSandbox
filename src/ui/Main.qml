@@ -551,6 +551,30 @@ Window {
             brightness: dayNightBrightness(worldClock.skyLight)
         }
 
+        // t135 可视太阳：t123 顶点光有方向调制但天空空（无可视太阳）→ 加一个暖白大球挂在天空，
+        //   让昼夜「太阳划过天空」肉眼可见。位置 = 相机眼位 + worldClock.sunDir·40 → 太阳始终在
+        //   「朝太阳方向」40 格远的天空；sunDir 随 dayPhase 量化跨步演变（kSunSteps=360 调试周期下
+        //   ~0.083s 一步）→ 太阳缓慢划过天空（F6 加速 ~30s 一圈最直观）。
+        //   PLAN §2-H「非旋转方向光」仍成立：此 Model 是纯呈现层装饰球，**不参与光照计算**——光照
+        //   方向仍由顶点色 sunDir 烘焙（chunkgeometry.cpp），DirectionalLight 的 eulerRotation 固定不变。
+        //   材质 NoLighting 自发光（同地形 / 线框 / 玩家模型已验证可见路径；lessons-learned「所有可见
+        //   Model 用 NoLighting」）。太阳落到地平线下（sunDir.y<=0，夜间）隐藏。
+        //   分层（PLAN §2）：纯呈现层，只读 worldClock.sunDir（Game 层 Q_PROPERTY），绝不反向写。
+        Model {
+            visible: worldClock.sunDir.y > 0.0   // 太阳在地平线上才显（夜间隐藏）
+            source: "#Sphere"
+            position: {
+                const eye = player.position
+                const s = worldClock.sunDir
+                return Qt.vector3d(eye.x + s.x * 40, eye.y + s.y * 40, eye.z + s.z * 40)
+            }
+            scale: Qt.vector3d(3.0, 3.0, 3.0)
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                baseColor: "#fff2cc"   // 暖白（淡黄白日色，原创纯色，非 MC 资产 §9(a)）
+            }
+        }
+
         // 共享图集纹理：3×3=9 个 per-chunk Model 共用一份 atlas（声明一次、按 id 引用）。
         Texture { id: voxelAtlas; source: "qrc:/textures/atlas.png"; generateMipmaps: false }
 

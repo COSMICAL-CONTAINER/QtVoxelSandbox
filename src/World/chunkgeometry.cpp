@@ -127,12 +127,14 @@ void ChunkGeometry::buildMesh()
     // t123 动态太阳顶点光常量（方案②：顶点色承载方向调制，PLAN §2-H 非 lit/shadowmap）：
     //   kSunRange：方向对比强度。朝太阳面（lit - litAvg > 0）超过 1 → 夹到 kSunMax（最亮=贴图原色）；
     //     背阳 / 投影阴影面（< 0）低于 1，呈暗。
-    //   kSunMin / kSunMax：vc 钳制范围。下限 0.3 防阴影面黑死、上限 1.0 不超过贴图原色（NoLighting 无法 overbright）。
+    //   kSunMin / kSunMax：vc 钳制范围。t135 下限 0.3→0.15 放宽对比（阴影面更暗、朝太阳面更亮，
+    //     方向感与投影对比更明显；仍不黑死）；上限 1.0 不超过贴图原色（NoLighting 无法 overbright）。
     //   kMaxShadow：heightmap 列投影阴影回扫最大列距离（界性能；低空太阳 tanElev 小 → 自然长阴影，超距截断）。
+    //     t135 10→32：低空 / 接近正午时仍能扫到挡光列，阴影更长更连续（影子跟随太阳移动更平滑）。
     constexpr float kSunRange   = 1.5f;
-    constexpr float kSunMin     = 0.3f;
+    constexpr float kSunMin     = 0.15f;
     constexpr float kSunMax     = 1.0f;
-    constexpr int   kMaxShadow  = 10;
+    constexpr int   kMaxShadow  = 32;
     // 太阳派生量（由 m_sunDir 算一次，供本 chunk 全部顶点光照复用）：
     //   sunIntensity：太阳高度归一（sin(kSunMaxElevDeg)=0.766 为满日照基准）。sunDir.y<0（地平下）→ 0
     //     → 白天方向调制生效、夜间归零（vc=1，与 t121 等亮，无夜间变暗回归）。
@@ -173,8 +175,11 @@ void ChunkGeometry::buildMesh()
                     //   则本块被投影阴影（shade=0 → 朝太阳的面失去直射贡献、呈阴影）。跨 chunk 经
                     //   world.heightmapAt 路由 → 阴影无缝跨越边界。太阳低空时 tanElev 小 → 长阴影。
                     //   本量为「每块」算一次（块内 6 面共享），界性能（仅见天块 + 太阳在上时算）。
+                    //   t135 门控放宽：原 `sunIntensity > 1e-3f` 在正午（sunDir 接近天顶，水平投影小）与黄昏
+                    //     （sunIntensity 趋 0）都不投影 → 一大坨无阴影。改判 `sdy > 0.f`：太阳只要在地平线上就
+                    //     算投影（含正午低水平角与黄昏），影子在全天白昼段都生效（更连续）。
                     float shade = 1.0f;
-                    if (surface && sunIntensity > 1e-3f && sunHlen > 0.05f) {
+                    if (surface && sdy > 0.f && sunHlen > 0.05f) {
                         for (int d = 1; d <= kMaxShadow; ++d) {
                             const int qx = wx + int(std::round(sunHx * float(d)));
                             const int qz = wz + int(std::round(sunHz * float(d)));

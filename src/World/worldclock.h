@@ -97,12 +97,13 @@ private:
     // t123 太阳轨道常量：
     //   kSunMaxElevDeg：正午太阳最高仰角（度）。sin(50°)≈0.766 为「满日照」基准（mesher 据此
     //     归一 sunDir.y → intensity∈[0,1]）。
-    //   kSunSteps：一周期太阳方向的量化步数。72 → 正常 1200s 周期约每 16.7s 跨一步（重建一次
-    //     mesh）、调试 30s 周期约每 0.42s 一步（肉眼可见太阳缓慢移动）。步进而非每 tick 刷 =
-    //     把「全量 mesh 重建」从 10Hz 降到 ~0.06Hz（正常）/ ~2.4Hz（调试），代价是顶点光按
+    //   kSunSteps：一周期太阳方向的量化步数。t135 72→360：调试 30s 周期约每 0.083s 跨一步
+    //     （原 72 步每 0.42s 一步 → 影子跳跃明显），360 步使影子随太阳移动更连续平滑；正常
+    //     1200s 周期则约每 3.3s 一步（顶点光更新频次仍远低于 10Hz tick，mesh 重建开销可控）。
+    //     步进而非每 tick 刷 = 把「全量 mesh 重建」从 10Hz 降到 ~步数/周期 Hz，代价是顶点光按
     //     步进变化（baseColor 仍平滑补昼夜过渡，故整体明暗无跳变）。
     static constexpr float kSunMaxElevDeg = 50.f;
-    static constexpr int   kSunSteps      = 72;
+    static constexpr int   kSunSteps      = 360;
 
     float m_phase = 0.f;      // 0..1 循环相位（由 m_elapsedMs 派生，避免浮点累积漂移）
     qint64 m_elapsedMs = 0;   // 累计已流逝毫秒（phase = (elapsed mod period) / period）
