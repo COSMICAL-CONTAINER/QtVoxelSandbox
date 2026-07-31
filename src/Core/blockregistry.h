@@ -18,7 +18,7 @@
 //
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
-//   10=furnace 11=coal_ore 12=iron_ore 13=torch 14=bedrock
+//   10=furnace 11=coal_ore 12=iron_ore 13=torch 14=bedrock ... 21=water
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -60,7 +60,14 @@ public:
                                 //   bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z。maxStack=1（单件，不可堆叠）。
         WoodTrapdoor      = 20, // 木板活板门：水平/竖直薄板。state bit0=开(1，竖直贴边)/合(0，水平贴地)，
                                 //   bit[2:1]=开时朝向 0=+X 1=-X 2=+Z 3=-Z。
-        Count         = 21, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Water              = 21, // 水（t148）：机制等价 MC 静水。solid=false（不挡邻居面剔除 → 地形贴着水仍画
+                                  //   自己的面）、shape=ShapeNone（**无碰撞** → 玩家穿过，spec「物理 v1 穿过」）、
+                                  //   **hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，防创造秒破；
+                                  //   同 bedrock 哨兵语义）、dropId=0（破不掉落）、各面同贴图=water(19) 蓝半透。
+                                  //   worldgen 在 waterLevel 以下低洼列填水（h<wl 从 h+1 到 wl）。渲染：mesher 把
+                                  //   水面剔出独立几何段、材质 opacity=0.7 半透；水-水邻接面互剔（nb==Water 剔除）。
+                                  //   不进创造调色板（worldgen 专属；非玩家可放置方块）。
+        Count         = 22, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起点哨兵：WoodSlab(15) 起的 id 走 PartialBlockGeometry 异形渲染（mesher 合批进
@@ -168,7 +175,8 @@ public:
     //   15=coal_ore 16=iron_ore（t84；矿石各面同贴图）
     //   17=torch（t88；6 面同贴图，近黑底+火焰图案）
     //   18=bedrock（t119；6 面同贴图，深灰斑驳不可破坏底岩）
-    // 图集由 tools/build_atlas.py 打包全部 19 瓦片；mesher / BlockCube 的 N=19 与之严格对齐。
+    //   19=water（t148；6 面同贴图，蓝半透——纹理本身不透明，半透由材质 opacity=0.7 实现）
+    // 图集由 tools/build_atlas.py 打包全部 20 瓦片；mesher / BlockCube 的 N=20 与之严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 

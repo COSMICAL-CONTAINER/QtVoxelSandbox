@@ -71,6 +71,15 @@ void ChunkGeometry::setSunDir(const QVector3D &dir)
     buildMesh();
 }
 
+// t148：水段开关变 → 重建（水段 / 地形段选块不同，需重网格化）。值未变则早退。
+void ChunkGeometry::setWaterOnly(bool on)
+{
+    if (m_waterOnly == on) return;
+    m_waterOnly = on;
+    emit waterOnlyChanged();
+    buildMesh();
+}
+
 // 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
 // 故 world 重建（recreate 销毁旧 chunk）后不会悬空：拿到的是新 chunk。
 Chunk *ChunkGeometry::myChunk() const
@@ -108,7 +117,7 @@ void ChunkGeometry::buildMesh()
         idx.reserve(8192);
     }
 
-    // 图集瓦片横排：19 瓦片（304×16）。BlockRegistry 为 14 方块定义 0..18 序号，
+    // 图集瓦片横排：20 瓦片（320×16）。BlockRegistry 为各方块定义 0..19 序号，
     // 与 tools/build_atlas.py 打包顺序严格一致（一个偏差即渗色/错贴）：
     //   0=grass_top 1=grass_side 2=dirt 3=stone 4=sand
     //   5=cobble 6=log_top 7=log_side 8=planks 9=leaves
@@ -117,8 +126,9 @@ void ChunkGeometry::buildMesh()
     //   15=coal_ore 16=iron_ore（t84；矿石各面同贴图）
     //   17=torch（t88；6 面同贴图）
     //   18=bedrock（t119；6 面同贴图，深灰斑驳底岩）
+    //   19=water（t148；6 面同贴图，蓝；纹理不透明，半透由水材质 opacity=0.7 实现）
     // 半纹素内缩防渗色（线性采样跨瓦片）。
-    constexpr int N = 19;
+    constexpr int N = 20;
     constexpr float tileW = 1.0f / N;
     constexpr float hx = 0.5f / (N * 16);
     constexpr float hy = 0.5f / 16;
@@ -159,10 +169,17 @@ void ChunkGeometry::buildMesh()
                     const int wx = originX + lx, wz = originZ + lz;
                     const quint8 b = blockAtWorld(wx, ly, wz);
                     if (b == 0) continue; // 空气
+                    // t148 水渲染分流：一个 chunk 由两段 ChunkGeometry 网格化 —— 地形段（waterOnly=false）
+                    //   只取非水方块；水段（waterOnly=true）只取 Water。这样水走独立透明材质（opacity=0.7）、
+                    //   地形走不透明材质，二者不互相污染（水不会被当不透明地形误渲、地形不会因水材质变透）。
+                    //   isWater != m_waterOnly 即「本段不要这块」→ 跳过（地形段跳水 / 水段跳非水）。
+                    const bool isWater = (b == BlockRegistry::Water);
+                    if (isWater != m_waterOnly) continue;
                     // t114 异形特例：火把不画 1×1×1 立方面 —— 它是「木柄 + 火焰」小模型（在 torchHost
                     // 由 QML Model 渲染，朝向据邻居 solid 推断）。mesher 在此跳过立方面，否则会出现
                     // 「黑底 6 面大立方 + 上叠小模型」的重复畸形。其他异形方块（未来如花/草）按同模式加。
-                    if (b == BlockRegistry::Torch) continue;
+                    //   水段不会到此（水 != Torch，已被 isWater != m_waterOnly 跳过），故仅地形段需此守卫。
+                    if (!isWater && b == BlockRegistry::Torch) continue;
 
                     // t121 天光 heightmap（PLAN §2-H「per-column 天光」）：本列首个非空气方块的 y。
                     // ly >= hm → 见天（地表/天空间）；否则地下。t123 改：见天块叠方向太阳光 + 投影阴影，
@@ -197,7 +214,10 @@ void ChunkGeometry::buildMesh()
                     //   shade / sun 量）已在上方算好，打包进 PartialLightCtx 传入；append 据各面外法线按
                     //   同款公式复算 vc。当前 FirstPartial=15=BlockRegistry::Count → 任何合法 id <
                     //   FirstPartial → 此分支永不进入（无任何异形方块定义）；t134 加 WoodSlab=15.. 后激活。
-                    if (b >= BlockRegistry::FirstPartial) {
+                    //   t148：Water id=21 也 >= FirstPartial，但水是整立方（走下方立方面路径），且水段已
+                    //   由 isWater 守卫隔离——此处 `!isWater` 防 PartialBlockGeometry 收到 Water（其 switch
+                    //   无 Water case → default 返 0 不画 → 水面丢失）。
+                    if (!isWater && b >= BlockRegistry::FirstPartial) {
                         const quint8 st = stateAtWorld(wx, ly, wz);
                         const PartialLightCtx lctx{
                             sdx, sdy, sdz,
@@ -211,12 +231,19 @@ void ChunkGeometry::buildMesh()
 
                     for (int f = 0; f < 6; ++f) {
                         const FaceDef &F = kFaces[f];
+                        const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                         // 邻居实体 → 剔除（跨 chunk 边界同样正确）。走 BlockRegistry::isSolid 单一权威，
                         // 与 playercontroller/raycast 的 isSolid 判定同源（PLAN §2：世界数据单一）。
                         //   原 `!= 0` 把任意非空气方块当 solid，导致火把(solid=false) 误判为挡面 →
                         //   火把下方地板的顶面被错误剔除 → 地板透明（t130 修复根因）。
                         //   越界 / air / torch 等 solid=false 方块不挡邻居面（应画出）。
-                        if (BlockRegistry::isSolid(blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2])))
+                        if (BlockRegistry::isSolid(nb))
+                            continue;
+                        // t148 水-水面互剔（spec「邻居剔除 nb==Water」）：水段渲染水块时，若邻居也是水
+                        //   则该面是水体内部面 → 剔除（仅留水-空气接触面 = 水面 / 暴露侧）。同 solid 判定
+                        //   一样走「邻居实体性」语义：水对水不可见、水对空气可见。（solid 判定已覆盖水贴
+                        //   地形那面——地形 solid=true → 水面被剔，避免与地形面重合 z-fight。）
+                        if (isWater && nb == BlockRegistry::Water)
                             continue;
 
                         const int t = tileFor(b, f);

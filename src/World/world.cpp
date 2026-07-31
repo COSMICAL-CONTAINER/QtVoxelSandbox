@@ -202,6 +202,7 @@ void World::generate()
 
     placeBedrock(); // t119：底层基岩（y 0..4 坑洼，底实顶疏；不可破坏）。先于矿石 / 树（仅覆盖最底几格）
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
+    fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
 }
 
@@ -414,4 +415,35 @@ void World::scatterOres()
         }
     }
     qInfo() << "worldgen: ores placed = coal" << coalPlaced << "iron" << ironPlaced; // 同 seed → 同计数（确定性核对）
+}
+
+// t148 海平面填水（PLAN §2-K 确定性）：遍历列，地表高度 h < waterLevel 的低洼列从 h+1 到 waterLevel
+//   填 Water（机制等价 MC 海洋 / 湖泊：低洼被水淹没到统一海平面）。仅在空气格写入（防御：不动地形 /
+//   基岩 / 矿石）。经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + 边界邻接 + heightmap 增量维护），
+//   不触发 blockPlaced（同 worldgen 既有约定——系统事件非玩家放置）。
+//
+//   waterLevel 取值：spec 原文为 8，那是 t119 把 heightAt 重定标（3..11 → 16..40）**之前**的地形范围
+//   （8 处于旧 3..11 中高位，故低洼列成海）。t119 后 heightAt ∈ [16,40]，8 < min(16) → 无任何列满足
+//   h<8 → 填水为零、特性不可见。此处把海平面重定标到 24：在新地形 [19,40] 下约 11% 列被淹（散布湖泊），
+//   出生列(8,8) h=27 > 24 → 出生保持陆地、近处低洼可见水域（同 seed 复算核对）。语义不变（海平面淹低洼），
+//   仅数值随地形重定标；t149 沙滩带 / 沙漠水位再细化时同源调整。
+//   全程纯函数于 seed + heightAt（fbm）→ 同 seed 同水域分布；禁用任何运行期随机源（PLAN §2-K）。
+void World::fillWater()
+{
+    constexpr int waterLevel = 24; // 海平面（见上注：spec 8 为 t119 前地形；现 16..40 → 重定标 24）
+    int waterCells = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            const int h = std::min(heightAt(x, z), m_height - 1);
+            if (h >= waterLevel) continue; // 此列地表高于海平面 → 无水
+            // 从地表上方一格到海平面填水（h+1..waterLevel）。低洼列被水淹没到统一海平面。
+            for (int y = h + 1; y <= waterLevel && y < m_height; ++y) {
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air)
+                    continue; // 仅写空气格（防御：不动已存在方块）
+                m_chunks.setBlock(x, y, z, BlockRegistry::Water);
+                ++waterCells;
+            }
+        }
+    }
+    qInfo() << "worldgen: water cells =" << waterCells; // 同 seed → 同计数（确定性核对）
 }

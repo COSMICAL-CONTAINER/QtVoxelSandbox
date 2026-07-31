@@ -38,6 +38,12 @@ class ChunkGeometry : public QQuick3DGeometry
     //   时间源），保持 Renderer→向下 依赖方向。设值即触发 buildMesh（绕过 chunk dirty：体素未变、
     //   仅光照变）。WorldClock 量化步进 → sunChanged → 本 setter → 重建（约 16s/步 正常、0.4s/步 调试）。
     Q_PROPERTY(QVector3D sunDir READ sunDir WRITE setSunDir NOTIFY sunInputChanged)
+    // t148 水渲染分流：waterOnly=true → 本几何只网格化 Water 方块（独立透明段，Main.qml 用 opacity=0.7
+    //   材质渲染）；waterOnly=false（默认）→ 只网格化非水方块（地形 / 异形 / ...，跳过 Water，避免与水段
+    //   重复绘制 + 水被当不透明地形误渲）。两段共用同一 culled meshing 主体 + 顶点色光照管线，仅：
+    //   (a) 选块（水 vs 非水）；(b) 邻居面剔除规则不同（水段额外剔 nb==Water，水-水面互剔；见 .cpp）。
+    //   一个 chunk 由两个 ChunkGeometry 实例渲染（地形段 + 水段），各自绑 QML Model + 材质。
+    Q_PROPERTY(bool waterOnly READ waterOnly WRITE setWaterOnly NOTIFY waterOnlyChanged)
     // 网格统计（t10 F3 调试叠层，PLAN §2-F）：buildMesh 完成后暴露本 chunk 的顶点 / 三角面数，
     // 供 F3 叠层汇总诊断 meshing 吞吐与帧抖根因（§2-F 明言「没有 F3 叠层，帧率验收无法诊断帧抖」）。
     // 仅在 buildMesh 末尾经 meshRebuilt 通知；呈现层只读、不反向写。三角面 = idx/3（实际索引计数
@@ -60,6 +66,10 @@ public:
     QVector3D sunDir() const { return m_sunDir; }
     void setSunDir(const QVector3D &dir);
 
+    // t148 水渲染分流（见 Q_PROPERTY 注释）：true=只网格化 Water 段。
+    bool waterOnly() const { return m_waterOnly; }
+    void setWaterOnly(bool on);
+
     // 网格统计（t10 F3 叠层）：上次 buildMesh 产出的顶点 / 三角面数。
     int vertexCount() const { return m_vertexCount; }
     int triangleCount() const { return m_triangleCount; }
@@ -69,6 +79,7 @@ signals:
     void cxChanged();
     void czChanged();
     void sunInputChanged(); // t123：sunDir 变（太阳量化跨步）；驱动呈现层 / 未来光场刷新
+    void waterOnlyChanged(); // t148：水段开关变（QML 改 waterOnly → 重建，水段 / 地形段重网格化）
     // buildMesh 完成（顶点 / 三角面数已更新；t10 F3 叠层据此刷新汇总）。
     void meshRebuilt();
 
@@ -91,6 +102,7 @@ private:
     int m_cx = -1; // -1 = 未赋值（myChunk 返回 nullptr，待 QML 赋 cx/cz 后才建）
     int m_cz = -1;
     QVector3D m_sunDir{0.f, 1.f, 0.f}; // t123 太阳方向（单位向量；默认天顶正午，QML 绑 WorldClock.sunDir）
+    bool m_waterOnly = false; // t148：true=只网格化 Water 段（透明水）；false=只网格化非水地形段
     int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
     int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）
 };

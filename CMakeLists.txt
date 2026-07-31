@@ -142,6 +142,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_tree_top.png
         textures/default_wood.png
         textures/default_torch.png
+        textures/default_water.png
         textures/icon_cobble.png
         textures/icon_coal_ore.png
         textures/icon_crafting_table.png

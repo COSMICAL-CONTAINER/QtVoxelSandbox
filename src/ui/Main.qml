@@ -659,6 +659,58 @@ Window {
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
 
+        // t148 水（独立透明渲染段）：每 chunk 额外一个 ChunkGeometry{waterOnly:true} 只网格化 Water
+        //   方块（水-水面互剔、水贴地形那面剔），用 PrincipledMaterial opacity=0.7 走透明通道（同
+        //   CrackBox / 玩家幽灵已验证的「opacity<1 → 半透」路径）。与地形段同图集 / 同顶点色光照管线，
+        //   仅材质 opacity 不同 → 水面半透、可透见水底地形。Model 摆位与地形段同（chunk 世界起点）。
+        //   透明物体由 QtQuick3D 渲染队列自动排在不透明地形之后 → 无需手调渲染序。复用既有「9 个显式
+        //   Model」已验证路径（不用 Repeater，lessons-learned t03 3D 领养坑）。
+        Model { // water (0,0)
+            position: Qt.vector3d(0, 0, 0)
+            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 0; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { // water (1,0)
+            position: Qt.vector3d(16, 0, 0)
+            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 0; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { // water (2,0)
+            position: Qt.vector3d(32, 0, 0)
+            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 0; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { // water (0,1)
+            position: Qt.vector3d(0, 0, 16)
+            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 1; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { // water (1,1)
+            position: Qt.vector3d(16, 0, 16)
+            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 1; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { // water (2,1)
+            position: Qt.vector3d(32, 0, 16)
+            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 1; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { // water (0,2)
+            position: Qt.vector3d(0, 0, 32)
+            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 2; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { // water (1,2)
+            position: Qt.vector3d(16, 0, 32)
+            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 2; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { // water (2,2)
+            position: Qt.vector3d(32, 0, 32)
+            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+
         // 选中立方体框（射线选体 t04 / t52）：从「命中面方框 (WireSquare)」改为「整个立方体框」，
         // 12 棱包住命中方块 8 角。Model 摆到命中方块中心（hitBlock + 0.5）；几何本身 ±0.5 居中、
         // 几何对称、与朝向无关 → 无需 eulerRotation（不似 WireSquare 需按命中面法线旋转）。
