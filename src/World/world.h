@@ -64,6 +64,11 @@ public:
     //（越界 / 空列 → -1）。mesher 据此判顶点见天（ly >= hm → 天光 1.0）/ 地下（暗 0.2）。经 ChunkManager
     // 路由到 chunk 局部列；heightmap 由 setBlock 增量维护（worldgen / 玩家编辑 / 实体写入均经此入口）。
     Q_INVOKABLE int heightmapAt(int x, int z) const { return m_chunks.heightmapAt(x, z); }
+    // t137 出生贴地表：worldgen 地表高度（纯函数于 seed + fbm，同 generate() 填充用的 heightAt）。
+    //   暴露给 Game 层（PlayerController）查出生列地表，把玩家脚底贴到 h+1（消除 kSpawnY 兜底落差摔伤）。
+    //   与 heightmapAt 的差异：heightAt = worldgen 地表（不含树 / 玩家编辑），heightmapAt = 当前列首个非空
+    //   （含增量）。出生用 heightAt —— 贴 worldgen 地表，语义稳定（同 seed 同地表）。只读查询，不改栅格。
+    Q_INVOKABLE int heightAt(int x, int z) const;
 
     // 写栅格的唯一入口（PLAN §2-C 精神：当前 GUI 线程单写者）。经 ChunkManager 跨 chunk 写入 +
     // 标目标 chunk 脏；该格贴 chunk 边沿（x/z 在 16 边）→ 同标邻接 chunk 脏（为 t03 跨边界剔除）。
@@ -102,7 +107,6 @@ private:
     void buildPermutation();  // 由 seed 填 512 置换表（线性同余，可复现）
     double noise2(double x, double z) const;
     double fbm(double x, double z) const;
-    int heightAt(int x, int z) const;
     // t117 沙漠群系判定（二次 fBm biome，PLAN §2-K 确定性）：与高度噪声独立采样（不同空间频率 + seed
     // 偏移），低频 → 大区块连续（沙丘 / 平原成片，非逐格斑点）。阈值化得干旱 / 普通二分群系。纯函数
     // 于 seed → 同 seed 同群系分布（与 heightAt 同源确定性）。

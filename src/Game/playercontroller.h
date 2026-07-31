@@ -312,6 +312,12 @@ private:
     // （全入）→ ItemEntityManager.removeAt 销毁实体；返 >0（背包满）→ 不拾取（entity 留）。
     // 距离从玩家 AABB 中心（脚底 + 半高）3D 起算，阈值 kPickupDist；从后往前扫便于 erase。
     void pickupScan();
+    // t137 出生贴地表：查出生列 (kSpawnX,kSpawnZ) 的 worldgen 地表高度 → 把脚底 Y 设为 h+1（站地表方块
+    //   上方）+ 同步 m_peakY 防误判落差。kSpawnY=44 是高于最高地表(~40)的兜底初值（防卡地形），但玩家从
+    //   44 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生落差。分别在
+    //   componentComplete / setWorld / respawn 调，确保世界（width/height/seed）定稿后玩家始终贴地表。
+    //   无世界 → no-op（m_pos 保持 kSpawnY 兜底）。只读 World::heightAt（向下依赖，不改栅格）。
+    void snapSpawnToGround();
 
     World *m_world = nullptr;
     Hotbar *m_hotbar = nullptr;                  // 拾取 addStack / 丢弃 takeStack 的栈操作目标（Q_PROPERTY 绑定）

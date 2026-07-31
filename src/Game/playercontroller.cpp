@@ -23,7 +23,8 @@ void PlayerController::componentComplete()
     QQuickItem::componentComplete();
     if (!m_window && (m_window = window()))
         m_window->installEventFilter(this); // 拦截 Esc + 失焦
-    m_peakY = m_pos.y(); // 掉落伤害基准：以脚底初始 Y 起（首帧不误判大落差）
+    snapSpawnToGround(); // t137：世界就绪 → 贴地表（覆盖 kSpawnY=44 兜底，消除出生落差摔伤）
+    m_peakY = m_pos.y(); // 掉落伤害基准：以脚底初始 Y 起（首帧不误判大落差；snap 已设则等价）
     m_clock.start();
     m_evtClock.start();
     m_timer.start();
@@ -33,7 +34,22 @@ void PlayerController::setWorld(World *w)
 {
     if (m_world == w) return;
     m_world = w;
+    snapSpawnToGround(); // t137：世界注入后贴地表（构造期 m_pos=kSpawnY 兜底，此处覆盖为真实地表）
     emit worldChanged();
+}
+
+// t137 出生贴地表：查出生列 (kSpawnX,kSpawnZ) 的 worldgen 地表高度 → 脚底 Y = h+1（站地表方块上方），
+//   同步 m_peakY 防误判落差。kSpawnY=44 是高于最高地表(~40)的兜底初值（防卡地形），但玩家从 44 摔到
+//   地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生落差。分别在
+//   componentComplete / setWorld / respawn 调，确保世界（width/height/seed）定稿后玩家始终贴地表。
+//   无世界 → no-op（m_pos 保持 kSpawnY 兜底）。分层（PLAN §2）：只读 World::heightAt（worldgen 地表纯
+//   函数，同 generate() 填充用），不改栅格；Game 层向下读 World，无反向依赖。
+void PlayerController::snapSpawnToGround()
+{
+    if (!m_world) return;
+    const int h = m_world->heightAt(int(kSpawnX), int(kSpawnZ));
+    m_pos.setY(float(h) + 1.0f); // 脚底 = 地表方块顶面（h 为地表方块 y，+1 站其上）
+    m_peakY = m_pos.y();         // 掉落伤害基准重置（同 componentComplete / setMode 语义，防陈旧落差）
 }
 
 void PlayerController::setHotbar(Hotbar *h)
@@ -163,9 +179,9 @@ void PlayerController::respawn()
 {
     cancelMining();           // 清生存累积挖掘态（裂纹叠层随之隐）
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
-    m_pos = QVector3D(kSpawnX, kSpawnY, kSpawnZ);
+    m_pos = QVector3D(kSpawnX, kSpawnY, kSpawnZ); // 回出生列（X/Z；Y 由 snapSpawnToGround 贴地表）
     m_vel = QVector3D(0, 0, 0);
-    m_peakY = m_pos.y();      // 重置掉落伤害基准（同 componentComplete / setMode 语义）
+    snapSpawnToGround();      // t137：重生贴地表（消除 kSpawnY 兜底落差；设 m_pos.y + m_peakY）
     if (m_flying) { m_flying = false; emit flyingChanged(); }
     setMoveState(Walk);       // 蹲下 / 疾跑归 Walk（同时复位 AABB 高 / 眼位；无变化静默）
     emit positionChanged();   // 相机 / 第三人称模型跟随刷新
