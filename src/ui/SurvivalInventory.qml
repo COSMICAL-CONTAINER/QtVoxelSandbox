@@ -31,63 +31,6 @@ Item {
     // t49：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区时；宿主接 player.dropHeldCursor）。
     signal discardHeldRequested()
 
-    // t129 临时调试：手臂角度 / 位置滑动条（纯 QtQuick 自绘）。项目未链接 QtQuick.Controls → 不用 Slider
-    //   控件；ArmSlider = track(Rectangle) + handle(Rectangle) + MouseArea（点 track 任意位置跳值 + 拖动连续
-    //   改值）。value 单向写回 window 级属性（handBaseTilt / handPosX/Y/Z）→ Main.qml viewModelHand 绑定读取
-    //   → 手臂 baseTilt / eulerRotation / position 实时变。下方 ⑤ 调试区实例化 4 个。
-    component ArmSlider : Item {
-        id: sl
-        property real value: 0
-        property real from: 0
-        property real to: 1
-        property string label: ""
-        width: 320
-        height: 30
-        readonly property real __range: to - from
-        readonly property real __norm: __range === 0 ? 0.0
-            : Math.max(0.0, Math.min(1.0, (value - from) / __range))
-        // 据 mouseX（相对 track）反算归一化值并写 value（imperative 赋值 → 破坏 value 的初始绑定，此后
-        //   slider 为权威；onValueChanged 把新值写回 window 级属性）。
-        function __setFromX(mx) {
-            const trackW = track.width > 0 ? track.width : sl.width
-            const n = Math.max(0.0, Math.min(1.0, mx / trackW))
-            sl.value = sl.from + n * sl.__range
-        }
-        Text {
-            anchors.left: parent.left; anchors.top: parent.top
-            text: sl.label
-            color: "#9aa0a6"; font.pixelSize: 11
-        }
-        Text {
-            anchors.right: parent.right; anchors.top: parent.top
-            text: sl.value.toFixed(2)
-            color: "#eaf2ea"; font.pixelSize: 11; font.bold: true
-        }
-        Rectangle {
-            id: track
-            anchors.left: parent.left; anchors.right: parent.right
-            anchors.top: parent.top; anchors.topMargin: 16
-            height: 12; radius: 6
-            color: "#2a2f36"
-            Rectangle { // 已填充段（左→handle）
-                width: sl.__norm * track.width; height: parent.height; radius: 6
-                color: "#5a8a5a"
-            }
-            Rectangle { // handle（圆点，居中于 __norm）
-                x: sl.__norm * Math.max(0, track.width - width)
-                anchors.verticalCenter: parent.verticalCenter
-                width: 10; height: 10; radius: 5
-                color: "#eaf2ea"; border.color: "#3a444f"; border.width: 1
-            }
-            MouseArea {
-                anchors.fill: parent
-                onPressed: (mouse) => sl.__setFromX(mouse.x)
-                onPositionChanged: (mouse) => sl.__setFromX(mouse.x)
-                preventStealing: true
-            }
-        }
-    }
-
     // ── 尺寸常量（集中一处便于对齐）──
     readonly property int slotSize: 40        // 统一槽尺寸（主栏 / hotbar / 合成 / 护甲同尺寸，贴近 1.0）
     readonly property int mainCols: 9
@@ -1058,49 +1001,6 @@ Item {
                     Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.left: parent.left }
                     Rectangle { color: "#ffffff"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
                     Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.right: parent.right }
-                }
-            }
-
-            // ⑤ t129 临时调试：第一人称手臂角度 / 位置实时滑动条（仅生存背包内可见）。
-            //   spec t129：baseTilt -180..180、position.xyz 各 -0.5..0.5，实时数值显示。滑动写回 window 级属性
-            //   （handBaseTilt / handPosX/Y/Z）→ Main.qml viewModelHand 绑定读取 → 手臂姿态实时变。
-            //   ⚠️ position.z < -0.3 会穿模、baseTilt 大幅偏离 ±100 破坏袖/手前后顺序（见 Main.qml 注释）；
-            //      确定值后回填进 viewModelHand 默认并删本区。
-            Column {
-                width: root.mainCols * root.slotSize
-                spacing: 4
-
-                Text {
-                    text: "手臂调试（实时；确定后回填默认）"
-                    color: "#7fae7f"; font.pixelSize: 11; height: 16
-                }
-                ArmSlider {
-                    width: parent.width
-                    label: "baseTilt (°)"
-                    from: -180; to: 180
-                    value: window.handBaseTilt
-                    onValueChanged: window.handBaseTilt = value
-                }
-                ArmSlider {
-                    width: parent.width
-                    label: "position.x"
-                    from: -0.5; to: 0.5
-                    value: window.handPosX
-                    onValueChanged: window.handPosX = value
-                }
-                ArmSlider {
-                    width: parent.width
-                    label: "position.y"
-                    from: -0.5; to: 0.5
-                    value: window.handPosY
-                    onValueChanged: window.handPosY = value
-                }
-                ArmSlider {
-                    width: parent.width
-                    label: "position.z"
-                    from: -0.5; to: 0.5
-                    value: window.handPosZ
-                    onValueChanged: window.handPosZ = value
                 }
             }
         }

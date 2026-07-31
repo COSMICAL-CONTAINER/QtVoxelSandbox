@@ -35,6 +35,10 @@ Window {
     // t87 熔炉子态：右键熔炉方块 → player.furnaceOpened → 显本面板（冶炼）+ 释放指针。与 inventoryOpen
     // / craftingTableOpen 互斥（关一个再开另一个）；E/Esc 关 → 恢复 grab。开时抑制暂停叠层。
     property bool furnaceOpen: false
+    // t139 ESC 设置菜单子态：仅在暂停叠层（playing 且 !captured）下有意义。暂停叠层「设置」按钮置
+    //   true → 显设置面板（手臂调试 ArmSlider 等）覆盖在暂停叠层之上；「返回」按钮置 false 回暂停菜单。
+    //   回主菜单 / 点击恢复游戏时一并复位。属纯呈现态，PLAN §2 分层（UI 层）。
+    property bool settingsOpen: false
 
     // t110 Shift/数字键守卫所需 window 级态：
     //   - shiftHeld：Shift 按下态（keyInput Keys.onPressed/Released 始终追踪，**不论背包是否开**）。
@@ -55,8 +59,8 @@ Window {
         return ""
     }
 
-    // t129 临时调试：第一人称手臂 viewmodel 的角度 / 位置 window 级中转属性。生存背包
-    //   （SurvivalInventory）的 ArmSlider 写这些属性 → viewModelHand（下方 PerspectiveCamera 子节点）绑定
+    // t129 临时调试：第一人称手臂 viewmodel 的角度 / 位置 window 级中转属性。t139 起 ESC
+    //   暂停叠层「设置」面板的 ArmSlider 写这些属性 → viewModelHand（下方 PerspectiveCamera 子节点）绑定
     //   读取 → 手臂 baseTilt / position 实时变。默认值 = t122/t73 不穿模几何定下来的值
     //   （baseTilt 100°、position (0.20, 0.05, -0.15)）。
     //   ⚠️ position.z 拉到 < -0.3 会让手伸进前方实体方块（穿模，见 viewModelHand 注释 t52/t73）；
@@ -77,6 +81,7 @@ Window {
         inventoryOpen = false
         craftingTableOpen = false
         furnaceOpen = false
+        settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
         returnHeldToHotbar()           // t56：返回菜单前归还光标手持栈（防遗留 heldBlock）
         player.release()
         appState = "menu"
@@ -406,7 +411,7 @@ Window {
                 //   swing 改 eulerRotation.x（绕肩挥动）、pop 改 position.y（位移），互不干扰、可叠加
                 //   （拾取时手不挥、破/放时手挥不弹）。
                 position: Qt.vector3d(window.handPosX, window.handPosY + viewModelHand.popY, window.handPosZ)
-                readonly property real baseTilt: window.handBaseTilt  // t129: 读 window 级（生存背包 ArmSlider 实时调）；默认 100.0 见 window.handBaseTilt 注释（t122 几何依据）
+                readonly property real baseTilt: window.handBaseTilt  // t129: 读 window 级（t139 起由 ESC 设置面板 ArmSlider 实时调）；默认 100.0 见 window.handBaseTilt 注释（t122 几何依据）
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 property real popY: 0.0                 // t120：拾取/拿取弹跳位移（Y）；0=静止，负=下沉
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
@@ -1798,7 +1803,14 @@ Window {
         Rectangle {
             anchors.fill: parent
             color: Qt.rgba(0, 0, 0, 0.55)
-            MouseArea { anchors.fill: parent; onClicked: { player.grab(); keyInput.forceActiveFocus() } }
+            // 点击恢复游戏（t139：设置面板开时不响应背景点击 → 必须先「返回」关设置面板）。
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    if (window.settingsOpen) return
+                    player.grab(); keyInput.forceActiveFocus()
+                }
+            }
         }
         Rectangle {
             width: 360; height: 250; radius: 10
@@ -1825,26 +1837,119 @@ Window {
                 Text { text: "[F3] toggle debug overlay (fps / pos / chunks / vertices)   [F3+B] toggle hitboxes"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
-                // 返回主菜单（playing ↔ menu 双向切换，t17）：消费点击，不冒泡到背景 grab。
-                Rectangle {
-                    width: 150; height: 32; radius: 6
-                    color: backMenuArea.containsMouse ? "#2a3a2a" : "#1a2a1a"
-                    border.color: "#3a6a3a"; border.width: 1
+                // 按钮行：t139 设置 + 返回主菜单。Row 居中，两按钮间距 10。
+                Row {
+                    spacing: 10
                     anchors.horizontalCenter: parent.horizontalCenter
-                    Text { anchors.centerIn: parent; text: "Main Menu"
-                           color: "#7fe57f"; font.pixelSize: 13 }
-                    MouseArea {
-                        id: backMenuArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: window.returnToMenu()
+                    // 设置（t139）：进入设置面板（手臂调试 ArmSlider 等）。消费点击，不冒泡到背景 grab。
+                    Rectangle {
+                        width: 110; height: 32; radius: 6
+                        color: settingsBtnArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
+                        border.color: "#3a5a7a"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "设置"
+                               color: "#7fb0e5"; font.pixelSize: 13 }
+                        MouseArea {
+                            id: settingsBtnArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.settingsOpen = true
+                        }
+                    }
+                    // 返回主菜单（playing ↔ menu 双向切换，t17）：消费点击，不冒泡到背景 grab。
+                    Rectangle {
+                        width: 150; height: 32; radius: 6
+                        color: backMenuArea.containsMouse ? "#2a3a2a" : "#1a2a1a"
+                        border.color: "#3a6a3a"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "Main Menu"
+                               color: "#7fe57f"; font.pixelSize: 13 }
+                        MouseArea {
+                            id: backMenuArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.returnToMenu()
+                        }
+                    }
+                }
+            }
+        }
+
+        // t139 设置面板：暂停叠层「设置」按钮触发（settingsOpen）。覆盖在暂停叠层之上（z 同 pauseOverlay
+        //   内更高层），含手臂调试 ArmSlider（从 SurvivalInventory 调试区迁来：baseTilt/posXYZ 实时调）。
+        //   仅 settingsOpen 显；「返回」按钮关回暂停菜单。背景遮罩仅吸收点击（§9 lessons「全屏遮罩 onClicked
+        //   会误关」→ 此处无 close 语义，纯防穿透到背后暂停叠层的恢复 grab）。
+        Item {
+            anchors.fill: parent
+            visible: window.settingsOpen
+            z: 50 // 在 pauseOverlay 内暂停内容之上
+            Rectangle {
+                anchors.fill: parent
+                color: Qt.rgba(0, 0, 0, 0.7)
+                MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
+            }
+            Rectangle {
+                width: 440; height: 320; radius: 10
+                anchors.centerIn: parent
+                color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
+                Column {
+                    anchors.fill: parent; anchors.margins: 20; spacing: 10
+                    Text { text: "设置"; color: "#eeeeee"; font.pixelSize: 22; font.bold: true
+                           anchors.horizontalCenter: parent.horizontalCenter }
+                    // 手臂调试（从生存背包 t129 调试区迁入）：滑动写回 window 级属性 → viewModelHand
+                    //   绑定读取 → 第一人称手臂 baseTilt / position 实时变。
+                    Text { text: "手臂调试（实时）"
+                           color: "#7fae7f"; font.pixelSize: 12 }
+                    ArmSlider {
+                        width: parent.width
+                        label: "baseTilt (°)"
+                        from: -180; to: 180
+                        value: window.handBaseTilt
+                        onValueChanged: window.handBaseTilt = value
+                    }
+                    ArmSlider {
+                        width: parent.width
+                        label: "position.x"
+                        from: -0.5; to: 0.5
+                        value: window.handPosX
+                        onValueChanged: window.handPosX = value
+                    }
+                    ArmSlider {
+                        width: parent.width
+                        label: "position.y"
+                        from: -0.5; to: 0.5
+                        value: window.handPosY
+                        onValueChanged: window.handPosY = value
+                    }
+                    ArmSlider {
+                        width: parent.width
+                        label: "position.z"
+                        from: -0.5; to: 0.5
+                        value: window.handPosZ
+                        onValueChanged: window.handPosZ = value
+                    }
+                    Text { text: "⚠ position.z < -0.3 会穿模 / baseTilt 大幅偏离 ±100 破坏袖手顺序（仅临时调试）"
+                           color: "#b08060"; font.pixelSize: 10; wrapMode: Text.WordWrap; width: parent.width }
+                    // 返回按钮：关设置面板回暂停菜单。
+                    Rectangle {
+                        width: 120; height: 32; radius: 6
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        color: backSettingsArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
+                        border.color: "#3a5a7a"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "返回"
+                               color: "#7fb0e5"; font.pixelSize: 13 }
+                        MouseArea {
+                            id: backSettingsArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.settingsOpen = false
+                        }
                     }
                 }
             }
         }
     }
-
     // t78 死亡界面（仅 Survival 血量 0 触发）：半透黑遮罩 + 「你死了」+ [立即重生] / [回主菜单]。
     //   触发链：PlayerState.takeDamage 扣血到 ≤0 → dead=true + emit died → 上方 Connections(onDied) 释放指针
     //   + 关背包/工作台；本叠层 visible 绑 playerState.dead（deadChanged NOTIFY 自动显隐）。
