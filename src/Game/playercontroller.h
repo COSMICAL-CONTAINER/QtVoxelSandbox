@@ -230,6 +230,11 @@ public:
     //   血量/死亡态）。出生点与构造期 m_pos 初值同源（kSpawn）；m_peakY 重置 → respawn 后下落从出生点
     //   起算（同 componentComplete 首帧，不误判陈旧落差）。emit positionChanged → 相机绑定重算跟随。
     Q_INVOKABLE void respawn();
+    // t176 存档加载：从存档恢复玩家位姿 + 模式（spec「玩家态 pos/.../模式」）。一次设 m_pos/m_yaw/m_pitch/
+    //   m_mode + 清速度 / 挖掘 / 飞行 / 蹲疾跑 + 重置 m_peakY（防存档点与首次重力结算间误判落差）。emit
+    //   positionChanged/yawChanged/pitchChanged/modeChanged → 相机 / 第三人称模型绑定刷新。与 respawn 的差异：
+    //   respawn 回固定出生点，本方法回存档任意点（玩家上次保存位置）。mode 取 Mode 序数（0/1/2）。
+    Q_INVOKABLE void loadSavedState(float x, float y, float z, float yaw, float pitch, int mode);
 
 signals:
     void worldChanged();

@@ -77,6 +77,9 @@ public:
     // 否则末位 delegate 会瞬移到被拾取位 → 视觉跳变）。越界静默。bump revision → QML Repeater
     // delegate 的 posAt/itemIdAt 绑定（触碰 revision）整列重算，shift 后各 delegate 对齐新数据。
     Q_INVOKABLE void removeAt(int i);
+    // t176 存档：清空所有掉落实体（切世界 / 退出存档前调，防上一世界的掉落物残留进新世界）。emit
+    //   entitiesChanged → count=0 → QML Repeater 清空 delegate。
+    Q_INVOKABLE void clearAll() { m_entities.clear(); emit entitiesChanged(); }
 
     // t53：第 i 个实体是否已过「新生免拾取期」（spawn 后 kPickupDelayMs 内 false → pickupScan 跳过）。
     // 破块瞬间实体常落在玩家近旁（如脚下方块中心距玩家中心仅 ~1.4 格 < kPickupDist 1.5），若无免拾窗

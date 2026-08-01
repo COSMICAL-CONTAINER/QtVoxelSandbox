@@ -22,6 +22,45 @@ World::World(QObject *parent) : QObject(parent)
     generate(); // 默认参数生成（静默，不 emit）
 }
 
+// t176 存档加载入口：重置到目标 seed 的零填充分区网格（不走 generate —— 由 WorldStore 写 chunk blob
+//   覆盖）。recreate 把 25 chunk 全清零 + 全标脏（首帧重建）；buildPermutation 重建 Perlin 表使后续
+//   heightAt 等查询用新 seed（一致性，虽加载路径主要靠存档而非 worldgen）。仅 emit seedChanged（dims 不变）；
+//   **不** emit worldChanged（网格此时全空，finishLoad 写完 blob 后才统一触发重建，避免中间态重建浪费）。
+void World::beginLoad(int seed)
+{
+    m_seed = seed;
+    m_chunks.recreate(m_width, m_depth, m_height); // 零填充 + 全标脏（recreate 实现）
+    buildPermutation();                            // 新 seed 的 Perlin 置换表（heightAt 查询一致性）
+    emit seedChanged();
+}
+
+// t176 存档加载收尾：WorldStore 写完所有 chunk blob 后调。逐 chunk 重算 heightmap（存档只存体素/光场，
+//   heightmap 派生于体素）、标全脏（保 25 个 ChunkGeometry 都重建为加载地形）、emit worldChanged 触发
+//   重建。recreate 已标脏，此处 markDirty 为防御（万一某 chunk 被中途 clearDirty）。
+void World::finishLoad()
+{
+    for (int cz = 0; cz < m_chunks.chunksZ(); ++cz) {
+        for (int cx = 0; cx < m_chunks.chunksX(); ++cx) {
+            if (Chunk *c = m_chunks.chunk(cx, cz)) {
+                c->recomputeAllHeightmaps();
+                c->markDirty();
+            }
+        }
+    }
+    emit worldChanged(); // 触发 25 个 ChunkGeometry 重建（terrain+water 两段）
+    m_chunks.clearAllDirty();
+}
+
+// t176 新世界生成：按 seed 全量 worldgen + emit。generate() 内部 recreate 网格（清上一世界残留），
+//   故无需先 beginLoad。emit seedChanged（QML 绑定刷新）+ worldChanged（ChunkGeometry 重建）。
+void World::regenerate(int seed)
+{
+    m_seed = seed;
+    generate();
+    emit seedChanged();
+    emit worldChanged();
+}
+
 void World::setWidth(int w)  { if (w == m_width)  return; m_width = w;  generate(); emit widthChanged();  emit worldChanged(); }
 void World::setDepth(int d)  { if (d == m_depth)  return; m_depth = d;  generate(); emit depthChanged();  emit worldChanged(); }
 void World::setHeight(int h) { if (h == m_height) return; m_height = h; generate(); emit heightChanged(); emit worldChanged(); }

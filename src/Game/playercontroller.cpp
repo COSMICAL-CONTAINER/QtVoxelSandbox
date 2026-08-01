@@ -201,6 +201,28 @@ void PlayerController::respawn()
     emit positionChanged();   // 相机 / 第三人称模型跟随刷新
 }
 
+// t176 存档加载：恢复玩家位姿 + 模式。清物理瞬态（速度 / 挖掘 / 飞行 / 蹲疾跑）+ m_peakY 重置到存档 Y
+//   （防「存档点到首次重力 tick」误判落差摔伤）。mode 序数 → Mode；越界守 0（Spectator，无伤兜底）。
+void PlayerController::loadSavedState(float x, float y, float z, float yaw, float pitch, int mode)
+{
+    cancelMining();
+    m_leftDown = false;
+    m_dead = false;
+    m_pos = QVector3D(x, y, z);
+    m_vel = QVector3D(0, 0, 0);
+    m_yaw = yaw;
+    m_pitch = pitch;
+    m_peakY = y; // 重置掉落基准（存档点起算，不误判陈旧落差）
+    if (m_flying) { m_flying = false; emit flyingChanged(); }
+    if (m_moveState != Walk) setMoveState(Walk);
+    const Mode target = (mode == int(Survival)) ? Survival
+                       : (mode == int(Creative)) ? Creative : Spectator;
+    if (target != m_mode) { m_mode = target; emit modeChanged(); }
+    emit positionChanged();
+    emit yawChanged();
+    emit pitchChanged();
+}
+
 void PlayerController::release()
 {
     if (!m_captured) return;

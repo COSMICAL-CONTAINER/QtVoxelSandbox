@@ -58,6 +58,21 @@ public:
     void markDirty() { m_dirty = true; }
     void clearDirty() { m_dirty = false; }
 
+    // t176 存档（SQLite）原始字节访问：m_voxels / m_states / m_lightField 三块定长连续数组
+    //   （同尺寸同索引 lx + kSize*(lz + kSize*ly)，长 = voxelCount()）。WorldStore（同 World 层）
+    //   经这三组访问器把整 chunk 序列化为 BLOB（save）或从 BLOB memcpy 回填（load）——避免逐格
+    //   Q_INVOKABLE 调用开销（16384 格 × 3 数组）。const 版供序列化、非 const 版供回填。
+    size_t voxelCount() const { return m_voxels.size(); } // = kSize*kSize*height
+    const quint8 *voxelData() const { return m_voxels.data(); }
+    const quint8 *stateData() const { return m_states.data(); }
+    const quint8 *lightData() const { return m_lightField.data(); }
+    quint8 *voxelDataMut() { return m_voxels.data(); }
+    quint8 *stateDataMut() { return m_states.data(); }
+    quint8 *lightDataMut() { return m_lightField.data(); }
+    // t176 load 后整 chunk 重算 heightmap（存档只存体素 / 光场，heightmap 派生于体素，需重算以保
+    //   mesher 的 sunShadowAt 列投影正确 —— 同 recomputeColumnHeightmap 跳 Torch 的语义）。
+    void recomputeAllHeightmaps();
+
 private:
     void recomputeColumnHeightmap(int lx, int lz); // 单列自顶向下重扫（破坏顶块后回扫找新顶）
 

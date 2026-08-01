@@ -28,8 +28,9 @@ Window {
     //   showHitboxes 一旦开启，松开 F3 不影响（独立 bool，同 MC：关 F3 后碰撞箱仍显直到再 F3+B 关）。
     property bool showHitboxes: false
 
-    // app 状态机（t17）：menu（启动首显主菜单）↔ playing（显 View3D/HUD + grab 指针）。
-    // 初始 menu：启动不直接进游戏，先显主菜单（开始/退出）。准星/HUD 仅 playing 态显。
+    // app 状态机（t17 / t176）：menu（启动首显主菜单）→ worldlist（单人模式：世界列表 / 新建）→
+    //   playing（显 View3D/HUD + grab 指针）。playing 经 ESC「保存并退出」回 worldlist；worldlist「返回」回 menu。
+    //   准星/HUD 仅 playing 态显。初始 menu：启动不直接进游戏。
     property string appState: "menu"
 
     // 背包子态（t18）：仅 playing 态有意义。开 → 释放指针（光标可见，可点格子，类暂停）；
@@ -97,13 +98,112 @@ Window {
         player.grab()
         keyInput.forceActiveFocus()
     }
-    // 返回主菜单：先释放指针（恢复光标 + 清按住的按键），再切 menu 态。
+    // t176 进入指定世界（从世界列表点「进入 / 创建并进入」调）：打开存档 → 按是否有 chunk blob 分流
+    //   （有 → 加载存档地形；无 → 新世界 worldgen）→ 加载玩家态（无 → 默认出生）→ 清实体残留 → 进游戏。
+    //  机制等价 MC：选世界进游戏时若曾保存则恢复地形 + 玩家位姿，否则按 seed 新生。
+    function enterWorld(file, name) {
+        currentWorldFile = file
+        currentWorldName = name
+        if (!worldStore.openWorld(file)) {
+            console.warn("[t176] openWorld failed:", file)
+            return
+        }
+        const meta = worldStore.loadMeta()
+        let seed = parseInt(meta.seed, 10)
+        if (isNaN(seed)) seed = 42
+        if (worldStore.hasChunks()) {
+            // 已保存地形 → 加载存档（玩家编辑过的地形恢复，而非 worldgen 重生）
+            theWorld.beginLoad(seed)
+            worldStore.loadChunks()
+            theWorld.finishLoad()
+        } else {
+            // 新世界（仅 meta 无 chunk blob）→ 按 seed 全量 worldgen（recreate 网格 + 地形 + 光场）
+            theWorld.regenerate(seed)
+        }
+        applyPlayerState(worldStore.loadPlayerData())
+        // 清上一世界的掉落物 / mob 残留（实体非体素，不进存档，切世界必清）
+        itemEntities.clearAll()
+        entityManager.clearAll()
+        appState = "playing"
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
+    // t176 把存档玩家态（QVariantMap）应用到 player / playerState / hotbarVM。空 map（新世界）→ 默认出生态。
+    function applyPlayerState(data) {
+        if (!data || Object.keys(data).length === 0) {
+            // 新世界：出生点 + 满血满饥 + 默认模式（player 构造默认 Spectator）+ 背包清空（构造期已空）
+            player.respawn()
+            playerState.respawn()
+            return
+        }
+        // 显式 undefined 检查：JS 的 `||` 对 falsy 值（0/NaN）会误兜底 —— 存档里 px/pz=0（世界边沿）或
+        // pitch=0（水平视角）本是合法值，用 `||` 会被回退成默认值，破坏 round-trip 保真。`!== undefined ?`
+        // 把「字段缺省」与「字段值为 0」严格分开（gatherPlayerState 总写齐 6 字段，缺省仅旧存档场景）。
+        const DF = { px: 40, py: 44, pz: 40, yaw: 0, pitch: -42, mode: 0 }
+        player.loadSavedState(
+            data.px    !== undefined ? data.px    : DF.px,
+            data.py    !== undefined ? data.py    : DF.py,
+            data.pz    !== undefined ? data.pz    : DF.pz,
+            data.yaw   !== undefined ? data.yaw   : DF.yaw,
+            data.pitch !== undefined ? data.pitch : DF.pitch,
+            data.mode  !== undefined ? data.mode  : DF.mode)
+        playerState.setHealth(data.health !== undefined ? data.health : 20)
+        playerState.setHunger(data.hunger !== undefined ? data.hunger : 20)
+        // 背包：先清空再按存档写（防上一世界物品残留）
+        for (let i = 0; i < 9; ++i) hotbarVM.setStack(i, 0, 0)
+        for (let j = 0; j < 27; ++j) hotbarVM.mainSetStack(j, 0, 0)
+        hotbarVM.heldBlock = 0
+        if (data.hotbar) for (let i = 0; i < data.hotbar.length && i < 9; ++i)
+            hotbarVM.setStack(i, data.hotbar[i].id, data.hotbar[i].count)
+        if (data.main) for (let i = 0; i < data.main.length && i < 27; ++i)
+            hotbarVM.mainSetStack(i, data.main[i].id, data.main[i].count)
+        // 同上：`||` 对 0（第 0 槽）会误兜底，恰好 0==默认值巧合正确，但显式检查更稳健且与上面一致。
+        hotbarVM.selectedSlot = data.selectedSlot !== undefined ? data.selectedSlot : 0
+    }
+    // t176 收集当前玩家态为 QVariantMap（存档用）：位姿 / 模式 / 血饥 / hotbar 9 + main 27 背包 / 选中槽。
+    function gatherPlayerState() {
+        const hotbar = []
+        for (let i = 0; i < 9; ++i) hotbar.push({ id: hotbarVM.blockIdAt(i), count: hotbarVM.countAt(i) })
+        const main = []
+        for (let i = 0; i < 27; ++i) main.push({ id: hotbarVM.mainBlockIdAt(i), count: hotbarVM.mainCountAt(i) })
+        return {
+            version: 1,
+            px: player.feetPosition.x, py: player.feetPosition.y, pz: player.feetPosition.z,
+            yaw: player.yaw, pitch: player.pitch,
+            mode: player.mode,
+            health: playerState.health, hunger: playerState.hunger,
+            selectedSlot: hotbarVM.selectedSlot,
+            hotbar: hotbar, main: main
+        }
+    }
+    // t176 保存并退出到世界列表（ESC 暂停叠层「保存并退出」按钮）：归还手持物 → 存玩家态 + 存地形 →
+    //   关库 → 清实体 → 切 worldlist 态。spec「退出存」：每次退出都把当前进度落盘。
+    function saveAndExitToWorldList() {
+        returnHeldToHotbar()
+        if (worldStore.isOpen()) {
+            worldStore.savePlayerData(gatherPlayerState())
+            worldStore.saveAll(currentWorldName)
+            worldStore.closeWorld()
+        }
+        inventoryOpen = false
+        craftingTableOpen = false
+        furnaceOpen = false
+        settingsOpen = false
+        itemEntities.clearAll()
+        entityManager.clearAll()
+        player.release()
+        appState = "worldlist"
+    }
+    // 返回主菜单：先释放指针（恢复光标 + 清按住的按键），关存档连接 + 清实体，再切 menu 态。
     function returnToMenu() {
         inventoryOpen = false
         craftingTableOpen = false
         furnaceOpen = false
         settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
         returnHeldToHotbar()           // t56：返回菜单前归还光标手持栈（防遗留 heldBlock）
+        worldStore.closeWorld()        // t176：回主菜单关存档连接（防残留打开库）
+        itemEntities.clearAll()        // t176：清实体残留
+        entityManager.clearAll()
         player.release()
         appState = "menu"
     }
@@ -215,6 +315,15 @@ Window {
     // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
     // 与物理(PlayerController)共用同一份栅格。
     World { id: theWorld; width: 80; depth: 80; height: 64; seed: 1337 } // t162：3×3(48)→5×5(25 chunk, 80×80) 放大；高度 64 不变
+
+    // t176 存档系统（SQLite，PLAN §2-L）：世界列表 / 新建 / 删除 / 打开 / 保存 / 加载。绑定 theWorld
+    //   使 WorldStore 经 chunks() 序列化 chunk blob。玩家态（pos/血/背包/模式）以裸原语经 gather /
+    //   apply 函数在 QML 编排（WorldStore 不持 Game 层对象引用，保依赖只向下）。saves/ 目录由 WorldStore
+    //   解析（<exeDir>/../saves 开发期 / AppLocalDataLocation 部署期）。
+    WorldStore { id: worldStore; world: theWorld }
+    // t176 当前世界会话：进入世界时记 file/name，保存退出时 saveAll(name) / 显示用。
+    property string currentWorldFile: ""
+    property string currentWorldName: ""
 
     // 昼夜时钟（t09，PLAN §2-H）：~20 分钟周期的天光亮度乘子 lerp（**非**旋转方向光）。
     // dayPhase 0..1 循环（0=正午 / 0.5=子夜）；skyLight [0,1] 是纯函数派生的天光乘子，供下面
@@ -2278,19 +2387,20 @@ Window {
                             onClicked: window.settingsOpen = true
                         }
                     }
-                    // 返回主菜单（playing ↔ menu 双向切换，t17）：消费点击，不冒泡到背景 grab。
+                    // t176 保存并退出到世界列表（原「Main Menu」：退出即落盘 + 回世界列表，机制等价 MC「保存并退出」）。
+                    //   消费点击，不冒泡到背景 grab。
                     Rectangle {
-                        width: 150; height: 32; radius: 6
+                        width: 180; height: 32; radius: 6
                         color: backMenuArea.containsMouse ? "#2a3a2a" : "#1a2a1a"
                         border.color: "#3a6a3a"; border.width: 1
-                        Text { anchors.centerIn: parent; text: "Main Menu"
+                        Text { anchors.centerIn: parent; text: "保存并退出"
                                color: "#7fe57f"; font.pixelSize: 13 }
                         MouseArea {
                             id: backMenuArea
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: window.returnToMenu()
+                            onClicked: window.saveAndExitToWorldList()
                         }
                     }
                 }
@@ -2760,8 +2870,20 @@ Window {
         anchors.fill: parent
         visible: window.appState === "menu"
         z: 200
-        onStartRequested: window.startGame()
+        onStartRequested: window.appState = "worldlist" // t176：单人模式 → 世界列表（新建 / 选择存档）
         onQuitRequested: Qt.quit()
+    }
+
+    // t176 世界列表 / 新建世界（单人模式入口）：列出已有存档 + 新建（名字 + 种子默认 42）+ 进入 / 删除。
+    //   仅 worldlist 态显，z=200（与主菜单同级全屏覆盖）。playRequested → enterWorld；backRequested → 回主菜单。
+    WorldList {
+        id: worldListPanel
+        anchors.fill: parent
+        store: worldStore
+        visible: window.appState === "worldlist"
+        z: 200
+        onPlayRequested: function(file, name) { window.enterWorld(file, name) }
+        onBackRequested: window.appState = "menu"
     }
 
     // 创造背包 1.0（t23，t18 升级）：可滚动全方块调色板 + 底部 9 槽 hotbar 栏（同步游戏内）+ 销毁槽。

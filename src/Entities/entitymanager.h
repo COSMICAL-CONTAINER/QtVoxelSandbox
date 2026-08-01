@@ -68,6 +68,9 @@ public:
     // 放置 blockId 并移除自身。链式塌落由调用方先把沙格置 air（经 World::setBlock → blockBroken →
     // 呈现层 onBlockBroken 递归触发上方沙）实现。达 kCap → 跳过 + 告警（防溢出）。
     Q_INVOKABLE void spawnFallingBlock(int x, int y, int z, int blockId);
+    // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
+    //   emit entitiesChanged → count=0 → QML Repeater 清空 delegate。
+    Q_INVOKABLE void clearAll() { m_entities.clear(); emit entitiesChanged(); }
 
     // 第 i 个实体的渲染数据（呈现层 Repeater delegate 绑它摆位 + 配色）。越界返回安全默认。
     Q_INVOKABLE QVector3D posAt(int i) const;

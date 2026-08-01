@@ -55,6 +55,10 @@ public:
     Q_INVOKABLE void heal(int amount);
     // 设饥饿值（进食消耗属 Phase 1.1；留接口）：clamp 到 [0, maxHunger]。无变化不发信号。
     Q_INVOKABLE void setHunger(int value);
+    // t176 存档加载：直接设 health（不走 takeDamage 的死亡判定路径）。clamp 到 [0, maxHealth]；同时按
+    //   结果同步 dead 态（health>0 → false）—— 存档玩家不可能是死亡态，但防御性置位 + emit deadChanged
+    //   以免陈旧 dead=true 残留显死亡界面。无变化（值 == 当前）不发信号。
+    Q_INVOKABLE void setHealth(int value);
     // t78 重生：清 dead 态（emit deadChanged）+ 恢复满血满饥。仅复位 PlayerState 数值；
     //   玩家定位（传回出生点）由 PlayerController::respawn() 负责（分层：状态属 Game 层，定位属 Physics 层）。
     //   呈现层「立即重生」按钮同时调本方法 + PlayerController.respawn()。

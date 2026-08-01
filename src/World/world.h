@@ -128,6 +128,20 @@ public:
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 
+    // t176 存档加载（PLAN §2-L SQLite WorldStore；World 层）：beginLoad 把世界重置为目标 seed 的
+    //   零填充分区网格（**不**走 generate —— 加载用 DB 里的 chunk blob 覆盖，玩家编辑过的地形从存档
+    //   恢复，而非 worldgen 重生），finishLoad 在 WorldStore 写完所有 chunk blob 后调（重算 heightmap +
+    //   标全脏 + emit worldChanged → 25 个 ChunkGeometry 重建为加载地形）。二者配套：beginLoad 不 emit
+    //   worldChanged（此时网格为零填充，重建无意义），finishLoad 才一次性触发重建。
+    //   尺寸固定（80×80×64，QML 构造期定稿），仅 seed 随存档变 → recreate 用现有 m_width/depth/height。
+    Q_INVOKABLE void beginLoad(int seed);
+    Q_INVOKABLE void finishLoad();
+    // t176 新世界生成入口（与 beginLoad 互补）：按 seed 全量 worldgen（recreate 网格 + 地形 / 树 / 矿 / 水 /
+    //   基岩 / 光场）+ emit seedChanged/worldChanged。与 setSeed 的差异：setSeed 在新 seed == 旧 seed 时
+    //   no-op（不重生），而本方法无条件重生（切到同 seed 的不同存档时仍要重建网格 —— 否则上一世界的编辑
+    //   残留）。供 WorldStore「无存档地形 → 新世界」路径调。
+    Q_INVOKABLE void regenerate(int seed);
+
 signals:
     void widthChanged();
     void depthChanged();

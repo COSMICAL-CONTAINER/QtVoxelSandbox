@@ -1,6 +1,7 @@
 import QtQuick
 
-// 主菜单（t17）：启动时全屏首显（Main.qml 初始 appState="menu"）。提供「开始游戏 / 退出」入口。
+// 主菜单（t17 / t176）：启动时全屏首显（Main.qml 初始 appState="menu"）。提供「单人模式 / 退出」入口。
+// t176：「开始游戏」改为「单人模式」→ 进入世界列表（新建 / 选择存档）；「退出」不变。
 //
 // 区隔要求（PLAN §9）：不照搬 MC 主菜单的平移背景图 + 居中窄灰按钮列 + logo 美术；
 // 采用纵向深色渐变背景 + 大字距标题 + 圆角大按钮（主操作绿色强调），整体冷调氛围。
@@ -60,7 +61,7 @@ Item {
             spacing: 16
             anchors.horizontalCenter: parent.horizontalCenter
 
-            // 开始游戏
+            // 单人模式（t176：原 Start Game → 进入世界列表）
             Rectangle {
                 width: 240; height: 52; radius: 10
                 color: startArea.containsPress ? "#335c33"
@@ -70,7 +71,7 @@ Item {
                 Behavior on border.width { NumberAnimation { duration: 80 } }
                 Text {
                     anchors.centerIn: parent
-                    text: "Start Game"
+                    text: "单人模式"
                     color: "#eaf6ea"; font.pixelSize: 18; font.bold: true
                 }
                 MouseArea {

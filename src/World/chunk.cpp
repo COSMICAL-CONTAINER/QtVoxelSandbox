@@ -98,6 +98,16 @@ void Chunk::clearLight()
     std::fill(m_lightField.begin(), m_lightField.end(), quint8(0));
 }
 
+// t176：整 chunk（16×16 列）自顶向下重扫 heightmap。存档加载回填 voxel 后调（heightmap 派生于
+//   体素，存档只存原始数组故需重算）。逐列复用 recomputeColumnHeightmap 的「跳 Torch、列全空→-1」语义，
+//   与增量维护一致 → 加载后的 heightmap 与 worldgen / 编辑增量维护结果一致。仅 WorldStore load 路径调。
+void Chunk::recomputeAllHeightmaps()
+{
+    for (int lz = 0; lz < kSize; ++lz)
+        for (int lx = 0; lx < kSize; ++lx)
+            recomputeColumnHeightmap(lx, lz);
+}
+
 // 单列自顶向下重扫：找首个非空气作新顶（破顶块用），列全空 → -1。仅 setBlock 破顶块时调用。
 //   t150b：跳过 Torch —— Torch 不计入 heightmap（见 setBlock 注释），重扫时亦跳过，使火把不再被
 //   当作列顶（否则火把上方地块 / 邻列阴影会受其影响）。

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick Qml Quick3D)
+find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick Qml Quick3D Sql)
 
 qt_standard_project_setup()
 
@@ -30,6 +30,11 @@ qt_add_executable(voxelsandbox
     src/World/world.h
     src/World/worldclock.cpp
     src/World/worldclock.h
+    # t176 存档系统（SQLite，PLAN §2-L）：自描述 chunk blob（voxels+state+light）+ 玩家态 JSON +
+    #   迁移注册表（PRAGMA user_version）。World 层（依赖只向下：Qt Sql + Chunk/ChunkManager/World），
+    #   玩家态经裸 QVariantMap 边界传入（不 include Game 层 playercontroller/hotbar，保依赖只向下）。
+    src/World/worldstore.cpp
+    src/World/worldstore.h
     src/Renderer/wiresquare.cpp
     src/Renderer/wiresquare.h
     src/Renderer/wirecube.cpp
@@ -103,6 +108,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/BlockParticles.qml
         src/ui/TorchSmoke.qml
         src/ui/MainMenu.qml
+        src/ui/WorldList.qml
         src/ui/Inventory.qml
         src/ui/InvSlot.qml
         src/ui/SurvivalInventory.qml
@@ -218,6 +224,7 @@ target_link_libraries(voxelsandbox PRIVATE
     Qt6::Quick
     Qt6::Qml
     Qt6::Quick3D
+    Qt6::Sql
 )
 
 # 运行期部署（Windows）：windeployqt 把 Qt 运行时 + QML 模块插件拷进 exe 同级目录。

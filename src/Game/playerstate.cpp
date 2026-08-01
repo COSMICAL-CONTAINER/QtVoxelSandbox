@@ -43,6 +43,14 @@ void PlayerState::setHunger(int value)
     emit hungerChanged();
 }
 
+// t176 存档加载：直接设 health（不走 takeDamage 死亡判定）。clamp + 同步 dead 态（存档玩家非死亡 → 置 false）。
+void PlayerState::setHealth(int value)
+{
+    const int nv = std::clamp(value, 0, kMaxHealth);
+    if (nv != m_health) { m_health = nv; emit healthChanged(); }
+    if (nv > 0 && m_dead) { m_dead = false; emit deadChanged(); } // 防陈旧死亡态残留显死亡界面
+}
+
 // t78 重生：清 dead 态 + 恢复满血满饥（无变化静默；dead 翻回 false 必发 deadChanged → 死亡界面隐）。
 //   仅复位本类数值；玩家传回出生点由 PlayerController::respawn() 负责（分层：状态 vs 定位）。
 void PlayerState::respawn()
