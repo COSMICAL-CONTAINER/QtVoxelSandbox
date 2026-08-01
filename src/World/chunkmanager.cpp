@@ -38,6 +38,16 @@ Chunk *ChunkManager::chunkAtWorld(int x, int z) const
     return chunk(x / kSize, z / kSize);
 }
 
+// t155g：清所有 chunk 的 dirty 标记（World::setBlock 在 emit worldChanged 后调）。
+//   旧版 buildMesh 末尾 clearDirty 由「先处理的 segment」抢先清掉共享 chunk 脏标记 →
+//   后处理的 segment（terrain/water 二者之一）见 dirty=false 跳过重建 → 那段 mesh 陈旧到下个 sun-step。
+//   改：buildMesh 不再清脏，统一由 World 在两段都重建完（emit worldChanged 同步返回后）清。
+void ChunkManager::clearAllDirty()
+{
+    for (auto &c : m_chunks)
+        if (c) c->clearDirty();
+}
+
 quint8 ChunkManager::blockAt(int x, int y, int z) const
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)

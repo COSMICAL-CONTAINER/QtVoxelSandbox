@@ -365,8 +365,7 @@ Item {
         acceptedButtons: Qt.RightButton
         gesturePolicy: TapHandler.WithinBounds
         onPressedChanged: {
-            if (pressed) root.beginRightDrag()
-            else root.endRightDrag()
+            // t166d：停用（改 per-slot 右键 → resolveRightClick，不依赖 hover/hoveredKey）。
         }
     }
 
@@ -478,6 +477,19 @@ Item {
                                     //   组无操作；普通左键走 resolveClick）。
                                     if (window.shiftHeld) { root.slotShiftLeft("craft", index); return }
                                     const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
+                                    if (!r) return
+                                    root.craftSlots[index] = r.slotId
+                                    root.craftCounts[index] = r.slotCount
+                                    root.craftRev++
+                                    root.hotbar.heldBlock = r.heldId
+                                    root.hotbar.heldCount = r.heldCount
+                                }
+                            }
+                            // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey。
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
                                     if (!r) return
                                     root.craftSlots[index] = r.slotId
                                     root.craftCounts[index] = r.slotCount
@@ -699,11 +711,22 @@ Item {
                                 // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId（拾起 + 合并）。
                                 const key = root.slotKey("main", index)
                                 const now = Date.now()
-                                const isDouble = (now - root.lastTapMs < 400) && (root.lastTapKey === key)
+                                const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
                                 root.lastTapMs = now
                                 root.lastTapKey = key
                                 if (isDouble) { root.doMergeSameId("main", index); return }
                                 const r = root.resolveClick(mainId, mainCount)
+                                if (!r) return
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount)
+                                root.hotbar.heldBlock = r.heldId
+                                root.hotbar.heldCount = r.heldCount
+                            }
+                        }
+                        // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey。
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: {
+                                const r = root.resolveRightClick(mainId, mainCount)
                                 if (!r) return
                                 root.hotbar.mainSetStack(index, r.slotId, r.slotCount)
                                 root.hotbar.heldBlock = r.heldId
@@ -810,7 +833,7 @@ Item {
                                     // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId。
                                     const key = root.slotKey("hotbar", index)
                                     const now = Date.now()
-                                    const isDouble = (now - root.lastTapMs < 400) && (root.lastTapKey === key)
+                                    const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
                                     root.lastTapMs = now
                                     root.lastTapKey = key
                                     if (isDouble) { root.doMergeSameId("hotbar", index); return }
@@ -822,7 +845,18 @@ Item {
                                     }
                                 }
                             }
-                            // 右键改由 root TapHandler 统一处理（t49 单格 + t79 均分）；此槽仅留 HoverHandler。
+                            // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey。
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                    if (r) {
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                        root.hotbar.heldBlock = r.heldId
+                                        root.hotbar.heldCount = r.heldCount
+                                    }
+                                }
+                            }
                             HoverHandler {
                                 // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
                                 // 不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。

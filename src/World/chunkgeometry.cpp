@@ -5,6 +5,7 @@
 #include "world.h"
 
 #include <QByteArray>
+#include <QElapsedTimer> // t155f：buildMesh 计时（诊断编辑卡顿）
 #include <QVector3D>
 
 #include <algorithm> // std::clamp / std::max（t151 真光场顶点色钳制）
@@ -93,6 +94,15 @@ void ChunkGeometry::setWaterOnly(bool on)
     buildMesh(RebuildReason::Water);
 }
 
+// t166b 阴影开关变 → 重网格化（顶点光 PCF 软影随开关重算；语义同光照变 → 用 Sun reason）。值未变早退。
+void ChunkGeometry::setShadowsEnabled(bool on)
+{
+    if (m_shadowsEnabled == on) return;
+    m_shadowsEnabled = on;
+    emit shadowsEnabledChanged();
+    buildMesh(RebuildReason::Sun);
+}
+
 // 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
 // 故 world 重建（recreate 销毁旧 chunk）后不会悬空：拿到的是新 chunk。
 Chunk *ChunkGeometry::myChunk() const
@@ -139,6 +149,7 @@ int ChunkGeometry::tileFor(quint8 block, int face) const
 float ChunkGeometry::sunShadowAt(float wx, float wy, float wz) const
 {
     if (!m_world) return 0.0f;
+    if (!m_shadowsEnabled) return 0.0f; // t166b：阴影开关关 → 跳过 PCF（提速 meshing / 诊断卡顿）
     const QVector3D s = m_sunDir;
     if (s.y() <= kSunMin) return 0.0f;                       // 太阳低于门 → 不投影（黎明/黄昏/夜间）
     const float sh = std::sqrt(s.x() * s.x() + s.z() * s.z());
@@ -174,6 +185,7 @@ float ChunkGeometry::sunShadowAt(float wx, float wy, float wz) const
 
 void ChunkGeometry::buildMesh(RebuildReason reason)
 {
+    QElapsedTimer bt; bt.start(); // t155f：诊断编辑卡顿（每 chunk 重建耗时）
     Chunk *c = myChunk();
     const int H = m_world ? m_world->height() : 0;
     constexpr int S = Chunk::kSize; // 16（X、Z chunk 边长）
@@ -358,18 +370,17 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
 
     update(); // 通知后端重新上传到 GPU
 
-    // t155 清脏语义解耦：仅当本次重建响应了待清的编辑脏（c->dirty()==true）时才清。编辑路径
-    //   （onWorldChanged，dirty-gated）恒命中 → 清除；太阳刷新（setSunDir→buildMesh(Sun)）见到的 chunk
-    //   永远非脏（编辑的 onWorldChanged 已在 setBlock 栈内同步清过）→ 不命中 → 不清。这让「编辑脏标记
-    //   只被真正响应编辑的重建清除」，immediate rebuild 对任何太阳时序稳健（破 / 放后不依赖下个太阳步进）。
-    if (c && c->dirty()) c->clearDirty();
+    // t155g：不再在此清 dirty。旧版在此 clearDirty → 同 chunk 的 terrain/water 两段共享脏标记，
+    //   先处理的段清掉后，后处理的段 onWorldChanged 见 dirty=false 跳过 → 那段 mesh 陈旧到下个 sun-step
+    //   （= 用户「挖/放后贴图 2s 才刷新」根因）。现 dirty 由 World 在 emit worldChanged（两段都重建完）后
+    //   经 ChunkManager::clearAllDirty() 统一清。buildMesh 只管重建，不清脏。
 
     // 可观测性（dev-spec t03 / t155 验收）：dirty = 编辑 / 初次加载即时重建（同步于 setBlock，破/放后当帧）；
     //   sun = 太阳跨步全量重建（绕 dirty，t155 编辑活跃期被 WorldClock 节流跳过）；water = 水段切换。
     //   读此日志可核对：破/放后立刻见 dirty 重建（无 3-4s 残留），编辑密集段无 sun 重建抢帧。
     static const char *const kReasonName[] = {"dirty", "sun", "water"};
-    qInfo("vo.render: chunk(%d,%d) rebuilt [%s] - %lld verts / %lld idx",
-          m_cx, m_cz, kReasonName[int(reason)], qint64(verts.size()), qint64(idx.size()));
+    qInfo("vo.render: chunk(%d,%d) rebuilt [%s] - %lld verts / %lld idx (%lldus)",
+          m_cx, m_cz, kReasonName[int(reason)], qint64(verts.size()), qint64(idx.size()), qint64(bt.nsecsElapsed() / 1000));
 
     // 通知 F3 叠层刷新（顶点 / 三角面数已更新；t10）。
     emit meshRebuilt();

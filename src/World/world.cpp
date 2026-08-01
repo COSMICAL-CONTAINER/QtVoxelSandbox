@@ -3,6 +3,7 @@
 #include "blockregistry.h"
 
 #include <QDebug>
+#include <QElapsedTimer> // t155c：recomputeLightAround 计时（测每帧编辑光照开销）
 #include <algorithm>
 #include <cmath>
 #include <queue>   // t151：recomputeLightField 的 BFS flood-fill 队列
@@ -42,12 +43,14 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     const quint8 oldId = m_chunks.blockAt(x, y, z);
     if (oldId == id) return false; // 无变化
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏（→5 参数 id,0 重置 state）
+    qInfo("vo.edit: setBlock %d,%d,%d  %d->%d", x, y, z, int(oldId), int(id)); // t155f 诊断：编辑时序
     if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
         emit blockBroken(x, y, z, int(oldId)); // 破：带原方块 id（粒子/音效按它取色/取声）
     else if (id != BlockRegistry::Air)
         emit blockPlaced(x, y, z, int(id));    // 放：带新方块 id
     recomputeLightAround(x, y, z, oldId, id); // t154：增量重 flood 编辑格周围有界盒（替代全量 recomputeLightField）
-    emit worldChanged(); // 触发 ChunkGeometry 重建（本回合整个单 mesh；mesher 拆分归 t03）
+    emit worldChanged(); // 触发 ChunkGeometry 重建（terrain+water 两段 dirty chunk 同步重建）
+    m_chunks.clearAllDirty(); // t155g：两段都重建完，统一清脏（防一段 clearDirty 抢清致另一段跳过 = 2s 卡顿根因）
     return true;
 }
 
@@ -108,6 +111,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     }
     recomputeLightAround(x, y, z, oldId, id); // t154：增量重 flood（id 不变只 state 变 → 内部早退，光照无变化）
     emit worldChanged(); // 异形方块 state 变（开合 / 朝向）需 mesh 重建
+    m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     return true;
 }
 
@@ -121,6 +125,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
     recomputeLightAround(x, y, z, BlockRegistry::Air, id); // t154：增量重 flood（着地：oldId=Air → newId=id）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
+    m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     return true;
 }
 
@@ -594,13 +599,15 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ne
     const bool torchChanged = (oldId == BlockRegistry::Torch || newId == BlockRegistry::Torch);
     if (!opacityChanged && !torchChanged) return; // 光照无变化（如门开合：id 不变 → isSolid 不变、非火把）
 
+    QElapsedTimer t; t.start(); // t155c：测编辑光照开销（找卡顿根因）
     constexpr int R = 15; // = 最大光值：编辑对盒外格（曼哈顿 ≥16）无影响 → 边界种子法成立（见上注释）
     const int x0 = std::max(0, ex - R), x1 = std::min(W - 1, ex + R);
     const int z0 = std::max(0, ez - R), z1 = std::min(D - 1, ez + R);
     int y0, y1;
     if (opacityChanged) {
-        // 整列高（圆柱盒）：天光列 first-opaque 翻转时编辑格下方所有原见天格可能翻暗，须全列重 seed。
-        y0 = 0;
+        // t155c：y0 由 0 改 ey-R（编辑下方光照变化衰减 ≤R，更深处已暗不变 → 不必清/重 seed 全列到底）。
+        //   y1 仍 H-1（天光列 first-opaque 须扫到顶重 seed，保正确）。盒缩小 → 清/重 seed 量 ↓，编辑更快。
+        y0 = std::max(0, ey - R);
         y1 = H - 1;
     } else {
         // 火把半径球盒：遮光不变 → 天光不翻，只需火把半径内重 flood 方块光。
@@ -608,6 +615,16 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ne
         y1 = std::min(H - 1, ey + R);
     }
     refloodBox(x0, y0, z0, x1, y1, z1, /*doSky=*/opacityChanged);
+    // t155d：标记光盒覆盖的所有 chunk 脏 → setBlock 末 emit worldChanged 后这些 chunk **立即**重建
+    //   （读新光场写顶点色），消除「编辑后邻 chunk 光照 / 火把光要等 2-3s 下个 sun-step 才刷新」。
+    //   旧版只编辑 chunk 标脏（+ 边界邻接，为面剔除），光场虽即时更新（~1μs）但邻 chunk mesh 未重建 →
+    //   陈旧到 sun-step。盒 31×31 横跨约 3~4 chunk → 9~16 chunk 重建（数 ms，单帧内可接受，远好于 2-3s）。
+    constexpr int cs = 16; // Chunk::kSize
+    for (int ccx = x0 / cs; ccx <= x1 / cs; ++ccx)
+        for (int ccz = z0 / cs; ccz <= z1 / cs; ++ccz)
+            if (Chunk *ch = m_chunks.chunk(ccx, ccz)) ch->markDirty();
+    qInfo("vo.light: recomputeLightAround %lldus box=%dx%dx%d", t.elapsed(),
+          x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1); // t155c：实测（找卡顿根因）
 }
 
 // t154 有界盒清场 + 重 seed + 重 flood（recomputeLightAround 的实现核心）。盒外格作固定边界种子（衰减 1 流入），

@@ -49,6 +49,9 @@ public:
     Chunk *chunk(int cx, int cz) const;
     // 世界坐标 (x,z) 所在 chunk（越界 nullptr）。
     Chunk *chunkAtWorld(int x, int z) const;
+    // t155g：清所有 chunk 的 dirty（World 在 emit worldChanged 后调 —— 此时所有 dirty chunk 的
+    //   terrain+water 两段 ChunkGeometry 都已在槽里重建完毕，统一清脏避免「一段 clearDirty 抢清致另一段跳过」）。
+    void clearAllDirty();
 
     // 尺寸变化时重建网格（清空旧 chunk，新建零填充 chunk，全部脏）。
     void recreate(int width, int depth, int height);

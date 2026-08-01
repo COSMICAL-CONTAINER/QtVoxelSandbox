@@ -346,14 +346,15 @@ Item {
         }
     }
 
-    // t79 右键拖拽均分总控（WithinBounds 让 pressed 跨格保持 true；右键单格 / 多格均由此驱动）。
-    // 调色板左键拾取不受影响；遮罩 MouseArea 仅接 LeftButton，右键透传到本 TapHandler。
+    // t79 右键拖拽均分总控（原 WithinBounds + hoveredKey 机制）。t166d：hoveredKey 依赖 slot HoverHandler，
+    //   若 hover 未更新 hoveredKey（疑似用户「右键全失效」根因），root 总控 no-op。改 per-slot TapHandler
+    //   (RightButton)→resolveRightClick（同左键 per-slot 模式，不依赖 hover）。本 root handler 保留但 onPressedChanged
+    //   置空（停用 drag-均分，免与 per-slot 双触发）。drag-均分（多格）暂停；单格右键（拿半/放一）由各槽自处理。
     TapHandler {
         acceptedButtons: Qt.RightButton
         gesturePolicy: TapHandler.WithinBounds
         onPressedChanged: {
-            if (pressed) root.beginRightDrag()
-            else root.endRightDrag()
+            // t166d：停用（改 per-slot 右键）。
         }
     }
 
@@ -640,6 +641,7 @@ Item {
                                             root.hoveredItemId = 0
                                     }
                                     onHoveredChanged: {
+                                        console.log("[hovDBG] hotbar:" + index + " hovered=" + hovered) // t166e 诊断：hover 是否到槽
                                         // t94 tooltip（仅非空槽显名；空槽不动 hoveredItemId，免覆盖邻槽态）。
                                         if (hovered) {
                                             root.hoveredName = root.hotbar.nameForBlock(slotId)
@@ -673,7 +675,7 @@ Item {
                                         // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId。
                                         const key = root.slotKey("hotbar", index)
                                         const now = Date.now()
-                                        const isDouble = (now - root.lastTapMs < 400) && (root.lastTapKey === key)
+                                        const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
                                         root.lastTapMs = now
                                         root.lastTapKey = key
                                         if (isDouble) { root.doMergeSameId("hotbar", index); return }
@@ -685,7 +687,19 @@ Item {
                                         }
                                     }
                                 }
-                                // t79：右键改由 root TapHandler 统一处理（单格右键 + 拖拽均分）；此处不再有右键 TapHandler。
+                                // t166d：per-slot 右键（拿半/放一），不依赖 hover/hoveredKey（同左键 per-slot 模式，可靠）。
+                                TapHandler {
+                                    acceptedButtons: Qt.RightButton
+                                    onTapped: {
+                                        const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                        if (r) {
+                                            root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                            root.hotbar.heldBlock = r.heldId
+                                            root.hotbar.heldCount = r.heldCount
+                                        }
+                                    }
+                                }
+                                // t79 旧：右键曾由 root TapHandler 统一处理；t166d 改 per-slot（hover 失效兜底）。
                                 // 均分拖拽高亮（扫过且待分发的合格格绿框；rightDragActive 期间才显）。
                                 // t108：绿框加 (槽空||槽==heldId) 条件——异物槽纵使被扫过也不亮（addDragSlot 已过滤
                                 // 入 dragSlots，此处显式条件双重保险：heldId/槽态在 drag 途中变化时仍准确）。

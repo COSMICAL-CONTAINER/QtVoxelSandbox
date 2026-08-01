@@ -51,6 +51,10 @@ public:
     //   (a) 选块（水 vs 非水）；(b) 邻居面剔除规则不同（水段额外剔 nb==Water，水-水面互剔；见 .cpp）。
     //   一个 chunk 由两个 ChunkGeometry 实例渲染（地形段 + 水段），各自绑 QML Model + 材质。
     Q_PROPERTY(bool waterOnly READ waterOnly WRITE setWaterOnly NOTIFY waterOnlyChanged)
+    // t166b 阴影开关（用户「卡顿疑似阴影所致，加开关测」）：false → sunShadowAt 直接返 0（跳过 PCF per-vertex
+    //   heightmap 采样 → meshing 大幅省时，sun-step 50 chunk 重建更快）+ 顶点光基底只剩 flood-fill 光场（无软影）。
+    //   ESC 设置面板开关绑 window.shadowsEnabled → 全 chunk 实例。默认 true（保留软影）；关掉即诊断 / 提速。
+    Q_PROPERTY(bool shadowsEnabled READ shadowsEnabled WRITE setShadowsEnabled NOTIFY shadowsEnabledChanged)
     // 网格统计（t10 F3 调试叠层，PLAN §2-F）：buildMesh 完成后暴露本 chunk 的顶点 / 三角面数，
     // 供 F3 叠层汇总诊断 meshing 吞吐与帧抖根因（§2-F 明言「没有 F3 叠层，帧率验收无法诊断帧抖」）。
     // 仅在 buildMesh 末尾经 meshRebuilt 通知；呈现层只读、不反向写。三角面 = idx/3（实际索引计数
@@ -76,6 +80,9 @@ public:
     // t148 水渲染分流（见 Q_PROPERTY 注释）：true=只网格化 Water 段。
     bool waterOnly() const { return m_waterOnly; }
     void setWaterOnly(bool on);
+    // t166b 阴影开关（false → sunShadowAt 返 0，关 PCF 软影，meshing 提速）。
+    bool shadowsEnabled() const { return m_shadowsEnabled; }
+    void setShadowsEnabled(bool on);
 
     // 网格统计（t10 F3 叠层）：上次 buildMesh 产出的顶点 / 三角面数。
     int vertexCount() const { return m_vertexCount; }
@@ -87,6 +94,7 @@ signals:
     void czChanged();
     void sunInputChanged(); // t123：sunDir 变（太阳量化跨步）；驱动呈现层 / 未来光场刷新
     void waterOnlyChanged(); // t148：水段开关变（QML 改 waterOnly → 重建，水段 / 地形段重网格化）
+    void shadowsEnabledChanged(); // t166b：阴影开关变（→ buildMesh 重算顶点光 PCF）
     // buildMesh 完成（顶点 / 三角面数已更新；t10 F3 叠层据此刷新汇总）。
     void meshRebuilt();
 
@@ -115,6 +123,7 @@ private:
     int m_cz = -1;
     QVector3D m_sunDir{0.f, 1.f, 0.f}; // t123 太阳方向（单位向量；默认天顶正午，QML 绑 WorldClock.sunDir）
     bool m_waterOnly = false; // t148：true=只网格化 Water 段（透明水）；false=只网格化非水地形段
+    bool m_shadowsEnabled = true; // t166b：PCF 软影开关（false → sunShadowAt 返 0，跳过 per-vertex 采样）
     int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
     int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）
 };
