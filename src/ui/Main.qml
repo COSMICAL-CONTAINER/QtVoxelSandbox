@@ -1697,87 +1697,131 @@ Window {
                 console.info("[t88] torchHost UP parent=" + torchHost.parent + " (须为 3D Node 非 null)")
             }
 
-            Repeater {
-                model: torchPositions
-                delegate: Node {
-                    id: torchGlow
-                    // 火把格底面中心（cell [x,x+1]×[y,y+1]×[z,z+1] 的底面中心）；子 Model 在此局部坐标内摆位。
-                    position: Qt.vector3d(model.x + 0.5, model.y, model.z + 0.5)
+            // t170 火把 delegate 实例表：key="x,y,z" → delegate Node（Component.createObject 创建）。
+            //   根因：QML Repeater 无法可靠销毁**被 reparent 的 3D delegate** —— QQuickRepeater 的 delegate
+            //   跟踪表是 QQuickItem* 类型，3D delegate（QQuick3DNode）不进表；且 onCompleted 的
+            //   `parent = torchHost` reparent 把 QObject 所有权转给 torchHost。结果：无论 model 是 ListModel
+            //   还是 int-count，count 减小时 Repeater 都找不到 delegate 来销毁 → onDestruction 永不触发 →
+            //   挖掉火把后木柄 + 火焰 Model 永久残留（t131 removeTorchAt 逻辑正确但 Repeater 不销毁 delegate
+            //   = 治标失效，用户实测「挖掉火把贴图不清除」）。修法：放弃 Repeater，改 Component.createObject
+            //   显式创建 + .destroy() 显式销毁（QML 动态对象标准生命周期：createObject 对象由本表 JS 引用
+            //   持有、destroy 可靠回收，无 Repeater 中间层）。数据源仍是 torchPositions ListModel（供
+            //   TorchSmoke Repeater + findTorchPrefOrient 选中框读取），本表仅管「木柄+火焰」视觉 delegate 的
+            //   生死，与 torchPositions 经同一组信号（blockBroken/torchPlaced/worldChanged）同步增删。
+            property var torchObjs: ({})
 
-                    // t114 朝向态：up=垂直插地；px/nx/pz/nz=横插 ±X/±Z 向（贴对应墙、柄伸向 cell 中央）。
-                    //   t125：定向权威改为「玩家点击面」（prefOrient，由 placeBlock 经 torchPlaced 传入的命中面
-                    //   外法线推导），recomputeOrient 优先采用之；旧固定优先级（下>-X>+X>-Z>+Z）仅作退化兜底。
-                    property string orient: "up"
-
-                    // t126 朝向逻辑抽出为顶层 computeTorchOrient（与选中框共用同一份判定，确保两者
-                    //   orient 永远一致 → 选中框贴合火把实际形状）。语义不变（t125）：优先 prefOrient
-                    //   （玩家点击面）、其支撑邻居仍实体即采用；否则按下 / 4 侧顺序首个实体邻居兜底；
-                    //   全无实体则保留玩家意图方向（无 pop-off 机制，宁可按原朝向画也不突兀翻转）。
-                    function recomputeOrient() {
-                        torchGlow.orient = computeTorchOrient(model.x, model.y, model.z, model.prefOrient || "up")
+            // 新增火把视觉 delegate（去重：同坐标已存在则跳过）。prefOrient 来自玩家点击面定向。
+            function addTorchVis(x, y, z, prefOrient) {
+                const key = x + "," + y + "," + z
+                if (torchObjs[key]) return
+                torchObjs[key] = torchDelegate.createObject(torchHost,
+                    {cellX: x, cellY: y, cellZ: z, cellPref: prefOrient || "up"})
+            }
+            // 移除火把视觉 delegate（.destroy() 可靠回收 Node + 子 Model + 动画）。
+            function removeTorchVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                const o = torchObjs[key]
+                if (o) { o.destroy(); delete torchObjs[key] }
+            }
+            // 兜底清孤儿（worldgen 重生 / setBlockFromEntity 等系统改写栅格不经 blockBroken）：扫表删
+            //   blockAt != Torch(13) 的条目，保证视觉 delegate 与栅格真值一致（机制同 torchPositions 的
+            //   onWorldChanged 兜底，二者并行各管各的容器）。
+            function cleanupVis() {
+                for (const key in torchObjs) {
+                    const p = key.split(",")
+                    if (theWorld.blockAt(parseInt(p[0]), parseInt(p[1]), parseInt(p[2])) !== 13) {
+                        torchObjs[key].destroy(); delete torchObjs[key]
                     }
+                }
+            }
+        }
 
-                    // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
-                    // onCompleted 显式 reparent 进 torchHost + 首次算朝向（同 itemHost delegate 模式）。
-                    Component.onCompleted: {
-                        if (parent === null) parent = torchHost
-                        torchGlow.recomputeOrient()
+        // t170 火把视觉 delegate 模板（木柄 + 火焰）：经 torchHost.addTorchVis 用 Component.createObject
+        //   实例化（initial props 注入 cellX/Y/Z/cellPref）、removeTorchVis/cleanupVis 用 .destroy() 回收。
+        //   内容与原 Repeater delegate 完全一致（t114 异形木柄+火焰 / t125 朝向 / t150e/f 位姿 / t157 焰心），
+        //   仅承载方式从 Repeater 换成手动 createObject（修 Repeater 不销毁 3D delegate 的根因）。
+        Component {
+            id: torchDelegate
+            Node {
+                id: torchGlow
+                // cell 坐标 + 定向：由 createObject initial properties 注入（非 Repeater model 角色）。
+                property int cellX: 0
+                property int cellY: 0
+                property int cellZ: 0
+                property string cellPref: "up"
+                // 火把格底面中心（cell [x,x+1]×[y,y+1]×[z,z+1] 的底面中心）；子 Model 在此局部坐标内摆位。
+                position: Qt.vector3d(cellX + 0.5, cellY, cellZ + 0.5)
+
+                // t114 朝向态：up=垂直插地；px/nx/pz/nz=横插 ±X/±Z 向（贴对应墙、柄伸向 cell 中央）。
+                //   t125：定向权威改为「玩家点击面」（prefOrient，由 placeBlock 经 torchPlaced 传入的命中面
+                //   外法线推导），recomputeOrient 优先采用之；旧固定优先级（下>-X>+X>-Z>+Z）仅作退化兜底。
+                property string orient: "up"
+
+                // t126 朝向逻辑抽出为顶层 computeTorchOrient（与选中框共用同一份判定，确保两者
+                //   orient 永远一致 → 选中框贴合火把实际形状）。语义不变（t125）：优先 prefOrient
+                //   （玩家点击面）、其支撑邻居仍实体即采用；否则按下 / 4 侧顺序首个实体邻居兜底；
+                //   全无实体则保留玩家意图方向（无 pop-off 机制，宁可按原朝向画也不突兀翻转）。
+                function recomputeOrient() {
+                    torchGlow.orient = computeTorchOrient(cellX, cellY, cellZ, cellPref)
+                }
+
+                Component.onCompleted: {
+                    if (parent === null) parent = torchHost  // createObject 已传 torchHost，双保险
+                    torchGlow.recomputeOrient()
+                }
+
+                // t114：邻居破/放后火把朝向重算（worldChanged 信号）。
+                Connections {
+                    target: theWorld
+                    function onWorldChanged() { torchGlow.recomputeOrient() }
+                }
+
+                // 木柄：细长棕立方（UnitCube；原木暗棕 #6b4f24，与木棒 MaterialIcon 同色系）。竖直时贴
+                //   cell 底部上伸（柄中心 0.3、scale Y 0.6 → 柄顶 0.6）；墙火把 30° 倾斜上伸 + ±0.30 深嵌
+                //   + scale Y 0.7（t150e/f：柄更长、嵌更深、上扬更陡）。scale 走 torchHandleScale（墙 0.7 /
+                //   地 0.6），与选中框共用同一份（DRY）。
+                Model {
+                    geometry: UnitCube {}
+                    scale: torchHandleScale(torchGlow.orient)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: "#6b4f24"   // 木柄暗棕（原木色，与木棒图标同色系）
                     }
+                    // 柄中心位置（局部坐标，相对 torchGlow 底面中心）。t126 抽出 torchHandleLocalPos
+                    //   与选中框共用同一份 switch，确保选中框位姿与渲染出的火把柄完全一致。
+                    position: torchHandleLocalPos(torchGlow.orient)
+                    // 旋转：墙火把把竖柄（默认沿 +Y）倾斜到对应朝向（t126 抽出 torchHandleEuler 与选中框共用）。
+                    //   ±X 向：绕 Z 轴 ±60°；±Z 向：绕 X 轴 ±60°（t132：自 ±90° 水平改 ±60° 上倾）。
+                    eulerRotation: torchHandleEuler(torchGlow.orient)
+                }
 
-                    // t114：邻居破/放后火把朝向重算（worldChanged 信号）。多重 Connections 可同 target
-                    // （主 onWorldChanged 在文件下方做火把列表清理，本处只刷朝向）。
-                    Connections {
-                        target: theWorld
-                        function onWorldChanged() { torchGlow.recomputeOrient() }
+                // 火焰（内层动态白立方）：暖白小立方（UnitCube scale ~0.18 + 闪烁动画；spec「scale 0.18 黄 + 闪」）。
+                // 摆在柄顶端（竖直时柄顶 Y=0.65；墙火把 30° 倾斜 + ±0.30 深嵌后柄末端，见 torchFlameLocalPos）。
+                // t157：移除原外层「光晕」静态大橙立方（0.42 半透橙 Model）后，仅保留本焰心作为火把发光体
+                //   —— 旧光晕是固定 opacity 无动画的半透立方，被读作「一片贴图」（破火把后视觉残留为橙
+                //   色残像），且整体观感偏离 MC 火把（1.0 火把仅小焰心、无大光晕）。焰心动态闪烁，无残像。
+                //   顶部少量烟雾粒子另由 TorchSmoke.qml 经 smokeLoader 加载（见文件下方）补充。
+                Model {
+                    id: torchFlame
+                    geometry: UnitCube {}
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: "#fff4cc"   // 焰心暖白（spec「高 baseColor 暖色 #ffcc66」的更亮内核）
                     }
-
-                    // 木柄：细长棕立方（UnitCube；原木暗棕 #6b4f24，与木棒 MaterialIcon 同色系）。竖直时贴
-                    //   cell 底部上伸（柄中心 0.3、scale Y 0.6 → 柄顶 0.6）；墙火把 30° 倾斜上伸 + ±0.30 深嵌
-                    //   + scale Y 0.7（t150e/f：柄更长、嵌更深、上扬更陡）。scale 走 torchHandleScale（墙 0.7 /
-                    //   地 0.6），与选中框共用同一份（DRY）。
-                    Model {
-                        geometry: UnitCube {}
-                        scale: torchHandleScale(torchGlow.orient)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: "#6b4f24"   // 木柄暗棕（原木色，与木棒图标同色系）
-                        }
-                        // 柄中心位置（局部坐标，相对 torchGlow 底面中心）。t126 抽出 torchHandleLocalPos
-                        //   与选中框共用同一份 switch，确保选中框位姿与渲染出的火把柄完全一致。
-                        position: torchHandleLocalPos(torchGlow.orient)
-                        // 旋转：墙火把把竖柄（默认沿 +Y）倾斜到对应朝向（t126 抽出 torchHandleEuler 与选中框共用）。
-                        //   ±X 向：绕 Z 轴 ±60°；±Z 向：绕 X 轴 ±60°（t132：自 ±90° 水平改 ±60° 上倾）。
-                        eulerRotation: torchHandleEuler(torchGlow.orient)
-                    }
-
-                    // 火焰（内层动态白立方）：暖白小立方（UnitCube scale ~0.18 + 闪烁动画；spec「scale 0.18 黄 + 闪」）。
-                    // 摆在柄顶端（竖直时柄顶 Y=0.65；墙火把 30° 倾斜 + ±0.30 深嵌后柄末端，见 torchFlameLocalPos）。
-                    // t157：移除原外层「光晕」静态大橙立方（0.42 半透橙 Model）后，仅保留本焰心作为火把发光体
-                    //   —— 旧光晕是固定 opacity 无动画的半透立方，被读作「一片贴图」（破火把后视觉残留为橙
-                    //   色残像），且整体观感偏离 MC 火把（1.0 火把仅小焰心、无大光晕）。焰心动态闪烁，无残像。
-                    //   顶部少量烟雾粒子另由 TorchSmoke.qml 经 smokeLoader 加载（见文件下方）补充。
-                    Model {
-                        id: torchFlame
-                        geometry: UnitCube {}
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: "#fff4cc"   // 焰心暖白（spec「高 baseColor 暖色 #ffcc66」的更亮内核）
-                        }
-                        // t150f：焰位读 torchFlameLocalPos（柄 30° 倾斜 + ±0.30 深嵌 + scale 0.7 后末端重算）。
-                        position: torchFlameLocalPos(torchGlow.orient)
-                        // 闪烁：自定义 flickerS（标量）由 SequentialAnimation 循环驱动；scale 绑它派生
-                        // （Y 轴略加长 = 火苗上窜感）。本工具链 Vector3DAnimation 未注册（运行期「is not a
-                        // type」），故走「NumberAnimation on 标量属性 + scale 绑定」等价路径（与 cam.shakeYaw
-                        // / itemHost bobY 同 NumberAnimation 模式）。
-                        property real flickerS: 0.18
-                        scale: Qt.vector3d(flickerS, flickerS * 1.08, flickerS)
-                        SequentialAnimation on flickerS {
-                            loops: Animation.Infinite
-                            NumberAnimation { from: 0.18; to: 0.21; duration: 110 }
-                            NumberAnimation { from: 0.21; to: 0.16; duration: 150 }
-                            NumberAnimation { from: 0.16; to: 0.19; duration: 90 }
-                            NumberAnimation { from: 0.19; to: 0.18; duration: 130 }
-                        }
+                    // t150f：焰位读 torchFlameLocalPos（柄 30° 倾斜 + ±0.30 深嵌 + scale 0.7 后末端重算）。
+                    position: torchFlameLocalPos(torchGlow.orient)
+                    // 闪烁：自定义 flickerS（标量）由 SequentialAnimation 循环驱动；scale 绑它派生
+                    // （Y 轴略加长 = 火苗上窜感）。本工具链 Vector3DAnimation 未注册（运行期「is not a
+                    // type」），故走「NumberAnimation on 标量属性 + scale 绑定」等价路径（与 cam.shakeYaw
+                    // / itemHost bobY 同 NumberAnimation 模式）。
+                    property real flickerS: 0.18
+                    scale: Qt.vector3d(flickerS, flickerS * 1.08, flickerS)
+                    SequentialAnimation on flickerS {
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 0.18; to: 0.21; duration: 110 }
+                        NumberAnimation { from: 0.21; to: 0.16; duration: 150 }
+                        NumberAnimation { from: 0.16; to: 0.19; duration: 90 }
+                        NumberAnimation { from: 0.19; to: 0.18; duration: 130 }
                     }
                 }
             }
@@ -1829,7 +1873,9 @@ Window {
             audio.playBreak(id)
             // t88：火把被破 → 从伪光源列表移除（id=13=BlockRegistry::Torch；C++ 侧未把枚举暴露 QML，
             // 此处用字面量 13 + 注释，与 blockregistry.h Id 枚举同源）。
-            if (id === 13) removeTorchAt(x, y, z)
+            // t170：同步销毁视觉 delegate（木柄+火焰 Model）—— torchPositions 供 TorchSmoke/选中框读，
+            //   torchHost.torchObjs 供本场景渲染，二者经同一信号并行增删。
+            if (id === 13) { removeTorchAt(x, y, z); torchHost.removeTorchVis(x, y, z) }
             // t117：被破格上方若为沙 → 失支撑塌落（maybeTrigger 内部 setBlock(air) 递归触发更上方沙链）。
             maybeTriggerFallingBlock(x, y + 1, z)
         }
@@ -1862,6 +1908,8 @@ Window {
                 const e = torchPositions.get(i)
                 if (theWorld.blockAt(e.x, e.y, e.z) !== 13) torchPositions.remove(i)
             }
+            // t170：同步清视觉 delegate 孤儿（与 torchPositions 兜底并行，各管各的容器）。
+            torchHost.cleanupVis()
         }
     }
 
@@ -1995,11 +2043,14 @@ Window {
     Connections {
         target: player
         function onTorchPlaced(x, y, z, nx, ny, nz) {
+            const orient = orientFromNormal(nx, ny, nz)
+            // t170：先建视觉 delegate（addTorchVis 自带去重）；与 torchPositions 数据追加并行。
+            torchHost.addTorchVis(x, y, z, orient)
             for (let i = 0; i < torchPositions.count; ++i) {
                 const e = torchPositions.get(i)
                 if (e.x === x && e.y === y && e.z === z) return
             }
-            torchPositions.append({x: x, y: y, z: z, prefOrient: orientFromNormal(nx, ny, nz)})
+            torchPositions.append({x: x, y: y, z: z, prefOrient: orient})
         }
     }
 
