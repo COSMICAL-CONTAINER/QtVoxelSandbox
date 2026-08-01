@@ -519,9 +519,11 @@ int Hotbar::fuelBurnSeconds(int fuelId) const
     return int(SmeltingRegistry::fuelBurnSeconds(fuelId));
 }
 
-// 按模式重置：t49 改为 Creative 与 Survival **都**清空 9 槽（删创造 8 满栈预置；创造物品改由调色板
-// 点取到光标→放入 hotbar 槽；spec point 2）。Spectator（mode==0）不动（hotbar 隐藏）。同时清空光标手持物。
-// t97：主栏 27 槽同清（创造 / 生存切换归零；主栏现 VM 共享，不随面板销毁，需显式清防跨模式残留）。
+// 显式重置槽内容（清空 9 hotbar + 27 主栏 + 光标手持物）。t49 引入时由 Main.qml::onModeChanged 在每次
+//   模式切换自动调用；t171 取消该自动调用 —— cycleMode 切模式**保留物品**（用户诉求「创造↔生存切换不清空
+//   背包」）。本方法保留为显式重置 API（供未来「清空背包」按钮等场景），不再被模式切换触发。
+//   mode 沿用 PlayerController::Mode 序数：1=Creative / 2=Survival → 清空；0=Spectator → 不动（观察者
+//   hotbar 隐藏，清空无意义；保留数据以便切回创造 / 生存时仍在）。主栏 27 槽同清（VM 共享，不随面板销毁）。
 void Hotbar::resetForMode(int mode)
 {
     if (mode == 1 || mode == 2) {

@@ -43,7 +43,7 @@ struct ItemStack {
 //   - setStack(slot, id, count)（直接写栈；背包点击放置/互换用）
 //   - setSlotBlock(slot, id)（兼容旧调用：等同 setStack(slot, id, id==0?0:1)；销毁槽清空用）
 //   - maxStackSize(id)（方块 64 / 工具段 1）
-//   - resetForMode(mode)（t49：创造 / 生存均清空 9 槽；创造物品改由调色板点取→放入 hotbar 槽）
+//   - resetForMode(mode)（显式清空 9 槽 + 主栏 + 光标手持物；t171 起不再由模式切换自动调用，保留为显式 API）
 //   - heldBlock / heldCount（光标手持物 id + 数量；背包点击拾取/放置用，跨创造/生存共享同一手持栈）
 //   - isTool / toolTier / creativeTools（t33：工具段判定 / 等级 / 创造调色板；QML 据 isTool 切方块
 //     Image vs ToolIcon Canvas 自绘图标）
@@ -159,8 +159,9 @@ public:
     //   - fuelBurnSeconds(fuelId)：燃料 → 燃烧秒数（0=不可燃；返回 int 秒，QML 友好且本表值均整数）。
     Q_INVOKABLE int smeltResult(int inputId) const;
     Q_INVOKABLE int fuelBurnSeconds(int fuelId) const;
-    // 按模式重置槽内容（t49：创造 / 生存均清空 9 槽；创造物品改由调色板点取→放入 hotbar 槽 / 观察者=不动）。
-    // mode 取 PlayerController::Mode 序数：0=Spectator 1=Creative 2=Survival。同时清空光标手持物。
+    // 显式重置槽内容（清空 9 hotbar + 27 主栏 + 光标手持物）。t49 引入时由模式切换自动调用；t171 取消自动
+    //   调用（cycleMode 切模式保留物品，用户诉求「创造↔生存切换不清空背包」）。保留为显式 API（供「清空
+    //   背包」等场景）。mode 取 PlayerController::Mode 序数：0=Spectator 1=Creative 2=Survival；1/2 清空、0 不动。
     Q_INVOKABLE void resetForMode(int mode);
     // 兼容旧调用（t18 setSlotBlock）：等同 setStack(slot, id, id==0?0:1)。保留以防遗漏迁移点（如销毁槽清空）。
     Q_INVOKABLE void setSlotBlock(int slot, int blockId);

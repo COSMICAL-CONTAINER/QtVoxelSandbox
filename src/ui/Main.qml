@@ -348,9 +348,11 @@ Window {
         function onModeChanged() {
             if (window.inventoryOpen && player.mode === PlayerController.Spectator)
                 window.closeInventory()
-            // t32：按模式重置 hotbar 栈内容（创造=8 方块满栈 / 生存=全空；观察者不动）。spec 验收
-            // 「创造初始满、生存初始全空」。无持久化前（t36+ 存档/拾取），切模式即重置为新模式的默认态。
-            hotbarVM.resetForMode(player.mode)
+            // t171：切模式**不动背包** —— 创造↔生存切换保留物品（用户诉求「cycleMode 切换不清空背包，
+            //   仅切模式不动背包」）。不再调 hotbarVM.resetForMode（旧 t32/t49 逻辑切模式即清空 9 hotbar
+            //   + 27 主栏 + 光标手持栈，违用户期望）。背包仅在构造期空起，其后由玩家拾取 / 调色板点取填入；
+            //   切观察者只是隐藏 hotbar UI（t20），数据保留，回创造 / 生存仍在。切观察者时上方
+            //   closeInventory 已 returnHeldToHotbar 归还光标手持栈，无物品丢失。
         }
     }
 
