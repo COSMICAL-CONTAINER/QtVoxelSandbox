@@ -460,6 +460,7 @@ void PlayerController::beginMining()
     m_mineBx = m_hitBx; m_mineBy = m_hitBy; m_mineBz = m_hitBz;
     m_miningProgress = 0.0f;
     m_miningStage = 0;
+    m_mineBeat = -1; // t165：挥臂节拍归位（新目标首 beat 0 立挥）
     emit miningStateChanged();
     emit miningProgressChanged();
     emit swingArm(); // 起手挥动（持续挖掘期间每阶切换再补发，形成挥动循环）
@@ -481,6 +482,7 @@ void PlayerController::cancelMining()
     m_mining = false;
     m_miningProgress = 0.0f;
     m_miningStage = -1;
+    m_mineBeat = -1; // t165：挥臂节拍归位
     emit miningStateChanged();
     emit miningProgressChanged();
 }
@@ -611,18 +613,24 @@ void PlayerController::updateMining(float dt)
     const float miningTime = ToolRegistry::miningTime(bid, heldItemId);
     m_miningProgress += dt / miningTime;
 
-    // stage 推进：clamp(progress*6, 0, 5)。每跨一阶发 miningStateChanged（切贴图）+ swingArm（挥动循环）。
-    // t141：基岩永不 finishMiningAt → progress 无界增长；min(progress,1.0) 把 int 转换输入钳到 6.0，杜绝
-    //   长时挂挖的 int 溢出 UB（stage 本就 clamp 到 0..5，钳 1.0 不改变任何可观测行为）。
-    const int newStage = std::clamp(int(std::min(m_miningProgress, 1.0f) * 6.0f), 0, 5);
+    // t165：不可挖方块（基岩 canMine=false）持续累积给「挥臂」反馈但**不显裂纹**（spec「一直不出现裂纹」）。
+    //   可挖方块 progress 到 1.0 → 下方完成守卫 finishMiningAt 破块；不可挖方块 progress 到 1.0 **回绕**
+    //   （-=1.0）→ beat 循环 0..5 → 持续跨阶 swingArm（手一直挥），防无界增长溢出。displayed stage：
+    //   可挖 = beat（裂纹 0..5），不可挖 = -1（裂纹叠层恒隐）。miningParticle 仅可挖方块迸发（基岩不破无碎屑）。
+    const bool mineable = ToolRegistry::canMine(bid);
+    if (!mineable && m_miningProgress >= 1.0f) m_miningProgress -= 1.0f; // 基岩 progress 循环（持续挥臂）
+    const int beat = std::clamp(int(std::min(m_miningProgress, 1.0f) * 6.0f), 0, 5);
+    const int newStage = mineable ? beat : -1; // 不可挖 → 不显裂纹（spec「一直不出现裂纹」）
+    if (beat != m_mineBeat) {
+        m_mineBeat = beat;
+        emit swingArm(); // 跨节拍挥臂（可挖/不可挖均挥；基岩循环 beat → 持续挥动反馈）
+        // t61：每跨一阶迸发少量碎屑（被挖方块色），驱动「挖的过程中」进度反馈粒子。仅可挖方块（基岩
+        //   不破无碎屑）。bid 上面已读（当前 tick 目标方块 id，setBlock 前原值），传呈现层复用破块 emitter。
+        if (mineable) emit miningParticle(m_mineBx, m_mineBy, m_mineBz, int(bid));
+    }
     if (newStage != m_miningStage) {
         m_miningStage = newStage;
-        emit miningStateChanged();
-        emit swingArm();
-        // t61：每跨一阶迸发少量碎屑（被挖方块色），驱动「挖的过程中」进度反馈粒子。bid 上面已读（当前
-        // tick 的目标方块 id，setBlock 前的原值），传给呈现层复用破块 emitter 迸发。破块完成时
-        // 的 +30% 大迸发走 finishMiningAt → setBlock → World::blockBroken（已 +30%），与此互补。
-        emit miningParticle(m_mineBx, m_mineBy, m_mineBz, int(bid));
+        emit miningStateChanged(); // 切裂纹贴图（可挖）/ 隐藏裂纹（不可挖 stage=-1）
     }
     emit miningProgressChanged();
 

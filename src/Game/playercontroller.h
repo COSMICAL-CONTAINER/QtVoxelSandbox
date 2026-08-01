@@ -408,6 +408,7 @@ private:
     bool m_mining = false;
     float m_miningProgress = 0.0f;
     int m_miningStage = -1;
+    int m_mineBeat = -1; // t165 挖掘挥臂节拍（progress*6 跨阶驱动 swingArm；基岩 progress 循环 → 持续挥臂）
     qint32 m_mineBx = 0, m_mineBy = 0, m_mineBz = 0;
     // 物理左键按下态（t44 连续挖掘）：与 m_mining（=「正在某目标上累积进度」）分离 —— finishMiningAt
     // 破完一块后 cancelMining 清 m_mining，但左键可能仍按住。m_leftDown 仅由 press 边缘（beginMining）

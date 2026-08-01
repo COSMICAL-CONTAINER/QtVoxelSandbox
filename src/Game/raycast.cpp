@@ -24,9 +24,12 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
     //   finishMiningAt 扫 6 邻 Torch + 无支撑 spawnItem）。故此处不复用 World::isSolid，
     //   改读 blockAt + 显式排除 Torch（BlockRegistry::isSolid 会连水 / 半砖等一并漏过，
     //   范围过大；本谓词只针对火把）。
+    // t165：再排除 Water —— 水非实体（solid=false、可穿过），射线应穿透水命中其后/下实体方块，
+    //   否则眼位入水即射线命中水面格 → 水下无法选中 / 挖掘任何方块（用户 bug「水下挖掘不了」）。
+    //   机制等价 MC：水不挡选体（水不可挖，选框落其后方块）。cameraDistance（t40）同受益（相机穿水）。
     auto blocksRay = [&world](int cx, int cy, int cz) {
         const quint8 b = world.blockAt(cx, cy, cz);
-        return b != quint8(0) && b != BlockRegistry::Torch;
+        return b != quint8(0) && b != BlockRegistry::Torch && b != BlockRegistry::Water;
     };
 
     // 当前所在体素（floor 对负坐标亦正确：-2.3 ∈ 体素 -3）
