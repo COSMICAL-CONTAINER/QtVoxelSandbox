@@ -68,6 +68,11 @@ class PlayerController : public QQuickItem
     //   分层（PLAN §2）：动画驱动数据（速度 + 相位）由 Game/Physics 层 tick 算出，QML 呈现层只读消费、
     //   绝不反向写（同 blockBroken→粒子 / swingArm→手挥动 模式）。腿/臂的实际欧拉角算在 QML（呈现层）。
     Q_PROPERTY(float moveSpeed READ moveSpeed NOTIFY moveSpeedChanged)
+    // 实际水平速度（blocks/sec，t159）：= 位移/dt 的水平标量（含撞墙归零、疾跑 / 飞 / 水下倍数）。
+    //   与 moveSpeed（走路动画意图速度，飞 / 观察者=0）的区别：speed 是**真实有效水平速度**，F3 叠层
+    //   报它（spec「F3 加 speed 行 = 水平速度标量」）。复用 moveSpeedChanged 作 NOTIFY（spec：NOTIFY
+    //   moveSpeedChanged）—— 两者同在 step() 出口刷新，QML 绑定 speed / moveSpeed 一并重算。
+    Q_PROPERTY(float speed READ speed NOTIFY moveSpeedChanged)
     Q_PROPERTY(float walkPhase READ walkPhase NOTIFY walkPhaseChanged)
     // 移动状态机（t51）：双击 W 进 Sprint（水平移速 ×1.3、四肢摆动幅度 ×1.4）；Shift 按住进 Crouch
     //   （×0.4、AABB 高 1.8→1.5、相机随之降低、且「边缘安全」= 蹲下时若脚下将无支撑则不水平移动）。
@@ -76,6 +81,13 @@ class PlayerController : public QQuickItem
     //   walkPhase 推进速率随之变）与幅度（QML 据 moveState 缩放四肢摆角，接 t45）。
     //   分层（PLAN §2）：状态属 Game/Physics 层、由输入边缘统一推进（§2-D）；呈现层只读消费。
     Q_PROPERTY(MoveState moveState READ moveState NOTIFY moveStateChanged)
+    // 飞行速度倍数（t159）：创造-飞 / 观察者用滚轮调速，默认 1.0（= kFly 基速）；滚轮 ±档，
+    //   有效速度 = clamp(kFly * mul, kFlyMin, kFlyMax) ∈ [4, 20] blocks/sec。仅飞态生效（走路态滚轮
+    //   仍切 hotbar；spec「WheelHandler 仅 flying 时生效」）。状态属 Game/Physics 层（§2-D 单一输入路径：
+    //   滚轮经 QML → adjustFlySpeed），step() 读它算飞移速。spectator 常驻飞亦适用（spec「创造/观察者」）。
+    Q_PROPERTY(float flySpeedMul READ flySpeedMul NOTIFY flySpeedMulChanged)
+    // 当前有效飞行速度（blocks/sec）= clamp(kFly*mul, kFlyMin, kFlyMax)；F3 报它（t159）。随 mul 变通知。
+    Q_PROPERTY(float flySpeed READ flySpeed NOTIFY flySpeedMulChanged)
     // 射线选体（t04）：每帧沿视线 DDA 步进，命中首个实体方块。无命中 / 暂停时 hasHit=false。
     // hitBlock=命中格整数坐标；hitNormal=命中面外法线；hitFaceCenter/hitFaceEuler 供线框 Model 直接摆位。
     Q_PROPERTY(bool hasHit READ hasHit NOTIFY hitChanged)
@@ -143,7 +155,10 @@ public:
     bool onGround() const { return m_onGround; }
     bool flying() const { return m_flying; }
     float moveSpeed() const { return m_moveSpeed; } // 当前行走速度（仅走路模式非零；t45 QML 腿/臂摆频）
+    float speed() const { return m_horizSpeed; }    // 实际水平速度（blocks/sec；F3 报它；t159）
     float walkPhase() const { return m_walkPhase; } // 行走相位（弧度；走时累加、2π 回绕；t45 QML sin() 算摆角）
+    float flySpeedMul() const { return m_flySpeedMul; } // 飞行速度倍数（默认 1.0；t159 滚轮调速）
+    float flySpeed() const;                              // 有效飞行速度 = clamp(kFly*mul,4,20)；F3 报它（t159）
 
     bool hasHit() const { return m_hasHit; }
     QVector3D hitBlock() const { return QVector3D(m_hitBx, m_hitBy, m_hitBz); }
@@ -171,6 +186,9 @@ public:
     Q_INVOKABLE void cycleMode();
     Q_INVOKABLE void setMode(Mode m);
     Q_INVOKABLE void cycleCamera(); // F5 相机模式循环（0→1→2→0，t27）
+    // 飞行速度滚轮调速（t159）：dir=+1 加速 / -1 减速（对应前滚 / 后滚），每档 kFlyStep。
+    //   有效速度 clamp 到 [kFlyMin, kFlyMax]（4..20 blocks/sec）。仅 QML 在飞态调用（走路态滚轮切 hotbar）。
+    Q_INVOKABLE void adjustFlySpeed(int dir);
     Q_INVOKABLE void grab();
     Q_INVOKABLE void release();
     // 破/放（t05）：仅指针捕获时生效；走当前射线命中结果 → World::setBlock。
@@ -216,7 +234,8 @@ signals:
     void capturedChanged();
     void onGroundChanged();
     void flyingChanged();
-    void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）
+    void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）。speed 属性亦复用本信号（t159）。
+    void flySpeedMulChanged(); // 飞行速度倍数变（t159 滚轮调速；驱动 F3 报当前有效飞速）
     void walkPhaseChanged();  // 行走相位推进（t45；走时每 tick 发，QML 据 sin() 算四肢欧拉角）
     void moveStateChanged();  // 移动态切（Walk/Sprint/Crouch；t51；驱动 QML 摆幅 + 速率因子）
     void hitChanged();
@@ -305,6 +324,12 @@ private:
     // 移动状态速率因子（t51）：Sprint×1.3 / Crouch×0.4 / Walk×1.0。仅走路模式水平速度乘此值
     //   （飞 / 观察者 noclip 恒 1，状态机不进入 Sprint/Crouch）。同时驱动 moveSpeed 报告 → walkPhase 频率。
     float speedMul() const;
+    // t159 水下判定：玩家眼位格 == Water。step 据此把水平（及飞垂直）速度乘 kUnderwaterSpeedMul（~0.4）。
+    //   只读 World::blockAt（向下依赖）；眼位 = position()（脚底 + eyeHeight）。无世界 → false。
+    bool eyeInWater() const;
+    // t159 上报实际水平速度（speed 属性）：据 step 出口位移 / dt 算水平标量，值真变（> 阈值）才发
+    //   moveSpeedChanged（speed 复用此 NOTIFY）。各飞 / 走出口前调一次。dt<=0 → no-op。
+    void reportHorizSpeed(const QVector3D &posBefore, qreal dt);
     // 切移动态（t51）：同步更新 AABB 高 / 眼位（蹲下 1.5/相机随之降低；站起 1.8/1.62）。无变化静默。
     void setMoveState(MoveState s);
     // 蹲下「边缘安全」（t51）：给定水平位置 (x,z) 在当前脚位下方是否有支撑方块（脚底 0.05 处那一格
@@ -361,7 +386,9 @@ private:
     QHash<int, bool> m_keys;
     bool m_flying = false;          // 创造模式飞行子状态（双击空格切换；进创造默认走）
     float m_moveSpeed = 0.0f;       // 当前行走速度（仅走路模式非零；驱动 QML 腿/臂摆动频率，t45）
+    float m_horizSpeed = 0.0f;      // 实际水平速度（blocks/sec；F3 报它；位移/dt 算；t159）
     float m_walkPhase = 0.0f;       // 行走相位（弧度；走时累加、2π 回绕；供 QML sin() 算四肢摆角，t45）
+    float m_flySpeedMul = 1.0f;     // 飞行速度倍数（默认 1.0；滚轮 ±档调速；有效 = clamp(kFly*mul,4,20)；t159）
     MoveState m_moveState = Walk;   // 移动态（t51；Walk/Sprint/Crouch；仅走路模式有效，飞/Spectator 恒 Walk）
     float m_height = kHeight;       // 当前 AABB 高（蹲下变 kCrouchHeight=1.5；默认 kHeight=1.8；t51）
     float m_eyeHeight = kEyeHeight; // 当前眼位（蹲下降低到 kCrouchEye；相机 position 据此 → 蹲下相机降低，t51）
@@ -399,6 +426,10 @@ private:
     static constexpr float kCrouchHeight = 1.5f; // 蹲下 AABB 高（spec t51：1.8→1.5）
     static constexpr float kCrouchEye = 1.35f;   // 蹲下眼位（相机随之降低；≈ MC 蹲/站比例）
     static constexpr float kFly = 8.0f;        // 飞/观察 移速
+    static constexpr float kFlyMin = 4.0f;     // 飞行最低速度（blocks/sec；t159 滚轮调速下限）
+    static constexpr float kFlyMax = 20.0f;    // 飞行最高速度（blocks/sec；t159 滚轮调速上限）
+    static constexpr float kFlyStep = 1.0f;    // 滚轮每档有效飞行速度步进（blocks/sec；t159）
+    static constexpr float kUnderwaterSpeedMul = 0.4f; // 水下速度倍数（眼位在水格；t159，用户可后续调）
     static constexpr float kWalk = 4.3f;       // 走 移速
     static constexpr float kGravity = 28.0f;
     static constexpr float kJump = 8.4f;       // 顶点约 1.25 格

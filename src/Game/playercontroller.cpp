@@ -147,6 +147,19 @@ void PlayerController::cycleCamera()
     m_cameraMode = static_cast<CameraMode>((static_cast<int>(m_cameraMode) + 1) % 3);
     emit cameraModeChanged();
 }
+
+// t159 飞行速度滚轮调速：dir=+1 加速 / -1 减速（前滚 / 后滚），按有效速度步进 kFlyStep。
+//   有效速度 = clamp(kFly * mul, kFlyMin, kFlyMax) ∈ [4,20]；改有效速度再回算 mul（直接钳有效速度更直观，
+//   且 spectator / creative-飞 共用 flySpeed() 读 mul → 两模式同档位）。无变化静默（不发信号，免抖动）。
+//   仅 QML 在飞态调用（走路态滚轮切 hotbar）；本方法本身不判飞态 —— 输入边界（§2-D）由 QML 把关。
+void PlayerController::adjustFlySpeed(int dir)
+{
+    const float eff = std::clamp(kFly * m_flySpeedMul + float(dir) * kFlyStep, kFlyMin, kFlyMax);
+    const float newMul = eff / kFly;
+    if (newMul == m_flySpeedMul) return;
+    m_flySpeedMul = newMul;
+    emit flySpeedMulChanged();
+}
 void PlayerController::setMode(Mode m)
 {
     if (m == m_mode) return;
@@ -283,8 +296,10 @@ void PlayerController::tick()
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
         // t45：暂停时清行走动画驱动（moveSpeed→0；walkPhase 不动，QML 据此 sin*0=0 → 四肢归中性位）。
-        // 仅值真变时发，免每 tick 无谓刷新 QML 绑定。
-        if (m_moveSpeed != 0.0f) { m_moveSpeed = 0.0f; emit moveSpeedChanged(); }
+        // t159：同步清 speed（实际水平速度，暂停即 0；F3 报 0 而非陈旧值）。仅值真变时发，免每 tick 抖动。
+        if (m_moveSpeed != 0.0f || m_horizSpeed != 0.0f) {
+            m_moveSpeed = 0.0f; m_horizSpeed = 0.0f; emit moveSpeedChanged();
+        }
         return;
     }
     pollMouse();
@@ -934,6 +949,38 @@ float PlayerController::speedMul() const
     }
 }
 
+// t159 当前有效飞行速度（blocks/sec）= clamp(kFly * flySpeedMul, kFlyMin, kFlyMax)。
+//   spectator 与 creative-飞 共用（统一「飞行」单一旋钮）；step 各飞态分支读它算位移。
+float PlayerController::flySpeed() const
+{
+    return std::clamp(kFly * m_flySpeedMul, kFlyMin, kFlyMax);
+}
+
+// t159 水下判定：眼位格 == Water。眼位 = position()（脚底 + eyeHeight，与相机同源）。只读 World::blockAt
+//   （向下依赖，不改栅格；蹲下眼位降低随之变）。无世界 → false（保守不减速）。
+bool PlayerController::eyeInWater() const
+{
+    if (!m_world) return false;
+    const QVector3D eye = position();
+    return m_world->blockAt(int(std::floor(eye.x())), int(std::floor(eye.y())), int(std::floor(eye.z())))
+           == BlockRegistry::Water;
+}
+
+// t159 上报实际水平速度（speed 属性）：= |水平位移| / dt。含撞墙归零、疾跑 / 飞 / 水下倍数 —— 反映
+//   玩家**真实**水平移动速率（非意图速度）。值真变（> 0.05 阈值，免帧间噪声刷 QML）才发 moveSpeedChanged
+//   （speed 复用此 NOTIFY）。dt<=0 → no-op（极端：首帧 dt 未取）。
+void PlayerController::reportHorizSpeed(const QVector3D &posBefore, qreal dt)
+{
+    if (dt <= 1e-5) return;
+    const float dx = m_pos.x() - posBefore.x();
+    const float dz = m_pos.z() - posBefore.z();
+    const float s = std::sqrt(dx * dx + dz * dz) / float(dt);
+    if (std::fabs(s - m_horizSpeed) > 0.05f) {
+        m_horizSpeed = s;
+        emit moveSpeedChanged();
+    }
+}
+
 // 切移动态（t51）：同步更新 AABB 高 / 眼位（蹲下变矮、相机随之降低）。无变化静默。
 //   蹲下：m_height=kCrouchHeight(1.5) / m_eyeHeight=kCrouchEye(1.35)；
 //   站起（Walk/Sprint）：m_height=kHeight(1.8) / m_eyeHeight=kEyeHeight(1.62)。
@@ -1014,16 +1061,21 @@ void PlayerController::moveAxis(int axis, float amount)
 
 void PlayerController::step(qreal dt)
 {
+    const QVector3D posBefore = m_pos; // t159：出口算实际水平速度（speed 属性）的位移基准
     const QVector3D wish = wishHoriz();
     const bool space = m_keys.value(Qt::Key_Space), shift = m_keys.value(Qt::Key_Shift);
     const bool spaceEdge = space && !m_spacePrev; // 跳跃边沿：长按只跳一次（生存/创造-走路统一）
     m_spacePrev = space;
+    // t159 水下速度倍数：眼位在水格 → 水平（及飞垂直）速度 ×kUnderwaterSpeedMul（~0.4）。所有模式统一适用
+    //   （走 / 飞 / 观察者进水都变慢，机制等价 MC 水中减速）。每 tick 查一次（blockAt 单查，廉价）。
+    const float waterMul = eyeInWater() ? kUnderwaterSpeedMul : 1.0f;
 
     // 行走动画驱动（t45）：moveSpeed 仅走路模式（Survival / Creative-未飞）按住 WASD 时非零；
     //   Spectator / Creative-飞 → 0（飞行/幽灵态无走步动画，spec 未要求；为未来泳/飞姿留接口）。
     //   walkPhase 仅在走时累加（speed*dt*kStrideRate），2π 回绕；静止不累加 → QML 据此 sin*0=0 中性位。
     //   「按住 WASD 撞墙」时 wish 仍非零（玩家在「尝试」走）→ 腿仍摆，对齐 MC 行为。
     //   t51：moveSpeed 乘 speedMul（疾跑 ×1.3 / 蹲 ×0.4）→ walkPhase 推进速率随状态变（动画频率）。
+    //   t159：moveSpeed 不乘 waterMul（动画驱动用「意图」速度；水下减速是位移层，与四肢摆频解耦）。
     //   分层：动画驱动数据由 Game/Physics tick 算出，QML 呈现层只读消费（同 swingArm 模式）。
     {
         const bool moving = wish.lengthSquared() > 0.001f; // wish 已 normalize：非零即有 WASD 输入
@@ -1039,30 +1091,39 @@ void PlayerController::step(qreal dt)
     }
 
     if (m_mode == Spectator) {
-        QVector3D v = wish * kFly;
-        if (space) v.setY(kFly);
-        if (shift) v.setY(-kFly);
+        // t159：飞态统一用 flySpeed()（滚轮可调）× waterMul；spectator 常驻飞亦适用（spec「创造/观察者」）。
+        const float fs = flySpeed() * waterMul;
+        QVector3D v = wish * fs;
+        if (space) v.setY(fs);
+        if (shift) v.setY(-fs);
         m_pos += v * dt; // noclip
+        reportHorizSpeed(posBefore, dt); // t159：speed 属性上报
         emit positionChanged();
         return;
     }
 
     if (m_mode == Creative && m_flying) {
-        QVector3D v = wish * kWalk;
-        if (space) v.setY(kFly);
-        if (shift) v.setY(-kFly);
+        // t159：飞态统一用 flySpeed()（滚轮可调）× waterMul（原水平基 kWalk 改 kFly 基，与 spectator 同旋钮；
+        //   默认 mul=1.0 → kFly=8，比旧 kWalk=4.3 快但更贴近 MC 创造飞，且滚轮可在 4..20 调）。
+        const float fs = flySpeed() * waterMul;
+        QVector3D v = wish * fs;
+        if (space) v.setY(fs);
+        if (shift) v.setY(-fs);
         moveAxis(0, v.x() * dt); // 碰撞，无重力
         moveAxis(2, v.z() * dt);
         moveAxis(1, v.y() * dt);
         if (m_onGround) { m_onGround = false; emit onGroundChanged(); }
+        reportHorizSpeed(posBefore, dt); // t159：speed 属性上报
         emit positionChanged();
         return;
     }
 
     // 走（生存 / 创造-未飞）：重力 + 跳跃 + 逐轴解算
     // t51：水平速度乘 speedMul（疾跑 ×1.3 / 蹲 ×0.4 / 走 ×1.0）；spec「疾跑移速 +、蹲下 -」。
-    m_vel.setX(wish.x() * kWalk * speedMul());
-    m_vel.setZ(wish.z() * kWalk * speedMul());
+    //   双击 W 疾跑（setKey 内 m_lastWms 双击窗 ≤250ms 进 Sprint）→ speedMul()=1.3 实际乘入此处水平速度，
+    //   走速 4.3 → 疾跑 5.59 blocks/sec（同 MC 1.0 系数）。t159：再乘 waterMul（水下减速）。
+    m_vel.setX(wish.x() * kWalk * speedMul() * waterMul);
+    m_vel.setZ(wish.z() * kWalk * speedMul() * waterMul);
     m_vel.setY(std::max(float(m_vel.y() - kGravity * dt), -kMaxFall));
     if (spaceEdge && m_onGround) m_vel.setY(kJump);
 
@@ -1116,5 +1177,6 @@ void PlayerController::step(qreal dt)
     }
 
     if (wasGround != m_onGround) emit onGroundChanged();
+    reportHorizSpeed(posBefore, dt); // t159：speed 属性上报（位移/dt；含撞墙归零 / 疾跑 / 水下倍数）
     emit positionChanged();
 }

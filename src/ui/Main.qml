@@ -1953,8 +1953,18 @@ Window {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: (event) => {
                 if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen) return
-                if (event.angleDelta.y > 0)      hotbarVM.scroll(-1) // 上滚 → 左移（下标-1，环绕）
-                else if (event.angleDelta.y < 0) hotbarVM.scroll(1)  // 下滚 → 右移
+                // t159 飞行滚轮调速：飞态（creative-飞 / spectator 常驻飞）滚轮调 flySpeedMul（有效 4..20
+                //   blocks/sec），不再切 hotbar；走路态滚轮保持切 hotbar。spec「WheelHandler 仅 flying 时生效」。
+                //   前滚（angleDelta.y>0）加速、后滚减速。同一滚轮在不同运动态语义分流（输入边界由 QML 把关，
+                //   §2-D 单一输入路径：滚轮事件只此一处消费）。
+                const inFly = player.flying || player.mode === PlayerController.Spectator
+                if (inFly) {
+                    if (event.angleDelta.y > 0)      player.adjustFlySpeed(+1)
+                    else if (event.angleDelta.y < 0) player.adjustFlySpeed(-1)
+                } else {
+                    if (event.angleDelta.y > 0)      hotbarVM.scroll(-1) // 上滚 → 左移（下标-1，环绕）
+                    else if (event.angleDelta.y < 0) hotbarVM.scroll(1)  // 下滚 → 右移
+                }
             }
         }
     }
@@ -2268,6 +2278,10 @@ Window {
                  + "  (feet " + player.feetPosition.x.toFixed(1) + "," + player.feetPosition.y.toFixed(1) + "," + player.feetPosition.z.toFixed(1) + ")"
                  + "\nyaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch) + "  look " + camName
                  + "\nmode: " + modeName + (player.flying ? " (fly)" : "") + "  move: " + moveName + "  ground: " + (player.onGround ? "yes" : "no")
+                 + "\nspeed: " + player.speed.toFixed(2) + " b/s" // t159：实际水平速度（位移/dt；含疾跑/飞/水下倍数/撞墙归零）
+                 + (player.flying || player.mode === PlayerController.Spectator
+                    ? "  fly: " + player.flySpeed.toFixed(1) + " b/s (x" + player.flySpeedMul.toFixed(2) + ")"
+                    : "") // t159：飞态额外报当前有效飞速 + 倍数（滚轮可调 4..20）
                  + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
                  + "\nworld: " + theWorld.width + "×" + theWorld.depth + "×" + theWorld.height
                  + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"
