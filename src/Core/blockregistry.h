@@ -67,7 +67,16 @@ public:
                                   //   worldgen 在 waterLevel 以下低洼列填水（h<wl 从 h+1 到 wl）。渲染：mesher 把
                                   //   水面剔出独立几何段、材质 opacity=0.7 半透；水-水邻接面互剔（nb==Water 剔除）。
                                   //   不进创造调色板（worldgen 专属；非玩家可放置方块）。
-        Count         = 22, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Chest          = 22, // 箱子（t173）：机制等价 MC 1.0 箱子。solid=true / ShapeFull（整立方实体碰撞、
+                                  //   mesher 正常画 6 面顶/侧/前贴图=chest_top/side/front，与工作台 / 熔炉同走整立方
+                                  //   渲染路径 —— 非异形，**不**进 PartialBlockGeometry）、hardness=2.5（木制）、NoTool
+                                  //   （空手可采且掉落自身）、各面贴图 chest_top(20)/chest_side(21)/chest_front(22)。
+                                  //   右键打开 27 槽物品栏 UI（playercontroller 发 chestOpened 信号 → Main.qml 开
+                                  //   ChestUI + 盖子开合动画）；**物品内容存 ChestStore（Game 层，按方块坐标键控）**，
+                                  //   spec「物品存 chunk state」= 物品随方块存（世界级 block-instance state，非 QML
+                                  //   面板本地态，机制等价 MC「箱子内容存于方块」；多箱子各自独立 27 槽）。破块时
+                                  //   ChestStore.clearChest 清条目（内容不退回玩家背包，机制等价 MC 破箱掉落本属 1.1+）。
+        Count         = 23, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起点哨兵：WoodSlab(15) 起的 id 走 PartialBlockGeometry 异形渲染（mesher 合批进
@@ -176,7 +185,8 @@ public:
     //   17=torch（t88；6 面同贴图，近黑底+火焰图案）
     //   18=bedrock（t119；6 面同贴图，深灰斑驳不可破坏底岩）
     //   19=water（t148；6 面同贴图，蓝半透——纹理本身不透明，半透由材质 opacity=0.7 实现）
-    // 图集由 tools/build_atlas.py 打包全部 20 瓦片；mesher / BlockCube 的 N=20 与之严格对齐。
+    //   20=chest_top / 21=chest_side / 22=chest_front（t173；箱子顶=盖缝+铰链、侧=铁箍带、前=锁孔）
+    // 图集由 tools/build_atlas.py 打包全部 23 瓦片；mesher / BlockCube 的 N=23 与之严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 

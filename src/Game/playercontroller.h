@@ -289,6 +289,11 @@ signals:
     // Game/Physics 层发语义事件，呈现层只消费（PLAN §2 分层）。熔炉槽状态 / 冶炼 tick 由 FurnaceUI
     // 自持（面板常驻、visible 切换；WorldClock.ticked 驱动 tick）。
     void furnaceOpened();
+    // 右键箱子（t173）：placeBlock 检测到命中格为 Chest → 发本信号（不放置；携命中格世界坐标）→ 呈现层
+    //   Connections 打开 ChestUI（释放指针 + 启动盖子开合动画）。机制等价 MC 右键箱子开物品栏。同
+    //   craftingTableOpened / furnaceOpened 模式：Game/Physics 层发语义事件（携坐标供 ChestStore 寻址该
+    //   箱子的 27 槽），呈现层只消费（PLAN §2 分层）。坐标 = 玩家所点箱子格的整数世界坐标。
+    void chestOpened(int x, int y, int z);
     // 火把放置（t125 朝向修正）：placeBlock 成功放置 Torch 后发，携带玩家点击面的外法线（指向玩家侧，
     //   = m_hitNx/Ny/Nz）。呈现层（torchHost）据此把火把定向为「柄嵌玩家所点墙面」——替代旧 recomputeOrient
     //   固定优先级（下>-X>+X>-Z>+Z）：旧逻辑在「墙+地并存」（墙插火把下方恰有地面）时误判垂直立柱，

@@ -208,8 +208,9 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     //   17=torch（t88；6 面同贴图）
     //   18=bedrock（t119；6 面同贴图，深灰斑驳底岩）
     //   19=water（t148；6 面同贴图，蓝；纹理不透明，半透由水材质 opacity=0.7 实现）
+    //   20=chest_top / 21=chest_side / 22=chest_front（t173；箱子方块各面贴图）
     // 半纹素内缩防渗色（线性采样跨瓦片）。
-    constexpr int N = 20;
+    constexpr int N = 23;
     constexpr float tileW = 1.0f / N;
     constexpr float hx = 0.5f / (N * 16);
     constexpr float hy = 0.5f / 16;

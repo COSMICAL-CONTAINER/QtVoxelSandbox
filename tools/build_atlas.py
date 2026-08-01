@@ -11,9 +11,11 @@
   17 torch（t88，程序生成原创像素图）
   18 bedrock（t119，程序生成原创像素图）
   19 water（t148，程序生成原创像素图，纹理不透明；半透由 Main.qml 水材质 opacity=0.7 实现）
+  20 chest_top / 21 chest_side / 22 chest_front（t173，程序生成原创像素图；箱子方块，机制等价 MC 1.0 箱子）
 （CC0 资产，来源见 docs/PLAN.md §L 资产管线；工作台贴图由 tools/build_crafting_table.py、
  熔炉贴图由 tools/build_furnace.py、矿石贴图由 tools/build_ore.py、火把贴图由 tools/build_torch.py、
- 基岩贴图由 tools/build_bedrock.py、水贴图由 tools/build_water.py 程序生成原创像素图，§9 override (a)。）
+ 基岩贴图由 tools/build_bedrock.py、水贴图由 tools/build_water.py、箱子贴图由 tools/build_chest.py
+ 程序生成原创像素图，§9 override (a)。）
 """
 import os
 from PIL import Image
@@ -40,6 +42,9 @@ TILES = [
     "default_torch",                # 17 torch（t88，程序生成原创像素图；6 面同贴图）
     "default_bedrock",              # 18 bedrock（t119，程序生成原创像素图；6 面同贴图，深灰斑驳）
     "default_water",                # 19 water（t148，程序生成原创像素图；6 面同贴图，纹理不透明，半透由材质 opacity 实现）
+    "default_chest_top",            # 20 chest_top（t173，程序生成原创像素图；箱子顶面=盖缝+铰链+锁印）
+    "default_chest_side",           # 21 chest_side（t173，程序生成原创像素图；箱子侧面=铁箍带+板缝）
+    "default_chest_front",          # 22 chest_front（t173，程序生成原创像素图；箱子前面=盖缝+锁孔）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
