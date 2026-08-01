@@ -192,6 +192,7 @@ void PlayerController::respawn()
 {
     cancelMining();           // 清生存累积挖掘态（裂纹叠层随之隐）
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
+    m_dead = false;           // t175：清死亡态镜像 → pickupScan 恢复（重生后玩家已离开死亡点，可正常拾取）
     m_pos = QVector3D(kSpawnX, kSpawnY, kSpawnZ); // 回出生列（X/Z；Y 由 snapSpawnToGround 贴地表）
     m_vel = QVector3D(0, 0, 0);
     snapSpawnToGround();      // t137：重生贴地表（消除 kSpawnY 兜底落差；设 m_pos.y + m_peakY）
@@ -886,6 +887,43 @@ void PlayerController::dropHeldCursor()
     emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, cnt);
 }
 
+// t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（死亡点
+//   = 脚底 m_pos），随后清空背包。每非空栈 → 1 实体携带整栈数量（同 dropHeldCursor 模式）；空栈跳过。
+//   ItemEntityManager 无水平速度物理，靠散布到死亡格 3×3 邻域做视觉分离（轮回 9 格 pattern：>9 栈后
+//   回中心格可接受重叠）。光标手持栈一并掉落（onDied 已先 returnHeldToHotbar 归还背包合并，此处为
+//   防御双保险，held 通常已空）。最后 resetForMode(Survival) 清空 hotbar+main+held + bump revision →
+//   QML 同步（slotsChanged/mainSlotsChanged/heldBlockChanged）。死亡只在 Survival 发生（fallDamage /
+//   suffocation 均 Survival 路径），故 resetForMode(int(Survival)) 清空语义正确。
+//   顺序关键：先 emit spawnItem（创建实体 = 物品移出背包），后 resetForMode 清空（物品不再在背包）→
+//   无重复（实体一份 + 背包空）。spawnItem 同步走 QML DirectConnection（同线程）→ 实体即刻生成。
+void PlayerController::dropAllItems()
+{
+    if (!m_hotbar) return;
+    m_dead = true; // 标记死亡态 → 抑制 pickupScan（玩家尸体停死亡点，免掉落物被自动捡回空背包）
+    // 死亡点 = 玩家脚底整数格（玩家倒下处）；3×3 邻域散布避免全堆同一格中心。
+    const int cx = int(std::floor(m_pos.x()));
+    const int cy = int(std::floor(m_pos.y()));
+    const int cz = int(std::floor(m_pos.z()));
+    // 9 格轮回散布 pattern（中心 + 8 邻）。idx 单调递增，>9 栈后回中心格（接受少量重叠）。
+    static constexpr int kScatter[9][2] = {
+        {0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
+    };
+    int idx = 0;
+    auto dropStack = [&](int id, int count) {
+        if (id == 0 || count <= 0) return;          // 空栈跳过
+        emit spawnItem(cx + kScatter[idx % 9][0], cy, cz + kScatter[idx % 9][1], id, count);
+        ++idx;
+    };
+    // hotbar 9 槽 → main 27 槽 → 光标手持栈，逐栈掉落。
+    for (int i = 0; i < m_hotbar->slotCount(); ++i)
+        dropStack(m_hotbar->blockIdAt(i), m_hotbar->countAt(i));
+    for (int i = 0; i < m_hotbar->mainCount(); ++i)
+        dropStack(m_hotbar->mainBlockIdAt(i), m_hotbar->mainCountAt(i));
+    dropStack(m_hotbar->heldBlock(), m_hotbar->heldCount()); // 光标手持栈（onDied 已归还，通常空）
+    // 清空整个背包（hotbar + main + held）+ bump revision → QML 同步。仅 Survival 调（死亡仅在 Survival）。
+    m_hotbar->resetForMode(int(Survival));
+}
+
 // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 写入 hotbar 当前选中槽（覆盖；
 // 仅指针捕获时生效（与破/放同窗口级事件过滤路径；spec）。命中空气 / 无命中 / 无世界 / 无 hotbar → 不动作。
 // 数量按模式分（spec 示意 {id,1}；此处对齐模式语义：创造源无限 → 满栈，与 resetForMode 创造默认一致、
@@ -917,6 +955,7 @@ void PlayerController::pickBlock()
 void PlayerController::pickupScan()
 {
     if (!m_itemEntities || !m_hotbar) return;
+    if (m_dead) return; // t175：死亡态不拾取（玩家尸体停死亡点，否则掉落物 0.5s 免拾窗后被自动捡回空背包）
     const QVector3D center = m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f);
     const float r2 = kPickupDist * kPickupDist;
     for (int i = m_itemEntities->count() - 1; i >= 0; --i) {

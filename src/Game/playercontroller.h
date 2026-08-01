@@ -215,6 +215,16 @@ public:
     // 捡回只剩 1」bug；spec 验收「4 木棒丢出捡回仍 4」）。清空 hotbar 光标手持栈（setHeldBlock(0) 同步清
     // count）。空手 → 不丢。经 QML Connections 转发（同 dropHeld）。
     Q_INVOKABLE void dropHeldCursor();
+    // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（**死亡点**
+    //   = 玩家倒下时的脚底 m_pos，非出生点）+ 清空背包。每非空栈 → 1 实体携带整栈数量（同 dropHeldCursor
+    //   模式，经 spawnItem 信号 → Main.qml 转发到 ItemEntityManager.spawnItem，单向事件流）。栈散布到死亡格
+    //   3×3 邻域（ItemEntityManager 无水平速度，靠位置散布做视觉分离 / 便于玩家走回死亡点分别拾取）。
+    //   清空走 resetForMode(Survival)（hotbar + main + held 全清 + bump revision → QML 同步）。
+    //   由呈现层 onDied 路由调用（在 returnHeldToHotbar 之后：先把光标手持栈归还背包合并，再统一掉落；
+    //   held 此时已空，本方法的 held 分支为防御双保险）。死亡只在 Survival 发生（fallDamage/suffocation 均
+    //   Survival 路径），故 resetForMode(Survival) 清空语义正确。
+    //   分层（PLAN §2）：Game/Physics 层发语义事件 + 操作自身持有的 Hotbar，呈现层只路由（不反向写数值）。
+    Q_INVOKABLE void dropAllItems();
     // t78 重生定位：传回出生点（kSpawn）+ 清速度 / 挖掘态 / 飞行 / 蹲下疾跑（spec「立即重生」的定位部分）。
     //   由呈现层「立即重生」按钮调（与 PlayerState::respawn 配对：本方法管定位/物理态，PlayerState 管
     //   血量/死亡态）。出生点与构造期 m_pos 初值同源（kSpawn）；m_peakY 重置 → respawn 后下落从出生点
@@ -430,6 +440,8 @@ private:
     int m_selectedItem = BlockRegistry::Stone;  // 手持物品原始 id（含工具段；t34 挖掘速度用，绑定 hotbar.selectedItemId）
     float m_peakY = 0.0f;           // 滞空期间最高点 Y（掉落伤害结算基准；componentComplete 设为脚底 Y）
     float m_suffocationTimer = 0.0f; // t160 窒息累积计时（身体嵌实体方块时累加，每 kSuffocationInterval 秒一脉冲）
+    bool m_dead = false;             // t175 死亡态镜像（dropAllItems 置 true / respawn 置 false）：抑制死亡后
+                                     //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）
 
     // 持续挖掘态（t34）：仅 Survival 进入累积（Creative 单击瞬破不进入）；progress 0..1；
     // stage = clamp(progress*6, 0, 5)，-1 = 无累积（裂纹叠层隐藏）。mineBx/y/z = 目标格整数坐标。

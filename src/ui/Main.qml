@@ -118,8 +118,11 @@ Window {
     }
     // t78 死亡界面 → 回主菜单：清死亡态（dismiss 死亡遮罩 + 满血，下次 Start Game 干净）+ 走标准 returnToMenu。
     //   不复用 returnToMenu 内的复位：returnToMenu 也被暂停叠层「Main Menu」按钮用（非死亡流），保持其语义单一。
+    // t175：调 player.respawn() 把玩家复位到出生点 + 清 m_dead 镜像 → 下次 Start Game 从干净态起（否则
+    //   m_dead 残留 = pickupScan 永久关闭，且玩家仍停死亡点）。returnToMenu 内不含定位复位，故此处补。
     function deathReturnToMenu() {
         playerState.respawn()   // 清 dead（visible 绑自动隐）+ 满血（防死亡态遗留到下次进游戏）
+        player.respawn()        // t175：复位到出生点 + 清 m_dead 镜像（下次进游戏干净态）
         window.returnToMenu()
     }
     // t56：把光标手持栈（heldBlock/heldCount）归还进背包。关背包 / 工作台 / 返回菜单时调。
@@ -1856,11 +1859,16 @@ Window {
         // t78：死亡 → 释放指针（光标可见点死亡界面按钮）+ 关背包 / 工作台（防面板卡在死亡遮罩下）+
         //   归还光标手持栈（防遗留 heldBlock）。died 由 takeDamage 扣血到 ≤0 时发（仅 Survival 走此路径）。
         //   死亡界面 visible 绑 playerState.dead（deadChanged NOTIFY 自动显），无需在此手动切显隐。
+        // t175：归还 held 后调 player.dropAllItems() —— 整个背包（hotbar + main + held）掉落为物品实体
+        //   于死亡点 + 清空背包（resetForMode）。掉落先于 release（顺序无强耦合，但逻辑上「死前掉落」）。
+        //   玩家随后在死亡界面点「立即重生」→ respawnPlayer → 传回固定出生点（kSpawn，非原地复活）；
+        //   掉落物留在死亡点，玩家走回死亡点拾取（机制等价 MC 死亡掉落 + 全局出生点）。
         function onDied() {
             if (window.inventoryOpen) window.inventoryOpen = false
             if (window.craftingTableOpen) window.craftingTableOpen = false
             if (window.furnaceOpen) window.furnaceOpen = false
             window.returnHeldToHotbar()
+            player.dropAllItems()     // t175：死亡掉落整个背包到死亡点 + 清空背包
             player.release()           // 释放指针 → 光标可见（点「立即重生 / 回主菜单」按钮）
         }
     }
