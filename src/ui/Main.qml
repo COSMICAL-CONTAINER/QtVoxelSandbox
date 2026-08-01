@@ -1195,6 +1195,32 @@ Window {
             }
         }
 
+        // t157 火把顶部少量烟雾粒子：TorchSmoke.qml 经 Loader 动态加载（同 particleLoader 的 Particles3D
+        //   隔离模式 — 模块运行期缺失时仅本 Loader 失败 + 显式告警，Main.qml 仍正常加载，§2-E「保持运行
+        //   而非崩溃，且不静默吞」）。TorchSmoke.qml 内单 ParticleSystem3D + Repeater（每火把一个
+        //   ParticleEmitter3D：慢速上飘 + 横向轻扰 + 淡入淡出）。
+        //   分层（PLAN §2）：呈现层只消费 World 的火把位置列表（torchPositions，与 torchHost 同源），
+        //   经 Loader.onLoaded 把 ListModel 引用注入 TorchSmoke.torchModel；Repeater 反应式跟随
+        //   torchPositions 增删（ListModel 信号驱动），不反向写栅格。
+        Loader {
+            id: smokeLoader
+            active: true
+            source: "TorchSmoke.qml"
+            onLoaded: {
+                // 领养进同一个 particlesHost 锚点（复用既有 3D 场景节点，无需另开锚点）。
+                smokeLoader.item.parent = particlesHost
+                // 注入火把位置 ListModel（引用稳定；TorchSmoke 内 Repeater 据其 count/角色反应式更新）。
+                smokeLoader.item.torchModel = torchPositions
+                console.info("[t157] TorchSmoke adopted into scene graph; torches=" + torchPositions.count)
+            }
+            onStatusChanged: {
+                if (status === Loader.Ready)
+                    console.info("[t157] TorchSmoke Loader status = Ready")
+                else if (status === Loader.Error)
+                    console.warn("[t157] TorchSmoke Loader status = Error — Particles3D 运行期不可用，火把烟雾已降级关闭（§2-E）")
+            }
+        }
+
         // 方块掉落实体渲染（t35）：item entity 的小方块图标在此渲染。Repeater 父节点 = 场景内
         // 3D Node（itemHost）→ delegate（Node/Model，3D 对象）被领养进 3D 场景图（lessons-learned
         // 「动态 3D 对象必须挂到场景 Node，否则孤儿不渲染」—— t03 Repeater 直接挂 View3D 会成孤儿
@@ -1459,13 +1485,19 @@ Window {
             }
         }
 
-        // t88/t114 火把伪光源 + 异形模型：在每个火把方块位置渲染「木柄 + 火焰 + 光晕」三个 Model
+        // t88/t114 火把伪光源 + 异形模型：在每个火把方块位置渲染「木柄 + 火焰」两个 Model
         // （NoLighting 高 baseColor 暖色，**非** PointLight）。根因：lit 材质 / PointLight 在本场景不可行
-        // （lessons-learned 红线「lit 材质不渲染」），故火把动态光源走伪光源——纯色自发光小立方 + 半透
-        // 光晕，视觉读作「发光点」，不参与场景实际光照计算（真 flood-fill 方块光留 PLAN §M）。
+        // （lessons-learned 红线「lit 材质不渲染」），故火把动态光源走伪光源——纯色自发光小立方
+        // （动态闪烁焰心），视觉读作「发光点」，不参与场景实际光照计算（真 flood-fill 方块光留 PLAN §M）。
         //
         // t114 异形：mesher 不再为火把画 1×1×1 立方面（chunkgeometry.cpp Torch 特例 continue）→ 火把外观
-        // 全部由此 delegate 负责：木柄（细长棕立方）+ 火焰（暖白小立方 + 闪烁动画）+ 光晕（保留 t88 半透）。
+        // 全部由此 delegate 负责：木柄（细长棕立方）+ 火焰（暖白小立方 + 闪烁动画）。
+        //
+        // t157 移除外层光晕：原 delegate 含第三个「光晕」Model（0.42 半透橙立方包覆火焰）—— 此静态大橙
+        //   光源在破火把后视觉上残留为「橙色贴图残像」（外层光晕是固定 opacity 无动画的半透立方，常被
+        //   读作一片贴图而非发光），且整体观感偏离 MC 火把（MC 火把仅小焰心、无大光晕）。移除后只保留
+        //   内层动态白立方（torchFlame，闪烁动画），更贴 1.0 + 消除残像；顶部少量烟雾粒子另由 TorchSmoke.qml
+        //   经 smokeLoader 加载（见文件下方）补充。
         //
         // t114 朝向：运行期据邻居 solid 推断 —— 下格 solid=垂直插地；侧格 solid=横插该向（贴墙伸出）。
         // 邻居查询走 theWorld.isCollidable（BlockRegistry::isSolid 语义；只认实体方块，不挂到另一火把 /
@@ -1538,8 +1570,12 @@ Window {
                         eulerRotation: torchHandleEuler(torchGlow.orient)
                     }
 
-                    // 火焰：暖白小立方（UnitCube scale ~0.18 + 闪烁动画；spec「scale 0.18 黄 + 闪」）。
+                    // 火焰（内层动态白立方）：暖白小立方（UnitCube scale ~0.18 + 闪烁动画；spec「scale 0.18 黄 + 闪」）。
                     // 摆在柄顶端（竖直时柄顶 Y=0.65；墙火把 30° 倾斜 + ±0.30 深嵌后柄末端，见 torchFlameLocalPos）。
+                    // t157：移除原外层「光晕」静态大橙立方（0.42 半透橙 Model）后，仅保留本焰心作为火把发光体
+                    //   —— 旧光晕是固定 opacity 无动画的半透立方，被读作「一片贴图」（破火把后视觉残留为橙
+                    //   色残像），且整体观感偏离 MC 火把（1.0 火把仅小焰心、无大光晕）。焰心动态闪烁，无残像。
+                    //   顶部少量烟雾粒子另由 TorchSmoke.qml 经 smokeLoader 加载（见文件下方）补充。
                     Model {
                         id: torchFlame
                         geometry: UnitCube {}
@@ -1561,19 +1597,6 @@ Window {
                             NumberAnimation { from: 0.21; to: 0.16; duration: 150 }
                             NumberAnimation { from: 0.16; to: 0.19; duration: 90 }
                             NumberAnimation { from: 0.19; to: 0.18; duration: 130 }
-                        }
-                    }
-
-                    // 光晕（保留 t88）：半透暖色立方包覆火焰（opacity<1 自动走透明混合 → 视觉发光晕染，
-                    // 非 PointLight）。跟随火焰位置（绑 torchFlame.position）。
-                    Model {
-                        geometry: UnitCube {}
-                        position: torchFlame.position
-                        scale: Qt.vector3d(0.42, 0.42, 0.42)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: "#ffcc66"   // spec 暖色光晕
-                            opacity: 0.32          // 半透（<1 触发透明混合，同观察者幽灵半透模式）
                         }
                     }
                 }

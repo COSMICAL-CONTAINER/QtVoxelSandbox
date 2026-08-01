@@ -1,5 +1,6 @@
 #include "raycast.h"
 #include "world.h"
+#include "blockregistry.h" // t157：Torch 不挡射线（射线穿透火把，机制等价 MC 小型附着块）
 
 #include <cmath>
 #include <limits>
@@ -8,7 +9,7 @@
 // 故步长 ≤ 1 格（满足 dev-spec t04 要求）。命中面法线 = 进入该体素时所跨轴的 −step。
 //
 // 参考：A Fast Voxel Traversal Algorithm for Ray Tracing (1987)。整数格坐标按
-// World 约定（+Y 朝上，越界=空气）；isSolid 决定阻挡。
+// World 约定（+Y 朝上，越界=空气）；阻挡谓词见 blocksRay（实存且非 Torch，t157）。
 RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float maxDist)
 {
     RayHit h;
@@ -16,13 +17,25 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
         return h; // 零向量：无方向，不命中
     dir.normalize();
 
+    // t157：射线「阻挡」谓词 = 方块实存且**非 Torch**。World::isSolid 语义是「blockAt != 0」
+    //   （保留以兼容 item/mob 物理调用点），它会把 Torch 当 solid → 射线命中火把。
+    //   但 Torch 是小型附着块（伪光源、非实体碰撞），机制等价 MC 火把应被射线穿过 —— 玩家
+    //   准星瞄火把时实际选中其背后的实体方块；移除火把走「破支撑 → 火把自动脱落」（t150c，
+    //   finishMiningAt 扫 6 邻 Torch + 无支撑 spawnItem）。故此处不复用 World::isSolid，
+    //   改读 blockAt + 显式排除 Torch（BlockRegistry::isSolid 会连水 / 半砖等一并漏过，
+    //   范围过大；本谓词只针对火把）。
+    auto blocksRay = [&world](int cx, int cy, int cz) {
+        const quint8 b = world.blockAt(cx, cy, cz);
+        return b != quint8(0) && b != BlockRegistry::Torch;
+    };
+
     // 当前所在体素（floor 对负坐标亦正确：-2.3 ∈ 体素 -3）
     int x = int(std::floor(origin.x()));
     int y = int(std::floor(origin.y()));
     int z = int(std::floor(origin.z()));
 
     // 起点已嵌在实体方块内（相机穿模）→ 退化，视为不可命中，避免无意义的高亮
-    if (world.isSolid(x, y, z))
+    if (blocksRay(x, y, z))
         return h;
 
     const int stepX = (dir.x() > 0.f) ? 1 : (dir.x() < 0.f ? -1 : 0);
@@ -57,7 +70,7 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
         }
         if (t > maxDist)
             break; // 下一格已在射程外
-        if (world.isSolid(x, y, z)) {
+        if (blocksRay(x, y, z)) {
             h.valid = true;
             h.bx = x; h.by = y; h.bz = z;
             h.nx = float(nx); h.ny = float(ny); h.nz = float(nz);

@@ -101,6 +101,7 @@ qt_add_qml_module(voxelsandbox
     QML_FILES
         src/ui/Main.qml
         src/ui/BlockParticles.qml
+        src/ui/TorchSmoke.qml
         src/ui/MainMenu.qml
         src/ui/Inventory.qml
         src/ui/InvSlot.qml
