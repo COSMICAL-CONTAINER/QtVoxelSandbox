@@ -25,16 +25,17 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CoalOre:       return "icon_coal_ore.png";       // t84 煤矿石立方体图标
     case BlockRegistry::IronOre:       return "icon_iron_ore.png";       // t84 铁矿石立方体图标
     case BlockRegistry::Torch:         return "icon_torch.png";          // t88 火把立方体图标（伪光源）
-    // t145 不完整方块：6 类木制半方块各走自己的 flat 2D 区分图标（tools/build_cube_icons.py
-    //   render_partial_2d 程序生成，木板贴图填充异形剪影）。6 类同为木板材质 → 共享木纹观感，
-    //   但剪影各异（半高 / L 阶 / 柱档 / 高板 / 方格 / 薄条）→ hotbar / 创造调色板肉眼即可辨图，
-    //   不再依赖 v1 的「共用 icon_planks + 仅 displayName 区分」（6 格同图难辨）。
-    case BlockRegistry::WoodSlab:          return "icon_wood_slab.png";          // 木板台阶：半高
-    case BlockRegistry::WoodStairs:        return "icon_wood_stairs.png";        // 木板楼梯：L 阶
-    case BlockRegistry::WoodFence:         return "icon_wood_fence.png";         // 木栅栏：柱档
-    case BlockRegistry::WoodDoor:          return "icon_wood_door.png";          // 木板门：高板
-    case BlockRegistry::WoodTrapdoor:      return "icon_wood_trapdoor.png";      // 木活板门：方格
-    case BlockRegistry::WoodPressurePlate: return "icon_wood_pressure_plate.png";// 木板压力板：薄
+    // t145/t163(d) 不完整方块图标：6 类木制半方块各走自己的区分图标（tools/build_cube_icons.py 程序生成）。
+    //   t163(d) slab/stairs/trapdoor/pressure_plate 升级为 **3D dimetric 立体图标**（render_partial_3d 按
+    //   实际形状投影：slab 半高 / stairs L 阶 / trapdoor 薄板 / pressure_plate 更薄更小，顶 + 两侧明暗同
+    //   完整方块 cube icon）；door/fence 保留 flat 2D 剪影（高板 / 柱档剪影更直观）。6 类同为木板材质 →
+    //   共享木纹观感，但形状各异 → hotbar / 创造调色板肉眼即可辨图，不依赖 displayName 区分。
+    case BlockRegistry::WoodSlab:          return "icon_wood_slab.png";          // 木板台阶：3D 半高盒
+    case BlockRegistry::WoodStairs:        return "icon_wood_stairs.png";        // 木板楼梯：3D L 阶（背墙 + 整步）
+    case BlockRegistry::WoodFence:         return "icon_wood_fence.png";         // 木栅栏：2D 柱档剪影
+    case BlockRegistry::WoodDoor:          return "icon_wood_door.png";          // 木板门：2D 高板剪影
+    case BlockRegistry::WoodTrapdoor:      return "icon_wood_trapdoor.png";      // 木活板门：3D 薄板
+    case BlockRegistry::WoodPressurePlate: return "icon_wood_pressure_plate.png";// 木板压力板：3D 更薄更小
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }

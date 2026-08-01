@@ -723,14 +723,19 @@ void PlayerController::placeBlock()
     }
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
-    if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放
     const quint8 idByte = quint8(m_selectedBlock);
-    // t146 放置态先算（供「重叠校验」+「实际写入」复用，逻辑同源）：slab 据命中面 ny、stairs/door 据
-    //   玩家水平朝向、fence/pressure_plate/trapdoor 默认 0（trapdoor 默认水平合）。door 占两格 → 另算上格。
+    // t146 放置态先算（供「重叠校验」+「实际写入」+「t163(b) 合并判定」复用，逻辑同源）：slab 据命中面 /
+    //   玩家俯仰、stairs/door 据玩家水平朝向、fence/pressure_plate/trapdoor 默认 0（trapdoor 默认水平合）。
+    //   door 占两格 → 另算上格。
     quint8 placeState = 0;
     if (m_selectedBlock == BlockRegistry::WoodSlab) {
-        // 命中顶面（ny=+1，放在方块上方）→ 下半(state=0)；命中底面（ny=-1，天花板下方）→ 上半(state=1)。
-        placeState = quint8(m_hitNy < 0 ? 1 : 0);
+        // t163(a) 上下半独立放置（spec「据命中面 / 玩家视线定上半下半」）：
+        //   命中顶面（ny=+1，放在方块上方）→ 下半(state=0)；命中底面（ny=-1，天花板下方）→ 上半(state=1)；
+        //   命中侧面（ny=0，靠墙放）→ 据玩家俯仰：仰视(m_pitch>0)→上半，俯视→下半。
+        //   （pitch 约定：>0 = 视线 y 分量为正 = 向上看，见 lookDirection / m_pitch=-42 默认略俯视。）
+        if (m_hitNy > 0) placeState = 0;
+        else if (m_hitNy < 0) placeState = 1;
+        else placeState = quint8(m_pitch > 0 ? 1 : 0);
     } else if (m_selectedBlock == BlockRegistry::WoodStairs) {
         // t147：state[1:0]=水平朝向；bit2=上下倒置。
         //   t163 朝向修正：朝向 = horizontalFacing **异或 1**（取玩家反向）→ 楼梯「开口」朝玩家侧
@@ -740,6 +745,25 @@ void PlayerController::placeBlock()
         //   「ny<0 → 上半」约定，使「点方块下方」在所有半方块（slab/stairs）统一得到「倒挂」变体。
         placeState = quint8(((horizontalFacing() & 3) ^ 1) | (m_hitNy < 0 ? 4 : 0));
     }
+    // t163(b) 同格双半砖合整（spec「同格下半砖上再放下半砖→合并为完整方块阻挡行走」）：
+    //   右键 slab 时若点中的就是 slab，且点击面朝向其空半（lower 顶面 ny>0 / upper 底面 ny<0）→ 在同格
+    //   补出互补半，合成 Planks 完整方块（满格碰撞 → 阻挡行走；机制等价 MC「double slab = full block」）。
+    //   合成前查重叠（满格 Planks 比半砖大 → 重查 overlapsPlayerAABB；玩家在格内则拒合，防自埋）。
+    //   侧面点击（ny=0）不合（自然语义是放邻格）；同半 slab（如 lower 上再放 lower）走常规 target 放置。
+    if (m_selectedBlock == BlockRegistry::WoodSlab
+        && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::WoodSlab) {
+        const quint8 hitState = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+        const bool hitUpper = (hitState & 1) != 0;
+        const bool merge = (m_hitNy > 0 && !hitUpper) || (m_hitNy < 0 && hitUpper);
+        if (merge) {
+            if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks, 0)) return;
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks, 0);
+            m_lastPlaceMs = now;
+            emit swingArm(); // 合成也是一次「放置」动作 → 挥手（t29）
+            return;
+        }
+    }
+    if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放
     const bool isDoor = (m_selectedBlock == BlockRegistry::WoodDoor);
     const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
     // 与玩家重叠 → 不放（防自埋 / 卡死）。t146：按「将放置方块的实际形状 sub-AABB」判 —— 不完整方块可能

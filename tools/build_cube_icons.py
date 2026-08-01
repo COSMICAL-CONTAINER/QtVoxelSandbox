@@ -143,13 +143,115 @@ def render_flat_2d(name):
 # trapdoor 方格 / pressure_plate 薄条。木板材质观感一致（同为木制半方块），仅剪影不同 → 玩家一眼分辨
 # 「这是哪类异形」，配合中文显示名（木板台阶 / 木板楼梯 / …）双重区分。
 PARTIALS = [
-    ("wood_slab",           "slab"),           # 木板台阶：下半矩形（半高）
-    ("wood_stairs",         "stairs"),         # 木板楼梯：下半整 + 左上 quarter（L 阶）
     ("wood_fence",          "fence"),          # 木栅栏：中心立柱 + 上下两条横档（柱档）
     ("wood_door",           "door"),           # 木板门：满高窄竖板 + 把手（高板）
-    ("wood_trapdoor",       "trapdoor"),       # 木活板门：满格 + 2×2 网格纹（方格）
-    ("wood_pressure_plate", "pressure_plate"), # 木板压力板：中部细横条（薄）
 ]
+
+# t163(d) 不完整方块 3D 立体图标：slab/stairs/trapdoor/pressure_plate 改用 dimetric 投影（同完整方块
+#   cube icon 路径）按实际形状缩放 —— slab 半高、stairs L 阶（背墙 + 整步）、trapdoor 薄板、pressure_plate
+#   更薄更小。替代 t145 flat 2D 剪影（v1 同木纹难辨）；3D 顶 + 两侧明暗强化「这是哪类异形」+ 保留木板材质观感。
+#   door/fence 保留 flat 2D（高板 / 柱档剪影更直观，非立方体投影能表达的形态）。
+PARTIALS_3D = [
+    ("wood_slab",           "slab"),           # 木板台阶：全 footprint 半高盒（y[0,0.5]）
+    ("wood_stairs",         "stairs"),         # 木板楼梯：整步（y[0,0.5] 全 footprint）+ 背墙（y[0.5,1] 背半 footprint）
+    ("wood_trapdoor",       "trapdoor"),       # 木活板门：合态薄板（全 footprint，y[0,0.1875]）
+    ("wood_pressure_plate", "pressure_plate"), # 木板压力板：贴地更薄更小（边距 1/16，y[0,1/16]）
+]
+
+
+def project_pt(x, y, z, cy_local):
+    """dimetric 投影 unit cube [0,1]^3 → 画布坐标。复用 render() 的 hw/dv/v/cx 几何；cy 可调以按形状竖直居中。
+    推导（与 render() 的 N/E/S/Wc 同基准）：sx = cx + (x-z)*hw；sy = cy + (1-y)*v + (x+z-1)*dv。"""
+    sx = cx + (x - z) * hw
+    sy = cy_local + (1.0 - y) * v + (x + z - 1.0) * dv
+    return np.array([sx, sy], dtype=np.float64)
+
+
+def _render_face_depth(canvas, depth_buf,
+                       o_w, uax_w, vax_w, o_s, uax_s, vax_s,
+                       face_img, shade):
+    """平行四边形面：3D 由 (o_w, uax_w, vax_w) 定义（用于深度），屏幕由 (o_s, uax_s, vax_s) 定义（用于光栅化）。
+    每像素反求 (u,v)∈[0,1] → 采样 face_img × shade，按深度 x+y+z（大者=离 +inf 视点近=胜）做 depth test。
+    替代单盒 painter's algorithm，正确处理 stairs 多盒遮挡（背墙 vs 整步共享 y=0.5 边界、屏幕投影重叠）。"""
+    u, vv = face_uv(o_s, uax_s, vax_s)
+    m = (u >= 0) & (u <= 1) & (vv >= 0) & (vv <= 1)
+    u_c = np.clip(u, 0, 1)
+    vv_c = np.clip(vv, 0, 1)
+    wx = o_w[0] + u_c * uax_w[0] + vv_c * vax_w[0]
+    wy = o_w[1] + u_c * uax_w[1] + vv_c * vax_w[1]
+    wz = o_w[2] + u_c * uax_w[2] + vv_c * vax_w[2]
+    depth = wx + wy + wz
+    col = sample(face_img, u_c, vv_c).copy()
+    col[..., 0:3] *= shade
+    draw = m & (depth > depth_buf)
+    canvas[draw] = col[draw]
+    depth_buf[draw] = depth[draw]
+
+
+def _render_box_d(canvas, depth_buf, x0, x1, y0, y1, z0, z1, top_face, side_face, cy_local):
+    """渲染轴对齐盒子的 3 个可见面（顶 y=y1 / 右 x=x1 / 左 z=z1）。各面 origin+uax+vax（3D + 屏幕双套）传深度渲染。
+    UV 约定与 render() 同：顶面 u=x,v=z；右面 u=z,v=y；左面 u=x,v=y；texture 在各面满铺（slab 侧面贴图被竖向压缩，
+    机制等价 MC slab 侧面纹理被压扁）。shade：顶 1.00 / 右 0.80 / 左 0.62（光自右上，与 cube icon 一致）。"""
+    # 顶面 y=y1：origin (x0,y1,z0)，u→+x，v→+z。
+    o_s = project_pt(x0, y1, z0, cy_local)
+    _render_face_depth(canvas, depth_buf,
+                       np.array([x0, y1, z0]), np.array([x1 - x0, 0.0, 0.0]), np.array([0.0, 0.0, z1 - z0]),
+                       o_s, project_pt(x1, y1, z0, cy_local) - o_s, project_pt(x0, y1, z1, cy_local) - o_s,
+                       top_face, 1.00)
+    # 右面 x=x1：origin (x1,y0,z0)，u→+z，v→+y。
+    o_s = project_pt(x1, y0, z0, cy_local)
+    _render_face_depth(canvas, depth_buf,
+                       np.array([x1, y0, z0]), np.array([0.0, 0.0, z1 - z0]), np.array([0.0, y1 - y0, 0.0]),
+                       o_s, project_pt(x1, y0, z1, cy_local) - o_s, project_pt(x1, y1, z0, cy_local) - o_s,
+                       side_face, 0.80)
+    # 左面 z=z1：origin (x0,y0,z1)，u→+x，v→+y。
+    o_s = project_pt(x0, y0, z1, cy_local)
+    _render_face_depth(canvas, depth_buf,
+                       np.array([x0, y0, z1]), np.array([x1 - x0, 0.0, 0.0]), np.array([0.0, y1 - y0, 0.0]),
+                       o_s, project_pt(x1, y0, z1, cy_local) - o_s, project_pt(x0, y1, z1, cy_local) - o_s,
+                       side_face, 0.62)
+
+
+def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
+    """异形方块 dimetric 立体图标：木板贴图按实际形状投影 —— slab 半高 / stairs L 阶 / trapdoor 薄板 /
+    pressure_plate 更薄更小。1~2 个轴对齐子盒 + depth buffer（x+y+z 大者胜）解多盒遮挡；顶/两侧明暗同
+    cube icon。形状竖直居中（cy_local 据 y_mid 推）使小尺寸 icon 不贴画布底。"""
+    top = load_face(fill_top)
+    side = load_face(fill_side)
+    canvas = np.zeros((W, W, 4), dtype=np.float64)
+    depth_buf = np.full((W, W), -np.inf)
+
+    if shape == "slab":
+        boxes = [(0.0, 1.0, 0.0, 0.5, 0.0, 1.0)]                       # 全 footprint 半高
+        y_min, y_max = 0.0, 0.5
+    elif shape == "trapdoor":
+        boxes = [(0.0, 1.0, 0.0, 0.1875, 0.0, 1.0)]                    # 合态薄板
+        y_min, y_max = 0.0, 0.1875
+    elif shape == "pressure_plate":
+        boxes = [(1.0 / 16.0, 15.0 / 16.0, 0.0, 1.0 / 16.0,
+                  1.0 / 16.0, 15.0 / 16.0)]                            # 贴地薄板 + 边距
+        y_min, y_max = 0.0, 1.0 / 16.0
+    elif shape == "stairs":
+        # 整步（全 footprint 半高）+ 背墙（背半 footprint 上半）。渲染序无关（depth buffer 解决遮挡）；
+        #   背墙 z[0,0.5] = 背半（z 小 = 背，对应 N 角侧），整步 z[0,1] = 全 footprint。
+        boxes = [
+            (0.0, 1.0, 0.5, 1.0, 0.0, 0.5),  # 背墙
+            (0.0, 1.0, 0.0, 0.5, 0.0, 1.0),  # 整步
+        ]
+        y_min, y_max = 0.0, 1.0
+    else:
+        img = Image.fromarray(canvas.astype(np.uint8), "RGBA")
+        return img.resize((OUT, OUT), Image.LANCZOS)
+
+    # 形状竖直居中：cy_local 使形状 y_mid 的屏幕中心落在画布中心 W/2（公式由 project_pt sy 反解）。
+    y_mid = (y_min + y_max) / 2.0
+    cy_local = W / 2.0 - (1.0 - y_mid) * v
+
+    for (x0, x1, y0, y1, z0, z1) in boxes:
+        _render_box_d(canvas, depth_buf, x0, x1, y0, y1, z0, z1, top, side, cy_local)
+
+    img = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGBA")
+    return img.resize((OUT, OUT), Image.LANCZOS)
 
 
 def _shape_mask(shape):
@@ -239,6 +341,13 @@ def main():
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)
     # t145 不完整方块 flat 2D 区分图标（6 类木制半方块）。
+    # t163(d)：slab/stairs/trapdoor/pressure_plate 升级为 3D dimetric 立体图标（按实际形状投影），
+    #   door/fence 保留 flat 2D（剪影更直观）。
+    for out_name, shape in PARTIALS_3D:
+        img = render_partial_3d(shape)
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
     for out_name, shape in PARTIALS:
         img = render_partial_2d(shape)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
