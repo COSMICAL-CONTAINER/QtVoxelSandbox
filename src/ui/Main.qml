@@ -607,19 +607,31 @@ Window {
         //   材质 NoLighting 自发光（同地形 / 线框 / 玩家模型已验证可见路径；lessons-learned「所有可见
         //   Model 用 NoLighting」）。太阳落到地平线下（sunDir.y<=0，夜间）隐藏。
         //   分层（PLAN §2）：纯呈现层，只读 worldClock.sunDir（Game 层 Q_PROPERTY），绝不反向写。
+        //
+        //   t164 太阳贴图：几何用 BillboardQuad（自定义广告牌四边形，+Z 法线单面），**替代内置
+        //   #Sphere**。根因（t31 诊断）：本工程实测静态 `source:"#Cube"/"#Sphere"` Model 不渲染
+        //   （自定义 QQuick3DGeometry——地形/线框/BillboardQuad 掉落物——均可见，内置 primitives 不可见），
+        //   故太阳之前虽挂了 sun.png 贴图却永远空（R18「太阳依旧不显示」即此）。改走 BillboardQuad
+        //   自定义几何 + NoLighting PrincipledMaterial 这条**已验证可见**路径 → 太阳显贴图而非空。
+        //   **朝相机（billboard）**：QQuick3DNode 无 lookAt 属性（写 `lookAt:` 会触发 objectCreationFailed，
+        //   见 lessons-learned qmlcachegen 坑），故令承载 Model 的世界欧拉 = 相机欧拉（cam.eulerRotation）
+        //   → 四边形 +Z 法线恒 = -相机 forward → 指回相机 → 正面恒正对玩家（同 Main.qml 材料段掉落物
+        //   BillboardQuad 已验证路径，第一/第三人称三模式都对）。太阳盘「贴脸相机」恒呈轴对齐圆盘（不随
+        //   视角透视压缩），机制对齐 MC 1.0 天空太阳（平面盘）。
         Model {
             visible: worldClock.sunDir.y > 0.0   // 太阳在地平线上才显（夜间隐藏）
-            source: "#Sphere"
+            geometry: BillboardQuad {}
             position: {
                 const eye = player.position
                 const s = worldClock.sunDir
                 return Qt.vector3d(eye.x + s.x * 40, eye.y + s.y * 40, eye.z + s.z * 40)
             }
-            scale: Qt.vector3d(12.0, 12.0, 12.0)   // t164b：放大（正午在头顶，需抬头看；6 仍小，→12）
+            eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, 0)   // billboard 朝相机
+            scale: Qt.vector3d(8.0, 8.0, 8.0)   // 天空太阳盘（quad 1×1 ×8；距相机 40 格，显眼不糊屏）
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
-                baseColor: "#ffffff"   // 白底乘贴图
-                baseColorMap: Texture { source: "qrc:/textures/sun.png" } // 太阳贴图（实心不透明盘，t164b）
+                baseColor: "#ffffff"   // 白底乘贴图（纹理原色直出）
+                baseColorMap: Texture { source: "qrc:/textures/sun.png" } // 太阳贴图（实心不透明盘）
             }
         }
 
