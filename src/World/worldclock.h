@@ -34,6 +34,15 @@
 //   调试 ~每 0.4s 一步）。skyLight 不走此信号，仍随 dayPhaseChanged 每 tick 平滑刷
 //   （clearColor / DirectionalLight / 地形 baseColor 的昼夜过渡无跳变）。
 //
+// t155 编辑活跃期太阳步进节流：sunChanged 跨步会触发全部 chunk 全量重建顶点光（绕 dirty，18 mesh）
+//   —— 调试 30s 周期下约每 83ms 一次、正常 1200s 周期约每 3.3s 一次。玩家密集破/放时这会「抢帧」
+//   （与编辑即时重建争主线程）。故编辑活跃（近 kEditCooldownMs 内有 setBlock）期间**跳过**本 tick 的
+//   太阳跨步 + 不发 sunChanged → mesher 不全量重建；编辑冷却过后下一 idle tick 按 newPhase 量化 catch-up
+//   （太阳一步跳到当前量化位，影 / 天空太阳 Model 随之刷新）。**昼夜亮度（skyLight）不受影响**——仍随
+//   dayPhaseChanged 每 tick 平滑刷，clearColor / DirectionalLight / baseColor 无冻结，只是顶点光方向
+//   （影）暂驻。编辑「活跃」由呈现层 QML 经 World::worldChanged → noteEditActivity() 反馈给本时钟（Game
+//   层不 include / 不依赖 World；QML 桥接无 C++ 向上依赖，PLAN §2 分层不破）。
+//
 // 暴露给 QML（呈现层只读消费）：
 //   - dayPhase   0..1 循环相位（NOTIFY dayPhaseChanged）
 //   - skyLight   [0,1] 天光乘子（纯函数 dayPhase→亮度；同 NOTIFY 派生）
@@ -70,6 +79,11 @@ public:
     // 不影响生产节律常量（kDaySecs 不变；切换的是运行期所用周期）。
     Q_INVOKABLE void toggleDebugFast();
 
+    // t155 编辑活跃期反馈入口（呈现层 QML 经 World::worldChanged 调）：记录「最近一次编辑」时间戳，
+    //   供 onTick 判定编辑活跃期（近 kEditCooldownMs 内有编辑）→ 跳过太阳跨步全量重建，避免抢帧。
+    //   分层（PLAN §2）：Game 层时间源，不 include / 不依赖 World；编辑信号由 QML 桥接转发（无 C++ 向上依赖）。
+    Q_INVOKABLE void noteEditActivity();
+
 signals:
     void dayPhaseChanged();   // 每 tick 发（phase 推进）；skyLight 派生于 phase，同信号刷新
     void debugFastChanged();
@@ -88,6 +102,9 @@ private:
     float periodSecs() const;
     // t123：由「量化后的相位」算太阳 elev/azim/dir，写进成员。仅跨步时调（onTick 内判定）。
     void recomputeSun(float quantizedPhase);
+    // t155：编辑活跃期判定 ——「最近一次 noteEditActivity() 至今 < kEditCooldownMs」即为活跃。
+    //   onTick 跨步判定时读 m_elapsedMs（本 tick 已推进后的当前值），与编辑时间戳同基准。
+    bool editingActive() const;
 
     // 100ms（10Hz）：昼夜 lerp 缓慢，10Hz 已视觉平滑且不无谓刷爆 QML 绑定（与 PlayerController
     // 的 16ms 物理 tick 解耦——时钟不需要 60Hz）。
@@ -105,11 +122,20 @@ private:
     //     重建」从 10Hz 降到 ~步数/周期 Hz，代价是顶点光按步进变化（baseColor 仍平滑补昼夜过渡）。
     static constexpr float kSunMaxElevDeg = 50.f;
     static constexpr int   kSunSteps      = 360;
+    // t155 编辑活跃期窗口（毫秒）：近此窗口内有 setBlock（worldChanged）即视为「编辑活跃」→ 太阳跨步
+    //   节流跳过。取 1500ms：单次破/放冻结随后 1 个太阳跨步、连续编辑期间持续冻结、玩家停手 >1.5s
+    //   即恢复（影 / 天空太阳 catch-up）。值偏小 → 编辑间隙仍偶发抢帧；偏大 → 停手后影滞后明显。1.5s
+    //   在「编辑密集段不卡」与「停手影即时恢复」间取平衡。
+    static constexpr int kEditCooldownMs = 1500;
 
     float m_phase = 0.f;      // 0..1 循环相位（由 m_elapsedMs 派生，避免浮点累积漂移）
     qint64 m_elapsedMs = 0;   // 累计已流逝毫秒（phase = (elapsed mod period) / period）
     bool m_debugFast = false;
     QTimer m_timer;
+    // t155 最近一次 noteEditActivity() 时的 m_elapsedMs 快照（编辑活跃期判定基准）。初值 = -(cooldown+1)
+    //   → 启动首 tick 即「不活跃」（diff = m_elapsedMs - 初值 ≥ cooldown），避免世界 / 尺寸初始化期的
+    //   worldChanged 把首个太阳跨步误冻结（启动太阳本在天顶，冻结亦无视觉差，但语义求稳）。
+    qint64 m_lastEditElapsedMs = -qint64(kEditCooldownMs) - 1;
 
     // t123 太阳态（量化步进更新；首帧 mesh 未绑前用天顶正午）：
     QVector3D m_sunDir{0.f, 1.f, 0.f};   // 单位向量指向太阳（光来自此向）；默认天顶

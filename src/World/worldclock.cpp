@@ -36,6 +36,21 @@ void WorldClock::toggleDebugFast()
     emit debugFastChanged();
 }
 
+// t155 编辑活跃期反馈：呈现层 QML 在 World::worldChanged 时调本方法，把「最近编辑」时间戳记为当前
+//   m_elapsedMs（与 onTick 跨步判定同基准）。onTick 据此判 editingActive() → 编辑活跃期跳过太阳跨步。
+//   仅记时间戳，不改时间本身（无 setTime，PLAN §2 时间单向流逝）。
+void WorldClock::noteEditActivity()
+{
+    m_lastEditElapsedMs = m_elapsedMs;
+}
+
+// t155 编辑活跃期判定：「最近编辑至今 < kEditCooldownMs」即活跃。读 m_elapsedMs（onTick 跨步判定时
+//   已是本 tick 推进后的当前值）。初值哨兵使启动期判不活跃（见 m_lastEditElapsedMs 注释）。
+bool WorldClock::editingActive() const
+{
+    return m_elapsedMs - m_lastEditElapsedMs < qint64(kEditCooldownMs);
+}
+
 // t123：由相位算太阳位置。轨道角 psi = 2π·phase（0=正午）：
 //   elev = maxElev·cos(psi)   —— 正午 +maxElev（最高）、黄昏/黎明 0°、子夜 -maxElev（地平下）。
 //   水平绕转角 = psi（1 周期 1 圈）：正午 sunDir 朝 +Z+Y（约定 +Z=南）、黄昏 +X、子夜 -Z-下、黎明 -X。
@@ -75,10 +90,16 @@ void WorldClock::onTick()
     }
     // t123：太阳量化步进。按 newPhase 量化到 kSunSteps 步；跨步才重算 sunDir/elev/azim + 发
     //   sunChanged（mesher 绑此信号重建顶点光）。量化把 mesh 重建从 10Hz 降到 ~kSunSteps/period Hz。
+    // t155 编辑活跃期节流：玩家近 kEditCooldownMs 内有 setBlock（编辑活跃）→ 跳过本 tick 的太阳跨步
+    //   （不重算 sunDir / 不发 sunChanged → mesher 不全量重建 18 mesh，避免与编辑即时重建争帧）。编辑
+    //   冷却过后下一 idle tick：step 已按 newPhase 推进数步，`step != m_sunStep` 成立 → 一次 catch-up
+    //   跨步（太阳方向一步跳到当前量化位，影 / 天空太阳随之刷新）。昼夜亮度（skyLight）不受此节流影响
+    //   —— 仍随 dayPhaseChanged 每 tick 平滑刷（clearColor / DirectionalLight / baseColor 无冻结）。
+    //   编辑信号由呈现层 QML 经 World::worldChanged → noteEditActivity() 桥接（Game 层不依赖 World）。
     if (kSunSteps > 0) {
         int step = int(std::floor(newPhase * float(kSunSteps)));
         if (step >= kSunSteps) step = kSunSteps - 1; // phase==1.0 边界保护（floor 可能取到 kSunSteps）
-        if (step != m_sunStep) {
+        if (step != m_sunStep && !editingActive()) {
             m_sunStep = step;
             recomputeSun(float(step) / float(kSunSteps));
             emit sunChanged();

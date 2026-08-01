@@ -29,6 +29,13 @@ class ChunkGeometry : public QQuick3DGeometry
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(ChunkGeometry)
+public:
+    // t155 重建触发源（可观测性）：区分「编辑即时重建」与「太阳步进重建」，供日志核对破/放后是否
+    //   <1 帧即时刷新（dev-spec t155 验收「破块贴图立刻消失，无 3-4s 残留」）。dirty = 编辑 / 初次
+    //   加载触发（onWorldChanged，dirty-gated，**同步**于 setBlock）；sun = 太阳跨步触发（setSunDir，
+    //   绕 dirty 全量重算顶点光，t155 编辑活跃期被 WorldClock 节流跳过）；water = 水段开关切换。
+    enum class RebuildReason { Dirty, Sun, Water };
+    Q_ENUM(RebuildReason)
     Q_PROPERTY(World *world READ world WRITE setWorld NOTIFY worldChanged)
     Q_PROPERTY(int cx READ cx WRITE setCx NOTIFY cxChanged)
     Q_PROPERTY(int cz READ cz WRITE setCz NOTIFY czChanged)
@@ -84,8 +91,8 @@ signals:
     void meshRebuilt();
 
 private:
-    void onWorldChanged();            // worldChanged 槽：仅 dirty chunk 才重建
-    void buildMesh();                 // 局部 culled mesh + 写入 QQuick3DGeometry + 清脏
+    void onWorldChanged();            // worldChanged 槽：仅 dirty chunk 才重建（编辑即时，同步于 setBlock）
+    void buildMesh(RebuildReason reason); // 局部 culled mesh + 写入 QQuick3DGeometry + 清脏（编辑路径）
     int tileFor(quint8 block, int face) const;
     // t153 PCF 软影（方案③：t151 顶点光基底 + heightmap 正交深度图）：给定世界空间顶点，沿 sunDir 水平
     //   方向步进 kMaxShadow 格、2×2 PCF 采样路径列 heightmap，返回 [0,1] 软影因子（0=全亮、1=全影）。

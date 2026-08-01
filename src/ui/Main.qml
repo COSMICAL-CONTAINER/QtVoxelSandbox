@@ -204,6 +204,13 @@ Window {
     // 呈现层只读消费、绝不反向写时间（PLAN §2 分层）。F6 切调试加速（~30s 一周期）便于肉眼验收。
     WorldClock { id: worldClock }
 
+    // t155 编辑活跃期 → 太阳步进节流桥接：World 任一编辑（破 / 放 / 落沙着地 / 尺寸初始化）发 worldChanged；
+    //   呈现层把「编辑活跃」反馈给 WorldClock.noteEditActivity()，使其在编辑活跃期（近 1.5s 内有编辑）跳过
+    //   太阳跨步全量 mesh 重建（避免与编辑即时重建争帧）。纯 QML 桥接，不引入 C++ 跨层依赖
+    //   （WorldClock 为 Game 层、不 include World；QML 同时持二者引用并桥接 = 向下合法，PLAN §2 分层不破）。
+    //   连接为同线程直连 → noteEditActivity 在 setBlock 的 emit worldChanged 栈内同步执行，时间戳精准。
+    Connections { target: theWorld; function onWorldChanged() { worldClock.noteEditActivity() } }
+
     // 昼↔夜颜色 / 亮度 lerp 辅助（t09）：m=worldClock.skyLight ∈ [0,1]（0=子夜、1=正午）。
     // day 颜色 #9ec6e8 = (0.620,0.776,0.910)；night 颜色 #0b1026 = (0.043,0.063,0.149)。
     // 不影响 NoLighting 材质方块的自发光（地形仍按其材质常数显——昼夜只改环境/天光，spec）。
