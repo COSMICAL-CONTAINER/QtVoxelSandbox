@@ -66,10 +66,26 @@ Item {
     // 火焰闪烁动画驱动：燃烧时 0..1 循环（NumberAnimation），Canvas 据此调火焰高度 / 宽度 → 视觉跳动。
     property real flameFlicker: 0.0
 
-    // t110：当前指针所在槽的「组:下标」key（供 window.hoveredSlotKey 提升 → 数字键交换）。各槽 HoverHandler
-    //   onHoveredChanged 维护（进入写、离开按 key 守卫清除，防相邻槽进出竞态互清）。组名与 readSlot/writeSlot
-    //   一致：in / fuel / out / main / hotbar。
+    // t110：当前指针所在槽的「组:下标」key（供 window.hoveredSlotKey 提升 → 数字键交换 + t167 左键拖动
+    //   起点槽）。各槽 HoverHandler onHoveredChanged 维护（进入写、离开按 key 守卫清除，防相邻槽进出竞态
+    //   互清）。组名与 readSlot/writeSlot 一致：in / fuel / out / main / hotbar。
     property string hoveredKey: ""
+
+    // t167 左键拖动均分（spec：左键按住拖过 N 格 → 实时均分 floor(count/N)、余数留光标）。手势由 root 级
+    //   DragHandler(LeftButton) 总控：按下不动时 per-slot 左键 TapHandler 抓（slotLeft 单点拾取/放置/合并/互换 /
+    //   Shift 搬运），拖动越阈值 → DragHandler 激活夺抓 → onActiveChanged 驱动 begin/endLeftDrag；逐槽 HoverHandler
+    //   在 leftDragActive 期间收集扫过格子（addDragSlot 即触发 redistributeLive 实时重分）。dragSlots 存「组:下标」
+    //   字符串；dragHeld* 为按下瞬间光标栈快照；dragOriginal/dragWritten 支撑实时重分的撤销机制（每滑入新格先
+    //   撤销上轮写入再重分）。in / fuel / out / main / hotbar 五类槽统一参与（与 SurvivalInventory / CraftingTableUI
+    //   同算法；本文件无 craft 合成格，故 redistributeLive 无 craft 排除分支）。
+    property bool leftDragActive: false
+    property var dragSlots: []              // "in:0" / "fuel:0" / "out:0" / "main:5" / "hotbar:0"
+    property int dragHeldId: 0
+    property int dragHeldCount: 0
+    // 实时重分撤销机制：dragOriginal 记每槽 drag 前原始栈（首次 encounter 快照）；dragWritten 记本轮已写槽。
+    // 每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginLeftDrag / endLeftDrag 重置。
+    property var dragOriginal: ({})
+    property var dragWritten: ({})
 
     // ── 栈操作（与 CraftingTableUI.qml 完全一致：拾取/放置/合并/互换 4 case）──
     function resolveClick(curId, curCount) {
@@ -128,6 +144,122 @@ Item {
         else if (group === "out")  { root.outId = id;  root.outCount = count;  root.slotRev++ }
         else if (group === "main") { root.hotbar.mainSetStack(index, id, count) }
         else if (group === "hotbar"){ root.hotbar.setStack(index, id, count) }
+    }
+
+    // ── t167 左键拖动均分辅助（与 SurvivalInventory / CraftingTableUI 同算法，独立维护保持文件可读）──
+    function slotKey(group, index) { return group + ":" + index }
+    function dragHasKey(key) {
+        for (let i = 0; i < root.dragSlots.length; ++i) if (root.dragSlots[i] === key) return true
+        return false
+    }
+    function addDragSlot(key) {
+        if (root.dragHasKey(key)) return
+        // 异物槽不入 dragSlots（addDragSlot 前判）。仅在分发态（dragHeldId≠0）过滤——读槽当前栈，非空且
+        // id≠dragHeldId 则跳过（与 redistributeLive 的 eligible 过滤一致；让绿框只亮真正会收物的空/同 id 槽）。
+        // dragHeldId=0（空手拖）不过滤，让起点槽入 dragSlots 供 endLeftDrag→singleLeftClick。
+        if (root.dragHeldId !== 0) {
+            const p0 = key.split(":")
+            const cur = root.readSlot(p0[0], parseInt(p0[1], 10))
+            if (cur.id !== 0 && cur.id !== root.dragHeldId) return
+        }
+        root.dragSlots = root.dragSlots.concat([key])   // 新数组引用 → 依赖 dragSlots 的绑定刷新
+        root.redistributeLive()                          // 每滑入新格实时重算 N 等分（撤销 + 重分）
+    }
+    // 手势生命周期（root DragHandler.onActiveChanged 调）。
+    function beginLeftDrag() {
+        root.dragHeldId = root.hotbar.heldBlock
+        root.dragHeldCount = root.hotbar.heldCount
+        root.dragSlots = []
+        root.dragOriginal = ({})                        // 重置原始栈快照
+        root.dragWritten = ({})                         // 重置已写槽记录
+        root.leftDragActive = true
+        if (root.hoveredKey !== "") root.addDragSlot(root.hoveredKey)   // 起点槽（按下时指针所在格）
+    }
+    function endLeftDrag() {
+        if (!root.leftDragActive) return
+        root.leftDragActive = false
+        const n = root.dragSlots.length
+        // N≥2 已在 drag 途中实时分完（redistributeLive 每滑入新格重算），此处不再均分。
+        // N===1 退化为单格左键（拾取/放置/合并/互换）—— 微拖（越阈值但未离开起点格）的常规左键语义。
+        if (n === 1) {
+            const p = root.dragSlots[0].split(":")
+            root.singleLeftClick(p[0], parseInt(p[1], 10))
+        }
+        root.dragSlots = []
+        root.dragOriginal = ({})
+        root.dragWritten = ({})
+    }
+    // 实时均分：每滑入新格（addDragSlot 触发）即重算 floor(dragHeldCount/N) 入格、余数实时回光标。撤销机制：
+    // dragOriginal 快照每槽 drag 前原始栈（首次 encounter 拍），dragWritten 记本轮已写槽；下次重分前先据
+    // dragOriginal 把已写格恢复，再按新 N 重分 → 用户看到「滑第 2 格变对半、第 3 格变三等分」的实时反馈。
+    // 合格过滤：空槽 / 同 id 未满；异物 / 已满槽跳过。守恒：写回总量 + 余数 = dragHeldCount 快照。N≤1 不分
+    // （保留单格左键给 endLeftDrag 处理；空手 drag 无意义）。与 SurvivalInventory / CraftingTableUI 同算法。
+    function redistributeLive() {
+        // 1) 撤销上一轮写入（恢复 dragOriginal 记录的原始栈），确保重分前所有 dragSlots 回到 drag 前态。
+        for (const key in root.dragWritten) {
+            const wp = key.split(":")
+            const orig = root.dragOriginal[key]
+            root.writeSlot(wp[0], parseInt(wp[1], 10), orig.id, orig.count)
+        }
+        root.dragWritten = ({})
+
+        const heldId = root.dragHeldId
+        const total = root.dragHeldCount
+        const cap = root.hotbar.maxStackSize(heldId)
+
+        // 2) 重建合格清单；首次 encounter 的槽拍原始栈快照（此后该槽读到的是本轮写入值，须靠快照还原）。
+        let eligible = []
+        const seen = {}
+        for (let i = 0; i < root.dragSlots.length; ++i) {
+            const key = root.dragSlots[i]
+            if (seen[key]) continue
+            seen[key] = true
+            const p = key.split(":")
+            if (!root.dragOriginal[key]) {
+                const cur = root.readSlot(p[0], parseInt(p[1], 10))
+                root.dragOriginal[key] = { id: cur.id, count: cur.count }
+            }
+            const orig = root.dragOriginal[key]
+            if (orig.id === 0 || (orig.id === heldId && orig.count < cap))
+                eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count })
+        }
+
+        // n>total 截断 eligible 到 total 项（每格至少 1 件；N≤count）。如 8 件拖 9 格 → 第 9 格不分，避免被
+        // 「扫过即亮绿框」错觉。截断在 n<=1 早退之前。
+        let n = eligible.length
+        if (n > total) { eligible = eligible.slice(0, total); n = eligible.length }
+        // N≤1 / 空手 / 无物：不分（保留单格左键给 endLeftDrag；空手 drag 无意义）。余数 = 原始快照。
+        if (n <= 1 || heldId === 0 || total <= 0) {
+            root.hotbar.heldBlock = heldId
+            root.hotbar.heldCount = total
+            return
+        }
+
+        // 3) floor(total/N) 入格（cap 钳制防溢出），余数留光标；记 dragWritten 供下轮撤销。
+        const per = Math.floor(total / n)
+        let remaining = total
+        if (per > 0) {
+            for (let i = 0; i < n; ++i) {
+                const e = eligible[i]
+                const place = Math.min(per, cap - e.base)
+                if (place <= 0) continue
+                root.writeSlot(e.group, e.index, heldId, e.base + place)
+                root.dragWritten[e.key] = true
+                remaining -= place
+            }
+        }
+        root.hotbar.heldBlock = remaining > 0 ? heldId : 0
+        root.hotbar.heldCount = remaining
+    }
+    // 单格左键（N===1 微拖退路 = resolveClick：空手拾取 / 持物放置 / 合并 / 互换）。正常单击走 per-slot
+    //   TapHandler.onTapped（slotLeft）；仅当左键越阈值但只扫过起点一格时经此路径补一次单击语义。
+    function singleLeftClick(group, index) {
+        const cur = root.readSlot(group, index)
+        const r = root.resolveClick(cur.id, cur.count)
+        if (!r) return
+        root.writeSlot(group, index, r.slotId, r.slotCount)
+        root.hotbar.heldBlock = r.heldId
+        root.hotbar.heldCount = r.heldCount
     }
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
@@ -248,6 +380,19 @@ Item {
         if (changed) root.slotRev++
     }
 
+    // t167 左键拖动均分总控：DragHandler(LeftButton) 在 root 监听。按下不动时 per-slot 左键 TapHandler 抓
+    //   （slotLeft 单点拾取/放置/合并/互换 / Shift 搬运）；拖动越阈值 → DragHandler 激活夺抓 → onActiveChanged
+    //   驱动 begin/endLeftDrag。逐槽 HoverHandler 在 leftDragActive 期间收集扫过格（addDragSlot 即
+    //   redistributeLive 实时重分）。target:null 防 DragHandler 默认拖动父 Item（面板）。
+    DragHandler {
+        acceptedButtons: Qt.LeftButton
+        target: null
+        onActiveChanged: {
+            if (active) root.beginLeftDrag()
+            else root.endLeftDrag()
+        }
+    }
+
     // 半透明遮罩：仅吸收点击（防穿透），不关闭面板（E / Esc / closed 信号才关）。
     // 手持物时点遮罩区 → 丢弃为实体（同 CraftingTableUI / SurvivalInventory）。
     Rectangle {
@@ -348,11 +493,26 @@ Item {
                             } else if (root.hoveredItemId === root.inId) {
                                 root.hoveredItemId = 0
                             }
-                            // t110：track hoveredKey 供数字键交换（in:0）。
+                            // t110：track hoveredKey 供数字键交换 / t167 左键拖动起点槽（in:0）。
                             const key = "in:0"
                             if (hovered) root.hoveredKey = key
                             else if (root.hoveredKey === key) root.hoveredKey = ""
+                            // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                            if (hovered && root.leftDragActive) root.addDragSlot(key)
                         }
+                    }
+                    // t167 均分拖拽高亮（异物槽纵使被扫过也不亮）。
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: "#7fe57f"; border.width: 2
+                        visible: {
+                            root.dragSlots; root.leftDragActive; root.slotRev
+                            return root.leftDragActive
+                                && root.dragHasKey("in:0")
+                                && (root.inId === 0 || root.inId === root.dragHeldId)
+                        }
+                        z: 10
                     }
                 }
 
@@ -401,11 +561,26 @@ Item {
                             } else if (root.hoveredItemId === root.fuelId) {
                                 root.hoveredItemId = 0
                             }
-                            // t110：track hoveredKey 供数字键交换（fuel:0）。
+                            // t110：track hoveredKey 供数字键交换 / t167 左键拖动起点槽（fuel:0）。
                             const key = "fuel:0"
                             if (hovered) root.hoveredKey = key
                             else if (root.hoveredKey === key) root.hoveredKey = ""
+                            // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                            if (hovered && root.leftDragActive) root.addDragSlot(key)
                         }
+                    }
+                    // t167 均分拖拽高亮（异物槽纵使被扫过也不亮）。
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: "#7fe57f"; border.width: 2
+                        visible: {
+                            root.dragSlots; root.leftDragActive; root.slotRev
+                            return root.leftDragActive
+                                && root.dragHasKey("fuel:0")
+                                && (root.fuelId === 0 || root.fuelId === root.dragHeldId)
+                        }
+                        z: 10
                     }
                 }
 
@@ -518,11 +693,26 @@ Item {
                             } else if (root.hoveredItemId === root.outId) {
                                 root.hoveredItemId = 0
                             }
-                            // t110：track hoveredKey 供数字键交换（out:0）。
+                            // t110：track hoveredKey 供数字键交换 / t167 左键拖动起点槽（out:0）。
                             const key = "out:0"
                             if (hovered) root.hoveredKey = key
                             else if (root.hoveredKey === key) root.hoveredKey = ""
+                            // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                            if (hovered && root.leftDragActive) root.addDragSlot(key)
                         }
+                    }
+                    // t167 均分拖拽高亮（异物槽纵使被扫过也不亮）。
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: "#7fe57f"; border.width: 2
+                        visible: {
+                            root.dragSlots; root.leftDragActive; root.slotRev
+                            return root.leftDragActive
+                                && root.dragHasKey("out:0")
+                                && (root.outId === 0 || root.outId === root.dragHeldId)
+                        }
+                        z: 10
                     }
                 }
             }
@@ -591,11 +781,26 @@ Item {
                                 } else if (root.hoveredItemId === itemId) {
                                     root.hoveredItemId = 0
                                 }
-                                // t110：track hoveredKey 供数字键交换（main:index）。
+                                // t110：track hoveredKey 供数字键交换 / t167 左键拖动收集（main:index）。
                                 const key = "main:" + index
                                 if (hovered) root.hoveredKey = key
                                 else if (root.hoveredKey === key) root.hoveredKey = ""
+                                // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                                if (hovered && root.leftDragActive) root.addDragSlot(key)
                             }
+                        }
+                        // t167 均分拖拽高亮（异物槽纵使被扫过也不亮）。
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"
+                            border.color: "#7fe57f"; border.width: 2
+                            visible: {
+                                root.dragSlots; root.leftDragActive; root.hotbar.mainRevision
+                                return root.leftDragActive
+                                    && root.dragHasKey("main:" + index)
+                                    && (mainId === 0 || mainId === root.dragHeldId)
+                            }
+                            z: 10
                         }
                     }
                 }
@@ -661,11 +866,26 @@ Item {
                                     } else if (root.hoveredItemId === slotId) {
                                         root.hoveredItemId = 0
                                     }
-                                    // t110：track hoveredKey 供数字键交换（hotbar:index）。
+                                    // t110：track hoveredKey 供数字键交换 / t167 左键拖动收集（hotbar:index）。
                                     const key = "hotbar:" + index
                                     if (hovered) root.hoveredKey = key
                                     else if (root.hoveredKey === key) root.hoveredKey = ""
+                                    // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                                    if (hovered && root.leftDragActive) root.addDragSlot(key)
                                 }
+                            }
+                            // t167 均分拖拽高亮（异物槽纵使被扫过也不亮）。
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "transparent"
+                                border.color: "#7fe57f"; border.width: 2
+                                visible: {
+                                    root.dragSlots; root.leftDragActive; root.hotbar.slotRevision
+                                    return root.leftDragActive
+                                        && root.dragHasKey("hotbar:" + index)
+                                        && (slotId === 0 || slotId === root.dragHeldId)
+                                }
+                                z: 10
                             }
                         }
                     }
