@@ -90,16 +90,19 @@ void Hotbar::setSelectedSlot(int slot)
     emit selectedSlotChanged(); // selectedBlockId 从新选中栈派生，随之刷新
 }
 
-// 选中栈 id（空栈 / 工具栈→Air）。player.selectedBlock 绑它 → 空栈或工具栈时右键不放置
-// （playercontroller 守 Air）。工具非方块、不可放置（t33）：选中工具槽时 selectedBlockId 返 Air，
-// 同时 HUD 的 player.selectedBlock 显 #0（无可放置方块），与「工具用于挖掘、非放置」语义一致。
+// 选中栈 id（空栈 / 工具栈 / 材料栈 / 桶→Air）。player.selectedBlock 绑它 → 非方块段槽位右键不放置
+// （playercontroller 守 Air；桶走 m_selectedItem 的 useBlock 分支，不走 selectedBlock 放置路径）。
+// 工具非方块、不可放置（t33）：选中工具槽时 selectedBlockId 返 Air，同时 HUD 的 player.selectedBlock
+// 显 #0（无可放置方块），与「工具用于挖掘、非放置」语义一致。t174：材料段（木棒/煤/铁锭/桶等 id>=Count）
+// 亦非方块 → 返 Air（旧行为返回原始 id 会被 BlockCube 截断成 quint8 渲染出垃圾方块，如选中木棒显木板立方）。
 int Hotbar::selectedBlockId() const
 {
     if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size()))
         return int(BlockRegistry::Air);
     const int id = m_slots[size_t(m_selectedSlot)].id;
-    if (ToolRegistry::isTool(id)) return int(BlockRegistry::Air); // 工具槽 → 视作无可放置方块
-    return id;
+    // 仅方块段（0,Count）才是可放置方块；工具 / 材料 / 桶（id>=Count）→ Air（非方块，不可放置）。
+    if (id > 0 && id < int(BlockRegistry::Count)) return id;
+    return int(BlockRegistry::Air);
 }
 
 // 选中栈的**原始** id（t34 工具感知挖掘用）：含工具段，不归一 Air。空栈 / 越界 → 0（=Air，
@@ -133,6 +136,8 @@ QVariantList Hotbar::creativeTools() const
 // RecipeRegistry::*Id 命名常量；与 hotbar.cpp 材料段判定 / MaterialIcon 自绘图标同源）。
 // 无限源（拾取时满栈 64；创造不耗）。非方块 → 右键不放置（playercontroller selectedBlock 守 Air），
 // 与工具段同属「调色板可取、世界不可放」的非方块物品段。
+// t174：追加空铁桶 / 装水铁桶（材料段 0x206/0x207；maxStack=1 不可堆叠 —— creativeMaterials 取件时
+//   heldCount=1，同工具段语义）。桶走 useBlock（右键舀 / 倒水），不走放置路径。
 QVariantList Hotbar::creativeMaterials() const
 {
     return {
@@ -141,7 +146,9 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::CharcoalId),    // 木炭
         int(RecipeRegistry::IronOreDropId), // 铁原矿
         int(RecipeRegistry::IronIngotId),   // 铁锭
-        int(RecipeRegistry::GlassId)        // 玻璃
+        int(RecipeRegistry::GlassId),       // 玻璃
+        int(RecipeRegistry::BucketEmptyId), // t174 铁桶（空）
+        int(RecipeRegistry::WaterBucketId)  // t174 装水铁桶
     };
 }
 
@@ -232,6 +239,9 @@ QString Hotbar::nameForBlock(int blockId) const
         // t87 冶炼产物（spec 可选）：沙子→玻璃、原木→木炭。
         if (blockId == RecipeRegistry::GlassId)       return QStringLiteral("玻璃");
         if (blockId == RecipeRegistry::CharcoalId)    return QStringLiteral("木炭");
+        // t174 铁桶（材料段 0x206/0x207，maxStack=1 不可堆叠）：空桶可合成 / 装水桶由舀水得。
+        if (blockId == RecipeRegistry::BucketEmptyId) return QStringLiteral("铁桶");
+        if (blockId == RecipeRegistry::WaterBucketId) return QStringLiteral("装水铁桶");
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
@@ -467,6 +477,10 @@ int Hotbar::takeStack(int slot, int n)
 
 int Hotbar::maxStackSize(int id) const
 {
+    // t174 铁桶（材料段 0x206/0x207）：不可堆叠（机制等价 MC 1.0 桶单件；空 / 装水桶均 1）。
+    //   须在通用材料段判定**之前**特判（否则落 64）。桶是非堆叠功能性物品（同工具段语义），仅因归材料段
+    //   才在此分流。与 isMaterial 不冲突（MaterialIcon 仍画桶图标）。
+    if (id == RecipeRegistry::BucketEmptyId || id == RecipeRegistry::WaterBucketId) return 1;
     if (id >= kMaterialIdBase) return 64; // 材料段（t50 木棒等）：可堆叠 64（MC 标准）
     if (id >= kToolIdBase) return 1;      // 工具段（t33）：不可堆叠
     if (id <= 0 || id >= int(BlockRegistry::Count)) return 0; // air / 越界：不可堆叠（无意义）

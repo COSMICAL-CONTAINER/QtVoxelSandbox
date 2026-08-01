@@ -294,7 +294,10 @@ Item {
                                     //   返回时 heldBlock 已为 0，随后赋新值安全。空手（heldBlock===0）跳过丢弃。
                                     if (root.hotbar.heldBlock !== 0) root.discardHeldRequested()
                                     root.hotbar.heldBlock = modelData
-                                    root.hotbar.heldCount = root.hotbar.isTool(modelData) ? 1 : 64
+                                    // t174：count 走 maxStackSize（单一权威）—— 工具 1 / 桶 1（不可堆叠）/ 方块·材料 64。
+                                    //   旧 `isTool ? 1 : 64` 对桶（材料段 0x206/0x207 maxStack=1）误给 64（放入槽被 setStack
+                                    //   钳到 1，但光标浮动图标会短暂显 64）→ 统一走 maxStackSize 修正。
+                                    root.hotbar.heldCount = root.hotbar.maxStackSize(modelData)
                                     root.itemTaken()  // t120：创造拿物品 → 宿主弹手（handPopAnim）
                                 }
                             }

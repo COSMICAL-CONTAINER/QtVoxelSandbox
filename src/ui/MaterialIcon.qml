@@ -10,14 +10,16 @@ import QtQuick
 //   0x203 铁锭   —— 银白水平梯形锭（顶受光 + 底阴影 + 两端斜切暗边）。
 //   0x204 玻璃   —— 浅青半透方块（高光斜面 + 暗边框，表「透明硅块」；t87 沙子冶炼产物）。
 //   0x205 木炭   —— 深棕黑八边形块（与煤同形、偏暖棕色，表「烧过的木」；t87 原木冶炼产物）。
-// 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭同理 → 均独立自绘。
+//   0x206 铁桶（空）—— 灰金属桶身 + 提手弧 + 桶口椭圆（t174；机制等价 MC 铁桶，纯原创自绘）。
+//   0x207 装水铁桶 —— 同空桶 + 桶内青蓝水液面（t174；机制等价 MC 装水铁桶）。
+// 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭/桶同理 → 均独立自绘。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体 Repeater（sourceItem），
 // Inventory.qml / SurvivalInventory.qml / CraftingTableUI.qml 各槽 —— 凡 hotbarVM.isMaterial(id) 为真
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -180,15 +182,50 @@ Item {
                 R(14, 10, 1, 1, streak)
             }
 
+            // 铁桶（空，0x206）：MC 风格铁桶 = 梯形桶身（上宽下窄）+ 顶部桶口椭圆 + 一侧提手弧。
+            //   纯原创自绘（§9a）；灰金属配色（与铁锭同族），桶口深色椭圆表「开口」。
+            //   配色：body #b0b0b8（桶身亮面）/ dark #707078（桶身暗面 + 底）/ edge #505058（桶口暗边）/
+            //   handle #98989c（提手弧）/ mouth #3a3a42（桶口内阴影）。
+            const drawBucketEmpty = () => {
+                const body = "#b0b0b8", dark = "#707078", edge = "#505058", handle = "#98989c", mouth = "#3a3a42"
+                // 桶身梯形（上宽 14 / 下宽 11，rows 10..18）
+                R(5, 10, 14, 1, body)    // 顶行（桶口下沿）
+                R(5, 11, 14, 6, body)    // 主体 rows 11..16
+                R(6, 17, 12, 1, body)
+                R(7, 18, 10, 1, dark)    // 底（暗）
+                // 桶身右侧暗面（圆柱明暗）
+                R(16, 11, 2, 6, dark)
+                R(15, 17, 2, 1, dark)
+                // 桶口椭圆（顶部，rows 8..9；宽于桶身顶 → 表「外翻桶口」）
+                R(5, 8, 14, 1, edge)
+                R(6, 9, 12, 1, mouth)    // 桶口内阴影（深色）
+                // 提手弧（左上 → 右上，跨桶口上方）
+                R(6, 6, 1, 2, handle)
+                R(7, 5, 10, 1, handle)
+                R(17, 6, 1, 2, handle)
+            }
+
+            // 装水铁桶（0x207）：同空桶 + 桶内青蓝水液面（桶口椭圆内填水色，表「装满水」）。
+            //   水色与 default_water 蓝半透基调一致（#3a6ac8 浅版，表水面受光）。提手同空桶。
+            const drawWaterBucket = () => {
+                drawBucketEmpty() // 桶身（同空桶）
+                const water = "#3a6ac8", waterLight = "#5878d8"
+                // 桶口椭圆内的水液面（覆盖 mouth 阴影，表「装满水到桶口」）
+                R(6, 9, 12, 1, water)
+                R(7, 9, 4, 1, waterLight) // 水面高光（左上受光）
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             switch (root.materialId) {
-            case 0x200: drawStick();     break
-            case 0x201: drawCoal();      break
-            case 0x202: drawIronOre();   break
-            case 0x203: drawIronIngot(); break
-            case 0x204: drawGlass();     break
-            case 0x205: drawCharcoal();  break
-            default:    drawStick();     break
+            case 0x200: drawStick();        break
+            case 0x201: drawCoal();         break
+            case 0x202: drawIronOre();      break
+            case 0x203: drawIronIngot();    break
+            case 0x204: drawGlass();        break
+            case 0x205: drawCharcoal();     break
+            case 0x206: drawBucketEmpty();  break // t174 铁桶（空）
+            case 0x207: drawWaterBucket();  break // t174 装水铁桶
+            default:    drawStick();        break
             }
         }
     }

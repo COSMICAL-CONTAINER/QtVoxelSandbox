@@ -106,6 +106,24 @@ public:
     // takeStack 误触、多余粒子 / 音效把链式塌落刷成噪音。仅在目标格当前为空气时写入（着地格由 FallingBlock
     // 列扫保证为空气；防御：已占用则不覆盖）。越界 / 非空 → false。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
     bool setBlockFromEntity(int x, int y, int z, quint8 id);
+    // t174 水流系统静默写入（同 setBlockFromEntity 语义：经 m_chunks.setBlock 直写 + emit worldChanged
+    //   重建 mesh，但**不**发 broken/placed —— 水流蔓延是系统模拟非玩家动作，避免触发粒子/音效/拾取噪音）。
+    //   与 setBlockFromEntity 的差异：支持 state（水流 state 1..7 编码蔓延距离）；无条件覆盖（水流可改既有
+    //   水格的 state，或把蒸发的水格写回 air）。id==Air 且 state==0 表示蒸发（清格）。越界 / 无变化 → false。
+    //   id 合法性由 caller 保证（tickWaterFlow 仅传 Water/Air）。复用 recomputeLightAround 增量光照（水
+    //   isSolid=false → 非遮光，光场通常无变化，内部早退）。
+    //   t174 舀水（playercontroller 空桶）亦走本方法 —— 舀走水格是水流系统操作（非玩家破块），避免 setBlock
+    //   触发 blockBroken(Water) 的破块粒子/音（机制等价 MC 舀水无反馈）。非 Q_INVOKABLE（C++ 调）。
+    bool setWaterSilent(int x, int y, int z, quint8 id, quint8 state);
+    // t174 水流蔓延 tick（MC 式源+流扩散；spec「水流蔓延（源+流 MC 式扩散）」）：周期重算所有水流场。
+    //   由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 0.5s
+    //   真正重算一次，避免每帧扫全图）。机制等价 MC 1.0 流水：水源（state=0）为 BFS 根 → 水平蔓延出
+    //   state 1..7 的流水（最大 7 格扩散距离），遇到空气下方下落（水源正下方重水源化、流水下落成 state=1
+    //   流水），BFS 不再覆盖的水格蒸发为 air（舀走水源 / 隔断后流水衰退）。仅写水格（id=Water）+ air（蒸发），
+    //   不动地形。无玩家动作语义（系统模拟）→ 经 setWaterSilent 写入（不发 broken/placed，仅 worldChanged
+    //   重建 mesh）。玩家编辑（setBlock）与铁桶舀/倒（playercontroller 直写 setBlock）会改水格 → 下一 tick
+    //   BFS 自动重算（增量自然，无需显式通知）。
+    Q_INVOKABLE void tickWaterFlow();
 
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
@@ -168,6 +186,12 @@ private:
     std::vector<int> m_perm;  // 512 置换表（Perlin）
     int m_width = 16, m_depth = 16, m_height = 16, m_seed = 1337;
     ChunkManager m_chunks;    // 多 chunk 存储 + 跨 chunk 路由（World 层；默认空，generate 重建）
+    // t174 水流 tick 节流计数：tickWaterFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFlowTickInterval
+    //   才真正重算流场（~0.5s 一次）。水源/流水的扩散视觉上不需要 60Hz —— MC 自身约 5 tick/次（0.25s），
+    //   本工程取 5（0.5s）平衡流畅度与扫描开销（全图扫水格 + BFS）。
+    int m_flowTickCounter = 0;
+    static constexpr int kFlowTickInterval = 5;   // tickWaterFlow 节流间隔（WorldClock tick 单位 = 100ms → 0.5s）
+    static constexpr int kMaxFlowLevel = 7;       // 水流最大蔓延等级（state 1..7；机制等价 MC 1.0 流水 7 格扩散）
 };
 
 #endif // WORLD_H

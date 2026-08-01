@@ -351,6 +351,9 @@ private:
     // t159 水下判定：玩家眼位格 == Water。step 据此把水平（及飞垂直）速度乘 kUnderwaterSpeedMul（~0.4）。
     //   只读 World::blockAt（向下依赖）；眼位 = position()（脚底 + eyeHeight）。无世界 → false。
     bool eyeInWater() const;
+    // t174 脚位水中判定：玩家脚底格 == Water（m_pos 整数坐标）。浮力/游泳物理用它（眼位高于水面时仍能游，
+    //   机制等价 MC「在水中游泳」= 脚或身在水中即可）。只读 World::blockAt；无世界 → false。
+    bool feetInWater() const;
     // t159 上报实际水平速度（speed 属性）：据 step 出口位移 / dt 算水平标量，值真变（> 阈值）才发
     //   moveSpeedChanged（speed 复用此 NOTIFY）。各飞 / 走出口前调一次。dt<=0 → no-op。
     void reportHorizSpeed(const QVector3D &posBefore, qreal dt);
@@ -456,6 +459,14 @@ private:
     static constexpr float kFlyMax = 20.0f;    // 飞行最高速度（blocks/sec；t159 滚轮调速上限）
     static constexpr float kFlyStep = 1.0f;    // 滚轮每档有效飞行速度步进（blocks/sec；t159）
     static constexpr float kUnderwaterSpeedMul = 0.4f; // 水下速度倍数（眼位在水格；t159，用户可后续调）
+    // t174 水中浮力 / 游泳常量（机制等价 MC 1.0 水中物理：减速 + 浮力 + 按空格上浮）：
+    //   kWaterGravity：水中等效重力（远小于 kGravity=28 → 缓沉；接近 MC「水中下落被阻尼」）。
+    //   kSwimUp：按住空格上浮速度（恒定向上，机制等价 MC 按空格游泳上浮）。
+    //   kWaterSinkMax：水中最大下沉速度（钳制，防加速到穿水底；远小于 kMaxFall=78.4）。
+    //   水平减速复用 kUnderwaterSpeedMul（waterMul，眼位在水中时已乘入；脚位在水面以上时走正常水平速度）。
+    static constexpr float kWaterGravity = 6.0f;  // 水中重力（缓沉；≈ kGravity×0.21）
+    static constexpr float kSwimUp       = 4.5f;  // 按空格游泳上浮速度（blocks/sec）
+    static constexpr float kWaterSinkMax = 3.0f;  // 水中最大下沉速度（钳制）
     static constexpr float kWalk = 4.3f;       // 走 移速
     static constexpr float kGravity = 28.0f;
     static constexpr float kJump = 8.4f;       // 顶点约 1.25 格

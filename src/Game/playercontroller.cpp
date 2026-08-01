@@ -675,7 +675,10 @@ void PlayerController::placeBlock()
     const qint64 now = m_evtClock.elapsed();
     if (now - m_lastPlaceMs < 200) return;
     if (!canPlace()) return; // 观察者不能放块
-    if (!m_world || !m_captured || !m_hasHit) return;
+    if (!m_world || !m_captured) return;
+    // t174：空桶舀水用独立含水射线（见下方桶分支），水下 / 瞄深水时主射线无实体命中（m_hasHit=false）
+    //   亦须可舀，故 !m_hasHit 不在此一刀切拦截。下方工作台/熔炉/门/活版门与放块路径仍需命中 → 局部门控。
+    if (m_hasHit) {
     // t50：右键工作台 → 打开 3×3 合成 UI（优先于放置；spec「右键工作台开 3×3」）。
     if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
         emit craftingTableOpened();
@@ -725,6 +728,46 @@ void PlayerController::placeBlock()
             return;
         }
     }
+    } // t174：m_hasHit 局部门控结束（工作台/熔炉/门/活版门需命中；桶分支与放块路径各自处理命中需求）
+    // t174 铁桶 useBlock（spec「右键舀水/倒水交互」）：选空桶 / 装水桶时右键走桶交互，不走方块放置路径
+    //   （桶非方块；selectedBlock 经 hotbar 已归 Air，下方 Air 守卫会拦，故在此提前分支）。机制等价 MC 1.0
+    //   铁桶：装水桶右键 → 在命中面相邻空气格放置水源（state=0）；空桶右键 → 含水射线命中首个水格舀走。
+    //   创造模式桶**不消耗**（无限源，机制等价 MC 创造铁桶）；生存则空/装水桶互换（takeStack/setStack 写选中槽）。
+    //   分层（PLAN §2）：桶交互属 Game/Physics（读射线 + 写 World + 写 Hotbar VM），不改栅格语义（setBlock 入口）。
+    if (m_hotbar && (m_selectedItem == RecipeRegistry::WaterBucketId
+                     || m_selectedItem == RecipeRegistry::BucketEmptyId)) {
+        const int slot = m_hotbar->selectedSlot();
+        if (m_selectedItem == RecipeRegistry::WaterBucketId) {
+            // 倒水：命中面相邻格放水源。tx/ty/tz 同方块放置（命中面外法线相邻格）。目标须为空气（不覆盖实体）。
+            if (!m_hasHit) return; // 未命中 → 无相邻格可放（桶分支已绕过上方 !m_hasHit 门，此处补检）
+            const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
+            if (m_world->blockAt(tx, ty, tz) == BlockRegistry::Air) {
+                m_world->setBlock(tx, ty, tz, BlockRegistry::Water, 0); // state=0 水源（tickWaterFlow 下次 BFS 蔓延）
+                if (m_mode != Creative)
+                    m_hotbar->setStack(slot, int(RecipeRegistry::BucketEmptyId), 1); // 装水桶 → 空桶
+                m_lastPlaceMs = now;
+                emit swingArm();
+            }
+            return; // 倒水（无论成功与否）不再走放置路径
+        }
+        // 空桶舀水（t174 fix）：主射线排除 Water（t165 水下挖掘语义）→ 命中格恒为水后/水下的实体方块，
+        //   旧查命中格 == Water 恒 false（死代码）。改为单独跑「含水」射线（waterBlocks=true）命中首个水格：
+        //     - 水面 / 岸边瞄准水体 → 射线穿空气后命中水格；
+        //     - 瞄深水（射程内无实体，仅水）→ 主射线无命中，但含水射线命中水；
+        //     - 水下（眼位在水）→ 含水射线起点即水格，视为命中该格（桶舀身处水）。
+        //   不依赖上方 !m_hasHit 门（已绕过）→ 三种姿态均可舀。舀走走 setWaterSilent（水流系统静默写入，
+        //   不发 blockBroken → 无破块粒子/音，机制等价 MC 舀水无反馈），下一 tickWaterFlow BFS 自动衰退邻接流水。
+        const RayHit wHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, /*waterBlocks=*/true);
+        if (wHit.valid && m_world->blockAt(wHit.bx, wHit.by, wHit.bz) == BlockRegistry::Water) {
+            m_world->setWaterSilent(wHit.bx, wHit.by, wHit.bz, BlockRegistry::Air, 0); // 舀走（水源 / 流水均可舀，清整格）
+            if (m_mode != Creative)
+                m_hotbar->setStack(slot, int(RecipeRegistry::WaterBucketId), 1); // 空桶 → 装水桶
+            m_lastPlaceMs = now;
+            emit swingArm();
+        }
+        return; // 空桶（舀水成功与否）不再走放置路径
+    }
+    if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
     const quint8 idByte = quint8(m_selectedBlock);
@@ -1011,6 +1054,15 @@ bool PlayerController::eyeInWater() const
            == BlockRegistry::Water;
 }
 
+// t174 脚位水中判定：脚底格 == Water（m_pos 整数坐标 → 脚所处方块）。浮力/游泳物理用它（眼位高于水面
+//   时仍能游；机制等价 MC「在水中游泳」= 脚或身在水中即可）。只读 World::blockAt；无世界 → false。
+bool PlayerController::feetInWater() const
+{
+    if (!m_world) return false;
+    return m_world->blockAt(int(std::floor(m_pos.x())), int(std::floor(m_pos.y())), int(std::floor(m_pos.z())))
+           == BlockRegistry::Water;
+}
+
 // t159 上报实际水平速度（speed 属性）：= |水平位移| / dt。含撞墙归零、疾跑 / 飞 / 水下倍数 —— 反映
 //   玩家**真实**水平移动速率（非意图速度）。值真变（> 0.05 阈值，免帧间噪声刷 QML）才发 moveSpeedChanged
 //   （speed 复用此 NOTIFY）。dt<=0 → no-op（极端：首帧 dt 未取）。
@@ -1243,8 +1295,16 @@ void PlayerController::step(qreal dt)
     //   走速 4.3 → 疾跑 5.59 blocks/sec（同 MC 1.0 系数）。t159：再乘 waterMul（水下减速）。
     m_vel.setX(wish.x() * kWalk * speedMul() * waterMul);
     m_vel.setZ(wish.z() * kWalk * speedMul() * waterMul);
-    m_vel.setY(std::max(float(m_vel.y() - kGravity * dt), -kMaxFall));
-    if (spaceEdge && m_onGround) m_vel.setY(kJump);
+    // t174 水中浮力 / 游泳（spec「浮力/游泳」）：脚位在水格 → 缓沉（kWaterGravity << kGravity）+ 按住空格
+    //   上浮（kSwimUp，连续非边沿）+ 钳最大下沉（防穿水底）。机制等价 MC 1.0 水中：减速 + 浮力 + 空格上浮。
+    //   离水（脚位非水）走原重力 + 跳跃（spaceEdge && onGround）。waterMul 已乘水平速度（眼位在水中减速）。
+    if (feetInWater()) {
+        m_vel.setY(std::clamp(float(m_vel.y() - kWaterGravity * dt), -kWaterSinkMax, kSwimUp));
+        if (space) m_vel.setY(kSwimUp); // 按住空格 = 游泳上浮（连续；离水后 spaceEdge 跳跃边沿仍由下方分支处理）
+    } else {
+        m_vel.setY(std::max(float(m_vel.y() - kGravity * dt), -kMaxFall));
+        if (spaceEdge && m_onGround) m_vel.setY(kJump);
+    }
 
     // 防穿墙：每子步任意轴移动 ≤0.4 格
     QVector3D delta = m_vel * dt;

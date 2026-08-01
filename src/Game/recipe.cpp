@@ -122,6 +122,15 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
         0, 0, 0 },
       int(BlockRegistry::WoodTrapdoor), 2, 1, "wood_trapdoor" },
+    // t174 铁桶（空）：3 铁锭 V 形（顶左 + 顶右 + 底中）→ 1 空桶（有序 3×3，仅工作台）。机制等价 MC 1.0
+    //   铁桶配方（3 铁锭 V 形）。最小包围盒 3×2（顶行两端 + 底行中），可在工作台任意 3×2 子区放（包围盒
+    //   对齐后逐格比）。产物 BucketEmptyId（材料段 0x206，maxStack=1 不可堆叠 —— canTake 一次取 1 件）。
+    //   V 形两端 + 底中 = MC 经典「水桶 / 铁桶」共用形状（倒 V 留开口）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, 0,                          RecipeRegistry::IronIngotId,
+        0,                           RecipeRegistry::IronIngotId, 0,
+        0, 0, 0 },
+      RecipeRegistry::BucketEmptyId, 1, 1, "bucket_empty" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

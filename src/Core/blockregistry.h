@@ -60,13 +60,22 @@ public:
                                 //   bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z。maxStack=1（单件，不可堆叠）。
         WoodTrapdoor      = 20, // 木板活板门：水平/竖直薄板。state bit0=开(1，竖直贴边)/合(0，水平贴地)，
                                 //   bit[2:1]=开时朝向 0=+X 1=-X 2=+Z 3=-Z。
-        Water              = 21, // 水（t148）：机制等价 MC 静水。solid=false（不挡邻居面剔除 → 地形贴着水仍画
-                                  //   自己的面）、shape=ShapeNone（**无碰撞** → 玩家穿过，spec「物理 v1 穿过」）、
-                                  //   **hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，防创造秒破；
-                                  //   同 bedrock 哨兵语义）、dropId=0（破不掉落）、各面同贴图=water(19) 蓝半透。
-                                  //   worldgen 在 waterLevel 以下低洼列填水（h<wl 从 h+1 到 wl）。渲染：mesher 把
-                                  //   水面剔出独立几何段、材质 opacity=0.7 半透；水-水邻接面互剔（nb==Water 剔除）。
-                                  //   不进创造调色板（worldgen 专属；非玩家可放置方块）。
+        Water              = 21, // 水（t148/t174）：机制等价 MC 1.0 流水。solid=false（不挡邻居面剔除 → 地形贴着水
+                                  //   仍画自己的面）、shape=ShapeNone（**无碰撞** → 玩家穿过；t174 浮力/游泳走
+                                  //   PlayerController 水中物理分支，非碰撞）、**hardness=-1.0**（不可挖掘：
+                                  //   canMine=false，任何模式/工具不破，防创造秒破；同 bedrock 哨兵语义）、dropId=0
+                                  //   （破不掉落）、各面同贴图=water(19) 蓝半透。
+                                  //   worldgen 在 waterLevel 以下低洼列填水（h<wl 从 h+1 到 wl）—— 全作**水源**
+                                  //   （state=0）。渲染：mesher 把水面剔出独立几何段、材质 opacity=0.7 半透；
+                                  //   水-水邻接面互剔（nb==Water 剔除）。不进创造调色板（worldgen 专属；非玩家可放置
+                                  //   方块 —— 玩家经铁桶舀/倒水交互，t174）。
+                                  //   **t174 水流 state 编码**（复用 chunk m_states 并行数组；与不完整方块 state 同存储）：
+                                  //     state 0 = 水源（无限；worldgen 填 / 玩家铁桶倒 / 水源正下方的下落水柱重水源化）
+                                  //     state 1..7 = 流水（距水源的蔓延距离；MC 式扩散，最大 7 格水平距离）。
+                                  //   World::tickWaterFlow() 周期 BFS 从所有水源重算流场：水源 → 下落（air below）
+                                  //   成流水（state=1 起算，水源正下方重水源化除外）+ 水平蔓延 state+1（≤7）；水源被
+                                  //   舀走（铁桶）/ 隔断后，BFS 不再覆盖的格蒸发为 air（流水衰退）。state 仅驱动水流
+                                  //   模拟，**不影响渲染**（所有水格外观一致半透蓝）。
         Chest          = 22, // 箱子（t173）：机制等价 MC 1.0 箱子。solid=true / ShapeFull（整立方实体碰撞、
                                   //   mesher 正常画 6 面顶/侧/前贴图=chest_top/side/front，与工作台 / 熔炉同走整立方
                                   //   渲染路径 —— 非异形，**不**进 PartialBlockGeometry）、hardness=2.5（木制）、NoTool

@@ -29,6 +29,8 @@ struct RayHit
 };
 
 // 从 origin 沿 dir（无需归一化，内部归一）步进，maxDist 内返回首个实体方块命中。
-RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float maxDist);
+// waterBlocks（默认 false）：true 时 Water 亦挡射线（t174 铁桶舀水专用 —— 命中首个水格；主选体 /
+//   相机碰撞用默认 false，保 t165「水下可挖实体」语义不回归）。详见 .cpp blocksRay / 起点退化注释。
+RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float maxDist, bool waterBlocks = false);
 
 #endif // RAYCAST_H

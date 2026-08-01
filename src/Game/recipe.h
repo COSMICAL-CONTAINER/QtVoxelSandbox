@@ -56,6 +56,13 @@ public:
     // t87 冶炼产物（SmeltingRegistry 用；与 Coal/铁系列同属材料段 >= 0x200，可堆叠 64）：
     static constexpr int GlassId        = 0x204; // 玻璃：沙子冶炼产物（spec 可选项）
     static constexpr int CharcoalId     = 0x205; // 木炭：原木冶炼产物（spec 可选项；与煤等价燃料）
+    // t174 铁桶（功能性物品，复用材料段 id 区间；但**不可堆叠** —— Hotbar::maxStackSize 对这两个 id 返回 1）。
+    //   机制等价 MC 1.0 铁桶：空桶可合成（3 铁锭 V 形）+ 右键舀水（命中水 → 装水铁桶 + 水源消失）/
+    //   倒水（命中面相邻空气格 → 放置水源 + 桶变空）。属材料段（id >= 0x200）便于 isMaterial 分流到 MaterialIcon
+    //   自绘桶图标（BucketEmptyId 画空桶 / WaterBucketId 画装水桶），但 maxStack=1 与工具段同语义（单件）。
+    //   与 ToolRegistry::isTool（[0x100,0x103)）互斥 —— 桶非工具，不影响挖掘速度 / 掉落判定。
+    static constexpr int BucketEmptyId  = 0x206; // 铁桶（空）：3 铁锭 V 形合成；右键水舀水 → WaterBucketId
+    static constexpr int WaterBucketId  = 0x207; // 装水铁桶：空桶舀水得；右键倒出水水源 → BucketEmptyId
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {
