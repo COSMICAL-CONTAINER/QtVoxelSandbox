@@ -212,7 +212,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     //   kVcMin：未照明格（深洞无天光 / 无火把）的底亮度 —— 防纯黑撕裂、保留微弱可辨识（MC 为纯黑，
     //     此处取小底兼顾可玩性；火把光池 0.93 与之强对比，洞穴暗 / 火把亮一目了然）。
     //   kVcMax：满光封顶 1.0（NoLighting 无法 overbright，贴图原色即最亮）。
-    constexpr float kVcMin = 0.05f;
+    constexpr float kVcMin = 0.08f; // t166：暗部地板 0.05→0.08（用户「黑的地方稍太黑」；洞穴/阴影最低亮度微抬，仍远低于火把光池 0.93 保持对比）
     constexpr float kVcMax = 1.0f;
 
     if (c && m_world) {

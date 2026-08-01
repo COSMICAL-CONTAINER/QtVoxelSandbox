@@ -77,6 +77,11 @@ Window {
     property real handPosY: -0.12
     property real handPosZ: -0.39
 
+    // t166 暗度参数（用户「黑的地方稍太黑」）：terrainLight / tintBySkyLight 的 floor（夜间 / 阴暗处场景
+    //   最低亮度乘子）。默认 0.4（原固定值）；ESC 设置面板滑条实时调（0.20..0.60）→ 越大夜间 / 阴暗越亮。
+    //   调高 = 整体暗部变亮（兼顾可辨识），调低 = 夜更黑（氛围）。洞穴 / 阴影顶点色地板另由 C++ kVcMin（0.08）托底。
+    property real minLight: 0.4
+
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
     function startGame() {
         appState = "playing"
@@ -230,7 +235,8 @@ Window {
     //   m=skyLight ∈ [0,1]（0=子夜、1=正午）；floor 0.4 ≈ 原 nightTint alpha 0.6 把地形拉暗的等效量级
     //   （夜间仍可辨识地形轮廓，spec t09）。纯灰阶乘子（不偏色）——夜色基调由 sky clearColor 提供。
     function terrainLight(m) {
-        const b = 0.4 + (1.0 - 0.4) * m
+        const fl = window.minLight
+        const b = fl + (1.0 - fl) * m
         return Qt.rgba(b, b, b, 1.0)
     }
 
@@ -240,7 +246,8 @@ Window {
     //   统一。机制等价地形 baseColor=terrainLight × vertexColor：掉落物 BlockCube 无顶点色（恒白=1.0），
     //   故昼夜乘子只由 baseColor 承载；本函数给「带自身色调」的材质（工具 / 外壳）用。
     function tintBySkyLight(r, g, b, m) {
-        const k = 0.4 + (1.0 - 0.4) * m
+        const fl = window.minLight
+        const k = fl + (1.0 - fl) * m
         return Qt.rgba(r * k, g * k, b * k, 1.0)
     }
 
@@ -602,7 +609,8 @@ Window {
             scale: Qt.vector3d(3.0, 3.0, 3.0)
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
-                baseColor: "#fff2cc"   // 暖白（淡黄白日色，原创纯色，非 MC 资产 §9(a)）
+                baseColor: "#ffffff"   // 白底乘贴图（贴图自带暖黄白径向渐变，t164）
+                baseColorMap: Texture { source: "qrc:/textures/sun.png" } // t164 太阳贴图（原创径向渐变，中心暖白→边缘渐隐，非纯色 §9(a)）
             }
         }
 
@@ -2070,7 +2078,7 @@ Window {
                 MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
             }
             Rectangle {
-                width: 440; height: 320; radius: 10
+                width: 440; height: 380; radius: 10
                 anchors.centerIn: parent
                 color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
                 Column {
@@ -2111,6 +2119,16 @@ Window {
                     }
                     Text { text: "⚠ position.z < -0.3 会穿模（当前 -0.39 为 t156 用户选定）；滑动条仅微调，默认值已固化"
                            color: "#b08060"; font.pixelSize: 10; wrapMode: Text.WordWrap; width: parent.width }
+                    // t166 暗度参数：minLight 滑条（terrainLight floor）。越大夜间/阴暗越亮（用户「黑的地方稍太黑」可调）。
+                    Text { text: "暗度（minLight：夜间/阴暗最低亮度）"
+                           color: "#7fae7f"; font.pixelSize: 12 }
+                    ArmSlider {
+                        width: parent.width
+                        label: "minLight"
+                        from: 0.20; to: 0.60
+                        value: window.minLight
+                        onValueChanged: window.minLight = value
+                    }
                     // 返回按钮：关设置面板回暂停菜单。
                     Rectangle {
                         width: 120; height: 32; radius: 6

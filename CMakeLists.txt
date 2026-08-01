@@ -124,6 +124,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/crack_3.png
         textures/crack_4.png
         textures/crack_5.png
+        textures/sun.png
         textures/default_cobble.png
         textures/default_coal_ore.png
         textures/default_crafting_table_side.png
