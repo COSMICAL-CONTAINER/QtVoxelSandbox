@@ -1057,8 +1057,18 @@ void PlayerController::moveAxis(int axis, float amount)
         else            m_pos.setX(maxSurf + kHalfW + eps);
         m_vel.setX(0); break;
     case 1:
-        if (amount > 0) m_pos.setY(minSurf - m_height - eps); // 顶头（按当前高度）
-        else            m_pos.setY(maxSurf + eps);             // 着地（贴 sub-AABB 顶面，如半砖 y=0.5）
+        if (amount > 0) {
+            m_pos.setY(minSurf - m_height - eps); // 顶头（按当前高度）
+        } else {
+            // t161：从上方正常着地（本帧移动前脚底 pyBefore ≥ block 顶 maxSurf）→ 贴顶面站住；
+            //   若 pyBefore < maxSurf = 着地前脚已在方块顶之下 = 横向嵌入（沙落身上 / 从侧面卡入），
+            //   **不上抬**（否则逐层下落沙把玩家逐格顶到柱顶 = 「瞬移上爬」bug），保留 Y 仍在格内 →
+            //   交后续 moveAxis(0/2) 横向推出（用户「向外挤 not 向上」）。被完全包裹（无水平出路）则由
+            //   t160 窒息扣血兜底。
+            const float pyBefore = m_pos.y() - amount;
+            if (pyBefore >= maxSurf - 1e-3f) m_pos.setY(maxSurf + eps); // 正常着地贴顶
+            // else 嵌入：不 snap Y（留格内，待横向推出）
+        }
         m_vel.setY(0); break;
     case 2:
         if (amount > 0) m_pos.setZ(minSurf - kHalfW - eps);
