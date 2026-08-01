@@ -40,8 +40,10 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::Planks), 0, 0,
         0, 0, 0 },
       kStickId, 4, 1, "stick" },
-    // craftingTable：4 木板 → 1 工作台（无序；2×2 全木板）
-    { int(RecipeRegistry::Inventory2x2), true,
+    // craftingTable：4 木板 2×2 方阵 → 1 工作台（有序；机制等价 MC：须 2×2 方阵，非任意位置）。
+    //   t166g：原 shapeless(true) 让 4 板子任意摆放都出工作台（用户反馈「不管怎么摆都可以」过松）→
+    //   改 shaped(false)：shapedEqual 收缩到最小包围盒比逐格，输入须 2×2 方阵才匹配（1×4 线 / L 形不匹配）。
+    { int(RecipeRegistry::Inventory2x2), false,
       { int(BlockRegistry::Planks), int(BlockRegistry::Planks), 0,
         int(BlockRegistry::Planks), int(BlockRegistry::Planks), 0,
         0, 0, 0 },

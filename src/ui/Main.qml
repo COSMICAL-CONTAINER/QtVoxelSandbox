@@ -2643,6 +2643,15 @@ Window {
     // Spectator 无反应）。z 高于暂停叠层(100)/HUD，低于主菜单(200)。方块集 / 图标 / 中文名 / 槽位改写
     // 全部经 hotbar VM（ViewModel 读 BlockRegistry）；本组件只做呈现 + 输入转发。关闭（closed 信号）→ 宿主恢复 grab。
     // 仅依赖 QtQuick（无特殊模块），直接实例化（非 Loader 隔离）。
+    // t166f 背包叠层祖先容器：包裹 创造/生存/工作台/熔炉面板 + 浮动光标。HoverHandler 在此（祖先）→
+    //   hover 同时到本层与各面板槽位（后代），不再被顶层 sibling 截走 → 槽位 tooltip + 拖动均分恢复。
+    //   z=150 与原面板同级（高于暂停 100、低于主菜单 200 / 死亡 180）；内部面板各自 z 不变。
+    Item {
+        id: overlayRoot
+        anchors.fill: parent
+        z: 150
+        HoverHandler { id: cursorTracker }
+
     Inventory {
         id: inventoryPanel
         anchors.fill: parent
@@ -2716,12 +2725,10 @@ Window {
     // HoverHandler 为被动追踪（passive grab），**不消费 press/click** —— 不抢下方槽 TapHandler/DragHandler
     // 的 grab（本 Item 无任何 press handler，点击穿透到面板）。注意：enabled:false 会连 HoverHandler 一起
     // 禁用，故本层保持默认 enabled；纯被动 hover 不阻断下方点击（与 z=300 浮动光标 enabled:false 同理）。
-    Item {
-        id: cursorTrackLayer
-        anchors.fill: parent
-        z: 250
-        HoverHandler { id: cursorTracker }
-    }
+    // t166f: cursorTrackLayer 删除。旧版 z=250 全屏 HoverHandler 在背包面板(z=150)之上 → 作为顶层
+    //   sibling 截走 hover，槽位 HoverHandler 不触发 = tooltip/拖动均分失效。改把 HoverHandler 放到
+    //   包裹这些叠层的 overlayRoot（祖先）—— hover 传给祖先+后代，不挡槽位。光标位置仍由它驱动浮动图标。
+
 
     // 光标手持物浮动图标（背包点击拾取后「拿在鼠标上」的物品栈；hotbarVM.heldBlock/heldCount 驱动）。
     // 仅背包 / 工作台打开且手持非空时显，z 最高（盖过背包面板 z=150）。位置跟随 cursorTracker（窗口坐标）。
@@ -2762,4 +2769,5 @@ Window {
             font.pixelSize: 13; font.bold: true
         }
     }
+    } // t166f overlayRoot close（包裹背包叠层）
 }
