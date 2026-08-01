@@ -266,7 +266,7 @@ signals:
     // 转发到 ItemEntityManager.spawnItem 生成实体。分层（PLAN §2）：Game/Physics 层发语义事件，
     // 呈现层 / ViewModel 只消费（同 blockBroken→粒子）。
     void spawnItem(int x, int y, int z, int blockId, int count);
-    void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState
+    void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState（t160 窒息复用此路径）
     // 第一人称手挥动（t29）：breakBlock/placeBlock 在通过模式门控 + 动作真发生后发（观察者不发；
     // 未命中/放置被拒也不发）。同 blockBroken 模式——Game/Physics 层发语义事件，呈现层 Connections
     // 消费启动手臂挥动动画（PLAN §2 分层：手 viewmodel 属呈现层，绝不反向写）。
@@ -402,6 +402,7 @@ private:
     int m_selectedBlock = BlockRegistry::Stone; // 当前手持方块（右键放置；默认 Stone，t06 hotbar 绑定）
     int m_selectedItem = BlockRegistry::Stone;  // 手持物品原始 id（含工具段；t34 挖掘速度用，绑定 hotbar.selectedItemId）
     float m_peakY = 0.0f;           // 滞空期间最高点 Y（掉落伤害结算基准；componentComplete 设为脚底 Y）
+    float m_suffocationTimer = 0.0f; // t160 窒息累积计时（身体嵌实体方块时累加，每 kSuffocationInterval 秒一脉冲）
 
     // 持续挖掘态（t34）：仅 Survival 进入累积（Creative 单击瞬破不进入）；progress 0..1；
     // stage = clamp(progress*6, 0, 5)，-1 = 无累积（裂纹叠层隐藏）。mineBx/y/z = 目标格整数坐标。
@@ -435,6 +436,7 @@ private:
     static constexpr float kGravity = 28.0f;
     static constexpr float kJump = 8.4f;       // 顶点约 1.25 格
     static constexpr float kMaxFall = 78.4f;
+    static constexpr float kSuffocationInterval = 1.0f; // t160 窒息扣血间隔（秒；每秒 1HP，机制等价 MC 窒息 1/秒）
     static constexpr float kSens = 0.25f;      // 度/像素
     static constexpr float kStrideRate = 2.2f; // 步频系数（rad/米）：speed*dt*kStrideRate = walkPhase 增量（t45）
     static constexpr float kDeg = 0.017453292519943295f;

@@ -1184,6 +1184,25 @@ void PlayerController::step(qreal dt)
         m_peakY = m_pos.y();
     }
 
+    // t160 窒息（仅 Survival）：眼位（头部）格为实体可碰撞方块（被埋 / 头卡进方块，机制等价 MC 窒息）→
+    //   每 kSuffocationInterval 秒扣 1HP（fallDamageTaken 同路径 → PlayerState.takeDamage）+ 发 suffocationPulse
+    //   （呈现层红屏闪 + 视角晃动）。创造 / 观察者无伤。脱困（头部出方块）即停累积。蹲下眼位低随之判定点下移。
+    if (m_mode == Survival && m_world) {
+        const int hx = int(std::floor(m_pos.x()));
+        const int hy = int(std::floor(m_pos.y() + m_eyeHeight));
+        const int hz = int(std::floor(m_pos.z()));
+        if (m_world->isCollidable(hx, hy, hz)) {
+            m_suffocationTimer += float(dt);
+            if (m_suffocationTimer >= kSuffocationInterval) {
+                m_suffocationTimer -= kSuffocationInterval;
+                // fallDamageTaken(1) 经既有链 takeDamage→damaged→onDamaged 已驱动 HP 扣减 + 红屏闪 + 视角晃动（t67）。
+                emit fallDamageTaken(1);
+            }
+        } else {
+            m_suffocationTimer = 0.0f;
+        }
+    }
+
     if (wasGround != m_onGround) emit onGroundChanged();
     reportHorizSpeed(posBefore, dt); // t159：speed 属性上报（位移/dt；含撞墙归零 / 疾跑 / 水下倍数）
     emit positionChanged();
