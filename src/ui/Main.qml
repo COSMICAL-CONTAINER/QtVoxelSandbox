@@ -65,16 +65,17 @@ Window {
         return ""
     }
 
-    // t129 临时调试：第一人称手臂 viewmodel 的角度 / 位置 window 级中转属性。t139 起 ESC
-    //   暂停叠层「设置」面板的 ArmSlider 写这些属性 → viewModelHand（下方 PerspectiveCamera 子节点）绑定
-    //   读取 → 手臂 baseTilt / position 实时变。默认值 = t122/t73 不穿模几何定下来的值
-    //   （baseTilt 100°、position (0.20, 0.05, -0.15)）。
-    //   ⚠️ position.z 拉到 < -0.3 会让手伸进前方实体方块（穿模，见 viewModelHand 注释 t52/t73）；
-    //      baseTilt 大幅偏离 ±100 会破坏袖 / 手前后顺序。仅临时调试用，确定值后回填进 viewModelHand 默认。
-    property real handBaseTilt: 100.0
-    property real handPosX: 0.20
-    property real handPosY: 0.05
-    property real handPosZ: -0.15
+    // 第一人称手臂 viewmodel 的角度 / 位置 window 级中转属性（t129 引入作临时调试；t156 固化为用户终值）。
+    //   t139 起 ESC 暂停叠层「设置」面板的 ArmSlider 写这些属性 → viewModelHand（下方 PerspectiveCamera
+    //   子节点）绑定读取 → 手臂 baseTilt / position 实时变。t156 用户经滑动条调定终值并写死为此默认：
+    //   baseTilt -34.56°、position (0.36, -0.12, -0.39)。
+    //   ⚠️ position.z=-0.39 已 < -0.3，贴方块时手会伸进前方实体方块（穿模，见 viewModelHand 注释 t52/t73）
+    //      —— 此为用户主动选定（贴近方块的手感优先于 t73 的不穿模几何），有意保留。ArmSlider 仍在设置面板
+    //      可继续微调（未移除），故保留 window 级中转而非内联进 viewModelHand。
+    property real handBaseTilt: -34.56
+    property real handPosX: 0.36
+    property real handPosY: -0.12
+    property real handPosZ: -0.39
 
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
     function startGame() {
@@ -422,12 +423,15 @@ Window {
                 //   减到 30°、臂段 scale 收到 0.09 → 手段中心相机本地 z∈[-0.25(静止), -0.13(挥峰)]，始终近于 0.3 →
                 //   depth 测试恒胜地形 → 手臂恒在所有实体方块之前（不穿模）。pivot.y 上移到 0.05 使手仍落视野下中。
                 //   t91：pivot.x 0.35→0.20 整手左移（旧 0.35 偏右，手持方块出右框）；y/z 不动（不穿模余量不变）。
+                //   t156 固化：用户经设置面板 ArmSlider 重新调定终值（baseTilt -34.56°、position (0.36,-0.12,-0.39)），
+                //     有意放弃 t73/t91 的「不穿模几何」换取「贴近方块」手感（position.z=-0.39 深于 AABB 半宽 0.3）；
+                //     上方 window.handBaseTilt/handPosX/Y/Z 为权威默认，本节点 baseTilt/position 全读它们。
                 // t120 popY：拾取/拿取时整手 Y 弹跳（0→-0.08→0，~200ms；下方 handPopAnim 驱动）。
                 //   叠加进 position.y → 手下沉一点再回位（「拿到东西手一沉」反馈）。与 swingAngle 正交：
                 //   swing 改 eulerRotation.x（绕肩挥动）、pop 改 position.y（位移），互不干扰、可叠加
                 //   （拾取时手不挥、破/放时手挥不弹）。
                 position: Qt.vector3d(window.handPosX, window.handPosY + viewModelHand.popY, window.handPosZ)
-                readonly property real baseTilt: window.handBaseTilt  // t129: 读 window 级（t139 起由 ESC 设置面板 ArmSlider 实时调）；默认 100.0 见 window.handBaseTilt 注释（t122 几何依据）
+                readonly property real baseTilt: window.handBaseTilt  // 读 window 级（t129 引入、t139 起由 ESC 设置面板 ArmSlider 实时调）；t156 固化用户终值 -34.56（见 window.handBaseTilt 注释）
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 property real popY: 0.0                 // t120：拾取/拿取弹跳位移（Y）；0=静止，负=下沉
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
@@ -448,18 +452,18 @@ Window {
                     scale: Qt.vector3d(0.11, 0.16, 0.11)  // t81：加粗+加长 Y（0.085/0.12→0.11/0.16），手变长变大
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447) }
                 }
-                // 手持方块（t73 可见性修复）：持有方块（selectedBlock≠0）时，手前显该方块。
-                //   根因：旧 position(0,-0.1,0.01) scale0.12 被手臂(scale0.16/0.2)几何完全包住（手臂 z 范围
-                //     [-0.16,0.16] 吞掉方块 z=0.01）+ 65°tilt 使 z=0.01 的前移失效 → 方块被手皮遮挡不可见。
-                //   修：方块前移到 z=-0.11（脱离手段 z 包围 [-0.0425,0.0425]，方块 z 范围 [-0.17,-0.05] 全在手前）、
-                //     scale 0.12（大于手段 0.085，更显眼）→ 方块整段在手前方，从相机侧可见、不被手皮遮挡。
-                //   BlockCube + 共享图集 voxelAtlas → per-face 贴图（草顶/草侧…），复用地形贴图（零 MC 资产）。
-                //   作 viewModelHand 子节点 → 随挥动同步运动（块在手中）。selectedBlock=0 时 BlockCube 兜底为
-                //   Stone 但 Model.visible=false 不渲染（blockId 兜底仅防空 UV，不影响显隐）。
+                // 手持方块（t73 可见性修复；t156 位置重定）：持有方块（selectedBlock≠0）时，手前显该方块。
+                //   t156：手臂 baseTilt 由 100° 改 -34.56° 后，旧 z=-0.11 在屏幕上落到「手下方」（绕肩旋转使
+                //     原「手前」方向转为偏下）→ 方块显在手下面非手中。修：方块沿本地 -Z（手臂朝向）再前移到
+                //     z=-0.22（脱离手段 z 包围 [-0.055,0.055]，方块 z 范围 [-0.28,-0.16] 全在手腕前方）、与手持
+                //     工具(z=-0.22)同深 → 方块稳稳落在手腕前方、从相机侧可见、不被手皮遮挡。
+                //   scale 0.12（大于手段 0.085，更显眼）；BlockCube + 共享图集 voxelAtlas → per-face 贴图
+                //   （草顶/草侧…），复用地形贴图（零 MC 资产）。作 viewModelHand 子节点 → 随挥动同步运动（块在手中）。
+                //   selectedBlock=0 时 BlockCube 兜底为 Stone 但 Model.visible=false 不渲染（blockId 兜底仅防空 UV）。
                 Model {
                     visible: player.selectedBlock !== 0
                     geometry: BlockCube { blockId: player.selectedBlock }
-                    position: Qt.vector3d(0, 0.02, -0.11)    // t91：Y 跟手上移（旧 -0.10→+0.02）；z=-0.11 仍全在手前
+                    position: Qt.vector3d(0, 0.02, -0.22)    // t156：z=-0.11→-0.22 移到手腕前方（非下方）；Y 仍跟手段 (0.02)
                     scale: Qt.vector3d(0.12, 0.12, 0.12)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
@@ -2072,7 +2076,7 @@ Window {
                         value: window.handPosZ
                         onValueChanged: window.handPosZ = value
                     }
-                    Text { text: "⚠ position.z < -0.3 会穿模 / baseTilt 大幅偏离 ±100 破坏袖手顺序（仅临时调试）"
+                    Text { text: "⚠ position.z < -0.3 会穿模（当前 -0.39 为 t156 用户选定）；滑动条仅微调，默认值已固化"
                            color: "#b08060"; font.pixelSize: 10; wrapMode: Text.WordWrap; width: parent.width }
                     // 返回按钮：关设置面板回暂停菜单。
                     Rectangle {
