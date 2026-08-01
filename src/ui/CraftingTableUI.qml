@@ -1,6 +1,10 @@
 import QtQuick
 // t41：迁入 src/ui/ 子目录后需显式 import 自身模块，以解析下方 `property Hotbar hotbar` 等 C++ 类型。
 import VoxelSandbox
+// t168：背包槽操作算法（resolveClick/resolveRightClick/readSlot/writeSlot/redistributeLive/doMergeSameId
+//   等）抽取自共享 JS 库 InventoryOps.js；本面板仅保留 craft 本地槽路由 + 薄委托包装（供 QML 信号处理器
+//   经 root.xxx 调用，调用点零改动）。算法单一权威收敛于此库，消除四面板逐字复制。
+import "InventoryOps.js" as InventoryOps
 
 // 工作台 3×3 合成面板（t50 / t63 完整 UI）：右键工作台方块打开（PlayerController::craftingTableOpened →
 // Main.qml Connections → 显本面板 + 释放指针）。Esc / E / 关闭信号关闭（宿主恢复 grab）。
@@ -70,266 +74,34 @@ Item {
     property real lastTapMs: 0
     property string lastTapKey: ""
 
-    // resolveClick / resolveRightClick：与 SurvivalInventory.qml 完全一致（拾取/放置/合并/互换 4 case）。
-    // 复制而非抽公共组件，保持两文件独立可读（§9 自绘原创，不引入新公共依赖）。
-    function resolveClick(curId, curCount) {
-        const heldId = root.hotbar.heldBlock
-        const heldCount = root.hotbar.heldCount
-        if (heldId === 0) {
-            if (curId === 0) return null
-            return { slotId: 0, slotCount: 0, heldId: curId, heldCount: curCount }
-        }
-        if (curId === 0) {
-            return { slotId: heldId, slotCount: heldCount, heldId: 0, heldCount: 0 }
-        }
-        if (curId === heldId) {
-            const cap = root.hotbar.maxStackSize(curId)
-            const space = cap - curCount
-            if (space <= 0) return null
-            const move = Math.min(space, heldCount)
-            const remain = heldCount - move
-            return { slotId: curId, slotCount: curCount + move,
-                     heldId: remain > 0 ? heldId : 0, heldCount: remain }
-        }
-        return { slotId: heldId, slotCount: heldCount, heldId: curId, heldCount: curCount }
-    }
-    function resolveRightClick(curId, curCount) {
-        const heldId = root.hotbar.heldBlock
-        const heldCount = root.hotbar.heldCount
-        if (heldId === 0) {
-            if (curId === 0) return null
-            let half = Math.floor(curCount / 2)
-            if (half < 1) half = 1
-            return { slotId: curCount - half > 0 ? curId : 0, slotCount: curCount - half,
-                     heldId: curId, heldCount: half }
-        }
-        if (curId !== 0 && curId !== heldId) return null
-        const cap = root.hotbar.maxStackSize(heldId)
-        if (curId === heldId && curCount >= cap) return null
-        const remain = heldCount - 1
-        return { slotId: heldId, slotCount: curCount + 1,
-                 heldId: remain > 0 ? heldId : 0, heldCount: remain }
-    }
-
-    // ── t79 右键拖拽均分辅助（与 SurvivalInventory.qml 同算法，独立维护保持两文件可读）──
-    function slotKey(group, index) { return group + ":" + index }
-    function dragHasKey(key) {
-        for (let i = 0; i < root.dragSlots.length; ++i) if (root.dragSlots[i] === key) return true
-        return false
-    }
-    function addDragSlot(key) {
-        if (root.dragHasKey(key)) return
-        // t108：异物槽不入 dragSlots（addDragSlot 前判）。仅在分发态（dragHeldId≠0）过滤——读槽当前栈，
-        // 非空且 id≠dragHeldId 则跳过（与 redistributeLive 的 eligible 过滤一致；让绿框只亮真正会收物的
-        // 空/同 id 槽）。dragHeldId=0（空手拖）不过滤，让起点槽入 dragSlots 供 endLeftDrag→singleLeftClick。
-        if (root.dragHeldId !== 0) {
-            const p0 = key.split(":")
-            const cur = root.readSlot(p0[0], parseInt(p0[1], 10))
-            if (cur.id !== 0 && cur.id !== root.dragHeldId) return
-        }
-        root.dragSlots = root.dragSlots.concat([key])
-        root.redistributeLive()                          // t98：每滑入新格实时重算 N 等分（撤销 + 重分）
-    }
-    function readSlot(group, index) {
-        if (group === "craft")  return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0 }
-        if (group === "main")   return { id: root.hotbar.mainBlockIdAt(index), count: root.hotbar.mainCountAt(index) }
-        if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index) }
+    // ── t168 面板专属槽路由：craft 合成格走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
+    //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
+    function localReadSlot(group, index) {
+        if (group === "craft") return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0 }
         return { id: 0, count: 0 }
     }
-    function writeSlot(group, index, id, count) {
-        if (group === "craft")       { root.craftSlots[index] = id; root.craftCounts[index] = count; root.craftRev++ }
-        else if (group === "main")   { root.hotbar.mainSetStack(index, id, count) }
-        else if (group === "hotbar") { root.hotbar.setStack(index, id, count) }
+    function localWriteSlot(group, index, id, count) {
+        if (group === "craft") { root.craftSlots[index] = id; root.craftCounts[index] = count; root.craftRev++ }
     }
-    function beginLeftDrag() {
-        root.dragHeldId = root.hotbar.heldBlock
-        root.dragHeldCount = root.hotbar.heldCount
-        root.dragSlots = []
-        root.dragOriginal = ({})                        // t98：重置原始栈快照
-        root.dragWritten = ({})                         // t98：重置已写槽记录
-        root.leftDragActive = true
-        if (root.hoveredKey !== "") root.addDragSlot(root.hoveredKey)
-    }
-    function endLeftDrag() {
-        if (!root.leftDragActive) return
-        root.leftDragActive = false
-        const n = root.dragSlots.length
-        // t167：N≥2 已在 drag 途中实时分完（redistributeLive 每滑入新格重算），此处不再均分。
-        // N===1 退化为单格左键（拾取/放置/合并/互换）—— 微拖（越阈值但未离开起点格）的常规左键语义。
-        if (n === 1) {
-            const p = root.dragSlots[0].split(":")
-            root.singleLeftClick(p[0], parseInt(p[1], 10))
-        }
-        root.dragSlots = []
-        root.dragOriginal = ({})
-        root.dragWritten = ({})
-    }
-    // t98 实时均分（替代 t90 松手一次性 applyDragDistribute）：每滑入新格（addDragSlot 触发）即重算
-    // floor(dragHeldCount/N) 入格、余数实时回光标（heldBlock/heldCount → Main.qml 浮动图标实时变）。撤销
-    // 机制：dragOriginal 快照每槽 drag 前原始栈（首次 encounter 拍），dragWritten 记本轮已写槽；下次重分前
-    // 先据 dragOriginal 把已写格恢复，再按新 N 重分 → 用户看到「滑第 2 格变对半、第 3 格变三等分」的实时
-    // 反馈。合格过滤：空槽 / 同 id 未满；craft 合成格排除（避免改写合成输入、干扰 recipeMatch）；异物 / 已
-    // 满槽跳过。守恒：写回总量 + 余数 = dragHeldCount 快照。N≤1 不分（保留单格左键给 endLeftDrag 处理）。
-    // 与 Inventory / SurvivalInventory 同算法。
-    function redistributeLive() {
-        // 1) 撤销上一轮写入（恢复 dragOriginal 记录的原始栈），确保重分前所有 dragSlots 回到 drag 前态。
-        for (const key in root.dragWritten) {
-            const wp = key.split(":")
-            const orig = root.dragOriginal[key]
-            root.writeSlot(wp[0], parseInt(wp[1], 10), orig.id, orig.count)
-        }
-        root.dragWritten = ({})
+    // resolveClick / resolveRightClick（拾取/放置/合并/互换 + 半份）：算法见 InventoryOps（四面板共享）。
+    //   返回 {slotId,slotCount,heldId,heldCount} 或 null=无操作；调用方据返回值写对应槽 + 更新 held。
+    function resolveClick(curId, curCount) { return InventoryOps.resolveClick(root, curId, curCount) }
+    function resolveRightClick(curId, curCount) { return InventoryOps.resolveRightClick(root, curId, curCount) }
+    function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
+    function writeSlot(group, index, id, count) { InventoryOps.writeSlot(root, group, index, id, count) }
 
-        const heldId = root.dragHeldId
-        const total = root.dragHeldCount
-        const cap = root.hotbar.maxStackSize(heldId)
-
-        // 2) 重建合格清单；首次 encounter 的槽拍原始栈快照（此后该槽读到的是本轮写入值，须靠快照还原）。
-        let eligible = []
-        const seen = {}
-        for (let i = 0; i < root.dragSlots.length; ++i) {
-            const key = root.dragSlots[i]
-            if (seen[key]) continue
-            seen[key] = true
-            const p = key.split(":")
-            if (p[0] === "craft") continue                              // 合成格排除（避免影响 recipeMatch）
-            if (!root.dragOriginal[key]) {
-                const cur = root.readSlot(p[0], parseInt(p[1], 10))
-                root.dragOriginal[key] = { id: cur.id, count: cur.count }
-            }
-            const orig = root.dragOriginal[key]
-            if (orig.id === 0 || (orig.id === heldId && orig.count < cap))
-                eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count })
-        }
-
-        // t108：n>total 截断 eligible 到 total 项（每格至少 1 件；N≤count）。如 8 件拖 9 格 → 第 9 格不分，
-        // 避免被「扫过即亮绿框」错觉（与 redistributeLive 的「异物/已满跳过」一致）。截断在 n<=1 早退之前。
-        let n = eligible.length
-        if (n > total) { eligible = eligible.slice(0, total); n = eligible.length }
-        // N≤1 / 空手 / 无物：不分（保留单格左键给 endLeftDrag；空手 drag 无意义）。余数 = 原始快照。
-        if (n <= 1 || heldId === 0 || total <= 0) {
-            root.hotbar.heldBlock = heldId
-            root.hotbar.heldCount = total
-            return
-        }
-
-        // 3) floor(total/N) 入格（cap 钳制防溢出），余数留光标；记 dragWritten 供下轮撤销。
-        const per = Math.floor(total / n)
-        let remaining = total
-        if (per > 0) {
-            for (let i = 0; i < n; ++i) {
-                const e = eligible[i]
-                const place = Math.min(per, cap - e.base)
-                if (place <= 0) continue
-                root.writeSlot(e.group, e.index, heldId, e.base + place)
-                root.dragWritten[e.key] = true
-                remaining -= place
-            }
-        }
-        root.hotbar.heldBlock = remaining > 0 ? heldId : 0
-        root.hotbar.heldCount = remaining
-    }
-    // 单格左键（N===1 微拖退路 = resolveClick：空手拾取 / 持物放置 / 合并 / 互换）。正常单击走 per-slot
-    //   TapHandler.onTapped；仅当左键越阈值但只扫过起点一格时经此路径补一次单击语义。
-    function singleLeftClick(group, index) {
-        const cur = root.readSlot(group, index)
-        const r = root.resolveClick(cur.id, cur.count)
-        if (!r) return
-        root.writeSlot(group, index, r.slotId, r.slotCount)
-        root.hotbar.heldBlock = r.heldId
-        root.hotbar.heldCount = r.heldCount
-    }
-
-    // t110 Shift+左键搬运（MC 1.0 背包）：main 槽→首个空 hotbar 槽；hotbar 槽→首个空 main 槽；其它组（craft）
-    //   无操作（spec 仅定义 main↔hotbar）。与 SurvivalInventory / Inventory / FurnaceUI 同算法。
-    function slotShiftLeft(group, index) {
-        if (group === "main") {
-            const src = root.readSlot("main", index)
-            if (src.id === 0) return
-            for (let i = 0; i < root.hotbar.slotCount; ++i) {
-                if (root.readSlot("hotbar", i).id === 0) {
-                    root.writeSlot("main", index, 0, 0)
-                    root.writeSlot("hotbar", i, src.id, src.count)
-                    return
-                }
-            }
-        } else if (group === "hotbar") {
-            const src = root.readSlot("hotbar", index)
-            if (src.id === 0) return
-            for (let i = 0; i < root.hotbar.mainCount; ++i) {
-                if (root.readSlot("main", i).id === 0) {
-                    root.writeSlot("hotbar", index, 0, 0)
-                    root.writeSlot("main", i, src.id, src.count)
-                    return
-                }
-            }
-        }
-    }
-
-    // t110 数字键交换：当前 hover 槽 ↔ hotbar[idx] 整栈互换（与 SurvivalInventory 同算法）。
-    function swapHoveredWithHotbar(hotbarIdx) {
-        if (root.hoveredKey === "") return
-        const parts = root.hoveredKey.split(":")
-        if (parts.length !== 2) return
-        const group = parts[0]
-        const srcIdx = parseInt(parts[1], 10)
-        if (Number.isNaN(srcIdx)) return
-        const src = root.readSlot(group, srcIdx)
-        const dst = root.readSlot("hotbar", hotbarIdx)
-        root.writeSlot(group, srcIdx, dst.id, dst.count)
-        root.writeSlot("hotbar", hotbarIdx, src.id, src.count)
-    }
-
-    // t98 双击合并（MC：双击某槽 → 扫 main + hotbar 同 id 物品，累加成满栈 64 一组，余数留光标）。targetId
-    // 取光标手持 id（典型流程：首次左键拾起该槽 → 二次点击同槽合并），fallback 到所点槽 id（首次为放置时光
-    // 标空）。依赖 t97 main VM 共享（main + hotbar 同一份）。守恒：合并后 (各槽 + 光标) 总量 = 合并前。
-    function doMergeSameId(group, index) {
-        if (!root.hotbar) return
-        let targetId = root.hotbar.heldBlock
-        if (targetId === 0) {
-            const cur = root.readSlot(group, index)
-            targetId = cur.id
-        }
-        if (targetId === 0) return
-        const cap = root.hotbar.maxStackSize(targetId)
-
-        // 收集所有同 id 槽位 + 光标，求总量。
-        const slots = []
-        let total = 0
-        if (root.hotbar.heldBlock === targetId) total += root.hotbar.heldCount
-        for (let i = 0; i < root.hotbar.mainCount; ++i) {
-            if (root.hotbar.mainBlockIdAt(i) === targetId) {
-                total += root.hotbar.mainCountAt(i)
-                slots.push({ group: "main", index: i })
-            }
-        }
-        for (let i = 0; i < root.hotbar.slotCount; ++i) {
-            if (root.hotbar.blockIdAt(i) === targetId) {
-                total += root.hotbar.countAt(i)
-                slots.push({ group: "hotbar", index: i })
-            }
-        }
-        if (total <= 0) return
-
-        // 清空所有同 id 槽 + 光标（即将重新打包）。
-        for (let i = 0; i < slots.length; ++i) {
-            root.writeSlot(slots[i].group, slots[i].index, 0, 0)
-        }
-        root.hotbar.heldBlock = 0
-        root.hotbar.heldCount = 0
-
-        // 重打包：满栈（cap）按扫描顺序填回前 numFull 个槽，余数（< cap）留光标。槽位充足（total 来自这些
-        // 槽 + 光标，cap*(槽数+1) ≥ total），不会丢物品。
-        const numFull = Math.min(Math.floor(total / cap), slots.length)
-        for (let i = 0; i < numFull; ++i) {
-            root.writeSlot(slots[i].group, slots[i].index, targetId, cap)
-        }
-        const cursorCount = total - numFull * cap
-        if (cursorCount > 0) {
-            root.hotbar.heldBlock = targetId
-            root.hotbar.heldCount = cursorCount
-        }
-    }
+    // ── t79/t98/t108/t167 拖动均分 + t110 Shift/数字键搬运 + t98 双击合并：算法见 InventoryOps
+    //   （四面板共享）。本处仅薄委托包装，供 QML 信号处理器 / 绑定经 root.xxx 调用（调用点零改动）。
+    function slotKey(group, index) { return InventoryOps.slotKey(group, index) }
+    function dragHasKey(key) { return InventoryOps.dragHasKey(root, key) }
+    function addDragSlot(key) { InventoryOps.addDragSlot(root, key) }
+    function beginLeftDrag() { InventoryOps.beginLeftDrag(root) }
+    function endLeftDrag() { InventoryOps.endLeftDrag(root) }
+    // redistributeLive / singleLeftClick：纯内部辅助（仅 InventoryOps.addDragSlot / endLeftDrag 调用），
+    //   算法已入 InventoryOps，此处不再持有副本。
+    function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
+    function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
+    function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
 
     // 取当前合成格的 id 数组（触碰 craftRev 让 QML 绑定刷新时重算）。
     function craftIdArray() {

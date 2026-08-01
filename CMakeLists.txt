@@ -112,6 +112,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/ToolIcon.qml
         src/ui/MaterialIcon.qml
         src/ui/ArmSlider.qml
+        src/ui/InventoryOps.js
 )
 
 qt_add_resources(voxelsandbox "voxel_textures"
