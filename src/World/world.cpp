@@ -179,8 +179,10 @@ int World::heightAt(int x, int z) const
     // t119：高度由 16 重定标到 64（地表抬升、留出基岩底层 + 更厚石层 + 更高天空间）。
     // 原 7+n*4（地表 ~3..11）→ 28+n*12（地表 ~16..40）：基岩层 y 0..4 在地表之下，石层 12..36
     // 厚度（散布矿石有空间），天空间 24..48（树 / 飞行）。同 seed 仍确定（fbm 纯函数）。
+    // t162：振幅 12→8（用户「太陡太过于陡峭」→ 更平缓少陡山），基线 28→30 → 地表 ~22..38。
+    //   水位 24 仍相交（~22..24 低洼列见水），沙滩带 / 树·矿石阈值（waterLevel+1=25）同步成立。
     const double n = fbm((x + m_seed) * 0.09, (z + m_seed) * 0.09); // [-1,1]
-    const int h = int(std::lround(28.0 + n * 12.0));               // ~16..40
+    const int h = int(std::lround(30.0 + n * 8.0));                // ~22..38（t162 振幅减半更平缓）
     return std::max(0, h);
 }
 
@@ -191,7 +193,7 @@ int World::heightAt(int x, int z) const
 bool World::isDesert(int x, int z) const
 {
     const double b = fbm((x + m_seed + 7919) * 0.018, (z + m_seed + 7919) * 0.018); // [-1,1]
-    return b > 0.25;
+    return b > 0.35; // t162：0.25→0.35 沙漠比例 ↓（用户「沙子太多、主要靠水边」；干旱整柱沙适度减少，沙滩带仍供沙）
 }
 
 void World::generate()

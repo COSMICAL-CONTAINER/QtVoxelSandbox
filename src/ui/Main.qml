@@ -202,7 +202,7 @@ Window {
 
     // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
     // 与物理(PlayerController)共用同一份栅格。
-    World { id: theWorld; width: 48; depth: 48; height: 64; seed: 1337 } // t119：高度 16→64（地表 16..40 + 基岩底层）
+    World { id: theWorld; width: 80; depth: 80; height: 64; seed: 1337 } // t162：3×3(48)→5×5(25 chunk, 80×80) 放大；高度 64 不变
 
     // 昼夜时钟（t09，PLAN §2-H）：~20 分钟周期的天光亮度乘子 lerp（**非**旋转方向光）。
     // dayPhase 0..1 循环（0=正午 / 0.5=子夜）；skyLight [0,1] 是纯函数派生的天光乘子，供下面
@@ -686,6 +686,55 @@ Window {
             geometry: ChunkGeometry { id: geo22; world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
+        // t162 5×5 外环（cx/cz 含 3 或 4 的 16 个 chunk；中心 3×3 仍 geo00..geo22 供 F3 顶点统计，外环 id 不入 F3 和）。
+        Model { position: Qt.vector3d(48, 0, 0);  geometry: ChunkGeometry { id: geo30; world: theWorld; cx: 3; cz: 0; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 0);  geometry: ChunkGeometry { id: geo40; world: theWorld; cx: 4; cz: 0; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(48, 0, 16); geometry: ChunkGeometry { id: geo31; world: theWorld; cx: 3; cz: 1; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 16); geometry: ChunkGeometry { id: geo41; world: theWorld; cx: 4; cz: 1; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(48, 0, 32); geometry: ChunkGeometry { id: geo32; world: theWorld; cx: 3; cz: 2; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 32); geometry: ChunkGeometry { id: geo42; world: theWorld; cx: 4; cz: 2; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(0, 0, 48);  geometry: ChunkGeometry { id: geo03; world: theWorld; cx: 0; cz: 3; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(16, 0, 48); geometry: ChunkGeometry { id: geo13; world: theWorld; cx: 1; cz: 3; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(32, 0, 48); geometry: ChunkGeometry { id: geo23; world: theWorld; cx: 2; cz: 3; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(48, 0, 48); geometry: ChunkGeometry { id: geo33; world: theWorld; cx: 3; cz: 3; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 48); geometry: ChunkGeometry { id: geo43; world: theWorld; cx: 4; cz: 3; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(0, 0, 64);  geometry: ChunkGeometry { id: geo04; world: theWorld; cx: 0; cz: 4; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(16, 0, 64); geometry: ChunkGeometry { id: geo14; world: theWorld; cx: 1; cz: 4; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(32, 0, 64); geometry: ChunkGeometry { id: geo24; world: theWorld; cx: 2; cz: 4; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(48, 0, 64); geometry: ChunkGeometry { id: geo34; world: theWorld; cx: 3; cz: 4; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 64); geometry: ChunkGeometry { id: geo44; world: theWorld; cx: 4; cz: 4; sunDir: worldClock.sunDir }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
+        }
 
         // t148 水（独立透明渲染段）：每 chunk 额外一个 ChunkGeometry{waterOnly:true} 只网格化 Water
         //   方块（水-水面互剔、水贴地形那面剔），用 PrincipledMaterial opacity=0.7 走透明通道（同
@@ -736,6 +785,55 @@ Window {
         Model { // water (2,2)
             position: Qt.vector3d(32, 0, 32)
             geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        // t162 5×5 水外环（16 chunk，同地形外环 (cx,cz)）。
+        Model { position: Qt.vector3d(48, 0, 0);  geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 0; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 0);  geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 0; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(48, 0, 16); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 1; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 16); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 1; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(48, 0, 32); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 2; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 32); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 2; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(0, 0, 48);  geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 3; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(16, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 3; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(32, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 3; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(48, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 3; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 3; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(0, 0, 64);  geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 4; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(16, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 4; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(32, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 4; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(48, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 4; sunDir: worldClock.sunDir; waterOnly: true }
+            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        }
+        Model { position: Qt.vector3d(64, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 4; sunDir: worldClock.sunDir; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
 
