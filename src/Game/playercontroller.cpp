@@ -732,10 +732,13 @@ void PlayerController::placeBlock()
         // 命中顶面（ny=+1，放在方块上方）→ 下半(state=0)；命中底面（ny=-1，天花板下方）→ 上半(state=1)。
         placeState = quint8(m_hitNy < 0 ? 1 : 0);
     } else if (m_selectedBlock == BlockRegistry::WoodStairs) {
-        // t147：state[1:0]=水平朝向（horizontalFacing）；bit2=上下倒置。
+        // t147：state[1:0]=水平朝向；bit2=上下倒置。
+        //   t163 朝向修正：朝向 = horizontalFacing **异或 1**（取玩家反向）→ 楼梯「开口」朝玩家侧
+        //     （partialblockgeometry「朝 X 开 = 背墙在对侧」：玩家面 +X(0) → 取 -X(1) → 背墙 +X 侧、开口 -X 朝玩家），
+        //     玩家前行即可走上台阶（旧取正向 = 开口朝远离玩家 = 背对玩家，得绕行）。
         //   命中底面（天花板下方，m_hitNy<0）→ 倒置（整步在上、背墙在下）；否则正置。镜像 slab 的
         //   「ny<0 → 上半」约定，使「点方块下方」在所有半方块（slab/stairs）统一得到「倒挂」变体。
-        placeState = quint8((horizontalFacing() & 3) | (m_hitNy < 0 ? 4 : 0));
+        placeState = quint8(((horizontalFacing() & 3) ^ 1) | (m_hitNy < 0 ? 4 : 0));
     }
     const bool isDoor = (m_selectedBlock == BlockRegistry::WoodDoor);
     const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
@@ -1168,10 +1171,35 @@ void PlayerController::step(qreal dt)
         moveAxis(0, delta.x());
         if (crouchSafe && delta.x() != 0.0f && !hasGroundBelowAt(m_pos.x(), m_pos.z()))
             m_pos.setX(prevX); // 蹲下边缘安全：X 移动后脚下无支撑 → 回滚该轴位移
+        // t163 auto-step X：被低障碍（≤0.5：下半砖 / 楼梯整步 / 活版门合态）挡住且在地面非蹲 → 试抬升 0.55
+        //   走过去（机制等价 MC 自动上半砖 / 楼梯，无需跳）。抬升后顶头或仍走不通 → 还原 Y（不影响正常碰撞）。
+        if (delta.x() != 0.0f && m_pos.x() == prevX && m_onGround && m_moveState != Crouch) {
+            const float baseY = m_pos.y();
+            m_pos.setY(baseY + 0.55f);
+            if (!aabbHitsSolid()) {
+                const float prevXs = m_pos.x();
+                moveAxis(0, delta.x());
+                if (m_pos.x() == prevXs) m_pos.setY(baseY); // 抬升仍走不通（高墙）→ 还原
+            } else {
+                m_pos.setY(baseY); // 抬升顶头（天花板）→ 还原
+            }
+        }
         const float prevZ = m_pos.z();
         moveAxis(2, delta.z());
         if (crouchSafe && delta.z() != 0.0f && !hasGroundBelowAt(m_pos.x(), m_pos.z()))
             m_pos.setZ(prevZ); // 蹲下边缘安全：Z 移动后脚下无支撑 → 回滚该轴位移
+        // t163 auto-step Z（同 X）：低障碍 + 地面 + 非蹲 → 抬升 0.55 走过去，失败还原。
+        if (delta.z() != 0.0f && m_pos.z() == prevZ && m_onGround && m_moveState != Crouch) {
+            const float baseY = m_pos.y();
+            m_pos.setY(baseY + 0.55f);
+            if (!aabbHitsSolid()) {
+                const float prevZs = m_pos.z();
+                moveAxis(2, delta.z());
+                if (m_pos.z() == prevZs) m_pos.setY(baseY);
+            } else {
+                m_pos.setY(baseY);
+            }
+        }
     }
     // 稳健地面复探：脚底下方 0.05 有实体即算着地
     const float oy = m_pos.y();
