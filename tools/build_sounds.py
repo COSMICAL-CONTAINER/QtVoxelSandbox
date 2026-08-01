@@ -20,6 +20,13 @@
    - pickup.wav：拾取反馈 —— 短上扬正弦双音（~0.16s），轻快提示。
    - door_open.wav：开门 —— 木质嘎吱上扬 + 起始短扣响（门闩松脱）~0.22s（t152）。
    - door_close.wav：关门 —— 低频闷击（门框撞上）+ 末尾扣响（门闩扣合）~0.20s（t152）。
+   - hurt.wav：玩家受伤（t177）—— 低频闷击 + 略不和谐中频（呻吟感）+ 起始宽带冲击 ~0.22s；不分
+     材质（玩家自身受伤，非方块）。机制等价 MC 玩家受伤声（§9 原创）。PlayerState.damaged →
+     AudioManager.playHurt 触发；连击 seek 重发不堆叠（同其他单件）。
+   - ambient_wind.wav：环境音 / 风声床（t177）—— 长循环风声（~8s，单极点低通白噪 + 双 LFO 慢颤
+     调幅 + 首末 50ms 三角窗淡化保循环无缝）。机制等价 MC 的环境 / 风声氛围床（§9 原创）。
+     AudioManager 用 ma_sound 设 looping，startAmbient/stopAmbient 控制开关（playing 态开 / 退菜单停），
+     setAmbientLevel 据昼夜调强度（夜间更静谧）。
 
 确定性合成（每组固定 random.seed），同次运行产出字节一致的 WAV（便于 git/CI diff）。
 运行：python tools/build_sounds.py（输出到工程根 sounds/）。
@@ -182,6 +189,69 @@ def gen_door_close():
     return out
 
 
+def gen_hurt():
+    """受伤音（t177）：玩家自身受伤声 —— 低频闷击（身体受击的「闷」）+ 略不和谐中频（呻吟 / 闷哼感，
+    165Hz 略偏离基频泛音）+ 起始宽带冲击（瞬态「啪」），~0.22s。
+    机制等价 MC 玩家受伤声（原创程序合成，§9 法律：零 MC 资产）。由 PlayerState.damaged → Main.qml 路由
+    到 AudioManager.playHurt 触发（掉落伤害等；连击 seek 重发不堆叠，同其他单件）。
+    """
+    dur = 0.22
+    n = int(SR * dur)
+    random.seed(778877)
+    out = []
+    for i in range(n):
+        t = i / SR
+        # 低频冲击（身体受击的「闷」）
+        thunk = math.sin(2 * math.pi * 90 * t) * 0.55
+        # 略不和谐中频（呻吟 / 闷哼感；与 thunk 基频不成整数比 → 略紧绷）
+        groan = math.sin(2 * math.pi * 165 * t) * 0.30
+        # 起始宽带冲击（瞬态「啪」，快速衰减）
+        impact = random.uniform(-1, 1) * 0.45 * env_exp(t, 45.0)
+        e = env_exp(t, 12.0)
+        s = (thunk + groan + impact) * e
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
+def gen_ambient_wind():
+    """环境音 / 风声床（t177）：长循环风声 —— 单极点低通白噪（→ 低频起伏的「风」body）+ 双 LFO 慢速
+    调幅（0.30Hz + 0.11Hz 叠加 → 自然不规则起伏）+ 首末 50ms 三角窗淡化（保循环无缝、无边界咔哒），
+    ~8s。机制等价 MC 的环境 / 风声氛围床（原创程序合成，§9 法律：零 MC 资产）。
+    AudioManager 用 ma_sound_set_looping(true) 设循环，startAmbient / stopAmbient 控制开关（playing 态开 /
+    退菜单停），setAmbientLevel 据昼夜调强度（夜间更静谧）。整体幅度偏低（base_amp=0.13，背景氛围不抢前景）。
+    """
+    dur = 8.0
+    n = int(SR * dur)
+    random.seed(51501)
+    # 单极点低通：state = a*state + (1-a)*w → 把白噪压成低频起伏（a 越接近 1 越平滑 / 低频）
+    a = 0.985
+    state = 0.0
+    raw = [0.0] * n
+    for i in range(n):
+        w = random.uniform(-1, 1)
+        state = a * state + (1.0 - a) * w
+        raw[i] = state
+    # 低通后幅度大幅衰减 → 归一化回 [-1,1]，再乘 base 调到背景级
+    peak = max(1e-6, max(abs(s) for s in raw))
+    inv = 1.0 / peak
+    # 双 LFO 慢颤调幅（白天 / 风强的自然不规则起伏）
+    lfo1 = 2 * math.pi * 0.30
+    lfo2 = 2 * math.pi * 0.11
+    fade_n = int(SR * 0.05)  # 50ms 首末淡化（循环无缝）
+    base_amp = 0.13          # 风声整体偏低（背景氛围，不抢前景）
+    out = []
+    for i in range(n):
+        t = i / SR
+        lfo = 0.5 + 0.3 * math.sin(lfo1 * t) + 0.2 * math.sin(lfo2 * t)
+        amp = base_amp * lfo
+        if i < fade_n:
+            amp *= i / fade_n
+        elif i > n - fade_n:
+            amp *= (n - 1 - i) / fade_n
+        out.append(max(-1.0, min(1.0, raw[i] * inv * amp)))
+    return out
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -194,8 +264,10 @@ def main():
             write_wav(path, samples)
             print(f"wrote {path} ({len(samples)} frames, {len(samples)/SR:.2f}s)")
     # 单件音：place（保留）+ pickup + door_open / door_close（t152 门/活板门开关声）
+    # + hurt / ambient_wind（t177 受伤声 + 环境风声床）
     for name, gen in [("place", gen_place), ("pickup", gen_pickup),
-                      ("door_open", gen_door_open), ("door_close", gen_door_close)]:
+                      ("door_open", gen_door_open), ("door_close", gen_door_close),
+                      ("hurt", gen_hurt), ("ambient_wind", gen_ambient_wind)]:
         samples = gen()
         path = out_dir / f"{name}.wav"
         write_wav(path, samples)

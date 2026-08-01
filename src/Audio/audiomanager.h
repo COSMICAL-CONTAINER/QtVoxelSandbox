@@ -11,11 +11,11 @@
 // AudioManager（音频封装，Core/Platform 层，PLAN §2 分层）。
 //
 // 集成 miniaudio（单头库，PLAN §1 决策：miniaudio 单头 MIT；避 Qt Multimedia 后端矩阵不一致），
-// 为破 / 放 / 挖 / 脚步 / 拾取 5 类原创 SFX（§4）提供播放，**按方块材质分组**（t118：石/木/草/沙/叶
-// 5 组 clip 池，spec「playBreak/playMining/playStep 按 group 选」）。触发由 Game/Entities 层信号
-// 发出（World::blockBroken / blockPlaced、PlayerController::miningParticle / itemPickedUp /
-// walkPhaseChanged），呈现/QML 层经 Connections 转发到本类的 Q_INVOKABLE play* 方法 ——
-// 音频层只消费、绝不反向写栅格 / 玩家态（PLAN §2 分层：依赖只向下）。
+// 为破 / 放 / 挖 / 脚步 / 拾取 / 受伤 / 环境 7 类原创 SFX（§4 + t177 音效完善）提供播放，**按方块材质
+// 分组**（t118：石/木/草/沙/叶 5 组 clip 池，spec「playBreak/playMining/playStep 按 group 选」）。
+// 触发由 Game/Entities 层信号发出（World::blockBroken / blockPlaced、PlayerController::miningParticle
+// / itemPickedUp / walkPhaseChanged、PlayerState::damaged），呈现/QML 层经 Connections 转发到本类的
+// Q_INVOKABLE play* 方法 —— 音频层只消费、绝不反向写栅格 / 玩家态（PLAN §2 分层：依赖只向下）。
 //
 // 设计要点：
 //   - pimpl（std::unique_ptr<Data>）：miniaudio.h 是 ~4MB 重头，**不**进 audiomanager.h，使本头轻量、
@@ -26,9 +26,11 @@
 //     ma_sound_init_from_data_source。PCM 缓冲由 Clip 持有、与 sound 同寿命（ref 指向其内存）。
 //   - 材质分组 clip 池：5 组 × {break, mining, step} = 15 clip，按 BlockRegistry::materialGroup(id)
 //     选播；GroupDefault（air / 未知）→ 兜底复用 GroupStone（spec「按材质分组」+ 永不静默）。
-//     place / pickup 单件（放置 / 拾取不分材质）。
-//   - 重播语义：每次 play* 调 ma_sound_seek_to_pcm_frame(0) + start —— 截断重发，单实例不堆叠
-//     （spec「快速连击不叠暴」；MC SFX 重叠会爆音，截断是最简稳健的限并发）。
+//     place / pickup / door / hurt 单件（放置 / 拾取 / 门开关 / 受伤不分材质）；
+//     ambient（风声床）单件 + looping（startAmbient/stopAmbient 控制循环开关，setAmbientLevel 调强度）。
+//   - 重播语义：每次单件 play* 调 ma_sound_seek_to_pcm_frame(0) + start —— 截断重发，单实例不堆叠
+//     （spec「快速连击不叠暴」；MC SFX 重叠会爆音，截断是最简稳健的限并发）。ambient 是循环长音，
+//     走 start/stop（不 seek 重发）；setAmbientLevel 只改音量。
 //   - 降级（§2-E）：引擎初始化失败 / 某 WAV 缺失或损坏 → 仅该路径静默 + qCWarning 告警，
 //     其余 clip 不受影响、应用照常运行（绝不崩）。删音频文件运行 = 各 clip 各自降级、不崩。
 //
@@ -65,6 +67,21 @@ public:
     //   非放置）。spec「playDoorOpen/Close + doorToggled 信号」。
     Q_INVOKABLE void playDoorOpen();
     Q_INVOKABLE void playDoorClose();
+    // 受伤音（t177 音效完善）：玩家自身受伤声 —— 低频闷击 + 略不和谐中频（呻吟感）+ 起始宽带冲击。
+    //   不分材质（玩家自身，非方块）。机制等价 MC 玩家受伤声（原创程序合成，§9）。由 PlayerState::
+    //   damaged(amount) → Main.qml 路由到本方法（掉落伤害等所有 takeDamage 路径）；连击 seek 重发
+    //   不堆叠（同其他单件）。仅 Survival 走此路径（Creative 无伤 / Spectator noclip 不发 damaged）。
+    Q_INVOKABLE void playHurt();
+    // 环境音 / 风声床（t177 音效完善）：长循环风声（ma_sound looping=true），进入游戏（playing）启动、
+    //   退出（回菜单 / 世界列表）停止。机制等价 MC 的环境 / 风声氛围床（原创程序合成，§9）。
+    //   setAmbientLevel 据昼夜调强度（夜间更静谧）：level ∈ [0,1]，乘进 ambient 基础音量（base*m_volume*
+    //   *level）。Main.qml 把 worldClock.skyLight（0=子夜/1=正午）映射成 level（如 0.5+0.5*skyLight）
+    //   驱动 → 白天风声稍显、夜间更静谧。startAmbient 在 ambientPlaying=true 时早退（幂等）；stopAmbient
+    //   反之。降级：engine 失败 / ambient_clip 加载失败 → 各方法静默早退（§2-E，不崩）。
+    Q_INVOKABLE void startAmbient();
+    Q_INVOKABLE void stopAmbient();
+    // 设环境音强度（0..1）：仅改 ambient 声音量（若在播即时生效）；幂等（无变化不动）。
+    Q_INVOKABLE void setAmbientLevel(float level);
 
     float volume() const { return m_volume; }
     void setVolume(float v);

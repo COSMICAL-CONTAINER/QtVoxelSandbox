@@ -97,6 +97,7 @@ Window {
         appState = "playing"
         player.grab()
         keyInput.forceActiveFocus()
+        audio.startAmbient()   // t177 环境音：进游戏启风声床（幂等；menu/worldlist 态已 stop）
     }
     // t176 进入指定世界（从世界列表点「进入 / 创建并进入」调）：打开存档 → 按是否有 chunk blob 分流
     //   （有 → 加载存档地形；无 → 新世界 worldgen）→ 加载玩家态（无 → 默认出生）→ 清实体残留 → 进游戏。
@@ -127,6 +128,7 @@ Window {
         appState = "playing"
         player.grab()
         keyInput.forceActiveFocus()
+        audio.startAmbient()   // t177 环境音：进世界启风声床
     }
     // t176 把存档玩家态（QVariantMap）应用到 player / playerState / hotbarVM。空 map（新世界）→ 默认出生态。
     function applyPlayerState(data) {
@@ -193,6 +195,7 @@ Window {
         entityManager.clearAll()
         player.release()
         appState = "worldlist"
+        audio.stopAmbient()   // t177 环境音：退出世界停风声床（菜单态无声）
     }
     // 返回主菜单：先释放指针（恢复光标 + 清按住的按键），关存档连接 + 清实体，再切 menu 态。
     function returnToMenu() {
@@ -206,6 +209,7 @@ Window {
         entityManager.clearAll()
         player.release()
         appState = "menu"
+        audio.stopAmbient()   // t177 环境音：回主菜单停风声床
     }
     // t78 立即重生（死亡界面按钮）：满血 + 清死亡态 + 传回出生点 + 清挖掘/飞行态 + 重新锁定指针回游戏。
     //   PlayerState.respawn 复位血量/死亡态；PlayerController.respawn 传回出生点 + 清物理态；
@@ -338,6 +342,15 @@ Window {
     //   连接为同线程直连 → noteEditActivity 在 setBlock 的 emit worldChanged 栈内同步执行，时间戳精准。
     Connections { target: theWorld; function onWorldChanged() { worldClock.noteEditActivity() } }
 
+    // t177 环境音强度 ←→ 昼夜：风声夜间更静谧（level = 0.5 + 0.5*skyLight：白天 1.0、子夜 0.5）。
+    //   dayPhaseChanged 每 100ms tick 发（与 clearColor / DirectionalLight 同节拍）→ setAmbientLevel
+    //   即时改 looping 风声的音量（在播时；未播仅记值，下次 startAmbient 生效）。纯呈现层桥接，
+    //   PLAN §2 分层：Game 层 worldClock.skyLight（只读）→ Core/Platform 层 audio.setAmbientLevel。
+    Connections {
+        target: worldClock
+        function onDayPhaseChanged() { audio.setAmbientLevel(0.5 + 0.5 * worldClock.skyLight) }
+    }
+
     // 昼↔夜颜色 / 亮度 lerp 辅助（t09）：m=worldClock.skyLight ∈ [0,1]（0=子夜、1=正午）。
     // day 颜色 #9ec6e8 = (0.620,0.776,0.910)；night 颜色 #0b1026 = (0.043,0.063,0.149)。
     // 不影响 NoLighting 材质方块的自发光（地形仍按其材质常数显——昼夜只改环境/天光，spec）。
@@ -391,11 +404,14 @@ Window {
     // 只读 count/posAt/colorAt 自发渲染（PLAN §2 分层：呈现只消费 Entities 数据）。
     EntityManager { id: entityManager }
 
-    // t89 / t118 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 SFX，
-    //   按方块材质分组（石/木/草/沙/叶）clip 池（spec「playBreak/playMining/playStep 按 group 选」）。
-    //   触发由 Game 层信号发出（World::blockBroken/blockPlaced、PlayerController::miningParticle /
-    //   itemPickedUp / walkPhaseChanged），呈现层经 Connections 转发到 playBreak/playPlace/playMining /
-    //   playPickup/playStep（音频层只消费，PLAN §2 分层）。
+    // t89 / t118 / t177 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 / 门开关 /
+    //   受伤 / 环境 SFX，按方块材质分组（石/木/草/沙/叶）clip 池（spec「playBreak/playMining/playStep
+    //   按 group 选」）。触发由 Game 层信号发出（World::blockBroken/blockPlaced、PlayerController::
+    //   miningParticle / itemPickedUp / walkPhaseChanged、PlayerState::damaged），呈现层经 Connections
+    //   转发到 playBreak/playPlace/playMining/playPickup/playStep/playHurt（音频层只消费，PLAN §2 分层）。
+    //   t177 环境音（风声床）：startAmbient 进 playing 启 / stopAmbient 退菜单停（见 startGame/enterWorld/
+    //   saveAndExitToWorldList/returnToMenu）；setAmbientLevel 据昼夜 skyLight 调强度（上方 worldClock
+    //   Connections 驱动，夜间更静谧）。
     //   引擎初始化 / 音频加载失败时 AudioManager 内部静默降级（§2-E），此处无需守卫。
     //   _prevWalkPhase / _walkAccum 是脚步节律追踪态（QML 实例局部属性，非音频引擎态）：
     //   walkPhaseChanged 累加相位差（2π 回绕感知），每半步（Δ≥π）播一次脚步音。
@@ -1964,6 +1980,8 @@ Window {
             playerModel.hurt = 1.0    // 立即满红（hurtAnim 从 1.0 淡到 0）
             hurtAnim.start()           // 400ms 回正（重启进行中的动画 → 连击重新变红）
             shakeAnim.start()          // 200ms 视角晃动
+            // t177 受伤音：与变红 / 视角晃同源事件（PlayerState.damaged）触发，机制等价 MC 玩家受伤声。
+            audio.playHurt()
         }
         // t78：死亡 → 释放指针（光标可见点死亡界面按钮）+ 关背包 / 工作台（防面板卡在死亡遮罩下）+
         //   归还光标手持栈（防遗留 heldBlock）。died 由 takeDamage 扣血到 ≤0 时发（仅 Survival 走此路径）。

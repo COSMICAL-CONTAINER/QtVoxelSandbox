@@ -179,6 +179,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
 # t118：按方块材质分组（石/木/草/沙/叶）clip 池 —— break/mining/step 各 5 个变体（按 BlockRegistry::
 # materialGroup 选播，spec「按方块材质分组」）；place / pickup 单件（放置 / 拾取不分材质）。
 # t152：door_open / door_close 单件（门/活板门右键开合声；doorToggled 信号 → AudioManager.playDoor*）。
+# t177：hurt 单件（玩家受伤声；PlayerState.damaged → playHurt）+ ambient_wind 长循环风声床
+#   （playing 态 startAmbient / 退菜单 stopAmbient；setAmbientLevel 据昼夜 skyLight 调强度）。
 qt_add_resources(voxelsandbox "voxel_sounds"
     PREFIX "/"
     FILES
@@ -201,6 +203,8 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/pickup.wav
         sounds/door_open.wav
         sounds/door_close.wav
+        sounds/hurt.wav
+        sounds/ambient_wind.wav
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。

@@ -100,6 +100,16 @@ struct AudioManager::Data
     // t152 门 / 活版门开合单件（木质；右键 useBlock 翻开合时播，与 place 放块声区分）。
     Clip doorOpenClip{":/sounds/door_open.wav"};
     Clip doorCloseClip{":/sounds/door_close.wav"};
+    // t177 受伤单件（玩家自身受伤声；不分材质）。PlayerState::damaged → playHurt 触发。
+    Clip hurtClip{":/sounds/hurt.wav"};
+    // t177 环境音 / 风声床单件（长循环风声；构造后置 looping=true，start/stop 控制开关，
+    //   setAmbientLevel 调强度）。进入 playing 启动、退菜单停止。
+    Clip ambientClip{":/sounds/ambient_wind.wav"};
+    // 环境音运行态：是否在播（幂等 start/stop）+ 强度（0..1，由昼夜 skyLight 映射，夜间更静谧）。
+    bool ambientPlaying = false;
+    float ambientLevel = 1.0f;
+    // 环境音基础音量系数（风声偏低，背景氛围不抢前景；乘 m_volume 与 ambientLevel 得最终音量）。
+    static constexpr float kAmbientBaseVol = 0.22f;
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     static constexpr ma_uint32 kSampleRate = 22050;
@@ -112,7 +122,11 @@ struct AudioManager::Data
     }
 
     // 解码 WAV 字节 → s16 mono PCM @ kSampleRate，包进 ref；失败 ok=false。
-    void loadClip(Clip &c)
+    // maxFrames：total ≤ 此值则信任并按 total 读；未知（==0）/ 超出则截到此值（防异常大值占满内存）。
+    //   短 SFX（<0.3s）默认 kSampleRate*2（2s）远大于其长度、安全；长循环环境音（≥8s）须传更大值
+    //   （如 16s）以保完整解码 + 首末淡化无缝循环（修复：旧硬编码 5s 上限把 8s 环境音截到 2s →
+    //   循环点处满幅波形回绕到淡化起点 ≈0 → 每 2s 一次咔哒爆音，正是淡化设计要消除的）。
+    void loadClip(Clip &c, ma_uint64 maxFrames = ma_uint64(kSampleRate) * 2)
     {
         const QByteArray wav = loadWavResource(c.qrcPath);
         if (wav.isEmpty()) return;  // 资源缺失（已 warn）；ok 保持 false
@@ -123,11 +137,11 @@ struct AudioManager::Data
             qCWarning(lcAudio) << "decoder init 失败" << c.qrcPath << "（该音效降级）";
             return;
         }
-        // 估算总帧数：未知 / 异常大 → 兜底 2s 上限（SFX 都 <0.3s，2s 足够安全）。
+        // 估算总帧数：未知 / 超出 maxFrames → 截到 maxFrames（防异常大值占满内存）。
         ma_uint64 total = 0;
         ma_decoder_get_length_in_pcm_frames(&dec, &total);
-        if (total == 0 || total > ma_uint64(kSampleRate) * 5)
-            total = ma_uint64(kSampleRate) * 2;
+        if (total == 0 || total > maxFrames)
+            total = maxFrames;
         c.pcm.resize(size_t(total * kChannels));
         ma_uint64 read = 0;
         const ma_result rr = ma_decoder_read_pcm_frames(&dec, c.pcm.data(), total, &read);
@@ -164,6 +178,12 @@ struct AudioManager::Data
 
     // 按 groupIndex 取某音类的 clip（Break / Mining / Step）。
     Clip &groupClip(int groupIdx, Kind kind) { return groupClips[size_t(groupIdx)][size_t(kind)]; }
+
+    // 环境音最终音量 = master × base × level（level 由昼夜映射，夜间 < 1）。
+    float ambientVol(float masterVolume) const
+    {
+        return masterVolume * kAmbientBaseVol * ambientLevel;
+    }
 };
 
 AudioManager::AudioManager(QObject *parent)
@@ -198,10 +218,22 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->pickupClip);
     d->loadClip(d->doorOpenClip);
     d->loadClip(d->doorCloseClip);
+    d->loadClip(d->hurtClip);
+    // 环境音是 8.0s 长循环（build_sounds.py 首末 50ms 三角窗淡化保无缝），maxFrames 放宽到 16s
+    // 保完整解码 —— 默认 2s 上限会把 8s 截到 2s，使循环点落在满幅中波、回绕到淡化起点 ≈0 →
+    // 每 2s 一次咔哒爆音（淡化设计被废弃）。
+    d->loadClip(d->ambientClip, ma_uint64(Data::kSampleRate) * 16);
     d->initSound(d->placeClip);
     d->initSound(d->pickupClip);
     d->initSound(d->doorOpenClip);
     d->initSound(d->doorCloseClip);
+    d->initSound(d->hurtClip);
+    d->initSound(d->ambientClip);
+    // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
+    if (d->engineOk && d->ambientClip.ok) {
+        ma_sound_set_looping(&d->ambientClip.sound, MA_TRUE);
+        ma_sound_set_volume(&d->ambientClip.sound, d->ambientVol(m_volume));
+    }
 
     qCInfo(lcAudio).nospace().noquote()
         << "AudioManager init: engine=" << d->engineOk
@@ -212,7 +244,8 @@ AudioManager::AudioManager(QObject *parent)
         << d->groupClips[3][0].ok << "/" << d->groupClips[3][1].ok << "/" << d->groupClips[3][2].ok << " | "
         << d->groupClips[4][0].ok << "/" << d->groupClips[4][1].ok << "/" << d->groupClips[4][2].ok
         << " place=" << d->placeClip.ok << " pickup=" << d->pickupClip.ok
-        << " door_open=" << d->doorOpenClip.ok << " door_close=" << d->doorCloseClip.ok;
+        << " door_open=" << d->doorOpenClip.ok << " door_close=" << d->doorCloseClip.ok
+        << " hurt=" << d->hurtClip.ok << " ambient_wind=" << d->ambientClip.ok;
 }
 
 AudioManager::~AudioManager()
@@ -229,6 +262,8 @@ AudioManager::~AudioManager()
     if (d->pickupClip.ok) ma_sound_uninit(&d->pickupClip.sound);
     if (d->doorOpenClip.ok) ma_sound_uninit(&d->doorOpenClip.sound);
     if (d->doorCloseClip.ok) ma_sound_uninit(&d->doorCloseClip.sound);
+    if (d->hurtClip.ok) ma_sound_uninit(&d->hurtClip.sound);
+    if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
     ma_engine_uninit(&d->engine);
 }
 
@@ -270,6 +305,44 @@ void AudioManager::playDoorClose()
     d->replay(d->doorCloseClip, m_volume);
 }
 
+void AudioManager::playHurt()
+{
+    // 受伤音略低于 break（受伤反馈不宜过响；与 door 同量级）。
+    d->replay(d->hurtClip, m_volume * 0.9f);
+}
+
+void AudioManager::startAmbient()
+{
+    // 幂等：已在播早退（避免重复 start 把同一 looping 声叠成多路）。降级（engine/clip 失败）静默早退。
+    if (!d->engineOk || !d->ambientClip.ok || d->ambientPlaying) return;
+    ma_sound_set_volume(&d->ambientClip.sound, d->ambientVol(m_volume));
+    if (ma_sound_start(&d->ambientClip.sound) != MA_SUCCESS) {
+        qCWarning(lcAudio) << "ambient sound start 失败（环境音降级）";
+        return;
+    }
+    d->ambientPlaying = true;
+}
+
+void AudioManager::stopAmbient()
+{
+    // 幂等：未在播早退。stop 不 seek（looping 声下次 start 从当前位置续播 → 无伤；seek 回 0 更稳）。
+    if (!d->engineOk || !d->ambientClip.ok || !d->ambientPlaying) return;
+    ma_sound_stop(&d->ambientClip.sound);
+    ma_sound_seek_to_pcm_frame(&d->ambientClip.sound, 0);  // 下次 start 从头（避免中途续播突兀）
+    d->ambientPlaying = false;
+}
+
+void AudioManager::setAmbientLevel(float level)
+{
+    if (level < 0.0f) level = 0.0f;
+    if (level > 1.0f) level = 1.0f;
+    if (qFuzzyCompare(level, d->ambientLevel)) return;
+    d->ambientLevel = level;
+    // 在播则即时改音量；未播（如菜单态 dayPhase 推进）仅记 level，下次 startAmbient 用新值。
+    if (d->engineOk && d->ambientClip.ok && d->ambientPlaying)
+        ma_sound_set_volume(&d->ambientClip.sound, d->ambientVol(m_volume));
+}
+
 void AudioManager::setVolume(float v)
 {
     if (v < 0.0f) v = 0.0f;
@@ -277,4 +350,7 @@ void AudioManager::setVolume(float v)
     if (qFuzzyCompare(v, m_volume)) return;
     m_volume = v;
     emit volumeChanged();
+    // t177：环境音是持续 looping 声，master 音量变后须即时同步其音量（其他单件每次 replay 重设无需）。
+    if (d->engineOk && d->ambientClip.ok && d->ambientPlaying)
+        ma_sound_set_volume(&d->ambientClip.sound, d->ambientVol(m_volume));
 }
