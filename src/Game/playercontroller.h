@@ -10,6 +10,8 @@
 #include <QVector3D>
 #include <QtQml/qqml.h>
 
+#include <limits>
+
 #include "blockregistry.h"      // 方块 id（默认手持方块 / 破放校验）
 #include "entitymanager.h"      // 统一实体管理器（t95 测试生物 / 玩家推动）
 #include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
@@ -320,7 +322,17 @@ private:
     // t146 玩家 AABB vs 世界碰撞 sub-AABB 重叠测试（3 轴严格重叠）。axis∈{0,1,2} 时记录沿该轴的相交
     //   sub-AABB 表面（outMinSurf/outMaxSurf）供 moveAxis 贴面；axis<0 仅判命中（aabbHitsSolid 用）。
     //   取样范围与旧 aabbHitsSolid 同策略（floor(min)..ceil(max)-1，严格重叠排除仅贴面）。
-    bool overlapSubAABBs(int axis, float *outMinSurf, float *outMaxSurf) const;
+    //   t161 修：maxSurfCap 仅把 bmax<=cap 的块顶计入 maxSurf（向下着地用 cap=pyBefore → 只取「玩家原本站
+    //   其顶上」的可着陆面，忽略沙等 bury 块；默认 +inf=取全部，旧行为）。outHasMax=true 当至少有一个
+    //   合格 bmax 计入（区分「有碰撞但无可着陆面=纯 bury」与「有可着陆面」）；默认 nullptr 兼容旧调用。
+    bool overlapSubAABBs(int axis, float *outMinSurf, float *outMaxSurf,
+                         bool *outHasMax = nullptr,
+                         float maxSurfCap = std::numeric_limits<float>::max()) const;
+    // t161 嵌入挤出：玩家被下落沙 / 放置方块「包裹」时，沿最近开放水平方向把玩家推出（向外 not 向上，
+    //   无需按键）。判据用「玩家 XZ 中心所在列 + AABB 真重叠」→ 仅 burial 触发；正常贴墙 / 站立时中心
+    //   列为玩家占据的空气 → 不触发。4 向皆堵（全包裹）→ 不挤（交 t160 窒息扣血兜底）。配合 moveAxis(1)
+    //   嵌入不上抬（fab580e）共同兑现 spec「挖沙柱前行不上爬；被覆盖向外（未堵侧）挤出 not 向上」。
+    void extrudeEmbedded();
     // 移动状态速率因子（t51）：Sprint×1.3 / Crouch×0.4 / Walk×1.0。仅走路模式水平速度乘此值
     //   （飞 / 观察者 noclip 恒 1，状态机不进入 Sprint/Crouch）。同时驱动 moveSpeed 报告 → walkPhase 频率。
     float speedMul() const;

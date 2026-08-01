@@ -889,7 +889,11 @@ bool PlayerController::overlapsPlayerAABB(int bx, int by, int bz, quint8 id, qui
 //   sub-AABB 表面（outMinSurf = 相交盒 min 表面；outMaxSurf = 相交盒 max 表面），供 moveAxis 贴面：
 //   向 + 移动贴到 minSurf（玩家 max 边 = 最近进入面）、向 - 移动贴到 maxSurf（玩家 min 边 = 最近阻挡面）。
 //   axis<0 仅判命中（aabbHitsSolid 用，不填表面）。取样范围与旧 aabbHitsSolid 同策略。
-bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMaxSurf) const
+//   t161 修：maxSurfCap 仅把 bmax<=cap 的块顶计入 maxSurf（向下着地用：cap=pyBefore → 只累计「玩家移动前
+//   脚底 ≥ 块顶」的可着陆面，忽略沙等 bury 块），outHasMax 报是否有合格块。默认 cap=+inf、outHasMax=nullptr
+//   → 取全部块顶（旧行为），兼容 aabbHitsSolid / 水平轴贴面调用。
+bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMaxSurf,
+                                       bool *outHasMax, float maxSurfCap) const
 {
     if (!m_world) return false;
     const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
@@ -913,13 +917,15 @@ bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMa
                     const float bmin = (axis == 0) ? b.minX : (axis == 1) ? b.minY : b.minZ;
                     const float bmax = (axis == 0) ? b.maxX : (axis == 1) ? b.maxY : b.maxZ;
                     if (outMinSurf && (!haveMin || bmin < minSurf)) { minSurf = bmin; haveMin = true; }
-                    if (outMaxSurf && (!haveMax || bmax > maxSurf)) { maxSurf = bmax; haveMax = true; }
+                    // t161 修：maxSurf 只累计 bmax<=cap 的块（向下着地时 cap=pyBefore 过滤掉沙等 bury 块顶）
+                    if (outMaxSurf && bmax <= maxSurfCap && (!haveMax || bmax > maxSurf)) { maxSurf = bmax; haveMax = true; }
                 }
             }
     if (hit) {
         if (outMinSurf && haveMin) *outMinSurf = minSurf;
         if (outMaxSurf && haveMax) *outMaxSurf = maxSurf;
     }
+    if (outHasMax) *outHasMax = haveMax; // 区分「有碰撞但无可着陆面=纯 bury」与「有可着陆面」
     return hit;
 }
 
@@ -1051,7 +1057,15 @@ void PlayerController::moveAxis(int axis, float amount)
     }
     if (!m_world) return;
     float minSurf = 0.f, maxSurf = 0.f;
-    if (!overlapSubAABBs(axis, &minSurf, &maxSurf)) return; // 无碰撞 → 自由
+    bool hasMax = false;
+    // t161 修：向下（axis==1, amount<0）着地面只取玩家移动前脚底 pyBefore ≥ 块顶 bmax 的块（地面顶），
+    //   忽略沙等 pyBefore<bmax 的 bury 块（顶更高）→ maxSurfCap=pyBefore+eps 过滤。否则 overlapSubAABBs 取
+    //   所有重叠块 MAX（=沙顶 11）会让 snap 无效、地面托举（顶 10）随之失效，每 tick 重力再下沉穿地坠虚空。
+    //   其他方向（X/Z、Y 向上顶头）cap=+inf = 取全部（旧行为）。
+    const float pyBefore = m_pos.y() - amount; // 移动前脚底 Y（Y 已按 amount 更新，减回 = 旧值）
+    const float cap = (axis == 1 && amount < 0) ? (pyBefore + 1e-3f)
+                                                : std::numeric_limits<float>::max();
+    if (!overlapSubAABBs(axis, &minSurf, &maxSurf, &hasMax, cap)) return; // 无碰撞 → 自由
     const float eps = 1e-4f;
     switch (axis) {
     case 0:
@@ -1063,14 +1077,13 @@ void PlayerController::moveAxis(int axis, float amount)
         if (amount > 0) {
             m_pos.setY(minSurf - m_height - eps); // 顶头（按当前高度）
         } else {
-            // t161：从上方正常着地（本帧移动前脚底 pyBefore ≥ block 顶 maxSurf）→ 贴顶面站住；
-            //   若 pyBefore < maxSurf = 着地前脚已在方块顶之下 = 横向嵌入（沙落身上 / 从侧面卡入），
-            //   **不上抬**（否则逐层下落沙把玩家逐格顶到柱顶 = 「瞬移上爬」bug），保留 Y 仍在格内 →
-            //   交后续 moveAxis(0/2) 横向推出（用户「向外挤 not 向上」）。被完全包裹（无水平出路）则由
-            //   t160 窒息扣血兜底。
-            const float pyBefore = m_pos.y() - amount;
-            if (pyBefore >= maxSurf - 1e-3f) m_pos.setY(maxSurf + eps); // 正常着地贴顶
-            // else 嵌入：不 snap Y（留格内，待横向推出）
+            // t161 修：maxSurf 已被 cap=pyBefore 限定为「玩家原本站其顶上」的可着陆最高面（地面顶 10，非沙顶 11）。
+            //   hasMax=true → 贴顶面站住（地面托举正常生效，玩家不再逐 tick 下沉穿地）；hasMax=false = 所有重叠
+            //   块顶都在 pyBefore 之上（纯 bury：沙落身上 / 侧面卡入且脚下无支撑面）→ 不 snap Y（留格内），交后续
+            //   moveAxis(0/2)+extrudeEmbedded 横向推出（用户「向外挤 not 向上」）。被完全包裹（无水平出路）则由
+            //   t160 窒息扣血兜底。原 t161「据 inflated maxSurf 全不 snap」会连地面托举一起失效 → 穿地坠虚空。
+            if (hasMax) m_pos.setY(maxSurf + eps); // 站到可着陆最高面（地面顶，非沙顶）
+            // else 纯 bury：不 snap Y（留格内，待横向推出）
         }
         m_vel.setY(0); break;
     case 2:
@@ -1078,6 +1091,63 @@ void PlayerController::moveAxis(int axis, float amount)
         else            m_pos.setZ(maxSurf + kHalfW + eps);
         m_vel.setZ(0); break;
     }
+}
+
+// t161 嵌入挤出：见 .h 注释。补充实现要点——
+//   1) 嵌入块定位：扫玩家 XZ 中心列 (bx,bz) 在玩家全高 [y0,y1] 各格的 sub-AABB，找到第一个与玩家 AABB
+//      真重叠（3 轴严格重叠）的实体格 embY。中心列是玩家正常占据的「空气柱」，凡该柱出现重叠实体 = 有
+//      方块在玩家身上 materialize（下落沙着地 / 侧面塞入）= burial；正常贴墙时墙在玩家前导边、中心列仍
+//      空气 → embY<0 不触发。
+//   2) 逃向选择：4 向邻列（bx±1 / bz±1）在玩家全高全开放（无 collidable）= 可逃；取玩家中心距嵌入块该
+//      侧边界最近的一向（最少位移）。把玩家整体推到该侧嵌入块面之外（footprint 完全进入开放邻列）。
+//   3) 全包裹（4 向皆堵）→ 无可逃向 → 不动，交 t160 窒息扣血兜底（spec「被完全包裹」语义）。
+//   注：仅改 XZ、不动 Y / 速度 → 与 moveAxis(1) 不上抬（fab580e）正交协同：Y 留格内待此处横向清出。
+void PlayerController::extrudeEmbedded()
+{
+    if (!m_world) return;
+    const float px = m_pos.x(), pz = m_pos.z();
+    const int bx = int(std::floor(px));
+    const int bz = int(std::floor(pz));
+    const int y0 = int(std::floor(m_pos.y()));
+    const int y1 = int(std::floor(m_pos.y() + m_height));
+    const float minx = px - kHalfW, maxx = px + kHalfW;
+    const float miny = m_pos.y(),        maxy = m_pos.y() + m_height;
+    const float minz = pz - kHalfW, maxz = pz + kHalfW;
+    // 1) 找嵌入块（中心列上某 Y 格真重叠）。
+    int embY = -1;
+    for (int y = y0; y <= y1 && embY < 0; ++y) {
+        for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, y, bz)) {
+            if (minx < b.maxX && maxx > b.minX &&
+                miny < b.maxY && maxy > b.minY &&
+                minz < b.maxZ && maxz > b.minZ) { embY = y; break; }
+        }
+    }
+    if (embY < 0) return; // 中心列为空气（玩家正常占据）→ 非嵌入，不干预
+    // 2) 邻列全高开放判定（玩家能整身进入才算可逃，避免挤进半堵列又被卡）。
+    const auto columnClear = [&](int cx, int cz) -> bool {
+        for (int y = y0; y <= y1; ++y)
+            if (m_world->isCollidable(cx, y, cz)) return false;
+        return true;
+    };
+    // 3) 取最近开放侧（玩家中心距嵌入块该侧边界最近 = 位移最小）。
+    const float toPX = (bx + 1) - px, toMX = px - bx; // 到嵌入块 ±X 面距离
+    const float toPZ = (bz + 1) - pz, toMZ = pz - bz; // 到嵌入块 ±Z 面距离
+    int bestAxis = -1, bestDir = 0; float bestDist = 1e9f;
+    const auto consider = [&](int axis, int dir, float d) {
+        if (d >= bestDist) return;
+        const int cx = bx + (axis == 0 ? dir : 0);
+        const int cz = bz + (axis == 2 ? dir : 0);
+        if (!columnClear(cx, cz)) return; // 该侧堵 → 跳过
+        bestAxis = axis; bestDir = dir; bestDist = d;
+    };
+    consider(0,  1, toPX); consider(0, -1, toMX);
+    consider(2,  1, toPZ); consider(2, -1, toMZ);
+    if (bestAxis < 0) return; // 全包裹 → 不挤（t160 窒息兜底）
+    const float eps = 1e-3f;
+    if (bestAxis == 0)
+        m_pos.setX(bestDir > 0 ? (bx + 1) + kHalfW + eps : bx - kHalfW - eps); // 出 ±X 面，footprint 入开放邻列
+    else
+        m_pos.setZ(bestDir > 0 ? (bz + 1) + kHalfW + eps : bz - kHalfW - eps);
 }
 
 void PlayerController::step(qreal dt)
@@ -1201,6 +1271,9 @@ void PlayerController::step(qreal dt)
             }
         }
     }
+    // t161 嵌入挤出：逐轴解算后若玩家仍被包裹（下落沙 / 放置方块 materialize 在玩家身上），沿最近开放
+    //   水平方向推出（向外 not 向上）。先于地面复探 / 窒息判定 → 挤出成功则该 tick 不误判着地 / 窒息。
+    extrudeEmbedded();
     // 稳健地面复探：脚底下方 0.05 有实体即算着地
     const float oy = m_pos.y();
     m_pos.setY(oy - 0.05f);
