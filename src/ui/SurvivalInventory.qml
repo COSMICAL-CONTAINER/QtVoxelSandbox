@@ -426,11 +426,16 @@ Item {
 
     // 半透明遮罩：仅吸收点击（防穿透到背后游戏层），**不关闭背包**——用户要求背包只能 E / Esc 关闭。
     // t49：手持物时点遮罩区（面板外）→ 整栈丢弃为实体（同 Q 丢弃）。
+    // t158：acceptedButtons 限左键。原默认（全键）的 MouseArea 在面板之上、比 root 右键 TapHandler 更早
+    //   抓 right press（面板/槽 TapHandler 均只接 LeftButton 不拦右键）→ root 右键 TapHandler 永不触发 →
+    //   右键分半/放单（resolveRightClick）失效，持物右键反被这里当「点遮罩」丢弃。限左键后右键透到 root
+    //   TapHandler（beginRightDrag/singleRightClick 生效）；左键丢弃语义不变（MC 右键外部本就不丢弃）。
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.6)
         MouseArea {
             anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
             onClicked: {
                 // 拖出丢弃（spec point 5）：手持物点背包外 → 请求宿主丢弃；空手仅吸收点击。
                 if (root.hotbar && root.hotbar.heldBlock !== 0) root.discardHeldRequested()
@@ -442,7 +447,10 @@ Item {
     Rectangle {
         id: panel
         width: root.mainCols * root.slotSize + 32   // 360 + 2×16 边距 = 392
-        height: 580   // t129：+170 容纳底部手臂调试滑条区（⑤）
+        // t158：恢复 t129 前的 410。t129 曾 +170（→580）容纳底部手臂调试 ArmSlider 区（⑤），
+        //   t139 把 ArmSlider 迁到 ESC 设置面板时未回缩高度 → 底部留 ~170px 空白、hotbar 行悬在面板中部
+        //   （用户报「生存背包底部手槽区空缺」）。回 410 后 hotbar 贴底、还原 MC 1.0 生存背包布局。
+        height: 410
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
