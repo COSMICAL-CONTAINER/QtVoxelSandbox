@@ -46,7 +46,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
         emit blockBroken(x, y, z, int(oldId)); // 破：带原方块 id（粒子/音效按它取色/取声）
     else if (id != BlockRegistry::Air)
         emit blockPlaced(x, y, z, int(id));    // 放：带新方块 id
-    recomputeLightField(); // t151：栅格变 → 重算光场（mesher 重建前已新鲜）
+    recomputeLightAround(x, y, z, oldId, id); // t154：增量重 flood 编辑格周围有界盒（替代全量 recomputeLightField）
     emit worldChanged(); // 触发 ChunkGeometry 重建（本回合整个单 mesh；mesher 拆分归 t03）
     return true;
 }
@@ -106,7 +106,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
         else if (id != BlockRegistry::Air)
             emit blockPlaced(x, y, z, int(id));
     }
-    recomputeLightField(); // t151：栅格变 → 重算光场（mesher 重建前已新鲜）
+    recomputeLightAround(x, y, z, oldId, id); // t154：增量重 flood（id 不变只 state 变 → 内部早退，光照无变化）
     emit worldChanged(); // 异形方块 state 变（开合 / 朝向）需 mesh 重建
     return true;
 }
@@ -119,7 +119,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
         return false; // 越界拒绝
     if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) return false; // 已占用 → 不覆盖
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
-    recomputeLightField(); // t151：栅格变 → 重算光场
+    recomputeLightAround(x, y, z, BlockRegistry::Air, id); // t154：增量重 flood（着地：oldId=Air → newId=id）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
     return true;
 }
@@ -492,9 +492,10 @@ void World::fillWater()
 //   方块光种子：火把格（id==Torch）→ block=14（radius14；机制等价 MC 火把光，泛光照亮 14 格半径内的洞穴 /
 //     室内）。衰减 1 / 步 → 曼哈顿距离 d 处 block=14-d（d>=14 无光）。
 //
-//   时间不变：昼夜乘子由 QML baseColor（terrainLight(skyLight) 平滑 lerp）承担；光场只随栅格变（worldgen 末 +
-//     setBlock 后重算）。世界小（48×48×64）→ 全量 re-flood 一次约数十毫秒，click-rate 编辑可接受；增量 flood
-//     留后续优化。无随机源（纯栅格派生）。跨 chunk 经 ChunkManager 路由 → 光场无缝跨越边界。
+//   **仅 worldgen 末调一次**（全图 48×48×64≈147k 体素 ×2 通道全图 flood 约 20-40ms）。玩家编辑（setBlock /
+//     实体写入）改走增量 recomputeLightAround()（t154）：编辑格周围有界盒重 flood，单次 <1ms（典型编辑）。
+//     时间不变：昼夜乘子由 QML baseColor（terrainLight(skyLight) 平滑 lerp）承担；光场只随栅格变。
+//     无随机源（纯栅格派生）。跨 chunk 经 ChunkManager 路由 → 光场无缝跨越边界。
 void World::recomputeLightField()
 {
     const int W = m_width, D = m_depth, H = m_height;
@@ -561,6 +562,175 @@ void World::recomputeLightField()
             if (BlockRegistry::isSolid(m_chunks.blockAt(nx, ny, nz))) continue;
             if (nv > m_chunks.blockLightAt(nx, ny, nz)) {
                 m_chunks.setLight(nx, ny, nz, m_chunks.skyLightAt(nx, ny, nz), nv); // 更新 block，保留 sky
+                blockQ.push({nx, ny, nz});
+            }
+        }
+    }
+}
+
+// t154 增量光场入口（PLAN §2-H / §M + 性能）：编辑格 (ex,ey,ez) 由 oldId→newId 后，按影响面在有界盒内重 flood，
+//   替代旧「每次 setBlock 全量 recomputeLightField」（147k 体素 ×2 通道全图 BFS ≈ 20-40ms → 破/放卡顿）。
+//
+//   影响面判定（据 oldId/newId 的遮光性 + 是否火把）：
+//   - 遮光变化（isSolid(old) != isSolid(new)）：天光的列 first-opaque 可能翻转（破/放实体方块）→ 天光须重算，
+//     且翻转可能影响整列（编辑格下方所有原见天格翻暗）→ 盒覆盖**整列高**。同时方块光路径也可能被遮光变化阻断
+//     → 两通道都重 flood。
+//   - 仅火把增删（遮光不变，old/new 之一为 Torch）：天光全局有效不翻 → 只重 flood 方块光（火把半径盒）。
+//   - 两者皆否（如门开合：id 不变、isSolid 不变、非火把）→ 光照无变化，直接 return（仍发 worldChanged 重建 mesh）。
+//
+//   盒半径 R = 15 = 最大光值。关键不变量：光衰减 1/步、最大 15 → 编辑格对任何格的光贡献 ≤ max(0, 15-曼哈顿距离)；
+//     故**盒外格（曼哈顿 ≥16）的光值必不被本编辑影响**（无论增减、无论遮光翻转的列格 —— 翻转列格也在编辑列内、
+//     其影响半径同样 ≤15）。于是盒外格作「固定边界种子」向盒内流入（衰减 1），盒内清零后从种子重传播 →
+//     盒内结果与全量 re-flood 严格一致、盒外不变。典型编辑盒 ~30k 格（球）/~60k 格（圆柱），clear + flood <1ms。
+void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 newId)
+{
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+    if (ex < 0 || ey < 0 || ez < 0 || ex >= W || ey >= H || ez >= D) return;
+
+    const bool opacityChanged = (BlockRegistry::isSolid(oldId) != BlockRegistry::isSolid(newId));
+    const bool torchChanged = (oldId == BlockRegistry::Torch || newId == BlockRegistry::Torch);
+    if (!opacityChanged && !torchChanged) return; // 光照无变化（如门开合：id 不变 → isSolid 不变、非火把）
+
+    constexpr int R = 15; // = 最大光值：编辑对盒外格（曼哈顿 ≥16）无影响 → 边界种子法成立（见上注释）
+    const int x0 = std::max(0, ex - R), x1 = std::min(W - 1, ex + R);
+    const int z0 = std::max(0, ez - R), z1 = std::min(D - 1, ez + R);
+    int y0, y1;
+    if (opacityChanged) {
+        // 整列高（圆柱盒）：天光列 first-opaque 翻转时编辑格下方所有原见天格可能翻暗，须全列重 seed。
+        y0 = 0;
+        y1 = H - 1;
+    } else {
+        // 火把半径球盒：遮光不变 → 天光不翻，只需火把半径内重 flood 方块光。
+        y0 = std::max(0, ey - R);
+        y1 = std::min(H - 1, ey + R);
+    }
+    refloodBox(x0, y0, z0, x1, y1, z1, /*doSky=*/opacityChanged);
+}
+
+// t154 有界盒清场 + 重 seed + 重 flood（recomputeLightAround 的实现核心）。盒外格作固定边界种子（衰减 1 流入），
+//   盒内清零后从种子重传播 —— 等价于「以盒外为固定边界的盒内全量 re-flood」，结果与全局全量 re-flood 在盒内一致。
+//
+//   doSky=true（遮光变化）：两通道都重算。清两通道 → 重 seed 见天格(sky=15)+火把(block=14) → 边界种两通道 → flood 两通道。
+//   doSky=false（仅火把增删）：天光不动。清方块光（保留天光）→ 重 seed 火把 → 边界种方块光 → flood 方块光。
+//
+//   边界种子：盒**表面格**的盒外邻（仅表面格有盒外邻，内部格无 —— 故只扫表面省功）。盒外邻值：y>=H → 天光 15
+//   （开阔天空，与 skyLightAt OOB 同语义）；其余世界外（y<0 / x/z 越界）→ 0；盒内世界 → 其当前（未清）光值。
+void World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky)
+{
+    const int W = m_width, D = m_depth, H = m_height;
+    struct Cell { int x, y, z; };
+    std::queue<Cell> skyQ, blockQ;
+    static const int dk[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    auto inBox = [&](int x, int y, int z) {
+        return x >= x0 && x <= x1 && y >= y0 && y <= y1 && z >= z0 && z <= z1;
+    };
+
+    // 1. 清盒内：doSky → 两通道归零；否则仅清方块光（保留天光 —— 火把增删不动天光）。
+    for (int x = x0; x <= x1; ++x)
+        for (int y = y0; y <= y1; ++y)
+            for (int z = z0; z <= z1; ++z) {
+                if (doSky)
+                    m_chunks.setLight(x, y, z, 0, 0);
+                else
+                    m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), 0);
+            }
+
+    // 2. 盒内重 seed 天光（仅 doSky）：每列自顶向下首个遮光方块之上 = 见天 → sky=15（与全量 recomputeLightField
+    //    同语义：isSolid 作遮光判据）。仅 seed 落在盒内 y 范围的见天格（盒外 y 范围的格未清，保留旧值）。
+    if (doSky) {
+        for (int x = x0; x <= x1; ++x) {
+            for (int z = z0; z <= z1; ++z) {
+                int firstOpaque = H; // 整列无遮光 → 全列见天
+                for (int y = H - 1; y >= 0; --y)
+                    if (BlockRegistry::isSolid(m_chunks.blockAt(x, y, z))) { firstOpaque = y; break; }
+                for (int y = firstOpaque + 1; y < H; ++y) {
+                    if (y < y0 || y > y1) continue;
+                    m_chunks.setLight(x, y, z, 15, m_chunks.blockLightAt(x, y, z));
+                    skyQ.push({x, y, z});
+                }
+            }
+        }
+    }
+
+    // 3. 盒内重 seed 方块光：火把格 block=14（保留其天光值）。无论 doSky（火把光始终重 flood）。
+    for (int x = x0; x <= x1; ++x)
+        for (int y = y0; y <= y1; ++y)
+            for (int z = z0; z <= z1; ++z)
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Torch) {
+                    m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), 14);
+                    blockQ.push({x, y, z});
+                }
+
+    // 4. 盒外边界种子：盒表面格的盒外邻值衰减 1 流入盒内格（光从盒外不变区域渗入）。仅扫盒表面格（内部格无盒外邻）。
+    auto applyBoundary = [&](int x, int y, int z, int nx, int ny, int nz) {
+        quint8 s = 0, b = 0;
+        if (ny >= H) {
+            s = 15; // 世界顶之上 = 开阔天空（顶面采样）
+        } else if (nx >= 0 && nz >= 0 && nx < W && nz < D && ny >= 0) {
+            s = m_chunks.skyLightAt(nx, ny, nz); // 盒内世界格：当前（未清）光值
+            b = m_chunks.blockLightAt(nx, ny, nz);
+        }
+        if (s <= 0 && b <= 0) return;
+        const quint8 curSky = m_chunks.skyLightAt(x, y, z);
+        const quint8 curBlock = m_chunks.blockLightAt(x, y, z);
+        const bool opaque = BlockRegistry::isSolid(m_chunks.blockAt(x, y, z));
+        if (doSky && s > 0) {
+            const quint8 in = quint8(s - 1);
+            if (!opaque && in > curSky) { // 衰减 1 流入；遮光格不进光
+                m_chunks.setLight(x, y, z, in, m_chunks.blockLightAt(x, y, z));
+                skyQ.push({x, y, z});
+            }
+        }
+        if (b > 0) {
+            const quint8 in = quint8(b - 1);
+            if (!opaque && in > curBlock) {
+                m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), in);
+                blockQ.push({x, y, z});
+            }
+        }
+    };
+    for (int x = x0; x <= x1; ++x)
+        for (int y = y0; y <= y1; ++y)
+            for (int z = z0; z <= z1; ++z) {
+                const bool surface = (x == x0 || x == x1 || y == y0 || y == y1 || z == z0 || z == z1);
+                if (!surface) continue;
+                for (const auto &d : dk) {
+                    const int nx = x + d[0], ny = y + d[1], nz = z + d[2];
+                    if (!inBox(nx, ny, nz)) applyBoundary(x, y, z, nx, ny, nz);
+                }
+            }
+
+    // 5. BFS 天光传播（仅 doSky）：从种子向盒内非遮光邻格衰减 1、取 max；盒外邻不传（其值固定，已作边界种子流入）。
+    if (doSky) {
+        while (!skyQ.empty()) {
+            const Cell c = skyQ.front(); skyQ.pop();
+            const quint8 cur = m_chunks.skyLightAt(c.x, c.y, c.z);
+            if (cur <= 1) continue;
+            const quint8 nv = quint8(cur - 1);
+            for (const auto &d : dk) {
+                const int nx = c.x + d[0], ny = c.y + d[1], nz = c.z + d[2];
+                if (!inBox(nx, ny, nz)) continue;
+                if (BlockRegistry::isSolid(m_chunks.blockAt(nx, ny, nz))) continue;
+                if (nv > m_chunks.skyLightAt(nx, ny, nz)) {
+                    m_chunks.setLight(nx, ny, nz, nv, m_chunks.blockLightAt(nx, ny, nz));
+                    skyQ.push({nx, ny, nz});
+                }
+            }
+        }
+    }
+    // 6. BFS 方块光传播（火把）：同规则，独立通道。
+    while (!blockQ.empty()) {
+        const Cell c = blockQ.front(); blockQ.pop();
+        const quint8 cur = m_chunks.blockLightAt(c.x, c.y, c.z);
+        if (cur <= 1) continue;
+        const quint8 nv = quint8(cur - 1);
+        for (const auto &d : dk) {
+            const int nx = c.x + d[0], ny = c.y + d[1], nz = c.z + d[2];
+            if (!inBox(nx, ny, nz)) continue;
+            if (BlockRegistry::isSolid(m_chunks.blockAt(nx, ny, nz))) continue;
+            if (nv > m_chunks.blockLightAt(nx, ny, nz)) {
+                m_chunks.setLight(nx, ny, nz, m_chunks.skyLightAt(nx, ny, nz), nv);
                 blockQ.push({nx, ny, nz});
             }
         }

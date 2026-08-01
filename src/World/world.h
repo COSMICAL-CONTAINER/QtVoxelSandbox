@@ -81,7 +81,8 @@ public:
     Q_INVOKABLE int heightAt(int x, int z) const;
 
     // t151 真光场查询（PLAN §2-H / §M）：世界坐标 per-voxel 天光 / 方块光（各 0..15）。mesher 据此写顶点色。
-    //   光场由 recomputeLightField() 的 BFS flood-fill 算出（worldgen 末 + 每次 setBlock 后重算），存 chunk
+    //   光场由 BFS flood-fill 算出：worldgen 末走全量 recomputeLightField()；玩家编辑（setBlock / 实体写入）
+    //   走**增量** recomputeLightAround()（t154，编辑格周围有界盒重 flood，避免每次全量卡顿）。存 chunk
     //   第三数组。OOB 语义：y >= height → 天光 15（开阔天空，顶面采样）/ 方块光 0；y < 0 或 x/z 越界 → 0。
     //   Q_INVOKABLE 便于 F3 调试叠层（规划）查光；mesher 经 m_world 调用。只读，不改栅格。
     Q_INVOKABLE quint8 skyLightAt(int x, int y, int z) const;
@@ -145,10 +146,21 @@ private:
     //   填 Water（机制等价 MC 海洋 / 湖泊）。仅写空气格；同 seed → 同水域分布。waterLevel 见 .cpp 注释
     //   （spec 8 为 t119 前地形，现重定标到 24 以与 [16,40] 地形相交使水域可见）。
     void fillWater();
-    // t151 真光场重算（PLAN §2-H / §M）：per-voxel BFS flood-fill 天光（自顶，sky=15）+ 火把方块光
-    //   （radius14，block=14），衰减 1、仅穿过非遮光格、取 max。worldgen 末 + 每次 setBlock 后调。
+    // t151 真光场**全量**重算（PLAN §2-H / §M）：per-voxel BFS flood-fill 天光（自顶，sky=15）+ 火把方块光
+    //   （radius14，block=14），衰减 1、仅穿过非遮光格、取 max。**仅 worldgen 末调一次**（全图 147k 体素 ×2
+    //   通道约数十 ms，玩家编辑频率下不可接受）。玩家编辑走增量 recomputeLightAround()（t154）。
     //   存 chunk 第三数组（m_lightField）。时间不变（昼夜乘子由 QML baseColor 承担）。无随机源（纯栅格）。
     void recomputeLightField();
+    // t154 增量光场（核心 perf）：编辑格周围有界盒内重 flood，替代每次 setBlock 的全量重算。依据 oldId/newId
+    //   判定影响面：遮光变化（isSolid 翻转）→ 天光列 first-opaque 可能翻转 → 整列高 ±15 盒、两通道重 flood；
+    //   仅火把增删（遮光不变）→ 火把半径 ±15 盒、只重 flood 方块光（天光不动）。id 不变且非火把（如门开合）→
+    //   光照无变化，直接 return（不发世界重算）。盒半径 = 最大光值 15：编辑格对盒外格曼哈顿距离 ≥16 >15 →
+    //   盒外光值必不被编辑影响，故盒外作固定边界种子衰减 1 流入盒内，盒内清零后从种子重传播 → 结果与全量一致。
+    void recomputeLightAround(int x, int y, int z, quint8 oldId, quint8 newId);
+    // t154 有界盒清场 + 重 seed + 重 flood（recomputeLightAround 的实现核心，分离以便复用清/种/传播步骤）。
+    //   doSky=true：两通道都重算（清两通道、重 seed 见天格 + 火把、边界种两通道、flood 两通道）。
+    //   doSky=false：仅方块光（清方块光保留天光、重 seed 火把、边界种方块光、flood 方块光）——火把增删天光不变。
+    void refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky);
     void setVoxelIfAir(int x, int y, int z, quint8 id);       // 仅写空气格（树冠不覆盖主干/地形）
     quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希（列级 seed/x/z）→ 确定性伪随机
     quint32 hashVoxel(int seed, int x, int y, int z) const;   // 整数哈希（体素级 seed/x/y/z）→ 矿石散布用
