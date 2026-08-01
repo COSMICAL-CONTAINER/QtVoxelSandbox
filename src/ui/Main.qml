@@ -515,6 +515,37 @@ Window {
                                  : "#8a5a2e"                                                 // 木镐褐（默认 / tier 1）
                     }
                 }
+                // t169 手持材料（木棒/煤/木炭/铁锭 等）：选中材料段槽（isMaterial(selectedItem)）时，手前显
+                //   该材料的平图标 billboard。机制对齐 MC（手持非方块物品=平图标贴脸相机）+ spec t169
+                //   「四类贴图都要有」覆盖材料段（①背包槽 MaterialIcon / ②本手持 / ③掉落物 BillboardQuad+
+                //   MaterialIcon / ④3D 方块 N/A 材料不可放置 —— 三类齐）。复用 BillboardQuad + MaterialIcon
+                //   Canvas（同掉落物材料段路径），icon 统一（同一份自绘图）。
+                //   朝相机：作 viewModelHand 子节点会继承手 baseTilt/swing 的 Rx 旋转 → billboard +Z 不再正对
+                //   相机。补偿：local eulerRotation.x = -(baseTilt+swing) 抵消手 X 旋转 → billboard 世界旋转 =
+                //   相机旋转（同掉落物材料段 cam.eulerRotation 减 rotY 抵消的 billboard 模式）→ +Z 恒指回相机。
+                //   scale 0.18（介于手段 0.11 与手持方块 0.12 之间，平图标稍大显眼），z=-0.22 同手持方块/工具
+                //   （脱离手臂 z 包围）。alphaCutoff:0.5 + opacity:0.99 沿用 MaterialIcon 透明底 alpha-test 契约
+                //   （Canvas 透明底不丢弃会被当不透明黑 → 图标坍成黑块）。
+                Model {
+                    visible: hotbarVM.isMaterial(player.selectedItem)
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    scale: Qt.vector3d(0.18, 0.18, 0.18)
+                    eulerRotation: Qt.vector3d(-(viewModelHand.baseTilt + viewModelHand.swingAngle), 0, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        alphaCutoff: 0.5
+                        opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                        baseColor: terrainLight(worldClock.skyLight)
+                        baseColorMap: Texture {
+                            flipV: true
+                            sourceItem: MaterialIcon {
+                                materialId: player.selectedItem
+                                width: 64; height: 64
+                            }
+                        }
+                    }
+                }
                 // [t31] 诊断：确认手 Node 加载 + parent（相机）。
                 Component.onCompleted: console.info("[t31] viewModelHand UP parent=" + viewModelHand.parent + " vis=" + visible)
             }
@@ -621,16 +652,25 @@ Window {
         //   → 四边形 +Z 法线恒 = -相机 forward → 指回相机 → 正面恒正对玩家（同 Main.qml 材料段掉落物
         //   BillboardQuad 已验证路径，第一/第三人称三模式都对）。太阳盘「贴脸相机」恒呈轴对齐圆盘（不随
         //   视角透视压缩），机制对齐 MC 1.0 天空太阳（平面盘）。
+        //
+        //   t169 太阳依旧不显示修复：v1 把太阳摆在 eye + sunDir·40 = 距眼 40 格。但 5×5 chunk 世界
+        //   （b6b34e0，80×80）地形从原点向 ±40 延伸 —— 太阳距眼 40 恰好落在地形体积内（黄昏/黎明
+        //   sunDir.y≈0 时太阳水平距 40 = 地形边缘），且不透明 PrincipledMaterial 走深度测试 → 太阳被
+        //   与视线相交的地形/树叶遮挡而不可见（正午直射时太阳在玩家头顶尚可见，其余时段被地形遮蔽）。
+        //   机制对齐 MC 1.0：太阳贴在「天空穹顶」= 视点远端无穷远处，永远在地形之后。落地：把太阳推到
+        //   距眼 500 格（远超 5×5 世界边界 ±40 + 玩家偏移，地形永不在太阳与相机之间），scale 同比放大
+        //   到 80（角尺寸 80/500≈0.16 rad≈9°，与 v1 8/40≈0.2 rad 相近，视觉显眼不糊屏）。clipFar=1000
+        //   足以容纳（500 < 1000）。
         Model {
             visible: worldClock.sunDir.y > 0.0   // 太阳在地平线上才显（夜间隐藏）
             geometry: BillboardQuad {}
             position: {
                 const eye = player.position
                 const s = worldClock.sunDir
-                return Qt.vector3d(eye.x + s.x * 40, eye.y + s.y * 40, eye.z + s.z * 40)
+                return Qt.vector3d(eye.x + s.x * 500, eye.y + s.y * 500, eye.z + s.z * 500)
             }
             eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, 0)   // billboard 朝相机
-            scale: Qt.vector3d(8.0, 8.0, 8.0)   // 天空太阳盘（quad 1×1 ×8；距相机 40 格，显眼不糊屏）
+            scale: Qt.vector3d(80.0, 80.0, 80.0)   // 天空太阳盘（距相机 500 格 ×80；远超地形边界，永不遮蔽）
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 baseColor: "#ffffff"   // 白底乘贴图（纹理原色直出）
@@ -1169,6 +1209,9 @@ Window {
                     //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步运动（块在手中，自然跟随）。
                     //   BlockCube + 共享图集 → per-face 贴图（草顶 / 草侧…），复用地形贴图（零 MC 资产）。
                     //   仅第三人称 + 非观察者显（第一人称见 viewModelHand 的手持；观察者无动作不持物）。
+                    //   t169 火把黑底修复：同第一人称 viewModelHand / 掉落物路径 —— 火把 tile 透明底需
+                    //   alphaCutoff 0.5 丢弃透明像素，否则材质把透明底当不透明 → 渲成黑色立方体（用户实测
+                    //   「手持火把黑方块」）。仅火把（id 13）启用；其余方块贴图无 alpha，alphaCutoff=0。
                     Model {
                         visible: player.selectedBlock !== 0 && player.mode !== PlayerController.Spectator
                         geometry: BlockCube { blockId: player.selectedBlock }
@@ -1179,6 +1222,7 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             opacity: playerModel.bodyOpacity
+                            alphaCutoff: player.selectedBlock === 13 ? 0.5 : 0.0
                         }
                     }
                     // 手持工具（t75 木镐 3D）：选中工具槽时，第三人称右手上显镐形 3D（同第一人称分支，
@@ -1411,6 +1455,11 @@ Window {
                     //   掉落物浮空无天光遮蔽（BlockCube 无顶点色，等效 vertexColor=1.0），故仅靠 baseColor
                     //   承载昼夜乘子；夜间随地形一起变暗（spec「阴影/夜间变暗」）。绑定 skyLight NOTIFY
                     //   → 每周期 tick 自动刷新（同 chunk Model）。
+                    //   t169 火把掉落物黑底修复：火把贴图（tile 17）是透明底（alpha=0）+ 火把像素（alpha=255）。
+                    //   BlockCube 把它铺到 1×1×1 立方体六面，材质无 alpha 处理时透明底被当不透明 → 渲成黑色
+                    //   填充整面（用户实测「火把掉落物黑底」）。alpha-test（alphaCutoff 0.5）丢弃透明底像素、
+                    //   仅留火把像素 → 透明底不再显黑（机制同手持火把 viewModelHand / CrackBox 的 alphaCutoff 路径）。
+                    //   仅火把（id 13）启用；其余方块贴图无 alpha，保持 alphaCutoff=0（默认不透明）。
                     Model {
                         visible: !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
                         geometry: BlockCube { blockId: entRoot.entId }
@@ -1420,6 +1469,7 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             baseColor: terrainLight(worldClock.skyLight)
+                            alphaCutoff: entRoot.entId === 13 ? 0.5 : 0.0
                         }
                     }
                     // 工具段（t75 改用 PickaxeGeometry 3D 镐形，不再 CrackBox 兜底）：

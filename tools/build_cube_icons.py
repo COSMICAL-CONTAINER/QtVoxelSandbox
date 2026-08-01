@@ -142,20 +142,18 @@ def render_flat_2d(name):
 # （partialblockgeometry.cpp）的正视投影：slab 半高 / stairs L 阶 / fence 立柱+横档 / door 满高窄板 /
 # trapdoor 方格 / pressure_plate 薄条。木板材质观感一致（同为木制半方块），仅剪影不同 → 玩家一眼分辨
 # 「这是哪类异形」，配合中文显示名（木板台阶 / 木板楼梯 / …）双重区分。
-PARTIALS = [
-    ("wood_fence",          "fence"),          # 木栅栏：中心立柱 + 上下两条横档（柱档）
-    ("wood_door",           "door"),           # 木板门：满高窄竖板 + 把手（高板）
-]
-
-# t163(d) 不完整方块 3D 立体图标：slab/stairs/trapdoor/pressure_plate 改用 dimetric 投影（同完整方块
-#   cube icon 路径）按实际形状缩放 —— slab 半高、stairs L 阶（背墙 + 整步）、trapdoor 薄板、pressure_plate
-#   更薄更小。替代 t145 flat 2D 剪影（v1 同木纹难辨）；3D 顶 + 两侧明暗强化「这是哪类异形」+ 保留木板材质观感。
-#   door/fence 保留 flat 2D（高板 / 柱档剪影更直观，非立方体投影能表达的形态）。
+# t163(d) / t169 不完整方块 3D 立体图标：6 类全部走 dimetric 投影（同完整方块 cube icon 路径）按实际形状
+#   缩放 —— slab 半高、stairs L 阶（背墙 + 整步）、trapdoor 薄板、pressure_plate 更薄更小、fence 立柱+横档、
+#   door 满高薄板。替代 t145 flat 2D 剪影（v1 同木纹难辨）；3D 顶 + 两侧明暗强化「这是哪类异形」+ 保留木板
+#   材质观感。t169 把 door/fence 从 flat 2D 升级为 3D（spec「不完整方块 flat→3D」），与 slab/stairs/trapdoor/
+#   pressure_plate 同走 render_partial_3d —— 6 类同为 3D 立体图标，hotbar/创造调色板肉眼即可辨图。
 PARTIALS_3D = [
     ("wood_slab",           "slab"),           # 木板台阶：全 footprint 半高盒（y[0,0.5]）
     ("wood_stairs",         "stairs"),         # 木板楼梯：整步（y[0,0.5] 全 footprint）+ 背墙（y[0.5,1] 背半 footprint）
     ("wood_trapdoor",       "trapdoor"),       # 木活板门：合态薄板（全 footprint，y[0,0.1875]）
     ("wood_pressure_plate", "pressure_plate"), # 木板压力板：贴地更薄更小（边距 1/16，y[0,1/16]）
+    ("wood_fence",          "fence"),          # 木栅栏：中心立柱（细方柱全高）+ 上下两条横档（贯穿 x）
+    ("wood_door",           "door"),           # 木板门：满格高、3/16 厚的薄板（贴 -Z 面）
 ]
 
 
@@ -237,6 +235,26 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
         boxes = [
             (0.0, 1.0, 0.5, 1.0, 0.0, 0.5),  # 背墙
             (0.0, 1.0, 0.0, 0.5, 0.0, 1.0),  # 整步
+        ]
+        y_min, y_max = 0.0, 1.0
+    elif shape == "fence":
+        # 木栅栏（t169 由 flat 2D 升级为 3D，机制对齐 partialblockgeometry.cpp 异形几何）：
+        #   中心立柱（4/16 方柱全高，xz 都居中 6..10）+ 两条横档（贯穿 x 0..1、z 同立柱；上位 12..15/16、
+        #   下位 5..8/16）。横档略凸出立柱两侧 → 栅栏观感（与 v1 flat 2D 剪影柱档同语义）。depth buffer
+        #   解决立柱与横档的相交遮挡（共享 xz 中心区）。
+        boxes = [
+            (6.0 / 16.0, 10.0 / 16.0, 0.0, 1.0, 6.0 / 16.0, 10.0 / 16.0),  # 立柱
+            (0.0, 1.0, 12.0 / 16.0, 15.0 / 16.0, 6.0 / 16.0, 10.0 / 16.0),  # 上横档
+            (0.0, 1.0,  5.0 / 16.0,  8.0 / 16.0, 6.0 / 16.0, 10.0 / 16.0),  # 下横档
+        ]
+        y_min, y_max = 0.0, 1.0
+    elif shape == "door":
+        # 木门（t169 由 flat 2D 升级为 3D）：满格高、3/16 厚薄板（贴 -Z 面），机制对齐 MC 门（1×1 面、
+        #   3/16 厚板）。dimetric 视角下见大面（+Z 门面 1×1）+ 顶面（1×3/16 薄边）+ 右面（3/16×1 薄边），
+        #   与立方体图标（满格厚 1）的厚边对比即可一眼分辨「这是门不是满方块」。y 全高 → 与立方体等高
+        #   （区分于 slab 半高 / pressure_plate 贴地薄）。
+        boxes = [
+            (0.0, 1.0, 0.0, 1.0, 0.0, 3.0 / 16.0),  # 门板（贴 -Z 面，3/16 厚）
         ]
         y_min, y_max = 0.0, 1.0
     else:
@@ -340,16 +358,10 @@ def main():
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)
-    # t145 不完整方块 flat 2D 区分图标（6 类木制半方块）。
-    # t163(d)：slab/stairs/trapdoor/pressure_plate 升级为 3D dimetric 立体图标（按实际形状投影），
-    #   door/fence 保留 flat 2D（剪影更直观）。
+    # t145/t163(d)/t169 不完整方块 3D dimetric 立体图标：6 类木制半方块全部走 render_partial_3d
+    #   （按实际形状投影，3D 顶+两侧明暗）。t169 把 door/fence 从 flat 2D 升级为 3D —— 6 类同为立体图标。
     for out_name, shape in PARTIALS_3D:
         img = render_partial_3d(shape)
-        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
-        img.save(out_path)
-        print("wrote", os.path.relpath(out_path, HERE), img.size)
-    for out_name, shape in PARTIALS:
-        img = render_partial_2d(shape)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)
