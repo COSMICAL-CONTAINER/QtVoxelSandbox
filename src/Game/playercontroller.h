@@ -249,8 +249,15 @@ signals:
     // 携被挖方块坐标 + id（呈现层据此迸发少量对应色碎屑，复用破块 emitter / 重力）。破块完成时
     // 的「+30% 大迸发」仍走 World 的 blockBroken → burstBreak（已在此任务内 +30%），本信号仅驱动
     // 「挖的过程中」的进度反馈粒子。创造瞬破不进累积态 → 不发；仅 Survival 推进 stage 时发。
+    // t165：本信号**只驱动碎屑**（仅可挖方块 —— 基岩不破无碎屑）；挖掘音改由下方 miningSound 统一发。
     // 分层（PLAN §2）：Game/Physics 层发语义事件，呈现层只消费（同 blockBroken→粒子 / swingArm 模式）。
     void miningParticle(int x, int y, int z, int blockId);
+    // 挖掘击打音（t165）：生存累积挖掘每跨一节拍（progress 推进触发 beat 切换）发一次，携被挖方块 id。
+    //   **所有**被挖方块（含不可挖基岩）均发 —— spec「生存基岩可持续挖 ... 保持 mining 态挥臂+音」要求
+    //   基岩 hold-mine 也持续有节奏的挖掘音反馈（机制等价 MC 镐撞基岩响一声）。呈现层 Connections 接
+    //   AudioManager.playMining（按 id 材质组选 clip）。与 miningParticle 解耦：音走本信号（含基岩），
+    //   碎屑走 miningParticle（仅可挖）。创造瞬破不进累积态 → 不发。分层同 miningParticle。
+    void miningSound(int blockId);
     // 拾取掉落实体（t118 / t120）：pickupScan 把实体入背包（addToAny 成功入栈，无论全 / 部分）时发；
     // id = 物品 id、count = 本次实际拾取数（have - leftover；spec「拾取后销毁」的「拾取」语义事件）。
     // 全满装不下（leftover == have）不发（无拾取发生）。t118 据此 → AudioManager.playPickup（拾取音）；

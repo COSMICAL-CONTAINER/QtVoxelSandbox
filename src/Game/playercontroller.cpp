@@ -624,8 +624,12 @@ void PlayerController::updateMining(float dt)
     if (beat != m_mineBeat) {
         m_mineBeat = beat;
         emit swingArm(); // 跨节拍挥臂（可挖/不可挖均挥；基岩循环 beat → 持续挥动反馈）
+        // t165：挖掘击打音对所有被挖方块发（含基岩）—— spec「保持 mining 态挥臂+音」。基岩虽不破，
+        //   hold-mine 仍随节拍有挖掘音反馈（机制等价 MC 镐撞基岩响一声）；可挖方块同样发（音统一走本信号）。
+        emit miningSound(int(bid));
         // t61：每跨一阶迸发少量碎屑（被挖方块色），驱动「挖的过程中」进度反馈粒子。仅可挖方块（基岩
-        //   不破无碎屑）。bid 上面已读（当前 tick 目标方块 id，setBlock 前原值），传呈现层复用破块 emitter。
+        //   不破无碎屑，故碎屑仍由 mineable 守卫）。bid 上面已读（当前 tick 目标方块 id，setBlock 前原值），
+        //   传呈现层复用破块 emitter。音已由上方 miningSound 统一发出（含基岩），此处不再耦合音。
         if (mineable) emit miningParticle(m_mineBx, m_mineBy, m_mineBz, int(bid));
     }
     if (newStage != m_miningStage) {

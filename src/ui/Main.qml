@@ -322,12 +322,15 @@ Window {
         // t61：挖掘过程粒子 —— 生存累积挖掘时每跨一阶，player 发 miningParticle（被挖方块坐标+id），
         // 转发到 BlockParticles.burstMine（复用破块碎屑 emitter / 色逻辑 / 重力，少量迸发，进度反馈）。
         // 破块完成时的 +30% 大迸发仍由 onBlockBroken → burstBreak 驱动（burstBreak 已在此任务内 +30%）。
-        // t118：miningParticle 同时驱动 playMining（每挥一次响 —— 信号本就是「stage 跨阶 = 一次挥击」
-        // 的语义点，spec「miningParticle 每 stage 接音」）；id 给 AudioManager 按材质组选 mining clip。
+        // t165：挖掘音改由下方 onMiningSound 统一驱动（含基岩等不可挖方块的 hold-mine 音反馈，
+        // spec「保持 mining 态挥臂+音」）；本处仅迸碎屑（碎屑仍只对可挖方块，基岩不破无碎屑）。
         function onMiningParticle(x, y, z, id) {
             if (particleLoader.item) particleLoader.item.burstMine(x, y, z, id)
-            audio.playMining(id)
         }
+        // t165：挖掘击打音（每节拍一响）—— player 发 miningSound（被挖方块 id），**含不可挖基岩**的
+        //   hold-mine 音反馈（spec「生存基岩可持续挖 ... 保持 mining 态挥臂+音」；机制等价 MC 镐撞基岩响）。
+        //   id 给 AudioManager 按材质组选 mining clip。音与碎屑解耦：音对所有被挖方块，碎屑仅可挖。
+        function onMiningSound(id) { audio.playMining(id) }
         // t118：拾取掉落实体 → player 发 itemPickedUp(id, count) → 拾取音（pickup clip，不分材质）。
         // 信号在 pickupScan 实际入栈时（全 / 部分）才发；全满装不下不发（无伪触发）。机制等价 MC
         // 「拾起物品啵一声」。t120：同时启动 handPopAnim（手 Y 弹跳，音 + 手弹双反馈）。
