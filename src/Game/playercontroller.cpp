@@ -148,10 +148,11 @@ void PlayerController::cycleCamera()
     emit cameraModeChanged();
 }
 
-// t159 飞行速度滚轮调速：dir=+1 加速 / -1 减速（前滚 / 后滚），按有效速度步进 kFlyStep。
+// t159/t210 飞行速度滚轮调速：dir=+1 加速 / -1 减速（前滚 / 后滚），按有效速度步进 kFlyStep。
 //   有效速度 = clamp(kFly * mul, kFlyMin, kFlyMax) ∈ [4,20]；改有效速度再回算 mul（直接钳有效速度更直观，
-//   且 spectator / creative-飞 共用 flySpeed() 读 mul → 两模式同档位）。无变化静默（不发信号，免抖动）。
-//   仅 QML 在飞态调用（走路态滚轮切 hotbar）；本方法本身不判飞态 —— 输入边界（§2-D）由 QML 把关。
+//   spectator 常驻飞读 mul 算飞移速）。无变化静默（不发信号，免抖动）。
+//   t210 起仅 QML 在 spectator 模式调用（创造/生存滚轮切 hotbar）；本方法本身不判模式 —— 输入边界（§2-D）
+//   由 QML 把关。
 void PlayerController::adjustFlySpeed(int dir)
 {
     const float eff = std::clamp(kFly * m_flySpeedMul + float(dir) * kFlyStep, kFlyMin, kFlyMax);

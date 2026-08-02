@@ -83,10 +83,11 @@ class PlayerController : public QQuickItem
     //   walkPhase 推进速率随之变）与幅度（QML 据 moveState 缩放四肢摆角，接 t45）。
     //   分层（PLAN §2）：状态属 Game/Physics 层、由输入边缘统一推进（§2-D）；呈现层只读消费。
     Q_PROPERTY(MoveState moveState READ moveState NOTIFY moveStateChanged)
-    // 飞行速度倍数（t159）：创造-飞 / 观察者用滚轮调速，默认 1.0（= kFly 基速）；滚轮 ±档，
-    //   有效速度 = clamp(kFly * mul, kFlyMin, kFlyMax) ∈ [4, 20] blocks/sec。仅飞态生效（走路态滚轮
-    //   仍切 hotbar；spec「WheelHandler 仅 flying 时生效」）。状态属 Game/Physics 层（§2-D 单一输入路径：
-    //   滚轮经 QML → adjustFlySpeed），step() 读它算飞移速。spectator 常驻飞亦适用（spec「创造/观察者」）。
+    // 飞行速度倍数（t159/t210）：观察者（spectator）用滚轮调速，默认 1.0（= kFly 基速）；滚轮 ±档，
+    //   有效速度 = clamp(kFly * mul, kFlyMin, kFlyMax) ∈ [4, 20] blocks/sec。t210 起滚轮语义按模式分流：
+    //   spectator 滚轮=调速、创造/生存滚轮=切 hotbar（创造飞态亦走 hotbar，mul 保持默认 1.0 不由滚轮改）。
+    //   step() 仍读 mul 算飞移速（创造-飞 / spectator 常驻飞均用）。状态属 Game/Physics 层（§2-D 单一输入路径：
+    //   滚轮经 QML → adjustFlySpeed）。
     Q_PROPERTY(float flySpeedMul READ flySpeedMul NOTIFY flySpeedMulChanged)
     // 当前有效飞行速度（blocks/sec）= clamp(kFly*mul, kFlyMin, kFlyMax)；F3 报它（t159）。随 mul 变通知。
     Q_PROPERTY(float flySpeed READ flySpeed NOTIFY flySpeedMulChanged)
@@ -195,8 +196,9 @@ public:
     Q_INVOKABLE void cycleMode();
     Q_INVOKABLE void setMode(Mode m);
     Q_INVOKABLE void cycleCamera(); // F5 相机模式循环（0→1→2→0，t27）
-    // 飞行速度滚轮调速（t159）：dir=+1 加速 / -1 减速（对应前滚 / 后滚），每档 kFlyStep。
-    //   有效速度 clamp 到 [kFlyMin, kFlyMax]（4..20 blocks/sec）。仅 QML 在飞态调用（走路态滚轮切 hotbar）。
+    // 飞行速度滚轮调速（t159/t210）：dir=+1 加速 / -1 减速（对应前滚 / 后滚），每档 kFlyStep。
+    //   有效速度 clamp 到 [kFlyMin, kFlyMax]（4..20 blocks/sec）。t210 起仅 QML 在 spectator 模式调用
+    //   （创造 / 生存滚轮切 hotbar）。
     Q_INVOKABLE void adjustFlySpeed(int dir);
     Q_INVOKABLE void grab();
     Q_INVOKABLE void release();

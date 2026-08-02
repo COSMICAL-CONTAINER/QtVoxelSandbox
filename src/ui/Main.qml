@@ -2439,12 +2439,12 @@ Window {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: (event) => {
                 if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen) return
-                // t159 飞行滚轮调速：飞态（creative-飞 / spectator 常驻飞）滚轮调 flySpeedMul（有效 4..20
-                //   blocks/sec），不再切 hotbar；走路态滚轮保持切 hotbar。spec「WheelHandler 仅 flying 时生效」。
-                //   前滚（angleDelta.y>0）加速、后滚减速。同一滚轮在不同运动态语义分流（输入边界由 QML 把关，
-                //   §2-D 单一输入路径：滚轮事件只此一处消费）。
-                const inFly = player.flying || player.mode === PlayerController.Spectator
-                if (inFly) {
+                // t210 滚轮行为按模式切换：观察者（spectator）滚轮调 flySpeedMul（有效 4..20 blocks/sec，
+                //   前滚加速 / 后滚减速）；创造 / 生存滚轮恒切 hotbar 槽（无论是否在飞）。即「滚轮语义」由
+                //   player.mode 单一派生，不再混入 player.flying 运动态——创造飞态滚轮也能选 hotbar（t159 旧逻辑
+                //   把创造-飞 与 spectator 一并判为飞态调速，创造飞时滚轮选不了槽，违 MC 1.0：滚轮=选槽，飞行
+                //   速度无滚轮旋钮）。§2-D 单一输入路径：滚轮事件只此一处消费，按模式分流。
+                if (player.mode === PlayerController.Spectator) {
                     if (event.angleDelta.y > 0)      player.adjustFlySpeed(+1)
                     else if (event.angleDelta.y < 0) player.adjustFlySpeed(-1)
                 } else {
@@ -2832,7 +2832,7 @@ Window {
                  + "\nspeed: " + player.speed.toFixed(2) + " b/s" // t159：实际水平速度（位移/dt；含疾跑/飞/水下倍数/撞墙归零）
                  + (player.flying || player.mode === PlayerController.Spectator
                     ? "  fly: " + player.flySpeed.toFixed(1) + " b/s (x" + player.flySpeedMul.toFixed(2) + ")"
-                    : "") // t159：飞态额外报当前有效飞速 + 倍数（滚轮可调 4..20）
+                    : "") // t159/t210：飞态额外报当前有效飞速 + 倍数（仅 spectator 滚轮可调；创造飞态恒 x1.00）
                  + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
                  + "\nworld: " + theWorld.width + "×" + theWorld.depth + "×" + theWorld.height
                  + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"
