@@ -98,6 +98,19 @@ function writeSlot(root, group, index, id, count) {
 // ── 拖动均分辅助（t79/t98/t108/t167）──
 // 槽 key（"组:下标"）。字符串而非对象：去重 / 比较 / 拆分都直接，无需手写对象相等。
 function slotKey(group, index) { return group + ":" + index }
+
+// t228 面板边界判定（spec「拖出面板边界判定」）：给定 root 坐标系下的点 (x, y) 与面板 Item（各面板的
+//   `panel` Rectangle），返回该点是否落在面板矩形内。背包丢弃门控用：mask MouseArea 全屏铺底，点击位置
+//   在面板内（即使是非槽位的空白）→ 不丢弃（物品留光标）；只有真正点出整栏外（mask 区）才丢。修「左键拿物
+//   在面板内非槽位松手 → 直接丢地下」bug：原 mask 无边界判定，面板内空点击穿透即触发丢弃。
+//   坐标映射：mask `anchors.fill: parent`（= root）→ mask 坐标 == root 坐标；panel.mapFromItem(root, x, y)
+//   把点换算到 panel 自身坐标系（左上角原点），再判是否落在 [0,width]×[0,height]。panel 作为 id 在 mask 之后
+//   声明，但 QML id 在运行期解析，onClicked 触发时 panel 已实例化 → 引用安全。
+function pointInsidePanel(root, panelItem, x, y) {
+    if (!panelItem) return false
+    const local = panelItem.mapFromItem(root, x, y)
+    return local.x >= 0 && local.x < panelItem.width && local.y >= 0 && local.y < panelItem.height
+}
 function dragHasKey(root, key) {
     for (let i = 0; i < root.dragSlots.length; ++i) if (root.dragSlots[i] === key) return true
     return false

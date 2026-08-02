@@ -244,6 +244,11 @@ public:
     // 捡回只剩 1」bug；spec 验收「4 木棒丢出捡回仍 4」）。清空 hotbar 光标手持栈（setHeldBlock(0) 同步清
     // count）。空手 → 不丢。经 QML Connections 转发（同 dropHeld）。
     Q_INVOKABLE void dropHeldCursor();
+    // t228 右键拖出背包丢弃 1 件：与 dropHeldCursor 同源（光标手持栈 → 玩家前方 1.5 格实体），差异在**只丢 1 件**、
+    //   余数留光标（右键 = 逐个丢弃，对齐 MC「右键拖出 = 每次丢 1」；左键整栈走 dropHeldCursor）。count 归 0 时连 id
+    //   一起清（保持「id==0 ⟺ count==0」空栈不变式）。空手 / count<=0 → 不丢。spawnItem count=1。不限捕获态
+    //   （背包打开时未捕获正是此场景，同 dropHeldCursor）。经 QML Connections 转发（同 dropHeld / dropHeldCursor）。
+    Q_INVOKABLE void dropHeldCursorOne();
     // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（**死亡点**
     //   = 玩家倒下时的脚底 m_pos，非出生点）+ 清空背包。每非空栈 → 1 实体携带整栈数量（同 dropHeldCursor
     //   模式，经 spawnItem 信号 → Main.qml 转发到 ItemEntityManager.spawnItem，单向事件流）。栈散布到死亡格

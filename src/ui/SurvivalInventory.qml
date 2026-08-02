@@ -34,6 +34,9 @@ Item {
     signal closed()
     // t49：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区时；宿主接 player.dropHeldCursor）。
     signal discardHeldRequested()
+    // t228：请求宿主把光标手持栈**丢 1 件**为实体（右键拖出面板外；宿主接 player.dropHeldCursorOne）。
+    //   左键整栈走 discardHeldRequested，右键逐个走本信号（spec「左键=全丢/右键=逐个」）。
+    signal discardHeldOneRequested()
 
     // ── 尺寸常量（集中一处便于对齐）──
     readonly property int slotSize: 40        // 统一槽尺寸（主栏 / hotbar / 合成 / 护甲同尺寸，贴近 1.0）
@@ -113,6 +116,8 @@ Item {
     //   （四面板共享）。本处仅薄委托包装，供 QML 信号处理器 / 绑定经 root.xxx 调用（调用点零改动）。
     function slotKey(group, index) { return InventoryOps.slotKey(group, index) }
     function dragHasKey(key) { return InventoryOps.dragHasKey(root, key) }
+    // t228：判定 root 坐标系点 (x,y) 是否落在面板矩形内（拖出丢弃门控；面板内非槽位松手→不丢）。
+    function pointInsidePanel(x, y) { return InventoryOps.pointInsidePanel(root, panel, x, y) }
     function addDragSlot(key) { InventoryOps.addDragSlot(root, key) }
     function beginLeftDrag() { InventoryOps.beginLeftDrag(root) }
     function endLeftDrag() { InventoryOps.endLeftDrag(root) }
@@ -216,16 +221,21 @@ Item {
     // 半透明遮罩：仅吸收点击（防穿透到背后游戏层），**不关闭背包**——用户要求背包只能 E / Esc 关闭。
     // t49：手持物时点遮罩区（面板外）→ 整栈丢弃为实体（同 Q 丢弃）。t158：acceptedButtons 限左键（原默认
     //   全键的 MouseArea 抢 right press，致 per-slot 右键 TapHandler 永不触发）；限左键后右键透到槽 per-slot
-    //   TapHandler（resolveRightClick 生效）。左键点遮罩 → 丢弃；左键在槽区拖动 → DragHandler 接管均分（t167）。
+    //   TapHandler（resolveRightClick 生效）。t228：再加右键（右键拖出 = 丢 1 件）+ 面板边界判定（面板内非槽位
+    //   松手→不丢，修「左键拿物在面板内非槽位松手→直接丢地下」bug）。左键在槽区拖动 → DragHandler 接管均分。
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.6)
         MouseArea {
             anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
-            onClicked: {
-                // 拖出丢弃（spec point 5）：手持物点背包外 → 请求宿主丢弃；空手仅吸收点击。
-                if (root.hotbar && root.hotbar.heldBlock !== 0) root.discardHeldRequested()
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: (mouse) => {
+                // 空手仅吸收点击（防穿透），不丢弃。
+                if (!root.hotbar || root.hotbar.heldBlock === 0) return
+                // 面板内非槽位松手 → 不丢（物品留光标）；只有丢出整栏外才丢。
+                if (root.pointInsidePanel(mouse.x, mouse.y)) return
+                if (mouse.button === Qt.RightButton) root.discardHeldOneRequested()   // 右键逐个
+                else                                root.discardHeldRequested()       // 左键整栈
             }
         }
     }

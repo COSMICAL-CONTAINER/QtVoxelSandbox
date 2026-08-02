@@ -3389,6 +3389,8 @@ Window {
         onClosed: window.closeInventory()
         // t49：拖出丢弃（手持物点遮罩区）→ player 把光标手持栈丢为前方实体（同 Q 丢弃）。
         onDiscardHeldRequested: player.dropHeldCursor()
+        // t228：右键拖出 → 只丢 1 件（左键整栈走上面的 dropHeldCursor）。
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
         // t120：创造拿物品（调色板点击）→ 手弹跳（同生存拾取的手弹反馈，spec「创造拿物品到手也触发」）。
         onItemTaken: handPopAnim.start()
     }
@@ -3408,6 +3410,8 @@ Window {
         onClosed: window.closeInventory()
         // t49：拖出丢弃（手持物点遮罩区）→ player 把光标手持栈丢为前方实体（同 Q 丢弃）。
         onDiscardHeldRequested: player.dropHeldCursor()
+        // t228：右键拖出 → 只丢 1 件（左键整栈走上面的 dropHeldCursor）。
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }
 
     // t50 工作台 3×3 合成面板：右键工作台方块打开（player.craftingTableOpened → openCraftingTable）。
@@ -3422,6 +3426,7 @@ Window {
         z: 150
         onClosed: window.closeCraftingTable()
         onDiscardHeldRequested: player.dropHeldCursor()
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }
 
     // t87 熔炉冶炼面板：右键熔炉方块打开（player.furnaceOpened → openFurnace）。仅 playing &&
@@ -3435,6 +3440,7 @@ Window {
         z: 150
         onClosed: window.closeFurnace()
         onDiscardHeldRequested: player.dropHeldCursor()
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }
 
     // t173/t179 箱子物品栏面板：右键箱子方块打开（player.chestOpened → openChest）。仅 playing &&
@@ -3453,6 +3459,7 @@ Window {
         z: 150
         onClosed: window.closeChest()
         onDiscardHeldRequested: player.dropHeldCursor()
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }
 
     // t87 冶炼 tick：WorldClock 每 100ms 发 ticked(0.1) → 转发到 furnacePanel.tick 推进冶炼。

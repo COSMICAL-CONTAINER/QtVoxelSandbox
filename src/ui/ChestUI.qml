@@ -46,6 +46,9 @@ Item {
     // t49 同 SurvivalInventory / CraftingTableUI：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 /
     // 点遮罩区）。
     signal discardHeldRequested()
+    // t228：请求宿主把光标手持栈**丢 1 件**为实体（右键拖出面板外；宿主接 player.dropHeldCursorOne）。
+    //   左键整栈走 discardHeldRequested，右键逐个走本信号（spec「左键=全丢/右键=逐个」）。
+    signal discardHeldOneRequested()
 
     // ── 尺寸常量 ──
     readonly property int slotSize: 40
@@ -111,6 +114,8 @@ Item {
     //   （五面板共享）。本处仅薄委托包装，供 QML 信号处理器 / 绑定经 root.xxx 调用（调用点零改动）。
     function slotKey(group, index) { return InventoryOps.slotKey(group, index) }
     function dragHasKey(key) { return InventoryOps.dragHasKey(root, key) }
+    // t228：判定 root 坐标系点 (x,y) 是否落在面板矩形内（拖出丢弃门控；面板内非槽位松手→不丢）。
+    function pointInsidePanel(x, y) { return InventoryOps.pointInsidePanel(root, panel, x, y) }
     function addDragSlot(key) { InventoryOps.addDragSlot(root, key) }
     function beginLeftDrag() { InventoryOps.beginLeftDrag(root) }
     function endLeftDrag() { InventoryOps.endLeftDrag(root) }
@@ -152,14 +157,21 @@ Item {
     }
 
     // 半透明遮罩：仅吸收点击（防穿透），不关闭面板（E / Esc / closed 信号才关）。
-    // 手持物时点遮罩区 → 丢弃为实体（同 SurvivalInventory / CraftingTableUI）。
+    // 手持物时点遮罩区 → 丢弃为实体（同 SurvivalInventory / CraftingTableUI）。t228：左键整栈 / 右键 1 件
+    //   + 面板边界判定（面板内非槽位松手→不丢，修「左键拿物在面板内非槽位松手→直接丢地下」bug）。
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.6)
         MouseArea {
             anchors.fill: parent
-            onClicked: {
-                if (root.hotbar && root.hotbar.heldBlock !== 0) root.discardHeldRequested()
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: (mouse) => {
+                // 空手仅吸收点击（防穿透），不丢弃。
+                if (!root.hotbar || root.hotbar.heldBlock === 0) return
+                // 面板内非槽位松手 → 不丢（物品留光标）；只有丢出整栏外才丢。
+                if (root.pointInsidePanel(mouse.x, mouse.y)) return
+                if (mouse.button === Qt.RightButton) root.discardHeldOneRequested()   // 右键逐个
+                else                                root.discardHeldRequested()       // 左键整栈
             }
         }
     }

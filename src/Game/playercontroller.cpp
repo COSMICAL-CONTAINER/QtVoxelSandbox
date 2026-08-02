@@ -1051,6 +1051,23 @@ void PlayerController::dropHeldCursor()
     emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, cnt);
 }
 
+// t228 右键拖出背包丢弃 1 件（spec「右键=逐个」）：光标手持栈取 1 件 → 发 spawnItem(count=1)，余数留光标。
+//   与 dropHeldCursor 的差异：后者清空整栈；本方法只 -1 count（count 归 0 时连 id 一起清，保空栈不变式）。
+//   空手 / count<=0 → 不丢。位置同 dropHeldCursor：眼位 + 视线 * 1.5，floor 到格坐标。
+void PlayerController::dropHeldCursorOne()
+{
+    if (!m_hotbar) return;
+    const int id = m_hotbar->heldBlock();
+    const int cnt = m_hotbar->heldCount();
+    if (id == 0 || cnt <= 0) return;        // 空手 → 不丢
+    // 取 1 件：余数 >0 则 count-1（id 不变）；归 0 则 setHeldBlock(0) 连 id 一起清（保空栈不变式）。
+    if (cnt <= 1) m_hotbar->setHeldBlock(0);
+    else          m_hotbar->setHeldCount(cnt - 1);
+    const QVector3D fwd = lookDirection();
+    const QVector3D p = position() + fwd * 1.5f;
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, 1);
+}
+
 // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（死亡点
 //   = 脚底 m_pos），随后清空背包。每非空栈 → 1 实体携带整栈数量（同 dropHeldCursor 模式）；空栈跳过。
 //   ItemEntityManager 无水平速度物理，靠散布到死亡格 3×3 邻域做视觉分离（轮回 9 格 pattern：>9 栈后
