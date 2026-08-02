@@ -726,19 +726,35 @@ Window {
                 //   （草顶/草侧…），复用地形贴图（零 MC 资产）。作 viewModelHand 子节点 → 随挥动同步运动（块在手中）。
                 //   selectedBlock=0 时 BlockCube 兜底为 Stone 但 Model.visible=false 不渲染（blockId 兜底仅防空 UV）。
                 Model {
-                    visible: player.selectedBlock !== 0
+                    visible: player.selectedBlock !== 0 && player.selectedBlock !== 13
                     geometry: BlockCube { blockId: player.selectedBlock }
                     position: Qt.vector3d(0.0 + window.heldBlockX, 0.02 + window.heldBlockY, -0.22 + window.heldBlockZ)    // t156 基线 + t166c ESC 滑条偏移（heldBlockX/Y/Z）
                     scale: Qt.vector3d(0.12, 0.12, 0.12)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
-                        // t150a 火把黑边修复：火把贴图（tile 17）是透明底（alpha=0）+ 火把像素（alpha=255）。
-                        //   BlockCube 把它铺到 1×1×1 立方体六面，材质无 alpha 处理时透明底被当不透明 → 渲成
-                        //   黑色填充整面（用户实测「黑边 / 黑方块」）。alpha-test（alphaCutoff 0.5）丢弃透明底
-                        //   像素、仅留火把像素 → 透明底不再显黑（机制等价 CrackBox 的 alphaCutoff 路径）。
-                        //   仅火把（id 13）启用；其余方块贴图无 alpha，保持 alphaCutoff=0（默认不透明）。
-                        alphaCutoff: player.selectedBlock === 13 ? 0.5 : 0.0
+                        alphaCutoff: 0.0   // 火把（id 13）已走下方 torch billboard 分支，本立方路径不再处理它
+                    }
+                }
+                // t218 手持火把（第一人称）：火把非立方（世界内异形），手持走 billboard 平图标（细立柱），
+                //   非上方 BlockCube（6 面立方贴图 → 肉眼「贴火把的小立方」非「火把」）。BillboardQuad 单面 +Z
+                //   法线 + icon_torch.png（透明底火把本体）；scale 非等比（细高 0.10×0.22）→ 渲染成一根细长火把
+                //   而非方块。作 viewModelHand 子节点会继承手 baseTilt/swing 的 Rx 旋转 → billboard +Z 不再正对
+                //   相机；补偿 local eulerRotation.x = -(baseTilt+swing) 抵消手 X 旋转 → 世界旋转 = 相机旋转 →
+                //   +Z 恒指回相机、正面可见（同手持材料 BillboardQuad / 掉落物材料段 billboard 模式）。
+                //   alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test 契约（透明底不丢弃会被当不透明黑 → 火把坍黑块）。
+                //   13 = BlockRegistry::Torch（与既有字面量 + 注释模式同源）。
+                Model {
+                    visible: player.selectedBlock === 13
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0.0 + window.heldBlockX, 0.04 + window.heldBlockY, -0.22 + window.heldBlockZ)
+                    scale: Qt.vector3d(0.10, 0.22, 1.0)
+                    eulerRotation: Qt.vector3d(-(viewModelHand.baseTilt + viewModelHand.swingAngle), 0, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        alphaCutoff: 0.5
+                        opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                        baseColorMap: torchIconTex
                     }
                 }
                 // 手持工具（t75 木镐 3D）：选中工具槽（isTool(selectedItem)）时，手前显镐形 3D。
@@ -931,6 +947,13 @@ Window {
 
         // 共享图集纹理：3×3=9 个 per-chunk Model 共用一份 atlas（声明一次、按 id 引用）。
         Texture { id: voxelAtlas; source: "qrc:/textures/atlas.png"; generateMipmaps: false }
+
+        // t218 火把手持/掉落贴图：火把在世界内是异形（torchHost 木柄+火焰小立方，非 1×1×1 立方体），
+        //   但手持/掉落旧路径走 BlockCube（6 面立方贴图集 tile 17）→ 即便 alphaCutoff 丢弃透明底，肉眼仍是
+        //   「贴了火把贴图的小立方」而非「细火把」。改走 BillboardQuad 单面平图标 + icon_torch.png（tools/
+        //   build_cube_icons.py 的 render_flat_2d 产物：64×64 透明底只含火把本体，非 MC 资产）。三处手持/掉落
+        //   路径共用本贴图（单一 source，lessons-learned「同一份带 alpha 贴图被多路径共用须各自履行契约」）。
+        Texture { id: torchIconTex; source: "qrc:/textures/icon_torch.png"; generateMipmaps: false }
 
         // 挖掘裂纹 6 阶贴图（t34）：tools/build_cracks.py 程序生成（透明底 + 黑裂纹，§9a 自绘）。
         // 裂纹叠层 Model 据 player.miningStage（0..5）取对应 Texture 作 baseColorMap。
@@ -1460,7 +1483,7 @@ Window {
                     //   alphaCutoff 0.5 丢弃透明像素，否则材质把透明底当不透明 → 渲成黑色立方体（用户实测
                     //   「手持火把黑方块」）。仅火把（id 13）启用；其余方块贴图无 alpha，alphaCutoff=0。
                     Model {
-                        visible: player.selectedBlock !== 0 && player.mode !== PlayerController.Spectator
+                        visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && player.mode !== PlayerController.Spectator
                         geometry: BlockCube { blockId: player.selectedBlock }
                         position: Qt.vector3d(0, -0.55, -0.30)   // t72：移到手前方（手心前缘 z≈-0.125 前），不嵌进手里
                         scale: Qt.vector3d(0.22, 0.22, 0.22)
@@ -1469,7 +1492,26 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             opacity: playerModel.bodyOpacity
-                            alphaCutoff: player.selectedBlock === 13 ? 0.5 : 0.0
+                            alphaCutoff: 0.0   // 火把（id 13）走下方 torch billboard 分支
+                        }
+                    }
+                    // t218 手持火把（第三人称）：火把非立方 → billboard 平图标（细立柱）。作 rightArmPivot 子节点
+                    //   随臂行走/挖掘挥动同步。BillboardQuad +Z 法线默认 backface 剔除 → 第三人称-前（相机在玩家
+                    //   前）会看到背面被剔 → 火把消失；故 cullMode:Material.NoCulling 双面渲染，背面（镜像火把，
+                    //   火把近对称无明显差异）也显 → 三相机模式都可见。静止时臂本地 +Z 指玩家身后 = 第三人称-后
+                    //   相机方向，billboard 正对相机；臂挥动时火把随之倾（自然）。scale 0.16×0.30 细高（同第一人称
+                    //   torch billboard 非等比，显「细火把」非方块）。opacity 跟 bodyOpacity（观察者半透一致）。
+                    Model {
+                        visible: player.selectedBlock === 13 && player.mode !== PlayerController.Spectator
+                        geometry: BillboardQuad {}
+                        position: Qt.vector3d(0, -0.55, -0.30)
+                        scale: Qt.vector3d(0.16, 0.30, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            cullMode: Material.NoCulling   // 双面（第三人称-前见背面；火把近对称）
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // visible 已排除 Spectator → bodyOpacity 恒 1.0；<1 尊重贴图 alpha（透明底不渲染）
+                            baseColorMap: torchIconTex
                         }
                     }
                     // 手持工具（t75 木镐 3D）：选中工具槽时，第三人称右手上显镐形 3D（同第一人称分支，
@@ -1708,7 +1750,7 @@ Window {
                     //   仅留火把像素 → 透明底不再显黑（机制同手持火把 viewModelHand / CrackBox 的 alphaCutoff 路径）。
                     //   仅火把（id 13）启用；其余方块贴图无 alpha，保持 alphaCutoff=0（默认不透明）。
                     Model {
-                        visible: !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
+                        visible: entRoot.entId !== 13 && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
                         geometry: BlockCube { blockId: entRoot.entId }
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -1716,7 +1758,28 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             baseColor: terrainLight(worldClock.skyLight)
-                            alphaCutoff: entRoot.entId === 13 ? 0.5 : 0.0
+                            alphaCutoff: 0.0   // 火把（id 13）走下方 torch billboard 分支
+                        }
+                    }
+                    // t218 火把掉落实体：火把非立方 → BillboardQuad 平图标（细立柱），非 BlockCube 6 面立方
+                    //   （肉眼「贴火把的小立方」非「火把」）。机制同材料段 billboard（朝相机单面 +Z）：本 Model 是
+                    //   entRoot（绕 Y 自转 rotY）子节点，本地 yaw 减 rotY 抵消继承 → 世界旋转 = 相机旋转 → +Z 恒
+                    //   指回相机、正面恒可见（火把图标始终正对玩家，不随 entRoot 自转「转背面」）。scale 0.24×0.42
+                    //   非等比细高（火把像素约占图 0.75 高 → 渲染火把 ~0.31 高，与方块段 0.3 立方相当、但细）。
+                    //   baseColor 乘 terrainLight(skyLight) 夜间变暗（同方块段 / 材料段掉落物统一）。
+                    //   alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test 契约（透明底不丢弃会被当不透明黑）。
+                    Model {
+                        visible: entRoot.entId === 13
+                        geometry: BillboardQuad {}
+                        scale: Qt.vector3d(0.24, 0.42, 1.0)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y - entRoot.rotY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                            baseColor: terrainLight(worldClock.skyLight)
+                            baseColorMap: torchIconTex
                         }
                     }
                     // 工具段（t75 改用 PickaxeGeometry 3D 镐形，不再 CrackBox 兜底）：
