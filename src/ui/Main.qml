@@ -94,10 +94,12 @@ Window {
     // t166b 阴影开关（用户「卡顿疑似阴影所致，加开关测」）：false → 全 chunk sunShadowAt 返 0（关 PCF 软影，
     //   meshing 提速；顶点光基底只剩 flood-fill 光场）。ESC 设置面板开关绑此。默认 true。
     property bool shadowsEnabled: true
-    // t178 贪婪网格化开关（PLAN §4 性能打磨）：true（默认）→ chunk mesher 合并同 (tile,光) 共面为单个矩形
+    // t178/t183 贪婪网格化开关（PLAN §4 性能打磨）：true → chunk mesher 合并同 (tile,光) 共面为单个矩形
     //   （顶点/三角大幅下降，F3 可观测）；false → 回退逐格 culled（贴图逐格清晰）。绑各 ChunkGeometry。
-    //   注：图集路径下合并 quad 的贴图会拉伸铺满（逐格平铺需纹理数组=自研 RHI，dev-plan 偏差 1/2）。
-    property bool greedyMeshing: true
+    //   ⚠️ 图集（CLAMP 采样）路径下合并 quad 的贴图必然**拉伸**铺满（UV 超 [u0,u1] 采到相邻瓦片，无法 REPEAT
+    //   逐格平铺；细分成 per-block 子格又与 culled 输出一致、无顶点收益）→ t183 默认 false 恢复逐格清晰贴图。
+    //   逐格清晰 + 顶点预算兼得需纹理数组（自研 RHI，dev-plan 偏差 1/2）。ESC 设置面板仍可手动开 greedy 对比。
+    property bool greedyMeshing: false
     // t166c 第一人称手持方块位置（用户「加滑动条调手持方块位置」）：viewModelHand 内 BlockCube 的相对偏移。
     //   默认 (0,0,0)（t156「手前方」基线）；ESC 滑条实时调。
     property real heldBlockX: 0.0

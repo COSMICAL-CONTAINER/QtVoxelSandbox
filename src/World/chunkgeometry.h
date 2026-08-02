@@ -55,11 +55,15 @@ public:
     //   heightmap 采样 → meshing 大幅省时，sun-step 50 chunk 重建更快）+ 顶点光基底只剩 flood-fill 光场（无软影）。
     //   ESC 设置面板开关绑 window.shadowsEnabled → 全 chunk 实例。默认 true（保留软影）；关掉即诊断 / 提速。
     Q_PROPERTY(bool shadowsEnabled READ shadowsEnabled WRITE setShadowsEnabled NOTIFY shadowsEnabledChanged)
-    // t178 贪婪网格化开关（PLAN §4 性能打磨）：true（默认）→ buildMesh 走 greedy meshing（按 6 面方向逐层 2D mask
+    // t178 贪婪网格化开关（PLAN §4 性能打磨）：true → buildMesh 走 greedy meshing（按 6 面方向逐层 2D mask
     //   合并同 (tile, 邻格天光, 邻格方光) 的共面连续格为单个矩形）；false → 回退逐格 culled meshing（每可见面 4 顶点）。
     //   greedy 大幅降顶点 / 三角 / 索引数（平坦地面 16×16=256 quad → 1），F3 叠层据此可观测 meshing 吞吐改善。
-    //   贴图在合并 quad 上**拉伸**铺满（图集路径权衡；逐格平铺需纹理数组 = 自研 RHI 路径，见 dev-plan 偏差 1/2、
-    //   PLAN §2-I 顶点格式），关此开关可回退逐格清晰贴图。值变 → buildMesh 重网格化。
+    //   ⚠️ 贴图在合并 quad 上**拉伸**铺满：图集走 CLAMP 采样，UV 超 [u0,u1] 会采到**相邻瓦片**而非同瓦片重复 →
+    //   无法用「UV>1 + REPEAT」做逐格平铺；把合并 quad 细分成 per-block 子格则输出与逐格 culled 完全一致（无顶点
+    //   收益、徒增复杂度——相邻 cell 共边处 UV 不连续，不可共享顶点）。真正的「逐格清晰 + 顶点预算」需纹理数组
+    //   （per-face tileIndex 顶点属性 + sampler2DArray，UV 在 [0,1] 内 per-layer REPEAT）= 自研 RHI 路径（PLAN §2-I
+    //   顶点格式 / dev-plan 偏差 1/2），属推迟项。**t183 默认 false**（用户实测拉伸不可接受）；ESC 设置面板仍可手动
+    //   打开 greedy（性能对比 / 纹理数组落地后切回）。值变 → buildMesh 重网格化。
     Q_PROPERTY(bool greedyMeshing READ greedyMeshing WRITE setGreedyMeshing NOTIFY greedyMeshingChanged)
     // 网格统计（t10 F3 调试叠层，PLAN §2-F）：buildMesh 完成后暴露本 chunk 的顶点 / 三角面数，
     // 供 F3 叠层汇总诊断 meshing 吞吐与帧抖根因（§2-F 明言「没有 F3 叠层，帧率验收无法诊断帧抖」）。
@@ -134,7 +138,7 @@ private:
     QVector3D m_sunDir{0.f, 1.f, 0.f}; // t123 太阳方向（单位向量；默认天顶正午，QML 绑 WorldClock.sunDir）
     bool m_waterOnly = false; // t148：true=只网格化 Water 段（透明水）；false=只网格化非水地形段
     bool m_shadowsEnabled = true; // t166b：PCF 软影开关（false → sunShadowAt 返 0，跳过 per-vertex 采样）
-    bool m_greedyMeshing = true;  // t178：贪婪网格化开关（true=合并同面；false=逐格 culled）
+    bool m_greedyMeshing = false; // t178/t183：贪婪网格化开关（true=合并同面但贴图拉伸；false=逐格 culled 贴图清晰，t183 默认）
     int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
     int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）
 };
