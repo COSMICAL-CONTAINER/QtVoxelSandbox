@@ -3301,7 +3301,10 @@ Window {
         }
     }
 
-    // t202 气泡条（仅 Survival）：置食物 / 心行上一行（vitalsBar 之上），10 颗气泡居中。
+    // t202 / t227 气泡条（仅 Survival）：置 vitalsBar 上一行，且**右对齐贴在饥饿（食物）鼓腿条正上方**
+    //   （非居中于血+食上方）。机制等价 MC 1.0：氧气泡排在右侧食物条上方（左侧食物条上方为护甲，本项目未做）。
+    //   airBar.width === vitalsBar.width 且两者同 horizontalCenter → 右边沿对齐 → 内 Row 锚 parent.right
+    //   即与下方饥饿 Row（同样 anchors.right: parent.right）同列对齐，气泡逐颗落在鼓腿正上方。
     //   显隐：仅 Survival 且（眼位入水 或 气泡未满）→ 头没入水首次出现、出水回满后消失（spec）。
     //   每气泡 = 1 air（无半态）；level = air > index ? 2 : 0（index 0 = 最左；右耗尽，与心一致）。
     //   气泡图复用 VitalIcon kind="bubble"（自绘原创 Canvas，§9 override (a) 非 MC GUI PNG）。
@@ -3323,8 +3326,9 @@ Window {
             return curValue > index ? 2 : 0
         }
 
+        // t227：Row 锚 parent.right（非 horizontalCenter）→ 与下方饥饿鼓腿 Row 同列，气泡落在鼓腿正上方。
         Row {
-            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.right: parent.right
             anchors.bottom: parent.bottom
             spacing: 0
             Repeater {
