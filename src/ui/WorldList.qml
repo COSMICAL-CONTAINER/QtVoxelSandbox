@@ -102,7 +102,11 @@ Item {
                                 MouseArea {
                                     id: itemArea; anchors.fill: parent; hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
+                                    // 单击仅选中；双击直接进入该世界（机制等价 MC 世界列表双击进入）。
+                                    // MouseArea 在双击时先发 onClicked（选中）再发 onDoubleClicked（进入），
+                                    // 故无需额外延时门控：选中先行，进入随后。
                                     onClicked: { root.selectedFile = model.file; root.selectedName = model.name }
+                                    onDoubleClicked: if (model.file) root.playRequested(model.file, model.name)
                                 }
                                 Column {
                                     anchors.left: parent.left; anchors.leftMargin: 14
