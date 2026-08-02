@@ -37,6 +37,11 @@ desktop.ini
 *.pdb
 *.ilk
 *.log
+# Save files (用户存档数据：每次游玩都变、二进制；绝不进 VCS。saves/ 下每世界一个 .sqlite)
+saves/
+*.sqlite
+*.sqlite-journal
+*.db
 # Android (Phase 2)
 android-build/
 *.apk
