@@ -1521,8 +1521,13 @@ void PlayerController::step(qreal dt)
     if (!wasGround && m_onGround) {
         const float fall = m_peakY - m_pos.y();
         if (m_mode == Survival && fall > 3.0f) {
-            const int dmg = int(std::floor(fall - 3.0f));
-            if (dmg > 0) emit fallDamageTaken(dmg); // 呈现层 Connections 路由到 PlayerState.takeDamage
+            // t200 水抵消摔落伤害（机制等价 MC：落入水中免除摔伤）。着地瞬间脚位格 == Water → 水缓冲冲击，
+            //   不结算伤害。复用 feetInWater()（脚位 blockAt == Water；水非实体 → 落地必踩在水床底块上方，
+            //   floor(m_pos.y) 取水格 → 正确判中；无世界 → false 保守不抵消）。
+            if (!feetInWater()) {
+                const int dmg = int(std::floor(fall - 3.0f));
+                if (dmg > 0) emit fallDamageTaken(dmg); // 呈现层 Connections 路由到 PlayerState.takeDamage
+            }
         }
         m_peakY = m_pos.y();
     }
