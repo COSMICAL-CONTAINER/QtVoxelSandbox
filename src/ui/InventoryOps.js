@@ -125,10 +125,22 @@ function addDragSlot(root, key) {
     if (dragHasKey(root, key)) return
     // t108：异物槽不入 dragSlots（addDragSlot 前判）。仅在分发态（dragHeldId≠0）过滤——读槽当前栈，
     // 非空且 id≠dragHeldId 则跳过（与 redistributeLive 的 eligible 过滤一致；让绿框只亮真正会收物的
-    // 空/同 id 槽）。dragHeldId=0（空手拖）不过滤，让起点槽入 dragSlots 供 endLeftDrag→singleLeftClick。
+    // 空/同 id 槽）。t204：同 id 已满槽亦不入（redistributeLive 会把它剔出 eligible，此处同步剔除让绿框
+    //   不误导 + 让手持数上限按「真正会收物的格」计数）。dragHeldId=0（空手拖）不过滤，让起点槽入
+    //   dragSlots 供 endLeftDrag→singleLeftClick。
     if (root.dragHeldId !== 0) {
         const cur = readSlot(root, p0[0], parseInt(p0[1], 10))
         if (cur.id !== 0 && cur.id !== root.dragHeldId) return
+        if (cur.id === root.dragHeldId) {
+            const cap0 = root.hotbar.maxStackSize(root.dragHeldId)
+            if (cur.count >= cap0) return
+        }
+        // t204：左键拖拽上限=手持数。每合格格至少分 1 件 → 收集格数 ≤ dragHeldCount；超出即不收集
+        //   （不高亮、不分配），从源头让「绿格数 ≤ 手持数」。dragSlots 此处仅含真正会收物的合格格
+        //   （异物/已满已在上剔），故 length 即「已收集的合格格数」，与 redistributeLive 的
+        //   eligible.slice(0,total) 同源（截断在此前置 = 高亮与分配一并收紧，而非仅分配截断、高亮仍全亮）。
+        //   空手拖（dragHeldId=0，外层 if 已挡）不受此限；dragHeldCount=0 防御性跳过（理论不出现）。
+        if (root.dragHeldCount > 0 && root.dragSlots.length >= root.dragHeldCount) return
     }
     root.dragSlots = root.dragSlots.concat([key])   // 新数组引用 → 依赖 dragSlots 的绑定刷新
     redistributeLive(root)                          // t98：每滑入新格实时重算 N 等分（撤销 + 重分）
@@ -198,8 +210,9 @@ function redistributeLive(root) {
             eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count })
     }
 
-    // t108：n>total 截断 eligible 到 total 项（每格至少 1 件；N≤count）。如 8 件拖 9 格 → 第 9 格不分，
-    // 避免被「扫过即亮绿框」错觉（与 redistributeLive 的「异物/已满跳过」一致）。截断在 n<=1 早退之前。
+    // t108/t204：n>total 截断 eligible 到 total 项（每格至少 1 件；N≤count）。t204 起 dragSlots 收集已在
+    //   addDragSlot 按 dragHeldCount 上限预裁（绿格数 ≤ 手持数），故此处 n≤total 通常恒成立；本截断保留为
+    //   防御纵深（addDragSlot 未覆盖的边界，如未来动态改 dragSlots）。截断在 n<=1 早退之前。
     let n = eligible.length
     if (n > total) { eligible = eligible.slice(0, total); n = eligible.length }
     // N≤1 / 空手 / 无物：不分（保留单格左键给 endLeftDrag；空手 drag 无意义）。余数 = 原始快照。
