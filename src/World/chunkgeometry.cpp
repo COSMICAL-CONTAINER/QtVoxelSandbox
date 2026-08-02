@@ -331,8 +331,18 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 yLo = yHi = (F.dir[1] > 0) ? myTop : 0.0f; // 顶在 myTop / 底在 0
                             } else {
                                 // 侧面：邻实体剔除；邻空气画满侧 [0,myTop]；邻水按水面差画暴露带。
-                                if (BlockRegistry::isSolid(nb)) continue;
-                                if (nb == BlockRegistry::Water) {
+                                // t222：流水（state>0，降水面 myTop<1）邻实体方块时**不整面剔除**——画 [0,myTop]
+                                //   满侧保持流水贴图可见。修「流水格被占（玩家放方块 / 自然地形邻接）→水面贴图
+                                //   消失/透明、透视见底」：透明水材质（opacity 0.7）下侧壁封闭水体体积，从水面斜
+                                //   透视不再穿透到背后的实体方块 / 水底（水体「满」而非「空壳」），机制等价 MC
+                                //   流水贴着实体方块显侧壁。流水格被占（t198 setBlock 覆盖水→实体）后邻接流水 N
+                                //   朝新实体面不再被 `isSolid→continue` 抹掉其 water_flow 侧壁贴图。
+                                //   水源（state=0，满高 1.0）邻实体仍**剔除**：满格实体完全遮挡，画了只在实体面上
+                                //   叠一层半透水色（z-fight / 渗色观感），无视觉收益且会把所有水-地形接缝染蓝。
+                                if (BlockRegistry::isSolid(nb)) {
+                                    if (st == 0) continue; // 水源满高：邻实体完全遮挡 → 剔除（原行为）
+                                    // 流水降水面：画 [0,myTop] 满侧（yLo=0,yHi=myTop 已是默认）保持贴图可见
+                                } else if (nb == BlockRegistry::Water) {
                                     const float nbrTop = surfH(stateAtWorld(nwx, nwy, nwz));
                                     if (nbrTop >= myTop - 1e-4f) continue;      // 邻居水面 >= 本格 → 整面剔除
                                     yLo = nbrTop;                                // 邻居更低 → 画邻居水面到本格水面间暴露带
