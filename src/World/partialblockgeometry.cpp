@@ -16,7 +16,7 @@
 // state 编码（与 BlockRegistry::Id 注释 + playercontroller placeBlock 一致；机制等价 MC (id,metadata)）：
 //   slab        bit0      = 上半(1)/下半(0)
 //   stairs      bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 / 背墙在对侧） bit2=上下倒置（整步在上、背墙在下）
-//   fence       —         （单格中心立柱；state=0，连接邻居留后续）
+//   fence       —         （中心立柱 1.5 高 + 四向横档连邻居；state=0；连接判定读 PartialNeighborCtx，t209）
 //   pressure_plate —      （贴地薄板；state=0）
 //   door        bit[1:0]=朝向(0=+X 1=-X 2=+Z 3=-Z) bit2=开(1)/合(0) bit3=上格(1)/下格(0)
 //   trapdoor    bit0=开(1)/合(0) bit[2:1]=开时朝向(0=+X 1=-X 2=+Z 3=-Z)
@@ -86,6 +86,7 @@ int PartialBlockGeometry::append(
     int lx, int ly, int lz,
     quint8 blockId, quint8 state,
     const PartialLightCtx &light,
+    const PartialNeighborCtx &nb,
     float tileW, float hx, float hy, float v0, float v1)
 {
     const int startVerts = verts.size();
@@ -122,8 +123,35 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::WoodFence: {
-        // 中心立柱（0.4 见方，全高）。栅栏连接邻居的横档留后续任务（需邻居感知，同 fence gate）。
-        pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, 0.f, 1.f, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+        // t209 栅栏 = 中心立柱（0.4 见方，1.5 高）+ 四向横档（连接相邻栅栏 / 实体方块）。
+        //   立柱 y[0, 1.5] 与 collisionAABBs(ShapeFence) 同高（{0.3,0,0.3,0.7,1.5,0.7}）→ 玩家跳不过
+        //   （跳跃顶点 ~1.25 < 1.5；机制等价 MC 栅栏 1.5 高不可越）。立柱顶探入上格 0.5（栅栏上格必为空气，
+        //   否则碰撞亦不可能 1.5 高 → 渲染安全）。
+        //   横档分上下两道（MC 式），每道从立柱中心延伸到格边；仅在该向「有连接」时画。连接判定 = 邻格为
+        //   WoodFence 或 isSolid（实体整立方；不连空气/水/火把/不完整方块，同 MC 栅栏只连栅栏与实体）。
+        //   横档纯视觉（不进碰撞 AABB，机制等价 MC 栅栏 VoxelShape 仅立柱；玩家贴立柱碰撞即可挡）。
+        pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, 0.f, 1.5f, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+        const auto connects = [](quint8 blk) {
+            return blk == BlockRegistry::WoodFence || BlockRegistry::isSolid(blk);
+        };
+        const float yLo0 = 0.375f,  yLo1 = 0.5625f; // 下档（MC 6/16..9/16）
+        const float yHi0 = 0.9375f, yHi1 = 1.125f;  // 上档（探入 1.5 高区间，呼应立柱顶高度）
+        if (connects(nb.posX)) { // +X：x[中心, +X 边]
+            pushBox(verts, idx, lx, ly, lz, 0.5f, 1.0f, yLo0, yLo1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, 0.5f, 1.0f, yHi0, yHi1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+        }
+        if (connects(nb.negX)) { // -X：x[-X 边, 中心]
+            pushBox(verts, idx, lx, ly, lz, 0.0f, 0.5f, yLo0, yLo1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, 0.0f, 0.5f, yHi0, yHi1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+        }
+        if (connects(nb.posZ)) { // +Z：z[中心, +Z 边]
+            pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, yLo0, yLo1, 0.5f, 1.0f, tile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, yHi0, yHi1, 0.5f, 1.0f, tile, light, tileW, hx, hy, v0, v1);
+        }
+        if (connects(nb.negZ)) { // -Z：z[-Z 边, 中心]
+            pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, yLo0, yLo1, 0.0f, 0.5f, tile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, yHi0, yHi1, 0.0f, 0.5f, tile, light, tileW, hx, hy, v0, v1);
+        }
         break;
     }
     case BlockRegistry::WoodPressurePlate: {

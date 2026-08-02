@@ -1083,7 +1083,13 @@ bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMa
     const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
     // 严格重叠：ceil(max)-1 排除「仅贴面」的方块 → 防卡缝
     const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
-    const int y0 = int(std::floor(miny)), y1 = int(std::ceil(maxy)) - 1;
+    // t209 Y 取样向下扩 1 格（yFloor - 1）：栅栏等「高 AABB」（maxY > 1，探入上格）的方块其 sub-AABB 会从
+    //   玩家脚位下一格延伸上来。玩家跳跃（脚位上升到 F+1.x）时，栅栏立柱（cell F，AABB [F, F+1.5]）仍在
+    //   Y 区间重叠 [F+1.x, F+1.5]，但 floor(miny)=F+1 → 原 y0=F+1 漏掉 cell F → 玩家跨格横移即穿隧道越栅栏。
+    //   扩 1 格后 y0=F 命中栅栏格、3 轴严格重叠测试仍过滤掉「 maxY<=cell 顶」的普通方块（其 AABB 上界 ≤
+    //   yFloor ≤ miny → miny < b.maxY=false，无假阳性）。仅 +Y 向上凸出的形状（栅栏 / 未来 fence gate 等）获益。
+    const int yFloor = int(std::floor(miny));
+    const int y0 = yFloor - 1, y1 = int(std::ceil(maxy)) - 1;
     const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
     bool hit = false, haveMin = false, haveMax = false;
     float minSurf = 0.f, maxSurf = 0.f;

@@ -30,16 +30,24 @@ struct PartialLightCtx {
     float light;  // 本格光场值 [0,1]（max(sky,block)/15，已 clamp）；异形方块各面顶点色共用
 };
 
+// 逐块水平邻居上下文（t209 栅栏连接）：4 向水平邻居的方块 id（由 chunkgeometry::buildMesh 查好后传入）。
+//   仅 fence 用（栅栏横档是否画取决于邻格是否为栅栏 / 实体方块）；其余异形方块忽略本结构。
+//   纯数据 POD；越界邻居（chunk 边界外）由 chunkgeometry 经 world.blockAt 跨 chunk 路由取真值（同面剔除
+//   邻居查询路径），故栅栏连接跨 chunk 边界亦正确（边界格破/放已标邻 chunk 脏，触发邻居栅栏重网格化）。
+struct PartialNeighborCtx {
+    quint8 posX, negX, posZ, negZ;  // +X / -X / +Z / -Z 水平邻居方块 id（air=0；越界=0=空气）
+};
+
 // 不完整方块异形几何（t133 基础设施）：为 slab/stairs/fence/door/trapdoor/pressure plate 等「非
 // 1×1×1 整立方」的方块生成异形顶点，**合批进同一 chunk mesh**（复用 chunkgeometry 顶点色光照管线 +
 // 单 draw call），而非为每个异形方块另起 Model（lessons-learned t03「大网格不要用 QML Repeater 重复
 // 声明；走 C++ 侧 mesh/节点管理」）。
 //
-// 接口：append(verts, idx, lx, ly, lz, blockId, state, light, tileW, hx, hy, v0, v1) —— 把 (blockId, state)
+// 接口：append(verts, idx, lx, ly, lz, blockId, state, light, nb, tileW, hx, hy, v0, v1) —— 把 (blockId, state)
 //   对应的异形方块顶点 push 进 verts/idx（顶点位置 = (lx,ly,lz) + 局部偏移，与 chunkgeometry 立方面
 //   同坐标系：block-local [0,1]^3 + 格原点）。light 携带逐块光照上下文，append 按各面外法线算 vc
-//   （与 chunkgeometry 立方面同公式，复用顶点色光照）。tileW/hx/hy/v0/v1 是图集 UV 常量（与
-//   chunkgeometry 同 N=19 图集对齐；瓦片按 BlockRegistry::tileIndex 查得）。
+//   （与 chunkgeometry 立方面同公式，复用顶点色光照）。nb 携带 4 向水平邻居 id（t209 栅栏连接用）。
+//   tileW/hx/hy/v0/v1 是图集 UV 常量（与 chunkgeometry 同 N=19 图集对齐；瓦片按 BlockRegistry::tileIndex 查得）。
 //
 // switch(blockId) 分流（机制等价 MC 1.0 (id, metadata) 方块模型：id 选形状、state/metadata 选朝向 / 开合 /
 // 半位）：t133 基础设施**只搭骨架** —— 所有 case 走 default 返回 0（不追加顶点）。t134 落地 6 方块
@@ -66,11 +74,13 @@ public:
     //   lx/ly/lz = chunk 局部格坐标（顶点位置 = 格原点 (lx,ly,lz) + 局部偏移 [0,1]^3）。
     //   blockId/state = 体素 id + 朝向/开合状态（door 两格 / trapdoor 开合 / slab 上下半 / stairs 朝向）。
     //   light = 逐块光照上下文（surface/shade/sun 量；append 按各面外法线算 vc，同 chunkgeometry 立方面）。
+    //   nb = 逐块水平邻居上下文（t209 栅栏连接；仅 fence 用，其余异形方块忽略）。
     //   tileW/hx/hy/v0/v1 = 图集 UV 常量（与 chunkgeometry 同 N=19 图集对齐，半纹素内缩防渗色）。
     static int append(QVector<Vtx> &verts, QVector<quint32> &idx,
                       int lx, int ly, int lz,
                       quint8 blockId, quint8 state,
                       const PartialLightCtx &light,
+                      const PartialNeighborCtx &nb,
                       float tileW, float hx, float hy, float v0, float v1);
 
 private:

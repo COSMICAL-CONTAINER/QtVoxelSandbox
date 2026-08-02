@@ -43,7 +43,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   PartialBlockGeometry::append 按 (id,state) 生成异形顶点。maxStack：door=1（单件不可堆叠），其余 64。
     /* wood_slab      */ {int(BlockRegistry::WoodSlab),          8,  8, 8,  8, false, BlockRegistry::ShapeSlab,     2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodSlab),          1, 64, "wood_slab",          "木板台阶"}, // state bit0=上半(1)/下半(0)；半高 0.5
     /* wood_stairs    */ {int(BlockRegistry::WoodStairs),        8,  8, 8,  8, false, BlockRegistry::ShapeStairs,   2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodStairs),        1, 64, "wood_stairs",        "木板楼梯"}, // state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z；bit2=上下倒置
-    /* wood_fence     */ {int(BlockRegistry::WoodFence),         8,  8, 8,  8, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodFence),         1, 64, "wood_fence",         "木栅栏"}, // 中心立柱 0.4 见方；state=0
+    /* wood_fence     */ {int(BlockRegistry::WoodFence),         8,  8, 8,  8, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodFence),         1, 64, "wood_fence",         "木栅栏"}, // 中心立柱 0.4 见方 × 1.5 高 + 四向横档连邻居（t209）；state=0
     /* wood_pressure_plate */ {int(BlockRegistry::WoodPressurePlate), 8, 8, 8, 8, false, BlockRegistry::ShapePlate, 2.0f, int(BlockRegistry::NoTool), 0, int(BlockRegistry::WoodPressurePlate), 1, 64, "wood_pressure_plate", "木板压力板"}, // 贴地薄板；state=0
     /* wood_door      */ {int(BlockRegistry::WoodDoor),          8,  8, 8,  8, false, BlockRegistry::ShapeDoor,     2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodDoor),          1,  1, "wood_door",          "木板门"}, // 两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向
     /* wood_trapdoor  */ {int(BlockRegistry::WoodTrapdoor),      8,  8, 8,  8, false, BlockRegistry::ShapeTrapdoor, 2.0f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::WoodTrapdoor),      1, 64, "wood_trapdoor",      "木活板门"}, // state bit0=开/合 bit[2:1]=开时朝向
@@ -189,7 +189,11 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
         return out;
     }
     case BlockRegistry::ShapeFence:
-        out.push_back({0.3f, 0, 0.3f, 0.7f, 1, 0.7f}); // 中心立柱 0.4 见方（与 mesher 同）
+        // t209 立柱 1.5 高（与 partialblockgeometry 渲染立柱同高）。maxY=1.5 探入上格 0.5 → 玩家跳跃顶点
+        //   ~1.25 < 1.5 跳不过（机制等价 MC 栅栏 1.5 高不可越）。仅立柱碰撞（横档纯视觉，不进 AABB；
+        //   机制等价 MC 栅栏 VoxelShape 仅立柱）。玩家跨格 X/Z 移动 + 跳跃时，PlayerController::overlapSubAABBs
+        //   的 Y 取样向下扩 1 格（catch 上格以下立柱探入的 AABB），故 1.5 高碰撞对跳跃 / 立柱顶站立均生效。
+        out.push_back({0.3f, 0, 0.3f, 0.7f, 1.5f, 0.7f}); // 中心立柱 0.4 见方 × 1.5 高（与 mesher 同）
         return out;
     case BlockRegistry::ShapePlate:
         out.push_back({0.0625f, 0, 0.0625f, 0.9375f, 0.0625f, 0.9375f}); // 贴地薄板 1/16 厚

@@ -265,8 +265,17 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         std::max((cSky / 15.0f) * (1.0f - cShadow), cBlock / 15.0f), kVcMin, kVcMax);
                     const quint8 st = stateAtWorld(wx, ly, wz);
                     const PartialLightCtx lctx{ cellLight };
+                    // t209 栅栏连接：查 4 向水平邻居 id（跨 chunk 经 blockAtWorld 路由，边界邻居正确）。
+                    //   仅 fence 读本上下文；其余异形方块忽略。边界格破/放已标邻 chunk 脏（ChunkManager::setBlock
+                    //   在 lx/lz 贴边时标邻接脏）→ 跨 chunk 栅栏连接随邻居重网格化自动更新。
+                    const PartialNeighborCtx nctx{
+                        blockAtWorld(wx + 1, ly, wz),
+                        blockAtWorld(wx - 1, ly, wz),
+                        blockAtWorld(wx, ly, wz + 1),
+                        blockAtWorld(wx, ly, wz - 1),
+                    };
                     PartialBlockGeometry::append(verts, idx, lx, ly, lz, b, st,
-                                                 lctx, tileW, hx, hy, v0, v1);
+                                                 lctx, nctx, tileW, hx, hy, v0, v1);
                 }
             }
         }
