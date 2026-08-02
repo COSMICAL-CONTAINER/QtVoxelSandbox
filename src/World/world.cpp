@@ -8,6 +8,7 @@
 #include <cmath>
 #include <queue>   // t151：recomputeLightField 的 BFS flood-fill 队列
 #include <unordered_map> // t185 tickWaterFlow 的 adds 哈希表（key = 体素线性编码 → 新 level，多源取 min）
+#include <unordered_set> // t221 tickWaterFlow 的 evapKeys 集合（本 tick 将退场的格 key，供扩散 pass 跳过）
 
 // t149 海平面（水位）：worldgen 沙滩带 / 沙漠水位 / 填水 / 树·矿石阈值的单一权威常量。
 //   spec 原文 waterLevel=8 是 t119 重定标（heightAt 3..11 → 16..40）**之前**的旧地形范围；
@@ -199,22 +200,29 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
 //   新算法（增量、单步波前；spec「水源向外 1 格 1 格流动，最终停，不填满整个平面」）：
 //   1) 快照当前所有水格（pos + level）。state 0=水源（永久，仅玩家/铁桶/worldgen 放置/移除）；
 //      1..7=流水（每扩散 1 格 level+1，机制等价 MC 1.0 流水 7 格扩散；spec 的「8 格」含水源算）。
-//   2) 扩散 pass（只把波前推 1 格，**有流动动画**）：
+//   2) 蒸发 pass（**先于扩散算** —— 供扩散 pass 跳过「本 tick 将退场」的格）：流水（level>0）失支撑 →
+//        退场，1 格/tick 渐退。非源水格若既无「上方有水」（下落柱 / 上方源灌养）又无「水平方向更低 level
+//        的水邻居」（指向源方向）→ 蒸发。水源被舀/挖后，邻接 level-1 失支撑 → 本 tick 蒸发；下一 tick
+//        level-2 失支撑（level-1 已变 air）→ 蒸发；逐环渐退（机制对齐 MC 流水衰退）。每 tick 仅最内无支撑
+//        环退。结果入 evapKeys 集合（本 tick 退场格 key，供扩散 pass 跳过）。
+//   3) 扩散 pass（只把波前推 1 格，**有流动动画**）：
+//        - t221：**跳过 evapKeys 里的格**（退场中的格不再扩散）—— 否则存活的外环格会把水**回填**进刚蒸发
+//          的内环 air 格（扩散 pass 写 air 邻居、且在蒸发应用之前读 m_chunks 仍见外环存活），下一 tick 该
+//          回填格又失支撑蒸发 → 「一下有一下无」棋盘震荡。跳过后退场单向（仅向内蒸发、不向内回填）=
+//          蔓延动画的镜像（逐格回退，spec t221）。
 //        - 下落：cell 下方为 air → 下方写**流水 level=1**（**非水源**！这是修「灌满盆地」的关键 —— 下落水流
 //          不再当源、不重新满扩散，只作 fresh flow；机制对齐 MC「水流下落为流而非源」）。
 //        - 水平蔓延：仅当 cell「grounded」（下方为实体方块，非 air/水）且 level < kMaxFlowLevel → 4 向
 //          air 邻居写 level+1。下方为 air → 只下落不水平蔓延（悬崖边水直接流下，不在半空横向铺）；
 //          下方为水 → 既不下落也不蔓延（水下柱由其最底 grounded 格负责扩散）。
 //        只写当前为 air 的格（不覆写既有水）→ 每格首达即最低 level（机制对齐 MC 最短源距，无需重刷既有格）。
-//   3) 蒸发 pass（流水失支撑 → 退场，1 格/tick 渐退）：非源水格若既无「上方有水」（下落柱 / 上方源灌养）
-//      又无「水平方向更低 level 的水邻居」（指向源方向）→ 蒸发。水源被舀/挖后，邻接 level-1 失支撑 →
-//      本 tick 蒸发；下一 tick level-2 失支撑（level-1 已变 air）→ 蒸发；逐环渐退（机制对齐 MC 流水衰退）。
 //   4) 应用：先蒸发后新增（二者不相交 —— 前者必为水格、后者必为 air 格）。经 setWaterSilent 写入
 //      （系统模拟非玩家动作，不发 broken/placed，仅 worldChanged 重建 mesh）。
 //
 //   收敛性：稳态流场（海洋全源、已铺满的池）扩散 pass 无 air 可写、蒸发 pass 全有支撑 → 无变化 →
 //      setWaterSilent 全 false → 不触发 worldChanged → 无重建、无闪烁（修「一闪一闪」）。活跃扩散每 tick
-//      仅波前 ≤ 数格变化（远少于旧全量 diff）→ 重建量小、1 格/tick 动画可见（修「瞬间填平」）。
+//      仅波前 ≤ 数格变化（远少于旧全量 diff）→ 重建量小、1 格/tick 动画可见（修「瞬间填平」）。退场期
+//      扩散跳过退场格 → 不回填 → 1 格/tick 平滑回退（修 t221「棋盘一闪一闪」）。
 //
 //   分层（PLAN §2）：本方法属 World 层，只读/写 m_chunks + 发 worldChanged。不依赖 Renderer/Physics/Game。
 //   呈现层（Main.qml）经 WorldClock.ticked 桥接调用（QML 同时持 World + WorldClock，向下合法）。
@@ -260,26 +268,11 @@ void World::tickWaterFlow()
     };
     static const int hd[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
-    // 2) 扩散 pass：只把波前推 1 格（不级联 —— 新格下一 tick 才继续扩散 → 1 格/tick 动画）。
-    for (const WCell &c : cells) {
-        const int bk = belowKind(c.x, c.y, c.z);
-        if (bk == 0) {
-            // 下落：写下方为流水 level=1（**非源** —— 修 t174「下落成源灌满盆地」bug）。
-            tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1));
-        } else if (bk == 1 && c.level < kMaxFlowLevel) {
-            // 水平蔓延：grounded 且未到最大流距 → 4 向 air 邻居写 level+1。
-            for (const auto &d : hd) {
-                const int nx = c.x + d[0], nz = c.z + d[1];
-                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
-                if (m_chunks.blockAt(nx, c.y, nz) != BlockRegistry::Air) continue; // 只入 air（不覆写既有水）
-                tryAdd(keyOf(nx, c.y, nz), quint8(c.level + 1));
-            }
-        }
-        // bk == 2（下方为水）：水下柱 —— 由该柱最底 grounded 格负责水平扩散，本格不动。
-    }
-
-    // 3) 蒸发 pass：流水（level>0）失支撑 → 退场。水源（level=0）永不蒸发（玩家/铁桶/worldgen 管）。
+    // 2) 蒸发 pass（先算，供扩散 pass 跳过「本 tick 将退场」的格）：流水（level>0）失支撑 → 退场。
+    //    水源（level=0）永不蒸发（玩家/铁桶/worldgen 管）。每 tick 仅最内无支撑环退（逐环渐退）。
+    //    结果同时入 evapKeys（key 集合）—— 扩散 pass 据此跳过退场格，断「向内回填」震荡（t221）。
     std::vector<WCell> evaps;
+    std::unordered_set<long long> evapKeys;
     for (const WCell &c : cells) {
         if (c.level == 0) continue;
         bool supported = false;
@@ -295,7 +288,31 @@ void World::tickWaterFlow()
                 if (m_chunks.stateAt(nx, c.y, nz) < c.level) { supported = true; break; }
             }
         }
-        if (!supported) evaps.push_back(c);
+        if (!supported) {
+            evaps.push_back(c);
+            evapKeys.insert(keyOf(c.x, c.y, c.z));
+        }
+    }
+
+    // 3) 扩散 pass：只把波前推 1 格（不级联 —— 新格下一 tick 才继续扩散 → 1 格/tick 动画）。
+    //    t221：跳过 evapKeys（退场中的格）—— 退场中的格不再向外扩散，尤其不把水回填进刚蒸发的内环 air
+    //    格；否则外环存活格回填 → 下一 tick 又蒸发 → 棋盘震荡。跳过后退场单向 = 蔓延镜像（逐格回退）。
+    for (const WCell &c : cells) {
+        if (evapKeys.count(keyOf(c.x, c.y, c.z))) continue; // 退场中的格不扩散（断回填震荡）
+        const int bk = belowKind(c.x, c.y, c.z);
+        if (bk == 0) {
+            // 下落：写下方为流水 level=1（**非源** —— 修 t174「下落成源灌满盆地」bug）。
+            tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1));
+        } else if (bk == 1 && c.level < kMaxFlowLevel) {
+            // 水平蔓延：grounded 且未到最大流距 → 4 向 air 邻居写 level+1。
+            for (const auto &d : hd) {
+                const int nx = c.x + d[0], nz = c.z + d[1];
+                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                if (m_chunks.blockAt(nx, c.y, nz) != BlockRegistry::Air) continue; // 只入 air（不覆写既有水）
+                tryAdd(keyOf(nx, c.y, nz), quint8(c.level + 1));
+            }
+        }
+        // bk == 2（下方为水）：水下柱 —— 由该柱最底 grounded 格负责水平扩散，本格不动。
     }
 
     // 4) 应用：先蒸发后新增（不相交）。setWaterSilent 内部无变化 → false → 稳态零重建。
