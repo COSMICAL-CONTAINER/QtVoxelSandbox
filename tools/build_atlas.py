@@ -12,10 +12,14 @@
   18 bedrock（t119，程序生成原创像素图）
   19 water（t148，程序生成原创像素图，纹理不透明；半透由 Main.qml 水材质 opacity=0.7 实现）
   20 chest_top / 21 chest_side / 22 chest_front（t173，程序生成原创像素图；箱子方块，机制等价 MC 1.0 箱子）
+  23 water_flow（t197，程序生成原创像素图；**流水专用**贴图——水源 state=0 仍用 tile 19 静水（横向波纹），
+     流水 state=1..7 用本 tile（左上→右下斜向条纹），与水面随 level 下降的阶梯感配合，传达「逐格衰减流动」。
+     该 tile 不绑定任何方块 id（Water 方块 def 仍各面=19），mesher 在水段按 cell 的 state 选 19/23——属
+     渲染层呈现选择，非方块属性。tools/build_water_flow.py 生成。）
 （CC0 资产，来源见 docs/PLAN.md §L 资产管线；工作台贴图由 tools/build_crafting_table.py、
  熔炉贴图由 tools/build_furnace.py、矿石贴图由 tools/build_ore.py、火把贴图由 tools/build_torch.py、
- 基岩贴图由 tools/build_bedrock.py、水贴图由 tools/build_water.py、箱子贴图由 tools/build_chest.py
- 程序生成原创像素图，§9 override (a)。）
+ 基岩贴图由 tools/build_bedrock.py、水贴图由 tools/build_water.py、箱子贴图由 tools/build_chest.py、
+ 流水贴图由 tools/build_water_flow.py 程序生成原创像素图，§9 override (a)。）
 """
 import os
 from PIL import Image
@@ -45,6 +49,8 @@ TILES = [
     "default_chest_top",            # 20 chest_top（t173，程序生成原创像素图；箱子顶面=盖缝+铰链+锁印）
     "default_chest_side",           # 21 chest_side（t173，程序生成原创像素图；箱子侧面=铁箍带+板缝）
     "default_chest_front",          # 22 chest_front（t173，程序生成原创像素图；箱子前面=盖缝+锁孔）
+    "default_water_flow",           # 23 water_flow（t197，程序生成原创像素图；流水专用——斜向条纹区别于
+                                    #    静水横向波纹；mesher 在水段按 cell state 选 19(水源)/23(流水)，非方块属性）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

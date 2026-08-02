@@ -280,8 +280,99 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
             }
         }
 
-        // ---- PASS 2：标准 1×1×1 立方面（terrain 实心整立方 + 水）----
-        if (m_greedyMeshing) {
+        // ---- PASS 2：立方面网格化（terrain 段 culled/greedy；水段 t197 变高水面专用路径）----
+        if (m_waterOnly) {
+            // t197 水位视觉（PLAN §4 / dev-plan F 组）：水段不再画满格立方，而是按 cell 的 state(level)
+            //   降水面高度 + 流水用独立贴图，呈现 MC 式逐格衰减流动（修「所有水格同高满水位 → 看着静止」）。
+            //
+            //   水面高度：水源(state=0) 满高 1.0（用 water=19 静水贴图）；流水(state=1..7) 水面 = (8-level)/8
+            //   逐级降（用 water_flow=23 流水贴图）。机制等价 MC 1.0 流水 8 级衰减（机制对齐，非精确数值复刻）。
+            //
+            //   面剔除（关键：水位感知，决定本格水面与邻居水面间的暴露带 / 瀑布阶梯）：
+            //     · 顶面(+Y)：上方为空气 → 画在 myTop（水面）；上方为实体/水 → 剔除。
+            //     · 底面(-Y)：下方为空气 → 画在 0；下方为实体/水 → 剔除（流水悬空下方可见底）。
+            //     · 侧面(±X/±Z)：邻实体 → 剔除（地形挡）；邻空气 → 画本格满侧（自 0 至 myTop）；
+            //       邻水 → 比较水面：邻居水面 >= 本格 → 整面剔除；邻居水面 < 本格 → 画本格水面到邻居水面
+            //       之间的暴露垂直带（瀑布阶梯感 —— 两格水面落差处露出高格的侧壁）。
+            //   顶点色光照沿用 t151 真光场 + t153 PCF 软影（同 terrain culled 约定：邻格 sky/block + per-vertex 软影）。
+            //
+            //   分层（PLAN §2）：本段属 Renderer（mesher），只读 World（blockAt/stateAt/skyLightAt/blockLightAt/
+            //   heightmapAt）—— 水面高度是 mesher 据 state 的纯渲染层计算，不写栅格、不进 BlockDef（Water 方块
+            //   def 仍各面=19 静水；流水贴图选择是呈现层决定，非方块属性）。
+            constexpr int kWaterTile     = 19; // 静水贴图（水源各面；与 BlockRegistry Water def 同 tile）
+            constexpr int kWaterFlowTile = 23; // 流水贴图（流水各面；mesher 呈现层选择，非方块属性）
+            // state → 水面高度（cell-local Y，0..1）。水源 1.0；流水 (8-level)/8（7/8..1/8）。
+            //   state>7 不应出现（kMaxFlowLevel=7），clamp 兜底防越界（极端坏数据 → 1/8 而非负值）。
+            auto surfH = [](quint8 state) -> float {
+                if (state == 0) return 1.0f;
+                const int s = (state > 7) ? 7 : int(state);
+                return (8.0f - float(s)) / 8.0f;
+            };
+            for (int ly = 0; ly < H; ++ly) {
+                for (int lz = 0; lz < S; ++lz) {
+                    for (int lx = 0; lx < S; ++lx) {
+                        const int wx = originX + lx, wz = originZ + lz;
+                        if (blockAtWorld(wx, ly, wz) != BlockRegistry::Water) continue;
+                        const quint8 st = stateAtWorld(wx, ly, wz);
+                        const float myTop = surfH(st);
+                        const int tile = (st == 0) ? kWaterTile : kWaterFlowTile; // 水源静水 / 流水斜纹
+                        const float u0 = tile * tileW + hx, u1 = (tile + 1) * tileW - hx;
+                        for (int f = 0; f < 6; ++f) {
+                            const FaceDef &F = kFaces[f];
+                            const int nwx = wx + F.dir[0], nwy = ly + F.dir[1], nwz = wz + F.dir[2];
+                            const quint8 nb = blockAtWorld(nwx, nwy, nwz);
+                            // 决定本面是否画 + 画的垂直区间 [yLo, yHi]（cell-local）。
+                            //   水平面(±Y)：yLo=yHi（单层）；侧面(±X/±Z)：[yLo,yHi] 可能是部分带。
+                            float yLo = 0.0f, yHi = myTop;
+                            if (F.dir[1] != 0) {
+                                // 顶/底面：邻(上/下)为实体或水 → 剔除；为空气 → 画在水面 / 底。
+                                if (BlockRegistry::isSolid(nb)) continue;
+                                if (nb == BlockRegistry::Water) continue;
+                                yLo = yHi = (F.dir[1] > 0) ? myTop : 0.0f; // 顶在 myTop / 底在 0
+                            } else {
+                                // 侧面：邻实体剔除；邻空气画满侧 [0,myTop]；邻水按水面差画暴露带。
+                                if (BlockRegistry::isSolid(nb)) continue;
+                                if (nb == BlockRegistry::Water) {
+                                    const float nbrTop = surfH(stateAtWorld(nwx, nwy, nwz));
+                                    if (nbrTop >= myTop - 1e-4f) continue;      // 邻居水面 >= 本格 → 整面剔除
+                                    yLo = nbrTop;                                // 邻居更低 → 画邻居水面到本格水面间暴露带
+                                    yHi = myTop;
+                                } // else 邻空气：yLo=0, yHi=myTop（满侧）
+                            }
+                            // 光照（同 terrain culled：面所朝邻格的天光/方光 + per-vertex PCF 软影）。
+                            const float nbSkyF = m_world->skyLightAt(nwx, nwy, nwz) / 15.0f;
+                            const float nbBlockF = m_world->blockLightAt(nwx, nwy, nwz) / 15.0f;
+                            const quint32 base = quint32(verts.size());
+                            for (int cc = 0; cc < 4; ++cc) {
+                                const float dx = F.c[cc][0], dy = F.c[cc][1], dz = F.c[cc][2];
+                                // 顶点 Y：水平面四角同高（yHi）；侧面按角点 dy(0/1) 映射到 [yLo,yHi]。
+                                const float yy = (F.dir[1] != 0) ? yHi : (dy ? yHi : yLo);
+                                const float shadow = sunShadowAt(float(wx) + dx, float(ly) + yy, float(wz) + dz);
+                                const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow), nbBlockF),
+                                                            kVcMin, kVcMax);
+                                // UV：同 terrain culled 规则（±X cu=dz,cv=dy；±Z cu=dx,cv=dy；±Y cu=dx,cv=dz）。
+                                //   侧面 cv=dy(0/1) → 贴图垂直方向 0..1 映射到 [yLo,yHi] 区间（部分带/矮水面
+                                //   会让贴图竖向压缩/拉伸，图集 CLAMP 无法 REPEAT —— 已知图集路径权衡，见
+                                //   lessons-learned greedy meshing 条）。
+                                float cu, cv;
+                                if (f == 0 || f == 1) { cu = dz; cv = dy; }       // ±X
+                                else if (f == 4 || f == 5) { cu = dx; cv = dy; }  // ±Z
+                                else { cu = dx; cv = dz; }                        // ±Y
+                                Vtx v;
+                                v.x = float(lx) + dx; v.y = float(ly) + yy; v.z = float(lz) + dz; // 局部坐标
+                                v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
+                                v.u = u0 + cu * (u1 - u0);
+                                v.v = v0 + cv * (v1 - v0);
+                                v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f; // t151 光场 × t153 PCF 软影顶点色
+                                verts.append(v);
+                            }
+                            idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);
+                            idx.append(base + 0); idx.append(base + 2); idx.append(base + 3);
+                        }
+                    }
+                }
+            }
+        } else if (m_greedyMeshing) {
             // t178 贪婪网格化（greedy meshing，PLAN §4 性能打磨）：按 6 面方向逐「层」建 2D mask，合并同
             //   (tile, 邻格天光, 邻格方光) 的共面连续格为单个矩形 → 顶点 / 三角 / 索引数大幅下降（平坦地面
             //   16×16=256 quad → 1 quad）。F3 叠层据此可观测 meshing 吞吐改善（PLAN §2-F）。
