@@ -531,6 +531,12 @@ private:
     float m_miningProgress = 0.0f;
     int m_miningStage = -1;
     int m_mineBeat = -1; // t165 挖掘挥臂节拍（progress*6 跨阶驱动 swingArm；基岩 progress 循环 → 持续挥臂）
+    // t231 不可挖方块（基岩）挖掘音节流时间戳（m_evtClock；不被 tick restart）。基岩 miningTime 走 0.05s
+    //   地板 → progress 每 tick 跨多 beat → beat 变化触发 miningSound 每 ~16ms 连发（远快于普通挖掘的
+    //   几百 ms 节奏）。spec「改与普通挖掘同节奏（几百 ms 间隔）」：仅对不可挖方块按本时间戳节流到
+    //   kMineSoundThrottleMs；可挖方块仍每 beat 发（其 miningTime/6 节奏本就 ≥ 此节流，行为不变）。
+    //   初值 -100000 = 远古 → 每次新挖掘会话首 beat 不受限。beginMining / cancelMining 同 m_mineBeat 归位。
+    qint64 m_lastMineSoundMs = -100000;
     qint32 m_mineBx = 0, m_mineBy = 0, m_mineBz = 0;
     // 物理左键按下态（t44 连续挖掘）：与 m_mining（=「正在某目标上累积进度」）分离 —— finishMiningAt
     // 破完一块后 cancelMining 清 m_mining，但左键可能仍按住。m_leftDown 仅由 press 边缘（beginMining）
@@ -598,6 +604,11 @@ private:
     static constexpr float kDeg = 0.017453292519943295f;
     static constexpr float kReach = 5.0f;      // 射线选体射程（格）
     static constexpr float kPickupDist = 1.5f; // 拾取距离阈值（格；玩家 AABB 中心起算，spec ~1.2 量级）
+    // t231 不可挖方块（基岩）hold-mine 挖掘音节流间隔（ms；m_evtClock 时间戳差）。基岩 progress 因 miningTime
+    //   走 0.05s 地板每 tick 跨多 beat → miningSound 每 ~16ms 连发；spec「改与普通挖掘同节奏（几百 ms 间隔）」。
+    //   250ms ≈ 典型可挖方块（如手挖石头 miningTime≈1.5s）beat 变化的间隔量级（miningTime/6），机制对齐
+    //   MC 镐撞基岩的击打节拍。仅作用于不可挖方块；可挖方块 miningTime/6 节奏本就 ≥ 此值，不触发节流。
+    static constexpr qint64 kMineSoundThrottleMs = 250;
     static constexpr float kCamMax = 3.5f;     // 第三人称相机最大距离（格；t40，与 Main.qml 默认 d 对齐）
     static constexpr float kCamMargin = 0.1f;  // 相机贴命中面前的余量（防卡面 z-fight / 近裁面穿插；t40）
 };
