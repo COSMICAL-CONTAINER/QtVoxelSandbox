@@ -523,6 +523,15 @@ private:
     static constexpr float kWaterGravity = 6.0f;  // 水中重力（缓沉；≈ kGravity×0.21）
     static constexpr float kSwimUp       = 4.5f;  // 按空格游泳上浮速度（blocks/sec）
     static constexpr float kWaterSinkMax = 3.0f;  // 水中最大下沉速度（钳制）
+    // t211 水流推动玩家（机制等价 MC 1.0 流水冲走实体）：
+    //   kWaterFlowPush：流水水平推力速度（blocks/sec；脚位在流水格 state>0 时沿离源方向叠入水平速度）。
+    //     低于 kWalk(4.3) → 玩家仍可逆流游（净速 ≈ 走速 − 推力），但松手会被流走。spec「创造非飞 + 生存」。
+    //   kWaterfallSinkMax：悬崖边落水（瀑布）额外向下带的最大下沉速度（blocks/sec；高于 kWaterSinkMax=3
+    //     使玩家在瀑布中下沉更快，但仍远慢于自由落体 kMaxFall=78.4）。脚位下方为空气 = 水柱下落时启用。
+    //   仅走路模式（Survival / Creative-未飞）生效 —— Spectator / Creative-飞 early return，不进此分支
+    //   （spec「飞行 / 观察者态不生效」）。
+    static constexpr float kWaterFlowPush    = 2.5f; // 流水水平推力（blocks/sec）
+    static constexpr float kWaterfallSinkMax = 8.0f; // 瀑布最大下沉（blocks/sec）
     static constexpr float kWalk = 4.3f;       // 走 移速
     static constexpr float kGravity = 28.0f;
     static constexpr float kJump = 8.4f;       // 顶点约 1.25 格

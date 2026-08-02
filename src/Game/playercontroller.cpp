@@ -1463,7 +1463,41 @@ void PlayerController::step(qreal dt)
     //   上浮（kSwimUp，连续非边沿）+ 钳最大下沉（防穿水底）。机制等价 MC 1.0 水中：减速 + 浮力 + 空格上浮。
     //   离水（脚位非水）走原重力 + 跳跃（spaceEdge && onGround）。waterMul 已乘水平速度（眼位在水中减速）。
     if (feetInWater()) {
-        m_vel.setY(std::clamp(float(m_vel.y() - kWaterGravity * dt), -kWaterSinkMax, kSwimUp));
+        // t211 水流推动玩家（spec「创造非飞 + 生存，玩家在流水中被水流沿流动方向水平推动」）：
+        //   脚位在流水格（state>0；水源 state=0 静止不推，spec）→ 沿「离源方向」叠入水平推力。流向据脚位
+        //   4 向邻居 state 梯度推算：state 低于脚位的邻居 = 近源方向 → 推力朝远离它（离源 = 高 state 远源
+        //   方向）。梯度加权（footState − ns）使陡降（近源 → 远源跨多级）推得更猛；归一化后 ×kWaterFlowPush
+        //   叠入 m_vel.x/z（与玩家 wish 输入相加 → 逆流游净速 = 走速 − 推力，松手则被流走）。无梯度（四面无
+        //   更近源邻居，如水源/对称流）→ 不推。仅走路模式生效（Spectator / Creative-飞 已 early return）。
+        //   悬崖边落水额外向下带：脚位下方为空气 = 水柱下落（瀑布）→ 下沉上限抬到 kWaterfallSinkMax。
+        const int fx = int(std::floor(m_pos.x()));
+        const int fy = int(std::floor(m_pos.y()));
+        const int fz = int(std::floor(m_pos.z()));
+        const quint8 footState = m_world->stateAt(fx, fy, fz);
+        if (footState > 0) { // 流水格才推（水源 state=0 不推，spec）
+            float gx = 0.0f, gz = 0.0f;
+            constexpr int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (const auto &d : dirs) {
+                const int nx = fx + d[0], nz = fz + d[1];
+                if (m_world->blockAt(nx, fy, nz) == BlockRegistry::Water) {
+                    const quint8 ns = m_world->stateAt(nx, fy, nz);
+                    if (ns < footState) { // 该邻居更近源 → 推力朝远离它（离源）
+                        gx -= float(d[0]) * float(footState - ns);
+                        gz -= float(d[1]) * float(footState - ns);
+                    }
+                }
+            }
+            const float glen = std::sqrt(gx * gx + gz * gz);
+            if (glen > 1e-4f) {
+                m_vel.setX(m_vel.x() + (gx / glen) * kWaterFlowPush);
+                m_vel.setZ(m_vel.z() + (gz / glen) * kWaterFlowPush);
+            }
+        }
+        // 瀑布（脚位下方空气 = 水柱下落）→ 下沉上限抬高（额外向下带）；普通水仍 kWaterSinkMax。
+        const bool waterfall = footState > 0
+            && m_world->blockAt(fx, fy - 1, fz) == BlockRegistry::Air;
+        const float sinkMax = waterfall ? kWaterfallSinkMax : kWaterSinkMax;
+        m_vel.setY(std::clamp(float(m_vel.y() - kWaterGravity * dt), -sinkMax, kSwimUp));
         if (space) m_vel.setY(kSwimUp); // 按住空格 = 游泳上浮（连续；离水后 spaceEdge 跳跃边沿仍由下方分支处理）
     } else {
         m_vel.setY(std::max(float(m_vel.y() - kGravity * dt), -kMaxFall));
