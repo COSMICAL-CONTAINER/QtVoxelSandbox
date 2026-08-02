@@ -120,6 +120,14 @@ bool Hotbar::isTool(int itemId) const { return ToolRegistry::isTool(itemId); }
 // ── 材料段判定（t50）── id >= RecipeRegistry::MaterialIdBase（0x200）。与 isTool 互斥（材料段在工具段之上）。
 bool Hotbar::isMaterial(int itemId) const { return itemId >= RecipeRegistry::MaterialIdBase; }
 
+// t219 不完整方块段判定（手持 / 掉落贴图分流用）：闭区间 [FirstPartial, LastPartial]（t194 教训：
+//   单边 >= FirstPartial 会把段后整立方 Chest(22) 误判为异形）。异形方块在世界内非整立方 → 手持 / 掉落
+//   走 dimetric 立体平图标（icon_wood_*.png，BillboardQuad），非 BlockCube 满格木板立方。
+bool Hotbar::isPartialBlock(int itemId) const
+{
+    return itemId >= int(BlockRegistry::FirstPartial) && itemId <= int(BlockRegistry::LastPartial);
+}
+
 int Hotbar::toolTier(int itemId) const
 {
     const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);

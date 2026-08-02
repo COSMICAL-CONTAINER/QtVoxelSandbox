@@ -112,6 +112,12 @@ public:
     // 材料段判定（t50：合成产物木棒等，id >= RecipeRegistry::MaterialIdBase=0x200）。供 QML delegate
     // 据 isMaterial 切到材料图标 Canvas 自绘（细长棕色矩形 = 木棒）。与 isTool 互斥（材料段 > 工具段上界）。
     Q_INVOKABLE bool isMaterial(int itemId) const;
+    // t219 不完整方块段判定：id 是否异形方块段 [FirstPartial, LastPartial]（木板台阶 / 楼梯 / 栅栏 /
+    //   压力板 / 门 / 活板门）。供 QML 手持 / 掉落贴图据此切 BlockCube（整立方，6 面图集）vs BillboardQuad
+    //   平图标（异形在世界内非整立方 → 手持 / 掉落走 dimetric 立体图标 icon_wood_*.png，非「满格木板立方」）。
+    //   **闭区间** [FirstPartial, LastPartial]（lessons-learned t194：单边 >= FirstPartial 会误路由段后整立方
+    //   如 Chest(22) 进异形路径）。机制等价 MC「不完整方块手持 / 掉落显其立体图标」。
+    Q_INVOKABLE bool isPartialBlock(int itemId) const;
 
     // 每槽物品 id（air=0 即空栈）。越界返回 0。兼容旧消费者（player.selectedBlock 绑定 / 背包 swap）。
     Q_INVOKABLE int blockIdAt(int slot) const;

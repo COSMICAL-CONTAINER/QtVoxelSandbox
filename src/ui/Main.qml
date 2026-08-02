@@ -726,14 +726,35 @@ Window {
                 //   （草顶/草侧…），复用地形贴图（零 MC 资产）。作 viewModelHand 子节点 → 随挥动同步运动（块在手中）。
                 //   selectedBlock=0 时 BlockCube 兜底为 Stone 但 Model.visible=false 不渲染（blockId 兜底仅防空 UV）。
                 Model {
-                    visible: player.selectedBlock !== 0 && player.selectedBlock !== 13
+                    visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock)
                     geometry: BlockCube { blockId: player.selectedBlock }
                     position: Qt.vector3d(0.0 + window.heldBlockX, 0.02 + window.heldBlockY, -0.22 + window.heldBlockZ)    // t156 基线 + t166c ESC 滑条偏移（heldBlockX/Y/Z）
                     scale: Qt.vector3d(0.12, 0.12, 0.12)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
-                        alphaCutoff: 0.0   // 火把（id 13）已走下方 torch billboard 分支，本立方路径不再处理它
+                        alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）已走下方 billboard 分支，本立方路径不再处理它们
+                    }
+                }
+                // t219 手持木板衍生方块（第一人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）在世界内非整立方
+                //   → 走 billboard 平图标（dimetric 立体图标 icon_wood_*.png），非 BlockCube 满格木板立方（异形
+                //   各面 tile=planks → BlockCube 渲成「一块木板」与木板不可辨）。机制同手持火把 / 材料 billboard：
+                //   作 viewModelHand 子节点会继承手 baseTilt/swing 的 Rx 旋转 → billboard +Z 不再正对相机；补偿
+                //   local eulerRotation.x = -(baseTilt+swing) 抵消手 X 旋转 → 世界旋转 = 相机旋转 → +Z 恒指回相机。
+                //   scale 0.18（同手持材料 billboard，平图标稍大显眼）；alphaCutoff:0.5 + opacity:0.99 沿用透明底
+                //   alpha-test 契约（图标外透明底不丢弃会被当不透明黑 → 坍黑块）。partialIconTex.source 绑定
+                //   iconSourceForBlock(selectedBlock) → 选不同异形自动换图（单一 Texture 覆盖全部 6 类）。
+                Model {
+                    visible: hotbarVM.isPartialBlock(player.selectedBlock)
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0.02 + window.heldBlockX, 0.04 + window.heldBlockY, -0.22 + window.heldBlockZ)
+                    scale: Qt.vector3d(0.18, 0.18, 0.18)
+                    eulerRotation: Qt.vector3d(-(viewModelHand.baseTilt + viewModelHand.swingAngle), 0, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        alphaCutoff: 0.5
+                        opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                        baseColorMap: partialIconTex
                     }
                 }
                 // t218 手持火把（第一人称）：火把非立方（世界内异形），手持走 billboard 平图标（细立柱），
@@ -954,6 +975,22 @@ Window {
         //   build_cube_icons.py 的 render_flat_2d 产物：64×64 透明底只含火把本体，非 MC 资产）。三处手持/掉落
         //   路径共用本贴图（单一 source，lessons-learned「同一份带 alpha 贴图被多路径共用须各自履行契约」）。
         Texture { id: torchIconTex; source: "qrc:/textures/icon_torch.png"; generateMipmaps: false }
+
+        // t219 木板衍生方块（异形段 [FirstPartial,LastPartial]：台阶/楼梯/栅栏/压力板/门/活板门）手持/掉落贴图。
+        //   这些方块在世界内是异形（PartialBlockGeometry 按 (id,state) 生成），但手持/掉落旧路径走 BlockCube
+        //   → BlockCube.tileIndex 对异形段各方块全返回 planks(8)（异形各面同贴图=木板，t134 设计）→ 渲染成
+        //   「满格木板立方」肉眼与木板无法区分（楼梯/门/栅栏全都长得像一块木板）。改走 BillboardQuad 单面平
+        //   图标 + 各自 dimetric 立体图标 icon_wood_*.png（build_cube_icons.py render_partial_3d 产物：64×64
+        //   透明底 + 按实际形状投影的木板材质立体图，与 hotbar/创造调色板槽位图标同源）。source 动态绑定
+        //   iconSourceForBlock(selectedBlock) → 选不同异形自动换图标（单一 Texture 实例覆盖全部 6 类异形）。
+        //   两处手持路径（第一人称 viewModelHand + 第三人称 playerModel）共享本贴图（同读 selectedBlock）；
+        //   掉落实体另用 inline Texture（读 per-entity entId）。alpha 契约沿用 torch billboard（alphaCutoff:0.5
+        //   + opacity:0.99：透明底不丢弃会被当不透明黑 → 图标坍黑块）。
+        Texture {
+            id: partialIconTex
+            source: hotbarVM.iconSourceForBlock(player.selectedBlock)
+            generateMipmaps: false
+        }
 
         // 挖掘裂纹 6 阶贴图（t34）：tools/build_cracks.py 程序生成（透明底 + 黑裂纹，§9a 自绘）。
         // 裂纹叠层 Model 据 player.miningStage（0..5）取对应 Texture 作 baseColorMap。
@@ -1483,7 +1520,7 @@ Window {
                     //   alphaCutoff 0.5 丢弃透明像素，否则材质把透明底当不透明 → 渲成黑色立方体（用户实测
                     //   「手持火把黑方块」）。仅火把（id 13）启用；其余方块贴图无 alpha，alphaCutoff=0。
                     Model {
-                        visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && player.mode !== PlayerController.Spectator
+                        visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock) && player.mode !== PlayerController.Spectator
                         geometry: BlockCube { blockId: player.selectedBlock }
                         position: Qt.vector3d(0, -0.55, -0.30)   // t72：移到手前方（手心前缘 z≈-0.125 前），不嵌进手里
                         scale: Qt.vector3d(0.22, 0.22, 0.22)
@@ -1492,7 +1529,26 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             opacity: playerModel.bodyOpacity
-                            alphaCutoff: 0.0   // 火把（id 13）走下方 torch billboard 分支
+                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）走下方 billboard 分支
+                        }
+                    }
+                    // t219 手持木板衍生方块（第三人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）非整立方 →
+                    //   billboard 平图标（dimetric 立体图标），非满格木板立方。作 rightArmPivot 子节点随臂行走/
+                    //   挖掘挥动同步。BillboardQuad +Z 法线默认 backface 剔除 → 第三人称-前（相机在玩家前）见背面
+                    //   被剔 → 图标消失；故 cullMode:NoCulling 双面渲染（背面镜像图标，异形近对称无明显差异）→
+                    //   三相机模式都可见。scale 0.22（同手持方块立方，平图标等大）；opacity 跟 bodyOpacity（观察者
+                    //   半透一致）；alphaCutoff:0.5 沿用透明底 alpha-test 契约。partialIconTex 共享第一人称同一份。
+                    Model {
+                        visible: hotbarVM.isPartialBlock(player.selectedBlock) && player.mode !== PlayerController.Spectator
+                        geometry: BillboardQuad {}
+                        position: Qt.vector3d(0, -0.55, -0.30)
+                        scale: Qt.vector3d(0.22, 0.22, 0.22)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            cullMode: Material.NoCulling   // 双面（第三人称-前见背面；异形图标近对称）
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // visible 已排除 Spectator → bodyOpacity 恒 1.0；<1 尊重贴图 alpha（透明底不渲染）
+                            baseColorMap: partialIconTex
                         }
                     }
                     // t218 手持火把（第三人称）：火把非立方 → billboard 平图标（细立柱）。作 rightArmPivot 子节点
@@ -1750,7 +1806,7 @@ Window {
                     //   仅留火把像素 → 透明底不再显黑（机制同手持火把 viewModelHand / CrackBox 的 alphaCutoff 路径）。
                     //   仅火把（id 13）启用；其余方块贴图无 alpha，保持 alphaCutoff=0（默认不透明）。
                     Model {
-                        visible: entRoot.entId !== 13 && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
+                        visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock(entRoot.entId) && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
                         geometry: BlockCube { blockId: entRoot.entId }
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -1758,7 +1814,31 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             baseColor: terrainLight(worldClock.skyLight)
-                            alphaCutoff: 0.0   // 火把（id 13）走下方 torch billboard 分支
+                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）走下方 billboard 分支
+                        }
+                    }
+                    // t219 木板衍生方块掉落实体：异形段（台阶/楼梯/栅栏/压力板/门/活板门）非整立方 → BillboardQuad
+                    //   平图标（dimetric 立体图标 icon_wood_*.png），非 BlockCube 满格木板立方（异形各面 tile=planks
+                    //   → BlockCube 渲成「一块木板」与木板不可辨）。机制同火把 / 材料段掉落 billboard（朝相机单面 +Z）：
+                    //   本 Model 是 entRoot（绕 Y 自转 rotY）子节点，本地 yaw 减 rotY 抵消继承 → 世界旋转 = 相机旋转
+                    //   → +Z 恒指回相机、正面恒可见。scale 0.3（同方块段 / 材料段掉落物统一）；baseColor 乘
+                    //   terrainLight(skyLight) 夜间变暗（同方块段）；alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test 契约。
+                    //   Texture inline 读 per-entity entId（每个掉落物各显示自己的异形图标）。
+                    Model {
+                        visible: hotbarVM.isPartialBlock(entRoot.entId)
+                        geometry: BillboardQuad {}
+                        scale: Qt.vector3d(0.3, 0.3, 0.3)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y - entRoot.rotY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                            baseColor: terrainLight(worldClock.skyLight)
+                            baseColorMap: Texture {
+                                source: hotbarVM.iconSourceForBlock(entRoot.entId)
+                                generateMipmaps: false
+                            }
                         }
                     }
                     // t218 火把掉落实体：火把非立方 → BillboardQuad 平图标（细立柱），非 BlockCube 6 面立方
