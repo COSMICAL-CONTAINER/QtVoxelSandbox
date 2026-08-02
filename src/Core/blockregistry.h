@@ -257,6 +257,26 @@ public:
     //   Main.qml 的 SelectionWireBoxes 几何据本方法画每个 sub-AABB 的 12 棱（贴合实际形状，非全格）。
     static std::vector<BlockAABB> selectionAABBs(quint8 blockId, quint8 state);
 
+    // t213 方块是否占满整格立方（shape == ShapeFull）。R18d 三任务共用基础谓词（dev-plan t213/t220/t226）：
+    //   - t213 射线穿「不完整方块的空气部分」命中后方块（isFullCube → 射线进格即中；否则须命中 sub-AABB）；
+    //   - t220 沙子下落遇不完整方块 → 变掉落物（仅完整方块可支撑沙）；
+    //   - t226 箱子上方完整方块 → 阻挡开盖（不完整方块上方可开）。
+    //   water/torch/air（ShapeNone）→ false；不完整方块段（ShapeSlab/...）→ false；常规整立方
+    //   （grass/stone/log/planks/.../chest 等）→ true。机制等价 MC「方块是否完整立方」。
+    static bool isFullCube(quint8 blockId);
+
+    // t213 射线命中 sub-AABB（cell-local [0,1]^3）：射线进入含该方块的体素后，**须命中其中某个 sub-AABB**
+    //   才算选中——不完整方块 / 火把的「空气部分」让射线穿过命中后方块（修「挖半砖背后的方块却撸掉了
+    //   半砖/火把」，命中点是否落在该方块 sub-AABB 内）。与 selectionAABBs 的差异：
+    //   - 完整立方（ShapeFull）→ 单盒 {0,0,0,1,1,1}（射线进格即中，等同旧行为）；
+    //   - 不完整方块段（ShapeSlab/...）→ 同 selectionAABBs（实体 sub 形状；空气部分穿过）；
+    //   - 火把（ShapeNone，selectionAABBs 空 → 选中框由 Main.qml isTorch 分支特殊定向）→ 此处给一个贴火把
+    //     视觉范围的中央小立柱盒（瞄柄/焰才命中，格角落空气穿过）；
+    //   - air/water → 单盒 {0,0,0,1,1,1}（water 经 HitWater 命中整格舀水；air 不进本路径，兜底）。
+    //   火把朝向需邻居上下文（由呈现层 QML 持 + 邻居推导），Core 层无 World → 此处取覆盖所有朝向焰/柄的
+    //   保守中央区（焰恒在格中央偏上）。raycast 用本方法 + stateAt 做命中点 vs sub-AABB 精确测试。
+    static std::vector<BlockAABB> raycastAABBs(quint8 blockId, quint8 state);
+
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度
     static int toolType(quint8 blockId);      // 采掘所需工具类型（ToolType）
