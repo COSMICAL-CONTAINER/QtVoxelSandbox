@@ -58,7 +58,8 @@ Item {
     // 拖动越阈值 → DragHandler 激活夺抓 → onActiveChanged 驱动 begin/endLeftDrag；逐槽 HoverHandler 在
     // leftDragActive 期间收集扫过格子（addDragSlot 即触发 redistributeLive 实时重分）。dragSlots 存「组:下标」
     // 字符串（去重简单）；dragHeld* 为按下瞬间光标栈快照；dragOriginal/dragWritten 支撑实时重分的撤销机制
-    // （每滑入新格先撤销上轮写入再重分）。合成格 / 主栏 / hotbar 统一支持（合成格仅参与收集，不分发）。
+    // （每滑入新格先撤销上轮写入再重分）。合成格 / 主栏 / hotbar 统一支持——t180 起 craft 经 localDragGroups
+    //   声明为可拖拽组，参与收集 + 分发（旧版仅收集不分发）；右键分半走 per-slot 右键 TapHandler。
     // 均分算法与 t79/t98 右键拖拽同源（右键拖拽 t166d 改 per-slot 单点后停用）；t167 把同一算法接到左键。
     property bool leftDragActive: false
     property var dragSlots: []              // "craft:2" / "main:5" / "hotbar:0"
@@ -69,10 +70,18 @@ Item {
     // 已写槽。每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginLeftDrag / endLeftDrag 重置。
     property var dragOriginal: ({})
     property var dragWritten: ({})
-    // t98 双击合并：lastTapMs/lastTapKey 记上次左键点击（槽 key）的时间戳与 key；400ms 内同槽二次点击 →
-    // doMergeSameId（扫 main+hotbar 同 id 累加成满栈 64 一组、余数留光标）。
+    // t98 双击合并：lastTapMs/lastTapKey 记上次左键点击（槽 key）的时间戳与 key；280ms 内同槽二次点击 →
+    // doMergeSameId（扫 main+hotbar+craft 同 id 累加成满栈、余数留光标）。
     property real lastTapMs: 0
     property string lastTapKey: ""
+
+    // t180：craft 3×3 参与快捷操作（左键拖动均分 / 双击拿同类 / 右键分半）。声明 craft 为可拖拽本地组 →
+    //   InventoryOps.groupIsDraggable 放行（addDragSlot 收集、redistributeLive 分发）、doMergeSameId 扫 craft
+    //   槽。旧版 hardcode 排除 craft（避免改写合成输入），t180 改为按面板声明接入：双击/拖拽填合成格是 MC
+    //   标准交互；recipeMatch 据 craftRev 自动重算，合并后布局若变由用户重排。
+    property var localDragGroups: ["craft"]
+    // t180：craft 组槽位数（doMergeSameId 扫描范围）。craftSlots 长 9（3×3）。
+    function localSlotCount(group) { return group === "craft" ? root.craftSlots.length : 0 }
 
     // ── t168 面板专属槽路由：craft 合成格走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
     //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
@@ -255,6 +264,15 @@ Item {
                                     // t110：Shift+左键搬运（craft 槽不在 main↔hotbar 范畴，slotShiftLeft 对 craft
                                     //   组无操作；普通左键走 resolveClick）。
                                     if (window.shiftHeld) { root.slotShiftLeft("craft", index); return }
+                                    // t180：双击 craft 槽 → 拿同类（doMergeSameId 扫 main+hotbar+craft 同 id 累加成
+                                    //   满栈、余数留光标；满栈按 main→hotbar→craft 顺序回填，故常把 craft 物品
+                                    //   并入背包、清空合成格便于重排）。
+                                    const key = root.slotKey("craft", index)
+                                    const now = Date.now()
+                                    const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+                                    root.lastTapMs = now
+                                    root.lastTapKey = key
+                                    if (isDouble) { root.doMergeSameId("craft", index); return }
                                     const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
                                     if (!r) return
                                     root.craftSlots[index] = r.slotId

@@ -81,8 +81,9 @@ Item {
     //   Shift 搬运），拖动越阈值 → DragHandler 激活夺抓 → onActiveChanged 驱动 begin/endLeftDrag；逐槽 HoverHandler
     //   在 leftDragActive 期间收集扫过格子（addDragSlot 即触发 redistributeLive 实时重分）。dragSlots 存「组:下标」
     //   字符串；dragHeld* 为按下瞬间光标栈快照；dragOriginal/dragWritten 支撑实时重分的撤销机制（每滑入新格先
-    //   撤销上轮写入再重分）。in / fuel / out / main / hotbar 五类槽统一参与（与 SurvivalInventory / CraftingTableUI
-    //   同算法；本文件无 craft 合成格，故 redistributeLive 无 craft 排除分支）。
+    //   撤销上轮写入再重分）。in / fuel / main / hotbar 参与（t180：in/fuel 经 localDragGroups=["in","fuel"]
+    //   声明为可拖拽组；out 输出槽不参与拖拽/合并，防异物污染输出槽阻断冶炼）；与 SurvivalInventory /
+    //   CraftingTableUI 同算法；本文件无 craft 合成格。
     property bool leftDragActive: false
     property var dragSlots: []              // "in:0" / "fuel:0" / "out:0" / "main:5" / "hotbar:0"
     property int dragHeldId: 0
@@ -91,6 +92,20 @@ Item {
     // 每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginLeftDrag / endLeftDrag 重置。
     property var dragOriginal: ({})
     property var dragWritten: ({})
+
+    // t180：双击拿同类时间戳/key（slotLeft 入口判双击；同 CraftingTableUI）。熔炉旧版 slotLeft 无双击路径，
+    //   双击任何槽都只走两次单点 resolveClick；现可拖拽组槽支持双击合并。
+    property real lastTapMs: 0
+    property string lastTapKey: ""
+
+    // t180：熔炉 in/fuel 输入槽参与快捷操作（左键拖动均分 / 双击拿同类 / 右键分半）。声明为可拖拽本地组 →
+    //   InventoryOps.groupIsDraggable 放行（addDragSlot 收集、redistributeLive 分发）、doMergeSameId 扫 in/fuel
+    //   槽。out 输出槽不声明 → groupIsDraggable 拒收：拖拽不分发进 out（防异物污染输出槽阻断冶炼——
+    //   canSmelt 守 outId===0||outId===resultId）、双击合并不扫 out（输出只取不合）；out 高亮也不亮（绑
+    //   dragHasKey，非可拖拽组不入 dragSlots）。旧版「out 也参与拖拽分发」的潜在污染 bug 一并消除。
+    property var localDragGroups: ["in", "fuel"]
+    // t180：本地组槽位数（doMergeSameId 扫描范围）。in/fuel 各 1 槽；out 不在 localDragGroups 故不查。
+    function localSlotCount(group) { return (group === "in" || group === "fuel") ? 1 : 0 }
 
     // ── t168 面板专属槽路由：熔炉 in/fuel/out 走本地属性 + slotRev（不退回背包、跨开关持久，spec t97 保留
     //   本地）；main/hotbar 由 InventoryOps 统一经 VM。readSlot/writeSlot 薄包装委托 InventoryOps（本地组
@@ -111,9 +126,21 @@ Item {
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
     // t110：slotLeft 入口先查 window.shiftHeld → InventoryOps.slotShiftLeft（Shift+左键搬运 main↔hotbar；
-    //   in/fuel/out 不参与，避免误把冶炼输入搬走）。resolveClick/resolveRightClick 算法见 InventoryOps。
+    //   in/fuel/out 不参与，避免误把冶炼输入搬走）。t180：可拖拽组（main/hotbar/in/fuel）双击 → doMergeSameId
+    //   （拿同类）；out 非可拖拽，双击退化为两次单点（拾起+放回，净无操作）。resolveClick/resolveRightClick
+    //   算法见 InventoryOps。
     function slotLeft(group, index) {
         if (window.shiftHeld) { InventoryOps.slotShiftLeft(root, group, index); return }
+        // t180：280ms 内同槽二次点击 + 可拖拽组 → 拿同类（doMergeSameId 扫 main+hotbar+in+fuel 同 id）。
+        const key = group + ":" + index
+        const now = Date.now()
+        const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+        root.lastTapMs = now
+        root.lastTapKey = key
+        if (isDouble && InventoryOps.groupIsDraggable(root, group)) {
+            InventoryOps.doMergeSameId(root, group, index)
+            return
+        }
         const cur = InventoryOps.readSlot(root, group, index)
         const r = InventoryOps.resolveClick(root, cur.id, cur.count)
         if (!r) return

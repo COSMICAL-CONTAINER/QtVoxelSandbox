@@ -65,11 +65,18 @@ Item {
     // t98 实时重分撤销机制（同 CraftingTableUI）。
     property var dragOriginal: ({})
     property var dragWritten: ({})
-    // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId（扫 main+hotbar 同 id 累加成满栈 64 一组、
-    // 余数留光标）。chest 槽不参与合并扫描（仅 main/hotbar），但双击 chest 槽仍可触发「拾起该槽 + 合并
-    // 背包同 id」语义（targetId 取自 chest 槽 id）。
+    // t98 双击合并：280ms 内同槽二次点击 → doMergeSameId（扫 main+hotbar+chest 同 id 累加成满栈、余数留光标）。
     property real lastTapMs: 0
     property string lastTapKey: ""
+
+    // t180：chest 参与快捷操作（左键拖动均分 / 双击拿同类 / 右键分半）。声明 chest 为可拖拽本地组——
+    //   t168 抽 InventoryOps 后 drag 路径已让 chest 分发（旧 redistributeLive 仅排除 craft），t180 把「是否参与」
+    //   泛化为 localDragGroups 声明，此处显式声明以维持 chest 拖拽分发（不声明会被 groupIsDraggable 拒收、
+    //   回退为不可拖拽——回归）。双击合并也随之扫 chest 槽（修旧版「点 chest 槽常 total=0 空操作」：旧版
+    //   doMergeSameId 只扫 main/hotbar，chest 物品不并入）。
+    property var localDragGroups: ["chest"]
+    // t180：chest 组槽位数（doMergeSameId 扫描范围）= chestRows*chestCols（3×9=27，ChestStore::kSlotsPerChest）。
+    function localSlotCount(group) { return group === "chest" ? root.chestRows * root.chestCols : 0 }
 
     // ── t168 面板专属槽路由：chest 组走 ChestStore（按坐标寻址）；main/hotbar 由 InventoryOps 统一经 VM。
     //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。

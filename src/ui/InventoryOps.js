@@ -102,13 +102,27 @@ function dragHasKey(root, key) {
     for (let i = 0; i < root.dragSlots.length; ++i) if (root.dragSlots[i] === key) return true
     return false
 }
+// t180：判定某组是否参与「左键拖动均分 + 双击拿同类」。main/hotbar 恒参与（五面板一致）；本地组
+//   （craft / in / fuel / out / chest）仅当面板在 root.localDragGroups 数组中声明时参与——未声明则不参与
+//   （生存背包 2×2 craft、熔炉 out 槽保持不参与；主栏/hotbar 不受影响）。声明见各面板：
+//   CraftingTableUI=["craft"]、FurnaceUI=["in","fuel"]、ChestUI=["chest"]。把「参与与否」从旧 hardcode
+//   （redistributeLive 写死排除 "craft"、doMergeSameId 写死只扫 main/hotbar）泛化为按面板声明，契合 t168
+//   「一处改处处生效」：新增面板/组只要设 localDragGroups 即接入全套快捷操作。
+function groupIsDraggable(root, group) {
+    if (group === "main" || group === "hotbar") return true
+    const g = root.localDragGroups
+    return Array.isArray(g) && g.indexOf(group) >= 0
+}
 function addDragSlot(root, key) {
+    const p0 = key.split(":")
+    // t180：非可拖拽组不入 dragSlots——既免无谓重算，也防误导性绿框高亮（高亮 visible 绑 dragHasKey，
+    //   不收集即不亮；旧版扫过熔炉 out 槽会亮绿框却永不分发，现为静默跳过）。
+    if (!groupIsDraggable(root, p0[0])) return
     if (dragHasKey(root, key)) return
     // t108：异物槽不入 dragSlots（addDragSlot 前判）。仅在分发态（dragHeldId≠0）过滤——读槽当前栈，
     // 非空且 id≠dragHeldId 则跳过（与 redistributeLive 的 eligible 过滤一致；让绿框只亮真正会收物的
     // 空/同 id 槽）。dragHeldId=0（空手拖）不过滤，让起点槽入 dragSlots 供 endLeftDrag→singleLeftClick。
     if (root.dragHeldId !== 0) {
-        const p0 = key.split(":")
         const cur = readSlot(root, p0[0], parseInt(p0[1], 10))
         if (cur.id !== 0 && cur.id !== root.dragHeldId) return
     }
@@ -145,9 +159,10 @@ function endLeftDrag(root) {
 //   floor(dragHeldCount/N) 入格、余数实时回光标（heldBlock/heldCount → Main.qml 浮动图标实时变）。撤销
 //   机制：dragOriginal 快照每槽 drag 前原始栈（首次 encounter 拍），dragWritten 记本轮已写槽；下次重分前
 //   先据 dragOriginal 把已写格恢复，再按新 N 重分 → 用户看到「滑第 2 格变对半、第 3 格变三等分」的实时
-//   反馈。合格过滤：空槽 / 同 id 未满；craft 合成格排除（避免改写合成输入、干扰 recipeMatch；本规则对无
-//   craft 组的面板是 no-op）；异物 / 已满槽跳过。守恒：写回总量 + 余数 = dragHeldCount 快照。N≤1 不分
-//   （保留单格左键给 endLeftDrag 处理；空手 drag 无意义）。
+//   反馈。合格过滤：空槽 / 同 id 未满；非可拖拽组跳过（groupIsDraggable 判定，t180：旧版 hardcode 排除
+//   "craft"，现泛化为「面板未在 localDragGroups 声明的本地组跳过」——工作台 craft 3×3 现参与、熔炉 out
+//   不参与防异物污染输出槽阻断冶炼、生存背包 2×2 craft 维持不参与）；异物 / 已满槽跳过。守恒：写回总量 +
+//   余数 = dragHeldCount 快照。N≤1 不分（保留单格左键给 endLeftDrag 处理；空手 drag 无意义）。
 function redistributeLive(root) {
     // 1) 撤销上一轮写入（恢复 dragOriginal 记录的原始栈），确保重分前所有 dragSlots 回到 drag 前态。
     for (const key in root.dragWritten) {
@@ -169,7 +184,7 @@ function redistributeLive(root) {
         if (seen[key]) continue
         seen[key] = true
         const p = key.split(":")
-        if (p[0] === "craft") continue                              // 合成格排除（避免影响 recipeMatch）
+        if (!groupIsDraggable(root, p[0])) continue                 // t180：非可拖拽组跳过（替代旧 hardcode "craft" 排除）
         if (!root.dragOriginal[key]) {
             const cur = readSlot(root, p[0], parseInt(p[1], 10))
             root.dragOriginal[key] = { id: cur.id, count: cur.count }
@@ -261,9 +276,11 @@ function swapHoveredWithHotbar(root, hotbarIdx) {
     writeSlot(root, "hotbar", hotbarIdx, src.id, src.count)
 }
 
-// t98 双击合并（MC：双击某槽 → 扫 main + hotbar 同 id 物品，累加成满栈 64 一组，余数留光标）。targetId
-//   取光标手持 id（典型流程：首次左键拾起该槽 → 二次点击同槽合并），fallback 到所点槽 id（首次为放置时光
-//   标空）。依赖 main VM 共享（main + hotbar 同一份）。守恒：合并后 (各槽 + 光标) 总量 = 合并前。
+// t98 双击合并（MC：双击某槽 → 扫 main + hotbar（+ 面板声明的本地组）同 id 物品，累加成满栈 64 一组、
+//   余数留光标）。targetId 取光标手持 id（典型流程：首次左键拾起该槽 → 二次点击同槽合并），fallback 到
+//   所点槽 id（首次为放置时光标空）。t180：扫描范围加 root.localDragGroups（工作台 craft 3×3、熔炉 in/fuel、
+//   箱子 chest）——双击工作台/熔炉输入槽现可拾起该槽 + 合并背包同 id（旧版只扫 main+hotbar 致点 craft/in
+//   槽常 total=0 空操作）。守恒：合并后 (各槽 + 光标) 总量 = 合并前。
 function doMergeSameId(root, group, index) {
     if (!root.hotbar) return
     let targetId = root.hotbar.heldBlock
@@ -274,20 +291,31 @@ function doMergeSameId(root, group, index) {
     if (targetId === 0) return
     const cap = root.hotbar.maxStackSize(targetId)
 
+    // t180：扫描范围 = main + hotbar + root.localDragGroups（声明的本地组）。未声明 localDragGroups 的面板
+    //   （创造背包 / 生存背包）只扫 main+hotbar（行为不变）。读走 readSlot 统一路由（main/hotbar→VM、本地组
+    //   →localReadSlot），与 drag 路径同源；满栈按扫描顺序回填前 numFull 个槽（main→hotbar→本地），余数留光标。
+    const groupList = [["main", root.hotbar.mainCount], ["hotbar", root.hotbar.slotCount]]
+    const localGroups = root.localDragGroups
+    if (Array.isArray(localGroups)) {
+        for (let i = 0; i < localGroups.length; ++i) {
+            const lg = localGroups[i]
+            groupList.push([lg, root.localSlotCount ? root.localSlotCount(lg) : 0])
+        }
+    }
+
     // 收集所有同 id 槽位 + 光标，求总量。
     const slots = []
     let total = 0
     if (root.hotbar.heldBlock === targetId) total += root.hotbar.heldCount
-    for (let i = 0; i < root.hotbar.mainCount; ++i) {
-        if (root.hotbar.mainBlockIdAt(i) === targetId) {
-            total += root.hotbar.mainCountAt(i)
-            slots.push({ group: "main", index: i })
-        }
-    }
-    for (let i = 0; i < root.hotbar.slotCount; ++i) {
-        if (root.hotbar.blockIdAt(i) === targetId) {
-            total += root.hotbar.countAt(i)
-            slots.push({ group: "hotbar", index: i })
+    for (let gi = 0; gi < groupList.length; ++gi) {
+        const gname = groupList[gi][0]
+        const gcnt = groupList[gi][1]
+        for (let i = 0; i < gcnt; ++i) {
+            const s = readSlot(root, gname, i)
+            if (s.id === targetId) {
+                total += s.count
+                slots.push({ group: gname, index: i })
+            }
         }
     }
     if (total <= 0) return
