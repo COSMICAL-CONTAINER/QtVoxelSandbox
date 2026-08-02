@@ -139,12 +139,15 @@ Item {
                 width: parent.width * 0.4 - 10; height: parent.height
                 spacing: 16
 
-                // 新建世界面板。
+                // 新建世界面板。height 跟随内容 implicitHeight（上下 margins 各 16）——
+                // 固定 200 装不下 5 项（标题 + 名称 + 种子 + 按钮 + spacing）会把
+                // 「创建并进入世界」挤出底边框；按内容自适应也防 DPI/字体变粗后复发。
                 Rectangle {
                     width: parent.width; radius: 8
                     color: "#0e151d"; border.color: "#243040"; border.width: 1
-                    height: 200
+                    height: createCol.implicitHeight + 32
                     Column {
+                        id: createCol
                         anchors.fill: parent; anchors.margins: 16; spacing: 12
                         Text { text: "新建世界"; color: "#7fae7f"; font.pixelSize: 16; font.bold: true }
                         Column {
