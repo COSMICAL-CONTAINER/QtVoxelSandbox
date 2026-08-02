@@ -581,24 +581,13 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             m_world->setBlock(x, py, z, BlockRegistry::Air);
     }
     emit playerMined(x, y, z, int(brokenId), drop); // 破块语义事件（含 drop 标志；当前无消费端，留扩展）
-    // t150c/d 火把支撑联动：破块可能挖掉邻接火把的唯一支撑（如破墙→墙上火把悬空）。扫 6 邻火把，
-    //   无支撑者（torchHasSupport 返 false）掉落为物品（setBlock(Air) + spawnItem）。
-    //   机制等价 MC「火把附着面被移除则火把脱落」。torchHasSupport 查 5 向 solid 邻居（下 / 四侧），
-    //   与 placeBlock 预检 + computeTorchOrient 同语义 → 火把有任一 solid 邻居即保留（不会因次要支撑被
-    //   破而误掉）。掉落的火把走 setBlock(Air) → World 发 blockBroken + worldChanged → Main.qml 移除伪
-    //   光源（removeTorchAt / onWorldChanged 兜底）+ mesh 重建，消除「破支撑后火把悬空残像」（t150c）。
-    //   火把非 solid → 不支撑他火把 → 单趟 6 邻扫即足够（无级联，破一块不会链式掉一串）。
-    if (m_world) {
-        constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-        for (const auto &d : kNb) {
-            const int tx = x + d[0], ty = y + d[1], tz = z + d[2];
-            if (m_world->blockAt(tx, ty, tz) == BlockRegistry::Torch && !torchHasSupport(tx, ty, tz)) {
-                m_world->setBlock(tx, ty, tz, BlockRegistry::Air);
-                emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Torch),
-                               std::max(1, BlockRegistry::dropCount(BlockRegistry::Torch)));
-            }
-        }
-    }
+    // t214 火把失支撑立即掉落：破块后扫 6 邻火把，其**附着格**（state 编码）若已非 solid（含本格刚被置
+    //   Air）→ 火把直接掉落为物品。机制等价 MC「火把附着面被移除即脱落，不重新粘到附近其它可支撑方块」。
+    //   旧实现 torchHasSupport 查 5 向任一 solid → 墙火把破墙后仍被地面「粘」住不掉（用户报「火把不掉」）。
+    //   改读 state 编码的唯一附着邻居：仅当该邻居失撑才掉。掉落走 setBlock(Air) → World 发 blockBroken +
+    //   worldChanged → Main.qml 移除伪光源（removeTorchAt / onWorldChanged 兜底）+ mesh 重建。火把非
+    //   solid → 不撑他火把 → 单趟 6 邻扫即足够（无级联，破一块不会链式掉一串）。
+    dropUnsupportedTorchesAround(x, y, z);
     // t43：生存挖出可掉落方块 → **走实体流**（emit spawnItem），移除 commit a3e9300 的 auto-collect
     // （原直接 addStack）。掉落物落到该格地面、玩家走近 ≤kPickupDist 时经 pickupScan 拾取 → addStack
     // （先选中槽、再空槽，智能堆叠至 maxStack）。满栈不进背包则实体留地面（spec：全满→不拾取）。
@@ -621,17 +610,26 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）
 }
 
-// t150d 火把支撑判定：5 向（下 / ±X / ±Z）任一为 solid 方块即有支撑。与 placeBlock 火把放置预检 +
-//   Main.qml computeTorchOrient/torchNeighborSolid 同语义（同走 BlockRegistry::isSolid 单一权威）。
-//   火把 / 空气等 solid=false 方块不算支撑（防两火把互挂悬空）。无世界 → 视为无支撑（保守掉落）。
-bool PlayerController::torchHasSupport(int x, int y, int z) const
+// t214 破块后扫 (x,y,z) 的 6 邻火把：解码每火把 state 的附着方向（BlockRegistry::torchAttachOffset）
+//   定位其**唯一支撑格**，该格已非 solid（含刚被置 Air 的本破块）→ 火把直接掉落为物品（setBlock(Air) +
+//   spawnItem）。机制等价 MC「火把附着面被移除即脱落」。火把非 solid → 不撑他火把 → 单趟扫即足够
+//   （无级联）。与 placeBlock 火把预检（5 向任一 solid 即可放）正交：放置允许多支撑，但**掉落只看
+//   state 记录的那一个附着面**——故破墙后即便火把下方仍有地面，也因「墙是它的附着面」而掉落（不粘地）。
+void PlayerController::dropUnsupportedTorchesAround(int x, int y, int z)
 {
-    if (!m_world) return false;
-    return BlockRegistry::isSolid(m_world->blockAt(x, y - 1, z))
-        || BlockRegistry::isSolid(m_world->blockAt(x - 1, y, z))
-        || BlockRegistry::isSolid(m_world->blockAt(x + 1, y, z))
-        || BlockRegistry::isSolid(m_world->blockAt(x, y, z - 1))
-        || BlockRegistry::isSolid(m_world->blockAt(x, y, z + 1));
+    if (!m_world) return;
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &d : kNb) {
+        const int tx = x + d[0], ty = y + d[1], tz = z + d[2];
+        if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Torch) continue;
+        int ax, ay, az;
+        BlockRegistry::torchAttachOffset(m_world->stateAt(tx, ty, tz), ax, ay, az);
+        const int sx = tx + ax, sy = ty + ay, sz = tz + az;
+        if (BlockRegistry::isSolid(m_world->blockAt(sx, sy, sz))) continue; // 附着格仍 solid → 火把保留
+        m_world->setBlock(tx, ty, tz, BlockRegistry::Air); // → World 发 blockBroken + worldChanged → 清伪光源 + 重建
+        emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Torch),
+                       std::max(1, BlockRegistry::dropCount(BlockRegistry::Torch)));
+    }
 }
 
 // 每 tick 推进生存挖掘进度（t34）+ 连续续挖（t44）。创造不进入此态（beginMining 内瞬破已 return）。
@@ -897,6 +895,12 @@ void PlayerController::placeBlock()
         //   命中底面（天花板下方，m_hitNy<0）→ 倒置（整步在上、背墙在下）；否则正置。镜像 slab 的
         //   「ny<0 → 上半」约定，使「点方块下方」在所有半方块（slab/stairs）统一得到「倒挂」变体。
         placeState = quint8(((horizontalFacing() & 3) ^ 1) | (m_hitNy < 0 ? 4 : 0));
+    } else if (m_selectedBlock == BlockRegistry::Torch) {
+        // t214 火把附着方向写入 state（供 finishMiningAt 失撑掉落判定 + 存档 round-trip）。由命中面外法线
+        //   推导（同 torchPlaced 信号传出的法线 → QML prefOrient，两路同源 → C++ 附着判定与 QML 渲染朝向
+        //   放置时一致）。torch 走 ShapeNone → collisionAABBs/selectionAABBs/mesher 均不读 state，复用 state
+        //   作附着编码零回归。
+        placeState = quint8(BlockRegistry::torchOrientFromNormal(m_hitNx, m_hitNy, m_hitNz));
     }
     // t163(b) 同格双半砖合整（spec「同格下半砖上再放下半砖→合并为完整方块阻挡行走」）：
     //   右键 slab 时若点中的就是 slab，且点击面朝向其空半（lower 顶面 ny>0 / upper 底面 ny<0）→ 在同格

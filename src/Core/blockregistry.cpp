@@ -300,6 +300,33 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
     return shapeBoxes(sh, state);
 }
 
+// t214 火把附着方向由命中面外法线推导（与 Main.qml orientFromNormal 同源）：ny>0（点中顶面）→ 立柱
+//   TorchFloor（支撑 = 下方）；±X / ±Z 面各映射到对侧邻（normal 指向玩家侧，火把在 hitBlock + normal 侧，
+//   故其支撑 = 火把的反法线邻 = hitBlock）。无轴向命中（不应发生）→ TorchFloor 兜底。
+BlockRegistry::TorchAttach BlockRegistry::torchOrientFromNormal(int nx, int ny, int nz)
+{
+    if (ny > 0) return TorchFloor;
+    if (nx > 0) return TorchOnNX; // 点中 +X 面 → 火把在 +X 侧 → 支撑 -X 邻（QML "px"）
+    if (nx < 0) return TorchOnPX; // 点中 -X 面 → 火把在 -X 侧 → 支撑 +X 邻（QML "nx"）
+    if (nz > 0) return TorchOnNZ; // 点中 +Z 面 → 火把在 +Z 侧 → 支撑 -Z 邻（QML "pz"）
+    if (nz < 0) return TorchOnPZ; // 点中 -Z 面 → 火把在 -Z 侧 → 支撑 +Z 邻（QML "nz"）
+    return TorchFloor;
+}
+
+// t214 火把支撑邻居相对偏移（state → 附着格相对坐标）。越界 state 值（> TorchOnPZ）→ TorchFloor 兜底
+//   （防读脏 state 崩；旧存档 state=0 即 TorchFloor，行为对齐地面火把）。
+void BlockRegistry::torchAttachOffset(quint8 state, int &dx, int &dy, int &dz)
+{
+    switch (state) {
+    case TorchFloor: dx =  0; dy = -1; dz =  0; return; // 立柱：支撑 = 下方
+    case TorchOnNX:  dx = -1; dy =  0; dz =  0; return; // 柄伸 +X：支撑 = -X 邻
+    case TorchOnPX:  dx =  1; dy =  0; dz =  0; return; // 柄伸 -X：支撑 = +X 邻
+    case TorchOnNZ:  dx =  0; dy =  0; dz = -1; return; // 柄伸 +Z：支撑 = -Z 邻
+    case TorchOnPZ:  dx =  0; dy =  0; dz =  1; return; // 柄伸 -Z：支撑 = +Z 邻
+    default:         dx =  0; dy = -1; dz =  0; return; // 越界 → 地面火把兜底
+    }
+}
+
 // 音效材质分组（t118）：id → MaterialGroup 纯函数（按 BlockRegistry::Id 枚举值分支，单一权威）。// AudioManager 据此选 break / mining / step 音色；越界 / air / torch / 未知 → GroupDefault
 // （AudioManager 内部用 GroupStone 兜底播放，避免缺组静默）。
 // 机制等价 MC「方块 → SoundType」（机制对齐，非名词照搬）。新方块追加时按材质归入对应组或补新组。
