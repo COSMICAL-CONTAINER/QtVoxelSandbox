@@ -414,6 +414,17 @@ Window {
     //   x/y/z = 所开箱子的方块世界坐标（player.chestOpened 携带 → ChestStore 据此寻址该箱子的 27 槽）。
     function openChest(x, y, z) {
         if (appState !== "playing" || chestOpen) return
+        // t226 箱子上方阻挡开盖判定（机制等价 MC 1.0：箱子正上方格若为「完整立方」方块 → 盖子被压住，
+        //   不开 UI / 不放盖子动画；上方为空气 / 不完整方块（半砖 / 栅栏 / 楼梯 / 火把 / 水）或另一只箱子 → 可开）。
+        //   谓词用 BlockRegistry::isFullCube（theWorld.isFullCubeAt；t213/t220/t226 共用基础谓词的世界坐标版）。
+        //   **箱子(id 22)虽 shape=ShapeFull 但显式豁免**：机制等价 MC「箱子是非遮挡方块」—— 两箱上下叠放各
+        //   自可开盖（dev-plan t226 验收把箱子列入「上方能开」集）。其余完整立方（石 / 土 / 木板 / 工作台 /
+        //   熔炉 / 原木 / 树叶 / 沙等）上方均阻挡。越界（y+1 出世界顶）→ blockAt 返回 air → isFullCubeAt=false
+        //   → 不阻挡（顶格箱子无遮挡可开）。右键被压住的箱子 → 无任何反馈（不开 / 不放 / 不挥臂；placeBlock 已
+        //   在 chest 分支 return 不放置，机制等价 MC 被压箱子静默不响应）。分层（PLAN §2）：纯呈现层门控，只读
+        //   World（blockAt + isFullCubeAt），不写栅格；chestOpened 信号仍由 Game/Physics 发，本处决定是否呈现开盖。
+        const aboveId = theWorld.blockAt(x, y + 1, z)
+        if (aboveId !== 22 /* BlockRegistry::Chest */ && theWorld.isFullCubeAt(x, y + 1, z)) return
         if (inventoryOpen) closeInventory()
         if (craftingTableOpen) closeCraftingTable()
         if (furnaceOpen) closeFurnace()
