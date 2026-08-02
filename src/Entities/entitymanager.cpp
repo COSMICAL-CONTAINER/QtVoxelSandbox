@@ -210,10 +210,15 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
 //      越界（cy<0）查 isSolid 返 false → 不误判虚空地面，实体继续落。
 //   3) pos / resting 任一真变 → dirty，末尾统一 bump revision + emit（驱动 QML {revision; posAt} 绑定重算）。
 //
-// t117 FallingBlock 分支：无 resting 态（落到底即转为方块 + 移除）。重力 + 列扫同 Mob/Item，命中固体时
-//   inline 调 world->setBlockFromEntity(cx, solidCellY+1, cz, blockId) 放置并标记移除。**inline 放置**使
-//   同 tick 后续 FallingBlock 的列扫能见到此新固体 → 同柱多块依次堆叠到不同格（不撞同一格）。着地格
-//   solidCellY+1 由「自顶向下首个固体」扫描保证为空气。移除用索引收集 + 循环后逆序 erase（保索引有效）。
+// t117/t220 FallingBlock 分支：无 resting 态（落到底即转为方块 / 变掉落物 + 移除）。重力 + 列扫同 Mob/Item，
+//   但扫描按 t220「仅完整方块可支撑沙」分流命运：
+//     - air / water → 穿透继续落（t220 水不挡沙 → 沙落水填堵水格）；
+//     - 完整立方（isFullCube）→ inline 调 world->setBlockFromEntity(cx, cy+1, cz, blockId) 放置并标记移除
+//       （**inline 放置**使同 tick 后续 FallingBlock 的列扫能见到此新固体 → 同柱多块依次堆叠到不同格，不撞
+//       同一格；着地格 cy+1 由扫描保证为 air/水，setBlockFromEntity 覆盖空气 / 水填堵）；
+//     - 不完整方块（火把 / 半砖 / ...）→ 沙失撑，发 fallingBlockDropped（呈现层转发 ItemEntityManager.spawnItem
+//       生成掉落物）+ 标记移除（机制等价 MC 沙落火把碎成掉落物）。
+//   移除用索引收集 + 循环后逆序 erase（保索引有效）。
 void EntityManager::tick(qreal dt, World *world)
 {
     if (!world || m_entities.empty()) return;
@@ -226,7 +231,14 @@ void EntityManager::tick(qreal dt, World *world)
         const int cz = qFloor(e.pos.z());
         if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过
 
-        // t117 FallingBlock：重力 + 着地放置 + 移除（无 resting 态；落到底即转为方块）。
+        // t117/t220 FallingBlock：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）。
+        //   t220 沙与水 / 不完整方块交互（spec「仅完整方块可支撑沙」）：
+        //     - 下方为 air / water → **穿透**继续落（水不挡沙；沙落水填堵水格见「着地」分支）；
+        //     - 下方为**完整立方**（isFullCube）→ 着地放置在 cy+1（覆盖空气 / 水；t220 沙落水填堵水格）；
+        //     - 下方为**不完整方块**（火把 / 半砖 / 栅栏 / ...）→ 沙失撑，**变掉落物**（发 fallingBlockDropped
+        //       → 呈现层转发 ItemEntityManager.spawnItem），不放置、不动原不完整方块（仅完整立方可支撑沙）。
+        //   inline 放置（着地 setBlockFromEntity 在 tick 循环内、erase 之前）使同 tick 后续 FallingBlock 的
+        //   列扫能见到此新固体 → 同柱多块依次堆叠到不同格（不撞同一格）。着地格由列扫保证为 air/水。
         if (e.kind == FallingBlock) {
             e.vy -= kGravity * float(dt);
             if (e.vy < -kMaxFall) e.vy = -kMaxFall;
@@ -234,22 +246,33 @@ void EntityManager::tick(qreal dt, World *world)
             const int topCell = qFloor(e.pos.y());
             int botCell = qFloor(newY);
             if (botCell > topCell) botCell = topCell; // 防浮点噪声致 botCell>topCell
-            int solidCellY = -1;
+            int supportCellY = -1; // 首个完整立方支撑（着地放置在 cy+1）
+            int dropCellY = -1;    // 首个不完整方块（沙变掉落物；掉落点 = 该格上方 cy+1）
             for (int cy = topCell; cy >= botCell; --cy) {
                 if (cy < 0) break; // 越界下方=空气 → 不视作地面
-                if (world->isSolid(cx, cy, cz)) { solidCellY = cy; break; }
+                const quint8 b = world->blockAt(cx, cy, cz);
+                if (b == BlockRegistry::Air || b == BlockRegistry::Water) continue; // 穿透（t220 水不挡沙）
+                if (BlockRegistry::isFullCube(b)) { supportCellY = cy; break; } // 完整立方 → 着地支撑
+                dropCellY = cy; break; // 不完整方块（火把 / 半砖 / ...）→ 沙失撑变掉落物
             }
-            if (solidCellY >= 0) {
-                // 着地：在支撑方块上方一格放置 blockId + 标记移除。
-                world->setBlockFromEntity(cx, solidCellY + 1, cz, quint8(e.blockId));
+            if (supportCellY >= 0) {
+                // 着地：在支撑方块上方一格放置 blockId（覆盖空气 / 水；t220 沙落水填堵水格）+ 标记移除。
+                world->setBlockFromEntity(cx, supportCellY + 1, cz, quint8(e.blockId));
+                toRemove.push_back(idx);
+                dirty = true;
+            } else if (dropCellY >= 0) {
+                // 沙遇不完整方块失撑 → 变掉落物（掉落点 = 不完整方块上方一格 = 沙应停位）。发信号由呈现层
+                //   转发 ItemEntityManager.spawnItem（同 spawnItem 模式；分层：Entities 层发语义事件，呈现层
+                //   只消费）。不放置方块、不动原不完整方块（仅完整立方可支撑沙，机制等价 MC 沙落火把碎成掉落物）。
+                emit fallingBlockDropped(cx, dropCellY + 1, cz, e.blockId);
                 toRemove.push_back(idx);
                 dirty = true;
             } else if (newY <= 0.0f) {
-                // 全列无固体且已跌出世界底部 → 移除（防永久下落；正常世界 y=0 有石头层不触发）。
+                // 全列无支撑且已跌出世界底部 → 移除（防永久下落；正常世界 y=0 有石头层不触发）。
                 toRemove.push_back(idx);
                 dirty = true;
             } else if (newY != e.pos.y()) {
-                e.pos.setY(newY); // 继续自由下落
+                e.pos.setY(newY); // 继续自由下落（穿过 air / 水）
                 dirty = true;
             }
             continue; // 不走 Mob/Item 的 resting / 落地静止逻辑

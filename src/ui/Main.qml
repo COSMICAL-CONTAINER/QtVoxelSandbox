@@ -513,6 +513,15 @@ Window {
     // 只读 count/posAt/colorAt 自发渲染（PLAN §2 分层：呈现只消费 Entities 数据）。
     EntityManager { id: entityManager }
 
+    // t220 落沙遇不完整方块失撑 → 变掉落物：EntityManager 发 fallingBlockDropped（坐标 = 不完整方块上方
+    //   一格、id = 沙方块 id）→ 转发到 itemEntities.spawnItem 生成掉落实体（机制等价 MC「沙落火把上 → 沙
+    //   碎成掉落物」）。单向事件流：EntityManager 不持有 ItemEntityManager（同 player.spawnItem 模式；
+    //   PLAN §2 分层：Entities 层发语义事件，呈现层只消费）。
+    Connections {
+        target: entityManager
+        function onFallingBlockDropped(x, y, z, blockId) { itemEntities.spawnItem(x, y, z, blockId, 1) }
+    }
+
     // t89 / t118 / t177 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 / 门开关 /
     //   受伤 / 环境 SFX，按方块材质分组（石/木/草/沙/叶）clip 池（spec「playBreak/playMining/playStep
     //   按 group 选」）。触发由 Game 层信号发出（World::blockBroken/blockPlaced、PlayerController::
@@ -2507,8 +2516,11 @@ Window {
         }
     }
 
-    // t117 沙子重力触发：查 (x,y,z) 是否为沙且下方空气 → 先把沙格置 air（经 World::setBlock 发 blockBroken
-    //   递归触发上方沙链）再 spawn 下落方块实体。仅 id=8（BlockRegistry::Sand）参与；其余方块无重力。
+    // t117/t220 沙子重力触发：查 (x,y,z) 是否为沙且**下方非完整立方支撑** → 先把沙格置 air（经 World::setBlock
+    //   发 blockBroken 递归触发上方沙链）再 spawn 下落方块实体。仅 id=8（BlockRegistry::Sand）参与；其余方块无重力。
+    //   t220「仅完整方块可支撑沙」：下方为完整立方（isFullCubeAt）→ 有支撑不落；下方为 air / 水 / 不完整方块
+    //   （火把 / 半砖 / ...）→ 失撑触发下落（沙落水穿透填堵水格、沙遇不完整方块变掉落物 由 EntityManager.tick
+    //   落体判定）。旧版查「下方非空气」把水 / 火把 / 半砖当支撑，致沙卡在水上一格 / 粘在火把上（t220 (b)(c)）。
     //   「先置 air 再 spawn」使链式塌落自然：setBlock(air) → blockBroken(x,y,z,Sand) → onBlockBroken 再查
     //   (x,y+1,z) 沙并递归 trigger（沙柱一次塌完，机制等价 MC 沙链）。
     //   分层（PLAN §2）：呈现层（Main.qml）消费 World 语义事件（blockPlaced/broken）→ EntityManager 生成
@@ -2517,8 +2529,9 @@ Window {
         if (y < 0 || y >= theWorld.height) return
         if (x < 0 || z < 0 || x >= theWorld.width || z >= theWorld.depth) return
         if (theWorld.blockAt(x, y, z) !== 8) return // 仅沙（BlockRegistry::Sand=8）
-        if (y > 0 && theWorld.blockAt(x, y - 1, z) !== 0) return // 下方非空气 → 有支撑，不落
-        // 下方空气 → 触发：先置 air（递归触发上方沙链），再 spawn 下落实体。
+        // t220：仅完整立方可支撑沙。下方为完整立方 → 有支撑不落；下方为 air/水/不完整方块 → 失撑触发。
+        if (y > 0 && theWorld.isFullCubeAt(x, y - 1, z)) return
+        // 下方失撑 → 触发：先置 air（递归触发上方沙链），再 spawn 下落实体。
         theWorld.setBlock(x, y, z, 0)
         entityManager.spawnFallingBlock(x, y, z, 8)
     }

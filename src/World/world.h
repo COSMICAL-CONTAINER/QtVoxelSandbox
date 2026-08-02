@@ -52,6 +52,14 @@ public:
     // 是否「存在方块」（非 air）：raycast 选体 / 掉落实体着地 / mesher 邻居剔除 等用。
     // 注：名为 isSolid 但语义是「非 air 实存」（保留以兼容既有调用点）。碰撞语义见 isCollidable。
     Q_INVOKABLE bool isSolid(int x, int y, int z) const { return blockAt(x, y, z) != 0; }
+    // t220 该格方块是否「完整立方」（BlockRegistry::isFullCube(blockAt)），供呈现层 maybeTriggerFallingBlock
+    //   判「沙下方是否可支撑」：仅完整立方支撑沙；下方为 air / 水 / 不完整方块（火把 / 半砖 / ...）→ 沙失撑
+    //   下落（沙落水穿透填堵水格、沙遇不完整方块变掉落物 由 EntityManager::tick 落体判定）。与 isSolid
+    //   （「非 air 实存」）分离 —— isSolid 把水 / 火把 / 半砖当实存（旧落沙 isSolid 停格 / 射线命中用），
+    //   isFullCubeAt 严判完整立方（t213/t220/t226 共用基础谓词 isFullCube 的世界坐标版）。
+    Q_INVOKABLE bool isFullCubeAt(int x, int y, int z) const {
+        return BlockRegistry::isFullCube(blockAt(x, y, z));
+    }
     // 是否「实体碰撞」：t146 走 BlockRegistry::BlockDef.shape；t152 改读 state + isCollidableWhenClosed
     //   （门/活版门合态挡、开态通）。solid 仅作 mesher 邻居面剔除依据（不完整方块 solid=false → 不挡邻居
     //   整面）；**碰撞**看 shape + 开合态：常规整立方 / 不完整方块（slab/stairs/...）恒挡玩家（逐形状 sub-AABB
@@ -100,11 +108,12 @@ public:
     Q_INVOKABLE quint8 stateAt(int x, int y, int z) const;
     Q_INVOKABLE bool setBlock(int x, int y, int z, quint8 id, quint8 state);
 
-    // t117 FallingBlock 着地专用：经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + 边界邻接，同 setBlock
-    // 的写入路径）+ emit worldChanged（驱动 mesh 重建），但**不**发 blockPlaced（与玩家放置语义分离）。
-    // 沿用 worldgen 经 m_chunks.setBlock 直写不触发 blockPlaced 的既有约定——避免 onBlockPlaced 的 survival
-    // takeStack 误触、多余粒子 / 音效把链式塌落刷成噪音。仅在目标格当前为空气时写入（着地格由 FallingBlock
-    // 列扫保证为空气；防御：已占用则不覆盖）。越界 / 非空 → false。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
+    // t117/t220 FallingBlock 着地专用：经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + 边界邻接，同 setBlock
+    //   的写入路径）+ emit worldChanged（驱动 mesh 重建），但**不**发 blockPlaced（与玩家放置语义分离）。
+    //   沿用 worldgen 经 m_chunks.setBlock 直写不触发 blockPlaced 的既有约定——避免 onBlockPlaced 的 survival
+    //   takeStack 误触、多余粒子 / 音效把链式塌落刷成噪音。仅在目标格当前为**空气或水**时写入（t220：着地格
+    //   由 FallingBlock 列扫保证为 air/水 —— 沙落水穿透后填堵水格；防御：其余已占用方块不覆盖）。越界 /
+    //   非空非水 → false。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
     bool setBlockFromEntity(int x, int y, int z, quint8 id);
     // t174 水流系统静默写入（同 setBlockFromEntity 语义：经 m_chunks.setBlock 直写 + emit worldChanged
     //   重建 mesh，但**不**发 broken/placed —— 水流蔓延是系统模拟非玩家动作，避免触发粒子/音效/拾取噪音）。

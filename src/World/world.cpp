@@ -155,15 +155,17 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     return true;
 }
 
-// t117 FallingBlock 着地专用：m_chunks.setBlock 直写 + emit worldChanged，不发 blockPlaced（与玩家放置
-// 语义分离，沿用 worldgen 直写不触发 blockPlaced 的既有约定）。仅在目标为空气时写入（防御）。越界 / 非空 → false。
+// t117/t220 FallingBlock 着地专用：m_chunks.setBlock 直写 + emit worldChanged，不发 blockPlaced（与玩家放置
+//   语义分离，沿用 worldgen 直写不触发 blockPlaced 的既有约定）。t220：仅在目标为**空气或水**时写入（着地格
+//   由 FallingBlock 列扫保证为 air/水 —— 沙落水穿透后填堵水格；防御：其余已占用方块不覆盖）。越界 / 非空非水 → false。
 bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return false; // 越界拒绝
-    if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) return false; // 已占用 → 不覆盖
+    const quint8 occ = m_chunks.blockAt(x, y, z);
+    if (occ != BlockRegistry::Air && occ != BlockRegistry::Water) return false; // 仅空气 / 水可被实体着地覆盖
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
-    recomputeLightAround(x, y, z, BlockRegistry::Air, id); // t154：增量重 flood（着地：oldId=Air → newId=id）
+    recomputeLightAround(x, y, z, occ, id); // t154：增量重 flood（oldId=被覆盖的 air/水 → newId=id）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     return true;

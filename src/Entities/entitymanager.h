@@ -95,6 +95,12 @@ public:
 
 signals:
     void entitiesChanged(); // spawn / 推动位移 / 重力下落 触发；驱动 count/revision + QML 绑定刷新
+    // t220 FallingBlock 遇不完整方块失撑 → 变掉落物。沙下落途中首个「非 air/水」方块为**不完整方块**
+    //   （火把 / 半砖 / 栅栏 / ...，即非完整立方）时发本信号：坐标 = 不完整方块**上方一格**（= 沙应掉落位）、
+    //   blockId = 实体携带的方块 id（机制等价 MC「沙落火把上 → 沙碎成掉落物」；仅完整立方可支撑沙）。
+    //   呈现层（Main.qml）Connections 转发到 ItemEntityManager.spawnItem 生成掉落实体（同
+    //   PlayerController.spawnItem 模式；分层：Entities 层发语义事件，呈现层只消费，绝不反向写栅格）。
+    void fallingBlockDropped(int x, int y, int z, int blockId);
 
 private:
     struct Entity {
