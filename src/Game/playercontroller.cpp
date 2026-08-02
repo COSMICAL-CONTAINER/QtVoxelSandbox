@@ -782,19 +782,26 @@ void PlayerController::placeBlock()
     // t174 铁桶 useBlock（spec「右键舀水/倒水交互」）：选空桶 / 装水桶时右键走桶交互，不走方块放置路径
     //   （桶非方块；selectedBlock 经 hotbar 已归 Air，下方 Air 守卫会拦，故在此提前分支）。机制等价 MC 1.0
     //   铁桶：装水桶右键 → 在命中面相邻空气格放置水源（state=0）；空桶右键 → 含水射线命中首个水格舀走。
-    //   创造模式桶**不消耗**（无限源，机制等价 MC 创造铁桶）；生存则空/装水桶互换（takeStack/setStack 写选中槽）。
     //   分层（PLAN §2）：桶交互属 Game/Physics（读射线 + 写 World + 写 Hotbar VM），不改栅格语义（setBlock 入口）。
-    if (m_hotbar && (m_selectedItem == RecipeRegistry::WaterBucketId
-                     || m_selectedItem == RecipeRegistry::BucketEmptyId)) {
+    // t186 修复(a)「舀水不变桶」：手持物品 id **直读 hotbar**（单一权威，同 updateMining 的 t57 修法），不读
+    //   m_selectedItem 副本——后者经 Q_PROPERTY 绑定 hotbarVM.selectedItemId（NOTIFY=selectedSlotChanged）刷新，
+    //   QML 绑定重算可能被引擎延迟到下一事件循环 → 同一 tick 内 m_selectedItem 滞后于真实选中槽（拾取 / 切槽
+    //   边缘与右键同帧时）→ 桶分支不触发 → 舀水无效。直读 hotbar 消除绑定滞后窗口。
+    //   同时：舀水（空桶→装水桶）**所有模式都换桶**（移除旧 `m_mode != Creative` 守卫）——机制等价 MC 1.0
+    //   铁桶在创造 / 生存均反映其内容（舀水即满）；旧守卫使创造模式舀水后桶仍空（spec「当前舀水不变桶」）。
+    //   倒水方向保留创造不消耗（装水桶右键放水源，创造保持装水桶 = 无限放水；生存→空桶），不属本任务范围。
+    const int heldItemId = m_hotbar ? m_hotbar->selectedItemId() : 0;
+    if (m_hotbar && (heldItemId == RecipeRegistry::WaterBucketId
+                     || heldItemId == RecipeRegistry::BucketEmptyId)) {
         const int slot = m_hotbar->selectedSlot();
-        if (m_selectedItem == RecipeRegistry::WaterBucketId) {
+        if (heldItemId == RecipeRegistry::WaterBucketId) {
             // 倒水：命中面相邻格放水源。tx/ty/tz 同方块放置（命中面外法线相邻格）。目标须为空气（不覆盖实体）。
             if (!m_hasHit) return; // 未命中 → 无相邻格可放（桶分支已绕过上方 !m_hasHit 门，此处补检）
             const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
             if (m_world->blockAt(tx, ty, tz) == BlockRegistry::Air) {
                 m_world->setBlock(tx, ty, tz, BlockRegistry::Water, 0); // state=0 水源（tickWaterFlow 下次波前推进开始 1 格/tick 蔓延）
                 if (m_mode != Creative)
-                    m_hotbar->setStack(slot, int(RecipeRegistry::BucketEmptyId), 1); // 装水桶 → 空桶
+                    m_hotbar->setStack(slot, int(RecipeRegistry::BucketEmptyId), 1); // 装水桶 → 空桶（创造不消耗：保持装水桶可无限放水）
                 m_lastPlaceMs = now;
                 emit swingArm();
             }
@@ -810,8 +817,7 @@ void PlayerController::placeBlock()
         const RayHit wHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitWater);
         if (wHit.valid && m_world->blockAt(wHit.bx, wHit.by, wHit.bz) == BlockRegistry::Water) {
             m_world->setWaterSilent(wHit.bx, wHit.by, wHit.bz, BlockRegistry::Air, 0); // 舀走（水源 / 流水均可舀，清整格）
-            if (m_mode != Creative)
-                m_hotbar->setStack(slot, int(RecipeRegistry::WaterBucketId), 1); // 空桶 → 装水桶
+            m_hotbar->setStack(slot, int(RecipeRegistry::WaterBucketId), 1); // t186：空桶 → 装水桶（所有模式均换桶；旧 m_mode!=Creative 守卫移除）
             m_lastPlaceMs = now;
             emit swingArm();
         }

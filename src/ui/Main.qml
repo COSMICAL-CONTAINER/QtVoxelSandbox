@@ -711,7 +711,12 @@ Window {
                         opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
                         baseColor: terrainLight(worldClock.skyLight)
                         baseColorMap: Texture {
-                            flipV: true
+                            // t186 修复(b)：flipV 改 false。MaterialIcon Canvas 以左上为原点（y 向下）画——
+                            //   桶开口在顶部小 row、桶底在大 row，与背包槽直接用 MaterialIcon（无 flipV）显的
+                            //   「开口朝上」一致。旧 flipV:true 把 V 翻 → 桶开口渲染成朝下（spec「开口朝下 反了」）。
+                            //   材料段所有图标同此 BillboardQuad 路径 + Canvas 同约定，flipV 翻转使全部材料上下倒置
+                            //   （木棒 / 铁锭等因对称或罕见手持未被察觉）；改 false 后与背包槽图标一致（开口 / 高光朝上）。
+                            flipV: false
                             sourceItem: MaterialIcon {
                                 materialId: player.selectedItem
                                 width: 64; height: 64
@@ -1618,8 +1623,8 @@ Window {
                     //   - 工具段（isTool）→ PickaxeGeometry 3D 镐形（t75，纯实色体素，baseColor 按 tier）；
                     //   - 材料段（isMaterial）→ BillboardQuad（t112，单面 +Z 法线）+ Texture.sourceItem =
                     //     MaterialIcon Canvas + eulerRotation 朝相机（billboard 平图标，替代旧 CrackBox 6 面立方）。
-                    //   Texture.flipV=true：sourceItem 的 QtQuick Item 以左上为原点，3D 纹理以左下为原点 →
-                    //   不翻转会把「木棒从左下到右上」渲染成「从左上到右下」（镐头朝下），故 flipV。
+                    //   Texture.flipV：t186 改 false（旧 true 把 sourceItem 的 Canvas 上下翻 → 桶开口朝下；
+                    //     详见手持材料路径 t186 注释）。材料段图标与背包槽 MaterialIcon（无 flipV）一致。
                     //   分层（PLAN §2）：呈现层只消费 ItemEntityManager 数据；ToolIcon/MaterialIcon 是纯呈现
                     //   层 QML 自绘（§9a 原创），无 MC 资产 / 反向写栅格。
 
@@ -1684,7 +1689,7 @@ Window {
                     //   玩家区域看，billboard 镜像相机朝向即恒正对相机）。
                     //   **alphaCutoff + opacity<1**（沿用 t85 alpha-test 契约）：MaterialIcon Canvas 透明底若不
                     //   丢弃会被当不透明黑 → 图标坍成黑块。alphaCutoff:0.5 + opacity:0.99 → 仅图标像素显。
-                    //   flipV 同上方（2D 左上原点 → 3D 左下原点）。
+                    //   flipV：t186 改 false（旧 true 翻 V → 桶开口朝下；同手持材料路径）。
                     Model {
                         visible: hotbarVM.isMaterial(entRoot.entId)
                         geometry: BillboardQuad {}
@@ -1699,7 +1704,9 @@ Window {
                             //   （MaterialIcon 贴图 × baseColor × 不变 alpha；alpha=1.0 不与 opacity/alphaCutoff 冲突）。
                             baseColor: terrainLight(worldClock.skyLight)
                             baseColorMap: Texture {
-                                flipV: true
+                                // t186 修复(b)：flipV 改 false（同上方手持材料路径）——旧 true 把 MaterialIcon
+                                //   Canvas 上下翻 → 桶开口朝下；改 false 后与背包槽图标一致（开口 / 高光朝上）。
+                                flipV: false
                                 sourceItem: MaterialIcon {
                                     materialId: entRoot.entId
                                     width: 64; height: 64
