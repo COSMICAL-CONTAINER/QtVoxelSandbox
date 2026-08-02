@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QtQml/qqml.h>
+#include <QVariantList>
 
 #include <array>
 #include <unordered_map>
@@ -48,6 +49,15 @@ public:
     Q_INVOKABLE void setSlot(int x, int y, int z, int index, int id, int count);
     // 移除某箱子条目（破块清孤儿；不存在则 no-op）。spec「破箱掉落内容」属 Phase 1.1+，本轮直接弃内容。
     Q_INVOKABLE void clearChest(int x, int y, int z);
+    // 清空全部箱子（跨世界切换时 Main.qml.enterWorld 经 loadAll 间接调；亦可直调）。空 → no-op（不无故发信号）。
+    Q_INVOKABLE void clearAll();
+    // 收集所有「含 ≥1 非空槽」的箱子为 QVariantList（每项 {x,y,z,slots:[{id,count}×27]}），供 Main.qml 传
+    //   worldStore.saveAll(name, ...) 落盘。全空箱子跳过（落盘省行；加载后缺失条目 = 空 27 槽，行为等价）。
+    Q_INVOKABLE QVariantList allChests() const;
+    // 用存档 QVariantList（同 allChests 形状）整体替换内存内容（先清空再填充；单次 emit chestChanged）。
+    //   Main.qml.enterWorld 调：chestStore.loadAll(worldStore.loadChests()) —— 替换语义即「清旧世界残留 +
+    //   填本世界箱子」，杜绝跨世界泄漏（同 t187 hotbarVM「进世界前必清」模式）。空列表 → 仅清空。
+    Q_INVOKABLE void loadAll(const QVariantList &chests);
 
 signals:
     // 任一箱子任一槽内容变更（setSlot）/ 条目移除（clearChest）。驱动 revision 自增 + ChestUI delegate 刷新。
@@ -66,6 +76,8 @@ private:
     int m_revision = 0;
 
     static QString key(int x, int y, int z); // "x,y,z"
+    // 反解 key() 产物（"x,y,z" → x,y,z；坐标可负）。格式不符 → false。
+    static bool parseKey(const QString &k, int &x, int &y, int &z);
 };
 
 #endif // CHESTSTORE_H

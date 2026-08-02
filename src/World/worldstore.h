@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QtQml/qqml.h>
+#include <QVariantList>
 
 #include "world.h" // Q_PROPERTY(World*) + chunks() 路由（World 层只读，同层 include 不破铁律）
 
@@ -23,6 +24,10 @@
 //   - 玩家态：savePlayerData(QVariantMap) / loadPlayerData() → 玩家位姿 / 模式 / 血饥 / 背包（hotbar 9 +
 //     main 27）以 JSON 文本存 player_state 表（自描述、跨版本可读；裸原语由 QML 编排，WorldStore 不解析
 //     Game 层语义，只存 / 取整块 JSON）。
+//   - 箱子内容（t188）：saveAll(name, chests) 把 ChestStore 的箱子（坐标键控的 27 槽物品）落盘到 chests
+//     表（与 chunks / meta 同一事务，原子写）；loadChests() 读回。cheststore 在 Game 层 → WorldStore **不**
+//     include 它（向上违铁律），箱子数据经 Q_INVOKABLE 裸 QVariantList 边界传入 / 取出（同 player_state
+//     模式：每项 {x,y,z,slots:[{id,count}×27]}，WorldStore 不解析 Game 层语义，只存 / 取）。
 //   - 迁移注册表：PRAGMA user_version 烘 kSchemaVersion；新建库写版本、打开库校验版本。版本高于本程序
 //     支持 → 拒绝打开 + 大声告警（PLAN §2-E「存档损坏 → 停机」；用户应降版本 / 手动迁移）。
 //
@@ -60,8 +65,13 @@ public:
     Q_INVOKABLE bool isOpen() const { return m_open; }
 
     // 保存当前 World 的全部 chunk blob + 刷 meta（name/seed/dims/playedAt）。须先 openWorld。
-    //   事务性写入（一次 COMMIT）。返回是否成功（无 world / 未打开 / SQL 失败 → false + qWarning）。
-    Q_INVOKABLE bool saveAll(const QString &name);
+    //   事务性写入（一次 COMMIT）：chunks + meta + chests 同事务原子落盘（t188）。chests 为
+    //   ChestStore::allChests() 产物（每项 {x,y,z,slots:[{id,count}×27]}；空列表 → 清空 chests 表）。
+    //   返回是否成功（无 world / 未打开 / SQL 失败 → false + qWarning）。
+    Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {});
+    // 读当前库的 chests 表为 QVariantList（同 saveAll 的 chests 形状）。未打开 → 空列表。
+    //   caller（Main.qml.enterWorld）转交 chestStore.loadAll 整体替换内存（清旧世界残留 + 填本世界箱子）。
+    Q_INVOKABLE QVariantList loadChests() const;
     // 读当前库的 meta（name/seed/width/height/depth/playedAt）。未打开 → 空 Map。
     Q_INVOKABLE QVariantMap loadMeta() const;
     // 把当前库的 chunk blob 回填进 World（World 须已 beginLoad 零填充网格）。返回读到的 chunk 数；
@@ -96,7 +106,11 @@ private:
     bool m_open = false;       // 是否有库打开
     QString m_openFile;        // 当前打开库的相对文件名（saveAll 刷 meta 用）
 
-    static constexpr int kSchemaVersion = 1; // PRAGMA user_version；schema 变更时 +1 并写迁移
+    // PRAGMA user_version；schema 变更时 +1 并写迁移。v2（t188）= 新增 chests 表（纯加表，旧库 IF NOT EXISTS 幂等补建）。
+    static constexpr int kSchemaVersion = 2;
+    // 把箱子 QVariantList 落盘进 chests 表（DELETE 全量 + INSERT；用 kConn 连接，caller 已开事务）。
+    //   失败 → false（caller rollback）。
+    bool writeChests(const QVariantList &chests);
 };
 
 #endif // WORLDSTORE_H

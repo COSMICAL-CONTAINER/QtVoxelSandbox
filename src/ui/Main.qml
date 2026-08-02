@@ -149,6 +149,10 @@ Window {
             theWorld.regenerate(seed)
         }
         applyPlayerState(worldStore.loadPlayerData())
+        // t188 箱子按世界持久化 + 修跨世界泄漏：chestStore 跨世界长驻（同 hotbarVM），进世界前 loadAll
+        //   整体替换内存（先清后填）—— 无存档 chests 表 → 空列表 → 清空，杜绝上一世界箱子残留串入新世界。
+        //   存档 chests 由 saveAndExitToWorldList 经 saveAll(name, chestStore.allChests()) 落盘。
+        chestStore.loadAll(worldStore.loadChests())
         // 清上一世界的掉落物 / mob 残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
@@ -215,7 +219,8 @@ Window {
         returnHeldToHotbar()
         if (worldStore.isOpen()) {
             worldStore.savePlayerData(gatherPlayerState())
-            worldStore.saveAll(currentWorldName)
+            // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
+            worldStore.saveAll(currentWorldName, chestStore.allChests())
             worldStore.closeWorld()
         }
         inventoryOpen = false

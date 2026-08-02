@@ -118,6 +118,18 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create player_state failed:" << q.lastError().text();
         return false;
     }
+    // t188 箱子内容表：每只箱子（按方块世界坐标键控）一行，slots 序列化为 JSON 文本（同 player_state 自描述
+    //   模式）。纯加表 —— 旧库（v1）IF NOT EXISTS 幂等补建，无数据迁移负担。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS chests ("
+            "  x INTEGER NOT NULL,"
+            "  y INTEGER NOT NULL,"
+            "  z INTEGER NOT NULL,"
+            "  data TEXT NOT NULL,"
+            "  PRIMARY KEY (x, y, z))"))) {
+        qCCritical(lcSave) << "create chests failed:" << q.lastError().text();
+        return false;
+    }
     // 写 user_version（新库 0→kSchemaVersion；旧库同版本幂等；无 harm）。
     q.exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
     return true;
@@ -261,7 +273,7 @@ void WorldStore::closeWorld()
     m_openFile.clear();
 }
 
-bool WorldStore::saveAll(const QString &name)
+bool WorldStore::saveAll(const QString &name, const QVariantList &chests)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "saveAll: no open db or world";
@@ -319,6 +331,11 @@ bool WorldStore::saveAll(const QString &name)
             db.rollback();
             return false;
         }
+    }
+    // t188 箱子内容同事务落盘（chests 表 DELETE 全量 + INSERT；与 chunks / meta 原子提交）。
+    if (!writeChests(chests)) {
+        db.rollback();
+        return false;
     }
     if (!db.commit()) {
         qCCritical(lcSave) << "saveAll: commit failed:" << db.lastError().text();
@@ -421,4 +438,62 @@ bool WorldStore::hasChunks() const
     QSqlQuery q(QSqlDatabase::database(kConn));
     q.exec(QStringLiteral("SELECT COUNT(*) FROM chunks"));
     return q.next() && q.value(0).toInt() > 0;
+}
+
+// t188 箱子落盘：DELETE 全量 + INSERT 每只箱子（坐标列 + slots JSON 文本）。调用方（saveAll）已开事务，
+//   本方法不 BEGIN/COMMIT（同事务原子）。chests 形状 = ChestStore::allChests() 产物：每项
+//   {x,y,z,slots:[{id,count}×27]}。坐标缺 / 非法 → 跳过该箱（不写残条目）。
+bool WorldStore::writeChests(const QVariantList &chests)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM chests"))) {
+        qCCritical(lcSave) << "saveAll: chests delete failed:" << del.lastError().text();
+        return false;
+    }
+    QSqlQuery iq(db);
+    iq.prepare(QStringLiteral("INSERT INTO chests (x, y, z, data) VALUES (?, ?, ?, ?)"));
+    for (const QVariant &v : chests) {
+        const QVariantMap cm = v.toMap();
+        bool okx = false, oky = false, okz = false;
+        const int x = cm.value(QStringLiteral("x")).toInt(&okx);
+        const int y = cm.value(QStringLiteral("y")).toInt(&oky);
+        const int z = cm.value(QStringLiteral("z")).toInt(&okz);
+        if (!okx || !oky || !okz) continue; // 缺坐标 → 跳过（不写残条目）
+        // slots 序列化为 JSON 文本（同 player_state 自描述、跨版本可读）。
+        const QJsonDocument doc = QJsonDocument::fromVariant(cm.value(QStringLiteral("slots")));
+        iq.addBindValue(x);
+        iq.addBindValue(y);
+        iq.addBindValue(z);
+        iq.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+        if (!iq.exec()) {
+            qCCritical(lcSave) << "saveAll: chest insert failed at" << x << y << z
+                               << ":" << iq.lastError().text();
+            return false;
+        }
+    }
+    return true;
+}
+
+// t188 读 chests 表为 QVariantList（形状同 writeChests 入参）。未打开 → 空列表。caller（Main.qml.enterWorld）
+//   转交 chestStore.loadAll 整体替换内存（清旧世界残留 + 填本世界箱子）。
+QVariantList WorldStore::loadChests() const
+{
+    QVariantList out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT x, y, z, data FROM chests"))) {
+        qCWarning(lcSave) << "loadChests: select failed:" << q.lastError().text();
+        return out;
+    }
+    while (q.next()) {
+        QVariantMap cm;
+        cm.insert(QStringLiteral("x"), q.value(0).toInt());
+        cm.insert(QStringLiteral("y"), q.value(1).toInt());
+        cm.insert(QStringLiteral("z"), q.value(2).toInt());
+        const QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toString().toUtf8());
+        cm.insert(QStringLiteral("slots"), doc.toVariant());
+        out.append(cm);
+    }
+    return out;
 }
