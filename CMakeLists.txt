@@ -14,6 +14,10 @@ qt_add_executable(voxelsandbox
     main.cpp
     src/Core/blockregistry.cpp
     src/Core/blockregistry.h
+    # t232 世界列表封面黑屏修复：QQuickWindow::grabWindow 封装（grabToImage 拍不到 View3D 3D 场景 → 全黑）。
+    #   仅依赖 Qt（Quick/Gui/Qml），无自有层依赖 → Core 叶子工具，依赖只向下铁律成立。
+    src/Core/screengrab.cpp
+    src/Core/screengrab.h
     src/World/chunk.cpp
     src/World/chunk.h
     src/World/chunkmanager.cpp

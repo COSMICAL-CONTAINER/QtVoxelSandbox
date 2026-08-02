@@ -234,11 +234,11 @@ Window {
         }
     }
     // t176 保存并退出到世界列表（ESC 暂停叠层「保存并退出」按钮）：归还手持物 → 存玩家态 + 存地形 +
-    //   t191 截封面 → 关库 → 清实体 → 切 worldlist 态。spec「退出存」：每次退出都把当前进度落盘。
-    //   t191：在 closeWorld / View3D 离场前对 view3d 抓帧存封面（spec「closeWorld 前截屏」）。grabToImage 异步
-    //   → 把 closeWorld + 切态推迟到 ready 回调（保证 View3D 仍渲染 playing 画面被截到，而非离场后空帧）；
-    //   ready / 兜底定时器任一先发 → finishExitToWorldList 收尾（coverGrabPending 防双调）。抓帧失败 / 无世界
-    //   → 立即 finish（不阻塞退出，§2-E）。
+    //   截封面 → 关库 → 清实体 → 切 worldlist 态。spec「退出存」：每次退出都把当前进度落盘。
+    //   t232 封面黑屏修复：旧用 view3d.grabToImage() → 全黑（grabToImage 只经 2D 场景图重渲，拍不到 View3D
+    //   的 3D 渲染 pass）。改 ScreenGrab.grab(window) → QQuickWindow::grabWindow（含 3D pass）→ 真拍到场景。
+    //   抓帧前 coverHideUi=true 把 View3D 抬到最上层盖住暂停叠层 / HUD → 封面为纯 3D 场景。ScreenGrab 等下一帧
+    //   渲染完（盖住后）再抓 → onGrabbed 收尾（saveCover + finishExit）。兜底定时器防 frameSwapped 不发卡退出。
     function saveAndExitToWorldList() {
         if (coverGrabPending) return   // 防连点退出按钮重复触发（已有一次退出在进行）
         returnHeldToHotbar()
@@ -249,22 +249,24 @@ Window {
             // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
             worldStore.saveAll(currentWorldName, chestStore.allChests())
         }
-        coverGrabPending = true   // 标记退出进行中（防 ready + 兜底定时器双调 finish）
-        // 截封面：仅在 playing（view3d 抓得到画面）+ 有世界文件名（saveCover 据此写 sidecar PNG）时抓。
+        coverGrabPending = true   // 标记退出进行中（防 onGrabbed + 兜底定时器双调 finish）
+        // 截封面：仅在 playing（View3D 抓得到画面）+ 有世界文件名（saveCover 据此写 sidecar PNG）时抓。
         if (hasOpen && file.length > 0 && view3d.visible) {
-            // 224×224 = 缩略图显示尺寸 44×44 的 5×，给 Image 缩放留余量（清晰）。
-            const grab = view3d.grabToImage(Qt.size(224, 224))
-            if (grab) {
-                coverExitFallback.restart()   // 兜底：500ms 内 ready 未发 → 直接 finish（不卡退出）
-                grab.ready.connect(function() {
-                    coverExitFallback.stop()
-                    if (worldStore.isOpen())
-                        worldStore.saveCover(file, grab.image)   // null image → saveCover 内降级 qWarning
-                    window.finishExitToWorldList()
-                })
-                return   // 收尾交 ready 回调
-            }
+            window.coverHideUi = true       // 抬 View3D 盖住 UI（下一帧渲染生效），拍到无 UI 的纯场景
+            coverExitFallback.restart()     // 兜底：frameSwapped 不发 → 500ms 直接 finish（不卡退出）
+            screenGrab.grab(window)         // 等下一帧 frameSwapped → grabWindow → onGrabbed 收尾
+            return                          // 收尾交 onGrabbed / 兜底定时器
         }
+        window.finishExitToWorldList()
+    }
+    // t232 ScreenGrab.grab 完成回调：写封面 PNG + 收尾退出。image 为 QVariant<QImage>（空图 → saveCover
+    //   内 isNull 降级为「无封面」灰块，不阻塞退出，§2-E）。与 coverExitFallback 兜底两路汇集，coverGrabPending
+    //   守门防重复 finish。
+    function onCoverGrabbed(image) {
+        coverExitFallback.stop()
+        window.coverHideUi = false          // 复位（马上切 worldlist 态离场，复位保干净 / 防残留）
+        if (worldStore.isOpen())
+            worldStore.saveCover(currentWorldFile, image)   // null image → saveCover 内降级 qWarning
         window.finishExitToWorldList()
     }
     // t191 saveAndExitToWorldList 的收尾段（closeWorld + 清实体 + 切态）。从 ready 回调 / 兜底定时器 / 抓帧跳过
@@ -273,6 +275,7 @@ Window {
         if (!coverGrabPending) return
         coverGrabPending = false
         coverExitFallback.stop()
+        window.coverHideUi = false   // t232：复位 View3D z（防兜底路径漏复位 → 再进世界 View3D 仍盖住 HUD）
         if (worldStore.isOpen()) worldStore.closeWorld()
         inventoryOpen = false
         craftingTableOpen = false
@@ -488,18 +491,30 @@ Window {
     //   apply 函数在 QML 编排（WorldStore 不持 Game 层对象引用，保依赖只向下）。saves/ 目录由 WorldStore
     //   解析（<exeDir>/../saves 开发期 / AppLocalDataLocation 部署期）。
     WorldStore { id: worldStore; world: theWorld }
+    // t232 封面黑屏修复：窗口级截图工具（grabToImage 拍不到 View3D 3D 场景 → 改 grabWindow）。仅依赖 Qt，
+    //   无自有层依赖。grab(window) 等下一帧 frameSwapped → 离屏重渲含 3D pass → emit grabbed(QImage)。
+    ScreenGrab { id: screenGrab }
     // t176 当前世界会话：进入世界时记 file/name，保存退出时 saveAll(name) / 显示用。
     property string currentWorldFile: ""
     property string currentWorldName: ""
     // t191 截封面退出进行中标志：grabToImage 异步，ready 回调与兜底定时器两路可能都发 → 此标志 + finishExitToWorldList
     //   入口守门防重复收尾；saveAndExitToWorldList 开头也据它防连点重复触发。
     property bool coverGrabPending: false
+    // t232 抓帧时把 View3D 抬到最上层（z=999 > 暂停叠层 100 / 菜单 200）→ 覆盖暂停叠层 + HUD →
+    //   grabWindow 拍到无 UI 的纯 3D 场景。仅 saveAndExitToWorldList 抓帧期间为 true（~1 帧），抓完复位。
+    //   单点控 UI 隐藏（绑 view3d.z），免逐个 gate 各 HUD 叠层 visible。
+    property bool coverHideUi: false
     // t191 抓帧兜底定时器：ready 500ms 内未发（极端情况，View3D 不可抓帧）→ 直接收尾，绝不卡退出。
     Timer {
         id: coverExitFallback
         interval: 500
         repeat: false
         onTriggered: window.finishExitToWorldList()
+    }
+    // t232 ScreenGrab.grab → onCoverGrabbed 桥接（grabbed 信号驱动收尾）。
+    Connections {
+        target: screenGrab
+        function onGrabbed(image) { window.onCoverGrabbed(image) }
     }
 
     // 昼夜时钟（t09，PLAN §2-H）：~20 分钟周期的天光亮度乘子 lerp（**非**旋转方向光）。
@@ -736,6 +751,9 @@ Window {
     View3D {
         id: view3d
         anchors.fill: parent
+        // t232 抓封面期间抬到最上层：盖住暂停叠层 / HUD，让 grabWindow 拍到纯 3D 场景（无「PAUSED」面板 /
+        //   hotbar / HUD 文字）。平时 z=0（叠层在上层正常显）。opaque clearColor 背景 → 抬高后完全盖住 UI。
+        z: window.coverHideUi ? 999 : 0
         environment: SceneEnvironment {
             // t09：clearColor 随天光乘子 lerp 昼(#9ec6e8)↔夜(#0b1026)；方向固定（PLAN §2-H 非
             // 旋转方向光）。绑定 skyLight → 每周期 tick 自动刷新（debugFast 下 ~30s 一圈）。
