@@ -47,7 +47,7 @@ public:
                            // updateMining 内 if(canMine&&progress>=1.0) 守 finishMiningAt；t141 后创造可瞬破，
                            // beginMining 守卫已移除）、dropId=0（破不掉落）、各面同贴图（tile 18）。
                            // worldgen 在 y 0..4 按 hashVoxel 坑洼铺一层（底实顶疏）。
-        // ── t134 不完整方块（异形几何段，id >= FirstPartial）：6 类木制半方块，机制等价 MC 1.0
+        // ── t134 不完整方块（异形几何段，id ∈ [FirstPartial, LastPartial]）：6 类木制半方块，机制等价 MC 1.0
         //   (id, metadata) 方块模型。solid=false（同 torch：非整立方 → 不挡邻居面剔除，避免相邻整立方
         //   被错误剔除出「洞」；逐形状精确碰撞留后续任务）。各面同贴图=planks(8)、hardness=2.0（木质）、
         //   NoTool（空手可采且掉落）。掉落自身。mesher 经 PartialBlockGeometry::append 按 (id,state) 生成
@@ -88,11 +88,15 @@ public:
         Count         = 23, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
-    // t133 不完整方块段起点哨兵：WoodSlab(15) 起的 id 走 PartialBlockGeometry 异形渲染（mesher 合批进
-    //   chunk mesh，不走 1×1×1 立方面路径）。t134 已落地 6 类（WoodSlab=15 ... WoodTrapdoor=20，Count=21）；
-    //   mesher 的 `b >= FirstPartial` 分支现对这 6 id 激活。机制等价 MC 1.0 (id, metadata) 方块模型：
-    //   id >= FirstPartial 即「异形方块」（非整立方）。
+    // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
+    //   （mesher 合批进 chunk mesh，不走 1×1×1 立方面路径）。t134 落地 6 类（WoodSlab=15 ... WoodTrapdoor=20）。
+    //   机制等价 MC 1.0 (id, metadata) 方块模型：id ∈ [FirstPartial, LastPartial] 即「异形方块」（非整立方）。
+    //   **必须用闭区间**：段后追加的方块虽 id 更大但**非异形** —— Water(21) 走水段、Chest(22) 是整立方
+    //   ShapeFull 走 culled 立方面。旧「`b >= FirstPartial` 单边判定」会把这类段后整立方 / 非异形方块误
+    //   路由进 PartialBlockGeometry（其 switch 无对应 case → 追加 0 顶点 → 渲染透明）。t194 箱子放置后
+    //   透明（Chest 透视格子）即此根因。mesher / 选中框路由一律用 `>= FirstPartial && <= LastPartial`。
     static constexpr int FirstPartial = 15;
+    static constexpr int LastPartial  = WoodTrapdoor; // 20（异形段上界；新增异形方块追加时同步右移）
 
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：
     //   0=+X 1=-X 2=+Y(顶) 3=-Y(底) 4=+Z 5=-Z

@@ -1102,9 +1102,12 @@ Window {
             Connections { target: theWorld; function onWorldChanged() { ++selectionBox.worldRev } }
             readonly property int hitId: player.hasHit ? theWorld.blockAt(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z) : 0
             readonly property bool isTorch: hitId === 13
-            // t146 不完整方块（异形段 id >= FirstPartial=15）：选中框按形状 sub-AABB 画（selectionBoxPartial），
-            //   不走本全格框。15 = BlockRegistry::FirstPartial（魔法数；新增异形方块时此阈值不变）。
-            readonly property bool isPartial: hitId >= 15
+            // t146 不完整方块（异形段 id ∈ [FirstPartial, LastPartial] = [15, 20]）：选中框按形状 sub-AABB 画
+            //   （selectionBoxPartial），不走本全格框。魔法数 15/20 = BlockRegistry::FirstPartial/LastPartial
+            //   （= WoodSlab ... WoodTrapdoor；新增异形方块时同步右移上界）。**段后整立方（Chest=22）非异形**，
+            //   走本全格框（hitId=22 不在 [15,20] → isPartial=false）。旧 `hitId >= 15` 单边判定把 Chest 误判为
+            //   异形 → 走 selectionBoxPartial（虽 ShapeFull 仍画全格棱、视觉无差，但路由错、易在改 SelectionWireBoxes 时翻车）。
+            readonly property bool isPartial: hitId >= 15 && hitId <= 20
             // t146 命中方块的 state（异形方块朝向/开合）：供 selectionBoxPartial 的 SelectionWireBoxes 几何
             //   重建用。读 worldRev 使 worldChanged（编辑改 state，如活板门开合）后重算 → 选中框棱随之更新。
             readonly property int hitState: {

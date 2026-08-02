@@ -254,7 +254,10 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     if (b == 0) continue;
                     if (b == BlockRegistry::Water) continue;       // 水走 PASS 2 立方面（水段）
                     if (b == BlockRegistry::Torch) continue;       // 火把走 torchHost（QML Model）
-                    if (b < BlockRegistry::FirstPartial) continue; // 仅异形方块进此 pass
+                    // t194：必须闭区间 [FirstPartial, LastPartial]。段后整立方（Chest=22）虽 id 更大但非异形
+                    //   （ShapeFull，走 PASS 2 立方面）。旧单边 `b >= FirstPartial` 把 Chest 误路由进 PartialBlockGeometry
+                    //   （switch 无 case → 0 顶点 → 放置后透明透视格子）。Water/Torch 在上方已显式 continue。
+                    if (b < BlockRegistry::FirstPartial || b > BlockRegistry::LastPartial) continue; // 仅异形方块进此 pass
                     const quint8 cSky = m_world->skyLightAt(wx, ly, wz);
                     const quint8 cBlock = m_world->blockLightAt(wx, ly, wz);
                     const float cShadow = sunShadowAt(float(wx) + 0.5f, float(ly) + 0.5f, float(wz) + 0.5f);
@@ -314,7 +317,8 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             const bool isWater = (blk == BlockRegistry::Water);
                             if (isWater != m_waterOnly) continue;          // 段分流（地形段跳水 / 水段跳非水）
                             if (!isWater && blk == BlockRegistry::Torch) continue;
-                            if (!isWater && blk >= BlockRegistry::FirstPartial) continue; // 异形已在 PASS 1
+                            if (!isWater && blk >= BlockRegistry::FirstPartial
+                                && blk <= BlockRegistry::LastPartial) continue; // 异形已在 PASS 1；段后整立方（Chest）正常进立方面
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                             if (BlockRegistry::isSolid(nb)) continue;       // 邻居实体 → 剔除（跨 chunk 路由正确）
                             if (isWater && nb == BlockRegistry::Water) continue; // 水-水面互剔
@@ -395,7 +399,8 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         const bool isWater = (b == BlockRegistry::Water);
                         if (isWater != m_waterOnly) continue;
                         if (!isWater && b == BlockRegistry::Torch) continue;
-                        if (!isWater && b >= BlockRegistry::FirstPartial) continue; // 异形已在 PASS 1
+                        if (!isWater && b >= BlockRegistry::FirstPartial
+                            && b <= BlockRegistry::LastPartial) continue; // 异形已在 PASS 1；段后整立方（Chest）正常进立方面
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
