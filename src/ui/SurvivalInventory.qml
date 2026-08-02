@@ -65,6 +65,13 @@ Item {
     property string hoveredKey: ""          // 当前指针所在槽 key（HoverHandler 维护；beginLeftDrag 取起点槽）
     property int dragHeldId: 0
     property int dragHeldCount: 0
+    // t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）。rightDragSlots 存已放格（去重，每格只放
+    //   一次）；rightDragPlaced 标全程是否真放置过（空手 / 异 id 已满时为 false → endRightDrag 退化为单格右键）。
+    //   dragActive 统一左/右拖动收集门控（HoverHandler 据 dragActive 调 addDragSlot，InventoryOps 内分发）。
+    property bool rightDragActive: false
+    property var rightDragSlots: []
+    property bool rightDragPlaced: false
+    property bool dragActive: leftDragActive || rightDragActive
     // t98 实时重分撤销机制：dragOriginal 记每槽 drag 前原始栈（首次 encounter 快照）；dragWritten 记本轮
     // 已写槽。每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginLeftDrag / endLeftDrag 重置。
     property var dragOriginal: ({})
@@ -98,6 +105,10 @@ Item {
     function addDragSlot(key) { InventoryOps.addDragSlot(root, key) }
     function beginLeftDrag() { InventoryOps.beginLeftDrag(root) }
     function endLeftDrag() { InventoryOps.endLeftDrag(root) }
+    // t181 右键拖动（每格放 1 个）：薄委托包装，供 root DragHandler(RightButton) / HoverHandler 调用。
+    function beginRightDrag() { InventoryOps.beginRightDrag(root) }
+    function endRightDrag() { InventoryOps.endRightDrag(root) }
+    function addRightDragSlot(key) { InventoryOps.addRightDragSlot(root, key) }
     // redistributeLive / singleLeftClick：纯内部辅助（仅 InventoryOps.addDragSlot / endLeftDrag 调用），
     //   算法已入 InventoryOps，此处不再持有副本。
 
@@ -174,6 +185,18 @@ Item {
         onActiveChanged: {
             if (active) root.beginLeftDrag()
             else root.endLeftDrag()
+        }
+    }
+    // t181 右键拖动（每格放 1 个）：DragHandler(RightButton) 在 root 监听。按下不动时 per-slot 右键 TapHandler
+    //   抓（拿半 / 放一）；拖动越阈值 → DragHandler 激活夺抓 → onActiveChanged 驱动 begin/endRightDrag。逐槽
+    //   HoverHandler 在 dragActive 期间收集（addDragSlot 据 rightDragActive 分发到 addRightDragSlot）。target:null
+    //   防 DragHandler 拖动父 Item；与左键 DragHandler 独立（各 acceptedButtons 单按钮）。
+    DragHandler {
+        acceptedButtons: Qt.RightButton
+        target: null
+        onActiveChanged: {
+            if (active) root.beginRightDrag()
+            else root.endRightDrag()
         }
     }
 
@@ -316,7 +339,7 @@ Item {
                                     else if (root.hoveredKey === key) root.hoveredKey = ""
                                     // t167：左键拖动期间进入新格 → 收集（MC Java 集合只增不减：回滑不撤销已选格，
                                     // 故无 leave-remove 分支；redistributeLive 据 N 实时重分）。
-                                    if (hovered && root.leftDragActive) {
+                                    if (hovered && root.dragActive) {
                                         root.addDragSlot(key)
                                     }
                                 }
@@ -596,7 +619,7 @@ Item {
                                 if (hovered) root.hoveredKey = key
                                 else if (root.hoveredKey === key) root.hoveredKey = ""
                                 // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
-                                if (hovered && root.leftDragActive) {
+                                if (hovered && root.dragActive) {
                                     root.addDragSlot(key)
                                 }
                             }
@@ -735,7 +758,7 @@ Item {
                                     if (hovered) root.hoveredKey = key
                                     else if (root.hoveredKey === key) root.hoveredKey = ""
                                     // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
-                                    if (hovered && root.leftDragActive) {
+                                    if (hovered && root.dragActive) {
                                         root.addDragSlot(key)
                                     }
                                 }

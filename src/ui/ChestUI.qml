@@ -62,6 +62,11 @@ Item {
     property string hoveredKey: ""
     property int dragHeldId: 0
     property int dragHeldCount: 0
+    // t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）。dragActive 统一左/右拖动收集门控。
+    property bool rightDragActive: false
+    property var rightDragSlots: []
+    property bool rightDragPlaced: false
+    property bool dragActive: leftDragActive || rightDragActive
     // t98 实时重分撤销机制（同 CraftingTableUI）。
     property var dragOriginal: ({})
     property var dragWritten: ({})
@@ -109,6 +114,10 @@ Item {
     function addDragSlot(key) { InventoryOps.addDragSlot(root, key) }
     function beginLeftDrag() { InventoryOps.beginLeftDrag(root) }
     function endLeftDrag() { InventoryOps.endLeftDrag(root) }
+    // t181 右键拖动（每格放 1 个）：薄委托包装。
+    function beginRightDrag() { InventoryOps.beginRightDrag(root) }
+    function endRightDrag() { InventoryOps.endRightDrag(root) }
+    function addRightDragSlot(key) { InventoryOps.addRightDragSlot(root, key) }
     function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
     function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
@@ -127,6 +136,16 @@ Item {
         onActiveChanged: {
             if (active) root.beginLeftDrag()
             else root.endLeftDrag()
+        }
+    }
+    // t181 右键拖动（每格放 1 个）：DragHandler(RightButton) 在 root 监听；拖动越阈值 → begin/endRightDrag。
+    //   按下不动时 per-slot 右键 TapHandler 抓（拿半 / 放一）。target:null 防 DragHandler 拖动父 Item。
+    DragHandler {
+        acceptedButtons: Qt.RightButton
+        target: null
+        onActiveChanged: {
+            if (active) root.beginRightDrag()
+            else root.endRightDrag()
         }
     }
 
@@ -269,7 +288,7 @@ Item {
                                 if (hovered) root.hoveredKey = key
                                 else if (root.hoveredKey === key) root.hoveredKey = ""
                                 // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
-                                if (hovered && root.leftDragActive) {
+                                if (hovered && root.dragActive) {
                                     root.addDragSlot(key)
                                 }
                             }
@@ -380,7 +399,7 @@ Item {
                                 const key = root.slotKey("main", index)
                                 if (hovered) root.hoveredKey = key
                                 else if (root.hoveredKey === key) root.hoveredKey = ""
-                                if (hovered && root.leftDragActive) {
+                                if (hovered && root.dragActive) {
                                     root.addDragSlot(key)
                                 }
                             }
@@ -490,7 +509,7 @@ Item {
                                     const key = root.slotKey("hotbar", index)
                                     if (hovered) root.hoveredKey = key
                                     else if (root.hoveredKey === key) root.hoveredKey = ""
-                                    if (hovered && root.leftDragActive) {
+                                    if (hovered && root.dragActive) {
                                         root.addDragSlot(key)
                                     }
                                 }

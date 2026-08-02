@@ -114,6 +114,10 @@ function groupIsDraggable(root, group) {
     return Array.isArray(g) && g.indexOf(group) >= 0
 }
 function addDragSlot(root, key) {
+    // t181：右键拖动走独立路径（每格放 1 个，无重分配）；左键拖动走原 redistributeLive 均分路径。
+    //   HoverHandler 的收集条件改为 dragActive（leftDragActive || rightDragActive），此处据 rightDragActive
+    //   分发到 addRightDragSlot，避免左/右拖动状态机互相干扰（两套 dragSlots 独立）。
+    if (root.rightDragActive) { addRightDragSlot(root, key); return }
     const p0 = key.split(":")
     // t180：非可拖拽组不入 dragSlots——既免无谓重算，也防误导性绿框高亮（高亮 visible 绑 dragHasKey，
     //   不收集即不亮；旧版扫过熔炉 out 槽会亮绿框却永不分发，现为静默跳过）。
@@ -233,6 +237,68 @@ function singleLeftClick(root, group, index) {
     root.hotbar.heldCount = r.heldCount
 }
 
+// ── t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）──
+//   MC Java 右键拖拽语义：右键按住拖过 N 格 → 每滑入新格放 1 个（空槽开新栈 / 同 id 未满 +1；异 id / 已满 /
+//   手空跳过）。**无重分配**（左键均分每加新格全部重分 floor(count/N)；右键只对新格 +1，已放格不回撤）。
+//   手势由 root 级 DragHandler(RightButton) 总控（onActiveChanged 驱动 begin/endRightDrag）；逐槽 HoverHandler
+//   在 dragActive（left||right）期间收集，addDragSlot 据 rightDragActive 分发到 addRightDragSlot。微拖退路：drag
+//   越阈值但全程未放置（空手 / 起点槽异 id 已满）→ 退化为单格右键（拿半 / 放一），与左键 singleLeftClick 同语义。
+function rightDragHasKey(root, key) {
+    for (let i = 0; i < root.rightDragSlots.length; ++i) if (root.rightDragSlots[i] === key) return true
+    return false
+}
+function beginRightDrag(root) {
+    root.rightDragActive = true
+    root.rightDragSlots = []
+    root.rightDragPlaced = false
+    if (root.hoveredKey !== "") addRightDragSlot(root, root.hoveredKey)   // 起点槽立即放 1（持物时）
+}
+function endRightDrag(root) {
+    if (!root.rightDragActive) return
+    root.rightDragActive = false
+    // 微拖退路：drag 越阈值但全程未放置（空手 / 起点异 id 已满 / 未收集到格）→ 退化为单格右键（拿半 / 放一），
+    //   与左键 singleLeftClick 同语义。一旦放置过（持物拖入合格格）不再补单点（避免重复放置）。
+    if (!root.rightDragPlaced && root.hoveredKey !== "") {
+        const p = root.hoveredKey.split(":")
+        if (p.length === 2) singleRightClick(root, p[0], parseInt(p[1], 10))
+    }
+    root.rightDragSlots = []
+    root.rightDragPlaced = false
+}
+// 每滑入新格放 1 个（addDragSlot 据 rightDragActive 分发到此）。空手 / 异 id / 已满 → 跳过且不计入 placed。
+function addRightDragSlot(root, key) {
+    if (!root.rightDragActive) return
+    const p0 = key.split(":")
+    if (!groupIsDraggable(root, p0[0])) return
+    if (rightDragHasKey(root, key)) return
+    root.rightDragSlots = root.rightDragSlots.concat([key])
+    placeOneInSlot(root, p0[0], parseInt(p[1], 10))
+}
+// 往指定槽放 1 个（空槽开新栈 / 同 id 未满 +1；异 id / 已满 / 手空 → 跳过，不互换）。
+function placeOneInSlot(root, group, index) {
+    const heldId = root.hotbar.heldBlock
+    const heldCount = root.hotbar.heldCount
+    if (heldId === 0 || heldCount <= 0) return          // 空手：无物可放
+    const cur = readSlot(root, group, index)
+    if (cur.id !== 0 && cur.id !== heldId) return        // 异 id：跳过（不互换）
+    const cap = root.hotbar.maxStackSize(heldId)
+    if (cur.id === heldId && cur.count >= cap) return    // 同 id 已满：跳过
+    writeSlot(root, group, index, heldId, cur.count + 1)
+    const remain = heldCount - 1
+    root.hotbar.heldBlock = remain > 0 ? heldId : 0
+    root.hotbar.heldCount = remain
+    root.rightDragPlaced = true
+}
+// 单格右键（微拖退路 = resolveRightClick：空手拿半 / 持物放一）。
+function singleRightClick(root, group, index) {
+    const cur = readSlot(root, group, index)
+    const r = resolveRightClick(root, cur.id, cur.count)
+    if (!r) return
+    writeSlot(root, group, index, r.slotId, r.slotCount)
+    root.hotbar.heldBlock = r.heldId
+    root.hotbar.heldCount = r.heldCount
+}
+
 // t110 Shift+左键搬运（MC 1.0 背包）：main 槽→首个空 hotbar 槽；hotbar 槽→首个空 main 槽；其它组
 //   （craft / in / fuel / out）无操作（spec 仅定义 main↔hotbar）。整栈搬：源清空、目标写入源原内容。
 //   「空位」= id==0 的槽。无空位 → 无操作（shift 是显式搬运语义，与普通左键的拾取/放置区分）。
@@ -276,11 +342,11 @@ function swapHoveredWithHotbar(root, hotbarIdx) {
     writeSlot(root, "hotbar", hotbarIdx, src.id, src.count)
 }
 
-// t98 双击合并（MC：双击某槽 → 扫 main + hotbar（+ 面板声明的本地组）同 id 物品，累加成满栈 64 一组、
-//   余数留光标）。targetId 取光标手持 id（典型流程：首次左键拾起该槽 → 二次点击同槽合并），fallback 到
-//   所点槽 id（首次为放置时光标空）。t180：扫描范围加 root.localDragGroups（工作台 craft 3×3、熔炉 in/fuel、
-//   箱子 chest）——双击工作台/熔炉输入槽现可拾起该槽 + 合并背包同 id（旧版只扫 main+hotbar 致点 craft/in
-//   槽常 total=0 空操作）。守恒：合并后 (各槽 + 光标) 总量 = 合并前。
+// t181 双击拿手上（MC：双击某槽 → 扫 main + hotbar（+ 面板声明的本地组）同 id 物品，**全部拾取到光标**，
+//   非自动合并到背包首个槽）。targetId 取光标手持 id（典型流程：首次左键拾起该槽 → 二次点击同槽合并），
+//   fallback 到所点槽 id（首次为放置时光标空）。t180：扫描范围加 root.localDragGroups（工作台 craft 3×3、
+//   熔炉 in/fuel、箱子 chest）。守恒：合并后 (各槽 + 光标) 总量 = 合并前。t181：光标优先拿满（min(total,
+//   cap)），余量回填槽（旧实现把满栈塞回前 numFull 个槽、光标只拿余数 → 用户误以为「合并到首个槽」）。
 function doMergeSameId(root, group, index) {
     if (!root.hotbar) return
     let targetId = root.hotbar.heldBlock
@@ -327,13 +393,20 @@ function doMergeSameId(root, group, index) {
     root.hotbar.heldBlock = 0
     root.hotbar.heldCount = 0
 
-    // 重打包：满栈（cap）按扫描顺序填回前 numFull 个槽，余数（< cap）留光标。槽位充足（total 来自这些
-    // 槽 + 光标，cap*(槽数+1) ≥ total），不会丢物品。
-    const numFull = Math.min(Math.floor(total / cap), slots.length)
+    // t181：双击 = 拾取全部同类到**光标**（非自动合并到背包首个槽）。光标优先拿满（min(total, cap)）；
+    //   余量（total > cap 时）按扫描顺序回填入槽（满栈优先前 numFull 个、尾余入下一槽），物品守恒。
+    //   旧实现把满栈塞回前 numFull 个槽、光标只拿余数 → 用户看到「物品合并到首个槽、光标坐标不准」
+    //   （物品去了首个槽而非光标手上）。total ≤ cap 时光标拿全部、所有同 id 槽清空 = 全部拾起到手。
+    const cursorCount = Math.min(total, cap)
+    const remain = total - cursorCount
+    const numFull = Math.min(Math.floor(remain / cap), slots.length)
     for (let i = 0; i < numFull; ++i) {
         writeSlot(root, slots[i].group, slots[i].index, targetId, cap)
     }
-    const cursorCount = total - numFull * cap
+    const tail = remain - numFull * cap
+    if (tail > 0 && numFull < slots.length) {
+        writeSlot(root, slots[numFull].group, slots[numFull].index, targetId, tail)
+    }
     if (cursorCount > 0) {
         root.hotbar.heldBlock = targetId
         root.hotbar.heldCount = cursorCount

@@ -70,6 +70,12 @@ Item {
     // 已写槽。每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginLeftDrag / endLeftDrag 重置。
     property var dragOriginal: ({})
     property var dragWritten: ({})
+    // t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）。创造背包仅 hotbar 行作分发目标。
+    //   dragActive 统一左/右拖动收集门控（HoverHandler 据 dragActive 调 addDragSlot，InventoryOps 内分发）。
+    property bool rightDragActive: false
+    property var rightDragSlots: []
+    property bool rightDragPlaced: false
+    property bool dragActive: leftDragActive || rightDragActive
     // t98 双击合并：lastTapMs/lastTapKey 记上次左键点击（槽 key）的时间戳与 key；400ms 内同槽二次点击 →
     // doMergeSameId（扫 main+hotbar 同 id 累加成满栈 64 一组、余数留光标）。
     property real lastTapMs: 0
@@ -99,6 +105,10 @@ Item {
     function addDragSlot(key) { InventoryOps.addDragSlot(root, key) }
     function beginLeftDrag() { InventoryOps.beginLeftDrag(root) }
     function endLeftDrag() { InventoryOps.endLeftDrag(root) }
+    // t181 右键拖动（每格放 1 个）：薄委托包装。
+    function beginRightDrag() { InventoryOps.beginRightDrag(root) }
+    function endRightDrag() { InventoryOps.endRightDrag(root) }
+    function addRightDragSlot(key) { InventoryOps.addRightDragSlot(root, key) }
     // redistributeLive / singleLeftClick：纯内部辅助（仅 InventoryOps.addDragSlot / endLeftDrag 调用），
     //   算法已入 InventoryOps，此处不再持有副本。
     function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
@@ -117,6 +127,16 @@ Item {
         onActiveChanged: {
             if (active) root.beginLeftDrag()
             else root.endLeftDrag()
+        }
+    }
+    // t181 右键拖动（每格放 1 个）：DragHandler(RightButton) 在 root 监听；拖动越阈值 → begin/endRightDrag。
+    //   按下不动时 per-slot 右键 TapHandler 抓（拿半 / 放一）。target:null 防 DragHandler 拖动父 Item。
+    DragHandler {
+        acceptedButtons: Qt.RightButton
+        target: null
+        onActiveChanged: {
+            if (active) root.beginRightDrag()
+            else root.endRightDrag()
         }
     }
 
@@ -421,7 +441,7 @@ Item {
                                         if (hovered) root.hoveredKey = key
                                         else if (root.hoveredKey === key) root.hoveredKey = ""
                                         // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
-                                        if (hovered && root.leftDragActive) {
+                                        if (hovered && root.dragActive) {
                                             root.addDragSlot(key)
                                         }
                                     }
