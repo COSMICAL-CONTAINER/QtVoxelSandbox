@@ -58,7 +58,8 @@ Item {
     // 逐槽 HoverHandler 在 leftDragActive 期间收集扫过格子（addDragSlot 即触发 redistributeLive 实时重分）。
     // dragSlots 存「组:下标」字符串（去重 / 比较简单）；leftDragActive 标手势进行中；dragHeld* 为按下瞬间光标
     // 栈快照（均分按原始量算，避免拖拽中途槽内容变化干扰）；dragOriginal/dragWritten 支撑实时重分的撤销机制
-    // （每滑入新格先撤销上轮写入再重分）。背包主栏 / hotbar / 合成格统一支持（合成格仅参与收集，不分发）。
+    // （每滑入新格先撤销上轮写入再重分）。背包主栏 / hotbar / 合成格统一支持；t203 起合成格经 localDragGroups
+    //   声明亦参与分发（左键均分 / 右键每格放1），与主栏/hotbar 同。
     // 均分算法与 t79/t98 右键拖拽同源（右键拖拽 t166d 改 per-slot 单点后停用）；t167 把同一算法接到左键。
     property bool leftDragActive: false
     property var dragSlots: []              // 字符串数组（"craft:2" / "main:5" / "hotbar:0"）
@@ -80,6 +81,16 @@ Item {
     // doMergeSameId（扫 main+hotbar 同 id 累加成满栈 64 一组、余数留光标）。
     property real lastTapMs: 0
     property string lastTapKey: ""
+
+    // t203：2×2 合成格接入完整快捷操作（右键放1 / 右键拖拽每格放1 / 左键拖动均分 / 双击拿同类），与主栏/
+    //   hotbar 同（对齐 t180 工作台 craft 3×3）。声明 craft 为可拖拽本地组 → InventoryOps.groupIsDraggable
+    //   放行（addDragSlot 收集、redistributeLive 左键均分分发、addRightDragSlot 右键每格放1、doMergeSameId
+    //   扫 craft）。旧版 t180 注释「生存背包 2×2 craft 维持不参与」在此任务转为参与——合成格是纯输入槽
+    //   （无熔炉 out 那种「异物污染输出槽阻断冶炼」的顾虑），左/右拖拽填入是 MC 标准交互；recipeMatch 据
+    //   craftRev 自动重算，均分后布局若变由用户重排（同 CraftingTableUI）。
+    property var localDragGroups: ["craft"]
+    // t203：craft 组槽位数（doMergeSameId 扫描范围）。craftSlots 长 4（2×2）。
+    function localSlotCount(group) { return group === "craft" ? root.craftSlots.length : 0 }
 
     // ── t168 面板专属槽路由：craft 合成格走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
     //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
@@ -298,16 +309,41 @@ Item {
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
-                            // 点击拾取/放置/合并/互换（t38 栈感知；左键走 resolveClick；右键走 per-slot 右键
-                            // TapHandler 的 resolveRightClick）。左键拖动均分由 root DragHandler + 逐槽 HoverHandler
-                            // 收集（t167）；合成格仅参与收集、不分发（redistributeLive 排除 craft）。配方解析 Phase 1.1。
+                            // t203：craft 2×2 接入完整快捷操作（与主栏/hotbar/工作台 craft 3×3 同）：左键整组
+                            //   （resolveClick）+ 双击拿同类（doMergeSameId 扫 main+hotbar+craft）+ 左键拖动均分
+                            //   （root DragHandler + 逐槽 HoverHandler 收集，redistributeLive 分发）+ 右键放1/拿半
+                            //   （resolveRightClick）+ 右键拖拽每格放1（addRightDragSlot）。Shift+左键搬运对 craft
+                            //   组无操作（不在 main↔hotbar 范畴）。配方解析走 recipeMatch（据 craftRev 自动重算）。
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 onTapped: {
                                     // t110：Shift+左键搬运（craft 槽不在 main↔hotbar 范畴，slotShiftLeft 对 craft
                                     //   组无操作；普通左键走 resolveClick）。
                                     if (window.shiftHeld) { root.slotShiftLeft("craft", index); return }
+                                    // t203 双击拿同类（同 main/hotbar/工作台 craft 3×3）：280ms 内同槽二次点击 →
+                                    //   doMergeSameId（扫 main+hotbar+craft 同 id 累加成满栈、余数留光标）。
+                                    const key = root.slotKey("craft", index)
+                                    const now = Date.now()
+                                    const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+                                    root.lastTapMs = now
+                                    root.lastTapKey = key
+                                    if (isDouble) { root.doMergeSameId("craft", index); return }
                                     const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
+                                    if (!r) return
+                                    root.craftSlots[index] = r.slotId
+                                    root.craftCounts[index] = r.slotCount
+                                    root.craftRev++
+                                    root.hotbar.heldBlock = r.heldId
+                                    root.hotbar.heldCount = r.heldCount
+                                }
+                            }
+                            // t203 per-slot 右键（拿半/放一），与主栏/hotbar/工作台 craft 3×3 同（不依赖
+                            //   hover/hoveredKey）。空手→拾取 floor(count/2)（单件取 1）；持物→放 1（空槽开新栈 /
+                            //   同 id 未满 +1；异 id / 已满无操作，不互换）。
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
                                     if (!r) return
                                     root.craftSlots[index] = r.slotId
                                     root.craftCounts[index] = r.slotCount
