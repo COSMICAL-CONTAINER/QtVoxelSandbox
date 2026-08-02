@@ -200,29 +200,39 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
 //   新算法（增量、单步波前；spec「水源向外 1 格 1 格流动，最终停，不填满整个平面」）：
 //   1) 快照当前所有水格（pos + level）。state 0=水源（永久，仅玩家/铁桶/worldgen 放置/移除）；
 //      1..7=流水（每扩散 1 格 level+1，机制等价 MC 1.0 流水 7 格扩散；spec 的「8 格」含水源算）。
-//   2) 蒸发 pass（**先于扩散算** —— 供扩散 pass 跳过「本 tick 将退场」的格）：流水（level>0）失支撑 →
-//        退场，1 格/tick 渐退。非源水格若既无「上方有水」（下落柱 / 上方源灌养）又无「水平方向更低 level
-//        的水邻居」（指向源方向）→ 蒸发。水源被舀/挖后，邻接 level-1 失支撑 → 本 tick 蒸发；下一 tick
-//        level-2 失支撑（level-1 已变 air）→ 蒸发；逐环渐退（机制对齐 MC 流水衰退）。每 tick 仅最内无支撑
-//        环退。结果入 evapKeys 集合（本 tick 退场格 key，供扩散 pass 跳过）。
-//   3) 扩散 pass（只把波前推 1 格，**有流动动画**）：
-//        - t221：**跳过 evapKeys 里的格**（退场中的格不再扩散）—— 否则存活的外环格会把水**回填**进刚蒸发
-//          的内环 air 格（扩散 pass 写 air 邻居、且在蒸发应用之前读 m_chunks 仍见外环存活），下一 tick 该
-//          回填格又失支撑蒸发 → 「一下有一下无」棋盘震荡。跳过后退场单向（仅向内蒸发、不向内回填）=
-//          蔓延动画的镜像（逐格回退，spec t221）。
-//        - 下落：cell 下方为 air → 下方写**流水 level=1**（**非水源**！这是修「灌满盆地」的关键 —— 下落水流
-//          不再当源、不重新满扩散，只作 fresh flow；机制对齐 MC「水流下落为流而非源」）。
-//        - 水平蔓延：仅当 cell「grounded」（下方为实体方块，非 air/水）且 level < kMaxFlowLevel → 4 向
-//          air 邻居写 level+1。下方为 air → 只下落不水平蔓延（悬崖边水直接流下，不在半空横向铺）；
-//          下方为水 → 既不下落也不蔓延（水下柱由其最底 grounded 格负责扩散）。
-//        只写当前为 air 的格（不覆写既有水）→ 每格首达即最低 level（机制对齐 MC 最短源距，无需重刷既有格）。
-//   4) 应用：先蒸发后新增（二者不相交 —— 前者必为水格、后者必为 air 格）。经 setWaterSilent 写入
-//      （系统模拟非玩家动作，不发 broken/placed，仅 worldChanged 重建 mesh）。
+//   2) 源再生 pass（t224 水融合 / MC 1.0 infinite-water rule；详见下方调研结论）：流水格若被 ≥2 个
+//        水源邻居（水平 4 向）夹住且下方为实体或水源（grounded/supported）→ 升为水源（level 0）。
+//        每_tick 仅标记符合条件的格；级联在多 tick 内完成（A 升源后下一 tick 其邻居 B 才凑齐 2 源 → 升）。
+//        入 srcRegKeys（升源格 key），供蒸发 / 扩散 pass 跳过（升源格本 tick 既不蒸发也不作流水扩散）。
+//   3) 蒸发 pass（流水失支撑 → 退场，1 格/tick 渐退；跳过 srcRegKeys —— 即将升源的格不蒸发）。
+//        水源（level=0）永不蒸发。结果入 evapKeys（供扩散 pass 跳过退场格，断 t221「向内回填」震荡）。
+//   4) 扩散 pass（只把波前推 1 格，**有流动动画**；跳过 evapKeys + srcRegKeys）：
+//        - t221：跳过退场格（不向内回填 → 退场单向 = 蔓延镜像）。
+//        - 下落：cell 下方为 air → 下方写**流水 level=1**（**非水源**！修 t174「下落成源灌满盆地」）。
+//        - 水平蔓延：grounded 且 level < kMaxFlowLevel → 4 向邻居：air → 写 level+1（首达即最低）；
+//          **t224 re-leveling**：既有流水邻居若能被提供更低 level（c.level+1 < 邻居现 level）→ 下调之
+//          （平滑「两滩水融合」：旧实现只写 air、既有水永不下调 → 两股流水相遇在中线形成首达者独占的
+//          阶梯边界，观感「明显边界 / 各为固方块」；下调使中线格 = min(两源距)，多 tick 收敛为 V 形平滑）。
+//   5) 应用：升源 → 蒸发 → 新增/重定级（三者不相交 —— srcReg/evap/adds 经 keySet 互斥）。经 setWaterSilent
+//      写入（系统模拟非玩家动作，不发 broken/placed，仅 worldChanged 重建 mesh）。
 //
-//   收敛性：稳态流场（海洋全源、已铺满的池）扩散 pass 无 air 可写、蒸发 pass 全有支撑 → 无变化 →
-//      setWaterSilent 全 false → 不触发 worldChanged → 无重建、无闪烁（修「一闪一闪」）。活跃扩散每 tick
-//      仅波前 ≤ 数格变化（远少于旧全量 diff）→ 重建量小、1 格/tick 动画可见（修「瞬间填平」）。退场期
-//      扩散跳过退场格 → 不回填 → 1 格/tick 平滑回退（修 t221「棋盘一闪一闪」）。
+//   ── t224 MC 1.0 水融合调研结论（先调研、后实现；据此设计 pass 2 + pass 4 re-leveling）──
+//   MC Java 1.0 流体规则（机制对齐，非名词照搬）：
+//   (a) **level 语义**：水源 level=0；流水 level=1..7（每离源 +1，最大水平扩散 7 格）；下落水为「falling」
+//       （满高柱，不再水平衰减——本工程统一下落为 level=1 fresh flow，机制等价、不灌满盆地）。
+//   (b) **水平扩散**：每格 level = min(所有源到该格的曼哈顿距离)。两股流水相遇时，中线格取两源距之 min →
+//       天然 V 形平滑（**无硬边界**）。旧实现「只写 air、首达者独占」违反本不变量 → 阶梯边界 bug。
+//   (c) **源再生（infinite-water / 两滩融合的核心）**：一个**流水**格满足下列条件 → 转为**水源**：
+//        - 水平 4 向邻居中**至少 2 个是水源**（level=0）；且
+//        - 下方为**实体方块或水源**（grounded/supported；下方为 air 或流水不算 —— 流水会排干，无法长期托住新源）。
+//       经典 2×2 池（对角两源）→ 另两空格各被两源夹 → 升源 → 全源。两玩家倒水点距离 ≤2（中间格被两源夹）
+//       → 中间格升源 → 两滩融合成连续水源体。源再生级联（多 tick）直到区域被非 grounded 边界（悬崖 / 无 2 源）止。
+//   (d) 本工程 worldgen fillWater 把海 / 湖全填为**水源**（state=0）→ 稳态海洋全源、pass 2 无候选 → 零变化。
+//       玩家倒单桶（1 源）扩散出的流水无 2 源邻居 → 不升源（与 MC 单桶不形成无限源一致）。
+//   收敛性：升源（level 0..0 单调，源集只增）、re-leveling（level 只下调、下界 1）、扩散（bounded by 7）、
+//      蒸发（失支撑链有限）→ 有界单调 → 必收敛。稳态（全源池）四 pass 全无候选 → setWaterSilent 全 false
+//      → 不触发 worldChanged → 无重建、无闪烁（修「一闪一闪」）。活跃扩散每 tick 仅波前 ≤ 数格变化
+//      （远少于旧全量 diff）→ 重建量小、1 格/tick 动画可见（修「瞬间填平」）。
 //
 //   分层（PLAN §2）：本方法属 World 层，只读/写 m_chunks + 发 worldChanged。不依赖 Renderer/Physics/Game。
 //   呈现层（Main.qml）经 WorldClock.ticked 桥接调用（QML 同时持 World + WorldClock，向下合法）。
@@ -268,13 +278,56 @@ void World::tickWaterFlow()
     };
     static const int hd[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
-    // 2) 蒸发 pass（先算，供扩散 pass 跳过「本 tick 将退场」的格）：流水（level>0）失支撑 → 退场。
-    //    水源（level=0）永不蒸发（玩家/铁桶/worldgen 管）。每 tick 仅最内无支撑环退（逐环渐退）。
+    // 2) 源再生 pass（t224 水融合 / MC 1.0 infinite-water rule）：流水格被 ≥2 水平水源邻居夹住 +
+    //    下方为实体或水源 → 升为水源（level 0）。每 tick 仅标记符合条件的格；级联在多 tick 完成（A 升源
+    //    后下一 tick 邻居 B 才凑齐 2 源 → 升）。结果入 srcRegKeys —— 蒸发 / 扩散 pass 据此跳过升源格
+    //    （本 tick 不蒸发、亦不作流水扩散；下一 tick 作水源正常扩散）。机制等价 MC「2×2 池 / 两源夹一格
+    //    → 中间升源」即经典无限水机。worldgen 海/湖全为水源 → 无流水候选 → 稳态零变化；玩家单桶水扩散
+    //    出的流水仅 1 源邻居 → 不升源（与 MC 单桶不形成无限源一致）。两玩家倒水点距 ≤2 → 中间格被两源夹
+    //    → 升源 → 两滩融合为连续水源体（用户诉求「两股流水相遇应融合，现明显边界 / 各为固方块」之修复）。
+    std::vector<WCell> srcRegs;
+    std::unordered_set<long long> srcRegKeys;
+    for (const WCell &c : cells) {
+        if (c.level == 0) continue; // 已是水源
+        // a) 水平 4 向水源邻居计数（MC：至少 2 个水源夹住本格）。
+        int srcNeighbors = 0;
+        for (const auto &d : hd) {
+            const int nx = c.x + d[0], nz = c.z + d[1];
+            if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+            if (m_chunks.blockAt(nx, c.y, nz) == BlockRegistry::Water
+                && m_chunks.stateAt(nx, c.y, nz) == 0) {
+                ++srcNeighbors;
+            }
+        }
+        if (srcNeighbors < 2) continue;
+        // b) 下方须为实体方块或水源（MC：grounded/supported；下方 air 或流水不算 —— 流水会排干无法托住新源）。
+        bool supportedBelow = false;
+        if (c.y == 0) {
+            supportedBelow = true; // 世界底 = 基岩实心
+        } else {
+            const quint8 bb = m_chunks.blockAt(c.x, c.y - 1, c.z);
+            if (bb == BlockRegistry::Air) {
+                supportedBelow = false;
+            } else if (bb == BlockRegistry::Water) {
+                supportedBelow = (m_chunks.stateAt(c.x, c.y - 1, c.z) == 0); // 仅水源托得住
+            } else {
+                supportedBelow = true; // 实体方块
+            }
+        }
+        if (!supportedBelow) continue;
+        srcRegs.push_back(c);
+        srcRegKeys.insert(keyOf(c.x, c.y, c.z));
+    }
+
+    // 3) 蒸发 pass（先算，供扩散 pass 跳过「本 tick 将退场」的格）：流水（level>0）失支撑 → 退场。
+    //    水源（level=0）永不蒸发（玩家/铁桶/worldgen 管）。t224：跳过 srcRegKeys —— 即将升源的格不蒸发
+    //    （其本就 2 源邻居 → 必有更低 level 邻居 → supported，本不会进 evaps，此处显式跳过为防御 / 可读）。
     //    结果同时入 evapKeys（key 集合）—— 扩散 pass 据此跳过退场格，断「向内回填」震荡（t221）。
     std::vector<WCell> evaps;
     std::unordered_set<long long> evapKeys;
     for (const WCell &c : cells) {
         if (c.level == 0) continue;
+        if (srcRegKeys.count(keyOf(c.x, c.y, c.z))) continue; // t224：即将升源，不蒸发
         bool supported = false;
         // a) 上方有水 → 被下落柱 / 上方源灌养（支撑）。
         if (c.y + 1 < H && m_chunks.blockAt(c.x, c.y + 1, c.z) == BlockRegistry::Water)
@@ -294,28 +347,49 @@ void World::tickWaterFlow()
         }
     }
 
-    // 3) 扩散 pass：只把波前推 1 格（不级联 —— 新格下一 tick 才继续扩散 → 1 格/tick 动画）。
-    //    t221：跳过 evapKeys（退场中的格）—— 退场中的格不再向外扩散，尤其不把水回填进刚蒸发的内环 air
-    //    格；否则外环存活格回填 → 下一 tick 又蒸发 → 棋盘震荡。跳过后退场单向 = 蔓延镜像（逐格回退）。
+    // 4) 扩散 pass：只把波前推 1 格（不级联 —— 新格下一 tick 才继续扩散 → 1 格/tick 动画）。
+    //    跳过 evapKeys（退场格）+ srcRegKeys（升源格）：前者防向内回填震荡（t221），后者升源格本 tick
+    //    不作流水扩散（下一 tick 作水源扩散）。t224 re-leveling：对既有流水邻居，若能提供更低 level 则下调
+    //    （平滑两滩融合 —— 旧「只写 air、首达者独占」致中线阶梯边界 bug 之修复）。
     for (const WCell &c : cells) {
-        if (evapKeys.count(keyOf(c.x, c.y, c.z))) continue; // 退场中的格不扩散（断回填震荡）
+        if (evapKeys.count(keyOf(c.x, c.y, c.z))) continue;   // 退场中的格不扩散（断回填震荡）
+        if (srcRegKeys.count(keyOf(c.x, c.y, c.z))) continue; // t224：升源格本 tick 不作流水扩散
         const int bk = belowKind(c.x, c.y, c.z);
         if (bk == 0) {
             // 下落：写下方为流水 level=1（**非源** —— 修 t174「下落成源灌满盆地」bug）。
             tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1));
         } else if (bk == 1 && c.level < kMaxFlowLevel) {
-            // 水平蔓延：grounded 且未到最大流距 → 4 向 air 邻居写 level+1。
+            // 水平蔓延：grounded 且未到最大流距 → 4 向邻居。air → 写 level+1；既有流水 → re-level 下调。
             for (const auto &d : hd) {
                 const int nx = c.x + d[0], nz = c.z + d[1];
                 if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
-                if (m_chunks.blockAt(nx, c.y, nz) != BlockRegistry::Air) continue; // 只入 air（不覆写既有水）
-                tryAdd(keyOf(nx, c.y, nz), quint8(c.level + 1));
+                const long long nbKey = keyOf(nx, c.y, nz);
+                // 不动本 tick 退场 / 升源的邻居（前者将变 air、后者将变源；写它们会被 apply 后续覆盖 = 错）。
+                if (evapKeys.count(nbKey) || srcRegKeys.count(nbKey)) continue;
+                const quint8 nbId = m_chunks.blockAt(nx, c.y, nz);
+                if (nbId == BlockRegistry::Air) {
+                    // 蔓延到 air（首达即最低 level，机制对齐 MC 最短源距）。
+                    tryAdd(nbKey, quint8(c.level + 1));
+                } else if (nbId == BlockRegistry::Water) {
+                    // t224 re-leveling：既有流水邻居若能被提供更低 level（更近源）→ 下调之。
+                    //   旧实现只入 air → 两股流水相遇在中线，首达者独占该格 level，后到者被 `!=Air` 挡在
+                    //   外 → 中线两侧 level 不平滑（阶梯边界 = 用户「明显边界」）。下调使该格 = min(两源距)，
+                    //   多 tick 内逐级收敛为 V 形平滑（每 tick 下调 1 级，与波前 1 格/tick 动画一致）。
+                    //   只下调（offered < 现级），不上调；水源（level 0）永不被 re-level（仅 pass 2 升源）。
+                    const quint8 nbLvl = m_chunks.stateAt(nx, c.y, nz);
+                    const quint8 offered = quint8(c.level + 1);
+                    if (nbLvl > 0 && offered < nbLvl) tryAdd(nbKey, offered);
+                }
             }
         }
         // bk == 2（下方为水）：水下柱 —— 由该柱最底 grounded 格负责水平扩散，本格不动。
     }
 
-    // 4) 应用：先蒸发后新增（不相交）。setWaterSilent 内部无变化 → false → 稳态零重建。
+    // 5) 应用：升源 → 蒸发 → 新增/重定级（三者经 keySet 互斥，顺序安全）。setWaterSilent 内部无变化
+    //    → false → 稳态零重建。升源最前：升源格不在 evaps/evapKeys（pass 3 显式跳过）亦不在 adds（pass 4
+    //    显式跳过 srcRegKeys），故先写 level 0 不会被后续覆盖。
+    for (const WCell &s : srcRegs)
+        setWaterSilent(s.x, s.y, s.z, BlockRegistry::Water, 0);
     for (const WCell &e : evaps)
         setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
     for (const auto &kv : adds) {

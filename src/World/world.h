@@ -132,6 +132,12 @@ public:
     //   水平蔓延；流水失支撑（水源被舀/隔断）→ 逐环蒸发（1 格/tick 渐退）。最终流场收敛停（不填满整个平面）。
     //   稳态流场（海洋全源）每 tick 无变化 → setWaterSilent 全 false → 不触发 worldChanged（无重建、无闪烁）。
     //   玩家倒水（setBlock Water state=0）/ 舀水（setWaterSilent Air）改水格 → 下一 tick 波前自动增/退。
+    //   **t224 水融合（MC 1.0 水合并 + 源再生调研后实现）**：新增两机制消除「两股流水相遇明显边界 / 各为
+    //   固方块」(i) **源再生 pass**（infinite-water rule）—— 流水格被 ≥2 水平水源邻居夹住 + 下方实体/水源
+    //   → 升为水源（级联多 tick；2×2 池 / 两源夹一格 → 中间升源 = 两滩融合为连续水源体）；(ii) **re-leveling**
+    //   —— 既有流水邻居若能被提供更低 level（更近源）则下调（旧「只写 air、首达者独占」致中线阶梯边界 → 下调
+    //   使中线格 = min(两源距)，多 tick 收敛为 V 形平滑）。MC level 语义 = min(源到该格曼哈顿距离)，两流相遇
+    //   天然平滑无硬边界。worldgen 海/湖全为水源 → 稳态零变化；玩家单桶水仅 1 源邻居 → 不升源（同 MC）。
     Q_INVOKABLE void tickWaterFlow();
 
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
