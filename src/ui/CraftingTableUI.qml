@@ -115,6 +115,8 @@ Item {
     function beginRightDrag() { InventoryOps.beginRightDrag(root) }
     function endRightDrag() { InventoryOps.endRightDrag(root) }
     function addRightDragSlot(key) { InventoryOps.addRightDragSlot(root, key) }
+    // t205 右键拖拽绿框高亮：rightDragHasKey 判本格是否在 rightDragSlots（实际放了物的格集）。
+    function rightDragHasKey(key) { return InventoryOps.rightDragHasKey(root, key) }
     // redistributeLive / singleLeftClick：纯内部辅助（仅 InventoryOps.addDragSlot / endLeftDrag 调用），
     //   算法已入 InventoryOps，此处不再持有副本。
     function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
@@ -347,11 +349,13 @@ Item {
                                 color: "transparent"
                                 border.color: "#7fe57f"; border.width: 2
                                 visible: {
-                                    root.dragSlots; root.leftDragActive; root.craftRev
+                                    root.dragSlots; root.rightDragSlots
+                                    root.leftDragActive; root.rightDragActive; root.craftRev
                                     const sid = root.craftSlots[index] || 0
-                                    return root.leftDragActive
-                                        && root.dragHasKey(root.slotKey("craft", index))
-                                        && (sid === 0 || sid === root.dragHeldId)
+                                    const key = root.slotKey("craft", index)
+                                    if (root.leftDragActive && root.dragHasKey(key)
+                                        && (sid === 0 || sid === root.dragHeldId)) return true
+                                    return root.rightDragActive && root.rightDragHasKey(key)
                                 }
                                 z: 10
                             }
@@ -579,10 +583,12 @@ Item {
                             color: "transparent"
                             border.color: "#7fe57f"; border.width: 2
                             visible: {
-                                root.dragSlots; root.leftDragActive; root.hotbar.mainRevision
-                                return root.leftDragActive
-                                    && root.dragHasKey(root.slotKey("main", index))
-                                    && (mainId === 0 || mainId === root.dragHeldId)
+                                root.dragSlots; root.rightDragSlots
+                                root.leftDragActive; root.rightDragActive; root.hotbar.mainRevision
+                                const key = root.slotKey("main", index)
+                                if (root.leftDragActive && root.dragHasKey(key)
+                                    && (mainId === 0 || mainId === root.dragHeldId)) return true
+                                return root.rightDragActive && root.rightDragHasKey(key)
                             }
                             z: 10
                         }
@@ -698,10 +704,12 @@ Item {
                                 color: "transparent"
                                 border.color: "#7fe57f"; border.width: 2
                                 visible: {
-                                    root.dragSlots; root.leftDragActive; root.hotbar.slotRevision
-                                    return root.leftDragActive
-                                        && root.dragHasKey(root.slotKey("hotbar", index))
-                                        && (slotId === 0 || slotId === root.dragHeldId)
+                                    root.dragSlots; root.rightDragSlots
+                                    root.leftDragActive; root.rightDragActive; root.hotbar.slotRevision
+                                    const key = root.slotKey("hotbar", index)
+                                    if (root.leftDragActive && root.dragHasKey(key)
+                                        && (slotId === 0 || slotId === root.dragHeldId)) return true
+                                    return root.rightDragActive && root.rightDragHasKey(key)
                                 }
                                 z: 10
                             }

@@ -109,6 +109,8 @@ Item {
     function beginRightDrag() { InventoryOps.beginRightDrag(root) }
     function endRightDrag() { InventoryOps.endRightDrag(root) }
     function addRightDragSlot(key) { InventoryOps.addRightDragSlot(root, key) }
+    // t205 右键拖拽绿框高亮：rightDragSlots 即「实际收到物品的格」，rightDragHasKey 判本格是否在集。
+    function rightDragHasKey(key) { return InventoryOps.rightDragHasKey(root, key) }
     // redistributeLive / singleLeftClick：纯内部辅助（仅 InventoryOps.addDragSlot / endLeftDrag 调用），
     //   算法已入 InventoryOps，此处不再持有副本。
     function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
@@ -480,15 +482,19 @@ Item {
                                 }
                                 // t167 均分拖拽高亮（扫过且待分发的合格格绿框；leftDragActive 期间才显）。
                                 // 异物槽纵使被扫过也不亮（addDragSlot 已过滤入 dragSlots，此处显式条件双重保险）。
+                                // t205：右键拖拽（每格放1）同样显绿框 —— rightDragSlots 仅含「实际放了物」的格
+                                //   （addRightDragSlot 据 placeOneInSlot 成败收录），故 rightDragHasKey 即「此格已放」。
                                 Rectangle {
                                     anchors.fill: parent
                                     color: "transparent"
                                     border.color: "#7fe57f"; border.width: 2
                                     visible: {
-                                        root.dragSlots; root.leftDragActive; root.hotbar.slotRevision
-                                        return root.leftDragActive
-                                            && root.dragHasKey(root.slotKey("hotbar", index))
-                                            && (slotId === 0 || slotId === root.dragHeldId)
+                                        root.dragSlots; root.rightDragSlots
+                                        root.leftDragActive; root.rightDragActive; root.hotbar.slotRevision
+                                        const key = root.slotKey("hotbar", index)
+                                        if (root.leftDragActive && root.dragHasKey(key)
+                                            && (slotId === 0 || slotId === root.dragHeldId)) return true
+                                        return root.rightDragActive && root.rightDragHasKey(key)
                                     }
                                     z: 10
                                 }

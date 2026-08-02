@@ -172,6 +172,8 @@ Item {
     function beginRightDrag() { InventoryOps.beginRightDrag(root) }
     function endRightDrag() { InventoryOps.endRightDrag(root) }
     function addRightDragSlot(key) { InventoryOps.addRightDragSlot(root, key) }
+    // t205 右键拖拽绿框高亮：rightDragHasKey 判本格是否在 rightDragSlots（实际放了物的格集）。
+    function rightDragHasKey(key) { return InventoryOps.rightDragHasKey(root, key) }
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
     // redistributeLive / singleLeftClick / slotShiftLeft：纯内部辅助（仅 InventoryOps 内部 / slotLeft 调用），
     //   算法已入 InventoryOps，此处不再持有副本。
@@ -368,10 +370,11 @@ Item {
                         color: "transparent"
                         border.color: "#7fe57f"; border.width: 2
                         visible: {
-                            root.dragSlots; root.leftDragActive; root.slotRev
-                            return root.leftDragActive
-                                && root.dragHasKey("in:0")
-                                && (root.inId === 0 || root.inId === root.dragHeldId)
+                            root.dragSlots; root.rightDragSlots
+                            root.leftDragActive; root.rightDragActive; root.slotRev
+                            if (root.leftDragActive && root.dragHasKey("in:0")
+                                && (root.inId === 0 || root.inId === root.dragHeldId)) return true
+                            return root.rightDragActive && root.rightDragHasKey("in:0")
                         }
                         z: 10
                     }
@@ -436,10 +439,11 @@ Item {
                         color: "transparent"
                         border.color: "#7fe57f"; border.width: 2
                         visible: {
-                            root.dragSlots; root.leftDragActive; root.slotRev
-                            return root.leftDragActive
-                                && root.dragHasKey("fuel:0")
-                                && (root.fuelId === 0 || root.fuelId === root.dragHeldId)
+                            root.dragSlots; root.rightDragSlots
+                            root.leftDragActive; root.rightDragActive; root.slotRev
+                            if (root.leftDragActive && root.dragHasKey("fuel:0")
+                                && (root.fuelId === 0 || root.fuelId === root.dragHeldId)) return true
+                            return root.rightDragActive && root.rightDragHasKey("fuel:0")
                         }
                         z: 10
                     }
@@ -568,10 +572,11 @@ Item {
                         color: "transparent"
                         border.color: "#7fe57f"; border.width: 2
                         visible: {
-                            root.dragSlots; root.leftDragActive; root.slotRev
-                            return root.leftDragActive
-                                && root.dragHasKey("out:0")
-                                && (root.outId === 0 || root.outId === root.dragHeldId)
+                            root.dragSlots; root.rightDragSlots
+                            root.leftDragActive; root.rightDragActive; root.slotRev
+                            if (root.leftDragActive && root.dragHasKey("out:0")
+                                && (root.outId === 0 || root.outId === root.dragHeldId)) return true
+                            return root.rightDragActive && root.rightDragHasKey("out:0")
                         }
                         z: 10
                     }
@@ -656,10 +661,12 @@ Item {
                             color: "transparent"
                             border.color: "#7fe57f"; border.width: 2
                             visible: {
-                                root.dragSlots; root.leftDragActive; root.hotbar.mainRevision
-                                return root.leftDragActive
-                                    && root.dragHasKey("main:" + index)
-                                    && (mainId === 0 || mainId === root.dragHeldId)
+                                root.dragSlots; root.rightDragSlots
+                                root.leftDragActive; root.rightDragActive; root.hotbar.mainRevision
+                                const key = "main:" + index
+                                if (root.leftDragActive && root.dragHasKey(key)
+                                    && (mainId === 0 || mainId === root.dragHeldId)) return true
+                                return root.rightDragActive && root.rightDragHasKey(key)
                             }
                             z: 10
                         }
@@ -741,10 +748,12 @@ Item {
                                 color: "transparent"
                                 border.color: "#7fe57f"; border.width: 2
                                 visible: {
-                                    root.dragSlots; root.leftDragActive; root.hotbar.slotRevision
-                                    return root.leftDragActive
-                                        && root.dragHasKey("hotbar:" + index)
-                                        && (slotId === 0 || slotId === root.dragHeldId)
+                                    root.dragSlots; root.rightDragSlots
+                                    root.leftDragActive; root.rightDragActive; root.hotbar.slotRevision
+                                    const key = "hotbar:" + index
+                                    if (root.leftDragActive && root.dragHasKey(key)
+                                        && (slotId === 0 || slotId === root.dragHeldId)) return true
+                                    return root.rightDragActive && root.rightDragHasKey(key)
                                 }
                                 z: 10
                             }

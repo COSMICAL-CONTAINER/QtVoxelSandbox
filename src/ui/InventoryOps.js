@@ -279,28 +279,39 @@ function endRightDrag(root) {
     root.rightDragPlaced = false
 }
 // 每滑入新格放 1 个（addDragSlot 据 rightDragActive 分发到此）。空手 / 异 id / 已满 → 跳过且不计入 placed。
+//   t205 根因：旧版 `parseInt(p[1], 10)` 误写成 `p`（本作用域只有 `p0`，无 `p`）→ 运行期 ReferenceError。
+//   QML 信号处理器（DragHandler.onActiveChanged / 逐槽 HoverHandler → addDragSlot → 此处）抛出的 JS 异常被
+//   QML 引擎吞掉（仅 console 报错，不崩 app），故右键拖拽每滑入一格即抛错、placeOneInSlot 永不执行 → 全程
+//   不放物；只有松手时 endRightDrag 的微拖退路（rightDragPlaced 仍 false → singleRightClick）补放 1 个到松手格。
+//   用户观感 = 「右键单击放1正常，但右键拖只放1个/没激活」。修：`p` → `p0`。这类「信号处理器内引用未定义变量」
+//   的 ReferenceError 是 QML/JS 静默退化典型：app 不崩、编译期 qmlcachegen 不查函数体未定义引用、harness 三测
+//   全过，唯独 run+肉眼见功能坏 —— 凡 JS 信号处理器路径改完必 run 验证，勿信「编译过=对」。
+//   t205 增强：仅 placeOneInSlot 真放置时才把格记入 rightDragSlots —— rightDragSlots 即「实际收到物品的格」，
+//   供各面板绿框高亮（rightDragHasKey）准确反映「此格已放」（与左键 dragSlots 高亮对称），避免异 id/已满格
+//   误亮框。rightDragPlaced（全程是否真放置过，endRightDrag 微拖退路用）与「单格是否入 rightDragSlots」同源。
 function addRightDragSlot(root, key) {
     if (!root.rightDragActive) return
     const p0 = key.split(":")
     if (!groupIsDraggable(root, p0[0])) return
     if (rightDragHasKey(root, key)) return
+    if (!placeOneInSlot(root, p0[0], parseInt(p0[1], 10))) return   // 未放置（空手/异 id/已满）→ 不入高亮集
     root.rightDragSlots = root.rightDragSlots.concat([key])
-    placeOneInSlot(root, p0[0], parseInt(p[1], 10))
 }
-// 往指定槽放 1 个（空槽开新栈 / 同 id 未满 +1；异 id / 已满 / 手空 → 跳过，不互换）。
+// 往指定槽放 1 个（空槽开新栈 / 同 id 未满 +1；异 id / 已满 / 手空 → 跳过，不互换）。返回是否真放置。
 function placeOneInSlot(root, group, index) {
     const heldId = root.hotbar.heldBlock
     const heldCount = root.hotbar.heldCount
-    if (heldId === 0 || heldCount <= 0) return          // 空手：无物可放
+    if (heldId === 0 || heldCount <= 0) return false    // 空手：无物可放
     const cur = readSlot(root, group, index)
-    if (cur.id !== 0 && cur.id !== heldId) return        // 异 id：跳过（不互换）
+    if (cur.id !== 0 && cur.id !== heldId) return false  // 异 id：跳过（不互换）
     const cap = root.hotbar.maxStackSize(heldId)
-    if (cur.id === heldId && cur.count >= cap) return    // 同 id 已满：跳过
+    if (cur.id === heldId && cur.count >= cap) return false // 同 id 已满：跳过
     writeSlot(root, group, index, heldId, cur.count + 1)
     const remain = heldCount - 1
     root.hotbar.heldBlock = remain > 0 ? heldId : 0
     root.hotbar.heldCount = remain
     root.rightDragPlaced = true
+    return true
 }
 // 单格右键（微拖退路 = resolveRightClick：空手拿半 / 持物放一）。
 function singleRightClick(root, group, index) {
