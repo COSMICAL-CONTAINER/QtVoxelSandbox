@@ -158,9 +158,16 @@ Window {
         audio.startAmbient()   // t177 环境音：进世界启风声床
     }
     // t176 把存档玩家态（QVariantMap）应用到 player / playerState / hotbarVM。空 map（新世界）→ 默认出生态。
+    //   t187：背包清空必须放在「空 data 早 return」之前两路径共用 —— 旧版空分支漏清 hotbarVM，导致上一世界
+    //   物品残留内存 VM、带进同种子新世界（串世界根因）。hotbarVM 是跨世界长驻的内存对象，存档层按世界
+    //   （每 .sqlite 独立 player_state 表）隔离无 bug，但切世界时 VM 不重置就会泄漏到新世界。
     function applyPlayerState(data) {
+        // 背包清空（两路径共用）：hotbarVM 跨世界长驻，进任何世界前都必须先清，再按存档写或留空。
+        for (let i = 0; i < 9; ++i) hotbarVM.setStack(i, 0, 0)
+        for (let j = 0; j < 27; ++j) hotbarVM.mainSetStack(j, 0, 0)
+        hotbarVM.heldBlock = 0
         if (!data || Object.keys(data).length === 0) {
-            // 新世界：出生点 + 满血满饥 + 默认模式（player 构造默认 Spectator）+ 背包清空（构造期已空）
+            // 新世界：出生点 + 满血满饥 + 默认模式（player 构造默认 Spectator）+ 背包清空（上文已清）
             player.respawn()
             playerState.respawn()
             return
@@ -178,10 +185,7 @@ Window {
             data.mode  !== undefined ? data.mode  : DF.mode)
         playerState.setHealth(data.health !== undefined ? data.health : 20)
         playerState.setHunger(data.hunger !== undefined ? data.hunger : 20)
-        // 背包：先清空再按存档写（防上一世界物品残留）
-        for (let i = 0; i < 9; ++i) hotbarVM.setStack(i, 0, 0)
-        for (let j = 0; j < 27; ++j) hotbarVM.mainSetStack(j, 0, 0)
-        hotbarVM.heldBlock = 0
+        // 背包已在上文两路径共用处清空，此处直接按存档写
         if (data.hotbar) for (let i = 0; i < data.hotbar.length && i < 9; ++i)
             hotbarVM.setStack(i, data.hotbar[i].id, data.hotbar[i].count)
         if (data.main) for (let i = 0; i < data.main.length && i < 27; ++i)
