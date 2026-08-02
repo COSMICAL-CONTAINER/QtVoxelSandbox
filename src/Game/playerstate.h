@@ -4,13 +4,14 @@
 #include <QObject>
 #include <QtQml/qqml.h>
 
-// 玩家状态视图模型（Game/Entities 层）：生命/饥饿的数值持有 + 受伤/恢复钩子。
+// 玩家状态视图模型（Game/Entities 层）：生命/饥饿/气泡的数值持有 + 受伤/恢复钩子。
 //
 // 暴露给 QML（呈现层只读）：
 //   - health   当前生命 0..maxHealth（每心 2 HP；满 = 20 = 10 心）
 //   - maxHealth 恒 20（10 心 × 2 HP）
 //   - hunger   当前饥饿 0..maxHunger（每鼓腿 2 点；满 = 20 = 10 鼓腿）
 //   - maxHunger 恒 20（10 鼓腿 × 2 点）
+//   - air      当前气泡 0..maxAir（t202 溺水系统；满 = 10 气泡；眼位入水逐格减，归零后溺水扣血）
 // 心/鼓腿的「每格 full/half/empty」由 QML delegate 直接据 health/hunger 算出（绑定 NOTIFY
 // 自动刷新），无需把列表做成 Q_PROPERTY(QVariantList)（本工具链 moc 拒绝后者，见 lessons-learned）。
 //
@@ -35,6 +36,11 @@ class PlayerState : public QObject
     Q_PROPERTY(int maxHealth READ maxHealth CONSTANT)
     Q_PROPERTY(int hunger READ hunger NOTIFY hungerChanged)
     Q_PROPERTY(int maxHunger READ maxHunger CONSTANT)
+    // t202 气泡（溺水系统）：当前气泡 0..maxAir（满 10）。眼位入水逐格减 → 归零后溺水扣血；出水回满。
+    //   驱动 = PlayerController 经 airUpdated 信号 → Main.qml Connections 路由到 setAir（同 fallDamageTaken→
+    //   takeDamage 模式：Physics 层算时序、Game 层持显值、呈现层路由）。maxAir 恒 10 = 10 气泡（MC 1.0 风格）。
+    Q_PROPERTY(int air READ air NOTIFY airChanged)
+    Q_PROPERTY(int maxAir READ maxAir CONSTANT)
     // 死亡态（t78）：health ≤ 0 → true（died 信号触发时刻置位）；respawn() 翻回 false。
     // NOTIFY=deadChanged（dead 翻 true/false 都发 → QML 绑定据 dead 显/隐死亡界面）。
     Q_PROPERTY(bool dead READ dead NOTIFY deadChanged)
@@ -46,6 +52,8 @@ public:
     int maxHealth() const { return kMaxHealth; }
     int hunger() const { return m_hunger; }
     int maxHunger() const { return kMaxHunger; }
+    int air() const { return m_air; }       // t202 当前气泡（0..maxAir）
+    int maxAir() const { return kMaxAir; }  // t202 恒 10（10 气泡）
     bool dead() const { return m_dead; }
 
     // 受伤钩子（Game/Physics 调用）：扣 amount HP，clamp 到 0；扣到 0 → 置 dead + emit died（且此后不再继续扣，
@@ -59,6 +67,9 @@ public:
     //   结果同步 dead 态（health>0 → false）—— 存档玩家不可能是死亡态，但防御性置位 + emit deadChanged
     //   以免陈旧 dead=true 残留显死亡界面。无变化（值 == 当前）不发信号。
     Q_INVOKABLE void setHealth(int value);
+    // t202 设气泡值：由 PlayerController 经 airUpdated 信号驱动（Physics 层算时序、Game 层持显值）。
+    //   clamp 到 [0, maxAir]；无变化（值 == 当前）不发信号。t176 存档 round-trip 亦走此入口（air 可能 < max）。
+    Q_INVOKABLE void setAir(int value);
     // t78 重生：清 dead 态（emit deadChanged）+ 恢复满血满饥。仅复位 PlayerState 数值；
     //   玩家定位（传回出生点）由 PlayerController::respawn() 负责（分层：状态属 Game 层，定位属 Physics 层）。
     //   呈现层「立即重生」按钮同时调本方法 + PlayerController.respawn()。
@@ -67,6 +78,7 @@ public:
 signals:
     void healthChanged();
     void hungerChanged();
+    void airChanged(); // t202 气泡值变（驱动 QML 气泡条刷新 / 显隐；值真变才发）
     void deadChanged(); // dead 翻转（true/false 都发；驱动 QML 死亡界面显隐，t78）
     // t78 死亡一次性事件：health 首次降到 ≤0 时发（与 deadChanged 同帧发；died 语义=「刚死」，供呈现层
     //   释放指针 / 关面板等一次性副作用；deadChanged 驱动持续可见性绑定）。
@@ -80,9 +92,11 @@ signals:
 private:
     static constexpr int kMaxHealth = 20; // 10 心 × 2 HP
     static constexpr int kMaxHunger = 20; // 10 鼓腿 × 2 点
+    static constexpr int kMaxAir = 10;    // t202 10 气泡（MC 1.0 风格溺水系统）
 
     int m_health = kMaxHealth; // 初值满血
     int m_hunger = kMaxHunger; // 初值满饥
+    int m_air = kMaxAir;       // t202 初值满气泡（眼位入水逐格减；归零溺水扣血；出水回满）
     bool m_dead = false;       // t78 死亡态（health ≤ 0 → true；respawn 翻回 false）
 };
 

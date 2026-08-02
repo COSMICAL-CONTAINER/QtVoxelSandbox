@@ -311,7 +311,12 @@ signals:
     // 转发到 ItemEntityManager.spawnItem 生成实体。分层（PLAN §2）：Game/Physics 层发语义事件，
     // 呈现层 / ViewModel 只消费（同 blockBroken→粒子）。
     void spawnItem(int x, int y, int z, int blockId, int count);
-    void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState（t160 窒息复用此路径）
+    void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState（t160 窒息 / t202 溺水复用此路径）
+    // t202 气泡值更新（仅 Survival）：眼位入水逐格减 / 出水逐格回满时发，携**新的 air 值**（0..10）。
+    //   呈现层 Connections 路由到 PlayerState.setAir（同 fallDamageTaken→takeDamage 模式：Physics 层算
+    //   时序、Game 层持显值、呈现层路由）。溺水扣血复用 fallDamageTaken(1)（→ takeDamage → damaged 红
+    //   闪 / 视角晃，与窒息同链）。值真变（减 / 增一格气泡）才发，免每 tick 抖 QML 绑定。
+    void airUpdated(int air);
     // 第一人称手挥动（t29）：breakBlock/placeBlock 在通过模式门控 + 动作真发生后发（观察者不发；
     // 未命中/放置被拒也不发）。同 blockBroken 模式——Game/Physics 层发语义事件，呈现层 Connections
     // 消费启动手臂挥动动画（PLAN §2 分层：手 viewmodel 属呈现层，绝不反向写）。
@@ -470,6 +475,14 @@ private:
     int m_selectedItem = BlockRegistry::Stone;  // 手持物品原始 id（含工具段；t34 挖掘速度用，绑定 hotbar.selectedItemId）
     float m_peakY = 0.0f;           // 滞空期间最高点 Y（掉落伤害结算基准；componentComplete 设为脚底 Y）
     float m_suffocationTimer = 0.0f; // t160 窒息累积计时（身体嵌实体方块时累加，每 kSuffocationInterval 秒一脉冲）
+    // t202 气泡 + 溺水计时（仅 Survival）：眼位入水 m_airTimer 累加 → 每 kAirInterval 减 1 气泡；
+    //   气泡归零后 m_drownTimer 累加 → 每 kDrownInterval 扣 1HP（复用 fallDamageTaken→damaged 链）；
+    //   出水 m_airRegenTimer 累加 → 每 kAirRegenInterval 回 1 气泡。m_air 是 Physics 层累积器（权威），
+    //   PlayerState.air 是 Game 层显值镜像（经 airUpdated 同步）。respawn / loadSavedState 复位 m_air + 三计时器。
+    int m_air = kMaxAir;          // 当前气泡（0..kMaxAir；构造满，同 PlayerState::kMaxAir）
+    float m_airTimer = 0.0f;      // 入水减气累积
+    float m_drownTimer = 0.0f;    // 气泡归零后溺水扣血累积
+    float m_airRegenTimer = 0.0f; // 出水回气累积
     bool m_eyeInWater = false;       // t201 眼位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit eyeInWaterChanged）
     bool m_dead = false;             // t175 死亡态镜像（dropAllItems 置 true / respawn 置 false）：抑制死亡后
                                      //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）
@@ -515,6 +528,14 @@ private:
     static constexpr float kJump = 8.4f;       // 顶点约 1.25 格
     static constexpr float kMaxFall = 78.4f;
     static constexpr float kSuffocationInterval = 1.0f; // t160 窒息扣血间隔（秒；每秒 1HP，机制等价 MC 窒息 1/秒）
+    // t202 气泡 + 溺水时序（机制等价 MC 1.0：10 气泡 ≈ 15s 入水耗尽，归零后每秒 1HP）。
+    //   kAirInterval：眼位入水时每减 1 气泡的间隔（1.5s → 10 气泡 = 15s 才耗尽，同 MC 1.0 air=300 tick@20tps）。
+    //   kDrownInterval：air 归零后每扣 1HP 的间隔（1s，同 MC 溺水 1HP/s + 复用 fallDamageTaken→damaged 红闪 / 晃链）。
+    //   kAirRegenInterval：出水后每回 1 气泡的间隔（0.3s → 从 0 回满 ≈ 3s，比耗尽快避免反复溺水）。
+    static constexpr float kAirInterval = 1.5f;
+    static constexpr float kDrownInterval = 1.0f;
+    static constexpr float kAirRegenInterval = 0.3f;
+    static constexpr int kMaxAir = 10; // t202 气泡上限（须与 PlayerState::kMaxAir 一致；满气泡起算）
     static constexpr float kSens = 0.25f;      // 度/像素
     static constexpr float kStrideRate = 2.2f; // 步频系数（rad/米）：speed*dt*kStrideRate = walkPhase 增量（t45）
     static constexpr float kDeg = 0.017453292519943295f;

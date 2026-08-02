@@ -194,6 +194,11 @@ void PlayerController::respawn()
     cancelMining();           // 清生存累积挖掘态（裂纹叠层随之隐）
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
     m_dead = false;           // t175：清死亡态镜像 → pickupScan 恢复（重生后玩家已离开死亡点，可正常拾取）
+    // t202：重生回满气泡 + 清三计时器（出生点在水外 → 满气起算；PlayerState::respawn 同步 air 到 maxAir）。
+    if (m_air != kMaxAir) { m_air = kMaxAir; emit airUpdated(m_air); }
+    m_airTimer = 0.0f;
+    m_drownTimer = 0.0f;
+    m_airRegenTimer = 0.0f;
     m_pos = QVector3D(kSpawnX, kSpawnY, kSpawnZ); // 回出生列（X/Z；Y 由 snapSpawnToGround 贴地表）
     m_vel = QVector3D(0, 0, 0);
     snapSpawnToGround();      // t137：重生贴地表（消除 kSpawnY 兜底落差；设 m_pos.y + m_peakY）
@@ -214,6 +219,13 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     m_yaw = yaw;
     m_pitch = pitch;
     m_peakY = y; // 重置掉落基准（存档点起算，不误判陈旧落差）
+    // t202：存档不持久化 air（瞬态值，机制同速度 / 挖掘态；出水即回满）→ 加载回满气泡 + 清三计时器。
+    //   emit airUpdated 强制同步 PlayerState.air（防上一世界溺水残留低气值带进新世界显陈旧气泡条）。
+    m_air = kMaxAir;
+    emit airUpdated(m_air);
+    m_airTimer = 0.0f;
+    m_drownTimer = 0.0f;
+    m_airRegenTimer = 0.0f;
     if (m_flying) { m_flying = false; emit flyingChanged(); }
     if (m_moveState != Walk) setMoveState(Walk);
     const Mode target = (mode == int(Survival)) ? Survival
@@ -1556,6 +1568,53 @@ void PlayerController::step(qreal dt)
             }
         } else {
             m_suffocationTimer = 0.0f;
+        }
+    }
+
+    // t202 气泡 + 溺水（仅 Survival 耗气；Creative/Spectator 不溺水 → 恒满气）。复用 eyeInWater()（眼位
+    //   blockAt == Water；同 t201 蓝滤镜判定）。眼位入水：m_airTimer 累加 → 每 kAirInterval 减 1 气泡
+    //   （emit airUpdated 驱动 PlayerState.air + 气泡条）；气泡归零后 m_drownTimer 累加 → 每 kDrownInterval
+    //   扣 1HP（emit fallDamageTaken(1) 复用 takeDamage→damaged 红闪 / 视角晃链，与窒息同路径）。出水：
+    //   m_airRegenTimer 累加 → 每 kAirRegenInterval 回 1 气泡（spec「出水 → 气泡回满后消失」）。非 Survival
+    //   强制满气（切回 Survival 从满起算，防陈旧低气值残留）。死亡态（!m_captured 早 return）不进 step →
+    //   不耗气；respawn 复位 m_air + 三计时器。
+    if (m_world) {
+        if (m_mode != Survival) {
+            if (m_air != kMaxAir) { m_air = kMaxAir; emit airUpdated(m_air); }
+            m_airTimer = 0.0f;
+            m_drownTimer = 0.0f;
+            m_airRegenTimer = 0.0f;
+        } else if (eyeInWater()) {
+            m_airRegenTimer = 0.0f;
+            if (m_air > 0) {
+                m_airTimer += float(dt);
+                if (m_airTimer >= kAirInterval) {
+                    m_airTimer -= kAirInterval;
+                    --m_air;
+                    emit airUpdated(m_air);
+                }
+            } else {
+                // 气泡归零 → 溺水扣血（机制等价 MC 1.0：air=0 后每秒 1HP；复用 fallDamageTaken→damaged 链）
+                m_drownTimer += float(dt);
+                if (m_drownTimer >= kDrownInterval) {
+                    m_drownTimer -= kDrownInterval;
+                    emit fallDamageTaken(1);
+                }
+            }
+        } else {
+            // 出水：气泡逐格回满（满后气泡条消失；计时器同步清）
+            m_airTimer = 0.0f;
+            m_drownTimer = 0.0f;
+            if (m_air < kMaxAir) {
+                m_airRegenTimer += float(dt);
+                if (m_airRegenTimer >= kAirRegenInterval) {
+                    m_airRegenTimer -= kAirRegenInterval;
+                    ++m_air;
+                    emit airUpdated(m_air);
+                }
+            } else {
+                m_airRegenTimer = 0.0f;
+            }
         }
     }
 

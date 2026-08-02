@@ -51,11 +51,21 @@ void PlayerState::setHealth(int value)
     if (nv > 0 && m_dead) { m_dead = false; emit deadChanged(); } // 防陈旧死亡态残留显死亡界面
 }
 
-// t78 重生：清 dead 态 + 恢复满血满饥（无变化静默；dead 翻回 false 必发 deadChanged → 死亡界面隐）。
+// t202 设气泡值：clamp 到 [0, maxAir]；无变化静默。由 PlayerController 经 airUpdated 信号驱动（眼位入水
+//   逐格减 / 出水回满）；t176 存档 round-trip 亦走此入口（air 可能 < max，需保真）。
+void PlayerState::setAir(int value)
+{
+    const int nv = std::clamp(value, 0, kMaxAir);
+    if (nv != m_air) { m_air = nv; emit airChanged(); }
+}
+
+// t78 重生：清 dead 态 + 恢复满血满饥满气泡（无变化静默；dead 翻回 false 必发 deadChanged → 死亡界面隐）。
 //   仅复位本类数值；玩家传回出生点由 PlayerController::respawn() 负责（分层：状态 vs 定位）。
+//   t202：同步恢复 air 到 maxAir（重生回出生点必在地表 / 水外 → 满气泡起算）。
 void PlayerState::respawn()
 {
     if (m_dead) { m_dead = false; emit deadChanged(); } // 必发：驱动死亡界面 visible 绑定重算为 false
     if (m_health != kMaxHealth) { m_health = kMaxHealth; emit healthChanged(); }
     if (m_hunger != kMaxHunger) { m_hunger = kMaxHunger; emit hungerChanged(); }
+    if (m_air != kMaxAir) { m_air = kMaxAir; emit airChanged(); } // t202 重生回满气泡
 }

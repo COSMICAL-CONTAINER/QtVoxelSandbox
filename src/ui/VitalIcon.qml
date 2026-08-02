@@ -1,10 +1,11 @@
 import QtQuick
 
-// 生命心 / 饥饿鼓腿 单格图标（t22）：自绘原创像素图，Canvas 逐像素填充（§9 override (a)：
+// 生命心 / 饥饿鼓腿 / 气泡 单格图标（t22 / t202）：自绘原创像素图，Canvas 逐像素填充（§9 override (a)：
 // **非** MC GUI PNG，本项目程序生成）。kind 决定形状、level 决定填充态。
 //
-//   kind  : "heart"（生命心）| "hunger"（饥饿鼓腿）
+//   kind  : "heart"（生命心）| "hunger"（饥饿鼓腿）| "bubble"（t202 气泡）
 //   level : 0=empty（仅暗轮廓）/ 1=half（左半亮）/ 2=full（整格亮）
+//           bubble 仅用 0 / 2（无半态：气泡要么在要么不在，机制等价 MC 1.0 气泡）
 //
 // 像素位图 8×6（1=填充），scale=2 → 16×12 像素图，居中于 18×18 画布。8 列宽保证 half 分界
 // 恰为左 4 列（偶宽），与 MC「半心=左半红」一致。先整体画暗（空态轮廓），再按 level 叠亮色：
@@ -12,7 +13,7 @@ import QtQuick
 Canvas {
     id: root
 
-    property string kind: "heart" // "heart" | "hunger"
+    property string kind: "heart" // "heart" | "hunger" | "bubble"
     property int level: 2         // 0=empty 1=half 2=full
 
     width: 18
@@ -40,23 +41,38 @@ Canvas {
         [0,0,0,0,1,1,0,0],
         [0,0,0,0,1,1,0,0],
     ]
+    // t202 气泡位图（圆 blob + 左上高光缺角，显水滴 / 气泡感）。仅 full / empty 两态（无 half）。
+    readonly property var bubbleBmp: [
+        [0,1,1,1,1,1,1,0],
+        [1,0,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1],
+        [0,1,1,1,1,1,1,0],
+    ]
 
     onPaint: {
         const ctx = getContext("2d")
         ctx.reset()
         ctx.imageSmoothingEnabled = false // 像素硬边，不抗锯齿（1.0 风格）
 
-        const bmp = root.kind === "hunger" ? root.hungerBmp : root.heartBmp
+        const bmp = root.kind === "hunger" ? root.hungerBmp
+                   : root.kind === "bubble" ? root.bubbleBmp
+                   : root.heartBmp
         const rows = bmp.length
         const cols = bmp[0].length
         const scale = 2
         const ox = Math.floor((root.width  - cols * scale) / 2)
         const oy = Math.floor((root.height - rows * scale) / 2)
 
-        // 暗色（空态）：心=暗红、鼓腿=暗棕。先整体铺暗轮廓 → level=0 时只剩它即空态。
-        const dim = root.kind === "hunger" ? "#4a3520" : "#5a1a1a"
-        // 亮色（满态）：心=红、鼓腿=熟肉棕。
-        const bright = root.kind === "hunger" ? "#b5783a" : "#d22e2e"
+        // 暗色（空态）：心=暗红、鼓腿=暗棕、气泡=暗蓝灰。先整体铺暗轮廓 → level=0 时只剩它即空态。
+        const dim = root.kind === "hunger" ? "#4a3520"
+                   : root.kind === "bubble" ? "#1f3a52"
+                   : "#5a1a1a"
+        // 亮色（满态）：心=红、鼓腿=熟肉棕、气泡=亮青蓝（水下气泡视觉）。
+        const bright = root.kind === "hunger" ? "#b5783a"
+                       : root.kind === "bubble" ? "#7ec8ff"
+                       : "#d22e2e"
 
         for (let r = 0; r < rows; ++r) {
             for (let c = 0; c < cols; ++c) {

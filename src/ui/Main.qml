@@ -551,6 +551,9 @@ Window {
     Connections {
         target: player
         function onFallDamageTaken(hp) { playerState.takeDamage(hp) }
+        // t202 气泡值更新 → PlayerState.air（Physics 层算时序、Game 层持显值、呈现层路由；同 fallDamageTaken→
+        //   takeDamage 模式）。溺水扣血复用 onFallDamageTaken（→ takeDamage → damaged 红闪 / 视角晃）。
+        function onAirUpdated(air) { playerState.setAir(air) }
         // t35：生存破可掉落方块（drop=true）→ player 发 spawnItem → 转发到 manager 生成实体。
         // 创造 / 不可采掘时 player 不发本信号（无实体产出）。ViewModel 不持有 PlayerController，
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
@@ -3068,6 +3071,42 @@ Window {
                 delegate: VitalIcon {
                     kind: "hunger"
                     level: vitalsBar.levelFor(playerState.hunger, index)
+                }
+            }
+        }
+    }
+
+    // t202 气泡条（仅 Survival）：置食物 / 心行上一行（vitalsBar 之上），10 颗气泡居中。
+    //   显隐：仅 Survival 且（眼位入水 或 气泡未满）→ 头没入水首次出现、出水回满后消失（spec）。
+    //   每气泡 = 1 air（无半态）；level = air > index ? 2 : 0（index 0 = 最左；右耗尽，与心一致）。
+    //   气泡图复用 VitalIcon kind="bubble"（自绘原创 Canvas，§9 override (a) 非 MC GUI PNG）。
+    //   分层（PLAN §2）：呈现层只读 playerState.air（Game 层显值）+ player.eyeInWater（Physics 层水态），
+    //   绝不反向写；air 由 PlayerController.airUpdated 信号驱动刷新（经 Connections 路由到 setAir）。
+    Item {
+        id: airBar
+        visible: window.appState === "playing"
+                 && player.mode === PlayerController.Survival
+                 && (player.eyeInWater || playerState.air < playerState.maxAir)
+        anchors.bottom: vitalsBar.top
+        anchors.bottomMargin: 2
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: vitalsBar.width
+        height: 18
+
+        // 第 index 颗气泡的态：air > index → full(2)，否则 empty(0)。右耗尽（index 大的先空）。
+        function levelForAir(curValue, index) {
+            return curValue > index ? 2 : 0
+        }
+
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            spacing: 0
+            Repeater {
+                model: playerState.maxAir
+                delegate: VitalIcon {
+                    kind: "bubble"
+                    level: airBar.levelForAir(playerState.air, index)
                 }
             }
         }
