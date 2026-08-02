@@ -504,6 +504,9 @@ private:
     bool m_hasHit = false;
     qint32 m_hitBx = 0, m_hitBy = 0, m_hitBz = 0;
     qint32 m_hitNx = 0, m_hitNy = 0, m_hitNz = 0;
+    // t212 命中点世界 Y（眼位 + 视线*dist；updateRaycast 每帧刷新，不随 changed 早退——同格内移动格坐标/
+    //   法线不变但命中点 Y 仍在变，placeBlock 点击瞬间需读最新值定 slab 上/下半与互补合并）。无命中=0。
+    float m_hitPointY = 0.0f;
 
     static constexpr float kHalfW = 0.3f;      // 宽 0.6
     static constexpr float kHeight = 1.8f;

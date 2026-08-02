@@ -391,6 +391,12 @@ void PlayerController::updateRaycast()
     //   水均穿过，non-solid 不拉近视距），故本处显式传 HitTorch 仅作用于选体。
     const RayHit h = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitTorch);
 
+    // t212 命中点 Y（供 slab 上/下半放置 + 互补半合并判定，placeBlock 读）。lookDirection 已归一、dist 为起点
+    //   到命中面欧氏距离（见 raycast.h）→ 命中点 = 眼位 + 视线*dist。**每帧刷新**（不随下方 changed 早退）：
+    //   准星在同格内移动时格坐标/法线不变 → changed=false 跳过 emit，但命中点 Y 仍在变，placeBlock 点击瞬间
+    //   需读最新值定半位，故须在早退之前写入。无命中 → 0（placeBlock 入口 m_hasHit 守卫已拦，不读此值）。
+    m_hitPointY = h.valid ? (position().y() + lookDirection().y() * h.dist) : 0.0f;
+
     // 仅在命中态/格坐标/法线真正变化时 emit，避免每帧无谓刷新 QML 绑定。
     const bool changed = (h.valid != m_hasHit)
         || (h.valid && (h.bx != m_hitBx || h.by != m_hitBy || h.bz != m_hitBz
@@ -408,6 +414,7 @@ void PlayerController::clearHit()
     if (!m_hasHit) return;
     m_hasHit = false;
     m_hitNx = m_hitNy = m_hitNz = 0;
+    m_hitPointY = 0.0f; // t212：与命中态同步清零
     emit hitChanged();
 }
 
@@ -868,13 +875,20 @@ void PlayerController::placeBlock()
     //   door 占两格 → 另算上格。
     quint8 placeState = 0;
     if (m_selectedBlock == BlockRegistry::WoodSlab) {
-        // t163(a) 上下半独立放置（spec「据命中面 / 玩家视线定上半下半」）：
-        //   命中顶面（ny=+1，放在方块上方）→ 下半(state=0)；命中底面（ny=-1，天花板下方）→ 上半(state=1)；
-        //   命中侧面（ny=0，靠墙放）→ 据玩家俯仰：仰视(m_pitch>0)→上半，俯视→下半。
-        //   （pitch 约定：>0 = 视线 y 分量为正 = 向上看，见 lookDirection / m_pitch=-42 默认略俯视。）
+        // t212 命中面检测（spec「瞄已放方块上50%→上半砖；下50%→下半砖」，备注「命中点 y 与 hitCell y 差值判
+        //   上下半」）：
+        //   命中顶面（ny=+1，方块上方）→ 下半(state=0)：满格之上放下半砖，顶面+0.5 步可走上去（机制等价 MC
+        //     顶面放置造台阶）；命中底面（ny=-1，天花板下方）→ 上半(state=1)：倒挂半砖。二者命中点恒在格边界
+        //     （fracY=1/0），无「上下半」之分，沿用步进 / 倒挂约定不变。
+        //   命中侧面（ny=0，靠墙 / 靠方块侧）→ 据命中点 Y 在该格内的小数位置：上50%(fracY>=0.5)→上半(state=1)，
+        //     下50%→下半(state=0)。旧实现用玩家俯仰(m_pitch)判侧面半位，但默认略俯视(pitch=-42)→侧面恒下半，
+        //     与「瞄方块上半应放上半砖」直觉相悖（spec 报「现恒下半砖」）；改读命中点 Y 后瞄哪半放哪半。
         if (m_hitNy > 0) placeState = 0;
         else if (m_hitNy < 0) placeState = 1;
-        else placeState = quint8(m_pitch > 0 ? 1 : 0);
+        else {
+            const float fracY = m_hitPointY - float(m_hitBy); // 命中点在命中格内的 Y 小数分量 [0,1]
+            placeState = (fracY >= 0.5f) ? 1 : 0;
+        }
     } else if (m_selectedBlock == BlockRegistry::WoodStairs) {
         // t147：state[1:0]=水平朝向；bit2=上下倒置。
         //   t163 朝向修正：朝向 = horizontalFacing **异或 1**（取玩家反向）→ 楼梯「开口」朝玩家侧
@@ -895,7 +909,14 @@ void PlayerController::placeBlock()
         && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::WoodSlab) {
         const quint8 hitState = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
         const bool hitUpper = (hitState & 1) != 0;
-        const bool merge = (m_hitNy > 0 && !hitUpper) || (m_hitNy < 0 && hitUpper);
+        // t212 同格互补半合并（spec「同格上半+下半→合并整砖」+ 修「放了上半砖后同格下半砖放不下」/
+        //   「瞄上方却放旁边」）：据命中点 Y 判是否点中**空半**——下半砖(filled [0,0.5]) 点其上空半(fracY>=0.5)、
+        //   上半砖(filled [0.5,1]) 点其下空半(fracY<0.5) → 合并为 Planks 满格。旧实现仅认顶/底面(ny≠0)合并，
+        //   侧面点击不合并 → 右键已有半砖侧面会落到邻格（spec 报「瞄上方却放旁边」）而非补齐同格；且上半砖只能
+        //   由底面合并（玩家很难从下方点中）→「放了上半砖后同格下半砖放不下」。改读命中点 Y 后，任意面点中
+        //   空半即合并（含侧面）；点中实半则 fall-through 走下方常规邻格放置。
+        const float fracY = m_hitPointY - float(m_hitBy);
+        const bool merge = hitUpper ? (fracY < 0.5f) : (fracY >= 0.5f);
         if (merge) {
             if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks, 0)) return;
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks,
