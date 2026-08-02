@@ -241,13 +241,25 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
 }
 } // namespace
 
-// 当前 collision 与 selection 同数据（异形方块 VoxelShape 与 outline shape 多数一致；机制等价 MC）。
-//   分离接口备将来分歧（如某些方块选中框略放宽 / 碰撞略收紧）。两者都走 shapeBoxes —— 改形状只改一处。
-//   t152：collision 在开门态返回空（isCollidableWhenClosed=false → 玩家穿过），selection 仍画实际板形
-//   （开门 = 竖直薄板，选中框跟随可见形状；与渲染同源 shapeBoxes 不变）。
+// collision 与 selection 在此**刻意分歧**（t208）：
+//   - selectionAABBs 仍走 shapeBoxes（贴合渲染形状：门=薄板选中框、与视觉一致）。
+//   - collisionAABBs 对**门合态**返回**满格整立方** {0,0,0,1,1,1}，而非薄板。
+// 分歧理由（t208 根因）：门薄板仅 3/16 格厚，贴朝向边。孤立看「薄板沿法线轴挡住玩家」是对的（机制等价
+//   MC 1.0 门 VoxelShape），但本引擎里有两条穿隧道路径让薄板形同虚设：
+//   (1) creative-fly 路径**无子步**（unlike walk 路径的 ≤0.4/子步）：滚轮加速到 16+ blocks/sec 叠卡顿（dt
+//       钳到 0.05）→ 单次 moveAxis 位移 ≥0.8 > 薄板穿隧道阈值（板厚 0.1875 + 玩家宽 0.6 = 0.7875）→ 玩家
+//       一步跨过薄板。门是游戏内最薄的可放置障碍 → 最先被穿（整立方墙阈值 1.6，飞 20 也穿不过）。
+//   (2) 门放置时上格越世界高度 → setBlock 静默失败（World 返 false 不查）→ 只剩单格门 → 玩家跳跃跨过。
+//   满格碰撞**结构性地**消除穿隧道（玩家 AABB 整格重叠必被检出，无论位移多大）+ 不依赖子步正确性。
+//   代价：关门时玩家不能踏入门口开敞侧（被整格挡在门外）——机制简化为「关门=整格墙 / 开门=可通过」，
+//   仍可右键开合（射线命中走 blockAt，非 collisionAABBs）。开门态 isCollidableWhenClosed=false → 空碰撞，
+//   玩家穿过（同 MC）。selectionAABBs 不变 → 选中框仍贴合薄板视觉形状（F3+B 碰撞箱显满格 = 诚实标注）。
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 blockId, quint8 state)
 {
     if (!isCollidableWhenClosed(blockId, state)) return {}; // 开门 / 活版门 → 无碰撞 sub-AABB（玩家穿过）
+    // t208 门合态走满格整立方碰撞（防穿隧道；selectionAABBs 仍走 shapeBoxes 贴合视觉薄板形状）。
+    if (def(blockId).shape == ShapeDoor)
+        return {BlockAABB{0, 0, 0, 1, 1, 1}};
     return shapeBoxes(def(blockId).shape, state);
 }
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 blockId, quint8 state)

@@ -901,6 +901,10 @@ void PlayerController::placeBlock()
     // t134 不完整方块放置：door 占两格（下格 + 上格），需上格也为空气；其余单格。走 setBlock 5 参数版
     //   （写 id + state）。state 复用上方算出的 placeState / doorFacing（逻辑同源，无重复推导）。
     if (isDoor) {
+        // t208 防半截门（可穿根因 2）：门占两格，上格越世界高度时 World::setBlock 静默返 false（caller 不查）
+        //   → 只剩下单格 → 玩家跳跃（顶点 1.25 > 单格 1.0）即可跨过。显式查 ty+1 在界内且为空气才放，
+        //   否则整门拒绝（两格都不放），杜绝「上格缺失的单格门」。
+        if (ty + 1 >= m_world->height()) return;                       // 上格越世界顶 → 门放不下（拒整门）
         if (m_world->blockAt(tx, ty + 1, tz) != BlockRegistry::Air) return; // 上格非空 → 门放不下
         m_world->setBlock(tx, ty, tz, idByte, doorFacing);              // 下格：bit3=0(下格) bit2=0(合) bit[1:0]=朝向
         m_world->setBlock(tx, ty + 1, tz, idByte, quint8(doorFacing | 8)); // 上格：bit3=1
@@ -1387,9 +1391,20 @@ void PlayerController::step(qreal dt)
         QVector3D v = wish * fs;
         if (space) v.setY(fs);
         if (shift) v.setY(-fs);
-        moveAxis(0, v.x() * dt); // 碰撞，无重力
-        moveAxis(2, v.z() * dt);
-        moveAxis(1, v.y() * dt);
+        // t208 防穿隧道（薄板 / 门）：旧 creative-fly 无子步（unlike walk 路径的 ≤0.4/子步）→ 滚轮加速到 16+
+        //   blocks/sec 叠卡顿（dt 钳到 0.05）时单次 moveAxis 位移可达 0.8+，一步跨过薄障碍（门 3/16 板穿隧道
+        //   阈值仅 0.7875 = 板厚 0.1875 + 玩家宽 0.6）。门是游戏内最薄的可放置障碍 → 最先被穿（整立方墙阈值
+        //   1.6，飞 20×0.05=1.0 也穿不过）。补子步（同 walk：任意轴单步 ≤0.4 格）→ 子步位移 < 玩家宽 0.6 →
+        //   必与路径上任何障碍重叠被检出。lessons-learned「dt 钳制 + 子步防穿墙」同源。
+        QVector3D delta = v * float(dt);
+        const float md = std::max({std::fabs(delta.x()), std::fabs(delta.y()), std::fabs(delta.z())});
+        const int sub = std::max(1, int(std::ceil(md / 0.4f)));
+        delta /= float(sub);
+        for (int i = 0; i < sub; ++i) {
+            moveAxis(0, delta.x()); // 碰撞，无重力
+            moveAxis(2, delta.z());
+            moveAxis(1, delta.y());
+        }
         if (m_onGround) { m_onGround = false; emit onGroundChanged(); }
         reportHorizSpeed(posBefore, dt); // t159：speed 属性上报
         emit positionChanged();
