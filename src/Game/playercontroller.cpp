@@ -596,15 +596,27 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     if (drop) {
         int dropId = BlockRegistry::dropId(brokenId);
         int dropCount = std::max(1, BlockRegistry::dropCount(brokenId));
-        // t206 双半砖（合并态）破块掉 2× WoodSlab（非 1× Planks）：placeBlock 合并时写 Planks +
-        //   PlanksFromDoubleSlabBit 标记「源自双半砖」。此处检本 bit → 改掉 2 块半砖（机制等价 MC
-        //   「double slab 破坏掉 2 块半砖」）。spawnItem 传 count=2 → 1 实体携 2 件（拾取 addStack 入 2 块）。
-        //   常规 Planks（state=0）不进此分支 → 掉 1× Planks 不变。brokenState 已在 setBlock(Air) 前读（t134 时序）。
+        // t215 双半砖（合并态）破块掉 2× WoodSlab 为**2 个独立物品实体**（非 1 个 count=2 栈）：
+        //   placeBlock 合并时写 Planks + PlanksFromDoubleSlabBit 标记「源自双半砖」。此处检本 bit →
+        //   改掉 2 块半砖。机制等价 MC「double slab 破坏掉 2 块半砖，各自为独立掉落物」。原实现
+        //   emit 1 次 count=2 → 1 实体携 2 件（拾取 addStack 一次入 2）；改 emit 2 次 count=1 → 2 实体
+        //   各携 1 件（拾取各入 1）。两实体散布到破格 + 1 个非实体水平邻格做视觉分离（机制等价 MC 方块
+        //   掉落的水平散布；ItemEntityManager spawnItem 仅整数格坐标存格中心，故以邻格区分，且选非实体
+        //   邻格避免实体被重力弹到墙顶偏离破块）。无可用邻格则两实体同破格（仍 2 实体，拾取各入 1）。
+        //   常规 Planks（state=0）不进此分支 → 掉 1× Planks 不变。brokenState 已在 setBlock(Air) 前读
+        //   （t134 时序：4 参数 setBlock 委托 5 参数版以 state=0 写入，之后 stateAt 永返 0）。
         if (brokenId == BlockRegistry::Planks && (brokenState & BlockRegistry::PlanksFromDoubleSlabBit)) {
             dropId = BlockRegistry::WoodSlab;
-            dropCount = 2;
+            constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+            int sx = x, sz = z;
+            for (const auto &o : kHoriz) {
+                if (!BlockRegistry::isSolid(m_world->blockAt(x + o[0], y, z + o[1]))) { sx = x + o[0]; sz = z + o[1]; break; }
+            }
+            emit spawnItem(x, y, z, dropId, 1);
+            emit spawnItem(sx, y, sz, dropId, 1);
+        } else {
+            emit spawnItem(x, y, z, dropId, dropCount); // t83：传 dropId（Stone→Cobble / 矿石→材料），非 brokenId
         }
-        emit spawnItem(x, y, z, dropId, dropCount); // t83：传 dropId（Stone→Cobble / 矿石→材料 / 双砖→2×slab），非 brokenId
     }
     emit swingArm();                                // 破块成功 → 第一人称手挥动（t29）
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）
