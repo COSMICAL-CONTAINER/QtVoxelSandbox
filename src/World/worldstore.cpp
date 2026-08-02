@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
@@ -234,11 +235,53 @@ bool WorldStore::deleteWorld(const QString &file)
         qCWarning(lcSave) << "deleteWorld: not found" << path;
         return false;
     }
+    // t191：配套删截图封面 PNG（与 .sqlite 并排的 sidecar）。文件锁在 .sqlite 上，PNG 可直接删；
+    //   不存在 / 删失败不阻断删世界（cover 是附属，主库删除仍进行）。
+    deleteCover(file);
     if (!QFile::remove(path)) {
         qCWarning(lcSave) << "deleteWorld: remove failed" << path;
         return false;
     }
     qCInfo(lcSave) << "deleted world" << file;
+    return true;
+}
+
+// t191 封面 PNG 路径：与 .sqlite 同名并排（saves/<completeBaseName>.png）。file 含 .sqlite 后缀；
+//   completeBaseName 去「最后一个」扩展名（"a.sqlite"→"a"、"a.b.sqlite"→"a.b"），与 dbPath 同 savesDir。
+QString WorldStore::coverPath(const QString &file) const
+{
+    const QString base = QFileInfo(file).completeBaseName();
+    return QDir(savesDir()).absoluteFilePath(base + QStringLiteral(".png"));
+}
+
+// t191 把 grabToImage 拿到的 QImage 存为封面 PNG。image 来自 QML 的 grabResult.image（QVariant 包 QImage）。
+//   null 图 / 写盘失败 → false + qWarning（caller 不阻塞退出，§2-E 降级为「无封面」灰块）。
+bool WorldStore::saveCover(const QString &file, const QVariant &image)
+{
+    const QImage img = qvariant_cast<QImage>(image);
+    if (img.isNull()) {
+        qCWarning(lcSave) << "saveCover: null image for" << file;
+        return false;
+    }
+    const QString path = coverPath(file);
+    // QImage::save 据扩展名选格式（.png → PNG）；写盘失败（目录不可写 / 磁盘满）→ false。
+    if (!img.save(path, "PNG")) {
+        qCWarning(lcSave) << "saveCover: QImage::save failed:" << path;
+        return false;
+    }
+    qCInfo(lcSave) << "saved cover for" << file << "->" << path;
+    return true;
+}
+
+// t191 删封面 PNG（deleteWorld 内部调，也作 Q_INVOKABLE 供外部按需清理）。不存在视为成功（幂等）。
+bool WorldStore::deleteCover(const QString &file)
+{
+    const QString path = coverPath(file);
+    if (!QFile::exists(path)) return true;
+    if (!QFile::remove(path)) {
+        qCWarning(lcSave) << "deleteCover: remove failed:" << path;
+        return false;
+    }
     return true;
 }
 

@@ -108,13 +108,34 @@ Item {
                                     onClicked: { root.selectedFile = model.file; root.selectedName = model.name }
                                     onDoubleClicked: if (model.file) root.playRequested(model.file, model.name)
                                 }
+                                // t191 截图封面缩略图（左侧 44×44）：store.coverPath 拼成 file:/// URL；
+                                //   无封面（新世界 / 抓帧失败）→ Image 加载失败留空 → 透出底层灰槽作占位。
+                                //   cache:false 每次重读盘（封面被「保存退出」覆盖后刷新见新画面，不留陈旧缓存）。
+                                Rectangle {
+                                    id: coverSlot
+                                    anchors.left: parent.left; anchors.leftMargin: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 44; height: 44; radius: 4
+                                    color: "#0a1018"; border.color: "#2a3848"; border.width: 1
+                                    clip: true
+                                    Image {
+                                        anchors.fill: parent
+                                        source: root.store ? "file:///" + root.store.coverPath(model.file) : ""
+                                        fillMode: Image.PreserveAspectCrop
+                                        cache: false
+                                        asynchronous: true
+                                        sourceSize.width: 88; sourceSize.height: 88
+                                    }
+                                }
                                 Column {
-                                    anchors.left: parent.left; anchors.leftMargin: 14
+                                    anchors.left: parent.left; anchors.leftMargin: 66
                                     anchors.verticalCenter: parent.verticalCenter
                                     spacing: 4
                                     Text {
                                         text: model.name
                                         color: "#eaf2ea"; font.pixelSize: 16; font.bold: true
+                                        width: worldsCol.width - 66 - 14
+                                        elide: Text.ElideRight
                                     }
                                     Text {
                                         // 种子 + 上次游玩时间（ playedAt=0 显示「未游玩」）。

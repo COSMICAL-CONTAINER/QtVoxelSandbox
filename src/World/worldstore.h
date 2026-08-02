@@ -55,7 +55,18 @@ public:
     //   worldgen 不在此做 —— 创建只落 meta，玩世界时由 World 按 seed 生成（首次进入即新生成地形）。
     Q_INVOKABLE QString createWorld(const QString &name, int seed);
     // 删除世界（文件名相对 saves/）。失败（不存在 / 无权删）→ false + qWarning。
+    //   t191：配套删除截图封面 PNG（与 .sqlite 同名并排的 sidecar），免孤儿文件残留。
     Q_INVOKABLE bool deleteWorld(const QString &file);
+
+    // t191 截图封面：世界存档的缩略图 PNG（与 .sqlite 同名并排放：saves/<base>.png）。
+    //   - coverPath(file)：返回封面 PNG 绝对路径（供 WorldList delegate 拼 file:/// URL 加载缩略图）。
+    //   - saveCover(file, image)：把 grabToImage 拿到的 QImage 存为 PNG（QML 传 grabResult.image）。
+    //     image 为 null / 写盘失败 → false + qWarning（不阻塞退出，§2-E）。
+    //   - deleteCover(file)：删 PNG（deleteWorld 内部已调，此 Q_INVOKABLE 供外部按需清理）。
+    //   file 均为相对 saves/ 的存档文件名（含 .sqlite）；封面 base 名取 QFileInfo::completeBaseName。
+    Q_INVOKABLE QString coverPath(const QString &file) const;
+    Q_INVOKABLE bool saveCover(const QString &file, const QVariant &image);
+    Q_INVOKABLE bool deleteCover(const QString &file);
     // 打开已有世界（文件名相对 saves/）→ 后续 saveAll/loadChunks/loadMeta/savePlayerData/loadPlayerData
     //   作用于该库。版本校验 / schema 初始化在此做；返回是否成功打开（版本不符 / 损坏 → false）。
     Q_INVOKABLE bool openWorld(const QString &file);

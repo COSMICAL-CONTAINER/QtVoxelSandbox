@@ -213,16 +213,47 @@ Window {
             hotbar: hotbar, main: main
         }
     }
-    // t176 保存并退出到世界列表（ESC 暂停叠层「保存并退出」按钮）：归还手持物 → 存玩家态 + 存地形 →
-    //   关库 → 清实体 → 切 worldlist 态。spec「退出存」：每次退出都把当前进度落盘。
+    // t176 保存并退出到世界列表（ESC 暂停叠层「保存并退出」按钮）：归还手持物 → 存玩家态 + 存地形 +
+    //   t191 截封面 → 关库 → 清实体 → 切 worldlist 态。spec「退出存」：每次退出都把当前进度落盘。
+    //   t191：在 closeWorld / View3D 离场前对 view3d 抓帧存封面（spec「closeWorld 前截屏」）。grabToImage 异步
+    //   → 把 closeWorld + 切态推迟到 ready 回调（保证 View3D 仍渲染 playing 画面被截到，而非离场后空帧）；
+    //   ready / 兜底定时器任一先发 → finishExitToWorldList 收尾（coverGrabPending 防双调）。抓帧失败 / 无世界
+    //   → 立即 finish（不阻塞退出，§2-E）。
     function saveAndExitToWorldList() {
+        if (coverGrabPending) return   // 防连点退出按钮重复触发（已有一次退出在进行）
         returnHeldToHotbar()
-        if (worldStore.isOpen()) {
+        const file = currentWorldFile
+        const hasOpen = worldStore.isOpen()
+        if (hasOpen) {
             worldStore.savePlayerData(gatherPlayerState())
             // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
             worldStore.saveAll(currentWorldName, chestStore.allChests())
-            worldStore.closeWorld()
         }
+        coverGrabPending = true   // 标记退出进行中（防 ready + 兜底定时器双调 finish）
+        // 截封面：仅在 playing（view3d 抓得到画面）+ 有世界文件名（saveCover 据此写 sidecar PNG）时抓。
+        if (hasOpen && file.length > 0 && view3d.visible) {
+            // 224×224 = 缩略图显示尺寸 44×44 的 5×，给 Image 缩放留余量（清晰）。
+            const grab = view3d.grabToImage(Qt.size(224, 224))
+            if (grab) {
+                coverExitFallback.restart()   // 兜底：500ms 内 ready 未发 → 直接 finish（不卡退出）
+                grab.ready.connect(function() {
+                    coverExitFallback.stop()
+                    if (worldStore.isOpen())
+                        worldStore.saveCover(file, grab.image)   // null image → saveCover 内降级 qWarning
+                    window.finishExitToWorldList()
+                })
+                return   // 收尾交 ready 回调
+            }
+        }
+        window.finishExitToWorldList()
+    }
+    // t191 saveAndExitToWorldList 的收尾段（closeWorld + 清实体 + 切态）。从 ready 回调 / 兜底定时器 / 抓帧跳过
+    //   三路径汇集，coverGrabPending 守门防重复执行。
+    function finishExitToWorldList() {
+        if (!coverGrabPending) return
+        coverGrabPending = false
+        coverExitFallback.stop()
+        if (worldStore.isOpen()) worldStore.closeWorld()
         inventoryOpen = false
         craftingTableOpen = false
         furnaceOpen = false
@@ -392,6 +423,16 @@ Window {
     // t176 当前世界会话：进入世界时记 file/name，保存退出时 saveAll(name) / 显示用。
     property string currentWorldFile: ""
     property string currentWorldName: ""
+    // t191 截封面退出进行中标志：grabToImage 异步，ready 回调与兜底定时器两路可能都发 → 此标志 + finishExitToWorldList
+    //   入口守门防重复收尾；saveAndExitToWorldList 开头也据它防连点重复触发。
+    property bool coverGrabPending: false
+    // t191 抓帧兜底定时器：ready 500ms 内未发（极端情况，View3D 不可抓帧）→ 直接收尾，绝不卡退出。
+    Timer {
+        id: coverExitFallback
+        interval: 500
+        repeat: false
+        onTriggered: window.finishExitToWorldList()
+    }
 
     // 昼夜时钟（t09，PLAN §2-H）：~20 分钟周期的天光亮度乘子 lerp（**非**旋转方向光）。
     // dayPhase 0..1 循环（0=正午 / 0.5=子夜）；skyLight [0,1] 是纯函数派生的天光乘子，供下面
@@ -583,6 +624,7 @@ Window {
     }
 
     View3D {
+        id: view3d
         anchors.fill: parent
         environment: SceneEnvironment {
             // t09：clearColor 随天光乘子 lerp 昼(#9ec6e8)↔夜(#0b1026)；方向固定（PLAN §2-H 非
