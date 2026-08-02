@@ -304,6 +304,17 @@ public:
     //   OnNZ→(0,0,-1)；OnPZ→(0,0,+1)。越界 state 值 → TorchFloor 兜底。finishMiningAt 据此定位唯一附着格。
     static void torchAttachOffset(quint8 state, int &dx, int &dy, int &dz);
 
+    // t225 箱子朝向（存 chunk state，低 2 位编码水平朝向）：放置时记录箱子「前面（锁面，chest_front 贴图）」
+    //   朝哪一侧，mesher 据此把 chest_front 贴到对应面（其余三侧面 chest_side、顶/底 chest_top）。机制等价
+    //   MC 1.0 箱子放置时锁面朝向玩家。编码与 horizontalFacing 同源（0=+X 1=-X 2=+Z 3=-Z）= 箱子前面所朝方向。
+    //   state 经 m_states 落 SQLite round-trip 保真（旧存档箱子 state=0 → 前面 +X 兜底；箱子仅玩家放置、
+    //   罕见旧存档，朝向变化可接受）。**唯一消费点**：ChunkGeometry::tileFor（mesher 据 state 选前面贴图）。
+    //   collisionAABBs / selectionAABBs 不读 chest state（chest 走 ShapeFull 整立方）→ 复用 state 作朝向编码
+    //   零回归（同 PlanksFromDoubleSlabBit / torch state 复用 state 作 marker 的模式）。BlockCube 手持 / 掉落
+    //   走 stateless tileIndex（前面恒 -Z，旧默认）→ 物品图标外观不变。
+    // chestFrontFace(state)：返回前面所朝的 Face（PosX/NegX/PosZ/NegZ）；低 2 位解码，越界位 → NegZ 兜底。
+    static Face chestFrontFace(quint8 state);
+
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度
     static int toolType(quint8 blockId);      // 采掘所需工具类型（ToolType）

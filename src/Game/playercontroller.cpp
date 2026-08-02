@@ -927,6 +927,11 @@ void PlayerController::placeBlock()
         //   放置时一致）。torch 走 ShapeNone → collisionAABBs/selectionAABBs/mesher 均不读 state，复用 state
         //   作附着编码零回归。
         placeState = quint8(BlockRegistry::torchOrientFromNormal(m_hitNx, m_hitNy, m_hitNz));
+    } else if (m_selectedBlock == BlockRegistry::Chest) {
+        // t225 箱子前面（锁面）朝玩家侧：state = horizontalFacing ^ 1（玩家朝向的反向 = 箱子前面所朝方向，
+        //   机制等价 MC 1.0 箱子放置锁面朝玩家）。编码与 horizontalFacing 同源（0=+X 1=-X 2=+Z 3=-Z）；
+        //   mesher 据 state 把 chest_front 贴到对应面，QML 盖子铰链摆在前面背侧（锁面相对）。
+        placeState = quint8((horizontalFacing() & 3) ^ 1);
     }
     // t163(b) 同格双半砖合整（spec「同格下半砖上再放下半砖→合并为完整方块阻挡行走」）：
     //   右键 slab 时若点中的就是 slab，且点击面朝向其空半（lower 顶面 ny>0 / upper 底面 ny<0）→ 在同格

@@ -149,9 +149,19 @@ void ChunkGeometry::onWorldChanged()
 }
 
 // 查表（单一权威：BlockRegistry）。行为与历史硬编码一致：草顶/草侧/草底、其余各面统一。
-int ChunkGeometry::tileFor(quint8 block, int face) const
+//   t225 箱子特例：前面（锁面 chest_front）所朝面由 state 决定（放置时朝玩家），其余三侧面 chest_side、
+//   顶/底 chest_top。其余方块 state inert（tileFor 退化为 stateless BlockRegistry::tileIndex）。
+int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
 {
     // face: 0=+X 1=-X 2=+Y(顶) 3=-Y(底) 4=+Z 5=-Z（须与 BlockRegistry::Face 一致）
+    if (block == BlockRegistry::Chest) {
+        const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
+        const int frontFace = int(BlockRegistry::chestFrontFace(state)); // 前面（锁面）所朝面
+        if (face == frontFace) return d.frontTile;                       // chest_front（锁面）
+        if (face == int(BlockRegistry::Top) || face == int(BlockRegistry::Bottom))
+            return d.topTile;                                            // 顶/底 = chest_top
+        return d.sideTile;                                               // 其余三侧面 = chest_side
+    }
     return BlockRegistry::tileIndex(block, BlockRegistry::Face(face));
 }
 
@@ -454,7 +464,9 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (isWater && nb == BlockRegistry::Water) continue; // 水-水面互剔
                             const int ax = wx + F.dir[0], ay = ly + F.dir[1], az = wz + F.dir[2];
                             e.valid = true;
-                            e.tile = tileFor(blk, f);
+                            // t225 箱子前面朝向由 state 决定（其余方块 state inert）→ mask tile 含 state，
+                            //   不同朝向的相邻箱子在前侧面自然不合并（侧/顶/底面仍同 tile 可合并）。
+                            e.tile = tileFor(blk, f, stateAtWorld(wx, ly, wz));
                             e.sky = m_world->skyLightAt(ax, ay, az);
                             e.block = m_world->blockLightAt(ax, ay, az);
                         }
@@ -536,7 +548,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                             if (BlockRegistry::isSolid(nb)) continue;
                             if (isWater && nb == BlockRegistry::Water) continue;
-                            const int t = tileFor(b, f);
+                            const int t = tileFor(b, f, stateAtWorld(wx, ly, wz)); // t225 箱子前面朝向由 state 决定
                             const float u0 = t * tileW + hx, u1 = (t + 1) * tileW - hx;
                             const int ax = wx + F.dir[0], ay = ly + F.dir[1], az = wz + F.dir[2];
                             const float nbSkyF = m_world->skyLightAt(ax, ay, az) / 15.0f;

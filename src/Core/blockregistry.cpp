@@ -322,6 +322,18 @@ void BlockRegistry::torchAttachOffset(quint8 state, int &dx, int &dy, int &dz)
     }
 }
 
+// t225 箱子前面（锁面）所朝 Face（state 低 2 位解码，与 horizontalFacing 同源 0=+X 1=-X 2=+Z 3=-Z）。
+//   越界高位忽略（& 3）；mesher 据此把 chest_front 贴到对应面。无需「兜底」分支 —— 低 2 位四值全合法。
+BlockRegistry::Face BlockRegistry::chestFrontFace(quint8 state)
+{
+    switch (state & 3) {
+    case 0: return PosX;
+    case 1: return NegX;
+    case 2: return PosZ;
+    default: return NegZ;
+    }
+}
+
 // 音效材质分组（t118）：id → MaterialGroup 纯函数（按 BlockRegistry::Id 枚举值分支，单一权威）。// AudioManager 据此选 break / mining / step 音色；越界 / air / torch / 未知 → GroupDefault
 // （AudioManager 内部用 GroupStone 兜底播放，避免缺组静默）。
 // 机制等价 MC「方块 → SoundType」（机制对齐，非名词照搬）。新方块追加时按材质归入对应组或补新组。
