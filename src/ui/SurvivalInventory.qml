@@ -134,6 +134,8 @@ Item {
     function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
     function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
+    // t230 生存 2×2 Shift+左键结果槽 → 批量合成（耗尽最小原料数；产物入背包非光标）。
+    function slotShiftLeftCraft() { InventoryOps.slotShiftLeftCraft(root) }
 
     // t50 合成检测：读 2×2 craftSlots（行优先：[0]=TL [1]=TR [2]=BL [3]=BR）查 RecipeRegistry::match
     // （经 hotbar.recipeMatch 透传）。返回匹配配方的 QVariantMap（outputId/outputCount/consumeCount）或
@@ -485,9 +487,18 @@ Item {
                             font.pixelSize: 13; font.bold: true
                         }
                     }
-                    // 左/右键均触发合成（MC：结果槽左键取一批）。
+                    // 点击结果槽 → 合成。t230：左键 Shift → 批量合成（耗尽最小原料数；产物入背包），
+                    //   左键非 Shift / 右键 → 单次合成 craftOne（消耗每原料 1、产出 outputCount 到光标）。
+                    //   MC 1.0：Shift+左键结果槽才批量；Shift+右键 / 右键均单次。
                     TapHandler {
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: {
+                            if (window.shiftHeld) { root.slotShiftLeftCraft(); return }
+                            root.craftOne()
+                        }
+                    }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
                         onTapped: root.craftOne()
                     }
                 }

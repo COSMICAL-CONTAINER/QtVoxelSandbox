@@ -127,6 +127,32 @@ Item {
     function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
     function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
+    // t230 工作台 3×3 Shift+左键结果槽 → 批量合成（耗尽最小原料数；产物入背包非光标）。
+    function slotShiftLeftCraft() { InventoryOps.slotShiftLeftCraft(root) }
+    // t230 单次合成（结果槽普通左/右键）：消耗每非空原料 1、产出 outputCount 到光标。原 inline 在结果槽
+    //   TapHandler 内；抽出为函数供左/右 TapHandler 共用，左键先判 shift 走批量、否则走单次。
+    function craftOneResult() {
+        if (!root.hotbar) return
+        root.craftRev
+        const r = root.matchedRecipe()
+        if (!r) return
+        const heldId = root.hotbar.heldBlock
+        const heldCount = root.hotbar.heldCount
+        const cap = root.hotbar.maxStackSize(r.outputId)
+        if (!root.hotbar.recipeCanTake(r.outputId, r.outputCount, heldId, heldCount, cap)) return
+        for (let i = 0; i < root.craftSlots.length; ++i) {
+            if ((root.craftSlots[i] || 0) !== 0) {
+                root.craftCounts[i] = (root.craftCounts[i] || 0) - 1
+                if ((root.craftCounts[i] || 0) <= 0) {
+                    root.craftSlots[i] = 0
+                    root.craftCounts[i] = 0
+                }
+            }
+        }
+        root.hotbar.heldBlock = r.outputId
+        root.hotbar.heldCount = (heldId === r.outputId ? heldCount : 0) + r.outputCount
+        root.craftRev++
+    }
 
     // 取当前合成格的 id 数组（触碰 craftRev 让 QML 绑定刷新时重算）。
     function craftIdArray() {
@@ -451,34 +477,20 @@ Item {
                         }
                     }
 
-                    // 点击结果槽 → 合成（MC 式：消耗每原料 1、产出 outputCount 到光标；剩余留槽可连点）。
-                    // 前置：matchedRecipe 非 null；光标能容纳产物（空 / 同 id 且累加不超 maxStack）。
+                    // 点击结果槽 → 合成。t230：左键 Shift → 批量合成（耗尽最小原料数；产物入背包），
+                    //   左键非 Shift / 右键 → 单次合成（消耗每原料 1、产出 outputCount 到光标；剩余留槽可连点）。
+                    //   MC 1.0：Shift+左键结果槽才批量；Shift+右键 / 右键均单次。前置：matchedRecipe 非 null；
+                    //   单次还需光标能容纳产物（空 / 同 id 且累加不超 maxStack）。
                     TapHandler {
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        acceptedButtons: Qt.LeftButton
                         onTapped: {
-                            if (!root.hotbar) return
-                            root.craftRev  // 触碰最新态
-                            const r = root.matchedRecipe()
-                            if (!r) return
-                            const heldId = root.hotbar.heldBlock
-                            const heldCount = root.hotbar.heldCount
-                            const cap = root.hotbar.maxStackSize(r.outputId)
-                            if (!root.hotbar.recipeCanTake(r.outputId, r.outputCount, heldId, heldCount, cap)) return
-                            // 消耗：每个非空原料格 count-1（归 0 清 id）。原料用量恒 1（consumeCount=1）。
-                            for (let i = 0; i < root.craftSlots.length; ++i) {
-                                if ((root.craftSlots[i] || 0) !== 0) {
-                                    root.craftCounts[i] = (root.craftCounts[i] || 0) - 1
-                                    if ((root.craftCounts[i] || 0) <= 0) {
-                                        root.craftSlots[i] = 0
-                                        root.craftCounts[i] = 0
-                                    }
-                                }
-                            }
-                            // 产出：加 outputCount 到光标。
-                            root.hotbar.heldBlock = r.outputId
-                            root.hotbar.heldCount = (heldId === r.outputId ? heldCount : 0) + r.outputCount
-                            root.craftRev++
+                            if (window.shiftHeld) { root.slotShiftLeftCraft(); return }
+                            root.craftOneResult()
                         }
+                    }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: root.craftOneResult()
                     }
                 }
             }

@@ -336,9 +336,12 @@ function singleRightClick(root, group, index) {
     root.hotbar.heldCount = r.heldCount
 }
 
-// t110 Shift+左键搬运（MC 1.0 背包）：main 槽→首个空 hotbar 槽；hotbar 槽→首个空 main 槽；其它组
-//   （craft / in / fuel / out）无操作（spec 仅定义 main↔hotbar）。整栈搬：源清空、目标写入源原内容。
-//   「空位」= id==0 的槽。无空位 → 无操作（shift 是显式搬运语义，与普通左键的拾取/放置区分）。
+// t110 Shift+左键搬运（MC 1.0 背包）+ t230 扩展（craft 归包）：main 槽→首个空 hotbar 槽；hotbar 槽→首个空
+//   main 槽；craft 槽→智能归还背包（main → hotbar，同 id 合并）；其它组（in / fuel / out）无操作（spec t110
+//   仅定义 main↔hotbar；t230 craft 归包；熔炉 in/fuel/out 由 slotShiftLeftFurnace 在 FurnaceUI 单独处理）。
+//   main/hotbar 整栈搬：源清空、目标写入源原内容；「空位」= id==0 的槽，无空位 → 无操作（shift 是显式搬运
+//   语义，与普通左键的拾取/放置区分）。t230 craft 归包走 addToAny（同 id 合并 → 空槽开新），背包满 → 余数
+//   留 craft 槽（不清空，防丢物）。
 function slotShiftLeft(root, group, index) {
     if (group === "main") {
         const src = readSlot(root, "main", index)
@@ -360,7 +363,121 @@ function slotShiftLeft(root, group, index) {
                 return
             }
         }
+    } else if (group === "craft") {
+        // t230：合成槽 Shift+左键 → 整栈归还背包（spec「背包内合成槽物品按 shift 左键也会回到背包槽」）。
+        //   走 addToAny（main 同 id 合并 → hotbar 同 id → 空槽），与拾取/丢弃回栏同源；优于「仅查空槽」的
+        //   main/hotbar 路径（修「同 id 未满栈旁还有空位却搬不进去」边角）。背包满 → 余数留 craft 槽。
+        if (!root.hotbar) return
+        const src = readSlot(root, "craft", index)
+        if (src.id === 0 || src.count <= 0) return
+        const remain = root.hotbar.addToAny(src.id, src.count)
+        writeSlot(root, "craft", index, remain > 0 ? src.id : 0, remain)
     }
+}
+
+// t230 熔炉 Shift+左键智能入出（spec「熔炉 Shift+点击→智能入（可烧物→上格/燃料→下格）/ 出」）。
+//   仅 FurnaceUI 调用：caller（FurnaceUI.slotLeft）先调本函数，返回 true 表已处理（不回退）、false 表
+//   「非炉料 main/hotbar 或未知组」→ caller 回退到通用 slotShiftLeft（main↔hotbar 搬运）。
+//   - main/hotbar 上炉料 → 智能：可烧物（smeltResult≠0）优先入 in 槽；否则燃料（fuelBurnSeconds>0）入 fuel
+//     槽；都不是 → 返回 false 让 caller 回退到 main↔hotbar 搬运（MC 1.0：非炉料按通用背包整理）。
+//   - in/fuel/out → 整栈归还背包（addToAny：main 同 id 合并 → hotbar 同 id → 空槽）；out 提取、in/fuel 取回。
+//   跨槽搬运：合并同类 / 空槽开新（同 id 合并至上限，异物占位不覆盖，目标满则部分搬、源留余）。
+function slotShiftLeftFurnace(root, group, index) {
+    if (!root.hotbar) return false
+    if (group === "main" || group === "hotbar") {
+        const src = readSlot(root, group, index)
+        if (src.id === 0 || src.count <= 0) return true                  // 空槽：已处理（无操作）
+        const isSmeltable = root.hotbar.smeltResult(src.id) !== 0
+        const isFuel = root.hotbar.fuelBurnSeconds(src.id) > 0
+        if (!isSmeltable && !isFuel) return false                        // 非炉料：回退通用 main↔hotbar
+        // 可烧物优先（原木既可烧木炭又是燃料 → MC 选输入槽优先）。
+        const targetGroup = isSmeltable ? "in" : "fuel"
+        const target = readSlot(root, targetGroup, 0)
+        if (target.id !== 0 && target.id !== src.id) return true         // 异物占位 → 不覆盖（无操作）
+        const cap = root.hotbar.maxStackSize(src.id)
+        const space = cap - target.count
+        if (space <= 0) return true                                      // 目标满 → 无操作
+        const move = Math.min(space, src.count)
+        writeSlot(root, targetGroup, 0, src.id, target.count + move)
+        const remain = src.count - move
+        writeSlot(root, group, index, remain > 0 ? src.id : 0, remain)
+        return true
+    }
+    if (group === "in" || group === "fuel" || group === "out") {
+        // 整栈归还背包（提取 out / 取回 in/fuel）。addToAny 智能合并；背包满 → 余数留原槽。
+        const src = readSlot(root, group, index)
+        if (src.id === 0 || src.count <= 0) return true
+        const remain = root.hotbar.addToAny(src.id, src.count)
+        writeSlot(root, group, index, remain > 0 ? src.id : 0, remain)
+        return true
+    }
+    return false   // 未知组（FurnaceUI 无此情形）→ caller 回退
+}
+
+// t230 工作台 3×3 / 生存 2×2 Shift+左键结果槽 → 批量合成（spec「Shift+点合成产物→批量合成，耗尽最小原料数，
+//   一次入背包」）。仅 CraftingTableUI / SurvivalInventory 调用（两面板均有 craftSlots/craftCounts/craftRev/
+//   matchedRecipe）。机制等价 MC 1.0：shift+左键结果槽 → 一次合多次，产物入背包（非光标）。
+//   - maxCrafts = 每非空原料槽 count 的最小值（每合成消耗每非空槽 1，同既有单次 craftOne consume 规则）。
+//     例：planks 配方（1 原木 → 4 板），原料槽 [2,0,0,0] → maxCrafts=2 → 8 板；火把（1 煤+1 棍 → 4 把），
+//     煤槽 count=4 / 棍槽 count=3 → maxCrafts=3 → 12 把。
+//   - 守 heldId 为空或同 outputId（异物手持不批量合；交普通 craftOne 由用户自决）。
+//   - 防丢物：先扫 main+hotbar+光标 对 outputId 的可用空间，按 floor(space/outputCount) 把 maxCrafts 钳到
+//     「产物放得下」；空间不足 → 不消耗原料、无操作（同 MC「背包满则停止合成」）。
+//   - 守恒：消耗 maxCrafts × 每非空槽 1；产出 maxCrafts × outputCount；addToAny 入背包（main 同 id → hotbar
+//     同 id → 空槽），余数（理论上已被空间钳到 ≤ 光标位）入光标。
+function slotShiftLeftCraft(root) {
+    if (!root.hotbar || !root.matchedRecipe) return false
+    root.craftRev
+    const r = root.matchedRecipe()
+    if (!r) return true                                          // 无匹配 → 无操作但已处理（不回退）
+    const heldId = root.hotbar.heldBlock
+    if (heldId !== 0 && heldId !== r.outputId) return true       // 异物手持 → 无操作
+    // maxCrafts = 每非空原料槽 count 最小值。
+    let maxCrafts = -1
+    for (let i = 0; i < root.craftSlots.length; ++i) {
+        if ((root.craftSlots[i] || 0) !== 0) {
+            const c = root.craftCounts[i] || 0
+            if (maxCrafts < 0 || c < maxCrafts) maxCrafts = c
+        }
+    }
+    if (maxCrafts <= 0) return true                              // 无原料 → 无操作
+    // 钳到产物空间（防丢物）：扫 main+hotbar+光标 对 outputId 的可用容量。
+    const cap = root.hotbar.maxStackSize(r.outputId)
+    const heldCount = root.hotbar.heldCount
+    let space = 0
+    if (heldId === r.outputId) space += (cap - heldCount)
+    else if (heldId === 0) space += cap
+    for (let i = 0; i < root.hotbar.mainCount; ++i) {
+        const s = readSlot(root, "main", i)
+        if (s.id === 0) space += cap
+        else if (s.id === r.outputId) space += (cap - s.count)
+    }
+    for (let i = 0; i < root.hotbar.slotCount; ++i) {
+        const s = readSlot(root, "hotbar", i)
+        if (s.id === 0) space += cap
+        else if (s.id === r.outputId) space += (cap - s.count)
+    }
+    const maxCraftsBySpace = Math.floor(space / r.outputCount)
+    if (maxCrafts > maxCraftsBySpace) maxCrafts = maxCraftsBySpace
+    if (maxCrafts <= 0) return true                              // 无产物空间 → 不消耗原料、无操作
+    // 一次性消耗 maxCrafts 次（每非空槽 -maxCrafts；归 0 清 id）。
+    for (let i = 0; i < root.craftSlots.length; ++i) {
+        if ((root.craftSlots[i] || 0) !== 0) {
+            const remain = (root.craftCounts[i] || 0) - maxCrafts
+            if (remain <= 0) { root.craftSlots[i] = 0; root.craftCounts[i] = 0 }
+            else root.craftCounts[i] = remain
+        }
+    }
+    // 产出 maxCrafts × outputCount 入背包（addToAny：main → hotbar 智能堆叠）；余数（背包满）入光标。
+    const total = maxCrafts * r.outputCount
+    const remain = root.hotbar.addToAny(r.outputId, total)
+    if (remain > 0) {
+        const prevHeldCount = (heldId === r.outputId) ? heldCount : 0
+        root.hotbar.heldBlock = r.outputId
+        root.hotbar.heldCount = prevHeldCount + remain
+    }
+    root.craftRev++
+    return true
 }
 
 // t110 数字键交换（spec「数字键 1-9：背包开 + hoveredKey → 与 hotbar[idx] 交换」）：当前 hover 槽 ↔

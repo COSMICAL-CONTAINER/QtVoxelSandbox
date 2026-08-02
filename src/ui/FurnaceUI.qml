@@ -137,8 +137,14 @@ Item {
     //   in/fuel/out 不参与，避免误把冶炼输入搬走）。t180：可拖拽组（main/hotbar/in/fuel）双击 → doMergeSameId
     //   （拿同类）；out 非可拖拽，双击退化为两次单点（拾起+放回，净无操作）。resolveClick/resolveRightClick
     //   算法见 InventoryOps。
+    // t230：Shift+左键先走熔炉智能入出（slotShiftLeftFurnace）：可烧物→in / 燃料→fuel / out·in·fuel→归还背包。
+    //   返回 false（非炉料 main/hotbar、未知组）时回退到通用 slotShiftLeft（main↔hotbar 整理），与既有
+    //   t110 行为兼容（非炉料在熔炉面板仍可 shift 整理到另一区）。
     function slotLeft(group, index) {
-        if (window.shiftHeld) { InventoryOps.slotShiftLeft(root, group, index); return }
+        if (window.shiftHeld) {
+            if (InventoryOps.slotShiftLeftFurnace(root, group, index)) return
+            InventoryOps.slotShiftLeft(root, group, index); return
+        }
         // t180：280ms 内同槽二次点击 + 可拖拽组 → 拿同类（doMergeSameId 扫 main+hotbar+in+fuel 同 id）。
         const key = group + ":" + index
         const now = Date.now()
