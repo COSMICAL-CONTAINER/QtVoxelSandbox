@@ -301,7 +301,23 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
 }
 
 // ---- 主循环 ----
+// t178：tick() 包一层 CPU 耗时计时（PLAN §4 帧时间切分）。每 tick 累加主线程耗时，每 ~60 tick（≈1s@60Hz）
+//   算平均写 m_simMs 并 emit perfChanged → F3 叠层重绑显示「cpu sim: X.XXms」。实体 / 物理逻辑在 tickImpl。
 void PlayerController::tick()
+{
+    QElapsedTimer pt;
+    pt.start();
+    tickImpl();
+    m_simAccumNs += pt.nsecsElapsed();
+    if (++m_simTickCount >= 60) { // ≈1s 窗口（timer 16ms ≈ 62.5Hz → 60 tick ≈ 0.96s）
+        m_simMs = float(double(m_simAccumNs) / 1e6 / double(m_simTickCount)); // ns → ms 均
+        m_simAccumNs = 0;
+        m_simTickCount = 0;
+        emit perfChanged();
+    }
+}
+
+void PlayerController::tickImpl()
 {
     const qreal dt = qMin(m_clock.restart() / 1000.0, 0.05); // 钳 50ms，防卡顿后穿墙
     // t60：掉落物重力（世界模拟，独立于玩家捕获态——菜单 / 暂停时实体仍落到地面）。

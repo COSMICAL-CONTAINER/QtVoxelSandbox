@@ -90,6 +90,11 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(float flySpeedMul READ flySpeedMul NOTIFY flySpeedMulChanged)
     // 当前有效飞行速度（blocks/sec）= clamp(kFly*mul, kFlyMin, kFlyMax)；F3 报它（t159）。随 mul 变通知。
     Q_PROPERTY(float flySpeed READ flySpeed NOTIFY flySpeedMulChanged)
+    // t178 帧时间切分（PLAN §4 验收「写死帧时间切分 CPU/GPU ms」）：每帧测 tick() 主线程 CPU 耗时（物理 /
+    //   射线 / 实体 / 挖掘 / 拾取），~1s 滚动平均暴露给 F3 叠层。QtQuick3D 路径无公开 GPU 计时 / 逐帧 draw-call
+    //   查询 → F3 另用 frameMs(=1000/fps) + 估算 draw-call 数补足「CPU/GPU/draw-call 预算」（spec：不得伪造，
+    //   估算值明确标注 ≈）。GPU 真计时待自研 RHI 迁移（QRhiGpuTimer）。状态属 Game/Physics 层（§2-D）。
+    Q_PROPERTY(float simMs READ simMs NOTIFY perfChanged)
     // 射线选体（t04）：每帧沿视线 DDA 步进，命中首个实体方块。无命中 / 暂停时 hasHit=false。
     // hitBlock=命中格整数坐标；hitNormal=命中面外法线；hitFaceCenter/hitFaceEuler 供线框 Model 直接摆位。
     Q_PROPERTY(bool hasHit READ hasHit NOTIFY hitChanged)
@@ -161,6 +166,8 @@ public:
     float walkPhase() const { return m_walkPhase; } // 行走相位（弧度；走时累加、2π 回绕；t45 QML sin() 算摆角）
     float flySpeedMul() const { return m_flySpeedMul; } // 飞行速度倍数（默认 1.0；t159 滚轮调速）
     float flySpeed() const;                              // 有效飞行速度 = clamp(kFly*mul,4,20)；F3 报它（t159）
+    // t178：上次 1s 窗口的 tick() CPU 耗时平均（ms）；F3 帧时间切分用。
+    float simMs() const { return m_simMs; }
 
     bool hasHit() const { return m_hasHit; }
     QVector3D hitBlock() const { return QVector3D(m_hitBx, m_hitBy, m_hitBz); }
@@ -254,6 +261,7 @@ signals:
     void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）。speed 属性亦复用本信号（t159）。
     void flySpeedMulChanged(); // 飞行速度倍数变（t159 滚轮调速；驱动 F3 报当前有效飞速）
     void walkPhaseChanged();  // 行走相位推进（t45；走时每 tick 发，QML 据 sin() 算四肢欧拉角）
+    void perfChanged();       // t178：~1s 窗口 tick() CPU 耗时平均刷新（驱动 F3 帧时间切分重绑）
     void moveStateChanged();  // 移动态切（Walk/Sprint/Crouch；t51；驱动 QML 摆幅 + 速率因子）
     void hitChanged();
     void selectedBlockChanged();
@@ -331,6 +339,9 @@ private slots:
     void tick();
 
 private:
+    // t178：tick() 包一层计时（累加主线程 CPU 耗时，~60 tick 算 1s 平均 → m_simMs → emit perfChanged），
+    //   实体逻辑放 tickImpl（原 tick body）。tick 仍是 QTimer slot（连接不变）。
+    void tickImpl();
     void pollMouse();
     void step(qreal dt);
     QVector3D wishHoriz() const;
@@ -410,6 +421,10 @@ private:
     QTimer m_timer;
     QElapsedTimer m_clock;
     QElapsedTimer m_evtClock; // 事件时间戳（双击检测；不被 tick restart）
+    // t178 帧时间切分：累加每 tick 的主线程 CPU 耗时（ns），每 ~60 tick（≈1s@60Hz）算平均写 m_simMs + emit。
+    float m_simMs = 0.0f;
+    qint64 m_simAccumNs = 0;
+    int m_simTickCount = 0;
 
     // 出生点（t78 重生定位）：与构造期 m_pos 初值同源，respawn() 传回此处。脚底中心坐标。
     // 必须声明在 m_pos 之前（m_pos 默认成员初始化器引用本常量；C++ 不允许前向引用）。

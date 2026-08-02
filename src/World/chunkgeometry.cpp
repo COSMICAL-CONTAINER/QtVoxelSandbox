@@ -12,6 +12,7 @@
 #include <cmath>     // std::sqrt / std::floor（t153 PCF 软影 sunShadowAt）
 #include <cstddef>
 #include <cstring>
+#include <vector>    // t178 greedy meshing mask 缓冲（std::vector）
 
 // Vtx（chunk 顶点格式：pos3 + normal3 + uv2 + color4 rgba = 12 float = 48 字节）定义在
 // partialblockgeometry.h —— 由本文件（1×1×1 立方面）与 PartialBlockGeometry::append（异形方块）
@@ -101,6 +102,16 @@ void ChunkGeometry::setShadowsEnabled(bool on)
     m_shadowsEnabled = on;
     emit shadowsEnabledChanged();
     buildMesh(RebuildReason::Sun);
+}
+
+// t178 贪婪网格化开关变 → 重网格化（greedy vs 逐格 culled 顶点布局不同，须重建）。值未变早退。
+//   用 Dirty reason（同编辑即时重建路径，绕过 sun-step 节流）。
+void ChunkGeometry::setGreedyMeshing(bool on)
+{
+    if (m_greedyMeshing == on) return;
+    m_greedyMeshing = on;
+    emit greedyMeshingChanged();
+    buildMesh(RebuildReason::Dirty);
 }
 
 // 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
@@ -229,105 +240,192 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     constexpr float kVcMax = 1.0f;
 
     if (c && m_world) {
-        // 逐局部格：世界坐标取体素 + 邻居（跨 chunk 边界经 world.blockAt 路由 → 共边实体面
-        // 剔除、一侧空气画出、世界越界=空气）。顶点写 chunk 局部坐标（Model 负责世界定位）。
-        for (int ly = 0; ly < H; ++ly) {
+        // ---- PASS 1：不完整方块（异形）合批进同一 chunk mesh（t133 PartialBlockGeometry）----
+        //   **terrain 段独有**（水段无 partial；waterOnly 守卫防水段 ChunkGeometry 重复渲染异形方块）。
+        //   每 cell 仅一次 append。独立于 PASS 2 的面 mask——否则 6 面 mask 各扫一次会 6× 重复 append。
+        //   torch / 整立方 / 水不进此 pass。光照上下文（cellLight）按本格光场 + 本格中心 PCF 软影算
+        //   （同 t151/t153 异形约定），打包进 PartialLightCtx 传入。
+        if (!m_waterOnly) for (int ly = 0; ly < H; ++ly) {
             for (int lz = 0; lz < S; ++lz) {
                 for (int lx = 0; lx < S; ++lx) {
                     const int wx = originX + lx, wz = originZ + lz;
                     const quint8 b = blockAtWorld(wx, ly, wz);
-                    if (b == 0) continue; // 空气
-                    // t148 水渲染分流：一个 chunk 由两段 ChunkGeometry 网格化 —— 地形段（waterOnly=false）
-                    //   只取非水方块；水段（waterOnly=true）只取 Water。这样水走独立透明材质（opacity=0.7）、
-                    //   地形走不透明材质，二者不互相污染（水不会被当不透明地形误渲、地形不会因水材质变透）。
-                    //   isWater != m_waterOnly 即「本段不要这块」→ 跳过（地形段跳水 / 水段跳非水）。
-                    const bool isWater = (b == BlockRegistry::Water);
-                    if (isWater != m_waterOnly) continue;
-                    // t114 异形特例：火把不画 1×1×1 立方面 —— 它是「木柄 + 火焰」小模型（在 torchHost
-                    // 由 QML Model 渲染，朝向据邻居 solid 推断）。mesher 在此跳过立方面，否则会出现
-                    // 「黑底 6 面大立方 + 上叠小模型」的重复畸形。其他异形方块（未来如花/草）按同模式加。
-                    //   水段不会到此（水 != Torch，已被 isWater != m_waterOnly 跳过），故仅地形段需此守卫。
-                    if (!isWater && b == BlockRegistry::Torch) continue;
-
-                    // t151 真光场：本格光场值（max(sky,block)/15）用于异形方块各面顶点色（近似：异形小体
-                    //   各面共用以本格光场，因其面所朝向的「邻格」在子格尺度上歧义；异形格非遮光 → 光场
-                    //   已 flood 反映周围天光 / 火把光）。采样本格（wx,ly,wz）；立方体面则采邻格（下方）。
-                    //   t153 PCF 软影：异形方块近似取本格中心采样（per-face 子格尺度歧义，统一一格一影），
-                    //   shadow 折进 cellLight 一次性传 PartialBlockGeometry（天光分量被压暗、方光取 max 保留）。
+                    if (b == 0) continue;
+                    if (b == BlockRegistry::Water) continue;       // 水走 PASS 2 立方面（水段）
+                    if (b == BlockRegistry::Torch) continue;       // 火把走 torchHost（QML Model）
+                    if (b < BlockRegistry::FirstPartial) continue; // 仅异形方块进此 pass
                     const quint8 cSky = m_world->skyLightAt(wx, ly, wz);
                     const quint8 cBlock = m_world->blockLightAt(wx, ly, wz);
                     const float cShadow = sunShadowAt(float(wx) + 0.5f, float(ly) + 0.5f, float(wz) + 0.5f);
                     const float cellLight = std::clamp(
                         std::max((cSky / 15.0f) * (1.0f - cShadow), cBlock / 15.0f), kVcMin, kVcMax);
+                    const quint8 st = stateAtWorld(wx, ly, wz);
+                    const PartialLightCtx lctx{ cellLight };
+                    PartialBlockGeometry::append(verts, idx, lx, ly, lz, b, st,
+                                                 lctx, tileW, hx, hy, v0, v1);
+                }
+            }
+        }
 
-                    // t133 不完整方块异形分支：id >= FirstPartial 的方块不走 1×1×1 立方面路径，交由
-                    //   PartialBlockGeometry::append 生成异形顶点并**合批进同一 chunk mesh**（复用本顶点
-                    //   缓冲 + 顶点色光照管线 + 单 draw call，非另起 Model）。本块的光照上下文（surface /
-                    //   shade / sun 量）已在上方算好，打包进 PartialLightCtx 传入；append 据各面外法线按
-                    //   同款公式复算 vc。当前 FirstPartial=15=BlockRegistry::Count → 任何合法 id <
-                    //   FirstPartial → 此分支永不进入（无任何异形方块定义）；t134 加 WoodSlab=15.. 后激活。
-                    //   t148：Water id=21 也 >= FirstPartial，但水是整立方（走下方立方面路径），且水段已
-                    //   由 isWater 守卫隔离——此处 `!isWater` 防 PartialBlockGeometry 收到 Water（其 switch
-                    //   无 Water case → default 返 0 不画 → 水面丢失）。
-                    if (!isWater && b >= BlockRegistry::FirstPartial) {
-                        const quint8 st = stateAtWorld(wx, ly, wz);
-                        // t151：异形方块各面共用本格光场值作顶点色（PartialLightCtx.light）。
-                        const PartialLightCtx lctx{ cellLight };
-                        PartialBlockGeometry::append(verts, idx, lx, ly, lz, b, st,
-                                                     lctx, tileW, hx, hy, v0, v1);
-                        continue;
-                    }
+        // ---- PASS 2：标准 1×1×1 立方面（terrain 实心整立方 + 水）----
+        if (m_greedyMeshing) {
+            // t178 贪婪网格化（greedy meshing，PLAN §4 性能打磨）：按 6 面方向逐「层」建 2D mask，合并同
+            //   (tile, 邻格天光, 邻格方光) 的共面连续格为单个矩形 → 顶点 / 三角 / 索引数大幅下降（平坦地面
+            //   16×16=256 quad → 1 quad）。F3 叠层据此可观测 meshing 吞吐改善（PLAN §2-F）。
+            //
+            //   合并键含光照（tile + 邻格 sky + 邻格 block）→ 仅**均匀照明**区合并（保光照保真：合并 quad
+            //   四角共享同一邻格光值，内部不被误暗；火把 / 墙边光照变化处不合并，贴图也保持逐格清晰）。
+            //   PCF 软影仍 per-vertex（同 t153：合并 quad 四角各自 sunShadowAt → 影边光栅化平滑过渡）。
+            //   贴图在合并 quad 上**拉伸**铺满（图集路径权衡：逐格平铺需纹理数组 = 自研 RHI 路径，已记录
+            //   为推迟偏差 dev-plan 1/2 / PLAN §2-I）。greedyMeshing=false 可回退逐格 culled（清晰贴图）。
+            struct MaskEntry { bool valid = false; int tile = 0; quint8 sky = 0; quint8 block = 0; };
+            std::vector<MaskEntry> mask;
+            // 各面 UV 轴映射（须与历史逐格 culled 的 cu/cv 规则一致：±X cu=Z,cv=Y；±Y cu=X,cv=Z；±Z cu=X,cv=Y）。
+            static const int kUVAxes[6][2] = {
+                {2, 1}, {2, 1}, // ±X
+                {0, 2}, {0, 2}, // ±Y
+                {0, 1}, {0, 1}, // ±Z
+            };
+            for (int f = 0; f < 6; ++f) {
+                const FaceDef &F = kFaces[f];
+                // 法线轴（normalAxis）+ 两 in-plane 轴（axisA 带 merge 宽 w、axisB 带 merge 高 h）。
+                const int normalAxis = (F.dir[0] != 0) ? 0 : (F.dir[1] != 0) ? 1 : 2;
+                const int axisA = (normalAxis + 1) % 3;
+                const int axisB = (normalAxis + 2) % 3;
+                const int sizeN = (normalAxis == 1) ? H : S; // 沿法线轴的层数
+                const int sizeA = (axisA == 1) ? H : S;
+                const int sizeB = (axisB == 1) ? H : S;
+                if (sizeA <= 0 || sizeB <= 0 || sizeN <= 0) continue;
+                mask.assign(sizeA * sizeB, MaskEntry{});
 
-                    for (int f = 0; f < 6; ++f) {
-                        const FaceDef &F = kFaces[f];
-                        const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
-                        // 邻居实体 → 剔除（跨 chunk 边界同样正确）。走 BlockRegistry::isSolid 单一权威，
-                        // 与 playercontroller/raycast 的 isSolid 判定同源（PLAN §2：世界数据单一）。
-                        //   原 `!= 0` 把任意非空气方块当 solid，导致火把(solid=false) 误判为挡面 →
-                        //   火把下方地板的顶面被错误剔除 → 地板透明（t130 修复根因）。
-                        //   越界 / air / torch 等 solid=false 方块不挡邻居面（应画出）。
-                        if (BlockRegistry::isSolid(nb))
-                            continue;
-                        // t148 水-水面互剔（spec「邻居剔除 nb==Water」）：水段渲染水块时，若邻居也是水
-                        //   则该面是水体内部面 → 剔除（仅留水-空气接触面 = 水面 / 暴露侧）。同 solid 判定
-                        //   一样走「邻居实体性」语义：水对水不可见、水对空气可见。（solid 判定已覆盖水贴
-                        //   地形那面——地形 solid=true → 水面被剔，避免与地形面重合 z-fight。）
-                        if (isWater && nb == BlockRegistry::Water)
-                            continue;
-
-                        const int t = tileFor(b, f);
-                        const float u0 = t * tileW + hx, u1 = (t + 1) * tileW - hx;
-
-                        // t151 真光场 + t153 PCF 软影顶点色：本面照明 = 邻格（面所朝向空气格）光场
-                        //   max(sky,block)/15；天光分量再被 PCF 软影（sunShadowAt）压暗 —— 太阳被邻近高地
-                        //   遮挡处变暗、火把方光（block）取 max 保留（洞穴火把仍亮）。shadow 按各顶点世界位
-                        //   现算 → 同一面四角可不同 → 光栅化插值得影边软过渡（叠加 PCF 2×2 邻列平均）。
-                        //   越界 y>=height 视作开阔天光 15（顶面采样）。clamped [kVcMin, kVcMax]。
-                        const int ax = wx + F.dir[0], ay = ly + F.dir[1], az = wz + F.dir[2];
-                        const float nbSkyF = m_world->skyLightAt(ax, ay, az) / 15.0f;
-                        const float nbBlockF = m_world->blockLightAt(ax, ay, az) / 15.0f;
-
-                        const quint32 base = quint32(verts.size());
-                        for (int cc = 0; cc < 4; ++cc) {
-                            const float dx = F.c[cc][0], dy = F.c[cc][1], dz = F.c[cc][2];
-                            // t153：per-vertex PCF 软影（世界位 = chunk 世界原点 + 格 + 面角偏移）。
-                            const float shadow = sunShadowAt(float(wx) + dx, float(ly) + dy, float(wz) + dz);
-                            const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow), nbBlockF),
-                                                        kVcMin, kVcMax);
-                            float cu, cv;
-                            if (f == 0 || f == 1) { cu = dz; cv = dy; }       // ±X
-                            else if (f == 4 || f == 5) { cu = dx; cv = dy; }  // ±Z
-                            else { cu = dx; cv = dz; }                        // ±Y
-                            Vtx v;
-                            v.x = float(lx) + dx; v.y = float(ly) + dy; v.z = float(lz) + dz; // 局部坐标
-                            v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
-                            v.u = u0 + cu * (u1 - u0);
-                            v.v = v0 + cv * (v1 - v0);
-                            v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f; // t151 光场 × t153 PCF 软影顶点色
-                            verts.append(v);
+                for (int n = 0; n < sizeN; ++n) {
+                    // 建 mask：逐 (a,b) 判本格（normalAxis 层 = n）在面 f 是否出可见面。
+                    for (int a = 0; a < sizeA; ++a) {
+                        for (int b = 0; b < sizeB; ++b) {
+                            int lc[3] = {0, 0, 0};
+                            lc[normalAxis] = n; lc[axisA] = a; lc[axisB] = b;
+                            const int lx = lc[0], ly = lc[1], lz = lc[2];
+                            const int wx = originX + lx, wz = originZ + lz;
+                            MaskEntry &e = mask[a * sizeB + b];
+                            e.valid = false;
+                            const quint8 blk = blockAtWorld(wx, ly, wz);
+                            if (blk == 0) continue;
+                            const bool isWater = (blk == BlockRegistry::Water);
+                            if (isWater != m_waterOnly) continue;          // 段分流（地形段跳水 / 水段跳非水）
+                            if (!isWater && blk == BlockRegistry::Torch) continue;
+                            if (!isWater && blk >= BlockRegistry::FirstPartial) continue; // 异形已在 PASS 1
+                            const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
+                            if (BlockRegistry::isSolid(nb)) continue;       // 邻居实体 → 剔除（跨 chunk 路由正确）
+                            if (isWater && nb == BlockRegistry::Water) continue; // 水-水面互剔
+                            const int ax = wx + F.dir[0], ay = ly + F.dir[1], az = wz + F.dir[2];
+                            e.valid = true;
+                            e.tile = tileFor(blk, f);
+                            e.sky = m_world->skyLightAt(ax, ay, az);
+                            e.block = m_world->blockLightAt(ax, ay, az);
                         }
-                        idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);
-                        idx.append(base + 0); idx.append(base + 2); idx.append(base + 3);
+                    }
+                    // 贪婪合并 (a,b) 平面 → 矩形（先沿 axisA 扩宽 w，再沿 axisB 扩高 h）。
+                    for (int a = 0; a < sizeA; ++a) {
+                        for (int b = 0; b < sizeB; ++b) {
+                            const MaskEntry cur = mask[a * sizeB + b]; // 值拷贝（合并键固定；后续清格不影响）
+                            if (!cur.valid) continue;
+                            const int curTile = cur.tile;
+                            const quint8 curSky = cur.sky, curBlock = cur.block;
+                            auto same = [&](int aa, int bb) {
+                                const MaskEntry &o = mask[aa * sizeB + bb];
+                                return o.valid && o.tile == curTile && o.sky == curSky && o.block == curBlock;
+                            };
+                            int w = 1;
+                            while (a + w < sizeA && same(a + w, b)) ++w;
+                            int h = 1;
+                            while (b + h < sizeB) {
+                                bool ok = true;
+                                for (int k = 0; k < w; ++k)
+                                    if (!same(a + k, b + h)) { ok = false; break; }
+                                if (!ok) break;
+                                ++h;
+                            }
+                            // 发射矩形 [a,a+w) × [b,b+h) @ 层 n，面 f：4 顶点 + 2 三角。
+                            const float u0 = curTile * tileW + hx, u1 = (curTile + 1) * tileW - hx;
+                            const float nbSkyF = curSky / 15.0f;
+                            const float nbBlockF = curBlock / 15.0f;
+                            const int cuAxis = kUVAxes[f][0], cvAxis = kUVAxes[f][1];
+                            const quint32 base = quint32(verts.size());
+                            for (int cc = 0; cc < 4; ++cc) {
+                                int cl[3];
+                                cl[normalAxis] = n + int(F.c[cc][normalAxis]);             // 面贴 n 或 n+1 侧
+                                cl[axisA] = a + (F.c[cc][axisA] ? w : 0);                  // in-plane A：起 or 起+宽
+                                cl[axisB] = b + (F.c[cc][axisB] ? h : 0);                  // in-plane B：起 or 起+高
+                                // per-vertex PCF 软影（世界位 = chunk 原点 + 局部角点；同 t153）。
+                                const float shadow = sunShadowAt(float(originX + cl[0]),
+                                                                 float(cl[1]),
+                                                                 float(originZ + cl[2]));
+                                const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow), nbBlockF),
+                                                            kVcMin, kVcMax);
+                                // UV 在合并 quad 上拉伸铺满（cu/cv 取角点分量 0/1，纹理随几何 span 拉伸）。
+                                const float cu = F.c[cc][cuAxis] ? 1.0f : 0.0f;
+                                const float cv = F.c[cc][cvAxis] ? 1.0f : 0.0f;
+                                Vtx v;
+                                v.x = float(cl[0]); v.y = float(cl[1]); v.z = float(cl[2]); // chunk 局部坐标
+                                v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
+                                v.u = u0 + cu * (u1 - u0);
+                                v.v = v0 + cv * (v1 - v0);
+                                v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f;
+                                verts.append(v);
+                            }
+                            idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);
+                            idx.append(base + 0); idx.append(base + 2); idx.append(base + 3);
+                            // 清已合并格（防后续重叠发射）。
+                            for (int da = 0; da < w; ++da)
+                                for (int db = 0; db < h; ++db)
+                                    mask[(a + da) * sizeB + (b + db)].valid = false;
+                        }
+                    }
+                }
+            }
+        } else {
+            // 逐格 culled meshing（fallback，greedyMeshing=false）：每可见面 4 顶点 + 6 索引（贴图逐格清晰）。
+            for (int ly = 0; ly < H; ++ly) {
+                for (int lz = 0; lz < S; ++lz) {
+                    for (int lx = 0; lx < S; ++lx) {
+                        const int wx = originX + lx, wz = originZ + lz;
+                        const quint8 b = blockAtWorld(wx, ly, wz);
+                        if (b == 0) continue;
+                        const bool isWater = (b == BlockRegistry::Water);
+                        if (isWater != m_waterOnly) continue;
+                        if (!isWater && b == BlockRegistry::Torch) continue;
+                        if (!isWater && b >= BlockRegistry::FirstPartial) continue; // 异形已在 PASS 1
+                        for (int f = 0; f < 6; ++f) {
+                            const FaceDef &F = kFaces[f];
+                            const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
+                            if (BlockRegistry::isSolid(nb)) continue;
+                            if (isWater && nb == BlockRegistry::Water) continue;
+                            const int t = tileFor(b, f);
+                            const float u0 = t * tileW + hx, u1 = (t + 1) * tileW - hx;
+                            const int ax = wx + F.dir[0], ay = ly + F.dir[1], az = wz + F.dir[2];
+                            const float nbSkyF = m_world->skyLightAt(ax, ay, az) / 15.0f;
+                            const float nbBlockF = m_world->blockLightAt(ax, ay, az) / 15.0f;
+                            const quint32 base = quint32(verts.size());
+                            for (int cc = 0; cc < 4; ++cc) {
+                                const float dx = F.c[cc][0], dy = F.c[cc][1], dz = F.c[cc][2];
+                                const float shadow = sunShadowAt(float(wx) + dx, float(ly) + dy, float(wz) + dz);
+                                const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow), nbBlockF),
+                                                            kVcMin, kVcMax);
+                                float cu, cv;
+                                if (f == 0 || f == 1) { cu = dz; cv = dy; }       // ±X
+                                else if (f == 4 || f == 5) { cu = dx; cv = dy; }  // ±Z
+                                else { cu = dx; cv = dz; }                        // ±Y
+                                Vtx v;
+                                v.x = float(lx) + dx; v.y = float(ly) + dy; v.z = float(lz) + dz; // 局部坐标
+                                v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
+                                v.u = u0 + cu * (u1 - u0);
+                                v.v = v0 + cv * (v1 - v0);
+                                v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f; // t151 光场 × t153 PCF 软影顶点色
+                                verts.append(v);
+                            }
+                            idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);
+                            idx.append(base + 0); idx.append(base + 2); idx.append(base + 3);
+                        }
                     }
                 }
             }

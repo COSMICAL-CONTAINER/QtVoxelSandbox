@@ -86,6 +86,10 @@ Window {
     // t166b 阴影开关（用户「卡顿疑似阴影所致，加开关测」）：false → 全 chunk sunShadowAt 返 0（关 PCF 软影，
     //   meshing 提速；顶点光基底只剩 flood-fill 光场）。ESC 设置面板开关绑此。默认 true。
     property bool shadowsEnabled: true
+    // t178 贪婪网格化开关（PLAN §4 性能打磨）：true（默认）→ chunk mesher 合并同 (tile,光) 共面为单个矩形
+    //   （顶点/三角大幅下降，F3 可观测）；false → 回退逐格 culled（贴图逐格清晰）。绑各 ChunkGeometry。
+    //   注：图集路径下合并 quad 的贴图会拉伸铺满（逐格平铺需纹理数组=自研 RHI，dev-plan 偏差 1/2）。
+    property bool greedyMeshing: true
     // t166c 第一人称手持方块位置（用户「加滑动条调手持方块位置」）：viewModelHand 内 BlockCube 的相对偏移。
     //   默认 (0,0,0)（t156「手前方」基线）；ESC 滑条实时调。
     property real heldBlockX: 0.0
@@ -836,97 +840,97 @@ Window {
         // 16×16 时再换 C++ 侧批量管理（ChunkMeshManager）或经场景 Node 领养的 Repeater 方案。
         Model { // chunk (0,0) → 世界 (0,0)
             position: Qt.vector3d(0, 0, 0)
-            geometry: ChunkGeometry { id: geo00; world: theWorld; cx: 0; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+            geometry: ChunkGeometry { id: geo00; world: theWorld; cx: 0; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
             Component.onCompleted: console.info("[t31] chunk(0,0) UP parent=" + parent + " (对照：已知可见)")
         }
         Model { // chunk (1,0) → 世界 (16,0)
             position: Qt.vector3d(16, 0, 0)
-            geometry: ChunkGeometry { id: geo10; world: theWorld; cx: 1; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+            geometry: ChunkGeometry { id: geo10; world: theWorld; cx: 1; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (2,0) → 世界 (32,0)
             position: Qt.vector3d(32, 0, 0)
-            geometry: ChunkGeometry { id: geo20; world: theWorld; cx: 2; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+            geometry: ChunkGeometry { id: geo20; world: theWorld; cx: 2; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (0,1) → 世界 (0,16)
             position: Qt.vector3d(0, 0, 16)
-            geometry: ChunkGeometry { id: geo01; world: theWorld; cx: 0; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+            geometry: ChunkGeometry { id: geo01; world: theWorld; cx: 0; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (1,1) → 世界 (16,16)
             position: Qt.vector3d(16, 0, 16)
-            geometry: ChunkGeometry { id: geo11; world: theWorld; cx: 1; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+            geometry: ChunkGeometry { id: geo11; world: theWorld; cx: 1; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (2,1) → 世界 (32,16)
             position: Qt.vector3d(32, 0, 16)
-            geometry: ChunkGeometry { id: geo21; world: theWorld; cx: 2; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+            geometry: ChunkGeometry { id: geo21; world: theWorld; cx: 2; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (0,2) → 世界 (0,32)
             position: Qt.vector3d(0, 0, 32)
-            geometry: ChunkGeometry { id: geo02; world: theWorld; cx: 0; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+            geometry: ChunkGeometry { id: geo02; world: theWorld; cx: 0; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (1,2) → 世界 (16,32)
             position: Qt.vector3d(16, 0, 32)
-            geometry: ChunkGeometry { id: geo12; world: theWorld; cx: 1; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+            geometry: ChunkGeometry { id: geo12; world: theWorld; cx: 1; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // chunk (2,2) → 世界 (32,32)
             position: Qt.vector3d(32, 0, 32)
-            geometry: ChunkGeometry { id: geo22; world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+            geometry: ChunkGeometry { id: geo22; world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
         // t162 5×5 外环（cx/cz 含 3 或 4 的 16 个 chunk；中心 3×3 仍 geo00..geo22 供 F3 顶点统计，外环 id 不入 F3 和）。
-        Model { position: Qt.vector3d(48, 0, 0);  geometry: ChunkGeometry { id: geo30; world: theWorld; cx: 3; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(48, 0, 0);  geometry: ChunkGeometry { id: geo30; world: theWorld; cx: 3; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 0);  geometry: ChunkGeometry { id: geo40; world: theWorld; cx: 4; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(64, 0, 0);  geometry: ChunkGeometry { id: geo40; world: theWorld; cx: 4; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(48, 0, 16); geometry: ChunkGeometry { id: geo31; world: theWorld; cx: 3; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(48, 0, 16); geometry: ChunkGeometry { id: geo31; world: theWorld; cx: 3; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 16); geometry: ChunkGeometry { id: geo41; world: theWorld; cx: 4; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(64, 0, 16); geometry: ChunkGeometry { id: geo41; world: theWorld; cx: 4; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(48, 0, 32); geometry: ChunkGeometry { id: geo32; world: theWorld; cx: 3; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(48, 0, 32); geometry: ChunkGeometry { id: geo32; world: theWorld; cx: 3; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 32); geometry: ChunkGeometry { id: geo42; world: theWorld; cx: 4; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(64, 0, 32); geometry: ChunkGeometry { id: geo42; world: theWorld; cx: 4; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(0, 0, 48);  geometry: ChunkGeometry { id: geo03; world: theWorld; cx: 0; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(0, 0, 48);  geometry: ChunkGeometry { id: geo03; world: theWorld; cx: 0; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(16, 0, 48); geometry: ChunkGeometry { id: geo13; world: theWorld; cx: 1; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(16, 0, 48); geometry: ChunkGeometry { id: geo13; world: theWorld; cx: 1; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(32, 0, 48); geometry: ChunkGeometry { id: geo23; world: theWorld; cx: 2; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(32, 0, 48); geometry: ChunkGeometry { id: geo23; world: theWorld; cx: 2; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(48, 0, 48); geometry: ChunkGeometry { id: geo33; world: theWorld; cx: 3; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(48, 0, 48); geometry: ChunkGeometry { id: geo33; world: theWorld; cx: 3; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 48); geometry: ChunkGeometry { id: geo43; world: theWorld; cx: 4; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(64, 0, 48); geometry: ChunkGeometry { id: geo43; world: theWorld; cx: 4; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(0, 0, 64);  geometry: ChunkGeometry { id: geo04; world: theWorld; cx: 0; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(0, 0, 64);  geometry: ChunkGeometry { id: geo04; world: theWorld; cx: 0; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(16, 0, 64); geometry: ChunkGeometry { id: geo14; world: theWorld; cx: 1; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(16, 0, 64); geometry: ChunkGeometry { id: geo14; world: theWorld; cx: 1; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(32, 0, 64); geometry: ChunkGeometry { id: geo24; world: theWorld; cx: 2; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(32, 0, 64); geometry: ChunkGeometry { id: geo24; world: theWorld; cx: 2; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(48, 0, 64); geometry: ChunkGeometry { id: geo34; world: theWorld; cx: 3; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(48, 0, 64); geometry: ChunkGeometry { id: geo34; world: theWorld; cx: 3; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 64); geometry: ChunkGeometry { id: geo44; world: theWorld; cx: 4; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled }
+        Model { position: Qt.vector3d(64, 0, 64); geometry: ChunkGeometry { id: geo44; world: theWorld; cx: 4; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: terrainLight(worldClock.skyLight) }
         }
 
@@ -938,96 +942,96 @@ Window {
         //   Model」已验证路径（不用 Repeater，lessons-learned t03 3D 领养坑）。
         Model { // water (0,0)
             position: Qt.vector3d(0, 0, 0)
-            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // water (1,0)
             position: Qt.vector3d(16, 0, 0)
-            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // water (2,0)
             position: Qt.vector3d(32, 0, 0)
-            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // water (0,1)
             position: Qt.vector3d(0, 0, 16)
-            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // water (1,1)
             position: Qt.vector3d(16, 0, 16)
-            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // water (2,1)
             position: Qt.vector3d(32, 0, 16)
-            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // water (0,2)
             position: Qt.vector3d(0, 0, 32)
-            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // water (1,2)
             position: Qt.vector3d(16, 0, 32)
-            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
         Model { // water (2,2)
             position: Qt.vector3d(32, 0, 32)
-            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
         // t162 5×5 水外环（16 chunk，同地形外环 (cx,cz)）。
-        Model { position: Qt.vector3d(48, 0, 0);  geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(48, 0, 0);  geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 0);  geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(64, 0, 0);  geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(48, 0, 16); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(48, 0, 16); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 16); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(64, 0, 16); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(48, 0, 32); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(48, 0, 32); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 32); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(64, 0, 32); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(0, 0, 48);  geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(0, 0, 48);  geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(16, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(16, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(32, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(32, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(48, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(48, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(64, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(0, 0, 64);  geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(0, 0, 64);  geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(16, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(16, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(32, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(32, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(48, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(48, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
-        Model { position: Qt.vector3d(64, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; waterOnly: true }
+        Model { position: Qt.vector3d(64, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true }
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
 
@@ -2383,7 +2387,7 @@ Window {
                 Text { text: "[F6] toggle fast day/night (" + (worldClock.debugFast ? "ON · ~30s" : "OFF · ~20min") + ")"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[F3] toggle debug overlay (fps / pos / chunks / vertices)   [F3+B] toggle hitboxes"
+                Text { text: "[F3] toggle debug overlay (fps / frame / cpu ms / draw-calls / mesh)   [F3+B] toggle hitboxes"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 // 按钮行：t139 设置 + 返回主菜单。Row 居中，两按钮间距 10。
@@ -2668,9 +2672,10 @@ Window {
     // 顶点/三角面读各 ChunkGeometry.vertexCount/triangleCount），**不**在 UI 层持有副本。各 geo_NN 的
     // NOTIFY=meshRebuilt → 任一 chunk 重建即刷新汇总（编辑后立刻反映新顶点数）。
     //
-    // 占位字段（spec：不得伪造数字）：draw-call 当前 n/a —— QtQuick3D 路径不暴露逐帧 draw-call 计数，
-    // 取值接口留给 t13 性能 benchmark（届时走 QSGRendererInterface / RHI stats）；工作线程 0/0 —— 当前
-    // meshing 同步在 GUI 线程（onWorldChanged 内），无 worker 池，t13 线程化后填实数。
+    // t178 帧时间切分（PLAN §4 验收）：fps 旁加 frameMs(=1000/fps) + cpu sim ms（player.simMs，主线程 tick
+    //   1s 平均）；draw-call 改为**估算值**（≈，非伪造：chunks 地形+水两段 + 掉落物 + mob + 火把 + ~6 固定
+    //   场景 Model）—— QtQuick3D 路径仍不暴露逐帧真值，真计时 / 真 draw-call 待自研 RHI 迁移（QRhiGpuTimer）。
+    //   mesh 行加模式（greedy/culled）—— greedy 顶点/三角大幅降，可观测 PLAN §4 性能打磨成效。
     Text {
         visible: window.appState === "playing" && window.f3Visible
         x: 12; y: 62
@@ -2694,8 +2699,18 @@ Window {
             const moveName = player.moveState === PlayerController.Sprint ? "sprint"
                            : player.moveState === PlayerController.Crouch ? "crouch" : "walk"
             const ncx = theWorld.chunksX, ncz = theWorld.chunksZ
+            // t178 帧时间切分（PLAN §4 验收「写死帧时间切分 CPU/GPU ms + draw-call 预算」）：
+            //   - frameMs：总帧预算 = 1000/fps（fps=0 → 0，防除零）。
+            //   - cpuSimMs：主线程 tick() CPU 耗时 1s 平均（player.simMs；物理/射线/实体/挖掘/拾取）。
+            //   - drawEst：估算 draw-call 数（chunks 地形+水两段 + 掉落物 + mob + 火把 + ~6 固定场景 Model：
+            //     太阳/玩家模型/手/选框/裂纹/粒子；明确标 ≈ 因 QtQuick3D 路径不暴露逐帧真值，spec 禁伪造）。
+            //   GPU 真计时 / 逐帧 draw-call 待自研 RHI 迁移（QRhiGpuTimer / RHI stats）。
+            const frameMs = window.fps > 0 ? (1000.0 / window.fps) : 0.0
+            const drawEst = ncx * ncz * 2 + itemEntities.count + entityManager.count
+                            + torchPositions.count + 6
+            const meshMode = window.greedyMeshing ? "greedy" : "culled"
             return "voxelsandbox  [F3 debug]"
-                 + "\nfps: " + window.fps
+                 + "\nfps: " + window.fps + "  frame: " + frameMs.toFixed(1) + "ms  cpu sim: " + player.simMs.toFixed(2) + "ms"
                  + "\npos: " + player.position.x.toFixed(2) + "  " + player.position.y.toFixed(2) + "  " + player.position.z.toFixed(2)
                  + "  (feet " + player.feetPosition.x.toFixed(1) + "," + player.feetPosition.y.toFixed(1) + "," + player.feetPosition.z.toFixed(1) + ")"
                  + "\nyaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch) + "  look " + camName
@@ -2707,8 +2722,9 @@ Window {
                  + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
                  + "\nworld: " + theWorld.width + "×" + theWorld.depth + "×" + theWorld.height
                  + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"
-                 + "\nvertices: " + vx + "  triangles: " + tr
-                 + "\ndraw-calls: n/a (QtQuick3D path, see t13)  threads: 0/0 (sync meshing)"
+                 + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr // t178：mesh 模式 + 顶点/三角（greedy 大幅降）
+                 + "\ndraw-calls: ~" + drawEst + "  (chunks×2 " + (ncx * ncz * 2) + " + items " + itemEntities.count
+                 + " + mobs " + entityManager.count + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
                  + "\nday: phase " + worldClock.dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
                  + (worldClock.debugFast ? "  (fast)" : "")
                  + "\n[B] hitboxes: " + (window.showHitboxes ? "ON" : "off")

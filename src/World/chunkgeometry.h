@@ -55,6 +55,12 @@ public:
     //   heightmap 采样 → meshing 大幅省时，sun-step 50 chunk 重建更快）+ 顶点光基底只剩 flood-fill 光场（无软影）。
     //   ESC 设置面板开关绑 window.shadowsEnabled → 全 chunk 实例。默认 true（保留软影）；关掉即诊断 / 提速。
     Q_PROPERTY(bool shadowsEnabled READ shadowsEnabled WRITE setShadowsEnabled NOTIFY shadowsEnabledChanged)
+    // t178 贪婪网格化开关（PLAN §4 性能打磨）：true（默认）→ buildMesh 走 greedy meshing（按 6 面方向逐层 2D mask
+    //   合并同 (tile, 邻格天光, 邻格方光) 的共面连续格为单个矩形）；false → 回退逐格 culled meshing（每可见面 4 顶点）。
+    //   greedy 大幅降顶点 / 三角 / 索引数（平坦地面 16×16=256 quad → 1），F3 叠层据此可观测 meshing 吞吐改善。
+    //   贴图在合并 quad 上**拉伸**铺满（图集路径权衡；逐格平铺需纹理数组 = 自研 RHI 路径，见 dev-plan 偏差 1/2、
+    //   PLAN §2-I 顶点格式），关此开关可回退逐格清晰贴图。值变 → buildMesh 重网格化。
+    Q_PROPERTY(bool greedyMeshing READ greedyMeshing WRITE setGreedyMeshing NOTIFY greedyMeshingChanged)
     // 网格统计（t10 F3 调试叠层，PLAN §2-F）：buildMesh 完成后暴露本 chunk 的顶点 / 三角面数，
     // 供 F3 叠层汇总诊断 meshing 吞吐与帧抖根因（§2-F 明言「没有 F3 叠层，帧率验收无法诊断帧抖」）。
     // 仅在 buildMesh 末尾经 meshRebuilt 通知；呈现层只读、不反向写。三角面 = idx/3（实际索引计数
@@ -83,6 +89,9 @@ public:
     // t166b 阴影开关（false → sunShadowAt 返 0，关 PCF 软影，meshing 提速）。
     bool shadowsEnabled() const { return m_shadowsEnabled; }
     void setShadowsEnabled(bool on);
+    // t178 贪婪网格化开关（true=greedy 合并同面；false=逐格 culled）。值变 → 重网格化。
+    bool greedyMeshing() const { return m_greedyMeshing; }
+    void setGreedyMeshing(bool on);
 
     // 网格统计（t10 F3 叠层）：上次 buildMesh 产出的顶点 / 三角面数。
     int vertexCount() const { return m_vertexCount; }
@@ -95,6 +104,7 @@ signals:
     void sunInputChanged(); // t123：sunDir 变（太阳量化跨步）；驱动呈现层 / 未来光场刷新
     void waterOnlyChanged(); // t148：水段开关变（QML 改 waterOnly → 重建，水段 / 地形段重网格化）
     void shadowsEnabledChanged(); // t166b：阴影开关变（→ buildMesh 重算顶点光 PCF）
+    void greedyMeshingChanged();  // t178：贪婪网格化开关变（→ buildMesh 重网格化）
     // buildMesh 完成（顶点 / 三角面数已更新；t10 F3 叠层据此刷新汇总）。
     void meshRebuilt();
 
@@ -124,6 +134,7 @@ private:
     QVector3D m_sunDir{0.f, 1.f, 0.f}; // t123 太阳方向（单位向量；默认天顶正午，QML 绑 WorldClock.sunDir）
     bool m_waterOnly = false; // t148：true=只网格化 Water 段（透明水）；false=只网格化非水地形段
     bool m_shadowsEnabled = true; // t166b：PCF 软影开关（false → sunShadowAt 返 0，跳过 per-vertex 采样）
+    bool m_greedyMeshing = true;  // t178：贪婪网格化开关（true=合并同面；false=逐格 culled）
     int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
     int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）
 };
