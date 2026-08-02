@@ -826,8 +826,13 @@ void PlayerController::placeBlock()
         //   不依赖上方 !m_hasHit 门（已绕过）→ 三种姿态均可舀。舀走走 setWaterSilent（水流系统静默写入，
         //   不发 blockBroken → 无破块粒子/音，机制等价 MC 舀水无反馈），下一 tickWaterFlow 波前自动逐环衰退邻接流水。
         const RayHit wHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitWater);
-        if (wHit.valid && m_world->blockAt(wHit.bx, wHit.by, wHit.bz) == BlockRegistry::Water) {
-            m_world->setWaterSilent(wHit.bx, wHit.by, wHit.bz, BlockRegistry::Air, 0); // 舀走（水源 / 流水均可舀，清整格）
+        // t199 空桶只舀水源：机制等价 MC 1.0 铁桶——仅 state==0（水源）可舀，流水（state 1..7）右键无效。
+        //   state 取自 wHit 水格（同格 id+state 经 ChunkManager 路由），水源被舀后邻接流水由下一 tickWaterFlow
+        //   波前逐环衰退（机制等价 MC「桶舀源、流自然蒸发」）。流水右键：守卫不满足 → 不写栅格 / 不换桶 / 不挥手。
+        if (wHit.valid
+            && m_world->blockAt(wHit.bx, wHit.by, wHit.bz) == BlockRegistry::Water
+            && m_world->stateAt(wHit.bx, wHit.by, wHit.bz) == 0) { // 仅水源 state==0 可舀（t199）
+            m_world->setWaterSilent(wHit.bx, wHit.by, wHit.bz, BlockRegistry::Air, 0); // 舀走（清整格）
             m_hotbar->setStack(slot, int(RecipeRegistry::WaterBucketId), 1); // t186：空桶 → 装水桶（所有模式均换桶；旧 m_mode!=Creative 守卫移除）
             m_lastPlaceMs = now;
             emit swingArm();
