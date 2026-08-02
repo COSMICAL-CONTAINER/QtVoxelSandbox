@@ -70,12 +70,12 @@ public:
                                   //   水-水邻接面互剔（nb==Water 剔除）。不进创造调色板（worldgen 专属；非玩家可放置
                                   //   方块 —— 玩家经铁桶舀/倒水交互，t174）。
                                   //   **t174 水流 state 编码**（复用 chunk m_states 并行数组；与不完整方块 state 同存储）：
-                                  //     state 0 = 水源（无限；worldgen 填 / 玩家铁桶倒 / 水源正下方的下落水柱重水源化）
+                                  //     state 0 = 水源（无限；worldgen 填 / 玩家铁桶倒）
                                   //     state 1..7 = 流水（距水源的蔓延距离；MC 式扩散，最大 7 格水平距离）。
-                                  //   World::tickWaterFlow() 周期 BFS 从所有水源重算流场：水源 → 下落（air below）
-                                  //   成流水（state=1 起算，水源正下方重水源化除外）+ 水平蔓延 state+1（≤7）；水源被
-                                  //   舀走（铁桶）/ 隔断后，BFS 不再覆盖的格蒸发为 air（流水衰退）。state 仅驱动水流
-                                  //   模拟，**不影响渲染**（所有水格外观一致半透蓝）。
+                                  //   World::tickWaterFlow()（t185 重做为增量波前）每 ~0.3s 把波前推进 1 格：水源/流水
+                                  //   grounded（下方实体）→ 水平蔓延 state+1（≤7）；悬崖边（下方 air）→ 下落为流水 state=1
+                                  //   （**非水源**）；流水失支撑（水源被舀/隔断）→ 逐环蒸发。1 格/tick 流动动画可见、不灌满
+                                  //   整个平面。state 仅驱动水流模拟，**不影响渲染**（所有水格外观一致半透蓝）。
         Chest          = 22, // 箱子（t173）：机制等价 MC 1.0 箱子。solid=true / ShapeFull（整立方实体碰撞、
                                   //   mesher 正常画 6 面顶/侧/前贴图=chest_top/side/front，与工作台 / 熔炉同走整立方
                                   //   渲染路径 —— 非异形，**不**进 PartialBlockGeometry）、hardness=2.5（木制）、NoTool

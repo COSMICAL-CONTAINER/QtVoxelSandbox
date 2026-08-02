@@ -6,8 +6,8 @@
 #include <QElapsedTimer> // t155c：recomputeLightAround 计时（测每帧编辑光照开销）
 #include <algorithm>
 #include <cmath>
-#include <queue>   // t151：recomputeLightField 的 BFS flood-fill 队列；t174 tickWaterFlow BFS 队列
-#include <unordered_map> // t174 tickWaterFlow 的 newWater / oldWater 哈希表（key = 体素线性编码）
+#include <queue>   // t151：recomputeLightField 的 BFS flood-fill 队列
+#include <unordered_map> // t185 tickWaterFlow 的 adds 哈希表（key = 体素线性编码 → 新 level，多源取 min）
 
 // t149 海平面（水位）：worldgen 沙滩带 / 沙漠水位 / 填水 / 树·矿石阈值的单一权威常量。
 //   spec 原文 waterLevel=8 是 t119 重定标（heightAt 3..11 → 16..40）**之前**的旧地形范围；
@@ -187,119 +187,125 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     return true;
 }
 
-// t174 水流蔓延 tick（MC 式源+流扩散；PLAN §2-K 确定性 + 机制等价 MC 1.0 流水）。每 kFlowTickInterval
-//   （=5，~0.5s）真正重算一次（tickWaterFlow 每 100ms 被 WorldClock.ticked 调，内部节流计数）。
+// t185 水流重做（增量波前扩散；修 t174 全量 BFS 的「瞬间填平 + 闪烁」bug）。每 kFlowTickInterval
+//   （=3，~0.3s）把波前推进 1 格（tickWaterFlow 每 100ms 被 WorldClock.ticked 调，内部节流计数）。
 //
-//   算法（BFS 从所有水源重算流场）：
-//   1) 全图扫现有水格 → oldWater（key=线性坐标 → 旧 state）。同时收集水源（state==0）作 BFS 根。
-//   2) BFS：从水源起，按 MC 流水规则传播 ——
-//        - 下落（air below）：水源正下方 → 重水源化（state=0，使水柱像水源一样在底部重新蔓延，
-//          机制简化等价 MC「下落水流柱」）；流水正下方 → state=1（下落水流在底部作 fresh flow 蔓延）。
-//          统一表达：下落格 state = (上方 state==0) ? 0 : 1。
-//        - 水平蔓延（仅 state < kMaxFlowLevel=7）：4 向邻居是 air → state+1。
-//        visited 集合（newWater）保证每格只处理一次（BFS FIFO → 首达即最短 = 最低 state，机制对齐 MC）。
-//   3) Diff 应用：oldWater 中不在 newWater 的格 → 蒸发（setWaterSilent Air，水源被舀/隔断后流水衰退）；
-//        newWater 中 state 与 oldWater 不同的格 → 更新（setWaterSilent Water state）。无变化的格跳过（setWaterSilent
-//        内部无变化 → false，不触发 worldChanged 重建）。
+//   旧实现（t174）每 tick 从所有水源做**全量 BFS** 重算整片流场 → 玩家一放水桶，下一 tick 整个 7 格扩散
+//   + 所有下落柱立刻全部到位 = 「瞬间填平」；且下落水流被当**水源**（state=0）→ 每层下落都重新作源向四方
+//   满扩散 → 级联灌满整个盆地（leetcode 接雨水式）。全量重算 + 多源 BFS 在活跃期还会震荡 → 「一闪一闪」。
 //
-//   性能：全图扫水格 O(W*D*H)（80×80×64≈400k blockAt 查询，~1-2ms）；BFS 规模 = 水格数（典型海洋 ~数百格、
-//   玩家倒水 ~数十格），visited 天然限界。settled 海洋每次重算结果不变 → 不发 worldChanged（setWaterSilent
-//   无变化 false），无重建开销。仅在流场真变（玩家倒/舀水、扩散进行中）时触发重建。
+//   新算法（增量、单步波前；spec「水源向外 1 格 1 格流动，最终停，不填满整个平面」）：
+//   1) 快照当前所有水格（pos + level）。state 0=水源（永久，仅玩家/铁桶/worldgen 放置/移除）；
+//      1..7=流水（每扩散 1 格 level+1，机制等价 MC 1.0 流水 7 格扩散；spec 的「8 格」含水源算）。
+//   2) 扩散 pass（只把波前推 1 格，**有流动动画**）：
+//        - 下落：cell 下方为 air → 下方写**流水 level=1**（**非水源**！这是修「灌满盆地」的关键 —— 下落水流
+//          不再当源、不重新满扩散，只作 fresh flow；机制对齐 MC「水流下落为流而非源」）。
+//        - 水平蔓延：仅当 cell「grounded」（下方为实体方块，非 air/水）且 level < kMaxFlowLevel → 4 向
+//          air 邻居写 level+1。下方为 air → 只下落不水平蔓延（悬崖边水直接流下，不在半空横向铺）；
+//          下方为水 → 既不下落也不蔓延（水下柱由其最底 grounded 格负责扩散）。
+//        只写当前为 air 的格（不覆写既有水）→ 每格首达即最低 level（机制对齐 MC 最短源距，无需重刷既有格）。
+//   3) 蒸发 pass（流水失支撑 → 退场，1 格/tick 渐退）：非源水格若既无「上方有水」（下落柱 / 上方源灌养）
+//      又无「水平方向更低 level 的水邻居」（指向源方向）→ 蒸发。水源被舀/挖后，邻接 level-1 失支撑 →
+//      本 tick 蒸发；下一 tick level-2 失支撑（level-1 已变 air）→ 蒸发；逐环渐退（机制对齐 MC 流水衰退）。
+//   4) 应用：先蒸发后新增（二者不相交 —— 前者必为水格、后者必为 air 格）。经 setWaterSilent 写入
+//      （系统模拟非玩家动作，不发 broken/placed，仅 worldChanged 重建 mesh）。
+//
+//   收敛性：稳态流场（海洋全源、已铺满的池）扩散 pass 无 air 可写、蒸发 pass 全有支撑 → 无变化 →
+//      setWaterSilent 全 false → 不触发 worldChanged → 无重建、无闪烁（修「一闪一闪」）。活跃扩散每 tick
+//      仅波前 ≤ 数格变化（远少于旧全量 diff）→ 重建量小、1 格/tick 动画可见（修「瞬间填平」）。
 //
 //   分层（PLAN §2）：本方法属 World 层，只读/写 m_chunks + 发 worldChanged。不依赖 Renderer/Physics/Game。
 //   呈现层（Main.qml）经 WorldClock.ticked 桥接调用（QML 同时持 World + WorldClock，向下合法）。
 void World::tickWaterFlow()
 {
-    if (++m_flowTickCounter < kFlowTickInterval) return; // 节流：每 5 tick（~0.5s）真正重算一次
+    if (++m_flowTickCounter < kFlowTickInterval) return; // 节流：每 3 tick（~0.3s）把波前推进 1 格
     m_flowTickCounter = 0;
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return;
-    const long long layer = static_cast<long long>(W) * D; // 一个 Y 层的格子数（key 解码用）
 
-    // 体素线性 key：x + z*W + y*layer。世界 ≤ 80×80×64 = 409600 < INT_MAX，编码安全。
-    auto keyOf = [W, layer](int x, int y, int z) -> long long {
-        return static_cast<long long>(x) + static_cast<long long>(z) * W + static_cast<long long>(y) * layer;
+    // 体素线性 key：x + z*W + y*W*D。世界 ≤ 80×80×64 = 409600 < INT_MAX，编码安全。仅用于 adds 去重 / 取 min。
+    auto keyOf = [W, D](int x, int y, int z) -> long long {
+        return static_cast<long long>(x) + static_cast<long long>(z) * W
+             + static_cast<long long>(y) * static_cast<long long>(W) * D;
     };
-    // key → (x,y,z) 解码（diff 应用 setWaterSilent 时反算坐标）。
-    auto decodeX = [W](long long k) -> int { return static_cast<int>(k % W); };
-    auto decodeZ = [W, D](long long k) -> int { return static_cast<int>((k / W) % D); };
-    auto decodeY = [layer](long long k) -> int { return static_cast<int>(k / layer); };
 
-    std::unordered_map<long long, quint8> oldWater; // 旧水格 state 快照（蒸发 diff 用）
-    struct Cell { int x, y, z; };
-    std::vector<Cell> sources; // 水源（state==0）作 BFS 根
-
+    // 1) 快照当前水格（tick 内栅格不变 —— 新增/蒸发在 pass 末统一应用）。
+    struct WCell { int x, y, z; quint8 level; };
+    std::vector<WCell> cells;
     for (int x = 0; x < W; ++x)
         for (int z = 0; z < D; ++z)
             for (int y = 0; y < H; ++y) {
-                const quint8 b = m_chunks.blockAt(x, y, z);
-                if (b == BlockRegistry::Water) {
-                    const quint8 st = m_chunks.stateAt(x, y, z);
-                    oldWater[keyOf(x, y, z)] = st;
-                    if (st == 0) sources.push_back({x, y, z}); // state==0 = 水源
-                }
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Water)
+                    cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
             }
-    if (sources.empty()) {
-        // 无水源 → 蒸发所有残留流水（无 BFS 覆盖即清）。防「水源被舀后流水残不退」。
-        for (const auto &kv : oldWater)
-            setWaterSilent(decodeX(kv.first), decodeY(kv.first), decodeZ(kv.first),
-                           BlockRegistry::Air, 0);
-        return;
+
+    // 新增表：key → 新 level（多源指向同一格取 min = 最短源距，机制对齐 MC）。
+    std::unordered_map<long long, quint8> adds;
+    auto tryAdd = [&](long long k, quint8 lvl) {
+        auto it = adds.find(k);
+        if (it == adds.end()) adds.emplace(k, lvl);
+        else if (it->second > lvl) it->second = lvl;
+    };
+
+    // 下方格类别：y==0 视为实体底（基岩层不可下落）；否则查 m_chunks。
+    //   0=air(下落) / 1=solid(grounded，水平蔓延) / 2=water(水下柱，本格既不下落也不蔓延)。
+    auto belowKind = [&](int x, int y, int z) -> int {
+        if (y == 0) return 1;
+        const quint8 b = m_chunks.blockAt(x, y - 1, z);
+        if (b == BlockRegistry::Air) return 0;
+        if (b == BlockRegistry::Water) return 2;
+        return 1;
+    };
+    static const int hd[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+
+    // 2) 扩散 pass：只把波前推 1 格（不级联 —— 新格下一 tick 才继续扩散 → 1 格/tick 动画）。
+    for (const WCell &c : cells) {
+        const int bk = belowKind(c.x, c.y, c.z);
+        if (bk == 0) {
+            // 下落：写下方为流水 level=1（**非源** —— 修 t174「下落成源灌满盆地」bug）。
+            tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1));
+        } else if (bk == 1 && c.level < kMaxFlowLevel) {
+            // 水平蔓延：grounded 且未到最大流距 → 4 向 air 邻居写 level+1。
+            for (const auto &d : hd) {
+                const int nx = c.x + d[0], nz = c.z + d[1];
+                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                if (m_chunks.blockAt(nx, c.y, nz) != BlockRegistry::Air) continue; // 只入 air（不覆写既有水）
+                tryAdd(keyOf(nx, c.y, nz), quint8(c.level + 1));
+            }
+        }
+        // bk == 2（下方为水）：水下柱 —— 由该柱最底 grounded 格负责水平扩散，本格不动。
     }
 
-    // BFS 从所有水源（多源 BFS，FIFO → 每格首达 = 最低 state = 最短水源距离，机制对齐 MC）。
-    std::unordered_map<long long, quint8> newWater; // 新流场（key → state）
-    std::queue<Cell> q;
-    for (const Cell &s : sources) {
-        const long long k = keyOf(s.x, s.y, s.z);
-        if (newWater.emplace(k, quint8(0)).second) q.push(s); // 水源 state=0（emplace 去重防重复源）
-    }
-    // 6 向偏移：下 / +X / -X / +Z / -Z（上不算 —— 水不向上流；MC 流水仅向下/水平蔓延）。
-    static const int dk[5][3] = {{0, -1, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
-    while (!q.empty()) {
-        const Cell c = q.front(); q.pop();
-        const quint8 curLevel = newWater[keyOf(c.x, c.y, c.z)];
-        const bool isSource = (curLevel == 0);
-        // 1) 下落优先（air below）：水源正下方重水源化（state=0），流水正下方成 state=1（下落流水 fresh flow）。
-        if (c.y > 0) {
-            const int ny = c.y - 1;
-            if (m_chunks.blockAt(c.x, ny, c.z) == BlockRegistry::Air) {
-                const long long nk = keyOf(c.x, ny, c.z);
-                if (newWater.find(nk) == newWater.end()) {
-                    const quint8 nlevel = isSource ? quint8(0) : quint8(1); // 水源柱重水源化 / 流水下落 fresh
-                    newWater.emplace(nk, nlevel);
-                    q.push({c.x, ny, c.z});
-                }
+    // 3) 蒸发 pass：流水（level>0）失支撑 → 退场。水源（level=0）永不蒸发（玩家/铁桶/worldgen 管）。
+    std::vector<WCell> evaps;
+    for (const WCell &c : cells) {
+        if (c.level == 0) continue;
+        bool supported = false;
+        // a) 上方有水 → 被下落柱 / 上方源灌养（支撑）。
+        if (c.y + 1 < H && m_chunks.blockAt(c.x, c.y + 1, c.z) == BlockRegistry::Water)
+            supported = true;
+        // b) 水平方向有更低 level 的水邻居（指向源方向）→ 支撑。
+        if (!supported) {
+            for (const auto &d : hd) {
+                const int nx = c.x + d[0], nz = c.z + d[1];
+                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                if (m_chunks.blockAt(nx, c.y, nz) != BlockRegistry::Water) continue;
+                if (m_chunks.stateAt(nx, c.y, nz) < c.level) { supported = true; break; }
             }
         }
-        // 2) 水平蔓延（仅 state < kMaxFlowLevel；水源 state=0 也蔓延出 state=1，故条件含源）。
-        if (curLevel < kMaxFlowLevel) {
-            for (const auto &d : dk) {
-                if (d[1] != 0) continue; // 跳过下向偏移（下落已在 1) 处理）
-                const int nx = c.x + d[0], nz = c.z + d[2];
-                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue; // 越界
-                if (m_chunks.blockAt(nx, c.y, nz) != BlockRegistry::Air) continue; // 仅蔓延入空气
-                const long long nk = keyOf(nx, c.y, nz);
-                if (newWater.find(nk) != newWater.end()) continue; // visited
-                newWater.emplace(nk, quint8(curLevel + 1));
-                q.push({nx, c.y, nz});
-            }
-        }
+        if (!supported) evaps.push_back(c);
     }
 
-    // Diff 应用：蒸发（old 有 / new 无）+ 更新（state 变）。setWaterSilent 内部无变化 → 不触发重建。
-    for (const auto &kv : oldWater) {
-        if (newWater.find(kv.first) == newWater.end()) {
-            setWaterSilent(decodeX(kv.first), decodeY(kv.first), decodeZ(kv.first),
-                           BlockRegistry::Air, 0);
-        }
-    }
-    for (const auto &kv : newWater) {
-        const auto it = oldWater.find(kv.first);
-        if (it == oldWater.end() || it->second != kv.second) {
-            setWaterSilent(decodeX(kv.first), decodeY(kv.first), decodeZ(kv.first),
-                           BlockRegistry::Water, kv.second);
-        }
+    // 4) 应用：先蒸发后新增（不相交）。setWaterSilent 内部无变化 → false → 稳态零重建。
+    for (const WCell &e : evaps)
+        setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
+    for (const auto &kv : adds) {
+        const long long k = kv.first;
+        const int x = static_cast<int>(k % W);
+        const long long kz = k / W;
+        const int z = static_cast<int>(kz % D);
+        const int y = static_cast<int>(kz / D);
+        setWaterSilent(x, y, z, BlockRegistry::Water, kv.second);
     }
 }
 

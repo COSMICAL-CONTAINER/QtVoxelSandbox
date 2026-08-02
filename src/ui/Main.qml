@@ -3065,9 +3065,9 @@ Window {
         target: worldClock
         function onTicked(dt) {
             furnacePanel.tick(dt)
-            // t174 水流蔓延 tick：WorldClock 每 100ms tick → 驱动 World.tickWaterFlow（内部节流到 ~0.5s
-            //   真正重算一次 BFS 流场）。纯 QML 桥接（WorldClock 为 Game 层不 include World；QML 同时持二者
-            //   向下合法，PLAN §2 分层不破）。tickWaterFlow 内部对 settled 流场（无变化）静默 → 无重建开销。
+            // t185 水流蔓延 tick：WorldClock 每 100ms tick → 驱动 World.tickWaterFlow（内部节流到 ~0.3s
+            //   把波前推进 1 格 → 1 格/tick 流动动画可见）。纯 QML 桥接（WorldClock 为 Game 层不 include World；
+            //   QML 同时持二者向下合法，PLAN §2 分层不破）。tickWaterFlow 内部对 settled 流场（无变化）静默 → 无重建开销。
             theWorld.tickWaterFlow()
         }
     }

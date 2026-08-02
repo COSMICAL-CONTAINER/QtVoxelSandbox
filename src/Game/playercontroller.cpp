@@ -792,7 +792,7 @@ void PlayerController::placeBlock()
             if (!m_hasHit) return; // 未命中 → 无相邻格可放（桶分支已绕过上方 !m_hasHit 门，此处补检）
             const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
             if (m_world->blockAt(tx, ty, tz) == BlockRegistry::Air) {
-                m_world->setBlock(tx, ty, tz, BlockRegistry::Water, 0); // state=0 水源（tickWaterFlow 下次 BFS 蔓延）
+                m_world->setBlock(tx, ty, tz, BlockRegistry::Water, 0); // state=0 水源（tickWaterFlow 下次波前推进开始 1 格/tick 蔓延）
                 if (m_mode != Creative)
                     m_hotbar->setStack(slot, int(RecipeRegistry::BucketEmptyId), 1); // 装水桶 → 空桶
                 m_lastPlaceMs = now;
@@ -806,7 +806,7 @@ void PlayerController::placeBlock()
         //     - 瞄深水（射程内无实体，仅水）→ 主射线无命中，但含水射线命中水；
         //     - 水下（眼位在水）→ 含水射线起点即水格，视为命中该格（桶舀身处水）。
         //   不依赖上方 !m_hasHit 门（已绕过）→ 三种姿态均可舀。舀走走 setWaterSilent（水流系统静默写入，
-        //   不发 blockBroken → 无破块粒子/音，机制等价 MC 舀水无反馈），下一 tickWaterFlow BFS 自动衰退邻接流水。
+        //   不发 blockBroken → 无破块粒子/音，机制等价 MC 舀水无反馈），下一 tickWaterFlow 波前自动逐环衰退邻接流水。
         const RayHit wHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitWater);
         if (wHit.valid && m_world->blockAt(wHit.bx, wHit.by, wHit.bz) == BlockRegistry::Water) {
             m_world->setWaterSilent(wHit.bx, wHit.by, wHit.bz, BlockRegistry::Air, 0); // 舀走（水源 / 流水均可舀，清整格）
