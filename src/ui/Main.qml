@@ -1152,70 +1152,36 @@ Window {
             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
         }
 
-        // 选中立方体框（射线选体 t04 / t52）：从「命中面方框 (WireSquare)」改为「整个立方体框」，
-        // 12 棱包住命中方块 8 角。Model 摆到命中方块中心（hitBlock + 0.5）；几何本身 ±0.5 居中、
-        // 几何对称、与朝向无关 → 无需 eulerRotation（不似 WireSquare 需按命中面法线旋转）。
-        // 未命中 / 暂停（未捕获）时 hasHit=false → 隐藏。
-        //
-        // 放大系数 1.005（t76 收紧，原 1.02）：WireCube 几何 ±0.5，scale 1.02 → ±0.51 超出方块 0.01，
-        // 既在近面与方块之间留出可见空隙、又使远侧棱线落入邻接方块单元内被其 depth 吞噬（邻块不透明面
-        // 挡住棱）。1.005 → ±0.5025，仅微凸 0.0025（与 CrackBox 叠层同防 z-fight 量级），紧贴方块边、
-        // 邻块不再吞噬远侧棱。
+        // 选中框（射线选体 t04 / t52 / t146 / t216）：单一 SelectionWireBoxes 模型按
+        //   BlockRegistry::selectionAABBs(hitId,hitState) 画命中方块的 sub-AABB 12 棱（Lines，**纯 AABB
+        //   棱、无对角线 / 无叉叉**）—— 完整方块 selectionAABBs={0,0,0,1,1,1} 还原 ±0.5 立方框（与旧
+        //   WireCube 同观感），不完整方块贴合实际形状（下半砖下半盒棱 / 栅栏中心立柱 / 楼梯下步+背墙
+        //   双盒棱 / 薄板等），**非整立方黑边**。火把（ShapeNone → selectionAABBs 空）走独立
+        //   selectionBoxTorch（WireCube 木柄定向，见下方）。
+        //   t216 统一：旧 selectionBox(WireCube 全格) + selectionBoxPartial(SelectionWireBoxes) 双模型 +
+        //   isPartial 魔法数 [15,20] 路由合并为单一 SelectionWireBoxes 模型 —— 一切方块经 selectionAABBs
+        //   单一权威取形状，消除「完整 vs 不完整」路由分叉与魔法数漂移风险（段后追加整立方如 Chest=22 曾因
+        //   单边 `>=15` 误判为异形）；并强制 qmlcache 重编，修「整立方黑边 / 对角叉叉」类 stale-binary 视觉
+        //   回归（lessons-learned t41：qmlcachegen mtime 停在旧布局 → 增量构建漏重编 → 运行期回退旧 QML）。
+        //   放大系数 1.005（t76 收紧）：几何 ±0.5 居中 × scale 1.005 = ±0.5025，紧贴方块边、邻块不吞噬远侧
+        //   棱（与 CrackBox 叠层同防 z-fight 量级）。几何对称、与朝向无关 → eulerRotation=0（不似 WireSquare
+        //   需按命中面法线旋转）。未命中 / 暂停（未捕获）时 hasHit=false → 隐藏。
+        //   分层（PLAN §2）：呈现层只读 World（blockAt/stateAt）+ Core BlockRegistry 单一权威取形状，不写栅格。
         Model {
             id: selectionBox
-            // t146：完整方块 / Torch 走本框（WireCube 全格 + Torch 木柄定向）；不完整方块（id >= FirstPartial=15）
-            //   走下方 selectionBoxPartial（按 selectionAABBs 画 sub-AABB 棱，贴合实际形状）。两者 visible 互斥。
-            visible: player.hasHit && !isPartial
-            // t126：选中框按命中方块实际形状分流。Torch(id13) → 小立柱（scale 0.12/0.6/0.12 + 木柄
-            //   位姿），其余 → 全格 1.005（原行为，见上方 1.005 放大系数注释）。Torch 分支镜像 torchHost
-            //   delegate 的木柄 Model（同一份 computeTorchOrient + torchHandleLocalPos/Euler），故选中框
-            //   贴合火把外缘、非全格。13 = BlockRegistry::Torch（魔法数与下方 onWorldChanged 火把校验同源）。
-            //   分层（PLAN §2）：呈现层只读 World（blockAt/isCollidable），不写栅格。
-            property int worldRev: 0   // 邻居破/放会改火把有效朝向 → worldChanged ++ 触发 torchOrient 重算
+            // 火把（ShapeNone → selectionAABBs 空）走 selectionBoxTorch；其余一切方块（完整 + 不完整）
+            //   走本 SelectionWireBoxes（selectionAABBs 给形状：完整→全格立方框、不完整→贴合 sub-AABB）。
+            visible: player.hasHit && !isTorch
+            property int worldRev: 0   // 编辑改 state（活版门开合 / 楼梯朝向 / 双半砖合并位）→ worldChanged ++ 触发 hitState 重算
             Connections { target: theWorld; function onWorldChanged() { ++selectionBox.worldRev } }
             readonly property int hitId: player.hasHit ? theWorld.blockAt(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z) : 0
-            readonly property bool isTorch: hitId === 13
-            // t146 不完整方块（异形段 id ∈ [FirstPartial, LastPartial] = [15, 20]）：选中框按形状 sub-AABB 画
-            //   （selectionBoxPartial），不走本全格框。魔法数 15/20 = BlockRegistry::FirstPartial/LastPartial
-            //   （= WoodSlab ... WoodTrapdoor；新增异形方块时同步右移上界）。**段后整立方（Chest=22）非异形**，
-            //   走本全格框（hitId=22 不在 [15,20] → isPartial=false）。旧 `hitId >= 15` 单边判定把 Chest 误判为
-            //   异形 → 走 selectionBoxPartial（虽 ShapeFull 仍画全格棱、视觉无差，但路由错、易在改 SelectionWireBoxes 时翻车）。
-            readonly property bool isPartial: hitId >= 15 && hitId <= 20
-            // t146 命中方块的 state（异形方块朝向/开合）：供 selectionBoxPartial 的 SelectionWireBoxes 几何
-            //   重建用。读 worldRev 使 worldChanged（编辑改 state，如活板门开合）后重算 → 选中框棱随之更新。
+            readonly property bool isTorch: hitId === 13   // 13 = BlockRegistry::Torch；火把 ShapeNone → 走 selectionBoxTorch
+            // 命中方块的 state（异形方块朝向 / 开合 / 半位）：供 SelectionWireBoxes 几何重建用（stairs 朝向 /
+            //   slab 上下半 / door 开合 / trapdoor 开合 等）。读 worldRev 使 worldChanged 后重算 → 选中框棱随之更新。
             readonly property int hitState: {
                 selectionBox.worldRev;
                 return player.hasHit ? theWorld.stateAt(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z) : 0
             }
-            readonly property string torchOrient: {
-                // Q_INVOKABLE（isCollidable/blockAt）无自带 QML 绑定依赖 → 显式读 worldRev，使
-                //   worldChanged 后本绑定重算（邻居破/放会改火把有效朝向）。
-                selectionBox.worldRev;
-                return isTorch ? computeTorchOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z,
-                                                    findTorchPrefOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z))
-                               : "up"
-            }
-            position: isTorch
-                ? torchHandleWorldPos(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z, torchOrient)
-                : Qt.vector3d(player.hitBlock.x + 0.5, player.hitBlock.y + 0.5, player.hitBlock.z + 0.5)
-            scale: isTorch ? torchHandleScale(torchOrient) : Qt.vector3d(1.005, 1.005, 1.005)
-            eulerRotation: isTorch ? torchHandleEuler(torchOrient) : Qt.vector3d(0, 0, 0)
-            geometry: WireCube {}
-            materials: PrincipledMaterial {
-                lighting: PrincipledMaterial.NoLighting
-                baseColor: "#101010"
-            }
-        }
-
-        // t146 不完整方块选中框（异形段 id >= FirstPartial）：按 BlockRegistry::selectionAABBs(id,state)
-        //   画每个 sub-AABB 的 12 棱 → 贴合实际形状（下半砖只画下半盒棱、楼梯画下步+背墙两盒棱）。
-        //   SelectionWireBoxes 几据据 blockId/state 重建（hitBlock 变 / 编辑改 state 时自动重画）。
-        //   与上方 selectionBox（完整 / Torch）visible 互斥（isPartial 守门）。Model 摆命中方块中心 +
-        //   scale 1.005 微放大（同 selectionBox 的 1.005 防 z-fight 量级）。
-        //   分层（PLAN §2）：呈现层只读 World（blockAt/stateAt），经 BlockRegistry 单一权威取形状，不写栅格。
-        Model {
-            id: selectionBoxPartial
-            visible: player.hasHit && selectionBox.isPartial
             position: Qt.vector3d(player.hitBlock.x + 0.5, player.hitBlock.y + 0.5, player.hitBlock.z + 0.5)
             scale: Qt.vector3d(1.005, 1.005, 1.005)
             eulerRotation: Qt.vector3d(0, 0, 0)
@@ -1223,6 +1189,33 @@ Window {
                 blockId: selectionBox.hitId
                 state: selectionBox.hitState
             }
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                baseColor: "#101010"
+            }
+        }
+
+        // 火把选中框（t126）：火把 ShapeNone → selectionAABBs 空（无 sub-AABB 棱可画）→ 走独立 WireCube
+        //   木柄定向框（scale 0.12/0.6/0.12 + position/euler 镜像 torchHost 木柄 Model，同一份 computeTorchOrient
+        //   + torchHandleWorldPos/Scale/Euler），故选中框贴合火把外缘、非全格。13 = BlockRegistry::Torch
+        //   （魔法数与下方 onWorldChanged 火把校验同源）。
+        //   分层（PLAN §2）：呈现层只读 World（blockAt/isCollidable）+ torchPositions，不写栅格。
+        Model {
+            id: selectionBoxTorch
+            visible: player.hasHit && selectionBox.isTorch
+            property int worldRev: 0   // 邻居破/放会改火把有效朝向 → worldChanged ++ 触发 torchOrient 重算
+            Connections { target: theWorld; function onWorldChanged() { ++selectionBoxTorch.worldRev } }
+            // Q_INVOKABLE（isCollidable/blockAt）无自带 QML 绑定依赖 → 显式读 worldRev，使 worldChanged 后
+            //   本绑定重算（邻居破/放会改火把有效朝向）。
+            readonly property string torchOrient: {
+                selectionBoxTorch.worldRev;
+                return computeTorchOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z,
+                                          findTorchPrefOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z))
+            }
+            position: torchHandleWorldPos(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z, torchOrient)
+            scale: torchHandleScale(torchOrient)
+            eulerRotation: torchHandleEuler(torchOrient)
+            geometry: WireCube {}
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 baseColor: "#101010"

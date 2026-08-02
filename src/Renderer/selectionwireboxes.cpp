@@ -6,7 +6,9 @@
 #include <QVector3D>
 #include <QVector>
 
-// t146 按 BlockRegistry::selectionAABBs(blockId,state) 画每个 sub-AABB 的 12 棱（Lines）。
+// 按 BlockRegistry::selectionAABBs(blockId,state) 画每个 sub-AABB 的 12 棱（Lines，**纯 AABB 棱、无对角线**）。
+//   t216：去叉叉 —— 每盒只发 12 条棱（z=min 面 4 + z=max 面 4 + 纵向 4），**不**画对角（0-6/1-7/2-4/3-5
+//   等空间对角线），故选中框是干净的轴对齐盒轮廓、非「带叉的方框」。
 //
 // 几何约定（与 WireCube 同基准）：顶点以「cell 中心」为原点 —— cell-local AABB [min,max] 减 0.5 居中。
 //   Model 摆到命中方块中心（hitBlock + 0.5）→ 完整方块 AABB {0,0,0,1,1,1} 顶点恰为 ±0.5（与 WireCube 观感
@@ -49,25 +51,17 @@ void SelectionWireBoxes::rebuild()
         return;
     }
 
-    // 12 棱端点对（顶点角索引）。角序与 WireCube 一致：
+    // 12 棱端点对（顶点角索引），逐字照搬 wirecube.cpp:32-36。其前提是角点按**周长序**（绕面一圈）排，
+    //   即 z=min 面 0→1→2→3 走「左下→右下→右上→左上」一圈、z=max 面同序。故角序必须与 WireCube 一致：
     //   0:(min,min,min) 1:(max,min,min) 2:(max,max,min) 3:(min,max,min)
     //   4:(min,min,max) 5:(max,min,max) 6:(max,max,max) 7:(min,max,max)
+    //   ⚠️ 不能用「bit0=+x、bit1=+y、bit2=+z」的位编码派生角坐标 —— 位编码会把角 2/3（及 6/7）对调
+    //   （位序下 2=(min,max,*)、3=(max,max,*)，与上表 2=(max,max,*)、3=(min,max,*) 相反），导致棱 1-2 / 3-0
+    //   连成面内对角线 = 选中框前后两面各画一个 X 叉叉（本任务「去叉叉」的核心缺陷）。显式角表消除此类角序错位。
     static const int kEdges[12 * 2] = {
         0, 1,  1, 2,  2, 3,  3, 0, // z=min 面 4 棱
         4, 5,  5, 6,  6, 7,  7, 4, // z=max 面 4 棱
         0, 4,  1, 5,  2, 6,  3, 7, // 纵向 4 棱
-    };
-
-    // 角索引 → (axis=0/1/2) 的坐标：bit0=+x、bit1=+y、bit2=+z（与 kEdges 角序对齐）。减 0.5 居中。
-    auto cornerCoord = [](const BlockRegistry::BlockAABB &a, int cornerIdx, int axis) -> float {
-        const bool px = (cornerIdx & 1) != 0;
-        const bool py = (cornerIdx & 2) != 0;
-        const bool pz = (cornerIdx & 4) != 0;
-        float v;
-        if (axis == 0)      v = px ? a.maxX : a.minX;
-        else if (axis == 1) v = py ? a.maxY : a.minY;
-        else                v = pz ? a.maxZ : a.minZ;
-        return v - 0.5f; // cell 中心居中（Model 摆 hitBlock + 0.5）
     };
 
     QVector<float> verts;
@@ -75,11 +69,23 @@ void SelectionWireBoxes::rebuild()
     QVector3D bMin( 1e9f,  1e9f,  1e9f);
     QVector3D bMax(-1e9f, -1e9f, -1e9f);
     for (const BlockRegistry::BlockAABB &a : boxes) {
+        // 8 角显式坐标（周长序，与 wirecube.cpp:21-30 同序；减 0.5 居中：Model 摆 hitBlock + 0.5
+        //   → 完整方块 AABB {0,0,0,1,1,1} 顶点恰为 ±0.5，与 WireCube 同观感）。
+        const float c[8 * 3] = {
+            a.minX - 0.5f, a.minY - 0.5f, a.minZ - 0.5f, // 0
+            a.maxX - 0.5f, a.minY - 0.5f, a.minZ - 0.5f, // 1
+            a.maxX - 0.5f, a.maxY - 0.5f, a.minZ - 0.5f, // 2
+            a.minX - 0.5f, a.maxY - 0.5f, a.minZ - 0.5f, // 3
+            a.minX - 0.5f, a.minY - 0.5f, a.maxZ - 0.5f, // 4
+            a.maxX - 0.5f, a.minY - 0.5f, a.maxZ - 0.5f, // 5
+            a.maxX - 0.5f, a.maxY - 0.5f, a.maxZ - 0.5f, // 6
+            a.minX - 0.5f, a.maxY - 0.5f, a.maxZ - 0.5f, // 7
+        };
         for (int i = 0; i < 24; ++i) { // 12 棱 × 2 端点
             const int ci = kEdges[i];
-            const float vx = cornerCoord(a, ci, 0);
-            const float vy = cornerCoord(a, ci, 1);
-            const float vz = cornerCoord(a, ci, 2);
+            const float vx = c[ci * 3 + 0];
+            const float vy = c[ci * 3 + 1];
+            const float vz = c[ci * 3 + 2];
             verts.append(vx); verts.append(vy); verts.append(vz);
             if (vx < bMin.x()) bMin.setX(vx); if (vx > bMax.x()) bMax.setX(vx);
             if (vy < bMin.y()) bMin.setY(vy); if (vy > bMax.y()) bMax.setY(vy);
