@@ -123,6 +123,11 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(bool canBreak READ canBreak NOTIFY modeChanged)
     Q_PROPERTY(bool canPlace READ canPlace NOTIFY modeChanged)
     Q_PROPERTY(bool canFly READ canFly NOTIFY modeChanged)
+    // t201 水下蓝滤镜：眼位（= position()，脚底+eyeHeight）所在格 == Water 时为真。QML 据此显全屏浅蓝
+    //   半透叠层（机制等价 MC 水下视野蓝雾），1/2/3 人称统一（基于眼位 blockAt，与相机模式无关）。tickImpl
+    //   每 tick 重算并缓存到 m_eyeInWater；状态翻转才发 eyeInWaterChanged（避免每帧抖 QML 绑定）。只读
+    //   World::blockAt（向下依赖）；无世界 → false。speed-mul 减速（t159）直接调同名 const 方法读实时值。
+    Q_PROPERTY(bool eyeInWater READ eyeInWater NOTIFY eyeInWaterChanged)
     // 掉落伤害事件（t22）：生存模式着地时按落差结算，发出本次应扣 HP（每 HP = 半心）。
     // 不直接持有 PlayerState（保持 Physics/Game→呈现 的单向事件流，分层干净；与 blockBroken
     // 同模式）：呈现层经 Connections 路由到 PlayerState.takeDamage。0 表示无伤害（不路出）。
@@ -192,6 +197,11 @@ public:
     bool canPlace() const { return m_mode != Spectator; } // 观察者不能放块
     bool canFly() const   { return m_mode != Survival; }  // 生存走重力+跳，禁飞
 
+    // t201 水下判定（Q_PROPERTY eyeInWater READ）：眼位格 == Water。step() 读它乘水下速度倍数（t159）；
+    //   QML 读它驱动水下蓝滤镜叠层。const 只读 World::blockAt（向下依赖）；眼位 = position()（脚底+eyeHeight）；
+    //   无世界 → false。定义在 .cpp。
+    bool eyeInWater() const;
+
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
     Q_INVOKABLE void setMode(Mode m);
@@ -260,6 +270,7 @@ signals:
     void capturedChanged();
     void onGroundChanged();
     void flyingChanged();
+    void eyeInWaterChanged(); // t201 眼位水态翻转（驱动水下蓝滤镜叠层显隐；值真变才发，免每帧抖 QML 绑定）
     void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）。speed 属性亦复用本信号（t159）。
     void flySpeedMulChanged(); // 飞行速度倍数变（t159 滚轮调速；驱动 F3 报当前有效飞速）
     void walkPhaseChanged();  // 行走相位推进（t45；走时每 tick 发，QML 据 sin() 算四肢欧拉角）
@@ -376,9 +387,6 @@ private:
     // 移动状态速率因子（t51）：Sprint×1.3 / Crouch×0.4 / Walk×1.0。仅走路模式水平速度乘此值
     //   （飞 / 观察者 noclip 恒 1，状态机不进入 Sprint/Crouch）。同时驱动 moveSpeed 报告 → walkPhase 频率。
     float speedMul() const;
-    // t159 水下判定：玩家眼位格 == Water。step 据此把水平（及飞垂直）速度乘 kUnderwaterSpeedMul（~0.4）。
-    //   只读 World::blockAt（向下依赖）；眼位 = position()（脚底 + eyeHeight）。无世界 → false。
-    bool eyeInWater() const;
     // t174 脚位水中判定：玩家脚底格 == Water（m_pos 整数坐标）。浮力/游泳物理用它（眼位高于水面时仍能游，
     //   机制等价 MC「在水中游泳」= 脚或身在水中即可）。只读 World::blockAt；无世界 → false。
     bool feetInWater() const;
@@ -462,6 +470,7 @@ private:
     int m_selectedItem = BlockRegistry::Stone;  // 手持物品原始 id（含工具段；t34 挖掘速度用，绑定 hotbar.selectedItemId）
     float m_peakY = 0.0f;           // 滞空期间最高点 Y（掉落伤害结算基准；componentComplete 设为脚底 Y）
     float m_suffocationTimer = 0.0f; // t160 窒息累积计时（身体嵌实体方块时累加，每 kSuffocationInterval 秒一脉冲）
+    bool m_eyeInWater = false;       // t201 眼位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit eyeInWaterChanged）
     bool m_dead = false;             // t175 死亡态镜像（dropAllItems 置 true / respawn 置 false）：抑制死亡后
                                      //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）
 

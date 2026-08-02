@@ -2118,6 +2118,18 @@ Window {
         }
     }
 
+    // t201 水下蓝滤镜：眼位在水里（player.eyeInWater）→ 全屏浅蓝半透叠层，表示玩家潜入水中
+    //   （机制等价 MC 水下视野蓝雾）。1/2/3 人称统一（基于眼位 blockAt，与相机模式无关）。放在 View3D
+    //   之后、HUD/背包/暂停/死亡叠层之前 → 蓝雾只染 3D 场景，HUD/背包仍清晰可读（同 nightTint 经验：
+    //   全屏 tint 不应压暗 HUD / 背包 / 粒子等非场景层）。纯 Rectangle 无 MouseArea → 不拦截鼠标（指针
+    //   锁定 / 破放走 main.cpp 事件过滤器，不受此叠层影响）。状态驱动 = player.eyeInWater（tickImpl 每 tick
+    //   重算、翻转才发 eyeInWaterChanged，无每帧抖动）。仅 playing 态显（其余态 View3D 已隐）。
+    Rectangle {
+        anchors.fill: parent
+        visible: window.appState === "playing" && player.eyeInWater
+        color: Qt.rgba(0.20, 0.45, 0.70, 0.35)
+    }
+
     // t88 火把位置列表（火把伪光源 Repeater 的 model；blockPlaced/blockBroken/worldChanged 维护）。
     ListModel { id: torchPositions }
     // t121：原此处为 nightTint 全屏深蓝 Rectangle（地形 NoLighting 不随昼夜变暗的兜底）。

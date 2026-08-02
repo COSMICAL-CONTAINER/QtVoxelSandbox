@@ -321,6 +321,14 @@ void PlayerController::tick()
 void PlayerController::tickImpl()
 {
     const qreal dt = qMin(m_clock.restart() / 1000.0, 0.05); // 钳 50ms，防卡顿后穿墙
+    // t201 水下蓝滤镜：每 tick 重算眼位水态，翻转才 emit（避免每帧抖 QML 绑定）。放在 !m_captured
+    //   早 return 之前 → 暂停 / 背包开 / 失焦时仍刷新（玩家可能停在水里打开背包，蓝雾应持续显）。
+    //   仅读 World::blockAt（向下依赖，不改栅格）；无世界时 eyeInWater() 返 false。
+    const bool inWater = eyeInWater();
+    if (inWater != m_eyeInWater) {
+        m_eyeInWater = inWater;
+        emit eyeInWaterChanged();
+    }
     // t60：掉落物重力（世界模拟，独立于玩家捕获态——菜单 / 暂停时实体仍落到地面）。
     // PlayerController 是唯一同时持 World* + ItemEntityManager* 的对象，故由此驱动；实体物理态
     // （vy / resting）与 pos 同住在 ItemEntityManager 内部数据里（分层：Entities→World 向下只读）。
