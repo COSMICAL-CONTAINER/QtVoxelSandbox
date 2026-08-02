@@ -543,7 +543,8 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   ⚠️ brokenState 必须在 setBlock(Air) **之前**读：4 参数 setBlock 委托 5 参数版以 state=0 写入
     //   （chunk.cpp「id 变更时重置 state=0」契约），之后 stateAt 永返 0 → 配对方向恒算成 y+1 →
     //   破上格（bit3=1 本应 y-1 找下格）时下格不清，留半截悬空门。useBlock 路径在 setBlock 前读 st 故无此坑。
-    const quint8 brokenState = (brokenId == BlockRegistry::WoodDoor)
+    const quint8 brokenState = (brokenId == BlockRegistry::WoodDoor
+                                || brokenId == BlockRegistry::Planks)
         ? m_world->stateAt(x, y, z) : quint8(0);
     m_world->setBlock(x, y, z, BlockRegistry::Air); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
     if (brokenId == BlockRegistry::WoodDoor) {
@@ -576,8 +577,17 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     // drop 由 caller 算（生存走 ToolRegistry::canHarvest；创造瞬破 drop=false 不发）。
     // t64：spawnItem 带 count（= BlockRegistry::dropCount；当前表内全 1，留扩展位对齐方块表）。
     if (drop) {
-        const int dropCount = std::max(1, BlockRegistry::dropCount(brokenId));
-        emit spawnItem(x, y, z, BlockRegistry::dropId(brokenId), dropCount); // t83：传 dropId（Stone→Cobble / 矿石→材料），非 brokenId
+        int dropId = BlockRegistry::dropId(brokenId);
+        int dropCount = std::max(1, BlockRegistry::dropCount(brokenId));
+        // t206 双半砖（合并态）破块掉 2× WoodSlab（非 1× Planks）：placeBlock 合并时写 Planks +
+        //   PlanksFromDoubleSlabBit 标记「源自双半砖」。此处检本 bit → 改掉 2 块半砖（机制等价 MC
+        //   「double slab 破坏掉 2 块半砖」）。spawnItem 传 count=2 → 1 实体携 2 件（拾取 addStack 入 2 块）。
+        //   常规 Planks（state=0）不进此分支 → 掉 1× Planks 不变。brokenState 已在 setBlock(Air) 前读（t134 时序）。
+        if (brokenId == BlockRegistry::Planks && (brokenState & BlockRegistry::PlanksFromDoubleSlabBit)) {
+            dropId = BlockRegistry::WoodSlab;
+            dropCount = 2;
+        }
+        emit spawnItem(x, y, z, dropId, dropCount); // t83：传 dropId（Stone→Cobble / 矿石→材料 / 双砖→2×slab），非 brokenId
     }
     emit swingArm();                                // 破块成功 → 第一人称手挥动（t29）
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）
@@ -853,6 +863,8 @@ void PlayerController::placeBlock()
     //   补出互补半，合成 Planks 完整方块（满格碰撞 → 阻挡行走；机制等价 MC「double slab = full block」）。
     //   合成前查重叠（满格 Planks 比半砖大 → 重查 overlapsPlayerAABB；玩家在格内则拒合，防自埋）。
     //   侧面点击（ny=0）不合（自然语义是放邻格）；同半 slab（如 lower 上再放 lower）走常规 target 放置。
+    //   t206：合并写 Planks + PlanksFromDoubleSlabBit 标记「源自双半砖」→ finishMiningAt 据本 bit 掉 2× WoodSlab
+    //   （非 1× Planks；机制等价 MC「double slab 破坏掉 2 块半砖」）。详见 BlockRegistry::PlanksFromDoubleSlabBit 注释。
     if (m_selectedBlock == BlockRegistry::WoodSlab
         && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::WoodSlab) {
         const quint8 hitState = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
@@ -860,7 +872,8 @@ void PlayerController::placeBlock()
         const bool merge = (m_hitNy > 0 && !hitUpper) || (m_hitNy < 0 && hitUpper);
         if (merge) {
             if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks, 0)) return;
-            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks, 0);
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks,
+                              BlockRegistry::PlanksFromDoubleSlabBit);
             m_lastPlaceMs = now;
             emit swingArm(); // 合成也是一次「放置」动作 → 挥手（t29）
             return;
