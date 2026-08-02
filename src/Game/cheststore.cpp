@@ -17,17 +17,17 @@ QString ChestStore::key(int x, int y, int z)
 int ChestStore::slotIdAt(int x, int y, int z, int index) const
 {
     if (index < 0 || index >= kSlotsPerChest) return 0; // 越界 → 空栈
-    const auto it = m_chests.constFind(key(x, y, z));
-    if (it == m_chests.constEnd()) return 0;            // 无此箱子条目 → 空槽
-    return it->at(size_t(index)).id;
+    const auto it = m_chests.find(key(x, y, z));
+    if (it == m_chests.end()) return 0;            // 无此箱子条目 → 空槽
+    return it->second.at(size_t(index)).id;
 }
 
 int ChestStore::slotCountAt(int x, int y, int z, int index) const
 {
     if (index < 0 || index >= kSlotsPerChest) return 0;
-    const auto it = m_chests.constFind(key(x, y, z));
-    if (it == m_chests.constEnd()) return 0;
-    return it->at(size_t(index)).count;
+    const auto it = m_chests.find(key(x, y, z));
+    if (it == m_chests.end()) return 0;
+    return it->second.at(size_t(index)).count;
 }
 
 // 直接写某箱子某槽。index 越界忽略；id<=0 或 count<=0 → 清空该槽（保持空栈不变式：id==0 ⟺ count==0）。

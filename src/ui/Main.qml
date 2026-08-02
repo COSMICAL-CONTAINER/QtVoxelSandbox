@@ -42,6 +42,13 @@ Window {
     // t87 熔炉子态：右键熔炉方块 → player.furnaceOpened → 显本面板（冶炼）+ 释放指针。与 inventoryOpen
     // / craftingTableOpen 互斥（关一个再开另一个）；E/Esc 关 → 恢复 grab。开时抑制暂停叠层。
     property bool furnaceOpen: false
+    // t173/t179 箱子子态：右键箱子方块 → player.chestOpened(x,y,z) → 显 ChestUI（箱子 27 槽 + 玩家主栏 +
+    //   hotbar）+ 释放指针。与 inventoryOpen / craftingTableOpen / furnaceOpen 互斥；E/Esc 关 → 恢复 grab。
+    //   chestX/Y/Z 记当前所开箱子的方块世界坐标（ChestStore 据此寻址该箱子的 27 槽；切箱子时坐标变）。
+    property bool chestOpen: false
+    property int chestX: 0
+    property int chestY: 0
+    property int chestZ: 0
     // t139 ESC 设置菜单子态：仅在暂停叠层（playing 且 !captured）下有意义。暂停叠层「设置」按钮置
     //   true → 显设置面板（手臂调试 ArmSlider 等）覆盖在暂停叠层之上；「返回」按钮置 false 回暂停菜单。
     //   回主菜单 / 点击恢复游戏时一并复位。属纯呈现态，PLAN §2 分层（UI 层）。
@@ -61,6 +68,7 @@ Window {
         // 不触发，但显式判 visible 更稳，避免读隐藏面板的陈旧 hoveredKey）。
         if (craftingTablePanel.visible) return craftingTablePanel.hoveredKey
         if (furnacePanel.visible)        return furnacePanel.hoveredKey
+        if (chestPanel.visible)          return chestPanel.hoveredKey
         if (inventoryPanel.visible)      return inventoryPanel.hoveredKey
         if (survivalPanel.visible)       return survivalPanel.hoveredKey
         return ""
@@ -194,6 +202,7 @@ Window {
         inventoryOpen = false
         craftingTableOpen = false
         furnaceOpen = false
+        chestOpen = false
         settingsOpen = false
         itemEntities.clearAll()
         entityManager.clearAll()
@@ -206,6 +215,7 @@ Window {
         inventoryOpen = false
         craftingTableOpen = false
         furnaceOpen = false
+        chestOpen = false
         settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
         returnHeldToHotbar()           // t56：返回菜单前归还光标手持栈（防遗留 heldBlock）
         worldStore.closeWorld()        // t176：回主菜单关存档连接（防残留打开库）
@@ -262,6 +272,7 @@ Window {
     function swapHoveredWithHotbar(hotbarIdx) {
         if (craftingTablePanel.visible)      craftingTablePanel.swapHoveredWithHotbar(hotbarIdx)
         else if (furnacePanel.visible)       furnacePanel.swapHoveredWithHotbar(hotbarIdx)
+        else if (chestPanel.visible)         chestPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (inventoryPanel.visible)     inventoryPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (survivalPanel.visible)      survivalPanel.swapHoveredWithHotbar(hotbarIdx)
     }
@@ -316,6 +327,25 @@ Window {
         if (!furnaceOpen) return
         furnaceOpen = false
         returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeInventory / closeCraftingTable）
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
+    // t173/t179 打开 / 关闭箱子面板。打开 → release（光标可见点箱子 / 主栏槽）；关 → grab + 焦点回键位层。
+    // 与 inventoryOpen / craftingTableOpen / furnaceOpen 互斥（开箱子前关其它三个，反之同）。
+    //   x/y/z = 所开箱子的方块世界坐标（player.chestOpened 携带 → ChestStore 据此寻址该箱子的 27 槽）。
+    function openChest(x, y, z) {
+        if (appState !== "playing" || chestOpen) return
+        if (inventoryOpen) closeInventory()
+        if (craftingTableOpen) closeCraftingTable()
+        if (furnaceOpen) closeFurnace()
+        chestX = x; chestY = y; chestZ = z
+        chestOpen = true
+        player.release()
+    }
+    function closeChest() {
+        if (!chestOpen) return
+        chestOpen = false
+        returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeInventory / closeCraftingTable / closeFurnace）
         player.grab()
         keyInput.forceActiveFocus()
     }
@@ -391,6 +421,10 @@ Window {
 
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }
+    // t173/t179 箱子内容存储 VM（按方块世界坐标键控的 27 槽；ChestUI 读写 + onBlockBroken(Chest) 清孤儿）。
+    //   纯 Game/ViewModel 层，不依赖 World/Renderer；物品栈语义同 Hotbar（id=0=空）。ChestUI 经 chestX/Y/Z
+    //   寻址当前所开箱子；多只箱子各自独立 27 槽，跨 UI 开关持久。
+    ChestStore { id: chestStore }
 
     // 玩家状态（生命/饥饿，t22）：满血满饥初值。心/饥饿条读其 health/hunger；掉落伤害经
     // 下面的 Connections 路由到 takeDamage（呈现层只读，绝不反向写数值；PLAN §2 分层）。
@@ -471,6 +505,9 @@ Window {
         function onCraftingTableOpened() { window.openCraftingTable() }
         // t87：右键熔炉 → player 发 furnaceOpened → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
         function onFurnaceOpened() { window.openFurnace() }
+        // t173/t179：右键箱子 → player 发 chestOpened(x,y,z) → 开 ChestUI（释放指针 / 关包互斥）。
+        //   坐标供 ChestStore 寻址该箱子的 27 槽。
+        function onChestOpened(x, y, z) { window.openChest(x, y, z) }
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
@@ -1998,6 +2035,7 @@ Window {
             if (window.inventoryOpen) window.inventoryOpen = false
             if (window.craftingTableOpen) window.craftingTableOpen = false
             if (window.furnaceOpen) window.furnaceOpen = false
+            if (window.chestOpen) window.chestOpen = false
             window.returnHeldToHotbar()
             player.dropAllItems()     // t175：死亡掉落整个背包到死亡点 + 清空背包
             player.release()           // 释放指针 → 光标可见（点「立即重生 / 回主菜单」按钮）
@@ -2017,6 +2055,10 @@ Window {
             // t170：同步销毁视觉 delegate（木柄+火焰 Model）—— torchPositions 供 TorchSmoke/选中框读，
             //   torchHost.torchObjs 供本场景渲染，二者经同一信号并行增删。
             if (id === 13) { removeTorchAt(x, y, z); torchHost.removeTorchVis(x, y, z) }
+            // t173/t179：箱子被破 → 清 ChestStore 该坐标条目（防孤儿内容；机制等价 MC 破箱清空。
+            //   spec「破箱掉落内容」属 Phase 1.1+，本轮直接弃内容）。id=22=BlockRegistry::Chest（与
+            //   blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 / sand=8 既有模式）。
+            if (id === 22) chestStore.clearChest(x, y, z)
             // t117：被破格上方若为沙 → 失支撑塌落（maybeTrigger 内部 setBlock(air) 递归触发更上方沙链）。
             maybeTriggerFallingBlock(x, y + 1, z)
         }
@@ -2243,6 +2285,7 @@ Window {
             if (e.key === Qt.Key_E && window.appState === "playing") {
                 if (window.craftingTableOpen) window.closeCraftingTable()
                 else if (window.furnaceOpen) window.closeFurnace()
+                else if (window.chestOpen) window.closeChest()
                 else window.toggleInventory()
                 e.accepted = true; return
             }
@@ -2254,6 +2297,9 @@ Window {
             }
             if (e.key === Qt.Key_Escape && window.furnaceOpen) {
                 window.closeFurnace(); e.accepted = true; return
+            }
+            if (e.key === Qt.Key_Escape && window.chestOpen) {
+                window.closeChest(); e.accepted = true; return
             }
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
             //   t143：同时跟踪 f3Held=true（无条件，menu 态也设，与 shiftHeld 同模式），供 B 键修饰判定。
@@ -2278,7 +2324,7 @@ Window {
             //   根因：原代码无差别地把 Shift 与数字键透传给 player —— Shift 进 m_keys → 关包后 release 已清，
             //   但若「关包瞬间 Shift 仍按住」会重新捕获进 m_keys → 蹲下；数字键在背包开时仍改 selectedSlot，
             //   与背包内整理物品的语义冲突（MC 1.0 背包开时数字键 = 与该 hotbar 槽交换 hover 物品，非切选中）。
-            const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen
+            const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
 
             // Shift：始终追踪 shiftHeld（供背包槽 TapHandler 读做 Shift+左键搬运）；背包开时不透传给 player。
             //   shiftHeld 不论背包开关都更新 —— 闭包后若用户仍按住 Shift，下一次 TapHandler 读到的 shiftHeld
@@ -2307,7 +2353,7 @@ Window {
             //   与 player.m_keys 不同步）。非 Shift / 非背包态照旧透传。
             if (e.key === Qt.Key_Shift) {
                 window.shiftHeld = false
-                const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen
+                const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
                 if (bagOpen) return
             }
             player.setKey(e.key, false)
@@ -2324,7 +2370,7 @@ Window {
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: (event) => {
-                if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen) return
+                if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen) return
                 // t159 飞行滚轮调速：飞态（creative-飞 / spectator 常驻飞）滚轮调 flySpeedMul（有效 4..20
                 //   blocks/sec），不再切 hotbar；走路态滚轮保持切 hotbar。spec「WheelHandler 仅 flying 时生效」。
                 //   前滚（angleDelta.y>0）加速、后滚减速。同一滚轮在不同运动态语义分流（输入边界由 QML 把关，
@@ -2350,7 +2396,7 @@ Window {
         id: pauseOverlay
         anchors.fill: parent
         visible: window.appState === "playing" && !player.captured
-                 && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen
+                 && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen && !window.chestOpen
                  && !playerState.dead
         z: 100
         Rectangle {
@@ -2992,6 +3038,24 @@ Window {
         onDiscardHeldRequested: player.dropHeldCursor()
     }
 
+    // t173/t179 箱子物品栏面板：右键箱子方块打开（player.chestOpened → openChest）。仅 playing &&
+    // chestOpen 时显（与背包 / 工作台 / 熔炉面板互斥）。E/Esc/关闭信号关 → 宿主恢复 grab。
+    // 箱子 27 槽内容存 ChestStore（按 chestX/Y/Z 寻址；跨开关持久）；主栏 / hotbar 共享 hotbar VM。
+    // z 与其它面板一致（150）；光标手持物浮动图标 z=300 仍在其上。
+    ChestUI {
+        id: chestPanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        chestStore: chestStore
+        chestX: window.chestX
+        chestY: window.chestY
+        chestZ: window.chestZ
+        visible: window.appState === "playing" && window.chestOpen
+        z: 150
+        onClosed: window.closeChest()
+        onDiscardHeldRequested: player.dropHeldCursor()
+    }
+
     // t87 冶炼 tick：WorldClock 每 100ms 发 ticked(0.1) → 转发到 furnacePanel.tick 推进冶炼。
     // 单一时间权威（PLAN §2）：所有按时间推进的子系统都消费 WorldClock，不在 QML 各自起 Timer。
     // tick 内自检无活干（无燃料 / 无输入）即静默 return，故常驻连接无开销。
@@ -3024,7 +3088,7 @@ Window {
     // t50：手持材料 → MaterialIcon 自绘（木棒）。t37：enabled:false 显式声明本 Item 不参与指针事件——
     // z=300 浮在面板(z=150)之上，若参与事件捕获会抢走下方槽位 TapHandler 的点击。纯呈现层。
     Item {
-        visible: (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen) && hotbarVM.heldBlock !== 0
+        visible: (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen) && hotbarVM.heldBlock !== 0
         enabled: false
         z: 300
         x: cursorTracker.point.position.x - 16

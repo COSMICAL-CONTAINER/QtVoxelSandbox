@@ -74,6 +74,11 @@ qt_add_executable(voxelsandbox
     src/Game/recipe.h
     src/Game/smelting.cpp
     src/Game/smelting.h
+    # t173/t179 箱子内容存储 VM（Game 层）：按方块世界坐标键控的 27 槽物品内容；ChestUI 读写 + 破箱清孤儿。
+    #   纯存储类（无光 / 无 World 依赖）；物品栈语义同 Hotbar（id=0=空）。t173 落地时漏注册 → ChestStore
+    #   运行期「is not a type」→ 箱子右键无 UI；t179 补注册。
+    src/Game/cheststore.cpp
+    src/Game/cheststore.h
     # t89 音效（Core/Platform 层）：miniaudio 单头 + AudioManager 封装。
     #   miniaudio.h 是 vendored 第三方单头（~4MB），仅 miniaudio_impl.cpp 含 MINIAUDIO_IMPLEMENTATION；
     #   audiomanager.h/cpp 是项目自有代码（pimpl 隔离重头）。
@@ -114,6 +119,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/SurvivalInventory.qml
         src/ui/CraftingTableUI.qml
         src/ui/FurnaceUI.qml
+        src/ui/ChestUI.qml
         src/ui/VitalIcon.qml
         src/ui/ToolIcon.qml
         src/ui/MaterialIcon.qml
@@ -152,6 +158,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_wood.png
         textures/default_torch.png
         textures/default_water.png
+        textures/default_chest_top.png         # t173/t179 箱子各面贴图（build_chest.py 程序生成原创像素图）
+        textures/default_chest_side.png
+        textures/default_chest_front.png
         textures/icon_cobble.png
         textures/icon_coal_ore.png
         textures/icon_crafting_table.png
@@ -165,6 +174,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_sand.png
         textures/icon_stone.png
         textures/icon_torch.png
+        textures/icon_chest.png                 # t173/t179 箱子立方体图标（顶盖缝+侧铁箍；曾漏注册→运行时 WRN 无图标）
         textures/icon_wood_slab.png           # t145 不完整方块 flat 2D 区分图标
         textures/icon_wood_stairs.png
         textures/icon_wood_fence.png
