@@ -880,7 +880,14 @@ void PlayerController::placeBlock()
             return;
         }
     }
-    if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // 已有方块 → 不放
+    // t198 水中可放方块（排开水）：目标格为空气或水均可放置；水（水源 state=0 / 流水 state 1..7）被
+    //   方块直接覆盖 → World::setBlock 内 oldId=Water → newId=实体走「放置」分支（仅发 blockPlaced，
+    //   不发 blockBroken → 无破块粒子 / 音；水静默消失，机制等价 MC「方块填入水格排开水」）。已有实体
+    //   方块 → 拒（不覆盖）。下一 tickWaterFlow 因目标格已非 air → 不再向其扩散 → 邻接流水按失支撑逐环衰退。
+    {
+        const quint8 tid = m_world->blockAt(tx, ty, tz);
+        if (tid != BlockRegistry::Air && tid != BlockRegistry::Water) return; // 已有实体方块 → 不放
+    }
     const bool isDoor = (m_selectedBlock == BlockRegistry::WoodDoor);
     const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
     // 与玩家重叠 → 不放（防自埋 / 卡死）。t146：按「将放置方块的实际形状 sub-AABB」判 —— 不完整方块可能
@@ -906,7 +913,10 @@ void PlayerController::placeBlock()
         //   → 只剩下单格 → 玩家跳跃（顶点 1.25 > 单格 1.0）即可跨过。显式查 ty+1 在界内且为空气才放，
         //   否则整门拒绝（两格都不放），杜绝「上格缺失的单格门」。
         if (ty + 1 >= m_world->height()) return;                       // 上格越世界顶 → 门放不下（拒整门）
-        if (m_world->blockAt(tx, ty + 1, tz) != BlockRegistry::Air) return; // 上格非空 → 门放不下
+        {   // t198：门上格亦允许排开水（与下格同语义，水源 / 流水均可被门替换）。
+            const quint8 upId = m_world->blockAt(tx, ty + 1, tz);
+            if (upId != BlockRegistry::Air && upId != BlockRegistry::Water) return; // 上格非空（实体）→ 门放不下
+        }
         m_world->setBlock(tx, ty, tz, idByte, doorFacing);              // 下格：bit3=0(下格) bit2=0(合) bit[1:0]=朝向
         m_world->setBlock(tx, ty + 1, tz, idByte, quint8(doorFacing | 8)); // 上格：bit3=1
     } else {
