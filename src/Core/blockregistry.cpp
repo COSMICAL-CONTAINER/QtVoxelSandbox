@@ -65,6 +65,25 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
 static_assert(sizeof(kDefs) / sizeof(kDefs[0]) == int(BlockRegistry::Count),
               "kDefs 行数须与 BlockRegistry::Count 一致；新方块需补 BlockDef 行");
+
+// 编译期图集越界守卫（t182 根除复发 bug 类）：扫描 kDefs 全部 tile 字段，最大者须 < AtlasTileCount。
+//   - 任一方块 tile >= AtlasTileCount → 编译失败（该瓦片 UV 越界图集 → 采样到图集外/回绕 → 渗色）。
+//   - 隐式校验 AtlasTileCount 不小于「实际用到的最大 tile + 1」：加新方块带新 tile（如 tile 23）却忘把
+//     AtlasTileCount 从 23 改到 24 → 本断言失败 → 强制同步（堵住「mesher/BlockCube 各持魔数、漏改一份」
+//     的回归源头，t54/t148/t182 三次同族 bug 的结构性根除）。
+constexpr int computeMaxTile() {
+    int m = 0;
+    for (const BlockRegistry::BlockDef &d : kDefs) {
+        if (d.topTile    > m) m = d.topTile;
+        if (d.bottomTile > m) m = d.bottomTile;
+        if (d.sideTile   > m) m = d.sideTile;
+        if (d.frontTile  > m) m = d.frontTile;
+    }
+    return m;
+}
+static_assert(computeMaxTile() < int(BlockRegistry::AtlasTileCount),
+              "某方块 tile 字段 >= BlockRegistry::AtlasTileCount → 图集越界采样（渗色/错贴）；"
+              "新增瓦片须同步 AtlasTileCount 与 tools/build_atlas.py 的 TILES");
 } // namespace
 
 const BlockRegistry::BlockDef &BlockRegistry::def(quint8 blockId)

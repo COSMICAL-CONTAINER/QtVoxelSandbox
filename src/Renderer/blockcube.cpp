@@ -36,17 +36,13 @@ const FaceCorner kFaceCorners[6][4] = {
     {{ kH, -kH, -kH, 1, 0}, {-kH, -kH, -kH, 0, 0}, {-kH,  kH, -kH, 0, 1}, { kH,  kH, -kH, 1, 1}},
 };
 
-// 图集瓦片数：**必须**与 src/World/chunkgeometry.cpp 的 N、tools/build_atlas.py 的 TILES
-// 长度三处严格一致（一个偏差即贴图错位 / 渗色）。当前 20 瓦片横排（t148 加 water）：
-//   0 grass_top / 1 grass_side / 2 dirt / 3 stone / 4 sand
-//   5 cobble / 6 log_top / 7 log_side / 8 planks / 9 leaves
-//   10 crafting_table_top / 11 crafting_table_side
-//   12 furnace_top / 13 furnace_side / 14 furnace_front
-//   15 coal_ore / 16 iron_ore / 17 torch / 18 bedrock / 19 water
+// 图集瓦片数：读 BlockRegistry::AtlasTileCount（**单一权威**，与 chunkgeometry / build_atlas.py 同源）。
+//   历史复发 bug 类（t54 / t148 / t182）：本处曾持一份独立魔数（10 / 20），加新瓦片后漏改 → 与
+//   chunkgeometry 的 N 不一致 → BlockCube 的 u 区间按错误 1/kAtlasN 算偏宽偏窄，tile t 采到
+//   [t/kAtlasN,(t+1)/kAtlasN] 而真实瓦片在 [t/AtlasTileCount,(t+1)/AtlasTileCount] → 泥土采到半块
+//   石头、树叶采到木板（手持/掉落物贴图「杂交」= 不是实际方块）。改读单一权威常量后该类回归结构性根除。
 // 瓦片序号由 BlockRegistry::tileIndex(blockId, face) 给出（单一权威）。
-// 历史 bug（t54）：本处曾停在 10，而 chunkgeometry 已升到 12 → BlockCube 的 u 区间按 1/10 算
-// 偏宽偏右，泥土(2)采到半块石头、树叶(9)采到木板；与 chunkgeometry 对齐到 12 后修复。
-constexpr int kAtlasN = 20;
+constexpr int kAtlasN = BlockRegistry::AtlasTileCount;
 constexpr float kTileW = 1.0f / kAtlasN;
 constexpr float kHx = 0.5f / (kAtlasN * 16); // 半纹素内缩（线性采样防跨瓦片渗色）
 constexpr float kHy = 0.5f / 16;
