@@ -158,6 +158,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_wood.png
         textures/default_torch.png
         textures/default_water.png
+        textures/default_water_2.png             # t223 静水动画第二帧（build_water.py 程序生成原创像素图）
+        textures/default_water_flow.png          # t197 流水贴图（build_water_flow.py；曾漏注 qrc 清单，补登）
+        textures/default_water_flow_2.png        # t223 流水动画第二帧（build_water_flow.py 程序生成原创像素图）
         textures/default_chest_top.png         # t173/t179 箱子各面贴图（build_chest.py 程序生成原创像素图）
         textures/default_chest_side.png
         textures/default_chest_front.png
@@ -215,6 +218,7 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/door_close.wav
         sounds/hurt.wav
         sounds/ambient_wind.wav
+        sounds/water_flow.wav
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。

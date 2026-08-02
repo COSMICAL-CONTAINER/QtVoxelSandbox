@@ -114,6 +114,19 @@ void ChunkGeometry::setGreedyMeshing(bool on)
     buildMesh(RebuildReason::Dirty);
 }
 
+// t223 水贴图动画 phase 变（flipbook 换帧）。仅水段（waterOnly=true）受影响：地形段不引用水 tile，
+//   phase 变化对其顶点 UV 无影响 → 早退不重建（避免地形段无谓 buildMesh）。水段重网格化用 Water reason
+//   （同 waterOnly 切换语义；绕过 sun-step 节流）。phase 钳到 0/1（两帧 flipbook；超界兜底取 0）。
+void ChunkGeometry::setWaterAnimPhase(int phase)
+{
+    if (phase < 0 || phase > 1) phase = 0; // 钳到合法两帧范围
+    if (m_waterAnimPhase == phase) return;
+    m_waterAnimPhase = phase;
+    emit waterAnimPhaseChanged();
+    if (!m_waterOnly) return; // 地形段不引用水 tile → 无视觉影响，跳过重建
+    buildMesh(RebuildReason::Water);
+}
+
 // 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
 // 故 world 重建（recreate 销毁旧 chunk）后不会悬空：拿到的是新 chunk。
 Chunk *ChunkGeometry::myChunk() const
@@ -299,8 +312,15 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
             //   分层（PLAN §2）：本段属 Renderer（mesher），只读 World（blockAt/stateAt/skyLightAt/blockLightAt/
             //   heightmapAt）—— 水面高度是 mesher 据 state 的纯渲染层计算，不写栅格、不进 BlockDef（Water 方块
             //   def 仍各面=19 静水；流水贴图选择是呈现层决定，非方块属性）。
-            constexpr int kWaterTile     = 19; // 静水贴图（水源各面；与 BlockRegistry Water def 同 tile）
-            constexpr int kWaterFlowTile = 23; // 流水贴图（流水各面；mesher 呈现层选择，非方块属性）
+            constexpr int kWaterTile     = 19; // 静水贴图 frame 0（水源各面；与 BlockRegistry Water def 同 tile）
+            constexpr int kWaterFlowTile = 23; // 流水贴图 frame 0（流水各面；mesher 呈现层选择，非方块属性）
+            // t223 水贴图动画 flipbook：两帧（frame 0/1）慢速切换（Main.qml Timer ~800ms 切 waterAnimPhase）。
+            //   phase=0 用 {19,23}（frame 0）、phase=1 用 {24,25}（frame 1）。静水 frame 1 波纹略下移 → 荡漾感；
+            //   流水 frame 1 斜纹沿 (+1,+1) 平移半周期 → 「向右下流动」动势。机制等价 MC still/flowing_water flipbook。
+            constexpr int kWaterTileF1     = 24; // 静水贴图 frame 1（t223 动画第二帧）
+            constexpr int kWaterFlowTileF1 = 25; // 流水贴图 frame 1（t223 动画第二帧）
+            const int stillTile = (m_waterAnimPhase == 0) ? kWaterTile     : kWaterTileF1;
+            const int flowTile  = (m_waterAnimPhase == 0) ? kWaterFlowTile : kWaterFlowTileF1;
             // state → 水面高度（cell-local Y，0..1）。水源 1.0；流水 (8-level)/8（7/8..1/8）。
             //   state>7 不应出现（kMaxFlowLevel=7），clamp 兜底防越界（极端坏数据 → 1/8 而非负值）。
             auto surfH = [](quint8 state) -> float {
@@ -315,7 +335,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         if (blockAtWorld(wx, ly, wz) != BlockRegistry::Water) continue;
                         const quint8 st = stateAtWorld(wx, ly, wz);
                         const float myTop = surfH(st);
-                        const int tile = (st == 0) ? kWaterTile : kWaterFlowTile; // 水源静水 / 流水斜纹
+                        const int tile = (st == 0) ? stillTile : flowTile; // 水源静水 / 流水斜纹（t223 按 phase 选帧）
                         const float u0 = tile * tileW + hx, u1 = (tile + 1) * tileW - hx;
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];

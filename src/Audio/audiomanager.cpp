@@ -110,6 +110,13 @@ struct AudioManager::Data
     float ambientLevel = 1.0f;
     // 环境音基础音量系数（风声偏低，背景氛围不抢前景；乘 m_volume 与 ambientLevel 得最终音量）。
     static constexpr float kAmbientBaseVol = 0.22f;
+    // t223 水流声单件（长循环水流声；looping=true，startWaterFlow/stopWaterFlow 控开关，
+    //   setWaterFlowLevel 据 PlayerController.flowSoundLevel 调强度）。近流动水启动、远离停止。
+    Clip waterFlowClip{":/sounds/water_flow.wav"};
+    bool waterFlowPlaying = false;
+    float waterFlowLevel = 1.0f;
+    // 水流声基础音量系数（背景氛围级；乘 m_volume 与 waterFlowLevel 得最终音量）。
+    static constexpr float kWaterFlowBaseVol = 0.30f;
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     static constexpr ma_uint32 kSampleRate = 22050;
@@ -184,6 +191,11 @@ struct AudioManager::Data
     {
         return masterVolume * kAmbientBaseVol * ambientLevel;
     }
+    // t223 水流声最终音量 = master × base × level（level 由玩家到最近流水格的距离映射，近=1/远→0）。
+    float waterFlowVol(float masterVolume) const
+    {
+        return masterVolume * kWaterFlowBaseVol * waterFlowLevel;
+    }
 };
 
 AudioManager::AudioManager(QObject *parent)
@@ -223,16 +235,24 @@ AudioManager::AudioManager(QObject *parent)
     // 保完整解码 —— 默认 2s 上限会把 8s 截到 2s，使循环点落在满幅中波、回绕到淡化起点 ≈0 →
     // 每 2s 一次咔哒爆音（淡化设计被废弃）。
     d->loadClip(d->ambientClip, ma_uint64(Data::kSampleRate) * 16);
+    // t223 水流声同为 8.0s 长循环（首末淡化无缝），maxFrames 放宽到 16s 保完整解码（同 ambient_wind 教训）。
+    d->loadClip(d->waterFlowClip, ma_uint64(Data::kSampleRate) * 16);
     d->initSound(d->placeClip);
     d->initSound(d->pickupClip);
     d->initSound(d->doorOpenClip);
     d->initSound(d->doorCloseClip);
     d->initSound(d->hurtClip);
     d->initSound(d->ambientClip);
+    d->initSound(d->waterFlowClip);
     // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
     if (d->engineOk && d->ambientClip.ok) {
         ma_sound_set_looping(&d->ambientClip.sound, MA_TRUE);
         ma_sound_set_volume(&d->ambientClip.sound, d->ambientVol(m_volume));
+    }
+    // t223 水流声：sound init 成功后置循环 + 初始音量（startWaterFlow 才 start；由 proximity 扫描驱动）。
+    if (d->engineOk && d->waterFlowClip.ok) {
+        ma_sound_set_looping(&d->waterFlowClip.sound, MA_TRUE);
+        ma_sound_set_volume(&d->waterFlowClip.sound, d->waterFlowVol(m_volume));
     }
 
     qCInfo(lcAudio).nospace().noquote()
@@ -245,7 +265,8 @@ AudioManager::AudioManager(QObject *parent)
         << d->groupClips[4][0].ok << "/" << d->groupClips[4][1].ok << "/" << d->groupClips[4][2].ok
         << " place=" << d->placeClip.ok << " pickup=" << d->pickupClip.ok
         << " door_open=" << d->doorOpenClip.ok << " door_close=" << d->doorCloseClip.ok
-        << " hurt=" << d->hurtClip.ok << " ambient_wind=" << d->ambientClip.ok;
+        << " hurt=" << d->hurtClip.ok << " ambient_wind=" << d->ambientClip.ok
+        << " water_flow=" << d->waterFlowClip.ok;
 }
 
 AudioManager::~AudioManager()
@@ -264,6 +285,7 @@ AudioManager::~AudioManager()
     if (d->doorCloseClip.ok) ma_sound_uninit(&d->doorCloseClip.sound);
     if (d->hurtClip.ok) ma_sound_uninit(&d->hurtClip.sound);
     if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
+    if (d->waterFlowClip.ok) ma_sound_uninit(&d->waterFlowClip.sound);
     ma_engine_uninit(&d->engine);
 }
 
@@ -343,6 +365,40 @@ void AudioManager::setAmbientLevel(float level)
         ma_sound_set_volume(&d->ambientClip.sound, d->ambientVol(m_volume));
 }
 
+// t223 水流声：与 ambient_wind 同模式（looping 长音 + start/stop/setLevel），由 PlayerController 近流水
+//   proximity 扫描驱动（flowSoundLevel）。
+void AudioManager::startWaterFlow()
+{
+    // 幂等：已在播早退。降级（engine / clip 失败）静默早退（§2-E）。
+    if (!d->engineOk || !d->waterFlowClip.ok || d->waterFlowPlaying) return;
+    ma_sound_set_volume(&d->waterFlowClip.sound, d->waterFlowVol(m_volume));
+    if (ma_sound_start(&d->waterFlowClip.sound) != MA_SUCCESS) {
+        qCWarning(lcAudio) << "water flow sound start 失败（水流声降级）";
+        return;
+    }
+    d->waterFlowPlaying = true;
+}
+
+void AudioManager::stopWaterFlow()
+{
+    // 幂等：未在播早退。stop + seek 回 0（下次 start 从头，避免中途续播突兀）。
+    if (!d->engineOk || !d->waterFlowClip.ok || !d->waterFlowPlaying) return;
+    ma_sound_stop(&d->waterFlowClip.sound);
+    ma_sound_seek_to_pcm_frame(&d->waterFlowClip.sound, 0);
+    d->waterFlowPlaying = false;
+}
+
+void AudioManager::setWaterFlowLevel(float level)
+{
+    if (level < 0.0f) level = 0.0f;
+    if (level > 1.0f) level = 1.0f;
+    if (qFuzzyCompare(level, d->waterFlowLevel)) return;
+    d->waterFlowLevel = level;
+    // 在播则即时改音量；未播仅记 level，下次 startWaterFlow 用新值。
+    if (d->engineOk && d->waterFlowClip.ok && d->waterFlowPlaying)
+        ma_sound_set_volume(&d->waterFlowClip.sound, d->waterFlowVol(m_volume));
+}
+
 void AudioManager::setVolume(float v)
 {
     if (v < 0.0f) v = 0.0f;
@@ -353,4 +409,7 @@ void AudioManager::setVolume(float v)
     // t177：环境音是持续 looping 声，master 音量变后须即时同步其音量（其他单件每次 replay 重设无需）。
     if (d->engineOk && d->ambientClip.ok && d->ambientPlaying)
         ma_sound_set_volume(&d->ambientClip.sound, d->ambientVol(m_volume));
+    // t223：水流声同为持续 looping 声，master 音量变后须即时同步。
+    if (d->engineOk && d->waterFlowClip.ok && d->waterFlowPlaying)
+        ma_sound_set_volume(&d->waterFlowClip.sound, d->waterFlowVol(m_volume));
 }

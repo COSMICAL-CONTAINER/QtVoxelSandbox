@@ -82,6 +82,16 @@ public:
     Q_INVOKABLE void stopAmbient();
     // 设环境音强度（0..1）：仅改 ambient 声音量（若在播即时生效）；幂等（无变化不动）。
     Q_INVOKABLE void setAmbientLevel(float level);
+    // t223 水流声（近流水 proximity ambience loop）：长循环水流声（ma_sound looping=true），玩家近流动水
+    //   （state>0 流水格）一定范围时启动、远离停止。机制等价 MC 近流水 / 瀑布的环境水流声（原创程序合成，§9）。
+    //   startWaterFlow / stopWaterFlow 控开关（幂等，同 ambient 模式）；setWaterFlowLevel 据玩家到最近流水格
+    //   的距离调音量（近强远弱 → 0 时由 caller stopWaterFlow）。PlayerController.tickImpl 节流扫邻近流水格算
+    //   level（Q_PROPERTY flowSoundLevel），Main.qml Connections 据此 start/stop + setLevel。
+    //   降级：engine 失败 / water_flow_clip 加载失败 → 各方法静默早退（§2-E，不崩）。
+    Q_INVOKABLE void startWaterFlow();
+    Q_INVOKABLE void stopWaterFlow();
+    // 设水流声强度（0..1）：仅改水流声音量（若在播即时生效）；幂等。由 PlayerController.flowSoundLevel 驱动。
+    Q_INVOKABLE void setWaterFlowLevel(float level);
 
     float volume() const { return m_volume; }
     void setVolume(float v);

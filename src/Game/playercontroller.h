@@ -128,6 +128,13 @@ class PlayerController : public QQuickItem
     //   每 tick 重算并缓存到 m_eyeInWater；状态翻转才发 eyeInWaterChanged（避免每帧抖 QML 绑定）。只读
     //   World::blockAt（向下依赖）；无世界 → false。speed-mul 减速（t159）直接调同名 const 方法读实时值。
     Q_PROPERTY(bool eyeInWater READ eyeInWater NOTIFY eyeInWaterChanged)
+    // t223 近流水 proximity 水流声强度（0..1）：玩家到最近**流动水**格（Water 且 state>0；静止水源 state=0
+    //   不算 —— MC 近大片静海无流水声、近瀑布 / 玩家倒水流才有）的距离映射，近=1 / 远→0、范围外=0。
+    //   tickImpl 节流扫邻近盒（~每 0.25s）算最近流水格距离 → level = clamp(1 - dist/kFlowSoundRadius, 0, 1)。
+    //   Main.qml Connections 据此 start/stop AudioManager 水流声 + setWaterFlowLevel（level=0 → stopWaterFlow）。
+    //   仅 playing 流动水存在时 >0；菜单态 player.release 后扫描仍跑但通常无流水格 → 0 → 自动停。只读 World
+    //   （blockAt/stateAt 向下依赖）；无世界 → 0。值真变（>epsilon 或 0<->非0 翻转）才 emit，免每 scan 抖 QML。
+    Q_PROPERTY(float flowSoundLevel READ flowSoundLevel NOTIFY flowSoundLevelChanged)
     // 掉落伤害事件（t22）：生存模式着地时按落差结算，发出本次应扣 HP（每 HP = 半心）。
     // 不直接持有 PlayerState（保持 Physics/Game→呈现 的单向事件流，分层干净；与 blockBroken
     // 同模式）：呈现层经 Connections 路由到 PlayerState.takeDamage。0 表示无伤害（不路出）。
@@ -201,6 +208,9 @@ public:
     //   QML 读它驱动水下蓝滤镜叠层。const 只读 World::blockAt（向下依赖）；眼位 = position()（脚底+eyeHeight）；
     //   无世界 → false。定义在 .cpp。
     bool eyeInWater() const;
+    // t223 近流水 proximity 水流声强度（Q_PROPERTY flowSoundLevel READ）：玩家到最近流水格的距离映射 [0,1]。
+    //   无世界 / 无近流水 → 0。定义在 .cpp。
+    float flowSoundLevel() const;
 
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
@@ -271,6 +281,7 @@ signals:
     void onGroundChanged();
     void flyingChanged();
     void eyeInWaterChanged(); // t201 眼位水态翻转（驱动水下蓝滤镜叠层显隐；值真变才发，免每帧抖 QML 绑定）
+    void flowSoundLevelChanged(); // t223 近流水 proximity 强度变（驱动 AudioManager 水流声 start/stop/setLevel）
     void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）。speed 属性亦复用本信号（t159）。
     void flySpeedMulChanged(); // 飞行速度倍数变（t159 滚轮调速；驱动 F3 报当前有效飞速）
     void walkPhaseChanged();  // 行走相位推进（t45；走时每 tick 发，QML 据 sin() 算四肢欧拉角）
@@ -362,6 +373,10 @@ private:
     void tickImpl();
     void pollMouse();
     void step(qreal dt);
+    // t223 近流水 proximity 扫描：在玩家眼位周围 kFlowSoundRadius 盒内查最近**流动水**格（Water 且 state>0；
+    //   静水水源 state=0 不算），返回 [0,1] 强度（1=贴脸 / 0=范围外或无流水）。节流由 tickImpl 累加 dt 控制
+    //   （kFlowScanInterval）。只读 World::blockAt/stateAt（向下依赖）；无世界 → 0。
+    float scanFlowSoundLevel() const;
     QVector3D wishHoriz() const;
     void moveAxis(int axis, float amount);
     bool aabbHitsSolid() const;
@@ -485,6 +500,10 @@ private:
     float m_drownTimer = 0.0f;    // 气泡归零后溺水扣血累积
     float m_airRegenTimer = 0.0f; // 出水回气累积
     bool m_eyeInWater = false;       // t201 眼位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit eyeInWaterChanged）
+    // t223 近流水 proximity 水流声：m_flowSoundLevel = 最近流水格距离映射 [0,1]（tickImpl 节流扫描更新）；
+    //   m_flowScanTimer 累加 dt 到 kFlowScanInterval 才重扫（~0.25s，省扫描开销）。值真变才 emit。
+    float m_flowSoundLevel = 0.0f;
+    float m_flowScanTimer = 0.0f;
     bool m_dead = false;             // t175 死亡态镜像（dropAllItems 置 true / respawn 置 false）：抑制死亡后
                                      //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）
 
@@ -527,6 +546,13 @@ private:
     static constexpr float kWaterGravity = 6.0f;  // 水中重力（缓沉；≈ kGravity×0.21）
     static constexpr float kSwimUp       = 4.5f;  // 按空格游泳上浮速度（blocks/sec）
     static constexpr float kWaterSinkMax = 3.0f;  // 水中最大下沉速度（钳制）
+    // t223 近流水 proximity 水流声（spec「近流动水一定范围持续水流声 ambience loop」）：
+    //   kFlowSoundRadius：扫描盒半径（格）= 水流声可闻范围；玩家到最近流水格距离 ≥ 此 → level=0（无声）。
+    //     8 格 ≈ MC 近流水可闻距离量级（机制对齐，非精确数值复刻）。
+    //   kFlowScanInterval：proximity 重扫间隔（秒）。tickImpl 累加 dt 到此值才扫一次（省扫描开销，~4 次/秒
+    //     足够跟手；扫描盒约 (2R+1)³ 子集 ~几千次 blockAt/stateAt，每次 O(1) 数组索引，~亚毫秒级）。
+    static constexpr float kFlowSoundRadius = 8.0f;   // 水流声可闻半径（格）
+    static constexpr float kFlowScanInterval = 0.25f; // proximity 重扫间隔（秒）
     // t211 水流推动玩家（机制等价 MC 1.0 流水冲走实体）：
     //   kWaterFlowPush：流水水平推力速度（blocks/sec；脚位在流水格 state>0 时沿离源方向叠入水平速度）。
     //     低于 kWalk(4.3) → 玩家仍可逆流游（净速 ≈ 走速 − 推力），但松手会被流走。spec「创造非飞 + 生存」。

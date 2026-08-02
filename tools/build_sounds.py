@@ -27,6 +27,11 @@
      调幅 + 首末 50ms 三角窗淡化保循环无缝）。机制等价 MC 的环境 / 风声氛围床（§9 原创）。
      AudioManager 用 ma_sound 设 looping，startAmbient/stopAmbient 控制开关（playing 态开 / 退菜单停），
      setAmbientLevel 据昼夜调强度（夜间更静谧）。
+   - water_flow.wav：水流声（t223 近流水 proximity ambience loop）—— 长循环水流声（~8s，带通滤波白噪
+     （→ 中频「水流 / 湍流」body）+ 慢 LFO 起伏（拟水流强弱呼吸）+ 偶发「咕嘟」气泡瞬态（拟水冒泡 /
+     涟漪）+ 首末 50ms 三角窗淡化保循环无缝）。机制等价 MC 近流水 / 瀑布的环境水流声（§9 原创）。
+     AudioManager 用 ma_sound 设 looping，startWaterFlow/stopWaterFlow 控开关（PlayerController 近流水
+     proximity 扫描驱动），setWaterFlowLevel 据玩家到最近流水格距离调音量（近强远弱）。
 
 确定性合成（每组固定 random.seed），同次运行产出字节一致的 WAV（便于 git/CI diff）。
 运行：python tools/build_sounds.py（输出到工程根 sounds/）。
@@ -252,6 +257,60 @@ def gen_ambient_wind():
     return out
 
 
+def gen_water_flow():
+    """水流声（t223 近流水 proximity ambience loop）：长循环水流声 —— 带通滤波白噪（→ 中频「水流 / 湍流」body，
+    保留 ~500-2000Hz 能量、压掉极低 / 极高频）+ 慢 LFO 起伏（拟水流强弱呼吸）+ 偶发「咕嘟」气泡瞬态（拟水
+    冒泡 / 涟漪，低频窄峰）+ 首末 50ms 三角窗淡化保循环无缝，~8s。机制等价 MC 近流水 / 瀑布的环境水流声
+    （原创程序合成，§9 法律：零 MC 资产）。AudioManager 用 ma_sound_set_looping(true) 设循环，
+    startWaterFlow / stopWaterFlow 控开关（PlayerController 近流水 proximity 扫描驱动），setWaterFlowLevel
+    据玩家到最近流水格距离调音量（近强远弱 → 0 时 caller stopWaterFlow）。整体幅度偏低（base_amp=0.16，
+    背景氛围不抢前景；与环境风声同床共存、不互相盖过）。
+    """
+    dur = 8.0
+    n = int(SR * dur)
+    random.seed(70223)
+    # 带通：单极点低通（压高频嘶嘶）后保留中频 → 「水流」body。系数越小越平滑。
+    lp_a = 0.18
+    lp_state = 0.0
+    raw = [0.0] * n
+    for i in range(n):
+        w = random.uniform(-1, 1)
+        lp_state = lp_a * w + (1.0 - lp_a) * lp_state
+        raw[i] = lp_state
+    # 归一化回 [-1,1] 量级。
+    peak = max(1e-6, max(abs(s) for s in raw))
+    inv = 1.0 / peak
+    # 双 LFO 慢颤调幅（水流强弱呼吸的不规则起伏，同 ambient_wind 风声床手法）。
+    lfo1 = 2 * math.pi * 0.27
+    lfo2 = 2 * math.pi * 0.13
+    fade_n = int(SR * 0.05)  # 50ms 首末淡化（循环无缝）
+    base_amp = 0.16          # 水流声整体偏低（背景氛围，与风声同床共存不抢前景）
+    # 偶发「咕嘟」气泡瞬态（拟水冒泡 / 涟漪）：~每 0.4-0.8s 一个低频窄峰。
+    bubbles = []
+    t_b = 0.30
+    while t_b < dur:
+        bubbles.append(t_b)
+        t_b += random.uniform(0.4, 0.8)
+    out = []
+    for i in range(n):
+        t = i / SR
+        lfo = 0.5 + 0.3 * math.sin(lfo1 * t) + 0.2 * math.sin(lfo2 * t)
+        amp = base_amp * lfo
+        s = raw[i] * inv * amp
+        # 叠加气泡瞬态（窄高斯包络的低频正弦，咕嘟感）。
+        for tb in bubbles:
+            dtb = t - tb
+            if -0.05 < dtb < 0.10:
+                env = math.exp(-(dtb ** 2) / (2 * 0.012 ** 2))
+                s += 0.10 * env * math.sin(2 * math.pi * (220.0 + 80.0 * dtb) * dtb)
+        if i < fade_n:
+            s *= i / fade_n
+        elif i > n - fade_n:
+            s *= (n - 1 - i) / fade_n
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -264,10 +323,11 @@ def main():
             write_wav(path, samples)
             print(f"wrote {path} ({len(samples)} frames, {len(samples)/SR:.2f}s)")
     # 单件音：place（保留）+ pickup + door_open / door_close（t152 门/活板门开关声）
-    # + hurt / ambient_wind（t177 受伤声 + 环境风声床）
+    # + hurt / ambient_wind（t177 受伤声 + 环境风声床）+ water_flow（t223 近流水水流声床）
     for name, gen in [("place", gen_place), ("pickup", gen_pickup),
                       ("door_open", gen_door_open), ("door_close", gen_door_close),
-                      ("hurt", gen_hurt), ("ambient_wind", gen_ambient_wind)]:
+                      ("hurt", gen_hurt), ("ambient_wind", gen_ambient_wind),
+                      ("water_flow", gen_water_flow)]:
         samples = gen()
         path = out_dir / f"{name}.wav"
         write_wav(path, samples)

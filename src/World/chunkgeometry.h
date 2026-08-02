@@ -65,6 +65,15 @@ public:
     //   顶点格式 / dev-plan 偏差 1/2），属推迟项。**t183 默认 false**（用户实测拉伸不可接受）；ESC 设置面板仍可手动
     //   打开 greedy（性能对比 / 纹理数组落地后切回）。值变 → buildMesh 重网格化。
     Q_PROPERTY(bool greedyMeshing READ greedyMeshing WRITE setGreedyMeshing NOTIFY greedyMeshingChanged)
+    // t223 水贴图动画 phase（flipbook 帧索引 0/1）：仅水段（waterOnly=true）使用。mesher 据本值在
+    //   静水 tile {19,24}（水源 state=0）与流水 tile {23,25}（流水 state>0）间选帧——phase 0 用 {19,23}，
+    //   phase 1 用 {24,25}。两帧 flipbook 慢速切换（Main.qml Timer ~800ms 切 0/1，spec「勿快」）→ 静水轻微
+    //   荡漾、流水斜纹呈「向右下流动」动势（机制等价 MC still/flowing_water flipbook，§9 原创）。
+    //   非水段（地形）不引用水 tile，phase 变化对其无视觉影响 → setter 仅在 waterOnly 时触发 buildMesh
+    //   （避免地形段无谓重建）。值变 → 水段 buildMesh(Water) 重网格化（顶点 UV 子区换帧）。
+    //   分层（PLAN §2）：本属 Renderer（mesher），只接收裸 int phase（不依赖 Game 层时间源 / Timer），保持
+    //   Renderer→向下 依赖方向。
+    Q_PROPERTY(int waterAnimPhase READ waterAnimPhase WRITE setWaterAnimPhase NOTIFY waterAnimPhaseChanged)
     // 网格统计（t10 F3 调试叠层，PLAN §2-F）：buildMesh 完成后暴露本 chunk 的顶点 / 三角面数，
     // 供 F3 叠层汇总诊断 meshing 吞吐与帧抖根因（§2-F 明言「没有 F3 叠层，帧率验收无法诊断帧抖」）。
     // 仅在 buildMesh 末尾经 meshRebuilt 通知；呈现层只读、不反向写。三角面 = idx/3（实际索引计数
@@ -96,6 +105,9 @@ public:
     // t178 贪婪网格化开关（true=greedy 合并同面；false=逐格 culled）。值变 → 重网格化。
     bool greedyMeshing() const { return m_greedyMeshing; }
     void setGreedyMeshing(bool on);
+    // t223 水贴图动画 phase（0/1；仅水段使用）。值变 → 水段 buildMesh(Water)（地形段早退）。
+    int waterAnimPhase() const { return m_waterAnimPhase; }
+    void setWaterAnimPhase(int phase);
 
     // 网格统计（t10 F3 叠层）：上次 buildMesh 产出的顶点 / 三角面数。
     int vertexCount() const { return m_vertexCount; }
@@ -109,6 +121,7 @@ signals:
     void waterOnlyChanged(); // t148：水段开关变（QML 改 waterOnly → 重建，水段 / 地形段重网格化）
     void shadowsEnabledChanged(); // t166b：阴影开关变（→ buildMesh 重算顶点光 PCF）
     void greedyMeshingChanged();  // t178：贪婪网格化开关变（→ buildMesh 重网格化）
+    void waterAnimPhaseChanged(); // t223：水贴图动画 phase 变（→ 水段 buildMesh(Water) 换帧）
     // buildMesh 完成（顶点 / 三角面数已更新；t10 F3 叠层据此刷新汇总）。
     void meshRebuilt();
 
@@ -139,6 +152,7 @@ private:
     bool m_waterOnly = false; // t148：true=只网格化 Water 段（透明水）；false=只网格化非水地形段
     bool m_shadowsEnabled = true; // t166b：PCF 软影开关（false → sunShadowAt 返 0，跳过 per-vertex 采样）
     bool m_greedyMeshing = false; // t178/t183：贪婪网格化开关（true=合并同面但贴图拉伸；false=逐格 culled 贴图清晰，t183 默认）
+    int m_waterAnimPhase = 0; // t223：水贴图动画 phase（0/1；仅水段使用，flipbook 在 {19,24}/{23,25} 间选帧）
     int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
     int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）
 };

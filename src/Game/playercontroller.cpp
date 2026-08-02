@@ -341,6 +341,20 @@ void PlayerController::tickImpl()
         m_eyeInWater = inWater;
         emit eyeInWaterChanged();
     }
+    // t223 近流水 proximity 水流声：节流扫描（每 kFlowScanInterval 秒一次）算最近流水格距离 → level。
+    //   放在 !m_captured 早 return 之前 → 暂停 / 背包开时仍刷新（玩家停流水旁开背包，水流声应持续）；
+    //   退出世界 / 回菜单由 Main.qml 显式 stopWaterFlow（同 stopAmbient），且离开流水范围 level→0 自动停。
+    m_flowScanTimer += float(dt);
+    if (m_flowScanTimer >= kFlowScanInterval) {
+        m_flowScanTimer = 0.0f;
+        const float level = scanFlowSoundLevel();
+        // 值真变才 emit（>epsilon 或 0<->非0 翻转）；免每 scan 抖 QML 绑定 + AudioManager 无谓 setLevel。
+        if (qAbs(level - m_flowSoundLevel) > 0.02f
+            || (level <= 0.0f) != (m_flowSoundLevel <= 0.0f)) {
+            m_flowSoundLevel = level;
+            emit flowSoundLevelChanged();
+        }
+    }
     // t60：掉落物重力（世界模拟，独立于玩家捕获态——菜单 / 暂停时实体仍落到地面）。
     // PlayerController 是唯一同时持 World* + ItemEntityManager* 的对象，故由此驱动；实体物理态
     // （vy / resting）与 pos 同住在 ItemEntityManager 内部数据里（分层：Entities→World 向下只读）。
@@ -1251,6 +1265,55 @@ bool PlayerController::feetInWater() const
     if (!m_world) return false;
     return m_world->blockAt(int(std::floor(m_pos.x())), int(std::floor(m_pos.y())), int(std::floor(m_pos.z())))
            == BlockRegistry::Water;
+}
+
+// t223 flowSoundLevel 属性 READ：返回 m_flowSoundLevel（tickImpl 节流扫描缓存值）。
+float PlayerController::flowSoundLevel() const
+{
+    return m_flowSoundLevel;
+}
+
+// t223 近流水 proximity 扫描：在玩家眼位周围 kFlowSoundRadius 立方盒内查最近**流动水**格
+//   （Water 且 state>0；静水水源 state=0 不算 —— MC 近大片静海无流水声、近瀑布 / 玩家倒水流才有，
+//   spec「近流动水」）。返回 [0,1] 强度：1 = 贴脸流水格、0 = 范围外 / 无流水 / 无世界。
+//   level = clamp(1 - minDist / kFlowSoundRadius, 0, 1)（线性衰减；minDist 用欧氏距离的三维近似 ——
+//   取整数格中心 (cx+0.5,cy+0.5,cz+0.5) 到眼位的距离，近强远弱）。只读 World::blockAt/stateAt
+//   （向下依赖，不改栅格）。扫描盒 (2R+1)³ 在 R=8 时 ~17³≈4900 格，但 Y 维玩家通常 ±8 已含全部水柱，
+//   实际 blockAt/stateAt 是 O(1) 数组索引 → 整体亚毫秒级，每 0.25s 一次不影响帧率。
+float PlayerController::scanFlowSoundLevel() const
+{
+    if (!m_world) return 0.0f;
+    const QVector3D eye = position();  // 玩家眼位（脚底 + eyeHeight）
+    const float ex = eye.x(), ey = eye.y(), ez = eye.z();
+    const int cx = int(std::floor(ex)), cy = int(std::floor(ey)), cz = int(std::floor(ez));
+    const int R = int(kFlowSoundRadius);
+    float minDistSq = kFlowSoundRadius * kFlowSoundRadius + 1.0f;  // 初始化为超出范围（>R² → 无命中返 0）
+    bool found = false;
+    // 扫描盒 [cx-R, cx+R] × [cy-R, cy+R] × [cz-R, cz+R]；Y 维世界高度由 World::blockAt 越界返 0 兜底。
+    for (int dx = -R; dx <= R; ++dx) {
+        for (int dy = -R; dy <= R; ++dy) {
+            for (int dz = -R; dz <= R; ++dz) {
+                const int bx = cx + dx, by = cy + dy, bz = cz + dz;
+                if (m_world->blockAt(bx, by, bz) != BlockRegistry::Water) continue;
+                if (m_world->stateAt(bx, by, bz) == 0) continue;  // 静水水源不算（spec「流动水」）
+                // 格中心到眼位的距离平方（欧氏）；用平方比较免开方。
+                const float ddx = (float(bx) + 0.5f) - ex;
+                const float ddy = (float(by) + 0.5f) - ey;
+                const float ddz = (float(bz) + 0.5f) - ez;
+                const float dsq = ddx * ddx + ddy * ddy + ddz * ddz;
+                if (dsq < minDistSq) {
+                    minDistSq = dsq;
+                    found = true;
+                }
+            }
+        }
+    }
+    if (!found) return 0.0f;
+    const float dist = std::sqrt(minDistSq);
+    float level = 1.0f - dist / kFlowSoundRadius;
+    if (level < 0.0f) level = 0.0f;
+    if (level > 1.0f) level = 1.0f;
+    return level;
 }
 
 // t159 上报实际水平速度（speed 属性）：= |水平位移| / dt。含撞墙归零、疾跑 / 飞 / 水下倍数 —— 反映
