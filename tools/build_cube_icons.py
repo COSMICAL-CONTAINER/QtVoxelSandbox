@@ -158,11 +158,12 @@ PARTIALS_3D = [
 ]
 
 
-def project_pt(x, y, z, cy_local):
+def project_pt(x, y, z, cy_local, scale=1.0):
     """dimetric 投影 unit cube [0,1]^3 → 画布坐标。复用 render() 的 hw/dv/v/cx 几何；cy 可调以按形状竖直居中。
-    推导（与 render() 的 N/E/S/Wc 同基准）：sx = cx + (x-z)*hw；sy = cy + (1-y)*v + (x+z-1)*dv。"""
-    sx = cx + (x - z) * hw
-    sy = cy_local + (1.0 - y) * v + (x + z - 1.0) * dv
+    推导（与 render() 的 N/E/S/Wc 同基准）：sx = cx + (x-z)*hw；sy = cy + (1-y)*v + (x+z-1)*dv。
+    scale<1 用于「比单格更大的形状」（如门 2 格高）整体缩到画布内 —— hw/dv/v 同比缩小保 dimetric 比例。"""
+    sx = cx + (x - z) * hw * scale
+    sy = cy_local + (1.0 - y) * v * scale + (x + z - 1.0) * dv * scale
     return np.array([sx, sy], dtype=np.float64)
 
 
@@ -187,27 +188,28 @@ def _render_face_depth(canvas, depth_buf,
     depth_buf[draw] = depth[draw]
 
 
-def _render_box_d(canvas, depth_buf, x0, x1, y0, y1, z0, z1, top_face, side_face, cy_local):
+def _render_box_d(canvas, depth_buf, x0, x1, y0, y1, z0, z1, top_face, side_face, cy_local, scale=1.0):
     """渲染轴对齐盒子的 3 个可见面（顶 y=y1 / 右 x=x1 / 左 z=z1）。各面 origin+uax+vax（3D + 屏幕双套）传深度渲染。
     UV 约定与 render() 同：顶面 u=x,v=z；右面 u=z,v=y；左面 u=x,v=y；texture 在各面满铺（slab 侧面贴图被竖向压缩，
-    机制等价 MC slab 侧面纹理被压扁）。shade：顶 1.00 / 右 0.80 / 左 0.62（光自右上，与 cube icon 一致）。"""
+    机制等价 MC slab 侧面纹理被压扁）。shade：顶 1.00 / 右 0.80 / 左 0.62（光自右上，与 cube icon 一致）。
+    scale 透传 project_pt（用于门等「比单格大」形状缩到画布内）。"""
     # 顶面 y=y1：origin (x0,y1,z0)，u→+x，v→+z。
-    o_s = project_pt(x0, y1, z0, cy_local)
+    o_s = project_pt(x0, y1, z0, cy_local, scale)
     _render_face_depth(canvas, depth_buf,
                        np.array([x0, y1, z0]), np.array([x1 - x0, 0.0, 0.0]), np.array([0.0, 0.0, z1 - z0]),
-                       o_s, project_pt(x1, y1, z0, cy_local) - o_s, project_pt(x0, y1, z1, cy_local) - o_s,
+                       o_s, project_pt(x1, y1, z0, cy_local, scale) - o_s, project_pt(x0, y1, z1, cy_local, scale) - o_s,
                        top_face, 1.00)
     # 右面 x=x1：origin (x1,y0,z0)，u→+z，v→+y。
-    o_s = project_pt(x1, y0, z0, cy_local)
+    o_s = project_pt(x1, y0, z0, cy_local, scale)
     _render_face_depth(canvas, depth_buf,
                        np.array([x1, y0, z0]), np.array([0.0, 0.0, z1 - z0]), np.array([0.0, y1 - y0, 0.0]),
-                       o_s, project_pt(x1, y0, z1, cy_local) - o_s, project_pt(x1, y1, z0, cy_local) - o_s,
+                       o_s, project_pt(x1, y0, z1, cy_local, scale) - o_s, project_pt(x1, y1, z0, cy_local, scale) - o_s,
                        side_face, 0.80)
     # 左面 z=z1：origin (x0,y0,z1)，u→+x，v→+y。
-    o_s = project_pt(x0, y0, z1, cy_local)
+    o_s = project_pt(x0, y0, z1, cy_local, scale)
     _render_face_depth(canvas, depth_buf,
                        np.array([x0, y0, z1]), np.array([x1 - x0, 0.0, 0.0]), np.array([0.0, y1 - y0, 0.0]),
-                       o_s, project_pt(x1, y0, z1, cy_local) - o_s, project_pt(x0, y1, z1, cy_local) - o_s,
+                       o_s, project_pt(x1, y0, z1, cy_local, scale) - o_s, project_pt(x0, y1, z1, cy_local, scale) - o_s,
                        side_face, 0.62)
 
 
@@ -219,6 +221,11 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
     side = load_face(fill_side)
     canvas = np.zeros((W, W, 4), dtype=np.float64)
     depth_buf = np.full((W, W), -np.inf)
+
+    # dimetric 投影缩放：默认 1.0（形状 ≤ 1 格高，沿用既有 hw/dv/v 几何）；门 2 格高 → 0.65 缩进画布。
+    #   下方各 shape 分支可覆写。scale==1 时 cy_local 走 y_mid 公式（与既有 5 类图标像素一致、零回归）；
+    #   scale!=1 时按实际投影 bbox 中心居中（门 x/z 不对称，y_mid 公式会偏中心）。
+    scale = 1.0
 
     if shape == "slab":
         boxes = [(0.0, 1.0, 0.0, 0.5, 0.0, 1.0)]                       # 全 footprint 半高
@@ -250,24 +257,42 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
         ]
         y_min, y_max = 0.0, 1.0
     elif shape == "door":
-        # 木门（t169 由 flat 2D 升级为 3D）：满格高、3/16 厚薄板（贴 -Z 面），机制对齐 MC 门（1×1 面、
-        #   3/16 厚板）。dimetric 视角下见大面（+Z 门面 1×1）+ 顶面（1×3/16 薄边）+ 右面（3/16×1 薄边），
-        #   与立方体图标（满格厚 1）的厚边对比即可一眼分辨「这是门不是满方块」。y 全高 → 与立方体等高
-        #   （区分于 slab 半高 / pressure_plate 贴地薄）。
+        # t207 门 UI 图标两格高：门在世界里是两格高方块（WoodDoor 下/上格同 id，
+        #   partialblockgeometry.cpp 每格各画满高薄板 → 合起来即 y[0,2] 的 1×2×3/16 薄板）。
+        #   图标按真实形状投影 y[0,2]（修正 t169 把门只画成 1 格高 → 与「门是两格高方块」语义不符、
+        #   且与立方体图标等高难辨「这是 1 格的门」）。scale=0.7 把 2 格高的屏幕投影缩进画布（2 格高 × 0.7
+        #   ≈ 1.4 格立方体的屏幕高度，但因门是窄板宽度仅 ~3/16 格 → 整体呈高窄「门」剪影，~89% 画布高、
+        #   ~36% 画布宽，一眼分辨「这是 2 格高的门」）。dimetric 视角下见 +Z 门面（1×2 大面）+ 顶面
+        #   （1×3/16 薄边）+ 右面（3/16×2 薄边），与立方体图标（满格厚 1）对比即可分辨。
         boxes = [
-            (0.0, 1.0, 0.0, 1.0, 0.0, 3.0 / 16.0),  # 门板（贴 -Z 面，3/16 厚）
+            (0.0, 1.0, 0.0, 2.0, 0.0, 3.0 / 16.0),  # 门板（贴 -Z 面，3/16 厚，2 格高）
         ]
-        y_min, y_max = 0.0, 1.0
+        y_min, y_max = 0.0, 2.0
+        scale = 0.7
     else:
         img = Image.fromarray(canvas.astype(np.uint8), "RGBA")
         return img.resize((OUT, OUT), Image.LANCZOS)
 
-    # 形状竖直居中：cy_local 使形状 y_mid 的屏幕中心落在画布中心 W/2（公式由 project_pt sy 反解）。
-    y_mid = (y_min + y_max) / 2.0
-    cy_local = W / 2.0 - (1.0 - y_mid) * v
+    # 形状竖直居中：cy_local 使形状的屏幕中心落在画布中心 W/2。
+    #   scale==1：沿用 y_mid 公式（与既有 5 类图标像素一致、零回归 —— 公式由 project_pt sy 反解，
+    #     对 x/z 对称形状精确、对 fence 等略偏但已固化进既有图标）。
+    #   scale!=1（门）：按实际投影 bbox 中心居中 —— 投影所有盒子 8 角（cy_local=0 基线）求 sy 中点，
+    #     cy_local = W/2 − sy_mid（门 2 格高 + x/z 不对称，y_mid 公式会偏中心 → 用精确 bbox）。
+    if scale == 1.0:
+        y_mid = (y_min + y_max) / 2.0
+        cy_local = W / 2.0 - (1.0 - y_mid) * v
+    else:
+        sys_baseline = []
+        for (x0, x1, y0, y1, z0, z1) in boxes:
+            for px in (x0, x1):
+                for py in (y0, y1):
+                    for pz in (z0, z1):
+                        sys_baseline.append((1.0 - py) * v * scale + (px + pz - 1.0) * dv * scale)
+        sy_mid_baseline = (min(sys_baseline) + max(sys_baseline)) / 2.0
+        cy_local = W / 2.0 - sy_mid_baseline
 
     for (x0, x1, y0, y1, z0, z1) in boxes:
-        _render_box_d(canvas, depth_buf, x0, x1, y0, y1, z0, z1, top, side, cy_local)
+        _render_box_d(canvas, depth_buf, x0, x1, y0, y1, z0, z1, top, side, cy_local, scale)
 
     img = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGBA")
     return img.resize((OUT, OUT), Image.LANCZOS)
