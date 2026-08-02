@@ -1,6 +1,6 @@
 #include "raycast.h"
 #include "world.h"
-#include "blockregistry.h" // t157：Torch 不挡射线（射线穿透火把，机制等价 MC 小型附着块）
+#include "blockregistry.h" // Torch / Water 是否挡射线由 filter 决定（见 RayFilter；BlockRegistry 取 id）
 
 #include <cmath>
 #include <limits>
@@ -9,27 +9,30 @@
 // 故步长 ≤ 1 格（满足 dev-spec t04 要求）。命中面法线 = 进入该体素时所跨轴的 −step。
 //
 // 参考：A Fast Voxel Traversal Algorithm for Ray Tracing (1987)。整数格坐标按
-// World 约定（+Y 朝上，越界=空气）；阻挡谓词见 blocksRay（实存且非 Torch，t157）。
-RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float maxDist, bool waterBlocks)
+// World 约定（+Y 朝上，越界=空气）；阻挡谓词见 blocksRay（按 filter 切换 Torch / Water）。
+//
+// 同一份 DDA 被多种语义复用（选体 / 相机距离 / 铁桶舀水），它们对「Torch / Water 是否挡射线」
+// 需求不同，故用 filter 标志位独立切换（详见 raycast.h RayFilter 注释）：
+//   - 选体（HitTorch）：火把挡（t184，可选中 / 直挖）、水穿过（t165 水下可挖实体）。
+//   - 相机距离（Default）：火把 / 水均穿过（皆 non-solid，相机不应被拉近视距，保 t40）。
+//   - 铁桶（HitWater）：水挡（命中首个水格舀水）、火把穿过。
+RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float maxDist, unsigned filter)
 {
     RayHit h;
     if (dir.lengthSquared() < 1e-12f)
         return h; // 零向量：无方向，不命中
     dir.normalize();
 
-    // 射线「阻挡」谓词 = 方块实存且**非 Torch**；Water 由 waterBlocks 开关决定是否挡。
-    //   - waterBlocks=false（默认，主选体 / 相机碰撞）：Water 不挡 —— 水非实体（solid=false、可穿过），
-    //     射线穿透水命中其后/下实体方块（t165：否则眼位入水即命中水面格 → 水下无法选中/挖掘方块；
-    //     机制等价 MC 水不挡选体）。cameraDistance（t40）同受益（相机穿水）。
-    //   - waterBlocks=true（t174 铁桶舀水专用）：Water 亦挡 —— 桶需命中首个水格舀水（主射线排除水
-    //     致使命中格恒非水，桶交互独立跑含水射线）。主选体仍走 false，保 t165 水下挖掘语义不回归。
-    //   Torch 始终不挡（t157：小型附着块，准星瞄火把选中其背后实体方块；移除走破支撑 → 脱落）。
-    //   不复用 World::isSolid（语义=blockAt!=0 会把 Torch/Water 当 solid），改读 blockAt + 显式排除
-    //   （BlockRegistry::isSolid 会连水/半砖一并漏过，范围过大；本谓词只针对 Torch + Water）。
-    auto blocksRay = [&world, waterBlocks](int cx, int cy, int cz) {
+    // 射线「阻挡」谓词：空气恒穿过；实体方块（非 Torch / Water）恒挡；Torch / Water 由 filter 决定。
+    //   不复用 World::isSolid（语义=blockAt!=0 会把 Torch / Water 当 solid；且选体要 Torch 挡、相机要
+    //   Torch 穿，需按 filter 区分），改读 blockAt + filter 显式判定（单一权威 + 模式可切换）。
+    auto blocksRay = [&world, filter](int cx, int cy, int cz) {
         const quint8 b = world.blockAt(cx, cy, cz);
-        return b != quint8(0) && b != BlockRegistry::Torch
-               && (waterBlocks || b != BlockRegistry::Water);
+        if (b == quint8(0)) return false; // 空气：永远穿过
+        // Torch / Water 是否挡射线由 filter 决定（不同射线模式语义不同，见 RayFilter 注释）。
+        if (b == BlockRegistry::Torch && !(filter & RayFilter::HitTorch)) return false;
+        if (b == BlockRegistry::Water && !(filter & RayFilter::HitWater)) return false;
+        return true;
     };
 
     // 当前所在体素（floor 对负坐标亦正确：-2.3 ∈ 体素 -3）
@@ -37,17 +40,20 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
     int y = int(std::floor(origin.y()));
     int z = int(std::floor(origin.z()));
 
-    // 起点已嵌在「挡射线」的格内 → 退化，视为不可命中（相机穿模进实体方块，避免无意义高亮）。
-    //   t174 例外：waterBlocks 模式下起点在水格属正常（玩家在水中游泳），视该水格为首个命中 ——
+    // 起点已嵌在「该模式视为阻挡」的格内 → 退化，视为不可命中（相机穿模进实体方块，避免无意义高亮）。
+    //   t174 例外：HitWater 模式下起点在水格属正常（玩家在水中游泳），视该水格为首个命中 ——
     //   桶舀「身处水」（眼位在水时含水射线起点即水格，否则判退化会漏掉水下舀水）。无外法线
     //   （射线未跨面进入此格，nx/ny/nz 保持 0；桶舀水只读格坐标不读法线，无碍）。
+    //   t184：HitTorch 模式起点在火把格（玩家眼位恰入火把格 —— 火把 non-solid 可走入）亦判退化（不命中），
+    //   避免选中「贴脸火把」+ 无意义高亮；玩家退后半步即可正常选中该火把（火把通常贴墙，眼位入其格
+    //   是边缘瞬时态，退化无碍主流程）。
     if (blocksRay(x, y, z)) {
-        if (waterBlocks && world.blockAt(x, y, z) == BlockRegistry::Water) {
+        if ((filter & RayFilter::HitWater) && world.blockAt(x, y, z) == BlockRegistry::Water) {
             h.valid = true;
             h.bx = x; h.by = y; h.bz = z;
             return h; // 起点即水格 → 命中该格（dist=0；法线 0）
         }
-        return h; // 起点嵌实体方块（相机穿模）→ 退化，不可命中
+        return h; // 起点嵌实体方块（相机穿模）/ HitTorch 起点在火把格 → 退化，不可命中
     }
 
     const int stepX = (dir.x() > 0.f) ? 1 : (dir.x() < 0.f ? -1 : 0);
@@ -90,5 +96,5 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
             return h;
         }
     }
-    return h; // 射程内全为空气
+    return h; // 射程内全为空气 / 被该模式视为穿过的方块
 }

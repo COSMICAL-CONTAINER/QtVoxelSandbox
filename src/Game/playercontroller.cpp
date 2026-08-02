@@ -364,7 +364,11 @@ QVector3D PlayerController::lookDirection() const
 void PlayerController::updateRaycast()
 {
     if (!m_world) { clearHit(); return; }
-    const RayHit h = raycastVoxel(*m_world, position(), lookDirection(), kReach);
+    // t184：选体射线纳入 Torch（HitTorch）—— 准星瞄火把即命中火把（可显示火把边界框 + 左键直挖），
+    //   修正 t157「射线永远穿透火把」致火把不可直挖之缺陷（用户原意「火把可选可挖、空气可穿」）。
+    //   Water 仍穿过（保 t165 水下可选中 / 挖实体）；相机距离（updateCameraDistance）走 Default（火把 /
+    //   水均穿过，non-solid 不拉近视距），故本处显式传 HitTorch 仅作用于选体。
+    const RayHit h = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitTorch);
 
     // 仅在命中态/格坐标/法线真正变化时 emit，避免每帧无谓刷新 QML 绑定。
     const bool changed = (h.valid != m_hasHit)
@@ -797,13 +801,13 @@ void PlayerController::placeBlock()
             return; // 倒水（无论成功与否）不再走放置路径
         }
         // 空桶舀水（t174 fix）：主射线排除 Water（t165 水下挖掘语义）→ 命中格恒为水后/水下的实体方块，
-        //   旧查命中格 == Water 恒 false（死代码）。改为单独跑「含水」射线（waterBlocks=true）命中首个水格：
+        //   旧查命中格 == Water 恒 false（死代码）。改为单独跑「含水」射线（RayFilter::HitWater）命中首个水格：
         //     - 水面 / 岸边瞄准水体 → 射线穿空气后命中水格；
         //     - 瞄深水（射程内无实体，仅水）→ 主射线无命中，但含水射线命中水；
         //     - 水下（眼位在水）→ 含水射线起点即水格，视为命中该格（桶舀身处水）。
         //   不依赖上方 !m_hasHit 门（已绕过）→ 三种姿态均可舀。舀走走 setWaterSilent（水流系统静默写入，
         //   不发 blockBroken → 无破块粒子/音，机制等价 MC 舀水无反馈），下一 tickWaterFlow BFS 自动衰退邻接流水。
-        const RayHit wHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, /*waterBlocks=*/true);
+        const RayHit wHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitWater);
         if (wHit.valid && m_world->blockAt(wHit.bx, wHit.by, wHit.bz) == BlockRegistry::Water) {
             m_world->setWaterSilent(wHit.bx, wHit.by, wHit.bz, BlockRegistry::Air, 0); // 舀走（水源 / 流水均可舀，清整格）
             if (m_mode != Creative)
