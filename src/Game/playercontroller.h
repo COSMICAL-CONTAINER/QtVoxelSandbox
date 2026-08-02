@@ -238,6 +238,19 @@ public:
     // （spec）。空手 / 取失败 → 不丢。spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem
     // （同破块掉落 t35 路径）；丢弃后实体可被重新拾取（闭环）。
     Q_INVOKABLE void dropHeld();
+    // t229 Ctrl+Q 第一人称丢弃整栈：与 dropHeld（Q=丢 1 件）同源（取**选中槽**），差异在**丢整栈**而非 1 件。
+    //   仅指针捕获时生效（同 dropHeld；背包打开时未捕获正是此场景，整栈丢弃走背包悬停槽路径）。
+    //   空栈 / 取失败 → 不丢。spawnItem 携整栈数量（1 实体带整栈，同 dropHeldCursor 模式，修「丢 4 木棒
+    //   捡回只剩 1」类 bug）。经 QML Connections 转发（同 dropHeld / dropHeldCursor）。
+    Q_INVOKABLE void dropHeldStack();
+    // t229 背包悬停槽丢弃原语：通用「在玩家前方 1.5 格丢弃指定 id/count 实体」。与 dropHeld（取选中槽）/
+    //   dropHeldCursor（取光标手持栈）的差异：本方法**不读/改任何槽**，纯粹按给定 id/count 在玩家前方
+    //   spawnItem ——槽位的读改由 UI 层（InventoryOps.readSlot/writeSlot，按组路由 main/hotbar/craft/in/
+    //   fuel/out/chest）完成，本方法只负责实体生成 + 位置（Game/Physics 层语义，PLAN §2 分层：物理位置与
+    //   实体事件在 Game 层，槽操作在 VM/UI 层）。这样背包任意组的悬停槽丢弃（Q=1件 / Ctrl+Q=整栈）都走
+    //   同一原语，UI 层据组分发读写、算 1/全 栈量后调本方法。不限捕获态（背包打开时未捕获正是此场景）。
+    //   id==0 / count<=0 → 不丢。经 QML Connections 转发（同 spawnItem 模式）。
+    Q_INVOKABLE void dropItemAtFront(int itemId, int count);
     // 拖出背包丢弃（t49）：光标手持栈（hotbar.heldBlock/heldCount）整栈丢弃为实体（玩家前方 1.5 格）。
     // 与 dropHeld 的差异：后者取**选中槽** 1 件且仅捕获时；本方法取**光标手持栈**整栈、**不限捕获态**
     // （背包打开时未捕获正是此场景）。t64：spawnItem 传 heldCount → 1 实体携带整栈数量（修「丢 4 木棒

@@ -356,6 +356,38 @@ Window {
         else if (survivalPanel.visible)      survivalPanel.swapHoveredWithHotbar(hotbarIdx)
     }
 
+    // t229 Q / Ctrl+Q 背包内悬停槽丢弃（spec「背包内悬停槽 Q=丢 1 / Ctrl+Q=丢整栈。适用所有背包面板」）。
+    //   解析 window.hoveredSlotKey（"组:下标"）→ 路由到当前可见面板的 readSlot/writeSlot（每面板薄委托
+    //   InventoryOps.readSlot/writeSlot，按组分发 main/hotbar/craft/in/fuel/out/chest，VM 与本地存储通吃）→
+    //   据 dropAll 取「整栈 / 1 件」量、写回槽（清空或 -1）→ 调 player.dropItemAtFront(id, n) 在玩家前方 spawn
+    //   实体。空槽 / 无悬停 / 无面板 → 无操作。槽读改在 UI/VM 层（InventoryOps 单一权威）；实体生成 + 位置
+    //   在 Game/Physics 层（dropItemAtFront），分层干净（PLAN §2）。不触碰光标手持栈（heldBlock）—— MC 行为：
+    //   Q 直接从悬停槽丢、与光标内容无关。
+    //   ⚠️ qmlcachegen 仅词法校验：函数体内 hoveredSlotKey 解析为 JS 字符串 split 必须运行期实测（同 lessons-
+    //      learned「QML/JS 信号处理器静默退化」自检）。
+    function dropFromHoveredSlot(dropAll) {
+        const key = window.hoveredSlotKey
+        if (key === "") return
+        const sep = key.indexOf(":")
+        if (sep < 0) return
+        const group = key.substring(0, sep)
+        const index = parseInt(key.substring(sep + 1), 10)
+        // 路由到当前可见面板（同 swapHoveredWithHotbar 的面板分发顺序）。
+        let panel = null
+        if (craftingTablePanel.visible)      panel = craftingTablePanel
+        else if (furnacePanel.visible)       panel = furnacePanel
+        else if (chestPanel.visible)         panel = chestPanel
+        else if (inventoryPanel.visible)     panel = inventoryPanel
+        else if (survivalPanel.visible)      panel = survivalPanel
+        if (!panel) return
+        const st = panel.readSlot(group, index)
+        if (!st || st.id === 0 || st.count <= 0) return           // 空槽 → 无操作
+        const n = dropAll ? st.count : 1
+        if (dropAll || st.count <= 1) panel.writeSlot(group, index, 0, 0)            // 清空
+        else                          panel.writeSlot(group, index, st.id, st.count - 1) // -1 件
+        player.dropItemAtFront(st.id, n)                          // 玩家前方生成实体（Game 层语义事件）
+    }
+
     // 背包开关（t18）：E 键调。开 → release（光标可见点格子）；关 → grab + 焦点回键位层。
     function toggleInventory() {
         if (inventoryOpen) closeInventory()
@@ -2677,7 +2709,24 @@ Window {
             if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
             if (e.key === Qt.Key_F6) { worldClock.toggleDebugFast(); e.accepted = true; return } // 昼夜调试加速（t09）
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
-            if (e.key === Qt.Key_Q) { player.dropHeld(); e.accepted = true; return }     // 丢弃手持 1 件（t36）
+            // t229 Q / Ctrl+Q 丢弃热键（spec「第一人称 Q=丢 1 / Ctrl+Q=丢整栈（手持槽）；背包内悬停槽
+            //   Q=丢 1 / Ctrl+Q=丢整栈。适用所有背包面板」）。Ctrl 修饰由 e.modifiers 直接判（窗口级键盘事件，
+            //   无需常驻 ctrlHeld 态；同 shiftHeld 跟踪不同的是 Q 非移动键、press 即早退无需 release 守卫）。
+            //   背包开 + 悬停某槽 → 从**悬停槽**丢（Q=1件 / Ctrl+Q=整栈；任意组 main/hotbar/craft/in/fuel/
+            //   out/chest，经 InventoryOps.readSlot/writeSlot 路由）；否则（游戏内 / 未悬停）→ 从**选中槽**丢
+            //   （dropHeld/dropHeldStack 自检捕获态：未捕获/背包开时早退，与既有行为不回退）。Q 始终早退 →
+            //   不透传 player.setKey（Q 非移动键）。
+            if (e.key === Qt.Key_Q) {
+                const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
+                const ctrl = (e.modifiers & Qt.ControlModifier) !== 0
+                if (bagOpen && window.hoveredSlotKey !== "") {
+                    window.dropFromHoveredSlot(ctrl)        // 背包内悬停槽：Ctrl=整栈 / 否则 1 件
+                } else if (!bagOpen) {
+                    if (ctrl) player.dropHeldStack()         // 第一人称 Ctrl+Q 丢选中槽整栈
+                    else      player.dropHeld()              // 第一人称 Q 丢选中槽 1 件（t36，行为不变）
+                }
+                e.accepted = true; return
+            }
 
             // t110 背包开时的 Shift / 数字键守卫（spec「背包开时 Shift/数字键不透传到 player」+「数字键交换」）。
             //   根因：原代码无差别地把 Shift 与数字键透传给 player —— Shift 进 m_keys → 关包后 release 已清，

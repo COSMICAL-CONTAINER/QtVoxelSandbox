@@ -1034,6 +1034,40 @@ void PlayerController::dropHeld()
     emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, 1);
 }
 
+// t229 Ctrl+Q 第一人称丢弃整栈（spec「第一人称 Ctrl+Q=丢整栈（手持槽）」）：与 dropHeld（Q=丢 1 件）
+//   同源（取**选中槽**），差异在 takeStack 传「整栈数量」而非 1 —— 1 实体携带整栈数量（同 dropHeldCursor
+//   模式，避免「丢 4 件生 4 实体」爆量）。仅指针捕获时生效（同 dropHeld）。空栈 / 取失败 → 不丢。
+//   spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem（同 dropHeld / dropHeldCursor 路径）。
+void PlayerController::dropHeldStack()
+{
+    if (!m_captured) return;        // spec：仅捕获时（同 dropHeld）
+    if (!m_hotbar) return;
+    const int slot = m_hotbar->selectedSlot();
+    const int id = m_hotbar->blockIdAt(slot);
+    if (id == 0) return;            // 空手 → 不丢
+    const int cnt = m_hotbar->countAt(slot);
+    if (cnt <= 0) return;
+    const int took = m_hotbar->takeStack(slot, cnt); // 取整栈（takeStack 返回实际取走数）
+    if (took <= 0) return;
+    // 眼位前方 1.5 格，floor 到整数格（同 dropHeld 位置约定）。
+    const QVector3D fwd = lookDirection();
+    const QVector3D p = position() + fwd * 1.5f;
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, took);
+}
+
+// t229 背包悬停槽丢弃原语（spec「背包内悬停槽 Q=丢 1 / Ctrl+Q=丢整栈。适用所有背包面板」）：按给定
+//   (itemId, count) 在玩家前方 1.5 格 spawnItem。**不读/改任何槽** —— 槽的读改由 UI 层（InventoryOps
+//   readSlot/writeSlot，按 hoveredSlotKey 的组分发）完成，本方法只做实体生成 + 位置（Game/Physics 层语义，
+//   PLAN §2 分层：物理位置/实体事件在 Game 层，槽操作在 VM/UI 层）。id==0 / count<=0 → 不丢。
+//   不限捕获态（背包打开时未捕获正是此场景，同 dropHeldCursor）。位置同 dropHeld：眼位 + 视线 * 1.5 floor。
+void PlayerController::dropItemAtFront(int itemId, int count)
+{
+    if (itemId == 0 || count <= 0) return; // 空手 / 非正数 → 不丢
+    const QVector3D fwd = lookDirection();
+    const QVector3D p = position() + fwd * 1.5f;
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), itemId, count);
+}
+
 // 拖出背包丢弃（t49 / t64）：光标手持栈整栈丢弃为**单个实体携带整栈数量**（玩家前方）。不限捕获态
 // （背包打开时正是未捕获）。t64 修复：原 emit 仅传 id（count 走默认 1）→ 4 木棒丢出只生 1 实体 count=1，
 // 捡回只剩 1（用户：「4 木棒丢出去捡起来只剩 1 个」）。现传 heldCount → 1 实体携带整栈 → 捡回原数。
