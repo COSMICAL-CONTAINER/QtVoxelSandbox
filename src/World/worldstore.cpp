@@ -246,6 +246,47 @@ bool WorldStore::deleteWorld(const QString &file)
     return true;
 }
 
+// t192 重命名世界：只改 world_meta 的 name（.sqlite 文件名不动，文件名是内部唯一键 —— 改文件名会引入路径
+//   穿越 / 跨文件系统重命名复杂度且无用户可见收益）。用独立连接（kRenameConn，仿 worldList 的 kScanConn）：
+//   renameWorld 在世界列表 UI 触发、通常当前无库打开，独立连接避免与主连接耦合，也覆盖「重命名当前打开库」
+//   的边角情形（SQLite 多连接并发，主连接此刻无 in-flight 事务）。失败 → false + qWarning（§2-E）。
+bool WorldStore::renameWorld(const QString &file, const QString &newName)
+{
+    const QString path = dbPath(file);
+    if (!QFile::exists(path)) {
+        qCWarning(lcSave) << "renameWorld: not found" << path;
+        return false;
+    }
+    // 空白名 → 回退默认（与 createWorld 同语义），免世界列表出现无名条目。
+    const QString name = newName.trimmed().isEmpty() ? QStringLiteral("新世界") : newName.trimmed();
+
+    static const char *const kRenameConn = "voxelsandbox_worldstore_rename";
+    if (QSqlDatabase::contains(kRenameConn))
+        QSqlDatabase::removeDatabase(kRenameConn);
+    bool ok = false;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kRenameConn);
+        db.setDatabaseName(path);
+        if (!db.open()) {
+            qCWarning(lcSave) << "renameWorld: cannot open" << file << ":" << db.lastError().text();
+        } else {
+            // UPDATE 既有 'name' 行（createWorld 总会写 name，故行必存在）；语义「重命名=改既有名」。
+            QSqlQuery q(db);
+            q.prepare(QStringLiteral("UPDATE world_meta SET value = ? WHERE key = 'name'"));
+            q.addBindValue(name);
+            if (!q.exec()) {
+                qCWarning(lcSave) << "renameWorld: update failed:" << q.lastError().text();
+            } else {
+                ok = true;
+                qCInfo(lcSave) << "renamed world" << file << "->" << name;
+            }
+        }
+    }
+    if (QSqlDatabase::contains(kRenameConn))
+        QSqlDatabase::removeDatabase(kRenameConn);
+    return ok;
+}
+
 // t191 封面 PNG 路径：与 .sqlite 同名并排（saves/<completeBaseName>.png）。file 含 .sqlite 后缀；
 //   completeBaseName 去「最后一个」扩展名（"a.sqlite"→"a"、"a.b.sqlite"→"a.b"），与 dbPath 同 savesDir。
 QString WorldStore::coverPath(const QString &file) const

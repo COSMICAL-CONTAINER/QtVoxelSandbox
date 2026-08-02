@@ -57,6 +57,13 @@ public:
     // 删除世界（文件名相对 saves/）。失败（不存在 / 无权删）→ false + qWarning。
     //   t191：配套删除截图封面 PNG（与 .sqlite 同名并排的 sidecar），免孤儿文件残留。
     Q_INVOKABLE bool deleteWorld(const QString &file);
+    // t192 重命名世界（文件名相对 saves/）：只改 world_meta 的 name（显示名），**.sqlite 文件名不动** ——
+    //   文件名是内部唯一键（worldList/openWorld/saveAll 全用它路由），改文件名会引入路径穿越 / 跨文件系统
+    //   重命名等复杂度且无用户可见收益（用户只见 name）。用独立连接 UPDATE（与 worldList 同模式：不调
+    //   initSchema、不依赖主连接是否打开，renameWorld 通常在世界列表 UI 触发、此时无库打开）。
+    //   失败（文件不存在 / 打不开 / SQL 失败）→ false + qWarning（§2-E）；newName 空白 → 回退 "新世界"
+    //   （与 createWorld 同语义，免世界列表出现无名条目）。
+    Q_INVOKABLE bool renameWorld(const QString &file, const QString &newName);
 
     // t191 截图封面：世界存档的缩略图 PNG（与 .sqlite 同名并排放：saves/<base>.png）。
     //   - coverPath(file)：返回封面 PNG 绝对路径（供 WorldList delegate 拼 file:/// URL 加载缩略图）。

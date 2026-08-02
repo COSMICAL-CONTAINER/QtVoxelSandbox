@@ -14,6 +14,8 @@ Item {
     // 已选世界（file 名，相对 saves/）+ 其显示名。null = 未选。
     property string selectedFile: ""
     property string selectedName: ""
+    // t192 重命名内联编辑态：true = 展开「输入框 + 确认/取消」替换「重命名」按钮。选中切走时自动复位。
+    property bool renaming: false
 
     signal playRequested(string file, string name)
     signal backRequested()
@@ -41,8 +43,25 @@ Item {
             if (worldsModel.get(j).file === root.selectedFile) { stillThere = true; break }
         if (!stillThere) { root.selectedFile = ""; root.selectedName = "" }
     }
-    onVisibleChanged: if (visible) refresh()
+    onVisibleChanged: {
+        if (visible) refresh()
+        else renaming = false   // t192 面板隐藏 → 退出内联重命名态
+    }
     Component.onCompleted: if (visible) refresh()
+    // t192 选中切走 → 退出内联重命名态，免编辑框悬空挂着上一个世界的名。
+    onSelectedFileChanged: renaming = false
+
+    // t192 确认重命名：store.renameWorld(只改 world_meta.name，.sqlite 文件名不动) → 更新 selectedName +
+    //   refresh() 让列表 delegate 显新名。空名由 store 层回退「新世界」，此处同步 trim 后再传。
+    function confirmRename() {
+        if (!store || root.selectedFile.length === 0) { root.renaming = false; return }
+        const name = renameInput.text.trim().length > 0 ? renameInput.text.trim() : "新世界"
+        if (store.renameWorld(root.selectedFile, name)) root.selectedName = name
+        // 无论成败都退出编辑态：失败时 store 已 qWarning（§2-E），refresh 显旧名，用户可再点重命名重试。
+        root.renaming = false
+        root.refresh()
+    }
+    function cancelRename() { root.renaming = false }
 
     Column {
         anchors.fill: parent
@@ -236,12 +255,14 @@ Item {
                     }
                 }
 
-                // 选中世界操作（进入 / 删除）。
+                // 选中世界操作（进入 / 重命名 / 删除）。height 跟随内容 implicitHeight ——
+                // t189 教训：固定高度装不下展开后的「输入框 + 确认/取消」会挤出底边框；按内容自适应。
                 Rectangle {
                     width: parent.width; radius: 8
                     color: "#0e151d"; border.color: "#243040"; border.width: 1
-                    height: 200
+                    height: selCol.implicitHeight + 32
                     Column {
+                        id: selCol
                         anchors.fill: parent; anchors.margins: 16; spacing: 12
                         Text {
                             text: root.selectedFile.length > 0 ? ("已选: " + root.selectedName) : "未选择世界"
@@ -263,6 +284,69 @@ Item {
                                     root.playRequested(root.selectedFile, root.selectedName)
                             }
                             Text { anchors.centerIn: parent; text: "进入世界"; color: "#eaf6ea"; font.pixelSize: 15; font.bold: true }
+                        }
+                        // t192 重命名：已选且非编辑态显「重命名」按钮；编辑态由下方编辑行替换。
+                        Rectangle {
+                            width: parent.width; height: 36; radius: 6
+                            visible: root.selectedFile.length > 0 && !root.renaming
+                            color: renArea.containsMouse ? "#33455a" : "#22323f"
+                            border.color: "#4a6a8a"; border.width: 1
+                            MouseArea {
+                                id: renArea; anchors.fill: parent; hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    renameInput.text = root.selectedName
+                                    root.renaming = true
+                                    renameInput.forceActiveFocus()
+                                    renameInput.selectAll()
+                                }
+                            }
+                            Text { anchors.centerIn: parent; text: "重命名"; color: "#bcd0e6"; font.pixelSize: 13 }
+                        }
+                        // t192 重命名编辑行（复用 nameInput 风格的 TextInput + 确认/取消）。
+                        Column {
+                            width: parent.width; spacing: 8
+                            visible: root.renaming
+                            Rectangle {
+                                width: parent.width; height: 34; radius: 4
+                                color: "#0a1018"; border.color: "#2a3848"; border.width: 1
+                                TextInput {
+                                    id: renameInput
+                                    anchors.fill: parent; anchors.margins: 8
+                                    color: "#eaf2ea"; font.pixelSize: 14
+                                    selectByMouse: true; clip: true
+                                    verticalAlignment: Text.AlignVCenter
+                                    Keys.onReturnPressed: root.confirmRename()
+                                    Keys.onEnterPressed: root.confirmRename()
+                                    Keys.onEscapePressed: root.cancelRename()
+                                }
+                            }
+                            Row {
+                                width: parent.width; spacing: 8
+                                Rectangle {
+                                    width: (parent.width - 8) / 2; height: 34; radius: 6
+                                    color: okRenArea.containsPress ? "#335c33"
+                                         : okRenArea.containsMouse ? "#4f8a4f" : "#3a6a3a"
+                                    border.color: "#7fe57f"; border.width: 1
+                                    MouseArea {
+                                        id: okRenArea; anchors.fill: parent; hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.confirmRename()
+                                    }
+                                    Text { anchors.centerIn: parent; text: "确认"; color: "#eaf6ea"; font.pixelSize: 13; font.bold: true }
+                                }
+                                Rectangle {
+                                    width: (parent.width - 8) / 2; height: 34; radius: 6
+                                    color: cancelRenArea.containsMouse ? "#3a3a3a" : "#222a32"
+                                    border.color: "#4a4f55"; border.width: 1
+                                    MouseArea {
+                                        id: cancelRenArea; anchors.fill: parent; hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.cancelRename()
+                                    }
+                                    Text { anchors.centerIn: parent; text: "取消"; color: "#cdd6dd"; font.pixelSize: 13 }
+                                }
+                            }
                         }
                         Rectangle {
                             width: parent.width; height: 36; radius: 6
