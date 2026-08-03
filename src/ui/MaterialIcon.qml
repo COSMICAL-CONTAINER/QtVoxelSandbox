@@ -15,6 +15,10 @@ import QtQuick
 //   0x208 小麦种子 —— 几粒黄褐色麦种 + 胚芽细尖（t235；挖草丛掉落；种植 → 小麦作物 t236）。
 //   0x209 小麦物品 —— 金黄麦穗（中央穗轴 + 两侧成对麦粒 + 淡黄麦秆）（t237；收割成熟小麦作物掉落）。
 //   0x20A 面包   —— 金棕长条面包（顶弧 + 斜划口 + 两端圆收）（t238；3 小麦合成；右键食 +5 饥饿）。
+//   0x20B 生猪排 —— 浅粉红肉块 + 白骨柄（t242；杀猪掉落，带骨肉排）。
+//   0x20C 生牛肉 —— 深红肉块 + 白骨柄（t242；杀牛掉落，比猪排深红、肌理纹更密）。
+//   0x20D 皮革   —— 棕黄兽皮 + 毛边 + 缝线孔（t242；杀牛掉落，鞣制皮革）。
+//   0x20E 羊毛   —— 白色蓬松块 + 卷曲纹（t242；杀羊掉落，绒毛团）。
 // 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭/桶同理 → 均独立自绘。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体 Repeater（sourceItem），
@@ -22,7 +26,7 @@ import QtQuick
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -289,6 +293,93 @@ Item {
                 R(14, 8, 2, 1, score)
             }
 
+            // t242 mob 死亡掉落物（杀猪 / 牛 / 羊产出；机制等价 MC 1.0 生肉 / 皮革 / 羊毛，纯原创自绘 §9a）：
+            //   生猪排 0x20B —— 浅粉红肉块 + 白骨柄（猪排 = 带骨肉块，色比牛肉浅、粉调更重）。
+            //   生牛肉 0x20C —— 深红肉块 + 白骨柄（比猪排深红、肌理横纹）。
+            //   皮革 0x20D —— 棕黄兽皮（带毛边 + 缝线孔，表「鞣制皮革」）。
+            //   羊毛 0x20E —— 白色蓬松块（圆角 + 浅灰阴影表「绒毛团」）。
+            //   肉块配色统一走「肉色 + 骨头 + 暗红肌理 + 高光」结构，靠主色调（粉 / 红）与肌理密度区分。
+            //   drawRawMeat(kind) 共用骨架：kind="pig" 浅粉 / kind="beef" 深红。其余三块独立。
+            const drawRawMeat = (kind) => {
+                // 主色：猪排 #f09890（浅粉红，带粉调）/ 牛肉 #b03830（深红，饱和）。骨头 #f0e8d8（米白）。
+                //   肌理暗纹 dark：猪 #c06058 / 牛 #781818（横纹深红）。高光 light：猪 #f8b8b0 / 牛 #d05048。
+                const isPig = (kind === "pig")
+                const meat  = isPig ? "#f09890" : "#b03830"
+                const dark  = isPig ? "#c06058" : "#781818"
+                const light = isPig ? "#f8b8b0" : "#d05048"
+                const bone  = "#f0e8d8"
+                const boneShade = "#a89878"
+                // 肉块主体（rows 7..17，cols 5..18，圆角矩形；左下到右上的对角带骨）
+                R(7, 7, 11, 1, meat)        // 顶行（窄）
+                R(6, 8, 13, 9, meat)        // 主体 rows 8..16
+                R(7, 17, 11, 1, meat)       // 底行（窄）
+                // 顶 / 底圆角阴影
+                R(7, 17, 11, 1, dark)
+                // 肌理横纹（3-4 道横向暗纹，表「肌肉纤维」；牛肉更多更深）
+                R(7, 10, 11, 1, dark)
+                R(7, 13, 11, 1, dark)
+                if (!isPig) { R(7, 11, 11, 1, dark); R(7, 14, 11, 1, dark) }
+                // 高光（顶行亮色，表「湿润反光」）
+                R(7, 8, 9, 1, light)
+                // 骨柄（左下角到右上角的对角白骨，表「带骨肉排」）
+                R(8, 15, 2, 2, bone)
+                R(10, 13, 2, 2, bone)
+                R(12, 11, 2, 2, bone)
+                R(14, 9, 2, 2, bone)
+                R(16, 7, 2, 2, bone)
+                // 骨头暗边（圆头收口）
+                R(8, 16, 2, 1, boneShade)
+                R(16, 8, 2, 1, boneShade)
+            }
+            const drawRawPorkchop = () => drawRawMeat("pig")
+            const drawRawBeef     = () => drawRawMeat("beef")
+
+            // 皮革（0x20D，t242）：杀牛掉落。MC 风格皮革 = 棕黄兽皮（带毛边 + 缝线孔）。纯原创自绘（§9a）。
+            //   配色：hide #a87838（棕黄主体）/ hideLight #c89858（顶受光高光）/ hideDark #785020（暗边 + 毛尖）/
+            //   stitch #4a3010（缝线孔深棕）。
+            const drawLeather = () => {
+                const hide = "#a87838", hideLight = "#c89858", hideDark = "#785020", stitch = "#4a3010"
+                // 兽皮主体（不规则四边形，左上到右下倾斜；rows 7..17）
+                R(6, 7, 12, 1, hide)
+                R(5, 8, 14, 9, hide)        // 主体 rows 8..16
+                R(6, 17, 12, 1, hide)
+                // 顶受光高光（前两行 + 左上角）
+                R(6, 7, 12, 1, hideLight)
+                R(5, 8, 10, 1, hideLight)
+                // 毛边（上下边沿的小三角毛尖，表「兽皮未修剪」）
+                R(6, 6, 1, 1, hideDark); R(10, 6, 1, 1, hideDark); R(14, 6, 1, 1, hideDark)
+                R(7, 18, 1, 1, hideDark); R(11, 18, 1, 1, hideDark); R(15, 18, 1, 1, hideDark)
+                // 底阴影
+                R(6, 17, 12, 1, hideDark)
+                // 缝线孔（沿边缘等距分布的小深棕点，表「鞣制皮革的缝线孔」）
+                R(7, 9, 1, 1, stitch); R(7, 12, 1, 1, stitch); R(7, 15, 1, 1, stitch)
+                R(17, 9, 1, 1, stitch); R(17, 12, 1, 1, stitch); R(17, 15, 1, 1, stitch)
+            }
+
+            // 羊毛（0x20E，t242）：杀羊掉落。MC 风格羊毛 = 白色蓬松块（圆角 + 浅灰阴影表「绒毛团」）。
+            //   纯原创自绘（§9a）。配色：wool #f0f0f0（白主体）/ woolLight #ffffff（顶高光）/ woolShade
+            //   #c8c8c8（底阴影 + 卷曲纹）。
+            const drawWool = () => {
+                const wool = "#f0f0f0", woolLight = "#ffffff", woolShade = "#c8c8c8"
+                // 蓬松块主体（圆角矩形，rows 7..17；四角内收表「蓬松圆团」）
+                R(8, 7, 8, 1, wool)
+                R(6, 8, 12, 9, wool)        // 主体 rows 8..16
+                R(8, 17, 8, 1, wool)
+                // 顶受光高光（顶行 + 中央亮带，表「绒毛反光」）
+                R(8, 7, 8, 1, woolLight)
+                R(8, 9, 8, 1, woolLight)
+                // 底阴影（倒数两行）
+                R(8, 16, 8, 1, woolShade)
+                R(8, 17, 8, 1, woolShade)
+                // 卷曲纹（散布的浅灰小点，表「羊毛卷曲」）
+                R(8, 10, 1, 1, woolShade); R(12, 11, 1, 1, woolShade); R(15, 10, 1, 1, woolShade)
+                R(9, 13, 1, 1, woolShade); R(13, 14, 1, 1, woolShade); R(16, 13, 1, 1, woolShade)
+                R(10, 15, 1, 1, woolShade); R(14, 12, 1, 1, woolShade)
+                // 四角圆收（暗一格表「圆角」）
+                R(6, 8, 1, 1, woolShade); R(17, 8, 1, 1, woolShade)
+                R(6, 16, 1, 1, woolShade); R(17, 16, 1, 1, woolShade)
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             switch (root.materialId) {
             case 0x200: drawStick();        break
@@ -302,6 +393,10 @@ Item {
             case 0x208: drawSeed();         break // t235 小麦种子
             case 0x209: drawWheat();        break // t237 小麦物品（收割成熟小麦作物）
             case 0x20A: drawBread();        break // t238 面包（3 小麦合成；右键食 +5 饥饿）
+            case 0x20B: drawRawPorkchop();  break // t242 杀猪掉落
+            case 0x20C: drawRawBeef();      break // t242 杀牛掉落
+            case 0x20D: drawLeather();      break // t242 杀牛掉落
+            case 0x20E: drawWool();         break // t242 杀羊掉落
             default:    drawStick();        break
             }
         }

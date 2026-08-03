@@ -392,6 +392,12 @@ signals:
     //   spec「useBlock 发 doorToggled(open) 信号 → Main.qml 路由」。门两格同翻时只发一次（玩家点的是其中一格，
     //   配对格被动跟随；一次开合动作 = 一次音）。
     void doorToggled(bool open);
+    // t242 玩家攻击 mob（spec「玩家左键攻击生物→受伤音效 hurt」）：beginMining 在通过模式门控后、破块前
+    //   先做 findMobHit；命中活体 mob 且（无方块命中 OR mob 比方块更近）→ 走攻击路径（damageEntity +
+    //   swingArm）替代破块，并发本信号。呈现层 Connections 路由到 AudioManager.playHurt（复用 hurt.wav；
+    //   spec 仅说「受伤音效 hurt」，mob 受击与玩家受伤共用一份原创 SFX 即满足，未来可拆 mob 专属音）。
+    //   同 swingArm / blockBroken 模式：Game/Physics 层发语义事件，呈现 / 音频层只消费（PLAN §2 分层）。
+    void mobAttacked();
 
 protected:
     void componentComplete() override;
@@ -472,6 +478,11 @@ private:
     //   （含本格刚被置 Air）→ 火把直接掉落为物品（不「粘」到附近其它 solid 邻居）。机制等价 MC「火把
     //   附着面被移除即脱落」。火把非 solid → 不撑他火把 → 单趟扫即足够（无级联）。
     void dropUnsupportedTorchesAround(int x, int y, int z);
+    // t242 攻击 mob（spec「玩家左键攻击生物」）：damageEntity(entityIndex, kAttackDamage) + swingArm +
+    //   emit mobAttacked。伤害量对齐 MC 1.0 玩家空手 / 工具攻击 = 4 HP（2 心）；工具加成（剑等）属 Phase 1.1。
+    //   由 beginMining 在 mob 优先于方块时调。mob 由 caller 选定（findMobHit 已返最近活体索引）。
+    //   EntityManager.damageEntity 内已做边界 / dead / 非 Mob 守卫 + bump revision + emit mobDied（死亡掉落）。
+    void attackMob(int entityIndex);
     // 拾取扫描（t36）：每帧扫附近掉落实体 → Hotbar.addStack（先选中槽、再空槽）。addStack 返 0
     // （全入）→ ItemEntityManager.removeAt 销毁实体；返 >0（背包满）→ 不拾取（entity 留）。
     // 距离从玩家 AABB 中心（脚底 + 半高）3D 起算，阈值 kPickupDist；从后往前扫便于 erase。
@@ -584,6 +595,11 @@ private:
     // t212 命中点世界 Y（眼位 + 视线*dist；updateRaycast 每帧刷新，不随 changed 早退——同格内移动格坐标/
     //   法线不变但命中点 Y 仍在变，placeBlock 点击瞬间需读最新值定 slab 上/下半与互补合并）。无命中=0。
     float m_hitPointY = 0.0f;
+    // t242 命中方块的视线距离（眼位 → 命中面欧氏距离；updateRaycast 每帧刷新，不随 changed 早退——
+    //   beginMining 攻击判定读它与 findMobHit 返回距离比，挑更近的目标优先攻击 / 破块）。无命中=kReach
+    //   （=「无穷远」语义，让 mob 命中永远优先于「无方块命中」）。初值 5.0f 与 kReach 同值（kReach 声明
+    //   在后，依代码库约定默认成员初始化器不前向引用，故用字面量；值变更须同步 kReach）。
+    float m_hitDist = 5.0f;
 
     static constexpr float kHalfW = 0.3f;      // 宽 0.6
     static constexpr float kHeight = 1.8f;
@@ -658,6 +674,10 @@ private:
     static constexpr float kDeg = 0.017453292519943295f;
     static constexpr float kReach = 5.0f;      // 射线选体射程（格）
     static constexpr float kPickupDist = 1.5f; // 拾取距离阈值（格；玩家 AABB 中心起算，spec ~1.2 量级）
+    // t242 玩家攻击 mob 单次伤害（HP）。机制等价 MC 1.0 玩家攻击 = 4 HP（2 心）：5 心的猪 / 牛 / 羊需 3 击杀。
+    //   工具 / 剑加成属 Phase 1.1；本任务全模式空手攻击同伤害（创造亦走此伤害，但创造可瞬破方块优先 →
+    //   实际打 mob 走 findMobHit 同路径）。Survival 限定非必要（攻击不影响 Survival 平衡，spec 未限定模式）。
+    static constexpr int kAttackDamage = 4;
     // t231 不可挖方块（基岩）hold-mine 挖掘音节流间隔（ms；m_evtClock 时间戳差）。基岩 progress 因 miningTime
     //   走 0.05s 地板每 tick 跨多 beat → miningSound 每 ~16ms 连发；spec「改与普通挖掘同节奏（几百 ms 间隔）」。
     //   250ms ≈ 典型可挖方块（如手挖石头 miningTime≈1.5s）beat 变化的间隔量级（miningTime/6），机制对齐

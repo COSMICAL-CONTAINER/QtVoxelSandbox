@@ -660,6 +660,27 @@ Window {
     Connections {
         target: entityManager
         function onFallingBlockDropped(x, y, z, blockId) { itemEntities.spawnItem(x, y, z, blockId, 1) }
+        // t242 mob 死亡掉落（spec「血 0→死亡掉落物：猪:生猪排 / 牛:皮革+生牛肉 / 羊:羊毛」）：damageEntity
+        //   扣血到 ≤0 时 EntityManager 发 mobDied(x,y,z,mobType) → 据子类 id 转发到 ItemEntityManager.spawnItem
+        //   生成对应掉落实体（机制等价 MC 1.0 被动生物掉落；数量取 MC 1.0 量级：猪 1-2 生猪排 / 牛 1 皮革
+        //   + 1-2 生牛肉 / 羊 1 羊毛；MobTest 不掉落）。同 fallingBlockDropped 模式：单向事件流（PLAN §2 分层：
+        //   Entities 层发语义事件、呈现层只消费）。坐标 = mob 死亡格 floor(pos)，与 spawnItem 整数格约定一致。
+        //   ⚠️ QML 无法直接 import RecipeRegistry（C++ 静态类），故用字面量 id（同 MaterialIcon.qml 约定）：
+        //     0x20B=生猪排 / 0x20C=生牛肉 / 0x20D=皮革 / 0x20E=羊毛（RecipeRegistry::RawPorkchopId 等）。
+        //     id 改动须同步 src/Game/recipe.h（单一权威）。
+        function onMobDied(x, y, z, mobType) {
+            if (mobType === EntityManager.MobPig) {
+                itemEntities.spawnItem(x, y, z, 0x20B, 1)   // 生猪排 ×1-2
+                itemEntities.spawnItem(x, y, z, 0x20B, 1)
+            } else if (mobType === EntityManager.MobCow) {
+                itemEntities.spawnItem(x, y, z, 0x20D, 1)   // 皮革 ×1
+                itemEntities.spawnItem(x, y, z, 0x20C, 1)   // 生牛肉 ×1-2
+                itemEntities.spawnItem(x, y, z, 0x20C, 1)
+            } else if (mobType === EntityManager.MobSheep) {
+                itemEntities.spawnItem(x, y, z, 0x20E, 1)   // 羊毛 ×1
+            }
+            // MobTest（通用测试生物）不掉落 —— 调试用，无游戏内产出。
+        }
     }
 
     // t89 / t118 / t177 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 / 门开关 /
@@ -739,6 +760,11 @@ Window {
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
+        // t242 玩家攻击 mob（spec「受伤音效 hurt」）→ 复用 hurt.wav（玩家受伤声同源，机制等价 MC 受击音；
+        //   spec 仅说「hurt」，未来可拆 mob 专属受击音）。mob 红闪由 EntityManager.damageEntity 设 hurtFlash →
+        //   QML delegate 的 baseColor 绑定 hurtFlashAt>0 ? "#ff0000" 已驱动；扣血由 damageEntity 内完成。
+        //   呈现 / 音频层只消费 Game/Physics 语义事件（同 swingArm / blockBroken 模式；PLAN §2 分层）。
+        function onMobAttacked() { audio.playHurt() }
         // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换
         // 则保留背包打开，面板由各组件 visible 绑定 player.mode 自动换（创造背包↔生存背包）。避免任一
         // 背包在不兼容模式下滞留（Spectator 无背包/破放，t21）。

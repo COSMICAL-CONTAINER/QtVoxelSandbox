@@ -144,6 +144,13 @@ public:
     //   [0, maxHealth]；hurtFlash = kHurtFlashTime（QML 红闪）。health≤0 且未 dead → dead=true + deathTimer=
     //   kDeathTime + emit mobDied（t242 据它掉落）。dead / 非 Mob / 越界 / amount≤0 → 静默早退。bump revision。
     Q_INVOKABLE void damageEntity(int i, int amount);
+    // t242 攻击射线 vs mob AABB 命中测试（C++ 直调；PlayerController::beginMining 左键攻击路径调）。
+    //   返回沿射线 (origin, dir) maxDist 内**最近**的活体 mob 索引；无命中 → -1。
+    //   outDist（若非 null）写入命中距离（起点到 AABB 表面欧氏距离）。
+    //   命中判定：slab-based ray-AABB（mob AABB = pos ± radius 的 1×1×1 立方；dir 须归一）。
+    //   跳过：非 Mob（掉落物 / 下落方块）、dead（尸体不可再打，防鞭尸重复扣血 / 触发多次掉落）。
+    //   分层（PLAN §2）：EntityManager 自持实体数据，做几何测试最自然；只读自身数据、无向下依赖。
+    int findMobHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist = nullptr) const;
 
     // 玩家推动解析（C++ 直调；PlayerController::tick 每帧调，captured 时）。
     //   playerFeet=玩家脚底中心，halfW=玩家 AABB 半宽，height=玩家 AABB 高，world=只读世界（钳制穿墙用）。

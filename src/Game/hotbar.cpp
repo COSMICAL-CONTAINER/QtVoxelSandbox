@@ -267,6 +267,11 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SeedId)        return QStringLiteral("小麦种子"); // t235
         if (blockId == RecipeRegistry::WheatId)       return QStringLiteral("小麦");     // t237 收割成熟小麦作物掉落
         if (blockId == RecipeRegistry::BreadId)       return QStringLiteral("面包");     // t238 3 小麦合成；右键食 +5 饥饿
+        // t242 mob 死亡掉落物：杀猪 / 牛 / 羊产出（机制等价 MC 1.0 被动生物掉落，名称用通用词、零 MC 专名 §9）。
+        if (blockId == RecipeRegistry::RawPorkchopId) return QStringLiteral("生猪排");
+        if (blockId == RecipeRegistry::RawBeefId)     return QStringLiteral("生牛肉");
+        if (blockId == RecipeRegistry::LeatherId)     return QStringLiteral("皮革");
+        if (blockId == RecipeRegistry::WoolId)        return QStringLiteral("羊毛");
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

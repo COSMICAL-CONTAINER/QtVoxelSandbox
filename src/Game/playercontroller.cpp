@@ -422,6 +422,9 @@ void PlayerController::updateRaycast()
     //   准星在同格内移动时格坐标/法线不变 → changed=false 跳过 emit，但命中点 Y 仍在变，placeBlock 点击瞬间
     //   需读最新值定半位，故须在早退之前写入。无命中 → 0（placeBlock 入口 m_hasHit 守卫已拦，不读此值）。
     m_hitPointY = h.valid ? (position().y() + lookDirection().y() * h.dist) : 0.0f;
+    // t242：缓存命中距离（beginMining 攻击判定读它与 mob 命中距离比）。不随 changed 早退——同格内移动
+    //   格坐标 / 法线不变但命中距离仍在变，点击瞬间需读最新值。无命中 = kReach（「无穷远」语义）。
+    m_hitDist = h.valid ? h.dist : kReach;
 
     // 仅在命中态/格坐标/法线真正变化时 emit，避免每帧无谓刷新 QML 绑定。
     const bool changed = (h.valid != m_hasHit)
@@ -441,6 +444,7 @@ void PlayerController::clearHit()
     m_hasHit = false;
     m_hitNx = m_hitNy = m_hitNz = 0;
     m_hitPointY = 0.0f; // t212：与命中态同步清零
+    m_hitDist = kReach; // t242：与命中态同步重置为「无穷远」
     emit hitChanged();
 }
 
@@ -541,6 +545,20 @@ void PlayerController::beginMining()
     m_leftDown = true;
     if (!canBreak()) return; // 观察者不能破块（t21）
     if (!m_world || !m_captured) return;
+    // t242 攻击 mob（spec「玩家左键攻击生物」）：在通过模式门控后、破块 / 挥空手前先做 ray-mob 命中
+    //   测试。命中活体 mob 且（无方块命中 OR mob 比方块更近）→ 走攻击路径（damageEntity + swingArm
+    //   + emit mobAttacked → 呈现层 playHurt），不进破块分支。机制等价 MC 1.0「准星瞄生物左键攻击」，
+    //   生物比背后方块更近时优先打生物。任一不满足（无 mob 命中 / 方块更近）→ 落回原破块 / 挥空手路径。
+    if (m_entityManager) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        if (mobIdx >= 0 && mobDist <= m_hitDist) {
+            attackMob(mobIdx);
+            return;
+        }
+    }
     // t68 挥空手：左键对空气（无命中方块）时仍 emit swingArm（挥臂动画反馈），但**不进入**
     // mining 状态（不破块、不扣耐久、不显裂纹）。这是「动作反馈应独立于是否命中」的通用原则 ——
     // 挥臂是玩家主观动作的呈现，命不命中只决定后续语义（破块 / 未来攻击判定），不应阻塞挥臂反馈。
@@ -704,6 +722,20 @@ void PlayerController::dropUnsupportedTorchesAround(int x, int y, int z)
         emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Torch),
                        std::max(1, BlockRegistry::dropCount(BlockRegistry::Torch)));
     }
+}
+
+// t242 攻击 mob（spec「玩家左键攻击生物→受伤音效 hurt + 身体红闪 + 扣血」）：damageEntity 扣血 + 设
+//   hurtFlash（EntityManager 内已驱动 QML 红闪绑定刷新）+ swingArm（挥臂反馈）+ emit mobAttacked（→
+//   呈现层 playHurt）。伤害 kAttackDamage=4（MC 1.0 玩家攻击 2 心）。mob health≤0 时 damageEntity 内
+//   emit mobDied → Main.qml Connections 据.mobType 转发到 ItemEntityManager.spawnItem 生成猪排 / 皮革 /
+//   牛肉 / 羊毛掉落。索引由 caller findMobHit 选定（已是最近距离活体）；二次边界 / dead / 非 Mob 守卫在
+//   damageEntity 内。无 entityManager 时 caller 已早退不会到此处（防御）。
+void PlayerController::attackMob(int entityIndex)
+{
+    if (!m_entityManager) return;
+    m_entityManager->damageEntity(entityIndex, kAttackDamage);
+    emit swingArm();
+    emit mobAttacked();
 }
 
 // 每 tick 推进生存挖掘进度（t34）+ 连续续挖（t44）。创造不进入此态（beginMining 内瞬破已 return）。

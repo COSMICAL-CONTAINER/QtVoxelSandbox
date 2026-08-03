@@ -78,6 +78,15 @@ public:
     //   → 右键不放置，走「食用」分支（同桶 / 种子：在 selectedBlock Air 守卫之前分流）。MaterialIcon 自绘
     //   面包块图标。创造调色板补全归 t244；本任务仅注册使其可合 / 可食 / 可堆叠。
     static constexpr int BreadId        = 0x20A; // 面包：3 小麦合成；右键食 → +5 饥饿（t238）
+    // t242 mob 死亡掉落（材料段 0x20B..0x20E；机制等价 MC 1.0 被动生物掉落物；非方块、可堆叠 64）：
+    //   杀猪掉生猪排 / 杀牛掉生牛肉 + 皮革 / 杀羊掉羊毛。EntityManager mobDied 信号 → Main.qml 据本 id 调
+    //   ItemEntityManager.spawnItem 生成掉落实体（同 spawnItem 模式；PLAN §2 分层：Entities 层发语义事件、
+    //   呈现层只消费）。MaterialIcon 自绘图标归 t244 创造背包补全；本任务仅注册使其可掉 / 可堆叠 / 可拾。
+    //   名称 / 模型全原创（§9 区隔，零 MC 资产 / 专名）。
+    static constexpr int RawPorkchopId  = 0x20B; // 生猪排：杀猪掉落（机制等价 MC 1.0 raw porkchop）
+    static constexpr int RawBeefId      = 0x20C; // 生牛肉：杀牛掉落（机制等价 MC 1.0 raw beef）
+    static constexpr int LeatherId      = 0x20D; // 皮革：杀牛掉落（机制等价 MC 1.0 leather）
+    static constexpr int WoolId         = 0x20E; // 羊毛：杀羊掉落（机制等价 MC 1.0 wool）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

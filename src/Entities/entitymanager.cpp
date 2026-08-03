@@ -251,6 +251,54 @@ void EntityManager::damageEntity(int i, int amount)
     emit entitiesChanged();
 }
 
+// t242 攻击射线 vs mob AABB 命中测试（spec「玩家左键攻击生物」前置：选体）。slab-based ray-AABB
+//   对每个活体 mob 的 AABB（pos ± radius 的 1×1×1 立方）求交，取最近命中。dir 须归一（caller
+//   PlayerController::lookDirection 已归一）。跳过 dead（尸体不可打，防鞭尸重复扣血 / 触发多次掉落）
+//   与非 Mob（掉落物 / 下落方块不属攻击目标）。无命中 → -1。
+//   分层（PLAN §2）：纯只读自身数据（pos / radius / kind / dead）的几何测试，无向下依赖。
+int EntityManager::findMobHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist) const
+{
+    int bestIdx = -1;
+    float bestDist = maxDist;
+    // dir 退化（零向量）→ 无方向，无命中。NaN/Inf 防御同此分支。
+    if (!std::isfinite(dir.x()) || !std::isfinite(dir.y()) || !std::isfinite(dir.z())) return -1;
+    const float dirLen2 = dir.x()*dir.x() + dir.y()*dir.y() + dir.z()*dir.z();
+    if (dirLen2 < 1e-8f) return -1;
+    for (size_t i = 0; i < m_entities.size(); ++i) {
+        const Entity &e = m_entities[i];
+        if (e.kind != Mob || e.dead) continue;
+        // Slab 法 ray-AABB：对每轴 t1 = (min - origin) / dir、t2 = (max - origin) / dir；tmin = max(per-axis near)、
+        //   tmax = min(per-axis far)；命中 ⟺ tmax >= tmin && tmax >= 0 && tmin <= maxDist。
+        //   dir 分量近 0 时该轴 slab 退化为「整轴在内」约束（origin ∈ [min,max] → -inf..+inf，否则永不命中）。
+        const float r = e.radius;
+        float tmin = 0.0f, tmax = bestDist; // 起步用 [0, bestDist]，逐轴收紧
+        bool hit = true;
+        const float p[3] = { e.pos.x(), e.pos.y(), e.pos.z() };
+        const float o[3] = { origin.x(), origin.y(), origin.z() };
+        const float d[3] = { dir.x(), dir.y(), dir.z() };
+        for (int k = 0; k < 3; ++k) {
+            const float mn = p[k] - r, mx = p[k] + r;
+            if (std::abs(d[k]) < 1e-8f) {
+                // 射线平行该轴：origin 必须落在 slab 内
+                if (o[k] < mn || o[k] > mx) { hit = false; break; }
+                continue;
+            }
+            float t1 = (mn - o[k]) / d[k];
+            float t2 = (mx - o[k]) / d[k];
+            if (t1 > t2) std::swap(t1, t2);
+            if (t1 > tmin) tmin = t1;
+            if (t2 < tmax) tmax = t2;
+            if (tmin > tmax) { hit = false; break; }
+        }
+        if (!hit) continue;
+        // 起点已在 AABB 内（tmin<0）→ 取 tmax 不行（负方向出表面）；攻击视为贴脸命中 dist=0。
+        const float dist = tmin >= 0.0f ? tmin : 0.0f;
+        if (dist < bestDist) { bestDist = dist; bestIdx = int(i); }
+    }
+    if (bestIdx >= 0 && outDist) *outDist = bestDist;
+    return bestIdx;
+}
+
 // t239 AI wander 自主移动（机制等价 MC passive mob「随机选向 + 时间片游荡 / 停驻」循环）。
 //   - 时间片倒计时 wanderTimer；到 0 选新朝向 yawRad∈[0,2π) + 随机决定 idle（~25% speed=0 停驻）/ 行走
 //     （speed=kWalkSpeed），重置 timer∈[kWanderMin, kWanderMax]。非确定性（生物 AI 非世界生成，不涉 §2-K）。
