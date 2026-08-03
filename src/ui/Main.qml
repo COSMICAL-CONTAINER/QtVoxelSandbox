@@ -2321,6 +2321,37 @@ Window {
                             baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
                             baseColorMap: mobPigTex
                         }
+                        // t251 眼睛：mob 贴图是「全脸」身体纹（铺每盒每面，无五官）→ 头部正面无眼显「怪」。补 2 白眼底
+                        //   (#e8e8e8) + 2 深色瞳 (#1a1a1a) 小方块作 MobModel 子节点（同 t39 玩家眼睛模式：呈现层独立
+                        //   纯色 Model，不进 MobModel 几何 / 不共享 mob 贴图 → 实心眼色不受身体贴图调制）。NoLighting（红线）。
+                        //   眼作 mob Model 子节点 → 继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible（mobType 切换同步隐显）。
+                        //   猪/牛 headPitch 恒 0（EntityManager.headPitchAt 非 sheep 返 0）→ 眼直接定位头前面、无需俯仰 Node。
+                        //   位置 = MobModel 局部坐标（原点躯干中心）：猪头心 (0,0.05,-0.50) 半 (0.22,0.22,0.18) → 前面 z=-0.68，
+                        //   眼在上半 y≈0.13、左右 x=±0.10；z 贴头前面（眼底 z=-0.68、瞳 z=-0.69 略凸出，同 t52 贴脸防 z-fight）。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.10, 0.13, -0.68)
+                            scale: Qt.vector3d(0.08, 0.10, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.10, 0.13, -0.68)
+                            scale: Qt.vector3d(0.08, 0.10, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.10, 0.13, -0.69)
+                            scale: Qt.vector3d(0.04, 0.05, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.10, 0.13, -0.69)
+                            scale: Qt.vector3d(0.04, 0.05, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
                     }
                     Model {
                         // t240 牛（mobType 2）：MobModel + mob_cow 贴图（高大长身 + 头顶两小角盒）。
@@ -2335,6 +2366,33 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
                             baseColorMap: mobCowTex
+                        }
+                        // t251 眼睛（牛）：同猪眼模式（mob Model 子节点，纯色 NoLighting，继承 bodyYaw + visible）。
+                        //   牛头心 (0,0.15,-0.60) 半 (0.20,0.22,0.20) → 前面 z=-0.80；眼上半 y≈0.22、x=±0.09。
+                        //   牛 headPitch 恒 0 → 直接定位，无俯仰 Node（同猪）。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.09, 0.22, -0.80)
+                            scale: Qt.vector3d(0.07, 0.09, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.09, 0.22, -0.80)
+                            scale: Qt.vector3d(0.07, 0.09, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.09, 0.22, -0.81)
+                            scale: Qt.vector3d(0.035, 0.045, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.09, 0.22, -0.81)
+                            scale: Qt.vector3d(0.035, 0.045, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                         }
                     }
                     Model {
@@ -2352,6 +2410,42 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
                             baseColorMap: mobSheepTex
+                        }
+                        // t251 眼睛（羊）：同猪/牛模式（mob Model 子节点纯色 NoLighting），但羊吃草时 MobModel 把头绕
+                        //   颈枢俯仰（headPitch<0=低头，几何内部旋转）→ 若眼直接定位则会与俯仰的头脱离（眼悬浮原位、
+                        //   头下沉）。故把眼放进一个「颈枢 Node」：position = MobModel 头部颈附着点 (0, 0.10, -0.29)
+                        //   （= 头心 cy=0.10、cz+hz=-0.45+0.16；MobModel addHeadRot 绕此点 X 轴旋转），eulerRotation.x 绑
+                        //   headPitchAt → 眼随头同步俯仰（QML X 轴旋转与 MobModel addBoxRot 同向，绕同枢 → 视觉一致）。
+                        //   眼位置相对颈枢：头前面 abs z=-0.61 → 相对 -0.32；眼上半 abs y≈0.16 → 相对 0.06；x=±0.055。
+                        Node {
+                            position: Qt.vector3d(0, 0.10, -0.29)
+                            // headPitch 用 property 暂存（QML 绑定里 {block} 不能作 Qt.vector3d 内联参数 → 先算成属性）。
+                            property real headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                            eulerRotation: Qt.vector3d(headPitch, 0, 0)
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(-0.055, 0.06, -0.32)
+                                scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(0.055, 0.06, -0.32)
+                                scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(-0.055, 0.06, -0.33)
+                                scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(0.055, 0.06, -0.33)
+                                scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                            }
                         }
                     }
                     // t116 F3+B mob 碰撞箱（spec「mob scale 1.0」+ 朝向箭头）：mob AABB = 1×1×1 立方（与 mob
