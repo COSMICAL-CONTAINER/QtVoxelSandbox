@@ -510,19 +510,47 @@ int World::heightAt(int x, int z) const
     // 厚度（散布矿石有空间），天空间 24..48（树 / 飞行）。同 seed 仍确定（fbm 纯函数）。
     // t162：振幅 12→8（用户「太陡太过于陡峭」→ 更平缓少陡山），基线 28→30 → 地表 ~22..38。
     //   水位 24 仍相交（~22..24 低洼列见水），沙滩带 / 树·矿石阈值（waterLevel+1=25）同步成立。
+    // t274：群系分流 + 整体振幅降低（用户「现纯山地凹凸不平 → 大草原平地、山地仅特定群系」）。
+    //   每个群系独立振幅 —— plains 极平（amp 2，多数陆地）、hills 起伏保留山地感（amp 7，少数），
+    //   desert 平缓沙丘（amp 3）。共用基线 30 → 群系边界高差有界（最坏 plains↔hills ≈7 格，低频
+    //   群系边界稀少），无浮空 / 悬崖。水位 24：plains(28..32)/desert(27..33) 恒高于水 → 草原 / 沙漠
+    //   主体无水；hills(23..37) 低洼列见水 / 沙滩带（waterLevel+1=25 阈值仍成立）。同 seed 确定
+    //   （fbm + biomeAt 均纯函数，PLAN §2-K）。机制等价 MC 1.0 群系化高度图（plains 平 / hills 起伏 /
+    //   desert 沙，spec 原意）。
     const double n = fbm((x + m_seed) * 0.09, (z + m_seed) * 0.09); // [-1,1]
-    const int h = int(std::lround(30.0 + n * 8.0));                // ~22..38（t162 振幅减半更平缓）
+    double amp;
+    switch (biomeAt(x, z)) {
+        case Biome::Hills:  amp = 7.0; break; // 起伏（山地感，仅此群系有显著地形变化）
+        case Biome::Desert: amp = 3.0; break; // 平缓沙丘
+        case Biome::Plains: // 草原（多数陆地）
+        default:            amp = 2.0; break; // 极平（spec「大草原=平地」）
+    }
+    const int h = int(std::lround(30.0 + n * amp));
     return std::max(0, h);
 }
 
-// t117 沙漠群系判定（二次 fBm biome，PLAN §2-K 确定性）：用与高度噪声**不同**的空间频率（0.018 vs
-// 0.09）+ seed 偏移（+7919）独立采样同一 fBm → 群系图与高度图解耦（低洼 / 高地与干旱 / 普通独立）。
-// 低频 → 大区块连续（沙丘成片，非逐格斑点，机制等价 MC 1.0 沙漠群系的大尺度分布）。阈值 0.25 →
-// ~36% 干旱（fbm 近似正态，>0.25 约三分之一面积）。纯函数于 seed → 同 seed 同群系分布。
+// t274 群系判定（PLAN §2-K 确定性）：单一群系 fBm（频率 0.012，seed 偏移 +3571，与高度噪声 0.09、
+//   旧 t117 沙漠噪声 0.018 均不同）→ 群系图与高度图 / 旧沙漠分布解耦。低频 → 大区块连续（plains/hills/
+//   desert 成片，机制等价 MC 1.0 群系大尺度分布，非逐格斑点）。阈值三分（fbm 近似正态）：
+//     b > 0.5  → Hills  （少数，~15-20%：起伏山地，spec「山地仅特定群系」）
+//     b < -0.4 → Desert （少数，~15-20%：沙）
+//     其余     → Plains （多数，~60-70%：平坦草原，spec「大草原」原意）
+//   纯函数于 seed → 同 seed 同群系图。biomeAt 是群系的唯一权威：isDesert / heightAt / placeTallGrass
+//   均经此读群系，保证三处判定一致（不会出现「同列 generate 判沙漠、placeTrees 判草原」的撕裂）。
+World::Biome World::biomeAt(int x, int z) const
+{
+    const double b = fbm((x + m_seed + 3571) * 0.012, (z + m_seed + 3571) * 0.012); // [-1,1]
+    if (b > 0.5)  return Biome::Hills;
+    if (b < -0.4) return Biome::Desert;
+    return Biome::Plains;
+}
+
+// t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威）。旧 t117 独立 fBm（0.018/+7919/0.35）
+//   已由 t274 biomeAt 统一 —— 现沙漠分布随群系图（0.012/+3571）走，新世界生效（旧存档走 chunk blob
+//   不受影响，spec 明示）。供 generate（沙表层）/ placeTrees / placeTallGrass 跳过沙漠列。
 bool World::isDesert(int x, int z) const
 {
-    const double b = fbm((x + m_seed + 7919) * 0.018, (z + m_seed + 7919) * 0.018); // [-1,1]
-    return b > 0.35; // t162：0.25→0.35 沙漠比例 ↓（用户「沙子太多、主要靠水边」；干旱整柱沙适度减少，沙滩带仍供沙）
+    return biomeAt(x, z) == Biome::Desert;
 }
 
 void World::generate()
@@ -541,16 +569,18 @@ void World::generate()
     //   旧的 sandLevel=3 低洼沙判定被水位阈值（24+1=25）完全覆盖（h<=3 << 25 必属水下沙底），故删除。
     //   逐列独立 → 跨 chunk 边界天然连续，无浮空/悬崖；同 seed 确定（fbm/纯函数，PLAN §2-K）。
     //   走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
-    int desertCols = 0, sandyCols = 0;
+    int desertCols = 0, sandyCols = 0, plainsCols = 0, hillsCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
-            const bool desert = isDesert(x, z);
+            const Biome bio = biomeAt(x, z);
+            const bool desert = (bio == Biome::Desert); // t274：经 biomeAt 单一权威（原 isDesert 收口于此）
             const bool sandy = (!desert) && (h <= kWaterLevel + 1); // 沙滩带(wl±1) + 水下(h<wl)
             // t255：沙漠表层沙厚度 4..6 格（hashColumn 低 2 位派生，PLAN §2-K 确定性；非沙漠列置 0 不用）。
             const int desertSandThickness = desert ? (4 + int(hashColumn(m_seed, x, z) % 3u)) : 0;
             if (desert) ++desertCols;
             else if (sandy) ++sandyCols;
+            if (bio == Biome::Plains) ++plainsCols; else if (bio == Biome::Hills) ++hillsCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
                 if (desert) {
@@ -569,7 +599,9 @@ void World::generate()
             }
         }
     }
-    qInfo() << "worldgen: desert =" << desertCols << "beach/underwater =" << sandyCols
+    // t274：群系分布可观测（plains 应为多数 / hills + desert 少数）；同 seed → 同分布（确定性核对）。
+    qInfo() << "worldgen: biomes plains =" << plainsCols << "hills =" << hillsCols
+            << "desert =" << desertCols << "beach/underwater =" << sandyCols
             << "/" << (m_width * m_depth);
 
     placeBedrock(); // t119：底层基岩（y 0..4 坑洼，底实顶疏；不可破坏）。先于矿石 / 树（仅覆盖最底几格）
@@ -721,35 +753,46 @@ void World::placeTrees()
     qInfo() << "worldgen: trees placed =" << placed; // 可观测：同 seed → 同计数（确定性核对）
 }
 
-// t235 草丛确定性散布（PLAN §2-K）：遍历列，在 grass 表层（heightAt > waterLevel+1，非沙漠，与 generate
+// t235/t274 草丛确定性散布（PLAN §2-K）：遍历列，在 grass 表层（heightAt > waterLevel+1，非沙漠，与 generate
 //   草表层 / placeTrees / scatterOres 同阈值）上方一格（surfaceY+1）按 hashColumn(seed,x,z) 密度筛选置
 //   TallGrass。仅写空气格（setVoxelIfAir）→ 不覆盖已生成的树干 / 树叶 / 水。无运行期随机源（纯 seed 派生）→
-//   同 seed 同草丛分布。机制等价 MC 1.0 平原草丛点缀（密度较树高：~18% grass 列生草丛，平原点缀感）。
+//   同 seed 同草丛分布。机制等价 MC 1.0 平原草丛点缀。
 //   草丛占 surfaceY+1（grass 顶上方一格）；worldgen 顺序保证 placeTrees 先跑（树占 surfaceY+1 起若干格），
 //   故树干列的 surfaceY+1 已被 Log 占据 → setVoxelIfAir 跳过（草丛不抢树位）。无列间距筛选（草丛密度天然高，
 //   无需像树那样保证间距；机制等价 MC 平原草丛密集点缀）。
+//   t274 群系分流密度（spec「大草原=平地+多草丛」）：plains 草丛密集（40%，草原主体观感）、hills 适中（12%，
+//   山地草丛稀疏留出石 / 林裸露感）、desert 无（isDesert 已跳过）。纯函数于 seed + biomeAt → 同 seed 同分布。
 void World::placeTallGrass()
 {
-    constexpr unsigned kDensityPct = 18; // 每 grass 列 ~18% 生草丛（平原点缀密度；高于树 2%，草丛密集）
+    // t274 群系密度表（% of grass 列生草丛）：plains 远高于 hills（spec「多草丛」聚焦草原）。
+    constexpr int kPlainsGrassPct = 40; // 草原密集（spec 核心：「大草原=平地+多草丛」）
+    constexpr int kHillsGrassPct  = 12; // 山地稀疏（裸岩 / 林感）
 
     int placed = 0;
+    int plainsCols = 0, hillsCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int surfaceY = heightAt(x, z);
             // 与 placeTrees 同阈值：沙滩带(wl±1)/水下(h<wl)/低洼不生草丛（机制等价 MC 草丛不生于沙/水下）。
             if (surfaceY <= kWaterLevel + 1) continue;
-            if (isDesert(x, z)) continue;         // t117 沙漠群系不生草丛（机制等价 MC 沙漠无草）
+            const Biome bio = biomeAt(x, z);
+            if (bio == Biome::Desert) continue; // t117/t274 沙漠群系不生草丛（机制等价 MC 沙漠无草）
 
+            // t274 群系分流密度：plains 密集 / hills 稀疏。
+            const unsigned densityPct = (bio == Biome::Plains) ? unsigned(kPlainsGrassPct)
+                                                               : unsigned(kHillsGrassPct);
             const quint32 r = hashColumn(m_seed, x, z);
-            if (r % 100u >= unsigned(kDensityPct)) continue; // 密度筛选
+            if (r % 100u >= densityPct) continue; // 密度筛选
 
             const int y = surfaceY + 1; // grass 顶上方一格
             if (y >= m_height) continue; // 世界顶之上不放（防御）
             setVoxelIfAir(x, y, z, BlockRegistry::TallGrass);
             ++placed;
+            if (bio == Biome::Plains) ++plainsCols; else ++hillsCols;
         }
     }
-    qInfo() << "worldgen: tall grass placed =" << placed; // 可观测：同 seed → 同计数（确定性核对）
+    qInfo() << "worldgen: tall grass placed =" << placed
+            << "(plains" << plainsCols << "/ hills" << hillsCols << ")"; // 同 seed → 同计数（确定性核对）
 }
 
 // t119 底层基岩：遍历列，在 y 0..4 铺一层 Bedrock（不可破坏方块，hardness=-1.0 → canMine=false）。

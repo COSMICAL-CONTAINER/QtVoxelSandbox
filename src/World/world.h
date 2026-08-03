@@ -186,9 +186,18 @@ private:
     void buildPermutation();  // 由 seed 填 512 置换表（线性同余，可复现）
     double noise2(double x, double z) const;
     double fbm(double x, double z) const;
-    // t117 沙漠群系判定（二次 fBm biome，PLAN §2-K 确定性）：与高度噪声独立采样（不同空间频率 + seed
-    // 偏移），低频 → 大区块连续（沙丘 / 平原成片，非逐格斑点）。阈值化得干旱 / 普通二分群系。纯函数
-    // 于 seed → 同 seed 同群系分布（与 heightAt 同源确定性）。
+    // t274 群系枚举（plains/hills/desert 三分；机制等价 MC 1.0 大尺度群系，名称为通用描述词，§9 合规）。
+    //   worldgen 内部用：heightAt 据群系选振幅、placeTallGrass 据群系选密度、isDesert 收口到 biomeAt==Desert。
+    //   纯函数于 seed（biomeAt 经 fBm）→ 同 seed 同群系图（PLAN §2-K 确定性）。私有嵌套枚举（worldgen 细节，
+    //   不外泄到 QML；如需 F3 调试可后续暴露 Q_INVOKABLE 查询）。
+    enum class Biome { Plains, Hills, Desert };
+    // t274 群系判定（PLAN §2-K 确定性）：单一群系 fBm（与高度噪声 0.09 / 旧沙漠噪声 0.018 均不同频率 0.012 +
+    //   seed 偏移 +3571）→ 群系图与高度图解耦、与旧沙漠分布独立。低频 → 大区块连续（plains/hills/desert 成片，
+    //   非逐格斑点，机制等价 MC 1.0 群系大尺度分布）。阈值三分：hills（少数，起伏）/ desert（少数，沙）/
+    //   plains（多数，平坦草原 —— spec「大草原」原意）。纯函数于 seed → 同 seed 同群系分布。
+    Biome biomeAt(int x, int z) const;
+    // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威；旧独立 fBm 实现已由 t274 biomeAt 统一）。
+    //   供 generate（沙表层）/ placeTrees / placeTallGrass 跳过沙漠列。纯函数于 seed（经 biomeAt）。
     bool isDesert(int x, int z) const;
 
     // 确定性树木生成（PLAN §2-K）：在 generate() 末段于 grass 表层种橡树（原木主干+树叶球冠）。
