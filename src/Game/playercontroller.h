@@ -139,6 +139,12 @@ class PlayerController : public QQuickItem
     //   每 tick 重算并缓存到 m_eyeInWater；状态翻转才发 eyeInWaterChanged（避免每帧抖 QML 绑定）。只读
     //   World::blockAt（向下依赖）；无世界 → false。speed-mul 减速（t159）直接调同名 const 方法读实时值。
     Q_PROPERTY(bool eyeInWater READ eyeInWater NOTIFY eyeInWaterChanged)
+    // t269 脚位水中态（驱动水中走路声分流）：脚底格 == Water 时为真（涉水 / 浸没均真）。与 eyeInWater 的差异：
+    //   eyeInWater 仅眼位在水（完全潜没）；feetInWater 覆盖「眼在水面上但脚在水里」的涉水走步（机制等价
+    //   MC 涉水 / 游泳时步声变水声）。tickImpl 每 tick 重算并缓存到 m_feetInWater；状态翻转才发
+    //   feetInWaterChanged（避免每帧抖 QML 绑定，同 eyeInWater 模式）。Main.qml onWalkPhaseChanged 据它分流
+    //   playWaterStep（水中）vs playStep（陆地）。只读 World::blockAt（向下依赖）；无世界 → false。
+    Q_PROPERTY(bool feetInWater READ feetInWater NOTIFY feetInWaterChanged)
     // t223 近流水 proximity 水流声强度（0..1）：玩家到最近**流动水**格（Water 且 state>0；静止水源 state=0
     //   不算 —— MC 近大片静海无流水声、近瀑布 / 玩家倒水流才有）的距离映射，近=1 / 远→0、范围外=0。
     //   tickImpl 节流扫邻近盒（~每 0.25s）算最近流水格距离 → level = clamp(1 - dist/kFlowSoundRadius, 0, 1)。
@@ -224,6 +230,10 @@ public:
     //   QML 读它驱动水下蓝滤镜叠层。const 只读 World::blockAt（向下依赖）；眼位 = position()（脚底+eyeHeight）；
     //   无世界 → false。定义在 .cpp。
     bool eyeInWater() const;
+    // t269 脚位水中判定（Q_PROPERTY feetInWater READ）：脚底格 == Water（涉水 / 浸没均真）。step() 内复用它
+    //   做浮力 / 游泳 / 水流推动物理；QML 读它驱动水中走路声分流（playWaterStep vs playStep）。const 只读
+    //   World::blockAt（向下依赖）；无世界 → false。定义在 .cpp。
+    bool feetInWater() const;
     // t223 近流水 proximity 水流声强度（Q_PROPERTY flowSoundLevel READ）：玩家到最近流水格的距离映射 [0,1]。
     //   无世界 / 无近流水 → 0。定义在 .cpp。
     float flowSoundLevel() const;
@@ -325,6 +335,7 @@ signals:
     void onGroundChanged();
     void flyingChanged();
     void eyeInWaterChanged(); // t201 眼位水态翻转（驱动水下蓝滤镜叠层显隐；值真变才发，免每帧抖 QML 绑定）
+    void feetInWaterChanged(); // t269 脚位水态翻转（驱动水中走路声分流；值真变才发，免每帧抖 QML 绑定）
     void flowSoundLevelChanged(); // t223 近流水 proximity 强度变（驱动 AudioManager 水流声 start/stop/setLevel）
     void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）。speed 属性亦复用本信号（t159）。
     void flySpeedMulChanged(); // 飞行速度倍数变（t159 滚轮调速；驱动 F3 报当前有效飞速）
@@ -484,9 +495,8 @@ private:
     // 移动状态速率因子（t51）：Sprint×1.3 / Crouch×0.4 / Walk×1.0。仅走路模式水平速度乘此值
     //   （飞 / 观察者 noclip 恒 1，状态机不进入 Sprint/Crouch）。同时驱动 moveSpeed 报告 → walkPhase 频率。
     float speedMul() const;
-    // t174 脚位水中判定：玩家脚底格 == Water（m_pos 整数坐标）。浮力/游泳物理用它（眼位高于水面时仍能游，
-    //   机制等价 MC「在水中游泳」= 脚或身在水中即可）。只读 World::blockAt；无世界 → false。
-    bool feetInWater() const;
+    // t174 脚位水中判定（已上移为 public Q_PROPERTY feetInWater，t269）：玩家脚底格 == Water（m_pos 整数坐标）。
+    //   浮力 / 游泳 / 水流推动物理用它（眼位高于水面时仍能游，机制等价 MC「在水中游泳」= 脚或身在水中即可）。
     // t159 上报实际水平速度（speed 属性）：据 step 出口位移 / dt 算水平标量，值真变（> 阈值）才发
     //   moveSpeedChanged（speed 复用此 NOTIFY）。各飞 / 走出口前调一次。dt<=0 → no-op。
     void reportHorizSpeed(const QVector3D &posBefore, qreal dt);
@@ -620,6 +630,7 @@ private:
     float m_starveTimer = 0.0f;           // 饥饿归零后扣血累积（每 kStarveInterval 扣 1HP）
     float m_regenTimer = 0.0f;            // 高饥饿时回血累积（每 kHungerRegenInterval 回 1HP）
     bool m_eyeInWater = false;       // t201 眼位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit eyeInWaterChanged）
+    bool m_feetInWater = false;      // t269 脚位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit feetInWaterChanged）
     // t223 近流水 proximity 水流声：m_flowSoundLevel = 最近流水格距离映射 [0,1]（tickImpl 节流扫描更新）；
     //   m_flowScanTimer 累加 dt 到 kFlowScanInterval 才重扫（~0.25s，省扫描开销）。值真变才 emit。
     float m_flowSoundLevel = 0.0f;

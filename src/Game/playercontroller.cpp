@@ -378,6 +378,14 @@ void PlayerController::tickImpl()
         m_eyeInWater = inWater;
         emit eyeInWaterChanged();
     }
+    // t269 脚位水态（驱动水中走路声分流）：每 tick 重算，翻转才 emit（同 eyeInWater 模式）。放在 !m_captured
+    //   早 return 之前 → 暂停 / 背包开 / 失焦时仍刷新（玩家停水里开背包，关包后迈步仍应水声）。仅读 World::blockAt
+    //   （向下依赖）；无世界时 feetInWater() 返 false。
+    const bool finWater = feetInWater();
+    if (finWater != m_feetInWater) {
+        m_feetInWater = finWater;
+        emit feetInWaterChanged();
+    }
     // t223 近流水 proximity 水流声：节流扫描（每 kFlowScanInterval 秒一次）算最近流水格距离 → level。
     //   放在 !m_captured 早 return 之前 → 暂停 / 背包开时仍刷新（玩家停流水旁开背包，水流声应持续）；
     //   退出世界 / 回菜单由 Main.qml 显式 stopWaterFlow（同 stopAmbient），且离开流水范围 level→0 自动停。

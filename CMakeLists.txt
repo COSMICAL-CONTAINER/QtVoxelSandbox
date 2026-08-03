@@ -265,6 +265,7 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/mob_hurt.wav
         sounds/ambient_wind.wav
         sounds/water_flow.wav
+        sounds/water_step.wav
         sounds/mob_idle.wav
         sounds/mob_idle_pig.wav
         sounds/mob_idle_cow.wav

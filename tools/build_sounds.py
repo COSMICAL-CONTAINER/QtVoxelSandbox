@@ -31,11 +31,18 @@
      调幅 + 首末 50ms 三角窗淡化保循环无缝）。机制等价 MC 的环境 / 风声氛围床（§9 原创）。
      AudioManager 用 ma_sound 设 looping，startAmbient/stopAmbient 控制开关（playing 态开 / 退菜单停），
      setAmbientLevel 据昼夜调强度（夜间更静谧）。
-   - water_flow.wav：水流声（t223 近流水 proximity ambience loop）—— 长循环水流声（~8s，带通滤波白噪
-     （→ 中频「水流 / 湍流」body）+ 慢 LFO 起伏（拟水流强弱呼吸）+ 偶发「咕嘟」气泡瞬态（拟水冒泡 /
-     涟漪）+ 首末 50ms 三角窗淡化保循环无缝）。机制等价 MC 近流水 / 瀑布的环境水流声（§9 原创）。
-     AudioManager 用 ma_sound 设 looping，startWaterFlow/stopWaterFlow 控开关（PlayerController 近流水
-     proximity 扫描驱动），setWaterFlowLevel 据玩家到最近流水格距离调音量（近强远弱）。
+   - water_flow.wav：潺潺流水声（t269 重做：旧版合成的极慢 AM 起伏 + 单一低频 sustained body 听感像
+     海浪，用户判「不像流水」；改潺潺流水 / 潺潺溪流）。长循环 ~8s，三层混合：低频水量床（单极点
+     低通白噪）+ 中频「流水过石」沙沙 body（带通白噪）+ 高频细流 / 飞溅 hiss（高通白噪）；多重
+     不规则 AM（3 个速率 ~0.7/1.1/2.3Hz + 随机相位 sin 叠加，非旧版潮汐式规则慢呼吸）；密集「咕嘟」
+     气泡瞬态（每 0.08-0.25s 一个、随机基频 250-700Hz + 上扫拟冒泡上浮）—— 潺潺流水的标志性颗粒感。
+     首末 50ms 三角窗淡化保循环无缝。机制等价 MC 近流水环境音（§9 原创，零 MC 资产）。AudioManager 用
+     ma_sound 设 looping，startWaterFlow/stopWaterFlow 控开关（PlayerController 近流水 proximity 扫描驱动），
+     setWaterFlowLevel 据玩家到最近流水格距离调音量（近强远弱）。
+   - water_step.wav：水中走路声（t269）—— 玩家脚位在水中迈步时播（低频闷浊「咚」水下 body + 起始
+     「咕嘟」气泡 plop 瞬态，拟脚入水搅动），~0.16s。机制等价 MC 水中走路声（§9 原创，零 MC 资产）。
+     不分材质（水中听感统一闷浊），单件 clip；Main.qml onWalkPhaseChanged 据玩家 feetInWater 分流到
+     playWaterStep（替代按材质的 playStep）。
    - mob_idle.wav / mob_idle_pig.wav / mob_idle_cow.wav / mob_idle_sheep.wav：生物环境 idle 叫声（t250
      牛叫/羊叫/猪叫，周期偶发；玩家听者范围内由 EntityManager 周期 emit mobAmbient 触发 →
      AudioManager.playMobAmbient 据 mobType 选播）。机制等价 MC 1.0 被动生物偶发 idle call（§9 原创，
@@ -307,55 +314,146 @@ def gen_ambient_wind():
 
 
 def gen_water_flow():
-    """水流声（t223 近流水 proximity ambience loop）：长循环水流声 —— 带通滤波白噪（→ 中频「水流 / 湍流」body，
-    保留 ~500-2000Hz 能量、压掉极低 / 极高频）+ 慢 LFO 起伏（拟水流强弱呼吸）+ 偶发「咕嘟」气泡瞬态（拟水
-    冒泡 / 涟漪，低频窄峰）+ 首末 50ms 三角窗淡化保循环无缝，~8s。机制等价 MC 近流水 / 瀑布的环境水流声
-    （原创程序合成，§9 法律：零 MC 资产）。AudioManager 用 ma_sound_set_looping(true) 设循环，
+    """潺潺流水声（t269 重做：旧版像海浪 → 改潺潺流水 / 溪流声）。
+
+    听感诊断与对症（关键）：
+      - **旧版像海浪的根因**：极慢 AM（0.27Hz / 0.13Hz = 周期 3.7s / 7.7s）+ 单极点低通产生的单一
+        低频 sustained body → 听感是「潮起潮落的缓慢呼吸」= 海浪，而非流水。
+      - **潺潺流水的听感要素**：中高频为主（细流过石的沙沙）、快速**不规则**起伏（非潮汐式规则慢呼吸）、
+        密集小气泡 / 涟漪瞬态（潺潺的「颗粒感」）。
+
+    合成（~8s 长循环，三层混合 + 密集气泡 + 不规则 AM）：
+      1. 低频水量床（单极点低通白噪，幅度低 —— 仅作「水量」基础底，不抢前景）；
+      2. 中频「流水过石」沙沙 body（带通白噪：低通去高频嘶嘶 + 差分高通去极低频）；
+      3. 高频细流 / 飞溅 hiss（高通白噪，亮的细水颗粒）；
+      4. 多重不规则 AM：3 个速率（~0.7 / 1.1 / 2.3Hz）+ 随机相位 sin 叠加 → 不规则起伏（非规则慢呼吸）；
+      5. 密集「咕嘟」气泡瞬态（每 0.08-0.25s 一个、随机基频 250-700Hz + 上扫拟冒泡上浮）；
+      6. 首末 50ms 三角窗淡化保循环无缝。
+
+    机制等价 MC 近流水环境音（§9 原创，零 MC 资产）。AudioManager 用 ma_sound_set_looping(true) 设循环，
     startWaterFlow / stopWaterFlow 控开关（PlayerController 近流水 proximity 扫描驱动），setWaterFlowLevel
     据玩家到最近流水格距离调音量（近强远弱 → 0 时 caller stopWaterFlow）。整体幅度偏低（base_amp=0.16，
     背景氛围不抢前景；与环境风声同床共存、不互相盖过）。
     """
     dur = 8.0
     n = int(SR * dur)
-    random.seed(70223)
-    # 带通：单极点低通（压高频嘶嘶）后保留中频 → 「水流」body。系数越小越平滑。
-    lp_a = 0.18
-    lp_state = 0.0
-    raw = [0.0] * n
+    random.seed(70269)  # t269 重做新种子（新音色；确定性，同次运行字节一致）
+
+    # ---- 1. 低频水量床（单极点低通）----
+    bed_lp_a = 0.06
+    bed_state = 0.0
+    bed = [0.0] * n
     for i in range(n):
         w = random.uniform(-1, 1)
-        lp_state = lp_a * w + (1.0 - lp_a) * lp_state
-        raw[i] = lp_state
-    # 归一化回 [-1,1] 量级。
-    peak = max(1e-6, max(abs(s) for s in raw))
-    inv = 1.0 / peak
-    # 双 LFO 慢颤调幅（水流强弱呼吸的不规则起伏，同 ambient_wind 风声床手法）。
-    lfo1 = 2 * math.pi * 0.27
-    lfo2 = 2 * math.pi * 0.13
-    fade_n = int(SR * 0.05)  # 50ms 首末淡化（循环无缝）
-    base_amp = 0.16          # 水流声整体偏低（背景氛围，与风声同床共存不抢前景）
-    # 偶发「咕嘟」气泡瞬态（拟水冒泡 / 涟漪）：~每 0.4-0.8s 一个低频窄峰。
+        bed_state = bed_lp_a * w + (1.0 - bed_lp_a) * bed_state
+        bed[i] = bed_state
+    bed_inv = 1.0 / max(1e-6, max(abs(s) for s in bed))
+
+    # ---- 2. 中频 body（带通 = 低通 + 差分高通）----
+    mid_lp_a = 0.25                      # 单极点低通（压高频嘶嘶，留中频沙沙）
+    mid_lp_state = 0.0
+    mid_raw = [0.0] * n
+    for i in range(n):
+        w = random.uniform(-1, 1)
+        mid_lp_state = mid_lp_a * w + (1.0 - mid_lp_a) * mid_lp_state
+        mid_raw[i] = mid_lp_state
+    mid = [0.0] * n                       # 差分 = 高通（去极低频，留中频起伏）
+    prev = 0.0
+    for i in range(n):
+        v = mid_raw[i] - prev
+        prev = mid_raw[i]
+        mid[i] = v
+    mid_inv = 1.0 / max(1e-6, max(abs(s) for s in mid))
+
+    # ---- 3. 高频 hiss（高通白噪：细流 / 飞溅的亮颗粒）----
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+    hp_a = 0.85                           # 越接近 1 越保留高频
+    hiss = [0.0] * n
+    for i in range(n):
+        w = random.uniform(-1, 1)
+        v = hp_a * (hp_prev_out + w - hp_prev_in)
+        hp_prev_in = w
+        hp_prev_out = v
+        hiss[i] = v
+    hiss_inv = 1.0 / max(1e-6, max(abs(s) for s in hiss))
+
+    # ---- 4. 多重不规则 AM（3 速率 + 随机相位；非规则慢呼吸）----
+    lfo_a = 2 * math.pi * 1.1
+    lfo_b = 2 * math.pi * 2.3
+    lfo_c = 2 * math.pi * 0.7
+    ph_a = random.uniform(0, 2 * math.pi)
+    ph_b = random.uniform(0, 2 * math.pi)
+    ph_c = random.uniform(0, 2 * math.pi)
+
+    # ---- 5. 密集气泡瞬态（每 0.08-0.25s 一个；潺潺的「咕嘟」颗粒感）----
     bubbles = []
-    t_b = 0.30
-    while t_b < dur:
-        bubbles.append(t_b)
-        t_b += random.uniform(0.4, 0.8)
+    t_b = 0.05
+    while t_b < dur - 0.05:
+        bubbles.append((t_b,
+                        random.uniform(250.0, 700.0),   # 气泡基频
+                        random.uniform(0.06, 0.13),      # 振幅
+                        random.uniform(0.008, 0.020),    # 高斯宽
+                        random.uniform(0.5, 2.0)))       # 频率上扫系数（拟气泡上浮变调）
+        t_b += random.uniform(0.08, 0.25)
+
+    fade_n = int(SR * 0.05)
+    base_amp = 0.16
     out = []
     for i in range(n):
         t = i / SR
-        lfo = 0.5 + 0.3 * math.sin(lfo1 * t) + 0.2 * math.sin(lfo2 * t)
-        amp = base_amp * lfo
-        s = raw[i] * inv * amp
-        # 叠加气泡瞬态（窄高斯包络的低频正弦，咕嘟感）。
-        for tb in bubbles:
-            dtb = t - tb
-            if -0.05 < dtb < 0.10:
-                env = math.exp(-(dtb ** 2) / (2 * 0.012 ** 2))
-                s += 0.10 * env * math.sin(2 * math.pi * (220.0 + 80.0 * dtb) * dtb)
+        # 不规则 AM（均值 ~0.6、保底 0.05 不归零 → 水量持续）
+        am = 0.4 + 0.2 * math.sin(lfo_a * t + ph_a) \
+                 + 0.2 * math.sin(lfo_b * t + ph_b) \
+                 + 0.2 * math.sin(lfo_c * t + ph_c)
+        if am < 0.05:
+            am = 0.05
+        # 三层混合：bed（低频水量）+ mid（中频沙沙主体）+ hiss（高频细流）
+        s = (bed[i] * bed_inv * 0.30
+             + mid[i] * mid_inv * 0.55
+             + hiss[i] * hiss_inv * 0.25) * base_amp * am
+        # 叠加气泡瞬态（窄高斯包络短正弦 + 频率上扫）
+        for bt, bf, ba, bw, bs in bubbles:
+            dtb = t - bt
+            if -0.02 < dtb < bw * 4.0:
+                env = math.exp(-(dtb ** 2) / (2 * bw * bw))
+                f = bf + bs * 100.0 * dtb
+                s += ba * env * math.sin(2 * math.pi * f * dtb)
         if i < fade_n:
             s *= i / fade_n
         elif i > n - fade_n:
             s *= (n - 1 - i) / fade_n
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
+def gen_water_step():
+    """水中走路声（t269）：玩家脚位在水中迈步时播 —— 低频闷浊「咚」（水下 muffling）+ 起始「咕嘟」气泡
+    plop 瞬态（脚入水搅动），~0.16s。机制等价 MC 水中走路声（§9 原创，零 MC 资产）。AudioManager.playWaterStep
+    触发（Main.qml onWalkPhaseChanged 据玩家 feetInWater 分流，替代按材质的 playStep）。
+
+    vs 普通 step_X（按材质）：水下步声不按材质（水中听感统一闷浊），单件 clip；音量在 AudioManager 内
+    略低于普通 step（水下传播衰减 + 不抢水流声前景）。
+    """
+    dur = 0.16
+    n = int(SR * dur)
+    random.seed(269269)
+    out = []
+    lp_state = 0.0
+    lp_a = 0.12  # 低通系数（闷浊搅动感）
+    for i in range(n):
+        t = i / SR
+        # 低频 thunk（脚踩水的「咚」，水下 body）
+        thunk = math.sin(2 * math.pi * 90.0 * t) * 0.45
+        # 低通宽带噪声（水下的闷浊搅动感）
+        w = random.uniform(-1, 1)
+        lp_state = lp_a * w + (1.0 - lp_a) * lp_state
+        murk = lp_state * 0.35
+        # 起始「咕嘟」气泡 plop（脚入水瞬态）：~260Hz 起的上扫短正弦，窄高斯包络在 t≈0
+        plop_env = math.exp(-((t - 0.0) ** 2) / (2 * 0.012 ** 2))
+        plop = math.sin(2 * math.pi * (260.0 + 200.0 * t) * t) * 0.35 * plop_env
+        e = env_exp(t, 16.0)
+        s = (thunk + murk + plop) * e
         out.append(max(-1.0, min(1.0, s)))
     return out
 
@@ -479,6 +577,7 @@ def main():
                       ("hurt", gen_hurt), ("mob_hurt", gen_mob_hurt),
                       ("ambient_wind", gen_ambient_wind),
                       ("water_flow", gen_water_flow),
+                      ("water_step", gen_water_step),
                       ("mob_idle", gen_mob_idle_generic),
                       ("mob_idle_pig", gen_mob_idle_pig),
                       ("mob_idle_cow", gen_mob_idle_cow),

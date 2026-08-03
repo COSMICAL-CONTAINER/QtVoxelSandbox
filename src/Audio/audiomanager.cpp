@@ -120,11 +120,15 @@ struct AudioManager::Data
     static constexpr float kAmbientBaseVol = 0.22f;
     // t223 水流声单件（长循环水流声；looping=true，startWaterFlow/stopWaterFlow 控开关，
     //   setWaterFlowLevel 据 PlayerController.flowSoundLevel 调强度）。近流动水启动、远离停止。
+    //   t269：water_flow.wav 重合成潺潺流水声（旧版像海浪 → 改潺潺流水；build_sounds.py 三层混合 + 密集气泡）。
     Clip waterFlowClip{":/sounds/water_flow.wav"};
     bool waterFlowPlaying = false;
     float waterFlowLevel = 1.0f;
     // 水流声基础音量系数（背景氛围级；乘 m_volume 与 waterFlowLevel 得最终音量）。
     static constexpr float kWaterFlowBaseVol = 0.30f;
+    // t269 水中走路声单件（玩家脚位在水中迈步时播；不分材质，水下听感统一闷浊）。短 SFX（~0.16s），
+    //   默认 2s maxFrames 远大于其长度、安全。
+    Clip waterStepClip{":/sounds/water_step.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     static constexpr ma_uint32 kSampleRate = 22050;
@@ -249,6 +253,8 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->ambientClip, ma_uint64(Data::kSampleRate) * 16);
     // t223 水流声同为 8.0s 长循环（首末淡化无缝），maxFrames 放宽到 16s 保完整解码（同 ambient_wind 教训）。
     d->loadClip(d->waterFlowClip, ma_uint64(Data::kSampleRate) * 16);
+    // t269 水中走路声短 SFX（~0.16s），默认 2s maxFrames 远大于其长度。
+    d->loadClip(d->waterStepClip);
     d->initSound(d->placeClip);
     d->initSound(d->pickupClip);
     d->initSound(d->doorOpenClip);
@@ -259,6 +265,7 @@ AudioManager::AudioManager(QObject *parent)
         d->initSound(d->mobIdleClips[i]);
     d->initSound(d->ambientClip);
     d->initSound(d->waterFlowClip);
+    d->initSound(d->waterStepClip);
     // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
     if (d->engineOk && d->ambientClip.ok) {
         ma_sound_set_looping(&d->ambientClip.sound, MA_TRUE);
@@ -284,7 +291,8 @@ AudioManager::AudioManager(QObject *parent)
         << " mob_idle(gen/pig/cow/sheep)=" << d->mobIdleClips[0].ok << "/" << d->mobIdleClips[1].ok
         << "/" << d->mobIdleClips[2].ok << "/" << d->mobIdleClips[3].ok
         << " ambient_wind=" << d->ambientClip.ok
-        << " water_flow=" << d->waterFlowClip.ok;
+        << " water_flow=" << d->waterFlowClip.ok
+        << " water_step=" << d->waterStepClip.ok;
 }
 
 AudioManager::~AudioManager()
@@ -307,6 +315,7 @@ AudioManager::~AudioManager()
         if (d->mobIdleClips[i].ok) ma_sound_uninit(&d->mobIdleClips[i].sound);
     if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
     if (d->waterFlowClip.ok) ma_sound_uninit(&d->waterFlowClip.sound);
+    if (d->waterStepClip.ok) ma_sound_uninit(&d->waterStepClip.sound);
     ma_engine_uninit(&d->engine);
 }
 
@@ -325,6 +334,13 @@ void AudioManager::playStep(int blockId)
 {
     // 脚步音量略低（避免连击疲劳；spec「音量合理」）。
     d->replay(d->groupClip(groupIndex(blockId), Data::Step), m_volume * 0.7f);
+}
+
+// t269 水中走路声：玩家脚位在水中迈步时播（不分材质；水下听感统一闷浊，单件 clip）。音量低于普通
+//   playStep（水下传播衰减 + 不抢水流声前景）；seek 重发不堆叠；engine/clip 失败静默降级（§2-E）。
+void AudioManager::playWaterStep()
+{
+    d->replay(d->waterStepClip, m_volume * 0.55f);
 }
 
 void AudioManager::playMining(int blockId)

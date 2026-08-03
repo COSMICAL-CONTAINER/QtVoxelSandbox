@@ -795,6 +795,8 @@ Window {
     //   2π 回绕感知：phase 从 ~2π 跳回 0 时 raw delta<0 → 补 2π（playercontroller 在 >=2π 时减 2π 回绕）。
     //   t118：脚步音按脚下表面方块材质分流（spec「playStep 按 group 选」）。表面 = 脚底 -0.1 那一格
     //   （脚底 m_pos.y 减一点防恰在整数边界踩空 → 越界返 air → GroupDefault 兜底 Stone step，仍响）。
+    //   t269：脚位在水中（player.feetInWater）→ 改播水中走路声 playWaterStep（不分材质，水下听感统一闷浊；
+    //     机制等价 MC 水中步声），覆盖材质分流。feetInWater 涵盖「眼在水面上但脚在水里」的涉水走步。
     Connections {
         target: player
         function onWalkPhaseChanged() {
@@ -805,12 +807,17 @@ Window {
             audio._walkAccum += d
             if (audio._walkAccum >= Math.PI) {
                 audio._walkAccum -= Math.PI
-                // 脚下表面方块 id（材质组判定用）；越界 / air → 0 → GroupDefault 兜底 Stone step。
-                const feet = player.feetPosition
-                const sid = theWorld.blockAt(Math.floor(feet.x),
-                                             Math.floor(feet.y - 0.1),
-                                             Math.floor(feet.z))
-                audio.playStep(sid)
+                if (player.feetInWater) {
+                    // t269 水中迈步 → 水声（替代按材质 step）。
+                    audio.playWaterStep()
+                } else {
+                    // 脚下表面方块 id（材质组判定用）；越界 / air → 0 → GroupDefault 兜底 Stone step。
+                    const feet = player.feetPosition
+                    const sid = theWorld.blockAt(Math.floor(feet.x),
+                                                 Math.floor(feet.y - 0.1),
+                                                 Math.floor(feet.z))
+                    audio.playStep(sid)
+                }
             }
         }
     }

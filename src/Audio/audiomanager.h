@@ -100,6 +100,7 @@ public:
     Q_INVOKABLE void setAmbientLevel(float level);
     // t223 水流声（近流水 proximity ambience loop）：长循环水流声（ma_sound looping=true），玩家近流动水
     //   （state>0 流水格）一定范围时启动、远离停止。机制等价 MC 近流水 / 瀑布的环境水流声（原创程序合成，§9）。
+    //   t269 重做：water_flow.wav 重合成潺潺流水声（旧版像海浪 → 改潺潺流水 / 溪流；详见 build_sounds.py）。
     //   startWaterFlow / stopWaterFlow 控开关（幂等，同 ambient 模式）；setWaterFlowLevel 据玩家到最近流水格
     //   的距离调音量（近强远弱 → 0 时由 caller stopWaterFlow）。PlayerController.tickImpl 节流扫邻近流水格算
     //   level（Q_PROPERTY flowSoundLevel），Main.qml Connections 据此 start/stop + setLevel。
@@ -108,6 +109,11 @@ public:
     Q_INVOKABLE void stopWaterFlow();
     // 设水流声强度（0..1）：仅改水流声音量（若在播即时生效）；幂等。由 PlayerController.flowSoundLevel 驱动。
     Q_INVOKABLE void setWaterFlowLevel(float level);
+    // t269 水中走路声：玩家脚位在水中迈步时播（替代按材质的 playStep）。机制等价 MC 水中走路声（原创程序
+    //   合成，§9；零 MC 资产）。不分材质（水中听感统一闷浊）单件 clip；Main.qml onWalkPhaseChanged 据玩家
+    //   feetInWater 分流：水中 → playWaterStep，陆地 → playStep(blockId)。音量略低于普通 step（水下传播衰减
+    //   + 不抢水流声前景）。seek 重发不堆叠（同其他单件模式）；engine/clip 失败静默降级（§2-E，不崩）。
+    Q_INVOKABLE void playWaterStep();
 
     float volume() const { return m_volume; }
     void setVolume(float v);
