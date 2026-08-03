@@ -478,6 +478,20 @@ private:
     //   （含本格刚被置 Air）→ 火把直接掉落为物品（不「粘」到附近其它 solid 邻居）。机制等价 MC「火把
     //   附着面被移除即脱落」。火把非 solid → 不撑他火把 → 单趟扫即足够（无级联）。
     void dropUnsupportedTorchesAround(int x, int y, int z);
+    // t247 草丛 / 小麦作物掉落产出（玩家破块 / 失撑共用）：把 WheatCrop（按 state 判成熟，t237 收割：
+    //   成熟掉 1 小麦物品 + 1-2 种子、未成熟仅 1 种子）/ TallGrass（1/kTallGrassSeedDropDenom 概率掉种，
+    //   t246）的 spawnItem 计算收敛到此 → finishMiningAt 与 dropUnsupportedCropsAround 共用，**失撑掉落
+    //   与玩家破块产出同源**，零分支漂移。id 非两者 → no-op（caller 误调防御）。state 须为 setBlock(Air)
+    //   前快照（t134 时序：setBlock 委托 5 参数版以 state=0 写入，之后 stateAt 永返 0 → WheatCrop 成熟
+    //   判定失效，须先读）。分层同 spawnItem（Game/Physics 发语义事件，呈现层 / ViewModel 只消费）。
+    void dropCropDrops(int x, int y, int z, quint8 id, quint8 state);
+    // t247 草丛 / 小麦作物失撑掉落（spec「挖底方块→其上草方块/小麦应掉落（现悬空）；草根+作物须依附
+    //   下方实体方块」）：破块后查**正上方格**，若为 TallGrass / WheatCrop（其唯一支撑 = 下方实体方块，
+    //   刚被破为 Air）→ 作物直接掉落为对应产出（setBlock(Air) + dropCropDrops），不再悬空。机制等价 MC
+    //   「草丛 / 作物下方方块移除即脱落」。同 dropUnsupportedTorchesAround 模式：仅玩家破块触发（blockBroken
+    //   链）；TallGrass / WheatCrop 非 solid 且不作他物支撑 → 单趟向上扫即足够（无级联，破一块不会链式
+    //   掉一串）。掉落产出与玩家破块同源（dropCropDrops 共用，成熟小麦失撑仍掉小麦 + 种子）。
+    void dropUnsupportedCropsAround(int x, int y, int z);
     // t242 攻击 mob（spec「玩家左键攻击生物」）：damageEntity(entityIndex, kAttackDamage) + swingArm +
     //   emit mobAttacked。伤害量对齐 MC 1.0 玩家空手 / 工具攻击 = 4 HP（2 心）；工具加成（剑等）属 Phase 1.1。
     //   由 beginMining 在 mob 优先于方块时调。mob 由 caller 选定（findMobHit 已返最近活体索引）。

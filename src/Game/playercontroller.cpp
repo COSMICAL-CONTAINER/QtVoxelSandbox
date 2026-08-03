@@ -647,6 +647,10 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   worldChanged → Main.qml 移除伪光源（removeTorchAt / onWorldChanged 兜底）+ mesh 重建。火把非
     //   solid → 不撑他火把 → 单趟 6 邻扫即足够（无级联，破一块不会链式掉一串）。
     dropUnsupportedTorchesAround(x, y, z);
+    // t247 草丛 / 小麦作物失撑掉落：破块后其正上方的草丛 / 小麦作物（唯一支撑 = 本格，刚被破为 Air）
+    //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
+    //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
+    dropUnsupportedCropsAround(x, y, z);
     // t43：生存挖出可掉落方块 → **走实体流**（emit spawnItem），移除 commit a3e9300 的 auto-collect
     // （原直接 addStack）。掉落物落到该格地面、玩家走近 ≤kPickupDist 时经 pickupScan 拾取 → addStack
     // （先选中槽、再空槽，智能堆叠至 maxStack）。满栈不进背包则实体留地面（spec：全满→不拾取）。
@@ -655,37 +659,13 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     if (drop) {
         int dropId = BlockRegistry::dropId(brokenId);
         int dropCount = std::max(1, BlockRegistry::dropCount(brokenId));
-        // t237 小麦作物收割（spec「挖成熟(state=max)小麦→掉小麦物品 + 1-2 种子（可再种）；未成熟挖→仅返种子」）：
-        //   WheatCrop 的掉落**按 state 判成熟**——成熟(state>=WheatCropStageMax)掉 1× 小麦物品(WheatId) +
-        //   1-2× 种子(SeedId，可再种)；未成熟只掉 1× 种子。BlockDef.dropId/dropCount 仅作基础兜底（恒返 1 种子），
-        //   此处 state-aware 分流覆盖通用 dropId/dropCount 路径（同 PlanksFromDoubleSlabBit 双半砖模式：特殊掉落
-        //   在通用表查之上提前分流）。机制等价 MC 1.0「成熟小麦收割掉 1 小麦 + 1-3 种子；未成熟仅返 1 种子」
-        //   （本工程取 1-2 种子，spec 契约）。brokenState 在 setBlock(Air) 之前已读（同 WoodDoor/Planks 时序）。
-        //   两实体（小麦 + 种子）散布到破格 + 非实体水平邻格做视觉分离（复用双半砖 kHoriz 散布模式；
-        //   ItemEntityManager 整数格坐标存格中心 → 以邻格区分）。种子 1-2 走 QRandomGenerator（玩家交互掉落的
-        //   随机性，非 worldgen 确定性范畴 §2-K —— 机制等价 MC 小麦收割种子随机）。
-        if (brokenId == BlockRegistry::WheatCrop) {
-            const bool mature = brokenState >= BlockRegistry::WheatCropStageMax;
-            const int wheatCount = mature ? 1 : 0;
-            const int seedCount  = mature ? QRandomGenerator::global()->bounded(1, 3) : 1; // 成熟 1-2 / 未成熟 1
-            constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
-            int sx = x, sz = z;
-            for (const auto &o : kHoriz) {
-                if (!BlockRegistry::isSolid(m_world->blockAt(x + o[0], y, z + o[1]))) { sx = x + o[0]; sz = z + o[1]; break; }
-            }
-            if (wheatCount > 0)
-                emit spawnItem(x, y, z, RecipeRegistry::WheatId, wheatCount);
-            emit spawnItem(sx, y, sz, RecipeRegistry::SeedId, seedCount);
-        } else if (brokenId == BlockRegistry::TallGrass) {
-            // t246 挖草概率掉种子（spec「现 100% 掉种；改概率掉落（MC ~12.5%，可配）」）：TallGrass 的 BlockDef
-            //   dropId/dropCount 恒返 1×SeedId 作基础兜底，本分支在通用 drop 路径之上**以 1/kTallGrassSeedDropDenom
-            //   概率门控 emit spawnItem**——命中才掉 1 种子，未命中则草丛消失但无掉落（机制等价 MC 1.0 挖草丛
-            //   ~12.5% 掉小麦种子；常量可配）。概率分母 kTallGrassSeedDropDenom(=8) 在 playercontroller.h。同 WheatCrop
-            //   收割 / Planks 双半砖模式：特殊掉落语义在通用 BlockDef 表之上提前分流，特例 else 才走通用 dropId/dropCount。
-            //   这是玩家交互掉落的随机性（QRandomGenerator），非 worldgen 确定性范畴 §2-K —— 同 WheatCrop 种子 1-2
-            //   随机已验证路径。羊吃草（entitymanager sheepEatGrass）走静默 setWaterSilent 不经此处，互不影响。
-            if (QRandomGenerator::global()->bounded(kTallGrassSeedDropDenom) == 0)
-                emit spawnItem(x, y, z, dropId, dropCount);
+        // t247 草丛 / 小麦作物掉落产出收敛到 dropCropDrops（玩家破块 / 失撑共用同一 spawnItem 逻辑）：
+        //   - WheatCrop：按 state 判成熟（t237 收割 —— 成熟掉 1 小麦物品 + 1-2 种子 / 未成熟仅 1 种子）；
+        //   - TallGrass：1/kTallGrassSeedDropDenom 概率掉种（t246）。
+        //   同 PlanksFromDoubleSlabBit 双半砖模式：特殊掉落在通用 BlockDef 表之上提前分流，特例 else 走通用 dropId/dropCount。
+        //   brokenState 已在 setBlock(Air) 前读（t134 时序：WheatCrop 在 snapshot 条件内，成熟判定可靠）。
+        if (brokenId == BlockRegistry::WheatCrop || brokenId == BlockRegistry::TallGrass) {
+            dropCropDrops(x, y, z, brokenId, brokenState);
         } else if (brokenId == BlockRegistry::Planks && (brokenState & BlockRegistry::PlanksFromDoubleSlabBit)) {
             // t215 双半砖（合并态）破块掉 2× WoodSlab 为**2 个独立物品实体**（非 1 个 count=2 栈）：
             //   placeBlock 合并时写 Planks + PlanksFromDoubleSlabBit 标记「源自双半砖」。此处检本 bit →
@@ -732,6 +712,50 @@ void PlayerController::dropUnsupportedTorchesAround(int x, int y, int z)
         emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Torch),
                        std::max(1, BlockRegistry::dropCount(BlockRegistry::Torch)));
     }
+}
+
+// t247 草丛 / 小麦作物掉落产出（玩家破块 / 失撑共用，见 playercontroller.h 头注释）。
+//   WheatCrop：按 state 判成熟（t237）—— 成熟(state>=WheatCropStageMax)掉 1× 小麦物品(WheatId) + 1-2× 种子
+//   （SeedId，可再种）/ 未成熟仅 1× 种子。两实体散布到破格 + 非实体水平邻格做视觉分离。
+//   TallGrass：1/kTallGrassSeedDropDenom 概率掉 1× 种子（t246，BlockDef.dropId/dropCount 恒返 1 种子作基础兜底，
+//   本分支概率门控覆盖通用 drop 路径）。种子 1-2 / 概率均走 QRandomGenerator（玩家交互掉落的随机性，非 worldgen
+//   确定性范畴 §2-K）。失撑调用同走此逻辑 → 成熟小麦失撑仍掉小麦 + 种子（机制等价 MC「作物被任何方式移除都掉产物」）。
+void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 state)
+{
+    if (!m_world) return;
+    if (id == BlockRegistry::WheatCrop) {
+        const bool mature = state >= BlockRegistry::WheatCropStageMax;
+        const int wheatCount = mature ? 1 : 0;
+        const int seedCount  = mature ? QRandomGenerator::global()->bounded(1, 3) : 1; // 成熟 1-2 / 未成熟 1
+        constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        int sx = x, sz = z;
+        for (const auto &o : kHoriz) {
+            if (!BlockRegistry::isSolid(m_world->blockAt(x + o[0], y, z + o[1]))) { sx = x + o[0]; sz = z + o[1]; break; }
+        }
+        if (wheatCount > 0)
+            emit spawnItem(x, y, z, RecipeRegistry::WheatId, wheatCount);
+        emit spawnItem(sx, y, sz, RecipeRegistry::SeedId, seedCount);
+    } else if (id == BlockRegistry::TallGrass) {
+        const int dropId = BlockRegistry::dropId(id);
+        const int dropCount = std::max(1, BlockRegistry::dropCount(id));
+        if (QRandomGenerator::global()->bounded(kTallGrassSeedDropDenom) == 0)
+            emit spawnItem(x, y, z, dropId, dropCount);
+    }
+    // 其余 id → no-op（caller 误调防御，不误发 spawnItem）。
+}
+
+// t247 草丛 / 小麦作物失撑掉落（见 playercontroller.h 头注释）：破块后查正上方格，若为 TallGrass / WheatCrop
+//   → 其唯一支撑（下方实体方块）已被破为 Air → 直接掉落。掉落产出走 dropCropDrops（与玩家破块同源）。
+//   state 须在 setBlock(Air) 前读（t134 时序）。setBlock → World 发 blockBroken(crop) + worldChanged → 粒子 + mesh 重建。
+void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
+{
+    if (!m_world) return;
+    const int cx = x, cy = y + 1, cz = z; // 正上方格：唯一支撑 = 本格（刚被破为 Air）
+    const quint8 cid = m_world->blockAt(cx, cy, cz);
+    if (cid != BlockRegistry::TallGrass && cid != BlockRegistry::WheatCrop) return;
+    const quint8 cstate = m_world->stateAt(cx, cy, cz); // setBlock(Air) 前快照（WheatCrop 成熟判定）
+    m_world->setBlock(cx, cy, cz, BlockRegistry::Air);  // → World 发 blockBroken(crop) + worldChanged → 粒子 + mesh 重建
+    dropCropDrops(cx, cy, cz, cid, cstate);            // 失撑掉落产出与玩家破块同源
 }
 
 // t242 攻击 mob（spec「玩家左键攻击生物→受伤音效 hurt + 身体红闪 + 扣血」）：damageEntity 扣血 + 设
