@@ -15,14 +15,14 @@
 //
 // 物品 id 分段（与 Hotbar::ItemStack 的 id 字段一致）：
 //   方块段：0 .. BlockRegistry::Count-1（air / 草 / 土 / 石 / 圆石 / 原木 / 木板 / 树叶 / 沙）。
-//   工具段：id >= ToolIdBase（0x100）；当前 3 档镐（木 / 石 / 铁）+ 3 档锄（木 / 石 / 铁）。
+//   工具段：id >= ToolIdBase（0x100）；5 类工具（镐 / 斧 / 铲 / 剑 / 锄）× 3 档材质（木 / 石 / 铁）= 15 件。
 // 工具不可堆叠（Hotbar::maxStackSize(id) 对工具段返回 1，t32 已留段）。
 //
 // 耐久模型（spec t263，机制等价 MC 1.0 工具耐久）：每工具一份 maxDurability（按 tier：木 < 石 < 铁），
-//   每次有效使用（生存挖掘完成 / 锄耕地 / 未来剑攻击）-1，归零即破损（槽位清空、工具消失）。
+//   每次有效使用（生存挖掘完成 / 锄耕地 / 剑攻击 / 斧伐木 / 铲掘土）-1，归零即破损（槽位清空、工具消失）。
 //   创造模式不消耗（无限源）。耐久值随工具实例走（Hotbar::ItemStack.durability 字段，工具 count 恒 1 →
 //   每实例独立耐久；背包内搬运经 setStack 显式传 durability 保真，见 hotbar.h）。
-//   maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 的镐 / 锄 / 未来剑 / 斧 / 铲共享）。
+//   maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 的镐 / 锄 / 剑 / 斧 / 铲共享）。
 //
 // 挖掘模型（spec t33，机制等价 MC 1.0；硬度 / 采掘要求走 BlockRegistry::BlockDef）：
 //   - 挖掘耗时 = hardness / speedMul（秒）。
@@ -46,6 +46,7 @@ class ToolRegistry
 public:
     // 工具物品 id（与 Hotbar::ItemStack 的工具段对齐）。工具段基址 0x100，与方块段（0..8）隔开，
     // 防 quint8 截断别名（工具 id > 255 不会与任何方块 id 混淆）。新增工具按序追加并同步 ToolCount。
+    // t264 完整工具集：5 类（镐 / 锄 / 斧 / 铲 / 剑）× 3 档（木 / 石 / 铁）= 15 件，机制等价 MC 1.0 工具集。
     enum ToolId : int {
         ToolIdBase   = 0x100,
         PickaxeWood  = 0x100, // 木镐：tier 1，speedMul 2.0
@@ -54,7 +55,16 @@ public:
         HoeWood      = 0x103, // 木锄：type=Hoe（专用耕地；不参与挖掘速度，speedMul 仅记账=1.0）
         HoeStone     = 0x104, // 石锄：type=Hoe tier 2
         HoeIron      = 0x105, // 铁锄：type=Hoe tier 3
-        ToolCount    = 6,     // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
+        AxeWood      = 0x106, // 木斧：type=Axe tier 1，speedMul 2.0（伐木加速；t265 落实方块 toolType→Axe 后激活）
+        AxeStone     = 0x107, // 石斧：type=Axe tier 2，speedMul 4.0
+        AxeIron      = 0x108, // 铁斧：type=Axe tier 3，speedMul 6.0
+        ShovelWood   = 0x109, // 木铲：type=Shovel tier 1，speedMul 2.0（掘土沙加速；t265 落实方块 toolType→Shovel 后激活）
+        ShovelStone  = 0x10A, // 石铲：type=Shovel tier 2，speedMul 4.0
+        ShovelIron   = 0x10B, // 铁铲：type=Shovel tier 3，speedMul 6.0
+        SwordWood    = 0x10C, // 木剑：type=Sword tier 1，speedMul 1.0（不参与挖掘；剑攻击伤害归 t265）
+        SwordStone   = 0x10D, // 石剑：type=Sword tier 2，speedMul 1.0
+        SwordIron    = 0x10E, // 铁剑：type=Sword tier 3，speedMul 1.0
+        ToolCount    = 15,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
     };
 
     // 工具定义。表行索引 == itemId - ToolIdBase（连续）；详见 toolregistry.cpp kTools。
@@ -97,13 +107,16 @@ public:
 
     // 用户可见中文显示名（工具段；PLAN §9 override (b) 通用词）。
     //   PickaxeWood=木镐 PickaxeStone=石镐 PickaxeIron=铁镐
-    //   HoeWood=木锄 HoeStone=石锄 HoeIron=铁锄。非工具 / 越界 → 空串。
+    //   HoeWood=木锄 HoeStone=石锄 HoeIron=铁锄
+    //   AxeWood=木斧 AxeStone=石斧 AxeIron=铁斧
+    //   ShovelWood=木铲 ShovelStone=石铲 ShovelIron=铁铲
+    //   SwordWood=木剑 SwordStone=石剑 SwordIron=铁剑。非工具 / 越界 → 空串。
     // 字面量为 UTF-8，由 fromUtf8 解码（与项目既有中文注释 / BlockRegistry::displayName 同源）。
     static QString displayName(int itemId);
 
     // t263 工具最大耐久（使用次数上限；MC 1.0 经典值：木 59 / 石 131 / 铁 250，同 tier 共享）。
     //   非工具 / 越界 → 0（无耐久概念）。Hotbar 据本值初始化新工具实例的耐久 + tooltip 显「cur/max」。
-    //   机制等价 MC 1.0 工具耐久（机制对齐，非名词照搬）；金 / 钻石档留后续任务（t264 扩工具集时追加 tier）。
+    //   机制等价 MC 1.0 工具耐久（机制对齐，非名词照搬）；金 / 钻石档留后续任务（扩 tier 时追加）。
     static int maxDurability(int itemId);
 
 private:

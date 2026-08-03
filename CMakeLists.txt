@@ -62,6 +62,15 @@ qt_add_executable(voxelsandbox
     #   区别于镐的横梁 + 两端下勾）。手持（第一/第三人称）+ 掉落实体三处统一消费，按 toolType 选镐 vs 锄。
     src/Renderer/hoe.cpp
     src/Renderer/hoe.h
+    # t264 完整工具集：斧 / 铲 / 剑 3D 几何（与 pickaxe/hoe 同层同风格，复制 addBox 模式仅改形状）。
+    #   斧 = 单边厚刃、铲 = 方形铲斗、剑 = 纵向长刃 + 护手 + 柄。手持（第一/第三人称）+ 掉落实体三处统一消费，
+    #   按 toolType 选 5 类工具几何（Pickaxe/Hoe/Axe/Shovel/Sword）。纯实色体素几何 + NoLighting → 永不黑。
+    src/Renderer/axe.cpp
+    src/Renderer/axe.h
+    src/Renderer/shovel.cpp
+    src/Renderer/shovel.h
+    src/Renderer/sword.cpp
+    src/Renderer/sword.h
     # t240 猪牛羊方块化原创 3D 模型几何（四肢+躯干+头，§9 区隔不照搬 MC）。mobType Q_PROPERTY 选猪/牛/羊
     #   各自比例；每面铺整张贴图（全脸 UV，非 MC UV 拆皮）。EntityManager 的 Mob 实体（mobTypeAt）经
     #   Main.qml mobHost Repeater delegate 据其 mobType 设本几何 + 选对应贴图。Renderer 层只产出几何，

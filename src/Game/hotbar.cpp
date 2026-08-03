@@ -167,9 +167,13 @@ int Hotbar::toolType(int itemId) const
 
 QVariantList Hotbar::creativeTools() const
 {
-    // 创造调色板工具（无限源：拾取时 heldCount=1，工具不可堆叠）。3 档镐 + 3 档锄（t233）。
-    return {int(ToolRegistry::PickaxeWood), int(ToolRegistry::PickaxeStone), int(ToolRegistry::PickaxeIron),
-            int(ToolRegistry::HoeWood),     int(ToolRegistry::HoeStone),     int(ToolRegistry::HoeIron)};
+    // 创造调色板工具（无限源：拾取时 heldCount=1，工具不可堆叠）。t264 完整工具集：5 类（镐 / 锄 / 斧 / 铲 / 剑）
+    //   × 3 档（木 / 石 / 铁）= 15 件，机制等价 MC 1.0 工具集。按「同类 3 档」分组排列，肉眼易辨。
+    return {int(ToolRegistry::PickaxeWood),  int(ToolRegistry::PickaxeStone),  int(ToolRegistry::PickaxeIron),
+            int(ToolRegistry::HoeWood),      int(ToolRegistry::HoeStone),      int(ToolRegistry::HoeIron),
+            int(ToolRegistry::AxeWood),      int(ToolRegistry::AxeStone),      int(ToolRegistry::AxeIron),
+            int(ToolRegistry::ShovelWood),   int(ToolRegistry::ShovelStone),   int(ToolRegistry::ShovelIron),
+            int(ToolRegistry::SwordWood),    int(ToolRegistry::SwordStone),    int(ToolRegistry::SwordIron)};
 }
 
 // 创造调色板材料段（t114）：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃（材料段 id >= 0x200，

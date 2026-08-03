@@ -90,6 +90,70 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                           kStickId,                    0,
         0,                           kStickId,                    0 },
       int(ToolRegistry::HoeIron), 1, 1, "iron_hoe" },
+    // ── t264 完整工具集：斧 / 铲 / 剑 × 木 / 石 / 铁（机制等价 MC 1.0 工具配方）──
+    //   斧（Axe）：3 材料顶行左两 + 中行左一材料 + 中列 / 左下各 1 木棒（L 形斧头）。最小包围盒 2×3，
+    //     与锄（2×3 但中行左为空）包围盒内容不同 → 不冲突（锄中行 [0,S]、斧中行 [M,S]）。
+    //     产物 = 木斧 / 石斧 / 铁斧（AxeWood/Stone/Iron，伐木加速 t265）。
+    // woodAxe：3 木板 L 形 + 2 木棒 → 1 木斧。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks), 0,
+        int(BlockRegistry::Planks), kStickId,                  0,
+        0,                          kStickId,                  0 },
+      int(ToolRegistry::AxeWood), 1, 1, "wood_axe" },
+    // stoneAxe：3 圆石 L 形 + 2 木棒 → 1 石斧。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), 0,
+        int(BlockRegistry::Cobble), kStickId,                  0,
+        0,                          kStickId,                  0 },
+      int(ToolRegistry::AxeStone), 1, 1, "stone_axe" },
+    // ironAxe：3 铁锭 L 形 + 2 木棒 → 1 铁斧。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, 0,
+        RecipeRegistry::IronIngotId, kStickId,                   0,
+        0,                           kStickId,                   0 },
+      int(ToolRegistry::AxeIron), 1, 1, "iron_axe" },
+    //   铲（Shovel）：1 材料顶 + 2 木棒纵列 → 1 铲。最小包围盒 1×3（顶材料 + 下两棒），
+    //     与剑（1×3 但顶两材料 + 下一棒）内容不同 → 不冲突（铲 [M,S,S] vs 剑 [M,M,S]）。
+    //     产物 = 木铲 / 石铲 / 铁铲（ShovelWood/Stone/Iron，掘土沙加速 t265）。
+    // woodShovel：1 木板 + 2 木棒纵列 → 1 木铲。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), 0, 0,
+        kStickId,                   0, 0,
+        kStickId,                   0, 0 },
+      int(ToolRegistry::ShovelWood), 1, 1, "wood_shovel" },
+    // stoneShovel：1 圆石 + 2 木棒纵列 → 1 石铲。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), 0, 0,
+        kStickId,                   0, 0,
+        kStickId,                   0, 0 },
+      int(ToolRegistry::ShovelStone), 1, 1, "stone_shovel" },
+    // ironShovel：1 铁锭 + 2 木棒纵列 → 1 铁铲。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, 0, 0,
+        kStickId,                    0, 0,
+        kStickId,                    0, 0 },
+      int(ToolRegistry::ShovelIron), 1, 1, "iron_shovel" },
+    //   剑（Sword）：2 材料纵列 + 1 木棒底 → 1 剑。最小包围盒 1×3（上两材料 + 下一棒），
+    //     与铲（1×3 但上一材料 + 下两棒）内容不同 → 不冲突（剑 [M,M,S] vs 铲 [M,S,S]）。
+    //     产物 = 木剑 / 石剑 / 铁剑（SwordWood/Stone/Iron，攻击伤害 t265）。
+    // woodSword：2 木板纵列 + 1 木棒 → 1 木剑。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), 0, 0,
+        int(BlockRegistry::Planks), 0, 0,
+        kStickId,                   0, 0 },
+      int(ToolRegistry::SwordWood), 1, 1, "wood_sword" },
+    // stoneSword：2 圆石纵列 + 1 木棒 → 1 石剑。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), 0, 0,
+        int(BlockRegistry::Cobble), 0, 0,
+        kStickId,                   0, 0 },
+      int(ToolRegistry::SwordStone), 1, 1, "stone_sword" },
+    // ironSword：2 铁锭纵列 + 1 木棒 → 1 铁剑。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, 0, 0,
+        RecipeRegistry::IronIngotId, 0, 0,
+        kStickId,                    0, 0 },
+      int(ToolRegistry::SwordIron), 1, 1, "iron_sword" },
     // furnace：8 圆石围圈（中空）→ 1 熔炉（有序 3×3，仅工作台）。机制等价 MC 熔炉配方；
     // 满包围盒 3×3（中心空）→ 输入也须 3×3 围圈（中心为空格），9 圆石（实心）不匹配。
     { int(RecipeRegistry::Table3x3), false,

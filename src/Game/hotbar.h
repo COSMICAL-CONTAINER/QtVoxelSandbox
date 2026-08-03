@@ -111,10 +111,11 @@ public:
 
     // 工具段判定与属性（t33；供 QML delegate 据 isTool 选方块 Image vs ToolIcon Canvas 自绘）：
     //   - isTool(id)：id 是否工具段（>=0x100）。
-    //   - toolTier(id)：工具等级（1=木 2=石 3=铁；0=非工具）。ToolIcon.qml 据 tier 着色镐头。
-    //   - toolType(id)：工具类型（BlockRegistry::ToolType；Pickaxe=1 / Hoe=2 / 0=非工具）。QML 据 type
-    //     选镐形（PickaxeGeometry）vs 锄形（HoeGeometry）3D 几何 + ToolIcon 据 type 选镐 vs 锄像素图。
-    //   - creativeTools()：创造调色板的工具 id（3 档镐 + 3 档锄，t233；工具不可堆叠，拾取时 heldCount=1）。
+    //   - toolTier(id)：工具等级（1=木 2=石 3=铁；0=非工具）。ToolIcon.qml 据 tier 着色工具头。
+    //   - toolType(id)：工具类型（BlockRegistry::ToolType；Pickaxe=1 / Hoe=2 / Axe=3 / Shovel=4 / Sword=5 / 0=非工具）。
+    //     QML 据 type 选 5 类工具 3D 几何（Pickaxe/Hoe/Axe/Shovel/Sword Geometry）+ ToolIcon 据 type 选 5 类像素图。
+    //   - creativeTools()：创造调色板的工具 id（t264 完整工具集：5 类镐/锄/斧/铲/剑 × 3 档木/石/铁 = 15 件；
+    //     工具不可堆叠，拾取时 heldCount=1）。
     Q_INVOKABLE bool isTool(int itemId) const;
     Q_INVOKABLE int toolTier(int itemId) const;
     Q_INVOKABLE int toolType(int itemId) const;

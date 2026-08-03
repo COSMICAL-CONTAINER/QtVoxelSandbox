@@ -13,17 +13,29 @@ namespace {
 // 工具段连续表（按 ToolId 枚举顺序；isTool 判定后按偏移索引）。
 // type 字段为 BlockRegistry::ToolType（枚举归 Core；与 BlockDef.toolType 同源）。
 constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
-    // maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 镐 / 锄共享；spec t263「木头耐久度最低以此类推」）。
+    // maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 镐 / 锄 / 斧 / 铲 / 剑共享；spec t263「木头耐久度最低以此类推」）。
+    // speedMul：镐 / 斧 / 铲取 MC 1.0 同 tier 倍率（木 2 / 石 4 / 铁 6）—— 匹配方块 toolType 后激活加速；
+    //   锄 / 剑恒 1.0（锄专用耕地不挖、剑是武器不挖，二者无方块的 toolType 取它们 → miningSpeedMul 恒返 1.0 等同空手）。
     /* PickaxeWood  */ {int(BlockRegistry::Pickaxe), 1, 2.0f,   59, "pickaxe_wood",  "木镐"},
     /* PickaxeStone */ {int(BlockRegistry::Pickaxe), 2, 4.0f,  131, "pickaxe_stone", "石镐"},
     /* PickaxeIron  */ {int(BlockRegistry::Pickaxe), 3, 6.0f,  250, "pickaxe_iron",  "铁镐"},
     /* HoeWood      */ {int(BlockRegistry::Hoe),     1, 1.0f,   59, "hoe_wood",      "木锄"},
     /* HoeStone     */ {int(BlockRegistry::Hoe),     2, 1.0f,  131, "hoe_stone",     "石锄"},
     /* HoeIron      */ {int(BlockRegistry::Hoe),     3, 1.0f,  250, "hoe_iron",      "铁锄"},
+    // t264 完整工具集：斧 / 铲 / 剑 × 木 / 石 / 铁。机制等价 MC 1.0 工具集（§9 通用工具名，零 MC 专名）。
+    /* AxeWood      */ {int(BlockRegistry::Axe),     1, 2.0f,   59, "axe_wood",      "木斧"},
+    /* AxeStone     */ {int(BlockRegistry::Axe),     2, 4.0f,  131, "axe_stone",     "石斧"},
+    /* AxeIron      */ {int(BlockRegistry::Axe),     3, 6.0f,  250, "axe_iron",      "铁斧"},
+    /* ShovelWood   */ {int(BlockRegistry::Shovel),  1, 2.0f,   59, "shovel_wood",   "木铲"},
+    /* ShovelStone  */ {int(BlockRegistry::Shovel),  2, 4.0f,  131, "shovel_stone",  "石铲"},
+    /* ShovelIron   */ {int(BlockRegistry::Shovel),  3, 6.0f,  250, "shovel_iron",   "铁铲"},
+    /* SwordWood    */ {int(BlockRegistry::Sword),   1, 1.0f,   59, "sword_wood",    "木剑"},
+    /* SwordStone   */ {int(BlockRegistry::Sword),   2, 1.0f,  131, "sword_stone",   "石剑"},
+    /* SwordIron    */ {int(BlockRegistry::Sword),   3, 1.0f,  250, "sword_iron",    "铁剑"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
-static_assert(int(ToolRegistry::ToolCount) == 6, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+static_assert(int(ToolRegistry::ToolCount) == 15, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
 } // namespace
 
 bool ToolRegistry::isTool(int itemId)

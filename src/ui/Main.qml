@@ -1014,17 +1014,18 @@ Window {
                         NumberAnimation { from: 0.055; to: 0.05; duration: 130 }
                     }
                 }
-                // 手持工具（t75 木镐 3D / t233 锄 3D）：选中工具槽（isTool(selectedItem)）时，手前显工具 3D。
-                //   根因：旧分支只看 selectedBlock（工具槽→Air→selectedBlock=0）→ 选工具时无渲染分支 → 木镐不可见。
-                //   修：加本分支，可见性读 isTool(player.selectedItem)（selectedItem 含工具段，selectedBlockId 不再
-                //   把工具「归零隐藏」——放置语义仍走 selectedBlock=Air 不放置，互不干扰）。
-                //   PickaxeGeometry / HoeGeometry 是纯实色体素几何（无贴图 / 无 alpha）→ 永不黑（修「工具贴图黑」根因）。
-                //   t233：按 toolType 选镐（Pickaxe）vs 锄（Hoe）几何 —— 两个互斥 Model（共享位姿 / 材质参数，
+                // 手持工具（t75 木镐 3D / t233 锄 3D / t264 斧铲剑 3D）：选中工具槽（isTool(selectedItem)）时，
+                //   手前显工具 3D。根因：旧分支只看 selectedBlock（工具槽→Air→selectedBlock=0）→ 选工具时无渲染分支
+                //   → 木镐不可见。修：加本分支，可见性读 isTool(player.selectedItem)（selectedItem 含工具段，
+                //   selectedBlockId 不再把工具「归零隐藏」——放置语义仍走 selectedBlock=Air 不放置，互不干扰）。
+                //   PickaxeGeometry / HoeGeometry / AxeGeometry / ShovelGeometry / SwordGeometry 是纯实色体素几何
+                //   （无贴图 / 无 alpha）→ 永不黑（修「工具贴图黑」根因）。
+                //   t264：按 toolType 选 5 类工具几何（镐 / 锄 / 斧 / 铲 / 剑）—— 五个互斥 Model（共享位姿 / 材质参数，
                 //   仅 geometry + visible 不同），避免 Loader 装载 3D 的 reparent 坑（lessons-learned t16）。
-                //   baseColor 按 tier 着色（木褐 / 石灰 / 铁银白，镐锄同 tier 同色，同 2D ToolIcon 配色）。
+                //   baseColor 按 tier 着色（木褐 / 石灰 / 铁银白，五类同 tier 同色，同 2D ToolIcon 配色）。
                 //   作 viewModelHand 子节点 → 随挥动同步运动（工具在手中）；eulerRotation 给对角手持姿态。
                 Model {
-                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) !== 2
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 1
                     geometry: PickaxeGeometry {}
                     position: Qt.vector3d(0.02, 0.04, -0.22)    // t91：Y 跟手同 delta 上移（旧 -0.08→+0.04，保 +0.02 高于手段）；z=-0.22 脱离手臂 z 包围
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
@@ -1043,6 +1044,49 @@ Window {
                     position: Qt.vector3d(0.02, 0.04, -0.22)
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, -15)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                 : "#8a5a2e"
+                    }
+                }
+                // t264 斧（type=Axe）：同位姿 / 同 tier 配色，几何换 AxeGeometry（单边厚刃替代镐横梁 + 下勾）。
+                Model {
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 3
+                    geometry: AxeGeometry {}
+                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    scale: Qt.vector3d(0.42, 0.42, 0.42)
+                    eulerRotation: Qt.vector3d(15, -20, -15)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                 : "#8a5a2e"
+                    }
+                }
+                // t264 铲（type=Shovel）：同位姿 / 同 tier 配色，几何换 ShovelGeometry（方形铲斗）。
+                Model {
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 4
+                    geometry: ShovelGeometry {}
+                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    scale: Qt.vector3d(0.42, 0.42, 0.42)
+                    eulerRotation: Qt.vector3d(15, -20, -15)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                 : "#8a5a2e"
+                    }
+                }
+                // t264 剑（type=Sword）：纵向长刃几何，位姿竖直前指（区别于工具的对角手持）；eulerRotation.x
+                //   略前倾使刃尖朝前上方（持剑突刺姿态），同 tier 配色。
+                Model {
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 5
+                    geometry: SwordGeometry {}
+                    position: Qt.vector3d(0.02, 0.02, -0.22)
+                    scale: Qt.vector3d(0.42, 0.42, 0.42)
+                    eulerRotation: Qt.vector3d(20, -15, -10)    // 剑身竖直略前倾、刃尖朝前上
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
@@ -1862,14 +1906,14 @@ Window {
                             NumberAnimation { from: 0.08; to: 0.07; duration: 130 }
                         }
                     }
-                    // 手持工具（t75 木镐 3D / t233 锄 3D）：选中工具槽时，第三人称右手上显工具 3D（同第一人称分支，
-                    //   读 isTool(selectedItem)；不再 CrackBox 兜底）。PickaxeGeometry / HoeGeometry 纯实色体素 → 永不黑。
-                    //   t233：按 toolType 选镐 vs 锄几何（两互斥 Model）。
+                    // 手持工具（t75 木镐 3D / t233 锄 3D / t264 斧铲剑 3D）：选中工具槽时，第三人称右手上显工具 3D
+                    //   （同第一人称分支，读 isTool(selectedItem)；不再 CrackBox 兜底）。五类工具几何纯实色体素 → 永不黑。
+                    //   t264：按 toolType 选 5 类工具几何（镐 / 锄 / 斧 / 铲 / 剑，五互斥 Model）。
                     //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步（工具在手中）；握把（几何 y≈-0.45）
                     //   落在手位（rightArmPivot 本地 y≈-0.6），故 position.y=-0.55 使握把贴手心。
                     Model {
                         visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
-                                 && hotbarVM.toolType(player.selectedItem) !== 2
+                                 && hotbarVM.toolType(player.selectedItem) === 1
                         geometry: PickaxeGeometry {}
                         position: Qt.vector3d(0, -0.55, -0.18)
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
@@ -1890,6 +1934,54 @@ Window {
                         position: Qt.vector3d(0, -0.55, -0.18)
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
                         eulerRotation: Qt.vector3d(0, 20, -35)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                     : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                     : "#8a5a2e"
+                            opacity: playerModel.bodyOpacity
+                        }
+                    }
+                    // t264 斧（type=Axe）第三人称手持：同位姿 / 同 tier 配色，几何换 AxeGeometry。
+                    Model {
+                        visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
+                                 && hotbarVM.toolType(player.selectedItem) === 3
+                        geometry: AxeGeometry {}
+                        position: Qt.vector3d(0, -0.55, -0.18)
+                        scale: Qt.vector3d(0.5, 0.5, 0.5)
+                        eulerRotation: Qt.vector3d(0, 20, -35)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                     : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                     : "#8a5a2e"
+                            opacity: playerModel.bodyOpacity
+                        }
+                    }
+                    // t264 铲（type=Shovel）第三人称手持：同位姿 / 同 tier 配色，几何换 ShovelGeometry。
+                    Model {
+                        visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
+                                 && hotbarVM.toolType(player.selectedItem) === 4
+                        geometry: ShovelGeometry {}
+                        position: Qt.vector3d(0, -0.55, -0.18)
+                        scale: Qt.vector3d(0.5, 0.5, 0.5)
+                        eulerRotation: Qt.vector3d(0, 20, -35)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                     : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                     : "#8a5a2e"
+                            opacity: playerModel.bodyOpacity
+                        }
+                    }
+                    // t264 剑（type=Sword）第三人称手持：纵向长刃，刃尖朝前上（持剑姿态）。
+                    Model {
+                        visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
+                                 && hotbarVM.toolType(player.selectedItem) === 5
+                        geometry: SwordGeometry {}
+                        position: Qt.vector3d(0, -0.50, -0.18)
+                        scale: Qt.vector3d(0.5, 0.5, 0.5)
+                        eulerRotation: Qt.vector3d(-10, 20, -25)   // 剑身略竖直、刃尖斜上
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
@@ -2172,13 +2264,14 @@ Window {
                             baseColorMap: torchIconTex
                         }
                     }
-                    // 工具段（t75 改用 PickaxeGeometry 3D 镐形，不再 CrackBox 兜底；t233 加 HoeGeometry 锄形）：
+                    // 工具段（t75 改用 PickaxeGeometry 3D 镐形，不再 CrackBox 兜底；t233 加 HoeGeometry 锄形；
+                    //   t264 加 AxeGeometry / ShovelGeometry / SwordGeometry 斧铲剑形）：
                     //   旧 CrackBox + ToolIcon(透明底 RGB0) 贴图无 alphaCutoff → 透明底被当不透明黑 → 6 面黑立方体
-                    //   （「工具贴图黑」根因）。PickaxeGeometry / HoeGeometry 是纯实色体素几何（无贴图 / 无 alpha）→ 永不黑。
-                    //   baseColor 按 tier 着色（木褐 / 石灰 / 铁银白，镐锄同 tier 同色）；绕 Y 自转时正面恒有工具形可见。
-                    //   t233：按 toolType 选镐 vs 锄几何（两互斥 Model）。
+                    //   （「工具贴图黑」根因）。五类工具几何是纯实色体素几何（无贴图 / 无 alpha）→ 永不黑。
+                    //   baseColor 按 tier 着色（木褐 / 石灰 / 铁银白，五类同 tier 同色）；绕 Y 自转时正面恒有工具形可见。
+                    //   t264：按 toolType 选 5 类工具几何（镐 / 锄 / 斧 / 铲 / 剑，五互斥 Model）。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) !== 2
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 1
                         geometry: PickaxeGeometry {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -2199,6 +2292,57 @@ Window {
                     Model {
                         visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 2
                         geometry: HoeGeometry {}
+                        scale: Qt.vector3d(0.45, 0.45, 0.45)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: {
+                                const m = worldClock.skyLight
+                                const t = hotbarVM.toolTier(entRoot.entId)
+                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                     : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
+                                     : tintBySkyLight(138/255, 90/255, 46/255, m)
+                            }
+                        }
+                    }
+                    // t264 斧掉落物（type=Axe）：同 scale / 位置 / tier 配色，几何换 AxeGeometry。
+                    Model {
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 3
+                        geometry: AxeGeometry {}
+                        scale: Qt.vector3d(0.45, 0.45, 0.45)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: {
+                                const m = worldClock.skyLight
+                                const t = hotbarVM.toolTier(entRoot.entId)
+                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                     : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
+                                     : tintBySkyLight(138/255, 90/255, 46/255, m)
+                            }
+                        }
+                    }
+                    // t264 铲掉落物（type=Shovel）：同 scale / 位置 / tier 配色，几何换 ShovelGeometry。
+                    Model {
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 4
+                        geometry: ShovelGeometry {}
+                        scale: Qt.vector3d(0.45, 0.45, 0.45)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: {
+                                const m = worldClock.skyLight
+                                const t = hotbarVM.toolTier(entRoot.entId)
+                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                     : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
+                                     : tintBySkyLight(138/255, 90/255, 46/255, m)
+                            }
+                        }
+                    }
+                    // t264 剑掉落物（type=Sword）：纵向长刃，同 scale / 位置 / tier 配色，几何换 SwordGeometry。
+                    Model {
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 5
+                        geometry: SwordGeometry {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
                         materials: PrincipledMaterial {
