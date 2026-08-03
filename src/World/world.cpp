@@ -531,7 +531,10 @@ void World::generate()
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
 
     // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 水位」决定，下层 dirt / 深 stone。
-    //   - 沙漠群系（isDesert）：整柱沙（y 0..h 全 Sand，机制等价 MC 沙漠沙层）；底层基岩由 placeBedrock 覆盖。
+    //   - 沙漠群系（isDesert）：**仅表层 4-6 格沙**下接 Stone（t255 修正：旧实现整柱沙 y 0..h 全 Sand →
+    //     沙贯穿到基岩层，挖沙挖到底全沙、且沙柱占满石层使矿石无分布空间）。表层沙厚度按 hashColumn 派生
+    //     4..6（确定性，PLAN §2-K，沙丘高低起伏感）；其下 Stone 由 scatterOres 散布矿石、底层由 placeBedrock
+    //     覆盖基岩（机制等价 MC 沙漠：薄沙层 + 沙岩/石基底；本工程无沙岩方块故直接下接 Stone）。
     //   - 非沙漠且 h <= waterLevel+1：沙滩带 / 水下沙底。spec 显式沙滩带 h∈[wl-1,wl+1]（海平面 ±1 的可见沙滩），
     //     h<wl 的更低列被 fillWater 淹没 → 其表层同样取沙（水下沙底，草不生于水下）。表层 Sand / 下 Dirt / 深 Stone。
     //   - 非沙漠且 h > waterLevel+1：正常陆地（表层 Grass / 下 Dirt / 深 Stone）。
@@ -544,12 +547,15 @@ void World::generate()
             const int h = std::min(heightAt(x, z), m_height - 1);
             const bool desert = isDesert(x, z);
             const bool sandy = (!desert) && (h <= kWaterLevel + 1); // 沙滩带(wl±1) + 水下(h<wl)
+            // t255：沙漠表层沙厚度 4..6 格（hashColumn 低 2 位派生，PLAN §2-K 确定性；非沙漠列置 0 不用）。
+            const int desertSandThickness = desert ? (4 + int(hashColumn(m_seed, x, z) % 3u)) : 0;
             if (desert) ++desertCols;
             else if (sandy) ++sandyCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
                 if (desert) {
-                    b = BlockRegistry::Sand; // 整柱沙
+                    // t255：仅表层 desertSandThickness 格沙（h-y < thickness），下接 Stone（修旧整柱沙贯穿基岩 bug）。
+                    b = (h - y < desertSandThickness) ? BlockRegistry::Sand : BlockRegistry::Stone;
                 } else if (sandy) {
                     if (y == h)          b = BlockRegistry::Sand;  // 沙表层（沙滩 / 水下沙底）
                     else if (y >= h - 2) b = BlockRegistry::Dirt;  // 表层下土
