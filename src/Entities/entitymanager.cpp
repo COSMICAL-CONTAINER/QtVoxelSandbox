@@ -1,10 +1,11 @@
 #include "entitymanager.h"
-#include "world.h" // tick / resolvePlayerPush 只读 World::isSolid（向下依赖；PLAN §2 Entities→World 合规）
+#include "world.h" // tick / resolvePlayerPush / aiWander 只读 World::isSolid/blockAt/width/depth（向下依赖；PLAN §2 Entities→World 合规）
 
 #include <QLoggingCategory>
-#include <QtMath>    // qFloor
+#include <QRandomGenerator>
+#include <QtMath>    // qFloor, qRadiansToDegrees
 #include <algorithm> // std::clamp, std::min, std::move
-#include <cmath>     // std::sqrt
+#include <cmath>     // std::sqrt, std::sin, std::cos
 
 namespace {
 Q_LOGGING_CATEGORY(lcEnt, "vo.entity") // 模块化日志（PLAN §2-F）；未在 main.cpp 过滤，落 log 可见
@@ -16,6 +17,10 @@ Q_LOGGING_CATEGORY(lcEnt, "vo.entity") // 模块化日志（PLAN §2-F）；未�
 // 仍在空气格但 3/4 身体已入墙 → 旧版不撤回 → 下帧中心才入墙 → 撤回 → 再下帧又被推入 → 反复跳变 =
 // jitter（用户感知为 scale 闪烁 + revision 每帧 bump）。全格扫使「mob AABB 任一部分触墙」即撤回 →
 // mob 永不入墙 → 无跳变。
+//
+// t239 复用于 AI wander 水平碰撞（同 player move-and-resolve 逐轴撤回）：mob 按 yaw 行走时，逐轴
+// （X 后 Z）试探新位置 → 任一部分触墙即撤回该轴 → mob 贴墙滑动不穿入。Y 范围用 mob 当前 pos.y
+// （resting 后稳定，扫到的是身体高度处的墙，非脚下地面）。
 bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float r)
 {
     if (!world) return false;
@@ -35,12 +40,18 @@ bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float r)
 
 EntityManager::EntityManager(QObject *parent) : QObject(parent) {}
 
-// 生成测试生物：存格中心坐标 + 醒目纯色 + pushable，bump revision → QML Repeater 追加 delegate。
-// 达 kCap 跳过 + 告警（防溢出，spec「实体数量有上限」）。
+// 生成默认测试生物：委托 spawnMobTyped（mobType=0、#ff5555、满血）。t239 调试入口（M 键）。
 void EntityManager::spawnMob(int x, int y, int z)
 {
+    spawnMobTyped(x, y, z, 0, QStringLiteral("#ff5555"), kDefaultMaxHealth);
+}
+
+// t239 生物基类统一生成入口：满血 + 未死 + AI 初值（wanderTimer=0 → tick 首帧即选第一次向）。
+//   达 kCap 跳过 + 告警（防溢出，spec「实体数量有上限」）。bump revision → QML Repeater 追加 delegate。
+void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth)
+{
     if (int(m_entities.size()) >= kCap) {
-        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); spawn skipped at" << x << y << z;
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); spawnMobTyped skipped at" << x << y << z;
         return;
     }
     Entity e;
@@ -48,11 +59,21 @@ void EntityManager::spawnMob(int x, int y, int z)
     e.radius = 0.5f;
     e.pushable = true;
     e.kind = Mob;
-    e.color = QStringLiteral("#ff5555");
+    e.color = color.isEmpty() ? QStringLiteral("#ff5555") : color;
+    e.mobType = mobType;
+    e.maxHealth = maxHealth > 0 ? maxHealth : kDefaultMaxHealth;
+    e.health = e.maxHealth;
+    e.dead = false;
+    e.hurtFlash = 0.0f;
+    e.deathTimer = 0.0f;
+    e.yawRad = 0.0f;
+    e.wanderTimer = 0.0f; // 0 → tick 首帧选第一次向（避免所有 mob 同步起步）
+    e.wanderSpeed = 0.0f;
+    e.moveSpeed = 0.0f;
     m_entities.push_back(std::move(e));
     ++m_revision;
     emit entitiesChanged();
-    qCInfo(lcEnt) << "spawned mob at" << x << y << z << "(total" << m_entities.size() << ")";
+    qCInfo(lcEnt) << "spawned mob type" << mobType << "at" << x << y << z << "(total" << m_entities.size() << ")";
 }
 
 // t117 生成下落方块实体：存格中心 + blockId + pushable=false + kind=FallingBlock。bump revision →
@@ -114,6 +135,155 @@ int EntityManager::blockIdAt(int i) const
     return m_entities[size_t(i)].blockId;
 }
 
+// t239 mob 朝向度数（QML eulerRotation.y）。与 player.yaw 同约定：dir = (-sin(yaw),0,-cos(yaw))，
+//   QML eulerRotation.y = yawDeg 使模型本地 -Z（前）正对行走方向。非 Mob / 越界 → 0。
+float EntityManager::yawAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob) return 0.0f;
+    return qRadiansToDegrees(e.yawRad);
+}
+
+// t239 mob 当前水平速度（t241 腿摆动画频率读）。行走非零、idle/撞墙/死亡=0。非 Mob / 越界 → 0。
+float EntityManager::moveSpeedAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob) return 0.0f;
+    return e.moveSpeed;
+}
+
+// t239 mob 子类 id（t240 pig/cow/sheep；t242/t243 分流）。越界 → 0。
+int EntityManager::mobTypeAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    return m_entities[size_t(i)].mobType;
+}
+
+// t239 mob 当前血量（呈现层心条 / 攻击反馈）。非 Mob / 越界 → 0。
+int EntityManager::healthAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    return m_entities[size_t(i)].health;
+}
+
+// t239 mob 血量上限。非 Mob / 越界 → 0。
+int EntityManager::maxHealthAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    return m_entities[size_t(i)].maxHealth;
+}
+
+// t239 mob 死亡态（QML 播死亡动画 / 心条清空）。非 Mob / 越界 → false。
+bool EntityManager::deadAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    return m_entities[size_t(i)].dead;
+}
+
+// t239 mob 受击红闪剩余比 0..1（= hurtFlash / kHurtFlashTime；>0 → QML baseColor 红）。非 Mob / 越界 → 0。
+float EntityManager::hurtFlashAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.hurtFlash <= 0.0f) return 0.0f;
+    return e.hurtFlash / kHurtFlashTime;
+}
+
+// t239 受击（Q_INVOKABLE 兼调试 + t242 攻击路径双入口）：第 i 个 mob 受 amount 伤害。
+//   - clamp health 到 [0, maxHealth]；hurtFlash = kHurtFlashTime（QML 红闪）。
+//   - health≤0 且未 dead → dead=true + deathTimer=kDeathTime + emit mobDied（坐标 floor(pos) + mobType；
+//     t242 据它掉落猪排/皮革/羊毛）。dead 期间冻结 AI / 重力。
+//   - dead / 非 Mob / 越界 / amount≤0 → 静默早退。
+//   bump revision → 驱动 QML health/红闪/死亡绑定刷新。
+void EntityManager::damageEntity(int i, int amount)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.dead || amount <= 0) return;
+
+    e.health -= amount;
+    if (e.health < 0) e.health = 0;
+    e.hurtFlash = kHurtFlashTime;
+
+    if (e.health <= 0) {
+        // 死亡：冻结 AI / 重力（dead=true → tick 跳过 aiWander / 重力，仅 deathTimer 倒计时）+ 给 QML
+        //   死亡动画窗口（kDeathTime）+ emit mobDied 让 t242 掉落。坐标用 floor(pos)（与 spawnItem 整数
+        //   入口一致；t242 转发 ItemEntityManager.spawnItem）。
+        e.dead = true;
+        e.deathTimer = kDeathTime;
+        e.wanderSpeed = 0.0f;
+        e.moveSpeed = 0.0f;
+        const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
+        qCInfo(lcEnt) << "mob" << i << "type" << e.mobType << "died at" << dx << dy << dz;
+        emit mobDied(dx, dy, dz, e.mobType);
+    } else {
+        qCInfo(lcEnt) << "mob" << i << "took" << amount << "dmg, health=" << e.health << "/" << e.maxHealth;
+    }
+
+    ++m_revision;
+    emit entitiesChanged();
+}
+
+// t239 AI wander 自主移动（机制等价 MC passive mob「随机选向 + 时间片游荡 / 停驻」循环）。
+//   - 时间片倒计时 wanderTimer；到 0 选新朝向 yawRad∈[0,2π) + 随机决定 idle（~25% speed=0 停驻）/ 行走
+//     （speed=kWalkSpeed），重置 timer∈[kWanderMin, kWanderMax]。非确定性（生物 AI 非世界生成，不涉 §2-K）。
+//   - idle（speed=0）→ moveSpeed=0 不位移（腿停）。
+//   - 行走：按 yaw 算水平位移（dir = (-sin,0,-cos)，与 player 同 yaw 约定 → QML eulerRotation.y=yawDeg
+//     使模型 -Z 正对行走方向）；逐轴（X 后 Z）世界边界 clamp（[0.5, world-0.5] 防 mob 走出世界坠虚空）
+//     + 方块碰撞撤回（mobAabbHitsSolid 全格扫，仿 player move-and-resolve 贴墙滑动不穿入）。
+//   - 撞墙（两轴都未动）→ 缩短 wanderTimer（≤0.2s）下帧大概率换向离开墙角，避免一直顶墙。
+//   返回是否真位移（驱动 dirty + moveSpeed）。moveSpeed = 行走速度（撞墙/idle=0）供 t241 腿摆。
+bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, float worldD)
+{
+    // 时间片倒计时 → 选新向（随机 yaw + idle/行走 + 重置 timer）。
+    e.wanderTimer -= dt;
+    if (e.wanderTimer <= 0.0f) {
+        // yawRad ∈ [0, 2π)：bounded(62832) 返 [0, 62831]，/10000 → [0, 6.2831] ≈ [0, 2π)。
+        e.yawRad = float(QRandomGenerator::global()->bounded(62832)) / 10000.0f;
+        // wanderTimer ∈ [kWanderMin, kWanderMax)：bounded(1000)/1000 ∈ [0, 0.999]。
+        e.wanderTimer = kWanderMin
+                        + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kWanderMax - kWanderMin);
+        // idle（~kIdleChance 概率 speed=0 停驻）/ 行走（kWalkSpeed）。
+        e.wanderSpeed = (float(QRandomGenerator::global()->bounded(100)) / 100.0f < kIdleChance)
+                            ? 0.0f : kWalkSpeed;
+    }
+
+    if (e.wanderSpeed <= 0.0f) {
+        e.moveSpeed = 0.0f; // idle：不动（腿停）
+        return false;
+    }
+
+    // 行走：按 yaw 算水平位移（dir = (-sin,0,-cos)，与 player wishHoriz 同 yaw 约定）。
+    const float dx = -std::sin(e.yawRad) * e.wanderSpeed * dt;
+    const float dz = -std::cos(e.yawRad) * e.wanderSpeed * dt;
+    const float r = e.radius;
+
+    // X 轴：世界边界 clamp（mob 半宽 0.5 → 中心不越 [0.5, world-0.5]）+ 方块碰撞撤回。
+    float newX = e.pos.x() + dx;
+    if (newX < 0.5f) newX = 0.5f;
+    if (newX > worldW - 0.5f) newX = worldW - 0.5f;
+    if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), r)) newX = e.pos.x();
+
+    // Z 轴：用已更新的 X + 同样边界 clamp / 方块碰撞撤回（两轴顺序敏感，Z 参照可能已撤回的 newX）。
+    float newZ = e.pos.z() + dz;
+    if (newZ < 0.5f) newZ = 0.5f;
+    if (newZ > worldD - 0.5f) newZ = worldD - 0.5f;
+    if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, r)) newZ = e.pos.z();
+
+    bool moved = false;
+    if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+    if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+
+    e.moveSpeed = moved ? e.wanderSpeed : 0.0f; // 撞墙 → 腿停（moveSpeed=0），t241 腿摆频率随它
+
+    // 撞墙（两轴都未动）→ 缩短 timer 下帧大概率换向离开墙角（避免一直顶墙原地不动）。
+    if (!moved) e.wanderTimer = std::min(e.wanderTimer, 0.2f);
+
+    return moved;
+}
+
 // 玩家推动解析：对每个 pushable 实体做「玩家 AABB（XZ 矩形）vs 实体圆（XZ，半径=entity.radius）」
 // 穿透求解（机制等价 MC 实体碰撞推开：玩家位移解析后传给实体）。
 //   1) 垂直区间重叠判定：实体立方体 [pos.y−r, pos.y+r] 与玩家 AABB [feet.y, feet.y+height] 必须重叠
@@ -127,6 +297,7 @@ int EntityManager::blockIdAt(int i) const
 //      新位置下方仍有支撑 → 保持 resting（平地推动不下沉）；下方变空气（推下阶梯 / 推离支撑面）才
 //      resting=false 让重力复探。任一 pos 真变 → dirty，末尾统一 bump revision + emit（驱动 QML
 //      {revision; posAt} 绑定重算）。
+//   t239：dead mob 跳过（尸体不被推）。
 void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, float height, World *world)
 {
     if (m_entities.empty()) return;
@@ -134,7 +305,7 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
     const float pminY = playerFeet.y(), pmaxY = playerFeet.y() + height;
     bool dirty = false;
     for (auto &e : m_entities) {
-        if (!e.pushable) continue; // 掉落物等非推动实体跳过（统一基类预留）
+        if (!e.pushable || e.dead) continue; // 掉落物等非推动 + t239 dead mob 跳过
 
         const float r = e.radius;
         // 垂直区间重叠判定（实体为立方体：[pos.y−r, pos.y+r]）。
@@ -202,44 +373,37 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
     if (dirty) { ++m_revision; emit entitiesChanged(); }
 }
 
-// 重力 + 地面静止（机制同 ItemEntityManager::tick；向下只读 World::isSolid）。
-//   1) 已 resting：复探支撑格（实体底面下方一格 = floor(pos.y − r) − 1）仍实体 → 保持静止；
-//      失支撑 → 解除 resting 续落（防挖空悬空；亦承接 resolvePlayerPush 把实体推离原支撑面的情形）。
-//   2) 未 resting：vy -= g*dt（钳 -kMaxFall），按 dy 下移；下移路径 [floor(newY), floor(pos.y)] 自顶向下
-//      扫实体所在列首个实体方块 → 命中则贴其顶面（solidCellY+1+kRestOffset）停下、vy=0、resting=true。
-//      越界（cy<0）查 isSolid 返 false → 不误判虚空地面，实体继续落。
-//   3) pos / resting 任一真变 → dirty，末尾统一 bump revision + emit（驱动 QML {revision; posAt} 绑定重算）。
+// 重力 + AI wander + 地面静止（机制同 ItemEntityManager::tick；向下只读 World::isSolid/blockAt）。
+//   FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态）。
+//   Mob（t239）：
+//     - dead：冻结 AI/重力，仅 deathTimer 倒计时 + hurtFlash 衰减；deathTimer≤0 → 移除（给 QML 死亡动画窗口）。
+//     - 非 dead：aiWander（水平 AI 行走 + 碰撞）+ hurtFlash 衰减 + 原有 resting/重力/垂直（共用 Mob/Item）。
+//   Mob/Item 原有逻辑：
+//     1) 已 resting：复探支撑格（实体底面下方一格 = floor(pos.y − r) − 1）仍实体 → 保持静止；
+//        失支撑 → 解除 resting 续落（防挖空悬空；亦承接 resolvePlayerPush / aiWander 把实体推/走离原支撑面）。
+//     2) 未 resting：vy -= g*dt（钳 -kMaxFall），按 dy 下移；下移路径 [floor(newY), floor(pos.y)] 自顶向下
+//        扫实体所在列首个实体方块 → 命中则贴其顶面（solidCellY+1+kRestOffset）停下、vy=0、resting=true。
+//        越界（cy<0）查 isSolid 返 false → 不误判虚空地面，实体继续落。
+//     3) pos / resting 任一真变 → dirty，末尾统一 bump revision + emit（驱动 QML {revision; posAt} 绑定重算）。
+//   void-loss 兜底：Mob 跌出世界底部（pos.y<0，如被推出边界外无支撑）→ 标记移除（防永久下落）。
 //
-// t117/t220 FallingBlock 分支：无 resting 态（落到底即转为方块 / 变掉落物 + 移除）。重力 + 列扫同 Mob/Item，
-//   但扫描按 t220「仅完整方块可支撑沙」分流命运：
-//     - air / water → 穿透继续落（t220 水不挡沙 → 沙落水填堵水格）；
-//     - 完整立方（isFullCube）→ inline 调 world->setBlockFromEntity(cx, cy+1, cz, blockId) 放置并标记移除
-//       （**inline 放置**使同 tick 后续 FallingBlock 的列扫能见到此新固体 → 同柱多块依次堆叠到不同格，不撞
-//       同一格；着地格 cy+1 由扫描保证为 air/水，setBlockFromEntity 覆盖空气 / 水填堵）；
-//     - 不完整方块（火把 / 半砖 / ...）→ 沙失撑，发 fallingBlockDropped（呈现层转发 ItemEntityManager.spawnItem
-//       生成掉落物）+ 标记移除（机制等价 MC 沙落火把碎成掉落物）。
-//   移除用索引收集 + 循环后逆序 erase（保索引有效）。
+// 移除用索引收集 + 循环后逆序 erase（保索引有效）。
 void EntityManager::tick(qreal dt, World *world)
 {
     if (!world || m_entities.empty()) return;
+    const float worldW = float(world->width());
+    const float worldD = float(world->depth());
     bool dirty = false;
-    std::vector<int> toRemove; // t117：着地 / 跌出底部的 FallingBlock 索引（循环后逆序 erase）
+    std::vector<int> toRemove; // FallingBlock 着地 / 跌出 + t239 mob deathTimer 到 / void-loss 索引（逆序 erase）
 
     for (int idx = 0; idx < int(m_entities.size()); ++idx) {
         Entity &e = m_entities[size_t(idx)];
-        const int cx = qFloor(e.pos.x());
-        const int cz = qFloor(e.pos.z());
-        if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过
 
-        // t117/t220 FallingBlock：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）。
-        //   t220 沙与水 / 不完整方块交互（spec「仅完整方块可支撑沙」）：
-        //     - 下方为 air / water → **穿透**继续落（水不挡沙；沙落水填堵水格见「着地」分支）；
-        //     - 下方为**完整立方**（isFullCube）→ 着地放置在 cy+1（覆盖空气 / 水；t220 沙落水填堵水格）；
-        //     - 下方为**不完整方块**（火把 / 半砖 / 栅栏 / ...）→ 沙失撑，**变掉落物**（发 fallingBlockDropped
-        //       → 呈现层转发 ItemEntityManager.spawnItem），不放置、不动原不完整方块（仅完整立方可支撑沙）。
-        //   inline 放置（着地 setBlockFromEntity 在 tick 循环内、erase 之前）使同 tick 后续 FallingBlock 的
-        //   列扫能见到此新固体 → 同柱多块依次堆叠到不同格（不撞同一格）。着地格由列扫保证为 air/水。
+        // --- FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）---
         if (e.kind == FallingBlock) {
+            const int cx = qFloor(e.pos.x());
+            const int cz = qFloor(e.pos.z());
+            if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过
             e.vy -= kGravity * float(dt);
             if (e.vy < -kMaxFall) e.vy = -kMaxFall;
             const float newY = e.pos.y() + e.vy * float(dt);
@@ -275,10 +439,38 @@ void EntityManager::tick(qreal dt, World *world)
                 e.pos.setY(newY); // 继续自由下落（穿过 air / 水）
                 dirty = true;
             }
-            continue; // 不走 Mob/Item 的 resting / 落地静止逻辑
+            continue; // 不走 Mob 的 AI / resting / 重力逻辑
         }
 
-        // --- Mob/Item：原有 resting + 重力 + 落地静止逻辑 ---
+        // --- Mob（t239）---
+        if (e.kind == Mob) {
+            if (e.dead) {
+                // 死亡态：冻结 AI / 重力，仅 deathTimer 倒计时（给 QML 播死亡动画窗口）+ hurtFlash 衰减
+                //   （让 killing blow 的红闪自然褪去）。deathTimer≤0 → 标记移除（逆序 erase）。
+                e.deathTimer -= float(dt);
+                if (e.deathTimer <= 0.0f) { toRemove.push_back(idx); dirty = true; }
+                if (e.hurtFlash > 0.0f) {
+                    e.hurtFlash -= float(dt);
+                    if (e.hurtFlash <= 0.0f) { e.hurtFlash = 0.0f; dirty = true; } // 红闪结束 → bump 让 QML 翻回 baseColor
+                }
+                continue; // dead：不走 AI / 重力
+            }
+
+            // t239 AI wander 自主移动（水平）：随机选向 + 时间片 + 逐轴 AABB 碰撞。位移 → dirty（驱动 QML 位置绑定）。
+            if (aiWander(e, float(dt), world, worldW, worldD)) dirty = true;
+
+            // 受击红闪衰减（非 dead Mob）：仅在跨过 0 时 bump（红闪期间 colorAt 恒红无需每帧 bump；结束翻回 baseColor）。
+            if (e.hurtFlash > 0.0f) {
+                e.hurtFlash -= float(dt);
+                if (e.hurtFlash <= 0.0f) { e.hurtFlash = 0.0f; dirty = true; }
+            }
+        }
+
+        // --- Mob（非 dead）/ Item：原有 resting + 重力 + 垂直运动（cx/cz 在 AI 行走后重算）---
+        const int cx = qFloor(e.pos.x());
+        const int cz = qFloor(e.pos.z());
+        if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过
+
         // 已落地：复探支撑格是否仍实体。失支撑 → 续落。
         if (e.resting) {
             const int supportY = qFloor(e.pos.y() - e.radius) - 1; // 实体底面下方那一格（= 支撑方块 cellY）
@@ -314,9 +506,12 @@ void EntityManager::tick(qreal dt, World *world)
             e.pos.setY(mobNewY); // 自由下落（无命中）
             dirty = true;
         }
+
+        // t239 void-loss 兜底：Mob 跌出世界底部（pos.y<0，如被推/走离边界外无支撑）→ 标记移除（防永久下落）。
+        if (e.kind == Mob && e.pos.y() < 0.0f) { toRemove.push_back(idx); dirty = true; }
     }
 
-    // t117：逆序 erase 已着地 / 跌出的 FallingBlock（逆序保未处理索引有效）。
+    // 逆序 erase 已着地 / 跌出的 FallingBlock + deathTimer 到 / void-loss 的 Mob（逆序保未处理索引有效）。
     for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it)
         m_entities.erase(m_entities.begin() + *it);
 

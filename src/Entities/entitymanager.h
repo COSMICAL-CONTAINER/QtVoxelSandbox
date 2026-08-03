@@ -8,15 +8,15 @@
 
 #include <vector>
 
-// 统一实体管理器（t95；Entities 层）。
+// 统一实体管理器（t95；Entities 层）。t239 扩展为「生物基类（AI/物理/血量/受击/死亡）」。
 //
-// 为后续 Mob/AI 系统铺垫的「统一实体基类」：每个实体 = {世界坐标 pos, 半径 radius, 可推动标志
-// pushable, 渲染外观（kind/color/blockId）, 物理态（vy/resting）}。持有一类测试生物（pushable=true，
-// 玩家走碰可被推动，swept 碰撞解析玩家位移传给实体）+ t117 沙子重力方块（pushable=false，下落到着地
-// 转 setBlock + 移除）。掉落物（src/Game 的 ItemEntityManager）机制等价「pushable=false、被拾取」的
-// 实体变体——本轮不迁移既有的掉落系统（已深度集成 t35-t64：拾取 / 丢弃 / 重力 / 数量 / 免拾取窗），
-// 仅在此确立统一基类形态，为后续把掉落物并入统一 EntityManager 留形（spec「统一 EntityManager 设计」
-// 「为后续 Mob/AI 系统铺垫（统一实体基类）」）。
+// 每个 Mob 实体 = {世界坐标 pos, 半径 radius, 可推动标志 pushable, 渲染外观（kind/color/mobType/blockId）,
+// 物理态（vy/resting）, **AI 态（yawRad/wanderTimer/wanderSpeed/moveSpeed）, 生命态（maxHealth/health/
+// dead/hurtFlash/deathTimer）**}。为猪/牛/羊（t240）+ 后续 mob 统一基类（spec「为猪牛羊 + 后续 mob 统一基」）。
+// 持有一类测试生物（pushable=true，玩家走碰可推动，swept 碰撞解析玩家位移传给实体）+ t117 沙子重力方块
+// （pushable=false，下落到着地转 setBlock + 移除）。掉落物（src/Game 的 ItemEntityManager）机制等价
+// 「pushable=false、被拾取」的实体变体——本轮不迁移既有的掉落系统（已深度集成 t35-t64：拾取 / 丢弃 /
+// 重力 / 数量 / 免拾取窗），仅在此确立统一基类形态，为后续把掉落物并入统一 EntityManager 留形。
 //
 // 物理：
 //   - 重力 + 地面静止（tick(dt, world)）：未 resting 的实体 vy -= g*dt（钳 -kMaxFall），按 dy 下移并
@@ -29,12 +29,25 @@
 //     扫 mob AABB footprint 覆盖的所有格子（仿 player aabbHitsSolid；非旧版「只查中心格」），任一实体
 //     方块 → 撤回该轴推动（防穿墙 + 消除斜推角落 jitter——旧版单格检查致 mob 入墙反复跳变）。
 //
-// 分层（PLAN §2）：本层属 Entities（位于 Game/Physics 之下、World 之上）。向下只读 World（isSolid），
-// 不依赖 Renderer/Physics/QtQuick3D。tick / resolvePlayerPush 由 PlayerController（Game/Physics 层）每帧
-// 调（C++ 直调，非 Q_INVOKABLE——避开 moc 对 World* 前向类型的 metatype 处理，同 ItemEntityManager
-// 先例）。呈现层（Main.qml 的 Repeater）只读 count/posAt/colorAt，自发渲染，绝不反向写（PLAN §2 分层：
-// 呈现层只消费 Entities 数据，同 blockBroken→粒子 / spawnItem→掉落物 模式）。
-class World; // 前向声明（tick / resolvePlayerPush 只读 World::isSolid；完整定义在 .cpp include）
+// t239 生物基类（AI / 物理 / 血量 / 受击 / 死亡）：
+//   - **AI wander 自主移动**（tick 内 aiWander）：时间片倒计时 wanderTimer；到 0 随机选新朝向 yawRad +
+//     随机决定 idle（speed=0，~25%）/ 行走（speed=kWalkSpeed），重置 timer∈[kWanderMin, kWanderMax]。
+//     行走时按 yaw 算水平位移（与 player 同 yaw 约定：dir = (-sin, 0, -cos) → QML eulerRotation.y = yawDeg
+//     使模型 -Z 前）正对行走方向），逐轴（X 后 Z）做世界边界 clamp + 方块碰撞撤回（复用 mobAabbHitsSolid）。
+//     撞墙（两轴都未动）→ 缩短 timer 下帧大概率换向离开墙角。机制等价 MC passive mob 的「游荡 + 停驻」
+//     循环（随机选向 + 时间片），非确定性（生物 AI 非世界生成，不涉 §2-K）。
+//   - **血量 / 受击 / 死亡态**：maxHealth/health（默认 10 = MC 1.0 猪/牛/羊 5 心）；damageEntity(i, amount)
+//     扣血 + 设 hurtFlash=kHurtFlashTime（QML 据红闪显红）；health≤0 → dead=true + deathTimer=kDeathTime +
+//     emit mobDied（坐标 + mobType，t242 据它掉落猪排/皮革/羊毛）。dead 期间冻结 AI / 重力（仅 deathTimer
+//     倒计时），到 0 移除（给 QML 播死亡动画窗口）。resolvePlayerPush 跳过 dead mob（尸体不被推）。
+//
+// 分层（PLAN §2）：本层属 Entities（位于 Game/Physics 之下、World 之上）。向下只读 World（isSolid/
+// blockAt），不依赖 Renderer/Physics/QtQuick3D。tick / resolvePlayerPush / damageEntity 由 PlayerController
+// （Game/Physics 层）每帧 / 攻击时调（C++ 直调，非 Q_INVOKABLE 优先——避开 moc 对 World* 前向类型的
+// metatype 处理，同 ItemEntityManager 先例；damageEntity 兼 Q_INVOKABLE 供调试 / t242 攻击路径双入口）。
+// 呈现层（Main.qml 的 Repeater）只读 count/posAt/colorAt/yawAt/healthAt/...，自发渲染，绝不反向写
+// （PLAN §2 分层：呈现层只消费 Entities 数据，同 blockBroken→粒子 / spawnItem→掉落物 模式）。
+class World; // 前向声明（tick / resolvePlayerPush / aiWander 只读 World::isSolid/blockAt；完整定义在 .cpp include）
 class EntityManager : public QObject
 {
     Q_OBJECT
@@ -42,9 +55,10 @@ class EntityManager : public QObject
     // count：当前实体数（Repeater 作 int model → 生成 0..count-1 delegate）。NOTIFY entitiesChanged
     // 驱动 spawn 后 Repeater 追加新 delegate（不重建已有 → 后续 Mob/AI 动画连续不被打断）。
     Q_PROPERTY(int count READ count NOTIFY entitiesChanged)
-    // revision：实体集版本号（随 spawn / 推动位移 / 重力下落 自增）。供「触碰」绑定作 NOTIFY 触发器
-    // （同 Hotbar.slotRevision / ItemEntityManager.revision 模式）——posAt/colorAt 是 Q_INVOKABLE 不被
-    // NOTIFY 自动跟踪，需 { revision; posAt(i) } 显式建依赖，push/下落后绑定才重算。
+    // revision：实体集版本号（随 spawn / 推动位移 / 重力下落 / AI 行走 / 受击红闪 / 死亡移除 自增）。供
+    // 「触碰」绑定作 NOTIFY 触发器（同 Hotbar.slotRevision / ItemEntityManager.revision 模式）——
+    // posAt/colorAt/yawAt/healthAt 是 Q_INVOKABLE 不被 NOTIFY 自动跟踪，需 { revision; posAt(i) } 显式建依赖，
+    // push/下落/AI 移动/红闪/死亡后绑定才重算。
     Q_PROPERTY(int revision READ revision NOTIFY entitiesChanged)
 
 public:
@@ -53,15 +67,19 @@ public:
     int count() const { return int(m_entities.size()); }
     int revision() const { return m_revision; }
 
-    // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / FallingBlock=贴图方块）。
+    // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
+    // 管）/ FallingBlock=贴图方块）。
     enum Kind { Mob, Item, FallingBlock };
     Q_ENUM(Kind)
 
-    // 在方块格 (x,y,z)（整数坐标）生成一个测试生物。位置存该格中心 (x+0.5, y+0.5, z+0.5)；从高处
-    // 生成时由重力 tick 落到地表（无需 caller 查地表高度）。radius=0.5（1×1 方块半宽），pushable=true
-    // （玩家可推动），color=#ff5555（醒目纯色，spec「纯色突出」）。达 kCap → 跳过 + 告警（防溢出）。
+    // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
+    //   落地后由 spawnMobTyped 直接生成猪/牛/羊。位置存该格中心 (x+0.5, y+0.5, z+0.5)；从高处生成时由重力
+    //   tick 落到地表。radius=0.5、pushable=true。达 kCap → 跳过 + 告警（防溢出）。
     Q_INVOKABLE void spawnMob(int x, int y, int z);
-
+    // t239 生物基类统一生成入口（猪/牛/羊 + 后续 mob）：mobType=子类 id（0=通用测试生物；t240 pig/cow/sheep
+    //   各自 id；掉落/模型据它分流）；color=渲染配色（QML delegate baseColor）；maxHealth=血量上限（≤0 用默认）。
+    //   生成即满血、未死、AI wanderTimer=0（tick 首帧即选第一次向）。达 kCap → 跳过 + 告警（防溢出）。
+    Q_INVOKABLE void spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth);
     // t117 沙子重力方块：在方块格 (x,y,z) 生成一个下落方块实体（携带 blockId）。位置存该格中心
     // (x+0.5, y+0.5, z+0.5)；pushable=false（不被玩家推动，同掉落物变体）；kind=FallingBlock；
     // blockId 存实体携带的方块 id（着地放置用它）。重力 tick 下落，着地时 world->setBlockFromEntity
@@ -81,26 +99,55 @@ public:
     // t117：第 i 个实体携带的方块 id（FallingBlock 着地 setBlock 用；呈现层据它设 BlockCube.blockId
     // 贴图渲染）。非 FallingBlock 实体返回 0。越界返回 0。
     Q_INVOKABLE int blockIdAt(int i) const;
+    // t239 mob 朝向 / 行走（呈现层 / t241 腿摆动画读）：
+    //   yawAt = 朝向度数（QML delegate Node eulerRotation.y → 模型 -Z 正对行走方向；与 player.yaw 同约定）。
+    //   moveSpeedAt = 当前水平速度（blocks/s；行走非零、idle/撞墙/死亡=0；t241 据它驱动腿摆频率）。
+    //   越 mob（非 Mob kind）/ 越界 → 安全默认（yaw 0 / speed 0）。
+    Q_INVOKABLE float yawAt(int i) const;
+    Q_INVOKABLE float moveSpeedAt(int i) const;
+    // t239 mob 子类 id（t240 pig/cow/sheep；t242 据它选掉落物、t243 spawn egg 据 it 选生成类型）。越界→0。
+    Q_INVOKABLE int mobTypeAt(int i) const;
+    // t239 mob 血量 / 受击 / 死亡态（呈现层心条 / 红闪 / 死亡动画；t242 攻击 HUD 读）：
+    //   healthAt / maxHealthAt = 当前 / 上限血量（供心条 / 攻击反馈）；deadAt = 死亡态（QML 播死亡动画）；
+    //   hurtFlashAt = 受击红闪剩余比 0..1（>0 → QML baseColor 红，机制等价 MC mob 受击 10 tick 红闪）。
+    //   非 Mob / 越界 → 安全默认。
+    Q_INVOKABLE int healthAt(int i) const;
+    Q_INVOKABLE int maxHealthAt(int i) const;
+    Q_INVOKABLE bool deadAt(int i) const;
+    Q_INVOKABLE float hurtFlashAt(int i) const;
+
+    // t239 受击（Q_INVOKABLE 兼调试 + t242 攻击路径双入口）：第 i 个 mob 受 amount 伤害。clamp health 到
+    //   [0, maxHealth]；hurtFlash = kHurtFlashTime（QML 红闪）。health≤0 且未 dead → dead=true + deathTimer=
+    //   kDeathTime + emit mobDied（t242 据它掉落）。dead / 非 Mob / 越界 / amount≤0 → 静默早退。bump revision。
+    Q_INVOKABLE void damageEntity(int i, int amount);
 
     // 玩家推动解析（C++ 直调；PlayerController::tick 每帧调，captured 时）。
     //   playerFeet=玩家脚底中心，halfW=玩家 AABB 半宽，height=玩家 AABB 高，world=只读世界（钳制穿墙用）。
     //   对每个 pushable 实体：垂直区间与玩家 AABB 重叠时，按「AABB(XZ) vs 实体圆(XZ)」求穿透，把实体
     //   沿 (实体中心 − AABB 最近点) 方向推出穿透量；实体陷入实体方块时撤回该轴推动（防穿墙）。
     //   任一实体 pos 真变 → dirty=true，末尾统一 bump revision + emit（驱动 QML 位置绑定重算）。
+    //   t239：dead mob 跳过（尸体不被推）。
     void resolvePlayerPush(const QVector3D &playerFeet, float halfW, float height, World *world);
 
-    // 重力 + 地面静止（C++ 直调；PlayerController::tick 每帧调，独立于捕获态——菜单/暂停时实体仍模拟）。
-    //   机制同 ItemEntityManager::tick（向下只读 World::isSolid）。world=null / 无实体 → 早 return。
+    // 重力 + AI wander + 地面静止（C++ 直调；PlayerController::tick 每帧调，独立于捕获态——菜单/暂停时
+    //   实体仍模拟）。机制同 ItemEntityManager::tick（向下只读 World::isSolid/blockAt）。world=null / 无实体
+    //   → 早 return。Mob：AI 行走（aiWander）+ 重力；dead Mob：仅 deathTimer 倒计时（冻结）；FallingBlock：
+    //   t117/t220 着地放置 / 变掉落物 + 移除。
     void tick(qreal dt, World *world);
 
 signals:
-    void entitiesChanged(); // spawn / 推动位移 / 重力下落 触发；驱动 count/revision + QML 绑定刷新
-    // t220 FallingBlock 遇不完整方块失撑 → 变掉落物。沙下落途中首个「非 air/水」方块为**不完整方块**
+    void entitiesChanged(); // spawn / 推动位移 / 重力下落 / AI 行走 / 受击红闪 / 死亡移除 触发；驱动 count/revision + QML 绑定刷新
+    // t117/t220 FallingBlock 遇不完整方块失撑 → 变掉落物。沙下落途中首个「非 air/水」方块为**不完整方块**
     //   （火把 / 半砖 / 栅栏 / ...，即非完整立方）时发本信号：坐标 = 不完整方块**上方一格**（= 沙应掉落位）、
     //   blockId = 实体携带的方块 id（机制等价 MC「沙落火把上 → 沙碎成掉落物」；仅完整立方可支撑沙）。
     //   呈现层（Main.qml）Connections 转发到 ItemEntityManager.spawnItem 生成掉落实体（同
     //   PlayerController.spawnItem 模式；分层：Entities 层发语义事件，呈现层只消费，绝不反向写栅格）。
     void fallingBlockDropped(int x, int y, int z, int blockId);
+    // t239 mob 死亡一次性事件（damageEntity 把 health 首次扣到 ≤0 时发）。坐标 = 死亡格 floor(pos)，
+    //   mobType = 子类 id（0=通用 / t240 pig/cow/sheep）。t242 据它 + mobType 决定掉落物（猪:生猪排 /
+    //   牛:皮革+牛肉 / 羊:羊毛）→ 呈现层转发 ItemEntityManager.spawnItem（同 fallingBlockDropped 模式）。
+    //   分层（PLAN §2）：Entities 层发语义事件，呈现层只消费，绝不反向写栅格。
+    void mobDied(int x, int y, int z, int mobType);
 
 private:
     struct Entity {
@@ -112,14 +159,38 @@ private:
         QString color = QStringLiteral("#ff5555"); // 渲染配色（醒目纯色）
         float vy = 0.0f;         // 垂直速度（blocks/s；向下为负）；落地后归 0
         bool resting = false;    // 是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
+        // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
+        int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；drop/模型据它分流）
+        int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
+        int health = 0;          // 当前血量；<=0 → dead（spawnMobTyped 设满血）
+        bool dead = false;       // 死亡态（health<=0 → true；dead 期间冻结 AI/重力，deathTimer 到 0 移除）
+        float hurtFlash = 0.0f;  // 受击红闪剩余秒数（damageEntity 设 kHurtFlashTime；tick 衰减；>0 → QML 红）
+        float deathTimer = 0.0f; // 死亡到移除倒计时（dead 翻 true 时设 kDeathTime；给 QML 播死亡动画窗口）
+        float yawRad = 0.0f;     // 朝向 + 行走方向（弧度）；AI wander 随机选；dir=(-sin,0,-cos)，QML yawDeg
+        float wanderTimer = 0.0f;// 到下次选向倒计时（秒）；<=0 → 新 yawRad + 新 wanderSpeed + 重置 timer
+        float wanderSpeed = 0.0f;// 当前 AI 行走速度（blocks/s；0=idle 停驻 / kWalkSpeed=行走）；time-slice 随机
+        float moveSpeed = 0.0f;  // 当前有效水平速度（= wanderSpeed 行走时；撞墙/idle/死亡=0；expose 供 t241 腿摆）
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;
+
+    // t239 AI wander 自主移动（tick 内 Mob 分支调）：时间片倒计时到 → 随机选向 + idle/行走；行走按 yaw 逐轴
+    //   （X 后 Z）世界边界 clamp + 方块碰撞撤回。返回是否真位移（驱动 dirty + moveSpeed）。worldW/worldD =
+    //   世界宽/深（边界 clamp 防 mob 走出世界坠虚空）。
+    bool aiWander(Entity &e, float dt, World *world, float worldW, float worldD);
 
     static constexpr int kCap = 64;            // 实体数上限（测试用，防溢出）
     static constexpr float kGravity = 28.0f;   // 重力加速度（blocks/s²；与玩家/掉落物同值，世界手感一致）
     static constexpr float kMaxFall = 78.4f;   // 终端下落速度（blocks/s；防无限加速）
     static constexpr float kRestOffset = 0.5f; // 落地后实体中心相对支撑方块顶面的偏移（1×1 方块半宽 → 底面贴顶面）
+    // t239 生物基类常量：
+    static constexpr int kDefaultMaxHealth = 10;  // 默认 mob 血量（猪/牛/羊 MC 1.0 = 10 = 5 心）
+    static constexpr float kWalkSpeed = 1.0f;     // AI 行走速度（blocks/s；慢于玩家 4.3，wander 观感）
+    static constexpr float kWanderMin = 2.0f;     // 选向时间片下限（秒）
+    static constexpr float kWanderMax = 5.0f;     // 选向时间片上限（秒）
+    static constexpr float kIdleChance = 0.25f;   // 每次选向进入 idle（speed=0 停驻）的概率
+    static constexpr float kHurtFlashTime = 0.5f; // 受击红闪持续秒数（机制等价 MC mob 受击 10 tick = 0.5s）
+    static constexpr float kDeathTime = 0.5f;     // 死亡到移除窗口（给 QML 播死亡动画；机制等价 MC 死亡动画）
 };
 
 #endif // ENTITYMANAGER_H

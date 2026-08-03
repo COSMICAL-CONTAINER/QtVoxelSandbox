@@ -2184,11 +2184,15 @@ Window {
             Repeater {
                 model: entityManager.count
                 delegate: Node {
-                    // 触碰 revision 建立依赖（push 位移 / 重力下落 / FallingBlock 移除 bump revision → 位置 /
-                    // 配色 / kind 重算）。t117 FallingBlock 着地 erase-shift 后 revision 自增 → delegate 对齐
-                    // 新 entity 数据（同 itemEntities delegate 模式）。
+                    // 触碰 revision 建立依赖（push 位移 / 重力下落 / t239 AI 行走 / 受击红闪 / 死亡移除
+                    //   bump revision → 位置 / 配色 / kind / yaw 重算）。t117 FallingBlock 着地 erase-shift 后
+                    //   revision 自增 → delegate 对齐新 entity 数据（同 itemEntities delegate 模式）。
                     position: { entityManager.revision; return entityManager.posAt(index) }
                     property int entKind: { entityManager.revision; return entityManager.kindAt(index) }
+                    // t239 身体朝向：Mob 按 yawAt 转（模型本地 -Z 正对 AI 行走方向，与 player.yaw 同约定）；
+                    //   FallingBlock（沙立方）对称 → 不转（bodyYaw=0）。子节点（Mob Model / F3+B 箭头）随之继承。
+                    property real bodyYaw: { entityManager.revision; return entKind === EntityManager.Mob ? entityManager.yawAt(index) : 0 }
+                    eulerRotation: Qt.vector3d(0, bodyYaw, 0)
                     Component.onCompleted: {
                         // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
                         // onCompleted 显式 reparent 进 mobHost（同 itemHost / torchHost delegate）。
@@ -2209,23 +2213,28 @@ Window {
                             baseColorMap: voxelAtlas
                         }
                     }
-                    // Mob（原 t95 测试生物）：UnitCube = ±0.5 居中单位立方体（与地形 / 线框 / 玩家模型同基准）。
-                    //   scale=1（1×1×1）；NoLighting；baseColor = 实体配色（#ff5555 醒目纯色，spec「纯色突出」）。
+                    // Mob（原 t95 测试生物；t239 生物基类）：UnitCube = ±0.5 居中单位立方体（与地形 / 线框 /
+                    //   玩家模型同基准）。scale=1（1×1×1）；NoLighting。baseColor = 实体配色（colorAt），受击
+                    //   红闪（hurtFlashAt>0 → 全红，机制等价 MC mob 受击 10 tick 红闪）；随 delegate Node
+                    //   eulerRotation.y=bodyYaw 转向 AI 行走方向（t240 猪牛羊模型有前/后，纯色立方对称看不出）。
                     Model {
                         visible: entKind === EntityManager.Mob
                         geometry: UnitCube {}
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: { entityManager.revision; return entityManager.colorAt(index) }
+                            baseColor: {
+                                entityManager.revision
+                                return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : entityManager.colorAt(index)
+                            }
                         }
                     }
                     // t116 F3+B mob 碰撞箱（spec「mob scale 1.0」+ 朝向箭头）：mob AABB = 1×1×1 立方（与 mob
                     //   Model scale 1.0 一致）。WireCube ±0.5 scale 1.01（+1% 外扩避与 mob 立方表面 z-fight——
-                    //   共面时线被面遮挡看不见）。mob delegate Node 无旋转（仅 position）→ 子节点本地旋转 0 即
-                    //   世界轴对齐。mob 无 yaw 朝向态（EntityManager 仅 pos/radius，无 orientation）→ 朝向箭头
-                    //   固定指向 -Z（北，yaw=0）；spec「细 Model 绑 yaw」对无朝向实体退化为固定向。
-                    //   分层（PLAN §2）：纯呈现层调试叠层，只读 delegate 位置（entityManager 数据）。
+                    //   共面时线被面遮挡看不见）。t239：mob delegate Node 现按 bodyYaw 转（AI 行走方向）→
+                    //   子节点（朝向箭头）随之继承，箭头本地 -Z 指向 mob 朝向（不再是固定北）。WireCube 立方
+                    //   对称 → 转无异，但箭头现在正确反映 yaw。
+                    //   分层（PLAN §2）：纯呈现层调试叠层，只读 delegate 位置 / yaw（entityManager 数据）。
                     Model {
                         visible: window.showHitboxes
                         geometry: WireCube {}
@@ -2788,6 +2797,15 @@ Window {
             if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
             if (e.key === Qt.Key_F6) { worldClock.toggleDebugFast(); e.accepted = true; return } // 昼夜调试加速（t09）
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
+            // t239 调试：按 M 在玩家前方生成一个测试 mob（验证 AI wander / 重力 / 碰撞 / 受击 / 死亡基类）。
+            //   t243 spawn eggs 落地后此键可移除；现阶段无 spawn 入口（t142 已删旧测试 mob），靠它让 base 可观测。
+            //   生成在玩家脚底前 2 格、高 1 格（重力 tick 落到地表）；走过去可推动，左键攻击路径待 t242 接。
+            if (e.key === Qt.Key_M && window.appState === "playing") {
+                const fp = player.feetPosition
+                const lv = player.lookVector
+                entityManager.spawnMob(Math.floor(fp.x + lv.x * 2), Math.floor(fp.y) + 1, Math.floor(fp.z + lv.z * 2))
+                e.accepted = true; return
+            }
             // t229 Q / Ctrl+Q 丢弃热键（spec「第一人称 Q=丢 1 / Ctrl+Q=丢整栈（手持槽）；背包内悬停槽
             //   Q=丢 1 / Ctrl+Q=丢整栈。适用所有背包面板」）。Ctrl 修饰由 e.modifiers 直接判（窗口级键盘事件，
             //   无需常驻 ctrlHeld 态；同 shiftHeld 跟踪不同的是 Q 非移动键、press 即早退无需 release 守卫）。
