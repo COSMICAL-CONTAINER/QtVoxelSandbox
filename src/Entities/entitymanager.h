@@ -155,7 +155,10 @@ public:
     //   命中判定：slab-based ray-AABB（mob AABB = pos ± radius 的 1×1×1 立方；dir 须归一）。
     //   跳过：非 Mob（掉落物 / 下落方块）、dead（尸体不可再打，防鞭尸重复扣血 / 触发多次掉落）。
     //   分层（PLAN §2）：EntityManager 自持实体数据，做几何测试最自然；只读自身数据、无向下依赖。
-    int findMobHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist = nullptr) const;
+    // t253 攻击单体选中：findMobHit 返回**单个** mob 索引（nearest-along-ray，非 AoE 全打）；丢弃返回值
+    //   = 单体选中结果未用 = bug（调了选体却不据此攻击 / 高亮）。[[nodiscard]] 在编译期强约束（同项目
+    //   lessons-learned 的 [[nodiscard]] fallible-call 纪律：检查 + 用返回值，不 (void) 吞）。
+    [[nodiscard]] int findMobHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist = nullptr) const;
     // t249 受击击退（spec「受击往攻击方向小跳击退」；C++ 直调，PlayerController::attackMob 命中后调）：
     //   给第 i 个 mob 一个水平方向 (dirX,dirZ) 的击退冲量（vx/vz=kKnockbackHoriz 沿方向）+ 小跳垂直速度
     //   （vy=kKnockbackUp 向上）；解除 resting 让 tick 重力分支处理上跳→减速→下落→着地（小弹起观感）。

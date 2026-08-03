@@ -387,6 +387,8 @@ void PlayerController::tickImpl()
     pickupScan();
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
+        // t253：暂停 / 背包开时清 mob 目标框（updateRaycast 仅 captured 时跑 → 不清则残留旧目标）。
+        if (m_targetedMob >= 0) { m_targetedMob = -1; emit targetedMobChanged(); }
         // t45：暂停时清行走动画驱动（moveSpeed→0；walkPhase 不动，QML 据此 sin*0=0 → 四肢归中性位）。
         // t159：同步清 speed（实际水平速度，暂停即 0；F3 报 0 而非陈旧值）。仅值真变时发，免每 tick 抖动。
         if (m_moveSpeed != 0.0f || m_horizSpeed != 0.0f) {
@@ -432,6 +434,22 @@ void PlayerController::updateRaycast()
     //   格坐标 / 法线不变但命中距离仍在变，点击瞬间需读最新值。无命中 = kReach（「无穷远」语义）。
     m_hitDist = h.valid ? h.dist : kReach;
 
+    // t253 攻击单体选中：每帧缓存准星瞄准的**单个**最近活体 mob（findMobHit 已返单点最近，非 AoE 全打）。
+    //   供 QML 目标框高亮（呈现层只读）。mob 须不晚于命中方块（mobDist<=m_hitDist）才算目标——方块挡在
+    //   mob 前时该 mob 不算（机制等价 MC「方块遮挡视线 → mob 不可被瞄」）。不随 changed 早退：准星扫过 mob
+    //   时背景方块格可能未变（changed=false）但目标 mob 已切换，须每帧重算。beginMining 攻击仍即时调
+    //   findMobHit（点击瞬间最新视线），不读此缓存。
+    int newTarget = -1;
+    if (m_entityManager) {
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(position(), lookDirection(), kReach, &mobDist);
+        if (mobIdx >= 0 && mobDist <= m_hitDist) newTarget = mobIdx;
+    }
+    if (newTarget != m_targetedMob) {
+        m_targetedMob = newTarget;
+        emit targetedMobChanged();
+    }
+
     // 仅在命中态/格坐标/法线真正变化时 emit，避免每帧无谓刷新 QML 绑定。
     const bool changed = (h.valid != m_hasHit)
         || (h.valid && (h.bx != m_hitBx || h.by != m_hitBy || h.bz != m_hitBz
@@ -446,6 +464,9 @@ void PlayerController::updateRaycast()
 
 void PlayerController::clearHit()
 {
+    // t253：清目标 mob（无世界 / 退出 → 不应残留旧目标框；置前于 m_hasHit 早退——无方块命中但瞄着 mob
+    //   时 m_hasHit 可能为 false，仍须清 mob 目标）。
+    if (m_targetedMob >= 0) { m_targetedMob = -1; emit targetedMobChanged(); }
     if (!m_hasHit) return;
     m_hasHit = false;
     m_hitNx = m_hitNy = m_hitNz = 0;

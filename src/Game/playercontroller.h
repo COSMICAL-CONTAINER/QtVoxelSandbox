@@ -103,6 +103,11 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(QVector3D hitNormal READ hitNormal NOTIFY hitChanged)
     Q_PROPERTY(QVector3D hitFaceCenter READ hitFaceCenter NOTIFY hitChanged)
     Q_PROPERTY(QVector3D hitFaceEuler READ hitFaceEuler NOTIFY hitChanged)
+    // t253 攻击单体选中（spec「近距两 mob 只打一个 / 射线最近命中」）：每帧沿视线 findMobHit 选出的
+    //   **单个**活体 mob 索引（nearest-along-ray；非 AoE 全打），供 QML 目标框高亮（呈现层只读）。
+    //   -1 = 无目标（瞄准未命中 mob / 方块挡在 mob 前 / 无实体管理器 / 暂停）。仅 captured 时刷新；
+    //   beginMining 攻击路径仍即时调 findMobHit（点击瞬间最新视线），不依赖本缓存。
+    Q_PROPERTY(int targetedMob READ targetedMob NOTIFY targetedMobChanged)
     // 当前手持方块（右键放置用它；t06 hotbar 会绑定此属性）。默认 Stone。
     Q_PROPERTY(int selectedBlock READ selectedBlock WRITE setSelectedBlock NOTIFY selectedBlockChanged)
     // 当前手持物品的**原始 id**（t34 工具感知挖掘用）：方块段直接透传；工具段（>=0x100）由
@@ -187,6 +192,9 @@ public:
     QVector3D hitNormal() const { return QVector3D(m_hitNx, m_hitNy, m_hitNz); }
     QVector3D hitFaceCenter() const; // 命中面中心世界坐标（贴面，略外推防 z-fight）
     QVector3D hitFaceEuler() const;  // 把规范线框（+Z 法线）摆到命中面的欧拉角（度）
+    // t253：当前准星瞄准的**单个**目标 mob 索引（findMobHit 最近活体；updateRaycast 每帧刷新）。
+    //   -1 = 无目标。供 QML 目标框高亮（呈现层只读 EntityManager.posAt/radiusAt/halfHeightAt）。
+    int targetedMob() const { return m_targetedMob; }
 
     int selectedBlock() const { return m_selectedBlock; }
     void setSelectedBlock(int id);
@@ -311,6 +319,10 @@ signals:
     void perfChanged();       // t178：~1s 窗口 tick() CPU 耗时平均刷新（驱动 F3 帧时间切分重绑）
     void moveStateChanged();  // 移动态切（Walk/Sprint/Crouch；t51；驱动 QML 摆幅 + 速率因子）
     void hitChanged();
+    // t253 攻击单体选中：准星瞄准的目标 mob 索引变（updateRaycast 每帧刷新；驱动 QML 目标框显隐 / 跟随）。
+    //   仅值真变（命中新 mob / 失瞄 / 暂停清零）才发，免每帧抖 QML 绑定。分层（PLAN §2）：Game 层暴露
+    //   选中态，呈现层只读消费（同 hasHit→线框 模式）。
+    void targetedMobChanged();
     void selectedBlockChanged();
     void selectedItemChanged(); // 手持原始 id 变（含工具段切换；驱动 t34 速度重算）
     void miningStateChanged();  // mining / miningStage / miningBlock 三者同变（一次性发，少抖动）
@@ -619,6 +631,12 @@ private:
     //   （=「无穷远」语义，让 mob 命中永远优先于「无方块命中」）。初值 5.0f 与 kReach 同值（kReach 声明
     //   在后，依代码库约定默认成员初始化器不前向引用，故用字面量；值变更须同步 kReach）。
     float m_hitDist = 5.0f;
+    // t253 攻击单体选中：准星瞄准的**单个**目标 mob 的 EntityManager 索引（findMobHit 最近活体）。
+    //   updateRaycast 每帧刷新（不随 hit changed 早退——同 m_hitPointY/m_hitDist；准星扫过 mob 时即便
+    //   背后方块格未变，目标 mob 仍在切换，须每帧重算）。mob 须不晚于命中方块（mobDist<=m_hitDist）才算
+    //   目标（方块挡 mob 前 → 非目标）。仅值真变才 emit targetedMobChanged。-1 = 无目标。beginMining 攻击
+    //   仍即时调 findMobHit（点击瞬间最新视线），不读此缓存。
+    int m_targetedMob = -1;
 
     static constexpr float kHalfW = 0.3f;      // 宽 0.6
     static constexpr float kHeight = 1.8f;

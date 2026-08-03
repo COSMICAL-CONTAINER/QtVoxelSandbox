@@ -2466,6 +2466,19 @@ Window {
                             }
                         }
                     }
+                    // t253 攻击单体选中：准星瞄准的**单个** mob 显白色目标框（常驻可见，区别 F3+B 调试框——
+                    //   不依赖 showHitboxes）。player.targetedMob = EntityManager 索引（C++ findMobHit 每帧选
+                    //   最近活体单体）；delegate index 匹配即本 mob 被瞄准 → 显框。WireCube ±0.5 居中 + scale =
+                    //   AABB（同 F3+B hitbox 公式；+0.02 外扩略大于 F3+B 的 +0.01 → F3+B 同开时目标框叠在外侧
+                    //   仍可见）。仅 Mob（FallingBlock 非攻击目标）。NoLighting（可见 Model 红线）。
+                    //   分层（PLAN §2）：呈现层只读 player.targetedMob + delegate 位置 / halfW / halfH（同 hasHit
+                    //   →线框 模式：Game 层暴露选中态，呈现自发画框，绝不反向写）。
+                    Model {
+                        visible: entKind === EntityManager.Mob && player.targetedMob === index
+                        geometry: WireCube {}
+                        scale: Qt.vector3d(mobHalfW * 2.0 + 0.02, mobHalfH * 2.0 + 0.02, mobHalfW * 2.0 + 0.02)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
+                    }
                     // t116/t252 F3+B mob 碰撞箱（spec「mob scale 1.0」+ 朝向箭头）：mob AABB = halfW×halfH×halfW
                     //   （t252 非立方：pig/sheep 0.9×0.9、cow 0.9×1.4；旧版固定 1×1×1）。WireCube ±0.5 居中 →
                     //   scale = (2·halfW, 2·halfH, 2·halfW) 覆盖实际 AABB；+0.01 外扩避与 mob 模型表面 z-fight。
