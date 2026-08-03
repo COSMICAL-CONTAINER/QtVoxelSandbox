@@ -1242,6 +1242,29 @@ void PlayerController::placeBlock()
             return;
         }
     }
+    // t262 邻格互补半砖合并（spec「角落下半砖上沿邻墙侧面放上半砖」）：命中实体方块（墙 / 满砖）的面、
+    //   目标格已是**互补半**半砖时 → 把目标格合并为整砖（Planks + 双半砖标记）。场景：墙角下半砖上，玩家瞄
+    //   邻墙侧面（上半高度）想补上半砖（非顶面）。旧实现：目标格非 air/water → 下方排开水守卫直接 return
+    //   （spec 报「现不行」）。MC 语义：目标格已有互补半砖时合并为 double slab = full block（同 t163(b) 同格
+    //   合并，只是命中格从「slab」换成「邻接实体方块」——命中点 Y 仍据邻墙侧面 fracY 正确算出想放的半位）。
+    //   到此说明上面 t163(b) 同格合并未触发（命中格非 slab，或点中 slab 实半 fall-through）→ 检**目标格**。
+    //   同半（如目标下半 + 新下半）不合（几何重叠）→ 不合，fall-through 走下方常规放置 / 拒绝。
+    if (m_selectedBlock == BlockRegistry::WoodSlab) {
+        const quint8 tId = m_world->blockAt(tx, ty, tz);
+        if (tId == BlockRegistry::WoodSlab) {
+            const quint8 tState = m_world->stateAt(tx, ty, tz);
+            const bool tUpper = (tState & 1) != 0;
+            const bool newUpper = (placeState & 1) != 0; // placeState 已据命中面 / 命中点 Y 算好（见上方 WoodSlab 分支）
+            if (newUpper != tUpper) { // 互补半 → 合并目标格为整砖
+                if (overlapsPlayerAABB(tx, ty, tz, BlockRegistry::Planks, 0)) return; // 合成满砖前查自埋（同 t163b）
+                m_world->setBlock(tx, ty, tz, BlockRegistry::Planks,
+                                  BlockRegistry::PlanksFromDoubleSlabBit);
+                m_lastPlaceMs = now;
+                emit swingArm(); // 合成也是一次「放置」动作 → 挥手（t29）
+                return;
+            }
+        }
+    }
     // t198 水中可放方块（排开水）：目标格为空气或水均可放置；水（水源 state=0 / 流水 state 1..7）被
     //   方块直接覆盖 → World::setBlock 内 oldId=Water → newId=实体走「放置」分支（仅发 blockPlaced，
     //   不发 blockBroken → 无破块粒子 / 音；水静默消失，机制等价 MC「方块填入水格排开水」）。已有实体
