@@ -87,6 +87,16 @@ public:
     static constexpr int RawBeefId      = 0x20C; // 生牛肉：杀牛掉落（机制等价 MC 1.0 raw beef）
     static constexpr int LeatherId      = 0x20D; // 皮革：杀牛掉落（机制等价 MC 1.0 leather）
     static constexpr int WoolId         = 0x20E; // 羊毛：杀羊掉落（机制等价 MC 1.0 wool）
+    // t243 生物蛋（spawn eggs）：材料段 0x20F..0x211。创造模式物品，右键地面 → EntityManager::spawnMobTyped
+    //   生成对应被动生物（猪 / 牛 / 羊；机制等价 MC 1.0 spawn egg）。三种蛋各映射一种 mobType（与
+    //   EntityManager::MobType MobPig/Cow/Sheep 同值）；PlayerController::placeBlock 据本 id 分流走「使用」分支
+    //   （同桶 / 锄 / 种子：非方块材料段 → 在 selectedBlock Air 守卫之前分流，不走方块放置路径）。可堆叠 64
+    //   （机制等价 MC 1.0 spawn egg maxStack 64；走材料段默认 maxStack=64，无需特例）。生存消耗 1 蛋 / 创造不耗
+    //   （同种子 / 面包模式）。MaterialIcon 自绘蛋形图标（壳 + mob 配色斑点）；创造调色板补全归 t244。名称 /
+    //   图标全原创（§9 区隔，零 MC 资产 / 专名）。
+    static constexpr int SpawnEggPigId   = 0x20F; // 生物蛋（猪）：右键地面 → 生成猪（MobPig）
+    static constexpr int SpawnEggCowId   = 0x210; // 生物蛋（牛）：右键地面 → 生成牛（MobCow）
+    static constexpr int SpawnEggSheepId = 0x211; // 生物蛋（羊）：右键地面 → 生成羊（MobSheep）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

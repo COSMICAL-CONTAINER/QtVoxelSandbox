@@ -1045,6 +1045,43 @@ void PlayerController::placeBlock()
         emit swingArm(); // 食用挥手（一次「使用」动作；同种植 / 桶舀水挥手）
         return; // 面包（食用 / 无事）均不再走方块放置路径
     }
+    // t243 生物蛋 useBlock（spec「右键地面→生成对应生物」）：手持生物蛋（猪 / 牛 / 羊，材料段 0x20F..0x211）
+    //   右键命中实体方块 → 在命中面相邻格生成对应 mob（EntityManager::spawnMobTyped）。机制等价 MC 1.0 spawn
+    //   egg（机制对齐，非名词照搬）。蛋非方块（材料段）→ selectedBlock 经 hotbar 归 Air，须在下方
+    //   `m_selectedBlock == Air` 守卫之前分流（同桶 / 锄 / 种子 / 面包分支模式）。**须命中**（spec「右键地面」——
+    //   蛋需目标面定位生成点；瞄空气不生成）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可用。
+    //   生存消耗 1 蛋（创造不耗 → 无限生成，机制等价 MC 创造 spawn egg 不消耗）。
+    //   生成位 = 命中面相邻格 (m_hitBx+nx, m_hitBy+ny, m_hitBz+nz)（同方块放置 tx/ty/tz 约定）→ 右键方块顶面在
+    //   其上方一格生成、右键侧壁在玩家侧空气格生成；mob 半径 0.5、pos 存格中心 → spawnMobTyped 把 mob 放到该
+    //   格中心，重力 tick 把它贴到地表（生成位高于地表时下落，机制等价 MC spawn egg 落地）。mobType / 占位配色
+    //   据蛋 id 选（pig/cow/sheep 走 MobModel + 贴图，color 仅 mobType 0 测试路径读，传占位串即可）。
+    //   分层（PLAN §2）：生成属 Game/Physics（读射线命中 + 调 EntityManager），不改栅格语义（setBlock 入口）。
+    if (m_hotbar && m_world && m_entityManager
+        && (heldItemId == RecipeRegistry::SpawnEggPigId
+            || heldItemId == RecipeRegistry::SpawnEggCowId
+            || heldItemId == RecipeRegistry::SpawnEggSheepId)) {
+        if (m_hasHit) {
+            int mobType = 0;
+            QString color; // 占位串（pig/cow/sheep 走 MobModel + 贴图，不读 color）
+            if (heldItemId == RecipeRegistry::SpawnEggPigId) {
+                mobType = EntityManager::MobPig;   color = QStringLiteral("#f0a8b0");
+            } else if (heldItemId == RecipeRegistry::SpawnEggCowId) {
+                mobType = EntityManager::MobCow;   color = QStringLiteral("#5a4030");
+            } else {
+                mobType = EntityManager::MobSheep; color = QStringLiteral("#f5f0e8");
+            }
+            // 生成位 = 命中面相邻格（同方块放置；右键顶面 → 上方一格、右键侧壁 → 玩家侧空气格）。
+            //   maxHealth 传 0 → spawnMobTyped 内部用 kDefaultMaxHealth（=10，MC 1.0 猪/牛/羊 5 心）；
+            //   避开访问 EntityManager 私有常量（分层：Game 层不读 Entities 实现细节，仅传语义意图「默认血量」）。
+            const int sx = m_hitBx + m_hitNx, sy = m_hitBy + m_hitNy, sz = m_hitBz + m_hitNz;
+            m_entityManager->spawnMobTyped(sx, sy, sz, mobType, color, 0);
+            if (m_mode != Creative)
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 蛋（创造不耗）
+            m_lastPlaceMs = now;
+            emit swingArm(); // 使用蛋也是一次「使用」动作 → 挥手（t29）
+        }
+        return; // 生物蛋（生成成功 / 未命中）均不再走方块放置路径
+    }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;

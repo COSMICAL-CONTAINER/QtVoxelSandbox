@@ -19,6 +19,9 @@ import QtQuick
 //   0x20C 生牛肉 —— 深红肉块 + 白骨柄（t242；杀牛掉落，比猪排深红、肌理纹更密）。
 //   0x20D 皮革   —— 棕黄兽皮 + 毛边 + 缝线孔（t242；杀牛掉落，鞣制皮革）。
 //   0x20E 羊毛   —— 白色蓬松块 + 卷曲纹（t242；杀羊掉落，绒毛团）。
+//   0x20F 生物蛋（猪）—— 蛋形 + 粉红斑（t243；右键地面 → 生成猪）。
+//   0x210 生物蛋（牛）—— 蛋形 + 棕白斑（t243；右键地面 → 生成牛）。
+//   0x211 生物蛋（羊）—— 蛋形 + 浅灰白斑（t243；右键地面 → 生成羊）。
 // 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭/桶同理 → 均独立自绘。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体 Repeater（sourceItem），
@@ -26,7 +29,7 @@ import QtQuick
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -380,6 +383,50 @@ Item {
                 R(6, 16, 1, 1, woolShade); R(17, 16, 1, 1, woolShade)
             }
 
+            // t243 生物蛋（spawn eggs）：创造模式物品，右键地面 → 生成对应被动生物。MC 风格 spawn egg = 椭圆蛋形
+            //   + 表面散布该 mob 配色的斑点（蛋壳主色统一灰白，靠斑点色区分猪 / 牛 / 羊三种蛋）。纯原创自绘（§9a）。
+            //   drawSpawnEgg(kind) 共用骨架：kind="pig" 粉红斑（猪皮粉调）/ "cow" 棕白斑（牛棕白花）/ "sheep" 浅灰白
+            //   斑（羊绒白灰）。蛋形 = 上下收窄的椭圆（顶略尖、底圆收）；斑点按固定坐标散布（确定性，非随机源）。
+            //   配色：shell #e8e0c8（蛋壳暖白）/ shellLight #f8f0e0（顶受光高光）/ shellDark #b8a888（底阴影 + 蛋壳暗边）。
+            //   斑点色 spot / spotDark 按 mob 选：pig 粉 #f0a8b0 / 暗粉 #c8788（与 mob_pig 配色一致）；cow 棕 #5a4030 /
+            //   白 #f0e8d8（牛棕白花斑）；sheep 浅灰 #d8d0c8 / 白 #f5f0e8（羊绒白灰斑）。
+            const drawSpawnEgg = (kind) => {
+                const shell = "#e8e0c8", shellLight = "#f8f0e0", shellDark = "#b8a888"
+                // 斑点色按 mob 选（与 mob_pig / mob_cow / mob_sheep 贴图主色基调一致，便于肉眼辨蛋）。
+                let spot, spotDark
+                if (kind === "pig")   { spot = "#f0a8b0"; spotDark = "#c87888" }   // 猪皮粉
+                else if (kind === "cow") { spot = "#5a4030"; spotDark = "#f0e8d8" } // 牛棕白花
+                else                  { spot = "#d8d0c8"; spotDark = "#f5f0e8" }   // 羊绒白灰
+                // 蛋形主体（上下收窄的椭圆；rows 6..18，中部最宽 12）
+                R(9, 6, 6, 1, shell)        // 顶行（窄，略尖）
+                R(7, 7, 10, 1, shell)
+                R(6, 8, 12, 9, shell)       // 主体 rows 8..16（最宽）
+                R(7, 17, 10, 1, shell)
+                R(9, 18, 6, 1, shellDark)   // 底行（窄 + 暗阴影，圆收）
+                // 顶受光高光（顶两行 + 左上角，表「圆顶反光」）
+                R(9, 6, 6, 1, shellLight)
+                R(7, 7, 8, 1, shellLight)
+                R(6, 8, 3, 1, shellLight)
+                // 底阴影（倒数两行 + 右下边，表「蛋的体积感」）
+                R(7, 17, 10, 1, shellDark)
+                R(15, 9, 1, 7, shellDark)   // 右侧暗边（圆柱明暗）
+                // mob 斑点（散布蛋壳表面，固定坐标 → 确定性，非随机；每点 2×2 主色 + 1×1 暗边）
+                //   牛（cow）走「棕白花斑」：spotDark（白）作大底、spot（棕）叠中心 → 表「白底棕斑」花牛。
+                //   pig / sheep 走「主色斑 + 暗边」：spot 主色 + spotDark 暗边描底。
+                const blot = (cx, cy) => {
+                    if (kind === "cow") {
+                        R(cx, cy, 2, 2, spotDark)    // 白底
+                        R(cx, cy, 1, 1, spot)        // 棕心
+                    } else {
+                        R(cx, cy, 2, 2, spot)        // 主色斑
+                        R(cx + 1, cy + 1, 1, 1, spotDark) // 暗边
+                    }
+                }
+                blot(8, 9); blot(13, 8); blot(15, 11)
+                blot(7, 12); blot(10, 13); blot(13, 14)
+                blot(8, 15)
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             switch (root.materialId) {
             case 0x200: drawStick();        break
@@ -397,6 +444,9 @@ Item {
             case 0x20C: drawRawBeef();      break // t242 杀牛掉落
             case 0x20D: drawLeather();      break // t242 杀牛掉落
             case 0x20E: drawWool();         break // t242 杀羊掉落
+            case 0x20F: drawSpawnEgg("pig");   break // t243 生物蛋（猪）
+            case 0x210: drawSpawnEgg("cow");   break // t243 生物蛋（牛）
+            case 0x211: drawSpawnEgg("sheep"); break // t243 生物蛋（羊）
             default:    drawStick();        break
             }
         }

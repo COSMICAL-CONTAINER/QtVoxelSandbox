@@ -169,7 +169,12 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::WaterBucketId), // t174 装水铁桶
         int(RecipeRegistry::SeedId),        // t235 小麦种子（挖草丛得；种植 → 小麦作物 t236）
         int(RecipeRegistry::WheatId),       // t237 小麦物品（收割成熟作物得；面包原料）
-        int(RecipeRegistry::BreadId)        // t238 面包（3 小麦合成；右键食 +5 饥饿）
+        int(RecipeRegistry::BreadId),       // t238 面包（3 小麦合成；右键食 +5 饥饿）
+        // t243 生物蛋（创造模式物品；右键地面 → 生成对应被动生物）。机制等价 MC 1.0 spawn egg；maxStack=64
+        //   （走材料段默认），拾取时满栈 64；创造不耗 → 无限生成。MaterialIcon 自绘蛋形 + mob 配色斑点。
+        int(RecipeRegistry::SpawnEggPigId),   // 生物蛋（猪）
+        int(RecipeRegistry::SpawnEggCowId),   // 生物蛋（牛）
+        int(RecipeRegistry::SpawnEggSheepId)  // 生物蛋（羊）
     };
 }
 
@@ -272,6 +277,10 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::RawBeefId)     return QStringLiteral("生牛肉");
         if (blockId == RecipeRegistry::LeatherId)     return QStringLiteral("皮革");
         if (blockId == RecipeRegistry::WoolId)        return QStringLiteral("羊毛");
+        // t243 生物蛋：创造模式物品，右键地面 → 生成对应被动生物（机制等价 MC 1.0 spawn egg，零 MC 专名 §9）。
+        if (blockId == RecipeRegistry::SpawnEggPigId)   return QStringLiteral("生物蛋（猪）");
+        if (blockId == RecipeRegistry::SpawnEggCowId)   return QStringLiteral("生物蛋（牛）");
+        if (blockId == RecipeRegistry::SpawnEggSheepId) return QStringLiteral("生物蛋（羊）");
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
