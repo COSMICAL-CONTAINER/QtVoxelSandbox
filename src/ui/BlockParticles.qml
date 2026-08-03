@@ -38,6 +38,15 @@ Node {
         // t30：扬尘更少更弱——放置是「轻撒」非「迸裂」，6 颗已足。
         placeEmitter.burst(4, 60)
     }
+    // t267 进食屑粒（持面包按住右键累积进食时每跨一节拍 player 发 eatingParticle）：从嘴部（玩家眼位，
+    //   float 世界坐标）向外散少量面包屑。机制等价 MC 进食屑粒。与 burstBreak/burstMine 不同：原点是
+    //   float 世界坐标（玩家眼位）非方块格中心，故直接用传入坐标（不加 +0.5）。色 = 面包色（暖棕黄）。
+    //   单拍少量（3 < 破块 8，spec「屑粒动画」非爆量），kEatBeats 节拍封顶总迸发；方向偏上向前（嘴部吐出）。
+    function burstEat(x, y, z) {
+        eatParticle.color = "#d8a838" // 面包屑色（暖棕黄；呈现层视觉约定，非用户可见命名）
+        eatEmitter.position = Qt.vector3d(x, y, z)
+        eatEmitter.burst(3, 60)
+    }
 
     // 运行期就绪日志（t16）：落 voxelsandbox.log，使「粒子节点加载状态在 console 可见且非 Error」
     // 可被运行期核验（Particles3D 不可用时本文件根本不会被加载，故能进到此处即代表就绪）。
@@ -136,6 +145,41 @@ Node {
             velocity: VectorDirection3D {
                 direction: Qt.vector3d(0, 2, 0)
                 directionVariation: Qt.vector3d(1.0, 1.0, 1.0)
+            }
+        }
+
+        // t267 进食面包屑（嘴部迸发）：小颗粒、暖棕黄色、轻落（从玩家眼位向外散）。
+        //   机制等价 MC 进食屑粒；色由 burstEat 设（面包色）。delegate 复用 debrisDelegate（同碎屑小方块）。
+        //   particleScale ≤ 0.07（同 t30 碎屑「单粒 < 0.15 格」约束；此处 0.012 与 break/place 一致）。
+        ModelParticle3D {
+            id: eatParticle
+            maxAmount: 40
+            color: "#d8a838"
+            colorVariation: Qt.vector4d(0.12, 0.12, 0.12, 0.0)
+            fadeInEffect: ModelParticle3D.FadeScale
+            fadeInDuration: 40
+            fadeOutEffect: ModelParticle3D.FadeOpacity
+            fadeOutDuration: 250
+            hasTransparency: true
+            delegate: debrisDelegate
+        }
+        Gravity3D {
+            particles: [eatParticle]
+            direction: Qt.vector3d(0, -1, 0)
+            magnitude: 8 // 屑粒轻落（介于碎屑 14 / 扬尘 6 之间；嘴部吐出后自然下落）
+        }
+        ParticleEmitter3D {
+            id: eatEmitter
+            particle: eatParticle
+            emitRate: 0
+            lifeSpan: 600
+            lifeSpanVariation: 120
+            particleScale: 0.012
+            particleRotationVelocityVariation: Qt.vector3d(200, 200, 200)
+            // 嘴部吐出方向：偏上（y=1.5）+ 横向 variation（嘴嚼时屑粒四散），收束避免聚团。
+            velocity: VectorDirection3D {
+                direction: Qt.vector3d(0, 1.5, 0)
+                directionVariation: Qt.vector3d(1.2, 1.0, 1.2)
             }
         }
     }

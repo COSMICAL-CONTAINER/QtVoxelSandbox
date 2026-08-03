@@ -193,7 +193,9 @@ void PlayerController::grab()
 void PlayerController::respawn()
 {
     cancelMining();           // 清生存累积挖掘态（裂纹叠层随之隐）
+    cancelEating();           // t267：清进食累积态（防 respawn 后 updateEating 误续食）
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
+    m_rightDown = false;      // t267：清右键按下态（防 respawn 后 updateEating 误续食）
     m_dead = false;           // t175：清死亡态镜像 → pickupScan 恢复（重生后玩家已离开死亡点，可正常拾取）
     // t202：重生回满气泡 + 清三计时器（出生点在水外 → 满气起算；PlayerState::respawn 同步 air 到 maxAir）。
     if (m_air != kMaxAir) { m_air = kMaxAir; emit airUpdated(m_air); }
@@ -218,7 +220,9 @@ void PlayerController::respawn()
 void PlayerController::loadSavedState(float x, float y, float z, float yaw, float pitch, int mode)
 {
     cancelMining();
+    cancelEating(); // t267：清进食累积态（防加载后 updateEating 误续食）
     m_leftDown = false;
+    m_rightDown = false; // t267：清右键按下态（防加载后 updateEating 误续食）
     m_dead = false;
     m_pos = QVector3D(x, y, z);
     m_vel = QVector3D(0, 0, 0);
@@ -256,7 +260,9 @@ void PlayerController::release()
     setCaptured(false);
     clearHit();                               // 暂停 → 隐藏线框（未捕获时不选中）
     cancelMining();                           // t34：暂停 / 失焦 → 清累积挖掘态（spec：失焦清零）
+    cancelEating();                           // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零）
     m_leftDown = false;                       // t44：暂停 / 失焦 → 视同松手（切断续挖）
+    m_rightDown = false;                      // t267：暂停 / 失焦 → 视同松手（切断连食）
     // t51：暂停 / 失焦时退出疾跑 / 蹲下（恢复时从 Walk 起；避免遗留蹲态卡低视角 / 疾跑余速）。
     // t70：同时清双击窗口脏残留（防暂停恢复后首按 W 被旧戳误判双击 → 误触发疾跑）。
     if (m_moveState != Walk) setMoveState(Walk);
@@ -309,15 +315,29 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
             auto *me = static_cast<QMouseEvent *>(e);
             if (m_captured) {
                 if (me->button() == Qt::LeftButton)   { beginMining(); return true; }
-                if (me->button() == Qt::RightButton)  { placeBlock();  return true; }
+                // t267：手持面包 → 右键**按住**进食（不再单击即食；spec「单击即食→改长按右键」）。
+                //   持物判据直读 hotbar（单一权威，同 updateMining / placeBlock 的 t57/t186 修法，免 QML
+                //   绑定滞后窗口）。面包走 beginEating 累积进度路径，不进 placeBlock（placeBlock 内面包
+                //   分支已移除）。其它持物（方块 / 桶 / 锄 / 种子 / 蛋 / 工具）仍走 placeBlock 单击路径。
+                if (me->button() == Qt::RightButton)  {
+                    const int heldForEat = m_hotbar ? m_hotbar->selectedItemId() : 0;
+                    if (heldForEat == RecipeRegistry::BreadId) { beginEating(); return true; }
+                    placeBlock();
+                    return true;
+                }
                 if (me->button() == Qt::MiddleButton) { pickBlock();   return true; } // t37 pick block
             }
         } else if (e->type() == QEvent::MouseButtonRelease) {
             // t34：左键松开 → 清生存累积进度（创造不进入累积态，endMining 内 no-op）。
+            // t267：右键松开 → 清进食累积进度（未完成不消耗；非进食态 endEating 内 no-op）。
             // 仍只在捕获时消费（与 press 对称；未捕获时 release 不应破坏其它层的光标交互）。
             auto *me = static_cast<QMouseEvent *>(e);
             if (m_captured && me->button() == Qt::LeftButton) {
                 endMining();
+                return true;
+            }
+            if (m_captured && me->button() == Qt::RightButton) {
+                endEating();
                 return true;
             }
         }
@@ -387,6 +407,7 @@ void PlayerController::tickImpl()
     pickupScan();
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
+        cancelEating(); // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零，未完成不消耗）
         // t253：暂停 / 背包开时清 mob 目标框（updateRaycast 仅 captured 时跑 → 不清则残留旧目标）。
         if (m_targetedMob >= 0) { m_targetedMob = -1; emit targetedMobChanged(); }
         // t45：暂停时清行走动画驱动（moveSpeed→0；walkPhase 不动，QML 据此 sin*0=0 → 四肢归中性位）。
@@ -405,6 +426,7 @@ void PlayerController::tickImpl()
     updateRaycast();   // 沿视线 DDA 选体 → 更新线框命中态
     updateCameraDistance(); // t40：第三人称相机距离钳制（防穿墙）
     updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
+    updateEating(float(dt)); // t267：累积进食进度（持面包按住右键时；其它情况早 return）
 }
 
 // 视线方向：用与相机相同的欧拉→四元数（QQuaternion::fromEulerAngles(pitch,yaw,0)）旋转
@@ -958,6 +980,103 @@ void PlayerController::breakBlock()
     beginMining();
 }
 
+// t267 右键按下（手持面包）：开始累积进食进度。机制等价 MC 1.0 长按右键食面包（~1.6s 满，kEatDuration）。
+//   分流：eventFilter 在 RightButton press 时据持物（hotbar.selectedItemId == BreadId）调本方法而非
+//   placeBlock（面包不再单击即食；spec「单击即食→改长按右键」）。模式门控（t21）：观察者不能进食
+//   （沿用 placeBlock 入口 canPlace() 守卫；食用是「使用」语义，spectator 不交互）。无需命中（食用是玩家
+//   主观动作，不依赖视线命中实体方块，同 t238 旧面包分支语义）。持物变更（press→begin 间切槽）→ 不进。
+//   分层（PLAN §2）：进食属 Game/Physics（读持物 + 推进进度 + 写 Hotbar VM + 发语义事件），不改栅格语义。
+void PlayerController::beginEating()
+{
+    // 记录物理右键按下态（置于所有早 return 之前 —— 同 beginMining 的 m_leftDown 模式：即便当前不能开始
+    //   进食（观察者 / 未持面包 / 暂停），按钮按下这一事实仍成立，后续 updateEating 据此 + 持面包自动续食）。
+    m_rightDown = true;
+    if (!canPlace()) return; // 观察者不能进食（沿用 placeBlock 入口门控）
+    if (!m_hotbar || !m_captured) return;
+    if (m_hotbar->selectedItemId() != RecipeRegistry::BreadId) return; // 持物非面包 → 不进（仍记 m_rightDown）
+    m_eating = true;
+    m_eatingProgress = 0.0f;
+    m_eatBeat = -1; // 首拍 0 立即触发屑粒（进食开始的反馈即时）
+    emit eatingStateChanged();
+    emit eatingProgressChanged();
+}
+
+// t267 右键松开：清进食累积进度（未完成不消耗）。非进食态（m_eating=false）→ 仅清 m_rightDown，no-op。
+void PlayerController::endEating()
+{
+    m_rightDown = false;
+    if (!m_eating) return;
+    cancelEating();
+}
+
+// t267 清进食累积态（松开 / 换槽 / 失焦 / 完成）。无变化时静默（不发信号，免抖动 QML 绑定）。
+void PlayerController::cancelEating()
+{
+    if (!m_eating) return;
+    m_eating = false;
+    m_eatingProgress = 0.0f;
+    m_eatBeat = -1;
+    emit eatingStateChanged();
+    emit eatingProgressChanged();
+}
+
+// t267 完成（progress 满）：消耗 1 面包 + 恢复饥饿 + 清态。机制等价 MC 1.0 食面包 +5 hunger。
+//   Survival：消耗 1 面包（takeStack 选中槽 1 件）。Creative：饥饿锁满 → +5 被 clamp 截断无变化，且**不消耗**
+//   （创造调色板无限源，机制等价 MC 创造食不消耗；同 t238 旧面包分支 + 种子种植创造不耗）。饥饿恢复语义
+//   与 t238 旧面包分支一致（clamp；Survival 真增 / Creative 锁满静默），仅触发方式改：单击 → 长按累积满。
+//   无条件 emit swingArm（进食完成一次「使用」动作的挥手反馈）+ 刷 m_lastPlaceMs（防 placeBlock 入口 200ms CD
+//   与进食完成同帧后立即放块冲突）。cancelEating 清 m_eating；m_rightDown 不动 → updateEating 顶部连食分支接手。
+void PlayerController::finishEating()
+{
+    if (!m_hotbar) { cancelEating(); return; }
+    // 饥饿 +5（clamp；Survival 真增 / Creative 锁满无变化静默）。
+    const int nv = std::clamp(m_hunger + int(kBreadHungerAmount), 0, int(kMaxHunger));
+    if (nv != m_hunger) { m_hunger = nv; emit hungerUpdated(m_hunger); } // 呈现层 → PlayerState.setHunger
+    if (m_mode == Survival)
+        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 面包（创造不耗）
+    m_lastPlaceMs = m_evtClock.elapsed();
+    emit swingArm(); // 进食完成挥手（一次「使用」动作）
+    cancelEating();  // 清进食态（m_rightDown 不动 → 连食分支接手）
+}
+
+// t267 持续进食：每 tick 累积进度 / 检持物变更 / 跨节拍发屑粒 / 完成时消耗面包。由 tick() 调（captured 时）。
+//   机制等价 MC 1.0 长按右键食面包：progress 增量 = dt / kEatDuration（~1.6s 满）。
+//   连食（同 t44 连续挖掘族）：finishEating 消耗后 cancelEating 清 m_eating，但右键仍按住（m_rightDown）→
+//   顶部据此 + 仍持面包 → 自动 beginEating 下一件（不松手连食，机制等价 MC 按住右键连食多件面包）。
+//   持物变（切槽 / 面包耗尽后未松手）→ 取消进食（同挖掘目标变更清进度，spec「换槽清零」）。
+void PlayerController::updateEating(float dt)
+{
+    // 连食：右键仍按但当前未进食（刚吃完一件 m_eating 被 cancelEating 清 / 或持面包后按下时 beginEating
+    //   因某早 return 未进）→ 若仍持面包 + 可进食 → 自动 beginEating（progress 归 0）。仅非 spectator。
+    if (!m_eating && m_rightDown && canPlace() && m_hotbar
+        && m_hotbar->selectedItemId() == RecipeRegistry::BreadId) {
+        beginEating();
+    }
+
+    if (!m_eating) return;
+    if (!m_hotbar || !m_captured) { cancelEating(); return; }
+    // 持物变（切槽 / 面包耗尽）→ 取消进食（同挖掘目标变更清进度）。
+    if (m_hotbar->selectedItemId() != RecipeRegistry::BreadId) { cancelEating(); return; }
+
+    m_eatingProgress += dt / kEatDuration;
+    // 跨节拍屑粒：progress×kEatBeats 跨阶时发 eatingParticle（嘴部 = 玩家眼位 position()）。
+    //   beat 从 -1 起 → 首拍 0 在进食开始后首个 tick 立即触发（反馈即时）；之后每 ~0.4s 一拍（kEatBeats=4）。
+    //   屑粒不爆量：单拍 burst 少量（BlockParticles.burstEat 内 burst(3,60)），kEatBeats 段封顶总迸发数。
+    const int beat = std::clamp(int(m_eatingProgress * float(kEatBeats)), 0, kEatBeats);
+    if (beat != m_eatBeat) {
+        m_eatBeat = beat;
+        const QVector3D mouth = position(); // 眼位 ≈ 嘴部（屑粒从嘴迸发）
+        emit eatingParticle(mouth.x(), mouth.y(), mouth.z());
+    }
+    emit eatingProgressChanged();
+
+    // 完成：progress 满 → 消耗 1 面包 + 恢复饥饿。finishEating 内 cancelEating 清 m_eating；
+    //   m_rightDown 不动 → 下方下次 tick 顶部连食分支接手（仍持面包 + 仍按住 → 自动 beginEating 下一件）。
+    if (m_eatingProgress >= 1.0f) {
+        finishEating();
+    }
+}
+
 // 右键：命中面法线方向的相邻空格置当前手持方块。
 // 校验：目标格须为空气（不覆盖实体）；且不与玩家 AABB 重叠（防自埋/卡死）。
 // 模式门控（t21）：观察者不能放块（用户核心诉求）——在调用 World::setBlock 前拦截。
@@ -1134,24 +1253,10 @@ void PlayerController::placeBlock()
         }
         return; // 种子（种植成功 / 命中非耕地 / 未命中）均不再走方块放置路径
     }
-    // t238 食用面包（spec「右键食面包→恢复饱食度」）：手持面包（BreadId，材料段非方块）右键 → 恢复饱食度
-    //   +5 hunger（机制等价 MC 1.0 面包 +5 hunger / 2.5 鼓腿）。面包非方块 → selectedBlock 经 hotbar 归 Air，
-    //   须在下方 `m_selectedBlock == Air` 守卫之前分流（同桶 / 锄 / 种子分支模式）。**无需命中**（食用是
-    //   玩家主观动作，不依赖视线命中实体方块；机制等价 MC「长按右键食」，本项目简化为单次右键食一件）。
-    //   Survival：消耗 1 面包 + 饥饿 +5。Creative：饥饿锁满 → +5 被 clamp 截断无变化，且**不消耗**（创造调色板
-    //   无限源，机制等价 MC 创造食不消耗；同种子种植创造不耗）。为保「食用反馈独立于饥饿是否真 +」原则，
-    //   无条件 emit swingArm + 刷 m_lastPlaceMs（食面包也是一次「使用」动作；placeBlock 入口 200ms CD 顺带
-    //   限食用节流防刷屏挥手）。spectator 已被入口 canPlace() 守卫拦截（食用经 placeBlock 入口，沿用既有门控）。
-    if (m_hotbar && heldItemId == RecipeRegistry::BreadId) {
-        // 饥饿 +5（clamp；Survival 真增 / Creative 锁满无变化静默）。
-        const int nv = std::clamp(m_hunger + int(kBreadHungerAmount), 0, int(kMaxHunger));
-        if (nv != m_hunger) { m_hunger = nv; emit hungerUpdated(m_hunger); } // 呈现层 → PlayerState.setHunger
-        if (m_mode == Survival)
-            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 面包（创造不耗）
-        m_lastPlaceMs = now;
-        emit swingArm(); // 食用挥手（一次「使用」动作；同种植 / 桶舀水挥手）
-        return; // 面包（食用 / 无事）均不再走方块放置路径
-    }
+    // t267：面包已从 placeBlock 移除 —— 改由 eventFilter RightButton press 据持物 == BreadId 分流到
+    //   beginEating（长按累积进食进度，~1.6s 满后 finishEating 消耗 + 恢复饥饿）。spec「单击即食→改长按右键」。
+    //   旧单次右键食一件的分支已删（避免与长按路径并存导致单击仍即食）。饥饿恢复 + Survival 消耗 / Creative
+    //   不耗的语义见 finishEating（同 t238 旧分支语义，仅触发方式改：单击 → 长按累积满）。
     // t243 生物蛋 useBlock（spec「右键地面→生成对应生物」）：手持生物蛋（猪 / 牛 / 羊，材料段 0x20F..0x211）
     //   右键命中实体方块 → 在命中面相邻格生成对应 mob（EntityManager::spawnMobTyped）。机制等价 MC 1.0 spawn
     //   egg（机制对齐，非名词照搬）。蛋非方块（材料段）→ selectedBlock 经 hotbar 归 Air，须在下方

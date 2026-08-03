@@ -123,6 +123,12 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(float miningProgress READ miningProgress NOTIFY miningProgressChanged)
     Q_PROPERTY(int miningStage READ miningStage NOTIFY miningStateChanged)
     Q_PROPERTY(QVector3D miningBlock READ miningBlock NOTIFY miningStateChanged)
+    // 持续进食态（t267）：手持面包时**按住**右键累积进食进度（机制等价 MC 1.0 长按右键食面包 ~1.6s）。
+    //   eating = 是否正在进食；eatingProgress = 0..1。呈现层据此驱动 viewModelHand 下沉 + 抖动动画；
+    //   进食屑粒由 eatingParticle 信号驱动（嘴部迸发，同 miningParticle 模式）。spec「单击即食→改长按右键」。
+    //   松开 / 换槽（持物不再是面包）/ 失焦 / 暂停 → 清零（未完成不消耗）。完成（progress>=1）→ 消耗 1 面包。
+    Q_PROPERTY(bool eating READ eating NOTIFY eatingStateChanged)
+    Q_PROPERTY(float eatingProgress READ eatingProgress NOTIFY eatingProgressChanged)
     // 模式行为门控（t21）：由当前模式派生的能力标志（随 modeChanged 通知 QML）。
     // Spectator 禁放破（用户核心诉求：观察者不能破坏/放置）；飞仅 Creative/Spectator 可用。
     Q_PROPERTY(bool canBreak READ canBreak NOTIFY modeChanged)
@@ -205,6 +211,8 @@ public:
     float miningProgress() const { return m_miningProgress; }
     int miningStage() const { return m_miningStage; }
     QVector3D miningBlock() const { return QVector3D(m_mineBx, m_mineBy, m_mineBz); }
+    bool eating() const { return m_eating; }          // t267 进食态（驱动 viewModelHand 下沉 + 抖动）
+    float eatingProgress() const { return m_eatingProgress; } // t267 进食进度 0..1
 
     // 模式行为门控（t21，PLAN §2-D：模式标志由 PlayerController 持有，输入边缘统一查）。
     // 三模式差异化：Spectator 禁放破 + 可飞；Creative 可放破 + 可飞（双击空格切）；生存可放破 + 禁飞。
@@ -237,6 +245,11 @@ public:
     Q_INVOKABLE void placeBlock(); // 右键：命中面相邻空格置 selectedBlock（不覆盖实体 / 不埋玩家）
     Q_INVOKABLE void beginMining(); // 左键按下：创造瞬破 / 生存开始累积进度（t34）
     Q_INVOKABLE void endMining();   // 左键松开：清生存累积进度（t34）
+    // 持续进食（t267）：手持面包时**按住**右键累积进食进度（机制等价 MC 1.0 长按右键食面包 ~1.6s）。
+    //   beginEating() = 右键按下边缘（eventFilter 据持物 == BreadId 分流，面包不进 placeBlock；spec「非单击」）；
+    //   endEating() = 右键松开边缘（清累积进度，未完成不消耗）。完成时 finishEating 消耗 1 面包 + 恢复饥饿。
+    Q_INVOKABLE void beginEating(); // 右键按下（手持面包）：开始累积进食进度（t267）
+    Q_INVOKABLE void endEating();   // 右键松开：清累积进食进度（未完成不消耗，t267）
     // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 写入 hotbar 当前选中槽（覆盖；
     // 创造源无限 → 满栈，生存 → 单件）。仅指针捕获时生效（与破/放同窗口级 MouseButtonPress 路径）。
     // spec：「无论背包开关」—— captured=true 蕴含背包已关，故等价于「游戏内中键」；命中空气 / 无
@@ -340,6 +353,16 @@ signals:
     //   AudioManager.playMining（按 id 材质组选 clip）。与 miningParticle 解耦：音走本信号（含基岩），
     //   碎屑走 miningParticle（仅可挖）。创造瞬破不进累积态 → 不发。分层同 miningParticle。
     void miningSound(int blockId);
+    // t267 进食态翻转（开始 / 结束进食）：驱动 QML viewModelHand 下沉 + 抖动动画启停。
+    //   分层（PLAN §2）：Game/Physics 层发语义事件，呈现层只消费（同 miningStateChanged 模式）。
+    void eatingStateChanged();
+    // t267 进食进度连续变化（0..1）：高频独立信号（同 miningProgressChanged；当前仅驱动 beat 推进，
+    //   留 hook 供未来 HUD 进度条 / 抖动频率绑定）。值真变才发语义；此处每推进 tick 发（驱动 beat 跨阶判定）。
+    void eatingProgressChanged();
+    // t267 进食屑粒（持面包按住右键累积进食时每跨一节拍发一次）：携嘴部世界坐标（= 玩家眼位 position()，
+    //   float 坐标非方块格 —— 进食屑粒从玩家嘴部迸发而非方块中心）。呈现层 Connections 转发到
+    //   BlockParticles.burstEat 迸发少量屑粒（机制等价 MC 进食屑粒）。分层同 miningParticle。
+    void eatingParticle(float x, float y, float z);
     // 拾取掉落实体（t118 / t120）：pickupScan 把实体入背包（addToAny 成功入栈，无论全 / 部分）时发；
     // id = 物品 id、count = 本次实际拾取数（have - leftover；spec「拾取后销毁」的「拾取」语义事件）。
     // 全满装不下（leftover == have）不发（无拾取发生）。t118 据此 → AudioManager.playPickup（拾取音）；
@@ -486,6 +509,13 @@ private:
     void updateMining(float dt);
     // 清掉累积态（松开 / 换目标 / 失焦 / 完成）。无变化时静默（不发信号）。
     void cancelMining();
+    // t267 持续进食：每 tick 累积进度 / 检持物变更 / 跨节拍发屑粒 / 完成时消耗面包。由 tick() 调（captured 时）。
+    //   机制等价 MC 1.0 长按右键食面包：progress 增量 = dt / kEatDuration（~1.6s 满）。
+    void updateEating(float dt);
+    // t267 清进食累积态（松开 / 换槽 / 失焦 / 完成）。无变化时静默（不发信号，免抖动 QML 绑定）。
+    void cancelEating();
+    // t267 完成（progress 满）：消耗 1 面包 + 恢复饥饿（kBreadHungerAmount）+ 清态。Survival 消耗 / Creative 不耗。
+    void finishEating();
     // 完成（progress 满）：写 air + 发 playerMined + 清态。drop 由 caller 算（生存走 ToolRegistry）。
     void finishMiningAt(int x, int y, int z, bool drop);
     // t214 破块后扫 6 邻火把：若其**附着格**（state 编码，BlockRegistry::torchAttachOffset）已非 solid
@@ -618,6 +648,18 @@ private:
     // t248 攻击冷却剩余秒数（>0 时 attackMob 早退不扣血）：tickImpl 每帧递减；attackMob 成功命中后置
     //   kAttackCooldown。修长按左键每 tick 重触 beginMining 致 mob 瞬秒（见 kAttackCooldown 注释）。
     float m_attackCooldown = 0.0f;
+    // t267 持续进食态（手持面包按住右键累积，机制等价 MC 1.0 长按右键食面包 ~1.6s）。仅持面包时进入
+    //   （eventFilter RightButton press 据持物 == BreadId 分流调 beginEating，面包不进 placeBlock）。
+    //   progress 0..1；eatBeat = clamp(progress*kEatBeats,0,kEatBeats) 跨阶驱动 eatingParticle（屑粒迸发）。
+    //   完成（progress>=1）→ finishEating 消耗 1 面包 + 恢复饥饿 + 清 m_eating；m_rightDown 不动 → 连食。
+    bool m_eating = false;
+    float m_eatingProgress = 0.0f;
+    int m_eatBeat = -1;
+    // t267 物理右键按下态（与 m_eating =「正在累积进食」分离，同 m_leftDown/m_mining 解耦模式）：
+    //   finishEating 消耗后 cancelEating 清 m_eating，但右键可能仍按住。m_rightDown 仅由 press 边缘
+    //   （beginEating）置 true、release 边缘（endEating）/ 暂停失焦（release）置 false；finishEating /
+    //   cancelEating 不动它。updateEating 顶部据此 + 仍持面包 → 自动 beginEating 下一件（不松手连食）。
+    bool m_rightDown = false;
 
     // 射线选体命中态（整数格坐标 + 整数法线分量；仅变化时 emit hitChanged，避免每帧抖动 QML）
     bool m_hasHit = false;
@@ -715,6 +757,13 @@ private:
     //   kRegenHungerThreshold：回血所需饥饿下限（18 = 9 鼓腿；机制等价 MC 1.0 hunger≥18 才回血）。
     static constexpr int kMaxHunger = 20;
     static constexpr int kBreadHungerAmount = 5;
+    // t267 长按右键进食时序（机制对齐 MC 1.0：按住右键 ~1.6s 食完一件面包）。
+    //   kEatDuration：食一件面包的累积时长（秒）；progress 增量 = dt / kEatDuration。32 ticks ≈ 1.6s
+    //     （MC 1.0 食物进食 32 ticks；机制对齐，非精确数值复刻）。
+    //   kEatBeats：进食屑粒节拍数 —— progress [0,1] 等分 kEatBeats 段，每跨一段（eatBeat 自增）发一次
+    //     eatingParticle（嘴部屑粒迸发）+ QML 抖动循环。4 段 ≈ 每 0.4s 一拍（节奏感清晰，屑粒不爆量）。
+    static constexpr float kEatDuration = 1.6f;
+    static constexpr int kEatBeats = 4;
     static constexpr float kHungerIdleRate   = 0.013f; // ~1 饥饿 / 75s ≈ 25min 耗尽（满→空）
     static constexpr float kHungerWalkRate   = 0.067f; // ~1 饥饿 / 15s ≈ 5min 走路耗尽
     static constexpr float kHungerSprintRate = 0.133f; // ~1 饥饿 / 7.5s ≈ 2.5min 疾跑耗尽

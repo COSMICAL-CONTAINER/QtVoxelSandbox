@@ -743,6 +743,12 @@ Window {
         function onMiningParticle(x, y, z, id) {
             if (particleLoader.item) particleLoader.item.burstMine(x, y, z, id)
         }
+        // t267 进食屑粒（持面包按住右键累积进食时每跨一节拍 player 发 eatingParticle，携嘴部世界坐标）：
+        //   转发到 BlockParticles.burstEat（面包色屑粒从嘴部迸发）。机制等价 MC 进食屑粒。
+        //   x/y/z 为 float 世界坐标（玩家眼位），非方块格 → burstEat 内不加 +0.5（区别 burstBreak/burstMine）。
+        function onEatingParticle(x, y, z) {
+            if (particleLoader.item) particleLoader.item.burstEat(x, y, z)
+        }
         // t165：挖掘击打音（每节拍一响）—— player 发 miningSound（被挖方块 id），**含不可挖基岩**的
         //   hold-mine 音反馈（spec「生存基岩可持续挖 ... 保持 mining 态挥臂+音」；机制等价 MC 镐撞基岩响）。
         //   id 给 AudioManager 按材质组选 mining clip。音与碎屑解耦：音对所有被挖方块，碎屑仅可挖。
@@ -893,11 +899,17 @@ Window {
                 //   叠加进 position.y → 手下沉一点再回位（「拿到东西手一沉」反馈）。与 swingAngle 正交：
                 //   swing 改 eulerRotation.x（绕肩挥动）、pop 改 position.y（位移），互不干扰、可叠加
                 //   （拾取时手不挥、破/放时手挥不弹）。
-                position: Qt.vector3d(window.handPosX, window.handPosY + viewModelHand.popY, window.handPosZ)
+                position: Qt.vector3d(window.handPosX, window.handPosY + viewModelHand.popY - viewModelHand.eatDropY, window.handPosZ)
                 readonly property real baseTilt: window.handBaseTilt  // 读 window 级（t129 引入、t139 起由 ESC 设置面板 ArmSlider 实时调）；t156 固化用户终值 -34.56（见 window.handBaseTilt 注释）
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 property real popY: 0.0                 // t120：拾取/拿取弹跳位移（Y）；0=静止，负=下沉
-                eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle, 0, 0)
+                // t267 进食动画量：eatDropY = 手下沉位移（进食时手落下到嘴边，正=下沉，绑进 position.y 减去）；
+                //   eatTilt = 抖动增量（度，绑进 eulerRotation.x；进食时高频小幅振荡 = 嚼动）。均由下方
+                //   eatDropAnim/eatRiseAnim/eatShakeAnim 驱动（onEatingStateChanged 启停）。与 swingAngle/popY 正交
+                //   （各改不同属性），不与 armSwingAnim/handPopAnim 冲突。
+                property real eatDropY: 0.0
+                property real eatTilt: 0.0
+                eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle + viewModelHand.eatTilt, 0, 0)
 
                 // 上臂袖段（t73 蓝袖子）：覆盖肩-肘（上半段），上衣色 #3a6a9a（hurtTint 0.227/0.416/0.604，与
                 //   第三人称左/右臂袖段同色）。原第一人称手臂单肉色无袖子（蓝袖子只在第三人称）→ 加此段对齐。
@@ -1207,6 +1219,31 @@ Window {
             loops: 1
             NumberAnimation { target: playerModel; property: "mineBlend"; to: 1.0; duration: 80; easing.type: Easing.OutQuad }
             NumberAnimation { target: playerModel; property: "mineBlend"; to: 0.0; duration: 160; easing.type: Easing.InQuad }
+        }
+        // t267 进食动画（手落下到嘴边 + 嚼动抖动）：player.eatingStateChanged 翻转时启停（下方 Connections）。
+        //   eatDropAnim/eatRiseAnim：手 Y 下沉 / 回位（位移，绑进 viewModelHand.position.y 减去 eatDropY）。
+        //   eatShakeAnim：eulerRotation.x 高频小幅振荡（嚼动；±6°，loops:Infinite，进食期间持续）。
+        //   spec「手落下 + 抖动 + 屑粒动画 → 消耗」的前两者由此三动画落地；屑粒由 eatingParticle → burstEat。
+        //   分层（PLAN §2）：纯呈现层动画，消费 Game 层语义事件（同 armSwingAnim / handPopAnim 模式）。
+        NumberAnimation { id: eatDropAnim; target: viewModelHand; property: "eatDropY"; to: 0.18; duration: 120; easing.type: Easing.OutQuad }
+        NumberAnimation { id: eatRiseAnim; target: viewModelHand; property: "eatDropY"; to: 0.0;  duration: 120; easing.type: Easing.InQuad }
+        SequentialAnimation {
+            id: eatShakeAnim
+            loops: Animation.Infinite
+            NumberAnimation { target: viewModelHand; property: "eatTilt"; from: 0; to: 6;  duration: 55 }
+            NumberAnimation { target: viewModelHand; property: "eatTilt"; from: 6; to: -6; duration: 55 }
+            NumberAnimation { target: viewModelHand; property: "eatTilt"; from: -6; to: 0; duration: 55 }
+        }
+        // t267 进食态翻转 → 启停进食动画（onEatingStateChanged）。进食开始 = 下沉 + 抖动启；结束 = 回位 +
+        //   抖动停 + eatTilt 归零（防动画停在非零相位留残角）。与 onSwingArm（armSwingAnim）正交：进食期间
+        //   不发 swingArm（updateEating 节拍只发 eatingParticle），仅完成时 finishEating 发一次 swingArm
+        //   （此时 eating 已结束 → 本 handler 已停 eatShakeAnim，无冲突）。
+        Connections {
+            target: player
+            function onEatingStateChanged() {
+                if (player.eating) { eatDropAnim.start(); eatShakeAnim.start() }
+                else { eatRiseAnim.start(); eatShakeAnim.stop(); viewModelHand.eatTilt = 0 }
+            }
         }
 
         // t67 受伤反馈动画（替换 t51 全屏 damageOverlay 红闪）：
