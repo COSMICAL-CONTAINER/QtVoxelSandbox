@@ -21,12 +21,14 @@ Q_LOGGING_CATEGORY(lcEnt, "vo.entity") // 模块化日志（PLAN §2-F）；未�
 // t239 复用于 AI wander 水平碰撞（同 player move-and-resolve 逐轴撤回）：mob 按 yaw 行走时，逐轴
 // （X 后 Z）试探新位置 → 任一部分触墙即撤回该轴 → mob 贴墙滑动不穿入。Y 范围用 mob 当前 pos.y
 // （resting 后稳定，扫到的是身体高度处的墙，非脚下地面）。
-bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float r)
+// t252：AABB 的 XZ 用 halfW、Y 用 halfH（cow 0.45×0.70×0.45 等非立方 footprint；旧版单一 r 致 cow
+//   垂直范围同 XZ，碰撞感失真）。
+bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, float halfH)
 {
     if (!world) return false;
-    const float minx = cx - r, maxx = cx + r;
-    const float miny = cy - r, maxy = cy + r;
-    const float minz = cz - r, maxz = cz + r;
+    const float minx = cx - halfW, maxx = cx + halfW;
+    const float miny = cy - halfH, maxy = cy + halfH;
+    const float minz = cz - halfW, maxz = cz + halfW;
     const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
     const int y0 = int(std::floor(miny)), y1 = int(std::ceil(maxy)) - 1;
     const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
@@ -55,8 +57,17 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
         return;
     }
     Entity e;
-    e.pos = QVector3D(x + 0.5f, y + 0.5f, z + 0.5f);
-    e.radius = 0.5f;
+    // t252 碰撞箱按 mobType 设（pig/sheep 0.9×0.9、cow 0.9×1.4；MobTest 保 1×1×1）。机制对齐 MC 1.0
+    //   passive mob（猪 0.9×0.9 / 牛 0.9×1.4）；标识符 / 模型全原创（§9 区隔，不照搬 MC 美术）。
+    switch (mobType) {
+        case MobPig:   e.halfW = 0.45f; e.halfH = 0.45f; break; // 0.9×0.9
+        case MobCow:   e.halfW = 0.45f; e.halfH = 0.70f; break; // 0.9×1.4（机制等价 MC 1.0 牛）
+        case MobSheep: e.halfW = 0.45f; e.halfH = 0.45f; break; // 0.9×0.9
+        default:       e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（保 t95 旧路径）
+    }
+    // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
+    //   免首帧 collision 底面嵌入地面再 snap（cow halfH=0.70 时旧 +0.5 会嵌 0.2 进支撑方块）。
+    e.pos = QVector3D(x + 0.5f, y + e.halfH, z + 0.5f);
     e.pushable = true;
     e.kind = Mob;
     e.color = color.isEmpty() ? QStringLiteral("#ff5555") : color;
@@ -97,7 +108,8 @@ void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
     }
     Entity e;
     e.pos = QVector3D(x + 0.5f, y + 0.5f, z + 0.5f);
-    e.radius = 0.5f;
+    e.halfW = 0.5f; // FallingBlock = 1×1×1 立方（同地形方块；t252 halfW/halfH 默认 0.5 显式留档）
+    e.halfH = 0.5f;
     e.pushable = false; // 下落方块不被玩家推动（同掉落物变体）
     e.kind = FallingBlock;
     e.blockId = blockId;
@@ -117,7 +129,14 @@ QVector3D EntityManager::posAt(int i) const
 float EntityManager::radiusAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return 0.0f;
-    return m_entities[size_t(i)].radius;
+    return m_entities[size_t(i)].halfW;
+}
+
+// t252 Y 碰撞半高（QML F3+B hitbox scale.y 读）。越界 → 0。
+float EntityManager::halfHeightAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    return m_entities[size_t(i)].halfH;
 }
 
 bool EntityManager::pushableAt(int i) const
@@ -275,14 +294,17 @@ int EntityManager::findMobHit(const QVector3D &origin, const QVector3D &dir, flo
         // Slab 法 ray-AABB：对每轴 t1 = (min - origin) / dir、t2 = (max - origin) / dir；tmin = max(per-axis near)、
         //   tmax = min(per-axis far)；命中 ⟺ tmax >= tmin && tmax >= 0 && tmin <= maxDist。
         //   dir 分量近 0 时该轴 slab 退化为「整轴在内」约束（origin ∈ [min,max] → -inf..+inf，否则永不命中）。
-        const float r = e.radius;
+        //   t252：AABB 非立方 —— X/Z 用 halfW、Y 用 halfH（cow 0.45×0.70×0.45；旧版单一 r 致 hitbox 选体
+        //   与实际碰撞箱不符：打牛头 / 牛背高处按 1×1 误判命中、实际碰撞箱更高）。
+        const float ext[3] = { e.halfW, e.halfH, e.halfW }; // k=0(X)/2(Z)=halfW、k=1(Y)=halfH
         float tmin = 0.0f, tmax = bestDist; // 起步用 [0, bestDist]，逐轴收紧
         bool hit = true;
         const float p[3] = { e.pos.x(), e.pos.y(), e.pos.z() };
         const float o[3] = { origin.x(), origin.y(), origin.z() };
         const float d[3] = { dir.x(), dir.y(), dir.z() };
         for (int k = 0; k < 3; ++k) {
-            const float mn = p[k] - r, mx = p[k] + r;
+            const float ek = ext[k];
+            const float mn = p[k] - ek, mx = p[k] + ek;
             if (std::abs(d[k]) < 1e-8f) {
                 // 射线平行该轴：origin 必须落在 slab 内
                 if (o[k] < mn || o[k] > mx) { hit = false; break; }
@@ -369,19 +391,20 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
     // 行走：按 yaw 算水平位移（dir = (-sin,0,-cos)，与 player wishHoriz 同 yaw 约定）。
     const float dx = -std::sin(e.yawRad) * e.wanderSpeed * dt;
     const float dz = -std::cos(e.yawRad) * e.wanderSpeed * dt;
-    const float r = e.radius;
+    const float ehw = e.halfW; // XZ 半宽（边界 clamp + 圆碰撞）
+    const float ehh = e.halfH; // Y 半高（footprint 格扫 Y 范围）
 
-    // X 轴：世界边界 clamp（mob 半宽 0.5 → 中心不越 [0.5, world-0.5]）+ 方块碰撞撤回。
+    // X 轴：世界边界 clamp（mob XZ 半宽 ehw → 中心不越 [ehw, world-ehw]）+ 方块碰撞撤回。
     float newX = e.pos.x() + dx;
-    if (newX < 0.5f) newX = 0.5f;
-    if (newX > worldW - 0.5f) newX = worldW - 0.5f;
-    if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), r)) newX = e.pos.x();
+    if (newX < ehw) newX = ehw;
+    if (newX > worldW - ehw) newX = worldW - ehw;
+    if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
 
     // Z 轴：用已更新的 X + 同样边界 clamp / 方块碰撞撤回（两轴顺序敏感，Z 参照可能已撤回的 newX）。
     float newZ = e.pos.z() + dz;
-    if (newZ < 0.5f) newZ = 0.5f;
-    if (newZ > worldD - 0.5f) newZ = worldD - 0.5f;
-    if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, r)) newZ = e.pos.z();
+    if (newZ < ehw) newZ = ehw;
+    if (newZ > worldD - ehw) newZ = worldD - ehw;
+    if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
 
     bool moved = false;
     if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
@@ -412,7 +435,7 @@ bool EntityManager::sheepEatGrass(Entity &e, World *world, float worldW, float w
     const int cx = qFloor(fx);
     const int cz = qFloor(fz);
     // 身体格 y（草丛生于地表上方一格 = 此格）；地表格 = bodyY − 1（草方块）。
-    const int bodyY = qFloor(e.pos.y() - e.radius);
+    const int bodyY = qFloor(e.pos.y() - e.halfH); // t252: e.radius → e.halfH（底面 y）
     const int groundY = bodyY - 1;
     // 越界 / 非法 y → 安全返 false（blockAt 亦返 air，但显式守避免 floor 滚动到负域读 chunk 边界外）。
     if (cx < 0 || cz < 0 || cx >= int(worldW) || cz >= int(worldD)) return false;
@@ -433,7 +456,7 @@ bool EntityManager::sheepEatGrass(Entity &e, World *world, float worldW, float w
     return true;
 }
 
-// 玩家推动解析：对每个 pushable 实体做「玩家 AABB（XZ 矩形）vs 实体圆（XZ，半径=entity.radius）」
+// 玩家推动解析：对每个 pushable 实体做「玩家 AABB（XZ 矩形）vs 实体圆（XZ，半径=entity.halfW）」
 // 穿透求解（机制等价 MC 实体碰撞推开：玩家位移解析后传给实体）。
 //   1) 垂直区间重叠判定：实体立方体 [pos.y−r, pos.y+r] 与玩家 AABB [feet.y, feet.y+height] 必须重叠
 //      才推动（玩家从头顶跳过 / 跨层时不应误推）。
@@ -456,9 +479,11 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
     for (auto &e : m_entities) {
         if (!e.pushable || e.dead) continue; // 掉落物等非推动 + t239 dead mob 跳过
 
-        const float r = e.radius;
-        // 垂直区间重叠判定（实体为立方体：[pos.y−r, pos.y+r]）。
-        if (e.pos.y() + r <= pminY || e.pos.y() - r >= pmaxY) continue;
+        const float ehw = e.halfW; // 实体 XZ 半宽（圆碰撞半径）
+        const float ehh = e.halfH; // 实体 Y 半高（垂直区间）
+        // 垂直区间重叠判定（实体 AABB：[pos.y−ehh, pos.y+ehh] vs 玩家 [feet.y, feet.y+height]）。
+        //   t252：Y 用 halfH（非旧版共用 radius；cow halfH=0.70 → 推动判定区对齐实际碰撞箱高度）。
+        if (e.pos.y() + ehh <= pminY || e.pos.y() - ehh >= pmaxY) continue;
 
         // XZ 平面 AABB-vs-Circle 穿透求解。
         const float cx = std::clamp(e.pos.x(), px - halfW, px + halfW);
@@ -466,13 +491,13 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
         const float dx = e.pos.x() - cx;
         const float dz = e.pos.z() - cz;
         const float dist2 = dx * dx + dz * dz;
-        if (dist2 >= r * r) continue; // 无 XZ 穿透
+        if (dist2 >= ehw * ehw) continue; // 无 XZ 穿透
 
         float newX = e.pos.x();
         float newZ = e.pos.z();
         const float dist = std::sqrt(dist2);
         if (dist > 1e-5f) {
-            const float push = r - dist;
+            const float push = ehw - dist;
             newX = e.pos.x() + dx / dist * push;
             newZ = e.pos.z() + dz / dist * push;
         } else {
@@ -482,10 +507,10 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
             const float toMinZ = e.pos.z() - (pz - halfW);
             const float toMaxZ = (pz + halfW) - e.pos.z();
             const float m = std::min({toMinX, toMaxX, toMinZ, toMaxZ});
-            if (m == toMinX)      newX = px - halfW - r;
-            else if (m == toMaxX) newX = px + halfW + r;
-            else if (m == toMinZ) newZ = pz - halfW - r;
-            else                  newZ = pz + halfW + r;
+            if (m == toMinX)      newX = px - halfW - ehw;
+            else if (m == toMaxX) newX = px + halfW + ehw;
+            else if (m == toMinZ) newZ = pz - halfW - ehw;
+            else                  newZ = pz + halfW + ehw;
         }
 
         // 世界碰撞钳制（t104：mob AABB footprint 全格扫，仿 player aabbHitsSolid）：扫 mob 立方体 AABB
@@ -493,8 +518,8 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
         // 判定，Z 轴参照可能已撤回的 newX（两轴独立但顺序敏感）。旧版单格检查在斜推角落时 mob 中心可能
         // 仍在空气 → 不撤回 → 下帧中心入墙才撤回 → 反复跳变 = jitter；全格扫使任一部分触墙即撤回 → 消除。
         if (world) {
-            if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), r)) newX = e.pos.x();
-            if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, r))     newZ = e.pos.z();
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh))     newZ = e.pos.z();
         }
 
         if (newX != e.pos.x() || newZ != e.pos.z()) {
@@ -510,7 +535,7 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
             if (world) {
                 const int ncx = qFloor(newX);
                 const int ncz = qFloor(newZ);
-                const int supportY = qFloor(e.pos.y() - r) - 1; // 实体底面下方一格（与 tick 复探同公式）
+                const int supportY = qFloor(e.pos.y() - ehh) - 1; // 实体底面下方一格（与 tick 复探同公式）
                 if (supportY < 0 || !world->isSolid(ncx, supportY, ncz))
                     e.resting = false; // 新位置失支撑 → 解除静止让重力复探（推下阶梯 / 推离支撑面）
             } else {
@@ -531,7 +556,7 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
 //     1) 已 resting：复探支撑格（实体底面下方一格 = floor(pos.y − r) − 1）仍实体 → 保持静止；
 //        失支撑 → 解除 resting 续落（防挖空悬空；亦承接 resolvePlayerPush / aiWander 把实体推/走离原支撑面）。
 //     2) 未 resting：vy -= g*dt（钳 -kMaxFall），按 dy 下移；下移路径 [floor(newY), floor(pos.y)] 自顶向下
-//        扫实体所在列首个实体方块 → 命中则贴其顶面（solidCellY+1+kRestOffset）停下、vy=0、resting=true。
+//        扫实体所在列首个实体方块 → 命中则贴其顶面（solidCellY+1+halfH）停下、vy=0、resting=true。
 //        越界（cy<0）查 isSolid 返 false → 不误判虚空地面，实体继续落。
 //     3) pos / resting 任一真变 → dirty，末尾统一 bump revision + emit（驱动 QML {revision; posAt} 绑定重算）。
 //   void-loss 兜底：Mob 跌出世界底部（pos.y<0，如被推出边界外无支撑）→ 标记移除（防永久下落）。
@@ -682,7 +707,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
                         //   → GroupDefault 兜底 Stone step（同 player 脚步音越界处理；仍响）。
                         const int sfx = qFloor(e.pos.x());
                         const int sfz = qFloor(e.pos.z());
-                        const int sfy = qFloor(e.pos.y() - e.radius) - 1;
+                        const int sfy = qFloor(e.pos.y() - e.halfH) - 1;
                         const quint8 sid = (sfy >= 0) ? world->blockAt(sfx, sfy, sfz) : BlockRegistry::Air;
                         emit mobStep(e.mobType, int(sid));
                     }
@@ -696,15 +721,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
             //   （同 aiWander / resolvePlayerPush）；世界边界 clamp（防击退出世界）。速度衰减到可忽略 → 清零（防永
             //   久微小漂移 / 每帧 dirty 抖动）。仅 vx/vz 任一非零时执行（无击退的 mob 零开销跳过）。
             if (std::abs(e.vx) > 1e-4f || std::abs(e.vz) > 1e-4f) {
-                const float r = e.radius;
+                const float ehw = e.halfW; // t252 XZ 半宽（边界 clamp + 碰撞）
+                const float ehh = e.halfH; // t252 Y 半高（footprint 格扫）
                 float newX = e.pos.x() + e.vx * float(dt);
-                if (newX < 0.5f) newX = 0.5f;
-                if (newX > worldW - 0.5f) newX = worldW - 0.5f;
-                if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), r)) newX = e.pos.x();
+                if (newX < ehw) newX = ehw;
+                if (newX > worldW - ehw) newX = worldW - ehw;
+                if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
                 float newZ = e.pos.z() + e.vz * float(dt);
-                if (newZ < 0.5f) newZ = 0.5f;
-                if (newZ > worldD - 0.5f) newZ = worldD - 0.5f;
-                if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, r)) newZ = e.pos.z();
+                if (newZ < ehw) newZ = ehw;
+                if (newZ > worldD - ehw) newZ = worldD - ehw;
+                if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
                 if (newX != e.pos.x()) { e.pos.setX(newX); dirty = true; }
                 if (newZ != e.pos.z()) { e.pos.setZ(newZ); dirty = true; }
                 const float decay = std::max(0.0f, 1.0f - kKnockbackDrag * float(dt));
@@ -722,7 +748,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
 
         // 已落地：复探支撑格是否仍实体。失支撑 → 续落。
         if (e.resting) {
-            const int supportY = qFloor(e.pos.y() - e.radius) - 1; // 实体底面下方那一格（= 支撑方块 cellY）
+            const int supportY = qFloor(e.pos.y() - e.halfH) - 1; // 实体底面下方那一格（= 支撑方块 cellY）
             if (supportY >= 0 && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止
             e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
             dirty = true;
@@ -744,8 +770,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
         }
 
         if (mobSolidY >= 0) {
-            // 落地：贴支撑方块顶面 + 静止偏移（底面 = mobSolidY+1 = 支撑方块顶）。钳 mobNewY 防穿越。
-            const float restY = float(mobSolidY + 1) + kRestOffset;
+            // 落地：贴支撑方块顶面 + 静止偏移（底面 = mobSolidY+1 = 支撑方块顶；中心 = 顶 + halfH）。
+            //   t252：kRestOffset → e.halfH（per-mob 半高；cow halfH=0.70 → 比 1×1 高 0.2，固定 0.5 无法表达）。
+            const float restY = float(mobSolidY + 1) + e.halfH;
             if (mobNewY <= restY || e.vy < 0.0f) {
                 if (e.pos.y() != restY) { e.pos.setY(restY); dirty = true; }
                 if (e.vy != 0.0f) { e.vy = 0.0f; dirty = true; }

@@ -2293,10 +2293,25 @@ Window {
                     //   全红，机制等价 MC mob 受击 10 tick 红闪）：mobType 0 走 baseColor 红；mobType 1/2/3 走
                     //   纯红 Texture（mobCowTex 的内容被红 #ff0000 baseColor 调制 → 视觉全红）。
                     property int entMobType: { entityManager.revision; return entityManager.mobTypeAt(index) }
+                    // t252 碰撞箱尺寸（halfW/halfH）：C++ 按 mobType 设（pig/sheep 0.45、cow 0.45/0.70、
+                    //   MobTest/FallingBlock 0.5）。WireCube hitbox scale + 朝向棒长度读它们（旧版固定 1×1×1）。
+                    property real mobHalfW: { entityManager.revision; return entityManager.radiusAt(index) }
+                    property real mobHalfH: { entityManager.revision; return entityManager.halfHeightAt(index) }
+                    // t252 模型 Y 偏移：collision 中心（pos.y）≠ 模型躯干中心（halfH 变后二者分离）→ 模型
+                    //   需 Y 偏移使腿底贴 collision 底面（= 地面）。offset = modelLegBottom − halfH
+                    //   （modelLegBottom = MobModel 腿底本地 |y|：pig 0.48 / cow 0.50 / sheep 0.44；MobTest
+                    //   UnitCube ±0.5 → 0.50）。cow halfH=0.70 → offset −0.20（模型下移贴地，免悬空）。
+                    property real mobModelYOff: {
+                        if (entMobType === 1) return 0.48 - mobHalfH   // pig
+                        if (entMobType === 2) return 0.50 - mobHalfH   // cow
+                        if (entMobType === 3) return 0.44 - mobHalfH   // sheep
+                        return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
+                    }
                     Model {
                         // mobType 0：通用测试生物（t95/t239）—— UnitCube 单色立方（旧路径，保行为不变）。
                         visible: entKind === EntityManager.Mob && entMobType === 0
                         geometry: UnitCube {}
+                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
@@ -2314,6 +2329,7 @@ Window {
                             mobType: 1
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
+                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面（halfH 变后免悬空 / 穿地）
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
@@ -2361,6 +2377,7 @@ Window {
                             mobType: 2
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
+                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 cow halfH=0.70 → offset −0.20 腿底贴地
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
@@ -2405,6 +2422,7 @@ Window {
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                             headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
                         }
+                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
@@ -2448,23 +2466,25 @@ Window {
                             }
                         }
                     }
-                    // t116 F3+B mob 碰撞箱（spec「mob scale 1.0」+ 朝向箭头）：mob AABB = 1×1×1 立方（与 mob
-                    //   Model scale 1.0 一致）。WireCube ±0.5 scale 1.01（+1% 外扩避与 mob 立方表面 z-fight——
-                    //   共面时线被面遮挡看不见）。t239：mob delegate Node 现按 bodyYaw 转（AI 行走方向）→
-                    //   子节点（朝向箭头）随之继承，箭头本地 -Z 指向 mob 朝向（不再是固定北）。WireCube 立方
-                    //   对称 → 转无异，但箭头现在正确反映 yaw。
-                    //   分层（PLAN §2）：纯呈现层调试叠层，只读 delegate 位置 / yaw（entityManager 数据）。
+                    // t116/t252 F3+B mob 碰撞箱（spec「mob scale 1.0」+ 朝向箭头）：mob AABB = halfW×halfH×halfW
+                    //   （t252 非立方：pig/sheep 0.9×0.9、cow 0.9×1.4；旧版固定 1×1×1）。WireCube ±0.5 居中 →
+                    //   scale = (2·halfW, 2·halfH, 2·halfW) 覆盖实际 AABB；+0.01 外扩避与 mob 模型表面 z-fight。
+                    //   t239：mob delegate Node 按 bodyYaw 转（AI 行走方向）→ 子节点继承，箭头本地 -Z 指向 mob
+                    //   朝向。WireCube 立方对称 → 转无异，但箭头正确反映 yaw（mob facing line，spec「F3+B 显朝向」）。
+                    //   分层（PLAN §2）：纯呈现层调试叠层，只读 delegate 位置 / yaw / halfW / halfH。
                     Model {
                         visible: window.showHitboxes
                         geometry: WireCube {}
-                        scale: Qt.vector3d(1.01, 1.01, 1.01)
+                        scale: Qt.vector3d(mobHalfW * 2.0 + 0.01, mobHalfH * 2.0 + 0.01, mobHalfW * 2.0 + 0.01)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
                     }
                     Model {
                         visible: window.showHitboxes
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, 0, -0.25)     // 棒中心前移 0.25（半长）→ -Z 方向延伸 0.5
-                        scale: Qt.vector3d(0.03, 0.03, 0.5)
+                        // 朝向棒：从 collision 中心沿本地 -Z（mob 前 = 头朝向）延伸 mobHalfW+0.05（略超前壁辨识）。
+                        //   UnitCube ±0.5 scale sz → 棒长 sz；position z = −sz/2 使棒从 z=0 延伸到 z=−sz（前向）。
+                        position: Qt.vector3d(0, 0, -(mobHalfW + 0.05) * 0.5)
+                        scale: Qt.vector3d(0.03, 0.03, mobHalfW + 0.05)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
                 }

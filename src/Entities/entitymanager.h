@@ -20,7 +20,7 @@
 //
 // 物理：
 //   - 重力 + 地面静止（tick(dt, world)）：未 resting 的实体 vy -= g*dt（钳 -kMaxFall），按 dy 下移并
-//     扫实体所在列首个实体方块 → 落到其顶面停下（resting=true，pos.y = solidCellY + 1 + kRestOffset）。
+//     扫实体所在列首个实体方块 → 落到其顶面停下（resting=true，pos.y = solidCellY + 1 + halfH）。
 //     resting 实体复探支撑格，失支撑则续落（防挖空悬空）。机制与 ItemEntityManager::tick 同源（向下
 //     只读 World::isSolid，PLAN §2 合规）。
 //   - 玩家推动（resolvePlayerPush）：对每个 pushable 实体，用「玩家 AABB（XZ 矩形）vs 实体圆（XZ）」
@@ -109,7 +109,12 @@ public:
 
     // 第 i 个实体的渲染数据（呈现层 Repeater delegate 绑它摆位 + 配色）。越界返回安全默认。
     Q_INVOKABLE QVector3D posAt(int i) const;
+    // XZ 碰撞半宽（旧名 radius；t252 拆分 XZ/Y：halfW=XZ 圆碰撞半径 + footprint 格扫 X/Z 范围）。
+    //   pig/cow/sheep 0.45（0.9 宽）、MobTest/FallingBlock 0.5（1×1×1）。越界 → 0。
     Q_INVOKABLE float radiusAt(int i) const;
+    // t252 Y 碰撞半高（F3+B hitbox 高度读；QML WireCube scale.y = 2*halfHeightAt）。
+    //   pig/sheep 0.45（0.9 高）、cow 0.70（1.4 高，机制等价 MC 1.0 牛）、MobTest/FallingBlock 0.5。越界 → 0。
+    Q_INVOKABLE float halfHeightAt(int i) const;
     Q_INVOKABLE bool pushableAt(int i) const;
     Q_INVOKABLE int kindAt(int i) const;
     Q_INVOKABLE QString colorAt(int i) const;
@@ -203,7 +208,13 @@ signals:
 private:
     struct Entity {
         QVector3D pos;
-        float radius = 0.5f;     // 碰撞半径（1×1 方块半宽）；XZ 圆碰撞 + 垂直区间用
+        // t252 碰撞箱缩小：XZ 半宽（halfW）与 Y 半高（halfH）分离（旧版单一 radius=0.5 致所有 mob
+        //   碰撞感「整立方大」1×1×1）。按 mobType 设：MobTest 0.5/0.5（保 t95 旧路径）；pig/sheep
+        //   0.45/0.45（0.9×0.9）；cow 0.45/0.70（0.9×1.4，机制等价 MC 1.0 牛）。FallingBlock 0.5/0.5
+        //   （1×1×1 立方，同地形方块外观）。findMobHit / resolvePlayerPush / mobAabbHitsSolid / aiWander /
+        //   resting 均读它们（XZ 用 halfW、Y 用 halfH），不再共用单一 radius。
+        float halfW = 0.5f;      // XZ 碰撞半宽（圆碰撞半径 + footprint 格扫 X/Z 范围）
+        float halfH = 0.5f;      // Y 碰撞半高（垂直区间 + footprint 格扫 Y 范围 + resting 贴地偏移）
         bool pushable = true;    // 玩家是否可推动（掉落物变体 pushable=false，统一基类预留）
         int kind = Mob;          // 渲染分流（Mob/Item/FallingBlock；Q_ENUM）
         int blockId = 0;         // t117 FallingBlock 携带的方块 id（着地 setBlock 用；其余 kind=0）
@@ -252,7 +263,8 @@ private:
     static constexpr int kCap = 64;            // 实体数上限（测试用，防溢出）
     static constexpr float kGravity = 28.0f;   // 重力加速度（blocks/s²；与玩家/掉落物同值，世界手感一致）
     static constexpr float kMaxFall = 78.4f;   // 终端下落速度（blocks/s；防无限加速）
-    static constexpr float kRestOffset = 0.5f; // 落地后实体中心相对支撑方块顶面的偏移（1×1 方块半宽 → 底面贴顶面）
+    // t252：kRestOffset 移除 —— resting 贴地偏移现按 per-entity halfH（底面贴支撑方块顶面 = top + halfH），
+    //   不再是固定 0.5（cow halfH=0.70 → 比 1×1 高 0.2，单一常量无法表达）。
     // t239 生物基类常量：
     static constexpr int kDefaultMaxHealth = 10;  // 默认 mob 血量（猪/牛/羊 MC 1.0 = 10 = 5 心）
     static constexpr float kWalkSpeed = 1.0f;     // AI 行走速度（blocks/s；慢于玩家 4.3，wander 观感）
