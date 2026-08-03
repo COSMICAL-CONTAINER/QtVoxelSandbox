@@ -629,6 +629,13 @@ private:
     // t234 耕地水源邻近判定半径（机制等价 MC 1.0 farmland hydration：水同高或低 1 层、水平 4 格内即滋润）。
     //   isFarmlandMoist 扫 (2R+1)×2×(2R+1) 盒（y / y-1 两层 × 水平 ±4）；MC 取 4，本工程对齐。只读 blockAt。
     static constexpr int kFarmlandWaterRadius = 4;
+    // t246 草丛挖掉掉种子的概率分母（机制等价 MC 1.0 挖草丛 1/8=12.5% 掉小麦种子；可在本常量调）。finishMiningAt
+    //   破 TallGrass 时以 1/kTallGrassSeedDropDenom 概率 emit spawnItem(SeedId,1)，否则不掉落（dropId/dropCount
+    //   表恒返 1 种子是「基础兜底」，概率门控在本特例分支之上覆盖通用 drop 路径，同 WheatCrop/Planks 特例模式）。
+    //   这是玩家交互掉落的随机性（QRandomGenerator），非 worldgen 确定性范畴 §2-K —— 机制等价 MC 草丛掉种随机，
+    //   同 WheatCrop 收割种子 1-2 随机。羊吃草（entitymanager::sheepEatGrass）走静默 setWaterSilent 不发掉落，
+    //   与本玩家破块路径互不影响。
+    static constexpr int kTallGrassSeedDropDenom = 8; // 1/8 ≈ 12.5%（MC 1.0 草丛掉种概率）
     // t211 水流推动玩家（机制等价 MC 1.0 流水冲走实体）：
     //   kWaterFlowPush：流水水平推力速度（blocks/sec；脚位在流水格 state>0 时沿离源方向叠入水平速度）。
     //     低于 kWalk(4.3) → 玩家仍可逆流游（净速 ≈ 走速 − 推力），但松手会被流走。spec「创造非飞 + 生存」。

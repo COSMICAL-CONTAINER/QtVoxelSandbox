@@ -676,6 +676,16 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             if (wheatCount > 0)
                 emit spawnItem(x, y, z, RecipeRegistry::WheatId, wheatCount);
             emit spawnItem(sx, y, sz, RecipeRegistry::SeedId, seedCount);
+        } else if (brokenId == BlockRegistry::TallGrass) {
+            // t246 挖草概率掉种子（spec「现 100% 掉种；改概率掉落（MC ~12.5%，可配）」）：TallGrass 的 BlockDef
+            //   dropId/dropCount 恒返 1×SeedId 作基础兜底，本分支在通用 drop 路径之上**以 1/kTallGrassSeedDropDenom
+            //   概率门控 emit spawnItem**——命中才掉 1 种子，未命中则草丛消失但无掉落（机制等价 MC 1.0 挖草丛
+            //   ~12.5% 掉小麦种子；常量可配）。概率分母 kTallGrassSeedDropDenom(=8) 在 playercontroller.h。同 WheatCrop
+            //   收割 / Planks 双半砖模式：特殊掉落语义在通用 BlockDef 表之上提前分流，特例 else 才走通用 dropId/dropCount。
+            //   这是玩家交互掉落的随机性（QRandomGenerator），非 worldgen 确定性范畴 §2-K —— 同 WheatCrop 种子 1-2
+            //   随机已验证路径。羊吃草（entitymanager sheepEatGrass）走静默 setWaterSilent 不经此处，互不影响。
+            if (QRandomGenerator::global()->bounded(kTallGrassSeedDropDenom) == 0)
+                emit spawnItem(x, y, z, dropId, dropCount);
         } else if (brokenId == BlockRegistry::Planks && (brokenState & BlockRegistry::PlanksFromDoubleSlabBit)) {
             // t215 双半砖（合并态）破块掉 2× WoodSlab 为**2 个独立物品实体**（非 1 个 count=2 栈）：
             //   placeBlock 合并时写 Planks + PlanksFromDoubleSlabBit 标记「源自双半砖」。此处检本 bit →
