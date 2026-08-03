@@ -739,6 +739,31 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
                 if (std::abs(e.vx) < 0.05f) e.vx = 0.0f; // 衰减到可忽略 → 清零
                 if (std::abs(e.vz) < 0.05f) e.vz = 0.0f;
             }
+
+            // t254 窒息（机制同玩家 t160 的「眼位嵌实体方块 → 每 1s 扣 1HP」）：mob 头部（AABB 顶格）嵌入实体
+            //   可碰撞方块（被沙 / 方块埋住）→ 累加 suffocationTimer，每 kSuffocationInterval 秒扣 1HP（复用
+            //   damageEntity → hurtFlash 红闪 / mobDied 死亡掉落链，同玩家 fallDamageTaken(1)→takeDamage）。
+            //   头部出方块即停累积（脱困即停伤）。dead mob 已在上方早退 continue 跳过（尸体不再窒息）。
+            //   头部格 = floor(pos.y + halfH − ε)；ε 防 AABB 顶恰整数误取上方空气格（漏判窒息 → 沙埋不死）。
+            //   用 isCollidable（非 isSolid）：火把 / 开门 / 半砖等非完整碰撞方块不致窒息（同玩家 t160 用
+            //   isCollidable 判定；仅「头部被完整碰撞方块包裹」才窒息，机制等价 MC 头卡进 solid block）。
+            //   注：damageEntity 内 bump revision + emit，本 tick 末尾仍再 emit 一次（同帧多次 emit 无副作用，
+            //   QML 绑定合并到下次事件循环求值）。
+            {
+                const int sx = qFloor(e.pos.x());
+                const int sz = qFloor(e.pos.z());
+                const int sy = qFloor(e.pos.y() + e.halfH - 1e-3f);
+                if (sy >= 0 && world->isCollidable(sx, sy, sz)) {
+                    e.suffocationTimer += float(dt);
+                    if (e.suffocationTimer >= kSuffocationInterval) {
+                        e.suffocationTimer -= kSuffocationInterval;
+                        damageEntity(idx, 1); // 复用受击链：扣 1HP + 红闪 + （归零时）死亡掉落（内含 dead/越界/amount 守）
+                        dirty = true;
+                    }
+                } else {
+                    e.suffocationTimer = 0.0f; // 头部出方块 → 停累积（脱困即停伤）
+                }
+            }
         }
 
         // --- Mob（非 dead）/ Item：原有 resting + 重力 + 垂直运动（cx/cz 在 AI 行走后重算）---

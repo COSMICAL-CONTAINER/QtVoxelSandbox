@@ -236,6 +236,7 @@ private:
         bool dead = false;       // 死亡态（health<=0 → true；dead 期间冻结 AI/重力，deathTimer 到 0 移除）
         float hurtFlash = 0.0f;  // 受击红闪剩余秒数（damageEntity 设 kHurtFlashTime；tick 衰减；>0 → QML 红）
         float deathTimer = 0.0f; // 死亡到移除倒计时（dead 翻 true 时设 kDeathTime；给 QML 播死亡动画窗口）
+        float suffocationTimer = 0.0f; // t254 窒息累积计时（头部嵌实体方块时累加，每 kSuffocationInterval 秒扣 1HP；机制同玩家 t160）
         float yawRad = 0.0f;     // 朝向 + 行走方向（弧度）；AI wander 随机选；dir=(-sin,0,-cos)，QML yawDeg
         float wanderTimer = 0.0f;// 到下次选向倒计时（秒）；<=0 → 新 yawRad + 新 wanderSpeed + 重置 timer
         float wanderSpeed = 0.0f;// 当前 AI 行走速度（blocks/s；0=idle 停驻 / kWalkSpeed=行走）；time-slice 随机
@@ -276,6 +277,10 @@ private:
     static constexpr float kIdleChance = 0.25f;   // 每次选向进入 idle（speed=0 停驻）的概率
     static constexpr float kHurtFlashTime = 0.5f; // 受击红闪持续秒数（机制等价 MC mob 受击 10 tick = 0.5s）
     static constexpr float kDeathTime = 0.5f;     // 死亡到移除窗口（给 QML 播死亡动画；机制等价 MC 死亡动画）
+    // t254 mob 窒息扣血间隔（机制同玩家 t160 的 kSuffocationInterval）：mob 头部（AABB 顶格）嵌实体可碰撞方块
+    //   （被沙 / 方块埋住）时，每本间隔秒扣 1HP。机制等价 MC 1.0 窒息 1HP/s（每秒半心）；复用 damageEntity 链
+    //   （扣血 + hurtFlash 红闪 + 血量归零 mobDied 死亡掉落），同玩家 fallDamageTaken(1)→takeDamage 链。
+    static constexpr float kSuffocationInterval = 1.0f; // t254 窒息扣血间隔（秒；每秒 1HP，机制等价 MC 窒息 1/秒，同玩家 t160）
     // t241 行走动画 / 羊吃草常量：
     static constexpr float kWalkFreq = 6.2831853f; // 行走相位推进系数（=2π → 每 block 行走完成一个完整腿摆周期；
                                                    //   moveSpeed * dt * kWalkFreq；机制等价 MC mob 每步一摆）
