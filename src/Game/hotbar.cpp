@@ -166,7 +166,8 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::IronIngotId),   // 铁锭
         int(RecipeRegistry::GlassId),       // 玻璃
         int(RecipeRegistry::BucketEmptyId), // t174 铁桶（空）
-        int(RecipeRegistry::WaterBucketId)  // t174 装水铁桶
+        int(RecipeRegistry::WaterBucketId), // t174 装水铁桶
+        int(RecipeRegistry::SeedId)         // t235 小麦种子（挖草丛得；种植 → 小麦作物 t236）
     };
 }
 
@@ -261,6 +262,7 @@ QString Hotbar::nameForBlock(int blockId) const
         // t174 铁桶（材料段 0x206/0x207，maxStack=1 不可堆叠）：空桶可合成 / 装水桶由舀水得。
         if (blockId == RecipeRegistry::BucketEmptyId) return QStringLiteral("铁桶");
         if (blockId == RecipeRegistry::WaterBucketId) return QStringLiteral("装水铁桶");
+        if (blockId == RecipeRegistry::SeedId)        return QStringLiteral("小麦种子"); // t235
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

@@ -193,6 +193,10 @@ private:
     //   填 Water（机制等价 MC 海洋 / 湖泊）。仅写空气格；同 seed → 同水域分布。waterLevel 见 .cpp 注释
     //   （spec 8 为 t119 前地形，现重定标到 24 以与 [16,40] 地形相交使水域可见）。
     void fillWater();
+    // t235 草丛散布（PLAN §2-K 确定性）：地形 + 树 + 水定型后，遍历 grass 表层列（非沙漠 / 非沙滩水下 / 非水域），
+    //   按 hashColumn(seed,x,z) 密度筛选在 grass 顶上方一格（surfaceY+1）置 TallGrass（仅写空气格 → 不覆盖
+    //   树干 / 树叶 / 水）。同 seed → 同草丛分布；禁用任何运行期随机源。机制等价 MC 平原草丛点缀。
+    void placeTallGrass();
     // t151 真光场**全量**重算（PLAN §2-H / §M）：per-voxel BFS flood-fill 天光（自顶，sky=15）+ 火把方块光
     //   （radius14，block=14），衰减 1、仅穿过非遮光格、取 max。**仅 worldgen 末调一次**（全图 147k 体素 ×2
     //   通道约数十 ms，玩家编辑频率下不可接受）。玩家编辑走增量 recomputeLightAround()（t154）。

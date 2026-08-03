@@ -174,6 +174,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_chest_front.png
         textures/default_farmland_dry.png      # t234 耕地顶面干态贴图（build_farmland.py 程序生成原创像素图）
         textures/default_farmland_wet.png      # t234 耕地顶面湿态贴图（mesher 据 Farmland state bit0 选 dry/wet）
+        textures/default_tall_grass.png        # t235 草丛 cross 贴图（build_tall_grass.py 程序生成原创像素图；alpha 透明底 cutout）
         textures/icon_cobble.png
         textures/icon_coal_ore.png
         textures/icon_crafting_table.png

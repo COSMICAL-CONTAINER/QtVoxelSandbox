@@ -12,6 +12,7 @@ import QtQuick
 //   0x205 木炭   —— 深棕黑八边形块（与煤同形、偏暖棕色，表「烧过的木」；t87 原木冶炼产物）。
 //   0x206 铁桶（空）—— 灰金属桶身 + 提手弧 + 桶口椭圆（t174；机制等价 MC 铁桶，纯原创自绘）。
 //   0x207 装水铁桶 —— 同空桶 + 桶内青蓝水液面（t174；机制等价 MC 装水铁桶）。
+//   0x208 小麦种子 —— 几粒黄褐色麦种 + 胚芽细尖（t235；挖草丛掉落；种植 → 小麦作物 t236）。
 // 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭/桶同理 → 均独立自绘。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体 Repeater（sourceItem），
@@ -19,7 +20,7 @@ import QtQuick
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -215,6 +216,25 @@ Item {
                 R(7, 9, 4, 1, waterLight) // 水面高光（左上受光）
             }
 
+            // 小麦种子（0x208，t235）：几粒黄褐色麦种（椭圆粒 + 胚芽细尖）。机制等价 MC 小麦种子图标
+            //   （麦粒形）；纯原创自绘（§9a）。配色：seed #c8a868（麦粒暖黄褐）/ light #e0c890（受光高光）/
+            //   dark #8a6c38（阴影 + 胚沟）/ tip #6a8a3a（胚芽尖淡绿，表「将萌发」）。3 粒聚拢呈种子堆。
+            const drawSeed = () => {
+                const seed = "#c8a868", light = "#e0c890", dark = "#8a6c38", tip = "#6a8a3a"
+                // 单粒麦种（椭圆 + 胚芽尖）：以 为中心画一粒。
+                const grain = (cx, cy) => {
+                    // 椭圆主体（4×6，竖向麦粒）
+                    R(cx - 2, cy - 3, 4, 6, seed)
+                    R(cx - 1, cy - 3, 2, 1, light)    // 顶受光
+                    R(cx - 2, cy + 2, 4, 1, dark)     // 底阴影
+                    R(cx + 1, cy - 3, 1, 6, dark)     // 右暗边（圆柱明暗）
+                    R(cx, cy - 4, 1, 1, tip)          // 胚芽尖（顶端淡绿小点，表「将萌发」）
+                }
+                grain(8, 12)   // 主粒（中央偏左）
+                grain(14, 10)  // 右上粒
+                grain(12, 15)  // 右下粒
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             switch (root.materialId) {
             case 0x200: drawStick();        break
@@ -225,6 +245,7 @@ Item {
             case 0x205: drawCharcoal();     break
             case 0x206: drawBucketEmpty();  break // t174 铁桶（空）
             case 0x207: drawWaterBucket();  break // t174 装水铁桶
+            case 0x208: drawSeed();         break // t235 小麦种子
             default:    drawStick();        break
             }
         }

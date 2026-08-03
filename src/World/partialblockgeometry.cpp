@@ -1,5 +1,7 @@
 #include "partialblockgeometry.h"
 
+#include <cmath> // std::sqrt（pushCrossQuad 法线归一化）
+
 // t134 不完整方块异形几何：为 6 类木制半方块（WoodSlab/WoodStairs/WoodFence/WoodPressurePlate/
 // WoodDoor/WoodTrapdoor）生成异形顶点，**合批进同一 chunk mesh**（复用 chunkgeometry 顶点色光照管线 +
 // 单 draw call，lessons-learned t03「大网格不要用 QML Repeater」）。
@@ -78,6 +80,67 @@ void pushBox(QVector<Vtx> &verts, QVector<quint32> &idx,
         idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);
         idx.append(base + 0); idx.append(base + 2); idx.append(base + 3);
     }
+}
+
+// t235 cross 形广告牌方块（草丛 / 花 / 作物）：两片对角十字相交的**双面** quad，每片贴整张瓦片贴图。
+//   机制等价 MC 1.0 cross 模型（tall grass / 花生 / 小麦作物的两片对角相交平面）。
+//
+//   双面：默认 backface 剔除下单面 quad 只从一个方向可见；cross 须两面都见（玩家绕到背面仍见草叶）。
+//   故每片 quad 发**正反两组三角形**（正 CCW + 反 CW，法线取反）—— 不依赖材质关 culling，局部几何自洽。
+//
+//   quad 四角 p0..p3 须共面、按「从某一侧看 CCW」序给出（UV: p0=(0,0) p1=(1,0) p2=(1,1) p3=(0,1)，
+//   即 BL→BR→TR→TL，整张瓦片铺满该 quad）。法线由 (p1-p0)×(p3-p0) 算（NoLighting 下不影响着色，仅填格式）。
+//   光照：cross 各面共用本格光场值（同其它异形方块：faceVc 直接返回 L.light）。
+void pushCrossQuad(QVector<Vtx> &verts, QVector<quint32> &idx,
+                   int lx, int ly, int lz,
+                   float p0x, float p0y, float p0z,
+                   float p1x, float p1y, float p1z,
+                   float p2x, float p2y, float p2z,
+                   float p3x, float p3y, float p3z,
+                   int tile, const PartialLightCtx &L,
+                   float tileW, float hx, float hy, float v0, float v1)
+{
+    const float u0 = tile * tileW + hx, u1 = (tile + 1) * tileW - hx;
+    const float vc = faceVc(nullptr, L);
+    // 法线 = (p1-p0)×(p3-p0)（NoLighting 下不影响渲染；填格式 + 供未来 lit 路径）。
+    const float ex = p1x - p0x, ey = p1y - p0y, ez = p1z - p0z;
+    const float fx = p3x - p0x, fy = p3y - p0y, fz = p3z - p0z;
+    float nx = ey * fz - ez * fy;
+    float ny = ez * fx - ex * fz;
+    float nz = ex * fy - ey * fx;
+    const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+    if (len > 1e-6f) { nx /= len; ny /= len; nz /= len; }
+    else { nx = 0.f; ny = 1.f; nz = 0.f; } // 退化（不应发生）兜底 +Y
+
+    const float c[4][3] = {{p0x,p0y,p0z},{p1x,p1y,p1z},{p2x,p2y,p2z},{p3x,p3y,p3z}};
+    const float uv[4][2] = {{0,0},{1,0},{1,1},{0,1}};
+
+    // 正面（法线 +n，CCW p0→p1→p2→p3）。
+    const quint32 baseF = quint32(verts.size());
+    for (int i = 0; i < 4; ++i) {
+        Vtx v;
+        v.x = float(lx) + c[i][0]; v.y = float(ly) + c[i][1]; v.z = float(lz) + c[i][2];
+        v.nx = nx; v.ny = ny; v.nz = nz;
+        v.u = u0 + uv[i][0] * (u1 - u0);
+        v.v = v0 + uv[i][1] * (v1 - v0);
+        v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f;
+        verts.append(v);
+    }
+    idx.append(baseF + 0); idx.append(baseF + 1); idx.append(baseF + 2);
+    idx.append(baseF + 0); idx.append(baseF + 2); idx.append(baseF + 3);
+    // 背面（法线 -n，CW p0→p3→p2→p1 → 反向绕序三角形）。
+    const quint32 baseB = quint32(verts.size());
+    for (int i = 0; i < 4; ++i) {
+        Vtx v;
+        v.x = float(lx) + c[i][0]; v.y = float(ly) + c[i][1]; v.z = float(lz) + c[i][2];
+        v.nx = -nx; v.ny = -ny; v.nz = -nz;
+        v.u = u0 + uv[i][0] * (u1 - u0);
+        v.v = v0 + uv[i][1] * (v1 - v0);
+        v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f;
+        verts.append(v);
+    }
+    idx.append(baseB + 0); idx.append(baseB + 3); idx.append(baseB + 2);
+    idx.append(baseB + 0); idx.append(baseB + 2); idx.append(baseB + 1);
 }
 } // namespace
 
@@ -204,6 +267,20 @@ int PartialBlockGeometry::append(
             }
             pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.f, 1.f, bz0, bz1, tile, light, tileW, hx, hy, v0, v1);
         }
+        break;
+    }
+    case BlockRegistry::TallGrass: {
+        // t235 草丛 cross 模型：两片对角相交的双面 quad（满格高 0..1，对角占满 cell footprint）。
+        //   机制等价 MC 1.0 cross 模型（tall grass / 花生 / 作物）。两片分别沿 (+X,+Z) 与 (+X,-Z) 对角，
+        //   在格中心垂直线相交成 X 形（俯视）。每片整张贴 tall_grass 瓦片、双面发（pushCrossQuad）。
+        //   不做邻居剔除（cross 透明 + 装饰，不挡邻居；TallGrass solid=false 亦不参与邻居面剔除）。
+        //   Plane A：对角 (0,0,0)-(1,0,1)（-X-Z 角到 +X+Z 角）；Plane B：对角 (1,0,0)-(0,0,1)（+X-Z 角到 -X+Z 角）。
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
         break;
     }
     default:

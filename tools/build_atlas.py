@@ -27,10 +27,13 @@
   27 farmland_wet（t234 耕地顶面湿态：深棕色湿润翻耕土 + 同犁沟纹（区别 dry 仅色更深）。Farmland 方块
      frontTile 字段 = 本 tile（字段复用：Farmland 无 -Z 前面语义，frontTile 唯一消费点是 tileFor 的湿态顶面）；
      mesher 据 Farmland state bit0=1（湿）选本 tile 画 +Y 顶面。tools/build_farmland.py 生成。）
+  28 tall_grass（t235 草丛 cross 贴图：green 草叶 + alpha 透明底。TallGrass 方块各面 = 本 tile；mesher 走 cross
+     几何段（PartialBlockGeometry pushCross 双面双对角 quad），chunk 地形材质 alphaCutoff:0.5 cutout 透明底。
+     tools/build_tall_grass.py 程序生成原创像素图，§9 override (a)。）
 （CC0 资产，来源见 docs/PLAN.md §L 资产管线；工作台贴图由 tools/build_crafting_table.py、
  熔炉贴图由 tools/build_furnace.py、矿石贴图由 tools/build_ore.py、火把贴图由 tools/build_torch.py、
  基岩贴图由 tools/build_bedrock.py、水贴图由 tools/build_water.py、箱子贴图由 tools/build_chest.py、
- 流水贴图由 tools/build_water_flow.py 程序生成原创像素图，§9 override (a)。）
+ 流水贴图由 tools/build_water_flow.py、草丛贴图由 tools/build_tall_grass.py 程序生成原创像素图，§9 override (a)。）
 """
 import os
 from PIL import Image
@@ -66,6 +69,7 @@ TILES = [
     "default_water_flow_2",         # 25 water_flow_2（t223 流水动画第二帧；mesher 据水段 waterAnimPhase 在 23/25 间切换）
     "default_farmland_dry",         # 26 farmland_dry（t234 耕地顶面干态；浅色翻耕干土 + 纵向犁沟纹；tools/build_farmland.py 程序生成原创像素图）
     "default_farmland_wet",         # 27 farmland_wet（t234 耕地顶面湿态；深色湿润翻耕土 + 同犁沟纹；mesher 据 Farmland state bit0 选 26(干)/27(湿)）
+    "default_tall_grass",           # 28 tall_grass（t235 草丛 cross 贴图；green 草叶 + alpha 透明底；mesher 走 cross 几何段 + alphaCutoff cutout；tools/build_tall_grass.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

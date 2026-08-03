@@ -19,6 +19,7 @@
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
 //   10=furnace 11=coal_ore 12=iron_ore 13=torch 14=bedrock ... 21=water 22=chest 23=farmland
+//   24=tall_grass（草丛；cross 广告牌方块）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -100,7 +101,19 @@ public:
                                   //   （机制等价 MC 耕地碰撞箱矮 1 像素；selectionAABBs 仍走 ShapeFull 整格，选中框不缩，
                                   //   raycast 经 isFullCube=true 走整格命中 —— 三者解耦：碰撞矮、选中满、射线整格，零相互干扰）。
                                   //   state 编码干/湿（见 FarmlandMoistBit），由 playercontroller 耕地时据水源邻近判定写入。
-        Count         = 24, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        TallGrass      = 24, // 草丛（t235）：机制等价 MC 1.0 草丛 / 蕨类（tall grass / fern）。**cross 形广告牌方块**
+                                  //   （两片对角十字相交的 quad，billboard X 形贴图，alpha 透明底 cutout）—— 非 1×1×1 整立方，
+                                  //   亦非段内异形方块段（id > LastPartial）。worldgen 在 grass 表层上方确定性散布（placeTallGrass），
+                                  //   同 seed 同分布（PLAN §2-K）。solid=false（非实体 → 不挡邻居面剔除 → 相邻地形仍画自己的面；
+                                  //   同 torch / 不完整方块语义）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC 草丛可踩过）、
+                                  //   hardness=0（瞬破，同 torch）、NoTool（空手可采且掉落）、dropId=小麦种子（材料段 0x208，
+                                  //   RecipeRegistry::SeedId；Core 不依赖 Game 故用字面量 0x208）、dropCount=1、maxStack=64。
+                                  //   各面贴图=tall_grass(28)（green 草叶 + alpha 透明底；mesher 走 cross 几何段，材质 alphaCutoff
+                                  //   cutout 透明底）。音色归 GroupGrass（软草音）。**渲染走 PartialBlockGeometry::append 的 cross
+                                  //   case**（合批进 chunk mesh，复用顶点色光照；cross 双面双对角 quad）；chunkgeometry 路由进 cross 段
+                                  //   [FirstCross, LastCross]、不进立方面 PASS。raycastAABBs 整格命中（ShapeNone 非 torch 兜底）→
+                                  //   可瞄准 / 破坏。不进创造调色板（worldgen 专属装饰方块，机制等价 MC 草丛非玩家可放置；t244 补全）。
+        Count         = 25, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
@@ -112,6 +125,15 @@ public:
     //   透明（Chest 透视格子）即此根因。mesher / 选中框路由一律用 `>= FirstPartial && <= LastPartial`。
     static constexpr int FirstPartial = 15;
     static constexpr int LastPartial  = WoodTrapdoor; // 20（异形段上界；新增异形方块追加时同步右移）
+
+    // t235 cross 广告牌方块段哨兵：id ∈ [FirstCross, LastCross] 走 PartialBlockGeometry 的 cross 几何
+    //   （两片对角十字相交的双面 quad，机制等价 MC 草丛 / 花 / 作物的 cross 模型）。与 [FirstPartial, LastPartial]
+    //   的「轴对齐盒体异形」**不同类** —— cross 是对角双面平面（非盒组合），故独立成段（避免与 partial 盒体几何混在
+    //   同一 switch 误生成）。t235 落地 1 类（TallGrass=24）。mesher 路由用闭区间 [FirstCross, LastCross]（同 partial
+    //   段教训 lessons-learned t194：闭区间防段后整立方误进 cross 路径）。新增 cross 方块（花 / 小麦作物 t236 等）
+    //   追加时右移 LastCross。
+    static constexpr int FirstCross = TallGrass; // 24
+    static constexpr int LastCross  = TallGrass; // 24（cross 段上界；新增 cross 方块追加时同步右移）
 
     // t206 双半砖（合并态）state 标记：两块互补半砖（上+下）同格合并时，placeBlock 写 Planks(id=6) +
     //   本 bit 标记「源自双半砖」（旧实现写 Planks state=0 → 破块掉 1× Planks，用户报「双半砖挖掉掉 1 全木板」）。
@@ -247,7 +269,8 @@ public:
     //   26=farmland_dry（t234 耕地顶面干态；浅色翻耕干土，纵向犁沟纹）。
     //   27=farmland_wet（t234 耕地顶面湿态；深色湿润翻耕土，同犁沟纹 + 深色；mesher 据 Farmland state bit0
     //      选 26(干)/27(湿)；Farmland 方块 def topTile=26，tileFor 特例覆盖）。
-    // 图集由 tools/build_atlas.py 打包全部 28 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   28=tall_grass（t235 草丛 cross 贴图；green 草叶 + alpha 透明底；cross 几何段材质 alphaCutoff cutout 透明底）。
+    // 图集由 tools/build_atlas.py 打包全部 29 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -260,7 +283,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 28;
+    static constexpr int AtlasTileCount = 29;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

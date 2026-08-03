@@ -63,6 +63,10 @@ public:
     //   与 ToolRegistry::isTool（[0x100,0x103)）互斥 —— 桶非工具，不影响挖掘速度 / 掉落判定。
     static constexpr int BucketEmptyId  = 0x206; // 铁桶（空）：3 铁锭 V 形合成；右键水舀水 → WaterBucketId
     static constexpr int WaterBucketId  = 0x207; // 装水铁桶：空桶舀水得；右键倒出水水源 → BucketEmptyId
+    // t235 小麦种子：材料段 0x208。挖草丛（TallGrass）掉落（BlockRegistry::TallGrass.dropId=0x208）；
+    //   机制等价 MC 1.0「挖草丛掉小麦种子」。可堆叠 64；创造调色板可取用。**种植**（右键耕地→种小麦作物）
+    //   归 t236（WheatCrop 方块 + 生长阶段）；本任务仅注册物品（可持 / 可掉 / 创造可取）。
+    static constexpr int SeedId         = 0x208; // 小麦种子：挖草丛掉落；种植 → 小麦作物（t236）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

@@ -519,7 +519,8 @@ void World::generate()
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
-    recomputeLightField(); // t151：地形 / 树定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
+    placeTallGrass(); // t235：grass 表层上方确定性散布草丛（PLAN §2-K；树定型后，仅写空气格不覆盖树）
+    recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
 }
 
 // 整数哈希（FNV-1a + avalanche）：seed/x/z → 32 位确定性伪随机。纯函数，不依赖任何运行期随机源
@@ -661,6 +662,37 @@ void World::placeTrees()
         }
     }
     qInfo() << "worldgen: trees placed =" << placed; // 可观测：同 seed → 同计数（确定性核对）
+}
+
+// t235 草丛确定性散布（PLAN §2-K）：遍历列，在 grass 表层（heightAt > waterLevel+1，非沙漠，与 generate
+//   草表层 / placeTrees / scatterOres 同阈值）上方一格（surfaceY+1）按 hashColumn(seed,x,z) 密度筛选置
+//   TallGrass。仅写空气格（setVoxelIfAir）→ 不覆盖已生成的树干 / 树叶 / 水。无运行期随机源（纯 seed 派生）→
+//   同 seed 同草丛分布。机制等价 MC 1.0 平原草丛点缀（密度较树高：~18% grass 列生草丛，平原点缀感）。
+//   草丛占 surfaceY+1（grass 顶上方一格）；worldgen 顺序保证 placeTrees 先跑（树占 surfaceY+1 起若干格），
+//   故树干列的 surfaceY+1 已被 Log 占据 → setVoxelIfAir 跳过（草丛不抢树位）。无列间距筛选（草丛密度天然高，
+//   无需像树那样保证间距；机制等价 MC 平原草丛密集点缀）。
+void World::placeTallGrass()
+{
+    constexpr unsigned kDensityPct = 18; // 每 grass 列 ~18% 生草丛（平原点缀密度；高于树 2%，草丛密集）
+
+    int placed = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            const int surfaceY = heightAt(x, z);
+            // 与 placeTrees 同阈值：沙滩带(wl±1)/水下(h<wl)/低洼不生草丛（机制等价 MC 草丛不生于沙/水下）。
+            if (surfaceY <= kWaterLevel + 1) continue;
+            if (isDesert(x, z)) continue;         // t117 沙漠群系不生草丛（机制等价 MC 沙漠无草）
+
+            const quint32 r = hashColumn(m_seed, x, z);
+            if (r % 100u >= unsigned(kDensityPct)) continue; // 密度筛选
+
+            const int y = surfaceY + 1; // grass 顶上方一格
+            if (y >= m_height) continue; // 世界顶之上不放（防御）
+            setVoxelIfAir(x, y, z, BlockRegistry::TallGrass);
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: tall grass placed =" << placed; // 可观测：同 seed → 同计数（确定性核对）
 }
 
 // t119 底层基岩：遍历列，在 y 0..4 铺一层 Bedrock（不可破坏方块，hardness=-1.0 → canMine=false）。
