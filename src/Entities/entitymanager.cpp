@@ -299,6 +299,39 @@ int EntityManager::findMobHit(const QVector3D &origin, const QVector3D &dir, flo
     return bestIdx;
 }
 
+// t249 受击击退（spec「受击往攻击方向小跳击退」；机制等价 MC 1.0 knockback：受击实体沿攻击方向被推开 +
+//   小幅上弹）。caller（PlayerController::attackMob）传玩家→mob 水平方向向量 (dirX,dirZ)；本方法归一后
+//   设 vx/vz = kKnockbackHoriz×方向（水平冲量）+ vy = kKnockbackUp（小跳垂直冲量，向上）+ 解除 resting
+//   （让 tick 重力分支接手上跳→减速→下落→着地；不解除则 resting 早 return 跳过垂直运动 = 不弹起）。
+//   方向归一防御：零向量 / 非有限（NaN/Inf，caller 误传）→ 用实体当前 yaw 朝向兜底（-sin,-cos，同 aiWander
+//   约定）避免零冲量。非 Mob（掉落物 / 下落方块）/ dead（尸体不被推，同 resolvePlayerPush）/ 越界 → 早退。
+//   bump revision + emit → 驱动 QML {revision; posAt} 位置绑定重算（击退位移可见）。knockback 与 damageEntity
+//   分离：扣血走 damageEntity，位移冲量走本方法，各自 bump revision（attackMob 内顺序调用，二者都生效）。
+void EntityManager::knockback(int i, float dirX, float dirZ)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.dead) return;
+
+    // 归一方向（caller 应已传合理向量，此处防御零 / 非有限）。len 非有限或近 0 → yaw 朝向兜底。
+    float len = std::sqrt(dirX * dirX + dirZ * dirZ);
+    if (!(std::isfinite(len) && len > 1e-3f)) {
+        dirX = -std::sin(e.yawRad);
+        dirZ = -std::cos(e.yawRad);
+        len = 1.0f;
+    }
+    dirX /= len;
+    dirZ /= len;
+
+    e.vx = dirX * kKnockbackHoriz;
+    e.vz = dirZ * kKnockbackHoriz;
+    e.vy = kKnockbackUp;   // 小跳垂直速度（向上为正；tick 重力分支接手）
+    e.resting = false;     // 解除静止 → tick 处理上跳 + 下落 + 着地（否则 resting continue 跳过）
+    ++m_revision;
+    emit entitiesChanged();
+    qCInfo(lcEnt) << "mob" << i << "knockback dir=(" << dirX << dirZ << ") horiz=" << kKnockbackHoriz;
+}
+
 // t239 AI wander 自主移动（机制等价 MC passive mob「随机选向 + 时间片游荡 / 停驻」循环）。
 //   - 时间片倒计时 wanderTimer；到 0 选新朝向 yawRad∈[0,2π) + 随机决定 idle（~25% speed=0 停驻）/ 行走
 //     （speed=kWalkSpeed），重置 timer∈[kWanderMin, kWanderMax]。非确定性（生物 AI 非世界生成，不涉 §2-K）。
@@ -616,6 +649,30 @@ void EntityManager::tick(qreal dt, World *world)
             if (e.moveSpeed > 0.0f) {
                 e.walkPhase = std::fmod(e.walkPhase + e.moveSpeed * float(dt) * kWalkFreq, 6.2831853f);
                 dirty = true;
+            }
+
+            // t249 击退水平位移应用（vx/vz 衰减 + 逐轴碰撞位移）。knockback() 受击瞬间设 vx/vz，本处每 tick 把
+            //   速度转位移（叠加在 aiWander 移动之上 → 击退期间 AI 仍走，二者位移相加，同 MC「既有动量又有击退」）
+            //   + 指数衰减（vx *= 1 - kKnockbackDrag*dt，~0.5s 基本停）。逐轴（X 后 Z）mobAabbHitsSolid 撤回防穿墙
+            //   （同 aiWander / resolvePlayerPush）；世界边界 clamp（防击退出世界）。速度衰减到可忽略 → 清零（防永
+            //   久微小漂移 / 每帧 dirty 抖动）。仅 vx/vz 任一非零时执行（无击退的 mob 零开销跳过）。
+            if (std::abs(e.vx) > 1e-4f || std::abs(e.vz) > 1e-4f) {
+                const float r = e.radius;
+                float newX = e.pos.x() + e.vx * float(dt);
+                if (newX < 0.5f) newX = 0.5f;
+                if (newX > worldW - 0.5f) newX = worldW - 0.5f;
+                if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), r)) newX = e.pos.x();
+                float newZ = e.pos.z() + e.vz * float(dt);
+                if (newZ < 0.5f) newZ = 0.5f;
+                if (newZ > worldD - 0.5f) newZ = worldD - 0.5f;
+                if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, r)) newZ = e.pos.z();
+                if (newX != e.pos.x()) { e.pos.setX(newX); dirty = true; }
+                if (newZ != e.pos.z()) { e.pos.setZ(newZ); dirty = true; }
+                const float decay = std::max(0.0f, 1.0f - kKnockbackDrag * float(dt));
+                e.vx *= decay;
+                e.vz *= decay;
+                if (std::abs(e.vx) < 0.05f) e.vx = 0.0f; // 衰减到可忽略 → 清零
+                if (std::abs(e.vz) < 0.05f) e.vz = 0.0f;
             }
         }
 

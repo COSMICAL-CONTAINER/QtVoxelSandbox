@@ -772,13 +772,36 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
 // t248 攻击冷却（kAttackCooldown）：m_attackCooldown>0 时早退（不扣血 / 不挥臂 / 不发信号）。修「长按左键
 //   每帧重触 beginMining → mob 瞬秒」——cooldown 把长按连击压成每 0.5s 一次伤害。单次 click 边沿（press）
 //   首击 cooldown=0 总生效；后续 tick 在冷却内被吞。成功命中后置 kAttackCooldown。
+// t249 暴击 + 击退（spec「受击往攻击方向小跳击退；玩家跳起攻击=暴击 +50% 伤害，research MC crit」）：
+//   - 暴击判定（机制等价 MC 1.0 crit）：玩家「滞空下落」态（!onGround && m_vel.y()<0）→ dmg=kCritDamage(6)，
+//     否则 kAttackDamage(4)。MC 1.0 crit 精确条件 = falling（向下速度）&& !onGround && 不在梯子 / 水；
+//     本工程无梯子、水中减速但不下落 → 近似为「滞空下落」即可（spec「research MC crit 计算」）。注意：起跳
+//     上升期（vy>0）与地面（onGround）都**不**算暴击 —— 须「跳起后下落途中挥击」才触发，对齐 MC 手感。
+//   - 击退方向（spec「往攻击方向」= 玩家→mob 水平方向）：取两 XZ 中心差；重合（玩家骑在 mob 上）→ 用视线
+//     水平方向兜底。EntityManager.knockback 内再归一 + 零向量防御。knockback 给 mob 水平冲量 + 小跳垂直冲量。
+//   damageEntity 先于 knockback：若本次为击杀（health→0→dead），knockback 内 dead 守卫早退（尸体不弹，
+//     deathTimer 死亡动画原地播放）；存活则两者都生效（扣血 + 弹开 + 小跳）。
 void PlayerController::attackMob(int entityIndex)
 {
     if (!m_entityManager) return;
     if (m_attackCooldown > 0.0f) return; // t248 冷却内不扣血（连击 / 长按续触被吞）
-    m_entityManager->damageEntity(entityIndex, kAttackDamage);
+    // t249 暴击判定：滞空（!onGround）且下落（vy<0）→ +50% 伤害。
+    const bool crit = (!m_onGround && m_vel.y() < 0.0f);
+    const int dmg = crit ? kCritDamage : kAttackDamage;
+    // t249 击退方向：玩家脚底 → mob 中心 的水平向量（未归一，knockback 内归一）。
+    const QVector3D mobPos = m_entityManager->posAt(entityIndex);
+    float kbx = mobPos.x() - m_pos.x();
+    float kbz = mobPos.z() - m_pos.z();
+    if (std::sqrt(kbx * kbx + kbz * kbz) < 1e-3f) {
+        // 玩家与 mob XZ 重合（骑上 / 正上方）→ 用视线水平方向兜底，避免零向量无击退。
+        const QVector3D look = lookDirection();
+        kbx = look.x();
+        kbz = look.z();
+    }
+    m_entityManager->damageEntity(entityIndex, dmg);
+    m_entityManager->knockback(entityIndex, kbx, kbz);
     emit swingArm();
-    emit mobAttacked();
+    emit mobAttacked(crit);
     m_attackCooldown = kAttackCooldown;
 }
 

@@ -397,7 +397,9 @@ signals:
     //   swingArm）替代破块，并发本信号。呈现层 Connections 路由到 AudioManager.playMobHurt（t248 专属 mob
     //   受击声 mob_hurt.wav，替代旧复用 hurt.wav 的玩家受伤声——spec「受击音换专属 mob 受伤声」）。
     //   同 swingArm / blockBroken 模式：Game/Physics 层发语义事件，呈现 / 音频层只消费（PLAN §2 分层）。
-    void mobAttacked();
+    //   t249 crit=true 表示本次为暴击（玩家跳劈下落中命中）：呈现层可据此播放更强的受击音 / 暴击粒子
+    //   （spec 仅要求 +50% 伤害已由 kCritDamage 落地；反馈音 / 视觉属可选增强，留 hook）。
+    void mobAttacked(bool crit);
 
 protected:
     void componentComplete() override;
@@ -702,6 +704,10 @@ private:
     //   工具 / 剑加成属 Phase 1.1；本任务全模式空手攻击同伤害（创造亦走此伤害，但创造可瞬破方块优先 →
     //   实际打 mob 走 findMobHit 同路径）。Survival 限定非必要（攻击不影响 Survival 平衡，spec 未限定模式）。
     static constexpr int kAttackDamage = 4;
+    // t249 暴击伤害（spec「跳劈暴击 +50% 伤害，research MC crit」）。机制等价 MC 1.0 critical hit：
+    //   base × 1.5 向下取整（integer base*3/2）。base=4 → 6 HP（3 心）。暴击触发条件见 attackMob（玩家滞空
+    //   下落时挥击）。工具 / 剑的暴击加成属 Phase 1.1（届时本常量改为据工具算）；本任务空手暴击固定 6。
+    static constexpr int kCritDamage = kAttackDamage * 3 / 2; // = 6（base 4 × 1.5 向下取整）
     // t248 攻击冷却（秒）：mob 受击后 0.5s 内同玩家对其的伤害被压制（attackMob 早退、不扣血 / 不发信号）。
     //   修「1 击即死」根因：survival 长按左键时 updateMining 续挖分支会每 tick 重调 beginMining → 攻击分支
     //   每帧打一下 mob（mob 后方射程内有方块即触发），10HP/4dmg=3 击在 ~50ms 内打完 = 体感瞬秒。冷却把

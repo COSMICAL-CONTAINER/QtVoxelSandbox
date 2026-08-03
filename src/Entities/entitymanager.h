@@ -151,6 +151,14 @@ public:
     //   跳过：非 Mob（掉落物 / 下落方块）、dead（尸体不可再打，防鞭尸重复扣血 / 触发多次掉落）。
     //   分层（PLAN §2）：EntityManager 自持实体数据，做几何测试最自然；只读自身数据、无向下依赖。
     int findMobHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist = nullptr) const;
+    // t249 受击击退（spec「受击往攻击方向小跳击退」；C++ 直调，PlayerController::attackMob 命中后调）：
+    //   给第 i 个 mob 一个水平方向 (dirX,dirZ) 的击退冲量（vx/vz=kKnockbackHoriz 沿方向）+ 小跳垂直速度
+    //   （vy=kKnockbackUp 向上）；解除 resting 让 tick 重力分支处理上跳→减速→下落→着地（小弹起观感）。
+    //   方向 (dirX,dirZ) 由 caller 传「玩家→mob」水平向量（knockback 内再归一 + 零向量防御）。机制等价
+    //   MC 1.0 knockback：受击实体沿攻击方向被推开 + 小幅上弹（不旋转、无受击硬直打断 AI，仅速度叠加）。
+    //   非 Mob / dead（尸体不被推，同 resolvePlayerPush）/ 越界 → 静默早退。bump revision → QML 位置绑定刷新。
+    //   分层（PLAN §2）：与 damageEntity 同层（Entities），只改自身数据，无向下依赖；由 Game/Physics 层调。
+    void knockback(int i, float dirX, float dirZ);
 
     // 玩家推动解析（C++ 直调；PlayerController::tick 每帧调，captured 时）。
     //   playerFeet=玩家脚底中心，halfW=玩家 AABB 半宽，height=玩家 AABB 高，world=只读世界（钳制穿墙用）。
@@ -188,8 +196,13 @@ private:
         int kind = Mob;          // 渲染分流（Mob/Item/FallingBlock；Q_ENUM）
         int blockId = 0;         // t117 FallingBlock 携带的方块 id（着地 setBlock 用；其余 kind=0）
         QString color = QStringLiteral("#ff5555"); // 渲染配色（醒目纯色）
-        float vy = 0.0f;         // 垂直速度（blocks/s；向下为负）；落地后归 0
+        float vy = 0.0f;         // 垂直速度（blocks/s；向下为负）；落地后归 0；t249 击退小跳设正值（向上）
         bool resting = false;    // 是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
+        // t249 受击击退水平速度（XZ 分量，blocks/s）：knockback() 受击瞬间设置，tick 指数衰减到 0。
+        //   机制等价 MC 1.0 knockback 冲量（受击实体被沿攻击方向推开）；与 AI wander 的「直接位移」分离，
+        //   作为独立速度层叠加（knockback 期间 AI 仍可走，二者位移相加，同 MC 受击时实体既有动量又有击退）。
+        float vx = 0.0f;         // 击退水平速度 X（默认 0；仅 knockback 后非零）
+        float vz = 0.0f;         // 击退水平速度 Z（默认 0；仅 knockback 后非零）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
         int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
@@ -242,6 +255,16 @@ private:
     static constexpr float kEatScanInterval = 1.0f; // 空扫描（前方无草）后到下次扫描的间隔（秒；节流扫描开销）
     static constexpr float kEatReach = 0.7f;       // 检测前方草丛的水平距离（block；头部前方 ~ 半格多）
     static constexpr float kEatHeadPitch = -0.6f;  // 吃草头部俯仰峰值（弧度，负=低头；headPitchAt 据 sin(πp) 调制）
+    // t249 受击击退常量（机制对齐 MC 1.0 knockback 量级，spec「小跳击退」）：
+    //   kKnockbackHoriz：击退水平初速（blocks/s）。受击瞬间设 vx/vz=本值×方向；与 kWalkSpeed=1.0 相比明显
+    //     快（≈4.5×走速），但远低于玩家 kWalk=4.3 + 疾跑 → 玩家可追上被击退的 mob（不会打飞到追不上）。
+    //   kKnockbackUp：击退小跳垂直初速（blocks/s，向上为正）。峰值高 = v²/(2g) = 20.25/56 ≈ 0.36 格 = 小弹起
+    //     （机制等价 MC knockback 的小幅上弹，非大跳）。重力 28 把它拉回，着地走原 tick 路径。
+    //   kKnockbackDrag：水平速度指数衰减率（1/s）。每帧 vx *= (1 - drag*dt)；时间常数 1/drag=0.25s → ~0.5s
+    //     衰减到 ~13%、~1s 近停。总位移 ≈ v0/drag ≈ 1.1 格（小击退，对齐 spec「小跳击退」而非打飞）。
+    static constexpr float kKnockbackHoriz = 4.5f;  // 击退水平初速（blocks/s）
+    static constexpr float kKnockbackUp    = 4.5f;  // 击退小跳垂直初速（blocks/s；峰值 ~0.36 格）
+    static constexpr float kKnockbackDrag  = 4.0f;  // 击退水平衰减率（1/s；~0.5s 基本停下）
 };
 
 #endif // ENTITYMANAGER_H

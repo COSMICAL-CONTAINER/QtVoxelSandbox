@@ -766,7 +766,7 @@ Window {
         //   驱动；扣血由 damageEntity 内完成。t248 攻击冷却在 PlayerController::attackMob 内门控（长按连击
         //   每 0.5s 一次伤害，防瞬秒），此信号仅在真扣血时发（冷却内 attackMob 早退不发）。呈现 / 音频层只
         //   消费 Game/Physics 语义事件（同 swingArm / blockBroken 模式；PLAN §2 分层）。
-        function onMobAttacked() { audio.playMobHurt() }
+        function onMobAttacked(crit) { audio.playMobHurt() }
         // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换
         // 则保留背包打开，面板由各组件 visible 绑定 player.mode 自动换（创造背包↔生存背包）。避免任一
         // 背包在不兼容模式下滞留（Spectator 无背包/破放，t21）。
