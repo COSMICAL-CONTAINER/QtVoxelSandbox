@@ -459,7 +459,8 @@ function slotShiftLeftFurnace(root, group, index) {
 //   - maxCrafts = 每非空原料槽 count 的最小值（每合成消耗每非空槽 1，同既有单次 craftOne consume 规则）。
 //     例：planks 配方（1 原木 → 4 板），原料槽 [2,0,0,0] → maxCrafts=2 → 8 板；火把（1 煤+1 棍 → 4 把），
 //     煤槽 count=4 / 棍槽 count=3 → maxCrafts=3 → 12 把。
-//   - 守 heldId 为空或同 outputId（异物手持不批量合；交普通 craftOne 由用户自决）。
+//   - t268：光标持有任意物品（含非产物的异物）时也批量合——产物入背包（addToAny 只动 main/hotbar、不碰光标），
+//     光标原物品原样保留；空间钳按「光标仅持有同产物时贡献容量」算，背包放不下则裁 maxCrafts，绝不丢光标原物。
 //   - 防丢物：先扫 main+hotbar+光标 对 outputId 的可用空间，按 floor(space/outputCount) 把 maxCrafts 钳到
 //     「产物放得下」；空间不足 → 不消耗原料、无操作（同 MC「背包满则停止合成」）。
 //   - 守恒：消耗 maxCrafts × 每非空槽 1；产出 maxCrafts × outputCount；addToAny 入背包（main 同 id → hotbar
@@ -470,7 +471,10 @@ function slotShiftLeftCraft(root) {
     const r = root.matchedRecipe()
     if (!r) return true                                          // 无匹配 → 无操作但已处理（不回退）
     const heldId = root.hotbar.heldBlock
-    if (heldId !== 0 && heldId !== r.outputId) return true       // 异物手持 → 无操作
+    // t268：移除「异物手持 → 无操作」早退。spec「工作台左键拿取物品时 shift+左键 → 一键批量合成（覆盖手持态）」：
+    //   光标持有任意物品（含非产物的异物）时 shift+左键结果槽也应批量合。产物入背包（addToAny 只动 main/hotbar、
+    //   不碰光标），光标原物品原样保留。空间钳按「光标仅持有同产物时贡献容量」算（下方 space 分支已如此），背包
+    //   放不下则 maxCrafts 被裁到「放得下」的量（绝不丢光标原物）。
     // maxCrafts = 每非空原料槽 count 最小值。
     let maxCrafts = -1
     for (let i = 0; i < root.craftSlots.length; ++i) {
@@ -486,6 +490,7 @@ function slotShiftLeftCraft(root) {
     let space = 0
     if (heldId === r.outputId) space += (cap - heldCount)
     else if (heldId === 0) space += cap
+    // t268：heldId 为非产物异物时两分支均不命中 → 光标贡献 0 产物容量（产物只入 main/hotbar，不动光标原物）。
     for (let i = 0; i < root.hotbar.mainCount; ++i) {
         const s = readSlot(root, "main", i)
         if (s.id === 0) space += cap
@@ -510,7 +515,9 @@ function slotShiftLeftCraft(root) {
     // 产出 maxCrafts × outputCount 入背包（addToAny：main → hotbar 智能堆叠）；余数（背包满）入光标。
     const total = maxCrafts * r.outputCount
     const remain = root.hotbar.addToAny(r.outputId, total)
-    if (remain > 0) {
+    // t268：仅当光标为空或持有同产物时才把余数并入光标；持有非产物异物时不覆盖（防丢光标原物）。
+    //   理论上空间钳已保证 heldId 为异物时 remain=0（maxCrafts 按 main+hotbar 容量裁），此为防御纵深。
+    if (remain > 0 && (heldId === 0 || heldId === r.outputId)) {
         const prevHeldCount = (heldId === r.outputId) ? heldCount : 0
         root.hotbar.heldBlock = r.outputId
         root.hotbar.heldCount = prevHeldCount + remain
