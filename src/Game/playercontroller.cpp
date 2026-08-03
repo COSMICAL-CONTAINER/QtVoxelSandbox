@@ -1178,11 +1178,21 @@ void PlayerController::placeBlock()
                      || heldItemId == RecipeRegistry::BucketEmptyId)) {
         const int slot = m_hotbar->selectedSlot();
         if (heldItemId == RecipeRegistry::WaterBucketId) {
-            // 倒水：命中面相邻格放水源。tx/ty/tz 同方块放置（命中面外法线相邻格）。目标须为空气（不覆盖实体）。
+            // 倒水：命中面相邻格放水源。tx/ty/tz 同方块放置（命中面外法线相邻格）。目标须为空气或**流水**：
+            //   t273 修复(a)「流动水里放水」——旧守卫仅认 Air，瞄流水（Water state>0）右键静默无放；流水也是「水可倒
+            //   入的可占据格」，应允许放水源覆盖之（state>0 流水 → state=0 水源，升源；机制等价 MC 桶倒水入流水格
+            //   使其变满源）。已是水源（state==0）→ 视为「已满」，不重复放（免空耗一桶）。实体方块仍不覆盖（保 t05 放置语义）。
             if (!m_hasHit) return; // 未命中 → 无相邻格可放（桶分支已绕过上方 !m_hasHit 门，此处补检）
             const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
-            if (m_world->blockAt(tx, ty, tz) == BlockRegistry::Air) {
-                m_world->setBlock(tx, ty, tz, BlockRegistry::Water, 0); // state=0 水源（tickWaterFlow 下次波前推进开始 1 格/tick 蔓延）
+            const quint8 tgt = m_world->blockAt(tx, ty, tz);
+            const bool tgtFlowingWater = (tgt == BlockRegistry::Water
+                                          && m_world->stateAt(tx, ty, tz) != 0); // 流水（state 1..7），非水源
+            if (tgt == BlockRegistry::Air || tgtFlowingWater) {
+                // state=0 水源。setBlock 在 world.cpp 内对「放水」会 poke 水流节流计数（t273 修复 b）→ 下一
+                //   tickWaterFlow（~100ms）立即把波前推进 1 格（修复 b「放水后不立即流动」——旧节流计数残留使首
+                //   次蔓延最久等 0.3s，观感「不流动」）。Air→Water 发 blockPlaced；流水→水源 id 不变只 state 变
+                //   （不发 placed，是升源动作），均 worldChanged 重建水段 mesh。
+                m_world->setBlock(tx, ty, tz, BlockRegistry::Water, 0);
                 if (m_mode != Creative)
                     m_hotbar->setStack(slot, int(RecipeRegistry::BucketEmptyId), 1); // 装水桶 → 空桶（创造不消耗：保持装水桶可无限放水）
                 m_lastPlaceMs = now;

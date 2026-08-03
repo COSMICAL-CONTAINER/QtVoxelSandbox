@@ -92,6 +92,9 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     recomputeLightAround(x, y, z, oldId, id); // t154：增量重 flood 编辑格周围有界盒（替代全量 recomputeLightField）
     emit worldChanged(); // 触发 ChunkGeometry 重建（terrain+water 两段 dirty chunk 同步重建）
     m_chunks.clearAllDirty(); // t155g：两段都重建完，统一清脏（防一段 clearDirty 抢清致另一段跳过 = 2s 卡顿根因）
+    // t273 修复(b)：放水源（id==Water）时 poke 水流节流计数 → 下次 tickWaterFlow 即蔓延（详见 5 参数 setBlock 同名注释）。
+    if (id == BlockRegistry::Water)
+        m_flowTickCounter = kFlowTickInterval - 1;
     return true;
 }
 
@@ -153,6 +156,15 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     recomputeLightAround(x, y, z, oldId, id); // t154：增量重 flood（id 不变只 state 变 → 内部早退，光照无变化）
     emit worldChanged(); // 异形方块 state 变（开合 / 朝向）需 mesh 重建
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
+    // t273 修复(b)「放水后不立即流动」：玩家经桶 setBlock 放水源（Air→Water，或流水 state>0→水源升源）后，水流
+    //   应下一 tick（~100ms）即开始蔓延，而非等节流计数残留最久 ~0.3s 才首格（用户观感「放完不动」）。把节流计数
+    //   推到「下次 tickWaterFlow 即满足阈值」——其开头 `if (++m_flowTickCounter < kFlowTickInterval) return;`，故置
+    //   kFlowTickInterval-1 使下次 ++ 后恰好达阈值、立即处理波前。仅 Water 触发（放水是流动的源事件；其余方块编辑与
+    //   水流无关）。worldgen 填水走 m_chunks.setBlock 直写不经此 → 不受影响（生成期水域全源、稳态无蔓延需求）。此
+    //   poke 不改后续蔓延节奏（仍 ~0.3s/格动画），只让首格即时（机制等价 MC 倒水即刻外溢）。舀水走 setWaterSilent
+    //   不经此（舀水是退场、按既定节奏衰退即可，非本任务范围）。
+    if (id == BlockRegistry::Water)
+        m_flowTickCounter = kFlowTickInterval - 1;
     return true;
 }
 
