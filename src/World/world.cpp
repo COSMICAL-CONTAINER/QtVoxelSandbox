@@ -209,7 +209,9 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
 //   4) 扩散 pass（只把波前推 1 格，**有流动动画**；跳过 evapKeys + srcRegKeys）：
 //        - t221：跳过退场格（不向内回填 → 退场单向 = 蔓延镜像）。
 //        - 下落：cell 下方为 air → 下方写**流水 level=1**（**非水源**！修 t174「下落成源灌满盆地」）。
-//        - 水平蔓延：grounded 且 level < kMaxFlowLevel → 4 向邻居：air → 写 level+1（首达即最低）；
+//          **t272 cascade**：下落与水平蔓延不再互斥 —— 边缘 / 悬空水格（下方 air）同时下落 + 水平外扩，
+//          使水流「多流一格再下落」（修「悬崖边直接断」：旧 `else if` 让 bk==0 只下落断了水平蔓延）。
+//        - 水平蔓延：bk != 2（非水下柱）且 level < kMaxFlowLevel → 4 向邻居：air → 写 level+1（首达即最低）；
 //          **t224 re-leveling**：既有流水邻居若能被提供更低 level（c.level+1 < 邻居现 level）→ 下调之
 //          （平滑「两滩水融合」：旧实现只写 air、既有水永不下调 → 两股流水相遇在中线形成首达者独占的
 //          阶梯边界，观感「明显边界 / 各为固方块」；下调使中线格 = min(两源距)，多 tick 收敛为 V 形平滑）。
@@ -351,6 +353,12 @@ void World::tickWaterFlow()
     //    跳过 evapKeys（退场格）+ srcRegKeys（升源格）：前者防向内回填震荡（t221），后者升源格本 tick
     //    不作流水扩散（下一 tick 作水源扩散）。t224 re-leveling：对既有流水邻居，若能提供更低 level 则下调
     //    （平滑两滩融合 —— 旧「只写 air、首达者独占」致中线阶梯边界 bug 之修复）。
+    //    t272 平面边缘 cascade：「下落」与「水平蔓延」**不再互斥** —— 边缘 / 悬空水格（下方 air）同时
+    //    下落 + 向水平 air 邻居扩散（旧实现 bk==0 只下落、`else if` 断了水平蔓延 → 悬崖边水柱仅 1 格宽即
+    //    垂直断流，用户观感「直接断」）。新格（悬崖外的悬空水）下一 tick 自身下方 air → 再下落 + 再外扩，
+    //    形成「向外悬空延伸 → 下落」的 cascade（机制等价 MC 流水越崖外扩几格再成瀑；受 kMaxFlowLevel
+    //    收束，不会无限外扩）。bk==2（水下柱）仍跳过水平蔓延：由该柱最底 grounded 格负责扩散，柱内每格
+    //    都扩散会重复写邻居。
     for (const WCell &c : cells) {
         if (evapKeys.count(keyOf(c.x, c.y, c.z))) continue;   // 退场中的格不扩散（断回填震荡）
         if (srcRegKeys.count(keyOf(c.x, c.y, c.z))) continue; // t224：升源格本 tick 不作流水扩散
@@ -358,8 +366,10 @@ void World::tickWaterFlow()
         if (bk == 0) {
             // 下落：写下方为流水 level=1（**非源** —— 修 t174「下落成源灌满盆地」bug）。
             tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1));
-        } else if (bk == 1 && c.level < kMaxFlowLevel) {
-            // 水平蔓延：grounded 且未到最大流距 → 4 向邻居。air → 写 level+1；既有流水 → re-level 下调。
+        }
+        // 水平蔓延：bk != 2（非水下柱）且未到最大流距 → 4 向邻居。air → 写 level+1；既有流水 → re-level 下调。
+        //   t272：bk==0（悬空 / 越崖边缘）也走此分支 → 水流「多流一格再下落」（cascade lip）。
+        if (bk != 2 && c.level < kMaxFlowLevel) {
             for (const auto &d : hd) {
                 const int nx = c.x + d[0], nz = c.z + d[1];
                 if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
@@ -382,7 +392,6 @@ void World::tickWaterFlow()
                 }
             }
         }
-        // bk == 2（下方为水）：水下柱 —— 由该柱最底 grounded 格负责水平扩散，本格不动。
     }
 
     // 5) 应用：升源 → 蒸发 → 新增/重定级（三者经 keySet 互斥，顺序安全）。setWaterSilent 内部无变化
