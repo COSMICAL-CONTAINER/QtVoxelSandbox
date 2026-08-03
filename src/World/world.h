@@ -60,15 +60,16 @@ public:
     Q_INVOKABLE bool isFullCubeAt(int x, int y, int z) const {
         return BlockRegistry::isFullCube(blockAt(x, y, z));
     }
-    // 是否「实体碰撞」：t146 走 BlockRegistry::BlockDef.shape；t152 改读 state + isCollidableWhenClosed
-    //   （门/活版门合态挡、开态通）。solid 仅作 mesher 邻居面剔除依据（不完整方块 solid=false → 不挡邻居
-    //   整面）；**碰撞**看 shape + 开合态：常规整立方 / 不完整方块（slab/stairs/...）恒挡玩家（逐形状 sub-AABB
-    //   精确，见 collisionAABBsAt）；门 / 活版门**合态**挡、**开态**通（玩家穿过）；air/torch/water 不挡。
+    // 是否「实体碰撞」：t146 走 BlockRegistry::BlockDef.shape；t152 读 state；t261 门恒挡（门板开合都实存）。
+    //   solid 仅作 mesher 邻居面剔除依据（不完整方块 solid=false → 不挡邻居整面）；**碰撞**看 shape + 开合态：
+    //   常规整立方 / 不完整方块（slab/stairs/...）恒挡玩家（逐形状 sub-AABB 精确，见 collisionAABBsAt）；
+    //   门**无论开合**都挡（门板实存于某一边：合=贴朝向边、开=旋 90° 贴铰链侧邻边 → 撞门板被挡、门洞方向
+    //   可穿过，t261 修「开门四向全通」）；活版门合态挡、开态通（玩家穿过）；air/torch/water 不挡。
     //   与 isSolid（「有方块」= blockAt!=0，raycast 命中用）分离：不完整方块 isSolid=true（射线命中）且
-    //   isCollidable=true（合态挡玩家，但只在其 sub-AABB 范围内）；torch isSolid=true（可着地/命中）但
-    //   isCollidable=false（穿过）；开门 isSolid=true（射线命中）但 isCollidable=false（穿过，spec「开门通」）。
+    //   isCollidable=true（挡玩家，但只在其 sub-AABB 范围内）；torch isSolid=true（可着地/命中）但
+    //   isCollidable=false（穿过）；开门 isSolid=true（射线命中）且 isCollidable=true（门板仍挡一面，t261）。
     Q_INVOKABLE bool isCollidable(int x, int y, int z) const {
-        return BlockRegistry::isCollidableWhenClosed(blockAt(x, y, z), stateAt(x, y, z));
+        return BlockRegistry::isCollidable(blockAt(x, y, z), stateAt(x, y, z));
     }
     // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
     //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/

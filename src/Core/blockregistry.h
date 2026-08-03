@@ -318,16 +318,21 @@ public:
     static bool isSolid(quint8 blockId);
     // t146 方块碰撞/选中形状（BlockDef.shape；越界 → air 行 = ShapeNone）。
     static Shape shape(quint8 blockId);
-    // t152 门 / 活版门「合态挡 / 开态通」碰撞谓词（spec「isCollidableWhenClosed(id,state)(门/活版门合态
-    //   true/开态 false) → world isCollidable 读 state → 关门挡/开门通」）。
-    //   - 门（ShapeDoor）：state bit2=开(1) → false（开门通）；合(0) → true（关门挡）。
-    //   - 活版门（ShapeTrapdoor）：state bit0=开(1) → false；合(0) → true。
+    // 方块是否「有碰撞 sub-AABB」（考虑开合态）：决定 collisionAABBs 是否非空 + World::isCollidable
+    //   预判。单一权威：isCollidable 与 collisionAABBs 共用，保证「预判」与「精确碰撞」对开合态同源。
+    //   - 门（ShapeDoor）：**恒 true** —— 门板无论开合都实存于某一边（合=贴朝向边、开=旋 90° 贴铰链侧
+    //     邻边，几何见 shapeBoxes 的 ShapeDoor 分支 + partialblockgeometry WoodDoor 渲染同源），玩家撞
+    //     门板那两面被挡、门板切线方向（含开门后的「门洞」方向）可穿过。t261 修「开门四向全通」：旧名
+    //     isCollidableWhenClosed 对开门返 false → collisionAABBs 空 → 门板凭空消失、四向皆通；改恒 true 后
+    //     collisionAABBs 返回 shapeBoxes 算出的「旋后贴边」panel AABB，开门仍挡铰链那一面（机制等价
+    //     MC 门打开后门板贴墙仍挡一面、仅门洞方向可过）。函数随之从 isCollidableWhenClosed 改名 isCollidable
+    //     （「开态通」对门已不成立，旧名误导）。
+    //   - 活版门（ShapeTrapdoor）：bit0=开(1) → false（开=竖直贴边，玩家穿过，机制等价 MC 活版门打开可过）；
+    //     合(0) → true（水平贴地挡）。
     //   - 其余有碰撞形状（Full/Slab/Stairs/Fence/Plate）→ true（无开合概念，恒挡）。
     //   - air / torch / water（ShapeNone）→ false。
-    //   越界 → false（air 兜底）。World::isCollidable 与 BlockRegistry::collisionAABBs 共用此谓词，
-    //   使「isCollidable 预判」与「collisionAABBsAt 精确碰撞」对开合态同源 —— 开门同时 isCollidable=false
-    //   且 collisionAABBs 空（玩家穿过）；关门两者皆挡。机制等价 MC「门打开可穿过、关上挡路」。
-    static bool isCollidableWhenClosed(quint8 blockId, quint8 state);
+    //   越界 → false（air 兜底）。
+    static bool isCollidable(quint8 blockId, quint8 state);
     // t146 方块碰撞 sub-AABB（cell-local [0,1]^3；复用 partialblockgeometry state 解码 → 与渲染形状同源）。
     //   玩家碰撞迭代玩家 AABB 覆盖的格子，逐 sub-AABB（+ 格偏移到世界坐标）做 3 轴重叠测试。
     //   air/torch → 空；常规整立方 → 单盒 {0,0,0,1,1,1}；异形 → 形状对应的多盒（stairs 2 盒 等）。

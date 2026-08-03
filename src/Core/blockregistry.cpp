@@ -138,14 +138,14 @@ int BlockRegistry::tileIndex(quint8 blockId, Face face)
 bool BlockRegistry::isSolid(quint8 blockId)      { return def(blockId).solid; }
 BlockRegistry::Shape BlockRegistry::shape(quint8 blockId) { return def(blockId).shape; }
 
-// t152 门 / 活版门「合态挡 / 开态通」碰撞谓词：开门 → false（玩家穿过），关门 / 其余有碰撞形状 → true。
-//   air / torch / water（ShapeNone）→ false。越界 → false（air 兜底）。单一权威：isCollidable 与
-//   collisionAABBs 共用，保证「预判」与「精确碰撞」对开合态一致（开门既不预判挡、也无 sub-AABB）。
-bool BlockRegistry::isCollidableWhenClosed(quint8 blockId, quint8 state)
+// 方块是否「有碰撞 sub-AABB」（考虑开合态）。air / torch / water（ShapeNone）→ false。
+//   越界 → false（air 兜底）。单一权威：isCollidable 与 collisionAABBs 共用，保证「预判」与「精确碰撞」
+//   对开合态一致。t261：门恒挡（门板开合都实存 —— 合贴朝向边 / 开旋 90° 贴铰链侧邻边），活版门开态通。
+bool BlockRegistry::isCollidable(quint8 blockId, quint8 state)
 {
     switch (def(blockId).shape) {
-    case ShapeDoor:     return (state & 4) == 0; // bit2=开 → false（开门通）；合 → true（关门挡）
-    case ShapeTrapdoor: return (state & 1) == 0; // bit0=开 → false；合 → true
+    case ShapeDoor:     return true;             // t261 门板无论开合都实存（合=贴朝向边 / 开=旋后贴铰链侧），恒挡一面
+    case ShapeTrapdoor: return (state & 1) == 0; // bit0=开 → false（开态竖直贴边，玩家穿过）；合 → true
     case ShapeNone:     return false;            // air / torch / water：无碰撞
     default:            return true;             // Full/Slab/Stairs/Fence/Plate：无开合概念，恒挡
     }
@@ -278,7 +278,9 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
 } // namespace
 
 // collision 与 selection **同源**（t217 修正 t208）：两者都走 shapeBoxes（贴合渲染形状：门=薄板选中框、
-//   与视觉一致）。开门 / 活版门开态 → isCollidableWhenClosed=false → 空碰撞（玩家穿过）。
+//   与视觉一致）。开门（t261）：门板旋 90° 贴铰链侧邻边 → shapeBoxes 返回「旋后贴边」panel AABB，
+//   collisionAABBs 非空 → 玩家撞门板被挡、门洞方向可穿过（修「开门四向全通」）。活版门开态 → isCollidable=false
+//   → 空碰撞（玩家穿过）。
 //
 // t208 曾对门合态返回**满格整立方** {0,0,0,1,1,1}（防穿隧道 + 单格门），代价是关门时四面皆挡——玩家
 //   「不打开门完全进不去」，违反 MC 门「门占一面薄板、仅门面板那一面合时挡 / 开则通、其余恒通」语义
@@ -286,11 +288,12 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
 //   (1) creative-fly 路径已补子步（playercontroller.cpp step() creative-fly 分支：任意轴单步 ≤0.4 格）→
 //       子步位移 < 玩家宽 0.6 → 必与路径上薄板（厚 3/16=0.1875）重叠被检出（穿隧道阈值 0.7875 > 0.4）。
 //   (2) 门放置已强制两格（playercontroller placeBlock 查 ty+1 在界内且为空气，否则整门拒）→ 单格门根因 2 消除。
-//   故薄板碰撞成立：门仅在其面板法线轴上合时挡（沿门板法线穿越被阻），开门则通（空碰撞）；门板切线轴
-//   （与面板平行的两侧）恒通——玩家可贴门板侧面走过。selectionAABBs 同源 → 选中框 + F3+B 碰撞箱均显薄板。
+//   故薄板碰撞成立：门仅在其面板法线轴上合时挡（沿门板法线穿越被阻），开门则门板旋到铰链侧邻边仍挡那一面
+//   （t261）；门板切线轴（与面板平行的两侧）恒通——玩家可贴门板侧面走过。selectionAABBs 同源 → 选中框
+//   + F3+B 碰撞箱均显薄板。
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 blockId, quint8 state)
 {
-    if (!isCollidableWhenClosed(blockId, state)) return {}; // 开门 / 活版门 → 无碰撞 sub-AABB（玩家穿过）
+    if (!isCollidable(blockId, state)) return {}; // 活版门开态 / air / torch / water → 无碰撞 sub-AABB（玩家穿过）
     // t234 耕地碰撞略矮（15/16=0.9375）：机制等价 MC 耕地碰撞箱比整立方矮 1 像素。Farmland 走 ShapeFull
     //   （mesher 邻居面剔除 + raycast isFullCube=true 整格命中 + selectionAABBs 整格选中框，三者不动），
     //   仅碰撞在此特例返矮盒 → 玩家脚位停在 cell+0.9375（渲染顶面 cell+1.0 略高于脚位 → 视觉如站在浅翻耕沟，
