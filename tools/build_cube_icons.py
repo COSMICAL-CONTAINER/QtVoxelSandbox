@@ -42,6 +42,7 @@ BLOCKS = [
     ("iron_ore",        "default_iron_ore", "default_iron_ore"),  # t84 铁矿石（各面同贴图）
     ("torch",           "default_torch", "default_torch"),  # t88 火把（透明底+木柄+火焰；走平面 2D 分支非立方体投影）
     ("chest",           "default_chest_top", "default_chest_side"),  # t173 箱子（顶=盖缝+铰链；侧=铁箍带；图标显顶+侧）
+    ("farmland",        "default_farmland_dry", "default_dirt"),  # t234 耕地（顶=干态翻耕土；侧=泥土；图标显顶+侧）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

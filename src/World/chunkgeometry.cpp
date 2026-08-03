@@ -150,7 +150,8 @@ void ChunkGeometry::onWorldChanged()
 
 // 查表（单一权威：BlockRegistry）。行为与历史硬编码一致：草顶/草侧/草底、其余各面统一。
 //   t225 箱子特例：前面（锁面 chest_front）所朝面由 state 决定（放置时朝玩家），其余三侧面 chest_side、
-//   顶/底 chest_top。其余方块 state inert（tileFor 退化为 stateless BlockRegistry::tileIndex）。
+//   顶/底 chest_top。t234 耕地特例：顶面（+Y）据 state bit0 选 farmland_dry(干)/farmland_wet(湿)；其余面 =
+//   dirt（侧/底）。其余方块 state inert（tileFor 退化为 stateless BlockRegistry::tileIndex）。
 int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
 {
     // face: 0=+X 1=-X 2=+Y(顶) 3=-Y(底) 4=+Z 5=-Z（须与 BlockRegistry::Face 一致）
@@ -161,6 +162,15 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
         if (face == int(BlockRegistry::Top) || face == int(BlockRegistry::Bottom))
             return d.topTile;                                            // 顶/底 = chest_top
         return d.sideTile;                                               // 其余三侧面 = chest_side
+    }
+    // t234 耕地：顶面（+Y）据 state bit0（FarmlandMoistBit）选干(26)/湿(27)；底/侧 = dirt(2)。
+    //   dry/wet 仅顶面区别（机制等价 MC 耕地干/湿仅顶面贴图异）；侧/底恒泥土。
+    if (block == BlockRegistry::Farmland) {
+        if (face == int(BlockRegistry::Top))
+            return (state & BlockRegistry::FarmlandMoistBit)
+                   ? BlockRegistry::def(block).frontTile   // 湿态：借用 frontTile 字段存 farmland_wet(27)
+                   : BlockRegistry::def(block).topTile;    // 干态：topTile = farmland_dry(26)
+        return BlockRegistry::def(block).sideTile;         // 侧/底 = dirt(2)
     }
     return BlockRegistry::tileIndex(block, BlockRegistry::Face(face));
 }

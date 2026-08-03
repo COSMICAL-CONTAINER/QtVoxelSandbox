@@ -18,7 +18,7 @@
 //
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
-//   10=furnace 11=coal_ore 12=iron_ore 13=torch 14=bedrock ... 21=water
+//   10=furnace 11=coal_ore 12=iron_ore 13=torch 14=bedrock ... 21=water 22=chest 23=farmland
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -89,7 +89,18 @@ public:
                                   //   spec「物品存 chunk state」= 物品随方块存（世界级 block-instance state，非 QML
                                   //   面板本地态，机制等价 MC「箱子内容存于方块」；多箱子各自独立 27 槽）。破块时
                                   //   ChestStore.clearChest 清条目（内容不退回玩家背包，机制等价 MC 破箱掉落本属 1.1+）。
-        Count         = 23, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Farmland       = 23, // 耕地（t234）：机制等价 MC 1.0 耕地。持锄右键泥土/草方块→变耕地（playercontroller
+                                  //   useBlock 分支：检手持为 Hoe 工具 + 命中格 Dirt/Grass → setBlock(Farmland, moist)）。
+                                  //   solid=true / ShapeFull（整立方 opaque，正常参与邻居面剔除 + 走 culled 立方面渲染，
+                                  //   **非**异形 —— 不进 PartialBlockGeometry；与 Chest 同走段后整立方路径）、hardness=0.6
+                                  //   （同 grass/dirt 量级，NoTool 空手可采）、dropId=Dirt（破耕地掉泥土，机制等价 MC
+                                  //   「耕地破坏返泥土」，非掉耕地自身）、dropCount=1、maxStack=64。各面贴图：顶=farmland_dry(26)
+                                  //   或 farmland_wet(27)（mesher 据 state bit0 选，见 FarmlandMoistBit）/ 侧·底=dirt(2)。
+                                  //   **碰撞略矮 0.9375（15/16）**：collisionAABBs 对 Farmland 特例返 {0,0,0,1,0.9375,1}
+                                  //   （机制等价 MC 耕地碰撞箱矮 1 像素；selectionAABBs 仍走 ShapeFull 整格，选中框不缩，
+                                  //   raycast 经 isFullCube=true 走整格命中 —— 三者解耦：碰撞矮、选中满、射线整格，零相互干扰）。
+                                  //   state 编码干/湿（见 FarmlandMoistBit），由 playercontroller 耕地时据水源邻近判定写入。
+        Count         = 24, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
@@ -112,6 +123,16 @@ public:
     //   常规放置的 Planks state 恒 0（4 参数 setBlock 默认 / worldgen）→ 不误判为双砖。state 经 m_states 落 SQLite
     //   round-trip 保真（存档读回仍带本 bit → 重载后破块仍掉 2 块半砖）。
     static constexpr quint8 PlanksFromDoubleSlabBit = 0x01; // Planks state bit0 = 源自双半砖合并（仅 Planks 复用）
+
+    // t234 耕地干/湿 state 标记：bit0 = 湿润（1，邻近水源 → 顶面贴 farmland_wet，深色湿润土）/ 干燥（0，farmland_dry，
+    //   浅色干土）。由 playercontroller 耕地时据「水源邻近判定」（isFarmlandMoist 扫描半径 4 水平 + 同/下一层
+    //   有无 Water）写入 setBlock(Farmland, moist)。**唯一消费点**：ChunkGeometry::tileFor（mesher 据 bit0 选顶面
+    //   干/湿贴图）。collisionAABBs / selectionAABBs / raycastAABBs 不读 farmland state（farmland 走 ShapeFull +
+    //   collision 特例，state inert 于碰撞/选中）→ 复用 state 作干湿编码零回归（同 PlanksFromDoubleSlabBit /
+    //   torch state 复用 state 作 marker 的模式）。state 经 m_states 落 SQLite round-trip 保真（存档读回仍带干湿态）。
+    //   注：干/湿仅由耕地时的水源邻近快照决定（机制等价 MC「耕地后即时据邻水判湿润」）；动态补水（雨/后放水）
+    //   属后续任务（需 random tick 系统），本任务不做。
+    static constexpr quint8 FarmlandMoistBit = 0x01; // Farmland state bit0 = 湿润（仅 Farmland 复用）
 
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：
     //   0=+X 1=-X 2=+Y(顶) 3=-Y(底) 4=+Z 5=-Z
@@ -223,7 +244,10 @@ public:
     //      mesher 在水段按 cell 的 state 选 19(水源)/23(流水)。属渲染层呈现选择，非方块属性）。
     //   24=water_2（t223 静水动画第二帧；mesher 在水段据 waterAnimPhase 在 19/24 间慢速切换 → 静水荡漾感）。
     //   25=water_flow_2（t223 流水动画第二帧；mesher 在水段据 waterAnimPhase 在 23/25 间切换 → 斜纹流动动势）。
-    // 图集由 tools/build_atlas.py 打包全部 26 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   26=farmland_dry（t234 耕地顶面干态；浅色翻耕干土，纵向犁沟纹）。
+    //   27=farmland_wet（t234 耕地顶面湿态；深色湿润翻耕土，同犁沟纹 + 深色；mesher 据 Farmland state bit0
+    //      选 26(干)/27(湿)；Farmland 方块 def topTile=26，tileFor 特例覆盖）。
+    // 图集由 tools/build_atlas.py 打包全部 28 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -236,7 +260,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 26;
+    static constexpr int AtlasTileCount = 28;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
@@ -337,7 +361,7 @@ public:
     // 字面量为 UTF-8，由 fromUtf8 解码（与项目既有中文注释同源）。
     //   grass=草方块 dirt=泥土 stone=石头 cobble=圆石 log=橡木原木
     //   planks=橡木木板 leaves=橡树树叶 sand=沙子 crafting_table=工作台 furnace=熔炉
-    //   coal_ore=煤矿石 iron_ore=铁矿石 bedrock=基岩
+    //   coal_ore=煤矿石 iron_ore=铁矿石 bedrock=基岩 ... farmland=耕地
     static QString displayName(quint8 blockId);
 
     // 音效材质分组（t118）：id → MaterialGroup 纯函数。AudioManager 据此选 break / mining / step

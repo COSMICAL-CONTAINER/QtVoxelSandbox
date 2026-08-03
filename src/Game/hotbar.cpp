@@ -26,6 +26,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::IronOre:       return "icon_iron_ore.png";       // t84 铁矿石立方体图标
     case BlockRegistry::Torch:         return "icon_torch.png";          // t88 火把立方体图标（伪光源）
     case BlockRegistry::Chest:         return "icon_chest.png";          // t173 箱子立方体图标（顶盖缝+侧铁箍）
+    case BlockRegistry::Farmland:      return "icon_farmland.png";       // t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
     // t145/t163(d) 不完整方块图标：6 类木制半方块各走自己的区分图标（tools/build_cube_icons.py 程序生成）。
     //   t163(d) slab/stairs/trapdoor/pressure_plate 升级为 **3D dimetric 立体图标**（render_partial_3d 按
     //   实际形状投影：slab 半高 / stairs L 阶 / trapdoor 薄板 / pressure_plate 更薄更小，顶 + 两侧明暗同
@@ -213,6 +214,7 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::CoalOre),       int(BlockRegistry::IronOre),
              int(BlockRegistry::Torch),
              int(BlockRegistry::Chest),                                    // t173 箱子（右键开 27 槽）
+             int(BlockRegistry::Farmland),                                 // t234 耕地（持锄右键泥土/草得；干/湿两态）
              // t134 木制半方块：
              int(BlockRegistry::WoodSlab),          int(BlockRegistry::WoodStairs),
              int(BlockRegistry::WoodFence),         int(BlockRegistry::WoodPressurePlate),

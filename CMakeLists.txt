@@ -172,6 +172,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_chest_top.png         # t173/t179 箱子各面贴图（build_chest.py 程序生成原创像素图）
         textures/default_chest_side.png
         textures/default_chest_front.png
+        textures/default_farmland_dry.png      # t234 耕地顶面干态贴图（build_farmland.py 程序生成原创像素图）
+        textures/default_farmland_wet.png      # t234 耕地顶面湿态贴图（mesher 据 Farmland state bit0 选 dry/wet）
         textures/icon_cobble.png
         textures/icon_coal_ore.png
         textures/icon_crafting_table.png
@@ -186,6 +188,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_stone.png
         textures/icon_torch.png
         textures/icon_chest.png                 # t173/t179 箱子立方体图标（顶盖缝+侧铁箍；曾漏注册→运行时 WRN 无图标）
+        textures/icon_farmland.png              # t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
         textures/icon_wood_slab.png           # t145 不完整方块 flat 2D 区分图标
         textures/icon_wood_stairs.png
         textures/icon_wood_fence.png

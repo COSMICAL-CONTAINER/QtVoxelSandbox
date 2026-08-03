@@ -60,6 +60,17 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   底=chest_top(20)（底面少见，同顶面木纹）、侧(+X/-X/+Z)=chest_side(21)、前(-Z)=chest_front(22，锁面朝 -Z）。
     //   maxStack=64（背包内可堆叠，机制等价 MC 箱子物品）。掉落自身。音色归 GroupWood（木质）。
     /* chest         */ {int(BlockRegistry::Chest),              20, 20, 21, 22, true,  BlockRegistry::ShapeFull,     2.5f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Chest),          1, 64, "chest",          "箱子"},
+    // ── t234 耕地（Farmland）：机制等价 MC 1.0 耕地（持锄右键泥土/草方块→耕地；干/湿两态由水源邻近判定）。
+    //   整立方 opaque（solid=true / ShapeFull —— 与箱子同走 mesher 整立方面路径，**非**异形）、hardness=0.6
+    //   （同 grass/dirt 量级，NoTool 空手可采且掉落）、dropId=Dirt（破耕地掉泥土，机制等价 MC「耕地破坏返泥土」，
+    //   非掉耕地自身）、dropCount=1、maxStack=64。
+    //   字段复用（同 chest 复用 frontTile 作锁面、planks 复用 state 作双半砖 marker 的模式）：topTile=farmland_dry(26)
+    //   （干态顶面，默认）；frontTile=farmland_wet(27)（**湿态顶面** —— mesher tileFor 据 state bit0 选 topTile(干)/
+    //   frontTile(湿)；Farmland 无 -Z 前面语义，frontTile 字段对 Farmland 唯一消费点是 tileFor 的湿态顶面，复用零回归）；
+    //   bottomTile=sideTile=dirt(2)（耕地底/侧面同泥土，机制等价 MC 耕地侧=泥土）。tileFor 对所有非 +Y 面返 sideTile。
+    //   **碰撞略矮 0.9375**：collisionAABBs 对 Farmland 特例返 {0,0,0,1,0.9375,1}（见 .cpp 实现处注释）。
+    //   音色归 GroupGrass（同 grass/dirt 软土音）。
+    /* farmland      */ {int(BlockRegistry::Farmland),            26,  2,  2, 27, true,  BlockRegistry::ShapeFull,     0.6f, int(BlockRegistry::NoTool),  0, int(BlockRegistry::Dirt),           1, 64, "farmland",       "耕地"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -259,6 +270,12 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 blockId, quint8 state)
 {
     if (!isCollidableWhenClosed(blockId, state)) return {}; // 开门 / 活版门 → 无碰撞 sub-AABB（玩家穿过）
+    // t234 耕地碰撞略矮（15/16=0.9375）：机制等价 MC 耕地碰撞箱比整立方矮 1 像素。Farmland 走 ShapeFull
+    //   （mesher 邻居面剔除 + raycast isFullCube=true 整格命中 + selectionAABBs 整格选中框，三者不动），
+    //   仅碰撞在此特例返矮盒 → 玩家脚位停在 cell+0.9375（渲染顶面 cell+1.0 略高于脚位 → 视觉如站在浅翻耕沟，
+    //   同 MC 耕地观感）。与 selectionAABBs 解耦：选中框仍整格（玩家瞄准/破块按整格，无 1/16 误差烦恼）。
+    if (blockId == Farmland)
+        return {BlockAABB{0, 0, 0, 1, 0.9375f, 1}};
     return shapeBoxes(def(blockId).shape, state);
 }
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 blockId, quint8 state)
@@ -348,6 +365,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Chest: // t173 箱子 → 木质音色
         return GroupWood;
     case Grass: case Dirt:
+    case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）
         return GroupGrass;
     case Sand:
         return GroupSand;
