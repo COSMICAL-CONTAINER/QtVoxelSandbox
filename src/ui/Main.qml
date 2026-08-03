@@ -2275,13 +2275,28 @@ Window {
                     // t117 FallingBlock：贴图方块（BlockCube + 共享图集 voxelAtlas，复用地形贴图），scale 1.0
                     //   = 1×1×1（与地形方块外观一致；落体过程视觉读作「移动的方块」）。NoLighting（可见 Model
                     //   必须 NoLighting，lessons-learned）。blockId 据 entity 携带值（沙=8，与地形同贴图）。
+                    //   t257 掉落沙光影：BlockCube 接 world + worldPos + sunDir + shadowsEnabled → 顶点色按方块
+                    //   世界位采样光场 + PCF 软影（VoxelLight::vertexLight，与 chunkgeometry 立方面同公式）。
+                    //   材质 baseColor 乘 terrainLight(skyLight)（昼夜灰阶，同 chunk Model）+ vertexColorsEnabled:true
+                    //   → 最终色 = terrainLight × vertexColor × 贴图，与地形同亮度曲线。修「沙掉落时变亮 / 暗处
+                    //   挖底沙→掉落沙明显变亮」（旧版无 baseColor 也无顶点色 → 恒全亮，洞穴/夜间格外刺眼）。
+                    //   worldPos 绑 posAt（触碰 revision 建依赖 → 每帧位移 / 重力下落重烘顶点色）；sunDir 绑
+                    //   worldClock.sunDir（太阳跨步重烘）；shadowsEnabled 绑 window.shadowsEnabled（开关同步）。
                     Model {
                         visible: entKind === EntityManager.FallingBlock
-                        geometry: BlockCube { blockId: { entityManager.revision; return entityManager.blockIdAt(index) } }
+                        geometry: BlockCube {
+                            blockId: { entityManager.revision; return entityManager.blockIdAt(index) }
+                            world: theWorld
+                            worldPos: { entityManager.revision; return entityManager.posAt(index) }
+                            sunDir: worldClock.sunDir
+                            shadowsEnabled: window.shadowsEnabled
+                        }
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
+                            baseColor: terrainLight(worldClock.skyLight)  // t257 昼夜灰阶（同 chunk Model）
+                            vertexColorsEnabled: true                      // t257 顶点色光场 × PCF 软影
                         }
                     }
                     // Mob（原 t95 测试生物；t239 生物基类；t240 猪牛羊模型 + 贴图）：

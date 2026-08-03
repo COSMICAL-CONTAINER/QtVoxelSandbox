@@ -2,14 +2,14 @@
 #include "blockregistry.h"
 #include "chunk.h"
 #include "partialblockgeometry.h" // t133：Vtx（chunk 顶点格式）+ PartialBlockGeometry 异形分支
+#include "voxellight.h"           // t257：PCF 软影 + 光场顶点色单点实现（mesher 与 BlockCube 共用）
 #include "world.h"
 
 #include <QByteArray>
 #include <QElapsedTimer> // t155f：buildMesh 计时（诊断编辑卡顿）
 #include <QVector3D>
 
-#include <algorithm> // std::clamp / std::max（t151 真光场顶点色钳制）
-#include <cmath>     // std::sqrt / std::floor（t153 PCF 软影 sunShadowAt）
+#include <algorithm> // std::clamp / std::max（t151 真光场顶点色钳制；PCF 软影的 sqrt/floor 已迁 voxellight.h）
 #include <cstddef>
 #include <cstring>
 #include <vector>    // t178 greedy meshing mask 缓冲（std::vector）
@@ -34,16 +34,9 @@ static const FaceDef kFaces[6] = {
     /*-Z*/ {{0, 0, -1}, {0, 0, -1}, {{1, 0, 0}, {0, 0, 0}, {0, 1, 0}, {1, 1, 0}}},
 };
 
-// t153 PCF 软影调参（spec「kMaxShadow 短 / kSunMin 高」；方案③：t151 顶点光基底 + heightmap 正交深度图）。
-//   见 ChunkGeometry::sunShadowAt。文件作用域供 buildMesh 与 sunShadowAt 共用。
-//   - kSunMin：太阳高度门（sunDir.y 下限）。太阳低于此（黎明/黄昏/夜间）不投影 → 避免低角度极长影扫出
-//     世界；门偏高 → 仅近正午投影（用户嫌 t135「影一大坨」：高门 + 短步把影收紧到日中、贴近障碍）。
-//   - kSunFade：门附近淡入淡出带宽。sunDir.y 量化跨步到门两侧时影因子平滑过 0，无突变跳变。
-//   - kMaxShadow：投影步进上限（格）。短 → 影紧凑、计算省（每顶点 kMaxShadow×4 次 heightmap 查询），
-//     且低角度时影被截断不无限延伸。
-constexpr float kSunMin    = 0.30f; // ≈17.5° 仰角门（max 仰角 50°→sin=0.766；日中窗 [17.5°,50°]）
-constexpr float kSunFade   = 0.10f; // 门附近 ±0.10 band 平滑淡入
-constexpr int   kMaxShadow = 4;     // 步进上限 4 格（每顶点 4×4=16 次 heightmap 查询；影短促紧凑）
+// t153 PCF 软影调参与 t166 顶点色钳制（kSunMin/kSunFade/kMaxShadow/kVcMin/kVcMax）已迁至
+//   voxellight.h（VoxelLight 命名空间）—— mesher 与 BlockCube（t257 掉落沙顶点色）共用同一实现，
+//   杜绝「两处各持魔数、调参漂移」。见 VoxelLight::sunShadow / VoxelLight::vertexLight。
 
 ChunkGeometry::ChunkGeometry(QQuick3DObject *parent) : QQuick3DGeometry(parent) {}
 
@@ -190,41 +183,11 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
 //   （水平分量≈0）→ 影无方向感、退化为不投影。门附近按 kSunFade 平滑淡入，防量化跨步时影突变。
 //   分层（PLAN §2）：本属 Renderer（mesher），只读 World::heightmapAt（World 层）+ 接收裸 sunDir，不依赖
 //   Game 层 WorldClock —— 保持依赖向下。
+//   t257：实现迁至 voxellight.h 的 VoxelLight::sunShadow（mesher 与 BlockCube 掉落沙共用）；本方法
+//   仅注入本几何的 world/sunDir/shadowsEnabled 后委托，行为与历史逐字等价（机械抽取，零语义变化）。
 float ChunkGeometry::sunShadowAt(float wx, float wy, float wz) const
 {
-    if (!m_world) return 0.0f;
-    if (!m_shadowsEnabled) return 0.0f; // t166b：阴影开关关 → 跳过 PCF（提速 meshing / 诊断卡顿）
-    const QVector3D s = m_sunDir;
-    if (s.y() <= kSunMin) return 0.0f;                       // 太阳低于门 → 不投影（黎明/黄昏/夜间）
-    const float sh = std::sqrt(s.x() * s.x() + s.z() * s.z());
-    if (sh < 1e-3f) return 0.0f;                              // 太阳近天顶 → 影无方向感，退化不投影
-    const float invSh = 1.0f / sh;
-    const float hxp = s.x() * invSh, hzp = s.z() * invSh;     // 水平面归一太阳方向
-    const float vyp = s.y() * invSh;                          // 单位水平距离的垂直爬升（= tan(仰角)）
-    // 门附近窄带平滑淡入（防量化跨步影突变）：sunDir.y∈[kSunMin, kSunMin+kSunFade] → 0..1。
-    const float elevFade = std::clamp((s.y() - kSunMin) / kSunFade, 0.0f, 1.0f);
-    if (elevFade <= 0.0f) return 0.0f;
-
-    int occluded = 0, total = 0;
-    for (int k = 1; k <= kMaxShadow; ++k) {
-        // 步进 k 格水平距离：光线落点列 (ox,oz)、该列光线高度 rayY。
-        const float ox = wx + float(k) * hxp;
-        const float oz = wz + float(k) * hzp;
-        const float rayY = wy + float(k) * vyp;
-        // PCF：采样路径点周围 2×2 最近整数列（floor / +1）→ 影边半格列贡献 0.5，软过渡。
-        const int x0 = int(std::floor(ox));
-        const int z0 = int(std::floor(oz));
-        for (int xi = 0; xi < 2; ++xi) {
-            for (int zi = 0; zi < 2; ++zi) {
-                const int hm = m_world->heightmapAt(x0 + xi, z0 + zi);
-                // 列顶实体顶面（heightmap+1）高于光线 → 遮挡；hm<0（空列 / 越界）永不遮挡。
-                if (hm >= 0 && float(hm) + 1.0f > rayY) ++occluded;
-                ++total;
-            }
-        }
-    }
-    if (total == 0) return 0.0f;
-    return (float(occluded) / float(total)) * elevFade;
+    return VoxelLight::sunShadow(m_world, m_sunDir, m_shadowsEnabled, wx, wy, wz);
 }
 
 void ChunkGeometry::buildMesh(RebuildReason reason)
@@ -267,11 +230,10 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     //   被邻近高地遮挡」处压暗（heightmap 正交深度图沿 sunDir 步进、2×2 PCF 软过渡）；火把方光（block）
     //   不受影（取 max 保留）。昼夜乘子仍由 QML baseColor 承担（terrainLight 平滑 lerp），故光场本身时间
     //   不变 —— 影因子仅随 sunDir（量化跨步）变 → 绑 sunChanged 重建（sunShadowAt 见上方）。
-    //   kVcMin：未照明格（深洞无天光 / 无火把）的底亮度 —— 防纯黑撕裂、保留微弱可辨识（MC 为纯黑，
-    //     此处取小底兼顾可玩性；火把光池 0.93 与之强对比，洞穴暗 / 火把亮一目了然）。
-    //   kVcMax：满光封顶 1.0（NoLighting 无法 overbright，贴图原色即最亮）。
-    constexpr float kVcMin = 0.08f; // t166：暗部地板 0.05→0.08（用户「黑的地方稍太黑」；洞穴/阴影最低亮度微抬，仍远低于火把光池 0.93 保持对比）
-    constexpr float kVcMax = 1.0f;
+    //   kVcMin / kVcMax 取自 voxellight.h（VoxelLight::kVcMin/kVcMax）—— mesher 与 BlockCube（t257 掉落沙）
+    //   共用同一顶点色钳制曲线，保证「掉落沙与地形同亮度」（修暗处挖底沙变亮根因）。
+    constexpr float kVcMin = VoxelLight::kVcMin; // 暗部地板最低亮度（洞穴/阴影最低，仍远低于火把光池 0.93 保持对比）
+    constexpr float kVcMax = VoxelLight::kVcMax;
 
     if (c && m_world) {
         // ---- PASS 1：不完整方块（异形）合批进同一 chunk mesh（t133 PartialBlockGeometry）----

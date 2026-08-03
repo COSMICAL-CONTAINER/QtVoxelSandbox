@@ -24,6 +24,9 @@ qt_add_executable(voxelsandbox
     src/World/chunkmanager.h
     src/World/chunkgeometry.cpp
     src/World/chunkgeometry.h
+    # t257 体素光照 / PCF 软影单点实现（mesher 与 BlockCube 掉落沙共用同一光场 + 软影公式）：
+    #   header-only inline，属 World 层（只读 World 光场 / heightmap），Renderer（BlockCube）向下依赖合规。
+    src/World/voxellight.h
     # t133 不完整方块异形几何（mesher 子系统，与 chunkgeometry 同层）：
     #   switch(blockId) 生成异形顶点（slab/stairs/fence/door/trapdoor/pressure plate），合批进 chunk mesh。
     #   放 src/World/ 而非 spec 建议的 src/Renderer/ —— 唯一调用者 chunkgeometry 在 World，放 Renderer 会
