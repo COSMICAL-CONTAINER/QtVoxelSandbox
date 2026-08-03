@@ -263,6 +263,7 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::BucketEmptyId) return QStringLiteral("铁桶");
         if (blockId == RecipeRegistry::WaterBucketId) return QStringLiteral("装水铁桶");
         if (blockId == RecipeRegistry::SeedId)        return QStringLiteral("小麦种子"); // t235
+        if (blockId == RecipeRegistry::WheatId)       return QStringLiteral("小麦");     // t237 收割成熟小麦作物掉落
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

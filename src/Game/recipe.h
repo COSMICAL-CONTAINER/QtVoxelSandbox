@@ -66,7 +66,13 @@ public:
     // t235 小麦种子：材料段 0x208。挖草丛（TallGrass）掉落（BlockRegistry::TallGrass.dropId=0x208）；
     //   机制等价 MC 1.0「挖草丛掉小麦种子」。可堆叠 64；创造调色板可取用。**种植**（右键耕地→种小麦作物）
     //   归 t236（WheatCrop 方块 + 生长阶段）；本任务仅注册物品（可持 / 可掉 / 创造可取）。
-    static constexpr int SeedId         = 0x208; // 小麦种子：挖草丛掉落；种植 → 小麦作物（t236）
+    //   t237：收割小麦作物（WheatCrop）时也掉落种子（未成熟作物 / 成熟作物的额外种子）。
+    static constexpr int SeedId         = 0x208; // 小麦种子：挖草丛掉落；种植 → 小麦作物（t236）；收割返种（t237）
+    // t237 小麦物品：材料段 0x209。收割**成熟**小麦作物（WheatCrop，state==WheatCropStageMax）掉落
+    //   （机制等价 MC 1.0「成熟小麦收割掉小麦物品」）。可堆叠 64；创造调色板补全归 t244。
+    //   小麦物品是非方块 / 非工具材料（同种子 / 木棒 / 煤），走 MaterialIcon 自绘图标 + 本地通用名。
+    //   下游消费：t238 面包配方（3 小麦 → 1 面包；面包为后续任务，本任务仅注册小麦物品使其可持 / 可掉 / 可堆叠）。
+    static constexpr int WheatId        = 0x209; // 小麦物品：收割成熟小麦作物掉落；面包原料（t238）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

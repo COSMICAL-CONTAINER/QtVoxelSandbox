@@ -6,6 +6,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QQuaternion>
+#include <QRandomGenerator> // t237 收割种子随机量（1-2）；玩家交互掉落的随机性，非 worldgen 确定性范畴
 
 #include <algorithm>
 #include <cmath>
@@ -587,8 +588,11 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   ⚠️ brokenState 必须在 setBlock(Air) **之前**读：4 参数 setBlock 委托 5 参数版以 state=0 写入
     //   （chunk.cpp「id 变更时重置 state=0」契约），之后 stateAt 永返 0 → 配对方向恒算成 y+1 →
     //   破上格（bit3=1 本应 y-1 找下格）时下格不清，留半截悬空门。useBlock 路径在 setBlock 前读 st 故无此坑。
+    //   t237：WheatCrop 同理须读旧 state（state==WheatCropStageMax 判成熟 → 掉小麦 vs 仅种子），setBlock 后
+    //   state 重置为 0 → 永判未成熟 → 成熟作物收割不掉小麦（同族 lessons-learned t134「先快照再改 id」坑）。
     const quint8 brokenState = (brokenId == BlockRegistry::WoodDoor
-                                || brokenId == BlockRegistry::Planks)
+                                || brokenId == BlockRegistry::Planks
+                                || brokenId == BlockRegistry::WheatCrop)
         ? m_world->stateAt(x, y, z) : quint8(0);
     m_world->setBlock(x, y, z, BlockRegistry::Air); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
     if (brokenId == BlockRegistry::WoodDoor) {
@@ -612,16 +616,37 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     if (drop) {
         int dropId = BlockRegistry::dropId(brokenId);
         int dropCount = std::max(1, BlockRegistry::dropCount(brokenId));
-        // t215 双半砖（合并态）破块掉 2× WoodSlab 为**2 个独立物品实体**（非 1 个 count=2 栈）：
-        //   placeBlock 合并时写 Planks + PlanksFromDoubleSlabBit 标记「源自双半砖」。此处检本 bit →
-        //   改掉 2 块半砖。机制等价 MC「double slab 破坏掉 2 块半砖，各自为独立掉落物」。原实现
-        //   emit 1 次 count=2 → 1 实体携 2 件（拾取 addStack 一次入 2）；改 emit 2 次 count=1 → 2 实体
-        //   各携 1 件（拾取各入 1）。两实体散布到破格 + 1 个非实体水平邻格做视觉分离（机制等价 MC 方块
-        //   掉落的水平散布；ItemEntityManager spawnItem 仅整数格坐标存格中心，故以邻格区分，且选非实体
-        //   邻格避免实体被重力弹到墙顶偏离破块）。无可用邻格则两实体同破格（仍 2 实体，拾取各入 1）。
-        //   常规 Planks（state=0）不进此分支 → 掉 1× Planks 不变。brokenState 已在 setBlock(Air) 前读
-        //   （t134 时序：4 参数 setBlock 委托 5 参数版以 state=0 写入，之后 stateAt 永返 0）。
-        if (brokenId == BlockRegistry::Planks && (brokenState & BlockRegistry::PlanksFromDoubleSlabBit)) {
+        // t237 小麦作物收割（spec「挖成熟(state=max)小麦→掉小麦物品 + 1-2 种子（可再种）；未成熟挖→仅返种子」）：
+        //   WheatCrop 的掉落**按 state 判成熟**——成熟(state>=WheatCropStageMax)掉 1× 小麦物品(WheatId) +
+        //   1-2× 种子(SeedId，可再种)；未成熟只掉 1× 种子。BlockDef.dropId/dropCount 仅作基础兜底（恒返 1 种子），
+        //   此处 state-aware 分流覆盖通用 dropId/dropCount 路径（同 PlanksFromDoubleSlabBit 双半砖模式：特殊掉落
+        //   在通用表查之上提前分流）。机制等价 MC 1.0「成熟小麦收割掉 1 小麦 + 1-3 种子；未成熟仅返 1 种子」
+        //   （本工程取 1-2 种子，spec 契约）。brokenState 在 setBlock(Air) 之前已读（同 WoodDoor/Planks 时序）。
+        //   两实体（小麦 + 种子）散布到破格 + 非实体水平邻格做视觉分离（复用双半砖 kHoriz 散布模式；
+        //   ItemEntityManager 整数格坐标存格中心 → 以邻格区分）。种子 1-2 走 QRandomGenerator（玩家交互掉落的
+        //   随机性，非 worldgen 确定性范畴 §2-K —— 机制等价 MC 小麦收割种子随机）。
+        if (brokenId == BlockRegistry::WheatCrop) {
+            const bool mature = brokenState >= BlockRegistry::WheatCropStageMax;
+            const int wheatCount = mature ? 1 : 0;
+            const int seedCount  = mature ? QRandomGenerator::global()->bounded(1, 3) : 1; // 成熟 1-2 / 未成熟 1
+            constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+            int sx = x, sz = z;
+            for (const auto &o : kHoriz) {
+                if (!BlockRegistry::isSolid(m_world->blockAt(x + o[0], y, z + o[1]))) { sx = x + o[0]; sz = z + o[1]; break; }
+            }
+            if (wheatCount > 0)
+                emit spawnItem(x, y, z, RecipeRegistry::WheatId, wheatCount);
+            emit spawnItem(sx, y, sz, RecipeRegistry::SeedId, seedCount);
+        } else if (brokenId == BlockRegistry::Planks && (brokenState & BlockRegistry::PlanksFromDoubleSlabBit)) {
+            // t215 双半砖（合并态）破块掉 2× WoodSlab 为**2 个独立物品实体**（非 1 个 count=2 栈）：
+            //   placeBlock 合并时写 Planks + PlanksFromDoubleSlabBit 标记「源自双半砖」。此处检本 bit →
+            //   改掉 2 块半砖。机制等价 MC「double slab 破坏掉 2 块半砖，各自为独立掉落物」。原实现
+            //   emit 1 次 count=2 → 1 实体携 2 件（拾取 addStack 一次入 2）；改 emit 2 次 count=1 → 2 实体
+            //   各携 1 件（拾取各入 1）。两实体散布到破格 + 1 个非实体水平邻格做视觉分离（机制等价 MC 方块
+            //   掉落的水平散布；ItemEntityManager spawnItem 仅整数格坐标存格中心，故以邻格区分，且选非实体
+            //   邻格避免实体被重力弹到墙顶偏离破块）。无可用邻格则两实体同破格（仍 2 实体，拾取各入 1）。
+            //   常规 Planks（state=0）不进此分支 → 掉 1× Planks 不变。brokenState 已在 setBlock(Air) 前读
+            //   （t134 时序：4 参数 setBlock 委托 5 参数版以 state=0 写入，之后 stateAt 永返 0）。
             dropId = BlockRegistry::WoodSlab;
             constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
             int sx = x, sz = z;

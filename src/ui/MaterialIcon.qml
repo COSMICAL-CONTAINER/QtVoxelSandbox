@@ -13,6 +13,7 @@ import QtQuick
 //   0x206 铁桶（空）—— 灰金属桶身 + 提手弧 + 桶口椭圆（t174；机制等价 MC 铁桶，纯原创自绘）。
 //   0x207 装水铁桶 —— 同空桶 + 桶内青蓝水液面（t174；机制等价 MC 装水铁桶）。
 //   0x208 小麦种子 —— 几粒黄褐色麦种 + 胚芽细尖（t235；挖草丛掉落；种植 → 小麦作物 t236）。
+//   0x209 小麦物品 —— 金黄麦穗（中央穗轴 + 两侧成对麦粒 + 淡黄麦秆）（t237；收割成熟小麦作物掉落）。
 // 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭/桶同理 → 均独立自绘。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体 Repeater（sourceItem），
@@ -20,7 +21,7 @@ import QtQuick
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -235,6 +236,33 @@ Item {
                 grain(12, 15)  // 右下粒
             }
 
+            // 小麦物品（0x209，t237）：收割成熟小麦作物掉落。MC 风格小麦 = 金黄麦穗（中央穗轴 + 两侧成对麦粒
+            //   + 下方淡黄麦秆）。机制等价 MC 小麦物品图标（一把麦穗）；纯原创自绘（§9a）。
+            //   配色：grain #e8c860（麦粒金黄）/ grainLight #f8e890（受光高光）/ grainDark #b89838（穗轴 +
+            //   麦粒暗边）/ stem #d8b878（麦秆淡黄）/ stemDark #a88848（麦秆暗面）。
+            const drawWheat = () => {
+                const grain = "#e8c860", grainLight = "#f8e890", grainDark = "#b89838"
+                const stem = "#d8b878", stemDark = "#a88848"
+                // 麦秆（中央竖线，rows 13..19；右 1px 暗面表圆柱明暗）
+                R(11, 13, 2, 7, stem)
+                R(12, 13, 1, 7, stemDark)
+                // 麦穗中央穗轴（rows 5..12，比麦粒略深，串起两侧颗粒）
+                R(11, 5, 2, 8, grainDark)
+                // 麦粒：两侧成对斜颗粒（4 对，左右各一粒）。每粒 = 3×2 金黄椭圆 + 左上高光 + 右下暗边
+                const ear = (cx, cy) => {
+                    R(cx, cy, 3, 2, grain)
+                    R(cx, cy, 1, 1, grainLight)        // 左上受光
+                    R(cx + 2, cy + 1, 1, 1, grainDark) // 右下暗
+                }
+                ear(7, 6);  ear(14, 6)   // 第 1 对（最顶）
+                ear(7, 8);  ear(14, 8)   // 第 2 对
+                ear(7, 10); ear(14, 10)  // 第 3 对
+                ear(7, 12); ear(14, 12)  // 第 4 对（最底，接麦秆）
+                // 穗尖封粒（顶部 1 粒居中，收口麦穗顶端）
+                R(10, 4, 4, 2, grain)
+                R(10, 4, 2, 1, grainLight)
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             switch (root.materialId) {
             case 0x200: drawStick();        break
@@ -246,6 +274,7 @@ Item {
             case 0x206: drawBucketEmpty();  break // t174 铁桶（空）
             case 0x207: drawWaterBucket();  break // t174 装水铁桶
             case 0x208: drawSeed();         break // t235 小麦种子
+            case 0x209: drawWheat();        break // t237 小麦物品（收割成熟小麦作物）
             default:    drawStick();        break
             }
         }
