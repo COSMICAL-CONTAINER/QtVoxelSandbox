@@ -14,6 +14,7 @@ import QtQuick
 //   0x207 装水铁桶 —— 同空桶 + 桶内青蓝水液面（t174；机制等价 MC 装水铁桶）。
 //   0x208 小麦种子 —— 几粒黄褐色麦种 + 胚芽细尖（t235；挖草丛掉落；种植 → 小麦作物 t236）。
 //   0x209 小麦物品 —— 金黄麦穗（中央穗轴 + 两侧成对麦粒 + 淡黄麦秆）（t237；收割成熟小麦作物掉落）。
+//   0x20A 面包   —— 金棕长条面包（顶弧 + 斜划口 + 两端圆收）（t238；3 小麦合成；右键食 +5 饥饿）。
 // 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭/桶同理 → 均独立自绘。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体 Repeater（sourceItem），
@@ -21,7 +22,7 @@ import QtQuick
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -263,6 +264,31 @@ Item {
                 R(10, 4, 2, 1, grainLight)
             }
 
+            // 面包（0x20A，t238）：3 小麦合成；右键食 +5 饥饿。MC 风格面包 = 金棕长条（顶弧 + 斜划口 +
+            //   两端圆收）。机制等价 MC 面包图标（一块烤面包）；纯原创自绘（§9a）。
+            //   配色：crust #c88848（面包皮金棕，主体）/ crustLight #e0a868（顶弧受光高光）/ crustDark
+            //   #8a5828（底阴影 + 划口暗缝）/ score #6a3818（斜划口深棕，表「烤痕」）。
+            const drawBread = () => {
+                const crust = "#c88848", crustLight = "#e0a868", crustDark = "#8a5828", score = "#6a3818"
+                // 面包体（rows 8..16，cols 4..19，长条略呈椭圆；两端收窄表圆头）
+                R(6, 8, 12, 1, crust)       // 顶行（窄）
+                R(5, 9, 14, 1, crust)       // 第二行（宽）
+                R(4, 10, 16, 5, crust)      // 主体 rows 10..14
+                R(5, 15, 14, 1, crust)      // 倒数第二行（宽）
+                R(6, 16, 12, 1, crustDark)  // 底行（窄 + 暗阴影）
+                // 顶弧受光（前两行亮色，表「圆顶反光」）
+                R(6, 8, 12, 1, crustLight)
+                R(5, 9, 14, 1, crustLight)
+                R(4, 10, 5, 1, crustLight)  // 左上高光
+                // 两端圆收（左 / 右各暗一格，表「圆头收口」）
+                R(4, 11, 1, 3, crustDark)
+                R(19, 11, 1, 3, crustDark)
+                // 斜划口（3 道斜线，表「烤面包划痕」；每道 1 像素宽、斜置）
+                R(8, 10, 2, 1, score)
+                R(11, 9, 2, 1, score)
+                R(14, 8, 2, 1, score)
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             switch (root.materialId) {
             case 0x200: drawStick();        break
@@ -275,6 +301,7 @@ Item {
             case 0x207: drawWaterBucket();  break // t174 装水铁桶
             case 0x208: drawSeed();         break // t235 小麦种子
             case 0x209: drawWheat();        break // t237 小麦物品（收割成熟小麦作物）
+            case 0x20A: drawBread();        break // t238 面包（3 小麦合成；右键食 +5 饥饿）
             default:    drawStick();        break
             }
         }

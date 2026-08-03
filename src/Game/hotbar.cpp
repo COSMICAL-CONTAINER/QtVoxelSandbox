@@ -167,7 +167,9 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::GlassId),       // 玻璃
         int(RecipeRegistry::BucketEmptyId), // t174 铁桶（空）
         int(RecipeRegistry::WaterBucketId), // t174 装水铁桶
-        int(RecipeRegistry::SeedId)         // t235 小麦种子（挖草丛得；种植 → 小麦作物 t236）
+        int(RecipeRegistry::SeedId),        // t235 小麦种子（挖草丛得；种植 → 小麦作物 t236）
+        int(RecipeRegistry::WheatId),       // t237 小麦物品（收割成熟作物得；面包原料）
+        int(RecipeRegistry::BreadId)        // t238 面包（3 小麦合成；右键食 +5 饥饿）
     };
 }
 
@@ -264,6 +266,7 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::WaterBucketId) return QStringLiteral("装水铁桶");
         if (blockId == RecipeRegistry::SeedId)        return QStringLiteral("小麦种子"); // t235
         if (blockId == RecipeRegistry::WheatId)       return QStringLiteral("小麦");     // t237 收割成熟小麦作物掉落
+        if (blockId == RecipeRegistry::BreadId)       return QStringLiteral("面包");     // t238 3 小麦合成；右键食 +5 饥饿
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

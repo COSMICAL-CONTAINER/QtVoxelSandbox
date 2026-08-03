@@ -282,6 +282,11 @@ public:
     //   positionChanged/yawChanged/pitchChanged/modeChanged → 相机 / 第三人称模型绑定刷新。与 respawn 的差异：
     //   respawn 回固定出生点，本方法回存档任意点（玩家上次保存位置）。mode 取 Mode 序数（0/1/2）。
     Q_INVOKABLE void loadSavedState(float x, float y, float z, float yaw, float pitch, int mode);
+    // t238 设饥饿值（存档加载用；与 PlayerState.setHunger 配对）：clamp 到 [0, kMaxHunger]；同步本类的
+    //   Physics 层饥饿累积器 m_hunger + emit hungerUpdated（让 Main.qml 路由到 playerState.setHunger 把
+    //   Game 层显值与 Physics 层值对齐——存档只持久化 playerState.hunger，本方法把同一值灌回 Physics 层
+    //   镜像，使两层数据一致、 depletion 从存档值起算）。无变化（值 == 当前）静默。
+    Q_INVOKABLE void setHunger(int value);
 
 signals:
     void worldChanged();
@@ -341,11 +346,22 @@ signals:
     // 呈现层 / ViewModel 只消费（同 blockBroken→粒子）。
     void spawnItem(int x, int y, int z, int blockId, int count);
     void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState（t160 窒息 / t202 溺水复用此路径）
+    // t238 饥饿回血（仅 Survival，饱腹态）：饥饿充足（>= kRegenHungerThreshold）且未满血时，每
+    //   kHungerRegenInterval 秒发本信号携 1HP → 呈现层 Connections 路由到 PlayerState.heal（与 fallDamageTaken
+    //   → takeDamage 反向配对：扣血走 fallDamageTaken、回血走 healed；同 airUpdated→setAir 模式）。
+    //   机制等价 MC 1.0 hunger≥18 自动回血，让「食面包」真有生存收益（否则系统只能「不饿死」无法回血）。
+    void healed(int hp);
     // t202 气泡值更新（仅 Survival）：眼位入水逐格减 / 出水逐格回满时发，携**新的 air 值**（0..10）。
     //   呈现层 Connections 路由到 PlayerState.setAir（同 fallDamageTaken→takeDamage 模式：Physics 层算
     //   时序、Game 层持显值、呈现层路由）。溺水扣血复用 fallDamageTaken(1)（→ takeDamage → damaged 红
     //   闪 / 视角晃，与窒息同链）。值真变（减 / 增一格气泡）才发，免每 tick 抖 QML 绑定。
     void airUpdated(int air);
+    // t238 饥饿值更新（仅 Survival 推进；食用面包在所有模式都发）：Physics 层 m_hunger 推进 / 食用恢复
+    //   时发，携新的 hunger 值（0..maxHunger）。呈现层 Connections 路由到 PlayerState.setHunger（同 airUpdated
+    //   → setAir 模式：Physics 层算时序 / 食用事件、Game 层持显值、呈现层路由）。值真变才发，免每 tick 抖
+    //   QML 绑定。饥饿归零后扣血复用 fallDamageTaken(1)（→ takeDamage → damaged 红闪 / 视角晃，与窒息 /
+    //   溺水同链，spec「到 0→开始扣血，复用 takeDamage 链」）。
+    void hungerUpdated(int hunger);
     // 第一人称手挥动（t29）：breakBlock/placeBlock 在通过模式门控 + 动作真发生后发（观察者不发；
     // 未命中/放置被拒也不发）。同 blockBroken 模式——Game/Physics 层发语义事件，呈现层 Connections
     // 消费启动手臂挥动动画（PLAN §2 分层：手 viewmodel 属呈现层，绝不反向写）。
@@ -522,6 +538,18 @@ private:
     float m_airTimer = 0.0f;      // 入水减气累积
     float m_drownTimer = 0.0f;    // 气泡归零后溺水扣血累积
     float m_airRegenTimer = 0.0f; // 出水回气累积
+    // t238 饥饿系统（仅 Survival 推进；食用在所有模式都生效）。m_hunger 是 Physics 层累积器（权威），
+    //   PlayerState.hunger 是 Game 层显值镜像（经 hungerUpdated 同步）。depletion 由 step(dt) 推进：
+    //   m_hungerDepleteAccum 按「idle / walk / sprint」速率累加 dt，每满 1.0 扣 1 饥饿（运动加速消耗，
+    //   spec「饥饿随时间/运动掉落」）。m_starveTimer 在 m_hunger==0 时累加 → 每 kStarveInterval 扣 1HP
+    //   （复用 fallDamageTaken→takeDamage→damaged 链，spec「到 0→开始扣血」）。m_regenTimer 在 m_hunger
+    //   充足（>= kRegenHungerThreshold）且未满血时累加 → 每 kHungerRegenInterval 回 1HP（机制等价 MC 1.0
+    //   饥饿回血；让「食面包」能真回血，否则系统只能「不饿死」无法回血）。respawn / loadSavedState 复位
+    //   m_hunger + 三计时器。非 Survival（Creative/Spectator）m_hunger 锁满 + 计时器归零。
+    int m_hunger = kMaxHunger;            // 当前饥饿（0..kMaxHunger；构造满，同 PlayerState::kMaxHunger）
+    float m_hungerDepleteAccum = 0.0f;    // 饥饿消耗累积（按 dt × 速率累加，每满 1.0 扣 1）
+    float m_starveTimer = 0.0f;           // 饥饿归零后扣血累积（每 kStarveInterval 扣 1HP）
+    float m_regenTimer = 0.0f;            // 高饥饿时回血累积（每 kHungerRegenInterval 回 1HP）
     bool m_eyeInWater = false;       // t201 眼位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit eyeInWaterChanged）
     // t223 近流水 proximity 水流声：m_flowSoundLevel = 最近流水格距离映射 [0,1]（tickImpl 节流扫描更新）；
     //   m_flowScanTimer 累加 dt 到 kFlowScanInterval 才重扫（~0.25s，省扫描开销）。值真变才 emit。
@@ -607,6 +635,24 @@ private:
     static constexpr float kDrownInterval = 1.0f;
     static constexpr float kAirRegenInterval = 0.3f;
     static constexpr int kMaxAir = 10; // t202 气泡上限（须与 PlayerState::kMaxAir 一致；满气泡起算）
+    // t238 饥饿系统时序（机制对齐 MC 1.0 饥饿：满饥饿 ~ 几分钟运动耗尽；归零后周期扣血；充足时缓慢回血）。
+    //   kMaxHunger：饥饿上限（须与 PlayerState::kMaxHunger=20 一致；10 鼓腿 × 2 点）。
+    //   kBreadHungerAmount：食面包一次恢复的饥饿值（5 = 2.5 鼓腿；机制等价 MC 面包 +5 hunger）。
+    //   kHungerIdleRate / kHungerWalkRate / kHungerSprintRate：每秒饥饿消耗率（累积到 1.0 扣 1）。
+    //     idle 极慢（站立 / 漂浮 ~ 25 分钟耗尽）；walk 中速（走 ~5 分钟）；sprint 快（疾跑 ~2.5 分钟）。
+    //     非线性 & MC 1.0 量级一致（疾跑 ≈ 走 × 2、idle 远低于走）。m_horizSpeed > 0.1 即视为移动；
+    //     moveState==Sprint 用 sprint 率，否则 walk 率；不动用 idle 率。
+    //   kStarveInterval：饥饿归零后每扣 1HP 的间隔（4s，机制等价 MC 1.0 饥饿伤害 1HP/4s）。
+    //   kHungerRegenInterval：饥饿充足时每回 1HP 的间隔（4s，机制等价 MC 1.0 饱腹回血 1HP/4s）。
+    //   kRegenHungerThreshold：回血所需饥饿下限（18 = 9 鼓腿；机制等价 MC 1.0 hunger≥18 才回血）。
+    static constexpr int kMaxHunger = 20;
+    static constexpr int kBreadHungerAmount = 5;
+    static constexpr float kHungerIdleRate   = 0.013f; // ~1 饥饿 / 75s ≈ 25min 耗尽（满→空）
+    static constexpr float kHungerWalkRate   = 0.067f; // ~1 饥饿 / 15s ≈ 5min 走路耗尽
+    static constexpr float kHungerSprintRate = 0.133f; // ~1 饥饿 / 7.5s ≈ 2.5min 疾跑耗尽
+    static constexpr float kStarveInterval = 4.0f;
+    static constexpr float kHungerRegenInterval = 4.0f;
+    static constexpr int kRegenHungerThreshold = 18;
     static constexpr float kSens = 0.25f;      // 度/像素
     static constexpr float kStrideRate = 2.2f; // 步频系数（rad/米）：speed*dt*kStrideRate = walkPhase 增量（t45）
     static constexpr float kDeg = 0.017453292519943295f;

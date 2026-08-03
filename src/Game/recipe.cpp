@@ -154,6 +154,14 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                           RecipeRegistry::IronIngotId, 0,
         0, 0, 0 },
       RecipeRegistry::BucketEmptyId, 1, 1, "bucket_empty" },
+    // t238 面包：3 小麦横排 → 1 面包（有序 3×3，仅工作台）。机制等价 MC 1.0 面包配方（顶行 3 麦穗 → 1 面包）；
+    //   最小包围盒 3×1（满行），可在工作台任意一行竖 / 横平移摆放（shapedEqual 最小包围盒对齐）。3 列铺满
+    //   → 包围盒 1×3 → 不与 2×3 的锄 / 3×3 的镐配方冲突（包围盒尺寸不同）。产物 BreadId（材料段 0x20A，
+    //   maxStack=64 可堆叠；右键食 → +5 饥饿）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::WheatId, RecipeRegistry::WheatId, RecipeRegistry::WheatId,
+        0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::BreadId, 1, 1, "bread" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

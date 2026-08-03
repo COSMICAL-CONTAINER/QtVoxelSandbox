@@ -200,6 +200,11 @@ void PlayerController::respawn()
     m_airTimer = 0.0f;
     m_drownTimer = 0.0f;
     m_airRegenTimer = 0.0f;
+    // t238：重生回满饥饿 + 清三计时器（PlayerState::respawn 同步 hunger 到 maxHunger）。
+    if (m_hunger != kMaxHunger) { m_hunger = kMaxHunger; emit hungerUpdated(m_hunger); }
+    m_hungerDepleteAccum = 0.0f;
+    m_starveTimer = 0.0f;
+    m_regenTimer = 0.0f;
     m_pos = QVector3D(kSpawnX, kSpawnY, kSpawnZ); // 回出生列（X/Z；Y 由 snapSpawnToGround 贴地表）
     m_vel = QVector3D(0, 0, 0);
     snapSpawnToGround();      // t137：重生贴地表（消除 kSpawnY 兜底落差；设 m_pos.y + m_peakY）
@@ -227,6 +232,12 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     m_airTimer = 0.0f;
     m_drownTimer = 0.0f;
     m_airRegenTimer = 0.0f;
+    // t238：饥饿计时器随存档加载归零（避免上一世界残留扣血 / 回血累积跨世界串入）。m_hunger 本身不在此
+    //   复位 —— 由 Main.qml::applyPlayerState 经 player.setHunger(data.hunger) 单独灌入存档值（存档持久化
+    //   playerState.hunger；spec「到 0→扣血」从存档值起算）。setHunger 不被本方法调，故此处清计时器即可。
+    m_hungerDepleteAccum = 0.0f;
+    m_starveTimer = 0.0f;
+    m_regenTimer = 0.0f;
     if (m_flying) { m_flying = false; emit flyingChanged(); }
     if (m_moveState != Walk) setMoveState(Walk);
     const Mode target = (mode == int(Survival)) ? Survival
@@ -503,6 +514,16 @@ void PlayerController::setSelectedItem(int id)
     if (id == m_selectedItem) return;
     m_selectedItem = id;
     emit selectedItemChanged();
+}
+
+// t238 设饥饿值（存档加载用）。clamp 到 [0, kMaxHunger]；同步本类 Physics 层 m_hunger + emit hungerUpdated
+//   让 Main.qml 路由到 playerState.setHunger（Game 层显值与 Physics 层值对齐：存档只持久化 playerState.hunger，
+//   本方法把同一值灌回 Physics 层镜像）。无变化静默。供 Main.qml::applyPlayerState 在 playerState.setHunger
+//   之后配对调用（两层数据一致、depletion 从存档值起算）。
+void PlayerController::setHunger(int value)
+{
+    const int nv = std::clamp(value, 0, int(kMaxHunger));
+    if (nv != m_hunger) { m_hunger = nv; emit hungerUpdated(m_hunger); }
 }
 
 // 左键按下（t34）：按模式分流。
@@ -973,6 +994,24 @@ void PlayerController::placeBlock()
             }
         }
         return; // 种子（种植成功 / 命中非耕地 / 未命中）均不再走方块放置路径
+    }
+    // t238 食用面包（spec「右键食面包→恢复饱食度」）：手持面包（BreadId，材料段非方块）右键 → 恢复饱食度
+    //   +5 hunger（机制等价 MC 1.0 面包 +5 hunger / 2.5 鼓腿）。面包非方块 → selectedBlock 经 hotbar 归 Air，
+    //   须在下方 `m_selectedBlock == Air` 守卫之前分流（同桶 / 锄 / 种子分支模式）。**无需命中**（食用是
+    //   玩家主观动作，不依赖视线命中实体方块；机制等价 MC「长按右键食」，本项目简化为单次右键食一件）。
+    //   Survival：消耗 1 面包 + 饥饿 +5。Creative：饥饿锁满 → +5 被 clamp 截断无变化，且**不消耗**（创造调色板
+    //   无限源，机制等价 MC 创造食不消耗；同种子种植创造不耗）。为保「食用反馈独立于饥饿是否真 +」原则，
+    //   无条件 emit swingArm + 刷 m_lastPlaceMs（食面包也是一次「使用」动作；placeBlock 入口 200ms CD 顺带
+    //   限食用节流防刷屏挥手）。spectator 已被入口 canPlace() 守卫拦截（食用经 placeBlock 入口，沿用既有门控）。
+    if (m_hotbar && heldItemId == RecipeRegistry::BreadId) {
+        // 饥饿 +5（clamp；Survival 真增 / Creative 锁满无变化静默）。
+        const int nv = std::clamp(m_hunger + int(kBreadHungerAmount), 0, int(kMaxHunger));
+        if (nv != m_hunger) { m_hunger = nv; emit hungerUpdated(m_hunger); } // 呈现层 → PlayerState.setHunger
+        if (m_mode == Survival)
+            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 面包（创造不耗）
+        m_lastPlaceMs = now;
+        emit swingArm(); // 食用挥手（一次「使用」动作；同种植 / 桶舀水挥手）
+        return; // 面包（食用 / 无事）均不再走方块放置路径
     }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
@@ -1910,6 +1949,64 @@ void PlayerController::step(qreal dt)
                 m_airRegenTimer = 0.0f;
             }
         }
+    }
+
+    // t238 饥饿系统（仅 Survival 推进；Creative/Spectator 锁满 + 计时器归零）。时间源 = 物理 tick 的 dt
+    //   （与窒息 / 溺水同：step(dt) 由 tickImpl 每帧调，dt 来自 QTimer 真实流逝 → 等价 WorldClock 时间权威）。
+    //   spec「饥饿随时间/运动掉落（hunger depletion tick，WorldClock 驱动；到 0→开始扣血，复用 takeDamage 链）」。
+    //   三态推进：
+    //   (1) 消耗：m_hungerDepleteAccum 按 dt × rate 累加（idle / walk / sprint 三档率，疾跑 > 走 > 静）；
+    //       每满 1.0 扣 1 饥饿（clamp ≥0）+ emit hungerUpdated。spec「随时间 / 运动掉落」—— 水平速度 >0.1
+    //       即视为移动（疾跑用 sprint 率，否则 walk 率），不动用 idle 率。
+    //   (2) 饥饿回血：m_hunger >= kRegenHungerThreshold（18，9 鼓腿）且未满血时 m_regenTimer 累加 → 每
+    //       kHungerRegenInterval（4s）回 1HP（机制等价 MC 1.0 饱腹回血；让「食面包」能真回血）。饥饿不足 /
+    //       已满血 → 计时器归零。
+    //   (3) 饥饿伤害：m_hunger == 0 时 m_starveTimer 累加 → 每 kStarveInterval（4s）扣 1HP（emit
+    //       fallDamageTaken(1) → takeDamage → damaged 红闪 / 视角晃，与窒息 / 溺水同链，spec「复用 takeDamage 链」）。
+    //   分层（PLAN §2）：Game/Physics 层算时序 + 发语义事件（hungerUpdated / fallDamageTaken），呈现层只消费
+    //   （PlayerState.setHunger / takeDamage，经 Connections 路由，同 air / suffocation 模式）。
+    if (m_mode == Survival) {
+        // (1) 消耗：按运动状态选率（疾跑 > 走 > 静）。m_horizSpeed 由 reportHorizSpeed 上一 tick 算（本 tick
+        //     用上一帧值近似当前运动态 —— 饥饿率误差 1 帧可忽，无需每帧重算）。
+        const float rate = (m_horizSpeed > 0.1f)
+                           ? (m_moveState == Sprint ? kHungerSprintRate : kHungerWalkRate)
+                           : kHungerIdleRate;
+        m_hungerDepleteAccum += float(dt) * rate;
+        while (m_hungerDepleteAccum >= 1.0f) {
+            m_hungerDepleteAccum -= 1.0f;
+            if (m_hunger > 0) { --m_hunger; emit hungerUpdated(m_hunger); }
+            // 饥饿已 0 → 不再扣（clamp），accum 继续累但无副作用（下一 starving 分支接管扣血）。
+        }
+        // (2) 饥饿回血：饱腹（m_hunger >= kRegenHungerThreshold=18）+ 未满血 → 每 kHungerRegenInterval（4s）
+        //     回 1HP（emit healed(1) → 呈现层 PlayerState.heal；机制等价 MC 1.0 hunger≥18 自动回血，让
+        //     「食面包」真有生存收益）。饥饿不足 / 已满血 → 计时器归零。
+        if (m_hunger >= kRegenHungerThreshold) {
+            m_regenTimer += float(dt);
+            if (m_regenTimer >= kHungerRegenInterval) {
+                m_regenTimer -= kHungerRegenInterval;
+                emit healed(1);
+            }
+        } else {
+            m_regenTimer = 0.0f;
+        }
+        // (3) 饥饿伤害：m_hunger == 0 → 每 kStarveInterval（4s）扣 1HP（emit fallDamageTaken(1) → 呈现层
+        //     PlayerState.takeDamage → damaged 红闪 / 视角晃，与窒息 / 溺水同链，spec「到 0→开始扣血，复用
+        //     takeDamage 链」）。m_hunger > 0 → 计时器归零（不跨饿时段累积）。
+        if (m_hunger <= 0) {
+            m_starveTimer += float(dt);
+            if (m_starveTimer >= kStarveInterval) {
+                m_starveTimer -= kStarveInterval;
+                emit fallDamageTaken(1);
+            }
+        } else {
+            m_starveTimer = 0.0f;
+        }
+    } else {
+        // 非 Survival（Creative/Spectator）：饥饿锁满 + 三计时器归零（防切回 Survival 时陈旧累积串入）。
+        if (m_hunger != kMaxHunger) { m_hunger = kMaxHunger; emit hungerUpdated(m_hunger); }
+        m_hungerDepleteAccum = 0.0f;
+        m_starveTimer = 0.0f;
+        m_regenTimer = 0.0f;
     }
 
     if (wasGround != m_onGround) emit onGroundChanged();

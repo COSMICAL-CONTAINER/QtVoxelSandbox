@@ -209,6 +209,10 @@ Window {
             data.mode  !== undefined ? data.mode  : DF.mode)
         playerState.setHealth(data.health !== undefined ? data.health : 20)
         playerState.setHunger(data.hunger !== undefined ? data.hunger : 20)
+        // t238 同步 Physics 层饥饿镜像（存档持久化 playerState.hunger；此处把同一值灌回 PlayerController.m_hunger，
+        //   使两层一致、depletion 从存档值起算）。player.setHunger 内部 emit hungerUpdated → 上面 onHungerUpdated
+        //   路由回 playerState.setHunger（幂等：值已一致则无变化静默）。
+        player.setHunger(data.hunger !== undefined ? data.hunger : 20)
         // 背包已在上文两路径共用处清空，此处直接按存档写
         if (data.hotbar) for (let i = 0; i < data.hotbar.length && i < 9; ++i)
             hotbarVM.setStack(i, data.hotbar[i].id, data.hotbar[i].count)
@@ -673,9 +677,14 @@ Window {
     Connections {
         target: player
         function onFallDamageTaken(hp) { playerState.takeDamage(hp) }
+        // t238 饥饿回血 → PlayerState.heal（饱腹态每 4s 回 1HP；同 fallDamageTaken→takeDamage 反向配对）。
+        function onHealed(hp) { playerState.heal(hp) }
         // t202 气泡值更新 → PlayerState.air（Physics 层算时序、Game 层持显值、呈现层路由；同 fallDamageTaken→
         //   takeDamage 模式）。溺水扣血复用 onFallDamageTaken（→ takeDamage → damaged 红闪 / 视角晃）。
         function onAirUpdated(air) { playerState.setAir(air) }
+        // t238 饥饿值更新 → PlayerState.setHunger（Physics 层 m_hunger 推进 / 食用恢复时发；同 airUpdated→
+        //   setAir 模式）。饥饿归零扣血复用 onFallDamageTaken（→ takeDamage → damaged 红闪 / 视角晃）。
+        function onHungerUpdated(hunger) { playerState.setHunger(hunger) }
         // t35：生存破可掉落方块（drop=true）→ player 发 spawnItem → 转发到 manager 生成实体。
         // 创造 / 不可采掘时 player 不发本信号（无实体产出）。ViewModel 不持有 PlayerController，
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
