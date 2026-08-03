@@ -36,6 +36,16 @@
      涟漪）+ 首末 50ms 三角窗淡化保循环无缝）。机制等价 MC 近流水 / 瀑布的环境水流声（§9 原创）。
      AudioManager 用 ma_sound 设 looping，startWaterFlow/stopWaterFlow 控开关（PlayerController 近流水
      proximity 扫描驱动），setWaterFlowLevel 据玩家到最近流水格距离调音量（近强远弱）。
+   - mob_idle.wav / mob_idle_pig.wav / mob_idle_cow.wav / mob_idle_sheep.wav：生物环境 idle 叫声（t250
+     牛叫/羊叫/猪叫，周期偶发；玩家听者范围内由 EntityManager 周期 emit mobAmbient 触发 →
+     AudioManager.playMobAmbient 据 mobType 选播）。机制等价 MC 1.0 被动生物偶发 idle call（§9 原创，
+     零 MC 资产；不照搬任何 MC 生物音效，仅机制对齐「周期 idle 叫声」）。
+     - mob_idle（通用）：测试生物 / 未知子类的中性短 chirp（~0.18s）。
+     - mob_idle_pig（猪哼）：低中频鼻音 grunt —— 双短爆发（拟「哼哼」两声），基频 ~190Hz + 二次谐波，
+       ~0.32s。
+     - mob_idle_cow（牛哞）：长低频下扫 moo —— 基频 ~165→105Hz 缓降 + 慢 attack + 轻颤音，~0.62s。
+     - mob_idle_sheep（羊咩）：带 AM 颤音的 bleat —— ~380Hz 载波 × ~11Hz 振幅调制（拟「咩-咩」颤抖），
+       ~0.45s。
 
 确定性合成（每组固定 random.seed），同次运行产出字节一致的 WAV（便于 git/CI diff）。
 运行：python tools/build_sounds.py（输出到工程根 sounds/）。
@@ -350,6 +360,106 @@ def gen_water_flow():
     return out
 
 
+def gen_mob_idle_generic():
+    """通用生物 idle 叫声（t250）：中性短 chirp —— 单音基频 ~420Hz 正弦 + 二次谐波 + 起始软 attack +
+    快指数衰减，~0.18s。供 MobTest（测试生物）/ 未知 mobType 兜底（机制等价 MC 生物偶发 idle call；
+    §9 原创，零 MC 资产）。EntityManager 周期 emit mobAmbient(mobType=0) → AudioManager.playMobAmbient 触发。
+    """
+    dur = 0.18
+    n = int(SR * dur)
+    random.seed(250070)
+    out = []
+    for i in range(n):
+        t = i / SR
+        tone = math.sin(2 * math.pi * 420.0 * t) * 0.50
+        harm = math.sin(2 * math.pi * 840.0 * t) * 0.15        # 二次谐波（让 chirp 不至于纯音过空）
+        grit = random.uniform(-1, 1) * 0.12 * math.sin(2 * math.pi * 2600.0 * t)  # 轻摩擦瞬态
+        attack = min(1.0, t / 0.010)                            # 10ms attack（起声不刺）
+        e = env_exp(t, 16.0)
+        s = (tone + harm + grit) * e * attack
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
+def gen_mob_idle_pig():
+    """猪哼 idle 叫声（t250）：低中频鼻音 grunt —— 两段短爆发（拟「哼哼」），每段基频 ~190Hz 正弦 +
+    二次谐波（鼻音色彩）+ 弱宽带 grit，各 ~0.11s、间隔 ~0.05s，~0.32s。机制等价 MC 猪偶发 grunt
+    （§9 原创，零 MC 资产；不照搬任何 MC 生物音效）。mobAmbient(mobType=1) → playMobAmbient 触发。
+    """
+    dur = 0.32
+    n = int(SR * dur)
+    random.seed(250071)
+    # 两段爆发的中心（归一化时间 [0,1]）：第一段 0.15、第二段 0.65。
+    bursts = [0.15, 0.65]
+    out = []
+    for i in range(n):
+        t = i / SR
+        # 累加两段窄高斯包络（各 ~0.11s 宽）
+        env = 0.0
+        for b in bursts:
+            env += math.exp(-((t - b * dur) ** 2) / (2 * 0.030 ** 2))
+        env = min(1.0, env)
+        tone = math.sin(2 * math.pi * 190.0 * t) * 0.55
+        harm = math.sin(2 * math.pi * 380.0 * t) * 0.20          # 二次谐波（鼻音色彩）
+        grit = random.uniform(-1, 1) * 0.16                      # 弱宽带 grit（哼的气流感）
+        e = env
+        attack = min(1.0, t / 0.008)
+        s = (tone + harm + grit) * e * attack * 0.9
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
+def gen_mob_idle_cow():
+    """牛哞 idle 叫声（t250）：长低频下扫 moo —— 基频从 ~165Hz 缓降到 ~105Hz（哞的下沉感）+ 二次谐波 +
+    慢 attack（起声渐入）+ 轻颤音（~6Hz FM）+ 末尾慢衰减，~0.62s。机制等价 MC 牛偶发 moo（§9 原创，
+    零 MC 资产）。mobAmbient(mobType=2) → playMobAmbient 触发。
+    """
+    dur = 0.62
+    n = int(SR * dur)
+    random.seed(250072)
+    out = []
+    for i in range(n):
+        t = i / dur      # 归一化 0..1（pitch bend 用）
+        ts = i / SR
+        # 基频下扫 165→105Hz（哞的下沉轮廓）
+        f0 = 165.0 - 60.0 * t
+        fm = 6.0 * math.sin(2 * math.pi * 6.0 * ts)             # ~6Hz FM 颤（声带轻颤）
+        tone = math.sin(2 * math.pi * f0 * ts + fm) * 0.50
+        harm = math.sin(2 * math.pi * 2.0 * f0 * ts) * 0.16      # 二次谐波（mellow 的体腔感）
+        body = math.sin(2 * math.pi * 70.0 * ts) * 0.18          # 低频重量（大体型）
+        grit = random.uniform(-1, 1) * 0.08                      # 极弱气声
+        # 慢 attack（0.08s 起声渐入）+ 慢衰减
+        attack = min(1.0, ts / 0.08)
+        e = attack * env_exp(ts, 3.5)
+        s = (tone + harm + body + grit) * e
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
+def gen_mob_idle_sheep():
+    """羊咩 idle 叫声（t250）：带 AM 颤音的 bleat —— ~380Hz 载波 × ~11Hz 振幅调制（拟「咩-咩」颤抖）+
+    二次谐波 + 中 attack + 中衰减，~0.45s。机制等价 MC 羊偶发 baa（§9 原创，零 MC 资产）。
+    mobAmbient(mobType=3) → playMobAmbient 触发。
+    """
+    dur = 0.45
+    n = int(SR * dur)
+    random.seed(250073)
+    out = []
+    for i in range(n):
+        t = i / SR
+        ts = i / SR
+        carrier = math.sin(2 * math.pi * 380.0 * ts) * 0.48
+        harm = math.sin(2 * math.pi * 760.0 * ts) * 0.14          # 二次谐波
+        grit = random.uniform(-1, 1) * 0.10
+        # ~11Hz AM 颤（0.5±0.5 → 0..1 包络，让载波忽强忽弱 = 咩的颤抖）
+        trem = 0.5 + 0.5 * math.sin(2 * math.pi * 11.0 * ts)
+        attack = min(1.0, ts / 0.020)
+        e = attack * env_exp(ts, 5.5)
+        s = (carrier + harm + grit) * e * trem * 0.85
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -368,7 +478,11 @@ def main():
                       ("door_open", gen_door_open), ("door_close", gen_door_close),
                       ("hurt", gen_hurt), ("mob_hurt", gen_mob_hurt),
                       ("ambient_wind", gen_ambient_wind),
-                      ("water_flow", gen_water_flow)]:
+                      ("water_flow", gen_water_flow),
+                      ("mob_idle", gen_mob_idle_generic),
+                      ("mob_idle_pig", gen_mob_idle_pig),
+                      ("mob_idle_cow", gen_mob_idle_cow),
+                      ("mob_idle_sheep", gen_mob_idle_sheep)]:
         samples = gen()
         path = out_dir / f"{name}.wav"
         write_wav(path, samples)

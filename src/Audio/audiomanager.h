@@ -77,6 +77,17 @@ public:
     //   PlayerController::mobAttacked → Main.qml 路由到本方法（替代旧复用 playHurt 的路径）。与 hurt
     //   单件同模式（seek 重发不堆叠）；降级（engine / clip 失败）静默早退（§2-E，不崩）。
     Q_INVOKABLE void playMobHurt();
+    // t250 mob 环境音（牛叫/羊叫/猪叫 idle + 走路声）：
+    //   - playMobAmbient(mobType)：生物周期 idle 叫声 —— 按 mobType 选 mob_idle clip（0=通用 / 1=猪哼 /
+    //     2=牛哞 / 3=羊咩）。EntityManager tick 内 ambientTimer 周期倒计时（随机 8-16s）+ 玩家听者范围内
+    //     → emit mobAmbient(mobType) → Main.qml 路由到本方法。机制等价 MC 1.0 被动生物偶发 idle call
+    //     （原创程序合成，§9；零 MC 资产）。seek 重发不堆叠（同单件模式）；engine/clip 失败静默降级（§2-E）。
+    Q_INVOKABLE void playMobAmbient(int mobType);
+    //   - playMobStep(mobType, blockId)：生物走路声 —— 复用 step 材质分组 clip 池（按脚下方块 id 的材质组选），
+    //     mobType 当前保留语义对齐 / 未来扩展（步声按材质而非 mob 子类）。mob 是环境音（非玩家前景）→
+    //     音量低于玩家 playStep。EntityManager tick 内 walkPhase 每累积半步（π=一次脚落）+ 听者范围内 →
+    //     emit mobStep(mobType, 脚下方块 id) → Main.qml 路由到本方法。机制等价 MC 生物走路脚步声（§9 原创）。
+    Q_INVOKABLE void playMobStep(int mobType, int blockId);
     // 环境音 / 风声床（t177 音效完善）：长循环风声（ma_sound looping=true），进入游戏（playing）启动、
     //   退出（回菜单 / 世界列表）停止。机制等价 MC 的环境 / 风声氛围床（原创程序合成，§9）。
     //   setAmbientLevel 据昼夜调强度（夜间更静谧）：level ∈ [0,1]，乘进 ambient 基础音量（base*m_volume*

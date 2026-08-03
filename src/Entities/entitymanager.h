@@ -172,10 +172,22 @@ public:
     //   实体仍模拟）。机制同 ItemEntityManager::tick（向下只读 World::isSolid/blockAt）。world=null / 无实体
     //   → 早 return。Mob：AI 行走（aiWander）+ 重力；dead Mob：仅 deathTimer 倒计时（冻结）；FallingBlock：
     //   t117/t220 着地放置 / 变掉落物 + 移除。
-    void tick(qreal dt, World *world);
+    //   t250 环境音：listener = 玩家脚底位置（听者），用于 proximity 门控 mob idle/step 叫声 —— 仅听者
+    //   kAudioRange 半径内的活体 mob 才 emit mobAmbient/mobStep（远场静默，防多 mob 同步吵闹）。PlayerController
+    //   传 m_pos（菜单态仍有效）。listener 无关物理 / AI，仅参与音频门控（不写入实体态）。
+    void tick(qreal dt, World *world, const QVector3D &listener);
 
 signals:
     void entitiesChanged(); // spawn / 推动位移 / 重力下落 / AI 行走 / 受击红闪 / 死亡移除 触发；驱动 count/revision + QML 绑定刷新
+    // t250 mob 环境 idle 叫声（牛叫/羊叫/猪叫）：tick 内 ambientTimer 周期倒计时（随机 8-16s）到 + 玩家
+    //   听者范围内 → emit mobAmbient(mobType)。mobType = 子类 id（0=通用 / 1=猪 / 2=牛 / 3=羊）→ 呈现层
+    //   （Main.qml）Connections 路由到 AudioManager.playMobAmbient 据 mobType 选 mob_idle clip（机制等价
+    //   MC 1.0 被动生物偶发 idle call；§9 原创）。分层（PLAN §2）：Entities 层发语义事件，呈现层只消费。
+    void mobAmbient(int mobType);
+    // t250 mob 走路声：tick 内 walkPhase 每累积半步（π=一次脚落）+ 听者范围内 → emit mobStep(mobType,
+    //   blockId=脚下方块 id)。mobType 当前保留语义对齐；blockId 供 AudioManager 按材质组选 step clip。
+    //   呈现层 Connections 路由到 AudioManager.playMobStep（机制等价 MC 生物走路脚步声；§9 原创）。
+    void mobStep(int mobType, int blockId);
     // t117/t220 FallingBlock 遇不完整方块失撑 → 变掉落物。沙下落途中首个「非 air/水」方块为**不完整方块**
     //   （火把 / 半砖 / 栅栏 / ...，即非完整立方）时发本信号：坐标 = 不完整方块**上方一格**（= 沙应掉落位）、
     //   blockId = 实体携带的方块 id（机制等价 MC「沙落火把上 → 沙碎成掉落物」；仅完整立方可支撑沙）。
@@ -219,6 +231,9 @@ private:
         float eatTimer = 0.0f;   // >0 = 正处吃草周期（秒，倒数到 0 结束）；周期内强制 idle 站立 + 头部俯仰
         bool  eatApplied = false;// 本周期是否已消耗草丛（apply 阈值到达时置 true，防重复消耗）
         float eatCooldown = 0.0f;// 到下次扫描草丛的倒计时（秒）；吃完后 kEatCooldown、空扫描后 kEatScanInterval
+        // t250 环境音态（仅 Mob kind 用；FallingBlock/Item 留默认不触发）：
+        float stepAccum = 0.0f;  // walkPhase 半步累加器（弧度）；行走时累加 moveSpeed*dt*kWalkFreq，≥π → emit mobStep
+        float ambientTimer = 0.0f; // 到下次 idle 叫声的倒计时（秒）；≤0 → emit mobAmbient + 重置随机周期
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;
@@ -265,6 +280,17 @@ private:
     static constexpr float kKnockbackHoriz = 4.5f;  // 击退水平初速（blocks/s）
     static constexpr float kKnockbackUp    = 4.5f;  // 击退小跳垂直初速（blocks/s；峰值 ~0.36 格）
     static constexpr float kKnockbackDrag  = 4.0f;  // 击退水平衰减率（1/s；~0.5s 基本停下）
+    // t250 环境音常量（机制对齐 MC 1.0 被动生物偶发 idle call + 走路声；§9 原创合成音色在 build_sounds.py）：
+    //   kStepHalfStride：走路声半步阈值（弧度）。walkPhase 每完整 stride=2π 含两次脚落（左+右），故每累积
+    //     π → 一次脚落 → emit mobStep（同 player QML 端「Δphase≥π 播一次脚步音」语义，搬进 C++ 避逐 mob 追踪）。
+    //   kAmbientMin/Max：idle 叫声随机周期（秒）。MC 1.0 被动生物偶发 idle call 间隔量级 ~ 数秒到十余秒；
+    //     取 8-16s 偏稀疏（环境氛围、不抢前景；密集多 mob 场景也不吵）。
+    //   kAudioRange：听者范围（blocks）。仅此半径内的活体 mob emit idle/step 叫声（远场静默，防满屏 mob
+    //     同步吵闹 + 无意义远场计算）。
+    static constexpr float kStepHalfStride = 3.14159265f; // 半步阈值（弧度；=π）
+    static constexpr float kAmbientMin = 8.0f;            // idle 叫声间隔下限（秒）
+    static constexpr float kAmbientMax = 16.0f;           // idle 叫声间隔上限（秒）
+    static constexpr float kAudioRange = 24.0f;           // 听者范围（blocks；近 mob 才发声）
 };
 
 #endif // ENTITYMANAGER_H

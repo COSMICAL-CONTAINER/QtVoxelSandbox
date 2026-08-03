@@ -225,6 +225,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
 # t152：door_open / door_close 单件（门/活板门右键开合声；doorToggled 信号 → AudioManager.playDoor*）。
 # t177：hurt 单件（玩家受伤声；PlayerState.damaged → playHurt）+ ambient_wind 长循环风声床
 #   （playing 态 startAmbient / 退菜单 stopAmbient；setAmbientLevel 据昼夜 skyLight 调强度）。
+# t250：mob_idle（通用 / 猪 / 牛 / 羊）idle 叫声单件 —— EntityManager 周期 emit mobAmbient(mobType) →
+#   AudioManager.playMobAmbient 据 mobType 选播（机制等价 MC 1.0 被动生物偶发 idle call；§9 原创）。
 qt_add_resources(voxelsandbox "voxel_sounds"
     PREFIX "/"
     FILES
@@ -251,6 +253,10 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/mob_hurt.wav
         sounds/ambient_wind.wav
         sounds/water_flow.wav
+        sounds/mob_idle.wav
+        sounds/mob_idle_pig.wav
+        sounds/mob_idle_cow.wav
+        sounds/mob_idle_sheep.wav
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。

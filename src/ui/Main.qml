@@ -808,6 +808,18 @@ Window {
         }
     }
 
+    // t250 mob 环境音（牛叫/羊叫/猪叫 idle + 走路声）：EntityManager tick 内周期 emit mobAmbient(mobType)
+    //   （idle 叫声）+ walkPhase 半步 emit mobStep(mobType, blockId)（走路声），均经听者范围（kAudioRange）
+    //   门控（近 mob 才发声）。呈现层经此 Connections 路由到 AudioManager.playMobAmbient/playMobStep（音频层
+    //   只消费，PLAN §2 分层：Entities 层发语义事件、Core/Platform 层音频只消费，绝不反向写）。同
+    //   onMobAttacked→playMobHurt / onMobDied→spawnItem 模式（单向事件流）。引擎 / clip 失败时 AudioManager
+    //   内部静默降级（§2-E），此处无需守卫。
+    Connections {
+        target: entityManager
+        function onMobAmbient(mobType) { audio.playMobAmbient(mobType) }
+        function onMobStep(mobType, blockId) { audio.playMobStep(mobType, blockId) }
+    }
+
     View3D {
         id: view3d
         anchors.fill: parent

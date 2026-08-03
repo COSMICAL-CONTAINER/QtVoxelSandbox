@@ -378,7 +378,8 @@ void PlayerController::tickImpl()
     if (m_itemEntities && m_world) m_itemEntities->tick(dt, m_world);
     // t95：统一实体（测试生物）重力 + 地面静止，同掉落物常开（菜单 / 暂停时仍模拟）。机制同源
     // （EntityManager::tick 向下只读 World::isSolid）。PlayerController 现亦持 EntityManager* → 由它驱动。
-    if (m_entityManager && m_world) m_entityManager->tick(dt, m_world);
+    //   t250：传 m_pos 作听者位置，门控 mob idle/step 叫声（近 mob 才发声；菜单态 m_pos 仍有效）。
+    if (m_entityManager && m_world) m_entityManager->tick(dt, m_world, m_pos);
     // t92：拾取扫描提到 m_captured 早 return **之前**——打开背包（release→m_captured=false）时
     // 原 pickupScan 落在早 return 之后永不执行，玩家走近掉落物拾不起（仅见实体掉地）。掉落物物理
     // （itemEntities->tick）本就在早 return 前跑（独立于捕获态），拾取与之同级、同样常开才一致。

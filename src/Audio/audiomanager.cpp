@@ -104,6 +104,12 @@ struct AudioManager::Data
     Clip hurtClip{":/sounds/hurt.wav"};
     // t248 mob 受击单件（生物受击专属声；与玩家 hurt 区分）。PlayerController::mobAttacked → playMobHurt 触发。
     Clip mobHurtClip{":/sounds/mob_hurt.wav"};
+    // t250 mob 环境 idle 叫声 clip 池，按 mobType 索引（0=通用测试生物 / 1=猪 / 2=牛 / 3=羊）。EntityManager
+    //   tick 内 ambientTimer 周期倒计时 → emit mobAmbient(mobType) → Main.qml 路由到 playMobAmbient 据
+    //   mobType 选播。机制等价 MC 1.0 被动生物偶发 idle call（原创程序合成，§9；零 MC 资产）。mobIdleClips
+    //   长度须 ≥ 最高 mobType+1（当前 4）；playMobAmbient 对越界 mobType 兜底用下标 0（generic）。
+    Clip mobIdleClips[4] = { {":/sounds/mob_idle.wav"}, {":/sounds/mob_idle_pig.wav"},
+                             {":/sounds/mob_idle_cow.wav"}, {":/sounds/mob_idle_sheep.wav"} };
     // t177 环境音 / 风声床单件（长循环风声；构造后置 looping=true，start/stop 控制开关，
     //   setAmbientLevel 调强度）。进入 playing 启动、退菜单停止。
     Clip ambientClip{":/sounds/ambient_wind.wav"};
@@ -234,6 +240,9 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->doorCloseClip);
     d->loadClip(d->hurtClip);
     d->loadClip(d->mobHurtClip);
+    // t250 mob idle 叫声（猪哼 / 牛哞 / 羊咩 / 通用）—— 短 SFX（≤0.62s），默认 2s maxFrames 远大于其长度。
+    for (int i = 0; i < 4; ++i)
+        d->loadClip(d->mobIdleClips[i]);
     // 环境音是 8.0s 长循环（build_sounds.py 首末 50ms 三角窗淡化保无缝），maxFrames 放宽到 16s
     // 保完整解码 —— 默认 2s 上限会把 8s 截到 2s，使循环点落在满幅中波、回绕到淡化起点 ≈0 →
     // 每 2s 一次咔哒爆音（淡化设计被废弃）。
@@ -246,6 +255,8 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->doorCloseClip);
     d->initSound(d->hurtClip);
     d->initSound(d->mobHurtClip);
+    for (int i = 0; i < 4; ++i)
+        d->initSound(d->mobIdleClips[i]);
     d->initSound(d->ambientClip);
     d->initSound(d->waterFlowClip);
     // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
@@ -270,6 +281,8 @@ AudioManager::AudioManager(QObject *parent)
         << " place=" << d->placeClip.ok << " pickup=" << d->pickupClip.ok
         << " door_open=" << d->doorOpenClip.ok << " door_close=" << d->doorCloseClip.ok
         << " hurt=" << d->hurtClip.ok << " mob_hurt=" << d->mobHurtClip.ok
+        << " mob_idle(gen/pig/cow/sheep)=" << d->mobIdleClips[0].ok << "/" << d->mobIdleClips[1].ok
+        << "/" << d->mobIdleClips[2].ok << "/" << d->mobIdleClips[3].ok
         << " ambient_wind=" << d->ambientClip.ok
         << " water_flow=" << d->waterFlowClip.ok;
 }
@@ -290,6 +303,8 @@ AudioManager::~AudioManager()
     if (d->doorCloseClip.ok) ma_sound_uninit(&d->doorCloseClip.sound);
     if (d->hurtClip.ok) ma_sound_uninit(&d->hurtClip.sound);
     if (d->mobHurtClip.ok) ma_sound_uninit(&d->mobHurtClip.sound);
+    for (int i = 0; i < 4; ++i)
+        if (d->mobIdleClips[i].ok) ma_sound_uninit(&d->mobIdleClips[i].sound);
     if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
     if (d->waterFlowClip.ok) ma_sound_uninit(&d->waterFlowClip.sound);
     ma_engine_uninit(&d->engine);
@@ -343,6 +358,23 @@ void AudioManager::playMobHurt()
 {
     // mob 受击音与 hurt 同量级（生物受击反馈；机制等价 MC 生物受击声，§9 原创合成，与玩家 hurt 区分）。
     d->replay(d->mobHurtClip, m_volume * 0.9f);
+}
+
+// t250 mob 环境 idle 叫声（牛叫/羊叫/猪叫）：按 mobType 选 mob_idle clip。mobType 越界（防御 caller 误传 /
+//   将来新增子类未补 clip）→ 兜底用下标 0（generic）。音量略低于 break（环境偶发音，不抢前景）。
+void AudioManager::playMobAmbient(int mobType)
+{
+    int idx = mobType;
+    if (idx < 0 || idx >= 4) idx = 0; // 越界 → generic 兜底（永不静默：spec 缺组用最常见音色）
+    d->replay(d->mobIdleClips[size_t(idx)], m_volume * 0.85f);
+}
+
+// t250 mob 走路声：复用 step 材质分组 clip 池（按脚下方块 id 的材质组选），音量低于玩家 playStep
+//   （mob 是环境音、非玩家前景；spec「音量合理」）。mobType 当前保留语义对齐 / 未来扩展（步声按材质）。
+void AudioManager::playMobStep(int mobType, int blockId)
+{
+    Q_UNUSED(mobType);
+    d->replay(d->groupClip(groupIndex(blockId), Data::Step), m_volume * 0.45f);
 }
 
 void AudioManager::startAmbient()

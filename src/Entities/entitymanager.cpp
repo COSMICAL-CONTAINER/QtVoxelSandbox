@@ -75,6 +75,11 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
     e.eatTimer = 0.0f;
     e.eatApplied = false;
     e.eatCooldown = 0.0f;
+    // t250 环境音初值：半步累加 0；idle 叫声倒计时随机化（[kAmbientMin,kAmbientMax)）防批量 spawn 的 mob
+    //   首次叫声同步（同 wanderTimer=0 错峰起步同理）。stepAccum=0。
+    e.stepAccum = 0.0f;
+    e.ambientTimer = kAmbientMin
+                     + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
     m_entities.push_back(std::move(e));
     ++m_revision;
     emit entitiesChanged();
@@ -532,7 +537,7 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
 //   void-loss 兜底：Mob 跌出世界底部（pos.y<0，如被推出边界外无支撑）→ 标记移除（防永久下落）。
 //
 // 移除用索引收集 + 循环后逆序 erase（保索引有效）。
-void EntityManager::tick(qreal dt, World *world)
+void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
 {
     if (!world || m_entities.empty()) return;
     const float worldW = float(world->width());
@@ -644,10 +649,44 @@ void EntityManager::tick(qreal dt, World *world)
                 if (e.hurtFlash <= 0.0f) { e.hurtFlash = 0.0f; dirty = true; }
             }
 
+            // t250 环境音 proximity 门控：仅听者 kAudioRange 半径内的活体 mob 才 emit idle/step 叫声（远场静默，
+            //   防多 mob 同步吵闹 + 无意义远场音频）。每 mob 每帧算一次（XZ 主导，Y 纳入避免垂直堆叠 mob 全响）。
+            const float adx = e.pos.x() - listener.x();
+            const float ady = e.pos.y() - listener.y();
+            const float adz = e.pos.z() - listener.z();
+            const bool inAudioRange = (adx * adx + ady * ady + adz * adz) <= kAudioRange * kAudioRange;
+
+            // t250 mob idle 叫声（牛叫/羊叫/猪叫）：ambientTimer 周期倒计时 → 0 时听者范围内 emit mobAmbient
+            //   （mobType 供 AudioManager 选 mob_idle clip）+ 重置随机周期（错峰，防多 mob 同步叫）。
+            //   机制等价 MC 1.0 被动生物偶发 idle call；不论 idle/行走/吃草，活体 mob 周期性偶发叫。
+            e.ambientTimer -= float(dt);
+            if (e.ambientTimer <= 0.0f) {
+                e.ambientTimer = kAmbientMin
+                                 + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
+                if (inAudioRange) emit mobAmbient(e.mobType);
+            }
+
             // t241 行走动画相位推进：moveSpeed>0（行走 / 被推）→ walkPhase 前进（fmod 2π，QML 据它驱动腿摆）；
             //   idle / 吃草 / 撞墙 → 冻结（moveSpeed=0 不进，腿停于上次相位）。每推进帧 bump dirty 让绑定刷新。
+            //   t250 mob 走路声：相位推进量同步累加进 stepAccum，每半步（π=一次脚落）听者范围内 emit mobStep
+            //   （mobType + 脚下方块 id 供 AudioManager 按材质组选 step clip）。半步语义同 player QML 端
+            //   「Δphase≥π 播一次脚步音」，搬进 C++ 避逐 mob 追踪 walkPhase（多 mob 在 QML 追踪不现实）。
             if (e.moveSpeed > 0.0f) {
-                e.walkPhase = std::fmod(e.walkPhase + e.moveSpeed * float(dt) * kWalkFreq, 6.2831853f);
+                const float advance = e.moveSpeed * float(dt) * kWalkFreq;
+                e.walkPhase = std::fmod(e.walkPhase + advance, 6.2831853f);
+                e.stepAccum += advance;
+                if (e.stepAccum >= kStepHalfStride) {
+                    e.stepAccum -= kStepHalfStride;
+                    if (inAudioRange) {
+                        // 脚下方块 id（材质组判定用；与 resting 复探同列格 = 底面下方一格）。越界 / air → 0
+                        //   → GroupDefault 兜底 Stone step（同 player 脚步音越界处理；仍响）。
+                        const int sfx = qFloor(e.pos.x());
+                        const int sfz = qFloor(e.pos.z());
+                        const int sfy = qFloor(e.pos.y() - e.radius) - 1;
+                        const quint8 sid = (sfy >= 0) ? world->blockAt(sfx, sfy, sfz) : BlockRegistry::Air;
+                        emit mobStep(e.mobType, int(sid));
+                    }
+                }
                 dirty = true;
             }
 
