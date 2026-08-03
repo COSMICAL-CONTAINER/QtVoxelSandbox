@@ -78,7 +78,9 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   NoTool（空手可采且掉落）、dropId=0x208（小麦种子，材料段；Core 不依赖 Game，字面量与
     //   RecipeRegistry::SeedId 同源）、dropCount=1、maxStack=64。各面贴图=tall_grass(28)（green 草叶 +
     //   alpha 透明底）。音色归 GroupGrass（软草音，同 grass/dirt）。worldgen 在 grass 表层上方确定性散布。
-    //   **不**掉落自身（掉小麦种子）；机制等价 MC「挖草丛掉小麦种子」。不进创造调色板（装饰方块，t244 补全）。
+    //   **不**掉落自身（掉小麦种子）；机制等价 MC「挖草丛掉小麦种子」。进创造调色板（t244 补全：草丛虽由 worldgen
+    //   散布、非玩家常规放置，但创造页供测试 / 装饰直接取用；图标走 flat 2D 路径同火把，Hotbar::iconFileForBlock 返
+    //   icon_tall_grass.png）。
     /* tall_grass    */ {int(BlockRegistry::TallGrass),            28, 28, 28, 28, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, 0x208,                              1, 64, "tall_grass",    "草丛"},
     // ── t236 小麦作物（WheatCrop）：机制等价 MC 1.0 小麦作物（wheat crop）。**cross 形广告牌方块**（与 TallGrass 同走
     //   PartialBlockGeometry 的 cross 几何段 [FirstCross, LastCross]；两片对角相交的双面 quad，alpha 透明底 cutout）。

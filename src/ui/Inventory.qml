@@ -44,14 +44,16 @@ Item {
     //   发，hotbar 槽间搬动 / 互换不算「拿新物」。
     signal itemTaken()
 
-    // ① 调色板数据：9 实方块（creativeBlocks，含工作台 CraftingTable，t59）+ 3 档镐（creativeTools，t33）
-    // + 6 材料（creativeMaterials，t114：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃）+ 扩展空槽（id=0 → 空占位）。
+    // ① 调色板数据：可放置方块（creativeBlocks，含工作台 / 熔炉 / 箱子 / 耕地 / 草丛 / 小麦作物 / 6 类木制半方块）
+    // + 工具段（creativeTools：3 档镐 + 3 档锄）+ 材料段（creativeMaterials：木棒 / 煤 / 铁系列 / 玻璃 / 桶 /
+    //   小麦种子 / 小麦 / 面包 / 生物蛋×3 / mob 掉落×4）+ 扩展空槽（id=0 → 空占位）。
     // 一次性求值的绑定（方块 / 工具 / 材料集恒定；root.hotbar 由 null→对象 时重新求值）。
     // 空槽既是「可滚动」的内容，也占位示意未来 Phase 1.x 的 ~40 方块扩容（MC 1.0 创造页也是多行大网格）。
+    // t244 创造调色板一览补全：cross 广告牌方块（草丛 / 小麦作物）+ 4 mob 掉落物（生猪排 / 生牛肉 / 皮革 / 羊毛）。
     readonly property var paletteModel: root.hotbar
         ? root.hotbar.creativeBlocks().concat(root.hotbar.creativeTools())
                                 .concat(root.hotbar.creativeMaterials())
-                                .concat([0,0,0,0,0,0,0,0,0]) // 13 方块 + 3 镐 + 6 材料 + 9 空 = 31（≥27 占满 9 列 × 3 行 + 余）
+                                .concat([0,0,0,0,0,0,0,0,0]) // 23 方块 + 6 工具 + 18 材料 + 9 空 = 56（9 列 × 6 行 + 余，Flickable 滚）
         : []
 
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。

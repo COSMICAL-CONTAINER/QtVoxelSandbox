@@ -149,6 +149,15 @@ def render_flat_2d(name):
 #   door 满高薄板。替代 t145 flat 2D 剪影（v1 同木纹难辨）；3D 顶 + 两侧明暗强化「这是哪类异形」+ 保留木板
 #   材质观感。t169 把 door/fence 从 flat 2D 升级为 3D（spec「不完整方块 flat→3D」），与 slab/stairs/trapdoor/
 #   pressure_plate 同走 render_partial_3d —— 6 类同为 3D 立体图标，hotbar/创造调色板肉眼即可辨图。
+# t244 cross 广告牌方块（透明底，2D 平面图标）：草丛 / 小麦作物在世界内是 cross 形广告牌（非整立方），
+#   图标应反映其 2D 形态（直接放大、保留 alpha → 「纯草叶 / 麦穗无方块底」，同火把）。源贴图：
+#   default_tall_grass（草丛）/ default_wheat_stage_7（小麦作物取成熟阶段作图标 —— 麦穗金黄，肉眼一眼可辨
+#   「这是小麦」而非其它绿茎；与 hotbar.cpp iconFileForBlock / BlockRegistry TallGrass/WheatCrop 注释同源）。
+FLAT_2D_CROSS = [
+    ("tall_grass", "default_tall_grass"),     # t235 草丛 cross（透明底 + 绿草叶；走 render_flat_2d）
+    ("wheat_crop", "default_wheat_stage_7"),  # t236 小麦作物 cross（取成熟阶段 7 麦穗金黄作图标）
+]
+
 PARTIALS_3D = [
     ("wood_slab",           "slab"),           # 木板台阶：全 footprint 半高盒（y[0,0.5]）
     ("wood_stairs",         "stairs"),         # 木板楼梯：整步（y[0,0.5] 全 footprint）+ 背墙（y[0.5,1] 背半 footprint）
@@ -389,6 +398,12 @@ def main():
     #   （按实际形状投影，3D 顶+两侧明暗）。t169 把 door/fence 从 flat 2D 升级为 3D —— 6 类同为立体图标。
     for out_name, shape in PARTIALS_3D:
         img = render_partial_3d(shape)
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t244 cross 广告牌方块 flat 2D 图标：草丛 / 小麦作物（透明底 + 草叶 / 麦穗像素）。
+    for out_name, src_name in FLAT_2D_CROSS:
+        img = render_flat_2d(src_name)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)

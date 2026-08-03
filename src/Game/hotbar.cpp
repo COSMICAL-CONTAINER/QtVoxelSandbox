@@ -27,6 +27,11 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Torch:         return "icon_torch.png";          // t88 火把立方体图标（伪光源）
     case BlockRegistry::Chest:         return "icon_chest.png";          // t173 箱子立方体图标（顶盖缝+侧铁箍）
     case BlockRegistry::Farmland:      return "icon_farmland.png";       // t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
+    // t244 cross 广告牌方块图标：草丛 / 小麦作物在世界内是 cross 形广告牌（透明底 + 像素草叶 / 麦穗），
+    //   图标走 flat 2D 平面路径（同火把 icon_torch）—— build_cube_icons.py 的 render_flat_2d 直接放大源
+    //   贴图保留 alpha → 「纯草叶 / 麦穗无方块底」。小麦作物图标取成熟阶段 7（金黄麦穗），肉眼一眼可辨。
+    case BlockRegistry::TallGrass:     return "icon_tall_grass.png";     // t235 草丛（cross 透明底；绿草叶）
+    case BlockRegistry::WheatCrop:     return "icon_wheat_crop.png";     // t236 小麦作物（cross 透明底；取成熟阶段 7 麦穗）
     // t145/t163(d) 不完整方块图标：6 类木制半方块各走自己的区分图标（tools/build_cube_icons.py 程序生成）。
     //   t163(d) slab/stairs/trapdoor/pressure_plate 升级为 **3D dimetric 立体图标**（render_partial_3d 按
     //   实际形状投影：slab 半高 / stairs L 阶 / trapdoor 薄板 / pressure_plate 更薄更小，顶 + 两侧明暗同
@@ -174,7 +179,14 @@ QVariantList Hotbar::creativeMaterials() const
         //   （走材料段默认），拾取时满栈 64；创造不耗 → 无限生成。MaterialIcon 自绘蛋形 + mob 配色斑点。
         int(RecipeRegistry::SpawnEggPigId),   // 生物蛋（猪）
         int(RecipeRegistry::SpawnEggCowId),   // 生物蛋（牛）
-        int(RecipeRegistry::SpawnEggSheepId)  // 生物蛋（羊）
+        int(RecipeRegistry::SpawnEggSheepId), // 生物蛋（羊）
+        // t244 mob 死亡掉落物（杀猪 / 牛 / 羊产出；机制等价 MC 1.0 被动生物掉落，纯原创自绘 MaterialIcon §9a）：
+        //   完成创造调色板一览 —— 生存时由 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
+        //   可堆叠 64（走材料段默认 maxStack）；非方块 → 右键不放置（playercontroller selectedBlock 守 Air）。
+        int(RecipeRegistry::RawPorkchopId),   // 生猪排：杀猪掉落（带骨肉排，浅粉红）
+        int(RecipeRegistry::RawBeefId),       // 生牛肉：杀牛掉落（深红肉块）
+        int(RecipeRegistry::LeatherId),       // 皮革：杀牛掉落（棕黄兽皮）
+        int(RecipeRegistry::WoolId)           // 羊毛：杀羊掉落（白色绒毛团）
     };
 }
 
@@ -212,7 +224,9 @@ QVariantList Hotbar::countList() const
 // 创造背包网格用：所有可放置方块 id（实体方块，air 除外）。id 取自 BlockRegistry（单一权威）。
 // t50：追加工作台；t80：追加熔炉；t84：追加煤矿/铁矿石；t88：追加火把（伪光源方块，可在创造调色板
 // 直接取用，便于测试放置 + 发光精灵效果）。t134：追加 6 类木制半方块（slab/stairs/fence/pressure_plate/
-// door/trapdoor），可在创造直接取用测试异形放置 / 开合。
+// door/trapdoor），可在创造直接取用测试异形放置 / 开合。t244：追加 cross 广告牌方块（草丛 / 小麦作物），
+// 完成创造调色板一览（spec「加入所有新方块/物品」—— 草丛由 worldgen 散布、小麦作物经种子种出，
+// 但创造调色板供玩家直接取用测试放置 / 渲染，与 MC 创造页含草丛 / 作物同语义）。
 QVariantList Hotbar::creativeBlocks() const
 {
     return { int(BlockRegistry::Grass),         int(BlockRegistry::Dirt),  int(BlockRegistry::Stone),
@@ -226,7 +240,10 @@ QVariantList Hotbar::creativeBlocks() const
              // t134 木制半方块：
              int(BlockRegistry::WoodSlab),          int(BlockRegistry::WoodStairs),
              int(BlockRegistry::WoodFence),         int(BlockRegistry::WoodPressurePlate),
-             int(BlockRegistry::WoodDoor),          int(BlockRegistry::WoodTrapdoor) };
+             int(BlockRegistry::WoodDoor),          int(BlockRegistry::WoodTrapdoor),
+             // t244 cross 广告牌方块（透明底 cutout；与火把同走非整立方渲染）：
+             int(BlockRegistry::TallGrass),                                     // 草丛（worldgen 散布 / 杀草掉种子）
+             int(BlockRegistry::WheatCrop) };                                    // 小麦作物（state=阶段；种 0..7，图标显成熟态）
 }
 
 QString Hotbar::iconSourceAt(int slot) const

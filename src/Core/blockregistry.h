@@ -110,10 +110,11 @@ public:
                                   //   退化耕地留后续任务）、hardness=0（瞬破，同 torch / 草丛）、NoTool（空手可采且掉落）、
                                   //   dropId=0x208（小麦种子，材料段；Core 不依赖 Game 故字面量与 RecipeRegistry::SeedId 同源；
                                   //   **未成熟阶段破块返种子**——成熟阶段破块掉小麦物品 + 额外种子归 t237 收割按 state 判定，
-                                  //   本表 dropId 仅作基础兜底）、dropCount=1、maxStack=64（不进创造调色板：作物经种子种出，
-                                  //   非玩家直接放置的方块；t244 补全）。各面贴图=wheat_stage_<state>（tile 29..36，mesher 走 cross
-                                  //   几何段时据 state 选；本表 topTile/sideTile 存阶段 0 基底 tile 29，partialblockgeometry
-                                  //   的 WheatCrop case 内 state + 基底算出实际阶段贴图）。音色归 GroupGrass（软草音，同草丛）。
+                                  //   本表 dropId 仅作基础兜底）、dropCount=1、maxStack=64。**进创造调色板**（t244 补全：作物
+                                  //   经种子种出、非玩家常规放置，但创造页供测试 / 装饰取用；图标取成熟阶段 7 金黄麦穗）。
+                                  //   各面贴图=wheat_stage_<state>（tile 29..36，mesher 走 cross 几何段时据 state 选；本表
+                                  //   topTile/sideTile 存阶段 0 基底 tile 29，partialblockgeometry 的 WheatCrop case 内 state +
+                                  //   基底算出实际阶段贴图）。音色归 GroupGrass（软草音，同草丛）。
         TallGrass      = 24, // 草丛（t235）：机制等价 MC 1.0 草丛 / 蕨类（tall grass / fern）。**cross 形广告牌方块**
                                   //   （两片对角十字相交的 quad，billboard X 形贴图，alpha 透明底 cutout）—— 非 1×1×1 整立方，
                                   //   亦非段内异形方块段（id > LastPartial）。worldgen 在 grass 表层上方确定性散布（placeTallGrass），
@@ -125,7 +126,8 @@ public:
                                   //   cutout 透明底）。音色归 GroupGrass（软草音）。**渲染走 PartialBlockGeometry::append 的 cross
                                   //   case**（合批进 chunk mesh，复用顶点色光照；cross 双面双对角 quad）；chunkgeometry 路由进 cross 段
                                   //   [FirstCross, LastCross]、不进立方面 PASS。raycastAABBs 整格命中（ShapeNone 非 torch 兜底）→
-                                  //   可瞄准 / 破坏。不进创造调色板（worldgen 专属装饰方块，机制等价 MC 草丛非玩家可放置；t244 补全）。
+                                  //   可瞄准 / 破坏。**进创造调色板**（t244 补全：草丛由 worldgen 散布、非玩家常规放置，
+                                  //   但创造页供测试 / 装饰取用，图标走 flat 2D 路径同火把）。
         Count         = 26, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 

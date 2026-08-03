@@ -213,6 +213,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_wood_door.png
         textures/icon_wood_trapdoor.png
         textures/icon_wood_pressure_plate.png
+        textures/icon_tall_grass.png               # t244 草丛 cross 方块 flat 2D 图标（透明底 + 绿草叶）
+        textures/icon_wheat_crop.png               # t244 小麦作物 cross 方块 flat 2D 图标（取成熟阶段 7 麦穗）
 )
 
 # t89 / t118 音效资源（tools/build_sounds.py 程序合成，§4 原创 SFX；零 MC 资产）。

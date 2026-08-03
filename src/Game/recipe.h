@@ -81,8 +81,8 @@ public:
     // t242 mob 死亡掉落（材料段 0x20B..0x20E；机制等价 MC 1.0 被动生物掉落物；非方块、可堆叠 64）：
     //   杀猪掉生猪排 / 杀牛掉生牛肉 + 皮革 / 杀羊掉羊毛。EntityManager mobDied 信号 → Main.qml 据本 id 调
     //   ItemEntityManager.spawnItem 生成掉落实体（同 spawnItem 模式；PLAN §2 分层：Entities 层发语义事件、
-    //   呈现层只消费）。MaterialIcon 自绘图标归 t244 创造背包补全；本任务仅注册使其可掉 / 可堆叠 / 可拾。
-    //   名称 / 模型全原创（§9 区隔，零 MC 资产 / 专名）。
+    //   呈现层只消费）。MaterialIcon 自绘图标 + 进创造调色板均由 t244 完成（Hotbar::creativeMaterials 拾取即满栈 64，
+    //   供测试 / 装饰直接取用；生存时由 mob 死亡掉落 / 拾取获得）。名称 / 模型全原创（§9 区隔，零 MC 资产 / 专名）。
     static constexpr int RawPorkchopId  = 0x20B; // 生猪排：杀猪掉落（机制等价 MC 1.0 raw porkchop）
     static constexpr int RawBeefId      = 0x20C; // 生牛肉：杀牛掉落（机制等价 MC 1.0 raw beef）
     static constexpr int LeatherId      = 0x20D; // 皮革：杀牛掉落（机制等价 MC 1.0 leather）
