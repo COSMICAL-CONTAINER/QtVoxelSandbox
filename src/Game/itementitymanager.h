@@ -88,14 +88,33 @@ public:
     // 时钟未启 → true（保守可拾，防卡死、防延迟机制误伤合法拾取）。
     bool isPickupReady(int i) const;
 
-    // t60 掉落物重力：每帧推进所有未落地实体的垂直运动。vy -= g*dt（钳 -kMaxFall），按 dy 下移 pos.y，
-    // 下移路径上扫实体所在列（cx = floor(pos.x)、cz = floor(pos.z)）查首个实体方块 → 命中则贴其顶面停下
-    // （pos.y = solidCellY + 1 + kRestOffset、vy=0、resting=true）。已 resting 的实体复探支撑格
-    // （= floor(pos.y) - 1）仍实体才续落（防下方被挖后悬空）。任一实体 pos / resting 真变 → 末尾 bump
-    // revision + emit entitiesChanged（驱动 QML delegate 的 {revision; posAt(index)} 绑定重算 →
-    // 呈现位置实时下落；count 不变 → Repeater 不重建 delegate，旋转 / 浮动动画连续不被打断）。
-    // world 为 null / 无实体 → 早 return（保守不动作）。**C++ 直调**（PlayerController::tick 每帧调），
-    // 非 QML 调 → 不挂 Q_INVOKABLE（避开 moc 对 World* 前向类型的 metatype 处理）。
+    // t60 掉落物重力 / t271 水冲走掉落物：每帧推进所有实体的物理（由 PlayerController::tick 每帧调，
+    //   常开、独立于捕获态——菜单/暂停时世界照常模拟）。**C++ 直调**（非 QML 调 → 不挂 Q_INVOKABLE，
+    //   避开 moc 对 World* 前向类型的 metatype 处理）。world 为 null / 无实体 → 早 return（保守不动作）。
+    //
+    //   t60 空气重力：未入水时 vy -= g*dt（钳 -kMaxFall），按 dy 下移 pos.y，下移路径上扫实体所在列
+    //   （cx = floor(pos.x)、cz = floor(pos.z)）查首个实体方块 → 命中则贴其顶面停下（pos.y =
+    //   solidCellY + 1 + kRestOffset、vy=0、resting=true）。已 resting 的实体复探支撑格仍实体才续落
+    //   （防下方被挖后悬空）。任一实体 pos / resting 真变 → 末尾 bump revision + emit entitiesChanged
+    //   （驱动 QML delegate 的 {revision; posAt(index)} 绑定重算 → 呈现位置实时；count 不变 → Repeater
+    //   不重建 delegate，旋转 / 浮动动画连续不被打断）。
+    //
+    //   t271 入水（中心格 == Water）：
+    //     (a) **浮水面**（buoyancy，非瀑布）：扫该列自中心格向上找「最顶水格」（其上为非水 = 水面），
+    //         目标静止 Y = surfCellY + 1 - kItemFloatOffset（中心贴水面、留在水格内防 floor 抖出空气→
+    //         下帧误判离水→重力回落的振荡）。中心在目标下方 → 以恒速 kItemRiseSpeed 上浮（机制等价 MC
+    //         掉落物水中缓浮）；到水面 → 钳到目标、vy=0。**瀑布例外**（水格下方为空气 = 水柱下落）→ 不上浮，
+    //         fall-through 到重力分支随水柱下沉（机制等价 MC 掉落物被瀑布带下；落入下方水池后转浮水）。
+    //     (b) **随流移动**（flow push）：仅流水格（state>0；水源 state=0 静止不推，spec）→ 据 4 向邻居
+    //         state 梯度推算「离源方向」（state 低于本格的邻居 = 近源 → 推力朝远离它），归一化后 ×
+    //         kItemFlowSpeed × dt 直接叠入水平位移（与 PlayerController t211 玩家水流推力同源算法）。
+    //         水平位移前查目标格 isCollidable（实体碰撞）→ 撞墙 / 撞半砖该轴不动（per-axis 试探让实体沿墙
+    //         滑动而非卡死）。浮水 + 瀑布均施（水柱底部漫流仍横向带）。
+    //     **关键修正（t271）**：t60 列扫用 World::isSolid（=非 air，含 Water）会让掉落物停在水面上当成地面；
+    //       改为 isSolid && blockAt != Water（水视作穿透，机制等价 t220「水不挡沙」），掉落物由此穿水面
+    //       入水 → 下帧中心格变 Water → 转浮水分支上浮（而非粘在水面当着地）。
+    //   分层（PLAN §2）：本层属 Entities/Game，向下只读 World（blockAt/stateAt/isSolid/isCollidable），
+    //     不依赖 Renderer/Physics/QtQuick3D。
     void tick(qreal dt, World *world);
 
 signals:
@@ -122,6 +141,17 @@ private:
     // 落地后实体中心相对支撑方块顶面的静止偏移（格）。图标 Model scale 0.3（半高 0.15）→ 中心高于顶面
     // 0.3 时图标底贴顶面 +0.15、留余量给浮动动画（bobY 0..0.15）不穿地；半透外壳 scale 0.45 略大无碍。
     static constexpr float kRestOffset = 0.3f;
+    // t271 水冲走掉落物（spec「item 掉落物入水→浮水面 + 随流移动」）常量：
+    //   kItemRiseSpeed：水中浮力上浮速度（blocks/s；恒速，机制等价 MC 掉落物水中缓浮——不取加速度模型
+    //     是为避免「深水→陡升→水面→急刹」的机械感，恒速上升视觉更接近 MC 静稳上浮）。
+    //   kItemFlowSpeed：流水水平推移速度（blocks/s；流水格 state>0 沿离源方向直接叠入水平位移）。比玩家
+    //     kWaterFlowPush（4.0，每 tick 叠入速度且玩家有移动阻尼）取小——掉落物无水平阻尼，直接积分位移，
+    //     小值保「被流走可见但不火箭」。
+    //   kItemFloatOffset：浮水静止时中心距水面（cell 顶）的下沉量（格）；留中心在水格内防 floor 抖出
+    //     空气 → 下一帧误判离水 → 重力回落的振荡（中心贴近水面、略没入水中，机制等价 MC 掉落物贴水面浮）。
+    static constexpr float kItemRiseSpeed   = 2.5f;
+    static constexpr float kItemFlowSpeed   = 2.0f;
+    static constexpr float kItemFloatOffset = 0.05f;
 };
 
 #endif // ITEMENTITYMANAGER_H

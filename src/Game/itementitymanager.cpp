@@ -1,8 +1,9 @@
 #include "itementitymanager.h"
-#include "world.h" // t60 tick 只读 World::isSolid（向下依赖；PLAN §2 Entities→World 合规）
+#include "world.h" // t60/t271 tick 只读 World::blockAt/stateAt/isSolid/isCollidable（向下依赖；PLAN §2 Entities→World 合规）
 
 #include <QLoggingCategory>
 #include <QtMath> // qFloor
+#include <cmath>  // t271 std::sqrt（流水梯度归一化）
 
 namespace {
 Q_LOGGING_CATEGORY(lcItem, "vo.item") // 模块化日志（PLAN §2-F）；未在 main.cpp 过滤，落 log 可见
@@ -93,14 +94,8 @@ bool ItemEntityManager::isPickupReady(int i) const
     return (m_clock.elapsed() - m_entities[size_t(i)].spawnMs) >= kPickupDelayMs;
 }
 
-// t60 掉落物重力（每帧由 PlayerController::tick 调）。对每个实体：
-//   1) 已 resting：复探支撑格（cellY = floor(pos.y) - 1，即静止中心下方那一格）仍实体 → 保持静止；
-//      否则（下方被挖空）解除 resting 续落（防悬空；机制等价 MC 掉落物在支撑消失后重新下落）。
-//   2) 未 resting：vy -= g*dt（钳 -kMaxFall），按 dy 下移；下移路径 [floor(newY), floor(pos.y)] 自顶向下
-//      扫实体所在列首个实体方块 → 命中则贴其顶面（solidCellY+1+kRestOffset）停下、vy=0、resting=true。
-//      越界（cy<0）查 world.isSolid 返 false（World 约定越界=空气）→ 不会误判「虚空地面」，实体继续落。
-//   3) pos / resting 任一真变 → dirty=true，末尾统一 bump revision + emit entitiesChanged（驱动 QML
-//      {revision; posAt(index)} 绑定重算；count 不变 → Repeater 不重建 delegate，动画连续）。
+// t60 掉落物重力 / t271 水冲走掉落物（每帧由 PlayerController::tick 调）。对每个实体先判中心格是否
+//   为 Water，分流「浮水 + 随流」与「空气重力」两条路径。详见 .h 头注（分层 / 机制 / 关键修正）。
 // 单帧最大下移 = kMaxFall*0.05 ≈ 3.9 格（dt 钳 50ms）→ 列扫 ≤4 格，cheap；≤200 实体全程 O(数百)。
 void ItemEntityManager::tick(qreal dt, World *world)
 {
@@ -109,13 +104,87 @@ void ItemEntityManager::tick(qreal dt, World *world)
     for (auto &e : m_entities) {
         const int cx = qFloor(e.pos.x());
         const int cz = qFloor(e.pos.z());
-        if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过（防 isSolid 越界误判）
+        if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过（防越界误判）
 
-        // 已落地：复探支撑格是否仍实体。失支撑 → 解除 resting 续落（防挖空后悬空）。
+        const int cy = qFloor(e.pos.y());
+        const bool inWater = (cy >= 0 && world->blockAt(cx, cy, cz) == BlockRegistry::Water);
+        // t271 瀑布：水格下方为空气 = 水柱下落 → 不上浮（随水柱下沉，落入下方水池后转浮水）。
+        const bool waterfall = inWater
+            && (cy - 1 < 0 || world->blockAt(cx, cy - 1, cz) == BlockRegistry::Air);
+
+        if (inWater) {
+            // 水中 → 非着地（浮 / 随水柱下沉，resting 恒 false）。
+            if (e.resting) { e.resting = false; dirty = true; }
+
+            // (a) 浮水面（非瀑布）：扫列向上找最顶水格（其上非水 = 水面），恒速上浮到水面。
+            if (!waterfall) {
+                int surfCellY = cy;
+                // blockAt 对 y>=height 返 0(空气) → 循环到世界顶自然停；128 为硬上限防异常长水柱。
+                for (int i = 0; i < 128; ++i) {
+                    if (world->blockAt(cx, surfCellY + 1, cz) != BlockRegistry::Water) break;
+                    ++surfCellY;
+                }
+                const float restY = float(surfCellY + 1) - kItemFloatOffset; // 中心贴水面、留水格内
+                if (e.pos.y() < restY - 1e-3f) {
+                    e.vy = kItemRiseSpeed; // 恒速上浮（机制等价 MC 掉落物水中缓浮）
+                    float newY = e.pos.y() + e.vy * float(dt);
+                    if (newY > restY) newY = restY; // 到水面钳住（防上冲出空气格→振荡）
+                    e.pos.setY(newY);
+                    if (newY >= restY - 1e-3f) e.vy = 0.0f; // 抵达水面 → 静止
+                    dirty = true;
+                } else if (e.vy != 0.0f || e.pos.y() != restY) {
+                    e.vy = 0.0f;     // 在水面：静止（呈现层 bobY 动画给视觉浮动，物理稳）
+                    e.pos.setY(restY);
+                    dirty = true;
+                }
+            }
+
+            // (b) 随流移动（浮水 + 瀑布均施）：流水 state>0 才推（水源 state=0 静止，spec）。
+            //   4 向邻居 state 梯度 → 离源方向（与 PlayerController t211 玩家水流推力同源算法）。
+            const quint8 cellState = world->stateAt(cx, cy, cz);
+            if (cellState > 0) {
+                float gx = 0.0f, gz = 0.0f;
+                constexpr int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                for (const auto &d : dirs) {
+                    const int nx = cx + d[0], nz = cz + d[1];
+                    if (world->blockAt(nx, cy, nz) == BlockRegistry::Water) {
+                        const quint8 ns = world->stateAt(nx, cy, nz);
+                        if (ns < cellState) { // 该邻居更近源 → 推力朝远离它（离源 = 高 state 远源方向）
+                            gx -= float(d[0]) * float(cellState - ns);
+                            gz -= float(d[1]) * float(cellState - ns);
+                        }
+                    }
+                }
+                const float glen = std::sqrt(gx * gx + gz * gz);
+                if (glen > 1e-4f) {
+                    const float dvx = (gx / glen) * kItemFlowSpeed * float(dt);
+                    const float dvz = (gz / glen) * kItemFlowSpeed * float(dt);
+                    // per-axis 试探 + isCollidable 查（撞墙 / 撞半砖该轴不动，沿墙滑动而非卡死）。
+                    float px = e.pos.x();
+                    float pz = e.pos.z();
+                    const float tryX = px + dvx;
+                    if (!world->isCollidable(qFloor(tryX), cy, cz)) px = tryX;
+                    const float tryZ = pz + dvz;
+                    if (!world->isCollidable(qFloor(px), cy, qFloor(tryZ))) pz = tryZ;
+                    if (px != e.pos.x() || pz != e.pos.z()) {
+                        e.pos.setX(px); e.pos.setZ(pz); dirty = true;
+                    }
+                }
+            }
+
+            if (!waterfall) continue; // 浮水已完整处理 → 跳过重力分支
+            // 瀑布：fall through 到重力分支（水穿透列扫 → 随水柱下沉）
+        }
+
+        // === 重力分支（空气 + 瀑布）：t60 原逻辑，列扫已修正「水穿透」 ===
+        // 已落地：复探支撑格（cellY = floor(pos.y) - 1，即静止中心下方那一格）。水不再算支撑
+        //   （isSolid && blockAt != Water）→ 水填满下方时解除 resting 续落 / 下帧转浮水分支。
         if (e.resting) {
             const int supportY = qFloor(e.pos.y()) - 1; // 静止中心下方那一格（= 支撑方块 cellY）
-            if (supportY >= 0 && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止
-            e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
+            // 三目两支统一为 quint8（blockAt 返回 quint8，false 支显式强转枚举避 -Wextra 枚举/非枚举混用告警）。
+            const quint8 sb = (supportY >= 0) ? world->blockAt(cx, supportY, cz) : quint8(BlockRegistry::Air);
+            if (sb != BlockRegistry::Water && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止
+            e.resting = false; // 支撑消失（被挖 / 被水填）→ 续落（vy 已 0，从静止重新加速）
             dirty = true;
         }
 
@@ -124,14 +193,17 @@ void ItemEntityManager::tick(qreal dt, World *world)
         if (e.vy < -kMaxFall) e.vy = -kMaxFall;
         const float newY = e.pos.y() + e.vy * float(dt);
 
-        // 下移路径自顶向下扫实体所在列，找首个实体方块（防大 dt 穿过薄层；lessons「子步防穿墙」精神）。
+        // 下移路径自顶向下扫实体所在列首个实体方块（防大 dt 穿过薄层；lessons「子步防穿墙」精神）。
+        //   t271 关键修正：水视作穿透（isSolid && blockAt != Water）→ 掉落物穿水面入水，下帧转浮水分支
+        //   （机制等价 t220「水不挡沙」），而非粘在水面当着地。
         const int topCell = qFloor(e.pos.y()); // 当前中心所在格（一般为空气）
         int botCell = qFloor(newY);
         if (botCell > topCell) botCell = topCell; // 防浮点噪声致 botCell>topCell（vy≈0 时 newY 微高于 pos.y）
         int solidCellY = -1;
-        for (int cy = topCell; cy >= botCell; --cy) {
-            if (cy < 0) break; // 越界下方=空气（World 约定）→ 不视作地面，实体继续落
-            if (world->isSolid(cx, cy, cz)) { solidCellY = cy; break; }
+        for (int scy = topCell; scy >= botCell; --scy) {
+            if (scy < 0) break; // 越界下方=空气（World 约定）→ 不视作地面，实体继续落
+            const quint8 b = world->blockAt(cx, scy, cz);
+            if (b != BlockRegistry::Water && world->isSolid(cx, scy, cz)) { solidCellY = scy; break; }
         }
 
         if (solidCellY >= 0) {
