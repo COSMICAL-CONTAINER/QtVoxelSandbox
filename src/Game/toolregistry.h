@@ -24,11 +24,14 @@
 //   每实例独立耐久；背包内搬运经 setStack 显式传 durability 保真，见 hotbar.h）。
 //   maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 的镐 / 锄 / 剑 / 斧 / 铲共享）。
 //
-// 挖掘模型（spec t33，机制等价 MC 1.0；硬度 / 采掘要求走 BlockRegistry::BlockDef）：
+// 挖掘模型（spec t33 + t265 工具速度效果，机制等价 MC 1.0；硬度 / 工具类型 / 掉落门槛走 BlockRegistry::BlockDef）：
 //   - 挖掘耗时 = hardness / speedMul（秒）。
-//   - speedMul：空手 / 不匹配工具 = 1；匹配工具类型 AND tier >= minToolTier → 按 tier 倍率（2/4/6）。
-//   - 掉落判定（canHarvest）：方块不需工具 → 恒掉落；需工具 → 须持匹配类型 AND tier >= minToolTier，
-//     否则破后仅 AIR（t35 不发掉落实体）。spec：「不匹配 / 等级不够 → 慢且不掉落，仅 AIR」。
+//   - speedMul（t265）：空手 / 类型不匹配 = 1（基准速）；匹配工具类型 → 按 tier 倍率（2/4/6）。
+//     **掉落门槛（requiresTool）与速度解耦**：requiresTool=true 的方块（石类）须 tier>=minToolTier 才给速度加成
+//     且才掉落；requiresTool=false 的方块（木 / 土 / 沙类）任意等级的正确类型工具均给速度加成，且空手也掉落。
+//   - 掉落判定（canHarvest，t265 重构）：requiresTool=false → 恒掉落（空手可采）；requiresTool=true → 须持匹配
+//     类型 AND tier >= minToolTier，否则破后仅 AIR（t35 不发掉落实体）。spec：「不匹配 / 等级不够 → 慢且不掉落，仅 AIR」
+//     （仅对 requiresTool=true 的石类方块；木 / 土 / 沙空手慢挖仍掉落）。
 //   - 可挖判定（canMine）：实体方块且 hardness > 0（air / 越界 / 基岩=false）。
 //
 // 锄（type=Hoe）特殊语义：本工程**无任何方块的 toolType 取 Hoe**（耕地是非方块交互、走 useBlock，
@@ -44,6 +47,10 @@
 class ToolRegistry
 {
 public:
+    // t265 徒手 / 非武器工具攻击伤害（HP；MC 1.0 fist=1HP=半心）。剑走 attackDamage() 返 tier 倍率（4/5/6），
+    //   其余（空手 / 镐 / 斧 / 铲 / 锄）统一本值。attackMob 据本值 ×暴击算最终伤害。
+    static constexpr int kFistDamage = 1;
+
     // 工具物品 id（与 Hotbar::ItemStack 的工具段对齐）。工具段基址 0x100，与方块段（0..8）隔开，
     // 防 quint8 截断别名（工具 id > 255 不会与任何方块 id 混淆）。新增工具按序追加并同步 ToolCount。
     // t264 完整工具集：5 类（镐 / 锄 / 斧 / 铲 / 剑）× 3 档（木 / 石 / 铁）= 15 件，机制等价 MC 1.0 工具集。
@@ -86,8 +93,10 @@ public:
     static const ToolDef *tool(int itemId);
 
     // 挖掘速度倍率（spec：挖掘速度 = hardness / speedMul；硬度走 BlockRegistry::BlockDef）。
-    //   空手 / 非工具 / 类型不匹配 / 等级不够 → 1.0（=「慢」基准）；
-    //   匹配工具类型 AND tier >= minToolTier → tool.speedMul。
+    //   空手 / 非工具 / 类型不匹配 → 1.0（基准速）；
+    //   匹配工具类型 → tool.speedMul（tier 倍率 2/4/6）。t265：requiresTool=true 的方块（石类）额外要求
+    //   tier>=minToolTier 才给加成（等级不够 = 慢，spec「等级不够 → 慢」）；requiresTool=false 的方块（木 / 土 / 沙）
+    //   任意等级正确类型均给加成。
     static float miningSpeedMul(quint8 blockId, int itemId);
 
     // 挖掘耗时（秒）= hardness / miningSpeedMul，地板 0.05s（防空手秒破致 t34 进度抖动 / 除零）。
@@ -95,9 +104,16 @@ public:
     static float miningTime(quint8 blockId, int itemId);
 
     // 是否采掘掉落（破块后是否产出物品实体，供 t35 判定；掉落 id / 数量走 BlockRegistry::BlockDef）。
-    //   方块不需工具（toolType=NoTool）→ 恒 true（空手可采且掉落）；
-    //   需工具 → 须持匹配类型 AND tier >= minToolTier，否则 false（破后仅 AIR，不掉落）。
+    //   t265：requiresTool=false（木 / 土 / 沙类）→ 恒 true（空手可采且掉落，速度受工具影响但产物不依赖工具）；
+    //   requiresTool=true（石类）→ 须持匹配类型 AND tier >= minToolTier，否则 false（破后仅 AIR，不掉落）。
     static bool canHarvest(quint8 blockId, int itemId);
+
+    // t265 持物品攻击伤害（HP；spec「剑→加攻击伤害」）。机制等价 MC 1.0 武器伤害：
+    //   - 剑（type=Sword）：tier 倍率 —— 木 4 / 石 5 / 铁 6（MC 1.0 sword damage）。
+    //   - 其它（空手 / 镐 / 斧 / 铲 / 锄）：kFistDamage=1（MC 1.0 徒手 / 非武器工具伤害，剑是唯一武器）。
+    //   暴击（玩家滞空下落挥击）由 caller 按 base*3/2 算（attackMob）；本方法只返基础伤害。
+    //   非工具 / 越界 → kFistDamage（空手兜底）。玩家可用工具段 id 查（hotbar.selectedItemId）。
+    static int attackDamage(int itemId);
 
     // 方块是否可挖（spec t42）：实存方块（非 air / 非越界）且 hardness >= 0。
     //   - hardness == 0 → 瞬破可挖（如火把 t88）；

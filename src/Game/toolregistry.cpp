@@ -14,7 +14,8 @@ namespace {
 // type 字段为 BlockRegistry::ToolType（枚举归 Core；与 BlockDef.toolType 同源）。
 constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     // maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 镐 / 锄 / 斧 / 铲 / 剑共享；spec t263「木头耐久度最低以此类推」）。
-    // speedMul：镐 / 斧 / 铲取 MC 1.0 同 tier 倍率（木 2 / 石 4 / 铁 6）—— 匹配方块 toolType 后激活加速；
+    // speedMul：镐 / 斧 / 铲取 MC 1.0 同 tier 倍率（木 2 / 石 4 / 铁 6）—— 匹配方块 toolType 后激活加速。
+    //   t265：铁档（6）有意低于未来金（12）/ 钻石（8）档，留头部空间（spec「铁镐削弱，留金/钻石档空间」）；
     //   锄 / 剑恒 1.0（锄专用耕地不挖、剑是武器不挖，二者无方块的 toolType 取它们 → miningSpeedMul 恒返 1.0 等同空手）。
     /* PickaxeWood  */ {int(BlockRegistry::Pickaxe), 1, 2.0f,   59, "pickaxe_wood",  "木镐"},
     /* PickaxeStone */ {int(BlockRegistry::Pickaxe), 2, 4.0f,  131, "pickaxe_stone", "石镐"},
@@ -65,14 +66,17 @@ bool ToolRegistry::canMine(quint8 blockId)
 float ToolRegistry::miningSpeedMul(quint8 blockId, int itemId)
 {
     const int harvestTool = BlockRegistry::toolType(blockId);
-    // 不需工具的方块：任何手持物均无加成（本工程无铲 / 斧 → 持镐挖土同空手，MC 一致）。
+    // 无有效工具的方块（air/leaves/torch/...）：任何手持物均无加成（基准速 1.0）。
     if (harvestTool == BlockRegistry::NoTool) return 1.0f;
-    // 需工具：查手持物是否匹配类型且等级达标（spec：匹配 type AND tier>=minToolTier → 按 tier 倍率）。
+    // 查手持物是否匹配类型（斧 / 铲 / 镐）。
     const ToolDef *t = tool(itemId);
-    if (!t) return 1.0f;                                          // 空手 / 非工具 → 无加成（慢）
-    if (t->type != harvestTool) return 1.0f;                      // 工具类型不匹配 → 无加成（慢）
-    if (t->tier < BlockRegistry::minToolTier(blockId)) return 1.0f; // 等级不够 → 无加成（慢，spec「不匹配 / 等级不够 → 慢」）
-    return t->speedMul;                                           // 匹配且达标 → tier 倍率
+    if (!t) return 1.0f;                       // 空手 / 非工具 → 无加成（慢）
+    if (t->type != harvestTool) return 1.0f;   // 工具类型不匹配 → 无加成（慢）
+    // t265：requiresTool=true 的方块（石类）额外要求 tier>=minToolTier 才给速度加成（等级不够 = 慢）；
+    //   requiresTool=false 的方块（木 / 土 / 沙类）任意等级正确类型均给加成（空手也掉落、仅速度受工具影响）。
+    if (BlockRegistry::requiresTool(blockId)
+        && t->tier < BlockRegistry::minToolTier(blockId)) return 1.0f;
+    return t->speedMul;                        // 匹配（且达标）→ tier 倍率
 }
 
 float ToolRegistry::miningTime(quint8 blockId, int itemId)
@@ -89,11 +93,34 @@ float ToolRegistry::miningTime(quint8 blockId, int itemId)
 
 bool ToolRegistry::canHarvest(quint8 blockId, int itemId)
 {
+    // t265：掉落门槛走 requiresTool（与 toolType 速度加成解耦）。
+    //   requiresTool=false（木 / 土 / 沙类）→ 空手可采且掉落（速度受工具影响，但产物不依赖工具）；
+    //   requiresTool=true（石类）→ 须持匹配工具类型 AND tier>=minToolTier 才掉落。
+    if (!BlockRegistry::requiresTool(blockId)) return true; // 不需工具 → 恒掉落
     const int harvestTool = BlockRegistry::toolType(blockId);
-    if (harvestTool == BlockRegistry::NoTool) return true; // 空手可采 → 恒掉落
     const ToolDef *t = tool(itemId);
     if (!t) return false;                      // 需工具但空手 → 不掉落（spec：仅 AIR）
     return t->type == harvestTool && t->tier >= BlockRegistry::minToolTier(blockId); // 类型 + 等级双达标才掉落
+}
+
+// t265 持物品攻击伤害（spec「剑→加攻击伤害」，机制等价 MC 1.0 武器伤害）。
+//   剑（type=Sword）：tier 倍率 —— 木 4 / 石 5 / 铁 6（MC 1.0 sword damage；每档 +1，留金 / 钻石档空间）。
+//   其它（空手 / 镐 / 斧 / 铲 / 锄）：kFistDamage=1（MC 1.0 徒手伤害；剑是唯一武器，余工具不擅长攻击）。
+//   暴击由 caller（attackMob）按 base*3/2 算，本方法只返基础伤害。
+int ToolRegistry::attackDamage(int itemId)
+{
+    const ToolDef *t = tool(itemId);
+    if (!t) return kFistDamage; // 空手 / 非工具 → 徒手伤害
+    if (t->type == int(BlockRegistry::Sword)) {
+        // MC 1.0 剑伤害：木 4 / 石 5 / 铁 6（HP；1HP=半心）。每档 +1 留金(未来 12 速度档可更高伤害)/钻石档空间。
+        switch (t->tier) {
+        case 1: return 4; // 木剑（2 心）
+        case 2: return 5; // 石剑（2.5 心）
+        case 3: return 6; // 铁剑（3 心）
+        default: return 4; // 防御：未知 tier 兜底木剑
+        }
+    }
+    return kFistDamage; // 镐 / 斧 / 铲 / 锄：徒手伤害（非武器，MC 工具攻击伤害低，本工程统一=徒手）
 }
 
 QString ToolRegistry::displayName(int itemId)

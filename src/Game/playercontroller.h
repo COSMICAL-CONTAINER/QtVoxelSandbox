@@ -410,7 +410,7 @@ signals:
     //   受击声 mob_hurt.wav，替代旧复用 hurt.wav 的玩家受伤声——spec「受击音换专属 mob 受伤声」）。
     //   同 swingArm / blockBroken 模式：Game/Physics 层发语义事件，呈现 / 音频层只消费（PLAN §2 分层）。
     //   t249 crit=true 表示本次为暴击（玩家跳劈下落中命中）：呈现层可据此播放更强的受击音 / 暴击粒子
-    //   （spec 仅要求 +50% 伤害已由 kCritDamage 落地；反馈音 / 视觉属可选增强，留 hook）。
+    //   （spec 仅要求 +50% 伤害已由 attackMob 内 baseDmg*3/2 落地；反馈音 / 视觉属可选增强，留 hook）。
     void mobAttacked(bool crit);
 
 protected:
@@ -506,8 +506,8 @@ private:
     //   链）；TallGrass / WheatCrop 非 solid 且不作他物支撑 → 单趟向上扫即足够（无级联，破一块不会链式
     //   掉一串）。掉落产出与玩家破块同源（dropCropDrops 共用，成熟小麦失撑仍掉小麦 + 种子）。
     void dropUnsupportedCropsAround(int x, int y, int z);
-    // t242 攻击 mob（spec「玩家左键攻击生物」）：damageEntity(entityIndex, kAttackDamage) + swingArm +
-    //   emit mobAttacked。伤害量对齐 MC 1.0 玩家空手 / 工具攻击 = 4 HP（2 心）；工具加成（剑等）属 Phase 1.1。
+    // t242 攻击 mob（spec「玩家左键攻击生物」）：damageEntity(entityIndex, dmg) + swingArm +
+    //   emit mobAttacked。t265 伤害改走 ToolRegistry::attackDamage(手持物)（剑木4/石5/铁6、空手/工具=1 HP）。
     //   由 beginMining 在 mob 优先于方块时调。mob 由 caller 选定（findMobHit 已返最近活体索引）。
     //   EntityManager.damageEntity 内已做边界 / dead / 非 Mob 守卫 + bump revision + emit mobDied（死亡掉落）。
     void attackMob(int entityIndex);
@@ -726,14 +726,13 @@ private:
     static constexpr float kDeg = 0.017453292519943295f;
     static constexpr float kReach = 5.0f;      // 射线选体射程（格）
     static constexpr float kPickupDist = 1.5f; // 拾取距离阈值（格；玩家 AABB 中心起算，spec ~1.2 量级）
-    // t242 玩家攻击 mob 单次伤害（HP）。机制等价 MC 1.0 玩家攻击 = 4 HP（2 心）：5 心的猪 / 牛 / 羊需 3 击杀。
-    //   工具 / 剑加成属 Phase 1.1；本任务全模式空手攻击同伤害（创造亦走此伤害，但创造可瞬破方块优先 →
-    //   实际打 mob 走 findMobHit 同路径）。Survival 限定非必要（攻击不影响 Survival 平衡，spec 未限定模式）。
-    static constexpr int kAttackDamage = 4;
-    // t249 暴击伤害（spec「跳劈暴击 +50% 伤害，research MC crit」）。机制等价 MC 1.0 critical hit：
-    //   base × 1.5 向下取整（integer base*3/2）。base=4 → 6 HP（3 心）。暴击触发条件见 attackMob（玩家滞空
-    //   下落时挥击）。工具 / 剑的暴击加成属 Phase 1.1（届时本常量改为据工具算）；本任务空手暴击固定 6。
-    static constexpr int kCritDamage = kAttackDamage * 3 / 2; // = 6（base 4 × 1.5 向下取整）
+    // t265 玩家攻击伤害改走 ToolRegistry::attackDamage（手持物驱动）。机制等价 MC 1.0：
+    //   - 剑（type=Sword）：木 4 / 石 5 / 铁 6 HP（每档 +1）；
+    //   - 空手 / 镐 / 斧 / 铲 / 锄：ToolRegistry::kFistDamage=1 HP（MC 1.0 徒手）。
+    //   旧 t242 固定 kAttackDamage=4（不分工具）已由 t265 替换为按手持物查表（spec「剑→加攻击伤害」）。
+    //   创造模式亦走此伤害（但创造可瞬破方块优先 → 实际打 mob 走 findMobHit 同路径）。
+    // t265 剑攻击消耗耐久（机制等价 MC「剑每次命中 -1 耐久」）：attackMob 命中后 Survival 模式调
+    //   hotbar.damageSelectedItem（对非工具 / 空手静默 no-op；耐久归零自动清槽）。
     // t248 攻击冷却（秒）：mob 受击后 0.5s 内同玩家对其的伤害被压制（attackMob 早退、不扣血 / 不发信号）。
     //   修「1 击即死」根因：survival 长按左键时 updateMining 续挖分支会每 tick 重调 beginMining → 攻击分支
     //   每帧打一下 mob（mob 后方射程内有方块即触发），10HP/4dmg=3 击在 ~50ms 内打完 = 体感瞬秒。冷却把

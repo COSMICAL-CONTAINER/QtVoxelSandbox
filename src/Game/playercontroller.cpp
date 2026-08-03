@@ -792,7 +792,8 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
 
 // t242 攻击 mob（spec「玩家左键攻击生物→受伤音效 + 身体红闪 + 扣血」）：damageEntity 扣血 + 设
 //   hurtFlash（EntityManager 内已驱动 QML 红闪绑定刷新）+ swingArm（挥臂反馈）+ emit mobAttacked（→
-//   呈现层 playMobHurt，t248 专属 mob 受击声，非玩家 hurt）。伤害 kAttackDamage=4（MC 1.0 玩家攻击 2 心）。
+//   呈现层 playMobHurt，t248 专属 mob 受击声，非玩家 hurt）。
+//   t265 伤害改走 ToolRegistry::attackDamage(手持物)：剑木4/石5/铁6、空手与其它工具=kFistDamage(1)。
 //   mob health≤0 时 damageEntity 内 emit mobDied → Main.qml Connections 据.mobType 转发到
 //   ItemEntityManager.spawnItem 生成猪排 / 皮革 / 牛肉 / 羊毛掉落。索引由 caller findMobHit 选定（最近活体）；
 //   二次边界 / dead / 非 Mob 守卫在 damageEntity 内。无 entityManager 时 caller 已早退不会到此处（防御）。
@@ -800,10 +801,11 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
 //   每帧重触 beginMining → mob 瞬秒」——cooldown 把长按连击压成每 0.5s 一次伤害。单次 click 边沿（press）
 //   首击 cooldown=0 总生效；后续 tick 在冷却内被吞。成功命中后置 kAttackCooldown。
 // t249 暴击 + 击退（spec「受击往攻击方向小跳击退；玩家跳起攻击=暴击 +50% 伤害，research MC crit」）：
-//   - 暴击判定（机制等价 MC 1.0 crit）：玩家「滞空下落」态（!onGround && m_vel.y()<0）→ dmg=kCritDamage(6)，
-//     否则 kAttackDamage(4)。MC 1.0 crit 精确条件 = falling（向下速度）&& !onGround && 不在梯子 / 水；
-//     本工程无梯子、水中减速但不下落 → 近似为「滞空下落」即可（spec「research MC crit 计算」）。注意：起跳
-//     上升期（vy>0）与地面（onGround）都**不**算暴击 —— 须「跳起后下落途中挥击」才触发，对齐 MC 手感。
+//   - 暴击判定（机制等价 MC 1.0 crit）：玩家「滞空下落」态（!onGround && m_vel.y()<0）→ dmg=baseDmg*3/2，
+//     否则 baseDmg（baseDmg=ToolRegistry::attackDamage(手持物)）。MC 1.0 crit 精确条件 = falling（向下速度）
+//     && !onGround && 不在梯子 / 水；本工程无梯子、水中减速但不下落 → 近似为「滞空下落」即可（spec「research
+//     MC crit 计算」）。注意：起跳上升期（vy>0）与地面（onGround）都**不**算暴击 —— 须「跳起后下落途中挥击」
+//     才触发，对齐 MC 手感。
 //   - 击退方向（spec「往攻击方向」= 玩家→mob 水平方向）：取两 XZ 中心差；重合（玩家骑在 mob 上）→ 用视线
 //     水平方向兜底。EntityManager.knockback 内再归一 + 零向量防御。knockback 给 mob 水平冲量 + 小跳垂直冲量。
 //   damageEntity 先于 knockback：若本次为击杀（health→0→dead），knockback 内 dead 守卫早退（尸体不弹，
@@ -814,7 +816,12 @@ void PlayerController::attackMob(int entityIndex)
     if (m_attackCooldown > 0.0f) return; // t248 冷却内不扣血（连击 / 长按续触被吞）
     // t249 暴击判定：滞空（!onGround）且下落（vy<0）→ +50% 伤害。
     const bool crit = (!m_onGround && m_vel.y() < 0.0f);
-    const int dmg = crit ? kCritDamage : kAttackDamage;
+    // t265 攻击伤害按手持物查表（spec「剑→加攻击伤害」）：剑 tier 倍率（木4/石5/铁6），余 = kFistDamage(1)。
+    //   旧 t242 固定 kAttackDamage=4 已替换为 ToolRegistry::attackDamage（机制等价 MC 1.0 武器 vs 徒手）。
+    //   直读 hotbar.selectedItemId（单一权威，同 updateMining 持物判定，免 QML 绑定滞后窗口）；无 hotbar → 0=空手。
+    const int heldItemId = m_hotbar ? m_hotbar->selectedItemId() : 0;
+    const int baseDmg = ToolRegistry::attackDamage(heldItemId);
+    const int dmg = crit ? baseDmg * 3 / 2 : baseDmg; // 暴击 = base × 1.5 向下取整（同旧 kCritDamage 公式）
     // t249 击退方向：玩家脚底 → mob 中心 的水平向量（未归一，knockback 内归一）。
     const QVector3D mobPos = m_entityManager->posAt(entityIndex);
     float kbx = mobPos.x() - m_pos.x();
@@ -829,6 +836,9 @@ void PlayerController::attackMob(int entityIndex)
     m_entityManager->knockback(entityIndex, kbx, kbz);
     emit swingArm();
     emit mobAttacked(crit);
+    // t265 剑 / 工具攻击消耗耐久（机制等价 MC「工具每次命中 mob -1 耐久」）。仅 Survival（创造无限源不消耗）；
+    //   damageSelectedItem 对空手 / 非工具静默 no-op，耐久归零自动清槽（工具破损消失）。同 finishMiningAt 的耐久消耗模式。
+    if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem();
     m_attackCooldown = kAttackCooldown;
 }
 

@@ -191,24 +191,25 @@ public:
         NegZ   = 5,
     };
 
-    // 工具类型（决定能采掘哪类方块；BlockDef.toolType 与 ToolRegistry::ToolDef.type 共用同一枚举）。
-    // 放 Core 层是因为它属「方块的采掘属性」。当前 5 档：镐（采掘石类）/ 斧（伐木）/ 铲（掘土沙）/
+    // 工具类型（决定哪类工具给方块挖掘**速度加成**；BlockDef.toolType 与 ToolRegistry::ToolDef.type 共用同一枚举）。
+    // 放 Core 层是因为它属「方块的采掘属性」。当前 5 档：镐（石类）/ 斧（木类）/ 铲（土沙草类）/
     // 剑（攻击，不参与挖掘速度）/ 锄（专用耕地，不参与挖掘）。机制等价 MC 1.0 工具类型分流。
+    // **toolType 只决定速度加成，掉落是否依赖工具看 BlockDef.requiresTool**（t265 解耦）：木 / 土 / 沙类
+    //   方块 toolType=Axe/Shovel 但 requiresTool=false → 空手仍掉落、仅速度无加成；石类 toolType=Pickaxe
+    //   且 requiresTool=true → 空手不掉落且无加成。
     enum ToolType : int {
-        NoTool  = 0, // 空手可采且掉落
-        Pickaxe = 1, // 镐：采掘石类方块（stone / cobble / 矿石）
+        NoTool  = 0, // 无有效工具：任何手持物均无速度加成（基准速 1.0）；空手可采且掉落
+        Pickaxe = 1, // 镐：石类方块加速（stone / cobble / furnace / coal_ore / iron_ore；requiresTool=true 需镐才掉落）
         Hoe     = 2, // 锄：专用耕地（右键草/泥土→耕地，机制留后续任务）。**不参与挖掘速度**——
                      //   本工程无任何方块的 BlockDef.toolType 取 Hoe（耕地是非方块语义、走 useBlock 交互，
                      //   非「采掘所需工具」），故 ToolRegistry::miningSpeedMul 对持锄挖任何方块恒返 1.0
                      //   （等同空手），机制等价 MC 1.0「锄不影响挖掘」。
-        Axe     = 3, // 斧：伐木类方块加速（原木 / 木板 / 工作台 / 箱 / 木台阶等）。t264 注册工具物品；
-                     //   方块 toolType → Axe 的映射归 t265（materialGroup×tool 速度表）落实。当前无方块
-                     //   取 Axe → 持斧挖任何方块 miningSpeedMul 恒 1.0（等同空手），t265 把木类方块 toolType
-                     //   改 Axe 后激活加速。
-        Shovel  = 4, // 铲：掘土沙类方块加速（沙 / 土 / 草 / 砾等）。同 Axe：t264 注册工具，t265 落实方块
-                     //   toolType → Shovel 映射后激活加速。当前无方块取 Shovel → 持铲挖任何方块同空手。
-        Sword   = 5, // 剑：攻击伤害加成（t265 落实剑攻击），**不参与挖掘速度**——本工程无任何方块的
-                     //   toolType 取 Sword（剑是武器、非采掘工具），miningSpeedMul 恒 1.0（等同空手）。
+        Axe     = 3, // 斧：木类方块加速（原木 / 木板 / 工作台 / 箱 / 木台阶 / 楼梯 / 栅栏 / 压力板 / 门 / 活版门；
+                     //   requiresTool=false → 空手也掉落，仅速度受斧影响）。t265 落实方块 toolType→Axe 映射。
+        Shovel  = 4, // 铲：土沙草类方块加速（沙 / 泥土 / 草方块 / 耕地；requiresTool=false → 空手也掉落）。
+                     //   t265 落实方块 toolType→Shovel 映射。砾（gravel）方块待后续追加。
+        Sword   = 5, // 剑：攻击伤害加成（ToolRegistry::attackDamage，t265 落实），**不参与挖掘速度**——
+                     //   本工程无任何方块的 toolType 取 Sword（剑是武器、非采掘工具），miningSpeedMul 恒 1.0。
                      //   机制等价 MC 1.0「剑不加速挖掘（蛛网除外），其价值在攻击伤害」。
     };
 
@@ -269,8 +270,14 @@ public:
                              //   被误剔出洞）。**碰撞**改走 shape（solid=false 的不完整方块仍有碰撞 sub-AABB）。
         Shape shape;         // t146 碰撞/选中形状（Shape 枚举）。决定 collisionAABBs/selectionAABBs。
         float hardness;      // 基础硬度（挖掘耗时基准；<=0 → 不可挖掘，canMine=false）
-        int toolType;        // 采掘所需工具类型（ToolType；NoTool=空手可采且掉落）
-        int minToolTier;     // 采掘所需最低工具等级（toolType=NoTool 时忽略，恒 0）
+        int toolType;        // 「有效工具」类型（ToolType；决定哪类工具给挖掘**速度加成**，t265：斧→木 / 铲→土沙草 / 镐→石）。
+                             //   NoTool=无任何工具给加成（空手即基准速）。**与 requiresTool 正交**：toolType 只管速度，
+                             //   能否掉落看 requiresTool（木 / 土 / 沙虽 toolType=Axe/Shovel 但 requiresTool=false → 空手仍掉落）。
+        int minToolTier;     // 采掘所需最低工具等级（仅 requiresTool=true 时才作「掉落 + 速度」的等级门槛；
+                             //   requiresTool=false 时忽略，任意等级的正确类型工具均给速度加成）
+        bool requiresTool;   // t265 「掉落是否需要匹配工具」：true=必须持 toolType 且 tier>=minToolTier 才掉落
+                             //   （石 / 圆石 / 矿石 / 熔炉等石类）；false=空手也掉落（木 / 土 / 沙 / 草 —— 速度受工具
+                             //   影响，但产物不依赖工具，机制等价 MC 1.0「不需工具方块空手可采且掉落」）。
         int dropId;          // 破坏后掉落物品 id（<=0 → 不掉落；stone→cobble 等「冶炼转化」在此表达）
         int dropCount;       // 掉落数量（生存破块产出物品实体数；创造秒破不掉落，由 caller 判）
         int maxStack;        // 单栈最大堆叠（Hotbar / 背包上限；air=0；工具段另走 ToolRegistry，恒 1）
@@ -410,8 +417,9 @@ public:
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度
-    static int toolType(quint8 blockId);      // 采掘所需工具类型（ToolType）
-    static int minToolTier(quint8 blockId);   // 最低工具等级
+    static int toolType(quint8 blockId);      // 有效工具类型（ToolType；给挖掘速度加成的工具类）
+    static int minToolTier(quint8 blockId);   // 最低工具等级（仅 requiresTool=true 时作门槛）
+    static bool requiresTool(quint8 blockId); // t265 掉落是否需要匹配工具（true=石类需镐才掉；false=木土沙空手也掉）
     static int dropId(quint8 blockId);        // 破坏后掉落物品 id（<=0=不掉落）
     static int dropCount(quint8 blockId);     // 掉落数量
     static int maxStack(quint8 blockId);      // 单栈最大堆叠
