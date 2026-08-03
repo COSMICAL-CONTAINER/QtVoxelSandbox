@@ -30,10 +30,15 @@
   28 tall_grass（t235 草丛 cross 贴图：green 草叶 + alpha 透明底。TallGrass 方块各面 = 本 tile；mesher 走 cross
      几何段（PartialBlockGeometry pushCross 双面双对角 quad），chunk 地形材质 alphaCutoff:0.5 cutout 透明底。
      tools/build_tall_grass.py 程序生成原创像素图，§9 override (a)。）
+  29..36 wheat_stage_0..7（t236 小麦作物 8 个生长阶段贴图：cross 几何段，alpha 透明底 cutout。WheatCrop 方块 def
+     各面 = 29（基底阶段 0），mesher 在 PartialBlockGeometry::append 的 WheatCrop case 内据 chunk state 选
+     tile = 29 + stage（0=嫩芽 → 5=满高绿叶 → 6/7=顶部抽金黄麦穗成熟）。阶段贴图选择是 mesher 呈现层据 state
+     决定，非方块属性（同 Water 流水贴图模式）。tools/build_wheat.py 程序生成原创像素图，§9 override (a)。）
 （CC0 资产，来源见 docs/PLAN.md §L 资产管线；工作台贴图由 tools/build_crafting_table.py、
  熔炉贴图由 tools/build_furnace.py、矿石贴图由 tools/build_ore.py、火把贴图由 tools/build_torch.py、
  基岩贴图由 tools/build_bedrock.py、水贴图由 tools/build_water.py、箱子贴图由 tools/build_chest.py、
- 流水贴图由 tools/build_water_flow.py、草丛贴图由 tools/build_tall_grass.py 程序生成原创像素图，§9 override (a)。）
+ 流水贴图由 tools/build_water_flow.py、草丛贴图由 tools/build_tall_grass.py、小麦作物贴图由
+ tools/build_wheat.py 程序生成原创像素图，§9 override (a)。）
 """
 import os
 from PIL import Image
@@ -70,6 +75,14 @@ TILES = [
     "default_farmland_dry",         # 26 farmland_dry（t234 耕地顶面干态；浅色翻耕干土 + 纵向犁沟纹；tools/build_farmland.py 程序生成原创像素图）
     "default_farmland_wet",         # 27 farmland_wet（t234 耕地顶面湿态；深色湿润翻耕土 + 同犁沟纹；mesher 据 Farmland state bit0 选 26(干)/27(湿)）
     "default_tall_grass",           # 28 tall_grass（t235 草丛 cross 贴图；green 草叶 + alpha 透明底；mesher 走 cross 几何段 + alphaCutoff cutout；tools/build_tall_grass.py 程序生成原创像素图）
+    "default_wheat_stage_0",        # 29 wheat_stage_0（t236 小麦作物阶段 0 = 刚种嫩芽；mesher 在 cross 几何段据 state 选 29..36）
+    "default_wheat_stage_1",        # 30 wheat_stage_1
+    "default_wheat_stage_2",        # 31 wheat_stage_2
+    "default_wheat_stage_3",        # 32 wheat_stage_3
+    "default_wheat_stage_4",        # 33 wheat_stage_4
+    "default_wheat_stage_5",        # 34 wheat_stage_5（满高绿叶）
+    "default_wheat_stage_6",        # 35 wheat_stage_6（顶部初抽金黄麦穗）
+    "default_wheat_stage_7",        # 36 wheat_stage_7（成熟：穗更密、全金黄）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

@@ -1,5 +1,6 @@
 #include "partialblockgeometry.h"
 
+#include <algorithm> // std::min（WheatCrop stage clamp）
 #include <cmath> // std::sqrt（pushCrossQuad 法线归一化）
 
 // t134 不完整方块异形几何：为 6 类木制半方块（WoodSlab/WoodStairs/WoodFence/WoodPressurePlate/
@@ -281,6 +282,23 @@ int PartialBlockGeometry::append(
         pushCrossQuad(verts, idx, lx, ly, lz,
                       1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
                       tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
+    case BlockRegistry::WheatCrop: {
+        // t236 小麦作物 cross 模型：与 TallGrass 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
+        //   机制等价 MC 1.0 小麦作物（wheat crop）—— cross 模型上贴「当前生长阶段」对应的贴图：
+        //   state = 阶段 0..7（0=刚种嫩芽、7=成熟金黄麦穗），mesher 在此据 state 选 tile = 基底(wheat_stage_0=29) + stage。
+        //   **每阶段不同贴图**（spec「每阶段不同贴图」）—— 阶段贴图本身编码生长（嫩芽→拔高→抽穗→金黄），cross 几何
+        //   满格高不变（同 MC：作物模型尺寸不变、贴图的透明像素表达「未长到的部分」）。stage 越界（state>max，不应出现）
+        //   clamp 到 WheatCropStageMax 防读图集越界。不做邻居剔除（cross 透明 + 作物，同 TallGrass；WheatCrop solid=false）。
+        const int stage = std::min(int(state), int(BlockRegistry::WheatCropStageMax));
+        const int wheatTile = tile + stage; // tile = 基底 wheat_stage_0(29)；wheatTile = 29..36（阶段 0..7）
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      wheatTile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      wheatTile, light, tileW, hx, hy, v0, v1);
         break;
     }
     default:

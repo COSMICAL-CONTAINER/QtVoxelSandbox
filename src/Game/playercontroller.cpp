@@ -929,6 +929,26 @@ void PlayerController::placeBlock()
             return; // 锄（耕地成功 / 命中非可耕地 / 未命中）均不再走方块放置路径
         }
     }
+    // t236 小麦种子种植（spec「种子右键耕地→种小麦作物」）：手持种子（SeedId，材料段非方块）右键命中耕地 →
+    //   在耕地正上方空气格种小麦作物（WheatCrop，state=阶段 0 刚种）。机制等价 MC 1.0 种植。种子非方块 →
+    //   selectedBlock 经 hotbar 归 Air，须在下方 `m_selectedBlock == Air` 守卫之前分流（同桶 / 锄分支模式）。
+    //   命中非耕地（如石头 / 草 / 已有作物）→ 不种不挥（机制等价 MC 种子只能种在耕地）。spectator 已被入口
+    //   canPlace() 守卫拦截；Creative / Survival 均可种。生存消耗 1 种子（创造不耗 → 无限种）。
+    //   分层（PLAN §2）：种植属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM），不改 setBlock 语义。
+    if (m_hotbar && m_world && heldItemId == RecipeRegistry::SeedId) {
+        if (m_hasHit && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Farmland) {
+            const int wx = m_hitBx, wy = m_hitBy + 1, wz = m_hitBz; // 小麦种在耕地正上方一格
+            // 目标须在界内 + 为空气（不覆盖实体 / 已种作物 / 草丛）。越界 setBlock 静默返 false → 提前挡防误耗种子。
+            if (wy < m_world->height() && m_world->blockAt(wx, wy, wz) == BlockRegistry::Air) {
+                m_world->setBlock(wx, wy, wz, BlockRegistry::WheatCrop, 0); // state=0 阶段 0（刚种；tickCropGrowth 逐步推进）
+                if (m_mode != Creative)
+                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 种子（创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm(); // 种植也是一次「放置」动作 → 挥手（t29）
+            }
+        }
+        return; // 种子（种植成功 / 命中非耕地 / 未命中）均不再走方块放置路径
+    }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;

@@ -80,6 +80,16 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   alpha 透明底）。音色归 GroupGrass（软草音，同 grass/dirt）。worldgen 在 grass 表层上方确定性散布。
     //   **不**掉落自身（掉小麦种子）；机制等价 MC「挖草丛掉小麦种子」。不进创造调色板（装饰方块，t244 补全）。
     /* tall_grass    */ {int(BlockRegistry::TallGrass),            28, 28, 28, 28, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, 0x208,                              1, 64, "tall_grass",    "草丛"},
+    // ── t236 小麦作物（WheatCrop）：机制等价 MC 1.0 小麦作物（wheat crop）。**cross 形广告牌方块**（与 TallGrass 同走
+    //   PartialBlockGeometry 的 cross 几何段 [FirstCross, LastCross]；两片对角相交的双面 quad，alpha 透明底 cutout）。
+    //   **生长阶段存 chunk state**（state = 阶段 0..7；WheatCropStageMax；0=刚种嫩芽、7=成熟），WorldClock tick 推进成长。
+    //   solid=false（非实体 → 不挡邻居面剔除，同 torch / 草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC
+    //   作物可踩过）、hardness=0（瞬破，同 torch / 草丛）、NoTool（空手可采且掉落）、dropId=0x208（小麦种子，材料段；
+    //   **未成熟破块返种子** —— 成熟阶段掉小麦物品 + 额外种子归 t237 收割按 state 判定，本表 dropId 仅基础兜底）、
+    //   dropCount=1、maxStack=64（不进创造调色板：作物经种子种出，t244 补全）。各面贴图=wheat_stage_<state>（tile 29..36）：
+    //   本表 topTile/sideTile 存阶段 0 基底 tile 29，partialblockgeometry 的 WheatCrop case 内 state + 基底算实际阶段贴图
+    //   （同 Water 流水贴图由 mesher 据 state 选的模式 —— 阶段贴图是呈现层选择，非 BlockDef 字段）。音色归 GroupGrass（软草音）。
+    /* wheat_crop    */ {int(BlockRegistry::WheatCrop),             29, 29, 29, 29, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, 0x208,                              1, 64, "wheat_crop",    "小麦作物"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -376,6 +386,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Grass: case Dirt:
     case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）
     case TallGrass: // t235 草丛 → 软草音色（同 grass；机制等价 MC 草丛 SoundType = grass）
+    case WheatCrop: // t236 小麦作物 → 软草音色（同草丛；机制等价 MC 作物 SoundType = grass）
         return GroupGrass;
     case Sand:
         return GroupSand;

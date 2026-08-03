@@ -3593,6 +3593,11 @@ Window {
             //   把波前推进 1 格 → 1 格/tick 流动动画可见）。纯 QML 桥接（WorldClock 为 Game 层不 include World；
             //   QML 同时持二者向下合法，PLAN §2 分层不破）。tickWaterFlow 内部对 settled 流场（无变化）静默 → 无重建开销。
             theWorld.tickWaterFlow()
+            // t236 小麦作物生长 tick：WorldClock 每 100ms tick → 驱动 World.tickCropGrowth（内部节流到 ~每 2.5s
+            //   做一次成长判定，作物据光强 + 耕地支撑 + 散布概率逐步升生长阶段）。纯 QML 桥接（WorldClock 为
+            //   Game 层不 include World；QML 同时持二者向下合法，PLAN §2 分层不破）。tickCropGrowth 内部对稳态
+            //   （全成熟 / 无作物 / 全暗）静默 → 无重建开销。
+            theWorld.tickCropGrowth()
         }
     }
 

@@ -139,6 +139,20 @@ public:
     //   使中线格 = min(两源距)，多 tick 收敛为 V 形平滑）。MC level 语义 = min(源到该格曼哈顿距离)，两流相遇
     //   天然平滑无硬边界。worldgen 海/湖全为水源 → 稳态零变化；玩家单桶水仅 1 源邻居 → 不升源（同 MC）。
     Q_INVOKABLE void tickWaterFlow();
+    // t236 小麦作物生长 tick（spec「WorldClock tick 推进成长 随机/timed」）：由呈现层 Main.qml 经
+    //   WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kCropTickInterval×0.1s 做一次成长判定）。
+    //   机制等价 MC 1.0 小麦生长：作物在耕地方块上、头顶光照足（skyLight ≥ kCropMinLight）时按**确定性散布概率**
+    //   逐阶段升 state（0→1→…→7 成熟；7 = WheatCropStageMax 即成熟，t237 收割判 state==max 掉小麦）。
+    //   「确定性散布」= 每个成长判定窗口内，每株作物据 hashVoxel(seed, x,y,z) + 当前窗口序号算一个伪随机值，
+    //   落在概率窗口内才升阶段 → 不同作物错峰生长（非全部同步、贴近 MC random-tick 错落感），同时**纯函数于
+    //   seed + 窗口序号**（无 Math.random / 时间源 → 同 seed 同窗口序号同结果，便于复现）。
+    //   光照不足 / 下方非耕地 / 已成熟 → 不长（条件不满足即跳过，无副作用、不触发 worldChanged）。
+    //   写入走 setWaterSilent（**通用的「静默 state 写」入口** —— 名字历史遗留 water-first，实现支持任意 id+state；
+    //   作物升阶段是系统模拟非玩家动作 → 静默写避免发 blockBroken/blockPlaced 的粒子/音/拾取噪音，机制等价 MC
+    //   「作物生长无破/放反馈」）。稳态（全成熟 / 无作物 / 全暗）每窗口无变化 → setWaterSilent 全 false → 不发
+    //   worldChanged（无重建、无开销）。spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
+    //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
+    Q_INVOKABLE void tickCropGrowth();
 
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
@@ -225,6 +239,17 @@ private:
     int m_flowTickCounter = 0;
     static constexpr int kFlowTickInterval = 3;   // tickWaterFlow 节流间隔（WorldClock tick 单位 = 100ms → 0.3s/格）
     static constexpr int kMaxFlowLevel = 7;       // 水流最大蔓延等级（state 1..7；机制等价 MC 1.0 流水 7 格扩散）
+    // t236 小麦作物生长 tick 节流计数 + 常量：tickCropGrowth() 每 100ms 被 WorldClock.ticked 调一次；
+    //   累积到 kCropTickInterval 才做一次成长判定（~每 kCropTickInterval×0.1s 一窗）。窗口序号 m_cropIntervalIndex
+    //   每窗 +1，喂入 hashVoxel 散布概率 → 不同窗口不同作物错峰升阶段（防全部同步生长的机械感）。
+    //   kCropTickInterval=25（2.5s/窗）+ kCropGrowPct=35% → 单株平均 ~7s/阶段、~50s 长满 7 阶段（可见、可验收；
+    //   MC 1.0 约 31min 长满，本工程取快便于肉眼 / 测试复核，机制对齐非精确数值复刻）。kCropMinLight=9：头顶
+    //   天光 ≥9/15 才长（机制等价 MC 作物需 light level 9+；夜间 / 洞穴不长）。
+    int m_cropTickCounter = 0;
+    int m_cropIntervalIndex = 0;
+    static constexpr int kCropTickInterval = 25;  // tickCropGrowth 节流间隔（WorldClock tick 单位 = 100ms → 2.5s/窗）
+    static constexpr int kCropMinLight     = 9;   // 生长所需最低天光（/15；机制等价 MC 作物 light level 9+）
+    static constexpr int kCropGrowPct      = 35;  // 每窗每株升阶段的散布概率（%；35% → 平均 ~7s/阶段）
 };
 
 #endif // WORLD_H

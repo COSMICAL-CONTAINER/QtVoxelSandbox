@@ -402,6 +402,57 @@ void World::tickWaterFlow()
     }
 }
 
+// t236 小麦作物生长 tick（见 world.h 头注释）。机制等价 MC 1.0 小麦生长（random-tick 式散布概率升阶段）。
+//   节流到 ~每 kCropTickInterval tick（2.5s）做一次成长判定窗口；每窗遍历全图作物格，符合条件者按确定性散布
+//   概率升 state 一档（0→1→…→WheatCropStageMax=7 成熟）。写入走 setWaterSilent（静默 state 写，无破/放反馈）。
+void World::tickCropGrowth()
+{
+    if (++m_cropTickCounter < kCropTickInterval) return; // 节流：每 kCropTickInterval tick（~2.5s）做一次判定
+    m_cropTickCounter = 0;
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+
+    // 1) 快照当前作物格 + 阶段（tick 内栅格不变 —— 升阶段在 pass 末统一应用，避免半遍历态读到刚升的阶段）。
+    struct CCell { int x, y, z; quint8 stage; };
+    std::vector<CCell> cells;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y) {
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::WheatCrop)
+                    cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
+            }
+
+    // 2) 成长判定：每株据「下方耕地支撑 + 头顶光照足 + 未成熟」筛后，按确定性散布概率决定本窗是否升阶段。
+    //    散布：hashVoxel(seed, x, y, z) 混入窗口序号 m_cropIntervalIndex 取低 16 位 % 100，落在 [0, kCropGrowPct)
+    //    内即升 → 不同株错峰（非全部同步）、同 seed 同窗口序号同结果（无随机源，可复现）。
+    std::vector<CCell> grows;
+    for (const CCell &c : cells) {
+        if (c.stage >= BlockRegistry::WheatCropStageMax) continue;       // 已成熟 → 不再升
+        if (c.y == 0) continue;                                           // 世界底无「下方耕地」支撑
+        if (m_chunks.blockAt(c.x, c.y - 1, c.z) != BlockRegistry::Farmland)
+            continue;                                                     // 下方非耕地 → 不长（作物需耕地支撑）
+        if (m_chunks.skyLightAt(c.x, c.y, c.z) < kCropMinLight) continue; // 头顶天光不足 → 不长（夜间/洞穴）
+        // 确定性散布概率：纯函数于 seed + 位置 + 窗口序号（PLAN §2-K 精神：worldgen 确定性；此处生长模拟亦
+        //   走确定性哈希，无 Math.random / 时间源 → 同 seed 同窗口序号下结果一致，便于复现）。全 int 运算
+        //   避免符号转换告警（hashVoxel 参数为 int）。
+        const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_cropIntervalIndex) * 0x9E3779B9u));
+        const int hy = c.y * 7 + int(c.stage);
+        const quint32 h = hashVoxel(mixedSeed, c.x, hy, c.z);
+        if (int(h & 0xFFFFu) % 100 >= kCropGrowPct) continue;             // 散布落空 → 本窗不升
+        grows.push_back(c);
+    }
+
+    // 3) 应用升阶段（静默写：setWaterSilent 支持任意 id+state；作物升阶段是系统模拟，无破/放反馈）。
+    //    setWaterSilent 内部对「无变化」早退（oldId==newId && oldState==newState）；但作物升阶段 stage→stage+1
+    //    必有变化 → 每株触发一次 emit worldChanged。无作物可升时 grows 为空 → 零写入、零 worldChanged（稳态无开销）。
+    //    注：逐株 emit worldChanged 会导致多株同窗升阶段时多次 mesh 重建请求 —— 25 个 ChunkGeometry 各检各的 dirty，
+    //    仅含升阶段作物的 chunk 真正重建（per-chunk dirty 协作，见 lessons-learned t03），故实际重建 = 受影响 chunk 数。
+    for (const CCell &g : grows)
+        setWaterSilent(g.x, g.y, g.z, BlockRegistry::WheatCrop, quint8(g.stage + 1));
+
+    ++m_cropIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同株错峰）
+}
+
 // --- Perlin（2D fBm）---
 static double fade(double t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
 static double lerp(double a, double b, double t) { return a + t * (b - a); }

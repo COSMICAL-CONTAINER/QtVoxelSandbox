@@ -19,7 +19,7 @@
 // 方块 id（稳定可引用；worldgen/网格/存档都按 id 引用，勿随意改顺序/插值）：
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
 //   10=furnace 11=coal_ore 12=iron_ore 13=torch 14=bedrock ... 21=water 22=chest 23=farmland
-//   24=tall_grass（草丛；cross 广告牌方块）。
+//   24=tall_grass（草丛；cross 广告牌方块）。25=wheat_crop（小麦作物；cross + state=生长阶段 0..7）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -101,6 +101,19 @@ public:
                                   //   （机制等价 MC 耕地碰撞箱矮 1 像素；selectionAABBs 仍走 ShapeFull 整格，选中框不缩，
                                   //   raycast 经 isFullCube=true 走整格命中 —— 三者解耦：碰撞矮、选中满、射线整格，零相互干扰）。
                                   //   state 编码干/湿（见 FarmlandMoistBit），由 playercontroller 耕地时据水源邻近判定写入。
+        WheatCrop      = 25, // 小麦作物（t236）：机制等价 MC 1.0 小麦作物（wheat crop）。**cross 形广告牌方块**
+                                  //   （与 TallGrass 同走 PartialBlockGeometry 的 cross 几何段 [FirstCross, LastCross]；
+                                  //   两片对角相交的双面 quad，alpha 透明底 cutout）。**生长阶段存 chunk state**（state = 阶段
+                                  //   0..7；0=刚种下的嫩芽、7=成熟可收割），WorldClock tick 推进成长（world.tickCropGrowth；
+                                  //   每株据光强 + 耕地支撑 + 确定性散布概率逐步升阶段）。solid=false（非实体 → 不挡邻居面剔除，
+                                  //   同 torch / 草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC 作物可踩过 — 踩踏
+                                  //   退化耕地留后续任务）、hardness=0（瞬破，同 torch / 草丛）、NoTool（空手可采且掉落）、
+                                  //   dropId=0x208（小麦种子，材料段；Core 不依赖 Game 故字面量与 RecipeRegistry::SeedId 同源；
+                                  //   **未成熟阶段破块返种子**——成熟阶段破块掉小麦物品 + 额外种子归 t237 收割按 state 判定，
+                                  //   本表 dropId 仅作基础兜底）、dropCount=1、maxStack=64（不进创造调色板：作物经种子种出，
+                                  //   非玩家直接放置的方块；t244 补全）。各面贴图=wheat_stage_<state>（tile 29..36，mesher 走 cross
+                                  //   几何段时据 state 选；本表 topTile/sideTile 存阶段 0 基底 tile 29，partialblockgeometry
+                                  //   的 WheatCrop case 内 state + 基底算出实际阶段贴图）。音色归 GroupGrass（软草音，同草丛）。
         TallGrass      = 24, // 草丛（t235）：机制等价 MC 1.0 草丛 / 蕨类（tall grass / fern）。**cross 形广告牌方块**
                                   //   （两片对角十字相交的 quad，billboard X 形贴图，alpha 透明底 cutout）—— 非 1×1×1 整立方，
                                   //   亦非段内异形方块段（id > LastPartial）。worldgen 在 grass 表层上方确定性散布（placeTallGrass），
@@ -113,7 +126,7 @@ public:
                                   //   case**（合批进 chunk mesh，复用顶点色光照；cross 双面双对角 quad）；chunkgeometry 路由进 cross 段
                                   //   [FirstCross, LastCross]、不进立方面 PASS。raycastAABBs 整格命中（ShapeNone 非 torch 兜底）→
                                   //   可瞄准 / 破坏。不进创造调色板（worldgen 专属装饰方块，机制等价 MC 草丛非玩家可放置；t244 补全）。
-        Count         = 25, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Count         = 26, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
@@ -129,11 +142,20 @@ public:
     // t235 cross 广告牌方块段哨兵：id ∈ [FirstCross, LastCross] 走 PartialBlockGeometry 的 cross 几何
     //   （两片对角十字相交的双面 quad，机制等价 MC 草丛 / 花 / 作物的 cross 模型）。与 [FirstPartial, LastPartial]
     //   的「轴对齐盒体异形」**不同类** —— cross 是对角双面平面（非盒组合），故独立成段（避免与 partial 盒体几何混在
-    //   同一 switch 误生成）。t235 落地 1 类（TallGrass=24）。mesher 路由用闭区间 [FirstCross, LastCross]（同 partial
-    //   段教训 lessons-learned t194：闭区间防段后整立方误进 cross 路径）。新增 cross 方块（花 / 小麦作物 t236 等）
-    //   追加时右移 LastCross。
+    //   同一 switch 误生成）。t235 落地 TallGrass=24；t236 追加 WheatCrop=25（同 cross 模型 + 按 state 阶段选贴图）。
+    //   mesher 路由用闭区间 [FirstCross, LastCross]（同 partial 段教训 lessons-learned t194：闭区间防段后整立方误进
+    //   cross 路径）。新增 cross 方块（花 / 其它作物）追加时右移 LastCross。
     static constexpr int FirstCross = TallGrass; // 24
-    static constexpr int LastCross  = TallGrass; // 24（cross 段上界；新增 cross 方块追加时同步右移）
+    static constexpr int LastCross  = WheatCrop; // 25（cross 段上界；新增 cross 方块追加时同步右移）
+
+    // t236 小麦作物生长阶段：state = 阶段 0..7（0=刚种嫩芽、7=成熟）。mesher（PartialBlockGeometry::append 的
+    //   WheatCrop case）据 state 选对应阶段贴图（tile 29..36）；world.tickCropGrowth 据光强 + 耕地支撑 + 确定性
+    //   散布概率把未成熟作物的 state 逐步 +1 直到本上界。state 经 m_states 落 SQLite round-trip 保真（存档读回
+    //   仍带阶段 → 重载后继续生长 / 收割按阶段判成熟）。唯一消费点：partialblockgeometry 的 WheatCrop case（贴图
+    //   选择）+ world tickCropGrowth（成长上界判定）+ t237 收割（state==max 判成熟掉小麦）。mesher / collisionAABBs /
+    //   selectionAABBs 不读 wheat state（wheat 走 ShapeNone + cross 几何，state inert 于碰撞/选中）→ 复用 state 作
+    //   阶段编码零回归（同 PlanksFromDoubleSlabBit / Farmland state 复用 state 作 marker 的模式）。
+    static constexpr quint8 WheatCropStageMax = 7;
 
     // t206 双半砖（合并态）state 标记：两块互补半砖（上+下）同格合并时，placeBlock 写 Planks(id=6) +
     //   本 bit 标记「源自双半砖」（旧实现写 Planks state=0 → 破块掉 1× Planks，用户报「双半砖挖掉掉 1 全木板」）。
@@ -270,7 +292,10 @@ public:
     //   27=farmland_wet（t234 耕地顶面湿态；深色湿润翻耕土，同犁沟纹 + 深色；mesher 据 Farmland state bit0
     //      选 26(干)/27(湿)；Farmland 方块 def topTile=26，tileFor 特例覆盖）。
     //   28=tall_grass（t235 草丛 cross 贴图；green 草叶 + alpha 透明底；cross 几何段材质 alphaCutoff cutout 透明底）。
-    // 图集由 tools/build_atlas.py 打包全部 29 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   29..36=wheat_stage_0..7（t236 小麦作物 8 个生长阶段贴图；cross 几何段，alpha 透明底 cutout。mesher 在
+    //      PartialBlockGeometry::append 的 WheatCrop case 内据 state 选 tile = 29 + stage；WheatCrop 方块 def 各面
+    //      = 29（基底阶段 0），阶段贴图选择是 mesher 呈现层据 state 决定，非 BlockDef 字段——同 Water 流水贴图模式）。
+    // 图集由 tools/build_atlas.py 打包全部 37 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -283,7 +308,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 29;
+    static constexpr int AtlasTileCount = 37;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
