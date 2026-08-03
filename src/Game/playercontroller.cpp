@@ -2089,6 +2089,8 @@ void PlayerController::step(qreal dt)
         //   叠入 m_vel.x/z（与玩家 wish 输入相加 → 逆流游净速 = 走速 − 推力，松手则被流走）。无梯度（四面无
         //   更近源邻居，如水源/对称流）→ 不推。仅走路模式生效（Spectator / Creative-飞 已 early return）。
         //   悬崖边落水额外向下带：脚位下方为空气 = 水柱下落（瀑布）→ 下沉上限抬到 kWaterfallSinkMax。
+        //   t270 推力增强：kWaterFlowPush 由 2.5 提升到 4.0（见 .h 注释）—— 机制（梯度方向 + 每 tick 叠入 +
+        //     仅流水格 state>0 + 仅走路模式）完全不变，仅幅值增强使水流「持续外推」可被明显感知。
         const int fx = int(std::floor(m_pos.x()));
         const int fy = int(std::floor(m_pos.y()));
         const int fz = int(std::floor(m_pos.z()));

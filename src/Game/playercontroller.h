@@ -737,11 +737,16 @@ private:
     // t211 水流推动玩家（机制等价 MC 1.0 流水冲走实体）：
     //   kWaterFlowPush：流水水平推力速度（blocks/sec；脚位在流水格 state>0 时沿离源方向叠入水平速度）。
     //     低于 kWalk(4.3) → 玩家仍可逆流游（净速 ≈ 走速 − 推力），但松手会被流走。spec「创造非飞 + 生存」。
+    //   t270 流水推力增强：原值 2.5 太弱 —— 浮水按空格时几乎感觉不到水流携带（drift 仅 2.5 blocks/sec，
+    //     远低于走速 4.3）。提升至 4.0 使水流明显持续外推（idle drift 4.0；逆流走净速 0.3 仍可行、疾跑 1.59、
+    //     游出水面脱困路径不变）。仍 < kWalk 故玩家可逆流（MC 对齐：流水可逆、但费力）；机制（方向梯度 + 每 tick
+    //     叠入 m_vel.x/z + 仅走路模式）不变，只调幅值。穿墙安全：4.0×0.05=0.2 < 0.4 子步阈（同向叠走速 8.3×
+    //     0.05=0.415 → sub=2，子步循环自适应任意速度，无穿隧道风险）。
     //   kWaterfallSinkMax：悬崖边落水（瀑布）额外向下带的最大下沉速度（blocks/sec；高于 kWaterSinkMax=3
     //     使玩家在瀑布中下沉更快，但仍远慢于自由落体 kMaxFall=78.4）。脚位下方为空气 = 水柱下落时启用。
     //   仅走路模式（Survival / Creative-未飞）生效 —— Spectator / Creative-飞 early return，不进此分支
     //   （spec「飞行 / 观察者态不生效」）。
-    static constexpr float kWaterFlowPush    = 2.5f; // 流水水平推力（blocks/sec）
+    static constexpr float kWaterFlowPush    = 4.0f; // 流水水平推力（blocks/sec；t270 由 2.5 增强）
     static constexpr float kWaterfallSinkMax = 8.0f; // 瀑布最大下沉（blocks/sec）
     static constexpr float kWalk = 4.3f;       // 走 移速
     static constexpr float kGravity = 28.0f;
