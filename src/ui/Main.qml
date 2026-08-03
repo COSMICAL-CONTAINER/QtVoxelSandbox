@@ -1024,17 +1024,52 @@ Window {
                 //   仅 geometry + visible 不同），避免 Loader 装载 3D 的 reparent 坑（lessons-learned t16）。
                 //   baseColor 按 tier 着色（木褐 / 石灰 / 铁银白，五类同 tier 同色，同 2D ToolIcon 配色）。
                 //   作 viewModelHand 子节点 → 随挥动同步运动（工具在手中）；eulerRotation 给对角手持姿态。
-                Model {
+                // t266 镐手持贴图修：旧版整把镐用 PickaxeGeometry（pos-only 单一 baseColor）→ 铁镐整把银白
+                //   （柄也变白 =「纯白铁棍」）；且单色使柄/头不分 → 观感像「手拿镐头中间」。spec 要「木质柄 +
+                //   镐头、正握」。改两段着色：木柄恒木褐（与 tier 无关，机制对齐 MC 镐柄恒木），镐头（横梁 + 两
+                //   下勾）按 tier 着色（木褐 / 石灰 / 铁银白）。用 4 个 UnitCube 复刻 pickaxe.cpp 的 addBox 4 盒
+                //   形状（UnitCube ±0.5 满格 → scale = 2×半长，1:1 对齐几何尺寸），各盒独立材质 → 柄 / 头各走各的
+                //   baseColor。PickaxeGeometry 单色无法分染（一个 baseColor 乘全体），故手持走 UnitCube 组合；
+                //   第三人称 / 掉落物仍用 PickaxeGeometry（侧 / 俯视角单色观感可接受，本任务范围 = viewModelHand）。
+                //   正握：position.y 上移（旧 0.04→0.10）使手（手段 y≈0.02）握住柄下段、镐头朝上前方；eulerRotation
+                //   给对角手持（柄下右、镐头上左，类 MC）。作 viewModelHand 子节点 → 随挥动同步运动（工具在手中）。
+                Node {
+                    id: heldPickaxeFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 1
-                    geometry: PickaxeGeometry {}
-                    position: Qt.vector3d(0.02, 0.04, -0.22)    // t91：Y 跟手同 delta 上移（旧 -0.08→+0.04，保 +0.02 高于手段）；z=-0.22 脱离手臂 z 包围
+                    position: Qt.vector3d(0.02, 0.10, -0.22)     // t266：y 上移让手握柄下段（正握），镐头朝上前方；z=-0.22 脱离手臂 z 包围
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
-                    eulerRotation: Qt.vector3d(15, -20, -15)    // 对角手持（柄下右、镐头上左，类 MC 手持）
-                    materials: PrincipledMaterial {
-                        lighting: PrincipledMaterial.NoLighting
-                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁镐银白
-                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石镐中灰
-                                 : "#8a5a2e"                                                 // 木镐褐（默认 / tier 1）
+                    eulerRotation: Qt.vector3d(15, -20, -15)      // 对角手持（柄下右、镐头上左，类 MC 手持）
+                    // 镐头 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白（同 2D ToolIcon 配色）
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁镐银白
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石镐中灰
+                                                                                                 : "#8a5a2e"                                                   // 木镐褐（默认 / tier 1）
+                    // 木柄（竖直）：心 (0,-0.05,0)，半长 0.04×0.40×0.04（同 pickaxe.cpp 木柄 addBox）→ scale 2×半长
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.05, 0)
+                        scale: Qt.vector3d(0.08, 0.80, 0.08)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a5a2e" }   // 木柄恒木褐（与 tier 无关）
+                    }
+                    // 镐头横梁：心 (0, 0.40,0)，半长 0.30×0.05×0.06（同 pickaxe.cpp 横梁 addBox）
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.40, 0)
+                        scale: Qt.vector3d(0.60, 0.10, 0.12)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldPickaxeFp.headColor }
+                    }
+                    // 左下勾：心 (-0.26, 0.31,0)，半长 0.05×0.07×0.06
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(-0.26, 0.31, 0)
+                        scale: Qt.vector3d(0.10, 0.14, 0.12)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldPickaxeFp.headColor }
+                    }
+                    // 右下勾：心 (0.26, 0.31,0)，半长 0.05×0.07×0.06
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0.26, 0.31, 0)
+                        scale: Qt.vector3d(0.10, 0.14, 0.12)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldPickaxeFp.headColor }
                     }
                 }
                 // t233 锄（type=Hoe）：同位姿 / 同 tier 配色，仅几何换 HoeGeometry（宽扁锄刃替代镐横梁 + 下勾）。
