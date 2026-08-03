@@ -954,25 +954,63 @@ Window {
                         baseColorMap: partialIconTex
                     }
                 }
-                // t218 手持火把（第一人称）：火把非立方（世界内异形），手持走 billboard 平图标（细立柱），
+                // t218/t260 手持火把（第一人称）：火把非立方（世界内异形），手持走 billboard 平图标（细立柱），
                 //   非上方 BlockCube（6 面立方贴图 → 肉眼「贴火把的小立方」非「火把」）。BillboardQuad 单面 +Z
-                //   法线 + icon_torch.png（透明底火把本体）；scale 非等比（细高 0.10×0.22）→ 渲染成一根细长火把
-                //   而非方块。作 viewModelHand 子节点会继承手 baseTilt/swing 的 Rx 旋转 → billboard +Z 不再正对
-                //   相机；补偿 local eulerRotation.x = -(baseTilt+swing) 抵消手 X 旋转 → 世界旋转 = 相机旋转 →
+                //   法线 + icon_torch.png（透明底火把本体）→ 渲染成一根细长火把而非方块。
+                //   t260 放大：scale 0.10×0.22 → 0.14×0.32（用户「手持贴图太小 → 放大」）。
+                //   t260 燃烧动画：火把顶端加多色焰（外橙 + 中黄 + 白核）+ heldFlameS 跳动 → 持火把时火焰活跃
+                //     燃烧（机制对齐世界内 torchFlame 三层焰 + default_torch 贴图焰心配色）。
+                //   作 viewModelHand 子节点会继承手 baseTilt/swing 的 Rx 旋转 → billboard +Z 不再正对相机；
+                //   补偿 local eulerRotation.x = -(baseTilt+swing) 抵消手 X 旋转 → 世界旋转 = 相机旋转 →
                 //   +Z 恒指回相机、正面可见（同手持材料 BillboardQuad / 掉落物材料段 billboard 模式）。
                 //   alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test 契约（透明底不丢弃会被当不透明黑 → 火把坍黑块）。
                 //   13 = BlockRegistry::Torch（与既有字面量 + 注释模式同源）。
-                Model {
+                Node {
+                    id: heldTorchFp
                     visible: player.selectedBlock === 13
-                    geometry: BillboardQuad {}
                     position: Qt.vector3d(0.0 + window.heldBlockX, 0.04 + window.heldBlockY, -0.22 + window.heldBlockZ)
-                    scale: Qt.vector3d(0.10, 0.22, 1.0)
                     eulerRotation: Qt.vector3d(-(viewModelHand.baseTilt + viewModelHand.swingAngle), 0, 0)
-                    materials: PrincipledMaterial {
-                        lighting: PrincipledMaterial.NoLighting
-                        alphaCutoff: 0.5
-                        opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
-                        baseColorMap: torchIconTex
+
+                    // 火把 billboard 平图标（t260 放大）
+                    Model {
+                        geometry: BillboardQuad {}
+                        scale: Qt.vector3d(0.14, 0.32, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                            baseColorMap: torchIconTex
+                        }
+                    }
+
+                    // t260 燃烧动画：火把顶端多色焰（外橙 + 中黄 + 白核），heldFlameS 缩放跳动。
+                    //   位置：billboard 顶端（scale Y 0.32 → 顶端 y≈0.16；纹理火焰占顶 ~5/16、焰心约 y≈0.14）；
+                    //   z=+0.01 略前移（local +Z 经上方 eulerRotation 补偿后指回相机）→ 焰在 billboard 之前、无 z-fight。
+                    property real heldFlameS: 0.05
+                    Node {
+                        position: Qt.vector3d(0, 0.14, 0.01)
+                        Model {   // 外焰（橙）
+                            geometry: UnitCube {}
+                            scale: Qt.vector3d(heldTorchFp.heldFlameS, heldTorchFp.heldFlameS * 1.10, heldTorchFp.heldFlameS)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff8a1a" }
+                        }
+                        Model {   // 中焰（黄）
+                            geometry: UnitCube {}
+                            scale: Qt.vector3d(heldTorchFp.heldFlameS * 0.70, heldTorchFp.heldFlameS * 0.78, heldTorchFp.heldFlameS * 0.70)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffd23c" }
+                        }
+                        Model {   // 焰心（暖白）
+                            geometry: UnitCube {}
+                            scale: Qt.vector3d(heldTorchFp.heldFlameS * 0.45, heldTorchFp.heldFlameS * 0.50, heldTorchFp.heldFlameS * 0.45)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fff4c4" }
+                        }
+                    }
+                    SequentialAnimation on heldFlameS {
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 0.05; to: 0.065; duration: 110 }
+                        NumberAnimation { from: 0.065; to: 0.04; duration: 150 }
+                        NumberAnimation { from: 0.04; to: 0.055; duration: 90 }
+                        NumberAnimation { from: 0.055; to: 0.05; duration: 130 }
                     }
                 }
                 // 手持工具（t75 木镐 3D / t233 锄 3D）：选中工具槽（isTool(selectedItem)）时，手前显工具 3D。
@@ -1772,23 +1810,55 @@ Window {
                             baseColorMap: partialIconTex
                         }
                     }
-                    // t218 手持火把（第三人称）：火把非立方 → billboard 平图标（细立柱）。作 rightArmPivot 子节点
+                    // t218/t260 手持火把（第三人称）：火把非立方 → billboard 平图标（细立柱）。作 rightArmPivot 子节点
                     //   随臂行走/挖掘挥动同步。BillboardQuad +Z 法线默认 backface 剔除 → 第三人称-前（相机在玩家
                     //   前）会看到背面被剔 → 火把消失；故 cullMode:Material.NoCulling 双面渲染，背面（镜像火把，
                     //   火把近对称无明显差异）也显 → 三相机模式都可见。静止时臂本地 +Z 指玩家身后 = 第三人称-后
-                    //   相机方向，billboard 正对相机；臂挥动时火把随之倾（自然）。scale 0.16×0.30 细高（同第一人称
-                    //   torch billboard 非等比，显「细火把」非方块）。opacity 跟 bodyOpacity（观察者半透一致）。
-                    Model {
+                    //   相机方向，billboard 正对相机；臂挥动时火把随之倾（自然）。
+                    //   t260 放大：scale 0.16×0.30 → 0.22×0.42（与第一人称手持火把同步放大）。
+                    //   t260 燃烧动画：顶端多色焰（外橙 + 中黄 + 白核）+ tpFlameS 跳动（第一人称同步；F5 第三人称
+                    //     也见火把燃烧）。opacity 跟 bodyOpacity（观察者半透一致）。
+                    Node {
+                        id: heldTorchTp
                         visible: player.selectedBlock === 13 && player.mode !== PlayerController.Spectator
-                        geometry: BillboardQuad {}
                         position: Qt.vector3d(0, -0.55, -0.30)
-                        scale: Qt.vector3d(0.16, 0.30, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            cullMode: Material.NoCulling   // 双面（第三人称-前见背面；火把近对称）
-                            alphaCutoff: 0.5
-                            opacity: 0.99   // visible 已排除 Spectator → bodyOpacity 恒 1.0；<1 尊重贴图 alpha（透明底不渲染）
-                            baseColorMap: torchIconTex
+                        Model {
+                            geometry: BillboardQuad {}
+                            scale: Qt.vector3d(0.22, 0.42, 1.0)
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                cullMode: Material.NoCulling   // 双面（第三人称-前见背面；火把近对称）
+                                alphaCutoff: 0.5
+                                opacity: 0.99   // visible 已排除 Spectator → bodyOpacity 恒 1.0；<1 尊重贴图 alpha（透明底不渲染）
+                                baseColorMap: torchIconTex
+                            }
+                        }
+                        // t260 顶端多色焰（位置在 billboard 顶端：scale Y 0.42 → 顶端 y≈0.21，焰心约 y≈0.19）。
+                        property real tpFlameS: 0.07
+                        Node {
+                            position: Qt.vector3d(0, 0.19, 0)
+                            Model {
+                                geometry: UnitCube {}
+                                scale: Qt.vector3d(heldTorchTp.tpFlameS, heldTorchTp.tpFlameS * 1.10, heldTorchTp.tpFlameS)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff8a1a" }
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                scale: Qt.vector3d(heldTorchTp.tpFlameS * 0.70, heldTorchTp.tpFlameS * 0.78, heldTorchTp.tpFlameS * 0.70)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffd23c" }
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                scale: Qt.vector3d(heldTorchTp.tpFlameS * 0.45, heldTorchTp.tpFlameS * 0.50, heldTorchTp.tpFlameS * 0.45)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fff4c4" }
+                            }
+                        }
+                        SequentialAnimation on tpFlameS {
+                            loops: Animation.Infinite
+                            NumberAnimation { from: 0.07; to: 0.09; duration: 110 }
+                            NumberAnimation { from: 0.09; to: 0.055; duration: 150 }
+                            NumberAnimation { from: 0.055; to: 0.08; duration: 90 }
+                            NumberAnimation { from: 0.08; to: 0.07; duration: 130 }
                         }
                     }
                     // 手持工具（t75 木镐 3D / t233 锄 3D）：选中工具槽时，第三人称右手上显工具 3D（同第一人称分支，
@@ -2525,13 +2595,16 @@ Window {
         // （动态闪烁焰心），视觉读作「发光点」，不参与场景实际光照计算（真 flood-fill 方块光留 PLAN §M）。
         //
         // t114 异形：mesher 不再为火把画 1×1×1 立方面（chunkgeometry.cpp Torch 特例 continue）→ 火把外观
-        // 全部由此 delegate 负责：木柄（细长棕立方）+ 火焰（暖白小立方 + 闪烁动画）。
+        // 全部由此 delegate 负责：木柄（细长棕立方）+ 火焰（t260 三层渐变焰：外橙 + 中黄 + 白核 + 闪烁动画）。
         //
         // t157 移除外层光晕：原 delegate 含第三个「光晕」Model（0.42 半透橙立方包覆火焰）—— 此静态大橙
         //   光源在破火把后视觉上残留为「橙色贴图残像」（外层光晕是固定 opacity 无动画的半透立方，常被
         //   读作一片贴图而非发光），且整体观感偏离 MC 火把（MC 火把仅小焰心、无大光晕）。移除后只保留
-        //   内层动态白立方（torchFlame，闪烁动画），更贴 1.0 + 消除残像；顶部少量烟雾粒子另由 TorchSmoke.qml
+        //   内层动态焰（torchFlame，闪烁动画），更贴 1.0 + 消除残像；顶部少量烟雾粒子另由 TorchSmoke.qml
         //   经 smokeLoader 加载（见文件下方）补充。
+        // t260 多色焰：原单层暖白立方被读作「白炽灯泡」→ 改三层渐变焰（外橙 #ff8a1a / 中黄 #ffd23c / 心
+        //   #fff4c4，对齐 default_torch 贴图焰心配色 + MC 火把焰外橙内黄白核），同步 flickerS 缩放跳动 →
+        //   读作「跳动的火焰」而非「灯泡」。
         //
         // t114 朝向：运行期据邻居 solid 推断 —— 下格 solid=垂直插地；侧格 solid=横插该向（贴墙伸出）。
         // 邻居查询走 theWorld.isCollidable（BlockRegistry::isSolid 语义；只认实体方块，不挂到另一火把 /
@@ -2696,27 +2769,40 @@ Window {
                     eulerRotation: torchHandleEuler(torchGlow.orient)
                 }
 
-                // 火焰（内层动态白立方）：暖白小立方（UnitCube scale ~0.18 + 闪烁动画；spec「scale 0.18 黄 + 闪」）。
+                // 火焰（t260 多色焰）：原单层暖白立方（像白炽灯泡）→ 三层渐变焰（外橙 + 中黄 + 白核），
+                //   共享 flickerS 缩放跳动 → 读作「跳动的火焰」而非「灯泡」。配色对齐 default_torch 贴图焰心
+                //   （外橙 #ff8a1a / 中黄 #ffd23c / 心 #fff4c4）+ MC 火把焰（外橙内黄白核）。机制等价 MC 1.0
+                //   火把光源（仅小焰心 + 顶部偶发烟雾，无大光晕）。三层均 UnitCube + NoLighting（同已验证
+                //   可见路径，lessons-learned「所有可见 Model 用 NoLighting」）。
                 // 摆在柄顶端（竖直时柄顶 Y=0.65；墙火把 30° 倾斜 + ±0.30 深嵌后柄末端，见 torchFlameLocalPos）。
-                // t157：移除原外层「光晕」静态大橙立方（0.42 半透橙 Model）后，仅保留本焰心作为火把发光体
-                //   —— 旧光晕是固定 opacity 无动画的半透立方，被读作「一片贴图」（破火把后视觉残留为橙
-                //   色残像），且整体观感偏离 MC 火把（1.0 火把仅小焰心、无大光晕）。焰心动态闪烁，无残像。
-                //   顶部少量烟雾粒子另由 TorchSmoke.qml 经 smokeLoader 加载（见文件下方）补充。
-                Model {
+                //   顶部偶发烟雾粒子由 TorchSmoke.qml 经 smokeLoader 加载（见文件下方）补充。
+                Node {
                     id: torchFlame
-                    geometry: UnitCube {}
-                    materials: PrincipledMaterial {
-                        lighting: PrincipledMaterial.NoLighting
-                        baseColor: "#fff4cc"   // 焰心暖白（spec「高 baseColor 暖色 #ffcc66」的更亮内核）
-                    }
                     // t150f：焰位读 torchFlameLocalPos（柄 30° 倾斜 + ±0.30 深嵌 + scale 0.7 后末端重算）。
                     position: torchFlameLocalPos(torchGlow.orient)
-                    // 闪烁：自定义 flickerS（标量）由 SequentialAnimation 循环驱动；scale 绑它派生
-                    // （Y 轴略加长 = 火苗上窜感）。本工具链 Vector3DAnimation 未注册（运行期「is not a
-                    // type」），故走「NumberAnimation on 标量属性 + scale 绑定」等价路径（与 cam.shakeYaw
-                    // / itemHost bobY 同 NumberAnimation 模式）。
+                    // 闪烁：自定义 flickerS（标量）由 SequentialAnimation 循环驱动；三层 scale 统一由它派生
+                    //   （Y 轴略加长 = 火苗上窜感）。本工具链 Vector3DAnimation 未注册（运行期「is not a
+                    //   type」），故走「NumberAnimation on 标量属性 + scale 绑定」等价路径（与 cam.shakeYaw
+                    //   / itemHost bobY 同 NumberAnimation 模式）。
                     property real flickerS: 0.18
-                    scale: Qt.vector3d(flickerS, flickerS * 1.08, flickerS)
+                    // 外焰（橙，最大；三层由大到小嵌套 → 渐变焰心）
+                    Model {
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(torchFlame.flickerS, torchFlame.flickerS * 1.10, torchFlame.flickerS)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff8a1a" }
+                    }
+                    // 中焰（黄，中等）
+                    Model {
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(torchFlame.flickerS * 0.74, torchFlame.flickerS * 0.82, torchFlame.flickerS * 0.74)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffd23c" }
+                    }
+                    // 焰心（暖白，最小、最亮）
+                    Model {
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(torchFlame.flickerS * 0.48, torchFlame.flickerS * 0.54, torchFlame.flickerS * 0.48)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fff4c4" }
+                    }
                     SequentialAnimation on flickerS {
                         loops: Animation.Infinite
                         NumberAnimation { from: 0.18; to: 0.21; duration: 110 }
