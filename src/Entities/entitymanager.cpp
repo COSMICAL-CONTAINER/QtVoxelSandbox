@@ -70,6 +70,11 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
     e.wanderTimer = 0.0f; // 0 → tick 首帧选第一次向（避免所有 mob 同步起步）
     e.wanderSpeed = 0.0f;
     e.moveSpeed = 0.0f;
+    // t241 行走 / 吃草态初值：相位 0；未吃草；eatCooldown=0 → 羊首次 idle 即可扫描草丛（无需等待）。
+    e.walkPhase = 0.0f;
+    e.eatTimer = 0.0f;
+    e.eatApplied = false;
+    e.eatCooldown = 0.0f;
     m_entities.push_back(std::move(e));
     ++m_revision;
     emit entitiesChanged();
@@ -152,6 +157,26 @@ float EntityManager::moveSpeedAt(int i) const
     const Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob) return 0.0f;
     return e.moveSpeed;
+}
+
+// t241 行走动画相位（QML 驱动 MobModel 腿摆）。非 Mob / 越界 → 0。
+float EntityManager::walkPhaseAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob) return 0.0f;
+    return e.walkPhase;
+}
+
+// t241 羊头部俯仰（QML 驱动 MobModel 头俯仰）：仅 mobType==MobSheep 且吃草周期内返 sin(πp) 包络
+//   （p = 周期内进度 0..1；中段最深 = kEatHeadPitch、起末归 0）；其余 → 0（头不转）。
+float EntityManager::headPitchAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobSheep || e.eatTimer <= 0.0f) return 0.0f;
+    const float p = (kEatDuration - e.eatTimer) / kEatDuration; // 周期内进度 0..1
+    return kEatHeadPitch * std::sin(3.14159265f * p);           // sin(πp) 包络：起末 0、中段最深（负=低头）
 }
 
 // t239 mob 子类 id（t240 pig/cow/sheep；t242/t243 分流）。越界 → 0。
@@ -282,6 +307,44 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
     if (!moved) e.wanderTimer = std::min(e.wanderTimer, 0.2f);
 
     return moved;
+}
+
+// t241 羊吃草：检测 / 消耗 entity 前方一格草丛（机制等价 MC 羊吃草：草丛消失 + 其下草方块变泥土）。
+//   目标列 = 沿 yaw 朝向 reach=0.7 前方（头部前方）；草丛格 y = 身体格（floor(pos.y − radius)，草丛生于地
+//   表上方一格 = 羊身体所在格）；其下地表格 = bodyY − 1（草方块 Grass）。OOB → 安全返 false（blockAt 越界
+//   返 air ≠ TallGrass，setWaterSilent 越界返 false，均不副作用）。
+//   consume=true：草丛→Air（静默写，setWaterSilent 通用入口；非玩家破块 → 不发 broken/placed → 免粒子 / 音 /
+//     掉落噪音，同水流蔓延 / 作物生长模式）；其下若 Grass → Dirt（机制等价 MC 草地变泥土）。
+//   consume=false：仅检测（决定是否开吃草周期）。返回前方是否找到草丛。
+bool EntityManager::sheepEatGrass(Entity &e, World *world, float worldW, float worldD,
+                                  bool consume)
+{
+    if (!world) return false;
+    // 前方列坐标（沿 yaw 朝向 reach 距离）：dir = (-sin, 0, -cos)（与 aiWander / player wishHoriz 同约定）。
+    const float fx = e.pos.x() - std::sin(e.yawRad) * kEatReach;
+    const float fz = e.pos.z() - std::cos(e.yawRad) * kEatReach;
+    const int cx = qFloor(fx);
+    const int cz = qFloor(fz);
+    // 身体格 y（草丛生于地表上方一格 = 此格）；地表格 = bodyY − 1（草方块）。
+    const int bodyY = qFloor(e.pos.y() - e.radius);
+    const int groundY = bodyY - 1;
+    // 越界 / 非法 y → 安全返 false（blockAt 亦返 air，但显式守避免 floor 滚动到负域读 chunk 边界外）。
+    if (cx < 0 || cz < 0 || cx >= int(worldW) || cz >= int(worldD)) return false;
+    if (bodyY < 1 || groundY < 0) return false;
+
+    if (world->blockAt(cx, bodyY, cz) != BlockRegistry::TallGrass) return false; // 前方非草丛 → 不吃
+
+    if (consume) {
+        // 草丛→空气（静默写；setWaterSilent 是 World 的通用静默 state 写入口 —— 名字历史遗留 water-first，
+        //   实现支持任意 id+state，已由 tickCropGrowth 复用写入小麦作物 state）。
+        world->setWaterSilent(cx, bodyY, cz, BlockRegistry::Air, 0);
+        // 其下草方块→泥土（机制等价 MC 羊吃草后草地变泥土；非草方块不动）。
+        if (world->blockAt(cx, groundY, cz) == BlockRegistry::Grass)
+            world->setWaterSilent(cx, groundY, cz, BlockRegistry::Dirt, 0);
+        qCInfo(lcEnt) << "sheep ate tall grass at" << cx << bodyY << cz
+                      << "(grass block below -> dirt)";
+    }
+    return true;
 }
 
 // 玩家推动解析：对每个 pushable 实体做「玩家 AABB（XZ 矩形）vs 实体圆（XZ，半径=entity.radius）」
@@ -457,12 +520,54 @@ void EntityManager::tick(qreal dt, World *world)
             }
 
             // t239 AI wander 自主移动（水平）：随机选向 + 时间片 + 逐轴 AABB 碰撞。位移 → dirty（驱动 QML 位置绑定）。
-            if (aiWander(e, float(dt), world, worldW, worldD)) dirty = true;
+            // t241 羊吃草门控：eatTimer>0（吃草周期内）→ 跳过 wander + 强制 idle 站立（腿停 + 头俯仰），仅推进
+            //   吃草周期；否则走 AI wander，并据 idle + 扫描冷却决定是否开吃草周期。
+            const bool isSheep = (e.mobType == MobSheep);
+            const bool eating = isSheep && e.eatTimer > 0.0f;
+            if (eating) {
+                // 吃草周期：推进计时；到 apply 阈值时消耗前方草丛（草丛→空气 + 下草→泥土）；周期内强制 idle。
+                e.eatTimer -= float(dt);
+                const float eatElapsed = kEatDuration - e.eatTimer;
+                if (!e.eatApplied && eatElapsed >= kEatApplyAt) {
+                    // 即时消耗（apply 在周期中段、近 sin(πp) 包络峰 = 头最低时嚼）。consume=true 写栅格。
+                    sheepEatGrass(e, world, worldW, worldD, /*consume=*/true);
+                    e.eatApplied = true;
+                }
+                if (e.eatTimer <= 0.0f) {
+                    e.eatTimer = 0.0f;
+                    e.eatApplied = false;
+                    e.eatCooldown = kEatCooldown; // 吃完一棵后冷却（防连续吃完一片）
+                }
+                e.wanderSpeed = 0.0f;
+                e.moveSpeed = 0.0f; // 站立吃草 → 腿停（walkPhase 冻结于上次值）
+                dirty = true;       // headPitch 随 eatTimer 变 → 每帧 bump 让 QML 头俯仰绑定刷新
+            } else {
+                // 非吃草：扫描冷却倒数（仅羊）；AI wander；羊 idle 且冷却到 → 扫前方草丛决定是否开吃。
+                if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(dt);
+                if (aiWander(e, float(dt), world, worldW, worldD)) dirty = true;
+                if (isSheep && e.eatCooldown <= 0.0f && e.wanderSpeed <= 0.0f) {
+                    // idle 且扫描冷却到：前方有草丛 → 开吃草周期（headPitch 动画 + 中段消耗）；无 → 重置短冷却再等。
+                    if (sheepEatGrass(e, world, worldW, worldD, /*consume=*/false)) {
+                        e.eatTimer = kEatDuration; // 进入周期（apply 阈值时才真正消耗，保低头→嚼→抬头 时序）
+                        e.eatApplied = false;
+                        dirty = true;
+                    } else {
+                        e.eatCooldown = kEatScanInterval; // 空扫描 → 节流冷却
+                    }
+                }
+            }
 
             // 受击红闪衰减（非 dead Mob）：仅在跨过 0 时 bump（红闪期间 colorAt 恒红无需每帧 bump；结束翻回 baseColor）。
             if (e.hurtFlash > 0.0f) {
                 e.hurtFlash -= float(dt);
                 if (e.hurtFlash <= 0.0f) { e.hurtFlash = 0.0f; dirty = true; }
+            }
+
+            // t241 行走动画相位推进：moveSpeed>0（行走 / 被推）→ walkPhase 前进（fmod 2π，QML 据它驱动腿摆）；
+            //   idle / 吃草 / 撞墙 → 冻结（moveSpeed=0 不进，腿停于上次相位）。每推进帧 bump dirty 让绑定刷新。
+            if (e.moveSpeed > 0.0f) {
+                e.walkPhase = std::fmod(e.walkPhase + e.moveSpeed * float(dt) * kWalkFreq, 6.2831853f);
+                dirty = true;
             }
         }
 

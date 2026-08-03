@@ -29,23 +29,32 @@
 //     扫 mob AABB footprint 覆盖的所有格子（仿 player aabbHitsSolid；非旧版「只查中心格」），任一实体
 //     方块 → 撤回该轴推动（防穿墙 + 消除斜推角落 jitter——旧版单格检查致 mob 入墙反复跳变）。
 //
-// t239 生物基类（AI / 物理 / 血量 / 受击 / 死亡）：
+// t239 生物基类（AI / 物理 / 血量 / 受击 / 死亡）+ t241 行走动画 + 羊吃草：
 //   - **AI wander 自主移动**（tick 内 aiWander）：时间片倒计时 wanderTimer；到 0 随机选新朝向 yawRad +
 //     随机决定 idle（speed=0，~25%）/ 行走（speed=kWalkSpeed），重置 timer∈[kWanderMin, kWanderMax]。
 //     行走时按 yaw 算水平位移（与 player 同 yaw 约定：dir = (-sin, 0, -cos) → QML eulerRotation.y = yawDeg
 //     使模型 -Z 前）正对行走方向），逐轴（X 后 Z）做世界边界 clamp + 方块碰撞撤回（复用 mobAabbHitsSolid）。
 //     撞墙（两轴都未动）→ 缩短 timer 下帧大概率换向离开墙角。机制等价 MC passive mob 的「游荡 + 停驻」
 //     循环（随机选向 + 时间片），非确定性（生物 AI 非世界生成，不涉 §2-K）。
+//   - **t241 行走动画相位 walkPhase**：tick 内 moveSpeed>0（行走）时推进 walkPhase（fmod 2π）；idle / 吃草 /
+//     死亡 → 冻结（腿停于上次相位）。walkPhaseAt(i) 供 QML 驱动 MobModel 腿摆（每 active 帧 bump revision 让
+//     绑定刷新；idle 时 EntityManager 返回同一 float → MobModel.setWalkPhase 早退不重建）。
+//   - **t241 羊吃草 AI**（仅 mobType==MobSheep）：idle 且扫描冷却到 → 检测前方一格草丛（TallGrass），找到则
+//     进入吃草周期（eatTimer=kEatDuration，期间强制 idle 站立 + 头部俯仰动画）。周期推进到 apply 阈值时
+//     消耗草丛：草丛→空气 + 其下草方块→泥土（机制等价 MC 羊吃草：草丛消失、下方草地变泥土）。写入走
+//     World::setWaterSilent（通用静默 state 写入口；非玩家破块 → 不发 broken/placed，免粒子 / 音 / 掉落噪音，
+//     同水流蔓延 / 作物生长模式）。headPitchAt(i) 据吃草进度返 sin(πp) 包络（负值=低头），供 QML 驱动羊头俯仰。
 //   - **血量 / 受击 / 死亡态**：maxHealth/health（默认 10 = MC 1.0 猪/牛/羊 5 心）；damageEntity(i, amount)
 //     扣血 + 设 hurtFlash=kHurtFlashTime（QML 据红闪显红）；health≤0 → dead=true + deathTimer=kDeathTime +
 //     emit mobDied（坐标 + mobType，t242 据它掉落猪排/皮革/羊毛）。dead 期间冻结 AI / 重力（仅 deathTimer
 //     倒计时），到 0 移除（给 QML 播死亡动画窗口）。resolvePlayerPush 跳过 dead mob（尸体不被推）。
 //
-// 分层（PLAN §2）：本层属 Entities（位于 Game/Physics 之下、World 之上）。向下只读 World（isSolid/
-// blockAt），不依赖 Renderer/Physics/QtQuick3D。tick / resolvePlayerPush / damageEntity 由 PlayerController
-// （Game/Physics 层）每帧 / 攻击时调（C++ 直调，非 Q_INVOKABLE 优先——避开 moc 对 World* 前向类型的
-// metatype 处理，同 ItemEntityManager 先例；damageEntity 兼 Q_INVOKABLE 供调试 / t242 攻击路径双入口）。
-// 呈现层（Main.qml 的 Repeater）只读 count/posAt/colorAt/yawAt/healthAt/...，自发渲染，绝不反向写
+// 分层（PLAN §2）：本层属 Entities（位于 Game/Physics 之下、World 之上）。向下读写 World（读 isSolid/
+// blockAt；t241 羊吃草写 setWaterSilent —— 系统模拟静默写栅格，仍只向下依赖 World，不反向依赖 Renderer/
+// Physics/QtQuick3D）。tick / resolvePlayerPush / damageEntity 由 PlayerController（Game/Physics 层）每帧 /
+// 攻击时调（C++ 直调，非 Q_INVOKABLE 优先——避开 moc 对 World* 前向类型的 metatype 处理，同
+// ItemEntityManager 先例；damageEntity 兼 Q_INVOKABLE 供调试 / t242 攻击路径双入口）。呈现层（Main.qml
+// 的 Repeater）只读 count/posAt/colorAt/yawAt/walkPhaseAt/headPitchAt/healthAt/...，自发渲染，绝不反向写
 // （PLAN §2 分层：呈现层只消费 Entities 数据，同 blockBroken→粒子 / spawnItem→掉落物 模式）。
 class World; // 前向声明（tick / resolvePlayerPush / aiWander 只读 World::isSolid/blockAt；完整定义在 .cpp include）
 class EntityManager : public QObject
@@ -113,6 +122,13 @@ public:
     //   越 mob（非 Mob kind）/ 越界 → 安全默认（yaw 0 / speed 0）。
     Q_INVOKABLE float yawAt(int i) const;
     Q_INVOKABLE float moveSpeedAt(int i) const;
+    // t241 行走动画相位（弧度；行走时每帧推进，idle/吃草/死亡冻结）。QML 据 it 驱动 MobModel 腿摆
+    //   （绑 `walkPhase: {revision; walkPhaseAt(i)}`）。非 Mob / 越界 → 0。
+    Q_INVOKABLE float walkPhaseAt(int i) const;
+    // t241 羊头部俯仰（弧度，负=低头吃草）：仅 mobType==MobSheep 且处于吃草周期时返 sin(πp) 包络（中段
+    //   最深、起末归零）；其余 mob / 非吃草态 → 0（MobModel 头走轴对齐快路径不旋转）。QML 据 it 驱动
+    //   MobModel 头俯仰（绑 `headPitch: {revision; headPitchAt(i)}`）。
+    Q_INVOKABLE float headPitchAt(int i) const;
     // t239 mob 子类 id（t240 pig/cow/sheep；t242 据它选掉落物、t243 spawn egg 据 it 选生成类型）。越界→0。
     Q_INVOKABLE int mobTypeAt(int i) const;
     // t239 mob 血量 / 受击 / 死亡态（呈现层心条 / 红闪 / 死亡动画；t242 攻击 HUD 读）：
@@ -178,6 +194,11 @@ private:
         float wanderTimer = 0.0f;// 到下次选向倒计时（秒）；<=0 → 新 yawRad + 新 wanderSpeed + 重置 timer
         float wanderSpeed = 0.0f;// 当前 AI 行走速度（blocks/s；0=idle 停驻 / kWalkSpeed=行走）；time-slice 随机
         float moveSpeed = 0.0f;  // 当前有效水平速度（= wanderSpeed 行走时；撞墙/idle/死亡=0；expose 供 t241 腿摆）
+        float walkPhase = 0.0f;  // t241 行走动画相位（弧度）：moveSpeed>0 时推进（fmod 2π），余冻结；QML 腿摆读
+        // t241 羊吃草态（仅 mobType==MobSheep 用；其余 mob 留默认 0/false 不触发）：
+        float eatTimer = 0.0f;   // >0 = 正处吃草周期（秒，倒数到 0 结束）；周期内强制 idle 站立 + 头部俯仰
+        bool  eatApplied = false;// 本周期是否已消耗草丛（apply 阈值到达时置 true，防重复消耗）
+        float eatCooldown = 0.0f;// 到下次扫描草丛的倒计时（秒）；吃完后 kEatCooldown、空扫描后 kEatScanInterval
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;
@@ -186,6 +207,12 @@ private:
     //   （X 后 Z）世界边界 clamp + 方块碰撞撤回。返回是否真位移（驱动 dirty + moveSpeed）。worldW/worldD =
     //   世界宽/深（边界 clamp 防 mob 走出世界坠虚空）。
     bool aiWander(Entity &e, float dt, World *world, float worldW, float worldD);
+
+    // t241 羊吃草：检测/消耗 entity 前方一格草丛。consume=false 仅检测（决定是否进入吃草周期）；
+    //   consume=true 则写入（草丛→空气 + 其下草方块→泥土，走 World::setWaterSilent 静默写，非玩家破块
+    //   → 不发 broken/placed，免粒子/音/掉落噪音）。返回是否在前方找到草丛（TallGrass）。
+    //   目标格 = 沿 yaw 朝向 reach=0.7 前方列、y=身体格（草丛所在）+ 其下地表格（草方块）；OOB → 安全 false。
+    bool sheepEatGrass(Entity &e, World *world, float worldW, float worldD, bool consume);
 
     static constexpr int kCap = 64;            // 实体数上限（测试用，防溢出）
     static constexpr float kGravity = 28.0f;   // 重力加速度（blocks/s²；与玩家/掉落物同值，世界手感一致）
@@ -199,6 +226,15 @@ private:
     static constexpr float kIdleChance = 0.25f;   // 每次选向进入 idle（speed=0 停驻）的概率
     static constexpr float kHurtFlashTime = 0.5f; // 受击红闪持续秒数（机制等价 MC mob 受击 10 tick = 0.5s）
     static constexpr float kDeathTime = 0.5f;     // 死亡到移除窗口（给 QML 播死亡动画；机制等价 MC 死亡动画）
+    // t241 行走动画 / 羊吃草常量：
+    static constexpr float kWalkFreq = 6.2831853f; // 行走相位推进系数（=2π → 每 block 行走完成一个完整腿摆周期；
+                                                   //   moveSpeed * dt * kWalkFreq；机制等价 MC mob 每步一摆）
+    static constexpr float kEatDuration = 1.2f;    // 吃草周期总时长（秒；头低→嚼→抬 包络）；期间强制 idle 站立
+    static constexpr float kEatApplyAt  = 0.5f;    // 周期内消耗草丛的时刻（秒；近 sin(πp) 包络峰 → 头最低时嚼）
+    static constexpr float kEatCooldown = 2.0f;    // 吃完一棵后到下次扫描的冷却（秒；防连续吃完一片）
+    static constexpr float kEatScanInterval = 1.0f; // 空扫描（前方无草）后到下次扫描的间隔（秒；节流扫描开销）
+    static constexpr float kEatReach = 0.7f;       // 检测前方草丛的水平距离（block；头部前方 ~ 半格多）
+    static constexpr float kEatHeadPitch = -0.6f;  // 吃草头部俯仰峰值（弧度，负=低头；headPitchAt 据 sin(πp) 调制）
 };
 
 #endif // ENTITYMANAGER_H

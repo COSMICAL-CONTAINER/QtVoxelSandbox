@@ -2268,8 +2268,12 @@ Window {
                     }
                     Model {
                         // t240 猪（mobType 1）：MobModel 方块化原创模型 + mob_pig 贴图。
+                        // t241 行走动画：walkPhase 绑定驱动 4 腿对角摆动（moveSpeed>0 时 EntityManager 每帧推进相位）。
                         visible: entKind === EntityManager.Mob && entMobType === 1
-                        geometry: MobModel { mobType: 1 }
+                        geometry: MobModel {
+                            mobType: 1
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
@@ -2280,8 +2284,12 @@ Window {
                     }
                     Model {
                         // t240 牛（mobType 2）：MobModel + mob_cow 贴图（高大长身 + 头顶两小角盒）。
+                        // t241 行走动画：walkPhase 绑定驱动腿摆（同猪）。
                         visible: entKind === EntityManager.Mob && entMobType === 2
-                        geometry: MobModel { mobType: 2 }
+                        geometry: MobModel {
+                            mobType: 2
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
@@ -2291,8 +2299,14 @@ Window {
                     }
                     Model {
                         // t240 羊（mobType 3）：MobModel + mob_sheep 贴图（圆胖躯干 + 小头 + 短腿）。
+                        // t241 行走动画 + 吃草低头：walkPhase 驱动腿摆；headPitch 驱动头部俯仰（仅吃草周期内非零，
+                        //   headPitchAt 据 eatTimer 返 sin(πp) 包络 → 低头→嚼→抬头；草丛在 C++ tick 内被消耗）。
                         visible: entKind === EntityManager.Mob && entMobType === 3
-                        geometry: MobModel { mobType: 3 }
+                        geometry: MobModel {
+                            mobType: 3
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                            headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                        }
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting

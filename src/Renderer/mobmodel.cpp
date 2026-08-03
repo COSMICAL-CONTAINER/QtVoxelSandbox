@@ -5,6 +5,7 @@
 #include <QtGlobal> // quint32
 
 #include <algorithm> // std::min/max
+#include <cmath>     // std::sin, std::cos
 #include <vector>
 
 // 顶点：pos(3) + uv(2) = 5 float = 20 字节。每面铺整张贴图 [0,1]×[0,1]（全脸 UV，同 CrackBox）。
@@ -33,6 +34,9 @@ const Sgn kFace[6][4] = {
     // -Z（前；头朝此向）
     {{+1, -1, -1, 1, 0}, {-1, -1, -1, 0, 0}, {-1, +1, -1, 0, 1}, {+1, +1, -1, 1, 1}},
 };
+
+// t241 腿摆动幅度（弧度，约 29°）。机制等价 MC 四足 mob 腿摆幅（非精确数值复刻）。
+constexpr float kLegSwingAmp = 0.5f;
 
 // 追加一个轴对齐盒（心 cx,cy,cz；半长 hx,hy,hz）到 verts/idx，全脸 UV。每面 4 角 + 2 三角，24 顶点 / 36 索引。
 // base = 当前进度顶点数；索引以 base 为偏移写入。（与 hoe.cpp / pickaxe.cpp addBox 同实现思路，仅多 uv 通道。）
@@ -66,22 +70,78 @@ void addBox(float cx, float cy, float cz, float hx, float hy, float hz,
     bMax.setZ(std::max(bMax.z(), cz + hz));
 }
 
-// 四条腿对称放置（前 / 后两对）。legHy = 腿半高；legY = 腿心 y；legOffX/Z = 腿心相对躯干中心的水平偏移。
-// 腿粗细 legW（半宽）。复用于三种 mob（仅参数不同）。
+// t241 追加一个**绕过 (pivY, pivZ) 的 X 轴旋转**的盒（腿摆动 / 头部俯仰用）。X 轴旋转 → x 分量不变
+//   （故无 pivX 参数）；仅 y/z 两轴在 Y-Z 平面内绕 pivot 旋转。每角顶点旋转后写入；bounds 用旋转后顶点的
+//   实际范围累计（旋转改变 y/z 区间，addBox 的解析 AABB 不再适用）。angle=0 时几何等价 addBox（cos=1/sin=0），
+//   但仍走 cos/sin 路径——调用方对恒 0 角度（猪/牛头）应走 addBox 快路径（见 addHeadRot）。
+void addBoxRot(float cx, float cy, float cz, float hx, float hy, float hz,
+               float pivY, float pivZ, float angle,
+               std::vector<MobVtx> &verts, std::vector<quint32> &idx,
+               QVector3D &bMin, QVector3D &bMax)
+{
+    const float ca = std::cos(angle), sa = std::sin(angle);
+    const quint32 base = quint32(verts.size());
+    for (int f = 0; f < 6; ++f) {
+        for (int c = 0; c < 4; ++c) {
+            const Sgn &s = kFace[f][c];
+            MobVtx vt;
+            vt.x = cx + float(s.sx) * hx;                       // X 轴旋转 → x 不变
+            const float ly = cy + float(s.sy) * hy;
+            const float lz = cz + float(s.sz) * hz;
+            const float dy = ly - pivY;
+            const float dz = lz - pivZ;
+            vt.y = pivY + dy * ca - dz * sa;                     // X 轴旋转（右手）：y' = y·cos − z·sin
+            vt.z = pivZ + dy * sa + dz * ca;                     //             z' = y·sin + z·cos
+            vt.u = s.u;
+            vt.v = s.v;
+            verts.push_back(vt);
+            // 旋转后实际范围（逐顶点；解析 AABB 对旋转盒不再适用）。
+            bMin.setX(std::min(bMin.x(), vt.x)); bMax.setX(std::max(bMax.x(), vt.x));
+            bMin.setY(std::min(bMin.y(), vt.y)); bMax.setY(std::max(bMax.y(), vt.y));
+            bMin.setZ(std::min(bMin.z(), vt.z)); bMax.setZ(std::max(bMax.z(), vt.z));
+        }
+        const quint32 b = base + quint32(f * 4);
+        idx.push_back(b + 0); idx.push_back(b + 1); idx.push_back(b + 2);
+        idx.push_back(b + 0); idx.push_back(b + 2); idx.push_back(b + 3);
+    }
+}
+
+// t241 头部盒（+ 牛角等头附肢）：pitch==0 走 addBox 轴对齐快路径（猪 / 牛 / 非吃草态羊，每帧不进旋转），
+//   pitch!=0 走 addBoxRot 绕颈附着点（头后侧面心 = (cx, cy, cz+hz)，头与躯干相接处）旋转。
+//   pitch<0 = 低头（吃草）。负值使头前下部下沉（muzzle 朝地），机制等价 MC 羊吃草低头姿态。
+void addHeadRot(float cx, float cy, float cz, float hx, float hy, float hz, float pitch,
+                std::vector<MobVtx> &verts, std::vector<quint32> &idx,
+                QVector3D &bMin, QVector3D &bMax)
+{
+    if (pitch == 0.0f) { // 恒 0（猪/牛）→ 轴对齐快路径，免 cos/sin
+        addBox(cx, cy, cz, hx, hy, hz, verts, idx, bMin, bMax);
+        return;
+    }
+    // 颈附着点 = 头盒后侧面心（+Z 侧 = 朝躯干侧）：(cx, cy, cz+hz)。
+    addBoxRot(cx, cy, cz, hx, hy, hz, cy, cz + hz, pitch, verts, idx, bMin, bMax);
+}
+
+// t241 四条腿 walk cycle：绕各腿髋部（腿盒顶 = 盒心 y + 半高 legHy）做 X 轴摆动。
+//   对角配对（机制等价四足行走）：前左(−X,−Z) + 后右(+X,+Z) 同相 +sw；前右(+X,−Z) + 后左(−X,+Z) 反相 −sw。
+//   sw = kLegSwingAmp·sin(walkPhase)。walkPhase 由 EntityManager 据移动速度推进（moveSpeed>0 时）。
+//   腿盒 pivot.x = 腿盒中心 x（X 轴旋转不依赖 pivot.x，故 addBoxRot 签名无 pivX；这里隐式 = 各腿 cx）。
 void addLegs(float legY, float legHy, float legOffX, float legOffZ, float legW,
+             float walkPhase,
              std::vector<MobVtx> &verts, std::vector<quint32> &idx,
              QVector3D &bMin, QVector3D &bMax)
 {
-    addBox(-legOffX, legY, -legOffZ, legW, legHy, legW, verts, idx, bMin, bMax); // 前左
-    addBox( legOffX, legY, -legOffZ, legW, legHy, legW, verts, idx, bMin, bMax); // 前右
-    addBox(-legOffX, legY,  legOffZ, legW, legHy, legW, verts, idx, bMin, bMax); // 后左
-    addBox( legOffX, legY,  legOffZ, legW, legHy, legW, verts, idx, bMin, bMax); // 后右
+    const float hipTopY = legY + legHy; // 髋部 = 腿盒顶面 y（摆动轴位置）
+    const float sw = kLegSwingAmp * std::sin(walkPhase);
+    addBoxRot(-legOffX, legY, -legOffZ, legW, legHy, legW, hipTopY, -legOffZ, +sw, verts, idx, bMin, bMax); // 前左
+    addBoxRot( legOffX, legY, -legOffZ, legW, legHy, legW, hipTopY, -legOffZ, -sw, verts, idx, bMin, bMax); // 前右
+    addBoxRot(-legOffX, legY,  legOffZ, legW, legHy, legW, hipTopY,  legOffZ, -sw, verts, idx, bMin, bMax); // 后左
+    addBoxRot( legOffX, legY,  legOffZ, legW, legHy, legW, hipTopY,  legOffZ, +sw, verts, idx, bMin, bMax); // 后右
 }
 } // namespace
 
 MobModel::MobModel(QQuick3DObject *parent) : QQuick3DGeometry(parent)
 {
-    rebuild(); // 构造期用默认 mobType=Pig 建；QML 设 mobType 时再 rebuild 到正确类型
+    rebuild(); // 构造期用默认 mobType=Pig 建；QML 设 mobType / walkPhase / headPitch 时再 rebuild
 }
 
 void MobModel::setMobType(int type)
@@ -95,10 +155,30 @@ void MobModel::setMobType(int type)
     rebuild();
 }
 
-// 按 m_mobType 选比例建「躯干 + 头 + 4 腿（+ 牛角）」多盒几何。局部原点 = 躯干中心；头朝 -Z（前）。
-// 比例经手调使每种 mob 在 ~1×1×1 碰撞立方（EntityManager radius=0.5）内可辨：
+// t241 行走相位 setter：值未变早退（idle 时 EntityManager 返回同一 float → 不触发 rebuild）；
+//   变化则 rebuild 把腿摆到新角度。QML 绑定 `{revision; walkPhaseAt(i)}` 在 revision bump 时重算。
+void MobModel::setWalkPhase(float phase)
+{
+    if (phase == m_walkPhase) return;
+    m_walkPhase = phase;
+    emit walkPhaseChanged();
+    rebuild();
+}
+
+// t241 头部俯仰 setter：同上早退；仅羊吃草周期内非零（headPitchAt 据吃草进度返 sin(πp) 包络）。
+void MobModel::setHeadPitch(float pitch)
+{
+    if (pitch == m_headPitch) return;
+    m_headPitch = pitch;
+    emit headPitchChanged();
+    rebuild();
+}
+
+// 按 m_mobType 选比例建「躯干 + 头（俯仰）+ 4 腿（摆动）（+ 牛角随头转）」多盒几何。
+// 局部原点 = 躯干中心；头朝 -Z（前）。比例经手调使每种 mob 在 ~1×1×1 碰撞立方（EntityManager radius=0.5）内可辨：
 //   - 猪：紧凑低矮、短腿、大头；   - 牛：高大长身 + 头顶两小角盒；  - 羊：圆胖躯干、小头、短腿。
 // 全脸 UV → 各盒铺同张贴图；QML 据 mobType 选 mob_pig / mob_cow / mob_sheep。
+// t241：腿走 addLegs（walkPhase 驱动对角摆动）；头走 addHeadRot（headPitch=0 → 快路径；非 0 → 绕颈俯仰）。
 void MobModel::rebuild()
 {
     std::vector<MobVtx> verts;
@@ -108,22 +188,23 @@ void MobModel::rebuild()
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
 
     if (m_mobType == 2) {
-        // 牛：高大长身 + 头顶两小角盒。机制等价 MC 牛形态（非名词照搬）。
+        // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）
-        addBox(0.00f, 0.15f, -0.60f, 0.20f, 0.22f, 0.20f, verts, idx, bMin, bMax); // 头（前伸）
-        addBox(-0.22f, 0.34f, -0.58f, 0.05f, 0.06f, 0.05f, verts, idx, bMin, bMax); // 左角
-        addBox( 0.22f, 0.34f, -0.58f, 0.05f, 0.06f, 0.05f, verts, idx, bMin, bMax); // 右角
-        addLegs(-0.30f, 0.20f, 0.20f, 0.35f, 0.10f, verts, idx, bMin, bMax); // 4 长腿
+        // 头 + 双角共享颈附着点（cy, cz+hz）→ headPitch 驱动时整组随头俯仰。
+        addHeadRot(0.00f, 0.15f, -0.60f, 0.20f, 0.22f, 0.20f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸）
+        addHeadRot(-0.22f, 0.34f, -0.58f, 0.05f, 0.06f, 0.05f, m_headPitch, verts, idx, bMin, bMax); // 左角
+        addHeadRot( 0.22f, 0.34f, -0.58f, 0.05f, 0.06f, 0.05f, m_headPitch, verts, idx, bMin, bMax); // 右角
+        addLegs(-0.30f, 0.20f, 0.20f, 0.35f, 0.10f, m_walkPhase, verts, idx, bMin, bMax); // 4 长腿
     } else if (m_mobType == 3) {
         // 羊：圆胖躯干、小头、短腿。机制等价 MC 羊形态（非名词照搬）。
         addBox(0.00f, 0.05f, 0.00f, 0.30f, 0.28f, 0.42f, verts, idx, bMin, bMax); // 躯干（圆胖）
-        addBox(0.00f, 0.10f, -0.45f, 0.14f, 0.16f, 0.16f, verts, idx, bMin, bMax); // 小头
-        addLegs(-0.28f, 0.16f, 0.18f, 0.26f, 0.09f, verts, idx, bMin, bMax); // 4 短腿
+        addHeadRot(0.00f, 0.10f, -0.45f, 0.14f, 0.16f, 0.16f, m_headPitch, verts, idx, bMin, bMax); // 小头（吃草时俯仰）
+        addLegs(-0.28f, 0.16f, 0.18f, 0.26f, 0.09f, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
     } else {
         // 猪（默认 / 兜底）：紧凑低矮、短腿、大头。机制等价 MC 猪形态（非名词照搬）。
         addBox(0.00f, 0.00f, 0.00f, 0.35f, 0.22f, 0.45f, verts, idx, bMin, bMax); // 躯干（低矮）
-        addBox(0.00f, 0.05f, -0.50f, 0.22f, 0.22f, 0.18f, verts, idx, bMin, bMax); // 大头（前伸）
-        addLegs(-0.30f, 0.18f, 0.22f, 0.28f, 0.10f, verts, idx, bMin, bMax); // 4 短腿
+        addHeadRot(0.00f, 0.05f, -0.50f, 0.22f, 0.22f, 0.18f, m_headPitch, verts, idx, bMin, bMax); // 大头（前伸）
+        addLegs(-0.30f, 0.18f, 0.22f, 0.28f, 0.10f, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
     }
 
     // 写入顺序（lessons-learned）：clear → setVertexData → setIndexData → setStride
@@ -134,7 +215,7 @@ void MobModel::rebuild()
     setVertexData(QByteArray(reinterpret_cast<const char *>(verts.data()), int(verts.size() * sizeof(MobVtx))));
     setIndexData(QByteArray(reinterpret_cast<const char *>(idx.data()), int(idx.size() * sizeof(quint32))));
     setStride(int(sizeof(MobVtx)));
-    setBounds(bMin, bMax); // 局部 AABB（配合 Model 变换给视锥剔除盒）
+    setBounds(bMin, bMax); // 局部 AABB（配合 Model 变换给视锥剔除盒；含旋转后的腿 / 头实际范围）
     setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);
 
     addAttribute(QQuick3DGeometry::Attribute::PositionSemantic,

@@ -26,15 +26,29 @@
 //   行走方向」一致 → delegate Node eulerRotation.y = yawAt 后头朝行走方向）。bounds 据各盒实际范围算
 //   （配合 Model 变换给视锥剔除盒）。
 //
-// 分层（PLAN §2）：本类属 Renderer（依赖 QtQuick3D），只产出几何。mobType / 名称 / 血量在 Entities 层
-// （EntityManager）；贴图在呈现层（Main.qml Texture）。本类不读 EntityManager、不持贴图——mobType 由
-// QML 据 entityManager.mobTypeAt 设。依赖只向下。与 hoe.h / pickaxe.h 同层同风格（多盒 addBox 模式，
-// 仅多 uv 通道 + mobType 选择比例）。
+// t241 动画（腿摆 walk cycle + 头部俯仰）：
+//   - walkPhase（弧度相位）：>0 时驱动 4 腿绕各自髋部（腿盒顶）做 X 轴摆动，幅度 kLegSwingAmp·sin(phase)；
+//     对角配对（前左+后右 / 前右+后左 反相），机制等价四足 walk cycle。QML 绑定
+//     `walkPhase: entityManager.walkPhaseAt(i)`——moveSpeed>0（行走）时 EntityManager 每帧推进相位；
+//     idle/吃草 → 冻结（腿停于上次位置）。rebuild 在 setWalkPhase 时触发（几何每 active 帧重算一次，
+//     非活动态早退不重算 → 不增开销）。
+//   - headPitch（弧度，负=低头）：头部盒（+ 牛角）绕「头后侧颈附着点」X 轴俯仰。QML 绑定
+//     `headPitch: entityManager.headPitchAt(i)`——仅羊吃草周期内非零（sin(πp) 包络，中段最深、起末归零），
+//     猪 / 牛恒 0（走 addBox 轴对齐快路径，不进旋转）。
+//
+// 分层（PLAN §2）：本类属 Renderer（依赖 QtQuick3D），只产出几何。mobType / 名称 / 血量 / 相位在 Entities
+//   层（EntityManager）；贴图在呈现层（Main.qml Texture）。本类不读 EntityManager、不持贴图——动画相位由
+//   QML 据 entityManager.walkPhaseAt / headPitchAt 设。依赖只向下。与 hoe.h / pickaxe.h 同层同风格
+//   （多盒 addBox 模式，仅多 uv 通道 + mobType 选择比例 + 动画相位）。
 class MobModel : public QQuick3DGeometry
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(MobModel)
     Q_PROPERTY(int mobType READ mobType WRITE setMobType NOTIFY mobTypeChanged)
+    // t241 行走动画相位（弧度）：setWalkPhase 触发 rebuild 把腿摆到新角度（moveSpeed>0 时每帧变）。
+    Q_PROPERTY(float walkPhase READ walkPhase WRITE setWalkPhase NOTIFY walkPhaseChanged)
+    // t241 头部俯仰（弧度，负=低头吃草）：仅羊绑非零；猪/牛恒 0 → addBox 轴对齐快路径。
+    Q_PROPERTY(float headPitch READ headPitch WRITE setHeadPitch NOTIFY headPitchChanged)
 
 public:
     explicit MobModel(QQuick3DObject *parent = nullptr);
@@ -42,13 +56,23 @@ public:
     int mobType() const { return m_mobType; }
     void setMobType(int type);
 
+    float walkPhase() const { return m_walkPhase; }
+    void setWalkPhase(float phase);
+
+    float headPitch() const { return m_headPitch; }
+    void setHeadPitch(float pitch);
+
 signals:
     void mobTypeChanged();
+    void walkPhaseChanged();
+    void headPitchChanged();
 
 private:
-    void rebuild(); // 按 m_mobType 选比例建多盒几何；顶点位置 / bounds 随 mobType 变。
+    void rebuild(); // 按 m_mobType / m_walkPhase / m_headPhase 选比例 + 动画角度建多盒几何。
 
-    int m_mobType = 1; // 默认猪（合法非空，防未设 mobType 时空几何）
+    int m_mobType = 1;    // 默认猪（合法非空，防未设 mobType 时空几何）
+    float m_walkPhase = 0.0f; // 行走相位（弧度）；sin 驱动腿摆
+    float m_headPitch = 0.0f; // 头部俯仰（弧度，负=低头）；0 → 头走轴对齐快路径
 };
 
 #endif // MOBMODEL_H
