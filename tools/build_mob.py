@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""生成猪 / 牛 / 羊生物（passive mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
+
+机制等价 MC 1.0 三种被动生物（pig / cow / sheep）—— 名称 / 模型 / 贴图全原创、**不**拷贝任何
+MC 资产（PLAN §9 区隔）。本脚本程序生成三种 mob 各一张「全脸」贴图（MobModel 几何的每面都铺
+同一张贴图，非 MC 式 UV 拆皮）—— 简单稳健，配方块化模型比例让三种 mob 肉眼可辨。
+
+视觉意图（每张 16×16，无 alpha 透明底 —— 实心贴图走不透明 PrincipledMaterial）：
+  - mob_pig.png   ：粉红皮 + 几个深粉斑点 + 浅腹纹（读作「粉红猪皮」）。
+  - mob_cow.png   ：深棕底 + 不规则白斑 + 黑色「角痕」点缀（读作「牛皮斑纹」）。
+  - mob_sheep.png ：奶白羊毛 + 灰阴影卷曲纹（读作「羊毛卷」）。
+
+图案采用固定位置 + 确定性散布（无随机源 → CI 可复现、与 build_atlas.py / build_tall_grass.py 同风格）。
+
+输出（覆盖写入 textures/）：
+  mob_pig.png   /   mob_cow.png   /   mob_sheep.png
+
+依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
+生成原创像素图，§9 override (a)）。
+"""
+import os
+from PIL import Image
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(HERE, "..", "textures")
+TS = 16  # 贴图边长（像素）
+
+
+def fill(img, rgb):
+    """整张填一色。"""
+    px = img.load()
+    for y in range(TS):
+        for x in range(TS):
+            px[x, y] = rgb
+
+
+def blot(img, cells, rgb):
+    """把指定坐标列表的像素改色（确定性的「斑点」分布，无随机源）。"""
+    px = img.load()
+    for (x, y) in cells:
+        if 0 <= x < TS and 0 <= y < TS:
+            px[x, y] = rgb
+
+
+def make_pig():
+    """猪：粉红皮 + 深粉斑点 + 浅腹纹。机制等价 MC 猪皮（非名词照搬）。"""
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xf0, 0xa8, 0xb0, 255)   # 粉红皮主色 #f0a8b0
+    fill(img, base)
+
+    # 深粉斑点（散布于皮面，固定坐标）
+    dark = (0xd0, 0x80, 0x88, 255)   # 深粉 #d08088
+    blot(img, [
+        (3, 4), (4, 4), (3, 5),
+        (9, 3), (10, 3), (10, 4),
+        (6, 9), (7, 9), (6, 10),
+        (12, 10), (13, 10), (12, 11),
+        (2, 12), (3, 12),
+    ], dark)
+
+    # 浅腹纹（底部 2 行换浅色，拟腹部更亮 —— 仅底排，因每面铺同图，太多条纹会显乱）
+    light = (0xf8, 0xc4, 0xc8, 255)  # 浅粉 #f8c4c8
+    blot(img, [
+        (x, TS - 1) for x in range(2, TS - 2)
+    ], light)
+
+    out = os.path.join(SRC, "mob_pig.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def make_cow():
+    """牛：深棕底 + 不规则白斑 + 黑角痕点缀。机制等价 MC 牛皮斑纹（非名词照搬）。"""
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0x5a, 0x40, 0x30, 255)   # 深棕 #5a4030
+    fill(img, base)
+
+    # 白色不规则斑块（皮纹典型特征）—— 两簇：左上一团 + 右中一团
+    white = (0xf0, 0xe8, 0xd8, 255)  # 米白 #f0e8d8
+    blot(img, [
+        # 左上团
+        (2, 2), (3, 2), (4, 2),
+        (2, 3), (3, 3),
+        (3, 4),
+        # 右中团
+        (10, 7), (11, 7), (12, 7),
+        (10, 8), (11, 8),
+        (11, 9),
+        # 右下角小斑
+        (13, 12), (13, 13),
+    ], white)
+
+    # 黑角痕点缀（深棕上的更深小点，拟皮皱 / 角痕质感）
+    black = (0x2a, 0x1c, 0x14, 255)  # 深棕近黑 #2a1c14
+    blot(img, [
+        (6, 5), (9, 4), (5, 11), (8, 12), (12, 2), (1, 9),
+    ], black)
+
+    out = os.path.join(SRC, "mob_cow.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def make_sheep():
+    """羊：奶白羊毛 + 灰阴影卷曲纹（拟羊毛卷）。机制等价 MC 羊毛（非名词照搬）。"""
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xf5, 0xf0, 0xe8, 255)   # 奶白羊毛 #f5f0e8
+    fill(img, base)
+
+    # 灰阴影卷曲点（拟羊毛卷凹凸 —— 散布小灰点，固定坐标）
+    shade = (0xd0, 0xc8, 0xc0, 255)  # 浅灰 #d0c8c0
+    blot(img, [
+        (2, 3), (4, 2), (6, 4), (8, 3), (10, 2), (12, 4), (14, 3),
+        (3, 6), (5, 7), (7, 6), (9, 7), (11, 6), (13, 7),
+        (2, 9), (4, 10), (6, 9), (8, 10), (10, 9), (12, 10), (14, 9),
+        (3, 12), (5, 13), (7, 12), (9, 13), (11, 12), (13, 13),
+    ], shade)
+
+    # 深一点的灰纹（少量，提层次）
+    deep = (0xb0, 0xa8, 0xa0, 255)   # 中灰 #b0a8a0
+    blot(img, [
+        (5, 5), (10, 6), (3, 11), (12, 11),
+    ], deep)
+
+    out = os.path.join(SRC, "mob_sheep.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def main():
+    make_pig()
+    make_cow()
+    make_sheep()
+
+
+if __name__ == "__main__":
+    main()

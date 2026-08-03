@@ -176,6 +176,12 @@ Window {
         // 清上一世界的掉落物 / mob 残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
+        // t240 进世界生成猪 / 牛 / 羊各一只于出生点附近地表（ EntityManager 已注册 3 类 mobType 1/2/3；
+        //   生物蛋生成系统推迟到 t243，故本任务暂以固定 spawn 验证模型 + 贴图可见）。坐标取出生列 (40,40)
+        //   附近三格、Y = worldgen 地表 +1（落地上方一格 → 重力 tick 贴地表不摔伤）。§9 区隔：模型 / 贴图
+        //   原创方块化（不照搬 MC），机制对齐 MC 1.0 passive mob（猪 / 牛 / 羊三种）。spawnMobTyped 第五参
+        //   color 仅 mobType 0（测试生物）单色路径读，pig/cow/sheep 走 MobModel + 贴图 → 传占位串即可。
+        spawnInitialMobs()
         appState = "playing"
         player.grab()
         keyInput.forceActiveFocus()
@@ -310,6 +316,23 @@ Window {
         appState = "menu"
         audio.stopAmbient()   // t177 环境音：回主菜单停风声床
         audio.stopWaterFlow() // t223 水流声：回主菜单停（菜单态无声）
+    }
+    // t240 进世界生成猪 / 牛 / 羊各一只（出生点附近地表）。EntityManager 已注册 mobType 1/2/3 + spawnMobTyped
+    //   入口；生物蛋系统推迟到 t243，故本任务暂以固定 spawn 让模型 + 贴图肉眼可见。坐标取出生列 (40,40)
+    //   附近三格、Y = theWorld.heightAt(x,z) + 1（worldgen 地表上方一格 → 重力 tick 贴地表，出生落差 0 不摔伤）。
+    //   §9 区隔：三种 mob 模型 / 贴图全原创方块化（不照搬 MC）；机制对齐 MC 1.0 passive mob 三种。
+    //   spawnMobTyped 第五参 color 仅 mobType 0（通用测试生物）单色路径读；pig/cow/sheep 走 MobModel + 贴图，
+    //   传占位串。maxHealth=10（MC 1.0 passive mob 5 心）。
+    function spawnInitialMobs() {
+        // 猪（mobType 1）— 出生点左侧两格。
+        let h = theWorld.heightAt(36, 38)
+        if (h > 0) entityManager.spawnMobTyped(36, h + 1, 38, 1, "#f0a8b0", 10)
+        // 牛（mobType 2）— 出生点前方两格。
+        h = theWorld.heightAt(40, 36)
+        if (h > 0) entityManager.spawnMobTyped(40, h + 1, 36, 2, "#5a4030", 10)
+        // 羊（mobType 3）— 出生点右侧两格。
+        h = theWorld.heightAt(44, 38)
+        if (h > 0) entityManager.spawnMobTyped(44, h + 1, 38, 3, "#f5f0e8", 10)
     }
     // t78 立即重生（死亡界面按钮）：满血 + 清死亡态 + 传回出生点 + 清挖掘/飞行态 + 重新锁定指针回游戏。
     //   PlayerState.respawn 复位血量/死亡态；PlayerController.respawn 传回出生点 + 清物理态；
@@ -1118,6 +1141,14 @@ Window {
 
         // 共享图集纹理：3×3=9 个 per-chunk Model 共用一份 atlas（声明一次、按 id 引用）。
         Texture { id: voxelAtlas; source: "qrc:/textures/atlas.png"; generateMipmaps: false }
+
+        // t240 猪牛羊贴图：三种 passive mob 各一张「全脸」贴图（build_mob.py 程序生成原创像素图，§9a 区隔
+        //   不照搬 MC）。MobModel 几何每面铺整张贴图 [0,1]×[0,1]（同 CrackBox 全脸 UV）→ mobHost delegate 据
+        //   entityManager.mobTypeAt 选 pig/cow/sheep 贴图。实心无 alpha → 走不透明 PrincipledMaterial（无需
+        //   alphaCutoff / opacity 契约）。受击红闪（hurtFlashAt>0）由 baseColor 红覆盖贴图（mobPigRed 等）。
+        Texture { id: mobPigTex;   source: "qrc:/textures/mob_pig.png";   generateMipmaps: false }
+        Texture { id: mobCowTex;   source: "qrc:/textures/mob_cow.png";   generateMipmaps: false }
+        Texture { id: mobSheepTex; source: "qrc:/textures/mob_sheep.png"; generateMipmaps: false }
 
         // t218 火把手持/掉落贴图：火把在世界内是异形（torchHost 木柄+火焰小立方，非 1×1×1 立方体），
         //   但手持/掉落旧路径走 BlockCube（6 面立方贴图集 tile 17）→ 即便 alphaCutoff 丢弃透明底，肉眼仍是
@@ -2213,12 +2244,18 @@ Window {
                             baseColorMap: voxelAtlas
                         }
                     }
-                    // Mob（原 t95 测试生物；t239 生物基类）：UnitCube = ±0.5 居中单位立方体（与地形 / 线框 /
-                    //   玩家模型同基准）。scale=1（1×1×1）；NoLighting。baseColor = 实体配色（colorAt），受击
-                    //   红闪（hurtFlashAt>0 → 全红，机制等价 MC mob 受击 10 tick 红闪）；随 delegate Node
-                    //   eulerRotation.y=bodyYaw 转向 AI 行走方向（t240 猪牛羊模型有前/后，纯色立方对称看不出）。
+                    // Mob（原 t95 测试生物；t239 生物基类；t240 猪牛羊模型 + 贴图）：
+                    //   - mobType 0（通用测试生物）：仍走 UnitCube 单色立方（保 t95 行为不变，spec「mobType 0 不进 MobModel」）；
+                    //   - mobType 1/2/3（猪/牛/羊）：走 MobModel 方块化原创 3D 模型 + 各自贴图（四肢+躯干+头，
+                    //     §9 区隔不照搬 MC），随 delegate Node eulerRotation.y=bodyYaw 转向 AI 行走方向（MobModel
+                    //     头朝 -Z = 行走方向；纯色立方对称看不出，方块化模型有前/后可见）。
+                    //   NoLighting（lessons-learned 红线：可见 Model 必须 NoLighting）。受击红闪（hurtFlashAt>0 →
+                    //   全红，机制等价 MC mob 受击 10 tick 红闪）：mobType 0 走 baseColor 红；mobType 1/2/3 走
+                    //   纯红 Texture（mobCowTex 的内容被红 #ff0000 baseColor 调制 → 视觉全红）。
+                    property int entMobType: { entityManager.revision; return entityManager.mobTypeAt(index) }
                     Model {
-                        visible: entKind === EntityManager.Mob
+                        // mobType 0：通用测试生物（t95/t239）—— UnitCube 单色立方（旧路径，保行为不变）。
+                        visible: entKind === EntityManager.Mob && entMobType === 0
                         geometry: UnitCube {}
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
@@ -2227,6 +2264,40 @@ Window {
                                 entityManager.revision
                                 return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : entityManager.colorAt(index)
                             }
+                        }
+                    }
+                    Model {
+                        // t240 猪（mobType 1）：MobModel 方块化原创模型 + mob_pig 贴图。
+                        visible: entKind === EntityManager.Mob && entMobType === 1
+                        geometry: MobModel { mobType: 1 }
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0 红闪语义）。
+                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                            baseColorMap: mobPigTex
+                        }
+                    }
+                    Model {
+                        // t240 牛（mobType 2）：MobModel + mob_cow 贴图（高大长身 + 头顶两小角盒）。
+                        visible: entKind === EntityManager.Mob && entMobType === 2
+                        geometry: MobModel { mobType: 2 }
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                            baseColorMap: mobCowTex
+                        }
+                    }
+                    Model {
+                        // t240 羊（mobType 3）：MobModel + mob_sheep 贴图（圆胖躯干 + 小头 + 短腿）。
+                        visible: entKind === EntityManager.Mob && entMobType === 3
+                        geometry: MobModel { mobType: 3 }
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                            baseColorMap: mobSheepTex
                         }
                     }
                     // t116 F3+B mob 碰撞箱（spec「mob scale 1.0」+ 朝向箭头）：mob AABB = 1×1×1 立方（与 mob

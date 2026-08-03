@@ -59,6 +59,12 @@ qt_add_executable(voxelsandbox
     #   区别于镐的横梁 + 两端下勾）。手持（第一/第三人称）+ 掉落实体三处统一消费，按 toolType 选镐 vs 锄。
     src/Renderer/hoe.cpp
     src/Renderer/hoe.h
+    # t240 猪牛羊方块化原创 3D 模型几何（四肢+躯干+头，§9 区隔不照搬 MC）。mobType Q_PROPERTY 选猪/牛/羊
+    #   各自比例；每面铺整张贴图（全脸 UV，非 MC UV 拆皮）。EntityManager 的 Mob 实体（mobTypeAt）经
+    #   Main.qml mobHost Repeater delegate 据其 mobType 设本几何 + 选对应贴图。Renderer 层只产出几何，
+    #   mobType / 血量 / 名称在 Entities 层，贴图在呈现层（Main.qml Texture）—— 依赖只向下。
+    src/Renderer/mobmodel.cpp
+    src/Renderer/mobmodel.h
     # t112 广告牌四边形（单面 +Z 法线）：煤/木炭/铁原矿/木棒/铁锭/玻璃 掉落实体材料段
     #   从 CrackBox 6 面立方改为单面平图标 + 朝相机（billboard），消除「6 面未封闭超立方体」观感。
     src/Renderer/billboardquad.cpp
@@ -183,6 +189,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_wheat_stage_5.png
         textures/default_wheat_stage_6.png
         textures/default_wheat_stage_7.png
+        textures/mob_pig.png                # t240 猪/牛/羊生物贴图（build_mob.py 程序生成原创像素图，§9a）
+        textures/mob_cow.png                # 三种 passive mob 各一张「全脸」贴图，MobModel 几何每面铺同图（非 MC UV 拆皮）
+        textures/mob_sheep.png
         textures/icon_cobble.png
         textures/icon_coal_ore.png
         textures/icon_crafting_table.png

@@ -72,6 +72,14 @@ public:
     enum Kind { Mob, Item, FallingBlock };
     Q_ENUM(Kind)
 
+    // t240 mob 子类 id（与 Entity.mobType 同值；Q_ENUM 供 QML 据 mobTypeAt 选 MobModel 比例 + 贴图）。
+    //   MobTest=0 通用测试生物（t239，M 键生成；QML 仍走 UnitCube 旧路径，不进 MobModel）；
+    //   MobPig/MobCow/MobSheep = 猪/牛/羊（t240 各自方块化原创 3D 模型 + 各自贴图，Main.qml 走 MobModel）。
+    //   t242 据本 enum 选死亡掉落（猪:生猪排 / 牛:皮革+牛肉 / 羊:羊毛）；t243 spawn egg 据本 enum 选生成类型。
+    //   机制等价 MC 1.0 passive mob 三种（猪/牛/羊），名称 / 模型 / 贴图全原创（PLAN §9 区隔，不照搬 MC 美术）。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3 };
+    Q_ENUM(MobType)
+
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
     //   落地后由 spawnMobTyped 直接生成猪/牛/羊。位置存该格中心 (x+0.5, y+0.5, z+0.5)；从高处生成时由重力
     //   tick 落到地表。radius=0.5、pushable=true。达 kCap → 跳过 + 告警（防溢出）。
