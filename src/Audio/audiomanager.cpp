@@ -102,6 +102,8 @@ struct AudioManager::Data
     Clip doorCloseClip{":/sounds/door_close.wav"};
     // t177 受伤单件（玩家自身受伤声；不分材质）。PlayerState::damaged → playHurt 触发。
     Clip hurtClip{":/sounds/hurt.wav"};
+    // t248 mob 受击单件（生物受击专属声；与玩家 hurt 区分）。PlayerController::mobAttacked → playMobHurt 触发。
+    Clip mobHurtClip{":/sounds/mob_hurt.wav"};
     // t177 环境音 / 风声床单件（长循环风声；构造后置 looping=true，start/stop 控制开关，
     //   setAmbientLevel 调强度）。进入 playing 启动、退菜单停止。
     Clip ambientClip{":/sounds/ambient_wind.wav"};
@@ -231,6 +233,7 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->doorOpenClip);
     d->loadClip(d->doorCloseClip);
     d->loadClip(d->hurtClip);
+    d->loadClip(d->mobHurtClip);
     // 环境音是 8.0s 长循环（build_sounds.py 首末 50ms 三角窗淡化保无缝），maxFrames 放宽到 16s
     // 保完整解码 —— 默认 2s 上限会把 8s 截到 2s，使循环点落在满幅中波、回绕到淡化起点 ≈0 →
     // 每 2s 一次咔哒爆音（淡化设计被废弃）。
@@ -242,6 +245,7 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->doorOpenClip);
     d->initSound(d->doorCloseClip);
     d->initSound(d->hurtClip);
+    d->initSound(d->mobHurtClip);
     d->initSound(d->ambientClip);
     d->initSound(d->waterFlowClip);
     // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
@@ -265,7 +269,8 @@ AudioManager::AudioManager(QObject *parent)
         << d->groupClips[4][0].ok << "/" << d->groupClips[4][1].ok << "/" << d->groupClips[4][2].ok
         << " place=" << d->placeClip.ok << " pickup=" << d->pickupClip.ok
         << " door_open=" << d->doorOpenClip.ok << " door_close=" << d->doorCloseClip.ok
-        << " hurt=" << d->hurtClip.ok << " ambient_wind=" << d->ambientClip.ok
+        << " hurt=" << d->hurtClip.ok << " mob_hurt=" << d->mobHurtClip.ok
+        << " ambient_wind=" << d->ambientClip.ok
         << " water_flow=" << d->waterFlowClip.ok;
 }
 
@@ -284,6 +289,7 @@ AudioManager::~AudioManager()
     if (d->doorOpenClip.ok) ma_sound_uninit(&d->doorOpenClip.sound);
     if (d->doorCloseClip.ok) ma_sound_uninit(&d->doorCloseClip.sound);
     if (d->hurtClip.ok) ma_sound_uninit(&d->hurtClip.sound);
+    if (d->mobHurtClip.ok) ma_sound_uninit(&d->mobHurtClip.sound);
     if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
     if (d->waterFlowClip.ok) ma_sound_uninit(&d->waterFlowClip.sound);
     ma_engine_uninit(&d->engine);
@@ -331,6 +337,12 @@ void AudioManager::playHurt()
 {
     // 受伤音略低于 break（受伤反馈不宜过响；与 door 同量级）。
     d->replay(d->hurtClip, m_volume * 0.9f);
+}
+
+void AudioManager::playMobHurt()
+{
+    // mob 受击音与 hurt 同量级（生物受击反馈；机制等价 MC 生物受击声，§9 原创合成，与玩家 hurt 区分）。
+    d->replay(d->mobHurtClip, m_volume * 0.9f);
 }
 
 void AudioManager::startAmbient()

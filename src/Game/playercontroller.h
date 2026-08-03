@@ -392,10 +392,10 @@ signals:
     //   spec「useBlock 发 doorToggled(open) 信号 → Main.qml 路由」。门两格同翻时只发一次（玩家点的是其中一格，
     //   配对格被动跟随；一次开合动作 = 一次音）。
     void doorToggled(bool open);
-    // t242 玩家攻击 mob（spec「玩家左键攻击生物→受伤音效 hurt」）：beginMining 在通过模式门控后、破块前
+    // t242 玩家攻击 mob（spec「玩家左键攻击生物→受伤音效」）：beginMining 在通过模式门控后、破块前
     //   先做 findMobHit；命中活体 mob 且（无方块命中 OR mob 比方块更近）→ 走攻击路径（damageEntity +
-    //   swingArm）替代破块，并发本信号。呈现层 Connections 路由到 AudioManager.playHurt（复用 hurt.wav；
-    //   spec 仅说「受伤音效 hurt」，mob 受击与玩家受伤共用一份原创 SFX 即满足，未来可拆 mob 专属音）。
+    //   swingArm）替代破块，并发本信号。呈现层 Connections 路由到 AudioManager.playMobHurt（t248 专属 mob
+    //   受击声 mob_hurt.wav，替代旧复用 hurt.wav 的玩家受伤声——spec「受击音换专属 mob 受伤声」）。
     //   同 swingArm / blockBroken 模式：Game/Physics 层发语义事件，呈现 / 音频层只消费（PLAN §2 分层）。
     void mobAttacked();
 
@@ -601,6 +601,9 @@ private:
     // 置 true、release 边缘（endMining）/ 暂停失焦（release）置 false；finishMiningAt / cancelMining
     // 不动它。updateMining 顶部据此 + 新命中 → 自动 beginMining 下一块（progress 归 0），不松手连挖。
     bool m_leftDown = false;
+    // t248 攻击冷却剩余秒数（>0 时 attackMob 早退不扣血）：tickImpl 每帧递减；attackMob 成功命中后置
+    //   kAttackCooldown。修长按左键每 tick 重触 beginMining 致 mob 瞬秒（见 kAttackCooldown 注释）。
+    float m_attackCooldown = 0.0f;
 
     // 射线选体命中态（整数格坐标 + 整数法线分量；仅变化时 emit hitChanged，避免每帧抖动 QML）
     bool m_hasHit = false;
@@ -699,6 +702,13 @@ private:
     //   工具 / 剑加成属 Phase 1.1；本任务全模式空手攻击同伤害（创造亦走此伤害，但创造可瞬破方块优先 →
     //   实际打 mob 走 findMobHit 同路径）。Survival 限定非必要（攻击不影响 Survival 平衡，spec 未限定模式）。
     static constexpr int kAttackDamage = 4;
+    // t248 攻击冷却（秒）：mob 受击后 0.5s 内同玩家对其的伤害被压制（attackMob 早退、不扣血 / 不发信号）。
+    //   修「1 击即死」根因：survival 长按左键时 updateMining 续挖分支会每 tick 重调 beginMining → 攻击分支
+    //   每帧打一下 mob（mob 后方射程内有方块即触发），10HP/4dmg=3 击在 ~50ms 内打完 = 体感瞬秒。冷却把
+    //   「长按连击」压成「每 0.5s 一次伤害」→ 3 击需 ~1.5s = 用户体感「空手需多击」（spec 验收）。机制等价
+    //   MC 攻击冷却（间隔门控，非每帧扣血）。值取 0.5s ≈ MC 剑基础冷却时长。单次 click 边沿（press）首击总
+    //   生效（cooldown 初值 0）；连击 / 长按的后续 tick 在冷却内被吞。
+    static constexpr float kAttackCooldown = 0.5f;
     // t231 不可挖方块（基岩）hold-mine 挖掘音节流间隔（ms；m_evtClock 时间戳差）。基岩 progress 因 miningTime
     //   走 0.05s 地板每 tick 跨多 beat → miningSound 每 ~16ms 连发；spec「改与普通挖掘同节奏（几百 ms 间隔）」。
     //   250ms ≈ 典型可挖方块（如手挖石头 miningTime≈1.5s）beat 变化的间隔量级（miningTime/6），机制对齐

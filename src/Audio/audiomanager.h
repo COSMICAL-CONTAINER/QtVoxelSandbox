@@ -72,6 +72,11 @@ public:
     //   damaged(amount) → Main.qml 路由到本方法（掉落伤害等所有 takeDamage 路径）；连击 seek 重发
     //   不堆叠（同其他单件）。仅 Survival 走此路径（Creative 无伤 / Spectator noclip 不发 damaged）。
     Q_INVOKABLE void playHurt();
+    // mob 受击音（t248 专属受击音）：玩家攻击生物时该生物的受击声 —— 与玩家 hurt 区分（更短促、带
+    //   「 creature yelp 」下扫中频 + 较轻的软冲击；机制等价 MC 生物受击声，原创程序合成 §9）。由
+    //   PlayerController::mobAttacked → Main.qml 路由到本方法（替代旧复用 playHurt 的路径）。与 hurt
+    //   单件同模式（seek 重发不堆叠）；降级（engine / clip 失败）静默早退（§2-E，不崩）。
+    Q_INVOKABLE void playMobHurt();
     // 环境音 / 风声床（t177 音效完善）：长循环风声（ma_sound looping=true），进入游戏（playing）启动、
     //   退出（回菜单 / 世界列表）停止。机制等价 MC 的环境 / 风声氛围床（原创程序合成，§9）。
     //   setAmbientLevel 据昼夜调强度（夜间更静谧）：level ∈ [0,1]，乘进 ambient 基础音量（base*m_volume*

@@ -760,11 +760,13 @@ Window {
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
-        // t242 玩家攻击 mob（spec「受伤音效 hurt」）→ 复用 hurt.wav（玩家受伤声同源，机制等价 MC 受击音；
-        //   spec 仅说「hurt」，未来可拆 mob 专属受击音）。mob 红闪由 EntityManager.damageEntity 设 hurtFlash →
-        //   QML delegate 的 baseColor 绑定 hurtFlashAt>0 ? "#ff0000" 已驱动；扣血由 damageEntity 内完成。
-        //   呈现 / 音频层只消费 Game/Physics 语义事件（同 swingArm / blockBroken 模式；PLAN §2 分层）。
-        function onMobAttacked() { audio.playHurt() }
+        // t242/t248 玩家攻击 mob（spec「受伤音效」）→ 播 mob_hurt.wav（t248 专属 mob 受击声，区别于玩家
+        //   hurt.wav；spec「受击音换专属 mob 受伤声」，替代旧复用 playHurt 路径）。mob 红闪由
+        //   EntityManager.damageEntity 设 hurtFlash → QML delegate baseColor 绑定 hurtFlashAt>0 ? "#ff0000" 已
+        //   驱动；扣血由 damageEntity 内完成。t248 攻击冷却在 PlayerController::attackMob 内门控（长按连击
+        //   每 0.5s 一次伤害，防瞬秒），此信号仅在真扣血时发（冷却内 attackMob 早退不发）。呈现 / 音频层只
+        //   消费 Game/Physics 语义事件（同 swingArm / blockBroken 模式；PLAN §2 分层）。
+        function onMobAttacked() { audio.playMobHurt() }
         // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换
         // 则保留背包打开，面板由各组件 visible 绑定 player.mode 自动换（创造背包↔生存背包）。避免任一
         // 背包在不兼容模式下滞留（Spectator 无背包/破放，t21）。

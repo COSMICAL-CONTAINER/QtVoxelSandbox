@@ -23,6 +23,10 @@
    - hurt.wav：玩家受伤（t177）—— 低频闷击 + 略不和谐中频（呻吟感）+ 起始宽带冲击 ~0.22s；不分
      材质（玩家自身受伤，非方块）。机制等价 MC 玩家受伤声（§9 原创）。PlayerState.damaged →
      AudioManager.playHurt 触发；连击 seek 重发不堆叠（同其他单件）。
+   - mob_hurt.wav：生物受击（t248 专属受击音）—— 区别于玩家 hurt 的「闷哼」：更短促的软冲击 + 一段
+     下扫中频「 creature yelp 」（拟生物被打一声叫），~0.18s。机制等价 MC 生物受击声（§9 原创，零 MC
+     资产）。PlayerController.mobAttacked → AudioManager.playMobHurt 触发（替代旧复用 hurt.wav 的路径，
+     spec「受击音换专属 mob 受伤声」）。
    - ambient_wind.wav：环境音 / 风声床（t177）—— 长循环风声（~8s，单极点低通白噪 + 双 LFO 慢颤
      调幅 + 首末 50ms 三角窗淡化保循环无缝）。机制等价 MC 的环境 / 风声氛围床（§9 原创）。
      AudioManager 用 ma_sound 设 looping，startAmbient/stopAmbient 控制开关（playing 态开 / 退菜单停），
@@ -218,6 +222,41 @@ def gen_hurt():
     return out
 
 
+def gen_mob_hurt():
+    """生物受击音（t248 专属受击音）：与玩家 hurt.wav 区分 —— 更短促的软冲击（creature 被打的「啪」，
+    但比玩家 hurt 轻柔、低频分量少）+ 一段下扫中频「 creature yelp / 短叫」（拟生物一声叫），~0.18s。
+    机制等价 MC 生物受击声（原创程序合成，§9 法律：零 MC 资产；不照搬任何 MC 生物音效）。
+    由 PlayerController::mobAttacked → Main.qml 路由到 AudioManager.playMobHurt 触发（替代旧复用 hurt.wav
+    的路径）。与 hurt 单件同模式（连击 seek 重发不堆叠）。
+
+    音色差异化（vs gen_hurt）：
+      - hurt = 低频闷击 90Hz + 不和谐中频 165Hz groan + 宽带冲击 → 人味「闷哼 / 呃」。
+      - mob_hurt = 更高的软 thunk 140Hz（小体型 creature 体腔）+ 下扫 yelp（500→300Hz，带 FM 颤，
+        拟「吱 / 叫」）+ 较轻的摩擦瞬态 → 生物味「短叫」。整体更短（0.18 vs 0.22）、更亮。
+    """
+    dur = 0.18
+    n = int(SR * dur)
+    random.seed(812482)
+    out = []
+    for i in range(n):
+        t = i / dur  # 归一化时间 0..1（yelp pitch bend 用）
+        ts = i / SR
+        # 软冲击：较高基频的 thunk（小 creature 体腔，比玩家 hurt 高），衰减快
+        thunk = math.sin(2 * math.pi * 140.0 * ts) * 0.40
+        # 下扫 yelp：频率从 ~500Hz 滑到 ~300Hz（被打一声短叫），加少量 FM 颤（拟声带颤）
+        f_yelp = 500.0 - 200.0 * t
+        fm = 30.0 * math.sin(2 * math.pi * 70.0 * ts)  # FM 颤（→ 略「颤音」质感）
+        yelp = math.sin(2 * math.pi * f_yelp * ts + fm) * 0.38
+        # 较轻的摩擦瞬态（生物皮毛 / 羽毛摩擦感，比 hurt 宽带冲击弱）
+        grit = random.uniform(-1, 1) * 0.18 * math.sin(2 * math.pi * 2200.0 * ts)
+        # 整体指数衰减；起始段加一个极短attack 包络让 yelp 起声稍顿（拟「被打 → 楞一下 → 叫」）
+        e = env_exp(ts, 15.0)
+        attack = min(1.0, ts / 0.012)  # 12ms attack（yelp 不在最尖的 0 点满幅）
+        s = (thunk + yelp + grit) * e * attack
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
 def gen_ambient_wind():
     """环境音 / 风声床（t177）：长循环风声 —— 单极点低通白噪（→ 低频起伏的「风」body）+ 双 LFO 慢速
     调幅（0.30Hz + 0.11Hz 叠加 → 自然不规则起伏）+ 首末 50ms 三角窗淡化（保循环无缝、无边界咔哒），
@@ -323,10 +362,12 @@ def main():
             write_wav(path, samples)
             print(f"wrote {path} ({len(samples)} frames, {len(samples)/SR:.2f}s)")
     # 单件音：place（保留）+ pickup + door_open / door_close（t152 门/活板门开关声）
-    # + hurt / ambient_wind（t177 受伤声 + 环境风声床）+ water_flow（t223 近流水水流声床）
+    # + hurt / mob_hurt（t177 玩家受伤 + t248 生物受击专属）+ ambient_wind（t177 环境风声床）
+    # + water_flow（t223 近流水水流声床）
     for name, gen in [("place", gen_place), ("pickup", gen_pickup),
                       ("door_open", gen_door_open), ("door_close", gen_door_close),
-                      ("hurt", gen_hurt), ("ambient_wind", gen_ambient_wind),
+                      ("hurt", gen_hurt), ("mob_hurt", gen_mob_hurt),
+                      ("ambient_wind", gen_ambient_wind),
                       ("water_flow", gen_water_flow)]:
         samples = gen()
         path = out_dir / f"{name}.wav"

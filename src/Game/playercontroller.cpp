@@ -345,6 +345,11 @@ void PlayerController::tick()
 void PlayerController::tickImpl()
 {
     const qreal dt = qMin(m_clock.restart() / 1000.0, 0.05); // 钳 50ms，防卡顿后穿墙
+    // t248 攻击冷却递减（独立于捕获态 —— 菜单 / 背包开时也应自然走完，复击不卡陈旧值）。钳到 0。
+    if (m_attackCooldown > 0.0f) {
+        m_attackCooldown -= float(dt);
+        if (m_attackCooldown < 0.0f) m_attackCooldown = 0.0f;
+    }
     // t201 水下蓝滤镜：每 tick 重算眼位水态，翻转才 emit（避免每帧抖 QML 绑定）。放在 !m_captured
     //   早 return 之前 → 暂停 / 背包开 / 失焦时仍刷新（玩家可能停在水里打开背包，蓝雾应持续显）。
     //   仅读 World::blockAt（向下依赖，不改栅格）；无世界时 eyeInWater() 返 false。
@@ -758,18 +763,23 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
     dropCropDrops(cx, cy, cz, cid, cstate);            // 失撑掉落产出与玩家破块同源
 }
 
-// t242 攻击 mob（spec「玩家左键攻击生物→受伤音效 hurt + 身体红闪 + 扣血」）：damageEntity 扣血 + 设
+// t242 攻击 mob（spec「玩家左键攻击生物→受伤音效 + 身体红闪 + 扣血」）：damageEntity 扣血 + 设
 //   hurtFlash（EntityManager 内已驱动 QML 红闪绑定刷新）+ swingArm（挥臂反馈）+ emit mobAttacked（→
-//   呈现层 playHurt）。伤害 kAttackDamage=4（MC 1.0 玩家攻击 2 心）。mob health≤0 时 damageEntity 内
-//   emit mobDied → Main.qml Connections 据.mobType 转发到 ItemEntityManager.spawnItem 生成猪排 / 皮革 /
-//   牛肉 / 羊毛掉落。索引由 caller findMobHit 选定（已是最近距离活体）；二次边界 / dead / 非 Mob 守卫在
-//   damageEntity 内。无 entityManager 时 caller 已早退不会到此处（防御）。
+//   呈现层 playMobHurt，t248 专属 mob 受击声，非玩家 hurt）。伤害 kAttackDamage=4（MC 1.0 玩家攻击 2 心）。
+//   mob health≤0 时 damageEntity 内 emit mobDied → Main.qml Connections 据.mobType 转发到
+//   ItemEntityManager.spawnItem 生成猪排 / 皮革 / 牛肉 / 羊毛掉落。索引由 caller findMobHit 选定（最近活体）；
+//   二次边界 / dead / 非 Mob 守卫在 damageEntity 内。无 entityManager 时 caller 已早退不会到此处（防御）。
+// t248 攻击冷却（kAttackCooldown）：m_attackCooldown>0 时早退（不扣血 / 不挥臂 / 不发信号）。修「长按左键
+//   每帧重触 beginMining → mob 瞬秒」——cooldown 把长按连击压成每 0.5s 一次伤害。单次 click 边沿（press）
+//   首击 cooldown=0 总生效；后续 tick 在冷却内被吞。成功命中后置 kAttackCooldown。
 void PlayerController::attackMob(int entityIndex)
 {
     if (!m_entityManager) return;
+    if (m_attackCooldown > 0.0f) return; // t248 冷却内不扣血（连击 / 长按续触被吞）
     m_entityManager->damageEntity(entityIndex, kAttackDamage);
     emit swingArm();
     emit mobAttacked();
+    m_attackCooldown = kAttackCooldown;
 }
 
 // 每 tick 推进生存挖掘进度（t34）+ 连续续挖（t44）。创造不进入此态（beginMining 内瞬破已 return）。
