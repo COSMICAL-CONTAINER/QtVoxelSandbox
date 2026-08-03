@@ -15,7 +15,7 @@
 //
 // 物品 id 分段（与 Hotbar::ItemStack 的 id 字段一致）：
 //   方块段：0 .. BlockRegistry::Count-1（air / 草 / 土 / 石 / 圆石 / 原木 / 木板 / 树叶 / 沙）。
-//   工具段：id >= ToolIdBase（0x100）；当前 3 档镐（木 / 石 / 铁）。
+//   工具段：id >= ToolIdBase（0x100）；当前 3 档镐（木 / 石 / 铁）+ 3 档锄（木 / 石 / 铁）。
 // 工具不可堆叠（Hotbar::maxStackSize(id) 对工具段返回 1，t32 已留段）。
 //
 // 挖掘模型（spec t33，机制等价 MC 1.0；硬度 / 采掘要求走 BlockRegistry::BlockDef）：
@@ -24,6 +24,11 @@
 //   - 掉落判定（canHarvest）：方块不需工具 → 恒掉落；需工具 → 须持匹配类型 AND tier >= minToolTier，
 //     否则破后仅 AIR（t35 不发掉落实体）。spec：「不匹配 / 等级不够 → 慢且不掉落，仅 AIR」。
 //   - 可挖判定（canMine）：实体方块且 hardness > 0（air / 越界 / 基岩=false）。
+//
+// 锄（type=Hoe）特殊语义：本工程**无任何方块的 toolType 取 Hoe**（耕地是非方块交互、走 useBlock，
+// 非「采掘所需工具」），故持锄挖任何方块 miningSpeedMul 恒返 1.0（miningSpeedMul 第一步 `harvestTool
+// == NoTool → 1.0` 或类型不匹配 → 1.0），canHarvest 对需工具方块恒 false → 机制等价 MC「锄不影响挖掘」。
+// 锄的 tier 仅驱动其未来耕地交互（草→耕地耗时随 tier 缩短等，留后续任务），与挖掘解耦。
 //
 // 分层（PLAN §2）：本层属 Game，只依赖 Core（BlockRegistry），**不**依赖
 // Renderer/Physics/QtQuick3D。依赖只向下。ToolType 枚举归 BlockRegistry（Core），本类复用。
@@ -40,16 +45,19 @@ public:
         PickaxeWood  = 0x100, // 木镐：tier 1，speedMul 2.0
         PickaxeStone = 0x101, // 石镐：tier 2，speedMul 4.0
         PickaxeIron  = 0x102, // 铁镐：tier 3，speedMul 6.0
-        ToolCount    = 3,     // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
+        HoeWood      = 0x103, // 木锄：type=Hoe（专用耕地；不参与挖掘速度，speedMul 仅记账=1.0）
+        HoeStone     = 0x104, // 石锄：type=Hoe tier 2
+        HoeIron      = 0x105, // 铁锄：type=Hoe tier 3
+        ToolCount    = 6,     // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
     };
 
     // 工具定义。表行索引 == itemId - ToolIdBase（连续）；详见 toolregistry.cpp kTools。
     // type 字段为 BlockRegistry::ToolType（与 BlockDef.toolType 同枚举）——「工具实例的类型」须能
     // 匹配「方块要求的采掘工具类型」，故共用一个枚举（归 Core 层）。
     struct ToolDef {
-        int type;            // BlockRegistry::ToolType（Pickaxe / NoTool）
-        int tier;            // 等级（1=木 2=石 3=铁）；决定能否采掘高阶方块 + 速度倍率
-        float speedMul;      // 匹配工具时的挖掘速度倍率（>1 → 加速）
+        int type;            // BlockRegistry::ToolType（Pickaxe / Hoe / NoTool）
+        int tier;            // 等级（1=木 2=石 3=铁）；决定能否采掘高阶方块 + 速度倍率（镐）/ 耕地等级（锄）
+        float speedMul;      // 匹配工具时的挖掘速度倍率（>1 → 加速）；锄恒 1.0（不参与挖掘，仅记账）
         const char *name;    // 内部 / 调试用名（通用词，英文标识符；非面向用户）
         const char *display; // 用户可见中文显示名（UTF-8；PLAN §9 override (b) 通用描述词）
     };
@@ -81,7 +89,8 @@ public:
     static bool canMine(quint8 blockId);
 
     // 用户可见中文显示名（工具段；PLAN §9 override (b) 通用词）。
-    //   PickaxeWood=木镐 PickaxeStone=石镐 PickaxeIron=铁镐。非工具 / 越界 → 空串。
+    //   PickaxeWood=木镐 PickaxeStone=石镐 PickaxeIron=铁镐
+    //   HoeWood=木锄 HoeStone=石锄 HoeIron=铁锄。非工具 / 越界 → 空串。
     // 字面量为 UTF-8，由 fromUtf8 解码（与项目既有中文注释 / BlockRegistry::displayName 同源）。
     static QString displayName(int itemId);
 

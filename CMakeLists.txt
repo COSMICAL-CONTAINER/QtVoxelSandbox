@@ -55,6 +55,10 @@ qt_add_executable(voxelsandbox
     src/Renderer/blockcube.h
     src/Renderer/pickaxe.cpp
     src/Renderer/pickaxe.h
+    # t233 锄 3D 几何（与 pickaxe.h 同层同风格，复制 addBox 模式仅改头部形状：锄刃 = 宽扁向前伸的横刃，
+    #   区别于镐的横梁 + 两端下勾）。手持（第一/第三人称）+ 掉落实体三处统一消费，按 toolType 选镐 vs 锄。
+    src/Renderer/hoe.cpp
+    src/Renderer/hoe.h
     # t112 广告牌四边形（单面 +Z 法线）：煤/木炭/铁原矿/木棒/铁锭/玻璃 掉落实体材料段
     #   从 CrackBox 6 面立方改为单面平图标 + 朝相机（billboard），消除「6 面未封闭超立方体」观感。
     src/Renderer/billboardquad.cpp

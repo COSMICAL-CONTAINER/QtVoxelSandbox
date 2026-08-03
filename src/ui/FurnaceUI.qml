@@ -344,7 +344,7 @@ Item {
                             source: parent.itemId !== 0 ? root.hotbar.iconSourceForBlock(parent.itemId) : ""
                             fillMode: Image.PreserveAspectFit; smooth: true
                         }
-                        ToolIcon { anchors.fill: parent; visible: parent.itemId !== 0 && root.hotbar.isTool(parent.itemId); tier: root.hotbar.toolTier(parent.itemId) }
+                        ToolIcon { anchors.fill: parent; visible: parent.itemId !== 0 && root.hotbar.isTool(parent.itemId); tier: root.hotbar.toolTier(parent.itemId); toolType: root.hotbar.toolType(parent.itemId) }
                         MaterialIcon { anchors.fill: parent; visible: parent.itemId !== 0 && root.hotbar.isMaterial(parent.itemId); materialId: parent.itemId }
                     }
                     Text {
@@ -413,7 +413,7 @@ Item {
                             source: parent.itemId !== 0 ? root.hotbar.iconSourceForBlock(parent.itemId) : ""
                             fillMode: Image.PreserveAspectFit; smooth: true
                         }
-                        ToolIcon { anchors.fill: parent; visible: parent.itemId !== 0 && root.hotbar.isTool(parent.itemId); tier: root.hotbar.toolTier(parent.itemId) }
+                        ToolIcon { anchors.fill: parent; visible: parent.itemId !== 0 && root.hotbar.isTool(parent.itemId); tier: root.hotbar.toolTier(parent.itemId); toolType: root.hotbar.toolType(parent.itemId) }
                         MaterialIcon { anchors.fill: parent; visible: parent.itemId !== 0 && root.hotbar.isMaterial(parent.itemId); materialId: parent.itemId }
                     }
                     Text {
@@ -546,7 +546,7 @@ Item {
                             source: parent.itemId !== 0 ? root.hotbar.iconSourceForBlock(parent.itemId) : ""
                             fillMode: Image.PreserveAspectFit; smooth: true
                         }
-                        ToolIcon { anchors.fill: parent; visible: parent.itemId !== 0 && root.hotbar.isTool(parent.itemId); tier: root.hotbar.toolTier(parent.itemId) }
+                        ToolIcon { anchors.fill: parent; visible: parent.itemId !== 0 && root.hotbar.isTool(parent.itemId); tier: root.hotbar.toolTier(parent.itemId); toolType: root.hotbar.toolType(parent.itemId) }
                         MaterialIcon { anchors.fill: parent; visible: parent.itemId !== 0 && root.hotbar.isMaterial(parent.itemId); materialId: parent.itemId }
                     }
                     Text {
@@ -630,6 +630,7 @@ Item {
                                 anchors.fill: parent
                                 visible: { root.hotbar.mainRevision; return root.hotbar.isTool(mainId) }
                                 tier: { root.hotbar.mainRevision; return root.hotbar.toolTier(mainId) }
+                                toolType: { root.hotbar.mainRevision; return root.hotbar.toolType(mainId) }
                             }
                             MaterialIcon {
                                 anchors.fill: parent
@@ -718,6 +719,7 @@ Item {
                                     anchors.fill: parent
                                     visible: { root.hotbar.slotRevision; return root.hotbar.isTool(slotId) }
                                     tier: { root.hotbar.slotRevision; return root.hotbar.toolTier(slotId) }
+                                    toolType: { root.hotbar.slotRevision; return root.hotbar.toolType(slotId) }
                                 }
                                 MaterialIcon {
                                     anchors.fill: parent

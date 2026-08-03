@@ -283,6 +283,7 @@ Item {
                                     anchors.fill: parent
                                     visible: root.hotbar.isTool(modelData)
                                     tier: root.hotbar.toolTier(modelData)
+                                    toolType: root.hotbar.toolType(modelData)
                                 }
                                 MaterialIcon {
                                     anchors.fill: parent
@@ -401,6 +402,7 @@ Item {
                                         anchors.fill: parent
                                         visible: { root.hotbar.slotRevision; return root.hotbar.isTool(slotId) }
                                         tier: { root.hotbar.slotRevision; return root.hotbar.toolTier(slotId) }
+                                        toolType: { root.hotbar.slotRevision; return root.hotbar.toolType(slotId) }
                                     }
                                     MaterialIcon {
                                         anchors.fill: parent

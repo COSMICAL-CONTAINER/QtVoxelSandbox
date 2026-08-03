@@ -903,15 +903,17 @@ Window {
                         baseColorMap: torchIconTex
                     }
                 }
-                // 手持工具（t75 木镐 3D）：选中工具槽（isTool(selectedItem)）时，手前显镐形 3D。
+                // 手持工具（t75 木镐 3D / t233 锄 3D）：选中工具槽（isTool(selectedItem)）时，手前显工具 3D。
                 //   根因：旧分支只看 selectedBlock（工具槽→Air→selectedBlock=0）→ 选工具时无渲染分支 → 木镐不可见。
                 //   修：加本分支，可见性读 isTool(player.selectedItem)（selectedItem 含工具段，selectedBlockId 不再
                 //   把工具「归零隐藏」——放置语义仍走 selectedBlock=Air 不放置，互不干扰）。
-                //   PickaxeGeometry 是纯实色体素几何（无贴图 / 无 alpha）→ 永不黑（修「工具贴图黑」根因）。
-                //   baseColor 按 tier 着色（木镐褐 / 石镐灰 / 铁镐银白，同 2D ToolIcon 配色）。
-                //   作 viewModelHand 子节点 → 随挥动同步运动（镐在手中）；eulerRotation 给对角手持姿态。
+                //   PickaxeGeometry / HoeGeometry 是纯实色体素几何（无贴图 / 无 alpha）→ 永不黑（修「工具贴图黑」根因）。
+                //   t233：按 toolType 选镐（Pickaxe）vs 锄（Hoe）几何 —— 两个互斥 Model（共享位姿 / 材质参数，
+                //   仅 geometry + visible 不同），避免 Loader 装载 3D 的 reparent 坑（lessons-learned t16）。
+                //   baseColor 按 tier 着色（木褐 / 石灰 / 铁银白，镐锄同 tier 同色，同 2D ToolIcon 配色）。
+                //   作 viewModelHand 子节点 → 随挥动同步运动（工具在手中）；eulerRotation 给对角手持姿态。
                 Model {
-                    visible: hotbarVM.isTool(player.selectedItem)
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) !== 2
                     geometry: PickaxeGeometry {}
                     position: Qt.vector3d(0.02, 0.04, -0.22)    // t91：Y 跟手同 delta 上移（旧 -0.08→+0.04，保 +0.02 高于手段）；z=-0.22 脱离手臂 z 包围
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
@@ -921,6 +923,20 @@ Window {
                         baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁镐银白
                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石镐中灰
                                  : "#8a5a2e"                                                 // 木镐褐（默认 / tier 1）
+                    }
+                }
+                // t233 锄（type=Hoe）：同位姿 / 同 tier 配色，仅几何换 HoeGeometry（宽扁锄刃替代镐横梁 + 下勾）。
+                Model {
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 2
+                    geometry: HoeGeometry {}
+                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    scale: Qt.vector3d(0.42, 0.42, 0.42)
+                    eulerRotation: Qt.vector3d(15, -20, -15)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                 : "#8a5a2e"
                     }
                 }
                 // t169 手持材料（木棒/煤/木炭/铁锭 等）：选中材料段槽（isMaterial(selectedItem)）时，手前显
@@ -1695,16 +1711,34 @@ Window {
                             baseColorMap: torchIconTex
                         }
                     }
-                    // 手持工具（t75 木镐 3D）：选中工具槽时，第三人称右手上显镐形 3D（同第一人称分支，
-                    //   读 isTool(selectedItem)；不再 CrackBox 兜底）。PickaxeGeometry 纯实色体素 → 永不黑。
-                    //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步（镐在手中）；握把（几何 y≈-0.45）
+                    // 手持工具（t75 木镐 3D / t233 锄 3D）：选中工具槽时，第三人称右手上显工具 3D（同第一人称分支，
+                    //   读 isTool(selectedItem)；不再 CrackBox 兜底）。PickaxeGeometry / HoeGeometry 纯实色体素 → 永不黑。
+                    //   t233：按 toolType 选镐 vs 锄几何（两互斥 Model）。
+                    //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步（工具在手中）；握把（几何 y≈-0.45）
                     //   落在手位（rightArmPivot 本地 y≈-0.6），故 position.y=-0.55 使握把贴手心。
                     Model {
                         visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
+                                 && hotbarVM.toolType(player.selectedItem) !== 2
                         geometry: PickaxeGeometry {}
                         position: Qt.vector3d(0, -0.55, -0.18)
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
                         eulerRotation: Qt.vector3d(0, 20, -35)   // 柄沿小臂方向、镐头斜上，自然手持
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                     : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                     : "#8a5a2e"
+                            opacity: playerModel.bodyOpacity
+                        }
+                    }
+                    // t233 锄（type=Hoe）第三人称手持：同位姿 / 同 tier 配色，几何换 HoeGeometry。
+                    Model {
+                        visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
+                                 && hotbarVM.toolType(player.selectedItem) === 2
+                        geometry: HoeGeometry {}
+                        position: Qt.vector3d(0, -0.55, -0.18)
+                        scale: Qt.vector3d(0.5, 0.5, 0.5)
+                        eulerRotation: Qt.vector3d(0, 20, -35)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
@@ -1987,12 +2021,13 @@ Window {
                             baseColorMap: torchIconTex
                         }
                     }
-                    // 工具段（t75 改用 PickaxeGeometry 3D 镐形，不再 CrackBox 兜底）：
+                    // 工具段（t75 改用 PickaxeGeometry 3D 镐形，不再 CrackBox 兜底；t233 加 HoeGeometry 锄形）：
                     //   旧 CrackBox + ToolIcon(透明底 RGB0) 贴图无 alphaCutoff → 透明底被当不透明黑 → 6 面黑立方体
-                    //   （「工具贴图黑」根因）。PickaxeGeometry 是纯实色体素几何（无贴图 / 无 alpha）→ 永不黑。
-                    //   baseColor 按 tier 着色（木镐褐 / 石镐灰 / 铁镐银白）；绕 Y 自转时正面恒有镐形可见。
+                    //   （「工具贴图黑」根因）。PickaxeGeometry / HoeGeometry 是纯实色体素几何（无贴图 / 无 alpha）→ 永不黑。
+                    //   baseColor 按 tier 着色（木褐 / 石灰 / 铁银白，镐锄同 tier 同色）；绕 Y 自转时正面恒有工具形可见。
+                    //   t233：按 toolType 选镐 vs 锄几何（两互斥 Model）。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId)
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) !== 2
                         geometry: PickaxeGeometry {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -2000,6 +2035,23 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             // t144：tier 色乘天光乘子（tintBySkyLight）夜间变暗，与方块段统一。
                             //   原 hex #d8d8e6 / #9a9a9a / #8a5a2e = (216,216,230)/(154,154,154)/(138,90,46)。
+                            baseColor: {
+                                const m = worldClock.skyLight
+                                const t = hotbarVM.toolTier(entRoot.entId)
+                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                     : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
+                                     : tintBySkyLight(138/255, 90/255, 46/255, m)
+                            }
+                        }
+                    }
+                    // t233 锄掉落物（type=Hoe）：同 scale / 位置 / tier 配色，几何换 HoeGeometry。
+                    Model {
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 2
+                        geometry: HoeGeometry {}
+                        scale: Qt.vector3d(0.45, 0.45, 0.45)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
                             baseColor: {
                                 const m = worldClock.skyLight
                                 const t = hotbarVM.toolTier(entRoot.entId)
@@ -3271,6 +3323,7 @@ Window {
                             anchors.fill: parent
                             visible: { hotbarVM.slotRevision; return hotbarVM.isTool(hotbarVM.blockIdAt(index)) }
                             tier: { hotbarVM.slotRevision; return hotbarVM.toolTier(hotbarVM.blockIdAt(index)) }
+                            toolType: { hotbarVM.slotRevision; return hotbarVM.toolType(hotbarVM.blockIdAt(index)) }
                         }
                         MaterialIcon {
                             anchors.fill: parent
@@ -3578,6 +3631,7 @@ Window {
             anchors.fill: parent
             visible: hotbarVM.isTool(hotbarVM.heldBlock)
             tier: hotbarVM.toolTier(hotbarVM.heldBlock)
+            toolType: hotbarVM.toolType(hotbarVM.heldBlock)
         }
         MaterialIcon {
             anchors.fill: parent

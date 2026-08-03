@@ -134,10 +134,19 @@ int Hotbar::toolTier(int itemId) const
     return t ? t->tier : 0; // 非工具 → 0（ToolIcon 兜底木镐配色）
 }
 
+// 工具类型（t233 锄加入后，QML 据 type 选镐 vs 锄的 3D 几何 / Canvas 像素图）。
+//   返回 BlockRegistry::ToolType（Pickaxe=1 / Hoe=2）；非工具 → 0。
+int Hotbar::toolType(int itemId) const
+{
+    const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);
+    return t ? t->type : 0;
+}
+
 QVariantList Hotbar::creativeTools() const
 {
-    // 创造调色板 3 档镐（无限源：拾取时 heldCount=1，工具不可堆叠）。
-    return {int(ToolRegistry::PickaxeWood), int(ToolRegistry::PickaxeStone), int(ToolRegistry::PickaxeIron)};
+    // 创造调色板工具（无限源：拾取时 heldCount=1，工具不可堆叠）。3 档镐 + 3 档锄（t233）。
+    return {int(ToolRegistry::PickaxeWood), int(ToolRegistry::PickaxeStone), int(ToolRegistry::PickaxeIron),
+            int(ToolRegistry::HoeWood),     int(ToolRegistry::HoeStone),     int(ToolRegistry::HoeIron)};
 }
 
 // 创造调色板材料段（t114）：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃（材料段 id >= 0x200，

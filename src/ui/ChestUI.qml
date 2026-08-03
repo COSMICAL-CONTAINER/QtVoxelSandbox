@@ -236,6 +236,7 @@ Item {
                                 anchors.fill: parent
                                 visible: { root.chestCoordRev; return root.hotbar.isTool(chId) }
                                 tier: { root.chestCoordRev; return root.hotbar.toolTier(chId) }
+                                toolType: { root.chestCoordRev; return root.hotbar.toolType(chId) }
                             }
                             MaterialIcon {
                                 anchors.fill: parent
@@ -353,6 +354,7 @@ Item {
                                 anchors.fill: parent
                                 visible: { root.hotbar.mainRevision; return root.hotbar.isTool(mainId) }
                                 tier: { root.hotbar.mainRevision; return root.hotbar.toolTier(mainId) }
+                                toolType: { root.hotbar.mainRevision; return root.hotbar.toolType(mainId) }
                             }
                             MaterialIcon {
                                 anchors.fill: parent
@@ -466,6 +468,7 @@ Item {
                                     anchors.fill: parent
                                     visible: { root.hotbar.slotRevision; return root.hotbar.isTool(slotId) }
                                     tier: { root.hotbar.slotRevision; return root.hotbar.toolTier(slotId) }
+                                    toolType: { root.hotbar.slotRevision; return root.hotbar.toolType(slotId) }
                                 }
                                 MaterialIcon {
                                     anchors.fill: parent

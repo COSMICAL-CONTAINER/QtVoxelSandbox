@@ -16,10 +16,13 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     /* PickaxeWood  */ {int(BlockRegistry::Pickaxe), 1, 2.0f, "pickaxe_wood",  "木镐"},
     /* PickaxeStone */ {int(BlockRegistry::Pickaxe), 2, 4.0f, "pickaxe_stone", "石镐"},
     /* PickaxeIron  */ {int(BlockRegistry::Pickaxe), 3, 6.0f, "pickaxe_iron",  "铁镐"},
+    /* HoeWood      */ {int(BlockRegistry::Hoe),     1, 1.0f, "hoe_wood",      "木锄"},
+    /* HoeStone     */ {int(BlockRegistry::Hoe),     2, 1.0f, "hoe_stone",     "石锄"},
+    /* HoeIron      */ {int(BlockRegistry::Hoe),     3, 1.0f, "hoe_iron",      "铁锄"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
-static_assert(int(ToolRegistry::ToolCount) == 3, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+static_assert(int(ToolRegistry::ToolCount) == 6, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
 } // namespace
 
 bool ToolRegistry::isTool(int itemId)

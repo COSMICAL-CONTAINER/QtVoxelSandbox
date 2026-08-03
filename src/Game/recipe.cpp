@@ -67,6 +67,29 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                           kStickId,                    0,
         0,                           kStickId,                    0 },
       int(ToolRegistry::PickaxeIron), 1, 1, "iron_pickaxe" },
+    // ── 锄（t233）：顶行 2 材料（左 + 中）+ 中列 2 木棒 → 1 锄（有序 3×3，仅工作台）。机制等价 MC 1.0 锄配方。
+    //   与镐 T 形的差异：顶行**2**材料（镐为 3），最小包围盒 2×3 vs 镐 3×3 → shaped 匹配包围盒尺寸不同，
+    //   不会与镐配方冲突（输入 2 材料 + 2 木棒 → 包围盒 2×3 命中锄、3 材料 + 2 木棒 → 包围盒 3×3 命中镐）。
+    //   锄（type=Hoe）专用耕地、不参与挖掘速度（见 toolregistry.h 锄特殊语义注释）。
+    //   产物 = 木锄 / 石锄 / 铁锄（HoeWood/Stone/Iron，tier 1/2/3 仅驱动耕地等级，非挖掘）。
+    // woodHoe：2 木板顶行 + 中列 2 木棒 → 1 木锄。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks), 0,
+        0,                       kStickId,                 0,
+        0,                       kStickId,                 0 },
+      int(ToolRegistry::HoeWood), 1, 1, "wood_hoe" },
+    // stoneHoe：2 圆石顶行 + 中列 2 木棒 → 1 石锄。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), 0,
+        0,                       kStickId,                 0,
+        0,                       kStickId,                 0 },
+      int(ToolRegistry::HoeStone), 1, 1, "stone_hoe" },
+    // ironHoe：2 铁锭顶行 + 中列 2 木棒 → 1 铁锄。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, 0,
+        0,                           kStickId,                    0,
+        0,                           kStickId,                    0 },
+      int(ToolRegistry::HoeIron), 1, 1, "iron_hoe" },
     // furnace：8 圆石围圈（中空）→ 1 熔炉（有序 3×3，仅工作台）。机制等价 MC 熔炉配方；
     // 满包围盒 3×3（中心空）→ 输入也须 3×3 围圈（中心为空格），9 圆石（实心）不匹配。
     { int(RecipeRegistry::Table3x3), false,

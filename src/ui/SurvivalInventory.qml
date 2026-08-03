@@ -306,6 +306,7 @@ Item {
                                     anchors.fill: parent
                                     visible: { root.craftRev; return root.hotbar.isTool(root.craftSlots[index] || 0) }
                                     tier: { root.craftRev; return root.hotbar.toolTier(root.craftSlots[index] || 0) }
+                                    toolType: { root.craftRev; return root.hotbar.toolType(root.craftSlots[index] || 0) }
                                 }
                                 // t50 材料段（木棒）：MaterialIcon 自绘（§9a 原创，非 MC 资产）。
                                 MaterialIcon {
@@ -472,6 +473,7 @@ Item {
                             anchors.fill: parent
                             visible: parent.outId !== 0 && root.hotbar.isTool(parent.outId)
                             tier: root.hotbar.toolTier(parent.outId)
+                            toolType: root.hotbar.toolType(parent.outId)
                         }
                         MaterialIcon {
                             anchors.fill: parent
@@ -609,6 +611,7 @@ Item {
                                 anchors.fill: parent
                                 visible: { root.hotbar.mainRevision; return root.hotbar.isTool(mainId) }
                                 tier: { root.hotbar.mainRevision; return root.hotbar.toolTier(mainId) }
+                                toolType: { root.hotbar.mainRevision; return root.hotbar.toolType(mainId) }
                             }
                             MaterialIcon {
                                 anchors.fill: parent
@@ -748,6 +751,7 @@ Item {
                                     anchors.fill: parent
                                     visible: { root.hotbar.slotRevision; return root.hotbar.isTool(slotId) }
                                     tier: { root.hotbar.slotRevision; return root.hotbar.toolTier(slotId) }
+                                    toolType: { root.hotbar.slotRevision; return root.hotbar.toolType(slotId) }
                                 }
                                 MaterialIcon {
                                     anchors.fill: parent
