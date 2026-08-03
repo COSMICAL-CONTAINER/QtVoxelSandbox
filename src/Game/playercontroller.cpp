@@ -1502,19 +1502,27 @@ bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMa
                                        bool *outHasMax, float maxSurfCap) const
 {
     if (!m_world) return false;
-    const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
-    const float miny = m_pos.y(),           maxy = m_pos.y() + m_height; // t51：蹲下用 m_height（变矮）
-    const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
-    // 严格重叠：ceil(max)-1 排除「仅贴面」的方块 → 防卡缝
-    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
+    // t259：完整 AABB（cell 采样边界用——不漏采贴面格）。t51：高用 m_height（蹲下变矮）。
+    const float fminx = m_pos.x() - kHalfW, fmaxx = m_pos.x() + kHalfW;
+    const float fminy = m_pos.y(),           fmaxy = m_pos.y() + m_height;
+    const float fminz = m_pos.z() - kHalfW, fmaxz = m_pos.z() + kHalfW;
+    // t259 碰撞皮肤：逐块重叠判定用「内缩 skin」的有效 AABB —— 吸收落地 / 贴墙 snap 的 +eps（1e-4）
+    //   等浮点漂移，使蹲下（AABB 1.5）能通过「精确 1.5 格」通道（上半砖天花板 / 整砖+下半砖组合），
+    //   对齐 MC 1.0 蹲下通行（见 playercontroller.h kCollisionSkin 注释）。
+    const float sk = kCollisionSkin;
+    const float minx = fminx + sk, maxx = fmaxx - sk;
+    const float miny = fminy + sk, maxy = fmaxy - sk; // t51：蹲下用 m_height（变矮）
+    const float minz = fminz + sk, maxz = fmaxz - sk;
+    // cell 采样仍走完整 AABB（ceil(max)-1 排除「仅贴面」的方块 → 防卡缝，且不漏采边界格）：
+    const int x0 = int(std::floor(fminx)), x1 = int(std::ceil(fmaxx)) - 1;
     // t209 Y 取样向下扩 1 格（yFloor - 1）：栅栏等「高 AABB」（maxY > 1，探入上格）的方块其 sub-AABB 会从
     //   玩家脚位下一格延伸上来。玩家跳跃（脚位上升到 F+1.x）时，栅栏立柱（cell F，AABB [F, F+1.5]）仍在
     //   Y 区间重叠 [F+1.x, F+1.5]，但 floor(miny)=F+1 → 原 y0=F+1 漏掉 cell F → 玩家跨格横移即穿隧道越栅栏。
     //   扩 1 格后 y0=F 命中栅栏格、3 轴严格重叠测试仍过滤掉「 maxY<=cell 顶」的普通方块（其 AABB 上界 ≤
     //   yFloor ≤ miny → miny < b.maxY=false，无假阳性）。仅 +Y 向上凸出的形状（栅栏 / 未来 fence gate 等）获益。
-    const int yFloor = int(std::floor(miny));
-    const int y0 = yFloor - 1, y1 = int(std::ceil(maxy)) - 1;
-    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
+    const int yFloor = int(std::floor(fminy));
+    const int y0 = yFloor - 1, y1 = int(std::ceil(fmaxy)) - 1;
+    const int z0 = int(std::floor(fminz)), z1 = int(std::ceil(fmaxz)) - 1;
     bool hit = false, haveMin = false, haveMax = false;
     float minSurf = 0.f, maxSurf = 0.f;
     for (int y = y0; y <= y1; ++y)

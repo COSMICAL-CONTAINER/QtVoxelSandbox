@@ -643,6 +643,14 @@ private:
     static constexpr float kEyeHeight = 1.62f;
     static constexpr float kCrouchHeight = 1.5f; // 蹲下 AABB 高（spec t51：1.8→1.5）
     static constexpr float kCrouchEye = 1.35f;   // 蹲下眼位（相机随之降低；≈ MC 蹲/站比例）
+    // t259 碰撞皮肤（collision skin）：overlapSubAABBs 逐块重叠判定用「向内缩 skin」的有效 AABB。
+    //   落地 / 贴墙 snap 为防抖动留了 eps=1e-4 间隙，使身体实际占据 = surface + eps + height，
+    //   于是蹲下（1.5）的头顶会以 eps 量探入「精确 1.5 格」通道的天花板（上半砖 / 整砖+下半砖），
+    //   严格 `maxy > b.minY` 判碰撞 → 玩家卡在通道口进不去（与 MC 1.0 蹲下可过 1.5 缺口相违）。
+    //   skin（1e-3 = 1mm ≈ 10× snap eps）吸收这类浮点漂移与贴面误差，使 1.5 AABB 能通过 1.5 通道；
+    //   远小于 1 格且小于最薄方块（压力板 1/16=0.0625），视觉不可见、不漏检真实嵌入。cell 采样仍走
+    //   完整 AABB（不漏采贴面格），仅逐块判定用缩皮 AABB —— 是「防抖动 snap」与「精确通行」的解耦。
+    static constexpr float kCollisionSkin = 1e-3f;
     static constexpr float kFly = 8.0f;        // 飞/观察 移速
     static constexpr float kFlyMin = 4.0f;     // 飞行最低速度（blocks/sec；t159 滚轮调速下限）
     static constexpr float kFlyMax = 20.0f;    // 飞行最高速度（blocks/sec；t159 滚轮调速上限）
