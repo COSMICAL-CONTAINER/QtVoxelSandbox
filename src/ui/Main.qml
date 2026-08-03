@@ -362,7 +362,8 @@ Window {
     //   再 hotbar 同 id → 再空槽 main→hotbar）→ 关包归还的物品能合并进主栏同 id（修「丢弃回栏不合并」根因）。
     function returnHeldToHotbar() {
         if (!hotbarVM.heldBlock || hotbarVM.heldCount <= 0) return
-        const leftover = hotbarVM.addToAny(hotbarVM.heldBlock, hotbarVM.heldCount)
+        // t263 归还手持工具时保真耐久（addToAny 第 3 参 dur；非工具 dur=0 inert）。
+        const leftover = hotbarVM.addToAny(hotbarVM.heldBlock, hotbarVM.heldCount, hotbarVM.heldDurability)
         if (leftover > 0) {
             // 背包满：余量丢弃为实体（先把 heldCount 收到余量再 dropHeldCursor，它清 heldBlock + 发 spawnItem）。
             // 注：heldBlock/heldCount 是 Q_PROPERTY（WRITE setter），不能当函数调（.setHeldBlock(0) 会 TypeError），

@@ -24,22 +24,31 @@
 //   均分行为与抽取前一致（人工肉眼，逐面板复测）。
 .pragma library
 
-// ── 左键整组栈操作（t38）：给定目标槽当前 (curId, curCount) 与光标手持栈 (heldBlock, heldCount)，
-//    返回应写入的 {slotId, slotCount, heldId, heldCount}；null = 无操作。4 种 case：
-//      A 手持空 + 槽非空：拾取整栈。
-//      B 手持非空 + 槽空：放置整栈。
+// ── 左键整组栈操作（t38）：给定目标槽当前 (curId, curCount, curDur) 与光标手持栈 (heldBlock, heldCount,
+//    heldDurability)，返回应写入的 {slotId, slotCount, slotDur, heldId, heldCount, heldDur}；null = 无操作。
+//    4 种 case：
+//      A 手持空 + 槽非空：拾取整栈（含工具耐久随实例走，curDur → heldDur 保真）。
+//      B 手持非空 + 槽空：放置整栈（heldDur → slotDur 保真）。
 //      C 手持非空 + 同 id：合并至 maxStackSize(id)（方块 64 / 工具段 1），余数留 held；槽满则无操作。
-//      D 手持非空 + 异 id：互换。
+//        工具段 cap=1 → 已有同 id 槽恒满 → 不合并（A/B/D 路径覆盖工具搬运）。耐久不进合并键（同 id 工具不可
+//        堆叠，故无「合并两把镐」语义）。
+//      D 手持非空 + 异 id：互换（双方耐久随各自实例交换）。
 //    纯函数（只读 root.hotbar），无副作用 —— 调用方据返回值写入对应槽 + 更新 held。
-function resolveClick(root, curId, curCount) {
+function resolveClick(root, curId, curCount, curDur) {
     const heldId = root.hotbar.heldBlock
     const heldCount = root.hotbar.heldCount
+    const heldDur = root.hotbar.heldDurability                            // t263 工具耐久随实例走
     if (heldId === 0) {
         if (curId === 0) return null                                       // 空手点空槽：无操作
-        return { slotId: 0, slotCount: 0, heldId: curId, heldCount: curCount } // A 拾取整栈
+        // t263 拾取工具：本地槽（craft/chest/in/fuel）不持耐久 → curDur=0/undefined → 视作新工具（满耐久，-1=自动）。
+        //   hotbar/main 槽 curDur>0 → 实例耐久保真。非工具 curDur 恒 0（inert）。
+        const pickupDur = root.hotbar.isTool(curId) ? (curDur > 0 ? curDur : -1) : 0
+        return { slotId: 0, slotCount: 0, slotDur: 0,                     // A 拾取整栈：槽清空（耐久随物品移走）
+                 heldId: curId, heldCount: curCount, heldDur: pickupDur }
     }
     if (curId === 0) {
-        return { slotId: heldId, slotCount: heldCount, heldId: 0, heldCount: 0 } // B 放整栈
+        return { slotId: heldId, slotCount: heldCount, slotDur: heldDur,  // B 放整栈：耐久随物品入槽
+                 heldId: 0, heldCount: 0, heldDur: 0 }
     }
     if (curId === heldId) {
         // C 合并：min(剩余空间, 手持数) 移入槽；手持余 0 → heldId 归 0（保持空栈不变式）。
@@ -49,49 +58,62 @@ function resolveClick(root, curId, curCount) {
         const move = Math.min(space, heldCount)
         const remain = heldCount - move
         return {
-            slotId: curId, slotCount: curCount + move,
-            heldId: remain > 0 ? heldId : 0, heldCount: remain
+            slotId: curId, slotCount: curCount + move, slotDur: curDur,   // 同 id 合并：耐久不变（工具段不进此分支）
+            heldId: remain > 0 ? heldId : 0, heldCount: remain, heldDur: remain > 0 ? heldDur : 0
         }
     }
-    return { slotId: heldId, slotCount: heldCount, heldId: curId, heldCount: curCount } // D 互换
+    return { slotId: heldId, slotCount: heldCount, slotDur: heldDur,      // D 互换：双方耐久随各自实例交换
+             heldId: curId, heldCount: curCount, heldDur: curDur }
 }
 
 // ── 右键语义（t49，MC 1.0）：空手→拾取一半（floor(count/2)，单件特例取 1）；持物→放 1 个
 //    （空槽开新栈 / 同 id 未满 +1；异 id 槽 / 已满无操作，**不互换**）。返回与 resolveClick 同形；null = 无操作。
-function resolveRightClick(root, curId, curCount) {
+//    t263 工具段（cap=1）右键：空手点工具槽 → 单件特例 half=1 整件拿起（耐久保真）；持工具点空槽 → 放 1（=整件，
+//    耐久保真）；持工具点同 id 槽恒满 → 无操作；持工具点异 id 槽 → 无操作（不互换）。耐久随实例全程透传。
+function resolveRightClick(root, curId, curCount, curDur) {
     const heldId = root.hotbar.heldBlock
     const heldCount = root.hotbar.heldCount
+    const heldDur = root.hotbar.heldDurability
     if (heldId === 0) {
         if (curId === 0) return null                                     // 空手点空槽：无操作
         let half = Math.floor(curCount / 2)
-        if (half < 1) half = 1                                           // 单件：整件拿起
+        if (half < 1) half = 1                                           // 单件（工具段）：整件拿起
+        // 工具单件 half==curCount → 槽清空（slotDur=0）。t263 拾取工具耐久：本地槽 curDur=0 → 视作新工具（-1=自动满）。
+        const cleared = (curCount - half) <= 0
+        const pickupDur = root.hotbar.isTool(curId) ? (curDur > 0 ? curDur : -1) : 0
         return {
-            slotId: curCount - half > 0 ? curId : 0, slotCount: curCount - half,
-            heldId: curId, heldCount: half
+            slotId: cleared ? 0 : curId, slotCount: curCount - half, slotDur: cleared ? 0 : curDur,
+            heldId: curId, heldCount: half, heldDur: pickupDur
         }
     }
     if (curId !== 0 && curId !== heldId) return null                     // 异 id 槽：无操作（不互换）
     const cap = root.hotbar.maxStackSize(heldId)
-    if (curId === heldId && curCount >= cap) return null                 // 同 id 已满：无操作
+    if (curId === heldId && curCount >= cap) return null                 // 同 id 已满（工具段恒满）：无操作
     const remain = heldCount - 1
+    // 放 1 个到槽：工具段 cap=1 → 放的就是整件（heldDur → slotDur 保真）；光标余 0 → heldDur 归 0。
     return {
-        slotId: heldId, slotCount: curCount + 1,
-        heldId: remain > 0 ? heldId : 0, heldCount: remain
+        slotId: heldId, slotCount: curCount + 1, slotDur: heldDur,
+        heldId: remain > 0 ? heldId : 0, heldCount: remain, heldDur: remain > 0 ? heldDur : 0
     }
 }
 
-// ── 槽读写统一路由（t168 抽取）：main/hotbar 走 hotbar VM（四面板一致 → 收敛于此）；其它组
-//    （craft / in / fuel / out）委托面板的 localReadSlot/localWriteSlot 钩子。无钩子面板（Inventory）
+// ── 槽读写统一路由（t168 抽取；t263 加 durability 维度）：main/hotbar 走 hotbar VM（四面板一致 → 收敛于此）；
+//    其它组（craft / in / fuel / out）委托面板的 localReadSlot/localWriteSlot 钩子。无钩子面板（Inventory）
 //    以真值检测兜底（readSlot 空栈 / writeSlot 空操作）。index 对 main/hotbar 有效，对本地单槽组忽略。
+//    t263 durability：main/hotbar 槽透传工具耐久（readSlot 返 .durability / writeSlot 第 6 参）；本地组（craft/
+//      in/fuel/out）当前不持耐久（工具罕见进本地组 → 读写恒 0，setStack 对工具 dur=0 归一为 1 = 满耐久兜底，
+//      即本地组里的工具视作新工具；可接受边角，主路径 hotbar/main 已保真）。
 function readSlot(root, group, index) {
-    if (group === "main")   return { id: root.hotbar.mainBlockIdAt(index), count: root.hotbar.mainCountAt(index) }
-    if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index) }
+    if (group === "main")   return { id: root.hotbar.mainBlockIdAt(index), count: root.hotbar.mainCountAt(index), durability: root.hotbar.mainDurabilityAt(index) }
+    if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index), durability: root.hotbar.durabilityAt(index) }
     if (root.localReadSlot) return root.localReadSlot(group, index)
-    return { id: 0, count: 0 }
+    return { id: 0, count: 0, durability: 0 }
 }
-function writeSlot(root, group, index, id, count) {
-    if (group === "main")        { root.hotbar.mainSetStack(index, id, count); return }
-    if (group === "hotbar")      { root.hotbar.setStack(index, id, count); return }
+function writeSlot(root, group, index, id, count, durability) {
+    // t263 durability 缺省 -1（=自动：工具满耐久 / 非工具 0）；resolveClick 等显式传实例耐久时保真。
+    const dur = (durability === undefined) ? -1 : durability
+    if (group === "main")        { root.hotbar.mainSetStack(index, id, count, dur); return }
+    if (group === "hotbar")      { root.hotbar.setStack(index, id, count, dur); return }
     if (root.localWriteSlot)     root.localWriteSlot(group, index, id, count)
 }
 
@@ -159,9 +181,11 @@ function addDragSlot(root, key) {
     redistributeLive(root)                          // t98：每滑入新格实时重算 N 等分（撤销 + 重分）
 }
 // 手势生命周期（root DragHandler.onActiveChanged 调）。
+//   t263 dragHeldDurability 快照手持工具耐久（工具段不可拆分 → 拖动期间耐久不变，松手时回填光标保真）。
 function beginLeftDrag(root) {
     root.dragHeldId = root.hotbar.heldBlock
     root.dragHeldCount = root.hotbar.heldCount
+    root.dragHeldDurability = root.hotbar.heldDurability
     root.dragSlots = []
     root.dragOriginal = ({})                        // t98：重置原始栈快照
     root.dragWritten = ({})                         // t98：重置已写槽记录
@@ -197,12 +221,13 @@ function redistributeLive(root) {
     for (const key in root.dragWritten) {
         const wp = key.split(":")
         const orig = root.dragOriginal[key]
-        writeSlot(root, wp[0], parseInt(wp[1], 10), orig.id, orig.count)
+        writeSlot(root, wp[0], parseInt(wp[1], 10), orig.id, orig.count, orig.durability)
     }
     root.dragWritten = ({})
 
     const heldId = root.dragHeldId
     const total = root.dragHeldCount
+    const heldDur = root.dragHeldDurability                       // t263 工具耐久快照（拖动期间不变）
     const cap = root.hotbar.maxStackSize(heldId)
 
     // 2) 重建合格清单；首次 encounter 的槽拍原始栈快照（此后该槽读到的是本轮写入值，须靠快照还原）。
@@ -216,11 +241,11 @@ function redistributeLive(root) {
         if (!groupIsDraggable(root, p[0])) continue                 // t180：非可拖拽组跳过（替代旧 hardcode "craft" 排除）
         if (!root.dragOriginal[key]) {
             const cur = readSlot(root, p[0], parseInt(p[1], 10))
-            root.dragOriginal[key] = { id: cur.id, count: cur.count }
+            root.dragOriginal[key] = { id: cur.id, count: cur.count, durability: cur.durability }
         }
         const orig = root.dragOriginal[key]
         if (orig.id === 0 || (orig.id === heldId && orig.count < cap))
-            eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count })
+            eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count, dur: orig.durability })
     }
 
     // t108/t204：n>total 截断 eligible 到 total 项（每格至少 1 件；N≤count）。t204 起 dragSlots 收集已在
@@ -229,13 +254,16 @@ function redistributeLive(root) {
     let n = eligible.length
     if (n > total) { eligible = eligible.slice(0, total); n = eligible.length }
     // N≤1 / 空手 / 无物：不分（保留单格左键给 endLeftDrag；空手 drag 无意义）。余数 = 原始快照。
+    //   t263 工具段（cap=1）拖动：total=1 / N>1 → per=0 → 不分；耐久随物品留光标（heldDur 回填保真）。
     if (n <= 1 || heldId === 0 || total <= 0) {
         root.hotbar.heldBlock = heldId
         root.hotbar.heldCount = total
+        root.hotbar.heldDurability = heldDur
         return
     }
 
     // 3) floor(total/N) 入格（cap 钳制防溢出），余数留光标；记 dragWritten 供下轮撤销。
+    //   t263 同 id 合并（方块段）耐久不变（e.dur = 槽原始耐久）；工具段不进此分支（cap=1 恒满不进 eligible 合并）。
     const per = Math.floor(total / n)
     let remaining = total
     if (per > 0) {
@@ -243,24 +271,27 @@ function redistributeLive(root) {
             const e = eligible[i]
             const place = Math.min(per, cap - e.base)
             if (place <= 0) continue
-            writeSlot(root, e.group, e.index, heldId, e.base + place)
+            writeSlot(root, e.group, e.index, heldId, e.base + place, e.dur)
             root.dragWritten[e.key] = true
             remaining -= place
         }
     }
     root.hotbar.heldBlock = remaining > 0 ? heldId : 0
     root.hotbar.heldCount = remaining
+    root.hotbar.heldDurability = remaining > 0 ? heldDur : 0
 }
 
 // 单格左键（N===1 微拖退路 = resolveClick：空手拾取 / 持物放置 / 合并 / 互换）。正常单击走 per-slot
 //   TapHandler.onTapped（DragHandler 未激活）；仅当左键越阈值但只扫过起点一格时经此路径补一次单击语义。
+//   t263 耐久随实例透传（readSlot→resolveClick→writeSlot 全程携带 slotDur/heldDur）。
 function singleLeftClick(root, group, index) {
     const cur = readSlot(root, group, index)
-    const r = resolveClick(root, cur.id, cur.count)
+    const r = resolveClick(root, cur.id, cur.count, cur.durability)
     if (!r) return
-    writeSlot(root, group, index, r.slotId, r.slotCount)
+    writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur)
     root.hotbar.heldBlock = r.heldId
     root.hotbar.heldCount = r.heldCount
+    root.hotbar.heldDurability = r.heldDur                         // t263 工具耐久保真（setHeldBlock 已自动填 max，此处覆盖为实例值）
 }
 
 // ── t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）──
@@ -311,29 +342,35 @@ function addRightDragSlot(root, key) {
     root.rightDragSlots = root.rightDragSlots.concat([key])
 }
 // 往指定槽放 1 个（空槽开新栈 / 同 id 未满 +1；异 id / 已满 / 手空 → 跳过，不互换）。返回是否真放置。
+//   t263 工具段（cap=1）右键拖：放 1 = 放整件（heldDur → slotDur 保真）；手持余 0 → heldDur 归 0。
 function placeOneInSlot(root, group, index) {
     const heldId = root.hotbar.heldBlock
     const heldCount = root.hotbar.heldCount
+    const heldDur = root.hotbar.heldDurability
     if (heldId === 0 || heldCount <= 0) return false    // 空手：无物可放
     const cur = readSlot(root, group, index)
     if (cur.id !== 0 && cur.id !== heldId) return false  // 异 id：跳过（不互换）
     const cap = root.hotbar.maxStackSize(heldId)
     if (cur.id === heldId && cur.count >= cap) return false // 同 id 已满：跳过
-    writeSlot(root, group, index, heldId, cur.count + 1)
+    // 同 id 合并（方块段）耐久不变（cur.durability）；空槽开新工具（工具段）写手持耐久（heldDur 保真）。
+    const slotDur = (cur.id === heldId) ? cur.durability : heldDur
+    writeSlot(root, group, index, heldId, cur.count + 1, slotDur)
     const remain = heldCount - 1
     root.hotbar.heldBlock = remain > 0 ? heldId : 0
     root.hotbar.heldCount = remain
+    root.hotbar.heldDurability = remain > 0 ? heldDur : 0
     root.rightDragPlaced = true
     return true
 }
-// 单格右键（微拖退路 = resolveRightClick：空手拿半 / 持物放一）。
+// 单格右键（微拖退路 = resolveRightClick：空手拿半 / 持物放一）。t263 耐久透传（同 singleLeftClick）。
 function singleRightClick(root, group, index) {
     const cur = readSlot(root, group, index)
-    const r = resolveRightClick(root, cur.id, cur.count)
+    const r = resolveRightClick(root, cur.id, cur.count, cur.durability)
     if (!r) return
-    writeSlot(root, group, index, r.slotId, r.slotCount)
+    writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur)
     root.hotbar.heldBlock = r.heldId
     root.hotbar.heldCount = r.heldCount
+    root.hotbar.heldDurability = r.heldDur
 }
 
 // t110 Shift+左键搬运（MC 1.0 背包）+ t230 扩展（craft 归包）：main 槽→首个空 hotbar 槽；hotbar 槽→首个空
@@ -348,8 +385,8 @@ function slotShiftLeft(root, group, index) {
         if (src.id === 0) return
         for (let i = 0; i < root.hotbar.slotCount; ++i) {
             if (readSlot(root, "hotbar", i).id === 0) {
-                writeSlot(root, "main", index, 0, 0)
-                writeSlot(root, "hotbar", i, src.id, src.count)
+                writeSlot(root, "main", index, 0, 0, 0)
+                writeSlot(root, "hotbar", i, src.id, src.count, src.durability)   // t263 耐久随实例搬运
                 return
             }
         }
@@ -358,8 +395,8 @@ function slotShiftLeft(root, group, index) {
         if (src.id === 0) return
         for (let i = 0; i < root.hotbar.mainCount; ++i) {
             if (readSlot(root, "main", i).id === 0) {
-                writeSlot(root, "hotbar", index, 0, 0)
-                writeSlot(root, "main", i, src.id, src.count)
+                writeSlot(root, "hotbar", index, 0, 0, 0)
+                writeSlot(root, "main", i, src.id, src.count, src.durability)     // t263 耐久随实例搬运
                 return
             }
         }
@@ -367,6 +404,7 @@ function slotShiftLeft(root, group, index) {
         // t230：合成槽 Shift+左键 → 整栈归还背包（spec「背包内合成槽物品按 shift 左键也会回到背包槽」）。
         //   走 addToAny（main 同 id 合并 → hotbar 同 id → 空槽），与拾取/丢弃回栏同源；优于「仅查空槽」的
         //   main/hotbar 路径（修「同 id 未满栈旁还有空位却搬不进去」边角）。背包满 → 余数留 craft 槽。
+        //   t263 本地 craft 槽不持耐久（工具罕见进合成格）→ addToAny 自动填满耐久（合成产物视为新工具）。
         if (!root.hotbar) return
         const src = readSlot(root, "craft", index)
         if (src.id === 0 || src.count <= 0) return
@@ -398,9 +436,10 @@ function slotShiftLeftFurnace(root, group, index) {
         const space = cap - target.count
         if (space <= 0) return true                                      // 目标满 → 无操作
         const move = Math.min(space, src.count)
-        writeSlot(root, targetGroup, 0, src.id, target.count + move)
+        // t263 炉料槽（in/fuel）本地不持耐久 → 写手持耐久保真（src.durability）；工具段罕见进炉（非燃料/可烧物）。
+        writeSlot(root, targetGroup, 0, src.id, target.count + move, src.durability)
         const remain = src.count - move
-        writeSlot(root, group, index, remain > 0 ? src.id : 0, remain)
+        writeSlot(root, group, index, remain > 0 ? src.id : 0, remain, remain > 0 ? src.durability : 0)
         return true
     }
     if (group === "in" || group === "fuel" || group === "out") {
@@ -492,8 +531,9 @@ function swapHoveredWithHotbar(root, hotbarIdx) {
     if (Number.isNaN(srcIdx)) return
     const src = readSlot(root, group, srcIdx)
     const dst = readSlot(root, "hotbar", hotbarIdx)
-    writeSlot(root, group, srcIdx, dst.id, dst.count)
-    writeSlot(root, "hotbar", hotbarIdx, src.id, src.count)
+    // t263 双方耐久随各自实例交换（数字键搬运工具保真）。
+    writeSlot(root, group, srcIdx, dst.id, dst.count, dst.durability)
+    writeSlot(root, "hotbar", hotbarIdx, src.id, src.count, src.durability)
 }
 
 // t181 双击拿手上（MC：双击某槽 → 扫 main + hotbar（+ 面板声明的本地组）同 id 物品，**全部拾取到光标**，
@@ -540,9 +580,13 @@ function doMergeSameId(root, group, index) {
     }
     if (total <= 0) return
 
+    // t263 工具段（cap=1）双击：total=1=单件 → 拾起的就是那把工具，耐久须随实例到光标。在清空前快照首槽
+    //   耐久（slots 至少 1 项才会进到此；方块段 durability 恒 0 → 快照值 inert 不影响方块合并语义）。
+    const firstDur = slots.length > 0 ? readSlot(root, slots[0].group, slots[0].index).durability : 0
+
     // 清空所有同 id 槽 + 光标（即将重新打包）。
     for (let i = 0; i < slots.length; ++i) {
-        writeSlot(root, slots[i].group, slots[i].index, 0, 0)
+        writeSlot(root, slots[i].group, slots[i].index, 0, 0, 0)
     }
     root.hotbar.heldBlock = 0
     root.hotbar.heldCount = 0
@@ -555,14 +599,16 @@ function doMergeSameId(root, group, index) {
     const remain = total - cursorCount
     const numFull = Math.min(Math.floor(remain / cap), slots.length)
     for (let i = 0; i < numFull; ++i) {
-        writeSlot(root, slots[i].group, slots[i].index, targetId, cap)
+        writeSlot(root, slots[i].group, slots[i].index, targetId, cap, 0)  // 回填满栈（方块段，耐久 inert=0）
     }
     const tail = remain - numFull * cap
     if (tail > 0 && numFull < slots.length) {
-        writeSlot(root, slots[numFull].group, slots[numFull].index, targetId, tail)
+        writeSlot(root, slots[numFull].group, slots[numFull].index, targetId, tail, 0)
     }
     if (cursorCount > 0) {
         root.hotbar.heldBlock = targetId
         root.hotbar.heldCount = cursorCount
+        // 工具段单件：耐久 = 清空前快照的首槽耐久（firstDur）。方块段 firstDur=0（inert）；非工具 normalizeDurability 归 0。
+        root.hotbar.heldDurability = firstDur
     }
 }

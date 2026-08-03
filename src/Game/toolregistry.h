@@ -18,6 +18,12 @@
 //   工具段：id >= ToolIdBase（0x100）；当前 3 档镐（木 / 石 / 铁）+ 3 档锄（木 / 石 / 铁）。
 // 工具不可堆叠（Hotbar::maxStackSize(id) 对工具段返回 1，t32 已留段）。
 //
+// 耐久模型（spec t263，机制等价 MC 1.0 工具耐久）：每工具一份 maxDurability（按 tier：木 < 石 < 铁），
+//   每次有效使用（生存挖掘完成 / 锄耕地 / 未来剑攻击）-1，归零即破损（槽位清空、工具消失）。
+//   创造模式不消耗（无限源）。耐久值随工具实例走（Hotbar::ItemStack.durability 字段，工具 count 恒 1 →
+//   每实例独立耐久；背包内搬运经 setStack 显式传 durability 保真，见 hotbar.h）。
+//   maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 的镐 / 锄 / 未来剑 / 斧 / 铲共享）。
+//
 // 挖掘模型（spec t33，机制等价 MC 1.0；硬度 / 采掘要求走 BlockRegistry::BlockDef）：
 //   - 挖掘耗时 = hardness / speedMul（秒）。
 //   - speedMul：空手 / 不匹配工具 = 1；匹配工具类型 AND tier >= minToolTier → 按 tier 倍率（2/4/6）。
@@ -58,6 +64,7 @@ public:
         int type;            // BlockRegistry::ToolType（Pickaxe / Hoe / NoTool）
         int tier;            // 等级（1=木 2=石 3=铁）；决定能否采掘高阶方块 + 速度倍率（镐）/ 耕地等级（锄）
         float speedMul;      // 匹配工具时的挖掘速度倍率（>1 → 加速）；锄恒 1.0（不参与挖掘，仅记账）
+        int maxDurability;   // t263 最大耐久（使用次数上限；木 59 / 石 131 / 铁 250）。归零即破损。
         const char *name;    // 内部 / 调试用名（通用词，英文标识符；非面向用户）
         const char *display; // 用户可见中文显示名（UTF-8；PLAN §9 override (b) 通用描述词）
     };
@@ -93,6 +100,11 @@ public:
     //   HoeWood=木锄 HoeStone=石锄 HoeIron=铁锄。非工具 / 越界 → 空串。
     // 字面量为 UTF-8，由 fromUtf8 解码（与项目既有中文注释 / BlockRegistry::displayName 同源）。
     static QString displayName(int itemId);
+
+    // t263 工具最大耐久（使用次数上限；MC 1.0 经典值：木 59 / 石 131 / 铁 250，同 tier 共享）。
+    //   非工具 / 越界 → 0（无耐久概念）。Hotbar 据本值初始化新工具实例的耐久 + tooltip 显「cur/max」。
+    //   机制等价 MC 1.0 工具耐久（机制对齐，非名词照搬）；金 / 钻石档留后续任务（t264 扩工具集时追加 tier）。
+    static int maxDurability(int itemId);
 
 private:
     ToolRegistry() = delete; // 纯静态数据表，无实例。

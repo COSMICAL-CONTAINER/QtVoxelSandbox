@@ -715,6 +715,11 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             emit spawnItem(x, y, z, dropId, dropCount); // t83：传 dropId（Stone→Cobble / 矿石→材料），非 brokenId
         }
     }
+    // t263 生存挖掘完成 → 持有工具消耗 1 点耐久（机制等价 MC「每破 1 块工具 -1 耐久」）。创造 drop=false
+    //   路径不调本方法（beginMining 内瞬破 return，m_mode!=Survival 守卫挡）；生存可挖方块无论是否掉落
+    //   （canHarvest）均消耗（破需工具但无产出仍磨损工具，机制等价 MC）。damageSelectedItem 对非工具 / 空
+    //   槽静默 no-op；耐久归零自动清槽（工具破损消失）。空手破块无工具 → 不消耗（无耐久概念）。
+    if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem();
     emit swingArm();                                // 破块成功 → 第一人称手挥动（t29）
     cancelMining();                                 // 清累积态（裂纹叠层隐藏）
 }
@@ -1089,6 +1094,9 @@ void PlayerController::placeBlock()
                     //   走写入路径发 blockBroken(Dirt/Grass) + blockPlaced(Farmland) + worldChanged → 即时重建 mesh；
                     //   粒子/音由呈现层按事件消费）。swingArm 驱动挥锄动画。
                     m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Farmland, moist);
+                    // t263 锄耕地消耗 1 点耐久（机制等价 MC「锄每耕 1 格 -1 耐久」）。Survival 限定（创造不耗）；
+                    //   damageSelectedItem 对当前选中槽的锄 -1，归零自动清槽（锄破损消失）。
+                    if (m_mode == Survival) m_hotbar->damageSelectedItem();
                     m_lastPlaceMs = now;
                     emit swingArm();
                 }

@@ -69,6 +69,7 @@ Item {
     property string hoveredKey: ""
     property int dragHeldId: 0
     property int dragHeldCount: 0
+    property int dragHeldDurability: 0      // t263 拖动期间手持工具耐久快照（松手回填光标保真）
     // t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）。dragActive 统一左/右拖动收集门控。
     property bool rightDragActive: false
     property var rightDragSlots: []
@@ -102,8 +103,8 @@ Item {
     }
     // resolveClick / resolveRightClick（拾取/放置/合并/互换 + 半份）：算法见 InventoryOps（四面板共享）。
     //   返回 {slotId,slotCount,heldId,heldCount} 或 null=无操作；调用方据返回值写对应槽 + 更新 held。
-    function resolveClick(curId, curCount) { return InventoryOps.resolveClick(root, curId, curCount) }
-    function resolveRightClick(curId, curCount) { return InventoryOps.resolveRightClick(root, curId, curCount) }
+    function resolveClick(curId, curCount, curDur) { return InventoryOps.resolveClick(root, curId, curCount, curDur) }
+    function resolveRightClick(curId, curCount, curDur) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur) }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
     function writeSlot(group, index, id, count) { InventoryOps.writeSlot(root, group, index, id, count) }
 
@@ -333,26 +334,28 @@ Item {
                                     root.lastTapMs = now
                                     root.lastTapKey = key
                                     if (isDouble) { root.doMergeSameId("craft", index); return }
-                                    const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
+                                    const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0, 0)
                                     if (!r) return
                                     root.craftSlots[index] = r.slotId
                                     root.craftCounts[index] = r.slotCount
                                     root.craftRev++
                                     root.hotbar.heldBlock = r.heldId
                                     root.hotbar.heldCount = r.heldCount
+                                    root.hotbar.heldDurability = r.heldDur
                                 }
                             }
                             // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey。
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: {
-                                    const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0)
+                                    const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0, 0)
                                     if (!r) return
                                     root.craftSlots[index] = r.slotId
                                     root.craftCounts[index] = r.slotCount
                                     root.craftRev++
                                     root.hotbar.heldBlock = r.heldId
                                     root.hotbar.heldCount = r.heldCount
+                                    root.hotbar.heldDurability = r.heldDur
                                 }
                             }
                             HoverHandler {
@@ -512,6 +515,7 @@ Item {
                     delegate: Item {
                         property int mainId: { root.hotbar.mainRevision; return root.hotbar.mainBlockIdAt(index) }
                         property int mainCount: { root.hotbar.mainRevision; return root.hotbar.mainCountAt(index) }
+                        property int mainDur: { root.hotbar.mainRevision; return root.hotbar.mainDurabilityAt(index) } // t263 工具耐久
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent }
                         Item {
@@ -559,22 +563,24 @@ Item {
                                 root.lastTapMs = now
                                 root.lastTapKey = key
                                 if (isDouble) { root.doMergeSameId("main", index); return }
-                                const r = root.resolveClick(mainId, mainCount)
+                                const r = root.resolveClick(mainId, mainCount, mainDur)
                                 if (!r) return
-                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount)
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur)
                                 root.hotbar.heldBlock = r.heldId
                                 root.hotbar.heldCount = r.heldCount
+                                root.hotbar.heldDurability = r.heldDur
                             }
                         }
                         // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey。
                         TapHandler {
                             acceptedButtons: Qt.RightButton
                             onTapped: {
-                                const r = root.resolveRightClick(mainId, mainCount)
+                                const r = root.resolveRightClick(mainId, mainCount, mainDur)
                                 if (!r) return
-                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount)
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur)
                                 root.hotbar.heldBlock = r.heldId
                                 root.hotbar.heldCount = r.heldCount
+                                root.hotbar.heldDurability = r.heldDur
                             }
                         }
                         HoverHandler {
@@ -680,11 +686,12 @@ Item {
                                     root.lastTapMs = now
                                     root.lastTapKey = key
                                     if (isDouble) { root.doMergeSameId("hotbar", index); return }
-                                    const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                    const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index))
                                     if (r) {
-                                        root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur)
                                         root.hotbar.heldBlock = r.heldId
                                         root.hotbar.heldCount = r.heldCount
+                                        root.hotbar.heldDurability = r.heldDur
                                     }
                                 }
                             }
@@ -692,11 +699,12 @@ Item {
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: {
-                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index))
+                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index))
                                     if (r) {
-                                        root.hotbar.setStack(index, r.slotId, r.slotCount)
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur)
                                         root.hotbar.heldBlock = r.heldId
                                         root.hotbar.heldCount = r.heldCount
+                                        root.hotbar.heldDurability = r.heldDur
                                     }
                                 }
                             }
@@ -755,6 +763,20 @@ Item {
     // 材料段→本地通用名；air/空槽→空串→不显。工具后续将加「+攻击力」等字段，现阶段只名字。
     property int hoveredItemId: 0
     property point hoveredTipPos: Qt.point(0, 0)
+    // t263 当前 hover 槽的工具剩余耐久（-1=未跟踪 → tooltip 不显耐久行）。据 hoveredKey 查 hotbar/main。
+    property int hoveredDurability: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hotbar.isTool(root.hoveredItemId)) return -1
+        root.hotbar.slotRevision; root.hotbar.mainRevision
+        const key = root.hoveredKey
+        if (!key) return -1
+        const parts = key.split(":")
+        if (parts.length !== 2) return -1
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return -1
+        if (parts[0] === "hotbar") return root.hotbar.durabilityAt(idx)
+        if (parts[0] === "main") return root.hotbar.mainDurabilityAt(idx)
+        return -1
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -781,7 +803,9 @@ Item {
         Text {
             id: tipLabel
             anchors.centerIn: parent
-            text: root.hotbar ? root.hotbar.nameForBlock(root.hoveredItemId) : ""
+            // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
+            text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
+                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")) : ""
             color: "#f2f2f2"
             font.pixelSize: 12
         }

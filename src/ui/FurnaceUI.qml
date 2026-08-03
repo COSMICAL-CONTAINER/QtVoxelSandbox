@@ -91,6 +91,7 @@ Item {
     property var dragSlots: []              // "in:0" / "fuel:0" / "out:0" / "main:5" / "hotbar:0"
     property int dragHeldId: 0
     property int dragHeldCount: 0
+    property int dragHeldDurability: 0      // t263 拖动期间手持工具耐久快照（松手回填光标保真）
     // 实时重分撤销机制：dragOriginal 记每槽 drag 前原始栈（首次 encounter 快照）；dragWritten 记本轮已写槽。
     // 每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginLeftDrag / endLeftDrag 重置。
     property var dragOriginal: ({})
@@ -156,19 +157,21 @@ Item {
             return
         }
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveClick(root, cur.id, cur.count)
+        const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
+        root.hotbar.heldDurability = r.heldDur
     }
     function slotRight(group, index) {
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count)
+        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
+        root.hotbar.heldDurability = r.heldDur
     }
 
     // ── t79/t98/t108/t167 拖动均分 + t110 数字键交换：算法见 InventoryOps（四面板共享）。本处薄委托包装，
@@ -798,6 +801,20 @@ Item {
     // 材料段→本地通用名；air/空槽→空串→不显。工具后续将加「+攻击力」等字段，现阶段只名字。
     property int hoveredItemId: 0
     property point hoveredTipPos: Qt.point(0, 0)
+    // t263 当前 hover 槽的工具剩余耐久（-1=未跟踪 → tooltip 不显耐久行）。据 hoveredKey 查 hotbar/main。
+    property int hoveredDurability: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hotbar.isTool(root.hoveredItemId)) return -1
+        root.hotbar.slotRevision; root.hotbar.mainRevision
+        const key = root.hoveredKey
+        if (!key) return -1
+        const parts = key.split(":")
+        if (parts.length !== 2) return -1
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return -1
+        if (parts[0] === "hotbar") return root.hotbar.durabilityAt(idx)
+        if (parts[0] === "main") return root.hotbar.mainDurabilityAt(idx)
+        return -1
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -824,7 +841,9 @@ Item {
         Text {
             id: tipLabel
             anchors.centerIn: parent
-            text: root.hotbar ? root.hotbar.nameForBlock(root.hoveredItemId) : ""
+            // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
+            text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
+                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")) : ""
             color: "#f2f2f2"
             font.pixelSize: 12
         }

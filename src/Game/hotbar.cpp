@@ -60,6 +60,23 @@ bool isValidItemId(int id)
 {
     return id == 0 || (id > 0 && id < int(BlockRegistry::Count)) || id >= kToolIdBase;
 }
+
+// t263 把「写入时传入的 durability」归一为合法的工具实例耐久。
+//   - 非工具 id（含 air / 方块 / 材料）→ 恒 0（inert；非工具栈不带耐久）。
+//   - 工具 id + durability<0（缺省「自动」）→ maxDurability（新工具实例：创造取件 / 合成产物 / 世界拾取兜底）。
+//   - 工具 id + durability>=0（显式保真）→ clamp 到 [1, maxDurability]（搬运 / 拾取时槽内旧耐久）；
+//     0 视作 1（耐久归零的工具不应再进槽——破损在 damageSelectedItem 内清槽，不写 0 耐久工具）。
+// 调用者：setStack / mainSetStack / addStack / mainAddStack / addToAny（统一入口，防各处散写漏归一）。
+int normalizeDurability(int id, int durability)
+{
+    if (!ToolRegistry::isTool(id)) return 0;
+    const int cap = ToolRegistry::maxDurability(id);
+    if (cap <= 0) return 0; // 防御：工具表未配耐久（不应发生；maxDurability 对工具段恒 >0）
+    if (durability < 0) return cap;         // 缺省 → 新工具满耐久
+    if (durability > cap) return cap;       // 超 max 钳到 max
+    if (durability == 0) return 1;          // 0 视作 1（破损工具不写槽；最小 1 次耐久）
+    return durability;
+}
 } // namespace
 
 Hotbar::Hotbar(QObject *parent)
@@ -202,6 +219,13 @@ int Hotbar::countAt(int slot) const
     return m_slots[size_t(slot)].count;
 }
 
+// t263 每槽工具剩余耐久（非工具 / 空槽 = 0）。tooltip 显「cur/max」+ InventoryOps.readSlot 搬运保真读它。
+int Hotbar::durabilityAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_slots.size())) return 0;
+    return m_slots[size_t(slot)].durability;
+}
+
 // 拷一份槽内容给 QML 作 Repeater model（QVariantList<int>：物品 id）。slotRevision 触碰的 model
 // 绑定在 slotsChanged 后重算 → 返回新数组 → Repeater 整列重建。
 QVariantList Hotbar::slotList() const
@@ -318,19 +342,21 @@ void Hotbar::scroll(int delta)
 // ── 栈操作 ──
 
 // 直接写入栈。air/非法 id/count<=0 → 清空该槽（id=0,count=0）；否则 count 钳到 maxStackSize(id)。
-void Hotbar::setStack(int slot, int id, int count)
+//   durability（t263）：经 normalizeDurability 归一（-1=自动满 / >=0=保真 clamp）。工具 count 恒 1。
+void Hotbar::setStack(int slot, int id, int count, int durability)
 {
     if (slot < 0 || slot >= int(m_slots.size())) return;
     if (!isValidItemId(id)) return;
     ItemStack target;
     if (id != 0 && count > 0) {
         const int cap = maxStackSize(id);
-        target = ItemStack{id, std::min(count, cap)};
+        target = ItemStack{id, std::min(count, cap), normalizeDurability(id, durability)};
     } // else: 空栈（id=0 或 count<=0 → 清空）
     const ItemStack &cur = m_slots[size_t(slot)];
-    if (cur.id == target.id && cur.count == target.count) return;
+    if (cur.id == target.id && cur.count == target.count && cur.durability == target.durability) return;
     m_slots[size_t(slot)] = target;
-    qInfo().noquote() << "[inv] setStack slot=" << slot << "id=" << target.id << "count=" << target.count;
+    qInfo().noquote() << "[inv] setStack slot=" << slot << "id=" << target.id << "count=" << target.count
+                      << "dur=" << target.durability;
     bumpRevision();
     // 改当前选中槽 → 手持方块（selectedBlockId）也变了。selectedBlockId 的 NOTIFY 只能挂一个
     // 信号（selectedSlotChanged），故此处补发它，让消费者（player.selectedBlock 绑定 / HUD 手持名）
@@ -352,10 +378,13 @@ void Hotbar::setSlotBlock(int slot, int blockId)
 // t74 根因：旧序把「选中槽空→开新栈」排在「合并同 id 槽」前 → 选中槽空时直接开新栈，
 // 不查别处已有同 id 未满槽。例：第1槽草(未满) + 第2槽(选中,空) 挖草 → 草应进第1槽却进第2槽，
 // 形成同物分散两栈的反直觉结果。新序：合并全程优先于开新，避免「同物分散」。
-int Hotbar::addStack(int id, int n)
+int Hotbar::addStack(int id, int n, int durability)
 {
     if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
     const int cap = maxStackSize(id);
+    // t263 工具段（cap==1）：不可堆叠 → 同 id 槽合并分支永不命中（已有同 id 槽必 count==1==cap）。
+    //   故工具只走「空槽开新栈」分支，写入 normalizeDurability 归一的耐久。方块 / 材料段 durability 恒 0（inert）。
+    const int dur = normalizeDurability(id, durability);
     int remaining = n;
     bool changed = false;
 
@@ -373,7 +402,7 @@ int Hotbar::addStack(int id, int n)
         ItemStack &sel = m_slots[size_t(m_selectedSlot)];
         if (sel.id == 0) {
             const int add = std::min(cap, remaining);
-            sel = ItemStack{id, add}; remaining -= add; changed = true;
+            sel = ItemStack{id, add, dur}; remaining -= add; changed = true;
         }
     }
     for (size_t i = 0; i < m_slots.size(); ++i) {
@@ -382,7 +411,7 @@ int Hotbar::addStack(int id, int n)
         ItemStack &s = m_slots[i];
         if (s.id == 0) {
             const int add = std::min(cap, remaining);
-            s = ItemStack{id, add}; remaining -= add; changed = true;
+            s = ItemStack{id, add, dur}; remaining -= add; changed = true;
         }
     }
     if (changed) {
@@ -411,29 +440,40 @@ int Hotbar::mainCountAt(int slot) const
     return m_mainSlots[size_t(slot)].count;
 }
 
+// t263 主栏槽工具剩余耐久（同 durabilityAt 的主栏版；非工具 / 空槽 = 0）。
+int Hotbar::mainDurabilityAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_mainSlots.size())) return 0;
+    return m_mainSlots[size_t(slot)].durability;
+}
+
 // 直接写入主栏栈（背包点击放置 / 互换 / 拖拽均分写回主栏用）。校验同 setStack；air/非法 id/count<=0 → 清空。
 // 主栏槽与 selectedSlot 无关（不驱动 selectedBlockId），故无 selectedSlotChanged 补发。
-void Hotbar::mainSetStack(int slot, int id, int count)
+//   durability（t263）：同 setStack（normalizeDurability 归一）。
+void Hotbar::mainSetStack(int slot, int id, int count, int durability)
 {
     if (slot < 0 || slot >= int(m_mainSlots.size())) return;
     if (!isValidItemId(id)) return;
     ItemStack target;
     if (id != 0 && count > 0) {
         const int cap = maxStackSize(id);
-        target = ItemStack{id, std::min(count, cap)};
+        target = ItemStack{id, std::min(count, cap), normalizeDurability(id, durability)};
     }
     const ItemStack &cur = m_mainSlots[size_t(slot)];
-    if (cur.id == target.id && cur.count == target.count) return;
+    if (cur.id == target.id && cur.count == target.count && cur.durability == target.durability) return;
     m_mainSlots[size_t(slot)] = target;
-    qInfo().noquote() << "[inv] mainSetStack slot=" << slot << "id=" << target.id << "count=" << target.count;
+    qInfo().noquote() << "[inv] mainSetStack slot=" << slot << "id=" << target.id << "count=" << target.count
+                      << "dur=" << target.durability;
     bumpMainRevision();
 }
 
 // 智能堆叠放入主栏（同 id 合并 → 空槽开新）。返回未放入数。仅主栏范围（hotbar 由 addStack / addToAny 管）。
-int Hotbar::mainAddStack(int id, int n)
+//   durability（t263）：同 addStack（工具不可堆叠 → 只走空槽开新，写入归一耐久）。
+int Hotbar::mainAddStack(int id, int n, int durability)
 {
     if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
     const int cap = maxStackSize(id);
+    const int dur = normalizeDurability(id, durability);
     int remaining = n;
     bool changed = false;
     for (size_t i = 0; i < m_mainSlots.size(); ++i) {
@@ -449,7 +489,7 @@ int Hotbar::mainAddStack(int id, int n)
         ItemStack &s = m_mainSlots[i];
         if (s.id == 0) {
             const int add = std::min(cap, remaining);
-            s = ItemStack{id, add}; remaining -= add; changed = true;
+            s = ItemStack{id, add, dur}; remaining -= add; changed = true;
         }
     }
     if (changed) bumpMainRevision();
@@ -466,10 +506,12 @@ int Hotbar::mainAddStack(int id, int n)
 // t109 根因：旧序「main 空 → hotbar 空」让空手拾取先塞主栏空槽，玩家挖块却要翻主栏找 → 违直觉。
 // 拾取应优先落入可直接看见的 hotbar（MC 行为同此），故交换两空槽循环：hotbar 空优先于 main 空。
 // main 同 id 合并仍先于 hotbar 同 id（已存在栈就地补满优于跨栏开新，保持「同物不分散」）。
-int Hotbar::addToAny(int id, int n)
+int Hotbar::addToAny(int id, int n, int durability)
 {
     if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
     const int cap = maxStackSize(id);
+    // t263 工具段（cap==1）：同 id 合并分支永不命中（已有同 id 槽必满）→ 只走空槽开新；dur 归一。
+    const int dur = normalizeDurability(id, durability);
     int remaining = n;
     bool mainChanged = false, slotChanged = false;
 
@@ -497,7 +539,7 @@ int Hotbar::addToAny(int id, int n)
         ItemStack &s = m_slots[i];
         if (s.id == 0) {
             const int add = std::min(cap, remaining);
-            s = ItemStack{id, add}; remaining -= add; slotChanged = true;
+            s = ItemStack{id, add, dur}; remaining -= add; slotChanged = true;
         }
     }
     for (size_t i = 0; i < m_mainSlots.size(); ++i) {
@@ -505,7 +547,7 @@ int Hotbar::addToAny(int id, int n)
         ItemStack &s = m_mainSlots[i];
         if (s.id == 0) {
             const int add = std::min(cap, remaining);
-            s = ItemStack{id, add}; remaining -= add; mainChanged = true;
+            s = ItemStack{id, add, dur}; remaining -= add; mainChanged = true;
         }
     }
     if (mainChanged) bumpMainRevision();
@@ -542,6 +584,33 @@ int Hotbar::maxStackSize(int id) const
     if (id <= 0 || id >= int(BlockRegistry::Count)) return 0; // air / 越界：不可堆叠（无意义）
     // 方块段走 BlockRegistry::BlockDef.maxStack（t42 单一权威；旧硬编码 64 迁移到表查，行为不变）。
     return BlockRegistry::maxStack(quint8(id));
+}
+
+// t263 工具最大耐久（透传 ToolRegistry::maxDurability；非工具 → 0）。QML tooltip 显 max + 创造取件初始化用。
+int Hotbar::toolMaxDurability(int id) const
+{
+    return ToolRegistry::maxDurability(id);
+}
+
+// t263 消耗选中槽工具 1 点耐久（playercontroller 生存挖掘完成 / 锄耕地调用）。创造由 caller 不调（不消耗）。
+//   非工具 / 空槽 → no-op。耐久 >1 → -1 + bumpRevision（tooltip / HUD 刷新）。归零 → 清空槽（工具破损消失）
+//   + bumpRevision + 补发 selectedSlotChanged（selectedBlockId 可能因栈空而变 Air）。无返回值（caller 不据之分支）。
+void Hotbar::damageSelectedItem()
+{
+    if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return;
+    ItemStack &s = m_slots[size_t(m_selectedSlot)];
+    if (!ToolRegistry::isTool(s.id) || s.count <= 0) return; // 非工具 / 空槽 → no-op
+    if (s.durability <= 1) {
+        // 归零 → 工具破损：清空槽（机制等价 MC「工具耐久耗尽即消失」，不掉落破损残骸）。
+        qInfo().noquote() << "[inv] tool broken slot=" << m_selectedSlot << "id=" << s.id;
+        s = ItemStack{0, 0, 0};
+        bumpRevision();
+        emit selectedSlotChanged(); // 选中栈变空 → selectedBlockId → Air；player.selectedBlock 刷新
+        return;
+    }
+    s.durability -= 1;
+    qInfo().noquote() << "[inv] tool damage slot=" << m_selectedSlot << "id=" << s.id << "dur=" << s.durability;
+    bumpRevision(); // tooltip 「cur/max」+（未来）HUD 耐久条刷新
 }
 
 // t50 合成桥接：QML 不能直接调 C++ 静态 RecipeRegistry，经 VM 透传（VM 属 Game 同层，向下查 RecipeRegistry）。
@@ -611,8 +680,11 @@ void Hotbar::resetForMode(int mode)
     emit selectedSlotChanged();        // selectedBlockId 可能因栈变空而变 Air
 }
 
-// 光标手持物 id。setHeldBlock(0) 同步清 count；setHeldBlock(非0) 时若 count 为 0 补 1（防「有 id 无
-// count」中间态——QML 拾取整栈时会紧接 setHeldCount 覆盖为真实数量）。
+// 光标手持物 id。setHeldBlock(0) 同步清 count + durability；setHeldBlock(非0) 时若 count 为 0 补 1
+// （防「有 id 无 count」中间态——QML 拾取整栈时会紧接 setHeldCount 覆盖为真实数量）。
+// t263：切到新工具 id 时自动填 maxDurability（创造调色板取件=满耐久场景）；pickup-from-slot 路径
+//   在 setHeldBlock 后紧接 setHeldDurability(slot 旧值) 覆盖为槽内实例耐久（InventoryOps.readSlot 透传）。
+//   切到非工具 id 时 durability 归 0（inert）。同 id 不变则早退（不动 durability，防覆盖 caller 已设的值）。
 void Hotbar::setHeldBlock(int id)
 {
     if (!isValidItemId(id)) return;
@@ -622,8 +694,11 @@ void Hotbar::setHeldBlock(int id)
     } else {
         m_heldStack.id = id;
         if (m_heldStack.count <= 0) m_heldStack.count = 1;
+        // 新工具实例默认满耐久（创造取件 / 合成产物兜底）；caller 显式覆盖走 setHeldDurability。
+        m_heldStack.durability = normalizeDurability(id, -1);
     }
-    qInfo().noquote() << "[inv] setHeldBlock -> id=" << id << " count=" << m_heldStack.count;
+    qInfo().noquote() << "[inv] setHeldBlock -> id=" << id << " count=" << m_heldStack.count
+                      << "dur=" << m_heldStack.durability;
     emit heldBlockChanged();
 }
 
@@ -632,5 +707,15 @@ void Hotbar::setHeldCount(int n)
     if (n < 0) n = 0;
     if (n == m_heldStack.count) return;
     m_heldStack.count = n;
+    emit heldBlockChanged();
+}
+
+// t263 手持工具耐久 setter：clamp 到 [0, maxDurability(id)]；非工具 id 写入静默归 0（inert）。
+//   pickup-from-slot 路径在 setHeldBlock 后调本方法覆盖默认满耐久为槽内实例耐久（保真搬运）。
+void Hotbar::setHeldDurability(int d)
+{
+    const int normalized = normalizeDurability(m_heldStack.id, d);
+    if (normalized == m_heldStack.durability) return;
+    m_heldStack.durability = normalized;
     emit heldBlockChanged();
 }

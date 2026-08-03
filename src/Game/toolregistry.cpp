@@ -13,12 +13,13 @@ namespace {
 // 工具段连续表（按 ToolId 枚举顺序；isTool 判定后按偏移索引）。
 // type 字段为 BlockRegistry::ToolType（枚举归 Core；与 BlockDef.toolType 同源）。
 constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
-    /* PickaxeWood  */ {int(BlockRegistry::Pickaxe), 1, 2.0f, "pickaxe_wood",  "木镐"},
-    /* PickaxeStone */ {int(BlockRegistry::Pickaxe), 2, 4.0f, "pickaxe_stone", "石镐"},
-    /* PickaxeIron  */ {int(BlockRegistry::Pickaxe), 3, 6.0f, "pickaxe_iron",  "铁镐"},
-    /* HoeWood      */ {int(BlockRegistry::Hoe),     1, 1.0f, "hoe_wood",      "木锄"},
-    /* HoeStone     */ {int(BlockRegistry::Hoe),     2, 1.0f, "hoe_stone",     "石锄"},
-    /* HoeIron      */ {int(BlockRegistry::Hoe),     3, 1.0f, "hoe_iron",      "铁锄"},
+    // maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 镐 / 锄共享；spec t263「木头耐久度最低以此类推」）。
+    /* PickaxeWood  */ {int(BlockRegistry::Pickaxe), 1, 2.0f,   59, "pickaxe_wood",  "木镐"},
+    /* PickaxeStone */ {int(BlockRegistry::Pickaxe), 2, 4.0f,  131, "pickaxe_stone", "石镐"},
+    /* PickaxeIron  */ {int(BlockRegistry::Pickaxe), 3, 6.0f,  250, "pickaxe_iron",  "铁镐"},
+    /* HoeWood      */ {int(BlockRegistry::Hoe),     1, 1.0f,   59, "hoe_wood",      "木锄"},
+    /* HoeStone     */ {int(BlockRegistry::Hoe),     2, 1.0f,  131, "hoe_stone",     "石锄"},
+    /* HoeIron      */ {int(BlockRegistry::Hoe),     3, 1.0f,  250, "hoe_iron",      "铁锄"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -90,4 +91,11 @@ QString ToolRegistry::displayName(int itemId)
     // 源文件 UTF-8；MinGW GCC 默认 input/exec charset = UTF-8，字面量为 UTF-8 字节，fromUtf8 正确解码
     // （与 BlockRegistry::displayName 同源；跨编译器稳健靠「UTF-8 字面量 + fromUtf8」）。
     return QString::fromUtf8(t->display);
+}
+
+int ToolRegistry::maxDurability(int itemId)
+{
+    const ToolDef *t = tool(itemId);
+    if (!t) return 0; // 非工具 / 越界 → 0（无耐久概念；Hotbar 据本值区分工具 vs 非工具）
+    return t->maxDurability;
 }

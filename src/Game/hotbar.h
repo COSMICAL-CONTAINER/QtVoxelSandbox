@@ -14,14 +14,17 @@
 #include "smelting.h"      // t87 冶炼 / 燃料判定（smeltResult / fuelBurnSeconds 桥接到 QML）
 #include "toolregistry.h"  // 工具段 id（>=0x100）；工具判定 / tier / 中文名 / 创造调色板走工具注册表（t33）
 
-// 物品栈（t32 基础数据模型）：槽位从单一 quint8 block-id 升级为 {itemId, count}，支持堆叠。
+// 物品栈（t32 基础数据模型）：槽位从单一 quint8 block-id 升级为 {itemId, count, durability}，支持堆叠。
 //   - id 复用 BlockRegistry id（方块段 0..Count-1，air=0 即空栈）；
 //   - 预留工具段 id>=0x100（t33 落地，本任务仅留段；工具不可堆叠 → maxStackSize 返回 1）。
 //   - count 上限经 Hotbar::maxStackSize(id)：方块 64、工具 1。
+//   - durability（t263）：仅工具有意义（工具 count 恒 1 → 每实例独立耐久）；非工具栈恒 0（inert）。
+//     工具实例耐久 ∈ [1, ToolRegistry::maxDurability(id)]；归零即破损（槽位清空，不会出现 durability=0 的工具栈）。
 //   - 不变式：id==0 当且仅当 count==0（空栈）；非空栈 count 恒 >=1（写入处统一钳制）。
 struct ItemStack {
     int id = 0;
     int count = 0;
+    int durability = 0; // t263 工具剩余耐久（非工具 / 空栈 = 0，inert）
 
     bool isEmpty() const { return id == 0 || count <= 0; }
 };
@@ -73,8 +76,12 @@ class Hotbar : public QObject
     // 光标手持物（背包内点击拾取/放置的「拿在鼠标上的物品栈」，id=0 即空手）。创造/生存背包共用同一
     // VM → 两面板共享同一手持栈（在创造背包拾起、切生存背包仍持着）。Main.qml 据此画跟随光标的浮动图标。
     // heldCount 与 heldBlock 共享 NOTIFY=heldBlockChanged（二者强耦合：有 id 必有 count）。
+    // t263 heldDurability：手持工具的剩余耐久（随工具实例走；背包内搬运经 InventoryOps 显式同步保真）。
+    //   setHeldBlock 切换到新工具时自动填 maxDurability（创造调色板取件=满耐久）；pickup-from-slot 路径
+    //   在 setHeldBlock 后紧接 setHeldDurability(slot 旧值) 覆盖为槽内实例耐久（InventoryOps.readSlot 透传）。
     Q_PROPERTY(int heldBlock READ heldBlock WRITE setHeldBlock NOTIFY heldBlockChanged)
     Q_PROPERTY(int heldCount READ heldCount WRITE setHeldCount NOTIFY heldBlockChanged)
+    Q_PROPERTY(int heldDurability READ heldDurability WRITE setHeldDurability NOTIFY heldBlockChanged)
     // t97 主栏 VM 共享：27 主栏槽（生存背包 / 工作台 / 熔炉三菜单共享同一份）。mainRevision NOTIFY 驱动
     // 三菜单 delegate 触碰刷新（同 hotbar 行 slotRevision 模式）；mainCount CONSTANT=27 供 Repeater model。
     Q_PROPERTY(int mainCount READ mainCount CONSTANT)
@@ -93,6 +100,10 @@ public:
     void setHeldBlock(int id);
     int heldCount() const { return m_heldStack.count; }
     void setHeldCount(int n);
+    // t263 手持工具耐久（非工具 / 空手 = 0）。setHeldBlock 切工具 id 时已自动填 max；本 setter 供 pickup-from-slot
+    //   路径覆盖为槽内实例耐久（保真搬运）。clamp 到 [0, maxDurability(id)]；非工具 id 写入静默归 0。
+    int heldDurability() const { return m_heldStack.durability; }
+    void setHeldDurability(int d);
 
     // t97 主栏 VM（27 槽，三菜单共享）。mainCount 恒 27；mainRevision 随主栏栈写入自增。
     int mainCount() const { return int(m_mainSlots.size()); }
@@ -126,6 +137,8 @@ public:
     Q_INVOKABLE int blockIdAt(int slot) const;
     // 每槽栈数量（空槽 0）。
     Q_INVOKABLE int countAt(int slot) const;
+    // t263 每槽工具剩余耐久（非工具 / 空槽 = 0）。tooltip 显「cur/max」+ 搬运保真读它。
+    Q_INVOKABLE int durabilityAt(int slot) const;
     // 每槽图标 qrc 路径（统一尺寸的等距立方体图标；空槽返回 ""）。
     Q_INVOKABLE QString iconSourceAt(int slot) const;
     // 每槽物品的中文显示名（HUD/背包标签用；走 BlockRegistry::displayName）。空槽返回空串。
@@ -144,17 +157,24 @@ public:
     Q_INVOKABLE void scroll(int delta);
 
     // ── 栈操作（t32 基础；t36 拾取/丢弃消费）──
-    // 直接写入栈 (slot, id, count)；范围 + id 合法性 + count 上限校验；id==0 或 count<=0 → 清空该槽。
-    // 改当前选中槽时补发 selectedSlotChanged（驱动 selectedBlockId → player.selectedBlock 刷新）。
-    Q_INVOKABLE void setStack(int slot, int id, int count);
+    // 直接写入栈 (slot, id, count, durability=-1)；范围 + id 合法性 + count 上限校验；id==0 或 count<=0 → 清空该槽。
+    //   durability（t263）：-1=自动（工具填 maxDurability=新工具、非工具 0）；>=0=显式（搬运保真，clamp 到 [1,max]）。
+    //   改当前选中槽时补发 selectedSlotChanged（驱动 selectedBlockId → player.selectedBlock 刷新）。
+    Q_INVOKABLE void setStack(int slot, int id, int count, int durability = -1);
     // 智能堆叠放入（t36 拾取消费）：先选中槽（空 / 同 id 可入 ——「入手」语义，用户核心诉求
     // 「手持空→入手；手持有(异)物→入背包」），再其它同 id 槽合并，再空槽；返回未放入数（0=全入）。
     // 非法 id 全额退回。改了选中槽内容时补发 selectedSlotChanged。
-    Q_INVOKABLE int addStack(int id, int n);
+    //   durability（t263）：-1=自动（工具新实例满耐久，世界拾取 / 合成产物场景）；>=0=显式（掉落物拾取保真）。
+    Q_INVOKABLE int addStack(int id, int n, int durability = -1);
     // 从 slot 取最多 n 件（不超过该栈实际持有）；返回实际取走数；栈空则 id 归 0。
     Q_INVOKABLE int takeStack(int slot, int n);
     // 单件最大堆叠：方块段 64、工具段（id>=0x100，t33 预留）1（不可堆叠）。
     Q_INVOKABLE int maxStackSize(int id) const;
+    // t263 工具最大耐久（透传 ToolRegistry::maxDurability；非工具 → 0）。QML tooltip / 创造取件初始化用。
+    Q_INVOKABLE int toolMaxDurability(int id) const;
+    // t263 消耗选中槽工具 1 点耐久（生存挖掘完成 / 锄耕地调用）。非工具 / 空槽 → no-op；
+    //   耐久归零 → 清空槽（工具破损消失）+ emit slotsChanged。创造模式由 caller 不调本方法（不消耗）。
+    Q_INVOKABLE void damageSelectedItem();
     // t50 合成桥接（QML 不能直接调 C++ 静态类 RecipeRegistry，经 VM 透传）：
     //   - recipeMatch(slotIds, gridSize)：slotIds 为行优先 id 数组（QVariantList<int>，0=空格），
     //     gridSize = 2（背包 2×2）/ 3（工作台 3×3）。返回匹配配方（QVariantMap：outputId/outputCount/
@@ -186,9 +206,17 @@ public:
     //     使丢弃回栏 / 世界拾取能合并进主栏同 id（修「主栏不同步 / 回栏不合并」根因）。
     Q_INVOKABLE int mainBlockIdAt(int slot) const;
     Q_INVOKABLE int mainCountAt(int slot) const;
-    Q_INVOKABLE void mainSetStack(int slot, int id, int count);
-    Q_INVOKABLE int mainAddStack(int id, int n);
-    Q_INVOKABLE int addToAny(int id, int n);
+    // t263 主栏槽工具剩余耐久（非工具 / 空槽 = 0）。同 durabilityAt 的主栏版。
+    Q_INVOKABLE int mainDurabilityAt(int slot) const;
+    // 直接写入主栏栈（背包点击放置 / 互换 / 拖拽均分写回主栏用）。校验同 setStack；air/非法 id/count<=0 → 清空。
+    //   durability（t263）：同 setStack（-1=自动 / >=0=显式保真）。
+    Q_INVOKABLE void mainSetStack(int slot, int id, int count, int durability = -1);
+    // 智能堆叠放入主栏（同 id 合并 → 空槽开新）。返回未放入数。仅主栏范围（hotbar 由 addStack / addToAny 管）。
+    //   durability（t263）：同 addStack。
+    Q_INVOKABLE int mainAddStack(int id, int n, int durability = -1);
+    // 跨 main + hotbar 的智能堆叠（拾取 / 丢弃回栏合并）。优先序（spec t109）：
+    //   durability（t263）：同 addStack（-1=自动 / >=0=显式保真，掉落物拾取场景）。
+    Q_INVOKABLE int addToAny(int id, int n, int durability = -1);
 
 signals:
     void selectedSlotChanged();
