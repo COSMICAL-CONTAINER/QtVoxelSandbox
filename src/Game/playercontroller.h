@@ -588,9 +588,12 @@ private:
     // 必须声明在 m_pos 之前（m_pos 默认成员初始化器引用本常量；C++ 不允许前向引用）。
     // t119：世界高度 16→64、地表重定标到 16..40 → 出生 Y 抬到 44（高于最高地表 40，玩家落 / 浮于地表之上，
     //   不会卡进地形）。默认 Spectator 模式无重力（漂浮）；切重力模式时 setMode 重置 m_peakY 防误判落差。
-    static constexpr float kSpawnX = 40.0f; // t162：5×5(80×80) 世界居中（原 8 贴角，3×3 时）
+    // t276：出生点跟随大世界网格居中——世界边长 = worldChunksPerSide×16（默认 10×16=160）→ 居中 = 80。
+    //   X/Z 取「边长/2」使玩家落在世界中心而非贴角（与 Main.qml worldChunksPerSide 单一权威对齐；改网格
+    //   尺寸时同步改此处）。Y 不随边长变（地表高度由 heightAt 决定，kSpawnY 仅兜底）。
+    static constexpr float kSpawnX = 80.0f; // t276：大世界(160×160)居中（原 40 = 5×5/80×80 中心）
     static constexpr float kSpawnY = 44.0f;
-    static constexpr float kSpawnZ = 40.0f; // t162：5×5(80×80) 世界居中
+    static constexpr float kSpawnZ = 80.0f; // t276：大世界(160×160)居中
     QVector3D m_pos{kSpawnX, kSpawnY, kSpawnZ}; // 脚底（= 出生点；respawn 传回此处，t78）
     QVector3D m_vel{0, 0, 0};
     float m_yaw = 0, m_pitch = -42;

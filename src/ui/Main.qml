@@ -139,6 +139,37 @@ Window {
     property real heldBlockY: 0.13
     property real heldBlockZ: 0.22
 
+    // t276 大世界网格尺寸（PLAN §4 放大阶段 / R18g）：世界 = worldChunksPerSide×worldChunksPerSide 个
+    //   chunk 列（每 chunk 16×16），即边长 = worldChunksPerSide*16 方块。默认 10 → 10×10=100 chunk / 160×160。
+    //   单一权威：theWorld.width/depth 由它派生（下方 World 绑定），chunkAnchor.onCompleted 据 theWorld.chunksX/Z
+    //   动态生成对应数量的 chunk Model，F3 顶点统计自动覆盖全幅 → 改此一处即整体扩 / 缩（流式加载推迟 Phase 2，
+    //   本工程仍为「整片固定网格」全驻留）。worldgen 与 ChunkManager 全程维度无关（按 m_width/m_depth 迭代），
+    //   故扩容只改尺寸 + chunk Model 数量，不动 worldgen 逻辑。改值需同步 playercontroller kSpawnX/Z（居中）。
+    property int worldChunksPerSide: 10
+    // t276 动态 chunk Model 跟踪态：chunkAnchor.onCompleted 用 Component.createObject 按 chunksX×chunksZ
+    //   生成地形 + 水两段 Model（createObject + reparent 进 3D 场景 Node，t16/t170 已验证路径）。固定网格 → 仅一次
+    //   （chunksBuilt 守卫）。terrainGeos 持地形段 ChunkGeometry 引用；每个地形段经 Connections(onMeshRebuilt)
+    //   调 recomputeMeshStats 把全幅顶点 / 三角面汇总写入 meshVertices/meshTriangles 标量属性 —— F3 叠层**只读
+    //   标量**（不把 var 数组进 text 绑定，否则 QML 把 var 属性读判为 binding loop）。chunkObjects 持 Model 引用防 GC。
+    property var terrainGeos: []
+    property var chunkObjects: []
+    property bool chunksBuilt: false
+    property int meshVertices: 0     // 全幅地形段顶点汇总（recomputeMeshStats 写；F3 只读）
+    property int meshTriangles: 0    // 全幅地形段三角面汇总（recomputeMeshStats 写；F3 只读）
+    // 全幅顶点 / 三角面汇总（遍历 terrainGeos 求和 → 写标量属性）。由每个地形段 ChunkGeometry 的 meshRebuilt
+    //   信号经 Connections 触发（buildChunkModels 末也调一次取初值）。在普通函数里读 var 数组不创建绑定依赖，
+    //   故不触发 binding loop（与在 text 绑定里读 var 数组相反）。
+    function recomputeMeshStats() {
+        const geos = window.terrainGeos
+        let v = 0, t = 0
+        for (let i = 0; i < geos.length; ++i) {
+            v += geos[i].vertexCount
+            t += geos[i].triangleCount
+        }
+        window.meshVertices = v
+        window.meshTriangles = t
+    }
+
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
     function startGame() {
         appState = "playing"
@@ -318,21 +349,23 @@ Window {
         audio.stopWaterFlow() // t223 水流声：回主菜单停（菜单态无声）
     }
     // t240 进世界生成猪 / 牛 / 羊各一只（出生点附近地表）。EntityManager 已注册 mobType 1/2/3 + spawnMobTyped
-    //   入口；生物蛋系统推迟到 t243，故本任务暂以固定 spawn 让模型 + 贴图肉眼可见。坐标取出生列 (40,40)
-    //   附近三格、Y = theWorld.heightAt(x,z) + 1（worldgen 地表上方一格 → 重力 tick 贴地表，出生落差 0 不摔伤）。
+    //   入口；生物蛋系统推迟到 t243，故本任务暂以固定 spawn 让模型 + 贴图肉眼可见。坐标取出生列
+    //   （kSpawnX/Z，t276 大世界居中=80,80）附近三格、Y = theWorld.heightAt(x,z) + 1（worldgen 地表上方一格 →
+    //   重力 tick 贴地表，出生落差 0 不摔伤）。
     //   §9 区隔：三种 mob 模型 / 贴图全原创方块化（不照搬 MC）；机制对齐 MC 1.0 passive mob 三种。
     //   spawnMobTyped 第五参 color 仅 mobType 0（通用测试生物）单色路径读；pig/cow/sheep 走 MobModel + 贴图，
     //   传占位串。maxHealth=10（MC 1.0 passive mob 5 心）。
     function spawnInitialMobs() {
+        // t276：出生点跟随大世界居中（kSpawnX/Z=80）。三 mob 散布在其左 / 前 / 右各两格。
         // 猪（mobType 1）— 出生点左侧两格。
-        let h = theWorld.heightAt(36, 38)
-        if (h > 0) entityManager.spawnMobTyped(36, h + 1, 38, 1, "#f0a8b0", 10)
+        let h = theWorld.heightAt(76, 78)
+        if (h > 0) entityManager.spawnMobTyped(76, h + 1, 78, 1, "#f0a8b0", 10)
         // 牛（mobType 2）— 出生点前方两格。
-        h = theWorld.heightAt(40, 36)
-        if (h > 0) entityManager.spawnMobTyped(40, h + 1, 36, 2, "#5a4030", 10)
+        h = theWorld.heightAt(80, 76)
+        if (h > 0) entityManager.spawnMobTyped(80, h + 1, 76, 2, "#5a4030", 10)
         // 羊（mobType 3）— 出生点右侧两格。
-        h = theWorld.heightAt(44, 38)
-        if (h > 0) entityManager.spawnMobTyped(44, h + 1, 38, 3, "#f5f0e8", 10)
+        h = theWorld.heightAt(84, 78)
+        if (h > 0) entityManager.spawnMobTyped(84, h + 1, 78, 3, "#f5f0e8", 10)
     }
     // t78 立即重生（死亡界面按钮）：满血 + 清死亡态 + 传回出生点 + 清挖掘/飞行态 + 重新锁定指针回游戏。
     //   PlayerState.respawn 复位血量/死亡态；PlayerController.respawn 传回出生点 + 清物理态；
@@ -512,7 +545,9 @@ Window {
 
     // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
     // 与物理(PlayerController)共用同一份栅格。
-    World { id: theWorld; width: 80; depth: 80; height: 64; seed: 1337 } // t162：3×3(48)→5×5(25 chunk, 80×80) 放大；高度 64 不变
+    // t276 大世界（可配网格）：width/depth = worldChunksPerSide*16（默认 10 → 160×160=10×10=100 chunk）。
+    //   高度 64 不变。worldgen 覆盖全幅（ChunkManager / generate 按 m_width/m_depth 迭代，维度无关）。
+    World { id: theWorld; width: window.worldChunksPerSide * 16; depth: window.worldChunksPerSide * 16; height: 64; seed: 1337 }
 
     // t176 存档系统（SQLite，PLAN §2-L）：世界列表 / 新建 / 删除 / 打开 / 保存 / 加载。绑定 theWorld
     //   使 WorldStore 经 chunks() 序列化 chunk blob。玩家态（pos/血/背包/模式）以裸原语经 gather /
@@ -557,6 +592,12 @@ Window {
     //   （WorldClock 为 Game 层、不 include World；QML 同时持二者引用并桥接 = 向下合法，PLAN §2 分层不破）。
     //   连接为同线程直连 → noteEditActivity 在 setBlock 的 emit worldChanged 栈内同步执行，时间戳精准。
     Connections { target: theWorld; function onWorldChanged() { worldClock.noteEditActivity() } }
+    // t276 全幅 mesh 顶点 / 三角面汇总刷新：所有「几何变化」事件（setBlock / setBlockFromEntity / setWaterSilent /
+    //   generate / regenerate / load finishLoad）都 emit worldChanged → 在此重算 meshVertices/meshTriangles 标量供
+    //   F3 只读。sun-step 重建只改顶点色不改几何 → 顶点/三角面数不变 → 不需在 sunChanged 重算（省一次全幅扫）。
+    //   不连每个 chunk 的 meshRebuilt：100 chunk 创建期会级联 100 次 recompute → meshVertices 写 → F3 text 绑定
+    //   连续重算 → QML binding-loop 检测器误报（虽自收敛，但留 WRN）。worldChanged 是几何变化的唯一汇聚点，足够。
+    Connections { target: theWorld; function onWorldChanged() { window.recomputeMeshStats() } }
 
     // t177 环境音强度 ←→ 昼夜：风声夜间更静谧（level = 0.5 + 0.5*skyLight：白天 1.0、子夜 0.5）。
     //   dayPhaseChanged 每 100ms tick 发（与 clearColor / DirectionalLight 同节拍）→ setAmbientLevel
@@ -1385,214 +1426,83 @@ Window {
         Texture { id: crack4; source: "qrc:/textures/crack_4.png"; generateMipmaps: false }
         Texture { id: crack5; source: "qrc:/textures/crack_5.png"; generateMipmaps: false }
 
-        // 每 chunk culled mesh（t03）：3×3=9 个 Model/ChunkGeometry，**直接作为 View3D 的 3D 场景
-        // 子节点**（与原单 Model 同路径，渲染已验证可靠）。各 Model 摆到其 chunk 世界起点
-        // (cx*16, 0, cz*16)；ChunkGeometry 产出该 chunk 的局部 culled mesh（顶点=chunk 局部坐标）。
-        // 跨 chunk 边界面剔除经 world.blockAt 路由：相邻两 chunk 实体→共边面剔除（无夹层黑缝）、
-        // 一侧空气→画出、世界越界=空气 → 3×3 肉眼无缝。
-        // dirty 驱动：setBlock 经 ChunkManager 标目标 + 边界邻接 chunk dirty；worldChanged → 各
-        // ChunkGeometry::onWorldChanged() 检 myChunk().dirty()，仅脏的重建并清脏（rebuild 次数 =
-        // dirty chunk 数），非脏跳过。
-        //
-        // 注：不在此用 Repeater 创建 3D Model delegate——Repeater 是 QQuickItem，将其 3D Model
-        // delegate 领养到非纯 3D 场景 parent 时会触发「Delegate must not be of Item type」告警且
-        // 有成孤儿不渲染之虞（类 t16 Loader 3D 领养坑）。固定 3×3 用显式 9 Model 最稳；t07 放大到
-        // 16×16 时再换 C++ 侧批量管理（ChunkMeshManager）或经场景 Node 领养的 Repeater 方案。
-        Model { // chunk (0,0) → 世界 (0,0)
-            position: Qt.vector3d(0, 0, 0)
-            geometry: ChunkGeometry { id: geo00; world: theWorld; cx: 0; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-            Component.onCompleted: console.info("[t31] chunk(0,0) UP parent=" + parent + " (对照：已知可见)")
-        }
-        Model { // chunk (1,0) → 世界 (16,0)
-            position: Qt.vector3d(16, 0, 0)
-            geometry: ChunkGeometry { id: geo10; world: theWorld; cx: 1; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // chunk (2,0) → 世界 (32,0)
-            position: Qt.vector3d(32, 0, 0)
-            geometry: ChunkGeometry { id: geo20; world: theWorld; cx: 2; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // chunk (0,1) → 世界 (0,16)
-            position: Qt.vector3d(0, 0, 16)
-            geometry: ChunkGeometry { id: geo01; world: theWorld; cx: 0; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // chunk (1,1) → 世界 (16,16)
-            position: Qt.vector3d(16, 0, 16)
-            geometry: ChunkGeometry { id: geo11; world: theWorld; cx: 1; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // chunk (2,1) → 世界 (32,16)
-            position: Qt.vector3d(32, 0, 16)
-            geometry: ChunkGeometry { id: geo21; world: theWorld; cx: 2; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // chunk (0,2) → 世界 (0,32)
-            position: Qt.vector3d(0, 0, 32)
-            geometry: ChunkGeometry { id: geo02; world: theWorld; cx: 0; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // chunk (1,2) → 世界 (16,32)
-            position: Qt.vector3d(16, 0, 32)
-            geometry: ChunkGeometry { id: geo12; world: theWorld; cx: 1; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // chunk (2,2) → 世界 (32,32)
-            position: Qt.vector3d(32, 0, 32)
-            geometry: ChunkGeometry { id: geo22; world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        // t162 5×5 外环（cx/cz 含 3 或 4 的 16 个 chunk；中心 3×3 仍 geo00..geo22 供 F3 顶点统计，外环 id 不入 F3 和）。
-        Model { position: Qt.vector3d(48, 0, 0);  geometry: ChunkGeometry { id: geo30; world: theWorld; cx: 3; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 0);  geometry: ChunkGeometry { id: geo40; world: theWorld; cx: 4; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(48, 0, 16); geometry: ChunkGeometry { id: geo31; world: theWorld; cx: 3; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 16); geometry: ChunkGeometry { id: geo41; world: theWorld; cx: 4; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(48, 0, 32); geometry: ChunkGeometry { id: geo32; world: theWorld; cx: 3; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 32); geometry: ChunkGeometry { id: geo42; world: theWorld; cx: 4; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(0, 0, 48);  geometry: ChunkGeometry { id: geo03; world: theWorld; cx: 0; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(16, 0, 48); geometry: ChunkGeometry { id: geo13; world: theWorld; cx: 1; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(32, 0, 48); geometry: ChunkGeometry { id: geo23; world: theWorld; cx: 2; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(48, 0, 48); geometry: ChunkGeometry { id: geo33; world: theWorld; cx: 3; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 48); geometry: ChunkGeometry { id: geo43; world: theWorld; cx: 4; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(0, 0, 64);  geometry: ChunkGeometry { id: geo04; world: theWorld; cx: 0; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(16, 0, 64); geometry: ChunkGeometry { id: geo14; world: theWorld; cx: 1; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(32, 0, 64); geometry: ChunkGeometry { id: geo24; world: theWorld; cx: 2; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(48, 0, 64); geometry: ChunkGeometry { id: geo34; world: theWorld; cx: 3; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 64); geometry: ChunkGeometry { id: geo44; world: theWorld; cx: 4; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
+        // 每 chunk culled mesh（t03 / t276 大世界动态化）：地形段 + 水段各一个 ChunkGeometry，由 chunkAnchor.
+        //   onCompleted 按 theWorld.chunksX×chunksZ 用 Component.createObject 动态生成（替代旧 50 个显式 Model）。
+        //   lessons-learned 已验证路径（t16 Loader / t170 torchHost）：createObject 第一参 = chunkAnchor（已在
+        //   View3D 场景内）→ Model 被领养进 3D 场景图渲染（非孤儿，parent=QQuick3DNode*）。固定网格下 chunk 数
+        //   恒定 → 仅一次（chunksBuilt 守卫）；切世界只换 seed 不换尺寸 → 无需销毁重建。可配网格
+        //   （worldChunksPerSide）下显式声明不现实（10×10=200 Model），动态创建使网格尺寸单一权威 → 改一处全幅
+        //   扩 / 缩。不用 Repeater（t03 验证：Repeater 的 3D Model delegate 触发「Delegate must not be of Item
+        //   type」告警 + 孤儿不渲染之虞）。流式加载推迟 Phase 2，本工程仍为整片固定网格全驻留。
+        //   跨 chunk 边界面剔除经 world.blockAt 路由（相邻实体共边面剔除无夹层 / 一侧空气画出 / 越界=空气）；
+        //   dirty 驱动（setBlock 标目标 + 边界邻接脏；worldChanged → onWorldChanged 仅脏 chunk 重建）不变。
+        //   分层（PLAN §2）：本段属 Renderer 呈现层，只读 World（blockAt/stateAt/光场），不写栅格。
+        Node {
+            id: chunkAnchor   // chunk Model 领养锚点（createObject 第一参 → Model 进 3D 场景图渲染）
+            Component.onCompleted: {
+                // t276：按 theWorld.chunksX×chunksZ 动态生成地形 + 水两段 Model（createObject + reparent，
+                //   t16/t170 已验证）。固定网格 → 仅一次（chunksBuilt 守卫）。terrainGeos 供 F3 顶点汇总。
+                if (window.chunksBuilt) return
+                window.chunksBuilt = true
+                const nx = theWorld.chunksX, nz = theWorld.chunksZ
+                const geos = [], objs = []
+                for (let cz = 0; cz < nz; ++cz) {
+                    for (let cx = 0; cx < nx; ++cx) {
+                        const t = terrainChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })
+                        objs.push(t); geos.push(t.geometry)
+                        objs.push(waterChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
+                    }
+                }
+                window.terrainGeos = geos
+                window.chunkObjects = objs
+                window.recomputeMeshStats()   // 取初值（createObject 时各段已 buildMesh；后续 meshRebuilt 增量刷新）
+                console.info("[t276] built", objs.length, "chunk Models (" + nx + "x" + nz + "=" + (nx*nz) + " chunks)")
+            }
         }
 
-        // t148 水（独立透明渲染段）：每 chunk 额外一个 ChunkGeometry{waterOnly:true} 只网格化 Water
-        //   方块（水-水面互剔、水贴地形那面剔），用 PrincipledMaterial opacity=0.7 走透明通道（同
-        //   CrackBox / 玩家幽灵已验证的「opacity<1 → 半透」路径）。与地形段同图集 / 同顶点色光照管线，
-        //   仅材质 opacity 不同 → 水面半透、可透见水底地形。Model 摆位与地形段同（chunk 世界起点）。
-        //   透明物体由 QtQuick3D 渲染队列自动排在不透明地形之后 → 无需手调渲染序。复用既有「9 个显式
-        //   Model」已验证路径（不用 Repeater，lessons-learned t03 3D 领养坑）。
-        Model { // water (0,0)
-            position: Qt.vector3d(0, 0, 0)
-            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+        // 地形段 chunk Model 模板（culled mesh，非水方块）。cx/cz 由 createObject initial properties 注入；
+        //   内层 ChunkGeometry 经 terrainModel（本组件实例根 id）读 chunkCX/CZ —— 与 t170 torchDelegate 子引用
+        //   torchGlow 同一 Component 内根-id 引用模式（已验证）。
+        Component {
+            id: terrainChunkComp
+            Model {
+                id: terrainModel
+                property int chunkCX: 0
+                property int chunkCZ: 0
+                position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
+                geometry: ChunkGeometry {
+                    world: theWorld
+                    cx: terrainModel.chunkCX
+                    cz: terrainModel.chunkCZ
+                    sunDir: worldClock.sunDir
+                    shadowsEnabled: window.shadowsEnabled
+                    greedyMeshing: window.greedyMeshing
+                }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
+            }
         }
-        Model { // water (1,0)
-            position: Qt.vector3d(16, 0, 0)
-            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // water (2,0)
-            position: Qt.vector3d(32, 0, 0)
-            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // water (0,1)
-            position: Qt.vector3d(0, 0, 16)
-            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // water (1,1)
-            position: Qt.vector3d(16, 0, 16)
-            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // water (2,1)
-            position: Qt.vector3d(32, 0, 16)
-            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // water (0,2)
-            position: Qt.vector3d(0, 0, 32)
-            geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // water (1,2)
-            position: Qt.vector3d(16, 0, 32)
-            geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { // water (2,2)
-            position: Qt.vector3d(32, 0, 32)
-            geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        // t162 5×5 水外环（16 chunk，同地形外环 (cx,cz)）。
-        Model { position: Qt.vector3d(48, 0, 0);  geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 0);  geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 0; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(48, 0, 16); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 16); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 1; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(48, 0, 32); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 32); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 2; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(0, 0, 48);  geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(16, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(32, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(48, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 48); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 3; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(0, 0, 64);  geometry: ChunkGeometry { world: theWorld; cx: 0; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(16, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 1; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(32, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 2; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(48, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 3; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
-        }
-        Model { position: Qt.vector3d(64, 0, 64); geometry: ChunkGeometry { world: theWorld; cx: 4; cz: 4; sunDir: worldClock.sunDir; shadowsEnabled: window.shadowsEnabled; greedyMeshing: window.greedyMeshing; waterOnly: true; waterAnimPhase: window.waterAnimPhase }
-            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+
+        // 水段 chunk Model 模板（t148：waterOnly 只网格化 Water，opacity 0.7 半透；t223 waterAnimPhase flipbook）。
+        //   摆位与地形段同（chunk 世界起点）；透明物体由 QtQuick3D 渲染队列自动排在不透明地形之后。
+        Component {
+            id: waterChunkComp
+            Model {
+                id: waterModel
+                property int chunkCX: 0
+                property int chunkCZ: 0
+                position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
+                geometry: ChunkGeometry {
+                    world: theWorld
+                    cx: waterModel.chunkCX
+                    cz: waterModel.chunkCZ
+                    sunDir: worldClock.sunDir
+                    shadowsEnabled: window.shadowsEnabled
+                    greedyMeshing: window.greedyMeshing
+                    waterOnly: true
+                    waterAnimPhase: window.waterAnimPhase
+                }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+            }
         }
 
         // 选中框（射线选体 t04 / t52 / t146 / t216）：单一 SelectionWireBoxes 模型按
@@ -3822,13 +3732,10 @@ Window {
         style: Text.Outline; styleColor: "#000000"
         font.pixelSize: 12; font.family: "monospace"
         text: {
-            // 9 chunk 的顶点 / 三角面汇总（触碰各 geo_NN.vertexCount 建立 meshRebuilt 依赖）。
-            const vx = geo00.vertexCount + geo10.vertexCount + geo20.vertexCount
-                     + geo01.vertexCount + geo11.vertexCount + geo21.vertexCount
-                     + geo02.vertexCount + geo12.vertexCount + geo22.vertexCount
-            const tr = geo00.triangleCount + geo10.triangleCount + geo20.triangleCount
-                     + geo01.triangleCount + geo11.triangleCount + geo21.triangleCount
-                     + geo02.triangleCount + geo12.triangleCount + geo22.triangleCount
+            // t276 全幅 chunk 顶点 / 三角面汇总（meshVertices / meshTriangles 标量由每个地形段 meshRebuilt
+            //   经 Connections → recomputeMeshStats 增量刷新；F3 只读标量，不把 var 数组进 text 绑定 → 无 loop）。
+            //   旧 5×5 仅汇总中心 3×3（geo00..geo22），动态化后改为全幅（更诚实的 mesh 预算观测）。
+            const vx = window.meshVertices, tr = window.meshTriangles
             const modeName = player.mode === PlayerController.Spectator ? "SPECTATOR"
                            : player.mode === PlayerController.Creative ? "CREATIVE" : "SURVIVAL"
             const camName = player.cameraMode === PlayerController.FirstPerson ? "1st"
@@ -3836,7 +3743,10 @@ Window {
             // t51：移动态（walk/sprint/crouch）入 F3 叠层，便于核对疾跑 / 蹲下触发。
             const moveName = player.moveState === PlayerController.Sprint ? "sprint"
                            : player.moveState === PlayerController.Crouch ? "crouch" : "walk"
-            const ncx = theWorld.chunksX, ncz = theWorld.chunksZ
+            // t276：chunk 列数读 window.worldChunksPerSide（单一权威），不读 theWorld.chunksX/Z —— World.width/depth
+            //   现为 QML 绑定（← worldChunksPerSide），在 text 绑定里读 theWorld.chunksX（NOTIFY widthChanged）会与
+            //   width 绑定链构成 QML binding loop（误报，但留 WRN）。worldChunksPerSide 是常量 int，读它无 loop。
+            const ncx = window.worldChunksPerSide, ncz = window.worldChunksPerSide
             // t178 帧时间切分（PLAN §4 验收「写死帧时间切分 CPU/GPU ms + draw-call 预算」）：
             //   - frameMs：总帧预算 = 1000/fps（fps=0 → 0，防除零）。
             //   - cpuSimMs：主线程 tick() CPU 耗时 1s 平均（player.simMs；物理/射线/实体/挖掘/拾取）。
@@ -3860,7 +3770,9 @@ Window {
                     ? "  fly: " + player.flySpeed.toFixed(1) + " b/s (x" + player.flySpeedMul.toFixed(2) + ")"
                     : "") // t159/t210：飞态额外报当前有效飞速 + 倍数（仅 spectator 滚轮可调；创造飞态恒 x1.00）
                  + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
-                 + "\nworld: " + theWorld.width + "×" + theWorld.depth + "×" + theWorld.height
+                 // t276：world 行读 worldChunksPerSide（权威）+ theWorld.height（literal 64，非绑定，无 loop），
+                 //   不读 theWorld.width/depth（绑定链 → binding loop）。
+                 + "\nworld: " + (window.worldChunksPerSide * 16) + "×" + (window.worldChunksPerSide * 16) + "×" + theWorld.height
                  + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"
                  + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr // t178：mesh 模式 + 顶点/三角（greedy 大幅降）
                  + "\ndraw-calls: ~" + drawEst + "  (chunks×2 " + (ncx * ncz * 2) + " + items " + itemLive
