@@ -232,7 +232,15 @@ public:
     //   传 m_pos（菜单态仍有效）。listener 无关物理 / AI，仅参与音频门控（不写入实体态）。
     //   t283 箭命中玩家：listenerHalfW/listenerHeight = 玩家当前 AABB 半宽 / 高（PlayerController 传 kHalfW /
     //   m_height，蹲下时随之缩小 → 箭命中盒正确随蹲下收缩）。Arrow 分支据它判 point-in-AABB 命中。
-    void tick(qreal dt, World *world, const QVector3D &listener, float listenerHalfW, float listenerHeight);
+    //   t290 观察者交互门控：playerTargetable = 玩家是否可被敌对生物锁定为仇恨目标（PlayerController 传
+    //   mode==Survival —— 创造/观察者玩家不可锁定）。false 时：敌对 Mob 不 detect/chase/attack/shoot（回退
+    //   wander，且清残留追踪态 + Stalker 熄火，防 Survival→Creative/Spectator 切换后仍贴脸/射）；飞行中的箭
+    //   不再判定命中玩家（穿过）。机制等价 MC 1.0 创造/观察者无敌且不被仇恨。tickHostileLife（刷怪/燃烧/远距
+    //   消失）不读本参数 —— 那是世界模拟，独立于玩家模式（夜间照样刷怪、白天照样燃烧）。分层（PLAN §2）：
+    //   玩家模式标志由 Game/Physics 层（PlayerController）持有并据此派生 bool 向下传（Game→Entities 向下依赖，
+    //   同 listener/playerPos 先例），Entities 层不反查玩家模式（不反向依赖 Game）。
+    void tick(qreal dt, World *world, const QVector3D &listener, float listenerHalfW, float listenerHeight,
+              bool playerTargetable);
     // t280 黑暗刷怪调度 + 敌对生物日光燃烧（C++ 直调；PlayerController::tickImpl 每 tick 调，与 tick 同级）。
     //   独立于玩家捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续）。机制等价 MC 1.0
     //   「黑暗刷怪 + 白天燃烧」：周期 spawn（light<7 + 距玩家>24 + 总数上限）+ 敌对暴露日光 → 扣血 → 死亡消失。

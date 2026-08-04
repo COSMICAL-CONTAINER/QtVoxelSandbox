@@ -1207,7 +1207,7 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
 //
 // 移除用索引收集 + 循环后逆序 erase（保索引有效）。
 void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
-                        float listenerHalfW, float listenerHeight)
+                        float listenerHalfW, float listenerHeight, bool playerTargetable)
 {
     if (!world || m_entities.empty()) return;
     const float worldW = float(world->width());
@@ -1242,7 +1242,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   [0,height]×[−hw,+hw]；XZ/Z 外扩 kArrowHitHalfW，Y 上下各外扩 kArrowHitHalfW（提升近距命中率）。
             //   命中 → 发 mobAttackedPlayer(kArrowDamage, MobBones)（呈现层据 Survival 门控应用伤害，同近战
             //   aiHostile attack 路径）+ 移除箭。Creative/Spectator 玩家经 onMobAttackedPlayer 跳过 takeDamage。
-            if (!remove) {
+            //   t290 观察者交互门控：playerTargetable=false（创造/观察者）→ 箭直接穿过玩家不判定命中（机制等价
+            //   MC 1.0 创造/观察者无敌 —— 既不射（aiArcher 不射击非生存玩家）也不被命中；防 Survival→模式切换
+            //   后半空中的箭仍戳到刚转无敌的玩家）。
+            if (!remove && playerTargetable) {
                 const float px = listener.x(), py = listener.y(), pz = listener.z();
                 const float ex = px - listenerHalfW - kArrowHitHalfW;
                 const float ey = py - kArrowHitHalfW;
@@ -1355,12 +1358,24 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 e.moveSpeed = 0.0f; // 站立吃草 → 腿停（walkPhase 冻结于上次值）
                 dirty = true;       // headPitch 随 eatTimer 变 → 每帧 bump 让 QML 头俯仰绑定刷新
             } else if (e.hostile) {
-                // t281/t283/t284 敌对 AI：替代 wander。listener = 玩家脚位（tick 参数）。
-                //   t281 Shambler（僵尸）→ aiHostile（detect→pathfind→melee attack）。
-                //   t283 Bones（骷髅弓箭手）→ aiArcher（detect→keep-distance→shoot 远程射箭）。
-                //   t284 Stalker（潜行者/苦力怕）→ aiStalker（detect→chase→fuse→detonate 近距自爆）。
-                //   非追踪回退到 wander（在 aiHostile / aiArcher / aiStalker 内）。
-                if (e.mobType == MobBones) {
+                // t290 观察者交互门控：玩家不可锁定（创造/观察者）→ 敌对 Mob 不 detect/chase/attack/shoot，
+                //   回退 wander（机制等价 MC 1.0 创造/观察者无敌且不被仇恨）。清残留追踪态（chasing/chaseTimer）
+                //   + Stalker 熄火（fuseTimer 归零）防 Survival→Creative/Spectator 切换后 mob 仍贴脸/蓄力。
+                //   playerTargetable 由 PlayerController 传（mode==Survival）。变值即回退 wander → dirty 若真移动。
+                if (!playerTargetable) {
+                    if (e.chasing || e.fuseTimer > 0.0f) {
+                        e.chasing = false;
+                        e.chaseTimer = 0.0f;
+                        e.fuseTimer = 0.0f;
+                        dirty = true; // chasing/fuse 翻转 → bump 让 QML 收回追踪高亮 / 蓄力膨胀
+                    }
+                    if (aiWander(e, float(dt), world, worldW, worldD)) dirty = true;
+                } else if (e.mobType == MobBones) {
+                    // t281/t283/t284 敌对 AI：替代 wander。listener = 玩家脚位（tick 参数）。
+                    //   t281 Shambler（僵尸）→ aiHostile（detect→pathfind→melee attack）。
+                    //   t283 Bones（骷髅弓箭手）→ aiArcher（detect→keep-distance→shoot 远程射箭）。
+                    //   t284 Stalker（潜行者/苦力怕）→ aiStalker（detect→chase→fuse→detonate 近距自爆）。
+                    //   非追踪回退到 wander（在 aiHostile / aiArcher / aiStalker 内）。
                     if (aiArcher(e, float(dt), world, listener, worldW, worldD)) dirty = true;
                 } else if (e.mobType == MobStalker) {
                     if (aiStalker(e, float(dt), world, listener, worldW, worldD)) dirty = true;

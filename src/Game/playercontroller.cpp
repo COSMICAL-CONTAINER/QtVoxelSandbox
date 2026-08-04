@@ -418,8 +418,10 @@ void PlayerController::tickImpl()
     //   t250：传 m_pos 作听者位置，门控 mob idle/step 叫声（近 mob 才发声；菜单态 m_pos 仍有效）。
     //   t283：传 kHalfW + m_height（当前 AABB 半宽 / 高，蹲下随 m_height 缩小）→ EntityManager Arrow 分支
     //   据它判箭命中玩家 AABB（蹲下命中盒正确收缩）。
+    //   t290 观察者交互门控：传 playerTargetable = (m_mode == Survival) → 敌对 Mob 仅仇生存玩家（创造/观察者
+    //   不被 detect/chase/attack/shoot；箭亦不命中）。Game 层持玩家模式并据此派生 bool 向下传（PLAN §2 向下依赖）。
     if (m_entityManager && m_world)
-        m_entityManager->tick(dt, m_world, m_pos, kHalfW, m_height);
+        m_entityManager->tick(dt, m_world, m_pos, kHalfW, m_height, m_mode == Survival);
     // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见 EntityManager::tickHostileLife 头注释）。独立于玩家
     //   捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续；同 entityManager.tick）。
     //   skyLight 取自 m_worldClock（Q_PROPERTY 注入；[0,1] 昼夜乘子）。m_worldClock=null → 跳过（无昼夜 → 无 spawn）。
@@ -1615,16 +1617,17 @@ void PlayerController::dropAllItems()
 
 // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 写入 hotbar 当前选中槽（覆盖；
 // 仅指针捕获时生效（与破/放同窗口级事件过滤路径；spec）。命中空气 / 无命中 / 无世界 / 无 hotbar → 不动作。
-// 数量按模式分（spec 示意 {id,1}；此处对齐模式语义：创造源无限 → 满栈，与 resetForMode 创造默认一致、
-// 不把既有 64 回退成 1 造成视觉突兀；生存有限背包 → 单件）。pick 属「选择」不改栅格，三模式均允许。
+// t288：pick-block 仅 Creative——创造模式有「凭空中键复制方块」的能力（源无限 → 满栈）；生存有限背包
+// 无此能力（按中键不动作），Spectator 亦禁（与 canBreak/canPlace 同「观察者不交互」语义）。pick 虽不改
+// 栅格，但属「凭空获得方块」的选择作弊，故与破/放同走模式门控，不放宽到全模式。
 // 走 Hotbar::setStack 直接覆盖选中槽（Hotbar 内部校验范围 + id 合法性 + count 上限）。
 void PlayerController::pickBlock()
 {
+    if (m_mode != Creative) return; // t288：仅创造模式可中键复制方块
     if (!m_captured || !m_hasHit || !m_world || !m_hotbar) return;
     const quint8 id = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
     if (id == BlockRegistry::Air) return; // 命中空气 → 无可拾取
-    const int count = (m_mode == Creative) ? m_hotbar->maxStackSize(int(id)) : 1;
-    m_hotbar->setStack(m_hotbar->selectedSlot(), int(id), count);
+    m_hotbar->setStack(m_hotbar->selectedSlot(), int(id), m_hotbar->maxStackSize(int(id)));
 }
 
 // 拾取扫描（t36 / t64 / t97）：每帧扫附近掉落实体 → Hotbar::addToAny（跨 main + hotbar 智能堆叠，
@@ -1645,6 +1648,10 @@ void PlayerController::pickupScan()
 {
     if (!m_itemEntities || !m_hotbar) return;
     if (m_dead) return; // t175：死亡态不拾取（玩家尸体停死亡点，否则掉落物 0.5s 免拾窗后被自动捡回空背包）
+    // t290 观察者交互门控：观察者不应放/破/捡任何东西（与 canBreak/canPlace 同「观察者不交互栅格/物品」语义；
+    // spec「观察者能捡物品 = 错」）。门控在物理拾取入口（而非各 addStack 调用点）—— 单点守卫，覆盖率最高。
+    // Creative/Survival 正常拾取（创造背包可持有物品；生存拾取是核心玩法）。
+    if (m_mode == Spectator) return;
     const QVector3D center = m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f);
     const float r2 = kPickupDist * kPickupDist;
     for (int i = m_itemEntities->count() - 1; i >= 0; --i) {
