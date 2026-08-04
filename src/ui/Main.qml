@@ -1408,6 +1408,10 @@ Window {
         Texture { id: mobPigTex;   source: "qrc:/textures/mob_pig.png";   generateMipmaps: false }
         Texture { id: mobCowTex;   source: "qrc:/textures/mob_cow.png";   generateMipmaps: false }
         Texture { id: mobSheepTex; source: "qrc:/textures/mob_sheep.png"; generateMipmaps: false }
+        // t282 蹒跩者（Shambler；机制等价 MC 1.0 僵尸，§9 改名 + 原创贴图）：暗绿腐肉底 + 霉斑 + 腐痕 +
+        //   破布残片 + 缝合痕（build_mob.py 程序生成原创像素图，§9a 区隔不照搬 MC 皮肤）。MobModel 人形几何
+        //   （躯干/头/双臂前伸/双腿）每面铺整张贴图 [0,1]×[0,1]（同猪牛羊全脸 UV）；实心无 alpha → 不透明材质。
+        Texture { id: mobShamblerTex; source: "qrc:/textures/mob_shambler.png"; generateMipmaps: false }
 
         // t218 火把手持/掉落贴图：火把在世界内是异形（torchHost 木柄+火焰小立方，非 1×1×1 立方体），
         //   但手持/掉落旧路径走 BlockCube（6 面立方贴图集 tile 17）→ 即便 alphaCutoff 丢弃透明底，肉眼仍是
@@ -2573,17 +2577,19 @@ Window {
                         if (entMobType === 1) return 0.48 - mobHalfH   // pig
                         if (entMobType === 2) return 0.50 - mobHalfH   // cow
                         if (entMobType === 3) return 0.44 - mobHalfH   // sheep
+                        // t282 Shambler（人形）：MobModel 腿底本地 |y|=0.90（halfH=0.90 → offset=0，腿底贴 collision 底面）。
+                        if (entMobType === EntityManager.MobShambler) return 0.90 - mobHalfH
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
                     }
                     Model {
-                        // mobType 0 / 4 / 5：通用测试生物（t95/t239）+ t280 敌对 Shambler(4)/Bones(5) —— UnitCube
-                        //   单色立方（原创几何，§9 区隔不照搬 MC 美术）。敌对走 EntityManager.spawnHostileMob 设的
-                        //   colorAt（Shambler 暗绿 #4a6a3a / Bones 灰白 #d8d4c4）；mobType 0 仍走 spawnMob 的 #ff5555。
+                        // mobType 0 / 5：通用测试生物（t95/t239）+ t280 敌对 Bones(5)（骷髅，t283 待做原创模型）
+                        //   —— UnitCube 单色立方（原创几何，§9 区隔不照搬 MC 美术）。敌对走 EntityManager.spawnHostileMob
+                        //   设的 colorAt（Bones 灰白 #d8d4c4）；mobType 0 仍走 spawnMob 的 #ff5555。
                         //   受击红闪：hurtFlashAt>0 → baseColor #ff0000 覆盖。t280 燃烧：isBurningAt>0 → baseColor
                         //   偏橙（火焰色调制单色立方，与下方 flame Model 共显「着火」感）。
+                        //   t282：Shambler(4) 不再走本 UnitCube 路径 —— 已迁到下方专属 MobModel 人形 + 贴图分支。
                         visible: entKind === EntityManager.Mob
-                                 && (entMobType === 0 || entMobType === EntityManager.MobShambler
-                                     || entMobType === EntityManager.MobBones)
+                                 && (entMobType === 0 || entMobType === EntityManager.MobBones)
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -2765,6 +2771,41 @@ Window {
                                 scale: Qt.vector3d(0.025, 0.03, 0.02)
                                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                             }
+                        }
+                    }
+                    Model {
+                        // t282 蹒跚者（Shambler，mobType 4；机制等价 MC 1.0 僵尸，§9 改名 + 原创模型/贴图）：
+                        //   MobModel 人形几何（躯干 + 头 + 双臂前伸僵尸姿态 + 双腿 walkPhase 摆动）+ mob_shambler 贴图。
+                        //   近战 AI（detect→pathfind→attack，t281 已就绪）→ 走向玩家攻击；本任务仅交付原创模型 + 贴图。
+                        //   walkPhase 绑定驱动双腿绕髋左右反相摆动（biped walk cycle，EntityManager moveSpeed>0 时推进）。
+                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobShambler
+                        geometry: MobModel {
+                            mobType: 4
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
+                        position: Qt.vector3d(0, mobModelYOff, 0) // t282 halfH=0.90 → offset 0（腿底贴 collision 底面）
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0/1/2/3 红闪语义）。
+                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                            baseColorMap: mobShamblerTex
+                        }
+                        // t282 眼睛：亡灵红眼（不沿用猪牛羊的白眼底+深瞳 —— 不死亡灵的赤红发光眼更贴「僵尸」语义，
+                        //   且红眼不受身体贴图调制 → 实心红 #b01818 独立 Model，原创纯色 §9a）。mob Model 子节点 →
+                        //   继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible。MobModel 头心 (0,0.57,0) 半 (0.22,0.22,0.22)
+                        //   → 前面 z=-0.22；眼在上半 y≈0.62、x=±0.09；z 贴头前面略凸（-0.23，同 t52 贴脸防 z-fight）。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.09, 0.62, -0.23)
+                            scale: Qt.vector3d(0.07, 0.08, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.09, 0.62, -0.23)
+                            scale: Qt.vector3d(0.07, 0.08, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
                         }
                     }
                     // t253 攻击单体选中：准星瞄准的**单个** mob 显白色目标框（常驻可见，区别 F3+B 调试框——

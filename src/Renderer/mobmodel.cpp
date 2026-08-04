@@ -147,8 +147,8 @@ MobModel::MobModel(QQuick3DObject *parent) : QQuick3DGeometry(parent)
 void MobModel::setMobType(int type)
 {
     // 0（测试生物）/ 越界 → 兜底 Pig（保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube，
-    //   不进本类，故此处兜底仅防误设）。
-    if (type != 1 && type != 2 && type != 3) type = 1;
+    //   不进本类，故此处兜底仅防误设）。t282：mobType 4 = Shambler（人形）合法。
+    if (type != 1 && type != 2 && type != 3 && type != 4) type = 1;
     if (type == m_mobType) return;
     m_mobType = type;
     emit mobTypeChanged();
@@ -174,20 +174,37 @@ void MobModel::setHeadPitch(float pitch)
     rebuild();
 }
 
-// 按 m_mobType 选比例建「躯干 + 头（俯仰）+ 4 腿（摆动）（+ 牛角随头转）」多盒几何。
+// 按 m_mobType 选比例建「躯干 + 头（俯仰）+ 4 腿（摆动）（+ 牛角随头转）」多盒几何；t282 加 Shambler 人形分支。
 // 局部原点 = 躯干中心；头朝 -Z（前）。比例经手调使每种 mob 在 ~1×1×1 碰撞立方（EntityManager radius=0.5）内可辨：
 //   - 猪：紧凑低矮、短腿、大头；   - 牛：高大长身 + 头顶两小角盒；  - 羊：圆胖躯干、小头、短腿。
-// 全脸 UV → 各盒铺同张贴图；QML 据 mobType 选 mob_pig / mob_cow / mob_sheep。
+//   - Shambler（t282）：方块化人形（躯干 + 头 + 双臂前伸 + 双腿），碰撞 halfH=0.90（1.8 高）→ 腿底本地 y=−0.90
+//     （mobModelYOff=0.90 − halfH=0 → 模型无 Y 偏移、腿底贴 collision 底面 = 脚位）。机制等价 MC 1.0 僵尸形态。
+// 全脸 UV → 各盒铺同张贴图；QML 据 mobType 选 mob_pig / mob_cow / mob_sheep / mob_shambler。
 // t241：腿走 addLegs（walkPhase 驱动对角摆动）；头走 addHeadRot（headPitch=0 → 快路径；非 0 → 绕颈俯仰）。
+// t282：Shambler 腿走 addBoxRot 双腿绕髋左右反相摆动（biped walk cycle）；双臂 addBox 前伸固定（僵尸姿态）。
 void MobModel::rebuild()
 {
     std::vector<MobVtx> verts;
     std::vector<quint32> idx;
-    verts.reserve(8 * 24); // 至多躯干+头+4腿+2角 = 8 盒
+    verts.reserve(8 * 24); // 至多躯干+头+4腿+2角 = 8 盒（Shambler 6 盒在此内）
     idx.reserve(8 * 36);
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
 
-    if (m_mobType == 2) {
+    if (m_mobType == 4) {
+        // t282 Shambler（蹒跚者；机制等价 MC 1.0 僵尸，§9 区隔改名 + 原创模型/贴图）：
+        // 方块化人形 —— 躯干 + 头 + 双臂前伸（僵尸经典攻击姿态）+ 双腿绕髋做 biped walk cycle（左右反相）。
+        // 局部原点 = 躯干中心（同猪牛羊约定）；头朝 -Z（前 = AI 行走方向）；腿底本地 y=−0.90 贴 collision 底面。
+        // 双臂前伸固定（不走 walkPhase —— 僵尸手臂僵直前举的标志性姿态；腿摆即可传达行走，机制等价 MC 僵尸）。
+        // 腿绕髋（腿顶 y=−0.25 = 躯干底）X 轴摆动；左右反相（biped walk cycle，区别于四足 addLegs 的对角配对）。
+        addBox( 0.00f,  0.05f,  0.00f, 0.22f, 0.30f, 0.12f, verts, idx, bMin, bMax); // 躯干（心略上移让腿更长）
+        addBox( 0.00f,  0.57f,  0.00f, 0.22f, 0.22f, 0.22f, verts, idx, bMin, bMax); // 头（躯干顶上方）
+        addBox(-0.33f,  0.23f, -0.37f, 0.10f, 0.10f, 0.25f, verts, idx, bMin, bMax); // 左臂前伸（-X、-Z 前）
+        addBox( 0.33f,  0.23f, -0.37f, 0.10f, 0.10f, 0.25f, verts, idx, bMin, bMax); // 右臂前伸（+X、-Z 前）
+        const float sw = kLegSwingAmp * std::sin(m_walkPhase);
+        const float hipY = -0.25f; // 髋枢 = 腿顶（= 躯干底面 y）
+        addBoxRot(-0.11f, -0.575f, 0.00f, 0.11f, 0.325f, 0.12f, hipY, 0.00f, +sw, verts, idx, bMin, bMax); // 左腿
+        addBoxRot( 0.11f, -0.575f, 0.00f, 0.11f, 0.325f, 0.12f, hipY, 0.00f, -sw, verts, idx, bMin, bMax); // 右腿
+    } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）
         // 头 + 双角共享颈附着点（cy, cz+hz）→ headPitch 驱动时整组随头俯仰。
