@@ -226,6 +226,23 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       { RecipeRegistry::WheatId, RecipeRegistry::WheatId, RecipeRegistry::WheatId,
         0, 0, 0, 0, 0, 0 },
       RecipeRegistry::BreadId, 1, 1, "bread" },
+    // t304 弓：3 木棒左斜列 + 3 线右纵列 → 1 弓（有序 3×3，仅工作台）。机制等价 MC 1.0 弓配方
+    //   （左斜三木棒 + 右纵三线）。最小包围盒 3×3（满），只能在 3×3 工作台合。产物 Bow（工具段 0x10F，
+    //   maxStack=1 不可堆叠 → canTake 一次取 1 件）。木棒（材料段 0x200）+ 线（材料段 0x219，杀蜘蛛掉落）。
+    { int(RecipeRegistry::Table3x3), false,
+      { kStickId,                0,                          RecipeRegistry::StringId,
+        0,                        kStickId,                  RecipeRegistry::StringId,
+        kStickId,                0,                          RecipeRegistry::StringId },
+      int(ToolRegistry::Bow), 1, 1, "bow" },
+    // t304 箭：铁锭（顶）+ 木棒（中）+ 线（底）纵列 → 4 箭（有序 3×3，仅工作台）。机制等价 MC 1.0 箭配方
+    //   （燧石 + 棒 + 羽毛纵列 → 4 箭）的本地化替代——本工程无燧石 / 羽毛，用铁锭代箭头、线代羽毛。
+    //   最小包围盒 1×3（纵列），可在工作台任意一列竖放（shapedEqual 最小包围盒对齐 → 横放亦匹配）。
+    //   产物 ArrowId（材料段 0x21A，maxStack=64；弓弹药）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, 0, 0,
+        kStickId,                    0, 0,
+        RecipeRegistry::StringId,    0, 0 },
+      RecipeRegistry::ArrowId, 4, 1, "arrow" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

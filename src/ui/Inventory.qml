@@ -33,10 +33,12 @@ Item {
     property Hotbar hotbar
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
     signal closed()
-    // t49：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区时；宿主接 player.dropHeldCursor）。
+    // t49：请求宿主 dismiss 光标手持栈（拖出面板外释放 / 点遮罩区时）。宿主按模式决定落地语义：
+    //   生存背包 → 落地为实体（player.dropHeldCursor）；创造背包 → 凭空消失（setHeldBlock(0)，t292：
+    //   创造调色板=无限源，dismiss 回虚空、不丢出到世界）。
     signal discardHeldRequested()
-    // t228：请求宿主把光标手持栈**丢 1 件**为实体（右键拖出面板外；宿主接 player.dropHeldCursorOne）。
-    //   左键整栈走 discardHeldRequested，右键逐个走本信号（spec「左键=全丢/右键=逐个」）。
+    // t228：请求宿主 dismiss 光标手持栈的 1 件（右键拖出面板外）。宿主按模式：生存=落地 1 实体（dropHeldCursorOne）；
+    //   创造=凭空消失 1 件（t292）。左键整栈走 discardHeldRequested，右键逐个走本信号（spec「左键=全丢/右键=逐个」）。
     signal discardHeldOneRequested()
     // t120：创造拿物品（调色板点击 → 拿到光标 / 手）→ 请求宿主弹手动画（Main.qml 接 handPopAnim.start）。
     //   机制等价生存拾取的手弹反馈，但创造无实体销毁、不发 player.itemPickedUp（那是实体拾取专用信号）；
@@ -326,10 +328,10 @@ Item {
                                 // 拾取到光标（创造调色板=无限源，不清减调色板）。方块满栈 64；工具不可堆叠 →
                                 // count=1（t33）。setHeldBlock 已对工具段 id 校验合法（isValidItemId 含工具段）。
                                 onTapped: {
-                                    // t136：换拿前先把旧光标手持栈丢为实体（创造调色板=无限源，旧物应「丢回世界」
-                                    //   而非被下方赋值直接覆盖凭空消失）。discardHeldRequested → dropHeldCursor
-                                    //   同步清 heldBlock/heldCount 并在玩家前方 spawn 实体；信号同线程直连，
-                                    //   返回时 heldBlock 已为 0，随后赋新值安全。空手（heldBlock===0）跳过丢弃。
+                                    // t136/t292：换拿前先显式 dismiss 旧光标手持栈（防被下方赋值直接覆盖成「凭空消失」
+                                    //   的隐性路径——显式走信号让宿主统一处理）。创造调色板=无限源，旧物 dismiss 即回
+                                    //   虚空（setHeldBlock(0)，t292：不丢出到世界）；信号同线程直连，返回时 heldBlock 已为 0，
+                                    //   随后赋新值安全。空手（heldBlock===0）跳过。
                                     if (root.hotbar.heldBlock !== 0) root.discardHeldRequested()
                                     root.hotbar.heldBlock = modelData
                                     // t174：count 走 maxStackSize（单一权威）—— 工具 1 / 桶 1（不可堆叠）/ 方块·材料 64。
@@ -640,7 +642,8 @@ Item {
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行（如「铁镐  5/250」）；非工具 / 未跟踪 → 仅显名。
             text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
-                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")) : ""
+                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
+                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : "" // t304 弓伤害 tooltip
             color: "#f2f2f2"
             font.pixelSize: 12
         }

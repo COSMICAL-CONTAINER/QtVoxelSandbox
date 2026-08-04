@@ -708,13 +708,21 @@ Window {
     Connections {
         target: entityManager
         function onFallingBlockDropped(x, y, z, blockId) { itemEntities.spawnItem(x, y, z, blockId, 1) }
+        // t297 爆炸掉落（EntityManager detonateStalker 内 ~50% 概率/破坏块发）：转发到
+        //   ItemEntityManager.spawnItem 生成掉落实体（机制等价 MC 爆炸把被毁方块弹成物品）。itemId 已是
+        //   BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落）。同 fallingBlockDropped 模式：单向事件流
+        //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费）。掉落实体上限 kCap=200 自管防溢出。
+        function onExplosionDroppedItem(x, y, z, itemId) { itemEntities.spawnItem(x, y, z, itemId, 1) }
         // t242 mob 死亡掉落（spec「血 0→死亡掉落物：猪:生猪排 / 牛:皮革+生牛肉 / 羊:羊毛」）：damageEntity
         //   扣血到 ≤0 时 EntityManager 发 mobDied(x,y,z,mobType) → 据子类 id 转发到 ItemEntityManager.spawnItem
         //   生成对应掉落实体（机制等价 MC 1.0 被动生物掉落；数量取 MC 1.0 量级：猪 1-2 生猪排 / 牛 1 皮革
         //   + 1-2 生牛肉 / 羊 1 羊毛；MobTest 不掉落）。同 fallingBlockDropped 模式：单向事件流（PLAN §2 分层：
         //   Entities 层发语义事件、呈现层只消费）。坐标 = mob 死亡格 floor(pos)，与 spawnItem 整数格约定一致。
+        //   t299 敌对掉落（spec「敌对掉落物：骸骨→骨头 / 蹒跚者→腐肉 / 蜘蛛→线」）：骸骨 1-2 骨头 / 蹒跚者 1-2
+        //   腐肉 / 蜘蛛 1-2 线；MobStalker（爆炸型）无常规掉落（爆炸破坏块掉落归 t297 explosionDroppedItem）。
         //   ⚠️ QML 无法直接 import RecipeRegistry（C++ 静态类），故用字面量 id（同 MaterialIcon.qml 约定）：
         //     0x20B=生猪排 / 0x20C=生牛肉 / 0x20D=皮革 / 0x20E=羊毛（RecipeRegistry::RawPorkchopId 等）。
+        //     0x217=骨头 / 0x218=腐肉 / 0x219=线（RecipeRegistry::BoneId / RottenFleshId / StringId，t299）。
         //     id 改动须同步 src/Game/recipe.h（单一权威）。
         function onMobDied(x, y, z, mobType) {
             if (mobType === EntityManager.MobPig) {
@@ -726,17 +734,37 @@ Window {
                 itemEntities.spawnItem(x, y, z, 0x20C, 1)
             } else if (mobType === EntityManager.MobSheep) {
                 itemEntities.spawnItem(x, y, z, 0x20E, 1)   // 羊毛 ×1
+            } else if (mobType === EntityManager.MobBones) {
+                // t299 敌对掉落：骸骨（骷髅）→ 骨头 ×1-2（机制等价 MC 1.0 骷髅掉骨头）。
+                //   弓 + 箭掉落（spec「骸骨→弓(带耐久)+箭+骨头」）归 t301（骷髅持弓）/ t304（弓箭物品系统）——
+                //   那两任务注册弓 / 箭物品 + 耐久 + 拉弓射箭；此处仅落骨头，避免半成品弓无图标 / 无用法。
+                itemEntities.spawnItem(x, y, z, 0x217, 1)   // 骨头 ×1-2
+                itemEntities.spawnItem(x, y, z, 0x217, 1)
+            } else if (mobType === EntityManager.MobShambler) {
+                // t299 敌对掉落：蹒跚者（僵尸）→ 腐肉 ×1-2（机制等价 MC 1.0 僵尸掉腐肉）。
+                itemEntities.spawnItem(x, y, z, 0x218, 1)   // 腐肉 ×1-2
+                itemEntities.spawnItem(x, y, z, 0x218, 1)
+            } else if (mobType === EntityManager.MobSpider) {
+                // t299 敌对掉落：蜘蛛 → 线 ×1-2（机制等价 MC 1.0 蜘蛛掉线；弓 / 钓竿原料，t304 弓配方用）。
+                itemEntities.spawnItem(x, y, z, 0x219, 1)   // 线 ×1-2
+                itemEntities.spawnItem(x, y, z, 0x219, 1)
             }
-            // MobTest（通用测试生物）不掉落 —— 调试用，无游戏内产出。
+            // MobTest（通用测试生物）/ MobStalker（潜行者；爆炸型，机制等价 MC 苦力怕无常规掉落）不掉落 —— 调试 /
+            //   爆炸型无游戏内常规产出。Stalker 爆炸破坏方块的掉落由 detonateStalker 的 explosionDroppedItem 单独发（t297）。
         }
-        // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：EntityManager aiHostile 内攻击范围 + 冷却到时发
-        //   mobAttackedPlayer(amount, mobType) → 仅 Survival 应用伤害（Creative/Spectator 无伤跳过，机制等价 MC
-        //   创造/观察者无敌）。复用 PlayerState.takeDamage → damaged 红闪 / 视角晃 / 受伤音链（同 fallDamageTaken
-        //   路径；PLAYER 无伤模式经此门控不进 takeDamage）。单向事件流（PLAN §2 分层：Entities 发语义事件、
-        //   呈现层只消费）。
-        function onMobAttackedPlayer(amount, mobType) {
-            if (player.mode === PlayerController.Survival)
+        // t281 敌对 mob 近战攻击 / t283 骷髅箭 / t284 Stalker 爆炸命中玩家（spec「attack」）：EntityManager 发
+        //   mobAttackedPlayer(amount, mobType, kbX, kbZ) → 仅 Survival 应用伤害（Creative/Spectator 无伤跳过，机制
+        //   等价 MC 创造/观察者无敌）。复用 PlayerState.takeDamage → damaged 红闪 / 视角晃 / 受伤音链（同
+        //   fallDamageTaken 路径；PLAYER 无伤模式经此门控不进 takeDamage）。单向事件流（PLAN §2 分层：Entities
+        //   发语义事件、呈现层只消费）。
+        // t296 玩家受击击退：kbX/kbZ = 欲推开玩家的水平单位方向（近战=玩家−mob / 箭=箭速方向 / 爆炸=玩家−Stalker）。
+        //   调 player.applyHitKnockback 给玩家一个水平冲量 + 小跳（机制等价 MC 玩家被击退；仅 Survival 生效，方法内
+        //   自守模式）。先击退后扣血（顺序无关 —— 击退写冲量、扣血走 PlayerState，互不依赖）。
+        function onMobAttackedPlayer(amount, mobType, kbX, kbZ) {
+            if (player.mode === PlayerController.Survival) {
+                player.applyHitKnockback(kbX, kbZ)
                 playerState.takeDamage(amount)
+            }
         }
         // t284 Stalker 爆炸（EntityManager detonateStalker 发）：爆炸的单一音/视反馈入口 —— 播爆炸音
         //   （playExplosion）+ 白色迸发粒子（burstExplosion）。方块破坏走 setWaterSilent 不发 blockBroken
@@ -746,6 +774,9 @@ Window {
             audio.playExplosion()
             if (particleLoader.item) particleLoader.item.burstExplosion(x, y, z)
         }
+        // t304 玩家箭命中 mob（spec「抛物+伤害 mobs」）：damageEntity 已扣血 + 红闪（delegate 绑 hurtFlashAt）+
+        //   归零 mobDied；本信号驱动命中音（同近战 attackMob→onMobAttacked→playMobHurt 模式）。
+        function onArrowHitMob(mobType) { audio.playMobHurt(mobType) }
     }
 
     // t89 / t118 / t177 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 / 门开关 /
@@ -832,13 +863,16 @@ Window {
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
-        // t242/t248 玩家攻击 mob（spec「受伤音效」）→ 播 mob_hurt.wav（t248 专属 mob 受击声，区别于玩家
-        //   hurt.wav；spec「受击音换专属 mob 受伤声」，替代旧复用 playHurt 路径）。mob 红闪由
+        // t242/t248/t295 玩家攻击 mob（spec「受伤音效」）→ 据 mobType 播对应受击音：被动（0-3）走通用
+        //   mob_hurt.wav（t248 专属 mob 受击声，区别于玩家 hurt.wav；spec「受击音换专属 mob 受伤声」，替代
+        //   旧复用 playHurt 路径）；敌对（4-7）走各专属音（t295「骨头敲击/蜘蛛嘶/僵尸哀嚎/苦力怕爆炸声」——
+        //   Shambler 哀嚎 / Bones 骨头敲击 / Spider 蜘蛛嘶嗡 / Stalker 嘶嘶，复用其 ambient idle clip；
+        //   Stalker 爆炸专属音走 onExplosion→playExplosion 的 detonation 路径）。mob 红闪由
         //   EntityManager.damageEntity 设 hurtFlash → QML delegate baseColor 绑定 hurtFlashAt>0 ? "#ff0000" 已
         //   驱动；扣血由 damageEntity 内完成。t248 攻击冷却在 PlayerController::attackMob 内门控（长按连击
         //   每 0.5s 一次伤害，防瞬秒），此信号仅在真扣血时发（冷却内 attackMob 早退不发）。呈现 / 音频层只
         //   消费 Game/Physics 语义事件（同 swingArm / blockBroken 模式；PLAN §2 分层）。
-        function onMobAttacked(crit) { audio.playMobHurt() }
+        function onMobAttacked(mobType, crit) { audio.playMobHurt(mobType) }
         // t23/t24：背包打开时按 G 循环切模式 —— 切到观察者（无背包）则关闭；Creative↔Survival 间切换
         // 则保留背包打开，面板由各组件 visible 绑定 player.mode 自动换（创造背包↔生存背包）。避免任一
         // 背包在不兼容模式下滞留（Spectator 无背包/破放，t21）。
@@ -971,7 +1005,7 @@ Window {
                 //   叠加进 position.y → 手下沉一点再回位（「拿到东西手一沉」反馈）。与 swingAngle 正交：
                 //   swing 改 eulerRotation.x（绕肩挥动）、pop 改 position.y（位移），互不干扰、可叠加
                 //   （拾取时手不挥、破/放时手挥不弹）。
-                position: Qt.vector3d(window.handPosX, window.handPosY + viewModelHand.popY - viewModelHand.eatDropY, window.handPosZ)
+                position: Qt.vector3d(window.handPosX, window.handPosY + viewModelHand.popY - viewModelHand.eatDropY, window.handPosZ + viewModelHand.bowPullZ)
                 readonly property real baseTilt: window.handBaseTilt  // 读 window 级（t129 引入、t139 起由 ESC 设置面板 ArmSlider 实时调）；t156 固化用户终值 -34.56（见 window.handBaseTilt 注释）
                 property real swingAngle: 0.0          // 挥动增量（度）；0=静止。下挥=负（手往下/前劈），回位=0
                 property real popY: 0.0                 // t120：拾取/拿取弹跳位移（Y）；0=静止，负=下沉
@@ -981,7 +1015,12 @@ Window {
                 //   （各改不同属性），不与 armSwingAnim/handPopAnim 冲突。
                 property real eatDropY: 0.0
                 property real eatTilt: 0.0
-                eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle + viewModelHand.eatTilt, 0, 0)
+                // t304 弓拉弓动画：拉弓时整手微仰（arm raises into aim pose）+ 略后拉（z 向相机回收）。
+                //   bowPullTilt = 蓄力 ×18°（满弓仰 18°）、bowPullZ = 蓄力 ×0.06（z 后拉 0.06 格）。
+                //   均直读 player.bowDrawProgress（连续，无动画对象；progress 0→1 平滑跟随蓄力）。
+                readonly property real bowPullTilt: player.bowDrawing ? player.bowDrawProgress * 18.0 : 0.0
+                readonly property real bowPullZ: player.bowDrawing ? player.bowDrawProgress * 0.06 : 0.0
+                eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle + viewModelHand.eatTilt + viewModelHand.bowPullTilt, 0, 0)
 
                 // 上臂袖段（t73 蓝袖子）：覆盖肩-肘（上半段），上衣色 #3a6a9a（hurtTint 0.227/0.416/0.604，与
                 //   第三人称左/右臂袖段同色）。原第一人称手臂单肉色无袖子（蓝袖子只在第三人称）→ 加此段对齐。
@@ -1206,6 +1245,25 @@ Window {
                     position: Qt.vector3d(0.02, 0.02, -0.22)
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(20, -15, -10)    // 剑身竖直略前倾、刃尖朝前上
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                 : "#8a5a2e"
+                    }
+                }
+                // t304 弓（type=Bow）：BowGeometry 弓形（弓臂弧 + 弦 + 握把），垂直前指持弓姿态。
+                //   拉弓动画由 viewModelHand 父 Node 的 bowPullTilt/bowPullZ 驱动（整手仰 + 后拉 → 视觉「拉弓」）；
+                //   弓本身不旋转（保持前指瞄准方向，机制等价 MC 第一人称拉弓弓身稳、手后拉）。
+                //   tier 着色（木弓褐 / 石弓灰 / 铁弓银白，与 ToolIcon 弓图标 + 第三人称 / 掉落物同策略）。
+                Model {
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 7
+                    geometry: BowGeometry {}
+                    position: Qt.vector3d(0.02, 0.04, -0.24)
+                    scale: Qt.vector3d(0.42, 0.42, 0.42)
+                    // BowGeometry 上下臂沿本地 +Y（已竖直）→ 不绕 X 转；绕 Y 转 180° 使 belly（+Z）朝前（瞄准方向）、
+                    // 弦朝玩家（视觉见弦侧，机制等价 MC 第一人称持弓见弓背 / 弦）。略仰 12° 表「持弓瞄准」。
+                    eulerRotation: Qt.vector3d(12, 180, 0)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
@@ -2030,6 +2088,23 @@ Window {
                             opacity: playerModel.bodyOpacity
                         }
                     }
+                    // t304 弓（type=Bow）第三人称手持：BowGeometry 弓形垂直手持（弓臂竖直、belly 朝前）。
+                    //   拉弓动画由 player.bowDrawProgress 不在此分支驱动（第三人称手持静态；拉弓视觉主要在第一人称）。
+                    Model {
+                        visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
+                                 && hotbarVM.toolType(player.selectedItem) === 7
+                        geometry: BowGeometry {}
+                        position: Qt.vector3d(0, -0.48, -0.18)
+                        scale: Qt.vector3d(0.5, 0.5, 0.5)
+                        eulerRotation: Qt.vector3d(-10, 200, -25)   // 弓竖直、belly 朝前（Y 180°+ 略偏）
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                                     : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
+                                     : "#8a5a2e"
+                            opacity: playerModel.bodyOpacity
+                        }
+                    }
                 }
             }
             // 左腿枢轴（t45 走 / t65 蹲下膝盖弯曲）：枢轴位于左髋 (-0.125, 0.6, 0)，蹲下时髋随上半身
@@ -2400,6 +2475,23 @@ Window {
                             }
                         }
                     }
+                    // t304 弓掉落物（type=Bow）：BowGeometry 弓形，同 scale / 位置 / tier 配色（机制等价 MC 掉落弓）。
+                    Model {
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 7
+                        geometry: BowGeometry {}
+                        scale: Qt.vector3d(0.45, 0.45, 0.45)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: {
+                                const m = worldClock.skyLight
+                                const t = hotbarVM.toolTier(entRoot.entId)
+                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                     : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
+                                     : tintBySkyLight(138/255, 90/255, 46/255, m)
+                            }
+                        }
+                    }
                     // 材料段（t112 改 BillboardQuad + 朝相机）：木棒 / 煤 / 铁原矿 / 铁锭 / 玻璃 / 木炭
                     //   （RecipeRegistry::*Id，0x200 段）均无等距立方体 PNG，走 MaterialIcon Canvas 自绘。
                     //   旧 CrackBox 把同一张 2D 图标贴到立方体 6 面 → 斜视时 6 个半透面互相穿插、呈
@@ -2573,8 +2665,9 @@ Window {
                     //   全红，机制等价 MC mob 受击 10 tick 红闪）：mobType 0 走 baseColor 红；mobType 1/2/3 走
                     //   纯红 Texture（mobCowTex 的内容被红 #ff0000 baseColor 调制 → 视觉全红）。
                     property int entMobType: { entityManager.revision; return entityManager.mobTypeAt(index) }
-                    // t252 碰撞箱尺寸（halfW/halfH）：C++ 按 mobType 设（pig/sheep 0.45、cow 0.45/0.70、
-                    //   MobTest/FallingBlock 0.5）。WireCube hitbox scale + 朝向棒长度读它们（旧版固定 1×1×1）。
+                    // t252/t293 碰撞箱尺寸（halfW/halfH）：C++ 按 mobType 设（t293 收紧贴合身体：pig/sheep
+                    //   0.40/0.45、cow 0.40/0.50、敌对 0.30/0.90、spider 0.45/0.30、MobTest/FallingBlock 0.5）。
+                    //   WireCube hitbox scale + 朝向棒长度读它们（旧版固定 1×1×1）。
                     property real mobHalfW: { entityManager.revision; return entityManager.radiusAt(index) }
                     property real mobHalfH: { entityManager.revision; return entityManager.halfHeightAt(index) }
                     // t252 模型 Y 偏移：collision 中心（pos.y）≠ 模型躯干中心（halfH 变后二者分离）→ 模型
@@ -2888,8 +2981,9 @@ Window {
                             }
                         }
                     }
-                    // t285 Spider（蜘蛛；mobType 7）：MobModel 宽矮四腿（原创 §9，简化 4 腿；爬墙留后续）。
-                    //   暗黑红 baseColor（纯色原创 §9a）。受击红闪。hostile → EntityManager AI 自动追击玩家。
+                    // t285/t302 Spider（蜘蛛；mobType 7）：MobModel 宽矮躯干 + 前伸小头 + **8 腿**（原创 §9，4 对
+                    //   沿躯干 Z 分布；t302 升级自 t285 简化 4 腿。爬墙留后续）。暗黑红 baseColor（纯色原创 §9a）。
+                    //   受击红闪。hostile → EntityManager AI 自动追击玩家。t302 加 4 颗红眼（蜘蛛标志性，纯色子 Model）。
                     Model {
                         visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSpider
                         geometry: MobModel {
@@ -2907,23 +3001,46 @@ Window {
                                 return Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) // 暗黑红
                             }
                         }
+                        // t302 蜘蛛眼（4 颗红眼；蜘蛛标志性 8 眼简化为 4 颗醒目红眼，原创纯色 NoLighting §9a）：
+                        //   mob Model 子节点 → 继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible。同猪/牛/羊眼模式
+                        //   （呈现层独立纯色 Model，不进 MobModel 几何 / 不共享 mob 贴图 → 实心眼色不受身体色调制）。
+                        //   Spider 头心 (0,-0.02,-0.32) 半 (0.18,0.14,0.18) → 前面 z=-0.50；眼贴头前面 z=-0.51（略凸出
+                        //   防与头部面 z-fight，同 t52 贴脸）。4 颗分上下两对（y=+0.04 / -0.08；x=±0.07），暗体上红眼醒目。
+                        //   受击红闪时身体变 #ff0000 → 红眼暂融色（短暂可接受，非 bug；与猪/牛/羊红闪同理）。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.07, 0.04, -0.51)
+                            scale: Qt.vector3d(0.05, 0.05, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.07, 0.04, -0.51)
+                            scale: Qt.vector3d(0.05, 0.05, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.07, -0.08, -0.51)
+                            scale: Qt.vector3d(0.05, 0.05, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.07, -0.08, -0.51)
+                            scale: Qt.vector3d(0.05, 0.05, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                        }
                     }
-                    // t253 攻击单体选中：准星瞄准的**单个** mob 显白色目标框（常驻可见，区别 F3+B 调试框——
-                    //   不依赖 showHitboxes）。player.targetedMob = EntityManager 索引（C++ findMobHit 每帧选
-                    //   最近活体单体）；delegate index 匹配即本 mob 被瞄准 → 显框。WireCube ±0.5 居中 + scale =
-                    //   AABB（同 F3+B hitbox 公式；+0.02 外扩略大于 F3+B 的 +0.01 → F3+B 同开时目标框叠在外侧
-                    //   仍可见）。仅 Mob（FallingBlock 非攻击目标）。NoLighting（可见 Model 红线）。
-                    //   分层（PLAN §2）：呈现层只读 player.targetedMob + delegate 位置 / halfW / halfH（同 hasHit
-                    //   →线框 模式：Game 层暴露选中态，呈现自发画框，绝不反向写）。
-                    Model {
-                        visible: entKind === EntityManager.Mob && player.targetedMob === index
-                        geometry: WireCube {}
-                        scale: Qt.vector3d(mobHalfW * 2.0 + 0.02, mobHalfH * 2.0 + 0.02, mobHalfW * 2.0 + 0.02)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
-                    }
-                    // t116/t252 F3+B mob 碰撞箱（spec「mob scale 1.0」+ 朝向箭头）：mob AABB = halfW×halfH×halfW
-                    //   （t252 非立方：pig/sheep 0.9×0.9、cow 0.9×1.4；旧版固定 1×1×1）。WireCube ±0.5 居中 →
-                    //   scale = (2·halfW, 2·halfH, 2·halfW) 覆盖实际 AABB；+0.01 外扩避与 mob 模型表面 z-fight。
+                    // t293 mob 碰撞箱仅 F3+B：旧版 t253「准星瞄准的单个 mob 常驻显白色目标框」（hover 即显）
+                    //   被用户判为「hover 常显碰撞箱」——MC 1.0 准星瞄准 mob 无 wireframe（仅十字准星），
+                    //   故移除该常驻目标框。mob 碰撞箱（WireCube AABB + 朝向箭头）现**仅在 F3+B**（showHitboxes）
+                    //   显，符合 spec「mob 碰撞箱仅 F3+B」。攻击命中判定不受影响——beginMining 仍即时调
+                    //   findMobHit（点击瞬间最新视线，不读 m_targetedMob 缓存），故移除呈现框不破坏近距攻击。
+                    //   分层（PLAN §2）：呈现层只读 showHitboxes + delegate 位置 / halfW / halfH，绝不反向写。
+                    // t116/t252/t293 F3+B mob 碰撞箱（spec「mob scale 1.0」+ 朝向箭头）：mob AABB = halfW×halfH×halfW
+                    //   （t293 收紧后：pig/sheep 0.8×0.9、cow 0.8×1.0、敌对 0.6×1.8、spider 0.9×0.6；旧版固定 1×1×1）。
+                    //   WireCube ±0.5 居中 → scale = (2·halfW, 2·halfH, 2·halfW) 覆盖实际 AABB；+0.01 外扩避与 mob 模型表面 z-fight。
                     //   t239：mob delegate Node 按 bodyYaw 转（AI 行走方向）→ 子节点继承，箭头本地 -Z 指向 mob
                     //   朝向。WireCube 立方对称 → 转无异，但箭头正确反映 yaw（mob facing line，spec「F3+B 显朝向」）。
                     //   分层（PLAN §2）：纯呈现层调试叠层，只读 delegate 位置 / yaw / halfW / halfH。
@@ -4289,10 +4406,17 @@ Window {
                  && player.mode === PlayerController.Creative
         z: 150
         onClosed: window.closeInventory()
-        // t49：拖出丢弃（手持物点遮罩区）→ player 把光标手持栈丢为前方实体（同 Q 丢弃）。
-        onDiscardHeldRequested: player.dropHeldCursor()
-        // t228：右键拖出 → 只丢 1 件（左键整栈走上面的 dropHeldCursor）。
-        onDiscardHeldOneRequested: player.dropHeldCursorOne()
+        // t292：创造背包「归还 / 丢弃光标手持物」（点面板外遮罩 / 换拿覆盖）→ 应**凭空消失**，非丢出到世界
+        //   生成实体。机制等价 MC 1.0 创造模式：调色板=无限源，手持物 dismiss 即回虚空、不落地。生存背包
+        //   （survivalPanel）的手持物是真实物品，仍走 dropHeldCursor 落地（见下方）。分层（PLAN §2）：呈现层只发
+        //   dismiss 意图信号，是否落地由宿主按模式决定（创造=清栈 / 生存=spawn 实体）；setHeldBlock(0) 同步清
+        //   count+durability，浮动光标图标自动隐。
+        onDiscardHeldRequested: hotbarVM.heldBlock = 0
+        // 右键「逐个 dismiss」同源：≤1 → 整栈凭空消失；>1 → 光标 -1（dismiss 的那 1 件消失，余量留光标）。
+        onDiscardHeldOneRequested: {
+            if (hotbarVM.heldCount <= 1) hotbarVM.heldBlock = 0
+            else hotbarVM.heldCount = hotbarVM.heldCount - 1
+        }
         // t120：创造拿物品（调色板点击）→ 手弹跳（同生存拾取的手弹反馈，spec「创造拿物品到手也触发」）。
         onItemTaken: handPopAnim.start()
     }

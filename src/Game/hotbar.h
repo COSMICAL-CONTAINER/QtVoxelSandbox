@@ -173,6 +173,10 @@ public:
     Q_INVOKABLE int maxStackSize(int id) const;
     // t263 工具最大耐久（透传 ToolRegistry::maxDurability；非工具 → 0）。QML tooltip / 创造取件初始化用。
     Q_INVOKABLE int toolMaxDurability(int id) const;
+    // t304 弓箭最大伤害（满蓄力命中 HP；spec「弓伤害 tooltip」）。仅弓（toolType===Bow）有意义；其余返 0。
+    //   QML tooltip 据本值显「攻击 1-N」（蓄力 1..N HP）；弓近战走徒手伤害（ToolRegistry::attackDamage 兜底），
+    //   远程伤害由蓄力 + 箭命中决定（PlayerController bow fire / EntityManager Arrow）。
+    Q_INVOKABLE int bowArrowMaxDamage() const;
     // t263 消耗选中槽工具 1 点耐久（生存挖掘完成 / 锄耕地调用）。非工具 / 空槽 → no-op；
     //   耐久归零 → 清空槽（工具破损消失）+ emit slotsChanged。创造模式由 caller 不调本方法（不消耗）。
     Q_INVOKABLE void damageSelectedItem();

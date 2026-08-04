@@ -76,6 +76,10 @@ qt_add_executable(voxelsandbox
     src/Renderer/shovel.h
     src/Renderer/sword.cpp
     src/Renderer/sword.h
+    # t304 弓 3D 几何（与 sword / pickaxe 同层同风格，复制 addBox 模式仅改形状：弓臂弧 + 弓弦 + 握把）。
+    #   手持（第一 / 第三人称）+ 掉落实体三处统一消费，按 toolType===Bow（BlockRegistry::Bow=7）选本几何。
+    src/Renderer/bow.cpp
+    src/Renderer/bow.h
     # t240 猪牛羊方块化原创 3D 模型几何（四肢+躯干+头，§9 区隔不照搬 MC）。mobType Q_PROPERTY 选猪/牛/羊
     #   各自比例；每面铺整张贴图（全脸 UV，非 MC UV 拆皮）。EntityManager 的 Mob 实体（mobTypeAt）经
     #   Main.qml mobHost Repeater delegate 据其 mobType 设本几何 + 选对应贴图。Renderer 层只产出几何，
@@ -279,6 +283,10 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/mob_idle_pig.wav
         sounds/mob_idle_cow.wav
         sounds/mob_idle_sheep.wav
+        sounds/mob_idle_shambler.wav
+        sounds/mob_idle_bones.wav
+        sounds/mob_idle_stalker.wav
+        sounds/mob_idle_spider.wav
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。

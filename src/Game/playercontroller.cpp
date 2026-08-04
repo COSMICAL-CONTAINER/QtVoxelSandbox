@@ -176,6 +176,7 @@ void PlayerController::setMode(Mode m)
     if (m == m_mode) return;
     m_mode = m;
     m_vel = QVector3D(0, 0, 0); // 切模式清速度，避免半空切走生存被甩飞
+    m_knockback = QVector3D(0, 0, 0); // t296 切模式清受击击退冲量（防陈旧冲量跨模式残留；noclip 模式不积分它）
     m_onGround = false;
     m_peakY = m_pos.y();        // 重置掉落基准：避免从创造飞行高度切生存时累计陈旧落差
     if (m_flying) { m_flying = false; emit flyingChanged(); } // 进入新模式默认走（不飞）
@@ -203,6 +204,7 @@ void PlayerController::respawn()
 {
     cancelMining();           // 清生存累积挖掘态（裂纹叠层随之隐）
     cancelEating();           // t267：清进食累积态（防 respawn 后 updateEating 误续食）
+    cancelBowDraw();          // t304：清弓拉弓态（防 respawn 后误续拉）
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
     m_rightDown = false;      // t267：清右键按下态（防 respawn 后 updateEating 误续食）
     m_dead = false;           // t175：清死亡态镜像 → pickupScan 恢复（重生后玩家已离开死亡点，可正常拾取）
@@ -218,6 +220,7 @@ void PlayerController::respawn()
     m_regenTimer = 0.0f;
     m_pos = QVector3D(kSpawnX, kSpawnY, kSpawnZ); // 回出生列（X/Z；Y 由 snapSpawnToGround 贴地表）
     m_vel = QVector3D(0, 0, 0);
+    m_knockback = QVector3D(0, 0, 0); // t296：清受击击退冲量（重生不继承死亡点的击退）
     snapSpawnToGround();      // t137：重生贴地表（消除 kSpawnY 兜底落差；设 m_pos.y + m_peakY）
     if (m_flying) { m_flying = false; emit flyingChanged(); }
     setMoveState(Walk);       // 蹲下 / 疾跑归 Walk（同时复位 AABB 高 / 眼位；无变化静默）
@@ -230,11 +233,13 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
 {
     cancelMining();
     cancelEating(); // t267：清进食累积态（防加载后 updateEating 误续食）
+    cancelBowDraw(); // t304：清弓拉弓态（防加载后误续拉）
     m_leftDown = false;
     m_rightDown = false; // t267：清右键按下态（防加载后 updateEating 误续食）
     m_dead = false;
     m_pos = QVector3D(x, y, z);
     m_vel = QVector3D(0, 0, 0);
+    m_knockback = QVector3D(0, 0, 0); // t296：清受击击退冲量（瞬态值，存档不持久化；防上一世界残留）
     m_yaw = yaw;
     m_pitch = pitch;
     m_peakY = y; // 重置掉落基准（存档点起算，不误判陈旧落差）
@@ -270,6 +275,7 @@ void PlayerController::release()
     clearHit();                               // 暂停 → 隐藏线框（未捕获时不选中）
     cancelMining();                           // t34：暂停 / 失焦 → 清累积挖掘态（spec：失焦清零）
     cancelEating();                           // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零）
+    cancelBowDraw();                          // t304：暂停 / 失焦 → 清弓拉弓态（spec：失焦清零）
     m_leftDown = false;                       // t44：暂停 / 失焦 → 视同松手（切断续挖）
     m_rightDown = false;                      // t267：暂停 / 失焦 → 视同松手（切断连食）
     // t51：暂停 / 失焦时退出疾跑 / 蹲下（恢复时从 Walk 起；避免遗留蹲态卡低视角 / 疾跑余速）。
@@ -331,6 +337,9 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
                 if (me->button() == Qt::RightButton)  {
                     const int heldForEat = m_hotbar ? m_hotbar->selectedItemId() : 0;
                     if (heldForEat == RecipeRegistry::BreadId) { beginEating(); return true; }
+                    // t304 手持弓 → 右键长按拉弓（不进 placeBlock；弓非方块，selectedBlock 已守 Air）。机制等价
+                    //   MC 1.0 右键拉弓。持物判据直读 hotbar（单一权威，免 QML 绑定滞后窗口，同面包 / 桶修法）。
+                    if (heldForEat == int(ToolRegistry::Bow)) { beginBowDraw(); return true; }
                     placeBlock();
                     return true;
                 }
@@ -346,7 +355,9 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
                 return true;
             }
             if (m_captured && me->button() == Qt::RightButton) {
+                // t267 面包松开清进食；t304 弓松开射箭（二者持物互斥，安全都调）。
                 endEating();
+                endBowDraw();
                 return true;
             }
         }
@@ -435,6 +446,7 @@ void PlayerController::tickImpl()
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
         cancelEating(); // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零，未完成不消耗）
+        cancelBowDraw(); // t304：暂停 / 失焦 → 清弓拉弓态（spec：失焦清零，未射出不消耗箭 / 耐久）
         // t253：暂停 / 背包开时清 mob 目标框（updateRaycast 仅 captured 时跑 → 不清则残留旧目标）。
         if (m_targetedMob >= 0) { m_targetedMob = -1; emit targetedMobChanged(); }
         // t45：暂停时清行走动画驱动（moveSpeed→0；walkPhase 不动，QML 据此 sin*0=0 → 四肢归中性位）。
@@ -454,6 +466,15 @@ void PlayerController::tickImpl()
     updateCameraDistance(); // t40：第三人称相机距离钳制（防穿墙）
     updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
     updateEating(float(dt)); // t267：累积进食进度（持面包按住右键时；其它情况早 return）
+    // t304 弓拉弓蓄力：持弓按住右键时累加 m_bowDrawTime（钳 kBowFullCharge）。换槽（持物不再是弓）→ cancel。
+    //   仅 captured 时跑（pause 早 return 之前已清）。每 tick emit bowDrawChanged → QML 拉弓动画跟随进度。
+    if (m_bowDrawing) {
+        if (!m_hotbar || m_hotbar->selectedItemId() != int(ToolRegistry::Bow)) { cancelBowDraw(); }
+        else {
+            m_bowDrawTime = std::min(m_bowDrawTime + float(dt), kBowFullCharge);
+            emit bowDrawChanged();
+        }
+    }
 }
 
 // 视线方向：用与相机相同的欧拉→四元数（QQuaternion::fromEulerAngles(pitch,yaw,0)）旋转
@@ -884,11 +905,34 @@ void PlayerController::attackMob(int entityIndex)
     m_entityManager->damageEntity(entityIndex, dmg);
     m_entityManager->knockback(entityIndex, kbx, kbz);
     emit swingArm();
-    emit mobAttacked(crit);
+    // t295 mob 受击音效 + 敌对专属：随 mobAttacked 下传被攻击 mob 的 mobType，供呈现层据它路由到
+    //   AudioManager.playMobHurt(mobType) —— 被动走通用 creature yelp、敌对各走专属音（哀嚎/骨头敲击/蜘蛛嘶/嘶嘶）。
+    //   mobTypeAt 越界（理论不可达：entityIndex 由 findMobHit 选定的活体 mob）→ 兜底 0（通用 mob_hurt）。
+    const int mobType = m_entityManager->mobTypeAt(entityIndex);
+    emit mobAttacked(mobType, crit);
     // t265 剑 / 工具攻击消耗耐久（机制等价 MC「工具每次命中 mob -1 耐久」）。仅 Survival（创造无限源不消耗）；
     //   damageSelectedItem 对空手 / 非工具静默 no-op，耐久归零自动清槽（工具破损消失）。同 finishMiningAt 的耐久消耗模式。
     if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem();
     m_attackCooldown = kAttackCooldown;
+}
+
+// t296 玩家受击击退（见头文件 applyHitKnockback 注释；机制等价 MC 1.0 玩家被击退）。由 Main.qml 的
+//   EntityManager.mobAttackedPlayer Connections 调（仅 Survival —— 创造 / 观察者无敌不弹，mobAttackedPlayer 经
+//   t290 门控本就只在 Survival 发）。把 (dirX,dirZ) 单位方向 × kHitKnockbackHoriz 写入独立冲量 m_knockback 的 XZ，
+//   并设小跳垂直分量 kHitKnockbackUp（step() 走路路径每帧衰减 + 重力 + 叠入位移）。
+//   防御：归一输入（caller 已归一，此处再守）；非 Survival / 死亡 / 未捕获（菜单态）/ 零方向 → 静默早退。
+void PlayerController::applyHitKnockback(float dirX, float dirZ)
+{
+    if (m_mode != Survival) return;      // 创造 / 观察者无敌（防御；mobAttackedPlayer 本就 Survival-only）
+    if (m_dead || !m_captured) return;   // 死亡 / 菜单态不弹（防 respawn 后陈旧信号或暂停中被推）
+    float len = std::sqrt(dirX * dirX + dirZ * dirZ);
+    if (!(std::isfinite(len) && len > 1e-3f)) return; // 零 / 非有限方向 → 无击退（不弹）
+    dirX /= len;
+    dirZ /= len;
+    m_knockback.setX(dirX * kHitKnockbackHoriz);
+    m_knockback.setZ(dirZ * kHitKnockbackHoriz);
+    m_knockback.setY(kHitKnockbackUp); // 小跳（向上为正；step() 重力分支接手 → 上跳→减速→下落→着地）
+    qInfo("player hit-knockback dir=(%.3f,%.3f) horiz=%.1f", dirX, dirZ, kHitKnockbackHoriz);
 }
 
 // 每 tick 推进生存挖掘进度（t34）+ 连续续挖（t44）。创造不进入此态（beginMining 内瞬破已 return）。
@@ -1102,6 +1146,92 @@ void PlayerController::updateEating(float dt)
     if (m_eatingProgress >= 1.0f) {
         finishEating();
     }
+}
+
+// t304 弓蓄力进度（Q_PROPERTY bowDrawProgress READ）：钳到 [0,1]（满弓=1）。无拉弓态 → 0。
+float PlayerController::bowDrawProgress() const
+{
+    if (!m_bowDrawing || kBowFullCharge <= 0.0f) return 0.0f;
+    return std::clamp(m_bowDrawTime / kBowFullCharge, 0.0f, 1.0f);
+}
+
+// t304 右键按下（手持弓）：开始拉弓蓄力。机制等价 MC 1.0 长按右键拉弓（~1s 满弓，kBowFullCharge）。
+//   分流：eventFilter RightButton press 据持物（hotbar.selectedItemId == Bow）调本方法而非 placeBlock（弓非方块，
+//   selectedBlock 已守 Air）。模式门控：观察者不能拉弓（沿用 placeBlock 入口 canPlace() 守卫；射箭是「使用」
+//   语义，spectator 不交互）。无需命中（弓瞄准走视线方向，不依赖射线命中实体方块）。持物变更（press→begin 间
+//   切槽）→ 不进。蓄力期间 step() 水平速度 ×kBowSlowMul（spec「拉弓减速」）。
+void PlayerController::beginBowDraw()
+{
+    // 记录物理右键按下态已在 eventFilter（endBowDraw 据松开边缘触发，不依赖此）；m_rightDown 由面包路径管理，
+    //   弓与面包持物互斥不复用。置于所有早 return 之前的是 m_rightDown（面包路径），此处弓路径独立。
+    if (!canPlace()) return; // 观察者不能拉弓（沿用 placeBlock 入口门控）
+    if (!m_hotbar || !m_captured) return;
+    if (m_hotbar->selectedItemId() != int(ToolRegistry::Bow)) return; // 持物非弓 → 不进
+    if (m_bowDrawing) return; // 已在拉弓 → 不重置（防重复 press 抖动重置进度）
+    m_bowDrawing = true;
+    m_bowDrawTime = 0.0f;
+    emit bowDrawChanged();
+}
+
+// t304 右键松开：据蓄力射箭 + 清拉弓态。蓄力 < kBowMinChargeRatio / 无箭 → 不射（仅 cancel）。
+//   射箭：算蓄力比 → 箭速（lerp min..max）+ 伤害（lerp min..max）；vel = 视线方向 × 箭速（pitch 已含 → 抛物由
+//   Arrow tick 重力生成）；origin = 眼位 + 视线 × 0.6（防贴墙 spawn 入墙即没）。生存消耗 1 箭 + 弓 -1 耐久
+//   （创造不耗）。需箭在背包（spec）—— findArrowInInventory 找不到则不射。射出后 swingArm（射箭挥手反馈）。
+void PlayerController::endBowDraw()
+{
+    if (!m_bowDrawing) return; // 非拉弓态（面包松开 / 误触）→ no-op
+    const float prog = bowDrawProgress();
+    cancelBowDraw(); // 清拉弓态（无论射否；松开即结束蓄力）
+    // 蓄力不足 → 取消（不射，机制等价 MC「未拉足松开箭无力」）。
+    if (prog < kBowMinChargeRatio) return;
+    if (!m_hotbar || !m_world || !m_entityManager) return;
+    // 需箭在背包（spec）。创造不消耗但**仍须**背包有箭（机制等价 MC 创造弓亦须箭）。
+    const ArrowSlot ar = findArrowInInventory();
+    if (!ar.found) return;
+    // 箭速 / 伤害按蓄力 lerp（charge² 让满弓手感更利：短蓄力箭慢弱、满弓快强）。
+    const float charge = std::clamp(prog, 0.0f, 1.0f);
+    const float speed = std::lerp(kBowMinSpeed, kBowMaxSpeed, charge * charge);
+    const int damage = kBowMinDamage + int(std::round(charge * float(kBowMaxDamage - kBowMinDamage)));
+    const QVector3D look = lookDirection();
+    const QVector3D origin = position() + look * 0.6f; // 眼位 + 视线前移 0.6（防贴墙入墙）
+    m_entityManager->spawnArrowPlayer(origin, look * speed, damage);
+    // 生存消耗 1 箭 + 弓 -1 耐久；创造不耗（无限源）。
+    if (m_mode == Survival) {
+        if (ar.group == 0) {
+            m_hotbar->takeStack(ar.index, 1);
+        } else {
+            // main 段无 takeStack：手读 count - 1 写回（归 0 清 id，保持「id==0 ⟺ count==0」不变式）。
+            const int nc = m_hotbar->mainCountAt(ar.index) - 1;
+            m_hotbar->mainSetStack(ar.index, nc > 0 ? RecipeRegistry::ArrowId : 0, nc > 0 ? nc : 0);
+        }
+        m_hotbar->damageSelectedItem(); // 弓 -1 耐久（归零自动清槽）
+    }
+    emit swingArm(); // 射箭挥手反馈（一次「使用」动作）
+}
+
+// t304 清弓拉弓累积态（松开射出后 / 换槽（持物不再是弓）/ 失焦 / 暂停）。无拉弓态时静默（不发信号）。
+void PlayerController::cancelBowDraw()
+{
+    if (!m_bowDrawing) return;
+    m_bowDrawing = false;
+    m_bowDrawTime = 0.0f;
+    emit bowDrawChanged();
+}
+
+// t304 在背包（hotbar 9 + main 27）查首格含箭（ArrowId）。优先 hotbar（入手语义同拾取），再 main。
+//   返 {found, group(0=hotbar/1=main), index}。找不到 found=false。供 endBowDraw 判「需箭」+ 生存消耗定位槽。
+PlayerController::ArrowSlot PlayerController::findArrowInInventory() const
+{
+    if (!m_hotbar) return {false, 0, 0};
+    for (int i = 0; i < m_hotbar->slotCount(); ++i) {
+        if (m_hotbar->blockIdAt(i) == RecipeRegistry::ArrowId)
+            return {true, 0, i};
+    }
+    for (int i = 0; i < m_hotbar->mainCount(); ++i) {
+        if (m_hotbar->mainBlockIdAt(i) == RecipeRegistry::ArrowId)
+            return {true, 1, i};
+    }
+    return {false, 0, 0};
 }
 
 // 右键：命中面法线方向的相邻空格置当前手持方块。
@@ -1620,13 +1750,25 @@ void PlayerController::dropAllItems()
 // t288：pick-block 仅 Creative——创造模式有「凭空中键复制方块」的能力（源无限 → 满栈）；生存有限背包
 // 无此能力（按中键不动作），Spectator 亦禁（与 canBreak/canPlace 同「观察者不交互」语义）。pick 虽不改
 // 栅格，但属「凭空获得方块」的选择作弊，故与破/放同走模式门控，不放宽到全模式。
-// 走 Hotbar::setStack 直接覆盖选中槽（Hotbar 内部校验范围 + id 合法性 + count 上限）。
+// t291：优先「切槽」——hotbar 已有同方块时切到该槽（不动栈），仅 hotbar 全无该方块时才 setStack 复制入
+// 当前选中槽（Hotbar 内部校验范围 + id 合法性 + count 上限）。
 void PlayerController::pickBlock()
 {
     if (m_mode != Creative) return; // t288：仅创造模式可中键复制方块
     if (!m_captured || !m_hasHit || !m_world || !m_hotbar) return;
     const quint8 id = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
     if (id == BlockRegistry::Air) return; // 命中空气 → 无可拾取
+    // t291：创造中键切槽 —— 机制等价 MC 1.0 pick-block：先扫 hotbar 9 槽是否已有同 id 方块，有则切到该槽
+    // （setSelectedSlot，不动栈内容 / 数量 → 不重复占槽、不覆盖既有数量，选中槽即该槽时等值早退 no-op）；
+    // 仅当 hotbar 全无该方块时才落到「复制入当前选中槽」（setStack 写满栈，创造源无限）。区别于 t37/t288
+    // 「恒覆盖选中槽」：避免把「已在别槽的方块」又塞一份进选中槽挤掉原内容。
+    const int n = m_hotbar->slotCount();
+    for (int s = 0; s < n; ++s) {
+        if (m_hotbar->blockIdAt(s) == int(id)) { // blockIdAt 返原始 id；空槽=Air=0，id≠Air 不误匹配
+            m_hotbar->setSelectedSlot(s);
+            return;
+        }
+    }
     m_hotbar->setStack(m_hotbar->selectedSlot(), int(id), m_hotbar->maxStackSize(int(id)));
 }
 
@@ -2164,8 +2306,11 @@ void PlayerController::step(qreal dt)
     // t51：水平速度乘 speedMul（疾跑 ×1.3 / 蹲 ×0.4 / 走 ×1.0）；spec「疾跑移速 +、蹲下 -」。
     //   双击 W 疾跑（setKey 内 m_lastWms 双击窗 ≤250ms 进 Sprint）→ speedMul()=1.3 实际乘入此处水平速度，
     //   走速 4.3 → 疾跑 5.59 blocks/sec（同 MC 1.0 系数）。t159：再乘 waterMul（水下减速）。
-    m_vel.setX(wish.x() * kWalk * speedMul() * waterMul);
-    m_vel.setZ(wish.z() * kWalk * speedMul() * waterMul);
+    // t304 拉弓减速（spec「拉弓减速（叠 shift）」）：m_bowDrawing 时水平速度再 ×kBowSlowMul=0.5（与蹲下
+    //   ×0.4 叠加 → 蹲拉弓 = 走速×0.4×0.5=0.2，机制等价 MC 1.0 拉弓大幅减速）。仅走路模式（飞态早 return）。
+    const float bowMul = m_bowDrawing ? kBowSlowMul : 1.0f;
+    m_vel.setX(wish.x() * kWalk * speedMul() * waterMul * bowMul);
+    m_vel.setZ(wish.z() * kWalk * speedMul() * waterMul * bowMul);
     // t174 水中浮力 / 游泳（spec「浮力/游泳」）：脚位在水格 → 缓沉（kWaterGravity << kGravity）+ 按住空格
     //   上浮（kSwimUp，连续非边沿）+ 钳最大下沉（防穿水底）。机制等价 MC 1.0 水中：减速 + 浮力 + 空格上浮。
     //   离水（脚位非水）走原重力 + 跳跃（spaceEdge && onGround）。waterMul 已乘水平速度（眼位在水中减速）。
@@ -2221,9 +2366,20 @@ void PlayerController::step(qreal dt)
     //   窒息（t160）/ 饥饿等后续照常推进（受困 → 扣血逼其挖出）。判据与 extrudeEmbedded「全包裹→不挤」同源，
     //   见 isLockedBuried。地面复探（下方 aabbHitsSolid）仍跑：被埋态 AABB 重叠 → onGround=true（被支撑），
     //   防误判坠落 / 摔伤。
-    if (isLockedBuried()) m_vel = QVector3D(0, 0, 0);
+    if (isLockedBuried()) { m_vel = QVector3D(0, 0, 0); m_knockback = QVector3D(0, 0, 0); }
+    // t296 受击击退冲量积分（仅走路模式；Spectator / Creative-飞 noclip 早 return 不至此）。m_knockback 与 m_vel
+    //   分离（m_vel.x/z 每 tick 被 wish 覆盖）。每帧：水平指数衰减 + 垂直受重力（小跳弧自然），衰减殆尽 → 整体清零。
+    //   叠入位移：delta = (m_vel + m_knockback) * dt（子步 / 防穿墙照常按合成位移算）。
+    if (m_knockback.x() != 0.0f || m_knockback.y() != 0.0f || m_knockback.z() != 0.0f) {
+        const float decay = std::max(0.0f, 1.0f - kHitKnockbackDrag * float(dt)); // 水平指数衰减（钳 ≥0 防 dt 过大翻负）
+        m_knockback.setX(m_knockback.x() * decay);
+        m_knockback.setZ(m_knockback.z() * decay);
+        m_knockback.setY(m_knockback.y() - kGravity * float(dt)); // 垂直受重力（与世界重力同值 → 小跳弧自然）
+        const float km = std::fabs(m_knockback.x()) + std::fabs(m_knockback.y()) + std::fabs(m_knockback.z());
+        if (km < 0.08f) m_knockback = QVector3D(0, 0, 0); // 衰减殆尽 → 清零（防浮点噪声永久残留）
+    }
     // 防穿墙：每子步任意轴移动 ≤0.4 格
-    QVector3D delta = m_vel * dt; // 锁定 → m_vel=0 → delta=0 → moveAxis 早退（无穿出机会）
+    QVector3D delta = (m_vel + m_knockback) * dt; // 锁定 → m_vel=m_knockback=0 → delta=0 → moveAxis 早退
     const float md = std::max({std::fabs(delta.x()), std::fabs(delta.y()), std::fabs(delta.z())});
     const int sub = std::max(1, int(std::ceil(md / 0.4f)));
     delta /= float(sub);
@@ -2284,6 +2440,8 @@ void PlayerController::step(qreal dt)
     if (aabbHitsSolid()) m_onGround = true;
     m_pos.setY(oy);
     if (m_onGround && m_vel.y() < 0) m_vel.setY(0);
+    // t296 击退小跳着地：向下分量被地面吸收（同 m_vel.y 着地归零），防重力持续累负致 m_knockback.y 滞留。
+    if (m_onGround && m_knockback.y() < 0.0f) m_knockback.setY(0.0f);
 
     // 掉落伤害（t22，仅 Survival）：滞空期间记录最高点 m_peakY，着地瞬间按 MC 1.0 公式
     // floor(落差-3) 结算（fall>3 才伤，每整格 1 HP = 半心）。上 tick 已着地 → 重置基准；

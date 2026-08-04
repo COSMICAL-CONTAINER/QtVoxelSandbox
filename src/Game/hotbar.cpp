@@ -174,7 +174,10 @@ QVariantList Hotbar::creativeTools() const
             int(ToolRegistry::HoeWood),      int(ToolRegistry::HoeStone),      int(ToolRegistry::HoeIron),
             int(ToolRegistry::AxeWood),      int(ToolRegistry::AxeStone),      int(ToolRegistry::AxeIron),
             int(ToolRegistry::ShovelWood),   int(ToolRegistry::ShovelStone),   int(ToolRegistry::ShovelIron),
-            int(ToolRegistry::SwordWood),    int(ToolRegistry::SwordStone),    int(ToolRegistry::SwordIron)};
+            int(ToolRegistry::SwordWood),    int(ToolRegistry::SwordStone),    int(ToolRegistry::SwordIron),
+            // t304 弓（远程武器）：归工具段（maxStack=1，有耐久 384），故入 creativeTools（非 creativeMaterials）。
+            //   拾取即满耐庋新弓；创造射箭不消耗耐久 / 箭（但仍需背包有箭才射得出，spec「需箭在背包」）。
+            int(ToolRegistry::Bow)};
 }
 
 // 创造调色板材料段（t114）：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃（材料段 id >= 0x200，
@@ -215,7 +218,15 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RawBeefId),       // 生牛肉：杀牛掉落（深红肉块）
         int(RecipeRegistry::LeatherId),       // 皮革：杀牛掉落（棕黄兽皮）
         int(RecipeRegistry::WoolId),          // 羊毛：杀羊掉落（白色绒毛团）
-        int(RecipeRegistry::DiamondId)        // t279 钻石：钻石矿挖掘掉落（需铁镐；机制等价 MC 1.0 钻石）
+        int(RecipeRegistry::DiamondId),       // t279 钻石：钻石矿挖掘掉落（需铁镐；机制等价 MC 1.0 钻石）
+        // t299 敌对 mob 死亡掉落物（杀骸骨 / 蹒跚者 / 蜘蛛产出；机制等价 MC 1.0 敌对生物掉落，纯原创自绘 MaterialIcon §9a）：
+        //   完成创造调色板一览 —— 生存时由敌对 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
+        //   可堆叠 64（走材料段默认 maxStack）；非方块 → 右键不放置（playercontroller selectedBlock 守 Air）。
+        int(RecipeRegistry::BoneId),          // 骨头：杀骸骨掉落（米白骨段 + 两端膨节）
+        int(RecipeRegistry::RottenFleshId),   // 腐肉：杀蹒跩者掉落（暗红腐块 + 绿斑霉点）
+        int(RecipeRegistry::StringId),        // 线：杀蜘蛛掉落（浅色缠绕线团）
+        // t304 箭（弓弹药）：材料段 0x21A，可堆叠 64。创造直接取用便于测试弓（仍需背包有箭才射得出）。
+        int(RecipeRegistry::ArrowId)          // 箭：弓弹药；铁锭+木棒+线合成 4 件（t304）
     };
 }
 
@@ -340,6 +351,10 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggStalkerId)  return QStringLiteral("生物蛋（潜行者）");
         if (blockId == RecipeRegistry::SpawnEggSpiderId)   return QStringLiteral("生物蛋（蜘蛛）");
         if (blockId == RecipeRegistry::DiamondId)       return QStringLiteral("钻石"); // t279 钻石矿挖掘掉落
+        // t299 敌对 mob 死亡掉落物：杀骸骨 / 蹒跚者 / 蜘蛛产出（机制等价 MC 1.0 敌对生物掉落，名称用通用词、零 MC 专名 §9）。
+        if (blockId == RecipeRegistry::BoneId)        return QStringLiteral("骨头"); // 杀骸骨掉落
+        if (blockId == RecipeRegistry::RottenFleshId) return QStringLiteral("腐肉"); // 杀蹒跚者掉落
+        if (blockId == RecipeRegistry::StringId)      return QStringLiteral("线");   // 杀蜘蛛掉落（弓 / 钓竿原料）
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
@@ -608,6 +623,13 @@ int Hotbar::maxStackSize(int id) const
 int Hotbar::toolMaxDurability(int id) const
 {
     return ToolRegistry::maxDurability(id);
+}
+
+// t304 弓箭最大伤害（满蓄力命中 HP；spec「弓伤害 tooltip」）。与 PlayerController::kBowMaxDamage 同源（命名常量
+//   在 Physics 层私有，此处给 QML 友好的访问器）。改一处须同步 PlayerController 弓蓄力伤害上界。
+int Hotbar::bowArrowMaxDamage() const
+{
+    return 6; // 满蓄力箭命中 6 HP（3 心）；蓄力 1..6 HP（机制等价 MC 1.0 弓伤害量级）。
 }
 
 // t263 消耗选中槽工具 1 点耐久（playercontroller 生存挖掘完成 / 锄耕地调用）。创造由 caller 不调（不消耗）。

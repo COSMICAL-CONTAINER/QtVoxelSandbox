@@ -139,6 +139,13 @@ public:
     //   kindAt==Arrow 走细长杆 Model + arrowYawAt/arrowPitchAt 定向。机制等价 MC 1.0 骷髅射箭（箭抛物 + 命中伤害）；
     //   名称 / 视觉全原创（§9 区隔，不照搬 MC 美术）。达 kCap → 跳过 + 告警（防溢出）。
     Q_INVOKABLE void spawnArrow(const QVector3D &origin, const QVector3D &vel);
+    // t304 玩家弓射出的箭（spec「松开射箭（抛物+伤害 mobs）」）：与 spawnArrow（骷髅射出，命中玩家）对称，
+    //   差异在 arrowFromPlayer=true（命中 mob 而非玩家）+ arrowDamage 由弓蓄力决定（1..6 HP，caller 传）。
+    //   命中 mob 走 damageEntity（扣血 + 红闪 + 归零 mobDied 死亡掉落）+ emit mobAttacked(mobType, false)
+    //   （呈现层 playMobHurt；同玩家近战 attackMob 路径）。机制等价 MC 1.0 玩家弓箭打怪（敌我判别由发射者定）。
+    //   origin = 玩家眼位 + 视线前移 0.5（防贴墙 spawn 入墙即没）；vel = 视线方向 × 蓄力速度（含抛物 vy）。
+    //   达 kCap → 跳过 + 告警（防溢出，同 spawnArrow）。
+    Q_INVOKABLE void spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
     //   emit entitiesChanged → count=0 → QML Repeater 清空 delegate。t256：同步清空槽位 free list +
     //   live 计数（slot 复用模型见 acquireSlot/releaseSlot）。
@@ -265,10 +272,12 @@ public:
 
 signals:
     void entitiesChanged(); // spawn / 推动位移 / 重力下落 / AI 行走 / 受击红闪 / 死亡移除 触发；驱动 count/revision + QML 绑定刷新
-    // t250 mob 环境 idle 叫声（牛叫/羊叫/猪叫）：tick 内 ambientTimer 周期倒计时（随机 8-16s）到 + 玩家
-    //   听者范围内 → emit mobAmbient(mobType)。mobType = 子类 id（0=通用 / 1=猪 / 2=牛 / 3=羊）→ 呈现层
-    //   （Main.qml）Connections 路由到 AudioManager.playMobAmbient 据 mobType 选 mob_idle clip（机制等价
-    //   MC 1.0 被动生物偶发 idle call；§9 原创）。分层（PLAN §2）：Entities 层发语义事件，呈现层只消费。
+    // t250 mob 环境 idle 叫声（被动 牛叫/羊叫/猪叫 + 敌对 idle）：tick 内 ambientTimer 周期倒计时（随机
+    //   8-16s）到 + 玩家听者范围内 → emit mobAmbient(mobType)。mobType = 子类 id（0=通用 / 1=猪 / 2=牛 /
+    //   3=羊 / 4=Shambler / 5=Bones / 6=Stalker / 7=Spider，全 8 子类均周期偶发叫 —— 敌对亦走此路径，非仅
+    //   被动）→ 呈现层（Main.qml）Connections 路由到 AudioManager.playMobAmbient 据 mobType 选 mob_idle
+    //   clip（t294：敌对 4-7 各有独立音色，旧兜底通用已补全；机制等价 MC 1.0 生物偶发 idle call；§9 原创，
+    //   零 MC 资产）。分层（PLAN §2）：Entities 层发语义事件，呈现层只消费。
     void mobAmbient(int mobType);
     // t250 mob 走路声：tick 内 walkPhase 每累积半步（π=一次脚落）+ 听者范围内 → emit mobStep(mobType,
     //   blockId=脚下方块 id)。mobType 当前保留语义对齐；blockId 供 AudioManager 按材质组选 step clip。
@@ -285,19 +294,35 @@ signals:
     //   牛:皮革+牛肉 / 羊:羊毛）→ 呈现层转发 ItemEntityManager.spawnItem（同 fallingBlockDropped 模式）。
     //   分层（PLAN §2）：Entities 层发语义事件，呈现层只消费，绝不反向写栅格。
     void mobDied(int x, int y, int z, int mobType);
-    // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：hostile mob（Shambler/Bones）在 aiHostile 内检测到玩家处于
-    //   攻击范围（XZ<=kAttackRange + 垂直同层）且攻击冷却（kAttackCooldown）到时发本信号。amount = 单次伤害 HP
-    //   （kAttackDamage=3，MC 简单难度僵尸）；mobType = 子类 id（Shambler/Bones）。呈现层（Main.qml）Connections 据它
-    //   路由到 PlayerState.takeDamage —— 仅 Survival 应用（Creative/Spectator 无伤跳过，机制等价 MC 创造/观察者无敌）；
-    //   同 fallDamageTaken→takeDamage 模式（Game/Entities 层发语义事件、呈现层只消费，PLAN §2 分层）。attackCooldown
-    //   由 EntityManager 自管（防同帧多 mob 连抽；mobType 供呈现层选攻击音 / 反馈）。
-    void mobAttackedPlayer(int amount, int mobType);
+    // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：hostile mob（Shambler/Bones/Spider）在 aiHostile 内检测到
+    //   玩家处于攻击范围（XZ<=kAttackRange + 垂直同层）且攻击冷却（kAttackCooldown）到时发本信号。amount = 单次伤害 HP
+    //   （kAttackDamage=3，MC 简单难度僵尸）；mobType = 子类 id（Shambler/Bones/Stalker/Spider）。呈现层（Main.qml）
+    //   Connections 据它路由到 PlayerState.takeDamage —— 仅 Survival 应用（Creative/Spectator 无伤跳过，机制等价 MC
+    //   创造/观察者无敌）；同 fallDamageTaken→takeDamage 模式（Game/Entities 层发语义事件、呈现层只消费，PLAN §2 分层）。
+    //   attackCooldown 由 EntityManager 自管（防同帧多 mob 连抽；mobType 供呈现层选攻击音 / 反馈）。
+    // t296 玩家受击击退方向（kbX,kbZ）= 欲把玩家推开的水平**单位**方向（XZ）：
+    //   - 近战（aiHostile attack）/ 爆炸（detonateStalker）：(玩家脚位 − mob 中心) XZ 归一 → 把玩家推开 mob。
+    //   - 箭（Arrow tick 命中）：箭飞行速度 (vx,vz) 归一 → 沿箭去向推玩家（机制等价 MC 箭动量传递）。
+    //   呈现层据它调 PlayerController.applyHitKnockback（仅 Survival 生效；创造/观察者无敌不弹）。零向量由 caller
+    //   兜底（mob 正上方等退化情形），此处不再归一。mobAttackedPlayer 经 t290 门控仅在玩家可锁定（Survival）时发，
+    //   故击退天然只作用于 Survival 玩家。
+    void mobAttackedPlayer(int amount, int mobType, float kbX, float kbZ);
     // t284 Stalker 爆炸（detonateStalker 内发）：坐标 = 爆炸中心格 floor(pos)。呈现层（Main.qml）Connections
     //   据它路由到 AudioManager.playExplosion（爆炸音）+ BlockParticles.burstExplosion（白色迸发视觉）。
     //   方块破坏走 setWaterSilent（直写 + worldChanged 重建 mesh，**不**发 blockBroken → 免每块破块粒子/音 spam），
     //   故本信号是爆炸的**唯一**音/视反馈入口（同 fallDamageTaken→takeDamage 语义事件模式；PLAN §2 分层）。
     //   玩家伤害复用 mobAttackedPlayer（Survival 门控应用 takeDamage）。
     void explosion(int x, int y, int z);
+    // t297 爆炸掉落（detonateStalker 内发，每破坏块按 kExplosionDropChance 概率）：坐标 = 被破坏方块格
+    //   floor，itemId = BlockRegistry::dropId(原方块)（Stone→Cobble 等，同玩家挖掘掉落，非原方块 id）。
+    //   呈现层（Main.qml）Connections 转发到 ItemEntityManager.spawnItem 生成掉落实体（机制等价 MC 爆炸
+    //   把被毁方块的物品弹出来；同 fallingBlockDropped 模式）。分层（PLAN §2）：Entities 层发语义事件，
+    //   呈现层只消费，绝不反向写栅格。
+    void explosionDroppedItem(int x, int y, int z, int itemId);
+    // t304 玩家箭命中 mob（spec「抛物+伤害 mobs」的命中反馈）：玩家弓射出的箭（spawnArrowPlayer）在 tick 内
+    //   命中 mob 时发。damageEntity 已扣血 + 红闪 + 归零 mobDied 死亡掉落；本信号额外驱动命中音（呈现层 →
+    //   AudioManager.playMobHurt，同近战 attackMob→PlayerController.mobAttacked 模式）。mobType = 被命中 mob 子类 id。
+    void arrowHitMob(int mobType);
 
 private:
     struct Entity {
@@ -308,8 +333,9 @@ private:
         bool alive = true;
         QVector3D pos;
         // t252 碰撞箱缩小：XZ 半宽（halfW）与 Y 半高（halfH）分离（旧版单一 radius=0.5 致所有 mob
-        //   碰撞感「整立方大」1×1×1）。按 mobType 设：MobTest 0.5/0.5（保 t95 旧路径）；pig/sheep
-        //   0.45/0.45（0.9×0.9）；cow 0.45/0.70（0.9×1.4，机制等价 MC 1.0 牛）。FallingBlock 0.5/0.5
+        //   碰撞感「整立方大」1×1×1）。t293 进一步收紧贴合 MobModel 身体（旧值「大一圈」）。按 mobType 设：
+        //   MobTest 0.5/0.5（保 t95 旧路径）；pig/sheep 0.40/0.45；cow 0.40/0.50；敌对（Shambler/Bones/
+        //   Stalker）0.30/0.90（机制等价 MC 1.0 敌对 0.6 宽）；spider 0.45/0.30。FallingBlock 0.5/0.5
         //   （1×1×1 立方，同地形方块外观）。findMobHit / resolvePlayerPush / mobAabbHitsSolid / aiWander /
         //   resting 均读它们（XZ 用 halfW、Y 用 halfH），不再共用单一 radius。
         float halfW = 0.5f;      // XZ 碰撞半宽（圆碰撞半径 + footprint 格扫 X/Z 范围）
@@ -329,6 +355,12 @@ private:
         //   arrowLife = 寿命倒计时（秒；tick Arrow 分支递减，<=0 或命中 / 越界 → releaseSlot 移除）。
         //   非 Arrow 实体 arrowLife=0 不读。
         float arrowLife = 0.0f;  // 箭寿命倒计时（秒；仅 kind==Arrow 用）
+        // t304 玩家射出的箭（spawnArrowPlayer）专用：arrowFromPlayer=true 的箭命中 **mob**（damageEntity +
+        //   mobAttacked 语义事件）；false（骷髅 spawnArrow 射出）命中 **玩家**（mobAttackedPlayer，t283 旧路径）。
+        //   机制等价 MC 1.0「玩家箭打怪、怪箭打玩家」（敌我判别由发射者决定，非箭本身阵营）。非 Arrow 默认 false。
+        //   arrowDamage = 本箭命中时造成的伤害 HP（骷髅箭恒 kArrowDamage=2；玩家箭由弓蓄力 1..6 决定，spawnArrowPlayer 传）。
+        bool arrowFromPlayer = false; // 是否玩家射出（命中目标分流：true→mob / false→玩家）
+        int arrowDamage = 0;          // 命中伤害（HP；仅 kind==Arrow 用；骷髅箭 = kArrowDamage）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
         int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；t280 Shambler/Bones；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
@@ -417,7 +449,9 @@ private:
     // t239 AI wander 自主移动（tick 内 Mob 分支调）：时间片倒计时到 → 随机选向 + idle/行走；行走按 yaw 逐轴
     //   （X 后 Z）世界边界 clamp + 方块碰撞撤回。返回是否真位移（驱动 dirty + moveSpeed）。worldW/worldD =
     //   世界宽/深（边界 clamp 防 mob 走出世界坠虚空）。
-    bool aiWander(Entity &e, float dt, World *world, float worldW, float worldD);
+    // speedScale：水平位移缩放（t298 水中减速；1.0 陆地、kWaterSpeedMul 水中）。透传给 mob 的水平移动，
+    //   使在水中时既减位移又同步降低 moveSpeed（t241 腿摆频率随 moveSpeed，故水中腿也变慢 = 视觉上「挣扎」）。
+    bool aiWander(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale = 1.0f);
     // t281 敌对生物 AI（detect→pathfind→attack 三段；tick 内 hostile Mob 分支调，替代 aiWander）。
     //   spec t281「敌对生物基类（AI/寻路）：detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）
     //   + attack」。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI；标识符 / 美术全原创（§9 区隔）。
@@ -430,7 +464,9 @@ private:
     //   返回是否真位移（驱动 dirty + moveSpeed）。worldW/worldD = 世界宽/深（边界 clamp 防 mob 走出世界）。
     //   playerPos = 玩家脚位（tick 的 listener = PlayerController::m_pos）。分层（PLAN §2）：只读 World::isSolid +
     //   自身数据；attack 走语义信号（mobAttackedPlayer）让呈现层路由到 PlayerState（同 fallDamageTaken 模式）。
-    bool aiHostile(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD);
+    // speedScale 见 aiWander（t298 水中减速；追踪速度 / 内部回退 wander 一并缩放）。
+    bool aiHostile(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
+                   float speedScale = 1.0f);
     // t283 骷髅弓箭手 AI（detect→keep-distance→shoot 三段；tick 内 hostile mob 且 mobType==MobBones 分支调，
     //   替代 aiHostile 的近战 attack）。spec t283「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」。
     //   机制对齐 MC 1.0 骷髅射手：检测玩家 → 在 [kArcherKeepMin, kArcherKeepMax] 距离带维持（近则退 / 远则进）→
@@ -445,7 +481,8 @@ private:
     //   返回是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。playerPos = 玩家脚位（tick 的 listener）。
     //   分层（PLAN §2）：只读 World::isSolid + 自身数据；shoot 走 spawnArrow（箭实体）+ 命中由 Arrow 分支发
     //   mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile 的 attack 模式）。
-    bool aiArcher(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD);
+    bool aiArcher(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
+                  float speedScale = 1.0f);
     // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI（detect→chase→fuse→detonate；tick 内 hostile mob 且
     //   mobType==MobStalker 分支调，替代 aiHostile/aiArcher）。spec t284「近距蓄力膨胀动画 → 爆炸」。
     //   机制对齐 MC 1.0 苦力怕：检测玩家 → 缓慢逼近 → 进 kFuseRange 开始蓄力（站立不动 + 膨胀，机制等价 MC
@@ -461,7 +498,8 @@ private:
     //   返回是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。playerPos = 玩家脚位（tick 的 listener）。
     //   分层（PLAN §2）：只读 World::isSolid/blockAt + 自身数据；爆炸破坏方块走 World::setWaterSilent（向下
     //   写栅格 + worldChanged 重建 mesh）；伤害玩家走 mobAttackedPlayer 语义信号（呈现层路由 PlayerState）。
-    bool aiStalker(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD);
+    bool aiStalker(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
+                   float speedScale = 1.0f);
     // t284 Stalker 爆炸（aiStalker fuse 满时调）：以 e.pos 为中心、kExplosionRadius 为半径的球内破坏方块
     //   （setWaterSilent 写 Air，跳过 Bedrock / Water / Air）+ 距离衰减伤害玩家（emit mobAttackedPlayer）+
     //   emit explosion（呈现层播爆炸音 / 迸发）+ 标 e.exploded=true（tick 当帧移除）。机制等价 MC 苦力怕爆炸。
@@ -626,6 +664,22 @@ private:
     static constexpr float kFuseTime            = 1.5f;  // 蓄力到引爆的时长（秒；MC 苦力怕 ~1.5s）
     static constexpr float kExplosionRadius     = 3.0f;  // 球形爆炸半径（blocks）
     static constexpr int   kExplosionDamageMax  = 24;    // 贴脸爆炸伤害（HP；随距离线性衰减到 0）
+    // t297 爆炸掉落：每个被爆炸破坏的方块以此概率掉落其物品实体（机制等价 MC 爆炸弹毁方块掉物；
+    //   spec「~50% 成掉落物」）。掉落 id 走 BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落）。
+    static constexpr float kExplosionDropChance = 0.5f;  // 破坏块掉落概率（~50%；MC 实为 1/radius≈33%，spec 取 50%）
+    // t298 怪物受水流影响（spec「怪在水中正常走（错）→减速/浮（同玩家水中物理）」；机制等价玩家水中物理
+    //   t174 浮力缓沉 + t159 水下减速 + t211 流水推动 —— mobs 不按空格故无 kSwimUp 上浮，仅被动缓沉）。
+    //   数值与玩家同源（PlayerController kUnderwaterSpeedMul/kWaterGravity/kWaterSinkMax/kWaterFlowPush），保世界
+    //   手感一致；非 MC 精确复刻（PLAN §4「机制对标」非数值 1:1）。分层（PLAN §2）：Entities 层只读
+    //   World::blockAt/stateAt（脚位格是否水 / 流水 state），写自身实体态；无向上依赖。
+    //   - kWaterSpeedMul：水中水平速度倍数（脚位在水格 → AI 行走 / 追踪位移 ×此值）。0.4 = 陆地的 40%。
+    //   - kWaterGravity：水中等效重力（缓沉；远小于 kGravity=28 → mob 在水中缓慢下沉而非自由落体）。
+    //   - kWaterSinkMax：水中最大下沉速度（钳制，防加速穿水底；远小于 kMaxFall=78.4）。
+    //   - kWaterFlowPush：流水水平推力速度（脚位在流水格 state>0 时沿离源方向叠入水平位移，同玩家 t211）。
+    static constexpr float kWaterSpeedMul = 0.4f;  // 水中水平速度倍数（同玩家 kUnderwaterSpeedMul）
+    static constexpr float kWaterGravity  = 6.0f;  // 水中重力（缓沉；同玩家 kWaterGravity ≈ kGravity×0.21）
+    static constexpr float kWaterSinkMax  = 3.0f;  // 水中最大下沉速度（钳制；同玩家 kWaterSinkMax）
+    static constexpr float kWaterFlowPush = 4.0f;  // 流水水平推力（blocks/s；同玩家 kWaterFlowPush）
 };
 
 #endif // ENTITYMANAGER_H

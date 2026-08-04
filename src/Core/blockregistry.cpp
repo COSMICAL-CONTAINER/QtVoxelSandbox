@@ -107,6 +107,12 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   Core 不依赖 Game 故用字面量 0x212）、dropCount=1、maxStack=64。各面贴图=diamond_ore(37)（石头底 + 青白菱斑晶体，
     //   原创自绘 §9a）。音色归 GroupStone（石质，同 coal/iron 矿石）。worldgen 高度分层散布于深层 y∈[5,16]（煤浅/铁中/钻石深）。
     /* diamond_ore   */ {int(BlockRegistry::DiamondOre),            37, 37, 37, 37, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,  0x212,                              1, 64, "diamond_ore",   "钻石矿石"}, // 各面=diamond_ore(37)（t279）；散布于 stone 深层 y∈[5,16]；需铁镐(minTier3)；掉钻石材料(0x212)
+    // ── t300 羊毛方块（Wool）：机制等价 MC 1.0 羊毛（wool）。整立方 opaque（solid=true / ShapeFull —— 走 mesher
+    //   整立方面路径，**非**异形，与 chest/farmland 同走段后整立方路径）、hardness=0.8（同 MC 1.0 羊毛量级）、
+    //   toolType=Shears（剪刀给速度加成；requiresTool=false → 空手也掉落，仅速度受剪刀影响）、dropId=自身
+    //   （破块掉羊毛方块，可放置）、dropCount=1、maxStack=64。各面贴图=wool(38)（奶白羊毛底 + 浅灰卷曲绒毛纹）。
+    //   音色归 GroupWood（软质闷击，最接近 MC 羊毛 cloth SoundType）。
+    /* wool         */ {int(BlockRegistry::Wool),                   38, 38, 38, 38, true,  BlockRegistry::ShapeFull,     0.8f, int(BlockRegistry::Shears),  0, false, int(BlockRegistry::Wool),           1, 64, "wool",          "羊毛"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。

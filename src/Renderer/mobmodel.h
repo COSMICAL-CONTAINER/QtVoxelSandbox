@@ -18,6 +18,10 @@
 //   4 = Shambler（蹒跚者；t282）：方块化**人形**（躯干 + 头 + 双臂前伸 + 双腿），机制等价 MC 1.0 僵尸；
 //     名称 / 模型 / 贴图全原创（PLAN §9 区隔 Zombie→Shambler）。双臂前伸固定（僵尸经典攻击姿态），
 //     双腿绕髋做 biped walk cycle（左右反相，非四足对角），walkPhase 驱动。
+//   7 = Spider（蜘蛛；t285/t302）：宽矮躯干 + 前伸小头 + **8 腿**（4 对沿躯干 Z 分布，机制等价 MC 1.0 蜘蛛
+//     8 腿爬行；t285 原「简化 4 腿」升级为 t302 八腿 + Z 轴步态）。腿绕躯干侧面髋枢做 Z 轴旋转（外端抬起 =
+//     步态），walkPhase 驱动 tetrapod 交替步态（前后对同相、中两对反相）。眼由 Main.qml delegate 补（4 颗红眼
+//     纯色子 Model）；声音走 AudioManager.playMobAmbient/playMobHurt(mobType=7) → mob_idle_spider。
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
 //
 // 顶点格式：pos(3) + uv(2) = 5 float。每盒 6 面 × 4 角 = 24 顶点 / 36 索引；多盒累加。

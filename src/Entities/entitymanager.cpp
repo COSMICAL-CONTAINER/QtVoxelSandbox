@@ -21,7 +21,7 @@ Q_LOGGING_CATEGORY(lcEnt, "vo.entity") // 模块化日志（PLAN §2-F）；未�
 // t239 复用于 AI wander 水平碰撞（同 player move-and-resolve 逐轴撤回）：mob 按 yaw 行走时，逐轴
 // （X 后 Z）试探新位置 → 任一部分触墙即撤回该轴 → mob 贴墙滑动不穿入。Y 范围用 mob 当前 pos.y
 // （resting 后稳定，扫到的是身体高度处的墙，非脚下地面）。
-// t252：AABB 的 XZ 用 halfW、Y 用 halfH（cow 0.45×0.70×0.45 等非立方 footprint；旧版单一 r 致 cow
+// t252：AABB 的 XZ 用 halfW、Y 用 halfH（cow 0.40×0.50×0.40 等非立方 footprint；旧版单一 r 致 cow
 //   垂直范围同 XZ，碰撞感失真）。
 bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, float halfH)
 {
@@ -37,6 +37,17 @@ bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, f
             for (int x = x0; x <= x1; ++x)
                 if (world->isSolid(x, y, z)) return true;
     return false;
+}
+
+// t298 mob 脚位（AABB 底面所在格）是否为水 —— 同玩家 PlayerController::feetInWater 语义（机制等价 MC
+//   「脚在水里即受水中物理」）。feetCellY = floor(cy − halfH)（mob 底面格；pos.y 是中心，底面 = 中心−halfH）。
+//   只读 World::blockAt；越界（fy<0）/ 无世界 → false。用于 tick 内判「mob 在水中」→ 减速 + 浮力 + 流水推动。
+bool mobFeetInWater(World *world, float cx, float cy, float cz, float halfH)
+{
+    if (!world) return false;
+    const int fy = int(std::floor(cy - halfH));
+    if (fy < 0) return false;
+    return world->blockAt(int(std::floor(cx)), fy, int(std::floor(cz))) == BlockRegistry::Water;
 }
 } // namespace
 
@@ -57,19 +68,23 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
         return;
     }
     Entity e;
-    // t252 碰撞箱按 mobType 设（pig/sheep 0.9×0.9、cow 0.9×1.4；MobTest 保 1×1×1）。机制对齐 MC 1.0
-    //   passive mob（猪 0.9×0.9 / 牛 0.9×1.4）；标识符 / 模型全原创（§9 区隔，不照搬 MC 美术）。
-    //   t280 Shambler/Bones 走 1×1×1（机制等价 MC 1.0 僵尸 / 骷髅玩家尺寸；QML 走 UnitCube 单色原创几何，
-    //   非照搬 MC 美术）。hostile 标志据 mobType 设（spawnHostileMob 入口已设，spawnMobTyped 兜底也判一次）。
+    // t252/t293 碰撞箱按 mobType 设。t293 收紧贴合 MobModel 身体（旧值「大一圈」：被动 0.9 宽 vs 躯干 0.6~0.7、
+    //   敌对 0.9 宽 vs MC 0.6 / 身体 0.4~0.8、牛 1.4 高 vs 身体 0.87）。现按「MobModel 实际身体半宽 + 小余量」
+    //   取值：敌对 halfW=0.30（机制等价 MC 1.0 僵尸 / 骷髅 / 苦力怕 0.6 宽——手臂略超盒属 MC 风格，hitbox 只包
+    //   躯干核心）；被动 halfW=0.40（躯干 0.6~0.7 + 余量，头 / 长身可能略超 Z 盒，同 MC 四足 hitbox 不含吻部）；
+    //   牛 halfH 0.70→0.50（身体 0.87 高，旧 1.4 偏大）；其余 halfH 不变（已贴合：人形 1.8 = MC 玩家身高、
+    //   spider 0.6）。mobModelYOff = modelLegBottom − halfH 自动随 halfH 调（腿底恒贴 collision 底面，免悬空）。
+    //   标识符 / 模型全原创（§9 区隔，不照搬 MC 美术）。hostile 标志据 mobType 设（spawnHostileMob 入口已设，
+    //   spawnMobTyped 兜底也判一次）。
     switch (mobType) {
-        case MobPig:      e.halfW = 0.45f; e.halfH = 0.45f; break; // 0.9×0.9
-        case MobCow:      e.halfW = 0.45f; e.halfH = 0.70f; break; // 0.9×1.4（机制等价 MC 1.0 牛）
-        case MobSheep:    e.halfW = 0.45f; e.halfH = 0.45f; break; // 0.9×0.9
-        case MobShambler: e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 僵尸玩家身高）
-        case MobBones:    e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 骷髅玩家身高）
-        case MobStalker:  e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 苦力怕玩家身高；t284）
-        case MobSpider:   e.halfW = 0.55f; e.halfH = 0.30f; e.hostile = true; break; // 1.1×0.6 宽矮（机制等价 MC 蜘蛛；快速，t285）
-        default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（保 t95 旧路径）
+        case MobPig:      e.halfW = 0.40f; e.halfH = 0.45f; break; // 0.8×0.9（躯干 0.7 宽 + 余量；旧 0.9 偏大）
+        case MobCow:      e.halfW = 0.40f; e.halfH = 0.50f; break; // 0.8×1.0（躯干 0.64 宽 / 身体 0.87 高；旧 0.9×1.4 偏大一圈）
+        case MobSheep:    e.halfW = 0.40f; e.halfH = 0.45f; break; // 0.8×0.9（躯干 0.6 宽 + 余量；旧 0.9 偏大）
+        case MobShambler: e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 僵尸 0.6 宽；旧 0.9 偏大）
+        case MobBones:    e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 骷髅 0.6 宽；旧 0.9 偏大）
+        case MobStalker:  e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 苦力怕 0.6 宽；旧 0.9 偏大一圈；t284）
+        case MobSpider:   e.halfW = 0.45f; e.halfH = 0.30f; e.hostile = true; break; // 0.9×0.6 宽矮（躯干 0.8 宽 + 余量；旧 1.1 偏大；快速，t285）
+        default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
     //   免首帧 collision 底面嵌入地面再 snap（cow halfH=0.70 时旧 +0.5 会嵌 0.2 进支撑方块）。
@@ -147,6 +162,31 @@ void EntityManager::spawnArrow(const QVector3D &origin, const QVector3D &vel)
     e.vz = vel.z();
     e.arrowLife = kArrowLifetime;
     acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    ++m_revision;
+    emit entitiesChanged();
+}
+
+// t304 玩家弓射出的箭：与 spawnArrow（骷髅射出，命中玩家 t283）对称，差异在 arrowFromPlayer=true（命中 mob）+
+//   arrowDamage 由蓄力决定（1..6）。tick Arrow 分支据 arrowFromPlayer 分流命中目标（true→mob / false→玩家）。
+void EntityManager::spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); player arrow spawn skipped at" << origin;
+        return;
+    }
+    Entity e;
+    e.pos = origin;
+    e.halfW = 0.06f; // 同 spawnArrow（细长杆视觉 + 碰撞最小）
+    e.halfH = 0.06f;
+    e.pushable = false;
+    e.kind = Arrow;
+    e.vx = vel.x();
+    e.vy = vel.y();
+    e.vz = vel.z();
+    e.arrowLife = kArrowLifetime;
+    e.arrowFromPlayer = true;                  // 命中 mob（非玩家）
+    e.arrowDamage = damage > 0 ? damage : 1;   // 蓄力伤害（防御 ≥1）
+    acquireSlot(std::move(e));
     ++m_revision;
     emit entitiesChanged();
 }
@@ -543,7 +583,7 @@ int EntityManager::findMobHit(const QVector3D &origin, const QVector3D &dir, flo
         // Slab 法 ray-AABB：对每轴 t1 = (min - origin) / dir、t2 = (max - origin) / dir；tmin = max(per-axis near)、
         //   tmax = min(per-axis far)；命中 ⟺ tmax >= tmin && tmax >= 0 && tmin <= maxDist。
         //   dir 分量近 0 时该轴 slab 退化为「整轴在内」约束（origin ∈ [min,max] → -inf..+inf，否则永不命中）。
-        //   t252：AABB 非立方 —— X/Z 用 halfW、Y 用 halfH（cow 0.45×0.70×0.45；旧版单一 r 致 hitbox 选体
+        //   t252：AABB 非立方 —— X/Z 用 halfW、Y 用 halfH（cow 0.40×0.50×0.40；旧版单一 r 致 hitbox 选体
         //   与实际碰撞箱不符：打牛头 / 牛背高处按 1×1 误判命中、实际碰撞箱更高）。
         const float ext[3] = { e.halfW, e.halfH, e.halfW }; // k=0(X)/2(Z)=halfW、k=1(Y)=halfH
         float tmin = 0.0f, tmax = bestDist; // 起步用 [0, bestDist]，逐轴收紧
@@ -617,7 +657,7 @@ void EntityManager::knockback(int i, float dirX, float dirZ)
 //     + 方块碰撞撤回（mobAabbHitsSolid 全格扫，仿 player move-and-resolve 贴墙滑动不穿入）。
 //   - 撞墙（两轴都未动）→ 缩短 wanderTimer（≤0.2s）下帧大概率换向离开墙角，避免一直顶墙。
 //   返回是否真位移（驱动 dirty + moveSpeed）。moveSpeed = 行走速度（撞墙/idle=0）供 t241 腿摆。
-bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, float worldD)
+bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale)
 {
     // 时间片倒计时 → 选新向（随机 yaw + idle/行走 + 重置 timer）。
     e.wanderTimer -= dt;
@@ -638,8 +678,10 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
     }
 
     // 行走：按 yaw 算水平位移（dir = (-sin,0,-cos)，与 player wishHoriz 同 yaw 约定）。
-    const float dx = -std::sin(e.yawRad) * e.wanderSpeed * dt;
-    const float dz = -std::cos(e.yawRad) * e.wanderSpeed * dt;
+    //   t298：spd = wanderSpeed × speedScale（水中 speedScale=kWaterSpeedMul<1 → 位移 + 腿摆频率同步降）。
+    const float spd = e.wanderSpeed * speedScale;
+    const float dx = -std::sin(e.yawRad) * spd * dt;
+    const float dz = -std::cos(e.yawRad) * spd * dt;
     const float ehw = e.halfW; // XZ 半宽（边界 clamp + 圆碰撞）
     const float ehh = e.halfH; // Y 半高（footprint 格扫 Y 范围）
 
@@ -659,7 +701,7 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
     if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
     if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
 
-    e.moveSpeed = moved ? e.wanderSpeed : 0.0f; // 撞墙 → 腿停（moveSpeed=0），t241 腿摆频率随它
+    e.moveSpeed = moved ? spd : 0.0f; // 撞墙 → 腿停（moveSpeed=0），t241 腿摆频率随它（t298 水中 spd 已含减速）
 
     // 撞墙（两轴都未动）→ 缩短 timer 下帧大概率换向离开墙角（避免一直顶墙原地不动）。
     if (!moved) e.wanderTimer = std::min(e.wanderTimer, 0.2f);
@@ -672,7 +714,7 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
 //   平地 / 1 格台阶 / 树根 / 矮墙均能通过；复杂洞穴几何会卡墙，作为基类可接受，留给后续寻路增强）。
 //   分层（PLAN §2）：只读 World::isSolid + 自身数据；attack 走语义信号 mobAttackedPlayer（呈现层路由 PlayerState）。
 bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D &playerPos,
-                              float worldW, float worldD)
+                              float worldW, float worldD, float speedScale)
 {
     // 攻击冷却递减（不论追踪与否；自然走完，复击不卡陈旧值）。钳到 0。
     if (e.attackCooldown > 0.0f) {
@@ -697,7 +739,7 @@ bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D
 
     // (2) 非追踪 → 回退到 wander（随机游荡，同 passive；mobType 非 sheep 故不吃草分支，纯游荡）。
     if (!e.chasing) {
-        return aiWander(e, dt, world, worldW, worldD);
+        return aiWander(e, dt, world, worldW, worldD, speedScale); // t298 透传水中减速
     }
 
     // (3) 追踪：朝玩家走 + 越障跳。yaw 朝玩家（与 aiWander / player 同 yaw 约定：dir = (-sin,0,-cos)，
@@ -705,7 +747,9 @@ bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D
     if (distXZ > 1e-4f) {
         e.yawRad = std::atan2(-dx, -dz);
     }
-    e.wanderSpeed = kChaseSpeed; // 供 walkPhase 动画频率 + 语义（行走态）
+    e.wanderSpeed = kChaseSpeed; // 供 walkPhase 动画频率 + 语义（行走态；raw 值，水中减速不写入此字段避免下游二次缩放）
+    // t298 水中减速：chaseSpd = kChaseSpeed × speedScale（位移 + moveSpeed 用 it；wanderSpeed 保 raw）。
+    const float chaseSpd = kChaseSpeed * speedScale;
 
     // 越障跳：resting（贴地）+ 前方脚位格是 1 格墙（实体）+ 墙顶两格空气（可落 + 头可容，mob ~1.8 高）→ 跳。
     //   不跳的情况：前方无墙（平地直走）/ 墙 ≥2 格（跳不过，正确不跳避免原地蹦）/ 已在空中（resting=false 跳过）。
@@ -733,25 +777,30 @@ bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D
         const float nx = dx / distXZ;
         const float nz = dz / distXZ;
         // X 轴：世界边界 clamp + 方块碰撞撤回。
-        float newX = e.pos.x() + nx * kChaseSpeed * dt;
+        float newX = e.pos.x() + nx * chaseSpd * dt;
         if (newX < ehw) newX = ehw;
         if (newX > worldW - ehw) newX = worldW - ehw;
         if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
         // Z 轴：参照可能已撤回的 newX（两轴顺序敏感）。
-        float newZ = e.pos.z() + nz * kChaseSpeed * dt;
+        float newZ = e.pos.z() + nz * chaseSpd * dt;
         if (newZ < ehw) newZ = ehw;
         if (newZ > worldD - ehw) newZ = worldD - ehw;
         if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
         if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
         if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
     }
-    e.moveSpeed = moved ? kChaseSpeed : 0.0f; // 撞墙 → 腿停（moveSpeed=0），但仍在追踪，下帧重试 / 已跳
+    e.moveSpeed = moved ? chaseSpd : 0.0f; // 撞墙 → 腿停（moveSpeed=0），但仍在追踪，下帧重试 / 已跳（t298 含水中减速）
 
     // (4) attack：XZ <= kAttackRange + 垂直同层（|dy|<=kAttackVertRange）+ 冷却到 → emit mobAttackedPlayer + 重置冷却。
     //   垂直门控防跨层隔空打（玩家在 mob 头顶 / 脚下不命中）。emit 走语义信号，呈现层据 Survival 门控应用伤害。
+    //   t296 击退方向 = (玩家 − mob) XZ 归一（把玩家推开 mob）；distXZ 极小（贴脸重合）→ 朝 mob 朝向兜底（yaw 约定
+    //     dir=(-sin,-cos)），防零向量。dx/dz/distXZ 已在 (1) 前算好。
     if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange && e.attackCooldown <= 0.0f) {
         e.attackCooldown = kAttackCooldown;
-        emit mobAttackedPlayer(kAttackDamage, e.mobType);
+        float kbX, kbZ;
+        if (distXZ > 1e-3f) { kbX = dx / distXZ; kbZ = dz / distXZ; }
+        else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); } // 兜底：朝 mob 面朝方向（= 推开）
+        emit mobAttackedPlayer(kAttackDamage, e.mobType, kbX, kbZ);
         qCInfo(lcEnt) << "hostile mob" << e.mobType << "attacked player for" << kAttackDamage << "HP";
     }
 
@@ -762,7 +811,7 @@ bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D
 //   分层（PLAN §2）：只读 World::isSolid + 自身数据；shoot 走 spawnArrow（箭实体），命中由 Arrow tick 分支
 //   发 mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile attack 模式）。
 bool EntityManager::aiArcher(Entity &e, float dt, World *world, const QVector3D &playerPos,
-                             float worldW, float worldD)
+                             float worldW, float worldD, float speedScale)
 {
     // 攻击（射箭）冷却递减（不论追踪与否；自然走完，复射不卡陈旧值）。钳到 0。
     if (e.attackCooldown > 0.0f) {
@@ -785,12 +834,14 @@ bool EntityManager::aiArcher(Entity &e, float dt, World *world, const QVector3D 
     }
     if (!e.chasing) {
         // 非追踪 → 回退 wander（随机游荡；mobType 非 sheep 不吃草，纯游荡）。
-        return aiWander(e, dt, world, worldW, worldD);
+        return aiWander(e, dt, world, worldW, worldD, speedScale); // t298 透传水中减速
     }
 
     // (2) 朝向玩家（射箭方向 + 行走方向；dir=(-sin,0,-cos) 同 player/aiHostile yaw 约定）。
     if (distXZ > 1e-4f) e.yawRad = std::atan2(-dx, -dz);
-    e.wanderSpeed = kChaseSpeed; // 供 walkPhase 腿摆频率 + 语义（行走态）
+    e.wanderSpeed = kChaseSpeed; // 供 walkPhase 腿摆频率 + 语义（行走态；raw 值，水中减速不写入避免二次缩放）
+    // t298 水中减速：chaseSpd = kChaseSpeed × speedScale（位移 + moveSpeed 用 it）。
+    const float chaseSpd = kChaseSpeed * speedScale;
 
     // (3) 保持距离：近于 kArcherKeepMin → 朝远离走；远于 kArcherKeepMax → 朝玩家走；其间 → 原地（仅朝向）。
     //   moveDirX/Z = 水平移动单位向量（朝向「期望远离 / 接近」方向）。wantMove=false 表示在保持带内 → 不水平位移。
@@ -830,18 +881,18 @@ bool EntityManager::aiArcher(Entity &e, float dt, World *world, const QVector3D 
     if (wantMove) {
         const float ehw = e.halfW;
         const float ehh = e.halfH;
-        float newX = e.pos.x() + moveDirX * kChaseSpeed * dt;
+        float newX = e.pos.x() + moveDirX * chaseSpd * dt;
         if (newX < ehw) newX = ehw;
         if (newX > worldW - ehw) newX = worldW - ehw;
         if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
-        float newZ = e.pos.z() + moveDirZ * kChaseSpeed * dt;
+        float newZ = e.pos.z() + moveDirZ * chaseSpd * dt;
         if (newZ < ehw) newZ = ehw;
         if (newZ > worldD - ehw) newZ = worldD - ehw;
         if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
         if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
         if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
     }
-    e.moveSpeed = moved ? kChaseSpeed : 0.0f; // 撞墙 / 保持带内 → 腿停（walkPhase 冻结）
+    e.moveSpeed = moved ? chaseSpd : 0.0f; // 撞墙 / 保持带内 → 腿停（walkPhase 冻结；t298 含水中减速）
 
     // (5) shoot：射程内 + 垂直同层 + 视线清 + 冷却到 → 解抛物初速射箭 + 重置冷却（防每帧连发）。
     if (distXZ <= kArcherShootRange && std::abs(dy) <= kShootVertRange && e.attackCooldown <= 0.0f) {
@@ -913,7 +964,7 @@ void EntityManager::fireArrow(const Entity &shooter, const QVector3D &target)
 //   分层（PLAN §2）：只读 World::isSolid/blockAt + 自身数据；爆炸破坏方块走 setWaterSilent、伤害玩家走
 //   mobAttackedPlayer 语义信号（呈现层路由 PlayerState），同 aiHostile attack / aiArcher shoot 模式。
 bool EntityManager::aiStalker(Entity &e, float dt, World *world, const QVector3D &playerPos,
-                              float worldW, float worldD)
+                              float worldW, float worldD, float speedScale)
 {
     const float dx = playerPos.x() - e.pos.x();
     const float dz = playerPos.z() - e.pos.z();
@@ -961,11 +1012,13 @@ bool EntityManager::aiStalker(Entity &e, float dt, World *world, const QVector3D
 
     // 非追踪 → 回退 wander（随机游荡；mobType 非 sheep 不吃草，纯游荡）。
     if (!e.chasing) {
-        return aiWander(e, dt, world, worldW, worldD);
+        return aiWander(e, dt, world, worldW, worldD, speedScale); // t298 透传水中减速
     }
 
     // (3) 追踪但未蓄力：缓慢朝玩家走（kStalkerChaseSpeed）+ 越障跳（同 aiHostile）。
-    e.wanderSpeed = kStalkerChaseSpeed; // 供 walkPhase 腿摆频率 + 语义（行走态）
+    e.wanderSpeed = kStalkerChaseSpeed; // 供 walkPhase 腿摆频率 + 语义（行走态；raw 值，水中减速不写入避免二次缩放）
+    // t298 水中减速：stalkerSpd = kStalkerChaseSpeed × speedScale（位移 + moveSpeed 用 it）。
+    const float stalkerSpd = kStalkerChaseSpeed * speedScale;
     if (e.resting && world) {
         const float fdx = -std::sin(e.yawRad);
         const float fdz = -std::cos(e.yawRad);
@@ -986,18 +1039,18 @@ bool EntityManager::aiStalker(Entity &e, float dt, World *world, const QVector3D
         const float ehh = e.halfH;
         const float nx = dx / distXZ;
         const float nz = dz / distXZ;
-        float newX = e.pos.x() + nx * kStalkerChaseSpeed * dt;
+        float newX = e.pos.x() + nx * stalkerSpd * dt;
         if (newX < ehw) newX = ehw;
         if (newX > worldW - ehw) newX = worldW - ehw;
         if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
-        float newZ = e.pos.z() + nz * kStalkerChaseSpeed * dt;
+        float newZ = e.pos.z() + nz * stalkerSpd * dt;
         if (newZ < ehw) newZ = ehw;
         if (newZ > worldD - ehw) newZ = worldD - ehw;
         if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
         if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
         if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
     }
-    e.moveSpeed = moved ? kStalkerChaseSpeed : 0.0f;
+    e.moveSpeed = moved ? stalkerSpd : 0.0f; // t298 含水中减速
     return moved;
 }
 
@@ -1017,7 +1070,11 @@ void EntityManager::detonateStalker(Entity &e, World *world, const QVector3D &pl
     //   跳过 Air（无操作）/ Bedrock（不可破坏）/ Water（不抽干，机制等价 MC 爆炸不毁水体）。走 setWaterSilent
     //   （直写 + worldChanged 重建 mesh，**不**发 blockBroken → 免球形内每块破块粒子 / 音 spam —— 爆炸的音 / 视
     //   反馈由下方 explosion 信号单一入口驱动）。每块 O(1)；半径 3 → 7³=343 格 worst case，可接受（一次性事件）。
-    if (world) {
+    //   t297 水中不破坏方块：爆炸中心格（cx0,cy0,cz0 = Stalker 身体中心格；halfH=0.9 使 cy0 落在脚位 / 浅水时
+    //     即水格）为 Water → 水吸收爆炸（机制等价 MC 爆炸射线遇液体即灭 → 不毁地形），整段球形破坏跳过。
+    //     玩家伤害 / 音 / 视反馈照发（水中爆炸仍伤玩家、仍有爆炸声 / 迸发，仅地形无损，机制等价 MC）。
+    const bool originInWater = world && world->blockAt(cx0, cy0, cz0) == BlockRegistry::Water;
+    if (world && !originInWater) {
         const int r = int(std::ceil(kExplosionRadius));
         const float r2 = kExplosionRadius * kExplosionRadius;
         for (int dz = -r; dz <= r; ++dz) {
@@ -1031,6 +1088,14 @@ void EntityManager::detonateStalker(Entity &e, World *world, const QVector3D &pl
                     if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water)
                         continue; // 空气 / 基岩 / 水不破坏
                     world->setWaterSilent(bx, by, bz, BlockRegistry::Air, 0);
+                    // t297 爆炸掉落（~50% / 破坏块）：取 BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落，
+                    //   非原方块 id）→ 概率门控（kExplosionDropChance）→ emit explosionDroppedItem → 呈现层
+                    //   转发 ItemEntityManager.spawnItem 在该格生成掉落实体（机制等价 MC 爆炸把被毁方块弹成物品）。
+                    //   dropId<=0（如 leaves 默认 0 / 矿石须冶炼类）→ 不掉。用 QRandomGenerator（玩家交互掉落
+                    //   的随机性，非 worldgen 确定性范畴 §2-K）。
+                    const int dropItemId = BlockRegistry::dropId(b);
+                    if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
+                        emit explosionDroppedItem(bx, by, bz, dropItemId);
                 }
             }
         }
@@ -1051,7 +1116,17 @@ void EntityManager::detonateStalker(Entity &e, World *world, const QVector3D &pl
             if (dmg < 1) dmg = 1; // 半径内 → 至少 1HP（机制等价 MC 爆炸半径内必有伤害）
         }
     }
-    if (dmg > 0) emit mobAttackedPlayer(dmg, int(MobStalker));
+    // t296 爆炸击退方向 = (玩家 − 爆炸中心) XZ 归一（把玩家炸离 Stalker；机制等价 MC 苦力怕爆炸把玩家推飞）。
+    //   用玩家脚位 − 爆炸中心水平向量；退化（玩家恰在爆炸中心正上 / 下）→ 朝 +X 兜底。
+    if (dmg > 0) {
+        float kbX = 0.0f, kbZ = 0.0f;
+        const float dxh = playerPos.x() - ex;
+        const float dzh = playerPos.z() - ez;
+        const float phlen = std::sqrt(dxh * dxh + dzh * dzh);
+        if (phlen > 1e-3f) { kbX = dxh / phlen; kbZ = dzh / phlen; }
+        else { kbX = 1.0f; } // 兜底：水平重合 → 朝 +X 推（任意非零向）
+        emit mobAttackedPlayer(dmg, int(MobStalker), kbX, kbZ);
+    }
 
     // (c) 爆炸音 / 视反馈（单一入口）：emit explosion（呈现层 Connections → AudioManager.playExplosion +
     //   BlockParticles.burstExplosion）。坐标 = 爆炸中心格（粒子在中心迸发；机制等价 MC 爆炸声/光在爆炸点）。
@@ -1059,7 +1134,8 @@ void EntityManager::detonateStalker(Entity &e, World *world, const QVector3D &pl
 
     // (d) 标记本实体本帧已引爆 → tick Mob 分支据此当帧 releaseSlot 移除（爆炸即除，不再模拟）。
     e.exploded = true;
-    qCInfo(lcEnt) << "Stalker detonated at" << cx0 << cy0 << cz0 << "player dmg" << dmg;
+    qCInfo(lcEnt) << "Stalker detonated at" << cx0 << cy0 << cz0 << "player dmg" << dmg
+                  << (originInWater ? "(in water: no terrain damage)" : "");
 }
 
 // t241 羊吃草：检测 / 消耗 entity 前方一格草丛（机制等价 MC 羊吃草：草丛消失 + 其下草方块变泥土）。
@@ -1245,7 +1321,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   t290 观察者交互门控：playerTargetable=false（创造/观察者）→ 箭直接穿过玩家不判定命中（机制等价
             //   MC 1.0 创造/观察者无敌 —— 既不射（aiArcher 不射击非生存玩家）也不被命中；防 Survival→模式切换
             //   后半空中的箭仍戳到刚转无敌的玩家）。
-            if (!remove && playerTargetable) {
+            //   t304 玩家射出的箭（arrowFromPlayer=true）不判玩家命中 —— 玩家箭只打 mob（下方分支），不会误伤
+            //   玩家自己（机制等价 MC 1.0 玩家箭不伤玩家）。
+            if (!remove && playerTargetable && !e.arrowFromPlayer) {
                 const float px = listener.x(), py = listener.y(), pz = listener.z();
                 const float ex = px - listenerHalfW - kArrowHitHalfW;
                 const float ey = py - kArrowHitHalfW;
@@ -1253,9 +1331,45 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (next.x() >= ex && next.x() <= px + listenerHalfW + kArrowHitHalfW
                     && next.y() >= ey && next.y() <= py + listenerHeight + kArrowHitHalfW
                     && next.z() >= ez && next.z() <= pz + listenerHalfW + kArrowHitHalfW) {
-                    emit mobAttackedPlayer(kArrowDamage, int(MobBones));
+                    // t296 箭击退方向 = 箭飞行速度 (vx,vz) 归一（沿箭去向推玩家；机制等价 MC 箭动量传递）。
+                    //   退化（箭水平速 ~0，近乎垂直下落）→ 用「玩家 − 箭」水平向量兜底（把玩家推离着箭点）。
+                    float kbX = 0.0f, kbZ = 0.0f;
+                    const float vlen = std::sqrt(e.vx * e.vx + e.vz * e.vz);
+                    if (vlen > 1e-3f) { kbX = e.vx / vlen; kbZ = e.vz / vlen; }
+                    else {
+                        const float tx = px - e.pos.x(), tz = pz - e.pos.z();
+                        const float tlen = std::sqrt(tx * tx + tz * tz);
+                        if (tlen > 1e-3f) { kbX = tx / tlen; kbZ = tz / tlen; }
+                        else { kbX = 1.0f; }
+                    }
+                    emit mobAttackedPlayer(kArrowDamage, int(MobBones), kbX, kbZ);
                     hitPlayer = true;
                     remove = true;
+                }
+            }
+
+            // t304 玩家箭命中 mob（spec「抛物+伤害 mobs」）：玩家射出的箭（arrowFromPlayer=true）沿飞行逐帧
+            //   测点是否落在任一活体 mob 的 AABB（外扩 kArrowHitHalfW 提升近距命中率）内。命中首个最近 mob
+            //   → damageEntity（扣 arrowDamage HP + 红闪 + 归零 mobDied 死亡掉落，复用受击链）+ emit mobAttacked
+            //   （呈现层 playMobHurt；同近战 attackMob 路径）+ 移除箭。跳过非 alive / 非 Mob / dead（尸体） /
+            //   Arrow / Item（掉落物）实体。mob AABB 用每实体 halfW/halfH（t252 拆分 XZ/Y，按 mobType 贴合身体）。
+            //   机制等价 MC 1.0 玩家弓箭打怪（命中首个、伤害由蓄力决定、箭命中即消失）。
+            if (!remove && e.arrowFromPlayer) {
+                for (int mi = 0; mi < int(m_entities.size()); ++mi) {
+                    const Entity &m = m_entities[size_t(mi)];
+                    if (!m.alive || m.kind != Mob || m.dead) continue; // 跳过空槽 / 非 mob / 尸体
+                    const float ex2 = m.pos.x() - m.halfW - kArrowHitHalfW;
+                    const float ey2 = m.pos.y() - m.halfH - kArrowHitHalfW;
+                    const float ez2 = m.pos.z() - m.halfW - kArrowHitHalfW;
+                    if (next.x() >= ex2 && next.x() <= m.pos.x() + m.halfW + kArrowHitHalfW
+                        && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kArrowHitHalfW
+                        && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kArrowHitHalfW) {
+                        damageEntity(mi, e.arrowDamage); // 扣血 + 红闪 + 归零 mobDied（内含 dead/越界/amount 守）
+                        emit arrowHitMob(m.mobType); // t304 命中音（呈现层 playMobHurt，同近战 attackMob→mobAttacked）
+                        qCInfo(lcEnt) << "player arrow hit mob" << mi << "for" << e.arrowDamage << "HP";
+                        remove = true;
+                        break; // 命中首个即止（箭消失，不穿透）
+                    }
                 }
             }
 
@@ -1338,6 +1452,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // t239 AI wander 自主移动（水平）：随机选向 + 时间片 + 逐轴 AABB 碰撞。位移 → dirty（驱动 QML 位置绑定）。
             // t241 羊吃草门控：eatTimer>0（吃草周期内）→ 跳过 wander + 强制 idle 站立（腿停 + 头俯仰），仅推进
             //   吃草周期；否则走 AI wander，并据 idle + 扫描冷却决定是否开吃草周期。
+            // t298 怪物受水流影响：脚位在水格 → 水平减速（speedScale=kWaterSpeedMul）。透传给各 AI 函数缩放位移；
+            //   浮力缓沉 + 流水推动在下方 Mob 分支末段（flow push）+ 共享垂直段（buoyancy）处理。
+            const float speedScale = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)
+                                     ? kWaterSpeedMul : 1.0f;
             const bool isSheep = (e.mobType == MobSheep);
             const bool eating = isSheep && e.eatTimer > 0.0f;
             if (eating) {
@@ -1369,16 +1487,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         e.fuseTimer = 0.0f;
                         dirty = true; // chasing/fuse 翻转 → bump 让 QML 收回追踪高亮 / 蓄力膨胀
                     }
-                    if (aiWander(e, float(dt), world, worldW, worldD)) dirty = true;
+                    if (aiWander(e, float(dt), world, worldW, worldD, speedScale)) dirty = true;
                 } else if (e.mobType == MobBones) {
                     // t281/t283/t284 敌对 AI：替代 wander。listener = 玩家脚位（tick 参数）。
                     //   t281 Shambler（僵尸）→ aiHostile（detect→pathfind→melee attack）。
                     //   t283 Bones（骷髅弓箭手）→ aiArcher（detect→keep-distance→shoot 远程射箭）。
                     //   t284 Stalker（潜行者/苦力怕）→ aiStalker（detect→chase→fuse→detonate 近距自爆）。
                     //   非追踪回退到 wander（在 aiHostile / aiArcher / aiStalker 内）。
-                    if (aiArcher(e, float(dt), world, listener, worldW, worldD)) dirty = true;
+                    if (aiArcher(e, float(dt), world, listener, worldW, worldD, speedScale)) dirty = true;
                 } else if (e.mobType == MobStalker) {
-                    if (aiStalker(e, float(dt), world, listener, worldW, worldD)) dirty = true;
+                    if (aiStalker(e, float(dt), world, listener, worldW, worldD, speedScale)) dirty = true;
                     // 蓄力期（chasing）每帧 bump revision → QML inflateAt 绑定刷新（驱动膨胀动画 + 蓄力发白）；
                     //   即使 aiStalker 返 moved=false（蓄力站立不动），inflate 仍在变 → 须 dirty。熄火（fuseTimer→0）
                     //   亦在 chasing 态内 → 一并刷新让 QML 收回膨胀。
@@ -1386,12 +1504,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     // 引爆当帧移除：detonateStalker 置 exploded=true → 跳过后续重力 / resting（尸体即除）。
                     if (e.exploded) { toRemove.push_back(idx); continue; }
                 } else {
-                    if (aiHostile(e, float(dt), world, listener, worldW, worldD)) dirty = true;
+                    if (aiHostile(e, float(dt), world, listener, worldW, worldD, speedScale)) dirty = true;
                 }
             } else {
                 // 非吃草：扫描冷却倒数（仅羊）；AI wander；羊 idle 且冷却到 → 扫前方草丛决定是否开吃。
                 if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(dt);
-                if (aiWander(e, float(dt), world, worldW, worldD)) dirty = true;
+                if (aiWander(e, float(dt), world, worldW, worldD, speedScale)) dirty = true;
                 if (isSheep && e.eatCooldown <= 0.0f && e.wanderSpeed <= 0.0f) {
                     // idle 且扫描冷却到：前方有草丛 → 开吃草周期（headPitch 动画 + 中段消耗）；无 → 重置短冷却再等。
                     if (sheepEatGrass(e, world, worldW, worldD, /*consume=*/false)) {
@@ -1400,6 +1518,52 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         dirty = true;
                     } else {
                         e.eatCooldown = kEatScanInterval; // 空扫描 → 节流冷却
+                    }
+                }
+            }
+
+            // t298 流水推动 mob（机制等价玩家 t211：脚位在流水格 state>0 → 沿「离源方向」叠入水平位移）。
+            //   流向据脚位 4 向邻居 state 梯度推算：state 低于脚位的邻居 = 近源方向 → 推力朝远离它（离源）。
+            //   梯度加权（footState − ns）使陡降（近源 → 远源跨多级）推得更猛；归一化后 ×kWaterFlowPush 叠入位移
+            //   （与 AI 行走位移相加 → 逆流净速 = 走速 − 推力，松手则被流走）。逐轴 mobAabbHitsSolid 撤回防穿墙 +
+            //   世界边界 clamp（同 aiWander / knockback 位移模式）。仅 speedScale<1（脚位在水格）时执行（无水零开销）。
+            //   水源 state=0 不推（无梯度）；四面无更低 state 邻居（对称流）→ glen≈0 不推。
+            if (speedScale < 1.0f) {
+                const int wfx = qFloor(e.pos.x());
+                const int wfy = qFloor(e.pos.y() - e.halfH); // 脚位（AABB 底面）格
+                const int wfz = qFloor(e.pos.z());
+                if (wfy >= 0 && world->blockAt(wfx, wfy, wfz) == BlockRegistry::Water) {
+                    const quint8 footState = world->stateAt(wfx, wfy, wfz);
+                    if (footState > 0) { // 流水格才推（水源 state=0 静止不推，同玩家 t211）
+                        float gx = 0.0f, gz = 0.0f;
+                        constexpr int wdirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                        for (const auto &wd : wdirs) {
+                            const int nx = wfx + wd[0], nz = wfz + wd[1];
+                            if (world->blockAt(nx, wfy, nz) == BlockRegistry::Water) {
+                                const quint8 ns = world->stateAt(nx, wfy, nz);
+                                if (ns < footState) { // 该邻居更近源 → 推力朝远离它（离源）
+                                    gx -= float(wd[0]) * float(footState - ns);
+                                    gz -= float(wd[1]) * float(footState - ns);
+                                }
+                            }
+                        }
+                        const float glen = std::sqrt(gx * gx + gz * gz);
+                        if (glen > 1e-4f) {
+                            const float ehw = e.halfW;
+                            const float ehh = e.halfH;
+                            const float pushX = (gx / glen) * kWaterFlowPush;
+                            const float pushZ = (gz / glen) * kWaterFlowPush;
+                            float newX = e.pos.x() + pushX * float(dt);
+                            if (newX < ehw) newX = ehw;
+                            if (newX > worldW - ehw) newX = worldW - ehw;
+                            if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+                            float newZ = e.pos.z() + pushZ * float(dt);
+                            if (newZ < ehw) newZ = ehw;
+                            if (newZ > worldD - ehw) newZ = worldD - ehw;
+                            if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+                            if (newX != e.pos.x()) { e.pos.setX(newX); dirty = true; }
+                            if (newZ != e.pos.z()) { e.pos.setZ(newZ); dirty = true; }
+                        }
                     }
                 }
             }
@@ -1507,17 +1671,30 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         const int cz = qFloor(e.pos.z());
         if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过
 
+        // t298 水中浮力判定：仅 Mob kind（vestigial Item 不涉水物理）。脚位（AABB 底面）格 == Water → mobInWater。
+        //   feetCellY = floor(pos.y − halfH)（mob 底面格；pos.y 是中心）。用于下方重力分流（缓沉 vs 自由落体）。
+        const int mobFeetY = qFloor(e.pos.y() - e.halfH);
+        const bool mobInWater = (e.kind == Mob) && mobFeetY >= 0
+                                 && world->blockAt(cx, mobFeetY, cz) == BlockRegistry::Water;
+
         // 已落地：复探支撑格是否仍实体。失支撑 → 续落。
         if (e.resting) {
-            const int supportY = qFloor(e.pos.y() - e.halfH) - 1; // 实体底面下方那一格（= 支撑方块 cellY）
+            const int supportY = mobFeetY - 1; // 实体底面下方那一格（= 支撑方块 cellY）
             if (supportY >= 0 && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止
             e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
             dirty = true;
         }
 
-        // 重力 + 下移（vy 向下为负）。
-        e.vy -= kGravity * float(dt);
-        if (e.vy < -kMaxFall) e.vy = -kMaxFall;
+        // 重力 + 下移（vy 向下为负）。t298：mob 在水中 → 缓沉（kWaterGravity << kGravity）+ 钳最大下沉
+        //   （kWaterSinkMax << kMaxFall，防加速穿水底）；机制等价玩家 t174 水中浮力（mobs 不按空格故无上浮，
+        //   仅被动缓沉到水底 resting）。离水走原重力 + 终端下落。
+        if (mobInWater) {
+            e.vy -= kWaterGravity * float(dt);
+            if (e.vy < -kWaterSinkMax) e.vy = -kWaterSinkMax;
+        } else {
+            e.vy -= kGravity * float(dt);
+            if (e.vy < -kMaxFall) e.vy = -kMaxFall;
+        }
         const float mobNewY = e.pos.y() + e.vy * float(dt);
 
         // 下移路径自顶向下扫实体所在列，找首个实体方块（防大 dt 穿过薄层；lessons「子步防穿墙」精神）。

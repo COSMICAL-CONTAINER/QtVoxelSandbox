@@ -135,6 +135,12 @@ class PlayerController : public QQuickItem
     //   松开 / 换槽（持物不再是面包）/ 失焦 / 暂停 → 清零（未完成不消耗）。完成（progress>=1）→ 消耗 1 面包。
     Q_PROPERTY(bool eating READ eating NOTIFY eatingStateChanged)
     Q_PROPERTY(float eatingProgress READ eatingProgress NOTIFY eatingProgressChanged)
+    // t304 弓拉弓态（手持弓右键长按蓄力）：bowDrawing = 正在拉弓；bowDrawProgress = 0..1 蓄力进度
+    //   （0=刚起拉、1=满弓）。呈现层（Main.qml viewModelHand）据此把手 / 弓后拉（拉弓动画）；松开 endBowDraw
+    //   据 progress 算箭速 / 伤害并射出。spec「长按右键拉弓动画 → 松开射箭」。仅持弓右键进入（eventFilter
+    //   RightButton press 据 selectedItemId==Bow 分流）；松开 / 换槽 / 失焦 / 暂停 → 清零（cancelBowDraw）。
+    Q_PROPERTY(bool bowDrawing READ bowDrawing NOTIFY bowDrawChanged)
+    Q_PROPERTY(float bowDrawProgress READ bowDrawProgress NOTIFY bowDrawChanged)
     // 模式行为门控（t21）：由当前模式派生的能力标志（随 modeChanged 通知 QML）。
     // Spectator 禁放破（用户核心诉求：观察者不能破坏/放置）；飞仅 Creative/Spectator 可用。
     Q_PROPERTY(bool canBreak READ canBreak NOTIFY modeChanged)
@@ -227,6 +233,9 @@ public:
     QVector3D miningBlock() const { return QVector3D(m_mineBx, m_mineBy, m_mineBz); }
     bool eating() const { return m_eating; }          // t267 进食态（驱动 viewModelHand 下沉 + 抖动）
     float eatingProgress() const { return m_eatingProgress; } // t267 进食进度 0..1
+    // t304 弓拉弓态（Q_PROPERTY：bowDrawing / bowDrawProgress）。仅持弓右键蓄力时为真。
+    bool bowDrawing() const { return m_bowDrawing; }
+    float bowDrawProgress() const; // 蓄力进度 0..1（钳到 [0,1]；满弓=1）
 
     // 模式行为门控（t21，PLAN §2-D：模式标志由 PlayerController 持有，输入边缘统一查）。
     // 三模式差异化：Spectator 禁放破 + 可飞；Creative 可放破 + 可飞（双击空格切）；生存可放破 + 禁飞。
@@ -268,12 +277,29 @@ public:
     //   endEating() = 右键松开边缘（清累积进度，未完成不消耗）。完成时 finishEating 消耗 1 面包 + 恢复饥饿。
     Q_INVOKABLE void beginEating(); // 右键按下（手持面包）：开始累积进食进度（t267）
     Q_INVOKABLE void endEating();   // 右键松开：清累积进食进度（未完成不消耗，t267）
-    // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 写入 hotbar 当前选中槽（覆盖；
-    // 创造源无限 → 满栈）。仅指针捕获时生效（与破/放同窗口级 MouseButtonPress 路径）。
+    // t304 弓拉弓 / 射箭：手持弓右键按下 → beginBowDraw（开始蓄力，m_bowDrawTime 累加）；右键松开 → endBowDraw
+    //   （据蓄力射箭：消耗箭 + spawnArrowPlayer + 弓耐久 -1）。spec「长按右键拉弓 → 松开射箭」。
+    //   beginBowDraw：仅持弓 + 可放置（非观察者，沿用 placeBlock 入口门控语义）+ 已捕获时进入；无需命中
+    //   （弓瞄准走视线方向，不依赖射线命中实体方块）。蓄力期间 step() 减速（kBowSlowMul，spec「拉弓减速」）。
+    //   endBowDraw：蓄力 < kBowMinChargeRatio / 无箭 → 不射（仅 cancel）；满足 → 算速度 / 伤害射出。创造不耗箭 / 耐久。
+    Q_INVOKABLE void beginBowDraw();
+    Q_INVOKABLE void endBowDraw();
+    // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 装入 hotbar。仅指针捕获时生效
+    // （与破/放同窗口级 MouseButtonPress 路径）。
     // spec：「无论背包开关」—— captured=true 蕴含背包已关，故等价于「游戏内中键」；命中空气 / 无
     // 世界 / 无 hotbar → 不动作。t288：pick-block 仅 Creative（创造式复制方块能力；生存无之 →
     // 不动作），Spectator 亦禁（与 canBreak/canPlace 同「观察者不交互」语义，不改栅格但属选择作弊）。
+    // t291：优先「切槽」——hotbar 9 槽已有同 id 方块时切到该槽（setSelectedSlot，不动栈 / 数量）；
+    // 仅 hotbar 全无该方块时才覆盖当前选中槽（setStack 满栈）。机制等价 MC 1.0 pick-block。
     Q_INVOKABLE void pickBlock();
+    // t296 玩家受击击退（机制等价 MC 1.0 玩家被僵尸 / 箭 / 苦力怕爆炸击退 —— 命中后向被攻击方向小弹 + 水平推）。
+    //   EntityManager.mobAttackedPlayer(amount, mobType, kbX, kbZ) 携「欲推开玩家的水平单位方向」，Main.qml
+    //   Connections 据它调本方法。仅 Survival 生效（Creative/Spectator 无敌不弹；mobAttackedPlayer 经 t290 门控
+    //   本就只在 Survival 发，此处再守防御）+ 非死亡 + 已捕获（菜单态不弹）。kbX/kbZ 由 caller 归一（EntityManager
+    //   内已归一并兜底零向量）；本方法再防御性归一一次。击退写入独立冲量累加器 m_knockback（玩家 m_vel.x/z 每
+    //   tick 被 wish 输入覆盖，无法存击退），step() 走路路径每帧衰减 + 重力 + 叠入位移。分层（PLAN §2）：
+    //   Game/Physics 层持击退态；方向由 Entities 层（mob 位置 / 箭速）经语义信号向下传（Game→Physics 同层）。
+    Q_INVOKABLE void applyHitKnockback(float dirX, float dirZ);
     // Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格）。仅指针捕获时生效
     // （spec）。空手 / 取失败 → 不丢。spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem
     // （同破块掉落 t35 路径）；丢弃后实体可被重新拾取（闭环）。
@@ -380,6 +406,8 @@ signals:
     // t267 进食进度连续变化（0..1）：高频独立信号（同 miningProgressChanged；当前仅驱动 beat 推进，
     //   留 hook 供未来 HUD 进度条 / 抖动频率绑定）。值真变才发语义；此处每推进 tick 发（驱动 beat 跨阶判定）。
     void eatingProgressChanged();
+    // t304 弓拉弓态翻转 / 蓄力进度变（驱动 viewModelHand 拉 / 弓动画启停 + 进度跟随）。
+    void bowDrawChanged();
     // t267 进食屑粒（持面包按住右键累积进食时每跨一节拍发一次）：携嘴部世界坐标（= 玩家眼位 position()，
     //   float 坐标非方块格 —— 进食屑粒从玩家嘴部迸发而非方块中心）。呈现层 Connections 转发到
     //   BlockParticles.burstEat 迸发少量屑粒（机制等价 MC 进食屑粒）。分层同 miningParticle。
@@ -455,7 +483,14 @@ signals:
     //   同 swingArm / blockBroken 模式：Game/Physics 层发语义事件，呈现 / 音频层只消费（PLAN §2 分层）。
     //   t249 crit=true 表示本次为暴击（玩家跳劈下落中命中）：呈现层可据此播放更强的受击音 / 暴击粒子
     //   （spec 仅要求 +50% 伤害已由 attackMob 内 baseDmg*3/2 落地；反馈音 / 视觉属可选增强，留 hook）。
-    void mobAttacked(bool crit);
+    //   t295 mob 受击音效 + 敌对专属：mobType = 被攻击 mob 的子类 id（MobTest/Pig/Cow/Sheep 0-3 被动；
+    //     Shambler/Bones/Stalker/Spider 4-7 敌对）。attackMob 命中后从 EntityManager::mobTypeAt 取该值随本信号
+    //     下传，呈现层据此路由到 AudioManager.playMobHurt(mobType) —— 被动用通用 creature yelp（mob_hurt.wav）、
+    //     敌对各走专属音（复用其 ambient idle clip：Shambler 哀嚎 / Bones 骨头敲击 / Spider 蜘蛛嘶 / Stalker 嘶嘶；
+    //     机制等价 MC 敌对受击声与其 idle 叫声同族；Stalker 爆炸专属音走 playExplosion 的 detonation 路径）。
+    //     spec t295「敌对各:骨头敲击/蜘蛛嘶(近)/僵尸哀嚎/苦力怕爆炸声」。mobType 由 Game/Physics 层（持
+    //     EntityManager）取得，向下经语义信号传呈现层，不反查（PLAN §2 分层）。
+    void mobAttacked(int mobType, bool crit);
 
 protected:
     void componentComplete() override;
@@ -543,6 +578,12 @@ private:
     void updateEating(float dt);
     // t267 清进食累积态（松开 / 换槽 / 失焦 / 完成）。无变化时静默（不发信号，免抖动 QML 绑定）。
     void cancelEating();
+    // t264 清弓拉弓累积态（松开射出后 / 换槽（持物不再是弓）/ 失焦 / 暂停）。无拉弓态时静默（不发信号）。
+    void cancelBowDraw();
+    // t304 在背包（hotbar 9 + main 27）查首格含箭（ArrowId）的 (group,index)，找不到返 {false,0,0}。
+    //   group=0 hotbar / 1 main。供 fireArrow 判「需箭在背包」（spec）+ 生存消耗 1 箭定位槽。
+    struct ArrowSlot { bool found; int group; int index; };
+    ArrowSlot findArrowInInventory() const;
     // t267 完成（progress 满）：消耗 1 面包 + 恢复饥饿（kBreadHungerAmount）+ 清态。Survival 消耗 / Creative 不耗。
     void finishEating();
     // 完成（progress 满）：写 air + 发 playerMined + 清态。drop 由 caller 算（生存走 ToolRegistry）。
@@ -682,6 +723,13 @@ private:
     // t248 攻击冷却剩余秒数（>0 时 attackMob 早退不扣血）：tickImpl 每帧递减；attackMob 成功命中后置
     //   kAttackCooldown。修长按左键每 tick 重触 beginMining 致 mob 瞬秒（见 kAttackCooldown 注释）。
     float m_attackCooldown = 0.0f;
+    // t296 玩家受击击退冲量累加器（XZ 水平推 + Y 小跳弧）。与 m_vel 分离 —— 玩家 m_vel.x/z 每 tick 被 wish
+    //   输入覆盖（走路 / 疾跑 / 水中），击退若写入 m_vel 一帧即被覆盖 → 看不见。故独立累加：applyHitKnockback
+    //   设本向量（水平 = dir×kHitKnockbackHoriz / 垂直 = kHitKnockbackUp 小跳）；step() 走路路径每帧水平指数衰减
+    //   + 垂直受重力 → 叠入 delta = (m_vel + m_knockback)*dt；衰减殆尽（L1 < 阈）→ 整体清零。仅走路模式积分
+    //   （Spectator / Creative-飞 noclip 早 return 不至此 → setMode 切走时清零，防陈旧冲量残留）。着地（onGround
+    //   且向下分量 <0）清 Y 分量（小跳被地面吸收，同 m_vel.y 着地归零）。
+    QVector3D m_knockback{0, 0, 0};
     // t267 持续进食态（手持面包按住右键累积，机制等价 MC 1.0 长按右键食面包 ~1.6s）。仅持面包时进入
     //   （eventFilter RightButton press 据持物 == BreadId 分流调 beginEating，面包不进 placeBlock）。
     //   progress 0..1；eatBeat = clamp(progress*kEatBeats,0,kEatBeats) 跨阶驱动 eatingParticle（屑粒迸发）。
@@ -694,6 +742,13 @@ private:
     //   （beginEating）置 true、release 边缘（endEating）/ 暂停失焦（release）置 false；finishEating /
     //   cancelEating 不动它。updateEating 顶部据此 + 仍持面包 → 自动 beginEating 下一件（不松手连食）。
     bool m_rightDown = false;
+    // t304 弓拉弓蓄力态（手持弓右键按住累积，机制等价 MC 1.0 长按右键拉弓 ~1s 满弓）。仅持弓时进入
+    //   （eventFilter RightButton press 据持物 == Bow 分流调 beginBowDraw，弓不进 placeBlock）。
+    //   m_bowDrawTime 累加 dt（钳 kBowFullCharge）；bowDrawProgress = clamp(m_bowDrawTime/kBowFullCharge,0,1)。
+    //   松开（endBowDraw）据蓄力射箭 + 清 m_bowDrawing；换槽 / 失焦 / 暂停 → cancelBowDraw。蓄力期间 step()
+    //   水平速度 ×kBowSlowMul（spec「拉弓减速」，与蹲下叠加）。
+    bool m_bowDrawing = false;
+    float m_bowDrawTime = 0.0f;
 
     // 射线选体命中态（整数格坐标 + 整数法线分量；仅变化时 emit hitChanged，避免每帧抖动 QML）
     bool m_hasHit = false;
@@ -775,6 +830,16 @@ private:
     static constexpr float kGravity = 28.0f;
     static constexpr float kJump = 8.4f;       // 顶点约 1.25 格
     static constexpr float kMaxFall = 78.4f;
+    // t296 玩家受击击退常量（机制对齐 MC 1.0 玩家被击退量级；与 EntityManager mob 击退 kKnockbackHoriz=4.5 /
+    //   kKnockbackUp=4.5 / kKnockbackDrag=4.0 同族，玩家侧略强使「被打」反馈明显）：
+    //   - kHitKnockbackHoriz：受击水平初速（blocks/s）。略高于玩家走速 4.3 + mob 击退 → 一击把玩家推 ~1.3 格
+    //     （v0/drag ≈ 6/4.5），玩家可逆推反击但不致被风筝到追不上。
+    //   - kHitKnockbackUp：受击小跳垂直初速（blocks/s，向上）。峰值 v²/(2g)=17.64/56≈0.32 格 = 小弹起（机制等价
+    //     MC 受击小幅上弹），重力 28 拉回走原 tick 着地路径。
+    //   - kHitKnockbackDrag：水平衰减率（1/s）。时间常数 1/drag≈0.22s → ~0.5s 衰到 ~10%、~1s 近停；总位移 ≈ v0/drag。
+    static constexpr float kHitKnockbackHoriz = 6.0f;  // 受击水平初速（blocks/s）
+    static constexpr float kHitKnockbackUp    = 4.2f;  // 受击小跳垂直初速（blocks/s；峰值 ~0.32 格）
+    static constexpr float kHitKnockbackDrag  = 4.5f;  // 受击水平衰减率（1/s；~0.5s 基本停下）
     static constexpr float kSuffocationInterval = 1.0f; // t160 窒息扣血间隔（秒；每秒 1HP，机制等价 MC 窒息 1/秒）
     // t202 气泡 + 溺水时序（机制等价 MC 1.0：10 气泡 ≈ 15s 入水耗尽，归零后每秒 1HP）。
     //   kAirInterval：眼位入水时每减 1 气泡的间隔（1.5s → 10 气泡 = 15s 才耗尽，同 MC 1.0 air=300 tick@20tps）。
@@ -833,6 +898,22 @@ private:
     //   250ms ≈ 典型可挖方块（如手挖石头 miningTime≈1.5s）beat 变化的间隔量级（miningTime/6），机制对齐
     //   MC 镐撞基岩的击打节拍。仅作用于不可挖方块；可挖方块 miningTime/6 节奏本就 ≥ 此值，不触发节流。
     static constexpr qint64 kMineSoundThrottleMs = 250;
+    // t304 弓拉弓 / 射箭常量（机制对齐 MC 1.0 弓：~1s 满弓、蓄力越高箭越快越痛、拉弓减速、需箭在背包；
+    //   数值为本工程小世界量身调，非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）。
+    //   - kBowFullCharge：满弓蓄力时长（秒）。MC 1.0 弓拉满 ~20 tick=1s；取 1.0s（玩家有反应时间决定何时松）。
+    //   - kBowMinChargeRatio：可射箭的最低蓄力比（< 此松开 = 取消不射，机制等价 MC「未拉足松开箭无力 / 不射」）。
+    //   - kBowMinSpeed / kBowMaxSpeed：箭水平速度（blocks/s；蓄力 lerp。min≈12 让短蓄力箭仍飞几格、max≈26 满弓
+    //     快速直线）。Arrow 重力 = kGravity=28（与骷髅箭 / 世界同源）→ 抛物弧自然。
+    //   - kBowMinDamage / kBowMaxDamage：箭命中伤害（HP；蓄力 lerp。min=1=半心、max=6=3 心，机制等价 MC 1.0 弓
+    //     伤害量级）。Hotbar::bowArrowMaxDamage 据本 max 显 tooltip「攻击 1-6」。
+    //   - kBowSlowMul：拉弓时水平速度倍数（spec「拉弓减速」；与蹲下 ×0.4 叠加 = 蹲下拉弓更慢）。仅走路模式生效。
+    static constexpr float kBowFullCharge    = 1.0f;   // 满弓蓄力时长（秒；MC 1.0 弓 ~1s 拉满）
+    static constexpr float kBowMinChargeRatio = 0.15f; // 可射箭最低蓄力比（< 此松开 = 取消）
+    static constexpr float kBowMinSpeed      = 12.0f;  // 短蓄力箭水平速度（blocks/s）
+    static constexpr float kBowMaxSpeed      = 26.0f;  // 满弓箭水平速度（blocks/s）
+    static constexpr int   kBowMinDamage     = 1;      // 短蓄力箭命中伤害（HP）
+    static constexpr int   kBowMaxDamage     = 6;      // 满弓箭命中伤害（HP；Hotbar::bowArrowMaxDamage 同源）
+    static constexpr float kBowSlowMul       = 0.5f;   // 拉弓时水平速度倍数（spec「拉弓减速」）
     static constexpr float kCamMax = 3.5f;     // 第三人称相机最大距离（格；t40，与 Main.qml 默认 d 对齐）
     static constexpr float kCamMargin = 0.1f;  // 相机贴命中面前的余量（防卡面 z-fight / 近裁面穿插；t40）
 };

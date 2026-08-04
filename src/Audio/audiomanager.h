@@ -72,20 +72,30 @@ public:
     //   damaged(amount) → Main.qml 路由到本方法（掉落伤害等所有 takeDamage 路径）；连击 seek 重发
     //   不堆叠（同其他单件）。仅 Survival 走此路径（Creative 无伤 / Spectator noclip 不发 damaged）。
     Q_INVOKABLE void playHurt();
-    // mob 受击音（t248 专属受击音）：玩家攻击生物时该生物的受击声 —— 与玩家 hurt 区分（更短促、带
-    //   「 creature yelp 」下扫中频 + 较轻的软冲击；机制等价 MC 生物受击声，原创程序合成 §9）。由
-    //   PlayerController::mobAttacked → Main.qml 路由到本方法（替代旧复用 playHurt 的路径）。与 hurt
-    //   单件同模式（seek 重发不堆叠）；降级（engine / clip 失败）静默早退（§2-E，不崩）。
-    Q_INVOKABLE void playMobHurt();
+    // mob 受击音（t248 专属受击音 + t295 敌对专属音）：玩家攻击生物时该生物的受击声 —— 与玩家 hurt 区分。
+    //   mobType = 被攻击 mob 的子类 id（0=MobTest 通用 / 1=Pig / 2=Cow / 3=Sheep 被动；4=Shambler / 5=Bones /
+    //   6=Stalker / 7=Spider 敌对）。路由：
+    //     - 被动（0-3）/ 通用：mob_hurt.wav（更短促、带「 creature yelp 」下扫中频 + 较轻的软冲击；
+    //       机制等价 MC 生物受击声，原创程序合成 §9）。
+    //     - 敌对（4-7）：复用其 ambient idle clip 作受击专属音（spec t295「敌对各:骨头敲击/蜘蛛嘶(近)/
+    //       僵尸哀嚎/苦力怕爆炸声」——Shambler 哀嚎 / Bones 骨头敲击 / Spider 蜘蛛嘶嗡 / Stalker 嘶嘶；
+    //       机制等价 MC 敌对受击声与其 idle 叫声同族）。Stalker 爆炸专属音（苦力怕爆炸声）走 playExplosion
+    //       的 detonation 路径（detonateStalker → explosion 信号），其受击（被剑砍未引爆）用嘶嘶 idle。
+    //   由 PlayerController::mobAttacked(mobType,crit) → Main.qml 路由到本方法（替代旧复用 playHurt 的路径）。
+    //   seek 重发不堆叠（同 hurt 单件模式）；降级（engine / clip 失败）静默早退（§2-E，不崩）。
+    Q_INVOKABLE void playMobHurt(int mobType);
     // t284 爆炸音（Stalker/苦力怕自爆）：低频闷击 + 宽带爆裂瞬态 + 较长尾音（机制等价 MC 爆炸声，原创程序
     //   合成 §9；零 MC 资产）。由 EntityManager::explosion → Main.qml 路由到本方法触发（爆炸的单一音/视入口）。
     //   单件 clip；seek 重发不堆叠（同其他单件）；engine/clip 失败静默降级（§2-E，不崩）。
     Q_INVOKABLE void playExplosion();
-    // t250 mob 环境音（牛叫/羊叫/猪叫 idle + 走路声）：
+    // t250 mob 环境音（被动牛叫/羊叫/猪叫 + 敌对 idle 叫声 + 走路声）；t294 扩敌对 idle（补全「怪物叫声 idle」）：
     //   - playMobAmbient(mobType)：生物周期 idle 叫声 —— 按 mobType 选 mob_idle clip（0=通用 / 1=猪哼 /
-    //     2=牛哞 / 3=羊咩）。EntityManager tick 内 ambientTimer 周期倒计时（随机 8-16s）+ 玩家听者范围内
-    //     → emit mobAmbient(mobType) → Main.qml 路由到本方法。机制等价 MC 1.0 被动生物偶发 idle call
-    //     （原创程序合成，§9；零 MC 资产）。seek 重发不堆叠（同单件模式）；engine/clip 失败静默降级（§2-E）。
+    //     2=牛哞 / 3=羊咩 / 4=Shambler 哀嚎 / 5=Bones 骨咔哒 / 6=Stalker 嘶嘶 / 7=Spider 嘶嗡）。EntityManager
+    //     tick 内 ambientTimer 周期倒计时（随机 8-16s）+ 玩家听者范围内 → emit mobAmbient(mobType) → Main.qml
+    //     路由到本方法。机制等价 MC 1.0 生物偶发 idle call（原创程序合成，§9；零 MC 资产；PLAN §9 区隔改名
+    //     shambler/bones/stalker/spider，非 MC 专名）。t294：mobType 4-7 旧兜底通用 → 现各敌对子类独立音色
+    //     （ambient idle，与 t295 受击 / 近距 / 爆炸专属触发音不同）。seek 重发不堆叠（同单件模式）；
+    //     engine/clip 失败静默降级（§2-E）。
     Q_INVOKABLE void playMobAmbient(int mobType);
     //   - playMobStep(mobType, blockId)：生物走路声 —— 复用 step 材质分组 clip 池（按脚下方块 id 的材质组选），
     //     mobType 当前保留语义对齐 / 未来扩展（步声按材质而非 mob 子类）。mob 是环境音（非玩家前景）→

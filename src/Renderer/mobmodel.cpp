@@ -106,6 +106,43 @@ void addBoxRot(float cx, float cy, float cz, float hx, float hy, float hz,
     }
 }
 
+// t302 Z 轴旋转盒（蜘蛛腿步态用；镜像 addBoxRot 的 X 轴旋转，但绕 Z 轴 → z 分量不变，x/y 在 X-Y 平面旋转）。
+//   用途：蜘蛛腿是横向盒（半长在 X = 向躯干外侧延伸），addBoxRot 的 X 轴旋转对它几乎无效（y/z 分量小，
+//   旋转主要在 Y-Z 平面里晃，腿看不出动）→ 需 Z 轴旋转才能让 outer 端上下抬起（步态）。pivot (pivX, pivY)
+//   = 腿内端（髋 = 腿与躯干侧面相接处），angle > 0 把 +X 端向上转、−X 端向下转（右手定则）。
+//   与 addBoxRot 同实现骨架（6 面 × 4 角 + 累计 bounds 用旋转后顶点实际范围），仅旋转轴不同。
+void addBoxRotZ(float cx, float cy, float cz, float hx, float hy, float hz,
+                float pivX, float pivY, float angle,
+                std::vector<MobVtx> &verts, std::vector<quint32> &idx,
+                QVector3D &bMin, QVector3D &bMax)
+{
+    const float ca = std::cos(angle), sa = std::sin(angle);
+    const quint32 base = quint32(verts.size());
+    for (int f = 0; f < 6; ++f) {
+        for (int c = 0; c < 4; ++c) {
+            const Sgn &s = kFace[f][c];
+            MobVtx vt;
+            const float lx = cx + float(s.sx) * hx;
+            const float ly = cy + float(s.sy) * hy;
+            vt.z = cz + float(s.sz) * hz;                       // Z 轴旋转 → z 不变
+            const float dx = lx - pivX;
+            const float dy = ly - pivY;
+            vt.x = pivX + dx * ca - dy * sa;                     // Z 轴旋转（右手）：x' = x·cos − y·sin
+            vt.y = pivY + dx * sa + dy * ca;                     //             y' = x·sin + y·cos
+            vt.u = s.u;
+            vt.v = s.v;
+            verts.push_back(vt);
+            // 旋转后实际范围（逐顶点；解析 AABB 对旋转盒不再适用）。
+            bMin.setX(std::min(bMin.x(), vt.x)); bMax.setX(std::max(bMax.x(), vt.x));
+            bMin.setY(std::min(bMin.y(), vt.y)); bMax.setY(std::max(bMax.y(), vt.y));
+            bMin.setZ(std::min(bMin.z(), vt.z)); bMax.setZ(std::max(bMax.z(), vt.z));
+        }
+        const quint32 b = base + quint32(f * 4);
+        idx.push_back(b + 0); idx.push_back(b + 1); idx.push_back(b + 2);
+        idx.push_back(b + 0); idx.push_back(b + 2); idx.push_back(b + 3);
+    }
+}
+
 // t241 头部盒（+ 牛角等头附肢）：pitch==0 走 addBox 轴对齐快路径（猪 / 牛 / 非吃草态羊，每帧不进旋转），
 //   pitch!=0 走 addBoxRot 绕颈附着点（头后侧面心 = (cx, cy, cz+hz)，头与躯干相接处）旋转。
 //   pitch<0 = 低头（吃草）。负值使头前下部下沉（muzzle 朝地），机制等价 MC 羊吃草低头姿态。
@@ -136,6 +173,43 @@ void addLegs(float legY, float legHy, float legOffX, float legOffZ, float legW,
     addBoxRot( legOffX, legY, -legOffZ, legW, legHy, legW, hipTopY, -legOffZ, -sw, verts, idx, bMin, bMax); // 前右
     addBoxRot(-legOffX, legY,  legOffZ, legW, legHy, legW, hipTopY,  legOffZ, -sw, verts, idx, bMin, bMax); // 后左
     addBoxRot( legOffX, legY,  legOffZ, legW, legHy, legW, hipTopY,  legOffZ, +sw, verts, idx, bMin, bMax); // 后右
+}
+
+// t302 Spider 八腿（机制等价 MC 1.0 蜘蛛 8 腿；4 对沿躯干长度 Z 分布，每对 = 左(−X) + 右(+X)）。
+//   每条腿 = 从躯干侧面伸出的横向盒（半长在 X = 向外延伸），绕躯干侧面髋枢（腿内端 = bodyHalfX 处）
+//   做 Z 轴旋转（addBoxRotZ）→ outer 端上下抬起 = 步态。baseDown 静态下倾角让腿略向外下伸（蜘蛛典型姿态，
+//   非水平直伸），walkPhase 驱动四对腿的 tetropod 交替步态（前后对同相、中两对反相；左 + 右 镜像同步）。
+//   t285 原 Spider 简化 4 腿（addLegs 垂直短桩，藏在躯干下不可见 → 用户观感「无腿像蟑螂」）；t302 升级为
+//   8 条明显外伸的腿 + 步态。机制对齐 MC 1.0 蜘蛛 8 腿爬行；标识符 / 几何全原创（§9 区隔）。
+//   legReachPivotY = 躯干侧面髋枢 Y（= 躯干中心 Y）；腿底最远点 ~ −0.30 贴 collision 底面（halfH=0.30）。
+void addSpiderLegs(float bodyHalfX, float pivotY, float walkPhase,
+                   std::vector<MobVtx> &verts, std::vector<quint32> &idx,
+                   QVector3D &bMin, QVector3D &bMax)
+{
+    constexpr float kBaseDown         = 0.60f; // 腿静态外端下倾角（弧度，约 34°；蜘蛛腿外伸 + 下伸姿态）
+    constexpr float kSpiderLegSwing   = 0.25f; // 步态摆幅（弧度，约 14°；小于四足 kLegSwingAmp 因 8 腿密度高、防互撞）
+    constexpr float kLegHalfX         = 0.18f; // 腿半长（X 向躯干外延伸量）
+    constexpr float kLegHalfY         = 0.045f;// 腿粗细（Y）
+    constexpr float kLegHalfZ         = 0.05f; // 腿粗细（Z）
+    constexpr float kLegCenterOffX    = 0.18f; // 腿心相对躯干侧面 bodyHalfX 的外延中点（= kLegHalfX → 内端贴 bodyHalfX）
+    // 四对腿沿躯干 Z 分布（前→后）；相邻对步态反相（tetrapod gait：前+后对同相、中两对反相；左 + 右 镜像同相，
+    //   即同对两腿同步抬起 / 落下，对间交替 → 八腿整体呈「波浪式」步态，机制等价 MC 蜘蛛爬行）。
+    struct LegPair { float z; float pairSign; };
+    const LegPair pairs[4] = {
+        {-0.20f, +1.0f},
+        {-0.07f, -1.0f},
+        {+0.07f, -1.0f},
+        {+0.20f, +1.0f},
+    };
+    for (const LegPair &p : pairs) {
+        const float sw = kSpiderLegSwing * std::sin(walkPhase) * p.pairSign;
+        // +X（右）腿：base 角 −kBaseDown（外端下倾）；+ sw 抬起（角趋 0 = 外端升高）。髋枢 = 躯干右侧 (+bodyHalfX, pivotY)。
+        addBoxRotZ( bodyHalfX + kLegCenterOffX, pivotY, p.z, kLegHalfX, kLegHalfY, kLegHalfZ,
+                    bodyHalfX, pivotY, -kBaseDown + sw, verts, idx, bMin, bMax);
+        // −X（左）腿：镜像（base 角 +kBaseDown，sw 反号 → 与右腿同对同步抬起 / 落下，左右对称）。
+        addBoxRotZ(-(bodyHalfX + kLegCenterOffX), pivotY, p.z, kLegHalfX, kLegHalfY, kLegHalfZ,
+                   -bodyHalfX, pivotY, kBaseDown - sw, verts, idx, bMin, bMax);
+    }
 }
 } // namespace
 
@@ -187,8 +261,8 @@ void MobModel::rebuild()
 {
     std::vector<MobVtx> verts;
     std::vector<quint32> idx;
-    verts.reserve(8 * 24); // 至多躯干+头+4腿+2角 = 8 盒（Shambler 6 盒在此内）
-    idx.reserve(8 * 36);
+    verts.reserve(10 * 24); // 至多 Spider 躯干+头+8腿 = 10 盒；其余 mob ≤8 盒（猪/牛/羊/Shambler/Bones/Stalker）
+    idx.reserve(10 * 36);
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
 
     if (m_mobType == 4) {
@@ -225,11 +299,15 @@ void MobModel::rebuild()
         addBox( 0.00f,  0.66f,  0.00f, 0.15f, 0.15f, 0.15f, verts, idx, bMin, bMax); // 小头
         addLegs(-0.62f, 0.28f, 0.12f, 0.09f, 0.09f, m_walkPhase, verts, idx, bMin, bMax); // 四短粗腿
     } else if (m_mobType == 7) {
-        // t285 Spider（蜘蛛；机制等价 MC 1.0 蜘蛛，§9 区隔）—— 宽矮躯干 + 前伸小头 + 4 长腿（方块化原创；
-        //   MC 蜘蛛 8 腿低宽，本工程简化 4 腿。爬墙留后续）。腿底本地 y=−0.30 贴 collision 底面（halfH=0.30）。
+        // t285/t302 Spider（蜘蛛；机制等价 MC 1.0 蜘蛛，§9 区隔）—— 宽矮躯干 + 前伸小头 + **8 腿**（4 对沿躯干
+        //   Z 分布，t302 升级自 t285 简化 4 腿）。腿底本地 y ≈ −0.30 贴 collision 底面（EntityManager halfH=0.30）。
+        //   爬墙留后续（t285 spec 未含；本任务只做模型 + 步态动画）。8 腿绕躯干侧面髋枢做 Z 轴步态摆动
+        //   （addSpiderLegs），baseDown 外端下倾 + walkPhase 驱动 tetrapod 交替步态。眼由 Main.qml delegate 补
+        //   （4 颗红眼，同猪/牛/羊纯色子 Model 模式）。声音 / 受击音由 AudioManager.playMobAmbient/playMobHurt
+        //   据 mobType=7 路由（t294 mob_idle_spider 已就绪，本任务复用）。
         addBox( 0.00f, -0.05f,  0.00f, 0.40f, 0.18f, 0.30f, verts, idx, bMin, bMax); // 宽矮躯干
         addBox( 0.00f, -0.02f, -0.32f, 0.18f, 0.14f, 0.18f, verts, idx, bMin, bMax); // 小头（前伸）
-        addLegs(-0.20f, 0.10f, 0.16f, 0.20f, 0.07f, m_walkPhase, verts, idx, bMin, bMax); // 4 长腿
+        addSpiderLegs(0.40f, -0.05f, m_walkPhase, verts, idx, bMin, bMax);           // 8 腿（4 对，Z 轴步态）
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）

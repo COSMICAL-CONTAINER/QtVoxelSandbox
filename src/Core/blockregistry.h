@@ -139,7 +139,14 @@ public:
                                   //   （石质，同 coal/iron 矿石）。**洞穴裸露**：worldgen 顺序 scatterOres → carveCaves，carve 挖走
                                   //   stone/ore 暴露矿脉于洞壁（t278 既已铺路）→ 深层洞穴壁天然见钻矿石（spec「洞穴裸露矿物」）。
                                   //   进创造调色板（与 coal/iron 矿石同走立方体图标，t279 补全）。
-        Count         = 27, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Wool           = 27, // 羊毛方块（t300）：机制等价 MC 1.0 羊毛（wool）。整立方 opaque（solid=true / ShapeFull
+                                  //   —— 走 mesher 整立方面路径，**非**异形）、hardness=0.8（同 MC 1.0 羊毛量级）、
+                                  //   toolType=Shears（剪刀给速度加成；空手也掉落，requiresTool=false）、dropId=自身
+                                  //   （破块掉羊毛方块，可放置）、dropCount=1、maxStack=64。各面贴图=wool(38)（奶白羊毛底
+                                  //   + 浅灰卷曲绒毛纹，原创自绘 §9a）。**获得途径**：剪刀剪羊毛（EntityManager shearSheep →
+                                  //   sheepSheared 信号 → 掉落羊毛方块）/ 杀羊掉落（mobDied → Main.qml 据本 id spawnItem）。
+                                  //   音色归 GroupWood（软质闷击，最接近 MC 羊毛 cloth SoundType）。进创造调色板（t300 补全）。
+        Count         = 28, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
@@ -222,6 +229,15 @@ public:
         Sword   = 5, // 剑：攻击伤害加成（ToolRegistry::attackDamage，t265 落实），**不参与挖掘速度**——
                      //   本工程无任何方块的 toolType 取 Sword（剑是武器、非采掘工具），miningSpeedMul 恒 1.0。
                      //   机制等价 MC 1.0「剑不加速挖掘（蛛网除外），其价值在攻击伤害」。
+        Shears  = 6, // 剪刀（t300）：专用剪羊毛（右键羊→剪羊毛，EntityManager shearSheep）+ 给羊毛方块挖掘
+                     //   速度加成（Wool.toolType=Shears；requiresTool=false → 空手也掉落，仅速度受剪刀影响）。
+                     //   机制等价 MC 1.0 剪刀（shears：剪羊毛 / 加速羊毛 / 加速蛛网）。**唯一**取本类型的方块是
+                     //   Wool；其余方块持剪刀 miningSpeedMul 恒 1.0（类型不匹配，等同空手）。
+        Bow     = 7, // 弓（t304）：远程武器（右键长按拉弓 → 松开射箭）。**不参与挖掘速度**——本工程无任何
+                     //   方块的 BlockDef.toolType 取 Bow（弓是远程武器、非采掘工具），miningSpeedMul 恒 1.0
+                     //   （等同空手）。机制等价 MC 1.0「弓不影响挖掘」。仅用作 ToolRegistry::ToolDef.type 标识，
+                     //   供 ToolIcon / 手持 3D 几何（BowGeometry）/ tooltip 据 toolType===Bow 分流到弓形渲染。
+                     //   真实伤害 / 速度来自拉弓蓄力（PlayerController bow draw），不走 attackDamage（弓近战 = 徒手）。
     };
 
     // 音效材质分组（t118）：决定破 / 挖 / 走音色按方块材质分流（石 / 木 / 草 / 沙 / 叶 5 组 +
@@ -326,12 +342,14 @@ public:
     //      = 29（基底阶段 0），阶段贴图选择是 mesher 呈现层据 state 决定，非 BlockDef 字段——同 Water 流水贴图模式）。
     //   37=diamond_ore（t279 钻矿石；散布于 stone 深层 y∈[5,16]、需铁镐采掘；机制等价 MC 1.0 钻石矿，名称/贴图
     //      原创自绘 §9a；各面同贴图=石头底+青白菱斑晶体）。
-    // 图集由 tools/build_atlas.py 打包全部 38 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   38=wool（t300 羊毛方块；剪羊毛 / 杀羊掉落；机制等价 MC 1.0 羊毛，名称/贴图原创自绘 §9a；
+    //      各面同贴图=奶白羊毛底+浅灰卷曲绒毛纹）。
+    // 图集由 tools/build_atlas.py 打包全部 39 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 38）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 39）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -339,7 +357,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 38;
+    static constexpr int AtlasTileCount = 39;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

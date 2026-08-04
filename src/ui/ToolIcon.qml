@@ -20,7 +20,7 @@ import QtQuick
 Item {
     id: root
     property int tier: 1     // 1=木 2=石 3=铁（0 / 越界 → 兜底木色配色）
-    property int toolType: 1 // 1=镐 Pickaxe（默认）/ 2=锄 Hoe / 3=斧 Axe / 4=铲 Shovel / 5=剑 Sword（0 / 越界 → 兜底镐形）
+    property int toolType: 1 // 1=镐 Pickaxe（默认）/ 2=锄 Hoe / 3=斧 Axe / 4=铲 Shovel / 5=剑 Sword / 7=弓 Bow（0 / 越界 → 兜底镐形）
 
     Canvas {
         id: canvas
@@ -61,6 +61,29 @@ Item {
             const handle = "#7a5230" // 木把手
             const handleDark = "#4a3018"
             const light  = "#caa472" // 把手受光高光
+
+            // t304 弓（toolType===7）：整把纵向弓身 + 弓弦 + 中央握把 + 搭箭（远程武器轮廓）。
+            //   早 return 跳过下方对角木柄 / 镐头默认（弓无木柄、整把 tier 着色，与 3D BowGeometry 同策略）。
+            //   弓特征：垂直弓臂弧（左侧 belly）+ 右侧直弦 + 中央深色缠绳握把 + 弦上水平搭箭。
+            if (root.toolType === 7) {
+                // 弓臂弧（纵向 + 左凸 belly）：上臂尖 + 上臂段 + 下臂段 + 下臂尖
+                R(11, 3, 3, 2, head)            // 上臂尖
+                R(10, 5, 4, 6, head)            // 上臂段
+                R(9, 5, 2, 6, headLight)        // 上臂 belly 高光（左凸受光）
+                R(10, 13, 4, 6, head)           // 下臂段
+                R(9, 13, 2, 6, headLight)       // 下臂 belly 高光
+                R(11, 19, 3, 2, head)           // 下臂尖
+                // 弓弦（右侧直弦，连接上下臂尖）：细纵线
+                R(15, 4, 1, 16, headLight)
+                // 中央握把（深色缠绳，headDark 表「缠绕的握把」）
+                R(11, 10, 3, 4, headDark)
+                // 搭箭（弦中段水平箭，朝左尖）：杆 + 箭头 + 箭羽
+                R(7, 11, 9, 1, headLight)       // 箭杆（水平搭弦）
+                R(5, 11, 2, 1, head)            // 箭头（左尖）
+                R(16, 10, 2, 1, head)           // 箭羽（右尾上）
+                R(16, 12, 2, 1, head)           // 箭羽（右尾下）
+                return // 弓绘制完成（跳过下方工具柄 / 头）
+            }
 
             // 剑无对角木柄（整把纵向），其余四类共用对角木柄（从左下到右上）。
             if (root.toolType !== 5) {

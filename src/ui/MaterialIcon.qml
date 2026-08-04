@@ -22,7 +22,14 @@ import QtQuick
 //   0x20F 生物蛋（猪）—— 粉红蛋壳 + 居中猪鼻纹样（t243；t251 重做：原共用奶白壳仅小斑难辨 → 改主色+强身份纹）。
 //   0x210 生物蛋（牛）—— 棕底 + 大块白花斑（牛皮纹）+ 顶两小角（t243；t251 重做）。
 //   0x211 生物蛋（羊）—— 奶白蛋壳 + 满布灰卷绒纹（羊毛卷）（t243；t251 重做）。
+//   0x213 生物蛋（蹒跚者）—— 暗绿腐肉壳 + 棕褐腐斑 + 两颗红眼（t287/t303；机制等价僵尸 spawn egg）。
+//   0x214 生物蛋（骸骨）—— 灰白骨壳 + 黑色眼窝 + 纵向肋骨纹（t287/t303；机制等价骷髅 spawn egg）。
+//   0x215 生物蛋（潜行者）—— 深绿壳 + 浅绿迷彩斑 + 顶黄色火星（t287/t303；机制等价苦力怕 spawn egg；纯原创抽象配色，非 MC 苦力怕脸贴图）。
+//   0x216 生物蛋（蜘蛛）—— 近黑壳 + 多颗红眼 + 两侧伸出的腿线（t285/t303；机制等价蜘蛛 spawn egg）。
 //   0x212 钻石 —— 青白多面切割宝石（八边形轮廓 + 顶面高光菱 + 底阴影 + 几道切面棱线）（t279；机制等价 MC 钻石矿掉落）。
+//   0x217 骨头 —— 米白骨段 + 两端膨节（骨骺）+ 髓腔暗点（t299；杀骸骨掉落，机制等价 MC 骨头）。
+//   0x218 腐肉 —— 暗红褐腐块 + 绿霉斑 + 腐败裂痕（t299；杀蹒跚者掉落，区别于生牛肉的鲜亮红 + 横纹）。
+//   0x219 线 —— 浅米黄缠绕线团（多圈同心椭圆 + 交叉亮丝）（t299；杀蜘蛛掉落，弓 / 钓竿原料）。
 // 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭/桶同理 → 均独立自绘。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体 Repeater（sourceItem），
@@ -30,7 +37,7 @@ import QtQuick
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x212 钻石；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -389,6 +396,11 @@ Item {
             //   改为「蛋壳主色 = mob 主色 + 强身份纹样」三蛋一眼可辨（蛋形外轮廓三蛋一致，靠主色 + 纹样区分）：
             //     pig = 粉红蛋壳 + 居中猪鼻（椭圆鼻头 + 两鼻孔）；cow = 棕底 + 大块白花斑（牛皮纹）+ 顶两小角；
             //     sheep = 奶白蛋壳 + 满布灰卷绒纹（羊毛卷）。
+            //   t303 扩展敌对四蛋（t287 引入物品但 MaterialIcon 无 case → 落 default drawStick 显木棒；用户「蛋显方块」
+            //     泛指非蛋形）。沿用同一蛋形外轮廓 + 主色取各 mob 渲染色（playerController.cpp 蛋→mobType 映射），
+            //     靠主色 + 身份纹样区分（§9 区隔：纯原创抽象纹样，非 MC 苦力怕脸 / 僵尸皮贴图；机制对齐即可）：
+            //     shambler = 暗绿腐肉壳 + 棕褐腐斑 + 两颗红眼（僵尸眼）；bones = 灰白骨壳 + 黑眼窝 + 纵向肋骨纹；
+            //     stalker = 深绿壳 + 浅绿迷彩斑 + 顶黄色火星（引信/爆炸身份，非苦力怕脸）；spider = 近黑壳 + 红眼簇 + 两侧腿线。
             //   蛋形 = 上下收窄椭圆（rows 6..18、中部最宽 12）；纹样固定坐标散布（确定性，非随机源）。
             const drawSpawnEgg = (kind) => {
                 // 蛋形外轮廓（上下收窄椭圆；三蛋共用）。fillShell 据主色填蛋壳。
@@ -427,7 +439,7 @@ Item {
                     R(12, 12, 4, 3, white)   // 右下花斑
                     R(11, 9, 2, 2, white)    // 中上花斑
                     R(8, 14, 2, 2, white)    // 左下小斑
-                } else {
+                } else if (kind === "sheep") {
                     // 羊：奶白蛋壳 + 满布灰卷绒纹（羊毛卷）→ 奶白绒面一眼辨「羊」。
                     const shell = "#f5f0e8", lite = "#ffffff", dark = "#d0c8c0"
                     const curl = "#c8c0b8", curlDeep = "#b0a8a0"
@@ -444,6 +456,74 @@ Item {
                     for (const [c, r] of curls) R(c, r, 1, 1, curl)
                     // 少量深卷提层次
                     R(10, 10, 1, 1, curlDeep); R(13, 12, 1, 1, curlDeep); R(8, 14, 1, 1, curlDeep)
+                } else if (kind === "shambler") {
+                    // 蹒跚者（机制等价僵尸）：暗绿腐肉壳 + 棕褐腐斑 + 两颗红眼（僵尸的红色双眼）
+                    //   → 暗绿 + 红眼一眼辨「僵尸类」。纯原创抽象纹样（§9 区隔，非 MC 僵尸皮贴图）。
+                    const shell = "#4a6a3a", lite = "#6a8a4a", dark = "#2a4a1a"
+                    const rot = "#6a4a2a", eye = "#c83030"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边（圆柱明暗）
+                    // 棕褐腐斑（散布的不规则深棕块，表「腐烂溃口」）
+                    R(8, 10, 2, 2, rot)
+                    R(13, 11, 2, 1, rot)
+                    R(10, 14, 2, 1, rot)
+                    R(14, 14, 1, 1, rot)
+                    // 两颗红眼（居中偏上，僵尸的红色双眼 = 强身份特征）
+                    R(10, 8, 1, 1, eye)
+                    R(13, 8, 1, 1, eye)
+                } else if (kind === "bones") {
+                    // 骸骨（机制等价骷髅）：灰白骨壳 + 黑色眼窝 + 纵向肋骨纹
+                    //   → 灰白 + 黑眼窝一眼辨「骷髅类」。纯原创抽象纹样（§9 区隔，非 MC 骷髅贴图）。
+                    const shell = "#d8d8d0", lite = "#f0f0e8", dark = "#a8a8a0"
+                    const rib = "#989890", socket = "#2a2a2a"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边
+                    // 黑色眼窝（两个深黑小块，表「空洞眼窝」——骷髅身份）
+                    R(9, 9, 2, 2, socket)
+                    R(13, 9, 2, 2, socket)
+                    // 纵向肋骨纹（几道竖向浅纹，表「肋骨」）
+                    R(9, 12, 1, 4, rib)
+                    R(12, 12, 1, 4, rib)
+                    R(14, 13, 1, 3, rib)
+                } else if (kind === "stalker") {
+                    // 潜行者（机制等价苦力怕）：深绿壳 + 浅绿迷彩斑 + 顶黄色火星（引信将爆）
+                    //   → 深绿 + 顶火星一眼辨「自爆类」。§9 区隔：纯原创抽象配色（迷彩斑 + 引信火星），
+                    //   非 MC 苦力怕脸贴图（脸是 MC 强 trade dress，刻意避开；用「迷彩 + 火星」表同类机制）。
+                    const shell = "#3a5a3a", lite = "#4a6a4a", dark = "#2a4a2a"
+                    const speckle = "#5a7a4a", spark = "#f8d838"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边
+                    // 浅绿迷彩斑（散布的浅绿小斑，表「伪装迷彩」——与 shambler 的腐斑区分：更小更密、纯绿系）
+                    R(8, 10, 1, 1, speckle); R(11, 9, 1, 1, speckle); R(14, 10, 1, 1, speckle)
+                    R(9, 12, 1, 1, speckle); R(13, 12, 1, 1, speckle)
+                    R(8, 14, 1, 1, speckle); R(11, 15, 1, 1, speckle); R(14, 14, 1, 1, speckle)
+                    // 顶黄色火星（蛋顶上方一格，表「引信将爆」——潜行者的爆炸身份，区别于 shambler 的红眼）
+                    R(11, 5, 2, 1, spark)
+                } else if (kind === "spider") {
+                    // 蜘蛛：近黑壳 + 多颗红眼（蜘蛛复眼）+ 两侧伸出的腿线
+                    //   → 黑 + 红眼 + 腿一眼辨「蜘蛛类」。纯原创抽象纹样（§9 区隔）。
+                    const shell = "#2a1a1a", lite = "#4a2a2a", dark = "#1a0a0a"
+                    const eye = "#c81818", leg = "#1a0a0a"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光（暗红褐提亮）
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边
+                    // 多颗红眼（蜘蛛的红色复眼簇，居中偏上）
+                    R(9, 9, 1, 1, eye); R(11, 9, 1, 1, eye); R(13, 9, 1, 1, eye)
+                    R(10, 10, 1, 1, eye); R(12, 10, 1, 1, eye)
+                    // 两侧伸出的腿线（每侧 3 段短暗线，从蛋身向外辐射，表「蜘蛛腿」）
+                    R(5, 9, 1, 1, leg)
+                    R(4, 11, 2, 1, leg)
+                    R(5, 13, 1, 1, leg)
+                    R(18, 9, 1, 1, leg)
+                    R(18, 11, 2, 1, leg)
+                    R(18, 13, 1, 1, leg)
                 }
             }
 
@@ -478,6 +558,125 @@ Item {
                 R(5, 8, 1, 2, edge); R(18, 8, 1, 2, edge)
             }
 
+            // t299 敌对 mob 死亡掉落物（杀骸骨 / 蹒跚者 / 蜘蛛产出；机制等价 MC 1.0 敌对生物掉落，纯原创自绘 §9a）：
+            //   骨头 0x217 —— 经典骨头形：纵向骨干 + 两端膨节（骨骺），米白色 + 暖阴影，一眼辨「骨头」
+            //     （区别于皮革的棕黄兽皮 / 羊毛的白色绒团：骨头是硬质骨段 + 膨节，非柔韧皮毛）。
+            //   腐肉 0x218 —— 暗红褐腐块 + 绿斑霉点 + 深色腐败裂痕（区别于生牛肉的鲜亮红 + 横纹肌理：
+            //     腐肉主色明显更暗、带绿霉，表「变质」，非新鲜肉块）。
+            //   线 0x219 —— 浅色缠绕线团（多圈同心椭圆 + 几道交叉亮丝），表「一缕缠起的线」（蜘蛛丝原料）。
+            const drawBone = () => {
+                // 米白骨干 + 暖阴影 + 两端膨节。配色：bone #ece4d0（骨干主体）/ boneLight #fafaf0（受光高光）/
+                //   boneShade #b8a888（暗面 + 膨节阴影）/ marrow #6a5a40（骨端髓腔暗点，表「骨断面」）。
+                const bone = "#ece4d0", boneLight = "#fafaf0", boneShade = "#b8a888", marrow = "#6a5a40"
+                // 中央骨干（纵向竖条，rows 8..15；左右各 1px 受光 / 阴影表圆柱明暗）
+                R(11, 8, 3, 8, bone)
+                R(11, 8, 1, 8, boneLight)   // 左受光
+                R(13, 8, 1, 8, boneShade)   // 右阴影
+                // 上端膨节（骨骺，横向膨出 + 两侧圆球）
+                R(8, 6, 9, 2, bone)
+                R(8, 6, 9, 1, boneLight)
+                R(8, 7, 9, 1, boneShade)
+                R(7, 6, 2, 3, bone)         // 左圆球
+                R(16, 6, 2, 3, bone)        // 右圆球
+                R(7, 8, 2, 1, boneShade)
+                R(16, 8, 2, 1, boneShade)
+                // 下端膨节（同上端，镜像）
+                R(8, 16, 9, 2, bone)
+                R(8, 16, 9, 1, boneShade)
+                R(8, 17, 9, 1, boneLight)
+                R(7, 15, 2, 3, bone)
+                R(16, 15, 2, 3, bone)
+                R(7, 15, 2, 1, boneShade)
+                R(16, 15, 2, 1, boneShade)
+                // 髓腔暗点（上下膨节中心各一，表「骨断面腔」）
+                R(11, 6, 2, 1, marrow)
+                R(11, 17, 2, 1, marrow)
+            }
+
+            // 腐肉（0x218，t299）：杀蹒跚者（僵尸）掉落。MC 风格腐肉 = 暗红褐腐块 + 绿斑霉点 + 腐败裂痕。
+            //   纯原创自绘（§9a）。区别于生牛肉：主色更暗（褐红 vs 鲜红）+ 绿霉斑（变质的身份特征）。
+            //   配色：flesh #6a3028（暗红褐主体）/ fleshDark #3e1818（腐败裂痕 + 底阴影）/ fleshLight #8a4838
+            //   （受光高光）/ mold #5a7038（绿霉斑，表「长霉」）/ moldDark #3a4820（霉斑暗芯）。
+            const drawRottenFlesh = () => {
+                const flesh = "#6a3028", fleshDark = "#3e1818", fleshLight = "#8a4838"
+                const mold = "#5a7038", moldDark = "#3a4820"
+                // 腐块主体（不规则圆角块，rows 7..17；比生牛肉更暗褐）
+                R(7, 7, 11, 1, flesh)
+                R(6, 8, 13, 9, flesh)        // 主体 rows 8..16
+                R(7, 17, 11, 1, flesh)
+                // 顶受光（前两行略亮，表「湿润但暗淡」）
+                R(7, 7, 11, 1, fleshLight)
+                R(6, 8, 9, 1, fleshLight)
+                // 底阴影 + 圆角暗
+                R(7, 17, 11, 1, fleshDark)
+                R(6, 16, 1, 1, fleshDark); R(18, 16, 1, 1, fleshDark)
+                // 腐败裂痕（几道不规则深色裂痕，表「组织崩解」）
+                R(8, 10, 3, 1, fleshDark)
+                R(13, 11, 2, 1, fleshDark)
+                R(10, 13, 4, 1, fleshDark)
+                R(7, 14, 2, 1, fleshDark)
+                // 绿霉斑（散布的绿点 + 暗芯，表「长霉」——腐肉的身份特征，与生肉区分）
+                R(9, 9, 2, 2, mold);  R(10, 9, 1, 1, moldDark)
+                R(14, 13, 2, 2, mold);R(15, 14, 1, 1, moldDark)
+                R(8, 14, 1, 1, mold)
+                R(12, 9, 1, 1, moldDark)
+            }
+
+            // 线（0x219，t299）：杀蜘蛛掉落。MC 风格线 = 浅色缠绕线团（多圈同心椭圆 + 几道交叉亮丝）。
+            //   纯原创自绘（§9a）。配色：thread #e8e0c8（浅米黄线体）/ threadLight #faf8e8（高光丝）/ threadShade
+            //   #b8a888（阴影圈，表「缠绕层次」）。浅色 + 多圈缠绕一眼辨「一缕线」（非长直丝，而是缠起的线团）。
+            const drawString = () => {
+                const thread = "#e8e0c8", threadLight = "#faf8e8", threadShade = "#b8a888"
+                // 线团主体（中央椭圆块，rows 8..16）
+                R(8, 8, 9, 1, thread)
+                R(6, 9, 13, 7, thread)       // 主体 rows 9..15
+                R(8, 16, 9, 1, thread)
+                // 外圈缠绕阴影（左右两侧暗边，表「线团圆柱明暗」）
+                R(6, 9, 1, 7, threadShade)
+                R(18, 9, 1, 7, threadShade)
+                R(8, 16, 9, 1, threadShade)
+                // 同心缠绕圈（几道横向 + 斜向暗线，表「一圈圈缠起的线」）
+                R(8, 11, 11, 1, threadShade)
+                R(8, 14, 11, 1, threadShade)
+                R(9, 9, 1, 7, threadShade)
+                R(15, 9, 1, 7, threadShade)
+                // 高光亮丝（几道交叉亮线，表「丝线反光」）
+                R(9, 10, 6, 1, threadLight)
+                R(11, 12, 4, 1, threadLight)
+                R(10, 13, 1, 2, threadLight)
+                R(14, 10, 1, 3, threadLight)
+            }
+
+            // t304 箭（0x21A）：弓弹药。MC 风格箭 = 斜置杆 + 箭头 + 箭羽（fletching）。机制等价 MC 箭图标；
+            //   纯原创自绘（§9a）。配色：shaft #9c7340（木杆，同木棒亮面）/ shaftDark #6b4f24（杆暗面）/
+            //   tip #8a8a8a（灰色金属箭头）/ tipDark #585866（箭头暗边）/ fletch #e8e0c8（浅色箭羽，同线色族）。
+            const drawArrow = () => {
+                const shaft = "#9c7340", shaftDark = "#6b4f24"
+                const tip = "#8a8a8a", tipDark = "#585866"
+                const fletch = "#e8e0c8", fletchDark = "#b8a888"
+                // 箭杆（从左下 (4,20) 到右上 (18,6) 的对角木杆，每步右上移，2px 宽）
+                const segs = [
+                    [4, 20], [5, 19], [6, 18], [7, 17], [8, 16], [9, 15],
+                    [10, 14], [11, 13], [12, 12], [13, 11], [14, 10], [15, 9],
+                    [16, 8], [17, 7]
+                ]
+                for (const [c, r] of segs) {
+                    R(c, r, 2, 2, shaftDark)    // 杆暗面底
+                    R(c, r, 1, 2, shaft)        // 杆亮面（左上）
+                }
+                // 箭头（右上端，三角尖朝右上）：菱形 + 暗边
+                R(17, 5, 4, 2, tip)             // 箭头主体
+                R(18, 4, 3, 1, tip)             // 箭尖上收
+                R(19, 3, 2, 1, tipDark)         // 最尖
+                R(17, 7, 4, 1, tipDark)         // 箭头底描边（接杆处）
+                // 箭羽（左下端，三片尾羽）：浅色羽 + 暗边
+                R(2, 18, 3, 2, fletch)          // 上尾羽
+                R(2, 17, 1, 1, fletchDark)
+                R(3, 20, 3, 2, fletch)          // 下尾羽
+                R(3, 21, 1, 1, fletchDark)
+                R(5, 19, 2, 1, fletchDark)      // 羽根暗边（接杆处）
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             switch (root.materialId) {
             case 0x200: drawStick();        break
@@ -498,7 +697,15 @@ Item {
             case 0x20F: drawSpawnEgg("pig");   break // t243 生物蛋（猪）
             case 0x210: drawSpawnEgg("cow");   break // t243 生物蛋（牛）
             case 0x211: drawSpawnEgg("sheep"); break // t243 生物蛋（羊）
+            case 0x213: drawSpawnEgg("shambler"); break // t287/t303 生物蛋（蹒跚者；机制等价僵尸）
+            case 0x214: drawSpawnEgg("bones");    break // t287/t303 生物蛋（骸骨；机制等价骷髅）
+            case 0x215: drawSpawnEgg("stalker");  break // t287/t303 生物蛋（潜行者；机制等价苦力怕）
+            case 0x216: drawSpawnEgg("spider");   break // t285/t303 生物蛋（蜘蛛）
             case 0x212: drawDiamond();        break // t279 钻石（钻石矿挖掘掉落）
+            case 0x217: drawBone();           break // t299 骨头（杀骸骨掉落）
+            case 0x218: drawRottenFlesh();    break // t299 腐肉（杀蹒跚者掉落）
+            case 0x219: drawString();         break // t299 线（杀蜘蛛掉落）
+            case 0x21A: drawArrow();          break // t304 箭（弓弹药；铁锭+木棒+线合成 4 件）
             default:    drawStick();        break
             }
         }

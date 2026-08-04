@@ -36,6 +36,8 @@
      决定，非方块属性（同 Water 流水贴图模式）。tools/build_wheat.py 程序生成原创像素图，§9 override (a)。）
   37 diamond_ore（t279 钻矿石：散布于 stone 深层 y∈[5,16]，需铁镐采掘；机制等价 MC 1.0 钻石矿，名称/贴图
      原创自绘 §9a。各面同贴图=青白菱斑晶体嵌于石头底；tools/build_ore.py 程序生成原创像素图。）
+  38 wool（t300 羊毛方块：剪羊毛 / 杀羊掉落；机制等价 MC 1.0 羊毛，名称/贴图原创自绘 §9a。
+     各面同贴图=奶白羊毛底 + 浅灰卷曲绒毛纹；tools/build_wool.py 程序生成原创像素图。）
 （CC0 资产，来源见 docs/PLAN.md §L 资产管线；工作台贴图由 tools/build_crafting_table.py、
  熔炉贴图由 tools/build_furnace.py、矿石贴图由 tools/build_ore.py、火把贴图由 tools/build_torch.py、
  基岩贴图由 tools/build_bedrock.py、水贴图由 tools/build_water.py、箱子贴图由 tools/build_chest.py、
@@ -87,6 +89,8 @@ TILES = [
     "default_wheat_stage_7",        # 36 wheat_stage_7（成熟：穗更密、全金黄）
     "default_diamond_ore",          # 37 diamond_ore（t279 钻矿石；散布于 stone 深层 y∈[5,16]；需铁镐；
                                     #    机制等价 MC 1.0 钻石矿，名称/贴图原创自绘 §9a；各面同贴图=青白菱斑晶体）
+    "default_wool",                 # 38 wool（t300 羊毛方块；剪羊毛 / 杀羊掉落；机制等价 MC 1.0 羊毛，
+                                    #    名称/贴图原创自绘 §9a；各面同贴图=奶白羊毛底+浅灰卷曲绒毛纹）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

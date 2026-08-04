@@ -33,10 +33,14 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     /* SwordWood    */ {int(BlockRegistry::Sword),   1, 1.0f,   59, "sword_wood",    "木剑"},
     /* SwordStone   */ {int(BlockRegistry::Sword),   2, 1.0f,  131, "sword_stone",   "石剑"},
     /* SwordIron    */ {int(BlockRegistry::Sword),   3, 1.0f,  250, "sword_iron",    "铁剑"},
+    // t304 弓：type=Bow（不参与挖掘 → miningSpeedMul 恒 1.0 等同空手；弓的伤害走拉弓蓄力 + 箭，非 attackDamage）。
+    //   maxDurability=384（机制等价 MC 1.0 弓耐久；每次射箭 -1）。tier/speedMul 仅记账占位（语义同剑：无对应
+    //   采掘方块）。 displayName「弓」（§9 通用词；非 MC 专名）。
+    /* Bow          */ {int(BlockRegistry::Bow),     1, 1.0f,  384, "bow",           "弓"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
-static_assert(int(ToolRegistry::ToolCount) == 15, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+static_assert(int(ToolRegistry::ToolCount) == 16, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
 } // namespace
 
 bool ToolRegistry::isTool(int itemId)

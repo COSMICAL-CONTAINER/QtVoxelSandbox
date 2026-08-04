@@ -109,6 +109,23 @@ public:
     static constexpr int SpawnEggBonesId    = 0x214; // 生物蛋（骸骨）：右键 → 生成 Bones（敌对远程射箭，MobBones）
     static constexpr int SpawnEggStalkerId  = 0x215; // 生物蛋（潜行者）：右键 → 生成 Stalker（敌对爆炸，MobStalker）
     static constexpr int SpawnEggSpiderId   = 0x216; // t285 生物蛋（蜘蛛）：右键 → 生成 Spider（敌对快速，MobSpider）
+    // t299 敌对 mob 死亡掉落（材料段 0x217..0x219；机制等价 MC 1.0 敌对生物掉落物；非方块、可堆叠 64）：
+    //   杀骸骨（Bones）掉骨头 / 杀蹒跚者（Shambler）掉腐肉 / 杀蜘蛛（Spider）掉线。EntityManager mobDied 信号 →
+    //   Main.qml 据本 id 调 ItemEntityManager.spawnItem 生成掉落实体（同 t242 被动掉落模式；PLAN §2 分层：Entities
+    //   层发语义事件、呈现层只消费）。MaterialIcon 自绘图标 + 进创造调色板（Hotbar::creativeMaterials 拾取即满栈 64，
+    //   供测试 / 装饰直接取用；生存时由 mob 死亡掉落 / 拾取获得）。名称 / 图标全原创（§9 区隔，零 MC 资产 / 专名）。
+    //   **弓 + 箭掉落**（spec「骸骨→弓(带耐久)+箭+骨头」）归 t301（骷髅持弓）/ t304（弓箭物品系统）：那两任务注册弓 /
+    //   箭物品 + 持久耐久 + 拉弓射箭机制；本任务仅落骸骨的**材料**掉落（骨头），弓 / 箭留 t301 / t304（避免半成品弓
+    //   无图标 / 无用法的中间态）。
+    static constexpr int BoneId       = 0x217; // 骨头：杀骸骨（MobBones）掉落（机制等价 MC 1.0 骨头；可堆叠 64）
+    static constexpr int RottenFleshId= 0x218; // 腐肉：杀蹒跚者（MobShambler）掉落（机制等价 MC 1.0 腐肉；可堆叠 64）
+    static constexpr int StringId     = 0x219; // 线：杀蜘蛛（MobSpider）掉落（机制等价 MC 1.0 线；弓 / 钓竿原料，t304 弓配方用）
+    // t304 箭（弓弹药）：材料段 0x21A。可堆叠 64；非方块（材料段）→ 右键不放置。弓右键蓄力松开射出箭实体
+    //   （复用 t283 Arrow 实体 + EntityManager::spawnArrowPlayer）；命中 mob 伤害（蓄力越高伤害越高，1..6 HP）。
+    //   MaterialIcon 自绘箭头 + 杆 + 箭羽图标。创造调色板可取用（同木棒 / 铁锭等材料）；生存由合成获得
+    //   （铁锭 + 木棒 + 线 → 4 箭，机制等价 MC 1.0 箭配方燧石+棒+羽毛的本地化替代——本工程无燧石 / 羽毛，
+    //   用铁锭代箭头、线代羽毛）。名称 / 图标全原创（§9 区隔）。
+    static constexpr int ArrowId      = 0x21A; // 箭：弓弹药；铁锭+木棒+线合成 4 件；弓射出（t304）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

@@ -43,7 +43,7 @@
      「咕嘟」气泡 plop 瞬态，拟脚入水搅动），~0.16s。机制等价 MC 水中走路声（§9 原创，零 MC 资产）。
      不分材质（水中听感统一闷浊），单件 clip；Main.qml onWalkPhaseChanged 据玩家 feetInWater 分流到
      playWaterStep（替代按材质的 playStep）。
-   - mob_idle.wav / mob_idle_pig.wav / mob_idle_cow.wav / mob_idle_sheep.wav：生物环境 idle 叫声（t250
+   - mob_idle.wav / mob_idle_pig.wav / mob_idle_cow.wav / mob_idle_sheep.wav：被动生物环境 idle 叫声（t250
      牛叫/羊叫/猪叫，周期偶发；玩家听者范围内由 EntityManager 周期 emit mobAmbient 触发 →
      AudioManager.playMobAmbient 据 mobType 选播）。机制等价 MC 1.0 被动生物偶发 idle call（§9 原创，
      零 MC 资产；不照搬任何 MC 生物音效，仅机制对齐「周期 idle 叫声」）。
@@ -53,6 +53,20 @@
      - mob_idle_cow（牛哞）：长低频下扫 moo —— 基频 ~165→105Hz 缓降 + 慢 attack + 轻颤音，~0.62s。
      - mob_idle_sheep（羊咩）：带 AM 颤音的 bleat —— ~380Hz 载波 × ~11Hz 振幅调制（拟「咩-咩」颤抖），
        ~0.45s。
+   - mob_idle_shambler/bones/stalker/spider.wav：敌对生物环境 idle 叫声（t294「怪物叫声 idle」，补全
+     t250 仅被动生物有声的缺口：mobType≥4 旧兜底通用 mob_idle → 现各敌对子类独立音色）。机制等价 MC 1.0
+     敌对生物偶发 idle call（§9 原创，零 MC 资产；PLAN §9 区隔改名 shambler/bones/stalker/spider，
+     机制等价 僵尸/骷髅/苦力怕/蜘蛛，仅文件名用本项目区隔名，非 MC 专名）。同 t250 周期偶发路径（ambientTimer
+     8-16s + 听者范围门控）→ emit mobAmbient(mobType 4-7) → playMobAmbient 选播。注意与 t295 区分：本组是
+     周期 idle ambient（被动偶发），t295 是受击 / 近距 / 爆炸专属触发音（不同文件 / 不同合成）。
+     - mob_idle_shambler（哀嚎）：低频锯齿谐波叠加（1-5 次递减）+ ~28Hz growl AM（喉音粗糙颤）+ 慢下沉
+       ~112→90Hz + 气声 rasp，~0.55s。区别于牛哞：更粗糙 / 多谐波 / 带颤吼（非圆润双谐波）。
+     - mob_idle_bones（骨咔哒）：干脆的骨头咔哒 —— 不规则分布的多个短 click（高通白噪爆 + 偶尔空心头
+       800Hz tok），极快衰减，~0.30s。完全干percussive 无 sustain。
+     - mob_idle_stalker（嘶嘶）：引信燃灼感 —— 高通白噪 hiss + ~3000-3400Hz 略升哨音 + 半正弦 swell，~0.30s。
+       软（ambient rustle，非爆炸；爆炸走 explosion.wav）。
+     - mob_idle_spider（嘶嗡）：愤怒虫鸣 —— 高通 hiss + ~600Hz 载 × ~42Hz 攻击性 AM（振翅嗡）+ swell，~0.40s。
+       比 stalker 更持续 / 带嗡。
 
 确定性合成（每组固定 random.seed），同次运行产出字节一致的 WAV（便于 git/CI diff）。
 运行：python tools/build_sounds.py（输出到工程根 sounds/）。
@@ -558,6 +572,155 @@ def gen_mob_idle_sheep():
     return out
 
 
+def gen_mob_idle_shambler():
+    """敌对 Shambler（机制等价僵尸）idle 哀嚎（t294）：低频锯齿谐波叠加（1-5 次递减，喉音粗糙质感）+
+    ~28Hz growl AM（低频粗糙颤吼）+ 基频慢下沉 ~112→90Hz（呻吟下沉感）+ ~5Hz vibrato + 气声 rasp（undead
+    破损感），慢 attack 渐入 + 中衰减，~0.55s。机制等价 MC 敌对生物偶发 idle call（§9 原创，零 MC 资产；
+    PLAN §9 区隔改名 shambler，非 MC 专名）。mobAmbient(mobType=4) → playMobAmbient 触发（周期 ambientTimer
+    8-16s + 听者范围门控，同被动生物路径）。
+
+    vs 牛哞（gen_mob_idle_cow）：两者皆低频，但 shambler 用 5 次锯齿谐波 + growl AM → 粗糙 / 颤吼 /
+    不圆润（牛哞仅双谐波 + 6Hz 轻颤 = mellow 体腔感）；且 shambler 带 rasp 气声（亡灵破损）。
+    """
+    dur = 0.55
+    n = int(SR * dur)
+    random.seed(294074)  # t294 + mobType 4
+    out = []
+    for i in range(n):
+        t = i / dur       # 归一化 0..1（pitch bend 用）
+        ts = i / SR
+        # 基频缓慢下沉 112→90Hz（呻吟下沉）+ ~5Hz vibrato（声带轻颤）
+        f0 = 112.0 - 22.0 * t
+        vib = 4.0 * math.sin(2 * math.pi * 5.0 * ts)
+        # 锯齿谐波叠加（1-5 次递减）→ 喉音粗糙质感（区别于牛哞的圆润双谐波）
+        tone = 0.0
+        for h in range(1, 6):
+            tone += (1.0 / h) * math.sin(2 * math.pi * f0 * h * ts + vib)
+        tone *= 0.18            # 锯齿叠加后幅度大 → 缩到合量级
+        # 喉咙 growl：~28Hz AM（低频粗糙颤吼，亡灵的「嗬嗬」感）
+        growl = 0.5 + 0.5 * math.sin(2 * math.pi * 28.0 * ts)
+        # 气声 / 破损感（undead rasp，干涩呼吸）
+        rasp = random.uniform(-1, 1) * 0.12
+        attack = min(1.0, ts / 0.05)   # 慢起声（呻吟渐入，非冲击）
+        e = attack * env_exp(ts, 3.0)
+        s = (tone * growl + rasp) * e * 0.9
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
+def gen_mob_idle_bones():
+    """敌对 Bones（机制等价骷髅）idle 骨头咔哒（t294）：干脆的骨头咔哒 rattling —— 不规则分布的多个短 click
+    （高通白噪爆 + 偶尔空心头 800Hz tok），每个极快衰减（~10ms 高斯包络），整体 ~0.30s。完全干 percussive
+    无 sustain（骷髅骨架相互碰撞的标志干响）。机制等价 MC 敌对生物偶发 idle call（§9 原创，零 MC 资产；
+    PLAN §9 区隔改名 bones，非 MC 专名）。mobAmbient(mobType=5) → playMobAmbient 触发。
+
+    vs 受击 mob_hurt（gen_mob_hurt）：mob_hurt 是一声短叫（下扫 yelp），本 idle 是**多 click 串**（骨架颤响）；
+    vs 玩家 hurt：本 idle 高频干 percussive、无低频闷击。
+    """
+    dur = 0.30
+    n = int(SR * dur)
+    random.seed(294075)  # t294 + mobType 5
+    # 不规则分布的咔哒点（6-10 个，拟骨架一抖多骨相撞）
+    clicks = []
+    tc = 0.02
+    while tc < dur - 0.02:
+        clicks.append((tc,
+                       random.uniform(0.30, 0.55),     # 振幅
+                       random.uniform(0.006, 0.012),   # 高斯宽（极短，干脆）
+                       random.uniform(0, 2 * math.pi)))
+        tc += random.uniform(0.022, 0.045)
+    out = []
+    # 高通白噪态（干脆的骨头咔哒，去低频闷感；逐样本推进）
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+    hp_a = 0.85
+    for i in range(n):
+        t = i / SR
+        w = random.uniform(-1, 1)
+        v = hp_a * (hp_prev_out + w - hp_prev_in)
+        hp_prev_in = w
+        hp_prev_out = v
+        noise = v
+        s = 0.0
+        for ct, ca, cw, cph in clicks:
+            dtc = t - ct
+            if -0.02 < dtc < cw * 4.0:
+                env = math.exp(-(dtc ** 2) / (2 * cw * cw))
+                # 每个 click = 高通噪声爆（主）+ 偶尔空心头 tok（800Hz，骨架空腔回响）
+                s += ca * env * (0.7 * noise + 0.3 * math.sin(2 * math.pi * 800.0 * dtc + cph))
+        out.append(max(-1.0, min(1.0, s * 0.9)))
+    return out
+
+
+def gen_mob_idle_stalker():
+    """敌对 Stalker（机制等价苦力怕）idle 嘶嘶（t294）：引信燃灼感 —— 高通白噪 hiss（细颗粒燃灼）+
+    ~3000-3400Hz 略升哨音（引信灼烧的尖啸）+ 半正弦 swell（嘶嘶渐强再衰减，非瞬间冲击），~0.30s。软
+    （ambient rustle，非爆炸；爆炸走 explosion.wav，本 idle 仅暗示「附近有东西在嘶嘶」）。机制等价 MC 敌对
+    生物偶发 idle call（§9 原创，零 MC 资产；PLAN §9 区隔改名 stalker，非 MC 专名）。
+    mobAmbient(mobType=6) → playMobAmbient 触发。
+
+    vs explosion.wav（gen_explosion）：explosion 是低频轰 + 宽带爆裂瞬态（高冲击）；本 idle 是高频 hiss +
+    尖啸 swell（软 / 持续燃灼感，无低频轰）。
+    """
+    dur = 0.30
+    n = int(SR * dur)
+    random.seed(294076)  # t294 + mobType 6
+    out = []
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+    hp_a = 0.80                      # 高通（嘶嘶亮颗粒）
+    for i in range(n):
+        t = i / dur                  # 归一化 0..1（swell + pitch bend 用）
+        ts = i / SR
+        w = random.uniform(-1, 1)
+        v = hp_a * (hp_prev_out + w - hp_prev_in)
+        hp_prev_in = w
+        hp_prev_out = v
+        hiss = v
+        # 高频燃灼哨音（~3000→3400Hz 略升，引信灼烧的尖啸）
+        f_w = 3000.0 + 400.0 * t
+        whistle = math.sin(2 * math.pi * f_w * ts) * 0.12
+        # 慢 swell（半正弦 0→1→0，嘶嘶渐强再衰减）
+        swell = math.sin(math.pi * t)
+        s = (hiss * 0.5 + whistle) * swell
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
+def gen_mob_idle_spider():
+    """敌对 Spider（机制等价蜘蛛）idle 愤怒嘶嗡（t294）：高通白噪 hiss + ~600Hz 载波 × ~42Hz 攻击性 AM（振翅嗡，
+    虫鸣的攻击性颤）+ 半正弦 swell，~0.40s。比 stalker 更持续 / 带嗡（蜘蛛的愤怒虫鸣感）。机制等价 MC 敌对
+    生物偶发 idle call（§9 原创，零 MC 资产；PLAN §9 区隔改名 spider，非 MC 专名）。
+    mobAmbient(mobType=7) → playMobAmbient 触发。
+
+    vs stalker（gen_mob_idle_stalker）：stalker 是高频 hiss + 尖啸（无载波嗡）；spider 加 ~600Hz 载 × 42Hz AM
+    → 明显的「嗡嗡」虫鸣攻击感，更持续（0.40 vs 0.30s）。
+    """
+    dur = 0.40
+    n = int(SR * dur)
+    random.seed(294077)  # t294 + mobType 7
+    out = []
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+    hp_a = 0.78
+    for i in range(n):
+        t = i / dur                  # 归一化 0..1（swell 用）
+        ts = i / SR
+        w = random.uniform(-1, 1)
+        v = hp_a * (hp_prev_out + w - hp_prev_in)
+        hp_prev_in = w
+        hp_prev_out = v
+        hiss = v
+        # 虫鸣嗡：~600Hz 载波 × ~42Hz AM（攻击性振翅颤，虫鸣标志）
+        buzz_carrier = math.sin(2 * math.pi * 600.0 * ts) * 0.20
+        am = 0.5 + 0.5 * math.sin(2 * math.pi * 42.0 * ts)
+        # swell 包络（半正弦，渐强再衰减）
+        swell = math.sin(math.pi * t)
+        s = (hiss * 0.45 + buzz_carrier * am) * swell
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
 def gen_explosion():
     """爆炸音（t284 Stalker/苦力怕自爆）：低频闷击（爆炸的「轰」body）+ 起始宽带爆裂瞬态（冲击破空的「砰」）
     + 较长尾音（低频余响 + 衰减噪声，拟爆炸后的轰鸣回响），~0.5s。机制等价 MC 爆炸声（原创程序合成，§9 法律：
@@ -622,7 +785,11 @@ def main():
                       ("mob_idle", gen_mob_idle_generic),
                       ("mob_idle_pig", gen_mob_idle_pig),
                       ("mob_idle_cow", gen_mob_idle_cow),
-                      ("mob_idle_sheep", gen_mob_idle_sheep)]:
+                      ("mob_idle_sheep", gen_mob_idle_sheep),
+                      ("mob_idle_shambler", gen_mob_idle_shambler),
+                      ("mob_idle_bones", gen_mob_idle_bones),
+                      ("mob_idle_stalker", gen_mob_idle_stalker),
+                      ("mob_idle_spider", gen_mob_idle_spider)]:
         samples = gen()
         path = out_dir / f"{name}.wav"
         write_wav(path, samples)

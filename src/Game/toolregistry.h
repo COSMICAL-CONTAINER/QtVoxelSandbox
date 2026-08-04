@@ -71,7 +71,13 @@ public:
         SwordWood    = 0x10C, // 木剑：type=Sword tier 1，speedMul 1.0（不参与挖掘；剑攻击伤害归 t265）
         SwordStone   = 0x10D, // 石剑：type=Sword tier 2，speedMul 1.0
         SwordIron    = 0x10E, // 铁剑：type=Sword tier 3，speedMul 1.0
-        ToolCount    = 15,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
+        // t304 弓（远程武器）：type=Bow（BlockRegistry::Bow=7；不参与挖掘速度，miningSpeedMul 恒 1.0 等同空手）。
+        //   tier=1 / speedMul=1.0 仅为记账占位（弓的「速度」概念走拉弓蓄力，非挖掘 speedMul）。maxDurability=384
+        //   （机制等价 MC 1.0 弓耐久；每次射箭 -1，生存模式消耗）。弓近战 = 徒手（attackDamage 返 kFistDamage），
+        //   真实伤害由箭 + 蓄力决定（PlayerController bow draw/fire + EntityManager Arrow 命中）。不可堆叠（工具段
+        //   maxStack=1）。ToolIcon / 手持 3D（BowGeometry）/ tooltip 据 toolType===Bow 分流到弓形渲染。
+        Bow          = 0x10F, // 弓：type=Bow tier 1，speedMul 1.0（不参与挖掘）；右键长按拉弓 → 松开射箭（t304）
+        ToolCount    = 16,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
     };
 
     // 工具定义。表行索引 == itemId - ToolIdBase（连续）；详见 toolregistry.cpp kTools。

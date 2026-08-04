@@ -107,12 +107,18 @@ struct AudioManager::Data
     // t284 爆炸单件（Stalker/苦力怕自爆）。EntityManager::explosion → playExplosion 触发。短爆裂音（~0.5s），
     //   默认 2s maxFrames 远大于其长度、安全。
     Clip explosionClip{":/sounds/explosion.wav"};
-    // t250 mob 环境 idle 叫声 clip 池，按 mobType 索引（0=通用测试生物 / 1=猪 / 2=牛 / 3=羊）。EntityManager
+    // t250 mob 环境 idle 叫声 clip 池，按 mobType 索引。t294 扩到 8（被动 0-3 + 敌对 4-7）：
+    //   0=通用测试生物 / 1=猪 / 2=牛 / 3=羊（t250）/ 4=Shambler(哀嚎) / 5=Bones(骨咔哒) / 6=Stalker(嘶嘶) /
+    //   7=Spider(嘶嗡)（t294「怪物叫声 idle」，补全 t250 仅被动有声、敌对兜底通用的缺口）。EntityManager
     //   tick 内 ambientTimer 周期倒计时 → emit mobAmbient(mobType) → Main.qml 路由到 playMobAmbient 据
-    //   mobType 选播。机制等价 MC 1.0 被动生物偶发 idle call（原创程序合成，§9；零 MC 资产）。mobIdleClips
-    //   长度须 ≥ 最高 mobType+1（当前 4）；playMobAmbient 对越界 mobType 兜底用下标 0（generic）。
-    Clip mobIdleClips[4] = { {":/sounds/mob_idle.wav"}, {":/sounds/mob_idle_pig.wav"},
-                             {":/sounds/mob_idle_cow.wav"}, {":/sounds/mob_idle_sheep.wav"} };
+    //   mobType 选播。机制等价 MC 1.0 生物偶发 idle call（原创程序合成，§9；零 MC 资产；PLAN §9 区隔改名
+    //   shambler/bones/stalker/spider，非 MC 专名）。mobIdleClips 长度须 ≥ 最高 mobType+1（当前 8）；
+    //   playMobAmbient 对越界 mobType 兜底用下标 0（generic）。注意：本组是**周期 ambient idle**（被动偶发），
+    //   与 t295 受击 / 近距 / 爆炸专属触发音不同文件 / 不同合成。
+    Clip mobIdleClips[8] = { {":/sounds/mob_idle.wav"}, {":/sounds/mob_idle_pig.wav"},
+                             {":/sounds/mob_idle_cow.wav"}, {":/sounds/mob_idle_sheep.wav"},
+                             {":/sounds/mob_idle_shambler.wav"}, {":/sounds/mob_idle_bones.wav"},
+                             {":/sounds/mob_idle_stalker.wav"}, {":/sounds/mob_idle_spider.wav"} };
     // t177 环境音 / 风声床单件（长循环风声；构造后置 looping=true，start/stop 控制开关，
     //   setAmbientLevel 调强度）。进入 playing 启动、退菜单停止。
     Clip ambientClip{":/sounds/ambient_wind.wav"};
@@ -248,8 +254,9 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->hurtClip);
     d->loadClip(d->mobHurtClip);
     d->loadClip(d->explosionClip);
-    // t250 mob idle 叫声（猪哼 / 牛哞 / 羊咩 / 通用）—— 短 SFX（≤0.62s），默认 2s maxFrames 远大于其长度。
-    for (int i = 0; i < 4; ++i)
+    // t250/t294 mob idle 叫声（通用 / 猪哼 / 牛哞 / 羊咩 + 敌对 shambler/bones/stalker/spider）—— 短 SFX
+    //   （≤0.62s），默认 2s maxFrames 远大于其长度。
+    for (int i = 0; i < 8; ++i)
         d->loadClip(d->mobIdleClips[i]);
     // 环境音是 8.0s 长循环（build_sounds.py 首末 50ms 三角窗淡化保无缝），maxFrames 放宽到 16s
     // 保完整解码 —— 默认 2s 上限会把 8s 截到 2s，使循环点落在满幅中波、回绕到淡化起点 ≈0 →
@@ -266,7 +273,7 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->hurtClip);
     d->initSound(d->mobHurtClip);
     d->initSound(d->explosionClip);
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 8; ++i)
         d->initSound(d->mobIdleClips[i]);
     d->initSound(d->ambientClip);
     d->initSound(d->waterFlowClip);
@@ -294,8 +301,11 @@ AudioManager::AudioManager(QObject *parent)
         << " door_open=" << d->doorOpenClip.ok << " door_close=" << d->doorCloseClip.ok
         << " hurt=" << d->hurtClip.ok << " mob_hurt=" << d->mobHurtClip.ok
         << " explosion=" << d->explosionClip.ok
-        << " mob_idle(gen/pig/cow/sheep)=" << d->mobIdleClips[0].ok << "/" << d->mobIdleClips[1].ok
+        << " mob_idle(gen/pig/cow/sheep/shambler/bones/stalker/spider)="
+        << d->mobIdleClips[0].ok << "/" << d->mobIdleClips[1].ok
         << "/" << d->mobIdleClips[2].ok << "/" << d->mobIdleClips[3].ok
+        << "/" << d->mobIdleClips[4].ok << "/" << d->mobIdleClips[5].ok
+        << "/" << d->mobIdleClips[6].ok << "/" << d->mobIdleClips[7].ok
         << " ambient_wind=" << d->ambientClip.ok
         << " water_flow=" << d->waterFlowClip.ok
         << " water_step=" << d->waterStepClip.ok;
@@ -318,7 +328,7 @@ AudioManager::~AudioManager()
     if (d->hurtClip.ok) ma_sound_uninit(&d->hurtClip.sound);
     if (d->mobHurtClip.ok) ma_sound_uninit(&d->mobHurtClip.sound);
     if (d->explosionClip.ok) ma_sound_uninit(&d->explosionClip.sound);
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 8; ++i)
         if (d->mobIdleClips[i].ok) ma_sound_uninit(&d->mobIdleClips[i].sound);
     if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
     if (d->waterFlowClip.ok) ma_sound_uninit(&d->waterFlowClip.sound);
@@ -377,10 +387,21 @@ void AudioManager::playHurt()
     d->replay(d->hurtClip, m_volume * 0.9f);
 }
 
-void AudioManager::playMobHurt()
+// t248 通用生物受击音 + t295 敌对专属受击音：mobType 路由 —— 被动（0-3）走通用 mob_hurt.wav（creature
+//   yelp）；敌对（4-7）复用其 ambient idle clip 作受击专属音（spec t295「骨头敲击/蜘蛛嘶/僵尸哀嚎/苦力怕
+//   爆炸声」——Shambler 哀嚎 / Bones 骨头敲击 / Spider 蜘蛛嘶嗡 / Stalker 嘶嘶；机制等价 MC 敌对受击声与其
+//   idle 叫声同族）。Stalker 爆炸专属音（爆炸声）走 playExplosion 的 detonation 路径，其受击用嘶嘶 idle。
+//   越界 mobType（防御 caller 误传 / 将来新增子类未补）→ 兜底用通用 mob_hurt.wav（永不静默）。音量同 hurt
+//   量级（生物受击反馈；§9 原创合成，与玩家 hurt 区分）。PlayerController.mobAttacked(mobType,crit) 触发。
+void AudioManager::playMobHurt(int mobType)
 {
-    // mob 受击音与 hurt 同量级（生物受击反馈；机制等价 MC 生物受击声，§9 原创合成，与玩家 hurt 区分）。
-    d->replay(d->mobHurtClip, m_volume * 0.9f);
+    if (mobType >= 4 && mobType <= 7) {
+        // 敌对专属受击音：复用其 ambient idle clip（已在 mobIdleClips[4..7] 加载）。
+        d->replay(d->mobIdleClips[size_t(mobType)], m_volume * 0.9f);
+    } else {
+        // 被动 / 通用 / 越界：通用 mob_hurt.wav（creature yelp）。
+        d->replay(d->mobHurtClip, m_volume * 0.9f);
+    }
 }
 
 // t284 爆炸音（Stalker/苦力怕自爆）：略响于 hurt/mob_hurt（爆炸是高冲击事件，前景反馈）。机制等价 MC 爆炸声
@@ -391,12 +412,13 @@ void AudioManager::playExplosion()
     d->replay(d->explosionClip, m_volume);
 }
 
-// t250 mob 环境 idle 叫声（牛叫/羊叫/猪叫）：按 mobType 选 mob_idle clip。mobType 越界（防御 caller 误传 /
-//   将来新增子类未补 clip）→ 兜底用下标 0（generic）。音量略低于 break（环境偶发音，不抢前景）。
+// t250/t294 mob 环境 idle 叫声（被动牛叫/羊叫/猪叫 + 敌对 shambler/bones/stalker/spider idle）：按 mobType
+//   选 mob_idle clip。mobType 越界（防御 caller 误传 / 将来新增子类未补 clip）→ 兜底用下标 0（generic）。
+//   音量略低于 break（环境偶发音，不抢前景）。t294：mobType 4-7 旧兜底通用 → 现各敌对子类独立音色。
 void AudioManager::playMobAmbient(int mobType)
 {
     int idx = mobType;
-    if (idx < 0 || idx >= 4) idx = 0; // 越界 → generic 兜底（永不静默：spec 缺组用最常见音色）
+    if (idx < 0 || idx >= 8) idx = 0; // 越界 → generic 兜底（永不静默：spec 缺组用最常见音色）
     d->replay(d->mobIdleClips[size_t(idx)], m_volume * 0.85f);
 }
 
