@@ -20,16 +20,23 @@ ItemEntityManager::ItemEntityManager(QObject *parent) : QObject(parent)
 void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count)
 {
     if (itemId <= 0) return; // air / 非法：不产出（PlayerController 仅在 drop=true 时发，已过滤）
-    if (int(m_entities.size()) >= kCap) {
+    if (m_liveCount >= kCap) {
         qCWarning(lcItem) << "item entity cap reached (" << kCap << "); spawn skipped at" << x << y << z;
         return;
     }
     if (count < 1) count = 1; // 缺省 / 非法 → 单件（与历史调用兼容）
-    m_entities.push_back(ItemEntity{QVector3D(x + 0.5f, y + 0.5f, z + 0.5f), itemId, count, m_clock.elapsed()});
+    acquireSlot(ItemEntity{QVector3D(x + 0.5f, y + 0.5f, z + 0.5f), itemId, count, m_clock.elapsed()}); // t256 slot 复用
     ++m_revision;
     emit entitiesChanged();
     qCInfo(lcItem) << "spawned item entity id=" << itemId << "count=" << count << "at" << x << y << z
-                   << "(total" << m_entities.size() << ")";
+                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+}
+
+// t256：第 i 个槽位是否活体。空槽 → false（呈现层 delegate visible 隐藏 + pickupScan 跳过）。
+bool ItemEntityManager::aliveAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    return m_entities[size_t(i)].alive;
 }
 
 QVector3D ItemEntityManager::posAt(int i) const
@@ -53,15 +60,18 @@ int ItemEntityManager::countAt(int i) const
 
 // t64：拾取装不下时把余数回写、保留 entity（dropHeldCursor 整栈丢弃后部分拾取的回退路径）。
 // n<=0 销毁该实体（余数为 0 = 全拾走 → removeAt 语义）。bump revision 驱动 QML 数量绑定重算。
+// t256：销毁走 releaseSlot（标空 + 入 free list，不 erase-shift）→ count 单调不降 → Repeater delegate
+//   不泄漏（掉落物 spawn/拾取抖动同掉落沙族泄漏，slot 复用根治）。
 void ItemEntityManager::setCountAt(int i, int n)
 {
     if (i < 0 || i >= int(m_entities.size())) return;
     ItemEntity &e = m_entities[size_t(i)];
+    if (!e.alive) return; // t256：空槽防御
     if (e.count == n) return;
     if (n <= 0) {
-        // 余数为 0 = 全拾走 → 销毁实体（同 removeAt 路径，但走 setCountAt(0) 调用方语义统一）。
-        m_entities.erase(m_entities.begin() + i);
-        qCInfo(lcItem) << "item entity at index" << i << "consumed fully (remaining" << m_entities.size() << ")";
+        // 余数为 0 = 全拾走 → 释放槽位（同 removeAt 路径，但走 setCountAt(0) 调用方语义统一）。
+        releaseSlot(i);
+        qCInfo(lcItem) << "item entity at index" << i << "consumed fully (live" << m_liveCount << "slots" << m_entities.size() << ")";
     } else {
         e.count = n;
         qCInfo(lcItem) << "item entity at index" << i << "count ->" << n
@@ -71,16 +81,19 @@ void ItemEntityManager::setCountAt(int i, int n)
     emit entitiesChanged();
 }
 
-// 销毁第 i 个实体（t36 拾取消费）。erase-shift：其后元素前移、size--，保持位置 / 索引连续。
-// bump revision 驱动 QML Repeater delegate 的 posAt/itemIdAt 绑定（触碰 revision）重算 →
-// shift 后 delegate[k] 对齐新的 entity[k] 数据。count-- 同时让 Repeater 移除末位多余 delegate。
+// 销毁第 i 个实体（t36 拾取消费）。t256：改 releaseSlot（标空 + 入 free list）替代 erase-shift —— 保
+//   count 单调不降 → Repeater 不需销毁 reparent 的 3D delegate → 消除 spawn/拾取抖动致 delegate 泄漏。
+//   release 不 shift 索引（slot 稳定），bump revision 驱动 delegate 的 {revision; posAt/...} 绑定重算
+//   （空槽 aliveAt=false → delegate visible=false 隐藏；复用时 visible=true + 数据重绑）。
 void ItemEntityManager::removeAt(int i)
 {
     if (i < 0 || i >= int(m_entities.size())) return;
-    m_entities.erase(m_entities.begin() + i);
+    if (!m_entities[size_t(i)].alive) return; // t256：空槽防御（重复 remove 安全）
+    releaseSlot(i);
     ++m_revision;
     emit entitiesChanged();
-    qCInfo(lcItem) << "picked up item entity at index" << i << "(remaining" << m_entities.size() << ")";
+    qCInfo(lcItem) << "picked up item entity at index" << i
+                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
 }
 
 // t53：第 i 个实体是否已过新生免拾取期（spawn 后 kPickupDelayMs）。
@@ -102,6 +115,7 @@ void ItemEntityManager::tick(qreal dt, World *world)
     if (!world || m_entities.empty()) return;
     bool dirty = false;
     for (auto &e : m_entities) {
+        if (!e.alive) continue; // t256：跳过已释放的空槽（slot-reuse 残留位；不参与物理）
         const int cx = qFloor(e.pos.x());
         const int cz = qFloor(e.pos.z());
         if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过（防越界误判）

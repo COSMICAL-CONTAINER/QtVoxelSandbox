@@ -54,6 +54,12 @@ public:
 
     int count() const { return int(m_entities.size()); }
     int revision() const { return m_revision; }
+    // t256：当前**活体**实体数（不含已释放的空槽）。F3 draw-call 估算用它（空槽 delegate visible=false
+    //   不参与绘制）。spawn 上限判定（kCap）也读它（空槽可复用，不算满）。
+    Q_INVOKABLE int liveCount() const { return m_liveCount; }
+    // t256：第 i 个槽位是否活体。呈现层 delegate 据它 visible：空槽隐藏（slot 复用保 Repeater count
+    //   单调不降、delegate 永不销毁）。越界 → false。pickupScan 也据此跳过空槽。
+    Q_INVOKABLE bool aliveAt(int i) const;
 
     // 在方块格 (x,y,z)（整数坐标）生成一个 itemId 的掉落实体。位置存该格中心
     // (x+0.5, y+0.5, z+0.5)（实体悬浮在格中央）。达到 kCap → 跳过 + qWarning（防溢出）。
@@ -78,8 +84,8 @@ public:
     // delegate 的 posAt/itemIdAt 绑定（触碰 revision）整列重算，shift 后各 delegate 对齐新数据。
     Q_INVOKABLE void removeAt(int i);
     // t176 存档：清空所有掉落实体（切世界 / 退出存档前调，防上一世界的掉落物残留进新世界）。emit
-    //   entitiesChanged → count=0 → QML Repeater 清空 delegate。
-    Q_INVOKABLE void clearAll() { m_entities.clear(); emit entitiesChanged(); }
+    //   entitiesChanged → count=0 → QML Repeater 清空 delegate。t256：同步清空槽位 free list + live 计数。
+    Q_INVOKABLE void clearAll() { m_entities.clear(); m_freeSlots.clear(); m_liveCount = 0; emit entitiesChanged(); }
 
     // t53：第 i 个实体是否已过「新生免拾取期」（spawn 后 kPickupDelayMs 内 false → pickupScan 跳过）。
     // 破块瞬间实体常落在玩家近旁（如脚下方块中心距玩家中心仅 ~1.4 格 < kPickupDist 1.5），若无免拾窗
@@ -128,10 +134,47 @@ private:
         qint64 spawnMs = 0;  // 生成时刻（m_clock.elapsed()）；t53 isPickupReady 算 age 用
         float vy = 0.0f;     // t60：垂直速度（blocks/s；向下为负）；落地后归 0
         bool resting = false;// t60：是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
+        // t256：槽位占用标志（slot-reuse 模型，同 EntityManager::Entity::alive）。true = 活体；false = 已释放
+        //   空槽（待复用）。放末位：spawnItem 的聚合初始化 {pos,itemId,count,spawnMs} 不显式列 alive →
+        //   取默认 true（C++ 聚合初始化尾字段缺省即 default member init）。掉落物被拾取（removeAt /
+        //   setCountAt(0)）后 releaseSlot → alive=false；下次 spawnItem 复用空槽。tick / pickupScan 跳过
+        //   空槽；呈现层 delegate visible:aliveAt(index)。
+        bool alive = true;
     };
     std::vector<ItemEntity> m_entities;
     int m_revision = 0;
     QElapsedTimer m_clock; // 构造时 start()；spawn 记 elapsed、拾取算 age（墙钟，暂停期照常流逝无残留锁）
+
+    // t256 slot-reuse（修掉落沙衍生掉落物 delegate 泄漏；机制同 EntityManager，详见其注释）：实体移除
+    //   （拾取 / setCountAt(0)）不再 erase-shift，而 releaseSlot 标 alive=false + 入 free list；下次 spawn
+    //   复用空槽。m_entities.size()（=count 属性 = QML Repeater model）单调不降 → Repeater 不需销毁 reparent
+    //   的 3D delegate（lessons-learned t170：reparent 后的 3D delegate count 减小不销毁 → 掉落物 spawn/拾取
+    //   抖动致 delegate 累积泄漏）。沙落不完整方块变掉落物（fallingBlockDropped → spawnItem）+ 生存挖掘产出
+    //   均频繁 spawn/拾取，同族泄漏；slot 复用根治。高水位受 kCap(200) 钳制，与既有峰值并发同量级。
+    std::vector<int> m_freeSlots; // 已释放可复用的槽索引（LIFO）
+    int m_liveCount = 0;          // 活体实体数（= m_entities.size() − 空槽数）；spawn 上限 + F3 draw 估算读它
+
+    int acquireSlot(ItemEntity &&e)
+    {
+        int slot;
+        if (!m_freeSlots.empty()) {
+            slot = m_freeSlots.back();
+            m_freeSlots.pop_back();
+            m_entities[size_t(slot)] = std::move(e);
+        } else {
+            m_entities.push_back(std::move(e));
+            slot = int(m_entities.size()) - 1;
+        }
+        ++m_liveCount;
+        return slot;
+    }
+    void releaseSlot(int idx)
+    {
+        if (idx < 0 || idx >= int(m_entities.size())) return;
+        m_entities[size_t(idx)].alive = false;
+        m_freeSlots.push_back(idx);
+        --m_liveCount;
+    }
 
     static constexpr int kCap = 200;             // 实体数上限（spec：>200 跳过 / 合并）
     static constexpr qint64 kPickupDelayMs = 500; // 新生免拾取期（ms；t53 让实体先可见再可拾）

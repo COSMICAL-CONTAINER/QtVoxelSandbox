@@ -75,6 +75,12 @@ public:
 
     int count() const { return int(m_entities.size()); }
     int revision() const { return m_revision; }
+    // t256：当前**活体**实体数（不含已释放的空槽）。F3 draw-call 估算用它（空槽 delegate 已 visible=false
+    //   不参与绘制，count 会高估）。spawn 上限判定（kCap）也读它（空槽可复用，不算满）。
+    Q_INVOKABLE int liveCount() const { return m_liveCount; }
+    // t256：第 i 个槽位是否活体（= 已分配未释放）。呈现层 delegate 据它 visible：空槽 → 隐藏整棵 delegate
+    //   （slot 复用保 Repeater count 单调不降、delegate 永不销毁，空槽仅隐藏不重建）。越界 → false。
+    Q_INVOKABLE bool aliveAt(int i) const;
 
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
     // 管）/ FallingBlock=贴图方块）。
@@ -104,8 +110,9 @@ public:
     // 呈现层 onBlockBroken 递归触发上方沙）实现。达 kCap → 跳过 + 告警（防溢出）。
     Q_INVOKABLE void spawnFallingBlock(int x, int y, int z, int blockId);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
-    //   emit entitiesChanged → count=0 → QML Repeater 清空 delegate。
-    Q_INVOKABLE void clearAll() { m_entities.clear(); emit entitiesChanged(); }
+    //   emit entitiesChanged → count=0 → QML Repeater 清空 delegate。t256：同步清空槽位 free list +
+    //   live 计数（slot 复用模型见 acquireSlot/releaseSlot）。
+    Q_INVOKABLE void clearAll() { m_entities.clear(); m_freeSlots.clear(); m_liveCount = 0; emit entitiesChanged(); }
 
     // 第 i 个实体的渲染数据（呈现层 Repeater delegate 绑它摆位 + 配色）。越界返回安全默认。
     Q_INVOKABLE QVector3D posAt(int i) const;
@@ -210,6 +217,11 @@ signals:
 
 private:
     struct Entity {
+        // t256：槽位占用标志（slot-reuse 模型）。true = 已分配的活体实体；false = 已释放的空槽（在
+        //   m_freeSlots 中待复用）。与 mob 的 dead（死亡动画期）正交：濒死 mob 仍 alive=true（占槽播
+        //   死亡动画），deathTimer 到才 releaseSlot → alive=false（空槽，delegate 隐藏）。呈现层 delegate
+        //   绑 visible:aliveAt(index) → 空槽隐藏；C++ 各遍历（tick/findMobHit/resolvePlayerPush）跳过空槽。
+        bool alive = true;
         QVector3D pos;
         // t252 碰撞箱缩小：XZ 半宽（halfW）与 Y 半高（halfH）分离（旧版单一 radius=0.5 致所有 mob
         //   碰撞感「整立方大」1×1×1）。按 mobType 设：MobTest 0.5/0.5（保 t95 旧路径）；pig/sheep
@@ -252,6 +264,41 @@ private:
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;
+
+    // t256 slot-reuse（修掉落沙 delegate 泄漏）：实体移除（着地 / 死亡 / 跌出）不再 erase-shift，而把槽位
+    //   标 alive=false + 入 m_freeSlots；下次 spawn 优先复用空槽。于是 m_entities.size()（=count 属性 = QML
+    //   Repeater model）在游玩期**单调不降** → Repeater 永不需要销毁已 reparent 的 3D delegate。根因：
+    //   lessons-learned t170「reparent 后的 3D delegate 在 Repeater count 减小时不被销毁」——掉落沙频繁
+    //   spawn/land 使 count 上下抖动，每次「升」新建的 delegate（BlockCube + 材质 + 子 Model）在「降」时
+    //   不回收 → 10min 累积数千孤儿 delegate → ~2GB / 卡顿；重启清零（症状吻合）。slot 复用让 count 不降
+    //   → delegate 一次创建后稳定复用（空槽仅 visible=false 隐藏，不销毁不新建）→ 无累积。高水位受 kCap
+    //   钳制（≤64 槽），与既有「峰值并发实体数」同量级，无额外常驻开销。
+    std::vector<int> m_freeSlots; // 已释放可复用的槽索引（LIFO）
+    int m_liveCount = 0;          // 活体实体数（= m_entities.size() − 空槽数）；spawn 上限 + F3 draw 估算读它
+
+    // 把构造好的实体放入槽位（优先复用空槽，否则追加）。move 入槽后 alive=true（Entity 默认）。++m_liveCount。
+    int acquireSlot(Entity &&e)
+    {
+        int slot;
+        if (!m_freeSlots.empty()) {
+            slot = m_freeSlots.back();
+            m_freeSlots.pop_back();
+            m_entities[size_t(slot)] = std::move(e);
+        } else {
+            m_entities.push_back(std::move(e));
+            slot = int(m_entities.size()) - 1;
+        }
+        ++m_liveCount;
+        return slot;
+    }
+    // 释放槽位：alive=false + 入 free list + --m_liveCount。不 erase → count 不降 → Repeater delegate 稳定。
+    void releaseSlot(int idx)
+    {
+        if (idx < 0 || idx >= int(m_entities.size())) return;
+        m_entities[size_t(idx)].alive = false;
+        m_freeSlots.push_back(idx);
+        --m_liveCount;
+    }
 
     // t239 AI wander 自主移动（tick 内 Mob 分支调）：时间片倒计时到 → 随机选向 + idle/行走；行走按 yaw 逐轴
     //   （X 后 Z）世界边界 clamp + 方块碰撞撤回。返回是否真位移（驱动 dirty + moveSpeed）。worldW/worldD =

@@ -52,7 +52,7 @@ void EntityManager::spawnMob(int x, int y, int z)
 //   达 kCap 跳过 + 告警（防溢出，spec「实体数量有上限」）。bump revision → QML Repeater 追加 delegate。
 void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth)
 {
-    if (int(m_entities.size()) >= kCap) {
+    if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); spawnMobTyped skipped at" << x << y << z;
         return;
     }
@@ -91,10 +91,11 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
     e.stepAccum = 0.0f;
     e.ambientTimer = kAmbientMin
                      + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
-    m_entities.push_back(std::move(e));
+    acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
-    qCInfo(lcEnt) << "spawned mob type" << mobType << "at" << x << y << z << "(total" << m_entities.size() << ")";
+    qCInfo(lcEnt) << "spawned mob type" << mobType << "at" << x << y << z
+                  << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
 }
 
 // t117 生成下落方块实体：存格中心 + blockId + pushable=false + kind=FallingBlock。bump revision →
@@ -102,7 +103,7 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
 // 重力 tick 下落，着地时 world->setBlockFromEntity 放置 blockId 并移除（链式塌落由 caller 控制）。
 void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
 {
-    if (int(m_entities.size()) >= kCap) {
+    if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); falling block spawn skipped at" << x << y << z;
         return;
     }
@@ -113,11 +114,18 @@ void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
     e.pushable = false; // 下落方块不被玩家推动（同掉落物变体）
     e.kind = FallingBlock;
     e.blockId = blockId;
-    m_entities.push_back(std::move(e));
+    acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
     qCInfo(lcEnt) << "spawned falling block id=" << blockId << "at" << x << y << z
-                  << "(total" << m_entities.size() << ")";
+                  << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+}
+
+// t256：第 i 个槽位是否活体（已分配未释放）。空槽 → false（呈现层 delegate 据它 visible 隐藏）。
+bool EntityManager::aliveAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    return m_entities[size_t(i)].alive;
 }
 
 QVector3D EntityManager::posAt(int i) const
@@ -250,7 +258,7 @@ void EntityManager::damageEntity(int i, int amount)
 {
     if (i < 0 || i >= int(m_entities.size())) return;
     Entity &e = m_entities[size_t(i)];
-    if (e.kind != Mob || e.dead || amount <= 0) return;
+    if (!e.alive || e.kind != Mob || e.dead || amount <= 0) return; // t256：空槽防御（caller 已过滤）
 
     e.health -= amount;
     if (e.health < 0) e.health = 0;
@@ -290,7 +298,7 @@ int EntityManager::findMobHit(const QVector3D &origin, const QVector3D &dir, flo
     if (dirLen2 < 1e-8f) return -1;
     for (size_t i = 0; i < m_entities.size(); ++i) {
         const Entity &e = m_entities[i];
-        if (e.kind != Mob || e.dead) continue;
+        if (!e.alive || e.kind != Mob || e.dead) continue; // t256：跳过空槽（slot-reuse 残留位）
         // Slab 法 ray-AABB：对每轴 t1 = (min - origin) / dir、t2 = (max - origin) / dir；tmin = max(per-axis near)、
         //   tmax = min(per-axis far)；命中 ⟺ tmax >= tmin && tmax >= 0 && tmin <= maxDist。
         //   dir 分量近 0 时该轴 slab 退化为「整轴在内」约束（origin ∈ [min,max] → -inf..+inf，否则永不命中）。
@@ -338,7 +346,7 @@ void EntityManager::knockback(int i, float dirX, float dirZ)
 {
     if (i < 0 || i >= int(m_entities.size())) return;
     Entity &e = m_entities[size_t(i)];
-    if (e.kind != Mob || e.dead) return;
+    if (!e.alive || e.kind != Mob || e.dead) return; // t256：空槽防御（caller 已过滤）
 
     // 归一方向（caller 应已传合理向量，此处防御零 / 非有限）。len 非有限或近 0 → yaw 朝向兜底。
     float len = std::sqrt(dirX * dirX + dirZ * dirZ);
@@ -477,7 +485,7 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
     const float pminY = playerFeet.y(), pmaxY = playerFeet.y() + height;
     bool dirty = false;
     for (auto &e : m_entities) {
-        if (!e.pushable || e.dead) continue; // 掉落物等非推动 + t239 dead mob 跳过
+        if (!e.alive || !e.pushable || e.dead) continue; // t256 空槽 + 掉落物等非推动 + t239 dead mob 跳过
 
         const float ehw = e.halfW; // 实体 XZ 半宽（圆碰撞半径）
         const float ehh = e.halfH; // 实体 Y 半高（垂直区间）
@@ -572,6 +580,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
 
     for (int idx = 0; idx < int(m_entities.size()); ++idx) {
         Entity &e = m_entities[size_t(idx)];
+        if (!e.alive) continue; // t256：跳过已释放的空槽（slot-reuse 残留位；不参与物理 / AI）
 
         // --- FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）---
         if (e.kind == FallingBlock) {
@@ -708,7 +717,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
                         const int sfx = qFloor(e.pos.x());
                         const int sfz = qFloor(e.pos.z());
                         const int sfy = qFloor(e.pos.y() - e.halfH) - 1;
-                        const quint8 sid = (sfy >= 0) ? world->blockAt(sfx, sfy, sfz) : BlockRegistry::Air;
+                        const quint8 sid = (sfy >= 0) ? world->blockAt(sfx, sfy, sfz) : quint8(BlockRegistry::Air);
                         emit mobStep(e.mobType, int(sid));
                     }
                 }
@@ -812,9 +821,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
         if (e.kind == Mob && e.pos.y() < 0.0f) { toRemove.push_back(idx); dirty = true; }
     }
 
-    // 逆序 erase 已着地 / 跌出的 FallingBlock + deathTimer 到 / void-loss 的 Mob（逆序保未处理索引有效）。
+    // t256：移除的实体（着地 / 跌出的 FallingBlock + deathTimer 到 / void-loss 的 Mob）改 releaseSlot（标
+    //   alive=false + 入 free list）替代 erase-shift —— 保 m_entities.size()（=count 属性 = QML Repeater
+    //   model）单调不降 → Repeater 不需销毁 reparent 的 3D delegate → 消除掉落沙 spawn/land 抖动致 delegate
+    //   泄漏。release 不 shift 索引，顺序无关（逆序仅为保留与旧 erase 路径一致的可读性）。
     for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it)
-        m_entities.erase(m_entities.begin() + *it);
+        releaseSlot(*it);
 
     if (dirty || !toRemove.empty()) { ++m_revision; emit entitiesChanged(); }
 }

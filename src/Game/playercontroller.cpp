@@ -1619,6 +1619,7 @@ void PlayerController::pickupScan()
     const QVector3D center = m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f);
     const float r2 = kPickupDist * kPickupDist;
     for (int i = m_itemEntities->count() - 1; i >= 0; --i) {
+        if (!m_itemEntities->aliveAt(i)) continue;       // t256：跳过已释放的空槽（slot-reuse；count 含空槽）
         if (!m_itemEntities->isPickupReady(i)) continue; // t53：新生 0.5s 免拾取（让实体先可见再可拾）
         const QVector3D d = m_itemEntities->posAt(i) - center;
         if (d.lengthSquared() > r2) continue;          // 超阈值 → 跳过
@@ -1945,7 +1946,7 @@ void PlayerController::moveAxis(int axis, float amount)
             //   moveAxis(0/2)+extrudeEmbedded 横向推出（用户「向外挤 not 向上」）。被完全包裹（无水平出路）则由
             //   t160 窒息扣血兜底。原 t161「据 inflated maxSurf 全不 snap」会连地面托举一起失效 → 穿地坠虚空。
             if (hasMax) m_pos.setY(maxSurf + eps); // 站到可着陆最高面（地面顶，非沙顶）
-            else m_pos.setY(pyBefore); // t258：纯 bury（无 landable 面）→ 回退本次重力位移，防逐 tick 下沉穿地 / 坠出基岩（被埋锁定：Y 不动，水平靠 extrudeEmbedded 挤出 / 全包裹则不动，只能挖出脱困；t160 窒息扣血兜底）
+            else m_pos.setY(pyBefore); // t258（Y 轴）：纯 bury（无 landable 面）→ 回退本次重力位移，防逐 tick 下沉穿地 / 坠出基岩外。水平锁定见 step() 入口 isLockedBuried（全包裹→velocity 清零→moveAxis 空转）/ extrudeEmbedded（有开放侧→挤出），只能挖出脱困（t160 窒息扣血兜底）
         }
         m_vel.setY(0); break;
     case 2:
@@ -1953,6 +1954,47 @@ void PlayerController::moveAxis(int axis, float amount)
         else            m_pos.setZ(maxSurf + kHalfW + eps);
         m_vel.setZ(0); break;
     }
+}
+
+// t258 被埋锁定检测（spec「被埋→锁定不能动，只能挖出脱困」）：玩家被实体方块完全包围时 → 锁定。
+//   判据与 extrudeEmbedded 的「全包裹 → 不挤」同源（见 .h 头注释）：
+//   1) 中心列嵌入：玩家 XZ 中心列 (bx,bz) 在玩家全高 [y0,y1] 各格的 sub-AABB 与玩家 AABB 真重叠
+//      （3 轴严格重叠）= 有方块在玩家身上 materialize（下落沙着地 / 侧面塞入）= burial。正常贴墙 /
+//      站立时中心列为玩家占据的空气 → 非嵌入 → 不锁（不影响正常碰撞）。
+//   2) 四向皆堵：4 向邻列在玩家全高全开放（无 collidable）= 可逃；任一开放 → 不锁（extrudeEmbedded
+//      会推出去）。四向皆堵 → 锁定（无水平出路，moveAxis snap 会穿 → 必须整段跳过位移）。
+//   两者皆真 = 锁定。只读 World（collisionAABBsAt / isCollidable 向下依赖）；无世界 → false。
+bool PlayerController::isLockedBuried() const
+{
+    if (!m_world) return false;
+    const float px = m_pos.x(), pz = m_pos.z();
+    const int bx = int(std::floor(px));
+    const int bz = int(std::floor(pz));
+    const int y0 = int(std::floor(m_pos.y()));
+    const int y1 = int(std::floor(m_pos.y() + m_height));
+    const float minx = px - kHalfW, maxx = px + kHalfW;
+    const float miny = m_pos.y(),        maxy = m_pos.y() + m_height;
+    const float minz = pz - kHalfW, maxz = pz + kHalfW;
+    // 1) 中心列有嵌入块（玩家 AABB 与该列某 Y 格 sub-AABB 真重叠）。
+    bool embedded = false;
+    for (int y = y0; y <= y1 && !embedded; ++y) {
+        for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, y, bz)) {
+            if (minx < b.maxX && maxx > b.minX &&
+                miny < b.maxY && maxy > b.minY &&
+                minz < b.maxZ && maxz > b.minZ) { embedded = true; break; }
+        }
+    }
+    if (!embedded) return false; // 非嵌入（正常站立 / 贴墙）→ 不锁
+    // 2) 四向邻列全高开放判定（与 extrudeEmbedded 的 columnClear 同源）：有任一侧开放 → 可挤出，不锁。
+    const auto columnClear = [&](int cx, int cz) -> bool {
+        for (int y = y0; y <= y1; ++y)
+            if (m_world->isCollidable(cx, y, cz)) return false;
+        return true;
+    };
+    if (columnClear(bx + 1, bz) || columnClear(bx - 1, bz) ||
+        columnClear(bx, bz + 1) || columnClear(bx, bz - 1))
+        return false; // 有开放侧 → 可挤出（extrudeEmbedded 推出去），不锁
+    return true; // 嵌入 + 四向皆堵 = 锁定
 }
 
 // t161 嵌入挤出：见 .h 注释。补充实现要点——
@@ -2135,8 +2177,17 @@ void PlayerController::step(qreal dt)
         if (spaceEdge && m_onGround) m_vel.setY(kJump);
     }
 
+    // t258 被埋锁定（spec「被埋→锁定不能动，只能挖出脱困」）：玩家被实体方块完全包围（嵌入 + 四向皆堵）→
+    //   moveAxis 的 snap 会把玩家推穿相邻块（前后左右穿出 / 坠出基岩外，机制等价观察者 noclip；Y 轴已由
+    //   moveAxis(1) 纯 bury 回退防坠，水平在此先验门控）。锁定 → velocity 清零 → delta=0 → moveAxis 全
+    //   amount==0 早退（子步循环空转、无穿出机会）。脱困（挖出方块打开侧面 / 创造双击空格切飞）后自动解锁。
+    //   挖掘（raycast→beginMining）不经位移 → 不受影响，玩家仍可挖出卡住的方块脱困（spec「只能挖出脱困」）。
+    //   窒息（t160）/ 饥饿等后续照常推进（受困 → 扣血逼其挖出）。判据与 extrudeEmbedded「全包裹→不挤」同源，
+    //   见 isLockedBuried。地面复探（下方 aabbHitsSolid）仍跑：被埋态 AABB 重叠 → onGround=true（被支撑），
+    //   防误判坠落 / 摔伤。
+    if (isLockedBuried()) m_vel = QVector3D(0, 0, 0);
     // 防穿墙：每子步任意轴移动 ≤0.4 格
-    QVector3D delta = m_vel * dt;
+    QVector3D delta = m_vel * dt; // 锁定 → m_vel=0 → delta=0 → moveAxis 早退（无穿出机会）
     const float md = std::max({std::fabs(delta.x()), std::fabs(delta.y()), std::fabs(delta.z())});
     const int sub = std::max(1, int(std::ceil(md / 0.4f)));
     delta /= float(sub);

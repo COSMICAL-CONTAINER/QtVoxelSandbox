@@ -492,6 +492,15 @@ private:
     //   列为玩家占据的空气 → 不触发。4 向皆堵（全包裹）→ 不挤（交 t160 窒息扣血兜底）。配合 moveAxis(1)
     //   嵌入不上抬（fab580e）共同兑现 spec「挖沙柱前行不上爬；被覆盖向外（未堵侧）挤出 not 向上」。
     void extrudeEmbedded();
+    // t258 被埋锁定检测（spec「被埋→锁定不能动，只能挖出脱困」）：玩家被实体方块完全包围（中心列嵌入
+    //   + 四向水平邻列全高皆堵）→ 无水平出路 = 锁定态。step() 据此在 moveAxis 之前先验门控（velocity 清零
+    //   → delta=0 → moveAxis 全 amount==0 早退），根本不给 moveAxis 的 snap 把玩家推穿相邻块的机会
+    //   （穿出 bug 根因：嵌入态下 snap 到「被嵌块表面」可推向反方向 / 穿入邻块 = 前后左右穿出 / 坠出基岩外，
+    //   机制等价观察者 noclip；Y 轴已由 moveAxis(1) 纯 bury 回退防坠，水平在此先验门控）。与 extrudeEmbedded
+    //   的「全包裹→不挤」条件同源，但 extrudeEmbedded 在 moveAxis 之后跑（事后挤出，有开放侧才推），
+    //   本方法在 moveAxis 之前跑（先验锁定）。挖掘（raycast→beginMining）不经位移 → 不受锁定影响，玩家
+    //   仍可挖出卡住的方块脱困（spec「只能挖出脱困」）。只读 World（向下依赖）。
+    bool isLockedBuried() const;
     // 移动状态速率因子（t51）：Sprint×1.3 / Crouch×0.4 / Walk×1.0。仅走路模式水平速度乘此值
     //   （飞 / 观察者 noclip 恒 1，状态机不进入 Sprint/Crouch）。同时驱动 moveSpeed 报告 → walkPhase 频率。
     float speedMul() const;

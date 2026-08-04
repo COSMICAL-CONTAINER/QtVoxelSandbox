@@ -2239,11 +2239,15 @@ Window {
             Repeater {
                 model: itemEntities.count
                 delegate: Node {
+                    // t256 slot-reuse：掉落物拾取（removeAt / setCountAt(0)）改 releaseSlot 标空（不 erase）→
+                    //   count 单调不降 → 本 Repeater 永不销毁 delegate（修掉落沙衍生掉落物 + 生存挖掘产出的
+                    //   spawn/拾取抖动致 delegate 泄漏，同 mobHost 族；lessons-learned t170）。空槽 aliveAt=false
+                    //   → visible=false 隐藏；复用时 aliveAt=true + revision bump → 重显重绑。索引稳定。
+                    visible: { itemEntities.revision; return itemEntities.aliveAt(index) }
                     // 基准位置 + 物品 id + count：触碰 itemEntities.revision（Q_PROPERTY NOTIFY=entitiesChanged）
-                    // 建立依赖。t36 removeAt 用 erase-shift（前移后续实体），revision 自增 → 本绑定重算
-                    // → shift 后 delegate[k] 对齐新 entity[k] 的 pos/itemId/count（否则 posAt/itemIdAt/countAt
-                    // 是 Q_INVOKABLE 不被 NOTIFY 跟踪、shift 后 delegate 显示陈旧数据）。外层 Node 持基准
-                    // pos + 绕 Y 旋转。t64 加 count 触碰：部分拾取后 setCountAt bump revision → 数量重算。
+                    // 建立依赖。t36 removeAt 用 releaseSlot（标空，slot 稳定不 shift），revision 自增 → 本绑定
+                    // 重算 → delegate[k] 对齐 slot[k] 的 pos/itemId/count。外层 Node 持基准 pos + 绕 Y 旋转。
+                    // t64 加 count 触碰：部分拾取后 setCountAt bump revision → 数量重算。
                     id: entRoot
                     position: { itemEntities.revision; return itemEntities.posAt(index) }
                     property int entId: { itemEntities.revision; return itemEntities.itemIdAt(index) }
@@ -2549,8 +2553,14 @@ Window {
             Repeater {
                 model: entityManager.count
                 delegate: Node {
+                    // t256 slot-reuse：实体移除（沙着地 / mob 死亡 / 跌出）改 releaseSlot 标空（不 erase）→
+                    //   count 单调不降 → 本 Repeater 永不销毁 delegate（修掉落沙频繁 spawn/land 致 delegate
+                    //   泄漏：reparent 后的 3D delegate count 减小不销毁，lessons-learned t170）。空槽 aliveAt=false
+                    //   → 本 Node visible=false 隐藏整棵子树；slot 被复用时 aliveAt=true + revision bump → 重显
+                    //   并重绑新实体数据。索引稳定（release 不 shift）→ delegate[index] 恒对齐 slot[index]。
+                    visible: { entityManager.revision; return entityManager.aliveAt(index) }
                     // 触碰 revision 建立依赖（push 位移 / 重力下落 / t239 AI 行走 / 受击红闪 / 死亡移除
-                    //   bump revision → 位置 / 配色 / kind / yaw 重算）。t117 FallingBlock 着地 erase-shift 后
+                    //   bump revision → 位置 / 配色 / kind / yaw 重算）。t117 FallingBlock 着地 releaseSlot 后
                     //   revision 自增 → delegate 对齐新 entity 数据（同 itemEntities delegate 模式）。
                     position: { entityManager.revision; return entityManager.posAt(index) }
                     property int entKind: { entityManager.revision; return entityManager.kindAt(index) }
@@ -3834,8 +3844,10 @@ Window {
             //     太阳/玩家模型/手/选框/裂纹/粒子；明确标 ≈ 因 QtQuick3D 路径不暴露逐帧真值，spec 禁伪造）。
             //   GPU 真计时 / 逐帧 draw-call 待自研 RHI 迁移（QRhiGpuTimer / RHI stats）。
             const frameMs = window.fps > 0 ? (1000.0 / window.fps) : 0.0
-            const drawEst = ncx * ncz * 2 + itemEntities.count + entityManager.count
-                            + torchPositions.count + 6
+            // t256：draw 估算用 liveCount（活体实体）非 count（含已 release 的空槽）—— 空槽 delegate
+            //   visible=false 不参与绘制，count 会高估（slot-reuse 后 count=槽位数 ≠ 渲染实体数）。
+            const itemLive = itemEntities.liveCount(), mobLive = entityManager.liveCount()
+            const drawEst = ncx * ncz * 2 + itemLive + mobLive + torchPositions.count + 6
             const meshMode = window.greedyMeshing ? "greedy" : "culled"
             return "voxelsandbox  [F3 debug]"
                  + "\nfps: " + window.fps + "  frame: " + frameMs.toFixed(1) + "ms  cpu sim: " + player.simMs.toFixed(2) + "ms"
@@ -3851,8 +3863,8 @@ Window {
                  + "\nworld: " + theWorld.width + "×" + theWorld.depth + "×" + theWorld.height
                  + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"
                  + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr // t178：mesh 模式 + 顶点/三角（greedy 大幅降）
-                 + "\ndraw-calls: ~" + drawEst + "  (chunks×2 " + (ncx * ncz * 2) + " + items " + itemEntities.count
-                 + " + mobs " + entityManager.count + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
+                 + "\ndraw-calls: ~" + drawEst + "  (chunks×2 " + (ncx * ncz * 2) + " + items " + itemLive
+                 + " + mobs " + mobLive + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
                  + "\nday: phase " + worldClock.dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
                  + (worldClock.debugFast ? "  (fast)" : "")
                  + "\n[B] hitboxes: " + (window.showHitboxes ? "ON" : "off")
