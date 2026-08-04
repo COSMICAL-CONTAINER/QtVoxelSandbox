@@ -558,6 +558,46 @@ def gen_mob_idle_sheep():
     return out
 
 
+def gen_explosion():
+    """爆炸音（t284 Stalker/苦力怕自爆）：低频闷击（爆炸的「轰」body）+ 起始宽带爆裂瞬态（冲击破空的「砰」）
+    + 较长尾音（低频余响 + 衰减噪声，拟爆炸后的轰鸣回响），~0.5s。机制等价 MC 爆炸声（原创程序合成，§9 法律：
+    零 MC 资产）。由 EntityManager::explosion → AudioManager.playExplosion 触发（爆炸的单一音/视入口）。
+
+    音色设计（vs gen_hurt / gen_door_close）：
+      - 低频 body 极重（55Hz + 80Hz 双正弦 → 大能量低频「轰」；爆炸比关门/受伤的体量大得多）；
+      - 起始宽带爆裂（白噪 × 极快衰减 → 破空「砰」瞬态，比 hurt 的冲击强且宽）；
+      - 中频咆哮（~120Hz 略不和谐 + 慢 FM 颤 → 爆炸气浪的「吼」感）；
+      - 尾音较长（衰减常数 5.0 → ~0.5s 渐弱，比 hurt 0.22s / door 0.20s 长得多 = 爆炸的余响）。
+    """
+    dur = 0.50
+    n = int(SR * dur)
+    random.seed(284284)
+    out = []
+    lp_state = 0.0  # 低通态（尾音低频余响用）
+    lp_a = 0.08
+    for i in range(n):
+        t = i / SR
+        # 低频 body：双正弦（55 + 80Hz）→ 厚重「轰」
+        body = (math.sin(2 * math.pi * 55.0 * t) * 0.45
+                + math.sin(2 * math.pi * 80.0 * t) * 0.30)
+        # 中频咆哮：~120Hz + 慢 FM 颤（气浪的「吼」）
+        fm = 18.0 * math.sin(2 * math.pi * 9.0 * t)
+        roar = math.sin(2 * math.pi * 120.0 * t + fm) * 0.22
+        # 起始宽带爆裂瞬态（破空「砰」）—— 极快衰减
+        crack = random.uniform(-1, 1) * 0.55 * env_exp(t, 30.0)
+        # 尾音低频余响：单极点低通白噪 → 低频起伏的「轰隆」尾
+        w = random.uniform(-1, 1)
+        lp_state = lp_a * w + (1.0 - lp_a) * lp_state
+        rumble = lp_state * 0.30
+        # 整体指数衰减（衰减常数 5.0 → ~0.5s 渐弱；爆炸余响长）
+        e = env_exp(t, 5.0)
+        # 起始极短 attack（爆炸瞬态起声不顿）
+        attack = min(1.0, t / 0.004)
+        s = (body + roar + crack + rumble) * e * attack
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -575,6 +615,7 @@ def main():
     for name, gen in [("place", gen_place), ("pickup", gen_pickup),
                       ("door_open", gen_door_open), ("door_close", gen_door_close),
                       ("hurt", gen_hurt), ("mob_hurt", gen_mob_hurt),
+                      ("explosion", gen_explosion),
                       ("ambient_wind", gen_ambient_wind),
                       ("water_flow", gen_water_flow),
                       ("water_step", gen_water_step),

@@ -77,6 +77,10 @@ public:
     //   PlayerController::mobAttacked → Main.qml 路由到本方法（替代旧复用 playHurt 的路径）。与 hurt
     //   单件同模式（seek 重发不堆叠）；降级（engine / clip 失败）静默早退（§2-E，不崩）。
     Q_INVOKABLE void playMobHurt();
+    // t284 爆炸音（Stalker/苦力怕自爆）：低频闷击 + 宽带爆裂瞬态 + 较长尾音（机制等价 MC 爆炸声，原创程序
+    //   合成 §9；零 MC 资产）。由 EntityManager::explosion → Main.qml 路由到本方法触发（爆炸的单一音/视入口）。
+    //   单件 clip；seek 重发不堆叠（同其他单件）；engine/clip 失败静默降级（§2-E，不崩）。
+    Q_INVOKABLE void playExplosion();
     // t250 mob 环境音（牛叫/羊叫/猪叫 idle + 走路声）：
     //   - playMobAmbient(mobType)：生物周期 idle 叫声 —— 按 mobType 选 mob_idle clip（0=通用 / 1=猪哼 /
     //     2=牛哞 / 3=羊咩）。EntityManager tick 内 ambientTimer 周期倒计时（随机 8-16s）+ 玩家听者范围内

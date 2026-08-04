@@ -738,6 +738,14 @@ Window {
             if (player.mode === PlayerController.Survival)
                 playerState.takeDamage(amount)
         }
+        // t284 Stalker 爆炸（EntityManager detonateStalker 发）：爆炸的单一音/视反馈入口 —— 播爆炸音
+        //   （playExplosion）+ 白色迸发粒子（burstExplosion）。方块破坏走 setWaterSilent 不发 blockBroken
+        //   → 免球形内每块破块粒子 spam，故本信号是爆炸音/视的唯一驱动（同 fallDamageTaken→takeDamage 模式；
+        //   PLAN §2 分层：Entities 层发语义事件、呈现/音频层只消费）。
+        function onExplosion(x, y, z) {
+            audio.playExplosion()
+            if (particleLoader.item) particleLoader.item.burstExplosion(x, y, z)
+        }
     }
 
     // t89 / t118 / t177 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 / 门开关 /
@@ -2579,6 +2587,8 @@ Window {
                         if (entMobType === 3) return 0.44 - mobHalfH   // sheep
                         // t282 Shambler（人形）：MobModel 腿底本地 |y|=0.90（halfH=0.90 → offset=0，腿底贴 collision 底面）。
                         if (entMobType === EntityManager.MobShambler) return 0.90 - mobHalfH
+                        // t284 Stalker（潜行者/苦力怕）：MobModel 腿底本地 |y|=0.90（halfH=0.90 → offset=0）。
+                        if (entMobType === EntityManager.MobStalker) return 0.90 - mobHalfH
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
                     }
                     Model {
@@ -2806,6 +2816,54 @@ Window {
                             position: Qt.vector3d(0.09, 0.62, -0.23)
                             scale: Qt.vector3d(0.07, 0.08, 0.02)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
+                        }
+                    }
+                    Model {
+                        // t284 潜行者（Stalker，mobType 6；机制等价 MC 1.0 苦力怕，§9 改名 + 原创模型/纯色无贴图）：
+                        //   MobModel 四短腿 + 高瘦躯干 + 小头（mobType 5）。近距蓄力 → 爆炸（C++ aiStalker 已就绪）。
+                        //   walkPhase 绑定驱动四腿对角 walk cycle（EntityManager moveSpeed>0 时推进相位）。
+                        //   蓄力膨胀：inflateAt(i) 驱动 Model scale（1+inflate·0.5，机制等价 MC 苦力怕近距蓄力膨胀）+
+                        //     baseColor 蓄力发白（绿→白 lerp by inflate；机制等价 MC 苦力怕蓄力发白闪烁）。
+                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobStalker
+                        property real inflate: { entityManager.revision; return entityManager.inflateAt(index) }
+                        geometry: MobModel {
+                            mobType: 5
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
+                        position: Qt.vector3d(0, mobModelYOff, 0) // t284 halfH=0.90 → offset 0（腿底贴 collision 底面）
+                        // 蓄力膨胀：scale 随 inflate 增长（0 → 1.0、满蓄力 → 1.5；机制等价 MC 苦力怕膨胀）。
+                        scale: Qt.vector3d(1.0 + inflate * 0.5, 1.0 + inflate * 0.5, 1.0 + inflate * 0.5)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            // 受击红闪优先；否则青绿色（terrainLight 调昼夜暗），蓄力时 lerp 向白（蓄力发白）。
+                            baseColor: {
+                                entityManager.revision
+                                const tl = terrainLight(worldClock.skyLight)
+                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                let r = 0.37, g = 0.66, b = 0.23 // Stalker 青绿色（呈现层视觉约定色，原创）
+                                const infl = entityManager.inflateAt(index)
+                                if (infl > 0) {
+                                    const t = Math.min(1, infl)
+                                    r = r * (1 - t) + 1.0 * t
+                                    g = g * (1 - t) + 1.0 * t
+                                    b = b * (1 - t) + 1.0 * t
+                                }
+                                return Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0)
+                            }
+                        }
+                        // t284 眼睛：潜行者的深色眼（头部前面，原创纯色 §9a；mob Model 子节点继承 bodyYaw +
+                        //   蓄力 scale）。MobModel 头心 (0,0.66,0) 半 (0.15,0.15,0.15) → 前面 z=-0.15；眼 y≈0.68、x=±0.06。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.06, 0.68, -0.17)
+                            scale: Qt.vector3d(0.05, 0.06, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.06, 0.68, -0.17)
+                            scale: Qt.vector3d(0.05, 0.06, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                         }
                     }
                     // t253 攻击单体选中：准星瞄准的**单个** mob 显白色目标框（常驻可见，区别 F3+B 调试框——

@@ -47,6 +47,14 @@ Node {
         eatEmitter.position = Qt.vector3d(x, y, z)
         eatEmitter.burst(3, 60)
     }
+    // t284 爆炸迸发（Stalker/苦力怕自爆；EntityManager::explosion → Main.qml 路由到此）：复用破块碎屑的
+    //   emitter / 重力，色设白/灰（爆炸烟光的呈现层视觉约定色），数量多 + 横向四散（爆炸冲击波 → 非碎屑的上
+    //   抛收束）。机制等价 MC 爆炸的烟光迸发（§9 原创视觉，零 MC 资产）。坐标 = 爆炸中心格中心（+0.5）。
+    function burstExplosion(x, y, z) {
+        breakParticle.color = "#d8d8d8" // 爆炸烟光（浅灰白；呈现层约定）
+        breakEmitter.position = Qt.vector3d(x + 0.5, y + 0.5, z + 0.5)
+        breakEmitter.burst(20, 80) // 大迸发（爆炸 > 破块 8）
+    }
 
     // 运行期就绪日志（t16）：落 voxelsandbox.log，使「粒子节点加载状态在 console 可见且非 Error」
     // 可被运行期核验（Particles3D 不可用时本文件根本不会被加载，故能进到此处即代表就绪）。

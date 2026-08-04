@@ -104,6 +104,9 @@ struct AudioManager::Data
     Clip hurtClip{":/sounds/hurt.wav"};
     // t248 mob 受击单件（生物受击专属声；与玩家 hurt 区分）。PlayerController::mobAttacked → playMobHurt 触发。
     Clip mobHurtClip{":/sounds/mob_hurt.wav"};
+    // t284 爆炸单件（Stalker/苦力怕自爆）。EntityManager::explosion → playExplosion 触发。短爆裂音（~0.5s），
+    //   默认 2s maxFrames 远大于其长度、安全。
+    Clip explosionClip{":/sounds/explosion.wav"};
     // t250 mob 环境 idle 叫声 clip 池，按 mobType 索引（0=通用测试生物 / 1=猪 / 2=牛 / 3=羊）。EntityManager
     //   tick 内 ambientTimer 周期倒计时 → emit mobAmbient(mobType) → Main.qml 路由到 playMobAmbient 据
     //   mobType 选播。机制等价 MC 1.0 被动生物偶发 idle call（原创程序合成，§9；零 MC 资产）。mobIdleClips
@@ -244,6 +247,7 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->doorCloseClip);
     d->loadClip(d->hurtClip);
     d->loadClip(d->mobHurtClip);
+    d->loadClip(d->explosionClip);
     // t250 mob idle 叫声（猪哼 / 牛哞 / 羊咩 / 通用）—— 短 SFX（≤0.62s），默认 2s maxFrames 远大于其长度。
     for (int i = 0; i < 4; ++i)
         d->loadClip(d->mobIdleClips[i]);
@@ -261,6 +265,7 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->doorCloseClip);
     d->initSound(d->hurtClip);
     d->initSound(d->mobHurtClip);
+    d->initSound(d->explosionClip);
     for (int i = 0; i < 4; ++i)
         d->initSound(d->mobIdleClips[i]);
     d->initSound(d->ambientClip);
@@ -288,6 +293,7 @@ AudioManager::AudioManager(QObject *parent)
         << " place=" << d->placeClip.ok << " pickup=" << d->pickupClip.ok
         << " door_open=" << d->doorOpenClip.ok << " door_close=" << d->doorCloseClip.ok
         << " hurt=" << d->hurtClip.ok << " mob_hurt=" << d->mobHurtClip.ok
+        << " explosion=" << d->explosionClip.ok
         << " mob_idle(gen/pig/cow/sheep)=" << d->mobIdleClips[0].ok << "/" << d->mobIdleClips[1].ok
         << "/" << d->mobIdleClips[2].ok << "/" << d->mobIdleClips[3].ok
         << " ambient_wind=" << d->ambientClip.ok
@@ -311,6 +317,7 @@ AudioManager::~AudioManager()
     if (d->doorCloseClip.ok) ma_sound_uninit(&d->doorCloseClip.sound);
     if (d->hurtClip.ok) ma_sound_uninit(&d->hurtClip.sound);
     if (d->mobHurtClip.ok) ma_sound_uninit(&d->mobHurtClip.sound);
+    if (d->explosionClip.ok) ma_sound_uninit(&d->explosionClip.sound);
     for (int i = 0; i < 4; ++i)
         if (d->mobIdleClips[i].ok) ma_sound_uninit(&d->mobIdleClips[i].sound);
     if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
@@ -374,6 +381,14 @@ void AudioManager::playMobHurt()
 {
     // mob 受击音与 hurt 同量级（生物受击反馈；机制等价 MC 生物受击声，§9 原创合成，与玩家 hurt 区分）。
     d->replay(d->mobHurtClip, m_volume * 0.9f);
+}
+
+// t284 爆炸音（Stalker/苦力怕自爆）：略响于 hurt/mob_hurt（爆炸是高冲击事件，前景反馈）。机制等价 MC 爆炸声
+//   （§9 原创程序合成，零 MC 资产）。由 EntityManager::explosion → Main.qml Connections 路由触发。单件 seek 重发
+//   不堆叠（同其他单件）；engine/clip 失败静默降级（§2-E，不崩）。
+void AudioManager::playExplosion()
+{
+    d->replay(d->explosionClip, m_volume);
 }
 
 // t250 mob 环境 idle 叫声（牛叫/羊叫/猪叫）：按 mobType 选 mob_idle clip。mobType 越界（防御 caller 误传 /

@@ -67,6 +67,7 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
         case MobSheep:    e.halfW = 0.45f; e.halfH = 0.45f; break; // 0.9×0.9
         case MobShambler: e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 僵尸玩家身高）
         case MobBones:    e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 骷髅玩家身高）
+        case MobStalker:  e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 苦力怕玩家身高；t284）
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
@@ -158,12 +159,14 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
     int health = kHostileDefaultHealth;
     if (mobType == MobBones) {
         color = QStringLiteral("#d8d4c4"); // Bones：灰白骨色（机制等价 MC 骷髅；原创配色非照搬）
+    } else if (mobType == MobStalker) {
+        color = QStringLiteral("#5fa83a"); // Stalker：青绿色（机制等价 MC 苦力怕；原创配色非照搬）
     } else {
         color = QStringLiteral("#4a6a3a"); // Shambler：暗绿腐肉色（机制等价 MC 僵尸；原创配色）
-        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones 一律按 Shambler
+        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones/Stalker 一律按 Shambler
     }
     spawnMobTyped(x, y, z, mobType, color, health);
-    // spawnMobTyped 内 switch 已对 Shambler/Bones 设 hostile=true；spawnHostileMob 仅收口语义入口。
+    // spawnMobTyped 内 switch 已对 Shambler/Bones/Stalker 设 hostile=true；spawnHostileMob 仅收口语义入口。
 }
 
 // t280 当前活体敌对生物数（hostile && !dead && kind==Mob）。供 spawn 调度上限判定。
@@ -219,7 +222,10 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
         const int sz = qFloor(e.pos.z());
         const bool exposedToSun = (sx >= 0 && sz >= 0 && sx < worldW && sz < worldD && sy >= 0 && sy < worldH)
                                   && world->skyLightAt(sx, sy, sz) >= 15;
-        const bool inDaylight = exposedToSun && (skyBrightness > kBurnSkyBrightness);
+        // t284：Stalker（苦力怕）非亡灵 → 白天**不**燃烧（机制等价 MC 苦力怕不像僵尸/骷髅那样日光起火；
+        //   仅 Shambler/Bones 亡灵类燃烧）。Stalker 仍受远距消失 / spawn 调度约束（hostile=true）。
+        const bool inDaylight = exposedToSun && (skyBrightness > kBurnSkyBrightness)
+                                 && e.mobType != MobStalker;
         if (inDaylight) {
             if (!e.burning) { e.burning = true; dirty = true; } // 翻入燃烧 → bump（QML 显火焰）
             e.burnTimer += float(dt);
@@ -289,10 +295,12 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                 const float effSkyL = float(skyL) * skyBrightness; // 天光乘昼夜（夜间→0、白天→原值）
                 const float effLight = std::max(effSkyL, float(blkL));
                 if (effLight >= kSpawnLightThreshold) continue; // spec「light<阈值(7)」
-                // 合格点：spawn 一个敌对（Shambler / Bones 等概率）。spawnMobTyped 内 kCap 守卫；达 cap 静默跳过。
-                const int pickMob = rng->bounded(2);
-                spawnHostileMob(cx, cy, cz, pickMob == 0 ? MobShambler : MobBones);
-                qCInfo(lcEnt) << "hostile spawned type" << (pickMob == 0 ? MobShambler : MobBones)
+                // 合格点：spawn 一个敌对（Shambler / Bones / Stalker 等概率；t284 加 Stalker）。spawnMobTyped 内
+                //   kCap 守卫；达 cap 静默跳过。机制等价 MC 1.0 黑暗刷怪池（僵尸 / 骷髅 / 苦力怕）。
+                const int pickMob = rng->bounded(3);
+                const int spawnType = (pickMob == 0) ? MobShambler : (pickMob == 1) ? MobBones : MobStalker;
+                spawnHostileMob(cx, cy, cz, spawnType);
+                qCInfo(lcEnt) << "hostile spawned type" << spawnType
                              << "at" << cx << cy << cz << "effLight=" << effLight
                              << "(hostile" << hostileCount() << "/" << kHostileMobCap << ")";
                 break; // 本周期成功 spawn 1 个即收手（慢速堆叠；下个 kSpawnInterval 周期再尝试）
@@ -427,6 +435,20 @@ QVector3D EntityManager::velAt(int i) const
     const Entity &e = m_entities[size_t(i)];
     if (!e.alive) return QVector3D();
     return QVector3D(e.vx, e.vy, e.vz);
+}
+
+// t284 Stalker 蓄力膨胀进度（0..1）：仅 mobType==MobStalker 且 fuseTimer>0（正在蓄力）时返
+//   clamp(fuseTimer/kFuseTime,0,1)，供 QML delegate 据 it 对 Model 做 scale + baseColor 蓄力发白。非 Stalker /
+//   未蓄力（fuseTimer<=0）/ 越界 → 0（模型静态、原配色）。
+float EntityManager::inflateAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobStalker || e.fuseTimer <= 0.0f) return 0.0f;
+    float p = e.fuseTimer / kFuseTime;
+    if (p < 0.0f) p = 0.0f;
+    if (p > 1.0f) p = 1.0f;
+    return p;
 }
 
 // t239 mob 子类 id（t240 pig/cow/sheep；t242/t243 分流）。越界 → 0。
@@ -885,6 +907,160 @@ void EntityManager::fireArrow(const Entity &shooter, const QVector3D &target)
     spawnArrow(origin, QVector3D(vx, vy, vz));
 }
 
+// t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI（detect→chase→fuse→detonate；详见头文件 aiStalker 注释）。
+//   机制对齐 MC 苦力怕：缓慢逼近 → 近距蓄力（站立膨胀）→ 引爆；玩家逃远熄火。
+//   分层（PLAN §2）：只读 World::isSolid/blockAt + 自身数据；爆炸破坏方块走 setWaterSilent、伤害玩家走
+//   mobAttackedPlayer 语义信号（呈现层路由 PlayerState），同 aiHostile attack / aiArcher shoot 模式。
+bool EntityManager::aiStalker(Entity &e, float dt, World *world, const QVector3D &playerPos,
+                              float worldW, float worldD)
+{
+    const float dx = playerPos.x() - e.pos.x();
+    const float dz = playerPos.z() - e.pos.z();
+    const float distXZ = std::sqrt(dx * dx + dz * dz);
+
+    // (1) detect + chase memory（同 aiHostile / aiArcher）：进入 kDetectRange → 追踪 + 刷新记忆；脱离后记忆期内续追。
+    if (distXZ <= kDetectRange) {
+        e.chasing = true;
+        e.chaseTimer = kChaseMemory;
+    } else if (e.chasing) {
+        e.chaseTimer -= dt;
+        if (e.chaseTimer <= 0.0f) { e.chaseTimer = 0.0f; e.chasing = false; }
+    }
+
+    // (4) fuse：追踪态下据距离蓄力 / 熄火。蓄力中（fuseTimer>0）→ 站立不动（机制等价 MC 苦力怕近距嘶嘶蓄力停步）。
+    //   distXZ<=kFuseRange → 累加 fuseTimer；distXZ>kDefuseRange → 归零熄火。非追踪态 → 强制熄火（防脱离后仍蓄力）。
+    if (e.chasing) {
+        if (distXZ <= kFuseRange) {
+            e.fuseTimer += float(dt);
+        } else if (distXZ > kDefuseRange) {
+            e.fuseTimer = 0.0f;
+        }
+    } else {
+        e.fuseTimer = 0.0f;
+    }
+
+    // 朝向玩家（追踪时；射箭方向 + 行走方向。dir=(-sin,0,-cos) 同 player/aiHostile yaw 约定）。
+    if (e.chasing && distXZ > 1e-4f) e.yawRad = std::atan2(-dx, -dz);
+
+    // (5) detonate：蓄力满 → 引爆（破坏方块 + 伤害玩家 + emit explosion）+ 标 exploded。caller（tick Mob 分支）
+    //   据 exploded 当帧 releaseSlot 移除。detonate 后不再移动 → 直接返 false（moved=false）。
+    if (e.fuseTimer >= kFuseTime) {
+        detonateStalker(e, world, playerPos);
+        e.moveSpeed = 0.0f;
+        e.wanderSpeed = 0.0f;
+        return false;
+    }
+
+    // 蓄力中：站立不动（腿停），但仍朝玩家（yaw 已更新）。moveSpeed=0 → walkPhase 冻结。
+    if (e.fuseTimer > 0.0f) {
+        e.wanderSpeed = 0.0f;
+        e.moveSpeed = 0.0f;
+        return false;
+    }
+
+    // 非追踪 → 回退 wander（随机游荡；mobType 非 sheep 不吃草，纯游荡）。
+    if (!e.chasing) {
+        return aiWander(e, dt, world, worldW, worldD);
+    }
+
+    // (3) 追踪但未蓄力：缓慢朝玩家走（kStalkerChaseSpeed）+ 越障跳（同 aiHostile）。
+    e.wanderSpeed = kStalkerChaseSpeed; // 供 walkPhase 腿摆频率 + 语义（行走态）
+    if (e.resting && world) {
+        const float fdx = -std::sin(e.yawRad);
+        const float fdz = -std::cos(e.yawRad);
+        const int fy = qFloor(e.pos.y() - e.halfH);
+        const int fx = qFloor(e.pos.x() + fdx * 0.6f);
+        const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+        if (fy >= 0
+            && world->isSolid(fx, fy, fz)
+            && !world->isSolid(fx, fy + 1, fz)
+            && !world->isSolid(fx, fy + 2, fz)) {
+            e.vy = kJumpSpeed;
+            e.resting = false;
+        }
+    }
+    bool moved = false;
+    if (distXZ > 1e-4f) {
+        const float ehw = e.halfW;
+        const float ehh = e.halfH;
+        const float nx = dx / distXZ;
+        const float nz = dz / distXZ;
+        float newX = e.pos.x() + nx * kStalkerChaseSpeed * dt;
+        if (newX < ehw) newX = ehw;
+        if (newX > worldW - ehw) newX = worldW - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+        float newZ = e.pos.z() + nz * kStalkerChaseSpeed * dt;
+        if (newZ < ehw) newZ = ehw;
+        if (newZ > worldD - ehw) newZ = worldD - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+        if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+        if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+    }
+    e.moveSpeed = moved ? kStalkerChaseSpeed : 0.0f;
+    return moved;
+}
+
+// t284 Stalker 爆炸（aiStalker fuse 满时调；详见头文件 detonateStalker 注释）。机制等价 MC 苦力怕球形爆炸。
+//   分层（PLAN §2）：向下写 World（setWaterSilent 破坏方块 + worldChanged 重建 mesh）+ 发语义信号
+//   （explosion 音/视反馈、mobAttackedPlayer 伤害玩家）；只读 World::blockAt 判定破坏目标。无向上依赖。
+void EntityManager::detonateStalker(Entity &e, World *world, const QVector3D &playerPos)
+{
+    const float ex = e.pos.x();
+    const float ey = e.pos.y();
+    const float ez = e.pos.z();
+    const int cx0 = qFloor(ex);
+    const int cy0 = qFloor(ey);
+    const int cz0 = qFloor(ez);
+
+    // (a) 球形破坏方块：以爆炸中心格为原点、ceil(kExplosionRadius) 为半径的立方盒内逐格，距中心 <= 半径才破坏。
+    //   跳过 Air（无操作）/ Bedrock（不可破坏）/ Water（不抽干，机制等价 MC 爆炸不毁水体）。走 setWaterSilent
+    //   （直写 + worldChanged 重建 mesh，**不**发 blockBroken → 免球形内每块破块粒子 / 音 spam —— 爆炸的音 / 视
+    //   反馈由下方 explosion 信号单一入口驱动）。每块 O(1)；半径 3 → 7³=343 格 worst case，可接受（一次性事件）。
+    if (world) {
+        const int r = int(std::ceil(kExplosionRadius));
+        const float r2 = kExplosionRadius * kExplosionRadius;
+        for (int dz = -r; dz <= r; ++dz) {
+            for (int dy = -r; dy <= r; ++dy) {
+                for (int dx = -r; dx <= r; ++dx) {
+                    const float fdx = float(dx), fdy = float(dy), fdz = float(dz);
+                    if (fdx * fdx + fdy * fdy + fdz * fdz > r2) continue; // 球外跳过
+                    const int bx = cx0 + dx, by = cy0 + dy, bz = cz0 + dz;
+                    if (bx < 0 || bz < 0) continue; // 世界 XZ 边界外（World 约定）→ 不写
+                    const quint8 b = world->blockAt(bx, by, bz);
+                    if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water)
+                        continue; // 空气 / 基岩 / 水不破坏
+                    world->setWaterSilent(bx, by, bz, BlockRegistry::Air, 0);
+                }
+            }
+        }
+    }
+
+    // (b) 距离衰减伤害玩家：以玩家身体中心（脚位 + ~0.9，机制等价 MC 玩家受击采样身体中部）到爆炸中心计 3D 距离；
+    //   半径内 → dmg = round(kExplosionDamageMax·(1 − dist/radius))，至少 1（贴脸必死、远距可存活，机制等价 MC
+    //   苦力怕爆炸伤害随距离衰减）。半径外 → 0 不发。emit mobAttackedPlayer → 呈现层仅 Survival 应用（Creative /
+    //   Spectator 无伤跳过，机制等价 MC 创造 / 观察者无敌）。
+    int dmg = 0;
+    if (kExplosionRadius > 0.0f) {
+        const float pdx = playerPos.x() - ex;
+        const float pdy = (playerPos.y() + 0.9f) - ey;
+        const float pdz = playerPos.z() - ez;
+        const float pd = std::sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
+        if (pd <= kExplosionRadius) {
+            dmg = int(std::round(float(kExplosionDamageMax) * (1.0f - pd / kExplosionRadius)));
+            if (dmg < 1) dmg = 1; // 半径内 → 至少 1HP（机制等价 MC 爆炸半径内必有伤害）
+        }
+    }
+    if (dmg > 0) emit mobAttackedPlayer(dmg, int(MobStalker));
+
+    // (c) 爆炸音 / 视反馈（单一入口）：emit explosion（呈现层 Connections → AudioManager.playExplosion +
+    //   BlockParticles.burstExplosion）。坐标 = 爆炸中心格（粒子在中心迸发；机制等价 MC 爆炸声/光在爆炸点）。
+    emit explosion(cx0, cy0, cz0);
+
+    // (d) 标记本实体本帧已引爆 → tick Mob 分支据此当帧 releaseSlot 移除（爆炸即除，不再模拟）。
+    e.exploded = true;
+    qCInfo(lcEnt) << "Stalker detonated at" << cx0 << cy0 << cz0 << "player dmg" << dmg;
+}
+
 // t241 羊吃草：检测 / 消耗 entity 前方一格草丛（机制等价 MC 羊吃草：草丛消失 + 其下草方块变泥土）。
 //   目标列 = 沿 yaw 朝向 reach=0.7 前方（头部前方）；草丛格 y = 身体格（floor(pos.y − radius)，草丛生于地
 //   表上方一格 = 羊身体所在格）；其下地表格 = bodyY − 1（草方块 Grass）。OOB → 安全返 false（blockAt 越界
@@ -1178,12 +1354,21 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 e.moveSpeed = 0.0f; // 站立吃草 → 腿停（walkPhase 冻结于上次值）
                 dirty = true;       // headPitch 随 eatTimer 变 → 每帧 bump 让 QML 头俯仰绑定刷新
             } else if (e.hostile) {
-                // t281/t283 敌对 AI：替代 wander。listener = 玩家脚位（tick 参数）。
+                // t281/t283/t284 敌对 AI：替代 wander。listener = 玩家脚位（tick 参数）。
                 //   t281 Shambler（僵尸）→ aiHostile（detect→pathfind→melee attack）。
                 //   t283 Bones（骷髅弓箭手）→ aiArcher（detect→keep-distance→shoot 远程射箭）。
-                //   非追踪回退到 wander（在 aiHostile / aiArcher 内）。
+                //   t284 Stalker（潜行者/苦力怕）→ aiStalker（detect→chase→fuse→detonate 近距自爆）。
+                //   非追踪回退到 wander（在 aiHostile / aiArcher / aiStalker 内）。
                 if (e.mobType == MobBones) {
                     if (aiArcher(e, float(dt), world, listener, worldW, worldD)) dirty = true;
+                } else if (e.mobType == MobStalker) {
+                    if (aiStalker(e, float(dt), world, listener, worldW, worldD)) dirty = true;
+                    // 蓄力期（chasing）每帧 bump revision → QML inflateAt 绑定刷新（驱动膨胀动画 + 蓄力发白）；
+                    //   即使 aiStalker 返 moved=false（蓄力站立不动），inflate 仍在变 → 须 dirty。熄火（fuseTimer→0）
+                    //   亦在 chasing 态内 → 一并刷新让 QML 收回膨胀。
+                    if (e.chasing) dirty = true;
+                    // 引爆当帧移除：detonateStalker 置 exploded=true → 跳过后续重力 / resting（尸体即除）。
+                    if (e.exploded) { toRemove.push_back(idx); continue; }
                 } else {
                     if (aiHostile(e, float(dt), world, listener, worldW, worldD)) dirty = true;
                 }

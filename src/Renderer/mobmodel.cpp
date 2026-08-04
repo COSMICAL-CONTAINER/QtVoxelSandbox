@@ -148,7 +148,8 @@ void MobModel::setMobType(int type)
 {
     // 0（测试生物）/ 越界 → 兜底 Pig（保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube，
     //   不进本类，故此处兜底仅防误设）。t282：mobType 4 = Shambler（人形）合法。
-    if (type != 1 && type != 2 && type != 3 && type != 4) type = 1;
+    //   t284：mobType 5 = Stalker（潜行者；机制等价 MC 1.0 苦力怕）合法 —— 四短腿 + 高瘦躯干 + 小头。
+    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5) type = 1;
     if (type == m_mobType) return;
     m_mobType = type;
     emit mobTypeChanged();
@@ -204,6 +205,17 @@ void MobModel::rebuild()
         const float hipY = -0.25f; // 髋枢 = 腿顶（= 躯干底面 y）
         addBoxRot(-0.11f, -0.575f, 0.00f, 0.11f, 0.325f, 0.12f, hipY, 0.00f, +sw, verts, idx, bMin, bMax); // 左腿
         addBoxRot( 0.11f, -0.575f, 0.00f, 0.11f, 0.325f, 0.12f, hipY, 0.00f, -sw, verts, idx, bMin, bMax); // 右腿
+    } else if (m_mobType == 5) {
+        // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕，§9 区隔改名 + 原创模型/贴图全原创）：
+        //   四条短粗腿 + 高瘦躯干 + 小头（无纹理：呈现层 NoLighting 纯绿色 baseColor 着色，原创纯色 §9a）。
+        //   局部原点 = 躯干中心（同其它 mob 约定）；头朝 -Z（前 = AI 行走方向）；腿底本地 y=−0.90 贴 collision
+        //   底面（halfH=0.90 → mobModelYOff=0.90−halfH=0，模型无 Y 偏移）。蓄力膨胀由 QML delegate 据 inflateAt
+        //   对整个 Model 做 scale（1.0+inflate·0.5）驱动，几何本身不参与膨胀。
+        //   腿走 addLegs（四足对角 walk cycle，walkPhase 驱动；机制等价 MC 苦力怕四短腿行走）。
+        addBox( 0.00f,  0.08f,  0.00f, 0.18f, 0.42f, 0.16f, verts, idx, bMin, bMax); // 高瘦躯干
+        addBox( 0.00f,  0.66f,  0.00f, 0.15f, 0.15f, 0.15f, verts, idx, bMin, bMax); // 小头（躯干顶上方）
+        // 四短粗腿：腿顶 y=−0.34（躯干底）、腿底 y=−0.90（贴 collision 底面）；半高 0.28、中心 y=−0.62。
+        addLegs(-0.62f, 0.28f, 0.12f, 0.09f, 0.09f, m_walkPhase, verts, idx, bMin, bMax);
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）

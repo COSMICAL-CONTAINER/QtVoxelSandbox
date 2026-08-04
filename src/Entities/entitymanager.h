@@ -97,7 +97,12 @@ public:
     //     白天燃烧」）。Entity.hostile=true → 走 tickHostileLife 的燃烧 + 黑暗刷怪调度（白天暴露日光 → 着火扣血 →
     //     消失；夜间 / 洞穴低光处由 PlayerController.updateMobSpawning 周期 spawn）。QML 据 mobTypeAt 走对应贴图 /
     //     颜色（Shambler 暗绿、Bones 灰白 UnitCube，机制等价，非照搬 MC 美术）。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5 };
+    //   t284 Stalker（潜行者）= MobStalker(6)：机制等价 MC 1.0 苦力怕（Creeper）—— 近距蓄力膨胀 → 爆炸（破坏
+    //     方块 + 伤害玩家 + 音效）。PLAN §9 区隔改名 Creeper→Stalker「潜行者」；名称 / 模型 / 贴图全原创（仅
+    //     机制对齐「黑暗刷怪 / 近距自爆」）。Entity.hostile=true → 走 tickHostileLife 燃烧 / 远距消失 / spawn 调度
+    //     （同 Shambler/Bones）；tick Mob 分支据 mobType==MobStalker 路由到 aiStalker（蓄力 fuse → detonateStalker
+    //     爆炸：球形破坏方块 + 距离衰减伤害玩家 + emit explosion 音效）。inflateAt 暴露 fuse 进度供 QML 膨胀动画。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6 };
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -197,6 +202,10 @@ public:
     Q_INVOKABLE float arrowYawAt(int i) const;
     Q_INVOKABLE float arrowPitchAt(int i) const;
     Q_INVOKABLE QVector3D velAt(int i) const;
+    // t284 Stalker 蓄力膨胀进度（0..1）：fuseTimer>0（正在蓄力）时返 clamp(fuseTimer/kFuseTime,0,1)，供 QML
+    //   delegate 据 it 对 Model 做 scale（1+inflate·0.5）+ baseColor 蓄力发白（机制等价 MC 苦力怕近距蓄力膨胀
+    //   发白）。非 Stalker / 未蓄力 / 越界 → 0（模型静态）。revision 在蓄力期每帧 bump（tick Mob 分支）让绑定刷新。
+    Q_INVOKABLE float inflateAt(int i) const;
     // t249 受击击退（spec「受击往攻击方向小跳击退」；C++ 直调，PlayerController::attackMob 命中后调）：
     //   给第 i 个 mob 一个水平方向 (dirX,dirZ) 的击退冲量（vx/vz=kKnockbackHoriz 沿方向）+ 小跳垂直速度
     //   （vy=kKnockbackUp 向上）；解除 resting 让 tick 重力分支处理上跳→减速→下落→着地（小弹起观感）。
@@ -275,6 +284,12 @@ signals:
     //   同 fallDamageTaken→takeDamage 模式（Game/Entities 层发语义事件、呈现层只消费，PLAN §2 分层）。attackCooldown
     //   由 EntityManager 自管（防同帧多 mob 连抽；mobType 供呈现层选攻击音 / 反馈）。
     void mobAttackedPlayer(int amount, int mobType);
+    // t284 Stalker 爆炸（detonateStalker 内发）：坐标 = 爆炸中心格 floor(pos)。呈现层（Main.qml）Connections
+    //   据它路由到 AudioManager.playExplosion（爆炸音）+ BlockParticles.burstExplosion（白色迸发视觉）。
+    //   方块破坏走 setWaterSilent（直写 + worldChanged 重建 mesh，**不**发 blockBroken → 免每块破块粒子/音 spam），
+    //   故本信号是爆炸的**唯一**音/视反馈入口（同 fallDamageTaken→takeDamage 语义事件模式；PLAN §2 分层）。
+    //   玩家伤害复用 mobAttackedPlayer（Survival 门控应用 takeDamage）。
+    void explosion(int x, int y, int z);
 
 private:
     struct Entity {
@@ -340,6 +355,14 @@ private:
         // t250 环境音态（仅 Mob kind 用；FallingBlock/Item 留默认不触发）：
         float stepAccum = 0.0f;  // walkPhase 半步累加器（弧度）；行走时累加 moveSpeed*dt*kWalkFreq，≥π → emit mobStep
         float ambientTimer = 0.0f; // 到下次 idle 叫声的倒计时（秒）；≤0 → emit mobAmbient + 重置随机周期
+        // t284 Stalker 蓄力 / 爆炸态（仅 mobType==MobStalker 用；其余 mob 留默认不触发）：
+        //   fuseTimer：蓄力计时（秒）。aiStalker 在 kFuseRange 内每 tick 累加 dt；达 kFuseTime → detonateStalker
+        //     爆炸 + 标 exploded。玩家逃出 kDefuseRange → 归零（机制等价 MC 苦力怕近距蓄力 / 远距熄火）。
+        //     inflateAt 据 it 返 0..1（fuseTimer/kFuseTime）驱动 QML 膨胀动画。
+        //   exploded：本 tick 已引爆（detonateStalker 置 true）。tick Mob 分支据此把实体入 toRemove（releaseSlot），
+        //     并 continue 跳过后续重力 / resting（尸体即除，不再模拟）。爆炸当帧生效。
+        float fuseTimer = 0.0f;   // 蓄力计时（秒；>0 = 正在蓄力膨胀；仅 MobStalker 用）
+        bool  exploded  = false;  // 本 tick 已引爆（仅 MobStalker 用；detonateStalker 置 true 后当帧移除）
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;
@@ -415,6 +438,28 @@ private:
     //   分层（PLAN §2）：只读 World::isSolid + 自身数据；shoot 走 spawnArrow（箭实体）+ 命中由 Arrow 分支发
     //   mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile 的 attack 模式）。
     bool aiArcher(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD);
+    // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI（detect→chase→fuse→detonate；tick 内 hostile mob 且
+    //   mobType==MobStalker 分支调，替代 aiHostile/aiArcher）。spec t284「近距蓄力膨胀动画 → 爆炸」。
+    //   机制对齐 MC 1.0 苦力怕：检测玩家 → 缓慢逼近 → 进 kFuseRange 开始蓄力（站立不动 + 膨胀，机制等价 MC
+    //   苦力怕近距嘶嘶蓄力）→ 蓄满 kFuseTime 引爆；玩家逃出 kDefuseRange → 熄火（fuseTimer 归零）。
+    //   (1) detect + chase memory：同 aiHostile（kDetectRange 进追踪、脱离 kChaseMemory 秒放弃）。
+    //   (2) 非追踪 → 委托 aiWander（随机游荡）。
+    //   (3) 追踪：yaw 朝玩家；蓄力中（fuseTimer>0）→ 站立不动（moveSpeed=0，机制等价 MC 苦力怕蓄力时停步）；
+    //       否则缓慢朝玩家走（kStalkerChaseSpeed，慢于玩家走速 → 可甩脱但有威胁）+ 越障跳（同 aiHostile）。
+    //   (4) fuse：distXZ<=kFuseRange → fuseTimer+=dt（蓄力进度推进，inflateAt 据 it 驱动 QML 膨胀）；
+    //       distXZ>kDefuseRange → fuseTimer=0（熄火）。蓄力中仍朝玩家（yaw 更新）但不位移。
+    //   (5) detonate：fuseTimer>=kFuseTime → 调 detonateStalker（球形破坏方块 + 距离衰减伤害玩家 + emit
+    //       explosion + 标 exploded）+ 本实体当帧移除（tick Mob 分支据 exploded 入 toRemove）。
+    //   返回是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。playerPos = 玩家脚位（tick 的 listener）。
+    //   分层（PLAN §2）：只读 World::isSolid/blockAt + 自身数据；爆炸破坏方块走 World::setWaterSilent（向下
+    //   写栅格 + worldChanged 重建 mesh）；伤害玩家走 mobAttackedPlayer 语义信号（呈现层路由 PlayerState）。
+    bool aiStalker(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD);
+    // t284 Stalker 爆炸（aiStalker fuse 满时调）：以 e.pos 为中心、kExplosionRadius 为半径的球内破坏方块
+    //   （setWaterSilent 写 Air，跳过 Bedrock / Water / Air）+ 距离衰减伤害玩家（emit mobAttackedPlayer）+
+    //   emit explosion（呈现层播爆炸音 / 迸发）+ 标 e.exploded=true（tick 当帧移除）。机制等价 MC 苦力怕爆炸。
+    //   破坏方块走 setWaterSilent（静默写 + worldChanged 重建 mesh，**不**发 blockBroken → 免球形内每块破块
+    //   粒子 / 音 spam；爆炸的音 / 视反馈由 explosion 信号单一入口驱动）。
+    void detonateStalker(Entity &e, World *world, const QVector3D &playerPos);
     // t283 朝 target 解抛物初速并发射一支箭（aiArcher shoot 段调）。origin = shooter 中心 + 朝 target 前移
     //   0.5 格（避免贴墙时箭 spawn 入墙即没）。水平速度固定 kArrowSpeed → 飞行时间 t=d/vH；据 target 高度差
     //   反解 vy=(Δy+0.5·g·t²)/t（命中 target 高度的抛物解）；vy 钳到 ±kArrowMaxVert 防极端弧。三轴加 ±kArrowSpread
@@ -554,6 +599,25 @@ private:
     static constexpr float kArrowLifetime    = 5.0f;   // 箭最长存活（秒；兜底移除）
     static constexpr int   kArrowDamage      = 2;      // 命中伤害（HP）
     static constexpr float kArrowHitHalfW    = 0.4f;   // 箭 vs 玩家命中盒 XZ 外扩（blocks）
+    // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI / 爆炸常量（spec t284「近距蓄力膨胀动画 → 爆炸（破坏方块
+    //   + 伤害玩家 + 音效）」；机制对齐 MC 1.0 苦力怕：缓慢逼近 + 近距蓄力 + 球形爆炸 + 距离衰减伤害；数值为
+    //   本工程小世界量身调，非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）。
+    //   - kStalkerChaseSpeed：追踪行走速度（blocks/s）。慢于玩家走速 4.3 → 玩家可甩脱但具威胁；略慢于 Shambler
+    //     kChaseSpeed=2.8（苦力怕移动迟缓是其标志性弱点）。
+    //   - kFuseRange：开始蓄力的 XZ 距离上界（blocks；<= 才蓄力）。MC 苦力怕贴近 1-2 格引爆；取 1.8（mob 半宽
+    //     0.45 + 玩家半宽 0.3 + 余量 → 中心距 ~1.8 时已贴脸）。
+    //   - kDefuseRange：熄火的 XZ 距离（blocks；> 则 fuseTimer 归零）。MC 苦力怕玩家逃远即熄火；取 7（远于蓄力
+    //     近距、近于侦测 16 → 玩家中距拉扯可熄火保命）。
+    //   - kFuseTime：蓄力到引爆的时长（秒）。MC 苦力怕 ~1.5s 嘶嘶蓄力；取 1.5（玩家有反应时间侧身 / 后撤）。
+    //   - kExplosionRadius：球形爆炸半径（blocks）。MC 苦力怕爆炸威力 3（半径 ~3）；取 3.0。
+    //   - kExplosionDamageMax：贴脸（距离 0）爆炸伤害（HP）。MC 苻力怕正常难度贴脸 ~ 减护甲后仍致命；取 24
+    //     （= 12 心，机制等价「贴脸必死、远距可存活」），随距离线性衰减到 0（半径边缘）。
+    static constexpr float kStalkerChaseSpeed   = 2.6f;  // 追踪行走速度（blocks/s；慢于 Shambler，苦力怕迟缓）
+    static constexpr float kFuseRange           = 1.8f;  // 开始蓄力的 XZ 距离上界（blocks）
+    static constexpr float kDefuseRange         = 7.0f;  // 熄火的 XZ 距离（blocks；> 则 fuseTimer 归零）
+    static constexpr float kFuseTime            = 1.5f;  // 蓄力到引爆的时长（秒；MC 苦力怕 ~1.5s）
+    static constexpr float kExplosionRadius     = 3.0f;  // 球形爆炸半径（blocks）
+    static constexpr int   kExplosionDamageMax  = 24;    // 贴脸爆炸伤害（HP；随距离线性衰减到 0）
 };
 
 #endif // ENTITYMANAGER_H
