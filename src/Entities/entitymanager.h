@@ -253,6 +253,13 @@ signals:
     //   牛:皮革+牛肉 / 羊:羊毛）→ 呈现层转发 ItemEntityManager.spawnItem（同 fallingBlockDropped 模式）。
     //   分层（PLAN §2）：Entities 层发语义事件，呈现层只消费，绝不反向写栅格。
     void mobDied(int x, int y, int z, int mobType);
+    // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：hostile mob（Shambler/Bones）在 aiHostile 内检测到玩家处于
+    //   攻击范围（XZ<=kAttackRange + 垂直同层）且攻击冷却（kAttackCooldown）到时发本信号。amount = 单次伤害 HP
+    //   （kAttackDamage=3，MC 简单难度僵尸）；mobType = 子类 id（Shambler/Bones）。呈现层（Main.qml）Connections 据它
+    //   路由到 PlayerState.takeDamage —— 仅 Survival 应用（Creative/Spectator 无伤跳过，机制等价 MC 创造/观察者无敌）；
+    //   同 fallDamageTaken→takeDamage 模式（Game/Entities 层发语义事件、呈现层只消费，PLAN §2 分层）。attackCooldown
+    //   由 EntityManager 自管（防同帧多 mob 连抽；mobType 供呈现层选攻击音 / 反馈）。
+    void mobAttackedPlayer(int amount, int mobType);
 
 private:
     struct Entity {
@@ -295,6 +302,13 @@ private:
         bool  burning   = false; // 当前是否在日光下燃烧（tickHostileLife 每 tick 重算缓存；QML isBurningAt 读）。
         float burnTimer = 0.0f;  // 燃烧扣血累积（秒；暴露日光时累加 dt，每 kBurnDamageInterval 扣 1HP）。
         float suffocationTimer = 0.0f; // t254 窒息累积计时（头部嵌实体方块时累加，每 kSuffocationInterval 秒扣 1HP；机制同玩家 t160）
+        // t281 敌对 AI 态（仅 hostile=true 的 Mob 用；passive / FallingBlock 留默认不触发）：
+        //   detect→pathfind→attack 三段（spec t281「敌对生物基类（AI/寻路）」）。chasing 在 aiHostile 内据
+        //   玩家距离（<=kDetectRange）翻 true 并刷新 chaseTimer；脱离后记忆期内仍追，过则回退到 wander。
+        //   attackCooldown 每自然秒递减，<=0 且在攻击范围内 → emit mobAttackedPlayer + 重置（防每帧抽血）。
+        bool  chasing = false;       // 是否正追踪玩家（detect 范围内或记忆期内）；非追踪时回退 wander
+        float chaseTimer = 0.0f;     // 追踪记忆倒计时（秒；脱离侦测后仍追 kChaseMemory 秒，机制等价 MC 短期记忆）
+        float attackCooldown = 0.0f; // 攻击冷却倒计时（秒；<=0 可攻击；命中后置 kAttackCooldown，防连抽）
         float yawRad = 0.0f;     // 朝向 + 行走方向（弧度）；AI wander 随机选；dir=(-sin,0,-cos)，QML yawDeg
         float wanderTimer = 0.0f;// 到下次选向倒计时（秒）；<=0 → 新 yawRad + 新 wanderSpeed + 重置 timer
         float wanderSpeed = 0.0f;// 当前 AI 行走速度（blocks/s；0=idle 停驻 / kWalkSpeed=行走）；time-slice 随机
@@ -354,6 +368,19 @@ private:
     //   （X 后 Z）世界边界 clamp + 方块碰撞撤回。返回是否真位移（驱动 dirty + moveSpeed）。worldW/worldD =
     //   世界宽/深（边界 clamp 防 mob 走出世界坠虚空）。
     bool aiWander(Entity &e, float dt, World *world, float worldW, float worldD);
+    // t281 敌对生物 AI（detect→pathfind→attack 三段；tick 内 hostile Mob 分支调，替代 aiWander）。
+    //   spec t281「敌对生物基类（AI/寻路）：detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）
+    //   + attack」。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI；标识符 / 美术全原创（§9 区隔）。
+    //   (1) detect：XZ 距离 playerPos <= kDetectRange → chasing=true + 刷新 chaseTimer（脱离后记忆期内仍追）。
+    //   (2) 非追踪 → 委托 aiWander（随机游荡，同 passive），追踪态在此之外独立处理。
+    //   (3) 追踪：yaw 朝玩家 + 逐轴 AABB 碰撞撤回的水平移动（向玩家走）+ resting 且前方 1 格墙顶可落 → 跳（kJumpSpeed）。
+    //       「简化 A*」= 贪心方向（直线朝玩家）+ 越障跳；非完整 A*（每帧多 mob 跑 A* 开销过大，且近战 mob 直线 + 跳够用）。
+    //   (4) attack：XZ <= kAttackRange + |dy|<=kAttackVertRange + 冷却到 → emit mobAttackedPlayer(dmg, mobType)
+    //       + 重置冷却（防每帧抽血）。mobType = Shambler/Bones（呈现层据此选攻击音 / 反馈，机制等价 MC）。
+    //   返回是否真位移（驱动 dirty + moveSpeed）。worldW/worldD = 世界宽/深（边界 clamp 防 mob 走出世界）。
+    //   playerPos = 玩家脚位（tick 的 listener = PlayerController::m_pos）。分层（PLAN §2）：只读 World::isSolid +
+    //   自身数据；attack 走语义信号（mobAttackedPlayer）让呈现层路由到 PlayerState（同 fallDamageTaken 模式）。
+    bool aiHostile(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD);
 
     // t241 羊吃草：检测/消耗 entity 前方一格草丛。consume=false 仅检测（决定是否进入吃草周期）；
     //   consume=true 则写入（草丛→空气 + 其下草方块→泥土，走 World::setWaterSilent 静默写，非玩家破块
@@ -437,6 +464,24 @@ private:
     static constexpr float kBurnDamageInterval   = 1.0f;  // 燃烧扣血间隔（秒/HP；机制等价 MC 日光燃烧 1HP/s）
     static constexpr float kFarDespawn           = 56.0f; // 敌对远距消失半径（blocks）
     static constexpr int   kHostileDefaultHealth = 20;    // Shambler/Bones 满血（机制等价 MC 1.0 僵尸 / 骷髅 20HP）
+    // t281 敌对 AI 常量（spec「detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）+ attack」；
+    //   机制对齐 MC 1.0 僵尸 / 骷髅近战 AI：detect→pathfind→attack；数值为本工程小世界量身调，非 MC 精确复刻 ——
+    //   PLAN §4「机制对标」非数值 1:1）。detect 取 MC 追踪距离量级（16）、attack 取 MC 简单难度僵尸伤害（3HP）。
+    //   - kDetectRange：玩家侦测范围（blocks；XZ 距离）。MC 1.0 僵尸追踪 16-40 格；取下界 16（小世界不致满屏涌来）。
+    //   - kChaseMemory：脱离侦测后仍追踪的秒数（机制等价 MC mob 短期记忆 —— 玩家短暂绕墙后 mob 不立即放弃）。
+    //   - kChaseSpeed：追踪行走速度（blocks/s）。略慢于玩家走速 4.3 → 玩家可甩脱但具威胁；快于 wander kWalkSpeed=1.0。
+    //   - kAttackRange / kAttackVertRange：近战攻击 XZ 距离 + 垂直容差。XZ 1.6 = 相邻一格可达；垂直 2.0 防跨层隔空打
+    //     （mob 中心 vs 玩家脚位同层差 ~0.9，跳跃 / 上坡仍命中）。
+    //   - kAttackCooldown：攻击间隔（秒；机制等价 MC 僵尸 ~1s/击）；kAttackDamage：单次伤害 HP（MC 简单难度僵尸 3）。
+    //   - kJumpSpeed：越障跳跃初速（blocks/s；同 player jump 8.4 → 峰值 ~1.25 格，刚好翻 1 格墙；复用重力 kGravity 拉回）。
+    static constexpr float kDetectRange     = 16.0f; // 玩家侦测范围（blocks；XZ）
+    static constexpr float kChaseMemory     = 6.0f;  // 脱离侦测后追踪记忆（秒）
+    static constexpr float kChaseSpeed      = 2.8f;  // 追踪行走速度（blocks/s；慢于玩家走速、快于 wander）
+    static constexpr float kAttackRange     = 1.6f;  // 近战攻击 XZ 距离（blocks；mob 中心到玩家脚位）
+    static constexpr float kAttackVertRange = 2.0f;  // 攻击垂直容差（blocks；|mobY - playerFeetY|；防跨层）
+    static constexpr float kAttackCooldown  = 1.0f;  // 攻击间隔（秒）
+    static constexpr int   kAttackDamage    = 3;     // 单次攻击伤害（HP；MC 简单难度僵尸 3）
+    static constexpr float kJumpSpeed       = 8.4f;  // 越障跳跃初速（blocks/s；同 player jump，翻 1 格墙）
 };
 
 #endif // ENTITYMANAGER_H

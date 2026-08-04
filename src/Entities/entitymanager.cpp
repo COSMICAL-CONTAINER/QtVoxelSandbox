@@ -587,6 +587,97 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
     return moved;
 }
 
+// t281 敌对生物 AI（detect→pathfind→attack；详见头文件 aiHostile 注释）。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI。
+//   简化 A* = 贪心方向（直线朝玩家）+ 1 格墙越障跳；非完整 A*（每帧多 mob 跑 A* 开销过大，近战 mob 直线 + 跳够用，
+//   平地 / 1 格台阶 / 树根 / 矮墙均能通过；复杂洞穴几何会卡墙，作为基类可接受，留给后续寻路增强）。
+//   分层（PLAN §2）：只读 World::isSolid + 自身数据；attack 走语义信号 mobAttackedPlayer（呈现层路由 PlayerState）。
+bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D &playerPos,
+                              float worldW, float worldD)
+{
+    // 攻击冷却递减（不论追踪与否；自然走完，复击不卡陈旧值）。钳到 0。
+    if (e.attackCooldown > 0.0f) {
+        e.attackCooldown -= dt;
+        if (e.attackCooldown < 0.0f) e.attackCooldown = 0.0f;
+    }
+
+    // 玩家相对位置（XZ 距离 + 垂直差）。playerPos = 玩家脚位；e.pos = mob 中心。
+    const float dx = playerPos.x() - e.pos.x();
+    const float dz = playerPos.z() - e.pos.z();
+    const float dy = playerPos.y() - e.pos.y();
+    const float distXZ = std::sqrt(dx * dx + dz * dz);
+
+    // (1) detect：XZ 距离 <= kDetectRange → 进入 / 刷新追踪（chaseTimer 重置记忆期）。脱离则记忆期内续追，过期放弃。
+    if (distXZ <= kDetectRange) {
+        e.chasing = true;
+        e.chaseTimer = kChaseMemory;
+    } else if (e.chasing) {
+        e.chaseTimer -= dt;
+        if (e.chaseTimer <= 0.0f) { e.chaseTimer = 0.0f; e.chasing = false; }
+    }
+
+    // (2) 非追踪 → 回退到 wander（随机游荡，同 passive；mobType 非 sheep 故不吃草分支，纯游荡）。
+    if (!e.chasing) {
+        return aiWander(e, dt, world, worldW, worldD);
+    }
+
+    // (3) 追踪：朝玩家走 + 越障跳。yaw 朝玩家（与 aiWander / player 同 yaw 约定：dir = (-sin,0,-cos)，
+    //   使 QML eulerRotation.y=yawDeg 模型 -Z 正对玩家）→ yawRad = atan2(-dx, -dz)。
+    if (distXZ > 1e-4f) {
+        e.yawRad = std::atan2(-dx, -dz);
+    }
+    e.wanderSpeed = kChaseSpeed; // 供 walkPhase 动画频率 + 语义（行走态）
+
+    // 越障跳：resting（贴地）+ 前方脚位格是 1 格墙（实体）+ 墙顶两格空气（可落 + 头可容，mob ~1.8 高）→ 跳。
+    //   不跳的情况：前方无墙（平地直走）/ 墙 ≥2 格（跳不过，正确不跳避免原地蹦）/ 已在空中（resting=false 跳过）。
+    //   fdx/fdz = 朝向单位向量；前方格取脚位 +0.6 格偏移（mob 半宽 0.45 + 余量，确保落在墙格而非自身列）。
+    if (e.resting && world) {
+        const float fdx = -std::sin(e.yawRad);
+        const float fdz = -std::cos(e.yawRad);
+        const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
+        const int fx = qFloor(e.pos.x() + fdx * 0.6f);
+        const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+        if (fy >= 0
+            && world->isSolid(fx, fy, fz)                    // 前方脚位是墙（1 格障碍）
+            && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落（mob 翻上去后脚位）
+            && !world->isSolid(fx, fy + 2, fz)) {             // 头位可容（mob ~1.8 高，再上方须空气）
+            e.vy = kJumpSpeed;
+            e.resting = false; // 解除静止 → 本 tick 后段重力分支处理上跳（vy 正）→ 减速 → 下落 → 着地
+        }
+    }
+
+    // 水平移动（朝玩家，逐轴 AABB 碰撞撤回；复用 aiWander 的边界 clamp + mobAabbHitsSolid 全格扫模式 → 贴墙滑动不穿入）。
+    bool moved = false;
+    if (distXZ > 1e-4f) {
+        const float ehw = e.halfW; // t252 XZ 半宽（边界 clamp + 碰撞）
+        const float ehh = e.halfH; // t252 Y 半高（footprint 格扫）
+        const float nx = dx / distXZ;
+        const float nz = dz / distXZ;
+        // X 轴：世界边界 clamp + 方块碰撞撤回。
+        float newX = e.pos.x() + nx * kChaseSpeed * dt;
+        if (newX < ehw) newX = ehw;
+        if (newX > worldW - ehw) newX = worldW - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+        // Z 轴：参照可能已撤回的 newX（两轴顺序敏感）。
+        float newZ = e.pos.z() + nz * kChaseSpeed * dt;
+        if (newZ < ehw) newZ = ehw;
+        if (newZ > worldD - ehw) newZ = worldD - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+        if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+        if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+    }
+    e.moveSpeed = moved ? kChaseSpeed : 0.0f; // 撞墙 → 腿停（moveSpeed=0），但仍在追踪，下帧重试 / 已跳
+
+    // (4) attack：XZ <= kAttackRange + 垂直同层（|dy|<=kAttackVertRange）+ 冷却到 → emit mobAttackedPlayer + 重置冷却。
+    //   垂直门控防跨层隔空打（玩家在 mob 头顶 / 脚下不命中）。emit 走语义信号，呈现层据 Survival 门控应用伤害。
+    if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange && e.attackCooldown <= 0.0f) {
+        e.attackCooldown = kAttackCooldown;
+        emit mobAttackedPlayer(kAttackDamage, e.mobType);
+        qCInfo(lcEnt) << "hostile mob" << e.mobType << "attacked player for" << kAttackDamage << "HP";
+    }
+
+    return moved;
+}
+
 // t241 羊吃草：检测 / 消耗 entity 前方一格草丛（机制等价 MC 羊吃草：草丛消失 + 其下草方块变泥土）。
 //   目标列 = 沿 yaw 朝向 reach=0.7 前方（头部前方）；草丛格 y = 身体格（floor(pos.y − radius)，草丛生于地
 //   表上方一格 = 羊身体所在格）；其下地表格 = bodyY − 1（草方块 Grass）。OOB → 安全返 false（blockAt 越界
@@ -822,6 +913,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
                 e.wanderSpeed = 0.0f;
                 e.moveSpeed = 0.0f; // 站立吃草 → 腿停（walkPhase 冻结于上次值）
                 dirty = true;       // headPitch 随 eatTimer 变 → 每帧 bump 让 QML 头俯仰绑定刷新
+            } else if (e.hostile) {
+                // t281 敌对 AI（detect→pathfind→attack）：替代 wander。listener = 玩家脚位（tick 参数）。
+                //   追踪时朝玩家走 + 越障跳 + 攻击范围内 emit mobAttackedPlayer；非追踪回退到 wander（在 aiHostile 内）。
+                if (aiHostile(e, float(dt), world, listener, worldW, worldD)) dirty = true;
             } else {
                 // 非吃草：扫描冷却倒数（仅羊）；AI wander；羊 idle 且冷却到 → 扫前方草丛决定是否开吃。
                 if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(dt);

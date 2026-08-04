@@ -729,6 +729,15 @@ Window {
             }
             // MobTest（通用测试生物）不掉落 —— 调试用，无游戏内产出。
         }
+        // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：EntityManager aiHostile 内攻击范围 + 冷却到时发
+        //   mobAttackedPlayer(amount, mobType) → 仅 Survival 应用伤害（Creative/Spectator 无伤跳过，机制等价 MC
+        //   创造/观察者无敌）。复用 PlayerState.takeDamage → damaged 红闪 / 视角晃 / 受伤音链（同 fallDamageTaken
+        //   路径；PLAYER 无伤模式经此门控不进 takeDamage）。单向事件流（PLAN §2 分层：Entities 发语义事件、
+        //   呈现层只消费）。
+        function onMobAttackedPlayer(amount, mobType) {
+            if (player.mode === PlayerController.Survival)
+                playerState.takeDamage(amount)
+        }
     }
 
     // t89 / t118 / t177 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 / 门开关 /
