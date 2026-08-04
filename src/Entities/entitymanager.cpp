@@ -68,6 +68,7 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
         case MobShambler: e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 僵尸玩家身高）
         case MobBones:    e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 骷髅玩家身高）
         case MobStalker:  e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 苦力怕玩家身高；t284）
+        case MobSpider:   e.halfW = 0.55f; e.halfH = 0.30f; e.hostile = true; break; // 1.1×0.6 宽矮（机制等价 MC 蜘蛛；快速，t285）
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→

@@ -108,6 +108,7 @@ public:
     static constexpr int SpawnEggShamblerId = 0x213; // 生物蛋（蹒跚者）：右键 → 生成 Shambler（敌对近战，MobShambler）
     static constexpr int SpawnEggBonesId    = 0x214; // 生物蛋（骸骨）：右键 → 生成 Bones（敌对远程射箭，MobBones）
     static constexpr int SpawnEggStalkerId  = 0x215; // 生物蛋（潜行者）：右键 → 生成 Stalker（敌对爆炸，MobStalker）
+    static constexpr int SpawnEggSpiderId   = 0x216; // t285 生物蛋（蜘蛛）：右键 → 生成 Spider（敌对快速，MobSpider）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

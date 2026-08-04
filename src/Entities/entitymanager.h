@@ -102,7 +102,7 @@ public:
     //     机制对齐「黑暗刷怪 / 近距自爆」）。Entity.hostile=true → 走 tickHostileLife 燃烧 / 远距消失 / spawn 调度
     //     （同 Shambler/Bones）；tick Mob 分支据 mobType==MobStalker 路由到 aiStalker（蓄力 fuse → detonateStalker
     //     爆炸：球形破坏方块 + 距离衰减伤害玩家 + emit explosion 音效）。inflateAt 暴露 fuse 进度供 QML 膨胀动画。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6 };
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7 };
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs

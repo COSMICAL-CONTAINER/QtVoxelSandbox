@@ -1309,7 +1309,8 @@ void PlayerController::placeBlock()
             || heldItemId == RecipeRegistry::SpawnEggSheepId
             || heldItemId == RecipeRegistry::SpawnEggShamblerId
             || heldItemId == RecipeRegistry::SpawnEggBonesId
-            || heldItemId == RecipeRegistry::SpawnEggStalkerId)) {
+            || heldItemId == RecipeRegistry::SpawnEggStalkerId
+            || heldItemId == RecipeRegistry::SpawnEggSpiderId)) {
         if (m_hasHit) {
             int mobType = 0;
             QString color; // 占位串（pig/cow/sheep 走 MobModel + 贴图，不读 color）
@@ -1323,8 +1324,10 @@ void PlayerController::placeBlock()
                 mobType = EntityManager::MobShambler; color = QStringLiteral("#4a6a3a"); // t287 敌对：暗绿腐肉（机制等价僵尸）
             } else if (heldItemId == RecipeRegistry::SpawnEggBonesId) {
                 mobType = EntityManager::MobBones;    color = QStringLiteral("#d8d8d0"); // t287 敌对：灰白骨（机制等价骷髅）
-            } else { // SpawnEggStalkerId
+            } else if (heldItemId == RecipeRegistry::SpawnEggStalkerId) {
                 mobType = EntityManager::MobStalker;  color = QStringLiteral("#3a5a3a"); // t287 敌对：暗绿（机制等价苦力怕）
+            } else { // SpawnEggSpiderId
+                mobType = EntityManager::MobSpider;   color = QStringLiteral("#2a1a1a"); // t285 敌对：暗黑（机制等价蜘蛛）
             }
             // 生成位 = 命中面相邻格（同方块放置；右键顶面 → 上方一格、右键侧壁 → 玩家侧空气格）。
             //   maxHealth 传 0 → spawnMobTyped 内部用 kDefaultMaxHealth（=10，MC 1.0 猪/牛/羊 5 心）；

@@ -2589,6 +2589,8 @@ Window {
                         if (entMobType === EntityManager.MobShambler) return 0.90 - mobHalfH
                         // t284 Stalker（潜行者/苦力怕）：MobModel 腿底本地 |y|=0.90（halfH=0.90 → offset=0）。
                         if (entMobType === EntityManager.MobStalker) return 0.90 - mobHalfH
+                        if (entMobType === EntityManager.MobBones) return 0.90 - mobHalfH   // t287 Bones 人形（腿底 0.90）
+                        if (entMobType === EntityManager.MobSpider) return 0.30 - mobHalfH  // t285 Spider 宽矮（腿底 0.30）
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
                     }
                     Model {
@@ -2599,7 +2601,7 @@ Window {
                         //   偏橙（火焰色调制单色立方，与下方 flame Model 共显「着火」感）。
                         //   t282：Shambler(4) 不再走本 UnitCube 路径 —— 已迁到下方专属 MobModel 人形 + 贴图分支。
                         visible: entKind === EntityManager.Mob
-                                 && (entMobType === 0 || entMobType === EntityManager.MobBones)
+                                 && entMobType === 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -2827,7 +2829,7 @@ Window {
                         visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobStalker
                         property real inflate: { entityManager.revision; return entityManager.inflateAt(index) }
                         geometry: MobModel {
-                            mobType: 5
+                            mobType: 6
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
                         position: Qt.vector3d(0, mobModelYOff, 0) // t284 halfH=0.90 → offset 0（腿底贴 collision 底面）
@@ -2864,6 +2866,46 @@ Window {
                             position: Qt.vector3d(0.06, 0.68, -0.17)
                             scale: Qt.vector3d(0.05, 0.06, 0.02)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                    }
+                    // t287 Bones（骸骨/骷髅；mobType 5）：MobModel 人形（修：原走 UnitCube 致「白方块」）。
+                    //   灰白骨色 baseColor（无专属贴图，纯色原创 §9a）。受击红闪。远程射箭由 EntityManager 负责。
+                    Model {
+                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobBones
+                        geometry: MobModel {
+                            mobType: 5
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
+                        position: Qt.vector3d(0, mobModelYOff, 0)
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: {
+                                entityManager.revision
+                                const tl = terrainLight(worldClock.skyLight)
+                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 灰白骨色
+                            }
+                        }
+                    }
+                    // t285 Spider（蜘蛛；mobType 7）：MobModel 宽矮四腿（原创 §9，简化 4 腿；爬墙留后续）。
+                    //   暗黑红 baseColor（纯色原创 §9a）。受击红闪。hostile → EntityManager AI 自动追击玩家。
+                    Model {
+                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSpider
+                        geometry: MobModel {
+                            mobType: 7
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
+                        position: Qt.vector3d(0, mobModelYOff, 0)
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: {
+                                entityManager.revision
+                                const tl = terrainLight(worldClock.skyLight)
+                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                return Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) // 暗黑红
+                            }
                         }
                     }
                     // t253 攻击单体选中：准星瞄准的**单个** mob 显白色目标框（常驻可见，区别 F3+B 调试框——
