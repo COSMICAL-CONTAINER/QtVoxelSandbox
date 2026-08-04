@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""生成矿石（CoalOre / IronOre）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
+"""生成矿石（CoalOre / IronOre / DiamondOre）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
 
 机制等价 MC 1.0 矿石（嵌于 stone 区段、需镐采掘），但贴图为本项目程序生成的原创像素图，
 **不**拷贝任何 MC 资产。基底取本工程既有石头（default_stone.png）逐像素副本，保证与
 「石族」纹理一致（视觉上读得出「石头里嵌着矿」）；矿石用固定位置的色块簇点缀：
 
   - 煤矿（coal_ore）：石头底 + 多簇近黑斑块（煤层外露，配少量高光暗化边）；
-  - 铁矿（iron_ore）：石头底 + 多簇棕橙斑点（铁锈色，配浅色高光）。
+  - 铁矿（iron_ore）：石头底 + 多簇棕橙斑点（铁锈色，配浅色高光）；
+  - 钻矿（diamond_ore）：石头底 + 多簇青白菱斑（机制等价 MC 钻石矿，名称/贴图原创），
+    高光偏冷白、底阴影偏深青，散布表「嵌于岩的晶体」。
 
 色块位置固定（无随机源）→ 同输入同输出（确定性，便于 CI 校验 & 与 build_atlas.py 顺序对齐）。
 斑块布局刻意打散、不对称，避免「网格化 / 重复纹理」的人工感。
@@ -14,6 +16,7 @@
 输出（覆盖写入 textures/）：
   default_coal_ore.png
   default_iron_ore.png
+  default_diamond_ore.png
 
 依赖：本脚本须先有 textures/default_stone.png（既有 CC0/原创资产）。
 """
@@ -71,6 +74,16 @@ def draw_iron(canvas):
     return canvas
 
 
+def draw_diamond(canvas):
+    """钻矿（diamond_ore）：石头底 + 多簇青白菱斑晶体（散布；冷白高光 + 深青阴影显晶体反光）。
+    机制等价 MC 1.0 钻石矿，名称/贴图全原创（§9）。比煤/铁矿斑块更亮、更冷，肉眼即读「晶体矿」。"""
+    dia_base = np.array([110.0, 214.0, 214.0])    # 青白（晶体外露，偏冷）
+    dia_hi = np.array([208.0, 246.0, 246.0])      # 高光（晶体反光，近白青）
+    centers = [(3, 5), (11, 3), (13, 10), (5, 11), (8, 8), (10, 13)]
+    paint_blobs(canvas, centers, radius=1, color=dia_base, highlight=dia_hi)
+    return canvas
+
+
 def save(arr, name):
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA")
     out = os.path.join(SRC, name + ".png")
@@ -81,6 +94,7 @@ def save(arr, name):
 def main():
     save(draw_coal(stone_base()), "default_coal_ore")
     save(draw_iron(stone_base()), "default_iron_ore")
+    save(draw_diamond(stone_base()), "default_diamond_ore")
 
 
 if __name__ == "__main__":

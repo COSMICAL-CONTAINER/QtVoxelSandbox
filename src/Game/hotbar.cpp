@@ -24,6 +24,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Furnace:       return "icon_furnace.png";        // t80 熔炉立方体图标
     case BlockRegistry::CoalOre:       return "icon_coal_ore.png";       // t84 煤矿石立方体图标
     case BlockRegistry::IronOre:       return "icon_iron_ore.png";       // t84 铁矿石立方体图标
+    case BlockRegistry::DiamondOre:    return "icon_diamond_ore.png";    // t279 钻矿石立方体图标（石头底+青白菱斑晶体）
     case BlockRegistry::Torch:         return "icon_torch.png";          // t88 火把立方体图标（伪光源）
     case BlockRegistry::Chest:         return "icon_chest.png";          // t173 箱子立方体图标（顶盖缝+侧铁箍）
     case BlockRegistry::Farmland:      return "icon_farmland.png";       // t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
@@ -207,7 +208,8 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RawPorkchopId),   // 生猪排：杀猪掉落（带骨肉排，浅粉红）
         int(RecipeRegistry::RawBeefId),       // 生牛肉：杀牛掉落（深红肉块）
         int(RecipeRegistry::LeatherId),       // 皮革：杀牛掉落（棕黄兽皮）
-        int(RecipeRegistry::WoolId)           // 羊毛：杀羊掉落（白色绒毛团）
+        int(RecipeRegistry::WoolId),          // 羊毛：杀羊掉落（白色绒毛团）
+        int(RecipeRegistry::DiamondId)        // t279 钻石：钻石矿挖掘掉落（需铁镐；机制等价 MC 1.0 钻石）
     };
 }
 
@@ -262,6 +264,7 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Leaves),        int(BlockRegistry::Sand),
              int(BlockRegistry::CraftingTable), int(BlockRegistry::Furnace),
              int(BlockRegistry::CoalOre),       int(BlockRegistry::IronOre),
+             int(BlockRegistry::DiamondOre),                                   // t279 钻矿石（散布于 stone 深层 y∈[5,16]、需铁镐采掘；掉钻石材料）
              int(BlockRegistry::Torch),
              int(BlockRegistry::Chest),                                    // t173 箱子（右键开 27 槽）
              int(BlockRegistry::Farmland),                                 // t234 耕地（持锄右键泥土/草得；干/湿两态）
@@ -326,6 +329,7 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggPigId)   return QStringLiteral("生物蛋（猪）");
         if (blockId == RecipeRegistry::SpawnEggCowId)   return QStringLiteral("生物蛋（牛）");
         if (blockId == RecipeRegistry::SpawnEggSheepId) return QStringLiteral("生物蛋（羊）");
+        if (blockId == RecipeRegistry::DiamondId)       return QStringLiteral("钻石"); // t279 钻石矿挖掘掉落
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

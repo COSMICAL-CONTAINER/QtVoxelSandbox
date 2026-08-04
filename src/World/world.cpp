@@ -889,20 +889,36 @@ void World::placeBedrock()
     }
 }
 
-// 确定性矿石散布（t84，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 的格填 Stone，沙漠/沙滩表层除外），
-// 按 hashVoxel(seed,x,y,z) 的低 16 位（% 10000）做密度筛选 → 替换为煤矿/铁矿。仅替换 Stone
-// （不动 dirt/grass/sand/log/leaves，也不动已生成的另一种矿：判定只针对 Stone 格）。铁矿比煤矿
-// 略稀（贴近 MC 1.0 铁比煤少）；两矿共用同一 hash 的不同阈值段 → 互斥（一格至多一种矿）。
-// 全程纯函数于 seed → 可复现；禁用任何运行期随机源（QTime/时钟/全局 RNG）。
+// 确定性矿石散布（t84/t279，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 的格填 Stone，沙漠/沙滩表层
+//   除外），按 hashVoxel(seed,x,y,z) 的不同位段做密度筛选 → 替换为煤矿 / 铁矿 / **钻石矿**。
+//   **t279 高度分层**（煤浅 / 铁中 / 钻石深，机制等价 MC 1.0 矿物随深度分层）：
+//     - 钻石（diamond_ore）：仅深层 y∈[kDiamondMin=5, kDiamondMax=16]（紧贴基岩 kBedrockTop=4 之上 → 越近基
+//       岩越富，机制等价 MC 1.0 钻石矿 y 1-16）。密度最低（稀有，0.4%）→ 深挖方见。
+//     - 铁（iron_ore）：中层 y∈[kOreMin=5, kIronMax=30]（机制等价 MC 铁矿 y 1-64 中下层富集）。中等密度（0.7%）。
+//     - 煤（coal_ore）：浅层 y∈[kCoalMin=8, stoneTop]（机制等价 MC 煤矿靠近地表富集）。最高密度（1.0%）。
+//   三矿判定用同一 hash 的**不同位段**（% 10000 取位 0/8/16）→ 各自独立 → 重叠区（如 y∈[8,16]）三矿共存
+//   （一格至多一矿：判定序 钻石 > 铁 > 煤，先中者胜，稀有矿优先）。仅替换 Stone；同 seed → 同矿脉分布；
+//   禁用任何运行期随机源（QTime/时钟/全局 RNG）。
 //
-// 密度（/10000）：煤矿 0.8%、铁矿 0.5%（散点式，非 MC 的脉状集群——脉状留后续 worldgen 增强）。
-// 铁矿判定先于煤矿（pct < kIronPct 优先），使铁的稀有度不被煤矿阈值「吃掉」。
+//   **洞穴裸露矿物**（spec 核心）：worldgen 顺序 scatterOres → carveCaves，carveCaves（t278）挖走 stone/ore
+//   暴露矿脉于洞壁。旧 t84 矿物全高度均匀散布 → 洞穴穿矿概率与深度无关，深层洞穴难见钻石。t279 把钻石集中
+//   深层、洞穴也贯穿深层 → 深层洞壁天然见钻矿石（spec「洞穴 carve 自然暴露 + 钻石深」）。密度随深度上调使
+//   暴露更可见：深层 stone 多、洞穴穿多 → 矿脉出露概率天然高。
 void World::scatterOres()
 {
-    constexpr unsigned kIronPct = 50;  // /10000 → 0.5%（铁，需石镐）
-    constexpr unsigned kCoalPct = 80;  // /10000 → 0.8%（煤，木镐可挖）
+    constexpr int kOreMin      = 5;   // 矿物起始 y（紧贴基岩 kBedrockTop=4 之上；基岩层 y 0..4 不布矿）
+    constexpr int kCoalMin     = 8;   // 煤起始 y（仅浅层；机制等价 MC 煤靠近地表富集）
+    constexpr int kDiamondMin  = 5;   // 钻石起始 y（= kOreMin，紧贴基岩）
+    constexpr int kDiamondMax  = 16;  // 钻石上界 y（机制等价 MC 1.0 钻石矿 y 1-16）
+    constexpr int kIronMax     = 30;  // 铁上界 y（机制等价 MC 铁矿中下层富集）
 
-    int coalPlaced = 0, ironPlaced = 0;
+    // 密度（/10000，每体素命中概率）：钻石最稀（深层）< 铁（中层）< 煤（浅层，最常见）。
+    //   洞穴 carve 暴露后矿脉出露更可见（spec「洞穴裸露矿物」）；密度调到「分层肉眼可辨 + 不过密糊洞壁」。
+    constexpr unsigned kDiamondPct = 40;   // /10000 → 0.4%（钻石，需铁镐 minTier3；稀有深层）
+    constexpr unsigned kIronPct    = 70;   // /10000 → 0.7%（铁，需石镐 minTier2；中层）
+    constexpr unsigned kCoalPct    = 100;  // /10000 → 1.0%（煤，木镐可挖 minTier1；浅层最常见）
+
+    int coalPlaced = 0, ironPlaced = 0, diamondPlaced = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
@@ -915,20 +931,37 @@ void World::scatterOres()
             const int stoneTop = h - 3;
             for (int y = 0; y <= stoneTop; ++y) {
                 if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone)
-                    continue; // 仅替换 stone（防御：树根/边界异常格不动）
+                    continue; // 仅替换 stone（防御：树根/边界异常格不动；已生成的它种矿也不动）
                 const quint32 r = hashVoxel(m_seed, x, y, z);
-                const unsigned pct = unsigned(r % 10000u);
-                if (pct < kIronPct) {
-                    m_chunks.setBlock(x, y, z, BlockRegistry::IronOre);
-                    ++ironPlaced;
-                } else if (pct < kIronPct + kCoalPct) {
-                    m_chunks.setBlock(x, y, z, BlockRegistry::CoalOre);
-                    ++coalPlaced;
+                // 判定序：钻石（深层）> 铁（中层）> 煤（浅层）。先中者胜 → 重叠区稀有矿优先。
+                //   三段独立位（0/8/16）→ 判定彼此独立（非旧版「同 hash 不同阈值段互斥」），重叠区
+                //   三矿按概率共存但一格至多一矿（先中者已 setBlock 替换 Stone，后续判定跳过非 Stone）。
+                if (y >= kDiamondMin && y <= kDiamondMax) {
+                    if (((r       ) % 10000u) < kDiamondPct) {
+                        m_chunks.setBlock(x, y, z, BlockRegistry::DiamondOre);
+                        ++diamondPlaced;
+                        continue;
+                    }
+                }
+                if (y >= kOreMin && y <= kIronMax) {
+                    if (((r >> 8)  % 10000u) < kIronPct) {
+                        m_chunks.setBlock(x, y, z, BlockRegistry::IronOre);
+                        ++ironPlaced;
+                        continue;
+                    }
+                }
+                if (y >= kCoalMin) {
+                    if (((r >> 16) % 10000u) < kCoalPct) {
+                        m_chunks.setBlock(x, y, z, BlockRegistry::CoalOre);
+                        ++coalPlaced;
+                        continue;
+                    }
                 }
             }
         }
     }
-    qInfo() << "worldgen: ores placed = coal" << coalPlaced << "iron" << ironPlaced; // 同 seed → 同计数（确定性核对）
+    qInfo() << "worldgen: ores placed = coal" << coalPlaced << "iron" << ironPlaced
+            << "diamond" << diamondPlaced; // 同 seed → 同计数（确定性核对）
 }
 
 // t278 洞穴隧道生成（PLAN §2-K 确定性；spec「3D Perlin 阈值 / random-worm 隧道 + 分叉路口；内部黑暗；连通性」）。

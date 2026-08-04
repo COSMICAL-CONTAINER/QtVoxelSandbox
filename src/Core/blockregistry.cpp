@@ -100,6 +100,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   本表 topTile/sideTile 存阶段 0 基底 tile 29，partialblockgeometry 的 WheatCrop case 内 state + 基底算实际阶段贴图
     //   （同 Water 流水贴图由 mesher 据 state 选的模式 —— 阶段贴图是呈现层选择，非 BlockDef 字段）。音色归 GroupGrass（软草音）。
     /* wheat_crop    */ {int(BlockRegistry::WheatCrop),             29, 29, 29, 29, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, 0x208,                              1, 64, "wheat_crop",    "小麦作物"},
+    // ── t279 钻石矿（DiamondOre）：机制等价 MC 1.0 钻石矿（嵌于 stone 深层、需铁镐采掘、掉钻石材料）。整立方 opaque
+    //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 coal/iron 矿石同族）、hardness=3.0（同 coal/iron
+    //   量级，需镐）、toolType=Pickaxe、requiresTool=true、**minToolTier=3**（**需铁镐**才掉落 —— 木 / 石镐挖了不掉落，
+    //   机制等价 MC 1.0 钻石矿需铁镐；t33 工具等级表 PickaxeIron tier=3）、dropId=0x212（钻石材料段，RecipeRegistry::DiamondId；
+    //   Core 不依赖 Game 故用字面量 0x212）、dropCount=1、maxStack=64。各面贴图=diamond_ore(37)（石头底 + 青白菱斑晶体，
+    //   原创自绘 §9a）。音色归 GroupStone（石质，同 coal/iron 矿石）。worldgen 高度分层散布于深层 y∈[5,16]（煤浅/铁中/钻石深）。
+    /* diamond_ore   */ {int(BlockRegistry::DiamondOre),            37, 37, 37, 37, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,  0x212,                              1, 64, "diamond_ore",   "钻石矿石"}, // 各面=diamond_ore(37)（t279）；散布于 stone 深层 y∈[5,16]；需铁镐(minTier3)；掉钻石材料(0x212)
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -390,7 +397,7 @@ BlockRegistry::Face BlockRegistry::chestFrontFace(quint8 state)
 BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
 {
     switch (blockId) {
-    case Stone: case Cobble: case Furnace: case CoalOre: case IronOre:
+    case Stone: case Cobble: case Furnace: case CoalOre: case IronOre: case DiamondOre:
         return GroupStone;
     case Log: case Planks: case CraftingTable:
     case WoodSlab: case WoodStairs: case WoodFence:

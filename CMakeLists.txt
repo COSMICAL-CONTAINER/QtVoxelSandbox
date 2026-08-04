@@ -171,6 +171,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/sun.png
         textures/default_cobble.png
         textures/default_coal_ore.png
+        textures/default_diamond_ore.png          # t279 钻矿石贴图（build_ore.py 程序生成原创像素图；散布于 stone 深层 y∈[5,16]）
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
@@ -211,6 +212,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/mob_sheep.png
         textures/icon_cobble.png
         textures/icon_coal_ore.png
+        textures/icon_diamond_ore.png            # t279 钻矿石立方体图标（build_cube_icons.py；石头底+青白菱斑晶体）
         textures/icon_crafting_table.png
         textures/icon_dirt.png
         textures/icon_furnace.png

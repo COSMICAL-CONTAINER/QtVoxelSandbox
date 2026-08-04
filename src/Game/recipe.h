@@ -97,6 +97,11 @@ public:
     static constexpr int SpawnEggPigId   = 0x20F; // 生物蛋（猪）：右键地面 → 生成猪（MobPig）
     static constexpr int SpawnEggCowId   = 0x210; // 生物蛋（牛）：右键地面 → 生成牛（MobCow）
     static constexpr int SpawnEggSheepId = 0x211; // 生物蛋（羊）：右键地面 → 生成羊（MobSheep）
+    // t279 钻石：材料段 0x212。**钻石矿挖掘掉落**（BlockRegistry::DiamondOre.dropId=0x212；机制等价 MC 1.0「钻石矿
+    //   需铁镐采掘、掉钻石」，非冶炼产物 —— 钻石矿直接掉钻石材料，区别于铁原矿需冶炼成铁锭）。可堆叠 64；非方块
+    //   → 右键不放置。MaterialIcon 自绘钻石晶体图标（青白多面切割宝石，§9a）。创造调色板补全便于测试 / 装饰取用。
+    //   t279 仅注册物品（可持 / 可掉 / 创造可取）；钻石工具（钻石镐 tier 4 等）配方属后续任务，本轮不做。
+    static constexpr int DiamondId       = 0x212; // 钻石：钻石矿挖掘掉落（BlockRegistry::DiamondOre.dropId）；可堆叠 64
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

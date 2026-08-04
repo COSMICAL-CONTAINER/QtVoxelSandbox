@@ -210,8 +210,12 @@ private:
     // 单棵树：主干 trunkH 格 + 树冠。leafRand = 该列哈希的高位，驱动树冠四角叶的有无 → 每棵树冠轮廓
     // 各异（贴近 MC 橡树自然参差）。纯由 seed 派生（确定性，PLAN §2-K）。
     void placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
-    // 确定性矿石散布（t84，PLAN §2-K）：地形填充后遍历 stone 区段，按 hashVoxel(seed,x,y,z)
-    // 决定是否替换为煤矿/铁矿。仅替换 Stone；同 seed → 同矿脉分布；禁用任何运行期随机源。
+    // 确定性矿石散布（t84/t279，PLAN §2-K）：地形填充后遍历 stone 区段，按 hashVoxel(seed,x,y,z)
+    //   决定是否替换为煤矿 / 铁矿 / **钻石矿**。**t279 高度分层**（煤浅 / 铁中 / 钻石深，机制等价 MC 1.0
+    //   矿物随深度分层）：煤仅浅层（y≥8，靠近地表富集）、铁中层（y≤30）、钻石仅深层（y∈[5,16]，靠近基岩
+    //   越富）。三矿判定用同一 hash 的不同位段（独立 → 可重叠区三矿共存、优先钻石 > 铁 > 煤排冲突）。
+    //   仅替换 Stone；同 seed → 同矿脉分布；禁用任何运行期随机源。密度随深度上调（深层 stone 多、洞穴穿
+    //   多 → 洞壁裸露矿更可见，spec「洞穴 carve 自然暴露」——carveCaves 在本 pass 之后挖走 stone/ore 暴露矿脉）。
     void scatterOres();
     // t119 底层基岩（PLAN §2-K 确定性）：地形填充后在 y 0..4 铺一层 Bedrock（不可破坏，hardness=-1.0）。
     // 厚度按 hashVoxel 坑洼（底实顶疏，机制等价 MC 1.0 基岩层）。仅覆盖最底几格；同 seed → 同分布。
