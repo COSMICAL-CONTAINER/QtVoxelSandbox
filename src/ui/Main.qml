@@ -27,6 +27,12 @@ Window {
     //   WireCube AABB + 朝向箭头。MC F3+B 语义——B 键仅在 F3 按住时生效（见 f3Held，t143）；
     //   showHitboxes 一旦开启，松开 F3 不影响（独立 bool，同 MC：关 F3 后碰撞箱仍显直到再 F3+B 关）。
     property bool showHitboxes: false
+    // t277 F3+G 区块边界显示（机制等价 MC F3+G chunk boundary display）：显隐 16×16 区块边界线框叠层
+    //   （ChunkGridLines 纵线 + 顶/底水平连线，红色 NoLighting 线）。MC F3+G 语义——G 键仅在 F3 按住
+    //   （f3Held）时 toggle showChunkBounds，即「按住 F3 同时按 G」的组合键（F3 作 G 修饰键，与上方
+    //   F3+B 同模式）。showChunkBounds 独立于 f3Held/f3Visible：松开 F3 后边界线仍显直到再按 F3+G 关
+    //   （同 MC 行为，与 showHitboxes 一致）。仅 playing 态有意义（叠层在 View3D 场景内）。
+    property bool showChunkBounds: false
 
     // app 状态机（t17 / t176）：menu（启动首显主菜单）→ worldlist（单人模式：世界列表 / 新建）→
     //   playing（显 View3D/HUD + grab 指针）。playing 经 ESC「保存并退出」回 worldlist；worldlist「返回」回 menu。
@@ -1502,6 +1508,29 @@ Window {
                     waterAnimPhase: window.waterAnimPhase
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+            }
+        }
+
+        // t277 F3+G 区块边界显示（机制等价 MC F3+G chunk boundary display）：ChunkGridLines 按
+        //   世界尺寸 + 16 格 chunk 边长画区块边界线框叠层（每个 chunk 边界交点处纵线 y=0..height +
+        //   顶/底水平连线 = 完整格线框，从任意角度可见）。红色 NoLighting 线（lessons-learned：所有
+        //   可见 3D Model 必须 NoLighting，否则 lit 材质不出像素）。Model 摆 position 0,0,0 —— 几何顶点
+        //   已是世界坐标（与 chunk Model 同坐标系：chunk 摆 (cx*16,0,cz*16)，边界恰落在 x/z=16n）。
+        //   仅 playing + showChunkBounds（F3+G toggle）时显；走正常深度测试（被前景地形遮挡，高出地表
+        //   部分始终可见 = 既不喧宾夺主、又能看清边界）。
+        //   分层（PLAN §2）：呈现层只读 worldChunksPerSide / theWorld.height（世界尺寸单一权威），不写栅格。
+        Model {
+            visible: window.appState === "playing" && window.showChunkBounds
+            position: Qt.vector3d(0, 0, 0)
+            geometry: ChunkGridLines {
+                worldWidth: window.worldChunksPerSide * 16
+                worldDepth: window.worldChunksPerSide * 16
+                worldHeight: theWorld.height
+                chunkSize: 16
+            }
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                baseColor: "#ff3030"   // 红色边界线（机制等价 MC F3+G chunk border red lines）
             }
         }
 
@@ -3291,6 +3320,13 @@ Window {
             if (e.key === Qt.Key_B && window.appState === "playing" && window.f3Held) {
                 window.showHitboxes = !window.showHitboxes; e.accepted = true; return
             }
+            // t277 F3+G 区块边界显示（机制等价 MC F3+G chunk boundary display）：G 键仅在 F3 按住
+            //   （f3Held）时 toggle showChunkBounds（与上方 F3+B 同「F3 作修饰键」语义）。showChunkBounds
+            //   独立于 f3Held/f3Visible：松开 F3 后边界线仍显直到再按 F3+G 关（同 MC 行为）。
+            //   仅 playing 态 toggle（叠层在 View3D 场景内，菜单态不可见）。
+            if (e.key === Qt.Key_G && window.appState === "playing" && window.f3Held) {
+                window.showChunkBounds = !window.showChunkBounds; e.accepted = true; return
+            }
             if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
             if (e.key === Qt.Key_F6) { worldClock.toggleDebugFast(); e.accepted = true; return } // 昼夜调试加速（t09）
             if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
@@ -3435,7 +3471,7 @@ Window {
                 Text { text: "[F6] toggle fast day/night (" + (worldClock.debugFast ? "ON · ~30s" : "OFF · ~20min") + ")"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[F3] toggle debug overlay (fps / frame / cpu ms / draw-calls / mesh)   [F3+B] toggle hitboxes"
+                Text { text: "[F3] toggle debug overlay (fps / frame / cpu ms / draw-calls / mesh)   [F3+B] toggle hitboxes   [F3+G] toggle chunk bounds"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 // 按钮行：t139 设置 + 返回主菜单。Row 居中，两按钮间距 10。
@@ -3780,6 +3816,7 @@ Window {
                  + "\nday: phase " + worldClock.dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
                  + (worldClock.debugFast ? "  (fast)" : "")
                  + "\n[B] hitboxes: " + (window.showHitboxes ? "ON" : "off")
+                 + "   [G] chunk bounds: " + (window.showChunkBounds ? "ON" : "off")
         }
     }
 
