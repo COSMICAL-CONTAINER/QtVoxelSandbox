@@ -54,9 +54,16 @@ Item {
     readonly property int slotSize: 40
     readonly property int mainCols: 9
     readonly property int mainRows: 3
-    // 箱子自身 3×9=27 槽（MC 1.0 标准；ChestStore::kSlotsPerChest 同值）。
+    // 箱子自身 3×9=27 槽（MC 1.0 标准；与 chestStore.slotCount 同值，下方 chestSlotCount 显式绑定单一权威）。
+    //   chestCols/chestRows 是 Grid **布局**维度（columns=9 → 3 行），与「数据条目数」分离：
+    //   Repeater model 读 chestSlotCount（= chestStore.slotCount，数据权威），布局维度仍读 chestCols/chestRows。
+    //   不变量 chestCols * chestRows === chestStore.slotCount（27）；将来扩双倍箱子（54）时右移 chestRows=6。
     readonly property int chestCols: 9
     readonly property int chestRows: 3
+    // t173 复审：chest 槽条目数单一权威 = ChestStore::slotCount（Q_PROPERTY 暴露，恒 27）。
+    //   Repeater model 绑本属性 → chestStore 内部 kSlotsPerChest 改动时 Repeater 自动跟随，
+    //   不再依赖本地 chestRows*chestCols 与之「偶合相等」（防一边改漏致槽位数不一致）。
+    readonly property int chestSlotCount: chestStore ? chestStore.slotCount : chestRows * chestCols
 
     // t167 左键拖动均分（同 CraftingTableUI：root 级 DragHandler(LeftButton) 总控，逐槽 HoverHandler
     //   在 leftDragActive 期间收集扫过格 → redistributeLive 实时重分）。chest / main / hotbar 统一支持。
@@ -84,8 +91,9 @@ Item {
     //   回退为不可拖拽——回归）。双击合并也随之扫 chest 槽（修旧版「点 chest 槽常 total=0 空操作」：旧版
     //   doMergeSameId 只扫 main/hotbar，chest 物品不并入）。
     property var localDragGroups: ["chest"]
-    // t180：chest 组槽位数（doMergeSameId 扫描范围）= chestRows*chestCols（3×9=27，ChestStore::kSlotsPerChest）。
-    function localSlotCount(group) { return group === "chest" ? root.chestRows * root.chestCols : 0 }
+    // t180 / t173 复审：chest 组槽位数（doMergeSameId 扫描范围）= chestSlotCount（单一权威读 chestStore.slotCount，
+    //   恒 27 = 3×9 = ChestStore::kSlotsPerChest）。chestCols*chestRows 布局维度同值，但数据条目数走 chestStore 权威。
+    function localSlotCount(group) { return group === "chest" ? root.chestSlotCount : 0 }
 
     // ── t168 面板专属槽路由：chest 组走 ChestStore（按坐标寻址）；main/hotbar 由 InventoryOps 统一经 VM。
     //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
@@ -217,7 +225,7 @@ Item {
                 height: root.chestRows * root.slotSize
                 columns: root.chestCols; spacing: 0
                 Repeater {
-                    model: root.chestRows * root.chestCols  // 27
+                    model: root.chestSlotCount  // t173 复审：读 chestStore.slotCount（单一权威，恒 27；不再本地 chestRows*chestCols 偶合）
                     delegate: Item {
                         property int chId: { root.chestCoordRev; return root.chestStore.slotIdAt(root.chestX, root.chestY, root.chestZ, index) }
                         property int chCount: { root.chestCoordRev; return root.chestStore.slotCountAt(root.chestX, root.chestY, root.chestZ, index) }
