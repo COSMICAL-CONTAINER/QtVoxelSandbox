@@ -2624,12 +2624,12 @@ Window {
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, mobModelYOff, 0) // 同 mob 本体对齐（腿底贴 collision 底面）
                         scale: Qt.vector3d(1.06, 1.10, 1.06)      // 略大于 mob（火苗包覆感）
-                        opacity: flameOpacity.value
+                        opacity: 0.7  // t280 修：恢复提交漏定义 flameOpacity 致 ReferenceError，暂用常量（火苗明灭动画留后续）
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#ff8a2a"
                             // opacity 绑定 flameOpacity.value：SequentialAnimation 抖动 → 火苗明灭窜动感（机制等价）。
-                            opacity: flameOpacity.value
+                            opacity: 0.7  // t280 修：恢复提交漏定义 flameOpacity 致 ReferenceError，暂用常量（火苗明灭动画留后续）
                         }
                         property real flameOpacity: 0.55
                         SequentialAnimation on flameOpacity {

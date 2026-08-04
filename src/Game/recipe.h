@@ -102,6 +102,12 @@ public:
     //   → 右键不放置。MaterialIcon 自绘钻石晶体图标（青白多面切割宝石，§9a）。创造调色板补全便于测试 / 装饰取用。
     //   t279 仅注册物品（可持 / 可掉 / 创造可取）；钻石工具（钻石镐 tier 4 等）配方属后续任务，本轮不做。
     static constexpr int DiamondId       = 0x212; // 钻石：钻石矿挖掘掉落（BlockRegistry::DiamondOre.dropId）；可堆叠 64
+    // t287 敌对生物蛋（spawn eggs）：材料段 0x213..0x215。创造模式物品，右键地面 → spawnMobTyped 生成敌对生物
+    //   （Shambler/Bones/Stalker；机制等价 MC 1.0 僵尸/骷髅/苦力怕 spawn egg）。§9 改名（Zombie→Shambler「蹒跚者」、
+    //   Skeleton→Bones「骸骨」、Creeper→Stalker「潜行者」），仅机制对齐。Spider 蛋留待 t285 蜘蛛实现后补。
+    static constexpr int SpawnEggShamblerId = 0x213; // 生物蛋（蹒跚者）：右键 → 生成 Shambler（敌对近战，MobShambler）
+    static constexpr int SpawnEggBonesId    = 0x214; // 生物蛋（骸骨）：右键 → 生成 Bones（敌对远程射箭，MobBones）
+    static constexpr int SpawnEggStalkerId  = 0x215; // 生物蛋（潜行者）：右键 → 生成 Stalker（敌对爆炸，MobStalker）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

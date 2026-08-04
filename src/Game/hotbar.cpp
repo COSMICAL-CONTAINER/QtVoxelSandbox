@@ -202,6 +202,11 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::SpawnEggPigId),   // 生物蛋（猪）
         int(RecipeRegistry::SpawnEggCowId),   // 生物蛋（牛）
         int(RecipeRegistry::SpawnEggSheepId), // 生物蛋（羊）
+        // t287 敌对生物蛋（创造模式物品；右键地面 → 生成敌对生物 Shambler/Bones/Stalker）。
+        //   机制等价 MC 1.0 僵尸/骷髅/苦力怕 spawn egg；§9 改名。Spider 蛋留待 t285。
+        int(RecipeRegistry::SpawnEggShamblerId), // 生物蛋（蹒跚者）
+        int(RecipeRegistry::SpawnEggBonesId),    // 生物蛋（骸骨）
+        int(RecipeRegistry::SpawnEggStalkerId),  // 生物蛋（潜行者）
         // t244 mob 死亡掉落物（杀猪 / 牛 / 羊产出；机制等价 MC 1.0 被动生物掉落，纯原创自绘 MaterialIcon §9a）：
         //   完成创造调色板一览 —— 生存时由 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
         //   可堆叠 64（走材料段默认 maxStack）；非方块 → 右键不放置（playercontroller selectedBlock 守 Air）。
@@ -329,6 +334,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggPigId)   return QStringLiteral("生物蛋（猪）");
         if (blockId == RecipeRegistry::SpawnEggCowId)   return QStringLiteral("生物蛋（牛）");
         if (blockId == RecipeRegistry::SpawnEggSheepId) return QStringLiteral("生物蛋（羊）");
+        if (blockId == RecipeRegistry::SpawnEggShamblerId) return QStringLiteral("生物蛋（蹒跚者）");
+        if (blockId == RecipeRegistry::SpawnEggBonesId)    return QStringLiteral("生物蛋（骸骨）");
+        if (blockId == RecipeRegistry::SpawnEggStalkerId)  return QStringLiteral("生物蛋（潜行者）");
         if (blockId == RecipeRegistry::DiamondId)       return QStringLiteral("钻石"); // t279 钻石矿挖掘掉落
         return QString();
     }
