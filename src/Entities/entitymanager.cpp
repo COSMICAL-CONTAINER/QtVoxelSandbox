@@ -125,6 +125,30 @@ void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
 }
 
+// t283 生成箭矢投射物：存 origin + 3D 速度 vel（含 vy 抛物）+ kind=Arrow + pushable=false + 寿命。
+//   halfW/halfH=0.06（细长杆视觉 + 碰撞最小；箭命中走 point-in-AABB 不读 halfW）。bump revision → QML
+//   Repeater 追加 delegate（Arrow 分支细长杆定向 Model）。达 kCap 跳过 + 告警（防溢出）。
+void EntityManager::spawnArrow(const QVector3D &origin, const QVector3D &vel)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); arrow spawn skipped at" << origin;
+        return;
+    }
+    Entity e;
+    e.pos = origin;
+    e.halfW = 0.06f; // 箭细长杆（视觉 + 碰撞最小；命中检测用独立命中盒不读它）
+    e.halfH = 0.06f;
+    e.pushable = false; // 玩家走碰不推箭（同掉落物 / 下落方块变体）
+    e.kind = Arrow;
+    e.vx = vel.x(); // Arrow 复用 vx/vy/vz 作 3D 速度（Arrow 不走 Mob 击退衰减分支，无冲突）
+    e.vy = vel.y();
+    e.vz = vel.z();
+    e.arrowLife = kArrowLifetime;
+    acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    ++m_revision;
+    emit entitiesChanged();
+}
+
 // t280 敌对生物生成入口：委托 spawnMobTyped 设碰撞箱 / 血量 / 颜色（Shambler 暗绿、Bones 灰白，§9 原创配色）。
 //   spawnMobTyped 内 switch 据 mobType 设 hostile=true（兜底）。spec「黑暗刷怪调度」周期 spawn 调用它。
 //   mobType 非 Shambler/Bones → 仍生成但非敌对语义（防御；正常 caller 只传这两种）。
@@ -370,6 +394,39 @@ float EntityManager::headPitchAt(int i) const
     if (e.kind != Mob || e.mobType != MobSheep || e.eatTimer <= 0.0f) return 0.0f;
     const float p = (kEatDuration - e.eatTimer) / kEatDuration; // 周期内进度 0..1
     return kEatHeadPitch * std::sin(3.14159265f * p);           // sin(πp) 包络：起末 0、中段最深（负=低头）
+}
+
+// t283 箭水平朝向（QML eulerRotation.y 定向杆）：据 vx/vz 用 player 同 yaw 约定（dir=(-sin,-cos)）→
+//   yaw=atan2(-vx,-vz) 使杆本地 -Z 正对飞行水平方向。非 Arrow / 水平速度 ~0 / 越界 → 0。
+float EntityManager::arrowYawAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Arrow) return 0.0f;
+    const float h = std::sqrt(e.vx * e.vx + e.vz * e.vz);
+    if (h < 1e-4f) return 0.0f;
+    return qRadiansToDegrees(std::atan2(-e.vx, -e.vz));
+}
+
+// t283 箭俯仰（QML eulerRotation.x 定向杆）：pitch=atan2(vy, 水平速度)，正=上扬、负=下俯（抛物飞行中由正转负）。
+//   非 Arrow / 水平速度 ~0 / 越界 → 0。
+float EntityManager::arrowPitchAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Arrow) return 0.0f;
+    const float h = std::sqrt(e.vx * e.vx + e.vz * e.vz);
+    if (h < 1e-4f) return 0.0f;
+    return qRadiansToDegrees(std::atan2(e.vy, h));
+}
+
+// t283 实体 3D 速度（F3 / 调试；Arrow 读 vx/vy/vz）。非活体 / 越界 → 零向量。
+QVector3D EntityManager::velAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return QVector3D();
+    const Entity &e = m_entities[size_t(i)];
+    if (!e.alive) return QVector3D();
+    return QVector3D(e.vx, e.vy, e.vz);
 }
 
 // t239 mob 子类 id（t240 pig/cow/sheep；t242/t243 分流）。越界 → 0。
@@ -678,6 +735,156 @@ bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D
     return moved;
 }
 
+// t283 骷髅弓箭手 AI（detect→keep-distance→shoot；详见头文件 aiArcher 注释）。机制对齐 MC 1.0 骷髅射手。
+//   分层（PLAN §2）：只读 World::isSolid + 自身数据；shoot 走 spawnArrow（箭实体），命中由 Arrow tick 分支
+//   发 mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile attack 模式）。
+bool EntityManager::aiArcher(Entity &e, float dt, World *world, const QVector3D &playerPos,
+                             float worldW, float worldD)
+{
+    // 攻击（射箭）冷却递减（不论追踪与否；自然走完，复射不卡陈旧值）。钳到 0。
+    if (e.attackCooldown > 0.0f) {
+        e.attackCooldown -= dt;
+        if (e.attackCooldown < 0.0f) e.attackCooldown = 0.0f;
+    }
+
+    const float dx = playerPos.x() - e.pos.x();
+    const float dz = playerPos.z() - e.pos.z();
+    const float dy = playerPos.y() - e.pos.y();
+    const float distXZ = std::sqrt(dx * dx + dz * dz);
+
+    // (1) detect + chase memory（同 aiHostile）：进入 kDetectRange → 追踪 + 刷新记忆；脱离后记忆期内续追。
+    if (distXZ <= kDetectRange) {
+        e.chasing = true;
+        e.chaseTimer = kChaseMemory;
+    } else if (e.chasing) {
+        e.chaseTimer -= dt;
+        if (e.chaseTimer <= 0.0f) { e.chaseTimer = 0.0f; e.chasing = false; }
+    }
+    if (!e.chasing) {
+        // 非追踪 → 回退 wander（随机游荡；mobType 非 sheep 不吃草，纯游荡）。
+        return aiWander(e, dt, world, worldW, worldD);
+    }
+
+    // (2) 朝向玩家（射箭方向 + 行走方向；dir=(-sin,0,-cos) 同 player/aiHostile yaw 约定）。
+    if (distXZ > 1e-4f) e.yawRad = std::atan2(-dx, -dz);
+    e.wanderSpeed = kChaseSpeed; // 供 walkPhase 腿摆频率 + 语义（行走态）
+
+    // (3) 保持距离：近于 kArcherKeepMin → 朝远离走；远于 kArcherKeepMax → 朝玩家走；其间 → 原地（仅朝向）。
+    //   moveDirX/Z = 水平移动单位向量（朝向「期望远离 / 接近」方向）。wantMove=false 表示在保持带内 → 不水平位移。
+    float moveDirX = 0.0f, moveDirZ = 0.0f;
+    bool wantMove = false;
+    if (distXZ > 1e-4f) {
+        if (distXZ < kArcherKeepMin) {
+            // 太近：朝远离玩家方向（moveDir = (e - player) / dist = (-dx,-dz)/dist）。
+            moveDirX = -dx / distXZ;
+            moveDirZ = -dz / distXZ;
+            wantMove = true;
+        } else if (distXZ > kArcherKeepMax) {
+            // 太远：朝玩家方向。
+            moveDirX = dx / distXZ;
+            moveDirZ = dz / distXZ;
+            wantMove = true;
+        }
+    }
+
+    // 越障跳（仅在要水平移动 + 贴地时；同 aiHostile 越障：前方 1 格墙 + 墙顶 2 格空气 → 跳）。
+    //   前方格取 moveDir 方向 0.7 格偏移（mob 半宽 0.45 + 余量，落在前方格而非自身列）。
+    if (wantMove && e.resting && world) {
+        const int fy = qFloor(e.pos.y() - e.halfH);                 // 脚位格
+        const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
+        const int fz = qFloor(e.pos.z() + moveDirZ * 0.7f);
+        if (fy >= 0
+            && world->isSolid(fx, fy, fz)                            // 前方脚位是 1 格墙
+            && !world->isSolid(fx, fy + 1, fz)                       // 墙顶可落
+            && !world->isSolid(fx, fy + 2, fz)) {                    // 头位可容（mob ~1.8 高）
+            e.vy = kJumpSpeed;
+            e.resting = false;
+        }
+    }
+
+    // (4) 水平移动（朝 moveDir，逐轴 AABB 碰撞撤回；复用 aiHostile / aiWander 边界 clamp + 全格扫模式）。
+    bool moved = false;
+    if (wantMove) {
+        const float ehw = e.halfW;
+        const float ehh = e.halfH;
+        float newX = e.pos.x() + moveDirX * kChaseSpeed * dt;
+        if (newX < ehw) newX = ehw;
+        if (newX > worldW - ehw) newX = worldW - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+        float newZ = e.pos.z() + moveDirZ * kChaseSpeed * dt;
+        if (newZ < ehw) newZ = ehw;
+        if (newZ > worldD - ehw) newZ = worldD - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+        if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+        if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+    }
+    e.moveSpeed = moved ? kChaseSpeed : 0.0f; // 撞墙 / 保持带内 → 腿停（walkPhase 冻结）
+
+    // (5) shoot：射程内 + 垂直同层 + 视线清 + 冷却到 → 解抛物初速射箭 + 重置冷却（防每帧连发）。
+    if (distXZ <= kArcherShootRange && std::abs(dy) <= kShootVertRange && e.attackCooldown <= 0.0f) {
+        const QVector3D origin(e.pos.x(), e.pos.y() + e.halfH * 0.5f, e.pos.z());
+        const QVector3D target(playerPos.x(), playerPos.y() + 0.9f, playerPos.z()); // 玩家上身（眼位 ~ 脚+1.62）
+        if (lineOfSightClear(world, origin, target)) {
+            fireArrow(e, target);
+            e.attackCooldown = kShootCooldown;
+            qCInfo(lcEnt) << "archer (Bones) fired arrow; dist=" << distXZ;
+        }
+    }
+
+    return moved;
+}
+
+// t283 视线清查（aiArcher shoot 前调，防穿墙盲射）：从 from 到 to 沿连线 0.5 格步进采样，任一采样点所在格
+//   isSolid → 视线被挡返 false。0.5 格步进足以抓 1 格墙。分层：只读 World::isSolid，不向下加依赖。
+bool EntityManager::lineOfSightClear(World *world, const QVector3D &from, const QVector3D &to) const
+{
+    if (!world) return false; // 无世界可查 → 保守不射（caller 安全）
+    const QVector3D d = to - from;
+    const float len = d.length();
+    if (len < 0.5f) return true;                                  // 起终点同格 → 视线清
+    const float step = 0.5f;
+    for (float t = step; t < len; t += step) {
+        const QVector3D p = from + d * (t / len);
+        const int bx = qFloor(p.x()), by = qFloor(p.y()), bz = qFloor(p.z());
+        if (by >= 0 && world->isSolid(bx, by, bz)) return false;  // 中途被实体方块挡 → 视线不清
+    }
+    return true;
+}
+
+// t283 朝 target 解抛物初速并射箭（aiArcher shoot 段调；详见头文件 fireArrow 注释）。
+void EntityManager::fireArrow(const Entity &shooter, const QVector3D &target)
+{
+    // origin = shooter 中心高度 + 朝 target 前移 0.5 格（避免贴墙时箭 spawn 入墙即被 tick 判方块命中）。
+    const float dx0 = target.x() - shooter.pos.x();
+    const float dz0 = target.z() - shooter.pos.z();
+    const float horiz0 = std::sqrt(dx0 * dx0 + dz0 * dz0);
+    if (horiz0 < 0.01f) return; // 退化（同格）→ 安全早退（防除零）
+    QVector3D origin(shooter.pos.x() + dx0 / horiz0 * 0.5f,
+                     shooter.pos.y() + shooter.halfH * 0.5f,
+                     shooter.pos.z() + dz0 / horiz0 * 0.5f);
+    const float dx = target.x() - origin.x();
+    const float dy = target.y() - origin.y();
+    const float dz = target.z() - origin.z();
+    const float horiz = std::sqrt(dx * dx + dz * dz);
+    if (horiz < 0.01f) return;
+    const float vH = kArrowSpeed;
+    const float t = horiz / vH;                                  // 飞行时间（水平距 / 水平速度）
+    // 抛物解：dy = vy·t − 0.5·g·t² → vy = (dy + 0.5·g·t²)/t（命中 target 高度的初速）。
+    float vy = (dy + 0.5f * kGravity * t * t) / t;
+    if (vy > kArrowMaxVert) vy = kArrowMaxVert;                  // 钳极端弧
+    if (vy < -kArrowMaxVert) vy = -kArrowMaxVert;
+    float vx = (dx / horiz) * vH;
+    float vz = (dz / horiz) * vH;
+    // MC 骷髅非 100% 精准 → 三轴 ±kArrowSpread 随机抖动（spread ≪ vH 不改飞行时间量级）。
+    auto rnd = []() {
+        return (float(QRandomGenerator::global()->bounded(2001)) - 1000.0f) / 1000.0f; // [-1,1]
+    };
+    vx += rnd() * kArrowSpread;
+    vz += rnd() * kArrowSpread;
+    vy += rnd() * kArrowSpread;
+    spawnArrow(origin, QVector3D(vx, vy, vz));
+}
+
 // t241 羊吃草：检测 / 消耗 entity 前方一格草丛（机制等价 MC 羊吃草：草丛消失 + 其下草方块变泥土）。
 //   目标列 = 沿 yaw 朝向 reach=0.7 前方（头部前方）；草丛格 y = 身体格（floor(pos.y − radius)，草丛生于地
 //   表上方一格 = 羊身体所在格）；其下地表格 = bodyY − 1（草方块 Grass）。OOB → 安全返 false（blockAt 越界
@@ -822,7 +1029,8 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
 //   void-loss 兜底：Mob 跌出世界底部（pos.y<0，如被推出边界外无支撑）→ 标记移除（防永久下落）。
 //
 // 移除用索引收集 + 循环后逆序 erase（保索引有效）。
-void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
+void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
+                        float listenerHalfW, float listenerHeight)
 {
     if (!world || m_entities.empty()) return;
     const float worldW = float(world->width());
@@ -833,6 +1041,62 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
     for (int idx = 0; idx < int(m_entities.size()); ++idx) {
         Entity &e = m_entities[size_t(idx)];
         if (!e.alive) continue; // t256：跳过已释放的空槽（slot-reuse 残留位；不参与物理 / AI）
+
+        // --- Arrow（t283 骷髅弓箭手箭矢）：抛物 + 方块命中 / 玩家命中 / 寿命 / 越界 → 移除（不走 Mob AI / resting）---
+        if (e.kind == Arrow) {
+            e.arrowLife -= float(dt);
+            // 抛物：重力改 vy（与世界重力同值 → 弧自然）。不复用 Mob 终端下落钳（箭可高速上扬）。
+            e.vy -= kGravity * float(dt);
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
+            bool remove = false;
+            bool hitPlayer = false;
+
+            // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积）。
+            if (e.arrowLife <= 0.0f) remove = true;
+
+            // 方块命中：新位置所在格 isSolid → 命中即移除（嵌入视觉 MVP 不做；箭速 ~14、每帧 0.22 格，
+            //   1 格墙不致穿模。火把 / 半砖等非 solid → 穿透，机制可接受）。
+            if (!remove) {
+                const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
+                if (by >= 0 && world->isSolid(bx, by, bz)) remove = true;
+            }
+
+            // 玩家命中：箭（点）是否落在玩家 AABB 外扩命中盒内。玩家 AABB = listener（脚位）[−hw,+hw]×
+            //   [0,height]×[−hw,+hw]；XZ/Z 外扩 kArrowHitHalfW，Y 上下各外扩 kArrowHitHalfW（提升近距命中率）。
+            //   命中 → 发 mobAttackedPlayer(kArrowDamage, MobBones)（呈现层据 Survival 门控应用伤害，同近战
+            //   aiHostile attack 路径）+ 移除箭。Creative/Spectator 玩家经 onMobAttackedPlayer 跳过 takeDamage。
+            if (!remove) {
+                const float px = listener.x(), py = listener.y(), pz = listener.z();
+                const float ex = px - listenerHalfW - kArrowHitHalfW;
+                const float ey = py - kArrowHitHalfW;
+                const float ez = pz - listenerHalfW - kArrowHitHalfW;
+                if (next.x() >= ex && next.x() <= px + listenerHalfW + kArrowHitHalfW
+                    && next.y() >= ey && next.y() <= py + listenerHeight + kArrowHitHalfW
+                    && next.z() >= ez && next.z() <= pz + listenerHalfW + kArrowHitHalfW) {
+                    emit mobAttackedPlayer(kArrowDamage, int(MobBones));
+                    hitPlayer = true;
+                    remove = true;
+                }
+            }
+
+            // 越界兜底（飞出世界 XZ 边界 / 跌出底部）→ 移除（防永久飞行堆积）。
+            if (!remove) {
+                if (next.x() < 0.0f || next.z() < 0.0f
+                    || next.x() > worldW || next.z() > worldD || next.y() < 0.0f) {
+                    remove = true;
+                }
+            }
+
+            if (remove) {
+                toRemove.push_back(idx);
+                dirty = true;
+                if (hitPlayer) qCInfo(lcEnt) << "arrow hit player for" << kArrowDamage << "HP";
+            } else {
+                e.pos = next; // 继续飞行
+                dirty = true;
+            }
+            continue; // Arrow 不走 Mob AI / resting / 击退衰减
+        }
 
         // --- FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）---
         if (e.kind == FallingBlock) {
@@ -914,9 +1178,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener)
                 e.moveSpeed = 0.0f; // 站立吃草 → 腿停（walkPhase 冻结于上次值）
                 dirty = true;       // headPitch 随 eatTimer 变 → 每帧 bump 让 QML 头俯仰绑定刷新
             } else if (e.hostile) {
-                // t281 敌对 AI（detect→pathfind→attack）：替代 wander。listener = 玩家脚位（tick 参数）。
-                //   追踪时朝玩家走 + 越障跳 + 攻击范围内 emit mobAttackedPlayer；非追踪回退到 wander（在 aiHostile 内）。
-                if (aiHostile(e, float(dt), world, listener, worldW, worldD)) dirty = true;
+                // t281/t283 敌对 AI：替代 wander。listener = 玩家脚位（tick 参数）。
+                //   t281 Shambler（僵尸）→ aiHostile（detect→pathfind→melee attack）。
+                //   t283 Bones（骷髅弓箭手）→ aiArcher（detect→keep-distance→shoot 远程射箭）。
+                //   非追踪回退到 wander（在 aiHostile / aiArcher 内）。
+                if (e.mobType == MobBones) {
+                    if (aiArcher(e, float(dt), world, listener, worldW, worldD)) dirty = true;
+                } else {
+                    if (aiHostile(e, float(dt), world, listener, worldW, worldD)) dirty = true;
+                }
             } else {
                 // 非吃草：扫描冷却倒数（仅羊）；AI wander；羊 idle 且冷却到 → 扫前方草丛决定是否开吃。
                 if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(dt);

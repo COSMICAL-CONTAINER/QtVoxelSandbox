@@ -416,7 +416,10 @@ void PlayerController::tickImpl()
     // t95：统一实体（测试生物）重力 + 地面静止，同掉落物常开（菜单 / 暂停时仍模拟）。机制同源
     // （EntityManager::tick 向下只读 World::isSolid）。PlayerController 现亦持 EntityManager* → 由它驱动。
     //   t250：传 m_pos 作听者位置，门控 mob idle/step 叫声（近 mob 才发声；菜单态 m_pos 仍有效）。
-    if (m_entityManager && m_world) m_entityManager->tick(dt, m_world, m_pos);
+    //   t283：传 kHalfW + m_height（当前 AABB 半宽 / 高，蹲下随 m_height 缩小）→ EntityManager Arrow 分支
+    //   据它判箭命中玩家 AABB（蹲下命中盒正确收缩）。
+    if (m_entityManager && m_world)
+        m_entityManager->tick(dt, m_world, m_pos, kHalfW, m_height);
     // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见 EntityManager::tickHostileLife 头注释）。独立于玩家
     //   捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续；同 entityManager.tick）。
     //   skyLight 取自 m_worldClock（Q_PROPERTY 注入；[0,1] 昼夜乘子）。m_worldClock=null → 跳过（无昼夜 → 无 spawn）。

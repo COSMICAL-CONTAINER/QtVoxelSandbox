@@ -2842,6 +2842,39 @@ Window {
                         scale: Qt.vector3d(0.03, 0.03, mobHalfW + 0.05)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
+                    // t283 箭矢（Arrow）：骷髅弓箭手远程射出的投射物。细长杆 Model 沿飞行速度定向（yaw + pitch，
+                    //   arrowYawAt/arrowPitchAt 据 vel 算）。delegate Node 已摆 position（箭世界坐标）+ 不转（bodyYaw=0
+                    //   非 Mob）；本子 Node 据 yaw/pitch 转杆朝飞行方向。机制等价 MC 1.0 骷髅射箭抛物 + 命中伤害；
+                    //   名称 / 视觉全原创（§9 区隔，纯色自绘非 MC 美术）。NoLighting（可见 Model 红线）。
+                    //   杆本地 -Z = 飞行方向（同 player/mob 模型 -Z 前）；UnitCube ±0.5 scale (0.05,0.05,0.5) → 细杆长 0.5
+                    //   沿 Z；position z=-0.25 让杆从中心向前伸（箭头在前）。箭头 / 箭羽为杆子节点同向继承定向。
+                    Node {
+                        visible: { entityManager.revision; return entKind === EntityManager.Arrow }
+                        property real arrYaw: { entityManager.revision; return entityManager.arrowYawAt(index) }
+                        property real arrPitch: { entityManager.revision; return entityManager.arrowPitchAt(index) }
+                        eulerRotation: Qt.vector3d(arrPitch, arrYaw, 0)
+                        // 箭杆（深棕细长杆）
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0, -0.25)
+                            scale: Qt.vector3d(0.05, 0.05, 0.5)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a3a26" }
+                        }
+                        // 箭头（杆前端小尖，灰）
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0, -0.52)
+                            scale: Qt.vector3d(0.05, 0.05, 0.1)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a8a8a" }
+                        }
+                        // 箭羽（杆尾小十字，浅色）
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0, 0.02)
+                            scale: Qt.vector3d(0.13, 0.02, 0.05)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#cccccc" }
+                        }
+                    }
                 }
             }
         }

@@ -83,8 +83,8 @@ public:
     Q_INVOKABLE bool aliveAt(int i) const;
 
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
-    // 管）/ FallingBlock=贴图方块）。
-    enum Kind { Mob, Item, FallingBlock };
+    // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model））。
+    enum Kind { Mob, Item, FallingBlock, Arrow };
     Q_ENUM(Kind)
 
     // t240 mob 子类 id（与 Entity.mobType 同值；Q_ENUM 供 QML 据 mobTypeAt 选 MobModel 比例 + 贴图）。
@@ -127,6 +127,13 @@ public:
     // 放置 blockId 并移除自身。链式塌落由调用方先把沙格置 air（经 World::setBlock → blockBroken →
     // 呈现层 onBlockBroken 递归触发上方沙）实现。达 kCap → 跳过 + 告警（防溢出）。
     Q_INVOKABLE void spawnFallingBlock(int x, int y, int z, int blockId);
+    // t283 箭矢投射物（骷髅弓箭手 MobBones 远程攻击）：在 origin 处生成一支携带初速度 vel（blocks/s，含 vy 抛物）
+    //   的箭实体。kind=Arrow、pushable=false（玩家走碰不推箭）、halfW/halfH=0.06（细长杆视觉 + 碰撞最小）。
+    //   tick 内 Arrow 分支：重力改 vy（抛物）+ 速度位移 + 方块碰撞（命中即移除）+ 玩家 AABB 碰撞（命中发
+    //   mobAttackedPlayer(kArrowDamage, MobBones) + 移除）+ 寿命 / 边界超界兜底移除。呈现层 mobHost delegate 据
+    //   kindAt==Arrow 走细长杆 Model + arrowYawAt/arrowPitchAt 定向。机制等价 MC 1.0 骷髅射箭（箭抛物 + 命中伤害）；
+    //   名称 / 视觉全原创（§9 区隔，不照搬 MC 美术）。达 kCap → 跳过 + 告警（防溢出）。
+    Q_INVOKABLE void spawnArrow(const QVector3D &origin, const QVector3D &vel);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
     //   emit entitiesChanged → count=0 → QML Repeater 清空 delegate。t256：同步清空槽位 free list +
     //   live 计数（slot 复用模型见 acquireSlot/releaseSlot）。
@@ -184,6 +191,12 @@ public:
     //   = 单体选中结果未用 = bug（调了选体却不据此攻击 / 高亮）。[[nodiscard]] 在编译期强约束（同项目
     //   lessons-learned 的 [[nodiscard]] fallible-call 纪律：检查 + 用返回值，不 (void) 吞）。
     [[nodiscard]] int findMobHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist = nullptr) const;
+    // t283 箭矢定向（呈现层 mobHost delegate Arrow 分支读）：arrowYawAt/arrowPitchAt 据 vel 算水平朝向 + 俯仰
+    //   （度）。yaw 用 player 同约定（dir=(-sin,-cos)，yaw=atan2(-vx,-vz)）→ QML eulerRotation.y=yaw 使杆本地 -Z
+    //   正对飞行方向；pitch=atan2(vy,h)（正=上扬）。非 Arrow / 越界 → 0。velAt 返箭 3D 速度（F3/调试）。
+    Q_INVOKABLE float arrowYawAt(int i) const;
+    Q_INVOKABLE float arrowPitchAt(int i) const;
+    Q_INVOKABLE QVector3D velAt(int i) const;
     // t249 受击击退（spec「受击往攻击方向小跳击退」；C++ 直调，PlayerController::attackMob 命中后调）：
     //   给第 i 个 mob 一个水平方向 (dirX,dirZ) 的击退冲量（vx/vz=kKnockbackHoriz 沿方向）+ 小跳垂直速度
     //   （vy=kKnockbackUp 向上）；解除 resting 让 tick 重力分支处理上跳→减速→下落→着地（小弹起观感）。
@@ -203,12 +216,14 @@ public:
 
     // 重力 + AI wander + 地面静止（C++ 直调；PlayerController::tick 每帧调，独立于捕获态——菜单/暂停时
     //   实体仍模拟）。机制同 ItemEntityManager::tick（向下只读 World::isSolid/blockAt）。world=null / 无实体
-    //   → 早 return。Mob：AI 行走（aiWander）+ 重力；dead Mob：仅 deathTimer 倒计时（冻结）；FallingBlock：
-    //   t117/t220 着地放置 / 变掉落物 + 移除。
+    //   → 早 return。Mob：AI 行走（aiWander / aiHostile / aiArcher）+ 重力；dead Mob：仅 deathTimer 倒计时
+    //   （冻结）；FallingBlock：t117/t220 着地放置 / 变掉落物 + 移除；Arrow（t283）：抛物 + 方块 / 玩家命中 + 移除。
     //   t250 环境音：listener = 玩家脚底位置（听者），用于 proximity 门控 mob idle/step 叫声 —— 仅听者
     //   kAudioRange 半径内的活体 mob 才 emit mobAmbient/mobStep（远场静默，防多 mob 同步吵闹）。PlayerController
     //   传 m_pos（菜单态仍有效）。listener 无关物理 / AI，仅参与音频门控（不写入实体态）。
-    void tick(qreal dt, World *world, const QVector3D &listener);
+    //   t283 箭命中玩家：listenerHalfW/listenerHeight = 玩家当前 AABB 半宽 / 高（PlayerController 传 kHalfW /
+    //   m_height，蹲下时随之缩小 → 箭命中盒正确随蹲下收缩）。Arrow 分支据它判 point-in-AABB 命中。
+    void tick(qreal dt, World *world, const QVector3D &listener, float listenerHalfW, float listenerHeight);
     // t280 黑暗刷怪调度 + 敌对生物日光燃烧（C++ 直调；PlayerController::tickImpl 每 tick 调，与 tick 同级）。
     //   独立于玩家捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续）。机制等价 MC 1.0
     //   「黑暗刷怪 + 白天燃烧」：周期 spawn（light<7 + 距玩家>24 + 总数上限）+ 敌对暴露日光 → 扣血 → 死亡消失。
@@ -287,6 +302,10 @@ private:
         //   作为独立速度层叠加（knockback 期间 AI 仍可走，二者位移相加，同 MC 受击时实体既有动量又有击退）。
         float vx = 0.0f;         // 击退水平速度 X（默认 0；仅 knockback 后非零）
         float vz = 0.0f;         // 击退水平速度 Z（默认 0；仅 knockback 后非零）
+        // t283 Arrow（箭矢投射物）专用：vx/vy/vz 复用作 3D 速度（Arrow 不走 Mob 击退衰减分支，无冲突），
+        //   arrowLife = 寿命倒计时（秒；tick Arrow 分支递减，<=0 或命中 / 越界 → releaseSlot 移除）。
+        //   非 Arrow 实体 arrowLife=0 不读。
+        float arrowLife = 0.0f;  // 箭寿命倒计时（秒；仅 kind==Arrow 用）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
         int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；t280 Shambler/Bones；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
@@ -381,6 +400,30 @@ private:
     //   playerPos = 玩家脚位（tick 的 listener = PlayerController::m_pos）。分层（PLAN §2）：只读 World::isSolid +
     //   自身数据；attack 走语义信号（mobAttackedPlayer）让呈现层路由到 PlayerState（同 fallDamageTaken 模式）。
     bool aiHostile(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD);
+    // t283 骷髅弓箭手 AI（detect→keep-distance→shoot 三段；tick 内 hostile mob 且 mobType==MobBones 分支调，
+    //   替代 aiHostile 的近战 attack）。spec t283「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」。
+    //   机制对齐 MC 1.0 骷髅射手：检测玩家 → 在 [kArcherKeepMin, kArcherKeepMax] 距离带维持（近则退 / 远则进）→
+    //   距离 + 视线 + 冷却满足 → 朝玩家解抛物初速射箭（fireArrow）；不进 aiHostile 的近战范围攻击。
+    //   (1) detect + chase memory：同 aiHostile（kDetectRange 进追踪、脱离 kChaseMemory 秒放弃）。
+    //   (2) 非追踪 → 委托 aiWander（随机游荡）。
+    //   (3) 朝向：yaw 朝玩家（射箭方向 + 行走方向）。
+    //   (4) 保持距离：distXZ<kArcherKeepMin → 朝远离方向走（kChaseSpeed）；>kArcherKeepMax → 朝玩家走；
+    //       其间 → 原地持弓（不水平位移，仅朝向）。越障跳（同 aiHostile：前方 1 格墙 + 墙顶 2 格空气 → 跳）。
+    //   (5) shoot：distXZ<=kArcherShootRange + |dy|<=kShootVertRange + 视线清（lineOfSightClear）+ 冷却到 →
+    //       fireArrow + 重置冷却（防每帧连发）。
+    //   返回是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。playerPos = 玩家脚位（tick 的 listener）。
+    //   分层（PLAN §2）：只读 World::isSolid + 自身数据；shoot 走 spawnArrow（箭实体）+ 命中由 Arrow 分支发
+    //   mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile 的 attack 模式）。
+    bool aiArcher(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD);
+    // t283 朝 target 解抛物初速并发射一支箭（aiArcher shoot 段调）。origin = shooter 中心 + 朝 target 前移
+    //   0.5 格（避免贴墙时箭 spawn 入墙即没）。水平速度固定 kArrowSpeed → 飞行时间 t=d/vH；据 target 高度差
+    //   反解 vy=(Δy+0.5·g·t²)/t（命中 target 高度的抛物解）；vy 钳到 ±kArrowMaxVert 防极端弧。三轴加 ±kArrowSpread
+    //   随机抖动（MC 骷髅非 100% 精准；spread ≪ vH 不改飞行时间量级）。d 太小（<0.01）→ 安全早退（防除零）。
+    void fireArrow(const Entity &shooter, const QVector3D &target);
+    // t283 视线清查（aiArcher shoot 前调，防穿墙盲射）：从 from 到 to 沿连线 0.5 格步进采样，任一采样点所在
+    //   格 isSolid → 视线被挡返 false。0.5 格步进足以抓 1 格墙（箭速 ~14 blocks/s、每帧 0.22 格，墙厚 ≥1）。
+    //   分层：只读 World::isSolid（同 tick / aiHostile 越障查），不向下加依赖。
+    bool lineOfSightClear(World *world, const QVector3D &from, const QVector3D &to) const;
 
     // t241 羊吃草：检测/消耗 entity 前方一格草丛。consume=false 仅检测（决定是否进入吃草周期）；
     //   consume=true 则写入（草丛→空气 + 其下草方块→泥土，走 World::setWaterSilent 静默写，非玩家破块
@@ -482,6 +525,35 @@ private:
     static constexpr float kAttackCooldown  = 1.0f;  // 攻击间隔（秒）
     static constexpr int   kAttackDamage    = 3;     // 单次攻击伤害（HP；MC 简单难度僵尸 3）
     static constexpr float kJumpSpeed       = 8.4f;  // 越障跳跃初速（blocks/s；同 player jump，翻 1 格墙）
+    // t283 骷髅弓箭手远程 AI 常量（spec「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」；机制对齐
+    //   MC 1.0 骷髅射手：远距 + 抛物箭 + 保持距离 + 命中伤害；数值为本工程小世界量身调，非 MC 精确复刻 ——
+    //   PLAN §4「机制对标」非数值 1:1）。
+    //   - kArcherKeepMin / kArcherKeepMax：保持距离带（blocks；XZ）。玩家近于 min → 弓手后退；远于 max → 前进；
+    //     其间 → 原地射击。MC 骷髅理想射距 ~10、近战时后退；取 [5, 9] 让玩家可逼近（弓手不会无限风筝）。
+    //   - kArcherShootRange：开火 XZ 上界（blocks；<= 才射，且 < kDetectRange 16）。MC 骷髅射程 ~15；本工程取
+    //     12 略小于 detect（贴脸到 12 都射，过 12 仅追不射 = 接近 MC「远距拉弓近距退」节律）。
+    //   - kShootVertRange：开火垂直容差（blocks；|mobY - playerFeetY|；防跨层穿地板盲射）。复用近战同名量级。
+    //   - kShootCooldown：射箭间隔（秒；机制等价 MC 骷髅 ~1.5-3s 拉弓间隔）。
+    //   - kArrowSpeed：箭水平速度（blocks/s）。MC 箭速 ~ 存活 60 tick ≈ 3s 飞行；本工程取 14（约 1s 飞 14 格）
+    //     让玩家有反应时间侧身躲避（spec「命中伤害」隐含可规避）。
+    //   - kArrowMaxVert：vy 钳（blocks/s；防 fireArrow 抛物解在大水平距 / 大高差时解出极端弧 → 箭飞几秒才落）。
+    //   - kArrowSpread：三轴初速随机抖动（blocks/s；MC 骷髅非 100% 精准）。取 1.2 ≪ vH=14 → 命中率 ~ 中近距高 / 远距低。
+    //   - kArrowGravity：箭重力（复用 kGravity=28 → 与世界重力一致、抛物弧自然；非独立常量）。
+    //   - kArrowLifetime：箭最长存活（秒；飞行未命中 / 未碰方块时兜底移除，防永久滞留堆积）。
+    //   - kArrowDamage：命中玩家伤害（HP；MC 简单难度骷髅 1-2，取 2 = 1 心，对齐 t265 玩家攻击力量级）。
+    //   - kArrowHitHalfW：箭 vs 玩家 AABB 命中检测的 XZ 外扩（blocks；箭是点，玩家 AABB 外扩此值做命中盒，
+    //     提升近距命中率 / 玩家不致「贴脸箭穿过」）。
+    static constexpr float kArcherKeepMin    = 5.0f;   // 保持距离下界（blocks；近则退）
+    static constexpr float kArcherKeepMax    = 9.0f;   // 保持距离上界（blocks；远则进）
+    static constexpr float kArcherShootRange = 12.0f;  // 开火 XZ 上界（blocks）
+    static constexpr float kShootVertRange   = 4.0f;   // 开火垂直容差（blocks；防跨层盲射）
+    static constexpr float kShootCooldown    = 1.6f;   // 射箭间隔（秒）
+    static constexpr float kArrowSpeed       = 14.0f;  // 箭水平速度（blocks/s）
+    static constexpr float kArrowMaxVert     = 18.0f;  // vy 钳（blocks/s；防极端弧）
+    static constexpr float kArrowSpread      = 1.2f;   // 三轴初速随机抖动（blocks/s）
+    static constexpr float kArrowLifetime    = 5.0f;   // 箭最长存活（秒；兜底移除）
+    static constexpr int   kArrowDamage      = 2;      // 命中伤害（HP）
+    static constexpr float kArrowHitHalfW    = 0.4f;   // 箭 vs 玩家命中盒 XZ 外扩（blocks）
 };
 
 #endif // ENTITYMANAGER_H
