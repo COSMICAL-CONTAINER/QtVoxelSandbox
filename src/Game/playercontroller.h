@@ -19,6 +19,7 @@
 #include "raycast.h"            // RayHit（射线选体结果）
 #include "toolregistry.h"       // 工具感知挖掘速度 / 掉落判定（t34）
 #include "world.h"              // Q_PROPERTY(World*) 需要 World 完整定义
+#include "worldclock.h"         // t280 黑暗刷怪：读 skyLight（昼夜乘子）驱动 EntityManager::tickHostileLife
 
 // 玩家控制器（一个对象全包）：指针锁定式鼠标视角 + WASD/跳/飞 + 三模式物理。
 // 继承 QQuickItem 以拿到 QQuickWindow（指针锁定需要 QCursor 居中 warp）。
@@ -45,6 +46,11 @@ class PlayerController : public QQuickItem
     // 位移解析后传给实体）。分层（PLAN §2）：PlayerController 属 Game/Physics，EntityManager 属 Entities，
     // 经 QML 绑定注入（运行期连接、非编译期反向依赖，同 itemEntities 先例）。
     Q_PROPERTY(EntityManager *entityManager READ entityManager WRITE setEntityManager NOTIFY entityManagerChanged)
+    // t280 黑暗刷怪：PlayerController 经 Q_PROPERTY 持 WorldClock*（同 world/hotbar/itemEntities/entityManager
+    //   模式，QML 注入 peer ViewModel）。读 worldClock->skyLight()（[0,1] 昼夜乘子）每 tick 传给
+    //   EntityManager::tickHostileLife（驱动 spawn 光判定 + 白天燃烧）。Game→World 向下依赖合规（WorldClock
+    //   属 World 层）。null 时跳过敌对生命周期（无昼夜 → 无 spawn / 无燃烧，安全降级）。
+    Q_PROPERTY(WorldClock *worldClock READ worldClock WRITE setWorldClock NOTIFY worldClockChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -178,6 +184,8 @@ public:
     void setItemEntities(ItemEntityManager *m);
     EntityManager *entityManager() const { return m_entityManager; }
     void setEntityManager(EntityManager *m);
+    WorldClock *worldClock() const { return m_worldClock; }
+    void setWorldClock(WorldClock *c);
 
     QVector3D position() const { return m_pos + QVector3D(0, m_eyeHeight, 0); }
     float yaw() const { return m_yaw; }
@@ -324,6 +332,7 @@ signals:
     void hotbarChanged();
     void itemEntitiesChanged();
     void entityManagerChanged();
+    void worldClockChanged();
     void positionChanged();
     void yawChanged();
     void pitchChanged();
@@ -575,6 +584,7 @@ private:
     Hotbar *m_hotbar = nullptr;                  // 拾取 addStack / 丢弃 takeStack 的栈操作目标（Q_PROPERTY 绑定）
     ItemEntityManager *m_itemEntities = nullptr; // 拾取扫描数据源 + removeAt 销毁（Q_PROPERTY 绑定）
     EntityManager *m_entityManager = nullptr;    // 统一实体（t95 测试生物）：重力 tick + 玩家推动（Q_PROPERTY 绑定）
+    WorldClock *m_worldClock = nullptr;          // t280 黑暗刷怪：读 skyLight 驱动敌对 spawn / 燃烧（Q_PROPERTY 绑定）
     QQuickWindow *m_window = nullptr;
     QTimer m_timer;
     QElapsedTimer m_clock;

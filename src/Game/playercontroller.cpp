@@ -77,6 +77,15 @@ void PlayerController::setEntityManager(EntityManager *m)
     emit entityManagerChanged();
 }
 
+// t280 黑暗刷怪：注入 WorldClock（同 world/hotbar/itemEntities/entityManager 模式）。
+//   读 m_worldClock->skyLight() 传给 EntityManager::tickHostileLife。null 时敌对生命周期早退（无昼夜 → 无 spawn）。
+void PlayerController::setWorldClock(WorldClock *c)
+{
+    if (m_worldClock == c) return;
+    m_worldClock = c;
+    emit worldClockChanged();
+}
+
 void PlayerController::onWindowChanged(QQuickWindow *win)
 {
     if (m_window) m_window->removeEventFilter(this);
@@ -408,6 +417,11 @@ void PlayerController::tickImpl()
     // （EntityManager::tick 向下只读 World::isSolid）。PlayerController 现亦持 EntityManager* → 由它驱动。
     //   t250：传 m_pos 作听者位置，门控 mob idle/step 叫声（近 mob 才发声；菜单态 m_pos 仍有效）。
     if (m_entityManager && m_world) m_entityManager->tick(dt, m_world, m_pos);
+    // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见 EntityManager::tickHostileLife 头注释）。独立于玩家
+    //   捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续；同 entityManager.tick）。
+    //   skyLight 取自 m_worldClock（Q_PROPERTY 注入；[0,1] 昼夜乘子）。m_worldClock=null → 跳过（无昼夜 → 无 spawn）。
+    if (m_entityManager && m_world && m_worldClock)
+        m_entityManager->tickHostileLife(dt, m_world, m_pos, m_worldClock->skyLight());
     // t92：拾取扫描提到 m_captured 早 return **之前**——打开背包（release→m_captured=false）时
     // 原 pickupScan 落在早 return 之后永不执行，玩家走近掉落物拾不起（仅见实体掉地）。掉落物物理
     // （itemEntities->tick）本就在早 return 前跑（独立于捕获态），拾取与之同级、同样常开才一致。

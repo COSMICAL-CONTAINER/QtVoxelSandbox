@@ -92,7 +92,12 @@ public:
     //   MobPig/MobCow/MobSheep = 猪/牛/羊（t240 各自方块化原创 3D 模型 + 各自贴图，Main.qml 走 MobModel）。
     //   t242 据本 enum 选死亡掉落（猪:生猪排 / 牛:皮革+牛肉 / 羊:羊毛）；t243 spawn egg 据本 enum 选生成类型。
     //   机制等价 MC 1.0 passive mob 三种（猪/牛/羊），名称 / 模型 / 贴图全原创（PLAN §9 区隔，不照搬 MC 美术）。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3 };
+    //   t280 黑暗刷怪：MobShambler=4 / MobBones=5 = 敌对生物（机制等价 MC 1.0 僵尸 / 骷髅；PLAN §9 区隔改名：
+    //     Zombie→Shambler「蹒跚者」、Skeleton→Bones「骸骨」—— 名称 / 模型 / 贴图全原创，仅机制对齐「黑暗刷怪 /
+    //     白天燃烧」）。Entity.hostile=true → 走 tickHostileLife 的燃烧 + 黑暗刷怪调度（白天暴露日光 → 着火扣血 →
+    //     消失；夜间 / 洞穴低光处由 PlayerController.updateMobSpawning 周期 spawn）。QML 据 mobTypeAt 走对应贴图 /
+    //     颜色（Shambler 暗绿、Bones 灰白 UnitCube，机制等价，非照搬 MC 美术）。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5 };
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -103,6 +108,19 @@ public:
     //   各自 id；掉落/模型据它分流）；color=渲染配色（QML delegate baseColor）；maxHealth=血量上限（≤0 用默认）。
     //   生成即满血、未死、AI wanderTimer=0（tick 首帧即选第一次向）。达 kCap → 跳过 + 告警（防溢出）。
     Q_INVOKABLE void spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth);
+    // t280 黑暗刷怪：敌对生物生成入口（Shambler/Bones）。委托 spawnMobTyped（设 hostile=true / 配色 / 血量）
+    //   后再翻 Entity.hostile（spawnMobTyped 是通用入口，不知哪些 mobType 是敌对；本入口收口敌对语义）。
+    //   达 kCap → 委托内静默跳过。mobType 仅 MobShambler/MobBones 合法（其余当敌对调是非语义，但仍生成不崩）。
+    Q_INVOKABLE void spawnHostileMob(int x, int y, int z, int mobType);
+    // t280 当前**活体**敌对生物数（hostile=true 且非 dead 的 Mob）。供刷怪调度判总数上限（kHostileMobCap）。
+    //   含 Shambler/Bones；不含 passive（pig/cow/sheep/test）与 FallingBlock/Item。
+    Q_INVOKABLE int hostileCount() const;
+    // t280 第 i 个实体是否**敌对**（hostile=true 的活体 Mob）。QML 据它对 Shambler/Bones 显燃烧火焰 Model
+    //   （passive 永不燃烧 → 火焰仅敌对会显）。越界 / 非 hostile → false。
+    Q_INVOKABLE bool isHostileAt(int i) const;
+    // t280 第 i 个敌对生物是否**正在燃烧**（暴露在日光下、skyBrightness 超过燃烧门）。tickHostileLife 每 tick
+    //   重算并写入 Entity.burning 缓存；QML 据 isBurningAt 显火焰动画 + baseColor 偏橙。越界 / 非敌对 → false。
+    Q_INVOKABLE bool isBurningAt(int i) const;
     // t117 沙子重力方块：在方块格 (x,y,z) 生成一个下落方块实体（携带 blockId）。位置存该格中心
     // (x+0.5, y+0.5, z+0.5)；pushable=false（不被玩家推动，同掉落物变体）；kind=FallingBlock；
     // blockId 存实体携带的方块 id（着地放置用它）。重力 tick 下落，着地时 world->setBlockFromEntity
@@ -191,6 +209,27 @@ public:
     //   kAudioRange 半径内的活体 mob 才 emit mobAmbient/mobStep（远场静默，防多 mob 同步吵闹）。PlayerController
     //   传 m_pos（菜单态仍有效）。listener 无关物理 / AI，仅参与音频门控（不写入实体态）。
     void tick(qreal dt, World *world, const QVector3D &listener);
+    // t280 黑暗刷怪调度 + 敌对生物日光燃烧（C++ 直调；PlayerController::tickImpl 每 tick 调，与 tick 同级）。
+    //   独立于玩家捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续）。机制等价 MC 1.0
+    //   「黑暗刷怪 + 白天燃烧」：周期 spawn（light<7 + 距玩家>24 + 总数上限）+ 敌对暴露日光 → 扣血 → 死亡消失。
+    //   三个职责（独立模块、单一方法收口敌对生命周期）：
+    //     (a) **燃烧**：每个活体 hostile mob，所在格 skyLightAt>=15（直接见天，无遮挡）且 skyBrightness>门槛 →
+    //         标 burning=true（QML 显火焰）+ 累加 burnTimer，每 kBurnDamageInterval 秒扣 1HP（复用 damageEntity →
+    //         hurtFlash 红闪 + health 归零 mobDied 死亡链 → 死亡动画后 releaseSlot 自然消失 = spec「燃烧消失」）。
+    //         夜间 / 洞穴 / 树荫下不燃烧（机制等价 MC 1.0 僵尸 / 骷髅日光燃烧）。
+    //     (b) **远距消失**：敌对生物距玩家 > kFarDespawn（且不在 burning）→ 直接 releaseSlot 移除（防世界塞满
+    //         远处 mob；机制等价 MC 即时消失半径）。
+    //     (c) **spawn 调度**：内部 m_spawnAccum 节流（kSpawnInterval 秒一次），满 → 若 hostileCount<kHostileMobCap，
+    //         在玩家周围 [kSpawnMinDist, kSpawnMaxDist] 环内做 kSpawnAttempts 次随机选点（地表 or 洞穴），
+    //         各点查「air 格 + 下方 solid + 有效光 < kSpawnLightThreshold」三条件，首个合格点 spawn 一个敌对
+    //         （Shambler/Bones 等概率）。有效光 = max(skyLightAt * skyBrightness, blockLightAt)（0..15）；夜间地表
+    //         天光乘子→0、洞穴 skyLightAt=0 → 二者均<阈值可刷；白天地表 skyBrightness≈1 + 见天 skyLightAt=15 →
+    //         有效光 15 远超阈值不刷（机制等价 MC「夜晚地表 + 洞穴均可刷、白天仅暗洞穴」）。
+    //   分层（PLAN §2）：Entities 层（同 tick）只读 World（blockAt/isSolid/skyLightAt/blockLightAt/heightAt/width/
+    //   depth/height）+ 自身实体数据；写 EntityManager 自身（spawn / releaseSlot / damageEntity）。skyBrightness /
+    //   playerPos 由 Game 层（PlayerController）传入 —— Game 层读 WorldClock.skyLight（Game→World 向下）+ m_pos。
+    //   无向上依赖。world==null / 无实体 → 早 return。
+    void tickHostileLife(qreal dt, World *world, const QVector3D &playerPos, float skyBrightness);
 
 signals:
     void entitiesChanged(); // spawn / 推动位移 / 重力下落 / AI 行走 / 受击红闪 / 死亡移除 触发；驱动 count/revision + QML 绑定刷新
@@ -242,12 +281,19 @@ private:
         float vx = 0.0f;         // 击退水平速度 X（默认 0；仅 knockback 后非零）
         float vz = 0.0f;         // 击退水平速度 Z（默认 0；仅 knockback 后非零）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
-        int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；drop/模型据它分流）
+        int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；t280 Shambler/Bones；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
         int health = 0;          // 当前血量；<=0 → dead（spawnMobTyped 设满血）
         bool dead = false;       // 死亡态（health<=0 → true；dead 期间冻结 AI/重力，deathTimer 到 0 移除）
         float hurtFlash = 0.0f;  // 受击红闪剩余秒数（damageEntity 设 kHurtFlashTime；tick 衰减；>0 → QML 红）
         float deathTimer = 0.0f; // 死亡到移除倒计时（dead 翻 true 时设 kDeathTime；给 QML 播死亡动画窗口）
+        // t280 黑暗刷怪（敌对生物 Shambler/Bones 专用；passive / FallingBlock 留默认 false/0 不触发）：
+        //   hostile=true 的 Mob 走 tickHostileLife 的燃烧 + 远距消失 + spawn 调度逻辑。passive（pig/cow/sheep/
+        //   test）hostile=false → 不燃烧 / 不计入敌对上限 / 不远距消失（passive 永驻世界，机制等价 MC 被动生物
+        //   不燃烧、不自然消失）。FallingBlock / Item 不走 Mob 分支故 hostile 字段不读。
+        bool  hostile   = false; // 是否敌对生物（Shambler/Bones=true；passive=false）。spawnHostileMob 设 true。
+        bool  burning   = false; // 当前是否在日光下燃烧（tickHostileLife 每 tick 重算缓存；QML isBurningAt 读）。
+        float burnTimer = 0.0f;  // 燃烧扣血累积（秒；暴露日光时累加 dt，每 kBurnDamageInterval 扣 1HP）。
         float suffocationTimer = 0.0f; // t254 窒息累积计时（头部嵌实体方块时累加，每 kSuffocationInterval 秒扣 1HP；机制同玩家 t160）
         float yawRad = 0.0f;     // 朝向 + 行走方向（弧度）；AI wander 随机选；dir=(-sin,0,-cos)，QML yawDeg
         float wanderTimer = 0.0f;// 到下次选向倒计时（秒）；<=0 → 新 yawRad + 新 wanderSpeed + 重置 timer
@@ -275,6 +321,10 @@ private:
     //   钳制（≤64 槽），与既有「峰值并发实体数」同量级，无额外常驻开销。
     std::vector<int> m_freeSlots; // 已释放可复用的槽索引（LIFO）
     int m_liveCount = 0;          // 活体实体数（= m_entities.size() − 空槽数）；spawn 上限 + F3 draw 估算读它
+    // t280 黑暗刷怪 spawn 节流累积器（秒）：tickHostileLife 每 tick 累加 dt，达 kSpawnInterval 才尝试一次 spawn
+    //   周期（kSpawnAttempts 次选点）。独立于物理 / AI 的 tick（tick 每 16ms 跑、spawn 每 kSpawnInterval 秒跑一次，
+    //   节流避免每帧扫几千次 blockAt）。PlayerController 唯一调 tickHostileLife → 累加器随其 60Hz tick 推进。
+    float m_spawnAccum = 0.0f;
 
     // 把构造好的实体放入槽位（优先复用空槽，否则追加）。move 入槽后 alive=true（Entity 默认）。++m_liveCount。
     int acquireSlot(Entity &&e)
@@ -358,6 +408,35 @@ private:
     static constexpr float kAmbientMin = 8.0f;            // idle 叫声间隔下限（秒）
     static constexpr float kAmbientMax = 16.0f;           // idle 叫声间隔上限（秒）
     static constexpr float kAudioRange = 24.0f;           // 听者范围（blocks；近 mob 才发声）
+    // t280 黑暗刷怪常量（机制对齐 MC 1.0「light≤7 刷怪 / 距玩家>24 / 总数上限 / 白天燃烧」；数值为本工程小世界
+    //   160×160×64 量身调，非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）。dev-spec t280 验收阈值在常量名注：
+    //   kSpawnLightThreshold=7（spec「light<阈值(7)」）、kSpawnMinDist=24（spec「距玩家>N 格(24)」）。
+    //   - kSpawnInterval / kSpawnAttempts：周期 spawn 节流。每 2s 一周期、每周期 8 次随机选点 → 平均 ~1 mob/2s
+    //     增长（受 cap 钳制），夜里 10 分钟周期可堆 ~30 只（= kHostileMobCap），白天燃烧削掉。MC 自身约每 tick
+    //     尝试 spawn，本工程节流到 2s 周期 + 8 attempts 是「世界小、mob 密度够」与「扫描开销省」的平衡。
+    //   - kSpawnMinDist/Max：spawn 环 [24, 40]（spec 24 为下界）。下界 24 = 玩家附近不刷（避免凭空冒脸贴脸）；
+    //     上界 40 = 不刷太远（玩家走过去前 mob 不动 = 浪费槽，且 kFarDespawn=56 会清掉）。
+    //   - kHostileMobCap：敌对总数上限（不含 passive / FallingBlock / Item）。30 = 小世界合理密度（MC 1.0 自然
+    //     spawn cap 70，本工程世界小取一半）。达上限 → 跳过 spawn（passive / FallingBlock 仍可 spawn，走 kCap）。
+    //   - kSpawnLightThreshold：刷怪所需有效光上界（< 此才刷，spec 7）。有效光 = max(skyLightAt*skyBrightness,
+    //     blockLightAt)（0..15）；夜间地表 / 洞穴均 < 7 可刷、白天地表 > 7 不刷（机制等价 MC「light level ≤ 7」）。
+    //   - kBurnSkyBrightness / kBurnDamageInterval：日光燃烧。skyBrightness > kBurnSkyBrightness（白天，>0.55
+    //     = 太阳在地平线足够高）且 mob 直接见天（skyLightAt>=15 = 无树叶 / 顶棚遮挡）→ burning=true，每
+    //     kBurnDamageInterval 秒扣 1HP（机制等价 MC 僵尸 / 骷髅日光燃烧 1HP/s）。shade（skyLightAt<15）不燃烧。
+    //   - kFarDespawn：敌对远距消失半径（blocks）。距玩家 > 此的 hostile 直接 releaseSlot（防世界塞满远处 mob；
+    //     MC 即时消失半径 128，本工程小世界取 56 ≈ spawn 上界 40 + 缓冲 → spawn 环边沿 mob 不被立即清）。
+    //   - kHostileDefaultHealth：Shambler/Bones 满血（机制等价 MC 1.0 僵尸 / 骷髅 20HP=10 心；本工程取 20 同
+    //     passive kDefaultMaxHealth=10 ×2 —— 敌对略肉以体现威胁，仍可几剑打死，对齐 t265 攻击力）。
+    static constexpr float kSpawnInterval        = 2.0f;  // spawn 周期（秒；每周期 kSpawnAttempts 次选点）
+    static constexpr int   kSpawnAttempts        = 8;     // 每 spawn 周期的随机选点尝试次数
+    static constexpr float kSpawnMinDist         = 24.0f; // spawn 环下界（blocks；spec「距玩家>24」）
+    static constexpr float kSpawnMaxDist         = 40.0f; // spawn 环上界（blocks）
+    static constexpr int   kHostileMobCap        = 30;    // 敌对生物总数上限（不含 passive / FallingBlock / Item）
+    static constexpr float kSpawnLightThreshold  = 7.0f;  // 刷怪有效光上界（< 此才刷；spec「light<7」）
+    static constexpr float kBurnSkyBrightness    = 0.55f; // 燃烧所需 skyBrightness 门（白天；>0.55 = 日间）
+    static constexpr float kBurnDamageInterval   = 1.0f;  // 燃烧扣血间隔（秒/HP；机制等价 MC 日光燃烧 1HP/s）
+    static constexpr float kFarDespawn           = 56.0f; // 敌对远距消失半径（blocks）
+    static constexpr int   kHostileDefaultHealth = 20;    // Shambler/Bones 满血（机制等价 MC 1.0 僵尸 / 骷髅 20HP）
 };
 
 #endif // ENTITYMANAGER_H

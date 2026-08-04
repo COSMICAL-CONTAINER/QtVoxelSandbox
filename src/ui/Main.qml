@@ -759,6 +759,7 @@ Window {
         hotbar: hotbarVM
         itemEntities: itemEntities
         entityManager: entityManager
+        worldClock: worldClock
         selectedBlock: hotbarVM.selectedBlockId
         selectedItem: hotbarVM.selectedItemId
     }
@@ -2566,8 +2567,14 @@ Window {
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
                     }
                     Model {
-                        // mobType 0：通用测试生物（t95/t239）—— UnitCube 单色立方（旧路径，保行为不变）。
-                        visible: entKind === EntityManager.Mob && entMobType === 0
+                        // mobType 0 / 4 / 5：通用测试生物（t95/t239）+ t280 敌对 Shambler(4)/Bones(5) —— UnitCube
+                        //   单色立方（原创几何，§9 区隔不照搬 MC 美术）。敌对走 EntityManager.spawnHostileMob 设的
+                        //   colorAt（Shambler 暗绿 #4a6a3a / Bones 灰白 #d8d4c4）；mobType 0 仍走 spawnMob 的 #ff5555。
+                        //   受击红闪：hurtFlashAt>0 → baseColor #ff0000 覆盖。t280 燃烧：isBurningAt>0 → baseColor
+                        //   偏橙（火焰色调制单色立方，与下方 flame Model 共显「着火」感）。
+                        visible: entKind === EntityManager.Mob
+                                 && (entMobType === 0 || entMobType === EntityManager.MobShambler
+                                     || entMobType === EntityManager.MobBones)
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -2575,8 +2582,35 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: {
                                 entityManager.revision
-                                return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : entityManager.colorAt(index)
+                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                // t280 燃烧中 → 橙红偏色（与 flame Model 叠加显「着火」），否则走 mob 配色。
+                                if (entityManager.isBurningAt(index)) return "#ff7a3a"
+                                return entityManager.colorAt(index)
                             }
+                        }
+                    }
+                    // t280 敌对生物日光燃烧火焰视觉（spec「白天燃烧消失」）：hostile 暴露日光时 EntityManager
+                    //   标 burning=true（tickHostileLife 每 tick 重算）→ 本 Model 显「火焰」—— 一个略大于 mob 的
+                    //   橙黄半透立方叠在 mob 外，opacity 快速抖动模拟火苗窜动（机制等价 MC 僵尸 / 骷髅日光着火
+                    //   视觉；原创自绘非照搬）。仅 hostile + burning 显；passive 永不显。NoLighting（可见 Model 必须
+                    //   NoLighting，lessons-learned 红线）。绑 revision 触碰 → 翻入 / 翻出 burning 时重算 visible。
+                    Model {
+                        visible: { entityManager.revision; return entityManager.isBurningAt(index) }
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, mobModelYOff, 0) // 同 mob 本体对齐（腿底贴 collision 底面）
+                        scale: Qt.vector3d(1.06, 1.10, 1.06)      // 略大于 mob（火苗包覆感）
+                        opacity: flameOpacity.value
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#ff8a2a"
+                            // opacity 绑定 flameOpacity.value：SequentialAnimation 抖动 → 火苗明灭窜动感（机制等价）。
+                            opacity: flameOpacity.value
+                        }
+                        property real flameOpacity: 0.55
+                        SequentialAnimation on flameOpacity {
+                            loops: Animation.Infinite
+                            NumberAnimation { from: 0.40; to: 0.78; duration: 110 }
+                            NumberAnimation { from: 0.78; to: 0.40; duration: 140 }
                         }
                     }
                     Model {

@@ -59,11 +59,15 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
     Entity e;
     // t252 碰撞箱按 mobType 设（pig/sheep 0.9×0.9、cow 0.9×1.4；MobTest 保 1×1×1）。机制对齐 MC 1.0
     //   passive mob（猪 0.9×0.9 / 牛 0.9×1.4）；标识符 / 模型全原创（§9 区隔，不照搬 MC 美术）。
+    //   t280 Shambler/Bones 走 1×1×1（机制等价 MC 1.0 僵尸 / 骷髅玩家尺寸；QML 走 UnitCube 单色原创几何，
+    //   非照搬 MC 美术）。hostile 标志据 mobType 设（spawnHostileMob 入口已设，spawnMobTyped 兜底也判一次）。
     switch (mobType) {
-        case MobPig:   e.halfW = 0.45f; e.halfH = 0.45f; break; // 0.9×0.9
-        case MobCow:   e.halfW = 0.45f; e.halfH = 0.70f; break; // 0.9×1.4（机制等价 MC 1.0 牛）
-        case MobSheep: e.halfW = 0.45f; e.halfH = 0.45f; break; // 0.9×0.9
-        default:       e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（保 t95 旧路径）
+        case MobPig:      e.halfW = 0.45f; e.halfH = 0.45f; break; // 0.9×0.9
+        case MobCow:      e.halfW = 0.45f; e.halfH = 0.70f; break; // 0.9×1.4（机制等价 MC 1.0 牛）
+        case MobSheep:    e.halfW = 0.45f; e.halfH = 0.45f; break; // 0.9×0.9
+        case MobShambler: e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 僵尸玩家身高）
+        case MobBones:    e.halfW = 0.45f; e.halfH = 0.90f; e.hostile = true; break; // 0.9×1.8（机制等价 MC 骷髅玩家身高）
+        default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
     //   免首帧 collision 底面嵌入地面再 snap（cow halfH=0.70 时旧 +0.5 会嵌 0.2 进支撑方块）。
@@ -119,6 +123,163 @@ void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
     emit entitiesChanged();
     qCInfo(lcEnt) << "spawned falling block id=" << blockId << "at" << x << y << z
                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+}
+
+// t280 敌对生物生成入口：委托 spawnMobTyped 设碰撞箱 / 血量 / 颜色（Shambler 暗绿、Bones 灰白，§9 原创配色）。
+//   spawnMobTyped 内 switch 据 mobType 设 hostile=true（兜底）。spec「黑暗刷怪调度」周期 spawn 调用它。
+//   mobType 非 Shambler/Bones → 仍生成但非敌对语义（防御；正常 caller 只传这两种）。
+void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
+{
+    QString color;
+    int health = kHostileDefaultHealth;
+    if (mobType == MobBones) {
+        color = QStringLiteral("#d8d4c4"); // Bones：灰白骨色（机制等价 MC 骷髅；原创配色非照搬）
+    } else {
+        color = QStringLiteral("#4a6a3a"); // Shambler：暗绿腐肉色（机制等价 MC 僵尸；原创配色）
+        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones 一律按 Shambler
+    }
+    spawnMobTyped(x, y, z, mobType, color, health);
+    // spawnMobTyped 内 switch 已对 Shambler/Bones 设 hostile=true；spawnHostileMob 仅收口语义入口。
+}
+
+// t280 当前活体敌对生物数（hostile && !dead && kind==Mob）。供 spawn 调度上限判定。
+int EntityManager::hostileCount() const
+{
+    int n = 0;
+    for (const Entity &e : m_entities) {
+        if (e.alive && e.kind == Mob && e.hostile && !e.dead) ++n;
+    }
+    return n;
+}
+
+// t280 第 i 个实体是否敌对（hostile=true 的活体 Mob）。越界 / 非敌对 → false。
+bool EntityManager::isHostileAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    return e.alive && e.kind == Mob && e.hostile;
+}
+
+// t280 第 i 个敌对生物是否正在日光下燃烧（tickHostileLife 每 tick 重算缓存 Entity.burning）。
+//   越界 / 非敌对 → false。QML 据它显火焰动画（passive 永不燃烧 → 火焰仅敌对会显）。
+bool EntityManager::isBurningAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    return e.alive && e.kind == Mob && e.hostile && e.burning;
+}
+
+// t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见头文件方法注释）。三职责一方法收口敌对生命周期。
+//   分层（PLAN §2）：Entities 层，只读 World（blockAt/isSolid/skyLightAt/blockLightAt/heightAt/width/depth/height）
+//   + 自身实体数据；写 EntityManager（spawn / releaseSlot / damageEntity）。world==null → 早 return。
+void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &playerPos, float skyBrightness)
+{
+    if (!world) return;
+    const int worldW = world->width();
+    const int worldD = world->depth();
+    const int worldH = world->height();
+    bool dirty = false;
+    std::vector<int> toRemove; // 远距消失索引（releaseSlot；逆序处理避免索引漂移）
+
+    for (int idx = 0; idx < int(m_entities.size()); ++idx) {
+        Entity &e = m_entities[size_t(idx)];
+        if (!e.alive || e.kind != Mob || !e.hostile) continue; // 仅敌对 Mob；passive / FallingBlock 跳过
+        if (e.dead) continue; // 尸体走 deathTimer 链（tick 内已处理），不燃烧 / 不远距消失
+
+        // (a) 日光燃烧判定：mob 所在格直接见天（skyLightAt>=15 = 无遮挡）且白天（skyBrightness>门槛）→ 燃烧。
+        //   mob 中心格 (sx, sy, sz)：用 body 中心 Y（pos.y）所处方块格（同 tick 的窒息判定取身体高度处格）。
+        //   shade（skyLightAt<15，如树叶下 / 屋檐 / 洞口）→ 不燃烧（机制等价 MC 树荫保护敌对）。
+        //   夜间（skyBrightness<=门槛）→ 不燃烧（spec「白天燃烧消失」，仅白天）。
+        const int sx = qFloor(e.pos.x());
+        const int sy = qFloor(e.pos.y());
+        const int sz = qFloor(e.pos.z());
+        const bool exposedToSun = (sx >= 0 && sz >= 0 && sx < worldW && sz < worldD && sy >= 0 && sy < worldH)
+                                  && world->skyLightAt(sx, sy, sz) >= 15;
+        const bool inDaylight = exposedToSun && (skyBrightness > kBurnSkyBrightness);
+        if (inDaylight) {
+            if (!e.burning) { e.burning = true; dirty = true; } // 翻入燃烧 → bump（QML 显火焰）
+            e.burnTimer += float(dt);
+            if (e.burnTimer >= kBurnDamageInterval) {
+                e.burnTimer -= kBurnDamageInterval;
+                damageEntity(idx, 1); // 复用受击链：扣 1HP + 红闪 + （归零时）mobDied 死亡消失
+                dirty = true;
+            }
+        } else {
+            if (e.burning) { e.burning = false; dirty = true; } // 出日光 → 停燃烧（QML 隐火焰）
+            e.burnTimer = 0.0f; // 不燃烧时清零（机制等价 MC 出日光即停烧；非 MC「燃烧一段时间后才灭」简化）
+        }
+
+        // (b) 远距消失：敌对距玩家 > kFarDespawn（且不正在燃烧 —— 燃烧中让 damageEntity 链自然处理消失，
+        //   避免火焰视觉被远距消失打断）。releaseSlot 标空槽（slot 复用保 count 单调不降，lessons-learned t256）。
+        //   距离用 XZ 主导（玩家与 mob 多在同一高度层；Y 大差不影响「水平远」语义）。
+        if (!e.burning) {
+            const float dx = e.pos.x() - playerPos.x();
+            const float dz = e.pos.z() - playerPos.z();
+            if ((dx * dx + dz * dz) > kFarDespawn * kFarDespawn) {
+                toRemove.push_back(idx);
+                dirty = true;
+            }
+        }
+    }
+
+    // 逆序 releaseSlot（避免索引漂移；release 不 erase，但保持逆序习惯以备 erase 演进）。
+    for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it) {
+        releaseSlot(*it);
+    }
+
+    // (c) spawn 调度：节流到 kSpawnInterval 秒一次。达 kHostileMobCap 则跳过（passive / FallingBlock 走 kCap
+    //   不受此限）。每周期 kSpawnAttempts 次随机选点（地表 / 洞穴），首个合格点 spawn 一个敌对后本周期收手
+    //   （慢速堆叠到 cap，机制等价 MC 周期 spawn）。hostileCount 在 releaseSlot 后算（含本 tick 远距消失腾出的槽）。
+    m_spawnAccum += float(dt);
+    if (m_spawnAccum >= kSpawnInterval) {
+        m_spawnAccum = 0.0f;
+        if (hostileCount() < kHostileMobCap && m_liveCount < kCap) {
+            auto *rng = QRandomGenerator::global();
+            const float pfx = playerPos.x();
+            const float pfz = playerPos.z();
+            for (int attempt = 0; attempt < kSpawnAttempts; ++attempt) {
+                // 环内随机选点：角度 [0,2π)、距离 [kSpawnMinDist, kSpawnMaxDist]。
+                const float ang = float(rng->bounded(360)) * (0.017453292519943295f);
+                const float dist = kSpawnMinDist
+                                   + float(rng->bounded(1000)) / 1000.0f * (kSpawnMaxDist - kSpawnMinDist);
+                const int cx = int(pfx + std::cos(ang) * dist);
+                const int cz = int(pfz + std::sin(ang) * dist);
+                if (cx < 0 || cz < 0 || cx >= worldW || cz >= worldD) continue;
+                const int surfH = world->heightAt(cx, cz);
+                if (surfH < 1) continue; // 列无地表（极端情况）
+                // 选地表 or 洞穴（各 50%）：地表贴 surfH+1、洞穴在地表下随机一层。
+                int cy = surfH + 1;
+                const bool caveSpawn = (rng->bounded(2) != 0);
+                if (caveSpawn) {
+                    const int caveMax = surfH - 3; // 洞穴最深到 surfH-3（保留表面 3 格地层不动）
+                    const int caveMin = 2;         // 不刷基岩层（y<2 接近基岩）
+                    if (caveMax <= caveMin) continue;
+                    cy = caveMin + rng->bounded(caveMax - caveMin + 1);
+                }
+                if (cy < 1 || cy >= worldH - 1) continue; // 越界 / 顶格
+                // 三条件：目标格 air + 下方 solid（有地板）+ 有效光 < 阈值。
+                if (world->blockAt(cx, cy, cz) != BlockRegistry::Air) continue;
+                if (!world->isSolid(cx, cy - 1, cz)) continue; // 脚下须有支撑（防悬空刷怪）
+                const quint8 skyL = world->skyLightAt(cx, cy, cz);
+                const quint8 blkL = world->blockLightAt(cx, cy, cz);
+                const float effSkyL = float(skyL) * skyBrightness; // 天光乘昼夜（夜间→0、白天→原值）
+                const float effLight = std::max(effSkyL, float(blkL));
+                if (effLight >= kSpawnLightThreshold) continue; // spec「light<阈值(7)」
+                // 合格点：spawn 一个敌对（Shambler / Bones 等概率）。spawnMobTyped 内 kCap 守卫；达 cap 静默跳过。
+                const int pickMob = rng->bounded(2);
+                spawnHostileMob(cx, cy, cz, pickMob == 0 ? MobShambler : MobBones);
+                qCInfo(lcEnt) << "hostile spawned type" << (pickMob == 0 ? MobShambler : MobBones)
+                             << "at" << cx << cy << cz << "effLight=" << effLight
+                             << "(hostile" << hostileCount() << "/" << kHostileMobCap << ")";
+                break; // 本周期成功 spawn 1 个即收手（慢速堆叠；下个 kSpawnInterval 周期再尝试）
+            }
+        }
+    }
+
+    if (dirty) {
+        ++m_revision;
+        emit entitiesChanged();
+    }
 }
 
 // t256：第 i 个槽位是否活体（已分配未释放）。空槽 → false（呈现层 delegate 据它 visible 隐藏）。
