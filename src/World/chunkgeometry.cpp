@@ -254,8 +254,10 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     //   （switch 无 case → 0 顶点 → 放置后透明透视格子）。Water/Torch 在上方已显式 continue。
                     // t235：cross 广告牌方块段 [FirstCross, LastCross]（草丛）亦进此 pass（pushCross 生成对角双面
                     //   quad）。与 partial 盒体段并列、闭区间判定（同 t194 教训）。
+                    // t305：cross 路由改用 isCrossBillboard 谓词（连续段 ∪ {Sapling}）—— Sapling(28) id 不在
+                    //   [FirstCross,LastCross]=[24,25] 连续段内（DiamondOre/Wool 夹中间且非 cross），故并入谓词。
                     const bool isPartialX = (b >= BlockRegistry::FirstPartial && b <= BlockRegistry::LastPartial);
-                    const bool isCrossX   = (b >= BlockRegistry::FirstCross   && b <= BlockRegistry::LastCross);
+                    const bool isCrossX   = BlockRegistry::isCrossBillboard(b);
                     if (!isPartialX && !isCrossX) continue; // 仅异形盒体 / cross 方块进此 pass
                     const quint8 cSky = m_world->skyLightAt(wx, ly, wz);
                     const quint8 cBlock = m_world->blockLightAt(wx, ly, wz);
@@ -435,8 +437,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (!isWater && blk == BlockRegistry::Torch) continue;
                             if (!isWater && blk >= BlockRegistry::FirstPartial
                                 && blk <= BlockRegistry::LastPartial) continue; // 异形已在 PASS 1；段后整立方（Chest）正常进立方面
-                            if (!isWater && blk >= BlockRegistry::FirstCross
-                                && blk <= BlockRegistry::LastCross) continue;   // t235 cross（草丛）已在 PASS 1；不进立方面
+                            if (!isWater && BlockRegistry::isCrossBillboard(blk)) continue; // t235/t305 cross（草丛/作物/树苗）已在 PASS 1；不进立方面
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                             if (BlockRegistry::isSolid(nb)) continue;       // 邻居实体 → 剔除（跨 chunk 路由正确）
                             if (isWater && nb == BlockRegistry::Water) continue; // 水-水面互剔
@@ -521,8 +522,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         if (!isWater && b == BlockRegistry::Torch) continue;
                         if (!isWater && b >= BlockRegistry::FirstPartial
                             && b <= BlockRegistry::LastPartial) continue; // 异形已在 PASS 1；段后整立方（Chest）正常进立方面
-                        if (!isWater && b >= BlockRegistry::FirstCross
-                            && b <= BlockRegistry::LastCross) continue;   // t235 cross（草丛）已在 PASS 1；不进立方面
+                        if (!isWater && BlockRegistry::isCrossBillboard(b)) continue; // t235/t305 cross（草丛/作物/树苗）已在 PASS 1；不进立方面
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);

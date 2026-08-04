@@ -4504,6 +4504,10 @@ Window {
             //   Game 层不 include World；QML 同时持二者向下合法，PLAN §2 分层不破）。tickCropGrowth 内部对稳态
             //   （全成熟 / 无作物 / 全暗）静默 → 无重建开销。
             theWorld.tickCropGrowth()
+            // t305 树苗生长 tick：WorldClock 每 100ms tick → 驱动 World.tickSaplingGrowth（内部节流到 ~每 5s
+            //   做一次成长判定，树苗据光强 + 草地/泥土支撑 + 主干列畅通 + 散布概率逐步长成完整橡树）。纯 QML
+            //   桥接（同 tickCropGrowth 模式）。tickSaplingGrowth 内部对稳态（无树苗 / 全不满足）静默 → 无重建开销。
+            theWorld.tickSaplingGrowth()
         }
     }
 

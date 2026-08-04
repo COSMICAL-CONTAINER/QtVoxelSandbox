@@ -21,6 +21,7 @@
 //   10=furnace 11=coal_ore 12=iron_ore 13=torch 14=bedrock ... 21=water 22=chest 23=farmland
 //   24=tall_grass（草丛；cross 广告牌方块）。25=wheat_crop（小麦作物；cross + state=生长阶段 0..7）。
 //   26=diamond_ore（t279 钻矿石；散布于 stone 深层 y∈[5,16]，需铁镐采掘）。
+//   27=wool（t300 羊毛方块）。28=sapling（t305 树苗；cross 广告牌方块，种在草地/泥土上随时间生长成橡树）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -146,7 +147,21 @@ public:
                                   //   + 浅灰卷曲绒毛纹，原创自绘 §9a）。**获得途径**：剪刀剪羊毛（EntityManager shearSheep →
                                   //   sheepSheared 信号 → 掉落羊毛方块）/ 杀羊掉落（mobDied → Main.qml 据本 id spawnItem）。
                                   //   音色归 GroupWood（软质闷击，最接近 MC 羊毛 cloth SoundType）。进创造调色板（t300 补全）。
-        Count         = 28, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Sapling        = 28, // 树苗（t305）：机制等价 MC 1.0 橡树树苗（sapling）。**cross 形广告牌方块**（与 TallGrass /
+                                  //   WheatCrop 同走 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。
+                                  //   玩家持树苗物品（RecipeRegistry::SaplingItemId，材料段 0x21B）右键草地 / 泥土 → 在其上方一格
+                                  //   种下树苗（playercontroller useBlock 分支，同种子种植模式）。WorldClock tick 推进成长
+                                  //   （world.tickSaplingGrowth，机制等价 MC random-tick 生长）：树苗在草地 / 泥土支撑 + 头顶光照足 +
+                                  //   主干列空气畅通时按确定性散布概率生长，长成后清除树苗 + 在原位生成一棵完整橡树（复用 worldgen
+                                  //   placeTreeAt 主干 + 树叶球冠）。solid=false（非实体 → 不挡邻居面剔除，同 torch / 草丛）、
+                                  //   shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC 树苗可踩过）、hardness=0（瞬破，同 torch /
+                                  //   草丛）、NoTool（空手可采且掉落）、dropId=SaplingItemId（破树苗掉树苗**物品**，材料段 0x21B —— 非掉
+                                  //   树苗方块，机制等价 MC 破树苗掉树苗物品，玩家可回收再种）、dropCount=1、maxStack=64。各面贴图=
+                                  //   sapling(39)（棕色短树干 + 绿色嫩叶小球冠，alpha 透明底；mesher 走 cross 几何段，材质 alphaCutoff
+                                  //   cutout 透明底）。音色归 GroupGrass（软草音，同草丛 / 作物）。**树苗物品由树叶衰减 / 玩家破叶掉落**
+                                  //   （playercontroller dropLeafDrops：破叶概率掉树苗物品 + 木棒）。**不**进方块创造调色板（树苗经
+                                  //   物品种植、非玩家常规放置；创造调色板取树苗**物品**便于测试，见 creativeMaterials）。
+        Count         = 29, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
@@ -165,8 +180,18 @@ public:
     //   同一 switch 误生成）。t235 落地 TallGrass=24；t236 追加 WheatCrop=25（同 cross 模型 + 按 state 阶段选贴图）。
     //   mesher 路由用闭区间 [FirstCross, LastCross]（同 partial 段教训 lessons-learned t194：闭区间防段后整立方误进
     //   cross 路径）。新增 cross 方块（花 / 其它作物）追加时右移 LastCross。
+    //   **t305 树苗（Sapling=28）也是 cross 广告牌方块**，但其 id（28）不在 [FirstCross, LastCross]=[24,25] 连续段内
+    //   （DiamondOre=26 / Wool=27 夹在中间，二者非 cross）→ 不能简单右移 LastCross（会把 26/27 误判为 cross）。故
+    //   mesher 路由改用 isCrossBillboard(id) 谓词（见下）替代裸区间判定：[FirstCross,LastCross] ∪ {Sapling}。
+    //   新增 cross 方块若 id 亦不连续，同样并入 isCrossBillboard（单一权威，避免 mesher / 选中框多处分流漂移）。
     static constexpr int FirstCross = TallGrass; // 24
-    static constexpr int LastCross  = WheatCrop; // 25（cross 段上界；新增 cross 方块追加时同步右移）
+    static constexpr int LastCross  = WheatCrop; // 25（cross 段上界；新增连续 cross 方块追加时同步右移）
+
+    // t305 cross 广告牌方块统一谓词（单一权威）：true 表示该方块走 PartialBlockGeometry 的 cross 几何段
+    //   （两片对角相交双面 quad）。涵盖连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)。
+    //   mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律读本谓词，不各持区间判定
+    //   （PLAN §2：单一权威，避免「mesher 路由到 cross 但选中框仍按区间漏 Sapling」类撕裂）。
+    static bool isCrossBillboard(quint8 blockId);
 
     // t236 小麦作物生长阶段：state = 阶段 0..7（0=刚种嫩芽、7=成熟）。mesher（PartialBlockGeometry::append 的
     //   WheatCrop case）据 state 选对应阶段贴图（tile 29..36）；world.tickCropGrowth 据光强 + 耕地支撑 + 确定性
@@ -197,6 +222,16 @@ public:
     //   注：干/湿仅由耕地时的水源邻近快照决定（机制等价 MC「耕地后即时据邻水判湿润」）；动态补水（雨/后放水）
     //   属后续任务（需 random tick 系统），本任务不做。
     static constexpr quint8 FarmlandMoistBit = 0x01; // Farmland state bit0 = 湿润（仅 Farmland 复用）
+
+    // t305 持久树叶 state 标记：bit0 = 玩家放置（持久，不参与自然衰减）。机制等价 MC 1.0「玩家放置的树叶不衰减」
+    //   —— worldgen 生成的树叶 state=0（衰减候选：失去原木支撑即消失）；玩家创造模式放置的树叶写 state=本 bit
+    //   （标记持久，decayLeavesAround 跳过 → 创造建筑用的悬空树叶不被清掉）。**唯一消费点**：
+    //   World::decayLeavesAround（破原木后扫邻叶衰减，跳过 state bit0=1 的持久叶）。mesher / collisionAABBs /
+    //   selectionAABBs 不读 leaves state（leaves 走 ShapeFull + culled 立方面，state inert 于渲染/碰撞/选中）
+    //   → 复用 state 作持久标记零回归（同 PlanksFromDoubleSlabBit / torch state 复用 state 作 marker 的模式）。
+    //   state 经 m_states 落 SQLite round-trip 保真（存档读回仍带持久标记 → 重载后创造树叶仍不衰减）。
+    //   常规（worldgen / 自然）树叶 state 恒 0 → 衰减候选。placeBlock 对 Leaves 显式写 PersistentLeafBit。
+    static constexpr quint8 PersistentLeafBit = 0x01; // Leaves state bit0 = 玩家放置（持久，不衰减；仅 Leaves 复用）
 
     // 面索引（与 Renderer 的 kFaces 顺序一致，是 World/Renderer 共享的轴向约定）：
     //   0=+X 1=-X 2=+Y(顶) 3=-Y(底) 4=+Z 5=-Z
@@ -344,12 +379,14 @@ public:
     //      原创自绘 §9a；各面同贴图=石头底+青白菱斑晶体）。
     //   38=wool（t300 羊毛方块；剪羊毛 / 杀羊掉落；机制等价 MC 1.0 羊毛，名称/贴图原创自绘 §9a；
     //      各面同贴图=奶白羊毛底+浅灰卷曲绒毛纹）。
-    // 图集由 tools/build_atlas.py 打包全部 39 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   39=sapling（t305 树苗 cross 贴图；棕色短树干 + 绿色嫩叶小球冠，alpha 透明底 cutout；
+    //      Sapling 方块各面=本 tile，mesher 走 cross 几何段；机制等价 MC 1.0 橡树树苗，名称/贴图原创自绘 §9a）。
+    // 图集由 tools/build_atlas.py 打包全部 40 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 39）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 40）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -357,7 +394,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 39;
+    static constexpr int AtlasTileCount = 40;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

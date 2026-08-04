@@ -474,6 +474,141 @@ void World::tickCropGrowth()
     ++m_cropIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同株错峰）
 }
 
+// t305 树叶衰减（见 world.h 头注释）。机制等价 MC 1.0 叶衰：叶子距最近原木 >4 格（切比雪夫）即衰减。
+//   玩家破原木 → 扫破块点周围 kScanRadius 盒内叶子，逐叶查 kDecayRadius 内有无原木，无则失撑 → 静默清。
+//   持久叶（玩家放置，state 带 PersistentLeafBit）跳过。批量清 + 末尾一次 refloodBox 重算光场 + 一次 worldChanged。
+void World::decayLeavesAround(int x, int y, int z)
+{
+    constexpr int kScanRadius  = 7;  // 扫描盒半径（覆盖单棵橡树树冠 ~5 宽 + 余量；树冠在主干顶 ±2 内）
+    constexpr int kDecayRadius = 4;  // 叶子存活所需距原木的切比雪夫距离（机制等价 MC 1.0 叶 4 格内不衰）
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+
+    // 1) 收集失撑叶（kDecayRadius 切比雪夫距离内无原木 + 非持久叶）。同时累计受影响 AABB（供末尾光场重算盒）。
+    struct L { int x, y, z; };
+    std::vector<L> toDecay;
+    int minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
+    bool any = false;
+    for (int dx = -kScanRadius; dx <= kScanRadius; ++dx)
+        for (int dy = -kScanRadius; dy <= kScanRadius; ++dy)
+            for (int dz = -kScanRadius; dz <= kScanRadius; ++dz) {
+                const int lx = x + dx, ly = y + dy, lz = z + dz;
+                if (lx < 0 || ly < 0 || lz < 0 || lx >= W || ly >= H || lz >= D) continue;
+                if (m_chunks.blockAt(lx, ly, lz) != BlockRegistry::Leaves) continue;
+                if ((m_chunks.stateAt(lx, ly, lz) & BlockRegistry::PersistentLeafBit) != 0)
+                    continue; // t305 玩家放置叶（持久）不衰
+                // 查 kDecayRadius 切比雪夫距离内有无原木（任一命中即保留）。
+                bool hasLog = false;
+                for (int ox = -kDecayRadius; ox <= kDecayRadius && !hasLog; ++ox) {
+                    for (int oy = -kDecayRadius; oy <= kDecayRadius && !hasLog; ++oy) {
+                        for (int oz = -kDecayRadius; oz <= kDecayRadius && !hasLog; ++oz) {
+                            if (m_chunks.blockAt(lx + ox, ly + oy, lz + oz) == BlockRegistry::Log) {
+                                hasLog = true;
+                            }
+                        }
+                    }
+                }
+                if (hasLog) continue; // 仍有原木支撑 → 保留
+                toDecay.push_back({lx, ly, lz});
+                if (!any) { minX = maxX = lx; minY = maxY = ly; minZ = maxZ = lz; any = true; }
+                else {
+                    if (lx < minX) minX = lx;
+                    if (lx > maxX) maxX = lx;
+                    if (ly < minY) minY = ly;
+                    if (ly > maxY) maxY = ly;
+                    if (lz < minZ) minZ = lz;
+                    if (lz > maxZ) maxZ = lz;
+                }
+            }
+    if (toDecay.empty()) return; // 无失撑叶（如仅破一根、余干仍撑）→ 静默
+
+    // 2) 批量静默清叶（m_chunks.setBlock 直写 + 标脏，不发 broken/placed → 无破叶粒子/音；自然衰减无反馈，
+    //    机制等价 MC 自然叶衰）。末尾统一重算光场 + 一次 worldChanged（避免逐叶 setBlock 的 N 次光场重算 + N 次重建）。
+    for (const L &l : toDecay)
+        m_chunks.setBlock(l.x, l.y, l.z, BlockRegistry::Air);
+
+    // 3) 对受影响区做一次有界盒光场重 flood（叶 solid=true → air 改变遮光，天光从原叶位漏下，需重算）。
+    //    盒扩 1 格余量（光传播到邻格）；钳到世界界内。doSky=true 两通道都重算（叶遮挡影响天光，叶本身非火把）。
+    const int bx0 = std::max(0, minX - 1), by0 = std::max(0, minY - 1), bz0 = std::max(0, minZ - 1);
+    const int bx1 = std::min(W - 1, maxX + 1), by1 = std::min(H - 1, maxY + 1), bz1 = std::min(D - 1, maxZ + 1);
+    refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
+    emit worldChanged();
+    m_chunks.clearAllDirty();
+    qInfo("vo.edit: leaves decayed = %d", int(toDecay.size())); // 可观测：破原木后失撑叶计数
+}
+
+// t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。
+//   节流到 ~每 kSaplingTickInterval tick（5s）做一次成长判定窗口；每窗遍历全图树苗格，符合条件者按
+//   确定性散布概率长成 → 清除树苗 + 在原位生成完整橡树（placeTreeAt 主干 + 树叶球冠）。
+void World::tickSaplingGrowth()
+{
+    if (++m_saplingTickCounter < kSaplingTickInterval) return; // 节流：每 kSaplingTickInterval tick（~5s）判一次
+    m_saplingTickCounter = 0;
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+
+    // 1) 快照当前树苗格（tick 内栅格不变 —— 生长在 pass 末统一应用，避免半遍历态读到刚生成的树）。
+    struct SCell { int x, y, z; int trunkH; };
+    std::vector<SCell> cells;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y)
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Sapling)
+                    cells.push_back({x, y, z, 0});
+
+    // 2) 成长判定：每株据「下方草地/泥土支撑 + 头顶光照足 + 主干列畅通」筛后，按确定性散布概率决定本窗是否长成。
+    //    trunkH 据哈希高位取 4..6（与 worldgen placeTrees 同范围，保长出的树与自然树一致），按世界高度钳制。
+    //    主干列检查：g.y+1..g.y+trunkH+2 须畅通（树苗位 g.y 清后置原木、上方 trunkH-1 格原木 + 树冠 ~3 格空间）。
+    std::vector<SCell> grows;
+    for (SCell &c : cells) {
+        if (c.y == 0) continue; // 世界底无下方支撑
+        const quint8 below = m_chunks.blockAt(c.x, c.y - 1, c.z);
+        if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt)
+            continue; // 须草地 / 泥土支撑（机制等价 MC 树苗需泥土/草地）
+        if (m_chunks.skyLightAt(c.x, c.y, c.z) < kSaplingMinLight)
+            continue; // 头顶天光不足（夜间 / 洞穴不长）
+        const quint32 r = hashColumn(m_seed, c.x, c.z);
+        int trunkH = 4 + int((r >> 8) % 3u); // 4..6（与 worldgen 同源：hashColumn 高位 >> 8）
+        const int maxTrunk = (H - 1) - c.y - 2; // 留 2 格树冠余量后主干上限
+        if (maxTrunk < 4) continue;             // 此位放不下最小树 → 不长（保留树苗，等条件；条件永不满则永不长，可接受）
+        if (trunkH > maxTrunk) trunkH = maxTrunk;
+        // 主干 + 树冠空间须畅通（树苗位 g.y 由 placeTreeAt 置原木，故查 g.y+1 起的 trunkH-1 + 树冠 3 格）。
+        bool clear = true;
+        for (int t = 1; t <= trunkH + 2; ++t) {
+            if (c.y + t >= H) { clear = false; break; }
+            if (m_chunks.blockAt(c.x, c.y + t, c.z) != BlockRegistry::Air) { clear = false; break; }
+        }
+        if (!clear) continue; // 主干列阻塞 → 此窗不长（保留树苗，下窗再试）
+        // 确定性散布概率：纯函数于 seed + 位置 + 窗口序号（PLAN §2-K 精神，无 Math.random / 时间源 → 可复现）。
+        const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_saplingIntervalIndex) * 0x9E3779B9u));
+        const quint32 h = hashVoxel(mixedSeed, c.x, c.y, c.z);
+        if (int(h & 0xFFFFu) % 100 >= kSaplingGrowPct) continue; // 散布落空 → 本窗不长
+        c.trunkH = trunkH;
+        grows.push_back(c);
+    }
+
+    // 3) 应用生长：清树苗（m_chunks.setBlock 静默）+ placeTreeAt 生成完整橡树（setVoxelIfAir 仅写空气格，
+    //    不覆盖玩家编辑 / 已有方块）+ 局部光场重算（树干/叶遮挡改变天光）。多棵同窗长成合并一次 worldChanged。
+    //    placeTreeAt(x, surfaceY=y-1, ...) → 主干从 (y-1)+1 = y 起（树苗位），向上 trunkH 格 + 树冠。
+    //    leafRand = hashColumn 高位（与 worldgen 同源，驱动树冠四角叶有无 → 每棵轮廓各异）。
+    bool any = false;
+    for (const SCell &g : grows) {
+        m_chunks.setBlock(g.x, g.y, g.z, BlockRegistry::Air); // 清树苗（静默，无 broken/placed）
+        const quint32 lr = hashColumn(m_seed ^ 0x5BD1E995u, g.x, g.z); // 异或扰 leafRand 与密度字段（同 worldgen 风格）
+        placeTreeAt(g.x, g.y - 1, g.z, g.trunkH, lr >> 16);
+        // 局部光场重算：树主体（Log/Leaves，solid=true）从原树苗（solid=false）转 opaque → 遮光变化 → 盒内重 flood。
+        //   盒半径 = 光值 15（recomputeLightAround 内部），覆盖整棵树（~5 宽、~8 高）。多棵独立调（各自盒）。
+        recomputeLightAround(g.x, g.y, g.z, BlockRegistry::Sapling, BlockRegistry::Log);
+        any = true;
+    }
+    if (any) {
+        emit worldChanged(); // 触发重建（per-chunk dirty 协作：仅含新生成树的 chunk 真正重建）
+        m_chunks.clearAllDirty();
+        qInfo("vo.edit: saplings grew = %d", int(grows.size())); // 可观测：长成树苗计数
+    }
+    ++m_saplingIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同株错峰）
+}
+
 // --- Perlin（2D fBm）---
 static double fade(double t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
 static double lerp(double a, double b, double t) { return a + t * (b - a); }
@@ -585,6 +720,7 @@ int World::heightAt(int x, int z) const
     switch (biomeAt(x, z)) {
         case Biome::Hills:  amp = 7.0; break; // 起伏（山地感，仅此群系有显著地形变化）
         case Biome::Desert: amp = 3.0; break; // 平缓沙丘
+        case Biome::Forest: // 森林（t306）：与 plains 同振幅 amp 2 → 森林/草原边界零高差无缝（仅树/草密度分化）
         case Biome::Plains: // 草原（多数陆地）
         default:            amp = 2.0; break; // 极平（spec「大草原=平地」）
     }
@@ -605,7 +741,13 @@ World::Biome World::biomeAt(int x, int z) const
     const double b = fbm((x + m_seed + 3571) * 0.012, (z + m_seed + 3571) * 0.012); // [-1,1]
     if (b > 0.5)  return Biome::Hills;
     if (b < -0.4) return Biome::Desert;
-    return Biome::Plains;
+    // t306：原 plains 候选带（b ∈ [-0.4,0.5]）用第二条独立低频 fBm 把 forest 从草原里 carve 出来。
+    //   独立频率 0.020 + seed 偏移 +977（与主群系图 0.012/+3571、高度图 0.09 均不同）→ 森林图与三者解耦；
+    //   低频 → 森林成片（非逐格斑点，机制等价 MC 1.0 森林群系大尺度分布）。阈值 0.15（fbm 近似正态居中 0）
+    //   → 候选带内约 30-40% 划为森林，草原仍为多数（spec「森林+草原」二者共存，森林不吞没草原）。
+    //   纯函数于 seed → 同 seed 同 forest/plains 划分（PLAN §2-K）。
+    const double f = fbm((x + m_seed + 977) * 0.020, (z + m_seed + 977) * 0.020); // [-1,1]
+    return (f > 0.15) ? Biome::Forest : Biome::Plains;
 }
 
 // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威）。旧 t117 独立 fBm（0.018/+7919/0.35）
@@ -632,7 +774,7 @@ void World::generate()
     //   旧的 sandLevel=3 低洼沙判定被水位阈值（24+1=25）完全覆盖（h<=3 << 25 必属水下沙底），故删除。
     //   逐列独立 → 跨 chunk 边界天然连续，无浮空/悬崖；同 seed 确定（fbm/纯函数，PLAN §2-K）。
     //   走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
-    int desertCols = 0, sandyCols = 0, plainsCols = 0, hillsCols = 0;
+    int desertCols = 0, sandyCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
@@ -643,7 +785,10 @@ void World::generate()
             const int desertSandThickness = desert ? (4 + int(hashColumn(m_seed, x, z) % 3u)) : 0;
             if (desert) ++desertCols;
             else if (sandy) ++sandyCols;
-            if (bio == Biome::Plains) ++plainsCols; else if (bio == Biome::Hills) ++hillsCols;
+            // t306：森林地表仍为草（机制等价 MC 森林地表草地），仅树/草密度分化 → surface 填充无需分流 forest。
+            if (bio == Biome::Plains) ++plainsCols;
+            else if (bio == Biome::Hills) ++hillsCols;
+            else if (bio == Biome::Forest) ++forestCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
                 if (desert) {
@@ -662,9 +807,10 @@ void World::generate()
             }
         }
     }
-    // t274：群系分布可观测（plains 应为多数 / hills + desert 少数）；同 seed → 同分布（确定性核对）。
-    qInfo() << "worldgen: biomes plains =" << plainsCols << "hills =" << hillsCols
-            << "desert =" << desertCols << "beach/underwater =" << sandyCols
+    // t274/t306：群系分布可观测（plains 应为多数 / forest 次之 / hills + desert 少数）；同 seed → 同分布（确定性核对）。
+    qInfo() << "worldgen: biomes plains =" << plainsCols << "forest =" << forestCols
+            << "hills =" << hillsCols << "desert =" << desertCols
+            << "beach/underwater =" << sandyCols
             << "/" << (m_width * m_depth);
 
     placeBedrock(); // t119：底层基岩（y 0..4 坑洼，底实顶疏；不可破坏）。先于矿石 / 树（仅覆盖最底几格）
@@ -772,6 +918,8 @@ void World::placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand
 // 确定性树木散布：遍历列，按哈希(seed,x,z) 决定是否尝试种树；占用栅格保证主干间距 ≥2 列。
 // 仅在 grass 表层（heightAt > waterLevel+1，与 generate() 沙层判定同阈值）种；沙滩/水下/沙漠/越界/近邻有
 // 树干 → 跳过。主干高度按世界高度钳制（留出树冠空间），放不下最小树则确定性跳过。全部纯函数于 seed → 可复现。
+// t306 群系分流密度（spec「森林（现多树）+ 草原（少树多草）」）：forest 密闭成林 / plains 开阔偶见孤树 /
+//   hills 零星。机制等价 MC 1.0 森林/平原树密度分化。密度纯函数于 seed + biomeAt → 同 seed 同树分布。
 void World::placeTrees()
 {
     std::vector<char> occupied(size_t(m_width) * size_t(m_depth), 0); // 主干占用栅格（1=该列已有树干）
@@ -779,7 +927,11 @@ void World::placeTrees()
     constexpr int kMinTrunk    = 4; // 主干最少格数
     constexpr int kMaxTrunk    = 7; // 最多 7（低洼处可达）；高处按世界高度钳到 4 → 高度自然参差（用户诉求）
     constexpr int kCanopyExtra = 2; // 树冠在主干顶之上再升的格数（十字冠层 + 尖顶）
-    constexpr int kDensityPct  = 2; // 每 grass 列 ~2% 尝试 → 经间距筛选后零星分布（不密集成林）
+    // t306 群系分流树木密度（每 grass 列尝试概率 %）。间距筛选（主干 3×3 邻域不得已有树干 → 主干间距 ≥2 列）
+    //   封顶实际密度 ≈ 25%，故 forest 10% 全数通过间距 → 密林观感；plains 1% → 开阔草原偶见孤树。
+    constexpr int kForestTreePct = 10; // 森林密闭（spec「森林=现多树」）
+    constexpr int kPlainsTreePct = 1;  // 草原稀疏（spec「草原=少树」）
+    constexpr int kHillsTreePct  = 2;  // 山地零星（保留 t274 既有）
 
     int placed = 0;
     for (int z = 0; z < m_depth; ++z) {
@@ -787,10 +939,15 @@ void World::placeTrees()
             const int surfaceY = heightAt(x, z);
             // t149：水位阈值取代旧 kSandLevel=3 —— 沙滩带(wl±1)/水下(h<wl)/低洼不种树（机制等价 MC 树不生于沙滩/水下）。
             if (surfaceY <= kWaterLevel + 1) continue;
-            if (isDesert(x, z)) continue;         // t117 沙漠群系不种树（机制等价 MC 沙漠无树）
+            const Biome bio = biomeAt(x, z);
+            if (bio == Biome::Desert) continue;  // t117 沙漠群系不种树（机制等价 MC 沙漠无树）
 
+            // t306 群系分流密度：forest 密闭 / plains 稀疏 / hills 零星。
+            const unsigned densityPct = (bio == Biome::Forest) ? unsigned(kForestTreePct)
+                                        : (bio == Biome::Plains) ? unsigned(kPlainsTreePct)
+                                                                 : unsigned(kHillsTreePct);
             const quint32 r = hashColumn(m_seed, x, z);
-            if (r % 100u >= unsigned(kDensityPct)) continue; // 密度筛选
+            if (r % 100u >= densityPct) continue; // 密度筛选
 
             // 间距：主干列的 3×3 邻域（chebyshev 距离 ≤1）不得已有树干 → 保证主干间距 ≥2 列。
             bool tooClose = false;
@@ -825,16 +982,18 @@ void World::placeTrees()
 //   草丛占 surfaceY+1（grass 顶上方一格）；worldgen 顺序保证 placeTrees 先跑（树占 surfaceY+1 起若干格），
 //   故树干列的 surfaceY+1 已被 Log 占据 → setVoxelIfAir 跳过（草丛不抢树位）。无列间距筛选（草丛密度天然高，
 //   无需像树那样保证间距；机制等价 MC 平原草丛密集点缀）。
-//   t274 群系分流密度（spec「大草原=平地+多草丛」）：plains 草丛密集（40%，草原主体观感）、hills 适中（12%，
-//   山地草丛稀疏留出石 / 林裸露感）、desert 无（isDesert 已跳过）。纯函数于 seed + biomeAt → 同 seed 同分布。
+//   t274/t306 群系分流密度（spec「大草原=平地+多草丛」「森林+草原」）：plains 草丛密集（40%，草原主体观感）、
+//   forest 适中（18%，林下草地但树干/树冠占位 + 遮荫 → 比草原稀）、hills 适中（12%，山地草丛稀疏留出石 / 林
+//   裸露感）、desert 无（biomeAt==Desert 已跳过）。纯函数于 seed + biomeAt → 同 seed 同分布。
 void World::placeTallGrass()
 {
-    // t274 群系密度表（% of grass 列生草丛）：plains 远高于 hills（spec「多草丛」聚焦草原）。
+    // t274/t306 群系密度表（% of grass 列生草丛）：plains 远高于 forest/hills（spec「多草丛」聚焦草原）。
     constexpr int kPlainsGrassPct = 40; // 草原密集（spec 核心：「大草原=平地+多草丛」）
+    constexpr int kForestGrassPct = 18; // 森林适中（林下草地，树干/树冠占位 + 遮荫 → 比草原稀）
     constexpr int kHillsGrassPct  = 12; // 山地稀疏（裸岩 / 林感）
 
     int placed = 0;
-    int plainsCols = 0, hillsCols = 0;
+    int plainsCols = 0, hillsCols = 0, forestCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int surfaceY = heightAt(x, z);
@@ -843,9 +1002,10 @@ void World::placeTallGrass()
             const Biome bio = biomeAt(x, z);
             if (bio == Biome::Desert) continue; // t117/t274 沙漠群系不生草丛（机制等价 MC 沙漠无草）
 
-            // t274 群系分流密度：plains 密集 / hills 稀疏。
+            // t274/t306 群系分流密度：plains 密集 / forest 适中 / hills 稀疏。
             const unsigned densityPct = (bio == Biome::Plains) ? unsigned(kPlainsGrassPct)
-                                                               : unsigned(kHillsGrassPct);
+                                        : (bio == Biome::Forest) ? unsigned(kForestGrassPct)
+                                                                 : unsigned(kHillsGrassPct);
             const quint32 r = hashColumn(m_seed, x, z);
             if (r % 100u >= densityPct) continue; // 密度筛选
 
@@ -853,11 +1013,14 @@ void World::placeTallGrass()
             if (y >= m_height) continue; // 世界顶之上不放（防御）
             setVoxelIfAir(x, y, z, BlockRegistry::TallGrass);
             ++placed;
-            if (bio == Biome::Plains) ++plainsCols; else ++hillsCols;
+            if (bio == Biome::Plains) ++plainsCols;
+            else if (bio == Biome::Forest) ++forestCols;
+            else ++hillsCols;
         }
     }
     qInfo() << "worldgen: tall grass placed =" << placed
-            << "(plains" << plainsCols << "/ hills" << hillsCols << ")"; // 同 seed → 同计数（确定性核对）
+            << "(plains" << plainsCols << "/ forest" << forestCols
+            << "/ hills" << hillsCols << ")"; // 同 seed → 同计数（确定性核对）
 }
 
 // t119 底层基岩：遍历列，在 y 0..4 铺一层 Bedrock（不可破坏方块，hardness=-1.0 → canMine=false）。

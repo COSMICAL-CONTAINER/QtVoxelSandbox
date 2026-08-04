@@ -226,7 +226,10 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RottenFleshId),   // 腐肉：杀蹒跩者掉落（暗红腐块 + 绿斑霉点）
         int(RecipeRegistry::StringId),        // 线：杀蜘蛛掉落（浅色缠绕线团）
         // t304 箭（弓弹药）：材料段 0x21A，可堆叠 64。创造直接取用便于测试弓（仍需背包有箭才射得出）。
-        int(RecipeRegistry::ArrowId)          // 箭：弓弹药；铁锭+木棒+线合成 4 件（t304）
+        int(RecipeRegistry::ArrowId),         // 箭：弓弹药；铁锭+木棒+线合成 4 件（t304）
+        // t305 树苗物品：材料段 0x21B，可堆叠 64。破叶概率掉落（生存）/ 创造直接取用。右键草地 / 泥土种植 →
+        //   Sapling 方块（WorldClock tick 推进成长长成完整橡树）。机制等价 MC 1.0 橡树树苗；MaterialIcon 自绘图标。
+        int(RecipeRegistry::SaplingItemId)    // 树苗物品：破叶掉落；右键草地/泥土种植（t305）
     };
 }
 
@@ -355,6 +358,8 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::BoneId)        return QStringLiteral("骨头"); // 杀骸骨掉落
         if (blockId == RecipeRegistry::RottenFleshId) return QStringLiteral("腐肉"); // 杀蹒跚者掉落
         if (blockId == RecipeRegistry::StringId)      return QStringLiteral("线");   // 杀蜘蛛掉落（弓 / 钓竿原料）
+        if (blockId == RecipeRegistry::ArrowId)       return QStringLiteral("箭");   // t304 弓弹药
+        if (blockId == RecipeRegistry::SaplingItemId) return QStringLiteral("橡树树苗"); // t305 破叶掉落；种植 → 树
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

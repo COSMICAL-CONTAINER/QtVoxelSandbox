@@ -301,6 +301,20 @@ int PartialBlockGeometry::append(
                       wheatTile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::Sapling: {
+        // t305 树苗 cross 模型：与 TallGrass 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
+        //   机制等价 MC 1.0 橡树树苗（sapling）—— cross 模型上贴 sapling(39) 瓦片（棕色短树干 + 绿色嫩叶小球冠，
+        //   alpha 透明底 cutout）。**无 state 派生贴图**（树苗单一贴图；生长是清除树苗 + 生成完整树，非贴图阶段切换，
+        //   区别于 WheatCrop 的 state→阶段贴图）。tile 由 BlockRegistry::tileIndex(Sapling, PosX) = sideTile = 39 给出。
+        //   不做邻居剔除（cross 透明 + 树苗，同 TallGrass；Sapling solid=false）。材质 alphaCutoff:0.5 丢弃透明底。
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     default:
         return 0; // 非异形方块 / 未实现 → 不追加（chunkgeometry 的 continue 跳过此格）
     }

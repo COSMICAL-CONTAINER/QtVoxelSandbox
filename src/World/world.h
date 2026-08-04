@@ -154,6 +154,25 @@ public:
     //   worldChanged（无重建、无开销）。spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickCropGrowth();
+    // t305 树苗生长 tick（spec「树苗种植→长大成完整树（时间推进）」）：由呈现层 Main.qml 经 WorldClock.ticked
+    //   桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kSaplingTickInterval×0.1s 做一次成长判定）。
+    //   机制等价 MC 1.0 树苗生长（random-tick 式散布概率）：树苗在草地 / 泥土支撑 + 头顶光照足 + 主干列空气
+    //   畅通时，按确定性散布概率（hashVoxel(seed,x,y,z) + 窗口序号）逐步判定 → 命中即清除树苗 + 在原位生成
+    //   一棵完整橡树（复用 worldgen placeTreeAt 主干 + 树叶球冠）。光照不足 / 下方非草地泥土 / 主干列阻塞 →
+    //   不长（条件不满足即跳过，无副作用、不触发 worldChanged）。生成树走 setVoxelIfAir（仅写空气格，不覆盖
+    //   玩家编辑 / 已有方块；同 worldgen 树放置语义）。稳态（无树苗 / 全不满足）每窗口无变化 → 不发 worldChanged。
+    //   spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
+    //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
+    Q_INVOKABLE void tickSaplingGrowth();
+    // t305 树叶衰减（spec「挖光一棵树所有原木→树叶消失」）：玩家破原木后扫破块点周围树叶，判定其是否仍
+    //   「在原木支撑范围内」（机制等价 MC 1.0 叶子距原木 >4 格即衰减）。失撑叶（4 格切比雪夫距离内无原木）
+    //   静默清为 Air（setWaterSilent 不发 blockBroken → 无破叶粒子 / 音；自然衰减无反馈，机制等价 MC 自然叶衰）。
+    //   **持久叶**（玩家放置、state 带 PersistentLeafBit）跳过 → 创造建筑用的悬空叶不被清。批量清：先收集所有
+    //   失撑叶，统一经 m_chunks.setBlock 直写（不发 broken/placed），末尾对受影响区做一次 refloodBox 重算光场
+    //   + 一次 worldChanged（避免逐叶 setBlock 的 N 次光场重算 + N 次重建请求）。非 Q_INVOKABLE（PlayerController
+    //   C++ 调，破原木后触发）。
+    //   分层（PLAN §2）：本方法属 World 层，只读 / 写 m_chunks + lightField + 发 worldChanged。
+    void decayLeavesAround(int x, int y, int z);
 
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
@@ -190,15 +209,19 @@ private:
     // t278 3D Perlin 噪声（洞穴 carve 用）。复用 buildPermutation 的 m_perm[512] 表（与 noise2 同源）；
     //   grad3 三维梯度。纯函数于 seed + (x,y,z) → 同 seed 同 3D 噪声场（PLAN §2-K）。范围 ~[-1,1]。
     double noise3(double x, double y, double z) const;
-    // t274 群系枚举（plains/hills/desert 三分；机制等价 MC 1.0 大尺度群系，名称为通用描述词，§9 合规）。
-    //   worldgen 内部用：heightAt 据群系选振幅、placeTallGrass 据群系选密度、isDesert 收口到 biomeAt==Desert。
-    //   纯函数于 seed（biomeAt 经 fBm）→ 同 seed 同群系图（PLAN §2-K 确定性）。私有嵌套枚举（worldgen 细节，
-    //   不外泄到 QML；如需 F3 调试可后续暴露 Q_INVOKABLE 查询）。
-    enum class Biome { Plains, Hills, Desert };
-    // t274 群系判定（PLAN §2-K 确定性）：单一群系 fBm（与高度噪声 0.09 / 旧沙漠噪声 0.018 均不同频率 0.012 +
-    //   seed 偏移 +3571）→ 群系图与高度图解耦、与旧沙漠分布独立。低频 → 大区块连续（plains/hills/desert 成片，
-    //   非逐格斑点，机制等价 MC 1.0 群系大尺度分布）。阈值三分：hills（少数，起伏）/ desert（少数，沙）/
-    //   plains（多数，平坦草原 —— spec「大草原」原意）。纯函数于 seed → 同 seed 同群系分布。
+    // t274/t306 群系枚举（plains/forest/hills/desert 四分；机制等价 MC 1.0 大尺度群系，名称为通用描述词，§9 合规）。
+    //   worldgen 内部用：heightAt 据群系选振幅、placeTrees/placeTallGrass 据群系选密度、isDesert 收口到
+    //   biomeAt==Desert。纯函数于 seed（biomeAt 经 fBm）→ 同 seed 同群系图（PLAN §2-K 确定性）。私有嵌套枚举
+    //   （worldgen 细节，不外泄到 QML；如需 F3 调试可后续暴露 Q_INVOKABLE 查询）。
+    //   t306 在 t274 三分基础上把原 plains 中段 carve 出 forest：forest 多树（密闭林）、plains 少树多草（开阔草原），
+    //   机制等价 MC 1.0 森林 / 平原群系分化（spec「森林（现多树）+ 草原（少树多草）」）。
+    enum class Biome { Plains, Hills, Desert, Forest };
+    // t274/t306 群系判定（PLAN §2-K 确定性）：主群系 fBm（与高度噪声 0.09 / 旧沙漠噪声 0.018 均不同频率 0.012 +
+    //   seed 偏移 +3571）→ 群系图与高度图解耦、与旧沙漠分布独立。低频 → 大区块连续（plains/forest/hills/desert
+    //   成片，非逐格斑点，机制等价 MC 1.0 群系大尺度分布）。阈值三分主图：hills（少数，起伏）/ desert（少数，沙）/
+    //   其余 plains 候选带。t306 在 plains 候选带内用**第二条独立低频 fBm**（频率 0.020 + seed 偏移 +977，与主图
+    //   解耦）把 forest 从草原里 carve 出来 → 森林成片分布、与草原无缝衔接（二者同振幅 amp 2 → 边界零高差无缝）。
+    //   纯函数于 seed → 同 seed 同群系分布（含 forest/plains 划分）。
     Biome biomeAt(int x, int z) const;
     // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威；旧独立 fBm 实现已由 t274 biomeAt 统一）。
     //   供 generate（沙表层）/ placeTrees / placeTallGrass 跳过沙漠列。纯函数于 seed（经 biomeAt）。
@@ -275,6 +298,17 @@ private:
     static constexpr int kCropTickInterval = 25;  // tickCropGrowth 节流间隔（WorldClock tick 单位 = 100ms → 2.5s/窗）
     static constexpr int kCropMinLight     = 9;   // 生长所需最低天光（/15；机制等价 MC 作物 light level 9+）
     static constexpr int kCropGrowPct      = 35;  // 每窗每株升阶段的散布概率（%；35% → 平均 ~7s/阶段）
+    // t305 树苗生长 tick 节流计数 + 常量：tickSaplingGrowth() 每 100ms 被 WorldClock.ticked 调一次；
+    //   累积到 kSaplingTickInterval 才做一次成长判定（~每 kSaplingTickInterval×0.1s 一窗）。窗口序号
+    //   m_saplingIntervalIndex 每窗 +1，喂入 hashVoxel 散布概率 → 不同窗口不同树苗错峰生长。
+    //   kSaplingTickInterval=50（5s/窗）+ kSaplingGrowPct=10% → 单株平均 ~50s 长成（可见、可验收；MC 1.0 自然
+    //   生长 ~1-5min，本工程取快便于肉眼 / 测试复核，机制对齐非精确数值复刻）。kSaplingMinLight=9：头顶
+    //   天光 ≥9/15 才长（机制等价 MC 树苗 light level 9+；夜间 / 洞穴不长）。
+    int m_saplingTickCounter = 0;
+    int m_saplingIntervalIndex = 0;
+    static constexpr int kSaplingTickInterval = 50; // tickSaplingGrowth 节流间隔（WorldClock tick 单位 = 100ms → 5s/窗）
+    static constexpr int kSaplingMinLight     = 9;  // 生长所需最低天光（/15；机制等价 MC 树苗 light level 9+）
+    static constexpr int kSaplingGrowPct      = 10; // 每窗每株长成的散布概率（%；10% → 平均 ~50s 长成）
 };
 
 #endif // WORLD_H

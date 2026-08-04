@@ -599,6 +599,12 @@ private:
     //   前快照（t134 时序：setBlock 委托 5 参数版以 state=0 写入，之后 stateAt 永返 0 → WheatCrop 成熟
     //   判定失效，须先读）。分层同 spawnItem（Game/Physics 发语义事件，呈现层 / ViewModel 只消费）。
     void dropCropDrops(int x, int y, int z, quint8 id, quint8 state);
+    // t305 树叶掉落产出（玩家破叶专用）：破 Leaves 时按概率掉树苗物品（SaplingItemId）+ 木棒（StickId）。
+    //   机制等价 MC 1.0 破叶掉落（5% 树苗 / 2% 木棒；本工程对齐概率）。自然衰减（decayLeavesAround）不掉落
+    //   （spec「树叶消失」），仅玩家破叶走本分支。两物品散布到破格 + 非实体水平邻格做视觉分离（同 WheatCrop
+    //   / 双半砖模式）。概率走 QRandomGenerator（玩家交互掉落随机性，非 worldgen 确定性范畴 §2-K）。同
+    //   dropCropDrops 模式：特例掉落在通用 BlockDef 表之上提前分流（Leaves.dropId=0 兜底，本分支覆盖）。
+    void dropLeafDrops(int x, int y, int z);
     // t247 草丛 / 小麦作物失撑掉落（spec「挖底方块→其上草方块/小麦应掉落（现悬空）；草根+作物须依附
     //   下方实体方块」）：破块后查**正上方格**，若为 TallGrass / WheatCrop（其唯一支撑 = 下方实体方块，
     //   刚被破为 Air）→ 作物直接掉落为对应产出（setBlock(Air) + dropCropDrops），不再悬空。机制等价 MC
@@ -812,6 +818,12 @@ private:
     //   同 WheatCrop 收割种子 1-2 随机。羊吃草（entitymanager::sheepEatGrass）走静默 setWaterSilent 不发掉落，
     //   与本玩家破块路径互不影响。
     static constexpr int kTallGrassSeedDropDenom = 8; // 1/8 ≈ 12.5%（MC 1.0 草丛掉种概率）
+    // t305 树叶掉落概率（机制等价 MC 1.0 破叶掉落）：finishMiningAt 破 Leaves 时按本概率掉树苗物品 / 木棒。
+    //   kLeafSaplingDropPct=5（5% 掉 1 树苗，MC 1.0 橡树叶 5% 掉树苗）；kLeafStickDropPct=2（2% 掉 1 木棒，
+    //   MC 1.0 树叶 2% 掉木棒）。两次独立判定（可同时掉树苗 + 木棒）。玩家交互掉落的随机性（QRandomGenerator），
+    //   非 worldgen 确定性范畴 §2-K。自然衰减（decayLeavesAround）不走本路径（无掉落，spec「树叶消失」）。
+    static constexpr int kLeafSaplingDropPct = 5; // 5%（MC 1.0 橡树叶掉树苗概率）
+    static constexpr int kLeafStickDropPct   = 2; // 2%（MC 1.0 树叶掉木棒概率）
     // t211 水流推动玩家（机制等价 MC 1.0 流水冲走实体）：
     //   kWaterFlowPush：流水水平推力速度（blocks/sec；脚位在流水格 state>0 时沿离源方向叠入水平速度）。
     //     低于 kWalk(4.3) → 玩家仍可逆流游（净速 ≈ 走速 − 推力），但松手会被流走。spec「创造非飞 + 生存」。

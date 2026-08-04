@@ -38,6 +38,10 @@
      原创自绘 §9a。各面同贴图=青白菱斑晶体嵌于石头底；tools/build_ore.py 程序生成原创像素图。）
   38 wool（t300 羊毛方块：剪羊毛 / 杀羊掉落；机制等价 MC 1.0 羊毛，名称/贴图原创自绘 §9a。
      各面同贴图=奶白羊毛底 + 浅灰卷曲绒毛纹；tools/build_wool.py 程序生成原创像素图。）
+  39 sapling（t305 树苗 cross 贴图：棕色短树干 + 顶部绿色嫩叶小球冠，alpha 透明底 cutout。
+     Sapling 方块各面 = 本 tile；mesher 走 cross 几何段（PartialBlockGeometry pushCross 双面双对角 quad），
+     chunk 地形材质 alphaCutoff:0.5 cutout 透明底。机制等价 MC 1.0 橡树树苗（sapling）；名称/贴图原创自绘 §9a。
+     tools/build_sapling.py 程序生成原创像素图。）
 （CC0 资产，来源见 docs/PLAN.md §L 资产管线；工作台贴图由 tools/build_crafting_table.py、
  熔炉贴图由 tools/build_furnace.py、矿石贴图由 tools/build_ore.py、火把贴图由 tools/build_torch.py、
  基岩贴图由 tools/build_bedrock.py、水贴图由 tools/build_water.py、箱子贴图由 tools/build_chest.py、
@@ -91,6 +95,8 @@ TILES = [
                                     #    机制等价 MC 1.0 钻石矿，名称/贴图原创自绘 §9a；各面同贴图=青白菱斑晶体）
     "default_wool",                 # 38 wool（t300 羊毛方块；剪羊毛 / 杀羊掉落；机制等价 MC 1.0 羊毛，
                                     #    名称/贴图原创自绘 §9a；各面同贴图=奶白羊毛底+浅灰卷曲绒毛纹）
+    "default_sapling",              # 39 sapling（t305 树苗 cross 贴图；棕色短树干+绿色嫩叶小球冠，alpha 透明底 cutout；
+                                    #    Sapling 方块各面=本 tile，mesher 走 cross 几何段；机制等价 MC 1.0 橡树树苗；tools/build_sapling.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

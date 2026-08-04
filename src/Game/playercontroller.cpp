@@ -748,6 +748,12 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
     //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
     dropUnsupportedCropsAround(x, y, z);
+    // t305 树叶衰减（spec「挖光一棵树所有原木→树叶消失」）：玩家破原木 → 触发 World 扫破块点周围树叶，
+    //   失撑叶（4 格切比雪夫距离内无原木）静默清为 Air。**不依赖 drop 标志**（创造瞬破 drop=false 亦触发 ——
+    //   衰减是结构后果，非掉落；机制等价 MC 创造破原木后叶子照衰）。仅原木触发（破叶 / 破其它方块不衰）。
+    //   分层：本处（Game/Physics）调 World::decayLeavesAround（World 层方法），向下合法。
+    if (brokenId == BlockRegistry::Log && m_world)
+        m_world->decayLeavesAround(x, y, z);
     // t43：生存挖出可掉落方块 → **走实体流**（emit spawnItem），移除 commit a3e9300 的 auto-collect
     // （原直接 addStack）。掉落物落到该格地面、玩家走近 ≤kPickupDist 时经 pickupScan 拾取 → addStack
     // （先选中槽、再空槽，智能堆叠至 maxStack）。满栈不进背包则实体留地面（spec：全满→不拾取）。
@@ -763,6 +769,12 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         //   brokenState 已在 setBlock(Air) 前读（t134 时序：WheatCrop 在 snapshot 条件内，成熟判定可靠）。
         if (brokenId == BlockRegistry::WheatCrop || brokenId == BlockRegistry::TallGrass) {
             dropCropDrops(x, y, z, brokenId, brokenState);
+        } else if (brokenId == BlockRegistry::Leaves) {
+            // t305 玩家破叶 → 概率掉树苗物品 + 木棒（机制等价 MC 1.0 破叶 5% 树苗 / 2% 木棒）。Leaves.dropId=0
+            //   （表兜底无自掉），本特例分支覆盖通用 drop 路径（同 WheatCrop/TallGrass/双半砖模式）。自然衰减
+            //   （decayLeavesAround）不走此（无掉落）。brokenState 不影响叶掉落（无 state 派生 —— PersistentLeafBit
+            //   仅控衰减，破叶掉落同）。
+            dropLeafDrops(x, y, z);
         } else if (brokenId == BlockRegistry::Planks && (brokenState & BlockRegistry::PlanksFromDoubleSlabBit)) {
             // t215 双半砖（合并态）破块掉 2× WoodSlab 为**2 个独立物品实体**（非 1 个 count=2 栈）：
             //   placeBlock 合并时写 Planks + PlanksFromDoubleSlabBit 标记「源自双半砖」。此处检本 bit →
@@ -858,6 +870,26 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
     const quint8 cstate = m_world->stateAt(cx, cy, cz); // setBlock(Air) 前快照（WheatCrop 成熟判定）
     m_world->setBlock(cx, cy, cz, BlockRegistry::Air);  // → World 发 blockBroken(crop) + worldChanged → 粒子 + mesh 重建
     dropCropDrops(cx, cy, cz, cid, cstate);            // 失撑掉落产出与玩家破块同源
+}
+
+// t305 树叶掉落（见 playercontroller.h 头注释）。机制等价 MC 1.0 破叶掉落：5% 树苗物品 / 2% 木棒。
+//   两次独立判定（可同时掉树苗 + 木棒）。两物品散布到破格 + 非实体水平邻格做视觉分离（同 WheatCrop / 双半砖
+//   模式：ItemEntityManager spawnItem 仅整数格坐标存格中心，故以邻格区分）。无邻格则同破格（仍两实体）。
+void PlayerController::dropLeafDrops(int x, int y, int z)
+{
+    if (!m_world) return;
+    // 找一个非实体水平邻格做第二物品的散布位（视觉分离）；无则同破格。
+    constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    int sx = x, sz = z;
+    for (const auto &o : kHoriz) {
+        if (!BlockRegistry::isSolid(m_world->blockAt(x + o[0], y, z + o[1]))) { sx = x + o[0]; sz = z + o[1]; break; }
+    }
+    // 树苗物品（5%）：独立判定。
+    if (QRandomGenerator::global()->bounded(100) < kLeafSaplingDropPct)
+        emit spawnItem(x, y, z, RecipeRegistry::SaplingItemId, 1);
+    // 木棒（2%）：独立判定（可与树苗同时掉）；落到散布邻格做视觉分离。
+    if (QRandomGenerator::global()->bounded(100) < kLeafStickDropPct)
+        emit spawnItem(sx, y, sz, RecipeRegistry::StickId, 1);
 }
 
 // t242 攻击 mob（spec「玩家左键攻击生物→受伤音效 + 身体红闪 + 扣血」）：damageEntity 扣血 + 设
@@ -1420,6 +1452,30 @@ void PlayerController::placeBlock()
         }
         return; // 种子（种植成功 / 命中非耕地 / 未命中）均不再走方块放置路径
     }
+    // t305 树苗种植（spec「树苗种植→长大成完整树」）：手持树苗物品（SaplingItemId，材料段非方块）右键命中
+    //   草地 / 泥土 → 在命中格正上方空气格种下 Sapling 方块（机制等价 MC 1.0 树苗种植）。树苗物品非方块 →
+    //   selectedBlock 经 hotbar 归 Air，须在下方 `m_selectedBlock == Air` 守卫之前分流（同桶 / 锄 / 种子模式）。
+    //   命中非草地 / 泥土（如石头 / 沙 / 已有方块）→ 不种不挥（机制等价 MC 树苗只能种在草地 / 泥土）。spectator
+    //   已被入口 canPlace() 守卫拦截；Creative / Survival 均可种。生存消耗 1 树苗（创造不耗 → 无限种）。
+    //   分层（PLAN §2）：种植属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM），不改 setBlock 语义。
+    //   生长由 World::tickSaplingGrowth（WorldClock tick 驱动）推进，本处仅落地树苗方块。
+    if (m_hotbar && m_world && heldItemId == RecipeRegistry::SaplingItemId) {
+        if (m_hasHit) {
+            const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+            if (hitId == BlockRegistry::Grass || hitId == BlockRegistry::Dirt) {
+                const int wx = m_hitBx, wy = m_hitBy + 1, wz = m_hitBz; // 树苗种在命中格正上方一格
+                // 目标须在界内 + 为空气（不覆盖实体 / 已种树苗 / 草丛 / 水）。越界 setBlock 静默返 false → 提前挡防误耗树苗。
+                if (wy < m_world->height() && m_world->blockAt(wx, wy, wz) == BlockRegistry::Air) {
+                    m_world->setBlock(wx, wy, wz, BlockRegistry::Sapling, 0); // state=0（worldgen 树苗态；生长由 tick 推进）
+                    if (m_mode != Creative)
+                        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 树苗（创造不耗）
+                    m_lastPlaceMs = now;
+                    emit swingArm(); // 种植也是一次「放置」动作 → 挥手（t29）
+                }
+            }
+        }
+        return; // 树苗（种植成功 / 命中非草地泥土 / 未命中）均不再走方块放置路径
+    }
     // t267：面包已从 placeBlock 移除 —— 改由 eventFilter RightButton press 据持物 == BreadId 分流到
     //   beginEating（长按累积进食进度，~1.6s 满后 finishEating 消耗 + 恢复饥饿）。spec「单击即食→改长按右键」。
     //   旧单次右键食一件的分支已删（避免与长按路径并存导致单击仍即食）。饥饿恢复 + Survival 消耗 / Creative
@@ -1515,6 +1571,11 @@ void PlayerController::placeBlock()
         //   机制等价 MC 1.0 箱子放置锁面朝玩家）。编码与 horizontalFacing 同源（0=+X 1=-X 2=+Z 3=-Z）；
         //   mesher 据 state 把 chest_front 贴到对应面，QML 盖子铰链摆在前面背侧（锁面相对）。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
+    } else if (m_selectedBlock == BlockRegistry::Leaves) {
+        // t305 玩家放置的树叶标 PersistentLeafBit（持久，不参与自然衰减）—— 机制等价 MC 1.0「玩家放置的树叶
+        //   不衰减」。worldgen 叶 state=0（衰减候选）；玩家叶 state=本 bit → decayLeavesAround 跳过 → 创造建筑
+        //   用的悬空叶不被清。mesher / collision / 选中均不读 leaves state（ShapeFull + culled 立方面）→ 零回归。
+        placeState = BlockRegistry::PersistentLeafBit;
     }
     // t163(b) 同格双半砖合整（spec「同格下半砖上再放下半砖→合并为完整方块阻挡行走」）：
     //   右键 slab 时若点中的就是 slab，且点击面朝向其空半（lower 顶面 ny>0 / upper 底面 ny<0）→ 在同格

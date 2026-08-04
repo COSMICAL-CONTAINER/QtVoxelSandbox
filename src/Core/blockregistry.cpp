@@ -37,7 +37,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* cobble         */ {int(BlockRegistry::Cobble),        5,  5, 5,  5,  true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Cobble),        1, 64, "cobble",         "圆石"},
     /* log            */ {int(BlockRegistry::Log),           6,  6, 7,  7,  true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Log),            1, 64, "log",            "橡木原木"}, // t265 斧加速（requiresTool=false 空手仍掉落）；顶/底=log_top 侧=log_side
     /* planks         */ {int(BlockRegistry::Planks),        8,  8, 8,  8,  true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Planks),         1, 64, "planks",         "橡木木板"}, // t265 斧加速（空手也掉落）
-    /* leaves         */ {int(BlockRegistry::Leaves),        9,  9, 9,  9,  true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Leaves),         1, 64, "leaves",         "橡树树叶"}, // 无有效工具（MC 剑/剪加速，本工程留后续）
+    /* leaves         */ {int(BlockRegistry::Leaves),        9,  9, 9,  9,  true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "leaves",         "橡树树叶"}, // t305 dropId=0（叶掉木棒/树苗物品由 playercontroller dropLeafDrops 概率分流；不再自掉叶子方块）。无有效工具（MC 剑/剪加速，本工程留后续）。solid=true（遮挡天光，破叶触发光场重算）。
     /* sand           */ {int(BlockRegistry::Sand),          4,  4, 4,  4,  true,  BlockRegistry::ShapeFull,     0.5f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::Sand),           1, 64, "sand",           "沙子"}, // t265 铲加速（空手也掉落）
     /* crafting_table */ {int(BlockRegistry::CraftingTable), 10, 8, 11, 11, true,  BlockRegistry::ShapeFull,     2.5f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::CraftingTable),  1, 64, "crafting_table", "工作台"}, // t265 斧加速（空手也掉落）；顶=crafting_table_top(10) 底=planks(8) 侧=crafting_table_side(11)（t50）
     /* furnace        */ {int(BlockRegistry::Furnace),       12, 12, 13, 14, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Furnace),        1, 64, "furnace",        "熔炉"}, // 顶=furnace_top(12) 底=furnace_top(12) 侧=furnace_side(13) 前(-Z)=furnace_front(14)（t80）；8 圆石围圈合成；同石头（需镐）
@@ -113,6 +113,16 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   （破块掉羊毛方块，可放置）、dropCount=1、maxStack=64。各面贴图=wool(38)（奶白羊毛底 + 浅灰卷曲绒毛纹）。
     //   音色归 GroupWood（软质闷击，最接近 MC 羊毛 cloth SoundType）。
     /* wool         */ {int(BlockRegistry::Wool),                   38, 38, 38, 38, true,  BlockRegistry::ShapeFull,     0.8f, int(BlockRegistry::Shears),  0, false, int(BlockRegistry::Wool),           1, 64, "wool",          "羊毛"},
+    // ── t305 树苗（Sapling）：机制等价 MC 1.0 橡树树苗（cross 形广告牌方块，种在草地/泥土上随时间生长成橡树）。
+    //   cross 几何段（与 TallGrass / WheatCrop 同走 PartialBlockGeometry pushCross 双面双对角 quad，alpha 透明底 cutout）。
+    //   solid=false（非实体 → 不挡邻居面剔除，同 torch / 草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC
+    //   树苗可踩过）、hardness=0（瞬破，同 torch / 草丛）、NoTool（空手可采且掉落）、dropId=0x21B（**树苗物品**，材料段
+    //   RecipeRegistry::SaplingItemId；Core 不依赖 Game 故用字面量 0x21B —— 破树苗掉树苗物品非树苗方块，玩家可回收再种；
+    //   机制等价 MC 破树苗掉树苗物品）、dropCount=1、maxStack=64。各面贴图=sapling(39)（棕色短树干 + 绿色嫩叶小球冠，
+    //   alpha 透明底；mesher 走 cross 几何段，材质 alphaCutoff cutout）。音色归 GroupGrass（软草音，同草丛 / 作物）。
+    //   玩家持树苗物品右键草地/泥土种植（playercontroller useBlock 分支，同种子种植模式）；WorldClock tick 推进成长
+    //   （world.tickSaplingGrowth）。**不**进方块创造调色板（树苗经物品种植；创造取树苗**物品**便于测试，见 creativeMaterials）。
+    /* sapling      */ {int(BlockRegistry::Sapling),                 39, 39, 39, 39, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, 0x21B,                              1, 64, "sapling",       "橡树树苗"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -158,6 +168,15 @@ int BlockRegistry::tileIndex(quint8 blockId, Face face)
 
 bool BlockRegistry::isSolid(quint8 blockId)      { return def(blockId).solid; }
 BlockRegistry::Shape BlockRegistry::shape(quint8 blockId) { return def(blockId).shape; }
+
+// t305 cross 广告牌方块统一谓词（单一权威）：连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)。
+//   Sapling id（28）不在连续 cross 段内（DiamondOre=26 / Wool=27 夹在中间且非 cross）→ 显式并入。
+//   mesher / 选中框路由一律读本谓词（避免各持区间判定漂移，见头注释）。
+bool BlockRegistry::isCrossBillboard(quint8 blockId)
+{
+    if (blockId == Sapling) return true;
+    return blockId >= FirstCross && blockId <= LastCross;
+}
 
 // 方块是否「有碰撞 sub-AABB」（考虑开合态）。air / torch / water（ShapeNone）→ false。
 //   越界 → false（air 兜底）。单一权威：isCollidable 与 collisionAABBs 共用，保证「预判」与「精确碰撞」
@@ -414,6 +433,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）
     case TallGrass: // t235 草丛 → 软草音色（同 grass；机制等价 MC 草丛 SoundType = grass）
     case WheatCrop: // t236 小麦作物 → 软草音色（同草丛；机制等价 MC 作物 SoundType = grass）
+    case Sapling: // t305 树苗 → 软草音色（同草丛 / 作物；机制等价 MC 树苗 SoundType = grass）
         return GroupGrass;
     case Sand:
         return GroupSand;

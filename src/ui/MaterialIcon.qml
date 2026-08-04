@@ -37,7 +37,7 @@ import QtQuick
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -677,6 +677,32 @@ Item {
                 R(5, 19, 2, 1, fletchDark)      // 羽根暗边（接杆处）
             }
 
+            // t305 树苗物品（0x21B）：破叶概率掉落；右键草地/泥土种植 → Sapling 方块（WorldClock tick 推进成长）。
+            //   机制等价 MC 1.0 橡树树苗（sapling）图标；纯原创自绘（§9a）。MC 风格树苗 = 一根棕色短树干 +
+            //   顶部绿色嫩叶小球冠（树冠雏形）。配色：trunk #9c7340（树干亮面，同原木）/ trunkDark #6b4f24
+            //   （树干暗面）/ leaf #6fae3a（嫩叶亮面，鲜绿）/ leafDark #3a6a1a（叶暗面）。
+            const drawSapling = () => {
+                const trunk = "#9c7340", trunkDark = "#6b4f24"
+                const leaf = "#6fae3a", leafDark = "#3a6a1a"
+                // 树干（画布底中下部，两列圆柱明暗：左暗 / 右亮）。占下半部分表「短树苗主干」。
+                R(11, 12, 1, 8, trunkDark)   // 左暗面（cols 11, rows 12..19）
+                R(12, 12, 1, 8, trunk)       // 右亮面（col 12）
+                R(11, 19, 2, 1, trunkDark)   // 干底收口暗
+                // 树冠（树干顶部小球状叶簇，rows 5..11；以 (11.5, 8) 为中心散布叶像素，亮/暗交错立体）
+                R(9, 7, 5, 1, leaf)          // 顶横叶（受光亮）
+                R(8, 8, 7, 3, leafDark)      // 中部主体叶（暗底，rows 8..10）
+                R(8, 8, 7, 1, leaf)          // 中部上沿亮
+                R(9, 11, 5, 1, leafDark)     // 底横叶（暗，收口）
+                R(8, 9, 1, 2, leaf)          // 左亮边
+                R(14, 9, 1, 2, leafDark)     // 右暗边
+                R(10, 6, 3, 1, leaf)         // 顶尖叶（亮，表树冠顶）
+                R(11, 5, 1, 1, leafDark)     // 最顶尖暗点
+                // 几片散布亮叶（立体感）
+                R(9, 10, 1, 1, leaf)
+                R(13, 8, 1, 1, leaf)
+                R(11, 10, 1, 1, leaf)
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             switch (root.materialId) {
             case 0x200: drawStick();        break
@@ -706,6 +732,7 @@ Item {
             case 0x218: drawRottenFlesh();    break // t299 腐肉（杀蹒跚者掉落）
             case 0x219: drawString();         break // t299 线（杀蜘蛛掉落）
             case 0x21A: drawArrow();          break // t304 箭（弓弹药；铁锭+木棒+线合成 4 件）
+            case 0x21B: drawSapling();        break // t305 树苗物品（破叶掉落；种植 → 树）
             default:    drawStick();        break
             }
         }
