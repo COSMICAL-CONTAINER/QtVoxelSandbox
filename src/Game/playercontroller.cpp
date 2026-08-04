@@ -1945,7 +1945,7 @@ void PlayerController::moveAxis(int axis, float amount)
             //   moveAxis(0/2)+extrudeEmbedded 横向推出（用户「向外挤 not 向上」）。被完全包裹（无水平出路）则由
             //   t160 窒息扣血兜底。原 t161「据 inflated maxSurf 全不 snap」会连地面托举一起失效 → 穿地坠虚空。
             if (hasMax) m_pos.setY(maxSurf + eps); // 站到可着陆最高面（地面顶，非沙顶）
-            // else 纯 bury：不 snap Y（留格内，待横向推出）
+            else m_pos.setY(pyBefore); // t258：纯 bury（无 landable 面）→ 回退本次重力位移，防逐 tick 下沉穿地 / 坠出基岩（被埋锁定：Y 不动，水平靠 extrudeEmbedded 挤出 / 全包裹则不动，只能挖出脱困；t160 窒息扣血兜底）
         }
         m_vel.setY(0); break;
     case 2:
