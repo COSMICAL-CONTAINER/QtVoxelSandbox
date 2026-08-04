@@ -187,6 +187,9 @@ private:
     void buildPermutation();  // 由 seed 填 512 置换表（线性同余，可复现）
     double noise2(double x, double z) const;
     double fbm(double x, double z) const;
+    // t278 3D Perlin 噪声（洞穴 carve 用）。复用 buildPermutation 的 m_perm[512] 表（与 noise2 同源）；
+    //   grad3 三维梯度。纯函数于 seed + (x,y,z) → 同 seed 同 3D 噪声场（PLAN §2-K）。范围 ~[-1,1]。
+    double noise3(double x, double y, double z) const;
     // t274 群系枚举（plains/hills/desert 三分；机制等价 MC 1.0 大尺度群系，名称为通用描述词，§9 合规）。
     //   worldgen 内部用：heightAt 据群系选振幅、placeTallGrass 据群系选密度、isDesert 收口到 biomeAt==Desert。
     //   纯函数于 seed（biomeAt 经 fBm）→ 同 seed 同群系图（PLAN §2-K 确定性）。私有嵌套枚举（worldgen 细节，
@@ -221,6 +224,14 @@ private:
     //   按 hashColumn(seed,x,z) 密度筛选在 grass 顶上方一格（surfaceY+1）置 TallGrass（仅写空气格 → 不覆盖
     //   树干 / 树叶 / 水）。同 seed → 同草丛分布；禁用任何运行期随机源。机制等价 MC 平原草丛点缀。
     void placeTallGrass();
+    // t278 洞穴隧道生成（PLAN §2-K 确定性）：terrain + 矿石散布之后、填水之前 carve 地下洞穴。两套叠加：
+    //   (a) 3D Perlin 阈值洞（两路偏移 noise3 同时高于阈值 → 蜿蜒管状洞穴，机制等价 MC 1.0 Perlin 洞穴）；
+    //   (b) Perlin worm 隧道 + 分叉（确定性起点、沿 noise 扰动方向逐球 carve、定期分叉 → 连通隧道网 + Y/十
+    //       字路口）。范围 y ∈ (bedrockTop, h-4]：不动基岩底、保留表面草/土 + ≥1 格石顶 → 洞穴封闭地下（spec
+    //       「内部黑暗」：天光 flood-fill 不穿实体 → 洞内无天光；recomputeLightField 在本 pass 之后跑）。
+    //   纯函数于 seed（noise3 / hashColumn / hashVoxel）→ 同 seed 同洞穴分布。挖走 stone/dirt/ore，暴露矿石
+    //   于洞壁（为 t279 洞穴裸露矿物铺路）；不挖 air/bedrock/water。
+    void carveCaves();
     // t151 真光场**全量**重算（PLAN §2-H / §M）：per-voxel BFS flood-fill 天光（自顶，sky=15）+ 火把方块光
     //   （radius14，block=14），衰减 1、仅穿过非遮光格、取 max。**仅 worldgen 末调一次**（全图 147k 体素 ×2
     //   通道约数十 ms，玩家编辑频率下不可接受）。玩家编辑走增量 recomputeLightAround()（t154）。

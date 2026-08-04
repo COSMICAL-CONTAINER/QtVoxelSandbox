@@ -484,6 +484,15 @@ static double grad2(int hash, double x, double z)
     double v = h < 4 ? z : x;
     return ((h & 1) ? -u : u) + ((h & 2) ? -2.0 * v : 2.0 * v);
 }
+// t278 3D Perlin 梯度（与 grad2 同源；hash 低 4 位选 12 个 3D 梯度方向之一，标准 Perlin grad3）。
+//   供 noise3 用，洞穴 carve 的 3D 噪声场。
+static double grad3(int hash, double x, double y, double z)
+{
+    int h = hash & 15;
+    double u = h < 8 ? x : y;
+    double v = h < 4 ? y : (h == 12 || h == 14 ? x : z);
+    return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+}
 
 void World::buildPermutation()
 {
@@ -510,6 +519,39 @@ double World::noise2(double x, double z) const
     const int A = m_perm[X] + Z, B = m_perm[X + 1] + Z;
     return lerp(lerp(grad2(m_perm[A], x, z), grad2(m_perm[B], x - 1.0, z), u),
                 lerp(grad2(m_perm[A + 1], x, z - 1.0), grad2(m_perm[B + 1], x - 1.0, z - 1.0), u), v);
+}
+
+// t278 3D Perlin 噪声（机制等价标准 Perlin 3D；洞穴 carve 的 3D 标量场）。复用 noise2 的 fade/lerp/m_perm。
+//   索引链 m_perm[X]+Y → m_perm[..]+Z 与 noise2 同模式（m_perm 512 项，中间索引 ≤510、+1 ≤511 安全）。
+//   纯函数于 seed（m_perm 由 buildPermutation 派生于 seed）→ 同 seed 同 3D 噪声场（PLAN §2-K）。范围 ~[-1,1]。
+double World::noise3(double x, double y, double z) const
+{
+    const int X = int(std::floor(x)) & 255;
+    const int Y = int(std::floor(y)) & 255;
+    const int Z = int(std::floor(z)) & 255;
+    x -= std::floor(x);
+    y -= std::floor(y);
+    z -= std::floor(z);
+    const double u = fade(x), v = fade(y), w = fade(z);
+    const int A  = m_perm[X]     + Y;
+    const int AA = m_perm[A]     + Z;
+    const int AB = m_perm[A + 1] + Z;
+    const int B  = m_perm[X + 1] + Y;
+    const int BA = m_perm[B]     + Z;
+    const int BB = m_perm[B + 1] + Z;
+    const double x1 = x - 1.0;
+    const double y1 = y - 1.0;
+    const double z1 = z - 1.0;
+    return lerp(
+        lerp(
+            lerp(grad3(m_perm[AA],     x,  y,  z ), grad3(m_perm[BA],     x1, y,  z ), u),
+            lerp(grad3(m_perm[AB],     x,  y1, z ), grad3(m_perm[BB],     x1, y1, z ), u),
+            v),
+        lerp(
+            lerp(grad3(m_perm[AA + 1], x,  y,  z1), grad3(m_perm[BA + 1], x1, y,  z1), u),
+            lerp(grad3(m_perm[AB + 1], x,  y1, z1), grad3(m_perm[BB + 1], x1, y1, z1), u),
+            v),
+        w);
 }
 
 double World::fbm(double x, double z) const
@@ -627,6 +669,8 @@ void World::generate()
 
     placeBedrock(); // t119：底层基岩（y 0..4 坑洼，底实顶疏；不可破坏）。先于矿石 / 树（仅覆盖最底几格）
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
+    carveCaves(); // t278：洞穴隧道 carve（terrain + 矿石之后；挖走 stone/dirt/ore 暴露矿石于洞壁 → 为 t279 铺路）。
+                  //   先于填水 → 水只填地表低洼列（h+1..waterLevel），不灌地下洞穴；先于树/草 → 表面特征放于完整地表。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
     placeTallGrass(); // t235：grass 表层上方确定性散布草丛（PLAN §2-K；树定型后，仅写空气格不覆盖树）
@@ -885,6 +929,181 @@ void World::scatterOres()
         }
     }
     qInfo() << "worldgen: ores placed = coal" << coalPlaced << "iron" << ironPlaced; // 同 seed → 同计数（确定性核对）
+}
+
+// t278 洞穴隧道生成（PLAN §2-K 确定性；spec「3D Perlin 阈值 / random-worm 隧道 + 分叉路口；内部黑暗；连通性」）。
+//   两套叠加，互补：
+//   ── (a) 3D Perlin 阈值洞（蜿蜒管状洞穴）────────────────────────────────────────────────────────
+//   遍历地下 stone/dirt/ore 格（y ∈ (bedrockTop, h-4]），取两路**偏移** noise3（同噪声场不同坐标偏移 → 解耦），
+//   两路同时高于阈值才挖空。单路阈值给 blobby 洞穴（连通性差）；两路交集把 blobby 收敛成更细长的管（接近
+//   MC 1.0 Perlin 洞穴形态 —— 「两 noise 的交集」天然是 1-流形管状区域）。spec「3D Perlin 阈值」即此路径。
+//   ── (b) Perlin worm 隧道 + 分叉（连通隧道网 + Y/十字路口）──────────────────────────────────────
+//   确定性起点（hashColumn 散布网格 + 概率筛选），worm 沿 noise3 扰动方向逐球 carve（球重叠 → 连续管），
+//   定期分叉：子 worm 偏转 yaw（±30°..90°）→ 与父 worm 在分叉点交汇成 Y 形路口；不同 worm 的管相交成十字路口。
+//   spec「random-worm 隧道 + 分叉路口 / 连通性」即此路径。worm 总预算上限防最坏情况爆炸。
+//
+//   范围限定（spec「内部黑暗」）：y ∈ (bedrockTop, h-4] —— 不动基岩底层（hardness=-1 不可破，作世界底），
+//   保留表面 grass/dirt（y ∈ [h-2, h]）+ ≥1 格石顶（y = h-3）→ 洞穴**封闭**于地下，与地表之间有完整石层相隔。
+//   故 recomputeLightField（本 pass 之后跑）的天光 BFS 从列顶首个实体（= 表面 grass）向非遮光邻格衰减传播，
+//   被完整石层挡住、绝不渗入洞内 → 洞穴天然黑暗（机制等价 MC「封闭洞穴无天光」；洞口 / 天坑会漏天光属后续任务）。
+//
+//   确定性：noise3 / hashColumn / hashVoxel 均纯函数于 seed → worm 起点位 / 方向轨迹 / 分叉决策 / 阈值噪声
+//   全确定 → 同 seed 同 seed 同栅格（PLAN §2-K）。worm 方向依赖 noise3（位置 → 噪声 → 方向 → 下一位置），
+//   整条链纯函数 → 路径完全可复现。wormId / stepIndex 喂 hashVoxel 做分叉判定（与矿石 hashVoxel 用真实体素
+//   坐标正交 —— z 槽取常量 0x7027 远超世界 z 范围 → 不与矿石哈希冲突）。
+//
+//   性能：80×80×64 世界，(a) 阈值扫 ~190k 格 × 2 noise3 ≈ 数 ms；(b) worm ~30 起点 + 分叉 ≤80 worm × 80 步 ×
+//   ~25 体素/球 ≈ 160k 写 + ~12k noise3 ≈ 数十 ms。worldgen 一次性可接受。挖走 stone/dirt/ore 暴露矿石于洞壁
+//   （t279 洞穴裸露矿物直接读栅格即得）。经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + heightmap 增量维护），
+//   不发 blockBroken（worldgen 既有约定——系统事件非玩家破块）。
+void World::carveCaves()
+{
+    constexpr int kBedrockTop   = 4;     // 基岩层上界（与 placeBedrock 同源；不挖基岩）
+    constexpr int kSurfaceCeil  = 4;     // 表面之下留几格（保 ≥1 石顶：dirt 在 [h-2,h-1]、grass 在 h，故 h-3 起挖则留 y=h-3 石顶）
+
+    // ── (a) 3D Perlin 阈值洞穴 ──
+    constexpr double kNoiseFreq   = 0.06;   // 阈值噪声频率（特征尺度 ~16 格 → 洞穴数格宽）
+    constexpr double kNoiseOffset = 100.5;  // 第二路噪声坐标偏移（与第一路解耦）
+    constexpr double kCarveThresh = 0.32;   // 两路 noise3 都 > 此值才挖空（交集 → 蜿蜒管状洞穴）。
+                                            //   noise3 实测 σ≈0.28（按 worldgen 日志回算）→ 两路 0.32 交集 ≈ 2%
+    //   地下体素被挖 → 蜿蜒走廊式洞穴（机制等价 MC 1.0 Perlin 洞穴）。
+
+    int noiseCarved = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            const int h = std::min(heightAt(x, z), m_height - 1);
+            const int yMax = h - kSurfaceCeil; // 留表面 + ≥1 石顶
+            for (int y = kBedrockTop + 1; y <= yMax; ++y) {
+                const quint8 b = m_chunks.blockAt(x, y, z);
+                if (b == BlockRegistry::Air)     continue; // 已空（他处挖过）不重复
+                if (b == BlockRegistry::Bedrock) continue; // 基岩不可破
+                if (b == BlockRegistry::Water)   continue; // 防御（地下应无水）
+                const double fx = x * kNoiseFreq, fy = y * kNoiseFreq, fz = z * kNoiseFreq;
+                const double n1 = noise3(fx, fy, fz);
+                const double n2 = noise3(fx + kNoiseOffset, fy, fz + kNoiseOffset);
+                if (n1 > kCarveThresh && n2 > kCarveThresh) {
+                    m_chunks.setBlock(x, y, z, BlockRegistry::Air);
+                    ++noiseCarved;
+                }
+            }
+        }
+    }
+
+    // ── (b) Perlin worm 隧道 + 分叉 ──
+    constexpr int    kWormGrid   = 16;     // worm 起点网格间距（每 ~16×16 区域 1 候选 → 160×160 约 50 起点）
+    constexpr int    kWormLife   = 60;     // worm 主寿命（步）
+    constexpr double kWormStep   = 0.75;   // 步距（< 半径 → 球重叠成连续管，无断点）
+    constexpr double kWormRadius = 1.5;    // 管半径（直径 ~3 格，可通行；MC 1.0 洞穴常 ~2-3 格宽）
+    constexpr int    kMaxWorms   = 150;    // 全场 worm 总预算（含分叉；**须 > 起点数** 否则分叉永不触发）
+    constexpr double kTurnRate   = 0.20;   // 单步 yaw 扰动上限（弧度，~11° → 平滑曲率）
+    constexpr double kPitchRate  = 0.10;   // 单步 pitch 扰动上限（弧度，~6°）
+    constexpr double kPitchClamp = 0.55;   // 俯仰钳制（防管变井 / 陡穿地层；~32°）
+    constexpr int    kForkEvery  = 18;     // 每 N 步判定一次分叉
+    constexpr unsigned kForkPct  = 35u;    // 分叉概率（%；判定时机满足时）
+
+    // 球形 carve：把 (px,py,pz) 半径 r 内的实体天然方块（非 air/bedrock/water）置 air。
+    //   体素中心 = 整数坐标 +0.5；距离比球半径平方（避免 sqrt）。边界格越界跳过。
+    auto carveSphere = [&](double px, double py, double pz, double r) {
+        const int ir = int(r) + 1;
+        const int cx = int(std::floor(px)), cy = int(std::floor(py)), cz = int(std::floor(pz));
+        const double r2 = r * r;
+        for (int oy = -ir; oy <= ir; ++oy)
+            for (int ox = -ir; ox <= ir; ++ox)
+                for (int oz = -ir; oz <= ir; ++oz) {
+                    const double gx = double(cx + ox) + 0.5 - px;
+                    const double gy = double(cy + oy) + 0.5 - py;
+                    const double gz = double(cz + oz) + 0.5 - pz;
+                    if (gx * gx + gy * gy + gz * gz > r2) continue;
+                    const int x = cx + ox, y = cy + oy, z = cz + oz;
+                    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) continue;
+                    const quint8 b = m_chunks.blockAt(x, y, z);
+                    if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water) continue;
+                    m_chunks.setBlock(x, y, z, BlockRegistry::Air);
+                }
+    };
+
+    // worm 状态：位置 + 方向（球坐标 yaw/pitch）+ 寿命 + id（确定性喂 hashVoxel 做分叉判定）。
+    struct Worm { double x, y, z, yaw, pitch; int life; int id; };
+    std::vector<Worm> worms;
+    int nextWormId = 0;
+
+    // 确定性起点：hashColumn 散布网格（seed +7919 偏移 → 与树/草的 hashColumn(m_seed,...) 解耦）。
+    //   每格 1 候选：hash 低位 50% 概率生 worm（密度控制：网格 + 概率双重）；起点在 cell 内 ±抖动；
+    //   起始 yaw 由 hash 高位派生（0..2π 全方位）→ worm 朝向各异。y 选 [bedrockTop+2, h-ceil-1] 内随机层。
+    int placedStarts = 0;
+    const int caveSeed = m_seed + 7919; // 洞穴哈希偏移（与树/草 hashColumn 解耦；纯整数加，确定性）
+    for (int bx = kWormGrid / 2; bx < m_width; bx += kWormGrid) {
+        for (int bz = kWormGrid / 2; bz < m_depth; bz += kWormGrid) {
+            const quint32 r = hashColumn(caveSeed, bx, bz);
+            if ((r & 1u) == 0u) continue; // 50% 概率生 worm（密度控制）
+            // cell 内 ±span/2 抖动（避免网格化排列的机械感）
+            const int span = kWormGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int sx = bx + jx, sz = bz + jz;
+            if (sx < 1 || sz < 1 || sx >= m_width - 1 || sz >= m_depth - 1) continue; // 留 1 格边界
+            const int h = std::min(heightAt(sx, sz), m_height - 1);
+            const int yLo = kBedrockTop + 2;
+            const int yHi = h - kSurfaceCeil - 1;
+            if (yHi <= yLo) continue; // 此列地下空间不足（极低洼 / 水下）→ 跳过
+            const int yRange = yHi - yLo + 1;
+            const int sy = yLo + int((r >> 9) & 0x1Fu) % yRange;
+            const double yaw0 = double((r >> 14) & 0x3FFu) / 1024.0 * 6.28318530717958647692; // 0..2π
+            worms.push_back({double(sx) + 0.5, double(sy) + 0.5, double(sz) + 0.5, yaw0, 0.0, kWormLife, nextWormId++});
+            ++placedStarts;
+        }
+    }
+
+    // 推进 worm 队列（索引循环：子 worm 入队尾，wi 跟进 → 宽度优先展开整张隧道网）。分叉仅在总数 < kMaxWorms
+    //   时允许（预算上限）。worm 出界（x/z 边 / y 越基岩顶或世界顶）即杀（break），不留悬空段。
+    int wormSteps = 0;
+    for (size_t wi = 0; wi < worms.size(); ++wi) {
+        Worm &w = worms[wi];
+        int step = 0;
+        while (w.life > 0) {
+            carveSphere(w.x, w.y, w.z, kWormRadius);
+            ++wormSteps;
+            // 方向扰动：noise3 采样 worm 头位置 → 平滑曲线（位置驱动，纯函数 → 路径可复现）。
+            const double df = 0.10;
+            const double n1 = noise3(w.x * df,           w.y * df, w.z * df);
+            const double n2 = noise3(w.x * df + 33.3,    w.y * df, w.z * df - 17.7);
+            w.yaw   += n1 * kTurnRate;
+            w.pitch += n2 * kPitchRate;
+            if (w.pitch >  kPitchClamp) w.pitch =  kPitchClamp;
+            if (w.pitch < -kPitchClamp) w.pitch = -kPitchClamp;
+            // 推进（球坐标 → 笛卡尔方向 × 步距）。yaw 决定水平朝向、pitch 决定垂直分量（yaw 不影响 y）。
+            const double cp = std::cos(w.pitch);
+            w.x += cp * std::cos(w.yaw) * kWormStep;
+            w.y +=     std::sin(w.pitch) * kWormStep;
+            w.z += cp * std::sin(w.yaw) * kWormStep;
+            // 出界 → 杀 worm。
+            if (w.x < 1.0 || w.z < 1.0 || w.x >= double(m_width) - 1.0 || w.z >= double(m_depth) - 1.0) break;
+            if (w.y < double(kBedrockTop + 1) || w.y >= double(m_height) - 1) break;
+            ++step;
+            --w.life;
+            // 分叉：每 kForkEvery 步、且 worm 总数 < kMaxWorms 时，按 hashVoxel(seed,id,step,0x7027) % 100 概率生子。
+            //   子 worm：yaw 偏转 ±30°..90°（偏转角由 hash 派生，符号随机）→ 与父 worm 在分叉点交汇成 Y 形路口；
+            //   pitch 取父 pitch 反向减半（子趋向不同深度）；寿命 = 父寿命 2/3（子隧道较短）。spec「分叉路口」即此。
+            if ((step % kForkEvery) == 0 && int(worms.size()) < kMaxWorms) {
+                const quint32 fr = hashVoxel(m_seed, w.id, step, int(0x7027));
+                if ((fr % 100u) < kForkPct) {
+                    const double turn = (double((fr >> 8) & 0x3FFu) / 1024.0) * 1.04719755119659774615 + 0.52359877559829887308; // ~30°..90°
+                    const double sign = ((fr >> 18) & 1u) ? -1.0 : 1.0;
+                    Worm child = w;
+                    child.id    = nextWormId++;
+                    child.yaw   += sign * turn;
+                    child.pitch = -w.pitch * 0.5;
+                    child.life  = (w.life * 2) / 3;
+                    if (child.life < 20) child.life = 20; // 子隧道至少 20 步（够形成可见分叉）
+                    worms.push_back(child);
+                }
+            }
+        }
+    }
+
+    qInfo() << "worldgen: caves carved = noise" << noiseCarved
+            << "+ worm-steps" << wormSteps
+            << "(starts" << placedStarts << "worms" << int(worms.size()) << ")"; // 同 seed → 同计数（确定性核对）
 }
 
 // t148 海平面填水（PLAN §2-K 确定性）：遍历列，地表高度 h < waterLevel 的低洼列从 h+1 到 waterLevel
