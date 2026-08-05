@@ -328,10 +328,20 @@ Item {
                                 // 拾取到光标（创造调色板=无限源，不清减调色板）。方块满栈 64；工具不可堆叠 →
                                 // count=1（t33）。setHeldBlock 已对工具段 id 校验合法（isValidItemId 含工具段）。
                                 onTapped: {
+                                    // t318：切换式归还（修 t292 遗留「点原格又拿起该格」）。创造调色板=无限源，
+                                    //   点「当前手持物同格（原格）」= 放回（heldBlock===modelData → discardHeldRequested，
+                                    //   凭空消失回虚空，创造不丢世界，t292）；再点同格 = 重新拿起。旧版无脑 dismiss+re-pick
+                                    //   → 点原格 dismiss 后立刻赋同值（heldBlock 复原），用户观感「没归还、重复拾取」。
+                                    //   现 heldBlock===modelData 早退走归还，构成 true toggle（拿起→点原格归还→再点拿起）。
+                                    if (root.hotbar.heldBlock === modelData) {
+                                        root.discardHeldRequested()
+                                        return
+                                    }
                                     // t136/t292：换拿前先显式 dismiss 旧光标手持栈（防被下方赋值直接覆盖成「凭空消失」
                                     //   的隐性路径——显式走信号让宿主统一处理）。创造调色板=无限源，旧物 dismiss 即回
                                     //   虚空（setHeldBlock(0)，t292：不丢出到世界）；信号同线程直连，返回时 heldBlock 已为 0，
-                                    //   随后赋新值安全。空手（heldBlock===0）跳过。
+                                    //   随后赋新值安全。空手（heldBlock===0）跳过。异格（heldBlock!==modelData）走此分支 =
+                                    //   换拿（旧物回虚空 → 新物上手，MC 创造调色板语义）。
                                     if (root.hotbar.heldBlock !== 0) root.discardHeldRequested()
                                     root.hotbar.heldBlock = modelData
                                     // t174：count 走 maxStackSize（单一权威）—— 工具 1 / 桶 1（不可堆叠）/ 方块·材料 64。
