@@ -67,6 +67,12 @@ Item {
             //   与弓 / 剑同策略）。机制等价 MC 1.0 剪刀（shears）；名称 / 图标全原创（§9a 区隔不照搬 MC 资产）。
             //   剪刀特征：上下两个尖端 + 中央铆钉 + 底部两侧弹性弧（手指环），轮廓一眼可辨。
             if (root.toolType === 6) {
+                // t329 剪刀恒铁色（机制等价 MC 剪刀单一铁材质；ToolRegistry tier=1 仅记账不影响挖掘门槛 / 速度，
+                //   故配色不跟随 tier）。块作用域 const 影子覆盖外层 head/headDark/headLight（tier 着色）→ 整把
+                //   银白铁灰，而非木褐。与手持 / 掉落物 billboard 同源 ToolIcon 一致显铁色（剪刀无木柄、无 tier 变体）。
+                const head = "#d8d8e6"        // 铁银白（= tier 3 head 色）
+                const headDark = "#8a8a9a"    // 铁阴影
+                const headLight = "#f0f0fa"   // 铁高光
                 // 左刀刃（左上→右下对角，从尖端到枢轴）
                 R(3, 3, 2, 2, head)            // 左上尖端
                 R(5, 5, 2, 2, head)

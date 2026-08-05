@@ -1368,6 +1368,31 @@ Window {
                                  : "#8a5a2e"
                     }
                 }
+                // t329 剪刀（type=Shears）第一人称手持：剪刀无独立 3D 几何 → billboard ToolIcon 平图标
+                //   （同材料段手持路径：BillboardQuad + Canvas sourceItem + 抵消手 X 旋转 → billboard 世界朝向 =
+                //   相机朝向，+Z 恒指回相机）。剪刀恒铁色（ToolIcon toolType===6 内部强制铁灰，不跟随 tier），
+                //   与掉落物 / 背包槽图标一致；机制对齐 MC 第一人称剪刀平贴手心。alphaCutoff:0.5 + opacity:0.99
+                //   沿用 MaterialIcon 透明底 alpha-test 契约（Canvas 透明底不丢弃会被当不透明黑 → 图标坍成黑块）。
+                Model {
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 6
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    scale: Qt.vector3d(0.18, 0.18, 0.18)
+                    eulerRotation: Qt.vector3d(-(viewModelHand.baseTilt + viewModelHand.swingAngle), 0, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        alphaCutoff: 0.5
+                        opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                        baseColor: terrainLight(worldClock.skyLight)
+                        baseColorMap: Texture {
+                            flipV: false
+                            sourceItem: ToolIcon {
+                                toolType: 6
+                                width: 64; height: 64
+                            }
+                        }
+                    }
+                }
                 // t169 手持材料（木棒/煤/木炭/铁锭 等）：选中材料段槽（isMaterial(selectedItem)）时，手前显
                 //   该材料的平图标 billboard。机制对齐 MC（手持非方块物品=平图标贴脸相机）+ spec t169
                 //   「四类贴图都要有」覆盖材料段（①背包槽 MaterialIcon / ②本手持 / ③掉落物 BillboardQuad+
@@ -2234,6 +2259,30 @@ Window {
                             opacity: playerModel.bodyOpacity
                         }
                     }
+                    // t329 剪刀（type=Shears）第三人称手持：billboard ToolIcon 平图标（同手持火把第三人称路径：
+                    //   BillboardQuad + cullMode NoCulling 三相机模式均可见 + 随臂行走 / 挥动同步）。静止时臂本地
+                    //   +Z 指玩家身后 = 第三人称-后相机方向 → billboard 正对相机；NoCulling 让第三人称-前也见。
+                    //   剪刀恒铁色（ToolIcon toolType===6 内部强制，不跟随 tier）。opacity:0.99 强制透明通道。
+                    Model {
+                        visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
+                                 && hotbarVM.toolType(player.selectedItem) === 6
+                        geometry: BillboardQuad {}
+                        position: Qt.vector3d(0, -0.55, -0.30)
+                        scale: Qt.vector3d(0.30, 0.30, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            cullMode: Material.NoCulling   // 双面（第三人称-前见背面；剪刀近对称）
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                            baseColorMap: Texture {
+                                flipV: false
+                                sourceItem: ToolIcon {
+                                    toolType: 6
+                                    width: 64; height: 64
+                                }
+                            }
+                        }
+                    }
                 }
             }
             // 左腿枢轴（t45 走 / t65 蹲下膝盖弯曲）：枢轴位于左髋 (-0.125, 0.6, 0)，蹲下时髋随上半身
@@ -2618,6 +2667,30 @@ Window {
                                 return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
+                            }
+                        }
+                    }
+                    // t329 剪刀掉落物（type=Shears）：billboard ToolIcon 平图标（同材料段掉落路径：朝相机单面 +Z，
+                    //   eulerRotation 抵消 entRoot 自转 rotY → 世界旋转 = 相机旋转 → +Z 恒指回相机）。剪刀恒铁色
+                    //   （ToolIcon toolType===6 内部强制，不跟随 tier）。alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test
+                    //   契约（透明底不丢弃会被当不透明黑）；baseColor 乘 terrainLight 夜间变暗（同方块 / 材料段掉落物）。
+                    Model {
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 6
+                        geometry: BillboardQuad {}
+                        scale: Qt.vector3d(0.3, 0.3, 0.3)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y - entRoot.rotY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                            baseColor: terrainLight(worldClock.skyLight)
+                            baseColorMap: Texture {
+                                flipV: false
+                                sourceItem: ToolIcon {
+                                    toolType: 6
+                                    width: 64; height: 64
+                                }
                             }
                         }
                     }
