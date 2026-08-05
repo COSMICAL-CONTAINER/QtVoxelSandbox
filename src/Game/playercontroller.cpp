@@ -1,4 +1,5 @@
 #include "playercontroller.h"
+#include "playerstate.h" // t311 DeathCause 枚举（致死来源区分：Fall/Suffocation/Drowning/Starvation）
 #include "world.h"
 
 #include <QEvent>
@@ -24,7 +25,7 @@ void PlayerController::componentComplete()
     QQuickItem::componentComplete();
     if (!m_window && (m_window = window()))
         m_window->installEventFilter(this); // 拦截 Esc + 失焦
-    snapSpawnToGround(); // t137：世界就绪 → 贴地表（覆盖 kSpawnY=44 兜底，消除出生落差摔伤）
+    snapSpawnToGround(); // t137：世界就绪 → 贴地表（覆盖 kSpawnY=80 兜底，消除出生落差摔伤）
     m_peakY = m_pos.y(); // 掉落伤害基准：以脚底初始 Y 起（首帧不误判大落差；snap 已设则等价）
     m_clock.start();
     m_evtClock.start();
@@ -40,9 +41,9 @@ void PlayerController::setWorld(World *w)
 }
 
 // t137 出生贴地表：查出生列 (kSpawnX,kSpawnZ) 的 worldgen 地表高度 → 脚底 Y = h+1（站地表方块上方），
-//   同步 m_peakY 防误判落差。kSpawnY=44 是高于最高地表(~40)的兜底初值（防卡地形），但玩家从 44 摔到
-//   地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生落差。分别在
-//   componentComplete / setWorld / respawn 调，确保世界（width/height/seed）定稿后玩家始终贴地表。
+//   同步 m_peakY 防误判落差。kSpawnY=80 是高于最高地表(~71，t307 后 hills 顶)的兜底初值（防卡地形），
+//   但玩家从 80 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生落差。分别
+//   在 componentComplete / setWorld / respawn 调，确保世界（width/height/seed）定稿后玩家始终贴地表。
 //   无世界 → no-op（m_pos 保持 kSpawnY 兜底）。分层（PLAN §2）：只读 World::heightAt（worldgen 地表纯
 //   函数，同 generate() 填充用），不改栅格；Game 层向下读 World，无反向依赖。
 void PlayerController::snapSpawnToGround()
@@ -2517,7 +2518,7 @@ void PlayerController::step(qreal dt)
             //   floor(m_pos.y) 取水格 → 正确判中；无世界 → false 保守不抵消）。
             if (!feetInWater()) {
                 const int dmg = int(std::floor(fall - 3.0f));
-                if (dmg > 0) emit fallDamageTaken(dmg); // 呈现层 Connections 路由到 PlayerState.takeDamage
+                if (dmg > 0) emit fallDamageTaken(dmg, PlayerState::Fall); // t311 死因=高处坠落
             }
         }
         m_peakY = m_pos.y();
@@ -2535,7 +2536,7 @@ void PlayerController::step(qreal dt)
             if (m_suffocationTimer >= kSuffocationInterval) {
                 m_suffocationTimer -= kSuffocationInterval;
                 // fallDamageTaken(1) 经既有链 takeDamage→damaged→onDamaged 已驱动 HP 扣减 + 红屏闪 + 视角晃动（t67）。
-                emit fallDamageTaken(1);
+                emit fallDamageTaken(1, PlayerState::Suffocation); // t311 死因=窒息
             }
         } else {
             m_suffocationTimer = 0.0f;
@@ -2569,7 +2570,7 @@ void PlayerController::step(qreal dt)
                 m_drownTimer += float(dt);
                 if (m_drownTimer >= kDrownInterval) {
                     m_drownTimer -= kDrownInterval;
-                    emit fallDamageTaken(1);
+                    emit fallDamageTaken(1, PlayerState::Drowning); // t311 死因=溺水
                 }
             }
         } else {
@@ -2634,7 +2635,7 @@ void PlayerController::step(qreal dt)
             m_starveTimer += float(dt);
             if (m_starveTimer >= kStarveInterval) {
                 m_starveTimer -= kStarveInterval;
-                emit fallDamageTaken(1);
+                emit fallDamageTaken(1, PlayerState::Starvation); // t311 死因=饥饿
             }
         } else {
             m_starveTimer = 0.0f;

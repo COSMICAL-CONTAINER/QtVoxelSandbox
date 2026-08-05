@@ -106,7 +106,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   机制等价 MC 1.0 钻石矿需铁镐；t33 工具等级表 PickaxeIron tier=3）、dropId=0x212（钻石材料段，RecipeRegistry::DiamondId；
     //   Core 不依赖 Game 故用字面量 0x212）、dropCount=1、maxStack=64。各面贴图=diamond_ore(37)（石头底 + 青白菱斑晶体，
     //   原创自绘 §9a）。音色归 GroupStone（石质，同 coal/iron 矿石）。worldgen 高度分层散布于深层 y∈[5,16]（煤浅/铁中/钻石深）。
-    /* diamond_ore   */ {int(BlockRegistry::DiamondOre),            37, 37, 37, 37, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,  0x212,                              1, 64, "diamond_ore",   "钻石矿石"}, // 各面=diamond_ore(37)（t279）；散布于 stone 深层 y∈[5,16]；需铁镐(minTier3)；掉钻石材料(0x212)
+    /* diamond_ore   */ {int(BlockRegistry::DiamondOre),            37, 37, 37, 37, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,  0x212,                              1, 64, "diamond_ore",   "钻石矿石"}, // 各面=diamond_ore(37)（t279）；散布于 stone 深层 y∈[5,40]（t308：16→40）；需铁镐(minTier3)；掉钻石材料(0x212)
     // ── t300 羊毛方块（Wool）：机制等价 MC 1.0 羊毛（wool）。整立方 opaque（solid=true / ShapeFull —— 走 mesher
     //   整立方面路径，**非**异形，与 chest/farmland 同走段后整立方路径）、hardness=0.8（同 MC 1.0 羊毛量级）、
     //   toolType=Shears（剪刀给速度加成；requiresTool=false → 空手也掉落，仅速度受剪刀影响）、dropId=自身
@@ -123,6 +123,23 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   玩家持树苗物品右键草地/泥土种植（playercontroller useBlock 分支，同种子种植模式）；WorldClock tick 推进成长
     //   （world.tickSaplingGrowth）。**不**进方块创造调色板（树苗经物品种植；创造取树苗**物品**便于测试，见 creativeMaterials）。
     /* sapling      */ {int(BlockRegistry::Sapling),                 39, 39, 39, 39, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, 0x21B,                              1, 64, "sapling",       "橡树树苗"},
+    // ── t308 铜矿（CopperOre）：机制等价 MC 1.0 铜矿（嵌于 stone 浅中层、需石镐采掘、掉铜原矿→熔炉烧铜锭）。整立方 opaque
+    //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 coal/iron/diamond 矿石同族）、hardness=3.0
+    //   （同族量级，需镐）、toolType=Pickaxe、requiresTool=true、**minToolTier=2**（**需石镐**才掉落 —— 木镐挖了不掉落，
+    //   机制等价 MC 铜矿需石镐；同 iron 矿石门槛）、dropId=0x21C（**铜原矿**材料段，RecipeRegistry::CopperOreDropId；
+    //   Core 不依赖 Game 故用字面量 0x21C —— 掉**原矿**非锭，机制等价 MC 1.0「铜/铁/金矿采下为原矿，须熔炉冶炼成锭」，
+    //   区别于钻石矿直接掉钻石）、dropCount=1、maxStack=64。各面贴图=copper_ore(40)（石头底 + 橙铜斑 + 少量孔雀绿锈）。
+    //   音色归 GroupStone（石质，同 coal/iron 矿石）。worldgen 高度分层散布于浅中层 y∈[5,45]（金属族中最浅、最常见；
+    //   spec「铜铁金按序更稀少」→ 铜最常见）。
+    /* copper_ore   */ {int(BlockRegistry::CopperOre),                40, 40, 40, 40, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 2, true,  0x21C,                              1, 64, "copper_ore",   "铜矿石"},
+    // ── t308 金矿（GoldOre）：机制等价 MC 1.0 金矿（嵌于 stone 深层、需铁镐采掘、掉金原矿→熔炉烧金锭）。整立方 opaque
+    //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 coal/iron/diamond/copper 矿石同族）、
+    //   hardness=3.0（同族量级，需镐）、toolType=Pickaxe、requiresTool=true、**minToolTier=3**（**需铁镐**才掉落 ——
+    //   木 / 石镐挖了不掉落，机制等价 MC 金矿需铁镐；同 diamond 矿石门槛）、dropId=0x21E（**金原矿**材料段，
+    //   RecipeRegistry::GoldOreDropId；Core 不依赖 Game 故用字面量 0x21E —— 掉**原矿**非锭，机制等价 MC 1.0
+    //   「金矿采下为原矿，须熔炉冶炼成金锭」）、dropCount=1、maxStack=64。各面贴图=gold_ore(41)（石头底 + 金黄斑簇）。
+    //   音色归 GroupStone（石质）。worldgen 高度分层散布于深层 y∈[5,25]（金属族中最深、最稀有；spec「铜铁金按序更稀少」→ 金最稀有）。
+    /* gold_ore     */ {int(BlockRegistry::GoldOre),                  41, 41, 41, 41, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,  0x21E,                              1, 64, "gold_ore",     "金矿石"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -423,6 +440,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
 {
     switch (blockId) {
     case Stone: case Cobble: case Furnace: case CoalOre: case IronOre: case DiamondOre:
+    case CopperOre: case GoldOre: // t308 铜/金矿石 → 石质音色（同 coal/iron/diamond 矿石族）
         return GroupStone;
     case Log: case Planks: case CraftingTable:
     case WoodSlab: case WoodStairs: case WoodFence:

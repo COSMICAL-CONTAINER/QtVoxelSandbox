@@ -429,7 +429,9 @@ signals:
     // 转发到 ItemEntityManager.spawnItem 生成实体。分层（PLAN §2）：Game/Physics 层发语义事件，
     // 呈现层 / ViewModel 只消费（同 blockBroken→粒子）。
     void spawnItem(int x, int y, int z, int blockId, int count);
-    void fallDamageTaken(int hp); // 生存掉落伤害（t22）：着地结算，正值才发；呈现层路由到 PlayerState（t160 窒息 / t202 溺水复用此路径）
+    // t311 cause=PlayerState::DeathCause 枚举值，区分致死来源（Fall/Suffocation/Drowning/Starvation）供死因记录。
+    //   机制同 t22：生存伤害结算，正值才发；呈现层路由到 PlayerState.takeDamage(hp, cause)。
+    void fallDamageTaken(int hp, int cause);
     // t238 饥饿回血（仅 Survival，饱腹态）：饥饿充足（>= kRegenHungerThreshold）且未满血时，每
     //   kHungerRegenInterval 秒发本信号携 1HP → 呈现层 Connections 路由到 PlayerState.heal（与 fallDamageTaken
     //   → takeDamage 反向配对：扣血走 fallDamageTaken、回血走 healed；同 airUpdated→setAir 模式）。
@@ -622,10 +624,10 @@ private:
     // 距离从玩家 AABB 中心（脚底 + 半高）3D 起算，阈值 kPickupDist；从后往前扫便于 erase。
     void pickupScan();
     // t137 出生贴地表：查出生列 (kSpawnX,kSpawnZ) 的 worldgen 地表高度 → 把脚底 Y 设为 h+1（站地表方块
-    //   上方）+ 同步 m_peakY 防误判落差。kSpawnY=44 是高于最高地表(~40)的兜底初值（防卡地形），但玩家从
-    //   44 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生落差。分别在
-    //   componentComplete / setWorld / respawn 调，确保世界（width/height/seed）定稿后玩家始终贴地表。
-    //   无世界 → no-op（m_pos 保持 kSpawnY 兜底）。只读 World::heightAt（向下依赖，不改栅格）。
+    //   上方）+ 同步 m_peakY 防误判落差。kSpawnY=80 是高于最高地表(~71，t307 后 hills 顶)的兜底初值（防
+    //   卡地形），但玩家从 80 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生
+    //   落差。分别在 componentComplete / setWorld / respawn 调，确保世界（width/height/seed）定稿后玩家始终
+    //   贴地表。无世界 → no-op（m_pos 保持 kSpawnY 兜底）。只读 World::heightAt（向下依赖，不改栅格）。
     void snapSpawnToGround();
 
     World *m_world = nullptr;
@@ -649,8 +651,10 @@ private:
     // t276：出生点跟随大世界网格居中——世界边长 = worldChunksPerSide×16（默认 10×16=160）→ 居中 = 80。
     //   X/Z 取「边长/2」使玩家落在世界中心而非贴角（与 Main.qml worldChunksPerSide 单一权威对齐；改网格
     //   尺寸时同步改此处）。Y 不随边长变（地表高度由 heightAt 决定，kSpawnY 仅兜底）。
+    // t307：地表抬高到 ~64（hills 顶 ~71）→ 出生兜底 Y 44→80（仍高于最高地表，玩家落 / 浮于地表之上不卡
+    //   地形；snapSpawnToGround 在世界就绪后贴真实地表，兜底仅在无世界时生效）。
     static constexpr float kSpawnX = 80.0f; // t276：大世界(160×160)居中（原 40 = 5×5/80×80 中心）
-    static constexpr float kSpawnY = 44.0f;
+    static constexpr float kSpawnY = 80.0f; // t307：地表 ~64/hills 顶 ~71 → 兜底 80（原 44 < 新地表会卡地形）
     static constexpr float kSpawnZ = 80.0f; // t276：大世界(160×160)居中
     QVector3D m_pos{kSpawnX, kSpawnY, kSpawnZ}; // 脚底（= 出生点；respawn 传回此处，t78）
     QVector3D m_vel{0, 0, 0};

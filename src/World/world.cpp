@@ -16,7 +16,9 @@
 //   重定标同源取 24：约 11% 低洼列被淹（散布湖泊），出生列(8,8) h=27>24 保持陆地、近处低洼可见
 //   水域（同 seed 复算核对）。语义不变（海平面淹低洼），仅数值随地形重定标。
 //   全程纯函数于 seed + heightAt（fbm）→ 同 seed 同水域 / 沙滩分布（PLAN §2-K）。
-constexpr int kWaterLevel = 24;
+//   t307：地表基线 30→64（地表抬高至 ~64），水位同源抬高保持「低于基线 6 格」的相对几何不变
+//   （低洼 hills 仍见水 / 沙滩带，比例同 t162/t274）→ 24→58。同 seed 仍确定（fbm 纯函数）。
+constexpr int kWaterLevel = 58;
 
 World::World(QObject *parent) : QObject(parent)
 {
@@ -715,6 +717,13 @@ int World::heightAt(int x, int z) const
     //   主体无水；hills(23..37) 低洼列见水 / 沙滩带（waterLevel+1=25 阈值仍成立）。同 seed 确定
     //   （fbm + biomeAt 均纯函数，PLAN §2-K）。机制等价 MC 1.0 群系化高度图（plains 平 / hills 起伏 /
     //   desert 沙，spec 原意）。
+    // t307：地表整体抬高 —— 基线 30→64（用户「现地表 ~30，计划 ~64+，至少地面 64 格左右」），
+    //   振幅沿 t162/t274 用户已调定的平缓值（plains/forest 2、hills 7、desert 3）不动（避免回退用户
+    //   反复要求的「大草原平地」）。结果地表：plains/forest ~62..66、desert ~61..67、hills ~57..71
+    //   （地表中位 ~64，满足「地面 64 格」）。世界高度同步 64→128（Main.qml）留出树冠（地表+~10）+
+    //   天空间 / 飞行。水位 24→58 同源抬高（保持「低于基线 6 格」→ 低洼 hills 仍见水 / 沙滩带，
+    //   比例同 t162/t274）；沙滩带 / 树·矿石阈值（waterLevel+1=59）同步成立。同 seed 确定（fbm +
+    //   biomeAt 纯函数，PLAN §2-K）。
     const double n = fbm((x + m_seed) * 0.09, (z + m_seed) * 0.09); // [-1,1]
     double amp;
     switch (biomeAt(x, z)) {
@@ -724,7 +733,7 @@ int World::heightAt(int x, int z) const
         case Biome::Plains: // 草原（多数陆地）
         default:            amp = 2.0; break; // 极平（spec「大草原=平地」）
     }
-    const int h = int(std::lround(30.0 + n * amp));
+    const int h = int(std::lround(64.0 + n * amp));
     return std::max(0, h);
 }
 
@@ -817,7 +826,10 @@ void World::generate()
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
     carveCaves(); // t278：洞穴隧道 carve（terrain + 矿石之后；挖走 stone/dirt/ore 暴露矿石于洞壁 → 为 t279 铺路）。
                   //   先于填水 → 水只填地表低洼列（h+1..waterLevel），不灌地下洞穴；先于树/草 → 表面特征放于完整地表。
+    carveCaveEntrances(); // t309：地表连通洞穴入口（carveCaves 之后 → 竖井连通既有洞穴网络；先于地下水 → 竖井路径干净）。
+    placeUndergroundWaterPools(); // t309：封闭地下水池（carveCaves / 入口之后；先于填水 → 地表海平面与地下水各自独立）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
+    placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
     placeTallGrass(); // t235：grass 表层上方确定性散布草丛（PLAN §2-K；树定型后，仅写空气格不覆盖树）
     recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
@@ -864,11 +876,17 @@ quint32 World::hashVoxel(int seed, int x, int y, int z) const
 // 仅在合法边界且当前为空气时写入。树冠据此不覆盖主干/地形；跨 chunk 写入 + 脏标记由 ChunkManager 处理。
 void World::setVoxelIfAir(int x, int y, int z, quint8 id)
 {
+    setVoxelIfAir(x, y, z, id, quint8(0)); // 委托 5 参数版（state=0，常规方块默认 state）
+}
+
+// t310 带 state 版：草变种 worldgen 需写 state（矮/中/高）。其余语义同上（仅写空气格）。
+void World::setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state)
+{
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return; // 世界越界跳过（setVoxelIfAir 已含边界判，配合 placeTrees 的钳制双重保险）
     if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air)
         return;
-    m_chunks.setBlock(x, y, z, id);
+    m_chunks.setBlock(x, y, z, id, state);
 }
 
 // 单棵橡树：surfaceY=草顶 y；主干 trunkH 格原木(id5)从 surfaceY+1 起；顶部树叶(id7)树冠。
@@ -941,6 +959,9 @@ void World::placeTrees()
             if (surfaceY <= kWaterLevel + 1) continue;
             const Biome bio = biomeAt(x, z);
             if (bio == Biome::Desert) continue;  // t117 沙漠群系不种树（机制等价 MC 沙漠无树）
+            // t309：跳过非草顶列（地表湖水面 / 洞穴入口竖井顶等已把草替换 → 不种树；机制等价 MC 树仅生于草地）。
+            //   读栅格当前方块（heightAt 是 worldgen 高度、不含 t309 改动）→ 湖列水面 / 洞口 air 皆被本守卫拦截。
+            if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::Grass) continue;
 
             // t306 群系分流密度：forest 密闭 / plains 稀疏 / hills 零星。
             const unsigned densityPct = (bio == Biome::Forest) ? unsigned(kForestTreePct)
@@ -985,12 +1006,22 @@ void World::placeTrees()
 //   t274/t306 群系分流密度（spec「大草原=平地+多草丛」「森林+草原」）：plains 草丛密集（40%，草原主体观感）、
 //   forest 适中（18%，林下草地但树干/树冠占位 + 遮荫 → 比草原稀）、hills 适中（12%，山地草丛稀疏留出石 / 林
 //   裸露感）、desert 无（biomeAt==Desert 已跳过）。纯函数于 seed + biomeAt → 同 seed 同分布。
+//   t310 草变种（矮/中/高）：密度筛选后用**独立哈希位段** (r>>16)%100 选变种（与密度位段 r%100 解耦 → 密度与
+//   变种分布互不污染），各群系变种配比不同——plains 以矮/中为主（典型草地）、forest 林下多中/高草（茂盛下木）、
+//   hills 以矮草为主（裸露稀疏）。高草(2 格)需其上一格为空气（顶点延伸进上格）；被占则降级中草避免穿透实块。
 void World::placeTallGrass()
 {
     // t274/t306 群系密度表（% of grass 列生草丛）：plains 远高于 forest/hills（spec「多草丛」聚焦草原）。
     constexpr int kPlainsGrassPct = 40; // 草原密集（spec 核心：「大草原=平地+多草丛」）
     constexpr int kForestGrassPct = 18; // 森林适中（林下草地，树干/树冠占位 + 遮荫 → 比草原稀）
     constexpr int kHillsGrassPct  = 12; // 山地稀疏（裸岩 / 林感）
+
+    // t310 各群系草变种配比（矮 / 中 / 高，% ；累积阈值见下方 vr 判定）。plains 矮/中为主、forest 林下茂盛多
+    //   中/高、hills 矮草为主（裸岩稀疏）。机制等价 MC 群系草高分化（草原短草 / 森林高草）。
+    struct VarMix { int shortPct, mediumPct; }; // 高草 = 100 - short - medium 兜底
+    constexpr VarMix kPlainsMix = { 55, 35 }; // plains：55% 矮 / 35% 中 / 10% 高
+    constexpr VarMix kForestMix = { 20, 40 }; // forest：20% 矮 / 40% 中 / 40% 高（林下茂盛）
+    constexpr VarMix kHillsMix  = { 65, 25 }; // hills：65% 矮 / 25% 中 / 10% 高
 
     int placed = 0;
     int plainsCols = 0, hillsCols = 0, forestCols = 0;
@@ -1001,6 +1032,8 @@ void World::placeTallGrass()
             if (surfaceY <= kWaterLevel + 1) continue;
             const Biome bio = biomeAt(x, z);
             if (bio == Biome::Desert) continue; // t117/t274 沙漠群系不生草丛（机制等价 MC 沙漠无草）
+            // t309：跳过非草顶列（地表湖 / 洞口顶把草替换 → 草丛不生于水面 / 洞口；机制等价 MC 草丛仅生于草地）。
+            if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::Grass) continue;
 
             // t274/t306 群系分流密度：plains 密集 / forest 适中 / hills 稀疏。
             const unsigned densityPct = (bio == Biome::Plains) ? unsigned(kPlainsGrassPct)
@@ -1009,9 +1042,23 @@ void World::placeTallGrass()
             const quint32 r = hashColumn(m_seed, x, z);
             if (r % 100u >= densityPct) continue; // 密度筛选
 
+            // t310 草变种：独立哈希位段 (r>>16)%100 选矮/中/高（与密度位段 r%100 解耦）。
+            const VarMix mix = (bio == Biome::Plains) ? kPlainsMix
+                             : (bio == Biome::Forest) ? kForestMix
+                                                      : kHillsMix;
+            const unsigned vr = (r >> 16) % 100u;
+            quint8 variant = (vr < unsigned(mix.shortPct))                       ? quint8(BlockRegistry::TallGrassShort)
+                           : (vr < unsigned(mix.shortPct + mix.mediumPct))       ? quint8(BlockRegistry::TallGrassMedium)
+                                                                                 : quint8(BlockRegistry::TallGrassTall);
+
             const int y = surfaceY + 1; // grass 顶上方一格
             if (y >= m_height) continue; // 世界顶之上不放（防御）
-            setVoxelIfAir(x, y, z, BlockRegistry::TallGrass);
+            // 高草(2 格)顶点延伸进上格 → 上格须为空气；被树叶/实块占据则降级中草（避免穿透实块视觉错乱）。
+            if (variant == BlockRegistry::TallGrassTall
+                && (y + 1 >= m_height || m_chunks.blockAt(x, y + 1, z) != BlockRegistry::Air)) {
+                variant = BlockRegistry::TallGrassMedium;
+            }
+            setVoxelIfAir(x, y, z, BlockRegistry::TallGrass, variant);
             ++placed;
             if (bio == Biome::Plains) ++plainsCols;
             else if (bio == Biome::Forest) ++forestCols;
@@ -1052,36 +1099,46 @@ void World::placeBedrock()
     }
 }
 
-// 确定性矿石散布（t84/t279，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 的格填 Stone，沙漠/沙滩表层
-//   除外），按 hashVoxel(seed,x,y,z) 的不同位段做密度筛选 → 替换为煤矿 / 铁矿 / **钻石矿**。
-//   **t279 高度分层**（煤浅 / 铁中 / 钻石深，机制等价 MC 1.0 矿物随深度分层）：
-//     - 钻石（diamond_ore）：仅深层 y∈[kDiamondMin=5, kDiamondMax=16]（紧贴基岩 kBedrockTop=4 之上 → 越近基
-//       岩越富，机制等价 MC 1.0 钻石矿 y 1-16）。密度最低（稀有，0.4%）→ 深挖方见。
-//     - 铁（iron_ore）：中层 y∈[kOreMin=5, kIronMax=30]（机制等价 MC 铁矿 y 1-64 中下层富集）。中等密度（0.7%）。
+// 确定性矿石散布（t84/t279/t308，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 的格填 Stone，沙漠/沙滩表层
+//   除外），按 hashVoxel(seed,x,y,z) 的不同位段做密度筛选 → 替换为煤矿 / 铜矿 / 铁矿 / 金矿 / 钻石矿。
+//   **高度分层**（机制等价 MC 1.0 矿物随深度分层 + spec t308「铜铁金按序更稀少」）：
+//     - 钻石（diamond_ore）：深层 y∈[kDiamondMin=5, kDiamondMax=40]（紧贴基岩 kBedrockTop=4 之上）。
+//       密度最低（稀有，0.4%）。**t308 深度修正**：上界 16→40（用户 research 后定，地表 ~62、洞穴贯穿深层 →
+//       深挖更易见钻矿石；密度仍最低故整体稀有度不变）。需铁镐（minTier3）。
+//     - 金（gold_ore）：深层 y∈[kOreMin=5, kGoldMax=25]（机制等价 MC 金矿深层富集）。密度次低（稀有，0.5%）。
+//       金属族中最稀有（spec「铜铁金按序更稀少」→ 金最稀有）。需铁镐（minTier3）。掉金原矿→熔炉烧金锭。
+//     - 铁（iron_ore）：中层 y∈[kOreMin=5, kIronMax=30]（机制等价 MC 铁矿中下层富集）。中等密度（0.7%）。
+//       需石镐（minTier2）。掉铁原矿→熔炉烧铁锭。
+//     - 铜（copper_ore）：浅中层 y∈[kOreMin=5, kCopperMax=45]（机制等价 MC 铜矿浅中层富集）。密度次高（0.9%）。
+//       金属族中最常见 / 最浅（spec「铜铁金按序更稀少」→ 铜最常见）。需石镐（minTier2）。掉铜原矿→熔炉烧铜锭。
 //     - 煤（coal_ore）：浅层 y∈[kCoalMin=8, stoneTop]（机制等价 MC 煤矿靠近地表富集）。最高密度（1.0%）。
-//   三矿判定用同一 hash 的**不同位段**（% 10000 取位 0/8/16）→ 各自独立 → 重叠区（如 y∈[8,16]）三矿共存
-//   （一格至多一矿：判定序 钻石 > 铁 > 煤，先中者胜，稀有矿优先）。仅替换 Stone；同 seed → 同矿脉分布；
-//   禁用任何运行期随机源（QTime/时钟/全局 RNG）。
+//       木镐可挖（minTier1）。直接掉煤炭（燃料 / 火把原料，无需冶炼）。
+//   判定用两路独立哈希（r = hashVoxel(seed,...) 给钻石/铁/煤沿用旧位段 0/8/16，保旧矿脉分布；r2 = hashVoxel
+//   (seed^黄金比例常量,...) 给金/铜独立流）→ 5 矿各自独立。判定序（重叠区稀有矿优先）：钻石 > 金 > 铁 > 铜 > 煤
+//   （先中者胜、一格至多一矿）。仅替换 Stone；同 seed → 同矿脉分布；禁用任何运行期随机源（QTime/时钟/全局 RNG）。
 //
 //   **洞穴裸露矿物**（spec 核心）：worldgen 顺序 scatterOres → carveCaves，carveCaves（t278）挖走 stone/ore
-//   暴露矿脉于洞壁。旧 t84 矿物全高度均匀散布 → 洞穴穿矿概率与深度无关，深层洞穴难见钻石。t279 把钻石集中
-//   深层、洞穴也贯穿深层 → 深层洞壁天然见钻矿石（spec「洞穴 carve 自然暴露 + 钻石深」）。密度随深度上调使
-//   暴露更可见：深层 stone 多、洞穴穿多 → 矿脉出露概率天然高。
+//   暴露矿脉于洞壁。各矿按深度分层 + 洞穴贯穿 → 各层洞壁天然见对应矿脉（spec「洞穴 carve 自然暴露」）。
 void World::scatterOres()
 {
     constexpr int kOreMin      = 5;   // 矿物起始 y（紧贴基岩 kBedrockTop=4 之上；基岩层 y 0..4 不布矿）
     constexpr int kCoalMin     = 8;   // 煤起始 y（仅浅层；机制等价 MC 煤靠近地表富集）
     constexpr int kDiamondMin  = 5;   // 钻石起始 y（= kOreMin，紧贴基岩）
-    constexpr int kDiamondMax  = 16;  // 钻石上界 y（机制等价 MC 1.0 钻石矿 y 1-16）
+    constexpr int kDiamondMax  = 40;  // 钻石上界 y（t308：16→40，用户 research 后定；地表 ~62 深挖更易见）
+    constexpr int kGoldMax     = 25;  // 金上界 y（t308；机制等价 MC 金矿深层富集；金属族最深）
     constexpr int kIronMax     = 30;  // 铁上界 y（机制等价 MC 铁矿中下层富集）
+    constexpr int kCopperMax   = 45;  // 铜上界 y（t308；机制等价 MC 铜矿浅中层富集；金属族最浅）
 
-    // 密度（/10000，每体素命中概率）：钻石最稀（深层）< 铁（中层）< 煤（浅层，最常见）。
+    // 密度（/10000，每体素命中概率）：钻石最稀 < 金 < 铁 < 铜 < 煤（最常见）。
+    //   spec t308「铜铁金按序更稀少」→ 铜(0.9%) > 铁(0.7%) > 金(0.5%)；钻石(0.4%) / 煤(1.0%) 各为两端。
     //   洞穴 carve 暴露后矿脉出露更可见（spec「洞穴裸露矿物」）；密度调到「分层肉眼可辨 + 不过密糊洞壁」。
     constexpr unsigned kDiamondPct = 40;   // /10000 → 0.4%（钻石，需铁镐 minTier3；稀有深层）
+    constexpr unsigned kGoldPct    = 50;   // /10000 → 0.5%（金，需铁镐 minTier3；金属族最稀有，t308）
     constexpr unsigned kIronPct    = 70;   // /10000 → 0.7%（铁，需石镐 minTier2；中层）
+    constexpr unsigned kCopperPct  = 90;   // /10000 → 0.9%（铜，需石镐 minTier2；金属族最常见 / 最浅，t308）
     constexpr unsigned kCoalPct    = 100;  // /10000 → 1.0%（煤，木镐可挖 minTier1；浅层最常见）
 
-    int coalPlaced = 0, ironPlaced = 0, diamondPlaced = 0;
+    int coalPlaced = 0, copperPlaced = 0, ironPlaced = 0, goldPlaced = 0, diamondPlaced = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
@@ -1095,10 +1152,11 @@ void World::scatterOres()
             for (int y = 0; y <= stoneTop; ++y) {
                 if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone)
                     continue; // 仅替换 stone（防御：树根/边界异常格不动；已生成的它种矿也不动）
-                const quint32 r = hashVoxel(m_seed, x, y, z);
-                // 判定序：钻石（深层）> 铁（中层）> 煤（浅层）。先中者胜 → 重叠区稀有矿优先。
-                //   三段独立位（0/8/16）→ 判定彼此独立（非旧版「同 hash 不同阈值段互斥」），重叠区
-                //   三矿按概率共存但一格至多一矿（先中者已 setBlock 替换 Stone，后续判定跳过非 Stone）。
+                const quint32 r  = hashVoxel(m_seed, x, y, z);
+                // 第二路独立哈希流（黄金比例常量作 seed salt → 与 r 良好解耦）给金 / 铜判定，避免与 r 的
+                //   位段（0/8/16）重叠；钻石/铁/煤沿用 r 的旧位段保旧矿脉分布不变（仅钻石 Y 上界扩到 40）。
+                const quint32 r2 = hashVoxel(int(quint32(m_seed) ^ 0x9E3779B9u), x, y, z);
+                // 判定序（重叠区稀有矿优先）：钻石 > 金 > 铁 > 铜 > 煤。先中者胜 → 一格至多一矿。
                 if (y >= kDiamondMin && y <= kDiamondMax) {
                     if (((r       ) % 10000u) < kDiamondPct) {
                         m_chunks.setBlock(x, y, z, BlockRegistry::DiamondOre);
@@ -1106,15 +1164,29 @@ void World::scatterOres()
                         continue;
                     }
                 }
+                if (y >= kOreMin && y <= kGoldMax) {
+                    if (((r2      ) % 10000u) < kGoldPct) {
+                        m_chunks.setBlock(x, y, z, BlockRegistry::GoldOre);
+                        ++goldPlaced;
+                        continue;
+                    }
+                }
                 if (y >= kOreMin && y <= kIronMax) {
-                    if (((r >> 8)  % 10000u) < kIronPct) {
+                    if (((r  >> 8) % 10000u) < kIronPct) {
                         m_chunks.setBlock(x, y, z, BlockRegistry::IronOre);
                         ++ironPlaced;
                         continue;
                     }
                 }
+                if (y >= kOreMin && y <= kCopperMax) {
+                    if (((r2 >> 8) % 10000u) < kCopperPct) {
+                        m_chunks.setBlock(x, y, z, BlockRegistry::CopperOre);
+                        ++copperPlaced;
+                        continue;
+                    }
+                }
                 if (y >= kCoalMin) {
-                    if (((r >> 16) % 10000u) < kCoalPct) {
+                    if (((r  >> 16) % 10000u) < kCoalPct) {
                         m_chunks.setBlock(x, y, z, BlockRegistry::CoalOre);
                         ++coalPlaced;
                         continue;
@@ -1123,7 +1195,8 @@ void World::scatterOres()
             }
         }
     }
-    qInfo() << "worldgen: ores placed = coal" << coalPlaced << "iron" << ironPlaced
+    qInfo() << "worldgen: ores placed = coal" << coalPlaced << "copper" << copperPlaced
+            << "iron" << ironPlaced << "gold" << goldPlaced
             << "diamond" << diamondPlaced; // 同 seed → 同计数（确定性核对）
 }
 
@@ -1307,10 +1380,10 @@ void World::carveCaves()
 //   基岩 / 矿石）。经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + 边界邻接 + heightmap 增量维护），
 //   不触发 blockPlaced（同 worldgen 既有约定——系统事件非玩家放置）。
 //
-//   waterLevel 取文件级 kWaterLevel（=24，见 world.cpp 顶部注释）：spec 原文 8 为 t119 重定标前地形范围
-//   （旧 heightAt 3..11），现 heightAt∈[16,40] → 8 < min(16) 无列满足 → 重定标到 24，约 11% 列被淹（散布
-//   湖泊），出生列(8,8) h=27>24 保持陆地、近处低洼可见水域。t149 沙滩带/沙漠水位/树·矿石阈值均同源用此
-//   常量（generate 沙表层 / placeTrees / scatterOres 阈值 = waterLevel+1）。
+//   waterLevel 取文件级 kWaterLevel（=58，见 world.cpp 顶部注释）：随 t307 地表抬高（基线 30→64）同源
+//   抬高（24→58，保持「低于基线 6 格」相对几何）→ 低洼 hills 仍见水 / 沙滩带（比例同 t162/t274），
+//   草原 / 沙漠主体无水（hills ~57..71 仅 57 低洼列见水）。出生列(80,80) 地表 ~64>58 保持陆地。t149 沙滩
+//   带 / 沙漠水位 / 树·矿石阈值均同源用此常量（generate 沙表层 / placeTrees / scatterOres 阈值 = waterLevel+1）。
 //   全程纯函数于 seed + heightAt（fbm）→ 同 seed 同水域分布；禁用任何运行期随机源（PLAN §2-K）。
 void World::fillWater()
 {
@@ -1329,6 +1402,208 @@ void World::fillWater()
         }
     }
     qInfo() << "worldgen: water cells =" << waterCells; // 同 seed → 同计数（确定性核对）
+}
+
+// t309 地表连通洞穴入口（见 world.h 头注释）。机制等价 MC 1.0 天坑 / 洞穴入口：竖井把封闭地下洞穴网络与
+//   地表连通，天光经竖井 BFS 渗入洞内（recomputeLightField 在本 pass 之后跑）。
+//   确定性散布（hashColumn + seed 偏移，PLAN §2-K）：网格采样 + 概率筛选 + 网格内抖动 → 顶部 3×3 浅坑（可见）
+//   + 1×1 竖井向下挖（覆盖 grass/dirt/stone，不动 bedrock/water），首遇 air（既有洞穴）即停 → 竖井与洞穴连通。
+//   仅 plains/forest（spec「草原/森林概率」）；避开沙滩 / 水下 / 低洼（surfaceY <= waterLevel+2 → 洞口会灌入海水）。
+//   经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + heightmap 增量维护），不发 blockBroken（worldgen 既有约定）。
+void World::carveCaveEntrances()
+{
+    constexpr int kEntranceGrid  = 18;      // 候选网格间距（每 ~18×18 区域 1 候选）
+    constexpr unsigned kEntrancePct = 30u;  // 候选命中概率（%；plains/forest 才候选）
+    constexpr int kBedrockTop     = 4;      // 不挖基岩（与 carveCaves / placeBedrock 同源）
+    constexpr int kShaftMaxDepth  = 22;     // 竖井最大下挖深度（防极端列无限下挖；命中洞穴即停）
+
+    int placed = 0;
+    const int entranceSeed = m_seed + 3091; // 洞口哈希偏移（与树 / 草 / 洞穴 hashColumn 解耦；纯整数加，确定性）
+    for (int bx = kEntranceGrid / 2; bx < m_width; bx += kEntranceGrid) {
+        for (int bz = kEntranceGrid / 2; bz < m_depth; bz += kEntranceGrid) {
+            const quint32 r = hashColumn(entranceSeed, bx, bz);
+            if ((r % 100u) >= kEntrancePct) continue; // 概率筛选
+            // 网格内 ±span/2 抖动（避免网格化排列的机械感，同 carveCaves worm 起点抖动）。
+            const int span = kEntranceGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int x = bx + jx, z = bz + jz;
+            if (x < 2 || z < 2 || x >= m_width - 2 || z >= m_depth - 2) continue; // 留 2 格边界（3×3 顶坑不越界）
+            const Biome bio = biomeAt(x, z);
+            if (bio != Biome::Plains && bio != Biome::Forest) continue; // 仅 plains/forest（spec「草原/森林概率」）
+            const int surfaceY = std::min(heightAt(x, z), m_height - 1);
+            // 避开沙滩 / 水下 / 低洼：洞口不应在海平面附近（会灌入海水 / 出现在沙底）。
+            if (surfaceY <= kWaterLevel + 2) continue;
+
+            // 顶部 3×3 浅坑（1 格深）使洞口可见（裸眼可辨的凹陷入口）。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    const int px = x + dx, pz = z + dz;
+                    const quint8 b = m_chunks.blockAt(px, surfaceY, pz);
+                    if (b == BlockRegistry::Bedrock || b == BlockRegistry::Water) continue; // 不动基岩 / 水
+                    m_chunks.setBlock(px, surfaceY, pz, BlockRegistry::Air);
+                }
+            // 1×1 竖井向下，直至连通既有洞穴（首遇 air）或达最大深度 / 基岩。
+            int dug = 0;
+            for (int y = surfaceY - 1; y > kBedrockTop; --y) {
+                const quint8 b = m_chunks.blockAt(x, y, z);
+                if (b == BlockRegistry::Air) break;     // 已是空气 = 命中洞穴 → 连通，停止下挖
+                if (b == BlockRegistry::Bedrock) break;  // 基岩不可破
+                if (b == BlockRegistry::Water) break;    // 防御（地下应无水；placeUndergroundWaterPools 在本 pass 之后）
+                m_chunks.setBlock(x, y, z, BlockRegistry::Air);
+                ++dug;
+                if (dug >= kShaftMaxDepth) break;
+            }
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: cave entrances =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t309 地下水池（见 world.h 头注释）。机制等价 MC 1.0 地下水湖 / 封闭水洼：地下深处小型封闭空腔 + 底层水源。
+//   确定性散布（hashColumn + seed 偏移，PLAN §2-K）：网格采样 + 概率筛选 + 抖动 → 在地下 y 范围内选中心，
+//   carve 一个小圆盘空腔（底层水源 + 上方 air 气室），空腔被周围实体岩石天然封闭 → 水源稳态（不蔓延）+ 黑暗。
+//   y 范围 (bedrockTop+3, h-surfaceCeil-airAbove-1]：紧贴基岩之上 + 地表之下足够深（上方留石顶 → 封闭）。
+//   经 m_chunks.setBlock 直写；纯函数于 seed → 同 seed 同水池分布。
+void World::placeUndergroundWaterPools()
+{
+    constexpr int kPoolGrid      = 14;      // 候选网格间距
+    constexpr unsigned kPoolPct  = 40u;     // 候选命中概率
+    constexpr int kBedrockTop    = 4;       // 不动基岩（同 carveCaves / placeBedrock）
+    constexpr int kSurfaceCeil   = 4;       // 与 carveCaves 同源（保地表下若干格不挖 → 水池上方有石顶封闭）
+    constexpr int kAirAbove      = 2;       // 水面之上的空气层数（形成「水 + 气室」封闭空腔）
+
+    int placed = 0;
+    const int poolSeed = m_seed + 5309; // 水池哈希偏移（与其它 worldgen hashColumn 解耦）
+    for (int bx = kPoolGrid / 2; bx < m_width; bx += kPoolGrid) {
+        for (int bz = kPoolGrid / 2; bz < m_depth; bz += kPoolGrid) {
+            const quint32 r = hashColumn(poolSeed, bx, bz);
+            if ((r % 100u) >= kPoolPct) continue; // 概率筛选
+            const int span = kPoolGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3) continue; // 留 3 格边界（半径 ≤3 不越界）
+            const int h = std::min(heightAt(cx, cz), m_height - 1);
+            // 水池 y 范围：基岩之上 ~ 地表之下足够深（保上方有石顶 → 封闭黑暗）。
+            const int yLo = kBedrockTop + 3;
+            const int yHi = h - kSurfaceCeil - kAirAbove - 1;
+            if (yHi <= yLo) continue; // 此列地下空间不足（极低洼 / 水下）→ 跳过
+            const int yRange = yHi - yLo + 1;
+            const int cy = yLo + int((r >> 9) & 0x1Fu) % yRange;
+            const int rad = 2 + int((r >> 14) & 1u); // 半径 2..3
+
+            // 挖圆盘空腔（disc × {底层水源 + 上方 kAirAbove 层 air}）。仅覆盖 disc 范围；不触碰外部岩壁 → 天然封闭。
+            //   底层（cy）水源；cy+1..cy+kAirAbove 空气（气室）；其上保留原岩（石顶）。空腔被周围实体岩包围：
+            //   disc 外（距离 > rad）是未挖的 stone/dirt → 水源水平邻居为水（disc 内）或实体（disc 外）→ 无 air 邻居
+            //   → 不蔓延（tickWaterFlow 稳态）；下方（cy-1）实体 → 水源落地；气室上方实体 → 无天光（黑暗）。
+            //   与既有洞穴重叠时（carveCaves 已挖空同位）→ 水源进洞穴底部、形成洞穴内水洼（也是 spec「地下水池」）。
+            const int rad2 = rad * rad;
+            for (int dx = -rad; dx <= rad; ++dx) {
+                for (int dz = -rad; dz <= rad; ++dz) {
+                    if (dx * dx + dz * dz > rad2) continue; // 圆盘
+                    const int px = cx + dx, pz = cz + dz;
+                    // 底层水源（覆盖既有 cave air / stone / ore，但不动 bedrock / 已有水）。
+                    const quint8 fb = m_chunks.blockAt(px, cy, pz);
+                    if (fb != BlockRegistry::Bedrock && fb != BlockRegistry::Water)
+                        m_chunks.setBlock(px, cy, pz, BlockRegistry::Water);
+                    // 水面之上空气层（气室）；越界 / 基岩不动。
+                    for (int ay = 1; ay <= kAirAbove; ++ay) {
+                        const int yy = cy + ay;
+                        if (yy >= m_height) break;
+                        const quint8 ab = m_chunks.blockAt(px, yy, pz);
+                        if (ab == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(px, yy, pz, BlockRegistry::Air);
+                    }
+                }
+            }
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: underground water pools =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t309 地表小湖泊（见 world.h 头注释）。机制等价 MC 1.0 地表小湖泊 / 池塘：地表局部低洼处的浅水洼。
+//   确定性散布（hashColumn + seed 偏移，PLAN §2-K）：网格采样 + 概率筛选 + 抖动 → 选半径 2..3，**局部低洼**判定
+//   （disc 内 heightAt ∈ {surfaceY-1,surfaceY,surfaceY+1}（轻微起伏）、湖岸外圈 heightAt ≥ surfaceY（中心是相对低点））
+//   → carve 一个**下凹**浅水盘：disc 内清除 surfaceY..localH 的方块（开顶 → 湖露天），surfaceY-1/surfaceY-2 两层置水源。
+//   湖岸（外圈 ≥ surfaceY）在水面（surfaceY-1）处为实体土 → 湖水水平邻居无 air → 不溢漏 / 不蔓延（稳态）；湖面低于
+//   周围地表 1 格 + 开顶 → 部分露出（肉眼可见）。相比「整片严格等高」更易达成（局部低洼比大块平坦常见得多）。
+//   仅 plains/forest；避开沙滩 / 水下 / 海平面附近（湖独立于海）。经 m_chunks.setBlock 直写。
+void World::placeSurfaceLakes()
+{
+    constexpr int kLakeGrid     = 18;      // 候选网格间距
+    constexpr unsigned kLakePct = 25u;     // 候选命中概率
+    constexpr int kLakeDepth    = 2;       // 湖深（水源层数：surfaceY-1 .. surfaceY-2）
+
+    int placed = 0;
+    const int lakeSeed = m_seed + 7309; // 湖泊哈希偏移（与其它 worldgen hashColumn 解耦）
+    for (int bx = kLakeGrid / 2; bx < m_width; bx += kLakeGrid) {
+        for (int bz = kLakeGrid / 2; bz < m_depth; bz += kLakeGrid) {
+            const quint32 r = hashColumn(lakeSeed, bx, bz);
+            if ((r % 100u) >= kLakePct) continue; // 概率筛选
+            const int span = kLakeGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int x = bx + jx, z = bz + jz;
+            const int rad = 2 + int((r >> 9) & 1u); // 半径 2..3
+            // 留 rad+1 边界（局部低洼判定扫 disc + 湖岸外圈，须全在界内）。
+            if (x - (rad + 1) < 0 || z - (rad + 1) < 0
+                || x + (rad + 1) >= m_width || z + (rad + 1) >= m_depth) continue;
+            const Biome bio = biomeAt(x, z);
+            if (bio != Biome::Plains && bio != Biome::Forest) continue; // 仅 plains/forest
+            const int surfaceY = std::min(heightAt(x, z), m_height - 1);
+            // 避开海平面附近（湖独立于海、不溢入海）：湖面须明显高于海平面。
+            if (surfaceY <= kWaterLevel + 3) continue;
+
+            // 局部低洼判定（chebyshev 距离 d）：
+            //   disc（d ≤ rad）heightAt ∈ [surfaceY-1, surfaceY+1]（轻微起伏；含中心）；
+            //   湖岸外圈（d == rad+1）heightAt ≥ surfaceY（中心是相对低点 → 湖岸在水面 surfaceY-1 处为实体土，围成不溢漏湖盆）。
+            //   此条件比「整片严格等高」宽得多（局部低洼在 amp=2 平原常见），保证湖确有产出而非全被筛掉。
+            bool ok = true;
+            for (int dx = -(rad + 1); dx <= (rad + 1) && ok; ++dx) {
+                for (int dz = -(rad + 1); dz <= (rad + 1); ++dz) {
+                    const int localH = std::min(heightAt(x + dx, z + dz), m_height - 1);
+                    const int adx = dx < 0 ? -dx : dx;
+                    const int adz = dz < 0 ? -dz : dz;
+                    const int d = adx > adz ? adx : adz; // chebyshev 距离
+                    if (d <= rad) {
+                        if (localH < surfaceY - 1 || localH > surfaceY + 1) { ok = false; break; } // disc 轻微起伏
+                    } else {
+                        if (localH < surfaceY) { ok = false; break; } // 湖岸须 ≥ surfaceY（围成湖盆）
+                    }
+                }
+            }
+            if (!ok) continue;
+
+            // carve 下凹浅水盘。水面 = surfaceY-1（低于周围地表 1 格 → 露天可见的凹陷湖）。
+            const int waterSurface = surfaceY - 1;
+            const int rad2 = rad * rad;
+            for (int dx = -rad; dx <= rad; ++dx) {
+                for (int dz = -rad; dz <= rad; ++dz) {
+                    if (dx * dx + dz * dz > rad2) continue; // 圆盘
+                    const int px = x + dx, pz = z + dz;
+                    const int localH = std::min(heightAt(px, pz), m_height - 1);
+                    // 开顶：清除 surfaceY..localH 的方块（移除草地「盖」→ 湖露天；localH<surfaceY 时此循环不执行，该列本就低）。
+                    for (int y = surfaceY; y <= localH; ++y) {
+                        const quint8 b = m_chunks.blockAt(px, y, pz);
+                        if (b == BlockRegistry::Bedrock) continue; // 不动基岩
+                        m_chunks.setBlock(px, y, pz, BlockRegistry::Air);
+                    }
+                    // 水源 2 层（surfaceY-1 .. surfaceY-2），替换草 / 土（不动基岩）。底部（surfaceY-3）实体土托住水源。
+                    for (int ay = 0; ay < kLakeDepth; ++ay) {
+                        const int yy = waterSurface - ay;
+                        if (yy < 0) break;
+                        const quint8 b = m_chunks.blockAt(px, yy, pz);
+                        if (b == BlockRegistry::Bedrock) continue; // 不动基岩
+                        m_chunks.setBlock(px, yy, pz, BlockRegistry::Water);
+                    }
+                }
+            }
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: surface lakes =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t151 真光场 BFS flood-fill（PLAN §2-H「方块光独立 flood-fill、时间不变」+ §M）。

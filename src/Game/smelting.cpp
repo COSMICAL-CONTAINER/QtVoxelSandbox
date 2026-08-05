@@ -4,8 +4,11 @@
 //
 // 冶炼配方（1 输入 → 1 产物；无位置 / 多重集概念）：
 //   - iron：铁原矿（材料段 0x202）→ 铁锭（0x203）。核心配方，spec 验收项。
+//   - copper：铜原矿（材料段 0x21C）→ 铜锭（0x21D）。t308：机制等价 MC 1.0「铜矿采下为原矿，须熔炉冶炼成锭」。
+//   - gold：金原矿（材料段 0x21E）→ 金锭（0x21F）。t308：机制等价 MC 1.0「金矿采下为原矿，须熔炉冶炼成锭」。
 //   - glass：沙子（方块段 Sand）→ 玻璃（材料段 0x204，spec 可选）。
 //   - charcoal：原木（方块段 Log）→ 木炭（材料段 0x205，spec 可选）。
+//   注：钻石矿直接掉钻石（宝石，无需冶炼）—— 钻石不进本表（spec「钻石挖掘就还是钻石的样子」）。
 //
 // 燃料表（MC burn ticks / 20 = 秒；1 件冶炼 = 10s = 200 ticks）：
 //   - 煤炭 / 木炭：80s（8 件）—— 煤炭是 MC 主流燃料；木炭与煤等价（spec 扩展，便于「原木→木炭→再当燃料」闭环）。
@@ -17,9 +20,11 @@ struct SmeltEntry { int inputId; int outputId; const char *name; };
 struct FuelEntry  { int itemId;   float burnSecs; const char *name; };
 
 constexpr SmeltEntry kSmelt[] = {
-    { RecipeRegistry::IronOreDropId, RecipeRegistry::IronIngotId, "iron"     }, // 铁原矿 → 铁锭
-    { int(BlockRegistry::Sand),      RecipeRegistry::GlassId,     "glass"    }, // 沙子 → 玻璃
-    { int(BlockRegistry::Log),       RecipeRegistry::CharcoalId,  "charcoal" }, // 原木 → 木炭
+    { RecipeRegistry::IronOreDropId,   RecipeRegistry::IronIngotId,   "iron"     }, // 铁原矿 → 铁锭
+    { RecipeRegistry::CopperOreDropId, RecipeRegistry::CopperIngotId, "copper"   }, // t308 铜原矿 → 铜锭
+    { RecipeRegistry::GoldOreDropId,   RecipeRegistry::GoldIngotId,   "gold"     }, // t308 金原矿 → 金锭
+    { int(BlockRegistry::Sand),        RecipeRegistry::GlassId,       "glass"    }, // 沙子 → 玻璃
+    { int(BlockRegistry::Log),         RecipeRegistry::CharcoalId,    "charcoal" }, // 原木 → 木炭
 };
 
 constexpr FuelEntry kFuel[] = {

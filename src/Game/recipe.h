@@ -132,6 +132,15 @@ public:
     //   MaterialIcon 自绘树苗图标（棕色短树干 + 绿色嫩叶小球冠）。创造调色板可取用（creativeMaterials）。
     //   破 Sapling 方块亦掉本物品（BlockRegistry::Sapling.dropId=0x21B），玩家可回收再种。名称 / 图标全原创（§9 区隔）。
     static constexpr int SaplingItemId = 0x21B; // 树苗物品：破叶概率掉落；右键草地/泥土种植 → Sapling 方块（t305）
+    // t308 铜/金原矿 + 锭（机制等价 MC 1.0「铜/铁/金矿采下为原矿，须熔炉冶炼成锭」）：
+    //   铜矿 / 金矿挖掘掉落**原矿**（非锭，区别于钻石矿直接掉钻石——钻石是宝石无需冶炼）；原矿经熔炉冶炼成锭。
+    //   铁原矿(0x202)→铁锭(0x203) 既已存在；本任务补铜 / 金两条对称链。可堆叠 64；非方块（材料段）→ 右键不放置。
+    //   MaterialIcon 自绘图标（原矿走矿石族八边形 + 金属斑；锭走水平梯形金属条，配色按金属区分）。
+    //   下游消费：t308 仅注册物品（可持 / 可掉 / 创造可取 / 可冶炼）；铜/金工具 / 装备配方属后续任务（钻石工具前留位）。
+    static constexpr int CopperOreDropId = 0x21C; // 铜原矿：铜矿石挖掘掉落（BlockRegistry::CopperOre.dropId）；熔炉冶炼为铜锭
+    static constexpr int CopperIngotId   = 0x21D; // 铜锭：铜原矿冶炼产物；铜工具 / 装备配方原料（后续任务）
+    static constexpr int GoldOreDropId   = 0x21E; // 金原矿：金矿石挖掘掉落（BlockRegistry::GoldOre.dropId）；熔炉冶炼为金锭
+    static constexpr int GoldIngotId     = 0x21F; // 金锭：金原矿冶炼产物；金工具 / 装备 / 钟配方原料（后续任务）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

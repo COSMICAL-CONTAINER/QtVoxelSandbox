@@ -25,6 +25,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CoalOre:       return "icon_coal_ore.png";       // t84 煤矿石立方体图标
     case BlockRegistry::IronOre:       return "icon_iron_ore.png";       // t84 铁矿石立方体图标
     case BlockRegistry::DiamondOre:    return "icon_diamond_ore.png";    // t279 钻矿石立方体图标（石头底+青白菱斑晶体）
+    case BlockRegistry::CopperOre:     return "icon_copper_ore.png";     // t308 铜矿石立方体图标（石头底+橙铜斑+孔雀绿锈）
+    case BlockRegistry::GoldOre:       return "icon_gold_ore.png";       // t308 金矿石立方体图标（石头底+金黄斑簇）
     case BlockRegistry::Torch:         return "icon_torch.png";          // t88 火把立方体图标（伪光源）
     case BlockRegistry::Chest:         return "icon_chest.png";          // t173 箱子立方体图标（顶盖缝+侧铁箍）
     case BlockRegistry::Farmland:      return "icon_farmland.png";       // t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
@@ -229,7 +231,15 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::ArrowId),         // 箭：弓弹药；铁锭+木棒+线合成 4 件（t304）
         // t305 树苗物品：材料段 0x21B，可堆叠 64。破叶概率掉落（生存）/ 创造直接取用。右键草地 / 泥土种植 →
         //   Sapling 方块（WorldClock tick 推进成长长成完整橡树）。机制等价 MC 1.0 橡树树苗；MaterialIcon 自绘图标。
-        int(RecipeRegistry::SaplingItemId)    // 树苗物品：破叶掉落；右键草地/泥土种植（t305）
+        int(RecipeRegistry::SaplingItemId),   // 树苗物品：破叶掉落；右键草地/泥土种植（t305）
+        // t308 铜/金原矿 + 锭（机制等价 MC 1.0「铜/铁/金矿采下为原矿，须熔炉冶炼成锭」）：
+        //   铜矿 / 金矿挖掘掉落原矿（非锭）→ 熔炉冶炼成锭（区别于钻石矿直接掉钻石）。创造直接取用便于测试。
+        //   可堆叠 64（走材料段默认）；非方块 → 右键不放置。MaterialIcon 自绘图标（原矿走矿石族八边形 + 金属斑；
+        //   锭走水平梯形金属条，铜橙 / 金黄配色区分）。
+        int(RecipeRegistry::CopperOreDropId), // 铜原矿：铜矿石挖掘掉落；熔炉冶炼为铜锭
+        int(RecipeRegistry::CopperIngotId),   // 铜锭：铜原矿冶炼产物；铜工具 / 装备配方原料（后续任务）
+        int(RecipeRegistry::GoldOreDropId),   // 金原矿：金矿石挖掘掉落；熔炉冶炼为金锭
+        int(RecipeRegistry::GoldIngotId)      // 金锭：金原矿冶炼产物；金工具 / 装备 / 钟配方原料（后续任务）
     };
 }
 
@@ -284,7 +294,9 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Leaves),        int(BlockRegistry::Sand),
              int(BlockRegistry::CraftingTable), int(BlockRegistry::Furnace),
              int(BlockRegistry::CoalOre),       int(BlockRegistry::IronOre),
-             int(BlockRegistry::DiamondOre),                                   // t279 钻矿石（散布于 stone 深层 y∈[5,16]、需铁镐采掘；掉钻石材料）
+             int(BlockRegistry::DiamondOre),                                   // t279 钻矿石（散布于 stone 深层 y∈[5,40]、需铁镐采掘；掉钻石材料）
+             int(BlockRegistry::CopperOre),                                    // t308 铜矿石（散布于 stone 浅中层 y∈[5,45]、需石镐采掘；掉铜原矿→熔炉烧铜锭）
+             int(BlockRegistry::GoldOre),                                      // t308 金矿石（散布于 stone 深层 y∈[5,25]、需铁镐采掘；掉金原矿→熔炉烧金锭）
              int(BlockRegistry::Torch),
              int(BlockRegistry::Chest),                                    // t173 箱子（右键开 27 槽）
              int(BlockRegistry::Farmland),                                 // t234 耕地（持锄右键泥土/草得；干/湿两态）
@@ -360,6 +372,11 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::StringId)      return QStringLiteral("线");   // 杀蜘蛛掉落（弓 / 钓竿原料）
         if (blockId == RecipeRegistry::ArrowId)       return QStringLiteral("箭");   // t304 弓弹药
         if (blockId == RecipeRegistry::SaplingItemId) return QStringLiteral("橡树树苗"); // t305 破叶掉落；种植 → 树
+        // t308 铜/金原矿 + 锭（机制等价 MC 1.0「铜/铁/金矿采下为原矿，须熔炉冶炼成锭」）：
+        if (blockId == RecipeRegistry::CopperOreDropId) return QStringLiteral("铜原矿"); // 铜矿石挖掘掉落；熔炉烧铜锭
+        if (blockId == RecipeRegistry::CopperIngotId)   return QStringLiteral("铜锭");   // 铜原矿冶炼产物
+        if (blockId == RecipeRegistry::GoldOreDropId)   return QStringLiteral("金原矿"); // 金矿石挖掘掉落；熔炉烧金锭
+        if (blockId == RecipeRegistry::GoldIngotId)     return QStringLiteral("金锭");   // 金原矿冶炼产物
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

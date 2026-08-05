@@ -44,8 +44,21 @@ class PlayerState : public QObject
     // 死亡态（t78）：health ≤ 0 → true（died 信号触发时刻置位）；respawn() 翻回 false。
     // NOTIFY=deadChanged（dead 翻 true/false 都发 → QML 绑定据 dead 显/隐死亡界面）。
     Q_PROPERTY(bool dead READ dead NOTIFY deadChanged)
+    // t311 死亡原因（DeathCause）：记录致死那一击的来源，供 t312 聊天播报 / t313 死亡屏文案消费。
+    //   deathCause = 致死来源枚举；deathCauseText = 该枚举对应的中文文案（通用描述词，§9 零 MC 专名：
+    //   机制等价 MC 僵尸/骷髅/苦力怕 → 蹒跚者/骸骨/潜行者）。两属性 NOTIFY=deathCauseChanged（仅「致死时刻」
+    //   置位 + respawn / 存档加载复位时翻动；非致死扣血不改死因）。
+    Q_PROPERTY(int deathCause READ deathCause NOTIFY deathCauseChanged)
+    Q_PROPERTY(QString deathCauseText READ deathCauseText NOTIFY deathCauseChanged)
 
 public:
+    // t311 死亡原因枚举（机制等价 MC 1.0 各来源死因，§9 改名为通用词）。Q_ENUM 暴露给 QML：
+    //   PlayerState.Fall 等（同 EntityManager.MobPig 模式）。避免命名 None（Linux CI 下 X11 头 None 宏冲突）。
+    //   Generic=未归类（默认 / takeDamage 单参兜底）；Fall=高处坠落；Suffocation=嵌实体方块窒息；
+    //   Drowning=气泡归零溺水；Starvation=饥饿归零饿死；Shambler/Bones/Spider/Stalker=被对应敌对生物击败。
+    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker };
+    Q_ENUM(DeathCause)
+
     explicit PlayerState(QObject *parent = nullptr);
 
     int health() const { return m_health; }
@@ -55,10 +68,14 @@ public:
     int air() const { return m_air; }       // t202 当前气泡（0..maxAir）
     int maxAir() const { return kMaxAir; }  // t202 恒 10（10 气泡）
     bool dead() const { return m_dead; }
+    int deathCause() const { return m_deathCause; } // t311 致死来源枚举（仅 dead 时有意义）
+    QString deathCauseText() const;                  // t311 死因中文文案（通用词，§9）
 
     // 受伤钩子（Game/Physics 调用）：扣 amount HP，clamp 到 0；扣到 0 → 置 dead + emit died（且此后不再继续扣，
     // spec t78）。amount<=0 忽略（无治疗语义）。dead 期间早退（不再扣血、不再发 damaged）。
-    Q_INVOKABLE void takeDamage(int amount);
+    // t311 cause=致死来源（DeathCause 枚举），默认 Generic（单参调用兜底）；每次受伤记录最近来源，致死那一击
+    //   （health 扣到 ≤0）的 cause 即 deathCause。分层（PLAN §2）：Game 层持值，呈现层只读。
+    Q_INVOKABLE void takeDamage(int amount, int cause = Generic);
     // 恢复生命：加 amount HP，clamp 到 maxHealth。amount<=0 忽略。
     Q_INVOKABLE void heal(int amount);
     // 设饥饿值（进食消耗属 Phase 1.1；留接口）：clamp 到 [0, maxHunger]。无变化不发信号。
@@ -83,6 +100,8 @@ signals:
     // t78 死亡一次性事件：health 首次降到 ≤0 时发（与 deadChanged 同帧发；died 语义=「刚死」，供呈现层
     //   释放指针 / 关面板等一次性副作用；deadChanged 驱动持续可见性绑定）。
     void died();
+    // t311 致死来源变更（致死时刻置位 / respawn + 存档加载复位时翻动；驱动 deathCause / deathCauseText 绑定）。
+    void deathCauseChanged();
     // 受伤闪烁触发（t51）：takeDamage 实扣 HP 时发；呈现层（Main.qml）Connections 据此启动
     // 红色半透全屏叠层的 alpha 0.4→0 淡出动画（~600ms）。amount = 本次请求扣血量（不计 clamp 截断）。
     // 与 healthChanged 分离：healthChanged 驱动心条数值刷新（每半心切态），damaged 驱动一次性的视觉闪烁
@@ -98,6 +117,8 @@ private:
     int m_hunger = kMaxHunger; // 初值满饥
     int m_air = kMaxAir;       // t202 初值满气泡（眼位入水逐格减；归零溺水扣血；出水回满）
     bool m_dead = false;       // t78 死亡态（health ≤ 0 → true；respawn 翻回 false）
+    int m_lastCause = Generic; // t311 最近一次受伤来源（致死那一击写入 m_deathCause）
+    int m_deathCause = Generic;// t311 致死来源（health 扣到 ≤0 时 = m_lastCause；respawn / 存档加载复位 Generic）
 };
 
 #endif // PLAYERSTATE_H

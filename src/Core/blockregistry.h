@@ -20,8 +20,10 @@
 //   0=air 1=grass 2=dirt 3=stone 4=cobble 5=log 6=planks 7=leaves 8=sand 9=crafting_table
 //   10=furnace 11=coal_ore 12=iron_ore 13=torch 14=bedrock ... 21=water 22=chest 23=farmland
 //   24=tall_grass（草丛；cross 广告牌方块）。25=wheat_crop（小麦作物；cross + state=生长阶段 0..7）。
-//   26=diamond_ore（t279 钻矿石；散布于 stone 深层 y∈[5,16]，需铁镐采掘）。
+//   26=diamond_ore（t279 钻矿石；散布于 stone 深层 y∈[5,40]，需铁镐采掘）。
 //   27=wool（t300 羊毛方块）。28=sapling（t305 树苗；cross 广告牌方块，种在草地/泥土上随时间生长成橡树）。
+//   29=copper_ore（t308 铜矿石；散布于 stone 浅中层 y∈[5,45]，需石镐采掘；掉铜原矿→熔炉烧铜锭）。
+//   30=gold_ore（t308 金矿石；散布于 stone 深层 y∈[5,25]，需铁镐采掘；掉金原矿→熔炉烧金锭）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -130,7 +132,7 @@ public:
                                   //   [FirstCross, LastCross]、不进立方面 PASS。raycastAABBs 整格命中（ShapeNone 非 torch 兜底）→
                                   //   可瞄准 / 破坏。**进创造调色板**（t244 补全：草丛由 worldgen 散布、非玩家常规放置，
                                   //   但创造页供测试 / 装饰取用，图标走 flat 2D 路径同火把）。
-        DiamondOre     = 26, // 钻矿石（t279）：散布于 stone **深层**（worldgen scatterOres 高度分层 y∈[5,16]，机制等价
+        DiamondOre     = 26, // 钻矿石（t279/t308）：散布于 stone **深层**（worldgen scatterOres 高度分层 y∈[5,40]，机制等价
                                   //   MC 1.0 钻石矿「越近基岩越富」，§2-K 确定性散布）。整立方 opaque（solid=true / ShapeFull
                                   //   —— 走 mesher 整立方面路径，**非**异形，与 coal/iron 矿石同族）、hardness=3.0（同 coal/iron
                                   //   量级，需镐）、toolType=Pickaxe、requiresTool=true、**minToolTier=3**（**需铁镐**才掉落 —— 木 / 石
@@ -139,7 +141,26 @@ public:
                                   //   maxStack=64。各面贴图=diamond_ore(37)（石头底 + 青白菱斑晶体，原创自绘 §9a）。音色归 GroupStone
                                   //   （石质，同 coal/iron 矿石）。**洞穴裸露**：worldgen 顺序 scatterOres → carveCaves，carve 挖走
                                   //   stone/ore 暴露矿脉于洞壁（t278 既已铺路）→ 深层洞穴壁天然见钻矿石（spec「洞穴裸露矿物」）。
-                                  //   进创造调色板（与 coal/iron 矿石同走立方体图标，t279 补全）。
+                                  //   进创造调色板（与 coal/iron 矿石同走立方体图标，t279 补全）。**t308 深度修正**：钻石上界
+                                  //   y 16→40（用户 research 后定，深挖更易见；散布密度仍最低故整体稀有度不变）。
+        CopperOre      = 29, // 铜矿石（t308）：机制等价 MC 1.0 铜矿（嵌于 stone 浅中层、需石镐采掘、掉铜原矿→熔炉烧铜锭）。
+                                  //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 coal/iron/diamond
+                                  //   矿石同族）、hardness=3.0（同族量级，需镐）、toolType=Pickaxe、requiresTool=true、**minToolTier=2**
+                                  //   （**需石镐**才掉落 —— 木镐挖了不掉落，机制等价 MC 铜矿需石镐；同 iron 矿石门槛）、dropId=0x21C
+                                  //   （**铜原矿**材料段，RecipeRegistry::CopperOreDropId；Core 不依赖 Game 故用字面量 0x21C ——
+                                  //   掉落**原矿**非锭，机制等价 MC 1.0「铜/铁/金矿采下为原矿，须熔炉冶炼成锭」，区别于钻石矿直接掉钻石）、
+                                  //   dropCount=1、maxStack=64。各面贴图=copper_ore(40)（石头底 + 橙铜斑 + 少量孔雀绿锈，原创自绘 §9a）。
+                                  //   音色归 GroupStone（石质）。worldgen 高度分层散布于**浅中层** y∈[5,45]（金属族中最浅、最常见；
+                                  //   spec「铜铁金按序更稀少」→ 铜最常见）。**洞穴裸露**：carveCaves 暴露矿脉于洞壁。进创造调色板。
+        GoldOre        = 30, // 金矿石（t308）：机制等价 MC 1.0 金矿（嵌于 stone 深层、需铁镐采掘、掉金原矿→熔炉烧金锭）。整立方
+                                  //   opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 coal/iron/diamond/copper
+                                  //   矿石同族）、hardness=3.0（同族量级，需镐）、toolType=Pickaxe、requiresTool=true、**minToolTier=3**
+                                  //   （**需铁镐**才掉落 —— 木 / 石镐挖了不掉落，机制等价 MC 金矿需铁镐；同 diamond 矿石门槛）、dropId=0x21E
+                                  //   （**金原矿**材料段，RecipeRegistry::GoldOreDropId；Core 不依赖 Game 故用字面量 0x21E ——
+                                  //   掉落**原矿**非锭，机制等价 MC 1.0「金矿采下为原矿，须熔炉冶炼成金锭」）、dropCount=1、maxStack=64。
+                                  //   各面贴图=gold_ore(41)（石头底 + 金黄斑簇，原创自绘 §9a）。音色归 GroupStone（石质）。worldgen
+                                  //   高度分层散布于**深层** y∈[5,25]（金属族中最深、最稀有；spec「铜铁金按序更稀少」→ 金最稀有）。
+                                  //   **洞穴裸露**：carveCaves 暴露矿脉于洞壁。进创造调色板。
         Wool           = 27, // 羊毛方块（t300）：机制等价 MC 1.0 羊毛（wool）。整立方 opaque（solid=true / ShapeFull
                                   //   —— 走 mesher 整立方面路径，**非**异形）、hardness=0.8（同 MC 1.0 羊毛量级）、
                                   //   toolType=Shears（剪刀给速度加成；空手也掉落，requiresTool=false）、dropId=自身
@@ -161,7 +182,7 @@ public:
                                   //   cutout 透明底）。音色归 GroupGrass（软草音，同草丛 / 作物）。**树苗物品由树叶衰减 / 玩家破叶掉落**
                                   //   （playercontroller dropLeafDrops：破叶概率掉树苗物品 + 木棒）。**不**进方块创造调色板（树苗经
                                   //   物品种植、非玩家常规放置；创造调色板取树苗**物品**便于测试，见 creativeMaterials）。
-        Count         = 29, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Count         = 31, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
@@ -201,6 +222,19 @@ public:
     //   selectionAABBs 不读 wheat state（wheat 走 ShapeNone + cross 几何，state inert 于碰撞/选中）→ 复用 state 作
     //   阶段编码零回归（同 PlanksFromDoubleSlabBit / Farmland state 复用 state 作 marker 的模式）。
     static constexpr quint8 WheatCropStageMax = 7;
+
+    // t310 草变种（矮/中/高）state 编码：mesher（PartialBlockGeometry::append 的 TallGrass case）据 state 选
+    //   cross 高度。机制对标 MC 1.0 cross 草丛，但按用户要求做 3 高度变种（MC 1.0 原版仅 1 格满高 cross）。
+    //   worldgen placeTallGrass 按群系分流密度写入对应 state（PLAN §2-K 确定性；新世界生效）。
+    //   state 经 m_states 落 SQLite round-trip 保真。mesher 消费点：partialblockgeometry 的 TallGrass case
+    //   （cross 高度选择）。collision/selection 不读 tall grass state（ShapeNone + cross 几何，state inert 于
+    //   碰撞/选中）→ 复用 state 作变种编码零回归（同 WheatCropStage / Farmland state 复用模式）。
+    static constexpr quint8 TallGrassVariantMax = 2; // variant 上界（state 越界 clamp 兜底）
+    enum TallGrassVariant : quint8 {
+        TallGrassShort  = 0, // 矮草：cross 半格高（0..0.5）
+        TallGrassMedium = 1, // 中草：cross 满格高（0..1.0；与旧版满高草丛外观一致）
+        TallGrassTall   = 2, // 高草：cross 两格高（0..2.0，顶点延伸进上格；机制等价 MC 高草 / large fern）
+    };
 
     // t206 双半砖（合并态）state 标记：两块互补半砖（上+下）同格合并时，placeBlock 写 Planks(id=6) +
     //   本 bit 标记「源自双半砖」（旧实现写 Planks state=0 → 破块掉 1× Planks，用户报「双半砖挖掉掉 1 全木板」）。
@@ -252,7 +286,8 @@ public:
     //   且 requiresTool=true → 空手不掉落且无加成。
     enum ToolType : int {
         NoTool  = 0, // 无有效工具：任何手持物均无速度加成（基准速 1.0）；空手可采且掉落
-        Pickaxe = 1, // 镐：石类方块加速（stone / cobble / furnace / coal_ore / iron_ore；requiresTool=true 需镐才掉落）
+        Pickaxe = 1, // 镐：石类方块加速（stone / cobble / furnace / coal_ore / iron_ore / copper_ore / gold_ore / diamond_ore；
+                     //   requiresTool=true 需镐才掉落）
         Hoe     = 2, // 锄：专用耕地（右键草/泥土→耕地，机制留后续任务）。**不参与挖掘速度**——
                      //   本工程无任何方块的 BlockDef.toolType 取 Hoe（耕地是非方块语义、走 useBlock 交互，
                      //   非「采掘所需工具」），故 ToolRegistry::miningSpeedMul 对持锄挖任何方块恒返 1.0
@@ -375,18 +410,22 @@ public:
     //   29..36=wheat_stage_0..7（t236 小麦作物 8 个生长阶段贴图；cross 几何段，alpha 透明底 cutout。mesher 在
     //      PartialBlockGeometry::append 的 WheatCrop case 内据 state 选 tile = 29 + stage；WheatCrop 方块 def 各面
     //      = 29（基底阶段 0），阶段贴图选择是 mesher 呈现层据 state 决定，非 BlockDef 字段——同 Water 流水贴图模式）。
-    //   37=diamond_ore（t279 钻矿石；散布于 stone 深层 y∈[5,16]、需铁镐采掘；机制等价 MC 1.0 钻石矿，名称/贴图
+    //   37=diamond_ore（t279 钻矿石；散布于 stone 深层 y∈[5,40]、需铁镐采掘；机制等价 MC 1.0 钻石矿，名称/贴图
     //      原创自绘 §9a；各面同贴图=石头底+青白菱斑晶体）。
     //   38=wool（t300 羊毛方块；剪羊毛 / 杀羊掉落；机制等价 MC 1.0 羊毛，名称/贴图原创自绘 §9a；
     //      各面同贴图=奶白羊毛底+浅灰卷曲绒毛纹）。
     //   39=sapling（t305 树苗 cross 贴图；棕色短树干 + 绿色嫩叶小球冠，alpha 透明底 cutout；
     //      Sapling 方块各面=本 tile，mesher 走 cross 几何段；机制等价 MC 1.0 橡树树苗，名称/贴图原创自绘 §9a）。
-    // 图集由 tools/build_atlas.py 打包全部 40 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   40=copper_ore（t308 铜矿石；散布于 stone 浅中层 y∈[5,45]、需石镐采掘；机制等价 MC 1.0 铜矿，
+    //      名称/贴图原创自绘 §9a；各面同贴图=石头底+橙铜斑+孔雀绿锈）。
+    //   41=gold_ore（t308 金矿石；散布于 stone 深层 y∈[5,25]、需铁镐采掘；机制等价 MC 1.0 金矿，
+    //      名称/贴图原创自绘 §9a；各面同贴图=石头底+金黄斑簇）。
+    // 图集由 tools/build_atlas.py 打包全部 42 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 40）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 42）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -394,7 +433,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 40;
+    static constexpr int AtlasTileCount = 42;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

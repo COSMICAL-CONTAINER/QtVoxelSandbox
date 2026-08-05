@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成矿石（CoalOre / IronOre / DiamondOre）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
+"""生成矿石（CoalOre / IronOre / DiamondOre / CopperOre / GoldOre）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
 
 机制等价 MC 1.0 矿石（嵌于 stone 区段、需镐采掘），但贴图为本项目程序生成的原创像素图，
 **不**拷贝任何 MC 资产。基底取本工程既有石头（default_stone.png）逐像素副本，保证与
@@ -8,7 +8,11 @@
   - 煤矿（coal_ore）：石头底 + 多簇近黑斑块（煤层外露，配少量高光暗化边）；
   - 铁矿（iron_ore）：石头底 + 多簇棕橙斑点（铁锈色，配浅色高光）；
   - 钻矿（diamond_ore）：石头底 + 多簇青白菱斑（机制等价 MC 钻石矿，名称/贴图原创），
-    高光偏冷白、底阴影偏深青，散布表「嵌于岩的晶体」。
+    高光偏冷白、底阴影偏深青，散布表「嵌于岩的晶体」；
+  - 铜矿（copper_ore，t308）：石头底 + 多簇橙铜斑点 + 少量孔雀绿锈（机制等价 MC 1.0 铜矿，
+    名称/贴图原创）。橙铜主色 + 绿锈副色显「铜氧化」，区别于铁的纯棕橙；
+  - 金矿（gold_ore，t308）：石头底 + 多簇金黄斑点（机制等价 MC 1.0 金矿，名称/贴图原创）。
+    暖金高光 + 深金阴影显「贵金属反光」，最亮最暖的矿石族一眼可辨。
 
 色块位置固定（无随机源）→ 同输入同输出（确定性，便于 CI 校验 & 与 build_atlas.py 顺序对齐）。
 斑块布局刻意打散、不对称，避免「网格化 / 重复纹理」的人工感。
@@ -17,6 +21,8 @@
   default_coal_ore.png
   default_iron_ore.png
   default_diamond_ore.png
+  default_copper_ore.png
+  default_gold_ore.png
 
 依赖：本脚本须先有 textures/default_stone.png（既有 CC0/原创资产）。
 """
@@ -84,6 +90,33 @@ def draw_diamond(canvas):
     return canvas
 
 
+def draw_copper(canvas):
+    """铜矿（copper_ore，t308）：石头底 + 多簇橙铜斑点 + 少量孔雀绿锈（散布；暖橙高光显「铜氧化」）。
+    机制等价 MC 1.0 铜矿，名称/贴图全原创（§9）。橙铜主色比铁的棕橙更鲜亮、更偏橘；副色孔雀绿（铜锈）
+    点缀显「铜氧化」—— 与铁的纯棕橙铁锈区分（铁无绿锈）。"""
+    cop_base = np.array([214.0, 128.0, 56.0])     # 橙铜（铜外露，鲜亮橘橙，比铁更亮更橘）
+    cop_hi = np.array([248.0, 178.0, 96.0])       # 高光（铜反光，暖亮橙）
+    patina = np.array([72.0, 168.0, 138.0])       # 孔雀绿（铜氧化锈，副色点缀；铁无此色 → 区分铜/铁）
+    # 橙铜簇（散布；刻意不对称，避开边角溢出）
+    centers = [(4, 4), (11, 3), (3, 11), (12, 10), (8, 7), (10, 13)]
+    paint_blobs(canvas, centers, radius=1, color=cop_base, highlight=cop_hi)
+    # 孔雀绿锈点（少量散布，表「铜氧化」—— 铜的身份证，与铁的纯棕橙铁锈区分）
+    canvas[6, 9, 0:3] = patina
+    canvas[9, 13, 0:3] = patina
+    canvas[13, 5, 0:3] = patina
+    return canvas
+
+
+def draw_gold(canvas):
+    """金矿（gold_ore，t308）：石头底 + 多簇金黄斑点（散布；暖金高光 + 深金阴影显「贵金属反光」）。
+    机制等价 MC 1.0 金矿，名称/贴图全原创（§9）。金黄最亮最暖的矿石族一眼可辨（区别于铜的橙、铁的棕橙）。"""
+    gold_base = np.array([244.0, 198.0, 48.0])    # 金黄（金外露，饱和暖金）
+    gold_hi = np.array([252.0, 232.0, 120.0])     # 高光（金反光，近白金）
+    centers = [(4, 3), (11, 4), (3, 10), (12, 11), (8, 8), (10, 13), (6, 13)]
+    paint_blobs(canvas, centers, radius=1, color=gold_base, highlight=gold_hi)
+    return canvas
+
+
 def save(arr, name):
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA")
     out = os.path.join(SRC, name + ".png")
@@ -95,6 +128,8 @@ def main():
     save(draw_coal(stone_base()), "default_coal_ore")
     save(draw_iron(stone_base()), "default_iron_ore")
     save(draw_diamond(stone_base()), "default_diamond_ore")
+    save(draw_copper(stone_base()), "default_copper_ore")
+    save(draw_gold(stone_base()), "default_gold_ore")
 
 
 if __name__ == "__main__":

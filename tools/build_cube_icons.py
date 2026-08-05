@@ -41,6 +41,8 @@ BLOCKS = [
     ("coal_ore",        "default_coal_ore", "default_coal_ore"),  # t84 煤矿石（各面同贴图）
     ("iron_ore",        "default_iron_ore", "default_iron_ore"),  # t84 铁矿石（各面同贴图）
     ("diamond_ore",     "default_diamond_ore", "default_diamond_ore"),  # t279 钻矿石（各面同贴图）
+    ("copper_ore",      "default_copper_ore", "default_copper_ore"),    # t308 铜矿石（各面同贴图=石头底+橙铜斑+孔雀绿锈）
+    ("gold_ore",        "default_gold_ore", "default_gold_ore"),        # t308 金矿石（各面同贴图=石头底+金黄斑簇）
     ("wool",            "default_wool", "default_wool"),  # t300 羊毛方块（各面同贴图=奶白羊毛卷绒纹）
     ("torch",           "default_torch", "default_torch"),  # t88 火把（透明底+木柄+火焰；走平面 2D 分支非立方体投影）
     ("chest",           "default_chest_top", "default_chest_side"),  # t173 箱子（顶=盖缝+铰链；侧=铁箍带；图标显顶+侧）

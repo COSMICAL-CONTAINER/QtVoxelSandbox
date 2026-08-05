@@ -271,16 +271,24 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::TallGrass: {
-        // t235 草丛 cross 模型：两片对角相交的双面 quad（满格高 0..1，对角占满 cell footprint）。
-        //   机制等价 MC 1.0 cross 模型（tall grass / 花生 / 作物）。两片分别沿 (+X,+Z) 与 (+X,-Z) 对角，
-        //   在格中心垂直线相交成 X 形（俯视）。每片整张贴 tall_grass 瓦片、双面发（pushCrossQuad）。
+        // t235/t310 草丛 cross 模型：两片对角相交的双面 quad（俯视 X 形，对角占满 cell footprint）。
+        //   机制等价 MC 1.0 cross 模型（tall grass / 蕨类）。两片分别沿 (+X,+Z) 与 (+X,-Z) 对角，在格中心
+        //   垂直线相交成 X 形。每片整张贴 tall_grass 瓦片、双面发（pushCrossQuad）。
         //   不做邻居剔除（cross 透明 + 装饰，不挡邻居；TallGrass solid=false 亦不参与邻居面剔除）。
-        //   Plane A：对角 (0,0,0)-(1,0,1)（-X-Z 角到 +X+Z 角）；Plane B：对角 (1,0,0)-(0,0,1)（+X-Z 角到 -X+Z 角）。
+        //   t310 草变种（矮/中/高）：cross 高度 h 据 state 选——矮草 0.5（半格）、中草 1.0（满格，旧版外观）、
+        //   高草 2.0（两格，顶点延伸进上格；同栅栏 y=1.5 越格渲染，上格必为空气，worldgen placeTallGrass 已守）。
+        //   垂直 UV 仍取整张瓦片（v0..v1）→ 高草贴图被拉高 2×（草叶显更高）、矮草压缩半高 → 贴图自然表达变种。
+        //   state 越界 clamp 到 TallGrassVariantMax 防异常（不应出现，兜底）。
+        const int variant = std::min(int(state), int(BlockRegistry::TallGrassVariantMax));
+        const float h = (variant == BlockRegistry::TallGrassShort)  ? 0.5f
+                      : (variant == BlockRegistry::TallGrassTall)   ? 2.0f
+                                                                   : 1.0f;
+        // Plane A：对角 (0,0,0)-(1,0,1)（-X-Z 角到 +X+Z 角）；Plane B：对角 (1,0,0)-(0,0,1)（+X-Z 角到 -X+Z 角）。
         pushCrossQuad(verts, idx, lx, ly, lz,
-                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, h, 1.f,  0.f, h, 0.f, // Plane A: BL→BR→TR→TL
                       tile, light, tileW, hx, hy, v0, v1);
         pushCrossQuad(verts, idx, lx, ly, lz,
-                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, h, 1.f,  1.f, h, 0.f, // Plane B: BL→BR→TR→TL
                       tile, light, tileW, hx, hy, v0, v1);
         break;
     }

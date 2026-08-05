@@ -245,7 +245,7 @@ private:
     void placeBedrock();
     // t148 海平面填水（PLAN §2-K 确定性）：地形填充后在 waterLevel 以下的低洼列从 h+1 到 waterLevel
     //   填 Water（机制等价 MC 海洋 / 湖泊）。仅写空气格；同 seed → 同水域分布。waterLevel 见 .cpp 注释
-    //   （spec 8 为 t119 前地形，现重定标到 24 以与 [16,40] 地形相交使水域可见）。
+    //   （t307：随地表抬高 24→58，保持「低于基线 6 格」使低洼 hills 仍见水 / 沙滩带）。
     void fillWater();
     // t235 草丛散布（PLAN §2-K 确定性）：地形 + 树 + 水定型后，遍历 grass 表层列（非沙漠 / 非沙滩水下 / 非水域），
     //   按 hashColumn(seed,x,z) 密度筛选在 grass 顶上方一格（surfaceY+1）置 TallGrass（仅写空气格 → 不覆盖
@@ -259,6 +259,24 @@ private:
     //   纯函数于 seed（noise3 / hashColumn / hashVoxel）→ 同 seed 同洞穴分布。挖走 stone/dirt/ore，暴露矿石
     //   于洞壁（为 t279 洞穴裸露矿物铺路）；不挖 air/bedrock/water。
     void carveCaves();
+    // t309 洞穴入口（地表连通竖井；spec「多地表连通洞穴入口（草原/森林概率）」）：carveCaves 之后，在
+    //   plains/forest 地表确定性散布「竖井式洞口」——顶部 3×3 浅坑 + 向下 1×1 竖井直至连通既有洞穴
+    //   （首遇 air 即停）。竖井把天光引入地下洞穴（recomputeLightField 在本 pass 之后跑 → 天光 BFS 经竖井
+    //   渗入洞内，洞口附近变亮，机制等价 MC 1.0 天坑 / 洞穴入口）。仅 plains/forest，避开沙滩 / 水下 / 低洼
+    //   （洞口不应灌入海水）。纯函数于 seed（hashColumn）→ 同 seed 同洞口分布（PLAN §2-K）。
+    void carveCaveEntrances();
+    // t309 地下水池（封闭洞穴静止水层；spec「地下水池（封闭洞穴静止水层）」）：carveCaves / carveCaveEntrances
+    //   之后，地下深处确定性散布小型封闭水洼——carve 一个小椭球空腔（air 气室）+ 底层铺一层水源（state=0），
+    //   形成「封闭洞穴静止水层」。空腔被周围实体岩石天然封闭 → 水源无水平 air 邻居可蔓延 → 稳态
+    //   （tickWaterFlow 不扩散）；气室无天光 → 黑暗（机制等价 MC 1.0 地下水湖 / 封闭水洼）。纯函数于 seed
+    //   （hashColumn）→ 同 seed 同水池分布（PLAN §2-K）。
+    void placeUndergroundWaterPools();
+    // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
+    //   确定性散布小型浅水湖——在严格平坦（disc + 湖岸外圈 heightAt 全等）的草地 carve 一个浅水盘（surfaceY /
+    //   surfaceY-1 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶，肉眼可见）。
+    //   仅 plains/forest，避开沙滩 / 水下 / 海平面附近（湖独立于海）。纯函数于 seed（hashColumn）→ 同 seed
+    //   同湖泊分布（PLAN §2-K）。
+    void placeSurfaceLakes();
     // t151 真光场**全量**重算（PLAN §2-H / §M）：per-voxel BFS flood-fill 天光（自顶，sky=15）+ 火把方块光
     //   （radius14，block=14），衰减 1、仅穿过非遮光格、取 max。**仅 worldgen 末调一次**（全图 147k 体素 ×2
     //   通道约数十 ms，玩家编辑频率下不可接受）。玩家编辑走增量 recomputeLightAround()（t154）。
@@ -275,6 +293,7 @@ private:
     //   doSky=false：仅方块光（清方块光保留天光、重 seed 火把、边界种方块光、flood 方块光）——火把增删天光不变。
     void refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky);
     void setVoxelIfAir(int x, int y, int z, quint8 id);       // 仅写空气格（树冠不覆盖主干/地形）
+    void setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state); // t310：带 state（草变种 worldgen）
     quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希（列级 seed/x/z）→ 确定性伪随机
     quint32 hashVoxel(int seed, int x, int y, int z) const;   // 整数哈希（体素级 seed/x/y/z）→ 矿石散布用
 

@@ -88,6 +88,15 @@ Window {
     //   true → 显设置面板（手臂调试 ArmSlider 等）覆盖在暂停叠层之上；「返回」按钮置 false 回暂停菜单。
     //   回主菜单 / 点击恢复游戏时一并复位。属纯呈现态，PLAN §2 分层（UI 层）。
     property bool settingsOpen: false
+    // t312 聊天栏子态（PLAN §2 UI 层，纯呈现）：T/Enter 开 / Esc/Enter 关。开 → release 指针（光标可见
+    //   供打字 + TextField 取焦点，同背包面板模式）；关 → 恢复 grab + 焦点回键位层。开时抑制暂停叠层
+    //   （二者互斥：都是 !captured 态）+ 抑制滚轮切 hotbar（防打字时误切槽）。与背包/工作台/熔炉/箱子
+    //   子态互斥（开其一前关其它）。死亡态不开（playerState.dead 已接管 !captured 态，死亡信息走死亡屏）。
+    property bool chatOpen: false
+    // t312 玩家显示名（聊天「名: 文本」的名；机制等价 MC 玩家名，§9 通用词非专名）。单机 Phase 1.0 无账号名
+    //   系统 → 用「玩家」作通用默认；Phase 3 联机接入时改为联机昵称（LocalServer/RemoteServer）。纯呈现态，
+    //   不进存档（存档只有 worldName，非玩家名；worldName 是世界标识 ≠ 玩家身份）。
+    readonly property string playerName: "玩家"
 
     // t110 Shift/数字键守卫所需 window 级态：
     //   - shiftHeld：Shift 按下态（keyInput Keys.onPressed/Released 始终追踪，**不论背包是否开**）。
@@ -213,6 +222,8 @@ Window {
         // 清上一世界的掉落物 / mob 残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
+        // t312：清聊天历史（不持久化 / 不跨世界；新世界从空起）。
+        chatMessages.clear()
         // t240 进世界生成猪 / 牛 / 羊各一只于出生点附近地表（ EntityManager 已注册 3 类 mobType 1/2/3；
         //   生物蛋生成系统推迟到 t243，故本任务暂以固定 spawn 验证模型 + 贴图可见）。坐标取出生列 (40,40)
         //   附近三格、Y = worldgen 地表 +1（落地上方一格 → 重力 tick 贴地表不摔伤）。§9 区隔：模型 / 贴图
@@ -343,8 +354,11 @@ Window {
         craftingTableOpen = false
         furnaceOpen = false
         chestOpen = false
+        chatOpen = false                  // t312：回菜单关聊天（防遗留；非死亡流）
         chestLidAngle = 0    // t196：复位盖子角（防回菜单 / 再进世界残留半开盖子）
         settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
+        // t312：清聊天历史（不持久化 / 不跨世界；下一局从空起）。
+        chatMessages.clear()
         returnHeldToHotbar()           // t56：返回菜单前归还光标手持栈（防遗留 heldBlock）
         worldStore.closeWorld()        // t176：回主菜单关存档连接（防残留打开库）
         itemEntities.clearAll()        // t176：清实体残留
@@ -549,11 +563,61 @@ Window {
         keyInput.forceActiveFocus()
     }
 
+    // t312 聊天栏开关 / 收发（PLAN §2 UI 层，纯呈现；聊天历史 = ListModel 呈现态，无 C++ ViewModel ——
+    //   单机 Phase 1.0 无联机，聊天仅为「输入回显 + 系统播报」容器，Phase 3 联机接入时改走 LocalServer/
+    //   RemoteServer 协议层收发）。开 → release 指针（光标可见 + TextField 取焦点，同背包面板模式）；关 →
+    //   grab + 焦点回键位层。与背包/工作台/熔炉/箱子互斥（开前关其它）。
+    function openChat() {
+        if (appState !== "playing" || chatOpen) return
+        // 互斥：先关任何已开背包面板（归还光标手持栈 + grab），随后 release 让聊天接管光标。
+        if (inventoryOpen) closeInventory()
+        if (craftingTableOpen) closeCraftingTable()
+        if (furnaceOpen) closeFurnace()
+        if (chestOpen) closeChest()
+        // 死亡态不开聊天（死亡信息已由死亡屏接管；防聊天 input 抢死亡按钮焦点）。
+        if (playerState.dead) return
+        chatOpen = true
+        player.release()               // 释放指针 → 光标可见 + TextField 可取焦点打字
+        chatInput.forceActiveFocus()   // 焦点进 TextField（keyInput 持焦时 WASD 透传 player；改焦后不再透传）
+    }
+    // 关聊天：regrab=true（默认，回游戏态）；send 路径发完一条后调 regrab=true；Esc 取消调 regrab=true。
+    //   regrab=false 预留给「聊天 → 切到其它面板」的级联（暂无此路径）。
+    function closeChat(regrab) {
+        if (!chatOpen) return
+        chatOpen = false
+        if (regrab) {
+            player.grab()
+            keyInput.forceActiveFocus()
+        }
+    }
+    // 发送：把 TextField 文本（去首尾空白后非空）作为玩家消息入聊天历史（显示「名: 文本」），随后关聊天回游戏。
+    //   单机无服务端 → 不广播、不持久化；Phase 3 联机时此处改为 sendChatToServer(text) 走协议层。
+    function sendChat() {
+        const raw = chatInput.text
+        const txt = raw.trim()
+        if (txt.length > 0) appendChatMessage(window.playerName, txt, false)
+        chatInput.text = ""
+        closeChat(true)
+    }
+    // t312 系统播报入口（死亡消息 / 未来事件如 join/leave）：sender=系统来源名（玩家消息填玩家名、
+    //   系统消息填 "" 由 delegate 隐藏「名:」前缀直接显文本）；isSystem=true 走灰红色（区别玩家白）。
+    //   死亡播报由 onDied 路由调本函数（playerState.deathCauseText 给文案）。
+    function appendChatMessage(sender, text, isSystem) {
+        chatMessages.append({sender: sender, text: text, isSystem: isSystem === true})
+        // 历史上限（防无限增长吃内存 / 渲染）：保留最近 kChatHistoryMax 条，从头删溢出。
+        while (chatMessages.count > chatHistoryMax) chatMessages.remove(0)
+        // 触发消息行重显（fade 动画重启）+ 自动滚到底。
+        chatFadeTimer.restart()
+    }
+    // t312 聊天历史上限（保留最近 N 条；超出从头删。MC 1.0 聊天亦有限滚动缓冲，避免无限增长）。
+    readonly property int chatHistoryMax: 50
+
     // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
     // 与物理(PlayerController)共用同一份栅格。
     // t276 大世界（可配网格）：width/depth = worldChunksPerSide*16（默认 10 → 160×160=10×10=100 chunk）。
-    //   高度 64 不变。worldgen 覆盖全幅（ChunkManager / generate 按 m_width/m_depth 迭代，维度无关）。
-    World { id: theWorld; width: window.worldChunksPerSide * 16; depth: window.worldChunksPerSide * 16; height: 64; seed: 1337 }
+    //   高度 128（t307：地表抬高至 ~64，留出树冠 + 天空间 / 飞行；原 64 已不够 new surface+树）。worldgen
+    //   覆盖全幅（ChunkManager / generate 按 m_width/m_depth 迭代，维度无关；chunk 跨满高，128 即 taller column）。
+    World { id: theWorld; width: window.worldChunksPerSide * 16; depth: window.worldChunksPerSide * 16; height: 128; seed: 1337 }
 
     // t176 存档系统（SQLite，PLAN §2-L）：世界列表 / 新建 / 删除 / 打开 / 保存 / 加载。绑定 theWorld
     //   使 WorldStore 经 chunks() 序列化 chunk blob。玩家态（pos/血/背包/模式）以裸原语经 gather /
@@ -763,7 +827,15 @@ Window {
         function onMobAttackedPlayer(amount, mobType, kbX, kbZ) {
             if (player.mode === PlayerController.Survival) {
                 player.applyHitKnockback(kbX, kbZ)
-                playerState.takeDamage(amount)
+                // t311 据 mobType 映射致死来源（PlayerState::DeathCause）：蹒跚者/骸骨/蜘蛛近战或箭、潜行者爆炸。
+                //   EntityManager 与 PlayerState 两枚举在此汇合（QML 是唯一同时见两者的层），保持 PlayerState 与
+                //   EntityManager 解耦（不引入 C++ 反向依赖）。未知 mobType → Generic。
+                var cause = PlayerState.Generic
+                if (mobType === EntityManager.MobShambler) cause = PlayerState.Shambler
+                else if (mobType === EntityManager.MobBones) cause = PlayerState.Bones
+                else if (mobType === EntityManager.MobSpider) cause = PlayerState.Spider
+                else if (mobType === EntityManager.MobStalker) cause = PlayerState.Stalker
+                playerState.takeDamage(amount, cause)
             }
         }
         // t284 Stalker 爆炸（EntityManager detonateStalker 发）：爆炸的单一音/视反馈入口 —— 播爆炸音
@@ -817,7 +889,7 @@ Window {
     // 语义事件，呈现层只消费）。PlayerController 不持有 PlayerState，保持单向事件流、分层干净。
     Connections {
         target: player
-        function onFallDamageTaken(hp) { playerState.takeDamage(hp) }
+        function onFallDamageTaken(hp, cause) { playerState.takeDamage(hp, cause) } // t311 透传致死来源（Fall/Suffocation/Drowning/Starvation）
         // t238 饥饿回血 → PlayerState.heal（饱腹态每 4s 回 1HP；同 fallDamageTaken→takeDamage 反向配对）。
         function onHealed(hp) { playerState.heal(hp) }
         // t202 气泡值更新 → PlayerState.air（Physics 层算时序、Game 层持显值、呈现层路由；同 fallDamageTaken→
@@ -3336,6 +3408,11 @@ Window {
 
     // t88 火把位置列表（火把伪光源 Repeater 的 model；blockPlaced/blockBroken/worldChanged 维护）。
     ListModel { id: torchPositions }
+    // t312 聊天历史（PLAN §2 UI 层呈现态）：{sender, text, isSystem}。玩家消息（openChat 输入）+
+    //   系统播报（死亡原因等）共入此列表。单机无联机服务端 → 历史不持久化（回主菜单 / 切世界清空，
+    //   见 returnToMenu / enterWorld）。Phase 3 联机接入时改为协议层收发（LocalServer/RemoteServer）。
+    //   上下限由 appendChatMessage 维持（chatHistoryMax=50）。
+    ListModel { id: chatMessages }
     // t121：原此处为 nightTint 全屏深蓝 Rectangle（地形 NoLighting 不随昼夜变暗的兜底）。
     //   现顶点色承载天光遮蔽 + 材质 baseColor 承载昼夜乘子（见 terrainLight）后已移除该叠层——
     //   全屏 tint 会再压暗 HUD/粒子等非地形层；改走 per-vertex + baseColor 后地形由网格数据精确控光、
@@ -3371,9 +3448,15 @@ Window {
             if (window.craftingTableOpen) window.craftingTableOpen = false
             if (window.furnaceOpen) window.furnaceOpen = false
             if (window.chestOpen) window.chestOpen = false
+            if (window.chatOpen) window.chatOpen = false   // t312：死亡关聊天（死亡屏接管光标）
             window.returnHeldToHotbar()
             player.dropAllItems()     // t175：死亡掉落整个背包到死亡点 + 清空背包
             player.release()           // 释放指针 → 光标可见（点「立即重生 / 回主菜单」按钮）
+            // t312 死亡播报：聊天栏推一条系统消息（机制等价 MC 1.0 死亡消息「<player> <death reason>」）。
+            //   文案 = 玩家名 + 空格 + playerState.deathCauseText（如「玩家 从高处坠落」）。deathCauseText 是
+            //   Q_PROPERTY（非 Q_INVOKABLE）→ 属性访问不带括号；带括号会抛 TypeError 致播报静默失败（lessons：
+            //   QML/JS 信号处理器内异常被吞、功能静默退化）。t313 死亡屏与本期聊天用同一份 Game 层权威文案。
+            window.appendChatMessage("", window.playerName + " " + playerState.deathCauseText, true)
         }
     }
 
@@ -3618,6 +3701,18 @@ Window {
         focus: true
         Keys.onPressed: (e) => {
             if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
+            // t312 聊天栏打开：T / Enter（playing 且非死亡态且无背包/工作台/熔炉/箱子面板开）。机制等价
+            //   MC 1.0 T 打开聊天。Enter 与 T 同义（spec「T/Enter 打开聊天栏」）；Esc/E 在背包面板作关面板，
+            //   故聊天打开键不与 Esc/E 冲突（聊天开着时 Esc 由 chatInput 自己处理关聊天，见下方 TextField）。
+            //   聊天开期间 keyInput 不持焦点（chatInput 持焦）→ movement 键不透传 player（无需额外守卫，
+            //   与背包面板同模式）。
+            if ((e.key === Qt.Key_T || e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
+                    && window.appState === "playing" && !playerState.dead
+                    && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen && !window.chestOpen
+                    && !window.chatOpen) {
+                window.openChat()
+                e.accepted = true; return
+            }
             // 背包（t18）：E 开关。Esc 在背包打开时关闭（captured=false 时 Esc 不被 C++ 事件过滤器
             // 拦截，落到 QML；captured=true 时 Esc 仍走 C++ → release → 暂停叠层，原行为不变）。
             // t50：工作台面板同样 E/Esc 关（与背包互斥）。t87：熔炉面板亦同（E / Esc 关）。
@@ -3743,6 +3838,7 @@ Window {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: (event) => {
                 if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen) return
+                if (window.chatOpen) return   // t312：聊天开时不切 hotbar（打字时滚轮误触；聊天 input 顶层已捕获，双重保险）
                 // t210 滚轮行为按模式切换：观察者（spectator）滚轮调 flySpeedMul（有效 4..20 blocks/sec，
                 //   前滚加速 / 后滚减速）；创造 / 生存滚轮恒切 hotbar 槽（无论是否在飞）。即「滚轮语义」由
                 //   player.mode 单一派生，不再混入 player.flying 运动态——创造飞态滚轮也能选 hotbar（t159 旧逻辑
@@ -3764,12 +3860,14 @@ Window {
     // 背包 / 工作台打开时（同为 !captured 态）抑制本叠层 —— 三者互斥，避免面板下面透出暂停叠层。
     // t78：死亡态（playerState.dead）也抑制本叠层 —— 死亡时同样 !captured，但应由死亡界面（z=180）接管，
     //   不让「点击恢复」的暂停叠层透出（死亡必须走按钮，不可点击恢复）。
+    // t312：聊天栏打开时（同为 !captured 态）抑制本叠层 —— 聊天 input（z=170）接管光标打字。
     Item {
         id: pauseOverlay
         anchors.fill: parent
         visible: window.appState === "playing" && !player.captured
                  && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen && !window.chestOpen
                  && !playerState.dead
+                 && !window.chatOpen
         z: 100
         Rectangle {
             anchors.fill: parent
@@ -3800,6 +3898,9 @@ Window {
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "[LMB] break block   [RMB] place block   [Q] drop item"
+                       color: "#999999"; font.pixelSize: 12
+                       anchors.horizontalCenter: parent.horizontalCenter }
+                Text { text: "[T] / [Enter] open chat   (Enter send · Esc cancel)"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 Text { text: "[F6] toggle fast day/night (" + (worldClock.debugFast ? "ON · ~30s" : "OFF · ~20min") + ")"
@@ -3975,7 +4076,7 @@ Window {
             }
         }
     }
-    // t78 死亡界面（仅 Survival 血量 0 触发）：半透黑遮罩 + 「你死了」+ [立即重生] / [回主菜单]。
+    // t78 死亡界面（仅 Survival 血量 0 触发）：半透黑遮罩 + 「你死了」+ 死因文案 + [立即重生] / [回主菜单]。
     //   触发链：PlayerState.takeDamage 扣血到 ≤0 → dead=true + emit died → 上方 Connections(onDied) 释放指针
     //   + 关背包/工作台；本叠层 visible 绑 playerState.dead（deadChanged NOTIFY 自动显隐）。
     //   z=180（高于暂停 100 / 背包 150，低于主菜单 200 → 「回主菜单」后 MainMenu 覆盖）。
@@ -3984,6 +4085,11 @@ Window {
     //   「全屏遮罩 onClicked 会让点外部误关」 → 这里无 close 语义，纯吸收防穿透到背后游戏层）。
     //   分层（PLAN §2）：死亡态属 PlayerState（Game 层），呈现层只读消费 + 按钮调 Q_INVOKABLE（不反向写数值）。
     //   GUI 自绘原创（Rectangle 组合，无 MC GUI PNG；§9 override (a)）。
+    // t313 死因文案：标题「你死了」下显一行 `<玩家> <死因>`（机制等价 MC 1.0 死亡屏消息），文案与 onDied
+    //   路由的聊天播报（同文件）**同格式、同源**（playerName + 空格 + playerState.deathCauseText()）——
+    //   spec 要求「两处:聊天+死亡屏」用同一份 Game 层权威文案（deathCauseText），呈现层不另存副本。
+    //   deadChanged 置 dead=true 同帧已发 deathCauseChanged（playerstate.cpp takeDamage 致死分支），故本绑定的
+    //   deathCauseText 在死亡屏显出时已是本局致死来源（非上一局残留）。respawn 复位死因 → 死亡屏隐时同步清空。
     Item {
         id: deathOverlay
         anchors.fill: parent
@@ -3995,16 +4101,30 @@ Window {
             MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后游戏层
         }
         Rectangle {
-            width: 360; height: 210; radius: 10
+            width: 360; height: 244; radius: 10
             anchors.centerIn: parent
             color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
             Column {
                 anchors.centerIn: parent; spacing: 22
-                Text {
-                    text: "你死了"
-                    color: "#ff5555"; font.pixelSize: 30; font.bold: true
+                // 标题 + 死因文案（t313）：内层紧排（spacing 6），作为外层 Column 单个子项，不打乱按钮间距。
+                Column {
+                    spacing: 6
                     anchors.horizontalCenter: parent.horizontalCenter
-                    style: Text.Outline; styleColor: "#000000"
+                    Text {
+                        text: "你死了"
+                        color: "#ff5555"; font.pixelSize: 30; font.bold: true
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        style: Text.Outline; styleColor: "#000000"
+                    }
+                    // t313 死因副标题（灰白小字 + 黑描边，亮/暗背景均可读）：玩家名 + 死因，与聊天播报同格式。
+                    Text {
+                        // deathCauseText 是 Q_PROPERTY（READ 访问器、非 Q_INVOKABLE）→ 属性访问不带括号
+                        //   （带括号会在绑定求值时抛 TypeError「not a function」，死亡屏死因显示为空）。
+                        text: window.playerName + " " + playerState.deathCauseText
+                        color: "#c8c8c8"; font.pixelSize: 15
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        style: Text.Outline; styleColor: "#000000"
+                    }
                 }
                 // 立即重生（主操作，绿色强调；按钮风格对齐 MainMenu）
                 Rectangle {
@@ -4043,6 +4163,156 @@ Window {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: window.deathReturnToMenu()
                     }
+                }
+            }
+        }
+    }
+
+    // t312 聊天显示叠层（PLAN §2 UI 层，纯呈现）：左下角显示最近若干条聊天 / 系统消息，玩家消息显
+    //   「名: 文本」、系统消息（isSystem=true，如死亡播报）显灰红文本无「名:」前缀。机制等价 MC 1.0
+    //   聊天行（左下贴底、半透描边、随新消息滚入）。
+    //   显隐：playing 且（指针捕获中 = 正常游戏 / 聊天 input 开着）才显；暂停 / 背包 / 死亡 / 菜单态隐
+    //   （被更高 z 叠层覆盖或非游戏态）。z=95（高于 HUD/F3 z=50，低于暂停 100 → 暂停时被遮，符合「暂停
+    //   不显聊天」）。GUI 自绘原创（Text + 半透背板，无 MC GUI PNG；§9 override (a)）。
+    Item {
+        id: chatDisplay
+        visible: window.appState === "playing" && (player.captured || window.chatOpen)
+                 && chatMessages.count > 0
+        // 锚左下：底部留出 hotbar 高度（hotbar 底边距 18 + 槽高 46 + vitalsBar ~20 ≈ 90），左贴边 12。
+        //   不与底部居中的 hotbar 重叠（hotbar 居中、聊天靠左，水平错开）。
+        anchors.left: parent.left
+        anchors.leftMargin: 12
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 96
+        width: 460
+        z: 95
+
+        // 由下往上排列最近 N 条（count 受 chatHistoryMax 限；显示窗最多 chatVisibleLines 行，超出由
+        //   ListView 自管滚动 / 裁剪）。用 ListView 而非 Column：ListView 对 append/remove 有原生动画 +
+        //   自动滚到底（positionViewAtEnd），无需手动管布局。verticalLayoutDirection BottomToTop 让最新
+        //   在底部（贴近 input 输入位置 / 符合聊天从下往上堆叠的观感）。
+        readonly property int chatVisibleLines: 10
+        readonly property int chatLineHeight: 18
+
+        ListView {
+            id: chatListView
+            anchors.fill: parent
+            // 从底向顶布局：index 0（最早）在顶、最新（count-1）在底。新消息 append 后滚到底（最新可见）。
+            verticalLayoutDirection: ListView.BottomToTop
+            interactive: window.chatOpen   // 仅聊天开着时可滚回顾历史；游戏中（捕获态）非交互（防误触）
+            clip: true
+            model: chatMessages
+            // delegate：单行 Text。玩家消息「名: 文本」（名段浅蓝 + 文本白，富文本分段染色）；系统消息
+            //   （isSystem，如死亡播报）整行灰红纯文本、无「名:」前缀。HTML 转义防注入（用户文本 / 名进 span）。
+            delegate: Item {
+                width: chatDisplay.width
+                height: msgText.implicitHeight
+                Text {
+                    id: msgText
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    font.pixelSize: 14
+                    style: Text.Outline; styleColor: Qt.rgba(0, 0, 0, 0.85)   // 描边 → 亮/暗地形背景均可读
+                    // 系统消息纯文本走 Text.color（灰红）；玩家消息富文本（span 内显式设色，Text.color 被覆盖）。
+                    color: model.isSystem ? "#ff8088" : "#ffffff"
+                    textFormat: model.isSystem ? Text.PlainText : Text.RichText
+                    // 单一 text 绑定（避免 onTextChanged 改 text 的写后读时序坑）：系统消息原样；玩家消息拼富文本。
+                    text: {
+                        const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                        if (model.isSystem) return model.text
+                        return "<span style=\"color:#a8c8ff\">" + esc(model.sender)
+                             + ":</span> <span style=\"color:#ffffff\">" + esc(model.text) + "</span>"
+                    }
+                }
+            }
+            // 自动滚到底（最新可见）：count 变（append / remove 溢出）时定位到末尾。
+            onCountChanged: Qt.callLater(positionViewAtEnd)
+        }
+    }
+
+    // t312 聊天淡出计时器：游戏中（非聊天开态）新消息显若干秒后整体淡出（贴近 MC 旧消息渐隐观感）。
+    //   仅触发一次淡出动画（chatDisplay.opacity 1→0），重新 append 重启计时器并复位 opacity=1。
+    //   聊天开着（chatOpen）时不淡出（用户在打字 / 读历史）。
+    Timer {
+        id: chatFadeTimer
+        interval: 8000
+        repeat: false
+        onTriggered: {
+            if (!window.chatOpen) chatFadeOut.start()
+        }
+    }
+    // 淡出动画（单 NumberAnimation）。无 alwaysRunToEnd：新消息到来时 Connections 先 stop() 再复位
+    //   opacity=1.0 —— alwaysRunToEnd 会让 stop() 后动画仍跑到末尾（opacity→0）覆盖复位，造成「新消息也淡」。
+    NumberAnimation {
+        id: chatFadeOut
+        target: chatDisplay; property: "opacity"; to: 0.0; duration: 1200; easing.type: Easing.OutQuad
+    }
+    // appendChatMessage 调 chatFadeTimer.restart()；restart 前先把 opacity 复位（停掉进行中的淡出，重新可见）。
+    //   用 Binding 监听 count 变化（restart 已在 appendChatMessage 内做，此处仅复位 opacity）。
+    Connections {
+        target: chatMessages
+        function onCountChanged() { chatFadeOut.stop(); chatDisplay.opacity = 1.0 }
+    }
+
+    // t312 聊天输入栏（仅 chatOpen 时显）：左下贴底、TextInput + 提示符「>」+ 半透背板。z=170（高于暂停 100 /
+    //   HUD 50，低于死亡 180 → 死亡时死亡屏仍在上，但死亡态不开聊天故不冲突）。Enter 发送、Esc 取消（关闭）。
+    //   用 TextInput（纯 QtQuick）而非 TextField —— Main.qml 是根文档，顶层 import QtQuick.Controls 是硬加载
+    //   期依赖（部署缺口 → app exit -1，见 lessons-learned「顶层 import 是硬依赖」）；TextInput 无此风险，
+    //   且 WorldList.qml 已用同模式（项目未链接 Qt6::QuickControls2，TextInput 是既已验证的可编辑文本路径）。
+    //   聊天 input 取焦点后 keyInput 不再透传 movement 键给 player（打字期间玩家静止，机制等价 MC 聊天冻结输入）。
+    //   分层（PLAN §2）：纯呈现层；输入文本不入 Game/World 层（单机无服务端），Phase 3 联机时改走协议层收发。
+    Item {
+        id: chatInputBar
+        visible: window.appState === "playing" && window.chatOpen
+        anchors.left: parent.left
+        anchors.leftMargin: 12
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 96
+        width: 460
+        height: 30
+        z: 170
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.55)
+            radius: 4
+        }
+        // 提示符「>」（MC 风格聊天前缀；浅灰）。
+        Text {
+            id: chatPrompt
+            anchors.left: parent.left
+            anchors.leftMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            text: ">"
+            color: "#b0b0b0"
+            font.pixelSize: 14
+            font.bold: true
+        }
+        TextInput {
+            id: chatInput
+            anchors.left: chatPrompt.right
+            anchors.leftMargin: 6
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            color: "#ffffff"
+            font.pixelSize: 14
+            selectByMouse: true
+            clip: true
+            verticalAlignment: Text.AlignVCenter
+            // 聚焦后立刻全选（防 appendChatMessage 残留旧文本；首次打开文本恒空故无害，双保险）。
+            onActiveFocusChanged: if (activeFocus) selectAll()
+            // Enter 发送 / Esc 取消。Esc 走 Keys（非 C++ 事件过滤器：聊天态 !captured，Esc 不被拦截落 QML）。
+            Keys.onPressed: (event) => {
+                if (event.isAutoRepeat) return
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    window.sendChat()
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Escape) {
+                    chatInput.text = ""    // 取消丢弃草稿
+                    window.closeChat(true)
+                    event.accepted = true
                 }
             }
         }
@@ -4140,8 +4410,8 @@ Window {
                     ? "  fly: " + player.flySpeed.toFixed(1) + " b/s (x" + player.flySpeedMul.toFixed(2) + ")"
                     : "") // t159/t210：飞态额外报当前有效飞速 + 倍数（仅 spectator 滚轮可调；创造飞态恒 x1.00）
                  + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
-                 // t276：world 行读 worldChunksPerSide（权威）+ theWorld.height（literal 64，非绑定，无 loop），
-                 //   不读 theWorld.width/depth（绑定链 → binding loop）。
+                 // t276：world 行读 worldChunksPerSide（权威）+ theWorld.height（literal，非绑定，无 loop），
+                 //   不读 theWorld.width/depth（绑定链 → binding loop）。t307：height 64→128。
                  + "\nworld: " + (window.worldChunksPerSide * 16) + "×" + (window.worldChunksPerSide * 16) + "×" + theWorld.height
                  + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"
                  + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr // t178：mesh 模式 + 顶点/三角（greedy 大幅降）

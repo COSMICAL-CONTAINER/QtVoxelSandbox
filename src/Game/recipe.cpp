@@ -256,6 +256,12 @@ static_assert(RecipeRegistry::StickId == kStickId, "recipe.h StickId 与 .cpp kS
 static_assert(RecipeRegistry::CoalId        == 0x201, "CoalId 须与 BlockRegistry::CoalOre.dropId 字面量 0x201 一致");
 static_assert(RecipeRegistry::IronOreDropId == 0x202, "IronOreDropId 须与 BlockRegistry::IronOre.dropId 字面量 0x202 一致");
 static_assert(RecipeRegistry::IronIngotId   == 0x203, "IronIngotId 须为材料段序号 0x203");
+// t308 铜/金原矿 + 锭跨层契约（同 Coal/Iron 模式）：Core 层 blockregistry.cpp CopperOre/GoldOre 的 dropId 用
+//   字面量 0x21C/0x21E（Core 不 include Game 头）；本处钉死 recipe.h 常量 == 字面量，防漂移致掉落 / 冶炼断裂。
+static_assert(RecipeRegistry::CopperOreDropId == 0x21C, "CopperOreDropId 须与 BlockRegistry::CopperOre.dropId 字面量 0x21C 一致");
+static_assert(RecipeRegistry::CopperIngotId   == 0x21D, "CopperIngotId 须为材料段序号 0x21D");
+static_assert(RecipeRegistry::GoldOreDropId   == 0x21E, "GoldOreDropId 须与 BlockRegistry::GoldOre.dropId 字面量 0x21E 一致");
+static_assert(RecipeRegistry::GoldIngotId     == 0x21F, "GoldIngotId 须为材料段序号 0x21F");
 } // namespace
 
 // ── 匹配算法 ──
