@@ -1193,6 +1193,7 @@ float PlayerController::bowDrawProgress() const
 //   selectedBlock 已守 Air）。模式门控：观察者不能拉弓（沿用 placeBlock 入口 canPlace() 守卫；射箭是「使用」
 //   语义，spectator 不交互）。无需命中（弓瞄准走视线方向，不依赖射线命中实体方块）。持物变更（press→begin 间
 //   切槽）→ 不进。蓄力期间 step() 水平速度 ×kBowSlowMul（spec「拉弓减速」）。
+// t322 生存拉弓须背包有箭（机制等价 MC 1.0 生存弓无箭不可拉）；创造射箭免费（不查箭）。
 void PlayerController::beginBowDraw()
 {
     // 记录物理右键按下态已在 eventFilter（endBowDraw 据松开边缘触发，不依赖此）；m_rightDown 由面包路径管理，
@@ -1200,16 +1201,19 @@ void PlayerController::beginBowDraw()
     if (!canPlace()) return; // 观察者不能拉弓（沿用 placeBlock 入口门控）
     if (!m_hotbar || !m_captured) return;
     if (m_hotbar->selectedItemId() != int(ToolRegistry::Bow)) return; // 持物非弓 → 不进
+    // t322：生存须背包有箭才可拉弓（机制等价 MC 1.0 生存弓无箭不可拉；创造射箭免费不查）。
+    if (m_mode == Survival && !findArrowInInventory().found) return;
     if (m_bowDrawing) return; // 已在拉弓 → 不重置（防重复 press 抖动重置进度）
     m_bowDrawing = true;
     m_bowDrawTime = 0.0f;
     emit bowDrawChanged();
 }
 
-// t304 右键松开：据蓄力射箭 + 清拉弓态。蓄力 < kBowMinChargeRatio / 无箭 → 不射（仅 cancel）。
+// t304 右键松开：据蓄力射箭 + 清拉弓态。蓄力 < kBowMinChargeRatio / 无箭（生存）→ 不射（仅 cancel）。
 //   射箭：算蓄力比 → 箭速（lerp min..max）+ 伤害（lerp min..max）；vel = 视线方向 × 箭速（pitch 已含 → 抛物由
 //   Arrow tick 重力生成）；origin = 眼位 + 视线 × 0.6（防贴墙 spawn 入墙即没）。生存消耗 1 箭 + 弓 -1 耐久
-//   （创造不耗）。需箭在背包（spec）—— findArrowInInventory 找不到则不射。射出后 swingArm（射箭挥手反馈）。
+//   （创造不耗）。射出后 swingArm（射箭挥手反馈）。
+// t322：生存须背包有箭才可射（每发消耗 1，机制等价 MC 1.0）；创造射箭免费（不查箭 / 不消耗 / 不损耐久）。
 void PlayerController::endBowDraw()
 {
     if (!m_bowDrawing) return; // 非拉弓态（面包松开 / 误触）→ no-op
@@ -1217,10 +1221,14 @@ void PlayerController::endBowDraw()
     cancelBowDraw(); // 清拉弓态（无论射否；松开即结束蓄力）
     // 蓄力不足 → 取消（不射，机制等价 MC「未拉足松开箭无力」）。
     if (prog < kBowMinChargeRatio) return;
-    if (!m_hotbar || !m_world || !m_entityManager) return;
-    // 需箭在背包（spec）。创造不消耗但**仍须**背包有箭（机制等价 MC 创造弓亦须箭）。
-    const ArrowSlot ar = findArrowInInventory();
-    if (!ar.found) return;
+    if (!m_world || !m_entityManager) return;
+    // t322：生存须背包有箭才可射 + 定位消耗槽；创造免费（不查箭，无限源射）。
+    ArrowSlot ar{false, 0, 0};
+    if (m_mode == Survival) {
+        if (!m_hotbar) return;
+        ar = findArrowInInventory();
+        if (!ar.found) return;
+    }
     // 箭速 / 伤害按蓄力 lerp（charge² 让满弓手感更利：短蓄力箭慢弱、满弓快强）。
     const float charge = std::clamp(prog, 0.0f, 1.0f);
     const float speed = std::lerp(kBowMinSpeed, kBowMaxSpeed, charge * charge);

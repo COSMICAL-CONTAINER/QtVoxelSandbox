@@ -281,7 +281,9 @@ public:
     //   （据蓄力射箭：消耗箭 + spawnArrowPlayer + 弓耐久 -1）。spec「长按右键拉弓 → 松开射箭」。
     //   beginBowDraw：仅持弓 + 可放置（非观察者，沿用 placeBlock 入口门控语义）+ 已捕获时进入；无需命中
     //   （弓瞄准走视线方向，不依赖射线命中实体方块）。蓄力期间 step() 减速（kBowSlowMul，spec「拉弓减速」）。
-    //   endBowDraw：蓄力 < kBowMinChargeRatio / 无箭 → 不射（仅 cancel）；满足 → 算速度 / 伤害射出。创造不耗箭 / 耐久。
+    //   endBowDraw：蓄力 < kBowMinChargeRatio → 不射（仅 cancel）；满足 → 算速度 / 伤害射出。创造射箭免费（不查箭 /
+    //     不消耗 / 不损耐久）；生存须背包有箭 + 每发消耗 1 箭 + 弓 -1 耐久（t322）。
+    //   t322：生存拉弓 / 射箭均须背包有箭（机制等价 MC 1.0 生存弓无箭不可拉 / 射）；创造完全免费。
     Q_INVOKABLE void beginBowDraw();
     Q_INVOKABLE void endBowDraw();
     // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 装入 hotbar。仅指针捕获时生效
