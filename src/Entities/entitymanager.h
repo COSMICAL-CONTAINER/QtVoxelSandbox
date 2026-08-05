@@ -700,6 +700,11 @@ private:
     static constexpr float kArrowLifetime    = 5.0f;   // 箭最长存活（秒；兜底移除）
     static constexpr int   kArrowDamage      = 2;      // 命中伤害（HP）
     static constexpr float kArrowHitHalfW    = 0.4f;   // 箭 vs 玩家命中盒 XZ 外扩（blocks）
+    // t324 玩家自身箭自伤的发射者忽略窗口（spec「玩家自身箭下落伤害」；机制对齐 MC 1.0 箭出膛短时不伤发射者）。
+    //   玩家射出的箭（arrowFromPlayer）飞行此秒数后才「武装」可命中玩家自己（防贴脸出膛误伤 —— 箭 spawn 在玩家
+    //   外扩命中盒内，未武装前穿过不触发）。取 0.2s：远大于箭飞出玩家命中盒所需（~0.01s @ 14 blocks/s）、远小于
+    //   最低蓄力朝天箭往返时间（~0.7s）→ 既不漏 point-blank 自伤、也不漏「朝天落箭砸自己」。
+    static constexpr float kArrowSelfArmDelay = 0.2f;  // 玩家箭自伤武装延迟（秒；发射者忽略窗口）
     // t323 箭嵌入方块常量（spec「箭嵌在命中面（半嵌可见）+ 玩家箭可拾 + 嵌入箭 ~60s 消失」；机制对齐
     //   MC 1.0 箭命中方块嵌入可回收）。数值为本工程量身调，非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）。
     //   - kStuckArrowLifetime：嵌入箭最长存活（秒；命中方块瞬间重置 → ~60s 后 despawn，防永久滞留堆积）。

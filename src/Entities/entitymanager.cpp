@@ -1382,6 +1382,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
             bool remove = false;
             bool hitPlayer = false;
+            int hitPlayerDmg = 0; // t324 命中玩家造成的伤害（骷髅箭=kArrowDamage / 自身箭=arrowDamage；日志用）
 
             // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积）。
             if (e.arrowLife <= 0.0f) remove = true;
@@ -1419,11 +1420,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   t290 观察者交互门控：playerTargetable=false（创造/观察者）→ 箭直接穿过玩家不判定命中（机制等价
             //   MC 1.0 创造/观察者无敌 —— 既不射（aiArcher 不射击非生存玩家）也不被命中；防 Survival→模式切换
             //   后半空中的箭仍戳到刚转无敌的玩家）。
-            //   t304 玩家射出的箭（arrowFromPlayer=true）不判玩家命中 —— 玩家箭只打 mob（下方分支），不会误伤
+            //   t304 玩家射出的箭（arrowFromPlayer=true）默认不判玩家命中 —— 玩家箭只打 mob（下方分支），不会误伤
             //   玩家自己（机制等价 MC 1.0 玩家箭不伤玩家）。
+            //   t324 自身箭下落自伤例外：玩家射出的箭飞行 kArrowSelfArmDelay（发射者忽略窗口）后「武装」—— 下落砸中
+            //   玩家时也扣 arrowDamage HP（机制等价 MC 1.0 玩家可被自己朝天射落的箭砸伤）。窗口防贴脸出膛误伤（箭
+            //   spawn 在玩家外扩命中盒内，未武装前穿过不触发）。骷髅箭（arrowFromPlayer=false）恒命中玩家。
             //   t321 全局节流门控：m_playerHitCooldown>0（玩家刚被任一 mob 命中，节流无敌帧内）→ 跳过玩家命中判定
             //   （箭穿过玩家不触发伤害、不移除，继续飞行），与 aiHostile attack 节流一致 —— 防多弓手齐射秒杀玩家。
-            if (!remove && playerTargetable && !e.arrowFromPlayer && m_playerHitCooldown <= 0.0f) {
+            const float flightTime = kArrowLifetime - e.arrowLife; // 已飞行秒数（arrowLife 从 kArrowLifetime 递减）
+            const bool selfArmed = !e.arrowFromPlayer || flightTime >= kArrowSelfArmDelay;
+            if (!remove && playerTargetable && selfArmed && m_playerHitCooldown <= 0.0f) {
                 const float px = listener.x(), py = listener.y(), pz = listener.z();
                 const float ex = px - listenerHalfW - kArrowHitHalfW;
                 const float ey = py - kArrowHitHalfW;
@@ -1442,9 +1448,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         if (tlen > 1e-3f) { kbX = tx / tlen; kbZ = tz / tlen; }
                         else { kbX = 1.0f; }
                     }
-                    emit mobAttackedPlayer(kArrowDamage, int(MobBones), kbX, kbZ);
+                    // t324 命中伤害 / 死因来源分流：骷髅箭（arrowFromPlayer=false）= kArrowDamage / MobBones（t283 旧路径）；
+                    //   玩家自身箭（arrowFromPlayer=true）= arrowDamage（蓄力 1..6）/ mobType=-1（无 mob 来源 → 呈现层
+                    //   死因映射兜底 Generic，机制等价 MC「被自己的箭砸死」无特定凶手）。
+                    const int dmg = e.arrowFromPlayer ? e.arrowDamage : kArrowDamage;
+                    const int srcMobType = e.arrowFromPlayer ? -1 : int(MobBones);
+                    emit mobAttackedPlayer(dmg, srcMobType, kbX, kbZ);
                     m_playerHitCooldown = kPlayerHitThrottle; // t321 串行化玩家受击（多弓手轮替命中）
                     hitPlayer = true;
+                    hitPlayerDmg = dmg;
                     remove = true;
                 }
             }
@@ -1485,7 +1497,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             if (remove) {
                 toRemove.push_back(idx);
                 dirty = true;
-                if (hitPlayer) qCInfo(lcEnt) << "arrow hit player for" << kArrowDamage << "HP";
+                if (hitPlayer) qCInfo(lcEnt) << "arrow hit player for" << hitPlayerDmg << "HP";
             } else {
                 e.pos = next; // 继续飞行
                 dirty = true;
