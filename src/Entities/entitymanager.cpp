@@ -1124,29 +1124,19 @@ void EntityManager::detonateStalker(Entity &e, World *world, const QVector3D &pl
         }
     }
     if (world && !originInWater) {
-        const int r = int(std::ceil(kExplosionRadius));
-        const float r2 = kExplosionRadius * kExplosionRadius;
-        for (int dz = -r; dz <= r; ++dz) {
-            for (int dy = -r; dy <= r; ++dy) {
-                for (int dx = -r; dx <= r; ++dx) {
-                    const float fdx = float(dx), fdy = float(dy), fdz = float(dz);
-                    if (fdx * fdx + fdy * fdy + fdz * fdz > r2) continue; // 球外跳过
-                    const int bx = cx0 + dx, by = cy0 + dy, bz = cz0 + dz;
-                    if (bx < 0 || bz < 0) continue; // 世界 XZ 边界外（World 约定）→ 不写
-                    const quint8 b = world->blockAt(bx, by, bz);
-                    if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water)
-                        continue; // 空气 / 基岩 / 水不破坏
-                    world->setWaterSilent(bx, by, bz, BlockRegistry::Air, 0);
-                    // t297 爆炸掉落（~50% / 破坏块）：取 BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落，
-                    //   非原方块 id）→ 概率门控（kExplosionDropChance）→ emit explosionDroppedItem → 呈现层
-                    //   转发 ItemEntityManager.spawnItem 在该格生成掉落实体（机制等价 MC 爆炸把被毁方块弹成物品）。
-                    //   dropId<=0（如 leaves 默认 0 / 矿石须冶炼类）→ 不掉。用 QRandomGenerator（玩家交互掉落
-                    //   的随机性，非 worldgen 确定性范畴 §2-K）。
-                    const int dropItemId = BlockRegistry::dropId(b);
-                    if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
-                        emit explosionDroppedItem(bx, by, bz, dropItemId);
-                }
-            }
+        // t320 批量破坏：球内所有破坏块走 World::destroySphereSilent 一次收口（N 写 + 1 次 refloodBox +
+        //   1 次 emit worldChanged + 1 次 clearAllDirty），替代旧逐块 setWaterSilent 的「重建风暴」
+        //   （每块 1× emit + 1× recomputeLightAround → 数十次 mesh 重建请求 / 数十次光场重 flood → 一帧数百 ms）。
+        //   返回被破坏块（坐标 + 原 id），caller 据原 id 派生掉落物。
+        const auto destroyed = world->destroySphereSilent(cx0, cy0, cz0, kExplosionRadius);
+        // t297 爆炸掉落（~50% / 破坏块）：取 BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落，非原方块 id）
+        //   → 概率门控（kExplosionDropChance）→ emit explosionDroppedItem → 呈现层转发 ItemEntityManager.spawnItem
+        //   在该格生成掉落实体（机制等价 MC 爆炸把被毁方块弹成物品）。dropId<=0（如 leaves 默认 0 / 矿石须冶炼类）
+        //   → 不掉。用 QRandomGenerator（玩家交互掉落的随机性，非 worldgen 确定性范畴 §2-K）。
+        for (const World::DestroyedVoxel &d : destroyed) {
+            const int dropItemId = BlockRegistry::dropId(d.oldId);
+            if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
+                emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
         }
     }
 

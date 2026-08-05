@@ -173,6 +173,22 @@ public:
     //   C++ 调，破原木后触发）。
     //   分层（PLAN §2）：本方法属 World 层，只读 / 写 m_chunks + lightField + 发 worldChanged。
     void decayLeavesAround(int x, int y, int z);
+    // t320 爆炸批量破坏（修 Stalker 爆炸后 FPS 崩塌 / 内存爆涨；机制等价 MC 苦力怕球形爆破的批量化）。
+    //   根因：detonateStalker 旧路径对球内**每块**调 setWaterSilent → 每块 1× emit worldChanged + 1×
+    //   recomputeLightAround（±15 盒 ~50k 体素）+ 触发 QML 各 worldChanged Connections 一次。半径 3 球
+    //   破坏 ~30-100 块 → 一次爆炸 = 数十次 mesh 重建请求 + 数十次光场重 flood + 数十次 QML 重算 = 一帧
+    //   垼掉数百 ms（FPS 8-9）。
+    //   修法：本入口收口整个球的破坏 —— 逐块 m_chunks.setBlock 直写 Air + 标脏（**不** emit worldChanged、
+    //   **不** clearAllDirty、**不** per-block recomputeLightAround），末尾对受影响球外接盒做**一次**
+    //   refloodBox（doSky=true，遮光块破坏影响天光列）+ **一次** emit worldChanged + **一次** clearAllDirty
+    //   （机制同 decayLeavesAround 批量清叶：N 写 1 emit，避重建风暴）。
+    //   跳过 Air / Bedrock / Water（不破坏水体 / 基岩 / 空气；机制等价 MC 爆炸不毁水体）。caller 已自判
+    //   "水中不破坏地形"（detonateStalker 的 originInWater 门控；水中爆炸仍伤玩家但不毁地形）。
+    //   返回被破坏块（坐标 + 原 id）列表，供 caller 据原 id 派生掉落物（BlockRegistry::dropId）。无破坏 → 空。
+    //   分层（PLAN §2）：本方法属 World 层，只读 / 写 m_chunks + lightField + 发 worldChanged；不依赖
+    //   Renderer / Physics / Game。EntityManager（Entities 层）C++ 调（同 setWaterSilent / setBlockFromEntity）。
+    struct DestroyedVoxel { int x, y, z; quint8 oldId; };
+    std::vector<DestroyedVoxel> destroySphereSilent(int cx, int cy, int cz, float radius);
 
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }

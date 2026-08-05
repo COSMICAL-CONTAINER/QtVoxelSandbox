@@ -175,9 +175,19 @@ private:
         m_freeSlots.push_back(idx);
         --m_liveCount;
     }
+    // t320 自然寿命到期驱逐（每帧 tick 调，独立于 world —— 菜单 / 暂停时仍消失）。扫所有活体，age（m_clock.elapsed()
+    //   − spawnMs）> kDespawnMs → releaseSlot（同拾取路径，aliveAt=false → delegate 隐藏 + 槽位可复用）。任一驱逐
+    //   → bump revision + emit entitiesChanged（驱动 QML 隐藏对应 delegate）。空集合 / 无到期 → no-op。
+    void despawnExpired();
 
     static constexpr int kCap = 200;             // 实体数上限（spec：>200 跳过 / 合并）
     static constexpr qint64 kPickupDelayMs = 500; // 新生免拾取期（ms；t53 让实体先可见再可拾）
+    // t320 掉落物自然寿命（ms；机制等价 MC 1.0 掉落物 5 分钟后消失）。tick() 内扫所有活体，age > kDespawnMs
+    //   → releaseSlot 移除（同拾取路径，aliveAt=false → delegate 隐藏 + 槽位可复用）。修爆炸后掉落物累积致
+    //   FPS / 内存崩塌：单次爆炸可产出数十个掉落物，多次爆炸 + 无自然消失 → 累积到 kCap(200) 高水位 →
+    //   数百 3D delegate 长期占驻 QQuick3D 场景图（slot-reuse 模型下 count 单调不降，达到 200 后永不回落）。
+    //   5 min 寿命让活跃掉落物在玩家走开 / 漏拾后自然退场，常态 active count 维持低个位到几十，远低于 cap。
+    static constexpr qint64 kDespawnMs = 300000;  // 掉落物寿命（ms；5 min，机制等价 MC 掉落物 5 min 消失）
     // t60 物理常量（与 PlayerController 同值：保持世界重力手感一致；lessons-learned「重力/跳跃常量」）。
     static constexpr float kGravity = 28.0f;  // 重力加速度（blocks/s²）
     static constexpr float kMaxFall = 78.4f;  // 终端下落速度（blocks/s；防无限加速）

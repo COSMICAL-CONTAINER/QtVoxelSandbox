@@ -15,16 +15,29 @@ ItemEntityManager::ItemEntityManager(QObject *parent) : QObject(parent)
 }
 
 // 生成掉落实体：存格中心坐标 + id + count，bump 版本号发 entitiesChanged → QML Repeater 追加 delegate。
-// spec「实体数量有上限（防溢出）」：达 kCap 跳过 + 告警（保留已有；最简防溢出策略）。
+// spec「实体数量有上限（防溢出）」。t320 cap 行为改 LRU 驱逐：达 kCap 时不再「跳过新 spawn」（玩家视角是
+//   破块没掉落 = bug），而是驱逐最老活体（min spawnMs）腾位（机制等价 MC kMaxItemEntities 滑动窗 + LRU
+//   驱逐）。爆炸瞬时产数十掉落物 + 已有累积 → 老掉落物让位给新，玩家始终能看到本次破块的产出；被驱逐者
+//   走 releaseSlot（同拾取路径，aliveAt=false → delegate 隐藏 + 槽位可复用）。
 // t64：count 字段支持整栈丢弃为 1 实体（如 4 木棒丢出仍 1 实体 count=4）；count<=0 视作 1。
 void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count)
 {
     if (itemId <= 0) return; // air / 非法：不产出（PlayerController 仅在 drop=true 时发，已过滤）
-    if (m_liveCount >= kCap) {
-        qCWarning(lcItem) << "item entity cap reached (" << kCap << "); spawn skipped at" << x << y << z;
-        return;
-    }
     if (count < 1) count = 1; // 缺省 / 非法 → 单件（与历史调用兼容）
+    if (m_liveCount >= kCap) {
+        // t320 LRU 驱逐最老活体（min spawnMs = max age）腾位。O(N) 扫，N≤kCap(200) 常数级。
+        int oldest = -1; qint64 oldestMs = 0;
+        for (int i = 0; i < int(m_entities.size()); ++i) {
+            if (!m_entities[size_t(i)].alive) continue;
+            if (oldest < 0 || m_entities[size_t(i)].spawnMs < oldestMs) {
+                oldest = i; oldestMs = m_entities[size_t(i)].spawnMs;
+            }
+        }
+        if (oldest >= 0) {
+            releaseSlot(oldest);
+            qCWarning(lcItem) << "item entity cap reached (" << kCap << "); evicted oldest at slot" << oldest;
+        }
+    }
     acquireSlot(ItemEntity{QVector3D(x + 0.5f, y + 0.5f, z + 0.5f), itemId, count, m_clock.elapsed()}); // t256 slot 复用
     ++m_revision;
     emit entitiesChanged();
@@ -112,6 +125,8 @@ bool ItemEntityManager::isPickupReady(int i) const
 // 单帧最大下移 = kMaxFall*0.05 ≈ 3.9 格（dt 钳 50ms）→ 列扫 ≤4 格，cheap；≤200 实体全程 O(数百)。
 void ItemEntityManager::tick(qreal dt, World *world)
 {
+    // t320 寿命到期驱逐先于物理（独立于 world —— 菜单 / 暂停时世界不模拟但掉落物照常老化消失）。
+    despawnExpired();
     if (!world || m_entities.empty()) return;
     bool dirty = false;
     for (auto &e : m_entities) {
@@ -231,6 +246,24 @@ void ItemEntityManager::tick(qreal dt, World *world)
         } else if (newY != e.pos.y()) {
             e.pos.setY(newY); // 自由下落（无命中）
             dirty = true;
+        }
+    }
+    if (dirty) { ++m_revision; emit entitiesChanged(); }
+}
+
+// t320 自然寿命驱逐（见头文件 despawnExpired 注释）。每帧 tick 起始调，先于物理。
+void ItemEntityManager::despawnExpired()
+{
+    if (m_entities.empty()) return;
+    const qint64 now = m_clock.elapsed();
+    bool dirty = false;
+    for (int i = 0; i < int(m_entities.size()); ++i) {
+        if (!m_entities[size_t(i)].alive) continue; // t256：跳过已释放的空槽
+        if (now - m_entities[size_t(i)].spawnMs > kDespawnMs) {
+            releaseSlot(i); // 同拾取路径（alive=false + 入 free list + --liveCount）
+            dirty = true;
+            qCInfo(lcItem) << "item entity at index" << i << "despawned after" << kDespawnMs
+                           << "ms (lifetime; live" << m_liveCount << "slots" << m_entities.size() << ")";
         }
     }
     if (dirty) { ++m_revision; emit entitiesChanged(); }

@@ -539,6 +539,47 @@ void World::decayLeavesAround(int x, int y, int z)
     qInfo("vo.edit: leaves decayed = %d", int(toDecay.size())); // 可观测：破原木后失撑叶计数
 }
 
+// t320 爆炸批量破坏（见 world.h 头注释；机制同 decayLeavesAround 批量清叶：N 写 1 emit，避重建风暴）。
+std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, int cz, float radius)
+{
+    std::vector<DestroyedVoxel> destroyed;
+    if (radius <= 0.0f || m_width <= 0 || m_depth <= 0 || m_height <= 0) return destroyed;
+    const int r = int(std::ceil(radius));
+    const float r2 = radius * radius;
+    int minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
+    bool any = false;
+    for (int dz = -r; dz <= r; ++dz)
+        for (int dy = -r; dy <= r; ++dy)
+            for (int dx = -r; dx <= r; ++dx) {
+                const float fdx = float(dx), fdy = float(dy), fdz = float(dz);
+                if (fdx * fdx + fdy * fdy + fdz * fdz > r2) continue; // 球外跳过
+                const int bx = cx + dx, by = cy + dy, bz = cz + dz;
+                if (bx < 0 || bz < 0 || bx >= m_width || bz >= m_depth || by < 0 || by >= m_height) continue;
+                const quint8 b = m_chunks.blockAt(bx, by, bz);
+                if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water)
+                    continue; // 空气 / 基岩 / 水不破坏（机制等价 MC 爆炸：不毁水体、不破基岩）
+                m_chunks.setBlock(bx, by, bz, BlockRegistry::Air); // 直写 + 标脏（含跨 chunk 边界邻接脏），不 emit
+                destroyed.push_back({bx, by, bz, b});
+                if (!any) { minX = maxX = bx; minY = maxY = by; minZ = maxZ = bz; any = true; }
+                else {
+                    if (bx < minX) minX = bx; if (bx > maxX) maxX = bx;
+                    if (by < minY) minY = by; if (by > maxY) maxY = by;
+                    if (bz < minZ) minZ = bz; if (bz > maxZ) maxZ = bz;
+                }
+            }
+    if (destroyed.empty()) return destroyed;
+    // 末尾统一：1 次 refloodBox 重算光场（球外接盒扩 1 格余量，doSky=true 两通道都算 —— 破坏的多为
+    //   solid 遮光块，天光列随之变化）+ 1 次 emit worldChanged + 1 次 clearAllDirty（机制同 decayLeavesAround）。
+    const int bx0 = std::max(0, minX - 1), by0 = std::max(0, minY - 1), bz0 = std::max(0, minZ - 1);
+    const int bx1 = std::min(m_width - 1, maxX + 1), by1 = std::min(m_height - 1, maxY + 1), bz1 = std::min(m_depth - 1, maxZ + 1);
+    refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
+    emit worldChanged();
+    m_chunks.clearAllDirty();
+    qInfo("vo.edit: explosion destroyed = %d (center %d,%d,%d r=%g)",
+          int(destroyed.size()), cx, cy, cz, double(radius)); // 可观测：一次爆炸的破坏块数
+    return destroyed;
+}
+
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。
 //   节流到 ~每 kSaplingTickInterval tick（5s）做一次成长判定窗口；每窗遍历全图树苗格，符合条件者按
 //   确定性散布概率长成 → 清除树苗 + 在原位生成完整橡树（placeTreeAt 主干 + 树叶球冠）。
