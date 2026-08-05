@@ -37,10 +37,14 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     //   maxDurability=384（机制等价 MC 1.0 弓耐久；每次射箭 -1）。tier/speedMul 仅记账占位（语义同剑：无对应
     //   采掘方块）。 displayName「弓」（§9 通用词；非 MC 专名）。
     /* Bow          */ {int(BlockRegistry::Bow),     1, 1.0f,  384, "bow",           "弓"},
+    // t300 剪刀（type=Shears=6）：speedMul=2.0 在 Wool.toolType=Shears 时激活（羊毛方块挖掘加速）；
+    //   其余方块持剪刀 miningSpeedMul 恒 1.0（类型不匹配，等同空手）。tier/speedMul 仅记账 —— 剪刀的真正用途是
+    //   右键剪羊毛（非挖掘）。maxDurability=238（机制等价 MC 1.0 剪刀耐久；每次剪羊毛 -1）。displayName「剪刀」。
+    /* Shears       */ {int(BlockRegistry::Shears),  1, 2.0f,  238, "shears",        "剪刀"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
-static_assert(int(ToolRegistry::ToolCount) == 16, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+static_assert(int(ToolRegistry::ToolCount) == 17, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
 } // namespace
 
 bool ToolRegistry::isTool(int itemId)

@@ -31,6 +31,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Torch:         return "icon_torch.png";          // t88 火把立方体图标（伪光源）
     case BlockRegistry::Chest:         return "icon_chest.png";          // t173 箱子立方体图标（顶盖缝+侧铁箍）
     case BlockRegistry::Farmland:      return "icon_farmland.png";       // t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
+    case BlockRegistry::Wool:          return "icon_wool.png";           // t300 羊毛立方体图标（奶白绒毛）
     // t244 cross 广告牌方块图标：草丛 / 小麦作物在世界内是 cross 形广告牌（透明底 + 像素草叶 / 麦穗），
     //   图标走 flat 2D 平面路径（同火把 icon_torch）—— build_cube_icons.py 的 render_flat_2d 直接放大源
     //   贴图保留 alpha → 「纯草叶 / 麦穗无方块底」。小麦作物图标取成熟阶段 7（金黄麦穗），肉眼一眼可辨。
@@ -180,7 +181,10 @@ QVariantList Hotbar::creativeTools() const
             int(ToolRegistry::SwordWood),    int(ToolRegistry::SwordStone),    int(ToolRegistry::SwordIron),
             // t304 弓（远程武器）：归工具段（maxStack=1，有耐久 384），故入 creativeTools（非 creativeMaterials）。
             //   拾取即满耐庋新弓；创造射箭不消耗耐久 / 箭（但仍需背包有箭才射得出，spec「需箭在背包」）。
-            int(ToolRegistry::Bow)};
+            int(ToolRegistry::Bow),
+            // t300 剪刀（功能性工具）：归工具段（maxStack=1，耐久 238），故入 creativeTools。拾取即满耐久新剪刀；
+            //   创造剪羊毛不消耗耐久（同弓 / 镐 创造无限源）。ToolIcon 据 toolType===Shears 自绘剪刀图标。
+            int(ToolRegistry::Shears)};
 }
 
 // 创造调色板材料段（t114）：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃（材料段 id >= 0x200，
@@ -307,7 +311,8 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::WoodDoor),          int(BlockRegistry::WoodTrapdoor),
              // t244 cross 广告牌方块（透明底 cutout；与火把同走非整立方渲染）：
              int(BlockRegistry::TallGrass),                                     // 草丛（worldgen 散布 / 杀草掉种子）
-             int(BlockRegistry::WheatCrop) };                                    // 小麦作物（state=阶段；种 0..7，图标显成熟态）
+             int(BlockRegistry::WheatCrop),                                    // 小麦作物（state=阶段；种 0..7，图标显成熟态）
+             int(BlockRegistry::Wool) };                                       // t300 羊毛方块（剪羊毛 / 杀羊掉落；可放置）
 }
 
 QString Hotbar::iconSourceAt(int slot) const

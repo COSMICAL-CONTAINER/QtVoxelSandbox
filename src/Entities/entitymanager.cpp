@@ -499,6 +499,38 @@ int EntityManager::mobTypeAt(int i) const
     return m_entities[size_t(i)].mobType;
 }
 
+// t300 第 i 只 mob 是否已被剪羊毛（仅 MobSheep 用；其余 mob 永远 false）。越界 → false。
+bool EntityManager::shearedAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobSheep) return false; // 仅 sheep 有剪羊毛态
+    return e.sheared;
+}
+
+// t300 剪羊毛（spec「玩家右键羊 + 持剪刀 → 羊变裸 + 掉羊毛物品」；机制等价 MC 1.0 剪羊毛）。
+//   未剪羊毛的活体 sheep → 翻 sheared=true + 设 regrowCooldown（防刚剪完立即吃草长回，spec「加重新长毛冷却」）+
+//   emit sheepSheared(坐标) 让呈现层 Connections 转发 ItemEntityManager.spawnItem 生成羊毛物品掉落实体
+//   （同 mobDied→spawnItem 模式；单向事件流，分层：Entities 层发语义事件、呈现层只消费）。bump revision
+//   → QML delegate 据 shearedAt 翻羊为裸外观。已剪羊毛 / 非 sheep / dead / 越界 → 静默早退（机制等价 MC：
+//   剪羊毛只对有毛的活体羊生效，已裸的羊右键无反应）。
+void EntityManager::shearSheep(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobSheep) return; // 仅 sheep 可剪
+    if (e.dead || !e.alive) return;                     // 尸体 / 空槽不可剪
+    if (e.sheared) return;                              // 已裸 → 无反应（不重复掉羊毛）
+    e.sheared = true;
+    e.regrowCooldown = kRegrowCooldown; // 剪完到能吃草方块重新长毛的硬冷却
+    // 羊毛掉落在羊当前格（floor(pos)，同 mobDied 坐标约定）→ 呈现层 spawnItem 在该格中心生成掉落实体。
+    const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
+    qCInfo(lcEnt) << "sheep sheared at slot" << i << "pos" << e.pos << "-> dropped wool at" << dx << dy << dz;
+    emit sheepSheared(dx, dy, dz);
+    ++m_revision;
+    emit entitiesChanged(); // bump → QML delegate 据 shearedAt 翻羊为裸外观
+}
+
 // t239 mob 当前血量（呈现层心条 / 攻击反馈）。非 Mob / 越界 → 0。
 int EntityManager::healthAt(int i) const
 {
@@ -1518,6 +1550,37 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         dirty = true;
                     } else {
                         e.eatCooldown = kEatScanInterval; // 空扫描 → 节流冷却
+                    }
+                }
+                // t300 剪羊毛后的羊吃草方块重新长毛（spec「裸羊站在草方块上偶尔吃它 → 长毛 + 草方块变泥土」；
+                //   机制等价 MC 1.0「羊吃草方块重新长毛」）。仅 sheared=true 的羊走本分支（未剪羊毛的羊
+                //   sheared=false 默认状态 → 跳过，无需重新长毛）。regrowCooldown 由 shearSheep 设 kRegrowCooldown
+                //   防刚剪完即长回；冷却到 + 站在草方块上（脚下方块 id==Grass）→ 翻 sheared=false（重新长毛）+
+                //   脚下草方块→泥土（setWaterSilent 静默写，同 sheepEatGrass 的草方块→泥土，非玩家破块 → 不发
+                //   broken/placed，免粒子/音/掉落噪音）。扫描用 kRegrowScanInterval 节流（每秒扫一次脚下方块，
+                //   足够肉眼可见的「重新长毛」事件，不每帧扫 blockAt 省开销）。
+                //   **不要求 idle**（行走中亦可触发，机制等价 MC 1.0 羊走过草方块即可能吃 —— 重新长毛是吃草方块的
+                //   派生效果，非主动行为，不强制站立）；spec「偶尔」表概率性，节流扫描间隔本身就是「偶尔」语义。
+                if (isSheep && e.sheared) {
+                    if (e.regrowCooldown > 0.0f) {
+                        e.regrowCooldown -= float(dt);
+                    } else {
+                        // 冷却到：扫脚下方块（AABB 底面下一格 = 支撑格）。是 Grass → 重新长毛 + 草方块→泥土。
+                        const int gx = qFloor(e.pos.x());
+                        const int gy = qFloor(e.pos.y() - e.halfH) - 1; // 脚位格（AABB 底面）下一格 = 支撑方块
+                        const int gz = qFloor(e.pos.z());
+                        if (gy >= 0 && world->blockAt(gx, gy, gz) == BlockRegistry::Grass) {
+                            world->setWaterSilent(gx, gy, gz, BlockRegistry::Dirt, 0); // 草方块→泥土（静默写）
+                            e.sheared = false;       // 重新长毛（QML 据 shearedAt 翻回毛茸外观）
+                            e.regrowCooldown = 0.0f; // 未剪羊毛不再推进（下次剪切重置）
+                            dirty = true;            // bump → QML 翻外观
+                            qCInfo(lcEnt) << "sheep regrew wool at" << e.pos
+                                          << "(grass block at" << gx << gy << gz << "-> dirt)";
+                        } else {
+                            // 站在非草方块上：保持冷却到 0 但不立即长毛；下次扫描间隔（kRegrowScanInterval）
+                            //   再查（防每帧扫）。设短冷却节流。
+                            e.regrowCooldown = kRegrowScanInterval;
+                        }
                     }
                 }
             }

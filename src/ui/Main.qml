@@ -834,6 +834,13 @@ Window {
             // MobTest（通用测试生物）/ MobStalker（潜行者；爆炸型，机制等价 MC 苦力怕无常规掉落）不掉落 —— 调试 /
             //   爆炸型无游戏内常规产出。Stalker 爆炸破坏方块的掉落由 detonateStalker 的 explosionDroppedItem 单独发（t297）。
         }
+        // t300 剪羊毛掉落（spec「剪刀右键羊 → 羊变裸 + 掉羊毛物品」）：EntityManager shearSheep 内发
+        //   sheepSheared(x,y,z)（坐标 = 羊当前格 floor(pos)，与 spawnItem 整数格约定一致）→ 转发到
+        //   ItemEntityManager.spawnItem 生成羊毛物品掉落实体（机制等价 MC 1.0 剪羊毛掉落羊毛；杀羊掉落羊毛
+        //   归 onMobDied 的 MobSheep 分支，二者独立 —— 剪羊毛不杀羊、杀羊前已剪则死时不再多掉）。
+        //   0x20E = RecipeRegistry::WoolId（材料段羊毛物品；⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定）。
+        //   单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，同 fallingBlockDropped / mobDied 模式）。
+        function onSheepSheared(x, y, z) { itemEntities.spawnItem(x, y, z, 0x20E, 1) }
         // t281 敌对 mob 近战攻击 / t283 骷髅箭 / t284 Stalker 爆炸命中玩家（spec「attack」）：EntityManager 发
         //   mobAttackedPlayer(amount, mobType, kbX, kbZ) → 仅 Survival 应用伤害（Creative/Spectator 无伤跳过，机制
         //   等价 MC 创造/观察者无敌）。复用 PlayerState.takeDamage → damaged 红闪 / 视角晃 / 受伤音链（同
@@ -2917,10 +2924,17 @@ Window {
                         }
                     }
                     Model {
-                        // t240 羊（mobType 3）：MobModel + mob_sheep 贴图（圆胖躯干 + 小头 + 短腿）。
+                        // t240 羊（mobType 3）毛茸态：MobModel + mob_sheep 贴图（圆胖躯干 + 小头 + 短腿）。
                         // t241 行走动画 + 吃草低头：walkPhase 驱动腿摆；headPitch 驱动头部俯仰（仅吃草周期内非零，
                         //   headPitchAt 据 eatTimer 返 sin(πp) 包络 → 低头→嚼→抬头；草丛在 C++ tick 内被消耗）。
-                        visible: entKind === EntityManager.Mob && entMobType === 3
+                        // t300 剪羊毛态：shearedAt=false（未剪羊毛 / 已重新长毛）→ 显本毛茸贴图 Model；sheared=true
+                        //   时切到下方裸粉色 Model（互斥 visible，由 revision 触碰刷新）。机制等价 MC 1.0 剪羊毛后
+                        //   羊裸露粉色皮肤。
+                        visible: {
+                            entityManager.revision
+                            return entKind === EntityManager.Mob && entMobType === 3
+                                   && !entityManager.shearedAt(index)
+                        }
                         geometry: MobModel {
                             mobType: 3
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
@@ -2942,6 +2956,62 @@ Window {
                         Node {
                             position: Qt.vector3d(0, 0.10, -0.29)
                             // headPitch 用 property 暂存（QML 绑定里 {block} 不能作 Qt.vector3d 内联参数 → 先算成属性）。
+                            property real headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                            eulerRotation: Qt.vector3d(headPitch, 0, 0)
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(-0.055, 0.06, -0.32)
+                                scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(0.055, 0.06, -0.32)
+                                scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(-0.055, 0.06, -0.33)
+                                scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(0.055, 0.06, -0.33)
+                                scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                            }
+                        }
+                    }
+                    Model {
+                        // t300 羊（mobType 3）裸态：剪羊毛后（shearedAt=true）的羊外观。复用 MobModel 几何（同
+                        //   毛茸态四肢 + 头 + 躯干），但去贴图改裸粉肤色 #e8b8b8（机制等价 MC 1.0 剪羊毛后羊裸露
+                        //   粉色皮肤；无 mob_sheep 毛茸贴图 → 直接 baseColor 实色渲染，受 terrainLight 调制保昼夜
+                        //   明暗 + hurtFlash 红闪仍生效）。与上方毛茸态 Model 互斥 visible（shearedAt 翻转 → 切换）。
+                        //   walkPhase / headPitch 同步绑定 → 裸羊照常行走 + 吃草低头动画。
+                        //   重长毛（C++ tick 内吃草方块 → sheared=false）→ 上方毛茸 Model 显、本 Model 隐。
+                        visible: {
+                            entityManager.revision
+                            return entKind === EntityManager.Mob && entMobType === 3
+                                   && entityManager.shearedAt(index)
+                        }
+                        geometry: MobModel {
+                            mobType: 3
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                            headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                        }
+                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面（同毛茸态）
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            // 受击红闪覆盖裸粉色（同毛茸态红闪语义）；否则裸粉肤色 × terrainLight 调昼夜明暗。
+                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#e8b8b8" }
+                            // 无 baseColorMap → PrincipaledMaterial 走纯 baseColor 实色路径（默认即无贴图）。
+                        }
+                        // 裸态眼同步（同毛茸态颈枢 Node 结构；复用 headPitchAt 绑头俯仰）。
+                        Node {
+                            position: Qt.vector3d(0, 0.10, -0.29)
                             property real headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
                             eulerRotation: Qt.vector3d(headPitch, 0, 0)
                             Model {

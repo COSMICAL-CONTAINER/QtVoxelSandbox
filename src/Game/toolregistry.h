@@ -77,7 +77,14 @@ public:
         //   真实伤害由箭 + 蓄力决定（PlayerController bow draw/fire + EntityManager Arrow 命中）。不可堆叠（工具段
         //   maxStack=1）。ToolIcon / 手持 3D（BowGeometry）/ tooltip 据 toolType===Bow 分流到弓形渲染。
         Bow          = 0x10F, // 弓：type=Bow tier 1，speedMul 1.0（不参与挖掘）；右键长按拉弓 → 松开射箭（t304）
-        ToolCount    = 16,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
+        // t300 剪刀（功能性工具）：type=Shears（BlockRegistry::Shears=6；专用剪羊毛 + 给羊毛方块挖掘速度加成）。
+        //   tier=1 / speedMul=2.0（仅 Wool.toolType=Shears 时激活 → 羊毛方块挖掘加速；其余方块持剪刀 miningSpeedMul
+        //   恒 1.0 等同空手，机制等价 MC 1.0 剪刀不擅长挖普通方块）。maxDurability=238（机制等价 MC 1.0 剪刀耐久；
+        //   每次剪羊毛 -1，生存模式消耗）。**不可堆叠**（工具段 maxStack=1）。ToolIcon 据 toolType===Shears 自绘剪刀图标
+        //   （两片交叉刀刃 + 中央枢轴 + 弹性弧环）；剪刀的真正价值在剪羊毛（playercontroller placeBlock shears 分支
+        //   → EntityManager shearSheep），非挖掘。displayName「剪刀」（§9 通用词；非 MC 专名）。
+        Shears       = 0x110, // 剪刀：type=Shears tier 1，speedMul 2.0（仅羊毛方块激活）；右键羊 → 剪羊毛（t300）
+        ToolCount    = 17,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
     };
 
     // 工具定义。表行索引 == itemId - ToolIdBase（连续）；详见 toolregistry.cpp kTools。

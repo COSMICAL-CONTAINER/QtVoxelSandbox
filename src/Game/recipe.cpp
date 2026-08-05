@@ -243,6 +243,16 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         kStickId,                    0, 0,
         RecipeRegistry::StringId,    0, 0 },
       RecipeRegistry::ArrowId, 4, 1, "arrow" },
+    // t300 剪刀：2 铁锭对角（左下 + 右上）→ 1 剪刀（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0 剪刀配方
+    //   （2 铁锭对角线）。最小包围盒 2×2（满），shapedEqual 在 2×2 输入内直接匹配；在 3×3 工作台则包围盒对齐后
+    //   逐格比（左上 2×2 子区放对角铁锭 → 匹配）。产物 Shears（工具段 0x110，maxStack=1 → canTake 一次取 1 件）。
+    //   与锄（2×3）/ 铲（1×3）/ 剑（1×3）等包围盒尺寸不同 → 不冲突。剪刀的真正用途是右键剪羊毛（非挖掘），见
+    //   playercontroller placeBlock shears 分支 + EntityManager::shearSheep。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { 0,                        RecipeRegistry::IronIngotId, 0,
+        RecipeRegistry::IronIngotId, 0,                         0,
+        0, 0, 0 },
+      int(ToolRegistry::Shears), 1, 1, "shears" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

@@ -20,7 +20,7 @@ import QtQuick
 Item {
     id: root
     property int tier: 1     // 1=木 2=石 3=铁（0 / 越界 → 兜底木色配色）
-    property int toolType: 1 // 1=镐 Pickaxe（默认）/ 2=锄 Hoe / 3=斧 Axe / 4=铲 Shovel / 5=剑 Sword / 7=弓 Bow（0 / 越界 → 兜底镐形）
+    property int toolType: 1 // 1=镐 Pickaxe（默认）/ 2=锄 Hoe / 3=斧 Axe / 4=铲 Shovel / 5=剑 Sword / 6=剪刀 Shears / 7=弓 Bow（0 / 越界 → 兜底镐形）
 
     Canvas {
         id: canvas
@@ -62,6 +62,43 @@ Item {
             const handleDark = "#4a3018"
             const light  = "#caa472" // 把手受光高光
 
+            // t300 剪刀（toolType===6 / BlockRegistry::Shears）：两片 X 形交叉刀刃 + 中央枢轴 + 下端弹性弧环
+            //   （剪羊毛的功能性工具轮廓）。早 return 跳过下方对角木柄 / 镐头默认（剪刀无木柄，整把 tier 着色，
+            //   与弓 / 剑同策略）。机制等价 MC 1.0 剪刀（shears）；名称 / 图标全原创（§9a 区隔不照搬 MC 资产）。
+            //   剪刀特征：上下两个尖端 + 中央铆钉 + 底部两侧弹性弧（手指环），轮廓一眼可辨。
+            if (root.toolType === 6) {
+                // 左刀刃（左上→右下对角，从尖端到枢轴）
+                R(3, 3, 2, 2, head)            // 左上尖端
+                R(5, 5, 2, 2, head)
+                R(7, 7, 2, 2, head)
+                R(4, 4, 1, 1, headLight)      // 刀刃受光高光
+                R(6, 6, 1, 1, headLight)
+                // 左刀刃下半（枢轴→右下，到底部弹性弧）
+                R(9, 9, 2, 2, head)
+                R(11, 11, 2, 2, head)
+                R(10, 10, 1, 1, headLight)
+                // 右刀刃（右上→左下对角，从尖端到枢轴）
+                R(20, 3, 2, 2, head)           // 右上尖端
+                R(18, 5, 2, 2, head)
+                R(16, 7, 2, 2, head)
+                R(19, 4, 1, 1, headLight)
+                R(17, 6, 1, 1, headLight)
+                // 右刀刃下半（枢轴→左下，到底部弹性弧）
+                R(14, 9, 2, 2, head)
+                R(12, 11, 2, 2, head)
+                R(13, 10, 1, 1, headLight)
+                // 中央枢轴（铆钉，深色圆点 = 两片刀刃的旋转中心）
+                R(10, 9, 3, 3, headDark)
+                R(11, 10, 1, 1, headLight)    // 铆钉受光高光
+                // 底部弹性弧环（左右两侧椭圆环 = 手指环；剪刀的下端两个握环）
+                R(13, 14, 3, 4, head)         // 右环（外弧）
+                R(14, 15, 1, 2, headDark)     // 右环内孔描边（深色表「环洞」）
+                R(8, 14, 3, 4, head)          // 左环（外弧）
+                R(9, 15, 1, 2, headDark)      // 左环内孔描边
+                R(8, 18, 3, 1, headDark)      // 左环底描边
+                R(13, 18, 3, 1, headDark)     // 右环底描边
+                return // 剪刀绘制完成（跳过下方工具柄 / 头）
+            }
             // t304 弓（toolType===7）：整把纵向弓身 + 弓弦 + 中央握把 + 搭箭（远程武器轮廓）。
             //   早 return 跳过下方对角木柄 / 镐头默认（弓无木柄、整把 tier 着色，与 3D BowGeometry 同策略）。
             //   弓特征：垂直弓臂弧（左侧 belly）+ 右侧直弦 + 中央深色缠绳握把 + 弦上水平搭箭。

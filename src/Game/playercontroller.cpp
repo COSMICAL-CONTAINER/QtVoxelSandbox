@@ -1530,6 +1530,34 @@ void PlayerController::placeBlock()
         }
         return; // 生物蛋（生成成功 / 未命中）均不再走方块放置路径
     }
+    // t300 剪刀 useBlock（spec「玩家右键羊 + 持剪刀 → 羊变裸 + 掉羊毛物品」；机制等价 MC 1.0 剪羊毛）：
+    //   手持剪刀（ToolRegistry::Shears，工具段 0x110）右键 → 在主选体射线之外**独立**跑一条「mob 命中射线」
+    //   （findMobHit，同 beginMining 攻击路径）；命中**未剪羊毛的活体 sheep**（mobType==MobSheep 且 !sheared）
+    //   → EntityManager::shearSheep（翻 sheared=true + 设 regrowCooldown + emit sheepSheared 让呈现层 spawnItem
+    //   生成羊毛掉落）。命中非 sheep / 已剪羊毛 / 非 mob / 无命中 → 走原方块放置路径（剪刀不消耗 / 不放置，
+    //   机制等价 MC 1.0：剪刀对非羊右键无反应）。
+    //   **不要求 m_hasHit**（命中方块）：剪刀剪羊瞄准的是 mob（实体），不依赖方块命中格；瞄准悬空羊（无方块
+    //   命中）亦应可剪 → 故本分支在 !m_hasHit 守卫之前。剪刀非方块（工具段 id>=0x100）→ selectedBlock 归 Air，
+    //   须在 `m_selectedBlock == Air` 守卫之前分流（同桶 / 锄 / 蛋分支模式）。spectator 已被入口 canPlace() 守卫拦截；
+    //   Creative / Survival 均可剪。生存模式消耗剪刀 1 耐久（机制等价 MC「剪刀每剪一羊 -1 耐久」；创造不耗）。
+    //   分层（PLAN §2）：剪羊毛属 Game/Physics（读射线 + 调 EntityManager），不改栅格语义（setBlock 入口）。
+    if (m_hotbar && m_world && m_entityManager && heldItemId == int(ToolRegistry::Shears)) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        if (mobIdx >= 0
+            && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobSheep
+            && !m_entityManager->shearedAt(mobIdx)) {
+            m_entityManager->shearSheep(mobIdx);
+            // 生存模式消耗剪刀 1 耐久（机制等价 MC 剪刀每剪一羊 -1；创造无限源不耗）。damageSelectedItem 对
+            //   空手 / 非工具静默 no-op，归零自动清槽（剪刀破损消失）。同 attackMob / finishMiningAt 耐久消耗模式。
+            if (m_mode == Survival) m_hotbar->damageSelectedItem();
+            m_lastPlaceMs = now;
+            emit swingArm(); // 剪羊毛也是一次「使用」动作 → 挥手（t29）
+        }
+        return; // 剪刀（剪羊毛成功 / 命中非羊 / 已剪羊毛 / 无命中）均不再走方块放置路径
+    }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;

@@ -180,6 +180,17 @@ public:
     Q_INVOKABLE float headPitchAt(int i) const;
     // t239 mob 子类 id（t240 pig/cow/sheep；t242 据它选掉落物、t243 spawn egg 据 it 选生成类型）。越界→0。
     Q_INVOKABLE int mobTypeAt(int i) const;
+    // t300 第 i 只 mob 是否**已被剪羊毛**（仅 mobType==MobSheep 用；其余 mob 永远 false）。QML delegate 据它切换
+    //   羊的「毛茸」外观 vs 「裸」外观（sheared=true → 裸粉色身；false → mob_sheep 贴图毛茸身）。越界 / 非 sheep → false。
+    //   revision 在剪羊毛 / 重新长毛时 bump 让 QML 绑定刷新（同 hurtFlash / chasing 模式）。
+    Q_INVOKABLE bool shearedAt(int i) const;
+    // t300 剪羊毛（spec「玩家右键羊 + 持剪刀 → 羊变裸 + 掉羊毛物品」）：第 i 只**未剪羊毛的活体 sheep** → 翻
+    //   sheared=true + 设 regrowCooldown（吃草重新长毛前的冷却，防刚剪完立即吃草长回）+ emit sheepSheared(坐标)
+    //   让呈现层 Connections 转发到 ItemEntityManager.spawnItem 生成羊毛物品掉落实体（同 mobDied→spawnItem 模式；
+    //   单向事件流，分层：Entities 层发语义事件、呈现层只消费）。已剪羊毛 / 非 sheep / dead / 越界 → 静默早退
+    //   （机制等价 MC 1.0：剪羊毛只对有毛的羊生效，已裸的羊右键无反应）。bump revision → QML 翻羊为裸外观。
+    //   Q_INVOKABLE 兼调试 + playercontroller placeBlock shears 分支双入口（playercontroller 是 C++ 直调）。
+    Q_INVOKABLE void shearSheep(int i);
     // t239 mob 血量 / 受击 / 死亡态（呈现层心条 / 红闪 / 死亡动画；t242 攻击 HUD 读）：
     //   healthAt / maxHealthAt = 当前 / 上限血量（供心条 / 攻击反馈）；deadAt = 死亡态（QML 播死亡动画）；
     //   hurtFlashAt = 受击红闪剩余比 0..1（>0 → QML baseColor 红，机制等价 MC mob 受击 10 tick 红闪）。
@@ -323,6 +334,11 @@ signals:
     //   命中 mob 时发。damageEntity 已扣血 + 红闪 + 归零 mobDied 死亡掉落；本信号额外驱动命中音（呈现层 →
     //   AudioManager.playMobHurt，同近战 attackMob→PlayerController.mobAttacked 模式）。mobType = 被命中 mob 子类 id。
     void arrowHitMob(int mobType);
+    // t300 羊被剪羊毛（shearSheep 内发，仅未剪羊毛的活体 sheep 首次翻 sheared=true 时发）。坐标 = 羊当前格
+    //   floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在羊身旁）。呈现层（Main.qml）Connections
+    //   据它转发 ItemEntityManager.spawnItem(0x20E=羊毛 ×1)（同 mobDied→spawnItem 模式；单向事件流，PLAN §2 分层：
+    //   Entities 层发语义事件、呈现层只消费，绝不反向写栅格）。机制等价 MC 1.0 剪羊毛掉落羊毛物品。
+    void sheepSheared(int x, int y, int z);
 
 private:
     struct Entity {
@@ -392,6 +408,13 @@ private:
         float eatTimer = 0.0f;   // >0 = 正处吃草周期（秒，倒数到 0 结束）；周期内强制 idle 站立 + 头部俯仰
         bool  eatApplied = false;// 本周期是否已消耗草丛（apply 阈值到达时置 true，防重复消耗）
         float eatCooldown = 0.0f;// 到下次扫描草丛的倒计时（秒）；吃完后 kEatCooldown、空扫描后 kEatScanInterval
+        // t300 剪羊毛 + 吃草重新长毛态（仅 mobType==MobSheep 用；其余 mob 留默认 false/0 不触发）：
+        //   sheared=true → 已被剪羊毛（mob_sheep 贴图被遮为「裸粉色」外观，QML delegate 据 shearedAt 切换）；
+        //   剪羊毛后羊**站在草方块上** + regrowCooldown 到 → 重新长毛（sheared=false）+ 脚下草方块→泥土
+        //   （机制等价 MC 1.0「羊吃草方块重新长毛」）。regrowCooldown 由 shearSheep 设 kRegrowCooldown（防刚剪完
+        //   即长回；spec「加一个重新长毛冷却，免得刷屏」）。未剪羊毛的羊永远 sheared=false（默认状态）。
+        bool  sheared = false;       // 是否已被剪羊毛（QML delegate 据它切换毛茸 vs 裸外观）
+        float regrowCooldown = 0.0f; // 剪羊毛后到能吃草方块重新长毛的冷却倒计时（秒；仅 sheared=true 时推进 / 触发）
         // t250 环境音态（仅 Mob kind 用；FallingBlock/Item 留默认不触发）：
         float stepAccum = 0.0f;  // walkPhase 半步累加器（弧度）；行走时累加 moveSpeed*dt*kWalkFreq，≥π → emit mobStep
         float ambientTimer = 0.0f; // 到下次 idle 叫声的倒计时（秒）；≤0 → emit mobAmbient + 重置随机周期
@@ -548,6 +571,14 @@ private:
     static constexpr float kEatScanInterval = 1.0f; // 空扫描（前方无草）后到下次扫描的间隔（秒；节流扫描开销）
     static constexpr float kEatReach = 0.7f;       // 检测前方草丛的水平距离（block；头部前方 ~ 半格多）
     static constexpr float kEatHeadPitch = -0.6f;  // 吃草头部俯仰峰值（弧度，负=低头；headPitchAt 据 sin(πp) 调制）
+    // t300 剪羊毛后吃草方块重新长毛的冷却 / 扫描常量（机制等价 MC 1.0「羊吃草方块重新长毛」；数值为本工程小
+    //   世界量身调，非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）：
+    //   - kRegrowCooldown：剪羊毛后到能开始吃草方块重新长毛的硬冷却（秒）。spec「加一个重新长毛冷却，免得刷屏」
+    //     → 取 6.0（明显长于 eatCooldown=2.0，玩家剪完有充足窗口看到裸羊 + 拾取羊毛，6s 后才开始尝试长回）。
+    //   - kRegrowScanInterval：sheared 羊扫描脚下草方块的间隔（秒，节流扫描开销）。脚下方块每秒扫一次足够
+    //     （草方块到泥土的转换非瞬态，玩家肉眼可见的「重新长毛」事件）。
+    static constexpr float kRegrowCooldown   = 6.0f;  // 剪羊毛后到能吃草方块重新长毛的硬冷却（秒；防刚剪即长回）
+    static constexpr float kRegrowScanInterval = 1.0f; // sheared 羊扫描脚下草方块的间隔（秒；节流 blockAt 扫描开销）
     // t249 受击击退常量（机制对齐 MC 1.0 knockback 量级，spec「小跳击退」）：
     //   kKnockbackHoriz：击退水平初速（blocks/s）。受击瞬间设 vx/vz=本值×方向；与 kWalkSpeed=1.0 相比明显
     //     快（≈4.5×走速），但远低于玩家 kWalk=4.3 + 疾跑 → 玩家可追上被击退的 mob（不会打飞到追不上）。
