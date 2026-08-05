@@ -4286,12 +4286,16 @@ Window {
     // t312 聊天显示叠层（PLAN §2 UI 层，纯呈现）：左下角显示最近若干条聊天 / 系统消息，玩家消息显
     //   「名: 文本」、系统消息（isSystem=true，如死亡播报）显灰红文本无「名:」前缀。机制等价 MC 1.0
     //   聊天行（左下贴底、半透描边、随新消息滚入）。
-    //   显隐：playing 且（指针捕获中 = 正常游戏 / 聊天 input 开着）才显；暂停 / 背包 / 死亡 / 菜单态隐
-    //   （被更高 z 叠层覆盖或非游戏态）。z=95（高于 HUD/F3 z=50，低于暂停 100 → 暂停时被遮，符合「暂停
-    //   不显聊天」）。GUI 自绘原创（Text + 半透背板，无 MC GUI PNG；§9 override (a)）。
+    //   显隐：playing 且（指针捕获中 = 正常游戏 / 聊天 input 开着 / 死亡态）才显；暂停 / 背包 / 菜单态隐
+    //   （被更高 z 叠层覆盖或非游戏态）。z 默认 95（高于 HUD/F3 z=50，低于暂停 100 → 暂停时被遮，符合「暂停
+    //   不显聊天」）；死亡态抬到 185（高于死亡遮罩 180、低于主菜单 200）—— 死亡时 onDied 已 release 指针 +
+    //   关聊天（captured/chatOpen 俱假），若仍按原 visible/z 则刚推入的死亡播报被死亡遮罩盖住看不见（t327）。
+    //   GUI 自绘原创（Text + 半透背板，无 MC GUI PNG；§9 override (a)）。
     Item {
         id: chatDisplay
-        visible: window.appState === "playing" && (player.captured || window.chatOpen)
+        // t327：补 playerState.dead —— 死亡时 captured=false 且 chatOpen=false，否则死亡播报虽已 append 进
+        //   chatMessages 但本叠层 visible=false 不可见（用户报「聊天栏没播报」根因；与死亡屏同文案须能显）。
+        visible: window.appState === "playing" && (player.captured || window.chatOpen || playerState.dead)
                  && chatMessages.count > 0
         // 锚左下：底部留出 hotbar 高度（hotbar 底边距 18 + 槽高 46 + vitalsBar ~20 ≈ 90），左贴边 12。
         //   不与底部居中的 hotbar 重叠（hotbar 居中、聊天靠左，水平错开）。
@@ -4300,7 +4304,7 @@ Window {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 96
         width: 460
-        z: 95
+        z: playerState.dead ? 185 : 95   // t327：死亡时抬到死亡遮罩(180)之上显播报，低于主菜单(200)
 
         // 由下往上排列最近 N 条（count 受 chatHistoryMax 限；显示窗最多 chatVisibleLines 行，超出由
         //   ListView 自管滚动 / 裁剪）。用 ListView 而非 Column：ListView 对 append/remove 有原生动画 +
