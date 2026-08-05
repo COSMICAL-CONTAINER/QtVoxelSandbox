@@ -1,6 +1,7 @@
 #include "hotbar.h"
 
 #include <QDebug>
+#include <QStringList>
 #include <algorithm>
 
 namespace {
@@ -782,4 +783,64 @@ void Hotbar::setHeldDurability(int d)
     if (normalized == m_heldStack.durability) return;
     m_heldStack.durability = normalized;
     emit heldBlockChanged();
+}
+
+// t314 `/give` 调试聊天命令（spec t314）：解析 "/give <id> [count] [durability]" → addStack 放入背包 →
+//   返回聊天回显文案。debug 命令，**无视游戏模式**（创造 / 生存 / 观察者都可调；不属玩法经济）。
+//   args 形如 "3 64" / "<swordId> 1 100" / "8" / ""。物品 id 校验：必须落在方块段 / 工具段 / 材料段任一
+//   **已注册**区间（nameForBlock 返非空 = 已注册名）。count 缺省 1、durability 缺省 -1（自动：工具满耐久、
+//   非工具 0）。越段 / 未注册 / count<1 / durability<1 → 不改背包，返错误文案。
+//   分层：本方法是 ViewModel 入口（聊天经 QML sendChat 路由），向下调本类 addStack + nameForBlock，
+//   不依赖 World / Renderer。物品名走 nameForBlock（§9 通用词，零 MC 专名）。
+QString Hotbar::give(const QString &args)
+{
+    const QStringList parts = args.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (parts.isEmpty()) {
+        return QStringLiteral("用法: /give <id> [count] [durability]");
+    }
+    // 第一段：物品 id（方块段 / 工具段 / 材料段任一）。非整数 / 越段 / 未注册 → 未知物品。
+    bool okId = false;
+    const int id = parts.at(0).toInt(&okId);
+    if (!okId || !isValidItemId(id)) {
+        return QStringLiteral("未知物品 id: %1").arg(parts.at(0));
+    }
+    // isValidItemId 只判 id 段（方块段 / 工具段 / 材料段基址），不保证「已注册」—— 材料段 >= 0x200
+    //   区间内仍有未分配 id（如 0x220）。nameForBlock 返空 = 未注册名 → 视作未知物品（debug 命令拒
+    //   写入未注册 id 防误触 / 静默造数据）。
+    const QString name = nameForBlock(id);
+    if (name.isEmpty()) {
+        return QStringLiteral("未知物品 id: %1").arg(parts.at(0));
+    }
+    // 第二段：count（缺省 1）。非整数 / <1 → 用法错（不允许给 0 或负数）。
+    int count = 1;
+    if (parts.size() >= 2) {
+        bool okCount = false;
+        const int parsed = parts.at(1).toInt(&okCount);
+        if (!okCount || parsed < 1) {
+            return QStringLiteral("用法: /give <id> [count] [durability]");
+        }
+        count = parsed;
+    }
+    // 第三段：durability（缺省 -1 = 自动：工具满耐久 / 非工具 0）。显式指定时须 >=1（normalizeDurability
+    //   会 clamp 到 [1, maxDurability]）；非工具 id 写 durability 会被 normalizeDurability 归 0 inert。
+    int durability = -1;
+    if (parts.size() >= 3) {
+        bool okDur = false;
+        const int parsed = parts.at(2).toInt(&okDur);
+        if (!okDur || parsed < 1) {
+            return QStringLiteral("用法: /give <id> [count] [durability]");
+        }
+        durability = parsed;
+    }
+    // 多余参数（>=4 段）忽略（容忍用户多敲空格 / 后续参数；机制等价 MC /give 容错）。
+    // addStack 内部按 maxStackSize 钳制（工具段 cap=1 → 每槽单件；材料 / 方块段 cap=64）。返回未放入数
+    //   （背包满时 >0）。actual = count - remaining = 实际入背包数。
+    const int remaining = addStack(id, count, durability);
+    const int actual = count - remaining;
+    if (actual <= 0) {
+        return QStringLiteral("给予 %1 ×%2 失败：背包已满").arg(name).arg(count);
+    }
+    QString msg = QStringLiteral("给予 %1 ×%2").arg(name).arg(actual);
+    if (remaining > 0) msg += QStringLiteral("（背包已满，弃 %1）").arg(remaining);
+    return msg;
 }

@@ -200,6 +200,15 @@ public:
     Q_INVOKABLE void resetForMode(int mode);
     // 兼容旧调用（t18 setSlotBlock）：等同 setStack(slot, id, id==0?0:1)。保留以防遗漏迁移点（如销毁槽清空）。
     Q_INVOKABLE void setSlotBlock(int slot, int blockId);
+    // t314 `/give` 调试聊天命令（spec t314：debug 命令，**任意游戏模式**可调 —— 不属玩法经济，仅测试 / 调试用）。
+    //   args = `/give` 之后的剩余串（空表示无参 → 回显用法）。预期格式 `/give <id> [count] [durability]`，
+    //   id 可为方块段（1..Count-1）/ 工具段（>=0x100）/ 材料段（>=0x200）任一**已注册**物品；count 缺省 1；
+    //   durability 缺省 = maxDurability（仅工具段有意义，非工具恒 0 inert）。
+    //   调 addStack 智能堆叠（合并同 id → 入空槽；工具段单件单槽），返回聊天回显文案（成功「给予 <名> ×<n>」/
+    //   失败「未知物品 id: <id>」/「用法: /give <id> [count] [durability]」），由 QML sendChat 经
+    //   appendChatMessage("", result, true) 显灰系统色。物品名走 nameForBlock（§9 通用词：草方块 / 铁剑 /
+    //   钻石 ...）；零 MC 专名。越段 / 未注册 / 非法 count（<1）/ 非法 durability（<1）→ 不改背包，返错误。
+    Q_INVOKABLE QString give(const QString &args);
 
     // ── t97 主栏 VM 栈操作（27 槽，生存背包 / 工作台 / 熔炉三菜单共享同一份；熔炉 3 槽 + 合成格仍本地）──
     //   - mainBlockIdAt(slot) / mainCountAt(slot)：每主栏槽栈数据（air=0=空栈；越界返 0）。QML delegate 触碰

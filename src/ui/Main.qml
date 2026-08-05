@@ -592,10 +592,23 @@ Window {
     }
     // 发送：把 TextField 文本（去首尾空白后非空）作为玩家消息入聊天历史（显示「名: 文本」），随后关聊天回游戏。
     //   单机无服务端 → 不广播、不持久化；Phase 3 联机时此处改为 sendChatToServer(text) 走协议层。
+    //   t314 `/give` 调试聊天命令（spec t314）：debug 命令路由 → 转交 Hotbar VM 解析 + 放入背包 + 返回回显
+    //     文案（系统色灰）；不进玩家消息回显（MC 聊天惯例：命令只显结果）。debug 命令无视游戏模式（创造 /
+    //     生存 / 观察者都可调），见 hotbarVM.give。
     function sendChat() {
         const raw = chatInput.text
         const txt = raw.trim()
-        if (txt.length > 0) appendChatMessage(window.playerName, txt, false)
+        if (txt.length > 0) {
+            // /give 路由：截 `/give` 之后剩余串（含分隔空格，trim 由 C++ split SkipEmptyParts 兜底）。
+            //   仅匹配 `/give` 精确前缀（避免 /givex 误触）；其余 `/` 命令暂未实现，统一当普通玩家消息。
+            if (txt === "/give" || txt.startsWith("/give ")) {
+                const rest = txt.slice("/give".length)  // "/give 3 64" → " 3 64"；"/give" → ""
+                const reply = hotbarVM.give(rest)
+                appendChatMessage("", reply, true)
+            } else {
+                appendChatMessage(window.playerName, txt, false)
+            }
+        }
         chatInput.text = ""
         closeChat(true)
     }
