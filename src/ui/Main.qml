@@ -1292,61 +1292,163 @@ Window {
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldPickaxeFp.headColor }
                     }
                 }
-                // t233 锄（type=Hoe）：同位姿 / 同 tier 配色，仅几何换 HoeGeometry（宽扁锄刃替代镐横梁 + 下勾）。
-                Model {
+                // t332 锄（type=Hoe）手持木柄修：旧版整把单 baseColor（HoeGeometry pos-only 单色）→ 石 / 铁锄
+                //   木柄也变灰 / 银（应恒木）。改 Node + UnitCube 组合复刻 hoe.cpp 3 盒，各盒独立材质
+                //   （机制对齐 t266 镐手持「木柄恒木褐、头随 tier」；第三人称 / 掉落物仍用 HoeGeometry 单色）。
+                Node {
+                    id: heldHoeFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 2
-                    geometry: HoeGeometry {}
                     position: Qt.vector3d(0.02, 0.04, -0.22)
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, -15)
-                    materials: PrincipledMaterial {
-                        lighting: PrincipledMaterial.NoLighting
-                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
-                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
-                                 : "#8a5a2e"
+                    // 头部 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白（同 2D ToolIcon 配色）
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁锄银白
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石锄中灰
+                                                                                                 : "#8a5a2e"                                                   // 木锄褐（默认 / tier 1）
+                    // 木柄（竖直）：心 (0,-0.05,0)，半长 0.04×0.40×0.04（同 hoe.cpp 木柄 addBox）→ scale 2×半长
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.05, 0)
+                        scale: Qt.vector3d(0.08, 0.80, 0.08)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a5a2e" }   // 木柄恒木褐（与 tier 无关）
+                    }
+                    // 颈节（柄→刃连接）：心 (0,0.36,0.04)，半长 0.06×0.04×0.06
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.36, 0.04)
+                        scale: Qt.vector3d(0.12, 0.08, 0.12)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldHoeFp.headColor }
+                    }
+                    // 锄刃（宽扁向前伸）：心 (0,0.34,0.18)，半长 0.28×0.03×0.12
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.34, 0.18)
+                        scale: Qt.vector3d(0.56, 0.06, 0.24)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldHoeFp.headColor }
                     }
                 }
-                // t264 斧（type=Axe）：同位姿 / 同 tier 配色，几何换 AxeGeometry（单边厚刃替代镐横梁 + 下勾）。
-                Model {
+                // t332 斧（type=Axe）手持木柄修：旧版整把单 baseColor（AxeGeometry pos-only 单色）→ 石 / 铁斧
+                //   木柄也变灰 / 银（应恒木）。改 Node + UnitCube 组合复刻 axe.cpp 4 盒，各盒独立材质
+                //   （机制对齐 t266 镐手持「木柄恒木褐、头随 tier」；第三人称 / 掉落物仍用 AxeGeometry 单色）。
+                Node {
+                    id: heldAxeFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 3
-                    geometry: AxeGeometry {}
                     position: Qt.vector3d(0.02, 0.04, -0.22)
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, -15)
-                    materials: PrincipledMaterial {
-                        lighting: PrincipledMaterial.NoLighting
-                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
-                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
-                                 : "#8a5a2e"
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁斧银白
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石斧中灰
+                                                                                                 : "#8a5a2e"                                                   // 木斧褐（默认 / tier 1）
+                    // 木柄（竖直）：心 (0,-0.05,0)，半长 0.04×0.40×0.04（同 axe.cpp 木柄 addBox）→ scale 2×半长
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.05, 0)
+                        scale: Qt.vector3d(0.08, 0.80, 0.08)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a5a2e" }   // 木柄恒木褐（与 tier 无关）
+                    }
+                    // 颈节（柄→刃连接）：心 (0.03,0.36,0)，半长 0.05×0.04×0.05
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0.03, 0.36, 0)
+                        scale: Qt.vector3d(0.10, 0.08, 0.10)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldAxeFp.headColor }
+                    }
+                    // 斧刃主块（单边厚刃）：心 (0.18,0.34,0)，半长 0.14×0.06×0.05
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0.18, 0.34, 0)
+                        scale: Qt.vector3d(0.28, 0.12, 0.10)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldAxeFp.headColor }
+                    }
+                    // 刃口（右下收窄）：心 (0.30,0.26,0)，半长 0.04×0.06×0.05
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0.30, 0.26, 0)
+                        scale: Qt.vector3d(0.08, 0.12, 0.10)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldAxeFp.headColor }
                     }
                 }
-                // t264 铲（type=Shovel）：同位姿 / 同 tier 配色，几何换 ShovelGeometry（方形铲斗）。
-                Model {
+                // t332 铲（type=Shovel）手持木柄修：旧版整把单 baseColor（ShovelGeometry pos-only 单色）→ 石 / 铁铲
+                //   木柄也变灰 / 银（应恒木）。改 Node + UnitCube 组合复刻 shovel.cpp 3 盒，各盒独立材质
+                //   （机制对齐 t266 镐手持「木柄恒木褐、头随 tier」；第三人称 / 掉落物仍用 ShovelGeometry 单色）。
+                Node {
+                    id: heldShovelFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 4
-                    geometry: ShovelGeometry {}
                     position: Qt.vector3d(0.02, 0.04, -0.22)
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, -15)
-                    materials: PrincipledMaterial {
-                        lighting: PrincipledMaterial.NoLighting
-                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
-                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
-                                 : "#8a5a2e"
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁铲银白
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石铲中灰
+                                                                                                 : "#8a5a2e"                                                   // 木铲褐（默认 / tier 1）
+                    // 木柄（竖直）：心 (0,-0.05,0)，半长 0.04×0.40×0.04（同 shovel.cpp 木柄 addBox）→ scale 2×半长
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.05, 0)
+                        scale: Qt.vector3d(0.08, 0.80, 0.08)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a5a2e" }   // 木柄恒木褐（与 tier 无关）
+                    }
+                    // 颈节（柄→铲斗连接）：心 (0,0.36,0)，半长 0.05×0.04×0.05
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.36, 0)
+                        scale: Qt.vector3d(0.10, 0.08, 0.10)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldShovelFp.headColor }
+                    }
+                    // 铲斗（方形扁斗）：心 (0,0.30,0)，半长 0.14×0.08×0.05
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.30, 0)
+                        scale: Qt.vector3d(0.28, 0.16, 0.10)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldShovelFp.headColor }
                     }
                 }
-                // t264 剑（type=Sword）：纵向长刃几何，位姿竖直前指（区别于工具的对角手持）；eulerRotation.x
-                //   略前倾使刃尖朝前上方（持剑突刺姿态），同 tier 配色。
-                Model {
+                // t332 剑（type=Sword）手持木柄修：旧版整把单 baseColor（SwordGeometry pos-only 单色）→ 石 / 铁剑
+                //   的护手 / 剑柄 / 柄首也变灰 / 银（应恒木）。改 Node + UnitCube 组合复刻 sword.cpp 5 盒，各盒独立
+                //   材质：刃 + 尖 tier 色、护手 + 柄 + 柄首木色（同 2D ToolIcon 剑策略：刃 tier、护手 / 柄 / 柄首木）。
+                //   机制对齐 t266 镐手持；第三人称 / 掉落物仍用 SwordGeometry 单色。
+                Node {
+                    id: heldSwordFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 5
-                    geometry: SwordGeometry {}
                     position: Qt.vector3d(0.02, 0.02, -0.22)
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(20, -15, -10)    // 剑身竖直略前倾、刃尖朝前上
-                    materials: PrincipledMaterial {
-                        lighting: PrincipledMaterial.NoLighting
-                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
-                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
-                                 : "#8a5a2e"
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁剑银白
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石剑中灰
+                                                                                                 : "#8a5a2e"                                                   // 木剑褐（默认 / tier 1）
+                    // 剑刃（纵向长刃，tier 金属色）：心 (0,0.10,0)，半长 0.03×0.34×0.025（同 sword.cpp 剑刃 addBox）→ scale 2×半长
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.10, 0)
+                        scale: Qt.vector3d(0.06, 0.68, 0.05)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldSwordFp.headColor }
+                    }
+                    // 刃尖（顶端收窄，tier 金属色）：心 (0,0.42,0)，半长 0.02×0.04×0.02
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.42, 0)
+                        scale: Qt.vector3d(0.04, 0.08, 0.04)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldSwordFp.headColor }
+                    }
+                    // 护手（横向短梁，木色）：心 (0,-0.26,0)，半长 0.10×0.02×0.03
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.26, 0)
+                        scale: Qt.vector3d(0.20, 0.04, 0.06)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a5a2e" }   // 木色（与 tier 无关）
+                    }
+                    // 剑柄（下半短柄，木色）：心 (0,-0.34,0)，半长 0.025×0.06×0.025
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.34, 0)
+                        scale: Qt.vector3d(0.05, 0.12, 0.05)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a5a2e" }   // 木色（与 tier 无关）
+                    }
+                    // 柄首（柄底圆头，木色）：心 (0,-0.42,0)，半长 0.035×0.03×0.035
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.42, 0)
+                        scale: Qt.vector3d(0.07, 0.06, 0.07)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a5a2e" }   // 木色（与 tier 无关）
                     }
                 }
                 // t304/t330 弓（type=Bow）：BowGeometry C 形弓身（XY 面清晰 C 弯）+ 子节点 BowStringGeometry
