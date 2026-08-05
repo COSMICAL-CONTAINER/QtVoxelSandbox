@@ -372,6 +372,18 @@ bool BlockRegistry::isFullCube(quint8 blockId)
     return def(blockId).shape == ShapeFull;
 }
 
+// t334 per-block 光衰减量（见头注释）。flood-fill 据本值算邻格衰减 = max(1, lightOpacity)，取代旧 isSolid 二值遮光。
+//   全实体方块（isSolid）满遮光 → 15（保旧语义）；活版门合=15 / 开=0；台阶=7（半遮）；其余 → 0（全透）。
+quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
+{
+    if (isSolid(blockId)) return 15;                  // 全实体方块：满遮光（保旧 isSolid 光照语义）
+    switch (blockId) {
+    case WoodTrapdoor: return (state & 1) ? 0 : 15;   // 合=满遮（修「合活版门透光」）/ 开=全透
+    case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
+    default:           return 0;                      // 其余全透（air/torch/water/stairs/fence/plate/door/cross）
+    }
+}
+
 // t213 射线命中 sub-AABB：射线进入含该方块的体素后须命中某个 sub-AABB 才算选中（不完整方块/火把的空气
 //   部分让射线穿过命中后方块）。完整立方 / air / water → 整格单盒（进格即中，等同旧行为；water 经 HitWater
 //   命中整格舀水）；不完整方块段 → 同 selectionAABBs（实体 sub 形状，与渲染/碰撞同源）；火把（ShapeNone，

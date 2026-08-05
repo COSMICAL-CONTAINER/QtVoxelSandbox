@@ -156,7 +156,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
         else if (id != BlockRegistry::Air)
             emit blockPlaced(x, y, z, int(id));
     }
-    recomputeLightAround(x, y, z, oldId, id); // t154：增量重 flood（id 不变只 state 变 → 内部早退，光照无变化）
+    recomputeLightAround(x, y, z, oldId, oldState, id, state); // t334：传 state（活版门开合：id 不变但 lightOpacity 0↔15 翻转 → 须重 flood）
     emit worldChanged(); // 异形方块 state 变（开合 / 朝向）需 mesh 重建
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     // t273 修复(b)「放水后不立即流动」：玩家经桶 setBlock 放水源（Air→Water，或流水 state>0→水源升源）后，水流
@@ -1731,7 +1731,9 @@ void World::recomputeLightField()
         for (int z = 0; z < D; ++z) {
             int firstOpaque = H; // 遮光顶（H = 整列无遮光 → 全列见天）
             for (int y = H - 1; y >= 0; --y) {
-                if (BlockRegistry::isSolid(m_chunks.blockAt(x, y, z))) { firstOpaque = y; break; }
+                // t334：遮光判据改用 lightOpacity > 0（取代旧 isSolid）—— 半砖(7) / 合活版门(15) 也「遮光」、
+                //   截断本列见天 seed，下方靠 BFS 衰减渗光（半砖半减 / 合活版门满遮）。
+                if (BlockRegistry::lightOpacity(m_chunks.blockAt(x, y, z), m_chunks.stateAt(x, y, z)) > 0) { firstOpaque = y; break; }
             }
             for (int y = firstOpaque + 1; y < H; ++y) {
                 // 这些格必为非遮光（首个遮光之上）→ sky=15 种子；block 此时为 0（清场后）。
@@ -1750,16 +1752,19 @@ void World::recomputeLightField()
                     blockQ.push({x, y, z});
                 }
 
-    // BFS 天光传播：从种子向非遮光邻格衰减 1、取 max。
+    // BFS 天光传播：从种子向邻格衰减 max(1, lightOpacity)、取 max（t334：取代旧 isSolid 二值「遮光格不传」——
+    //   半砖半减 / 合活版门满遮 / 实体满遮；透明格仍衰减 1 = 旧行为）。
     while (!skyQ.empty()) {
         const Cell c = skyQ.front(); skyQ.pop();
         const quint8 cur = m_chunks.skyLightAt(c.x, c.y, c.z);
-        if (cur <= 1) continue; // 衰减到 1 以下不再传播（下一步 = 0 无意义）
-        const quint8 nv = quint8(cur - 1);
+        if (cur <= 1) continue; // 衰减到 1 以下不再传播（任一邻格 prop = cur-max(1,op) ≤ 0）
         for (const auto &d : dk) {
             const int nx = c.x + d[0], ny = c.y + d[1], nz = c.z + d[2];
             if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue; // 越界跳过
-            if (BlockRegistry::isSolid(m_chunks.blockAt(nx, ny, nz))) continue; // 遮光格不传光
+            const quint8 nbOp = BlockRegistry::lightOpacity(m_chunks.blockAt(nx, ny, nz), m_chunks.stateAt(nx, ny, nz));
+            const int prop = int(cur) - std::max(1, int(nbOp)); // 进入邻格的衰减（实体 15 → 满 0 不传，同旧 continue）
+            if (prop <= 0) continue;
+            const quint8 nv = quint8(prop);
             if (nv > m_chunks.skyLightAt(nx, ny, nz)) {
                 m_chunks.setLight(nx, ny, nz, nv, m_chunks.blockLightAt(nx, ny, nz)); // 更新 sky，保留 block
                 skyQ.push({nx, ny, nz});
@@ -1772,11 +1777,13 @@ void World::recomputeLightField()
         const Cell c = blockQ.front(); blockQ.pop();
         const quint8 cur = m_chunks.blockLightAt(c.x, c.y, c.z);
         if (cur <= 1) continue;
-        const quint8 nv = quint8(cur - 1);
         for (const auto &d : dk) {
             const int nx = c.x + d[0], ny = c.y + d[1], nz = c.z + d[2];
             if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
-            if (BlockRegistry::isSolid(m_chunks.blockAt(nx, ny, nz))) continue;
+            const quint8 nbOp = BlockRegistry::lightOpacity(m_chunks.blockAt(nx, ny, nz), m_chunks.stateAt(nx, ny, nz));
+            const int prop = int(cur) - std::max(1, int(nbOp));
+            if (prop <= 0) continue;
+            const quint8 nv = quint8(prop);
             if (nv > m_chunks.blockLightAt(nx, ny, nz)) {
                 m_chunks.setLight(nx, ny, nz, m_chunks.skyLightAt(nx, ny, nz), nv); // 更新 block，保留 sky
                 blockQ.push({nx, ny, nz});
@@ -1799,15 +1806,26 @@ void World::recomputeLightField()
 //     故**盒外格（曼哈顿 ≥16）的光值必不被本编辑影响**（无论增减、无论遮光翻转的列格 —— 翻转列格也在编辑列内、
 //     其影响半径同样 ≤15）。于是盒外格作「固定边界种子」向盒内流入（衰减 1），盒内清零后从种子重传播 →
 //     盒内结果与全量 re-flood 严格一致、盒外不变。典型编辑盒 ~30k 格（球）/~60k 格（圆柱），clear + flood <1ms。
+// t334 旧 4 参数入口（id 变更路径）：state=0 委托。全实体方块 / air / 水 / 沙 / 树苗·原木等的遮光与 state 无关
+//   （lightOpacity(*, 0) 即正确），故 id 变更路径不需 state。仅活版门开合（id 不变、state 翻转）需 state ——
+//   走 6 参数重载（setBlock 5 参数版直传 oldState/state）。
 void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 newId)
+{
+    recomputeLightAround(ex, ey, ez, oldId, quint8(0), newId, quint8(0));
+}
+
+void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 oldState,
+                                 quint8 newId, quint8 newState)
 {
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return;
     if (ex < 0 || ey < 0 || ez < 0 || ex >= W || ey >= H || ez >= D) return;
 
-    const bool opacityChanged = (BlockRegistry::isSolid(oldId) != BlockRegistry::isSolid(newId));
+    // t334：遮光变化判据改用 lightOpacity（取代旧 isSolid）—— 半砖放/破（0↔7）、合↔开活版门（0↔15）均能检出
+    //   翻转 → 触发重 flood。id 不变且非火把且 lightOpacity 不变（如门开合：lightOpacity 恒 0）→ 光照无变化，早退。
+    const bool opacityChanged = (BlockRegistry::lightOpacity(oldId, oldState) != BlockRegistry::lightOpacity(newId, newState));
     const bool torchChanged = (oldId == BlockRegistry::Torch || newId == BlockRegistry::Torch);
-    if (!opacityChanged && !torchChanged) return; // 光照无变化（如门开合：id 不变 → isSolid 不变、非火把）
+    if (!opacityChanged && !torchChanged) return; // 光照无变化（如门开合：lightOpacity 恒 0、非火把）
 
     QElapsedTimer t; t.start(); // t155c：测编辑光照开销（找卡顿根因）
     constexpr int R = 15; // = 最大光值：编辑对盒外格（曼哈顿 ≥16）无影响 → 边界种子法成立（见上注释）
@@ -1872,7 +1890,8 @@ void World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSk
             for (int z = z0; z <= z1; ++z) {
                 int firstOpaque = H; // 整列无遮光 → 全列见天
                 for (int y = H - 1; y >= 0; --y)
-                    if (BlockRegistry::isSolid(m_chunks.blockAt(x, y, z))) { firstOpaque = y; break; }
+                    // t334：遮光判据 lightOpacity > 0（取代 isSolid）—— 半砖(7) / 合活版门(15) 也截断见天 seed。
+                    if (BlockRegistry::lightOpacity(m_chunks.blockAt(x, y, z), m_chunks.stateAt(x, y, z)) > 0) { firstOpaque = y; break; }
                 for (int y = firstOpaque + 1; y < H; ++y) {
                     if (y < y0 || y > y1) continue;
                     m_chunks.setLight(x, y, z, 15, m_chunks.blockLightAt(x, y, z));
@@ -1901,20 +1920,23 @@ void World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSk
             b = m_chunks.blockLightAt(nx, ny, nz);
         }
         if (s <= 0 && b <= 0) return;
+        // t334：流入衰减按本格 lightOpacity（取代旧 isSolid 二值「遮光格不进光」）—— 透明衰减 1（旧行为）/
+        //   半砖衰减 7 / 实体·合活版门衰减 15（满遮断流，同旧 opaque 跳过）。int 运算防 quint8 下溢。
+        const quint8 op = BlockRegistry::lightOpacity(m_chunks.blockAt(x, y, z), m_chunks.stateAt(x, y, z));
+        const int dec = std::max(1, int(op));
         const quint8 curSky = m_chunks.skyLightAt(x, y, z);
         const quint8 curBlock = m_chunks.blockLightAt(x, y, z);
-        const bool opaque = BlockRegistry::isSolid(m_chunks.blockAt(x, y, z));
         if (doSky && s > 0) {
-            const quint8 in = quint8(s - 1);
-            if (!opaque && in > curSky) { // 衰减 1 流入；遮光格不进光
-                m_chunks.setLight(x, y, z, in, m_chunks.blockLightAt(x, y, z));
+            const int in = int(s) - dec;
+            if (in > int(curSky)) { // 衰减 dec 流入；满遮(dec≥15→in≤0) 不进光
+                m_chunks.setLight(x, y, z, quint8(in), m_chunks.blockLightAt(x, y, z));
                 skyQ.push({x, y, z});
             }
         }
         if (b > 0) {
-            const quint8 in = quint8(b - 1);
-            if (!opaque && in > curBlock) {
-                m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), in);
+            const int in = int(b) - dec;
+            if (in > int(curBlock)) {
+                m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), quint8(in));
                 blockQ.push({x, y, z});
             }
         }
@@ -1930,17 +1952,20 @@ void World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSk
                 }
             }
 
-    // 5. BFS 天光传播（仅 doSky）：从种子向盒内非遮光邻格衰减 1、取 max；盒外邻不传（其值固定，已作边界种子流入）。
+    // 5. BFS 天光传播（仅 doSky）：从种子向盒内邻格衰减 max(1, lightOpacity)、取 max（t334：取代旧 isSolid 二值）；
+    //    盒外邻不传（其值固定，已作边界种子流入）。
     if (doSky) {
         while (!skyQ.empty()) {
             const Cell c = skyQ.front(); skyQ.pop();
             const quint8 cur = m_chunks.skyLightAt(c.x, c.y, c.z);
             if (cur <= 1) continue;
-            const quint8 nv = quint8(cur - 1);
             for (const auto &d : dk) {
                 const int nx = c.x + d[0], ny = c.y + d[1], nz = c.z + d[2];
                 if (!inBox(nx, ny, nz)) continue;
-                if (BlockRegistry::isSolid(m_chunks.blockAt(nx, ny, nz))) continue;
+                const quint8 nbOp = BlockRegistry::lightOpacity(m_chunks.blockAt(nx, ny, nz), m_chunks.stateAt(nx, ny, nz));
+                const int prop = int(cur) - std::max(1, int(nbOp));
+                if (prop <= 0) continue;
+                const quint8 nv = quint8(prop);
                 if (nv > m_chunks.skyLightAt(nx, ny, nz)) {
                     m_chunks.setLight(nx, ny, nz, nv, m_chunks.blockLightAt(nx, ny, nz));
                     skyQ.push({nx, ny, nz});
@@ -1953,11 +1978,13 @@ void World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSk
         const Cell c = blockQ.front(); blockQ.pop();
         const quint8 cur = m_chunks.blockLightAt(c.x, c.y, c.z);
         if (cur <= 1) continue;
-        const quint8 nv = quint8(cur - 1);
         for (const auto &d : dk) {
             const int nx = c.x + d[0], ny = c.y + d[1], nz = c.z + d[2];
             if (!inBox(nx, ny, nz)) continue;
-            if (BlockRegistry::isSolid(m_chunks.blockAt(nx, ny, nz))) continue;
+            const quint8 nbOp = BlockRegistry::lightOpacity(m_chunks.blockAt(nx, ny, nz), m_chunks.stateAt(nx, ny, nz));
+            const int prop = int(cur) - std::max(1, int(nbOp));
+            if (prop <= 0) continue;
+            const quint8 nv = quint8(prop);
             if (nv > m_chunks.blockLightAt(nx, ny, nz)) {
                 m_chunks.setLight(nx, ny, nz, m_chunks.skyLightAt(nx, ny, nz), nv);
                 blockQ.push({nx, ny, nz});

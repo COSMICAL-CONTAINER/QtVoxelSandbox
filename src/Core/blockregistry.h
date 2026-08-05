@@ -474,6 +474,20 @@ public:
     //   （grass/stone/log/planks/.../chest 等）→ true。机制等价 MC「方块是否完整立方」。
     static bool isFullCube(quint8 blockId);
 
+    // t334 per-block 光衰减量（lightOpacity；机制等价 MC 1.0 lightOpacity 0..15）：光穿入该格时损失的光级。
+    //   flood-fill（World recomputeLightField / refloodBox）据本值算邻格衰减 = max(1, lightOpacity)，取代旧的
+    //   isSolid 二值遮光（旧实现在所有 solid=false 的异形方块上恒「全透」，致合活版门 / 台阶也透光 —— 与形状语义矛盾）。
+    //   state 参与：活版门开合态决定是否遮光。
+    //   - 全实体方块（isSolid=true：草/泥/石/叶/箱/矿...）→ 15（满遮光，等同旧 isSolid 跳过；保既有行为）。
+    //   - 活版门（WoodTrapdoor）：合态（state bit0=0）→ 15（合=水平贴地满遮光，修「合活版门仍透光」）；
+    //     开态（bit0=1）→ 0（开=竖直贴边，光全透，保既有行为）。
+    //   - 台阶（WoodSlab）→ 7（半遮光：占空比 0.5 → opacity = floor(0.5×15) = 7 → 衰减 7，满光 15→8 约半减，
+    //     机制等价 MC「半砖按占空比衰减天光」）。
+    //   - 其余（air/torch/water/stairs/fence/plate/door/cross）→ 0（全透，保既有行为 —— 本任务不动它们）。
+    //   越界 → 0（air 兜底，等同全透）。**仅光照消费**：mesher 邻居面剔除仍走 isSolid（solid 字段语义不变），
+    //   二者解耦（同 torch「solid=false 但参与剔除判定」既有模式；新增的遮光规则不污染面剔除）。
+    static quint8 lightOpacity(quint8 blockId, quint8 state);
+
     // t213 射线命中 sub-AABB（cell-local [0,1]^3）：射线进入含该方块的体素后，**须命中其中某个 sub-AABB**
     //   才算选中——不完整方块 / 火把的「空气部分」让射线穿过命中后方块（修「挖半砖背后的方块却撸掉了
     //   半砖/火把」，命中点是否落在该方块 sub-AABB 内）。与 selectionAABBs 的差异：

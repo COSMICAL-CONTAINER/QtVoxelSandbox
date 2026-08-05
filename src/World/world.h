@@ -315,6 +315,10 @@ private:
     //   光照无变化，直接 return（不发世界重算）。盒半径 = 最大光值 15：编辑格对盒外格曼哈顿距离 ≥16 >15 →
     //   盒外光值必不被编辑影响，故盒外作固定边界种子衰减 1 流入盒内，盒内清零后从种子重传播 → 结果与全量一致。
     void recomputeLightAround(int x, int y, int z, quint8 oldId, quint8 newId);
+    // t334 含 state 的增量光场入口（活版门开合：id 不变但 lightOpacity 翻转 → 须重 flood）。id 变更路径仍走
+    //   上方 4 参数重载（state=0 委托；全实体 / air / 水 / 沙等的遮光与 state 无关，state=0 比较即正确）。
+    void recomputeLightAround(int x, int y, int z, quint8 oldId, quint8 oldState,
+                              quint8 newId, quint8 newState);
     // t154 有界盒清场 + 重 seed + 重 flood（recomputeLightAround 的实现核心，分离以便复用清/种/传播步骤）。
     //   doSky=true：两通道都重算（清两通道、重 seed 见天格 + 火把、边界种两通道、flood 两通道）。
     //   doSky=false：仅方块光（清方块光保留天光、重 seed 火把、边界种方块光、flood 方块光）——火把增删天光不变。
