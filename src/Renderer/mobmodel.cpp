@@ -283,33 +283,20 @@ void MobModel::rebuild()
         // t287/t301 Bones（骸骨；机制等价 MC 1.0 骷髅，§9 区隔改名）—— 瘦骨嶙峋人形（窄躯干 + 小头骨 + 细骨杆四肢）
         //   + 右手持弓（t301：原创弧形弓几何）。修：原 mobType 5 误标为 Stalker，且 Main.qml 把 Bones(5) 路由到
         //   UnitCube 致「白方块」—— t287 改走 MobModel 人形；t301 进一步把比例从 Shambler 充血人形细化为骷髅比例 +
-        //   持弓视觉。远程射箭（t283 aiArcher）由 EntityManager 负责；几何仅形态 + 持弓。
+        //   持弓视觉。远程射箭（t283 aiArcher）由 EntityManager 负责。t331：右臂 + 弓移至 Main.qml（肩枢 Node 子节点）
+        //   —— 弓需独立木褐色材质（区别骨白体色，修「骨弓」误色）+ 抬臂/拉弓动画（drawAmount 驱动）；本几何仅剩
+        //   躯干 + 头 + 左臂 + 双腿（骨白单材质）。
         // t301 比例（vs Shambler 同位的 0.22 / 0.22³ / 0.10 / 0.11）：窄躯干（halfX 0.14 vs 0.22）+ 小头骨
         //   （0.16×0.18×0.16 略竖 vs 0.22³）+ 细骨杆四肢（臂 0.05 vs 0.10、腿 0.06 vs 0.11）→ 「皮包骨」骷髅观感，
         //   明显区别于 Shambler 厚实人形。眼窝由 Main.qml delegate 补（黑色空洞，区别 Shambler 赤红亡灵眼）。
         addBox( 0.00f,  0.05f,  0.00f, 0.14f, 0.30f, 0.10f, verts, idx, bMin, bMax); // 窄躯干（瘦骨）
         addBox( 0.00f,  0.57f,  0.00f, 0.16f, 0.18f, 0.16f, verts, idx, bMin, bMax); // 小头骨（略竖，比 Shambler 头小一圈）
         addBox(-0.20f,  0.23f, -0.37f, 0.05f, 0.05f, 0.25f, verts, idx, bMin, bMax); // 左臂（细骨杆前伸）
-        addBox( 0.20f,  0.23f, -0.37f, 0.05f, 0.05f, 0.25f, verts, idx, bMin, bMax); // 右臂（细骨杆前伸，持弓）
+        // 右臂 + 弓见上 t331 注释（移至 Main.qml 肩枢 Node：木色弓 + 抬臂/拉弓动画）。左臂无动画仍在此。
         const float sw5 = kLegSwingAmp * std::sin(m_walkPhase);
         addBoxRot(-0.07f, -0.575f, 0.00f, 0.06f, 0.325f, 0.06f, -0.25f, 0.00f, +sw5, verts, idx, bMin, bMax); // 左腿（细骨杆）
         addBoxRot( 0.07f, -0.575f, 0.00f, 0.06f, 0.325f, 0.06f, -0.25f, 0.00f, -sw5, verts, idx, bMin, bMax); // 右腿（细骨杆）
-        // t301 弓体（持于右手前，垂直弧形；机制等价 MC 1.0 骷髅持弓，§9 区隔原创几何）。弓平面 = Y-Z 平面（含箭
-        //   飞行方向 -Z 与垂直 Y）。弓背中段（握把）垂直立于右手前，上 / 下肢绕握把端向 +Z（朝射手）回弯成典型
-        //   C 形；弓弦贴弓背 +Z 侧（凹侧 = 射手侧）。弓 X = 右手位 → 弓随整体 yaw 转（QML eulerRotation.y）始终在
-        //   右手前。与 BowGeometry（玩家手持弓）同设计语言（握把 + 上 / 下肢 + 弓弦），更简（4 盒 vs 6 盒）——
-        //   mob 第三人称远观，曲线近似要求低于玩家手持第一人称；弓共用 MobModel 单材质 → 同灰白骨色（骨弓）。
-        constexpr float kBowX  = 0.22f;    // 弓平面 X（右手位 + 0.02 偏移免与臂 z-fight）
-        constexpr float kBowY  = 0.22f;    // 握把 Y（与右手齐平，避开头部）
-        constexpr float kBowZ  = -0.50f;   // 握把 Z（前伸于右手前段）
-        constexpr float kBowTh = 0.025f;   // 弓体半厚（X / Z，瘦薄显骨弓）
-        constexpr float kBowA  = 0.50f;    // 弓肢回弯角（弧度 ≈ 29°；tip 朝射手偏移量）
-        addBox(kBowX, kBowY, kBowZ, kBowTh, 0.06f, kBowTh, verts, idx, bMin, bMax);          // 握把（中段）
-        addBoxRot(kBowX, kBowY + 0.10f, kBowZ, kBowTh, 0.09f, kBowTh,
-                  kBowY + 0.06f, kBowZ, +kBowA, verts, idx, bMin, bMax);                     // 上肢（向 +Z 回弯）
-        addBoxRot(kBowX, kBowY - 0.10f, kBowZ, kBowTh, 0.09f, kBowTh,
-                  kBowY - 0.06f, kBowZ, -kBowA, verts, idx, bMin, bMax);                     // 下肢（向 +Z 回弯）
-        addBox(kBowX, kBowY, kBowZ + 0.06f, 0.012f, 0.16f, 0.012f, verts, idx, bMin, bMax);  // 弓弦（射手侧 +Z）
+        // t331 弓 + 右臂移至 Main.qml（MobBowGeometry 木色弓 + UnitCube 右臂，肩枢 Node 子节点随 drawAmount 抬起）。
     } else if (m_mobType == 6) {
         // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕，§9 区隔改名）—— 四短粗腿 + 高瘦躯干 + 小头。
         //   修：原误标 mobType 5（与 Bones 冲突），已正为 6（enum MobStalker=6）。腿底本地 y=−0.90 贴 collision 底面。

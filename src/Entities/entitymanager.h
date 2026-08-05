@@ -231,6 +231,12 @@ public:
     //   delegate 据 it 对 Model 做 scale（1+inflate·0.5）+ baseColor 蓄力发白（机制等价 MC 苦力怕近距蓄力膨胀
     //   发白）。非 Stalker / 未蓄力 / 越界 → 0（模型静态）。revision 在蓄力期每帧 bump（tick Mob 分支）让绑定刷新。
     Q_INVOKABLE float inflateAt(int i) const;
+    // t331 骸骨拉弓瞄准进度（0..1）：仅 mobType==MobBones 且 aimTimer>0（正在拉弓瞄准）时返
+    //   clamp(aimTimer/kAimWindup,0,1)，供 QML delegate 据 it 驱动 MobModel 肩枢 Node 抬右臂 + MobBowGeometry 弦后拉
+    //   （机制等价 MC 1.0 骷髅停步拉弓瞄准）。aiArcher 射程内 + 视线清 + 冷却到 → 累加 aimTimer；满 kAimWindup 才射
+    //   （拉弓期位移减速到停 = SLOWS + pauses to aim，顺带拉低 t321 攻击节奏）。非 Bones / 未瞄准 / 越界 → 0。
+    //   revision 在追踪期每帧 bump（tick Mob 分支）让绑定刷新（拉弓期 mob 减速到停 → moved=false 亦须刷新）。
+    Q_INVOKABLE float drawAmountAt(int i) const;
     // t249 受击击退（spec「受击往攻击方向小跳击退」；C++ 直调，PlayerController::attackMob 命中后调）：
     //   给第 i 个 mob 一个水平方向 (dirX,dirZ) 的击退冲量（vx/vz=kKnockbackHoriz 沿方向）+ 小跳垂直速度
     //   （vy=kKnockbackUp 向上）；解除 resting 让 tick 重力分支处理上跳→减速→下落→着地（小弹起观感）。
@@ -439,6 +445,11 @@ private:
         //     并 continue 跳过后续重力 / resting（尸体即除，不再模拟）。爆炸当帧生效。
         float fuseTimer = 0.0f;   // 蓄力计时（秒；>0 = 正在蓄力膨胀；仅 MobStalker 用）
         bool  exploded  = false;  // 本 tick 已引爆（仅 MobStalker 用；detonateStalker 置 true 后当帧移除）
+        // t331 骸骨拉弓瞄准计时（秒；仅 mobType==MobBones 用；其余 mob 留默认 0 不触发）：
+        //   aiArcher 在射程内 + 视线清 + 冷却到时累加；满 kAimWindup → fireArrow + 清零（每发前先拉弓瞄准 ~0.5s，
+        //   期间位移减速到停 = SLOWS + pauses to aim）。脱射程 / 视线断 / 冷却中 → 清零（中止拉弓）。drawAmountAt 据
+        //   它返 0..1 驱动 QML 抬臂 + 弦后拉。
+        float aimTimer = 0.0f;    // 拉弓瞄准计时（秒；>0 = 正在拉弓；仅 MobBones 用）
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;
@@ -517,7 +528,9 @@ private:
     //   (4) 保持距离：distXZ<kArcherKeepMin → 朝远离方向走（kChaseSpeed）；>kArcherKeepMax → 朝玩家走；
     //       其间 → 原地持弓（不水平位移，仅朝向）。越障跳（同 aiHostile：前方 1 格墙 + 墙顶 2 格空气 → 跳）。
     //   (5) shoot：distXZ<=kArcherShootRange + |dy|<=kShootVertRange + 视线清（lineOfSightClear）+ 冷却到 →
-    //       fireArrow + 重置冷却（防每帧连发）。
+    //       t331 先累加 aimTimer（拉弓瞄准；期间位移按 (1−draw) 减速到停 = SLOWS + pauses to aim），满 kAimWindup 才
+    //       fireArrow + 重置冷却（防每帧连发）。脱射程 / 视线断 / 冷却中 → 清 aimTimer（中止拉弓）。drawAmountAt 据
+    //       aimTimer 暴露 0..1 给 QML 驱动抬臂 + 弦后拉。
     //   返回是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。playerPos = 玩家脚位（tick 的 listener）。
     //   分层（PLAN §2）：只读 World::isSolid + 自身数据；shoot 走 spawnArrow（箭实体）+ 命中由 Arrow 分支发
     //   mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile 的 attack 模式）。
@@ -694,6 +707,9 @@ private:
     static constexpr float kArcherShootRange = 12.0f;  // 开火 XZ 上界（blocks）
     static constexpr float kShootVertRange   = 4.0f;   // 开火垂直容差（blocks；防跨层盲射）
     static constexpr float kShootCooldown    = 1.6f;   // 射箭间隔（秒）
+    // t331 拉弓瞄准时长（秒）：射程内 + 视线清 + 冷却到 → 先累加 aimTimer 满 kAimWindup 才射；期间位移减速到停
+    //   （机制等价 MC 1.0 骷髅停步拉弓瞄准；顺带拉低攻击节奏，缓解 t321 围攻压迫感）。drawAmountAt 据 it 返 0..1。
+    static constexpr float kAimWindup        = 0.5f;   // 拉弓瞄准时长（秒；满才射）
     static constexpr float kArrowSpeed       = 14.0f;  // 箭水平速度（blocks/s）
     static constexpr float kArrowMaxVert     = 18.0f;  // vy 钳（blocks/s；防极端弧）
     static constexpr float kArrowSpread      = 1.2f;   // 三轴初速随机抖动（blocks/s）

@@ -113,6 +113,7 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
     // t250 环境音初值：半步累加 0；idle 叫声倒计时随机化（[kAmbientMin,kAmbientMax)）防批量 spawn 的 mob
     //   首次叫声同步（同 wanderTimer=0 错峰起步同理）。stepAccum=0。
     e.stepAccum = 0.0f;
+    e.aimTimer = 0.0f; // t331 骸骨拉弓瞄准计时（slot 复用防残留；仅 MobBones 用）
     e.ambientTimer = kAmbientMin
                      + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
     acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
@@ -522,6 +523,20 @@ float EntityManager::inflateAt(int i) const
     return p;
 }
 
+// t331 骸骨拉弓瞄准进度（0..1）：仅 mobType==MobBones 且 aimTimer>0（正在拉弓）时返 clamp(aimTimer/kAimWindup,0,1)，
+//   供 QML delegate 据 it 驱动肩枢 Node 抬右臂 + MobBowGeometry 弦后拉。非 Bones / 未瞄准（aimTimer<=0）/ 越界 → 0
+//   （模型静态、松弦）。机制等价 MC 1.0 骷髅停步拉弓瞄准。
+float EntityManager::drawAmountAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobBones || e.aimTimer <= 0.0f) return 0.0f;
+    float p = e.aimTimer / kAimWindup;
+    if (p < 0.0f) p = 0.0f;
+    if (p > 1.0f) p = 1.0f;
+    return p;
+}
+
 // t239 mob 子类 id（t240 pig/cow/sheep；t242/t243 分流）。越界 → 0。
 int EntityManager::mobTypeAt(int i) const
 {
@@ -907,7 +922,11 @@ bool EntityManager::aiArcher(Entity &e, float dt, World *world, const QVector3D 
     if (distXZ > 1e-4f) e.yawRad = std::atan2(-dx, -dz);
     e.wanderSpeed = kChaseSpeed; // 供 walkPhase 腿摆频率 + 语义（行走态；raw 值，水中减速不写入避免二次缩放）
     // t298 水中减速：chaseSpd = kChaseSpeed × speedScale（位移 + moveSpeed 用 it）。
-    const float chaseSpd = kChaseSpeed * speedScale;
+    // t331 拉弓减速：aimTimer>0（正拉弓瞄准）→ draw=aimTimer/kAimWindup ∈[0,1]，位移再 ×(1−draw) → 拉弓期渐减速
+    //   到停（SLOWS + pauses to aim；满拉 draw=1 → chaseSpd=0 停步射）。draw 亦暴露给 QML 抬臂/弦后拉（drawAmountAt）。
+    float draw = e.aimTimer > 0.0f ? e.aimTimer / kAimWindup : 0.0f;
+    if (draw > 1.0f) draw = 1.0f;
+    const float chaseSpd = kChaseSpeed * speedScale * (1.0f - draw);
 
     // (3) 保持距离：近于 kArcherKeepMin → 朝远离走；远于 kArcherKeepMax → 朝玩家走；其间 → 原地（仅朝向）。
     //   moveDirX/Z = 水平移动单位向量（朝向「期望远离 / 接近」方向）。wantMove=false 表示在保持带内 → 不水平位移。
@@ -960,15 +979,24 @@ bool EntityManager::aiArcher(Entity &e, float dt, World *world, const QVector3D 
     }
     e.moveSpeed = moved ? chaseSpd : 0.0f; // 撞墙 / 保持带内 → 腿停（walkPhase 冻结；t298 含水中减速）
 
-    // (5) shoot：射程内 + 垂直同层 + 视线清 + 冷却到 → 解抛物初速射箭 + 重置冷却（防每帧连发）。
+    // (5) shoot：射程内 + 垂直同层 + 视线清 + 冷却到 → t331 先累加 aimTimer（拉弓瞄准），满 kAimWindup 才射 +
+    //   重置冷却（防每帧连发）。脱射程 / 视线断 / 冷却中 → 清 aimTimer（中止拉弓，下帧 draw 归 0 → 全速）。
     if (distXZ <= kArcherShootRange && std::abs(dy) <= kShootVertRange && e.attackCooldown <= 0.0f) {
         const QVector3D origin(e.pos.x(), e.pos.y() + e.halfH * 0.5f, e.pos.z());
         const QVector3D target(playerPos.x(), playerPos.y() + 0.9f, playerPos.z()); // 玩家上身（眼位 ~ 脚+1.62）
         if (lineOfSightClear(world, origin, target)) {
-            fireArrow(e, target);
-            e.attackCooldown = kShootCooldown;
-            qCInfo(lcEnt) << "archer (Bones) fired arrow; dist=" << distXZ;
+            e.aimTimer += float(dt);
+            if (e.aimTimer >= kAimWindup) {
+                fireArrow(e, target);
+                e.attackCooldown = kShootCooldown;
+                e.aimTimer = 0.0f;
+                qCInfo(lcEnt) << "archer (Bones) fired arrow; dist=" << distXZ;
+            }
+        } else {
+            e.aimTimer = 0.0f; // 视线断 → 中止拉弓
         }
+    } else {
+        e.aimTimer = 0.0f; // 脱射程 / 垂直跨层 / 冷却中 → 不拉弓
     }
 
     return moved;
@@ -1611,6 +1639,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   t284 Stalker（潜行者/苦力怕）→ aiStalker（detect→chase→fuse→detonate 近距自爆）。
                     //   非追踪回退到 wander（在 aiHostile / aiArcher / aiStalker 内）。
                     if (aiArcher(e, float(dt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    // t331 拉弓期（chasing）每帧 bump revision → QML drawAmountAt 绑定刷新（驱动抬臂 + 弦后拉）；
+                    //   即使 aiArcher 返 moved=false（拉弓减速到停），aimTimer 仍在变 → 须 dirty（同 Stalker inflate 模式）。
+                    if (e.chasing) dirty = true;
                 } else if (e.mobType == MobStalker) {
                     if (aiStalker(e, float(dt), world, listener, worldW, worldD, speedScale)) dirty = true;
                     // 蓄力期（chasing）每帧 bump revision → QML inflateAt 绑定刷新（驱动膨胀动画 + 蓄力发白）；

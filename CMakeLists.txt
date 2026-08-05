@@ -86,6 +86,10 @@ qt_add_executable(voxelsandbox
     #   mobType / 血量 / 名称在 Entities 层，贴图在呈现层（Main.qml Texture）—— 依赖只向下。
     src/Renderer/mobmodel.cpp
     src/Renderer/mobmodel.h
+    # t331 骸骨持用弓几何（独立于 MobModel —— 弓需木褐色材质 + 拉弓动画；QML 独立 Model 消费）。
+    #   drawAmount Q_PROPERTY 驱动弦后拉 + 肢增弯；EntityManager::drawAmountAt 设值（aimTimer 驱动）。
+    src/Renderer/mobbow.cpp
+    src/Renderer/mobbow.h
     # t112 广告牌四边形（单面 +Z 法线）：煤/木炭/铁原矿/木棒/铁锭/玻璃 掉落实体材料段
     #   从 CrackBox 6 面立方改为单面平图标 + 朝相机（billboard），消除「6 面未封闭超立方体」观感。
     src/Renderer/billboardquad.cpp

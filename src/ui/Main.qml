@@ -3352,9 +3352,10 @@ Window {
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                         }
                     }
-                    // t287/t301 Bones（骸骨/骷髅；mobType 5）：MobModel 瘦骨人形 + 持弓（t301：窄躯干/细四肢/小头骨 +
-                    //   右手弧形弓几何）。灰白骨色 baseColor（无专属贴图，纯色原创 §9a；弓共用此色 = 骨弓）。受击红闪。
-                    //   远程射箭由 EntityManager 负责。
+                    // t287/t301/t331 Bones（骸骨/骷髅；mobType 5）：MobModel 瘦骨人形（窄躯干/细四肢/小头骨）。
+                    //   灰白骨色 baseColor（无专属贴图，纯色原创 §9a）。受击红闪。远程射箭由 EntityManager 负责。
+                    //   t331：弓 + 右臂移出 MobModel（单材质无法同几何双色）→ 见下方「肩枢 Node」：木色弓（MobBowGeometry，
+                    //   修「弓误用骨白」）+ 右臂（骨白 UnitCube 共享 boneMat）随 drawAmount（aimTimer）抬起瞄准 + 弦后拉。
                     Model {
                         visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobBones
                         geometry: MobModel {
@@ -3363,13 +3364,15 @@ Window {
                         }
                         position: Qt.vector3d(0, mobModelYOff, 0)
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        // boneMat 带 id：右臂（肩枢 Node 子节点）共享同一材质 → 受击红闪 + 昼夜灰阶与身体完全同步。
                         materials: PrincipledMaterial {
+                            id: boneMat
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: {
                                 entityManager.revision
                                 const tl = terrainLight(worldClock.skyLight)
                                 if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 灰白骨色（弓同色 = 骨弓）
+                                return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 灰白骨色（身体 + 右臂）
                             }
                         }
                         // t301 骷髅黑色眼窝（头骨标志性的空洞眼窝，纯色 NoLighting §9a；mob Model 子节点继承 bodyYaw +
@@ -3387,6 +3390,35 @@ Window {
                             position: Qt.vector3d(0.06, 0.62, -0.17)
                             scale: Qt.vector3d(0.06, 0.07, 0.02)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                        // t331 右臂 + 弓 肩枢 Node：drawAmount（EntityManager::drawAmountAt，aimTimer 驱动）抬起右臂瞄准。
+                        //   臂与弓同处一 Node 绕肩枢刚体同转 → 抬臂时弓精确随臂移动（免错位）。肩枢 = 右臂根与躯干相接处
+                        //   (0.20,0.28,-0.12)（MobModel 局部坐标；Node 继承 bodyYaw + 父 position）。drawAmount=0 → 臂/弓在
+                        //   原持弓静态位（与 t301 MobModel 内建位一致）。机制等价 MC 1.0 骷髅停步抬弓瞄准。
+                        Node {
+                            position: Qt.vector3d(0.20, 0.28, -0.12)
+                            eulerRotation.x: { entityManager.revision; return entityManager.drawAmountAt(index) * 30 } // 度；+draw 前端（-Z）上扬
+                            // 右臂（骨白 UnitCube，共享 boneMat）：臂心相对肩枢 = (0,-0.05,-0.25)；半 (0.05,0.05,0.25)。
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(0.0, -0.05, -0.25)
+                                scale: Qt.vector3d(0.10, 0.10, 0.50)
+                                materials: boneMat
+                            }
+                            // 弓（木褐色 MobBowGeometry，独立于骨白体色；弦随 drawAmount 后拉 + 肢增弯）：握把相对肩枢 = (0.02,-0.06,-0.38)。
+                            Model {
+                                geometry: MobBowGeometry {
+                                    drawAmount: { entityManager.revision; return entityManager.drawAmountAt(index) }
+                                }
+                                position: Qt.vector3d(0.02, -0.06, -0.38)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: {
+                                        const tl = terrainLight(worldClock.skyLight) // 昼夜灰阶（同身体；受击期暂持木色，短可接受）
+                                        return Qt.rgba(0.42 * tl.r, 0.27 * tl.g, 0.15 * tl.b, 1.0) // 木褐色（修「弓误用骨白」）
+                                    }
+                                }
+                            }
                         }
                     }
                     // t285/t302 Spider（蜘蛛；mobType 7）：MobModel 宽矮躯干 + 前伸小头 + **8 腿**（原创 §9，4 对
