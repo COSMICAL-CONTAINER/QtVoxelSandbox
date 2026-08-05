@@ -625,6 +625,11 @@ private:
     // （全入）→ ItemEntityManager.removeAt 销毁实体；返 >0（背包满）→ 不拾取（entity 留）。
     // 距离从玩家 AABB 中心（脚底 + 半高）3D 起算，阈值 kPickupDist；从后往前扫便于 erase。
     void pickupScan();
+    // t323 嵌入箭近距拾取（spec「玩家箭嵌入方块后走近自动拾 +1 箭」）：扫 EntityManager 中「玩家射出且已嵌入
+    //   方块」的箭，玩家 AABB 中心 3D 距 ≤ kPickupDist → Hotbar.addToAny(ArrowId,1)：全入（余 0）→ removeEntityAt
+    //   销毁嵌入箭 + emit itemPickedUp（拾取音 / 手弹跳，同掉落物）；背包满 → 嵌入箭留。骷髅箭（arrowFromPlayer=
+    //   false）不拾（防刷箭）；飞行中箭（未嵌入）不拾（免误拾）。门控同 pickupScan（死亡 / 观察者不拾）。
+    void arrowPickupScan();
     // t137 出生贴地表：查出生列 (kSpawnX,kSpawnZ) 的 worldgen 地表高度 → 把脚底 Y 设为 h+1（站地表方块
     //   上方）+ 同步 m_peakY 防误判落差。kSpawnY=80 是高于最高地表(~71，t307 后 hills 顶)的兜底初值（防
     //   卡地形），但玩家从 80 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生

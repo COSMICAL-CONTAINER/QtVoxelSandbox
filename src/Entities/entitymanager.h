@@ -220,6 +220,13 @@ public:
     Q_INVOKABLE float arrowYawAt(int i) const;
     Q_INVOKABLE float arrowPitchAt(int i) const;
     Q_INVOKABLE QVector3D velAt(int i) const;
+    // t323 箭嵌入态访问（PlayerController::arrowPickupScan 近距拾取读）：isArrowStuckAt = 箭是否已嵌入方块
+    //   （仅嵌入箭可拾，飞行中不拾 —— 免误拾飞行箭）。arrowFromPlayerAt = 是否玩家射出（仅玩家箭可拾；
+    //   骷髅箭防刷不拾，spec「SKELETON 箭不可拾取」）。非 Arrow / 越界 → false。
+    //   removeEntityAt = 释放槽位（拾取全入后销毁嵌入箭；同 ItemEntityManager.removeAt 拾取销毁语义）。
+    Q_INVOKABLE bool isArrowStuckAt(int i) const;
+    Q_INVOKABLE bool arrowFromPlayerAt(int i) const;
+    Q_INVOKABLE void removeEntityAt(int i);
     // t284 Stalker 蓄力膨胀进度（0..1）：fuseTimer>0（正在蓄力）时返 clamp(fuseTimer/kFuseTime,0,1)，供 QML
     //   delegate 据 it 对 Model 做 scale（1+inflate·0.5）+ baseColor 蓄力发白（机制等价 MC 苦力怕近距蓄力膨胀
     //   发白）。非 Stalker / 未蓄力 / 越界 → 0（模型静态）。revision 在蓄力期每帧 bump（tick Mob 分支）让绑定刷新。
@@ -377,6 +384,12 @@ private:
         //   arrowDamage = 本箭命中时造成的伤害 HP（骷髅箭恒 kArrowDamage=2；玩家箭由弓蓄力 1..6 决定，spawnArrowPlayer 传）。
         bool arrowFromPlayer = false; // 是否玩家射出（命中目标分流：true→mob / false→玩家）
         int arrowDamage = 0;          // 命中伤害（HP；仅 kind==Arrow 用；骷髅箭 = kArrowDamage）
+        // t323 箭嵌入态（命中方块后冻结物理）：arrowStuck=true → tick Arrow 分支仅推进 despawn 倒计时，不再
+        //   重力 / 位移 / 命中判定。vx/vy/vz 保留作定向（arrowYawAt/arrowPitchAt 据 vel 算 → 嵌入箭仍朝命中
+        //   飞行方向）。命中瞬间 e.pos 钉到入射面（半嵌可见）+ arrowLife 重置 kStuckArrowLifetime（~60s despawn）。
+        //   玩家箭（arrowFromPlayer）嵌入后可被 PlayerController::arrowPickupScan 近距拾取；骷髅箭嵌入不可拾取
+        //   （防刷箭，spec）。非 Arrow / 飞行中默认 false。
+        bool arrowStuck = false; // 箭是否已嵌入方块（仅 kind==Arrow 用；spawn 默认 false，acquireSlot 覆写新实体）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
         int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；t280 Shambler/Bones；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
@@ -687,6 +700,13 @@ private:
     static constexpr float kArrowLifetime    = 5.0f;   // 箭最长存活（秒；兜底移除）
     static constexpr int   kArrowDamage      = 2;      // 命中伤害（HP）
     static constexpr float kArrowHitHalfW    = 0.4f;   // 箭 vs 玩家命中盒 XZ 外扩（blocks）
+    // t323 箭嵌入方块常量（spec「箭嵌在命中面（半嵌可见）+ 玩家箭可拾 + 嵌入箭 ~60s 消失」；机制对齐
+    //   MC 1.0 箭命中方块嵌入可回收）。数值为本工程量身调，非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）。
+    //   - kStuckArrowLifetime：嵌入箭最长存活（秒；命中方块瞬间重置 → ~60s 后 despawn，防永久滞留堆积）。
+    //   - kArrowEmbed：嵌入时箭心相对入射面的回退（blocks；正 → 心在面外侧、杆沿飞行方向伸入面内半嵌可见；
+    //     箭杆长 ~0.55，取 0.2 → 尖入面内 ~0.35、杆尾露面外 ~0.2，半嵌观感）。
+    static constexpr float kStuckArrowLifetime = 60.0f; // 嵌入箭存活（秒；despawn）
+    static constexpr float kArrowEmbed         = 0.20f; // 嵌入回退（blocks；心在面外、尖入面内）
     // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI / 爆炸常量（spec t284「近距蓄力膨胀动画 → 爆炸（破坏方块
     //   + 伤害玩家 + 音效）」；机制对齐 MC 1.0 苦力怕：缓慢逼近 + 近距蓄力 + 球形爆炸 + 距离衰减伤害；数值为
     //   本工程小世界量身调，非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）。

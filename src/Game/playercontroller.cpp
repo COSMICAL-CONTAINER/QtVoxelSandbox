@@ -444,6 +444,9 @@ void PlayerController::tickImpl()
     // （itemEntities->tick）本就在早 return 前跑（独立于捕获态），拾取与之同级、同样常开才一致。
     // 安全：pickupScan 内自检 m_itemEntities/m_hotbar 非空，t53 新生免拾取窗已在内部（0.5s 后才可拾）。
     pickupScan();
+    // t323 嵌入箭近距拾取（与掉落物拾取同级常开：背包开 / 失焦时玩家仍可走近拾嵌入箭）。内自检
+    //   m_entityManager/m_hotbar 非空 + 死亡 / 观察者门控，常开安全（同 pickupScan）。
+    arrowPickupScan();
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
         cancelEating(); // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零，未完成不消耗）
@@ -1912,6 +1915,32 @@ void PlayerController::pickupScan()
             // t118：部分拾取也算拾取事件（按实际入栈数计；spec「拾取」语义覆盖「全 / 部分」两路）。
             emit itemPickedUp(id, have - leftover);
         } // else leftover == have：背包完全装不下 → entity 不动（spec：全满→不拾取；不发事件）
+    }
+}
+
+// t323 嵌入箭近距拾取（spec「玩家箭嵌入方块后走近自动拾 +1 箭」）：扫 EntityManager 中「玩家射出且已嵌入
+//   方块」的箭，玩家 AABB 中心 3D 距 ≤ kPickupDist → addToAny(ArrowId,1) 全入则销毁嵌入箭 + emit itemPickedUp
+//   （拾取音 / 手弹跳，复用掉落物拾取语义事件）。骷髅箭（arrowFromPlayer=false）不拾（防刷箭，spec「SKELETON
+//   箭不可拾取」）；飞行中箭（未嵌入）不拾（免误拾）。门控同 pickupScan（无 entityManager/hotbar / 死亡 / 观察者 → 早退）。
+void PlayerController::arrowPickupScan()
+{
+    if (!m_entityManager || !m_hotbar) return;
+    if (m_dead) return;            // 同 pickupScan：死亡态不拾取
+    if (m_mode == Spectator) return; // t290 观察者不交互（不拾取，同 pickupScan 门控）
+    const QVector3D center = m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f);
+    const float r2 = kPickupDist * kPickupDist;
+    for (int i = m_entityManager->count() - 1; i >= 0; --i) {
+        if (!m_entityManager->aliveAt(i)) continue;                    // 跳过空槽（slot-reuse）
+        if (m_entityManager->kindAt(i) != int(EntityManager::Arrow)) continue; // 仅箭
+        if (!m_entityManager->isArrowStuckAt(i)) continue;             // 仅嵌入箭（飞行中不拾）
+        if (!m_entityManager->arrowFromPlayerAt(i)) continue;          // 仅玩家箭（骷髅箭防刷不拾）
+        const QVector3D d = m_entityManager->posAt(i) - center;
+        if (d.lengthSquared() > r2) continue;                          // 超阈值 → 跳过
+        const int leftover = m_hotbar->addToAny(int(RecipeRegistry::ArrowId), 1);
+        if (leftover <= 0) { // 全入 → 销毁嵌入箭（满则留，spec「满→不拾」）
+            m_entityManager->removeEntityAt(i);
+            emit itemPickedUp(int(RecipeRegistry::ArrowId), 1); // 拾取音 / 手弹跳（同掉落物拾取）
+        }
     }
 }
 

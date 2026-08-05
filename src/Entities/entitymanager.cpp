@@ -478,6 +478,33 @@ QVector3D EntityManager::velAt(int i) const
     return QVector3D(e.vx, e.vy, e.vz);
 }
 
+// t323 箭是否已嵌入方块（PlayerController::arrowPickupScan 近距拾取读；飞行中不拾免误拾）。
+//   非 Arrow / 越界 → false。
+bool EntityManager::isArrowStuckAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    return e.kind == Arrow && e.arrowStuck;
+}
+
+// t323 箭是否玩家射出（仅玩家箭嵌入后可拾；骷髅箭防刷不拾，spec「SKELETON 箭不可拾取」）。非 Arrow / 越界 → false。
+bool EntityManager::arrowFromPlayerAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    return e.kind == Arrow && e.arrowFromPlayer;
+}
+
+// t323 释放槽位（PlayerController 拾取嵌入箭全入背包后销毁箭；同 ItemEntityManager.removeAt 拾取销毁语义）。
+//   委托 releaseSlot（标空槽 + 入 free list，保 Repeater count 单调不降，lessons-learned t256）。
+void EntityManager::removeEntityAt(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    releaseSlot(i);
+    ++m_revision;
+    emit entitiesChanged();
+}
+
 // t284 Stalker 蓄力膨胀进度（0..1）：仅 mobType==MobStalker 且 fuseTimer>0（正在蓄力）时返
 //   clamp(fuseTimer/kFuseTime,0,1)，供 QML delegate 据 it 对 Model 做 scale + baseColor 蓄力发白。非 Stalker /
 //   未蓄力（fuseTimer<=0）/ 越界 → 0（模型静态、原配色）。
@@ -1342,6 +1369,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
 
         // --- Arrow（t283 骷髅弓箭手箭矢）：抛物 + 方块命中 / 玩家命中 / 寿命 / 越界 → 移除（不走 Mob AI / resting）---
         if (e.kind == Arrow) {
+            // t323 嵌入态（命中方块后冻结物理）：仅 despawn 倒计时；玩家箭的近距拾取由
+            //   PlayerController::arrowPickupScan 处理（嵌入箭仍渲染：kind=Arrow + pos 钉面 + vel 定向不变）。
+            if (e.arrowStuck) {
+                e.arrowLife -= float(dt);
+                if (e.arrowLife <= 0.0f) { toRemove.push_back(idx); dirty = true; } // ~60s despawn
+                continue;
+            }
             e.arrowLife -= float(dt);
             // 抛物：重力改 vy（与世界重力同值 → 弧自然）。不复用 Mob 终端下落钳（箭可高速上扬）。
             e.vy -= kGravity * float(dt);
@@ -1352,11 +1386,30 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积）。
             if (e.arrowLife <= 0.0f) remove = true;
 
-            // 方块命中：新位置所在格 isSolid → 命中即移除（嵌入视觉 MVP 不做；箭速 ~14、每帧 0.22 格，
-            //   1 格墙不致穿模。火把 / 半砖等非 solid → 穿透，机制可接受）。
+            // 方块命中（t323 嵌入而非移除）：新位置所在格 isSolid → 箭钉入射面（半嵌可见、定向飞行方向），
+            //   arrowStuck=true 冻结物理 + arrowLife 重置 kStuckArrowLifetime（~60s despawn）。vx/vy/vz 保留供
+            //   arrowYawAt/arrowPitchAt 定向（嵌入箭仍朝命中飞行方向）。火把 / 半砖等非 solid → 穿透（机制可接受）。
+            //   玩家箭嵌入后可拾（PlayerController::arrowPickupScan）；骷髅箭嵌入不拾（防刷，spec）。
             if (!remove) {
                 const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
-                if (by >= 0 && world->isSolid(bx, by, bz)) remove = true;
+                if (by >= 0 && world->isSolid(bx, by, bz)) {
+                    // 入射方向（归一；速度 ~0 退化 → 向下兜底）。沿 dir 把箭尖压入面、杆尾露面外（半嵌）。
+                    QVector3D v(e.vx, e.vy, e.vz);
+                    const float vlen = v.length();
+                    const QVector3D dir = vlen > 1e-3f ? v / vlen : QVector3D(0.0f, -1.0f, 0.0f);
+                    // 入射面 = |v| 主轴上「箭来源侧」的 block 边界面（vx>0 → 来源 -X 侧 → x=bx 面；余类推），
+                    //   其余两轴用 next 坐标（命中点在该面上的投影）。非主轴坐标可能略入块，但箭细长沿 dir 定向无碍。
+                    float fx = next.x(), fy = next.y(), fz = next.z();
+                    const float ax = std::abs(e.vx), ay = std::abs(e.vy), az = std::abs(e.vz);
+                    if (ax >= ay && ax >= az) fx = e.vx > 0.0f ? float(bx) : float(bx + 1);
+                    else if (ay >= az)        fy = e.vy > 0.0f ? float(by) : float(by + 1);
+                    else                       fz = e.vz > 0.0f ? float(bz) : float(bz + 1);
+                    e.pos = QVector3D(fx, fy, fz) - dir * kArrowEmbed; // 心在面外、尖入面内（半嵌可见）
+                    e.arrowStuck = true;
+                    e.arrowLife = kStuckArrowLifetime;
+                    dirty = true;
+                    continue; // 嵌入态：跳过玩家 / mob 命中 + 越界兜底（已钉面；下帧由顶部 arrowStuck 分支 despawn）
+                }
             }
 
             // 玩家命中：箭（点）是否落在玩家 AABB 外扩命中盒内。玩家 AABB = listener（脚位）[−hw,+hw]×
