@@ -812,11 +812,16 @@ Window {
             } else if (mobType === EntityManager.MobSheep) {
                 itemEntities.spawnItem(x, y, z, 0x20E, 1)   // 羊毛 ×1
             } else if (mobType === EntityManager.MobBones) {
-                // t299 敌对掉落：骸骨（骷髅）→ 骨头 ×1-2（机制等价 MC 1.0 骷髅掉骨头）。
-                //   弓 + 箭掉落（spec「骸骨→弓(带耐久)+箭+骨头」）归 t301（骷髅持弓）/ t304（弓箭物品系统）——
-                //   那两任务注册弓 / 箭物品 + 耐久 + 拉弓射箭；此处仅落骨头，避免半成品弓无图标 / 无用法。
-                itemEntities.spawnItem(x, y, z, 0x217, 1)   // 骨头 ×1-2
+                // t301 敌对掉落：骸骨（骷髅）→ 骨头 ×1-2 + 箭 ×0-2 + 弓（~50%）。
+                //   机制等价 MC 1.0 骷髅掉骨头 + 箭 + 有时弓（spec t301：弓 ~50% 概率非 100%，区别于被动掉落的恒定数量）。
+                //   弓 id=0x10F（ToolRegistry::Bow，工具段；不可堆叠 maxStack=1）/ 箭 id=0x21A（RecipeRegistry::ArrowId）/
+                //   骨头 id=0x217（RecipeRegistry::BoneId）。⚠️ QML 不 import C++ 静态类，故用字面量（同上注释约定）。
+                //   弓 / 箭的两次 Math.random() 独立判定 → 箭总量 0-2、弓 0-1，每件独立掉落实体（同被动掉落模式）。
+                itemEntities.spawnItem(x, y, z, 0x217, 1)   // 骨头 ×1-2（恒掉，每件独立实体）
                 itemEntities.spawnItem(x, y, z, 0x217, 1)
+                if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x21A, 1)  // 箭 ~50% ×1
+                if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x21A, 1)  // 箭 ~50% ×1（独立 → 总量 0-2）
+                if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x10F, 1)  // 弓 ~50%（ToolRegistry::Bow）
             } else if (mobType === EntityManager.MobShambler) {
                 // t299 敌对掉落：蹒跚者（僵尸）→ 腐肉 ×1-2（机制等价 MC 1.0 僵尸掉腐肉）。
                 itemEntities.spawnItem(x, y, z, 0x218, 1)   // 腐肉 ×1-2
@@ -3048,8 +3053,9 @@ Window {
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                         }
                     }
-                    // t287 Bones（骸骨/骷髅；mobType 5）：MobModel 人形（修：原走 UnitCube 致「白方块」）。
-                    //   灰白骨色 baseColor（无专属贴图，纯色原创 §9a）。受击红闪。远程射箭由 EntityManager 负责。
+                    // t287/t301 Bones（骸骨/骷髅；mobType 5）：MobModel 瘦骨人形 + 持弓（t301：窄躯干/细四肢/小头骨 +
+                    //   右手弧形弓几何）。灰白骨色 baseColor（无专属贴图，纯色原创 §9a；弓共用此色 = 骨弓）。受击红闪。
+                    //   远程射箭由 EntityManager 负责。
                     Model {
                         visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobBones
                         geometry: MobModel {
@@ -3064,8 +3070,24 @@ Window {
                                 entityManager.revision
                                 const tl = terrainLight(worldClock.skyLight)
                                 if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 灰白骨色
+                                return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 灰白骨色（弓同色 = 骨弓）
                             }
+                        }
+                        // t301 骷髅黑色眼窝（头骨标志性的空洞眼窝，纯色 NoLighting §9a；mob Model 子节点继承 bodyYaw +
+                        //   父 visible）。区别于 Shambler 的赤红亡灵眼 —— Bones 用纯黑 #1a1a1a 显「空洞眼窝」而非「发光
+                        //   眼」，更贴头骨语义。MobModel 头骨心 (0,0.57,0) 半 (0.16,0.18,0.16) → 前面 z=-0.16；眼贴头
+                        //   前面 z=-0.17（略凸出防 z-fight，同 t52 贴脸）。眼在上半 y≈0.62（头骨上半 = 眼眶位）、x=±0.06。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.06, 0.62, -0.17)
+                            scale: Qt.vector3d(0.06, 0.07, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.06, 0.62, -0.17)
+                            scale: Qt.vector3d(0.06, 0.07, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                         }
                     }
                     // t285/t302 Spider（蜘蛛；mobType 7）：MobModel 宽矮躯干 + 前伸小头 + **8 腿**（原创 §9，4 对
