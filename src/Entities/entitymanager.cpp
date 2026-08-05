@@ -1106,10 +1106,23 @@ void EntityManager::detonateStalker(Entity &e, World *world, const QVector3D &pl
     //   跳过 Air（无操作）/ Bedrock（不可破坏）/ Water（不抽干，机制等价 MC 爆炸不毁水体）。走 setWaterSilent
     //   （直写 + worldChanged 重建 mesh，**不**发 blockBroken → 免球形内每块破块粒子 / 音 spam —— 爆炸的音 / 视
     //   反馈由下方 explosion 信号单一入口驱动）。每块 O(1)；半径 3 → 7³=343 格 worst case，可接受（一次性事件）。
-    //   t297 水中不破坏方块：爆炸中心格（cx0,cy0,cz0 = Stalker 身体中心格；halfH=0.9 使 cy0 落在脚位 / 浅水时
-    //     即水格）为 Water → 水吸收爆炸（机制等价 MC 爆炸射线遇液体即灭 → 不毁地形），整段球形破坏跳过。
+    //   t297 水中不破坏方块：水吸收爆炸（机制等价 MC 爆炸射线遇液体即灭 → 不毁地形），整段球形破坏跳过。
     //     玩家伤害 / 音 / 视反馈照发（水中爆炸仍伤玩家、仍有爆炸声 / 迸发，仅地形无损，机制等价 MC）。
-    const bool originInWater = world && world->blockAt(cx0, cy0, cz0) == BlockRegistry::Water;
+    //   t319 修 t297 漏判（水中仍毁地形）：e.pos.y 是 mob 身体【中心】（halfH=0.9 → 身体 1.8 高），t297
+    //     只查 blockAt(cx0, cy0=floor(pos.y), cz0) 中心格 —— Stalker 在水中受浮力上浮（头出水面）时中心格
+    //     常落在水面之上的空气格 → originInWater=false → 球形破坏照跑（bug）。改【沿身体 Y 列】逐格查水
+    //     （feet=floor(pos.y−halfH) .. head=floor(pos.y+halfH−ε)，XZ 取中心格）—— 复用同文件 mobFeetInWater /
+    //     tick 水中浮力判定（mobInWater）的同一脚位语义；任一身体格 == Water 即视为水中爆炸。陆地（身体列
+    //     全程无水）originInWater=false → 照常破坏，行为不变。
+    bool originInWater = false;
+    if (world) {
+        const int fy = qFloor(ey - e.halfH);             // 脚位格（AABB 底面所在格；同 mobFeetInWater）
+        const int hy = qFloor(ey + e.halfH - 1e-3f);     // 头位格（ε 防 AABB 顶恰整数误取上方空气格）
+        for (int by = fy; by <= hy && !originInWater; ++by) {
+            if (by < 0) continue;                         // Y<0 越界 blockAt 返 Air，跳过免无谓查（同 mobFeetInWater 早返）
+            if (world->blockAt(cx0, by, cz0) == BlockRegistry::Water) originInWater = true;
+        }
+    }
     if (world && !originInWater) {
         const int r = int(std::ceil(kExplosionRadius));
         const float r2 = kExplosionRadius * kExplosionRadius;
