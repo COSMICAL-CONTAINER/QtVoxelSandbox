@@ -665,9 +665,11 @@ void Hotbar::damageSelectedItem()
     if (s.durability <= 1) {
         // 归零 → 工具破损：清空槽（机制等价 MC「工具耐久耗尽即消失」，不掉落破损残骸）。
         qInfo().noquote() << "[inv] tool broken slot=" << m_selectedSlot << "id=" << s.id;
+        const int brokenId = s.id;
         s = ItemStack{0, 0, 0};
         bumpRevision();
         emit selectedSlotChanged(); // 选中栈变空 → selectedBlockId → Air；player.selectedBlock 刷新
+        emit toolBroken(brokenId);  // t315 破损音（Main.qml Connections → AudioManager.playToolBreak）
         return;
     }
     s.durability -= 1;

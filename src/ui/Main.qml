@@ -3516,6 +3516,14 @@ Window {
         }
     }
 
+    // t315 工具耐久归零破损音：Hotbar::damageSelectedItem 归零分支 emit toolBroken(itemId) → 路由到
+    //   AudioManager.playToolBreak（呈现层消费语义事件，PLAN §2 分层：音频层只消费、不反向写）。槽位清空在
+    //   emit 前已完成（Hotbar 内）；此处仅播音。engine / clip 失败时 AudioManager 内部静默降级（§2-E）。
+    Connections {
+        target: hotbarVM
+        function onToolBroken(itemId) { audio.playToolBreak() }
+    }
+
     // t88 工具：按坐标移除火把伪光源（破块 / 校验清理共用）。从后往前扫，删**所有**匹配 (x,y,z) 的条目。
     //   t131：原版仅删首个即 return —— onTorchPlaced 旧无去重 + 信号竞态会产生同坐标重复条目，单删留孤儿
     //   → 挖掉火把后伪光源仍在（用户实测「火把挖掉光源残留」）。改删全部，配合 onTorchPlaced 源头去重
@@ -4442,6 +4450,17 @@ Window {
         readonly property int slotSize: 46 // 单格方形尺寸（图标 38 居中，留井边呼吸）
         readonly property int selMargin: 1 // 选框相对槽的外扩（凸起边框略大于槽）
 
+        // t315 HUD hotbar 悬停 tooltip：指针位于某槽时显其名（工具附「耐久: cur/max」行）。指针锁定 FPS 瞄
+        //   准态下 HoverHandler 不触发（光标居中隐藏），仅指针释放（暂停 / 面板开但未盖底栏）时生效。hoveredSlot
+        //   = 当前指针所在槽下标（-1=无）；每槽 HoverHandler onHoveredChanged 维护（进入写、离开按 index 守卫清除，
+        //   防相邻槽进出竞态互清，同背包面板 hoveredKey 模式）。触碰 slotRevision 令槽内容改写后 tooltip 刷新。
+        property int hoveredSlot: -1
+        // 当前 hover 槽的物品 id（tooltip 显名 / 耐久行用）。空槽 / 无 hover → 0（tooltip 不显）。
+        property int hoveredItemId: {
+            hotbarVM.slotRevision  // 触碰：栈写入后重算
+            return hotbarBar.hoveredSlot >= 0 ? hotbarVM.blockIdAt(hotbarBar.hoveredSlot) : 0
+        }
+
         // 9 个方形凹槽槽框（sunken bevel：顶/左 1px 暗边=阴影、底/右 1px 亮边=受光 → 凹陷观感）。
         Row {
             id: slotRow
@@ -4516,6 +4535,47 @@ Window {
                         font.pixelSize: 14; font.bold: true
                     }
 
+                    // t315 工具耐久条：槽底薄条，宽 ∝ remaining/max，色绿(>50%)/黄(20–50%)/红(<20%)。
+                    //   仅工具（isTool）且 remaining<max（满耐久工具不显条）时可见。触碰 slotRevision 令耐久
+                    //   消耗后重算（durabilityAt / toolMaxDurability 是 Q_INVOKABLE，靠版本号触发）。机制等价
+                    //   MC 1.0 工具耐久条（绿色随耗变黄转红、满耐久隐）；原创自绘 Rectangle，零 MC 资产（§9）。
+                    Item {
+                        id: durabilityBar
+                        property int curDur: { hotbarVM.slotRevision; return hotbarVM.durabilityAt(index) }
+                        property int maxDur: { hotbarVM.slotRevision; return hotbarVM.toolMaxDurability(hotbarVM.blockIdAt(index)) }
+                        property real ratio: maxDur > 0 ? curDur / maxDur : 0.0
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: 3
+                        anchors.rightMargin: 3
+                        anchors.bottomMargin: 2
+                        height: 3
+                        visible: { hotbarVM.slotRevision
+                            const id = hotbarVM.blockIdAt(index)
+                            return hotbarVM.isTool(id) && durabilityBar.curDur > 0 && durabilityBar.curDur < durabilityBar.maxDur }
+                        // 槽底凹槽底色（耐久条的「空段」背景，凸显已耗部分）。
+                        Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.55 }
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            width: parent.width * (parent.maxDur > 0 ? parent.curDur / parent.maxDur : 0)
+                            // 绿 >50% / 黄 20–50% / 红 <20%（MC 1.0 耐久条配色量级）。
+                            color: parent.ratio > 0.5 ? "#5fd35f" : (parent.ratio >= 0.2 ? "#e8e85a" : "#e05050")
+                        }
+                    }
+
+                    // t315 HUD hotbar 悬停 tooltip：进入写 hoveredSlot、离开按 index 守卫清除（防相邻槽进出竞态
+                    //   互清，同背包面板 hoveredKey 模式）。指针锁定 FPS 瞄准态不触发（光标居中隐藏）。
+                    HoverHandler {
+                        id: slotHover
+                        onHoveredChanged: {
+                            if (hovered) hotbarBar.hoveredSlot = index
+                            else if (hotbarBar.hoveredSlot === index) hotbarBar.hoveredSlot = -1
+                        }
+                    }
+
                     // [t55] 诊断：delegate 创建时打一行 —— 确认恰好 9 个 delegate 生成 + 初始 id（启动全空=0）。
                     // 若日志只见 9 行且 id=0，之后拾取无新日志 = delegate 未重建（预期，因 model 是常数）；
                     // 此时刷新靠下方 onSlotsChanged 打印 + 各绑定 slotRevision 触碰（应见图标更新）。
@@ -4537,6 +4597,54 @@ Window {
             Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.left: parent.left }
             Rectangle { color: "#ffffff"; width: parent.width; height: 2; anchors.bottom: parent.bottom }
             Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.right: parent.right }
+        }
+
+        // t315 HUD hotbar 悬停 tooltip（纯 QtQuick 自绘；同背包面板 t94 模式，不引入 QtQuick.Controls）。
+        //   显 hoveredSlot 槽物品名；工具附「耐久: cur/max」行（spec「name\n\n耐久: x/x」）。非工具 / 空槽 / 无
+        //   hover → 不显。触碰 slotRevision 令槽内容改写后刷新（durabilityAt 等是 Q_INVOKABLE，靠版本号触发）。
+        //   定位：水平居中于 hoveredSlot 上方，左右贴边时夹紧；垂直在 hotbar 行之上（y=-height-6），顶部空间
+        //   不足（极小窗口）翻到行下方。
+        Rectangle {
+            id: hudTip
+            visible: hotbarBar.hoveredItemId !== 0 && hudTipLabel.text !== ""
+            z: 1000
+            width: hudTipLabel.implicitWidth + 14
+            height: hudTipLabel.implicitHeight + 8
+            color: "#101216"
+            opacity: 0.94
+            border.color: "#3a444f"
+            border.width: 1
+            radius: 3
+            x: {
+                const cx = hotbarBar.hoveredSlot * hotbarBar.slotSize + hotbarBar.slotSize / 2
+                let px = cx - width / 2
+                if (px < 2) px = 2
+                const maxX = hotbarBar.width - width - 2
+                if (px > maxX) px = maxX
+                return px
+            }
+            y: {
+                let py = -height - 6
+                if (py < 2) py = hotbarBar.height + 6 // 顶部空间不足 → 翻到行下方
+                return py
+            }
+            Text {
+                id: hudTipLabel
+                anchors.centerIn: parent
+                // 工具槽附「\n\n耐久: cur/max」行（spec 多行格式）；非工具仅显名。触碰 slotRevision 刷新。
+                text: {
+                    hotbarVM.slotRevision
+                    const id = hotbarBar.hoveredItemId
+                    if (id === 0) return ""
+                    const name = hotbarVM.nameForBlock(id)
+                    if (!hotbarVM.isTool(id)) return name
+                    const cur = hotbarBar.hoveredSlot >= 0 ? hotbarVM.durabilityAt(hotbarBar.hoveredSlot) : 0
+                    const mx = hotbarVM.toolMaxDurability(id)
+                    return name + "\n\n耐久: " + cur + "/" + mx
+                }
+                color: "#f2f2f2"
+                font.pixelSize: 12
+            }
         }
     }
 

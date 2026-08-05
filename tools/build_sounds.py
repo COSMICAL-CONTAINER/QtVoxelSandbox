@@ -27,6 +27,9 @@
      下扫中频「 creature yelp 」（拟生物被打一声叫），~0.18s。机制等价 MC 生物受击声（§9 原创，零 MC
      资产）。PlayerController.mobAttacked → AudioManager.playMobHurt 触发（替代旧复用 hurt.wav 的路径，
      spec「受击音换专属 mob 受伤声」）。
+   - tool_break.wav：工具破损音（t315 工具耐久归零瞬间）—— 干脆「啪嗒」断裂声（高频 crack 瞬态 + 中频
+     snap body + 末尾碎屑沙沙），~0.20s。机制等价 MC 工具耐久耗尽破损声（§9 原创）。Hotbar::toolBroken →
+     AudioManager.playToolBreak 触发（damageSelectedItem 归零分支 emit）。
    - ambient_wind.wav：环境音 / 风声床（t177）—— 长循环风声（~8s，单极点低通白噪 + 双 LFO 慢颤
      调幅 + 首末 50ms 三角窗淡化保循环无缝）。机制等价 MC 的环境 / 风声氛围床（§9 原创）。
      AudioManager 用 ma_sound 设 looping，startAmbient/stopAmbient 控制开关（playing 态开 / 退菜单停），
@@ -721,6 +724,51 @@ def gen_mob_idle_spider():
     return out
 
 
+def gen_tool_break():
+    """工具破损音（t315 工具耐久归零瞬间播放）：干脆的「啪嗒」断裂声 —— 木柄 / 木板崩裂的脆响。起始极短宽带
+    crack 瞬态（断裂瞬间的高频冲击）+ 中频空洞 snap body（~520Hz 短正弦，材料崩裂的回响）+ 弱低频 thunk
+    （手持重量落地）+ 末尾细碎 debris 沙沙（碎屑散落），~0.20s。机制等价 MC 工具耐久耗尽时的破损声（§9 原创程序
+    合成，零 MC 资产）。由 Hotbar::toolBroken → Main.qml 路由到 AudioManager.playToolBreak 触发（damageSelectedItem
+    归零分支 emit）。
+
+    音色差异化（vs gen_hurt / gen_door_close / break_wood）：
+      - hurt = 低频闷击 90Hz + 不和谐中频 165Hz groan → 人味「闷哼」；
+      - door_close = 低频闷击 95Hz + 末尾扣响 → 门撞框；
+      - break_wood = 中空闷击 180Hz + 弱噪声 → 整块木头被破；
+      - tool_break = 更亮 / 更脆：高频 crack 瞬态更强（断裂的「啪」）+ 较高基频 snap 520Hz（短脆回响）+
+        末尾碎屑沙沙（手持物散架的颗粒尾）→ 一听即「东西断了」而非「挨打 / 关门」。
+    """
+    dur = 0.20
+    n = int(SR * dur)
+    random.seed(315315)
+    out = []
+    # 高通态（末尾碎屑 debris 用，干脆细颗粒）
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+    hp_a = 0.82
+    for i in range(n):
+        t = i / SR
+        # 起始极短宽带 crack 瞬态（断裂瞬间的高频冲击「啪」）—— 起点窄峰、极快衰减
+        crack_env = math.exp(-((t - 0.0) ** 2) / (2 * 0.004 ** 2))
+        crack = random.uniform(-1, 1) * 0.60 * crack_env
+        # 中频空洞 snap body（材料崩裂的短脆回响；520Hz 较亮，区别于 hurt 的低闷）
+        snap = math.sin(2 * math.pi * 520.0 * t) * 0.42 * env_exp(t, 32.0)
+        # 弱低频 thunk（手持重量落地的一闷）
+        thunk = math.sin(2 * math.pi * 110.0 * t) * 0.20 * env_exp(t, 20.0)
+        # 末尾细碎 debris 沙沙（碎屑散落；延迟 ~60ms 起，高通白噪细颗粒）
+        w = random.uniform(-1, 1)
+        v = hp_a * (hp_prev_out + w - hp_prev_in)
+        hp_prev_in = w
+        hp_prev_out = v
+        debris_env = 0.0
+        if t > 0.06:
+            debris_env = env_exp(t - 0.06, 16.0)
+        debris = v * 0.22 * debris_env
+        s = crack + snap + thunk + debris
+        out.append(max(-1.0, min(1.0, s)))
+    return out
+
+
 def gen_explosion():
     """爆炸音（t284 Stalker/苦力怕自爆）：低频闷击（爆炸的「轰」body）+ 起始宽带爆裂瞬态（冲击破空的「砰」）
     + 较长尾音（低频余响 + 衰减噪声，拟爆炸后的轰鸣回响），~0.5s。机制等价 MC 爆炸声（原创程序合成，§9 法律：
@@ -779,6 +827,7 @@ def main():
                       ("door_open", gen_door_open), ("door_close", gen_door_close),
                       ("hurt", gen_hurt), ("mob_hurt", gen_mob_hurt),
                       ("explosion", gen_explosion),
+                      ("tool_break", gen_tool_break),
                       ("ambient_wind", gen_ambient_wind),
                       ("water_flow", gen_water_flow),
                       ("water_step", gen_water_step),

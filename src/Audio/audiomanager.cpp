@@ -107,6 +107,9 @@ struct AudioManager::Data
     // t284 爆炸单件（Stalker/苦力怕自爆）。EntityManager::explosion → playExplosion 触发。短爆裂音（~0.5s），
     //   默认 2s maxFrames 远大于其长度、安全。
     Clip explosionClip{":/sounds/explosion.wav"};
+    // t315 工具破损单件（工具耐久归零瞬间）。Hotbar::toolBroken → playToolBreak 触发。短脆断裂音（~0.20s），
+    //   默认 2s maxFrames 远大于其长度、安全。
+    Clip toolBreakClip{":/sounds/tool_break.wav"};
     // t250 mob 环境 idle 叫声 clip 池，按 mobType 索引。t294 扩到 8（被动 0-3 + 敌对 4-7）：
     //   0=通用测试生物 / 1=猪 / 2=牛 / 3=羊（t250）/ 4=Shambler(哀嚎) / 5=Bones(骨咔哒) / 6=Stalker(嘶嘶) /
     //   7=Spider(嘶嗡)（t294「怪物叫声 idle」，补全 t250 仅被动有声、敌对兜底通用的缺口）。EntityManager
@@ -254,6 +257,7 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->hurtClip);
     d->loadClip(d->mobHurtClip);
     d->loadClip(d->explosionClip);
+    d->loadClip(d->toolBreakClip);
     // t250/t294 mob idle 叫声（通用 / 猪哼 / 牛哞 / 羊咩 + 敌对 shambler/bones/stalker/spider）—— 短 SFX
     //   （≤0.62s），默认 2s maxFrames 远大于其长度。
     for (int i = 0; i < 8; ++i)
@@ -273,6 +277,7 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->hurtClip);
     d->initSound(d->mobHurtClip);
     d->initSound(d->explosionClip);
+    d->initSound(d->toolBreakClip);
     for (int i = 0; i < 8; ++i)
         d->initSound(d->mobIdleClips[i]);
     d->initSound(d->ambientClip);
@@ -301,6 +306,7 @@ AudioManager::AudioManager(QObject *parent)
         << " door_open=" << d->doorOpenClip.ok << " door_close=" << d->doorCloseClip.ok
         << " hurt=" << d->hurtClip.ok << " mob_hurt=" << d->mobHurtClip.ok
         << " explosion=" << d->explosionClip.ok
+        << " tool_break=" << d->toolBreakClip.ok
         << " mob_idle(gen/pig/cow/sheep/shambler/bones/stalker/spider)="
         << d->mobIdleClips[0].ok << "/" << d->mobIdleClips[1].ok
         << "/" << d->mobIdleClips[2].ok << "/" << d->mobIdleClips[3].ok
@@ -328,6 +334,7 @@ AudioManager::~AudioManager()
     if (d->hurtClip.ok) ma_sound_uninit(&d->hurtClip.sound);
     if (d->mobHurtClip.ok) ma_sound_uninit(&d->mobHurtClip.sound);
     if (d->explosionClip.ok) ma_sound_uninit(&d->explosionClip.sound);
+    if (d->toolBreakClip.ok) ma_sound_uninit(&d->toolBreakClip.sound);
     for (int i = 0; i < 8; ++i)
         if (d->mobIdleClips[i].ok) ma_sound_uninit(&d->mobIdleClips[i].sound);
     if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
@@ -410,6 +417,14 @@ void AudioManager::playMobHurt(int mobType)
 void AudioManager::playExplosion()
 {
     d->replay(d->explosionClip, m_volume);
+}
+
+// t315 工具破损音（工具耐久归零瞬间）：略响于 hurt（物品崩裂是明确反馈事件，前景）。机制等价 MC 工具耐久
+//   耗尽破损声（§9 原创程序合成，零 MC 资产）。由 Hotbar::toolBroken → Main.qml Connections 路由触发
+//   （damageSelectedItem 归零分支 emit）。单件 seek 重发不堆叠（同其他单件）；engine/clip 失败静默降级（§2-E，不崩）。
+void AudioManager::playToolBreak()
+{
+    d->replay(d->toolBreakClip, m_volume * 0.95f);
 }
 
 // t250/t294 mob 环境 idle 叫声（被动牛叫/羊叫/猪叫 + 敌对 shambler/bones/stalker/spider idle）：按 mobType

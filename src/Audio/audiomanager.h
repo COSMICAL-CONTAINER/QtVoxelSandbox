@@ -88,6 +88,11 @@ public:
     //   合成 §9；零 MC 资产）。由 EntityManager::explosion → Main.qml 路由到本方法触发（爆炸的单一音/视入口）。
     //   单件 clip；seek 重发不堆叠（同其他单件）；engine/clip 失败静默降级（§2-E，不崩）。
     Q_INVOKABLE void playExplosion();
+    // t315 工具破损音（工具耐久归零瞬间）：干脆的「啪嗒」断裂声（高频 crack 瞬态 + 中频 snap body + 末尾碎屑
+    //   沙沙）。机制等价 MC 工具耐久耗尽破损声（原创程序合成，§9；零 MC 资产）。由 Hotbar::toolBroken(itemId)
+    //   → Main.qml 路由到本方法（damageSelectedItem 归零分支 emit，itemId 保留语义对齐 / 未来按工具材质分流）。
+    //   单件 clip；seek 重发不堆叠（同其他单件）；engine/clip 失败静默降级（§2-E，不崩）。
+    Q_INVOKABLE void playToolBreak();
     // t250 mob 环境音（被动牛叫/羊叫/猪叫 + 敌对 idle 叫声 + 走路声）；t294 扩敌对 idle（补全「怪物叫声 idle」）：
     //   - playMobAmbient(mobType)：生物周期 idle 叫声 —— 按 mobType 选 mob_idle clip（0=通用 / 1=猪哼 /
     //     2=牛哞 / 3=羊咩 / 4=Shambler 哀嚎 / 5=Bones 骨咔哒 / 6=Stalker 嘶嘶 / 7=Spider 嘶嗡）。EntityManager

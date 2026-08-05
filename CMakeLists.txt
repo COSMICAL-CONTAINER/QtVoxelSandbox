@@ -280,6 +280,7 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/hurt.wav
         sounds/mob_hurt.wav
         sounds/explosion.wav
+        sounds/tool_break.wav                       # t315 工具耐久归零破损声（Hotbar::toolBroken → playToolBreak）
         sounds/ambient_wind.wav
         sounds/water_flow.wav
         sounds/water_step.wav

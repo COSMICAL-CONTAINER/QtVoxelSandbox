@@ -178,7 +178,8 @@ public:
     //   远程伤害由蓄力 + 箭命中决定（PlayerController bow fire / EntityManager Arrow）。
     Q_INVOKABLE int bowArrowMaxDamage() const;
     // t263 消耗选中槽工具 1 点耐久（生存挖掘完成 / 锄耕地调用）。非工具 / 空槽 → no-op；
-    //   耐久归零 → 清空槽（工具破损消失）+ emit slotsChanged。创造模式由 caller 不调本方法（不消耗）。
+    //   耐久归零 → 清空槽（工具破损消失）+ emit slotsChanged + emit toolBroken（t315 破损音）。创造模式由
+    //   caller 不调本方法（不消耗）。
     Q_INVOKABLE void damageSelectedItem();
     // t50 合成桥接（QML 不能直接调 C++ 静态类 RecipeRegistry，经 VM 透传）：
     //   - recipeMatch(slotIds, gridSize)：slotIds 为行优先 id 数组（QVariantList<int>，0=空格），
@@ -229,6 +230,11 @@ signals:
     // 绑定整列重建。
     void slotsChanged();
     void heldBlockChanged(); // 光标手持物变更（id 或 count；拾取/放置/丢弃）→ Main.qml 浮动图标 + 数量刷新
+    // t315 选中槽工具耐久归零破损（damageSelectedItem 归零分支 emit）。itemId = 破损工具 id（QML 据此播
+    //   破损音；未来可按工具材质分流音色）。槽位清空在 emit 前已完成（机制等价 MC「工具耐久耗尽即消失」）。
+    //   呈现层（Main.qml）经 Connections 路由到 AudioManager.playToolBreak；分层（PLAN §2）：VM 只发语义事件，
+    //   不直接调音频（音频层只消费）。
+    void toolBroken(int itemId);
     // t97 主栏栈变更（mainSetStack / mainAddStack / addToAny 的 main 分支 / resetForMode）。同时驱动
     // mainRevision 自增 → 三菜单 delegate 触碰 mainRevision 的绑定重算（图标 / 数量同步刷新）。
     void mainSlotsChanged();
