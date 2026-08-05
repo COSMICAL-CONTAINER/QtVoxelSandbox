@@ -46,3 +46,7 @@ saves/
 android-build/
 *.apk
 *.aab
+# Temp / process snapshots (sub-agent artifacts — never track; swept in by git add -A before)
+_t*.txt
+*_proc.txt
+*_proc.*
