@@ -752,10 +752,11 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
     //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
     dropUnsupportedCropsAround(x, y, z);
-    // t305 树叶衰减（spec「挖光一棵树所有原木→树叶消失」）：玩家破原木 → 触发 World 扫破块点周围树叶，
-    //   失撑叶（4 格切比雪夫距离内无原木）静默清为 Air。**不依赖 drop 标志**（创造瞬破 drop=false 亦触发 ——
-    //   衰减是结构后果，非掉落；机制等价 MC 创造破原木后叶子照衰）。仅原木触发（破叶 / 破其它方块不衰）。
-    //   分层：本处（Game/Physics）调 World::decayLeavesAround（World 层方法），向下合法。
+    // t305/t325 树叶衰减（spec「挖光一棵树所有原木→树叶消失」，t325 渐进化）：玩家破原木 → 触发 World 扫破块点
+    //   周围树叶，失撑叶（4 格切比雪夫距离内无原木）**入渐进衰减队列**（非瞬时清）；队列由 tickLeafDecay 每
+    //   窗按散布概率逐叶渐退 ~10-30s（机制等价 MC 1.0 叶衰 random-tick 渐退）。**不依赖 drop 标志**（创造瞬破
+    //   drop=false 亦触发 —— 衰减是结构后果，非掉落；机制等价 MC 创造破原木后叶子照衰）。仅原木触发（破叶 /
+    //   破其它方块不衰）。分层：本处（Game/Physics）调 World::decayLeavesAround（World 层方法），向下合法。
     if (brokenId == BlockRegistry::Log && m_world)
         m_world->decayLeavesAround(x, y, z);
     // t43：生存挖出可掉落方块 → **走实体流**（emit spawnItem），移除 commit a3e9300 的 auto-collect

@@ -2,9 +2,10 @@
 #define WORLD_H
 
 #include <QObject>
-#include <QtGlobal> // quint32（hashColumn 确定性哈希返回类型）
+#include <QtGlobal> // quint32（hashColumn 确定性哈希返回类型）/ quint64（树叶衰减队列键）
 #include <QtQml/qqml.h>
 
+#include <unordered_set> // t325 树叶渐进衰减队列 m_decayingLeaves（坐标打包键的去重集合）
 #include <vector>
 
 #include "blockregistry.h" // isCollidable 走 BlockDef.solid（t88 火把 non-solid 不挡玩家）
@@ -164,14 +165,24 @@ public:
     //   spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickSaplingGrowth();
-    // t305 树叶衰减（spec「挖光一棵树所有原木→树叶消失」）：玩家破原木后扫破块点周围树叶，判定其是否仍
-    //   「在原木支撑范围内」（机制等价 MC 1.0 叶子距原木 >4 格即衰减）。失撑叶（4 格切比雪夫距离内无原木）
-    //   静默清为 Air（setWaterSilent 不发 blockBroken → 无破叶粒子 / 音；自然衰减无反馈，机制等价 MC 自然叶衰）。
-    //   **持久叶**（玩家放置、state 带 PersistentLeafBit）跳过 → 创造建筑用的悬空叶不被清。批量清：先收集所有
-    //   失撑叶，统一经 m_chunks.setBlock 直写（不发 broken/placed），末尾对受影响区做一次 refloodBox 重算光场
-    //   + 一次 worldChanged（避免逐叶 setBlock 的 N 次光场重算 + N 次重建请求）。非 Q_INVOKABLE（PlayerController
-    //   C++ 调，破原木后触发）。
-    //   分层（PLAN §2）：本方法属 World 层，只读 / 写 m_chunks + lightField + 发 worldChanged。
+    // t325 树叶渐进消退 tick（spec「挖光一棵树所有原木→树叶消失」的渐进化修：旧 t305 瞬时清半树冠叶 →
+    //   改为逐叶按概率渐退，散布 ~10-30s）。由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；
+    //   本方法内部节流到 ~每 kLeafDecayTickInterval×0.1s 做一次判定窗口）。机制等价 MC 1.0 叶衰 random-tick：
+    //   叶子一旦失撑（无原木支撑）即进入衰减，**每窗**按散布概率 kLeafDecayPct 独立判定是否本窗消失 → 几何分布
+    //   散布寿命（非瞬时全消、不同叶错峰渐退）。散布确定性哈希（seed + 位置 + 窗口序号，PLAN §2-K 精神，同
+    //   tickCropGrowth/tickSaplingGrowth）。命中叶批量静默清（m_chunks.setBlock 直写 Air + 标脏，不发 broken/
+    //   placed → 无破叶粒子/音，自然衰减无反馈）+ 末尾对受影响区一次 refloodBox 重算光场 + 一次 worldChanged
+    //   （避免逐叶 setBlock 的 N 次光场重算 + N 次重建请求，机制同旧 decayLeavesAround 批量清叶）。队列空（无
+    //   失撑叶）或本窗无命中 → 零写入、零 worldChanged（稳态无开销）。非 Q_INVOKABLE？—— 是 Q_INVOKABLE：
+    //   同 tickCropGrowth/tickSaplingGrowth 由 QML WorldClock 桥接调用。
+    Q_INVOKABLE void tickLeafDecay();
+    // t305 树叶失撑检测（t325 改造：不再瞬时清叶，改为入渐进衰减队列）。玩家破原木后扫破块点周围树叶，
+    //   判定其是否仍「在原木支撑范围内」（机制等价 MC 1.0 叶子距原木 >4 格即衰减）。失撑叶（4 格切比雪夫距离
+    //   内无原木）**入渐进衰减队列 m_decayingLeaves**（按坐标去重）→ 留待 tickLeafDecay 按概率逐叶渐退（散布
+    //   ~10-30s，非瞬时全消）。**持久叶**（玩家放置、state 带 PersistentLeafBit）跳过 → 创造建筑用的悬空叶不衰。
+    //   本方法只入队、不立即清叶、不发 worldChanged（清叶 + 光场重算 + worldChanged 收口到 tickLeafDecay）。
+    //   非 Q_INVOKABLE（PlayerController C++ 调，破原木后触发）。
+    //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + 写 m_decayingLeaves。
     void decayLeavesAround(int x, int y, int z);
     // t320 爆炸批量破坏（修 Stalker 爆炸后 FPS 崩塌 / 内存爆涨；机制等价 MC 苦力怕球形爆破的批量化）。
     //   根因：detonateStalker 旧路径对球内**每块**调 setWaterSilent → 每块 1× emit worldChanged + 1×
@@ -344,6 +355,17 @@ private:
     static constexpr int kSaplingTickInterval = 50; // tickSaplingGrowth 节流间隔（WorldClock tick 单位 = 100ms → 5s/窗）
     static constexpr int kSaplingMinLight     = 9;  // 生长所需最低天光（/15；机制等价 MC 树苗 light level 9+）
     static constexpr int kSaplingGrowPct      = 10; // 每窗每株长成的散布概率（%；10% → 平均 ~50s 长成）
+    // t325 树叶渐进衰减队列 + 节流计数 + 常量：tickLeafDecay() 每 100ms 被 WorldClock.ticked 调一次；
+    //   累积到 kLeafDecayTickInterval 才开一个判定窗口（~每 kLeafDecayTickInterval×0.1s 一窗）。窗口序号
+    //   m_leafDecayIntervalIndex 每窗 +1，喂入 hashVoxel 散布概率 → 不同叶错峰渐退（非全部同步消失）。
+    //   m_decayingLeaves 持当前失撑但尚未消失的叶坐标（坐标打包成 quint64 键，去重；队列空 → 稳态零开销早退）。
+    //   kLeafDecayTickInterval=3（0.3s/窗）+ kLeafDecayPct=2（2%/窗）→ 几何分布平均寿命 ~15s、中位 ~10s、长尾至 30s+
+    //   （spec「散布 ~10-30s 渐退」）；MC 1.0 叶衰为 random-tick 式渐退，本工程机制对齐非精确数值复刻。
+    std::unordered_set<quint64> m_decayingLeaves; // 失撑叶坐标集合（packCell 打包键；tickLeafDecay 消费 + 清出队）
+    int m_leafDecayTickCounter = 0;
+    int m_leafDecayIntervalIndex = 0;
+    static constexpr int kLeafDecayTickInterval = 3; // tickLeafDecay 节流间隔（WorldClock tick 单位 = 100ms → 0.3s/窗）
+    static constexpr int kLeafDecayPct          = 2; // 每窗每叶消失的散布概率（%；2% → 平均 ~15s 渐退，散布至 30s+）
 };
 
 #endif // WORLD_H

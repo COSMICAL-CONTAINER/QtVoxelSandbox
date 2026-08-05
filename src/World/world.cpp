@@ -34,6 +34,7 @@ void World::beginLoad(int seed)
     m_seed = seed;
     m_chunks.recreate(m_width, m_depth, m_height); // 零填充 + 全标脏（recreate 实现）
     buildPermutation();                            // 新 seed 的 Perlin 置换表（heightAt 查询一致性）
+    m_decayingLeaves.clear(); // t325 网格重置 → 渐进衰减队列作废（坐标已不指向当前栅格；防误清新世界叶）
     emit seedChanged();
 }
 
@@ -476,9 +477,23 @@ void World::tickCropGrowth()
     ++m_cropIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同株错峰）
 }
 
-// t305 树叶衰减（见 world.h 头注释）。机制等价 MC 1.0 叶衰：叶子距最近原木 >4 格（切比雪夫）即衰减。
-//   玩家破原木 → 扫破块点周围 kScanRadius 盒内叶子，逐叶查 kDecayRadius 内有无原木，无则失撑 → 静默清。
-//   持久叶（玩家放置，state 带 PersistentLeafBit）跳过。批量清 + 末尾一次 refloodBox 重算光场 + 一次 worldChanged。
+// t325 树叶渐进衰减队列的坐标打包 / 解包（文件内工具）。世界 ≤ 256³（实际 80×80×64），三轴各取低 16 位
+//   打包成 quint64 键供 std::unordered_set 去重。入队的坐标恒非负（decayLeavesAround 已钳到 [0,W/H/D)）。
+static inline quint64 packLeafCell(int x, int y, int z)
+{
+    return (quint64(quint16(x)) << 32) | (quint64(quint16(y)) << 16) | quint64(quint16(z));
+}
+static inline void unpackLeafCell(quint64 k, int &x, int &y, int &z)
+{
+    x = int(quint16(k >> 32));
+    y = int(quint16(k >> 16));
+    z = int(quint16(k));
+}
+
+// t305 树叶失撑检测（t325 改造：见 world.h 头注释）。机制等价 MC 1.0 叶衰：叶子距最近原木 >4 格（切比雪夫）即失撑。
+//   玩家破原木 → 扫破块点周围 kScanRadius 盒内叶子，逐叶查 kDecayRadius 内有无原木，无则失撑。
+//   t325：失撑叶**入渐进衰减队列 m_decayingLeaves**（按坐标去重）→ 不再瞬时清。持久叶（玩家放置，state 带
+//   PersistentLeafBit）跳过。本方法只入队；清叶 + 光场重算 + worldChanged 收口到 tickLeafDecay（逐窗按概率渐退）。
 void World::decayLeavesAround(int x, int y, int z)
 {
     constexpr int kScanRadius  = 7;  // 扫描盒半径（覆盖单棵橡树树冠 ~5 宽 + 余量；树冠在主干顶 ±2 内）
@@ -486,11 +501,8 @@ void World::decayLeavesAround(int x, int y, int z)
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return;
 
-    // 1) 收集失撑叶（kDecayRadius 切比雪夫距离内无原木 + 非持久叶）。同时累计受影响 AABB（供末尾光场重算盒）。
-    struct L { int x, y, z; };
-    std::vector<L> toDecay;
-    int minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
-    bool any = false;
+    // 收集失撑叶（kDecayRadius 切比雪夫距离内无原木 + 非持久叶）→ 入渐进衰减队列（坐标去重，多次破原木 /
+    //   多棵同扫只入队一次）。不立即清叶、不发 worldChanged —— 渐退由 tickLeafDecay 驱动。
     for (int dx = -kScanRadius; dx <= kScanRadius; ++dx)
         for (int dy = -kScanRadius; dy <= kScanRadius; ++dy)
             for (int dz = -kScanRadius; dz <= kScanRadius; ++dz) {
@@ -499,7 +511,7 @@ void World::decayLeavesAround(int x, int y, int z)
                 if (m_chunks.blockAt(lx, ly, lz) != BlockRegistry::Leaves) continue;
                 if ((m_chunks.stateAt(lx, ly, lz) & BlockRegistry::PersistentLeafBit) != 0)
                     continue; // t305 玩家放置叶（持久）不衰
-                // 查 kDecayRadius 切比雪夫距离内有无原木（任一命中即保留）。
+                // 查 kDecayRadius 切比雪夫距离内有无原木（任一命中即保留 —— 仍有原木支撑）。
                 bool hasLog = false;
                 for (int ox = -kDecayRadius; ox <= kDecayRadius && !hasLog; ++ox) {
                     for (int oy = -kDecayRadius; oy <= kDecayRadius && !hasLog; ++oy) {
@@ -510,33 +522,73 @@ void World::decayLeavesAround(int x, int y, int z)
                         }
                     }
                 }
-                if (hasLog) continue; // 仍有原木支撑 → 保留
-                toDecay.push_back({lx, ly, lz});
-                if (!any) { minX = maxX = lx; minY = maxY = ly; minZ = maxZ = lz; any = true; }
-                else {
-                    if (lx < minX) minX = lx;
-                    if (lx > maxX) maxX = lx;
-                    if (ly < minY) minY = ly;
-                    if (ly > maxY) maxY = ly;
-                    if (lz < minZ) minZ = lz;
-                    if (lz > maxZ) maxZ = lz;
-                }
+                if (hasLog) continue; // 仍有原木支撑 → 保留（不入队）
+                m_decayingLeaves.insert(packLeafCell(lx, ly, lz)); // 失撑 → 入渐进衰减队列（去重）
             }
-    if (toDecay.empty()) return; // 无失撑叶（如仅破一根、余干仍撑）→ 静默
+}
 
-    // 2) 批量静默清叶（m_chunks.setBlock 直写 + 标脏，不发 broken/placed → 无破叶粒子/音；自然衰减无反馈，
-    //    机制等价 MC 自然叶衰）。末尾统一重算光场 + 一次 worldChanged（避免逐叶 setBlock 的 N 次光场重算 + N 次重建）。
-    for (const L &l : toDecay)
-        m_chunks.setBlock(l.x, l.y, l.z, BlockRegistry::Air);
+// t325 树叶渐进消退 tick（见 world.h 头注释）。机制等价 MC 1.0 叶衰 random-tick 渐退：队列内每叶每窗按散布概率
+//   kLeafDecayPct 独立判定是否本窗消失 → 几何分布散布寿命（平均 ~15s、中位 ~10s、长尾 30s+，非瞬时全消）。
+//   命中叶批量静默清（m_chunks.setBlock 直写 Air + 标脏，不发 broken/placed → 无破叶粒子/音，自然衰减无反馈）
+//   + 末尾对受影响区一次 refloodBox 重算光场 + 一次 worldChanged（避免逐叶 N 次光场重算 + N 次重建请求）。
+//   队列空（稳态无失撑叶）→ 零开销早退；本窗无命中 → 零写入、零 worldChanged。散布确定性哈希（PLAN §2-K 精神，
+//   同 tickCropGrowth/tickSaplingGrowth：seed + 位置 + 窗口序号 → 可复现，无 Math.random / 时间源）。
+void World::tickLeafDecay()
+{
+    if (m_decayingLeaves.empty()) return;                       // 稳态（无失撑叶）→ 零开销早退
+    if (++m_leafDecayTickCounter < kLeafDecayTickInterval) return; // 节流：每 kLeafDecayTickInterval tick（~0.3s）开一窗
+    m_leafDecayTickCounter = 0;
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
 
-    // 3) 对受影响区做一次有界盒光场重 flood（叶 solid=true → air 改变遮光，天光从原叶位漏下，需重算）。
-    //    盒扩 1 格余量（光传播到邻格）；钳到世界界内。doSky=true 两通道都重算（叶遮挡影响天光，叶本身非火把）。
+    // 散布种子混入窗口序号（每窗一新种子 → 每叶每窗一新伪随机滚，渐进渐退；全 int 运算避符号转换告警）。
+    const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_leafDecayIntervalIndex) * 0x9E3779B9u));
+
+    // 逐叶判定：队列项可能已被他途清除（玩家破叶 / 爆炸 / 重置）→ 块非 Leaves 即视为已消失，出队（不再衰减）。
+    //   命中叶先记坐标（decayed）+ 累计受影响 AABB，末尾批量写 + 一次 reflood + worldChanged。
+    std::vector<quint64> decayed;
+    int minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
+    bool any = false;
+    for (auto it = m_decayingLeaves.begin(); it != m_decayingLeaves.end(); ) {
+        int lx, ly, lz;
+        unpackLeafCell(*it, lx, ly, lz);
+        if (m_chunks.blockAt(lx, ly, lz) != BlockRegistry::Leaves) {
+            it = m_decayingLeaves.erase(it); // 已被他途清除 → 出队
+            continue;
+        }
+        const quint32 h = hashVoxel(mixedSeed, lx, ly, lz);
+        if (int(h & 0xFFFFu) % 100 < kLeafDecayPct) {
+            decayed.push_back(*it);                       // 本窗命中 → 待清
+            if (!any) { minX = maxX = lx; minY = maxY = ly; minZ = maxZ = lz; any = true; }
+            else {
+                if (lx < minX) minX = lx; if (lx > maxX) maxX = lx;
+                if (ly < minY) minY = ly; if (ly > maxY) maxY = ly;
+                if (lz < minZ) minZ = lz; if (lz > maxZ) maxZ = lz;
+            }
+            it = m_decayingLeaves.erase(it);              // 命中 → 出队（不再参与后续窗口）
+        } else {
+            ++it;                                         // 本窗未命中 → 留队，下窗再滚
+        }
+    }
+
+    ++m_leafDecayIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同叶错峰渐退）
+    if (decayed.empty()) return; // 本窗无命中 → 零写入、零 worldChanged
+
+    // 批量静默清叶（m_chunks.setBlock 直写 + 标脏，不发 broken/placed）。末尾统一重算光场 + 一次 worldChanged
+    //   （避免逐叶 setBlock 的 N 次光场重算 + N 次重建；机制同旧 decayLeavesAround 批量清叶）。
+    for (quint64 k : decayed) {
+        int lx, ly, lz;
+        unpackLeafCell(k, lx, ly, lz);
+        m_chunks.setBlock(lx, ly, lz, BlockRegistry::Air);
+    }
+    // 对受影响区做一次有界盒光场重 flood（叶 solid=true → air 改变遮光，天光从原叶位漏下，需重算）。
+    //   盒扩 1 格余量（光传播到邻格）；钳到世界界内。doSky=true 两通道都重算（叶遮挡影响天光，叶本身非火把）。
     const int bx0 = std::max(0, minX - 1), by0 = std::max(0, minY - 1), bz0 = std::max(0, minZ - 1);
     const int bx1 = std::min(W - 1, maxX + 1), by1 = std::min(H - 1, maxY + 1), bz1 = std::min(D - 1, maxZ + 1);
     refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
     emit worldChanged();
     m_chunks.clearAllDirty();
-    qInfo("vo.edit: leaves decayed = %d", int(toDecay.size())); // 可观测：破原木后失撑叶计数
+    qInfo("vo.edit: leaves decayed = %d", int(decayed.size())); // 可观测：本窗渐退叶计数
 }
 
 // t320 爆炸批量破坏（见 world.h 头注释；机制同 decayLeavesAround 批量清叶：N 写 1 emit，避重建风暴）。
@@ -812,6 +864,7 @@ void World::generate()
 {
     buildPermutation();
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
+    m_decayingLeaves.clear(); // t325 全新世界无失撑叶 → 清渐进衰减队列（防旧世界坐标误清新世界叶）
 
     // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 水位」决定，下层 dirt / 深 stone。
     //   - 沙漠群系（isDesert）：**仅表层 4-6 格沙**下接 Stone（t255 修正：旧实现整柱沙 y 0..h 全 Sand →
