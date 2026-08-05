@@ -279,6 +279,7 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/step_leaves.wav
         sounds/place.wav
         sounds/pickup.wav
+        sounds/ui_click.wav
         sounds/door_open.wav
         sounds/door_close.wav
         sounds/hurt.wav

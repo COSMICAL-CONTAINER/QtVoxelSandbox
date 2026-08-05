@@ -128,22 +128,30 @@ struct AudioManager::Data
     // 环境音运行态：是否在播（幂等 start/stop）+ 强度（0..1，由昼夜 skyLight 映射，夜间更静谧）。
     bool ambientPlaying = false;
     float ambientLevel = 1.0f;
-    // 环境音基础音量系数（风声偏低，背景氛围不抢前景；乘 m_volume 与 ambientLevel 得最终音量）。
-    static constexpr float kAmbientBaseVol = 0.22f;
+    // 环境音基础音量系数（t328：合成已峰值归一化到满刻度，故 base 提到 0.30 保明显可闻的背景风声，
+    //   仍低于前景 SFX；乘 m_volume 与 ambientLevel 得最终音量）。
+    static constexpr float kAmbientBaseVol = 0.30f;
     // t223 水流声单件（长循环水流声；looping=true，startWaterFlow/stopWaterFlow 控开关，
     //   setWaterFlowLevel 据 PlayerController.flowSoundLevel 调强度）。近流动水启动、远离停止。
     //   t269：water_flow.wav 重合成潺潺流水声（旧版像海浪 → 改潺潺流水；build_sounds.py 三层混合 + 密集气泡）。
     Clip waterFlowClip{":/sounds/water_flow.wav"};
     bool waterFlowPlaying = false;
     float waterFlowLevel = 1.0f;
-    // 水流声基础音量系数（背景氛围级；乘 m_volume 与 waterFlowLevel 得最终音量）。
-    static constexpr float kWaterFlowBaseVol = 0.30f;
+    // 水流声基础音量系数（t328：合成已峰值归一化到满刻度，故 base 提到 0.35 保明显可闻的近水声，
+    //   仍低于前景 SFX；乘 m_volume 与 waterFlowLevel 得最终音量）。
+    static constexpr float kWaterFlowBaseVol = 0.35f;
     // t269 水中走路声单件（玩家脚位在水中迈步时播；不分材质，水下听感统一闷浊）。短 SFX（~0.16s），
     //   默认 2s maxFrames 远大于其长度、安全。
     Clip waterStepClip{":/sounds/water_step.wav"};
+    // t328 UI 反馈 click 单件（热键 / 滚轮切槽 tick）。短 SFX（~0.05s），默认 maxFrames 远大于其长度、安全。
+    //   Hotbar::selectedSlotChanged → Main.qml 路由到 playUIClick 触发（§9 原创程序合成，零 MC 资产）。
+    Clip uiClickClip{":/sounds/ui_click.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
-    static constexpr ma_uint32 kSampleRate = 22050;
+    // t328：合成升到 44100 Hz（更多高频细节 / 更短瞬态分辨 → 音色清晰，详见 build_sounds.py）。
+    //   decoder_config 强制此采样率；若 < WAV 实际采样率会**下采样**丢高频（旧 22050 把 t328 新加的高频细节
+    //   全砍掉 → 重做失效）。故此处必须与 build_sounds.py 的 SR 一致（44100）。
+    static constexpr ma_uint32 kSampleRate = 44100;
 
     // 在 pathStore 内构造一条 qrc 路径（:/sounds/{kind}_{group}.wav），返回其 .c_str()（长寿命）。
     const char *makePath(const char *kind, int groupIdx)
@@ -270,6 +278,8 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->waterFlowClip, ma_uint64(Data::kSampleRate) * 16);
     // t269 水中走路声短 SFX（~0.16s），默认 2s maxFrames 远大于其长度。
     d->loadClip(d->waterStepClip);
+    // t328 UI click 短 SFX（~0.05s），默认 maxFrames 远大于其长度。
+    d->loadClip(d->uiClickClip);
     d->initSound(d->placeClip);
     d->initSound(d->pickupClip);
     d->initSound(d->doorOpenClip);
@@ -283,6 +293,7 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->ambientClip);
     d->initSound(d->waterFlowClip);
     d->initSound(d->waterStepClip);
+    d->initSound(d->uiClickClip);
     // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
     if (d->engineOk && d->ambientClip.ok) {
         ma_sound_set_looping(&d->ambientClip.sound, MA_TRUE);
@@ -314,7 +325,8 @@ AudioManager::AudioManager(QObject *parent)
         << "/" << d->mobIdleClips[6].ok << "/" << d->mobIdleClips[7].ok
         << " ambient_wind=" << d->ambientClip.ok
         << " water_flow=" << d->waterFlowClip.ok
-        << " water_step=" << d->waterStepClip.ok;
+        << " water_step=" << d->waterStepClip.ok
+        << " ui_click=" << d->uiClickClip.ok;
 }
 
 AudioManager::~AudioManager()
@@ -340,6 +352,7 @@ AudioManager::~AudioManager()
     if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
     if (d->waterFlowClip.ok) ma_sound_uninit(&d->waterFlowClip.sound);
     if (d->waterStepClip.ok) ma_sound_uninit(&d->waterStepClip.sound);
+    if (d->uiClickClip.ok) ma_sound_uninit(&d->uiClickClip.sound);
     ma_engine_uninit(&d->engine);
 }
 
@@ -425,6 +438,15 @@ void AudioManager::playExplosion()
 void AudioManager::playToolBreak()
 {
     d->replay(d->toolBreakClip, m_volume * 0.95f);
+}
+
+// t328 UI 反馈 click（热键 / 滚轮切槽 tick）：轻 tick（合成时已峰值归一化到 0.55，再乘 m_volume × 0.6
+//   控制为低音量反馈，不抢前景 SFX）。机制等价 MC 物品栏切换 tick 反馈（§9 原创程序合成，零 MC 资产）。
+//   由 Hotbar::selectedSlotChanged → Main.qml 路由到本方法触发。单件 seek 重发不堆叠（同其他单件）；
+//   engine / clip 失败静默降级（§2-E，不崩）。
+void AudioManager::playUIClick()
+{
+    d->replay(d->uiClickClip, m_volume * 0.6f);
 }
 
 // t250/t294 mob 环境 idle 叫声（被动牛叫/羊叫/猪叫 + 敌对 shambler/bones/stalker/spider idle）：按 mobType

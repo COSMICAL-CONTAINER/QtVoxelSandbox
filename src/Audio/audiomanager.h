@@ -93,6 +93,11 @@ public:
     //   → Main.qml 路由到本方法（damageSelectedItem 归零分支 emit，itemId 保留语义对齐 / 未来按工具材质分流）。
     //   单件 clip；seek 重发不堆叠（同其他单件）；engine/clip 失败静默降级（§2-E，不崩）。
     Q_INVOKABLE void playToolBreak();
+    // t328 UI 反馈 click（热键 / 滚轮切槽 tick）：轻 tick（~0.05s 高通噪声爆 + 微小高谐）。机制等价 MC 物品栏
+    //   切换 tick 反馈（原创程序合成 §9；零 MC 资产）。由 Hotbar::selectedSlotChanged → Main.qml 路由到本方法
+    //   触发（与视觉高亮配对的音频反馈）。单件 clip；seek 重发不堆叠（同其他单件）；engine/clip 失败静默
+    //   降级（§2-E，不崩）。
+    Q_INVOKABLE void playUIClick();
     // t250 mob 环境音（被动牛叫/羊叫/猪叫 + 敌对 idle 叫声 + 走路声）；t294 扩敌对 idle（补全「怪物叫声 idle」）：
     //   - playMobAmbient(mobType)：生物周期 idle 叫声 —— 按 mobType 选 mob_idle clip（0=通用 / 1=猪哼 /
     //     2=牛哞 / 3=羊咩 / 4=Shambler 哀嚎 / 5=Bones 骨咔哒 / 6=Stalker 嘶嘶 / 7=Spider 嘶嗡）。EntityManager

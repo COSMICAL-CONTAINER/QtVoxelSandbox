@@ -1,77 +1,32 @@
 #!/usr/bin/env python3
 """原创 SFX 合成（§4 原创 SFX；零 MC 资产）。
 
-程序合成 22050 Hz mono 16-bit PCM WAV（无外部音频资产），机制等价 MC「按方块材质 SoundType
-选声」手感（机制对齐，非名词照搬；§9 法律：原创程序合成）。两类产出：
+程序合成 44100 Hz mono 16-bit PCM WAV（无外部音频资产），机制等价 MC「按方块材质 SoundType
+选声」手感（机制对齐，非名词照搬；§9 法律：原创程序合成）。
 
-1. **材质分组 clip 池**（t118）：石 / 木 / 草 / 沙 / 叶 5 组，每组各 break / mining / step
-   三个短音 —— AudioManager 据 BlockRegistry::materialGroup(id) 选播（spec「playBreak/playMining/
-   playStep 按 group 选」）。各组手感差异化（参数见 MATERIALS）：
-     - stone：硬脆敲击 —— 高频 thunk + 宽带 crunch，明亮短促。
-     - wood：中空闷击 —— 中频空心敲 + 弱噪声瞬态。
-     - grass：柔垫软踩 —— 低频软噪声，无锐瞬态。
-     - sand：颗粒沙响 —— 高频细噪声为主，无 body。
-     - leaves：叶沙沙 —— 调幅噪声（慢颤），最轻。
-   - break_X：完整破块音（最长 / 响，~0.25-0.30s，含 crunch 尾）。
-   - mining_X：挖掘一阶的轻敲（spec「每挥一次响」；短 ~0.10s、亮度同组、能量约为 break 的 60%）。
-   - step_X：踩在表面（最短 ~0.10s、能量约为 break 的 50%、body 偏弱）。
-2. **单件音**：
-   - place.wav：放块 plonk（保留 t89 既有合成；放置不分材质，单份）。
-   - pickup.wav：拾取反馈 —— 短上扬正弦双音（~0.16s），轻快提示。
-   - door_open.wav：开门 —— 木质嘎吱上扬 + 起始短扣响（门闩松脱）~0.22s（t152）。
-   - door_close.wav：关门 —— 低频闷击（门框撞上）+ 末尾扣响（门闩扣合）~0.20s（t152）。
-   - hurt.wav：玩家受伤（t177）—— 低频闷击 + 略不和谐中频（呻吟感）+ 起始宽带冲击 ~0.22s；不分
-     材质（玩家自身受伤，非方块）。机制等价 MC 玩家受伤声（§9 原创）。PlayerState.damaged →
-     AudioManager.playHurt 触发；连击 seek 重发不堆叠（同其他单件）。
-   - mob_hurt.wav：生物受击（t248 专属受击音）—— 区别于玩家 hurt 的「闷哼」：更短促的软冲击 + 一段
-     下扫中频「 creature yelp 」（拟生物被打一声叫），~0.18s。机制等价 MC 生物受击声（§9 原创，零 MC
-     资产）。PlayerController.mobAttacked → AudioManager.playMobHurt 触发（替代旧复用 hurt.wav 的路径，
-     spec「受击音换专属 mob 受伤声」）。
-   - tool_break.wav：工具破损音（t315 工具耐久归零瞬间）—— 干脆「啪嗒」断裂声（高频 crack 瞬态 + 中频
-     snap body + 末尾碎屑沙沙），~0.20s。机制等价 MC 工具耐久耗尽破损声（§9 原创）。Hotbar::toolBroken →
-     AudioManager.playToolBreak 触发（damageSelectedItem 归零分支 emit）。
-   - ambient_wind.wav：环境音 / 风声床（t177）—— 长循环风声（~8s，单极点低通白噪 + 双 LFO 慢颤
-     调幅 + 首末 50ms 三角窗淡化保循环无缝）。机制等价 MC 的环境 / 风声氛围床（§9 原创）。
-     AudioManager 用 ma_sound 设 looping，startAmbient/stopAmbient 控制开关（playing 态开 / 退菜单停），
-     setAmbientLevel 据昼夜调强度（夜间更静谧）。
-   - water_flow.wav：潺潺流水声（t269 重做：旧版合成的极慢 AM 起伏 + 单一低频 sustained body 听感像
-     海浪，用户判「不像流水」；改潺潺流水 / 潺潺溪流）。长循环 ~8s，三层混合：低频水量床（单极点
-     低通白噪）+ 中频「流水过石」沙沙 body（带通白噪）+ 高频细流 / 飞溅 hiss（高通白噪）；多重
-     不规则 AM（3 个速率 ~0.7/1.1/2.3Hz + 随机相位 sin 叠加，非旧版潮汐式规则慢呼吸）；密集「咕嘟」
-     气泡瞬态（每 0.08-0.25s 一个、随机基频 250-700Hz + 上扫拟冒泡上浮）—— 潺潺流水的标志性颗粒感。
-     首末 50ms 三角窗淡化保循环无缝。机制等价 MC 近流水环境音（§9 原创，零 MC 资产）。AudioManager 用
-     ma_sound 设 looping，startWaterFlow/stopWaterFlow 控开关（PlayerController 近流水 proximity 扫描驱动），
-     setWaterFlowLevel 据玩家到最近流水格距离调音量（近强远弱）。
-   - water_step.wav：水中走路声（t269）—— 玩家脚位在水中迈步时播（低频闷浊「咚」水下 body + 起始
-     「咕嘟」气泡 plop 瞬态，拟脚入水搅动），~0.16s。机制等价 MC 水中走路声（§9 原创，零 MC 资产）。
-     不分材质（水中听感统一闷浊），单件 clip；Main.qml onWalkPhaseChanged 据玩家 feetInWater 分流到
-     playWaterStep（替代按材质的 playStep）。
-   - mob_idle.wav / mob_idle_pig.wav / mob_idle_cow.wav / mob_idle_sheep.wav：被动生物环境 idle 叫声（t250
-     牛叫/羊叫/猪叫，周期偶发；玩家听者范围内由 EntityManager 周期 emit mobAmbient 触发 →
-     AudioManager.playMobAmbient 据 mobType 选播）。机制等价 MC 1.0 被动生物偶发 idle call（§9 原创，
-     零 MC 资产；不照搬任何 MC 生物音效，仅机制对齐「周期 idle 叫声」）。
-     - mob_idle（通用）：测试生物 / 未知子类的中性短 chirp（~0.18s）。
-     - mob_idle_pig（猪哼）：低中频鼻音 grunt —— 双短爆发（拟「哼哼」两声），基频 ~190Hz + 二次谐波，
-       ~0.32s。
-     - mob_idle_cow（牛哞）：长低频下扫 moo —— 基频 ~165→105Hz 缓降 + 慢 attack + 轻颤音，~0.62s。
-     - mob_idle_sheep（羊咩）：带 AM 颤音的 bleat —— ~380Hz 载波 × ~11Hz 振幅调制（拟「咩-咩」颤抖），
-       ~0.45s。
-   - mob_idle_shambler/bones/stalker/spider.wav：敌对生物环境 idle 叫声（t294「怪物叫声 idle」，补全
-     t250 仅被动生物有声的缺口：mobType≥4 旧兜底通用 mob_idle → 现各敌对子类独立音色）。机制等价 MC 1.0
-     敌对生物偶发 idle call（§9 原创，零 MC 资产；PLAN §9 区隔改名 shambler/bones/stalker/spider，
-     机制等价 僵尸/骷髅/苦力怕/蜘蛛，仅文件名用本项目区隔名，非 MC 专名）。同 t250 周期偶发路径（ambientTimer
-     8-16s + 听者范围门控）→ emit mobAmbient(mobType 4-7) → playMobAmbient 选播。注意与 t295 区分：本组是
-     周期 idle ambient（被动偶发），t295 是受击 / 近距 / 爆炸专属触发音（不同文件 / 不同合成）。
-     - mob_idle_shambler（哀嚎）：低频锯齿谐波叠加（1-5 次递减）+ ~28Hz growl AM（喉音粗糙颤）+ 慢下沉
-       ~112→90Hz + 气声 rasp，~0.55s。区别于牛哞：更粗糙 / 多谐波 / 带颤吼（非圆润双谐波）。
-     - mob_idle_bones（骨咔哒）：干脆的骨头咔哒 —— 不规则分布的多个短 click（高通白噪爆 + 偶尔空心头
-       800Hz tok），极快衰减，~0.30s。完全干percussive 无 sustain。
-     - mob_idle_stalker（嘶嘶）：引信燃灼感 —— 高通白噪 hiss + ~3000-3400Hz 略升哨音 + 半正弦 swell，~0.30s。
-       软（ambient rustle，非爆炸；爆炸走 explosion.wav）。
-     - mob_idle_spider（嘶嗡）：愤怒虫鸣 —— 高通 hiss + ~600Hz 载 × ~42Hz 攻击性 AM（振翅嗡）+ swell，~0.40s。
-       比 stalker 更持续 / 带嗡。
+t328 全面重做：用户反馈「ambient/hurt/collect/hostile 全听不清或沉闷怪异（0-1/10）」。根因诊断：
+  1. **音量太低**：旧版多数 clip 内部峰值仅 ~0.13（如 ambient_wind），叠加 AudioManager 各级音量
+     系数后实际播放峰值 <0.03 → 几乎听不见。修：所有 clip 经 `finalize()` 做 DC 阻隔 + 峰值归一化
+     到目标峰值（默认 0.9）→ 统一满刻度、彻底根治「太轻」。
+  2. **音色沉闷**：旧版基频偏低（hurt 90Hz、cow 165Hz、shambler 112Hz）+ 谐波少 + 起声慢 → 听感
+     「沉、闷、糊」（低频一团无高频细节）。修：
+     - 脚步：~1ms 宽带瞬态 click（高通噪声爆 + 极快指数衰减 τ≈0.8ms）→ 干脆的「踏」撞击，不再
+       是拖沓的低频闷音；
+     - 牛/羊/猪：改用**共振峰（formant）合成**（锯齿声门源 → 并联 2 极共振器组）→ 真正的元音 /
+       动物叫声质感（非旧版纯正弦下扫的「电子蜂鸣」）。cow=moo 低共振峰、sheep=baa 高亮共振峰、
+       pig=oink 鼻音共振峰 + 双爆发；
+     - Shambler（机制等价僵尸）：多谐波锯齿源 + 低共振峰 + ~24Hz growl AM + rasp 气声 → 粗糙
+       下沉的哀嚎（明显可辨、有存在感）；
+     - Bones（骷髅）：高频噪声咔哒串 + 偶发空腔 tok → 干脆骨响；
+     - Spider：高通 hiss + ~600Hz × 42Hz AM 嗡 → 愤怒虫鸣；
+     - Stalker（苦力怕）：引信 hiss + 末段软 boom（一 Clip 内嘶嘶转爆炸）→ 一听即「引信怪物」；
+     - hurt/mob_hurt/pickup/place/explosion/tool_break/door：抬升基频、加谐波 / 瞬态，明亮可辨。
+  3. **新增 UI click**（ui_click.wav）：热键 / 滚轮切槽时的轻 tick 反馈（AudioManager.playUIClick，
+     Main.qml 路由 hotbarVM.selectedSlotChanged）。
 
-确定性合成（每组固定 random.seed），同次运行产出字节一致的 WAV（便于 git/CI diff）。
+确定性合成：每生成器用固定 random.Random(seed)（**不再用 hash()**——Python3 字符串 hash 受
+PYTHONHASHSEED 随机盐影响、跨进程不稳定；改显式 int 映射 KIND_SEED），同次运行产出字节一致 WAV。
+
 运行：python tools/build_sounds.py（输出到工程根 sounds/）。
 """
 import math
@@ -80,11 +35,14 @@ import wave
 import random
 from pathlib import Path
 
-SR = 22050  # 采样率（SFX 足够；文件小）
+SR = 44100  # 采样率（t328 升到 44.1k：更多高频细节、更短瞬态分辨 → 音色清晰；AudioManager 同步设 44100）
+
+# 音类 → 确定性种子偏移（显式 int，不用 hash() 避免跨进程随机盐；见模块 docstring）。
+KIND_SEED = {"break": 11, "mining": 23, "step": 37}
 
 
 def write_wav(path, samples):
-    """samples ∈ [-1,1] float → 16-bit PCM mono WAV。"""
+    """samples ∈ [-1,1] float → 16-bit PCM mono WAV（先经 finalize() 归一化）。"""
     with wave.open(str(path), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)  # 16-bit
@@ -97,339 +55,402 @@ def write_wav(path, samples):
 
 
 def env_exp(t, decay):
-    """指数衰减包络（e^{-decay*t}）。"""
+    """指数衰减包络（e^{-decay*t}）。decay 越大越短促。"""
     return math.exp(-t * decay)
 
 
-# 材质合成参数（手感差异化的单一权威表；新增材质组在此追加一行）。
-# 字段：thunk_freq=敲击基频；crunch_gain=宽带噪声权重；body_gain=低频重量权重；hi=高频亮噪权重；
-#       break_decay / mining_decay / step_decay = 三类音的衰减常数（越大越短促）；
-#       energy_mul = 相对响度系数（stone 满、leaves 最弱）；seed = 确定性噪声源。
+def finalize(samples, target_peak=0.9):
+    """DC 阻隔（一阶高通 τ≈8ms）+ 峰值归一化到 target_peak。
+
+    t328 核心修复：旧版各 clip 内部峰值参差（ambient_wind 仅 ~0.13）→ 播放听不见。归一化后所有 clip
+    统一满刻度，由 AudioManager 各级音量系数（m_volume / kind 系数 / ambient base vol）单独控制
+    相对响度。DC 阻隔避免低频偏置浪费量化动态范围。
+    """
+    if not samples:
+        return samples
+    a = 0.999  # 一阶高通系数（τ≈8ms，去 DC 与极低频偏置，不动可听低频）
+    prev_in = 0.0
+    prev_out = 0.0
+    out = [0.0] * len(samples)
+    for i, x in enumerate(samples):
+        y = x - prev_in + a * prev_out
+        prev_in = x
+        prev_out = y
+        out[i] = y
+    peak = max(1e-6, max(abs(s) for s in out))
+    g = target_peak / peak
+    return [max(-1.0, min(1.0, s * g)) for s in out]
+
+
+class Resonator:
+    """2 极共振器（bandpass，共振峰合成用）。
+
+    y[n] = g·x[n] + 2R·cos(θ)·y[n-1] − R²·y[n-2]，R=e^{−π·bw/fs}（bw 控带宽）、θ=2π·freq/fs。
+    g=(1−R) 馈入增益大致归一化共振峰。锯齿声门源经并联共振器组 → 元音 / 动物叫声质感。
+    """
+
+    def __init__(self, freq, bw, sr=SR):
+        R = math.exp(-math.pi * bw / sr)
+        self.a1 = 2.0 * R * math.cos(2.0 * math.pi * freq / sr)
+        self.a2 = R * R
+        self.g = 1.0 - R
+        self.s1 = 0.0
+        self.s2 = 0.0
+
+    def process(self, x):
+        y = self.g * x + self.a1 * self.s1 - self.a2 * self.s2
+        self.s2 = self.s1
+        self.s1 = y
+        return y
+
+
+def voiced_formant(f0_fn, formants, dur, attack=0.04, decay_rate=3.0,
+                   vib_rate=5.0, vib_depth=0.0, am_rate=0.0, am_depth=0.0,
+                   noise_gain=0.0, seed=0):
+    """共振峰合成有声音（牛/羊/猪/Shambler 叫声）。
+
+    锯齿声门源（含全部 1/n 谐波）→ 并联共振器组（formants=[(freq,bw),...]）→ 元音 / 动物声质感。
+    f0_fn(t_norm→[0,1]) 返回瞬时基频；vib_* 颤音、am_* AM 颤（咩 / growl）、noise_gain 气声（rasp）。
+    attack 起声渐入；decay_rate 整体指数衰减。返回未归一化样本（caller 走 finalize）。
+    """
+    n = int(SR * dur)
+    rnd = random.Random(seed)
+    res = [Resonator(f, bw) for (f, bw) in formants]
+    phase = 0.0
+    out = [0.0] * n
+    for i in range(n):
+        tnorm = i / n if n else 0.0
+        ts = i / SR
+        f0 = f0_fn(tnorm)
+        vib = vib_depth * math.sin(2 * math.pi * vib_rate * ts) if vib_rate else 0.0
+        phase += (f0 + vib) / SR
+        if phase >= 1.0:
+            phase -= math.floor(phase)
+        src = 2.0 * phase - 1.0  # 锯齿 -1..1（含全部谐波，喉音 / 声带源）
+        y = 0.0
+        for r in res:
+            y += r.process(src)
+        if noise_gain:
+            y += rnd.uniform(-1, 1) * noise_gain
+        am = 1.0
+        if am_depth:
+            am = 1.0 - am_depth * 0.5 + am_depth * 0.5 * math.sin(2 * math.pi * am_rate * ts)
+        a = min(1.0, ts / attack) if attack else 1.0
+        e = a * math.exp(-decay_rate * ts)
+        out[i] = y * e * am
+    return out
+
+
+# 材质合成参数（手感差异化的单一权威表）。
+# 字段：thunk_freq=敲击基频；transient_gain=起始 ~1ms 宽带 click 权重（脆 / 软）；body_gain=低频重量；
+#       crunch_gain=宽带噪声权重；break_decay/mining_decay/step_decay=三类音衰减常数（越大越短促）；
+#       energy=相对响度（峰值归一化目标系数，保留材质间手感差）；seed=确定性噪声源。
 MATERIALS = {
-    "stone":  dict(thunk_freq=110, crunch_gain=0.55, body_gain=0.35, hi_gain=0.30,
-                   break_decay=13.0, mining_decay=24.0, step_decay=28.0, energy=1.00, seed=1337),
-    "wood":   dict(thunk_freq=180, crunch_gain=0.20, body_gain=0.55, hi_gain=0.10,
+    "stone":  dict(thunk_freq=210, transient_gain=0.95, body_gain=0.45, crunch_gain=0.55,
+                   break_decay=15.0, mining_decay=28.0, step_decay=34.0, energy=1.00, seed=1337),
+    "wood":   dict(thunk_freq=170, transient_gain=0.70, body_gain=0.60, crunch_gain=0.25,
                    break_decay=18.0, mining_decay=30.0, step_decay=34.0, energy=0.85, seed=2024),
-    "grass":  dict(thunk_freq=70,  crunch_gain=0.45, body_gain=0.30, hi_gain=0.05,
-                   break_decay=20.0, mining_decay=32.0, step_decay=36.0, energy=0.65, seed=42),
-    "sand":   dict(thunk_freq=60,  crunch_gain=0.65, body_gain=0.10, hi_gain=0.45,
-                   break_decay=24.0, mining_decay=38.0, step_decay=42.0, energy=0.60, seed=99),
-    "leaves": dict(thunk_freq=120, crunch_gain=0.55, body_gain=0.05, hi_gain=0.20,
-                   break_decay=16.0, mining_decay=26.0, step_decay=30.0, energy=0.50, seed=7),
+    "grass":  dict(thunk_freq=120, transient_gain=0.20, body_gain=0.35, crunch_gain=0.55,
+                   break_decay=20.0, mining_decay=32.0, step_decay=36.0, energy=0.70, seed=42),
+    "sand":   dict(thunk_freq=110, transient_gain=0.55, body_gain=0.15, crunch_gain=0.80,
+                   break_decay=22.0, mining_decay=34.0, step_decay=38.0, energy=0.65, seed=99),
+    "leaves": dict(thunk_freq=150, transient_gain=0.30, body_gain=0.10, crunch_gain=0.60,
+                   break_decay=17.0, mining_decay=28.0, step_decay=32.0, energy=0.55, seed=7),
 }
 
 
 def synth_material(name, kind):
-    """按材质 + 音类（break/mining/step）合成一段样本。
+    """按材质 + 音类（break/mining/step）合成一段样本（t328 重做）。
 
-    各音类差异：duration（break 最长 / step 最短）、衰减常数（kind_decay）、整体能量系数。
-    能量系数（kind_energy）：break 1.0 / mining 0.6（每挥一击，比破轻）/ step 0.5（脚下踩，最弱）。
-    音量末尾钳到 [-1,1]（防削顶爆音；spec「音量合理、不爆音」）。
+    起始 ~1ms 宽带瞬态 click（高通噪声爆 + τ≈0.8ms 极快衰减）→ 干脆的撞击「踏 / 啪」，区别旧版
+    拖沓低频闷音；其后接 tonal thunk + crunch 尾。能量系数 kind_energy：break 1.0 / mining 0.7 /
+    step 0.55（相对响度进 finalize 目标峰值；AudioManager 另有 kind 系数）。
     """
     m = MATERIALS[name]
     if kind == "break":
-        dur, decay, kind_energy = 0.28, m["break_decay"], 1.0
+        dur, decay, kind_energy = 0.26, m["break_decay"], 1.0
     elif kind == "mining":
-        dur, decay, kind_energy = 0.11, m["mining_decay"], 0.6
+        dur, decay, kind_energy = 0.11, m["mining_decay"], 0.7
     else:  # step
-        dur, decay, kind_energy = 0.11, m["step_decay"], 0.5
+        dur, decay, kind_energy = 0.09, m["step_decay"], 0.55
     n = int(SR * dur)
-    rnd = random.Random(m["seed"] + hash(kind) % 1000)  # 每音类独立确定性序列
-    out = []
+    rnd = random.Random(m["seed"] + KIND_SEED[kind])  # 确定性序列（显式 int，不用 hash）
+    out = [0.0] * n
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+    hp_a = 0.60  # 一阶高通（起始 click 用，去低频闷感留脆亮瞬态）
     for i in range(n):
         t = i / SR
+        # 起始 ~1ms 宽带瞬态 click（干脆撞击「踏」）—— 高通噪声爆 × 极快指数衰减
+        click_env = math.exp(-t / 0.0008)  # τ≈0.8ms（~1ms 瞬态，符合 spec「footstep=wideband noise ~1ms transient」）
+        w1 = rnd.uniform(-1, 1)
+        hpv = hp_a * (hp_prev_out + w1 - hp_prev_in)
+        hp_prev_in = w1
+        hp_prev_out = hpv
+        click = hpv * m["transient_gain"] * click_env
+        # tonal body（敲击基频回响）
         thunk = math.sin(2 * math.pi * m["thunk_freq"] * t)
+        # 宽带 crunch 尾（材质颗粒感）
         crunch = rnd.uniform(-1, 1)
-        body = math.sin(2 * math.pi * 55 * t)  # 低频重量感（统一基线）
-        hi = rnd.uniform(-1, 1) * math.sin(2 * math.pi * 1800 * t)  # 高频亮瞬态
+        # 低频重量（统一基线）
+        body = math.sin(2 * math.pi * 65 * t)
         e = env_exp(t, decay)
-        amp = m["energy"] * kind_energy
-        s = (thunk * m["body_gain"]
+        s = (click
+             + thunk * m["body_gain"]
              + crunch * m["crunch_gain"]
-             + body * 0.25
-             + hi * m["hi_gain"]) * e * amp
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+             + body * 0.22) * e
+        out[i] = s
+    return finalize(out, target_peak=0.9 * m["energy"])  # 保留材质间相对响度（leaves < stone）
 
 
 def gen_place():
-    """放块音：低频 plonk + 起始短噪声瞬态（保留 t89 合成；放置不分材质）。"""
-    dur = 0.18
+    """放块音（t328）：明亮 plonk —— 较高基频 ~180Hz 上扫到 240Hz + 二次谐波 + 起始短 click。
+    放置不分材质；与 break（破坏）/ pickup（拾取）音色明显区分（更圆润 / 上扬）。"""
+    dur = 0.16
     n = int(SR * dur)
-    random.seed(7)
-    out = []
+    rnd = random.Random(7)
+    out = [0.0] * n
     for i in range(n):
         t = i / SR
-        plonk = math.sin(2 * math.pi * 130 * t) * 0.7
-        transient = random.uniform(-1, 1) * 0.4 * env_exp(t, 60.0)  # 极短瞬态
-        e = env_exp(t, 22.0)
-        out.append((plonk + transient) * e)
-    return out
+        tnorm = i / n
+        # 基频上扫 180→240Hz（放物「落定」的上扬感）
+        f = 180.0 + 60.0 * tnorm
+        tone = math.sin(2 * math.pi * f * t)
+        harm = math.sin(2 * math.pi * 2 * f * t) * 0.30  # 二次谐波（圆润不空）
+        click = rnd.uniform(-1, 1) * 0.35 * env_exp(t, 80.0)  # 起始极短瞬态
+        e = env_exp(t, 24.0)
+        out[i] = (tone * 0.7 + harm + click) * e
+    return finalize(out)
 
 
 def gen_pickup():
-    """拾取音：短上扬双音（C5→E5 正弦）+ 轻噪声瞬态 ~0.16s。机制等价 MC 拾取「啵」反馈。"""
-    dur = 0.16
+    """拾取 / 收集音（t328）：明亮上扬双音（A4 440Hz → E5 659Hz 正弦 + 三次谐波），轻快「叮」。
+    机制等价 MC 拾取反馈；与 place（圆润落定）/ break（颗粒破坏）明显区分。"""
+    dur = 0.15
     n = int(SR * dur)
-    random.seed(20260731)
-    out = []
+    rnd = random.Random(20260731)
+    out = [0.0] * n
     for i in range(n):
         t = i / SR
-        # 两段频率：前半 ~523Hz（C5），后半 ~659Hz（E5）—— 上扬轻快感。
-        f = 523.0 if t < dur * 0.5 else 659.0
-        tone = math.sin(2 * math.pi * f * t) * 0.55
-        transient = random.uniform(-1, 1) * 0.15 * env_exp(t, 50.0)
-        e = env_exp(t, 16.0)
-        out.append((tone + transient) * e)
-    return out
+        # 两段频率：前半 440Hz（A4），后半 659Hz（E5）—— 上扬轻快「叮-叮」
+        f = 440.0 if t < dur * 0.45 else 659.0
+        tone = math.sin(2 * math.pi * f * t)
+        harm = math.sin(2 * math.pi * 3 * f * t) * 0.10  # 三次谐波（金属铃质感）
+        transient = rnd.uniform(-1, 1) * 0.12 * env_exp(t, 60.0)
+        e = env_exp(t, 18.0)
+        out[i] = (tone * 0.75 + harm + transient) * e
+    return finalize(out)
+
+
+def gen_ui_click():
+    """UI 反馈 click（t328 新增）：热键 / 滚轮切槽时的轻 tick —— 极短高通噪声爆 + 微小 1200Hz 谐，
+    ~0.05s。机制等价 MC 物品栏切换 tick 反馈（§9 原创）。AudioManager.playUIClick 触发，
+    Main.qml 路由 hotbarVM.selectedSlotChanged。短 SFX（~0.05s），轻而不刺。"""
+    dur = 0.05
+    n = int(SR * dur)
+    rnd = random.Random(328328)
+    out = [0.0] * n
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+    hp_a = 0.7
+    for i in range(n):
+        t = i / SR
+        w = rnd.uniform(-1, 1)
+        hpv = hp_a * (hp_prev_out + w - hp_prev_in)
+        hp_prev_in = w
+        hp_prev_out = hpv
+        click = hpv * 0.7 * env_exp(t, 120.0)  # 极快衰减（脆 tick）
+        tone = math.sin(2 * math.pi * 1200.0 * t) * 0.15 * env_exp(t, 90.0)  # 微小高谐（木 / 塑按键感）
+        out[i] = click + tone
+    return finalize(out, target_peak=0.55)  # UI 反馈偏低（不抢前景 SFX）
 
 
 def gen_door_open():
-    """开门音（t152）：木质嘎吱上扬 + 起始短扣响（门闩松脱）~0.22s。
-    机制等价 MC 木门开启声（原创程序合成，§9 法律：零 MC 资产）。门/活板门右键开合时由
-    PlayerController::doorToggled(open=true) → AudioManager::playDoorOpen 触发。
-    """
+    """开门音：木质嘎吱上扬 + 起始短扣响（门闩松脱）~0.22s。机制等价 MC 木门开启声（§9 原创）。"""
     dur = 0.22
     n = int(SR * dur)
-    random.seed(310152)
-    out = []
+    rnd = random.Random(310152)
+    out = [0.0] * n
     for i in range(n):
         t = i / SR
-        # 嘎吱：基频从 ~180 缓升到 ~320Hz（门轴转动摩擦的 pitch bend）
-        f = 180.0 + 140.0 * (t / dur)
-        creak = math.sin(2 * math.pi * f * t) * 0.5
-        # 高频摩擦噪声（嘎吱质感）
-        grit = random.uniform(-1, 1) * 0.18 * math.sin(2 * math.pi * 2400 * t)
-        # 起始扣响（门闩松脱瞬态）—— 起点窄峰
+        f = 220.0 + 160.0 * (t / dur)  # 嘎吱基频缓升（门轴转动 pitch bend）
+        creak = math.sin(2 * math.pi * f * t)
+        grit = rnd.uniform(-1, 1) * 0.22 * math.sin(2 * math.pi * 2800 * t)  # 高频摩擦
         click_env = math.exp(-((t - 0.0) ** 2) / (2 * 0.010 ** 2))
-        click = random.uniform(-1, 1) * 0.40 * click_env
+        click = rnd.uniform(-1, 1) * 0.40 * click_env
         e = env_exp(t, 11.0)
-        s = (creak + grit + click) * e
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = (creak * 0.55 + grit + click) * e
+    return finalize(out)
 
 
 def gen_door_close():
-    """关门音（t152）：低频闷击（门框撞上）+ 末尾扣响（门闩扣合）~0.20s。
-    机制等价 MC 木门关闭声（原创程序合成，§9 法律：零 MC 资产）。doorToggled(open=false) 触发。
-    """
+    """关门音：低频闷击（门框撞上）+ 末尾扣响（门闩扣合）~0.20s。机制等价 MC 木门关闭声（§9 原创）。"""
     dur = 0.20
     n = int(SR * dur)
-    random.seed(310153)
-    out = []
+    rnd = random.Random(310153)
+    out = [0.0] * n
     for i in range(n):
         t = i / SR
-        # 低频闷击（门撞门框）+ 低频重量感
-        thunk = math.sin(2 * math.pi * 95 * t) * 0.6
-        body = math.sin(2 * math.pi * 55 * t) * 0.25
-        # 末尾扣响（门闩扣合）—— 在 t≈dur*0.7 附近爆发的窄高斯峰
+        thunk = math.sin(2 * math.pi * 110 * t)
+        body = math.sin(2 * math.pi * 60 * t) * 0.30
         center = dur * 0.7
         click_env = math.exp(-((t - center) ** 2) / (2 * 0.006 ** 2))
-        latch = random.uniform(-1, 1) * 0.45 * click_env
+        latch = rnd.uniform(-1, 1) * 0.45 * click_env
         e = env_exp(t, 14.0)
-        s = (thunk + body + latch) * e
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = (thunk * 0.6 + body + latch) * e
+    return finalize(out)
 
 
 def gen_hurt():
-    """受伤音（t177）：玩家自身受伤声 —— 低频闷击（身体受击的「闷」）+ 略不和谐中频（呻吟 / 闷哼感，
-    165Hz 略偏离基频泛音）+ 起始宽带冲击（瞬态「啪」），~0.22s。
-    机制等价 MC 玩家受伤声（原创程序合成，§9 法律：零 MC 资产）。由 PlayerState.damaged → Main.qml 路由
-    到 AudioManager.playHurt 触发（掉落伤害等；连击 seek 重发不堆叠，同其他单件）。
-    """
-    dur = 0.22
+    """玩家受伤音（t328）：中频「呃」grunt —— 抬升基频（220Hz 略下沉 + 440Hz 谐）+ 起始宽带冲击。
+    旧版 90Hz 太沉闷；新版基频拉到中频 + 谐波 → 像「挨打闷哼」而非低频蜂鸣。~0.20s。机制等价 MC
+    玩家受伤声（§9 原创）。PlayerState.damaged → AudioManager.playHurt 触发。"""
+    dur = 0.20
     n = int(SR * dur)
-    random.seed(778877)
-    out = []
+    rnd = random.Random(778877)
+    out = [0.0] * n
     for i in range(n):
         t = i / SR
-        # 低频冲击（身体受击的「闷」）
-        thunk = math.sin(2 * math.pi * 90 * t) * 0.55
-        # 略不和谐中频（呻吟 / 闷哼感；与 thunk 基频不成整数比 → 略紧绷）
-        groan = math.sin(2 * math.pi * 165 * t) * 0.30
-        # 起始宽带冲击（瞬态「啪」，快速衰减）
-        impact = random.uniform(-1, 1) * 0.45 * env_exp(t, 45.0)
+        tnorm = i / n
+        # 中频 grunt：220Hz 略下沉到 170Hz（挨打闷哼），加二次 + 三次谐（声带质感）
+        f0 = 220.0 - 50.0 * tnorm
+        tone = math.sin(2 * math.pi * f0 * t)
+        h2 = math.sin(2 * math.pi * 2 * f0 * t) * 0.25
+        h3 = math.sin(2 * math.pi * 3 * f0 * t) * 0.12
+        # 起始宽带冲击（瞬态「啪」）
+        impact = rnd.uniform(-1, 1) * 0.45 * env_exp(t, 45.0)
         e = env_exp(t, 12.0)
-        s = (thunk + groan + impact) * e
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = (tone * 0.55 + h2 + h3 + impact) * e
+    return finalize(out)
 
 
 def gen_mob_hurt():
-    """生物受击音（t248 专属受击音）：与玩家 hurt.wav 区分 —— 更短促的软冲击（creature 被打的「啪」，
-    但比玩家 hurt 轻柔、低频分量少）+ 一段下扫中频「 creature yelp / 短叫」（拟生物一声叫），~0.18s。
-    机制等价 MC 生物受击声（原创程序合成，§9 法律：零 MC 资产；不照搬任何 MC 生物音效）。
-    由 PlayerController::mobAttacked → Main.qml 路由到 AudioManager.playMobHurt 触发（替代旧复用 hurt.wav
-    的路径）。与 hurt 单件同模式（连击 seek 重发不堆叠）。
-
-    音色差异化（vs gen_hurt）：
-      - hurt = 低频闷击 90Hz + 不和谐中频 165Hz groan + 宽带冲击 → 人味「闷哼 / 呃」。
-      - mob_hurt = 更高的软 thunk 140Hz（小体型 creature 体腔）+ 下扫 yelp（500→300Hz，带 FM 颤，
-        拟「吱 / 叫」）+ 较轻的摩擦瞬态 → 生物味「短叫」。整体更短（0.18 vs 0.22）、更亮。
-    """
+    """生物受击音（t328）：creature yelp —— 下扫中频（560→320Hz，带 FM 颤）+ 软 thunk + 摩擦瞬态。
+    与玩家 hurt 区分（更高 / 更亮 / 更短叫）。~0.18s。机制等价 MC 生物受击声（§9 原创）。"""
     dur = 0.18
     n = int(SR * dur)
-    random.seed(812482)
-    out = []
+    rnd = random.Random(812482)
+    out = [0.0] * n
     for i in range(n):
-        t = i / dur  # 归一化时间 0..1（yelp pitch bend 用）
+        tnorm = i / n
         ts = i / SR
-        # 软冲击：较高基频的 thunk（小 creature 体腔，比玩家 hurt 高），衰减快
-        thunk = math.sin(2 * math.pi * 140.0 * ts) * 0.40
-        # 下扫 yelp：频率从 ~500Hz 滑到 ~300Hz（被打一声短叫），加少量 FM 颤（拟声带颤）
-        f_yelp = 500.0 - 200.0 * t
-        fm = 30.0 * math.sin(2 * math.pi * 70.0 * ts)  # FM 颤（→ 略「颤音」质感）
-        yelp = math.sin(2 * math.pi * f_yelp * ts + fm) * 0.38
-        # 较轻的摩擦瞬态（生物皮毛 / 羽毛摩擦感，比 hurt 宽带冲击弱）
-        grit = random.uniform(-1, 1) * 0.18 * math.sin(2 * math.pi * 2200.0 * ts)
-        # 整体指数衰减；起始段加一个极短attack 包络让 yelp 起声稍顿（拟「被打 → 楞一下 → 叫」）
+        thunk = math.sin(2 * math.pi * 160.0 * ts) * 0.35  # 软 thunk（小 creature 体腔）
+        f_yelp = 560.0 - 240.0 * tnorm  # 下扫 yelp（被打一声短叫）
+        fm = 35.0 * math.sin(2 * math.pi * 70.0 * ts)  # FM 颤
+        yelp = math.sin(2 * math.pi * f_yelp * ts + fm) * 0.40
+        grit = rnd.uniform(-1, 1) * 0.16 * math.sin(2 * math.pi * 2400.0 * ts)
         e = env_exp(ts, 15.0)
-        attack = min(1.0, ts / 0.012)  # 12ms attack（yelp 不在最尖的 0 点满幅）
-        s = (thunk + yelp + grit) * e * attack
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        attack = min(1.0, ts / 0.012)  # 12ms attack（被打 → 楞一下 → 叫）
+        out[i] = (thunk + yelp + grit) * e * attack
+    return finalize(out)
 
 
 def gen_ambient_wind():
-    """环境音 / 风声床（t177）：长循环风声 —— 单极点低通白噪（→ 低频起伏的「风」body）+ 双 LFO 慢速
-    调幅（0.30Hz + 0.11Hz 叠加 → 自然不规则起伏）+ 首末 50ms 三角窗淡化（保循环无缝、无边界咔哒），
-    ~8s。机制等价 MC 的环境 / 风声氛围床（原创程序合成，§9 法律：零 MC 资产）。
-    AudioManager 用 ma_sound_set_looping(true) 设循环，startAmbient / stopAmbient 控制开关（playing 态开 /
-    退菜单停），setAmbientLevel 据昼夜调强度（夜间更静谧）。整体幅度偏低（base_amp=0.13，背景氛围不抢前景）。
-    """
+    """环境音 / 风声床（t328 重做）：长循环风声 —— 单极点低通白噪（低频起伏「风」body）+ 高通白噪
+    （gust 高频细颗粒）+ 双 LFO 慢颤调幅 + 首末 80ms 三角窗淡化（循环无缝），~8s。
+    t328 关键：旧版 base_amp=0.13 → 峰值 ~0.13 → 播放几乎听不见；finalize 归一化到满刻度 + 加高频 gust
+    层 → 明显可闻的风声（AudioManager kAmbientBaseVol 再控制背景级）。机制等价 MC 环境 / 风声床（§9）。"""
     dur = 8.0
     n = int(SR * dur)
-    random.seed(51501)
-    # 单极点低通：state = a*state + (1-a)*w → 把白噪压成低频起伏（a 越接近 1 越平滑 / 低频）
+    rnd = random.Random(51501)
+    # 低频水量床（单极点低通 → 低频起伏的「风」body）
     a = 0.985
+    bed = [0.0] * n
     state = 0.0
-    raw = [0.0] * n
     for i in range(n):
-        w = random.uniform(-1, 1)
+        w = rnd.uniform(-1, 1)
         state = a * state + (1.0 - a) * w
-        raw[i] = state
-    # 低通后幅度大幅衰减 → 归一化回 [-1,1]，再乘 base 调到背景级
-    peak = max(1e-6, max(abs(s) for s in raw))
-    inv = 1.0 / peak
-    # 双 LFO 慢颤调幅（白天 / 风强的自然不规则起伏）
+        bed[i] = state
+    bed_inv = 1.0 / max(1e-6, max(abs(s) for s in bed))
+    # 高频 gust（高通白噪 → 风的细颗粒 / 嘶嘶层，旧版缺、致风声太闷）
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+    hp_a = 0.8
+    gust = [0.0] * n
+    for i in range(n):
+        w = rnd.uniform(-1, 1)
+        v = hp_a * (hp_prev_out + w - hp_prev_in)
+        hp_prev_in = w
+        hp_prev_out = v
+        gust[i] = v
+    gust_inv = 1.0 / max(1e-6, max(abs(s) for s in gust))
+    # 双 LFO 慢颤调幅（自然不规则起伏）
     lfo1 = 2 * math.pi * 0.30
     lfo2 = 2 * math.pi * 0.11
-    fade_n = int(SR * 0.05)  # 50ms 首末淡化（循环无缝）
-    base_amp = 0.13          # 风声整体偏低（背景氛围，不抢前景）
-    out = []
+    fade_n = int(SR * 0.08)  # 80ms 首末淡化（循环无缝）
+    out = [0.0] * n
     for i in range(n):
         t = i / SR
-        lfo = 0.5 + 0.3 * math.sin(lfo1 * t) + 0.2 * math.sin(lfo2 * t)
-        amp = base_amp * lfo
+        lfo = 0.55 + 0.30 * math.sin(lfo1 * t) + 0.15 * math.sin(lfo2 * t)
+        s = (bed[i] * bed_inv * 0.65 + gust[i] * gust_inv * 0.40) * lfo
         if i < fade_n:
-            amp *= i / fade_n
+            s *= i / fade_n
         elif i > n - fade_n:
-            amp *= (n - 1 - i) / fade_n
-        out.append(max(-1.0, min(1.0, raw[i] * inv * amp)))
-    return out
+            s *= (n - 1 - i) / fade_n
+        out[i] = s
+    return finalize(out)  # 满刻度（AudioManager kAmbientBaseVol 控制背景级）
 
 
 def gen_water_flow():
-    """潺潺流水声（t269 重做：旧版像海浪 → 改潺潺流水 / 溪流声）。
-
-    听感诊断与对症（关键）：
-      - **旧版像海浪的根因**：极慢 AM（0.27Hz / 0.13Hz = 周期 3.7s / 7.7s）+ 单极点低通产生的单一
-        低频 sustained body → 听感是「潮起潮落的缓慢呼吸」= 海浪，而非流水。
-      - **潺潺流水的听感要素**：中高频为主（细流过石的沙沙）、快速**不规则**起伏（非潮汐式规则慢呼吸）、
-        密集小气泡 / 涟漪瞬态（潺潺的「颗粒感」）。
-
-    合成（~8s 长循环，三层混合 + 密集气泡 + 不规则 AM）：
-      1. 低频水量床（单极点低通白噪，幅度低 —— 仅作「水量」基础底，不抢前景）；
-      2. 中频「流水过石」沙沙 body（带通白噪：低通去高频嘶嘶 + 差分高通去极低频）；
-      3. 高频细流 / 飞溅 hiss（高通白噪，亮的细水颗粒）；
-      4. 多重不规则 AM：3 个速率（~0.7 / 1.1 / 2.3Hz）+ 随机相位 sin 叠加 → 不规则起伏（非规则慢呼吸）；
-      5. 密集「咕嘟」气泡瞬态（每 0.08-0.25s 一个、随机基频 250-700Hz + 上扫拟冒泡上浮）；
-      6. 首末 50ms 三角窗淡化保循环无缝。
-
-    机制等价 MC 近流水环境音（§9 原创，零 MC 资产）。AudioManager 用 ma_sound_set_looping(true) 设循环，
-    startWaterFlow / stopWaterFlow 控开关（PlayerController 近流水 proximity 扫描驱动），setWaterFlowLevel
-    据玩家到最近流水格距离调音量（近强远弱 → 0 时 caller stopWaterFlow）。整体幅度偏低（base_amp=0.16，
-    背景氛围不抢前景；与环境风声同床共存、不互相盖过）。
-    """
+    """潺潺流水声（t328 保留 t269 三层 + 密集气泡设计，finalize 归一化）。长循环 ~8s：低频水量床 +
+    中频「流水过石」沙沙 + 高频细流 hiss + 多重不规则 AM + 密集「咕嘟」气泡瞬态；首末 50ms 淡化无缝。
+    机制等价 MC 近流水环境音（§9 原创）。"""
     dur = 8.0
     n = int(SR * dur)
-    random.seed(70269)  # t269 重做新种子（新音色；确定性，同次运行字节一致）
-
-    # ---- 1. 低频水量床（单极点低通）----
+    rnd = random.Random(70269)
     bed_lp_a = 0.06
     bed_state = 0.0
     bed = [0.0] * n
     for i in range(n):
-        w = random.uniform(-1, 1)
+        w = rnd.uniform(-1, 1)
         bed_state = bed_lp_a * w + (1.0 - bed_lp_a) * bed_state
         bed[i] = bed_state
     bed_inv = 1.0 / max(1e-6, max(abs(s) for s in bed))
-
-    # ---- 2. 中频 body（带通 = 低通 + 差分高通）----
-    mid_lp_a = 0.25                      # 单极点低通（压高频嘶嘶，留中频沙沙）
+    mid_lp_a = 0.25
     mid_lp_state = 0.0
     mid_raw = [0.0] * n
     for i in range(n):
-        w = random.uniform(-1, 1)
+        w = rnd.uniform(-1, 1)
         mid_lp_state = mid_lp_a * w + (1.0 - mid_lp_a) * mid_lp_state
         mid_raw[i] = mid_lp_state
-    mid = [0.0] * n                       # 差分 = 高通（去极低频，留中频起伏）
+    mid = [0.0] * n
     prev = 0.0
     for i in range(n):
         v = mid_raw[i] - prev
         prev = mid_raw[i]
         mid[i] = v
     mid_inv = 1.0 / max(1e-6, max(abs(s) for s in mid))
-
-    # ---- 3. 高频 hiss（高通白噪：细流 / 飞溅的亮颗粒）----
     hp_prev_in = 0.0
     hp_prev_out = 0.0
-    hp_a = 0.85                           # 越接近 1 越保留高频
+    hp_a = 0.85
     hiss = [0.0] * n
     for i in range(n):
-        w = random.uniform(-1, 1)
+        w = rnd.uniform(-1, 1)
         v = hp_a * (hp_prev_out + w - hp_prev_in)
         hp_prev_in = w
         hp_prev_out = v
         hiss[i] = v
     hiss_inv = 1.0 / max(1e-6, max(abs(s) for s in hiss))
-
-    # ---- 4. 多重不规则 AM（3 速率 + 随机相位；非规则慢呼吸）----
     lfo_a = 2 * math.pi * 1.1
     lfo_b = 2 * math.pi * 2.3
     lfo_c = 2 * math.pi * 0.7
-    ph_a = random.uniform(0, 2 * math.pi)
-    ph_b = random.uniform(0, 2 * math.pi)
-    ph_c = random.uniform(0, 2 * math.pi)
-
-    # ---- 5. 密集气泡瞬态（每 0.08-0.25s 一个；潺潺的「咕嘟」颗粒感）----
+    ph_a = rnd.uniform(0, 2 * math.pi)
+    ph_b = rnd.uniform(0, 2 * math.pi)
+    ph_c = rnd.uniform(0, 2 * math.pi)
     bubbles = []
     t_b = 0.05
     while t_b < dur - 0.05:
-        bubbles.append((t_b,
-                        random.uniform(250.0, 700.0),   # 气泡基频
-                        random.uniform(0.06, 0.13),      # 振幅
-                        random.uniform(0.008, 0.020),    # 高斯宽
-                        random.uniform(0.5, 2.0)))       # 频率上扫系数（拟气泡上浮变调）
-        t_b += random.uniform(0.08, 0.25)
-
+        bubbles.append((t_b, rnd.uniform(250.0, 700.0), rnd.uniform(0.06, 0.13),
+                        rnd.uniform(0.008, 0.020), rnd.uniform(0.5, 2.0)))
+        t_b += rnd.uniform(0.08, 0.25)
     fade_n = int(SR * 0.05)
-    base_amp = 0.16
-    out = []
+    out = [0.0] * n
     for i in range(n):
         t = i / SR
-        # 不规则 AM（均值 ~0.6、保底 0.05 不归零 → 水量持续）
-        am = 0.4 + 0.2 * math.sin(lfo_a * t + ph_a) \
-                 + 0.2 * math.sin(lfo_b * t + ph_b) \
-                 + 0.2 * math.sin(lfo_c * t + ph_c)
+        am = 0.4 + 0.2 * math.sin(lfo_a * t + ph_a) + 0.2 * math.sin(lfo_b * t + ph_b) + 0.2 * math.sin(lfo_c * t + ph_c)
         if am < 0.05:
             am = 0.05
-        # 三层混合：bed（低频水量）+ mid（中频沙沙主体）+ hiss（高频细流）
-        s = (bed[i] * bed_inv * 0.30
-             + mid[i] * mid_inv * 0.55
-             + hiss[i] * hiss_inv * 0.25) * base_amp * am
-        # 叠加气泡瞬态（窄高斯包络短正弦 + 频率上扫）
+        s = (bed[i] * bed_inv * 0.30 + mid[i] * mid_inv * 0.55 + hiss[i] * hiss_inv * 0.25) * am
         for bt, bf, ba, bw, bs in bubbles:
             dtb = t - bt
             if -0.02 < dtb < bw * 4.0:
@@ -440,206 +461,134 @@ def gen_water_flow():
             s *= i / fade_n
         elif i > n - fade_n:
             s *= (n - 1 - i) / fade_n
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = s
+    return finalize(out)
 
 
 def gen_water_step():
-    """水中走路声（t269）：玩家脚位在水中迈步时播 —— 低频闷浊「咚」（水下 muffling）+ 起始「咕嘟」气泡
-    plop 瞬态（脚入水搅动），~0.16s。机制等价 MC 水中走路声（§9 原创，零 MC 资产）。AudioManager.playWaterStep
-    触发（Main.qml onWalkPhaseChanged 据玩家 feetInWater 分流，替代按材质的 playStep）。
-
-    vs 普通 step_X（按材质）：水下步声不按材质（水中听感统一闷浊），单件 clip；音量在 AudioManager 内
-    略低于普通 step（水下传播衰减 + 不抢水流声前景）。
-    """
+    """水中走路声：低频闷浊「咚」（水下 muffling）+ 起始「咕嘟」气泡 plop，~0.16s。机制等价 MC 水中
+    走路声（§9 原创）。不分材质（水中听感统一闷浊），单件 clip。"""
     dur = 0.16
     n = int(SR * dur)
-    random.seed(269269)
-    out = []
+    rnd = random.Random(269269)
+    out = [0.0] * n
     lp_state = 0.0
-    lp_a = 0.12  # 低通系数（闷浊搅动感）
+    lp_a = 0.12
     for i in range(n):
         t = i / SR
-        # 低频 thunk（脚踩水的「咚」，水下 body）
-        thunk = math.sin(2 * math.pi * 90.0 * t) * 0.45
-        # 低通宽带噪声（水下的闷浊搅动感）
-        w = random.uniform(-1, 1)
+        thunk = math.sin(2 * math.pi * 100.0 * t) * 0.45
+        w = rnd.uniform(-1, 1)
         lp_state = lp_a * w + (1.0 - lp_a) * lp_state
         murk = lp_state * 0.35
-        # 起始「咕嘟」气泡 plop（脚入水瞬态）：~260Hz 起的上扫短正弦，窄高斯包络在 t≈0
         plop_env = math.exp(-((t - 0.0) ** 2) / (2 * 0.012 ** 2))
-        plop = math.sin(2 * math.pi * (260.0 + 200.0 * t) * t) * 0.35 * plop_env
+        plop = math.sin(2 * math.pi * (280.0 + 200.0 * t) * t) * 0.35 * plop_env
         e = env_exp(t, 16.0)
-        s = (thunk + murk + plop) * e
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = (thunk + murk + plop) * e
+    return finalize(out)
 
 
 def gen_mob_idle_generic():
-    """通用生物 idle 叫声（t250）：中性短 chirp —— 单音基频 ~420Hz 正弦 + 二次谐波 + 起始软 attack +
-    快指数衰减，~0.18s。供 MobTest（测试生物）/ 未知 mobType 兜底（机制等价 MC 生物偶发 idle call；
-    §9 原创，零 MC 资产）。EntityManager 周期 emit mobAmbient(mobType=0) → AudioManager.playMobAmbient 触发。
-    """
+    """通用生物 idle 叫声：中性短 chirp —— 基频 ~440Hz 正弦 + 二次谐波 + 软 attack + 快衰减，~0.18s。
+    供测试生物 / 未知 mobType 兜底（机制等价 MC 生物偶发 idle call；§9 原创）。"""
     dur = 0.18
     n = int(SR * dur)
-    random.seed(250070)
-    out = []
+    rnd = random.Random(250070)
+    out = [0.0] * n
     for i in range(n):
         t = i / SR
-        tone = math.sin(2 * math.pi * 420.0 * t) * 0.50
-        harm = math.sin(2 * math.pi * 840.0 * t) * 0.15        # 二次谐波（让 chirp 不至于纯音过空）
-        grit = random.uniform(-1, 1) * 0.12 * math.sin(2 * math.pi * 2600.0 * t)  # 轻摩擦瞬态
-        attack = min(1.0, t / 0.010)                            # 10ms attack（起声不刺）
+        tone = math.sin(2 * math.pi * 440.0 * t) * 0.50
+        harm = math.sin(2 * math.pi * 880.0 * t) * 0.15
+        grit = rnd.uniform(-1, 1) * 0.12 * math.sin(2 * math.pi * 2600.0 * t)
+        attack = min(1.0, t / 0.010)
         e = env_exp(t, 16.0)
-        s = (tone + harm + grit) * e * attack
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = (tone + harm + grit) * e * attack
+    return finalize(out)
 
 
 def gen_mob_idle_pig():
-    """猪哼 idle 叫声（t250）：低中频鼻音 grunt —— 两段短爆发（拟「哼哼」），每段基频 ~190Hz 正弦 +
-    二次谐波（鼻音色彩）+ 弱宽带 grit，各 ~0.11s、间隔 ~0.05s，~0.32s。机制等价 MC 猪偶发 grunt
-    （§9 原创，零 MC 资产；不照搬任何 MC 生物音效）。mobAmbient(mobType=1) → playMobAmbient 触发。
-    """
-    dur = 0.32
-    n = int(SR * dur)
-    random.seed(250071)
-    # 两段爆发的中心（归一化时间 [0,1]）：第一段 0.15、第二段 0.65。
-    bursts = [0.15, 0.65]
-    out = []
+    """猪哼 idle（t328 共振峰）：鼻音 grunt —— 共振峰合成（锯齿源 + 鼻音共振峰 F1=500/F2=1500/F3=2600）
+    × 双窄高斯爆发（拟「哼哼」两声），基频 ~170Hz，~0.35s。机制等价 MC 猪偶发 grunt（§9 原创）。"""
+    dur = 0.35
+    bursts = [0.18, 0.62]
+    samples = voiced_formant(
+        f0_fn=lambda tn: 170.0,
+        formants=[(500, 90), (1500, 130), (2600, 200)],  # 鼻音共振峰（高 F2 = 鼻音色彩）
+        dur=dur, attack=0.012, decay_rate=1.2,
+        noise_gain=0.08, seed=250071)
+    n = len(samples)
+    rnd = random.Random(2500719)
+    out = [0.0] * n
     for i in range(n):
         t = i / SR
-        # 累加两段窄高斯包络（各 ~0.11s 宽）
         env = 0.0
         for b in bursts:
-            env += math.exp(-((t - b * dur) ** 2) / (2 * 0.030 ** 2))
+            env += math.exp(-((t - b * dur) ** 2) / (2 * 0.045 ** 2))
         env = min(1.0, env)
-        tone = math.sin(2 * math.pi * 190.0 * t) * 0.55
-        harm = math.sin(2 * math.pi * 380.0 * t) * 0.20          # 二次谐波（鼻音色彩）
-        grit = random.uniform(-1, 1) * 0.16                      # 弱宽带 grit（哼的气流感）
-        e = env
-        attack = min(1.0, t / 0.008)
-        s = (tone + harm + grit) * e * attack * 0.9
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = samples[i] * env * 1.4
+    return finalize(out)
 
 
 def gen_mob_idle_cow():
-    """牛哞 idle 叫声（t250）：长低频下扫 moo —— 基频从 ~165Hz 缓降到 ~105Hz（哞的下沉感）+ 二次谐波 +
-    慢 attack（起声渐入）+ 轻颤音（~6Hz FM）+ 末尾慢衰减，~0.62s。机制等价 MC 牛偶发 moo（§9 原创，
-    零 MC 资产）。mobAmbient(mobType=2) → playMobAmbient 触发。
-    """
-    dur = 0.62
-    n = int(SR * dur)
-    random.seed(250072)
-    out = []
-    for i in range(n):
-        t = i / dur      # 归一化 0..1（pitch bend 用）
-        ts = i / SR
-        # 基频下扫 165→105Hz（哞的下沉轮廓）
-        f0 = 165.0 - 60.0 * t
-        fm = 6.0 * math.sin(2 * math.pi * 6.0 * ts)             # ~6Hz FM 颤（声带轻颤）
-        tone = math.sin(2 * math.pi * f0 * ts + fm) * 0.50
-        harm = math.sin(2 * math.pi * 2.0 * f0 * ts) * 0.16      # 二次谐波（mellow 的体腔感）
-        body = math.sin(2 * math.pi * 70.0 * ts) * 0.18          # 低频重量（大体型）
-        grit = random.uniform(-1, 1) * 0.08                      # 极弱气声
-        # 慢 attack（0.08s 起声渐入）+ 慢衰减
-        attack = min(1.0, ts / 0.08)
-        e = attack * env_exp(ts, 3.5)
-        s = (tone + harm + body + grit) * e
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+    """牛哞 idle（t328 共振峰）：长 moo —— 共振峰合成（锯齿源 + 低共振峰 F1=350/F2=850/F3=2400 = 「ooo」
+    元音）+ 基频 200→130Hz 缓降 + ~5Hz vibrato + 慢 attack，~0.62s。机制等价 MC 牛偶发 moo（§9 原创）。
+    旧版纯 165Hz 正弦下扫 = 电子蜂鸣；共振峰合成后是真正「哞」的元音质感。"""
+    samples = voiced_formant(
+        f0_fn=lambda tn: 200.0 - 70.0 * tn,  # 基频缓降（哞的下沉轮廓）
+        formants=[(350, 80), (850, 110), (2400, 180)],  # 「ooo」低共振峰
+        dur=0.62, attack=0.08, decay_rate=3.0,
+        vib_rate=5.0, vib_depth=4.0,  # ~5Hz vibrato（声带轻颤）
+        noise_gain=0.05, seed=250072)
+    return finalize(samples)
 
 
 def gen_mob_idle_sheep():
-    """羊咩 idle 叫声（t250）：带 AM 颤音的 bleat —— ~380Hz 载波 × ~11Hz 振幅调制（拟「咩-咩」颤抖）+
-    二次谐波 + 中 attack + 中衰减，~0.45s。机制等价 MC 羊偶发 baa（§9 原创，零 MC 资产）。
-    mobAmbient(mobType=3) → playMobAmbient 触发。
-    """
-    dur = 0.45
-    n = int(SR * dur)
-    random.seed(250073)
-    out = []
-    for i in range(n):
-        t = i / SR
-        ts = i / SR
-        carrier = math.sin(2 * math.pi * 380.0 * ts) * 0.48
-        harm = math.sin(2 * math.pi * 760.0 * ts) * 0.14          # 二次谐波
-        grit = random.uniform(-1, 1) * 0.10
-        # ~11Hz AM 颤（0.5±0.5 → 0..1 包络，让载波忽强忽弱 = 咩的颤抖）
-        trem = 0.5 + 0.5 * math.sin(2 * math.pi * 11.0 * ts)
-        attack = min(1.0, ts / 0.020)
-        e = attack * env_exp(ts, 5.5)
-        s = (carrier + harm + grit) * e * trem * 0.85
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+    """羊咩 idle（t328 共振峰）：bleat —— 共振峰合成（锯齿源 + 高亮共振峰 F1=720/F2=1300/F3=2700 = 「aaa」
+    元音）+ 基频 ~360Hz × ~12Hz AM 颤（咩的颤抖）+ 中 attack，~0.45s。机制等价 MC 羊偶发 baa（§9 原创）。
+    比牛更高 / 更亮（高共振峰 + 高基频 + AM 颤）。"""
+    samples = voiced_formant(
+        f0_fn=lambda tn: 360.0,
+        formants=[(720, 110), (1300, 160), (2700, 220)],  # 「aaa」高亮共振峰
+        dur=0.45, attack=0.025, decay_rate=5.0,
+        am_rate=12.0, am_depth=0.7,  # ~12Hz AM 颤（咩-咩颤抖）
+        noise_gain=0.06, seed=250073)
+    return finalize(samples)
 
 
 def gen_mob_idle_shambler():
-    """敌对 Shambler（机制等价僵尸）idle 哀嚎（t294）：低频锯齿谐波叠加（1-5 次递减，喉音粗糙质感）+
-    ~28Hz growl AM（低频粗糙颤吼）+ 基频慢下沉 ~112→90Hz（呻吟下沉感）+ ~5Hz vibrato + 气声 rasp（undead
-    破损感），慢 attack 渐入 + 中衰减，~0.55s。机制等价 MC 敌对生物偶发 idle call（§9 原创，零 MC 资产；
-    PLAN §9 区隔改名 shambler，非 MC 专名）。mobAmbient(mobType=4) → playMobAmbient 触发（周期 ambientTimer
-    8-16s + 听者范围门控，同被动生物路径）。
-
-    vs 牛哞（gen_mob_idle_cow）：两者皆低频，但 shambler 用 5 次锯齿谐波 + growl AM → 粗糙 / 颤吼 /
-    不圆润（牛哞仅双谐波 + 6Hz 轻颤 = mellow 体腔感）；且 shambler 带 rasp 气声（亡灵破损）。
-    """
-    dur = 0.55
-    n = int(SR * dur)
-    random.seed(294074)  # t294 + mobType 4
-    out = []
-    for i in range(n):
-        t = i / dur       # 归一化 0..1（pitch bend 用）
-        ts = i / SR
-        # 基频缓慢下沉 112→90Hz（呻吟下沉）+ ~5Hz vibrato（声带轻颤）
-        f0 = 112.0 - 22.0 * t
-        vib = 4.0 * math.sin(2 * math.pi * 5.0 * ts)
-        # 锯齿谐波叠加（1-5 次递减）→ 喉音粗糙质感（区别于牛哞的圆润双谐波）
-        tone = 0.0
-        for h in range(1, 6):
-            tone += (1.0 / h) * math.sin(2 * math.pi * f0 * h * ts + vib)
-        tone *= 0.18            # 锯齿叠加后幅度大 → 缩到合量级
-        # 喉咙 growl：~28Hz AM（低频粗糙颤吼，亡灵的「嗬嗬」感）
-        growl = 0.5 + 0.5 * math.sin(2 * math.pi * 28.0 * ts)
-        # 气声 / 破损感（undead rasp，干涩呼吸）
-        rasp = random.uniform(-1, 1) * 0.12
-        attack = min(1.0, ts / 0.05)   # 慢起声（呻吟渐入，非冲击）
-        e = attack * env_exp(ts, 3.0)
-        s = (tone * growl + rasp) * e * 0.9
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+    """敌对 Shambler（机制等价僵尸）idle 哀嚎（t328 共振峰重做）：多谐波锯齿源（含全部 1/n 谐波 → 粗糙
+    喉音）+ 低共振峰（F1=480/F2=1050/F3=2500）+ 基频 160→105Hz 下沉 + ~24Hz growl AM（粗颤吼）+
+    rasp 气声（亡灵破损）+ 慢 attack，~0.60s。机制等价 MC 敌对生物偶发 idle call（§9 原创；PLAN §9
+    区隔改名 shambler，非 MC 专名）。比牛哞更粗糙 / 多谐波 / 颤吼（明显可辨、有存在感）。"""
+    samples = voiced_formant(
+        f0_fn=lambda tn: 160.0 - 55.0 * tn,  # 基频下沉（呻吟下沉）
+        formants=[(480, 130), (1050, 200), (2500, 320)],  # 低 + 宽共振峰（亡灵喉音）
+        dur=0.60, attack=0.05, decay_rate=2.5,
+        am_rate=24.0, am_depth=0.55,  # ~24Hz growl AM（粗颤吼）
+        vib_rate=5.0, vib_depth=3.0,
+        noise_gain=0.12,  # rasp 气声（亡灵破损）
+        seed=294074)
+    return finalize(samples)
 
 
 def gen_mob_idle_bones():
-    """敌对 Bones（机制等价骷髅）idle 骨头咔哒（t294）：干脆的骨头咔哒 rattling —— 不规则分布的多个短 click
-    （高通白噪爆 + 偶尔空心头 800Hz tok），每个极快衰减（~10ms 高斯包络），整体 ~0.30s。完全干 percussive
-    无 sustain（骷髅骨架相互碰撞的标志干响）。机制等价 MC 敌对生物偶发 idle call（§9 原创，零 MC 资产；
-    PLAN §9 区隔改名 bones，非 MC 专名）。mobAmbient(mobType=5) → playMobAmbient 触发。
-
-    vs 受击 mob_hurt（gen_mob_hurt）：mob_hurt 是一声短叫（下扫 yelp），本 idle 是**多 click 串**（骨架颤响）；
-    vs 玩家 hurt：本 idle 高频干 percussive、无低频闷击。
-    """
+    """敌对 Bones（机制等价骷髅）idle 骨头咔哒（t328）：高频噪声咔哒串 + 偶发空腔 1000Hz tok。
+    不规则分布 6-10 个短 click（高通噪声爆 × 极窄高斯包络 ~8ms），干脆干 percussive 无 sustain，
+    ~0.30s。机制等价 MC 敌对生物偶发 idle call（§9 原创；PLAN §9 区隔改名 bones，非 MC 专名）。"""
     dur = 0.30
     n = int(SR * dur)
-    random.seed(294075)  # t294 + mobType 5
-    # 不规则分布的咔哒点（6-10 个，拟骨架一抖多骨相撞）
+    rnd = random.Random(294075)
     clicks = []
     tc = 0.02
     while tc < dur - 0.02:
-        clicks.append((tc,
-                       random.uniform(0.30, 0.55),     # 振幅
-                       random.uniform(0.006, 0.012),   # 高斯宽（极短，干脆）
-                       random.uniform(0, 2 * math.pi)))
-        tc += random.uniform(0.022, 0.045)
-    out = []
-    # 高通白噪态（干脆的骨头咔哒，去低频闷感；逐样本推进）
+        clicks.append((tc, rnd.uniform(0.30, 0.55), rnd.uniform(0.006, 0.012), rnd.uniform(0, 2 * math.pi)))
+        tc += rnd.uniform(0.022, 0.045)
+    out = [0.0] * n
     hp_prev_in = 0.0
     hp_prev_out = 0.0
     hp_a = 0.85
     for i in range(n):
         t = i / SR
-        w = random.uniform(-1, 1)
+        w = rnd.uniform(-1, 1)
         v = hp_a * (hp_prev_out + w - hp_prev_in)
         hp_prev_in = w
         hp_prev_out = v
@@ -649,164 +598,123 @@ def gen_mob_idle_bones():
             dtc = t - ct
             if -0.02 < dtc < cw * 4.0:
                 env = math.exp(-(dtc ** 2) / (2 * cw * cw))
-                # 每个 click = 高通噪声爆（主）+ 偶尔空心头 tok（800Hz，骨架空腔回响）
-                s += ca * env * (0.7 * noise + 0.3 * math.sin(2 * math.pi * 800.0 * dtc + cph))
-        out.append(max(-1.0, min(1.0, s * 0.9)))
-    return out
+                s += ca * env * (0.7 * noise + 0.3 * math.sin(2 * math.pi * 1000.0 * dtc + cph))
+        out[i] = s * 0.9
+    return finalize(out)
 
 
 def gen_mob_idle_stalker():
-    """敌对 Stalker（机制等价苦力怕）idle 嘶嘶（t294）：引信燃灼感 —— 高通白噪 hiss（细颗粒燃灼）+
-    ~3000-3400Hz 略升哨音（引信灼烧的尖啸）+ 半正弦 swell（嘶嘶渐强再衰减，非瞬间冲击），~0.30s。软
-    （ambient rustle，非爆炸；爆炸走 explosion.wav，本 idle 仅暗示「附近有东西在嘶嘶」）。机制等价 MC 敌对
-    生物偶发 idle call（§9 原创，零 MC 资产；PLAN §9 区隔改名 stalker，非 MC 专名）。
-    mobAmbient(mobType=6) → playMobAmbient 触发。
-
-    vs explosion.wav（gen_explosion）：explosion 是低频轰 + 宽带爆裂瞬态（高冲击）；本 idle 是高频 hiss +
-    尖啸 swell（软 / 持续燃灼感，无低频轰）。
-    """
-    dur = 0.30
+    """敌对 Stalker（机制等价苦力怕）idle（t328）：引信 hiss + 末段软 boom（一 Clip 内嘶嘶转爆炸）。
+    前段高通白噪 hiss + ~3200Hz 略升哨音（引信燃灼尖啸）+ 半正弦 swell；末段 ~0.10s 软 boom（低频闷击
+    + 宽带爆裂，暗示爆炸），~0.42s。机制等价 MC 敌对生物偶发 idle call（§9 原创；PLAN §9 区隔改名 stalker，
+    非_MC 专名）。idle 软 boom 远弱于 explosion.wav（ambient 暗示，非真爆炸）。"""
+    dur = 0.42
     n = int(SR * dur)
-    random.seed(294076)  # t294 + mobType 6
-    out = []
+    rnd = random.Random(294076)
+    out = [0.0] * n
     hp_prev_in = 0.0
     hp_prev_out = 0.0
-    hp_a = 0.80                      # 高通（嘶嘶亮颗粒）
+    hp_a = 0.80
+    boom_t = dur * 0.62  # 嘶嘶段结束、boom 段起点
     for i in range(n):
-        t = i / dur                  # 归一化 0..1（swell + pitch bend 用）
-        ts = i / SR
-        w = random.uniform(-1, 1)
+        t = i / SR
+        w = rnd.uniform(-1, 1)
         v = hp_a * (hp_prev_out + w - hp_prev_in)
         hp_prev_in = w
         hp_prev_out = v
         hiss = v
-        # 高频燃灼哨音（~3000→3400Hz 略升，引信灼烧的尖啸）
-        f_w = 3000.0 + 400.0 * t
-        whistle = math.sin(2 * math.pi * f_w * ts) * 0.12
-        # 慢 swell（半正弦 0→1→0，嘶嘶渐强再衰减）
-        swell = math.sin(math.pi * t)
-        s = (hiss * 0.5 + whistle) * swell
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        s = 0.0
+        if t < boom_t:
+            # 引信嘶嘶段：高通 hiss + 略升哨音 × 半正弦 swell
+            tn = t / boom_t
+            f_w = 3000.0 + 400.0 * tn
+            whistle = math.sin(2 * math.pi * f_w * t) * 0.14
+            swell = math.sin(math.pi * tn)
+            s = (hiss * 0.55 + whistle) * swell
+        else:
+            # 末段软 boom（低频闷击 + 宽带爆裂，快速衰减；ambient 暗示非真爆炸）
+            dt = t - boom_t
+            body = (math.sin(2 * math.pi * 70.0 * dt) * 0.45 + math.sin(2 * math.pi * 110.0 * dt) * 0.25)
+            crack = rnd.uniform(-1, 1) * 0.40 * env_exp(dt, 30.0)
+            s = (body + crack) * env_exp(dt, 12.0) * 0.8
+        out[i] = s
+    return finalize(out)
 
 
 def gen_mob_idle_spider():
-    """敌对 Spider（机制等价蜘蛛）idle 愤怒嘶嗡（t294）：高通白噪 hiss + ~600Hz 载波 × ~42Hz 攻击性 AM（振翅嗡，
-    虫鸣的攻击性颤）+ 半正弦 swell，~0.40s。比 stalker 更持续 / 带嗡（蜘蛛的愤怒虫鸣感）。机制等价 MC 敌对
-    生物偶发 idle call（§9 原创，零 MC 资产；PLAN §9 区隔改名 spider，非 MC 专名）。
-    mobAmbient(mobType=7) → playMobAmbient 触发。
-
-    vs stalker（gen_mob_idle_stalker）：stalker 是高频 hiss + 尖啸（无载波嗡）；spider 加 ~600Hz 载 × 42Hz AM
-    → 明显的「嗡嗡」虫鸣攻击感，更持续（0.40 vs 0.30s）。
-    """
+    """敌对 Spider（机制等价蜘蛛）idle 愤怒嘶嗡（t328）：高通白噪 hiss + ~600Hz 载波 × ~42Hz 攻击性 AM
+    （振翅嗡）+ 半正弦 swell，~0.40s。比 stalker 更持续 / 带嗡。机制等价 MC 敌对生物偶发 idle call
+    （§9 原创；PLAN §9 区隔改名 spider，非 MC 专名）。"""
     dur = 0.40
     n = int(SR * dur)
-    random.seed(294077)  # t294 + mobType 7
-    out = []
+    rnd = random.Random(294077)
+    out = [0.0] * n
     hp_prev_in = 0.0
     hp_prev_out = 0.0
     hp_a = 0.78
     for i in range(n):
-        t = i / dur                  # 归一化 0..1（swell 用）
+        t = i / dur
         ts = i / SR
-        w = random.uniform(-1, 1)
+        w = rnd.uniform(-1, 1)
         v = hp_a * (hp_prev_out + w - hp_prev_in)
         hp_prev_in = w
         hp_prev_out = v
         hiss = v
-        # 虫鸣嗡：~600Hz 载波 × ~42Hz AM（攻击性振翅颤，虫鸣标志）
-        buzz_carrier = math.sin(2 * math.pi * 600.0 * ts) * 0.20
+        buzz_carrier = math.sin(2 * math.pi * 600.0 * ts) * 0.22
         am = 0.5 + 0.5 * math.sin(2 * math.pi * 42.0 * ts)
-        # swell 包络（半正弦，渐强再衰减）
         swell = math.sin(math.pi * t)
-        s = (hiss * 0.45 + buzz_carrier * am) * swell
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = (hiss * 0.45 + buzz_carrier * am) * swell
+    return finalize(out)
 
 
 def gen_tool_break():
-    """工具破损音（t315 工具耐久归零瞬间播放）：干脆的「啪嗒」断裂声 —— 木柄 / 木板崩裂的脆响。起始极短宽带
-    crack 瞬态（断裂瞬间的高频冲击）+ 中频空洞 snap body（~520Hz 短正弦，材料崩裂的回响）+ 弱低频 thunk
-    （手持重量落地）+ 末尾细碎 debris 沙沙（碎屑散落），~0.20s。机制等价 MC 工具耐久耗尽时的破损声（§9 原创程序
-    合成，零 MC 资产）。由 Hotbar::toolBroken → Main.qml 路由到 AudioManager.playToolBreak 触发（damageSelectedItem
-    归零分支 emit）。
-
-    音色差异化（vs gen_hurt / gen_door_close / break_wood）：
-      - hurt = 低频闷击 90Hz + 不和谐中频 165Hz groan → 人味「闷哼」；
-      - door_close = 低频闷击 95Hz + 末尾扣响 → 门撞框；
-      - break_wood = 中空闷击 180Hz + 弱噪声 → 整块木头被破；
-      - tool_break = 更亮 / 更脆：高频 crack 瞬态更强（断裂的「啪」）+ 较高基频 snap 520Hz（短脆回响）+
-        末尾碎屑沙沙（手持物散架的颗粒尾）→ 一听即「东西断了」而非「挨打 / 关门」。
-    """
+    """工具破损音（t328）：干脆「啪嗒」断裂 —— 起始极短宽带 crack + 较高基频 snap（620Hz，区别 hurt
+    低闷）+ 弱低频 thunk + 末尾碎屑沙沙，~0.20s。机制等价 MC 工具耐久耗尽破损声（§9 原创）。"""
     dur = 0.20
     n = int(SR * dur)
-    random.seed(315315)
-    out = []
-    # 高通态（末尾碎屑 debris 用，干脆细颗粒）
+    rnd = random.Random(315315)
+    out = [0.0] * n
     hp_prev_in = 0.0
     hp_prev_out = 0.0
     hp_a = 0.82
     for i in range(n):
         t = i / SR
-        # 起始极短宽带 crack 瞬态（断裂瞬间的高频冲击「啪」）—— 起点窄峰、极快衰减
         crack_env = math.exp(-((t - 0.0) ** 2) / (2 * 0.004 ** 2))
-        crack = random.uniform(-1, 1) * 0.60 * crack_env
-        # 中频空洞 snap body（材料崩裂的短脆回响；520Hz 较亮，区别于 hurt 的低闷）
-        snap = math.sin(2 * math.pi * 520.0 * t) * 0.42 * env_exp(t, 32.0)
-        # 弱低频 thunk（手持重量落地的一闷）
-        thunk = math.sin(2 * math.pi * 110.0 * t) * 0.20 * env_exp(t, 20.0)
-        # 末尾细碎 debris 沙沙（碎屑散落；延迟 ~60ms 起，高通白噪细颗粒）
-        w = random.uniform(-1, 1)
+        crack = rnd.uniform(-1, 1) * 0.60 * crack_env
+        snap = math.sin(2 * math.pi * 620.0 * t) * 0.42 * env_exp(t, 32.0)
+        thunk = math.sin(2 * math.pi * 120.0 * t) * 0.20 * env_exp(t, 20.0)
+        w = rnd.uniform(-1, 1)
         v = hp_a * (hp_prev_out + w - hp_prev_in)
         hp_prev_in = w
         hp_prev_out = v
-        debris_env = 0.0
-        if t > 0.06:
-            debris_env = env_exp(t - 0.06, 16.0)
+        debris_env = env_exp(t - 0.06, 16.0) if t > 0.06 else 0.0
         debris = v * 0.22 * debris_env
-        s = crack + snap + thunk + debris
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = crack + snap + thunk + debris
+    return finalize(out)
 
 
 def gen_explosion():
-    """爆炸音（t284 Stalker/苦力怕自爆）：低频闷击（爆炸的「轰」body）+ 起始宽带爆裂瞬态（冲击破空的「砰」）
-    + 较长尾音（低频余响 + 衰减噪声，拟爆炸后的轰鸣回响），~0.5s。机制等价 MC 爆炸声（原创程序合成，§9 法律：
-    零 MC 资产）。由 EntityManager::explosion → AudioManager.playExplosion 触发（爆炸的单一音/视入口）。
-
-    音色设计（vs gen_hurt / gen_door_close）：
-      - 低频 body 极重（55Hz + 80Hz 双正弦 → 大能量低频「轰」；爆炸比关门/受伤的体量大得多）；
-      - 起始宽带爆裂（白噪 × 极快衰减 → 破空「砰」瞬态，比 hurt 的冲击强且宽）；
-      - 中频咆哮（~120Hz 略不和谐 + 慢 FM 颤 → 爆炸气浪的「吼」感）；
-      - 尾音较长（衰减常数 5.0 → ~0.5s 渐弱，比 hurt 0.22s / door 0.20s 长得多 = 爆炸的余响）。
-    """
+    """爆炸音（t328）：低频 body（55+85Hz 双正弦 → 厚「轰」）+ 中频咆哮（130Hz + FM 颤）+ 起始宽带
+    爆裂瞬态 + 尾音低频余响，~0.50s。机制等价 MC 爆炸声（§9 原创）。Stalker 自爆走此 clip。"""
     dur = 0.50
     n = int(SR * dur)
-    random.seed(284284)
-    out = []
-    lp_state = 0.0  # 低通态（尾音低频余响用）
+    rnd = random.Random(284284)
+    out = [0.0] * n
+    lp_state = 0.0
     lp_a = 0.08
     for i in range(n):
         t = i / SR
-        # 低频 body：双正弦（55 + 80Hz）→ 厚重「轰」
-        body = (math.sin(2 * math.pi * 55.0 * t) * 0.45
-                + math.sin(2 * math.pi * 80.0 * t) * 0.30)
-        # 中频咆哮：~120Hz + 慢 FM 颤（气浪的「吼」）
+        body = math.sin(2 * math.pi * 55.0 * t) * 0.45 + math.sin(2 * math.pi * 85.0 * t) * 0.30
         fm = 18.0 * math.sin(2 * math.pi * 9.0 * t)
-        roar = math.sin(2 * math.pi * 120.0 * t + fm) * 0.22
-        # 起始宽带爆裂瞬态（破空「砰」）—— 极快衰减
-        crack = random.uniform(-1, 1) * 0.55 * env_exp(t, 30.0)
-        # 尾音低频余响：单极点低通白噪 → 低频起伏的「轰隆」尾
-        w = random.uniform(-1, 1)
+        roar = math.sin(2 * math.pi * 130.0 * t + fm) * 0.22
+        crack = rnd.uniform(-1, 1) * 0.55 * env_exp(t, 30.0)
+        w = rnd.uniform(-1, 1)
         lp_state = lp_a * w + (1.0 - lp_a) * lp_state
         rumble = lp_state * 0.30
-        # 整体指数衰减（衰减常数 5.0 → ~0.5s 渐弱；爆炸余响长）
         e = env_exp(t, 5.0)
-        # 起始极短 attack（爆炸瞬态起声不顿）
         attack = min(1.0, t / 0.004)
-        s = (body + roar + crack + rumble) * e * attack
-        out.append(max(-1.0, min(1.0, s)))
-    return out
+        out[i] = (body + roar + crack + rumble) * e * attack
+    return finalize(out)
 
 
 def main():
@@ -820,10 +728,9 @@ def main():
             path = out_dir / f"{kind}_{name}.wav"
             write_wav(path, samples)
             print(f"wrote {path} ({len(samples)} frames, {len(samples)/SR:.2f}s)")
-    # 单件音：place（保留）+ pickup + door_open / door_close（t152 门/活板门开关声）
-    # + hurt / mob_hurt（t177 玩家受伤 + t248 生物受击专属）+ ambient_wind（t177 环境风声床）
-    # + water_flow（t223 近流水水流声床）
+    # 单件音（t328 重做合成 + 新增 ui_click）：
     for name, gen in [("place", gen_place), ("pickup", gen_pickup),
+                      ("ui_click", gen_ui_click),
                       ("door_open", gen_door_open), ("door_close", gen_door_close),
                       ("hurt", gen_hurt), ("mob_hurt", gen_mob_hurt),
                       ("explosion", gen_explosion),

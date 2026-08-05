@@ -3888,6 +3888,8 @@ Window {
     Connections {
         target: hotbarVM
         function onToolBroken(itemId) { audio.playToolBreak() }
+        // t328：切槽（数字键 1-9 / 滚轮）→ UI click 反馈（与视觉高亮配对的音频 tick）。
+        function onSelectedSlotChanged() { audio.playUIClick() }
     }
 
     // t88 工具：按坐标移除火把伪光源（破块 / 校验清理共用）。从后往前扫，删**所有**匹配 (x,y,z) 的条目。
