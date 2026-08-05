@@ -88,6 +88,16 @@ void ChunkGeometry::setWaterOnly(bool on)
     buildMesh(RebuildReason::Water);
 }
 
+// t326：cutout 段开关变 → 重建（cutout 段只发 cross 顶点、地形段不再发 cross → 两段选块不同，需重网格化）。
+//   值未变则早退。用 Dirty reason（同编辑即时重建路径，绕过 sun-step 节流，跨 chunk 边界 cross 随邻居破/放刷新）。
+void ChunkGeometry::setCutoutOnly(bool on)
+{
+    if (m_cutoutOnly == on) return;
+    m_cutoutOnly = on;
+    emit cutoutOnlyChanged();
+    buildMesh(RebuildReason::Dirty);
+}
+
 // t166b 阴影开关变 → 重网格化（顶点光 PCF 软影随开关重算；语义同光照变 → 用 Sun reason）。值未变早退。
 void ChunkGeometry::setShadowsEnabled(bool on)
 {
@@ -258,7 +268,16 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     //   [FirstCross,LastCross]=[24,25] 连续段内（DiamondOre/Wool 夹中间且非 cross），故并入谓词。
                     const bool isPartialX = (b >= BlockRegistry::FirstPartial && b <= BlockRegistry::LastPartial);
                     const bool isCrossX   = BlockRegistry::isCrossBillboard(b);
-                    if (!isPartialX && !isCrossX) continue; // 仅异形盒体 / cross 方块进此 pass
+                    // t326 cross cutout 分流：cross 方块（草丛/作物/树苗）贴图带 alpha 透明底 → 进独立 cutout 段
+                    //   （半透材质 opacity:0.99 + alphaCutoff:0.5 cutout 透明间隙）；partial 盒体（slab/stairs/...）
+                    //   贴图不透明 → 留地形段（不透明材质 opacity=1）。两段互斥：地形段若同时发 cross → opacity=1
+                    //   下 alpha 被忽略、透明底当不透明显成实心板（用户「草丛挡视线」根因）。cutout 段只发 cross。
+                    if (m_cutoutOnly) {
+                        if (!isCrossX) continue;     // cutout 段：仅 cross（草丛/作物/树苗）
+                    } else {
+                        if (isCrossX) continue;      // 地形段：cross 走 cutout 段、不在此画（否则显实心板）
+                        if (!isPartialX) continue;   // 地形段：仅 partial 盒体（立方面在 PASS 2）
+                    }
                     const quint8 cSky = m_world->skyLightAt(wx, ly, wz);
                     const quint8 cBlock = m_world->blockLightAt(wx, ly, wz);
                     const float cShadow = sunShadowAt(float(wx) + 0.5f, float(ly) + 0.5f, float(wz) + 0.5f);
@@ -282,7 +301,10 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
         }
 
         // ---- PASS 2：立方面网格化（terrain 段 culled/greedy；水段 t197 变高水面专用路径）----
-        if (m_waterOnly) {
+        //   t326：cutout 段（cutoutOnly）只发 cross 顶点（PASS 1），无水 / 无整立方面 → 跳过 PASS 2。
+        if (m_cutoutOnly) {
+            // cutout 段：cross 仅在 PASS 1（pushCross 双面 quad）；无立方面、无水。空分支，跳过下方三路。
+        } else if (m_waterOnly) {
             // t197 水位视觉（PLAN §4 / dev-plan F 组）：水段不再画满格立方，而是按 cell 的 state(level)
             //   降水面高度 + 流水用独立贴图，呈现 MC 式逐格衰减流动（修「所有水格同高满水位 → 看着静止」）。
             //

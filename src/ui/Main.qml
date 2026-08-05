@@ -1634,6 +1634,7 @@ Window {
                         const t = terrainChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })
                         objs.push(t); geos.push(t.geometry)
                         objs.push(waterChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
+                        objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t326 cutout 段（草丛/作物/树苗）
                     }
                 }
                 window.terrainGeos = geos
@@ -1685,6 +1686,35 @@ Window {
                     waterAnimPhase: window.waterAnimPhase
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+            }
+        }
+
+        // t326 cross cutout 段 chunk Model 模板：cross 广告牌方块（草丛 / 小麦作物 / 树苗）的独立半透段。
+        //   cross 贴图带 alpha 透明底（草叶 / 树苗本体 alpha=255、底 alpha=0），须 alpha-test cutout 才显透明
+        //   间隙（否则显成两片实心板挡视线）。PrincipledMaterial 在本 D3D11 后端 **alphaCutoff 仅在 opacity<1**
+        //   （透明通道）下生效（见 crack 材质 B1 注释 / lessons-learned alpha 契约条）—— 地形段材质 opacity=1 →
+        //   alpha 被忽略 → 透明底当不透明显成实心板（用户「草丛挡住视线」根因）。本段配 opacity:0.99 +
+        //   alphaCutoff:0.5（沿用 torch / crack / MaterialIcon alpha-test 契约）。terrain / water 段不能整体
+        //   降 opacity（全地形半透 + 透明通道无深度写 = z-fight），故拆独立段（机制等价 waterOnly 的透明分流）。
+        //   cutoutOnly:true 让 ChunkGeometry 仅网格化 cross（PASS 1 pushCross）、跳过立方面（PASS 2）。
+        //   几何顶点为 chunk 局部坐标、position 同 terrain/water 段；顶点色光照（terrainLight + vertexColors）沿用同管线。
+        Component {
+            id: crossChunkComp
+            Model {
+                id: crossModel
+                property int chunkCX: 0
+                property int chunkCZ: 0
+                position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
+                geometry: ChunkGeometry {
+                    world: theWorld
+                    cx: crossModel.chunkCX
+                    cz: crossModel.chunkCZ
+                    sunDir: worldClock.sunDir
+                    shadowsEnabled: window.shadowsEnabled
+                    greedyMeshing: window.greedyMeshing
+                    cutoutOnly: true   // t326：仅 cross 方块（草丛/作物/树苗）→ 半透 cutout 材质 cutout 透明底
+                }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; opacity: 0.99; baseColor: terrainLight(worldClock.skyLight) }
             }
         }
 
