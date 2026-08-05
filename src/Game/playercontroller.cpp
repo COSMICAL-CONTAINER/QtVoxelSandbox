@@ -2215,13 +2215,18 @@ bool PlayerController::isLockedBuried() const
     const float minx = px - kHalfW, maxx = px + kHalfW;
     const float miny = m_pos.y(),        maxy = m_pos.y() + m_height;
     const float minz = pz - kHalfW, maxz = pz + kHalfW;
-    // 1) 中心列有嵌入块（玩家 AABB 与该列某 Y 格 sub-AABB 真重叠）。
+    // 1) 中心列有嵌入块（玩家 AABB 与该列某 Y 格 sub-AABB **显著**重叠）。
+    //   t289 修：原 hairline 重叠（任何 ε 接触即算嵌入）致玩家 Y 贴方块边界时（站立 / 落地 snapping 的
+    //   FP 残差）误判嵌入 → 恰在窄处（四向堵）触发 isLockedBuried → velocity 清零 → WASD / 空格失效
+    //   （移动锁定，切观察者飞态不经此门控故可动 = 用户报告症状）。改：玩家 AABB 内缩 kEmbedTol 后再测
+    //   → 仅「显著嵌入」（深度 >0.1）才算，排除边界 FP。真被埋（沙落身 / 卡进墙）仍显著嵌入 → 仍锁。
+    constexpr float kEmbedTol = 0.1f;
     bool embedded = false;
     for (int y = y0; y <= y1 && !embedded; ++y) {
         for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, y, bz)) {
-            if (minx < b.maxX && maxx > b.minX &&
-                miny < b.maxY && maxy > b.minY &&
-                minz < b.maxZ && maxz > b.minZ) { embedded = true; break; }
+            if (minx + kEmbedTol < b.maxX && maxx - kEmbedTol > b.minX &&
+                miny + kEmbedTol < b.maxY && maxy - kEmbedTol > b.minY &&
+                minz + kEmbedTol < b.maxZ && maxz - kEmbedTol > b.minZ) { embedded = true; break; }
         }
     }
     if (!embedded) return false; // 非嵌入（正常站立 / 贴墙）→ 不锁
