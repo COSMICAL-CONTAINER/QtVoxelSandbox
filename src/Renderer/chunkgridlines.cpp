@@ -65,22 +65,39 @@ void ChunkGridLines::rebuild()
         verts.append(bx); verts.append(by); verts.append(bz);
     };
 
+    // t316 加粗线：D3D11 Lines 基元线宽固定 ~1px，单条线在绿/棕地形上过细难辨。每条线沿其**垂直面**
+    //   画 5 条偏移副本（"+" 字形：原线 + ±t × 2 个垂直轴 = o[0]/o[1]），视觉合成一条粗线（t=0.04 块
+    //   → 近处约 0.08 块粗、远处仍显亮色，仅 F3+G 调试叠层时几何放大 5x、性能可忽略）。各方向线选垂直面：
+    //   - 纵线（沿 Y）：垂直面 X-Z（偏移作用在 X、Z）。
+    //   - x 边界线（沿 Z）：垂直面 X-Y（偏移作用在 X、Y）。
+    //   - z 边界线（沿 X）：垂直面 Y-Z（偏移作用在 Y、Z）。
+    constexpr float t = 0.04f;
+    const float offs[5][2] = {{0, 0}, {t, 0}, {-t, 0}, {0, t}, {0, -t}};
+
     // 纵线：遍历每个 (x 边界, z 边界) 交点。世界尺寸恒为 chunkSize 整数倍（t276 worldChunksPerSide*16），
     //   故步长 chunkSize 恰好在 worldWidth/worldDepth 收口（xb/zb 最后取到 = worldWidth/worldDepth）。
     for (int xb = 0; xb <= m_worldWidth; xb += m_chunkSize) {
         for (int zb = 0; zb <= m_worldDepth; zb += m_chunkSize) {
-            addLine(float(xb), y0, float(zb), float(xb), y1, float(zb));
+            const float fxb = float(xb), fzb = float(zb);
+            for (const auto &o : offs)
+                addLine(fxb + o[0], y0, fzb + o[1], fxb + o[0], y1, fzb + o[1]);
         }
     }
     // 沿 x 边界的水平连线（固定 xb，z 走 0..depth），顶 + 底各一条。
     for (int xb = 0; xb <= m_worldWidth; xb += m_chunkSize) {
-        addLine(float(xb), y0, 0.0f, float(xb), y0, float(m_worldDepth));
-        addLine(float(xb), y1, 0.0f, float(xb), y1, float(m_worldDepth));
+        const float fxb = float(xb), zd = float(m_worldDepth);
+        for (const auto &o : offs) {
+            addLine(fxb + o[0], y0 + o[1], 0.0f, fxb + o[0], y0 + o[1], zd);
+            addLine(fxb + o[0], y1 + o[1], 0.0f, fxb + o[0], y1 + o[1], zd);
+        }
     }
     // 沿 z 边界的水平连线（固定 zb，x 走 0..width），顶 + 底各一条。
     for (int zb = 0; zb <= m_worldDepth; zb += m_chunkSize) {
-        addLine(0.0f, y0, float(zb), float(m_worldWidth), y0, float(zb));
-        addLine(0.0f, y1, float(zb), float(m_worldWidth), y1, float(zb));
+        const float fzb = float(zb), wd = float(m_worldWidth);
+        for (const auto &o : offs) {
+            addLine(0.0f, y0 + o[0], fzb + o[1], wd, y0 + o[0], fzb + o[1]);
+            addLine(0.0f, y1 + o[0], fzb + o[1], wd, y1 + o[0], fzb + o[1]);
+        }
     }
 
     clear();

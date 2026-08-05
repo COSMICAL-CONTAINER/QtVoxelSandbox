@@ -1682,7 +1682,9 @@ Window {
             }
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
-                baseColor: "#ff3030"   // 红色边界线（机制等价 MC F3+G chunk border red lines）
+                // t316 亮饱和黄（旧 #ff3030 红色亮度低、在绿/棕地形上过细难辨；黄色相对亮度 ~3x，
+                //   机制等价 MC F3+G chunk border 黄色亮线；配 ChunkGridLines 加粗几何）。
+                baseColor: "#FFD500"
             }
         }
 
