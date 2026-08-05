@@ -2452,6 +2452,15 @@ void PlayerController::step(qreal dt)
         m_vel.setY(std::max(float(m_vel.y() - kGravity * dt), -kMaxFall));
         if (spaceEdge && m_onGround) m_vel.setY(kJump);
     }
+    // t317 生存跳跃高度不足修复：记录本 tick 是否注入了合法地面跳跃冲量（spaceEdge && onGround）。
+    //   kJump=8.4 / kGravity=28 → 理论顶点 v²/(2g)=1.26 格（≥1.05 验收），但用户实测只跳 ~0.5 格。
+    //   根因：紧随其后的 isLockedBuried 速度清零（t258）会把刚设的 m_vel.y=kJump 一并清掉。t289 把嵌入
+    //   判定从 hairline 放宽到 kEmbedTol=0.1 减少了误锁，但 columnClear 仍扫玩家全高 [y0,y1] 任一格
+    //   collidable 即判「堵」→ 在 1 格坑 / 贴墙角 / 紧邻欲跳上的方块等场景，4 向皆堵 + 边界 FP 仍可触发
+    //   clamp，吃掉跳跃冲量。把合法 jump impulse 从 clamp 豁免（保存 → clamp 后重设）：clamp 的本职是
+    //   防 moveAxis X/Z snap 穿墙（水平清零仍保留），Y 轴另有 moveAxis(1,+) 顶头 snap 兜底 → 真被埋且
+    //   头顶有方块的玩家上跳仍会被自然挡住（锁定语义不破）；头顶无方块时上跳脱困亦合理。
+    const bool jumpFired = (spaceEdge && m_onGround);
 
     // t258 被埋锁定（spec「被埋→锁定不能动，只能挖出脱困」）：玩家被实体方块完全包围（嵌入 + 四向皆堵）→
     //   moveAxis 的 snap 会把玩家推穿相邻块（前后左右穿出 / 坠出基岩外，机制等价观察者 noclip；Y 轴已由
@@ -2462,6 +2471,10 @@ void PlayerController::step(qreal dt)
     //   见 isLockedBuried。地面复探（下方 aabbHitsSolid）仍跑：被埋态 AABB 重叠 → onGround=true（被支撑），
     //   防误判坠落 / 摔伤。
     if (isLockedBuried()) { m_vel = QVector3D(0, 0, 0); m_knockback = QVector3D(0, 0, 0); }
+    // t317 合法地面跳跃冲量豁免于被埋锁定（jumpFired 见上注）：clamp 后重设 m_vel.y=kJump。真被埋且有
+    //   天花板时下方子步 moveAxis(1, +) 顶头 snap（playercontroller.cpp:2209）仍会清零 m_vel.y 并挡住上移，
+    //   锁定语义保留；只是不再误吃 normal ground jump。
+    if (jumpFired) m_vel.setY(kJump);
     // t296 受击击退冲量积分（仅走路模式；Spectator / Creative-飞 noclip 早 return 不至此）。m_knockback 与 m_vel
     //   分离（m_vel.x/z 每 tick 被 wish 覆盖）。每帧：水平指数衰减 + 垂直受重力（小跳弧自然），衰减殆尽 → 整体清零。
     //   叠入位移：delta = (m_vel + m_knockback) * dt（子步 / 防穿墙照常按合成位移算）。
