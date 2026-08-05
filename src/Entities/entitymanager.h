@@ -444,6 +444,10 @@ private:
     //   周期（kSpawnAttempts 次选点）。独立于物理 / AI 的 tick（tick 每 16ms 跑、spawn 每 kSpawnInterval 秒跑一次，
     //   节流避免每帧扫几千次 blockAt）。PlayerController 唯一调 tickHostileLife → 累加器随其 60Hz tick 推进。
     float m_spawnAccum = 0.0f;
+    // t321 玩家受击全局节流倒计时（秒；<=0 = 玩家可被命中；>0 = 节流无敌帧内，mob 攻击 / 骷髅箭命中不触发）。
+    //   任一 mob 经 mobAttackedPlayer 命中玩家时置 kPlayerHitThrottle；tick 每帧扣 dt。详见 kPlayerHitThrottle 注释。
+    //   解决「多 mob 围攻各独立冷却叠加 → 满血瞬死」：把 N 只 mob 的并行冷却串行化为单线节拍（轮替出手）。
+    float m_playerHitCooldown = 0.0f;
 
     // 把构造好的实体放入槽位（优先复用空槽，否则追加）。move 入槽后 alive=true（Entity 默认）。++m_liveCount。
     int acquireSlot(Entity &&e)
@@ -637,15 +641,22 @@ private:
     //   - kChaseSpeed：追踪行走速度（blocks/s）。略慢于玩家走速 4.3 → 玩家可甩脱但具威胁；快于 wander kWalkSpeed=1.0。
     //   - kAttackRange / kAttackVertRange：近战攻击 XZ 距离 + 垂直容差。XZ 1.6 = 相邻一格可达；垂直 2.0 防跨层隔空打
     //     （mob 中心 vs 玩家脚位同层差 ~0.9，跳跃 / 上坡仍命中）。
-    //   - kAttackCooldown：攻击间隔（秒；机制等价 MC 僵尸 ~1s/击）；kAttackDamage：单次伤害 HP（MC 简单难度僵尸 3）。
+    //   - kAttackCooldown：攻击间隔（秒；机制等价 MC 僵尸 ~1s/击）；kAttackDamage：单次伤害 HP（MC 正常难度僵尸 4 = 2 心）。
     //   - kJumpSpeed：越障跳跃初速（blocks/s；同 player jump 8.4 → 峰值 ~1.25 格，刚好翻 1 格墙；复用重力 kGravity 拉回）。
     static constexpr float kDetectRange     = 16.0f; // 玩家侦测范围（blocks；XZ）
     static constexpr float kChaseMemory     = 6.0f;  // 脱离侦测后追踪记忆（秒）
     static constexpr float kChaseSpeed      = 2.8f;  // 追踪行走速度（blocks/s；慢于玩家走速、快于 wander）
     static constexpr float kAttackRange     = 1.6f;  // 近战攻击 XZ 距离（blocks；mob 中心到玩家脚位）
     static constexpr float kAttackVertRange = 2.0f;  // 攻击垂直容差（blocks；|mobY - playerFeetY|；防跨层）
-    static constexpr float kAttackCooldown  = 1.0f;  // 攻击间隔（秒）
-    static constexpr int   kAttackDamage    = 3;     // 单次攻击伤害（HP；MC 简单难度僵尸 3）
+    static constexpr float kAttackCooldown  = 1.0f;  // 单 mob 攻击间隔（秒）
+    static constexpr int   kAttackDamage    = 4;     // 单次攻击伤害（HP；MC 正常难度僵尸 4 = 2 心）
+    // t321 玩家受击全局节流（秒；详见 kPlayerHitThrottle 注释）。单 mob 冷却只防自己连抽，多 mob 围攻时各 mob
+    //   独立冷却叠加 → DPS 倍乘（4 只 × 4HP/s = 16HP/s ≈ 满血瞬死，玩家无反应窗口）。本节流在 EntityManager 全局
+    //   层串行化「玩家被命中」：任一 mob（近战 attack / 骷髅箭命中）经 mobAttackedPlayer 命中后置 m_playerHitCooldown
+    //   = kPlayerHitThrottle；其间其它 mob 攻击 / 命中不触发（机制等价「玩家受击无敌帧」+ 强制围攻 mob 轮替出手）。
+    //   单只 mob 不受影响（其 1s 冷却 > 0.5s 节流，节流总先归零）；多只围攻时受击频率上限 = 1/0.5 = 2 次/s（与只数无关）
+    //   → DPS 封顶 2×kAttackDamage = 8HP/s → 满血 10HP 至少 1.25s 反应窗口（走速 4.3 → 可移动 ~5 格脱离）。
+    static constexpr float kPlayerHitThrottle = 0.5f; // 玩家受击全局节流（秒；防多 mob 围攻秒杀）
     static constexpr float kJumpSpeed       = 8.4f;  // 越障跳跃初速（blocks/s；同 player jump，翻 1 格墙）
     // t283 骷髅弓箭手远程 AI 常量（spec「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」；机制对齐
     //   MC 1.0 骷髅射手：远距 + 抛物箭 + 保持距离 + 命中伤害；数值为本工程小世界量身调，非 MC 精确复刻 ——

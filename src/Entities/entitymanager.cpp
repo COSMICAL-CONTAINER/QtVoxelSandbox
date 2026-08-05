@@ -823,12 +823,16 @@ bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D
     }
     e.moveSpeed = moved ? chaseSpd : 0.0f; // 撞墙 → 腿停（moveSpeed=0），但仍在追踪，下帧重试 / 已跳（t298 含水中减速）
 
-    // (4) attack：XZ <= kAttackRange + 垂直同层（|dy|<=kAttackVertRange）+ 冷却到 → emit mobAttackedPlayer + 重置冷却。
-    //   垂直门控防跨层隔空打（玩家在 mob 头顶 / 脚下不命中）。emit 走语义信号，呈现层据 Survival 门控应用伤害。
+    // (4) attack：XZ <= kAttackRange + 垂直同层（|dy|<=kAttackVertRange）+ 单 mob 冷却到 + t321 全局节流到 →
+    //   emit mobAttackedPlayer + 重置两者。垂直门控防跨层隔空打（玩家在 mob 头顶 / 脚下不命中）。emit 走语义信号，
+    //   呈现层据 Survival 门控应用伤害。t321 节流门控防多 mob 围攻同帧齐抽（详见 kPlayerHitThrottle 注释）——
+    //   m_playerHitCooldown>0（其它 mob 刚命中过）→ 本次 attack 不触发（mob 视觉仍挥击但无伤害），等节流过。
     //   t296 击退方向 = (玩家 − mob) XZ 归一（把玩家推开 mob）；distXZ 极小（贴脸重合）→ 朝 mob 朝向兜底（yaw 约定
     //     dir=(-sin,-cos)），防零向量。dx/dz/distXZ 已在 (1) 前算好。
-    if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange && e.attackCooldown <= 0.0f) {
+    if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange
+        && e.attackCooldown <= 0.0f && m_playerHitCooldown <= 0.0f) {
         e.attackCooldown = kAttackCooldown;
+        m_playerHitCooldown = kPlayerHitThrottle; // t321 串行化玩家受击（围攻 mob 轮替出手）
         float kbX, kbZ;
         if (distXZ > 1e-3f) { kbX = dx / distXZ; kbZ = dz / distXZ; }
         else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); } // 兜底：朝 mob 面朝方向（= 推开）
@@ -1323,6 +1327,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     bool dirty = false;
     std::vector<int> toRemove; // FallingBlock 着地 / 跌出 + t239 mob deathTimer 到 / void-loss 索引（逆序 erase）
 
+    // t321 玩家受击全局节流倒计时（每帧扣一次，非每实体；防多 mob 围攻秒杀，详见 kPlayerHitThrottle 注释）。
+    if (m_playerHitCooldown > 0.0f) {
+        m_playerHitCooldown -= float(dt);
+        if (m_playerHitCooldown < 0.0f) m_playerHitCooldown = 0.0f;
+    }
+
     for (int idx = 0; idx < int(m_entities.size()); ++idx) {
         Entity &e = m_entities[size_t(idx)];
         if (!e.alive) continue; // t256：跳过已释放的空槽（slot-reuse 残留位；不参与物理 / AI）
@@ -1355,7 +1365,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   后半空中的箭仍戳到刚转无敌的玩家）。
             //   t304 玩家射出的箭（arrowFromPlayer=true）不判玩家命中 —— 玩家箭只打 mob（下方分支），不会误伤
             //   玩家自己（机制等价 MC 1.0 玩家箭不伤玩家）。
-            if (!remove && playerTargetable && !e.arrowFromPlayer) {
+            //   t321 全局节流门控：m_playerHitCooldown>0（玩家刚被任一 mob 命中，节流无敌帧内）→ 跳过玩家命中判定
+            //   （箭穿过玩家不触发伤害、不移除，继续飞行），与 aiHostile attack 节流一致 —— 防多弓手齐射秒杀玩家。
+            if (!remove && playerTargetable && !e.arrowFromPlayer && m_playerHitCooldown <= 0.0f) {
                 const float px = listener.x(), py = listener.y(), pz = listener.z();
                 const float ex = px - listenerHalfW - kArrowHitHalfW;
                 const float ey = py - kArrowHitHalfW;
@@ -1375,6 +1387,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         else { kbX = 1.0f; }
                     }
                     emit mobAttackedPlayer(kArrowDamage, int(MobBones), kbX, kbZ);
+                    m_playerHitCooldown = kPlayerHitThrottle; // t321 串行化玩家受击（多弓手轮替命中）
                     hitPlayer = true;
                     remove = true;
                 }
