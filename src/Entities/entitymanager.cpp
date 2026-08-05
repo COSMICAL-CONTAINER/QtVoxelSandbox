@@ -35,7 +35,10 @@ bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, f
     for (int y = y0; y <= y1; ++y)
         for (int z = z0; z <= z1; ++z)
             for (int x = x0; x <= x1; ++x)
-                if (world->isSolid(x, y, z)) return true;
+                // t333 水视穿透（同 t271 掉落物 / t220 水不挡沙）：World::isSolid 语义=「非 air」含 Water，
+                //   会把水当墙 → mob 横向进不了水 + 流水推力被水格自身撤回（t333 根因「怪水上走 + 不被推」）。
+                //   水非实体碰撞 → 排除后 mob 可入水游 / 被流水沿流推动，仍撞石头/泥土等真实体方块。
+                if (world->blockAt(x, y, z) != BlockRegistry::Water && world->isSolid(x, y, z)) return true;
     return false;
 }
 
@@ -1824,7 +1827,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         // 已落地：复探支撑格是否仍实体。失支撑 → 续落。
         if (e.resting) {
             const int supportY = mobFeetY - 1; // 实体底面下方那一格（= 支撑方块 cellY）
-            if (supportY >= 0 && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止
+            // t333 水视穿透：支撑格是水 → 不算实体支撑 → 续落入水（否则怪站在水面上把水当方块走上去）。
+            if (supportY >= 0
+                && world->blockAt(cx, supportY, cz) != BlockRegistry::Water
+                && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止
             e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
             dirty = true;
         }
@@ -1848,7 +1854,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         int mobSolidY = -1;
         for (int cy = mobTopCell; cy >= mobBotCell; --cy) {
             if (cy < 0) break; // 越界下方=空气（World 约定）→ 不视作地面，实体继续落
-            if (world->isSolid(cx, cy, cz)) { mobSolidY = cy; break; }
+            // t333 水视穿透：水格不计地面 → mob 穿水面入水（落水后转 mobInWater 浮/减速/流水推动分支，
+            //   同 t271 掉落物穿水）。否则水格被 isSolid 当地面 → mob 粘在水面当着地（怪水上走）。
+            if (world->blockAt(cx, cy, cz) != BlockRegistry::Water
+                && world->isSolid(cx, cy, cz)) { mobSolidY = cy; break; }
         }
 
         if (mobSolidY >= 0) {
