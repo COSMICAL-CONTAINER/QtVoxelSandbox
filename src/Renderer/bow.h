@@ -4,20 +4,25 @@
 #include <QtQuick3D/QQuick3DGeometry>
 #include <QtQml/qqml.h>
 
-// 弓 3D 几何（弓臂弧 + 弓弦 + 握把，体素化块组合，Triangles，pos-only）。
+// 弓 3D 几何（t330 重绘）：弓臂为清晰的 C 形弧（XY 平面内、薄 Z 厚度）+ 握把缠绳。
 //
-// 用途（t304 弓 + 箭）：与 PickaxeGeometry / SwordGeometry 对称的弓形 3D ——手持（第一 / 第三人称）+
-// 掉落实体三处统一消费。本类是**纯实心体素几何**（无贴图、无 alpha），配 PrincipledMaterial{NoLighting +
-// baseColor}（同 Pickaxe / Sword 已验证可见路径）→ 必为实色弓形、永不黑。形状机制对齐 MC 1.0 弓：垂直弓身
-// （弓臂在 XY 平面、 belly 朝 +Z / 弦在 -Z）+ 中央握把 + 后侧细弦。QML 据 toolType===Bow（BlockRegistry::Bow=7）
-// 选本几何；弓臂 / 弦共用 tier 色（与 ToolIcon 弓图标同色策略：整把 tier 着色，木弓褐）。
+// 旧版（t304）把弓臂弧放在 YZ 深度面（belly ±Z 仅 0.04→0.09 微凸）→ 从正面（相机沿 -Z 看）弧被
+// 完全压缩成一根直棍，配深色细弦 → 观感「两根棍」（粗棍=弓身、细棍=弦）；且弦摆在凸侧 -Z（错侧）。
+// t330 修正：弧改放 XY 面（正面可见的清晰 C 弯）+ 弦挪到凹侧（+X，连接两臂尖）+ 弦独立几何配白材质
+// （蜘蛛丝白，与弓身 tier 木色分离）。机制对齐 MC 1.0 弓：垂直 C 形弓身 + 凹侧白弦 + 中央握把。
 //
-// 顶点 144（6 盒 × 每盒 24）+ 索引 216（6 盒 × 36）。CCW 朝外。基准：握把中心 ≈ 原点（上 limb tip y≈+0.46、
-// 下 limb tip y≈-0.46、弦 z≈-0.04、belly z≈+0.12），消费点用 Model 的 position/scale/eulerRotation 摆位定向。
+// 两个几何类（共享本文件，同层同风格，复制 addBox / addOrientedBox 模式）：
+//   - BowGeometry       弓身（C 弧 + 握把），pos-only，QML 配 tier 木色 baseColor（与 Pickaxe/Sword 同路径）。
+//   - BowStringGeometry 弓弦（凹侧竖直线），pos-only，QML 配白色 baseColor（独立于 tier）。作为 BowGeometry
+//                       Model 的子节点消费（继承父变换）→ 一处摆位、两色分染。
+//
+// 顶点：弓身 10 盒 × 24 = 240；弓弦 1 盒 × 24 = 24。索引 36/盒。CCW 朝外。基准：握把中心 ≈ 原点
+// （上臂尖 y≈+0.45、下臂尖 y≈-0.45、凹侧弦 x≈+0.06、凸侧握把 x≈-0.10）。消费点用 Model 的
+// position/scale/eulerRotation 摆位定向（弓身平面 XY 正对相机 → 弧清晰可见）。
 //
 // 分层（PLAN §2）：本类属 Renderer（依赖 QtQuick3D），只产出几何。弓 tier / 名称在 ToolRegistry（Game 层）；
-// 本类不读 tier、不持贴图——着色由 QML 呈现层据 hotbarVM.toolTier 设 baseColor（与 sword 同模式）。
-// 依赖只向下。与 sword.h / pickaxe.h 同层同风格（复制 addBox 模式，仅改整体形状）。
+// 本类不读 tier、不持贴图——着色由 QML 呈现层据 hotbarVM.toolTier 设 baseColor（弓身）+ 硬编码白（弦）。
+// 依赖只向下。与 sword.h / pickaxe.h 同层同风格。
 class BowGeometry : public QQuick3DGeometry
 {
     Q_OBJECT
@@ -25,6 +30,18 @@ class BowGeometry : public QQuick3DGeometry
 
 public:
     explicit BowGeometry(QQuick3DObject *parent = nullptr);
+};
+
+// 弓弦几何（t330）：凹侧（+X）竖直细线，连接上下臂尖。独立几何 → QML 配白色 PrincipledMaterial
+// （蜘蛛丝白，与弓身 tier 木色分离；旧版整把同色致弦呈木色）。作为 BowGeometry Model 的子节点消费
+// （继承父 position/scale/eulerRotation → 与弓身精确同位）。pos-only，同 BowGeometry 写入顺序。
+class BowStringGeometry : public QQuick3DGeometry
+{
+    Q_OBJECT
+    QML_NAMED_ELEMENT(BowStringGeometry)
+
+public:
+    explicit BowStringGeometry(QQuick3DObject *parent = nullptr);
 };
 
 #endif // BOW_H

@@ -1349,23 +1349,30 @@ Window {
                                  : "#8a5a2e"
                     }
                 }
-                // t304 弓（type=Bow）：BowGeometry 弓形（弓臂弧 + 弦 + 握把），垂直前指持弓姿态。
-                //   拉弓动画由 viewModelHand 父 Node 的 bowPullTilt/bowPullZ 驱动（整手仰 + 后拉 → 视觉「拉弓」）；
-                //   弓本身不旋转（保持前指瞄准方向，机制等价 MC 第一人称拉弓弓身稳、手后拉）。
-                //   tier 着色（木弓褐 / 石弓灰 / 铁弓银白，与 ToolIcon 弓图标 + 第三人称 / 掉落物同策略）。
+                // t304/t330 弓（type=Bow）：BowGeometry C 形弓身（XY 面清晰 C 弯）+ 子节点 BowStringGeometry
+                //   白弦（凹侧）。弓身平面 XY 正对相机（local +Z→world +Z）→ 弧清晰可见（旧版弧在 YZ 深度面被
+                //   压成直棍，观感「两根棍」）。拉弓动画由 viewModelHand 父 Node 的 bowPullTilt/bowPullZ 驱动。
                 Model {
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 7
                     geometry: BowGeometry {}
                     position: Qt.vector3d(0.02, 0.04, -0.24)
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
-                    // BowGeometry 上下臂沿本地 +Y（已竖直）→ 不绕 X 转；绕 Y 转 180° 使 belly（+Z）朝前（瞄准方向）、
-                    // 弦朝玩家（视觉见弦侧，机制等价 MC 第一人称持弓见弓背 / 弦）。略仰 12° 表「持弓瞄准」。
-                    eulerRotation: Qt.vector3d(12, 180, 0)
+                    // rotY=0：弓身平面 XY 正对相机（旧版 180° 是为旧 YZ 弧翻 belly 朝前；新版弧在 XY 不需翻）。
+                    // 微仰 10° 表「持弓瞄准」。凸侧 -X（左）、凹侧 +X（右，弦所在）。
+                    eulerRotation: Qt.vector3d(10, 0, 0)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                  : "#8a5a2e"
+                    }
+                    // t330 白弦（蜘蛛丝白，独立于 tier）：子节点继承父 position/scale/eulerRotation → 与弓身同位。
+                    Model {
+                        geometry: BowStringGeometry {}
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#f5f5f5"
+                        }
                     }
                 }
                 // t329 剪刀（type=Shears）第一人称手持：剪刀无独立 3D 几何 → billboard ToolIcon 平图标
@@ -2242,7 +2249,7 @@ Window {
                             opacity: playerModel.bodyOpacity
                         }
                     }
-                    // t304 弓（type=Bow）第三人称手持：BowGeometry 弓形垂直手持（弓臂竖直、belly 朝前）。
+                    // t304/t330 弓第三人称手持：BowGeometry C 形弓身 + 子节点白弦。
                     //   拉弓动画由 player.bowDrawProgress 不在此分支驱动（第三人称手持静态；拉弓视觉主要在第一人称）。
                     Model {
                         visible: hotbarVM.isTool(player.selectedItem) && player.mode !== PlayerController.Spectator
@@ -2250,13 +2257,22 @@ Window {
                         geometry: BowGeometry {}
                         position: Qt.vector3d(0, -0.48, -0.18)
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
-                        eulerRotation: Qt.vector3d(-10, 200, -25)   // 弓竖直、belly 朝前（Y 180°+ 略偏）
+                        eulerRotation: Qt.vector3d(-10, 200, -25)   // 弓竖直、平面斜对相机（Y 180°+ 略偏）
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                      : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                      : "#8a5a2e"
                             opacity: playerModel.bodyOpacity
+                        }
+                        // t330 白弦（子节点继承父变换 + bodyOpacity 随身淡入淡出）。
+                        Model {
+                            geometry: BowStringGeometry {}
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColor: "#f5f5f5"
+                                opacity: playerModel.bodyOpacity
+                            }
                         }
                     }
                     // t329 剪刀（type=Shears）第三人称手持：billboard ToolIcon 平图标（同手持火把第三人称路径：
@@ -2653,7 +2669,7 @@ Window {
                             }
                         }
                     }
-                    // t304 弓掉落物（type=Bow）：BowGeometry 弓形，同 scale / 位置 / tier 配色（机制等价 MC 掉落弓）。
+                    // t304/t330 弓掉落物（type=Bow）：BowGeometry C 形弓身 + 子节点白弦，随 entRoot 绕 Y 自转。
                     Model {
                         visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 7
                         geometry: BowGeometry {}
@@ -2667,6 +2683,14 @@ Window {
                                 return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
+                            }
+                        }
+                        // t330 白弦（蜘蛛丝白；随天光变暗，同弓身 / 方块掉落物）。
+                        Model {
+                            geometry: BowStringGeometry {}
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColor: tintBySkyLight(245/255, 245/255, 245/255, worldClock.skyLight)
                             }
                         }
                     }
