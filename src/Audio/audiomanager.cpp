@@ -128,9 +128,9 @@ struct AudioManager::Data
     // 环境音运行态：是否在播（幂等 start/stop）+ 强度（0..1，由昼夜 skyLight 映射，夜间更静谧）。
     bool ambientPlaying = false;
     float ambientLevel = 1.0f;
-    // 环境音基础音量系数（t328：合成已峰值归一化到满刻度，故 base 提到 0.30 保明显可闻的背景风声，
-    //   仍低于前景 SFX；乘 m_volume 与 ambientLevel 得最终音量）。
-    static constexpr float kAmbientBaseVol = 0.30f;
+    // 环境音基础音量系数（t366：合成已改为柔和低频风、target_peak=0.7，base 压到 0.20 保「明显是背景」
+    //   而非淹没前景 SFX；旧 0.30 + 满刻度宽带 = 持续白噪掩盖一切，是 t366 白噪复发的根因之一）。
+    static constexpr float kAmbientBaseVol = 0.20f;
     // t223 水流声单件（长循环水流声；looping=true，startWaterFlow/stopWaterFlow 控开关，
     //   setWaterFlowLevel 据 PlayerController.flowSoundLevel 调强度）。近流动水启动、远离停止。
     //   t269：water_flow.wav 重合成潺潺流水声（旧版像海浪 → 改潺潺流水；build_sounds.py 三层混合 + 密集气泡）。

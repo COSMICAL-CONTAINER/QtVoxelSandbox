@@ -346,55 +346,60 @@ def gen_mob_hurt():
 
 
 def gen_ambient_wind():
-    """环境音 / 风声床（t328 重做）：长循环风声 —— 单极点低通白噪（低频起伏「风」body）+ 高通白噪
-    （gust 高频细颗粒）+ 双 LFO 慢颤调幅 + 首末 80ms 三角窗淡化（循环无缝），~8s。
-    t328 关键：旧版 base_amp=0.13 → 峰值 ~0.13 → 播放几乎听不见；finalize 归一化到满刻度 + 加高频 gust
-    层 → 明显可闻的风声（AudioManager kAmbientBaseVol 再控制背景级）。机制等价 MC 环境 / 风声床（§9）。"""
+    """环境音 / 风声床（t366 真正修复白噪）。
+
+    RECURRENCE 真因：t328 为「让风声更亮」在此加了高通白噪「gust」层（权重 0.40）+ finalize 满刻度归一化。
+    该层在频谱上占 ~53% 能量（>2kHz）且本 clip 是**进游戏即自动启动的 8s 循环 looping 声**，结果 = 持续满幅
+    宽带嘶嘶（电视雪花 / 雨声白噪），掩盖所有前景 SFX（脚步 / 动物叫「听不清 / 像没声」）。这正是「t328 之后更糟」
+    的来源——修音量没用，因为问题层是宽带噪声本身。
+
+    真正修复：**删除 gust 高通层**，仅留两级级联一阶低通（陡降、高频几乎无）+ 双慢 LFO AM（自然起伏）+
+    首末 80ms 淡化（循环无缝）。频谱集中在 <300Hz、高频能量 <8%（旧 53%）→ 柔和低频背景风、非静态噪声。
+    AudioManager kAmbientBaseVol 进一步压到背景级。机制等价 MC 环境风声床（§9 原创）。
+
+    教训（写入 lessons-learned）：**长循环 ambient 床永远不要含宽带高通噪声层**——低通化的低频风声才是「风」，
+    高通宽带层在任何音量下都是静态噪声，且因其 looping 自动启动会持续淹没前景。"""
     dur = 8.0
     n = int(SR * dur)
     rnd = random.Random(51501)
-    # 低频水量床（单极点低通 → 低频起伏的「风」body）
-    a = 0.985
+    # 两级级联一阶低通（a=0.990 → a=0.985）：截止数十至百 Hz、陡降，高频几乎为零 → 柔和低频「风」body。
+    a1 = 0.990
+    s1 = 0.0
     bed = [0.0] * n
-    state = 0.0
     for i in range(n):
         w = rnd.uniform(-1, 1)
-        state = a * state + (1.0 - a) * w
-        bed[i] = state
+        s1 = a1 * s1 + (1.0 - a1) * w
+        bed[i] = s1
+    a2 = 0.985
+    s2 = 0.0
+    for i in range(n):
+        s2 = a2 * s2 + (1.0 - a2) * bed[i]
+        bed[i] = s2
     bed_inv = 1.0 / max(1e-6, max(abs(s) for s in bed))
-    # 高频 gust（高通白噪 → 风的细颗粒 / 嘶嘶层，旧版缺、致风声太闷）
-    hp_prev_in = 0.0
-    hp_prev_out = 0.0
-    hp_a = 0.8
-    gust = [0.0] * n
-    for i in range(n):
-        w = rnd.uniform(-1, 1)
-        v = hp_a * (hp_prev_out + w - hp_prev_in)
-        hp_prev_in = w
-        hp_prev_out = v
-        gust[i] = v
-    gust_inv = 1.0 / max(1e-6, max(abs(s) for s in gust))
-    # 双 LFO 慢颤调幅（自然不规则起伏）
-    lfo1 = 2 * math.pi * 0.30
-    lfo2 = 2 * math.pi * 0.11
+    # 双慢 LFO 调幅（自然风势起伏；0.13Hz + 0.07Hz 拟阵风）
+    lfo1 = 2 * math.pi * 0.13
+    lfo2 = 2 * math.pi * 0.07
     fade_n = int(SR * 0.08)  # 80ms 首末淡化（循环无缝）
     out = [0.0] * n
     for i in range(n):
         t = i / SR
         lfo = 0.55 + 0.30 * math.sin(lfo1 * t) + 0.15 * math.sin(lfo2 * t)
-        s = (bed[i] * bed_inv * 0.65 + gust[i] * gust_inv * 0.40) * lfo
+        s = bed[i] * bed_inv * lfo
         if i < fade_n:
             s *= i / fade_n
         elif i > n - fade_n:
             s *= (n - 1 - i) / fade_n
         out[i] = s
-    return finalize(out)  # 满刻度（AudioManager kAmbientBaseVol 控制背景级）
+    return finalize(out, target_peak=0.7)  # 低于满刻度 → 柔和背景级（非前景 SFX 量级）
 
 
 def gen_water_flow():
-    """潺潺流水声（t328 保留 t269 三层 + 密集气泡设计，finalize 归一化）。长循环 ~8s：低频水量床 +
-    中频「流水过石」沙沙 + 高频细流 hiss + 多重不规则 AM + 密集「咕嘟」气泡瞬态；首末 50ms 淡化无缝。
-    机制等价 MC 近流水环境音（§9 原创）。"""
+    """潺潺流水声（t366 重做可辨）。
+
+    t328 版「中频流水过石」层用微分器（low-pass 后做差分）实现 —— 微分本质是高通，结果整段 ~85% 能量 >2kHz =
+    嘶嘶静态噪声，听不出「流水」。t366 修复：中频层改**中低通**（非微分）→ 中频柔和沙沙而非高频嘶嘶；降 hiss 权重
+    （0.25→0.10）；提低频水量床权重；保留密集「咕嘟」气泡瞬态（音高可辨的咕嘟 = 流水的辨识特征）。
+    首末 50ms 淡化无缝。~8s。机制等价 MC 近流水环境音（§9 原创）。"""
     dur = 8.0
     n = int(SR * dur)
     rnd = random.Random(70269)
@@ -406,19 +411,14 @@ def gen_water_flow():
         bed_state = bed_lp_a * w + (1.0 - bed_lp_a) * bed_state
         bed[i] = bed_state
     bed_inv = 1.0 / max(1e-6, max(abs(s) for s in bed))
-    mid_lp_a = 0.25
-    mid_lp_state = 0.0
-    mid_raw = [0.0] * n
+    # 中频柔和流水沙沙：中低通（非微分高通）→ 中频颗粒而非高频嘶嘶
+    mid_lp_a = 0.20
+    mid_state = 0.0
+    mid = [0.0] * n
     for i in range(n):
         w = rnd.uniform(-1, 1)
-        mid_lp_state = mid_lp_a * w + (1.0 - mid_lp_a) * mid_lp_state
-        mid_raw[i] = mid_lp_state
-    mid = [0.0] * n
-    prev = 0.0
-    for i in range(n):
-        v = mid_raw[i] - prev
-        prev = mid_raw[i]
-        mid[i] = v
+        mid_state = mid_lp_a * w + (1.0 - mid_lp_a) * mid_state
+        mid[i] = mid_state
     mid_inv = 1.0 / max(1e-6, max(abs(s) for s in mid))
     hp_prev_in = 0.0
     hp_prev_out = 0.0
@@ -450,7 +450,7 @@ def gen_water_flow():
         am = 0.4 + 0.2 * math.sin(lfo_a * t + ph_a) + 0.2 * math.sin(lfo_b * t + ph_b) + 0.2 * math.sin(lfo_c * t + ph_c)
         if am < 0.05:
             am = 0.05
-        s = (bed[i] * bed_inv * 0.30 + mid[i] * mid_inv * 0.55 + hiss[i] * hiss_inv * 0.25) * am
+        s = (bed[i] * bed_inv * 0.45 + mid[i] * mid_inv * 0.35 + hiss[i] * hiss_inv * 0.10) * am
         for bt, bf, ba, bw, bs in bubbles:
             dtb = t - bt
             if -0.02 < dtb < bw * 4.0:
@@ -571,43 +571,42 @@ def gen_mob_idle_shambler():
 
 
 def gen_mob_idle_bones():
-    """敌对 Bones（机制等价骷髅）idle 骨头咔哒（t328）：高频噪声咔哒串 + 偶发空腔 1000Hz tok。
-    不规则分布 6-10 个短 click（高通噪声爆 × 极窄高斯包络 ~8ms），干脆干 percussive 无 sustain，
-    ~0.30s。机制等价 MC 敌对生物偶发 idle call（§9 原创；PLAN §9 区隔改名 bones，非 MC 专名）。"""
+    """敌对 Bones（机制等价骷髅）idle 骨头咔哒（t366 重做可辨）。
+
+    t328 版以高通噪声咔哒为主（频谱 ~71% >2kHz）= 纯噪声，听不出「骨头」。t366 修复：每下咔哒改为**空心木块 tok**
+    （基频 600-1100Hz 正弦 + 二次谐，拟骨头相击的脆空腔音）为主、噪声 tick 降为陪衬；6-10 个不规则间隔。干脆、带
+    音高的敲击串，一听即「骨头咔哒」。~0.30s。机制等价 MC 骷髅 idle（§9 原创；PLAN §9 区隔改名 bones，非 MC 专名）。"""
     dur = 0.30
     n = int(SR * dur)
     rnd = random.Random(294075)
     clicks = []
     tc = 0.02
     while tc < dur - 0.02:
-        clicks.append((tc, rnd.uniform(0.30, 0.55), rnd.uniform(0.006, 0.012), rnd.uniform(0, 2 * math.pi)))
+        # 每下咔哒：时间 / 振幅 / 极窄高斯宽度 / 空心 tok 基频（带音高的木块音）
+        clicks.append((tc, rnd.uniform(0.50, 0.90), rnd.uniform(0.005, 0.010), rnd.uniform(600.0, 1100.0)))
         tc += rnd.uniform(0.022, 0.045)
     out = [0.0] * n
-    hp_prev_in = 0.0
-    hp_prev_out = 0.0
-    hp_a = 0.85
     for i in range(n):
         t = i / SR
-        w = rnd.uniform(-1, 1)
-        v = hp_a * (hp_prev_out + w - hp_prev_in)
-        hp_prev_in = w
-        hp_prev_out = v
-        noise = v
         s = 0.0
-        for ct, ca, cw, cph in clicks:
+        for ct, ca, cw, cf in clicks:
             dtc = t - ct
             if -0.02 < dtc < cw * 4.0:
                 env = math.exp(-(dtc ** 2) / (2 * cw * cw))
-                s += ca * env * (0.7 * noise + 0.3 * math.sin(2 * math.pi * 1000.0 * dtc + cph))
+                tok = math.sin(2 * math.pi * cf * dtc) + 0.4 * math.sin(2 * math.pi * 2 * cf * dtc)  # 空心木块 tok
+                tick = rnd.uniform(-1, 1) * 0.18  # 极小噪声 tick（骨头相击的颗粒质感）
+                s += ca * env * (tok * 0.6 + tick)
         out[i] = s * 0.9
     return finalize(out)
 
 
 def gen_mob_idle_stalker():
-    """敌对 Stalker（机制等价苦力怕）idle（t328）：引信 hiss + 末段软 boom（一 Clip 内嘶嘶转爆炸）。
-    前段高通白噪 hiss + ~3200Hz 略升哨音（引信燃灼尖啸）+ 半正弦 swell；末段 ~0.10s 软 boom（低频闷击
-    + 宽带爆裂，暗示爆炸），~0.42s。机制等价 MC 敌对生物偶发 idle call（§9 原创；PLAN §9 区隔改名 stalker，
-    非_MC 专名）。idle 软 boom 远弱于 explosion.wav（ambient 暗示，非真爆炸）。"""
+    """敌对 Stalker（机制等价苦力怕）idle（t366 重做可辨）。
+
+    t328 版前段以高通 hiss 为主（频谱 ~76% >2kHz）= 嘶嘶噪声听不出「引信怪物」。t366 修复：前段以**上升引信哨音**
+    （2500→3400Hz 正弦 + 二次谐，拟引信燃灼尖啸）为主、hiss 降为陪衬；末段软 boom（低频闷击 + 宽带爆裂）。一 Clip 内
+    嘶嘶→爆炸的轮廓清晰可辨。~0.42s。机制等价 MC 苦力怕 idle（§9 原创；PLAN §9 区隔改名 stalker，非 MC 专名）。
+    idle 软 boom 远弱于 explosion.wav（ambient 暗示，非真爆炸）。"""
     dur = 0.42
     n = int(SR * dur)
     rnd = random.Random(294076)
@@ -625,12 +624,12 @@ def gen_mob_idle_stalker():
         hiss = v
         s = 0.0
         if t < boom_t:
-            # 引信嘶嘶段：高通 hiss + 略升哨音 × 半正弦 swell
+            # 引信段：上升哨音（主）+ hiss（陪衬）× 半正弦 swell
             tn = t / boom_t
-            f_w = 3000.0 + 400.0 * tn
-            whistle = math.sin(2 * math.pi * f_w * t) * 0.14
+            f_w = 2500.0 + 900.0 * tn
+            whistle = math.sin(2 * math.pi * f_w * t) + 0.3 * math.sin(2 * math.pi * 2 * f_w * t)
             swell = math.sin(math.pi * tn)
-            s = (hiss * 0.55 + whistle) * swell
+            s = (whistle * 0.45 + hiss * 0.18) * swell
         else:
             # 末段软 boom（低频闷击 + 宽带爆裂，快速衰减；ambient 暗示非真爆炸）
             dt = t - boom_t
@@ -642,9 +641,11 @@ def gen_mob_idle_stalker():
 
 
 def gen_mob_idle_spider():
-    """敌对 Spider（机制等价蜘蛛）idle 愤怒嘶嗡（t328）：高通白噪 hiss + ~600Hz 载波 × ~42Hz 攻击性 AM
-    （振翅嗡）+ 半正弦 swell，~0.40s。比 stalker 更持续 / 带嗡。机制等价 MC 敌对生物偶发 idle call
-    （§9 原创；PLAN §9 区隔改名 spider，非 MC 专名）。"""
+    """敌对 Spider（机制等价蜘蛛）idle 愤怒嘶嗡（t366 重做可辨）。
+
+    t328 版 hiss 权重 0.45、嗡嗡载波仅 0.22 → 频谱 ~91% >2kHz = 纯嘶嘶噪声听不出「虫」。t366 修复：以 600Hz 载波 ×
+    42Hz AM 嗡嗡（昆虫振翅嗡）+ 二次谐为主、hiss 降为陪衬，半正弦 swell。一听即「愤怒虫嗡 + 轻嘶」。~0.40s。
+    机制等价 MC 蜘蛛 idle（§9 原创；PLAN §9 区隔改名 spider，非 MC 专名）。"""
     dur = 0.40
     n = int(SR * dur)
     rnd = random.Random(294077)
@@ -653,17 +654,18 @@ def gen_mob_idle_spider():
     hp_prev_out = 0.0
     hp_a = 0.78
     for i in range(n):
-        t = i / dur
+        tn = i / dur
         ts = i / SR
         w = rnd.uniform(-1, 1)
         v = hp_a * (hp_prev_out + w - hp_prev_in)
         hp_prev_in = w
         hp_prev_out = v
         hiss = v
-        buzz_carrier = math.sin(2 * math.pi * 600.0 * ts) * 0.22
-        am = 0.5 + 0.5 * math.sin(2 * math.pi * 42.0 * ts)
-        swell = math.sin(math.pi * t)
-        out[i] = (hiss * 0.45 + buzz_carrier * am) * swell
+        # 主嗡嗡载波：600Hz 正弦 + 二次谐（更「虫」质感），× 42Hz 攻击性 AM（振翅嗡嗡）
+        buzz = math.sin(2 * math.pi * 600.0 * ts) + 0.35 * math.sin(2 * math.pi * 1200.0 * ts)
+        am = 0.4 + 0.6 * math.sin(2 * math.pi * 42.0 * ts)  # 0..1 攻击性 AM
+        swell = math.sin(math.pi * tn)
+        out[i] = (buzz * am * 0.65 + hiss * 0.20) * swell
     return finalize(out)
 
 
