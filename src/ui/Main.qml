@@ -3322,8 +3322,8 @@ Window {
                         // t241 行走动画 + 吃草低头：walkPhase 驱动腿摆；headPitch 驱动头部俯仰（仅吃草周期内非零，
                         //   headPitchAt 据 eatTimer 返 sin(πp) 包络 → 低头→嚼→抬头；草丛在 C++ tick 内被消耗）。
                         // t300 剪羊毛态：shearedAt=false（未剪羊毛 / 已重新长毛）→ 显本毛茸贴图 Model；sheared=true
-                        //   时切到下方裸粉色 Model（互斥 visible，由 revision 触碰刷新）。机制等价 MC 1.0 剪羊毛后
-                        //   羊裸露粉色皮肤。
+                        //   时切到下方裸肤色 Model（互斥 visible，由 revision 触碰刷新）。机制等价 MC 1.0 剪羊毛后
+                        //   羊裸露皮肤。
                         visible: {
                             entityManager.revision
                             return entKind === EntityManager.Mob && entMobType === 3
@@ -3380,9 +3380,10 @@ Window {
                     }
                     Model {
                         // t300 羊（mobType 3）裸态：剪羊毛后（shearedAt=true）的羊外观。复用 MobModel 几何（同
-                        //   毛茸态四肢 + 头 + 躯干），但去贴图改裸粉肤色 #e8b8b8（机制等价 MC 1.0 剪羊毛后羊裸露
-                        //   粉色皮肤；无 mob_sheep 毛茸贴图 → 直接 baseColor 实色渲染，受 terrainLight 调制保昼夜
-                        //   明暗 + hurtFlash 红闪仍生效）。与上方毛茸态 Model 互斥 visible（shearedAt 翻转 → 切换）。
+                        //   毛茸态四肢 + 头 + 躯干），但去贴图改裸肤色 #d6b890（机制等价 MC 1.0 剪羊毛后羊裸露
+                        //   皮肤；t363 改肤色而非纯粉：贴近玩家手肤 + 略带残白羊毛，无 mob_sheep 毛茸贴图 → 直接
+                        //   baseColor 实色渲染，受 terrainLight 调制保昼夜明暗 + hurtFlash 红闪仍生效）。与上方毛茸态
+                        //   Model 互斥 visible（shearedAt 翻转 → 切换）。
                         //   walkPhase / headPitch 同步绑定 → 裸羊照常行走 + 吃草低头动画。
                         //   重长毛（C++ tick 内吃草方块 → sheared=false）→ 上方毛茸 Model 显、本 Model 隐。
                         visible: {
@@ -3399,8 +3400,10 @@ Window {
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            // 受击红闪覆盖裸粉色（同毛茸态红闪语义）；否则裸粉肤色 × terrainLight 调昼夜明暗。
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#e8b8b8" }
+                            // 受击红闪覆盖肤色（同毛茸态红闪语义）；否则肤色 × terrainLight 调昼夜明暗。
+                            // t363 baseColor=肤色 #d6b890（玩家手肤 0.792/0.643/0.447=#caa472 略向白偏，留少量残白羊毛感，
+                            //   非猪粉 #e8b8b8）：剪羊毛后裸露的是肤色调而非纯粉，贴近玩家手肤、带一丝残白。
+                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#d6b890" }
                             // 无 baseColorMap → PrincipaledMaterial 走纯 baseColor 实色路径（默认即无贴图）。
                         }
                         // 裸态眼同步（同毛茸态颈枢 Node 结构；复用 headPitchAt 绑头俯仰）。
