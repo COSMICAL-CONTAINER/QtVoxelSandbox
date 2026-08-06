@@ -44,4 +44,18 @@ public:
     explicit BowStringGeometry(QQuick3DObject *parent = nullptr);
 };
 
+// 搭箭几何（t368）：拉弓时显于弓弦上的箭（nocks 贴弦中点）。箭尾（nocks）= 局部原点 (0,0,0)、
+//   箭身沿 -X（朝准星 / 弓凹侧反向）：细木身 + 阔头镞（-X 端两段阶梯收尖）+ 尾羽（近 nocks 处 ±Y 加宽薄片）。
+//   pos-only（同 BowGeometry / BowStringGeometry），单材质单色（QML 配 baseColor；身/镞/羽同色，靠几何造型辨识）。
+//   作弓 Model 子节点消费（继承父变换）→ 一处摆位。机制等价 MC 1.0 拉弓搭箭（弦上横箭、镞朝前）。
+//   顶点：4 盒 × 24 = 96；索引 36/盒。CCW 朝外。基准：nocks (0,0,0)、镞尖 (-0.27,0,0)。
+class BowArrowGeometry : public QQuick3DGeometry
+{
+    Q_OBJECT
+    QML_NAMED_ELEMENT(BowArrowGeometry)
+
+public:
+    explicit BowArrowGeometry(QQuick3DObject *parent = nullptr);
+};
+
 #endif // BOW_H

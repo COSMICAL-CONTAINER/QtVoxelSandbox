@@ -145,3 +145,33 @@ BowStringGeometry::BowStringGeometry(QQuick3DObject *parent) : QQuick3DGeometry(
                  0, QQuick3DGeometry::Attribute::U32Type);
     update();
 }
+
+BowArrowGeometry::BowArrowGeometry(QQuick3DObject *parent) : QQuick3DGeometry(parent)
+{
+    // 搭箭（nocks at 原点、沿 -X）：4 盒拼成辨识箭形——细木身 + 阔头镞（-X 端两段阶梯收尖）+ 尾羽
+    //   （近 nocks 处 ±Y 加宽的薄片，正面 ±Z 视见竖向羽叶）。Z 半厚 0.012 < 弓身 0.02 → 箭贴弓面薄板内、
+    //   正面恒清晰。消费点：QML 把本几何 nocks（局部原点）摆到弦中点 (0.06,0,0) → 箭尾贴弦。
+    //   机制等价 MC 1.0 拉弓搭箭（弦上横箭、镞朝前）。
+    std::vector<BowVtx> verts;
+    std::vector<quint32> idx;
+    verts.reserve(4 * 24);
+    idx.reserve(4 * 36);
+    constexpr float kZ = 0.012f;                 // Z 半厚（薄板，贴弓面；< 弓身 0.02）
+    addBox(-0.10f,  0.0f, 0.0f, 0.10f,  0.011f, kZ, verts, idx); // 木身：x 0.0..-0.20（nocks 在 +X 端 0.0）
+    addBox(-0.215f, 0.0f, 0.0f, 0.025f, 0.024f, kZ, verts, idx); // 镞基（阔头）：x -0.19..-0.24、±Y 0.024
+    addBox(-0.255f, 0.0f, 0.0f, 0.018f, 0.013f, kZ, verts, idx); // 镞尖（收尖）：x -0.237..-0.273
+    addBox(-0.035f, 0.0f, 0.0f, 0.022f, 0.034f, kZ, verts, idx); // 尾羽：x -0.013..-0.057、±Y 0.034（竖向羽叶）
+
+    clear();
+    setVertexData(QByteArray(reinterpret_cast<const char *>(verts.data()), int(verts.size() * sizeof(BowVtx))));
+    setIndexData(QByteArray(reinterpret_cast<const char *>(idx.data()), int(idx.size() * sizeof(quint32))));
+    setStride(int(sizeof(BowVtx)));
+    setBounds(QVector3D(-0.28f, -0.04f, -0.015f), QVector3D(0.01f, 0.04f, 0.015f)); // 局部 AABB（略放宽防误剔）
+    setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);
+
+    addAttribute(QQuick3DGeometry::Attribute::PositionSemantic,
+                 int(offsetof(BowVtx, x)), QQuick3DGeometry::Attribute::F32Type);
+    addAttribute(QQuick3DGeometry::Attribute::IndexSemantic,
+                 0, QQuick3DGeometry::Attribute::U32Type);
+    update();
+}

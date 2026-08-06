@@ -1607,12 +1607,28 @@ Window {
                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                  : "#8a5a2e"
                     }
-                    // t330 白弦（蜘蛛丝白，独立于 tier）：子节点继承父 position/scale/eulerRotation → 与弓身同位。
-                    Model {
-                        geometry: BowStringGeometry {}
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: "#f5f5f5"
+                    // t330 白弦 + t368 搭箭（nocked arrow）：弦与箭同处一 Node，沿 -X 随 drawAmount 后拉
+                    //   （player.bowDrawProgress 0..1）→ 弦中点 (0.06,0,0) 与箭尾（nocks）恒同位，免脱弦。
+                    //   箭仅拉弓时可见（player.bowDrawing）；箭身沿 -X（朝准星方向）。机制等价 MC 1.0 拉弓搭箭。
+                    Node {
+                        position: Qt.vector3d(player.bowDrawing ? -player.bowDrawProgress * 0.05 : 0.0, 0.0, 0.0)
+                        // 白弦（蜘蛛丝白，独立于 tier）：继承父 position/scale/eulerRotation → 与弓身同位。
+                        Model {
+                            geometry: BowStringGeometry {}
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColor: "#f5f5f5"
+                            }
+                        }
+                        // 搭箭（t368）：BowArrowGeometry 局部原点=箭尾，摆到弦中点 (0.06,0,0) → 箭尾贴弦。
+                        Model {
+                            visible: player.bowDrawing
+                            geometry: BowArrowGeometry {}
+                            position: Qt.vector3d(0.06, 0.0, 0.0)
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColor: "#9c8050"   // 中褐木色（独立于 tier；与深木弓身 #8a5a2e 分离、辨识）
+                            }
                         }
                     }
                 }
