@@ -1617,7 +1617,10 @@ void World::placeUndergroundWaterPools()
 //   → carve 一个**下凹**浅水盘：disc 内清除 surfaceY..localH 的方块（开顶 → 湖露天），surfaceY-1/surfaceY-2 两层置水源。
 //   湖岸（外圈 ≥ surfaceY）在水面（surfaceY-1）处为实体土 → 湖水水平邻居无 air → 不溢漏 / 不蔓延（稳态）；湖面低于
 //   周围地表 1 格 + 开顶 → 部分露出（肉眼可见）。相比「整片严格等高」更易达成（局部低洼比大块平坦常见得多）。
-//   仅 plains/forest；避开沙滩 / 水下 / 海平面附近（湖独立于海）。经 m_chunks.setBlock 直写。
+//   t340 形态丰富化：(a) 湖岸改用 fbm 调制每格有效半径 → 弯曲湖岸 / 半岛（非正圆 / 非垂直圆柱）；(b) 约 half 湖
+//   （per-lake hash 位）在湖床之下藏一个空心穹顶气室（保留 1 层石顶 → 水源不漏；穹顶被 stone 封闭 → 稳定 air 气室），
+//   形成「地表浅湖 + 下伏空腔」与「纯地表浅湖」两种形态混排。仅 plains/forest；避开沙滩 / 水下 / 海平面附近（湖独立
+//   于海）。经 m_chunks.setBlock 直写；fbm / hashColumn 纯函数 → 同 seed 同湖形（PLAN §2-K）。
 void World::placeSurfaceLakes()
 {
     constexpr int kLakeGrid     = 18;      // 候选网格间距
@@ -1625,6 +1628,7 @@ void World::placeSurfaceLakes()
     constexpr int kLakeDepth    = 2;       // 湖深（水源层数：surfaceY-1 .. surfaceY-2）
 
     int placed = 0;
+    int caverns = 0; // t340：湖下空心穹顶气室计数（形态混排核对）
     const int lakeSeed = m_seed + 7309; // 湖泊哈希偏移（与其它 worldgen hashColumn 解耦）
     for (int bx = kLakeGrid / 2; bx < m_width; bx += kLakeGrid) {
         for (int bz = kLakeGrid / 2; bz < m_depth; bz += kLakeGrid) {
@@ -1635,6 +1639,7 @@ void World::placeSurfaceLakes()
             const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
             const int x = bx + jx, z = bz + jz;
             const int rad = 2 + int((r >> 9) & 1u); // 半径 2..3
+            const bool wantCavern = (r >> 17) & 1u;  // t340：约半数湖下藏空心穹顶气室（形态混排：地表浅湖 / 湖+下伏空腔）
             // 留 rad+1 边界（局部低洼判定扫 disc + 湖岸外圈，须全在界内）。
             if (x - (rad + 1) < 0 || z - (rad + 1) < 0
                 || x + (rad + 1) >= m_width || z + (rad + 1) >= m_depth) continue;
@@ -1665,13 +1670,18 @@ void World::placeSurfaceLakes()
             }
             if (!ok) continue;
 
-            // carve 下凹浅水盘。水面 = surfaceY-1（低于周围地表 1 格 → 露天可见的凹陷湖）。
+            // carve 下凹浅水盘（t340：不规则湖岸 + 部分湖下藏空心穹顶）。水面 = surfaceY-1（低于周围地表 1 格 → 露天可见的凹陷湖）。
             const int waterSurface = surfaceY - 1;
-            const int rad2 = rad * rad;
             for (int dx = -rad; dx <= rad; ++dx) {
                 for (int dz = -rad; dz <= rad; ++dz) {
-                    if (dx * dx + dz * dz > rad2) continue; // 圆盘
                     const int px = x + dx, pz = z + dz;
+                    // t340 不规则湖岸：fbm（世界坐标采样 → 确定性、与地形 fbm 解耦）调制每格有效半径（rad ± ~0.9）
+                    //   → 弯曲湖岸 / 半岛，非正圆。被剔除的 disc 格保留为草地半岛：其 heightAt ≥ surfaceY-1（局部低洼
+                    //   判定保证）→ 在水面 surfaceY-1 处为实体 → 水平邻居无 air → 不溢漏（稳态）。loop 格全在
+                    //   chebyshev ≤ rad（≤ 测试区 rad+1）→ 不越低洼判定范围。
+                    const double shore = fbm((px + m_seed) * 0.33 + 31.7, (pz + m_seed) * 0.33 + 19.3); // [-1,1]
+                    const double effR = double(rad) + 0.9 * shore;
+                    if (double(dx * dx + dz * dz) > effR * effR) continue; // 半岛 / 湖岸外（保留为草地）
                     const int localH = std::min(heightAt(px, pz), m_height - 1);
                     // 开顶：清除 surfaceY..localH 的方块（移除草地「盖」→ 湖露天；localH<surfaceY 时此循环不执行，该列本就低）。
                     for (int y = surfaceY; y <= localH; ++y) {
@@ -1689,10 +1699,40 @@ void World::placeSurfaceLakes()
                     }
                 }
             }
+
+            // t340 形态混排：约半数湖在湖床之下藏一个空心穹顶气室（spec「surface 湖 + 下伏 hollow 穹顶」）。
+            //   水源不能直接悬于 air 之上（tickWaterFlow 下落 pass 会把水泄入下方 air → 淹没气室），故保留
+            //   surfaceY-3 一层石顶：其上水源（surfaceY-2）落在实体上不漏；穹顶 air 自 surfaceY-4 起。穹顶被
+            //   周围 stone 包围（水平内缩 rad-1 → ≥1 石壁；垂直不触基岩）→ 封闭气室，tickWaterFlow 不动 air → 稳态。
+            //   穹顶 = 自顶向下逐层半径递减的圆盘（顶层最宽、底层收尖）→ 穹形 / 拱顶，非垂直竖井。
+            if (wantCavern) {
+                constexpr int kBedrockTop = 4; // 不动基岩（同 carveCaves / placeUndergroundWaterPools）
+                const int ceilY = surfaceY - 3;       // 石顶（保留实体；其上 surfaceY-2 水源落于此）
+                const int rxR = rad - 1;              // 水平最大半径（≥1；内缩 → 留 ≥1 石壁）
+                const int domeH = rxR + 1;            // 穹顶高度（顶层最宽、逐层 -1 → 穹形）
+                const int bottomY = ceilY - domeH;    // 穹顶最低 air 层的下一格（须高于基岩层）
+                if (rxR >= 1 && bottomY >= kBedrockTop + 1) {
+                    for (int ly = 0; ly < domeH; ++ly) {
+                        const int yy = ceilY - 1 - ly; // 自石顶下第一格起向下挖 air（surfaceY-4, surfaceY-5, ...）
+                        const int lr = rxR - ly;       // 顶层 lr=rxR，逐层 -1 → 收尖穹顶
+                        if (lr < 0) break;
+                        const int lr2 = lr * lr;
+                        for (int dx = -lr; dx <= lr; ++dx) {
+                            for (int dz = -lr; dz <= lr; ++dz) {
+                                if (dx * dx + dz * dz > lr2) continue; // 圆盘
+                                const quint8 b = m_chunks.blockAt(x + dx, yy, z + dz);
+                                if (b == BlockRegistry::Bedrock || b == BlockRegistry::Water) continue; // 不动基岩 / 水
+                                m_chunks.setBlock(x + dx, yy, z + dz, BlockRegistry::Air);
+                            }
+                        }
+                    }
+                    ++caverns;
+                }
+            }
             ++placed;
         }
     }
-    qInfo() << "worldgen: surface lakes =" << placed; // 同 seed → 同计数（确定性核对）
+    qInfo() << "worldgen: surface lakes =" << placed << "(with cavern" << caverns << ")"; // 同 seed → 同计数（确定性核对）
 }
 
 // t151 真光场 BFS flood-fill（PLAN §2-H「方块光独立 flood-fill、时间不变」+ §M）。

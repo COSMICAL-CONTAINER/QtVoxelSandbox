@@ -304,9 +304,11 @@ private:
     //   （hashColumn）→ 同 seed 同水池分布（PLAN §2-K）。
     void placeUndergroundWaterPools();
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
-    //   确定性散布小型浅水湖——在严格平坦（disc + 湖岸外圈 heightAt 全等）的草地 carve 一个浅水盘（surfaceY /
-    //   surfaceY-1 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶，肉眼可见）。
-    //   仅 plains/forest，避开沙滩 / 水下 / 海平面附近（湖独立于海）。纯函数于 seed（hashColumn）→ 同 seed
+    //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
+    //   （surfaceY-1 / surfaceY-2 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶 -1，
+    //   肉眼可见）。t340：(a) fbm 调制每格有效半径 → 弯曲湖岸 / 半岛（非正圆）；(b) 约 half 湖在湖床之下藏空心穹顶
+    //   气室（1 层石顶托水源 + stone 封闭 → 稳定 air 气室），「地表浅湖」与「地表浅湖 + 下伏空腔」两形态混排。
+    //   仅 plains/forest，避开沙滩 / 水下 / 海平面附近（湖独立于海）。纯函数于 seed（hashColumn / fbm）→ 同 seed
     //   同湖泊分布（PLAN §2-K）。
     void placeSurfaceLakes();
     // t151 真光场**全量**重算（PLAN §2-H / §M）：per-voxel BFS flood-fill 天光（自顶，sky=15）+ 火把方块光
