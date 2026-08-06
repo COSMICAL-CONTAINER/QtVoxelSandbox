@@ -612,6 +612,22 @@ Window {
         chatInput.text = ""
         closeChat(true)
     }
+    // t346 `/give` 参数提示文案（spec t346）：据当前输入文本返回下一个待输入参数的提示串（MC 风格 inline hint，
+    //   由下方 giveHint Text 行显示）。参数序：id → 数量 → 耐久。光标在 token 中途 → 期望当前 token；已敲尾空格
+    //   → 期望下一 token（等价 MC 命令补全按空格推进）。仅 `/give` 精确前缀触发（同 sendChat 路由，避免 /givex
+    //   误触）；非 /give 输入返空串（提示行隐藏）。纯呈现逻辑，零 Game/World 依赖。
+    function giveHintText(t) {
+        if (t !== "/give" && !t.startsWith("/give ")) return ""
+        const rest = t.slice(5)                              // "/give" 之后剩余（"" / " 3" / " 3 64" ...）
+        const endsWithSpace = rest.endsWith(" ")
+        const trimmed = rest.trim()
+        const n = trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length
+        // 特例 t==="/give"（无尾空格）→ 还没开始首参，期望 idx=0；否则尾空格 → 新 token 期望 idx=n，中途 → idx=n-1。
+        let idx = (t === "/give") ? 0 : (endsWithSpace ? n : n - 1)
+        const names = ["id（方块/工具/材料 id）", "数量（缺省 1）", "耐久（仅工具，缺省满耐久）"]
+        if (idx < 0 || idx >= names.length) return ""
+        return "下一个参数: " + names[idx]
+    }
     // t312 系统播报入口（死亡消息 / 未来事件如 join/leave）：sender=系统来源名（玩家消息填玩家名、
     //   系统消息填 "" 由 delegate 隐藏「名:」前缀直接显文本）；isSystem=true 走灰红色（区别玩家白）。
     //   死亡播报由 onDied 路由调本函数（playerState.deathCauseText 给文案）。
@@ -4698,6 +4714,22 @@ Window {
                 }
             }
         }
+    }
+
+    // t346 `/give` 参数提示行（仅 chatOpen 且输入为 /give 命令时显）：位于输入栏正下方，灰黄小字 + 黑描边。
+    //   纯呈现（PLAN §2 UI 层），文案由 giveHintText 依 chatInput.text 实时算（binding 随键入自动刷新）。
+    Text {
+        visible: window.appState === "playing" && window.chatOpen
+                 && giveHintText(chatInput.text).length > 0
+        anchors.left: chatInputBar.left
+        anchors.leftMargin: 14
+        anchors.top: chatInputBar.bottom
+        anchors.topMargin: 3
+        text: giveHintText(chatInput.text)
+        color: "#e0d060"
+        font.pixelSize: 12
+        style: Text.Outline
+        styleColor: "#000000"
     }
 
     // 准星（仅 playing 且捕获时）：中心十字，白色核心 + 黑色描边 → 亮/暗背景均可见。

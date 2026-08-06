@@ -843,9 +843,18 @@ QString Hotbar::give(const QString &args)
     const int remaining = addStack(id, count, durability);
     const int actual = count - remaining;
     if (actual <= 0) {
-        return QStringLiteral("给予 %1 ×%2 失败：背包已满").arg(name).arg(count);
+        return QStringLiteral("给予玩家 %1 ×%2 失败：背包已满").arg(name).arg(count);
     }
-    QString msg = QStringLiteral("给予 %1 ×%2").arg(name).arg(actual);
+    // t346 输出文案：成功「给予玩家 <名> ×<n>」；显式耐久（第三段已给）+ 工具 → 耐久变体「给予玩家耐久为
+    //   <dur> 的 <名> ×<n>」。<dur> = normalizeDurability clamp 后实际写入值；非工具显式耐久 inert（归 0）
+    //   → 不显耐久变体（避免「耐久为 0」误导）。
+    QString msg;
+    if (durability > 0 && isTool(id)) {
+        msg = QStringLiteral("给予玩家耐久为 %1 的 %2 ×%3")
+                  .arg(normalizeDurability(id, durability)).arg(name).arg(actual);
+    } else {
+        msg = QStringLiteral("给予玩家 %1 ×%2").arg(name).arg(actual);
+    }
     if (remaining > 0) msg += QStringLiteral("（背包已满，弃 %1）").arg(remaining);
     return msg;
 }
