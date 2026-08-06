@@ -564,7 +564,7 @@ private:
     //   其顶上」的可着陆面，忽略沙等 bury 块；默认 +inf=取全部，旧行为）。outHasMax=true 当至少有一个
     //   合格 bmax 计入（区分「有碰撞但无可着陆面=纯 bury」与「有可着陆面」）；默认 nullptr 兼容旧调用。
     //   t352 修（对称 maxSurfCap）：minSurfFloor 仅把 bmin>=floor 的块底计入 minSurf（向上顶头用 floor=
-    //   pyBefore+m_height → 只取「玩家原头顶之上」的真天花板，忽略半砖阶 / 楼梯背墙 / 活版门唇边 / 栅栏柱
+    //   pyBefore+m_height → 只取「玩家原头顶之上」的真天花板，忽略半砖阶 / 楼梯背墙 / 开活板门整高板 / 栅栏柱
     //   等身体 / 脚位的 partial 块；默认 -inf=取全部，旧行为）。outHasMin=true 当至少有一个合格 bmin 计入
     //   （区分「有碰撞但无真天花板=身体级 partial 重叠」与「有真天花板」）；默认 nullptr 兼容旧调用。
     bool overlapSubAABBs(int axis, float *outMinSurf, float *outMaxSurf,

@@ -2314,7 +2314,7 @@ void PlayerController::moveAxis(int axis, float amount)
     //   所有重叠块 MAX（=沙顶 11）会让 snap 无效、地面托举（顶 10）随之失效，每 tick 重力再下沉穿地坠虚空。
     //   其他方向（X/Z）cap=+inf = 取全部（旧行为）。
     // t352 修（对称 maxSurfCap）：向上（axis==1, amount>0）顶头只取块底 bmin ≥ 玩家移动前头顶 pyBefore+m_height
-    //   的块（真天花板），忽略半砖阶 / 楼梯背墙 / 活版门唇边 / 栅栏柱等「身体 / 脚位」partial 块（它们的 bmin
+    //   的块（真天花板），忽略半砖阶 / 楼梯背墙 / 开活板门整高板 / 栅栏柱等「身体 / 脚位」partial 块（它们的 bmin
     //   在玩家头顶之下）→ minSurfFloor=pyBefore+m_height-eps 过滤。否则 overlapSubAABBs 取所有重叠块 MIN（=脚位
     //   partial 块底）会让 snap 把玩家猛拽到 minSurf-m_height（向下穿格）并清零 m_vel.y，吃掉合法跳跃冲量
     //   （t317 复发根因：跳跃上升期 footprint 偶发重叠身体级 partial 块 → 被当假天花板 → 速度清零 → 只跳半格卡死）。
