@@ -261,8 +261,8 @@ void MobModel::rebuild()
 {
     std::vector<MobVtx> verts;
     std::vector<quint32> idx;
-    verts.reserve(10 * 24); // 至多 Spider 躯干+头+8腿 = 10 盒；其余 mob ≤8 盒（猪/牛/羊/Shambler/Bones/Stalker）
-    idx.reserve(10 * 36);
+    verts.reserve(16 * 24); // 至多 Bones 镂空骨架 = 14 盒（脊柱+胸骨+8 肋+头+左臂+2 腿）；Spider = 10；其余 ≤8
+    idx.reserve(16 * 36);
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
 
     if (m_mobType == 4) {
@@ -289,7 +289,18 @@ void MobModel::rebuild()
         // t301 比例（vs Shambler 同位的 0.22 / 0.22³ / 0.10 / 0.11）：窄躯干（halfX 0.14 vs 0.22）+ 小头骨
         //   （0.16×0.18×0.16 略竖 vs 0.22³）+ 细骨杆四肢（臂 0.05 vs 0.10、腿 0.06 vs 0.11）→ 「皮包骨」骷髅观感，
         //   明显区别于 Shambler 厚实人形。眼窝由 Main.qml delegate 补（黑色空洞，区别 Shambler 赤红亡灵眼）。
-        addBox( 0.00f,  0.05f,  0.00f, 0.14f, 0.30f, 0.10f, verts, idx, bMin, bMax); // 窄躯干（瘦骨）
+        // t370 镂空骨架重构：原 t301「窄躯干实体盒」远观像白棍 → 改为「脊柱 + 胸骨 + 多对肋骨（带间隙）」，
+        //   远观读作骷髅（肋缝 / 脊柱透出），非实体白块。四肢仍细骨杆、头骨比例 / 挂点不变（t301）→
+        //   Main.qml 肩枢 (0.20,0.28,-0.12) 与眼窝仍对齐。躯干本地范围同原（y∈[-0.25,0.35]、x∈[-0.14,0.14]、
+        //   z∈[-0.10,0.10]）。机制等价 MC 1.0 骷髅镂空骨架观感（§9 区隔）。
+        addBox( 0.00f,  0.05f,  0.04f, 0.035f, 0.28f, 0.035f, verts, idx, bMin, bMax); // 脊柱（垂直主干，略靠背；肋缝透出）
+        addBox( 0.00f,  0.12f, -0.10f, 0.030f, 0.16f, 0.020f, verts, idx, bMin, bMax); // 胸骨（前中竖骨；肋前端汇集）
+        //   肋骨：4 对（左/右各 4 根）沿胸高分布，每根横置细骨杆（半 X 大、半 Y 薄），邻肋 y 间隙 ~0.04
+        //     → 远观「栅栏状」肋笼（缝隙 = 镂空，区别实体盒；左右肋中央留缝让脊柱 / 胸骨透出）。
+        for (float ribY : { 0.25f, 0.18f, 0.11f, 0.04f }) {
+            addBox(-0.07f, ribY, -0.03f, 0.05f, 0.016f, 0.06f, verts, idx, bMin, bMax); // 左肋
+            addBox( 0.07f, ribY, -0.03f, 0.05f, 0.016f, 0.06f, verts, idx, bMin, bMax); // 右肋
+        }
         addBox( 0.00f,  0.57f,  0.00f, 0.16f, 0.18f, 0.16f, verts, idx, bMin, bMax); // 小头骨（略竖，比 Shambler 头小一圈）
         addBox(-0.20f,  0.23f, -0.37f, 0.05f, 0.05f, 0.25f, verts, idx, bMin, bMax); // 左臂（细骨杆前伸）
         // 右臂 + 弓见上 t331 注释（移至 Main.qml 肩枢 Node：木色弓 + 抬臂/拉弓动画）。左臂无动画仍在此。
