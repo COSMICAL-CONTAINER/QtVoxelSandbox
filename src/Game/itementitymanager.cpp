@@ -39,10 +39,34 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count)
         }
     }
     acquireSlot(ItemEntity{QVector3D(x + 0.5f, y + 0.5f, z + 0.5f), itemId, count, m_clock.elapsed()}); // t256 slot 复用
-    ++m_revision;
-    emit entitiesChanged();
+    notifyChanged(); // t354：经批量收口（批内不 emit，endBatch 末尾 1 次 emit）
     qCInfo(lcItem) << "spawned item entity id=" << itemId << "count=" << count << "at" << x << y << z
                    << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+}
+
+// t354 批量 emit 收口实现（见 .h beginBatch / notifyChanged 注释）。
+void ItemEntityManager::notifyChanged()
+{
+    ++m_revision;
+    if (m_batchDepth <= 0) {
+        emit entitiesChanged(); // 非批（常态）：立即通知，行为同旧
+    } else {
+        m_batchDirty = true; // 批内：仅标 dirty，由 endBatch 末尾 1 次 emit 收口
+    }
+}
+
+// t354 进入批量：depth++（可嵌套；非爆炸的常规 spawn 不经批 → depth 恒 0）。
+void ItemEntityManager::beginBatch() { ++m_batchDepth; }
+
+// t354 退出批量：depth 归 0 且批内有 dirty → 1 次 emit 收口；未 begin / 无 dirty → no-op（防御水中爆炸无掉落
+//   → onExplosionDroppedItem 未发 → 无 begin，onExplosion 仍调 endBatch 的情形）。
+void ItemEntityManager::endBatch()
+{
+    if (m_batchDepth <= 0) return;
+    if (--m_batchDepth == 0 && m_batchDirty) {
+        m_batchDirty = false;
+        emit entitiesChanged(); // 1 次 emit 收口 N 个累积变更（修爆炸 O(N²) 绑定风暴 → O(N)）
+    }
 }
 
 // t256：第 i 个槽位是否活体。空槽 → false（呈现层 delegate visible 隐藏 + pickupScan 跳过）。
@@ -90,8 +114,7 @@ void ItemEntityManager::setCountAt(int i, int n)
         qCInfo(lcItem) << "item entity at index" << i << "count ->" << n
                        << "(partially picked; remaining in world)";
     }
-    ++m_revision;
-    emit entitiesChanged();
+    notifyChanged(); // t354：经批量收口（内部 ++revision + 按需 emit）
 }
 
 // 销毁第 i 个实体（t36 拾取消费）。t256：改 releaseSlot（标空 + 入 free list）替代 erase-shift —— 保
@@ -103,8 +126,7 @@ void ItemEntityManager::removeAt(int i)
     if (i < 0 || i >= int(m_entities.size())) return;
     if (!m_entities[size_t(i)].alive) return; // t256：空槽防御（重复 remove 安全）
     releaseSlot(i);
-    ++m_revision;
-    emit entitiesChanged();
+    notifyChanged(); // t354：经批量收口（内部 ++revision + 按需 emit）
     qCInfo(lcItem) << "picked up item entity at index" << i
                    << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
 }
@@ -257,7 +279,7 @@ void ItemEntityManager::tick(qreal dt, World *world)
             dirty = true;
         }
     }
-    if (dirty) { ++m_revision; emit entitiesChanged(); }
+    if (dirty) notifyChanged(); // t354：经批量收口（内部 ++revision + 按需 emit）
 }
 
 // t320 自然寿命驱逐（见头文件 despawnExpired 注释）。每帧 tick 起始调，先于物理。
@@ -275,5 +297,5 @@ void ItemEntityManager::despawnExpired()
                            << "ms (lifetime; live" << m_liveCount << "slots" << m_entities.size() << ")";
         }
     }
-    if (dirty) { ++m_revision; emit entitiesChanged(); }
+    if (dirty) notifyChanged(); // t354：经批量收口（内部 ++revision + 按需 emit）
 }

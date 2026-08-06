@@ -889,7 +889,16 @@ Window {
         //   ItemEntityManager.spawnItem 生成掉落实体（机制等价 MC 爆炸把被毁方块弹成物品）。itemId 已是
         //   BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落）。同 fallingBlockDropped 模式：单向事件流
         //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费）。掉落实体上限 kCap=200 自管防溢出。
-        function onExplosionDroppedItem(x, y, z, itemId) { itemEntities.spawnItem(x, y, z, itemId, 1) }
+        function onExplosionDroppedItem(x, y, z, itemId) {
+            // t354 批量收口爆炸掉落（修 t320 复发根因）：detonateStalker 对球内每破坏块发一次本信号 → 旧路径
+            //   逐个 spawnItem，每次 emit entitiesChanged → N 次 Repeater model 变更 + N 轮全体 delegate 重算 =
+            //   O(N²) 绑定风暴 + N 次重 3D delegate 即时实例化 → 一帧数十 ms（FPS 崩 + 落地前续卡）。t320 只批了
+            //   World 层 worldChanged，漏了本 Item 层 entitiesChanged。批态集中在 C++（m_batchDepth）：仅首发掉落
+            //   开批（batchActive 守卫 → beginBatch 恰一次），后续掉落 spawnItem 经 notifyChanged 只标 dirty 不 emit；
+            //   批尾由下方 onExplosion 收口（detonateStalker 末尾恒发 explosion，与掉落同栈同步 → 必在所有掉落后）。
+            if (!itemEntities.batchActive()) itemEntities.beginBatch()
+            itemEntities.spawnItem(x, y, z, itemId, 1)
+        }
         // t242 mob 死亡掉落（spec「血 0→死亡掉落物：猪:生猪排 / 牛:皮革+生牛肉 / 羊:羊毛」）：damageEntity
         //   扣血到 ≤0 时 EntityManager 发 mobDied(x,y,z,mobType,burned) → 据子类 id 转发到 ItemEntityManager.spawnItem
         //   生成对应掉落实体（机制等价 MC 1.0 被动生物掉落；数量取 MC 1.0 量级：猪 1-2 生猪排 / 牛 1 皮革
@@ -982,6 +991,9 @@ Window {
         //   → 免球形内每块破块粒子 spam，故本信号是爆炸音/视的唯一驱动（同 fallDamageTaken→takeDamage 模式；
         //   PLAN §2 分层：Entities 层发语义事件、呈现/音频层只消费）。
         function onExplosion(x, y, z) {
+            // t354 收口本发爆炸的批量掉落（depth 归 0 → 1 次 emit 补齐所有新 delegate；水中爆炸无掉落 →
+            //   未 beginBatch → endBatch 守卫 no-op）。先于音 / 视反馈，保证 delegate 当帧就位。
+            if (itemEntities.batchActive()) itemEntities.endBatch()
             audio.playExplosion()
             if (particleLoader.item) particleLoader.item.burstExplosion(x, y, z)
         }

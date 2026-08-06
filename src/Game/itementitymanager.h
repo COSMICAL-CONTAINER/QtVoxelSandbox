@@ -68,6 +68,23 @@ public:
     // （本类不查 maxStack —— PlayerController 拾取时把全数交 Hotbar.addStack 自然分流到多槽）。
     Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1);
 
+    // t354 批量 spawn 抑制 entitiesChanged（修 Stalker 爆炸「t320 已批 worldChanged 但仍卡」的复发根因）：
+    //   一次爆炸按 kExplosionDropChance(~50%) 对球内每破坏块发 explosionDroppedItem → 呈现层逐个 spawnItem，
+    //   而旧 spawnItem **每次** ++revision + emit entitiesChanged → N 个掉落物 = N 次 Repeater model(count) 变更 +
+    //   N 轮「全体 delegate 触碰 revision 重算 4 绑定」= O(N²) 绑定重算 + N 次重 3D delegate 即时实例化
+    //   （BlockCube / Billboard Canvas）→ 一帧数十 ms（FPS 崩 + 落地前每帧续卡）。t320 只批了 World 层的
+    //   worldChanged（N 写 1 emit），漏了本 Game/Item 层的 entitiesChanged —— 即复发根因。
+    //   beginBatch/endBatch 把同一次爆炸的 N 个 spawn 收口成末尾 1 次 emit（Repeater 一次补齐 N 个新 delegate、
+    //   已存在 delegate 仅重算 1 轮）= O(N)。深度计数可嵌套；非爆炸的常规 spawn（玩家丢弃 / mob 死亡 / 落沙）
+    //   不经批（depth=0）→ 立即 emit，行为不变。clearAll 不经批（重置语义，应即时通知）。机制等价 MC 爆炸
+    //   一次性结算掉落而非逐块入世界。呈现层用法：第一发爆炸掉落信号 beginBatch、爆炸总结信号（onExplosion，
+    //   detonateStalker 末尾恒发）endBatch 收口。
+    Q_INVOKABLE void beginBatch(); // 进入批量：notifyChanged 仅标 dirty、不 emit（depth++）
+    Q_INVOKABLE void endBatch();   // 退出批量：depth 归 0 且有 dirty → 1 次 emit；非批 / 无 dirty → no-op
+    // t354 当前是否在批量区间（depth>0）。呈现层据此判「首发爆炸掉落」开批（仅 begin 一次），避免在 QML 维护
+    //   跨 handler 的批量态（批态集中在 C++ m_batchDepth，单一事实源）。
+    Q_INVOKABLE bool batchActive() const { return m_batchDepth > 0; }
+
     // 第 i 个实体的世界坐标（呈现层 Repeater delegate 绑它摆位）。越界返回 (0,0,0)。
     Q_INVOKABLE QVector3D posAt(int i) const;
     // 第 i 个实体的物品 id（呈现层据它设 BlockCube.blockId / 分流到 ToolIcon / MaterialIcon 外观）。
@@ -143,6 +160,10 @@ private:
     };
     std::vector<ItemEntity> m_entities;
     int m_revision = 0;
+    // t354 批量 spawn 抑制 emit（见 beginBatch 注释）：depth>0 时 notifyChanged 只标 dirty 不 emit；
+    //   endBatch 归 0 且 dirty → 1 次 emit 收口 N 个累积变更。非批（depth=0）时 notifyChanged 立即 emit，行为同旧。
+    int m_batchDepth = 0;
+    bool m_batchDirty = false;
     QElapsedTimer m_clock; // 构造时 start()；spawn 记 elapsed、拾取算 age（墙钟，暂停期照常流逝无残留锁）
 
     // t256 slot-reuse（修掉落沙衍生掉落物 delegate 泄漏；机制同 EntityManager，详见其注释）：实体移除
@@ -179,6 +200,10 @@ private:
     //   − spawnMs）> kDespawnMs → releaseSlot（同拾取路径，aliveAt=false → delegate 隐藏 + 槽位可复用）。任一驱逐
     //   → bump revision + emit entitiesChanged（驱动 QML 隐藏对应 delegate）。空集合 / 无到期 → no-op。
     void despawnExpired();
+    // t354 批量 emit 收口（见 beginBatch 注释）：实体集每次变更（spawn / setCount / remove / tick dirty /
+    //   despawn dirty）统一走此。++revision 恒做（delegate 触碰 revision 取最新值）；emit 仅在非批（depth<=0）时发，
+    //   批内仅标 dirty、由 endBatch 末尾 1 次 emit 收口。clearAll 走独立直 emit（重置语义、不经批）。
+    void notifyChanged();
 
     static constexpr int kCap = 200;             // 实体数上限（spec：>200 跳过 / 合并）
     static constexpr qint64 kPickupDelayMs = 500; // 新生免拾取期（ms；t53 让实体先可见再可拾）
