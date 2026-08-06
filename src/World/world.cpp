@@ -825,7 +825,9 @@ int World::heightAt(int x, int z) const
     switch (biomeAt(x, z)) {
         case Biome::Hills:  amp = 7.0; break; // 起伏（山地感，仅此群系有显著地形变化）
         case Biome::Desert: amp = 3.0; break; // 平缓沙丘
-        case Biome::Forest: // 森林（t306）：与 plains 同振幅 amp 2 → 森林/草原边界零高差无缝（仅树/草密度分化）
+        case Biome::Forest: amp = 5.0; break; // 森林（t341）：amp 2→5 起伏（用户「森林要更起伏」→ 产山坡供洞口贴附；
+                                             //   不再与 plains 同振幅 → 森林/草原边界有小幅高差，但低于 hills amp 7，
+                                             //   保持「大草原平地」仍成立）。t306 原 amp 2（与 plains 同）已废。
         case Biome::Plains: // 草原（多数陆地）
         default:            amp = 2.0; break; // 极平（spec「大草原=平地」）
     }
@@ -960,7 +962,9 @@ void World::generate()
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
     carveCaves(); // t278：洞穴隧道 carve（terrain + 矿石之后；挖走 stone/dirt/ore 暴露矿石于洞壁 → 为 t279 铺路）。
                   //   先于填水 → 水只填地表低洼列（h+1..waterLevel），不灌地下洞穴；先于树/草 → 表面特征放于完整地表。
-    placeUndergroundWaterPools(); // t309：封闭地下水池（carveCaves 之后；先于填水 → 地表海平面与地下水各自独立）。
+    carveCaveEntrances(); // t341：山坡洞口（carveCaves 之后 → 连通既有洞穴网络；先于地下水 → 洞口路径干净；先于填水
+                          //   / 树 / 草 → 洞口刻在完整地表）。仅该列近表有真实洞穴 air 才开口 → 永不产孤立竖井。
+    placeUndergroundWaterPools(); // t309：封闭地下水池（carveCaves / 入口之后；先于填水 → 地表海平面与地下水各自独立）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
@@ -1543,9 +1547,86 @@ void World::fillWater()
     qInfo() << "worldgen: water cells =" << waterCells; // 同 seed → 同计数（确定性核对）
 }
 
-// t339：原 t309 carveCaveEntrances（地表 3×3 浅坑 + 向下 1×1 竖井）已移除。其 1×1 竖井在「该列无既有洞穴」时
-//   会一路挖到 kShaftMaxDepth=22，在地下留下规整的 1 格宽垂直气柱（裸眼即「矿井」感）——正是本任务要消除的
-//   规则竖井。自然洞穴完全由 carveCaves（3D Perlin 阈值洞 + worm 隧道 + 分叉）独立提供，移除此 pass 不影响洞穴网络。
+// t341 山坡洞口（见 world.h 头注释）。机制等价 MC 1.0 山坡洞口 / 天坑：在「山坡腰」列把既有地下洞穴网络与
+//   地表连通，天光经洞口 BFS 渗入洞内（recomputeLightField 在本 pass 之后跑）。
+//   t339 移除了原 t309 的「向下 1×1 竖井」（无洞穴时挖出规整 1 格宽垂直气柱 = 地下「矿井」感）。t341 重写为三步：
+//   (1) 山坡过滤 —— 列必须处于坡腰（既有更高邻列 = 非峰、也有更低邻列 = 非谷，且最大高差 ≥ kSlopeDrop）→
+//       洞口落在坡面（halfway up），低侧地形已低于洞口 → 该侧壁天然裸露可走入、高侧深入山体 = 山坡洞口观感。
+//   (2) 洞穴连通过滤 —— 仅当该列近表（surfaceY-1 向下 kMaxReach 内）存在 carveCaves 已挖出的 cave air 才开口；
+//       找不到则跳过 → **永不产孤立竖井**（修 t339「无洞挖出矿井」问题：每个洞口都连真实洞穴）。
+//   (3) 大洞口 —— 3×3 水平（x/z 各 ±1）× 自 surfaceY 下挖到 caveY（垂直，含洞穴顶格）= 可通行（2-3 宽 × 数格高，
+//       玩家 0.6×1.8 轻松进出；修 t309 的「1×1 竖井 + 3×3 仅 1 格浅坑」太窄不可走）。
+//   确定性散布（hashColumn + seed 偏移，PLAN §2-K）：更密网格 + 更高概率（grid 10 / 60% vs 旧 18 / 30% → 更多洞口）
+//   + 网格内抖动 → 候选列；再经「山坡 + 近表有洞」双重几何过滤。仅 plains/forest/hills（hills amp 7 自然有坡、
+//   forest t341 amp 5 新增坡；plains amp 2 平坦 → 山坡过滤天然排除）；跳过沙漠（沙底无草土、不像洞口）/ 海域
+//   （海 + 沙滩，避免海水灌入 / 沙底）/ 低洼（surfaceY <= waterLevel+2 → 洞口会灌海水）。经 m_chunks.setBlock
+//   直写（跨 chunk 路由 + 标脏 + heightmap 增量维护），不发 blockBroken（worldgen 既有约定）。纯函数于 seed
+//   （hashColumn + 已生成 chunk 的纯几何查询）→ 同 seed 同洞口分布。
+void World::carveCaveEntrances()
+{
+    constexpr int kEntranceGrid   = 10;      // 候选网格间距（比旧 t309 的 18 更密 → 更多洞口）
+    constexpr unsigned kEntrancePct = 60u;   // 候选命中概率（%；比旧 30 更高 → 更多洞口）
+    constexpr int kBedrockTop      = 4;      // 不挖基岩（与 carveCaves / placeBedrock 同源）
+    constexpr int kMaxReach        = 6;      // 自地表向下找洞穴的最大扫描格数（找不到则不开口 → 无孤立竖井；浅 sinkhole）
+    constexpr int kSlopeDrop       = 2;      // 山坡判定：邻列最大高差 ≥ 此值（真坡面，非平坦）
+    constexpr int kMouthHalf       = 1;      // 开口半宽（3×3 = ±1）
+
+    int placed = 0;
+    const int entranceSeed = m_seed + 3091;  // 洞口哈希偏移（与树 / 草 / 洞穴 hashColumn 解耦；纯整数加，确定性）
+    for (int bx = kEntranceGrid / 2; bx < m_width; bx += kEntranceGrid) {
+        for (int bz = kEntranceGrid / 2; bz < m_depth; bz += kEntranceGrid) {
+            const quint32 r = hashColumn(entranceSeed, bx, bz);
+            if ((r % 100u) >= kEntrancePct) continue; // 概率筛选
+            // 网格内 ±span/2 抖动（避免网格化排列的机械感，同 carveCaves worm 起点抖动）。
+            const int span = kEntranceGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int x = bx + jx, z = bz + jz;
+            if (x < 2 || z < 2 || x >= m_width - 2 || z >= m_depth - 2) continue; // 留 2 格边界（3×3 开口不越界）
+            if (seaColumnHeight(x, z) >= 0) continue; // 海域（海 + 沙滩）不开口（避免海水灌入 / 沙底）
+            const Biome bio = biomeAt(x, z);
+            if (bio == Biome::Desert) continue; // 沙漠沙底不开口（无草 / 土 → 暴露纯沙不像洞口）
+
+            const int surfaceY = std::min(heightAt(x, z), m_height - 1);
+            if (surfaceY <= kWaterLevel + 2) continue; // 避开沙滩 / 水下 / 低洼（洞口不应灌入海水）
+
+            // 山坡判定（t341）：列必须处于「坡腰」—— 4 邻列既有严格更高（非峰）也有严格更低（非谷），且最大
+            //   高差 ≥ kSlopeDrop（真坡面）。平坦地（plains amp 2）四邻 ≈ surfaceY → hMaxNb/hMinNb 都 ≈ surfaceY
+            //   → 两个严格不等式之一必假 → 跳过；故平原天然无洞口，洞口只落在有起伏的 hills / forest 坡面。
+            const int n1 = std::min(heightAt(x + 1, z), m_height - 1);
+            const int n2 = std::min(heightAt(x - 1, z), m_height - 1);
+            const int n3 = std::min(heightAt(x, z + 1), m_height - 1);
+            const int n4 = std::min(heightAt(x, z - 1), m_height - 1);
+            const int hMaxNb = std::max({n1, n2, n3, n4});
+            const int hMinNb = std::min({n1, n2, n3, n4});
+            if (hMaxNb <= surfaceY) continue;          // 无严格更高邻列 = 局部峰 → 不开口
+            if (hMinNb >= surfaceY) continue;          // 无严格更低邻列 = 局部谷 → 不开口
+            if (hMaxNb - hMinNb < kSlopeDrop) continue; // 坡度不足 → 平坦地不开口
+
+            // 自地表向下找既有洞穴 air（carveCaves 已挖空）。找不到 → 该列近表无洞，不开口（杜绝孤立竖井）。
+            int caveY = -1;
+            const int yFloor = std::max(kBedrockTop + 1, surfaceY - kMaxReach);
+            for (int y = surfaceY - 1; y >= yFloor; --y) {
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Air) { caveY = y; break; }
+            }
+            if (caveY < 0) continue; // 近表无洞穴 → 不开口（每个洞口都连真实洞穴，无「矿井」式孤立竖井）
+
+            // 开口（t341）：3×3 水平（x/z 各 ±kMouthHalf）× 自 surfaceY 下到 caveY（垂直，含洞穴顶格）= 可通行大洞口。
+            //   仅挖实体天然方块（grass/dirt/stone/ore），不动 air（已是空）/ bedrock / water（防御，本层应无水）。
+            for (int dy = 0; dy <= surfaceY - caveY; ++dy) {
+                const int y = surfaceY - dy;
+                for (int dx = -kMouthHalf; dx <= kMouthHalf; ++dx)
+                    for (int dz = -kMouthHalf; dz <= kMouthHalf; ++dz) {
+                        const quint8 b = m_chunks.blockAt(x + dx, y, z + dz);
+                        if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water) continue;
+                        m_chunks.setBlock(x + dx, y, z + dz, BlockRegistry::Air);
+                    }
+            }
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: cave entrances =" << placed; // 同 seed → 同计数（确定性核对）
+}
 
 // t309 地下水池（见 world.h 头注释）。机制等价 MC 1.0 地下水湖 / 封闭水洼：地下深处小型封闭空腔 + 底层水源。
 //   确定性散布（hashColumn + seed 偏移，PLAN §2-K）：网格采样 + 概率筛选 + 抖动 → 在地下 y 范围内选中心，

@@ -295,9 +295,14 @@ private:
     //   纯函数于 seed（noise3 / hashColumn / hashVoxel）→ 同 seed 同洞穴分布。挖走 stone/dirt/ore，暴露矿石
     //   于洞壁（为 t279 洞穴裸露矿物铺路）；不挖 air/bedrock/water。
     void carveCaves();
-    // （t339 移除）原 carveCaveEntrances：向下 1×1 竖井在该列无洞穴时挖出规整 1 格宽垂直气柱（地下「矿井」），
-    //   已删除；自然洞穴由 carveCaves 提供。
-    // t309 地下水池（封闭洞穴静止水层；spec「地下水池（封闭洞穴静止水层）」）：carveCaves
+    // t341 山坡洞口（spec「多地表连通洞穴入口 + 山坡」）：carveCaves 之后，在「山坡腰」列（4 邻列既有严格更高
+    //   也有严格更低 = 处于坡面而非峰/谷）+「近表有真实洞穴 air（carveCaves 已挖空）」双重过滤下，确定性散布
+    //   3×3 可通行大洞口（自地表下挖到既有洞穴顶格）。仅该列近表有 cave air 才开口 → 永不产孤立竖井（修 t339
+    //   「无洞挖出 1×1 矿井」问题）。山坡低侧地形已低于洞口 → 该侧壁天然裸露可走入；高侧深入山体 = 山坡洞口观感。
+    //   修 t309「1×1 竖井 + 3×3 仅 1 格浅坑」太窄不可走 → 现 3×3 全高。避开沙漠 / 沙滩 / 水下 / 低洼。纯函数于 seed
+    //   （hashColumn + 已生成 chunk 的纯几何查询）→ 同 seed 同洞口分布（PLAN §2-K）。
+    void carveCaveEntrances();
+    // t309 地下水池（封闭洞穴静止水层；spec「地下水池（封闭洞穴静止水层）」）：carveCaves / carveCaveEntrances
     //   之后，地下深处确定性散布小型封闭水洼——carve 一个小椭球空腔（air 气室）+ 底层铺一层水源（state=0），
     //   形成「封闭洞穴静止水层」。空腔被周围实体岩石天然封闭 → 水源无水平 air 邻居可蔓延 → 稳态
     //   （tickWaterFlow 不扩散）；气室无天光 → 黑暗（机制等价 MC 1.0 地下水湖 / 封闭水洼）。纯函数于 seed
