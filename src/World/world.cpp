@@ -1096,17 +1096,19 @@ void World::placeTrees()
 //   草丛占 surfaceY+1（grass 顶上方一格）；worldgen 顺序保证 placeTrees 先跑（树占 surfaceY+1 起若干格），
 //   故树干列的 surfaceY+1 已被 Log 占据 → setVoxelIfAir 跳过（草丛不抢树位）。无列间距筛选（草丛密度天然高，
 //   无需像树那样保证间距；机制等价 MC 平原草丛密集点缀）。
-//   t274/t306 群系分流密度（spec「大草原=平地+多草丛」「森林+草原」）：plains 草丛密集（40%，草原主体观感）、
-//   forest 适中（18%，林下草地但树干/树冠占位 + 遮荫 → 比草原稀）、hills 适中（12%，山地草丛稀疏留出石 / 林
-//   裸露感）、desert 无（biomeAt==Desert 已跳过）。纯函数于 seed + biomeAt → 同 seed 同分布。
+//   t337 群系分流密度修正（spec「森林=密树多草，草原=少树适量草，沙/海=无草」）：forest 草丛茂盛（35%，林下
+//   密下木）、plains 适中（18%，开阔草原点缀）、hills 稀疏（12%，山地裸岩 / 林裸露感）、desert 无（biomeAt==
+//   Desert 已跳过）。注：旧 t306/t274 令 plains(40%)>forest(18%)（草原多草），观感「全图铺满草」且森林不显密 →
+//   t337 反转关系为 forest>plains，使森林读「密集」、草原读「开阔」，过渡呈 forest 35→plains 18→hills 12 自然
+//   递降。纯函数于 seed + biomeAt → 同 seed 同分布。
 //   t310 草变种（矮/中/高）：密度筛选后用**独立哈希位段** (r>>16)%100 选变种（与密度位段 r%100 解耦 → 密度与
 //   变种分布互不污染），各群系变种配比不同——plains 以矮/中为主（典型草地）、forest 林下多中/高草（茂盛下木）、
 //   hills 以矮草为主（裸露稀疏）。高草(2 格)需其上一格为空气（顶点延伸进上格）；被占则降级中草避免穿透实块。
 void World::placeTallGrass()
 {
-    // t274/t306 群系密度表（% of grass 列生草丛）：plains 远高于 forest/hills（spec「多草丛」聚焦草原）。
-    constexpr int kPlainsGrassPct = 40; // 草原密集（spec 核心：「大草原=平地+多草丛」）
-    constexpr int kForestGrassPct = 18; // 森林适中（林下草地，树干/树冠占位 + 遮荫 → 比草原稀）
+    // t337 群系密度表（% of grass 列生草丛）：forest 茂盛 / plains 适中 / hills 稀疏（spec「森林多草，草原适量草」）。
+    constexpr int kPlainsGrassPct = 18; // 草原适量（spec「草原=少树适量草」：开阔点缀；旧 40% 偏密致全图铺草）
+    constexpr int kForestGrassPct = 35; // 森林茂盛（spec「森林=密树多草」：林下密下木；旧 18% 偏稀致森林不显密）
     constexpr int kHillsGrassPct  = 12; // 山地稀疏（裸岩 / 林感）
 
     // t310 各群系草变种配比（矮 / 中 / 高，% ；累积阈值见下方 vr 判定）。plains 矮/中为主、forest 林下茂盛多
