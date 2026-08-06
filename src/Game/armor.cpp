@@ -10,27 +10,27 @@
 namespace {
 constexpr ArmorRegistry::ArmorDef kArmors[] = {
     // ── 皮革（Leather；机制等价 MC 1.0 leather armor：护甲 1/3/2/1=7、耐久 55/80/75/65）──
-    { ArmorRegistry::Leather, ArmorRegistry::Helmet,     1,  55, "leather_helmet",     "\xe7\x9a\xae\xe9\x9d\xa9\xe5\xa4\xb4\xe7\x9b\xb2" },     // 皮革头盔
+    { ArmorRegistry::Leather, ArmorRegistry::Helmet,     1,  55, "leather_helmet",     "\xe7\x9a\xae\xe9\x9d\xa9\xe5\xa4\xb4\xe7\x9b\x9b" },     // 皮革头盔
     { ArmorRegistry::Leather, ArmorRegistry::Chestplate, 3,  80, "leather_chestplate", "\xe7\x9a\xae\xe9\x9d\xa9\xe8\x83\xb8\xe7\x94\xb2" },     // 皮革胸甲
     { ArmorRegistry::Leather, ArmorRegistry::Leggings,   2,  75, "leather_leggings",   "\xe7\x9a\xae\xe9\x9d\xa9\xe6\x8a\xa4\xe8\x85\xbf" },     // 皮革护腿
     { ArmorRegistry::Leather, ArmorRegistry::Boots,      1,  65, "leather_boots",      "\xe7\x9a\xae\xe9\x9d\xa9\xe9\x9d\xb4\xe5\xad\x90" },     // 皮革靴子
     // ── 铁（Iron；机制等价 MC 1.0 iron armor：护甲 2/6/5/2=15、耐久 165/240/225/195）──
-    { ArmorRegistry::Iron,    ArmorRegistry::Helmet,     2, 165, "iron_helmet",        "\xe9\x93\x81\xe5\xa4\xb4\xe7\x9b\xb2" },                 // 铁头盔
+    { ArmorRegistry::Iron,    ArmorRegistry::Helmet,     2, 165, "iron_helmet",        "\xe9\x93\x81\xe5\xa4\xb4\xe7\x9b\x9b" },                 // 铁头盔
     { ArmorRegistry::Iron,    ArmorRegistry::Chestplate, 6, 240, "iron_chestplate",    "\xe9\x93\x81\xe8\x83\xb8\xe7\x94\xb2" },                 // 铁胸甲
     { ArmorRegistry::Iron,    ArmorRegistry::Leggings,   5, 225, "iron_leggings",      "\xe9\x93\x81\xe6\x8a\xa4\xe8\x85\xbf" },                 // 铁护腿
     { ArmorRegistry::Iron,    ArmorRegistry::Boots,      2, 195, "iron_boots",         "\xe9\x93\x81\xe9\x9d\xb4\xe5\xad\x90" },                 // 铁靴子
     // ── 铜（Copper；MC 1.0 无铜护甲 → 自定：护甲 2/4/3/1=10、耐久 110/160/150/130，皮革与金之间）──
-    { ArmorRegistry::Copper,  ArmorRegistry::Helmet,     2, 110, "copper_helmet",      "\xe9\x93\x9c\xe5\xa4\xb4\xe7\x9b\xb2" },                 // 铜头盔
+    { ArmorRegistry::Copper,  ArmorRegistry::Helmet,     2, 110, "copper_helmet",      "\xe9\x93\x9c\xe5\xa4\xb4\xe7\x9b\x9b" },                 // 铜头盔
     { ArmorRegistry::Copper,  ArmorRegistry::Chestplate, 4, 160, "copper_chestplate",  "\xe9\x93\x9c\xe8\x83\xb8\xe7\x94\xb2" },                 // 铜胸甲
     { ArmorRegistry::Copper,  ArmorRegistry::Leggings,   3, 150, "copper_leggings",    "\xe9\x93\x9c\xe6\x8a\xa4\xe8\x85\xbf" },                 // 铜护腿
     { ArmorRegistry::Copper,  ArmorRegistry::Boots,      1, 130, "copper_boots",       "\xe9\x93\x9c\xe9\x9d\xb4\xe5\xad\x90" },                 // 铜靴子
     // ── 金（Gold；机制等价 MC 1.0 gold armor：护甲 2/5/3/1=11、耐久 77/112/105/96）──
-    { ArmorRegistry::Gold,    ArmorRegistry::Helmet,     2,  77, "gold_helmet",        "\xe9\x87\x91\xe5\xa4\xb4\xe7\x9b\xb2" },                 // 金头盔
+    { ArmorRegistry::Gold,    ArmorRegistry::Helmet,     2,  77, "gold_helmet",        "\xe9\x87\x91\xe5\xa4\xb4\xe7\x9b\x9b" },                 // 金头盔
     { ArmorRegistry::Gold,    ArmorRegistry::Chestplate, 5, 112, "gold_chestplate",    "\xe9\x87\x91\xe8\x83\xb8\xe7\x94\xb2" },                 // 金胸甲
     { ArmorRegistry::Gold,    ArmorRegistry::Leggings,   3, 105, "gold_leggings",      "\xe9\x87\x91\xe6\x8a\xa4\xe8\x85\xbf" },                 // 金护腿
     { ArmorRegistry::Gold,    ArmorRegistry::Boots,      1,  96, "gold_boots",         "\xe9\x87\x91\xe9\x9d\xb4\xe5\xad\x90" },                 // 金靴子
     // ── 钻石（Diamond；机制等价 MC 1.0 diamond armor：护甲 3/8/6/3=20、耐久 363/528/495/429）──
-    { ArmorRegistry::Diamond, ArmorRegistry::Helmet,     3, 363, "diamond_helmet",     "\xe9\x92\xbb\xe7\x9f\xb3\xe5\xa4\xb4\xe7\x9b\xb2" },     // 钻石头盔
+    { ArmorRegistry::Diamond, ArmorRegistry::Helmet,     3, 363, "diamond_helmet",     "\xe9\x92\xbb\xe7\x9f\xb3\xe5\xa4\xb4\xe7\x9b\x9b" },     // 钻石头盔
     { ArmorRegistry::Diamond, ArmorRegistry::Chestplate, 8, 528, "diamond_chestplate", "\xe9\x92\xbb\xe7\x9f\xb3\xe8\x83\xb8\xe7\x94\xb2" },     // 钻石胸甲
     { ArmorRegistry::Diamond, ArmorRegistry::Leggings,   6, 495, "diamond_leggings",   "\xe9\x92\xbb\xe7\x9f\xb3\xe6\x8a\xa4\xe8\x85\xbf" },     // 钻石护腿
     { ArmorRegistry::Diamond, ArmorRegistry::Boots,      3, 429, "diamond_boots",      "\xe9\x92\xbb\xe7\x9f\xb3\xe9\x9d\xb4\xe5\xad\x90" },     // 钻石靴子
