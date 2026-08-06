@@ -1032,11 +1032,16 @@ void World::seaCorner(int &cx, int &cz) const
     cz = (r & 2u) ? m_depth - 1 : 0;
 }
 
-// t338 海域列高度（海 + 沙滩集中于一角）。返回：
-//   -1 = 内陆（非海域 → 走自然 heightAt，无海沙 / 海水）
-//   0..m_height-1 = 海域重塑地表 y（角点最深 seaFloor → 边缘 beachTop 线性缓坡；h<waterLevel 为海底由 fillWater
-//     灌水，h==waterLevel+1 为干沙滩）。判定 = 角点起的四分之一圆盘（欧氏 dist <= seaRadius）。
-//   纯函数于 seed + dims（PLAN §2-K）。generate 据此重塑地形（沙底/沙滩），fillWater 据此只在海域灌水，
+// t338/t372 海域列高度（海 + 沙滩集中于一角）。返回：
+//   -1 = 远内陆（dist 超过海域半径 + 过渡带 → 走自然 heightAt，无海沙 / 海水）
+//   0..m_height-1 = 海域重塑地表 y：
+//     · 沙海盘（dist <= effectiveRadius）：角点最深 seaFloor → 岸线 beachTop 缓坡（+ 高度噪声柔化）；
+//       h<waterLevel 为海底由 fillWater 灌水，h==waterLevel+1 为干沙滩。表层 Sand（见 isSeaSandColumn）。
+//     · 过渡带（effectiveRadius < dist <= effectiveRadius+blendWidth）：高度由 beachTop smoothstep 过渡到
+//       自然 heightAt → 消除「岸线 59 ↔ 邻接森林 62-66」的悬崖（t372）；表层走自然群系草地（isSeaSandColumn=false）。
+//   t372 海岸线柔化（spec「沙滩太规整」）：低频 fBm 抖动 effectiveRadius → 蜿蜒岸线（非规整圆弧）；
+//   高度噪声 → 海底/沙滩微起伏（非完美平面）。纯函数于 seed + dims + heightAt（fbm）（PLAN §2-K）。
+//   generate 据此重塑地形（沙底/沙滩），fillWater 仅在沙海盘（h<waterLevel）灌水，
 //   placeSurfaceLakes/placeUndergroundWaterPools 据此跳过海域（避免叠湖 / 误挖海水柱）。
 int World::seaColumnHeight(int x, int z) const
 {
@@ -1046,13 +1051,54 @@ int World::seaColumnHeight(int x, int z) const
     const int dx = x - cx, dz = z - cz;
     const double dist = std::sqrt(double(dx) * dx + double(dz) * dz);
     const int seaRadius = std::min(m_width, m_depth) * 3 / 10; // 海域半径（地图短边 30% → 一角可见海）
-    if (dist > double(seaRadius)) return -1;                   // 圆盘外 → 内陆
-    constexpr int kSeaDepth = 6;                               // 角点海深（水位之下格数）
-    const int seaFloor = kWaterLevel - kSeaDepth;              // 角点海底（最深）
-    const int beachTop = kWaterLevel + 1;                      // 边缘干沙滩（水位 +1）
-    const double t = dist / double(seaRadius);                 // 0（角点）..1（边缘）
-    const int h = int(std::lround(seaFloor + (beachTop - seaFloor) * t));
-    return std::max(0, std::min(h, m_height - 1));
+
+    // t372 岸线蜿蜒（spec「沙滩太规整」）：低频 fBm 抖动有效半径 → 自然蜿蜒岸线（非规整圆弧）。
+    //   独立频率 0.07 + seed 偏移 +5331（与高度图 0.09 / 群系 0.012 均解耦）→ 同 seed 同岸线（PLAN §2-K）。
+    const double shore = fbm((x + m_seed + 5331) * 0.07, (z + m_seed + 5331) * 0.07); // [-1,1]
+    const double effectiveRadius = double(seaRadius) * (1.0 + 0.12 * shore);          // ±12% 蜿蜒
+
+    constexpr int kSeaDepth = 6;                      // 角点海深（水位之下格数）
+    const int seaFloor = kWaterLevel - kSeaDepth;     // 角点海底（最深）
+    const int beachTop = kWaterLevel + 1;             // 岸线干沙滩（水位 +1）
+
+    if (dist <= effectiveRadius) {
+        // 沙海盘（海盆 + 干沙滩）：缓坡 + 高度噪声（柔化规整线性坡）。
+        //   高度噪声独立频率 0.15 + seed 偏移 +8842 → 海底 / 沙滩微起伏（非完美平面，PLAN §2-K）。
+        const double t = dist / effectiveRadius;                       // 0（角点）..1（岸线）
+        const double heightNoise = fbm((x + m_seed + 8842) * 0.15, (z + m_seed + 8842) * 0.15) * 1.5;
+        const int h = int(std::lround(seaFloor + (beachTop - seaFloor) * t + heightNoise));
+        return std::max(0, std::min(h, m_height - 1));
+    }
+
+    // t372 高度过渡带（spec「沙滩与邻接森林高差突兀」）：沙盘外圈把高度从 beachTop smoothstep 过渡到
+    //   自然 heightAt → 消除岸线处 cliff（beach 59 ↔ forest 62-66 突跳）。表层走自然群系（草地），故与
+    //   generate 的沙表层判定（isSeaSandColumn）分离。纯函数于 seed + heightAt（fbm）→ 同 seed 同过渡（§2-K）。
+    const double blendWidth = double(seaRadius) * 0.30; // 过渡带宽（海域半径 30%）
+    if (dist <= effectiveRadius + blendWidth) {
+        const int naturalH = std::min(heightAt(x, z), m_height - 1);
+        const double bt = (dist - effectiveRadius) / blendWidth; // 0（接沙盘）..1（接内陆）
+        const double e = bt * bt * (3.0 - 2.0 * bt);            // smoothstep（缓和、切线水平 → 无缝拼接）
+        const int h = int(std::lround(beachTop + (naturalH - beachTop) * e));
+        return std::max(0, std::min(h, m_height - 1));
+    }
+    return -1; // 远内陆 → 走自然 heightAt
+}
+
+// t372 沙海盘判定（spec「沙滩表层」）。返回该列是否为真正沙表层（海盆 + 干沙滩）。与 seaColumnHeight
+//   共用完全相同的 effectiveRadius 计算（确定性一致：沙→草表层切换恰好落在岸线，与高度过渡带起点重合 →
+//   沙滩边缘无缝接草地）。过渡带列（dist > effectiveRadius）返回 false → 走自然群系草地。纯函数于
+//   seed + dims（PLAN §2-K）。供 generate 决定沙表层 / 草地表层。
+bool World::isSeaSandColumn(int x, int z) const
+{
+    if (m_width <= 0 || m_depth <= 0) return false;
+    int cx, cz;
+    seaCorner(cx, cz);
+    const int dx = x - cx, dz = z - cz;
+    const double dist = std::sqrt(double(dx) * dx + double(dz) * dz);
+    const int seaRadius = std::min(m_width, m_depth) * 3 / 10;
+    const double shore = fbm((x + m_seed + 5331) * 0.07, (z + m_seed + 5331) * 0.07); // 与 seaColumnHeight 同源
+    const double effectiveRadius = double(seaRadius) * (1.0 + 0.12 * shore);
+    return dist <= effectiveRadius;
 }
 
 void World::generate()
@@ -1078,22 +1124,24 @@ void World::generate()
         for (int z = 0; z < m_depth; ++z) {
             const Biome bio = biomeAt(x, z);
             const bool desert = (bio == Biome::Desert); // t274：经 biomeAt 单一权威（原 isDesert 收口于此）
-            // t338：海域（海 + 沙滩）集中于一角。海域列地表重塑为 seaColumnHeight（缓坡海底/沙滩）。
+            // t338/t372：海域（海 + 沙滩）集中于一角。seaColumnHeight 返回沙海盘 + 过渡带的重塑高度（>=0）；
+            //   isSeaSandColumn 仅沙海盘为真 → 沙表层；过渡带（高度已平滑过渡到 heightAt）走自然群系草地。
             const int seaH = seaColumnHeight(x, z);
-            const bool inSea = (seaH >= 0);
-            const int h = inSea ? seaH : std::min(heightAt(x, z), m_height - 1);
+            const bool inSeaHeight = (seaH >= 0);                       // 沙海盘 + 过渡带（高度重塑）
+            const bool inSandSea = inSeaHeight && isSeaSandColumn(x, z); // 仅沙海盘（沙表层 / 灌水）
+            const int h = inSeaHeight ? seaH : std::min(heightAt(x, z), m_height - 1);
             // t255：沙漠表层沙厚度 4..6 格（hashColumn 低 2 位派生，PLAN §2-K 确定性；非沙漠列置 0 不用）。
             const int desertSandThickness = desert ? (4 + int(hashColumn(m_seed, x, z) % 3u)) : 0;
             if (desert) ++desertCols;
-            else if (inSea) ++seaCols;
+            else if (inSandSea) ++seaCols;
             // t306：森林地表仍为草（机制等价 MC 森林地表草地），仅树/草密度分化 → surface 填充无需分流 forest。
             if (bio == Biome::Plains) ++plainsCols;
             else if (bio == Biome::Hills) ++hillsCols;
             else if (bio == Biome::Forest) ++forestCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
-                if (inSea) {
-                    // t338 海域：沙表层（海底 / 沙滩）+ Dirt + Stone（机制等价 MC 海岸沙 + 水下沙底）。海域优先于
+                if (inSandSea) {
+                    // t338 海域：沙表层（海底 / 沙滩）+ Dirt + Stone（机制等价 MC 海岸沙 + 水下沙底）。沙海盘优先于
                     //   群系（海覆盖任何群系，统一沙底）；fillWater 随后在海盆（h<waterLevel）灌满海水到海平面。
                     if (y == h)          b = BlockRegistry::Sand;  // 沙表层（海底 / 沙滩）
                     else if (y >= h - 2) b = BlockRegistry::Dirt;  // 表层下土
