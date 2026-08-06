@@ -698,14 +698,16 @@ private:
     static constexpr float kAttackRange     = 1.6f;  // 近战攻击 XZ 距离（blocks；mob 中心到玩家脚位）
     static constexpr float kAttackVertRange = 2.0f;  // 攻击垂直容差（blocks；|mobY - playerFeetY|；防跨层）
     static constexpr float kAttackCooldown  = 1.0f;  // 单 mob 攻击间隔（秒）
-    static constexpr int   kAttackDamage    = 4;     // 单次攻击伤害（HP；MC 正常难度僵尸 4 = 2 心）
-    // t321 玩家受击全局节流（秒；详见 kPlayerHitThrottle 注释）。单 mob 冷却只防自己连抽，多 mob 围攻时各 mob
-    //   独立冷却叠加 → DPS 倍乘（4 只 × 4HP/s = 16HP/s ≈ 满血瞬死，玩家无反应窗口）。本节流在 EntityManager 全局
-    //   层串行化「玩家被命中」：任一 mob（近战 attack / 骷髅箭命中）经 mobAttackedPlayer 命中后置 m_playerHitCooldown
+    static constexpr int   kAttackDamage    = 3;     // 单次近战伤害（HP；t353 自 4 降回 3 = 1.5 心，配 1s 节流给反应窗口）
+    // t321/t353 玩家受击全局节流（秒；详见 kPlayerHitThrottle 注释）。单 mob 冷却只防自己连抽，多 mob 围攻时各 mob
+    //   独立冷却叠加 → DPS 倍乘（无节流时 4 只 × 4HP/s = 16HP/s ≈ 满血瞬死，玩家无反应窗口）。本节流在 EntityManager
+    //   全局层串行化「玩家被命中」：任一 mob（近战 attack / 骷髅箭命中）经 mobAttackedPlayer 命中后置 m_playerHitCooldown
     //   = kPlayerHitThrottle；其间其它 mob 攻击 / 命中不触发（机制等价「玩家受击无敌帧」+ 强制围攻 mob 轮替出手）。
-    //   单只 mob 不受影响（其 1s 冷却 > 0.5s 节流，节流总先归零）；多只围攻时受击频率上限 = 1/0.5 = 2 次/s（与只数无关）
-    //   → DPS 封顶 2×kAttackDamage = 8HP/s → 满血 10HP 至少 1.25s 反应窗口（走速 4.3 → 可移动 ~5 格脱离）。
-    static constexpr float kPlayerHitThrottle = 0.5f; // 玩家受击全局节流（秒；防多 mob 围攻秒杀）
+    //   t353 根因复盘：t321 节流取 0.5s（→ 围攻上限 2 命中/s）同时把近战伤害 3→4，围攻 DPS = 2×4 = 8HP/s → 满血 10HP 仅
+    //   1.25s 反应窗口 ≈ 瞬死，节流过短且单发过高，故 R18i 后仍嫌过快。t353 节流 0.5→1.0（围攻命中率上限降到 1 次/s）
+    //   + 近战伤害 4→3。单只 mob 不受影响（其 1s 冷却 >= 节流，节流不延后单 mob 节奏）；多只围攻时受击频率上限 = 1/1.0
+    //   = 1 次/s（与只数无关）→ DPS 封顶 1×kAttackDamage = 3HP/s → 满血 10HP 至少 3.3s 反应窗口（走速 4.3 → 可移动 ~14 格脱离）。
+    static constexpr float kPlayerHitThrottle = 1.0f; // 玩家受击全局节流（秒；防多 mob 围攻秒杀；t353 自 0.5 提到 1.0）
     static constexpr float kJumpSpeed       = 8.4f;  // 越障跳跃初速（blocks/s；同 player jump，翻 1 格墙）
     // t283 骷髅弓箭手远程 AI 常量（spec「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」；机制对齐
     //   MC 1.0 骷髅射手：远距 + 抛物箭 + 保持距离 + 命中伤害；数值为本工程小世界量身调，非 MC 精确复刻 ——
@@ -729,7 +731,7 @@ private:
     static constexpr float kArcherKeepMax    = 9.0f;   // 保持距离上界（blocks；远则进）
     static constexpr float kArcherShootRange = 12.0f;  // 开火 XZ 上界（blocks）
     static constexpr float kShootVertRange   = 4.0f;   // 开火垂直容差（blocks；防跨层盲射）
-    static constexpr float kShootCooldown    = 1.6f;   // 射箭间隔（秒）
+    static constexpr float kShootCooldown    = 2.5f;   // 射箭冷却（秒；+kAimWindup 0.5 = 每发 ~3s；t353 自 1.6 提到 2.5 降低多弓手箭雨密度）
     // t331 拉弓瞄准时长（秒）：射程内 + 视线清 + 冷却到 → 先累加 aimTimer 满 kAimWindup 才射；期间位移减速到停
     //   （机制等价 MC 1.0 骷髅停步拉弓瞄准；顺带拉低攻击节奏，缓解 t321 围攻压迫感）。drawAmountAt 据 it 返 0..1。
     static constexpr float kAimWindup        = 0.5f;   // 拉弓瞄准时长（秒；满才射）
