@@ -3218,28 +3218,65 @@ Window {
                             }
                         }
                     }
-                    // t280/t344 燃烧火焰视觉：mob 处于燃烧态即显「火焰」—— 一个略大于 mob 的橙黄半透立方叠在
-                    //   mob 外，opacity 快速抖动模拟火苗窜动（机制等价 MC 僵尸/骷髅日光着火 + 动物触岩浆着火视觉；
-                    //   原创自绘非照搬）。燃烧态 = EntityManager.isBurningAt：t280 敌对日光 burning（hostile 暴露日光）
-                    //   OR t344 火烧态 fireTimer>0（岩浆/火点燃；ALL mobs 含 passive 牛/猪/羊）。NoLighting（可见 Model
-                    //   必须 NoLighting，lessons-learned 红线）。绑 revision 触碰 → 翻入/翻出 burning 时重算 visible。
-                    Model {
+                    // t371 燃烧火焰视觉（重做 t280/t344）：旧版「略大于 mob 的橙黄半透立方整块包覆」→ 读作
+                    //   「橙色方块 / 放大火把」而非火焰。改为「贴身的动画火舌」—— 沿身体表面（collision 箱表面，
+                    //   delegate 原点 = 箱中心，跨度 ±mobHalfW × ±mobHalfH）分布若干小火舌，每条复用 torch 三层焰
+                    //   （外橙 #ff8a1a / 中黄 #ffd23c / 白心 #fff4c4，§9a 原创自绘），尺寸 ~0.13（贴身非包覆）。
+                    //   各火舌独立闪烁（相位错开 → 火苗此起彼伏）→ 读作「身上窜动的火焰」。机制等价 MC 僵尸/骷髅
+                    //   日光着火 + 动物触岩浆着火视觉。状态 = EntityManager.isBurningAt（t280 敌对日光 burning OR
+                    //   t344 fireTimer>0 火烧；ALL mobs）。NoLighting（可见 Model 红线）。Repeater + 位置/相位表驱动
+                    //   （复用 mobHost 同款 Repeater-for-3D，减重复；火焰随 delegate Node bodyYaw 转动贴身）。绑
+                    //   revision 触碰 → 翻入/翻出 burning 时重算 visible。
+                    Node {
+                        id: mobBurnFlames
                         visible: { entityManager.revision; return entityManager.isBurningAt(index) }
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, mobModelYOff, 0) // 同 mob 本体对齐（腿底贴 collision 底面）
-                        scale: Qt.vector3d(1.06, 1.10, 1.06)      // 略大于 mob（火苗包覆感）
-                        opacity: 0.7  // t280 修：恢复提交漏定义 flameOpacity 致 ReferenceError，暂用常量（火苗明灭动画留后续）
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: "#ff8a2a"
-                            // opacity 绑定 flameOpacity.value：SequentialAnimation 抖动 → 火苗明灭窜动感（机制等价）。
-                            opacity: 0.7  // t280 修：恢复提交漏定义 flameOpacity 致 ReferenceError，暂用常量（火苗明灭动画留后续）
-                        }
-                        property real flameOpacity: 0.55
-                        SequentialAnimation on flameOpacity {
-                            loops: Animation.Infinite
-                            NumberAnimation { from: 0.40; to: 0.78; duration: 110 }
-                            NumberAnimation { from: 0.78; to: 0.40; duration: 140 }
+                        // 火舌点表：[x, y, z, phaseIdx]，坐标为 delegate 本地框（collision 箱中心 = 原点，
+                        //   身体 ±mobHalfW × ±mobHalfH）。phaseIdx 选相位（错开闪烁）。火焰贴身表面分布脚/腰/肩/顶。
+                        Repeater {
+                            model: [
+                                [0.0,      -mobHalfH * 0.65,  mobHalfW,        0],   // 脚前
+                                [0.0,      -mobHalfH * 0.65, -mobHalfW,        1],   // 脚后
+                                [0.0,       0.0,               mobHalfW,        2],   // 腰前
+                                [mobHalfW,  0.0,               0.0,             3],   // 右腰
+                                [-mobHalfW, 0.0,               0.0,             0],   // 左腰
+                                [0.0,       mobHalfH * 0.65,  -mobHalfW,        1],   // 肩后
+                                [0.0,       mobHalfH * 0.95,   0.0,             2]    // 头顶
+                            ]
+                            delegate: Node {
+                                position: Qt.vector3d(modelData[0], modelData[1], modelData[2])
+                                // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
+                                //   onCompleted 显式 reparent 进 mobBurnFlames（同 mobHost / itemHost 模式）。
+                                Component.onCompleted: if (parent === null) parent = mobBurnFlames
+                                property real flickerS: 0.13
+                                // 外焰（橙，最大；三层由大到小嵌套 → 渐变焰心，同 torch 焰模式）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    scale: Qt.vector3d(flickerS, flickerS * 1.20, flickerS)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff8a1a" }
+                                }
+                                // 中焰（黄）
+                                Model {
+                                    geometry: UnitCube {}
+                                    scale: Qt.vector3d(flickerS * 0.62, flickerS * 0.74, flickerS * 0.62)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffd23c" }
+                                }
+                                // 焰心（暖白，最小最亮）
+                                Model {
+                                    geometry: UnitCube {}
+                                    scale: Qt.vector3d(flickerS * 0.38, flickerS * 0.46, flickerS * 0.38)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fff4c4" }
+                                }
+                                // 闪烁：flickerS 标量 SequentialAnimation（同 torch；本工具链无 Vector3DAnimation，
+                                //   走 NumberAnimation on 标量 + scale 绑定）。duration 按 phaseIdx 偏移 → 各火舌
+                                //   相位错开，读作「此起彼伏」而非整齐跳动。
+                                SequentialAnimation on flickerS {
+                                    loops: Animation.Infinite
+                                    NumberAnimation { from: 0.13; to: 0.17; duration: 110 + modelData[3] * 60 }
+                                    NumberAnimation { from: 0.17; to: 0.11; duration: 150 + modelData[3] * 50 }
+                                    NumberAnimation { from: 0.11; to: 0.15; duration: 90 }
+                                    NumberAnimation { from: 0.15; to: 0.13; duration: 130 + modelData[3] * 40 }
+                                }
+                            }
                         }
                     }
                     Model {
