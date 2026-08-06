@@ -374,6 +374,10 @@ private:
     //   才把波前推进 1 格（~0.3s 一格 → 1 格/tick 流动动画可见）。MC 自身约 0.25s/格，本工程取 3（0.3s）平衡
     //   动画可见度与扫描开销（全图扫水格 ~1-2ms + 波前少量写入）。
     int m_flowTickCounter = 0;
+    // t350 流体 tick 批量写标志：tickWaterFlow apply pass 开 → 每次 setWaterSilent 只写栅格 + 重光照，
+    //   不 emit worldChanged / 不 clearAllDirty；caller 末尾一次性 emit + clearDirty。把「每 tick 写 N 格
+    //   → N 次 worldChanged 扇出重建」合并为「1 次重建」，消除活跃扩散期卡顿。通用机制（t351 岩浆可同用）。
+    bool m_batchFluid = false;
     static constexpr int kFlowTickInterval = 3;   // tickWaterFlow 节流间隔（WorldClock tick 单位 = 100ms → 0.3s/格）
     static constexpr int kMaxFlowLevel = 7;       // 水流最大蔓延等级（state 1..7；机制等价 MC 1.0 流水 7 格扩散）
     // t343 岩浆流 tick 节流计数 + 常量：tickLavaFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到

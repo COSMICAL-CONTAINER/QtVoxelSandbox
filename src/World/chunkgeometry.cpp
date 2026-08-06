@@ -350,13 +350,25 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                 const int s = (state > 7) ? 7 : int(state);
                 return (8.0f - float(s)) / 8.0f;
             };
+            // t350 renderTop：水流格的**实际渲染**顶高（含竖向柱连续性修正）。水源(st==0)=1.0；
+            //   流水(st>0) 的 slab 高 = surfH(state)，但若**正上方为水**（竖向柱 / 下落流的中段）→ 1.0（满块）。
+            //   修「竖向堆叠流水格间露出空气带」：流水 slab 仅占 cell 下部（[0, (8-level)/8]），上方留空；
+            //   两流水格上下堆叠时，下格侧壁止于其 slab 顶、上格侧壁起于本 cell 底 → slab 顶与本 cell 底之间
+            //   一段无侧壁 → 透视见空气带（用户「水不连续 / 见缝」）。被上方水覆盖的流水格属柱内 → 渲染满高，
+            //   侧壁贯通相邻格 → 柱连续无缝。顶格（上方 air）保 slab 水面高（露出真实水面）；水源本就满高。
+            //   blockAtWorld 越界返 Air → 顶格不触发满高修正。
+            auto renderTop = [&](quint8 state, int ax, int ay, int az) -> float {
+                if (state == 0) return 1.0f;
+                if (blockAtWorld(ax, ay + 1, az) == BlockRegistry::Water) return 1.0f; // 上方有水 → 柱内满块
+                return surfH(state);
+            };
             for (int ly = 0; ly < H; ++ly) {
                 for (int lz = 0; lz < S; ++lz) {
                     for (int lx = 0; lx < S; ++lx) {
                         const int wx = originX + lx, wz = originZ + lz;
                         if (blockAtWorld(wx, ly, wz) != BlockRegistry::Water) continue;
                         const quint8 st = stateAtWorld(wx, ly, wz);
-                        const float myTop = surfH(st);
+                        const float myTop = renderTop(st, wx, ly, wz); // t350：上方有水 → 满高（柱连续无缝）
                         const int tile = (st == 0) ? stillTile : flowTile; // 水源静水 / 流水斜纹（t223 按 phase 选帧）
                         const float u0 = tile * tileW + hx, u1 = (tile + 1) * tileW - hx;
                         for (int f = 0; f < 6; ++f) {
@@ -385,7 +397,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                     if (st == 0) continue; // 水源满高：邻实体完全遮挡 → 剔除（原行为）
                                     // 流水降水面：画 [0,myTop] 满侧（yLo=0,yHi=myTop 已是默认）保持贴图可见
                                 } else if (nb == BlockRegistry::Water) {
-                                    const float nbrTop = surfH(stateAtWorld(nwx, nwy, nwz));
+                                    const float nbrTop = renderTop(stateAtWorld(nwx, nwy, nwz), nwx, nwy, nwz);
                                     if (nbrTop >= myTop - 1e-4f) continue;      // 邻居水面 >= 本格 → 整面剔除
                                     yLo = nbrTop;                                // 邻居更低 → 画邻居水面到本格水面间暴露带
                                     yHi = myTop;

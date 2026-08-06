@@ -209,6 +209,7 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     const quint8 lightOldId = oldId; // recomputeLightAround 用编辑前后 id（水 isSolid=false 非遮光，光照通常无变化）
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
     recomputeLightAround(x, y, z, lightOldId, id);
+    if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     return true;
@@ -391,9 +392,14 @@ void World::tickWaterFlow()
             // 下落：写下方为流水 level=1（**非源** —— 修 t174「下落成源灌满盆地」bug）。
             tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1));
         }
-        // 水平蔓延：bk != 2（非水下柱）且未到最大流距 → 4 向邻居。air → 写 level+1；既有流水 → re-level 下调。
-        //   t272：bk==0（悬空 / 越崖边缘）也走此分支 → 水流「多流一格再下落」（cascade lip）。
-        if (bk != 2 && c.level < kMaxFlowLevel) {
+        // 水平蔓延：仅当本格 grounded（下方为实体方块，bk==1）才向水平 air 邻居扩散；air → 写 level+1；
+        //   既有流水 → re-level 下调。t350 修「单桶水流遇崖边悬空 cascade → 淹平面（tsunami）」：
+        //   旧实现 `bk != 2` 让 bk==0（下方 air）同时下落 + 水平外扩，每格悬空水都向 4 方各推 1 格再下落 →
+        //   无界平面淹没（一桶水铺满整片）。MC 规则：流水仅在 solid 支撑上水平扩散；下方为 air 即**只**垂直
+        //   下落（已写下方 level=1），不外扩。水流沿 solid 推到崖边 → 边缘格下方 air → 下落成柱 → 落点
+        //   grounded 格继续 7 格水平蔓延（机制等价 MC 流水 grounded spread + 越崖成瀑）。bk==2（水下柱）本格
+        //   不扩散（由该柱最底 grounded 格负责）；bk==0（悬空）只下落不扩散。
+        if (bk == 1 && c.level < kMaxFlowLevel) {
             for (const auto &d : hd) {
                 const int nx = c.x + d[0], nz = c.z + d[1];
                 if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
@@ -421,17 +427,29 @@ void World::tickWaterFlow()
     // 5) 应用：升源 → 蒸发 → 新增/重定级（三者经 keySet 互斥，顺序安全）。setWaterSilent 内部无变化
     //    → false → 稳态零重建。升源最前：升源格不在 evaps/evapKeys（pass 3 显式跳过）亦不在 adds（pass 4
     //    显式跳过 srcRegKeys），故先写 level 0 不会被后续覆盖。
+    //    t350 流体 tick 批量写：开 m_batchFluid 使每次 setWaterSilent 只写栅格 + 重光照、**不** emit
+    //    worldChanged、**不** clearAllDirty；末尾本 tick 所有改动一次性 emit worldChanged（驱动 terrain/water
+    //    两段重建完）+ clearAllDirty。修「活跃扩散每 tick 写 N 格 → N 次 worldChanged → N×全 chunk
+    //    onWorldChanged 扇出 + N×recomputeMeshStats 全扫」的卡顿。批量遵循两段共享 dirty 协议（emit 后两段
+    //    同步重建、再统一清脏），与逐格路径终态一致，仅把 N 次重建并为 1 次。
+    m_batchFluid = true;
+    bool anyChange = false;
     for (const WCell &s : srcRegs)
-        setWaterSilent(s.x, s.y, s.z, BlockRegistry::Water, 0);
+        anyChange |= setWaterSilent(s.x, s.y, s.z, BlockRegistry::Water, 0);
     for (const WCell &e : evaps)
-        setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
+        anyChange |= setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
     for (const auto &kv : adds) {
         const long long k = kv.first;
         const int x = static_cast<int>(k % W);
         const long long kz = k / W;
         const int z = static_cast<int>(kz % D);
         const int y = static_cast<int>(kz / D);
-        setWaterSilent(x, y, z, BlockRegistry::Water, kv.second);
+        anyChange |= setWaterSilent(x, y, z, BlockRegistry::Water, kv.second);
+    }
+    m_batchFluid = false;
+    if (anyChange) {
+        emit worldChanged();       // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
+        m_chunks.clearAllDirty();  // 两段重建完统一清脏（同逐格路径的 emit→clear 顺序）
     }
 }
 
