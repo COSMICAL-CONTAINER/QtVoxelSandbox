@@ -5844,8 +5844,9 @@ Window {
             //   做一次成长判定，树苗据光强 + 草地/泥土支撑 + 主干列畅通 + 散布概率逐步长成完整橡树）。纯 QML
             //   桥接（同 tickCropGrowth 模式）。tickSaplingGrowth 内部对稳态（无树苗 / 全不满足）静默 → 无重建开销。
             theWorld.tickSaplingGrowth()
-            // t325 树叶渐进消退 tick：WorldClock 每 100ms tick → 驱动 World.tickLeafDecay（内部节流到 ~每 0.3s
-            //   开一窗，队列内每叶按散布概率 2%/窗独立判定是否消失 → 几何分布散布 ~10-30s 渐退，非瞬时全消）。
+            // t325 树叶渐进消退 tick：WorldClock 每 100ms tick → 驱动 World.tickLeafDecay（内部节流到 ~每 0.4s
+            //   开一窗，队列内每叶按散布概率 1%/窗独立判定是否消失 → 几何分布散布 ~30-90s 渐退，非瞬时全消；
+            //   t379 在 t325 基础上放慢约 2.5×）。
             //   纯 QML 桥接（同 tickCropGrowth/tickSaplingGrowth 模式）。tickLeafDecay 内部对稳态（无失撑叶 /
             //   本窗无命中）静默 → 无写入、无重建开销。
             theWorld.tickLeafDecay()

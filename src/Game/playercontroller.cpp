@@ -903,7 +903,7 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
     dropCropDrops(cx, cy, cz, cid, cstate);            // 失撑掉落产出与玩家破块同源
 }
 
-// t305 树叶掉落（见 playercontroller.h 头注释）。机制等价 MC 1.0 破叶掉落：5% 树苗物品 / 2% 木棒。
+// t305 树叶掉落（见 playercontroller.h 头注释）。机制等价 MC 1.0 破叶掉落：t379 调高后 10% 树苗物品 / 8% 木棒。
 //   两次独立判定（可同时掉树苗 + 木棒）。两物品散布到破格 + 非实体水平邻格做视觉分离（同 WheatCrop / 双半砖
 //   模式：ItemEntityManager spawnItem 仅整数格坐标存格中心，故以邻格区分）。无邻格则同破格（仍两实体）。
 void PlayerController::dropLeafDrops(int x, int y, int z)
@@ -915,10 +915,10 @@ void PlayerController::dropLeafDrops(int x, int y, int z)
     for (const auto &o : kHoriz) {
         if (!BlockRegistry::isSolid(m_world->blockAt(x + o[0], y, z + o[1]))) { sx = x + o[0]; sz = z + o[1]; break; }
     }
-    // 树苗物品（5%）：独立判定。
+    // 树苗物品（10%）：独立判定。
     if (QRandomGenerator::global()->bounded(100) < kLeafSaplingDropPct)
         emit spawnItem(x, y, z, RecipeRegistry::SaplingItemId, 1);
-    // 木棒（2%）：独立判定（可与树苗同时掉）；落到散布邻格做视觉分离。
+    // 木棒（8%）：独立判定（可与树苗同时掉）；落到散布邻格做视觉分离。
     if (QRandomGenerator::global()->bounded(100) < kLeafStickDropPct)
         emit spawnItem(sx, y, sz, RecipeRegistry::StickId, 1);
 }

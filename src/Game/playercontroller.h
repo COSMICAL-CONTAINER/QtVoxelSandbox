@@ -875,11 +875,12 @@ private:
     //   与本玩家破块路径互不影响。
     static constexpr int kTallGrassSeedDropDenom = 8; // 1/8 ≈ 12.5%（MC 1.0 草丛掉种概率）
     // t305 树叶掉落概率（机制等价 MC 1.0 破叶掉落）：finishMiningAt 破 Leaves 时按本概率掉树苗物品 / 木棒。
-    //   kLeafSaplingDropPct=5（5% 掉 1 树苗，MC 1.0 橡树叶 5% 掉树苗）；kLeafStickDropPct=2（2% 掉 1 木棒，
-    //   MC 1.0 树叶 2% 掉木棒）。两次独立判定（可同时掉树苗 + 木棒）。玩家交互掉落的随机性（QRandomGenerator），
+    //   t379 调参（spec 反馈掉落偏少）：kLeafSaplingDropPct=10（10% 掉 1 树苗，较 MC 1.0 原值 5% 翻倍；
+    //   kLeafStickDropPct=8（8% 掉 1 木棒，较 MC 1.0 原值 2% 提至 4×，木棒比树苗更常见，符合廉价材料定位）。
+    //   两次独立判定（可同时掉树苗 + 木棒）。玩家交互掉落的随机性（QRandomGenerator），
     //   非 worldgen 确定性范畴 §2-K。自然衰减（decayLeavesAround）不走本路径（无掉落，spec「树叶消失」）。
-    static constexpr int kLeafSaplingDropPct = 5; // 5%（MC 1.0 橡树叶掉树苗概率）
-    static constexpr int kLeafStickDropPct   = 2; // 2%（MC 1.0 树叶掉木棒概率）
+    static constexpr int kLeafSaplingDropPct = 10; // 10%（t379 由 MC 原值 5% 调高，反馈掉落偏少）
+    static constexpr int kLeafStickDropPct   = 8;  // 8%（t379 由 MC 原值 2% 调高，反馈掉落偏少）
     // t211 水流推动玩家（机制等价 MC 1.0 流水冲走实体）：
     //   kWaterFlowPush：流水水平推力速度（blocks/sec；脚位在流水格 state>0 时沿离源方向叠入水平速度）。
     //     低于 kWalk(4.3) → 玩家仍可逆流游（净速 ≈ 走速 − 推力），但松手会被流走。spec「创造非飞 + 生存」。

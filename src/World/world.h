@@ -189,7 +189,7 @@ public:
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickSaplingGrowth();
     // t325 树叶渐进消退 tick（spec「挖光一棵树所有原木→树叶消失」的渐进化修：旧 t305 瞬时清半树冠叶 →
-    //   改为逐叶按概率渐退，散布 ~10-30s）。由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；
+    //   改为逐叶按概率渐退，散布 ~30-90s；t379 在 t325 基础上进一步放慢）。由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；
     //   本方法内部节流到 ~每 kLeafDecayTickInterval×0.1s 做一次判定窗口）。机制等价 MC 1.0 叶衰 random-tick：
     //   叶子一旦失撑（无原木支撑）即进入衰减，**每窗**按散布概率 kLeafDecayPct 独立判定是否本窗消失 → 几何分布
     //   散布寿命（非瞬时全消、不同叶错峰渐退）。散布确定性哈希（seed + 位置 + 窗口序号，PLAN §2-K 精神，同
@@ -429,13 +429,14 @@ private:
     //   累积到 kLeafDecayTickInterval 才开一个判定窗口（~每 kLeafDecayTickInterval×0.1s 一窗）。窗口序号
     //   m_leafDecayIntervalIndex 每窗 +1，喂入 hashVoxel 散布概率 → 不同叶错峰渐退（非全部同步消失）。
     //   m_decayingLeaves 持当前失撑但尚未消失的叶坐标（坐标打包成 quint64 键，去重；队列空 → 稳态零开销早退）。
-    //   kLeafDecayTickInterval=3（0.3s/窗）+ kLeafDecayPct=2（2%/窗）→ 几何分布平均寿命 ~15s、中位 ~10s、长尾至 30s+
-    //   （spec「散布 ~10-30s 渐退」）；MC 1.0 叶衰为 random-tick 式渐退，本工程机制对齐非精确数值复刻。
+    //   kLeafDecayTickInterval=4（0.4s/窗）+ kLeafDecayPct=1（1%/窗）→ 几何分布平均寿命 ~40s、中位 ~28s、长尾至 90s+
+    //   （t379：t325 原值 3/2 ~15s 仍偏快 → 放慢约 2.5×，叶子更持久渐退）；MC 1.0 叶衰为 random-tick 式渐退，
+    //   本工程机制对齐非精确数值复刻。
     std::unordered_set<quint64> m_decayingLeaves; // 失撑叶坐标集合（packCell 打包键；tickLeafDecay 消费 + 清出队）
     int m_leafDecayTickCounter = 0;
     int m_leafDecayIntervalIndex = 0;
-    static constexpr int kLeafDecayTickInterval = 3; // tickLeafDecay 节流间隔（WorldClock tick 单位 = 100ms → 0.3s/窗）
-    static constexpr int kLeafDecayPct          = 2; // 每窗每叶消失的散布概率（%；2% → 平均 ~15s 渐退，散布至 30s+）
+    static constexpr int kLeafDecayTickInterval = 4; // tickLeafDecay 节流间隔（WorldClock tick 单位 = 100ms → 0.4s/窗）
+    static constexpr int kLeafDecayPct          = 1; // 每窗每叶消失的散布概率（%；1% → 平均 ~40s 渐退，散布至 90s+）
 };
 
 #endif // WORLD_H

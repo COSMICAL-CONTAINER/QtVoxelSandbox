@@ -689,7 +689,8 @@ void World::decayLeavesAround(int x, int y, int z)
 }
 
 // t325 树叶渐进消退 tick（见 world.h 头注释）。机制等价 MC 1.0 叶衰 random-tick 渐退：队列内每叶每窗按散布概率
-//   kLeafDecayPct 独立判定是否本窗消失 → 几何分布散布寿命（平均 ~15s、中位 ~10s、长尾 30s+，非瞬时全消）。
+//   kLeafDecayPct 独立判定是否本窗消失 → 几何分布散布寿命（平均 ~40s、中位 ~28s、长尾 90s+，非瞬时全消；
+//   t379 在 t325 基础上放慢约 2.5×）。
 //   命中叶批量静默清（m_chunks.setBlock 直写 Air + 标脏，不发 broken/placed → 无破叶粒子/音，自然衰减无反馈）
 //   + 末尾对受影响区一次 refloodBox 重算光场 + 一次 worldChanged（避免逐叶 N 次光场重算 + N 次重建请求）。
 //   队列空（稳态无失撑叶）→ 零开销早退；本窗无命中 → 零写入、零 worldChanged。散布确定性哈希（PLAN §2-K 精神，
@@ -697,7 +698,7 @@ void World::decayLeavesAround(int x, int y, int z)
 void World::tickLeafDecay()
 {
     if (m_decayingLeaves.empty()) return;                       // 稳态（无失撑叶）→ 零开销早退
-    if (++m_leafDecayTickCounter < kLeafDecayTickInterval) return; // 节流：每 kLeafDecayTickInterval tick（~0.3s）开一窗
+    if (++m_leafDecayTickCounter < kLeafDecayTickInterval) return; // 节流：每 kLeafDecayTickInterval tick（~0.4s）开一窗
     m_leafDecayTickCounter = 0;
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return;
