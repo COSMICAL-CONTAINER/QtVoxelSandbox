@@ -1008,11 +1008,13 @@ World::Biome World::biomeAt(int x, int z) const
     if (b < -0.4) return Biome::Desert;
     // t306：原 plains 候选带（b ∈ [-0.4,0.5]）用第二条独立低频 fBm 把 forest 从草原里 carve 出来。
     //   独立频率 0.020 + seed 偏移 +977（与主群系图 0.012/+3571、高度图 0.09 均不同）→ 森林图与三者解耦；
-    //   低频 → 森林成片（非逐格斑点，机制等价 MC 1.0 森林群系大尺度分布）。阈值 0.15（fbm 近似正态居中 0）
-    //   → 候选带内约 30-40% 划为森林，草原仍为多数（spec「森林+草原」二者共存，森林不吞没草原）。
-    //   纯函数于 seed → 同 seed 同 forest/plains 划分（PLAN §2-K）。
+    //   低频 → 森林成片（非逐格斑点，机制等价 MC 1.0 森林群系大尺度分布）。
+    //   t373：阈值 0.15→0.40（fbm 近似正态居中 0）。旧 0.15 实测森林吞没草原（草原几乎不可见），
+    //   因 4 阶 fbm 实际分布比名义 [-1,1] 收窄、0.15 已落入正半区主流段 → 森林占比偏高。提至 0.40
+    //   把森林压成少数（候选带内 ~15-20%），草原重新成为大片开阔地带（spec「大草原」原意）；森林仍
+    //   成片共存（spec「森林+草原」二者共存，森林不消失）。纯函数于 seed → 同 seed 同 forest/plains 划分（PLAN §2-K）。
     const double f = fbm((x + m_seed + 977) * 0.020, (z + m_seed + 977) * 0.020); // [-1,1]
-    return (f > 0.15) ? Biome::Forest : Biome::Plains;
+    return (f > 0.40) ? Biome::Forest : Biome::Plains;
 }
 
 // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威）。旧 t117 独立 fBm（0.018/+7919/0.35）
