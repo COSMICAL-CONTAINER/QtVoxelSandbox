@@ -2065,8 +2065,10 @@ void World::placeLavaLakes()
 //   于海）。经 m_chunks.setBlock 直写；fbm / hashColumn 纯函数 → 同 seed 同湖形（PLAN §2-K）。
 void World::placeSurfaceLakes()
 {
-    constexpr int kLakeGrid     = 18;      // 候选网格间距
-    constexpr unsigned kLakePct = 25u;     // 候选命中概率
+    // t375「湖太少」：网格 18→12、命中 25→50 → 候选密度约 4.5×（密度 ∝ pct/grid²）。仅放宽候选密度，
+    //   不动「局部低洼」几何判定（湖盆有效性须保留，否则斜坡上的水会流空 → 坏湖）。同 seed 仍确定。
+    constexpr int kLakeGrid     = 12;      // 候选网格间距（t375：18→12 加密采样）
+    constexpr unsigned kLakePct = 50u;     // 候选命中概率（t375：25→50 翻倍）
     constexpr int kLakeDepth    = 2;       // 湖深（水源层数：surfaceY-1 .. surfaceY-2）
 
     int placed = 0;
