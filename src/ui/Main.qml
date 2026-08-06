@@ -877,6 +877,25 @@ Window {
         return Qt.rgba(r * k, g * k, b * k, 1.0)
     }
 
+    // t377 mob 护甲 Model 的 baseColor：tier 色（与玩家 / MaterialIcon 护甲配色同源）× 昼夜 terrainLight，
+    //   受击红闪（hurtFlashAt>0 → #ff0000，同 mob 体色红闪）。armorId = 0x300 + tier*4 + piece → tier = (id-0x300)/4。
+    //   spec t377「mobs spawn with RANDOM armor ... material-colored」。
+    function mobArmorColor(entIdx, armorId) {
+        entityManager.revision
+        if (entityManager.hurtFlashAt(entIdx) > 0) return "#ff0000"
+        const tier = Math.floor((armorId - 0x300) / 4)
+        const cols = [
+            [0.541, 0.353, 0.169], // 皮革
+            [0.847, 0.847, 0.847], // 铁
+            [0.784, 0.471, 0.314], // 铜
+            [0.980, 0.847, 0.251], // 金
+            [0.306, 0.878, 0.784], // 钻石
+        ]
+        const c = cols[tier] || cols[1]
+        const tl = terrainLight(worldClock.skyLight)
+        return Qt.rgba(c[0] * tl.r, c[1] * tl.g, c[2] * tl.b, 1.0)
+    }
+
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }
     // t173/t179 箱子内容存储 VM（按方块世界坐标键控的 27 槽；ChestUI 读写 + onBlockBroken(Chest) 清孤儿）。
@@ -2209,6 +2228,27 @@ Window {
                 return Qt.rgba(r + (1.0 - r) * hurt, g * (1.0 - hurt), b * (1.0 - hurt), 1.0)
             }
 
+            // t377 护甲 tier → 基础色 (r,g,b) 浮点（与 MaterialIcon 护甲配色同源：皮革棕 / 铁银 / 铜橙 / 金黄 /
+            //   钻石青）。3rd-person 装备护甲 Model 据此着色（material-colored，spec t377「THIRD-PERSON player model
+            //   shows equipped armor (per piece, material-colored)」）。armorId 非护甲 → 兜底铁银灰。
+            function armorBaseColor(armorId) {
+                const tier = hotbarVM.armorTier(armorId)
+                switch (tier) {
+                case 0: return [0.541, 0.353, 0.169] // 皮革 #8a5a2b
+                case 1: return [0.847, 0.847, 0.847] // 铁 #d8d8d8
+                case 2: return [0.784, 0.471, 0.314] // 铜 #c87850
+                case 3: return [0.980, 0.847, 0.251] // 金 #fad840
+                case 4: return [0.306, 0.878, 0.784] // 钻石 #4ee0c8
+                default: return [0.847, 0.847, 0.847]
+                }
+            }
+            // t377 护甲 Model 的 baseColor = tier 色 lerp 向红（受伤变红，同身体 hurtTint）+ bodyOpacity。
+            //   与身体部件统一走 hurtTint（不叠 terrainLight —— 玩家身体本身不随昼夜变暗，护甲一致）。
+            function armorMatColor(armorId) {
+                const c = playerModel.armorBaseColor(armorId)
+                return playerModel.hurtTint(playerModel.hurt, c[0], c[1], c[2])
+            }
+
             // 行走动画混合系数（t45）：moveSpeed>0.1 → 1（四肢摆动），否则 0（中性位）。QML 据此缩放
             //   腿/臂的 sin() 摆幅 → 静止时四肢归零（不再生硬平移）。0/1 二值切换（spec：静止归零）。
             readonly property real walkBlend: player.moveSpeed > 0.1 ? 1.0 : 0.0
@@ -2286,6 +2326,16 @@ Window {
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
                     }
+                    // t377 头盔（装备槽 0）：作 headNode 子节点 → 随头部俯仰。略大于头、覆盖头顶（帽型）。
+                    //   visible 绑装备槽 0 是否有护甲（armorRevision 触碰）。材质色 = tier（armorMatColor）。
+                    Model {
+                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(0) }
+                        visible: armId !== 0
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.32, 0)
+                        scale: Qt.vector3d(0.54, 0.40, 0.54)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(armId); opacity: playerModel.bodyOpacity }
+                    }
                     // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
                     // 的两个对称小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
                     // （§9 override (a)，无 MC 皮肤）。作 headNode 子节点 → 随头部俯仰（眼贴头表面 → 跟随看视线方向）。
@@ -2326,6 +2376,15 @@ Window {
                     position: Qt.vector3d(0, 0.35, 0)
                     scale: Qt.vector3d(0.5, 0.7, 0.3)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
+                }
+                // t377 胸甲（装备槽 1）：作 upperBody 子节点 → 随鞠躬前倾。略大于躯干、覆盖胸腹（甲片型）。
+                Model {
+                    property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(1) }
+                    visible: armId !== 0
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, 0.42, 0)
+                    scale: Qt.vector3d(0.56, 0.56, 0.36)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(armId); opacity: playerModel.bodyOpacity }
                 }
                 // 左臂枢轴（t45 走 / t52 仅右手挖）：枢轴位于左肩（相对 upperBody：-0.375, 0.7, 0；世界 -0.375, 1.3, 0），
                 //   袖+手作子节点本地 -Y 偏移（袖中心 -0.25、手中心 -0.6）→ 绕肩旋转时手在弧线末端摆动（自然关节运动）。
@@ -2627,6 +2686,15 @@ Window {
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                 }
+                // t377 左护腿（装备槽 2）：作大腿枢轴子节点 → 随大腿行走 / 蹲下摆动。略大于大腿、覆盖裤腿。
+                Model {
+                    property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
+                    visible: armId !== 0
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, -0.15, 0)
+                    scale: Qt.vector3d(0.27, 0.32, 0.27)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(armId); opacity: playerModel.bodyOpacity }
+                }
                 // 膝盖关节（t65）：位于大腿末端（髋下 0.3）。站立 0°（小腿续大腿成直线）；蹲下回折
                 //   crouchKnee（=−crouchThigh）→ 小腿相对大腿弯折、整体腿弯曲，有效竖直高度缩短配合身体下沉。
                 Node {
@@ -2639,6 +2707,15 @@ Window {
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
+                    }
+                    // t377 左靴（装备槽 3）：作膝盖枢轴子节点 → 随小腿摆动。覆盖脚踝 / 脚部（靴型）。
+                    Model {
+                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(3) }
+                        visible: armId !== 0
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.27, 0)
+                        scale: Qt.vector3d(0.27, 0.12, 0.29)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(armId); opacity: playerModel.bodyOpacity }
                     }
                 }
             }
@@ -2657,6 +2734,15 @@ Window {
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                 }
+                // t377 右护腿（装备槽 2）：镜像左护腿（随大腿摆动）。
+                Model {
+                    property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
+                    visible: armId !== 0
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0, -0.15, 0)
+                    scale: Qt.vector3d(0.27, 0.32, 0.27)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(armId); opacity: playerModel.bodyOpacity }
+                }
                 Node {
                     id: rightKneePivot
                     position: Qt.vector3d(0, -0.3, 0)
@@ -2666,6 +2752,15 @@ Window {
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
+                    }
+                    // t377 右靴（装备槽 3）：镜像左靴（随小腿摆动）。
+                    Model {
+                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(3) }
+                        visible: armId !== 0
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.27, 0)
+                        scale: Qt.vector3d(0.27, 0.12, 0.29)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(armId); opacity: playerModel.bodyOpacity }
                     }
                 }
             }
@@ -3546,6 +3641,38 @@ Window {
                             scale: Qt.vector3d(0.07, 0.08, 0.02)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
                         }
+                        // t377 Shambler 随机护甲（4 部位；mobArmorAt 返护甲 id，0=无 → 隐）。作 mob Model 子节点 →
+                        //   继承 bodyYaw + 父 visible。MobModel 局部坐标（头心 0.57 / 躯干心 0.05 / 腿底 -0.90）。
+                        //   腿摆动烘焙在几何里 → 护腿 / 靴为静态盒（近似的视觉提示，~20% mob 偶遇可接受）。
+                        //   tier 色 × terrainLight + 受击红闪（mobArmorColor）；NoLighting（红线）。
+                        Model { // 头盔（piece 0）
+                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 0) }
+                            visible: armId !== 0
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.48, 0.30, 0.48)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, armId) }
+                        }
+                        Model { // 胸甲（piece 1）
+                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 1) }
+                            visible: armId !== 0
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.48, 0.50, 0.30)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, armId) }
+                        }
+                        Model { // 护腿（piece 2）
+                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 2) }
+                            visible: armId !== 0
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.46, 0.40, 0.26)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, armId) }
+                        }
+                        Model { // 靴子（piece 3）
+                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 3) }
+                            visible: armId !== 0
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.46, 0.16, 0.26)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, armId) }
+                        }
                     }
                     Model {
                         // t284 潜行者（Stalker，mobType 6；机制等价 MC 1.0 苦力怕，§9 改名 + 原创模型/纯色无贴图）：
@@ -3662,6 +3789,36 @@ Window {
                                     }
                                 }
                             }
+                        }
+                        // t377 Bones 随机护甲（4 部位；同 Shambler，但 Bones 身形瘦 → 护甲盒按比例缩窄，贴骨身）。
+                        //   作 mob Model 子节点继承 bodyYaw + 父 visible；MobModel 局部坐标（瘦躯干 half 0.14 / 细腿 0.06）。
+                        Model { // 头盔（piece 0）
+                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 0) }
+                            visible: armId !== 0
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.36, 0.26, 0.36)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, armId) }
+                        }
+                        Model { // 胸甲（piece 1）
+                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 1) }
+                            visible: armId !== 0
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.34, 0.50, 0.24)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, armId) }
+                        }
+                        Model { // 护腿（piece 2）
+                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 2) }
+                            visible: armId !== 0
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.30, 0.40, 0.20)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, armId) }
+                        }
+                        Model { // 靴子（piece 3）
+                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 3) }
+                            visible: armId !== 0
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.30, 0.16, 0.20)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, armId) }
                         }
                     }
                     // t285/t302 Spider（蜘蛛；mobType 7）：MobModel 宽矮躯干 + 前伸小头 + **8 腿**（原创 §9，4 对

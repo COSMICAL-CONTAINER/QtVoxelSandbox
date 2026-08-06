@@ -349,6 +349,9 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
                     // t304 手持弓 → 右键长按拉弓（不进 placeBlock；弓非方块，selectedBlock 已守 Air）。机制等价
                     //   MC 1.0 右键拉弓。持物判据直读 hotbar（单一权威，免 QML 绑定滞后窗口，同面包 / 桶修法）。
                     if (heldForEat == int(ToolRegistry::Bow)) { beginBowDraw(); return true; }
+                    // t377 手持护甲 → 右键装备 / 互换（不进 placeBlock；护甲非方块，selectedBlock 已守 Air）。
+                    //   equipSelectedArmor 自判 isArmor，非护甲返 false → 回退 placeBlock。机制等价 MC 1.0 右键装备。
+                    if (m_hotbar && m_hotbar->equipSelectedArmor()) return true;
                     placeBlock();
                     return true;
                 }

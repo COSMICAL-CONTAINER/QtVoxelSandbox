@@ -243,6 +243,10 @@ public:
     //   （拉弓期位移减速到停 = SLOWS + pauses to aim，顺带拉低 t321 攻击节奏）。非 Bones / 未瞄准 / 越界 → 0。
     //   revision 在追踪期每帧 bump（tick Mob 分支）让绑定刷新（拉弓期 mob 减速到停 → moved=false 亦须刷新）。
     Q_INVOKABLE float drawAmountAt(int i) const;
+    // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。
+    //   仅 Shambler/Bones spawn 时随机分配（~80% 无 / ~20% 一件或一套）；QML delegate 据 it 叠加 tier 色
+    //   护甲 Model（material-colored，机制等价 MC 1.0 僵尸/骷髅随机护甲）。越界 → 0。
+    Q_INVOKABLE int mobArmorAt(int i, int piece) const;
     // t249 受击击退（spec「受击往攻击方向小跳击退」；C++ 直调，PlayerController::attackMob 命中后调）：
     //   给第 i 个 mob 一个水平方向 (dirX,dirZ) 的击退冲量（vx/vz=kKnockbackHoriz 沿方向）+ 小跳垂直速度
     //   （vy=kKnockbackUp 向上）；解除 resting 让 tick 重力分支处理上跳→减速→下落→着地（小弹起观感）。
@@ -466,6 +470,13 @@ private:
         //   期间位移减速到停 = SLOWS + pauses to aim）。脱射程 / 视线断 / 冷却中 → 清零（中止拉弓）。drawAmountAt 据
         //   它返 0..1 驱动 QML 抬臂 + 弦后拉。
         float aimTimer = 0.0f;    // 拉弓瞄准计时（秒；>0 = 正在拉弓；仅 MobBones 用）
+        // t377 mob 护甲（4 部位护甲物品 id；0=无）。仅 Shambler/Bones spawn 时随机分配（~80% 无 / ~20% 一件或
+        //   一套）。QML delegate 据它叠加 tier 色护甲 Model（机制等价 MC 1.0 僵尸/骷髅随机护甲；spec t377）。
+        //   其余 mob 留 0 不显。仅视觉 + spawn 随机（不参与 mob 减伤计算 —— spec 仅要求视觉 + 偶遇）。
+        int armorHelmet = 0;      // 头盔护甲 id（0=无）
+        int armorChest  = 0;      // 胸甲护甲 id（0=无）
+        int armorLegs   = 0;      // 护腿护甲 id（0=无）
+        int armorBoots  = 0;      // 靴子护甲 id（0=无）
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;

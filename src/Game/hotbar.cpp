@@ -744,6 +744,32 @@ void Hotbar::damageArmor()
     if (changed) bumpArmorRevision();
 }
 
+// t377 在世界中右键手持护甲 → 装备 / 互换（spec t377「held armor RIGHT-CLICK = equip/swap」）。
+//   选中槽护甲 → 装到对应部位槽；该槽原旧件 → 换回选中槽（手持）。机制等价 MC 1.0 右键装备护甲
+//   （空槽装备、占用槽互换）。护甲不可堆叠（count 恒 1）；耐久随实例保真搬运（normalizeDurability 经
+//   setStack / armorSetStack 归一）。非护甲选中 → false（caller 回退常规右键 placeBlock）。
+bool Hotbar::equipSelectedArmor()
+{
+    if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return false;
+    const ItemStack &sel = m_slots[size_t(m_selectedSlot)];
+    if (!ArmorRegistry::isArmor(sel.id)) return false;            // 选中非护甲 → 非本路径
+    const int piece = ArmorRegistry::piece(sel.id);
+    if (piece < 0 || piece >= int(m_armorSlots.size())) return false;
+    // 快照新旧护甲（耐久随实例保真搬运）。
+    const int newId = sel.id, newDur = sel.durability;
+    const int oldId = m_armorSlots[size_t(piece)].id;
+    const int oldDur = m_armorSlots[size_t(piece)].durability;
+    qInfo().noquote() << "[inv] equipSelectedArmor slot=" << m_selectedSlot << "id=" << newId
+                      << "->piece=" << piece << " oldId=" << oldId;
+    // 清选中槽（取出手持护甲）。
+    setStack(m_selectedSlot, 0, 0, 0);
+    // 装备新护甲到对应部位槽（armorSetStack 守部位匹配，piece 一致必过）。
+    armorSetStack(piece, newId, 1, newDur);
+    // 旧护甲换回手持选中槽（已空 → 单件入）；无旧件 → 选中槽留空（手持清空）。
+    if (oldId != 0) setStack(m_selectedSlot, oldId, 1, oldDur);
+    return true;
+}
+
 // 从 slot 取最多 n 件。返回实际取走数；栈空则 id 归 0（保持空栈不变式）。
 int Hotbar::takeStack(int slot, int n)
 {

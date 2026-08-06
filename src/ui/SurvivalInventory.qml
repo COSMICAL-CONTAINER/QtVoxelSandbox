@@ -609,6 +609,13 @@ Item {
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 onTapped: {
+                                    // t377 Shift+左键装备槽护甲 → 整件归还背包（slotShiftLeft armor 分支）。
+                                    //   spec「Shift+Left-click an equipped piece -> move to inventory」。
+                                    if (window.shiftHeld) {
+                                        root.slotShiftLeft("armor", index)
+                                        root.armorChanged()
+                                        return
+                                    }
                                     const heldId = root.hotbar.heldBlock
                                     const heldCnt = root.hotbar.heldCount
                                     const heldDur = root.hotbar.heldDurability

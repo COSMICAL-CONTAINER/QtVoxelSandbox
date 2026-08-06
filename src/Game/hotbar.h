@@ -274,6 +274,11 @@ public:
     Q_INVOKABLE void armorSetStack(int slot, int id, int count, int durability = -1);
     Q_INVOKABLE QVariantList creativeArmor() const;
     Q_INVOKABLE void damageArmor();
+    // t377 在世界中右键手持护甲 → 装备 / 互换（spec t377「held armor RIGHT-CLICK = equip/swap」）。
+    //   取当前选中槽护甲：空对应部位槽 → 直接装备；占用 → 先把旧件换回选中槽（手持），再装备新件。
+    //   返回 true = 已处理（caller PlayerController 据此消费右键，不走 placeBlock）；选中非护甲 → false。
+    //   护甲不可堆叠 → count 恒 1；耐久随实例保真搬运。机制等价 MC 1.0 右键装备护甲。
+    Q_INVOKABLE bool equipSelectedArmor();
 
 signals:
     void selectedSlotChanged();

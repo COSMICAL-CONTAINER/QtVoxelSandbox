@@ -134,6 +134,31 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
     e.aimTimer = 0.0f; // t331 骸骨拉弓瞄准计时（slot 复用防残留；仅 MobBones 用）
     e.ambientTimer = kAmbientMin
                      + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
+    // t377 mob 随机护甲（仅 Shambler/Bones；spec「~80% no armor, ~20% a random piece/set」）。机制等价 MC 1.0
+    //   僵尸/骷髅随机护甲。armorId = 0x300 + tier*4 + piece（与 ArmorRegistry id 段一致；本地常量避免跨层依赖
+    //   Game/recipe.h —— Entities 层不向上 include）。tier 0..4（皮革/铁/铜/金/钻石）；piece 0..3（头/胸/腿/靴）。
+    //   仅视觉 + spawn 随机（QML delegate 叠 tier 色护甲 Model）；不参与 mob 减伤（spec 仅要求偶遇）。
+    e.armorHelmet = e.armorChest = e.armorLegs = e.armorBoots = 0;
+    if (mobType == MobShambler || mobType == MobBones) {
+        auto *rng = QRandomGenerator::global();
+        if (rng->bounded(100) < 20) {                       // ~20% 有护甲
+            constexpr int kArmorBase = 0x300;                // ArmorRegistry::ArmorIdBase（同源常量）
+            const int tier = int(rng->bounded(5));           // 0..4 材质档
+            const int base = kArmorBase + tier * 4;
+            if (rng->bounded(2) == 0) {                      // 整套（4 部位全配）
+                e.armorHelmet = base + 0;
+                e.armorChest  = base + 1;
+                e.armorLegs   = base + 2;
+                e.armorBoots  = base + 3;
+            } else {                                         // 单件（随机一个部位）
+                const int piece = int(rng->bounded(4));
+                if (piece == 0)      e.armorHelmet = base + 0;
+                else if (piece == 1) e.armorChest  = base + 1;
+                else if (piece == 2) e.armorLegs   = base + 2;
+                else                 e.armorBoots  = base + 3;
+            }
+        }
+    }
     acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -580,6 +605,21 @@ int EntityManager::mobTypeAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return 0;
     return m_entities[size_t(i)].mobType;
+}
+
+// t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。越界 → 0。
+//   仅 Shambler/Bones spawn 时随机分配；QML delegate 据 it 叠 tier 色护甲 Model。
+int EntityManager::mobArmorAt(int i, int piece) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    const Entity &e = m_entities[size_t(i)];
+    switch (piece) {
+    case 0: return e.armorHelmet;
+    case 1: return e.armorChest;
+    case 2: return e.armorLegs;
+    case 3: return e.armorBoots;
+    default: return 0;
+    }
 }
 
 // t300 第 i 只 mob 是否已被剪羊毛（仅 MobSheep 用；其余 mob 永远 false）。越界 → false。

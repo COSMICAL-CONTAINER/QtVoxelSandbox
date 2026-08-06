@@ -106,6 +106,9 @@ function resolveRightClick(root, curId, curCount, curDur) {
 function readSlot(root, group, index) {
     if (group === "main")   return { id: root.hotbar.mainBlockIdAt(index), count: root.hotbar.mainCountAt(index), durability: root.hotbar.mainDurabilityAt(index) }
     if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index), durability: root.hotbar.durabilityAt(index) }
+    // t377 装备槽（4 护甲槽：头/胸/腿/脚；index = 部位）。InventoryOps 路由护甲槽读，供 slotShiftLeft「Shift+左键
+    //   装备中的护甲 → 整件归还背包」用（同 main/hotbar 经 VM 统一）。
+    if (group === "armor") return { id: root.hotbar.armorBlockIdAt(index), count: root.hotbar.armorCountAt(index), durability: root.hotbar.armorDurabilityAt(index) }
     if (root.localReadSlot) return root.localReadSlot(group, index)
     return { id: 0, count: 0, durability: 0 }
 }
@@ -114,6 +117,8 @@ function writeSlot(root, group, index, id, count, durability) {
     const dur = (durability === undefined) ? -1 : durability
     if (group === "main")        { root.hotbar.mainSetStack(index, id, count, dur); return }
     if (group === "hotbar")      { root.hotbar.setStack(index, id, count, dur); return }
+    // t377 装备槽写经 armorSetStack（VM 守部位匹配 + count 钳 1）；slotShiftLeft 护甲装备 / 脱下用。
+    if (group === "armor")       { root.hotbar.armorSetStack(index, id, count, dur); return }
     if (root.localWriteSlot)     root.localWriteSlot(group, index, id, count)
 }
 
@@ -380,6 +385,29 @@ function singleRightClick(root, group, index) {
 //   语义，与普通左键的拾取/放置区分）。t230 craft 归包走 addToAny（同 id 合并 → 空槽开新），背包满 → 余数
 //   留 craft 槽（不清空，防丢物）。
 function slotShiftLeft(root, group, index) {
+    // t377 Shift+左键装备护甲：main/hotbar 持有护甲 → 装到对应部位槽（旧件换回源槽）。
+    //   机制等价 MC 1.0「Shift+左键背包护甲 → 自动装备到对应槽」（spec t377「survival inventory Shift+Left-click an
+    //   armor piece -> equip to its slot」）。护甲不可堆叠 → count 恒 1；耐久随实例保真搬运。非护甲走下方通用搬运。
+    if (group === "main" || group === "hotbar") {
+        const src = readSlot(root, group, index)
+        if (src.id !== 0 && root.hotbar.isArmor(src.id)) {
+            const piece = root.hotbar.armorPiece(src.id)
+            const old = readSlot(root, "armor", piece)
+            writeSlot(root, group, index, 0, 0, 0)                          // 取出源槽护甲
+            writeSlot(root, "armor", piece, src.id, 1, src.durability)      // 装备到部位槽
+            if (old.id !== 0) writeSlot(root, group, index, old.id, old.count, old.durability) // 旧件换回源槽
+            return
+        }
+    }
+    // t377 Shift+左键装备槽护甲 → 整件归还背包（addToAny：main 同 id 合并 → hotbar 同 id → 空槽）。
+    //   spec t377「Shift+Left-click an equipped piece -> move to inventory」。背包满 → 余数留装备槽。
+    if (group === "armor") {
+        const src = readSlot(root, "armor", index)
+        if (src.id === 0 || src.count <= 0) return
+        const remain = root.hotbar.addToAny(src.id, src.count, src.durability)
+        writeSlot(root, "armor", index, remain > 0 ? src.id : 0, remain, src.durability)
+        return
+    }
     if (group === "main") {
         const src = readSlot(root, "main", index)
         if (src.id === 0) return
