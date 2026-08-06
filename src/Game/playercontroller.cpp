@@ -2001,7 +2001,8 @@ bool PlayerController::overlapsPlayerAABB(int bx, int by, int bz, quint8 id, qui
 //   脚底 ≥ 块顶」的可着陆面，忽略沙等 bury 块），outHasMax 报是否有合格块。默认 cap=+inf、outHasMax=nullptr
 //   → 取全部块顶（旧行为），兼容 aabbHitsSolid / 水平轴贴面调用。
 bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMaxSurf,
-                                       bool *outHasMax, float maxSurfCap) const
+                                       bool *outHasMax, float maxSurfCap,
+                                       bool *outHasMin, float minSurfFloor) const
 {
     if (!m_world) return false;
     // t259：完整 AABB（cell 采样边界用——不漏采贴面格）。t51：高用 m_height（蹲下变矮）。
@@ -2038,7 +2039,9 @@ bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMa
                     if (axis < 0) continue; // 仅判命中（aabbHitsSolid）
                     const float bmin = (axis == 0) ? b.minX : (axis == 1) ? b.minY : b.minZ;
                     const float bmax = (axis == 0) ? b.maxX : (axis == 1) ? b.maxY : b.maxZ;
-                    if (outMinSurf && (!haveMin || bmin < minSurf)) { minSurf = bmin; haveMin = true; }
+                    // t352 修（对称 maxSurfCap）：minSurf 只累计 bmin>=floor 的块（向上顶头时 floor=pyBefore+
+                    //   m_height 过滤掉身体 / 脚位 partial 块，只留「玩家原头顶之上」的真天花板）。
+                    if (outMinSurf && bmin >= minSurfFloor && (!haveMin || bmin < minSurf)) { minSurf = bmin; haveMin = true; }
                     // t161 修：maxSurf 只累计 bmax<=cap 的块（向下着地时 cap=pyBefore 过滤掉沙等 bury 块顶）
                     if (outMaxSurf && bmax <= maxSurfCap && (!haveMax || bmax > maxSurf)) { maxSurf = bmax; haveMax = true; }
                 }
@@ -2048,6 +2051,7 @@ bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMa
         if (outMaxSurf && haveMax) *outMaxSurf = maxSurf;
     }
     if (outHasMax) *outHasMax = haveMax; // 区分「有碰撞但无可着陆面=纯 bury」与「有可着陆面」
+    if (outHasMin) *outHasMin = haveMin; // t352：区分「有碰撞但无真天花板=身体级 partial 重叠」与「有真天花板」
     return hit;
 }
 
@@ -2304,15 +2308,24 @@ void PlayerController::moveAxis(int axis, float amount)
     }
     if (!m_world) return;
     float minSurf = 0.f, maxSurf = 0.f;
-    bool hasMax = false;
+    bool hasMax = false, hasMin = false;
     // t161 修：向下（axis==1, amount<0）着地面只取玩家移动前脚底 pyBefore ≥ 块顶 bmax 的块（地面顶），
     //   忽略沙等 pyBefore<bmax 的 bury 块（顶更高）→ maxSurfCap=pyBefore+eps 过滤。否则 overlapSubAABBs 取
     //   所有重叠块 MAX（=沙顶 11）会让 snap 无效、地面托举（顶 10）随之失效，每 tick 重力再下沉穿地坠虚空。
-    //   其他方向（X/Z、Y 向上顶头）cap=+inf = 取全部（旧行为）。
+    //   其他方向（X/Z）cap=+inf = 取全部（旧行为）。
+    // t352 修（对称 maxSurfCap）：向上（axis==1, amount>0）顶头只取块底 bmin ≥ 玩家移动前头顶 pyBefore+m_height
+    //   的块（真天花板），忽略半砖阶 / 楼梯背墙 / 活版门唇边 / 栅栏柱等「身体 / 脚位」partial 块（它们的 bmin
+    //   在玩家头顶之下）→ minSurfFloor=pyBefore+m_height-eps 过滤。否则 overlapSubAABBs 取所有重叠块 MIN（=脚位
+    //   partial 块底）会让 snap 把玩家猛拽到 minSurf-m_height（向下穿格）并清零 m_vel.y，吃掉合法跳跃冲量
+    //   （t317 复发根因：跳跃上升期 footprint 偶发重叠身体级 partial 块 → 被当假天花板 → 速度清零 → 只跳半格卡死）。
+    //   hasMin=false = 重叠均为身体级 partial（无真天花板）→ 不 snap / 不清零（保留跳跃上升），交后续 moveAxis(0/2)
+    //   横向解算（贴墙 snap）。其他方向（X/Z、Y 向下）floor=-inf = 取全部（旧行为）。
     const float pyBefore = m_pos.y() - amount; // 移动前脚底 Y（Y 已按 amount 更新，减回 = 旧值）
     const float cap = (axis == 1 && amount < 0) ? (pyBefore + 1e-3f)
                                                 : std::numeric_limits<float>::max();
-    if (!overlapSubAABBs(axis, &minSurf, &maxSurf, &hasMax, cap)) return; // 无碰撞 → 自由
+    const float floor = (axis == 1 && amount > 0) ? (pyBefore + m_height - 1e-3f)
+                                                  : -std::numeric_limits<float>::max();
+    if (!overlapSubAABBs(axis, &minSurf, &maxSurf, &hasMax, cap, &hasMin, floor)) return; // 无碰撞 → 自由
     const float eps = 1e-4f;
     switch (axis) {
     case 0:
@@ -2322,7 +2335,12 @@ void PlayerController::moveAxis(int axis, float amount)
         m_vel.setX(0); break;
     case 1:
         if (amount > 0) {
-            m_pos.setY(minSurf - m_height - eps); // 顶头（按当前高度）
+            // t352：仅当存在真天花板（hasMin：块底在玩家原头顶之上）才顶头 snap + 清零垂直速度。
+            //   身体 / 脚位 partial 块重叠（hasMin=false）不是天花板 → 保留本次上升位移与 m_vel.y（跳跃不被吃）。
+            if (hasMin) {
+                m_pos.setY(minSurf - m_height - eps); // 顶头（按当前高度）
+                m_vel.setY(0);
+            }
         } else {
             // t161 修：maxSurf 已被 cap=pyBefore 限定为「玩家原本站其顶上」的可着陆最高面（地面顶 10，非沙顶 11）。
             //   hasMax=true → 贴顶面站住（地面托举正常生效，玩家不再逐 tick 下沉穿地）；hasMax=false = 所有重叠
@@ -2331,8 +2349,9 @@ void PlayerController::moveAxis(int axis, float amount)
             //   t160 窒息扣血兜底。原 t161「据 inflated maxSurf 全不 snap」会连地面托举一起失效 → 穿地坠虚空。
             if (hasMax) m_pos.setY(maxSurf + eps); // 站到可着陆最高面（地面顶，非沙顶）
             else m_pos.setY(pyBefore); // t258（Y 轴）：纯 bury（无 landable 面）→ 回退本次重力位移，防逐 tick 下沉穿地 / 坠出基岩外。水平锁定见 step() 入口 isLockedBuried（全包裹→velocity 清零→moveAxis 空转）/ extrudeEmbedded（有开放侧→挤出），只能挖出脱困（t160 窒息扣血兜底）
+            m_vel.setY(0);
         }
-        m_vel.setY(0); break;
+        break;
     case 2:
         if (amount > 0) m_pos.setZ(minSurf - kHalfW - eps);
         else            m_pos.setZ(maxSurf + kHalfW + eps);
@@ -2568,29 +2587,21 @@ void PlayerController::step(qreal dt)
         m_vel.setY(std::max(float(m_vel.y() - kGravity * dt), -kMaxFall));
         if (spaceEdge && m_onGround) m_vel.setY(kJump);
     }
-    // t317 生存跳跃高度不足修复：记录本 tick 是否注入了合法地面跳跃冲量（spaceEdge && onGround）。
-    //   kJump=8.4 / kGravity=28 → 理论顶点 v²/(2g)=1.26 格（≥1.05 验收），但用户实测只跳 ~0.5 格。
-    //   根因：紧随其后的 isLockedBuried 速度清零（t258）会把刚设的 m_vel.y=kJump 一并清掉。t289 把嵌入
-    //   判定从 hairline 放宽到 kEmbedTol=0.1 减少了误锁，但 columnClear 仍扫玩家全高 [y0,y1] 任一格
-    //   collidable 即判「堵」→ 在 1 格坑 / 贴墙角 / 紧邻欲跳上的方块等场景，4 向皆堵 + 边界 FP 仍可触发
-    //   clamp，吃掉跳跃冲量。把合法 jump impulse 从 clamp 豁免（保存 → clamp 后重设）：clamp 的本职是
-    //   防 moveAxis X/Z snap 穿墙（水平清零仍保留），Y 轴另有 moveAxis(1,+) 顶头 snap 兜底 → 真被埋且
-    //   头顶有方块的玩家上跳仍会被自然挡住（锁定语义不破）；头顶无方块时上跳脱困亦合理。
-    const bool jumpFired = (spaceEdge && m_onGround);
-
     // t258 被埋锁定（spec「被埋→锁定不能动，只能挖出脱困」）：玩家被实体方块完全包围（嵌入 + 四向皆堵）→
     //   moveAxis 的 snap 会把玩家推穿相邻块（前后左右穿出 / 坠出基岩外，机制等价观察者 noclip；Y 轴已由
-    //   moveAxis(1) 纯 bury 回退防坠，水平在此先验门控）。锁定 → velocity 清零 → delta=0 → moveAxis 全
-    //   amount==0 早退（子步循环空转、无穿出机会）。脱困（挖出方块打开侧面 / 创造双击空格切飞）后自动解锁。
+    //   moveAxis(1) 纯 bury 回退防坠，水平在此先验门控）。锁定 → 水平 velocity 清零 → delta.x/z=0 →
+    //   moveAxis(0/2) amount==0 早退（无穿出机会）。脱困（挖出方块打开侧面 / 创造双击空格切飞）后自动解锁。
     //   挖掘（raycast→beginMining）不经位移 → 不受影响，玩家仍可挖出卡住的方块脱困（spec「只能挖出脱困」）。
     //   窒息（t160）/ 饥饿等后续照常推进（受困 → 扣血逼其挖出）。判据与 extrudeEmbedded「全包裹→不挤」同源，
     //   见 isLockedBuried。地面复探（下方 aabbHitsSolid）仍跑：被埋态 AABB 重叠 → onGround=true（被支撑），
     //   防误判坠落 / 摔伤。
-    if (isLockedBuried()) { m_vel = QVector3D(0, 0, 0); m_knockback = QVector3D(0, 0, 0); }
-    // t317 合法地面跳跃冲量豁免于被埋锁定（jumpFired 见上注）：clamp 后重设 m_vel.y=kJump。真被埋且有
-    //   天花板时下方子步 moveAxis(1, +) 顶头 snap（playercontroller.cpp:2209）仍会清零 m_vel.y 并挡住上移，
-    //   锁定语义保留；只是不再误吃 normal ground jump。
-    if (jumpFired) m_vel.setY(kJump);
+    // t352（t317 复发根治）：被埋锁定只清零**水平** velocity（m_vel.x/z）+ 击退冲量，**保留 m_vel.y**。
+    //   t317 旧法仅豁免「跳跃触发那一 tick」（jumpFired 重设 kJump），但跳跃**上升期**的后续 tick 仍被这里
+    //   清零 m_vel.y → 速度被吃 → 只跳半格卡死（须切创造 / 观察者复位）。锁定本职是防 moveAxis X/Z snap 穿墙
+    //   （水平），Y 轴穿墙 / 坠落已由 moveAxis(1)（顶头 snap + 纯 bury 回退）兜底，故无需在此清垂直速度：
+    //   真被埋且头顶有方块的玩家上跳仍被 moveAxis(1,+) 顶头 snap 挡住（锁定语义不破）；头顶无方块时上跳脱困
+    //   合理（t317 既定设计）。水平清零保留 → 防穿墙目的不破。
+    if (isLockedBuried()) { m_vel.setX(0); m_vel.setZ(0); m_knockback = QVector3D(0, 0, 0); }
     // t296 受击击退冲量积分（仅走路模式；Spectator / Creative-飞 noclip 早 return 不至此）。m_knockback 与 m_vel
     //   分离（m_vel.x/z 每 tick 被 wish 覆盖）。每帧：水平指数衰减 + 垂直受重力（小跳弧自然），衰减殆尽 → 整体清零。
     //   叠入位移：delta = (m_vel + m_knockback) * dt（子步 / 防穿墙照常按合成位移算）。

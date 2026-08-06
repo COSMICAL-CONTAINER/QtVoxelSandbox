@@ -563,9 +563,15 @@ private:
     //   t161 修：maxSurfCap 仅把 bmax<=cap 的块顶计入 maxSurf（向下着地用 cap=pyBefore → 只取「玩家原本站
     //   其顶上」的可着陆面，忽略沙等 bury 块；默认 +inf=取全部，旧行为）。outHasMax=true 当至少有一个
     //   合格 bmax 计入（区分「有碰撞但无可着陆面=纯 bury」与「有可着陆面」）；默认 nullptr 兼容旧调用。
+    //   t352 修（对称 maxSurfCap）：minSurfFloor 仅把 bmin>=floor 的块底计入 minSurf（向上顶头用 floor=
+    //   pyBefore+m_height → 只取「玩家原头顶之上」的真天花板，忽略半砖阶 / 楼梯背墙 / 活版门唇边 / 栅栏柱
+    //   等身体 / 脚位的 partial 块；默认 -inf=取全部，旧行为）。outHasMin=true 当至少有一个合格 bmin 计入
+    //   （区分「有碰撞但无真天花板=身体级 partial 重叠」与「有真天花板」）；默认 nullptr 兼容旧调用。
     bool overlapSubAABBs(int axis, float *outMinSurf, float *outMaxSurf,
                          bool *outHasMax = nullptr,
-                         float maxSurfCap = std::numeric_limits<float>::max()) const;
+                         float maxSurfCap = std::numeric_limits<float>::max(),
+                         bool *outHasMin = nullptr,
+                         float minSurfFloor = -std::numeric_limits<float>::max()) const;
     // t161 嵌入挤出：玩家被下落沙 / 放置方块「包裹」时，沿最近开放水平方向把玩家推出（向外 not 向上，
     //   无需按键）。判据用「玩家 XZ 中心所在列 + AABB 真重叠」→ 仅 burial 触发；正常贴墙 / 站立时中心
     //   列为玩家占据的空气 → 不触发。4 向皆堵（全包裹）→ 不挤（交 t160 窒息扣血兜底）。配合 moveAxis(1)
