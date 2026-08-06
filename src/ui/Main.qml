@@ -4908,9 +4908,11 @@ Window {
                     }
 
                     // t315 工具耐久条：槽底薄条，宽 ∝ remaining/max，色绿(>50%)/黄(20–50%)/红(<20%)。
-                    //   仅工具（isTool）且 remaining<max（满耐久工具不显条）时可见。触碰 slotRevision 令耐久
+                    //   仅「带耐久」物品（toolMaxDurability>0）且 remaining<max（满耐久不显条）时可见。触碰 slotRevision 令耐久
                     //   消耗后重算（durabilityAt / toolMaxDurability 是 Q_INVOKABLE，靠版本号触发）。机制等价
                     //   MC 1.0 工具耐久条（绿色随耗变黄转红、满耐久隐）；原创自绘 Rectangle，零 MC 资产（§9）。
+                    //   t349：耐久条按「有无耐久」判（maxDur>0）而非 isTool 段 —— 显式含剪刀（toolType=Shears，maxDur=238，
+                    //   t315 漏剪刀）；满耐久（curDur==maxDur）隐条，受损后绿/黄/红同其他工具。
                     Item {
                         id: durabilityBar
                         property int curDur: { hotbarVM.slotRevision; return hotbarVM.durabilityAt(index) }
@@ -4924,8 +4926,9 @@ Window {
                         anchors.bottomMargin: 2
                         height: 3
                         visible: { hotbarVM.slotRevision
-                            const id = hotbarVM.blockIdAt(index)
-                            return hotbarVM.isTool(id) && durabilityBar.curDur > 0 && durabilityBar.curDur < durabilityBar.maxDur }
+                            // t349：按「有无耐久」（maxDur>0）判而非 isTool 段 —— 显式含剪刀（maxDur=238）；
+                            //   未来任何带耐久物品亦自动显条。满耐久（curDur==maxDur）隐条（同 MC「满耐久不显」）。
+                            return durabilityBar.maxDur > 0 && durabilityBar.curDur > 0 && durabilityBar.curDur < durabilityBar.maxDur }
                         // 槽底凹槽底色（耐久条的「空段」背景，凸显已耗部分）。
                         Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.55 }
                         Rectangle {
@@ -5009,7 +5012,9 @@ Window {
                     const id = hotbarBar.hoveredItemId
                     if (id === 0) return ""
                     const name = hotbarVM.nameForBlock(id)
-                    if (!hotbarVM.isTool(id)) return name
+                    // t349：按「有无耐久」（toolMaxDurability>0）判而非 isTool 段 —— 显式含剪刀（maxDur=238）；
+                    //   非工具 / 材料段 maxDur=0 → 仅显名（无耐久行）。
+                    if (hotbarVM.toolMaxDurability(id) <= 0) return name
                     const cur = hotbarBar.hoveredSlot >= 0 ? hotbarVM.durabilityAt(hotbarBar.hoveredSlot) : 0
                     const mx = hotbarVM.toolMaxDurability(id)
                     return name + "\n\n耐久: " + cur + "/" + mx
