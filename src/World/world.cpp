@@ -965,6 +965,8 @@ void World::generate()
     carveCaveEntrances(); // t341：山坡洞口（carveCaves 之后 → 连通既有洞穴网络；先于地下水 → 洞口路径干净；先于填水
                           //   / 树 / 草 → 洞口刻在完整地表）。仅该列近表有真实洞穴 air 才开口 → 永不产孤立竖井。
     placeUndergroundWaterPools(); // t309：封闭地下水池（carveCaves / 入口之后；先于填水 → 地表海平面与地下水各自独立）。
+    carveCanyon(); // t342：大峡谷（caves/ores 之后 → 峡壁既有矿石层被 carve 暴露；先于填水 → 内陆干涸峡谷，
+                   //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
@@ -1626,6 +1628,98 @@ void World::carveCaveEntrances()
         }
     }
     qInfo() << "worldgen: cave entrances =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t342 大峡谷地貌（见 world.h 头注释）。机制等价 MC ravine / 真实大峡谷：一条贯穿地图的长窄露天裂缝，两侧立壁
+//   纵贯矿层带 → 峡壁裸露矿石。
+//   路径 = 长程 worm：自地图边界附近确定性出发（hashColumn 选边 + 沿边散布起点），朝对侧 baseYaw 方向行进；
+//   yaw 受 noise2 平滑扰动 + 向 baseYaw 的弱回复力（kRestore）→ 蜿蜒长裂缝（非直线、非急转、保证贯穿而非打转），
+//   步距 < 底半径 → 水平盘重叠成连续长沟。出界（抵达对侧边缘）即停。
+//   横截面 = 上宽下窄阶梯 V 形：逐层 y 自峡谷底到地表，半径 = 底半径 + (y 进度)*顶额外 + fbm 峡壁调制（弯曲不规则，
+//   非完美圆柱）；顶部宽 / 底部窄 = 真实峡谷剖面（spec「widening slightly」）。kFloor 选在矿层带（煤 8+ / 铜 / 铁 /
+//   金 5+）之内 → 两侧立壁纵贯多矿层 → carve 暴露矿石于峡壁（spec「内壁露矿石」；worldgen 顺序 scatterOres →
+//   carveCaves → ... → carveCanyon：矿石先布好，峡谷再 carve，壁面矿石显）。
+//   **露天**：自峡谷底到地表全挖（清除 grass/dirt → 天光直入；recomputeLightField 在本 pass 之后跑 → BFS 自峡谷顶
+//   向下衰减，峡谷明亮而非黑，与封闭地下洞穴相反）。不动基岩底层（kFloor > bedrockTop）、不动 air / 水；跳过海域列
+//   （seaColumnHeight >= 0，峡谷为陆地地貌、不与海角水互动）。确定性：起点 / 朝向 / 路径全纯函数于 seed
+//   （hashColumn + noise2 / fbm）→ 同 seed 同峡谷（PLAN §2-K）。~1 条/图：单条 worm（无散布网格）→ 每图约 1 条贯穿峡谷。
+//   经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + heightmap 增量维护），不发 blockBroken（worldgen 既有约定）。
+void World::carveCanyon()
+{
+    constexpr int kFloor       = 22;    // 峡谷底 y（远高于基岩层 0..4，carveDisc 另跳过 Bedrock；落在矿层带内 → 峡壁裸露煤/铜/铁/金矿层）
+    constexpr int kBaseRadius  = 3;     // 底部半径（窄底；直径 ~6）
+    constexpr int kTopExtra    = 2;     // 顶部额外半径（上宽下窄阶梯；顶半径 = base + extra ~5，spec「widening slightly」）
+    constexpr double kStep     = 0.7;   // 步距（< 底半径 → 水平盘重叠成连续长沟）
+    constexpr double kTurnRate = 0.05;  // 噪声 yaw 扰动系数（单步 ~2.9° → 长程缓弯）
+    constexpr double kRestore  = 0.02;  // 向 baseYaw 的弱回复系数（保证贯穿地图而非原地打转）
+    constexpr int kMaxSteps    = 280;   // 最大步数（步距 0.7 + 回复 → ~150 格贯穿 160 地图；出界即停）
+    constexpr double kWallFreq = 0.21;  // 峡壁 fbm 频率（弯曲峡壁 / 不规则半径调制）
+
+    // ── 确定性起点 + 朝向 ── 选起始边（0=z- / 1=z+ / 2=x- / 3=x+），沿边 hash 散布起点；baseYaw 朝对侧（向地图内）。
+    const int canyonSeed = m_seed + 9342; // 峡谷哈希偏移（与其它 worldgen hashColumn 解耦；纯整数加，确定性）
+    const quint32 r0 = hashColumn(canyonSeed, 7, 7);
+    const unsigned edge = r0 & 3u;
+    const double t = double((r0 >> 2) % 1000u) / 1000.0;                       // 0..1 沿边位置
+    const double yawJitter = (double((r0 >> 12) & 0x3FFu) / 1024.0 - 0.5) * 0.8; // 起始 ±0.4 rad 偏转
+    const double inset = 10.0;                                                  // 起点距边界（留余量不贴边）
+    double px, pz, baseYaw;
+    switch (edge) {
+        case 0: px = 12.0 + t * (m_width  - 24.0); pz = inset;                   baseYaw =  1.57079632679489661923; break; // +z（朝南）
+        case 1: px = 12.0 + t * (m_width  - 24.0); pz = double(m_depth) - inset; baseYaw = -1.57079632679489661923; break; // -z（朝北）
+        case 2: px = inset;                       pz = 12.0 + t * (m_depth - 24.0); baseYaw = 0.0;                          break; // +x（朝东）
+        default:px = double(m_width) - inset;     pz = 12.0 + t * (m_depth - 24.0); baseYaw =  3.14159265358979323846;  break; // -x（朝西）
+    }
+    double yaw = baseYaw + yawJitter;
+
+    // 水平盘 carve（中心 cx/cz、高度 y、半径 r）：盘内实体天然方块（非 air/bedrock/water）置 air；跳过海域列。
+    //   体素中心 = 整数坐标 +0.5；距离比半径平方（避免 sqrt）。盘半径 = V 形剖面按 y 插值 + fbm 峡壁调制。
+    int carvedVoxels = 0;
+    auto carveDisc = [&](double cx, double cz, int y, double r) {
+        const int ir = int(r) + 1;
+        const int icx = int(std::floor(cx)), icz = int(std::floor(cz));
+        const double r2 = r * r;
+        for (int ox = -ir; ox <= ir; ++ox)
+            for (int oz = -ir; oz <= ir; ++oz) {
+                const double gx = double(icx + ox) + 0.5 - cx;
+                const double gz = double(icz + oz) + 0.5 - cz;
+                if (gx * gx + gz * gz > r2) continue;
+                const int x = icx + ox, z = icz + oz;
+                if (x < 0 || z < 0 || x >= m_width || z >= m_depth) continue;
+                if (seaColumnHeight(x, z) >= 0) continue; // 海域（海 + 沙滩）不开峡（峡谷为陆地地貌）
+                const quint8 b = m_chunks.blockAt(x, y, z);
+                if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water) continue;
+                m_chunks.setBlock(x, y, z, BlockRegistry::Air);
+                ++carvedVoxels;
+            }
+    };
+
+    // ── 推进 worm，逐层 carve V 形剖面 ──
+    int steps = 0;
+    for (int step = 0; step < kMaxSteps; ++step) {
+        const int ix = int(px), iz = int(pz);
+        if (ix < 1 || iz < 1 || ix >= m_width - 1 || iz >= m_depth - 1) break; // 出界（已贯穿到对侧）→ 停
+        const int surfaceY = std::min(heightAt(ix, iz), m_height - 1);
+        const int span = std::max(1, surfaceY - kFloor);
+        // 自峡谷底到地表逐层 carve。半径 = base + (y 进度)*topExtra + fbm 峡壁调制 → 上宽下窄 + 弯曲不规则。
+        for (int y = kFloor; y <= surfaceY; ++y) {
+            const double f = double(y - kFloor) / double(span);                // 0（底）..1（顶）
+            const double wall = fbm((double(ix) + m_seed) * kWallFreq + 5.5,
+                                    (double(iz) + m_seed) * kWallFreq - 2.3);   // [-1,1] 峡壁噪声
+            const double r = double(kBaseRadius) + f * double(kTopExtra) + 0.7 * wall;
+            if (r <= 0.0) continue;
+            carveDisc(px, pz, y, r);
+        }
+        // 推进（水平面内；yaw 决定朝向，无 pitch → 长程水平裂缝）。噪声缓弯 + 向 baseYaw 回复（保证贯穿）。
+        const double df = 0.05;
+        const double n = noise2(px * df + 11.1, pz * df - 7.7);                // [-1,1] 平滑扰动
+        yaw += n * kTurnRate + (baseYaw - yaw) * kRestore;
+        px += std::cos(yaw) * kStep;
+        pz += std::sin(yaw) * kStep;
+        ++steps;
+    }
+
+    qInfo() << "worldgen: grand canyon carved =" << carvedVoxels
+            << "(steps" << steps << "floor" << kFloor << ")"; // 同 seed → 同计数（确定性核对）
 }
 
 // t309 地下水池（见 world.h 头注释）。机制等价 MC 1.0 地下水湖 / 封闭水洼：地下深处小型封闭空腔 + 底层水源。

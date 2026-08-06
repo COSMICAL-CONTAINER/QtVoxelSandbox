@@ -302,6 +302,13 @@ private:
     //   修 t309「1×1 竖井 + 3×3 仅 1 格浅坑」太窄不可走 → 现 3×3 全高。避开沙漠 / 沙滩 / 水下 / 低洼。纯函数于 seed
     //   （hashColumn + 已生成 chunk 的纯几何查询）→ 同 seed 同洞口分布（PLAN §2-K）。
     void carveCaveEntrances();
+    // t342 大峡谷地貌（spec「地表长条裂缝（露天峡谷），内壁露矿石」）：scatterOres / carveCaves 之后、fillWater
+    //   之前，确定性生成约 1 条贯穿地图的长窄露天峡谷。路径 = 长程 worm（自边界附近确定性出发、朝对侧 noise 缓
+    //   弯行进 + 向 baseYaw 弱回复 → 蜿蜒贯穿）；横截面 = 上宽下窄阶梯 V 形（fbm 调制 → 弯曲峡壁）。自地表
+    //   heightAt 下挖到峡谷底（落在矿层带内 → 两侧立壁纵贯煤/铜/铁/金矿层 → carve 暴露矿石于峡壁）。露天
+    //   （清除地表草/土 → 天光直入）；不动基岩底层 / air / 水；跳过海域列（陆地地貌）。纯函数于 seed
+    //   （hashColumn + noise2 / fbm）→ 同 seed 同峡谷（PLAN §2-K）。单条 worm → 每图约 1 条贯穿峡谷。
+    void carveCanyon();
     // t309 地下水池（封闭洞穴静止水层；spec「地下水池（封闭洞穴静止水层）」）：carveCaves / carveCaveEntrances
     //   之后，地下深处确定性散布小型封闭水洼——carve 一个小椭球空腔（air 气室）+ 底层铺一层水源（state=0），
     //   形成「封闭洞穴静止水层」。空腔被周围实体岩石天然封闭 → 水源无水平 air 邻居可蔓延 → 稳态
