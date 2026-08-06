@@ -52,6 +52,24 @@ bool mobFeetInWater(World *world, float cx, float cy, float cz, float halfH)
     if (fy < 0) return false;
     return world->blockAt(int(std::floor(cx)), fy, int(std::floor(cz))) == BlockRegistry::Water;
 }
+
+// t362 mob 落地支撑复探：footprint XZ 任一列在支撑层 supportY 有实体（非水）方块 → true。
+//   取样同 mobAabbHitsSolid（floor(min)..ceil(max)-1，严格覆盖排除仅贴面列）。只读 World。
+//   用于替代旧版「仅中心列」支撑复探 —— 见 tick 内 resting 复探注释（修「mob 下 1 格台阶卡死」根因）。
+bool mobFootprintHasSupport(World *world, float cx, float cz, int supportY, float halfW)
+{
+    if (!world || supportY < 0) return false; // 无世界 / 脚位已在 y=0 之下（无支撑层可查）→ 无支撑
+    const int x0 = int(std::floor(cx - halfW));
+    const int x1 = int(std::ceil(cx + halfW)) - 1;
+    const int z0 = int(std::floor(cz - halfW));
+    const int z1 = int(std::ceil(cz + halfW)) - 1;
+    for (int z = z0; z <= z1; ++z)
+        for (int x = x0; x <= x1; ++x)
+            // t333 水视穿透（同 mobAabbHitsSolid）：水格不算实体支撑 → 怪不把水面当地面站着。
+            if (world->blockAt(x, supportY, z) != BlockRegistry::Water && world->isSolid(x, supportY, z))
+                return true;
+    return false;
+}
 } // namespace
 
 EntityManager::EntityManager(QObject *parent) : QObject(parent) {}
@@ -1913,13 +1931,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         const bool mobInWater = (e.kind == Mob) && mobFeetY >= 0
                                  && world->blockAt(cx, mobFeetY, cz) == BlockRegistry::Water;
 
-        // 已落地：复探支撑格是否仍实体。失支撑 → 续落。
+        // 已落地：复探支撑是否仍实体。失支撑 → 续落。
+        // t362 改「footprint 任一列有支撑」（旧版仅中心列 cx/cz）：mob 走下 1 格台阶时，中心先越过台阶沿、
+        //   但后半 footprint 仍压在更高支撑块上。旧版即判失支撑 → 重力把整格 snap 下沉到低地 → 此时 trailing
+        //   边仍压在高块列 → 落地后水平移动被 mobAabbHitsSolid 判 trailing 腿卡进身后高块 → 每帧撤回 →
+        //   永久卡死（用户「下台阶卡住变活靶」）。改 footprint 后：只要还有任一列压在更高支撑上就保 resting，
+        //   悬出台阶沿继续前行；直到 trailing 边也越过台阶沿（footprint 全离支撑）才下沉 → 落低地时 trailing
+        //   已不在高块列 → 腿不卡、干净步下（机制等价 MC mob 越过台阶沿后才自动步下 1 格）。
         if (e.resting) {
             const int supportY = mobFeetY - 1; // 实体底面下方那一格（= 支撑方块 cellY）
-            // t333 水视穿透：支撑格是水 → 不算实体支撑 → 续落入水（否则怪站在水面上把水当方块走上去）。
-            if (supportY >= 0
-                && world->blockAt(cx, supportY, cz) != BlockRegistry::Water
-                && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止
+            if (mobFootprintHasSupport(world, e.pos.x(), e.pos.z(), supportY, e.halfW)) continue; // 仍实体 → 保持静止
             e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
             dirty = true;
         }
