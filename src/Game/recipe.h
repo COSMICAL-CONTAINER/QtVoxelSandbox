@@ -169,6 +169,15 @@ public:
     // （方块 64 / 工具 1）；此处由 caller 传 maxStack 解耦（本类不依赖 Hotbar）。
     static bool canTake(const Recipe &r, int heldId, int heldCount, int maxStack);
 
+    // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 的**对齐映射**（资源包加载前置；与 docs/item-ids.md 材料 /
+    //   mob 掉落 / 生物蛋段「MC 1.0.0」列一致）。覆盖整个材料段 [MaterialIdBase, GoldIngotId] = 0x200..0x21F
+    //   （含材料 / mob 死亡掉落 / 生物蛋三子集——三者在 MC 1.0 都是「物品」，统一在 items.png）。**不重排常量**
+    //   （保存档 / 配方 / 掉落表向后兼容——材料段 id 落 player_state JSON（背包）+ 配方 / BlockDef.dropId，重排会
+    //   破坏旧存档与既存数据）；故用「映射层」对齐。无 MC 1.0 等价（铜 / 金原矿与锭 1.17+、铁 / 金原矿 1.0 直接掉
+    //   矿石方块）→ -1（资源包回退引擎自绘 MaterialIcon）。**生物蛋**：MC 1.0 是单一 id 383（spawn egg）+ metadata
+    //   分 mob 变体，故引擎全部 spawn_egg（猪 / 牛 / 羊 / 蹒跚者 / 骸骨 / 潜行者 / 蜘蛛）→ 383。越界 → -1。
+    static int mcMaterialId(int engineMaterialId);
+
 private:
     RecipeRegistry() = delete; // 纯静态数据表，无实例。
 };

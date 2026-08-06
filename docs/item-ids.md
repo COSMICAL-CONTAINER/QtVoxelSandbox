@@ -6,6 +6,34 @@
 > 右侧「MC 1.0.0」列仅作 sanity 对照（同机制等价的 MC Java 1.0.0 数字 id；「—」= 该物品在 MC 1.0.0 不存在，
 > 「block」= MC 1.0.0 中以方块形式存在而非可拾取物品）。
 
+---
+
+## MC 1.0 对齐策略（t348：资源包前置 + 存档向后兼容）
+
+**结论：不重排引擎 id，改以「映射层」对齐 MC 1.0。**
+
+引擎 id（方块段 `0..30` / 工具段 `0x100..0x110` / 材料段 `0x200..0x21F`）是**存档权威**：`.sqlite` 的 chunk blob
+按方块引擎 id 落盘、`player_state` JSON（背包 / hotbar）按物品引擎 id 落盘、配方表的 `pattern/outputId` 引用引擎
+id。重排这些常量会让所有旧存档读出乱码（旧 `1`=grass 读成新 `1`=stone）且无救——故**不做 id renumber**。
+
+对齐靠**映射表**：每个段在其所属注册表里持一份「引擎 id → MC 1.0 数字 id」单向查找表，未来资源包加载器据此把引擎
+方块 / 物品翻译成 MC 1.0 `terrain.png` / `items.png` 的贴图槽（MC 1.0 按 block/item 数字 id 在图集中定位 tile）。
+**单一权威**（PLAN §2）：本文件各表的「MC 1.0.0」列与代码映射函数须一致（改一处同步另一处）。
+
+| 段 | 代码映射函数 | 文件 | 分层 |
+|---|---|---|---|
+| 方块段 | `BlockRegistry::mcBlockId(engineId)` | `src/Core/blockregistry.{h,cpp}` | Core |
+| 工具段 | `ToolRegistry::mcToolId(engineToolId)` | `src/Game/toolregistry.{h,cpp}` | Game |
+| 材料段 | `RecipeRegistry::mcMaterialId(engineMaterialId)` | `src/Game/recipe.{h,cpp}` | Game |
+
+**无 MC 1.0 等价 → -1**：映射函数返回 -1（木板台阶 WoodSlab——1.0 仅石台阶 44；铜矿 / 铜锭——1.17+；铁 / 金原矿与
+锭——1.0 直接掉矿石方块），资源包加载器见 -1 即回退引擎过程化贴图。**生物蛋**：MC 1.0 是单一 spawn egg id `383`
++ metadata 分 mob 变体，故引擎全部 `spawn_egg_*`（猪 / 牛 / 羊 / 蹒跚者 / 骸骨 / 潜行者 / 蜘蛛）→ `383`。
+
+**存档向后兼容**：因未重排引擎 id，chunk blob / player_state JSON 的语义不变 → **无需 user_version 迁移**（schema
+亦未变，`kSchemaVersion` 不动）。若将来确需 renumber（如批量改方方块 id），届时再 `kSchemaVersion` +1 + 加
+load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`mcBlockId` 等）已为此 remap 预置「翻译」基础设施。
+
 ## id 段总览
 
 | 段 | 范围 | 说明 |

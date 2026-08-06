@@ -563,6 +563,16 @@ public:
     // 复用 GroupStone 音色）。机制等价 MC「按方块材质 SoundType 选声」（机制对齐，非名词照搬）。
     static MaterialGroup materialGroup(quint8 blockId);
 
+    // t348 引擎方块 id → MC Java 1.0.0 方块数字 id 的**对齐映射**（资源包加载前置）。**不重排枚举值**——
+    //   .sqlite 存档的 chunk blob 按引擎 id 落盘（Air=0 / Grass=1 / ...），重排 BlockRegistry::Id 会破坏所有旧
+    //   存档；故采用「映射层」而非「重排常量」对齐 MC 1.0：未来资源包加载器据此把引擎方块翻译成 MC 1.0
+    //   terrain.png 的贴图槽（MC 1.0 按 block id 在 terrain.png 中定位 tile）。无 MC 1.0 等价的方块（如木板台阶
+    //   WoodSlab——1.0 仅有石台阶 id 44、木板台阶 1.3+ 才有；铜矿石 CopperOre——1.17+ 才有）→ 返回 -1（资源包回退
+    //   引擎过程化贴图）。**单一权威**（PLAN §2）：docs/item-ids.md 方块段「MC 1.0.0」列与本表须一致（改一处同步
+    //   另一处）。分层：本表属 Core（仅依赖 QtGlobal）；工具 / 材料段的 MC 映射归 ToolRegistry / RecipeRegistry
+    //   （Game 层各自映射自身段，向下依赖 Core 不破铁律）。越界 id → -1。
+    static int mcBlockId(quint8 engineId);
+
 private:
     BlockRegistry() = delete; // 纯静态数据表，无实例。
 };

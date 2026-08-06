@@ -148,6 +148,13 @@ public:
     //   机制等价 MC 1.0 工具耐久（机制对齐，非名词照搬）；金 / 钻石档留后续任务（扩 tier 时追加）。
     static int maxDurability(int itemId);
 
+    // t348 引擎工具 id → MC Java 1.0.0 物品数字 id 的**对齐映射**（资源包加载前置；与 docs/item-ids.md 工具段
+    //   「MC 1.0.0」列一致）。**不重排 ToolId 枚举**（保存档 / 配方向后兼容）——工具段 id（0x100..）落 player_state
+    //   JSON（背包）+ 配方 outputId，重排会破坏旧存档与配方表；故用「映射层」对齐。未来资源包加载器据此把引擎工具
+    //   翻译成 MC 1.0 items.png 的贴图槽。剪刀（Shears，MC 物品 id 359，beta 1.7 加入、1.0 存在）亦在此映射。
+    //   越界 / 非工具 id → -1（资源包回退引擎自绘 ToolIcon）。分层：本表属 Game，向下依赖 Core（BlockRegistry::ToolType）。
+    static int mcToolId(int engineToolId);
+
 private:
     ToolRegistry() = delete; // 纯静态数据表，无实例。
 };

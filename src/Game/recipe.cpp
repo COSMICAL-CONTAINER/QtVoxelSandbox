@@ -272,6 +272,25 @@ static_assert(RecipeRegistry::CopperOreDropId == 0x21C, "CopperOreDropId 须与 
 static_assert(RecipeRegistry::CopperIngotId   == 0x21D, "CopperIngotId 须为材料段序号 0x21D");
 static_assert(RecipeRegistry::GoldOreDropId   == 0x21E, "GoldOreDropId 须与 BlockRegistry::GoldOre.dropId 字面量 0x21E 一致");
 static_assert(RecipeRegistry::GoldIngotId     == 0x21F, "GoldIngotId 须为材料段序号 0x21F");
+
+// t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 材料 / mob
+//   掉落 / 生物蛋段「MC 1.0.0」列一致）。行索引 = engineMaterialId - MaterialIdBase（覆盖 [0x200, 0x21F] = 32 项，
+//   含材料 / mob 死亡掉落 / 生物蛋三子集——MC 1.0 均为「物品」）。**不重排常量**（保存档 / 配方 / 掉落表向后兼容）。
+//   无 MC 1.0 等价（铁 / 金 / 铜原矿与锭 1.17+）→ -1；生物蛋（spawn_egg_*）→ 383（MC 1.0 单一 spawn egg id + metadata）。
+//   新增材料段物品须在此补一行（否则越界 -1）。
+constexpr int kMcMaterialIdCount = RecipeRegistry::GoldIngotId - RecipeRegistry::MaterialIdBase + 1; // 0x200..0x21F = 32
+constexpr int kMcMaterialId[kMcMaterialIdCount] = {
+    /* 0x200 stick        */ 280, /* 0x201 coal         */ 263, /* 0x202 iron_ore_drop */ -1,  /* 0x203 iron_ingot */ 265,
+    /* 0x204 glass        */ 20,  /* 0x205 charcoal     */ 263, /* 0x206 bucket_empty */ 325, /* 0x207 water_bucket */ 326,
+    /* 0x208 seed         */ 295, /* 0x209 wheat        */ 296, /* 0x20A bread        */ 297, /* 0x20B raw_porkchop */ 319,
+    /* 0x20C raw_beef     */ 363, /* 0x20D leather      */ 334, /* 0x20E wool         */ 35,  /* 0x20F spawn_egg_pig */ 383,
+    /* 0x210 spawn_egg_cow*/ 383, /* 0x211 spawn_egg_sheep */ 383, /* 0x212 diamond    */ 264, /* 0x213 spawn_egg_shambler */ 383,
+    /* 0x214 spawn_egg_bones */ 383, /* 0x215 spawn_egg_stalker */ 383, /* 0x216 spawn_egg_spider */ 383,
+    /* 0x217 bone         */ 352, /* 0x218 rotten_flesh */ 367, /* 0x219 string       */ 287, /* 0x21A arrow      */ 262,
+    /* 0x21B sapling_item */ 6,   /* 0x21C copper_ore_drop */ -1, /* 0x21D copper_ingot */ -1, /* 0x21E gold_ore_drop */ -1,
+    /* 0x21F gold_ingot   */ 266,
+};
+static_assert(kMcMaterialIdCount == 32, "材料段 MC 映射表长度须 = [MaterialIdBase, GoldIngotId] = 32");
 } // namespace
 
 // ── 匹配算法 ──
@@ -377,4 +396,13 @@ bool RecipeRegistry::canTake(const Recipe &r, int heldId, int heldCount, int max
     if (heldId == 0) return r.outputCount <= maxStack;             // 空光标 → 须一次放得下
     if (heldId != r.outputId) return false;                        // 异物光标 → 不合（MC：拿不下）
     return heldCount + r.outputCount <= maxStack;                  // 同物 → 累加不超上限
+}
+
+// t348 引擎材料段 id → MC Java 1.0.0 物品数字 id（资源包前置；见 kMcMaterialId 表注释）。越界（非材料段 /
+//   超出 [MaterialIdBase, GoldIngotId]）→ -1（资源包回退引擎自绘 MaterialIcon）。
+int RecipeRegistry::mcMaterialId(int engineMaterialId)
+{
+    const int idx = engineMaterialId - MaterialIdBase;
+    if (idx < 0 || idx >= kMcMaterialIdCount) return -1;
+    return kMcMaterialId[idx];
 }

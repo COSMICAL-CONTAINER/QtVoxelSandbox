@@ -45,6 +45,19 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
 static_assert(int(ToolRegistry::ToolCount) == 17, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+
+// t348 引擎工具 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 工具段
+//   「MC 1.0.0」列一致）。行索引 = engineToolId - ToolIdBase（与 kTools 同序）。**不重排枚举**（保存档 / 配方
+//   向后兼容）。新增工具须在此补一行（否则越界 -1）。Shears → 359（MC 剪刀 beta 1.7 加入、1.0 存在）。
+constexpr int kMcToolId[int(ToolRegistry::ToolCount)] = {
+    /* PickaxeWood  */ 270, /* PickaxeStone */ 274, /* PickaxeIron  */ 257, /* HoeWood */ 290,
+    /* HoeStone     */ 291, /* HoeIron      */ 292, /* AxeWood      */ 271, /* AxeStone */ 275,
+    /* AxeIron      */ 258, /* ShovelWood   */ 269, /* ShovelStone  */ 273, /* ShovelIron */ 256,
+    /* SwordWood    */ 272, /* SwordStone   */ 276, /* SwordIron    */ 267, /* Bow */ 261,
+    /* Shears       */ 359,
+};
+static_assert(sizeof(kMcToolId) / sizeof(kMcToolId[0]) == int(ToolRegistry::ToolCount),
+              "kMcToolId 行数须与 ToolRegistry::ToolCount 一致；新工具需补一行 MC 1.0 对齐值");
 } // namespace
 
 bool ToolRegistry::isTool(int itemId)
@@ -145,4 +158,12 @@ int ToolRegistry::maxDurability(int itemId)
     const ToolDef *t = tool(itemId);
     if (!t) return 0; // 非工具 / 越界 → 0（无耐久概念；Hotbar 据本值区分工具 vs 非工具）
     return t->maxDurability;
+}
+
+// t348 引擎工具 id → MC Java 1.0.0 物品数字 id（资源包前置；见 kMcToolId 表注释）。越界 / 非工具 → -1
+//   （资源包回退引擎自绘 ToolIcon）。
+int ToolRegistry::mcToolId(int engineToolId)
+{
+    if (!isTool(engineToolId)) return -1;
+    return kMcToolId[engineToolId - ToolIdBase];
 }

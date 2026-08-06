@@ -164,6 +164,23 @@ constexpr int computeMaxTile() {
 static_assert(computeMaxTile() < int(BlockRegistry::AtlasTileCount),
               "某方块 tile 字段 >= BlockRegistry::AtlasTileCount → 图集越界采样（渗色/错贴）；"
               "新增瓦片须同步 AtlasTileCount 与 tools/build_atlas.py 的 TILES");
+
+// t348 引擎方块 id → MC Java 1.0.0 方块数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 方块段
+//   「MC 1.0.0」列一致）。行索引 == 引擎方块 id（与 kDefs 同序）。**不重排枚举**（保存档向后兼容）：本表仅作
+//   「翻译层」，引擎 id 恒为存档权威。MC 1.0 无等价 → -1（WoodSlab：1.0 仅石台阶 44；CopperOre：1.17+）。
+//   Water 取静水 id 8（MC 流水 id 9 同属 Water 方块，正映射取代表值 8）。新增方块须在此补一行（否则越界 -1）。
+constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
+    /* air            */ 0,   /* grass          */ 2,   /* dirt           */ 3,   /* stone          */ 1,
+    /* cobble         */ 4,   /* log            */ 17,  /* planks         */ 5,   /* leaves         */ 18,
+    /* sand           */ 12,  /* crafting_table */ 58,  /* furnace        */ 61,  /* coal_ore       */ 16,
+    /* iron_ore       */ 15,  /* torch          */ 50,  /* bedrock        */ 7,   /* wood_slab      */ -1,
+    /* wood_stairs    */ 53,  /* wood_fence     */ 85,  /* wood_pressure_plate */ 72,
+    /* wood_door      */ 64,  /* wood_trapdoor  */ 96,  /* water          */ 8,   /* chest          */ 54,
+    /* farmland       */ 60,  /* tall_grass     */ 31,  /* wheat_crop     */ 59,  /* diamond_ore    */ 56,
+    /* wool           */ 35,  /* sapling        */ 6,   /* copper_ore     */ -1,  /* gold_ore       */ 14,
+};
+static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
+              "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
 } // namespace
 
 const BlockRegistry::BlockDef &BlockRegistry::def(quint8 blockId)
@@ -491,4 +508,12 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     default:
         return GroupDefault; // air / torch / water / 越界 / 未知 → 兜底（AudioManager 复用 Stone 音色）
     }
+}
+
+// t348 引擎方块 id → MC Java 1.0.0 方块数字 id（资源包前置；见 kMcBlockId 表注释）。越界 id → -1（无 MC 等价，
+//   资源包回退引擎过程化贴图）。
+int BlockRegistry::mcBlockId(quint8 engineId)
+{
+    if (int(engineId) >= int(Count)) return -1; // 越界 → 无 MC 等价
+    return kMcBlockId[int(engineId)];
 }
