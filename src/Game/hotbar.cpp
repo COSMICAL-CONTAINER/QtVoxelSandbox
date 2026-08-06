@@ -421,6 +421,11 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::CopperIngotId)   return QStringLiteral("铜锭");   // 铜原矿冶炼产物
         if (blockId == RecipeRegistry::GoldOreDropId)   return QStringLiteral("金原矿"); // 金矿石挖掘掉落；熔炉烧金锭
         if (blockId == RecipeRegistry::GoldIngotId)     return QStringLiteral("金锭");   // 金原矿冶炼产物
+        // t344 烤肉（mob 燃烧致死掉落；机制等价 MC 1.0 cooked porkchop / beef / mutton）：与生肉 (RawPorkchopId/
+        //   RawBeefId) 配对的熟肉段，进 creativeMaterials 故须有名 —— 旧版漏返 → 空串 → 创造调色板无 hover tooltip。
+        if (blockId == RecipeRegistry::CookedPorkchopId) return QStringLiteral("熟猪排"); // 猪燃烧致死掉落
+        if (blockId == RecipeRegistry::CookedBeefId)     return QStringLiteral("熟牛肉"); // 牛燃烧致死掉落
+        if (blockId == RecipeRegistry::CookedMuttonId)   return QStringLiteral("熟羊肉"); // 羊燃烧致死掉落
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
