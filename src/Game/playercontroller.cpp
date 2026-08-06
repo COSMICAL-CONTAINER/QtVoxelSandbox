@@ -219,6 +219,10 @@ void PlayerController::respawn()
     m_hungerDepleteAccum = 0.0f;
     m_starveTimer = 0.0f;
     m_regenTimer = 0.0f;
+    // t344：重生清火烧态（出生点在岩浆外 → 不带火重生；翻 m_burning 才 emit，防陈旧火焰叠层残留）。
+    m_fireTimer = 0.0f;
+    m_fireDmgTimer = 0.0f;
+    if (m_burning) { m_burning = false; emit burningChanged(); }
     m_pos = QVector3D(kSpawnX, kSpawnY, kSpawnZ); // 回出生列（X/Z；Y 由 snapSpawnToGround 贴地表）
     m_vel = QVector3D(0, 0, 0);
     m_knockback = QVector3D(0, 0, 0); // t296：清受击击退冲量（重生不继承死亡点的击退）
@@ -257,6 +261,10 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     m_hungerDepleteAccum = 0.0f;
     m_starveTimer = 0.0f;
     m_regenTimer = 0.0f;
+    // t344：存档加载清火烧态（瞬态值，不持久化；防上一世界火残留带进新世界显陈旧火焰叠层）。
+    m_fireTimer = 0.0f;
+    m_fireDmgTimer = 0.0f;
+    if (m_burning) { m_burning = false; emit burningChanged(); }
     if (m_flying) { m_flying = false; emit flyingChanged(); }
     if (m_moveState != Walk) setMoveState(Walk);
     const Mode target = (mode == int(Survival)) ? Survival
@@ -2782,6 +2790,51 @@ void PlayerController::step(qreal dt)
         m_hungerDepleteAccum = 0.0f;
         m_starveTimer = 0.0f;
         m_regenTimer = 0.0f;
+    }
+
+    // t344 玩家火烧（岩浆 / 火点燃；仅 Survival 着火 + 火伤 + 熄灭；机制等价 MC 1.0 玩家触岩浆着火）。
+    //   分两段（同 EntityManager mob 火烧逻辑，常量复用 EntityManager::kFire* 保一致手感）：
+    //   (1) 岩浆接触点燃：脚位格 floor(m_pos.y) 或眼位格 floor(pos.y+eye) 任一 == Lava → fireTimer = kFireDuration
+    //       （仍在岩浆重置火伤累积 = 持续重燃）。机制等价 MC 玩家进岩浆着火。
+    //   (2) 火烧推进：fireTimer>0 → 离开岩浆递减；每 kFireDamageInterval 扣 1HP（fallDamageTaken(1, Fire) 复用
+    //       takeDamage→damaged 红闪 / 视角晃链，同窒息 / 溺水）+ 掷随机提前熄灭（kFireExtinguishChance）。
+    //       fireTimer 归零即熄（定时双保险）。m_burning = fireTimer>0，翻转才 emit burningChanged（驱动底部火焰叠层）。
+    //   非 Survival（Creative/Spectator 无敌）→ 清火（不着火 / 不火伤），翻转才 emit。无世界 → 不进火段（m_burning 翻 false）。
+    if (m_mode == Survival && m_world) {
+        const int fx = int(std::floor(m_pos.x()));
+        const int fz = int(std::floor(m_pos.z()));
+        const int footY = int(std::floor(m_pos.y()));            // 脚位格
+        const int eyeY = int(std::floor(m_pos.y() + m_eyeHeight)); // 眼位格（潜没时）
+        bool touchingLava = false;
+        if (footY >= 0 && m_world->blockAt(fx, footY, fz) == BlockRegistry::Lava) touchingLava = true;
+        if (!touchingLava && eyeY >= 0 && m_world->blockAt(fx, eyeY, fz) == BlockRegistry::Lava)
+            touchingLava = true;
+        if (touchingLava) {
+            m_fireTimer = EntityManager::kFireDuration;
+            m_fireDmgTimer = 0.0f; // 岩浆内重置火伤累积（持续重燃）
+        }
+        if (m_fireTimer > 0.0f) {
+            if (!touchingLava) m_fireTimer -= float(dt);
+            m_fireDmgTimer += float(dt);
+            if (m_fireDmgTimer >= EntityManager::kFireDamageInterval) {
+                m_fireDmgTimer -= EntityManager::kFireDamageInterval;
+                // 先掷随机提前熄灭（机制等价 MC 火 random extinguish）；不熄才扣 1HP 火伤。
+                if (QRandomGenerator::global()->generateDouble() < double(EntityManager::kFireExtinguishChance)) {
+                    m_fireTimer = 0.0f;
+                    m_fireDmgTimer = 0.0f;
+                } else {
+                    emit fallDamageTaken(1, PlayerState::Fire); // t311 死因=燃烧（复用 takeDamage→damaged 链）
+                }
+            }
+            if (m_fireTimer <= 0.0f) { m_fireTimer = 0.0f; m_fireDmgTimer = 0.0f; } // 定时熄灭
+        }
+        // m_burning 翻转才 emit（避免每帧抖 QML 绑定，同 eyeInWater 模式）。
+        if ((m_fireTimer > 0.0f) != m_burning) { m_burning = !m_burning; emit burningChanged(); }
+    } else {
+        // 非 Survival：无敌不着火 → 清火态（防切回 Survival 时陈旧 fireTimer 串入）；翻转才 emit。
+        m_fireTimer = 0.0f;
+        m_fireDmgTimer = 0.0f;
+        if (m_burning) { m_burning = false; emit burningChanged(); }
     }
 
     if (wasGround != m_onGround) emit onGroundChanged();

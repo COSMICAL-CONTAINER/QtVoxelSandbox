@@ -123,8 +123,9 @@ public:
     // t280 第 i 个实体是否**敌对**（hostile=true 的活体 Mob）。QML 据它对 Shambler/Bones 显燃烧火焰 Model
     //   （passive 永不燃烧 → 火焰仅敌对会显）。越界 / 非 hostile → false。
     Q_INVOKABLE bool isHostileAt(int i) const;
-    // t280 第 i 个敌对生物是否**正在燃烧**（暴露在日光下、skyBrightness 超过燃烧门）。tickHostileLife 每 tick
-    //   重算并写入 Entity.burning 缓存；QML 据 isBurningAt 显火焰动画 + baseColor 偏橙。越界 / 非敌对 → false。
+    // t280 第 i 个 mob 是否**正在燃烧**（火焰视觉）：hostile 暴露日光（tickHostileLife 写 Entity.burning）OR
+    //   t344 火烧态（fireTimer>0，岩浆 / 火点燃；ALL mobs 含 passive）。QML 据 isBurningAt 显火焰 Model +
+    //   baseColor 偏橙。t344 扩展：passive 着火亦显火焰（机制等价 MC 动物着火视觉）。越界 / 非 Mob → false。
     Q_INVOKABLE bool isBurningAt(int i) const;
     // t117 沙子重力方块：在方块格 (x,y,z) 生成一个下落方块实体（携带 blockId）。位置存该格中心
     // (x+0.5, y+0.5, z+0.5)；pushable=false（不被玩家推动，同掉落物变体）；kind=FallingBlock；
@@ -316,8 +317,11 @@ signals:
     // t239 mob 死亡一次性事件（damageEntity 把 health 首次扣到 ≤0 时发）。坐标 = 死亡格 floor(pos)，
     //   mobType = 子类 id（0=通用 / t240 pig/cow/sheep）。t242 据它 + mobType 决定掉落物（猪:生猪排 /
     //   牛:皮革+牛肉 / 羊:羊毛）→ 呈现层转发 ItemEntityManager.spawnItem（同 fallingBlockDropped 模式）。
+    //   t344 burned = 致死时刻 mob 是否处于火烧态（fireTimer>0，触碰岩浆 / 火点燃）：true → 呈现层 onMobDied
+    //   据此把被动生物的「生肉掉落」替换为熟肉（猪→熟猪排 / 牛→熟牛肉 / 羊→熟羊肉；机制等价 MC 1.0 着火死亡
+    //   掉熟肉）。仅 fireTimer>0 触发（日光 burning 仅敌对、不掉肉故不参与）。
     //   分层（PLAN §2）：Entities 层发语义事件，呈现层只消费，绝不反向写栅格。
-    void mobDied(int x, int y, int z, int mobType);
+    void mobDied(int x, int y, int z, int mobType, bool burned);
     // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：hostile mob（Shambler/Bones/Spider）在 aiHostile 内检测到
     //   玩家处于攻击范围（XZ<=kAttackRange + 垂直同层）且攻击冷却（kAttackCooldown）到时发本信号。amount = 单次伤害 HP
     //   （kAttackDamage=3，MC 简单难度僵尸）；mobType = 子类 id（Shambler/Bones/Stalker/Spider）。呈现层（Main.qml）
@@ -410,6 +414,13 @@ private:
         bool  hostile   = false; // 是否敌对生物（Shambler/Bones=true；passive=false）。spawnHostileMob 设 true。
         bool  burning   = false; // 当前是否在日光下燃烧（tickHostileLife 每 tick 重算缓存；QML isBurningAt 读）。
         float burnTimer = 0.0f;  // 燃烧扣血累积（秒；暴露日光时累加 dt，每 kBurnDamageInterval 扣 1HP）。
+        // t344 火烧态（岩浆 / 火点燃；ALL mobs，含 passive）。fireTimer>0 = 正在着火（视觉火焰 + 每秒火伤 + 随机熄灭；
+        //   归零即熄）。与上方 hostile-only 日光 burning（日光暴露驱动）**并列独立**：日光 burning 仅敌对 + 走
+        //   tickHostileLife；fireTimer 适用于所有 Mob + 在主 tick() Mob 分支推进（触碰岩浆 / 火即点燃，离开后仍持续
+        //   kFireDuration 秒）。isBurningAt 据二者之一为真即返真（QML 火焰 Model 对 passive 着火亦显）。mobDied 信号
+        //   带 burned = (fireTimer>0)（着火态死亡的 mob 掉熟肉，见 Main.qml onMobDied）。
+        float fireTimer       = 0.0f; // 火烧剩余秒数（>0 着火；岩浆 / 火点燃；每 tick 递减，归零熄灭）
+        float fireDamageTimer = 0.0f; // 火伤累积（秒；fireTimer>0 时累加，每 kFireDamageInterval 扣 1HP + 掷随机熄灭）
         float suffocationTimer = 0.0f; // t254 窒息累积计时（头部嵌实体方块时累加，每 kSuffocationInterval 秒扣 1HP；机制同玩家 t160）
         // t281 敌对 AI 态（仅 hostile=true 的 Mob 用；passive / FallingBlock 留默认不触发）：
         //   detect→pathfind→attack 三段（spec t281「敌对生物基类（AI/寻路）」）。chasing 在 aiHostile 内据
@@ -659,6 +670,18 @@ private:
     static constexpr float kBurnDamageInterval   = 1.0f;  // 燃烧扣血间隔（秒/HP；机制等价 MC 日光燃烧 1HP/s）
     static constexpr float kFarDespawn           = 56.0f; // 敌对远距消失半径（blocks）
     static constexpr int   kHostileDefaultHealth = 20;    // Shambler/Bones 满血（机制等价 MC 1.0 僵尸 / 骷髅 20HP）
+public:
+    // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
+    //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。
+    //   public 暴露 → PlayerController 复用（玩家火烧与 mob 火烧同值保一致手感；Game→Entities 向下依赖合规）。
+    //   kFireDuration：着火后持续时间（秒；离开火源后仍持续此秒数才灭，机制等价 MC fire 8s）。
+    //   kFireDamageInterval：火伤扣血间隔（秒；每秒 1HP，机制等价 MC 火 1HP/s 持续段）。
+    //   kFireExtinguishChance：每次火伤结算时随机提前熄灭的概率（机制等价 MC fire 随机熄灭 + 雨灭；本工程无雨，
+    //     仅留随机提前灭 + 定时双保险；取 0.15 = 约 15%/秒概率提前灭）。
+    static constexpr float kFireDuration        = 8.0f;  // 着火持续时间（秒；岩浆/火点燃后 fireTimer 初值）
+    static constexpr float kFireDamageInterval  = 1.0f;  // 火伤扣血间隔（秒/HP）
+    static constexpr float kFireExtinguishChance = 0.15f; // 每次火伤结算随机提前熄灭概率
+private:
     // t281 敌对 AI 常量（spec「detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）+ attack」；
     //   机制对齐 MC 1.0 僵尸 / 骷髅近战 AI：detect→pathfind→attack；数值为本工程小世界量身调，非 MC 精确复刻 ——
     //   PLAN §4「机制对标」非数值 1:1）。detect 取 MC 追踪距离量级（16）、attack 取 MC 简单难度僵尸伤害（3HP）。

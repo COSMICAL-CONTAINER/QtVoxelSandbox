@@ -891,7 +891,7 @@ Window {
         //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费）。掉落实体上限 kCap=200 自管防溢出。
         function onExplosionDroppedItem(x, y, z, itemId) { itemEntities.spawnItem(x, y, z, itemId, 1) }
         // t242 mob 死亡掉落（spec「血 0→死亡掉落物：猪:生猪排 / 牛:皮革+生牛肉 / 羊:羊毛」）：damageEntity
-        //   扣血到 ≤0 时 EntityManager 发 mobDied(x,y,z,mobType) → 据子类 id 转发到 ItemEntityManager.spawnItem
+        //   扣血到 ≤0 时 EntityManager 发 mobDied(x,y,z,mobType,burned) → 据子类 id 转发到 ItemEntityManager.spawnItem
         //   生成对应掉落实体（机制等价 MC 1.0 被动生物掉落；数量取 MC 1.0 量级：猪 1-2 生猪排 / 牛 1 皮革
         //   + 1-2 生牛肉 / 羊 1 羊毛；MobTest 不掉落）。同 fallingBlockDropped 模式：单向事件流（PLAN §2 分层：
         //   Entities 层发语义事件、呈现层只消费）。坐标 = mob 死亡格 floor(pos)，与 spawnItem 整数格约定一致。
@@ -901,16 +901,22 @@ Window {
         //     0x20B=生猪排 / 0x20C=生牛肉 / 0x20D=皮革 / 0x20E=羊毛（RecipeRegistry::RawPorkchopId 等）。
         //     0x217=骨头 / 0x218=腐肉 / 0x219=线（RecipeRegistry::BoneId / RottenFleshId / StringId，t299）。
         //     id 改动须同步 src/Game/recipe.h（单一权威）。
-        function onMobDied(x, y, z, mobType) {
+        function onMobDied(x, y, z, mobType, burned) {
+            // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
+            //   着火死亡掉熟肉）：猪→熟猪排 / 牛→熟牛肉（皮革非肉、不变）/ 羊→熟羊肉（替代羊毛）。熟肉 id：
+            //   0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（RecipeRegistry::CookedPorkchopId 等；⚠️ QML 用字面量同上约定）。
             if (mobType === EntityManager.MobPig) {
-                itemEntities.spawnItem(x, y, z, 0x20B, 1)   // 生猪排 ×1-2
-                itemEntities.spawnItem(x, y, z, 0x20B, 1)
+                const meat = burned ? 0x221 : 0x20B      // 熟猪排 / 生猪排 ×1-2
+                itemEntities.spawnItem(x, y, z, meat, 1)
+                itemEntities.spawnItem(x, y, z, meat, 1)
             } else if (mobType === EntityManager.MobCow) {
-                itemEntities.spawnItem(x, y, z, 0x20D, 1)   // 皮革 ×1
-                itemEntities.spawnItem(x, y, z, 0x20C, 1)   // 生牛肉 ×1-2
-                itemEntities.spawnItem(x, y, z, 0x20C, 1)
+                itemEntities.spawnItem(x, y, z, 0x20D, 1) // 皮革 ×1（非肉，燃烧不变）
+                const meat = burned ? 0x222 : 0x20C       // 熟牛肉 / 生牛肉 ×1-2
+                itemEntities.spawnItem(x, y, z, meat, 1)
+                itemEntities.spawnItem(x, y, z, meat, 1)
             } else if (mobType === EntityManager.MobSheep) {
-                itemEntities.spawnItem(x, y, z, 0x20E, 1)   // 羊毛 ×1
+                // 燃烧致死 → 熟羊肉（替代羊毛；机制等价 MC cooked mutton）；否则羊毛 ×1。
+                itemEntities.spawnItem(x, y, z, burned ? 0x223 : 0x20E, 1)
             } else if (mobType === EntityManager.MobBones) {
                 // t301 敌对掉落：骸骨（骷髅）→ 骨头 ×1-2 + 箭 ×0-2 + 弓（~50%）。
                 //   机制等价 MC 1.0 骷髅掉骨头 + 箭 + 有时弓（spec t301：弓 ~50% 概率非 100%，区别于被动掉落的恒定数量）。
@@ -3163,11 +3169,11 @@ Window {
                             }
                         }
                     }
-                    // t280 敌对生物日光燃烧火焰视觉（spec「白天燃烧消失」）：hostile 暴露日光时 EntityManager
-                    //   标 burning=true（tickHostileLife 每 tick 重算）→ 本 Model 显「火焰」—— 一个略大于 mob 的
-                    //   橙黄半透立方叠在 mob 外，opacity 快速抖动模拟火苗窜动（机制等价 MC 僵尸 / 骷髅日光着火
-                    //   视觉；原创自绘非照搬）。仅 hostile + burning 显；passive 永不显。NoLighting（可见 Model 必须
-                    //   NoLighting，lessons-learned 红线）。绑 revision 触碰 → 翻入 / 翻出 burning 时重算 visible。
+                    // t280/t344 燃烧火焰视觉：mob 处于燃烧态即显「火焰」—— 一个略大于 mob 的橙黄半透立方叠在
+                    //   mob 外，opacity 快速抖动模拟火苗窜动（机制等价 MC 僵尸/骷髅日光着火 + 动物触岩浆着火视觉；
+                    //   原创自绘非照搬）。燃烧态 = EntityManager.isBurningAt：t280 敌对日光 burning（hostile 暴露日光）
+                    //   OR t344 火烧态 fireTimer>0（岩浆/火点燃；ALL mobs 含 passive 牛/猪/羊）。NoLighting（可见 Model
+                    //   必须 NoLighting，lessons-learned 红线）。绑 revision 触碰 → 翻入/翻出 burning 时重算 visible。
                     Model {
                         visible: { entityManager.revision; return entityManager.isBurningAt(index) }
                         geometry: UnitCube {}
@@ -3898,6 +3904,31 @@ Window {
         anchors.fill: parent
         visible: window.appState === "playing" && player.eyeInWater
         color: Qt.rgba(0.20, 0.45, 0.70, 0.35)
+    }
+
+    // t344 着火火焰叠层：玩家燃烧（player.burning，岩浆 / 火点燃）→ 屏幕底部 ~35% 火焰半透叠层（机制等价
+    //   MC 着火屏边火焰；不覆盖全屏，仅底部火焰窜动感）。橙红渐变（顶透明 → 底炽热）+ opacity 抖动模拟火苗窜动。
+    //   纯 Rectangle / Gradient 自绘原创（§9a，非 MC 资产）。状态驱动 = player.burning（tickImpl 算时序、翻转才
+    //   emit burningChanged，无每帧抖动）。仅 playing 态显。放在 View3D 之后、HUD/背包/暂停/死亡叠层之前（同水下
+    //   蓝雾经验：叠层只染 3D 场景区，HUD/背包仍清晰可读）。纯 Rectangle 无 MouseArea → 不拦截鼠标。
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: parent.height * 0.35
+        visible: window.appState === "playing" && player.burning
+        gradient: Gradient {
+            GradientStop { position: 0.0;  color: Qt.rgba(1.0, 0.35, 0.05, 0.0) }   // 顶（透明，火焰上沿渐隐）
+            GradientStop { position: 0.45; color: Qt.rgba(1.0, 0.40, 0.08, 0.35) }  // 中（橙半透）
+            GradientStop { position: 1.0;  color: Qt.rgba(1.0, 0.55, 0.15, 0.78) }  // 底（炽热近不透）
+        }
+        property real flameFlicker: 0.85
+        SequentialAnimation on flameFlicker {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.65; to: 1.0; duration: 120 }
+            NumberAnimation { from: 1.0; to: 0.70; duration: 160 }
+        }
+        opacity: flameFlicker
     }
 
     // t88 火把位置列表（火把伪光源 Repeater 的 model；blockPlaced/blockBroken/worldChanged 维护）。

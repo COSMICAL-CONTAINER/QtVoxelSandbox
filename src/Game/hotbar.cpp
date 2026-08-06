@@ -244,7 +244,12 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::CopperOreDropId), // 铜原矿：铜矿石挖掘掉落；熔炉冶炼为铜锭
         int(RecipeRegistry::CopperIngotId),   // 铜锭：铜原矿冶炼产物；铜工具 / 装备配方原料（后续任务）
         int(RecipeRegistry::GoldOreDropId),   // 金原矿：金矿石挖掘掉落；熔炉冶炼为金锭
-        int(RecipeRegistry::GoldIngotId)      // 金锭：金原矿冶炼产物；金工具 / 装备 / 钟配方原料（后续任务）
+        int(RecipeRegistry::GoldIngotId),     // 金锭：金原矿冶炼产物；金工具 / 装备 / 钟配方原料（后续任务）
+        // t344 烤肉（mob 燃烧致死掉落；机制等价 MC 1.0 着火死亡掉熟肉）：生存由「烧死动物」获得，
+        //   创造调色板补全便于测试（同生肉）。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘褐色烤肉图标。
+        int(RecipeRegistry::CookedPorkchopId), // 熟猪排：猪燃烧致死掉落
+        int(RecipeRegistry::CookedBeefId),     // 熟牛肉：牛燃烧致死掉落
+        int(RecipeRegistry::CookedMuttonId)    // 熟羊肉：羊燃烧致死掉落
     };
 }
 

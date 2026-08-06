@@ -232,13 +232,15 @@ bool EntityManager::isHostileAt(int i) const
     return e.alive && e.kind == Mob && e.hostile;
 }
 
-// t280 第 i 个敌对生物是否正在日光下燃烧（tickHostileLife 每 tick 重算缓存 Entity.burning）。
-//   越界 / 非敌对 → false。QML 据它显火焰动画（passive 永不燃烧 → 火焰仅敌对会显）。
+// t280 第 i 个 mob 是否正在燃烧（火焰视觉）：t344 火烧态（fireTimer>0，岩浆/火点燃；ALL mobs 含 passive）
+//   OR 敌对日光 burning（tickHostileLife 每 tick 重算缓存 Entity.burning）。越界 / 非 Mob → false。
+//   QML 据 isBurningAt 显火焰动画（t344：passive 着火亦显火焰 Model）。
 bool EntityManager::isBurningAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return false;
     const Entity &e = m_entities[size_t(i)];
-    return e.alive && e.kind == Mob && e.hostile && e.burning;
+    // t344：火烧态（fireTimer>0）适用于所有 Mob；日光 burning 仅敌对。二者任一为真即显火焰。
+    return e.alive && e.kind == Mob && (e.fireTimer > 0.0f || (e.hostile && e.burning));
 }
 
 // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见头文件方法注释）。三职责一方法收口敌对生命周期。
@@ -631,8 +633,12 @@ void EntityManager::damageEntity(int i, int amount)
         e.wanderSpeed = 0.0f;
         e.moveSpeed = 0.0f;
         const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
-        qCInfo(lcEnt) << "mob" << i << "type" << e.mobType << "died at" << dx << dy << dz;
-        emit mobDied(dx, dy, dz, e.mobType);
+        // t344 burned = 致死时刻是否处于火烧态（fireTimer>0）：着火死亡掉熟肉（被动动物）。仅 fireTimer
+        //   触发（日光 burning 仅敌对、不掉肉故不参与 cooked 判定）。
+        const bool burned = e.fireTimer > 0.0f;
+        qCInfo(lcEnt) << "mob" << i << "type" << e.mobType << "died at" << dx << dy << dz
+                      << (burned ? "(burned)" : "");
+        emit mobDied(dx, dy, dz, e.mobType, burned);
     } else {
         qCInfo(lcEnt) << "mob" << i << "took" << amount << "dmg, health=" << e.health << "/" << e.maxHealth;
     }
@@ -1592,6 +1598,54 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
                 continue; // dead：不走 AI / 重力
             }
+
+            // t344 火烧系统（岩浆 / 火点燃；ALL mobs 含 passive；机制等价 MC 1.0 实体触岩浆着火 + 火伤 + 熄灭）。
+            //   分两段：
+            //   (1) 岩浆接触点燃：mob 脚位格 floor(pos.y−halfH) 或身体中心格 floor(pos.y) 任一 == Lava → 刷新
+            //       fireTimer = kFireDuration（落入岩浆湖 / 踩岩浆流即着火；机制等价 MC 实体进岩浆着火）。
+            //       仍在岩浆中重置火伤累积（机制等价 MC：岩浆内持续重燃，fireTimer 不递减）。
+            //   (2) 火烧推进：fireTimer>0 → 离开岩浆后递减；每 kFireDamageInterval 扣 1HP（复用 damageEntity 受击链：
+            //       扣血 + 红闪 + 归零 mobDied 带 burned=true → 熟肉掉落）+ 掷随机提前熄灭（kFireExtinguishChance）。
+            //       fireTimer 自然归零即熄（定时双保险）。passive 与敌对均走本段（日光 burning 仍由 tickHostileLife
+            //       独立管，二者在 isBurningAt 合取显火焰）。只读 World::blockAt（向下依赖）。
+            {
+                const int fx = qFloor(e.pos.x());
+                const int fz = qFloor(e.pos.z());
+                const int footY = qFloor(e.pos.y() - e.halfH); // 脚位（AABB 底面）格
+                const int bodyY = qFloor(e.pos.y());           // 身体中心格
+                bool touchingLava = false;
+                if (footY >= 0 && world->blockAt(fx, footY, fz) == BlockRegistry::Lava) touchingLava = true;
+                if (!touchingLava && bodyY >= 0 && world->blockAt(fx, bodyY, fz) == BlockRegistry::Lava)
+                    touchingLava = true;
+                if (touchingLava) {
+                    if (e.fireTimer < kFireDuration) { e.fireTimer = kFireDuration; dirty = true; } // 翻入着火 → bump（QML 显火焰）
+                    e.fireDamageTimer = 0.0f; // 岩浆内重置火伤累积（持续重燃）
+                }
+                if (e.fireTimer > 0.0f) {
+                    if (!touchingLava) e.fireTimer -= float(dt);
+                    e.fireDamageTimer += float(dt);
+                    if (e.fireDamageTimer >= kFireDamageInterval) {
+                        e.fireDamageTimer -= kFireDamageInterval;
+                        // 先掷随机提前熄灭（机制等价 MC 火 random extinguish）；不熄才扣 1HP 火伤。
+                        if (QRandomGenerator::global()->generateDouble() < double(kFireExtinguishChance)) {
+                            e.fireTimer = 0.0f;
+                            e.fireDamageTimer = 0.0f;
+                            dirty = true; // 熄火 → bump（QML 收火焰）
+                        } else if (!e.dead) { // 防御：damageEntity 可能本帧已死
+                            damageEntity(idx, 1); // 火伤 1HP（复用受击链；归零 mobDied 带 burned=true）
+                            dirty = true;
+                        }
+                    }
+                    // 定时熄灭：fireTimer 自然归零（离开岩浆后持续 kFireDuration 秒即灭）。
+                    if (e.fireTimer <= 0.0f) {
+                        e.fireTimer = 0.0f;
+                        e.fireDamageTimer = 0.0f;
+                        dirty = true;
+                    }
+                }
+            }
+            // 火伤可能本帧致死（damageEntity 置 dead）→ 本帧不再走 AI / 重力（同上方 dead 分支语义，防死尸位移）。
+            if (e.dead) continue;
 
             // t239 AI wander 自主移动（水平）：随机选向 + 时间片 + 逐轴 AABB 碰撞。位移 → dirty（驱动 QML 位置绑定）。
             // t241 羊吃草门控：eatTimer>0（吃草周期内）→ 跳过 wander + 强制 idle 站立（腿停 + 头俯仰），仅推进

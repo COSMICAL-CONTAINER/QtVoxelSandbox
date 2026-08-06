@@ -169,6 +169,12 @@ class PlayerController : public QQuickItem
     //   节奏）算最近岩浆格距离 → level。Main.qml Connections 据此 start/stop AudioManager 岩浆声 + setLavaFlowLevel。
     //   仅 playing 且近岩浆时 >0；菜单态扫描仍跑但通常无岩浆格 → 0 → 自动停。只读 World（向下依赖）；无世界 → 0。
     Q_PROPERTY(float lavaSoundLevel READ lavaSoundLevel NOTIFY lavaSoundLevelChanged)
+    // t344 玩家火烧态（岩浆 / 火点燃；仅 Survival 着火 + 火伤）：脚位 / 身体格 == Lava → 着火（fireTimer=
+    //   kFireDuration，复用 EntityManager 火烧常量保一致手感）；fireTimer>0 时每 kFireDamageInterval 秒扣 1HP
+    //   （fallDamageTaken(1, Fire) 复用 takeDamage→damaged 链）+ 掷随机提前熄灭。状态翻转才发 burningChanged
+    //   （避免每帧抖 QML 绑定，同 eyeInWater 模式）。Main.qml 据它显底部火焰叠层（屏幕下 ~35%，机制等价 MC
+    //   着火屏边火焰）。仅 Survival 生效（Creative/Spectator 无敌不着火）；无世界 → false。
+    Q_PROPERTY(bool burning READ burning NOTIFY burningChanged)
     // 掉落伤害事件（t22）：生存模式着地时按落差结算，发出本次应扣 HP（每 HP = 半心）。
     // 不直接持有 PlayerState（保持 Physics/Game→呈现 的单向事件流，分层干净；与 blockBroken
     // 同模式）：呈现层经 Connections 路由到 PlayerState.takeDamage。0 表示无伤害（不路出）。
@@ -262,6 +268,9 @@ public:
     // t343 近岩浆 proximity 岩浆声强度（Q_PROPERTY lavaSoundLevel READ）：玩家到最近岩浆格的距离映射 [0,1]。
     //   无世界 / 无近岩浆 → 0。定义在 .cpp。
     float lavaSoundLevel() const;
+    // t344 玩家火烧态（Q_PROPERTY burning READ）：m_burning 缓存（tickImpl 算时序、翻转才 emit burningChanged）。
+    //   仅 Survival 着火（Creative/Spectator 无敌）。Main.qml 据它显底部火焰叠层。
+    bool burning() const { return m_burning; }
 
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
@@ -384,6 +393,7 @@ signals:
     void feetInWaterChanged(); // t269 脚位水态翻转（驱动水中走路声分流；值真变才发，免每帧抖 QML 绑定）
     void flowSoundLevelChanged(); // t223 近流水 proximity 强度变（驱动 AudioManager 水流声 start/stop/setLevel）
     void lavaSoundLevelChanged(); // t343 近岩浆 proximity 强度变（驱动 AudioManager 岩浆声 start/stop/setLevel）
+    void burningChanged(); // t344 玩家火烧态翻转（驱动底部火焰叠层显隐；值真变才发，免每帧抖 QML 绑定）
     void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）。speed 属性亦复用本信号（t159）。
     void flySpeedMulChanged(); // 飞行速度倍数变（t159 滚轮调速；驱动 F3 报当前有效飞速）
     void walkPhaseChanged();  // 行走相位推进（t45；走时每 tick 发，QML 据 sin() 算四肢欧拉角）
@@ -729,6 +739,12 @@ private:
     float m_flowScanTimer = 0.0f;
     // t343 近岩浆 proximity 岩浆声：m_lavaSoundLevel = 最近岩浆格距离映射 [0,1]（tickImpl 同 flowScan 节奏重扫）。
     float m_lavaSoundLevel = 0.0f;
+    // t344 玩家火烧态（岩浆 / 火点燃；仅 Survival）：m_burning 缓存（翻转才 emit burningChanged），
+    //   m_fireTimer 火烧剩余秒（>0 着火；tickImpl 推进，归零熄灭），m_fireDmgTimer 火伤累积（每 kFireDamageInterval 扣 1HP）。
+    //   常量复用 EntityManager::kFire*（Game→Entities 向下依赖，玩家与 mob 火烧同值保一致手感）。
+    bool m_burning = false;
+    float m_fireTimer = 0.0f;
+    float m_fireDmgTimer = 0.0f;
     bool m_dead = false;             // t175 死亡态镜像（dropAllItems 置 true / respawn 置 false）：抑制死亡后
                                      //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）
 

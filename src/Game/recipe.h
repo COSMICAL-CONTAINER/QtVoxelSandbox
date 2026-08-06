@@ -147,6 +147,16 @@ public:
     static constexpr int CopperIngotId   = 0x21D; // 铜锭：铜原矿冶炼产物；铜工具 / 装备配方原料（后续任务）
     static constexpr int GoldOreDropId   = 0x21E; // 金原矿：金矿石挖掘掉落（BlockRegistry::GoldOre.dropId）；熔炉冶炼为金锭
     static constexpr int GoldIngotId     = 0x21F; // 金锭：金原矿冶炼产物；金工具 / 装备 / 钟配方原料（后续任务）
+    // t344 烤肉（mob 燃烧致死掉落；机制等价 MC 1.0「着火死亡的动物掉熟肉」）：被动生物在燃烧态（fireTimer>0，
+    //   触碰岩浆 / 火点燃）下死亡时，EntityManager mobDied 信号带 burned=true → Main.qml onMobDied 据 mobType
+    //   把「生肉掉落」替换为本段熟肉掉落（猪→熟猪排 / 牛→熟牛肉 / 羊→熟羊肉；皮革 / 羊毛等非肉掉落不变）。
+    //   机制等价 MC 1.0 cooked porkchop / cooked beef / cooked mutton；纯原创自绘 MaterialIcon 图标（§9a）。
+    //   可堆叠 64（走材料段默认）；非方块 → 右键不放置。生存由「烧死动物」获得（替代熔炉烤肉，t344 范围），
+    //   创造调色板补全便于测试（同生肉）。无 MC 1.0 等价映射（mutton / 熟肉段 1.0 物品表无对应，1.8+ 才有 →
+    //   mcMaterialId 返 -1，资源包回退引擎自绘 MaterialIcon）。
+    static constexpr int CookedPorkchopId = 0x221; // 熟猪排：猪燃烧致死掉落（机制等价 MC 1.0 cooked porkchop）
+    static constexpr int CookedBeefId     = 0x222; // 熟牛肉：牛燃烧致死掉落（机制等价 MC 1.0 cooked beef / steak）
+    static constexpr int CookedMuttonId   = 0x223; // 熟羊肉：羊燃烧致死掉落（机制等价 MC cooked mutton；§9 区隔改名）
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

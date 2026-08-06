@@ -41,7 +41,7 @@ import QtQuick
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）/ 0x21C 铜原矿 / 0x21D 铜锭 / 0x21E 金原矿 / 0x21F 金锭（t308）；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）/ 0x21C 铜原矿 / 0x21D 铜锭 / 0x21E 金原矿 / 0x21F 金锭（t308）/ 0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（t344）；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -359,6 +359,49 @@ Item {
             }
             const drawRawPorkchop = () => drawRawMeat("pig")
             const drawRawBeef     = () => drawRawMeat("beef")
+
+            // t344 烤肉（mob 燃烧致死掉落；机制等价 MC 1.0 cooked porkchop / beef / mutton，纯原创自绘 §9a）：
+            //   与生肉同骨架（肉块 + 骨柄）但主色为「烤熟的褐色」（棕褐焦边 + 深褐肌理），一眼辨「熟」（vs 生肉鲜红/粉）。
+            //   drawCookedMeat(kind) 共用骨架：kind="pig" 浅褐（猪排烤后偏粉褐）/ "beef" 深褐（牛肉烤后深棕）/
+            //   "mutton" 中褐（羊肉烤后棕褐；无骨柄，整块烤肉）。骨柄米白（猪/牛带骨烤排；mutton 无骨）。
+            const drawCookedMeat = (kind) => {
+                // 主色：猪排 #a86848（烤后浅褐）/ 牛肉 #6a3818（深棕）/ 羊肉 #8a5028（中褐）。焦边 char #3a1a08。
+                //   高光 light：猪 #c08868 / 牛 #8a5028 / 羊 #a86838（受光面，表「烤出的油亮」）。骨 bone #f0e8d8。
+                const isPig = (kind === "pig"), isBeef = (kind === "beef")
+                const meat  = isPig ? "#a86848" : isBeef ? "#6a3818" : "#8a5028"
+                const dark  = isPig ? "#704028" : isBeef ? "#3a1a08" : "#5a3018"
+                const light = isPig ? "#c08868" : isBeef ? "#8a5028" : "#a86838"
+                const char  = "#3a1a08"
+                const bone  = "#f0e8d8", boneShade = "#a89878"
+                // 肉块主体（rows 7..17，cols 5..18，圆角矩形）
+                R(7, 7, 11, 1, meat)
+                R(6, 8, 13, 9, meat)        // 主体 rows 8..16
+                R(7, 17, 11, 1, meat)
+                // 底焦边（深褐，表「烤焦的底面」）
+                R(7, 17, 11, 1, dark)
+                // 烤痕（几道更深褐横向纹，表「烤出的焦纹」；牛肉最多最深）
+                R(7, 10, 11, 1, dark)
+                R(7, 13, 11, 1, dark)
+                if (isBeef) { R(7, 11, 11, 1, char); R(7, 14, 11, 1, char) }
+                // 高光（顶行油亮，表「烤出的油脂反光」）
+                R(7, 8, 9, 1, light)
+                if (!isBeef && !isPig) {
+                    // mutton：整块烤肉无骨柄 → 顶面再加几粒深褐焦斑表「羊肉膻味焦皮」
+                    R(9, 9, 1, 1, char); R(13, 12, 1, 1, char); R(11, 15, 1, 1, char)
+                    return // mutton 无骨柄，到此结束
+                }
+                // 骨柄（左下到右上对角白骨，表「带骨烤排」——猪 / 牛带骨，mutton 无骨已 return）
+                R(8, 15, 2, 2, bone)
+                R(10, 13, 2, 2, bone)
+                R(12, 11, 2, 2, bone)
+                R(14, 9, 2, 2, bone)
+                R(16, 7, 2, 2, bone)
+                R(8, 16, 2, 1, boneShade)
+                R(16, 8, 2, 1, boneShade)
+            }
+            const drawCookedPorkchop = () => drawCookedMeat("pig")
+            const drawCookedBeef     = () => drawCookedMeat("beef")
+            const drawCookedMutton   = () => drawCookedMeat("mutton")
 
             // 皮革（0x20D，t242）：杀牛掉落。MC 风格皮革 = 棕黄兽皮（带毛边 + 缝线孔）。纯原创自绘（§9a）。
             //   配色：hide #a87838（棕黄主体）/ hideLight #c89858（顶受光高光）/ hideDark #785020（暗边 + 毛尖）/
@@ -821,6 +864,9 @@ Item {
             case 0x219: drawString();         break // t299 线（杀蜘蛛掉落）
             case 0x21A: drawArrow();          break // t304 箭（弓弹药；铁锭+木棒+线合成 4 件）
             case 0x21B: drawSapling();        break // t305 树苗物品（破叶掉落；种植 → 树）
+            case 0x221: drawCookedPorkchop(); break // t344 熟猪排（猪燃烧致死掉落）
+            case 0x222: drawCookedBeef();     break // t344 熟牛肉（牛燃烧致死掉落）
+            case 0x223: drawCookedMutton();   break // t344 熟羊肉（羊燃烧致死掉落）
             default:    drawStick();        break
             }
         }
