@@ -18,6 +18,9 @@
 //   全程纯函数于 seed + heightAt（fbm）→ 同 seed 同水域 / 沙滩分布（PLAN §2-K）。
 //   t307：地表基线 30→64（地表抬高至 ~64），水位同源抬高保持「低于基线 6 格」的相对几何不变
 //   （低洼 hills 仍见水 / 沙滩带，比例同 t162/t274）→ 24→58。同 seed 仍确定（fbm 纯函数）。
+//   t338：海 + 沙滩改为集中于一角（seaColumnHeight 四分之一圆盘缓坡，角点 seaFloor=waterLevel-6 → 边缘
+//   waterLevel+1 干沙滩），不再「全域低洼列散水/散沙」。本常量仍是海平面 / 海底 / 沙滩阈值的单一权威
+//   （fillWater 灌到 waterLevel；沙滩环 = waterLevel+1）。同 seed 仍确定（fbm + seaColumnHeight 纯函数）。
 constexpr int kWaterLevel = 58;
 
 World::World(QObject *parent) : QObject(parent)
@@ -860,47 +863,84 @@ bool World::isDesert(int x, int z) const
     return biomeAt(x, z) == Biome::Desert;
 }
 
+// t338 海域角点（4 角之一；seed 派生确定性）。海域（海 + 沙滩）集中于此角，内陆无散沙 / 散水。
+//   hashColumn 用固定独立坐标（与其它 worldgen hashColumn 解耦）→ 同 seed 同角（PLAN §2-K）。
+void World::seaCorner(int &cx, int &cz) const
+{
+    const quint32 r = hashColumn(m_seed, 0x5EA1u, 0xC0A5u);
+    cx = (r & 1u) ? m_width - 1 : 0;
+    cz = (r & 2u) ? m_depth - 1 : 0;
+}
+
+// t338 海域列高度（海 + 沙滩集中于一角）。返回：
+//   -1 = 内陆（非海域 → 走自然 heightAt，无海沙 / 海水）
+//   0..m_height-1 = 海域重塑地表 y（角点最深 seaFloor → 边缘 beachTop 线性缓坡；h<waterLevel 为海底由 fillWater
+//     灌水，h==waterLevel+1 为干沙滩）。判定 = 角点起的四分之一圆盘（欧氏 dist <= seaRadius）。
+//   纯函数于 seed + dims（PLAN §2-K）。generate 据此重塑地形（沙底/沙滩），fillWater 据此只在海域灌水，
+//   placeSurfaceLakes/placeUndergroundWaterPools 据此跳过海域（避免叠湖 / 误挖海水柱）。
+int World::seaColumnHeight(int x, int z) const
+{
+    if (m_width <= 0 || m_depth <= 0) return -1;
+    int cx, cz;
+    seaCorner(cx, cz);
+    const int dx = x - cx, dz = z - cz;
+    const double dist = std::sqrt(double(dx) * dx + double(dz) * dz);
+    const int seaRadius = std::min(m_width, m_depth) * 3 / 10; // 海域半径（地图短边 30% → 一角可见海）
+    if (dist > double(seaRadius)) return -1;                   // 圆盘外 → 内陆
+    constexpr int kSeaDepth = 6;                               // 角点海深（水位之下格数）
+    const int seaFloor = kWaterLevel - kSeaDepth;              // 角点海底（最深）
+    const int beachTop = kWaterLevel + 1;                      // 边缘干沙滩（水位 +1）
+    const double t = dist / double(seaRadius);                 // 0（角点）..1（边缘）
+    const int h = int(std::lround(seaFloor + (beachTop - seaFloor) * t));
+    return std::max(0, std::min(h, m_height - 1));
+}
+
 void World::generate()
 {
     buildPermutation();
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
     m_decayingLeaves.clear(); // t325 全新世界无失撑叶 → 清渐进衰减队列（防旧世界坐标误清新世界叶）
 
-    // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 水位」决定，下层 dirt / 深 stone。
+    // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 海域」决定，下层 dirt / 深 stone。
     //   - 沙漠群系（isDesert）：**仅表层 4-6 格沙**下接 Stone（t255 修正：旧实现整柱沙 y 0..h 全 Sand →
     //     沙贯穿到基岩层，挖沙挖到底全沙、且沙柱占满石层使矿石无分布空间）。表层沙厚度按 hashColumn 派生
     //     4..6（确定性，PLAN §2-K，沙丘高低起伏感）；其下 Stone 由 scatterOres 散布矿石、底层由 placeBedrock
     //     覆盖基岩（机制等价 MC 沙漠：薄沙层 + 沙岩/石基底；本工程无沙岩方块故直接下接 Stone）。
-    //   - 非沙漠且 h <= waterLevel+1：沙滩带 / 水下沙底。spec 显式沙滩带 h∈[wl-1,wl+1]（海平面 ±1 的可见沙滩），
-    //     h<wl 的更低列被 fillWater 淹没 → 其表层同样取沙（水下沙底，草不生于水下）。表层 Sand / 下 Dirt / 深 Stone。
-    //   - 非沙漠且 h > waterLevel+1：正常陆地（表层 Grass / 下 Dirt / 深 Stone）。
-    //   旧的 sandLevel=3 低洼沙判定被水位阈值（24+1=25）完全覆盖（h<=3 << 25 必属水下沙底），故删除。
-    //   逐列独立 → 跨 chunk 边界天然连续，无浮空/悬崖；同 seed 确定（fbm/纯函数，PLAN §2-K）。
+    //   - 海域（t338 seaColumnHeight >= 0，集中于一角）：海盆 + 沙滩。该列地表重塑为缓坡（角点最深海底 →
+    //     边缘干沙滩），表层 Sand / 下 Dirt / 深 Stone；fillWater 随后在海盆（h<waterLevel）灌满海水。海优先于
+    //     群系（海覆盖任何群系，统一沙底）。
+    //   - 其余内陆：正常陆地（表层 Grass / 下 Dirt / 深 Stone）。
+    //   t338：旧「全域 h<=waterLevel+1 → 散布沙滩/水下沙」已移除 —— 内陆低洼列不再产散沙（spec「内陆无散沙」），
+    //     沙 + 海水集中于此一角。逐列独立 → 跨 chunk 边界天然连续；同 seed 确定（fbm / seaColumnHeight 纯函数，§2-K）。
     //   走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
-    int desertCols = 0, sandyCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0;
+    int desertCols = 0, seaCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
-            const int h = std::min(heightAt(x, z), m_height - 1);
             const Biome bio = biomeAt(x, z);
             const bool desert = (bio == Biome::Desert); // t274：经 biomeAt 单一权威（原 isDesert 收口于此）
-            const bool sandy = (!desert) && (h <= kWaterLevel + 1); // 沙滩带(wl±1) + 水下(h<wl)
+            // t338：海域（海 + 沙滩）集中于一角。海域列地表重塑为 seaColumnHeight（缓坡海底/沙滩）。
+            const int seaH = seaColumnHeight(x, z);
+            const bool inSea = (seaH >= 0);
+            const int h = inSea ? seaH : std::min(heightAt(x, z), m_height - 1);
             // t255：沙漠表层沙厚度 4..6 格（hashColumn 低 2 位派生，PLAN §2-K 确定性；非沙漠列置 0 不用）。
             const int desertSandThickness = desert ? (4 + int(hashColumn(m_seed, x, z) % 3u)) : 0;
             if (desert) ++desertCols;
-            else if (sandy) ++sandyCols;
+            else if (inSea) ++seaCols;
             // t306：森林地表仍为草（机制等价 MC 森林地表草地），仅树/草密度分化 → surface 填充无需分流 forest。
             if (bio == Biome::Plains) ++plainsCols;
             else if (bio == Biome::Hills) ++hillsCols;
             else if (bio == Biome::Forest) ++forestCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
-                if (desert) {
-                    // t255：仅表层 desertSandThickness 格沙（h-y < thickness），下接 Stone（修旧整柱沙贯穿基岩 bug）。
-                    b = (h - y < desertSandThickness) ? BlockRegistry::Sand : BlockRegistry::Stone;
-                } else if (sandy) {
-                    if (y == h)          b = BlockRegistry::Sand;  // 沙表层（沙滩 / 水下沙底）
+                if (inSea) {
+                    // t338 海域：沙表层（海底 / 沙滩）+ Dirt + Stone（机制等价 MC 海岸沙 + 水下沙底）。海域优先于
+                    //   群系（海覆盖任何群系，统一沙底）；fillWater 随后在海盆（h<waterLevel）灌满海水到海平面。
+                    if (y == h)          b = BlockRegistry::Sand;  // 沙表层（海底 / 沙滩）
                     else if (y >= h - 2) b = BlockRegistry::Dirt;  // 表层下土
                     else                 b = BlockRegistry::Stone; // 深石
+                } else if (desert) {
+                    // t255：仅表层 desertSandThickness 格沙（h-y < thickness），下接 Stone（修旧整柱沙贯穿基岩 bug）。
+                    b = (h - y < desertSandThickness) ? BlockRegistry::Sand : BlockRegistry::Stone;
                 } else {
                     if (y == h)          b = BlockRegistry::Grass; // 草地表层
                     else if (y >= h - 2) b = BlockRegistry::Dirt;  // 土
@@ -913,7 +953,7 @@ void World::generate()
     // t274/t306：群系分布可观测（plains 应为多数 / forest 次之 / hills + desert 少数）；同 seed → 同分布（确定性核对）。
     qInfo() << "worldgen: biomes plains =" << plainsCols << "forest =" << forestCols
             << "hills =" << hillsCols << "desert =" << desertCols
-            << "beach/underwater =" << sandyCols
+            << "sea/beach =" << seaCols
             << "/" << (m_width * m_depth);
 
     placeBedrock(); // t119：底层基岩（y 0..4 坑洼，底实顶疏；不可破坏）。先于矿石 / 树（仅覆盖最底几格）
@@ -1485,10 +1525,14 @@ void World::fillWater()
     int waterCells = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
-            const int h = std::min(heightAt(x, z), m_height - 1);
-            if (h >= kWaterLevel) continue; // 此列地表高于海平面 → 无水
-            // 从地表上方一格到海平面填水（h+1..kWaterLevel）。低洼列被水淹没到统一海平面。
-            for (int y = h + 1; y <= kWaterLevel && y < m_height; ++y) {
+            // t338：海水仅集中于海域一角（seaColumnHeight >= 0 的海盆，seaH < waterLevel）。旧「全域低洼列
+            //   (h<waterLevel) 灌水」已移除 → 内陆低洼列不再产散布水洼（spec「内陆无散沙 / 散水」，沙随水走）。
+            //   海域海底 = seaColumnHeight（与 generate 填充一致）；沙滩环（seaH=waterLevel+1）高于海平面不灌水。
+            const int seaH = seaColumnHeight(x, z);
+            if (seaH < 0) continue;              // 内陆不灌水（消除散布水洼）
+            if (seaH >= kWaterLevel) continue;   // 沙滩环（waterLevel+1）高于海平面 → 无水
+            // 从海底上方一格到海平面填水（seaH+1..kWaterLevel）。海盆被水淹没到统一海平面。
+            for (int y = seaH + 1; y <= kWaterLevel && y < m_height; ++y) {
                 if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air)
                     continue; // 仅写空气格（防御：不动已存在方块）
                 m_chunks.setBlock(x, y, z, BlockRegistry::Water);
@@ -1527,6 +1571,7 @@ void World::placeUndergroundWaterPools()
             const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
             const int cx = bx + jx, cz = bz + jz;
             if (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3) continue; // 留 3 格边界（半径 ≤3 不越界）
+            if (seaColumnHeight(cx, cz) >= 0) continue; // t338：海域已有海，不叠地下水池（heightAt 为纯自然高度，会按自然高度算 y 范围误挖入海水柱）
             const int h = std::min(heightAt(cx, cz), m_height - 1);
             // 水池 y 范围：基岩之上 ~ 地表之下足够深（保上方有石顶 → 封闭黑暗）。
             const int yLo = kBedrockTop + 3;
@@ -1593,6 +1638,7 @@ void World::placeSurfaceLakes()
             // 留 rad+1 边界（局部低洼判定扫 disc + 湖岸外圈，须全在界内）。
             if (x - (rad + 1) < 0 || z - (rad + 1) < 0
                 || x + (rad + 1) >= m_width || z + (rad + 1) >= m_depth) continue;
+            if (seaColumnHeight(x, z) >= 0) continue; // t338：海域不叠地表湖（海独立于湖；heightAt 纯自然高度会误判海列为可挖平坦地 → 误挖海水柱）
             const Biome bio = biomeAt(x, z);
             if (bio != Biome::Plains && bio != Biome::Forest) continue; // 仅 plains/forest
             const int surfaceY = std::min(heightAt(x, z), m_height - 1);

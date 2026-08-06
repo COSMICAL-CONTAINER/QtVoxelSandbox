@@ -253,6 +253,15 @@ private:
     // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威；旧独立 fBm 实现已由 t274 biomeAt 统一）。
     //   供 generate（沙表层）/ placeTrees / placeTallGrass 跳过沙漠列。纯函数于 seed（经 biomeAt）。
     bool isDesert(int x, int z) const;
+    // t338 海域集中于一角（海 + 沙滩；spec「沙集中一角→沙滩+海」）。seed 派生选 4 角之一（seaCorner），
+    //   四分之一圆盘（seaColumnHeight）缓坡重塑：角点最深海底 → 边缘干沙滩。seaColumnHeight 返回海域列重塑
+    //   地表 y（>=0）或 -1（内陆）。generate 据此把海盆 + 沙滩集中于此角（沙表层 + 海底），fillWater 仅在此角
+    //   灌水；内陆低洼不再散沙 / 散水（旧「全域 h<=waterLevel+1 → 沙滩/水下」散布已移除）。纯函数于 seed + dims
+    //   （PLAN §2-K）；出生列居中 (80,80) 远离四角 → 不落海。heightAt 保持纯 fBm（不改），海域重塑仅在
+    //   generate/fillWater 显式应用 → placeTrees/placeTallGrass/scatterOres 经既有的「草顶 / 自然高度」守卫自然跳过
+    //   海域（海列自然 surfaceY 处为 air/水，非 Grass → 不种树/草），placeSurfaceLakes/placeUndergroundWaterPools 显式跳过。
+    void seaCorner(int &cx, int &cz) const;
+    int seaColumnHeight(int x, int z) const;
 
     // 确定性树木生成（PLAN §2-K）：在 generate() 末段于 grass 表层种橡树（原木主干+树叶球冠）。
     // 位置/形状纯由 seed 决定；禁用任何运行期随机源（QTime/时钟/全局 RNG）。
