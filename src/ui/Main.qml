@@ -689,8 +689,74 @@ Window {
         "help": {
             desc: "/help —— 列出可用命令",
             run: function(rest) { return window.helpText() }
+        },
+        // t378 /kill 命令（spec t378）：无参=自杀；@e=清除所有非玩家实体；@e[type=类型]=按实体类型清除。
+        //   选择器机制等价 MC 1.0（@e=all entities；§9 区隔：僵尸/骷髅/苦力怕 → shambler/bones/stalker）。
+        "kill": {
+            desc: "/kill [@e[type=类型]] —— 无参自杀；@e 清除所有非玩家实体；@e[type=类型] 按类型清除",
+            run: function(rest) { return window.runKill(rest) }
         }
     })
+    // t378 实体类型名 → EntityManager.MobType 枚举 id 的映射（/kill @e[type=...] 用；§9 区隔改名 mob）。
+    //   name 命中 → 对应枚举 id；未知 → -1。机制等价 MC 1.0 实体类型选择器（@e[type=pig]）。
+    function mobTypeIdFromName(name) {
+        const m = {
+            "test": EntityManager.MobTest,
+            "pig": EntityManager.MobPig,
+            "cow": EntityManager.MobCow,
+            "sheep": EntityManager.MobSheep,
+            "shambler": EntityManager.MobShambler,
+            "bones": EntityManager.MobBones,
+            "stalker": EntityManager.MobStalker,
+            "spider": EntityManager.MobSpider
+        }
+        return (name in m) ? m[name] : -1
+    }
+    // t378 /kill 命令分发（spec t378）：rest = 命令词后剩余串（含前导空格，由 sendChat 传）。
+    //   trim 后空 → 自杀（扣满血击杀玩家，走标准 takeDamage → 死亡界面 / 聊天播报链）；
+    //   "@e" / "@e[type=类型]" → 实体选择器：无 type 过滤 → 清除所有非玩家实体（mob / 下落方块 / 箭矢）；
+    //   有 type 过滤 → 仅清匹配类型的 Mob（下落方块 / 箭矢无 mobType 语义，type 过滤跳过）。player 不在
+    //   EntityManager → clearAll / 过滤天然不含玩家（满足 spec「除玩家外所有实体」）。未知选择器 / 类型 → 回显用法。
+    function runKill(rest) {
+        const arg = rest.trim()
+        if (arg.length === 0) {
+            playerState.takeDamage(playerState.health, PlayerState.Generic)
+            return "已自杀"
+        }
+        if (arg.charAt(0) !== "@") return "用法: /kill [@e[type=类型]]"
+        const sel = arg.slice(1)
+        if (sel !== "e" && !sel.startsWith("e[")) return "未知选择器: @" + sel + "（仅支持 @e）"
+
+        // 解析 [type=类型] 过滤（容缺右 ]、容空白）。
+        let typeFilter = ""
+        const lb = sel.indexOf("[")
+        if (lb >= 0) {
+            const rb = sel.lastIndexOf("]")
+            const body = rb > lb ? sel.slice(lb + 1, rb) : sel.slice(lb + 1)
+            const m = body.match(/type\s*=\s*(\w+)/)
+            if (m) typeFilter = m[1].toLowerCase()
+        }
+
+        if (typeFilter.length === 0) {
+            entityManager.clearAll()
+            return "已清除所有非玩家实体"
+        }
+        const tid = window.mobTypeIdFromName(typeFilter)
+        if (tid < 0) {
+            return "未知实体类型: " + typeFilter +
+                   "（可用: test, pig, cow, sheep, shambler, bones, stalker, spider）"
+        }
+        let removed = 0
+        for (let i = 0; i < entityManager.count; ++i) {
+            if (entityManager.aliveAt(i)
+                    && entityManager.kindAt(i) === EntityManager.Mob
+                    && entityManager.mobTypeAt(i) === tid) {
+                entityManager.removeEntityAt(i)
+                ++removed
+            }
+        }
+        return "已清除 " + removed + " 个 " + typeFilter
+    }
     // t347 /help 文案：依 commandRegistry 实时生成（注册表加项 → /help 自动列出，无需手维护）。多行用 \n
     //   分隔（系统消息走 Text.PlainText，\n 在 PlainText 内作换行，delegate height=implicitHeight 自撑）。
     function helpText() {
