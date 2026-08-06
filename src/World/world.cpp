@@ -1896,13 +1896,22 @@ void World::carveCanyon()
                 if (x < 0 || z < 0 || x >= m_width || z >= m_depth) continue;
                 if (seaColumnHeight(x, z) >= 0) continue; // 海域（海 + 沙滩）不开峡（峡谷为陆地地貌）
                 const quint8 b = m_chunks.blockAt(x, y, z);
-                if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water) continue;
+                // t376：地下水池（placeUndergroundWaterPools，先于峡谷）若与峡谷相交，carve 会把池水暴露给
+                //   峡谷空气 → 即便 t350 已限流，峡壁仍会从边缘池水渗出。故盘内水格一并挖空（排干）保峡谷干涸；
+                //   盘外池水仍被实体岩封闭（稳态）。盘外的边缘渗水由下方 post-pass 排水带兜底。仅跳过 air / 基岩。
+                if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock) continue;
                 m_chunks.setBlock(x, y, z, BlockRegistry::Air);
                 ++carvedVoxels;
             }
     };
 
     // ── 推进 worm，逐层 carve V 形剖面 ──
+    //   t376：同时记录路径中心（ix,iz + surfaceY + 朝向 yaw），供 carve 后三个 post-pass 用：
+    //   (1) 排水带 —— 排干峡谷带内残余水（兜底盘外边缘池水渗出）；(2) 邻接侧洞 —— 沿峡壁刻短隧道连既有洞穴；
+    //   (3) 单点高源瀑布 —— 一格水源高悬峡心柱，t350 限流下成细瀑布 + 小水洼（点缀非泛滥）。
+    struct CanyonPt { int ix, iz, surfaceY, span; double yaw; };
+    std::vector<CanyonPt> path;
+    path.reserve(kMaxSteps);
     int steps = 0;
     for (int step = 0; step < kMaxSteps; ++step) {
         const int ix = int(px), iz = int(pz);
@@ -1918,6 +1927,7 @@ void World::carveCanyon()
             if (r <= 0.0) continue;
             carveDisc(px, pz, y, r);
         }
+        path.push_back({ix, iz, surfaceY, span, yaw});
         // 推进（水平面内；yaw 决定朝向，无 pitch → 长程水平裂缝）。噪声缓弯 + 向 baseYaw 回复（保证贯穿）。
         const double df = 0.05;
         const double n = noise2(px * df + 11.1, pz * df - 7.7);                // [-1,1] 平滑扰动
@@ -1927,8 +1937,71 @@ void World::carveCanyon()
         ++steps;
     }
 
+    // t376 (1) 排水带：盘外（半径 > 当前盘半径）仍可能有地下水池残水紧贴峡壁 → 暴露后渗出。沿路径中心以
+    //   固定半径（盘上限 + 余量）逐柱排干 [kFloor, surfaceY] 内的水格 → 峡谷带内无水可渗。池水远端（带外）
+    //   仍被实体岩封闭（稳态）。一次 worldgen 开销可接受。
+    constexpr int kDrainRadius = kBaseRadius + kTopExtra + 2; // 盘上限 (~6) + 2 余量 → 8
+    int drainedCells = 0;
+    for (const CanyonPt &p : path) {
+        const int R2 = kDrainRadius * kDrainRadius;
+        for (int ox = -kDrainRadius; ox <= kDrainRadius; ++ox)
+            for (int oz = -kDrainRadius; oz <= kDrainRadius; ++oz) {
+                if (ox * ox + oz * oz > R2) continue;
+                const int x = p.ix + ox, z = p.iz + oz;
+                if (x < 0 || z < 0 || x >= m_width || z >= m_depth) continue;
+                if (seaColumnHeight(x, z) >= 0) continue; // 海域不排（海独立于峡谷）
+                const int topY = std::min(p.surfaceY, m_height - 1);
+                for (int y = kFloor; y <= topY; ++y) {
+                    if (m_chunks.blockAt(x, y, z) == BlockRegistry::Water) {
+                        m_chunks.setBlock(x, y, z, BlockRegistry::Air);
+                        ++drainedCells;
+                    }
+                }
+            }
+    }
+
+    // t376 (2) 邻接侧洞：每 kSideEvery 个路径点刻一条垂直于峡谷走向的短隧道进峡壁 → 可探索的壁龛，
+    //   常与 carveCaves 已有的洞穴网络（壁后）连通。复用 carveDisc（同款排干 + 海域跳过），三层 y 保通行。
+    constexpr int    kSideEvery  = 24;     // 每隔多少路径点刻一条侧洞（path ≤280 → 最多 ~11 条）
+    constexpr int    kSideLen    = 7;      // 隧道长度（进壁格数）
+    constexpr double kSideRadius = 1.6;    // 隧道半径（直径 ~3，可通行）
+    constexpr double kHalfPi     = 1.57079632679489661923;
+    int sideCaves = 0;
+    for (size_t i = kSideEvery / 2; i < path.size(); i += kSideEvery) {
+        const CanyonPt &p = path[i];
+        const double sign = (((i / kSideEvery) & 1u) != 0u) ? 1.0 : -1.0; // 索引奇偶定侧（确定性）
+        const double perpYaw = p.yaw + sign * kHalfPi;                    // 垂直于峡谷走向
+        const double startOff = double(kBaseRadius + kTopExtra) + 1.0;    // 起点：贴峡壁外侧
+        double tx = double(p.ix) + 0.5 + std::cos(perpYaw) * startOff;
+        double tz = double(p.iz) + 0.5 + std::sin(perpYaw) * startOff;
+        for (int s = 0; s < kSideLen; ++s) {
+            for (int y = kFloor; y <= kFloor + 2; ++y)                     // 3 层高隧道，贴峡底可走入
+                carveDisc(tx, tz, y, kSideRadius);
+            tx += std::cos(perpYaw);
+            tz += std::sin(perpYaw);
+        }
+        ++sideCaves;
+    }
+
+    // t376 (3) 单点高源瀑布点缀：取路径 ~1/3 处一格水源，高悬于峡心柱（其下全程峡谷空气）。t350 限流下
+    //   仅垂直下落成细瀑 + 落点 grounded 后水平蔓延 ≤kMaxFlowLevel 格 = 小水洼（点缀非泛滥）。span 太小
+    //   （无落差）则跳过。最后放置，避免被排水带 / 侧洞覆盖。
+    int waterfallY = -1;
+    if (!path.empty()) {
+        const size_t wi = path.size() / 3;
+        const CanyonPt &wp = path[wi];
+        if (wp.span >= 6) { // 至少 6 格落差才有「瀑布」观感
+            waterfallY = kFloor + (wp.span * 3) / 4; // 高位（距底 3/4 跨度），其下峡谷空气 → 细瀑
+            if (waterfallY < m_height && m_chunks.blockAt(wp.ix, waterfallY, wp.iz) == BlockRegistry::Air)
+                m_chunks.setBlock(wp.ix, waterfallY, wp.iz, BlockRegistry::Water); // 源（state 默认 0）
+        }
+    }
+
     qInfo() << "worldgen: grand canyon carved =" << carvedVoxels
             << "(steps" << steps << "floor" << kFloor << ")"; // 同 seed → 同计数（确定性核对）
+    qInfo() << "worldgen: canyon drained =" << drainedCells
+            << "side caves =" << sideCaves
+            << "waterfall y =" << waterfallY; // t376 确定性核对
 }
 
 // t309 地下水池（见 world.h 头注释）。机制等价 MC 1.0 地下水湖 / 封闭水洼：地下深处小型封闭空腔 + 底层水源。
