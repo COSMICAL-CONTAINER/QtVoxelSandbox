@@ -2425,16 +2425,23 @@ void PlayerController::extrudeEmbedded()
     const float minx = px - kHalfW, maxx = px + kHalfW;
     const float miny = m_pos.y(),        maxy = m_pos.y() + m_height;
     const float minz = pz - kHalfW, maxz = pz + kHalfW;
-    // 1) 找嵌入块（中心列上某 Y 格真重叠）。
+    // t355 修：嵌入检测用与 isLockedBuried（t289）相同的 kEmbedTol 内缩。旧版用裸「任意 ε 接触即重叠」，
+    //   当玩家 m_pos.y 贴方块整数边界（站立 / 落地 snapping 的 FP 残差，如 m_pos.y=64.9999 使 floor() 落到
+    //   脚下方块格）会把「玩家站其上的地面方块」误判为中心列嵌入 → extrudeEmbedded 把玩家横向推到邻列 =
+    //   站立 / 走动时偶发瞬移（同高邻列通常也是地面 → 推回 → 来回抖 = 用户报告的单机 rubberband）。内缩 0.1
+    //   后仅「显著嵌入」（穿透 >0.1：下落沙着地 / 侧面塞入 / 卡进墙）才触发推出，与 isLockedBuried 一致；
+    //   hairline / 边界 FP 不触发 → 无瞬移。真嵌入仍深 >0.1 → 仍被正常推出（本职不破）。
+    constexpr float kEmbedTol = 0.1f; // 须与 isLockedBuried 同值（边界 FP 阈一致；改须两处同步）
+    // 1) 找嵌入块（中心列上某 Y 格**显著**重叠，内缩 kEmbedTol 排除边界 FP）。
     int embY = -1;
     for (int y = y0; y <= y1 && embY < 0; ++y) {
         for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, y, bz)) {
-            if (minx < b.maxX && maxx > b.minX &&
-                miny < b.maxY && maxy > b.minY &&
-                minz < b.maxZ && maxz > b.minZ) { embY = y; break; }
+            if (minx + kEmbedTol < b.maxX && maxx - kEmbedTol > b.minX &&
+                miny + kEmbedTol < b.maxY && maxy - kEmbedTol > b.minY &&
+                minz + kEmbedTol < b.maxZ && maxz - kEmbedTol > b.minZ) { embY = y; break; }
         }
     }
-    if (embY < 0) return; // 中心列为空气（玩家正常占据）→ 非嵌入，不干预
+    if (embY < 0) return; // 中心列为空气 / 仅 hairline 接触（玩家正常占据）→ 非嵌入，不干预
     // 2) 邻列全高开放判定（玩家能整身进入才算可逃，避免挤进半堵列又被卡）。
     const auto columnClear = [&](int cx, int cz) -> bool {
         for (int y = y0; y <= y1; ++y)
