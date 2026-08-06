@@ -4767,6 +4767,11 @@ Window {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 96
         width: 460
+        // t358：容器高度 = 可见行数 × 行高。**Item 无显式 height 默认 0**，而 ListView 用 anchors.fill + clip:true
+        //   → 视口恒 0 → **所有**聊天行（含死亡播报）永远不可见（t327 只修了 visible/z，但 0 高容器下无论
+        //   visible/z/opacity 都画不出像素；这是死亡播报「仍只在死亡屏、不在聊天栏」的真正根因）。补 height 让
+        //   下文 chatVisibleLines/chatLineHeight（此前声明却从未被引用 = 本就为定高度而设）真正生效。
+        height: chatVisibleLines * chatLineHeight
         z: playerState.dead ? 185 : 95   // t327：死亡时抬到死亡遮罩(180)之上显播报，低于主菜单(200)
 
         // 由下往上排列最近 N 条（count 受 chatHistoryMax 限；显示窗最多 chatVisibleLines 行，超出由
