@@ -1665,7 +1665,12 @@ void PlayerController::placeBlock()
         //   由底面合并（玩家很难从下方点中）→「放了上半砖后同格下半砖放不下」。改读命中点 Y 后，任意面点中
         //   空半即合并（含侧面）；点中实半则 fall-through 走下方常规邻格放置。
         const float fracY = m_hitPointY - float(m_hitBy);
-        const bool merge = hitUpper ? (fracY < 0.5f) : (fracY >= 0.5f);
+        // t361 上半砖底面（空半的边界平面）需可靠合并：选体射线走 sub-AABB 精确测试（raycast.cpp），上半砖
+        //   sub-AABB 自 Y=0.5 起 → 点其底面 fracY 恒 ≈0.5（非 <0.5），旧 hitUpper?(fracY<0.5) 永不成立 →
+        //   点上半砖底面落到下方邻格（放上半砖）而非同格合并（spec 报「须点邻居底面」）。空半无几何体，玩家
+        //   从空半侧只能命中其边界平面（上半砖底面 m_hitNy<0 / 下半砖顶面 m_hitNy>0）→ 补法线判定免 fracY==0.5
+        //   浮点抖动：点中空半边界平面即「想填空半」→ 合并。
+        const bool merge = hitUpper ? (m_hitNy < 0 || fracY < 0.5f) : (m_hitNy > 0 || fracY >= 0.5f);
         if (merge) {
             if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks, 0)) return;
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks,
