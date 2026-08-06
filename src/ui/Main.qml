@@ -5429,17 +5429,17 @@ Window {
                  && player.mode === PlayerController.Creative
         z: 150
         onClosed: window.closeInventory()
-        // t292：创造背包「归还 / 丢弃光标手持物」（点面板外遮罩 / 换拿覆盖）→ 应**凭空消失**，非丢出到世界
-        //   生成实体。机制等价 MC 1.0 创造模式：调色板=无限源，手持物 dismiss 即回虚空、不落地。生存背包
-        //   （survivalPanel）的手持物是真实物品，仍走 dropHeldCursor 落地（见下方）。分层（PLAN §2）：呈现层只发
-        //   dismiss 意图信号，是否落地由宿主按模式决定（创造=清栈 / 生存=spawn 实体）；setHeldBlock(0) 同步清
-        //   count+durability，浮动光标图标自动隐。
-        onDiscardHeldRequested: hotbarVM.heldBlock = 0
-        // 右键「逐个 dismiss」同源：≤1 → 整栈凭空消失；>1 → 光标 -1（dismiss 的那 1 件消失，余量留光标）。
-        onDiscardHeldOneRequested: {
-            if (hotbarVM.heldCount <= 1) hotbarVM.heldBlock = 0
-            else hotbarVM.heldCount = hotbarVM.heldCount - 1
-        }
+        // t356：创造拖出面板外丢弃（点遮罩区 / 拖出释放）→ 落地为实体（同生存 dropHeldCursor）。回归根因：
+        //   t292 曾把创造 dismiss 统一改成「凭空消失」（heldBlock=0），t318 又把「调色板点原格归还」接到同一信号
+        //   discardHeldRequested → 创造拖出 / 丢热键一并变虚空、丢不出物。t356 把两个意图拆开信号：拖出面板外 =
+        //   丢世界实体（本处 dropHeldCursor）；调色板点原格 / 换拿归还 = 凭空消失（returnHeldToVoidRequested，见下）。
+        //   分层（PLAN §2）：呈现层只发意图信号，是否落地由宿主定（此处一律 spawn 实体，与生存一致）。
+        onDiscardHeldRequested: player.dropHeldCursor()
+        // 右键逐个拖出 → 同生存 dropHeldCursorOne（丢 1 件到世界，余量留光标）。
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
+        // t356：调色板「归还光标手持物到虚空」（点原格 t318 切换归还 / 换拿时旧物回虚空 t136）→ 凭空消失
+        //   （heldBlock=0，同步清 count+durability；t292 创造无限源语义，不丢世界实体）。与拖出（=世界）区分。
+        onReturnHeldToVoidRequested: hotbarVM.heldBlock = 0
         // t120：创造拿物品（调色板点击）→ 手弹跳（同生存拾取的手弹反馈，spec「创造拿物品到手也触发」）。
         onItemTaken: handPopAnim.start()
     }

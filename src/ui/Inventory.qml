@@ -33,13 +33,18 @@ Item {
     property Hotbar hotbar
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
     signal closed()
-    // t49：请求宿主 dismiss 光标手持栈（拖出面板外释放 / 点遮罩区时）。宿主按模式决定落地语义：
-    //   生存背包 → 落地为实体（player.dropHeldCursor）；创造背包 → 凭空消失（setHeldBlock(0)，t292：
-    //   创造调色板=无限源，dismiss 回虚空、不丢出到世界）。
+    // t49/t356：请求宿主把光标手持栈「丢出到世界」生成实体（拖出面板外释放 / 点遮罩区时）。宿主一律走
+    //   player.dropHeldCursor 落地（创造 / 生存一致 —— t356 恢复创造拖出生实体，修 t292 把创造 dismiss 统一
+    //   改成「凭空消失」致丢不出物的回归；调色板无限源的「归还」另走 returnHeldToVoidRequested，见下）。
     signal discardHeldRequested()
-    // t228：请求宿主 dismiss 光标手持栈的 1 件（右键拖出面板外）。宿主按模式：生存=落地 1 实体（dropHeldCursorOne）；
-    //   创造=凭空消失 1 件（t292）。左键整栈走 discardHeldRequested，右键逐个走本信号（spec「左键=全丢/右键=逐个」）。
+    // t228/t356：右键拖出面板外丢 1 件 → 宿主一律 player.dropHeldCursorOne（落地 1 实体，创造/生存一致）。
+    //   左键整栈走 discardHeldRequested，右键逐个走本信号（spec「左键=全丢/右键=逐个」）。
     signal discardHeldOneRequested()
+    // t356：创造调色板「归还光标手持物到虚空」（点原格切换归还 t318 / 换拿时旧物回虚空 t136）。调色板=无限源，
+    //   「归还」即凭空消失（heldBlock=0）、不丢世界实体（t292 创造语义）。区别于 discardHeldRequested（拖出=丢世界）：
+    //   t318 前二者共用 discardHeldRequested，且 t292 把该信号宿主改成「创造凭空消失」→ 创造拖出/丢热键一并变
+    //   虚空、丢不出物。t356 把「归还虚空」与「丢出世界」拆成两个意图信号，互不串台（归还=虚空 / 拖出=世界）。
+    signal returnHeldToVoidRequested()
     // t120：创造拿物品（调色板点击 → 拿到光标 / 手）→ 请求宿主弹手动画（Main.qml 接 handPopAnim.start）。
     //   机制等价生存拾取的手弹反馈，但创造无实体销毁、不发 player.itemPickedUp（那是实体拾取专用信号）；
     //   故经此信号让宿主单独触发手弹（spec「创造拿物品到手也触发 handPopAnim」）。仅调色板「无限源拿取」
@@ -331,20 +336,22 @@ Item {
                                 // count=1（t33）。setHeldBlock 已对工具段 id 校验合法（isValidItemId 含工具段）。
                                 onTapped: {
                                     // t318：切换式归还（修 t292 遗留「点原格又拿起该格」）。创造调色板=无限源，
-                                    //   点「当前手持物同格（原格）」= 放回（heldBlock===modelData → discardHeldRequested，
+                                    //   点「当前手持物同格（原格）」= 放回（heldBlock===modelData → returnHeldToVoidRequested，
                                     //   凭空消失回虚空，创造不丢世界，t292）；再点同格 = 重新拿起。旧版无脑 dismiss+re-pick
                                     //   → 点原格 dismiss 后立刻赋同值（heldBlock 复原），用户观感「没归还、重复拾取」。
                                     //   现 heldBlock===modelData 早退走归还，构成 true toggle（拿起→点原格归还→再点拿起）。
+                                    //   t356：归还走 returnHeldToVoidRequested（=虚空），不复用 discardHeldRequested（=丢世界实体），
+                                    //   否则 t318 归还路径会把「丢世界」意图与「回虚空」混淆。
                                     if (root.hotbar.heldBlock === modelData) {
-                                        root.discardHeldRequested()
+                                        root.returnHeldToVoidRequested()
                                         return
                                     }
                                     // t136/t292：换拿前先显式 dismiss 旧光标手持栈（防被下方赋值直接覆盖成「凭空消失」
                                     //   的隐性路径——显式走信号让宿主统一处理）。创造调色板=无限源，旧物 dismiss 即回
-                                    //   虚空（setHeldBlock(0)，t292：不丢出到世界）；信号同线程直连，返回时 heldBlock 已为 0，
+                                    //   虚空（heldBlock=0，t292：不丢出到世界）；信号同线程直连，返回时 heldBlock 已为 0，
                                     //   随后赋新值安全。空手（heldBlock===0）跳过。异格（heldBlock!==modelData）走此分支 =
-                                    //   换拿（旧物回虚空 → 新物上手，MC 创造调色板语义）。
-                                    if (root.hotbar.heldBlock !== 0) root.discardHeldRequested()
+                                    //   换拿（旧物回虚空 → 新物上手，MC 创造调色板语义）。t356：同走 returnHeldToVoidRequested。
+                                    if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
                                     root.hotbar.heldBlock = modelData
                                     // t174：count 走 maxStackSize（单一权威）—— 工具 1 / 桶 1（不可堆叠）/ 方块·材料 64。
                                     //   旧 `isTool ? 1 : 64` 对桶（材料段 0x206/0x207 maxStack=1）误给 64（放入槽被 setStack
