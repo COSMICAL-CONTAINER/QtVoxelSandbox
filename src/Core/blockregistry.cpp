@@ -428,6 +428,22 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
     }
 }
 
+// t360 列顶实面 Y 偏移（见头注释）：PCF 软影用本值替代「heightmap+1.0 整格」假设，按方块真实模型高度判遮挡。
+//   与 shapeBoxes 的 maxY 同源（单一权威：改形状只改一处），但免建 vector —— PCF 热路径每顶点 16 次查询。
+float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
+{
+    switch (def(blockId).shape) {
+    case ShapeSlab:     return (state & 1) ? 1.0f : 0.5f;     // 上半砖顶=1.0 / 下半砖顶=0.5
+    case ShapeTrapdoor: return (state & 1) ? 1.0f : 0.1875f;  // 开=竖直板到顶 1.0 / 合=水平薄板顶 0.1875
+    case ShapeFence:    return 1.5f;                          // 中心立柱 1.5 高
+    case ShapePlate:    return 0.0625f;                       // 贴地薄板 1/16 高
+    case ShapeStairs:   return 1.0f;                          // 背墙到顶（整步+背墙最高点 = cellY+1）
+    case ShapeFull:     return 1.0f;                          // 整立方
+    case ShapeDoor:     return 1.0f;                          // 满高薄板
+    default:            return 1.0f;                          // ShapeNone（air/torch/water）不入 heightmap 顶，兜底 1.0
+    }
+}
+
 // t213 射线命中 sub-AABB：射线进入含该方块的体素后须命中某个 sub-AABB 才算选中（不完整方块/火把的空气
 //   部分让射线穿过命中后方块）。完整立方 / air / water → 整格单盒（进格即中，等同旧行为；water 经 HitWater
 //   命中整格舀水）；不完整方块段 → 同 selectionAABBs（实体 sub 形状，与渲染/碰撞同源）；火把（ShapeNone，

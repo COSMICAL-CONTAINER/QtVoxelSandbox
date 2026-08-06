@@ -84,6 +84,10 @@ public:
     //（越界 / 空列 → -1）。mesher 据此判顶点见天（ly >= hm → 天光 1.0）/ 地下（暗 0.2）。经 ChunkManager
     // 路由到 chunk 局部列；heightmap 由 setBlock 增量维护（worldgen / 玩家编辑 / 实体写入均经此入口）。
     Q_INVOKABLE int heightmapAt(int x, int z) const { return m_chunks.heightmapAt(x, z); }
+    // t360 列顶实面世界 y（= heightmapAt + solidTopOffset）：PCF 软影按方块真实模型高度判遮挡
+    //   （修「下半砖 / 合活版门被当整格高 → 投出整格黑影、邻地误暗」）。空列 / 越界（heightmap<0）→ -1（不遮挡）。
+    //   非 Q_INVOKABLE（仅 VoxelLight C++ 调；与 heightmapAt 同只读语义）。
+    float columnTopSurfaceY(int x, int z) const;
     // t137 出生贴地表：worldgen 地表高度（纯函数于 seed + fbm，同 generate() 填充用的 heightAt）。
     //   暴露给 Game 层（PlayerController）查出生列地表，把玩家脚底贴到 h+1（消除 kSpawnY 兜底落差摔伤）。
     //   与 heightmapAt 的差异：heightAt = worldgen 地表（不含树 / 玩家编辑），heightmapAt = 当前列首个非空

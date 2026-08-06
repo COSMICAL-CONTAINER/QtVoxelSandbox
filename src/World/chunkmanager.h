@@ -38,6 +38,10 @@ public:
     bool setBlock(int x, int y, int z, quint8 id, quint8 state);
     // t121：世界坐标列的「自顶向下首个非空气」y（越界 / 空列 → -1）。mesher 据此判顶点见天（PLAN §2-H）。
     int heightmapAt(int x, int z) const;
+    // t360 列顶实面世界 y（= heightmap + solidTopOffset(列顶方块)；越界 / 空列 → -1）。PCF 软影按方块真实
+    //   模型高度判遮挡（修下半砖/合活版门被当整格高投整格黑影）。单次 chunk 路由（PCF 热路径：heightmap +
+    //   该列顶方块 block/state 一次取齐，免 3 次重复 chunk 路由）。
+    float columnTopSurfaceY(int x, int z) const;
     // t151 光场路由（世界坐标 ↔ chunk 局部）：sky/block 读 + 写 + 全清。越界读返回 0、写忽略。
     //   flood-fill（World）与 mesher 经此访问 per-voxel 光场（跨 chunk 自动路由）。OOB 语义统一交 caller。
     quint8 skyLightAt(int x, int y, int z) const;

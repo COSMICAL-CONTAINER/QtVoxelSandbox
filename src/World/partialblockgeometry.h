@@ -22,12 +22,17 @@ struct Vtx {
     float r, g, b, a;
 };
 
-// 逐块光场上下文（t151 真光场；由 chunkgeometry::buildMesh 按本块算好后传入，append 把它直接作各面顶点色）。
-//   light = 本格光场值 max(sky,block)/15（已 clamp 到 [kVcMin, 1]）；异形方块各面共用此值（近似：异形
-//   小体面所朝向的「邻格」在子格尺度上歧义，故取本格光场；异形格非遮光 → 光场已 flood 反映周围）。
-//   替代 t123 方向太阳 faceVc（faceNormal·sunDir + heightmap 列投影）—— 方向阴影留 t153 PCF 软影。
+// 逐块光场上下文（t151 真光场；由 chunkgeometry::buildMesh 按本块算好后传入）。
+//   light = 本格光场值 max(sky,block)/15（cross 植物 pushCrossQuad 用：cross 立于开敞格、本格即其光照）。
+//   face[6] = 6 向「面所朝邻格」光场值（pushBox 各盒面按外法线方向取；顺序同 partialblockgeometry.cpp
+//     kBoxFaces [+X,-X,+Y,-Y,+Z,-Z]）。已含 per-face PCF 软影 + clamp 到 [kVcMin,1]。
+//   t360 修异形方块自影：合活版门 / 下半砖等「本格遮光」方块的**顶面**旧采本格光场（被本格 lightOpacity
+//     压暗 → 顶面自影变黑/发暗）；改采上方空气邻格 flood 光（=15 复亮）。各面采其外法线邻格 —— 与整立方
+//     面剔除路径同源（整立方各面即采面所朝邻格光）。对异形子盒，「面所朝邻格」= 该面外侧的世界格
+//     （顶面→上格、底面→下格、侧面→水平邻格），无子格尺度歧义。替代 t123 方向太阳 faceVc。
 struct PartialLightCtx {
-    float light;  // 本格光场值 [0,1]（max(sky,block)/15，已 clamp）；异形方块各面顶点色共用
+    float light;     // 本格光场值 [0,1]（cross 植物 pushCrossQuad 用）
+    float face[6];   // 6 向邻格光场值 [0,1]（pushBox 各面按外法线方向取；已含 per-face PCF + clamp）
 };
 
 // 逐块水平邻居上下文（t209 栅栏连接）：4 向水平邻居的方块 id（由 chunkgeometry::buildMesh 查好后传入）。

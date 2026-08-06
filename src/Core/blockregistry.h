@@ -512,6 +512,12 @@ public:
     //   越界 → 0。与 lightOpacity 解耦：岩浆 lightOpacity=0（solid=false 全透）但 lightEmission=15（既透光又自发光）。
     static quint8 lightEmission(quint8 blockId);
 
+    // t360 列顶实面 Y 偏移（cell-local 0..~1.5）：该格最高实面在世界 y = cellY + 本值。PCF 软影据此判列顶
+    //   是否挡光（取代旧「heightmap+1.0 整格」假设）—— 修「下半砖 / 合活版门被当整格高 → 投出整格黑影、
+    //   邻地误暗」（上半砖 / 整立方顶恰在 cellY+1 → 不变，无回归）。机制等价 MC 按方块实际模型高度投影。
+    //   全实体 1.0；下半砖 0.5 / 上半砖 1.0；合活版门 0.1875 / 开 1.0；楼梯背墙到顶 1.0；栅栏 1.5；压板 0.0625。
+    static float solidTopOffset(quint8 blockId, quint8 state);
+
     // t213 射线命中 sub-AABB（cell-local [0,1]^3）：射线进入含该方块的体素后，**须命中其中某个 sub-AABB**
     //   才算选中——不完整方块 / 火把的「空气部分」让射线穿过命中后方块（修「挖半砖背后的方块却撸掉了
     //   半砖/火把」，命中点是否落在该方块 sub-AABB 内）。与 selectionAABBs 的差异：

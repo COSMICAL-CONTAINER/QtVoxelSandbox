@@ -296,7 +296,28 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     const float cellLight = std::clamp(
                         std::max((cSky / 15.0f) * (1.0f - cShadow), cBlock / 15.0f), kVcMin, kVcMax);
                     const quint8 st = stateAtWorld(wx, ly, wz);
-                    const PartialLightCtx lctx{ cellLight };
+                    // t360 异形方块光照：cross 用本格光场（cellLight）；pushBox 各面用「面所朝邻格」flood 光
+                    //   （修合活版门/下半砖顶面自影：旧采被本格 lightOpacity 压暗的本格值）。6 向邻格 sky/block
+                    //   + 各面代表点（面中心世界位）PCF → clamp(max(sky*(1-sh), block))。顺序同 kBoxFaces
+                    //   [+X,-X,+Y,-Y,+Z,-Z]，与 partialblockgeometry pushBox 取 face[fi] 一一对应。
+                    struct FaceSrc { int dx, dy, dz; float px, py, pz; };
+                    const FaceSrc fs[6] = {
+                        { 1, 0, 0, float(wx + 1),     float(ly) + 0.5f, float(wz) + 0.5f}, // +X
+                        {-1, 0, 0, float(wx),         float(ly) + 0.5f, float(wz) + 0.5f}, // -X
+                        { 0, 1, 0, float(wx) + 0.5f,  float(ly + 1),   float(wz) + 0.5f}, // +Y
+                        { 0,-1, 0, float(wx) + 0.5f,  float(ly),       float(wz) + 0.5f}, // -Y
+                        { 0, 0, 1, float(wx) + 0.5f,  float(ly) + 0.5f, float(wz + 1)},   // +Z
+                        { 0, 0,-1, float(wx) + 0.5f,  float(ly) + 0.5f, float(wz)},       // -Z
+                    };
+                    PartialLightCtx lctx;
+                    lctx.light = cellLight;
+                    for (int i = 0; i < 6; ++i) {
+                        const int nx = wx + fs[i].dx, ny = ly + fs[i].dy, nz = wz + fs[i].dz;
+                        const float nbSkyF = m_world->skyLightAt(nx, ny, nz) / 15.0f;
+                        const float nbBlockF = m_world->blockLightAt(nx, ny, nz) / 15.0f;
+                        const float sh = sunShadowAt(fs[i].px, fs[i].py, fs[i].pz);
+                        lctx.face[i] = std::clamp(std::max(nbSkyF * (1.0f - sh), nbBlockF), kVcMin, kVcMax);
+                    }
                     // t209 栅栏连接：查 4 向水平邻居 id（跨 chunk 经 blockAtWorld 路由，边界邻居正确）。
                     //   仅 fence 读本上下文；其余异形方块忽略。边界格破/放已标邻 chunk 脏（ChunkManager::setBlock
                     //   在 lx/lz 贴边时标邻接脏）→ 跨 chunk 栅栏连接随邻居重网格化自动更新。

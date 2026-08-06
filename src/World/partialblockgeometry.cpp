@@ -11,8 +11,8 @@
 //   - 复用 chunkgeometry 的「kFaces 法线 + uv 规则」：每面外法线 + 4 角（从外看 CCW）+ per-face UV 映射
 //     （±X 面 cu,cv=(z,y)；±Z 面 (x,y)；±Y 面 (x,z)），三角形按 (0,1,2),(0,2,3)。本文件本地定义同款
 //     Face 表（chunkgeometry 的 kFaces 是其 .cpp 内 static，无法 import；此处镜像，注释钉死同源）。
-//   - t151 真光场：各面顶点色 = 本格光场值 max(sky,block)/15（由 chunkgeometry 算好经 PartialLightCtx.light
-//     传入），异形方块与立方面光照一致、无缝混排（替代 t123 方向太阳 faceVc）。
+//   - t151/t360 真光场：盒体各面顶点色 = 该面外法线邻格的 flood 光 max(sky,block)/15（经 PartialLightCtx.face
+//     传入；t360 改采邻格取代本格，修合活版门/下半砖顶面自影），cross 植物用本格光场（PartialLightCtx.light）。
 //   - 各 shape 生成器把异形拆成 1~2 个轴对齐子盒（pushBox 推 6 面），不剔内面 —— 异形小体的内/底面被
 //     自身遮挡（overdraw 可忽），且 partial 方块 solid=false 不参与整立方邻居剔除，需自画全部面。
 //
@@ -27,13 +27,6 @@
 // 文件位置（分层 PLAN §2）：与唯一调用者 chunkgeometry 同放 src/World/（mesher 子系统同层），见 .h 注释。
 
 namespace {
-// t151：异形方块各面共用本格光场值作顶点色（faceVc 直接返回 L.light，法线参数保留供未来按面分流）。
-float faceVc(const float nrm[3], const PartialLightCtx &L)
-{
-    (void)nrm; // t151：异形方块面光近似为本格光场（不按法线复算）；保留形参供未来按面采样邻格。
-    return L.light;
-}
-
 // 轴对齐盒体 6 面定义（normal + 4 角 + per-corner (cu,cv)）。角序与 chunkgeometry kFaces 完全一致
 // （从外看 CCW；UV 映射 ±X=(z,y) ±Z=(x,y) ±Y=(x,z)），三角形按 (0,1,2),(0,2,3)。
 // cu,cv 取单位值 {0,1}（不随盒体尺寸缩放）→ 整张瓦片贴图始终映射到该面（薄面则贴图被压缩，与 MC 一致）。
@@ -51,6 +44,9 @@ const BoxFace kBoxFaces[6] = {
 
 // 推一个轴对齐盒体的 6 面。tile = 图集瓦片序号（partial 方块各面同贴图，由 BlockRegistry::tileIndex 给）。
 // 不做邻居剔除（异形小体内/底面被自身遮挡，overdraw 可忽；partial solid=false 亦不参与整立方邻居剔除）。
+//   t360 光照：各面顶点色取该面外法线方向的邻格 flood 光（PartialLightCtx.face[fi]，fi 与 kBoxFaces 同序
+//   +X,-X,+Y,-Y,+Z,-Z）—— 修合活版门/下半砖顶面自影（旧采被本格遮光压暗的本格值）。内/底面虽不可见，
+//   仍按邻格取值（统一、无特例）；其邻格常为下方实体格（sky=0）→ 暗，与遮挡观感一致。
 void pushBox(QVector<Vtx> &verts, QVector<quint32> &idx,
              int lx, int ly, int lz,
              float x0, float x1, float y0, float y1, float z0, float z1,
@@ -58,13 +54,14 @@ void pushBox(QVector<Vtx> &verts, QVector<quint32> &idx,
              float tileW, float hx, float hy, float v0, float v1)
 {
     const float u0 = tile * tileW + hx, u1 = (tile + 1) * tileW - hx;
-    for (const BoxFace &f : kBoxFaces) {
+    for (int fi = 0; fi < 6; ++fi) {
+        const BoxFace &f = kBoxFaces[fi];
         // 单位盒面模板的常数轴（法线轴）填成实际盒体边值（+面=x1/y1/z1，-面=x0/y0/z0）；
         // 面内两轴取模板 0/1 → 映射到该面实际范围（整张瓦片贴图覆盖该面）。
         const float vX = (f.n[0] > 0) ? x1 : (f.n[0] < 0) ? x0 : 0;
         const float vY = (f.n[1] > 0) ? y1 : (f.n[1] < 0) ? y0 : 0;
         const float vZ = (f.n[2] > 0) ? z1 : (f.n[2] < 0) ? z0 : 0;
-        const float vc = faceVc(f.n, L);
+        const float vc = L.face[fi]; // t360：本面外法线方向的邻格光场（顺序同 kBoxFaces）
         const quint32 base = quint32(verts.size());
         for (int i = 0; i < 4; ++i) {
             const float tx = f.c[i][0], ty = f.c[i][1], tz = f.c[i][2]; // 模板角点（0/1）
@@ -91,7 +88,7 @@ void pushBox(QVector<Vtx> &verts, QVector<quint32> &idx,
 //
 //   quad 四角 p0..p3 须共面、按「从某一侧看 CCW」序给出（UV: p0=(0,0) p1=(1,0) p2=(1,1) p3=(0,1)，
 //   即 BL→BR→TR→TL，整张瓦片铺满该 quad）。法线由 (p1-p0)×(p3-p0) 算（NoLighting 下不影响着色，仅填格式）。
-//   光照：cross 各面共用本格光场值（同其它异形方块：faceVc 直接返回 L.light）。
+//   光照：cross 各面共用本格光场值（cross 立于开敞格、本格 flood 光即其光照；PartialLightCtx.light）。
 void pushCrossQuad(QVector<Vtx> &verts, QVector<quint32> &idx,
                    int lx, int ly, int lz,
                    float p0x, float p0y, float p0z,
@@ -102,7 +99,7 @@ void pushCrossQuad(QVector<Vtx> &verts, QVector<quint32> &idx,
                    float tileW, float hx, float hy, float v0, float v1)
 {
     const float u0 = tile * tileW + hx, u1 = (tile + 1) * tileW - hx;
-    const float vc = faceVc(nullptr, L);
+    const float vc = L.light; // cross 用本格光场（开敞格 flood 光）
     // 法线 = (p1-p0)×(p3-p0)（NoLighting 下不影响渲染；填格式 + 供未来 lit 路径）。
     const float ex = p1x - p0x, ey = p1y - p0y, ez = p1z - p0z;
     const float fx = p3x - p0x, fy = p3y - p0y, fz = p3z - p0z;

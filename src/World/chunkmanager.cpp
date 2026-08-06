@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "blockregistry.h" // t360 solidTopOffset（列顶实面高度；PCF 软影按方块真实模型高度判遮挡）
+
 ChunkManager::ChunkManager(int width, int depth, int height)
 {
     recreate(width, depth, height);
@@ -63,6 +65,21 @@ int ChunkManager::heightmapAt(int x, int z) const
         return -1; // 世界越界 = 无实体（mesher 对越界列本就无面可画）
     Chunk *c = chunk(x / kSize, z / kSize);
     return c ? c->heightmapAt(x - (x / kSize) * kSize, z - (z / kSize) * kSize) : -1;
+}
+
+// t360 列顶实面世界 y（见头注释）：单次 chunk 路由取 heightmap + 列顶方块 block/state → solidTopOffset。
+//   空列 / 越界 / 无 chunk → -1（不遮挡）。PCF 软影（voxellight.h sunShadow）每采样调本。
+float ChunkManager::columnTopSurfaceY(int x, int z) const
+{
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth)
+        return -1.0f;
+    Chunk *c = chunk(x / kSize, z / kSize);
+    if (!c) return -1.0f;
+    const int lx = x - (x / kSize) * kSize;
+    const int lz = z - (z / kSize) * kSize;
+    const int hm = c->heightmapAt(lx, lz);
+    if (hm < 0) return -1.0f;
+    return float(hm) + BlockRegistry::solidTopOffset(c->blockAt(lx, hm, lz), c->stateAt(lx, hm, lz));
 }
 
 // t151 光场路由（世界坐标 → chunk 局部）。越界读返回 0（无光）。flood-fill 与 mesher 经此访问光场。

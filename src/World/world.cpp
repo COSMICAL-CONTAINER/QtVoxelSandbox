@@ -127,6 +127,13 @@ quint8 World::blockLightAt(int x, int y, int z) const
     return m_chunks.blockLightAt(x, y, z);
 }
 
+// t360 列顶实面世界 y（见头注释）：heightmap + solidTopOffset(列顶方块)。空列 → -1。PCF 软影采样用。
+//   委托 ChunkManager 单次 chunk 路由版（PCF 热路径，免 3 次重复 chunk 路由）。
+float World::columnTopSurfaceY(int x, int z) const
+{
+    return m_chunks.columnTopSurfaceY(x, z);
+}
+
 // t146 给定格的碰撞 sub-AABB（世界坐标）。读 blockAt + stateAt → BlockRegistry::collisionAABBs 取 cell-local
 //   子盒 → 偏移到世界坐标。越界 blockAt=0(air) → collisionAABBs 空 → 返回空。玩家碰撞（PlayerController）
 //   逐格逐 sub-AABB 测试。同源 partialblockgeometry 的 state 解码（碰撞形状 == 渲染形状）。

@@ -39,8 +39,9 @@ constexpr float kVcMin = 0.08f; // 暗部地板最低亮度（洞穴/阴影最�
 constexpr float kVcMax = 1.0f;
 
 // t153 PCF 软影（方案③：t151 顶点光基底 + heightmap 正交深度图 PCF 0..1 软过渡）。
-//   给定世界空间顶点 (wx,wy,wz)，沿太阳「水平方向」步进 kMaxShadow 格，逐步采样路径所过列的 heightmap
-//   （= 该列正交深度，列顶实体方块顶面 = heightmap+1）。若列顶面高于太阳光线在该列的高度 → 该列遮挡。
+//   给定世界空间顶点 (wx,wy,wz)，沿太阳「水平方向」步进 kMaxShadow 格，逐步采样路径所过列的列顶实面
+//   （= 该列正交深度；t360 列顶实面世界 y = heightmap + solidTopOffset，按方块真实模型高度：整立方 1.0 /
+//   下半砖 0.5 / 合活版门 0.1875…，取代旧 heightmap+1.0 整格假设）。若列顶面高于太阳光线在该列的高度 → 该列遮挡。
 //   PCF：每步采样路径点周围 2×2 最近整数列（floor/ceil）取平均 → 半格列贡献 0.5 遮挡，影边 0..1 软过渡
 //   （非硬二值）。返回 [0,1] 软影因子（0=全亮、1=全影）。shadowsEnabled=false / world==null → 直接返 0
 //   （跳过 PCF 提速；掉落沙未接 world 时退化为无软影的全亮基底）。
@@ -76,9 +77,11 @@ inline float sunShadow(const World *world, const QVector3D &sunDir, bool shadows
         const int z0 = int(std::floor(oz));
         for (int xi = 0; xi < 2; ++xi) {
             for (int zi = 0; zi < 2; ++zi) {
-                const int hm = world->heightmapAt(x0 + xi, z0 + zi);
-                // 列顶实体顶面（heightmap+1）高于光线 → 遮挡；hm<0（空列 / 越界）永不遮挡。
-                if (hm >= 0 && float(hm) + 1.0f > rayY) ++occluded;
+                // t360 列顶实面世界 y（按方块真实模型高度：下半砖 0.5 / 合活版门 0.1875 / 整立方 1.0…），
+                //   取代旧「heightmap+1.0 整格」假设 —— 修下半砖 / 合活版门被当整格高投出整格黑影、邻地误暗。
+                //   top<0（空列 / 越界）永不遮挡。
+                const float top = world->columnTopSurfaceY(x0 + xi, z0 + zi);
+                if (top >= 0.0f && top > rayY) ++occluded;
                 ++total;
             }
         }
