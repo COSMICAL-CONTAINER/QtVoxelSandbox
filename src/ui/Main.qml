@@ -1397,7 +1397,7 @@ Window {
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 1
                     position: Qt.vector3d(0.02, 0.10, -0.22)     // t266：y 上移让手握柄下段（正握），镐头朝上前方；z=-0.22 脱离手臂 z 包围
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
-                    eulerRotation: Qt.vector3d(15, -20, -15)      // 对角手持（柄下右、镐头上左，类 MC 手持）
+                    eulerRotation: Qt.vector3d(15, -20, 28)       // t369 修 Z 符号：正 Z roll 把几何头（+Y）摆向屏幕左（柄下右/头上左对角，类 MC 手持）；旧 -15 反把头摆向右、与「头上左」注释相悖（手本地 X 轴不受手 baseTilt 的 X 旋转影响 → Z 符号直接定头左右）
                     // 镐头 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白（同 2D ToolIcon 配色）
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁镐银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石镐中灰
@@ -1437,9 +1437,9 @@ Window {
                 Node {
                     id: heldHoeFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 2
-                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    position: Qt.vector3d(0.02, 0.10, -0.22)       // t369：y 对齐镐（0.04→0.10），握把贴手心、与镐一致
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
-                    eulerRotation: Qt.vector3d(15, -20, -15)
+                    eulerRotation: Qt.vector3d(15, -20, 28)        // t369：正 Z roll 把锄刃（+Y）摆向屏幕左（柄下右/头上左对角，同镐）
                     // 头部 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白（同 2D ToolIcon 配色）
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁锄银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石锄中灰
@@ -1472,9 +1472,9 @@ Window {
                 Node {
                     id: heldAxeFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 3
-                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    position: Qt.vector3d(0.02, 0.10, -0.22)       // t369：y 对齐镐（0.04→0.10），握把贴手心、与镐一致
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
-                    eulerRotation: Qt.vector3d(15, -20, -15)
+                    eulerRotation: Qt.vector3d(15, -20, 28)        // t369：正 Z roll 把斧刃（+Y）摆向屏幕左（柄下右/头上左对角，同镐）
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁斧银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石斧中灰
                                                                                                  : "#8a5a2e"                                                   // 木斧褐（默认 / tier 1）
@@ -1513,9 +1513,9 @@ Window {
                 Node {
                     id: heldShovelFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 4
-                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    position: Qt.vector3d(0.02, 0.10, -0.22)       // t369：y 对齐镐（0.04→0.10），握把贴手心、与镐一致
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
-                    eulerRotation: Qt.vector3d(15, -20, -15)
+                    eulerRotation: Qt.vector3d(15, -20, 28)        // t369：正 Z roll 把铲斗（+Y）摆向屏幕左（柄下右/头上左对角，同镐）
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁铲银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石铲中灰
                                                                                                  : "#8a5a2e"                                                   // 木铲褐（默认 / tier 1）
@@ -1548,9 +1548,9 @@ Window {
                 Node {
                     id: heldSwordFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 5
-                    position: Qt.vector3d(0.02, 0.02, -0.22)
+                    position: Qt.vector3d(0.02, 0.04, -0.22)     // t369：y 微抬（0.02→0.04），护手贴手心
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
-                    eulerRotation: Qt.vector3d(20, -15, -10)    // 剑身竖直略前倾、刃尖朝前上
+                    eulerRotation: Qt.vector3d(20, -15, 15)       // t369：正 Z roll 把刃尖（+Y）摆向屏幕左（旧 -10 反摆向右）；剑身竖直略前倾、刃尖朝前上
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁剑银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石剑中灰
                                                                                                  : "#8a5a2e"                                                   // 木剑褐（默认 / tier 1）
