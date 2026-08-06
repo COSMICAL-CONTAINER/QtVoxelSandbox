@@ -450,8 +450,9 @@ public:
     //     collisionAABBs 返回 shapeBoxes 算出的「旋后贴边」panel AABB，开门仍挡铰链那一面（机制等价
     //     MC 门打开后门板贴墙仍挡一面、仅门洞方向可过）。函数随之从 isCollidableWhenClosed 改名 isCollidable
     //     （「开态通」对门已不成立，旧名误导）。
-    //   - 活版门（ShapeTrapdoor）：bit0=开(1) → false（开=竖直贴边，玩家穿过，机制等价 MC 活版门打开可过）；
-    //     合(0) → true（水平贴地挡）。
+    //   - 活版门（ShapeTrapdoor）：**恒 true**（t335）—— 合=水平贴地板（顶面站立）/ 开=铰链侧唇边（板底 3/16 高
+    //     可站立条，板身竖直部分玩家穿过 —— 机制等价 MC 活版门打开可过 + 留唇边供竖井边沿站立不坠；唇边几何见
+    //     collisionAABBs 的 WoodTrapdoor 开态特例，与 shapeBoxes/selectionAABBs 的整高竖直板解耦）。
     //   - 其余有碰撞形状（Full/Slab/Stairs/Fence/Plate）→ true（无开合概念，恒挡）。
     //   - air / torch / water（ShapeNone）→ false。
     //   越界 → false（air 兜底）。
