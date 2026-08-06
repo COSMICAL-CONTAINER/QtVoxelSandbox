@@ -556,7 +556,8 @@ private:
     //   (3) 追踪：yaw 朝玩家；蓄力中（fuseTimer>0）→ 站立不动（moveSpeed=0，机制等价 MC 苦力怕蓄力时停步）；
     //       否则缓慢朝玩家走（kStalkerChaseSpeed，慢于玩家走速 → 可甩脱但有威胁）+ 越障跳（同 aiHostile）。
     //   (4) fuse：distXZ<=kFuseRange → fuseTimer+=dt（蓄力进度推进，inflateAt 据 it 驱动 QML 膨胀）；
-    //       distXZ>kDefuseRange → fuseTimer=0（熄火）。蓄力中仍朝玩家（yaw 更新）但不位移。
+    //       离开蓄力区即 defuse——中距（kFuseRange<dist<=kDefuseRange）fuseTimer-=dt 渐退回 0（非累积，反复
+    //       进出不强制引爆）；逃远（>kDefuseRange）→ fuseTimer=0（熄火）。蓄力中仍朝玩家（yaw 更新）但不位移。
     //   (5) detonate：fuseTimer>=kFuseTime → 调 detonateStalker（球形破坏方块 + 距离衰减伤害玩家 + emit
     //       explosion + 标 exploded）+ 本实体当帧移除（tick Mob 分支据 exploded 入 toRemove）。
     //   返回是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。playerPos = 玩家脚位（tick 的 listener）。

@@ -1080,12 +1080,16 @@ bool EntityManager::aiStalker(Entity &e, float dt, World *world, const QVector3D
     }
 
     // (4) fuse：追踪态下据距离蓄力 / 熄火。蓄力中（fuseTimer>0）→ 站立不动（机制等价 MC 苦力怕近距嘶嘶蓄力停步）。
-    //   distXZ<=kFuseRange → 累加 fuseTimer；distXZ>kDefuseRange → 归零熄火。非追踪态 → 强制熄火（防脱离后仍蓄力）。
+    //   distXZ<=kFuseRange → 累加 fuseTimer（蓄力）；离开蓄力区即泄压（defuse）：中距（kFuseRange<dist<=kDefuseRange）
+    //   渐退回常态（非累积，反复进出不强制引爆）；逃远（>kDefuseRange）即归零。非追踪态 → 强制熄火（防脱离后仍蓄力）。
     if (e.chasing) {
         if (distXZ <= kFuseRange) {
             e.fuseTimer += float(dt);
         } else if (distXZ > kDefuseRange) {
             e.fuseTimer = 0.0f;
+        } else {
+            e.fuseTimer -= float(dt);
+            if (e.fuseTimer < 0.0f) e.fuseTimer = 0.0f;
         }
     } else {
         e.fuseTimer = 0.0f;
