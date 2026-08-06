@@ -920,8 +920,7 @@ void World::generate()
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
     carveCaves(); // t278：洞穴隧道 carve（terrain + 矿石之后；挖走 stone/dirt/ore 暴露矿石于洞壁 → 为 t279 铺路）。
                   //   先于填水 → 水只填地表低洼列（h+1..waterLevel），不灌地下洞穴；先于树/草 → 表面特征放于完整地表。
-    carveCaveEntrances(); // t309：地表连通洞穴入口（carveCaves 之后 → 竖井连通既有洞穴网络；先于地下水 → 竖井路径干净）。
-    placeUndergroundWaterPools(); // t309：封闭地下水池（carveCaves / 入口之后；先于填水 → 地表海平面与地下水各自独立）。
+    placeUndergroundWaterPools(); // t309：封闭地下水池（carveCaves 之后；先于填水 → 地表海平面与地下水各自独立）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
@@ -1498,61 +1497,9 @@ void World::fillWater()
     qInfo() << "worldgen: water cells =" << waterCells; // 同 seed → 同计数（确定性核对）
 }
 
-// t309 地表连通洞穴入口（见 world.h 头注释）。机制等价 MC 1.0 天坑 / 洞穴入口：竖井把封闭地下洞穴网络与
-//   地表连通，天光经竖井 BFS 渗入洞内（recomputeLightField 在本 pass 之后跑）。
-//   确定性散布（hashColumn + seed 偏移，PLAN §2-K）：网格采样 + 概率筛选 + 网格内抖动 → 顶部 3×3 浅坑（可见）
-//   + 1×1 竖井向下挖（覆盖 grass/dirt/stone，不动 bedrock/water），首遇 air（既有洞穴）即停 → 竖井与洞穴连通。
-//   仅 plains/forest（spec「草原/森林概率」）；避开沙滩 / 水下 / 低洼（surfaceY <= waterLevel+2 → 洞口会灌入海水）。
-//   经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + heightmap 增量维护），不发 blockBroken（worldgen 既有约定）。
-void World::carveCaveEntrances()
-{
-    constexpr int kEntranceGrid  = 18;      // 候选网格间距（每 ~18×18 区域 1 候选）
-    constexpr unsigned kEntrancePct = 30u;  // 候选命中概率（%；plains/forest 才候选）
-    constexpr int kBedrockTop     = 4;      // 不挖基岩（与 carveCaves / placeBedrock 同源）
-    constexpr int kShaftMaxDepth  = 22;     // 竖井最大下挖深度（防极端列无限下挖；命中洞穴即停）
-
-    int placed = 0;
-    const int entranceSeed = m_seed + 3091; // 洞口哈希偏移（与树 / 草 / 洞穴 hashColumn 解耦；纯整数加，确定性）
-    for (int bx = kEntranceGrid / 2; bx < m_width; bx += kEntranceGrid) {
-        for (int bz = kEntranceGrid / 2; bz < m_depth; bz += kEntranceGrid) {
-            const quint32 r = hashColumn(entranceSeed, bx, bz);
-            if ((r % 100u) >= kEntrancePct) continue; // 概率筛选
-            // 网格内 ±span/2 抖动（避免网格化排列的机械感，同 carveCaves worm 起点抖动）。
-            const int span = kEntranceGrid / 2;
-            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
-            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
-            const int x = bx + jx, z = bz + jz;
-            if (x < 2 || z < 2 || x >= m_width - 2 || z >= m_depth - 2) continue; // 留 2 格边界（3×3 顶坑不越界）
-            const Biome bio = biomeAt(x, z);
-            if (bio != Biome::Plains && bio != Biome::Forest) continue; // 仅 plains/forest（spec「草原/森林概率」）
-            const int surfaceY = std::min(heightAt(x, z), m_height - 1);
-            // 避开沙滩 / 水下 / 低洼：洞口不应在海平面附近（会灌入海水 / 出现在沙底）。
-            if (surfaceY <= kWaterLevel + 2) continue;
-
-            // 顶部 3×3 浅坑（1 格深）使洞口可见（裸眼可辨的凹陷入口）。
-            for (int dx = -1; dx <= 1; ++dx)
-                for (int dz = -1; dz <= 1; ++dz) {
-                    const int px = x + dx, pz = z + dz;
-                    const quint8 b = m_chunks.blockAt(px, surfaceY, pz);
-                    if (b == BlockRegistry::Bedrock || b == BlockRegistry::Water) continue; // 不动基岩 / 水
-                    m_chunks.setBlock(px, surfaceY, pz, BlockRegistry::Air);
-                }
-            // 1×1 竖井向下，直至连通既有洞穴（首遇 air）或达最大深度 / 基岩。
-            int dug = 0;
-            for (int y = surfaceY - 1; y > kBedrockTop; --y) {
-                const quint8 b = m_chunks.blockAt(x, y, z);
-                if (b == BlockRegistry::Air) break;     // 已是空气 = 命中洞穴 → 连通，停止下挖
-                if (b == BlockRegistry::Bedrock) break;  // 基岩不可破
-                if (b == BlockRegistry::Water) break;    // 防御（地下应无水；placeUndergroundWaterPools 在本 pass 之后）
-                m_chunks.setBlock(x, y, z, BlockRegistry::Air);
-                ++dug;
-                if (dug >= kShaftMaxDepth) break;
-            }
-            ++placed;
-        }
-    }
-    qInfo() << "worldgen: cave entrances =" << placed; // 同 seed → 同计数（确定性核对）
-}
+// t339：原 t309 carveCaveEntrances（地表 3×3 浅坑 + 向下 1×1 竖井）已移除。其 1×1 竖井在「该列无既有洞穴」时
+//   会一路挖到 kShaftMaxDepth=22，在地下留下规整的 1 格宽垂直气柱（裸眼即「矿井」感）——正是本任务要消除的
+//   规则竖井。自然洞穴完全由 carveCaves（3D Perlin 阈值洞 + worm 隧道 + 分叉）独立提供，移除此 pass 不影响洞穴网络。
 
 // t309 地下水池（见 world.h 头注释）。机制等价 MC 1.0 地下水湖 / 封闭水洼：地下深处小型封闭空腔 + 底层水源。
 //   确定性散布（hashColumn + seed 偏移，PLAN §2-K）：网格采样 + 概率筛选 + 抖动 → 在地下 y 范围内选中心，
