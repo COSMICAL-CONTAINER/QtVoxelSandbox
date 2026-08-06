@@ -577,6 +577,7 @@ Window {
         // 死亡态不开聊天（死亡信息已由死亡屏接管；防聊天 input 抢死亡按钮焦点）。
         if (playerState.dead) return
         chatOpen = true
+        historyCursor = -1             // t347：每次开聊天从草稿态起（不延续上次浏览位置）
         player.release()               // 释放指针 → 光标可见 + TextField 可取焦点打字
         chatInput.forceActiveFocus()   // 焦点进 TextField（keyInput 持焦时 WASD 透传 player；改焦后不再透传）
     }
@@ -592,24 +593,36 @@ Window {
     }
     // 发送：把 TextField 文本（去首尾空白后非空）作为玩家消息入聊天历史（显示「名: 文本」），随后关聊天回游戏。
     //   单机无服务端 → 不广播、不持久化；Phase 3 联机时此处改为 sendChatToServer(text) 走协议层。
-    //   t314 `/give` 调试聊天命令（spec t314）：debug 命令路由 → 转交 Hotbar VM 解析 + 放入背包 + 返回回显
-    //     文案（系统色灰）；不进玩家消息回显（MC 聊天惯例：命令只显结果）。debug 命令无视游戏模式（创造 /
-    //     生存 / 观察者都可调），见 hotbarVM.give。
+    //   t314 `/give` 调试聊天命令（spec t314）：debug 命令无视游戏模式（创造 / 生存 / 观察者都可调，见
+    //     hotbarVM.give），返回回显文案（系统色灰）；不进玩家消息回显（MC 聊天惯例：命令只显结果）。
+    //   t347 命令分发（spec t347）：`/` 开头按「命令词（首个空白前）」查 commandRegistry 分发到对应 handler；
+    //     未注册的 `/xxx` 仍当普通玩家消息（保留旧回退语义，避免破坏既有用法）。新增命令 = 往 commandRegistry
+    //     加一项，无需改本函数（机制等价 MC 命令分发器：注册即生效）。命令词按空白边界匹配 → /givex 不会
+    //     误触 /give（比旧 startsWith 前缀判更严格且自然）。
+    //   t347 命令历史（spec t347）：每条已发送非空行 pushHistory 入 commandHistory，供 chatInput Up/Down 回溯。
     function sendChat() {
         const raw = chatInput.text
         const txt = raw.trim()
         if (txt.length > 0) {
-            // /give 路由：截 `/give` 之后剩余串（含分隔空格，trim 由 C++ split SkipEmptyParts 兜底）。
-            //   仅匹配 `/give` 精确前缀（避免 /givex 误触）；其余 `/` 命令暂未实现，统一当普通玩家消息。
-            if (txt === "/give" || txt.startsWith("/give ")) {
-                const rest = txt.slice("/give".length)  // "/give 3 64" → " 3 64"；"/give" → ""
-                const reply = hotbarVM.give(rest)
-                appendChatMessage("", reply, true)
+            pushHistory(txt)
+            if (txt.charAt(0) === "/") {
+                const sp = txt.search(/\s/)                 // 首个空白（命令词边界）；-1 = 无参命令
+                const name = (sp < 0) ? txt.slice(1) : txt.slice(1, sp)
+                const rest = (sp < 0) ? "" : txt.slice(sp)  // 含前导空格（与原 /give rest 语义一致，C++ split 兜底 trim）
+                const entry = commandRegistry[name]
+                if (entry) {
+                    const echo = entry.run(rest)
+                    if (echo && echo.length > 0)
+                        appendChatMessage("", echo, true)
+                } else {
+                    appendChatMessage(window.playerName, txt, false)   // 未知 / 命令 → 当玩家消息
+                }
             } else {
                 appendChatMessage(window.playerName, txt, false)
             }
         }
         chatInput.text = ""
+        historyCursor = -1
         closeChat(true)
     }
     // t346 `/give` 参数提示文案（spec t346）：据当前输入文本返回下一个待输入参数的提示串（MC 风格 inline hint，
@@ -640,6 +653,61 @@ Window {
     }
     // t312 聊天历史上限（保留最近 N 条；超出从头删。MC 1.0 聊天亦有限滚动缓冲，避免无限增长）。
     readonly property int chatHistoryMax: 50
+
+    // t347 命令分发表（spec t347）：command → {desc, run(rest)} 的可扩展注册表，替代硬编码 if 链。
+    //   新增命令 = 往此对象加一项（desc 供 /help 列出；run 接「命令词后剩余串（含前导空格）」返系统回显串，
+    //   返空串则不显）；sendChat 按命令词查表分发，无需改路由逻辑。机制等价 MC 命令分发器（注册即生效）。
+    property var commandRegistry: ({
+        "give": {
+            desc: "/give <id> [数量] [耐久] —— 给予玩家物品",
+            run: function(rest) { return hotbarVM.give(rest) }
+        },
+        "help": {
+            desc: "/help —— 列出可用命令",
+            run: function(rest) { return window.helpText() }
+        }
+    })
+    // t347 /help 文案：依 commandRegistry 实时生成（注册表加项 → /help 自动列出，无需手维护）。多行用 \n
+    //   分隔（系统消息走 Text.PlainText，\n 在 PlainText 内作换行，delegate height=implicitHeight 自撑）。
+    function helpText() {
+        const keys = Object.keys(commandRegistry).sort()
+        const lines = ["可用命令:"]
+        for (let i = 0; i < keys.length; ++i)
+            lines.push("  " + commandRegistry[keys[i]].desc)
+        return lines.join("\n")
+    }
+
+    // t347 已发送命令历史（spec t347）：最早在前、最新在后；chatInput Up/Down 经 browseHistory 回溯。
+    //   仅作 input 草稿回溯用（呈现态），不入 Game/World 层；historyMax 防无限增长。
+    property var commandHistory: []
+    property int historyCursor: -1            // -1 = 草稿态（未浏览）；>=0 = 指向 commandHistory[index]
+    property string historyDraft: ""          // 开始浏览前保存的草稿，Down 越过最新时还原
+    readonly property int historyMax: 50
+    function pushHistory(text) {
+        commandHistory.push(text)
+        while (commandHistory.length > historyMax) commandHistory.shift()
+    }
+    // Up(delta=-1, 更旧) / Down(delta=+1, 更新)：空历史忽略；草稿态按 Down 无效；Down 越过最新回草稿态还原；
+    //   其余夹紧。每步把命令行写回 chatInput.text 并把光标置尾（贴近 MC：Up 取出可继续编辑 / 续发）。
+    function browseHistory(delta) {
+        if (commandHistory.length === 0) return
+        if (historyCursor < 0) {
+            if (delta > 0) return              // 草稿态按 Down 无效
+            historyDraft = chatInput.text      // 首次 Up：保存当前草稿
+            historyCursor = commandHistory.length - 1   // 指向最新（末尾）
+        } else {
+            historyCursor += delta
+            if (historyCursor >= commandHistory.length) {
+                historyCursor = -1             // Down 越过最新 → 回草稿态还原
+                chatInput.text = historyDraft
+                chatInput.cursorPosition = chatInput.text.length
+                return
+            }
+            if (historyCursor < 0) historyCursor = 0
+        }
+        chatInput.text = commandHistory[historyCursor]
+        chatInput.cursorPosition = chatInput.text.length
+    }
 
     // 单一体素世界（内部 3×3=9 chunk，世界 48×48×16；QML API 不变）：网格(ChunkGeometry)
     // 与物理(PlayerController)共用同一份栅格。
@@ -4702,7 +4770,19 @@ Window {
             // 聚焦后立刻全选（防 appendChatMessage 残留旧文本；首次打开文本恒空故无害，双保险）。
             onActiveFocusChanged: if (activeFocus) selectAll()
             // Enter 发送 / Esc 取消。Esc 走 Keys（非 C++ 事件过滤器：聊天态 !captured，Esc 不被拦截落 QML）。
+            //   t347 Up/Down 翻命令历史（spec t347）：置 autoRepeat 守卫之前，支持长按连续翻；Enter/Esc 仍受
+            //     autoRepeat 抑制（防长按重复发送 / 反复开关）。
             Keys.onPressed: (event) => {
+                if (event.key === Qt.Key_Up) {
+                    window.browseHistory(-1)
+                    event.accepted = true
+                    return
+                }
+                if (event.key === Qt.Key_Down) {
+                    window.browseHistory(1)
+                    event.accepted = true
+                    return
+                }
                 if (event.isAutoRepeat) return
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     window.sendChat()
