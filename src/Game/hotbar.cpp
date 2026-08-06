@@ -232,6 +232,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::GlassId),       // 玻璃
         int(RecipeRegistry::BucketEmptyId), // t174 铁桶（空）
         int(RecipeRegistry::WaterBucketId), // t174 装水铁桶
+        int(RecipeRegistry::LavaBucketId),  // t351 装岩浆铁桶（创造调色板补全：平行装水铁桶；右键放岩浆源）
         int(RecipeRegistry::SeedId),        // t235 小麦种子（挖草丛得；种植 → 小麦作物 t236）
         int(RecipeRegistry::WheatId),       // t237 小麦物品（收割成熟作物得；面包原料）
         int(RecipeRegistry::BreadId),       // t238 面包（3 小麦合成；右键食 +5 饥饿）

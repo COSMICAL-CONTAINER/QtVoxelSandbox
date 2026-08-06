@@ -3927,6 +3927,16 @@ Window {
         color: Qt.rgba(0.20, 0.45, 0.70, 0.35)
     }
 
+    // t351 没入岩浆橙雾：眼位在岩浆里（player.eyeInLava）→ 全屏暖橙半透叠层（机制等价 MC 没入岩浆的橙红视野雾）。
+    //   与水下蓝雾平行（同模式、同层级、同显隐条件），水/岩浆互斥（一格非既水又岩浆）。纯 Rectangle 无 MouseArea
+    //   → 不拦截鼠标（同蓝雾经验）。状态驱动 = player.eyeInLava（tickImpl 每 tick 重算、翻转才发 eyeInLavaChanged）。
+    //   仅 playing 态显。橙色比蓝雾略浓（岩浆近不透 → 视野受阻更强，机制等价 MC 岩浆视野差于水）。
+    Rectangle {
+        anchors.fill: parent
+        visible: window.appState === "playing" && player.eyeInLava
+        color: Qt.rgba(0.85, 0.30, 0.05, 0.55)
+    }
+
     // t344 着火火焰叠层：玩家燃烧（player.burning，岩浆 / 火点燃）→ 屏幕底部 ~35% 火焰半透叠层（机制等价
     //   MC 着火屏边火焰；不覆盖全屏，仅底部火焰窜动感）。橙红渐变（顶透明 → 底炽热）+ opacity 抖动模拟火苗窜动。
     //   纯 Rectangle / Gradient 自绘原创（§9a，非 MC 资产）。状态驱动 = player.burning（tickImpl 算时序、翻转才

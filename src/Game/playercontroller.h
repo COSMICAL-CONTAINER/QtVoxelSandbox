@@ -157,6 +157,11 @@ class PlayerController : public QQuickItem
     //   feetInWaterChanged（避免每帧抖 QML 绑定，同 eyeInWater 模式）。Main.qml onWalkPhaseChanged 据它分流
     //   playWaterStep（水中）vs playStep（陆地）。只读 World::blockAt（向下依赖）；无世界 → false。
     Q_PROPERTY(bool feetInWater READ feetInWater NOTIFY feetInWaterChanged)
+    // t351 岩浆橙雾：眼位（= position()，脚底+eyeHeight）所在格 == Lava 时为真。QML 据此显全屏橙半透叠层
+    //   （机制等价 MC 没入岩浆的橙红视野雾），1/2/3 人称统一（基于眼位 blockAt）。tickImpl 每 tick 重算并缓存
+    //   到 m_eyeInLava；状态翻转才发 eyeInLavaChanged（避免每帧抖 QML 绑定）。只读 World::blockAt（向下依赖）；
+    //   无世界 → false。与 eyeInWater 平行（同模式），水/岩浆互斥（一格不可能既是 Water 又是 Lava）。
+    Q_PROPERTY(bool eyeInLava READ eyeInLava NOTIFY eyeInLavaChanged)
     // t223 近流水 proximity 水流声强度（0..1）：玩家到最近**流动水**格（Water 且 state>0；静止水源 state=0
     //   不算 —— MC 近大片静海无流水声、近瀑布 / 玩家倒水流才有）的距离映射，近=1 / 远→0、范围外=0。
     //   tickImpl 节流扫邻近盒（~每 0.25s）算最近流水格距离 → level = clamp(1 - dist/kFlowSoundRadius, 0, 1)。
@@ -262,6 +267,9 @@ public:
     //   做浮力 / 游泳 / 水流推动物理；QML 读它驱动水中走路声分流（playWaterStep vs playStep）。const 只读
     //   World::blockAt（向下依赖）；无世界 → false。定义在 .cpp。
     bool feetInWater() const;
+    // t351 岩浆中判定（Q_PROPERTY eyeInLava READ）：眼位格 == Lava（与 eyeInWater 平行）。QML 读它驱动岩浆橙雾叠层。
+    //   const 只读 World::blockAt（向下依赖）；眼位 = position()（脚底+eyeHeight）；无世界 → false。定义在 .cpp。
+    bool eyeInLava() const;
     // t223 近流水 proximity 水流声强度（Q_PROPERTY flowSoundLevel READ）：玩家到最近流水格的距离映射 [0,1]。
     //   无世界 / 无近流水 → 0。定义在 .cpp。
     float flowSoundLevel() const;
@@ -390,6 +398,7 @@ signals:
     void onGroundChanged();
     void flyingChanged();
     void eyeInWaterChanged(); // t201 眼位水态翻转（驱动水下蓝滤镜叠层显隐；值真变才发，免每帧抖 QML 绑定）
+    void eyeInLavaChanged();  // t351 眼位岩浆态翻转（驱动岩浆橙雾叠层显隐；值真变才发，免每帧抖 QML 绑定）
     void feetInWaterChanged(); // t269 脚位水态翻转（驱动水中走路声分流；值真变才发，免每帧抖 QML 绑定）
     void flowSoundLevelChanged(); // t223 近流水 proximity 强度变（驱动 AudioManager 水流声 start/stop/setLevel）
     void lavaSoundLevelChanged(); // t343 近岩浆 proximity 强度变（驱动 AudioManager 岩浆声 start/stop/setLevel）
@@ -732,6 +741,7 @@ private:
     float m_starveTimer = 0.0f;           // 饥饿归零后扣血累积（每 kStarveInterval 扣 1HP）
     float m_regenTimer = 0.0f;            // 高饥饿时回血累积（每 kHungerRegenInterval 回 1HP）
     bool m_eyeInWater = false;       // t201 眼位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit eyeInWaterChanged）
+    bool m_eyeInLava = false;        // t351 眼位岩浆态缓存（tickImpl 每 tick 重算对比，翻转才 emit eyeInLavaChanged）
     bool m_feetInWater = false;      // t269 脚位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit feetInWaterChanged）
     // t223 近流水 proximity 水流声：m_flowSoundLevel = 最近流水格距离映射 [0,1]（tickImpl 节流扫描更新）；
     //   m_flowScanTimer 累加 dt 到 kFlowScanInterval 才重扫（~0.25s，省扫描开销）。值真变才 emit。

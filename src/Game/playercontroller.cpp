@@ -407,6 +407,13 @@ void PlayerController::tickImpl()
         m_eyeInWater = inWater;
         emit eyeInWaterChanged();
     }
+    // t351 眼位岩浆态（驱动岩浆橙雾叠层）：每 tick 重算，翻转才 emit（同 eyeInWater 模式）。放在 !m_captured
+    //   早 return 之前 → 暂停 / 背包开 / 失焦时仍刷新。仅读 World::blockAt（向下依赖）；无世界时 eyeInLava() 返 false。
+    const bool inLava = eyeInLava();
+    if (inLava != m_eyeInLava) {
+        m_eyeInLava = inLava;
+        emit eyeInLavaChanged();
+    }
     // t269 脚位水态（驱动水中走路声分流）：每 tick 重算，翻转才 emit（同 eyeInWater 模式）。放在 !m_captured
     //   早 return 之前 → 暂停 / 背包开 / 失焦时仍刷新（玩家停水里开背包，关包后迈步仍应水声）。仅读 World::blockAt
     //   （向下依赖）；无世界时 feetInWater() 返 false。
@@ -1691,13 +1698,14 @@ void PlayerController::placeBlock()
             }
         }
     }
-    // t198 水中可放方块（排开水）：目标格为空气或水均可放置；水（水源 state=0 / 流水 state 1..7）被
-    //   方块直接覆盖 → World::setBlock 内 oldId=Water → newId=实体走「放置」分支（仅发 blockPlaced，
-    //   不发 blockBroken → 无破块粒子 / 音；水静默消失，机制等价 MC「方块填入水格排开水」）。已有实体
-    //   方块 → 拒（不覆盖）。下一 tickWaterFlow 因目标格已非 air → 不再向其扩散 → 邻接流水按失支撑逐环衰退。
+    // t198 水中可放方块（排开水）/ t351 岩浆同理（排开岩浆）：目标格为空气 / 水 / 岩浆均可放置；流体被
+    //   方块直接覆盖 → World::setBlock 内 oldId=Water/Lava → newId=实体走「放置」分支（仅发 blockPlaced，
+    //   不发 blockBroken → 无破块粒子 / 音；流体静默消失，机制等价 MC「方块填入流体格排开流体」）。已有实体
+    //   方块 → 拒（不覆盖）。下一 tickWaterFlow/tickLavaFlow 因目标格已非 air → 不再向其扩散 → 邻接流按失撑衰退。
     {
         const quint8 tid = m_world->blockAt(tx, ty, tz);
-        if (tid != BlockRegistry::Air && tid != BlockRegistry::Water) return; // 已有实体方块 → 不放
+        if (tid != BlockRegistry::Air && tid != BlockRegistry::Water
+            && tid != BlockRegistry::Lava) return; // 已有实体方块 → 不放
     }
     const bool isDoor = (m_selectedBlock == BlockRegistry::WoodDoor);
     const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
@@ -1724,9 +1732,10 @@ void PlayerController::placeBlock()
         //   → 只剩下单格 → 玩家跳跃（顶点 1.25 > 单格 1.0）即可跨过。显式查 ty+1 在界内且为空气才放，
         //   否则整门拒绝（两格都不放），杜绝「上格缺失的单格门」。
         if (ty + 1 >= m_world->height()) return;                       // 上格越世界顶 → 门放不下（拒整门）
-        {   // t198：门上格亦允许排开水（与下格同语义，水源 / 流水均可被门替换）。
+        {   // t198/t351：门上格亦允许排开水/岩浆（与下格同语义，源 / 流均可被门替换）。
             const quint8 upId = m_world->blockAt(tx, ty + 1, tz);
-            if (upId != BlockRegistry::Air && upId != BlockRegistry::Water) return; // 上格非空（实体）→ 门放不下
+            if (upId != BlockRegistry::Air && upId != BlockRegistry::Water
+                && upId != BlockRegistry::Lava) return; // 上格非空（实体）→ 门放不下
         }
         m_world->setBlock(tx, ty, tz, idByte, doorFacing);              // 下格：bit3=0(下格) bit2=0(合) bit[1:0]=朝向
         m_world->setBlock(tx, ty + 1, tz, idByte, quint8(doorFacing | 8)); // 上格：bit3=1
@@ -2114,6 +2123,15 @@ bool PlayerController::eyeInWater() const
     const QVector3D eye = position();
     return m_world->blockAt(int(std::floor(eye.x())), int(std::floor(eye.y())), int(std::floor(eye.z())))
            == BlockRegistry::Water;
+}
+
+// t351 岩浆中判定（见 .h 头注释）：眼位格 == Lava（与 eyeInWater 平行；水/岩浆互斥）。只读 World::blockAt。
+bool PlayerController::eyeInLava() const
+{
+    if (!m_world) return false;
+    const QVector3D eye = position();
+    return m_world->blockAt(int(std::floor(eye.x())), int(std::floor(eye.y())), int(std::floor(eye.z())))
+           == BlockRegistry::Lava;
 }
 
 // t174 脚位水中判定：脚底格 == Water（m_pos 整数坐标 → 脚所处方块）。浮力/游泳物理用它（眼位高于水面
@@ -2794,8 +2812,11 @@ void PlayerController::step(qreal dt)
 
     // t344 玩家火烧（岩浆 / 火点燃；仅 Survival 着火 + 火伤 + 熄灭；机制等价 MC 1.0 玩家触岩浆着火）。
     //   分两段（同 EntityManager mob 火烧逻辑，常量复用 EntityManager::kFire* 保一致手感）：
-    //   (1) 岩浆接触点燃：脚位格 floor(m_pos.y) 或眼位格 floor(pos.y+eye) 任一 == Lava → fireTimer = kFireDuration
-    //       （仍在岩浆重置火伤累积 = 持续重燃）。机制等价 MC 玩家进岩浆着火。
+    //   (1) 岩浆接触点燃：脚位格 floor(m_pos.y) 或眼位格 floor(pos.y+eye) 任一 == Lava → 刷 fireTimer = kFireDuration
+    //       （持续重燃 = 离开前不熄）。机制等价 MC 玩家进岩浆着火。t351 修「伤害时有时无」：旧版在岩浆内把
+    //       m_fireDmgTimer 归零 → 每帧累 dt 又被归零 → 累积器永达不到 kFireDamageInterval → **泡在岩浆里反而不扣血**，
+    //       只有离开后的余焰才扣（且被随机熄灭跳过 → 时有时无）。现只刷 fireTimer（保持续燃），不碰火伤累积器 →
+    //       泡岩浆 / 余焰均按 kFireDamageInterval 稳定扣血（修 spec「伤害稳定扣血」）。
     //   (2) 火烧推进：fireTimer>0 → 离开岩浆递减；每 kFireDamageInterval 扣 1HP（fallDamageTaken(1, Fire) 复用
     //       takeDamage→damaged 红闪 / 视角晃链，同窒息 / 溺水）+ 掷随机提前熄灭（kFireExtinguishChance）。
     //       fireTimer 归零即熄（定时双保险）。m_burning = fireTimer>0，翻转才 emit burningChanged（驱动底部火焰叠层）。
@@ -2810,8 +2831,7 @@ void PlayerController::step(qreal dt)
         if (!touchingLava && eyeY >= 0 && m_world->blockAt(fx, eyeY, fz) == BlockRegistry::Lava)
             touchingLava = true;
         if (touchingLava) {
-            m_fireTimer = EntityManager::kFireDuration;
-            m_fireDmgTimer = 0.0f; // 岩浆内重置火伤累积（持续重燃）
+            m_fireTimer = EntityManager::kFireDuration; // 持续重燃（离开前 fireTimer 不衰减）；不动 m_fireDmgTimer（t351）
         }
         if (m_fireTimer > 0.0f) {
             if (!touchingLava) m_fireTimer -= float(dt);

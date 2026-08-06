@@ -2163,14 +2163,18 @@ void World::recomputeLightField()
         }
     }
 
-    // 种子 2 — 方块光（火把）：扫所有格，Torch → block=14（保留其天光值）。
+    // 种子 2 — 方块光（发光方块）：扫所有格，lightEmission>0（火把=14 / 岩浆=15）→ block=该值（保留天光）。
+    //   t351：岩浆自发光 15，地底岩浆湖照亮封闭洞穴（MC 1.0 岩浆光 level 15）。沿用 BlockRegistry::lightEmission
+    //   单一权威（火把/岩浆/未来发光方块均经此），消除「每加一个光源改一处种子」回归类。
     for (int x = 0; x < W; ++x)
         for (int y = 0; y < H; ++y)
-            for (int z = 0; z < D; ++z)
-                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Torch) {
-                    m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), 14);
+            for (int z = 0; z < D; ++z) {
+                const quint8 emission = BlockRegistry::lightEmission(m_chunks.blockAt(x, y, z));
+                if (emission > 0) {
+                    m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), emission);
                     blockQ.push({x, y, z});
                 }
+            }
 
     // BFS 天光传播：从种子向邻格衰减 max(1, lightOpacity)、取 max（t334：取代旧 isSolid 二值「遮光格不传」——
     //   半砖半减 / 合活版门满遮 / 实体满遮；透明格仍衰减 1 = 旧行为）。
@@ -2244,8 +2248,10 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ol
     // t334：遮光变化判据改用 lightOpacity（取代旧 isSolid）—— 半砖放/破（0↔7）、合↔开活版门（0↔15）均能检出
     //   翻转 → 触发重 flood。id 不变且非火把且 lightOpacity 不变（如门开合：lightOpacity 恒 0）→ 光照无变化，早退。
     const bool opacityChanged = (BlockRegistry::lightOpacity(oldId, oldState) != BlockRegistry::lightOpacity(newId, newState));
-    const bool torchChanged = (oldId == BlockRegistry::Torch || newId == BlockRegistry::Torch);
-    if (!opacityChanged && !torchChanged) return; // 光照无变化（如门开合：lightOpacity 恒 0、非火把）
+    // t351：发光方块增删（火把/岩浆）触发方块光重 flood。岩浆 lightOpacity=0（solid=false）→ opacityChanged 恒 false，
+    //   若不纳入本判据则岩浆流/凝（tickLavaFlow → setWaterSilent → 此处）会因「无变化」早退 → 岩浆光不更新。
+    const bool lightSourceChanged = (BlockRegistry::lightEmission(oldId) > 0 || BlockRegistry::lightEmission(newId) > 0);
+    if (!opacityChanged && !lightSourceChanged) return; // 光照无变化（如门开合：lightOpacity 恒 0、非发光方块）
 
     QElapsedTimer t; t.start(); // t155c：测编辑光照开销（找卡顿根因）
     constexpr int R = 15; // = 最大光值：编辑对盒外格（曼哈顿 ≥16）无影响 → 边界种子法成立（见上注释）
@@ -2321,14 +2327,17 @@ void World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSk
         }
     }
 
-    // 3. 盒内重 seed 方块光：火把格 block=14（保留其天光值）。无论 doSky（火把光始终重 flood）。
+    // 3. 盒内重 seed 方块光：发光格（lightEmission>0：火把=14 / 岩浆=15）→ block=该值（保留天光）。无论 doSky。
+    //   t351：岩浆自发光 15，流/凝时（tickLavaFlow → setWaterSilent → recomputeLightAround）须重 flood 其方块光。
     for (int x = x0; x <= x1; ++x)
         for (int y = y0; y <= y1; ++y)
-            for (int z = z0; z <= z1; ++z)
-                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Torch) {
-                    m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), 14);
+            for (int z = z0; z <= z1; ++z) {
+                const quint8 emission = BlockRegistry::lightEmission(m_chunks.blockAt(x, y, z));
+                if (emission > 0) {
+                    m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), emission);
                     blockQ.push({x, y, z});
                 }
+            }
 
     // 4. 盒外边界种子：盒表面格的盒外邻值衰减 1 流入盒内格（光从盒外不变区域渗入）。仅扫盒表面格（内部格无盒外邻）。
     auto applyBoundary = [&](int x, int y, int z, int nx, int ny, int nz) {

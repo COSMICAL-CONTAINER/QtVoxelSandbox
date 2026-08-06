@@ -505,6 +505,12 @@ public:
     //   二者解耦（同 torch「solid=false 但参与剔除判定」既有模式；新增的遮光规则不污染面剔除）。
     static quint8 lightOpacity(quint8 blockId, quint8 state);
 
+    // t351 方块自发光强度（lightEmission；机制等价 MC 1.0 方块光 level 0..15）：该格作为方块光**种子**的强度。
+    //   flood-fill（World recomputeLightField / refloodBox）据本值把发光格种入方块光 BFS。火把=14（既有），
+    //   岩浆=15（MC 1.0 岩浆光 level 15，地底发光照亮洞穴；机制对齐非精确复刻）。其余 → 0（不自发光）。
+    //   越界 → 0。与 lightOpacity 解耦：岩浆 lightOpacity=0（solid=false 全透）但 lightEmission=15（既透光又自发光）。
+    static quint8 lightEmission(quint8 blockId);
+
     // t213 射线命中 sub-AABB（cell-local [0,1]^3）：射线进入含该方块的体素后，**须命中其中某个 sub-AABB**
     //   才算选中——不完整方块 / 火把的「空气部分」让射线穿过命中后方块（修「挖半砖背后的方块却撸掉了
     //   半砖/火把」，命中点是否落在该方块 sub-AABB 内）。与 selectionAABBs 的差异：

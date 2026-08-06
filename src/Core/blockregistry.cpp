@@ -428,6 +428,16 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     }
 }
 
+// t351 方块自发光强度（见头注释）：火把=14（既有）、岩浆=15（地底发光，MC 1.0 岩浆光 level 15）、其余 0。
+quint8 BlockRegistry::lightEmission(quint8 blockId)
+{
+    switch (blockId) {
+    case Torch: return 14;  // 既有：火把方块光种子 14（radius14 泛光）
+    case Lava:  return 15;  // t351：岩浆方块光种子 15（地底发光照亮洞穴；MC 1.0 岩浆光 level 15）
+    default:    return 0;   // 其余不自发光
+    }
+}
+
 // t213 射线命中 sub-AABB：射线进入含该方块的体素后须命中某个 sub-AABB 才算选中（不完整方块/火把的空气
 //   部分让射线穿过命中后方块）。完整立方 / air / water → 整格单盒（进格即中，等同旧行为；water 经 HitWater
 //   命中整格舀水）；不完整方块段 → 同 selectionAABBs（实体 sub 形状，与渲染/碰撞同源）；火把（ShapeNone，

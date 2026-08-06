@@ -316,9 +316,11 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
         //   t326：cutout 段（cutoutOnly）只发 cross 顶点（PASS 1），无水 / 无整立方面 → 跳过 PASS 2。
         if (m_cutoutOnly) {
             // cutout 段：cross 仅在 PASS 1（pushCross 双面 quad）；无立方面、无水。空分支，跳过下方三路。
-        } else if (m_waterOnly) {
-            // t197 水位视觉（PLAN §4 / dev-plan F 组）：水段不再画满格立方，而是按 cell 的 state(level)
-            //   降水面高度 + 流水用独立贴图，呈现 MC 式逐格衰减流动（修「所有水格同高满水位 → 看着静止」）。
+        } else if (m_waterOnly || m_lavaOnly) {
+            // t197 水位视觉 / t351 岩浆分层视觉：流体段（水 / 岩浆）不再画满格立方，而是按 cell 的 state(level)
+            //   降液面高度 + 流体用独立贴图，呈现 MC 式逐格衰减流动（修「所有流体格同高满液位 → 看着静止/全平」）。
+            //   t351：岩浆段复用此变高路径（旧岩浆段走 culled/greedy 满格立方 → 岩浆面全平，无分层；现 lavaOnly
+            //   进本分支按 state 降液面，机制等价水的分层流动）。参数差异由下方 fluidId/maxLevel/各 tile 区分。
             //
             //   水面高度：水源(state=0) 满高 1.0（用 water=19 静水贴图）；流水(state=1..7) 水面 = (8-level)/8
             //   逐级降（用 water_flow=23 流水贴图）。机制等价 MC 1.0 流水 8 级衰减（机制对齐，非精确数值复刻）。
@@ -334,39 +336,38 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
             //   分层（PLAN §2）：本段属 Renderer（mesher），只读 World（blockAt/stateAt/skyLightAt/blockLightAt/
             //   heightmapAt）—— 水面高度是 mesher 据 state 的纯渲染层计算，不写栅格、不进 BlockDef（Water 方块
             //   def 仍各面=19 静水；流水贴图选择是呈现层决定，非方块属性）。
-            constexpr int kWaterTile     = 19; // 静水贴图 frame 0（水源各面；与 BlockRegistry Water def 同 tile）
-            constexpr int kWaterFlowTile = 23; // 流水贴图 frame 0（流水各面；mesher 呈现层选择，非方块属性）
-            // t223 水贴图动画 flipbook：两帧（frame 0/1）慢速切换（Main.qml Timer ~800ms 切 waterAnimPhase）。
-            //   phase=0 用 {19,23}（frame 0）、phase=1 用 {24,25}（frame 1）。静水 frame 1 波纹略下移 → 荡漾感；
-            //   流水 frame 1 斜纹沿 (+1,+1) 平移半周期 → 「向右下流动」动势。机制等价 MC still/flowing_water flipbook。
-            constexpr int kWaterTileF1     = 24; // 静水贴图 frame 1（t223 动画第二帧）
-            constexpr int kWaterFlowTileF1 = 25; // 流水贴图 frame 1（t223 动画第二帧）
-            const int stillTile = (m_waterAnimPhase == 0) ? kWaterTile     : kWaterTileF1;
-            const int flowTile  = (m_waterAnimPhase == 0) ? kWaterFlowTile : kWaterFlowTileF1;
-            // state → 水面高度（cell-local Y，0..1）。水源 1.0；流水 (8-level)/8（7/8..1/8）。
-            //   state>7 不应出现（kMaxFlowLevel=7），clamp 兜底防越界（极端坏数据 → 1/8 而非负值）。
-            auto surfH = [](quint8 state) -> float {
+            // t351 流体参数化（水 / 岩浆共用此变高路径，差异仅 id / 贴图 / 最大 level）：
+            //   fluidId：本段画哪种流体（水段=Water / 岩浆段=Lava）。
+            //   stillTile/flowTile：水源/岩浆源用静贴图，流水/流岩浆用流贴图。水有 flipbook 两帧 + 独立 flow 贴图(23/25)；
+            //     岩浆仅 tile 42（无独立 flow 贴图）→ 源 / 流均用 42（分层高度差异已足够表达衰减，机制等价 MC 岩浆分层）。
+            //   maxLevel：液面衰减分级。水 8 级（state 1..7 → 液面 (8-s)/8）；岩浆 4 级（state 1..3 → 液面 (4-s)/4）。
+            const quint8 fluidId  = m_lavaOnly ? BlockRegistry::Lava  : BlockRegistry::Water;
+            const int maxLevel    = m_lavaOnly ? 4 : 8;                 // 源(0) + 流(1..maxLevel-1)
+            const int stillTile   = m_lavaOnly ? 42 : (m_waterAnimPhase == 0 ? 19 : 24);
+            const int flowTile    = m_lavaOnly ? 42 : (m_waterAnimPhase == 0 ? 23 : 25);
+            // state → 液面高度（cell-local Y，0..1）。源 1.0；流 (maxLevel-level)/maxLevel（越远越矮）。
+            //   state 越界 clamp 兜底防负值（极端坏数据 → 最低一级液面而非负值）。
+            auto surfH = [maxLevel](quint8 state) -> float {
                 if (state == 0) return 1.0f;
-                const int s = (state > 7) ? 7 : int(state);
-                return (8.0f - float(s)) / 8.0f;
+                const int s = (int(state) > maxLevel - 1) ? (maxLevel - 1) : int(state);
+                return (float(maxLevel) - float(s)) / float(maxLevel);
             };
-            // t350 renderTop：水流格的**实际渲染**顶高（含竖向柱连续性修正）。水源(st==0)=1.0；
-            //   流水(st>0) 的 slab 高 = surfH(state)，但若**正上方为水**（竖向柱 / 下落流的中段）→ 1.0（满块）。
-            //   修「竖向堆叠流水格间露出空气带」：流水 slab 仅占 cell 下部（[0, (8-level)/8]），上方留空；
-            //   两流水格上下堆叠时，下格侧壁止于其 slab 顶、上格侧壁起于本 cell 底 → slab 顶与本 cell 底之间
-            //   一段无侧壁 → 透视见空气带（用户「水不连续 / 见缝」）。被上方水覆盖的流水格属柱内 → 渲染满高，
-            //   侧壁贯通相邻格 → 柱连续无缝。顶格（上方 air）保 slab 水面高（露出真实水面）；水源本就满高。
-            //   blockAtWorld 越界返 Air → 顶格不触发满高修正。
+            // t350 renderTop：流体格的**实际渲染**顶高（含竖向柱连续性修正）。源(st==0)=1.0；
+            //   流(st>0) 的 slab 高 = surfH(state)，但若**正上方为同种流体**（竖向柱 / 下落流的中段）→ 1.0（满块）。
+            //   修「竖向堆叠流格间露出空气带」：流 slab 仅占 cell 下部，上方留空；两流格上下堆叠时，下格侧壁止于
+            //   其 slab 顶、上格侧壁起于本 cell 底 → slab 顶与本 cell 底之间一段无侧壁 → 透视见空气带。被上方同种
+            //   流体覆盖的流格属柱内 → 渲染满高，侧壁贯通相邻格 → 柱连续无缝。顶格（上方 air）保 slab 液面高。
+            //   blockAtWorld 越界返 Air → 顶格不触发满高修正。t351：流体判定由硬编码 Water 改为 fluidId（水 / 岩浆通用）。
             auto renderTop = [&](quint8 state, int ax, int ay, int az) -> float {
                 if (state == 0) return 1.0f;
-                if (blockAtWorld(ax, ay + 1, az) == BlockRegistry::Water) return 1.0f; // 上方有水 → 柱内满块
+                if (blockAtWorld(ax, ay + 1, az) == fluidId) return 1.0f; // 上方有同种流体 → 柱内满块
                 return surfH(state);
             };
             for (int ly = 0; ly < H; ++ly) {
                 for (int lz = 0; lz < S; ++lz) {
                     for (int lx = 0; lx < S; ++lx) {
                         const int wx = originX + lx, wz = originZ + lz;
-                        if (blockAtWorld(wx, ly, wz) != BlockRegistry::Water) continue;
+                        if (blockAtWorld(wx, ly, wz) != fluidId) continue;
                         const quint8 st = stateAtWorld(wx, ly, wz);
                         const float myTop = renderTop(st, wx, ly, wz); // t350：上方有水 → 满高（柱连续无缝）
                         const int tile = (st == 0) ? stillTile : flowTile; // 水源静水 / 流水斜纹（t223 按 phase 选帧）
@@ -381,7 +382,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (F.dir[1] != 0) {
                                 // 顶/底面：邻(上/下)为实体或水 → 剔除；为空气 → 画在水面 / 底。
                                 if (BlockRegistry::isSolid(nb)) continue;
-                                if (nb == BlockRegistry::Water) continue;
+                                if (nb == fluidId) continue;
                                 yLo = yHi = (F.dir[1] > 0) ? myTop : 0.0f; // 顶在 myTop / 底在 0
                             } else {
                                 // 侧面：邻实体剔除；邻空气画满侧 [0,myTop]；邻水按水面差画暴露带。
@@ -396,7 +397,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 if (BlockRegistry::isSolid(nb)) {
                                     if (st == 0) continue; // 水源满高：邻实体完全遮挡 → 剔除（原行为）
                                     // 流水降水面：画 [0,myTop] 满侧（yLo=0,yHi=myTop 已是默认）保持贴图可见
-                                } else if (nb == BlockRegistry::Water) {
+                                } else if (nb == fluidId) {
                                     const float nbrTop = renderTop(stateAtWorld(nwx, nwy, nwz), nwx, nwy, nwz);
                                     if (nbrTop >= myTop - 1e-4f) continue;      // 邻居水面 >= 本格 → 整面剔除
                                     yLo = nbrTop;                                // 邻居更低 → 画邻居水面到本格水面间暴露带
