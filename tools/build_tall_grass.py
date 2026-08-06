@@ -15,6 +15,12 @@ t245 alpha 边缘修复（黑边根因 + 修法）：草叶像素（绿, alpha=2
   （alpha 保持 0）→ 边缘采样在 alpha 渐变时 RGB 保持草绿色 → cutout 边缘干净（机制等价 MC cutout
   贴图生成时的 alpha bleed / "padding" 处理）。alpha=0 不被丢弃契约不变（仅 RGB 改色，alpha 仍 0）。
 
+t367 锐化草叶（加宽到 2px）：图集走线性过滤（mag Linear），1px 草叶被放大到 1m×h cross quad 上时，
+  其不透明芯仅 ~1 texel 宽 → alphaCutoff:0.5 后可见区薄如细线、糊且刺眼（用户「草丛糊/刺眼」）。加宽到
+  2px → 不透明芯占 2 texel、可见区 ~2 texel 宽 → 草叶形状清晰利落（机制等价 MC 1.0 cross 草叶约 2px 宽）。
+  alpha 仍二值 0/255（仅扩宽不透明区、不软化边缘），alphaCutoff 边缘契约与 alpha bleed 均不变。几何段
+  （partialblockgeometry pushCrossQuad）不变：全瓦片贴 cross quad 正确，糊感根因在贴图草叶过细。
+
 图案（固定位置 + 确定性散布，无随机源 → 便于 CI 校验 & 与 build_atlas.py 顺序对齐）：
   - 透明底（alpha=0）；
   - 5-7 条竖向草叶（画布 y 自下而上生长），宽 1 像素、高低参差、横向分布在画布中段（留边距）；
@@ -78,29 +84,31 @@ def main():
     img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
     px = img.load()
 
-    def blade(x, top_y, light_rgb, dark_rgb):
-        """竖向草叶：列 x 自画布底（y=TS-1）向上长到 top_y（含），上端浅、下端深。
-        top_y 越小 → 草叶越高（画布 y 向下，顶在上）。"""
+    def blade(x, top_y, light_rgb, dark_rgb, width=2):
+        """竖向草叶：列 x..x+width-1 自画布底（y=TS-1）向上长到 top_y（含），上端浅、下端深。
+        top_y 越小 → 草叶越高（画布 y 向下，顶在上）。width=2（t367）：见文件头 t367 段——线性过滤 +
+        alphaCutoff 下 1px 草叶显成细弱糊线，加宽到 2px 使草叶形状清晰（不透明芯占 2 texel）。"""
         for y in range(top_y, TS):
             # 顶端 1-2 像素用亮色（嫩叶），其余渐暗到暗色（老叶）。
             t = (y - top_y) / max(1, TS - 1 - top_y)  # 0（顶）..1（底）
             r = int(light_rgb[0] * (1 - t) + dark_rgb[0] * t)
             g = int(light_rgb[1] * (1 - t) + dark_rgb[1] * t)
             b = int(light_rgb[2] * (1 - t) + dark_rgb[2] * t)
-            px[x, y] = (r, g, b, 255)
+            for dx in range(width):
+                px[x + dx, y] = (r, g, b, 255)
 
     # 草叶两档配色（草绿）：亮面 #6fae3a（嫩绿受光）/ 暗面 #3a6a1a（深绿阴影）。
     light = (0x6f, 0xae, 0x3a)
     dark = (0x3a, 0x6a, 0x1a)
-    # 草叶列 + 顶端 y（参差高度）。列分布于画布中段 [3,12]（留左右边距），顶端 y 参差 [3,8]。
+    # 草叶起点列 + 顶端 y（参差高度），每叶宽 2px（t367，见 blade 注释）。起点列分布于画布中段 [3,12]
+    #   （留左右边距），顶端 y 参差 [3,8]。相邻叶基部分并成簇、顶端参差 → 读作「一丛清晰草叶」而非实心块。
     #   固定位置（无随机源 → 可复现 / CI 可校验）。
     blades = [
-        (4, 5),   # 高草叶
-        (6, 3),   # 最高草叶（中央）
-        (8, 4),
-        (10, 6),
-        (11, 8),  # 矮草叶
-        (7, 7),
+        (3, 7),   # 中等草叶（左；cols 3-4）
+        (5, 4),   # 高草叶（cols 5-6；与左叶基部分并 → 左簇 3-6）
+        (8, 3),   # 最高草叶（中央；cols 8-9）
+        (10, 5),  # 高草叶（cols 10-11；与中央叶基部分并 → 中右簇 8-11）
+        (12, 8),  # 矮草叶（右；cols 12-13）
     ]
     for (x, top_y) in blades:
         blade(x, top_y, light, dark)
