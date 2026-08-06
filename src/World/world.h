@@ -93,6 +93,11 @@ public:
     //   与 heightmapAt 的差异：heightAt = worldgen 地表（不含树 / 玩家编辑），heightmapAt = 当前列首个非空
     //   （含增量）。出生用 heightAt —— 贴 worldgen 地表，语义稳定（同 seed 同地表）。只读查询，不改栅格。
     Q_INVOKABLE int heightAt(int x, int z) const;
+    // t374 群系查询（暴露给上层 Entities / 呈现层做群系化逻辑；worldgen 私有 Biome 枚举不外泄类型，仅返 int
+    //   编码）。编码同私有 enum Biome：0=Plains, 1=Hills, 2=Desert, 3=Forest。纯函数于 seed（委托 biomeAt；
+    //   PLAN §2-K 确定性，同 seed 同群系图）。分层（PLAN §2）：World 低层只读查询，不依赖 Entities / Renderer。
+    //   消费点：EntityManager::pickPassiveMobType 据本值加权选被动生物类型（t374 群系化刷怪）。
+    Q_INVOKABLE int biomeIdAt(int x, int z) const { return int(biomeAt(x, z)); }
 
     // t151 真光场查询（PLAN §2-H / §M）：世界坐标 per-voxel 天光 / 方块光（各 0..15）。mesher 据此写顶点色。
     //   光场由 BFS flood-fill 算出：worldgen 末走全量 recomputeLightField()；玩家编辑（setBlock / 实体写入）

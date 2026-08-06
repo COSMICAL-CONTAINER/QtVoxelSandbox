@@ -388,6 +388,28 @@ Window {
         // 羊（mobType 3）— 出生点右侧两格。
         h = theWorld.heightAt(84, 78)
         if (h > 0) entityManager.spawnMobTyped(84, h + 1, 78, 3, "#f5f0e8", 10)
+
+        // t374 群系化被动生物分布：在整张地图随机散布一群被动生物，每只类型按其所在群系加权选取
+        //   （entityManager.pickPassiveMobType ← theWorld.biomeIdAt）。机制等价 MC 1.0 出生时被动生物群按群系
+        //   分布（平原多牛羊、森林多猪；非排斥，仅概率差异）。上方固定 3 只保出生点附近必见三类；本散布群提供
+        //   群系化的统计偏移（spec「草原多见牛羊、森林多见猪」）。散布点取整图随机列、地表上方一格；跳水面 /
+        //   头顶非空（树干 / 原木）列避免刷进树里或水里。
+        const kScatterCount = 20
+        const wdim = theWorld.width
+        for (let i = 0; i < kScatterCount; ++i) {
+            const sx = 4 + Math.floor(Math.random() * (wdim - 8)) // [4, wdim-4)，避世界边
+            const sz = 4 + Math.floor(Math.random() * (wdim - 8))
+            const sh = theWorld.heightAt(sx, sz)
+            if (sh <= 0) continue
+            const surface = theWorld.blockAt(sx, sh, sz)
+            if (surface === 21 /* Water */ || surface === 0 /* Air */) continue // 非陆地 / 水面
+            const headroom = theWorld.blockAt(sx, sh + 1, sz)
+            if (headroom !== 0 /* Air */ && headroom !== 24 /* TallGrass */) continue // 头顶非空（树干等）
+            const mt = entityManager.pickPassiveMobType(theWorld.biomeIdAt(sx, sz))
+            const col = (mt === EntityManager.MobCow) ? "#5a4030"
+                     : (mt === EntityManager.MobSheep) ? "#f5f0e8" : "#f0a8b0"
+            entityManager.spawnMobTyped(sx, sh + 1, sz, mt, col, 10)
+        }
     }
     // t78 立即重生（死亡界面按钮）：满血 + 清死亡态 + 传回出生点 + 清挖掘/飞行态 + 重新锁定指针回游戏。
     //   PlayerState.respawn 复位血量/死亡态；PlayerController.respawn 传回出生点 + 清物理态；

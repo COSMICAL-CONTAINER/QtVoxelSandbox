@@ -117,6 +117,11 @@ public:
     //   后再翻 Entity.hostile（spawnMobTyped 是通用入口，不知哪些 mobType 是敌对；本入口收口敌对语义）。
     //   达 kCap → 委托内静默跳过。mobType 仅 MobShambler/MobBones 合法（其余当敌对调是非语义，但仍生成不崩）。
     Q_INVOKABLE void spawnHostileMob(int x, int y, int z, int mobType);
+    // t374 被动生物群系化生成类型选取：据群系 id（World::biomeIdAt 编码：0=Plains, 1=Hills, 2=Desert,
+    //   3=Forest）按 kPassiveSpawnWeights 加权随机返 MobPig/MobCow/MobSheep 之一。机制等价 MC 1.0 群系化
+    //   被动刷怪池（平原牛羊富集、森林猪富集；非排斥，仅概率差异）。群系 id 越界 → 兜底按 Plains。const 只读。
+    //   分层（PLAN §2）：Entities 层，纯函数于入参（biome id）+ RNG 采样，不读 World / 不改实体数据。
+    Q_INVOKABLE int pickPassiveMobType(int biomeId) const;
     // t280 当前**活体**敌对生物数（hostile=true 且非 dead 的 Mob）。供刷怪调度判总数上限（kHostileMobCap）。
     //   含 Shambler/Bones；不含 passive（pig/cow/sheep/test）与 FallingBlock/Item。
     Q_INVOKABLE int hostileCount() const;
@@ -671,6 +676,16 @@ private:
     static constexpr float kBurnDamageInterval   = 1.0f;  // 燃烧扣血间隔（秒/HP；机制等价 MC 日光燃烧 1HP/s）
     static constexpr float kFarDespawn           = 56.0f; // 敌对远距消失半径（blocks）
     static constexpr int   kHostileDefaultHealth = 20;    // Shambler/Bones 满血（机制等价 MC 1.0 僵尸 / 骷髅 20HP）
+    // t374 被动生物群系权重表 kPassiveSpawnWeights[biome][mob]：行 = 群系（同 World::biomeIdAt 编码
+    //   0=Plains, 1=Hills, 2=Desert, 3=Forest），列 = mob（0=牛 MobCow, 1=羊 MobSheep, 2=猪 MobPig）。
+    //   Plains 牛羊富集（开阔草原）、Forest 猪富集（机制等价 MC 1.0 平原牛羊 / 森林猪富集）、Hills 均衡、
+    //   Desert 稀疏均匀（沙漠少动物，非排斥，仅概率差异）。pickPassiveMobType 据本表加权随机选 mob 类型。
+    static constexpr int kPassiveSpawnWeights[4][3] = {
+        { 4, 4, 2 }, // Plains（牛 40% / 羊 40% / 猪 20%；牛羊富集）
+        { 2, 2, 2 }, // Hills（均衡）
+        { 1, 1, 1 }, // Desert（稀疏均匀）
+        { 2, 2, 6 }, // Forest（牛 20% / 羊 20% / 猪 60%；猪富集）
+    };
 public:
     // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
     //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。

@@ -232,6 +232,24 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
     // spawnMobTyped 内 switch 已对 Shambler/Bones/Stalker 设 hostile=true；spawnHostileMob 仅收口语义入口。
 }
 
+// t374 被动生物群系化类型选取：据群系 id（World::biomeIdAt 编码）按 kPassiveSpawnWeights 加权随机返
+//   MobPig/MobCow/MobSheep。机制等价 MC 1.0 群系化被动刷怪池（平原牛羊 / 森林猪富集；非排斥，仅概率差异）。
+//   群系 id 越界 → 兜底 Plains（索引 0）。const 只读（仅 RNG 采样，不改实体数据）。
+int EntityManager::pickPassiveMobType(int biomeId) const
+{
+    const int b = (biomeId >= 0 && biomeId < 4) ? biomeId : 0; // 越界兜底 Plains
+    const int wCow   = kPassiveSpawnWeights[b][0]; // 列 0 = 牛 MobCow
+    const int wSheep = kPassiveSpawnWeights[b][1]; // 列 1 = 羊 MobSheep
+    const int wPig   = kPassiveSpawnWeights[b][2]; // 列 2 = 猪 MobPig
+    const int total  = wCow + wSheep + wPig;
+    auto *rng = QRandomGenerator::global();
+    int r = int(rng->bounded(total)); // [0, total)；bounded 返 quint32，同 tickHostileLife pickMob 模式
+    if (r < wCow) return MobCow;
+    r -= wCow;
+    if (r < wSheep) return MobSheep;
+    return MobPig;
+}
+
 // t280 当前活体敌对生物数（hostile && !dead && kind==Mob）。供 spawn 调度上限判定。
 int EntityManager::hostileCount() const
 {
