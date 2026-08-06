@@ -41,6 +41,7 @@ namespace RayFilter {
     constexpr unsigned Default  = 0u;                  // Torch / Water 均穿过（相机距离 t40）
     constexpr unsigned HitTorch = 1u << 0;             // Torch 挡射线（选体 t184：火把可选中 / 直挖）
     constexpr unsigned HitWater = 1u << 1;             // Water 挡射线（铁桶舀水 t174）
+    constexpr unsigned HitLava  = 1u << 2;             // Lava 挡射线（铁桶舀岩浆 t343）
 } // namespace RayFilter
 
 // 从 origin 沿 dir（无需归一化，内部归一）步进，maxDist 内返回首个「该 filter 视为阻挡」的方块命中。

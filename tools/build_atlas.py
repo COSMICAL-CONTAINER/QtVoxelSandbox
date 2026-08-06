@@ -105,6 +105,10 @@ TILES = [
                                     #    名称/贴图原创自绘 §9a；各面同贴图=石头底+橙铜斑+孔雀绿锈；tools/build_ore.py 程序生成）
     "default_gold_ore",             # 41 gold_ore（t308 金矿石；散布于 stone 深层 y∈[5,25]、需铁镐采掘；机制等价 MC 1.0 金矿，
                                     #    名称/贴图原创自绘 §9a；各面同贴图=石头底+金黄斑簇；tools/build_ore.py 程序生成）
+    "default_lava",                 # 42 lava（t343 岩浆；机制等价 MC 1.0 岩浆——慢流、不可破、玩家穿过；worldgen Y<30 封闭
+                                    #    岩浆湖 + 玩家铁桶舀/放；木质方块邻岩浆概率着火焚毁；掉落物丢入被摧毁。名称/贴图原创自绘
+                                    #    §9a；各面同贴图=深红橙底+亮黄橙鼓泡+白炽热点；tools/build_lava.py 程序生成原创像素图。
+                                    #    纹理不透明，岩浆段材质 opacity≈0.95 近不透、配 NoLighting 暖色 baseColor 显自发光感）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

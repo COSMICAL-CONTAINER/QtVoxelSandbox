@@ -347,6 +347,7 @@ Window {
         appState = "worldlist"
         audio.stopAmbient()   // t177 环境音：退出世界停风声床（菜单态无声）
         audio.stopWaterFlow() // t223 水流声：退出世界停（菜单态无声；离开流水范围本会自停，此处显式保干净）
+        audio.stopLavaFlow()  // t343 岩浆声：退出世界停（同水流声）
     }
     // 返回主菜单：先释放指针（恢复光标 + 清按住的按键），关存档连接 + 清实体，再切 menu 态。
     function returnToMenu() {
@@ -367,6 +368,7 @@ Window {
         appState = "menu"
         audio.stopAmbient()   // t177 环境音：回主菜单停风声床
         audio.stopWaterFlow() // t223 水流声：回主菜单停（菜单态无声）
+        audio.stopLavaFlow()  // t343 岩浆声：回主菜单停（同水流声）
     }
     // t240 进世界生成猪 / 牛 / 羊各一只（出生点附近地表）。EntityManager 已注册 mobType 1/2/3 + spawnMobTyped
     //   入口；生物蛋系统推迟到 t243，故本任务暂以固定 spawn 让模型 + 贴图肉眼可见。坐标取出生列
@@ -801,6 +803,20 @@ Window {
                 audio.setWaterFlowLevel(lvl)
             } else {
                 audio.stopWaterFlow()
+            }
+        }
+    }
+    // t343 近岩浆 proximity 岩浆声：PlayerController.lavaSoundLevel（每 ~0.25s 节流扫描更新，0=无近岩浆 / 近=1）
+    //   → AudioManager.startLavaFlow/stopLavaFlow/setLavaFlowLevel。机制同水流声（level>0 启动设音量；<=0 停）。
+    Connections {
+        target: player
+        function onLavaSoundLevelChanged() {
+            const lvl = player.lavaSoundLevel
+            if (lvl > 0.0) {
+                audio.startLavaFlow()
+                audio.setLavaFlowLevel(lvl)
+            } else {
+                audio.stopLavaFlow()
             }
         }
     }
@@ -1852,6 +1868,7 @@ Window {
                         const t = terrainChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })
                         objs.push(t); geos.push(t.geometry)
                         objs.push(waterChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
+                        objs.push(lavaChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t343 岩浆段
                         objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t326 cutout 段（草丛/作物/树苗）
                     }
                 }
@@ -1904,6 +1921,31 @@ Window {
                     waterAnimPhase: window.waterAnimPhase
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+            }
+        }
+
+        // t343 岩浆段 chunk Model 模板（lavaOnly 只网格化 Lava，opacity≈0.95 近不透 + NoLighting 暖色 baseColor 显
+        //   自发光感）。机制等价 MC 1.0 岩浆（近不透浓稠流体；慢流、不可破、玩家穿过）。岩浆段复用 culled/greedy 立方面
+        //   路径（满格立方 + 自剔 nb==Lava + 邻实体剔），不效仿水的变高水面。baseColor 用暖橙略提亮（NoLighting 下 baseColor
+        //   直接乘进最终色 → 岩浆显炽热自发光感，区别于地形的环境光调制）。摆位同地形/水段；透明物体由 QtQuick3D 渲染队列
+        //   自动排在不透明地形之后。lit 红线：PrincipledMaterial 必须 NoLighting（默认 lit 在 D3D11 不出像素）。
+        Component {
+            id: lavaChunkComp
+            Model {
+                id: lavaModel
+                property int chunkCX: 0
+                property int chunkCZ: 0
+                position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
+                geometry: ChunkGeometry {
+                    world: theWorld
+                    cx: lavaModel.chunkCX
+                    cz: lavaModel.chunkCZ
+                    sunDir: worldClock.sunDir
+                    shadowsEnabled: window.shadowsEnabled
+                    greedyMeshing: window.greedyMeshing
+                    lavaOnly: true
+                }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.95; baseColor: Qt.rgba(1.0, 0.82, 0.6, 1.0) }
             }
         }
 
@@ -5368,6 +5410,10 @@ Window {
             //   把波前推进 1 格 → 1 格/tick 流动动画可见）。纯 QML 桥接（WorldClock 为 Game 层不 include World；
             //   QML 同时持二者向下合法，PLAN §2 分层不破）。tickWaterFlow 内部对 settled 流场（无变化）静默 → 无重建开销。
             theWorld.tickWaterFlow()
+            // t343 岩浆流 tick：WorldClock 每 100ms tick → 驱动 World.tickLavaFlow（内部节流到 ~3s 把波前推进 1 格
+            //   → 岩浆比水慢 ~30 倍的可见缓慢流动；更短扩散距离 3 格；无源再生）。末尾 ignite pass 焚毁邻岩浆木类。
+            //   纯 QML 桥接（同 tickWaterFlow 模式）。稳态（worldgen 全源岩浆湖）静默 → 无重建开销。
+            theWorld.tickLavaFlow()
             // t236 小麦作物生长 tick：WorldClock 每 100ms tick → 驱动 World.tickCropGrowth（内部节流到 ~每 2.5s
             //   做一次成长判定，作物据光强 + 耕地支撑 + 散布概率逐步升生长阶段）。纯 QML 桥接（WorldClock 为
             //   Game 层不 include World；QML 同时持二者向下合法，PLAN §2 分层不破）。tickCropGrowth 内部对稳态

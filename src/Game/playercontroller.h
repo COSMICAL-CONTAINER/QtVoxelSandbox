@@ -164,6 +164,11 @@ class PlayerController : public QQuickItem
     //   仅 playing 流动水存在时 >0；菜单态 player.release 后扫描仍跑但通常无流水格 → 0 → 自动停。只读 World
     //   （blockAt/stateAt 向下依赖）；无世界 → 0。值真变（>epsilon 或 0<->非0 翻转）才 emit，免每 scan 抖 QML。
     Q_PROPERTY(float flowSoundLevel READ flowSoundLevel NOTIFY flowSoundLevelChanged)
+    // t343 近岩浆 proximity 岩浆声强度（0..1）：玩家到最近**岩浆**格（Lava，源 / 流皆算——岩浆湖多为源、
+    //   rumble 应近任何岩浆响起）的距离映射，近=1 / 远→0、范围外=0。tickImpl 节流扫邻近盒（同 flowSoundLevel
+    //   节奏）算最近岩浆格距离 → level。Main.qml Connections 据此 start/stop AudioManager 岩浆声 + setLavaFlowLevel。
+    //   仅 playing 且近岩浆时 >0；菜单态扫描仍跑但通常无岩浆格 → 0 → 自动停。只读 World（向下依赖）；无世界 → 0。
+    Q_PROPERTY(float lavaSoundLevel READ lavaSoundLevel NOTIFY lavaSoundLevelChanged)
     // 掉落伤害事件（t22）：生存模式着地时按落差结算，发出本次应扣 HP（每 HP = 半心）。
     // 不直接持有 PlayerState（保持 Physics/Game→呈现 的单向事件流，分层干净；与 blockBroken
     // 同模式）：呈现层经 Connections 路由到 PlayerState.takeDamage。0 表示无伤害（不路出）。
@@ -254,6 +259,9 @@ public:
     // t223 近流水 proximity 水流声强度（Q_PROPERTY flowSoundLevel READ）：玩家到最近流水格的距离映射 [0,1]。
     //   无世界 / 无近流水 → 0。定义在 .cpp。
     float flowSoundLevel() const;
+    // t343 近岩浆 proximity 岩浆声强度（Q_PROPERTY lavaSoundLevel READ）：玩家到最近岩浆格的距离映射 [0,1]。
+    //   无世界 / 无近岩浆 → 0。定义在 .cpp。
+    float lavaSoundLevel() const;
 
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
@@ -375,6 +383,7 @@ signals:
     void eyeInWaterChanged(); // t201 眼位水态翻转（驱动水下蓝滤镜叠层显隐；值真变才发，免每帧抖 QML 绑定）
     void feetInWaterChanged(); // t269 脚位水态翻转（驱动水中走路声分流；值真变才发，免每帧抖 QML 绑定）
     void flowSoundLevelChanged(); // t223 近流水 proximity 强度变（驱动 AudioManager 水流声 start/stop/setLevel）
+    void lavaSoundLevelChanged(); // t343 近岩浆 proximity 强度变（驱动 AudioManager 岩浆声 start/stop/setLevel）
     void moveSpeedChanged();  // 行走速度变（t45；驱动 QML walkBlend 切换 + 摆频）。speed 属性亦复用本信号（t159）。
     void flySpeedMulChanged(); // 飞行速度倍数变（t159 滚轮调速；驱动 F3 报当前有效飞速）
     void walkPhaseChanged();  // 行走相位推进（t45；走时每 tick 发，QML 据 sin() 算四肢欧拉角）
@@ -514,6 +523,8 @@ private:
     //   静水水源 state=0 不算），返回 [0,1] 强度（1=贴脸 / 0=范围外或无流水）。节流由 tickImpl 累加 dt 控制
     //   （kFlowScanInterval）。只读 World::blockAt/stateAt（向下依赖）；无世界 → 0。
     float scanFlowSoundLevel() const;
+    // t343 近岩浆 proximity 扫描（机制同 scanFlowSoundLevel，但查 Lava 格——源 / 流皆算）。返回 [0,1] 强度。
+    float scanLavaSoundLevel() const;
     QVector3D wishHoriz() const;
     void moveAxis(int axis, float amount);
     bool aabbHitsSolid() const;
@@ -716,6 +727,8 @@ private:
     //   m_flowScanTimer 累加 dt 到 kFlowScanInterval 才重扫（~0.25s，省扫描开销）。值真变才 emit。
     float m_flowSoundLevel = 0.0f;
     float m_flowScanTimer = 0.0f;
+    // t343 近岩浆 proximity 岩浆声：m_lavaSoundLevel = 最近岩浆格距离映射 [0,1]（tickImpl 同 flowScan 节奏重扫）。
+    float m_lavaSoundLevel = 0.0f;
     bool m_dead = false;             // t175 死亡态镜像（dropAllItems 置 true / respawn 置 false）：抑制死亡后
                                      //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）
 

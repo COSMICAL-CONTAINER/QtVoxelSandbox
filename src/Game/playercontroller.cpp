@@ -420,6 +420,14 @@ void PlayerController::tickImpl()
             m_flowSoundLevel = level;
             emit flowSoundLevelChanged();
         }
+        // t343 近岩浆 proximity 岩浆流声：同 scan 节流算最近岩浆格（源 / 流皆算——岩浆湖多为源，rumble 应近任何岩浆
+        //   响起）距离 → level。Main.qml Connections 据此 start/stop AudioManager 岩浆声 + setLavaFlowLevel。
+        const float llevel = scanLavaSoundLevel();
+        if (qAbs(llevel - m_lavaSoundLevel) > 0.02f
+            || (llevel <= 0.0f) != (m_lavaSoundLevel <= 0.0f)) {
+            m_lavaSoundLevel = llevel;
+            emit lavaSoundLevelChanged();
+        }
     }
     // t60：掉落物重力（世界模拟，独立于玩家捕获态——菜单 / 暂停时实体仍落到地面）。
     // PlayerController 是唯一同时持 World* + ItemEntityManager* 的对象，故由此驱动；实体物理态
@@ -1369,51 +1377,57 @@ void PlayerController::placeBlock()
     //   倒水方向保留创造不消耗（装水桶右键放水源，创造保持装水桶 = 无限放水；生存→空桶），不属本任务范围。
     const int heldItemId = m_hotbar ? m_hotbar->selectedItemId() : 0;
     if (m_hotbar && (heldItemId == RecipeRegistry::WaterBucketId
+                     || heldItemId == RecipeRegistry::LavaBucketId
                      || heldItemId == RecipeRegistry::BucketEmptyId)) {
         const int slot = m_hotbar->selectedSlot();
-        if (heldItemId == RecipeRegistry::WaterBucketId) {
-            // 倒水：命中面相邻格放水源。tx/ty/tz 同方块放置（命中面外法线相邻格）。目标须为空气或**流水**：
-            //   t273 修复(a)「流动水里放水」——旧守卫仅认 Air，瞄流水（Water state>0）右键静默无放；流水也是「水可倒
-            //   入的可占据格」，应允许放水源覆盖之（state>0 流水 → state=0 水源，升源；机制等价 MC 桶倒水入流水格
-            //   使其变满源）。已是水源（state==0）→ 视为「已满」，不重复放（免空耗一桶）。实体方块仍不覆盖（保 t05 放置语义）。
+        if (heldItemId == RecipeRegistry::WaterBucketId || heldItemId == RecipeRegistry::LavaBucketId) {
+            // 倒流体（水 / 岩浆）：命中面相邻格放对应源（state=0）。tx/ty/tz 同方块放置（命中面外法线相邻格）。
+            //   目标须为空气或**该流体的流态**（流水 / 流岩浆 state>0 → 源覆盖升源；机制等价 MC 桶倒入流态格使其变满源）。
+            //   已是源（state==0）→ 视为「已满」不重复放。实体方块仍不覆盖（保 t05 放置语义）。
             if (!m_hasHit) return; // 未命中 → 无相邻格可放（桶分支已绕过上方 !m_hasHit 门，此处补检）
             const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
             const quint8 tgt = m_world->blockAt(tx, ty, tz);
-            const bool tgtFlowingWater = (tgt == BlockRegistry::Water
-                                          && m_world->stateAt(tx, ty, tz) != 0); // 流水（state 1..7），非水源
-            if (tgt == BlockRegistry::Air || tgtFlowingWater) {
-                // state=0 水源。setBlock 在 world.cpp 内对「放水」会 poke 水流节流计数（t273 修复 b）→ 下一
-                //   tickWaterFlow（~100ms）立即把波前推进 1 格（修复 b「放水后不立即流动」——旧节流计数残留使首
-                //   次蔓延最久等 0.3s，观感「不流动」）。Air→Water 发 blockPlaced；流水→水源 id 不变只 state 变
-                //   （不发 placed，是升源动作），均 worldChanged 重建水段 mesh。
-                m_world->setBlock(tx, ty, tz, BlockRegistry::Water, 0);
+            const BlockRegistry::Id fluidId = (heldItemId == RecipeRegistry::WaterBucketId)
+                ? BlockRegistry::Water : BlockRegistry::Lava;
+            const bool tgtFlowing = (tgt == fluidId && m_world->stateAt(tx, ty, tz) != 0); // 流态（state>0），非源
+            if (tgt == BlockRegistry::Air || tgtFlowing) {
+                // state=0 源。setBlock 在 world.cpp 内对「放水 / 放岩浆」会 poke 对应流 tick 节流计数（t273/t343）→
+                //   下一 tick（~100ms）立即把波前推进 1 格（机制等价 MC 倒流体即刻外溢）。Air→流体发 blockPlaced；
+                //   流态→源 id 不变只 state 变（不发 placed，是升源动作），均 worldChanged 重建对应段 mesh。
+                m_world->setBlock(tx, ty, tz, fluidId, 0);
                 if (m_mode != Creative)
-                    m_hotbar->setStack(slot, int(RecipeRegistry::BucketEmptyId), 1); // 装水桶 → 空桶（创造不消耗：保持装水桶可无限放水）
+                    m_hotbar->setStack(slot, int(RecipeRegistry::BucketEmptyId), 1); // 装流体桶 → 空桶（创造不消耗：保持装流体桶可无限放）
                 m_lastPlaceMs = now;
                 emit swingArm();
             }
-            return; // 倒水（无论成功与否）不再走放置路径
+            return; // 倒流体（无论成功与否）不再走放置路径
         }
-        // 空桶舀水（t174 fix）：主射线排除 Water（t165 水下挖掘语义）→ 命中格恒为水后/水下的实体方块，
-        //   旧查命中格 == Water 恒 false（死代码）。改为单独跑「含水」射线（RayFilter::HitWater）命中首个水格：
-        //     - 水面 / 岸边瞄准水体 → 射线穿空气后命中水格；
-        //     - 瞄深水（射程内无实体，仅水）→ 主射线无命中，但含水射线命中水；
-        //     - 水下（眼位在水）→ 含水射线起点即水格，视为命中该格（桶舀身处水）。
-        //   不依赖上方 !m_hasHit 门（已绕过）→ 三种姿态均可舀。舀走走 setWaterSilent（水流系统静默写入，
-        //   不发 blockBroken → 无破块粒子/音，机制等价 MC 舀水无反馈），下一 tickWaterFlow 波前自动逐环衰退邻接流水。
+        // 空桶舀流体（t174 水/t343 岩浆）：主射线排除 Water/Lava → 命中格恒为流体后/下的实体方块，旧查命中格恒 false
+        //   （死代码）。改为单独跑「含流体」射线（HitWater / HitLava）命中首个流体格（水面/岩浆面/岸边/深水/水下/岩浆中
+        //   均可舀）。舀走走 setWaterSilent（通用静默写入，不发 blockBroken → 无破块粒子/音，机制等价 MC 舀流体无反馈）。
+        // t199 仅舀源（state==0）：机制等价 MC 1.0 铁桶——流水 / 流岩浆（state>0）右键无效。先试水（HitWater）→ 装水桶；
+        //   水未中再试岩浆（HitLava）→ 装岩浆桶（t343）。两者皆未中 → 不写栅格 / 不换桶 / 不挥手。
         const RayHit wHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitWater);
-        // t199 空桶只舀水源：机制等价 MC 1.0 铁桶——仅 state==0（水源）可舀，流水（state 1..7）右键无效。
-        //   state 取自 wHit 水格（同格 id+state 经 ChunkManager 路由），水源被舀后邻接流水由下一 tickWaterFlow
-        //   波前逐环衰退（机制等价 MC「桶舀源、流自然蒸发」）。流水右键：守卫不满足 → 不写栅格 / 不换桶 / 不挥手。
         if (wHit.valid
             && m_world->blockAt(wHit.bx, wHit.by, wHit.bz) == BlockRegistry::Water
             && m_world->stateAt(wHit.bx, wHit.by, wHit.bz) == 0) { // 仅水源 state==0 可舀（t199）
             m_world->setWaterSilent(wHit.bx, wHit.by, wHit.bz, BlockRegistry::Air, 0); // 舀走（清整格）
-            m_hotbar->setStack(slot, int(RecipeRegistry::WaterBucketId), 1); // t186：空桶 → 装水桶（所有模式均换桶；旧 m_mode!=Creative 守卫移除）
+            m_hotbar->setStack(slot, int(RecipeRegistry::WaterBucketId), 1); // 空桶 → 装水桶
+            m_lastPlaceMs = now;
+            emit swingArm();
+            return;
+        }
+        // t343 空桶舀岩浆：含岩浆射线（HitLava）命中首个岩浆格；仅岩浆源 state==0 可舀（同 t199 水源语义）。
+        const RayHit lHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitLava);
+        if (lHit.valid
+            && m_world->blockAt(lHit.bx, lHit.by, lHit.bz) == BlockRegistry::Lava
+            && m_world->stateAt(lHit.bx, lHit.by, lHit.bz) == 0) { // 仅岩浆源 state==0 可舀
+            m_world->setWaterSilent(lHit.bx, lHit.by, lHit.bz, BlockRegistry::Air, 0); // 舀走（setWaterSilent 通用静默写，支持 Lava id）
+            m_hotbar->setStack(slot, int(RecipeRegistry::LavaBucketId), 1); // 空桶 → 装岩浆桶
             m_lastPlaceMs = now;
             emit swingArm();
         }
-        return; // 空桶（舀水成功与否）不再走放置路径
+        return; // 空桶（舀水 / 舀岩浆成功与否）不再走放置路径
     }
     // t234 锄头 useBlock（spec「持锄右键泥土/草方块→变耕地」）：手持为 Hoe 类工具（木/石/铁锄）+ 命中格为
     //   Dirt/Grass → 该格转 Farmland（干/湿由 isFarmlandMoist 据水源邻近快照判定写 state bit0）。机制等价
@@ -2141,6 +2155,44 @@ float PlayerController::scanFlowSoundLevel() const
                     minDistSq = dsq;
                     found = true;
                 }
+            }
+        }
+    }
+    if (!found) return 0.0f;
+    const float dist = std::sqrt(minDistSq);
+    float level = 1.0f - dist / kFlowSoundRadius;
+    if (level < 0.0f) level = 0.0f;
+    if (level > 1.0f) level = 1.0f;
+    return level;
+}
+
+// t343 lavaSoundLevel 属性 READ：返回 m_lavaSoundLevel（tickImpl 节流扫描缓存值）。
+float PlayerController::lavaSoundLevel() const
+{
+    return m_lavaSoundLevel;
+}
+
+// t343 近岩浆 proximity 扫描（机制同 scanFlowSoundLevel，但查 Lava 格——源 / 流皆算：岩浆湖多为源，
+//   rumble 应近任何岩浆响起，区别于水流声仅算流态）。返回 [0,1] 强度：1=贴脸岩浆格、0=范围外 / 无岩浆 / 无世界。
+float PlayerController::scanLavaSoundLevel() const
+{
+    if (!m_world) return 0.0f;
+    const QVector3D eye = position();
+    const float ex = eye.x(), ey = eye.y(), ez = eye.z();
+    const int cx = int(std::floor(ex)), cy = int(std::floor(ey)), cz = int(std::floor(ez));
+    const int R = int(kFlowSoundRadius);
+    float minDistSq = kFlowSoundRadius * kFlowSoundRadius + 1.0f;
+    bool found = false;
+    for (int dx = -R; dx <= R; ++dx) {
+        for (int dy = -R; dy <= R; ++dy) {
+            for (int dz = -R; dz <= R; ++dz) {
+                const int bx = cx + dx, by = cy + dy, bz = cz + dz;
+                if (m_world->blockAt(bx, by, bz) != BlockRegistry::Lava) continue;
+                const float ddx = (float(bx) + 0.5f) - ex;
+                const float ddy = (float(by) + 0.5f) - ey;
+                const float ddz = (float(bz) + 0.5f) - ez;
+                const float dsq = ddx * ddx + ddy * ddy + ddz * ddz;
+                if (dsq < minDistSq) { minDistSq = dsq; found = true; }
             }
         }
     }

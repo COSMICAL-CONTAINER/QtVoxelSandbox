@@ -125,9 +125,10 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
     auto blocksRay = [&world, filter](int cx, int cy, int cz) {
         const quint8 b = world.blockAt(cx, cy, cz);
         if (b == quint8(0)) return false; // 空气：永远穿过
-        // Torch / Water 是否挡射线由 filter 决定（不同射线模式语义不同，见 RayFilter 注释）。
+        // Torch / Water / Lava 是否挡射线由 filter 决定（不同射线模式语义不同，见 RayFilter 注释）。
         if (b == BlockRegistry::Torch && !(filter & RayFilter::HitTorch)) return false;
         if (b == BlockRegistry::Water && !(filter & RayFilter::HitWater)) return false;
+        if (b == BlockRegistry::Lava  && !(filter & RayFilter::HitLava))  return false; // t343 岩浆（铁桶舀）
         return true;
     };
 
@@ -165,10 +166,10 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
                           int cellNx, int cellNy, int cellNz) -> bool {
         const quint8 b = world.blockAt(cx, cy, cz);
         const bool selectionMode = (filter & RayFilter::HitTorch) != 0;
-        // 完整立方 → 整格命中；水（仅 HitWater 模式进此分支）→ 整格命中舀水；
-        //   非选体模式（相机 Default / 桶 HitWater）对不完整方块亦整格阻挡（旧行为，防相机穿半砖）。
+        // 完整立方 → 整格命中；水（仅 HitWater 模式进此分支）→ 整格命中舀水；岩浆（仅 HitLava 模式）→ 整格命中舀岩浆；
+        //   非选体模式（相机 Default / 桶 HitWater / HitLava）对不完整方块亦整格阻挡（旧行为，防相机穿半砖）。
         const bool fullCell = BlockRegistry::isFullCube(b) || b == BlockRegistry::Water
-                              || !selectionMode;
+                              || b == BlockRegistry::Lava || !selectionMode;
         if (fullCell) {
             h.valid = true;
             h.bx = cx; h.by = cy; h.bz = cz;
@@ -205,10 +206,17 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
             h.bx = x; h.by = y; h.bz = z;
             return h; // 起点即水格 → 命中该格（dist=0；法线 0）
         }
+        // t343：HitLava 模式下起点在岩浆格属正常（玩家在岩浆中），视该岩浆格为首个命中（同 HitWater 水下舀水）。
+        if ((filter & RayFilter::HitLava) && world.blockAt(x, y, z) == BlockRegistry::Lava) {
+            h.valid = true;
+            h.bx = x; h.by = y; h.bz = z;
+            return h; // 起点即岩浆格 → 命中该格（dist=0；法线 0）
+        }
         const quint8 startB = world.blockAt(x, y, z);
         const bool startPartial = (filter & RayFilter::HitTorch) != 0
                                   && !BlockRegistry::isFullCube(startB)
-                                  && startB != BlockRegistry::Water;
+                                  && startB != BlockRegistry::Water
+                                  && startB != BlockRegistry::Lava;
         if (!startPartial)
             return h; // 完整立方 / 非选体模式起点嵌阻挡格 → 退化（相机穿模 / 贴脸火把旧语义）
         // 选体模式 + 起点在不完整方块/火把格：sub-AABB 测试（段 = 起点格 [0, tExitStartCell]）。

@@ -717,6 +717,66 @@ def gen_explosion():
     return finalize(out)
 
 
+def gen_lava():
+    """岩浆低频 rumble + 气泡（t343）。长循环 ~8s：低频隆隆床（拟地壳深处的持续低吼）+ 中频「咕嘟」气泡瞬态
+    （拟岩浆表面鼓泡破裂）+ 偶发深爆裂（拟大块结皮塌陷）。首末 50ms 淡化无缝。机制等价 MC 近岩浆环境音（§9 原创）。"""
+    dur = 8.0
+    n = int(SR * dur)
+    rnd = random.Random(51317)
+    # 低频隆隆床：极低截止的噪声（拟持续低频轰鸣）。
+    bed_lp_a = 0.012
+    bed_state = 0.0
+    bed = [0.0] * n
+    for i in range(n):
+        w = rnd.uniform(-1, 1)
+        bed_state = bed_lp_a * w + (1.0 - bed_lp_a) * bed_state
+        bed[i] = bed_state
+    bed_inv = 1.0 / max(1e-6, max(abs(s) for s in bed))
+    # 中频气泡瞬态（咕嘟）：不规则间隔、低频正弦脉冲 + 指数衰减包络。
+    bubbles = []
+    t_b = 0.08
+    while t_b < dur - 0.08:
+        bubbles.append((t_b, rnd.uniform(90.0, 220.0), rnd.uniform(0.10, 0.20),
+                        rnd.uniform(0.025, 0.060), rnd.uniform(-40.0, 40.0)))
+        t_b += rnd.uniform(0.10, 0.30)
+    # 偶发深爆裂（结皮塌陷）：稀疏、更低频、更长包络。
+    cracks = []
+    t_c = 0.5
+    while t_c < dur - 0.5:
+        cracks.append((t_c, rnd.uniform(50.0, 90.0), rnd.uniform(0.18, 0.28), rnd.uniform(0.08, 0.14)))
+        t_c += rnd.uniform(1.5, 3.5)
+    fade_n = int(SR * 0.05)
+    out = [0.0] * n
+    # 低频床慢 AM（拟岩浆活动起伏，非恒定轰鸣）。
+    lfo_a = 2 * math.pi * 0.5
+    lfo_b = 2 * math.pi * 1.3
+    ph_a = rnd.uniform(0, 2 * math.pi)
+    ph_b = rnd.uniform(0, 2 * math.pi)
+    for i in range(n):
+        t = i / SR
+        am = 0.6 + 0.2 * math.sin(lfo_a * t + ph_a) + 0.2 * math.sin(lfo_b * t + ph_b)
+        if am < 0.1:
+            am = 0.1
+        s = bed[i] * bed_inv * 0.55 * am
+        for bt, bf, ba, bw, bs in bubbles:
+            dtb = t - bt
+            if -0.02 < dtb < bw * 4.0:
+                env = math.exp(-(dtb ** 2) / (2 * bw * bw))
+                f = bf + bs * 20.0 * dtb
+                s += ba * env * math.sin(2 * math.pi * f * dtb)
+        for ct, cf, ca, cw in cracks:
+            dtc = t - ct
+            if -0.02 < dtc < cw * 4.0:
+                env = math.exp(-(dtc ** 2) / (2 * cw * cw))
+                s += ca * env * math.sin(2 * math.pi * cf * dtc)
+        if i < fade_n:
+            s *= i / fade_n
+        elif i > n - fade_n:
+            s *= (n - 1 - i) / fade_n
+        out[i] = s
+    return finalize(out)
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -738,6 +798,7 @@ def main():
                       ("ambient_wind", gen_ambient_wind),
                       ("water_flow", gen_water_flow),
                       ("water_step", gen_water_step),
+                      ("lava", gen_lava),
                       ("mob_idle", gen_mob_idle_generic),
                       ("mob_idle_pig", gen_mob_idle_pig),
                       ("mob_idle_cow", gen_mob_idle_cow),

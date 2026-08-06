@@ -278,7 +278,7 @@ static_assert(RecipeRegistry::GoldIngotId     == 0x21F, "GoldIngotId 须为材�
 //   含材料 / mob 死亡掉落 / 生物蛋三子集——MC 1.0 均为「物品」）。**不重排常量**（保存档 / 配方 / 掉落表向后兼容）。
 //   无 MC 1.0 等价（铁 / 金 / 铜原矿与锭 1.17+）→ -1；生物蛋（spawn_egg_*）→ 383（MC 1.0 单一 spawn egg id + metadata）。
 //   新增材料段物品须在此补一行（否则越界 -1）。
-constexpr int kMcMaterialIdCount = RecipeRegistry::GoldIngotId - RecipeRegistry::MaterialIdBase + 1; // 0x200..0x21F = 32
+constexpr int kMcMaterialIdCount = RecipeRegistry::LavaBucketId - RecipeRegistry::MaterialIdBase + 1; // 0x200..0x220 = 33
 constexpr int kMcMaterialId[kMcMaterialIdCount] = {
     /* 0x200 stick        */ 280, /* 0x201 coal         */ 263, /* 0x202 iron_ore_drop */ -1,  /* 0x203 iron_ingot */ 265,
     /* 0x204 glass        */ 20,  /* 0x205 charcoal     */ 263, /* 0x206 bucket_empty */ 325, /* 0x207 water_bucket */ 326,
@@ -289,8 +289,9 @@ constexpr int kMcMaterialId[kMcMaterialIdCount] = {
     /* 0x217 bone         */ 352, /* 0x218 rotten_flesh */ 367, /* 0x219 string       */ 287, /* 0x21A arrow      */ 262,
     /* 0x21B sapling_item */ 6,   /* 0x21C copper_ore_drop */ -1, /* 0x21D copper_ingot */ -1, /* 0x21E gold_ore_drop */ -1,
     /* 0x21F gold_ingot   */ 266,
+    /* 0x220 lava_bucket  */ 327,
 };
-static_assert(kMcMaterialIdCount == 32, "材料段 MC 映射表长度须 = [MaterialIdBase, GoldIngotId] = 32");
+static_assert(kMcMaterialIdCount == 33, "材料段 MC 映射表长度须 = [MaterialIdBase, LavaBucketId] = 33");
 } // namespace
 
 // ── 匹配算法 ──

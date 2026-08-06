@@ -133,6 +133,12 @@ public:
     Q_INVOKABLE void stopWaterFlow();
     // 设水流声强度（0..1）：仅改水流声音量（若在播即时生效）；幂等。由 PlayerController.flowSoundLevel 驱动。
     Q_INVOKABLE void setWaterFlowLevel(float level);
+    // t343 岩浆声（机制同水流声，由 PlayerController.lavaSoundLevel proximity 驱动）：近岩浆启动、远离停止。
+    //   长循环低频 rumble + 气泡（lava.wav，build_sounds.py 程序合成，§9 原创）；幂等；降级静默早退（§2-E）。
+    Q_INVOKABLE void startLavaFlow();
+    Q_INVOKABLE void stopLavaFlow();
+    // 设岩浆声强度（0..1）：仅改岩浆声音量（若在播即时生效）；幂等。由 PlayerController.lavaSoundLevel 驱动。
+    Q_INVOKABLE void setLavaFlowLevel(float level);
     // t269 水中走路声：玩家脚位在水中迈步时播（替代按材质的 playStep）。机制等价 MC 水中走路声（原创程序
     //   合成，§9；零 MC 资产）。不分材质（水中听感统一闷浊）单件 clip；Main.qml onWalkPhaseChanged 据玩家
     //   feetInWater 分流：水中 → playWaterStep，陆地 → playStep(blockId)。音量略低于普通 step（水下传播衰减

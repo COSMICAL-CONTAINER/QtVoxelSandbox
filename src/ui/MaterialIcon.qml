@@ -237,6 +237,17 @@ Item {
                 R(7, 9, 4, 1, waterLight) // 水面高光（左上受光）
             }
 
+            // 装岩浆铁桶（0x220，t343）：同空桶 + 桶内炽热岩浆液面（橙红 + 亮黄鼓泡，表「装满岩浆到桶口」）。
+            //   岩浆色与 default_lava 暖橙基调一致（#c8401a 深红橙 + #ffb040 亮黄橙鼓泡）。机制等价 MC 装岩浆铁桶。
+            const drawLavaBucket = () => {
+                drawBucketEmpty() // 桶身（同空桶）
+                const lava = "#c8401a", lavaHot = "#ffb040"
+                // 桶口椭圆内的岩浆液面（覆盖 mouth 阴影，表「装满岩浆到桶口」）
+                R(6, 9, 12, 1, lava)
+                R(8, 9, 2, 1, lavaHot)  // 亮黄橙鼓泡高光（炽热核心）
+                R(13, 9, 2, 1, lavaHot) // 另一鼓泡
+            }
+
             // 小麦种子（0x208，t235）：几粒黄褐色麦种（椭圆粒 + 胚芽细尖）。机制等价 MC 小麦种子图标
             //   （麦粒形）；纯原创自绘（§9a）。配色：seed #c8a868（麦粒暖黄褐）/ light #e0c890（受光高光）/
             //   dark #8a6c38（阴影 + 胚沟）/ tip #6a8a3a（胚芽尖淡绿，表「将萌发」）。3 粒聚拢呈种子堆。
@@ -785,6 +796,7 @@ Item {
             case 0x205: drawCharcoal();     break
             case 0x206: drawBucketEmpty();  break // t174 铁桶（空）
             case 0x207: drawWaterBucket();  break // t174 装水铁桶
+            case 0x220: drawLavaBucket();   break // t343 装岩浆铁桶
             case 0x208: drawSeed();         break // t235 小麦种子
             case 0x209: drawWheat();        break // t237 小麦物品（收割成熟小麦作物）
             case 0x20A: drawBread();        break // t238 面包（3 小麦合成；右键食 +5 饥饿）

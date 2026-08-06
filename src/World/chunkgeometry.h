@@ -63,6 +63,12 @@ public:
     //   邻居；PASS 1 只发 cross 顶点、PASS 2 立方面跳过）。dirty 时序不受影响（三段 onWorldChanged 皆同步槽，
     //   World emit worldChanged() 内全部重建完才 clearAllDirty，见 world.cpp setBlock）。
     Q_PROPERTY(bool cutoutOnly READ cutoutOnly WRITE setCutoutOnly NOTIFY cutoutOnlyChanged)
+    // t343 岩浆渲染分流（机制等价 waterOnly 的「独立段」，复用 culled/greedy 立方面路径而非水的变高水面）：
+    //   lavaOnly=true → 本几何只网格化 Lava 方块（独立段，Main.qml 用 opacity≈0.95 + NoLighting 暖色 baseColor 材质
+    //   显近不透岩浆 + 自发光感）；lavaOnly=false（默认）→ 地形段跳过 Lava（避免与岩浆段重复绘制）。岩浆段满格立方
+    //   + 自剔 nb==Lava + 邻实体剔面（同 culled 地形约定），不效仿水的变高水面（岩浆浓稠、满格观感即可）。一个 chunk
+    //   由四个 ChunkGeometry 实例渲染（地形段 + 水段 + cutout 段 + 岩浆段），各自绑 QML Model + 材质。
+    Q_PROPERTY(bool lavaOnly READ lavaOnly WRITE setLavaOnly NOTIFY lavaOnlyChanged)
     // t166b 阴影开关（用户「卡顿疑似阴影所致，加开关测」）：false → sunShadowAt 直接返 0（跳过 PCF per-vertex
     //   heightmap 采样 → meshing 大幅省时，sun-step 50 chunk 重建更快）+ 顶点光基底只剩 flood-fill 光场（无软影）。
     //   ESC 设置面板开关绑 window.shadowsEnabled → 全 chunk 实例。默认 true（保留软影）；关掉即诊断 / 提速。
@@ -114,6 +120,9 @@ public:
     // t326 cross cutout 分流（见 Q_PROPERTY 注释）：true=只网格化 cross 广告牌方块（草丛 / 作物 / 树苗）。
     bool cutoutOnly() const { return m_cutoutOnly; }
     void setCutoutOnly(bool on);
+    // t343 岩浆分流（见 Q_PROPERTY 注释）：true=只网格化 Lava 段（满格立方，独立近不透暖色材质）。
+    bool lavaOnly() const { return m_lavaOnly; }
+    void setLavaOnly(bool on);
     // t166b 阴影开关（false → sunShadowAt 返 0，关 PCF 软影，meshing 提速）。
     bool shadowsEnabled() const { return m_shadowsEnabled; }
     void setShadowsEnabled(bool on);
@@ -135,6 +144,7 @@ signals:
     void sunInputChanged(); // t123：sunDir 变（太阳量化跨步）；驱动呈现层 / 未来光场刷新
     void waterOnlyChanged(); // t148：水段开关变（QML 改 waterOnly → 重建，水段 / 地形段重网格化）
     void cutoutOnlyChanged(); // t326：cutout 段开关变（QML 改 cutoutOnly → 重建，cross 段 / 地形段重网格化）
+    void lavaOnlyChanged(); // t343：岩浆段开关变（QML 改 lavaOnly → 重建，岩浆段 / 地形段重网格化）
     void shadowsEnabledChanged(); // t166b：阴影开关变（→ buildMesh 重算顶点光 PCF）
     void greedyMeshingChanged();  // t178：贪婪网格化开关变（→ buildMesh 重网格化）
     void waterAnimPhaseChanged(); // t223：水贴图动画 phase 变（→ 水段 buildMesh(Water) 换帧）
@@ -167,6 +177,7 @@ private:
     QVector3D m_sunDir{0.f, 1.f, 0.f}; // t123 太阳方向（单位向量；默认天顶正午，QML 绑 WorldClock.sunDir）
     bool m_waterOnly = false; // t148：true=只网格化 Water 段（透明水）；false=只网格化非水地形段
     bool m_cutoutOnly = false; // t326：true=只网格化 cross 段（草丛/作物/树苗 cutout）；false=不网格化 cross
+    bool m_lavaOnly = false; // t343：true=只网格化 Lava 段（满格立方近不透暖色）；false=地形段跳 Lava
     bool m_shadowsEnabled = true; // t166b：PCF 软影开关（false → sunShadowAt 返 0，跳过 per-vertex 采样）
     bool m_greedyMeshing = false; // t178/t183：贪婪网格化开关（true=合并同面但贴图拉伸；false=逐格 culled 贴图清晰，t183 默认）
     int m_waterAnimPhase = 0; // t223：水贴图动画 phase（0/1；仅水段使用，flipbook 在 {19,24}/{23,25} 间选帧）

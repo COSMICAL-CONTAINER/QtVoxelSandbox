@@ -355,6 +355,7 @@ QString Hotbar::nameForBlock(int blockId) const
         // t174 铁桶（材料段 0x206/0x207，maxStack=1 不可堆叠）：空桶可合成 / 装水桶由舀水得。
         if (blockId == RecipeRegistry::BucketEmptyId) return QStringLiteral("铁桶");
         if (blockId == RecipeRegistry::WaterBucketId) return QStringLiteral("装水铁桶");
+        if (blockId == RecipeRegistry::LavaBucketId) return QStringLiteral("装岩浆铁桶"); // t343 空桶舀岩浆源得
         if (blockId == RecipeRegistry::SeedId)        return QStringLiteral("小麦种子"); // t235
         if (blockId == RecipeRegistry::WheatId)       return QStringLiteral("小麦");     // t237 收割成熟小麦作物掉落
         if (blockId == RecipeRegistry::BreadId)       return QStringLiteral("面包");     // t238 3 小麦合成；右键食 +5 饥饿
@@ -639,7 +640,8 @@ int Hotbar::maxStackSize(int id) const
     // t174 铁桶（材料段 0x206/0x207）：不可堆叠（机制等价 MC 1.0 桶单件；空 / 装水桶均 1）。
     //   须在通用材料段判定**之前**特判（否则落 64）。桶是非堆叠功能性物品（同工具段语义），仅因归材料段
     //   才在此分流。与 isMaterial 不冲突（MaterialIcon 仍画桶图标）。
-    if (id == RecipeRegistry::BucketEmptyId || id == RecipeRegistry::WaterBucketId) return 1;
+    if (id == RecipeRegistry::BucketEmptyId || id == RecipeRegistry::WaterBucketId
+        || id == RecipeRegistry::LavaBucketId) return 1;
     if (id >= kMaterialIdBase) return 64; // 材料段（t50 木棒等）：可堆叠 64（MC 标准）
     if (id >= kToolIdBase) return 1;      // 工具段（t33）：不可堆叠
     if (id <= 0 || id >= int(BlockRegistry::Count)) return 0; // air / 越界：不可堆叠（无意义）

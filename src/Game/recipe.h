@@ -63,6 +63,12 @@ public:
     //   与 ToolRegistry::isTool（[0x100,0x103)）互斥 —— 桶非工具，不影响挖掘速度 / 掉落判定。
     static constexpr int BucketEmptyId  = 0x206; // 铁桶（空）：3 铁锭 V 形合成；右键水舀水 → WaterBucketId
     static constexpr int WaterBucketId  = 0x207; // 装水铁桶：空桶舀水得；右键倒出水水源 → BucketEmptyId
+    // t343 装岩浆铁桶（LavaBucketId）：材料段 0x220。机制等价 MC 1.0 岩浆桶（lava bucket）——空桶舀岩浆源得；
+    //   右键倒出岩浆源 → BucketEmptyId（生存消耗 / 创造不耗，同装水桶模式）。**不可堆叠**（maxStack=1，Hotbar::
+    //   maxStackSize 特判，同空 / 装水桶）。非方块（材料段）→ 右键不走放置，走 useBlock 桶交互分支（同装水桶）。
+    //   **无合成配方**（同装水桶——桶类内容由舀取获得，非合成）；MaterialIcon 自绘装岩浆桶图标（桶身 + 橙红岩浆）。
+    //   MC 1.0 对齐 id 327（lava bucket）；与 docs/item-ids.md 材料段「MC 1.0.0」列一致（单一权威）。
+    static constexpr int LavaBucketId   = 0x220; // 装岩浆铁桶：空桶舀岩浆源得；右键倒岩浆源 → 空桶（t343）
     // t235 小麦种子：材料段 0x208。挖草丛（TallGrass）掉落（BlockRegistry::TallGrass.dropId=0x208）；
     //   机制等价 MC 1.0「挖草丛掉小麦种子」。可堆叠 64；创造调色板可取用。**种植**（右键耕地→种小麦作物）
     //   归 t236（WheatCrop 方块 + 生长阶段）；本任务仅注册物品（可持 / 可掉 / 创造可取）。

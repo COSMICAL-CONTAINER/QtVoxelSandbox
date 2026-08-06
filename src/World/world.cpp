@@ -101,6 +101,9 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     // t273 修复(b)：放水源（id==Water）时 poke 水流节流计数 → 下次 tickWaterFlow 即蔓延（详见 5 参数 setBlock 同名注释）。
     if (id == BlockRegistry::Water)
         m_flowTickCounter = kFlowTickInterval - 1;
+    // t343：放岩浆源（id==Lava）时 poke 岩浆流节流计数 → 下次 tickLavaFlow 即蔓延（机制同水 poke）。
+    if (id == BlockRegistry::Lava)
+        m_lavaFlowTickCounter = kLavaFlowTickInterval - 1;
     return true;
 }
 
@@ -171,6 +174,9 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     //   不经此（舀水是退场、按既定节奏衰退即可，非本任务范围）。
     if (id == BlockRegistry::Water)
         m_flowTickCounter = kFlowTickInterval - 1;
+    // t343：放岩浆源时 poke 岩浆流节流计数（机制同上方水 poke，让首格即时蔓延）。
+    if (id == BlockRegistry::Lava)
+        m_lavaFlowTickCounter = kLavaFlowTickInterval - 1;
     return true;
 }
 
@@ -426,6 +432,133 @@ void World::tickWaterFlow()
         const int z = static_cast<int>(kz % D);
         const int y = static_cast<int>(kz / D);
         setWaterSilent(x, y, z, BlockRegistry::Water, kv.second);
+    }
+}
+
+// t343 岩浆流 tick（见 world.h 头注释）。机制等价 MC 1.0 主世界岩浆：比水慢 ~30 倍、扩散 3 格、无源再生。
+//   算法同 tickWaterFlow 的增量波前（快照 → 蒸发 → 扩散 → 应用），但去掉源再生 pass（岩浆不形成无限源）、
+//   节流更慢（kLavaFlowTickInterval=30 → 3s/格）、扩散更短（kMaxLavaFlowLevel=3）。末尾 ignite pass 焚毁邻岩浆木类。
+void World::tickLavaFlow()
+{
+    if (++m_lavaFlowTickCounter < kLavaFlowTickInterval) return; // 节流：每 30 tick（~3s）把波前推进 1 格
+    m_lavaFlowTickCounter = 0;
+    ++m_lavaIgniteIndex; // ignite 窗口序号（每流 tick +1，喂散布概率 → 错峰焚毁）
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+
+    auto keyOf = [W, D](int x, int y, int z) -> long long {
+        return static_cast<long long>(x) + static_cast<long long>(z) * W
+             + static_cast<long long>(y) * static_cast<long long>(W) * D;
+    };
+
+    // 1) 快照当前岩浆格。
+    struct LCell { int x, y, z; quint8 level; };
+    std::vector<LCell> cells;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y) {
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Lava)
+                    cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
+            }
+
+    std::unordered_map<long long, quint8> adds;
+    auto tryAdd = [&](long long k, quint8 lvl) {
+        auto it = adds.find(k);
+        if (it == adds.end()) adds.emplace(k, lvl);
+        else if (it->second > lvl) it->second = lvl;
+    };
+
+    // 下方格类别（同 tickWaterFlow）：0=air(下落) / 1=solid(grounded) / 2=lava(岩浆下柱，不下落不蔓延)。
+    auto belowKind = [&](int x, int y, int z) -> int {
+        if (y == 0) return 1;
+        const quint8 b = m_chunks.blockAt(x, y - 1, z);
+        if (b == BlockRegistry::Air) return 0;
+        if (b == BlockRegistry::Lava) return 2;
+        return 1;
+    };
+    static const int hd[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+
+    // 2) 蒸发 pass（流岩浆 state>0 失支撑 → 凝固退场；岩浆源 state=0 永不退场）。无源再生 pass（岩浆不形成无限源）。
+    std::vector<LCell> evaps;
+    std::unordered_set<long long> evapKeys;
+    for (const LCell &c : cells) {
+        if (c.level == 0) continue; // 岩浆源永不退场（玩家/铁桶/worldgen 管）
+        bool supported = false;
+        if (c.y + 1 < H && m_chunks.blockAt(c.x, c.y + 1, c.z) == BlockRegistry::Lava) supported = true; // 上方岩浆灌养
+        if (!supported) {
+            for (const auto &d : hd) {
+                const int nx = c.x + d[0], nz = c.z + d[1];
+                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                if (m_chunks.blockAt(nx, c.y, nz) != BlockRegistry::Lava) continue;
+                if (m_chunks.stateAt(nx, c.y, nz) < c.level) { supported = true; break; } // 水平更低 level 邻居（近源）支撑
+            }
+        }
+        if (!supported) {
+            evaps.push_back(c);
+            evapKeys.insert(keyOf(c.x, c.y, c.z));
+        }
+    }
+
+    // 3) 扩散 pass：只把波前推 1 格（1 格/tick 缓慢动画）。跳过退场格。下落 + 水平蔓延不互斥（同 tickWaterFlow t272）。
+    for (const LCell &c : cells) {
+        if (evapKeys.count(keyOf(c.x, c.y, c.z))) continue; // 退场中的格不扩散
+        const int bk = belowKind(c.x, c.y, c.z);
+        if (bk == 0) {
+            tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1)); // 下落为流岩浆 state=1（非源）
+        }
+        if (bk != 2 && c.level < kMaxLavaFlowLevel) {
+            for (const auto &d : hd) {
+                const int nx = c.x + d[0], nz = c.z + d[1];
+                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                const long long nbKey = keyOf(nx, c.y, nz);
+                if (evapKeys.count(nbKey)) continue;
+                const quint8 nbId = m_chunks.blockAt(nx, c.y, nz);
+                if (nbId == BlockRegistry::Air) {
+                    tryAdd(nbKey, quint8(c.level + 1)); // 蔓延到 air
+                } else if (nbId == BlockRegistry::Lava) {
+                    // re-leveling（同水）：既有流岩浆邻居若能被提供更低 level → 下调（平滑两股岩浆融合）。
+                    const quint8 nbLvl = m_chunks.stateAt(nx, c.y, nz);
+                    const quint8 offered = quint8(c.level + 1);
+                    if (nbLvl > 0 && offered < nbLvl) tryAdd(nbKey, offered);
+                }
+            }
+        }
+    }
+
+    // 4) 应用：蒸发 → 新增/重定级（经 keySet 互斥）。setWaterSilent 是通用静默 state 写入口（支持任意 id+state）。
+    for (const LCell &e : evaps)
+        setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
+    for (const auto &kv : adds) {
+        const long long k = kv.first;
+        const int x = static_cast<int>(k % W);
+        const long long kz = k / W;
+        const int z = static_cast<int>(kz % D);
+        const int y = static_cast<int>(kz / D);
+        setWaterSilent(x, y, z, BlockRegistry::Lava, kv.second);
+    }
+
+    // 5) ignite pass（spec「木质方块邻岩浆概率着火焚毁」）：遍历本 tick 岩浆格，扫 6 邻，木类方块按散布概率焚毁。
+    //    散布确定性（hashVoxel + 窗口序号，PLAN §2-K）→ 同 seed 同窗口同焚毁，错峰非全部同步烧光。setBlock Air
+    //    发 blockBroken → 触发破块粒子 / 音（机制等价 MC 木块被岩浆点燃焚毁）。t344 完整着火系统留后续。
+    auto isWoodLike = [](quint8 id) -> bool {
+        using BR = BlockRegistry;
+        return id == BR::Log || id == BR::Planks || id == BR::CraftingTable || id == BR::Leaves
+            || id == BR::WoodSlab || id == BR::WoodStairs || id == BR::WoodFence
+            || id == BR::WoodPressurePlate || id == BR::WoodDoor || id == BR::WoodTrapdoor || id == BR::Chest;
+    };
+    for (const LCell &c : cells) {
+        const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for (const auto &n : neigh) {
+            const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
+            if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            const quint8 nb = m_chunks.blockAt(nx, ny, nz);
+            if (!isWoodLike(nb)) continue;
+            // 散布概率判定（hashVoxel + 窗口序号 → 确定性伪随机，PLAN §2-K）。命中即焚毁。
+            const quint32 hv = hashVoxel(m_seed ^ 0x1A7A, nx, ny, nz) ^ (quint32(m_lavaIgniteIndex) * 2654435761u);
+            if ((hv % 100u) < unsigned(kLavaIgnitePct)) {
+                setBlock(nx, ny, nz, BlockRegistry::Air); // 焚毁（发 blockBroken → 破块粒子/音）
+            }
+        }
     }
 }
 
@@ -965,6 +1098,7 @@ void World::generate()
     carveCaveEntrances(); // t341：山坡洞口（carveCaves 之后 → 连通既有洞穴网络；先于地下水 → 洞口路径干净；先于填水
                           //   / 树 / 草 → 洞口刻在完整地表）。仅该列近表有真实洞穴 air 才开口 → 永不产孤立竖井。
     placeUndergroundWaterPools(); // t309：封闭地下水池（carveCaves / 入口之后；先于填水 → 地表海平面与地下水各自独立）。
+    placeLavaLakes(); // t343：地下封闭岩浆湖（Y<30；carveCaves 之后 → 湖独立于洞穴；先于填水 → 岩浆不与海水冲突）。
     carveCanyon(); // t342：大峡谷（caves/ores 之后 → 峡壁既有矿石层被 carve 暴露；先于填水 → 内陆干涸峡谷，
                    //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
@@ -1784,6 +1918,64 @@ void World::placeUndergroundWaterPools()
         }
     }
     qInfo() << "worldgen: underground water pools =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t343 地下岩浆湖（见 world.h 头注释）。机制等价 MC 1.0 地下岩浆湖：Y<30 封闭洞穴内的小型岩浆洼地。
+//   确定性散布（hashColumn + seed 偏移，PLAN §2-K），结构与 placeUndergroundWaterPools 同源（圆盘空腔 + 底层源 +
+//   上方气室），但填 Lava 源（state=0）且仅散布于 y < kLavaLakeMaxY(30) 的地下深处。空腔被周围实体岩封闭 →
+//   岩浆源无水平 air 邻居 → 稳态（tickLavaFlow 不扩散）；气室无天光 → 黑暗（仅岩浆自发光暖色，但本工程岩浆段
+//   走 NoLighting 材质非真光源，气室仍记为暗）。纯函数于 seed → 同 seed 同岩浆湖分布。
+void World::placeLavaLakes()
+{
+    constexpr int kPoolGrid      = 16;      // 候选网格间距（比水池略稀 → 岩浆湖更稀有）
+    constexpr unsigned kPoolPct  = 30u;     // 候选命中概率
+    constexpr int kBedrockTop    = 4;       // 不动基岩（同 carveCaves / placeBedrock）
+    constexpr int kAirAbove      = 2;       // 岩浆面之上的空气层数（形成「岩浆 + 气室」封闭空腔）
+
+    int placed = 0;
+    const int poolSeed = m_seed + 9309; // 岩浆湖哈希偏移（与其它 worldgen hashColumn 解耦）
+    for (int bx = kPoolGrid / 2; bx < m_width; bx += kPoolGrid) {
+        for (int bz = kPoolGrid / 2; bz < m_depth; bz += kPoolGrid) {
+            const quint32 r = hashColumn(poolSeed, bx, bz);
+            if ((r % 100u) >= kPoolPct) continue; // 概率筛选
+            const int span = kPoolGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3) continue; // 留 3 格边界
+            if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠岩浆湖（避免与海水柱冲突）
+            // 岩浆湖 y 范围：基岩之上 ~ kLavaLakeMaxY 之下（spec「Y<30」）。地下深处封闭洞穴。
+            const int yLo = kBedrockTop + 3;
+            const int yHi = kLavaLakeMaxY - 1;
+            if (yHi <= yLo) continue;
+            const int yRange = yHi - yLo + 1;
+            const int cy = yLo + int((r >> 9) & 0x1Fu) % yRange;
+            const int rad = 2 + int((r >> 14) & 1u); // 半径 2..3
+
+            // 挖圆盘空腔（disc × {底层岩浆源 + 上方 kAirAbove 层 air}）。仅覆盖 disc 范围；不触碰外部岩壁 → 天然封闭。
+            //   底层（cy）岩浆源；cy+1..cy+kAirAbove 空气（气室）；其上保留原岩（石顶）。空腔被周围实体岩包围 →
+            //   岩浆源水平邻居为岩浆（disc 内）或实体（disc 外）→ 无 air 邻居 → 不蔓延（tickLavaFlow 稳态）。
+            const int rad2 = rad * rad;
+            for (int dx = -rad; dx <= rad; ++dx) {
+                for (int dz = -rad; dz <= rad; ++dz) {
+                    if (dx * dx + dz * dz > rad2) continue; // 圆盘
+                    const int px = cx + dx, pz = cz + dz;
+                    const quint8 fb = m_chunks.blockAt(px, cy, pz);
+                    if (fb != BlockRegistry::Bedrock && fb != BlockRegistry::Lava)
+                        m_chunks.setBlock(px, cy, pz, BlockRegistry::Lava); // 底层岩浆源（覆盖 cave air/stone/ore，不动 bedrock/已有岩浆）
+                    for (int ay = 1; ay <= kAirAbove; ++ay) { // 岩浆面之上空气层（气室）；越界 / 基岩不动。
+                        const int yy = cy + ay;
+                        if (yy >= m_height) break;
+                        const quint8 ab = m_chunks.blockAt(px, yy, pz);
+                        if (ab == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(px, yy, pz, BlockRegistry::Air);
+                    }
+                }
+            }
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: underground lava lakes =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t309 地表小湖泊（见 world.h 头注释）。机制等价 MC 1.0 地表小湖泊 / 池塘：地表局部低洼处的浅水洼。

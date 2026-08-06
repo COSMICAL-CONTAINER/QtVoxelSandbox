@@ -140,6 +140,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   「金矿采下为原矿，须熔炉冶炼成金锭」）、dropCount=1、maxStack=64。各面贴图=gold_ore(41)（石头底 + 金黄斑簇）。
     //   音色归 GroupStone（石质）。worldgen 高度分层散布于深层 y∈[5,25]（金属族中最深、最稀有；spec「铜铁金按序更稀少」→ 金最稀有）。
     /* gold_ore     */ {int(BlockRegistry::GoldOre),                  41, 41, 41, 41, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,  0x21E,                              1, 64, "gold_ore",     "金矿石"},
+    // ── t343 岩浆（Lava）：机制等价 MC 1.0 岩浆（lava，主世界慢流体）。solid=false（不挡邻居面剔除 → 相邻地形仍画自己的面；
+    //   同 Water）、shape=ShapeNone（**无碰撞** → 玩家穿过；t344 着火扣血留后续）、**hardness=-1.0**（负值 → ToolRegistry::canMine
+    //   自动 false：任何模式/工具不可破，防创造秒破；同 bedrock / Water 哨兵语义）、toolType=NoTool / minTier=0、dropId=0 不掉落、
+    //   dropCount=0、maxStack=64（worldgen 专属，不进创造调色板 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。
+    //   各面贴图=lava(42)（深红橙底 + 亮黄橙鼓泡 + 白炽热点，原创自绘 §9a；纹理不透明，岩浆段材质 opacity≈0.95 近不透、NoLighting
+    //   暖色 baseColor 显自发光感）。音色归 GroupStone（石质兜底；岩浆专属 rumble 走 AudioManager lava 流声 proximity loop，非破块音）。
+    //   worldgen placeLavaLakes 在 Y<30 封闭洞穴散布岩浆湖；玩家铁桶舀/放（playercontroller 桶分支 + HitLava 射线）。
+    /* lava         */ {int(BlockRegistry::Lava),                     42, 42, 42, 42, false, BlockRegistry::ShapeNone,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "lava",          "岩浆"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -178,6 +186,7 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* wood_door      */ 64,  /* wood_trapdoor  */ 96,  /* water          */ 8,   /* chest          */ 54,
     /* farmland       */ 60,  /* tall_grass     */ 31,  /* wheat_crop     */ 59,  /* diamond_ore    */ 56,
     /* wool           */ 35,  /* sapling        */ 6,   /* copper_ore     */ -1,  /* gold_ore       */ 14,
+    /* lava           */ 10,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");

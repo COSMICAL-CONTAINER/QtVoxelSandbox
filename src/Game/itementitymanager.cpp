@@ -136,6 +136,15 @@ void ItemEntityManager::tick(qreal dt, World *world)
         if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过（防越界误判）
 
         const int cy = qFloor(e.pos.y());
+        // t343 掉落物丢入岩浆被摧毁（spec「Q 键物品丢岩浆→摧毁」）：实体中心格 == Lava → 焚毁释放该槽。
+        //   机制等价 MC 1.0 掉落物接触岩浆 / 火即消失。releaseSlot 标 alive=false（slot-reuse，同拾取路径），
+        //   本迭代即结束（continue）；末尾 dirty=true 触发 emit entitiesChanged → QML delegate 隐藏。
+        if (cy >= 0 && world->blockAt(cx, cy, cz) == BlockRegistry::Lava) {
+            const int idx = int(&e - &m_entities.front());
+            releaseSlot(idx);
+            dirty = true;
+            continue;
+        }
         const bool inWater = (cy >= 0 && world->blockAt(cx, cy, cz) == BlockRegistry::Water);
         // t271 瀑布：水格下方为空气 = 水柱下落 → 不上浮（随水柱下沉，落入下方水池后转浮水）。
         const bool waterfall = inWater

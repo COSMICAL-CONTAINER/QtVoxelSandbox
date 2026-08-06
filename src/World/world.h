@@ -141,6 +141,20 @@ public:
     //   使中线格 = min(两源距)，多 tick 收敛为 V 形平滑）。MC level 语义 = min(源到该格曼哈顿距离)，两流相遇
     //   天然平滑无硬边界。worldgen 海/湖全为水源 → 稳态零变化；玩家单桶水仅 1 源邻居 → 不升源（同 MC）。
     Q_INVOKABLE void tickWaterFlow();
+    // t343 岩浆流 tick（spec「岩浆慢流（比水慢）」；机制等价 MC 1.0 主世界岩浆——比水慢 ~30 倍、扩散距离更短、
+    //   **无源再生**）。由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到
+    //   ~每 kLavaFlowTickInterval×0.1s 把波前推进 1 格 = ~3s/格，对比水 0.3s/格）。算法同 tickWaterFlow 的增量波前
+    //   （快照 → 蒸发 → 扩散 → 应用），但：(a) 节流更慢（kLavaFlowTickInterval=30 vs 水 3）；(b) 扩散距离更短
+    //   （kMaxLavaFlowLevel=3 vs 水 7）；(c) **无源再生 pass**（MC 1.0 主世界岩浆不形成无限源——两源相夹不升源，
+    //   岩浆源被舀即永久消失）。下落（下方 air）→ 流岩浆 state=1；grounded（下方实体）→ 水平蔓延 state+1（≤3）；
+    //   流岩浆失支撑 → 逐环凝固退场。稳态（worldgen 全源岩浆湖）每 tick 无变化 → setWaterSilent 全 false → 零重建。
+    //   写入复用 setWaterSilent（**通用静默 state 写入口**——名字历史遗留 water-first，实现支持任意 id+state；岩浆
+    //   蔓延 / 凝固是系统模拟非玩家动作，静默写避免发 broken/placed 噪音，机制等价 MC 岩浆流动无破/放反馈）。
+    //   **末尾 ignite pass**（spec「木质方块邻岩浆概率着火焚毁」）：遍历本 tick 的岩浆格，扫水平 + 上下 6 邻，
+    //   木类方块（Log/Planks/CraftingTable/Leaves/WoodSlab/Stairs/Fence/Plate/Door/Trapdoor/Chest）按确定性散布概率
+    //   hashVoxel + 窗口序号 点燃焚毁（setBlock Air，发 blockBroken 触发破块粒子 / 音）。t344 完整着火系统（玩家扣血 /
+    //   屏覆盖 / 熟肉掉落）留后续；本任务仅「邻岩浆木类概率焚毁」。
+    Q_INVOKABLE void tickLavaFlow();
     // t236 小麦作物生长 tick（spec「WorldClock tick 推进成长 随机/timed」）：由呈现层 Main.qml 经
     //   WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kCropTickInterval×0.1s 做一次成长判定）。
     //   机制等价 MC 1.0 小麦生长：作物在耕地方块上、头顶光照足（skyLight ≥ kCropMinLight）时按**确定性散布概率**
@@ -315,6 +329,12 @@ private:
     //   （tickWaterFlow 不扩散）；气室无天光 → 黑暗（机制等价 MC 1.0 地下水湖 / 封闭水洼）。纯函数于 seed
     //   （hashColumn）→ 同 seed 同水池分布（PLAN §2-K）。
     void placeUndergroundWaterPools();
+    // t343 地下岩浆湖（spec「Y<30 随机封闭岩浆湖」；机制等价 MC 1.0 地下岩浆湖）：carveCaves /
+    //   carveCaveEntrances 之后、fillWater 之前，地下深处（y < kLavaLakeMaxY=30）确定性散布小型封闭岩浆湖——
+    //   carve 一个小椭球空腔（air 气室）+ 底层铺一层岩浆源（state=0），形成「封闭洞穴岩浆湖」。空腔被周围实体
+    //   岩石天然封闭 → 岩浆源无水平 air 邻居可蔓延 → 稳态（tickLavaFlow 不扩散）；气室无天光 → 黑暗（机制等价
+    //   MC 1.0 地下岩浆湖 / 封闭熔岩洼地）。纯函数于 seed（hashColumn）→ 同 seed 同岩浆湖分布（PLAN §2-K）。
+    void placeLavaLakes();
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
     //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
     //   （surfaceY-1 / surfaceY-2 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶 -1，
@@ -356,6 +376,17 @@ private:
     int m_flowTickCounter = 0;
     static constexpr int kFlowTickInterval = 3;   // tickWaterFlow 节流间隔（WorldClock tick 单位 = 100ms → 0.3s/格）
     static constexpr int kMaxFlowLevel = 7;       // 水流最大蔓延等级（state 1..7；机制等价 MC 1.0 流水 7 格扩散）
+    // t343 岩浆流 tick 节流计数 + 常量：tickLavaFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到
+    //   kLavaFlowTickInterval 才把波前推进 1 格（~3s/格 → MC 主世界岩浆比水慢约 30 倍的可见缓慢流动）。
+    //   kLavaFlowTickInterval=30（3s/格）+ kMaxLavaFlowLevel=3（最大 3 格水平扩散，vs 水 7）→ 岩浆流短而慢，
+    //   机制等价 MC 1.0 主世界岩浆（Nether 岩浆与水同速，本工程仅主世界故取慢）。岩浆**无源再生**
+    //   （MC 1.0 主世界岩浆不形成无限源）。
+    int m_lavaFlowTickCounter = 0;
+    int m_lavaIgniteIndex = 0; // ignite pass 窗口序号（喂 hashVoxel 散布概率 → 不同窗口不同木块错峰焚毁）
+    static constexpr int kLavaFlowTickInterval = 30; // tickLavaFlow 节流间隔（WorldClock tick 单位 = 100ms → 3s/格）
+    static constexpr int kMaxLavaFlowLevel    = 3;   // 岩浆流最大蔓延等级（state 1..3；MC 1.0 主世界岩浆 3 格扩散）
+    static constexpr int kLavaIgnitePct       = 8;   // 邻岩浆木类每窗焚毁概率（%；8% → 平均 ~37s 焚毁，可见可验收）
+    static constexpr int kLavaLakeMaxY        = 30;  // 岩浆湖最高 y（spec「Y<30」；仅地下深处）
     // t236 小麦作物生长 tick 节流计数 + 常量：tickCropGrowth() 每 100ms 被 WorldClock.ticked 调一次；
     //   累积到 kCropTickInterval 才做一次成长判定（~每 kCropTickInterval×0.1s 一窗）。窗口序号 m_cropIntervalIndex
     //   每窗 +1，喂入 hashVoxel 散布概率 → 不同窗口不同作物错峰升阶段（防全部同步生长的机械感）。

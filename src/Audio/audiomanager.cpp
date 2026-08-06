@@ -140,6 +140,14 @@ struct AudioManager::Data
     // 水流声基础音量系数（t328：合成已峰值归一化到满刻度，故 base 提到 0.35 保明显可闻的近水声，
     //   仍低于前景 SFX；乘 m_volume 与 waterFlowLevel 得最终音量）。
     static constexpr float kWaterFlowBaseVol = 0.35f;
+    // t343 岩浆声单件（长循环低频 rumble + 气泡；looping=true，startLavaFlow/stopLavaFlow 控开关，
+    //   setLavaFlowLevel 据 PlayerController.lavaSoundLevel 调强度）。近岩浆启动、远离停止。
+    //   lava.wav 程序合成（build_sounds.py gen_lava：低频隆隆床 + 中频气泡瞬态 + 偶发深爆裂，§9 原创）。
+    Clip lavaFlowClip{":/sounds/lava.wav"};
+    bool lavaFlowPlaying = false;
+    float lavaFlowLevel = 1.0f;
+    // 岩浆声基础音量系数（同水流声 base 量级；乘 m_volume 与 lavaFlowLevel 得最终音量）。
+    static constexpr float kLavaFlowBaseVol = 0.40f;
     // t269 水中走路声单件（玩家脚位在水中迈步时播；不分材质，水下听感统一闷浊）。短 SFX（~0.16s），
     //   默认 2s maxFrames 远大于其长度、安全。
     Clip waterStepClip{":/sounds/water_step.wav"};
@@ -228,6 +236,11 @@ struct AudioManager::Data
     {
         return masterVolume * kWaterFlowBaseVol * waterFlowLevel;
     }
+    // t343 岩浆声最终音量 = master × base × level（level 由玩家到最近岩浆格的距离映射，近=1/远→0）。
+    float lavaFlowVol(float masterVolume) const
+    {
+        return masterVolume * kLavaFlowBaseVol * lavaFlowLevel;
+    }
 };
 
 AudioManager::AudioManager(QObject *parent)
@@ -276,6 +289,8 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->ambientClip, ma_uint64(Data::kSampleRate) * 16);
     // t223 水流声同为 8.0s 长循环（首末淡化无缝），maxFrames 放宽到 16s 保完整解码（同 ambient_wind 教训）。
     d->loadClip(d->waterFlowClip, ma_uint64(Data::kSampleRate) * 16);
+    // t343 岩浆声长循环（低频 rumble + 气泡，首末淡化无缝），maxFrames 放宽到 16s 保完整解码（同上教训）。
+    d->loadClip(d->lavaFlowClip, ma_uint64(Data::kSampleRate) * 16);
     // t269 水中走路声短 SFX（~0.16s），默认 2s maxFrames 远大于其长度。
     d->loadClip(d->waterStepClip);
     // t328 UI click 短 SFX（~0.05s），默认 maxFrames 远大于其长度。
@@ -292,6 +307,7 @@ AudioManager::AudioManager(QObject *parent)
         d->initSound(d->mobIdleClips[i]);
     d->initSound(d->ambientClip);
     d->initSound(d->waterFlowClip);
+    d->initSound(d->lavaFlowClip);
     d->initSound(d->waterStepClip);
     d->initSound(d->uiClickClip);
     // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
@@ -303,6 +319,11 @@ AudioManager::AudioManager(QObject *parent)
     if (d->engineOk && d->waterFlowClip.ok) {
         ma_sound_set_looping(&d->waterFlowClip.sound, MA_TRUE);
         ma_sound_set_volume(&d->waterFlowClip.sound, d->waterFlowVol(m_volume));
+    }
+    // t343 岩浆声：sound init 成功后置循环 + 初始音量（startLavaFlow 才 start；由 proximity 扫描驱动）。
+    if (d->engineOk && d->lavaFlowClip.ok) {
+        ma_sound_set_looping(&d->lavaFlowClip.sound, MA_TRUE);
+        ma_sound_set_volume(&d->lavaFlowClip.sound, d->lavaFlowVol(m_volume));
     }
 
     qCInfo(lcAudio).nospace().noquote()
@@ -325,6 +346,7 @@ AudioManager::AudioManager(QObject *parent)
         << "/" << d->mobIdleClips[6].ok << "/" << d->mobIdleClips[7].ok
         << " ambient_wind=" << d->ambientClip.ok
         << " water_flow=" << d->waterFlowClip.ok
+        << " lava=" << d->lavaFlowClip.ok
         << " water_step=" << d->waterStepClip.ok
         << " ui_click=" << d->uiClickClip.ok;
 }
@@ -351,6 +373,7 @@ AudioManager::~AudioManager()
         if (d->mobIdleClips[i].ok) ma_sound_uninit(&d->mobIdleClips[i].sound);
     if (d->ambientClip.ok) ma_sound_uninit(&d->ambientClip.sound);
     if (d->waterFlowClip.ok) ma_sound_uninit(&d->waterFlowClip.sound);
+    if (d->lavaFlowClip.ok) ma_sound_uninit(&d->lavaFlowClip.sound);
     if (d->waterStepClip.ok) ma_sound_uninit(&d->waterStepClip.sound);
     if (d->uiClickClip.ok) ma_sound_uninit(&d->uiClickClip.sound);
     ma_engine_uninit(&d->engine);
@@ -533,6 +556,37 @@ void AudioManager::setWaterFlowLevel(float level)
         ma_sound_set_volume(&d->waterFlowClip.sound, d->waterFlowVol(m_volume));
 }
 
+// t343 岩浆声（机制同水流声 startWaterFlow/stopWaterFlow/setWaterFlowLevel，由 PlayerController.lavaSoundLevel
+//   proximity 驱动）。幂等；降级（engine / clip 失败）静默早退（§2-E）。
+void AudioManager::startLavaFlow()
+{
+    if (!d->engineOk || !d->lavaFlowClip.ok || d->lavaFlowPlaying) return;
+    ma_sound_set_volume(&d->lavaFlowClip.sound, d->lavaFlowVol(m_volume));
+    if (ma_sound_start(&d->lavaFlowClip.sound) != MA_SUCCESS) {
+        qCWarning(lcAudio) << "lava sound start 失败（岩浆声降级）";
+        return;
+    }
+    d->lavaFlowPlaying = true;
+}
+
+void AudioManager::stopLavaFlow()
+{
+    if (!d->engineOk || !d->lavaFlowClip.ok || !d->lavaFlowPlaying) return;
+    ma_sound_stop(&d->lavaFlowClip.sound);
+    ma_sound_seek_to_pcm_frame(&d->lavaFlowClip.sound, 0);
+    d->lavaFlowPlaying = false;
+}
+
+void AudioManager::setLavaFlowLevel(float level)
+{
+    if (level < 0.0f) level = 0.0f;
+    if (level > 1.0f) level = 1.0f;
+    if (qFuzzyCompare(level, d->lavaFlowLevel)) return;
+    d->lavaFlowLevel = level;
+    if (d->engineOk && d->lavaFlowClip.ok && d->lavaFlowPlaying)
+        ma_sound_set_volume(&d->lavaFlowClip.sound, d->lavaFlowVol(m_volume));
+}
+
 void AudioManager::setVolume(float v)
 {
     if (v < 0.0f) v = 0.0f;
@@ -546,4 +600,7 @@ void AudioManager::setVolume(float v)
     // t223：水流声同为持续 looping 声，master 音量变后须即时同步。
     if (d->engineOk && d->waterFlowClip.ok && d->waterFlowPlaying)
         ma_sound_set_volume(&d->waterFlowClip.sound, d->waterFlowVol(m_volume));
+    // t343：岩浆声同为持续 looping 声，master 音量变后须即时同步。
+    if (d->engineOk && d->lavaFlowClip.ok && d->lavaFlowPlaying)
+        ma_sound_set_volume(&d->lavaFlowClip.sound, d->lavaFlowVol(m_volume));
 }

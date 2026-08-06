@@ -182,7 +182,23 @@ public:
                                   //   cutout 透明底）。音色归 GroupGrass（软草音，同草丛 / 作物）。**树苗物品由树叶衰减 / 玩家破叶掉落**
                                   //   （playercontroller dropLeafDrops：破叶概率掉树苗物品 + 木棒）。**不**进方块创造调色板（树苗经
                                   //   物品种植、非玩家常规放置；创造调色板取树苗**物品**便于测试，见 creativeMaterials）。
-        Count         = 31, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Lava           = 31, // 岩浆（t343）：机制等价 MC 1.0 岩浆（lava）——**比水慢得多**的流体（tickLavaFlow 节流 ~3s/格 vs 水 0.3s/格；
+                                  //   更短扩散距离 kMaxLavaFlowLevel=3 vs 水 7；**无源再生**——MC 1.0 主世界岩浆不形成无限源）。
+                                  //   solid=false（不挡邻居面剔除 → 相邻地形仍画自己的面；同 Water）、shape=ShapeNone（**无碰撞** → 玩家穿过；
+                                  //   t344 着火扣血留后续）、**hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，防创造秒破；同
+                                  //   bedrock / Water 哨兵语义）、dropId=0 不掉落、dropCount=0、maxStack=64（worldgen 专属，不进创造调色板 /
+                                  //   不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图=lava(42)（深红橙底 + 亮黄橙鼓泡 + 白炽热点，
+                                  //   原创自绘 §9a；纹理不透明，岩浆段材质 opacity≈0.95 近不透、NoLighting 暖色 baseColor 显自发光感）。
+                                  //   **t343 岩浆 state 编码**（复用 chunk m_states 并行数组；与水 state 同存储语义）：
+                                  //     state 0 = 岩浆源（worldgen 填 / 玩家铁桶倒；源被舀即消失，无再生）
+                                  //     state 1..3 = 流岩浆（距源的蔓延距离；MC 式扩散，最大 3 格水平距离）。
+                                  //   World::tickLavaFlow() 每 ~3s 把波前推进 1 格（机制等价 MC 主世界岩浆 ~30 倍水速差）：源 / 流 grounded
+                                  //   （下方实体）→ 水平蔓延 state+1（≤3）；悬崖（下方 air）→ 下落为流岩浆 state=1；流岩浆失支撑 → 逐环凝固退场。
+                                  //   worldgen placeLavaLakes 在 Y<30 封闭洞穴散布小型岩浆湖（圆盘源 + 上方气室，周围石壁封闭 → 稳态不蔓延）。
+                                  //   **t343 交互**：(a) 铁桶舀 / 放（playercontroller 桶分支 + HitLava 射线）；(b) 木质方块邻岩浆概率着火焚毁
+                                  //   （tickLavaFlow 末 ignite pass：Log/Planks/CraftingTable/Leaves 等木类 + 概率 setBlock Air）；(c) 掉落物丢入
+                                  //   岩浆被摧毁（ItemEntityManager tick 检中心格 == Lava → releaseSlot）。不进创造调色板（worldgen / 桶交互获得）。
+        Count         = 32, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
@@ -433,7 +449,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 42;
+    static constexpr int AtlasTileCount = 43;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
