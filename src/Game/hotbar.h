@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "armor.h"        // t345 护甲段 id + 属性（ArmorRegistry；护甲槽 / 减伤 / 图标走它）
 #include "blockregistry.h" // 物品 id（方块段 0..Count-1；图标/中文名走单一注册表）
 #include "recipe.h"        // 材料段 id（>=0x200，t50 木棒）；nameForBlock 材料段查 RecipeRegistry::StickId
 #include "smelting.h"      // t87 冶炼 / 燃料判定（smeltResult / fuelBurnSeconds 桥接到 QML）
@@ -86,6 +87,14 @@ class Hotbar : public QObject
     // 三菜单 delegate 触碰刷新（同 hotbar 行 slotRevision 模式）；mainCount CONSTANT=27 供 Repeater model。
     Q_PROPERTY(int mainCount READ mainCount CONSTANT)
     Q_PROPERTY(int mainRevision READ mainRevision NOTIFY mainSlotsChanged)
+    // t345 护甲槽 VM（4 槽：头 / 胸 / 腿 / 脚，生存背包左上装备栏；三菜单不共享护甲 —— 护甲只属玩家自身，
+    //   非主栏物品流，故独立 4 槽而非走 m_mainSlots）。armorRevision NOTIFY 驱动 SurvivalInventory 装备栏
+    //   delegate 触碰刷新（同 hotbar / main 行 revision 模式）；armorCount CONSTANT=4 供 Repeater model。
+    //   totalArmorPoints = 4 装备槽护甲值之和（0..20），驱动 Main.qml 护甲条 + 减伤（spec「icons filling
+    //   with total armor」+「armor reduces incoming damage by its armor value」）。
+    Q_PROPERTY(int armorCount READ armorCount CONSTANT)
+    Q_PROPERTY(int armorRevision READ armorRevision NOTIFY armorSlotsChanged)
+    Q_PROPERTY(int totalArmorPoints READ totalArmorPoints NOTIFY armorSlotsChanged)
 
 public:
     explicit Hotbar(QObject *parent = nullptr);
@@ -109,6 +118,11 @@ public:
     int mainCount() const { return int(m_mainSlots.size()); }
     int mainRevision() const { return m_mainRevision; }
 
+    // t345 护甲槽 VM。armorCount 恒 4；armorRevision 随护甲栈写入自增；totalArmorPoints = 4 装备槽护甲值之和。
+    int armorCount() const { return int(m_armorSlots.size()); }
+    int armorRevision() const { return m_armorRevision; }
+    int totalArmorPoints() const;
+
     // 工具段判定与属性（t33；供 QML delegate 据 isTool 选方块 Image vs ToolIcon Canvas 自绘）：
     //   - isTool(id)：id 是否工具段（>=0x100）。
     //   - toolTier(id)：工具等级（1=木 2=石 3=铁；0=非工具）。ToolIcon.qml 据 tier 着色工具头。
@@ -124,8 +138,9 @@ public:
     // 由 recipe.h RecipeRegistry::*Id 命名常量定义）。材料段与方块段分离 —— 非方块不可右键放置
     // （与工具段同为非方块调色板项），玩家据需取用到 hotbar 槽（合成 / 冶炼原料 / 装饰）。
     Q_INVOKABLE QVariantList creativeMaterials() const;
-    // 材料段判定（t50：合成产物木棒等，id >= RecipeRegistry::MaterialIdBase=0x200）。供 QML delegate
-    // 据 isMaterial 切到材料图标 Canvas 自绘（细长棕色矩形 = 木棒）。与 isTool 互斥（材料段 > 工具段上界）。
+    // 材料段判定（t50：合成产物木棒等，id >= RecipeRegistry::MaterialIdBase=0x200；**含 t345 护甲段** 0x300..）。
+    //   供 QML delegate 据 isMaterial 切到材料图标 Canvas 自绘。isMaterial 在全工程是「非方块非工具 → QML 自绘
+    //   MaterialIcon」的渲染路由谓词；护甲同属此类 → 亦走 MaterialIcon。与 isTool 互斥（材料段 > 工具段上界）。
     Q_INVOKABLE bool isMaterial(int itemId) const;
     // t219 不完整方块段判定：id 是否异形方块段 [FirstPartial, LastPartial]（木板台阶 / 楼梯 / 栅栏 /
     //   压力板 / 门 / 活板门）。供 QML 手持 / 掉落贴图据此切 BlockCube（整立方，6 面图集）vs BillboardQuad
@@ -133,6 +148,15 @@ public:
     //   **闭区间** [FirstPartial, LastPartial]（lessons-learned t194：单边 >= FirstPartial 会误路由段后整立方
     //   如 Chest(22) 进异形路径）。机制等价 MC「不完整方块手持 / 掉落显其立体图标」。
     Q_INVOKABLE bool isPartialBlock(int itemId) const;
+    // t345 护甲段判定（id 在护甲段 [ArmorIdBase, ArmorIdEnd) 内）。与 isTool / isMaterial 互斥（护甲段在
+    //   材料段之上 0x300）。供 QML delegate 据 isArmor 切到护甲自绘图标 + 装备槽校验「部位匹配」。
+    Q_INVOKABLE bool isArmor(int itemId) const;
+    // t345 护甲部位 / 材质档 / 单件护甲值 / 最大耐久（透传 ArmorRegistry；非护甲 → 0/-1）。QML 装备槽点击
+    //   校验「持物部位 == 槽位部位」+ tooltip 显护甲值 + 创造取件初始化耐久用。
+    Q_INVOKABLE int armorPiece(int itemId) const;     // ArmorRegistry::ArmorPiece（0 头盔..3 靴子）；非护甲 -1
+    Q_INVOKABLE int armorTier(int itemId) const;      // ArmorRegistry::ArmorTier（0 皮革..4 钻石）；非护甲 -1
+    Q_INVOKABLE int armorPointsFor(int itemId) const; // 单件护甲值；非护甲 0
+    Q_INVOKABLE int armorMaxDurability(int itemId) const; // 单件最大耐久；非护甲 0
 
     // 每槽物品 id（air=0 即空栈）。越界返回 0。兼容旧消费者（player.selectedBlock 绑定 / 背包 swap）。
     Q_INVOKABLE int blockIdAt(int slot) const;
@@ -234,6 +258,23 @@ public:
     //   durability（t263）：同 addStack（-1=自动 / >=0=显式保真，掉落物拾取场景）。
     Q_INVOKABLE int addToAny(int id, int n, int durability = -1);
 
+    // ── t345 护甲槽 VM（4 槽：头 / 胸 / 腿 / 脚）── 玩家自身装备（非物品流，独立 4 槽）。
+    //   - armorBlockIdAt(slot) / armorCountAt(slot) / armorDurabilityAt(slot)：每装备槽栈数据（air=0=空；越界返 0）。
+    //     QML 装备栏 delegate 触碰 armorRevision 取最新值（同 hotbar / main 行 revision 模式）。
+    //   - armorSetStack(slot, id, count, durability)：直接写装备槽（装备 / 脱下用）。校验：slot 范围 + id 须为
+    //     护甲段（或 0=清空）+ 部位须匹配该槽（头盔槽只接头盔，MC 行为）+ count 钳 1（护甲不可堆叠）。
+    //     非护甲 / 部位不符 → no-op（不改槽、不发信号）；id==0 → 清空该槽（脱下）。
+    //   - totalArmorPoints()：4 装备槽护甲值之和（0..20）；Q_PROPERTY 暴露 + 减伤比例算（armorReductionFactor）。
+    //   - damageArmor()：受击时每件装备 -1 耐久（spec「degrades on hits」）；归零 → 清空该槽（破损消失）。
+    //     由 Main.qml 在 takeDamage 路由后调（每受一次击 4 件各 -1，机制等价 MC 护甲耐久损耗）。
+    //   - creativeArmor()：创造调色板护甲段（5 套 × 4 部位 = 20 件；拾取即满耐久单件，供测试 / 直接装备）。
+    Q_INVOKABLE int armorBlockIdAt(int slot) const;
+    Q_INVOKABLE int armorCountAt(int slot) const;
+    Q_INVOKABLE int armorDurabilityAt(int slot) const;
+    Q_INVOKABLE void armorSetStack(int slot, int id, int count, int durability = -1);
+    Q_INVOKABLE QVariantList creativeArmor() const;
+    Q_INVOKABLE void damageArmor();
+
 signals:
     void selectedSlotChanged();
     // 槽内容变更（setStack/addStack/takeStack/resetForMode）。同时驱动 slotRevision 自增 → QML model
@@ -248,6 +289,12 @@ signals:
     // t97 主栏栈变更（mainSetStack / mainAddStack / addToAny 的 main 分支 / resetForMode）。同时驱动
     // mainRevision 自增 → 三菜单 delegate 触碰 mainRevision 的绑定重算（图标 / 数量同步刷新）。
     void mainSlotsChanged();
+    // t345 护甲槽栈变更（armorSetStack / damageArmor / resetForMode）。同时驱动 armorRevision 自增 +
+    // totalArmorPoints 重算 → SurvivalInventory 装备栏 delegate + Main.qml 护甲条 / 减伤刷新。
+    void armorSlotsChanged();
+    // t345 护甲耐久归零破损（damageArmor 归零分支 emit）。itemId = 破损护甲 id（槽位清空在 emit 前完成）。
+    //   呈现层可据此播破损音（机制等价 MC 护甲耗尽破损声；当前复用 toolBreak 音，未来按材质分流）。
+    void armorBroken(int itemId);
 
 private:
     // 9 槽物品栈。t49：构造期全空（创造物品改由调色板点取→放入 hotbar 槽；不再预置 8 满栈）。
@@ -260,8 +307,14 @@ private:
     std::vector<ItemStack> m_mainSlots;
     int m_mainRevision = 0;   // 主栏内容版本号：每次主栏栈写入自增，供三菜单 delegate 绑定作 NOTIFY 触发器
 
+    // t345 护甲槽 VM（4 槽：玩家自身装备，非物品流）。构造期全空；slot 0=头盔 1=胸甲 2=护腿 3=靴子
+    //   （与 SurvivalInventory 装备栏纵向序 + ArmorRegistry::ArmorPiece 同序）。
+    std::vector<ItemStack> m_armorSlots;
+    int m_armorRevision = 0;  // 护甲内容版本号：每次护甲栈写入自增，供装备栏 / 护甲条 / 减伤绑定作 NOTIFY 触发器
+
     void bumpRevision();      // ++m_slotRevision + emit slotsChanged（统一 hotbar 9 槽内容变更通知）
     void bumpMainRevision();  // ++m_mainRevision + emit mainSlotsChanged（统一主栏 27 槽内容变更通知）
+    void bumpArmorRevision(); // ++m_armorRevision + emit armorSlotsChanged（统一护甲 4 槽内容变更通知）
 };
 
 #endif // HOTBAR_H

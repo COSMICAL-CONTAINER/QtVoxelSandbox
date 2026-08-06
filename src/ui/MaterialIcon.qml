@@ -830,6 +830,55 @@ Item {
             }
 
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
+            // t345 护甲段（0x300..0x313，5 套材质 × 4 部位 = 20 件）。按 tier（配色）+ piece（形状）派生绘制，
+            //   不为每件写独立 case（20 件 × 像素图过冗；tier/piece 两维即足够区分：皮革棕 / 铁银 / 铜橙 /
+            //   金黄 / 钻石青 × 头盔圆穹 / 胸甲肩躯 / 护腿双腿 / 靴子双靴）。机制等价 MC 1.0 护甲图标族
+            //   （§9 override (a) 纯原创自绘，非 MC GUI PNG）。
+            const drawArmor = () => {
+                const aid   = root.materialId - 0x300        // 0..19（护甲段内偏移）
+                const piece = aid % 4                          // 0=头盔 1=胸甲 2=护腿 3=靴子
+                const tier  = Math.floor(aid / 4)              // 0=皮革 1=铁 2=铜 3=金 4=钻石
+                // 配色（按 tier 选 base / 亮 / 暗 三色）。皮革暖棕、金属银、铜橙、金黄、钻石青。
+                const palettes = [
+                    ["#8a5a2b", "#a87340", "#5e3d1c"], // 皮革 leather
+                    ["#d8d8d8", "#f0f0f0", "#9a9a9a"], // 铁 iron
+                    ["#c87850", "#e0966a", "#8a4f30"], // 铜 copper
+                    ["#fad840", "#fff080", "#b89820"], // 金 gold
+                    ["#4ee0c8", "#8af0e0", "#2a9886"], // 钻石 diamond
+                ]
+                const [base, light, dark] = palettes[tier] || palettes[0]
+                if (piece === 0) {            // 头盔：帽檐 + 圆穹头罩 + 面罩缝
+                    R(5, 6, 14, 2, base)      // 帽檐
+                    R(7, 8, 10, 7, base)      // 头罩主体
+                    R(7, 8, 10, 1, light)     // 顶受光
+                    R(5, 6, 14, 1, light)     // 帽檐受光
+                    R(7, 14, 10, 1, dark)     // 底阴影
+                    R(9, 10, 6, 3, dark)      // 面罩缝（镂空感）
+                } else if (piece === 1) {     // 胸甲：肩 + 躯干 + 中线
+                    R(5, 6, 14, 3, base)      // 肩
+                    R(6, 9, 12, 9, base)      // 躯干
+                    R(5, 6, 14, 1, light)     // 肩受光
+                    R(6, 9, 12, 1, light)     // 躯干顶受光
+                    R(6, 17, 12, 1, dark)     // 底阴影
+                    R(11, 9, 2, 9, dark)      // 中线（左右甲片分缝）
+                } else if (piece === 2) {     // 护腿：腰 + 左右两腿
+                    R(6, 6, 12, 3, base)      // 腰带
+                    R(6, 6, 12, 1, light)     // 腰受光
+                    R(6, 9, 5, 9, base)       // 左腿
+                    R(13, 9, 5, 9, base)      // 右腿
+                    R(6, 17, 5, 1, dark)      // 左腿底阴影
+                    R(13, 17, 5, 1, dark)     // 右腿底阴影
+                } else {                      // 靴子：左右两靴筒 + 鞋底
+                    R(5, 9, 6, 8, base)       // 左靴筒
+                    R(13, 9, 6, 8, base)      // 右靴筒
+                    R(5, 9, 6, 1, light)      // 左靴顶受光
+                    R(13, 9, 6, 1, light)     // 右靴顶受光
+                    R(3, 16, 10, 2, dark)     // 鞋底（横向加深，连两靴）
+                }
+            }
+            // 护甲段范围前置分支（避免为 20 个 id 各写 case；范围 [0x300, 0x314)）。
+            if (root.materialId >= 0x300 && root.materialId < 0x314) { drawArmor(); return }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break

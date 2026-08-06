@@ -111,6 +111,10 @@ qt_add_executable(voxelsandbox
     src/Game/raycast.h
     src/Game/recipe.cpp
     src/Game/recipe.h
+    # t345 护甲注册表（Game 层）：5 套材质 × 4 部位 = 20 件护甲的护甲值 / 耐久 / 名（机制等价 MC 1.0 护甲）。
+    #   纯静态数据表（同 ToolRegistry 模式）；id 段定义在 recipe.h（ArmorIdBase=0x300）。减伤 / 装备槽 / 图标走它。
+    src/Game/armor.cpp
+    src/Game/armor.h
     src/Game/smelting.cpp
     src/Game/smelting.h
     # t173/t179 箱子内容存储 VM（Game 层）：按方块世界坐标键控的 27 槽物品内容；ChestUI 读写 + 破箱清孤儿。

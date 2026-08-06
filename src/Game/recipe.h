@@ -157,6 +157,38 @@ public:
     static constexpr int CookedPorkchopId = 0x221; // 熟猪排：猪燃烧致死掉落（机制等价 MC 1.0 cooked porkchop）
     static constexpr int CookedBeefId     = 0x222; // 熟牛肉：牛燃烧致死掉落（机制等价 MC 1.0 cooked beef / steak）
     static constexpr int CookedMuttonId   = 0x223; // 熟羊肉：羊燃烧致死掉落（机制等价 MC cooked mutton；§9 区隔改名）
+    // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
+    //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
+    //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。
+    //   **不可堆叠**（Hotbar::maxStackSize 对护甲段返 1，同工具段语义 —— 每件独立耐久）。与材料段（0x200..）/
+    //   工具段（0x100..）三段互斥：Hotbar::isMaterial 对护甲段返 false（防误判为可堆叠材料）；图标渲染走
+    //   MaterialIcon（护甲段 case，因护甲「非方块非工具 → QML 自绘」同材料段）。
+    //   行序 = tier 主序 × piece 次序（皮革 4 → 铁 4 → 铜 4 → 金 4 → 钻石 4）；与 armor.cpp kArmors 表行序严格
+    //   一致（static_assert 钉死）。合成产物 = 各材质锭 / 皮革（材料段）经工作台 3×3 有序配方（recipe.cpp）。
+    //   皮革来源：杀牛掉落 LeatherId（0x20D，t242）→ 皮革护甲配方原料（spec「LEATHER comes from cow drops」）。
+    static constexpr int ArmorIdBase      = 0x300;
+    static constexpr int LeatherHelmet     = 0x300; // 皮革头盔（护甲 1 / 耐久 55）
+    static constexpr int LeatherChestplate = 0x301; // 皮革胸甲（护甲 3 / 耐久 80）
+    static constexpr int LeatherLeggings   = 0x302; // 皮革护腿（护甲 2 / 耐久 75）
+    static constexpr int LeatherBoots      = 0x303; // 皮革靴子（护甲 1 / 耐久 65）
+    static constexpr int IronHelmet        = 0x304; // 铁头盔（护甲 2 / 耐久 165）
+    static constexpr int IronChestplate    = 0x305; // 铁胸甲（护甲 6 / 耐久 240）
+    static constexpr int IronLeggings      = 0x306; // 铁护腿（护甲 5 / 耐久 225）
+    static constexpr int IronBoots         = 0x307; // 铁靴子（护甲 2 / 耐久 195）
+    static constexpr int CopperHelmet      = 0x308; // 铜头盔（护甲 2 / 耐久 110；MC 1.0 无铜护甲，自定）
+    static constexpr int CopperChestplate  = 0x309; // 铜胸甲（护甲 4 / 耐久 160）
+    static constexpr int CopperLeggings    = 0x30A; // 铜护腿（护甲 3 / 耐久 150）
+    static constexpr int CopperBoots       = 0x30B; // 铜靴子（护甲 1 / 耐久 130）
+    static constexpr int GoldHelmet        = 0x30C; // 金头盔（护甲 2 / 耐久 77）
+    static constexpr int GoldChestplate    = 0x30D; // 金胸甲（护甲 5 / 耐久 112）
+    static constexpr int GoldLeggings      = 0x30E; // 金护腿（护甲 3 / 耐久 105）
+    static constexpr int GoldBoots         = 0x30F; // 金靴子（护甲 1 / 耐久 96）
+    static constexpr int DiamondHelmet     = 0x310; // 钻石头盔（护甲 3 / 耐久 363）
+    static constexpr int DiamondChestplate = 0x311; // 钻石胸甲（护甲 8 / 耐久 528）
+    static constexpr int DiamondLeggings   = 0x312; // 钻石护腿（护甲 6 / 耐久 495）
+    static constexpr int DiamondBoots      = 0x313; // 钻石靴子（护甲 3 / 耐久 429）
+    static constexpr int ArmorCount    = 20,       // 哨兵：已定义护甲数（合法护甲 id 相对 ArmorIdBase 的上界）。
+                                  ArmorIdEnd = ArmorIdBase + ArmorCount; // 0x314（护甲段上界，不含）。
 
     // 配方定义（每条一行；单一权威）。改配方任何属性只改 kRecipes 一行，全工程生效。
     struct Recipe {

@@ -37,6 +37,9 @@ Item {
     // t228：请求宿主把光标手持栈**丢 1 件**为实体（右键拖出面板外；宿主接 player.dropHeldCursorOne）。
     //   左键整栈走 discardHeldRequested，右键逐个走本信号（spec「左键=全丢/右键=逐个」）。
     signal discardHeldOneRequested()
+    // t345 护甲装备 / 脱下发生（装备槽 TapHandler 触发）→ 宿主播装备音（spec「equip/unequip SOUND」；
+    //   当前复用 playPlace 作过渡装备音，专用护甲音属后续资产任务）。
+    signal armorChanged()
 
     // ── 尺寸常量（集中一处便于对齐）──
     readonly property int slotSize: 40        // 统一槽尺寸（主栏 / hotbar / 合成 / 护甲同尺寸，贴近 1.0）
@@ -536,45 +539,119 @@ Item {
                     }
                 }
 
-                // 4 护甲槽（最左，纵向：头 / 胸 / 腿 / 脚）：占位自绘图标（Phase 1.1 装备逻辑）。
-                // 据槽 index 画 头盔 / 胸甲 / 护腿 / 靴 的暗灰金属像素图（§9 override (a) 原创，非 MC 资产）。
+                // 4 护甲槽（最左，纵向：头 / 胸 / 腿 / 脚）：t345 起接入 hotbar VM 装备栏（armorBlockIdAt 等）。
+                //   槽 index 与 ArmorRegistry::ArmorPiece 同序（0 头盔 / 1 胸甲 / 2 护腿 / 3 靴子）。
+                //   点击：持护甲且部位匹配该槽 → 装备（与槽内旧护甲互换到光标）；空手点有护甲槽 → 脱下到光标。
+                //   部位不符 / 非护甲持物 → no-op（MC 行为：头盔不进胸甲槽）。悬停 → tooltip 显护甲名 + 护甲值。
                 Column {
                     x: 0   // 最左（人物装备栏在左，对齐 MC 1.0）
                     y: 0
                     spacing: 0
                     Repeater {
-                        model: root.armorCount
+                        model: root.hotbar.armorCount
                         delegate: Item {
+                            // 装备槽栈 id / 数量 / 耐久（触碰 armorRevision → 装备 / 脱下 / 破损后重算；air=0 空）。
+                            property int armId: { root.hotbar.armorRevision; return root.hotbar.armorBlockIdAt(index) }
+                            property int armDur: { root.hotbar.armorRevision; return root.hotbar.armorDurabilityAt(index) }
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent; wellColor: "#262b30" }
+                            // 空槽部位占位剪影（暗灰金属头盔/胸甲/护腿/靴像素图；§9a 原创，非 MC 资产）。
+                            //   仅 armId===0 时显（有装备时让位给 MaterialIcon 护甲图）。
                             Canvas {
                                 anchors.centerIn: parent
                                 width: 26; height: 26
+                                visible: armId === 0
                                 onPaint: {
                                     const ctx = getContext("2d"); ctx.reset()
                                     ctx.imageSmoothingEnabled = false
-                                    const metal = "#9aa0a6"   // 暗灰金属（占位）
-                                    const gap = "#262b30"     // 镂空用井底色
+                                    const metal = "#9aa0a6", gap = "#262b30"
                                     ctx.fillStyle = metal
                                     if (index === 0) {                  // 头盔
-                                        ctx.fillRect(5, 5, 16, 3)       // 帽檐
-                                        ctx.fillRect(7, 8, 12, 9)       // 头罩
+                                        ctx.fillRect(5, 5, 16, 3)
+                                        ctx.fillRect(7, 8, 12, 9)
                                         ctx.fillStyle = gap
-                                        ctx.fillRect(9, 11, 8, 3)       // 面罩缝（挖空）
+                                        ctx.fillRect(9, 11, 8, 3)
                                     } else if (index === 1) {           // 胸甲
-                                        ctx.fillRect(6, 5, 14, 4)       // 肩
-                                        ctx.fillRect(7, 9, 12, 13)      // 躯干
+                                        ctx.fillRect(6, 5, 14, 4)
+                                        ctx.fillRect(7, 9, 12, 13)
                                         ctx.fillStyle = gap
-                                        ctx.fillRect(12, 10, 2, 10)     // 中线
+                                        ctx.fillRect(12, 10, 2, 10)
                                     } else if (index === 2) {           // 护腿
-                                        ctx.fillRect(7, 5, 12, 4)       // 腰
-                                        ctx.fillRect(7, 9, 4, 13)       // 左腿
-                                        ctx.fillRect(15, 9, 4, 13)      // 右腿
+                                        ctx.fillRect(7, 5, 12, 4)
+                                        ctx.fillRect(7, 9, 4, 13)
+                                        ctx.fillRect(15, 9, 4, 13)
                                     } else {                            // 靴
-                                        ctx.fillRect(6, 13, 6, 7)       // 左靴筒
-                                        ctx.fillRect(14, 13, 6, 7)      // 右靴筒
-                                        ctx.fillRect(4, 18, 10, 2)      // 左鞋底
-                                        ctx.fillRect(12, 18, 10, 2)     // 右鞋底
+                                        ctx.fillRect(6, 13, 6, 7)
+                                        ctx.fillRect(14, 13, 6, 7)
+                                        ctx.fillRect(4, 18, 10, 2)
+                                        ctx.fillRect(12, 18, 10, 2)
+                                    }
+                                }
+                            }
+                            // 装备中的护甲图标（走 MaterialIcon 护甲段分支；armId!==0 时显）。
+                            MaterialIcon {
+                                anchors.centerIn: parent
+                                width: 30; height: 30
+                                visible: armId !== 0
+                                materialId: armId
+                            }
+                            // 装备耐久（仅 < max 时显，提示损耗；机制等价 MC 装备耐久条——此处用数字简化）。
+                            Text {
+                                anchors.right: parent.right; anchors.bottom: parent.bottom
+                                anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                visible: armId !== 0 && armDur > 0
+                                        && armDur < root.hotbar.armorMaxDurability(armId)
+                                text: armDur + "/" + root.hotbar.armorMaxDurability(armId)
+                                color: "#cccccc"; style: Text.Outline; styleColor: "#000000"
+                                font.pixelSize: 10
+                            }
+                            // 装备 / 脱下（左键单点）。护甲不可堆叠 → count 恒 1；走 armorSetStack（含部位校验）。
+                            TapHandler {
+                                acceptedButtons: Qt.LeftButton
+                                onTapped: {
+                                    const heldId = root.hotbar.heldBlock
+                                    const heldCnt = root.hotbar.heldCount
+                                    const heldDur = root.hotbar.heldDurability
+                                    const slotHas = armId !== 0
+                                    // 持物：须是护甲且部位匹配该槽 → 装备（与槽内旧物互换到光标）；否则 no-op。
+                                    if (heldId !== 0) {
+                                        if (!root.hotbar.isArmor(heldId)) return
+                                        if (root.hotbar.armorPiece(heldId) !== index) return
+                                        // 互换：先把槽内旧护甲取到光标，再装备手持护甲（armorSetStack 守部位）。
+                                        const oldId = armId, oldDur = armDur
+                                        root.hotbar.armorSetStack(index, 0, 0)        // 先清槽（脱下旧物）
+                                        root.hotbar.armorSetStack(index, heldId, 1, heldDur) // 装备手持
+                                        // 光标手持 = 旧物（若有），否则空。
+                                        if (oldId !== 0) {
+                                            root.hotbar.heldBlock = oldId
+                                            root.hotbar.heldCount = 1
+                                            root.hotbar.heldDurability = oldDur
+                                        } else {
+                                            root.hotbar.heldBlock = 0
+                                            root.hotbar.heldCount = 0
+                                        }
+                                        root.armorChanged() // t345 装备音
+                                        return
+                                    }
+                                    // 空手：槽有护甲 → 脱下到光标。
+                                    if (slotHas) {
+                                        root.hotbar.heldBlock = armId
+                                        root.hotbar.heldCount = 1
+                                        root.hotbar.heldDurability = armDur
+                                        root.hotbar.armorSetStack(index, 0, 0)
+                                        root.armorChanged() // t345 脱下音
+                                    }
+                                }
+                            }
+                            // t345 悬停 tooltip：显护甲名 + 护甲值（spec「hover an armor piece shows its armor value」）。
+                            HoverHandler {
+                                onHoveredChanged: {
+                                    if (hovered && armId !== 0) {
+                                        root.hoveredItemId = armId
+                                        root.hoveredArmorValue = root.hotbar.armorPointsFor(armId)
+                                    } else if (root.hoveredItemId === armId) {
+                                        root.hoveredItemId = 0
+                                        root.hoveredArmorValue = 0
                                     }
                                 }
                             }
@@ -886,6 +963,9 @@ Item {
     // 材料段→本地通用名；air/空槽→空串→不显。工具后续将加「+攻击力」等字段，现阶段只名字。
     property int hoveredItemId: 0
     property point hoveredTipPos: Qt.point(0, 0)
+    // t345 当前 hover 槽的护甲值（>0 = 护甲 → tooltip 附「护甲 N」行；0 = 非护甲 / 未跟踪）。装备槽 HoverHandler
+    //   写入；离开按 id 守卫清 0（同 hoveredItemId 模式，防相邻槽进出竞态互清）。
+    property int hoveredArmorValue: 0
     // t263 当前 hover 槽的工具剩余耐久（-1=未跟踪 → tooltip 不显耐久行）。据 hoveredKey 查 hotbar/main。
     property int hoveredDurability: {
         if (!root.hotbar || !root.hoveredItemId || !root.hotbar.isTool(root.hoveredItemId)) return -1
@@ -927,9 +1007,12 @@ Item {
             id: tipLabel
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行（如「铁镐  5/250」）；非工具 / 未跟踪 → 仅显名。
+            //   t345 护甲槽 tooltip 附「护甲 N」行（spec「hover an armor piece shows its armor value」）。
+            //   t304 弓槽 tooltip 附「攻击 1-N」行。
             text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
-                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : "" // t304 弓伤害 tooltip
+                + (root.hoveredArmorValue > 0 ? "  护甲 " + root.hoveredArmorValue : "")
+                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : ""
             color: "#f2f2f2"
             font.pixelSize: 12
         }

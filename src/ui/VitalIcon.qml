@@ -3,7 +3,7 @@ import QtQuick
 // 生命心 / 饥饿鼓腿 / 气泡 单格图标（t22 / t202）：自绘原创像素图，Canvas 逐像素填充（§9 override (a)：
 // **非** MC GUI PNG，本项目程序生成）。kind 决定形状、level 决定填充态。
 //
-//   kind  : "heart"（生命心）| "hunger"（饥饿鼓腿）| "bubble"（t202 气泡）
+//   kind  : "heart"（生命心）| "hunger"（饥饿鼓腿）| "bubble"（t202 气泡）| "armor"（t345 护甲盾）
 //   level : 0=empty（仅暗轮廓）/ 1=half（左半亮）/ 2=full（整格亮）
 //           bubble 仅用 0 / 2（无半态：气泡要么在要么不在，机制等价 MC 1.0 气泡）
 //
@@ -13,7 +13,7 @@ import QtQuick
 Canvas {
     id: root
 
-    property string kind: "heart" // "heart" | "hunger" | "bubble"
+    property string kind: "heart" // "heart" | "hunger" | "bubble" | "armor"
     property int level: 2         // 0=empty 1=half 2=full
 
     width: 18
@@ -50,6 +50,16 @@ Canvas {
         [1,1,1,1,1,1,1,1],
         [0,1,1,1,1,1,1,0],
     ]
+    // t345 护甲位图（盾牌轮廓：圆肩顶 + 尖底；机制等价 MC 1.0 护甲条盾形图标，纯原创自绘 §9a）。
+    //   half=左半亮（每盾 = 2 护甲点，与心同；totalArmor 奇数 → 末盾半亮）。
+    readonly property var armorBmp: [
+        [0,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1],
+        [0,1,1,1,1,1,1,0],
+        [0,0,1,1,1,1,0,0],
+    ]
 
     onPaint: {
         const ctx = getContext("2d")
@@ -58,6 +68,7 @@ Canvas {
 
         const bmp = root.kind === "hunger" ? root.hungerBmp
                    : root.kind === "bubble" ? root.bubbleBmp
+                   : root.kind === "armor" ? root.armorBmp
                    : root.heartBmp
         const rows = bmp.length
         const cols = bmp[0].length
@@ -65,13 +76,15 @@ Canvas {
         const ox = Math.floor((root.width  - cols * scale) / 2)
         const oy = Math.floor((root.height - rows * scale) / 2)
 
-        // 暗色（空态）：心=暗红、鼓腿=暗棕、气泡=暗蓝灰。先整体铺暗轮廓 → level=0 时只剩它即空态。
+        // 暗色（空态）：心=暗红、鼓腿=暗棕、气泡=暗蓝灰、护甲=暗灰。先整体铺暗轮廓 → level=0 时只剩它即空态。
         const dim = root.kind === "hunger" ? "#4a3520"
                    : root.kind === "bubble" ? "#1f3a52"
+                   : root.kind === "armor" ? "#3a3f44"
                    : "#5a1a1a"
-        // 亮色（满态）：心=红、鼓腿=熟肉棕、气泡=亮青蓝（水下气泡视觉）。
+        // 亮色（满态）：心=红、鼓腿=熟肉棕、气泡=亮青蓝（水下气泡视觉）、护甲=银灰（金属盾）。
         const bright = root.kind === "hunger" ? "#b5783a"
                        : root.kind === "bubble" ? "#7ec8ff"
+                       : root.kind === "armor" ? "#c8ccd0"
                        : "#d22e2e"
 
         for (let r = 0; r < rows; ++r) {

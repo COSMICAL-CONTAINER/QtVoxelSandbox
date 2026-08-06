@@ -59,27 +59,30 @@ constexpr int kMaterialIdBase = 0x200; // 与 RecipeRegistry::MaterialIdBase 同
 // 方块单栈上限走 BlockRegistry::BlockDef.maxStack（t42 单一权威；MC 1.0 方块标准 64）。
 // 创造风格默认填充直接读 maxStack(id)，不再本地硬编码 64（改表即同步）。
 
-// id 合法性：air(0) / 方块段 (0,Count) / 工具段 (>=0x100) / 材料段 (>=0x200)。越段 id 一律拒
-// （防 quint8 截断别名）。材料段 t50 新增（木棒等合成产物）。
+// id 合法性：air(0) / 方块段 (0,Count) / 工具段 (>=0x100) / 材料段 (>=0x200) / 护甲段 (>=0x300)。越段 id 一律拒
+// （防 quint8 截断别名）。护甲段 t345 新增（>= ArmorIdBase，经 >= kToolIdBase 隐式通过；显式注释钉死语义）。
 bool isValidItemId(int id)
 {
     return id == 0 || (id > 0 && id < int(BlockRegistry::Count)) || id >= kToolIdBase;
 }
 
-// t263 把「写入时传入的 durability」归一为合法的工具实例耐久。
-//   - 非工具 id（含 air / 方块 / 材料）→ 恒 0（inert；非工具栈不带耐久）。
-//   - 工具 id + durability<0（缺省「自动」）→ maxDurability（新工具实例：创造取件 / 合成产物 / 世界拾取兜底）。
-//   - 工具 id + durability>=0（显式保真）→ clamp 到 [1, maxDurability]（搬运 / 拾取时槽内旧耐久）；
-//     0 视作 1（耐久归零的工具不应再进槽——破损在 damageSelectedItem 内清槽，不写 0 耐久工具）。
-// 调用者：setStack / mainSetStack / addStack / mainAddStack / addToAny（统一入口，防各处散写漏归一）。
+// t263 把「写入时传入的 durability」归一为合法的工具 / 护甲实例耐久。
+//   - 非工具 / 非护甲 id（含 air / 方块 / 材料）→ 恒 0（inert；不带耐久）。
+//   - 工具 / 护甲 id + durability<0（缺省「自动」）→ maxDurability（新实例：创造取件 / 合成产物 / 世界拾取兜底）。
+//   - 工具 / 护甲 id + durability>=0（显式保真）→ clamp 到 [1, maxDurability]（搬运 / 拾取时槽内旧耐久）；
+//     0 视作 1（耐久归零的实例不应再进槽——破损在 damageSelectedItem / damageArmor 内清槽，不写 0 耐久实例）。
+// t345：护甲走 ArmorRegistry::maxDurability（同工具语义；护甲受击 -1，归零破损）。
+// 调用者：setStack / mainSetStack / addStack / mainAddStack / addToAny / armorSetStack（统一入口，防各处散写漏归一）。
 int normalizeDurability(int id, int durability)
 {
-    if (!ToolRegistry::isTool(id)) return 0;
-    const int cap = ToolRegistry::maxDurability(id);
-    if (cap <= 0) return 0; // 防御：工具表未配耐久（不应发生；maxDurability 对工具段恒 >0）
-    if (durability < 0) return cap;         // 缺省 → 新工具满耐久
+    const bool isTool = ToolRegistry::isTool(id);
+    const bool isArm  = ArmorRegistry::isArmor(id);
+    if (!isTool && !isArm) return 0;
+    const int cap = isTool ? ToolRegistry::maxDurability(id) : ArmorRegistry::maxDurability(id);
+    if (cap <= 0) return 0; // 防御：表未配耐久（不应发生；maxDurability 对工具 / 护甲恒 >0）
+    if (durability < 0) return cap;         // 缺省 → 新实例满耐久
     if (durability > cap) return cap;       // 超 max 钳到 max
-    if (durability == 0) return 1;          // 0 视作 1（破损工具不写槽；最小 1 次耐久）
+    if (durability == 0) return 1;          // 0 视作 1（破损实例不写槽；最小 1 次耐久）
     return durability;
 }
 } // namespace
@@ -90,6 +93,8 @@ Hotbar::Hotbar(QObject *parent)
     , m_slots(9, ItemStack{0, 0})
     // t97：构造期 27 主栏槽全空（生存空背包起；三菜单共享同一份 VM 数据）。
     , m_mainSlots(27, ItemStack{0, 0})
+    // t345：构造期 4 护甲槽全空（玩家初始无装备）。
+    , m_armorSlots(4, ItemStack{0, 0})
 {
 }
 
@@ -105,6 +110,14 @@ void Hotbar::bumpMainRevision()
 {
     ++m_mainRevision;
     emit mainSlotsChanged();
+}
+
+// t345：护甲版本号 bump（同 bumpRevision 的护甲版）。armorSetStack / damageArmor / resetForMode 调 →
+// SurvivalInventory 装备栏 delegate + Main.qml 护甲条 / 减伤绑定重算（totalArmorPoints 是派生值，经此刷新）。
+void Hotbar::bumpArmorRevision()
+{
+    ++m_armorRevision;
+    emit armorSlotsChanged();
 }
 
 void Hotbar::setSelectedSlot(int slot)
@@ -145,8 +158,23 @@ int Hotbar::selectedItemId() const
 // ── 工具段桥接（t33）── 查 ToolRegistry 单一权威，QML delegate 据此选方块 Image vs ToolIcon Canvas。
 bool Hotbar::isTool(int itemId) const { return ToolRegistry::isTool(itemId); }
 
-// ── 材料段判定（t50）── id >= RecipeRegistry::MaterialIdBase（0x200）。与 isTool 互斥（材料段在工具段之上）。
-bool Hotbar::isMaterial(int itemId) const { return itemId >= RecipeRegistry::MaterialIdBase; }
+// ── 材料段判定（t50 / t345）── id >= RecipeRegistry::MaterialIdBase（0x200）。**含护甲段**（0x300..）：
+//   isMaterial 在全工程是「非方块非工具 → QML 自绘 MaterialIcon」的**渲染路由谓词**（40+ 处 delegate 据它切
+//   方块 Image vs MaterialIcon），护甲同属「非方块非工具」→ 走 MaterialIcon（MaterialIcon.qml 含护甲段分支）。
+//   护甲与可堆叠材料的**功能**差异（maxStack=1 / 独立耐久 / 独立名）由各自入口的 isArmor 先行特判保证
+//   （maxStackSize / nameForBlock / normalizeDurability 均先查 isArmor），不依赖 isMaterial 排除护甲。
+//   故保持单边 >= 简单形式 → 40+ delegate 零改动即自动渲染护甲。
+bool Hotbar::isMaterial(int itemId) const
+{
+    return itemId >= RecipeRegistry::MaterialIdBase;
+}
+
+// ── t345 护甲段判定 / 属性桥接（透传 ArmorRegistry；QML delegate + 装备槽校验用）──
+bool Hotbar::isArmor(int itemId) const { return ArmorRegistry::isArmor(itemId); }
+int Hotbar::armorPiece(int itemId) const { return ArmorRegistry::piece(itemId); }
+int Hotbar::armorTier(int itemId) const { return ArmorRegistry::tier(itemId); }
+int Hotbar::armorPointsFor(int itemId) const { return ArmorRegistry::armorPoints(itemId); }
+int Hotbar::armorMaxDurability(int itemId) const { return ArmorRegistry::maxDurability(itemId); }
 
 // t219 不完整方块段判定（手持 / 掉落贴图分流用）：闭区间 [FirstPartial, LastPartial]（t194 教训：
 //   单边 >= FirstPartial 会把段后整立方 Chest(22) 误判为异形）。异形方块在世界内非整立方 → 手持 / 掉落
@@ -347,6 +375,9 @@ QString Hotbar::nameForBlock(int blockId) const
     // 材料段（t50 木棒 / t85 煤炭·铁原矿·铁锭）→ 本地通用名（材料段无注册表，名简单且少，就近返回）。
     // air / 越界 → 空串。PLAN §9：UI 不另存方块 / 工具名副本。
     if (blockId <= 0) return QString();
+    // t345 护甲段（>= ArmorIdBase，在材料段之上）：走 ArmorRegistry::displayName（皮革头盔 / 铁胸甲 …）。
+    //   须在材料段判定之前（护甲段 id 也 >= kMaterialIdBase，否则会落材料段兜底空串）。
+    if (ArmorRegistry::isArmor(blockId)) return ArmorRegistry::displayName(blockId);
     if (blockId >= kMaterialIdBase) {
         // 材料段：木棒 / 煤炭 / 铁原矿 / 铁锭（id 取自 RecipeRegistry 常量，与 blockregistry.cpp 矿石
         // dropId 字面量同源）。任一漏返 → 空串（兜底，UI 不显名但不崩）。
@@ -626,6 +657,87 @@ int Hotbar::addToAny(int id, int n, int durability)
     return remaining;
 }
 
+// ── t345 护甲槽 VM（4 槽：头 / 胸 / 腿 / 脚；玩家自身装备，非物品流）──
+
+// 4 装备槽护甲值之和（0..20）。Q_PROPERTY 暴露 → Main.qml 护甲条 + 减伤比例算。
+// 空槽 / 非护甲（防御性，不应发生 —— armorSetStack 已守只接护甲）不计。
+int Hotbar::totalArmorPoints() const
+{
+    int total = 0;
+    for (const ItemStack &s : m_armorSlots) {
+        if (s.id != 0 && ArmorRegistry::isArmor(s.id)) total += ArmorRegistry::armorPoints(s.id);
+    }
+    return total;
+}
+
+int Hotbar::armorBlockIdAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_armorSlots.size())) return 0;
+    return m_armorSlots[size_t(slot)].id;
+}
+
+int Hotbar::armorCountAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_armorSlots.size())) return 0;
+    return m_armorSlots[size_t(slot)].count;
+}
+
+int Hotbar::armorDurabilityAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_armorSlots.size())) return 0;
+    return m_armorSlots[size_t(slot)].durability;
+}
+
+// 直接写入装备槽。slot 范围守；id 须为护甲段（或 0=清空）+ 部位须匹配该槽（头盔槽只接头盔，MC 行为）；
+//   count 钳 1（护甲不可堆叠）；durability 经 normalizeDurability 归一。非护甲 / 部位不符 → no-op。
+//   id==0 或 count<=0 → 清空该槽（脱下）。部位匹配：slot 索引 == ArmorRegistry::piece(id)。
+void Hotbar::armorSetStack(int slot, int id, int count, int durability)
+{
+    if (slot < 0 || slot >= int(m_armorSlots.size())) return;
+    if (id == 0 || count <= 0) {
+        // 清空（脱下）。
+        if (m_armorSlots[size_t(slot)].id == 0) return; // 已空 → 不发信号
+        m_armorSlots[size_t(slot)] = ItemStack{0, 0, 0};
+        bumpArmorRevision();
+        return;
+    }
+    if (!ArmorRegistry::isArmor(id)) return;            // 非护甲 → 拒（装备槽只接护甲）
+    if (ArmorRegistry::piece(id) != slot) return;       // 部位不符 → 拒（头盔不进胸甲槽）
+    const int dur = normalizeDurability(id, durability);
+    m_armorSlots[size_t(slot)] = ItemStack{id, 1, dur}; // 护甲不可堆叠 → count 恒 1
+    bumpArmorRevision();
+}
+
+// 创造调色板护甲段（5 套 × 4 部位 = 20 件；拾取即满耐久单件，供测试 / 直接装备）。Inventory 创造调色板补全用。
+QVariantList Hotbar::creativeArmor() const
+{
+    QVariantList list;
+    for (int i = 0; i < int(RecipeRegistry::ArmorCount); ++i)
+        list << (int(RecipeRegistry::ArmorIdBase) + i);
+    return list;
+}
+
+// 受击时每件装备 -1 耐久（spec「DURABILITY degrades on hits」）；归零 → 清空该槽（破损消失）+ emit armorBroken。
+//   由 Main.qml 在 takeDamage 路由后调（每受一次击 4 件各 -1，机制等价 MC 护甲耐久损耗）。空槽 / 满耐久不动。
+void Hotbar::damageArmor()
+{
+    bool changed = false;
+    for (ItemStack &s : m_armorSlots) {
+        if (s.id == 0 || !ArmorRegistry::isArmor(s.id)) continue;
+        if (s.durability <= 1) {
+            // 归零 → 护甲破损：清空槽（机制等价 MC「护甲耐久耗尽即消失」）。
+            const int brokenId = s.id;
+            s = ItemStack{0, 0, 0};
+            emit armorBroken(brokenId); // 呈现层播破损音（复用 toolBreak 路径）
+            changed = true;
+        } else {
+            --s.durability;
+            changed = true;
+        }
+    }
+    if (changed) bumpArmorRevision();
+}
+
 // 从 slot 取最多 n 件。返回实际取走数；栈空则 id 归 0（保持空栈不变式）。
 int Hotbar::takeStack(int slot, int n)
 {
@@ -647,6 +759,8 @@ int Hotbar::maxStackSize(int id) const
     //   才在此分流。与 isMaterial 不冲突（MaterialIcon 仍画桶图标）。
     if (id == RecipeRegistry::BucketEmptyId || id == RecipeRegistry::WaterBucketId
         || id == RecipeRegistry::LavaBucketId) return 1;
+    // t345 护甲段（>= ArmorIdBase）：不可堆叠（每件独立耐久，同工具段语义）。
+    if (ArmorRegistry::isArmor(id)) return 1;
     if (id >= kMaterialIdBase) return 64; // 材料段（t50 木棒等）：可堆叠 64（MC 标准）
     if (id >= kToolIdBase) return 1;      // 工具段（t33）：不可堆叠
     if (id <= 0 || id >= int(BlockRegistry::Count)) return 0; // air / 越界：不可堆叠（无意义）
@@ -748,11 +862,14 @@ void Hotbar::resetForMode(int mode)
         // Creative / Survival：全空（创造源=调色板无限拾取；生存=空背包起，采集/拾取由 t34-t36 填入）。
         for (ItemStack &s : m_slots) s = ItemStack{0, 0};
         for (ItemStack &s : m_mainSlots) s = ItemStack{0, 0};
+        // t345：护甲槽一并清空（重生 / 切模式重置时脱下所有装备）。
+        for (ItemStack &s : m_armorSlots) s = ItemStack{0, 0};
     }
     // mode==0（Spectator）：不动（hotbar 隐藏，槽内容无意义）。
     m_heldStack = ItemStack{};
     bumpRevision();
     bumpMainRevision();
+    bumpArmorRevision();               // t345 护甲槽可能清空 → 装备栏 / 护甲条 / 减伤刷新
     emit heldBlockChanged();           // 手持物被清空 → 浮动图标隐
     emit selectedSlotChanged();        // selectedBlockId 可能因栈变空而变 Air
 }
@@ -761,7 +878,8 @@ void Hotbar::resetForMode(int mode)
 // （防「有 id 无 count」中间态——QML 拾取整栈时会紧接 setHeldCount 覆盖为真实数量）。
 // t263：切到新工具 id 时自动填 maxDurability（创造调色板取件=满耐久场景）；pickup-from-slot 路径
 //   在 setHeldBlock 后紧接 setHeldDurability(slot 旧值) 覆盖为槽内实例耐久（InventoryOps.readSlot 透传）。
-//   切到非工具 id 时 durability 归 0（inert）。同 id 不变则早退（不动 durability，防覆盖 caller 已设的值）。
+//   切到非工具 / 非护甲 id 时 durability 归 0（inert）；工具 / 护甲走 normalizeDurability 填满耐久（t263 / t345）。
+//   同 id 不变则早退（不动 durability，防覆盖 caller 已设的值）。
 void Hotbar::setHeldBlock(int id)
 {
     if (!isValidItemId(id)) return;
@@ -771,7 +889,7 @@ void Hotbar::setHeldBlock(int id)
     } else {
         m_heldStack.id = id;
         if (m_heldStack.count <= 0) m_heldStack.count = 1;
-        // 新工具实例默认满耐久（创造取件 / 合成产物兜底）；caller 显式覆盖走 setHeldDurability。
+        // 新工具 / 护甲实例默认满耐久（创造取件 / 合成产物兜底）；caller 显式覆盖走 setHeldDurability。
         m_heldStack.durability = normalizeDurability(id, -1);
     }
     qInfo().noquote() << "[inv] setHeldBlock -> id=" << id << " count=" << m_heldStack.count

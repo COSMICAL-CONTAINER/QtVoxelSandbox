@@ -966,7 +966,15 @@ Window {
                 else if (mobType === EntityManager.MobBones) cause = PlayerState.Bones
                 else if (mobType === EntityManager.MobSpider) cause = PlayerState.Spider
                 else if (mobType === EntityManager.MobStalker) cause = PlayerState.Stalker
-                playerState.takeDamage(amount, cause)
+                // t345 护甲减伤（同 onFallDamageTaken 路径：mob 近战 / 箭 / 爆炸命中也走护甲减伤 + 耐久损耗）。
+                var finalAmt = amount
+                const totalArmor = hotbarVM.totalArmorPoints
+                if (amount > 0 && totalArmor > 0) {
+                    const ratio = Math.min(0.80, totalArmor * 0.04)
+                    finalAmt = Math.max(1, Math.round(amount * (1 - ratio)))
+                    hotbarVM.damageArmor()
+                }
+                playerState.takeDamage(finalAmt, cause)
             }
         }
         // t284 Stalker 爆炸（EntityManager detonateStalker 发）：爆炸的单一音/视反馈入口 —— 播爆炸音
@@ -1020,7 +1028,20 @@ Window {
     // 语义事件，呈现层只消费）。PlayerController 不持有 PlayerState，保持单向事件流、分层干净。
     Connections {
         target: player
-        function onFallDamageTaken(hp, cause) { playerState.takeDamage(hp, cause) } // t311 透传致死来源（Fall/Suffocation/Drowning/Starvation）
+        // t345 护甲减伤：路由到 takeDamage 前先按 totalArmor 算减伤比例（每点 4%，上限 80%；机制等价 MC 1.0
+        //   护甲减伤）。至少 1 点穿透（护甲不彻底免伤）。护甲受击 -1 耐久（damageArmor；归零破损消失）。
+        //   spec「armor reduces incoming damage by its armor value」+「DURABILITY degrades on hits」。
+        //   覆盖所有走 fallDamageTaken 的伤害源（坠落 / 窒息 / 溺水 / 饥饿 / 燃烧）；mobAttackedPlayer 同此减伤。
+        function onFallDamageTaken(hp, cause) {
+            let finalDmg = hp
+            const totalArmor = hotbarVM.totalArmorPoints
+            if (hp > 0 && totalArmor > 0) {
+                const ratio = Math.min(0.80, totalArmor * 0.04)
+                finalDmg = Math.max(1, Math.round(hp * (1 - ratio)))
+                hotbarVM.damageArmor()
+            }
+            playerState.takeDamage(finalDmg, cause) // t311 透传致死来源（Fall/Suffocation/Drowning/Starvation/Fire）
+        }
         // t238 饥饿回血 → PlayerState.heal（饱腹态每 4s 回 1HP；同 fallDamageTaken→takeDamage 反向配对）。
         function onHealed(hp) { playerState.heal(hp) }
         // t202 气泡值更新 → PlayerState.air（Physics 层算时序、Game 层持显值、呈现层路由；同 fallDamageTaken→
@@ -5302,6 +5323,44 @@ Window {
         }
     }
 
+    // t345 护甲条（仅 Survival）：置 vitalsBar 上一行，**左对齐贴在生命心条正上方**（机制等价 MC 1.0：
+    //   护甲条排在左侧心条上方）。spec「ARMOR BAR shows above the hearts row (icons filling with total armor)」。
+    //   10 颗盾形图标，每盾 = 2 护甲点（满 20 = 钻石整套 = 10 盾全亮）；totalArmor 奇数 → 末盾半亮。
+    //   显隐：仅 Survival 且 totalArmorPoints > 0（无装备时不显，机制等价 MC 无护甲不显护甲条）。
+    //   复用 VitalIcon kind="armor"（自绘原创盾形 Canvas，§9 override (a) 非 MC GUI PNG）。
+    //   分层（PLAN §2）：呈现层只读 hotbar.totalArmorPoints（ViewModel 据装备槽算），绝不反向写。
+    Item {
+        id: armorBar
+        visible: window.appState === "playing"
+                 && player.mode === PlayerController.Survival
+                 && hotbarVM.totalArmorPoints > 0
+        anchors.bottom: vitalsBar.top
+        anchors.bottomMargin: 2
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: vitalsBar.width
+        height: 18
+
+        // 第 index 颗护甲盾的态：totalArmor - index*2 余额 ≥2 → full、≥1 → half、否则 empty。
+        function levelForArmor(curValue, index) {
+            const bal = curValue - index * 2
+            return bal >= 2 ? 2 : (bal >= 1 ? 1 : 0)
+        }
+
+        // 左对齐贴心条正上方（与下方心 Row 同 anchors.left）。
+        Row {
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            spacing: 0
+            Repeater {
+                model: 10
+                delegate: VitalIcon {
+                    kind: "armor"
+                    level: armorBar.levelForArmor(hotbarVM.totalArmorPoints, index)
+                }
+            }
+        }
+    }
+
     // 主菜单（t17）：启动首显（appState="menu"）；Start/Quit 信号连到 startGame / Qt.quit。
     // 仅 menu 态可见，z 高于暂停叠层（100）与所有 HUD，全屏覆盖。「退出」→ Qt.quit() 直接退进程。
     // 仅依赖 QtQuick（无特殊模块），直接实例化（非 Loader 隔离）——加载失败即 app 致命，故无需降级。
@@ -5380,6 +5439,9 @@ Window {
         onDiscardHeldRequested: player.dropHeldCursor()
         // t228：右键拖出 → 只丢 1 件（左键整栈走上面的 dropHeldCursor）。
         onDiscardHeldOneRequested: player.dropHeldCursorOne()
+        // t345 护甲装备 / 脱下 → 播装备音（spec「equip/unequip SOUND」；当前复用 playPlace 作过渡装备音，
+        //   专用护甲音属后续资产任务 —— 程序合成 wav 接 build_sounds.py）。
+        onArmorChanged: audio.playPlace(0)
     }
 
     // t50 工作台 3×3 合成面板：右键工作台方块打开（player.craftingTableOpened → openCraftingTable）。
