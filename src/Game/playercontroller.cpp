@@ -49,7 +49,9 @@ void PlayerController::setWorld(World *w)
 void PlayerController::snapSpawnToGround()
 {
     if (!m_world) return;
-    const int h = m_world->heightAt(int(kSpawnX), int(kSpawnZ));
+    // t388：按当前重生点列贴地表（m_spawnPos）。世界就绪时 m_spawnPos==kSpawn（初值，行为不变）；夜间睡床后
+    //   m_spawnPos=床位，重生贴床顶（床是 solid 地表方块 → heightAt 返床 y，+1 站其上）。
+    const int h = m_world->heightAt(int(m_spawnPos.x()), int(m_spawnPos.z()));
     m_pos.setY(float(h) + 1.0f); // 脚底 = 地表方块顶面（h 为地表方块 y，+1 站其上）
     m_peakY = m_pos.y();         // 掉落伤害基准重置（同 componentComplete / setMode 语义，防陈旧落差）
 }
@@ -206,6 +208,7 @@ void PlayerController::respawn()
     cancelMining();           // 清生存累积挖掘态（裂纹叠层随之隐）
     cancelEating();           // t267：清进食累积态（防 respawn 后 updateEating 误续食）
     cancelBowDraw();          // t304：清弓拉弓态（防 respawn 后误续拉）
+    cancelSleep();            // t388：清睡觉 fade 态（重生即醒；防 respawn 后 updateSleep 误续睡）
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
     m_rightDown = false;      // t267：清右键按下态（防 respawn 后 updateEating 误续食）
     m_dead = false;           // t175：清死亡态镜像 → pickupScan 恢复（重生后玩家已离开死亡点，可正常拾取）
@@ -223,7 +226,7 @@ void PlayerController::respawn()
     m_fireTimer = 0.0f;
     m_fireDmgTimer = 0.0f;
     if (m_burning) { m_burning = false; emit burningChanged(); }
-    m_pos = QVector3D(kSpawnX, kSpawnY, kSpawnZ); // 回出生列（X/Z；Y 由 snapSpawnToGround 贴地表）
+    m_pos = m_spawnPos; // t388：回当前重生点（初值=kSpawn；睡床后=床位）。Y 由 snapSpawnToGround 贴地表。
     m_vel = QVector3D(0, 0, 0);
     m_knockback = QVector3D(0, 0, 0); // t296：清受击击退冲量（重生不继承死亡点的击退）
     snapSpawnToGround();      // t137：重生贴地表（消除 kSpawnY 兜底落差；设 m_pos.y + m_peakY）
@@ -239,6 +242,7 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     cancelMining();
     cancelEating(); // t267：清进食累积态（防加载后 updateEating 误续食）
     cancelBowDraw(); // t304：清弓拉弓态（防加载后误续拉）
+    cancelSleep();   // t388：清睡觉 fade 态（存档不持久化睡觉；防加载后误续睡）
     m_leftDown = false;
     m_rightDown = false; // t267：清右键按下态（防加载后 updateEating 误续食）
     m_dead = false;
@@ -285,6 +289,7 @@ void PlayerController::release()
     cancelMining();                           // t34：暂停 / 失焦 → 清累积挖掘态（spec：失焦清零）
     cancelEating();                           // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零）
     cancelBowDraw();                          // t304：暂停 / 失焦 → 清弓拉弓态（spec：失焦清零）
+    cancelSleep();                            // t388：暂停 / 失焦 → 中断睡觉 fade（未跳清晨即醒）
     m_leftDown = false;                       // t44：暂停 / 失焦 → 视同松手（切断续挖）
     m_rightDown = false;                      // t267：暂停 / 失焦 → 视同松手（切断连食）
     // t51：暂停 / 失焦时退出疾跑 / 蹲下（恢复时从 Walk 起；避免遗留蹲态卡低视角 / 疾跑余速）。
@@ -477,6 +482,7 @@ void PlayerController::tickImpl()
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
         cancelEating(); // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零，未完成不消耗）
         cancelBowDraw(); // t304：暂停 / 失焦 → 清弓拉弓态（spec：失焦清零，未射出不消耗箭 / 耐久）
+        cancelSleep();   // t388：暂停 / 失焦 → 中断睡觉 fade（未跳清晨即醒）
         // t253：暂停 / 背包开时清 mob 目标框（updateRaycast 仅 captured 时跑 → 不清则残留旧目标）。
         if (m_targetedMob >= 0) { m_targetedMob = -1; emit targetedMobChanged(); }
         // t45：暂停时清行走动画驱动（moveSpeed→0；walkPhase 不动，QML 据此 sin*0=0 → 四肢归中性位）。
@@ -496,6 +502,7 @@ void PlayerController::tickImpl()
     updateCameraDistance(); // t40：第三人称相机距离钳制（防穿墙）
     updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
     updateEating(float(dt)); // t267：累积进食进度（持面包按住右键时；其它情况早 return）
+    updateSleep(float(dt));  // t388：累积睡觉 fade 进度（满 kSleepDuration → 跳清晨 + 设重生点）
     // t304 弓拉弓蓄力：持弓按住右键时累加 m_bowDrawTime（钳 kBowFullCharge）。换槽（持物不再是弓）→ cancel。
     //   仅 captured 时跑（pause 早 return 之前已清）。每 tick emit bowDrawChanged → QML 拉弓动画跟随进度。
     if (m_bowDrawing) {
@@ -1289,6 +1296,69 @@ void PlayerController::cancelBowDraw()
     emit bowDrawChanged();
 }
 
+// t388 sleepProgress 派生（Q_PROPERTY READ）：clamp(m_sleepTimer/kSleepDuration, 0, 1)。手写 clamp 免加 <algorithm>。
+float PlayerController::sleepProgress() const
+{
+    if (kSleepDuration <= 0.0f) return 0.0f;
+    const float p = m_sleepTimer / kSleepDuration;
+    return p < 0.0f ? 0.0f : (p > 1.0f ? 1.0f : p);
+}
+
+// t388 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调）。机制等价 MC 1.0 床：夜间 + 床周无怪物才睡。
+void PlayerController::trySleepAt(int bx, int by, int bz)
+{
+    if (m_sleeping) return; // fade 进行中再右键无效（防重入）
+    // 夜间判定（WorldClock.isNight 纯函数；无 worldClock → 当非夜间拒绝，安全降级）。
+    if (!m_worldClock || !m_worldClock->isNight()) {
+        emit sleepRefused(QStringLiteral("只有在夜晚才能睡觉"));
+        return;
+    }
+    // 床周敌对判定（EntityManager.hostileNearby；球心=床格中心，机制等价 MC 床周 8 格内有敌对即不能睡）。
+    if (m_entityManager) {
+        const QVector3D bedCenter(float(bx) + 0.5f, float(by) + 0.5f, float(bz) + 0.5f);
+        if (m_entityManager->hostileNearby(bedCenter, kSleepMonsterRadius)) {
+            emit sleepRefused(QStringLiteral("附近有怪物，无法入睡"));
+            return;
+        }
+    }
+    // 通过 → 进 fade 态（玩家定格等跳清晨；fade 短 1.2s，简化不冻结输入位移）。
+    m_sleeping = true;
+    m_sleepTimer = 0.0f;
+    m_sleepBx = bx; m_sleepBy = by; m_sleepBz = bz;
+    emit sleepingChanged();
+}
+
+// t388 持续睡觉（tickImpl 调）：累积 fade 进度，满 kSleepDuration → 跳清晨 + 设重生点 + 清态。
+void PlayerController::updateSleep(float dt)
+{
+    if (!m_sleeping) return;
+    m_sleepTimer += float(dt);
+    emit sleepProgressChanged(); // 驱动 QML 黑叠层 ramp（每 tick 推进）
+    if (m_sleepTimer >= kSleepDuration) {
+        // 跳清晨（WorldClock 时间向前快进到黎明 phase 0.75；PLAN §2-H 时间单向，只加 m_elapsedMs）。
+        if (m_worldClock) m_worldClock->skipToDawn();
+        // 设重生点 = 床位（床格中心 + 上方 1.0 = 玩家站床顶；respawn 时 snapSpawnToGround 再贴地表兜底）。
+        m_spawnPos = QVector3D(float(m_sleepBx) + 0.5f, float(m_sleepBy) + 1.0f, float(m_sleepBz) + 0.5f);
+        cancelSleep(); // 清态 + emit sleepingChanged（QML 黑叠层随 sleeping=false 隐藏，显清晨场景）
+    }
+}
+
+// t388 清睡觉 fade 态（完成 / 受惊醒 / 失焦 / 暂停 / 重生）。无变化时静默（不发信号，免抖动 QML 绑定）。
+void PlayerController::cancelSleep()
+{
+    if (!m_sleeping) return;
+    m_sleeping = false;
+    m_sleepTimer = 0.0f;
+    emit sleepingChanged();
+}
+
+// t388 受惊醒（Q_INVOKABLE；呈现层 Connections 据玩家受击 fallDamageTaken / mobAttackedPlayer 路由调）。
+//   spec「受击即醒」。非睡觉态静默（cancelSleep 自守）。
+void PlayerController::wakeUp()
+{
+    cancelSleep();
+}
+
 // t304 在背包（hotbar 9 + main 27）查首格含箭（ArrowId）。优先 hotbar（入手语义同拾取），再 main。
 //   返 {found, group(0=hotbar/1=main), index}。找不到 found=false。供 endBowDraw 判「需箭」+ 生存消耗定位槽。
 PlayerController::ArrowSlot PlayerController::findArrowInInventory() const
@@ -1340,6 +1410,13 @@ void PlayerController::placeBlock()
     //   盖子开合动画）；ChestStore 据坐标寻址该箱子的 27 槽。机制等价 MC 右键箱子开物品栏。
     if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Chest) {
         emit chestOpened(m_hitBx, m_hitBy, m_hitBz);
+        return;
+    }
+    // t387/t388 右键床 → 尝试睡觉（useBlock 语义；优先于放置，同工作台 / 箱子模式：右键已放置的床即睡，不另放块）。
+    //   空手亦可（睡是「使用」语义，与手持何物无关）。命中格为任一床色变体（BlockRegistry::isBed）→ trySleepAt：
+    //   夜间 + 床周无怪物 → 进 fade 态（完成后跳清晨 + 设重生点）；白天 / 附近有怪物 → emit sleepRefused 文案。
+    if (BlockRegistry::isBed(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+        trySleepAt(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
     // t134 右键门 / 活板门 → 翻 state 开合（useBlock 语义；spec「door/trapdoor 右键 useBlock 翻 state 开合」）。

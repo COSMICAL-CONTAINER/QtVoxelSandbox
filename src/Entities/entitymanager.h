@@ -125,6 +125,10 @@ public:
     // t280 当前**活体**敌对生物数（hostile=true 且非 dead 的 Mob）。供刷怪调度判总数上限（kHostileMobCap）。
     //   含 Shambler/Bones；不含 passive（pig/cow/sheep/test）与 FallingBlock/Item。
     Q_INVOKABLE int hostileCount() const;
+    // t388 睡觉机制「床周有敌对即拒绝」判定：给定中心 center 与半径 radius（blocks），是否任一**活体敌对 mob**
+    //   （alive && kind==Mob && hostile && !dead）在其 3D 球内。机制等价 MC 1.0 床周 8 格内有敌对生物即不能睡。
+    //   const 只读自身数据；无实体 / 无命中 → false。由 PlayerController::trySleepAt（placeBlock useBlock 床分支）调。
+    Q_INVOKABLE bool hostileNearby(const QVector3D &center, float radius) const;
     // t280 第 i 个实体是否**敌对**（hostile=true 的活体 Mob）。QML 据它对 Shambler/Bones 显燃烧火焰 Model
     //   （passive 永不燃烧 → 火焰仅敌对会显）。越界 / 非 hostile → false。
     Q_INVOKABLE bool isHostileAt(int i) const;

@@ -58,6 +58,9 @@ class WorldClock : public QObject
     QML_NAMED_ELEMENT(WorldClock)
     Q_PROPERTY(float dayPhase READ dayPhase NOTIFY dayPhaseChanged)
     Q_PROPERTY(float skyLight READ skyLight NOTIFY dayPhaseChanged)
+    // t388 睡觉机制「夜间才能睡」判定：夜间 = 天光乘子 < 0.5（phase ∈ (0.25, 0.75)：黄昏→子夜→黎明）。
+    //   纯函数 dayPhase → bool（NOTIFY=dayPhaseChanged，与 skyLight 同信号派生）。
+    Q_PROPERTY(bool isNight READ isNight NOTIFY dayPhaseChanged)
     Q_PROPERTY(bool debugFast READ debugFast NOTIFY debugFastChanged)
     Q_PROPERTY(QVector3D sunDir READ sunDir NOTIFY sunChanged)
     Q_PROPERTY(float sunElevation READ sunElevation NOTIFY sunChanged)
@@ -68,6 +71,8 @@ public:
 
     float dayPhase() const { return m_phase; }
     float skyLight() const;     // 派生：天光乘子（纯函数 dayPhase → 亮度；PLAN §2-H）
+    // t388 夜间判定（sleep 机制用）：天光乘子 < 0.5（黄昏→子夜→黎明的暗半周期）。纯函数 dayPhase → bool。
+    bool isNight() const { return skyLight() < 0.5f; }
     bool debugFast() const { return m_debugFast; }
 
     // t123 太阳方向（量化步进更新；mesher 据此烘顶点光）。
@@ -78,6 +83,13 @@ public:
     // 调试加速键（呈现层按键调）：切 ~30s 周期，便于肉眼快速看一圈昼夜。仅调试便利、
     // 不影响生产节律常量（kDaySecs 不变；切换的是运行期所用周期）。
     Q_INVOKABLE void toggleDebugFast();
+
+    // t388 睡觉机制「跳清晨」（夜间右键床完成后由 PlayerController 调）：把时间**向前**快进到下一清晨
+    //   （phase 0.75 = 黎明）。PLAN §2-H 不变量 = 天光亮度乘子 lerp + **时间单向流逝** —— 本方法只**向前加**
+    //   m_elapsedMs（绝不回退），是 Game 层「睡觉快进」事件（机制等价 MC 1.0 全员睡觉跳清晨），非呈现层反向
+    //   写时间（与既有「无 setTime / 时间单向」精神一致：时间仍只增不减，只是离散跳跃一次）。即时重派生
+    //   phase + 太阳方向并 emit（不等下一 100ms tick），使昼夜亮度 / 顶点光同步跳到清晨。
+    Q_INVOKABLE void skipToDawn();
 
     // t155 编辑活跃期反馈入口（呈现层 QML 经 World::worldChanged 调）：记录「最近一次编辑」时间戳，
     //   供 onTick 判定编辑活跃期（近 kEditCooldownMs 内有编辑）→ 跳过太阳跨步全量重建，避免抢帧。

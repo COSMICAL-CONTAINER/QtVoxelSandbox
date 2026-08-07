@@ -1185,6 +1185,7 @@ Window {
                 }
                 playerState.takeDamage(finalAmt, cause)
             }
+            player.wakeUp()  // t388 受击即醒（mob 近战 / 箭 / 爆炸中断睡觉 fade；非 Survival 亦醒，防御）
         }
         // t284 Stalker 爆炸（EntityManager detonateStalker 发）：爆炸的单一音/视反馈入口 —— 播爆炸音
         //   （playExplosion）+ 白色迸发粒子（burstExplosion）。方块破坏走 setWaterSilent 不发 blockBroken
@@ -1253,6 +1254,7 @@ Window {
                 hotbarVM.damageArmor()
             }
             playerState.takeDamage(finalDmg, cause) // t311 透传致死来源（Fall/Suffocation/Drowning/Starvation/Fire）
+            player.wakeUp()  // t388 受击即醒（坠落/窒息/溺水/饥饿/燃烧中断睡觉 fade）
         }
         // t238 饥饿回血 → PlayerState.heal（饱腹态每 4s 回 1HP；同 fallDamageTaken→takeDamage 反向配对）。
         function onHealed(hp) { playerState.heal(hp) }
@@ -1262,6 +1264,8 @@ Window {
         // t238 饥饿值更新 → PlayerState.setHunger（Physics 层 m_hunger 推进 / 食用恢复时发；同 airUpdated→
         //   setAir 模式）。饥饿归零扣血复用 onFallDamageTaken（→ takeDamage → damaged 红闪 / 视角晃）。
         function onHungerUpdated(hunger) { playerState.setHunger(hunger) }
+        // t388 睡觉被拒（白天 / 附近有怪物）→ 系统播报中文文案（同死亡播报 appendChatMessage 模式）。
+        function onSleepRefused(reason) { window.appendChatMessage("", reason, true) }
         // t35：生存破可掉落方块（drop=true）→ player 发 spawnItem → 转发到 manager 生成实体。
         // 创造 / 不可采掘时 player 不发本信号（无实体产出）。ViewModel 不持有 PlayerController，
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
@@ -4458,6 +4462,18 @@ Window {
         SequentialAnimation on opacity { id: lightningFlashAnim; running: false
             NumberAnimation { from: 0.85; to: 0.0; duration: 300 }   // 满白闪现 → 300ms 淡到透明（雷击瞬时白闪）
         }
+    }
+
+    // t388 睡觉 fade 叠层（夜间右键床 → 全屏黑 ramp → 跳清晨后隐藏）：机制等价 MC 1.0 睡觉过渡。
+    //   状态驱动 = player.sleeping + player.sleepProgress（tickImpl 算时序、翻转才发 sleepingChanged；进度每 tick
+    //   发 sleepProgressChanged）。sleeping 期间随进度 ramp 到近全黑（×1.7 使前 ~60% 进度即达峰值，余为「闭眼」
+    //   停留）；sleeping=false（跳清晨完成 / 受惊醒）即隐藏 → 显清晨场景（睁眼见白昼）。纯 Rectangle 无 MouseArea
+    //   → 不拦截鼠标（同水下蓝雾 / 闪电白闪经验）。仅 playing 态显；放在 View3D 之后、HUD/背包/暂停叠层之前。
+    Rectangle {
+        anchors.fill: parent
+        visible: window.appState === "playing" && player.sleeping
+        color: "#000000"
+        opacity: Math.min(1.0, player.sleepProgress * 1.7) * 0.95
     }
 
     // t88 火把位置列表（火把伪光源 Repeater 的 model；blockPlaced/blockBroken/worldChanged 维护）。

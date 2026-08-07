@@ -285,6 +285,19 @@ int EntityManager::hostileCount() const
     return n;
 }
 
+// t388 床周敌对判定（sleep 机制「附近有怪物拒绝」）：任一活体敌对 mob 在 center 的 radius 球内 → true。
+//   3D 欧氏距离（含 Y，防楼上 / 洞下贴脸的敌对漏判）。const 只读自身数据。
+bool EntityManager::hostileNearby(const QVector3D &center, float radius) const
+{
+    const float r2 = radius * radius;
+    for (const Entity &e : m_entities) {
+        if (!e.alive || e.kind != Mob || !e.hostile || e.dead) continue;
+        const QVector3D d = e.pos - center;
+        if (d.lengthSquared() <= r2) return true;
+    }
+    return false;
+}
+
 // t280 第 i 个实体是否敌对（hostile=true 的活体 Mob）。越界 / 非敌对 → false。
 bool EntityManager::isHostileAt(int i) const
 {

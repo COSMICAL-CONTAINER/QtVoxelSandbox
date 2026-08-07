@@ -36,6 +36,34 @@ void WorldClock::toggleDebugFast()
     emit debugFastChanged();
 }
 
+// t388 睡觉跳清晨：把时间向前快进到下一黎明（phase 0.75）。只**加** m_elapsedMs（PLAN §2-H 时间单向）。
+//   isNight 下当前 phase ∈ (0.25, 0.75)，故通常 cur < target 直接补到 0.75；cur 已过 0.75（防御）则绕到
+//   下一周期 0.75。即时重派生 phase + 太阳方向 + emit（同 onTick 派生路径，但即时而非等下一 tick）。
+void WorldClock::skipToDawn()
+{
+    const float target = 0.75f;
+    const float cur = m_phase;
+    const float addFrac = (cur <= target) ? (target - cur) : ((1.0f - cur) + target);
+    m_elapsedMs += qint64(addFrac * periodSecs() * 1000.f);
+    // 重派生 phase（与 onTick 同取模路径，防浮点漂移）。
+    const float periodMs = periodSecs() * 1000.f;
+    qint64 wrapped = m_elapsedMs;
+    if (periodMs > 0.f) {
+        const qint64 p = qint64(periodMs);
+        if (p > 0) wrapped = m_elapsedMs % p;
+    }
+    m_phase = (periodMs > 0.f) ? float(wrapped) / periodMs : 0.f;
+    emit dayPhaseChanged(); // skyLight / isNight 派生于 phase，同信号刷新（QML 昼夜亮度即刻跳清晨）
+    // 太阳方向即时跳到清晨量化位（mesher 据此重建顶点光 / 影；同 onTick 的量化逻辑）。
+    if (kSunSteps > 0) {
+        int step = int(std::floor(m_phase * float(kSunSteps)));
+        if (step >= kSunSteps) step = kSunSteps - 1;
+        m_sunStep = step;
+        recomputeSun(float(step) / float(kSunSteps));
+        emit sunChanged();
+    }
+}
+
 // t155 编辑活跃期反馈：呈现层 QML 在 World::worldChanged 时调本方法，把「最近编辑」时间戳记为当前
 //   m_elapsedMs（与 onTick 跨步判定同基准）。onTick 据此判 editingActive() → 编辑活跃期跳过太阳跨步。
 //   仅记时间戳，不改时间本身（无 setTime，PLAN §2 时间单向流逝）。
