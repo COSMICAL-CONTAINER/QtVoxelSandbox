@@ -181,6 +181,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/crack_4.png
         textures/crack_5.png
         textures/sun.png
+        textures/cloud.png                # t384 云层贴图（build_cloud.py 程序生成可无缝平铺的云密度图；昼白夜灰由 baseColor 乘灰阶实现）
         textures/default_cobble.png
         textures/default_coal_ore.png
         textures/default_copper_ore.png          # t308 铜矿石贴图（build_ore.py 程序生成原创像素图；散布于 stone 浅中层 y∈[5,45]）

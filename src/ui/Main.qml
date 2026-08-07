@@ -135,6 +135,16 @@ Window {
     //   调高 = 整体暗部变亮（兼顾可辨识），调低 = 夜更黑（氛围）。洞穴 / 阴影顶点色地板另由 C++ kVcMin（0.08）托底。
     property real minLight: 0.4
 
+    // t384 云层漂移累积（单一时间权威 WorldClock.ticked 推进，不在 QML 另起 Timer，PLAN §2）。
+    //   云 Model 的 position.x = player.x + (cloudDrift) —— cloudDrift 随时间增长并在「一个 tile 世界宽」
+    //   处取模回绕（贴图可无缝平铺 → 回绕点无接缝），实现「缓慢漂移的无限云盖」。driftSpeed=1.5 格/s。
+    property real cloudDrift: 0.0
+    readonly property real kCloudDriftSpeed: 1.5    // 云漂移速度（格/秒；MC 云缓慢漂移）
+    readonly property real kCloudPlaneSize: 600.0   // 云平面边长（世界格；远超 5×5 世界 80×80 边界）
+    readonly property real kCloudTiles: 12.0        // 贴图重复次数（scaleU/V；一 tile = 平面宽/重复数）
+    readonly property real kCloudTileWorld: 600.0 / 12.0   // 一个 tile 的世界宽 = 漂移回绕周期（=50 格）
+    readonly property real kCloudAltitude: 90.0     // 云盖在玩家眼位之上的高度（格；始终在头顶上方）
+
     // t166b 阴影开关（用户「卡顿疑似阴影所致，加开关测」）：false → 全 chunk sunShadowAt 返 0（关 PCF 软影，
     //   meshing 提速；顶点光基底只剩 flood-fill 光场）。ESC 设置面板开关绑此。默认 true。
     property bool shadowsEnabled: true
@@ -940,6 +950,15 @@ Window {
                        1.0)
     }
     function dayNightBrightness(m) { return 0.25 + (1.5 - 0.25) * m }
+
+    // t384 云层 baseColor（昼白 / 夜灰暗）：m=worldClock.skyLight ∈ [0,1]（0=子夜、1=正午）。
+    //   lerp 灰阶 0.30(夜)↔1.0(昼)：夜云呈暗灰（用户「grey/dark night」）、昼云呈白（「white day」）。
+    //   纯灰阶（不偏色）—— 与地形 terrainLight 同设计：夜色基调由 sky clearColor 提供，云只调明度。
+    //   NoLighting 材质下最终色 = baseColor × 贴图（白）→ baseColor 直接决定云的明暗。
+    function cloudColor(m) {
+        const k = 0.30 + (1.0 - 0.30) * m
+        return Qt.rgba(k, k, k, 1.0)
+    }
 
     // t121：地形 chunk 顶点色现已承载天光遮蔽（见天 1.0 / 地下 0.2，mesher 按 chunk heightmap 烘焙进
     //   ColorSemantic）。移除原 nightTint 全屏叠层后，昼夜天光乘子改由材质 baseColor（灰阶亮度）承载——
@@ -1975,6 +1994,41 @@ Window {
                 lighting: PrincipledMaterial.NoLighting
                 baseColor: "#ffffff"   // 白底乘贴图（纹理原色直出）
                 baseColorMap: Texture { source: "qrc:/textures/sun.png" } // 太阳贴图（实心不透明盘）
+            }
+        }
+
+        // t384 高空云盖（机制等价 MC 1.0 漂移云层；§9 自绘 cloud.png，零 MC 资产）：一张覆盖整片天空的
+        //   大水平四边形（BillboardQuad 绕 X 转 90° 摊平成 XZ 平面、前向法线朝下 -Y → 从下方抬头可见），
+        //   贴可无缝平铺的 cloud.png（scaleU/V=12 重复）→ 缝里透出 sky clearColor、云团处显白/灰。
+        //   缓慢漂移：position.x = player.x + cloudDrift（cloudDrift 由 WorldClock.ticked 按 1.5 格/s 累积、
+        //   每 50 格回绕；贴图可无缝平铺 → 回绕无接缝）→ 抬头见自然漂移的云盖。X/Z 跟随玩家 → 始终覆盖头顶。
+        //   昼夜变色：baseColor = cloudColor(skyLight)（昼白 / 夜灰暗）。Y = 眼位 + 90（始终在头顶上方）。
+        //   lit 红线：PrincipledMaterial 必须 NoLighting（同地形 / 太阳已验证可见路径；lessons-learned）。
+        //   alpha：贴图存云密度（云 alpha、缝 alpha=0），材质 opacity<1 走透明通道 → 缝透出天空、云半透。
+        //   alphaCutoff:0.02 仅丢弃近乎全透像素（保柔边 + 杜绝「透明底当不透明黑」黑底回退，t169 同族契约）。
+        //   分层（PLAN §2）：纯呈现层，只读 worldClock.skyLight（Game 层 Q_PROPERTY）+ player.position，绝不反向写。
+        Model {
+            geometry: BillboardQuad {}
+            // 绕 X 转 90°：BillboardQuad（XY 平面、前向 +Z）→ XZ 水平面、前向 -Y（朝下，抬头可见）。
+            eulerRotation: Qt.vector3d(90, 0, 0)
+            scale: Qt.vector3d(window.kCloudPlaneSize, window.kCloudPlaneSize, window.kCloudPlaneSize)
+            position: {
+                const eye = player.position
+                return Qt.vector3d(eye.x + window.cloudDrift, eye.y + window.kCloudAltitude, eye.z)
+            }
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                baseColor: cloudColor(worldClock.skyLight)
+                opacity: 0.9
+                alphaCutoff: 0.02
+                baseColorMap: Texture {
+                    source: "qrc:/textures/cloud.png"
+                    generateMipmaps: false
+                    scaleU: window.kCloudTiles
+                    scaleV: window.kCloudTiles
+                    tilingModeHorizontal: Texture.Repeat
+                    tilingModeVertical: Texture.Repeat
+                }
             }
         }
 
@@ -5885,6 +5939,9 @@ Window {
             //   纯 QML 桥接（同 tickCropGrowth/tickSaplingGrowth 模式）。tickLeafDecay 内部对稳态（无失撑叶 /
             //   本窗无命中）静默 → 无写入、无重建开销。
             theWorld.tickLeafDecay()
+            // t384 云层漂移累积：单一时间权威（PLAN §2）—— 云缓慢漂移用世界时钟 tick 推进，不在 QML 另起 Timer。
+            //   cloudDrift 在「一个 tile 世界宽」处取模回绕（贴图可无缝平铺 → 回绕点无接缝）。
+            window.cloudDrift = (window.cloudDrift + dt * window.kCloudDriftSpeed) % window.kCloudTileWorld
         }
     }
 
