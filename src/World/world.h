@@ -146,6 +146,13 @@ public:
     Q_INVOKABLE quint8 stateAt(int x, int y, int z) const;
     Q_INVOKABLE bool setBlock(int x, int y, int z, quint8 id, quint8 state);
 
+    // t406 耕地湿润等级（spec「被附近水湿润、4 级湿润、越湿作物长得越快」）：给定耕地格 (x,y,z)，扫水源
+    //   切比雪夫半径 4 水平 + 同/下一层（y / y-1，机制等价 MC farmland hydration 同高或低 1 层水均滋润），
+    //   取最近水源切比雪夫距离 → 映射等级：dist 1→3、2→2、3→1、≥4/无水→0（共 4 级 0..3，越近水越湿）。
+    //   唯一水源邻近判定权威：耕地时（playercontroller 锄头分支）写一次 + tickFarmlandHydration 周期复算。
+    //   只读 m_chunks.blockAt（向下依赖）；世界空 → 0（干态兜底）。非 Q_INVOKABLE（C++ 调）。
+    int farmlandHydrationLevel(int x, int y, int z) const;
+
     // t117/t220 FallingBlock 着地专用：经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + 边界邻接，同 setBlock
     //   的写入路径）+ emit worldChanged（驱动 mesh 重建），但**不**发 blockPlaced（与玩家放置语义分离）。
     //   沿用 worldgen 经 m_chunks.setBlock 直写不触发 blockPlaced 的既有约定——避免 onBlockPlaced 的 survival
@@ -205,6 +212,21 @@ public:
     //   worldChanged（无重建、无开销）。spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickCropGrowth();
+    // t406 甘蔗生长 tick（spec「甘蔗 max5、仅邻水处长高」）：由呈现层 Main.qml 经 WorldClock.ticked 桥接调用
+    //   （每 100ms 一 tick；节流到 ~每 kSugarcaneTickInterval×0.1s 一窗）。机制等价 MC 1.0 sugar cane 生长
+    //   （random-tick 散布概率升柱）：扫甘蔗柱顶（上方为空气的甘蔗格），据柱基是否邻水（4 水平邻于基 / 基下一层）
+    //   + 柱高 < kSugarcaneMaxHeight(5) + 确定性散布概率 → 命中即在柱顶上方一格长一格（setWaterSilent 静默写，
+    //   无破/放反馈，机制等价 MC「甘蔗生长无反馈」）。柱基不邻水 → 永不长（满足 spec「仅邻水处长高」）；
+    //   柱高已达 5 → 停长。稳态（无甘蔗 / 全满高 / 全不邻水）每窗无变化 → 不发 worldChanged。散布确定性哈希
+    //   （seed + 位置 + 窗口序号，PLAN §2-K，同 tickCropGrowth/tickSaplingGrowth）。分层（PLAN §2）：World 层，
+    //   只读 / 写 m_chunks + 发 worldChanged。不依赖 Renderer/Physics/Game。
+    Q_INVOKABLE void tickSugarcaneGrowth();
+    // t406 耕地湿润复算 tick（spec「被附近水湿润、4 级」的动态实现）：由呈现层 Main.qml 经 WorldClock.ticked 桥接
+    //   （每 100ms 一 tick；节流到 ~每 kFarmlandHydrTickInterval×0.1s 一窗）。扫全图 Farmland 格，逐格用
+    //   farmlandHydrationLevel 复算湿润等级；与存档 state 低 2 位不等则 setWaterSilent 静默写新等级（驱动 mesher
+    //   顶点色暗化重建 → 肉眼见近水耕地变深、远水耕地渐干）。机制等价 MC 1.0 farmland 随机 tick 补/失水（玩家后放
+    //   水 / 挖水 → 耕地湿润度随之变）。稳态（湿润度全不变）每窗零写入、零 worldChanged。分层（PLAN §2）：World 层。
+    Q_INVOKABLE void tickFarmlandHydration();
     // t305 树苗生长 tick（spec「树苗种植→长大成完整树（时间推进）」）：由呈现层 Main.qml 经 WorldClock.ticked
     //   桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kSaplingTickInterval×0.1s 做一次成长判定）。
     //   机制等价 MC 1.0 树苗生长（random-tick 式散布概率）：树苗在草地 / 泥土支撑 + 头顶光照足 + 主干列空气
@@ -533,6 +555,23 @@ private:
     static constexpr int kCropTickInterval = 25;  // tickCropGrowth 节流间隔（WorldClock tick 单位 = 100ms → 2.5s/窗）
     static constexpr int kCropMinLight     = 9;   // 生长所需最低天光（/15；机制等价 MC 作物 light level 9+）
     static constexpr int kCropGrowPct      = 35;  // 每窗每株升阶段的散布概率（%；35% → 平均 ~7s/阶段）
+    // t406 甘蔗生长 tick 节流计数 + 常量：tickSugarcaneGrowth() 每 100ms 被 WorldClock.ticked 调一次；累积到
+    //   kSugarcaneTickInterval 才做一次生长判定（~每 kSugarcaneTickInterval×0.1s 一窗）。窗口序号
+    //   m_sugarcaneIntervalIndex 每窗 +1 喂入 hashVoxel 散布概率 → 不同甘蔗柱错峰生长。
+    //   kSugarcaneTickInterval=50（5s/窗）+ kSugarcaneGrowPct=20% → 每柱每升一格平均 ~25s（从 1 到 5 共 4 升 ~100s；
+    //   可见、可验收；MC 1.0 约 ~每 16 ticks 一次随机 tick 取快便于肉眼复核，机制对齐非精确数值复刻）。
+    //   kSugarcaneMaxHeight=5：甘蔗柱最高 5 格（spec「max5」；worldgen 初生 1..3，生长补到 5）。
+    int m_sugarcaneTickCounter = 0;
+    int m_sugarcaneIntervalIndex = 0;
+    static constexpr int kSugarcaneTickInterval = 50; // tickSugarcaneGrowth 节流间隔（WorldClock tick = 100ms → 5s/窗）
+    static constexpr int kSugarcaneGrowPct      = 20; // 每窗每柱升一格的散布概率（%；20% → 平均 ~25s/升）
+    static constexpr int kSugarcaneMaxHeight    = 5;  // 甘蔗柱最高格数（spec「max5」；超出停长）
+    // t406 耕地湿润复算 tick 节流计数 + 常量：tickFarmlandHydration() 每 100ms 被 WorldClock.ticked 调一次；累积到
+    //   kFarmlandHydrTickInterval 才复算一次（~每 kFarmlandHydrTickInterval×0.1s 一窗）。复算用
+    //   farmlandHydrationLevel（水源切比雪夫半径 4）→ 与存档 state 不等才静默写新等级。kFarmlandHydrTickInterval=30
+    //   （3s/窗）→ 后放水 / 挖水约 3s 内耕地湿润度更新（可见、可验收；MC 1.0 走 random tick 较慢，取快便于肉眼复核）。
+    int m_farmlandHydrTickCounter = 0;
+    static constexpr int kFarmlandHydrTickInterval = 30; // tickFarmlandHydration 节流间隔（100ms → 3s/窗）
     // t305 树苗生长 tick 节流计数 + 常量：tickSaplingGrowth() 每 100ms 被 WorldClock.ticked 调一次；
     //   累积到 kSaplingTickInterval 才做一次成长判定（~每 kSaplingTickInterval×0.1s 一窗）。窗口序号
     //   m_saplingIntervalIndex 每窗 +1，喂入 hashVoxel 散布概率 → 不同窗口不同树苗错峰生长。

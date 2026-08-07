@@ -1671,12 +1671,12 @@ void PlayerController::placeBlock()
         if (heldItemId != RecipeRegistry::SeedId) return;
     }
     // t234 锄头 useBlock（spec「持锄右键泥土/草方块→变耕地」）：手持为 Hoe 类工具（木/石/铁锄）+ 命中格为
-    //   Dirt/Grass → 该格转 Farmland（干/湿由 isFarmlandMoist 据水源邻近快照判定写 state bit0）。机制等价
-    //   MC 1.0 锄耕地（机制对齐，非名词照搬）。锄非方块（工具段 id>=0x100）→ selectedBlock 归 Air，须在下方
-    //   `m_selectedBlock == Air` 守卫之前分流（同桶分支模式）。命中非泥土/草（如石头/沙）→ 不耕不挥（锄对非
-    //   可耕地无效应，机制等价 MC 锄石头无反应）。spectator 已被入口 canPlace() 守卫拦截（耕地经 placeBlock
-    //   入口，沿用既有放置门控；spectator 不交互）；Creative / Survival 均可耕。tier 当前仅记账（不驱动耕地耗时，
-    //   spec t233「tier 驱动未来耕地等级，留后续任务」）→ 任何 tier 锄一键成耕地。
+    //   Dirt/Grass → 该格转 Farmland（湿润等级由 World::farmlandHydrationLevel 据水源邻近判定写 state 低 2 位；
+    //   t406 4 级湿润，darker=wetter）。机制等价 MC 1.0 锄耕地（机制对齐，非名词照搬）。锄非方块（工具段 id>=0x100）
+    //   → selectedBlock 归 Air，须在下方 `m_selectedBlock == Air` 守卫之前分流（同桶分支模式）。命中非泥土/草
+    //   （如石头/沙）→ 不耕不挥（锄对非可耕地无效应，机制等价 MC 锄石头无反应）。spectator 已被入口 canPlace()
+    //   守卫拦截（耕地经 placeBlock 入口，沿用既有放置门控；spectator 不交互）；Creative / Survival 均可耕。tier
+    //   当前仅记账（不驱动耕地耗时，spec t233「tier 驱动未来耕地等级，留后续任务」）→ 任何 tier 锄一键成耕地。
     //   分层（PLAN §2）：耕地属 Game/Physics（读射线命中 + 写 World + 读水源邻近），不改 setBlock 语义。
     if (m_hotbar && m_world) {
         const ToolRegistry::ToolDef *const td = ToolRegistry::tool(heldItemId);
@@ -1684,12 +1684,12 @@ void PlayerController::placeBlock()
             if (m_hasHit) {
                 const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
                 if (hitId == BlockRegistry::Dirt || hitId == BlockRegistry::Grass) {
-                    const quint8 moist = isFarmlandMoist(m_hitBx, m_hitBy, m_hitBz)
-                                         ? BlockRegistry::FarmlandMoistBit : quint8(0);
-                    // setBlock(id, state)：5 参数版写 Farmland + 干/湿 state（id 变 Dirt/Grass→Farmland，
+                    // t406 湿润等级 0..3（World::farmlandHydrationLevel 据水源切比雪夫半径 4 算出；近水→湿，darker=wetter）。
+                    const int hydr = m_world->farmlandHydrationLevel(m_hitBx, m_hitBy, m_hitBz);
+                    // setBlock(id, state)：5 参数版写 Farmland + 湿润等级 state（id 变 Dirt/Grass→Farmland，
                     //   走写入路径发 blockBroken(Dirt/Grass) + blockPlaced(Farmland) + worldChanged → 即时重建 mesh；
                     //   粒子/音由呈现层按事件消费）。swingArm 驱动挥锄动画。
-                    m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Farmland, moist);
+                    m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Farmland, quint8(hydr));
                     // t263 锄耕地消耗 1 点耐久（机制等价 MC「锄每耕 1 格 -1 耐久」）。Survival 限定（创造不耗）；
                     //   damageSelectedItem 对当前选中槽的锄 -1，归零自动清槽（锄破损消失）。
                     if (m_mode == Survival) m_hotbar->damageSelectedItem();
@@ -2349,26 +2349,6 @@ int PlayerController::horizontalFacing() const
     const float fx = -std::sin(yr), fz = -std::cos(yr);
     if (std::fabs(fx) >= std::fabs(fz)) return fx > 0.0f ? 0 : 1; // +X / -X
     return fz > 0.0f ? 2 : 3;                                     // +Z / -Z
-}
-
-// t234 耕地水源邻近判定（spec「水源邻近判定湿润」）：扫水平 ±kFarmlandWaterRadius 格、本层 + 下一层
-//   （y / y-1，机制等价 MC farmland hydration：水在耕地同高或低 1 层、水平 4 格内即滋润）有无 Water 方块。
-//   命中任一水格即判湿润（远水/无水 → 干）。仅耕地（placeBlock 锄头分支）时调一次 —— 快照判定，非动态补水
-//   （动态补水需 random tick 系统，属后续任务）。只读 World::blockAt（向下依赖）；无世界 → false（干态兜底）。
-bool PlayerController::isFarmlandMoist(int x, int y, int z) const
-{
-    if (!m_world) return false;
-    const int r = kFarmlandWaterRadius;
-    for (int dy = 0; dy >= -1; --dy) {       // 本层 y + 下一层 y-1（MC 同高/低 1 层水均滋润耕地）
-        const int yy = y + dy;
-        for (int dx = -r; dx <= r; ++dx) {
-            for (int dz = -r; dz <= r; ++dz) {
-                if (m_world->blockAt(x + dx, yy, z + dz) == BlockRegistry::Water)
-                    return true;
-            }
-        }
-    }
-    return false;
 }
 
 QVector3D PlayerController::wishHoriz() const

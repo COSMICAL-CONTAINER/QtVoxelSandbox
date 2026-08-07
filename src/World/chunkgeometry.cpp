@@ -175,8 +175,9 @@ void ChunkGeometry::onWorldChanged()
 
 // 查表（单一权威：BlockRegistry）。行为与历史硬编码一致：草顶/草侧/草底、其余各面统一。
 //   t225 箱子特例：前面（锁面 chest_front）所朝面由 state 决定（放置时朝玩家），其余三侧面 chest_side、
-//   顶/底 chest_top。t234 耕地特例：顶面（+Y）据 state bit0 选 farmland_dry(干)/farmland_wet(湿)；其余面 =
-//   dirt（侧/底）。其余方块 state inert（tileFor 退化为 stateless BlockRegistry::tileIndex）。
+//   顶/底 chest_top。t234 耕地特例：顶面（+Y）恒 farmland_dry(26) 贴图，湿润等级（state 低 2 位）由顶点色
+//   暗化体现（darker=wetter，见 buildMesh 内 farmlandHydrBrightMul）；其余面 = dirt（侧/底）。其余方块 state
+//   inert（tileFor 退化为 stateless BlockRegistry::tileIndex）。
 int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
 {
     // face: 0=+X 1=-X 2=+Y(顶) 3=-Y(底) 4=+Z 5=-Z（须与 BlockRegistry::Face 一致）
@@ -188,16 +189,25 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
             return d.topTile;                                            // 顶/底 = chest_top
         return d.sideTile;                                               // 其余三侧面 = chest_side
     }
-    // t234 耕地：顶面（+Y）据 state bit0（FarmlandMoistBit）选干(26)/湿(27)；底/侧 = dirt(2)。
-    //   dry/wet 仅顶面区别（机制等价 MC 耕地干/湿仅顶面贴图异）；侧/底恒泥土。
+    // t234/t406 耕地：顶面（+Y）恒 farmland_dry(26)（topTile）；湿润等级 0..3（state 低 2 位）由顶点色暗化
+    //   体现（darker=wetter，见 buildMesh 内 farmlandHydrBrightMul），不再切换 dry/wet 两贴图（4 级靠顶点色
+    //   连续暗化实现，无需扩图集 + 2 贴图）。侧/底 = dirt(2)。
     if (block == BlockRegistry::Farmland) {
         if (face == int(BlockRegistry::Top))
-            return (state & BlockRegistry::FarmlandMoistBit)
-                   ? BlockRegistry::def(block).frontTile   // 湿态：借用 frontTile 字段存 farmland_wet(27)
-                   : BlockRegistry::def(block).topTile;    // 干态：topTile = farmland_dry(26)
-        return BlockRegistry::def(block).sideTile;         // 侧/底 = dirt(2)
+            return BlockRegistry::def(block).topTile;     // farmland_dry(26) —— 湿润由顶点色暗化体现
+        return BlockRegistry::def(block).sideTile;        // 侧/底 = dirt(2)
     }
     return BlockRegistry::tileIndex(block, BlockRegistry::Face(face));
+}
+
+// t406 耕地湿润度 → +Y 顶面顶点色暗化系数（darker=wetter；机制等价 MC 耕地越湿顶面越深）。
+//   level 0（干）×1.00 不暗化 → 浅色 farmland_dry 贴图本色；level 3（最湿，邻水 dist 1）×0.46 → 明显深暗。
+//   仅作用于顶点色（vc 已含天光/方光/软影）→ 既保光照信息又叠加湿润暗化。湿等级进 greedy 合并键
+//   （MaskEntry.hydr）→ 不同湿润度的耕地顶面不共面误并（各保留各自暗化）。
+float ChunkGeometry::farmlandHydrBrightMul(quint8 hydr) const
+{
+    static constexpr float kTbl[4] = { 1.00f, 0.82f, 0.64f, 0.46f };
+    return (hydr <= BlockRegistry::FarmlandHydrationMax) ? kTbl[hydr] : kTbl[0];
 }
 
 // t153 PCF 软影（方案③：t151 顶点光基底 + heightmap 正交深度图 PCF 0..1 软过渡）。
@@ -496,7 +506,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
             //   PCF 软影仍 per-vertex（同 t153：合并 quad 四角各自 sunShadowAt → 影边光栅化平滑过渡）。
             //   贴图在合并 quad 上**拉伸**铺满（图集路径权衡：逐格平铺需纹理数组 = 自研 RHI 路径，已记录
             //   为推迟偏差 dev-plan 1/2 / PLAN §2-I）。greedyMeshing=false 可回退逐格 culled（清晰贴图）。
-            struct MaskEntry { bool valid = false; int tile = 0; quint8 sky = 0; quint8 block = 0; };
+            struct MaskEntry { bool valid = false; int tile = 0; quint8 sky = 0; quint8 block = 0; quint8 hydr = 0; }; // t406 hydr = Farmland +Y 顶面湿润等级（进合并键防不同湿润度共面误并）
             std::vector<MaskEntry> mask;
             // 各面 UV 轴映射（须与历史逐格 culled 的 cu/cv 规则一致：±X cu=Z,cv=Y；±Y cu=X,cv=Z；±Z cu=X,cv=Y）。
             static const int kUVAxes[6][2] = {
@@ -550,9 +560,14 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             e.valid = true;
                             // t225 箱子前面朝向由 state 决定（其余方块 state inert）→ mask tile 含 state，
                             //   不同朝向的相邻箱子在前侧面自然不合并（侧/顶/底面仍同 tile 可合并）。
-                            e.tile = tileFor(blk, f, stateAtWorld(wx, ly, wz));
+                            const quint8 st = stateAtWorld(wx, ly, wz);
+                            e.tile = tileFor(blk, f, st);
                             e.sky = m_world->skyLightAt(ax, ay, az);
                             e.block = m_world->blockLightAt(ax, ay, az);
+                            // t406 耕地湿润等级进合并键：仅 Farmland +Y 顶面带等级（侧/底 + 非耕地 = 0），
+                            //   → 不同湿润度的耕地顶面不共面误并（各保留各自顶点色暗化，darker=wetter 清晰可辨）。
+                            e.hydr = (blk == BlockRegistry::Farmland && f == int(BlockRegistry::Top))
+                                     ? quint8(st & BlockRegistry::FarmlandHydrationMask) : quint8(0);
                         }
                     }
                     // 贪婪合并 (a,b) 平面 → 矩形（先沿 axisA 扩宽 w，再沿 axisB 扩高 h）。
@@ -562,9 +577,11 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (!cur.valid) continue;
                             const int curTile = cur.tile;
                             const quint8 curSky = cur.sky, curBlock = cur.block;
+                            const quint8 curHydr = cur.hydr; // t406 耕地湿润等级（进合并键）
                             auto same = [&](int aa, int bb) {
                                 const MaskEntry &o = mask[aa * sizeB + bb];
-                                return o.valid && o.tile == curTile && o.sky == curSky && o.block == curBlock;
+                                return o.valid && o.tile == curTile && o.sky == curSky
+                                       && o.block == curBlock && o.hydr == curHydr;
                             };
                             int w = 1;
                             while (a + w < sizeA && same(a + w, b)) ++w;
@@ -580,6 +597,8 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             const float u0 = curTile * tileW + hx, u1 = (curTile + 1) * tileW - hx;
                             const float nbSkyF = curSky / 15.0f;
                             const float nbBlockF = curBlock / 15.0f;
+                            // t406 耕地 +Y 顶面湿润暗化（curHydr>0 仅耕地顶面；其余面 / 非耕地 = 1.0 不影响）。
+                            const float brightMul = farmlandHydrBrightMul(curHydr);
                             const int cuAxis = kUVAxes[f][0], cvAxis = kUVAxes[f][1];
                             const quint32 base = quint32(verts.size());
                             for (int cc = 0; cc < 4; ++cc) {
@@ -601,7 +620,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
                                 v.u = u0 + cu * (u1 - u0);
                                 v.v = v0 + cv * (v1 - v0);
-                                v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f;
+                                v.r = vc * brightMul; v.g = vc * brightMul; v.b = vc * brightMul; v.a = 1.0f; // t406 brightMul = 耕地湿润暗化（非耕地 = 1.0）
                                 verts.append(v);
                             }
                             idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);
@@ -642,11 +661,15 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (isLava && nb == BlockRegistry::Lava) continue;
                             // t405 玻璃-玻璃面互剔（Glass solid=false → isSolid(nb) 不剔除玻璃邻；显式剔除避免两玻璃共面重复绘制）。
                             if (isGlass && nb == BlockRegistry::Glass) continue;
-                            const int t = tileFor(b, f, stateAtWorld(wx, ly, wz)); // t225 箱子前面朝向由 state 决定
+                            const quint8 st = stateAtWorld(wx, ly, wz); // t225/t406 箱子前面朝向 / 耕地湿润由 state 决定
+                            const int t = tileFor(b, f, st); // t225 箱子前面朝向由 state 决定
                             const float u0 = t * tileW + hx, u1 = (t + 1) * tileW - hx;
                             const int ax = wx + F.dir[0], ay = ly + F.dir[1], az = wz + F.dir[2];
                             const float nbSkyF = m_world->skyLightAt(ax, ay, az) / 15.0f;
                             const float nbBlockF = m_world->blockLightAt(ax, ay, az) / 15.0f;
+                            // t406 耕地 +Y 顶面湿润暗化（darker=wetter；仅 Farmland 顶面带等级，其余 = 1.0）。
+                            const float brightMul = (b == BlockRegistry::Farmland && f == int(BlockRegistry::Top))
+                                ? farmlandHydrBrightMul(quint8(st & BlockRegistry::FarmlandHydrationMask)) : 1.0f;
                             const quint32 base = quint32(verts.size());
                             for (int cc = 0; cc < 4; ++cc) {
                                 const float dx = F.c[cc][0], dy = F.c[cc][1], dz = F.c[cc][2];
@@ -662,7 +685,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
                                 v.u = u0 + cu * (u1 - u0);
                                 v.v = v0 + cv * (v1 - v0);
-                                v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f; // t151 光场 × t153 PCF 软影顶点色
+                                v.r = vc * brightMul; v.g = vc * brightMul; v.b = vc * brightMul; v.a = 1.0f; // t151 光场 × t153 PCF 软影顶点色 × t406 耕地湿润暗化（非耕地 brightMul=1.0）
                                 verts.append(v);
                             }
                             idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);

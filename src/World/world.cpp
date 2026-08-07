@@ -676,7 +676,13 @@ void World::tickCropGrowth()
         //   群系解析）→ 本窗生长概率翻倍（机制等价 MC 雨水加速作物生长 / 维持耕地湿润）。降水是世界态（m_weather）
         //   运行期模拟，故此判定打破「确定性哈希」纯函数性 —— 与 rain 灭火同理（动态天气影响世界模拟，合理）。
         const bool cropRained = (m_chunks.skyLightAt(c.x, c.y, c.z) >= 15) && isPrecipitatingAt(c.x, c.z);
-        const int growPct = cropRained ? (kCropGrowPct * 2) : kCropGrowPct;
+        // t406 耕地湿润加速作物（spec「越湿作物长得越快」）：读支撑耕地 state 低 2 位湿润等级（0..3），等级越高
+        //   升阶段概率倍率越大（dry 1× → wettest 4×）。湿润等级由 tickFarmlandHydration 据水源邻近距离周期复算 →
+        //   近水耕地种的小麦明显比远水快长（机制等价 MC farmland moisture 加速作物生长）。全 int 运算避符号告警。
+        const int hydr = int(m_chunks.stateAt(c.x, c.y - 1, c.z) & BlockRegistry::FarmlandHydrationMask);
+        const int hydrMul = 1 + hydr; // 1×（干）.. 4×（最湿）
+        int growPct = (cropRained ? (kCropGrowPct * 2) : kCropGrowPct) * hydrMul;
+        if (growPct > 100) growPct = 100; // 钳到散布概率上界（% 运算域 [0,100)）
         // 确定性散布概率：纯函数于 seed + 位置 + 窗口序号（PLAN §2-K 精神：worldgen 确定性；此处生长模拟亦
         //   走确定性哈希，无 Math.random / 时间源 → 同 seed 同窗口序号下结果一致，便于复现）。全 int 运算
         //   避免符号转换告警（hashVoxel 参数为 int）。
@@ -696,6 +702,122 @@ void World::tickCropGrowth()
         setWaterSilent(g.x, g.y, g.z, BlockRegistry::WheatCrop, quint8(g.stage + 1));
 
     ++m_cropIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同株错峰）
+}
+
+// t406 耕地湿润等级（见 world.h 头注释）。扫水源切比雪夫半径 4 水平 + 同 / 下一层（y / y-1），取最近水源
+//   切比雪夫水平距离 → 映射 4 级 0..3（越近水越湿）。机制等价 MC 1.0 farmland hydration（同高 / 低 1 层水滋润、
+//   半径 4 内湿润）。只读 m_chunks.blockAt（向下依赖）；世界空 → 0（干态兜底）。
+int World::farmlandHydrationLevel(int x, int y, int z) const
+{
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return 0;
+    constexpr int kRadius = 4; // MC 1.0 farmland hydration 半径（水同高 / 低 1 层、水平 4 格内即滋润）
+    int bestDist = kRadius + 1; // 超半径哨兵（= 无水 → 干）
+    for (int dy = 0; dy >= -1; --dy) {       // 本层 y + 下一层 y-1（同 / 低 1 层水均滋润）
+        const int yy = y + dy;
+        for (int dx = -kRadius; dx <= kRadius; ++dx) {
+            for (int dz = -kRadius; dz <= kRadius; ++dz) {
+                if (m_chunks.blockAt(x + dx, yy, z + dz) != BlockRegistry::Water) continue;
+                const int d = std::max(std::abs(dx), std::abs(dz)); // 切比雪夫水平距离
+                if (d < bestDist) bestDist = d;
+            }
+        }
+    }
+    // 距离 → 等级：dist 1→3、2→2、3→1、≥4/无水→0（4 级 0..3，darker=wetter）。
+    const int level = kRadius - bestDist; // dist 1→3、2→2、3→1、4→0、哨兵(5)→-1
+    return (level > 0) ? level : 0;
+}
+
+// t406 甘蔗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 sugar cane random-tick 生长。
+void World::tickSugarcaneGrowth()
+{
+    if (++m_sugarcaneTickCounter < kSugarcaneTickInterval) return; // 节流：每 kSugarcaneTickInterval tick（~5s）一窗
+    m_sugarcaneTickCounter = 0;
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+
+    // 1) 快照柱顶甘蔗格（上方为空气的甘蔗格 = 有长高余地的柱顶；中间 / 底格上方是甘蔗 → 非柱顶，跳过）。
+    struct SCell { int x, y, z; };
+    std::vector<SCell> tops;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y) {
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::Sugarcane) continue;
+                if (y + 1 >= H) continue;                                  // 柱顶贴世界顶 → 无上方空间，不长
+                if (m_chunks.blockAt(x, y + 1, z) != BlockRegistry::Air) continue; // 上方非空气（被挡）→ 非可长柱顶
+                tops.push_back({x, y, z});
+            }
+    if (tops.empty()) { ++m_sugarcaneIntervalIndex; return; }
+
+    // 散布种子混入窗口序号（每窗一新种子 → 每柱每窗一新伪随机滚，错峰生长；全 int 运算避符号转换告警）。
+    const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_sugarcaneIntervalIndex) * 0x9E3779B9u));
+
+    // 2) 逐柱顶判定：找柱基（向下走到非甘蔗）+ 算柱高 + 柱基邻水 → 散布概率升一格。
+    std::vector<SCell> grows;
+    for (const SCell &t : tops) {
+        // 找柱基（向下走到下方非甘蔗格；世界底兜底）。柱基 = 这株甘蔗的「根」格（其下为草地 / 沙地 / 泥土支撑）。
+        int by = t.y;
+        while (by - 1 >= 0 && m_chunks.blockAt(t.x, by - 1, t.z) == BlockRegistry::Sugarcane) --by;
+        const int height = t.y - by + 1; // 柱高（含柱顶）
+        if (height >= kSugarcaneMaxHeight) continue; // 已达 5 格上限 → 停长（spec「max5」）
+
+        // 柱基邻水判定（4 水平邻于基 y / 基下一层 y-1）：与 worldgen placeSugarcane 同语义（草 / 沙顶邻水）。
+        //   基下一层 = 草 / 沙地格（worldgen 在 surfaceY 查水）；基层查水兼容沼泽浅水（placeSwampPools 改草顶为水）。
+        //   不邻水 → 永不长（spec「仅邻水处长高」）。
+        auto wateredAt = [&](int yy) -> bool {
+            if (yy < 0 || yy >= H) return false;
+            const int nx[4] = { t.x + 1, t.x - 1, t.x,     t.x };
+            const int nz[4] = { t.z,     t.z,     t.z + 1, t.z - 1 };
+            for (int i = 0; i < 4; ++i) {
+                const int ax = nx[i], az = nz[i];
+                if (ax < 0 || az < 0 || ax >= W || az >= D) continue;
+                if (m_chunks.blockAt(ax, yy, az) == BlockRegistry::Water) return true;
+            }
+            return false;
+        };
+        if (!wateredAt(by) && !wateredAt(by - 1)) continue; // 柱基两层均不邻水 → 不长
+
+        // 确定性散布概率（PLAN §2-K 精神，同 tickCropGrowth）。
+        const quint32 h = hashVoxel(mixedSeed, t.x, t.y, t.z);
+        if (int(h & 0xFFFFu) % 100 >= kSugarcaneGrowPct) continue; // 散布落空 → 本窗不长
+        grows.push_back({t.x, t.y + 1, t.z}); // 在柱顶上方一格长一格
+    }
+
+    // 3) 应用生长（setWaterSilent 静默写：甘蔗生长是系统模拟，无破 / 放反馈；与 tickCropGrowth 同写入路径）。
+    for (const SCell &g : grows)
+        setWaterSilent(g.x, g.y, g.z, BlockRegistry::Sugarcane, 0);
+
+    ++m_sugarcaneIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗不同柱错峰）
+}
+
+// t406 耕地湿润复算 tick（见 world.h 头注释）。机制等价 MC 1.0 farmland 随机 tick 补 / 失水。
+void World::tickFarmlandHydration()
+{
+    if (++m_farmlandHydrTickCounter < kFarmlandHydrTickInterval) return; // 节流：每 kFarmlandHydrTickInterval tick（~3s）一窗
+    m_farmlandHydrTickCounter = 0;
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+
+    // 快照耕地格 + 当前湿润等级（tick 内栅格不变 —— 写入在末尾统一应用）。
+    struct FCell { int x, y, z; quint8 hydr; };
+    std::vector<FCell> cells;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y) {
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Farmland)
+                    cells.push_back({x, y, z, quint8(m_chunks.stateAt(x, y, z) & BlockRegistry::FarmlandHydrationMask)});
+            }
+
+    // 复算湿润等级；与存档不等才记为待写（changes.hydr 存新等级；避免稳态零意义写入 + 零 worldChanged）。
+    std::vector<FCell> changes;
+    for (const FCell &c : cells) {
+        const quint8 newHydr = quint8(farmlandHydrationLevel(c.x, c.y, c.z));
+        if (newHydr != c.hydr) changes.push_back({c.x, c.y, c.z, newHydr});
+    }
+
+    // 应用（setWaterSilent 静默写 Farmland + 新湿润等级；驱动 mesher 顶点色暗化重建 → 肉眼见湿润度变）。
+    for (const FCell &c : changes)
+        setWaterSilent(c.x, c.y, c.z, BlockRegistry::Farmland, c.hydr);
 }
 
 // t325 树叶渐进衰减队列的坐标打包 / 解包（文件内工具）。世界 ≤ 256³（实际 80×80×64），三轴各取低 16 位

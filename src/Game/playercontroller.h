@@ -657,11 +657,6 @@ private:
     //   返回 0=+X 1=-X 2=+Z 3=-Z（与不完整方块 state 朝向编码一致：stairs/door/trapdoor 均用此编码）。
     //   供 placeBlock 放 stairs/door 时定朝向、useBlock 开 trapdoor 时定开向。
     int horizontalFacing() const;
-    // t234 耕地湿润判定（spec「水源邻近判定湿润」）：给定耕地格 (x,y,z)，扫描水平半径 kFarmlandWaterRadius
-    //   格 + 本层 / 下一层（y / y-1，机制等价 MC 耕地被同高或低 1 层的水滋润）有无 Water 方块。命中 → 湿润
-    //   （state bit0=1，mesher 顶面贴 farmland_wet），否则干燥（farmland_dry）。仅耕地（placeBlock 锄头分支）
-    //   时调一次（快照判定，非动态补水）。只读 World::blockAt（向下依赖）；无世界 → false（干态兜底）。
-    bool isFarmlandMoist(int x, int y, int z) const;
     // 持续挖掘（t34）：每 tick 累积进度 / 检目标变更 / 完成时破块。由 tick() 调（captured 时）。
     void updateMining(float dt);
     // 清掉累积态（松开 / 换目标 / 失焦 / 完成）。无变化时静默（不发信号）。
@@ -955,9 +950,6 @@ private:
     //     足够跟手；扫描盒约 (2R+1)³ 子集 ~几千次 blockAt/stateAt，每次 O(1) 数组索引，~亚毫秒级）。
     static constexpr float kFlowSoundRadius = 8.0f;   // 水流声可闻半径（格）
     static constexpr float kFlowScanInterval = 0.25f; // proximity 重扫间隔（秒）
-    // t234 耕地水源邻近判定半径（机制等价 MC 1.0 farmland hydration：水同高或低 1 层、水平 4 格内即滋润）。
-    //   isFarmlandMoist 扫 (2R+1)×2×(2R+1) 盒（y / y-1 两层 × 水平 ±4）；MC 取 4，本工程对齐。只读 blockAt。
-    static constexpr int kFarmlandWaterRadius = 4;
     // t246 草丛挖掉掉种子的概率分母（机制等价 MC 1.0 挖草丛 1/8=12.5% 掉小麦种子；可在本常量调）。finishMiningAt
     //   破 TallGrass 时以 1/kTallGrassSeedDropDenom 概率 emit spawnItem(SeedId,1)，否则不掉落（dropId/dropCount
     //   表恒返 1 种子是「基础兜底」，概率门控在本特例分支之上覆盖通用 drop 路径，同 WheatCrop/Planks 特例模式）。

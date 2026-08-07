@@ -6532,6 +6532,14 @@ Window {
             //   Game 层不 include World；QML 同时持二者向下合法，PLAN §2 分层不破）。tickCropGrowth 内部对稳态
             //   （全成熟 / 无作物 / 全暗）静默 → 无重建开销。
             theWorld.tickCropGrowth()
+            // t406 甘蔗生长 tick：WorldClock 每 100ms tick → 驱动 World.tickSugarcaneGrowth（内部节流到 ~每 5s
+            //   一窗，甘蔗柱基邻水 + 柱高<5 + 散布概率 → 在柱顶上方长一格；柱基不邻水永不长、达 5 格停长）。
+            //   纯 QML 桥接（同 tickCropGrowth 模式，PLAN §2 分层不破）。稳态（无甘蔗 / 全满高 / 全不邻水）静默。
+            theWorld.tickSugarcaneGrowth()
+            // t406 耕地湿润复算 tick：WorldClock 每 100ms tick → 驱动 World.tickFarmlandHydration（内部节流到
+            //   ~每 3s 一窗，复算各耕地格湿润等级 0..3，与存档不等才静默写 → 驱动 mesher 顶点色暗化重建，肉眼见
+            //   近水耕地变深、远水渐干；亦兼容 t234 旧单 bit 存档自动迁移到 4 级编码）。纯 QML 桥接（同上）。
+            theWorld.tickFarmlandHydration()
             // t305 树苗生长 tick：WorldClock 每 100ms tick → 驱动 World.tickSaplingGrowth（内部节流到 ~每 5s
             //   做一次成长判定，树苗据光强 + 草地/泥土支撑 + 主干列畅通 + 散布概率逐步长成完整橡树）。纯 QML
             //   桥接（同 tickCropGrowth 模式）。tickSaplingGrowth 内部对稳态（无树苗 / 全不满足）静默 → 无重建开销。

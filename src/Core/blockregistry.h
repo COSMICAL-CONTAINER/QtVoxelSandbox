@@ -106,11 +106,12 @@ public:
                                   //   **非**异形 —— 不进 PartialBlockGeometry；与 Chest 同走段后整立方路径）、hardness=0.6
                                   //   （同 grass/dirt 量级，NoTool 空手可采）、dropId=Dirt（破耕地掉泥土，机制等价 MC
                                   //   「耕地破坏返泥土」，非掉耕地自身）、dropCount=1、maxStack=64。各面贴图：顶=farmland_dry(26)
-                                  //   或 farmland_wet(27)（mesher 据 state bit0 选，见 FarmlandMoistBit）/ 侧·底=dirt(2)。
+                                  //   或 farmland_wet(27)（mesher 据 state 低 2 位湿润等级暗化顶点色，见 FarmlandHydrationMask）/ 侧·底=dirt(2)。
                                   //   **碰撞略矮 0.9375（15/16）**：collisionAABBs 对 Farmland 特例返 {0,0,0,1,0.9375,1}
                                   //   （机制等价 MC 耕地碰撞箱矮 1 像素；selectionAABBs 仍走 ShapeFull 整格，选中框不缩，
                                   //   raycast 经 isFullCube=true 走整格命中 —— 三者解耦：碰撞矮、选中满、射线整格，零相互干扰）。
-                                  //   state 编码干/湿（见 FarmlandMoistBit），由 playercontroller 耕地时据水源邻近判定写入。
+                                  //   state 低 2 位编码湿润等级 0..3（见 FarmlandHydrationMask），由 playercontroller 耕地时 +
+                                  //   World::tickFarmlandHydration 周期复算据水源邻近距离写入。越湿顶面顶点色越暗（darker=wetter）。
         WheatCrop      = 25, // 小麦作物（t236）：机制等价 MC 1.0 小麦作物（wheat crop）。**cross 形广告牌方块**
                                   //   （与 TallGrass 同走 PartialBlockGeometry 的 cross 几何段 [FirstCross, LastCross]；
                                   //   两片对角相交的双面 quad，alpha 透明底 cutout）。**生长阶段存 chunk state**（state = 阶段
@@ -432,15 +433,21 @@ public:
     //   round-trip 保真（存档读回仍带本 bit → 重载后破块仍掉 2 块半砖）。
     static constexpr quint8 PlanksFromDoubleSlabBit = 0x01; // Planks state bit0 = 源自双半砖合并（仅 Planks 复用）
 
-    // t234 耕地干/湿 state 标记：bit0 = 湿润（1，邻近水源 → 顶面贴 farmland_wet，深色湿润土）/ 干燥（0，farmland_dry，
-    //   浅色干土）。由 playercontroller 耕地时据「水源邻近判定」（isFarmlandMoist 扫描半径 4 水平 + 同/下一层
-    //   有无 Water）写入 setBlock(Farmland, moist)。**唯一消费点**：ChunkGeometry::tileFor（mesher 据 bit0 选顶面
-    //   干/湿贴图）。collisionAABBs / selectionAABBs / raycastAABBs 不读 farmland state（farmland 走 ShapeFull +
-    //   collision 特例，state inert 于碰撞/选中）→ 复用 state 作干湿编码零回归（同 PlanksFromDoubleSlabBit /
-    //   torch state 复用 state 作 marker 的模式）。state 经 m_states 落 SQLite round-trip 保真（存档读回仍带干湿态）。
-    //   注：干/湿仅由耕地时的水源邻近快照决定（机制等价 MC「耕地后即时据邻水判湿润」）；动态补水（雨/后放水）
-    //   属后续任务（需 random tick 系统），本任务不做。
-    static constexpr quint8 FarmlandMoistBit = 0x01; // Farmland state bit0 = 湿润（仅 Farmland 复用）
+    // t234/t406 耕地湿润度 state 编码：state 低 2 位 = 湿润等级 0..3（FarmlandHydrationMask 取低 2 位）。
+    //   机制等价 MC 1.0 farmland hydration（4 级湿润；越湿作物长得越快、湿润度由贴图色深肉眼可辨）：
+    //   - level 0（干）：浅色翻耕干土（farmland_dry 贴图 + 顶点色不暗化）；
+    //   - level 1..3（渐湿）：mesher 对 +Y 顶面顶点色按等级递增暗化（darker=wetter，机制等价 MC 耕地越湿越深）。
+    //   等级由 World::farmlandHydrationLevel 据水源切比雪夫距离（同/下一层、半径 4 内）算出：dist 1→3、2→2、3→1、
+    //   ≥4/无水→0。耕地时（playercontroller 锄头分支）写一次；World::tickFarmlandHydration 周期复算（动态补水：
+    //   后放水 / 雨后水位变化 → 远水耕地渐干、近水耕地转湿，机制等价 MC 耕地随机 tick 补/失水）。
+    //   **消费点**：ChunkGeometry 顶点色暗化（+Y 顶面据 level 调亮 ×{1.0,0.82,0.64,0.46}，进 greedy 合并键防
+    //   不同湿润度共面误并）+ tickCropGrowth（小麦作物升阶段概率 × (1+level)：越湿长得越快）。
+    //   collisionAABBs / selectionAABBs / raycastAABBs 不读 farmland state（farmland 走 ShapeFull + collision 特例，
+    //   state inert 于碰撞/选中）→ 复用 state 作湿润编码零回归（同 PlanksFromDoubleSlabBit / torch state 复用模式）。
+    //   state 经 m_states 落 SQLite round-trip 保真（存档读回仍带湿润等级）。旧存档（t234 单 bit 湿润）读回 state∈{0,1}
+    //   → 经 tickFarmlandHydration 复算自动迁移到 4 级编码（无显式迁移代码：tick 周期覆盖）。
+    static constexpr quint8 FarmlandHydrationMask = 0x03; // Farmland state 低 2 位 = 湿润等级（仅 Farmland 复用）
+    static constexpr int  FarmlandHydrationMax  = 3;      // 湿润等级上界（level 3 = 最湿；dist 1 邻水）
 
     // t305 持久树叶 state 标记：bit0 = 玩家放置（持久，不参与自然衰减）。机制等价 MC 1.0「玩家放置的树叶不衰减」
     //   —— worldgen 生成的树叶 state=0（衰减候选：失去原木支撑即消失）；玩家创造模式放置的树叶写 state=本 bit

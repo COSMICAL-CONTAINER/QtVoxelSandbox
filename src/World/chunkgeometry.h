@@ -167,6 +167,8 @@ private:
     void onWorldChanged();            // worldChanged 槽：仅 dirty chunk 才重建（编辑即时，同步于 setBlock）
     void buildMesh(RebuildReason reason); // 局部 culled mesh + 写入 QQuick3DGeometry + 清脏（编辑路径）
     int tileFor(quint8 block, int face, quint8 state) const;
+    // t406 耕地湿润等级 → +Y 顶面顶点色暗化系数（darker=wetter）。仅 Farmland +Y 顶面消费。
+    float farmlandHydrBrightMul(quint8 hydr) const;
     // t153 PCF 软影（方案③：t151 顶点光基底 + heightmap 正交深度图）：给定世界空间顶点，沿 sunDir 水平
     //   方向步进 kMaxShadow 格、2×2 PCF 采样路径列 heightmap，返回 [0,1] 软影因子（0=全亮、1=全影）。
     //   mesher 据此把天光分量乘 (1-sh)，火把方光取 max 保留。只读 World::heightmapAt + 裸 sunDir（不依赖
