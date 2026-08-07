@@ -48,6 +48,12 @@ public:
     //   - 木棒 5s（0.5 件；spec t93——「2 木板拆 4 木棒」反而不划算，由数据自然表达）。
     static float fuelBurnSeconds(int itemId);
 
+    // t402 冶炼产出 → 单件冶炼 XP 奖励（按**产物 id**查；玩家从熔炉输出槽取走产物时按件 × 此值产经验球）。
+    //   机制等价 MC 1.0 smelting XP（铁原矿→铁锭给 0.7XP、原木→木炭给 0.2XP，本工程取整放大便于可观察）；
+    //   spec「iron ingot gives more than charcoal」由数据自然表达（铁锭 > 木炭）。0 = 该产物无 XP（玻璃等）。
+    //   数据权威：与 smeltResult 配对（输入 → 产物 → XP），改 XP 只改本表。§9 通用词；零 MC 专名。
+    static int smeltXpReward(int outputId);
+
     // 单次冶炼耗时（秒）。MC 1.0 标准 200 ticks = 10s。
     static constexpr float kSmeltSecs = 10.f;
 

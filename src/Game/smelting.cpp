@@ -55,3 +55,25 @@ float SmeltingRegistry::fuelBurnSeconds(int itemId)
         if (e.itemId == itemId) return e.burnSecs;
     return 0.f;
 }
+
+// t402 冶炼产物 → XP 奖励表（机制等价 MC 1.0 smelting XP，spec「iron ingot gives more than charcoal」）。
+//   按**产物 id** 查（玩家取走产物时按件 × 此值产经验球，spec「removing a finished smelt item grants XP」）。
+//   取整放大便于可观察（MC 原值小数；本工程世界小、单次产量少，整数 XP 让累积可见）。数值为本工程
+//   量身调，非 MC 精确复刻（PLAN §4「机制对标」非数值 1:1）。无 MC 1.0 等价映射（XP 数值为机制内部）。
+namespace {
+struct SmeltXpEntry { int outputId; int xp; const char *name; };
+constexpr SmeltXpEntry kSmeltXp[] = {
+    { RecipeRegistry::IronIngotId,   3, "iron"     }, // 铁锭：铁原矿冶炼给 3 XP（金属矿主力来源，spec「iron ingot」）
+    { RecipeRegistry::CopperIngotId, 2, "copper"   }, // 铜锭：铜原矿冶炼给 2 XP（t308 铜链）
+    { RecipeRegistry::GoldIngotId,   2, "gold"     }, // 金锭：金原矿冶炼给 2 XP（t308 金链）
+    { RecipeRegistry::CharcoalId,    1, "charcoal" }, // 木炭：原木冶炼给 1 XP（spec「charcoal」；少于铁，数据自然表达）
+    { RecipeRegistry::GlassId,       0, "glass"    }, // 玻璃：沙子冶炼给 0 XP（无金属价值）
+};
+} // namespace
+
+int SmeltingRegistry::smeltXpReward(int outputId)
+{
+    for (const SmeltXpEntry &e : kSmeltXp)
+        if (e.outputId == outputId) return e.xp;
+    return 0;
+}

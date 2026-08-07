@@ -111,6 +111,9 @@ qt_add_executable(voxelsandbox
     # t95 统一实体管理器（Entities 层）：测试生物 / 玩家推动 / 重力。为后续 Mob/AI 系统铺垫统一基类。
     src/Entities/entitymanager.cpp
     src/Entities/entitymanager.h
+    # t402 经验球管理器（Entities 层）：磁吸 + 拾取；杀怪 / 冶炼产出经验球，玩家吸收累积 XP。
+    src/Entities/xporbmanager.cpp
+    src/Entities/xporbmanager.h
     src/Game/raycast.cpp
     src/Game/raycast.h
     src/Game/recipe.cpp

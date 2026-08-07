@@ -90,6 +90,15 @@ void PlayerController::setWorldClock(WorldClock *c)
     emit worldClockChanged();
 }
 
+// t402 注入经验球管理器（同 setItemEntities / setEntityManager 模式）：仅记录指针 + 发信号
+//   （QML 注入 peer ViewModel，运行期连接、非编译期反向依赖；PLAN §2 分层）。tick 驱动见 tickImpl。
+void PlayerController::setXpOrbManager(XpOrbManager *m)
+{
+    if (m_xpOrbManager == m) return;
+    m_xpOrbManager = m;
+    emit xpOrbManagerChanged();
+}
+
 void PlayerController::onWindowChanged(QQuickWindow *win)
 {
     if (m_window) m_window->removeEventFilter(this);
@@ -463,6 +472,10 @@ void PlayerController::tickImpl()
     // PlayerController 是唯一同时持 World* + ItemEntityManager* 的对象，故由此驱动；实体物理态
     // （vy / resting）与 pos 同住在 ItemEntityManager 内部数据里（分层：Entities→World 向下只读）。
     if (m_itemEntities && m_world) m_itemEntities->tick(dt, m_world);
+    // t402 经验球磁吸 + 拾取（同掉落物 tick 常开 —— 菜单 / 暂停时球仍向玩家飞，世界模拟连续）。
+    //   playerCenter = 玩家 AABB 中心（脚底 m_pos + 半高），磁吸 / 拾取都相对此点。无 World 依赖
+    //   （经验球是纯磁吸实体）。拾取经 XpOrbManager::xpPickedUp 语义信号 → 呈现层路由 PlayerState.addXp。
+    if (m_xpOrbManager) m_xpOrbManager->tick(dt, m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f));
     // t95：统一实体（测试生物）重力 + 地面静止，同掉落物常开（菜单 / 暂停时仍模拟）。机制同源
     // （EntityManager::tick 向下只读 World::isSolid）。PlayerController 现亦持 EntityManager* → 由它驱动。
     //   t250：传 m_pos 作听者位置，门控 mob idle/step 叫声（近 mob 才发声；菜单态 m_pos 仍有效）。

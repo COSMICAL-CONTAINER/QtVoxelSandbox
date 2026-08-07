@@ -233,9 +233,10 @@ Window {
         //   整体替换内存（先清后填）—— 无存档 chests 表 → 空列表 → 清空，杜绝上一世界箱子残留串入新世界。
         //   存档 chests 由 saveAndExitToWorldList 经 saveAll(name, chestStore.allChests()) 落盘。
         chestStore.loadAll(worldStore.loadChests())
-        // 清上一世界的掉落物 / mob 残留（实体非体素，不进存档，切世界必清）
+        // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
+        xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
         // t312：清聊天历史（不持久化 / 不跨世界；新世界从空起）。
         chatMessages.clear()
         // t240 进世界生成猪 / 牛 / 羊各一只于出生点附近地表（ EntityManager 已注册 3 类 mobType 1/2/3；
@@ -279,6 +280,8 @@ Window {
             data.mode  !== undefined ? data.mode  : DF.mode)
         playerState.setHealth(data.health !== undefined ? data.health : 20)
         playerState.setHunger(data.hunger !== undefined ? data.hunger : 20)
+        // t402 经验值回填（存档持久化 playerState.xp；旧存档无 xp 字段 → undefined → 默认 0）。
+        playerState.setXp(data.xp !== undefined ? data.xp : 0)
         // t238 同步 Physics 层饥饿镜像（存档持久化 playerState.hunger；此处把同一值灌回 PlayerController.m_hunger，
         //   使两层一致、depletion 从存档值起算）。player.setHunger 内部 emit hungerUpdated → 上面 onHungerUpdated
         //   路由回 playerState.setHunger（幂等：值已一致则无变化静默）。
@@ -322,6 +325,7 @@ Window {
             yaw: player.yaw, pitch: player.pitch,
             mode: player.mode,
             health: playerState.health, hunger: playerState.hunger,
+            xp: playerState.xp,   // t402 经验值累积持久化
             selectedSlot: hotbarVM.selectedSlot,
             hotbar: hotbar, main: main, armor: armor
         }
@@ -378,6 +382,7 @@ Window {
         settingsOpen = false
         itemEntities.clearAll()
         entityManager.clearAll()
+        xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
         player.release()
         appState = "worldlist"
         audio.stopAmbient()   // t177 环境音：退出世界停风声床（菜单态无声）
@@ -399,6 +404,7 @@ Window {
         worldStore.closeWorld()        // t176：回主菜单关存档连接（防残留打开库）
         itemEntities.clearAll()        // t176：清实体残留
         entityManager.clearAll()
+        xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
         player.release()
         appState = "menu"
         audio.stopAmbient()   // t177 环境音：回主菜单停风声床
@@ -797,6 +803,7 @@ Window {
 
         if (typeFilter.length === 0) {
             entityManager.clearAll()
+            xpOrbs.clearAll()   // t402 经验球同族一并清
             return "已清除所有非玩家实体"
         }
         const tid = window.mobTypeIdFromName(typeFilter)
@@ -1127,6 +1134,22 @@ Window {
     // 只读 count/posAt/colorAt 自发渲染（PLAN §2 分层：呈现只消费 Entities 数据）。
     EntityManager { id: entityManager }
 
+    // t402 经验球管理器（Entities 层）：杀怪 / 冶炼产出经验球，玩家靠近磁吸飞来 → 吸收累积 XP。
+    //   纯数据持有（pos + amount），呈现层（下方 xpOrbHost Repeater）只读；磁吸 / 拾取由
+    //   PlayerController.tick 驱动（持 XpOrbManager*）。拾取经 xpPickedUp 语义信号 → 下方 Connections
+    //   路由到 playerState.addXp（单向事件流，PLAN §2 分层：Entities 发语义事件、呈现层只消费）。
+    XpOrbManager { id: xpOrbs }
+
+    // t402 经验球拾取 → 玩家累积 XP（语义事件路由，同 fallDamageTaken→takeDamage 模式；
+    //   PLAN §2 分层：Entities 发语义事件、呈现层只消费）。拾取音复用掉落物拾取声（playPickup）。
+    Connections {
+        target: xpOrbs
+        function onXpPickedUp(amount) {
+            playerState.addXp(amount)
+            audio.playPickup()
+        }
+    }
+
     // t220 落沙遇不完整方块失撑 → 变掉落物：EntityManager 发 fallingBlockDropped（坐标 = 不完整方块上方
     //   一格、id = 沙方块 id）→ 转发到 itemEntities.spawnItem 生成掉落实体（机制等价 MC「沙落火把上 → 沙
     //   碎成掉落物」）。单向事件流：EntityManager 不持有 ItemEntityManager（同 player.spawnItem 模式；
@@ -1161,6 +1184,17 @@ Window {
         //     0x228=羽毛 / 0x229=生鸡肉 / 0x22A=熟鸡肉（RecipeRegistry::FeatherId 等，t398 鸡掉落）。
         //     id 改动须同步 src/Game/recipe.h（单一权威）。
         function onMobDied(x, y, z, mobType, burned) {
+            // t402 杀怪产经验球（spec「killing mobs spawns XP orbs」；机制等价 MC 1.0 杀怪掉经验）。
+            //   敌对 mob（Shambler/Bones/Stalker/Spider）掉 XP；被动 mob（猪/牛/羊/鸡/鱿鱼，繁殖经济用）
+            //   不掉（MC 1.0 杀被动动物不给 XP，仅敌对给）。MobTest（调试）不掉。XP 数值为本工程小世界
+            //   量身调（非 MC 精确复刻，PLAN §4 机制对标非数值 1:1）。
+            const xpForMob = {}
+            xpForMob[EntityManager.MobShambler] = 5   // 蹒跚者（僵尸）：5 XP
+            xpForMob[EntityManager.MobBones]    = 5   // 骸骨（骷髅）：5 XP
+            xpForMob[EntityManager.MobStalker]  = 5   // 潜行者（苦力怕）：5 XP（自爆型，同敌对量级）
+            xpForMob[EntityManager.MobSpider]   = 5   // 蜘蛛：5 XP
+            const xpAmt = xpForMob[mobType]
+            if (xpAmt && xpAmt > 0) xpOrbs.spawnOrb(x, y, z, xpAmt)
             // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
             //   着火死亡掉熟肉）：猪→熟猪排 / 牛→熟牛肉（皮革非肉、不变）/ 羊→熟羊肉（替代羊毛）。熟肉 id：
             //   0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（RecipeRegistry::CookedPorkchopId 等；⚠️ QML 用字面量同上约定）。
@@ -1301,6 +1335,7 @@ Window {
         itemEntities: itemEntities
         entityManager: entityManager
         worldClock: worldClock
+        xpOrbManager: xpOrbs
         selectedBlock: hotbarVM.selectedBlockId
         selectedItem: hotbarVM.selectedItemId
     }
@@ -3642,6 +3677,63 @@ Window {
             }
         }
 
+        // t402 经验球渲染（XpOrbManager 的发光小球实体）：Repeater 父节点 = 场景内 3D Node（xpOrbHost）
+        //   → delegate 被 reparent 进 3D 场景图（同 itemHost / mobHost 模式；lessons-learned「动态 3D 对象
+        //   必须挂到场景 Node，否则孤儿不渲染」）。slot-reuse：count 单调不降 → 空槽 delegate visible=false
+        //   隐藏不销毁（同 itemHost 族；lessons-learned t170/t256）。
+        // 触发：xpOrbs.count 随 spawnOrb 自增（NOTIFY entitiesChanged）→ Repeater 追加 delegate。位置随
+        //   磁吸 bump revision → {revision; posAt} 绑定重算（呈现层只读消费，绝不反向写；PLAN §2 分层）。
+        // 外观：纯色发光小球（PrincipledMaterial.NoLighting + 绿色 baseColor；§9a 自绘纯色，无 MC 资产）。
+        //   上下浮动 + 缩放呼吸由呈现层自发（不反向写数据）；amountAt 驱动颜色深浅（大球更显眼）。
+        Node {
+            id: xpOrbHost
+            Component.onCompleted: {
+                console.info("[t402] xpOrbHost UP parent=" + xpOrbHost.parent + " (须为 3D Node 非 null)")
+            }
+
+            Repeater {
+                model: xpOrbs.count
+                delegate: Node {
+                    visible: { xpOrbs.revision; return xpOrbs.aliveAt(index) }
+                    id: orbRoot
+                    position: { xpOrbs.revision; return xpOrbs.posAt(index) }
+                    property int orbAmount: { xpOrbs.revision; return xpOrbs.amountAt(index) }
+                    property real bobY: 0
+                    property real pulse: 1.0   // 缩放呼吸（0.85..1.15）
+
+                    Component.onCompleted: {
+                        if (parent === null) parent = xpOrbHost
+                    }
+
+                    // 经验球本体：纯色发光小球（NoLighting 必备 —— lit 材质在本 D3D11 后端不渲染，
+                    //   lessons-learned「所有可见 Model 必须用 NoLighting」）。绿色 baseColor；amount 大 →
+                    //   更亮（黄绿）凸显。scale ~0.18 + bob + pulse 呼吸（呈现层自发动画）。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, orbRoot.bobY, 0)
+                        scale: Qt.vector3d(0.18 * orbRoot.pulse, 0.18 * orbRoot.pulse, 0.18 * orbRoot.pulse)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            // 大额球更亮黄（机制等价 MC 大经验球更显眼）；小额偏深绿。
+                            baseColor: orbRoot.orbAmount >= 5 ? "#b8e635" : "#7fd13b"
+                        }
+                    }
+                    // 上下浮动 0.12 格（~1.4s 周期；比掉落物快 = 经验球活泼感）。
+                    SequentialAnimation on bobY {
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 0; to: 0.12; duration: 700; easing.type: Easing.InOutSine }
+                        NumberAnimation { from: 0.12; to: 0; duration: 700; easing.type: Easing.InOutSine }
+                    }
+                    // 缩放呼吸（0.85..1.15，~1s 周期）= 发光脉动感。
+                    SequentialAnimation on pulse {
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 0.85; to: 1.15; duration: 500; easing.type: Easing.InOutSine }
+                        NumberAnimation { from: 1.15; to: 0.85; duration: 500; easing.type: Easing.InOutSine }
+                    }
+                }
+            }
+        }
+
         // t95 测试生物渲染（统一 EntityManager 的 pushable 实体）：Repeater 父节点 = 场景内 3D Node
         // （mobHost）→ delegate（Node/Model，3D 对象）被领养进 3D 场景图（lessons-learned「动态 3D 对象
         // 必须挂到场景 Node，否则孤儿不渲染」—— 同 itemHost / torchHost 模式）。
@@ -5848,6 +5940,7 @@ Window {
                  + "\ndraw-calls: ~" + drawEst + "  (chunks×2 " + (ncx * ncz * 2) + " + items " + itemLive
                  + " + mobs " + mobLive + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
                  + "\nday: phase " + worldClock.dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
+                 + "  xp: " + playerState.xp + "  orbs: " + xpOrbs.liveCount()
                  + (worldClock.debugFast ? "  (fast)" : "")
                  + "\n[B] hitboxes: " + (window.showHitboxes ? "ON" : "off")
                  + "   [G] chunk bounds: " + (window.showChunkBounds ? "ON" : "off")
@@ -6313,6 +6406,13 @@ Window {
         onClosed: window.closeFurnace()
         onDiscardHeldRequested: player.dropHeldCursor()
         onDiscardHeldOneRequested: player.dropHeldCursorOne()
+        // t402 冶炼取走产物 → 产经验球（spec「removing finished smelt item grants XP」）。球 spawn 在
+        //   玩家脚位上方一格（玩家正在取产物 → 立刻被磁吸吸收；机制等价 MC 冶炼产经验给玩家）。铁锭 >
+        //   木炭由 SmeltingRegistry 数据自然表达（FurnaceUI 据 smeltXpReward 算 amount）。单向事件流。
+        onXpAwarded: {
+            const fp = player.feetPosition
+            xpOrbs.spawnOrb(Math.floor(fp.x), Math.floor(fp.y) + 1, Math.floor(fp.z), amount)
+        }
     }
 
     // t173/t179 箱子物品栏面板：右键箱子方块打开（player.chestOpened → openChest）。仅 playing &&

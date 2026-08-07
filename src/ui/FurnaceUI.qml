@@ -41,6 +41,10 @@ Item {
     property Hotbar hotbar
     // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
     signal closed()
+    // t402 冶炼产出取走 → 请求宿主产经验球（spec「removing a finished smelt item grants XP scaled
+    //   by item type」）。amount = 本次取走累计的 XP（按产物 id × 件数 × SmeltingRegistry::smeltXpReward
+    //   算，铁锭 > 木炭由数据自然表达）。宿主在玩家附近 spawnOrb（机制等价 MC 1.0 冶炼产经验）。
+    signal xpAwarded(int amount)
     // 拖出丢弃：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区；同 CraftingTableUI）。
     signal discardHeldRequested()
     // t228：请求宿主把光标手持栈**丢 1 件**为实体（右键拖出面板外；宿主接 player.dropHeldCursorOne）。
@@ -60,6 +64,12 @@ Item {
     property int fuelId: 0;  property int fuelCount: 0
     property int outId: 0;   property int outCount: 0
     property int slotRev: 0   // 熔炉 3 槽内容版本号（任何槽改写自增 → 绑定刷新）
+    // t402 输出槽快照（检测玩家取走产物 → 按 id × 件数产经验球）。每次 slotRev 变与 prevOut 对比：
+    //   若同 id 且 outCount 减少 → 差值 × smeltXpReward(outId) = 本次取走 XP → emit xpAwarded。
+    //   不同 id / outCount 增（产出 / 换产物）不发（仅「取走」算 XP）。spec「removing finished smelt
+    //   item grants XP」；铁锭 > 木炭由 SmeltingRegistry 数据自然表达。
+    property int prevOutId: 0
+    property int prevOutCount: 0
 
     // 冶炼运行态：burnRemain = 当前燃料剩余燃烧秒数（>0 表「正在烧」）；smeltProgress = 当前件累积秒数
     // （0..kSmeltSecs；满则产 1 件、归零或留余）。ticked 驱动推进（见 tick()）。
@@ -191,6 +201,24 @@ Item {
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
     // redistributeLive / singleLeftClick / slotShiftLeft：纯内部辅助（仅 InventoryOps 内部 / slotLeft 调用），
     //   算法已入 InventoryOps，此处不再持有副本。
+
+    // t402 检测玩家从输出槽取走产物 → 按 id × 件数产经验球（spec「removing finished smelt item grants
+    //   XP scaled by item type」）。slotRev 在任何槽改写时自增（localWriteSlot / setStack）；此处对比
+    //   prevOut 快照：outCount 减少（同 id 或末件取致 outId→0）→ 差值 × smeltXpReward(prevOutId) = XP →
+    //   emit xpAwarded。产出（count 增）/ 换产物（id 变 count 不减）不发。XP 走 SmeltingRegistry（铁锭 > 木炭
+    //   由数据自然表达）。单向事件流：宿主据 xpAwarded 在玩家附近 spawnOrb（PLAN §2 分层）。
+    Connections {
+        target: root
+        function onSlotRevChanged() {
+            if (root.prevOutCount > root.outCount) {
+                const taken = root.prevOutCount - root.outCount
+                const xp = root.hotbar ? root.hotbar.smeltXpReward(root.prevOutId) * taken : 0
+                if (xp > 0) root.xpAwarded(xp)
+            }
+            root.prevOutId = root.outId
+            root.prevOutCount = root.outCount
+        }
+    }
 
 
     // ── 冶炼 tick（spec：燃料燃烧→累积热量→输入转输出；WorldClock.ticked 驱动，每 tick dt=0.1s）──

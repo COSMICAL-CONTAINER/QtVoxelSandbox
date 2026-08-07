@@ -97,3 +97,20 @@ void PlayerState::respawn()
     if (m_deathCause != Generic) { m_deathCause = Generic; emit deathCauseChanged(); }
     m_lastCause = Generic;
 }
+
+// t402 累积经验值：加 amount（吸收经验球时调；amount<=0 忽略）。仅累积数值 + emit xpChanged
+//   （呈现层 F3 / 经验条刷新）；level/points 派生属 Phase 1.1+。分层（PLAN §2）：Game 层持显值，
+//   呈现层 Connections 据语义事件（XpOrbManager::xpPickedUp）路由调用。
+void PlayerState::addXp(int amount)
+{
+    if (amount <= 0) return;
+    m_xp += amount;
+    emit xpChanged();
+}
+
+// t402 设经验值（存档加载用；与 setHealth/setHunger 同模式）：clamp 到 >=0；无变化不发信号。
+void PlayerState::setXp(int value)
+{
+    const int nv = value < 0 ? 0 : value;
+    if (nv != m_xp) { m_xp = nv; emit xpChanged(); }
+}

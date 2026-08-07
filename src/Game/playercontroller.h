@@ -17,6 +17,7 @@
 #include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
 #include "itementitymanager.h"  // 掉落实体管理器（t36 拾取扫描 / removeAt）
 #include "raycast.h"            // RayHit（射线选体结果）
+#include "xporbmanager.h"       // t402 经验球管理器（磁吸 + 拾取扫描）
 #include "toolregistry.h"       // 工具感知挖掘速度 / 掉落判定（t34）
 #include "world.h"              // Q_PROPERTY(World*) 需要 World 完整定义
 #include "worldclock.h"         // t280 黑暗刷怪：读 skyLight（昼夜乘子）驱动 EntityManager::tickHostileLife
@@ -51,6 +52,12 @@ class PlayerController : public QQuickItem
     //   EntityManager::tickHostileLife（驱动 spawn 光判定 + 白天燃烧）。Game→World 向下依赖合规（WorldClock
     //   属 World 层）。null 时跳过敌对生命周期（无昼夜 → 无 spawn / 无燃烧，安全降级）。
     Q_PROPERTY(WorldClock *worldClock READ worldClock WRITE setWorldClock NOTIFY worldClockChanged)
+    // t402 经验球管理器（同 world/hotbar/itemEntities/entityManager/worldClock 模式，QML 注入 peer ViewModel）。
+    //   每帧调 xpOrbManager.tick(dt, 玩家中心)（磁吸 + 拾取，独立于捕获态——菜单 / 暂停时球仍向玩家飞，
+    //   世界模拟连续，同 itemEntities.tick）。拾取经语义信号 xpPickedUp → 呈现层路由 PlayerState.addXp。
+    //   分层（PLAN §2）：PlayerController 属 Game/Physics，XpOrbManager 属 Entities，经 QML 绑定注入
+    //   （运行期连接、非编译期反向依赖，同 itemEntities 先例）。
+    Q_PROPERTY(XpOrbManager *xpOrbManager READ xpOrbManager WRITE setXpOrbManager NOTIFY xpOrbManagerChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -222,6 +229,8 @@ public:
     void setEntityManager(EntityManager *m);
     WorldClock *worldClock() const { return m_worldClock; }
     void setWorldClock(WorldClock *c);
+    XpOrbManager *xpOrbManager() const { return m_xpOrbManager; }
+    void setXpOrbManager(XpOrbManager *m);
 
     QVector3D position() const { return m_pos + QVector3D(0, m_eyeHeight, 0); }
     float yaw() const { return m_yaw; }
@@ -417,6 +426,7 @@ signals:
     void itemEntitiesChanged();
     void entityManagerChanged();
     void worldClockChanged();
+    void xpOrbManagerChanged(); // t402 经验球管理器注入变更
     void positionChanged();
     void yawChanged();
     void pitchChanged();
@@ -735,6 +745,7 @@ private:
     ItemEntityManager *m_itemEntities = nullptr; // 拾取扫描数据源 + removeAt 销毁（Q_PROPERTY 绑定）
     EntityManager *m_entityManager = nullptr;    // 统一实体（t95 测试生物）：重力 tick + 玩家推动（Q_PROPERTY 绑定）
     WorldClock *m_worldClock = nullptr;          // t280 黑暗刷怪：读 skyLight 驱动敌对 spawn / 燃烧（Q_PROPERTY 绑定）
+    XpOrbManager *m_xpOrbManager = nullptr;      // t402 经验球：磁吸 + 拾取扫描（Q_PROPERTY 绑定）
     QQuickWindow *m_window = nullptr;
     QTimer m_timer;
     QElapsedTimer m_clock;

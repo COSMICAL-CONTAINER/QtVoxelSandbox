@@ -50,6 +50,11 @@ class PlayerState : public QObject
     //   置位 + respawn / 存档加载复位时翻动；非致死扣血不改死因）。
     Q_PROPERTY(int deathCause READ deathCause NOTIFY deathCauseChanged)
     Q_PROPERTY(QString deathCauseText READ deathCauseText NOTIFY deathCauseChanged)
+    // t402 经验值（XP）累积：玩家吸收经验球（杀怪 / 冶炼产出）累加。机制等价 MC 1.0 经验
+    //   （level/points 留 Phase 1.1+；本轮做裸数值累积 + 拾取钩子，呈现层只读）。NOTIFY=xpChanged
+    //   驱动 F3 / HUD 经验条刷新。addXp 由呈现层 Connections 据经验球拾取语义事件（XpOrbManager::
+    //   xpPickedUp）路由调用（同 fallDamageTaken→takeDamage 模式：Game 层持显值、呈现层路由）。
+    Q_PROPERTY(int xp READ xp NOTIFY xpChanged)
 
 public:
     // t311 死亡原因枚举（机制等价 MC 1.0 各来源死因，§9 改名为通用词）。Q_ENUM 暴露给 QML：
@@ -71,6 +76,7 @@ public:
     bool dead() const { return m_dead; }
     int deathCause() const { return m_deathCause; } // t311 致死来源枚举（仅 dead 时有意义）
     QString deathCauseText() const;                  // t311 死因中文文案（通用词，§9）
+    int xp() const { return m_xp; }                  // t402 当前经验值累积
 
     // 受伤钩子（Game/Physics 调用）：扣 amount HP，clamp 到 0；扣到 0 → 置 dead + emit died（且此后不再继续扣，
     // spec t78）。amount<=0 忽略（无治疗语义）。dead 期间早退（不再扣血、不再发 damaged）。
@@ -92,6 +98,13 @@ public:
     //   玩家定位（传回出生点）由 PlayerController::respawn() 负责（分层：状态属 Game 层，定位属 Physics 层）。
     //   呈现层「立即重生」按钮同时调本方法 + PlayerController.respawn()。
     Q_INVOKABLE void respawn();
+    // t402 累积经验值：加 amount XP（amount<=0 忽略）。仅累积数值 + emit xpChanged（呈现层 F3 /
+    //   经验条刷新）；level/points 留 Phase 1.1+。由呈现层 Connections 据经验球拾取语义事件
+    //   （XpOrbManager::xpPickedUp）路由调用（同 fallDamageTaken→takeDamage 模式）。
+    Q_INVOKABLE void addXp(int amount);
+    // t402 设经验值（存档加载用；与 setHealth/setHunger 同模式）：直接设（不走任何派生判定），
+    //   clamp 到 >=0；无变化不发信号。供 Main.qml::applyPlayerState 在 playerState.xp 灌入存档值。
+    Q_INVOKABLE void setXp(int value);
 
 signals:
     void healthChanged();
@@ -103,6 +116,8 @@ signals:
     void died();
     // t311 致死来源变更（致死时刻置位 / respawn + 存档加载复位时翻动；驱动 deathCause / deathCauseText 绑定）。
     void deathCauseChanged();
+    // t402 经验值累积变更（addXp / setXp 真变时发；驱动 F3 / 经验条绑定刷新）。
+    void xpChanged();
     // 受伤闪烁触发（t51）：takeDamage 实扣 HP 时发；呈现层（Main.qml）Connections 据此启动
     // 红色半透全屏叠层的 alpha 0.4→0 淡出动画（~600ms）。amount = 本次请求扣血量（不计 clamp 截断）。
     // 与 healthChanged 分离：healthChanged 驱动心条数值刷新（每半心切态），damaged 驱动一次性的视觉闪烁
@@ -120,6 +135,7 @@ private:
     bool m_dead = false;       // t78 死亡态（health ≤ 0 → true；respawn 翻回 false）
     int m_lastCause = Generic; // t311 最近一次受伤来源（致死那一击写入 m_deathCause）
     int m_deathCause = Generic;// t311 致死来源（health 扣到 ≤0 时 = m_lastCause；respawn / 存档加载复位 Generic）
+    int m_xp = 0;              // t402 经验值累积（吸收经验球累加；初值 0）
 };
 
 #endif // PLAYERSTATE_H

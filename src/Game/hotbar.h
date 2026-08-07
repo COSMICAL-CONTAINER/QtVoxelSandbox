@@ -218,6 +218,9 @@ public:
     //   - fuelBurnSeconds(fuelId)：燃料 → 燃烧秒数（0=不可燃；返回 int 秒，QML 友好且本表值均整数）。
     Q_INVOKABLE int smeltResult(int inputId) const;
     Q_INVOKABLE int fuelBurnSeconds(int fuelId) const;
+    // t402 冶炼 XP 桥接（同 smeltResult / fuelBurnSeconds 模式）：透传 SmeltingRegistry::smeltXpReward
+    //   给 QML（FurnaceUI 检测输出槽取走时按产物 id × 件数产经验球）。返回单件冶炼 XP（0=无 XP）。
+    Q_INVOKABLE int smeltXpReward(int outputId) const;
     // 显式重置槽内容（清空 9 hotbar + 27 主栏 + 光标手持物）。t49 引入时由模式切换自动调用；t171 取消自动
     //   调用（cycleMode 切模式保留物品，用户诉求「创造↔生存切换不清空背包」）。保留为显式 API（供「清空
     //   背包」等场景）。mode 取 PlayerController::Mode 序数：0=Spectator 1=Creative 2=Survival；1/2 清空、0 不动。

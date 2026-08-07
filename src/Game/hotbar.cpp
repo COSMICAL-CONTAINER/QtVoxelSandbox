@@ -976,6 +976,12 @@ int Hotbar::fuelBurnSeconds(int fuelId) const
     return int(SmeltingRegistry::fuelBurnSeconds(fuelId));
 }
 
+// t402 冶炼 XP 桥接：透传 SmeltingRegistry::smeltXpReward（FurnaceUI 据产物 id 查单件 XP）。
+int Hotbar::smeltXpReward(int outputId) const
+{
+    return SmeltingRegistry::smeltXpReward(outputId);
+}
+
 // 显式重置槽内容（清空 9 hotbar + 27 主栏 + 光标手持物）。t49 引入时由 Main.qml::onModeChanged 在每次
 //   模式切换自动调用；t171 取消该自动调用 —— cycleMode 切模式**保留物品**（用户诉求「创造↔生存切换不清空
 //   背包」）。本方法保留为显式重置 API（供未来「清空背包」按钮等场景），不再被模式切换触发。
