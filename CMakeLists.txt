@@ -210,6 +210,14 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_water_flow.png          # t197 流水贴图（build_water_flow.py；曾漏注 qrc 清单，补登）
         textures/default_water_flow_2.png        # t223 流水动画第二帧（build_water_flow.py 程序生成原创像素图）
         textures/default_lava.png                # t343 岩浆贴图（build_lava.py 程序生成原创像素图；深红橙底+亮黄橙鼓泡+白炽热点）
+        textures/default_bed_red.png             # t387 床方块 8 色变体贴图（build_bed.py 程序生成原创像素图；彩色被面+枕垫亮带+绗缝针脚）
+        textures/default_bed_orange.png
+        textures/default_bed_yellow.png
+        textures/default_bed_green.png
+        textures/default_bed_cyan.png
+        textures/default_bed_blue.png
+        textures/default_bed_magenta.png
+        textures/default_bed_black.png
         textures/default_chest_top.png         # t173/t179 箱子各面贴图（build_chest.py 程序生成原创像素图）
         textures/default_chest_side.png
         textures/default_chest_front.png
@@ -244,6 +252,14 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_sand.png
         textures/icon_stone.png
         textures/icon_torch.png
+        textures/icon_bed_red.png               # t387 床方块 8 色变体立方体图标（build_cube_icons.py 程序生成）
+        textures/icon_bed_orange.png
+        textures/icon_bed_yellow.png
+        textures/icon_bed_green.png
+        textures/icon_bed_cyan.png
+        textures/icon_bed_blue.png
+        textures/icon_bed_magenta.png
+        textures/icon_bed_black.png
         textures/icon_chest.png                 # t173/t179 箱子立方体图标（顶盖缝+侧铁箍；曾漏注册→运行时 WRN 无图标）
         textures/icon_farmland.png              # t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
         textures/icon_wood_slab.png           # t145 不完整方块 flat 2D 区分图标

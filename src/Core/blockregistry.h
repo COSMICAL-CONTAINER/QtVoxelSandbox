@@ -198,8 +198,35 @@ public:
                                   //   **t343 交互**：(a) 铁桶舀 / 放（playercontroller 桶分支 + HitLava 射线）；(b) 木质方块邻岩浆概率着火焚毁
                                   //   （tickLavaFlow 末 ignite pass：Log/Planks/CraftingTable/Leaves 等木类 + 概率 setBlock Air）；(c) 掉落物丢入
                                   //   岩浆被摧毁（ItemEntityManager tick 检中心格 == Lava → releaseSlot）。不进创造调色板（worldgen / 桶交互获得）。
-        Count         = 32, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t387 床方块（bed）8 色变体：机制等价 MC 1.0 床（bed），简化为单格整立方（spec「head+foot 双格，
+        //   或简化单格 if cleaner」→ 取单格，避免双格配对放置 / 状态机的复杂度）。每色一个方块 id（连续段
+        //   [FirstBed, LastBed]）→ 创造调色板每个色变体独立取用 + 右键放置（复用既有 selectedBlockId → placeBlock
+        //   通用放置路径，无需新交互；物品系统是 id 驱动，故「同 id 不同 state」的色变无法经背包表达 → 多 id）。
+        //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 wool / chest 同族；
+        //   简化：碰撞满格，非 MC 床的矮半高 hitbox）、hardness=0.2（同 MC 1.0 床量级，软质）、toolType=Axe
+        //   （木制床架；requiresTool=false → 空手也掉落，仅速度受斧影响）、dropId=自身（破床掉同色床方块，可放回）、
+        //   dropCount=1、maxStack=64。各面贴图=default_bed_<color>（tile 43..50；彩色被面底 + 顶部枕垫亮带 +
+        //   绗缝针脚暗点 + 边缘暗化，原创自绘 §9a）。音色归 GroupWood（软质闷击，同 wool / chest）。**配方**：
+        //   planks + wool → 红床（BedRed，默认 / 最标志性色，recipe.cpp）；其余色变体创造调色板直接取用（本工程
+        //   无染料系统，色变不经合成获得，机制对齐 MC 1.0「彩色羊毛 / 床需染料」但染料留后续任务）。**睡觉机制**
+        //   （夜间右键床跳清晨 + 重生点）归 t388（isBed 谓词为其单一权威判定）。
+        BedRed         = 32, // 红床：配方产物（planks+wool）；默认色。
+        BedOrange      = 33, // 橙床
+        BedYellow      = 34, // 黄床
+        BedGreen       = 35, // 绿床
+        BedCyan        = 36, // 青床
+        BedBlue        = 37, // 蓝床
+        BedMagenta     = 38, // 品红床
+        BedBlack       = 39, // 黑床
+        Count         = 40, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
+
+    // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
+    //   （右键床 → 跳清晨 + 重生点）判定「命中格是否床」，避免各处自写 id 区间漂移（同 isCrossBillboard 模式）。
+    //   连续段（无段外夹入），故裸区间判定即可；仍提供 isBed 谓词作单一权威（改段时一处同步）。
+    static constexpr int FirstBed = BedRed;
+    static constexpr int LastBed  = BedBlack;
+    static bool isBed(quint8 blockId);
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
     //   （mesher 合批进 chunk mesh，不走 1×1×1 立方面路径）。t134 落地 6 类（WoodSlab=15 ... WoodTrapdoor=20）。
@@ -436,12 +463,15 @@ public:
     //      名称/贴图原创自绘 §9a；各面同贴图=石头底+橙铜斑+孔雀绿锈）。
     //   41=gold_ore（t308 金矿石；散布于 stone 深层 y∈[5,25]、需铁镐采掘；机制等价 MC 1.0 金矿，
     //      名称/贴图原创自绘 §9a；各面同贴图=石头底+金黄斑簇）。
-    // 图集由 tools/build_atlas.py 打包全部 42 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   42=lava（t343 岩浆；各面同贴图=深红橙底+亮黄橙鼓泡+白炽热点，原创自绘 §9a；岩浆段材质 opacity≈0.95 近不透）。
+    //   43..50=bed_red..bed_black（t387 床方块 8 色变体；简化单格整立方，机制等价 MC 1.0 床。各面同贴图=彩色被面底
+    //      + 顶部枕垫亮带 + 绗缝针脚暗点 + 边缘暗化，原创自绘 §9a；tools/build_bed.py 程序生成。配方 planks+wool → 红床）。
+    // 图集由 tools/build_atlas.py 打包全部 51 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 42）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 51）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -449,7 +479,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 43;
+    static constexpr int AtlasTileCount = 51;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

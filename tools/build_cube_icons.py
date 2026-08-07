@@ -44,6 +44,16 @@ BLOCKS = [
     ("copper_ore",      "default_copper_ore", "default_copper_ore"),    # t308 铜矿石（各面同贴图=石头底+橙铜斑+孔雀绿锈）
     ("gold_ore",        "default_gold_ore", "default_gold_ore"),        # t308 金矿石（各面同贴图=石头底+金黄斑簇）
     ("wool",            "default_wool", "default_wool"),  # t300 羊毛方块（各面同贴图=奶白羊毛卷绒纹）
+    # t387 床方块 8 色变体立方体图标（各面同贴图=彩色被面+枕垫亮带+绗缝针脚；build_bed.py 程序生成原创像素图）。
+    #   8 色顶 + 两侧明暗 → hotbar / 创造调色板肉眼即可辨色（红 / 橙 / 黄 / 绿 / 青 / 蓝 / 品红 / 黑）。
+    ("bed_red",         "default_bed_red",     "default_bed_red"),
+    ("bed_orange",      "default_bed_orange",  "default_bed_orange"),
+    ("bed_yellow",      "default_bed_yellow",  "default_bed_yellow"),
+    ("bed_green",       "default_bed_green",   "default_bed_green"),
+    ("bed_cyan",        "default_bed_cyan",    "default_bed_cyan"),
+    ("bed_blue",        "default_bed_blue",    "default_bed_blue"),
+    ("bed_magenta",     "default_bed_magenta", "default_bed_magenta"),
+    ("bed_black",       "default_bed_black",   "default_bed_black"),
     ("torch",           "default_torch", "default_torch"),  # t88 火把（透明底+木柄+火焰；走平面 2D 分支非立方体投影）
     ("chest",           "default_chest_top", "default_chest_side"),  # t173 箱子（顶=盖缝+铰链；侧=铁箍带；图标显顶+侧）
     ("farmland",        "default_farmland_dry", "default_dirt"),  # t234 耕地（顶=干态翻耕土；侧=泥土；图标显顶+侧）

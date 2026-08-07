@@ -171,6 +171,13 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { RecipeRegistry::CharcoalId, kStickId, 0, 0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::Torch), 4, 1, "torch_charcoal" },
+    // t387 红床：木板+羊毛 → 1 红床（无序 2×2）。机制等价 MC 1.0 床配方（3 板 + 3 羊毛 → 床）的简化版
+    //   （本工程用 1 板 + 1 羊毛 → 1 床，降低合成摩擦；色变用独立 id 故配方只产默认红床，其余色变体创造调色板
+    //   取用——本工程无染料系统）。羊毛原料用 RecipeRegistry::WoolId（材料段 0x20E，杀羊 / 剪羊毛掉落；创造调色板
+    //   亦有）→ 生存可由羊获得；2 原料任意位置即可（2×2 背包栏 / 3×3 工作台均可）。产物 BedRed（方块段，可放置）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::Planks), RecipeRegistry::WoolId, 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedRed), 1, 1, "bed_red" },
     // ── t134 不完整方块（木制半方块，机制等价 MC 配方；产物 id >= FirstPartial 走异形渲染）──
     //   slab：3 木板横排 → 6 木板台阶（有序 3×3，仅工作台）。MC「3 板横排→6 台阶」。
     { int(RecipeRegistry::Table3x3), false,

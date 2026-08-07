@@ -32,6 +32,15 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Chest:         return "icon_chest.png";          // t173 箱子立方体图标（顶盖缝+侧铁箍）
     case BlockRegistry::Farmland:      return "icon_farmland.png";       // t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
     case BlockRegistry::Wool:          return "icon_wool.png";           // t300 羊毛立方体图标（奶白绒毛）
+    // t387 床方块 8 色变体立方体图标（彩色被面 + 枕垫亮带 + 绗缝针脚；build_cube_icons.py 程序生成）。
+    case BlockRegistry::BedRed:        return "icon_bed_red.png";        // 红床（配方产物默认色）
+    case BlockRegistry::BedOrange:     return "icon_bed_orange.png";     // 橙床
+    case BlockRegistry::BedYellow:     return "icon_bed_yellow.png";     // 黄床
+    case BlockRegistry::BedGreen:      return "icon_bed_green.png";      // 绿床
+    case BlockRegistry::BedCyan:       return "icon_bed_cyan.png";       // 青床
+    case BlockRegistry::BedBlue:       return "icon_bed_blue.png";       // 蓝床
+    case BlockRegistry::BedMagenta:    return "icon_bed_magenta.png";    // 品红床
+    case BlockRegistry::BedBlack:      return "icon_bed_black.png";      // 黑床
     // t244 cross 广告牌方块图标：草丛 / 小麦作物在世界内是 cross 形广告牌（透明底 + 像素草叶 / 麦穗），
     //   图标走 flat 2D 平面路径（同火把 icon_torch）—— build_cube_icons.py 的 render_flat_2d 直接放大源
     //   贴图保留 alpha → 「纯草叶 / 麦穗无方块底」。小麦作物图标取成熟阶段 7（金黄麦穗），肉眼一眼可辨。
@@ -346,7 +355,12 @@ QVariantList Hotbar::creativeBlocks() const
              // t244 cross 广告牌方块（透明底 cutout；与火把同走非整立方渲染）：
              int(BlockRegistry::TallGrass),                                     // 草丛（worldgen 散布 / 杀草掉种子）
              int(BlockRegistry::WheatCrop),                                    // 小麦作物（state=阶段；种 0..7，图标显成熟态）
-             int(BlockRegistry::Wool) };                                       // t300 羊毛方块（剪羊毛 / 杀羊掉落；可放置）
+             int(BlockRegistry::Wool),                                        // t300 羊毛方块（剪羊毛 / 杀羊掉落；可放置）
+             // t387 床方块 8 色变体（简化单格整立方；机制等价 MC 1.0 床。配方 planks+wool → 红床；其余色创造直接取用）。
+             int(BlockRegistry::BedRed),    int(BlockRegistry::BedOrange),
+             int(BlockRegistry::BedYellow), int(BlockRegistry::BedGreen),
+             int(BlockRegistry::BedCyan),   int(BlockRegistry::BedBlue),
+             int(BlockRegistry::BedMagenta),int(BlockRegistry::BedBlack) };
 }
 
 QString Hotbar::iconSourceAt(int slot) const

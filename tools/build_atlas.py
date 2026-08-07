@@ -109,6 +109,18 @@ TILES = [
                                     #    岩浆湖 + 玩家铁桶舀/放；木质方块邻岩浆概率着火焚毁；掉落物丢入被摧毁。名称/贴图原创自绘
                                     #    §9a；各面同贴图=深红橙底+亮黄橙鼓泡+白炽热点；tools/build_lava.py 程序生成原创像素图。
                                     #    纹理不透明，岩浆段材质 opacity≈0.95 近不透、配 NoLighting 暖色 baseColor 显自发光感）
+    # t387 床方块（bed）8 色变体：简化单格整立方（spec「head+foot 双格，或简化单格」→ 取单格），机制等价 MC 1.0
+    #   床。各色变体一张 16×16 实心贴图（彩色被面底 + 顶部枕垫亮带 + 绗缝针脚暗点 + 边缘暗化），六面铺同图（同
+    #   wool / chest）。配方 planks+wool → 红床（默认色，最标志性）；其余色变体创造调色板直接取用（无染料系统）。
+    #   名称 / 贴图全原创纯色，零 MC 资产（§9 区隔）；tools/build_bed.py 程序生成原创像素图。
+    "default_bed_red",              # 43 bed_red（红床；配方产物默认色）
+    "default_bed_orange",           # 44 bed_orange（橙床）
+    "default_bed_yellow",           # 45 bed_yellow（黄床）
+    "default_bed_green",            # 46 bed_green（绿床）
+    "default_bed_cyan",             # 47 bed_cyan（青床）
+    "default_bed_blue",             # 48 bed_blue（蓝床）
+    "default_bed_magenta",          # 49 bed_magenta（品红床）
+    "default_bed_black",            # 50 bed_black（黑床）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

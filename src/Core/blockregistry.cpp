@@ -148,6 +148,22 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   暖色 baseColor 显自发光感）。音色归 GroupStone（石质兜底；岩浆专属 rumble 走 AudioManager lava 流声 proximity loop，非破块音）。
     //   worldgen placeLavaLakes 在 Y<30 封闭洞穴散布岩浆湖；玩家铁桶舀/放（playercontroller 桶分支 + HitLava 射线）。
     /* lava         */ {int(BlockRegistry::Lava),                     42, 42, 42, 42, false, BlockRegistry::ShapeNone,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "lava",          "岩浆"},
+    // ── t387 床方块（bed）8 色变体：机制等价 MC 1.0 床（bed），简化为单格整立方（spec「head+foot 双格，或简化单格」
+    //   → 取单格）。每色一个方块 id（连续段 [FirstBed, LastBed]）→ 创造调色板每色独立取用 + 右键放置（复用既有
+    //   selectedBlockId → placeBlock 通用放置路径，无需新交互）。整立方 opaque（solid=true / ShapeFull —— 走 mesher
+    //   整立方面路径，**非**异形，与 wool / chest 同族；简化：碰撞满格）、hardness=0.2（同 MC 1.0 床量级，软质）、
+    //   toolType=Axe（木制床架；requiresTool=false → 空手也掉落，仅速度受斧影响）、dropId=自身（破床掉同色床方块，
+    //   可放回）、dropCount=1、maxStack=64。各面贴图=default_bed_<color>（tile 43..50；彩色被面底 + 顶部枕垫亮带 +
+    //   绗缝针脚暗点 + 边缘暗化，原创自绘 §9a）。配方 planks+wool → 红床（BedRed，默认色）；其余色变体创造调色板
+    //   直接取用（无染料系统）。音色归 GroupWood（软质闷击，同 wool / chest）。睡觉机制归 t388。
+    /* bed_red      */ {int(BlockRegistry::BedRed),                    43, 43, 43, 43, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedRed),        1, 64, "bed_red",      "红色床"}, // 配方产物（planks+wool）；默认色
+    /* bed_orange   */ {int(BlockRegistry::BedOrange),                 44, 44, 44, 44, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedOrange),     1, 64, "bed_orange",   "橙色床"},
+    /* bed_yellow   */ {int(BlockRegistry::BedYellow),                 45, 45, 45, 45, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedYellow),     1, 64, "bed_yellow",   "黄色床"},
+    /* bed_green    */ {int(BlockRegistry::BedGreen),                  46, 46, 46, 46, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedGreen),      1, 64, "bed_green",    "绿色床"},
+    /* bed_cyan     */ {int(BlockRegistry::BedCyan),                   47, 47, 47, 47, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedCyan),       1, 64, "bed_cyan",     "青色床"},
+    /* bed_blue     */ {int(BlockRegistry::BedBlue),                   48, 48, 48, 48, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedBlue),       1, 64, "bed_blue",     "蓝色床"},
+    /* bed_magenta  */ {int(BlockRegistry::BedMagenta),                49, 49, 49, 49, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedMagenta),    1, 64, "bed_magenta",  "品红色床"},
+    /* bed_black    */ {int(BlockRegistry::BedBlack),                  50, 50, 50, 50, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedBlack),      1, 64, "bed_black",    "黑色床"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -187,6 +203,8 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* farmland       */ 60,  /* tall_grass     */ 31,  /* wheat_crop     */ 59,  /* diamond_ore    */ 56,
     /* wool           */ 35,  /* sapling        */ 6,   /* copper_ore     */ -1,  /* gold_ore       */ 14,
     /* lava           */ 10,
+    /* bed_red        */ 26,  /* bed_orange     */ 26,  /* bed_yellow     */ 26,  /* bed_green      */ 26, // t387 床 8 色变体 → MC 1.0 床 id 26（统一；MC 1.0 床颜色由 metadata 分，本工程用独立 id）
+    /* bed_cyan       */ 26,  /* bed_blue       */ 26,  /* bed_magenta    */ 26,  /* bed_black      */ 26,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -219,6 +237,13 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
 {
     if (blockId == Sapling) return true;
     return blockId >= FirstCross && blockId <= LastCross;
+}
+
+// t387 床方块段统一谓词（单一权威）：id ∈ [FirstBed, LastBed]（8 色变体）即床。供 t388 睡觉机制判定「命中格
+//   是否床」（右键床 → 跳清晨 + 重生点），避免各处自写 id 区间漂移（同 isCrossBillboard 模式）。连续段，裸区间即可。
+bool BlockRegistry::isBed(quint8 blockId)
+{
+    return blockId >= FirstBed && blockId <= LastBed;
 }
 
 // 方块是否「有碰撞 sub-AABB」（考虑开合态）。air / torch / water（ShapeNone）→ false。
@@ -519,6 +544,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case WoodPressurePlate: case WoodDoor: case WoodTrapdoor: // t134 木制半方块 → 木质音色
     case Chest: // t173 箱子 → 木质音色
     case Wool: // t300 羊毛 → 木质音色（软质闷击，最接近 MC 1.0 羊毛 cloth SoundType）
+    case BedRed: case BedOrange: case BedYellow: case BedGreen: // t387 床 → 木质音色（软质被面闷击，同 wool）
+    case BedCyan: case BedBlue: case BedMagenta: case BedBlack:
         return GroupWood;
     case Grass: case Dirt:
     case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）
