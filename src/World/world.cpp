@@ -327,6 +327,28 @@ void World::tickWaterFlow()
                     cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
             }
 
+    // t411 流体交互 pass A（流水 → 静岩浆源 → 黑曜石）：遍历快照中的**流水**格（state>0），查 6 正交邻是否
+    //   为**静岩浆源**（Lava state=0）；命中则把该静岩浆源凝固为 Obsidian。机制等价 MC 1.0「流水触岩浆源 →
+    //   黑曜石」（仅流水触发；水源触岩浆不反应——区别于岩浆侧交互，源-源不凝固）。6 正交邻覆盖「水流自上
+    //   而下浇到岩浆源顶」的瀑布情形。凝固目标延迟到批量应用阶段写入（流场计算 pass 2-4 读旧栅格，但水本就
+    //   无法流入岩浆/obsidian 实体 → 无副作用）。setWaterSilent 写 Obsidian：旧 id=Lava → 内部标 m_lavaDirty，
+    //   驱动下次岩浆 tick 续扫该岩浆格的流岩浆邻居（它们因源被凝固而失支撑，应凝固/退场）。
+    std::vector<WCell> obsidianTargets;
+    {
+        static const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for (const WCell &c : cells) {
+            if (c.level == 0) continue; // 仅流水触发交互（水源触岩浆不凝固）
+            for (const auto &n : neigh) {
+                const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
+                if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                if (m_chunks.blockAt(nx, ny, nz) == BlockRegistry::Lava
+                    && m_chunks.stateAt(nx, ny, nz) == 0) {
+                    obsidianTargets.push_back({nx, ny, nz, 0});
+                }
+            }
+        }
+    }
+
     // 新增表：key → 新 level（多源指向同一格取 min = 最短源距，机制对齐 MC）。
     std::unordered_map<long long, quint8> adds;
     auto tryAdd = [&](long long k, quint8 lvl) {
@@ -475,6 +497,10 @@ void World::tickWaterFlow()
     //    同步重建、再统一清脏），与逐格路径终态一致，仅把 N 次重建并为 1 次。
     m_batchFluid = true;
     bool anyChange = false;
+    // t411：先写流水→静岩浆源凝固为 Obsidian（与 srcRegs/evaps/adds 操作的格互不相交 —— obsidian 目标是 Lava
+    //   源格，其余三者操作 Water/Air 格；故写入顺序安全）。
+    for (const WCell &o : obsidianTargets)
+        anyChange |= setWaterSilent(o.x, o.y, o.z, BlockRegistry::Obsidian, 0);
     for (const WCell &s : srcRegs)
         anyChange |= setWaterSilent(s.x, s.y, s.z, BlockRegistry::Water, 0);
     for (const WCell &e : evaps)
@@ -528,6 +554,29 @@ void World::tickLavaFlow()
                 if (m_chunks.blockAt(x, y, z) == BlockRegistry::Lava)
                     cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
             }
+
+    // t411 流体交互 pass B（流岩浆 → 静水源 → 圆石）：遍历快照中的**流岩浆**格（state>0），查 6 正交邻是否
+    //   为**静水源**（Water state=0）；命中则把该静水源凝固为 Cobblestone（**非** stone——机制等价 MC 1.0
+    //   「流岩浆触水源 → 圆石」，区别于 stone：MC 1.0 中水源遇流岩浆变石、流岩浆遇水源变圆石，本工程对齐
+    //   spec 显式要求「becomes COBBLESTONE (NOT stone)」）。仅流岩浆触发（岩浆源触水不反应）；6 正交邻覆盖
+    //   「流岩浆自上而下浇到水源顶」的瀑布情形。凝固目标延迟到批量应用阶段写入（流场计算 pass 2-3 读旧栅格，
+    //   但岩浆本就无法流入水/cobble 实体 → 无副作用）。setWaterSilent 写 Cobble：旧 id=Water → 内部标
+    //   m_waterDirty，驱动下次水 tick 续扫该水格的水源邻居（它们因源被凝固而失支撑，应退场/扩散）。
+    std::vector<LCell> cobbleTargets;
+    {
+        static const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for (const LCell &c : cells) {
+            if (c.level == 0) continue; // 仅流岩浆触发交互（岩浆源触水不凝固）
+            for (const auto &n : neigh) {
+                const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
+                if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                if (m_chunks.blockAt(nx, ny, nz) == BlockRegistry::Water
+                    && m_chunks.stateAt(nx, ny, nz) == 0) {
+                    cobbleTargets.push_back({nx, ny, nz, 0});
+                }
+            }
+        }
+    }
 
     std::unordered_map<long long, quint8> adds;
     auto tryAdd = [&](long long k, quint8 lvl) {
@@ -598,6 +647,10 @@ void World::tickLavaFlow()
     //    clearDirty」合并为末尾 1 次 emit + clear，消除活跃岩浆扩散期 N 次重建扇出（同 t350 水流批量化的根因）。
     m_batchFluid = true;
     bool anyChange = false;
+    // t411：先写流岩浆→静水源凝固为 Cobblestone（与 evaps/adds 操作的格互不相交 —— cobble 目标是 Water 源格，
+    //   evaps/adds 操作 Lava/Air 格；故写入顺序安全）。
+    for (const LCell &cb : cobbleTargets)
+        anyChange |= setWaterSilent(cb.x, cb.y, cb.z, BlockRegistry::Cobble, 0);
     for (const LCell &e : evaps)
         anyChange |= setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
     for (const auto &kv : adds) {

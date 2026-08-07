@@ -167,6 +167,9 @@ TILES = [
     "default_potato_crop_1",        # 74 potato_crop_1（age 2-3：拔高）
     "default_potato_crop_2",        # 75 potato_crop_2（age 4-5：叶丛）
     "default_potato_crop_3",        # 76 potato_crop_3（age 6-7：成熟，棕黄马铃薯块茎露出土）
+    "default_obsidian",             # 77 obsidian（t411 黑曜石；流水触静岩浆源凝固产物——机制等价 MC 1.0
+                                    #    obsidian，名称/贴图原创自绘 §9a；各面同贴图=深紫黑火山玻璃底+紫红纹理嵌点+
+                                    #    少量品紫玻璃微反光；tools/build_obsidian.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

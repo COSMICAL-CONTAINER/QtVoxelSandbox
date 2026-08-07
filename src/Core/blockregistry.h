@@ -369,7 +369,16 @@ public:
         //   区别于小麦的基底 + state 全 8 阶段贴图）。方块 def topTile/sideTile 存基底阶段 0 tile（69/73），几何段算实际。
         CarrotCrop     = 55, // 胡萝卜作物：cross 形作物方块（机制等价 MC 1.0 carrot crop）；dropId=CarrotId(0x22F)
         PotatoCrop     = 56, // 马铃薯作物：cross 形作物方块（机制等价 MC 1.0 potato crop）；dropId=PotatoId(0x230)
-        Count          = 57, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t411 黑曜石（Obsidian）：机制等价 MC 1.0 obsidian（流水 state>0 触到静岩浆源 state=0 时，静岩浆源凝固
+        //   成本方块——见 World::tickWaterFlow 流体交互 pass）。整立方 opaque（solid=true / ShapeFull —— 走 mesher
+        //   整立方面路径，**非**异形，与 stone/cobble/sandstone 同族）、hardness=12.0（同 MC 1.0 obsidian 量级，
+        //   极硬极耐挖）、toolType=Pickaxe（石族）、requiresTool=true、minToolTier=1（木镐起可破且掉落；本工程工具
+        //   等级表无钻石镐门槛，简化为木镐即采，便于玩家回收流体交互产物）、dropId=自身（破黑曜石掉黑曜石方块，
+        //   可放置）、dropCount=1、maxStack=64。各面贴图=obsidian(77)（深紫黑火山玻璃底 + 紫红纹理嵌点 + 少量品紫
+        //   玻璃微反光，原创自绘 §9a）。音色归 GroupStone（石质）。worldgen 不直接生成（仅由 t411 流体交互产生），
+        //   不进创造调色板（系统获得语义，同 ice）。
+        Obsidian       = 57, // 黑曜石：流水触静岩浆源凝固产物（t411 流体交互）
+        Count          = 58, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -683,7 +692,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 77;
+    static constexpr int AtlasTileCount = 78;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

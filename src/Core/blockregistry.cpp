@@ -279,6 +279,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   tile = 基底 + state/2（4 阶段贴图覆盖 8 年龄，机制对齐 MC 1.0 carrot/potato 4 张阶段贴图）。
     /* carrot_crop  */ {int(BlockRegistry::CarrotCrop),                    69, 69, 69, 69, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x22F, 1, 64, "carrot_crop",  "胡萝卜作物"},
     /* potato_crop  */ {int(BlockRegistry::PotatoCrop),                    73, 73, 73, 73, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x230, 1, 64, "potato_crop",  "马铃薯作物"},
+    // ── t411 黑曜石（Obsidian）：机制等价 MC 1.0 obsidian（流水 state>0 触到静岩浆源 state=0 时，静岩浆源凝固成
+    //   本方块——见 World::tickWaterFlow 流体交互 pass）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方
+    //   面路径，**非**异形，与 stone/cobble/sandstone 同族）、hardness=12.0（同 MC 1.0 obsidian 量级，极硬极耐挖）、
+    //   toolType=Pickaxe（石族）、requiresTool=true、minToolTier=1（木镐起可破且掉落；本工程工具等级表无钻石镐门槛，
+    //   简化为木镐即采，便于玩家回收流体交互产物）、dropId=自身（破黑曜石掉黑曜石方块，可放置）、dropCount=1、maxStack=64。
+    //   各面贴图=obsidian(77)（深紫黑火山玻璃底 + 紫红纹理嵌点 + 少量品紫玻璃微反光，原创自绘 §9a）。音色归 GroupStone
+    //   （石质）。worldgen 不直接生成（仅由 t411 流体交互产生），不进创造调色板（系统获得语义，同 ice）。
+    /* obsidian     */ {int(BlockRegistry::Obsidian),                       77, 77, 77, 77, true,  BlockRegistry::ShapeFull,    12.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Obsidian),      1, 64, "obsidian",     "黑曜石"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -337,6 +345,7 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* glass          */ 20, // t405 玻璃 → MC 1.0 glass id 20
     /* carrot_crop    */ 141, // t407 胡萝卜作物 → MC 1.0 carrot crop block id 141（age 由 metadata 分，统一取成熟态 id）
     /* potato_crop    */ 142, // t407 马铃薯作物 → MC 1.0 potato crop block id 142
+    /* obsidian       */ 49, // t411 黑曜石 → MC 1.0 obsidian block id 49（流水触静岩浆源凝固产物）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -689,6 +698,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case CopperOre: case GoldOre: // t308 铜/金矿石 → 石质音色（同 coal/iron/diamond 矿石族）
     case Spawner: // t392 刷怪笼 → 石质音色（铁笼金属敲击感，最接近 MC 1.0 刷怪笼 metal SoundType）
     case Sandstone: // t394 砂岩 → 石质音色（成岩，同 cobble/stone 族）
+    case Obsidian: // t411 黑曜石 → 石质音色（致密火山玻璃，同 cobble/stone 族）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）
