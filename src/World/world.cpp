@@ -622,7 +622,7 @@ void World::tickLavaFlow()
     //    发 blockBroken → 触发破块粒子 / 音（机制等价 MC 木块被岩浆点燃焚毁）。t344 完整着火系统留后续。
     auto isWoodLike = [](quint8 id) -> bool {
         using BR = BlockRegistry;
-        return id == BR::Log || id == BR::Planks || id == BR::CraftingTable || id == BR::Leaves
+        return id == BR::Log || id == BR::SpruceLog || id == BR::Planks || id == BR::CraftingTable || id == BR::Leaves
             || id == BR::WoodSlab || id == BR::WoodStairs || id == BR::WoodFence
             || id == BR::WoodPressurePlate || id == BR::WoodDoor || id == BR::WoodTrapdoor || id == BR::Chest;
     };
@@ -733,11 +733,14 @@ void World::decayLeavesAround(int x, int y, int z)
                 if ((m_chunks.stateAt(lx, ly, lz) & BlockRegistry::PersistentLeafBit) != 0)
                     continue; // t305 玩家放置叶（持久）不衰
                 // 查 kDecayRadius 切比雪夫距离内有无原木（任一命中即保留 —— 仍有原木支撑）。
+                //   t395：原木支撑同时认橡木 Log 与云杉 SpruceLog（云杉树冠靠 SpruceLog 主干支撑；否则云杉叶会
+                //   误判失撑而衰减）。机制等价 MC「叶距任一原木类 ≤4 格即不衰」。
                 bool hasLog = false;
                 for (int ox = -kDecayRadius; ox <= kDecayRadius && !hasLog; ++ox) {
                     for (int oy = -kDecayRadius; oy <= kDecayRadius && !hasLog; ++oy) {
                         for (int oz = -kDecayRadius; oz <= kDecayRadius && !hasLog; ++oz) {
-                            if (m_chunks.blockAt(lx + ox, ly + oy, lz + oz) == BlockRegistry::Log) {
+                            const quint8 nb = m_chunks.blockAt(lx + ox, ly + oy, lz + oz);
+                            if (nb == BlockRegistry::Log || nb == BlockRegistry::SpruceLog) {
                                 hasLog = true;
                             }
                         }
@@ -1053,6 +1056,8 @@ int World::heightAt(int x, int z) const
         case Biome::Forest: amp = 5.0; break; // 森林（t341）：amp 2→5 起伏（用户「森林要更起伏」→ 产山坡供洞口贴附；
                                              //   不再与 plains 同振幅 → 森林/草原边界有小幅高差，但低于 hills amp 7，
                                              //   保持「大草原平地」仍成立）。t306 原 amp 2（与 plains 同）已废。
+        case Biome::Snowy:  amp = 3.0; break; // 雪原/针叶（t395）：平缓起伏（介于 plains 2 与 desert 3 之间；覆雪地表
+                                             //   宜平缓，少悬崖；机制等价 MC 1.0 雪原 / 针叶平缓地形）。
         case Biome::Plains: // 草原（多数陆地）
         default:            amp = 2.0; break; // 极平（spec「大草原=平地」）
     }
@@ -1081,7 +1086,14 @@ World::Biome World::biomeAt(int x, int z) const
     //   把森林压成少数（候选带内 ~15-20%），草原重新成为大片开阔地带（spec「大草原」原意）；森林仍
     //   成片共存（spec「森林+草原」二者共存，森林不消失）。纯函数于 seed → 同 seed 同 forest/plains 划分（PLAN §2-K）。
     const double f = fbm((x + m_seed + 977) * 0.020, (z + m_seed + 977) * 0.020); // [-1,1]
-    return (f > 0.40) ? Biome::Forest : Biome::Plains;
+    if (f > 0.40) return Biome::Forest;
+    // t395 雪原/针叶群系：用第三条独立低频 fBm 把 Snowy 从草原里 carve 出来。独立频率 0.016 + seed 偏移 +6420
+    //   （与主群系图 0.012/+3571、森林图 0.020/+977、高度图 0.09 均不同）→ 雪原图与四者解耦；低频 → 雪原成片
+    //   （非逐格斑点，机制等价 MC 1.0 寒冷群系大尺度分布）。阈值 0.45 → 候选带内少数（~10-15%）成雪原（与沙漠 /
+    //   森林同为少数群系，草原仍占多数）。纯函数于 seed → 同 seed 同雪原分布（PLAN §2-K）。
+    const double s = fbm((x + m_seed + 6420) * 0.016, (z + m_seed + 6420) * 0.016); // [-1,1]
+    if (s > 0.45) return Biome::Snowy;
+    return Biome::Plains;
 }
 
 // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威）。旧 t117 独立 fBm（0.018/+7919/0.35）
@@ -1112,6 +1124,7 @@ int World::weatherStateAt(int x, int z) const
     const Biome b = biomeAt(x, z);
     if (b == Biome::Desert) return int(Weather::Clear); // 沙漠干燥 → 永不降水（机制等价 MC 沙漠无雨 / 雪）
     if (b == Biome::Hills)  return int(Weather::Snow);  // 山地（冷）→ 降水即雪（机制等价 MC 冷群系下雪）
+    if (b == Biome::Snowy)  return int(Weather::Snow);  // t395 雪原/针叶（冷）→ 降水即雪（机制等价 MC 寒冷群系下雪；spec「weather SNOWS here」）
     return int(m_weather);                               // 草原 / 森林（暖）→ 随全局态（雨 / 雪 / 雷）
 }
 
@@ -1187,7 +1200,7 @@ void World::strikeLightning()
     const quint8 id = blockAt(x, y, z);
     auto isWoodLike = [](quint8 bid) -> bool {
         using BR = BlockRegistry;
-        return bid == BR::Log || bid == BR::Planks || bid == BR::CraftingTable || bid == BR::Leaves
+        return bid == BR::Log || bid == BR::SpruceLog || bid == BR::Planks || bid == BR::CraftingTable || bid == BR::Leaves
             || bid == BR::WoodSlab || bid == BR::WoodStairs || bid == BR::WoodFence
             || bid == BR::WoodPressurePlate || bid == BR::WoodDoor || bid == BR::WoodTrapdoor || bid == BR::Chest;
     };
@@ -1294,7 +1307,7 @@ void World::generate()
     //   t338：旧「全域 h<=waterLevel+1 → 散布沙滩/水下沙」已移除 —— 内陆低洼列不再产散沙（spec「内陆无散沙」），
     //     沙 + 海水集中于此一角。逐列独立 → 跨 chunk 边界天然连续；同 seed 确定（fbm / seaColumnHeight 纯函数，§2-K）。
     //   走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
-    int desertCols = 0, seaCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0;
+    int desertCols = 0, seaCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0, snowyCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const Biome bio = biomeAt(x, z);
@@ -1318,6 +1331,7 @@ void World::generate()
             if (bio == Biome::Plains) ++plainsCols;
             else if (bio == Biome::Hills) ++hillsCols;
             else if (bio == Biome::Forest) ++forestCols;
+            else if (bio == Biome::Snowy) ++snowyCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
                 if (inSandSea) {
@@ -1334,7 +1348,8 @@ void World::generate()
                     else if (h - y < desertSandThickness + desertSandstoneThickness) b = BlockRegistry::Sandstone; // 沙下砂岩
                     else                                                b = BlockRegistry::Stone;      // 深石
                 } else {
-                    if (y == h)          b = BlockRegistry::Grass; // 草地表层
+                    if (y == h)          b = (bio == Biome::Snowy) ? BlockRegistry::SnowLayer  // t395 雪原地表覆雪（机制等价 MC 寒冷群系覆雪）
+                                                                  : BlockRegistry::Grass;      // 草地表层
                     else if (y >= h - 2) b = BlockRegistry::Dirt;  // 土
                     else                 b = BlockRegistry::Stone; // 石
                 }
@@ -1345,6 +1360,7 @@ void World::generate()
     // t274/t306：群系分布可观测（plains 应为多数 / forest 次之 / hills + desert 少数）；同 seed → 同分布（确定性核对）。
     qInfo() << "worldgen: biomes plains =" << plainsCols << "forest =" << forestCols
             << "hills =" << hillsCols << "desert =" << desertCols
+            << "snowy =" << snowyCols
             << "sea/beach =" << seaCols
             << "/" << (m_width * m_depth);
 
@@ -1360,6 +1376,7 @@ void World::generate()
     carveCanyon(); // t342：大峡谷（caves/ores 之后 → 峡壁既有矿石层被 carve 暴露；先于填水 → 内陆干涸峡谷，
                    //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
+    freezeSurfaceWater(); // t395：Snowy 群系海/湖表层水冻结为冰（fillWater 之后水已就位；先于树 / 草）
     placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
     placeTallGrass(); // t235：grass 表层上方确定性散布草丛（PLAN §2-K；树定型后，仅写空气格不覆盖树）
@@ -1469,6 +1486,51 @@ void World::placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand
     setVoxelIfAir(x, trunkTopY + 2, z, BlockRegistry::Leaves);
 }
 
+// t395 单棵云杉（变种树，机制等价 MC 1.0 spruce）：surfaceY=雪顶 y；主干 trunkH 格云杉原木（id SpruceLog）
+//   从 surfaceY+1 起；顶部窄锥形树冠（普通树叶 id Leaves —— 不引独立 SpruceLeaves，复用 Leaves；变种由深色
+//   SpruceLog 主干 + 高窄锥形树冠形状区分）。树冠呈「底宽顶尖」锥形（贴近 MC 云杉针叶树冠）：自 trunkBase+1 起
+//   逐层向上，底层半径 2 渐收到顶尖半径 0；半径 2 的层四角按 leafRand 各位决定有无 → 每棵锥冠轮廓各异。
+//   主干先置、树冠后置且仅写空气格 → 树冠绝不覆盖主干。纯由 seed 派生（leafRand，确定性 PLAN §2-K）。
+void World::placeSpruceTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand)
+{
+    const int trunkBase = surfaceY + 1;
+    const int trunkTopY = trunkBase + trunkH - 1;
+
+    // 主干（地表上方空气，逐格置云杉原木）。
+    for (int y = trunkBase; y <= trunkTopY; ++y)
+        setVoxelIfAir(x, y, z, BlockRegistry::SpruceLog);
+
+    const auto absi = [](int v) { return v < 0 ? -v : v; };
+
+    // 锥形树冠：自 trunkBase+1 到 trunkTopY+1（顶尖）逐层；底层半径 2、上半半径 1、顶尖单叶。
+    //   半径 2 层四角（|dx|=2 且 |dz|=2）按 leafRand 低 4 位各一位决定有无 → 锥冠底部轮廓每棵不同。
+    const int canopyLow = trunkBase + 1;
+    const int canopyTop = trunkTopY + 1;
+    const int canopyH = canopyTop - canopyLow; // 锥高（层数 - 1）
+    for (int y = canopyLow; y <= canopyTop; ++y) {
+        int radius;
+        if (y == canopyTop) {
+            // 顶尖单叶（锥顶）。
+            setVoxelIfAir(x, y, z, BlockRegistry::Leaves);
+            continue;
+        }
+        // 上半径 1（锥上半收窄）、下半径 2（锥下半宽）。canopyH<=0 时统一半径 1（极矮云杉兜底）。
+        radius = (canopyH > 0 && (y - canopyLow) >= (canopyH + 1) / 2) ? 1 : 2;
+        for (int dx = -radius; dx <= radius; ++dx) {
+            for (int dz = -radius; dz <= radius; ++dz) {
+                if (dx == 0 && dz == 0) continue; // 主干列保留原木
+                if (absi(dx) > radius || absi(dz) > radius) continue; // 切比雪夫半径
+                // 半径 2 层四角按 leafRand 决定有无（与橡树 placeTreeAt 同模式）。
+                if (radius == 2 && absi(dx) == 2 && absi(dz) == 2) {
+                    const unsigned bit = (dx > 0 ? 1u : 0u) + (dz > 0 ? 2u : 0u); // 0..3 → 四角各一位
+                    if (!((leafRand >> bit) & 1u)) continue; // 该角本轮不生叶
+                }
+                setVoxelIfAir(x + dx, y, z + dz, BlockRegistry::Leaves);
+            }
+        }
+    }
+}
+
 // 确定性树木散布：遍历列，按哈希(seed,x,z) 决定是否尝试种树；占用栅格保证主干间距 ≥2 列。
 // 仅在 grass 表层（heightAt > waterLevel+1，与 generate() 沙层判定同阈值）种；沙滩/水下/沙漠/越界/近邻有
 // 树干 → 跳过。主干高度按世界高度钳制（留出树冠空间），放不下最小树则确定性跳过。全部纯函数于 seed → 可复现。
@@ -1486,6 +1548,7 @@ void World::placeTrees()
     constexpr int kForestTreePct = 10; // 森林密闭（spec「森林=现多树」）
     constexpr int kPlainsTreePct = 1;  // 草原稀疏（spec「草原=少树」）
     constexpr int kHillsTreePct  = 2;  // 山地零星（保留 t274 既有）
+    constexpr int kSnowyTreePct  = 9;  // t395 雪原/针叶：针叶林密闭（机制等价 MC taiga 密植云杉；接近 forest 密度）
 
     int placed = 0;
     for (int z = 0; z < m_depth; ++z) {
@@ -1495,13 +1558,16 @@ void World::placeTrees()
             if (surfaceY <= kWaterLevel + 1) continue;
             const Biome bio = biomeAt(x, z);
             if (bio == Biome::Desert) continue;  // t117 沙漠群系不种树（机制等价 MC 沙漠无树）
-            // t309：跳过非草顶列（地表湖水面 / 洞穴入口竖井顶等已把草替换 → 不种树；机制等价 MC 树仅生于草地）。
-            //   读栅格当前方块（heightAt 是 worldgen 高度、不含 t309 改动）→ 湖列水面 / 洞口 air 皆被本守卫拦截。
-            if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::Grass) continue;
+            // t309：跳过非草顶 / 非雪顶列（地表湖水面 / 洞穴入口竖井顶等已把草 / 雪替换 → 不种树；机制等价 MC 树仅
+            //   生于草地 / 雪地）。读栅格当前方块（heightAt 是 worldgen 高度、不含 t309 改动）→ 湖列水面 / 洞口 air
+            //   皆被本守卫拦截。t395：Snowy 群系地表为 SnowLayer（覆雪）→ 云杉生于雪上（机制等价 MC 寒冷群系针叶树）。
+            const quint8 surf = m_chunks.blockAt(x, surfaceY, z);
+            if (surf != BlockRegistry::Grass && surf != BlockRegistry::SnowLayer) continue;
 
-            // t306 群系分流密度：forest 密闭 / plains 稀疏 / hills 零星。
+            // t306/t395 群系分流密度：forest 密闭 / plains 稀疏 / hills 零星 / snowy 针叶林密植。
             const unsigned densityPct = (bio == Biome::Forest) ? unsigned(kForestTreePct)
                                         : (bio == Biome::Plains) ? unsigned(kPlainsTreePct)
+                                        : (bio == Biome::Snowy)  ? unsigned(kSnowyTreePct)
                                                                  : unsigned(kHillsTreePct);
             const quint32 r = hashColumn(m_seed, x, z);
             if (r % 100u >= densityPct) continue; // 密度筛选
@@ -1523,8 +1589,19 @@ void World::placeTrees()
             if (maxTrunkH < kMinTrunk) continue; // 此列放不下最小树 → 确定性跳过
             if (trunkH > maxTrunkH) trunkH = maxTrunkH;
 
-            // leafRand = 哈希高位 → 驱动树冠四角叶随机（每棵轮廓各异）；与密度(低位)/高度(>>8)字段不重叠。
-            placeTreeAt(x, surfaceY, z, trunkH, r >> 16);
+            // t395 雪原/针叶群系改种云杉变种（机制等价 MC taiga 云杉）：主干更高（云杉特征）+ 窄锥形树冠。
+            //   云杉主干高度独立范围 kMinSpruceTrunk..kMaxSpruceTrunk（> 橡树），同源按世界高度钳制。
+            //   leafRand = 哈希高位 → 驱动树冠四角叶随机（每棵轮廓各异）；与密度(低位)/高度(>>8)字段不重叠。
+            if (bio == Biome::Snowy) {
+                constexpr int kMinSpruceTrunk = 6; // 云杉主干最少格数（高于橡树 4）
+                constexpr int kMaxSpruceTrunk = 9; // 最多 9（高耸针叶树）
+                int spruceH = kMinSpruceTrunk + int((r >> 8) % unsigned(kMaxSpruceTrunk - kMinSpruceTrunk + 1));
+                if (spruceH > maxTrunkH) spruceH = maxTrunkH;
+                if (spruceH < kMinSpruceTrunk) continue; // 此列放不下最小云杉 → 确定性跳过
+                placeSpruceTreeAt(x, surfaceY, z, spruceH, r >> 16);
+            } else {
+                placeTreeAt(x, surfaceY, z, trunkH, r >> 16);
+            }
             occupied[size_t(x) + size_t(m_width) * size_t(z)] = 1;
             ++placed;
         }
@@ -1570,6 +1647,7 @@ void World::placeTallGrass()
             if (surfaceY <= kWaterLevel + 1) continue;
             const Biome bio = biomeAt(x, z);
             if (bio == Biome::Desert) continue; // t117/t274 沙漠群系不生草丛（机制等价 MC 沙漠无草）
+            if (bio == Biome::Snowy) continue;  // t395 雪原/针叶地表覆雪 → 不生草丛（机制等价 MC 寒冷群系雪地无草）
             // t309：跳过非草顶列（地表湖 / 洞口顶把草替换 → 草丛不生于水面 / 洞口；机制等价 MC 草丛仅生于草地）。
             if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::Grass) continue;
 
@@ -1653,6 +1731,28 @@ void World::placeDesertFlora()
     }
     qInfo() << "worldgen: desert flora placed cactus =" << cactusPlaced
             << "dead_bush =" << deadBushPlaced; // 同 seed → 同计数（确定性核对）
+}
+
+// t395 雪原/针叶群系水面冻结（见 world.h 头注释）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water
+//   格）冻结为 Ice（机制等价 MC 1.0 寒冷群系水面结冰）。仅冻最顶层水面（同 MC 仅表层结冰；下层水保留为水源）。
+//   地下水池（placeUndergroundWaterPools 的 cy ≤ h-7，对任意 surfaceY 恒 < waterLevel）不在 y==waterLevel → 不受
+//   影响；故扫描固定 y==waterLevel 一层即精准命中「海 / 低洼地表水表面」而不误冻地下水。走 m_chunks.setBlock
+//   直写（worldgen 静默；光场随后 recomputeLightField 重算 → Ice 满遮光正确计入）。纯函数于 seed（biomeAt，§2-K）。
+void World::freezeSurfaceWater()
+{
+    if (kWaterLevel >= m_height) return; // 极端：世界高度不足（防御）
+    int frozen = 0;
+    const int y = kWaterLevel;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            if (biomeAt(x, z) != Biome::Snowy) continue; // 仅雪原/针叶群系冻结
+            if (m_chunks.blockAt(x, y, z) == BlockRegistry::Water) {
+                m_chunks.setBlock(x, y, z, BlockRegistry::Ice);
+                ++frozen;
+            }
+        }
+    }
+    qInfo() << "worldgen: frozen surface ice =" << frozen; // 同 seed → 同计数（确定性核对）
 }
 
 // t119 底层基岩：遍历列，在 y 0..4 铺一层 Bedrock（不可破坏方块，hardness=-1.0 → canMine=false）。

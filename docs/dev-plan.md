@@ -1046,7 +1046,7 @@ t18                        （背包，依赖 hotbar）
 | 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
 |---|---|---|---|---|
 | t394 | ⏳ | **沙漠群系 + 内容**：沙地表、**仙人掌**（可放/触碰伤害）、枯木、沙岩；天气**不下雨**（联动 t385）。**验收**：沙漠成片、仙人掌可放且扎手、无雨。 | t385 | world.cpp biome + BlockRegistry(Cactus/DeadBush/Sandstone) |
-| t395 | ⏳ | **雪原/针叶群系 + 内容**：雪层、冰、云杉（变种树）；天气**下雪非雨**。**验收**：雪原成片、雪/冰可踩、下雪。 | t385 | world.cpp biome + BlockRegistry(SnowLayer/Ice/SpruceLog) |
+| t395 | ✅ | **雪原/针叶群系 + 内容**：雪层、冰、云杉（变种树）；天气**下雪非雨**。**验收**：雪原成片、雪/冰可踩、下雪。 | t385 | world.cpp biome + BlockRegistry(SnowLayer/Ice/SpruceLog) |
 | t396 | ⏳ | **沼泽群系 + 内容**：浅水洼、莲花、蘑菇、偏暗色调。**验收**：沼泽可见浅水+莲花+蘑菇。 | — | world.cpp biome + BlockRegistry(LilyPad/Mushroom) |
 | t397 | ⏳ | **通用群系内容**：花（红/黄等）、甘蔗（水边长高 3 格）。多群系草地生成。**验收**：草地上有花、水边有甘蔗。 | — | BlockRegistry(Flower/Sugarcane) + worldgen scatter |
 

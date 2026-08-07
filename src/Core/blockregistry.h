@@ -25,6 +25,7 @@
 //   29=copper_ore（t308 铜矿石；散布于 stone 浅中层 y∈[5,45]，需石镐采掘；掉铜原矿→熔炉烧铜锭）。
 //   30=gold_ore（t308 金矿石；散布于 stone 深层 y∈[5,25]，需铁镐采掘；掉金原矿→熔炉烧金锭）。
 //   41=sandstone / 42=cactus / 43=dead_bush（t394 沙漠三件套：砂岩沙下成岩 / 仙人掌接触伤害 / 枯灌木装饰）。
+//   44=snow_layer / 45=ice / 46=spruce_log（t395 雪原/针叶三件套：地表覆雪 / 水面冻结冰 / 云杉树主干）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -267,7 +268,30 @@ public:
                                   //   **段外 cross**：DeadBush id(43) 不在 [FirstCross,LastCross]=[24,25] 连续段内（多方块夹
                                   //   中间且非 cross），故并入 isCrossBillboard 谓词（同 Sapling 模式 —— 单一权威，避免 mesher /
                                   //   选中框多处分流漂移），mesher 路由一律读谓词。
-        Count         = 44, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t395 雪原/针叶群系内容（机制等价 MC 1.0 寒冷群系三件套：snow / ice / spruce log；名称 / 贴图全原创自绘 §9a）：
+        SnowLayer      = 44, // 积雪层：雪原/针叶群系地表覆盖（worldgen 在 Snowy 群系把草顶替换为积雪层）。整立方 opaque
+                                  //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 sand / sandstone 同族；
+                                  //   简化为满格整立方非 MC 薄雪层，避免异形几何复杂度）、hardness=0.2（同 MC 1.0 雪层量级，软质）、
+                                  //   toolType=Shovel（铲加速；requiresTool=false → 空手也掉落，仅速度受铲影响）、dropId=自身
+                                  //   （破积雪层掉积雪层方块，可放回）、dropCount=1、maxStack=64。各面贴图=snow(57)（冷白底 +
+                                  //   细密冰晶噪点，原创自绘 §9a）。音色归 GroupSand（颗粒雪响）。进创造调色板（玩家可取用 / 放置）。
+        Ice            = 45, // 冰：雪原/针叶群系水面冻结产物（worldgen freezeSurfaceWater 把 Snowy 群系海/湖表层水冻结为冰）。
+                                  //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形；可踩 / 实体碰撞；
+                                  //   简化为不透明整立方，非 MC 半透冰，避开透明体积网格化复杂度）、hardness=0.5（同 MC 1.0 冰量级）、
+                                  //   toolType=Pickaxe、requiresTool=true、minToolTier=1（木镐可破）、**dropId=0**（破冰不掉落 —— 机制
+                                  //   等价 MC 1.0 冰需精准采集才掉落，本工程无精准采集故恒不掉落）、dropCount=0、maxStack=64
+                                  //   （worldgen 专属冻结 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图=ice(58)
+                                  //   （浅蓝底 + 反光裂纹，原创自绘 §9a）。音色归 GroupStone（玻璃质敲击，最接近 MC 1.0 冰 glass
+                                  //   SoundType）。不进创造调色板（worldgen 冻结获得；与 water / lava 同属「worldgen / 系统获得」语义）。
+        SpruceLog      = 46, // 云杉原木：雪原/针叶群系云杉树的主干（worldgen placeSpruceTreeAt 在 Snowy 群系种云杉变种树）。
+                                  //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 log / planks
+                                  //   同族；机制等价 MC 1.0 云杉原木——寒冷群系针叶树变种，区别于橡木原木 Log）、hardness=2.0
+                                  //   （同 MC 1.0 原木量级）、toolType=Axe（木类；requiresTool=false → 空手也掉落，仅速度受斧影响）、
+                                  //   dropId=自身（破云杉原木掉云杉原木方块，可放置）、dropCount=1、maxStack=64。各面贴图：顶/底=
+                                  //   spruce_log_top(59)（深棕同心年轮截面）/ 侧=spruce_log_side(60)（深棕垂直树皮条带，区别于橡木
+                                  //   原木 log_side 的浅棕；云杉木特征为更深冷棕色）。音色归 GroupWood（木质，同 log / planks）。
+                                  //   进创造调色板（玩家可取用 / 放置）。
+        Count         = 47, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -523,6 +547,10 @@ public:
     //      tools/build_cactus.py 程序生成原创像素图）。
     //   56=dead_bush（t394 枯死的灌木 cross 贴图；透明底 + 棕褐放射干枝；alphaCutoff cutout；
     //      tools/build_dead_bush.py 程序生成原创像素图）。
+    //   57=snow（t395 积雪层各面贴图；冷白底+细密冰晶噪点；SnowLayer 各面=本 tile；tools/build_snow.py 程序生成原创像素图）。
+    //   58=ice（t395 冰各面贴图；浅蓝底+反光裂纹；Ice 各面=本 tile；tools/build_ice.py 程序生成原创像素图）。
+    //   59=spruce_log_top / 60=spruce_log_side（t395 云杉原木；顶=深棕同心年轮截面 / 侧=深棕垂直树皮条带；
+    //      区别于橡木原木 log_top/log_side 的浅棕；tools/build_spruce.py 程序生成原创像素图）。
     // 图集由 tools/build_atlas.py 打包全部 57 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
@@ -536,7 +564,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 57;
+    static constexpr int AtlasTileCount = 61;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

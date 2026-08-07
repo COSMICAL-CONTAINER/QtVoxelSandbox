@@ -794,7 +794,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   窗按散布概率逐叶渐退 ~10-30s（机制等价 MC 1.0 叶衰 random-tick 渐退）。**不依赖 drop 标志**（创造瞬破
     //   drop=false 亦触发 —— 衰减是结构后果，非掉落；机制等价 MC 创造破原木后叶子照衰）。仅原木触发（破叶 /
     //   破其它方块不衰）。分层：本处（Game/Physics）调 World::decayLeavesAround（World 层方法），向下合法。
-    if (brokenId == BlockRegistry::Log && m_world)
+    if ((brokenId == BlockRegistry::Log || brokenId == BlockRegistry::SpruceLog) && m_world)
         m_world->decayLeavesAround(x, y, z);
     // t43：生存挖出可掉落方块 → **走实体流**（emit spawnItem），移除 commit a3e9300 的 auto-collect
     // （原直接 addStack）。掉落物落到该格地面、玩家走近 ≤kPickupDist 时经 pickupScan 拾取 → addStack

@@ -305,7 +305,7 @@ private:
     //   （worldgen 细节，不外泄到 QML；如需 F3 调试可后续暴露 Q_INVOKABLE 查询）。
     //   t306 在 t274 三分基础上把原 plains 中段 carve 出 forest：forest 多树（密闭林）、plains 少树多草（开阔草原），
     //   机制等价 MC 1.0 森林 / 平原群系分化（spec「森林（现多树）+ 草原（少树多草）」）。
-    enum class Biome { Plains, Hills, Desert, Forest };
+    enum class Biome { Plains, Hills, Desert, Forest, Snowy };
     // t385 天气状态机枚举（机制等价 MC 1.0 天气四态）。私有嵌套（天气细节，不外泄类型到 QML；
     //   Q_INVOKABLE weatherState / weatherStateAt 返 int 编码）。Thunder = 降水 + 风暴（雷电闪光 / 引燃留 t386）。
     enum class Weather : int { Clear = 0, Rain = 1, Snow = 2, Thunder = 3 };
@@ -338,6 +338,11 @@ private:
     // 单棵树：主干 trunkH 格 + 树冠。leafRand = 该列哈希的高位，驱动树冠四角叶的有无 → 每棵树冠轮廓
     // 各异（贴近 MC 橡树自然参差）。纯由 seed 派生（确定性，PLAN §2-K）。
     void placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
+    // t395 单棵云杉（变种树）：主干 trunkH 格云杉原木（id SpruceLog）+ 顶部窄锥形树冠（普通树叶 id Leaves）。
+    //   机制等价 MC 1.0 云杉（spruce）—— 比 oak 更高更窄、树冠呈收尖锥形（底层半径 2 渐收到顶尖半径 0）。
+    //   worldgen placeTrees 在 Snowy 群系改种本变种（区别于橡树：深色云杉主干 + 高窄锥形树冠）。仅写空气格
+    //   （setVoxelIfAir）→ 不覆盖主干 / 地形。纯由 seed 派生（leafRand 驱动锥层四角叶有无，确定性 PLAN §2-K）。
+    void placeSpruceTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
     // 确定性矿石散布（t84/t279，PLAN §2-K）：地形填充后遍历 stone 区段，按 hashVoxel(seed,x,y,z)
     //   决定是否替换为煤矿 / 铁矿 / **钻石矿**。**t279 高度分层**（煤浅 / 铁中 / 钻石深，机制等价 MC 1.0
     //   矿物随深度分层）：煤仅浅层（y≥8，靠近地表富集）、铁中层（y≤30）、钻石仅深层（y∈[5,16]，靠近基岩
@@ -361,6 +366,11 @@ private:
     //   机制等价 MC 1.0 沙漠仙人掌 / 枯灌木点缀。纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；
     //   禁用任何运行期随机源。仅写空气格 → 不覆盖沙上已生成的方块（与 placeTrees/placeTallGrass 同守卫语义）。
     void placeDesertFlora();
+    // t395 雪原/针叶群系水面冻结（PLAN §2-K 确定性）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water
+    //   格）冻结为 Ice（机制等价 MC 1.0 寒冷群系水面结冰）。仅冻最顶层水面（同 MC 仅表层结冰；下层水保留）；
+    //   地下水池（cy ≤ h-7 << waterLevel）不在 y==waterLevel 故不受影响。generate 在 fillWater 之后调（水已就位）。
+    //   走 m_chunks.setBlock 直写（worldgen 静默，光场随后 recomputeLightField 重算）。纯函数于 seed（biomeAt）。
+    void freezeSurfaceWater();
     // t278 洞穴隧道生成（PLAN §2-K 确定性）：terrain + 矿石散布之后、填水之前 carve 地下洞穴。两套叠加：
     //   (a) 3D Perlin 阈值洞（两路偏移 noise3 同时高于阈值 → 蜿蜒管状洞穴，机制等价 MC 1.0 Perlin 洞穴）；
     //   (b) Perlin worm 隧道 + 分叉（确定性起点、沿 noise 扰动方向逐球 carve、定期分叉 → 连通隧道网 + Y/十

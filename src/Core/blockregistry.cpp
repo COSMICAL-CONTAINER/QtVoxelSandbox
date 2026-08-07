@@ -194,6 +194,29 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   沙顶低密度散布；放置预检须 Sand 在下方。**段外 cross**（id 43 不在 [FirstCross,LastCross] 连续段内）→ 并入
     //   isCrossBillboard 谓词（同 Sapling 模式），mesher 路由一律读谓词。进创造调色板（装饰取用）。
     /* dead_bush    */ {int(BlockRegistry::DeadBush),                   56, 56, 56, 56, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "dead_bush",    "枯死的灌木"},
+    // ── t395 雪原/针叶群系内容（机制等价 MC 1.0 寒冷群系三件套：snow / ice / spruce log；名称 / 贴图全原创自绘 §9a）：
+    //   积雪层（SnowLayer）：雪原/针叶群系地表覆盖（worldgen 在 Snowy 群系把草顶替换为积雪层）。整立方 opaque
+    //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 sand / sandstone 同族；简化为满格整立方
+    //   非 MC 薄雪层，避免异形几何复杂度）、hardness=0.2（同 MC 1.0 雪层量级，软质）、toolType=Shovel（铲加速；
+    //   requiresTool=false → 空手也掉落，仅速度受铲影响）、dropId=自身（破积雪层掉积雪层方块，可放回）、dropCount=1、
+    //   maxStack=64。各面贴图=snow(57)（冷白底 + 细密冰晶噪点）。音色归 GroupSand（颗粒雪响）。进创造调色板。
+    /* snow_layer   */ {int(BlockRegistry::SnowLayer),                  57, 57, 57, 57, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::SnowLayer),     1, 64, "snow_layer",   "积雪层"},
+    //   冰（Ice）：雪原/针叶群系水面冻结产物（worldgen freezeSurfaceWater 把 Snowy 群系海/湖表层水冻结为冰）。整立方
+    //   opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形；可踩 / 实体碰撞；简化为不透明整立方，
+    //   非 MC 半透冰，避开透明体积网格化复杂度）、hardness=0.5（同 MC 1.0 冰量级）、toolType=Pickaxe、requiresTool=true、
+    //   minToolTier=1（木镐可破）、**dropId=0**（破冰不掉落 —— 机制等价 MC 1.0 冰需精准采集才掉落，本工程无精准采集
+    //   故恒不掉落）、dropCount=0、maxStack=64（worldgen 专属冻结 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。
+    //   各面贴图=ice(58)（浅蓝底 + 反光裂纹）。音色归 GroupStone（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）。
+    //   不进创造调色板（worldgen 冻结获得；与 water / lava 同属「worldgen / 系统获得」语义）。
+    /* ice          */ {int(BlockRegistry::Ice),                        58, 58, 58, 58, true,  BlockRegistry::ShapeFull,     0.5f, int(BlockRegistry::Pickaxe), 1, true,                             0, 0, 64, "ice",          "冰"},
+    //   云杉原木（SpruceLog）：雪原/针叶群系云杉树的主干（worldgen placeSpruceTreeAt 在 Snowy 群系种云杉变种树）。
+    //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 log / planks 同族；机制等价
+    //   MC 1.0 云杉原木——寒冷群系针叶树变种，区别于橡木原木 Log）、hardness=2.0（同 MC 1.0 原木量级）、toolType=Axe
+    //   （木类；requiresTool=false → 空手也掉落，仅速度受斧影响）、dropId=自身（破云杉原木掉云杉原木方块，可放置）、
+    //   dropCount=1、maxStack=64。各面贴图：顶/底=spruce_log_top(59)（深棕同心年轮截面）/ 侧=spruce_log_side(60)
+    //   （深棕垂直树皮条带，区别于橡木原木 log_side 的浅棕；云杉木特征为更深冷棕色）。音色归 GroupWood（木质）。
+    //   进创造调色板。
+    /* spruce_log   */ {int(BlockRegistry::SpruceLog),                  59, 59, 60, 60, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceLog),     1, 64, "spruce_log",   "云杉原木"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -239,6 +262,9 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* sandstone      */ 24, // t394 砂岩 → MC 1.0 sandstone id 24
     /* cactus         */ 81, // t394 仙人掌 → MC 1.0 cactus id 81
     /* dead_bush      */ 32, // t394 枯死的灌木 → MC 1.0 dead bush id 32
+    /* snow_layer     */ 80, // t395 积雪层 → MC 1.0 snow block id 80（满格雪方块；MC 薄雪层 id 78 为非整立方，本工程简化整立方故取雪方块 80）
+    /* ice            */ 79, // t395 冰 → MC 1.0 ice id 79
+    /* spruce_log     */ -1, // t395 云杉原木 → MC 1.0 无独立 id（1.0 仅橡木 log id 17，云杉 / 白桦等变种 1.7+ 才以 metadata 分；本工程用独立 id 故无 1.0 等价）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -576,6 +602,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Spawner: // t392 刷怪笼 → 石质音色（铁笼金属敲击感，最接近 MC 1.0 刷怪笼 metal SoundType）
     case Sandstone: // t394 砂岩 → 石质音色（成岩，同 cobble/stone 族）
         return GroupStone;
+    case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
+        return GroupStone;
     case Log: case Planks: case CraftingTable:
     case WoodSlab: case WoodStairs: case WoodFence:
     case WoodPressurePlate: case WoodDoor: case WoodTrapdoor: // t134 木制半方块 → 木质音色
@@ -583,6 +611,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Wool: // t300 羊毛 → 木质音色（软质闷击，最接近 MC 1.0 羊毛 cloth SoundType）
     case BedRed: case BedOrange: case BedYellow: case BedGreen: // t387 床 → 木质音色（软质被面闷击，同 wool）
     case BedCyan: case BedBlue: case BedMagenta: case BedBlack:
+    case SpruceLog: // t395 云杉原木 → 木质音色（同 log / planks 族）
         return GroupWood;
     case Grass: case Dirt:
     case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）
@@ -593,6 +622,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case DeadBush: // t394 枯死的灌木 → 软草音色（枯枝软质，同草丛；机制等价 MC dead bush SoundType = grass）
         return GroupGrass;
     case Sand:
+    case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）
         return GroupSand;
     case Leaves:
         return GroupLeaves;

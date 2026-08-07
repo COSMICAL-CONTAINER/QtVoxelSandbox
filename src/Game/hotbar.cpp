@@ -34,6 +34,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Wool:          return "icon_wool.png";           // t300 羊毛立方体图标（奶白绒毛）
     case BlockRegistry::Sandstone:     return "icon_sandstone.png";      // t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
+    case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
+    case BlockRegistry::SpruceLog:    return "icon_spruce_log.png";    // t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮）
     // t387 床方块 8 色变体立方体图标（彩色被面 + 枕垫亮带 + 绗缝针脚；build_cube_icons.py 程序生成）。
     case BlockRegistry::BedRed:        return "icon_bed_red.png";        // 红床（配方产物默认色）
     case BlockRegistry::BedOrange:     return "icon_bed_orange.png";     // 橙床
@@ -371,6 +373,11 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Sandstone),                                   // 砂岩（沙下成岩；需镐采掘；可放置）
              int(BlockRegistry::Cactus),                                      // 仙人掌（接触伤害；放沙/仙人掌上）
              int(BlockRegistry::DeadBush),                                    // 枯死的灌木（cross 装饰；放沙上）
+             // t395 雪原/针叶群系内容：积雪层（地表覆雪）/ 云杉原木（云杉树主干）。机制等价 MC 1.0 寒冷群系三件套
+             //   （snow / spruce log），名称 / 贴图原创自绘 §9a。冰（Ice）由 worldgen 冻结水面获得（同 water / lava
+             //   属系统获得），不进创造调色板。
+             int(BlockRegistry::SnowLayer),                                  // 积雪层（雪原地表覆雪；铲加速；可放置）
+             int(BlockRegistry::SpruceLog),                                  // 云杉原木（云杉树主干；斧加速；可放置）
              // t387 床方块 8 色变体（简化单格整立方；机制等价 MC 1.0 床。配方 planks+wool → 红床；其余色创造直接取用）。
              int(BlockRegistry::BedRed),    int(BlockRegistry::BedOrange),
              int(BlockRegistry::BedYellow), int(BlockRegistry::BedGreen),

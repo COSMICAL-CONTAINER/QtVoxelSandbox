@@ -242,6 +242,10 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_cactus_top.png           # t394 仙人掌顶面/底面贴图（build_cactus.py；绿截面+同心方框环纹+中央凹陷）
         textures/default_cactus_side.png          # t394 仙人掌侧面贴图（build_cactus.py；深绿底+4 垂直棱脊+棱上刺点）
         textures/default_dead_bush.png            # t394 枯死的灌木 cross 贴图（build_dead_bush.py；透明底+棕褐放射干枝；alphaCutoff cutout）
+        textures/default_snow.png                 # t395 积雪层贴图（build_snow.py；冷白底+细密冰晶噪点；SnowLayer 各面）
+        textures/default_ice.png                  # t395 冰贴图（build_ice.py；浅蓝底+反光裂纹；Ice 各面）
+        textures/default_spruce_log_top.png       # t395 云杉原木顶/底面贴图（build_spruce.py；深棕同心年轮截面）
+        textures/default_spruce_log_side.png      # t395 云杉原木侧面贴图（build_spruce.py；深棕垂直树皮条带）
         textures/default_chest_top.png         # t173/t179 箱子各面贴图（build_chest.py 程序生成原创像素图）
         textures/default_chest_side.png
         textures/default_chest_front.png
@@ -297,6 +301,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_sandstone.png                # t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带；build_cube_icons.py）
         textures/icon_cactus.png                   # t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点；build_cube_icons.py）
         textures/icon_dead_bush.png                # t394 枯死的灌木 cross 方块 flat 2D 图标（透明底 + 棕褐干枝；build_cube_icons.py）
+        textures/icon_snow_layer.png               # t395 积雪层立方体图标（各面=冷白冰晶噪点；build_cube_icons.py）
+        textures/icon_ice.png                      # t395 冰立方体图标（各面=浅蓝反光裂纹；build_cube_icons.py）
+        textures/icon_spruce_log.png               # t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮；build_cube_icons.py）
 )
 
 # t89 / t118 音效资源（tools/build_sounds.py 程序合成，§4 原创 SFX；零 MC 资产）。

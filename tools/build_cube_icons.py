@@ -60,6 +60,10 @@ BLOCKS = [
     # t394 沙漠群系内容：砂岩（沙下成岩整立方）/ 仙人掌（接触伤害整立方）立方体图标（顶+两侧明暗）。
     ("sandstone",       "default_sandstone_top", "default_sandstone_side"),  # t394 砂岩（顶=压实沙面；侧=层理带）
     ("cactus",          "default_cactus_top",    "default_cactus_side"),     # t394 仙人掌（顶=绿截面环纹；侧=棱脊+刺点）
+    # t395 雪原/针叶群系内容：积雪层（地表覆雪）/ 冰（水面冻结）/ 云杉原木（云杉树主干）立方体图标（顶+两侧明暗）。
+    ("snow_layer",      "default_snow",          "default_snow"),            # t395 积雪层（各面=冷白冰晶噪点）
+    ("ice",             "default_ice",           "default_ice"),             # t395 冰（各面=浅蓝反光裂纹）
+    ("spruce_log",      "default_spruce_log_top", "default_spruce_log_side"), # t395 云杉原木（顶=年轮截面；侧=深棕树皮）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

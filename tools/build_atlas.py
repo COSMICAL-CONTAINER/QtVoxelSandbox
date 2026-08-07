@@ -132,6 +132,12 @@ TILES = [
     "default_cactus_top",           # 54 cactus_top（仙人掌顶面/底面；绿截面 + 同心方框环纹 + 中央凹陷）
     "default_cactus_side",          # 55 cactus_side（仙人掌侧面；深绿底 + 4 垂直棱脊亮带 + 棱上刺点）
     "default_dead_bush",            # 56 dead_bush（枯死的灌木 cross 贴图；透明底 + 棕褐放射干枝；alphaCutoff cutout）
+    # t395 雪原/针叶群系内容：积雪层（地表覆雪）/ 冰（水面冻结）/ 云杉原木（云杉树主干）。机制等价 MC 1.0
+    #   寒冷群系三件套（snow / ice / spruce log），名称/贴图原创自绘 §9a；各由独立 build_*.py 程序生成。
+    "default_snow",                 # 57 snow（积雪层各面贴图；冷白底+细密冰晶噪点；SnowLayer 各面=本 tile）
+    "default_ice",                  # 58 ice（冰各面贴图；浅蓝底+反光裂纹；Ice 各面=本 tile）
+    "default_spruce_log_top",       # 59 spruce_log_top（云杉原木顶/底面；深棕同心年轮截面）
+    "default_spruce_log_side",      # 60 spruce_log_side（云杉原木侧面；深棕垂直树皮条带）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
