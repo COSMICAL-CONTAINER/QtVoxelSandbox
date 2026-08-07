@@ -275,6 +275,11 @@ signals:
     void seedChanged();
     void worldChanged(); // 生成/编辑后发出 → 网格重建
     void weatherChanged(); // t385 天气态翻转（晴↔雨/雪/雷；驱动 QML 天空变暗 + 粒子切换）
+    // t386 一次闪电击中（雷雨天随机触发）：携击中世界坐标 (x,y,z)。呈现层据此显屏幕白闪 + 雷声（playThunder）；
+    //   实体层（mob / 玩家）据此对击中点附近实体造成伤害。World 自身已对击中点的木类方块引燃焚毁（见 strikeLightning）。
+    //   机制等价 MC 1.0 雷击（机制等价，§9 改名非 MC 专名）。分层（PLAN §2）：World 低层只发语义事件，绝不反向
+    //   依赖 Entities / Renderer —— 损伤 mob / 玩家由各自上层 Connections 消费本信号（同 blockBroken 模式）。
+    void lightningStruck(int x, int y, int z);
     // 编辑语义事件（id：broken 带被破的原方块 id；placed 带新放方块 id）。
     void blockBroken(int x, int y, int z, int id);
     void blockPlaced(int x, int y, int z, int id);
@@ -493,6 +498,13 @@ private:
     // t385 天气态 + 计时（运行期随机模拟；构造 / generate / beginLoad 经 resetWeather 重置为 Clear + 随机晴时长）。
     Weather m_weather = Weather::Clear;
     float m_weatherTimer = 0.0f;  // 当前天气态剩余秒数（倒数到 0 → 随机转换；构造时设首个晴时长）
+    // t386 闪电计时（仅雷态有意义）：当前到下一次闪电击中的剩余秒数（倒数到 0 → strikeLightning + 重置随机间隔）。
+    //   resetWeather 设首击间隔；非雷态不递减（tickWeather 守 m_weather==Thunder）。机制等价 MC 1.0 雷暴期随机闪电。
+    float m_lightningTimer = 0.0f;
+    // t386 闪电间隔常量（秒；机制对齐 MC 1.0 雷暴期 ~每几秒一闪，取短便于肉眼 / 测试复核）。雷暴期内每
+    //   kLightningIntervalMin..Max 秒随机一击（~4-12s/击）→ 一次 25-50s 雷暴平均 4-7 次闪电，可见可验收。
+    static constexpr float kLightningIntervalMin = 4.0f;
+    static constexpr float kLightningIntervalMax = 12.0f;
     // t385 天气时长常量（秒；机制对齐 MC 1.0「~0.5-1 天一态」取短便于肉眼 / 测试复核）。晴阶段 kClearWeatherMin..Max
     //   （~45-120s）、降水阶段 kWeatherDurMin..Max（~35-80s）、雷态 kThunderDurMin..Max（~25-50s，更短）。
     //   首场天气前的晴阶段 kInitialClearMin..Max 偏短（~20-45s）→ 进世界 ~1 分钟内可见首场天气（验收可见性）。
@@ -507,6 +519,14 @@ private:
     // t385 重置天气态（Clear + 随机晴时长）；构造 / generate / beginLoad 调。态真翻才 emit weatherChanged
     //   （加载 / 新世界天气从 Clear 起；构造期无监听者，emit 亦无害）。
     void resetWeather();
+    // t386 触发一次闪电击中（雷态 m_lightningTimer 归零时调）：在 [0,width)×[0,depth) 内随机选一列，取其列顶
+    //   实面（heightmapAt）为击中点；空列（heightmap<0，如纯海域上空）→ 跳过不发信号（无可见落点）。击中点若为
+    //   木类方块（同 tickLavaFlow isWoodLike 判定）→ setBlock Air 焚毁（发 blockBroken → 破块粒子/音，机制等价 MC
+    //   雷击点燃木质）；非木类仅闪光 / 雷声 / 伤害（由上层 Connections 据 lightningStruck 信号消费）。末尾 emit
+    //   lightningStruck(x,y,z) 驱动呈现层（白闪 + playThunder）+ 实体层（mob / 玩家近击中点伤害）。位置随机于世界
+    //   内（World 不知玩家位 → 不依赖上层；闪光 / 雷声为全局反馈，落点仅决定火 / 实体伤）。分层（PLAN §2）：
+    //   只读 m_chunks + 写栅格（setBlock）+ 发信号；不依赖 Renderer / Physics / Game / Entities。
+    void strikeLightning();
 };
 
 #endif // WORLD_H

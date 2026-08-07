@@ -1122,6 +1122,7 @@ bool World::isPrecipitatingAt(int x, int z) const
 }
 
 // t385 重置天气态（见 world.h 头注释）：Clear + 随机首场晴时长（偏短便于进世界即见天气）。态真翻才 emit。
+//   t386：同时重置闪电计时（雷态进入时第一击的随机间隔；非雷态不递减，无副作用）。
 void World::resetWeather()
 {
     auto *rng = QRandomGenerator::global();
@@ -1129,6 +1130,7 @@ void World::resetWeather()
     const bool changed = (m_weather != Weather::Clear);
     m_weather = Weather::Clear;
     m_weatherTimer = dur;
+    m_lightningTimer = kLightningIntervalMin + float(rng->generateDouble()) * (kLightningIntervalMax - kLightningIntervalMin);
     if (changed) emit weatherChanged();
 }
 
@@ -1158,6 +1160,41 @@ void World::tickWeather(qreal dt)
     }
     m_weather = next;
     emit weatherChanged(); // 态翻转 → 驱动 QML 天空变暗 + 粒子切换
+
+    // t386 闪电：仅雷态推进。进入雷态时 m_lightningTimer 已由 resetWeather / 上一击重置为首击间隔；递减到 0 →
+    //   strikeLightning（随机落点 + 引燃 + emit lightningStruck）+ 重置下一击随机间隔。非雷态不递减（零开销）。
+    //   spec「雷雨天随机闪电（闪光+雷声），可点燃木/伤害实体」。机制等价 MC 1.0 雷暴期随机闪电。
+    if (m_weather == Weather::Thunder) {
+        m_lightningTimer -= float(dt);
+        if (m_lightningTimer <= 0.0f) {
+            strikeLightning();
+            auto *rng = QRandomGenerator::global();
+            m_lightningTimer = kLightningIntervalMin + float(rng->generateDouble()) * (kLightningIntervalMax - kLightningIntervalMin);
+        }
+    }
+}
+
+// t386 触发一次闪电击中（见 world.h 头注释）：随机世界内一列为落点，列顶实面为击中 y；木类方块焚毁；emit 信号。
+void World::strikeLightning()
+{
+    auto *rng = QRandomGenerator::global();
+    const int x = int(rng->bounded(m_width));   // [0, width)
+    const int z = int(rng->bounded(m_depth));   // [0, depth)
+    const int y = heightmapAt(x, z);            // 列顶首个实面 y（空列 → -1）
+    if (y < 0) return;                          // 空列（纯海域 / 全空气上空）无可见落点 → 不发信号
+    // 击中点木类方块焚毁（机制等价 MC 雷击点燃木质；无 Fire 方块 → setBlock Air 焚毁 + blockBroken 粒子/音，
+    //   同 tickLavaFlow ignite pass 语义）。非木类不焚毁（仅闪光 / 雷声 / 伤害，由上层据信号消费）。
+    const quint8 id = blockAt(x, y, z);
+    auto isWoodLike = [](quint8 bid) -> bool {
+        using BR = BlockRegistry;
+        return bid == BR::Log || bid == BR::Planks || bid == BR::CraftingTable || bid == BR::Leaves
+            || bid == BR::WoodSlab || bid == BR::WoodStairs || bid == BR::WoodFence
+            || bid == BR::WoodPressurePlate || bid == BR::WoodDoor || bid == BR::WoodTrapdoor || bid == BR::Chest;
+    };
+    if (isWoodLike(id)) {
+        setBlock(x, y, z, BlockRegistry::Air); // 焚毁（发 blockBroken → 破块粒子 / 音 + worldChanged 重建）
+    }
+    emit lightningStruck(x, y, z); // 驱动呈现层（白闪 + playThunder）+ 实体层（mob / 玩家近击中点伤害）
 }
 
 // t338 海域角点（4 角之一；seed 派生确定性）。海域（海 + 沙滩）集中于此角，内陆无散沙 / 散水。

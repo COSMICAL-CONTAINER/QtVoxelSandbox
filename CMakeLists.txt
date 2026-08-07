@@ -297,6 +297,7 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/water_flow.wav
         sounds/water_step.wav
         sounds/lava.wav                             # t343 岩浆 proximity 环境音（build_sounds.py gen_lava 程序合成，§9 原创）
+        sounds/thunder.wav                          # t386 雷声（build_sounds.py gen_thunder 程序合成，§9 原创；lightningStruck → playThunder）
         sounds/mob_idle.wav
         sounds/mob_idle_pig.wav
         sounds/mob_idle_cow.wav

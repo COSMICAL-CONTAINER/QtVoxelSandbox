@@ -649,6 +649,39 @@ def gen_explosion():
     return finalize(out)
 
 
+def gen_thunder():
+    """雷声（t386）：起始尖「咔」爆（宽带瞬态 ~25ms）+ 深沉低频轰鸣长尾（~2.6s 双正弦 38/62Hz body + FM 颤
+    滚动）+ 缓慢衰减的低通噪声 rumble。机制等价 MC 远雷 / 雷击轰隆声（§9 原创；零 MC 资产）。比 explosion 更低、
+    更长（雷声是低频长尾持续轰隆，而非爆炸的短爆裂）。由 World::lightningStruck → Main.qml 路由 playThunder 触发。"""
+    dur = 2.6
+    n = int(SR * dur)
+    rnd = random.Random(386386)
+    # 低通噪声 rumble 床（极低截止 → 持续低频隆隆，拟云层放电的空气振动）。
+    bed_state = 0.0
+    bed_a = 0.018
+    bed = [0.0] * n
+    for i in range(n):
+        w = rnd.uniform(-1, 1)
+        bed_state = bed_a * w + (1.0 - bed_a) * bed_state
+        bed[i] = bed_state
+    bed_inv = 1.0 / max(1e-6, max(abs(s) for s in bed))
+    out = [0.0] * n
+    for i in range(n):
+        t = i / SR
+        # 起始尖爆：极短宽带瞬态（拟雷击放电瞬间的「咔」爆，迅速衰减）。
+        crack = rnd.uniform(-1, 1) * 0.55 * env_exp(t, 60.0)
+        # 低频 body：双正弦（38/62Hz）+ FM 颤动（拟雷声滚动 / 多次回响叠加）。
+        fm = 12.0 * math.sin(2 * math.pi * 4.5 * t)
+        body = (math.sin(2 * math.pi * 38.0 * t + fm) * 0.40
+                + math.sin(2 * math.pi * 62.0 * t) * 0.22)
+        rumble = bed[i] * bed_inv * 0.28
+        # 长衰减包络（雷声持续轰隆 ~2.6s 渐弱）+ 极短 attack（瞬态后立即满）。
+        e = env_exp(t, 1.05)
+        attack = min(1.0, t / 0.006)
+        out[i] = (crack + body + rumble) * e * attack
+    return finalize(out)
+
+
 def gen_lava():
     """岩浆低频 rumble + 气泡（t343）。长循环 ~8s：低频隆隆床（拟地壳深处的持续低吼）+ 中频「咕嘟」气泡瞬态
     （拟岩浆表面鼓泡破裂）+ 偶发深爆裂（拟大块结皮塌陷）。首末 50ms 淡化无缝。机制等价 MC 近岩浆环境音（§9 原创）。"""
@@ -731,6 +764,7 @@ def main():
                       ("water_flow", gen_water_flow),
                       ("water_step", gen_water_step),
                       ("lava", gen_lava),
+                      ("thunder", gen_thunder),
                       ("mob_idle", gen_mob_idle_generic),
                       ("mob_idle_pig", gen_mob_idle_pig),
                       ("mob_idle_cow", gen_mob_idle_cow),

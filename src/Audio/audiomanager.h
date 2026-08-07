@@ -93,6 +93,11 @@ public:
     //   → Main.qml 路由到本方法（damageSelectedItem 归零分支 emit，itemId 保留语义对齐 / 未来按工具材质分流）。
     //   单件 clip；seek 重发不堆叠（同其他单件）；engine/clip 失败静默降级（§2-E，不崩）。
     Q_INVOKABLE void playToolBreak();
+    // t386 雷声（雷雨天随机闪电）：起始尖「咔」爆 + 深沉低频轰鸣长尾（~2.6s）。机制等价 MC 雷击 / 远雷轰隆声
+    //   （§9 原创程序合成，零 MC 资产；比 explosion 更低更长 = 雷声低频长尾持续轰隆，非爆炸短爆裂）。由 World::
+    //   lightningStruck(x,y,z) → Main.qml Connections 路由到本方法（与屏幕白闪 + 引燃 / 伤害同源事件）。单件 clip；
+    //   seek 重发不堆叠（同其他单件；连击雷不堆暴）；engine/clip 失败静默降级（§2-E，不崩）。
+    Q_INVOKABLE void playThunder();
     // t328 UI 反馈 click（热键 / 滚轮切槽 tick）：轻 tick（~0.05s 高通噪声爆 + 微小高谐）。机制等价 MC 物品栏
     //   切换 tick 反馈（原创程序合成 §9；零 MC 资产）。由 Hotbar::selectedSlotChanged → Main.qml 路由到本方法
     //   触发（与视觉高亮配对的音频反馈）。单件 clip；seek 重发不堆叠（同其他单件）；engine/clip 失败静默

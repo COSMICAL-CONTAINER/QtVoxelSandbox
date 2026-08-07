@@ -154,6 +154,9 @@ struct AudioManager::Data
     // t328 UI 反馈 click 单件（热键 / 滚轮切槽 tick）。短 SFX（~0.05s），默认 maxFrames 远大于其长度、安全。
     //   Hotbar::selectedSlotChanged → Main.qml 路由到 playUIClick 触发（§9 原创程序合成，零 MC 资产）。
     Clip uiClickClip{":/sounds/ui_click.wav"};
+    // t386 雷声单件（雷雨天随机闪电）。较长 SFX（~2.6s 低频轰鸣长尾）→ maxFrames 须放宽到 4s（默认 2s 会把
+    //   长尾截断 → 雷「轰隆」戛然而止，同 ambient_wind 长 clip 教训）。World::lightningStruck → playThunder 触发。
+    Clip thunderClip{":/sounds/thunder.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     // t328：合成升到 44100 Hz（更多高频细节 / 更短瞬态分辨 → 音色清晰，详见 build_sounds.py）。
@@ -295,6 +298,8 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->waterStepClip);
     // t328 UI click 短 SFX（~0.05s），默认 maxFrames 远大于其长度。
     d->loadClip(d->uiClickClip);
+    // t386 雷声较长 SFX（~2.6s），maxFrames 放宽到 4s 保完整长尾轰鸣（同长 clip 教训，避免 2s 截断戛然而止）。
+    d->loadClip(d->thunderClip, ma_uint64(Data::kSampleRate) * 4);
     d->initSound(d->placeClip);
     d->initSound(d->pickupClip);
     d->initSound(d->doorOpenClip);
@@ -310,6 +315,7 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->lavaFlowClip);
     d->initSound(d->waterStepClip);
     d->initSound(d->uiClickClip);
+    d->initSound(d->thunderClip);
     // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
     if (d->engineOk && d->ambientClip.ok) {
         ma_sound_set_looping(&d->ambientClip.sound, MA_TRUE);
@@ -348,7 +354,8 @@ AudioManager::AudioManager(QObject *parent)
         << " water_flow=" << d->waterFlowClip.ok
         << " lava=" << d->lavaFlowClip.ok
         << " water_step=" << d->waterStepClip.ok
-        << " ui_click=" << d->uiClickClip.ok;
+        << " ui_click=" << d->uiClickClip.ok
+        << " thunder=" << d->thunderClip.ok;
 }
 
 AudioManager::~AudioManager()
@@ -376,6 +383,7 @@ AudioManager::~AudioManager()
     if (d->lavaFlowClip.ok) ma_sound_uninit(&d->lavaFlowClip.sound);
     if (d->waterStepClip.ok) ma_sound_uninit(&d->waterStepClip.sound);
     if (d->uiClickClip.ok) ma_sound_uninit(&d->uiClickClip.sound);
+    if (d->thunderClip.ok) ma_sound_uninit(&d->thunderClip.sound);
     ma_engine_uninit(&d->engine);
 }
 
@@ -453,6 +461,14 @@ void AudioManager::playMobHurt(int mobType)
 void AudioManager::playExplosion()
 {
     d->replay(d->explosionClip, m_volume);
+}
+
+// t386 雷声（雷雨天随机闪电）：满音量前景反馈（雷击是高冲击环境事件，与爆炸同量级）。机制等价 MC 雷击 / 远雷
+//   轰隆声（§9 原创程序合成，零 MC 资产）。由 World::lightningStruck → Main.qml Connections 路由触发（与屏幕白闪 +
+//   引燃 / 伤害同源事件）。单件 seek 重发不堆叠（同其他单件；连击雷不堆暴）；engine/clip 失败静默降级（§2-E，不崩）。
+void AudioManager::playThunder()
+{
+    d->replay(d->thunderClip, m_volume);
 }
 
 // t315 工具破损音（工具耐久归零瞬间）：略响于 hurt（物品崩裂是明确反馈事件，前景）。机制等价 MC 工具耐久

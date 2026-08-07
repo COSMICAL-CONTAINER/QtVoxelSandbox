@@ -144,6 +144,10 @@ Window {
     readonly property real kCloudTiles: 12.0        // 贴图重复次数（scaleU/V；一 tile = 平面宽/重复数）
     readonly property real kCloudTileWorld: 600.0 / 12.0   // 一个 tile 的世界宽 = 漂移回绕周期（=50 格）
     readonly property real kCloudAltitude: 90.0     // 云盖在玩家眼位之上的高度（格；始终在头顶上方）
+    // t386 闪电击中点附近实体伤害参数（机制等价 MC 1.0 雷击对击中点附近实体造成伤害）。kLightningHurtRadius =
+    //   3.0 格欧氏半径（覆盖击中点 ±3 立体范围）；kLightningDamage = 5 HP（约 MC 雷击 5 心伤害量级，可见可验收）。
+    readonly property real kLightningHurtRadius: 3.0
+    readonly property int  kLightningDamage: 5
 
     // t166b 阴影开关（用户「卡顿疑似阴影所致，加开关测」）：false → 全 chunk sunShadowAt 返 0（关 PCF 软影，
     //   meshing 提速；顶点光基底只剩 flood-fill 光场）。ESC 设置面板开关绑此。默认 true。
@@ -886,6 +890,37 @@ Window {
     //   不连每个 chunk 的 meshRebuilt：100 chunk 创建期会级联 100 次 recompute → meshVertices 写 → F3 text 绑定
     //   连续重算 → QML binding-loop 检测器误报（虽自收敛，但留 WRN）。worldChanged 是几何变化的唯一汇聚点，足够。
     Connections { target: theWorld; function onWorldChanged() { window.recomputeMeshStats() } }
+
+    // t386 闪电击中（雷雨天随机，World::strikeLightning 发）：闪光 + 雷声 + 击中点附近实体伤害的单一入口。
+    //   分层（PLAN §2）：World 低层只发 lightningStruck(x,y,z) 语义事件 + 自身焚毁木类方块；呈现层（白闪动画 +
+    //   playThunder）与实体层（mob / 玩家近击中点伤害）在此消费。机制等价 MC 1.0 雷击（闪光 + 雷声 + 点燃 + 伤害）。
+    //   损伤半径 kLightningHurtRadius（玩家 + mob 距击中点欧氏距离内 → 扣 kLightningDamage HP）。玩家走
+    //   playerState.takeDamage（仅 Survival 生效，Creative / Spectator 无伤），mob 走 damageEntity（复用受击链）。
+    Connections {
+        target: theWorld
+        function onLightningStruck(x, y, z) {
+            // (1) 屏幕白闪：重启 flashAnim（闪现满白 ~0.85 → 300ms 淡到 0；连击雷重新闪，机制等价 MC 雷击瞬时全屏白闪）。
+            lightningFlashAnim.start()
+            // (2) 雷声（程序合成，§9 原创）。与白闪 / 引燃同源事件触发。
+            audio.playThunder()
+            // (3) 击中点附近实体伤害：遍历活体 mob，欧氏距离 ≤ kLightningHurtRadius → damageEntity（扣血 + 红闪 +
+            //   归零 mobDied 死亡掉落，复用受击链）。闪电是稀有事件 → 全表扫开销可忽略。
+            const r = window.kLightningHurtRadius
+            const r2 = r * r
+            for (let i = 0; i < entityManager.count(); ++i) {
+                if (!entityManager.aliveAt(i)) continue
+                const p = entityManager.posAt(i)
+                const dx = p.x - x, dy = p.y - y, dz = p.z - z
+                if (dx*dx + dy*dy + dz*dz <= r2)
+                    entityManager.damageEntity(i, window.kLightningDamage)
+            }
+            // (4) 玩家近击中点伤害（仅 Survival 生效：takeDamage 内 dead / 模式守；Creative / Spectator 不走此伤害路径）。
+            const eye = player.position
+            const pdx = eye.x - x, pdy = eye.y - y, pdz = eye.z - z
+            if (pdx*pdx + pdy*pdy + pdz*pdz <= r2)
+                playerState.takeDamage(window.kLightningDamage)
+        }
+    }
 
     // t177 环境音强度 ←→ 昼夜：风声夜间更静谧（level = 0.5 + 0.5*skyLight：白天 1.0、子夜 0.5）。
     //   dayPhaseChanged 每 100ms tick 发（与 clearColor / DirectionalLight 同节拍）→ setAmbientLevel
@@ -4408,6 +4443,21 @@ Window {
             NumberAnimation { from: 1.0; to: 0.70; duration: 160 }
         }
         opacity: flameFlicker
+    }
+
+    // t386 闪电屏幕白闪叠层：雷击瞬间全屏白透叠层闪现 → 300ms 淡到透明（机制等价 MC 1.0 雷击瞬时全屏白闪）。
+    //   纯 Rectangle 无 MouseArea → 不拦截鼠标（同水下蓝雾 / 岩浆橙雾经验）。opacity 由 lightningFlashAnim 驱动
+    //   （World::lightningStruck → 上方 Connections.onLightningStruck → lightningFlashAnim.start()）。仅 playing 态显。
+    //   放在 View3D 之后、HUD/背包/暂停叠层之前（同水下蓝雾：只染 3D 场景区，HUD 仍清晰可读）。
+    Rectangle {
+        id: lightningFlash
+        anchors.fill: parent
+        visible: window.appState === "playing"
+        color: "#ffffff"
+        opacity: 0.0   // 静止时透明；雷击时由下方动画闪现后淡回 0
+        SequentialAnimation on opacity { id: lightningFlashAnim; running: false
+            NumberAnimation { from: 0.85; to: 0.0; duration: 300 }   // 满白闪现 → 300ms 淡到透明（雷击瞬时白闪）
+        }
     }
 
     // t88 火把位置列表（火把伪光源 Repeater 的 model；blockPlaced/blockBroken/worldChanged 维护）。
