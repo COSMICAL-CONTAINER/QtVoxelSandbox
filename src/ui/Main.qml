@@ -995,11 +995,37 @@ Window {
         let g = 0.063 + (0.776 - 0.063) * m
         let b = 0.149 + (0.910 - 0.149) * m
         const d = theWorld.weatherDarkness
-        // 向暗阴灰蓝 (0.30, 0.32, 0.38) lerp d（保留冷调，非纯灰）。
+        // 向暗灰蓝 (0.30, 0.32, 0.38) lerp d（保留冷调，非纯灰）。
         r += (0.30 - r) * d
         g += (0.32 - g) * d
         b += (0.38 - b) * d
+        // t389 日出日落霞光（spec「天穹日出日落颜色渐变，非仅亮度变」）：黄昏 / 黎明窗口把天色向暖橙红
+        //   lerp（sunsetTint），使日出日落呈红 / 橙 / 黄而非仅变暗的蓝。雷暴 / 雨天 d 抑制（云遮日无霞光）。
+        const tint = sunsetTint() * (1.0 - 0.8 * d)
+        r += (1.00 - r) * tint * 0.85   // 暖橙红目标 (1.00, 0.42, 0.16)；×0.85 上限避免纯橙
+        g += (0.42 - g) * tint * 0.85
+        b += (0.16 - b) * tint * 0.85
         return Qt.rgba(r, g, b, 1.0)
+    }
+
+    // t389 日出日落霞光强度 [0,1]：在黄昏(dayPhase 0.25) / 黎明(0.75) 各开一窗（±0.12 phase），峰值 1、窗外 0。
+    //   读 dayPhase 而非 skyLight —— skyLight 在黄昏 / 黎明同为 0.5，无法与接近正午 / 子夜（0.9 / 0.1）区分；
+    //   唯有 dayPhase 能定位「太阳贴地平」的瞬间。三角窗 + smoothstep 使起落柔和（无突变）。
+    //   纯呈现层，只读 worldClock.dayPhase（dayPhaseChanged 每 tick 驱动刷新）。
+    function sunsetTint() {
+        const p = worldClock.dayPhase
+        const dusk = Math.max(0, 1 - Math.abs(p - 0.25) / 0.12)
+        const dawn = Math.max(0, 1 - Math.abs(p - 0.75) / 0.12)
+        const t = Math.max(dusk, dawn)
+        return t * t * (3 - 2 * t)
+    }
+
+    // t389 星空透明度 [0,1]：夜间淡入（skyLight≤0.2 满星、≥0.5 全隐），昼隐；雷暴 / 雨天 weatherDarkness
+    //   抑制（云遮星，d=1 → 几乎无星）。供 SkyDome Model opacity 绑定（dayPhaseChanged 每 tick 刷）。
+    function starOpacity() {
+        const m = worldClock.skyLight
+        const a = Math.max(0, Math.min(1, (0.5 - m) / 0.3))
+        return a * (1.0 - 0.85 * theWorld.weatherDarkness)
     }
 
     // t384 云层 baseColor（昼白 / 夜灰暗）：m=worldClock.skyLight ∈ [0,1]（0=子夜、1=正午）。
@@ -2052,6 +2078,56 @@ Window {
                 lighting: PrincipledMaterial.NoLighting
                 baseColor: "#ffffff"   // 白底乘贴图（纹理原色直出）
                 baseColorMap: Texture { source: "qrc:/textures/sun.png" } // 太阳贴图（实心不透明盘）
+            }
+        }
+
+        // t389 可视月亮（机制等价 MC 1.0 月相；§9 自绘 moon_<phase>.png，零 MC 资产）：与太阳互补 ——
+        //   月在「背太阳方向」(eye − sunDir·500)。sunDir.y<0（夜间 / 太阳在地平下）时月在地平上 → 显；
+        //   sunDir.y>0（昼）隐藏（与上方太阳 visible:sunDir.y>0 互补，二者永不同时显）。月相由
+        //   WorldClock.moonPhase(0..7) 选 moon_<phase>.png（满→盈凸→上弦→蛾眉→新月→残月→下弦→亏凸，8 天一轮回）。
+        //   billboard 朝相机 + scale 80（与太阳同角尺寸 80/500）、距眼 500（在 SkyDome 600 之前 → 渲于星空之上）。
+        //   PLAN §2-H「非旋转方向光」仍成立：月是纯呈现层装饰盘，不参与光照。lit 红线：NoLighting（同太阳）。
+        //   分层（PLAN §2）：纯呈现层，只读 worldClock.sunDir / moonPhase（Game 层 Q_PROPERTY），绝不反向写。
+        Model {
+            visible: worldClock.sunDir.y < 0.0   // 夜间（太阳在地平下）才显，与太阳互补
+            geometry: BillboardQuad {}
+            position: {
+                const eye = player.position
+                const s = worldClock.sunDir
+                return Qt.vector3d(eye.x - s.x * 500, eye.y - s.y * 500, eye.z - s.z * 500)
+            }
+            eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, 0)   // billboard 朝相机
+            scale: Qt.vector3d(80.0, 80.0, 80.0)
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                baseColor: "#ffffff"
+                alphaCutoff: 0.5     // 盘外透明像素丢弃（cutout 不透明盘；贴图暗部已为暗蓝灰略亮于夜空，整盘任何相位都隐约可见）
+                // moonPhase 0..7 → 选对应月相贴图（字符串拼 source；moonPhaseChanged 跨天时刷新）。
+                baseColorMap: Texture { source: "qrc:/textures/moon_" + worldClock.moonPhase + ".png" }
+            }
+        }
+
+        // t389 星空天穹（机制等价 MC 1.0 夜空星点；§9 自绘 stars.png，零 MC 资产）：一张绕相机眼位的
+        //   UV 球（SkyDome，scale 600 = 距眼 600 格）铺星空贴图，内表面朝相机（SkyDome 按「内表面 = 正面」
+        //   生成，默认 backface 剔除下显内表面）。居中于眼位（position 绑 player.position）→ 相机恒在球心 →
+        //   每条视线交球一次 → 恒作最远天幕（地形 / 云 / 日月皆在 600 之内 → 渲于其前可见；clipFar=1000 容纳）。
+        //   opacity 随天光淡入（夜显星 / 昼隐）+ 雷暴雨天抑制（云遮星）。贴图透明底 → 缝透出 sky clearColor、
+        //   星点处显白 / 蓝。缓慢自转 eulerRotation.y=dayPhase·360 → 星空随天周期绕极轴转一圈（天球周日视运动）。
+        //   lit 红线：NoLighting（同地形 / 太阳已验证可见路径）。分层（PLAN §2）：纯呈现层，只读 worldClock，绝不反向写。
+        Model {
+            geometry: SkyDome {}
+            position: player.position
+            eulerRotation.y: worldClock.dayPhase * 360.0   // 天球周日视运动（一圈 / 天周期）
+            scale: Qt.vector3d(600.0, 600.0, 600.0)
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                baseColor: "#ffffff"
+                opacity: starOpacity()                      // 夜间淡入 / 昼隐 / 雨天抑制（dayPhaseChanged 每 tick 刷）
+                alphaCutoff: 0.02                            // 仅丢弃近乎全透像素（保星柔边 + 杜绝黑底回退，同云契约）
+                baseColorMap: Texture {
+                    source: "qrc:/textures/stars.png"
+                    generateMipmaps: false
+                }
             }
         }
 

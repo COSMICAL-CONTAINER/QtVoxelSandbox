@@ -94,6 +94,10 @@ qt_add_executable(voxelsandbox
     #   从 CrackBox 6 面立方改为单面平图标 + 朝相机（billboard），消除「6 面未封闭超立方体」观感。
     src/Renderer/billboardquad.cpp
     src/Renderer/billboardquad.h
+    # t389 天穹球（UV 球，内表面铺星空贴图）：绕相机眼位的星点球壳。夜间抬头见散布星点；
+    #   居中于相机 → 每条视线交球一次 → 恒作最远天幕（地形 / 日月皆在其内）。Renderer 层只产出几何。
+    src/Renderer/skydome.cpp
+    src/Renderer/skydome.h
     src/Game/playercontroller.cpp
     src/Game/playercontroller.h
     src/Game/playerstate.cpp
@@ -183,6 +187,15 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/crack_5.png
         textures/sun.png
         textures/cloud.png                # t384 云层贴图（build_cloud.py 程序生成可无缝平铺的云密度图；昼白夜灰由 baseColor 乘灰阶实现）
+        textures/stars.png                # t389 星空贴图（build_stars.py 程序生成透明底+白/蓝星点；铺到 SkyDome 内表面，夜间淡入）
+        textures/moon_0.png               # t389 月相 8 帧贴图（build_moon.py 程序生成；满→盈凸→上弦→蛾眉→新月→残月→下弦→亏凸，WorldClock.moonPhase 选其一）
+        textures/moon_1.png
+        textures/moon_2.png
+        textures/moon_3.png
+        textures/moon_4.png
+        textures/moon_5.png
+        textures/moon_6.png
+        textures/moon_7.png
         textures/default_cobble.png
         textures/default_coal_ore.png
         textures/default_copper_ore.png          # t308 铜矿石贴图（build_ore.py 程序生成原创像素图；散布于 stone 浅中层 y∈[5,45]）

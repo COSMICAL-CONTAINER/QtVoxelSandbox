@@ -31,8 +31,10 @@ void WorldClock::toggleDebugFast()
 {
     m_debugFast = !m_debugFast;
     // 切周期时按比例调整 elapsed，使 phase 不突变（否则 1200s→30s 会让画面瞬间昼夜翻转）。
-    // 新 elapsed = 旧 phase × 新周期；保持视觉连续。
-    m_elapsedMs = qint64(m_phase * periodSecs() * 1000.f);
+    // 新 elapsed = (dayCount + phase) × 新周期：同时保 phase（昼夜亮度连续）与 dayCount
+    //   （t389 月相不跳 —— 否则 elapsed 仅按小数 phase 重建会让 dayCount 归 0、月相回满）。
+    const qint64 day = m_dayCount >= 0 ? m_dayCount : 0;
+    m_elapsedMs = qint64((float(day) + m_phase) * periodSecs() * 1000.f);
     emit debugFastChanged();
 }
 
@@ -115,6 +117,21 @@ void WorldClock::onTick()
     if (newPhase != m_phase) {
         m_phase = newPhase;
         emit dayPhaseChanged(); // skyLight 派生于 phase，QML 同信号刷新
+    }
+    // t389 月相：跨「完整一天」(elapsed 跨过 period 整数倍) 时前进一阶、8 周期轮回。
+    //   dayCount = floor(elapsed/period)（用 wrapped 除外的累计 elapsed，而非 wrapped——wrapped 已抹掉
+    //   整圈，会把「第 N 天」误判为第 0 天；月相应随绝对流逝天数单调推进）。仅跨天时 emit（非每 tick）。
+    //   toggleDebugFast 会按比例改 elapsed 保 phase 连续 → dayCount 不突变 → 无须此处特殊处理。
+    if (periodMs > 0.f) {
+        const qint64 day = m_elapsedMs / qint64(periodMs);
+        if (day != m_dayCount) {
+            m_dayCount = day;
+            const int phase = int(((day % 8) + 8) % 8);   // %8 轮回；+8 防 day 为负（哨兵初值 -1 → 0）
+            if (phase != m_moonPhase) {
+                m_moonPhase = phase;
+                emit moonPhaseChanged();   // QML 月 Model 据 moonPhase 切 moon_<phase>.png
+            }
+        }
     }
     // t123：太阳量化步进。按 newPhase 量化到 kSunSteps 步；跨步才重算 sunDir/elev/azim + 发
     //   sunChanged（mesher 绑此信号重建顶点光）。量化把 mesh 重建从 10Hz 降到 ~kSunSteps/period Hz。

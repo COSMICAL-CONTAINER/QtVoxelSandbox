@@ -65,6 +65,12 @@ class WorldClock : public QObject
     Q_PROPERTY(QVector3D sunDir READ sunDir NOTIFY sunChanged)
     Q_PROPERTY(float sunElevation READ sunElevation NOTIFY sunChanged)
     Q_PROPERTY(float sunAzimuth READ sunAzimuth NOTIFY sunChanged)
+    // t389 月相（机制等价 MC 1.0 月相 8 周期）：每完整过一个「天周期」(periodSecs) 月相前进一阶，
+    //   8 天一轮回（满→盈凸→上弦→蛾眉→新月→残月→下弦→亏凸）。纯函数 dayCount → moonPhase：
+    //   dayCount = floor(m_elapsedMs / periodMs)（已过的完整天数），moonPhase = dayCount % 8。
+    //   NOTIFY=moonPhaseChanged（仅跨天时发，非每 tick → QML 不无谓刷贴图）。呈现层据本值选
+    //   moon_<phase>.png（Main.qml 月 Model）。Game 层时间源派生（只读消费，PLAN §2 分层）。
+    Q_PROPERTY(int moonPhase READ moonPhase NOTIFY moonPhaseChanged)
 
 public:
     explicit WorldClock(QObject *parent = nullptr);
@@ -79,6 +85,8 @@ public:
     QVector3D sunDir() const { return m_sunDir; }
     float sunElevation() const { return m_sunElevDeg; }
     float sunAzimuth() const { return m_sunAzimDeg; }
+    // t389 月相（0..7；纯函数 dayCount%8，跨天时 onTick 更新 + emit moonPhaseChanged）。
+    int moonPhase() const { return m_moonPhase; }
 
     // 调试加速键（呈现层按键调）：切 ~30s 周期，便于肉眼快速看一圈昼夜。仅调试便利、
     // 不影响生产节律常量（kDaySecs 不变；切换的是运行期所用周期）。
@@ -102,6 +110,8 @@ signals:
     // t123：太阳量化步进跨步时发（驱动 mesher 重建顶点光）。skyLight 不绑此信号（仍随
     //   dayPhaseChanged 平滑刷）。
     void sunChanged();
+    // t389：跨天时发（驱动月 Model 切 moon_<phase>.png 贴图）；非每 tick → 仅 8 次周期切换刷新。
+    void moonPhaseChanged();
     // t87 游戏时间 tick：每 kTickMs（100ms）发一次，携带本 tick 推进的秒数（恒 kTickMs/1000=0.1）。
     // 用途：熔炉冶炼等「按游戏时间推进」的系统据此 tick（FurnaceUI.tick）。与昼夜相位解耦——本信号
     // 每 tick 无条件发（不似 dayPhaseChanged 仅 phase 真变才发），保证冶炼节律稳定 10Hz。
@@ -143,6 +153,10 @@ private:
     float m_phase = 0.f;      // 0..1 循环相位（由 m_elapsedMs 派生，避免浮点累积漂移）
     qint64 m_elapsedMs = 0;   // 累计已流逝毫秒（phase = (elapsed mod period) / period）
     bool m_debugFast = false;
+    // t389 月相态：m_dayCount = floor(elapsed/period)（已过完整天数），m_moonPhase = dayCount%8。
+    //   初值 m_dayCount=-1 → 首 tick 必算 + emit（保证呈现层首帧即拿到正确 phase，非靠默认 0 兜底）。
+    qint64 m_dayCount = -1;
+    int m_moonPhase = 0;
     QTimer m_timer;
     // t155 最近一次 noteEditActivity() 时的 m_elapsedMs 快照（编辑活跃期判定基准）。初值 = -(cooldown+1)
     //   → 启动首 tick 即「不活跃」（diff = m_elapsedMs - 初值 ≥ cooldown），避免世界 / 尺寸初始化期的
