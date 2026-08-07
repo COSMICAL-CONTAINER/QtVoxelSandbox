@@ -6166,6 +6166,55 @@ Window {
         }
     }
 
+    // t403 经验条（XP bar）+ 等级数：hotbar 正上方（hearts/hunger 行之下，MC 1.0 布局：hotbar → XP 条 → 心/饥饿）。
+    //   经验值累积（playerState.xp，t402 经验球拾取）→ level 由总 xp 经 MC 曲线派生 → 条按 xpBarFraction
+    //   （当前级进度 / 升下一级所需）填充。满 → 升级（level++ + 条分母跳到更大值，机制等价 MC 1.0）；
+    //   每级所需 XP 单调递增（曲线见 PlayerState::xpNeedForLevel）。等级数仅 level>0 显（MC：0 级无数）。
+    //   分层（PLAN §2）：呈现层只读 playerState.level / xpBarFraction，曲线 + level 派生全在 Game 层
+    //   PlayerState（单一权威），绝不反向写。绿条 + 绿字自绘原创（§9 override (a) 非 MC GUI PNG）。
+    //   全 playing 模式均显（机制等价 MC：创造 / 生存都显经验条 + 等级）。
+    Item {
+        id: xpBar
+        visible: window.appState === "playing"
+        anchors.bottom: hotbarBar.top
+        anchors.bottomMargin: 4
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: hotbarBar.width
+        height: 9
+
+        // 背景凹槽（深色底，凸显绿色填充）。
+        Rectangle {
+            anchors.fill: parent
+            color: "#1f1f1f"
+            opacity: 0.9
+            border.color: "#3a3a3a"
+            border.width: 1
+        }
+        // 绿色填充：宽度 ∝ xpBarFraction [0,1]（满 → 下一帧升级后分母变大、条「空」回小段）。
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: 1
+            anchors.topMargin: 1
+            anchors.bottomMargin: 1
+            width: Math.max(0, parent.width - 2) * playerState.xpBarFraction
+            color: "#7ee23a"
+        }
+
+        // 等级数（绿色描边，居中于条 → 半浮于条上方、半压在条上，MC 1.0 风格）。level=0 不显。
+        Text {
+            anchors.centerIn: parent
+            visible: playerState.level > 0
+            text: playerState.level
+            color: "#7ee23a"
+            style: Text.Outline
+            styleColor: "#202020"
+            font.pixelSize: 16
+            font.bold: true
+        }
+    }
+
     // 生命心 + 饥饿鼓腿条（t22，仅 Survival）：hotbar 上方，左 10 心、右 10 鼓腿。
     // 每心/鼓腿 = 2 点；满/半/空三态自绘原创像素图（VitalIcon.qml 的 Canvas，§9 override (a)：
     // 非 MC GUI PNG）。Creative/Spectator 不显（1.0：非生存模式无生命/饥饿）。
@@ -6176,7 +6225,7 @@ Window {
         id: vitalsBar
         visible: window.appState === "playing"
                  && player.mode === PlayerController.Survival
-        anchors.bottom: hotbarBar.top
+        anchors.bottom: xpBar.top
         anchors.bottomMargin: 5
         anchors.horizontalCenter: parent.horizontalCenter
         width: hotbarBar.width

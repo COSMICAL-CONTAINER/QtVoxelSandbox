@@ -55,6 +55,18 @@ class PlayerState : public QObject
     //   驱动 F3 / HUD 经验条刷新。addXp 由呈现层 Connections 据经验球拾取语义事件（XpOrbManager::
     //   xpPickedUp）路由调用（同 fallDamageTaken→takeDamage 模式：Game 层持显值、呈现层路由）。
     Q_PROPERTY(int xp READ xp NOTIFY xpChanged)
+    // t403 等级（level）：由总 xp 经 MC 1.0 风格递增曲线派生（单一权威在 Game 层，呈现层只读）。
+    //   addXp 累积到「升至下一级所需」即 level++（条重置：分母跳到更大值，机制等价 MC 1.0 经验曲线）；
+    //   每升一级所需 XP 单调递增（低级 2L+7、中级 5L−38、高级 9L−158，三段斜率）。升级为后续附魔台前置。
+    //   NOTIFY=levelChanged 驱动 HUD 等级数刷新。**level 纯派生自 m_xp（总）→ 存档只存 xp、读档自动重建 level**，
+    //   无需单独持久化 level（同 health/hunger 非派生项的持久化各自独立，level 跟随 xp 走）。
+    Q_PROPERTY(int level READ level NOTIFY levelChanged)
+    // t403 从当前 level 升到下一级所需 XP（曲线驱动；level 变才变）。驱动经验条填充分母。
+    Q_PROPERTY(int xpToNextLevel READ xpToNextLevel NOTIFY levelChanged)
+    // t403 经验条填充比 [0,1] = 当前级内 XP / xpToNextLevel。NOTIFY=xpChanged（条增长靠 addXp，而 addXp
+    //   必发 xpChanged；level 仅在 addXp/setXp 内随 xp 同步变 → xpChanged 覆盖所有「条可能变」的时机，
+    //   见 lessons-learned「Q_PROPERTY NOTIFY 只能挂一个信号」：挂主、补发副，此处无需补发）。
+    Q_PROPERTY(qreal xpBarFraction READ xpBarFraction NOTIFY xpChanged)
 
 public:
     // t311 死亡原因枚举（机制等价 MC 1.0 各来源死因，§9 改名为通用词）。Q_ENUM 暴露给 QML：
@@ -76,7 +88,10 @@ public:
     bool dead() const { return m_dead; }
     int deathCause() const { return m_deathCause; } // t311 致死来源枚举（仅 dead 时有意义）
     QString deathCauseText() const;                  // t311 死因中文文案（通用词，§9）
-    int xp() const { return m_xp; }                  // t402 当前经验值累积
+    int xp() const { return m_xp; }                  // t402 当前经验值累积（总）
+    int level() const { return m_level; }             // t403 当前等级（由总 xp 经曲线派生）
+    int xpToNextLevel() const;                         // t403 升下一级所需 XP（曲线）
+    qreal xpBarFraction() const;                       // t403 经验条填充比 [0,1]
 
     // 受伤钩子（Game/Physics 调用）：扣 amount HP，clamp 到 0；扣到 0 → 置 dead + emit died（且此后不再继续扣，
     // spec t78）。amount<=0 忽略（无治疗语义）。dead 期间早退（不再扣血、不再发 damaged）。
@@ -118,6 +133,8 @@ signals:
     void deathCauseChanged();
     // t402 经验值累积变更（addXp / setXp 真变时发；驱动 F3 / 经验条绑定刷新）。
     void xpChanged();
+    // t403 等级变更（addXp 跨越曲线阈值时；setXp 读档重建时）。驱动 HUD 等级数 / 经验条分母刷新。
+    void levelChanged();
     // 受伤闪烁触发（t51）：takeDamage 实扣 HP 时发；呈现层（Main.qml）Connections 据此启动
     // 红色半透全屏叠层的 alpha 0.4→0 淡出动画（~600ms）。amount = 本次请求扣血量（不计 clamp 截断）。
     // 与 healthChanged 分离：healthChanged 驱动心条数值刷新（每半心切态），damaged 驱动一次性的视觉闪烁
@@ -136,6 +153,15 @@ private:
     int m_lastCause = Generic; // t311 最近一次受伤来源（致死那一击写入 m_deathCause）
     int m_deathCause = Generic;// t311 致死来源（health 扣到 ≤0 时 = m_lastCause；respawn / 存档加载复位 Generic）
     int m_xp = 0;              // t402 经验值累积（吸收经验球累加；初值 0）
+    int m_level = 0;           // t403 当前等级（由 m_xp 经曲线派生；初值 0）
+    int m_intoLevel = 0;       // t403 当前级内已累积 XP（m_xp − xpTotalForLevel(m_level)；初值 0）
+
+    // t403 MC 1.0 风格递增曲线（机制等价 MC，三段斜率；need 单调递增）：从 level 升到 level+1 所需 XP。
+    //   低级（0..14）2L+7、中级（15..29）5L−38、高级（30+）9L−158。level<0 → 0（防御）。
+    static int xpNeedForLevel(int level);
+    // 据 m_xp（总）重算 m_level + m_intoLevel；level 真变才 emit levelChanged（驱动 HUD 等级数 / 条分母）。
+    // addXp / setXp 在改 m_xp 后调（xpChanged + levelChanged 同帧发，QML 绑定齐刷）。
+    void recomputeLevel();
 };
 
 #endif // PLAYERSTATE_H

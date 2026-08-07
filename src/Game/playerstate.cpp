@@ -98,19 +98,65 @@ void PlayerState::respawn()
     m_lastCause = Generic;
 }
 
-// t402 累积经验值：加 amount（吸收经验球时调；amount<=0 忽略）。仅累积数值 + emit xpChanged
-//   （呈现层 F3 / 经验条刷新）；level/points 派生属 Phase 1.1+。分层（PLAN §2）：Game 层持显值，
+// t402 累积经验值：加 amount（吸收经验球时调；amount<=0 忽略）。累积 m_xp（总）+ 派生 level（t403，
+//   跨曲线阈值即升级）+ emit xpChanged（呈现层 F3 / 经验条刷新）。分层（PLAN §2）：Game 层持显值，
 //   呈现层 Connections 据语义事件（XpOrbManager::xpPickedUp）路由调用。
 void PlayerState::addXp(int amount)
 {
     if (amount <= 0) return;
     m_xp += amount;
+    recomputeLevel(); // t403 跨曲线阈值 → level++（条重置）；level 真变才 emit levelChanged
     emit xpChanged();
 }
 
 // t402 设经验值（存档加载用；与 setHealth/setHunger 同模式）：clamp 到 >=0；无变化不发信号。
+//   t403：改值后 recomputeLevel 重建 level（存档只存 xp 总量 → 读档 level 自动派生，无需单独持久化）。
 void PlayerState::setXp(int value)
 {
     const int nv = value < 0 ? 0 : value;
-    if (nv != m_xp) { m_xp = nv; emit xpChanged(); }
+    if (nv != m_xp) {
+        m_xp = nv;
+        recomputeLevel();
+        emit xpChanged();
+    }
+}
+
+// t403 MC 1.0 风格递增曲线（机制等价 MC，三段斜率；need 单调递增 → 每级比上一级要更多 XP）。
+int PlayerState::xpNeedForLevel(int level)
+{
+    if (level < 0) return 0;   // 防御：负级无意义
+    if (level < 15) return 2 * level + 7;
+    if (level < 30) return 5 * level - 38;
+    return 9 * level - 158;
+}
+
+// t403 升下一级所需 XP（曲线驱动；level 变才变）。
+int PlayerState::xpToNextLevel() const
+{
+    return xpNeedForLevel(m_level);
+}
+
+// t403 经验条填充比 [0,1] = 当前级内 XP / xpToNextLevel。need<=0（防御）→ 0。
+qreal PlayerState::xpBarFraction() const
+{
+    const int need = xpNeedForLevel(m_level);
+    if (need <= 0) return 0.0;
+    return qreal(m_intoLevel) / qreal(need);
+}
+
+// t403 据 m_xp（总）派生 m_level + m_intoLevel：从 level 0 起逐级减去「升下一级所需」直到余额不足
+//   → m_level = 已升至的级、m_intoLevel = 余额（= 当前级内进度，驱动经验条）。单次 addXp 跨多级时循环
+//   连升（大经验球一次跨数级）。level 真变才 emit levelChanged（驱动 HUD 等级数 / 条分母刷新）。
+void PlayerState::recomputeLevel()
+{
+    int lvl = 0;
+    int rem = m_xp;
+    for (;;) {
+        const int need = xpNeedForLevel(lvl);
+        if (need <= 0 || rem < need) break; // 不足以升下一级（need 恒 >0，<=0 仅防御兜底）
+        rem -= need;
+        ++lvl;
+    }
+    m_intoLevel = rem < 0 ? 0 : rem;
+    if (lvl != m_level) { m_level = lvl; emit levelChanged(); }
 }
