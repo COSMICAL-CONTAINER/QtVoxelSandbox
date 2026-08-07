@@ -197,6 +197,15 @@ PARTIALS_3D = [
     ("wood_door",           "door"),           # 木板门：满格高、3/16 厚的薄板（贴 -Z 面）
 ]
 
+# t412 圆石变体（cobble variants）：石质半方块图标。同 shape 几何，仅 fill 换 default_cobble（顶 + 侧同圆石）。
+#   render_partial_3d(shape, fill_top, fill_side) 透传 fill；与木制半方块同 3D dimetric 流程。
+PARTIALS_3D_COBBLE = [
+    ("cobble_slab",           "slab"),
+    ("cobble_stairs",         "stairs"),
+    ("cobble_pressure_plate", "pressure_plate"),
+    ("cobble_fence",          "fence"),
+]
+
 
 def project_pt(x, y, z, cy_local, scale=1.0):
     """dimetric 投影 unit cube [0,1]^3 → 画布坐标。复用 render() 的 hw/dv/v/cx 几何；cy 可调以按形状竖直居中。
@@ -428,6 +437,12 @@ def main():
     #   （按实际形状投影，3D 顶+两侧明暗）。t169 把 door/fence 从 flat 2D 升级为 3D —— 6 类同为立体图标。
     for out_name, shape in PARTIALS_3D:
         img = render_partial_3d(shape)
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t412 圆石变体 3D dimetric 立体图标：同 shape 几何，fill 换 default_cobble（机制等价木制半方块图标流程）。
+    for out_name, shape in PARTIALS_3D_COBBLE:
+        img = render_partial_3d(shape, "default_cobble", "default_cobble")
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)

@@ -842,17 +842,18 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             //   （decayLeavesAround）不走此（无掉落）。brokenState 不影响叶掉落（无 state 派生 —— PersistentLeafBit
             //   仅控衰减，破叶掉落同）。
             dropLeafDrops(x, y, z);
-        } else if (brokenId == BlockRegistry::Planks && (brokenState & BlockRegistry::PlanksFromDoubleSlabBit)) {
-            // t215 双半砖（合并态）破块掉 2× WoodSlab 为**2 个独立物品实体**（非 1 个 count=2 栈）：
-            //   placeBlock 合并时写 Planks + PlanksFromDoubleSlabBit 标记「源自双半砖」。此处检本 bit →
-            //   改掉 2 块半砖。机制等价 MC「double slab 破坏掉 2 块半砖，各自为独立掉落物」。原实现
-            //   emit 1 次 count=2 → 1 实体携 2 件（拾取 addStack 一次入 2）；改 emit 2 次 count=1 → 2 实体
-            //   各携 1 件（拾取各入 1）。两实体散布到破格 + 1 个非实体水平邻格做视觉分离（机制等价 MC 方块
-            //   掉落的水平散布；ItemEntityManager spawnItem 仅整数格坐标存格中心，故以邻格区分，且选非实体
-            //   邻格避免实体被重力弹到墙顶偏离破块）。无可用邻格则两实体同破格（仍 2 实体，拾取各入 1）。
-            //   常规 Planks（state=0）不进此分支 → 掉 1× Planks 不变。brokenState 已在 setBlock(Air) 前读
+        } else if ((brokenState & BlockRegistry::DoubleSlabMarkerBit)
+                   && BlockRegistry::fullBlockSlabDrop(brokenId) != 0) {
+            // t215/t412 双半砖（合并态）破块掉 2× 对应半砖为**2 个独立物品实体**（非 1 个 count=2 栈）：
+            //   placeBlock 合并时写满格整立方（Planks / Cobble）+ DoubleSlabMarkerBit 标记「源自双半砖」。此处检
+            //   本 bit → 改掉 2 块对应半砖（WoodSlab / CobbleSlab）。机制等价 MC「double slab 破坏掉 2 块半砖，各自
+            //   为独立掉落物」。原实现 emit 1 次 count=2 → 1 实体携 2 件（拾取 addStack 一次入 2）；改 emit 2 次
+            //   count=1 → 2 实体各携 1 件（拾取各入 1）。两实体散布到破格 + 1 个非实体水平邻格做视觉分离（机制
+            //   等价 MC 方块掉落的水平散布；ItemEntityManager spawnItem 仅整数格坐标存格中心，故以邻格区分，且选
+            //   非实体邻格避免实体被重力弹到墙顶偏离破块）。无可用邻格则两实体同破格（仍 2 实体，拾取各入 1）。
+            //   常规 Planks / Cobble（state=0）不进此分支 → 掉 1× 满砖不变。brokenState 已在 setBlock(Air) 前读
             //   （t134 时序：4 参数 setBlock 委托 5 参数版以 state=0 写入，之后 stateAt 永返 0）。
-            dropId = BlockRegistry::WoodSlab;
+            dropId = BlockRegistry::fullBlockSlabDrop(brokenId);
             constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
             int sx = x, sz = z;
             for (const auto &o : kHoriz) {
@@ -1886,7 +1887,7 @@ void PlayerController::placeBlock()
     //   玩家俯仰、stairs/door 据玩家水平朝向、fence/pressure_plate/trapdoor 默认 0（trapdoor 默认水平合）。
     //   door 占两格 → 另算上格。
     quint8 placeState = 0;
-    if (m_selectedBlock == BlockRegistry::WoodSlab) {
+    if (BlockRegistry::isSlab(quint8(m_selectedBlock))) { // t412 木 / 石台阶共用同一放置态（命中面 / 命中点 Y 判上下半）
         // t212 命中面检测（spec「瞄已放方块上50%→上半砖；下50%→下半砖」，备注「命中点 y 与 hitCell y 差值判
         //   上下半」）：
         //   命中顶面（ny=+1，方块上方）→ 下半(state=0)：满格之上放下半砖，顶面+0.5 步可走上去（机制等价 MC
@@ -1901,7 +1902,7 @@ void PlayerController::placeBlock()
             const float fracY = m_hitPointY - float(m_hitBy); // 命中点在命中格内的 Y 小数分量 [0,1]
             placeState = (fracY >= 0.5f) ? 1 : 0;
         }
-    } else if (m_selectedBlock == BlockRegistry::WoodStairs) {
+    } else if (BlockRegistry::isStairs(quint8(m_selectedBlock))) { // t412 木 / 石楼梯共用朝向 / 倒置编码
         // t147：state[1:0]=水平朝向；bit2=上下倒置。
         //   t163 朝向修正：朝向 = horizontalFacing **异或 1**（取玩家反向）→ 楼梯「开口」朝玩家侧
         //     （partialblockgeometry「朝 X 开 = 背墙在对侧」：玩家面 +X(0) → 取 -X(1) → 背墙 +X 侧、开口 -X 朝玩家），
@@ -1927,19 +1928,20 @@ void PlayerController::placeBlock()
         placeState = BlockRegistry::PersistentLeafBit;
     }
     // t163(b) 同格双半砖合整（spec「同格下半砖上再放下半砖→合并为完整方块阻挡行走」）：
-    //   右键 slab 时若点中的就是 slab，且点击面朝向其空半（lower 顶面 ny>0 / upper 底面 ny<0）→ 在同格
-    //   补出互补半，合成 Planks 完整方块（满格碰撞 → 阻挡行走；机制等价 MC「double slab = full block」）。
-    //   合成前查重叠（满格 Planks 比半砖大 → 重查 overlapsPlayerAABB；玩家在格内则拒合，防自埋）。
-    //   侧面点击（ny=0）不合（自然语义是放邻格）；同半 slab（如 lower 上再放 lower）走常规 target 放置。
-    //   t206：合并写 Planks + PlanksFromDoubleSlabBit 标记「源自双半砖」→ finishMiningAt 据本 bit 掉 2× WoodSlab
-    //   （非 1× Planks；机制等价 MC「double slab 破坏掉 2 块半砖」）。详见 BlockRegistry::PlanksFromDoubleSlabBit 注释。
-    if (m_selectedBlock == BlockRegistry::WoodSlab
-        && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::WoodSlab) {
+    //   右键 slab 时若点中的就是**同种** slab（木 / 石各自合并，不同材质不合 —— 机制等价 MC double slab 须同材质），
+    //   且点击面朝向其空半（lower 顶面 ny>0 / upper 底面 ny<0）→ 在同格补出互补半，合成满格整立方（WoodSlab→Planks /
+    //   CobbleSlab→Cobble；满格碰撞 → 阻挡行走；机制等价 MC「double slab = full block」）。合成前查重叠（满格比半砖大 →
+    //   重查 overlapsPlayerAABB；玩家在格内则拒合，防自埋）。侧面点击（ny=0）不合（自然语义是放邻格）；同半 slab
+    //   （如 lower 上再放 lower）走常规 target 放置。
+    //   t206/t412：合并写 slabFullBlock(selected) + DoubleSlabMarkerBit 标记「源自双半砖」→ finishMiningAt 据本 bit
+    //   掉 2× 对应半砖（非 1× 满砖；机制等价 MC「double slab 破坏掉 2 块半砖」）。详见 BlockRegistry::DoubleSlabMarkerBit。
+    if (BlockRegistry::isSlab(quint8(m_selectedBlock))
+        && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == m_selectedBlock) {
         const quint8 hitState = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
         const bool hitUpper = (hitState & 1) != 0;
         // t212 同格互补半合并（spec「同格上半+下半→合并整砖」+ 修「放了上半砖后同格下半砖放不下」/
         //   「瞄上方却放旁边」）：据命中点 Y 判是否点中**空半**——下半砖(filled [0,0.5]) 点其上空半(fracY>=0.5)、
-        //   上半砖(filled [0.5,1]) 点其下空半(fracY<0.5) → 合并为 Planks 满格。旧实现仅认顶/底面(ny≠0)合并，
+        //   上半砖(filled [0.5,1]) 点其下空半(fracY<0.5) → 合并为满格。旧实现仅认顶/底面(ny≠0)合并，
         //   侧面点击不合并 → 右键已有半砖侧面会落到邻格（spec 报「瞄上方却放旁边」）而非补齐同格；且上半砖只能
         //   由底面合并（玩家很难从下方点中）→「放了上半砖后同格下半砖放不下」。改读命中点 Y 后，任意面点中
         //   空半即合并（含侧面）；点中实半则 fall-through 走下方常规邻格放置。
@@ -1951,31 +1953,33 @@ void PlayerController::placeBlock()
         //   浮点抖动：点中空半边界平面即「想填空半」→ 合并。
         const bool merge = hitUpper ? (m_hitNy < 0 || fracY < 0.5f) : (m_hitNy > 0 || fracY >= 0.5f);
         if (merge) {
-            if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks, 0)) return;
-            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Planks,
-                              BlockRegistry::PlanksFromDoubleSlabBit);
+            const quint8 fullId = BlockRegistry::slabFullBlock(quint8(m_selectedBlock));
+            if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, fullId, 0)) return;
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, fullId,
+                              BlockRegistry::DoubleSlabMarkerBit);
             m_lastPlaceMs = now;
             emit swingArm(); // 合成也是一次「放置」动作 → 挥手（t29）
             return;
         }
     }
     // t262 邻格互补半砖合并（spec「角落下半砖上沿邻墙侧面放上半砖」）：命中实体方块（墙 / 满砖）的面、
-    //   目标格已是**互补半**半砖时 → 把目标格合并为整砖（Planks + 双半砖标记）。场景：墙角下半砖上，玩家瞄
+    //   目标格已是**同种互补半**半砖时 → 把目标格合并为整砖（满格 + 双半砖标记）。场景：墙角下半砖上，玩家瞄
     //   邻墙侧面（上半高度）想补上半砖（非顶面）。旧实现：目标格非 air/water → 下方排开水守卫直接 return
-    //   （spec 报「现不行」）。MC 语义：目标格已有互补半砖时合并为 double slab = full block（同 t163(b) 同格
+    //   （spec 报「现不行」）。MC 语义：目标格已有同种互补半砖时合并为 double slab = full block（同 t163(b) 同格
     //   合并，只是命中格从「slab」换成「邻接实体方块」——命中点 Y 仍据邻墙侧面 fracY 正确算出想放的半位）。
-    //   到此说明上面 t163(b) 同格合并未触发（命中格非 slab，或点中 slab 实半 fall-through）→ 检**目标格**。
-    //   同半（如目标下半 + 新下半）不合（几何重叠）→ 不合，fall-through 走下方常规放置 / 拒绝。
-    if (m_selectedBlock == BlockRegistry::WoodSlab) {
+    //   到此说明上面 t163(b) 同格合并未触发（命中格非同种 slab，或点中 slab 实半 fall-through）→ 检**目标格**。
+    //   同半（如目标下半 + 新下半）不合（几何重叠）；异种（木 vs 石）不合（不同 double slab 材质）→ 不合，fall-through。
+    if (BlockRegistry::isSlab(quint8(m_selectedBlock))) {
         const quint8 tId = m_world->blockAt(tx, ty, tz);
-        if (tId == BlockRegistry::WoodSlab) {
+        if (tId == m_selectedBlock) { // 同种半砖 → 互补半可合并（异种不合）
             const quint8 tState = m_world->stateAt(tx, ty, tz);
             const bool tUpper = (tState & 1) != 0;
-            const bool newUpper = (placeState & 1) != 0; // placeState 已据命中面 / 命中点 Y 算好（见上方 WoodSlab 分支）
+            const bool newUpper = (placeState & 1) != 0; // placeState 已据命中面 / 命中点 Y 算好（见上方 slab 分支）
             if (newUpper != tUpper) { // 互补半 → 合并目标格为整砖
-                if (overlapsPlayerAABB(tx, ty, tz, BlockRegistry::Planks, 0)) return; // 合成满砖前查自埋（同 t163b）
-                m_world->setBlock(tx, ty, tz, BlockRegistry::Planks,
-                                  BlockRegistry::PlanksFromDoubleSlabBit);
+                const quint8 fullId = BlockRegistry::slabFullBlock(quint8(m_selectedBlock));
+                if (overlapsPlayerAABB(tx, ty, tz, fullId, 0)) return; // 合成满砖前查自埋（同 t163b）
+                m_world->setBlock(tx, ty, tz, fullId,
+                                  BlockRegistry::DoubleSlabMarkerBit);
                 m_lastPlaceMs = now;
                 emit swingArm(); // 合成也是一次「放置」动作 → 挥手（t29）
                 return;

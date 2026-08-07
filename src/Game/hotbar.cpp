@@ -70,6 +70,11 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::WoodDoor:          return "icon_wood_door.png";          // 木板门：2D 高板剪影
     case BlockRegistry::WoodTrapdoor:      return "icon_wood_trapdoor.png";      // 木活板门：3D 薄板
     case BlockRegistry::WoodPressurePlate: return "icon_wood_pressure_plate.png";// 木板压力板：3D 更薄更小
+    // t412 圆石变体图标：石质半方块 3D dimetric 立体图标（圆石贴图按实际形状投影，同木制半方块图标流程）。
+    case BlockRegistry::CobbleSlab:          return "icon_cobble_slab.png";          // 圆石台阶：3D 半高盒
+    case BlockRegistry::CobbleStairs:        return "icon_cobble_stairs.png";        // 圆石楼梯：3D L 阶（背墙 + 整步）
+    case BlockRegistry::CobbleFence:         return "icon_cobble_fence.png";         // 圆石墙：3D 立柱 + 横档
+    case BlockRegistry::CobblePressurePlate: return "icon_cobble_pressure_plate.png";// 圆石压力板：3D 更薄更小
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
@@ -198,12 +203,13 @@ int Hotbar::armorTier(int itemId) const { return ArmorRegistry::tier(itemId); }
 int Hotbar::armorPointsFor(int itemId) const { return ArmorRegistry::armorPoints(itemId); }
 int Hotbar::armorMaxDurability(int itemId) const { return ArmorRegistry::maxDurability(itemId); }
 
-// t219 不完整方块段判定（手持 / 掉落贴图分流用）：闭区间 [FirstPartial, LastPartial]（t194 教训：
-//   单边 >= FirstPartial 会把段后整立方 Chest(22) 误判为异形）。异形方块在世界内非整立方 → 手持 / 掉落
-//   走 dimetric 立体平图标（icon_wood_*.png，BillboardQuad），非 BlockCube 满格木板立方。
+// t219 不完整方块段判定（手持 / 掉落贴图分流用）：异形方块在世界内非整立方 → 手持 / 掉落走 dimetric 立体
+//   图标（icon_wood_*.png / icon_cobble_*.png，BillboardQuad），非 BlockCube 满格立方。t412 走 BlockRegistry
+//   单一权威谓词（[FirstPartial,LastPartial] ∪ 段外圆石变体），避免 QML 与 mesher 路由漂移。
 bool Hotbar::isPartialBlock(int itemId) const
 {
-    return itemId >= int(BlockRegistry::FirstPartial) && itemId <= int(BlockRegistry::LastPartial);
+    if (itemId <= 0 || itemId >= int(BlockRegistry::Count)) return false;
+    return BlockRegistry::isPartialBlock(quint8(itemId));
 }
 
 int Hotbar::toolTier(int itemId) const
@@ -393,6 +399,9 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::WoodSlab),          int(BlockRegistry::WoodStairs),
              int(BlockRegistry::WoodFence),         int(BlockRegistry::WoodPressurePlate),
              int(BlockRegistry::WoodDoor),          int(BlockRegistry::WoodTrapdoor),
+             // t412 圆石变体（cobble variants）：石质半方块（台阶 / 楼梯 / 墙 / 压力板），复用异形方块系统 + 圆石贴图。
+             int(BlockRegistry::CobbleSlab),        int(BlockRegistry::CobbleStairs),
+             int(BlockRegistry::CobbleFence),       int(BlockRegistry::CobblePressurePlate),
              // t244 cross 广告牌方块（透明底 cutout；与火把同走非整立方渲染）：
              int(BlockRegistry::TallGrass),                                     // 草丛（worldgen 散布 / 杀草掉种子）
              int(BlockRegistry::WheatCrop),                                    // 小麦作物（state=阶段；种 0..7，图标显成熟态）

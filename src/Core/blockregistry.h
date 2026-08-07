@@ -378,7 +378,16 @@ public:
         //   玻璃微反光，原创自绘 §9a）。音色归 GroupStone（石质）。worldgen 不直接生成（仅由 t411 流体交互产生），
         //   不进创造调色板（系统获得语义，同 ice）。
         Obsidian       = 57, // 黑曜石：流水触静岩浆源凝固产物（t411 流体交互）
-        Count          = 58, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t412 圆石变体（cobble variants）：机制等价 MC 1.0 石质半方块（cobblestone slab/stairs/wall/pressure-plate）。
+        //   复用既有异形方块系统（PartialBlockGeometry 几何 + ShapeSlab/ShapeStairs/ShapeFence/ShapePlate 子 AABB），
+        //   仅换圆石贴图（tile 5，各面同）与石质属性（hardness 2.0、Pickaxe、requiresTool=true、minTier1、GroupStone）。
+        //   id 段外（不与 [FirstPartial,LastPartial]=15..20 相邻 —— 中间夹大量非异形方块），故经 isPartialBlock /
+        //   isSlab / isStairs / isFence / isPressurePlate 谓词并入异形路由（单一权威，同 isCrossBillboard 段外 cross 模式）。
+        CobbleSlab          = 58, // 圆石台阶：半高（上/下半）。state bit0=上半(1)/下半(0)（与 WoodSlab 同编码）。
+        CobbleStairs        = 59, // 圆石楼梯：整步 + 背墙。state[1:0]=朝向 bit2=倒置（与 WoodStairs 同编码）。
+        CobbleFence         = 60, // 圆石墙：中心立柱 + 四向横档连邻居（机制等价 MC 圆石墙；与 WoodFence 同几何）。
+        CobblePressurePlate = 61, // 圆石压力板：贴地薄板（与 WoodPressurePlate 同几何）。
+        Count          = 62, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -405,6 +414,19 @@ public:
     //   透明（Chest 透视格子）即此根因。mesher / 选中框路由一律用 `>= FirstPartial && <= LastPartial`。
     static constexpr int FirstPartial = 15;
     static constexpr int LastPartial  = WoodTrapdoor; // 20（异形段上界；新增异形方块追加时同步右移）
+
+    // t412 异形方块统一谓词（单一权威，段外圆石变体并入，同 isCrossBillboard 段外 cross 模式）：
+    //   isPartialBlock：走 PartialBlockGeometry 异形渲染（mesher PASS 1 路由 + PASS 2 continue）。含连续段
+    //     [FirstPartial, LastPartial]（6 类木制半方块）+ 段外圆石变体 4 类（CobbleSlab/Stairs/Fence/PressurePlate）。
+    //     Farmland 经 chunkgeometry 单独并入 PASS 1（矮盒渲染，非 partial 子 AABB 形状），故不在此谓词内。
+    //   isSlab/isStairs/isFence/isPressurePlate：placeBlock 放置态 / 双半砖合并 / 栅栏连接判定按形状分流，
+    //     同形状不同材质（木 / 石）共用一套放置与合并逻辑（仅贴图 / 硬度 / 掉落差异走 BlockDef 表）。
+    //   mesher / 选中框 / playercontroller 一律读本谓词，不各持 id 判定（PLAN §2 单一权威，避免多处分流漂移）。
+    static bool isPartialBlock(quint8 blockId);
+    static bool isSlab(quint8 blockId);
+    static bool isStairs(quint8 blockId);
+    static bool isFence(quint8 blockId);
+    static bool isPressurePlate(quint8 blockId);
 
     // t235 cross 广告牌方块段哨兵：id ∈ [FirstCross, LastCross] 走 PartialBlockGeometry 的 cross 几何
     //   （两片对角十字相交的双面 quad，机制等价 MC 草丛 / 花 / 作物的 cross 模型）。与 [FirstPartial, LastPartial]
@@ -464,6 +486,15 @@ public:
     //   常规放置的 Planks state 恒 0（4 参数 setBlock 默认 / worldgen）→ 不误判为双砖。state 经 m_states 落 SQLite
     //   round-trip 保真（存档读回仍带本 bit → 重载后破块仍掉 2 块半砖）。
     static constexpr quint8 PlanksFromDoubleSlabBit = 0x01; // Planks state bit0 = 源自双半砖合并（仅 Planks 复用）
+    // t412 双半砖合并泛化（圆石变体）：两块互补半砖同格合并 → 写入该半砖对应的「满格整立方」(WoodSlab→Planks /
+    //   CobbleSlab→Cobble) + DoubleSlabMarkerBit 标记；finishMiningAt 检本 bit → 破块掉 2× 对应半砖（机制等价
+    //   MC「double slab 破坏掉 2 块半砖」）。满格方块的 state 对 ShapeFull inert（mesher / collision / 选中均不读），
+    //   复用 bit0 作 marker 零回归（同 PlanksFromDoubleSlabBit 模式；本常量值与之一致 = 0x01，木 / 石两族共用）。
+    //   slabFullBlock(slabId)：半砖 → 其满格整立方（WoodSlab→Planks / CobbleSlab→Cobble；非半砖→Air）。
+    //   fullBlockSlabDrop(fullId)：满格整立方 → 其半砖（Planks→WoodSlab / Cobble→CobbleSlab；非双砖源→0）。
+    static constexpr quint8 DoubleSlabMarkerBit = 0x01; // 满格方块 state bit0 = 源自双半砖合并（Planks / Cobble 复用）
+    static quint8 slabFullBlock(quint8 slabId);
+    static quint8 fullBlockSlabDrop(quint8 fullId);
 
     // t234/t406 耕地湿润度 state 编码：state 低 2 位 = 湿润等级 0..3（FarmlandHydrationMask 取低 2 位）。
     //   机制等价 MC 1.0 farmland hydration（4 级湿润；越湿作物长得越快、湿润度由贴图色深肉眼可辨）：

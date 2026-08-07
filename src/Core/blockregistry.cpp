@@ -287,6 +287,16 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   各面贴图=obsidian(77)（深紫黑火山玻璃底 + 紫红纹理嵌点 + 少量品紫玻璃微反光，原创自绘 §9a）。音色归 GroupStone
     //   （石质）。worldgen 不直接生成（仅由 t411 流体交互产生），不进创造调色板（系统获得语义，同 ice）。
     /* obsidian     */ {int(BlockRegistry::Obsidian),                       77, 77, 77, 77, true,  BlockRegistry::ShapeFull,    12.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Obsidian),      1, 64, "obsidian",     "黑曜石"},
+    // ── t412 圆石变体（cobble variants）：机制等价 MC 1.0 石质半方块（cobblestone slab/stairs/wall/pressure-plate）。
+    //   复用既有异形方块系统（PartialBlockGeometry 几何 + ShapeSlab/ShapeStairs/ShapeFence/ShapePlate 子 AABB），仅换
+    //   圆石贴图（各面=cobble(5)）与石质属性：solid=false（非整立方 → 不挡邻居面剔除，同木制半砖）、hardness=2.0
+    //   （同 cobble 量级）、toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落，机制等价 MC 石类需镐）；
+    //   dropId=自身（破块掉同种圆石变体，可放回）、dropCount=1、maxStack=64。音色归 GroupStone（石质，同 cobble）。
+    //   各面贴图=cobble(5)（mesher 经 PartialBlockGeometry 按 (id,state) 生成异形顶点，tile 由 tileIndex 取本方块 sideTile）。
+    /* cobble_slab          */ {int(BlockRegistry::CobbleSlab),          5, 5, 5, 5, false, BlockRegistry::ShapeSlab,     2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CobbleSlab),          1, 64, "cobble_slab",          "圆石台阶"}, // state bit0=上半(1)/下半(0)；半高 0.5（与 WoodSlab 同编码）
+    /* cobble_stairs        */ {int(BlockRegistry::CobbleStairs),        5, 5, 5, 5, false, BlockRegistry::ShapeStairs,   2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CobbleStairs),        1, 64, "cobble_stairs",        "圆石楼梯"}, // state[1:0]=朝向 bit2=倒置（与 WoodStairs 同编码）
+    /* cobble_fence         */ {int(BlockRegistry::CobbleFence),         5, 5, 5, 5, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CobbleFence),         1, 64, "cobble_fence",         "圆石墙"}, // 中心立柱 + 四向横档连邻居（机制等价 MC 圆石墙；与 WoodFence 同几何）；state=0
+    /* cobble_pressure_plate */ {int(BlockRegistry::CobblePressurePlate), 5, 5, 5, 5, false, BlockRegistry::ShapePlate,   2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CobblePressurePlate), 1, 64, "cobble_pressure_plate", "圆石压力板"}, // 贴地薄板（与 WoodPressurePlate 同几何）；state=0
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -346,6 +356,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* carrot_crop    */ 141, // t407 胡萝卜作物 → MC 1.0 carrot crop block id 141（age 由 metadata 分，统一取成熟态 id）
     /* potato_crop    */ 142, // t407 马铃薯作物 → MC 1.0 potato crop block id 142
     /* obsidian       */ 49, // t411 黑曜石 → MC 1.0 obsidian block id 49（流水触静岩浆源凝固产物）
+    /* cobble_slab             */ 44, // t412 圆石台阶 → MC 1.0 stone slab id 44（metadata 3 = cobblestone；统一取 slab id）
+    /* cobble_stairs           */ 67, // t412 圆石楼梯 → MC 1.0 stairs id 67（1.0 楼梯含木/石/cobble 统一 id）
+    /* cobble_fence            */ -1, // t412 圆石墙 → MC 1.0 无等价（cobblestone wall id 139 为 1.4+；1.0 仅木栅栏 id 85）
+    /* cobble_pressure_plate   */ 70, // t412 圆石压力板 → MC 1.0 stone pressure plate id 70
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -370,6 +384,35 @@ int BlockRegistry::tileIndex(quint8 blockId, Face face)
 
 bool BlockRegistry::isSolid(quint8 blockId)      { return def(blockId).solid; }
 BlockRegistry::Shape BlockRegistry::shape(quint8 blockId) { return def(blockId).shape; }
+
+// t412 异形方块 / 半方块族统一谓词（单一权威，段外圆石变体并入，同 isCrossBillboard 段外 cross 模式）。
+//   连续段 [FirstPartial, LastPartial]（6 类木制半方块）+ 段外圆石变体 4 类（CobbleSlab/Stairs/Fence/PressurePlate）。
+//   Farmland 不在此谓词内（矮盒渲染经 chunkgeometry 单独并入 PASS 1，非 partial 子 AABB 形状族）。
+bool BlockRegistry::isPartialBlock(quint8 blockId)
+{
+    if (blockId == CobbleSlab || blockId == CobbleStairs
+        || blockId == CobbleFence || blockId == CobblePressurePlate) return true; // t412 段外圆石变体
+    return blockId >= FirstPartial && blockId <= LastPartial;
+}
+bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab; }
+bool BlockRegistry::isStairs(quint8 blockId)         { return blockId == WoodStairs || blockId == CobbleStairs; }
+bool BlockRegistry::isFence(quint8 blockId)          { return blockId == WoodFence || blockId == CobbleFence; }
+bool BlockRegistry::isPressurePlate(quint8 blockId)  { return blockId == WoodPressurePlate || blockId == CobblePressurePlate; }
+
+// t412 双半砖合并映射（木 / 石两族共用一套合并与掉落逻辑）：半砖 → 其满格整立方（合并写入目标）；
+//   满格整立方 → 其半砖（破坏掉落）。非半砖 / 非双砖源 → Air / 0（兜底）。
+quint8 BlockRegistry::slabFullBlock(quint8 slabId)
+{
+    if (slabId == WoodSlab)   return Planks;
+    if (slabId == CobbleSlab) return Cobble;
+    return Air;
+}
+quint8 BlockRegistry::fullBlockSlabDrop(quint8 fullId)
+{
+    if (fullId == Planks) return WoodSlab;
+    if (fullId == Cobble) return CobbleSlab;
+    return 0;
+}
 
 // t305 cross 广告牌方块统一谓词（单一权威）：连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)
 //   + 段外 DeadBush(43)（t394）+ 段外 Mushroom(48)（t396）+ 段外 LilyPad(47)（t396）+ 段外花段 [FirstFlower, LastFlower]
@@ -596,6 +639,7 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     switch (blockId) {
     case WoodTrapdoor: return (state & 1) ? 0 : 15;   // 合=满遮（修「合活版门透光」）/ 开=全透
     case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
+    case CobbleSlab:   return 7;                      // t412 圆石台阶半遮光（同 WoodSlab，半高占空比 0.5）
     case Farmland:     return 15;                     // t408 耕地 solid=false（矮盒渲染）但仍是 opaque 土块 → 满遮光
     default:           return 0;                      // 其余全透（air/torch/water/stairs/fence/plate/door/cross）
     }
@@ -699,6 +743,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Spawner: // t392 刷怪笼 → 石质音色（铁笼金属敲击感，最接近 MC 1.0 刷怪笼 metal SoundType）
     case Sandstone: // t394 砂岩 → 石质音色（成岩，同 cobble/stone 族）
     case Obsidian: // t411 黑曜石 → 石质音色（致密火山玻璃，同 cobble/stone 族）
+    case CobbleSlab: case CobbleStairs: case CobbleFence: case CobblePressurePlate: // t412 圆石变体 → 石质音色（同 cobble 族）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

@@ -316,6 +316,10 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_wood_door.png
         textures/icon_wood_trapdoor.png
         textures/icon_wood_pressure_plate.png
+        textures/icon_cobble_slab.png             # t412 圆石变体 3D dimetric 立体图标（圆石贴图按形状投影）
+        textures/icon_cobble_stairs.png
+        textures/icon_cobble_fence.png
+        textures/icon_cobble_pressure_plate.png
         textures/icon_tall_grass.png               # t244 草丛 cross 方块 flat 2D 图标（透明底 + 绿草叶）
         textures/icon_wheat_crop.png               # t244 小麦作物 cross 方块 flat 2D 图标（取成熟阶段 7 麦穗）
         textures/icon_sandstone.png                # t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带；build_cube_icons.py）

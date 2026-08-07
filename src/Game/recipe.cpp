@@ -216,6 +216,32 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
         0, 0, 0 },
       int(BlockRegistry::WoodTrapdoor), 2, 1, "wood_trapdoor" },
+    // ── t412 圆石变体（cobble variants）：机制等价 MC 1.0 石质半方块配方。复用既有 slab/stairs/fence/pressure-plate
+    //   配方形状（仅把木板换圆石 + 木棒），与木制半方块同形 → 同包围盒判定，互不冲突（原料不同）。
+    //   cobble_slab：3 圆石横排 → 6 圆石台阶（有序 3×3，仅工作台；最小包围盒 3×1）。机制等价 MC 石台阶配方。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble),
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::CobbleSlab), 6, 1, "cobble_slab" },
+    //   cobble_stairs：6 圆石阶梯（顶左 / 中左两 / 底满）→ 4 圆石楼梯（有序 3×3，仅工作台；最小包围盒 3×3）。
+    //     机制等价 MC 石楼梯配方；与熔炉（8 圆石中空）包围盒内容不同（本 [4]=圆石填、熔炉 [4]=空）→ 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), 0,                      0,
+        int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), 0,
+        int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble) },
+      int(BlockRegistry::CobbleStairs), 4, 1, "cobble_stairs" },
+    //   cobble_fence：6 圆石 + 2 木棒（石-棒-石 ×2 行）→ 3 圆石墙（有序 3×3，仅工作台）。复用木栅栏配方形状
+    //     （机制等价栅栏配方；圆石墙用棒连接同木栅栏结构）。最小包围盒 3×2，与木栅栏包围盒同形但原料不同 → 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), kStickId,                  int(BlockRegistry::Cobble),
+        int(BlockRegistry::Cobble), kStickId,                  int(BlockRegistry::Cobble),
+        0, 0, 0 },
+      int(BlockRegistry::CobbleFence), 3, 1, "cobble_fence" },
+    //   cobble_pressure_plate：2 圆石横排 → 1 圆石压力板（有序 2×2 背包栏；最小包围盒 2×1）。机制等价 MC 石压力板配方。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), 0,
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::CobblePressurePlate), 1, 1, "cobble_pressure_plate" },
     // t174 铁桶（空）：3 铁锭 V 形（顶左 + 顶右 + 底中）→ 1 空桶（有序 3×3，仅工作台）。机制等价 MC 1.0
     //   铁桶配方（3 铁锭 V 形）。最小包围盒 3×2（顶行两端 + 底行中），可在工作台任意 3×2 子区放（包围盒
     //   对齐后逐格比）。产物 BucketEmptyId（材料段 0x206，maxStack=1 不可堆叠 —— canTake 一次取 1 件）。

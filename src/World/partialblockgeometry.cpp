@@ -160,14 +160,16 @@ int PartialBlockGeometry::append(
     const int tile = BlockRegistry::tileIndex(blockId, BlockRegistry::PosX);
 
     switch (blockId) {
-    case BlockRegistry::WoodSlab: {
+    case BlockRegistry::WoodSlab:
+    case BlockRegistry::CobbleSlab: { // t412 圆石台阶（与 WoodSlab 同几何，tile 由 tileIndex 取本方块 sideTile=cobble）
         // 半高：state bit0=上半 → y[0.5,1]；下半 → y[0,0.5]。全 footprint。
         const bool upper = (state & 1) != 0;
         const float y0 = upper ? 0.5f : 0.0f, y1 = upper ? 1.0f : 0.5f;
         pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, y0, y1, 0.f, 1.f, tile, light, tileW, hx, hy, v0, v1);
         break;
     }
-    case BlockRegistry::WoodStairs: {
+    case BlockRegistry::WoodStairs:
+    case BlockRegistry::CobbleStairs: { // t412 圆石楼梯（与 WoodStairs 同几何）
         // 楼梯 = 整步（全 footprint 半高）+ 背墙（朝向对侧半 footprint 的另半高）。
         //   state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 → 背墙在对侧 -d 半）。
         //   t147 state bit2=上下倒置：正置整步在下层(y 0..0.5)+背墙在上层(y 0.5..1)；
@@ -187,17 +189,19 @@ int PartialBlockGeometry::append(
         pushBox(verts, idx, lx, ly, lz, bx0, bx1, wallY0, wallY1, bz0, bz1, tile, light, tileW, hx, hy, v0, v1);
         break;
     }
-    case BlockRegistry::WoodFence: {
+    case BlockRegistry::WoodFence:
+    case BlockRegistry::CobbleFence: { // t412 圆石墙（与 WoodFence 同几何；机制等价 MC 圆石墙）
         // t209 栅栏 = 中心立柱（0.4 见方，1.5 高）+ 四向横档（连接相邻栅栏 / 实体方块）。
         //   立柱 y[0, 1.5] 与 collisionAABBs(ShapeFence) 同高（{0.3,0,0.3,0.7,1.5,0.7}）→ 玩家跳不过
         //   （跳跃顶点 ~1.25 < 1.5；机制等价 MC 栅栏 1.5 高不可越）。立柱顶探入上格 0.5（栅栏上格必为空气，
         //   否则碰撞亦不可能 1.5 高 → 渲染安全）。
         //   横档分上下两道（MC 式），每道从立柱中心延伸到格边；仅在该向「有连接」时画。连接判定 = 邻格为
-        //   WoodFence 或 isSolid（实体整立方；不连空气/水/火把/不完整方块，同 MC 栅栏只连栅栏与实体）。
-        //   横档纯视觉（不进碰撞 AABB，机制等价 MC 栅栏 VoxelShape 仅立柱；玩家贴立柱碰撞即可挡）。
+        //   任意栅栏（WoodFence/CobbleFence，t412 经 isFence 谓词）或 isSolid（实体整立方；不连空气/水/火把/
+        //   不完整方块，同 MC 栅栏只连栅栏与实体）。横档纯视觉（不进碰撞 AABB，机制等价 MC 栅栏 VoxelShape
+        //   仅立柱；玩家贴立柱碰撞即可挡）。
         pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, 0.f, 1.5f, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
         const auto connects = [](quint8 blk) {
-            return blk == BlockRegistry::WoodFence || BlockRegistry::isSolid(blk);
+            return BlockRegistry::isFence(blk) || BlockRegistry::isSolid(blk);
         };
         const float yLo0 = 0.375f,  yLo1 = 0.5625f; // 下档（MC 6/16..9/16）
         const float yHi0 = 0.9375f, yHi1 = 1.125f;  // 上档（探入 1.5 高区间，呼应立柱顶高度）
@@ -219,7 +223,8 @@ int PartialBlockGeometry::append(
         }
         break;
     }
-    case BlockRegistry::WoodPressurePlate: {
+    case BlockRegistry::WoodPressurePlate:
+    case BlockRegistry::CobblePressurePlate: { // t412 圆石压力板（与 WoodPressurePlate 同几何）
         // 贴地薄板（1/16 厚 + 1/16 边距）。
         pushBox(verts, idx, lx, ly, lz, 0.0625f, 0.9375f, 0.f, 0.0625f, 0.0625f, 0.9375f,
                 tile, light, tileW, hx, hy, v0, v1);
