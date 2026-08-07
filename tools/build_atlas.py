@@ -154,6 +154,19 @@ TILES = [
     "default_glass",                # 68 glass（t405 玻璃各面贴图；近白青底 + 暗边框 + 对角高光斜线；Glass 各面=本 tile，
                                     #    mesher 走 glassOnly 半透段；纹理不透明，半透由材质 opacity 实现，同 water 模式；
                                     #    tools/build_glass.py 程序生成原创像素图）
+    # t407 胡萝卜/马铃薯作物 4 阶段贴图（机制等价 MC 1.0 carrot/potato crop 4 张阶段贴图；每张覆盖 2 个年龄：
+    #   age 0-1→stage0、2-3→stage1、4-5→stage2、6-7→stage3）。cross 几何段（PartialBlockGeometry pushCross 双面双
+    #   对角 quad），alpha 透明底 cutout。CarrotCrop def 各面=69 / PotatoCrop def 各面=73（基底阶段 0）；mesher 在
+    #   PartialBlockGeometry::append 的 CarrotCrop/PotatoCrop case 内据 state 选 tile = 基底 + state/2。
+    #   tools/build_carrot_potato.py 程序生成原创像素图（§9 override (a)；零 MC 资产）。
+    "default_carrot_crop_0",        # 69 carrot_crop_0（age 0-1：嫩芽）
+    "default_carrot_crop_1",        # 70 carrot_crop_1（age 2-3：拔高）
+    "default_carrot_crop_2",        # 71 carrot_crop_2（age 4-5：叶丛）
+    "default_carrot_crop_3",        # 72 carrot_crop_3（age 6-7：成熟，橙红胡萝卜根露出土）
+    "default_potato_crop_0",        # 73 potato_crop_0（age 0-1：嫩芽）
+    "default_potato_crop_1",        # 74 potato_crop_1（age 2-3：拔高）
+    "default_potato_crop_2",        # 75 potato_crop_2（age 4-5：叶丛）
+    "default_potato_crop_3",        # 76 potato_crop_3（age 6-7：成熟，棕黄马铃薯块茎露出土）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

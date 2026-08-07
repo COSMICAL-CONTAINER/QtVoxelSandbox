@@ -791,7 +791,9 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   state 重置为 0 → 永判未成熟 → 成熟作物收割不掉小麦（同族 lessons-learned t134「先快照再改 id」坑）。
     const quint8 brokenState = (brokenId == BlockRegistry::WoodDoor
                                 || brokenId == BlockRegistry::Planks
-                                || brokenId == BlockRegistry::WheatCrop)
+                                || brokenId == BlockRegistry::WheatCrop
+                                || brokenId == BlockRegistry::CarrotCrop
+                                || brokenId == BlockRegistry::PotatoCrop)
         ? m_world->stateAt(x, y, z) : quint8(0);
     m_world->setBlock(x, y, z, BlockRegistry::Air); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
     if (brokenId == BlockRegistry::WoodDoor) {
@@ -831,7 +833,8 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         //   - TallGrass：1/kTallGrassSeedDropDenom 概率掉种（t246）。
         //   同 PlanksFromDoubleSlabBit 双半砖模式：特殊掉落在通用 BlockDef 表之上提前分流，特例 else 走通用 dropId/dropCount。
         //   brokenState 已在 setBlock(Air) 前读（t134 时序：WheatCrop 在 snapshot 条件内，成熟判定可靠）。
-        if (brokenId == BlockRegistry::WheatCrop || brokenId == BlockRegistry::TallGrass) {
+        if (brokenId == BlockRegistry::WheatCrop || brokenId == BlockRegistry::TallGrass
+            || brokenId == BlockRegistry::CarrotCrop || brokenId == BlockRegistry::PotatoCrop) {
             dropCropDrops(x, y, z, brokenId, brokenState);
         } else if (brokenId == BlockRegistry::Leaves) {
             // t305 玩家破叶 → 概率掉树苗物品 + 木棒（机制等价 MC 1.0 破叶 5% 树苗 / 2% 木棒）。Leaves.dropId=0
@@ -895,9 +898,11 @@ void PlayerController::dropUnsupportedTorchesAround(int x, int y, int z)
 // t247 草丛 / 小麦作物掉落产出（玩家破块 / 失撑共用，见 playercontroller.h 头注释）。
 //   WheatCrop：按 state 判成熟（t237）—— 成熟(state>=WheatCropStageMax)掉 1× 小麦物品(WheatId) + 1-2× 种子
 //   （SeedId，可再种）/ 未成熟仅 1× 种子。两实体散布到破格 + 非实体水平邻格做视觉分离。
+//   t407 CarrotCrop/PotatoCrop：成熟掉 1-4× 对应物品（CarrotId/PotatoId，机制等价 MC 1.0「成熟作物掉 1-4」；
+//   MC carrot/potato 物品本身即种子 + 产物，故不再额外掉种子 —— 区别于小麦的种子 + 麦粒双产物）/ 未成熟仅 1×。
 //   TallGrass：1/kTallGrassSeedDropDenom 概率掉 1× 种子（t246，BlockDef.dropId/dropCount 恒返 1 种子作基础兜底，
 //   本分支概率门控覆盖通用 drop 路径）。种子 1-2 / 概率均走 QRandomGenerator（玩家交互掉落的随机性，非 worldgen
-//   确定性范畴 §2-K）。失撑调用同走此逻辑 → 成熟小麦失撑仍掉小麦 + 种子（机制等价 MC「作物被任何方式移除都掉产物」）。
+//   确定性范畴 §2-K）。失撑调用同走此逻辑 → 成熟作物失撑仍掉产物（机制等价 MC「作物被任何方式移除都掉产物」）。
 void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 state)
 {
     if (!m_world) return;
@@ -913,6 +918,14 @@ void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 stat
         if (wheatCount > 0)
             emit spawnItem(x, y, z, RecipeRegistry::WheatId, wheatCount);
         emit spawnItem(sx, y, sz, RecipeRegistry::SeedId, seedCount);
+    } else if (id == BlockRegistry::CarrotCrop || id == BlockRegistry::PotatoCrop) {
+        // t407 胡萝卜/马铃薯收割：成熟掉 1-4× 对应物品（机制等价 MC 1.0 成熟作物 1-4）；未成熟仅 1×。
+        //   产出物即种子（玩家可再种），机制对齐 MC carrot/potato「种 1 收 1-4」。未成熟仅返 1 个（基础兜底，
+        //   同 BlockDef.dropId=CarrotId/PotatoId）。
+        const bool mature = state >= BlockRegistry::WheatCropStageMax; // 三种作物共享阶段上界（blockregistry.h 注释）
+        const int cropItemId = (id == BlockRegistry::CarrotCrop) ? RecipeRegistry::CarrotId : RecipeRegistry::PotatoId;
+        const int count = mature ? QRandomGenerator::global()->bounded(1, 5) : 1; // 成熟 1-4 / 未成熟 1
+        emit spawnItem(x, y, z, cropItemId, count);
     } else if (id == BlockRegistry::TallGrass) {
         const int dropId = BlockRegistry::dropId(id);
         const int dropCount = std::max(1, BlockRegistry::dropCount(id));
@@ -930,7 +943,8 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
     if (!m_world) return;
     const int cx = x, cy = y + 1, cz = z; // 正上方格：唯一支撑 = 本格（刚被破为 Air）
     const quint8 cid = m_world->blockAt(cx, cy, cz);
-    if (cid != BlockRegistry::TallGrass && cid != BlockRegistry::WheatCrop) return;
+    if (cid != BlockRegistry::TallGrass && cid != BlockRegistry::WheatCrop
+        && cid != BlockRegistry::CarrotCrop && cid != BlockRegistry::PotatoCrop) return;
     const quint8 cstate = m_world->stateAt(cx, cy, cz); // setBlock(Air) 前快照（WheatCrop 成熟判定）
     m_world->setBlock(cx, cy, cz, BlockRegistry::Air);  // → World 发 blockBroken(crop) + worldChanged → 粒子 + mesh 重建
     dropCropDrops(cx, cy, cz, cid, cstate);            // 失撑掉落产出与玩家破块同源
@@ -1706,19 +1720,30 @@ void PlayerController::placeBlock()
     //   命中非耕地（如石头 / 草 / 已有作物）→ 不种不挥（机制等价 MC 种子只能种在耕地）。spectator 已被入口
     //   canPlace() 守卫拦截；Creative / Survival 均可种。生存消耗 1 种子（创造不耗 → 无限种）。
     //   分层（PLAN §2）：种植属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM），不改 setBlock 语义。
-    if (m_hotbar && m_world && heldItemId == RecipeRegistry::SeedId) {
-        if (m_hasHit && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Farmland) {
-            const int wx = m_hitBx, wy = m_hitBy + 1, wz = m_hitBz; // 小麦种在耕地正上方一格
-            // 目标须在界内 + 为空气（不覆盖实体 / 已种作物 / 草丛）。越界 setBlock 静默返 false → 提前挡防误耗种子。
-            if (wy < m_world->height() && m_world->blockAt(wx, wy, wz) == BlockRegistry::Air) {
-                m_world->setBlock(wx, wy, wz, BlockRegistry::WheatCrop, 0); // state=0 阶段 0（刚种；tickCropGrowth 逐步推进）
-                if (m_mode != Creative)
-                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 种子（创造不耗）
-                m_lastPlaceMs = now;
-                emit swingArm(); // 种植也是一次「放置」动作 → 挥手（t29）
+    //   t407：胡萝卜（CarrotId）/马铃薯（PotatoId）物品同理 —— 右键耕地种对应作物方块（MC 1.0 carrot/potato
+    //   物品本身即种子 + 产物，机制等价 MC「种一个胡萝卜长成胡萝卜作物」）。三者共一分支：物品→作物映射表，
+    //   统一种植流程（耕地正上方空气格 + state=0 + 生存消耗 1 / 创造不耗）。
+    static const struct CropSeed { int itemId; quint8 cropBlockId; } kCropSeeds[] = {
+        { RecipeRegistry::SeedId,  BlockRegistry::WheatCrop  },
+        { RecipeRegistry::CarrotId, BlockRegistry::CarrotCrop },
+        { RecipeRegistry::PotatoId, BlockRegistry::PotatoCrop },
+    };
+    for (const CropSeed &cs : kCropSeeds) {
+        if (heldItemId == cs.itemId) {
+            if (m_hotbar && m_world && m_hasHit
+                && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Farmland) {
+                const int wx = m_hitBx, wy = m_hitBy + 1, wz = m_hitBz; // 作物种在耕地正上方一格
+                // 目标须在界内 + 为空气（不覆盖实体 / 已种作物 / 草丛）。越界 setBlock 静默返 false → 提前挡防误耗种子。
+                if (wy < m_world->height() && m_world->blockAt(wx, wy, wz) == BlockRegistry::Air) {
+                    m_world->setBlock(wx, wy, wz, cs.cropBlockId, 0); // state=0 阶段 0（刚种；tickCropGrowth 逐步推进）
+                    if (m_mode != Creative)
+                        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 种子（创造不耗）
+                    m_lastPlaceMs = now;
+                    emit swingArm(); // 种植也是一次「放置」动作 → 挥手（t29）
+                }
             }
+            return; // 作物种子（种植成功 / 命中非耕地 / 未命中）均不再走方块放置路径
         }
-        return; // 种子（种植成功 / 命中非耕地 / 未命中）均不再走方块放置路径
     }
     // t305 树苗种植（spec「树苗种植→长大成完整树」）：手持树苗物品（SaplingItemId，材料段非方块）右键命中
     //   草地 / 泥土 → 在命中格正上方空气格种下 Sapling 方块（机制等价 MC 1.0 树苗种植）。树苗物品非方块 →

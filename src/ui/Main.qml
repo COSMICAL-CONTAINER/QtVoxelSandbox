@@ -1225,6 +1225,12 @@ Window {
                 // t299 敌对掉落：蹒跚者（僵尸）→ 腐肉 ×1-2（机制等价 MC 1.0 僵尸掉腐肉）。
                 itemEntities.spawnItem(x, y, z, 0x218, 1)   // 腐肉 ×1-2
                 itemEntities.spawnItem(x, y, z, 0x218, 1)
+                // t407 稀有掉落（机制等价 MC 1.0 僵尸罕见掉落）：胡萝卜 / 马铃薯各 2.5% 独立概率（MC 1.0 zombie
+                //   rareDropChance = 2.5%，iron/carrot/potato 三者各 2.5% 独立判定，本工程实现 carrot/potato 两种）。
+                //   稀有掉落是「杀怪偶尔掉作物」的经济入口（玩家由此获得胡萝卜 / 马铃薯 → 种耕地长作物）。
+                //   0x22F = RecipeRegistry::CarrotId / 0x230 = RecipeRegistry::PotatoId（⚠️ QML 用字面量同上注释约定）。
+                if (Math.random() < 0.025) itemEntities.spawnItem(x, y, z, 0x22F, 1)  // 胡萝卜 ~2.5%
+                if (Math.random() < 0.025) itemEntities.spawnItem(x, y, z, 0x230, 1)  // 马铃薯 ~2.5%
             } else if (mobType === EntityManager.MobSpider) {
                 // t299 敌对掉落：蜘蛛 → 线 ×1-2（机制等价 MC 1.0 蜘蛛掉线；弓 / 钓竿原料，t304 弓配方用）。
                 itemEntities.spawnItem(x, y, z, 0x219, 1)   // 线 ×1-2

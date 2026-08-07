@@ -653,13 +653,18 @@ void World::tickCropGrowth()
     if (W <= 0 || D <= 0 || H <= 0) return;
 
     // 1) 快照当前作物格 + 阶段（tick 内栅格不变 —— 升阶段在 pass 末统一应用，避免半遍历态读到刚升的阶段）。
-    struct CCell { int x, y, z; quint8 stage; };
+    //   t407：快照涵盖全部三种作物（小麦 / 胡萝卜 / 马铃薯）—— 三者生长机制完全同构（同耕地支撑 + 光照 +
+    //   湿润 + 确定性散布概率，复用 WheatCropStageMax 共享阶段上界），故共一生长判定，仅写入时按各自 id。
+    struct CCell { int x, y, z; quint8 id; quint8 stage; };
     std::vector<CCell> cells;
     for (int x = 0; x < W; ++x)
         for (int z = 0; z < D; ++z)
             for (int y = 0; y < H; ++y) {
-                if (m_chunks.blockAt(x, y, z) == BlockRegistry::WheatCrop)
-                    cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
+                const quint8 b = m_chunks.blockAt(x, y, z);
+                if (b == BlockRegistry::WheatCrop
+                    || b == BlockRegistry::CarrotCrop
+                    || b == BlockRegistry::PotatoCrop)
+                    cells.push_back({x, y, z, b, m_chunks.stateAt(x, y, z)});
             }
 
     // 2) 成长判定：每株据「下方耕地支撑 + 头顶光照足 + 未成熟」筛后，按确定性散布概率决定本窗是否升阶段。
@@ -699,7 +704,7 @@ void World::tickCropGrowth()
     //    注：逐株 emit worldChanged 会导致多株同窗升阶段时多次 mesh 重建请求 —— 25 个 ChunkGeometry 各检各的 dirty，
     //    仅含升阶段作物的 chunk 真正重建（per-chunk dirty 协作，见 lessons-learned t03），故实际重建 = 受影响 chunk 数。
     for (const CCell &g : grows)
-        setWaterSilent(g.x, g.y, g.z, BlockRegistry::WheatCrop, quint8(g.stage + 1));
+        setWaterSilent(g.x, g.y, g.z, g.id, quint8(g.stage + 1)); // t407：按各自作物 id 写回（小麦/胡萝卜/马铃薯）
 
     ++m_cropIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同株错峰）
 }

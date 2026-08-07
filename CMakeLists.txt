@@ -270,6 +270,14 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_wheat_stage_5.png
         textures/default_wheat_stage_6.png
         textures/default_wheat_stage_7.png
+        textures/default_carrot_crop_0.png      # t407 胡萝卜作物 4 阶段贴图（build_carrot_potato.py 程序生成原创像素图；cross 几何段 + alphaCutoff cutout；mesher 据 CarrotCrop state 选 69 + state/2）
+        textures/default_carrot_crop_1.png
+        textures/default_carrot_crop_2.png
+        textures/default_carrot_crop_3.png
+        textures/default_potato_crop_0.png      # t407 马铃薯作物 4 阶段贴图（build_carrot_potato.py；mesher 据 PotatoCrop state 选 73 + state/2）
+        textures/default_potato_crop_1.png
+        textures/default_potato_crop_2.png
+        textures/default_potato_crop_3.png
         textures/mob_pig.png                # t240 猪/牛/羊生物贴图（build_mob.py 程序生成原创像素图，§9a）
         textures/mob_cow.png                # 三种 passive mob 各一张「全脸」贴图，MobModel 几何每面铺同图（非 MC UV 拆皮）
         textures/mob_sheep.png

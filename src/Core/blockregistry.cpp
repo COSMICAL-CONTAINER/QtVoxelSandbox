@@ -262,6 +262,19 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   半透由 glassOnly 段材质 opacity 实现，同 water 模式）。音色归 GroupStone（玻璃质敲击）。渲染走 glassOnly 段
     //   （独立半透材质 opacity:0.45 + NoLighting）；地形段跳过 Glass。lightOpacity=0（solid=false → default 返 0，透光）。
     /* glass        */ {int(BlockRegistry::Glass),                        68, 68, 68, 68, false, BlockRegistry::ShapeFull,     0.3f, int(BlockRegistry::Pickaxe), 0, false,                            0x204, 1, 64, "glass",        "玻璃"},
+    // ── t407 胡萝卜/马铃薯作物（CarrotCrop/PotatoCrop）：机制等价 MC 1.0 carrot/potato 作物。**cross 形广告牌方块**
+    //   （与小麦作物同走 PartialBlockGeometry 的 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）。
+    //   种植：手持胡萝卜/马铃薯物品（CarrotId 0x22F / PotatoId 0x230）右键耕地 → 上方一格种本作物（playercontroller）。
+    //   生长：World::tickCropGrowth 推进（同小麦），复用 WheatCropStageMax=7（8 年龄、age 7 成熟）。
+    //   收割：成熟掉 1-4 个对应物品（playercontroller dropCropDrops）；未成熟掉 1 个。
+    //   solid=false（非实体 → 不挡邻居面剔除，同小麦）/ shape=ShapeNone（无碰撞 → 玩家穿过，机制等价 MC 作物可踩过）、
+    //   hardness=0（瞬破）/ NoTool（空手可采且掉落）、dropCount=1、maxStack=64。音色归 GroupGrass。
+    //   dropId = 对应物品（CarrotId/PotatoId；Core 不依赖 Game 故字面量 0x22F/0x230，同 TallGrass 用 0x208 模式）；
+    //   本表 dropId 仅基础兜底（未成熟破块返 1 个），成熟收割的 1-4 倍产出由 dropCropDrops 特例覆盖通用 drop 路径
+    //   （同 WheatCrop/TallGrass 模式）。各面贴图存基底阶段 0 tile（69/73），mesher 在 cross 几何段据 state 选
+    //   tile = 基底 + state/2（4 阶段贴图覆盖 8 年龄，机制对齐 MC 1.0 carrot/potato 4 张阶段贴图）。
+    /* carrot_crop  */ {int(BlockRegistry::CarrotCrop),                    69, 69, 69, 69, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x22F, 1, 64, "carrot_crop",  "胡萝卜作物"},
+    /* potato_crop  */ {int(BlockRegistry::PotatoCrop),                    73, 73, 73, 73, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x230, 1, 64, "potato_crop",  "马铃薯作物"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -318,6 +331,8 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* flower_white   */ -1, // t397 白花 → MC 1.0 无等价（oxeye daisy 雏菊 1.7+ id 34；本工程作花方块故无 1.0 等价）
     /* sugarcane      */ 83, // t397 甘蔗 → MC 1.0 sugar cane（reeds）id 83
     /* glass          */ 20, // t405 玻璃 → MC 1.0 glass id 20
+    /* carrot_crop    */ 141, // t407 胡萝卜作物 → MC 1.0 carrot crop block id 141（age 由 metadata 分，统一取成熟态 id）
+    /* potato_crop    */ 142, // t407 马铃薯作物 → MC 1.0 potato crop block id 142
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -354,6 +369,8 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == Mushroom) return true; // t396 段外 cross（蘑菇，同 Sapling 模式）
     if (blockId == LilyPad) return true;  // t396 cross 路由的横向浮叶（几何水平非竖直 cross，但同走 PASS 1 alphaCutoff 路径，见头注释）
     if (blockId == Sugarcane) return true; // t397 段外 cross（甘蔗细茎，同 Sapling 模式）
+    if (blockId == CarrotCrop) return true; // t407 段外 cross（胡萝卜作物，同小麦作物按 state 选阶段贴图）
+    if (blockId == PotatoCrop) return true; // t407 段外 cross（马铃薯作物，同小麦作物按 state 选阶段贴图）
     if (blockId >= FirstFlower && blockId <= LastFlower) return true; // t397 段外花段（4 色 cross）
     return blockId >= FirstCross && blockId <= LastCross;
 }
@@ -691,6 +708,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Mushroom: // t396 蘑菇 → 软草音色（软质真菌，同草丛；机制等价 MC mushroom SoundType = grass / stone 取软草近似）
     case FlowerRed: case FlowerYellow: case FlowerBlue: case FlowerWhite: // t397 4 色花 → 软草音色（软植物，同草丛；机制等价 MC 花 SoundType = grass）
     case Sugarcane: // t397 甘蔗 → 软草音色（细茎软植物，同草丛；机制等价 MC sugar cane SoundType = grass）
+    case CarrotCrop: // t407 胡萝卜作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）
+    case PotatoCrop: // t407 马铃薯作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）
         return GroupGrass;
     case Sand:
     case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）

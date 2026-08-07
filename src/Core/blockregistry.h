@@ -350,7 +350,23 @@ public:
         //   lightOpacity=0（玻璃透光——机制等价 MC 玻璃 lightOpacity 0；solid=false 已致全透，玻璃与其它 solid=false
         //   方块同）。进创造调色板经玻璃**物品**（0x204，creativeMaterials，MaterialIcon drawGlass 图标），非方块段。
         Glass          = 54, // 玻璃：沙子冶炼产物方块；透明整立方（solid=false + glassOnly 段半透渲染）。
-        Count         = 55, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t407 胡萝卜/马铃薯作物（crop）：机制等价 MC 1.0 carrot/potato 作物。**cross 形广告牌方块**（与 WheatCrop
+        //   同走 PartialBlockGeometry 的 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。
+        //   MC 1.0 carrot/potato 作物与小麦同走「8 生长年龄、age 7 成熟」机制，故**复用 WheatCropStageMax=7** 作共享
+        //   阶段上界（state = 阶段 0..7；7 = 成熟可收割，机制等价 MC age 0..7）。世界由 World::tickCropGrowth 推进成长
+        //   （同小麦：据光强 + 耕地支撑 + 湿润 + 确定性散布概率逐窗升阶段）。**种植**：手持胡萝卜/马铃薯物品
+        //   （RecipeRegistry::CarrotId/PotatoId，t400 已注册作猪繁殖食物）右键耕地 → 在其上方一格种下本作物方块
+        //   （playercontroller useBlock 分支，同种子种小麦模式）。**收割**：破成熟作物掉 1-4 个对应物品（MC 1.0 成熟
+        //   作物掉 1-4，机制对齐；未成熟掉 1 个）。solid=false（非实体 → 不挡邻居面剔除，同 torch / 草丛 / 小麦）、
+        //   shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC 作物可踩过）、hardness=0（瞬破，同小麦）、NoTool（空手
+        //   可采且掉落）、dropCount=1、maxStack=64。音色归 GroupGrass（软草音，同小麦作物）。**作物方块不进创造调色板**
+        //   （同树苗：由对应物品种植获得，创造调色板取物品即可，t400 已补 creativeMaterials）。
+        //   各面贴图=carrot_crop_0..3(69..72) / potato_crop_0..3(73..76)（MC 1.0 carrot/potato 4 张阶段贴图，每张覆盖
+        //   2 个年龄：age 0-1→tex0、2-3→tex1、4-5→tex2、6-7→tex3；mesher 在 cross 几何段据 state 选 tile = 基底 + state/2，
+        //   区别于小麦的基底 + state 全 8 阶段贴图）。方块 def topTile/sideTile 存基底阶段 0 tile（69/73），几何段算实际。
+        CarrotCrop     = 55, // 胡萝卜作物：cross 形作物方块（机制等价 MC 1.0 carrot crop）；dropId=CarrotId(0x22F)
+        PotatoCrop     = 56, // 马铃薯作物：cross 形作物方块（机制等价 MC 1.0 potato crop）；dropId=PotatoId(0x230)
+        Count          = 57, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -396,8 +412,9 @@ public:
     //   + 段外 DeadBush(43)（t394）+ 段外 Mushroom(48)（t396）+ 段外 LilyPad(47)（t396：横向浮叶，几何为水平
     //   quad 非竖直 cross，但同走本路由 + alphaCutoff cutout 路径 —— PartialBlockGeometry::append 的 LilyPad
     //   case 内画水平 quad）+ 段外花段 [FirstFlower, LastFlower]（t397：4 色 cross）+ 段外 Sugarcane(53)（t397：
-    //   细茎 cross，1..3 高叠柱）。mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律读本谓词，
-    //   不各持区间判定（PLAN §2：单一权威，避免「mesher 路由到 cross 但选中框仍按区间漏某方块」撕裂）。
+    //   细茎 cross，1..3 高叠柱）+ 段外 CarrotCrop(55)/PotatoCrop(56)（t407：作物 cross，同小麦作物按 state 选阶段贴图）。
+    //   mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律读本谓词，不各持区间判定
+    //   （PLAN §2：单一权威，避免「mesher 路由到 cross 但选中框仍按区间漏某方块」撕裂）。
     static bool isCrossBillboard(quint8 blockId);
 
     // t236 小麦作物生长阶段：state = 阶段 0..7（0=刚种嫩芽、7=成熟）。mesher（PartialBlockGeometry::append 的
@@ -407,6 +424,9 @@ public:
     //   选择）+ world tickCropGrowth（成长上界判定）+ t237 收割（state==max 判成熟掉小麦）。mesher / collisionAABBs /
     //   selectionAABBs 不读 wheat state（wheat 走 ShapeNone + cross 几何，state inert 于碰撞/选中）→ 复用 state 作
     //   阶段编码零回归（同 PlanksFromDoubleSlabBit / Farmland state 复用 state 作 marker 的模式）。
+    // t407：本常量同时是**胡萝卜/马铃薯作物的共享阶段上界**（CarrotCrop/PotatoCrop 与小麦同走 MC 1.0「8 年龄、
+    //   age 7 成熟」机制，state 编码与判定完全同小麦）。tickCropGrowth / 收割 / 几何阶段贴图选择对三种作物统一读
+    //   本常量（不另立 CropStageMax，避免三处常量漂移；改名 WheatCropStageMax 会触动多文件故保留原名 + 本注释）。
     static constexpr quint8 WheatCropStageMax = 7;
 
     // t310 草变种（矮/中/高）state 编码：mesher（PartialBlockGeometry::append 的 TallGrass case）据 state 选
@@ -641,6 +661,11 @@ public:
     //   67=sugarcane（t397 甘蔗 cross 贴图；透明底 + 绿色节段细茎 + 顶部尖叶，alphaCutoff cutout；
     //      Sugarcane 各面=本 tile，mesher 走 cross 几何段；tools/build_sugarcane.py 程序生成原创像素图）。
     //   68=glass（t405 玻璃各面贴图；近白青底 + 暗边框 + 对角高光斜线；Glass 各面=本 tile，mesher 走 glassOnly
+    //   69..72=carrot_crop_0..3（t407 胡萝卜作物 4 阶段贴图；cross 几何段，alpha 透明底 cutout。MC 1.0 carrot 4 张
+    //      阶段贴图，每张覆盖 2 个年龄；mesher 在 PartialBlockGeometry::append 的 CarrotCrop case 内据 state 选
+    //      tile = 69 + state/2。CarrotCrop 方块 def 各面=69（基底阶段 0））。
+    //   73..76=potato_crop_0..3（t407 马铃薯作物 4 阶段贴图；同 carrot_crop 4 阶段机制；PotatoCrop def 各面=73；
+    //      mesher 在 PotatoCrop case 内选 tile = 73 + state/2）。
     //      半透段；纹理不透明，半透由材质 opacity 实现，同 water 模式；tools/build_glass.py 程序生成原创像素图）。
     // 图集由 tools/build_atlas.py 打包全部 69 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
@@ -655,7 +680,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 69;
+    static constexpr int AtlasTileCount = 77;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
