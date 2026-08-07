@@ -1851,6 +1851,41 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // 火伤可能本帧致死（damageEntity 置 dead）→ 本帧不再走 AI / 重力（同上方 dead 分支语义，防死尸位移）。
             if (e.dead) continue;
 
+            // t394 仙人掌接触伤害（spec「contact damages entities that touch it」；机制等价 MC 1.0 仙人掌触碰即伤）。
+            //   接触判定：mob 脚位 / 身体格（floor(pos±halfH)）及其水平 4 邻 + 脚下格，任一 == Cactus 即接触
+            //   （覆盖「撞其侧」+「站其顶」；Cactus 是实体整立方 → mob 碰撞停在邻格，故脚 / 身体格本身恒非 Cactus，
+            //   须查邻接格 / 脚下格）。每 kCactusDamageInterval(0.5s) 扣 1HP（复用 damageEntity 受击链：扣血 + 红闪 +
+            //   归零 mobDied 死亡掉落）。离开即重置累积器（机制等价 MC：接触才扣，离开即停）。只读 World::blockAt
+            //   （向下依赖）。
+            {
+                const int fx = qFloor(e.pos.x());
+                const int fz = qFloor(e.pos.z());
+                const int footY = qFloor(e.pos.y() - e.halfH); // 脚位（AABB 底面）格
+                const int bodyY = qFloor(e.pos.y());           // 身体中心格
+                auto cactusCell = [&](int xx, int yy, int zz) -> bool {
+                    return yy >= 0 && yy < world->height()
+                           && world->blockAt(xx, yy, zz) == BlockRegistry::Cactus;
+                };
+                bool touch = false;
+                for (int yy : {footY, bodyY}) {
+                    if (cactusCell(fx,     yy, fz) || cactusCell(fx + 1, yy, fz)
+                        || cactusCell(fx - 1, yy, fz) || cactusCell(fx, yy, fz + 1)
+                        || cactusCell(fx, yy, fz - 1)) { touch = true; break; }
+                }
+                if (!touch && cactusCell(fx, footY - 1, fz)) touch = true; // 站在仙人掌顶
+                if (touch) {
+                    e.cactusDamageTimer += float(dt);
+                    if (e.cactusDamageTimer >= kCactusDamageInterval) {
+                        e.cactusDamageTimer = 0.0f;
+                        if (!e.dead) { damageEntity(idx, 1); dirty = true; } // 仙人掌扎伤 1HP（复用受击链）
+                    }
+                } else {
+                    e.cactusDamageTimer = 0.0f; // 离开即重置
+                }
+            }
+            // 仙人掌扎伤可能本帧致死 → 本帧不再走 AI / 重力（同上方 dead 分支语义，防死尸位移）。
+            if (e.dead) continue;
+
             // t239 AI wander 自主移动（水平）：随机选向 + 时间片 + 逐轴 AABB 碰撞。位移 → dirty（驱动 QML 位置绑定）。
             // t241 羊吃草门控：eatTimer>0（吃草周期内）→ 跳过 wander + 强制 idle 站立（腿停 + 头俯仰），仅推进
             //   吃草周期；否则走 AI wander，并据 idle + 扫描冷却决定是否开吃草周期。

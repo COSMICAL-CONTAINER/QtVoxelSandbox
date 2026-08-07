@@ -57,7 +57,7 @@ public:
     //   Generic=未归类（默认 / takeDamage 单参兜底）；Fall=高处坠落；Suffocation=嵌实体方块窒息；
     //   Drowning=气泡归零溺水；Starvation=饥饿归零饿死；Shambler/Bones/Spider/Stalker=被对应敌对生物击败；
     //   Fire=燃烧致死（t344：触碰岩浆 / 火点燃后火伤扣血到 0）。
-    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire };
+    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus };
     Q_ENUM(DeathCause)
 
     explicit PlayerState(QObject *parent = nullptr);

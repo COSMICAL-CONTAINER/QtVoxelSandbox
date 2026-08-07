@@ -32,6 +32,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Chest:         return "icon_chest.png";          // t173 箱子立方体图标（顶盖缝+侧铁箍）
     case BlockRegistry::Farmland:      return "icon_farmland.png";       // t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
     case BlockRegistry::Wool:          return "icon_wool.png";           // t300 羊毛立方体图标（奶白绒毛）
+    case BlockRegistry::Sandstone:     return "icon_sandstone.png";      // t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带）
+    case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     // t387 床方块 8 色变体立方体图标（彩色被面 + 枕垫亮带 + 绗缝针脚；build_cube_icons.py 程序生成）。
     case BlockRegistry::BedRed:        return "icon_bed_red.png";        // 红床（配方产物默认色）
     case BlockRegistry::BedOrange:     return "icon_bed_orange.png";     // 橙床
@@ -46,6 +48,7 @@ const char *iconFileForBlock(quint8 id)
     //   贴图保留 alpha → 「纯草叶 / 麦穗无方块底」。小麦作物图标取成熟阶段 7（金黄麦穗），肉眼一眼可辨。
     case BlockRegistry::TallGrass:     return "icon_tall_grass.png";     // t235 草丛（cross 透明底；绿草叶）
     case BlockRegistry::WheatCrop:     return "icon_wheat_crop.png";     // t236 小麦作物（cross 透明底；取成熟阶段 7 麦穗）
+    case BlockRegistry::DeadBush:      return "icon_dead_bush.png";      // t394 枯死的灌木（cross 透明底；棕褐干枝；沙漠装饰）
     // t145/t163(d) 不完整方块图标：6 类木制半方块各走自己的区分图标（tools/build_cube_icons.py 程序生成）。
     //   t163(d) slab/stairs/trapdoor/pressure_plate 升级为 **3D dimetric 立体图标**（render_partial_3d 按
     //   实际形状投影：slab 半高 / stairs L 阶 / trapdoor 薄板 / pressure_plate 更薄更小，顶 + 两侧明暗同
@@ -363,6 +366,11 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::TallGrass),                                     // 草丛（worldgen 散布 / 杀草掉种子）
              int(BlockRegistry::WheatCrop),                                    // 小麦作物（state=阶段；种 0..7，图标显成熟态）
              int(BlockRegistry::Wool),                                        // t300 羊毛方块（剪羊毛 / 杀羊掉落；可放置）
+             // t394 沙漠群系内容：砂岩（沙下成岩）/ 仙人掌（接触伤害）/ 枯死的灌木（cross 装饰）。机制等价 MC 1.0
+             //   沙漠三件套（sandstone / cactus / dead bush），名称 / 贴图原创自绘 §9a。
+             int(BlockRegistry::Sandstone),                                   // 砂岩（沙下成岩；需镐采掘；可放置）
+             int(BlockRegistry::Cactus),                                      // 仙人掌（接触伤害；放沙/仙人掌上）
+             int(BlockRegistry::DeadBush),                                    // 枯死的灌木（cross 装饰；放沙上）
              // t387 床方块 8 色变体（简化单格整立方；机制等价 MC 1.0 床。配方 planks+wool → 红床；其余色创造直接取用）。
              int(BlockRegistry::BedRed),    int(BlockRegistry::BedOrange),
              int(BlockRegistry::BedYellow), int(BlockRegistry::BedGreen),

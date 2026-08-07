@@ -125,6 +125,13 @@ TILES = [
                                     #    玩家在范围内时周期性刷一只敌对 mob，破坏后停止；机制等价 MC 1.0 刷怪笼，
                                     #    名称/贴图原创自绘 §9a；各面同贴图=暗蓝灰底+铁灰栅栏+中心青绿光斑；
                                     #    tools/build_spawner.py 程序生成原创像素图）
+    # t394 沙漠群系内容：砂岩（沙下成岩）/ 仙人掌（接触伤害）/ 枯死的灌木（cross 装饰）。机制等价 MC 1.0
+    #   沙漠三件套（sandstone / cactus / dead bush），名称/贴图原创自绘 §9a；各由独立 build_*.py 程序生成。
+    "default_sandstone_top",        # 52 sandstone_top（砂岩顶面；压实沙面 + 细密噪点 + 暗框）
+    "default_sandstone_side",       # 53 sandstone_side（砂岩侧面/底面；暖沙底 + 横向层理带）
+    "default_cactus_top",           # 54 cactus_top（仙人掌顶面/底面；绿截面 + 同心方框环纹 + 中央凹陷）
+    "default_cactus_side",          # 55 cactus_side（仙人掌侧面；深绿底 + 4 垂直棱脊亮带 + 棱上刺点）
+    "default_dead_bush",            # 56 dead_bush（枯死的灌木 cross 贴图；透明底 + 棕褐放射干枝；alphaCutoff cutout）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

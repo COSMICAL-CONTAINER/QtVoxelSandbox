@@ -1305,8 +1305,13 @@ void World::generate()
             const bool inSeaHeight = (seaH >= 0);                       // 沙海盘 + 过渡带（高度重塑）
             const bool inSandSea = inSeaHeight && isSeaSandColumn(x, z); // 仅沙海盘（沙表层 / 灌水）
             const int h = inSeaHeight ? seaH : std::min(heightAt(x, z), m_height - 1);
-            // t255：沙漠表层沙厚度 4..6 格（hashColumn 低 2 位派生，PLAN §2-K 确定性；非沙漠列置 0 不用）。
-            const int desertSandThickness = desert ? (4 + int(hashColumn(m_seed, x, z) % 3u)) : 0;
+            // t255/t394：沙漠列确定性哈希（PLAN §2-K）—— 沙厚度 / 砂岩厚度各取不同位段派生（解耦）。
+            //   非沙漠列置 0 不用（下方 thickness 判定跳过）。
+            const quint32 colHash = desert ? hashColumn(m_seed, x, z) : 0u;
+            // t255：沙漠表层沙厚度 4..6 格（colHash 低 2 位派生）。
+            const int desertSandThickness = desert ? (4 + int(colHash % 3u)) : 0;
+            // t394：沙下砂岩层厚度 3..5 格（colHash bit[9:8] 派生；沙下成岩，机制等价 MC 沙漠沙下砂岩）。
+            const int desertSandstoneThickness = desert ? (3 + int((colHash >> 8) % 3u)) : 0;
             if (desert) ++desertCols;
             else if (inSandSea) ++seaCols;
             // t306：森林地表仍为草（机制等价 MC 森林地表草地），仅树/草密度分化 → surface 填充无需分流 forest。
@@ -1322,8 +1327,12 @@ void World::generate()
                     else if (y >= h - 2) b = BlockRegistry::Dirt;  // 表层下土
                     else                 b = BlockRegistry::Stone; // 深石
                 } else if (desert) {
-                    // t255：仅表层 desertSandThickness 格沙（h-y < thickness），下接 Stone（修旧整柱沙贯穿基岩 bug）。
-                    b = (h - y < desertSandThickness) ? BlockRegistry::Sand : BlockRegistry::Stone;
+                    // t255/t394：表层 desertSandThickness 格沙（h-y < thickness）下接 Sandstone 层（h-y <
+                    //   thickness+sandstoneThickness）再下接 Stone（修旧整柱沙贯穿基岩 bug）。机制等价 MC 1.0
+                    //   沙漠沙下砂岩层（沙压成岩）。沙 / 砂岩厚度均 colHash 不同位段派生 → 确定性（PLAN §2-K）。
+                    if (h - y < desertSandThickness)                       b = BlockRegistry::Sand;      // 表层沙
+                    else if (h - y < desertSandThickness + desertSandstoneThickness) b = BlockRegistry::Sandstone; // 沙下砂岩
+                    else                                                b = BlockRegistry::Stone;      // 深石
                 } else {
                     if (y == h)          b = BlockRegistry::Grass; // 草地表层
                     else if (y >= h - 2) b = BlockRegistry::Dirt;  // 土
@@ -1354,6 +1363,7 @@ void World::generate()
     placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
     placeTallGrass(); // t235：grass 表层上方确定性散布草丛（PLAN §2-K；树定型后，仅写空气格不覆盖树）
+    placeDesertFlora(); // t394：沙漠沙顶确定性散布仙人掌（1-3 格高柱）+ 枯死的灌木（PLAN §2-K；草丛后，仅写空气格）
     recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
     // t380：worldgen 末置流体脏 → 进世界后首次 tickWaterFlow/tickLavaFlow 各扫一次确认稳态（海洋 / 岩浆湖
     //   全源 → 零候选 → 即清标志停扫）。一次性确认扫描（防御：避免标志初始 false 漏掉 worldgen 引入的流场）。
@@ -1596,6 +1606,53 @@ void World::placeTallGrass()
     qInfo() << "worldgen: tall grass placed =" << placed
             << "(plains" << plainsCols << "/ forest" << forestCols
             << "/ hills" << hillsCols << ")"; // 同 seed → 同计数（确定性核对）
+}
+
+// t394 沙漠植被散布（机制等价 MC 1.0 沙漠仙人掌 + 枯灌木点缀）：遍历 desert 沙顶列，按 hashColumn 密度筛选
+//   在沙顶上方一格（surfaceY+1）置仙人掌柱（1-3 格高，仅写空气格）或枯死的灌木（cross 广告牌，仅写空气格）。
+//   纯函数于 seed + biomeAt（经 hashColumn，PLAN §2-K）→ 同 seed 同分布；禁用任何运行期随机源。
+//   仅写空气格（setVoxelIfAir）→ 不覆盖沙上已生成的方块 / 树 / 草丛（与 placeTrees/placeTallGrass 同守卫语义；
+//   事实上 desert 列 placeTrees/placeTallGrass 已跳过，此处仅与沙海 / 洞口空气守卫配合）。
+//   密度：仙人掌稀疏（~3% 沙漠列）、枯灌木适中（~6%）—— 沙漠少植被但仍有点缀，机制等价 MC 沙漠稀疏植被。
+void World::placeDesertFlora()
+{
+    constexpr unsigned kCactusPct   = 3;  // 仙人掌密度（% of 沙漠沙顶列；稀疏点缀）
+    constexpr unsigned kDeadBushPct = 6;  // 枯死的灌木密度（% of 沙漠沙顶列；适中点缀）
+    int cactusPlaced = 0, deadBushPlaced = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            if (biomeAt(x, z) != Biome::Desert) continue; // 仅沙漠群系
+            const int surfaceY = heightAt(x, z);
+            // 与 placeTrees / placeTallGrass 同阈值：沙滩带(wl±1)/水下(h<wl)不生（机制等价 MC 沙漠植被不生于沙滩/水下）。
+            if (surfaceY <= kWaterLevel + 1) continue;
+            // 仅沙顶列生（机制等价 MC 仙人掌 / 枯灌木生于沙；沙海盘 / 洞口顶替换了沙 → 跳过）。
+            if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::Sand) continue;
+
+            const quint32 r = hashColumn(m_seed, x, z);
+            const unsigned cr = r % 100u; // 密度位段
+            if (cr < kCactusPct) {
+                // 仙人掌柱：高度 1..3（独立位段 (r>>16)%3 + 1，与密度位段解耦）。逐格向上仅写空气格
+                //   （不穿透树叶 / 实块；遇非空气即止）。机制等价 MC 仙人掌可叠高。
+                const int height = 1 + int((r >> 16) % 3u);
+                for (int i = 0; i < height; ++i) {
+                    const int y = surfaceY + 1 + i;
+                    if (y >= m_height) break;
+                    if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) break; // 遇实块即止（不覆盖）
+                    setVoxelIfAir(x, y, z, BlockRegistry::Cactus, 0);
+                    ++cactusPlaced;
+                }
+            } else if (cr < kCactusPct + kDeadBushPct) {
+                // 枯死的灌木（cross 广告牌）：沙顶上方一格（surfaceY+1），须空气（不覆盖）。
+                const int y = surfaceY + 1;
+                if (y < m_height && m_chunks.blockAt(x, y, z) == BlockRegistry::Air) {
+                    setVoxelIfAir(x, y, z, BlockRegistry::DeadBush, 0);
+                    ++deadBushPlaced;
+                }
+            }
+        }
+    }
+    qInfo() << "worldgen: desert flora placed cactus =" << cactusPlaced
+            << "dead_bush =" << deadBushPlaced; // 同 seed → 同计数（确定性核对）
 }
 
 // t119 底层基岩：遍历列，在 y 0..4 铺一层 Bedrock（不可破坏方块，hardness=-1.0 → canMine=false）。

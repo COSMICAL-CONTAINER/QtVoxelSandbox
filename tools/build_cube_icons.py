@@ -57,6 +57,9 @@ BLOCKS = [
     ("torch",           "default_torch", "default_torch"),  # t88 火把（透明底+木柄+火焰；走平面 2D 分支非立方体投影）
     ("chest",           "default_chest_top", "default_chest_side"),  # t173 箱子（顶=盖缝+铰链；侧=铁箍带；图标显顶+侧）
     ("farmland",        "default_farmland_dry", "default_dirt"),  # t234 耕地（顶=干态翻耕土；侧=泥土；图标显顶+侧）
+    # t394 沙漠群系内容：砂岩（沙下成岩整立方）/ 仙人掌（接触伤害整立方）立方体图标（顶+两侧明暗）。
+    ("sandstone",       "default_sandstone_top", "default_sandstone_side"),  # t394 砂岩（顶=压实沙面；侧=层理带）
+    ("cactus",          "default_cactus_top",    "default_cactus_side"),     # t394 仙人掌（顶=绿截面环纹；侧=棱脊+刺点）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----
@@ -170,6 +173,7 @@ def render_flat_2d(name):
 FLAT_2D_CROSS = [
     ("tall_grass", "default_tall_grass"),     # t235 草丛 cross（透明底 + 绿草叶；走 render_flat_2d）
     ("wheat_crop", "default_wheat_stage_7"),  # t236 小麦作物 cross（取成熟阶段 7 麦穗金黄作图标）
+    ("dead_bush",  "default_dead_bush"),      # t394 枯死的灌木 cross（透明底 + 棕褐干枝；沙漠装饰）
 ]
 
 PARTIALS_3D = [

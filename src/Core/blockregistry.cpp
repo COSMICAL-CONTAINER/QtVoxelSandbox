@@ -172,6 +172,28 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   + 铁灰栅栏 + 中心青绿光斑，原创自绘 §9a）。音色归 GroupStone（铁笼金属敲击）。worldgen placeDungeons 在地下地牢
     //   中央放置；玩家可破坏以停止刷怪（EntityManager::tickSpawners 扫到该格 blockAt != Spawner 即跳过）。不进创造调色板。
     /* spawner      */ {int(BlockRegistry::Spawner),                    51, 51, 51, 51, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,                             0, 0, 64, "spawner",      "刷怪笼"},
+    // ── t394 沙漠群系内容（机制等价 MC 1.0 沙漠三件套：sandstone / cactus / dead bush；名称 / 贴图全原创自绘 §9a）：
+    //   砂岩（Sandstone）：沙下成岩整立方。solid=true / ShapeFull（走 mesher 整立方面路径，**非**异形，与 chest/wool
+    //   同族）、hardness=0.8（同 MC 1.0 砂岩量级）、toolType=Pickaxe、requiresTool=true、minToolTier=1（木镐可破，同
+    //   cobble/stone 门槛）、dropId=自身（破砂岩掉砂岩方块，可放置）、dropCount=1、maxStack=64。各面贴图：顶=
+    //   sandstone_top(52)（压实沙面 + 细密噪点 + 暗框）/ 底·侧=sandstone_side(53)（暖沙底 + 横向层理带）。音色归
+    //   GroupStone（石质）。worldgen 在 desert 沙表层下铺砂岩（区别于直接下接 Stone）；进创造调色板（玩家可取用）。
+    /* sandstone    */ {int(BlockRegistry::Sandstone),                  52, 53, 53, 53, true,  BlockRegistry::ShapeFull,     0.8f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Sandstone),     1, 64, "sandstone",    "砂岩"},
+    //   仙人掌（Cactus）：沙漠标志性植物方块（接触伤害实体）。solid=true / ShapeFull（整立方实体碰撞 → mob/玩家撞其侧
+    //   或站其上即「接触」，接触伤害由 EntityManager/PlayerController 环境 tick 处理）、hardness=0.4（同 MC 1.0 仙人掌
+    //   量级，软质）、toolType=NoTool（空手即采且掉落，机制等价 MC 仙人掌无工具要求）、requiresTool=false、dropId=
+    //   自身（破仙人掌掉仙人掌方块，可放回）、dropCount=1、maxStack=64。各面贴图：顶·底=cactus_top(54)（绿截面 +
+    //   同心方框环纹）/ 侧=cactus_side(55)（深绿底 + 4 垂直棱脊 + 棱上刺点）。音色归 GroupGrass（植物，软质）。
+    //   worldgen 在 desert 沙顶散布 1-3 格高柱；放置预检（placeBlock）须 Sand/Cactus 在下方。进创造调色板。
+    /* cactus       */ {int(BlockRegistry::Cactus),                     54, 54, 55, 55, true,  BlockRegistry::ShapeFull,     0.4f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Cactus),         1, 64, "cactus",       "仙人掌"},
+    //   枯死的灌木（DeadBush）：沙漠干旱地表枯枝装饰。cross 形广告牌方块（与 TallGrass/Sapling 同走 cross 几何段，两片
+    //   对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。solid=false（非实体 → 不挡邻居面剔除，同 torch/
+    //   草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过）、hardness=0（瞬破）、NoTool（空手可采）、dropId=0（破枯灌木
+    //   无掉落，机制等价 MC 空手破 dead bush 无产物；创造调色板取用即得）、dropCount=0、maxStack=64。各面贴图=
+    //   dead_bush(56)（透明底 + 棕褐放射干枝；alphaCutoff cutout）。音色归 GroupGrass（软草音）。worldgen 在 desert
+    //   沙顶低密度散布；放置预检须 Sand 在下方。**段外 cross**（id 43 不在 [FirstCross,LastCross] 连续段内）→ 并入
+    //   isCrossBillboard 谓词（同 Sapling 模式），mesher 路由一律读谓词。进创造调色板（装饰取用）。
+    /* dead_bush    */ {int(BlockRegistry::DeadBush),                   56, 56, 56, 56, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "dead_bush",    "枯死的灌木"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -214,6 +236,9 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* bed_red        */ 26,  /* bed_orange     */ 26,  /* bed_yellow     */ 26,  /* bed_green      */ 26, // t387 床 8 色变体 → MC 1.0 床 id 26（统一；MC 1.0 床颜色由 metadata 分，本工程用独立 id）
     /* bed_cyan       */ 26,  /* bed_blue       */ 26,  /* bed_magenta    */ 26,  /* bed_black      */ 26,
     /* spawner        */ 52, // t392 刷怪笼 → MC 1.0 mob spawner id 52
+    /* sandstone      */ 24, // t394 砂岩 → MC 1.0 sandstone id 24
+    /* cactus         */ 81, // t394 仙人掌 → MC 1.0 cactus id 81
+    /* dead_bush      */ 32, // t394 枯死的灌木 → MC 1.0 dead bush id 32
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -239,12 +264,13 @@ int BlockRegistry::tileIndex(quint8 blockId, Face face)
 bool BlockRegistry::isSolid(quint8 blockId)      { return def(blockId).solid; }
 BlockRegistry::Shape BlockRegistry::shape(quint8 blockId) { return def(blockId).shape; }
 
-// t305 cross 广告牌方块统一谓词（单一权威）：连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)。
-//   Sapling id（28）不在连续 cross 段内（DiamondOre=26 / Wool=27 夹在中间且非 cross）→ 显式并入。
+// t305 cross 广告牌方块统一谓词（单一权威）：连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)
+//   + 段外 DeadBush(43)（t394）。Sapling / DeadBush id 不在连续 cross 段内（多方块夹中间且非 cross）→ 显式并入。
 //   mesher / 选中框路由一律读本谓词（避免各持区间判定漂移，见头注释）。
 bool BlockRegistry::isCrossBillboard(quint8 blockId)
 {
     if (blockId == Sapling) return true;
+    if (blockId == DeadBush) return true; // t394 段外 cross（枯死的灌木，同 Sapling 模式）
     return blockId >= FirstCross && blockId <= LastCross;
 }
 
@@ -548,6 +574,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Stone: case Cobble: case Furnace: case CoalOre: case IronOre: case DiamondOre:
     case CopperOre: case GoldOre: // t308 铜/金矿石 → 石质音色（同 coal/iron/diamond 矿石族）
     case Spawner: // t392 刷怪笼 → 石质音色（铁笼金属敲击感，最接近 MC 1.0 刷怪笼 metal SoundType）
+    case Sandstone: // t394 砂岩 → 石质音色（成岩，同 cobble/stone 族）
         return GroupStone;
     case Log: case Planks: case CraftingTable:
     case WoodSlab: case WoodStairs: case WoodFence:
@@ -562,6 +589,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case TallGrass: // t235 草丛 → 软草音色（同 grass；机制等价 MC 草丛 SoundType = grass）
     case WheatCrop: // t236 小麦作物 → 软草音色（同草丛；机制等价 MC 作物 SoundType = grass）
     case Sapling: // t305 树苗 → 软草音色（同草丛 / 作物；机制等价 MC 树苗 SoundType = grass）
+    case Cactus: // t394 仙人掌 → 软草音色（植物，软质多肉；机制等价 MC 仙人掌 SoundType = cloth，本工程取软草近似）
+    case DeadBush: // t394 枯死的灌木 → 软草音色（枯枝软质，同草丛；机制等价 MC dead bush SoundType = grass）
         return GroupGrass;
     case Sand:
         return GroupSand;

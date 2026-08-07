@@ -24,6 +24,7 @@
 //   27=wool（t300 羊毛方块）。28=sapling（t305 树苗；cross 广告牌方块，种在草地/泥土上随时间生长成橡树）。
 //   29=copper_ore（t308 铜矿石；散布于 stone 浅中层 y∈[5,45]，需石镐采掘；掉铜原矿→熔炉烧铜锭）。
 //   30=gold_ore（t308 金矿石；散布于 stone 深层 y∈[5,25]，需铁镐采掘；掉金原矿→熔炉烧金锭）。
+//   41=sandstone / 42=cactus / 43=dead_bush（t394 沙漠三件套：砂岩沙下成岩 / 仙人掌接触伤害 / 枯灌木装饰）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -234,7 +235,39 @@ public:
                                   //   spawn 1 只敌对 mob（Shambler / Bones 等概率，机制等价 MC 1.0 刷怪笼周期刷怪 +
                                   //   玩家近才刷 + 数量上限）。玩家不在范围 / 笼被破 → 不刷（spec「player near 才刷」、
                                   //   「broken → stop」）。
-        Count         = 41, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t394 沙漠群系内容（机制等价 MC 1.0 沙漠三件套：sandstone / cactus / dead bush；名称 / 贴图全原创自绘 §9a）：
+        Sandstone      = 41, // 砂岩：沙漠沙表层下的成岩石质层（worldgen 在 desert 沙下铺砂岩，区别于直接下接 Stone）。
+                                  //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 chest /
+                                  //   wool 同族）、hardness=0.8（同 MC 1.0 砂岩量级，需镐且耗时；同 cobble/stone 族）、
+                                  //   toolType=Pickaxe、requiresTool=true、minToolTier=1（木镐可破，同 cobble/stone 门槛）、
+                                  //   dropId=自身（破砂岩掉砂岩方块，可放置）、dropCount=1、maxStack=64。各面贴图：顶=
+                                  //   sandstone_top(52) / 侧·底=sandstone_side(53)（暖沙色 + 横向层理带，原创自绘 §9a）。
+                                  //   音色归 GroupStone（石质，同 cobble/stone）。进创造调色板（玩家可取用 / 放置）。
+        Cactus         = 42, // 仙人掌：沙漠标志性植物方块（worldgen 在 desert 沙顶散布 1-3 格高柱；玩家可放置在沙 / 仙人掌
+                                  //   上）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形；
+                                  //   实体碰撞 → mob/玩家撞其侧或站其上即「接触」）、hardness=0.4（同 MC 1.0 仙人掌量级，软质）、
+                                  //   toolType=NoTool（空手即采且掉落，机制等价 MC 仙人掌无工具要求）、requiresTool=false、
+                                  //   dropId=自身（破仙人掌掉仙人掌方块，可放回）、dropCount=1、maxStack=64。各面贴图：顶·底=
+                                  //   cactus_top(54)（绿截面 + 同心方框环纹）/ 侧=cactus_side(55)（深绿底 + 4 垂直棱脊 + 棱上刺点，
+                                  //   原创自绘 §9a）。音色归 GroupGrass（植物，软质）。**接触伤害**（spec「contact damages
+                                  //   entities that touch it」）：EntityManager mob tick + PlayerController 环境 tick 检测实体
+                                  //   脚位/身体格及其水平 4 邻 + 脚下格任一 == Cactus 即「接触」→ 每 kCactusDamageInterval(0.5s) 扣
+                                  //   1HP（机制等价 MC 仙人掌触碰即伤）。**放置预检**（placeBlock）：目标格下方须为 Sand 或
+                                  //   Cactus（机制等价 MC 仙人掌须沙地 / 仙人掌支撑），否则拒放。进创造调色板。
+        DeadBush       = 43, // 枯死的灌木：沙漠干旱地表的枯枝装饰（worldgen 在 desert 沙顶低密度散布）。**cross 形广告牌
+                                  //   方块**（与 TallGrass / Sapling 同走 PartialBlockGeometry 的 cross 几何段，两片对角相交
+                                  //   双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。机制等价 MC 1.0 dead bush（沙漠
+                                  //   枯灌木，纯装饰 / 空手破无产物）。solid=false（非实体 → 不挡邻居面剔除，同 torch / 草丛）、
+                                  //   shape=ShapeNone（**无碰撞** → 玩家穿过，同草丛）、hardness=0（瞬破）、NoTool（空手可采）、
+                                  //   dropId=0（破枯灌木无掉落 —— 机制等价 MC 空手破 dead bush 无产物；本工程无剪刀剪取，故
+                                  //   恒无掉落，创造调色板取用即得）、dropCount=0、maxStack=64。各面贴图=dead_bush(56)
+                                  //   （透明底 + 棕褐放射干枝，原创自绘 §9a；mesher 走 cross 几何段 + alphaCutoff cutout）。
+                                  //   音色归 GroupGrass（软草音，同草丛）。**放置预检**（placeBlock）：目标格下方须为 Sand
+                                  //   （机制等价 MC 枯灌木生于沙地），否则拒放。进创造调色板（装饰取用）。
+                                  //   **段外 cross**：DeadBush id(43) 不在 [FirstCross,LastCross]=[24,25] 连续段内（多方块夹
+                                  //   中间且非 cross），故并入 isCrossBillboard 谓词（同 Sapling 模式 —— 单一权威，避免 mesher /
+                                  //   选中框多处分流漂移），mesher 路由一律读谓词。
+        Count         = 44, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -268,9 +301,9 @@ public:
     static constexpr int LastCross  = WheatCrop; // 25（cross 段上界；新增连续 cross 方块追加时同步右移）
 
     // t305 cross 广告牌方块统一谓词（单一权威）：true 表示该方块走 PartialBlockGeometry 的 cross 几何段
-    //   （两片对角相交双面 quad）。涵盖连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)。
-    //   mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律读本谓词，不各持区间判定
-    //   （PLAN §2：单一权威，避免「mesher 路由到 cross 但选中框仍按区间漏 Sapling」类撕裂）。
+    //   （两片对角相交双面 quad）。涵盖连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)
+    //   + 段外 DeadBush(43)（t394）。mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律
+    //   读本谓词，不各持区间判定（PLAN §2：单一权威，避免「mesher 路由到 cross 但选中框仍按区间漏某方块」撕裂）。
     static bool isCrossBillboard(quint8 blockId);
 
     // t236 小麦作物生长阶段：state = 阶段 0..7（0=刚种嫩芽、7=成熟）。mesher（PartialBlockGeometry::append 的
@@ -484,12 +517,18 @@ public:
     //      + 顶部枕垫亮带 + 绗缝针脚暗点 + 边缘暗化，原创自绘 §9a；tools/build_bed.py 程序生成。配方 planks+wool → 红床）。
     //   51=spawner（t392 刷怪笼；机制等价 MC 1.0 刷怪笼，名称/贴图原创自绘 §9a；各面同贴图=暗蓝灰底 + 铁灰栅栏
     //      + 中心青绿光斑；tools/build_spawner.py 程序生成）。
-    // 图集由 tools/build_atlas.py 打包全部 52 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   52=sandstone_top / 53=sandstone_side（t394 砂岩；沙下成岩整立方；顶=压实沙面 / 侧=层理带；
+    //      tools/build_sandstone.py 程序生成原创像素图）。
+    //   54=cactus_top / 55=cactus_side（t394 仙人掌；接触伤害整立方；顶=绿截面环纹 / 侧=棱脊+刺点；
+    //      tools/build_cactus.py 程序生成原创像素图）。
+    //   56=dead_bush（t394 枯死的灌木 cross 贴图；透明底 + 棕褐放射干枝；alphaCutoff cutout；
+    //      tools/build_dead_bush.py 程序生成原创像素图）。
+    // 图集由 tools/build_atlas.py 打包全部 57 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 52）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 57）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -497,7 +536,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 52;
+    static constexpr int AtlasTileCount = 57;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

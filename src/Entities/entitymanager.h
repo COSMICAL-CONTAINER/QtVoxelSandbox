@@ -448,6 +448,7 @@ private:
         float fireTimer       = 0.0f; // 火烧剩余秒数（>0 着火；岩浆 / 火点燃；每 tick 递减，归零熄灭）
         float fireDamageTimer = 0.0f; // 火伤累积（秒；fireTimer>0 时累加，每 kFireDamageInterval 扣 1HP + 掷随机熄灭）
         float suffocationTimer = 0.0f; // t254 窒息累积计时（头部嵌实体方块时累加，每 kSuffocationInterval 秒扣 1HP；机制同玩家 t160）
+        float cactusDamageTimer = 0.0f; // t394 仙人掌接触伤害累积（mob AABB 接触 Cactus 时累加，每 kCactusDamageInterval 扣 1HP；离开归零）
         // t281 敌对 AI 态（仅 hostile=true 的 Mob 用；passive / FallingBlock 留默认不触发）：
         //   detect→pathfind→attack 三段（spec t281「敌对生物基类（AI/寻路）」）。chasing 在 aiHostile 内据
         //   玩家距离（<=kDetectRange）翻 true 并刷新 chaseTimer；脱离后记忆期内仍追，过则回退到 wander。
@@ -746,6 +747,9 @@ public:
     static constexpr float kFireDuration        = 8.0f;  // 着火持续时间（秒；岩浆/火点燃后 fireTimer 初值）
     static constexpr float kFireDamageInterval  = 1.0f;  // 火伤扣血间隔（秒/HP）
     static constexpr float kFireExtinguishChance = 0.15f; // 每次火伤结算随机提前熄灭概率
+    // t394 仙人掌接触伤害扣血间隔（秒/HP；机制等价 MC 1.0 仙人掌触碰即伤，每 0.5s 扣 1HP = 2HP/s）。
+    //   玩家与 mob 共用本值（Game→Entities 向下依赖，玩家复用 EntityManager::kCactusDamageInterval，保一致手感）。
+    static constexpr float kCactusDamageInterval = 0.5f;
 private:
     // t281 敌对 AI 常量（spec「detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）+ attack」；
     //   机制对齐 MC 1.0 僵尸 / 骷髅近战 AI：detect→pathfind→attack；数值为本工程小世界量身调，非 MC 精确复刻 ——

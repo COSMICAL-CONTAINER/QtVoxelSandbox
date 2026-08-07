@@ -237,6 +237,11 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_bed_magenta.png
         textures/default_bed_black.png
         textures/default_spawner.png              # t392 刷怪笼贴图（build_spawner.py 程序生成原创像素图；暗蓝灰底+铁灰栅栏+中心青绿光斑）
+        textures/default_sandstone_top.png        # t394 砂岩顶面贴图（build_sandstone.py 程序生成；压实沙面+细密噪点+暗框）
+        textures/default_sandstone_side.png       # t394 砂岩侧面/底面贴图（build_sandstone.py；暖沙底+横向层理带）
+        textures/default_cactus_top.png           # t394 仙人掌顶面/底面贴图（build_cactus.py；绿截面+同心方框环纹+中央凹陷）
+        textures/default_cactus_side.png          # t394 仙人掌侧面贴图（build_cactus.py；深绿底+4 垂直棱脊+棱上刺点）
+        textures/default_dead_bush.png            # t394 枯死的灌木 cross 贴图（build_dead_bush.py；透明底+棕褐放射干枝；alphaCutoff cutout）
         textures/default_chest_top.png         # t173/t179 箱子各面贴图（build_chest.py 程序生成原创像素图）
         textures/default_chest_side.png
         textures/default_chest_front.png
@@ -289,6 +294,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_wood_pressure_plate.png
         textures/icon_tall_grass.png               # t244 草丛 cross 方块 flat 2D 图标（透明底 + 绿草叶）
         textures/icon_wheat_crop.png               # t244 小麦作物 cross 方块 flat 2D 图标（取成熟阶段 7 麦穗）
+        textures/icon_sandstone.png                # t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带；build_cube_icons.py）
+        textures/icon_cactus.png                   # t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点；build_cube_icons.py）
+        textures/icon_dead_bush.png                # t394 枯死的灌木 cross 方块 flat 2D 图标（透明底 + 棕褐干枝；build_cube_icons.py）
 )
 
 # t89 / t118 音效资源（tools/build_sounds.py 程序合成，§4 原创 SFX；零 MC 资产）。

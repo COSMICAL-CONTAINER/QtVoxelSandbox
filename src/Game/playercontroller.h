@@ -794,6 +794,9 @@ private:
     bool m_burning = false;
     float m_fireTimer = 0.0f;
     float m_fireDmgTimer = 0.0f;
+    // t394 仙人掌接触伤害累积（玩家 AABB 接触 Cactus 方块时累加，每 EntityManager::kCactusDamageInterval 扣 1HP；
+    //   离开即归零）。机制等价 MC 1.0 仙人掌触碰即伤。仅 Survival（Creative/Spectator 无敌不累）。
+    float m_cactusDmgTimer = 0.0f;
     // t388 睡觉 fade 态（夜间右键床 → fade → 跳清晨 + 设重生点）。m_sleeping=正在睡觉；m_sleepTimer 累积到
     //   kSleepDuration 即完成（跳清晨 + 设 spawn）；m_sleepBx/By/Bz=所睡床格（完成后据此设 m_spawnPos）。
     bool m_sleeping = false;
