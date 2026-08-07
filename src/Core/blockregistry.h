@@ -28,6 +28,8 @@
 //   44=snow_layer / 45=ice / 46=spruce_log（t395 雪原/针叶三件套：地表覆雪 / 水面冻结冰 / 云杉树主干）。
 //   47=lily_pad / 48=mushroom（t396 沼泽植物：水面浮叶 / 草地小蘑菇）。
 //   49..52=flower_red/yellow/blue/white / 53=sugarcane（t397 多群系装饰植物：4 色花 + 水边甘蔗）。
+//   54=glass（t405 玻璃：沙子冶炼产物方块；透明整立方——solid=false 透面剔除 + glassOnly 段半透渲染，
+//      机制等价 MC 1.0 玻璃 glass）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -328,7 +330,26 @@ public:
                                   //   GroupGrass（软植物音）。**放置预检**（placeBlock）：目标格下方须为 Grass / Dirt / Sand /
                                   //   Sugarcane（机制等价 MC 甘蔗须草地 / 沙地 / 甘蔗支撑，且须邻水 —— 邻水判定留 worldgen，玩家
                                   //   放置仅守支撑，机制等价 MC 创造放置不强制邻水）。进创造调色板（玩家可取用 / 放置）。
-        Count         = 54, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t405 玻璃方块（机制等价 MC 1.0 玻璃 glass）：沙子熔炉冶炼产物（SmeltingRegistry 沙子→玻璃物品 0x204；
+        //   玩家持玻璃物品右键放置 → 玻璃方块）。**透明整立方**——本任务核心：玻璃须真正**透视**（透过玻璃可见背后
+        //   的方块 / 实体），机制等价 MC 1.0 玻璃。
+        //   solid=false（**关键**：solid 仅作 mesher 邻居面剔除依据，见 t146 注。solid=false → 相邻实体方块**不**因玻璃
+        //   而剔面 → 石头 / 地形贴着玻璃仍画自己的面 → 透过半透玻璃可见背后的方块（修「玻璃身后方块被剔面 → 透视见底 /
+        //   x-ray 空壳」）。碰撞 / 选中 / 射线阻挡不读 solid（走 shape / raycastAABBs / blockAt!=0），故 glass 仍可踩 /
+        //   可瞄准 / 可破）。shape=ShapeFull（整立方实体碰撞 + 选中框；与 ice / sandstone 同走整格，**非**异形——不进
+        //   PartialBlockGeometry）、hardness=0.3（同 MC 1.0 玻璃量级，薄脆）、toolType=Pickaxe（玻璃采掘归石族）、
+        //   requiresTool=false（空手可破且掉落——本工程无精准采集，玻璃可回收，便于沙子→玻璃→重放闭环）、dropId=0x204
+        //   （破玻璃掉玻璃**物品** RecipeRegistry::GlassId，材料段；Core 不依赖 Game 故用字面量 0x204，同 TallGrass 用
+        //   0x208 模式）、dropCount=1、maxStack=64。各面贴图=glass(68)（近白青底 + 暗边框 + 对角高光斜线，原创自绘 §9a；
+        //   透明感由 glassOnly 段材质 opacity≈0.45 实现，纹理本身不透明——同 water 模式：纹理不透 + 材质半透）。
+        //   音色归 GroupStone（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）。**渲染**：mesher 路由进
+        //   ChunkGeometry 的 glassOnly 段（独立半透材质 opacity:0.45 + NoLighting + 顶点色光照，机制等价 waterOnly /
+        //   lavaOnly 的透明分流）；地形段跳过 Glass（避免与玻璃段重复绘制 + 被当不透明地形）。glassOnly 段面剔除：
+        //   邻实体剔（避免与实体面共面 z-fight）、邻 Glass 剔（玻璃-玻璃共面不重复绘制）、邻空气画（半透面，透视关键）。
+        //   lightOpacity=0（玻璃透光——机制等价 MC 玻璃 lightOpacity 0；solid=false 已致全透，玻璃与其它 solid=false
+        //   方块同）。进创造调色板经玻璃**物品**（0x204，creativeMaterials，MaterialIcon drawGlass 图标），非方块段。
+        Glass          = 54, // 玻璃：沙子冶炼产物方块；透明整立方（solid=false + glassOnly 段半透渲染）。
+        Count         = 55, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -612,7 +633,9 @@ public:
     //      alphaCutoff cutout；各色 Flower 方块各面=本 tile，mesher 走 cross 几何段；tools/build_flower.py 程序生成原创像素图）。
     //   67=sugarcane（t397 甘蔗 cross 贴图；透明底 + 绿色节段细茎 + 顶部尖叶，alphaCutoff cutout；
     //      Sugarcane 各面=本 tile，mesher 走 cross 几何段；tools/build_sugarcane.py 程序生成原创像素图）。
-    // 图集由 tools/build_atlas.py 打包全部 68 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   68=glass（t405 玻璃各面贴图；近白青底 + 暗边框 + 对角高光斜线；Glass 各面=本 tile，mesher 走 glassOnly
+    //      半透段；纹理不透明，半透由材质 opacity 实现，同 water 模式；tools/build_glass.py 程序生成原创像素图）。
+    // 图集由 tools/build_atlas.py 打包全部 69 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -625,7 +648,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 68;
+    static constexpr int AtlasTileCount = 69;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

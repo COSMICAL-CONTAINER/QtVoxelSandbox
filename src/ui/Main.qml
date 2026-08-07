@@ -2351,6 +2351,7 @@ Window {
                         objs.push(waterChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
                         objs.push(lavaChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t343 岩浆段
                         objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t326 cutout 段（草丛/作物/树苗）
+                        objs.push(glassChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t405 玻璃段（透明）
                     }
                 }
                 window.terrainGeos = geos
@@ -2427,6 +2428,34 @@ Window {
                     lavaOnly: true
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.95; baseColor: Qt.rgba(1.0, 0.82, 0.6, 1.0) }
+            }
+        }
+
+        // t405 玻璃段 chunk Model 模板（glassOnly 只网格化 Glass，opacity≈0.45 半透 + NoLighting + 顶点色光照 →
+        //   透过玻璃可见背后的方块 / 实体）。机制等价 MC 1.0 玻璃（glass：透明整立方，透视背后物）。研究要点：本
+        //   D3D11 / QtQuick3D 后端的「真透明」走 PrincipledMaterial 的 opacity<1（透明渲染队列，QtQuick3D 自动排在不
+        //   透明地形之后、按深度排序），而非 alpha-cutout（cutout 是硬透明边、无半透，适合草丛 / 火把透明底，不适合
+        //   玻璃「整体半透」观感）。玻璃段走 culled/greedy 整立方面路径（满格立方 + 自剔 nb==Glass + 邻实体剔 + 邻空气画）；
+        //   Glass solid=false → 相邻实体方块不剔面 → 透过半透玻璃可见背后方块（关键透视保证）。baseColor 取浅青白略提亮
+        //   （NoLighting 下 baseColor 直接乘进最终色 → 玻璃显淡青玻璃质感；区别于岩浆暖橙自发光）。摆位同地形 / 水 / 岩浆段。
+        //   lit 红线：PrincipledMaterial 必须 NoLighting（默认 lit 在 D3D11 不出像素，见 lessons-learned 渲染盲区静态化条）。
+        Component {
+            id: glassChunkComp
+            Model {
+                id: glassModel
+                property int chunkCX: 0
+                property int chunkCZ: 0
+                position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
+                geometry: ChunkGeometry {
+                    world: theWorld
+                    cx: glassModel.chunkCX
+                    cz: glassModel.chunkCZ
+                    sunDir: worldClock.sunDir
+                    shadowsEnabled: window.shadowsEnabled
+                    greedyMeshing: window.greedyMeshing
+                    glassOnly: true
+                }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.45; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
             }
         }
 

@@ -1744,6 +1744,28 @@ void PlayerController::placeBlock()
         }
         return; // 树苗（种植成功 / 命中非草地泥土 / 未命中）均不再走方块放置路径
     }
+    // t405 玻璃物品放置（spec「沙子冶炼产物玻璃 → 可放置为透明玻璃方块」）：手持玻璃物品（GlassId，材料段非方块）
+    //   右键命中实体方块 → 在命中面相邻空气格（或水/岩浆格，替换流体）放置 Glass 方块（透明整立方）。机制等价
+    //   MC 1.0 玻璃（glass：可放置的透明方块）。玻璃物品非方块 → selectedBlock 经 hotbar 归 Air，须在下方
+    //   `m_selectedBlock == Air` 守卫之前分流（同桶 / 锄 / 种子 / 树苗分支模式）。**须命中**（须目标面定位放置点）。
+    //   spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可放。生存消耗 1 玻璃物品（创造不耗）。
+    //   分层（PLAN §2）：放置属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM），不改 setBlock 语义。
+    //   玻璃方块渲染透明（glassOnly 段半透材质）由 Renderer 呈现层负责，本处仅落地方块 id。
+    if (m_hotbar && m_world && heldItemId == RecipeRegistry::GlassId) {
+        if (m_hasHit) {
+            const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
+            const quint8 tgt = m_world->blockAt(tx, ty, tz);
+            // 目标须为空气或流体（水/岩浆可被玻璃替换，同方块放置语义）；实体方块不覆盖（保 t05 放置语义）。
+            if (tgt == BlockRegistry::Air || tgt == BlockRegistry::Water || tgt == BlockRegistry::Lava) {
+                m_world->setBlock(tx, ty, tz, BlockRegistry::Glass, 0); // state=0（玻璃无 state 语义）
+                if (m_mode != Creative)
+                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 玻璃物品（创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm(); // 放置也是一次「放置」动作 → 挥手（t29）
+            }
+        }
+        return; // 玻璃物品（放置成功 / 未命中 / 目标被占）均不再走方块放置路径
+    }
     // t267：面包已从 placeBlock 移除 —— 改由 eventFilter RightButton press 据持物 == BreadId 分流到
     //   beginEating（长按累积进食进度，~1.6s 满后 finishEating 消耗 + 恢复饥饿）。spec「单击即食→改长按右键」。
     //   旧单次右键食一件的分支已删（避免与长按路径并存导致单击仍即食）。饥饿恢复 + Survival 消耗 / Creative

@@ -253,6 +253,15 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   cutout）。音色归 GroupGrass（软植物音）。**放置预检**（placeBlock）：目标格下方须为 Grass / Dirt / Sand /
     //   Sugarcane（机制等价 MC 甘蔗须草地 / 沙地 / 甘蔗支撑）。进创造调色板（玩家可取用 / 放置）。
     /* sugarcane    */ {int(BlockRegistry::Sugarcane),                    67, 67, 67, 67, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Sugarcane),     1, 64, "sugarcane",    "甘蔗"},
+    // t405 玻璃（Glass）：透明整立方（机制等价 MC 1.0 玻璃 glass）。solid=false（**关键**：仅作 mesher 邻居面剔除依据 →
+    //   相邻实体方块不剔面 → 透过半透玻璃可见背后的方块；碰撞 / 选中 / 射线走 shape=ShapeFull / raycastAABBs / blockAt!=0
+    //   故 glass 仍可踩 / 可瞄准 / 可破）、shape=ShapeFull（整立方，**非**异形）、hardness=0.3（同 MC 1.0 玻璃量级）、
+    //   toolType=Pickaxe（石族）、requiresTool=false（空手可破且掉落——本工程无精准采集，玻璃可回收）、dropId=0x204
+    //   （破玻璃掉玻璃物品 RecipeRegistry::GlassId，Core 不依赖 Game 故字面量 0x204，同 TallGrass 用 0x208 模式）、
+    //   dropCount=1、maxStack=64。各面贴图=glass(68)（近白青底 + 暗边框 + 对角高光斜线，原创自绘 §9a；纹理不透明，
+    //   半透由 glassOnly 段材质 opacity 实现，同 water 模式）。音色归 GroupStone（玻璃质敲击）。渲染走 glassOnly 段
+    //   （独立半透材质 opacity:0.45 + NoLighting）；地形段跳过 Glass。lightOpacity=0（solid=false → default 返 0，透光）。
+    /* glass        */ {int(BlockRegistry::Glass),                        68, 68, 68, 68, false, BlockRegistry::ShapeFull,     0.3f, int(BlockRegistry::Pickaxe), 0, false,                            0x204, 1, 64, "glass",        "玻璃"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -308,6 +317,7 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* flower_blue    */ -1, // t397 蓝花 → MC 1.0 无等价（cornflower 矢车菊 id 28（1.0 为玫瑰丛 rose bush 的变体）；蓝花是本工程原创 4 色变体之一，无 1.0 等价故 -1）
     /* flower_white   */ -1, // t397 白花 → MC 1.0 无等价（oxeye daisy 雏菊 1.7+ id 34；本工程作花方块故无 1.0 等价）
     /* sugarcane      */ 83, // t397 甘蔗 → MC 1.0 sugar cane（reeds）id 83
+    /* glass          */ 20, // t405 玻璃 → MC 1.0 glass id 20
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -659,6 +669,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Sandstone: // t394 砂岩 → 石质音色（成岩，同 cobble/stone 族）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
+    case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）
         return GroupStone;
     case Log: case Planks: case CraftingTable:
     case WoodSlab: case WoodStairs: case WoodFence:

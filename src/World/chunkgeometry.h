@@ -69,6 +69,14 @@ public:
     //   + 自剔 nb==Lava + 邻实体剔面（同 culled 地形约定），不效仿水的变高水面（岩浆浓稠、满格观感即可）。一个 chunk
     //   由四个 ChunkGeometry 实例渲染（地形段 + 水段 + cutout 段 + 岩浆段），各自绑 QML Model + 材质。
     Q_PROPERTY(bool lavaOnly READ lavaOnly WRITE setLavaOnly NOTIFY lavaOnlyChanged)
+    // t405 玻璃渲染分流（机制等价 waterOnly / lavaOnly 的「半透独立段」）：glassOnly=true → 本几何只网格化
+    //   Glass 方块（透明整立方，独立半透段，Main.qml 用 opacity≈0.45 + NoLighting 材质渲染 → 透过玻璃可见背后
+    //   的方块 / 实体）；glassOnly=false（默认）→ 地形段跳过 Glass（避免与玻璃段重复绘制 + 被当不透明地形）。
+    //   一个 chunk 由五个 ChunkGeometry 实例渲染（地形 + 水 + cutout + 岩浆 + 玻璃），各自绑 QML Model + 材质。
+    //   glassOnly 段走 culled/greedy 整立方面路径（满格立方；Glass solid=false → 相邻实体不剔面 → 透过玻璃可见
+    //   背后方块；邻实体剔 / 邻 Glass 剔 / 邻空气画，见 buildMesh）。玻璃非流体（无 state 液面），不走水的变高
+    //   水面路径。dirty 时序：五段 onWorldChanged 皆同步槽，World emit worldChanged() 内全部重建完才 clearAllDirty。
+    Q_PROPERTY(bool glassOnly READ glassOnly WRITE setGlassOnly NOTIFY glassOnlyChanged)
     // t166b 阴影开关（用户「卡顿疑似阴影所致，加开关测」）：false → sunShadowAt 直接返 0（跳过 PCF per-vertex
     //   heightmap 采样 → meshing 大幅省时，sun-step 50 chunk 重建更快）+ 顶点光基底只剩 flood-fill 光场（无软影）。
     //   ESC 设置面板开关绑 window.shadowsEnabled → 全 chunk 实例。默认 true（保留软影）；关掉即诊断 / 提速。
@@ -123,6 +131,9 @@ public:
     // t343 岩浆分流（见 Q_PROPERTY 注释）：true=只网格化 Lava 段（满格立方，独立近不透暖色材质）。
     bool lavaOnly() const { return m_lavaOnly; }
     void setLavaOnly(bool on);
+    // t405 玻璃分流（见 Q_PROPERTY 注释）：true=只网格化 Glass 段（透明整立方，独立半透材质）。
+    bool glassOnly() const { return m_glassOnly; }
+    void setGlassOnly(bool on);
     // t166b 阴影开关（false → sunShadowAt 返 0，关 PCF 软影，meshing 提速）。
     bool shadowsEnabled() const { return m_shadowsEnabled; }
     void setShadowsEnabled(bool on);
@@ -145,6 +156,7 @@ signals:
     void waterOnlyChanged(); // t148：水段开关变（QML 改 waterOnly → 重建，水段 / 地形段重网格化）
     void cutoutOnlyChanged(); // t326：cutout 段开关变（QML 改 cutoutOnly → 重建，cross 段 / 地形段重网格化）
     void lavaOnlyChanged(); // t343：岩浆段开关变（QML 改 lavaOnly → 重建，岩浆段 / 地形段重网格化）
+    void glassOnlyChanged(); // t405：玻璃段开关变（QML 改 glassOnly → 重建，玻璃段 / 地形段重网格化）
     void shadowsEnabledChanged(); // t166b：阴影开关变（→ buildMesh 重算顶点光 PCF）
     void greedyMeshingChanged();  // t178：贪婪网格化开关变（→ buildMesh 重网格化）
     void waterAnimPhaseChanged(); // t223：水贴图动画 phase 变（→ 水段 buildMesh(Water) 换帧）
@@ -178,6 +190,7 @@ private:
     bool m_waterOnly = false; // t148：true=只网格化 Water 段（透明水）；false=只网格化非水地形段
     bool m_cutoutOnly = false; // t326：true=只网格化 cross 段（草丛/作物/树苗 cutout）；false=不网格化 cross
     bool m_lavaOnly = false; // t343：true=只网格化 Lava 段（满格立方近不透暖色）；false=地形段跳 Lava
+    bool m_glassOnly = false; // t405：true=只网格化 Glass 段（透明整立方半透）；false=地形段跳 Glass
     bool m_shadowsEnabled = true; // t166b：PCF 软影开关（false → sunShadowAt 返 0，跳过 per-vertex 采样）
     bool m_greedyMeshing = false; // t178/t183：贪婪网格化开关（true=合并同面但贴图拉伸；false=逐格 culled 贴图清晰，t183 默认）
     int m_waterAnimPhase = 0; // t223：水贴图动画 phase（0/1；仅水段使用，flipbook 在 {19,24}/{23,25} 间选帧）

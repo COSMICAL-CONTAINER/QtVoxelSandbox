@@ -151,6 +151,9 @@ TILES = [
     "default_flower_blue",          # 65 flower_blue（蓝花 cross 贴图；原创 4 色变体之一）
     "default_flower_white",         # 66 flower_white（白花 cross 贴图；机制等价 MC oxeye daisy 雏菊）
     "default_sugarcane",            # 67 sugarcane（甘蔗 cross 贴图；机制等价 MC sugar cane 芦苇；透明底 + 绿色节段细茎 + 顶部尖叶）
+    "default_glass",                # 68 glass（t405 玻璃各面贴图；近白青底 + 暗边框 + 对角高光斜线；Glass 各面=本 tile，
+                                    #    mesher 走 glassOnly 半透段；纹理不透明，半透由材质 opacity 实现，同 water 模式；
+                                    #    tools/build_glass.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
