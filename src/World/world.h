@@ -33,6 +33,10 @@ class World : public QObject
     // chunk mesher 的 Repeater 决定 Model 数量、t10 F3 计数。仅随 width/depth 变化。
     Q_PROPERTY(int chunksX READ chunksX NOTIFY widthChanged)
     Q_PROPERTY(int chunksZ READ chunksZ NOTIFY depthChanged)
+    // t385 天气态（全局：晴/雨/雪/雷；QML 据此变暗天空 + 切粒子）。NOTIFY=weatherChanged 驱动刷新。
+    Q_PROPERTY(int weatherState READ weatherState NOTIFY weatherChanged)
+    // t385 天空变暗乘子 [0,1]（0=晴不变暗；Thunder 最暗）。QML clearColor/cloudColor 据此拉暗。
+    Q_PROPERTY(float weatherDarkness READ weatherDarkness NOTIFY weatherChanged)
 
 public:
     explicit World(QObject *parent = nullptr);
@@ -98,6 +102,22 @@ public:
     //   PLAN §2-K 确定性，同 seed 同群系图）。分层（PLAN §2）：World 低层只读查询，不依赖 Entities / Renderer。
     //   消费点：EntityManager::pickPassiveMobType 据本值加权选被动生物类型（t374 群系化刷怪）。
     Q_INVOKABLE int biomeIdAt(int x, int z) const { return int(biomeAt(x, z)); }
+
+    // t385 天气系统（机制等价 MC 1.0 天气：clear/rain/snow/thunder 随机转换；天空变暗；按群系）。
+    //   全局单一天气态（weatherState）+ tickWeather 随机时长转换（QRandomGenerator 运行期模拟；天气是动态模拟
+    //   非地形 worldgen 确定性，同 EntityManager 火 random extinguish 用 RNG）。局部降水类型据群系解析
+    //   （weatherStateAt）：沙漠→晴、山地(Hills 冷高海拔)→雪、草原/森林→随全局态。雷态（Thunder）= 降水 + 风暴
+    //   （天空更暗），雷电闪光 / 引燃留 t386。分层（PLAN §2）：本组属 World 层，只读 m_weather + biomeAt，
+    //   不依赖 Renderer/Physics/Game。呈现层（QML 天空变暗 + 粒子）与 Entities 层（mob 灭火 / 日光燃烧门控）
+    //   只读消费。
+    int weatherState() const { return int(m_weather); }
+    float weatherDarkness() const;
+    // 局部降水类型（群系解析）：返回 Weather 枚举 int（0=Clear / 1=Rain / 2=Snow / 3=Thunder）。
+    //   Clear→Clear；沙漠→Clear（永不降水）；山地(Hills)→Snow（冷）；草原/森林→随全局态（雨/雪/雷）。
+    //   QML 据此选粒子类型；EntityManager / PlayerController 据此判灭火 / 日光燃烧门控。OOB 安全（biomeAt 纯函数）。
+    Q_INVOKABLE int weatherStateAt(int x, int z) const;
+    // 该位置是否正降水（= weatherStateAt != Clear）。mob 灭火 / 作物浇水 / 日光燃烧门控用。OOB 安全。
+    Q_INVOKABLE bool isPrecipitatingAt(int x, int z) const;
 
     // t151 真光场查询（PLAN §2-H / §M）：世界坐标 per-voxel 天光 / 方块光（各 0..15）。mesher 据此写顶点色。
     //   光场由 BFS flood-fill 算出：worldgen 末走全量 recomputeLightField()；玩家编辑（setBlock / 实体写入）
@@ -199,6 +219,13 @@ public:
     //   失撑叶）或本窗无命中 → 零写入、零 worldChanged（稳态无开销）。非 Q_INVOKABLE？—— 是 Q_INVOKABLE：
     //   同 tickCropGrowth/tickSaplingGrowth 由 QML WorldClock 桥接调用。
     Q_INVOKABLE void tickLeafDecay();
+    // t385 天气 tick（spec「天气状态机（晴/雨/雪/雷）+ 随机转换」）：由呈现层 Main.qml 经 WorldClock.ticked
+    //   桥接调用（每 100ms 一 tick；本方法按 dt 推进天气态剩余计时，归零即随机转换）。机制等价 MC 1.0 天气：
+    //   晴 ↔ 降水（雨/雪/雷）随机时长来回转换；晴→随机选雨(65%)/雪(25%)/雷(10%)，降水→晴。转换用 QRandomGenerator
+    //   （运行期模拟，非 worldgen 确定性 —— 天气是动态模拟非地形生成）。态翻转 emit weatherChanged（驱动 QML
+    //   天空变暗 + 粒子切换）。计时未到 → 仅减计时零开销（无写入 / 无 worldChanged）。spectator/创造/生存均推进
+    //   （天气是世界模拟，与玩家模式无关）。分层（PLAN §2）：本方法属 World 层，只读 / 写 m_weather + 发 weatherChanged。
+    Q_INVOKABLE void tickWeather(qreal dt);
     // t305 树叶失撑检测（t325 改造：不再瞬时清叶，改为入渐进衰减队列）。玩家破原木后扫破块点周围树叶，
     //   判定其是否仍「在原木支撑范围内」（机制等价 MC 1.0 叶子距原木 >4 格即衰减）。失撑叶（4 格切比雪夫距离
     //   内无原木）**入渐进衰减队列 m_decayingLeaves**（按坐标去重）→ 留待 tickLeafDecay 按概率逐叶渐退（散布
@@ -247,6 +274,7 @@ signals:
     void heightChanged();
     void seedChanged();
     void worldChanged(); // 生成/编辑后发出 → 网格重建
+    void weatherChanged(); // t385 天气态翻转（晴↔雨/雪/雷；驱动 QML 天空变暗 + 粒子切换）
     // 编辑语义事件（id：broken 带被破的原方块 id；placed 带新放方块 id）。
     void blockBroken(int x, int y, int z, int id);
     void blockPlaced(int x, int y, int z, int id);
@@ -266,6 +294,9 @@ private:
     //   t306 在 t274 三分基础上把原 plains 中段 carve 出 forest：forest 多树（密闭林）、plains 少树多草（开阔草原），
     //   机制等价 MC 1.0 森林 / 平原群系分化（spec「森林（现多树）+ 草原（少树多草）」）。
     enum class Biome { Plains, Hills, Desert, Forest };
+    // t385 天气状态机枚举（机制等价 MC 1.0 天气四态）。私有嵌套（天气细节，不外泄类型到 QML；
+    //   Q_INVOKABLE weatherState / weatherStateAt 返 int 编码）。Thunder = 降水 + 风暴（雷电闪光 / 引燃留 t386）。
+    enum class Weather : int { Clear = 0, Rain = 1, Snow = 2, Thunder = 3 };
     // t274/t306 群系判定（PLAN §2-K 确定性）：主群系 fBm（与高度噪声 0.09 / 旧沙漠噪声 0.018 均不同频率 0.012 +
     //   seed 偏移 +3571）→ 群系图与高度图解耦、与旧沙漠分布独立。低频 → 大区块连续（plains/forest/hills/desert
     //   成片，非逐格斑点，机制等价 MC 1.0 群系大尺度分布）。阈值三分主图：hills（少数，起伏）/ desert（少数，沙）/
@@ -459,6 +490,23 @@ private:
     int m_leafDecayIntervalIndex = 0;
     static constexpr int kLeafDecayTickInterval = 4; // tickLeafDecay 节流间隔（WorldClock tick 单位 = 100ms → 0.4s/窗）
     static constexpr int kLeafDecayPct          = 1; // 每窗每叶消失的散布概率（%；1% → 平均 ~40s 渐退，散布至 90s+）
+    // t385 天气态 + 计时（运行期随机模拟；构造 / generate / beginLoad 经 resetWeather 重置为 Clear + 随机晴时长）。
+    Weather m_weather = Weather::Clear;
+    float m_weatherTimer = 0.0f;  // 当前天气态剩余秒数（倒数到 0 → 随机转换；构造时设首个晴时长）
+    // t385 天气时长常量（秒；机制对齐 MC 1.0「~0.5-1 天一态」取短便于肉眼 / 测试复核）。晴阶段 kClearWeatherMin..Max
+    //   （~45-120s）、降水阶段 kWeatherDurMin..Max（~35-80s）、雷态 kThunderDurMin..Max（~25-50s，更短）。
+    //   首场天气前的晴阶段 kInitialClearMin..Max 偏短（~20-45s）→ 进世界 ~1 分钟内可见首场天气（验收可见性）。
+    static constexpr float kClearWeatherMin = 45.0f;
+    static constexpr float kClearWeatherMax = 120.0f;
+    static constexpr float kWeatherDurMin   = 35.0f;
+    static constexpr float kWeatherDurMax   = 80.0f;
+    static constexpr float kThunderDurMin   = 25.0f;
+    static constexpr float kThunderDurMax   = 50.0f;
+    static constexpr float kInitialClearMin = 20.0f;
+    static constexpr float kInitialClearMax = 45.0f;
+    // t385 重置天气态（Clear + 随机晴时长）；构造 / generate / beginLoad 调。态真翻才 emit weatherChanged
+    //   （加载 / 新世界天气从 Clear 起；构造期无监听者，emit 亦无害）。
+    void resetWeather();
 };
 
 #endif // WORLD_H

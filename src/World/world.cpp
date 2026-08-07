@@ -4,6 +4,7 @@
 
 #include <QDebug>
 #include <QElapsedTimer> // t155c：recomputeLightAround 计时（测每帧编辑光照开销）
+#include <QRandomGenerator> // t385 天气态随机时长转换（运行期模拟；同 EntityManager 火 random extinguish）
 #include <algorithm>
 #include <cmath>
 #include <queue>   // t151：recomputeLightField 的 BFS flood-fill 队列
@@ -38,6 +39,7 @@ void World::beginLoad(int seed)
     m_chunks.recreate(m_width, m_depth, m_height); // 零填充 + 全标脏（recreate 实现）
     buildPermutation();                            // 新 seed 的 Perlin 置换表（heightAt 查询一致性）
     m_decayingLeaves.clear(); // t325 网格重置 → 渐进衰减队列作废（坐标已不指向当前栅格；防误清新世界叶）
+    resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
     emit seedChanged();
 }
 
@@ -670,13 +672,18 @@ void World::tickCropGrowth()
         if (m_chunks.blockAt(c.x, c.y - 1, c.z) != BlockRegistry::Farmland)
             continue;                                                     // 下方非耕地 → 不长（作物需耕地支撑）
         if (m_chunks.skyLightAt(c.x, c.y, c.z) < kCropMinLight) continue; // 头顶天光不足 → 不长（夜间/洞穴）
+        // t385 雨水浇作物（spec「浇作物」）：作物露天（skyLightAt>=15 = 头顶无遮挡）且所在列正降水（雨/雪/雷，
+        //   群系解析）→ 本窗生长概率翻倍（机制等价 MC 雨水加速作物生长 / 维持耕地湿润）。降水是世界态（m_weather）
+        //   运行期模拟，故此判定打破「确定性哈希」纯函数性 —— 与 rain 灭火同理（动态天气影响世界模拟，合理）。
+        const bool cropRained = (m_chunks.skyLightAt(c.x, c.y, c.z) >= 15) && isPrecipitatingAt(c.x, c.z);
+        const int growPct = cropRained ? (kCropGrowPct * 2) : kCropGrowPct;
         // 确定性散布概率：纯函数于 seed + 位置 + 窗口序号（PLAN §2-K 精神：worldgen 确定性；此处生长模拟亦
         //   走确定性哈希，无 Math.random / 时间源 → 同 seed 同窗口序号下结果一致，便于复现）。全 int 运算
         //   避免符号转换告警（hashVoxel 参数为 int）。
         const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_cropIntervalIndex) * 0x9E3779B9u));
         const int hy = c.y * 7 + int(c.stage);
         const quint32 h = hashVoxel(mixedSeed, c.x, hy, c.z);
-        if (int(h & 0xFFFFu) % 100 >= kCropGrowPct) continue;             // 散布落空 → 本窗不升
+        if (int(h & 0xFFFFu) % 100 >= growPct) continue;                  // 散布落空 → 本窗不升
         grows.push_back(c);
     }
 
@@ -1085,6 +1092,74 @@ bool World::isDesert(int x, int z) const
     return biomeAt(x, z) == Biome::Desert;
 }
 
+// t385 天空变暗乘子（见 world.h 头注释）。雷暴最暗、雨中等、雪阴沉略暗、晴不变暗。供 QML clearColor/cloudColor。
+float World::weatherDarkness() const
+{
+    switch (m_weather) {
+        case Weather::Thunder: return 0.55f; // 雷暴：显著变暗
+        case Weather::Rain:    return 0.35f; // 雨天：中等变暗（阴沉）
+        case Weather::Snow:    return 0.22f; // 雪天：略暗（阴沉）
+        case Weather::Clear:   return 0.0f;  // 晴：不变暗
+    }
+    return 0.0f; // 防御（enum 已全覆盖；-Wreturn-type 兜底）
+}
+
+// t385 局部降水类型（群系解析，见 world.h 头注释）。Clear→Clear；沙漠→Clear（永不降水）；
+//   山地(Hills 冷 / 高海拔)→Snow（降水即雪）；草原 / 森林→随全局态（雨 / 雪 / 雷）。OOB 安全（biomeAt 纯函数）。
+int World::weatherStateAt(int x, int z) const
+{
+    if (m_weather == Weather::Clear) return int(Weather::Clear);
+    const Biome b = biomeAt(x, z);
+    if (b == Biome::Desert) return int(Weather::Clear); // 沙漠干燥 → 永不降水（机制等价 MC 沙漠无雨 / 雪）
+    if (b == Biome::Hills)  return int(Weather::Snow);  // 山地（冷）→ 降水即雪（机制等价 MC 冷群系下雪）
+    return int(m_weather);                               // 草原 / 森林（暖）→ 随全局态（雨 / 雪 / 雷）
+}
+
+// t385 该位置是否正降水（= weatherStateAt != Clear）。mob 灭火 / 作物浇水 / 日光燃烧门控用。
+bool World::isPrecipitatingAt(int x, int z) const
+{
+    return weatherStateAt(x, z) != int(Weather::Clear);
+}
+
+// t385 重置天气态（见 world.h 头注释）：Clear + 随机首场晴时长（偏短便于进世界即见天气）。态真翻才 emit。
+void World::resetWeather()
+{
+    auto *rng = QRandomGenerator::global();
+    const float dur = kInitialClearMin + float(rng->generateDouble()) * (kInitialClearMax - kInitialClearMin);
+    const bool changed = (m_weather != Weather::Clear);
+    m_weather = Weather::Clear;
+    m_weatherTimer = dur;
+    if (changed) emit weatherChanged();
+}
+
+// t385 天气 tick（见 world.h 头注释）。机制等价 MC 1.0 天气：晴 ↔ 降水（雨/雪/雷）随机时长转换。
+void World::tickWeather(qreal dt)
+{
+    if (m_weatherTimer <= 0.0f) return; // 防御（构造已设首时长；正常不触发）
+    m_weatherTimer -= float(dt);
+    if (m_weatherTimer > 0.0f) return;  // 计时未到 → 不转换（零开销：无写入 / 无 emit）
+
+    auto *rng = QRandomGenerator::global();
+    Weather next;
+    if (m_weather == Weather::Clear) {
+        // 晴 → 随机选一种降水：雨 65%（最常见）/ 雪 25% / 雷 10%（机制等价 MC 雨多于雪 / 雷）。
+        const int r = int(rng->bounded(100)); // [0,100)
+        if (r < 10)      next = Weather::Thunder;
+        else if (r < 35) next = Weather::Snow;
+        else             next = Weather::Rain;
+        // 降水持续时长（雷态偏短）。
+        const float lo = (next == Weather::Thunder) ? kThunderDurMin : kWeatherDurMin;
+        const float hi = (next == Weather::Thunder) ? kThunderDurMax : kWeatherDurMax;
+        m_weatherTimer = lo + float(rng->generateDouble()) * (hi - lo);
+    } else {
+        // 降水 → 晴。
+        next = Weather::Clear;
+        m_weatherTimer = kClearWeatherMin + float(rng->generateDouble()) * (kClearWeatherMax - kClearWeatherMin);
+    }
+    m_weather = next;
+    emit weatherChanged(); // 态翻转 → 驱动 QML 天空变暗 + 粒子切换
+}
+
 // t338 海域角点（4 角之一；seed 派生确定性）。海域（海 + 沙滩）集中于此角，内陆无散沙 / 散水。
 //   hashColumn 用固定独立坐标（与其它 worldgen hashColumn 解耦）→ 同 seed 同角（PLAN §2-K）。
 void World::seaCorner(int &cx, int &cz) const
@@ -1168,6 +1243,7 @@ void World::generate()
     buildPermutation();
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
     m_decayingLeaves.clear(); // t325 全新世界无失撑叶 → 清渐进衰减队列（防旧世界坐标误清新世界叶）
+    resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）
 
     // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 海域」决定，下层 dirt / 深 stone。
     //   - 沙漠群系（isDesert）：**仅表层 4-6 格沙**下接 Stone（t255 修正：旧实现整柱沙 y 0..h 全 Sand →

@@ -332,8 +332,12 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                                   && world->skyLightAt(sx, sy, sz) >= 15;
         // t284：Stalker（苦力怕）非亡灵 → 白天**不**燃烧（机制等价 MC 苦力怕不像僵尸/骷髅那样日光起火；
         //   仅 Shambler/Bones 亡灵类燃烧）。Stalker 仍受远距消失 / spawn 调度约束（hostile=true）。
+        // t385：降水（雨/雪/雷）时露天 mob 不燃烧（机制等价 MC 雨天遮日 → 亡灵不燃）—— 见天 + 所在列降水
+        //   即视为「无直射日光」。与 fire-timer 灭火（主 tick）互补：日光 burning 由 rain 门控前置、岩浆 / 火点燃
+        //   的 fireTimer 由主 tick 雨浇灭。
+        const bool rainingHere = exposedToSun && world->isPrecipitatingAt(sx, sz);
         const bool inDaylight = exposedToSun && (skyBrightness > kBurnSkyBrightness)
-                                 && e.mobType != MobStalker;
+                                 && e.mobType != MobStalker && !rainingHere;
         if (inDaylight) {
             if (!e.burning) { e.burning = true; dirty = true; } // 翻入燃烧 → bump（QML 显火焰）
             e.burnTimer += float(dt);
@@ -1700,6 +1704,19 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (touchingLava) {
                     if (e.fireTimer < kFireDuration) { e.fireTimer = kFireDuration; dirty = true; } // 翻入着火 → bump（QML 显火焰）
                     e.fireDamageTimer = 0.0f; // 岩浆内重置火伤累积（持续重燃）
+                }
+                // t385 雨灭 mob 火（spec「雨灭 mob 火」）：mob 直接见天（skyLightAt>=15 = 头顶无遮挡）且所在列
+                //   正降水（雨/雪/雷，群系解析；沙漠不降水）→ 立即灭火。机制等价 MC 雨水浇灭着火实体。
+                //   仅露天生效（树下/屋内不淋雨，火不灭）。与日光 burning 独立（fireTimer 适用于所有 Mob）。
+                if (e.fireTimer > 0.0f) {
+                    const bool mobSkyExposed = (fx >= 0 && fz >= 0 && fx < int(worldW) && fz < int(worldD)
+                                                && bodyY >= 0 && bodyY < world->height()
+                                                && world->skyLightAt(fx, bodyY, fz) >= 15);
+                    if (mobSkyExposed && world->isPrecipitatingAt(fx, fz)) {
+                        e.fireTimer = 0.0f;
+                        e.fireDamageTimer = 0.0f;
+                        dirty = true; // 熄火 → bump（QML 收火焰）
+                    }
                 }
                 if (e.fireTimer > 0.0f) {
                     if (!touchingLava) e.fireTimer -= float(dt);

@@ -951,12 +951,30 @@ Window {
     }
     function dayNightBrightness(m) { return 0.25 + (1.5 - 0.25) * m }
 
+    // t385 天气变暗的天空色（spec「天空变暗」）：把昼夜 dayNightColor 按天气暗度（theWorld.weatherDarkness
+    //   0..1；Thunder 最暗）向暗灰蓝（阴沉 overcast）lerp。雷暴 / 雨天 → 天色明显变暗；晴 → 不变（d=0 原色）。
+    //   纯呈现层，只读 worldClock.skyLight + theWorld.weatherDarkness（World 层 Q_PROPERTY；二者 NOTIFY 驱动刷新）。
+    function weatherSkyColor() {
+        const m = worldClock.skyLight
+        let r = 0.043 + (0.620 - 0.043) * m
+        let g = 0.063 + (0.776 - 0.063) * m
+        let b = 0.149 + (0.910 - 0.149) * m
+        const d = theWorld.weatherDarkness
+        // 向暗阴灰蓝 (0.30, 0.32, 0.38) lerp d（保留冷调，非纯灰）。
+        r += (0.30 - r) * d
+        g += (0.32 - g) * d
+        b += (0.38 - b) * d
+        return Qt.rgba(r, g, b, 1.0)
+    }
+
     // t384 云层 baseColor（昼白 / 夜灰暗）：m=worldClock.skyLight ∈ [0,1]（0=子夜、1=正午）。
     //   lerp 灰阶 0.30(夜)↔1.0(昼)：夜云呈暗灰（用户「grey/dark night」）、昼云呈白（「white day」）。
     //   纯灰阶（不偏色）—— 与地形 terrainLight 同设计：夜色基调由 sky clearColor 提供，云只调明度。
+    //   t385：天气暗度（theWorld.weatherDarkness）把云再向暗灰 0.45 拉（风暴时云变暗灰，非白）。
     //   NoLighting 材质下最终色 = baseColor × 贴图（白）→ baseColor 直接决定云的明暗。
     function cloudColor(m) {
-        const k = 0.30 + (1.0 - 0.30) * m
+        let k = 0.30 + (1.0 - 0.30) * m
+        k += (0.45 - k) * theWorld.weatherDarkness   // t385 风暴时云变暗灰
         return Qt.rgba(k, k, k, 1.0)
     }
 
@@ -1325,7 +1343,8 @@ Window {
         environment: SceneEnvironment {
             // t09：clearColor 随天光乘子 lerp 昼(#9ec6e8)↔夜(#0b1026)；方向固定（PLAN §2-H 非
             // 旋转方向光）。绑定 skyLight → 每周期 tick 自动刷新（debugFast 下 ~30s 一圈）。
-            clearColor: dayNightColor(worldClock.skyLight)
+            // t385：天气暗度（theWorld.weatherDarkness）再向暗阴灰蓝 lerp（雷暴 / 雨天天空变暗）。
+            clearColor: weatherSkyColor()
             backgroundMode: SceneEnvironment.Color
             antialiasingMode: SceneEnvironment.NoAA
         }
@@ -2995,6 +3014,33 @@ Window {
                     console.info("[t157] TorchSmoke Loader status = Ready")
                 else if (status === Loader.Error)
                     console.warn("[t157] TorchSmoke Loader status = Error — Particles3D 运行期不可用，火把烟雾已降级关闭（§2-E）")
+            }
+        }
+
+        // t385 天气降水粒子（雨 / 雪覆盖层）：WeatherParticles.qml 经 Loader 动态加载（同 particleLoader /
+        //   smokeLoader 的 Particles3D 隔离模式 — 模块运行期缺失时仅本 Loader 失败 + 显式告警，Main.qml 仍
+        //   正常加载，§2-E「保持运行而非崩溃，且不静默吞」）。WeatherParticles.qml 内单 ParticleSystem3D +
+        //   雨 / 雪两套 emitter（emitRate 据 weatherStateAt 群系解析的局部降水类型切换；沙漠→无、山地→雪、
+        //   草原/森林→雨）。Node 跟随玩家眼位（粒子云始终笼罩玩家）。
+        //   分层（PLAN §2）：天气态由 World(Game 层) 算（weatherStateAt），呈现层只读消费、绝不反向写。
+        Loader {
+            id: weatherLoader
+            active: true
+            source: "WeatherParticles.qml"
+            onLoaded: {
+                // 领养进同一个 particlesHost 锚点（复用既有 3D 场景节点；否则 Loader 加载到的 Node parent=null
+                // → 孤儿 → 不渲染，t16 同族坑）。
+                weatherLoader.item.parent = particlesHost
+                // 注入 World + PlayerController（WeatherParticles 据此查天气态 + 跟随眼位）。
+                weatherLoader.item.world = theWorld
+                weatherLoader.item.player = player
+                console.info("[t385] WeatherParticles adopted into scene graph")
+            }
+            onStatusChanged: {
+                if (status === Loader.Ready)
+                    console.info("[t385] WeatherParticles Loader status = Ready")
+                else if (status === Loader.Error)
+                    console.warn("[t385] WeatherParticles Loader status = Error — Particles3D 运行期不可用，天气粒子已降级关闭（§2-E）")
             }
         }
 
@@ -5939,6 +5985,10 @@ Window {
             //   纯 QML 桥接（同 tickCropGrowth/tickSaplingGrowth 模式）。tickLeafDecay 内部对稳态（无失撑叶 /
             //   本窗无命中）静默 → 无写入、无重建开销。
             theWorld.tickLeafDecay()
+            // t385 天气 tick：WorldClock 每 100ms tick → 驱动 World.tickWeather（按 dt 推进天气态剩余计时，
+            //   归零即随机转换晴↔雨/雪/雷；态翻转 emit weatherChanged 驱动下方天空变暗 + 粒子切换）。
+            //   纯 QML 桥接（同 tickWaterFlow / tickCropGrowth 模式，PLAN §2 分层不破）。计时未到零开销。
+            theWorld.tickWeather(dt)
             // t384 云层漂移累积：单一时间权威（PLAN §2）—— 云缓慢漂移用世界时钟 tick 推进，不在 QML 另起 Timer。
             //   cloudDrift 在「一个 tile 世界宽」处取模回绕（贴图可无缝平铺 → 回绕点无接缝）。
             window.cloudDrift = (window.cloudDrift + dt * window.kCloudDriftSpeed) % window.kCloudTileWorld
