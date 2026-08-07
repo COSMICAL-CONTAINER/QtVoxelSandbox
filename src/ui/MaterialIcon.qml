@@ -294,6 +294,54 @@ Item {
                 R(10, 4, 2, 1, grainLight)
             }
 
+            // 胡萝卜（0x22F，t400）：猪繁殖食物。MC 风格胡萝卜 = 橙红锥形根（上宽下尖）+ 顶端绿缨。
+            //   机制等价 MC 胡萝卜图标；纯原创自绘（§9a）。配色：root #e8782a（橙红根）/ rootLight #f8a050
+            //   （受光高光）/ rootDark #b04810（根尖 + 暗边 + 横纹）/ leaf #4a8a3a（绿缨）/ leafDark #2a5a1a。
+            const drawCarrot = () => {
+                const root = "#e8782a", rootLight = "#f8a050", rootDark = "#b04810"
+                const leaf = "#4a8a3a", leafDark = "#2a5a1a"
+                // 绿缨（顶端 3-4 条细叶，rows 3..6）
+                R(8, 3, 1, 4, leaf);  R(11, 2, 2, 5, leaf);  R(14, 3, 1, 4, leaf)
+                R(11, 2, 2, 1, leafDark) // 缨底暗收
+                // 根主体（上宽下尖的锥：rows 7..18，逐行收窄）
+                R(8, 7, 8, 2, root)        // 顶最宽（rows 7..8）
+                R(9, 9, 6, 3, root)        // rows 9..11
+                R(9, 12, 6, 3, root)       // rows 12..14
+                R(10, 15, 4, 2, root)      // rows 15..16
+                R(11, 17, 2, 2, root)      // rows 17..18（收尖）
+                // 受光高光（左上橙亮带，表圆柱明暗）
+                R(8, 7, 2, 6, rootLight)
+                R(9, 13, 1, 2, rootLight)
+                // 暗边 + 横纹（右侧 + 几道横纹表「根皮纹理」）
+                R(14, 7, 2, 8, rootDark)   // 右暗边
+                R(8, 10, 8, 1, rootDark)   // 横纹 1
+                R(9, 13, 6, 1, rootDark)   // 横纹 2
+            }
+
+            // 马铃薯（0x230，t400）：猪繁殖食物。MC 风格马铃薯 = 棕黄椭圆块茎 + 凹凸「芽眼」斑点。
+            //   机制等价 MC 马铃薯图标；纯原创自绘（§9a）。配色：skin #c89858（棕黄皮）/ skinLight #e0b878
+            //   （受光高光）/ skinDark #8a6028（暗边 + 芽眼）/ eye #6a4818（深芽眼点）。
+            const drawPotato = () => {
+                const skin = "#c89858", skinLight = "#e0b878", skinDark = "#8a6028", eye = "#6a4818"
+                // 块茎主体（椭圆，rows 6..17，两端收窄表「肾形块茎」）
+                R(8, 6, 8, 1, skin)        // 顶行（窄）
+                R(6, 7, 12, 2, skin)       // rows 7..8（宽）
+                R(5, 9, 14, 6, skin)       // 主体 rows 9..14（最宽）
+                R(6, 15, 12, 2, skin)      // rows 15..16（宽）
+                R(8, 17, 8, 1, skinDark)   // 底行（窄 + 暗阴影）
+                // 受光高光（左上亮带，表「椭圆凸面」）
+                R(8, 6, 8, 1, skinLight)
+                R(6, 7, 4, 2, skinLight)
+                R(5, 9, 4, 3, skinLight)
+                // 两端圆收（左 / 右各暗一格，表「圆头收口」）
+                R(5, 10, 1, 4, skinDark)
+                R(18, 10, 1, 4, skinDark)
+                // 芽眼（3 个深色小斑点，表「块茎芽眼凹」）
+                R(9, 10, 2, 1, eye)
+                R(13, 12, 2, 1, eye)
+                R(10, 14, 2, 1, eye)
+            }
+
             // 面包（0x20A，t238）：3 小麦合成；右键食 +5 饥饿。MC 风格面包 = 金棕长条（顶弧 + 斜划口 +
             //   两端圆收）。机制等价 MC 面包图标（一块烤面包）；纯原创自绘（§9a）。
             //   配色：crust #c88848（面包皮金棕，主体）/ crustLight #e0a868（顶弧受光高光）/ crustDark
@@ -1126,6 +1174,8 @@ Item {
             case 0x22C: drawSpawnEgg("chicken"); break // t398 生物蛋（鸡）
             case 0x22D: drawInkSac();             break // t399 墨囊（杀鱿鱼掉落）
             case 0x22E: drawSpawnEgg("squid");    break // t399 生物蛋（鱿鱼）
+            case 0x22F: drawCarrot();             break // t400 胡萝卜（猪繁殖食物；喂成体猪 → 求偶）
+            case 0x230: drawPotato();             break // t400 马铃薯（猪繁殖食物；喂成体猪 → 求偶）
             default:    drawStick();        break
             }
         }

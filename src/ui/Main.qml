@@ -3626,7 +3626,17 @@ Window {
                     // 触碰 revision 建立依赖（push 位移 / 重力下落 / t239 AI 行走 / 受击红闪 / 死亡移除
                     //   bump revision → 位置 / 配色 / kind / yaw 重算）。t117 FallingBlock 着地 releaseSlot 后
                     //   revision 自增 → delegate 对齐新 entity 数据（同 itemEntities delegate 模式）。
-                    position: { entityManager.revision; return entityManager.posAt(index) }
+                    // t400 幼崽缩放（babyScaleAt：成体 1.0 / 幼崽 0.5）：Node scale 围绕原点（= 碰撞中心 pos）缩放
+                    //   子模型 → 腿底（local y=-halfH）缩到 pos.y - s·halfH，比地面（pos.y - halfH）高 halfH·(1-s)
+                    //   → 幼崽悬空。故 position.y 下移 mobHalfH·(1-s) 把腿底拉回地面（mobHalfH 定义于下方，QML 绑定
+                    //   按名解析不依赖声明顺序）。revision bump（长大 baby→false）→ entBabyScale 重算 → 重缩 + 重定位。
+                    property real entBabyScale: { entityManager.revision; return entityManager.babyScaleAt(index) }
+                    position: {
+                        entityManager.revision
+                        const p = entityManager.posAt(index)
+                        return Qt.vector3d(p.x, p.y - mobHalfH * (1.0 - entBabyScale), p.z)
+                    }
+                    scale: Qt.vector3d(entBabyScale, entBabyScale, entBabyScale)
                     property int entKind: { entityManager.revision; return entityManager.kindAt(index) }
                     // t239 身体朝向：Mob 按 yawAt 转（模型本地 -Z 正对 AI 行走方向，与 player.yaw 同约定）；
                     //   FallingBlock（沙立方）对称 → 不转（bodyYaw=0）。子节点（Mob Model / F3+B 箭头）随之继承。
@@ -3698,6 +3708,22 @@ Window {
                         if (entMobType === EntityManager.MobChicken) return 0.40 - mobHalfH // t398 Chicken 小型鸟（腿底 0.40）
                         if (entMobType === EntityManager.MobSquid) return 0.46 - mobHalfH // t399 Squid 触腕底 0.46（贴 collision 底面）
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
+                    }
+                    // t400 求偶心形指示（spec 繁殖可观察反馈；机制等价 MC 1.0 love mode 心形粒子）：mob 处于求偶期
+                    //   （inLoveAt=true）→ 头顶显一颗小红心（玩家喂食后即时见 → 确认求偶已触发，无此反馈则玩家不知
+                    //   「喂成功了没」）。纯视觉、无碰撞；NoLighting（红线：可见 Model 必须 NoLighting）。心 = 小立方
+                    //   45° Z 旋成菱形（近似心形剪影）。位置 = 碰撞顶面上方 ~0.45 格（mobHalfH + 0.45）；缩放 0.18
+                    //   （小不挡视线）。仅 Mob + inLove 时 visible。静态（避免与 position 绑定冲突的动画；视觉够辨）。
+                    Model {
+                        visible: { entityManager.revision; return entKind === EntityManager.Mob && entityManager.inLoveAt(index) }
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, mobHalfH + 0.45, 0) // 头顶上方（local；Node 已在碰撞中心）
+                        scale: Qt.vector3d(0.18, 0.18, 0.18)
+                        eulerRotation.z: 45 // 菱形（心形近似剪影）
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#ff3a5a" // 求偶红心
+                        }
                     }
                     Model {
                         // mobType 0 / 5：通用测试生物（t95/t239）+ t280 敌对 Bones(5)（骷髅，t283 待做原创模型）

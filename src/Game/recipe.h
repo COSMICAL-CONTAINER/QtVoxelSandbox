@@ -181,6 +181,14 @@ public:
     //   **生物蛋（鱿鱼）** SpawnEggSquidId：创造模式物品，右键地面 → EntityManager::spawnMobTyped 生成 MobSquid。
     static constexpr int InkSacId          = 0x22D; // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac；染料 / 书与笔原料预留）
     static constexpr int SpawnEggSquidId   = 0x22E; // 生物蛋（鱿鱼）：右键地面 → 生成鱿鱼（MobSquid）
+    // t400 繁殖食物（材料段 0x22F/0x230；机制等价 MC 1.0 胡萝卜 / 马铃薯 —— 猪的繁殖食物）。可堆叠 64；非方块
+    //   （材料段）→ 右键走 useBlock「喂食」分支（PlayerController placeBlock 食物分支 → EntityManager::feedMob）：
+    //   命中**成体猪** → 触发求偶期（同种配对产幼崽）。命中非猪 / 幼崽 / 无命中 → 不消耗（无其他 useBlock 用途）。
+    //   MaterialIcon 自绘图标（胡萝卜橙红锥根 + 绿缨 / 马铃薯棕黄椭圆块茎），创造调色板补全便于测试繁殖。
+    //   名称 / 图标全原创（§9 区隔，零 MC 资产 / 专名）。与小麦（牛 / 羊食物）/ 种子（鸡食物）一并构成 4 种被动
+    //   生物的繁殖食物表（EntityManager::feedMob 据 mobType 判食物匹配）。
+    static constexpr int CarrotId          = 0x22F; // 胡萝卜：猪繁殖食物（喂成体猪 → 求偶；机制等价 MC 1.0 carrot）
+    static constexpr int PotatoId          = 0x230; // 马铃薯：猪繁殖食物（喂成体猪 → 求偶；机制等价 MC 1.0 potato）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

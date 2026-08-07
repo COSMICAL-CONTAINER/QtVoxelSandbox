@@ -316,6 +316,10 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RawChickenId),      // 生鸡肉：杀鸡掉落
         int(RecipeRegistry::CookedChickenId),   // 熟鸡肉：鸡燃烧致死掉落
         int(RecipeRegistry::EggId),             // 蛋：鸡周期性下蛋掉落
+        // t400 繁殖食物（机制等价 MC 1.0 胡萝卜 / 马铃薯 —— 猪的繁殖食物）：创造调色板补全便于测试繁殖
+        //   （喂成体猪触发求偶 → 同种配对产幼崽）。生存由（未来）种植 / 战利品获得；可堆叠 64；非方块 → 右键喂食。
+        int(RecipeRegistry::CarrotId),          // 胡萝卜：猪繁殖食物（喂成体猪 → 求偶）
+        int(RecipeRegistry::PotatoId),          // 马铃薯：猪繁殖食物（喂成体猪 → 求偶）
         // t399 鱿鱼相关材料（机制等价 MC 1.0 鱿鱼死亡掉墨囊；生存由杀鱿鱼获得，创造调色板补全便于测试 / 装饰）。
         //   可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘图标。
         int(RecipeRegistry::InkSacId)           // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac）
@@ -501,6 +505,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::CookedChickenId)   return QStringLiteral("熟鸡肉");   // 鸡燃烧致死掉落
         if (blockId == RecipeRegistry::EggId)             return QStringLiteral("蛋");       // 鸡周期性下蛋掉落
         if (blockId == RecipeRegistry::SpawnEggChickenId) return QStringLiteral("生物蛋（鸡）"); // 右键地面 → 生成鸡
+        // t400 繁殖食物（机制等价 MC 1.0 胡萝卜 / 马铃薯 —— 猪的繁殖食物）。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::CarrotId)          return QStringLiteral("胡萝卜");   // 猪繁殖食物（喂成体猪 → 求偶）
+        if (blockId == RecipeRegistry::PotatoId)          return QStringLiteral("马铃薯");   // 猪繁殖食物（喂成体猪 → 求偶）
         // t399 鱿鱼相关（机制等价 MC 1.0 鱿鱼；§9 区隔改名 + 原创名）。
         if (blockId == RecipeRegistry::InkSacId)        return QStringLiteral("墨囊");       // 杀鱿鱼掉落
         if (blockId == RecipeRegistry::SpawnEggSquidId) return QStringLiteral("生物蛋（鱿鱼）"); // 右键地面 → 生成鱿鱼

@@ -1528,6 +1528,53 @@ void PlayerController::placeBlock()
         }
         return; // 空桶（舀水 / 舀岩浆成功与否）不再走放置路径
     }
+    // t400 繁殖喂食 useBlock（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding）：
+    //   手持繁殖食物（小麦 WheatId / 胡萝卜 CarrotId / 马铃薯 PotatoId / 种子 SeedId）右键 → 在主选体射线之外
+    //   **独立**跑一条「mob 命中射线」（findMobHit，同剪刀剪羊 / 攻击路径）；命中**成体**可繁殖 mob 且食物匹配
+    //   该物种（牛/羊=小麦、猪=胡萝卜·马铃薯、鸡=种子）→ EntityManager::enterLoveMode（设 loveTimer + emit）+
+    //   生存消耗 1 食物 / 创造不耗 + 挥手。命中非 mob / 食物不匹配 / 幼崽 / 冷却中 / 已求偶 / 无命中 → 未喂。
+    //   **不要求 m_hasHit**（命中方块）：喂食瞄准的是 mob（实体），不依赖方块命中格；瞄准悬空 mob 亦可喂
+    //   （同剪刀剪羊模式）。食物非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前
+    //   分流（同桶 / 锄 / 蛋 / 剪刀分支模式）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可喂。
+    //   **种子特例**：种子既是鸡的食物又是种植物品（t236 右键耕地种小麦）→ 未命中鸡（或命中但非鸡 / 非成体 /
+    //   冷却中）时**不 return**，fall-through 到下方种子种植分支（右键耕地仍可种植）；其余 3 种食物（小麦 / 胡
+    //   萝卜 / 马铃薯）无其他 useBlock 用途 → 未喂即 return（不放置方块）。食物匹配判定在 Game 层（本处）做：
+    //   物品 id 属 RecipeRegistry（Game 层），Entities 层的 enterLoveMode 不向上依赖（PLAN §2 分层）。
+    if (m_hotbar && m_world && m_entityManager
+        && (heldItemId == RecipeRegistry::WheatId
+            || heldItemId == RecipeRegistry::CarrotId
+            || heldItemId == RecipeRegistry::PotatoId
+            || heldItemId == RecipeRegistry::SeedId)) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        bool fed = false;
+        if (mobIdx >= 0) {
+            const int mt = m_entityManager->mobTypeAt(mobIdx);
+            // 食物匹配（Game 层判定，RecipeRegistry id + EntityManager mobType）：
+            //   牛/羊 → 小麦；猪 → 胡萝卜 / 马铃薯；鸡 → 种子。机制等价 MC 1.0 各动物对应繁殖食物。
+            bool match = false;
+            if (mt == EntityManager::MobCow || mt == EntityManager::MobSheep)
+                match = (heldItemId == RecipeRegistry::WheatId);
+            else if (mt == EntityManager::MobPig)
+                match = (heldItemId == RecipeRegistry::CarrotId || heldItemId == RecipeRegistry::PotatoId);
+            else if (mt == EntityManager::MobChicken)
+                match = (heldItemId == RecipeRegistry::SeedId);
+            // enterLoveMode 内含成体 / 冷却 / 已求偶 / 可繁殖 mob 守卫；返 true 才算喂成功（消耗食物）。
+            if (match) fed = m_entityManager->enterLoveMode(mobIdx);
+        }
+        if (fed) {
+            if (m_mode != Creative)
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 食物（创造不耗 → 无限喂）
+            m_lastPlaceMs = now;
+            emit swingArm(); // 喂食也是一次「使用」动作 → 挥手（t29）
+            return; // 喂食成功 → 不再走放置 / 种植路径
+        }
+        // 未喂（无 mob / 食物不匹配 / 幼崽 / 冷却 / 已求偶）：
+        //   种子 fall-through 到下方种植分支（右键耕地仍可种小麦）；其余 3 种食物无其他用途 → return（不放置）。
+        if (heldItemId != RecipeRegistry::SeedId) return;
+    }
     // t234 锄头 useBlock（spec「持锄右键泥土/草方块→变耕地」）：手持为 Hoe 类工具（木/石/铁锄）+ 命中格为
     //   Dirt/Grass → 该格转 Farmland（干/湿由 isFarmlandMoist 据水源邻近快照判定写 state bit0）。机制等价
     //   MC 1.0 锄耕地（机制对齐，非名词照搬）。锄非方块（工具段 id>=0x100）→ selectedBlock 归 Air，须在下方

@@ -205,6 +205,23 @@ public:
     //   （机制等价 MC 1.0：剪羊毛只对有毛的羊生效，已裸的羊右键无反应）。bump revision → QML 翻羊为裸外观。
     //   Q_INVOKABLE 兼调试 + playercontroller placeBlock shears 分支双入口（playercontroller 是 C++ 直调）。
     Q_INVOKABLE void shearSheep(int i);
+    // t400 触发求偶期（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding 的 love mode）。
+    //   第 i 个**成体**可繁殖 mob（pig/cow/sheep/chicken）+ 非冷却 + 未在求偶 → 进求偶期（loveTimer=kLoveDuration）
+    //   + bump revision（QML 显心）+ 返 true。幼崽 / 冷却中 / 已求偶 / 非可繁殖 mob / dead / 越界 → 返 false。
+    //   **食物匹配**（牛/羊=小麦 / 猪=胡萝卜·马铃薯 / 鸡=种子）由 caller（PlayerController，Game 层）判 —— 物品 id
+    //   属 Game 层（RecipeRegistry），Entities 层不向上依赖（PLAN §2）。caller 先据 mobTypeAt + 持物判匹配，再调本方法。
+    //   Q_INVOKABLE 兼调试 + PlayerController placeBlock 食物分支双入口（playercontroller 是 C++ 直调）。
+    Q_INVOKABLE bool enterLoveMode(int i);
+    // t400 第 i 个 mob 是否处于求偶期（loveTimer>0）。QML delegate 据它显心形 Model（繁殖可观察反馈 ——
+    //   玩家喂食后立即见心，确认求偶已触发）。非 mob / 越界 / 未求偶 → false。
+    Q_INVOKABLE bool inLoveAt(int i) const;
+    // t400 第 i 个 mob 的模型缩放（幼崽 kBabyScale=0.5 / 成体 1.0）。QML delegate Node scale 绑它 → 幼崽半大
+    //   （机制等价 MC 幼崽体型小）。非 mob / 越界 → 1.0。revision 在长大（baby→false）时 bump 让 QML 重缩。
+    Q_INVOKABLE float babyScaleAt(int i) const;
+    // t400 当前**可繁殖**被动 mob 数（pig/cow/sheep/chicken 的成体 + 幼崽，alive 且非 dead）。供繁殖上限判定
+    //   （kPassiveMobCap；达上限 → 配对不再产幼崽，防种群爆炸，spec「种群上限」）。hostile / MobTest /
+    //   MobSquid / FallingBlock / Item 不计。const 只读自身数据。
+    Q_INVOKABLE int passiveBreedableCount() const;
     // t239 mob 血量 / 受击 / 死亡态（呈现层心条 / 红闪 / 死亡动画；t242 攻击 HUD 读）：
     //   healthAt / maxHealthAt = 当前 / 上限血量（供心条 / 攻击反馈）；deadAt = 死亡态（QML 播死亡动画）；
     //   hurtFlashAt = 受击红闪剩余比 0..1（>0 → QML baseColor 红，机制等价 MC mob 受击 10 tick 红闪）。
@@ -491,6 +508,16 @@ private:
         //   （机制等价 MC 1.0 鱿鱼喷水推进：周期性上冲后缓沉 = 节律性上下游动）。离水不推进（搁浅态走 aiWander 慢爬）。
         //   spawn 时随机化初值防批量 spawn 的鱿鱼同步喷水（同 ambientTimer 错峰模式）。
         float swimTimer = 0.0f;      // 到下次喷水推进倒计时（秒；仅 MobSquid 用）
+        // t400 繁殖态（仅 MobPig/MobCow/MobSheep/MobChicken 用；其余 mob 留默认 0/false 不触发）：
+        //   机制对齐 MC 1.0 breeding —— 喂对应食物触发「求偶期」（love mode）→ 同种两求偶者相遇产幼崽 + 双方
+        //   进繁殖冷却；幼崽定时长大成体。求偶期主动寻偶（tick 内 findNearestMate 设 yaw 朝配偶 → aiWander 行走）。
+        //   loveTimer>0 = 求偶期（喂食触发，自然衰减；期内主动走向同类求偶者 + 与之接触产幼崽）；归零即退出。
+        //   breedCooldown = 繁殖后冷却（防同对 mob 立即再繁；期内喂食不触发求偶，机制等价 MC 繁殖冷却）。
+        //   baby=true = 幼崽（半大模型 + 不可繁殖 / 不可喂食触发求偶）；growTimer 倒计时到 0 → 长大成体。
+        float loveTimer = 0.0f;      // 求偶期倒计时（秒；>0 求偶；喂食触发，tick 自然衰减）
+        float breedCooldown = 0.0f;  // 繁殖后冷却（秒；>0 喂食不触发求偶；防刷屏）
+        bool  baby = false;          // 是否幼崽（QML 据 babyScaleAt 缩 0.5；不可繁殖 / 不可喂食触发求偶）
+        float growTimer = 0.0f;      // 幼崽长大倒计时（秒；baby=true 时推进，到 0 → baby=false 长大成体）
         // t250 环境音态（仅 Mob kind 用；FallingBlock/Item 留默认不触发）：
         float stepAccum = 0.0f;  // walkPhase 半步累加器（弧度）；行走时累加 moveSpeed*dt*kWalkFreq，≥π → emit mobStep
         float ambientTimer = 0.0f; // 到下次 idle 叫声的倒计时（秒）；≤0 → emit mobAmbient + 重置随机周期
@@ -563,6 +590,12 @@ private:
         m_freeSlots.push_back(idx);
         --m_liveCount;
     }
+    // t239 生物基类统一生成核心（spawnMobTyped 的实现主体，t400 抽出便于繁殖产幼崽复用）：构造 Entity（碰撞箱 /
+    //   pos / 血量 / AI 初值 / 护甲随机等同 spawnMobTyped）+ acquireSlot，返回槽索引（达 kCap → -1 + 告警）。
+    //   **不 bump revision / 不 emit**（由 caller 据「本次是否需刷新 QML」决定 —— spawnMobTyped 立即 emit，
+    //   tickBreeding 批量产幼崽后统一一次 emit，避免高频扇出 notify 风暴，同 t320/t354 批量收口纪律）。
+    //   t400 caller 据返回 slot 设 baby=true / growTimer（幼崽态）后再由 caller 统一 emit。
+    int spawnMobCore(int x, int y, int z, int mobType, const QString &color, int maxHealth);
 
     // t239 AI wander 自主移动（tick 内 Mob 分支调）：时间片倒计时到 → 随机选向 + idle/行走；行走按 yaw 逐轴
     //   （X 后 Z）世界边界 clamp + 方块碰撞撤回。返回是否真位移（驱动 dirty + moveSpeed）。worldW/worldD =
@@ -656,6 +689,22 @@ private:
     //   → 不发 broken/placed，免粒子/音/掉落噪音）。返回是否在前方找到草丛（TallGrass）。
     //   目标格 = 沿 yaw 朝向 reach=0.7 前方列、y=身体格（草丛所在）+ 其下地表格（草方块）；OOB → 安全 false。
     bool sheepEatGrass(Entity &e, World *world, float worldW, float worldD, bool consume);
+    // t400 繁殖 tick（tick 末尾调，主实体循环之外 —— 幼崽生成走 acquireSlot 可能 push_back，主循环持 Entity&
+    //   引用期间不可 push_back 致其失效，故集中到本末段）：
+    //   (1) 衰减所有 mob 的 loveTimer / breedCooldown / 幼崽 growTimer（growTimer 到 0 → baby=false 长大）。
+    //   (2) 求偶期成体配对 —— 同种（pig/cow/sheep/chicken）双方均求偶（loveTimer>0）且非幼崽 / 非冷却 + XZ 中心
+    //       距 ≤ kBreedRange → 产 1 幼崽（spawnMobCore 标 baby=true + growTimer）+ 双方进 kBreedCooldown 冷却 +
+    //       退求偶（loveTimer=0）。受 kPassiveMobCap 钳制（达上限不再产，spec「种群上限」）。
+    //   返是否变更（驱动 dirty + bump revision + emit）。配对扫描 O(n²) 但 n ≤ kCap=64 可忽略。
+    //   分层（PLAN §2）：只读自身实体数据 + 调 spawnMobCore（同层）；无向下 / 向上依赖。
+    bool tickBreeding(qreal dt);
+    // t400 最近求偶配偶查找（tick Mob 分支 love-mode 寻偶调）：返最近一只 alive 且 !dead 且 !baby 且
+    //   loveTimer>0 且 mobType==e.mobType 的 mob 索引（排除 self）；无 → -1。供求偶者设 yaw 朝配偶 → aiWander
+    //   行走相遇。O(n) 每 mob 每帧，n≤64 可忽略。const 只读。
+    int findNearestMate(int idx) const;
+    // t400 mobType 是否**可繁殖被动生物**（pig/cow/sheep/chicken 之一）。求偶寻偶 / 配对 / feedMob 食物匹配
+    //   均先据它门控（hostile / MobTest / MobSquid 不可繁殖）。静态纯函数。
+    static bool isBreedableType(int mobType);
 
     static constexpr int kCap = 64;            // 实体数上限（测试用，防溢出）
     static constexpr float kGravity = 28.0f;   // 重力加速度（blocks/s²；与玩家/掉落物同值，世界手感一致）
@@ -788,6 +837,24 @@ private:
     static constexpr float kSquidSwimIntervalMin = 1.5f;  // 喷水推进周期下限（秒）
     static constexpr float kSquidSwimIntervalMax = 3.0f;  // 喷水推进周期上限（秒）
     static constexpr float kSquidSwimSpeed       = 0.8f;  // 水中水平漂游速度（blocks/s；慢漂非疾游）
+    // t400 繁殖常量（spec t400「同种 2 只喂对应食物 → 生幼崽；种群上限防泛滥」；机制对齐 MC 1.0 breeding：
+    //   喂食触发 love mode → 同种配对产幼崽 + 5 分钟冷却 + 幼崽 20 分钟长大；数值为本工程小世界量身调，
+    //   非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）。
+    //   - kLoveDuration：求偶期持续秒数。MC love mode ~30s 找配偶窗口；取 30（求偶者有充足时间被寻偶 AI 拉到一起）。
+    //   - kBreedCooldown：繁殖后冷却秒数。MC 5 分钟；取 60（明显长于求偶期 30 → 一对 mob 1 分钟内只繁 1 次，
+    //     防刷屏；又远短于 MC 5 分钟便于测试观察「冷却中再喂无效」）。
+    //   - kBabyGrowTime：幼崽长大秒数。MC 20 分钟；取 120（2 分钟，肉眼可观察「幼崽渐大成体」而不冗长）。
+    //   - kBreedRange：配对 XZ 中心距上界（blocks）。MC 求偶者贴近即繁；取 3.0（mob 半宽 0.4 + 接触余量 →
+    //     中心距 3 内算「相遇」；求偶期主动寻偶 AI 把它们拉到一起，故无需大半径）。
+    //   - kPassiveMobCap：可繁殖被动 mob 总数上限（pig/cow/sheep/chicken 成体 + 幼崽）。达上限 → 配对不再产
+    //     幼崽（防种群爆炸；spec「种群上限」）。取 24（小世界合理密度；与 kHostileMobCap=30 同量级）。
+    //   - kBabyScale：幼崽模型缩放（QML delegate Node scale via babyScaleAt）。MC 幼崽 ~0.5 倍体型；取 0.5。
+    static constexpr float kLoveDuration    = 30.0f; // 求偶期持续（秒；MC love mode ~30s 窗口）
+    static constexpr float kBreedCooldown   = 60.0f; // 繁殖后冷却（秒；防同对立即再繁；MC 5 分钟，本工程取 60 便测试）
+    static constexpr float kBabyGrowTime    = 120.0f; // 幼崽长大（秒；MC 20 分钟，本工程取 120 便观察）
+    static constexpr float kBreedRange      = 3.0f;  // 配对 XZ 中心距上界（blocks；求偶寻偶 AI 把双方拉到一起后触发）
+    static constexpr int   kPassiveMobCap   = 24;    // 可繁殖被动 mob 总数上限（防种群爆炸；spec「种群上限」）
+    static constexpr float kBabyScale       = 0.5f;  // 幼崽模型缩放（babyScaleAt 返它；成体 1.0）
 public:
     // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
     //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。

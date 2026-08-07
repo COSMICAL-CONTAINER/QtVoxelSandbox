@@ -82,11 +82,26 @@ void EntityManager::spawnMob(int x, int y, int z)
 
 // t239 生物基类统一生成入口：满血 + 未死 + AI 初值（wanderTimer=0 → tick 首帧即选第一次向）。
 //   达 kCap 跳过 + 告警（防溢出，spec「实体数量有上限」）。bump revision → QML Repeater 追加 delegate。
+//   t400：实体构造 + 入槽抽到 spawnMobCore（便于繁殖产幼崽复用）；本入口仅包一层 acquire 后立即 emit。
 void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth)
 {
+    const int slot = spawnMobCore(x, y, z, mobType, color, maxHealth);
+    if (slot < 0) return; // 达 kCap（spawnMobCore 内已告警）
+    ++m_revision;
+    emit entitiesChanged();
+    qCInfo(lcEnt) << "spawned mob type" << mobType << "at" << x << y << z
+                  << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+}
+
+// t239 生物基类统一生成核心（spawnMobTyped 实现主体；t400 抽出便于繁殖产幼崽复用）：构造 Entity（碰撞箱 /
+//   pos / 血量 / AI 初值 / 护甲随机）+ acquireSlot，返槽索引（达 kCap → -1 + 告警）。不 bump revision / 不 emit
+//   （caller 决定 emit 时机：spawnMobTyped 立即 emit；tickBreeding 批量产幼崽后统一一次 emit，避免高频扇出
+//   notify 风暴，同 t320/t354 批量收口纪律）。
+int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString &color, int maxHealth)
+{
     if (m_liveCount >= kCap) {
-        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); spawnMobTyped skipped at" << x << y << z;
-        return;
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); spawnMobCore skipped at" << x << y << z;
+        return -1;
     }
     Entity e;
     // t252/t293 碰撞箱按 mobType 设。t293 收紧贴合 MobModel 身体（旧值「大一圈」：被动 0.9 宽 vs 躯干 0.6~0.7、
@@ -172,11 +187,10 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
             }
         }
     }
-    acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
-    qCInfo(lcEnt) << "spawned mob type" << mobType << "at" << x << y << z
-                  << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+    // t400 繁殖态初值：Entity 默认成员初始化已把 loveTimer/breedCooldown/growTimer=0、baby=false，move 入槽时
+    //   覆盖槽位旧值（slot 复用防残留 —— 上一任槽位若曾求偶 / 繁殖 / 是幼崽，复用时清回成体默认）。故新生 mob
+    //   恒为成体、未求偶、可繁殖；幼崽态由 tickBreeding 产时单独设 baby=true + growTimer。无需在此显式赋。
+    return acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）；返槽索引
 }
 
 // t117 生成下落方块实体：存格中心 + blockId + pushable=false + kind=FallingBlock。bump revision →
@@ -779,6 +793,171 @@ void EntityManager::shearSheep(int i)
     emit sheepSheared(dx, dy, dz);
     ++m_revision;
     emit entitiesChanged(); // bump → QML delegate 据 shearedAt 翻羊为裸外观
+}
+
+// t400 mobType 是否可繁殖被动生物（pig/cow/sheep/chicken 之一）。hostile / MobTest / MobSquid 不可繁殖。
+//   feedMob 食物匹配 / 求偶寻偶 / 配对均先据它门控。机制等价 MC 1.0 仅被动 farm 动物可繁殖。
+bool EntityManager::isBreedableType(int mobType)
+{
+    return mobType == MobPig || mobType == MobCow || mobType == MobSheep || mobType == MobChicken;
+}
+
+// t400 触发求偶期（spec「喂对应食物 → 求偶」；机制等价 MC 1.0 breeding 的 feed-to-enter-love-mode）。
+//   成体可繁殖 mob + 非冷却 + 未在求偶 → 进求偶期（loveTimer=kLoveDuration）+ 返 true。
+//   幼崽 / 冷却中 / 已求偶 / 非可繁殖 mob / dead / 越界 → 返 false（caller 不消耗食物）。
+//   **食物匹配**由 caller（PlayerController Game 层）判：物品 id 属 RecipeRegistry（Game 层），Entities 层不向上
+//   依赖（PLAN §2）。caller 先据 mobTypeAt + 持物判「食物是否匹配该物种」，匹配才调本方法。
+//   bump revision + emit → QML delegate 据 inLoveAt 显心（玩家即时见求偶反馈）。同 shearSheep 修改 + emit 模式。
+bool EntityManager::enterLoveMode(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || !e.alive || e.dead) return false;   // 仅活体 mob 可触发
+    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken 可繁殖
+    if (e.baby) return false;                                 // 幼崽未成熟，不可触发求偶
+    if (e.breedCooldown > 0.0f) return false;                 // 繁殖冷却中 → 喂食无效（防刷屏；caller 保住食物）
+    if (e.loveTimer > 0.0f) return false;                     // 已求偶 → 不重复触发（防一次喂多个叠加）
+    e.loveTimer = kLoveDuration; // 进求偶期（tick 内衰减 + 寻偶 AI 把它拉向同类求偶者）
+    qCInfo(lcEnt) << "mob slot" << i << "type" << e.mobType << "-> love mode" << kLoveDuration << "s";
+    ++m_revision;
+    emit entitiesChanged(); // bump → QML 据 inLoveAt 显心
+    return true; // caller 据返值消耗 1 食物（生存）
+}
+
+// t400 第 i 个 mob 是否处于求偶期（loveTimer>0）。QML delegate 据它显心形 Model（繁殖可观察反馈）。
+bool EntityManager::inLoveAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || !e.alive) return false;
+    return e.loveTimer > 0.0f;
+}
+
+// t400 第 i 个 mob 的模型缩放（幼崽 kBabyScale=0.5 / 成体 1.0）。QML delegate Node scale 绑它。
+float EntityManager::babyScaleAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 1.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || !e.alive) return 1.0f;
+    return e.baby ? kBabyScale : 1.0f;
+}
+
+// t400 当前可繁殖被动 mob 数（pig/cow/sheep/chicken 成体 + 幼崽，alive 且非 dead）。供繁殖上限判定。
+int EntityManager::passiveBreedableCount() const
+{
+    int n = 0;
+    for (const Entity &e : m_entities) {
+        if (!e.alive || e.dead || e.kind != Mob) continue;
+        if (isBreedableType(e.mobType)) ++n;
+    }
+    return n;
+}
+
+// t400 最近求偶配偶查找：返最近一只 alive && !dead && !baby && loveTimer>0 && mobType==e.mobType 的 mob 索引
+//   （排除 self）；无 → -1。供求偶者设 yaw 朝配偶 → aiWander 行走相遇。O(n) 每 mob 每帧。
+int EntityManager::findNearestMate(int idx) const
+{
+    if (idx < 0 || idx >= int(m_entities.size())) return -1;
+    const Entity &self = m_entities[size_t(idx)];
+    int best = -1;
+    float bestDistSq = 0.0f;
+    for (int j = 0; j < int(m_entities.size()); ++j) {
+        if (j == idx) continue;
+        const Entity &m = m_entities[size_t(j)];
+        if (!m.alive || m.dead || m.kind != Mob) continue;
+        if (m.baby || m.loveTimer <= 0.0f) continue;     // 仅同样在求偶的成体算配偶
+        if (m.mobType != self.mobType) continue;          // 同种
+        const float dx = m.pos.x() - self.pos.x();
+        const float dz = m.pos.z() - self.pos.z();
+        const float d2 = dx * dx + dz * dz;
+        if (best < 0 || d2 < bestDistSq) { best = j; bestDistSq = d2; }
+    }
+    return best;
+}
+
+// t400 繁殖 tick（tick 末尾调；spec「同种 2 只喂对应食物 → 生幼崽；种群上限」；机制对齐 MC 1.0 breeding）。
+//   (1) 衰减 loveTimer / breedCooldown / 幼崽 growTimer（growTimer 到 0 → baby=false 长大成体）。
+//   (2) 求偶期成体配对：同种双方均求偶 + XZ 中心距 ≤ kBreedRange → 产 1 幼崽（spawnMobCore 标 baby + growTimer）
+//       + 双方进 kBreedCooldown 冷却 + 退求偶（loveTimer=0）。受 kPassiveMobCap 钳制（达上限不再产）。
+//   返是否变更（驱动 tick 末尾 dirty + bump revision + emit）。配对扫描 O(n²)，n≤kCap=64 可忽略。
+//   幼崽生成走 acquireSlot（可能 push_back）—— 主实体循环持 Entity& 引用期间不可 push_back（致引用失效），
+//   故本段在主循环之外（tick 末尾）做，且配对阶段仅记 pending、统一在末段 spawn（防引用失效 + 批量收口 emit）。
+bool EntityManager::tickBreeding(qreal dt)
+{
+    if (m_entities.empty()) return false;
+    bool dirty = false;
+    // (1) 衰减所有 mob 的求偶 / 冷却 / 幼崽长大计时。
+    for (Entity &e : m_entities) {
+        if (!e.alive || e.kind != Mob) continue;
+        if (e.loveTimer > 0.0f) {
+            e.loveTimer -= float(dt);
+            if (e.loveTimer <= 0.0f) { e.loveTimer = 0.0f; dirty = true; } // 退求偶 → 收心（QML 隐心）
+        }
+        if (e.breedCooldown > 0.0f) {
+            e.breedCooldown -= float(dt);
+            if (e.breedCooldown < 0.0f) e.breedCooldown = 0.0f;
+        }
+        if (e.baby) {
+            e.growTimer -= float(dt);
+            if (e.growTimer <= 0.0f) {
+                e.growTimer = 0.0f;
+                e.baby = false; // 长大成体（QML babyScaleAt 1.0 → 重缩回正常体型）
+                dirty = true;
+                qCInfo(lcEnt) << "baby grew up at pos" << e.pos << "type" << e.mobType;
+            }
+        }
+    }
+    // (2) 配对：求偶期成体同种相遇 → 产幼崽。先算「本帧还可产几只」= 上限 − 当前可繁殖数（防超 cap）。
+    //   配对阶段仅 reset 父母 loveTimer / 设冷却 + 记 pending 幼崽；spawn 推迟到末段（批量 + 避引用失效）。
+    struct PendingBaby { float x, y, z; int mobType; QString color; };
+    std::vector<PendingBaby> pending;
+    int remaining = kPassiveMobCap - passiveBreedableCount();
+    const float rangeSq = kBreedRange * kBreedRange;
+    const int n = int(m_entities.size());
+    for (int idx = 0; idx < n && remaining > 0; ++idx) {
+        Entity &e = m_entities[size_t(idx)];
+        if (!e.alive || e.dead || e.kind != Mob) continue;
+        if (!isBreedableType(e.mobType) || e.baby) continue;
+        if (e.loveTimer <= 0.0f || e.breedCooldown > 0.0f) continue; // 须在求偶且非冷却
+        // 找最近的同种求偶配偶（j>idx 避免重复配对：idx 配 j 后 j 的 loveTimer 归 0，后续到 j 自动跳过）。
+        for (int j = idx + 1; j < n; ++j) {
+            Entity &m = m_entities[size_t(j)];
+            if (!m.alive || m.dead || m.kind != Mob) continue;
+            if (m.mobType != e.mobType || m.baby) continue;
+            if (m.loveTimer <= 0.0f || m.breedCooldown > 0.0f) continue;
+            const float dx = m.pos.x() - e.pos.x();
+            const float dz = m.pos.z() - e.pos.z();
+            const float dy = m.pos.y() - e.pos.y();
+            if (dx * dx + dz * dz > rangeSq) continue;        // XZ 中心距超 KBreedRange → 未相遇
+            if (std::abs(dy) > 2.0f) continue;                 // 垂直跨层不算（防跨地板盲配）
+            // 配对成功：双方退求偶 + 进冷却；幼崽生在双方中点（地表上方，重力 tick 贴地）。
+            e.loveTimer = 0.0f; e.breedCooldown = kBreedCooldown;
+            m.loveTimer = 0.0f; m.breedCooldown = kBreedCooldown;
+            const float bx = (e.pos.x() + m.pos.x()) * 0.5f;
+            const float by = std::min(e.pos.y(), m.pos.y());
+            const float bz = (e.pos.z() + m.pos.z()) * 0.5f;
+            pending.push_back({ bx, by, bz, e.mobType, e.color });
+            --remaining;
+            dirty = true;
+            qCInfo(lcEnt) << "breed pair: slots" << idx << "&" << j << "type" << e.mobType
+                          << "-> baby pending at" << bx << by << bz
+                          << "(passive count toward cap" << (kPassiveMobCap - remaining) << "/" << kPassiveMobCap << ")";
+            break; // e 已配对，处理下一个 idx
+        }
+    }
+    // 末段 spawn 幼崽（acquireSlot 可能 push_back —— 此时已脱离主循环的 Entity& 引用，安全）。
+    //   一次循环 spawn 多只，tick 末尾统一 bump revision + emit 一次（批量收口，避免 N 只幼崽 N 次 notify 风暴）。
+    for (const PendingBaby &b : pending) {
+        // spawnMobCore 不 emit；幼崽色继承父代 color（pig/cow/sheep 走 MobModel 不读 color，占位串无妨）。
+        const int slot = spawnMobCore(int(std::floor(b.x)), int(std::floor(b.y)), int(std::floor(b.z)),
+                                      b.mobType, b.color, 0);
+        if (slot >= 0) {
+            Entity &baby = m_entities[size_t(slot)];
+            baby.baby = true;            // 标幼崽（QML babyScaleAt → 0.5 缩小）
+            baby.growTimer = kBabyGrowTime; // 长大倒计时
+        }
+    }
+    return dirty;
 }
 
 // t239 mob 当前血量（呈现层心条 / 攻击反馈）。非 Mob / 越界 → 0。
@@ -2014,6 +2193,24 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (e.mobType == MobSquid) {
                     if (aiSquid(e, float(dt), world, worldW, worldD, speedScale)) dirty = true;
                 } else {
+                // t400 求偶寻偶（spec「喂食 → 求偶 → 同种配对」；机制等价 MC 1.0 love mode 寻偶）：成体可繁殖 mob
+                //   在求偶期（loveTimer>0）→ 覆盖 wander 的随机选向，把 yaw 钉向最近同种求偶配偶 + 强制行走 +
+                //   短置 wanderTimer（防 aiWander 本帧重新随机选向）→ aiWander 沿该 yaw 行走靠近配偶，使两求偶者
+                //   主动相遇进入配对距离（tickBreeding 末段配对产幼崽）。无配偶（仅一方求偶）/ 非求偶 → 走原 wander。
+                //   寻偶仅设 yaw/speed/timer（不改 pos），实际位移交 aiWander（复用其逐轴碰撞撤回 + 边界 clamp，
+                //   防穿墙 / 出界）。squid loveTimer 恒 0（不可繁殖）→ 本块对其 no-op。
+                if (e.loveTimer > 0.0f && !e.baby && isBreedableType(e.mobType)) {
+                    const int mate = findNearestMate(idx);
+                    if (mate >= 0) {
+                        const Entity &mp = m_entities[size_t(mate)];
+                        const float mdx = mp.pos.x() - e.pos.x();
+                        const float mdz = mp.pos.z() - e.pos.z();
+                        // 朝配偶（dir=(-sin,0,-cos) 约定：yaw=atan2(-Δx,-Δz) 使模型 -Z 正对配偶）。
+                        e.yawRad = std::atan2(-mdx, -mdz);
+                        e.wanderSpeed = kWalkSpeed; // 强制行走（覆盖 idle 可能）
+                        e.wanderTimer = 0.4f;       // 防 aiWander 本帧重新随机选向（0.4s > 一帧 dt，下帧再重设）
+                    }
+                }
                 if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(dt);
                 if (aiWander(e, float(dt), world, worldW, worldD, speedScale)) dirty = true;
                 if (isSheep && e.eatCooldown <= 0.0f && e.wanderSpeed <= 0.0f) {
@@ -2293,6 +2490,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     //   泄漏。release 不 shift 索引，顺序无关（逆序仅为保留与旧 erase 路径一致的可读性）。
     for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it)
         releaseSlot(*it);
+
+    // t400 繁殖 tick（主实体循环之外 —— 幼崽生成 acquireSlot 可能 push_back，主循环持 Entity& 引用期间不可 push_back
+    //   致其失效）：衰减求偶 / 冷却 / 幼崽长大计时 + 求偶配对产幼崽（受 kPassiveMobCap 钳制）。dirty 合入本 tick
+    //   末尾统一一次 bump + emit（批量收口，避免 N 幼崽 N 次 notify 风暴，同 t320/t354 纪律）。
+    if (tickBreeding(dt)) dirty = true;
 
     if (dirty || !toRemove.empty()) { ++m_revision; emit entitiesChanged(); }
 }
