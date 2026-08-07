@@ -2605,11 +2605,14 @@ Window {
             }
         }
 
-        // 挖掘裂纹叠层（t34）：仅生存持续挖掘时显（miningStage >= 0；创造瞬破不进入累积态，
-        // stage=-1 → 隐藏）。叠在目标方块上（position = miningBlock + 0.5 中心），略放大 1.005
-        // 防 z-fight；baseColorMap 按 miningStage 切 6 阶裂纹 PNG（0/20/40/60/80/100%）。
-        // 分层（PLAN §2）：呈现层只读 player.miningStage（Game 层算），不反向写进度；裂纹贴图
-        // 自绘原创（tools/build_cracks.py 程序生成，§9 override (a)）。
+        // 挖掘裂纹叠层（t34 / t410 异形贴合）：仅生存持续挖掘时显（miningStage >= 0；创造瞬破不进入
+        //   累积态，stage=-1 → 隐藏）。叠在目标方块上（position = miningBlock + 0.5 中心）；baseColorMap 按
+        //   miningStage 切 6 阶裂纹 PNG（0/20/40/60/80/100%）。
+        //   t410：裂纹叠层按被挖方块形状缩放（CrackBox 据 blockId/state 走 selectionAABBs 各 sub-AABB 一盒），
+        //     故破台阶显半高叠层、破栅栏显立柱叠层、破楼梯显下步+背墙双盒——不再恒为整立方（spec t410）。
+        //     blockId/state 绑 player.miningBlock 处的 blockAt/stateAt（miningBlock 切换 → 重算 → CrackBox rebuild）。
+        // 分层（PLAN §2）：呈现层只读 player.miningStage + World（blockAt/stateAt，只读）+ Core BlockRegistry
+        //   单一权威取形状，不反向写进度 / 栅格；裂纹贴图自绘原创（tools/build_cracks.py 程序生成，§9 override (a)）。
         // 材质：NoLighting + hasTransparency → 透明底（alpha=0）不遮方块本色，仅黑裂纹显示。
         // cullMode 默认 Back（仅外法线面可见）→ 玩家看得到的几面才显裂纹（背向面被剔除）。
         Model {
@@ -2617,8 +2620,11 @@ Window {
             position: Qt.vector3d(player.miningBlock.x + 0.5,
                                   player.miningBlock.y + 0.5,
                                   player.miningBlock.z + 0.5)
-            scale: Qt.vector3d(1.005, 1.005, 1.005) // 微放大防与方块面 z-fight
-            geometry: CrackBox {}
+            scale: Qt.vector3d(1.005, 1.005, 1.005) // 微放大防与方块面 z-fight（CrackBox 另烘焙 per-face kEps 缝，异形 sub-AABB 不以中心对称亦无重面闪烁）
+            geometry: CrackBox {
+                blockId: theWorld.blockAt(player.miningBlock.x, player.miningBlock.y, player.miningBlock.z)
+                state: theWorld.stateAt(player.miningBlock.x, player.miningBlock.y, player.miningBlock.z)
+            }
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 // alphaCutoff：裂纹贴图含 alpha（透明底 alpha=0 + 半透黑裂纹 alpha≈220）。设 0.5 启用
