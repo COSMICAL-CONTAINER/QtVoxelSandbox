@@ -100,13 +100,16 @@ public:
                                   //   spec「物品存 chunk state」= 物品随方块存（世界级 block-instance state，非 QML
                                   //   面板本地态，机制等价 MC「箱子内容存于方块」；多箱子各自独立 27 槽）。破块时
                                   //   ChestStore.clearChest 清条目（内容不退回玩家背包，机制等价 MC 破箱掉落本属 1.1+）。
-        Farmland       = 23, // 耕地（t234）：机制等价 MC 1.0 耕地。持锄右键泥土/草方块→变耕地（playercontroller
+        Farmland       = 23, // 耕地（t234/t408）：机制等价 MC 1.0 耕地。持锄右键泥土/草方块→变耕地（playercontroller
                                   //   useBlock 分支：检手持为 Hoe 工具 + 命中格 Dirt/Grass → setBlock(Farmland, moist)）。
-                                  //   solid=true / ShapeFull（整立方 opaque，正常参与邻居面剔除 + 走 culled 立方面渲染，
-                                  //   **非**异形 —— 不进 PartialBlockGeometry；与 Chest 同走段后整立方路径）、hardness=0.6
+                                  //   **t408 矮盒渲染（露出 1/16 唇）+ solid=false**：mesher 经 PartialBlockGeometry 画 [0,0.9375]
+                                  //   矮盒（顶=farmland_dry(26) / 侧·底=dirt(2)），机制等价 MC 耕地比整立方矮 1 像素。solid=false
+                                  //   （同 glass 模式）→ 相邻整立方**不**因耕地剔面 → 画满高侧壁填住矮盒上方 1/16 缺口（solid=true
+                                  //   会留透视 x-ray 洞）。shape 仍 ShapeFull（碰撞/选中/raycast 走整格，与渲染解耦；collisionAABBs
+                                  //   特例 0.9375 不变）。光照仍满遮（lightOpacity 特例返 15，solid=false 不误降全透）。hardness=0.6
                                   //   （同 grass/dirt 量级，NoTool 空手可采）、dropId=Dirt（破耕地掉泥土，机制等价 MC
                                   //   「耕地破坏返泥土」，非掉耕地自身）、dropCount=1、maxStack=64。各面贴图：顶=farmland_dry(26)
-                                  //   或 farmland_wet(27)（mesher 据 state 低 2 位湿润等级暗化顶点色，见 FarmlandHydrationMask）/ 侧·底=dirt(2)。
+                                  //   （mesher 据 state 低 2 位湿润等级暗化顶点色，见 FarmlandHydrationMask）/ 侧·底=dirt(2)。
                                   //   **碰撞略矮 0.9375（15/16）**：collisionAABBs 对 Farmland 特例返 {0,0,0,1,0.9375,1}
                                   //   （机制等价 MC 耕地碰撞箱矮 1 像素；selectionAABBs 仍走 ShapeFull 整格，选中框不缩，
                                   //   raycast 经 isFullCube=true 走整格命中 —— 三者解耦：碰撞矮、选中满、射线整格，零相互干扰）。

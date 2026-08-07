@@ -51,11 +51,15 @@ void pushBox(QVector<Vtx> &verts, QVector<quint32> &idx,
              int lx, int ly, int lz,
              float x0, float x1, float y0, float y1, float z0, float z1,
              int tile, const PartialLightCtx &L,
-             float tileW, float hx, float hy, float v0, float v1)
+             float tileW, float hx, float hy, float v0, float v1,
+             int topTile = -1)
 {
-    const float u0 = tile * tileW + hx, u1 = (tile + 1) * tileW - hx;
+    // topTile >= 0 时 +Y 顶面（fi==2）用 topTile、其余面用 tile（t408 耕地：顶=farmland_dry / 侧·底=dirt）；
+    //   默认 -1 → 全 6 面用 tile（既有 slab/stairs/fence/... 调用不变）。
     for (int fi = 0; fi < 6; ++fi) {
         const BoxFace &f = kBoxFaces[fi];
+        const int ftile = (topTile >= 0 && fi == 2) ? topTile : tile;
+        const float u0 = ftile * tileW + hx, u1 = (ftile + 1) * tileW - hx;
         // 单位盒面模板的常数轴（法线轴）填成实际盒体边值（+面=x1/y1/z1，-面=x0/y0/z0）；
         // 面内两轴取模板 0/1 → 映射到该面实际范围（整张瓦片贴图覆盖该面）。
         const float vX = (f.n[0] > 0) ? x1 : (f.n[0] < 0) ? x0 : 0;
@@ -415,6 +419,18 @@ int PartialBlockGeometry::append(
         pushCrossQuad(verts, idx, lx, ly, lz,
                       0.f, yp, 0.f,  1.f, yp, 0.f,  1.f, yp, 1.f,  0.f, yp, 1.f, // 水平 quad：BL→BR→TR→TL（xz 全 footprint）
                       tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
+    case BlockRegistry::Farmland: {
+        // t408 耕地矮盒：机制等价 MC 耕地比整立方矮 1 像素（15/16=0.9375）→ 顶面略陷，相邻整立方（草地等）上方
+        //   露出 1/16 唇。全 footprint、y[0, 0.9375]：顶面 farmland_dry(26)（湿润暗化由 mesher 在 lctx.face[+Y] 预乘
+        //   farmlandHydrBrightMul 体现，darker=wetter），侧·底 dirt(2)。耕地走 solid=false（见 BlockDef）→ 相邻整立方
+        //   不剔面、画满高侧壁填住矮盒上方 1/16 缺口（防透视 x-ray 洞，同 glass 模式）。不做邻居剔除（异形小体约定；
+        //   内/底面被自身或邻实体遮挡，overdraw 可忽）。topTile 取 def.topTile(26) → +Y 顶面贴耕地贴图。
+        constexpr float kFarmlandTop = 0.9375f; // 15/16（与 collisionAABBs 耕地特例同高）
+        pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, kFarmlandTop, 0.f, 1.f,
+                tile, light, tileW, hx, hy, v0, v1,
+                BlockRegistry::def(blockId).topTile); // +Y 顶面 farmland_dry(26)，侧·底用 tile(=sideTile dirt 2)
         break;
     }
     default:

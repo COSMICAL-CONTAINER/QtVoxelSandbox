@@ -69,16 +69,20 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   maxStack=64（背包内可堆叠，机制等价 MC 箱子物品）。掉落自身。音色归 GroupWood（木质）。
     /* chest         */ {int(BlockRegistry::Chest),              20, 20, 21, 22, true,  BlockRegistry::ShapeFull,     2.5f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Chest),          1, 64, "chest",          "箱子"}, // t265 斧加速（木制，空手也掉落）
     // ── t234 耕地（Farmland）：机制等价 MC 1.0 耕地（持锄右键泥土/草方块→耕地；干/湿两态由水源邻近判定）。
-    //   整立方 opaque（solid=true / ShapeFull —— 与箱子同走 mesher 整立方面路径，**非**异形）、hardness=0.6
-    //   （同 grass/dirt 量级，NoTool 空手可采且掉落）、dropId=Dirt（破耕地掉泥土，机制等价 MC「耕地破坏返泥土」，
-    //   非掉耕地自身）、dropCount=1、maxStack=64。
+    //   hardness=0.6（同 grass/dirt 量级，NoTool 空手可采且掉落）、dropId=Dirt（破耕地掉泥土，机制等价 MC「耕地
+    //   破坏返泥土」，非掉耕地自身）、dropCount=1、maxStack=64。
     //   字段复用（同 chest 复用 frontTile 作锁面、planks 复用 state 作双半砖 marker 的模式）：topTile=farmland_dry(26)
-    //   （干态顶面，默认）；frontTile=farmland_wet(27)（**湿态顶面** —— mesher tileFor 据 state bit0 选 topTile(干)/
-    //   frontTile(湿)；Farmland 无 -Z 前面语义，frontTile 字段对 Farmland 唯一消费点是 tileFor 的湿态顶面，复用零回归）；
-    //   bottomTile=sideTile=dirt(2)（耕地底/侧面同泥土，机制等价 MC 耕地侧=泥土）。tileFor 对所有非 +Y 面返 sideTile。
+    //   （顶面，mesher 据 state 低 2 位湿润等级做顶点色暗化，darker=wetter；t406）/ frontTile=farmland_wet(27)（字段
+    //   复用，Farmland 无 -Z 前面语义）/ bottomTile=sideTile=dirt(2)（耕地底/侧面同泥土）。
+    //   **t408 矮盒渲染 + solid=false**：耕地顶面渲染在 0.9375（15/16，机制等价 MC 耕地比整立方矮 1 像素），经
+    //     PartialBlockGeometry 画 [0,0.9375] 矮盒（顶=farmland_dry / 侧·底=dirt），露出 1/16 唇。solid=false（同 glass
+    //     模式）→ 相邻整立方**不**因耕地剔面 → 画满高侧壁，填住矮盒上方的 1/16 缺口（否则 solid=true + 矮盒 → 缺口处
+    //     无任何面 = 透视 x-ray 洞，lessons-learned t194 同族）。shape 仍 ShapeFull（碰撞/选中/raycast 走整格，三者与
+    //     渲染解耦；collisionAABBs 特例 0.9375 不变）。光照仍满遮（lightOpacity 特例返 15，见 .cpp；solid=false 不会
+    //     误降为全透）。
     //   **碰撞略矮 0.9375**：collisionAABBs 对 Farmland 特例返 {0,0,0,1,0.9375,1}（见 .cpp 实现处注释）。
     //   音色归 GroupGrass（同 grass/dirt 软土音）。
-    /* farmland      */ {int(BlockRegistry::Farmland),            26,  2,  2, 27, true,  BlockRegistry::ShapeFull,     0.6f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::Dirt),           1, 64, "farmland",       "耕地"}, // t265 铲加速（土类，空手也掉泥土）
+    /* farmland      */ {int(BlockRegistry::Farmland),            26,  2,  2, 27, false, BlockRegistry::ShapeFull,     0.6f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::Dirt),           1, 64, "farmland",       "耕地"}, // t408 solid=false（矮盒渲染，邻整立方不剔面填唇缺口）；t265 铲加速（土类，空手也掉泥土）
     // ── t235 草丛（TallGrass）：机制等价 MC 1.0 草丛 / 蕨类（tall grass / fern）。**cross 形广告牌方块**
     //   （两片对角十字相交的双面 quad，billboard X 形贴图）—— 非 1×1×1 整立方、亦非段内异形方块段。
     //   solid=false（非实体 → 不挡邻居面剔除，相邻地形仍画自己的面；同 torch / 不完整方块语义）、
@@ -583,6 +587,7 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     switch (blockId) {
     case WoodTrapdoor: return (state & 1) ? 0 : 15;   // 合=满遮（修「合活版门透光」）/ 开=全透
     case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
+    case Farmland:     return 15;                     // t408 耕地 solid=false（矮盒渲染）但仍是 opaque 土块 → 满遮光
     default:           return 0;                      // 其余全透（air/torch/water/stairs/fence/plate/door/cross）
     }
 }
