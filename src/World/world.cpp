@@ -2464,17 +2464,12 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ol
         y0 = std::max(0, ey - R);
         y1 = std::min(H - 1, ey + R);
     }
-    refloodBox(x0, y0, z0, x1, y1, z1, /*doSky=*/opacityChanged);
-    // t155d：标记光盒覆盖的所有 chunk 脏 → setBlock 末 emit worldChanged 后这些 chunk **立即**重建
-    //   （读新光场写顶点色），消除「编辑后邻 chunk 光照 / 火把光要等 2-3s 下个 sun-step 才刷新」。
-    //   旧版只编辑 chunk 标脏（+ 边界邻接，为面剔除），光场虽即时更新（~1μs）但邻 chunk mesh 未重建 →
-    //   陈旧到 sun-step。盒 31×31 横跨约 3~4 chunk → 9~16 chunk 重建（数 ms，单帧内可接受，远好于 2-3s）。
-    constexpr int cs = 16; // Chunk::kSize
-    for (int ccx = x0 / cs; ccx <= x1 / cs; ++ccx)
-        for (int ccz = z0 / cs; ccz <= z1 / cs; ++ccz)
-            if (Chunk *ch = m_chunks.chunk(ccx, ccz)) ch->markDirty();
-    qInfo("vo.light: recomputeLightAround %lldus box=%dx%dx%d", t.elapsed(),
-          x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1); // t155c：实测（找卡顿根因）
+    // t383：refloodBox 内部精确标脏（仅光场确有变化的 chunk），旧版「盒内全 chunk 标脏」已移除 ——
+    //   消除持续破/放的 dirty-storm（典型编辑只 1~2 chunk 光变，旧版每次标 9~16 chunk → 18~32 段/编辑重建）。
+    //   编辑 chunk + 边界邻接（setBlock 已标）+ 此处光变 chunk → emit worldChanged 后仅这些重建。
+    const int dirty = refloodBox(x0, y0, z0, x1, y1, z1, /*doSky=*/opacityChanged);
+    qInfo("vo.light: recomputeLightAround %lldus box=%dx%dx%d dirtyChunks=%d", t.elapsed(),
+          x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1, dirty); // t383：dirtyChunks = 实际光变重建的 chunk 数
 }
 
 // t154 有界盒清场 + 重 seed + 重 flood（recomputeLightAround 的实现核心）。盒外格作固定边界种子（衰减 1 流入），
@@ -2485,7 +2480,7 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ol
 //
 //   边界种子：盒**表面格**的盒外邻（仅表面格有盒外邻，内部格无 —— 故只扫表面省功）。盒外邻值：y>=H → 天光 15
 //   （开阔天空，与 skyLightAt OOB 同语义）；其余世界外（y<0 / x/z 越界）→ 0；盒内世界 → 其当前（未清）光值。
-void World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky)
+int World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky)
 {
     const int W = m_width, D = m_depth, H = m_height;
     struct Cell { int x, y, z; };
@@ -2494,6 +2489,19 @@ void World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSk
     auto inBox = [&](int x, int y, int z) {
         return x >= x0 && x <= x1 && y >= y0 && y <= y1 && z >= z0 && z <= z1;
     };
+
+    // t383：reflood 前快照盒内两通道光场，reflood 后逐 chunk 切片比对 → 仅「光场确有变化」的 chunk 标脏。
+    //   典型破/放实体块只动编辑列天光（其余列 reflood 后与清前逐格相同 → 不标脏、不重建）。
+    //   快照 ≤ ~120KB（31×64×31×2），读/比对各 <0.5ms，省下的无谓重建（数 ms~数十 ms）远大于此。
+    const size_t bw = size_t(x1 - x0 + 1), bh = size_t(y1 - y0 + 1), bd = size_t(z1 - z0 + 1);
+    std::vector<quint8> snapSky(bw * bh * bd), snapBlock(bw * bh * bd);
+    for (int x = x0; x <= x1; ++x)
+        for (int y = y0; y <= y1; ++y)
+            for (int z = z0; z <= z1; ++z) {
+                const size_t i = size_t(x - x0) + bw * (size_t(z - z0) + bd * size_t(y - y0));
+                snapSky[i] = m_chunks.skyLightAt(x, y, z);
+                snapBlock[i] = m_chunks.blockLightAt(x, y, z);
+            }
 
     // 1. 清盒内：doSky → 两通道归零；否则仅清方块光（保留天光 —— 火把增删不动天光）。
     for (int x = x0; x <= x1; ++x)
@@ -2616,4 +2624,31 @@ void World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSk
             }
         }
     }
+
+    // t383：reflood 完成 → 逐 chunk 切片比对快照，光场确有变化的 chunk 标脏（精确替代旧「盒内全 chunk 标脏」）。
+    //   充要：chunk 需重建 ⟺ 其顶点色输入（sky/block）变。逐格比对不漏（变化的格其 chunk 必标）不多
+    //   （未变 chunk 不标，避免 dirty-storm）。逐 chunk 切片 + 首变即退出（changed）—— 比「逐格标」少路由、
+    //   逐 chunk 自然去重（一次 markDirty/chunk）。doSky=false 时 reflood 不动天光 → 比对天光恒等，
+    //   仅方块光变化触发（语义不变）。m_chunks.chunk() 越界返 nullptr（盒内坐标本在界内，安全）。
+    constexpr int cs = 16; // Chunk::kSize
+    int changedChunks = 0;
+    for (int ccx = x0 / cs; ccx <= x1 / cs; ++ccx) {
+        for (int ccz = z0 / cs; ccz <= z1 / cs; ++ccz) {
+            Chunk *ch = m_chunks.chunk(ccx, ccz);
+            if (!ch) continue;
+            const int ax0 = std::max(x0, ccx * cs), ax1 = std::min(x1, ccx * cs + cs - 1);
+            const int az0 = std::max(z0, ccz * cs), az1 = std::min(z1, ccz * cs + cs - 1);
+            bool changed = false;
+            for (int x = ax0; x <= ax1 && !changed; ++x)
+                for (int y = y0; y <= y1 && !changed; ++y)
+                    for (int z = az0; z <= z1 && !changed; ++z) {
+                        const size_t i = size_t(x - x0) + bw * (size_t(z - z0) + bd * size_t(y - y0));
+                        if (snapSky[i] != m_chunks.skyLightAt(x, y, z) ||
+                            snapBlock[i] != m_chunks.blockLightAt(x, y, z))
+                            changed = true;
+                    }
+            if (changed) { ch->markDirty(); ++changedChunks; }
+        }
+    }
+    return changedChunks;
 }

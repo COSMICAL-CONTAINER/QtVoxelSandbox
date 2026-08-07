@@ -373,7 +373,13 @@ private:
     // t154 有界盒清场 + 重 seed + 重 flood（recomputeLightAround 的实现核心，分离以便复用清/种/传播步骤）。
     //   doSky=true：两通道都重算（清两通道、重 seed 见天格 + 火把、边界种两通道、flood 两通道）。
     //   doSky=false：仅方块光（清方块光保留天光、重 seed 火把、边界种方块光、flood 方块光）——火把增删天光不变。
-    void refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky);
+    //   t383 DEFINITIVE dirty-storm fix：reflood 后**仅对光场确有变化**的 chunk 标脏（reflood 前快照两通道、
+    //     reflood 后逐 chunk 切片比对，首个变化格即标脏并提前退出）。旧版由 caller 标「盒内所有 chunk」脏
+    //     （31×31 盒横跨 3~4 chunk → 每次破/放重建 9~16 chunk × 2 段 = 18~32 段/编辑），但 reflood 通常只改
+    //     1~2 chunk 光 → 其余 chunk mesh 顶点色本就正确，无谓重建 = 持续破/放 dirty-storm 的真实根因（既非
+    //     clearDirty 竞态也非缺批合并，而是「相邻失效」over-invalidate）。返回被标脏的 chunk 数（诊断）。
+    //     三 caller（recomputeLightAround / decayLeavesAround / destroySphereSilent）统一经此精确标脏。
+    int refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky);
     void setVoxelIfAir(int x, int y, int z, quint8 id);       // 仅写空气格（树冠不覆盖主干/地形）
     void setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state); // t310：带 state（草变种 worldgen）
     quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希（列级 seed/x/z）→ 确定性伪随机
