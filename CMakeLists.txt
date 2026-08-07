@@ -160,6 +160,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/BlockParticles.qml
         src/ui/TorchSmoke.qml
         src/ui/WeatherParticles.qml
+        src/ui/AmbientParticles.qml
         src/ui/MainMenu.qml
         src/ui/WorldList.qml
         src/ui/Inventory.qml

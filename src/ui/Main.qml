@@ -3159,6 +3159,34 @@ Window {
             }
         }
 
+        // t390 环境点缀粒子（雨溅 / 叶飘 / 火把火星）：AmbientParticles.qml 经 Loader 动态加载（同
+        //   particleLoader / smokeLoader / weatherLoader 的 Particles3D 隔离模式 — 模块运行期缺失时仅本
+        //   Loader 失败 + 显式告警，Main.qml 仍正常加载，§2-E「保持运行而非崩溃，且不静默吞」）。
+        //   分层（PLAN §2）：呈现层只读消费 World 天气态 / 群系（weatherStateAt / biomeIdAt）+ torchPositions，
+        //   绝不反向写栅格。雨溅联动 t385 天气（降水态玩家脚边水花）；叶飘仅在森林群系；火把火星复用
+        //   torchPositions（与 TorchSmoke 烟雾互补）。粒子量克制（spec「不抢戏」）。
+        Loader {
+            id: ambientLoader
+            active: true
+            source: "AmbientParticles.qml"
+            onLoaded: {
+                // 领养进同一个 particlesHost 锚点（复用既有 3D 场景节点；否则 Loader 加载到的 Node parent=null
+                //   → 孤儿 → 不渲染，t16 同族坑）。
+                ambientLoader.item.parent = particlesHost
+                // 注入 World + PlayerController + torchPositions（AmbientParticles 据此查天气 / 群系 + 跟随眼位 + 火把位置）。
+                ambientLoader.item.world = theWorld
+                ambientLoader.item.player = player
+                ambientLoader.item.torchModel = torchPositions
+                console.info("[t390] AmbientParticles adopted into scene graph; torches=" + torchPositions.count)
+            }
+            onStatusChanged: {
+                if (status === Loader.Ready)
+                    console.info("[t390] AmbientParticles Loader status = Ready")
+                else if (status === Loader.Error)
+                    console.warn("[t390] AmbientParticles Loader status = Error — Particles3D 运行期不可用，环境粒子已降级关闭（§2-E）")
+            }
+        }
+
         // 方块掉落实体渲染（t35）：item entity 的小方块图标在此渲染。Repeater 父节点 = 场景内
         // 3D Node（itemHost）→ delegate（Node/Model，3D 对象）被领养进 3D 场景图（lessons-learned
         // 「动态 3D 对象必须挂到场景 Node，否则孤儿不渲染」—— t03 Repeater 直接挂 View3D 会成孤儿
