@@ -1826,6 +1826,21 @@ void PlayerController::placeBlock()
     if (m_selectedBlock == BlockRegistry::DeadBush) {
         if (m_world->blockAt(tx, ty - 1, tz) != BlockRegistry::Sand) return;
     }
+    // t397 花放置预检：仅可放在草地 / 泥土 / 耕地正上方（机制等价 MC 1.0 花生于草地 / 泥土）。
+    //   目标格的下方须为 Grass / Dirt / Farmland；否则拒绝放置（不挥）。与树苗「须草地 / 泥土」同支撑语义。
+    if (BlockRegistry::isFlower(m_selectedBlock)) {
+        const quint8 below = m_world->blockAt(tx, ty - 1, tz);
+        if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
+            && below != BlockRegistry::Farmland) return;
+    }
+    // t397 甘蔗放置预检：仅可放在草地 / 泥土 / 沙地 / 甘蔗正上方（机制等价 MC 1.0 sugar cane 须草地 / 沙地 / 甘蔗
+    //   支撑）。机制等价 cactus 预检（cactus 须 Sand / Cactus；甘蔗放宽到 Grass / Dirt / Sand / Sugarcane ——
+    //   MC 甘蔗生于草地与沙地，故支撑族比仙人掌宽）。邻水判定留 worldgen（创造放置不强制邻水，机制等价 MC）。
+    if (m_selectedBlock == BlockRegistry::Sugarcane) {
+        const quint8 below = m_world->blockAt(tx, ty - 1, tz);
+        if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
+            && below != BlockRegistry::Sand && below != BlockRegistry::Sugarcane) return;
+    }
     // t134 不完整方块放置：door 占两格（下格 + 上格），需上格也为空气；其余单格。走 setBlock 5 参数版
     //   （写 id + state）。state 复用上方算出的 placeState / doorFacing（逻辑同源，无重复推导）。
     if (isDoor) {

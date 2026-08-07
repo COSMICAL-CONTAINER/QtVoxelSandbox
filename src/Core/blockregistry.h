@@ -26,6 +26,8 @@
 //   30=gold_ore（t308 金矿石；散布于 stone 深层 y∈[5,25]，需铁镐采掘；掉金原矿→熔炉烧金锭）。
 //   41=sandstone / 42=cactus / 43=dead_bush（t394 沙漠三件套：砂岩沙下成岩 / 仙人掌接触伤害 / 枯灌木装饰）。
 //   44=snow_layer / 45=ice / 46=spruce_log（t395 雪原/针叶三件套：地表覆雪 / 水面冻结冰 / 云杉树主干）。
+//   47=lily_pad / 48=mushroom（t396 沼泽植物：水面浮叶 / 草地小蘑菇）。
+//   49..52=flower_red/yellow/blue/white / 53=sugarcane（t397 多群系装饰植物：4 色花 + 水边甘蔗）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -301,14 +303,32 @@ public:
                                   //   hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身（破蘑菇掉蘑菇方块，可放回）、
                                   //   dropCount=1、maxStack=64。各面贴图=mushroom(62)（透明底 + 米色菌柄 + 红底白斑菌盖，
                                   //   alphaCutoff cutout）。音色归 GroupGrass（软植物音）。进创造调色板（装饰取用）。
-                                  //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 log / planks
-                                  //   同族；机制等价 MC 1.0 云杉原木——寒冷群系针叶树变种，区别于橡木原木 Log）、hardness=2.0
-                                  //   （同 MC 1.0 原木量级）、toolType=Axe（木类；requiresTool=false → 空手也掉落，仅速度受斧影响）、
-                                  //   dropId=自身（破云杉原木掉云杉原木方块，可放置）、dropCount=1、maxStack=64。各面贴图：顶/底=
-                                  //   spruce_log_top(59)（深棕同心年轮截面）/ 侧=spruce_log_side(60)（深棕垂直树皮条带，区别于橡木
-                                  //   原木 log_side 的浅棕；云杉木特征为更深冷棕色）。音色归 GroupWood（木质，同 log / planks）。
-                                  //   进创造调色板（玩家可取用 / 放置）。
-        Count         = 49, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t397 多群系装饰植物（机制等价 MC 1.0 花 / 甘蔗；名称 / 贴图全原创自绘 §9a）：
+        //   花（Flower）4 色变体：每色一个方块 id（连续段 [FirstFlower, LastFlower]）→ 创造调色板每色独立取用 +
+        //   右键放置（复用既有 selectedBlockId → placeBlock 通用放置路径，预检须草地 / 泥土支撑）。cross 形广告牌方块
+        //   （与 TallGrass / Sapling 同走 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方，
+        //   「thin like tall grass」（spec 原话）。机制等价 MC 1.0 花（poppy / dandelion 等），名称 / 贴图全原创自绘。
+        //   solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC 花可踩过）、
+        //   hardness=0（瞬破，同草丛 / 火把）、NoTool（空手可采且掉落）、dropId=自身（破花掉同色花方块，可放回）、
+        //   dropCount=1、maxStack=64。各面贴图=flower_<color>（tile 63..66；透明底 + 茎 + 花头，alphaCutoff cutout）。
+        //   音色归 GroupGrass（软植物音，同草丛 / 蘑菇）。worldgen placeFlowers 在各群系草地低密度散布（plains 多彩 /
+        //   forest 少量 / swamp 适量 / hills 稀疏；机制等价 MC 各群系花点缀）。进创造调色板（每色独立取用）。
+        FlowerRed      = 49, // 红花（机制等价 MC 罂粟 poppy，标志性色）
+        FlowerYellow   = 50, // 黄花（机制等价 MC 蒲公英 dandelion）
+        FlowerBlue     = 51, // 蓝花（机制等价 MC 矢车菊 cornflower；原创配色）
+        FlowerWhite    = 52, // 白花（机制等价 MC 雏菊 oxeye daisy）
+        Sugarcane      = 53, // 甘蔗（机制等价 MC 1.0 sugar cane / reeds）：水边生长的可叠高细茎植物。**cross 形广告牌
+                                  //   方块**（与花 / 草丛同走 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非
+                                  //   1×1×1 整立方，呈细茎观感（机制对标 MC 甘蔗「细于整立方」）。worldgen placeSugarcane 在水域
+                                  //   邻接的草地 / 沙地旁确定性散布 1..3 格高柱（同 cactus 1-3 高模式；spec「grows up to 3 tall
+                                  //   at waters edges」），每格仅写空气格 → 不覆盖已生成的方块。solid=false（非实体 → 不挡邻居面
+                                  //   剔除，同草丛 / 花）、shape=ShapeNone（**无碰撞** → 玩家穿过）、hardness=0（瞬破）、NoTool
+                                  //   （空手可采且掉落）、dropId=自身（破甘蔗掉甘蔗方块，可放回 / 可重种）、dropCount=1、maxStack=64。
+                                  //   各面贴图=sugarcane(67)（透明底 + 绿色节段细茎 + 顶部尖叶，alphaCutoff cutout）。音色归
+                                  //   GroupGrass（软植物音）。**放置预检**（placeBlock）：目标格下方须为 Grass / Dirt / Sand /
+                                  //   Sugarcane（机制等价 MC 甘蔗须草地 / 沙地 / 甘蔗支撑，且须邻水 —— 邻水判定留 worldgen，玩家
+                                  //   放置仅守支撑，机制等价 MC 创造放置不强制邻水）。进创造调色板（玩家可取用 / 放置）。
+        Count         = 54, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -317,6 +337,14 @@ public:
     static constexpr int FirstBed = BedRed;
     static constexpr int LastBed  = BedBlack;
     static bool isBed(quint8 blockId);
+
+    // t397 花方块段哨兵：id ∈ [FirstFlower, LastFlower] 为花色变体（4 色）。isFlower(id) 单一权威谓词供 worldgen /
+    //   放置预检 / 未来花相关机制（如花生成染料、花蜜）判定「是否花」，避免各处自写 id 区间漂移（同 isBed /
+    //   isCrossBillboard 模式）。连续段（无段外夹入），故裸区间判定即可；仍提供 isFlower 谓词作单一权威（改段时
+    //   一处同步）。worldgen placeFlowers 据本谓词把各色花散布到草地（不各持 4 个 id 判定）。
+    static constexpr int FirstFlower = FlowerRed;
+    static constexpr int LastFlower  = FlowerWhite;
+    static bool isFlower(quint8 blockId);
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
     //   （mesher 合批进 chunk mesh，不走 1×1×1 立方面路径）。t134 落地 6 类（WoodSlab=15 ... WoodTrapdoor=20）。
@@ -345,7 +373,8 @@ public:
     //   （两片对角相交双面 quad）。涵盖连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)
     //   + 段外 DeadBush(43)（t394）+ 段外 Mushroom(48)（t396）+ 段外 LilyPad(47)（t396：横向浮叶，几何为水平
     //   quad 非竖直 cross，但同走本路由 + alphaCutoff cutout 路径 —— PartialBlockGeometry::append 的 LilyPad
-    //   case 内画水平 quad）。mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律读本谓词，
+    //   case 内画水平 quad）+ 段外花段 [FirstFlower, LastFlower]（t397：4 色 cross）+ 段外 Sugarcane(53)（t397：
+    //   细茎 cross，1..3 高叠柱）。mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律读本谓词，
     //   不各持区间判定（PLAN §2：单一权威，避免「mesher 路由到 cross 但选中框仍按区间漏某方块」撕裂）。
     static bool isCrossBillboard(quint8 blockId);
 
@@ -574,12 +603,16 @@ public:
     //      LilyPad 各面=本 tile，mesher 走 isCrossBillboard 路由的 LilyPad 横向 quad case）。
     //   62=mushroom（t396 蘑菇 cross 贴图；透明底 + 米色菌柄 + 红底白斑菌盖，alphaCutoff cutout；
     //      Mushroom 各面=本 tile，mesher 走 cross 几何段）。
-    // 图集由 tools/build_atlas.py 打包全部 57 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   63..66=flower_red/yellow/blue/white（t397 花 4 色变体 cross 贴图；透明底 + 绿茎 + 彩色花头，
+    //      alphaCutoff cutout；各色 Flower 方块各面=本 tile，mesher 走 cross 几何段；tools/build_flower.py 程序生成原创像素图）。
+    //   67=sugarcane（t397 甘蔗 cross 贴图；透明底 + 绿色节段细茎 + 顶部尖叶，alphaCutoff cutout；
+    //      Sugarcane 各面=本 tile，mesher 走 cross 几何段；tools/build_sugarcane.py 程序生成原创像素图）。
+    // 图集由 tools/build_atlas.py 打包全部 68 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 57）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 68）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -587,7 +620,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 63;
+    static constexpr int AtlasTileCount = 68;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

@@ -348,6 +348,40 @@ int PartialBlockGeometry::append(
                       tile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::FlowerRed: case BlockRegistry::FlowerYellow:
+    case BlockRegistry::FlowerBlue:  case BlockRegistry::FlowerWhite: {
+        // t397 花 cross 模型：与 Sapling / Mushroom 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
+        //   机制等价 MC 1.0 花（poppy / dandelion 等）—— cross 模型上贴 flower_<color> 瓦片（tile 63..66；透明底
+        //   + 绿茎 + 彩色花头，alphaCutoff cutout）。**无 state 派生贴图**（每色单一贴图；纯装饰，无生长 / 变种）。
+        //   4 色合用同一 case（switch fallthrough；tile 由 BlockRegistry::tileIndex(<color>, PosX) 各自 sideTile 给出，
+        //   故每色仍按各自方块 id 取贴图，机制等价 MC「各色花各有贴图」）。spec「thin like tall grass」即满格 cross。
+        //   不做邻居剔除（cross 透明 + 装饰，同 TallGrass；Flower solid=false）。材质 alphaCutoff:0.5 丢弃透明底 →
+        //   仅花像素显。
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
+    case BlockRegistry::Sugarcane: {
+        // t397 甘蔗 cross 模型：与花 / 草丛同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
+        //   机制等价 MC 1.0 sugar cane（甘蔗 / 芦苇）—— cross 模型上贴 sugarcane(67) 瓦片（透明底 + 绿色节段细茎
+        //   + 顶部尖叶，alphaCutoff cutout）。甘蔗细茎观感由贴图 alpha 表达（透明底丢弃 → 仅茎像素显），cross 几何
+        //   满格不变（同花 / 草丛）。**可叠高 1..3 格**：worldgen placeSugarcane 在水边列逐格向上仅写空气格堆叠甘蔗
+        //   方块，每格独立走本 case 各画满高 cross → 视觉如细茎柱（机制等价 MC 甘蔗 1..3 格柱）。
+        //   **无 state 派生贴图**（甘蔗单一贴图；叠高靠堆方块非 state 阶段，区别于 WheatCrop）。
+        //   tile 由 BlockRegistry::tileIndex(Sugarcane, PosX) = sideTile = 67 给出。不做邻居剔除（cross 透明 + 植物，
+        //   同 TallGrass；Sugarcane solid=false）。材质 alphaCutoff:0.5 丢弃透明底 → 仅茎像素显。
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::LilyPad: {
         // t396 睡莲「横向浮叶」模型：**一片水平双面 quad 贴 cell 底部**（y≈1/16，刚好浮于水面）—— 与竖直 cross
         //   （草丛 / 蘑菇等两片对角 X）不同，睡莲是平铺水面的圆叶，故几何为水平 quad 非竖直 cross。机制等价

@@ -142,6 +142,15 @@ TILES = [
                                     #    alphaCutoff cutout；LilyPad 各面=本 tile，mesher 走 LilyPad 横向 quad case）
     "default_mushroom",             # 62 mushroom（t396 蘑菇 cross 贴图；透明底 + 米色菌柄 + 红底白斑菌盖；
                                     #    alphaCutoff cutout；Mushroom 各面=本 tile，mesher 走 cross 几何段）
+    # t397 多群系装饰植物：花 4 色变体 + 甘蔗（机制等价 MC 1.0 花 / 甘蔗；名称 / 贴图原创自绘 §9a）。
+    #   各色花 / 甘蔗 cross 贴图（透明底 + 茎 + 花头 / 细茎，alphaCutoff cutout）；各 Flower / Sugarcane 方块各面=本 tile，
+    #   mesher 走 cross 几何段（PartialBlockGeometry pushCross 双面双对角 quad）；tools/build_flower.py +
+    #   tools/build_sugarcane.py 程序生成原创像素图。
+    "default_flower_red",           # 63 flower_red（红花 cross 贴图；机制等价 MC poppy 罂粟，名称/贴图原创自绘 §9a）
+    "default_flower_yellow",        # 64 flower_yellow（黄花 cross 贴图；机制等价 MC dandelion 蒲公英）
+    "default_flower_blue",          # 65 flower_blue（蓝花 cross 贴图；原创 4 色变体之一）
+    "default_flower_white",         # 66 flower_white（白花 cross 贴图；机制等价 MC oxeye daisy 雏菊）
+    "default_sugarcane",            # 67 sugarcane（甘蔗 cross 贴图；机制等价 MC sugar cane 芦苇；透明底 + 绿色节段细茎 + 顶部尖叶）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

@@ -232,6 +232,27 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   mushroom(62)（透明底 + 米色菌柄 + 红底白斑菌盖，alphaCutoff cutout）。音色归 GroupGrass（软植物音）。
     //   worldgen placeSwampFlora 在沼泽草地格上方一格低密度散布。进创造调色板（装饰取用）。
     /* mushroom     */ {int(BlockRegistry::Mushroom),                    62, 62, 62, 62, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Mushroom),      1, 64, "mushroom",     "蘑菇"},
+    // ── t397 多群系装饰植物（机制等价 MC 1.0 花 / 甘蔗；名称 / 贴图全原创自绘 §9a）：
+    //   花（Flower）4 色变体：每色一个方块 id（连续段 [FirstFlower, LastFlower]）→ 创造调色板每色独立取用 + 右键放置。
+    //   cross 形广告牌方块（与 TallGrass / Sapling 同走 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）——
+    //   非 1×1×1 整立方，spec「thin like tall grass」。solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone
+    //   （**无碰撞** → 玩家穿过，机制等价 MC 花可踩过）、hardness=0（瞬破，同草丛 / 火把）、NoTool（空手可采且掉落）、
+    //   dropId=自身（破花掉同色花方块，可放回）、dropCount=1、maxStack=64。各面贴图=flower_<color>（tile 63..66；
+    //   透明底 + 绿茎 + 彩色花头，alphaCutoff cutout）。音色归 GroupGrass（软植物音，同草丛 / 蘑菇）。worldgen
+    //   placeFlowers 在各群系草地低密度散布（机制等价 MC 各群系花点缀）。进创造调色板（每色独立取用）。
+    /* flower_red    */ {int(BlockRegistry::FlowerRed),                   63, 63, 63, 63, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::FlowerRed),     1, 64, "flower_red",    "红花"},
+    /* flower_yellow */ {int(BlockRegistry::FlowerYellow),                64, 64, 64, 64, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::FlowerYellow),  1, 64, "flower_yellow", "黄花"},
+    /* flower_blue   */ {int(BlockRegistry::FlowerBlue),                  65, 65, 65, 65, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::FlowerBlue),    1, 64, "flower_blue",   "蓝花"},
+    /* flower_white  */ {int(BlockRegistry::FlowerWhite),                 66, 66, 66, 66, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::FlowerWhite),   1, 64, "flower_white",  "白花"},
+    //   甘蔗（Sugarcane）：水边生长的可叠高细茎植物。**cross 形广告牌方块**（与花 / 草丛同走 cross 几何段，两片对角
+    //   相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方，呈细茎观感。worldgen placeSugarcane 在水域邻接的
+    //   草地 / 沙地旁确定性散布 1..3 格高柱（同 cactus 1-3 高模式；spec「grows up to 3 tall at waters edges」），每格仅
+    //   写空气格 → 不覆盖已生成的方块。solid=false（非实体 → 不挡邻居面剔除，同草丛 / 花）、shape=ShapeNone
+    //   （**无碰撞** → 玩家穿过）、hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身（破甘蔗掉甘蔗方块，可放回 /
+    //   可重种）、dropCount=1、maxStack=64。各面贴图=sugarcane(67)（透明底 + 绿色节段细茎 + 顶部尖叶，alphaCutoff
+    //   cutout）。音色归 GroupGrass（软植物音）。**放置预检**（placeBlock）：目标格下方须为 Grass / Dirt / Sand /
+    //   Sugarcane（机制等价 MC 甘蔗须草地 / 沙地 / 甘蔗支撑）。进创造调色板（玩家可取用 / 放置）。
+    /* sugarcane    */ {int(BlockRegistry::Sugarcane),                    67, 67, 67, 67, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Sugarcane),     1, 64, "sugarcane",    "甘蔗"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -282,6 +303,11 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* spruce_log     */ -1, // t395 云杉原木 → MC 1.0 无独立 id（1.0 仅橡木 log id 17，云杉 / 白桦等变种 1.7+ 才以 metadata 分；本工程用独立 id 故无 1.0 等价）
     /* lily_pad       */ -1, // t396 睡莲 → MC 1.0 无等价（lily pad id 111 为 1.7+ 物品；本工程作方块故无 1.0 等价）
     /* mushroom       */ -1, // t396 蘑菇 → MC 1.0 蘑菇仅以 item（红 40 / 棕 39）或巨型菌盖方块（红 100 / 棕 99）存在，无「小蘑菇植物方块」等价；本工程作 cross 装饰方块故无 1.0 等价
+    /* flower_red     */ 37, // t397 红花 → MC 1.0 poppy（罂粟）id 37
+    /* flower_yellow  */ 38, // t397 黄花 → MC 1.0 dandelion（蒲公英）id 38
+    /* flower_blue    */ -1, // t397 蓝花 → MC 1.0 无等价（cornflower 矢车菊 id 28（1.0 为玫瑰丛 rose bush 的变体）；蓝花是本工程原创 4 色变体之一，无 1.0 等价故 -1）
+    /* flower_white   */ -1, // t397 白花 → MC 1.0 无等价（oxeye daisy 雏菊 1.7+ id 34；本工程作花方块故无 1.0 等价）
+    /* sugarcane      */ 83, // t397 甘蔗 → MC 1.0 sugar cane（reeds）id 83
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -308,7 +334,8 @@ bool BlockRegistry::isSolid(quint8 blockId)      { return def(blockId).solid; }
 BlockRegistry::Shape BlockRegistry::shape(quint8 blockId) { return def(blockId).shape; }
 
 // t305 cross 广告牌方块统一谓词（单一权威）：连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)
-//   + 段外 DeadBush(43)（t394）。Sapling / DeadBush id 不在连续 cross 段内（多方块夹中间且非 cross）→ 显式并入。
+//   + 段外 DeadBush(43)（t394）+ 段外 Mushroom(48)（t396）+ 段外 LilyPad(47)（t396）+ 段外花段 [FirstFlower, LastFlower]
+//   （t397 4 色）+ 段外 Sugarcane(53)（t397 细茎）。非连续 cross 方块 id 显式并入（同 Sapling 模式）。
 //   mesher / 选中框路由一律读本谓词（避免各持区间判定漂移，见头注释）。
 bool BlockRegistry::isCrossBillboard(quint8 blockId)
 {
@@ -316,6 +343,8 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == DeadBush) return true; // t394 段外 cross（枯死的灌木，同 Sapling 模式）
     if (blockId == Mushroom) return true; // t396 段外 cross（蘑菇，同 Sapling 模式）
     if (blockId == LilyPad) return true;  // t396 cross 路由的横向浮叶（几何水平非竖直 cross，但同走 PASS 1 alphaCutoff 路径，见头注释）
+    if (blockId == Sugarcane) return true; // t397 段外 cross（甘蔗细茎，同 Sapling 模式）
+    if (blockId >= FirstFlower && blockId <= LastFlower) return true; // t397 段外花段（4 色 cross）
     return blockId >= FirstCross && blockId <= LastCross;
 }
 
@@ -324,6 +353,14 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
 bool BlockRegistry::isBed(quint8 blockId)
 {
     return blockId >= FirstBed && blockId <= LastBed;
+}
+
+// t397 花方块段统一谓词（单一权威）：id ∈ [FirstFlower, LastFlower]（4 色变体）即花。供 worldgen placeFlowers
+//   / 放置预检 / 未来花相关机制判定「是否花」，避免各处自写 id 区间漂移（同 isBed / isCrossBillboard 模式）。
+//   连续段，裸区间即可。
+bool BlockRegistry::isFlower(quint8 blockId)
+{
+    return blockId >= FirstFlower && blockId <= LastFlower;
 }
 
 // 方块是否「有碰撞 sub-AABB」（考虑开合态）。air / torch / water（ShapeNone）→ false。
@@ -641,6 +678,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case DeadBush: // t394 枯死的灌木 → 软草音色（枯枝软质，同草丛；机制等价 MC dead bush SoundType = grass）
     case LilyPad: // t396 睡莲 → 软草音色（浮叶软质植物，同草丛；机制等价 MC lily pad SoundType = grass）
     case Mushroom: // t396 蘑菇 → 软草音色（软质真菌，同草丛；机制等价 MC mushroom SoundType = grass / stone 取软草近似）
+    case FlowerRed: case FlowerYellow: case FlowerBlue: case FlowerWhite: // t397 4 色花 → 软草音色（软植物，同草丛；机制等价 MC 花 SoundType = grass）
+    case Sugarcane: // t397 甘蔗 → 软草音色（细茎软植物，同草丛；机制等价 MC sugar cane SoundType = grass）
         return GroupGrass;
     case Sand:
     case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）

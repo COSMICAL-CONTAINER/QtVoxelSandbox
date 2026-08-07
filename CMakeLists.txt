@@ -248,6 +248,11 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_spruce_log_side.png      # t395 云杉原木侧面贴图（build_spruce.py；深棕垂直树皮条带）
         textures/default_lily_pad.png             # t396 睡莲浮叶贴图（build_lily_pad.py；透明底+绿圆叶+V缺口；alphaCutoff cutout）
         textures/default_mushroom.png             # t396 蘑菇 cross 贴图（build_mushroom.py；透明底+米色菌柄+红底白斑菌盖；alphaCutoff cutout）
+        textures/default_flower_red.png           # t397 花 4 色变体 cross 贴图（build_flower.py；透明底+绿茎+彩色花头；alphaCutoff cutout）
+        textures/default_flower_yellow.png
+        textures/default_flower_blue.png
+        textures/default_flower_white.png
+        textures/default_sugarcane.png            # t397 甘蔗 cross 贴图（build_sugarcane.py；透明底+绿色节段细茎+顶部尖叶；alphaCutoff cutout）
         textures/default_chest_top.png         # t173/t179 箱子各面贴图（build_chest.py 程序生成原创像素图）
         textures/default_chest_side.png
         textures/default_chest_front.png
@@ -308,6 +313,11 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_spruce_log.png               # t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮；build_cube_icons.py）
         textures/icon_lily_pad.png                 # t396 睡莲 flat 2D 图标（透明底+绿圆叶+V缺口；build_cube_icons.py）
         textures/icon_mushroom.png                 # t396 蘑菇 flat 2D 图标（透明底+米色菌柄+红底白斑菌盖；build_cube_icons.py）
+        textures/icon_flower_red.png               # t397 花 4 色 flat 2D 图标（透明底+绿茎+彩色花头；build_cube_icons.py）
+        textures/icon_flower_yellow.png
+        textures/icon_flower_blue.png
+        textures/icon_flower_white.png
+        textures/icon_sugarcane.png                # t397 甘蔗 flat 2D 图标（透明底+绿色节段细茎+顶部尖叶；build_cube_icons.py）
 )
 
 # t89 / t118 音效资源（tools/build_sounds.py 程序合成，§4 原创 SFX；零 MC 资产）。

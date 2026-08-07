@@ -1395,6 +1395,8 @@ void World::generate()
     placeTallGrass(); // t235：grass 表层上方确定性散布草丛（PLAN §2-K；树定型后，仅写空气格不覆盖树）
     placeDesertFlora(); // t394：沙漠沙顶确定性散布仙人掌（1-3 格高柱）+ 枯死的灌木（PLAN §2-K；草丛后，仅写空气格）
     placeSwampFlora(); // t396：Swamp 群系睡莲（水面）+ 蘑菇（草岛）；PLAN §2-K；仅写空气格不覆盖水 / 草 / 树
+    placeFlowers(); // t397：各群系草地确定性散布 4 色花（PLAN §2-K；草丛后，仅写空气格不覆盖草 / 树）
+    placeSugarcane(); // t397：水域邻接陆地确定性散布 1..3 格高甘蔗（PLAN §2-K；花后，仅写空气格不覆盖草 / 树 / 花）
     recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
     // t380：worldgen 末置流体脏 → 进世界后首次 tickWaterFlow/tickLavaFlow 各扫一次确认稳态（海洋 / 岩浆湖
     //   全源 → 零候选 → 即清标志停扫）。一次性确认扫描（防御：避免标志初始 false 漏掉 worldgen 引入的流场）。
@@ -1816,6 +1818,117 @@ void World::placeSwampFlora()
     }
     qInfo() << "worldgen: swamp flora placed lily =" << lilyPlaced
             << "mushroom =" << mushPlaced; // 同 seed → 同计数（确定性核对）
+}
+
+// t397 花散布（见 world.h 头注释）：遍历各群系草地列，按 hashColumn 密度 + 群系色彩配比散布 4 色花之一于草顶上方
+//   一格（surfaceY+1）。机制等价 MC 1.0 各群系花点缀（平原多彩 / 森林少量 / 沼泽适量 / 山地稀疏）。
+//   密度筛选（r%100 < pct）+ 色选（独立位段 (r>>16)%4）解耦 → 密度与色彩分布互不污染。仅写空气格（setVoxelIfAir）
+//   → 不覆盖草上已生成的方块（树 / 草丛）。与 placeTallGrass 同阈值（非沙漠 / 非雪原 / 非沙滩水下 / grass 顶）。
+//   纯函数于 seed + biomeAt（经 hashColumn，PLAN §2-K）→ 同 seed 同分布；禁用任何运行期随机源。
+//   worldgen 顺序：placeTallGrass 之后（草丛占草顶上方一格优先），花仅写空气格 → 已被草丛 / 树占的列自然跳过。
+void World::placeFlowers()
+{
+    // 各群系花密度（% of grass 列）。机制等价 MC 1.0 各群系花点缀密度分化：
+    //   plains 多彩（草原花海，spec「平原多彩」）、forest 适中（林下小花）、swamp 适中（湿地野花）、hills 稀疏（裸岩少花）。
+    //   取低于对应群系草丛密度（placeTallGrass：plains 18 / forest 35 / hills 12）→ 花点缀在草丛之间，不喧宾夺主。
+    constexpr unsigned kPlainsFlowerPct = 10; // 平原花海（多彩点缀，spec「平原多彩」）
+    constexpr unsigned kForestFlowerPct = 6;  // 森林林下小花（适量，不抢密草风头）
+    constexpr unsigned kSwampFlowerPct  = 8;  // 沼泽湿地野花（草岛点缀）
+    constexpr unsigned kHillsFlowerPct  = 4;  // 山地稀疏（裸岩 / 林少花）
+
+    int placed = 0;
+    int red = 0, yellow = 0, blue = 0, white = 0; // 各色计数（可观测 / 确定性核对）
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            const int surfaceY = heightAt(x, z);
+            // 与 placeTallGrass 同阈值：沙滩带(wl±1)/水下(h<wl)/低洼不生花（机制等价 MC 花不生于沙/水下）。
+            if (surfaceY <= kWaterLevel + 1) continue;
+            const Biome bio = biomeAt(x, z);
+            if (bio == Biome::Desert) continue; // 沙漠群系不生花（机制等价 MC 沙漠无花）
+            if (bio == Biome::Snowy) continue;  // 雪原/针叶地表覆雪 → 不生花（机制等价 MC 寒冷群系雪地无花）
+            // 仅草顶列生花（机制等价 MC 花生于草地；地表湖 / 洞口顶替换了草 → 跳过）。
+            if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::Grass) continue;
+
+            const quint32 r = hashColumn(m_seed, x, z);
+            const unsigned densityPct = (bio == Biome::Plains) ? kPlainsFlowerPct
+                                        : (bio == Biome::Forest) ? kForestFlowerPct
+                                        : (bio == Biome::Swamp)  ? kSwampFlowerPct
+                                                                 : kHillsFlowerPct; // hills 兜底
+            if (r % 100u >= densityPct) continue; // 密度筛选
+
+            // 色选：独立哈希位段 (r>>16)%4 选色（与密度位段 r%100 解耦 → 密度与色彩分布互不污染）。
+            //   4 色均布（各 25%）；机制等价 MC 各色花在群系内随机点缀。
+            const unsigned colorPick = (r >> 16) % 4u;
+            quint8 flowerId = quint8(BlockRegistry::FlowerRed);
+            if      (colorPick == 1) flowerId = quint8(BlockRegistry::FlowerYellow);
+            else if (colorPick == 2) flowerId = quint8(BlockRegistry::FlowerBlue);
+            else if (colorPick == 3) flowerId = quint8(BlockRegistry::FlowerWhite);
+
+            const int y = surfaceY + 1; // 草顶上方一格
+            if (y >= m_height) continue; // 世界顶之上不放（防御）
+            // 仅写空气格 → 不覆盖草上已生成的方块（树干 / 树叶 / 草丛）。已被占的列自然跳过（草丛先于此 pass）。
+            if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) continue;
+            setVoxelIfAir(x, y, z, flowerId, 0);
+            ++placed;
+            if      (flowerId == BlockRegistry::FlowerRed)    ++red;
+            else if (flowerId == BlockRegistry::FlowerYellow) ++yellow;
+            else if (flowerId == BlockRegistry::FlowerBlue)   ++blue;
+            else                                              ++white;
+        }
+    }
+    qInfo() << "worldgen: flowers placed =" << placed
+            << "(red" << red << "/ yellow" << yellow
+            << "/ blue" << blue << "/ white" << white << ")"; // 同 seed → 同计数（确定性核对）
+}
+
+// t397 甘蔗散布（见 world.h 头注释）：遍历水域（海平面 Water 格 y==waterLevel / 沼泽浅水格）的水平 4 邻陆地列
+//   （草地 / 沙地），在邻水陆地格的草 / 沙顶上方确定性散布 1..3 格高甘蔗柱。机制等价 MC 1.0 sugar cane 生于水边。
+//   「邻水」判定 = 该列草 / 沙顶（surfaceY）的水平 4 邻任一为 Water（海平面水 / 沼泽浅水均算）；远水陆地不生
+//   （机制等价 MC 甘蔗须直接邻水）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），逐格向上仅写
+//   空气格 → 不覆盖已生成的方块（树 / 草 / 花）。仅写空气格（setVoxelIfAir）。
+//   纯函数于 seed + biomeAt + 水域（经 hashColumn，PLAN §2-K）→ 同 seed 同分布；禁用任何运行期随机源。
+//   worldgen 顺序：placeFlowers 之后（花占草顶上方一格优先），甘蔗仅写空气格 → 已被占的列自然跳过。
+void World::placeSugarcane()
+{
+    constexpr unsigned kSugarcanePct = 30; // 邻水陆地列生甘蔗密度（% of 邻水草/沙顶列；机制等价 MC 水边甘蔗较常见）
+    int placed = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            const Biome bio = biomeAt(x, z);
+            if (bio == Biome::Desert) continue; // 沙漠群系甘蔗归 placeDesertFlora（仙人掌 / 枯灌木）—— 不在此散布
+            const int surfaceY = heightAt(x, z);
+            if (surfaceY <= 0 || surfaceY >= m_height) continue; // 防御（界内）
+            // 仅草地 / 沙地顶生甘蔗（机制等价 MC 甘蔗生于草地 / 沙地；雪原覆雪不生 → Snowy 草顶已被 SnowLayer 替换 → 跳过）。
+            const quint8 surf = m_chunks.blockAt(x, surfaceY, z);
+            if (surf != BlockRegistry::Grass && surf != BlockRegistry::Sand) continue;
+
+            // 「邻水」判定：草 / 沙顶（surfaceY）的水平 4 邻任一为 Water。海平面水（y==waterLevel）+ 沼泽浅水
+            //   （placeSwampPools 改的草顶 Water）均算。机制等价 MC 甘蔗须直接邻水（半径 1 内有水）。
+            const auto isWaterNb = [&](int dx, int dz) -> bool {
+                const int nx = x + dx, nz = z + dz;
+                if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) return false;
+                return m_chunks.blockAt(nx, surfaceY, nz) == BlockRegistry::Water;
+            };
+            const bool adjacentToWater =
+                isWaterNb( 1, 0) || isWaterNb(-1, 0) || isWaterNb(0,  1) || isWaterNb(0, -1);
+            if (!adjacentToWater) continue; // 远水陆地不生甘蔗
+
+            const quint32 r = hashColumn(m_seed, x, z);
+            if (r % 100u >= kSugarcanePct) continue; // 密度筛选
+
+            // 高度 1..3（独立位段 (r>>16)%3 + 1，与密度位段解耦）。逐格向上仅写空气格 → 不穿透树叶 / 实块。
+            //   机制等价 MC 甘蔗 1..3 格柱（spec「grows up to 3 tall」）。
+            const int height = 1 + int((r >> 16) % 3u);
+            for (int i = 0; i < height; ++i) {
+                const int y = surfaceY + 1 + i;
+                if (y >= m_height) break;
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) break; // 遇实块即止（不覆盖）
+                setVoxelIfAir(x, y, z, BlockRegistry::Sugarcane, 0);
+                ++placed;
+            }
+        }
+    }
+    qInfo() << "worldgen: sugarcane placed =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t395 雪原/针叶群系水面冻结（见 world.h 头注释）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water

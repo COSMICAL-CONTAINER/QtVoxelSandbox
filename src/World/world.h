@@ -377,6 +377,21 @@ private:
     //   机制等价 MC 1.0 沼泽睡莲浮水 + 阴暗草地小蘑菇。纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；
     //   禁用任何运行期随机源。仅写空气格 → 不覆盖水 / 草上已生成的方块（与 placeTrees/placeTallGrass 同守卫语义）。
     void placeSwampFlora();
+    // t397 花散布（PLAN §2-K 确定性）：遍历各群系草地列（非沙漠 / 非雪原 / 非沙滩水下，与 placeTallGrass 同阈值），
+    //   按 hashColumn(seed,x,z) 密度筛选在草顶上方一格（surfaceY+1）置 4 色花之一（cross 广告牌，仅写空气格）。
+    //   机制等价 MC 1.0 各群系花点缀（平原多彩 / 森林少量 / 沼泽适量 / 山地稀疏）。各群系密度 + 色彩配比不同：
+    //   plains 花最多且 4 色均布（开阔草原花海）、forest 适中偏黄 / 白（林下小花）、swamp 适中偏蓝（湿地野花）、
+    //   hills 稀疏（裸岩 / 林少花）。色选独立哈希位段 (r>>16)%4 选色（与密度位段 r%100 解耦）。仅写空气格
+    //   （setVoxelIfAir）→ 不覆盖草上已生成的方块（树 / 草丛）。纯函数于 seed + biomeAt → 同 seed 同分布；
+    //   禁用任何运行期随机源（与 placeTallGrass / placeSwampFlora 同守卫语义）。
+    void placeFlowers();
+    // t397 甘蔗散布（PLAN §2-K 确定性）：遍历水域（海平面 Water 格 / 沼泽浅水格）的**水平 4 邻**陆地列
+    //   （草地 / 沙地），在邻水陆地格的草 / 沙顶上方确定性散布 1..3 格高甘蔗柱（Sugarcane cross，每格仅写空气格）。
+    //   机制等价 MC 1.0 sugar cane 生于水边（沙 / 草地邻水）。仅在水**直接邻接**的陆地生（机制等价 MC 甘蔗须邻水；
+    //   远水陆地不生）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），逐格向上仅写空气格 → 不覆盖
+    //   已生成的方块（树 / 草 / 花）。纯函数于 seed + biomeAt + 水域（经 hashColumn）→ 同 seed 同分布；禁用任何
+    //   运行期随机源（与 placeTallGrass / placeDesertFlora 同守卫语义）。
+    void placeSugarcane();
     // t395 雪原/针叶群系水面冻结（PLAN §2-K 确定性）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water
     //   格）冻结为 Ice（机制等价 MC 1.0 寒冷群系水面结冰）。仅冻最顶层水面（同 MC 仅表层结冰；下层水保留）；
     //   地下水池（cy ≤ h-7 << waterLevel）不在 y==waterLevel 故不受影响。generate 在 fillWater 之后调（水已就位）。

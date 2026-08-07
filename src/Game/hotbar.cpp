@@ -53,6 +53,12 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::DeadBush:      return "icon_dead_bush.png";      // t394 枯死的灌木（cross 透明底；棕褐干枝；沙漠装饰）
     case BlockRegistry::LilyPad:       return "icon_lily_pad.png";       // t396 睡莲（cross 路由横向浮叶；透明底 + 绿圆叶 + V 缺口）
     case BlockRegistry::Mushroom:      return "icon_mushroom.png";       // t396 蘑菇（cross 透明底；米色菌柄 + 红底白斑菌盖）
+    // t397 花 4 色变体 + 甘蔗（cross 透明底；flat 2D 图标，build_cube_icons.py render_flat_2d 放大源贴图保留 alpha）。
+    case BlockRegistry::FlowerRed:     return "icon_flower_red.png";     // 红花（cross 透明底；绿茎 + 红花头）
+    case BlockRegistry::FlowerYellow:  return "icon_flower_yellow.png";  // 黄花（cross 透明底；绿茎 + 黄花头）
+    case BlockRegistry::FlowerBlue:    return "icon_flower_blue.png";    // 蓝花（cross 透明底；绿茎 + 蓝花头）
+    case BlockRegistry::FlowerWhite:   return "icon_flower_white.png";   // 白花（cross 透明底；绿茎 + 白花头）
+    case BlockRegistry::Sugarcane:     return "icon_sugarcane.png";      // 甘蔗（cross 透明底；绿色节段细茎 + 顶部尖叶）
     // t145/t163(d) 不完整方块图标：6 类木制半方块各走自己的区分图标（tools/build_cube_icons.py 程序生成）。
     //   t163(d) slab/stairs/trapdoor/pressure_plate 升级为 **3D dimetric 立体图标**（render_partial_3d 按
     //   实际形状投影：slab 半高 / stairs L 阶 / trapdoor 薄板 / pressure_plate 更薄更小，顶 + 两侧明暗同
@@ -384,6 +390,11 @@ QVariantList Hotbar::creativeBlocks() const
              //   （lily pad / mushroom），名称/贴图原创自绘 §9a。cross 路由（alphaCutoff cutout 透明底）。
              int(BlockRegistry::LilyPad),                                    // 睡莲（沼泽水面浮叶；横向浮叶 cross 路由；可放置）
              int(BlockRegistry::Mushroom),                                   // 蘑菇（沼泽草地小蘑菇；cross 装饰；可放置）
+             // t397 多群系装饰植物：花 4 色变体 + 甘蔗（机制等价 MC 1.0 花 / 甘蔗；名称 / 贴图原创自绘 §9a）。
+             //   cross 路由（alphaCutoff cutout 透明底）；每色花独立 id 便于创造调色板取用 + 右键放置。
+             int(BlockRegistry::FlowerRed),    int(BlockRegistry::FlowerYellow), // 红花 / 黄花（worldgen 散布 / 各群系花点缀）
+             int(BlockRegistry::FlowerBlue),   int(BlockRegistry::FlowerWhite),  // 蓝花 / 白花
+             int(BlockRegistry::Sugarcane),                                   // 甘蔗（水边生长；1..3 高叠柱；可放置）
              // t387 床方块 8 色变体（简化单格整立方；机制等价 MC 1.0 床。配方 planks+wool → 红床；其余色创造直接取用）。
              int(BlockRegistry::BedRed),    int(BlockRegistry::BedOrange),
              int(BlockRegistry::BedYellow), int(BlockRegistry::BedGreen),
