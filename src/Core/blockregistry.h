@@ -284,6 +284,23 @@ public:
                                   //   （浅蓝底 + 反光裂纹，原创自绘 §9a）。音色归 GroupStone（玻璃质敲击，最接近 MC 1.0 冰 glass
                                   //   SoundType）。不进创造调色板（worldgen 冻结获得；与 water / lava 同属「worldgen / 系统获得」语义）。
         SpruceLog      = 46, // 云杉原木：雪原/针叶群系云杉树的主干（worldgen placeSpruceTreeAt 在 Snowy 群系种云杉变种树）。
+        // ── t396 沼泽群系内容（机制等价 MC 1.0 沼泽植物：lily pad / mushroom；名称 / 贴图全原创自绘 §9a）：
+        LilyPad        = 47, // 睡莲：沼泽浅水水面浮叶（worldgen placeSwampFlora 在沼泽水格上方一格散布）。
+                                  //   **cross 路由的横向浮叶**（mesher 经 PartialBlockGeometry::append 的 LilyPad case 画一片
+                                  //   水平双面 quad 贴 cell 底部 → 浮于水面；与 TallGrass 等竖直 cross 同走 isCrossBillboard
+                                  //   路由 + alphaCutoff cutout 透明底，但几何为水平非竖直）。solid=false（非实体 → 不挡邻居
+                                  //   面剔除，同 torch / 草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC 睡莲薄叶
+                                  //   无硬碰撞；可踩过）、hardness=0（瞬破，同草丛）、NoTool（空手可采且掉落）、dropId=自身
+                                  //   （破睡莲掉睡莲方块，可放回）、dropCount=1、maxStack=64。各面贴图=lily_pad(61)
+                                  //   （透明底 + 绿色圆叶 + V 形缺口，alphaCutoff cutout）。音色归 GroupGrass（软植物音）。
+                                  //   进创造调色板（玩家可取用 / 放置）。
+        Mushroom       = 48, // 蘑菇：沼泽草地小蘑菇（worldgen placeSwampFlora 在沼泽草地格上方一格低密度散布）。
+                                  //   cross 形广告牌方块（与 Sapling / DeadBush 同走 cross 几何段，两片对角相交双面 quad，
+                                  //   alpha 透明底 cutout）—— 非 1×1×1 整立方。机制等价 MC 1.0 蘑菇（沼泽 / 阴暗草地小蘑菇）。
+                                  //   solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过）、
+                                  //   hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身（破蘑菇掉蘑菇方块，可放回）、
+                                  //   dropCount=1、maxStack=64。各面贴图=mushroom(62)（透明底 + 米色菌柄 + 红底白斑菌盖，
+                                  //   alphaCutoff cutout）。音色归 GroupGrass（软植物音）。进创造调色板（装饰取用）。
                                   //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 log / planks
                                   //   同族；机制等价 MC 1.0 云杉原木——寒冷群系针叶树变种，区别于橡木原木 Log）、hardness=2.0
                                   //   （同 MC 1.0 原木量级）、toolType=Axe（木类；requiresTool=false → 空手也掉落，仅速度受斧影响）、
@@ -291,7 +308,7 @@ public:
                                   //   spruce_log_top(59)（深棕同心年轮截面）/ 侧=spruce_log_side(60)（深棕垂直树皮条带，区别于橡木
                                   //   原木 log_side 的浅棕；云杉木特征为更深冷棕色）。音色归 GroupWood（木质，同 log / planks）。
                                   //   进创造调色板（玩家可取用 / 放置）。
-        Count         = 47, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Count         = 49, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -326,8 +343,10 @@ public:
 
     // t305 cross 广告牌方块统一谓词（单一权威）：true 表示该方块走 PartialBlockGeometry 的 cross 几何段
     //   （两片对角相交双面 quad）。涵盖连续段 [FirstCross, LastCross]（草丛 / 小麦作物）+ 段外 Sapling(28)
-    //   + 段外 DeadBush(43)（t394）。mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律
-    //   读本谓词，不各持区间判定（PLAN §2：单一权威，避免「mesher 路由到 cross 但选中框仍按区间漏某方块」撕裂）。
+    //   + 段外 DeadBush(43)（t394）+ 段外 Mushroom(48)（t396）+ 段外 LilyPad(47)（t396：横向浮叶，几何为水平
+    //   quad 非竖直 cross，但同走本路由 + alphaCutoff cutout 路径 —— PartialBlockGeometry::append 的 LilyPad
+    //   case 内画水平 quad）。mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律读本谓词，
+    //   不各持区间判定（PLAN §2：单一权威，避免「mesher 路由到 cross 但选中框仍按区间漏某方块」撕裂）。
     static bool isCrossBillboard(quint8 blockId);
 
     // t236 小麦作物生长阶段：state = 阶段 0..7（0=刚种嫩芽、7=成熟）。mesher（PartialBlockGeometry::append 的
@@ -551,6 +570,10 @@ public:
     //   58=ice（t395 冰各面贴图；浅蓝底+反光裂纹；Ice 各面=本 tile；tools/build_ice.py 程序生成原创像素图）。
     //   59=spruce_log_top / 60=spruce_log_side（t395 云杉原木；顶=深棕同心年轮截面 / 侧=深棕垂直树皮条带；
     //      区别于橡木原木 log_top/log_side 的浅棕；tools/build_spruce.py 程序生成原创像素图）。
+    //   61=lily_pad（t396 睡莲 cross 路由的横向浮叶贴图；透明底 + 绿色圆叶 + V 形缺口，alphaCutoff cutout；
+    //      LilyPad 各面=本 tile，mesher 走 isCrossBillboard 路由的 LilyPad 横向 quad case）。
+    //   62=mushroom（t396 蘑菇 cross 贴图；透明底 + 米色菌柄 + 红底白斑菌盖，alphaCutoff cutout；
+    //      Mushroom 各面=本 tile，mesher 走 cross 几何段）。
     // 图集由 tools/build_atlas.py 打包全部 57 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
@@ -564,7 +587,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 61;
+    static constexpr int AtlasTileCount = 63;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

@@ -217,6 +217,21 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   （深棕垂直树皮条带，区别于橡木原木 log_side 的浅棕；云杉木特征为更深冷棕色）。音色归 GroupWood（木质）。
     //   进创造调色板。
     /* spruce_log   */ {int(BlockRegistry::SpruceLog),                  59, 59, 60, 60, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceLog),     1, 64, "spruce_log",   "云杉原木"},
+    // ── t396 沼泽群系内容（机制等价 MC 1.0 沼泽植物：lily pad / mushroom；名称 / 贴图全原创自绘 §9a）：
+    //   睡莲（LilyPad）：沼泽浅水水面浮叶。**cross 路由的横向浮叶**（mesher PartialBlockGeometry::append 的 LilyPad
+    //   case 画一片水平双面 quad 贴 cell 底部 → 浮于水面；同走 isCrossBillboard 路由 + alphaCutoff cutout，但几何为
+    //   水平非竖直）。solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制
+    //   等价 MC 睡莲薄叶无硬碰撞；可踩过）、hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身（破睡莲掉
+    //   睡莲方块，可放回）、dropCount=1、maxStack=64。各面贴图=lily_pad(61)（透明底 + 绿色圆叶 + V 形缺口，alphaCutoff
+    //   cutout）。音色归 GroupGrass（软植物音）。worldgen placeSwampFlora 在沼泽水格上方一格散布。进创造调色板。
+    /* lily_pad     */ {int(BlockRegistry::LilyPad),                     61, 61, 61, 61, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::LilyPad),       1, 64, "lily_pad",     "睡莲"},
+    //   蘑菇（Mushroom）：沼泽草地小蘑菇。cross 形广告牌方块（与 Sapling / DeadBush 同走 cross 几何段，两片对角相交
+    //   双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。机制等价 MC 1.0 蘑菇（沼泽 / 阴暗草地小蘑菇）。
+    //   solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过）、hardness=0（瞬破）、
+    //   NoTool（空手可采且掉落）、dropId=自身（破蘑菇掉蘑菇方块，可放回）、dropCount=1、maxStack=64。各面贴图=
+    //   mushroom(62)（透明底 + 米色菌柄 + 红底白斑菌盖，alphaCutoff cutout）。音色归 GroupGrass（软植物音）。
+    //   worldgen placeSwampFlora 在沼泽草地格上方一格低密度散布。进创造调色板（装饰取用）。
+    /* mushroom     */ {int(BlockRegistry::Mushroom),                    62, 62, 62, 62, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Mushroom),      1, 64, "mushroom",     "蘑菇"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -265,6 +280,8 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* snow_layer     */ 80, // t395 积雪层 → MC 1.0 snow block id 80（满格雪方块；MC 薄雪层 id 78 为非整立方，本工程简化整立方故取雪方块 80）
     /* ice            */ 79, // t395 冰 → MC 1.0 ice id 79
     /* spruce_log     */ -1, // t395 云杉原木 → MC 1.0 无独立 id（1.0 仅橡木 log id 17，云杉 / 白桦等变种 1.7+ 才以 metadata 分；本工程用独立 id 故无 1.0 等价）
+    /* lily_pad       */ -1, // t396 睡莲 → MC 1.0 无等价（lily pad id 111 为 1.7+ 物品；本工程作方块故无 1.0 等价）
+    /* mushroom       */ -1, // t396 蘑菇 → MC 1.0 蘑菇仅以 item（红 40 / 棕 39）或巨型菌盖方块（红 100 / 棕 99）存在，无「小蘑菇植物方块」等价；本工程作 cross 装饰方块故无 1.0 等价
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -297,6 +314,8 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
 {
     if (blockId == Sapling) return true;
     if (blockId == DeadBush) return true; // t394 段外 cross（枯死的灌木，同 Sapling 模式）
+    if (blockId == Mushroom) return true; // t396 段外 cross（蘑菇，同 Sapling 模式）
+    if (blockId == LilyPad) return true;  // t396 cross 路由的横向浮叶（几何水平非竖直 cross，但同走 PASS 1 alphaCutoff 路径，见头注释）
     return blockId >= FirstCross && blockId <= LastCross;
 }
 
@@ -620,6 +639,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Sapling: // t305 树苗 → 软草音色（同草丛 / 作物；机制等价 MC 树苗 SoundType = grass）
     case Cactus: // t394 仙人掌 → 软草音色（植物，软质多肉；机制等价 MC 仙人掌 SoundType = cloth，本工程取软草近似）
     case DeadBush: // t394 枯死的灌木 → 软草音色（枯枝软质，同草丛；机制等价 MC dead bush SoundType = grass）
+    case LilyPad: // t396 睡莲 → 软草音色（浮叶软质植物，同草丛；机制等价 MC lily pad SoundType = grass）
+    case Mushroom: // t396 蘑菇 → 软草音色（软质真菌，同草丛；机制等价 MC mushroom SoundType = grass / stone 取软草近似）
         return GroupGrass;
     case Sand:
     case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）

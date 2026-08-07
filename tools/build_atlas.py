@@ -138,6 +138,10 @@ TILES = [
     "default_ice",                  # 58 ice（冰各面贴图；浅蓝底+反光裂纹；Ice 各面=本 tile）
     "default_spruce_log_top",       # 59 spruce_log_top（云杉原木顶/底面；深棕同心年轮截面）
     "default_spruce_log_side",      # 60 spruce_log_side（云杉原木侧面；深棕垂直树皮条带）
+    "default_lily_pad",             # 61 lily_pad（t396 睡莲 cross 路由的横向浮叶贴图；透明底 + 绿色圆叶 + V 形缺口；
+                                    #    alphaCutoff cutout；LilyPad 各面=本 tile，mesher 走 LilyPad 横向 quad case）
+    "default_mushroom",             # 62 mushroom（t396 蘑菇 cross 贴图；透明底 + 米色菌柄 + 红底白斑菌盖；
+                                    #    alphaCutoff cutout；Mushroom 各面=本 tile，mesher 走 cross 几何段）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

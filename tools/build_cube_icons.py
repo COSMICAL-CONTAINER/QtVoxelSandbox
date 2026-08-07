@@ -178,6 +178,8 @@ FLAT_2D_CROSS = [
     ("tall_grass", "default_tall_grass"),     # t235 草丛 cross（透明底 + 绿草叶；走 render_flat_2d）
     ("wheat_crop", "default_wheat_stage_7"),  # t236 小麦作物 cross（取成熟阶段 7 麦穗金黄作图标）
     ("dead_bush",  "default_dead_bush"),      # t394 枯死的灌木 cross（透明底 + 棕褐干枝；沙漠装饰）
+    ("lily_pad",   "default_lily_pad"),       # t396 睡莲（透明底 + 绿色圆叶 + V 形缺口；沼泽水面浮叶）
+    ("mushroom",   "default_mushroom"),       # t396 蘑菇（透明底 + 米色菌柄 + 红底白斑菌盖；沼泽草地小蘑菇）
 ]
 
 PARTIALS_3D = [

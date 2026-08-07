@@ -1058,6 +1058,10 @@ int World::heightAt(int x, int z) const
                                              //   保持「大草原平地」仍成立）。t306 原 amp 2（与 plains 同）已废。
         case Biome::Snowy:  amp = 3.0; break; // 雪原/针叶（t395）：平缓起伏（介于 plains 2 与 desert 3 之间；覆雪地表
                                              //   宜平缓，少悬崖；机制等价 MC 1.0 雪原 / 针叶平缓地形）。
+        case Biome::Swamp:  amp = 0.0; break; // 沼泽（t396）：**完美平坦**（amp 0 → 全 Swamp 列等高于基线 64）。
+                                             //   平坦是浅水池稳态的前提 —— placeSwampPools 把约半数草顶改造成 1 格深
+                                             //   Water 源，全列等高 → 水源层水平邻接同高草岛（Grass）→ 不溢流（机制等价
+                                             //   MC 1.0 沼泽平地 + 浅水洼地貌；非 MC 沼泽的微起伏，本工程取严格平坦保水源稳定）。
         case Biome::Plains: // 草原（多数陆地）
         default:            amp = 2.0; break; // 极平（spec「大草原=平地」）
     }
@@ -1093,6 +1097,12 @@ World::Biome World::biomeAt(int x, int z) const
     //   森林同为少数群系，草原仍占多数）。纯函数于 seed → 同 seed 同雪原分布（PLAN §2-K）。
     const double s = fbm((x + m_seed + 6420) * 0.016, (z + m_seed + 6420) * 0.016); // [-1,1]
     if (s > 0.45) return Biome::Snowy;
+    // t396 沼泽群系：用第四条独立低频 fBm 把 Swamp 从草原里 carve 出来。独立频率 0.024 + seed 偏移 +8842
+    //   （与主群系图 0.012/+3571、森林图 0.020/+977、雪原图 0.016/+6420、高度图 0.09 均不同）→ 沼泽图与五者解耦；
+    //   低频 → 沼泽成片（非逐格斑点，机制等价 MC 1.0 沼泽大尺度分布）。阈值 0.30 → 候选带内少数（~15-20%）成
+    //   沼泽（略多于雪原，沼泽为本任务标志性群系；仍为少数，草原占多数）。纯函数于 seed → 同 seed 同沼泽分布（§2-K）。
+    const double sw = fbm((x + m_seed + 8842) * 0.024, (z + m_seed + 8842) * 0.024); // [-1,1]
+    if (sw > 0.30) return Biome::Swamp;
     return Biome::Plains;
 }
 
@@ -1307,7 +1317,7 @@ void World::generate()
     //   t338：旧「全域 h<=waterLevel+1 → 散布沙滩/水下沙」已移除 —— 内陆低洼列不再产散沙（spec「内陆无散沙」），
     //     沙 + 海水集中于此一角。逐列独立 → 跨 chunk 边界天然连续；同 seed 确定（fbm / seaColumnHeight 纯函数，§2-K）。
     //   走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
-    int desertCols = 0, seaCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0, snowyCols = 0;
+    int desertCols = 0, seaCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0, snowyCols = 0, swampCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const Biome bio = biomeAt(x, z);
@@ -1332,6 +1342,7 @@ void World::generate()
             else if (bio == Biome::Hills) ++hillsCols;
             else if (bio == Biome::Forest) ++forestCols;
             else if (bio == Biome::Snowy) ++snowyCols;
+            else if (bio == Biome::Swamp) ++swampCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
                 if (inSandSea) {
@@ -1361,6 +1372,7 @@ void World::generate()
     qInfo() << "worldgen: biomes plains =" << plainsCols << "forest =" << forestCols
             << "hills =" << hillsCols << "desert =" << desertCols
             << "snowy =" << snowyCols
+            << "swamp =" << swampCols
             << "sea/beach =" << seaCols
             << "/" << (m_width * m_depth);
 
@@ -1378,9 +1390,11 @@ void World::generate()
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     freezeSurfaceWater(); // t395：Snowy 群系海/湖表层水冻结为冰（fillWater 之后水已就位；先于树 / 草）
     placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
+    placeSwampPools(); // t396：Swamp 群系浅水池（fillWater / 地表湖之后 → 沼泽水独立；先于树 / 草 → 水格使树 / 草据「草顶」守卫跳过）。
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
     placeTallGrass(); // t235：grass 表层上方确定性散布草丛（PLAN §2-K；树定型后，仅写空气格不覆盖树）
     placeDesertFlora(); // t394：沙漠沙顶确定性散布仙人掌（1-3 格高柱）+ 枯死的灌木（PLAN §2-K；草丛后，仅写空气格）
+    placeSwampFlora(); // t396：Swamp 群系睡莲（水面）+ 蘑菇（草岛）；PLAN §2-K；仅写空气格不覆盖水 / 草 / 树
     recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
     // t380：worldgen 末置流体脏 → 进世界后首次 tickWaterFlow/tickLavaFlow 各扫一次确认稳态（海洋 / 岩浆湖
     //   全源 → 零候选 → 即清标志停扫）。一次性确认扫描（防御：避免标志初始 false 漏掉 worldgen 引入的流场）。
@@ -1731,6 +1745,77 @@ void World::placeDesertFlora()
     }
     qInfo() << "worldgen: desert flora placed cactus =" << cactusPlaced
             << "dead_bush =" << deadBushPlaced; // 同 seed → 同计数（确定性核对）
+}
+
+// t396 沼泽浅水池（见 world.h 头注释）：遍历 Swamp 群系列，用低频 fbm（与地形 / 群系图均解耦）把约半数草地列
+//   的草顶（y==surfaceY 的 Grass）改造成 1 格深 Water 源（state=0），余下保留为草岛。机制等价 MC 1.0 沼泽
+//   「平地 + 浅水洼 + 草岛」地貌。Swamp 群系 heightAt amp=0 → 全 Swamp 列 surfaceY 等高（基线 64）→ 水源层
+//   水平邻接同高草岛（Grass，solid）→ 不溢流（稳态源层，tickWaterFlow 无候选）。低频 fbm 阈值 0.0 → 约 50%
+//   列成水、50% 留草岛，成片分布（非逐格斑点，机制等价 MC 沼泽大尺度水洼）。
+//   仅处理 Swamp 非海列（海域 seaColumnHeight>=0 独立，跳过）；surfaceY 须明显高于海平面（沼泽水独立于海，
+//   不溢入海）。走 m_chunks.setBlock 直写（worldgen 静默；光场随后 recomputeLightField 重算 → Water 全透光正确）。
+//   纯函数于 seed（biomeAt + fbm）→ 同 seed 同沼泽水分布（PLAN §2-K）。
+void World::placeSwampPools()
+{
+    int pools = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            if (biomeAt(x, z) != Biome::Swamp) continue; // 仅沼泽群系
+            if (seaColumnHeight(x, z) >= 0) continue;     // 海域独立（海 / 沙滩不叠沼泽水）
+            const int surfaceY = std::min(heightAt(x, z), m_height - 1);
+            // 避开海平面附近（沼泽水独立于海、不溢入海）。Swamp amp=0 → surfaceY=64 > waterLevel+3=61 恒成立。
+            if (surfaceY <= kWaterLevel + 3) continue;
+            // 仅改草顶列（机制等价 MC 沼泽浅水生于草地；沙滩 / 水下 / 洞口替换了草 → 跳过）。
+            if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::Grass) continue;
+
+            // 低频 fbm（独立频率 0.20 + seed 偏移 +1503，与地形 0.09 / 群系图 0.012-0.024 均解耦）→ 成片水洼。
+            //   阈值 0.0 → 约 50% 列成水（fbm 近似对称居中 0），余草岛。
+            const double pw = fbm((x + m_seed + 1503) * 0.20, (z + m_seed + 1503) * 0.20); // [-1,1]
+            if (pw <= 0.0) continue; // 草岛（保留 Grass）
+            // 草顶 → Water 源（1 格深，下方的 Dirt 仍托住水源）。直写（worldgen 静默）。
+            m_chunks.setBlock(x, surfaceY, z, BlockRegistry::Water);
+            ++pools;
+        }
+    }
+    qInfo() << "worldgen: swamp pools =" << pools; // 同 seed → 同计数（确定性核对）
+}
+
+// t396 沼泽植物散布（见 world.h 头注释）：遍历 Swamp 群系列，在浅水格上方一格（surfaceY+1，水面之上）散布
+//   睡莲（LilyPad 横向浮叶，仅写空气格）+ 在草岛格上方一格（surfaceY+1）低密度散布蘑菇（Mushroom cross 广告牌，
+//   仅写空气格）。机制等价 MC 1.0 沼泽睡莲浮水 + 阴暗草地小蘑菇。
+//   密度：睡莲 ~25% 水格（水面点缀，非满铺）、蘑菇 ~8% 草岛格（稀疏阴暗处冒头）—— 沼泽植物适量点缀（机制等价
+//   MC 沼泽睡莲 / 蘑菇稀疏分布）。仅写空气格（setVoxelIfAir）→ 不覆盖水 / 草上已生成的方块（树 / 草丛）。
+//   纯函数于 seed + biomeAt（经 hashColumn，PLAN §2-K）→ 同 seed 同分布；禁用任何运行期随机源。
+void World::placeSwampFlora()
+{
+    constexpr unsigned kLilyPct   = 25; // 睡莲密度（% of 沼泽水格；水面点缀，非满铺）
+    constexpr unsigned kMushPct   = 8;  // 蘑菇密度（% of 沼泽草岛格；稀疏阴暗处冒头）
+    int lilyPlaced = 0, mushPlaced = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            if (biomeAt(x, z) != Biome::Swamp) continue; // 仅沼泽群系
+            const int surfaceY = std::min(heightAt(x, z), m_height - 1);
+            const int y = surfaceY + 1; // 水面 / 草顶上方一格（植物放置位）
+            if (y >= m_height) continue; // 世界顶之上不放（防御）
+            const quint8 surf = m_chunks.blockAt(x, surfaceY, z);
+            const quint32 r = hashColumn(m_seed, x, z);
+            if (surf == BlockRegistry::Water) {
+                // 浅水格 → 睡莲（横向浮叶）：密度筛选后置 LilyPad 于水面上一格（cell 底部 quad 浮于水面）。
+                if (r % 100u >= kLilyPct) continue; // 密度筛选
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) continue; // 上方须空气（不覆盖树 / 实块）
+                setVoxelIfAir(x, y, z, BlockRegistry::LilyPad, 0);
+                ++lilyPlaced;
+            } else if (surf == BlockRegistry::Grass) {
+                // 草岛格 → 蘑菇（cross 广告牌）：低密度筛选后置 Mushroom 于草顶上一格。
+                if (r % 100u >= kMushPct) continue; // 密度筛选
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) continue; // 上方须空气（不覆盖树 / 草丛）
+                setVoxelIfAir(x, y, z, BlockRegistry::Mushroom, 0);
+                ++mushPlaced;
+            }
+        }
+    }
+    qInfo() << "worldgen: swamp flora placed lily =" << lilyPlaced
+            << "mushroom =" << mushPlaced; // 同 seed → 同计数（确定性核对）
 }
 
 // t395 雪原/针叶群系水面冻结（见 world.h 头注释）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water

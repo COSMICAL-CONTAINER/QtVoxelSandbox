@@ -334,6 +334,36 @@ int PartialBlockGeometry::append(
                       tile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::Mushroom: {
+        // t396 蘑菇 cross 模型：与 Sapling / DeadBush 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
+        //   机制等价 MC 1.0 蘑菇（沼泽 / 阴暗草地小蘑菇）—— cross 模型上贴 mushroom(62) 瓦片（透明底 + 米色菌柄 +
+        //   红底白斑菌盖，alphaCutoff cutout）。**无 state 派生贴图**（蘑菇单一贴图；纯装饰，无生长 / 变种）。
+        //   tile 由 BlockRegistry::tileIndex(Mushroom, PosX) = sideTile = 62 给出。不做邻居剔除（cross 透明 + 装饰，
+        //   同 TallGrass；Mushroom solid=false）。材质 alphaCutoff:0.5 丢弃透明底 → 仅蘑菇像素显。
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
+    case BlockRegistry::LilyPad: {
+        // t396 睡莲「横向浮叶」模型：**一片水平双面 quad 贴 cell 底部**（y≈1/16，刚好浮于水面）—— 与竖直 cross
+        //   （草丛 / 蘑菇等两片对角 X）不同，睡莲是平铺水面的圆叶，故几何为水平 quad 非竖直 cross。机制等价
+        //   MC 1.0 lily pad（沼泽浅水水面浮叶）。worldgen 把本方块置于水格上方一格（y = 水面 + 1），其 cell 底部
+        //   quad（world y ≈ 水面 + 1/16）恰浮于水面之上 → 视觉如叶片贴水。
+        //   复用 pushCrossQuad（它对任意 4 共面角点发正反双面三角形 → 水平 quad 同样双面可见，从水面上下均见叶）。
+        //   四角取 cell 全 footprint（xz [0,1]）+ y=1/16（略高于 cell 底防 z-fight 水面）；UV 满铺整张瓦片（圆叶由
+        //   贴图 alpha cutout 表达，几何仍为整张 quad）。不做邻居剔除（透明 + 浮叶，同 cross；LilyPad solid=false）。
+        //   材质 alphaCutoff:0.5 丢弃透明底 → 仅圆叶像素显（V 形缺口由贴图 alpha 表达）。
+        //   tile 由 BlockRegistry::tileIndex(LilyPad, PosX) = sideTile = 61 给出。
+        constexpr float yp = 1.0f / 16.0f; // 浮叶高度（cell 底以上 1/16，贴水面防 z-fight）
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, yp, 0.f,  1.f, yp, 0.f,  1.f, yp, 1.f,  0.f, yp, 1.f, // 水平 quad：BL→BR→TR→TL（xz 全 footprint）
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     default:
         return 0; // 非异形方块 / 未实现 → 不追加（chunkgeometry 的 continue 跳过此格）
     }

@@ -105,7 +105,7 @@ public:
     //   （含增量）。出生用 heightAt —— 贴 worldgen 地表，语义稳定（同 seed 同地表）。只读查询，不改栅格。
     Q_INVOKABLE int heightAt(int x, int z) const;
     // t374 群系查询（暴露给上层 Entities / 呈现层做群系化逻辑；worldgen 私有 Biome 枚举不外泄类型，仅返 int
-    //   编码）。编码同私有 enum Biome：0=Plains, 1=Hills, 2=Desert, 3=Forest。纯函数于 seed（委托 biomeAt；
+    //   编码）。编码同私有 enum Biome：0=Plains, 1=Hills, 2=Desert, 3=Forest, 4=Snowy, 5=Swamp。纯函数于 seed（委托 biomeAt；
     //   PLAN §2-K 确定性，同 seed 同群系图）。分层（PLAN §2）：World 低层只读查询，不依赖 Entities / Renderer。
     //   消费点：EntityManager::pickPassiveMobType 据本值加权选被动生物类型（t374 群系化刷怪）。
     Q_INVOKABLE int biomeIdAt(int x, int z) const { return int(biomeAt(x, z)); }
@@ -305,7 +305,7 @@ private:
     //   （worldgen 细节，不外泄到 QML；如需 F3 调试可后续暴露 Q_INVOKABLE 查询）。
     //   t306 在 t274 三分基础上把原 plains 中段 carve 出 forest：forest 多树（密闭林）、plains 少树多草（开阔草原），
     //   机制等价 MC 1.0 森林 / 平原群系分化（spec「森林（现多树）+ 草原（少树多草）」）。
-    enum class Biome { Plains, Hills, Desert, Forest, Snowy };
+    enum class Biome { Plains, Hills, Desert, Forest, Snowy, Swamp };
     // t385 天气状态机枚举（机制等价 MC 1.0 天气四态）。私有嵌套（天气细节，不外泄类型到 QML；
     //   Q_INVOKABLE weatherState / weatherStateAt 返 int 编码）。Thunder = 降水 + 风暴（雷电闪光 / 引燃留 t386）。
     enum class Weather : int { Clear = 0, Rain = 1, Snow = 2, Thunder = 3 };
@@ -366,6 +366,17 @@ private:
     //   机制等价 MC 1.0 沙漠仙人掌 / 枯灌木点缀。纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；
     //   禁用任何运行期随机源。仅写空气格 → 不覆盖沙上已生成的方块（与 placeTrees/placeTallGrass 同守卫语义）。
     void placeDesertFlora();
+    // t396 沼泽浅水池（PLAN §2-K 确定性）：遍历 Swamp 群系列，用低频 fbm（与其它噪声解耦）把约半数草地列
+    //   改造成 1 格深浅水池（草顶 → Water 源，state=0）。机制等价 MC 1.0 沼泽「平地 + 浅水洼 + 草岛」地貌。
+    //   Swamp 群系 heightAt amp=0（完美平坦，见 heightAt 注释）→ 全 Swamp 列等高 → 水源层同高、水平邻接为
+    //   草岛（同高 Grass）→ 不溢流（稳态源层）。仅写 Swamp 非海列（海域独立）。走 m_chunks.setBlock 直写
+    //   （worldgen 静默；光场随后 recomputeLightField 重算）。纯函数于 seed（biomeAt + fbm）。
+    void placeSwampPools();
+    // t396 沼泽植物散布（PLAN §2-K 确定性）：遍历 Swamp 群系列，在浅水格上方一格（水面 + 1）散布睡莲
+    //   （LilyPad 横向浮叶，仅写空气格）+ 在草岛格上方一格低密度散布蘑菇（Mushroom cross 广告牌，仅写空气格）。
+    //   机制等价 MC 1.0 沼泽睡莲浮水 + 阴暗草地小蘑菇。纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；
+    //   禁用任何运行期随机源。仅写空气格 → 不覆盖水 / 草上已生成的方块（与 placeTrees/placeTallGrass 同守卫语义）。
+    void placeSwampFlora();
     // t395 雪原/针叶群系水面冻结（PLAN §2-K 确定性）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water
     //   格）冻结为 Ice（机制等价 MC 1.0 寒冷群系水面结冰）。仅冻最顶层水面（同 MC 仅表层结冰；下层水保留）；
     //   地下水池（cy ≤ h-7 << waterLevel）不在 y==waterLevel 故不受影响。generate 在 fillWater 之后调（水已就位）。

@@ -51,6 +51,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::TallGrass:     return "icon_tall_grass.png";     // t235 草丛（cross 透明底；绿草叶）
     case BlockRegistry::WheatCrop:     return "icon_wheat_crop.png";     // t236 小麦作物（cross 透明底；取成熟阶段 7 麦穗）
     case BlockRegistry::DeadBush:      return "icon_dead_bush.png";      // t394 枯死的灌木（cross 透明底；棕褐干枝；沙漠装饰）
+    case BlockRegistry::LilyPad:       return "icon_lily_pad.png";       // t396 睡莲（cross 路由横向浮叶；透明底 + 绿圆叶 + V 缺口）
+    case BlockRegistry::Mushroom:      return "icon_mushroom.png";       // t396 蘑菇（cross 透明底；米色菌柄 + 红底白斑菌盖）
     // t145/t163(d) 不完整方块图标：6 类木制半方块各走自己的区分图标（tools/build_cube_icons.py 程序生成）。
     //   t163(d) slab/stairs/trapdoor/pressure_plate 升级为 **3D dimetric 立体图标**（render_partial_3d 按
     //   实际形状投影：slab 半高 / stairs L 阶 / trapdoor 薄板 / pressure_plate 更薄更小，顶 + 两侧明暗同
@@ -378,6 +380,10 @@ QVariantList Hotbar::creativeBlocks() const
              //   属系统获得），不进创造调色板。
              int(BlockRegistry::SnowLayer),                                  // 积雪层（雪原地表覆雪；铲加速；可放置）
              int(BlockRegistry::SpruceLog),                                  // 云杉原木（云杉树主干；斧加速；可放置）
+             // t396 沼泽群系内容：睡莲（水面浮叶）/ 蘑菇（草地小蘑菇）。机制等价 MC 1.0 沼泽植物
+             //   （lily pad / mushroom），名称/贴图原创自绘 §9a。cross 路由（alphaCutoff cutout 透明底）。
+             int(BlockRegistry::LilyPad),                                    // 睡莲（沼泽水面浮叶；横向浮叶 cross 路由；可放置）
+             int(BlockRegistry::Mushroom),                                   // 蘑菇（沼泽草地小蘑菇；cross 装饰；可放置）
              // t387 床方块 8 色变体（简化单格整立方；机制等价 MC 1.0 床。配方 planks+wool → 红床；其余色创造直接取用）。
              int(BlockRegistry::BedRed),    int(BlockRegistry::BedOrange),
              int(BlockRegistry::BedYellow), int(BlockRegistry::BedGreen),
