@@ -4694,20 +4694,20 @@ Window {
         //   （chestX/Y/Z）一处显盖子（一次只开一只箱子，chestOpen 单 bool）。chestLidAngle 由 openChest/
         //   closeChest 驱动（window 级 Behavior 平滑过渡 0↔全开角）。
         //
-        // t225 朝向 + 格内薄板（修「盖子像占用上一格方块刷新动画」）：
+        // t225 朝向 + t409 盖子属立方本体顶部 1/4（修「盖子像脱离实体 / 像上一格方块刷新动画」）：
         //   - 朝向：箱子放置时前面（锁面）朝玩家（placeBlock 写 state=horizontalFacing^1）。盖子铰链在锁面
         //     **背侧**（开盖向远离玩家翻）。用「外层 pivot（顶面中心 + Yaw）+ 内层铰链（局部背棱 + X 旋转）」
         //     嵌套，使局部「+Z=背 / -Z=前」约定对所有朝向统一：pivot 的 Yaw 把局部 +Z 转到箱子实际背侧方向
         //     （chestLidYaw 据 chestFacing 算），铰链摆在局部 +Z=+0.5（背棱），其 X 旋转翻起局部 -Z（前缘）。
-        //   - 格内薄板：盖子缩为 0.9×0.10×0.9（厚 0.10，远薄于 t196 旧 0.16），摆在箱顶之上 0.005（lidY=0.055）。
-        //     closed 平覆箱顶呈「薄盖板」（非旧 0.16 厚「像上一格方块」的板），开合动画贴合格内顶面、读作
-        //     「箱子自己的盖子翻开」而非「上一格有块在刷新」。开盖仍会向上翻起（铰链在箱顶棱，机制等价 MC
-        //     箱子开盖必向上翻），但薄板 + 锁面朝玩家使动画明确归属本格箱子。
+        //   - t409 盖子 = 立方本体顶部 1/4（机制等价 MC 箱子：盖子是方块自身的一部分，非脱离实体）。盖子缩为
+        //     1.0×0.25×1.0，相对铰链摆 (0, -0.125, -0.5) → closed 时正好填满立方顶 1/4（顶面齐 cy+1.0、四向齐
+        //     cell 边）。closed 完全嵌在立方本体内 → 被本体（mesher 渲的整立方）遮挡，无 z-fight；随铰链 +X
+        //     翻开，前缘自立方顶面冒出、向后上方仰翻（机制等价 MC 后铰链前翻），动画明确归属本格箱子本体。
         //
-        // 盖子本体 = BlockCube(Chest) 薄板（复用图集 per-face 贴图 chest_top/side/front → 与箱子本体 mesher
+        // 盖子本体 = BlockCube(Chest)（复用图集 per-face 贴图 chest_top/side/front → 与箱子本体 mesher
         //   整立方同外观，零 MC 资产）。可见性：playing 态且（chestOpen 或 角>0）→ 合盖动画播放期间
-        //   （chestOpen 已 false 但角未到 0）盖子仍显，角到位 0 后自动隐。分层（PLAN §2）：纯呈现层，
-        //   只读 chestX/Y/Z + chestFacing + chestOpen/chestLidAngle。
+        //   （chestOpen 已 false 但角未到 0）盖子仍显，角到位 0 后自动隐（防闭态无谓渲染）。分层（PLAN §2）：
+        //   纯呈现层，只读 chestX/Y/Z + chestFacing + chestOpen/chestLidAngle。
         Node {
             id: chestLidPivot
             visible: window.appState === "playing" && (window.chestOpen || window.chestLidAngle > 0.01)
@@ -4722,12 +4722,13 @@ Window {
                 eulerRotation: Qt.vector3d(window.chestLidAngle, 0, 0)
 
                 Model {
-                    // 盖子薄板：BlockCube 顶点 ±0.5，缩 (0.9, 0.10, 0.9) → 0.9 宽 × 0.10 厚 × 0.9 深 薄板。
-                    //   摆位相对铰链：X 居中（0）、Y 顶面之上（+0.055 → 底面 y=cy+1.005 微抬避顶面 z-fight）、
-                    //   Z 向前（-0.45 → 覆盖 cell [前 0.10, 背 1.0]，前缘留 0.10 唇）。closed 平覆；随铰链 +X 翻开。
+                    // 盖子 = 立方顶部 1/4：BlockCube 顶点 ±0.5，缩 (1.0, 0.25, 1.0) → 1 宽 × 0.25 高 × 1 深。
+                    //   摆位相对铰链（铰链原点 = 背侧顶棱中点）：X 居中(0)、Y 向下(-0.125 → 中心 cy+0.875、
+                    //   顶面齐 cy+1.0)、Z 向前(-0.5 → 覆盖 cell 全深 [前 0, 背 1.0])。closed 完全嵌在立方顶
+                    //   1/4 内、被本体遮挡（无 z-fight）；随铰链 +X 翻开前缘自顶面冒出上扬。
                     geometry: BlockCube { blockId: 22 }   // 22 = BlockRegistry::Chest（与 blockregistry.h Id 枚举同源；同 torch=13 既有字面量 + 注释模式）
-                    position: Qt.vector3d(0.0, 0.055, -0.45)
-                    scale: Qt.vector3d(0.9, 0.10, 0.9)
+                    position: Qt.vector3d(0.0, -0.125, -0.5)
+                    scale: Qt.vector3d(1.0, 0.25, 1.0)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
