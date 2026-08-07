@@ -1,5 +1,8 @@
 #include "cheststore.h"
 
+#include "loottable.h" // t393 战利品表（dungeonChestPool / roll）；同层 Game，向下依赖 Core
+
+#include <QRandomGenerator>
 #include <QStringList>
 #include <QVariantMap>
 
@@ -135,4 +138,47 @@ void ChestStore::loadAll(const QVariantList &chests)
     }
     ++m_revision;
     emit chestChanged(); // 状态整体替换 → 通知 ChestUI delegate 重读（即便结果为空，刷新到空态）
+}
+
+// t393 首开填充地牢战利品（见 cheststore.h 头注释）。已有条目 → no-op 返 false（首开一次性 roll）；
+//   无条目 → 用 LootTable 抽 kDungeonRolls 件，分散入随机空槽，建条目 + bump revision + emit chestChanged。
+bool ChestStore::populateDungeonLoot(int x, int y, int z)
+{
+    const QString k = key(x, y, z);
+    if (m_chests.find(k) != m_chests.end()) return false; // 已开过 / 已填充 → 不再生（首开一次性）
+
+    // 坐标确定性 seed（PLAN §2-K）：同坐标箱子 → 同战利品；与 worldgen hashVoxel 同族（坐标混合，非时间源）。
+    //   用无符号 32 位混合（与 world.cpp hashColumn/hashVoxel 同模式），坐标可负故先转 quint32（位模式）。
+    const quint32 sx = quint32(quint32(x) * 73856093u);
+    const quint32 sy = quint32(quint32(y) * 19349663u);
+    const quint32 sz = quint32(quint32(z) * 83492791u);
+    const quint32 seed = (sx ^ sy ^ sz) ^ 0xC0FFEEu; // 加盐防低坐标退化到 0
+
+    // 抽取战利品 stack 列表（最多 kDungeonRolls 件，同 id 不合并）。
+    const auto &pool = LootTable::dungeonChestPool();
+    const std::vector<LootTable::Stack> stacks = LootTable::roll(pool, LootTable::kDungeonRolls, seed);
+
+    // 建空箱子条目，逐 stack 找随机空槽写入（同 id 不合并 → 分散多槽，机制等价 MC dungeon chest 散布）。
+    Chest chest; // 默认 27 空槽（Slot{id=0,count=0}）
+    QRandomGenerator slotRng(seed ^ 0x9E3779B9u); // 与抽取 RNG 不同的盐 → 槽位分布独立
+    for (const LootTable::Stack &st : stacks) {
+        if (st.itemId <= 0 || st.count <= 0) continue;
+        // 找一个随机空槽（最多试 kSlotsPerChest 次 + 线性兜底；27 槽放 8 件绰绰有余，必命中）。
+        int slot = -1;
+        for (int t = 0; t < kSlotsPerChest; ++t) {
+            const int cand = int(slotRng.bounded(kSlotsPerChest));
+            if (chest[size_t(cand)].id == 0) { slot = cand; break; }
+        }
+        if (slot < 0) { // 随机全撞已占（极不可能 8 件撞满 27 槽）→ 线性扫首个空槽兜底
+            for (int i = 0; i < kSlotsPerChest; ++i)
+                if (chest[size_t(i)].id == 0) { slot = i; break; }
+        }
+        if (slot < 0) break; // 真填满（roll 数 ≤ 槽数，理论不可达）→ 弃余
+        chest[size_t(slot)] = Slot{ st.itemId, st.count };
+    }
+
+    m_chests[k] = std::move(chest);
+    ++m_revision;
+    emit chestChanged(); // 首开写入 → 通知 ChestUI delegate 重读（开盖前已填，ChestUI 显时即见战利品）
+    return true; // 已填充（首开一次性 roll 成功）
 }

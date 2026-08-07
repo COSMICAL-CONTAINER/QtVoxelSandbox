@@ -76,6 +76,13 @@ public:
     Q_INVOKABLE bool isCollidable(int x, int y, int z) const {
         return BlockRegistry::isCollidable(blockAt(x, y, z), stateAt(x, y, z));
     }
+    // t393 该格箱子是否「地牢生成箱」（worldgen placeDungeons 写入的箱子，state 带 ChestStateDungeonFlag bit2；
+    //   玩家放置的箱子 state 仅低 2 位朝向，无此位）。Main.qml.openChest 据此判「是否首开填充地牢战利品」。
+    //   分层（PLAN §2）：纯只读谓词（blockAt + stateAt + BlockRegistry），不写栅格。非箱子格 → false。
+    Q_INVOKABLE bool isDungeonChest(int x, int y, int z) const {
+        return blockAt(x, y, z) == BlockRegistry::Chest
+            && (stateAt(x, y, z) & BlockRegistry::ChestStateDungeonFlag) != 0;
+    }
     // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
     //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/
     //   trapdoor，state 解码同 partialblockgeometry）。玩家碰撞迭代玩家 AABB 覆盖的所有格，逐 sub-AABB

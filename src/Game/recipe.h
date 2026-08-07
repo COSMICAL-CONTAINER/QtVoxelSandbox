@@ -157,6 +157,14 @@ public:
     static constexpr int CookedPorkchopId = 0x221; // 熟猪排：猪燃烧致死掉落（机制等价 MC 1.0 cooked porkchop）
     static constexpr int CookedBeefId     = 0x222; // 熟牛肉：牛燃烧致死掉落（机制等价 MC 1.0 cooked beef / steak）
     static constexpr int CookedMuttonId   = 0x223; // 熟羊肉：羊燃烧致死掉落（机制等价 MC cooked mutton；§9 区隔改名）
+    // t393 战利品表（loot table）专用材料段物品（地牢箱 + 渔获共用 LootTable）。机制等价 MC 1.0 dungeon chest loot
+    //   里的稀有件 / 红石粉等；本任务仅注册使其「可持 / 可掉 / 可堆叠 / 有名 / 有图标」，无合成配方（地牢战利品
+    //   非合成获得，同桶类）。可堆叠 64（走材料段默认）；非方块（材料段）→ 右键不放置。名称 / 图标全原创自绘（§9a）。
+    //   MC 1.0 对齐：红石粉=331 / 马鞍=329；命名牌（1.6+）/ 附魔书（1.4+）1.0 不存在 → mcMaterialId 返 -1（资源包回退）。
+    static constexpr int RedstoneId      = 0x224; // 红石粉：地牢战利品（机制等价 MC 1.0 redstone dust）；可堆叠 64
+    static constexpr int SaddleId        = 0x225; // 马鞍：地牢稀有战利品（机制等价 MC 1.0 saddle）；可堆叠 64（简化）
+    static constexpr int NameTagId       = 0x226; // 命名牌：地牢稀有战利品（机制等价 MC name tag，1.6+）
+    static constexpr int EnchantedBookId = 0x227; // 附魔书占位：地牢极稀有战利品（机制等价 MC enchanted book，1.4+；占位无真附魔）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。
@@ -218,8 +226,8 @@ public:
     static bool canTake(const Recipe &r, int heldId, int heldCount, int maxStack);
 
     // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 的**对齐映射**（资源包加载前置；与 docs/item-ids.md 材料 /
-    //   mob 掉落 / 生物蛋段「MC 1.0.0」列一致）。覆盖整个材料段 [MaterialIdBase, GoldIngotId] = 0x200..0x21F
-    //   （含材料 / mob 死亡掉落 / 生物蛋三子集——三者在 MC 1.0 都是「物品」，统一在 items.png）。**不重排常量**
+    //   mob 掉落 / 生物蛋段「MC 1.0.0」列一致）。覆盖整个材料段 [MaterialIdBase, EnchantedBookId] = 0x200..0x227
+    //   （含材料 / mob 死亡掉落 / 生物蛋 / 熟肉 / 战利品表物品五子集——五者在 MC 1.0 都是「物品」，统一在 items.png）。**不重排常量**
     //   （保存档 / 配方 / 掉落表向后兼容——材料段 id 落 player_state JSON（背包）+ 配方 / BlockDef.dropId，重排会
     //   破坏旧存档与既存数据）；故用「映射层」对齐。无 MC 1.0 等价（铜 / 金原矿与锭 1.17+、铁 / 金原矿 1.0 直接掉
     //   矿石方块）→ -1（资源包回退引擎自绘 MaterialIcon）。**生物蛋**：MC 1.0 是单一 id 383（spawn egg）+ metadata

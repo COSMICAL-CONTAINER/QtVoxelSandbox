@@ -126,6 +126,10 @@ qt_add_executable(voxelsandbox
     #   运行期「is not a type」→ 箱子右键无 UI；t179 补注册。
     src/Game/cheststore.cpp
     src/Game/cheststore.h
+    # t393 战利品表（Game 层）：纯静态数据 + 纯函数（条目池 + 加权抽取）；地牢箱 + 渔获共用。
+    #   无 Q_OBJECT / 无实例；item id 引用 recipe.h 材料段常量。ChestStore::populateDungeonLoot 调它填箱。
+    src/Game/loottable.cpp
+    src/Game/loottable.h
     # t89 音效（Core/Platform 层）：miniaudio 单头 + AudioManager 封装。
     #   miniaudio.h 是 vendored 第三方单头（~4MB），仅 miniaudio_impl.cpp 含 MINIAUDIO_IMPLEMENTATION；
     #   audiomanager.h/cpp 是项目自有代码（pimpl 隔离重头）。

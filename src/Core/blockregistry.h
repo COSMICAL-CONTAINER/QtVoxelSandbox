@@ -613,6 +613,12 @@ public:
     //   走 stateless tileIndex（前面恒 -Z，旧默认）→ 物品图标外观不变。
     // chestFrontFace(state)：返回前面所朝的 Face（PosX/NegX/PosZ/NegZ）；低 2 位解码，越界位 → NegZ 兜底。
     static Face chestFrontFace(quint8 state);
+    // t393 箱子 state bit2（值 4）=「地牢生成箱」标记（worldgen placeDungeons 写入；玩家放置的箱子无此位）。
+    //   仅供 World::isDungeonChest 读 → Main.qml.openChest 据此判「是否首开填充地牢战利品」。**不**影响
+    //   chestFrontFace（后者只读低 2 位 state&3，bit2 被忽略 → 朝向编码零回归）；collisionAABBs /
+    //   selectionAABBs 亦不读 chest state → 复用 bit2 作 marker 零回归（同 torch / 双半砖 marker 同族）。
+    //   state 经 m_states 落 SQLite round-trip 保真（旧存档箱子 state=0 → 非地牢箱，不填充，安全）。
+    static constexpr quint8 ChestStateDungeonFlag = 0x04;
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度

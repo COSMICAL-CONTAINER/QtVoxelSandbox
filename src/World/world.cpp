@@ -2396,9 +2396,11 @@ void World::placeDungeons()
             // 3) 中央 Spawner（地板上方一格 = cy+1 = 站立高度）。覆盖原空气格；不动非空气（防 cave 重叠时
             //    误覆盖既有方块，但步骤 2 已清空气 → 此处恒为 Air，覆盖安全）。
             m_chunks.setBlock(cx + kRoomW / 2, cy + 1, cz + kRoomD / 2, BlockRegistry::Spawner);
-            // 4) 角落 Chest（与 Spawner 对角 = 角落 (0, 1, 0)）：t393 填战利品内容；本任务仅放置空箱方块。
-            //    state=0（chestFrontFace 兜底 NegZ；worldgen 不关心箱子朝向，玩家放置后才走朝向 state）。
-            m_chunks.setBlock(cx, cy + 1, cz, BlockRegistry::Chest);
+            // 4) 角落 Chest（与 Spawner 对角 = 角落 (0, 1, 0)）：t393 首开填充地牢战利品（ChestStore::populateDungeonLoot，
+            //    由 Main.qml.openChest 据下面的 state 标记触发）。state 带 ChestStateDungeonFlag(bit2) 标「地牢生成箱」
+            //    → World::isDungeonChest 返 true → 玩家首开时填充；玩家自放的箱子无此标记 → 不填（机制对齐 MC）。
+            //    朝向低 2 位 = 0（chestFrontFace 兜底 NegZ；worldgen 不关心箱子朝向）。
+            m_chunks.setBlock(cx, cy + 1, cz, BlockRegistry::Chest, BlockRegistry::ChestStateDungeonFlag);
             ++placed;
         }
     }

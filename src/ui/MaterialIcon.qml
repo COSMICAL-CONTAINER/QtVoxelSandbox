@@ -41,7 +41,7 @@ import QtQuick
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）/ 0x21C 铜原矿 / 0x21D 铜锭 / 0x21E 金原矿 / 0x21F 金锭（t308）/ 0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（t344）；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）/ 0x21C 铜原矿 / 0x21D 铜锭 / 0x21E 金原矿 / 0x21F 金锭（t308）/ 0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（t344）/ 0x224 红石粉 / 0x225 马鞍 / 0x226 命名牌 / 0x227 附魔书占位（t393 战利品表）；0/未知 → 兜底木棒）
 
     Canvas {
         id: canvas
@@ -829,6 +829,96 @@ Item {
                 R(11, 10, 1, 1, leaf)
             }
 
+            // t393 战利品表专用材料（地牢箱 / 渔获；机制等价 MC 1.0 dungeon chest loot 的稀有件 / 红石粉，
+            //   纯原创自绘 §9a）。配色一眼可辨：红石=红粉堆 / 马鞍=棕鞍座 / 命名牌=纸签 + 细绳 / 附魔书=书 + 紫光晕。
+            // 红石粉（0x224）：红色粉末小堆（不规则小红块 + 几粒亮红反光，表「一堆红石粉」）。
+            //   配色：dust #c8302a（红石主体）/ dustLight #f0604a（受光高光）/ dustDark #8a1810（暗阴影）/ speck #ffa070（亮粉反光点）。
+            const drawRedstone = () => {
+                const dust = "#c8302a", dustLight = "#f0604a", dustDark = "#8a1810", speck = "#ffa070"
+                // 不规则粉堆（中部最宽、上下收窄；表「一堆散粉」非整齐方块）
+                R(9, 9, 6, 1, dust)
+                R(7, 10, 10, 5, dust)        // 主体 rows 10..14
+                R(9, 15, 6, 1, dust)
+                // 顶受光（前两行亮，表「粉堆反光」）
+                R(9, 9, 6, 1, dustLight)
+                R(7, 10, 10, 1, dustLight)
+                R(7, 10, 4, 1, dustLight)
+                // 底阴影
+                R(9, 15, 6, 1, dustDark)
+                R(14, 11, 1, 4, dustDark)
+                // 几粒亮粉反光点（散布，表「红石晶体反光」）
+                R(9, 11, 1, 1, speck); R(12, 12, 1, 1, speck); R(10, 13, 1, 1, speck); R(13, 10, 1, 1, speck)
+            }
+            // 马鞍（0x225）：棕色皮革鞍座（座椅 + 前后翘起的鞍桥 + 两侧鞍裙）。机制等价 MC 马鞍图标。
+            //   配色：leather #8a5a2b（鞍体棕）/ leatherLight #b07840（受光高光）/ leatherDark #5e3d1c（暗阴影 + 鞍桥）。
+            const drawSaddle = () => {
+                const leather = "#8a5a2b", leatherLight = "#b07840", leatherDark = "#5e3d1c"
+                // 鞍座中央（座椅面，rows 10..13，最宽）
+                R(6, 10, 12, 1, leather)     // 座椅顶（受光）
+                R(5, 11, 14, 3, leather)     // 主体 rows 11..13
+                R(6, 14, 12, 1, leatherDark) // 座椅底阴影
+                // 前后鞍桥（翘起的鞍头 / 鞍尾，左右各一柱）
+                R(4, 8, 3, 3, leather)       // 左鞍桥（前翘）
+                R(17, 8, 3, 3, leather)      // 右鞍桥（后翘）
+                R(4, 8, 3, 1, leatherDark)   // 鞍桥顶暗边
+                R(17, 8, 3, 1, leatherDark)
+                // 鞍裙（座椅下方两侧下垂的皮翼）
+                R(5, 14, 2, 3, leatherDark)
+                R(17, 14, 2, 3, leatherDark)
+                // 受光高光（座椅顶面亮带，表「皮革反光」）
+                R(7, 10, 10, 1, leatherLight)
+                R(6, 11, 3, 1, leatherLight)
+            }
+            // 命名牌（0x226）：浅色纸签 + 顶部细绳挂耳 + 几行字线。机制等价 MC 命名牌图标。
+            //   配色：paper #e8e0c8（纸签主体）/ paperLight #f8f4e4（受光高光）/ paperDark #b8a888（暗边 + 字线）/ cord #8a6c38（挂绳棕）。
+            const drawNameTag = () => {
+                const paper = "#e8e0c8", paperLight = "#f8f4e4", paperDark = "#b8a888", cord = "#8a6c38"
+                // 纸签主体（圆角矩形，rows 9..17）
+                R(8, 9, 8, 1, paper)
+                R(6, 10, 12, 7, paper)       // 主体 rows 10..16
+                R(8, 17, 8, 1, paper)
+                // 顶受光（前两行亮，表「纸面反光」）
+                R(8, 9, 8, 1, paperLight)
+                R(6, 10, 12, 1, paperLight)
+                R(6, 10, 3, 1, paperLight)
+                // 底 / 右暗边（纸签厚度）
+                R(8, 17, 8, 1, paperDark)
+                R(17, 10, 1, 7, paperDark)
+                // 顶部挂绳孔 + 挂绳（纸签顶上一小圆孔 + 向上的细绳挂耳）
+                R(11, 8, 2, 1, paperDark)    // 圆孔（暗）
+                R(11, 6, 2, 2, cord)         // 挂绳短杆
+                R(10, 5, 4, 1, cord)         // 挂绳顶环
+                // 字线（纸签上 3 行横线，表「写的字」）
+                R(8, 12, 8, 1, paperDark)
+                R(8, 14, 6, 1, paperDark)
+                R(8, 16, 7, 1, paperDark)
+            }
+            // 附魔书占位（0x227）：一本合上的书 + 紫色附魔光晕（封面 + 书页 + 几道紫色光纹 / 闪点）。
+            //   占位无真附魔（spec「enchanted-book-placeholder」）—— 仅图标表「带附魔光泽的书」。
+            //   配色：cover #6a3a8a（封面紫）/ coverLight #9a5ab8（受光）/ page #e8e0c8（书页米黄）/ glow #c060e0（附魔紫光）/ spark #ffa0ff（光闪点）。
+            const drawEnchantedBook = () => {
+                const cover = "#6a3a8a", coverLight = "#9a5ab8", page = "#e8e0c8", glow = "#c060e0", spark = "#ffa0ff"
+                // 书本主体（合上的书：封面矩形 + 右侧书页厚度条）
+                R(5, 7, 12, 1, cover)        // 封面顶
+                R(4, 8, 14, 8, cover)        // 封面主体 rows 8..15
+                R(5, 16, 12, 1, cover)       // 封面底
+                // 右侧书页厚度条（书的切口，米黄页边 + 暗阴影）
+                R(16, 8, 2, 8, page)
+                R(16, 8, 1, 8, "#b8a888")
+                // 封面受光（左上亮，表「皮质封面反光」）
+                R(5, 7, 12, 1, coverLight)
+                R(4, 8, 4, 1, coverLight)
+                // 封面装订线（左侧一道暗紫竖线，表「书脊」）
+                R(4, 8, 1, 8, "#3a1a4a")
+                // 附魔紫光晕（封面上的紫色光纹 + 闪点，表「附魔光泽」—— 占位的身份特征，区别于普通书）
+                R(8, 10, 6, 1, glow)         // 上光纹
+                R(8, 13, 6, 1, glow)         // 下光纹
+                R(7, 11, 1, 2, glow)         // 左光带
+                R(14, 11, 1, 2, glow)        // 右光带
+                R(10, 11, 1, 1, spark)       // 中心光闪点
+                R(12, 12, 1, 1, spark)
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             // t345 护甲段（0x300..0x313，5 套材质 × 4 部位 = 20 件）。按 tier（配色）+ piece（形状）派生绘制，
             //   不为每件写独立 case（20 件 × 像素图过冗；tier/piece 两维即足够区分：皮革棕 / 铁银 / 铜橙 /
@@ -916,6 +1006,10 @@ Item {
             case 0x221: drawCookedPorkchop(); break // t344 熟猪排（猪燃烧致死掉落）
             case 0x222: drawCookedBeef();     break // t344 熟牛肉（牛燃烧致死掉落）
             case 0x223: drawCookedMutton();   break // t344 熟羊肉（羊燃烧致死掉落）
+            case 0x224: drawRedstone();       break // t393 红石粉（地牢战利品）
+            case 0x225: drawSaddle();         break // t393 马鞍（地牢稀有战利品）
+            case 0x226: drawNameTag();        break // t393 命名牌（地牢稀有战利品）
+            case 0x227: drawEnchantedBook();  break // t393 附魔书占位（地牢极稀有战利品）
             default:    drawStick();        break
             }
         }

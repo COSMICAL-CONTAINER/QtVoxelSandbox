@@ -287,7 +287,14 @@ QVariantList Hotbar::creativeMaterials() const
         //   创造调色板补全便于测试（同生肉）。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘褐色烤肉图标。
         int(RecipeRegistry::CookedPorkchopId), // 熟猪排：猪燃烧致死掉落
         int(RecipeRegistry::CookedBeefId),     // 熟牛肉：牛燃烧致死掉落
-        int(RecipeRegistry::CookedMuttonId)    // 熟羊肉：羊燃烧致死掉落
+        int(RecipeRegistry::CookedMuttonId),   // 熟羊肉：羊燃烧致死掉落
+        // t393 战利品表专用材料（地牢箱首开填充 + 预留钓鱼 t401）：生存非合成获得（仅地牢战利品），
+        //   创造调色板补全便于测试图标 / 装饰取用。可堆叠 64（走材料段默认）；非方块 → 右键不放置。
+        //   MaterialIcon 自绘图标（红石=红粉堆 / 马鞍=棕鞍座 / 命名牌=纸签+绳 / 附魔书=书+紫光）。
+        int(RecipeRegistry::RedstoneId),        // 红石粉：地牢战利品（机制等价 MC 1.0 redstone dust）
+        int(RecipeRegistry::SaddleId),          // 马鞍：地牢稀有战利品（机制等价 MC 1.0 saddle）
+        int(RecipeRegistry::NameTagId),         // 命名牌：地牢稀有战利品（机制等价 MC name tag，1.6+）
+        int(RecipeRegistry::EnchantedBookId)    // 附魔书占位：地牢极稀有战利品（占位无真附魔，1.4+）
     };
 }
 
@@ -440,6 +447,11 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::CookedPorkchopId) return QStringLiteral("熟猪排"); // 猪燃烧致死掉落
         if (blockId == RecipeRegistry::CookedBeefId)     return QStringLiteral("熟牛肉"); // 牛燃烧致死掉落
         if (blockId == RecipeRegistry::CookedMuttonId)   return QStringLiteral("熟羊肉"); // 羊燃烧致死掉落
+        // t393 战利品表专用材料（地牢箱 / 渔获）：红石粉 / 马鞍 / 命名牌 / 附魔书占位。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::RedstoneId)      return QStringLiteral("红石粉"); // 地牢战利品（机制等价 MC 1.0 redstone dust）
+        if (blockId == RecipeRegistry::SaddleId)        return QStringLiteral("马鞍");   // 地牢稀有战利品（机制等价 MC 1.0 saddle）
+        if (blockId == RecipeRegistry::NameTagId)       return QStringLiteral("命名牌"); // 地牢稀有战利品（机制等价 MC name tag）
+        if (blockId == RecipeRegistry::EnchantedBookId) return QStringLiteral("附魔书"); // 地牢极稀有战利品（占位，无真附魔）
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

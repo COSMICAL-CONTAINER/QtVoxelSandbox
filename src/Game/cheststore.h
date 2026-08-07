@@ -58,6 +58,13 @@ public:
     //   Main.qml.enterWorld 调：chestStore.loadAll(worldStore.loadChests()) —— 替换语义即「清旧世界残留 +
     //   填本世界箱子」，杜绝跨世界泄漏（同 t187 hotbarVM「进世界前必清」模式）。空列表 → 仅清空。
     Q_INVOKABLE void loadAll(const QVariantList &chests);
+    // t393 首开填充地牢战利品（机制等价 MC 1.0 dungeon chest loot）。仅对「尚未有条目」的箱子生效（首次开）：
+    //   已有条目（曾开过 / 已填充）→ no-op 返 false（杜绝清空后重开再生战利品，机制对齐 MC「战利品 roll 一次」）。
+    //   用 LootTable::dungeonChestPool + 坐标确定性 seed 抽 8 件（PLAN §2-K 精神：同箱子同战利品，世界重生成可复现），
+    //   分散入随机空槽（同 id 不合并，机制等价 MC dungeon chest 多槽散布）。caller（Main.qml.openChest）须先确认
+    //   该坐标是地牢箱（theWorld.isDungeonChest —— 由 chest state bit2 标记，worldgen 写入；玩家放置的无此标记）。
+    //   分层（PLAN §2）：本层 Game，依赖同层 LootTable + QtCore；不依赖 World（「是否地牢箱」由 caller 查 World）。
+    Q_INVOKABLE bool populateDungeonLoot(int x, int y, int z);
 
 signals:
     // 任一箱子任一槽内容变更（setSlot）/ 条目移除（clearChest）。驱动 revision 自增 + ChestUI delegate 刷新。

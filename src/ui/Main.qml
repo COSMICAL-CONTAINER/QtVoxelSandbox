@@ -607,6 +607,11 @@ Window {
         // t225 读箱子朝向 state（前面所朝方向；placeBlock 写入 = horizontalFacing^1，锁面朝玩家）→
         //   驱动盖子铰链侧（chestLidYaw）。& 3 防御性掩码（与 BlockRegistry::chestFrontFace 的 state&3 同源）。
         chestFacing = theWorld.stateAt(x, y, z) & 3
+        // t393 地牢箱首开填充战利品：worldgen placeDungeons 给地牢箱 state 置 ChestStateDungeonFlag(bit2) →
+        //   isDungeonChest 返 true。首开（ChestStore 无该坐标条目）时由 LootTable 抽 8 件分散入随机空槽
+        //   （坐标确定性 seed → 同箱同战利品；已开过则 populateDungeonLoot 返 false 不再生）。玩家自放箱无此
+        //   标记 → 不填（机制对齐 MC）。在 chestOpen=true / 盖子动画之前填 → ChestUI 显时即见战利品。
+        if (theWorld.isDungeonChest(x, y, z)) chestStore.populateDungeonLoot(x, y, z)
         chestOpen = true
         // t196：触发盖子翻开动画（chestLidAngle 0→全开，Behavior 平滑过渡）；chestLidPivot 据坐标 + 朝向摆位。
         chestLidAngle = kChestLidOpenAngle
