@@ -56,6 +56,9 @@ void World::finishLoad()
     }
     emit worldChanged(); // 触发 25 个 ChunkGeometry 重建（terrain+water 两段）
     m_chunks.clearAllDirty();
+    // t380：加载存档后置流体脏 —— 存档可能含未稳流场（玩家存档时水正流），首次流体 tick 重扫恢复流动。
+    m_waterDirty = true;
+    m_lavaDirty = true;
 }
 
 // t176 新世界生成：按 seed 全量 worldgen + emit。generate() 内部 recreate 网格（清上一世界残留），
@@ -104,6 +107,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     // t343：放岩浆源（id==Lava）时 poke 岩浆流节流计数 → 下次 tickLavaFlow 即蔓延（机制同水 poke）。
     if (id == BlockRegistry::Lava)
         m_lavaFlowTickCounter = kLavaFlowTickInterval - 1;
+    pokeFluidDirty(x, y, z); // t380：块编辑可能扰动邻接流体平衡 → 标流体脏（驱动 tickWaterFlow/tickLavaFlow 早退后重扫）
     return true;
 }
 
@@ -184,6 +188,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     // t343：放岩浆源时 poke 岩浆流节流计数（机制同上方水 poke，让首格即时蔓延）。
     if (id == BlockRegistry::Lava)
         m_lavaFlowTickCounter = kLavaFlowTickInterval - 1;
+    pokeFluidDirty(x, y, z); // t380：块编辑可能扰动邻接流体平衡 → 标流体脏
     return true;
 }
 
@@ -200,6 +205,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
     recomputeLightAround(x, y, z, occ, id); // t154：增量重 flood（oldId=被覆盖的 air/水 → newId=id）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
+    pokeFluidDirty(x, y, z); // t380：沙着地可能覆盖水 / 邻接流体 → 标流体脏（驱动流体 tick 重扫）
     return true;
 }
 
@@ -216,6 +222,11 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     const quint8 lightOldId = oldId; // recomputeLightAround 用编辑前后 id（水 isSolid=false 非遮光，光照通常无变化）
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
     recomputeLightAround(x, y, z, lightOldId, id);
+    // t380：流体 tick 内部写入 → 标流体脏（链式扩散：本次写入改变流场 → 下次 tick 续扫直到稳态）。
+    //   按 id / oldId 设对应标志：写 / 移除 Water → m_waterDirty；写 / 移除 Lava → m_lavaDirty。
+    //   非 fluid 写入（作物升阶 / 羊吃草经此入口）id/oldId 均非 Water/Lava → 不设标志，无副作用。
+    if (id == BlockRegistry::Water || lightOldId == BlockRegistry::Water) m_waterDirty = true;
+    if (id == BlockRegistry::Lava || lightOldId == BlockRegistry::Lava) m_lavaDirty = true;
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -270,12 +281,33 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
 //
 //   分层（PLAN §2）：本方法属 World 层，只读/写 m_chunks + 发 worldChanged。不依赖 Renderer/Physics/Game。
 //   呈现层（Main.qml）经 WorldClock.ticked 桥接调用（QML 同时持 World + WorldClock，向下合法）。
+// t380：块编辑后标记流体脏（驱动 tickWaterFlow/tickLavaFlow 早退优化；详见 m_waterDirty/m_lavaDirty 头注释）。
+//   查编辑格 + 6 正交邻是否含 Water/Lava → 设对应标志 true。流体只正交传播，故对角邻不影响（不查）。
+//   覆盖两类触发：(a) 直接写流体（id==Water/Lava）；(b) 破 / 改流体邻接的实体块（如破水边的石头 → 水应流入
+//   新空气；放块入水 → 邻接水流平衡变）。blockAt 越界返 Air（ChunkManager）→ 无需 bounds 检查。
+void World::pokeFluidDirty(int x, int y, int z)
+{
+    const int neigh[7][3] = {{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &n : neigh) {
+        const quint8 b = m_chunks.blockAt(x + n[0], y + n[1], z + n[2]);
+        if (b == BlockRegistry::Water) m_waterDirty = true;
+        else if (b == BlockRegistry::Lava) m_lavaDirty = true;
+    }
+}
+
 void World::tickWaterFlow()
 {
     if (++m_flowTickCounter < kFlowTickInterval) return; // 节流：每 3 tick（~0.3s）把波前推进 1 格
     m_flowTickCounter = 0;
+    // t380 perf：稳态（海洋全源、无玩家扰动）早退 —— 跳过全图 W×D×H 扫描（~41 万格 chunk 路由除法 ≈ 3-5ms）。
+    //   m_waterDirty 由 setBlock/setBlockFromEntity/destroySphereSilent 的 pokeFluidDirty + setWaterSilent 写
+    //   Water 时设 true。本行清 false；apply 内 setWaterSilent 若真写则重设 → 稳态（零写入）后停扫。
+    if (!m_waterDirty) return;
+    m_waterDirty = false;
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return;
+    QElapsedTimer t380t;
+    t380t.start(); // t380 perf：可观测活跃扫描耗时（仅非稳态扫描打，稳态早退不打 → 无噪音）
 
     // 体素线性 key：x + z*W + y*W*D。世界 ≤ 80×80×64 = 409600 < INT_MAX，编码安全。仅用于 adds 去重 / 取 min。
     auto keyOf = [W, D](int x, int y, int z) -> long long {
@@ -458,6 +490,10 @@ void World::tickWaterFlow()
         emit worldChanged();       // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
         m_chunks.clearAllDirty();  // 两段重建完统一清脏（同逐格路径的 emit→clear 顺序）
     }
+    // t380 perf：活跃水扫描耗时（仅非稳态扫描打：cells=参与计算的水格数、writes=本 tick 实写数、settled=是否收敛停扫）。
+    qInfo("vo.perf: tickWaterFlow %lldus cells=%d writes=%d settled=%d",
+          t380t.elapsed(), int(cells.size()), int(srcRegs.size() + evaps.size() + int(adds.size())),
+          anyChange ? 0 : 1);
 }
 
 // t343 岩浆流 tick（见 world.h 头注释）。机制等价 MC 1.0 主世界岩浆：比水慢 ~30 倍、扩散 3 格、无源再生。
@@ -467,9 +503,14 @@ void World::tickLavaFlow()
 {
     if (++m_lavaFlowTickCounter < kLavaFlowTickInterval) return; // 节流：每 30 tick（~3s）把波前推进 1 格
     m_lavaFlowTickCounter = 0;
+    // t380 perf：稳态早退（同 tickWaterFlow；m_lavaDirty 由 pokeFluidDirty / setWaterSilent 写 Lava 时设）。
+    if (!m_lavaDirty) return;
+    m_lavaDirty = false;
     ++m_lavaIgniteIndex; // ignite 窗口序号（每流 tick +1，喂散布概率 → 错峰焚毁）
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return;
+    QElapsedTimer t380t;
+    t380t.start(); // t380 perf：活跃岩浆扫描耗时（仅非稳态打）
 
     auto keyOf = [W, D](int x, int y, int z) -> long long {
         return static_cast<long long>(x) + static_cast<long long>(z) * W
@@ -551,16 +592,28 @@ void World::tickLavaFlow()
     }
 
     // 4) 应用：蒸发 → 新增/重定级（经 keySet 互斥）。setWaterSilent 是通用静默 state 写入口（支持任意 id+state）。
+    //    t380 perf：批量写（同 tickWaterFlow 的 m_batchFluid）—— 把「每岩浆格 1× emit worldChanged +
+    //    clearDirty」合并为末尾 1 次 emit + clear，消除活跃岩浆扩散期 N 次重建扇出（同 t350 水流批量化的根因）。
+    m_batchFluid = true;
+    bool anyChange = false;
     for (const LCell &e : evaps)
-        setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
+        anyChange |= setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
     for (const auto &kv : adds) {
         const long long k = kv.first;
         const int x = static_cast<int>(k % W);
         const long long kz = k / W;
         const int z = static_cast<int>(kz % D);
         const int y = static_cast<int>(kz / D);
-        setWaterSilent(x, y, z, BlockRegistry::Lava, kv.second);
+        anyChange |= setWaterSilent(x, y, z, BlockRegistry::Lava, kv.second);
     }
+    m_batchFluid = false;
+    if (anyChange) {
+        emit worldChanged();      // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
+        m_chunks.clearAllDirty(); // 两段重建完统一清脏
+    }
+    qInfo("vo.perf: tickLavaFlow %lldus cells=%d writes=%d settled=%d",
+          t380t.elapsed(), int(cells.size()), int(evaps.size() + int(adds.size())),
+          anyChange ? 0 : 1);
 
     // 5) ignite pass（spec「木质方块邻岩浆概率着火焚毁」）：遍历本 tick 岩浆格，扫 6 邻，木类方块按散布概率焚毁。
     //    散布确定性（hashVoxel + 窗口序号，PLAN §2-K）→ 同 seed 同窗口同焚毁，错峰非全部同步烧光。setBlock Air
@@ -787,6 +840,12 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
     const int bx0 = std::max(0, minX - 1), by0 = std::max(0, minY - 1), bz0 = std::max(0, minZ - 1);
     const int bx1 = std::min(m_width - 1, maxX + 1), by1 = std::min(m_height - 1, maxY + 1), bz1 = std::min(m_depth - 1, maxZ + 1);
     refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
+    // t380：爆炸破坏球外接盒内的实体块 → 邻接水 / 岩浆可能失支撑流动。球内 Water/Lava 已跳过不破坏，
+    //   但球边缘外的流体邻接关系变了（如炸开含水柱旁的石头 → 水流入新坑）。盒内必有流体邻接则标脏，
+    //   驱动下次流体 tick 重扫；盒内无流体 → pokeFluidDirty 不设（无副作用）。爆炸是稀有事件 → 逐破坏块
+    //   poke 略重，直接置两标志 true 保守（稳态扫描后即清，一次性开销可忽略）。
+    m_waterDirty = true;
+    m_lavaDirty = true;
     emit worldChanged();
     m_chunks.clearAllDirty();
     qInfo("vo.edit: explosion destroyed = %d (center %d,%d,%d r=%g)",
@@ -1182,6 +1241,10 @@ void World::generate()
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
     placeTallGrass(); // t235：grass 表层上方确定性散布草丛（PLAN §2-K；树定型后，仅写空气格不覆盖树）
     recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
+    // t380：worldgen 末置流体脏 → 进世界后首次 tickWaterFlow/tickLavaFlow 各扫一次确认稳态（海洋 / 岩浆湖
+    //   全源 → 零候选 → 即清标志停扫）。一次性确认扫描（防御：避免标志初始 false 漏掉 worldgen 引入的流场）。
+    m_waterDirty = true;
+    m_lavaDirty = true;
 }
 
 // 整数哈希（FNV-1a + avalanche）：seed/x/z → 32 位确定性伪随机。纯函数，不依赖任何运行期随机源

@@ -378,6 +378,10 @@ private:
     void setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state); // t310：带 state（草变种 worldgen）
     quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希（列级 seed/x/z）→ 确定性伪随机
     quint32 hashVoxel(int seed, int x, int y, int z) const;   // 整数哈希（体素级 seed/x/y/z）→ 矿石散布用
+    // t380：块编辑后标记流体脏（驱动 tickWaterFlow/tickLavaFlow 早退）。查编辑格 + 6 正交邻是否含
+    //   Water/Lava → 设对应 m_waterDirty/m_lavaDirty=true（见 m_*Dirty 字段头注释）。blockAt 越界返 Air
+    //   安全（不需 bounds 检查）。编辑是 click-rate → 6 次 blockAt 可忽略。
+    void pokeFluidDirty(int x, int y, int z);
 
     std::vector<int> m_perm;  // 512 置换表（Perlin）
     int m_width = 16, m_depth = 16, m_height = 16, m_seed = 1337;
@@ -390,6 +394,18 @@ private:
     //   不 emit worldChanged / 不 clearAllDirty；caller 末尾一次性 emit + clearDirty。把「每 tick 写 N 格
     //   → N 次 worldChanged 扇出重建」合并为「1 次重建」，消除活跃扩散期卡顿。通用机制（t351 岩浆可同用）。
     bool m_batchFluid = false;
+    // t380 流体脏标志（perf：tickWaterFlow/tickLavaFlow 早退优化）。稳态（海洋全源、无玩家扰动）时两 tick
+    //   仍每 ~0.3s / ~3s 全图扫 W×D×H（80×80×64≈41 万格 × chunk 路由除法）只为发现「无候选 → 零变化」
+    //   → 稳态帧每 0.3s 白付 ~3-5ms 扫描（= 大水域 / 长时游戏周期性卡顿；关联 t320/t354 屡报 lag）。改：
+    //   仅当「自上次扫描后有流体相关编辑」才扫。setBlock / setBlockFromEntity / destroySphereSilent 调
+    //   pokeFluidDirty（查编辑格 + 6 正交邻是否含 Water/Lava —— 流体只正交传播，对角不影响；块编辑可能扰动
+    //   邻接流体平衡：破邻水的实体块 / 放块入水）；setWaterSilent 写 Water/Lava 时按 id/oldId 设对应标志
+    //   （流体 tick 内部写入 → 链式扩散下 tick 续扫直到稳态）。tickWaterFlow/tickLavaFlow 入口检标志：
+    //   false → 早退（跳过全图扫）；true → 扫描前清 false，apply 内 setWaterSilent 若真写则重设 true →
+    //   稳态（零写入）后自然停扫。generate/finishLoad 末置两标志 true（一次性确认扫 → 新世界/存档态稳态
+    //   即清，防御加载态含未稳流场）。标志只设 true（tick 自身清），不会漏触发（所有块写路径均 poke）。
+    bool m_waterDirty = false;
+    bool m_lavaDirty = false;
     static constexpr int kFlowTickInterval = 3;   // tickWaterFlow 节流间隔（WorldClock tick 单位 = 100ms → 0.3s/格）
     static constexpr int kMaxFlowLevel = 7;       // 水流最大蔓延等级（state 1..7；机制等价 MC 1.0 流水 7 格扩散）
     // t343 岩浆流 tick 节流计数 + 常量：tickLavaFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到
