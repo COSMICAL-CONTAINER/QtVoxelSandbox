@@ -3,7 +3,11 @@
 
 #include <QObject>
 #include <QtQml/qqml.h>
+#include <QByteArray>
+#include <QHash>
+#include <QList>
 #include <QVariantList>
+#include <functional>
 
 #include "world.h" // Q_PROPERTY(World*) + chunks() 路由（World 层只读，同层 include 不破铁律）
 
@@ -126,9 +130,37 @@ private:
 
     // PRAGMA user_version；schema 变更时 +1 并写迁移。v2（t188）= 新增 chests 表（纯加表，旧库 IF NOT EXISTS 幂等补建）。
     static constexpr int kSchemaVersion = 2;
+    // t382 world_version：**数据语义**版本（方块 id 映射演进），存 world_meta 'world_version' 键。
+    //   与 PRAGMA user_version（SQL schema 版本）刻意分离 —— schema 版本管表结构（加表 / 加列），
+    //   world_version 管「chunk blob 里那个字节现在指代哪个方块」（block-id 重排）。改方块 id 语义时 bump
+    //   本常量 + 在 migrations() 注册一条 remap 步，旧存档 openWorld 时自动迁移（不破老存档）。
+    //   t348 用映射层（BlockRegistry::mcBlockId）而非重排引擎 id → 存档字节序未变 → kWorldVersion=1，
+    //   migrations() 的 0→1 步为 identity（空 remap 表）。缺键（t382 前存档）→ 视为 0。
+    static constexpr int kWorldVersion = 1;
     // 把箱子 QVariantList 落盘进 chests 表（DELETE 全量 + INSERT；用 kConn 连接，caller 已开事务）。
     //   失败 → false（caller rollback）。
     bool writeChests(const QVariantList &chests);
+
+    // ── t382 迁移注册表（world_version → kWorldVersion 的数据迁移；详见类头注释 + migrations()）──
+    // 单条迁移：把存档数据从 (targetVersion-1) 推进到 targetVersion。apply 对一个 chunk 的三段 blob
+    //   就地改写 —— block-id 重排只动 voxels（states/light 传入以备将来 state-bit 重排，当前迁移不改）。
+    using BlobMigrator = std::function<void(QByteArray &voxels, QByteArray &states, QByteArray &light)>;
+    struct Migration {
+        int targetVersion;   // 本步把数据推进到的目标 world_version
+        BlobMigrator apply;  // 对单 chunk 三段 blob 的就地变换
+    };
+    // 迁移注册表（单一权威）：按 targetVersion 升序的迁移列表。openWorld 时据存档 world_version 取
+    //   (stored, kWorldVersion] 内的步按序应用。新增 block-id 重排：追加
+    //   Migration{N+1, makeIdRemap({{oldId,newId},...})} 并同步 bump kWorldVersion=N+1。
+    static const QList<Migration> &migrations();
+    // 构造一条 block-id 重排迁移：remap 给出「旧 id → 新 id」的非 identity 映射（未列出 = 保持不变）。
+    //   返回的 BlobMigrator 一次性建 256 字节查表、遍历 voxels 每字节 O(1) 改写（states/light 不动）。
+    //   空 remap = identity（用于「打通链路但无需重排」的迁移步，如 t382 的 0→1）。
+    static BlobMigrator makeIdRemap(const QHash<quint8, quint8> &remap);
+    // 把当前库的 chunk blob 从存档 world_version 推进到 kWorldVersion：读 world_meta 'world_version'
+    //   （缺键→0），若 < kWorldVersion 则逐 chunk 行应用 migrations()、写回、刷版本（事务原子）。
+    //   已是当前版本 → no-op 返 true。openWorld 在 initSchema 后调一次。失败 → false（caller 拒绝打开）。
+    bool migrateWorldData();
 };
 
 #endif // WORLDSTORE_H

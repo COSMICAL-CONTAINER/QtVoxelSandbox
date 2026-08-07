@@ -241,8 +241,10 @@ Window {
     //   （每 .sqlite 独立 player_state 表）隔离无 bug，但切世界时 VM 不重置就会泄漏到新世界。
     function applyPlayerState(data) {
         // 背包清空（两路径共用）：hotbarVM 跨世界长驻，进任何世界前都必须先清，再按存档写或留空。
+        //   t382：护甲 4 槽同样跨世界长驻 → 一并清（旧版漏清 → 上世界装备串入新世界）。
         for (let i = 0; i < 9; ++i) hotbarVM.setStack(i, 0, 0)
         for (let j = 0; j < 27; ++j) hotbarVM.mainSetStack(j, 0, 0)
+        for (let k = 0; k < 4; ++k) hotbarVM.armorSetStack(k, 0, 0)
         hotbarVM.heldBlock = 0
         if (!data || Object.keys(data).length === 0) {
             // 新世界：出生点 + 满血满饥 + 默认模式（player 构造默认 Spectator）+ 背包清空（上文已清）
@@ -268,27 +270,46 @@ Window {
         //   路由回 playerState.setHunger（幂等：值已一致则无变化静默）。
         player.setHunger(data.hunger !== undefined ? data.hunger : 20)
         // 背包已在上文两路径共用处清空，此处直接按存档写
-        if (data.hotbar) for (let i = 0; i < data.hotbar.length && i < 9; ++i)
-            hotbarVM.setStack(i, data.hotbar[i].id, data.hotbar[i].count)
-        if (data.main) for (let i = 0; i < data.main.length && i < 27; ++i)
-            hotbarVM.mainSetStack(i, data.main[i].id, data.main[i].count)
+        //   t382：每栈透传 durability（缺省 -1 = 自动满；存档有值则保真工具磨损）。非工具 durability 经
+        //   Hotbar::normalizeDurability 归一为 0（inert），故传 0 对方块栈安全。
+        if (data.hotbar) for (let i = 0; i < data.hotbar.length && i < 9; ++i) {
+            const s = data.hotbar[i]
+            hotbarVM.setStack(i, s.id, s.count, s.durability !== undefined ? s.durability : -1)
+        }
+        if (data.main) for (let i = 0; i < data.main.length && i < 27; ++i) {
+            const s = data.main[i]
+            hotbarVM.mainSetStack(i, s.id, s.count, s.durability !== undefined ? s.durability : -1)
+        }
+        // t382 护甲 4 槽回填（旧存档无 armor 字段 → data.armor undefined → 跳过，保持上文已清的空装备）。
+        if (data.armor) for (let k = 0; k < data.armor.length && k < 4; ++k) {
+            const s = data.armor[k]
+            hotbarVM.armorSetStack(k, s.id, s.count, s.durability !== undefined ? s.durability : -1)
+        }
         // 同上：`||` 对 0（第 0 槽）会误兜底，恰好 0==默认值巧合正确，但显式检查更稳健且与上面一致。
         hotbarVM.selectedSlot = data.selectedSlot !== undefined ? data.selectedSlot : 0
     }
     // t176 收集当前玩家态为 QVariantMap（存档用）：位姿 / 模式 / 血饥 / hotbar 9 + main 27 背包 / 选中槽。
+    //   t382 round-trip 保真补全：每栈多记 durability（旧版只存 id/count → 工具磨损 round-trip 后回满），
+    //   并新增 armor 4 槽（旧版完全没存护甲 → 装备退出即丢）。version 2 = +durability +armor（自描述 JSON，
+    //   applyPlayerState 对缺字段降级，旧 v1 存档仍可读）。
     function gatherPlayerState() {
         const hotbar = []
-        for (let i = 0; i < 9; ++i) hotbar.push({ id: hotbarVM.blockIdAt(i), count: hotbarVM.countAt(i) })
+        for (let i = 0; i < 9; ++i) hotbar.push({
+            id: hotbarVM.blockIdAt(i), count: hotbarVM.countAt(i), durability: hotbarVM.durabilityAt(i) })
         const main = []
-        for (let i = 0; i < 27; ++i) main.push({ id: hotbarVM.mainBlockIdAt(i), count: hotbarVM.mainCountAt(i) })
+        for (let i = 0; i < 27; ++i) main.push({
+            id: hotbarVM.mainBlockIdAt(i), count: hotbarVM.mainCountAt(i), durability: hotbarVM.mainDurabilityAt(i) })
+        const armor = []
+        for (let k = 0; k < 4; ++k) armor.push({
+            id: hotbarVM.armorBlockIdAt(k), count: hotbarVM.armorCountAt(k), durability: hotbarVM.armorDurabilityAt(k) })
         return {
-            version: 1,
+            version: 2,
             px: player.feetPosition.x, py: player.feetPosition.y, pz: player.feetPosition.z,
             yaw: player.yaw, pitch: player.pitch,
             mode: player.mode,
             health: playerState.health, hunger: playerState.hunger,
             selectedSlot: hotbarVM.selectedSlot,
-            hotbar: hotbar, main: main
+            hotbar: hotbar, main: main, armor: armor
         }
     }
     // t176 保存并退出到世界列表（ESC 暂停叠层「保存并退出」按钮）：归还手持物 → 存玩家态 + 存地形 +

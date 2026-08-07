@@ -21,7 +21,10 @@
 #include <QStandardPaths>
 #include <QVariant>
 #include <QVector>
-#include <cstring> // std::memcpy（chunk blob 回填）
+#include <algorithm> // std::sort（迁移步按 targetVersion 排序）
+#include <array>     // std::array（id remap 查表）
+#include <cstring>   // std::memcpy（chunk blob 回填）
+#include <memory>    // std::shared_ptr（id remap 查表捕获进 lambda）
 
 // 单独日志分类（PLAN §2-F 模块化日志）：vo.save 存档读写可观测（建库 / 版本不符 / chunk blob 计数）。
 Q_LOGGING_CATEGORY(lcSave, "vo.save")
@@ -209,7 +212,9 @@ QString WorldStore::createWorld(const QString &name, int seed)
             {QStringLiteral("height"), QStringLiteral("64")},
             {QStringLiteral("depth"), QStringLiteral("80")},
             {QStringLiteral("created"), QString::number(now)},
-            {QStringLiteral("playedAt"), QStringLiteral("0")}
+            {QStringLiteral("playedAt"), QStringLiteral("0")},
+            // t382：新世界出生即当前 world_version（无需迁移；openWorld 的 migrateWorldData 据此 no-op）。
+            {QStringLiteral("world_version"), QString::number(kWorldVersion)}
         };
         for (const auto &kv : metas) {
             q.addBindValue(kv.first);
@@ -342,6 +347,13 @@ bool WorldStore::openWorld(const QString &file)
             QSqlDatabase::removeDatabase(kConn);
             return false;
         }
+        // t382：把存档数据迁移到当前 world_version（旧存档 block-id 重排等）。失败 → 拒绝打开（§2-E）。
+        //   新世界（createWorld 已写 world_version=kWorldVersion）→ migrateWorldData 内 no-op。
+        if (!migrateWorldData()) {
+            qCCritical(lcSave) << "openWorld: data migration failed for" << file;
+            QSqlDatabase::removeDatabase(kConn);
+            return false;
+        }
     }
     m_open = true;
     m_openFile = file;
@@ -405,7 +417,10 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests)
         {QStringLiteral("width"), QString::number(cm.width())},
         {QStringLiteral("height"), QString::number(cm.height())},
         {QStringLiteral("depth"), QString::number(cm.depth())},
-        {QStringLiteral("playedAt"), QString::number(now)}
+        {QStringLiteral("playedAt"), QString::number(now)},
+        // t382：每次保存都刷 world_version（确保存档始终标记为当前数据版本）+ chunk_count（完整性核查）。
+        {QStringLiteral("world_version"), QString::number(kWorldVersion)},
+        {QStringLiteral("chunk_count"), QString::number(saved)}
     };
     for (const auto &kv : metas) {
         mq.addBindValue(kv.first);
@@ -473,6 +488,18 @@ int WorldStore::loadChunks()
         std::memcpy(c->stateDataMut(), states.constData(), n);
         std::memcpy(c->lightDataMut(), light.constData(), n);
         ++loaded;
+    }
+    // t382 完整性核查：实际加载 chunk 数应与存档 chunk_count 一致。不一致 = 有 chunk 因尺寸不符 / 损坏被
+    //   跳过（上方 size mismatch continue）→ 告警但不阻断加载（已加载的部分仍可用，§2-E 降级运行）。
+    {
+        QSqlQuery cq(QSqlDatabase::database(kConn));
+        if (cq.exec(QStringLiteral("SELECT value FROM world_meta WHERE key='chunk_count'")) && cq.next()) {
+            const int stored = cq.value(0).toString().toInt();
+            if (stored != loaded)
+                qCWarning(lcSave) << "loadChunks: chunk_count mismatch — stored" << stored
+                                  << "loaded" << loaded
+                                  << "(some chunks skipped: size/dim mismatch or corruption)";
+        }
     }
     qCInfo(lcSave) << "loaded" << loaded << "chunks for world" << m_openFile;
     return loaded;
@@ -580,4 +607,114 @@ QVariantList WorldStore::loadChests() const
         out.append(cm);
     }
     return out;
+}
+
+// t382 迁移注册表（单一权威）。当前仅一条 0→1 步：t348 用映射层（BlockRegistry::mcBlockId）而非重排
+//   引擎 id，故存档 chunk 字节序未变 → 空 remap 表（identity）。此步存在以打通「读 chunk → remap voxels
+//   → 写回 → 刷 world_version」全链路（对 t382 前无 world_version 键的老存档执行一次），并为将来真正的
+//   block-id 重排提供现成插入点：追加 Migration{N+1, makeIdRemap({{oldId,newId},...})} + bump kWorldVersion。
+const QList<WorldStore::Migration> &WorldStore::migrations()
+{
+    static const QList<Migration> list = {
+        Migration{1, makeIdRemap({})}, // 0→1：identity（t348 未重排引擎 id）
+    };
+    return list;
+}
+
+// 构造 block-id 重排迁移：建 256 字节查表（默认 identity，remap 覆盖指定项），返回遍历 voxels 改写的
+//   BlobMigrator。查表用 shared_ptr 捕获进 lambda（一次建表、多次 chunk 复用，O(1)/字节）。空 remap =
+//   identity（字节逐个映射回自身，等效 no-op 但走完整 remap 路径，验证机制可用）。
+WorldStore::BlobMigrator WorldStore::makeIdRemap(const QHash<quint8, quint8> &remap)
+{
+    auto table = std::make_shared<std::array<quint8, 256>>();
+    for (int i = 0; i < 256; ++i)
+        (*table)[i] = quint8(i); // 默认 identity
+    for (auto it = remap.constBegin(); it != remap.constEnd(); ++it)
+        (*table)[quint8(it.key())] = quint8(it.value()); // 覆盖需重排的 id
+    return [table](QByteArray &voxels, QByteArray & /*states*/, QByteArray & /*light*/) {
+        char *p = voxels.data();
+        const qsizetype n = voxels.size();
+        for (qsizetype i = 0; i < n; ++i)
+            p[i] = char((*table)[quint8(p[i])]);
+    };
+}
+
+// t382 把存档数据迁移到 kWorldVersion。读 world_meta 'world_version'（缺键→0 = t382 前老存档），若低于
+//   当前则按 migrations() 取覆盖步、按 targetVersion 升序逐 chunk 应用（事务原子：UPDATE 全部 chunk +
+//   刷版本一次 COMMIT）。已是当前版本 → no-op。返回是否成功（SQL 失败 → rollback + false）。
+bool WorldStore::migrateWorldData()
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    int stored = 0;
+    {
+        QSqlQuery rq(db);
+        if (rq.exec(QStringLiteral("SELECT value FROM world_meta WHERE key='world_version'")) && rq.next())
+            stored = rq.value(0).toString().toInt(); // 缺键（t382 前存档）→ 保持 0
+    }
+    if (stored >= kWorldVersion)
+        return true; // 已是当前版本（含新世界 createWorld 已写 kWorldVersion）
+
+    // 收集 targetVersion ∈ (stored, kWorldVersion] 的迁移步，按 targetVersion 升序应用。
+    const QList<Migration> &ms = migrations();
+    QList<const Migration *> todo;
+    todo.reserve(ms.size());
+    for (const Migration &m : ms)
+        if (m.targetVersion > stored && m.targetVersion <= kWorldVersion)
+            todo.append(&m);
+    std::sort(todo.begin(), todo.end(),
+              [](const Migration *a, const Migration *b) { return a->targetVersion < b->targetVersion; });
+
+    qCInfo(lcSave) << "migrating world data world_version" << stored << "->" << kWorldVersion
+                   << "across" << todo.size() << "step(s) for" << m_openFile;
+
+    if (!db.transaction()) {
+        qCCritical(lcSave) << "migrate: begin transaction failed:" << db.lastError().text();
+        return false;
+    }
+    // ORDER BY cz, cx 与 saveAll 的 chunk 遍历序（cz 外 / cx 内）一致，便于一致性与日志可读。
+    QSqlQuery sel(db);
+    if (!sel.exec(QStringLiteral("SELECT cx, cz, voxels, states, light FROM chunks ORDER BY cz, cx"))) {
+        qCCritical(lcSave) << "migrate: select chunks failed:" << sel.lastError().text();
+        db.rollback();
+        return false;
+    }
+    QSqlQuery up(db);
+    up.prepare(QStringLiteral("UPDATE chunks SET voxels=?, states=?, light=? WHERE cx=? AND cz=?"));
+    int migrated = 0;
+    while (sel.next()) {
+        const int cx = sel.value(0).toInt();
+        const int cz = sel.value(1).toInt();
+        QByteArray voxels = sel.value(2).toByteArray();
+        QByteArray states = sel.value(3).toByteArray();
+        QByteArray light = sel.value(4).toByteArray();
+        for (const Migration *m : todo)
+            m->apply(voxels, states, light);
+        up.addBindValue(voxels);
+        up.addBindValue(states);
+        up.addBindValue(light);
+        up.addBindValue(cx);
+        up.addBindValue(cz);
+        if (!up.exec()) {
+            qCCritical(lcSave) << "migrate: update chunk failed at" << cx << cz << ":" << up.lastError().text();
+            db.rollback();
+            return false;
+        }
+        ++migrated;
+    }
+    // 刷 world_version（标志本库数据已推进到当前版本，后续 openWorld 跳过迁移）。
+    QSqlQuery mq(db);
+    mq.prepare(QStringLiteral("INSERT OR REPLACE INTO world_meta (key, value) VALUES ('world_version', ?)"));
+    mq.addBindValue(QString::number(kWorldVersion));
+    if (!mq.exec()) {
+        qCCritical(lcSave) << "migrate: stamp world_version failed:" << mq.lastError().text();
+        db.rollback();
+        return false;
+    }
+    if (!db.commit()) {
+        qCCritical(lcSave) << "migrate: commit failed:" << db.lastError().text();
+        db.rollback();
+        return false;
+    }
+    qCInfo(lcSave) << "migration complete:" << migrated << "chunk(s) advanced to world_version" << kWorldVersion;
+    return true;
 }
