@@ -105,6 +105,7 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
         case MobBones:    e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 骷髅 0.6 宽；旧 0.9 偏大）
         case MobStalker:  e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 苦力怕 0.6 宽；旧 0.9 偏大一圈；t284）
         case MobSpider:   e.halfW = 0.45f; e.halfH = 0.30f; e.hostile = true; break; // 0.9×0.6 宽矮（躯干 0.8 宽 + 余量；旧 1.1 偏大；快速，t285）
+        case MobChicken:  e.halfW = 0.30f; e.halfH = 0.40f; break; // 0.6×0.8 小型鸟（躯干 0.4 宽 / 站立 0.7 高；t398）
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
@@ -132,6 +133,11 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
     //   首次叫声同步（同 wanderTimer=0 错峰起步同理）。stepAccum=0。
     e.stepAccum = 0.0f;
     e.aimTimer = 0.0f; // t331 骸骨拉弓瞄准计时（slot 复用防残留；仅 MobBones 用）
+    // t398 鸡下蛋计时初值：随机化（kEggLayMin..Max）防批量 spawn 的鸡同步下蛋（同 ambientTimer 错峰模式）。
+    //   非 MobChicken 的 mob 保留 0 不触发（tick Mob 分支仅 mobType==MobChicken 推进 eggTimer）。
+    e.eggTimer = (mobType == MobChicken)
+                 ? (kEggLayMin + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kEggLayMax - kEggLayMin))
+                 : 0.0f;
     e.ambientTimer = kAmbientMin
                      + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
     // t377 mob 随机护甲（仅 Shambler/Bones；spec「~80% no armor, ~20% a random piece/set」）。机制等价 MC 1.0
@@ -266,13 +272,16 @@ int EntityManager::pickPassiveMobType(int biomeId) const
     const int wCow   = kPassiveSpawnWeights[b][0]; // 列 0 = 牛 MobCow
     const int wSheep = kPassiveSpawnWeights[b][1]; // 列 1 = 羊 MobSheep
     const int wPig   = kPassiveSpawnWeights[b][2]; // 列 2 = 猪 MobPig
-    const int total  = wCow + wSheep + wPig;
+    const int wChick = kPassiveSpawnWeights[b][3]; // 列 3 = 鸡 MobChicken（t398）
+    const int total  = wCow + wSheep + wPig + wChick;
     auto *rng = QRandomGenerator::global();
     int r = int(rng->bounded(total)); // [0, total)；bounded 返 quint32，同 tickHostileLife pickMob 模式
     if (r < wCow) return MobCow;
     r -= wCow;
     if (r < wSheep) return MobSheep;
-    return MobPig;
+    r -= wSheep;
+    if (r < wPig) return MobPig;
+    return MobChicken;
 }
 
 // t280 当前活体敌对生物数（hostile && !dead && kind==Mob）。供 spawn 调度上限判定。
@@ -2060,6 +2069,21 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 e.ambientTimer = kAmbientMin
                                  + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
                 if (inAudioRange) emit mobAmbient(e.mobType);
+            }
+
+            // t398 鸡下蛋（spec「periodically lays an EGG item」）：仅 mobType==MobChicken 推进 eggTimer（其余 mob
+            //   eggTimer=0 早退）。周期到 → emit chickenLaidEgg(floor(pos))（呈现层据它 spawnItem 生成蛋物品掉落，
+            //   同 mobDied→spawnItem 模式）+ 重置随机周期（kEggLayMin..Max，机制等价 MC 1.0 鸡 5-10 分钟下一枚蛋）。
+            //   不受 idle/行走态门控（活体鸡无论静止 / 游荡均周期下蛋，机制等价 MC 鸡下蛋独立于行为）。坐标取
+            //   floor(pos) 与 spawnItem 整数格约定一致（蛋落在鸡身旁）。无 listener 范围门控 —— 蛋是物品实体非音频，
+            //   远场鸡下蛋亦须生成（玩家走近即可见）。
+            if (e.mobType == MobChicken) {
+                e.eggTimer -= float(dt);
+                if (e.eggTimer <= 0.0f) {
+                    e.eggTimer = kEggLayMin
+                                 + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kEggLayMax - kEggLayMin);
+                    emit chickenLaidEgg(qFloor(e.pos.x()), qFloor(e.pos.y() - e.halfH), qFloor(e.pos.z()));
+                }
             }
 
             // t241 行走动画相位推进：moveSpeed>0（行走 / 被推）→ walkPhase 前进（fmod 2π，QML 据它驱动腿摆）；

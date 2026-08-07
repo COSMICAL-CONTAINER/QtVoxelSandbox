@@ -582,6 +582,19 @@ Item {
                     R(18, 9, 1, 1, leg)
                     R(18, 11, 2, 1, leg)
                     R(18, 13, 1, 1, leg)
+                } else if (kind === "chicken") {
+                    // 鸡（t398）：白羽壳 + 棕褐翅斑 + 顶红色鸡冠（鸡冠一眼辨「鸡」）。纯原创抽象纹样（§9 区隔）。
+                    const shell = "#f5f0e4", lite = "#ffffff", dark = "#d8d0c2"
+                    const brown = "#8a5a32", comb = "#c83030"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边
+                    // 棕褐翅斑（散布的棕色小斑，表「翅膀羽色」）
+                    R(8, 10, 1, 1, brown); R(11, 9, 1, 1, brown); R(14, 11, 1, 1, brown)
+                    R(9, 13, 1, 1, brown); R(13, 14, 1, 1, brown); R(7, 12, 1, 1, brown)
+                    // 顶红色鸡冠（蛋顶上方一格，鸡的身份特征）
+                    R(10, 5, 4, 1, comb)
                 }
             }
 
@@ -803,6 +816,74 @@ Item {
                 R(5, 19, 2, 1, fletchDark)      // 羽根暗边（接杆处）
             }
 
+            // t398 鸡相关材料（机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉 + 周期下蛋；纯原创自绘 §9a）。
+            // 羽毛（0x228）：杀鸡掉落。MC 风格羽毛 = 斜置羽杆 + 两侧羽片 + 底部蓬松羽根。机制等价 MC 羽毛图标。
+            //   配色：quill #f0ebd8（羽杆米白）/ barb #ffffff（羽片白）/ barbDark #c8c0b0（羽片暗边）/ root #8a7a5a（羽根灰褐）。
+            const drawFeather = () => {
+                const quill = "#f0ebd8", barb = "#ffffff", barbDark = "#c8c0b0", root = "#8a7a5a"
+                // 羽杆（从右下 (16,18) 到左上 (7,4) 的对角主杆，2px 宽）
+                const segs = [
+                    [7, 4], [8, 5], [9, 6], [10, 7], [11, 8], [12, 9],
+                    [13, 10], [14, 11], [15, 12], [16, 13]
+                ]
+                for (const [c, r] of segs) R(c, r, 1, 2, quill)
+                // 羽片（杆两侧的白色羽支，斜向伸出 —— 杆左上侧 + 右下侧）
+                const barbs = [
+                    [5, 4], [6, 6], [7, 8], [8, 10], [9, 12], [10, 14],     // 左上侧羽片
+                    [10, 5], [12, 6], [14, 7], [13, 9], [15, 10], [13, 12]  // 右下侧羽片
+                ]
+                for (const [c, r] of barbs) R(c, r, 2, 1, barb)
+                // 羽片暗边（部分，提层次）
+                R(5, 5, 1, 1, barbDark); R(9, 11, 1, 1, barbDark); R(13, 11, 1, 1, barbDark)
+                // 羽根（右下端，蓬松灰褐点）
+                R(16, 14, 2, 3, root)
+                R(15, 15, 1, 2, root)
+            }
+            // 生鸡肉（0x229）：杀鸡掉落。MC 风格生肉 = 粉红肉块（带骨断口）。机制等价 MC 生鸡肉图标。
+            //   配色：meat #e89090（生肉粉红）/ meatLight #f8b8b8（受光高光）/ meatDark #b85858（暗边 + 骨断口）。
+            const drawRawChicken = () => {
+                const meat = "#e89090", meatLight = "#f8b8b8", meatDark = "#b85858"
+                R(6, 8, 12, 1, meat)            // 顶行
+                R(5, 9, 14, 6, meat)            // 主体 rows 9..14
+                R(6, 15, 12, 1, meatDark)       // 底阴影
+                R(5, 9, 14, 1, meatLight)       // 顶受光
+                R(4, 10, 1, 4, meatDark)        // 左暗边（圆收）
+                R(18, 10, 1, 4, meatDark)       // 右暗边
+                // 骨断口（左端白色小段，表「带骨」）
+                R(5, 11, 1, 3, meatLight)
+                R(4, 12, 1, 1, "#f0e8d8")
+            }
+            // 熟鸡肉（0x22A）：鸡燃烧致死掉落。MC 风格熟肉 = 金棕烤肉块（带骨断口 + 烤痕）。机制等价 MC 熟鸡肉图标。
+            //   配色：meat #c87848（熟肉金棕）/ meatLight #e09868（受光高光）/ meatDark #8a4828（暗边 + 烤痕）。
+            const drawCookedChicken = () => {
+                const meat = "#c87848", meatLight = "#e09868", meatDark = "#8a4828"
+                R(6, 8, 12, 1, meat)
+                R(5, 9, 14, 6, meat)
+                R(6, 15, 12, 1, meatDark)
+                R(5, 9, 14, 1, meatLight)
+                R(4, 10, 1, 4, meatDark)
+                R(18, 10, 1, 4, meatDark)
+                // 烤痕（两道斜向暗纹，表「烤过」）
+                R(9, 10, 1, 3, meatDark)
+                R(13, 11, 1, 3, meatDark)
+                // 骨断口
+                R(5, 11, 1, 3, meatLight)
+                R(4, 12, 1, 1, "#f0e8d8")
+            }
+            // 蛋（0x22B）：鸡周期性下蛋掉落。MC 风格蛋 = 白色椭圆（顶高光 + 底阴影）。机制等价 MC 蛋图标。
+            //   配色：shell #f5f0e4（蛋壳白）/ lite #ffffff（顶高光）/ dark #c8c0b0（底阴影）。
+            const drawEgg = () => {
+                const shell = "#f5f0e4", lite = "#ffffff", dark = "#c8c0b0"
+                R(9, 6, 6, 1, shell)        // 顶行（窄）
+                R(7, 7, 10, 1, shell)
+                R(6, 8, 12, 9, shell)       // 主体 rows 8..16
+                R(7, 17, 10, 1, shell)
+                R(9, 18, 6, 1, shell)       // 底行（圆收）
+                R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)   // 顶高光
+                R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark) // 底阴影
+                R(15, 9, 1, 7, dark)        // 右暗边
+            }
+
             // t305 树苗物品（0x21B）：破叶概率掉落；右键草地/泥土种植 → Sapling 方块（WorldClock tick 推进成长）。
             //   机制等价 MC 1.0 橡树树苗（sapling）图标；纯原创自绘（§9a）。MC 风格树苗 = 一根棕色短树干 +
             //   顶部绿色嫩叶小球冠（树冠雏形）。配色：trunk #9c7340（树干亮面，同原木）/ trunkDark #6b4f24
@@ -1010,6 +1091,11 @@ Item {
             case 0x225: drawSaddle();         break // t393 马鞍（地牢稀有战利品）
             case 0x226: drawNameTag();        break // t393 命名牌（地牢稀有战利品）
             case 0x227: drawEnchantedBook();  break // t393 附魔书占位（地牢极稀有战利品）
+            case 0x228: drawFeather();        break // t398 羽毛（杀鸡掉落）
+            case 0x229: drawRawChicken();     break // t398 生鸡肉（杀鸡掉落）
+            case 0x22A: drawCookedChicken();  break // t398 熟鸡肉（鸡燃烧致死掉落）
+            case 0x22B: drawEgg();            break // t398 蛋（鸡周期性下蛋掉落）
+            case 0x22C: drawSpawnEgg("chicken"); break // t398 生物蛋（鸡）
             default:    drawStick();        break
             }
         }

@@ -442,7 +442,8 @@ Window {
             if (headroom !== 0 /* Air */ && headroom !== 24 /* TallGrass */) continue // 头顶非空（树干等）
             const mt = entityManager.pickPassiveMobType(theWorld.biomeIdAt(sx, sz))
             const col = (mt === EntityManager.MobCow) ? "#5a4030"
-                     : (mt === EntityManager.MobSheep) ? "#f5f0e8" : "#f0a8b0"
+                     : (mt === EntityManager.MobSheep) ? "#f5f0e8"
+                     : (mt === EntityManager.MobChicken) ? "#f5f0e4" : "#f0a8b0"
             entityManager.spawnMobTyped(sx, sh + 1, sz, mt, col, 10)
         }
     }
@@ -748,7 +749,8 @@ Window {
             "shambler": EntityManager.MobShambler,
             "bones": EntityManager.MobBones,
             "stalker": EntityManager.MobStalker,
-            "spider": EntityManager.MobSpider
+            "spider": EntityManager.MobSpider,
+            "chicken": EntityManager.MobChicken
         }
         return (name in m) ? m[name] : -1
     }
@@ -1140,6 +1142,7 @@ Window {
         //   ⚠️ QML 无法直接 import RecipeRegistry（C++ 静态类），故用字面量 id（同 MaterialIcon.qml 约定）：
         //     0x20B=生猪排 / 0x20C=生牛肉 / 0x20D=皮革 / 0x20E=羊毛（RecipeRegistry::RawPorkchopId 等）。
         //     0x217=骨头 / 0x218=腐肉 / 0x219=线（RecipeRegistry::BoneId / RottenFleshId / StringId，t299）。
+        //     0x228=羽毛 / 0x229=生鸡肉 / 0x22A=熟鸡肉（RecipeRegistry::FeatherId 等，t398 鸡掉落）。
         //     id 改动须同步 src/Game/recipe.h（单一权威）。
         function onMobDied(x, y, z, mobType, burned) {
             // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
@@ -1176,6 +1179,13 @@ Window {
                 // t299 敌对掉落：蜘蛛 → 线 ×1-2（机制等价 MC 1.0 蜘蛛掉线；弓 / 钓竿原料，t304 弓配方用）。
                 itemEntities.spawnItem(x, y, z, 0x219, 1)   // 线 ×1-2
                 itemEntities.spawnItem(x, y, z, 0x219, 1)
+            } else if (mobType === EntityManager.MobChicken) {
+                // t398 鸡掉落：羽毛 ×1-2 + 生鸡肉 ×1（机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉）。
+                //   burned=true（着火致死）→ 生鸡肉替换为熟鸡肉（机制等价 MC 1.0 着火死亡掉熟肉，同猪/牛/羊）。
+                //   0x228=羽毛 / 0x229=生鸡肉 / 0x22A=熟鸡肉（RecipeRegistry::FeatherId / RawChickenId / CookedChickenId）。
+                itemEntities.spawnItem(x, y, z, 0x228, 1)   // 羽毛 ×1-2（非肉，燃烧不变）
+                itemEntities.spawnItem(x, y, z, 0x228, 1)
+                itemEntities.spawnItem(x, y, z, burned ? 0x22A : 0x229, 1)  // 熟鸡肉 / 生鸡肉 ×1
             }
             // MobTest（通用测试生物）/ MobStalker（潜行者；爆炸型，机制等价 MC 苦力怕无常规掉落）不掉落 —— 调试 /
             //   爆炸型无游戏内常规产出。Stalker 爆炸破坏方块的掉落由 detonateStalker 的 explosionDroppedItem 单独发（t297）。
@@ -1187,6 +1197,12 @@ Window {
         //   0x20E = RecipeRegistry::WoolId（材料段羊毛物品；⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定）。
         //   单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，同 fallingBlockDropped / mobDied 模式）。
         function onSheepSheared(x, y, z) { itemEntities.spawnItem(x, y, z, 0x20E, 1) }
+        // t398 鸡下蛋（spec「periodically lays an EGG item」）：EntityManager tick 内 MobChicken eggTimer 周期到 →
+        //   发 chickenLaidEgg(x,y,z)（坐标 = 鸡当前格 floor(pos)，与 spawnItem 整数格约定一致）→ 转发到
+        //   ItemEntityManager.spawnItem 生成蛋物品掉落实体（机制等价 MC 1.0 鸡 5-10 分钟下一枚蛋）。
+        //   0x22B = RecipeRegistry::EggId（材料段蛋物品；⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定）。
+        //   单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，同 sheepSheared / mobDied 模式）。
+        function onChickenLaidEgg(x, y, z) { itemEntities.spawnItem(x, y, z, 0x22B, 1) }
         // t281 敌对 mob 近战攻击 / t283 骷髅箭 / t284 Stalker 爆炸命中玩家（spec「attack」）：EntityManager 发
         //   mobAttackedPlayer(amount, mobType, kbX, kbZ) → 仅 Survival 应用伤害（Creative/Spectator 无伤跳过，机制
         //   等价 MC 创造/观察者无敌）。复用 PlayerState.takeDamage → damaged 红闪 / 视角晃 / 受伤音链（同
@@ -2185,6 +2201,9 @@ Window {
         //   破布残片 + 缝合痕（build_mob.py 程序生成原创像素图，§9a 区隔不照搬 MC 皮肤）。MobModel 人形几何
         //   （躯干/头/双臂前伸/双腿）每面铺整张贴图 [0,1]×[0,1]（同猪牛羊全脸 UV）；实心无 alpha → 不透明材质。
         Texture { id: mobShamblerTex; source: "qrc:/textures/mob_shambler.png"; generateMipmaps: false }
+        // t398 鸡（Chicken；机制等价 MC 1.0 鸡，§9 原创）：白羽底 + 棕褐翅尖 / 尾羽斑 + 浅暖黄腹部（build_mob.py
+        //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 小型鸟几何（躯干/头/尾/2 腿）每面铺整张贴图。
+        Texture { id: mobChickenTex; source: "qrc:/textures/mob_chicken.png"; generateMipmaps: false }
 
         // t218 火把手持/掉落贴图：火把在世界内是异形（torchHost 木柄+火焰小立方，非 1×1×1 立方体），
         //   但手持/掉落旧路径走 BlockCube（6 面立方贴图集 tile 17）→ 即便 alphaCutoff 丢弃透明底，肉眼仍是
@@ -3651,6 +3670,7 @@ Window {
                         if (entMobType === EntityManager.MobStalker) return 0.90 - mobHalfH
                         if (entMobType === EntityManager.MobBones) return 0.90 - mobHalfH   // t287 Bones 人形（腿底 0.90）
                         if (entMobType === EntityManager.MobSpider) return 0.30 - mobHalfH  // t285 Spider 宽矮（腿底 0.30）
+                        if (entMobType === EntityManager.MobChicken) return 0.40 - mobHalfH // t398 Chicken 小型鸟（腿底 0.40）
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
                     }
                     Model {
@@ -4219,6 +4239,64 @@ Window {
                             position: Qt.vector3d(0.07, -0.08, -0.51)
                             scale: Qt.vector3d(0.05, 0.05, 0.02)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                        }
+                    }
+                    // t398 Chicken（鸡；mobType 8）：MobModel 小型鸟几何（圆胖躯干 + 前伸小头 + 后翘尾 + 2 细腿
+                    //   biped walk cycle；机制等价 MC 1.0 鸡，§9 原创模型 + 贴图）。passive → EntityManager AI 走
+                    //   aiWander（同猪/牛/羊）；周期性下蛋（chickenLaidEgg → onChickenLaidEgg 转发 spawnItem EGG）。
+                    //   受击红闪。喙 / 鸡冠 / 肉垂为本 Model 子节点（纯色 NoLighting，同猪眼模式 —— 单材质无法同几何
+                    //   双色，故头饰独立子节点继承 bodyYaw + visible）。MobModel 头心 (0,0.26,-0.18) 半 (0.11,0.12,0.11)。
+                    Model {
+                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobChicken
+                        geometry: MobModel {
+                            mobType: 8
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
+                        position: Qt.vector3d(0, mobModelYOff, 0)
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                            baseColorMap: mobChickenTex
+                        }
+                        // 喙（前伸尖嘴，橙黄；头前面 z=-0.29）。MobModel 头前面 = 头心 cz(-0.18) - hz(0.11) = -0.29。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.24, -0.32)
+                            scale: Qt.vector3d(0.04, 0.025, 0.06)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8a020" }
+                        }
+                        // 鸡冠（头顶红色小冠，3 颗粒状凸起；头心上方 y≈0.39）。机制等价 MC 鸡冠视觉。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.39, -0.16)
+                            scale: Qt.vector3d(0.05, 0.04, 0.04)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.04, 0.39, -0.18)
+                            scale: Qt.vector3d(0.035, 0.035, 0.04)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.04, 0.39, -0.18)
+                            scale: Qt.vector3d(0.035, 0.035, 0.04)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
+                        }
+                        // 眼（2 颗黑点；头两侧偏前 z=-0.27、y=0.27、x=±0.08）。同猪/牛眼纯色子 Model 模式。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.08, 0.27, -0.27)
+                            scale: Qt.vector3d(0.025, 0.03, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.08, 0.27, -0.27)
+                            scale: Qt.vector3d(0.025, 0.03, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                         }
                     }
                     // t293 mob 碰撞箱仅 F3+B：旧版 t253「准星瞄准的单个 mob 常驻显白色目标框」（hover 即显）

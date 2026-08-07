@@ -22,6 +22,9 @@
 //     8 腿爬行；t285 原「简化 4 腿」升级为 t302 八腿 + Z 轴步态）。腿绕躯干侧面髋枢做 Z 轴旋转（外端抬起 =
 //     步态），walkPhase 驱动 tetrapod 交替步态（前后对同相、中两对反相）。眼由 Main.qml delegate 补（4 颗红眼
 //     纯色子 Model）；声音走 AudioManager.playMobAmbient/playMobHurt(mobType=7) → mob_idle_spider。
+//   8 = Chicken（鸡；t398）：小型鸟——圆胖躯干 + 前伸小头 + 后翘尾 + **2 细腿**（biped walk cycle，机制等价
+//     MC 1.0 鸡两足鸟形态）。喙 / 鸡冠由 Main.qml delegate 补（纯色子 Model）。声音 mobType=8 越界兜底
+//     mob_idle（generic）。
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
 //
 // 顶点格式：pos(3) + uv(2) = 5 float。每盒 6 面 × 4 角 = 24 顶点 / 36 索引；多盒累加。

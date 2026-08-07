@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""生成猪 / 牛 / 羊 / 蹒跚者（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
+"""生成猪 / 牛 / 羊 / 蹒跚者 / 鸡（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
 
-机制等价 MC 1.0 三种被动生物（pig / cow / sheep）+ 一种敌对生物（zombie）—— 名称 / 模型 / 贴图
-全原创、**不**拷贝任何 MC 资产（PLAN §9 区隔：Zombie→Shambler「蹒跚者」改名）。本脚本程序生成
-四种 mob 各一张「全脸」贴图（MobModel 几何的每面都铺同一张贴图，非 MC 式 UV 拆皮）—— 简单稳健，
-配方块化模型比例让四种 mob 肉眼可辨。
+机制等价 MC 1.0 三种被动生物（pig / cow / sheep）+ 鸡（chicken）+ 一种敌对生物（zombie）—— 名称 / 模型 /
+贴图全原创、**不**拷贝任何 MC 资产（PLAN §9 区隔：Zombie→Shambler「蹒跚者」改名）。本脚本程序生成
+五种 mob 各一张「全脸」贴图（MobModel 几何的每面都铺同一张贴图，非 MC 式 UV 拆皮）—— 简单稳健，
+配方块化模型比例让五种 mob 肉眼可辨。
 
 视觉意图（每张 16×16，无 alpha 透明底 —— 实心贴图走不透明 PrincipledMaterial）：
   - mob_pig.png      ：粉红皮 + 几个深粉斑点 + 浅腹纹（读作「粉红猪皮」）。
@@ -12,11 +12,12 @@
   - mob_sheep.png    ：奶白羊毛 + 灰阴影卷曲纹（读作「羊毛卷」）。
   - mob_shambler.png ：暗绿腐肉底 + 深绿霉斑 + 棕色腐痕 + 青蓝/赭褐「破布」残片 + 深色缝合痕
                        （读作「不死亡灵腐尸」；机制等价 MC 1.0 僵尸皮肤，§9 改名 + 原创贴图）。
+  - mob_chicken.png  ：白羽底 + 棕褐翅尖 / 尾羽斑 + 浅暖黄腹部（读作「白色母鸡羽毛」；t398）。
 
 图案采用固定位置 + 确定性散布（无随机源 → CI 可复现、与 build_atlas.py / build_tall_grass.py 同风格）。
 
 输出（覆盖写入 textures/）：
-  mob_pig.png   /   mob_cow.png   /   mob_sheep.png   /   mob_shambler.png
+  mob_pig.png   /   mob_cow.png   /   mob_sheep.png   /   mob_shambler.png   /   mob_chicken.png
 
 依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
 生成原创像素图，§9 override (a)）。
@@ -194,11 +195,52 @@ def make_shambler():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_chicken():
+    """鸡（Chicken；机制等价 MC 1.0 鸡，§9 原创贴图非照搬）：
+    白色羽毛底 + 棕红色翅尖 / 尾羽斑（读作「白色母鸡羽毛」）。每面铺同图（同猪牛羊全脸 UV 方案）→
+    躯干 / 头 / 尾 / 腿各盒都铺同一张羽毛纹。配方块化小型鸟比例 + 喙 / 鸡冠纯色子 Model → 肉眼读作「鸡」。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xf5, 0xf0, 0xe4, 255)   # 白羽主色 #f5f0e4（略暖奶白，区别于羊 #f5f0e8 的冷白）
+    fill(img, base)
+
+    # 棕红色羽斑（翅膀 / 尾羽深色区，散布于身体侧面，固定坐标）
+    brown = (0x8a, 0x5a, 0x32, 255)  # 棕褐 #8a5a32
+    blot(img, [
+        (2, 5), (3, 5), (2, 6),
+        (6, 4), (7, 4), (7, 5),
+        (11, 6), (12, 6), (12, 7),
+        (13, 4), (14, 4),
+        (4, 10), (5, 10), (4, 11),
+        (9, 11), (10, 11), (10, 12),
+        (13, 12), (14, 12),
+    ], brown)
+
+    # 浅暖灰阴影点（羽毛层叠凹凸感，少量免乱）
+    shade = (0xd8, 0xd0, 0xc2, 255)  # 浅暖灰 #d8d0c2
+    blot(img, [
+        (5, 2), (8, 3), (11, 2),
+        (3, 8), (6, 8), (9, 9), (12, 9),
+        (2, 13), (7, 13), (11, 14),
+    ], shade)
+
+    # 底部浅黄（腹部到腿部过渡略偏暖黄，拟鸡腹部绒毛色）
+    belly = (0xf0, 0xe0, 0xb8, 255)  # 浅暖黄 #f0e0b8
+    blot(img, [
+        (x, TS - 1) for x in range(3, TS - 3)
+    ], belly)
+
+    out = os.path.join(SRC, "mob_chicken.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def main():
     make_pig()
     make_cow()
     make_sheep()
     make_shambler()
+    make_chicken()
 
 
 if __name__ == "__main__":

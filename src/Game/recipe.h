@@ -165,6 +165,16 @@ public:
     static constexpr int SaddleId        = 0x225; // 马鞍：地牢稀有战利品（机制等价 MC 1.0 saddle）；可堆叠 64（简化）
     static constexpr int NameTagId       = 0x226; // 命名牌：地牢稀有战利品（机制等价 MC name tag，1.6+）
     static constexpr int EnchantedBookId = 0x227; // 附魔书占位：地牢极稀有战利品（机制等价 MC enchanted book，1.4+；占位无真附魔）
+    // t398 鸡（chicken）相关材料段物品（0x228..0x22C；机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉 + 周期下蛋）：
+    //   杀鸡掉羽毛 + 生鸡肉；鸡燃烧致死 → 生鸡肉替换为熟鸡肉（机制等价 MC 1.0 着火死亡掉熟肉，同猪/牛/羊）。
+    //   鸡周期性下蛋（EGG 物品掉落，机制等价 MC 1.0 鸡 5-10 分钟下一枚蛋）。可堆叠 64；非方块（材料段）→ 右键不放置。
+    //   MaterialIcon 自绘图标（羽毛 / 肉排 / 蛋），创造调色板补全（同生肉 / 熟肉）。名称 / 图标全原创（§9 区隔，零 MC 资产）。
+    //   **生物蛋（鸡）** SpawnEggChickenId：创造模式物品，右键地面 → EntityManager::spawnMobTyped 生成 MobChicken。
+    static constexpr int FeatherId         = 0x228; // 羽毛：杀鸡掉落（机制等价 MC 1.0 feather；箭配方原料预留）
+    static constexpr int RawChickenId      = 0x229; // 生鸡肉：杀鸡掉落（机制等价 MC 1.0 raw chicken）
+    static constexpr int CookedChickenId   = 0x22A; // 熟鸡肉：鸡燃烧致死掉落（机制等价 MC 1.0 cooked chicken）
+    static constexpr int EggId             = 0x22B; // 蛋：鸡周期性下蛋掉落（机制等价 MC 1.0 egg）；可堆叠 16（§9 简化走材料段默认 64）
+    static constexpr int SpawnEggChickenId = 0x22C; // 生物蛋（鸡）：右键地面 → 生成鸡（MobChicken）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

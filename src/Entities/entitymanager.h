@@ -102,7 +102,7 @@ public:
     //     机制对齐「黑暗刷怪 / 近距自爆」）。Entity.hostile=true → 走 tickHostileLife 燃烧 / 远距消失 / spawn 调度
     //     （同 Shambler/Bones）；tick Mob 分支据 mobType==MobStalker 路由到 aiStalker（蓄力 fuse → detonateStalker
     //     爆炸：球形破坏方块 + 距离衰减伤害玩家 + emit explosion 音效）。inflateAt 暴露 fuse 进度供 QML 膨胀动画。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7 };
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8 };
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -118,8 +118,8 @@ public:
     //   达 kCap → 委托内静默跳过。mobType 仅 MobShambler/MobBones 合法（其余当敌对调是非语义，但仍生成不崩）。
     Q_INVOKABLE void spawnHostileMob(int x, int y, int z, int mobType);
     // t374 被动生物群系化生成类型选取：据群系 id（World::biomeIdAt 编码：0=Plains, 1=Hills, 2=Desert,
-    //   3=Forest）按 kPassiveSpawnWeights 加权随机返 MobPig/MobCow/MobSheep 之一。机制等价 MC 1.0 群系化
-    //   被动刷怪池（平原牛羊富集、森林猪富集；非排斥，仅概率差异）。群系 id 越界 → 兜底按 Plains。const 只读。
+    //   3=Forest）按 kPassiveSpawnWeights 加权随机返 MobPig/MobCow/MobSheep/MobChicken 之一。机制等价 MC 1.0
+    //   群系化被动刷怪池（平原牛羊富集、森林猪富集；非排斥，仅概率差异）。群系 id 越界 → 兜底按 Plains。const 只读。
     //   分层（PLAN §2）：Entities 层，纯函数于入参（biome id）+ RNG 采样，不读 World / 不改实体数据。
     Q_INVOKABLE int pickPassiveMobType(int biomeId) const;
     // t280 当前**活体**敌对生物数（hostile=true 且非 dead 的 Mob）。供刷怪调度判总数上限（kHostileMobCap）。
@@ -382,6 +382,12 @@ signals:
     //   据它转发 ItemEntityManager.spawnItem(0x20E=羊毛 ×1)（同 mobDied→spawnItem 模式；单向事件流，PLAN §2 分层：
     //   Entities 层发语义事件、呈现层只消费，绝不反向写栅格）。机制等价 MC 1.0 剪羊毛掉落羊毛物品。
     void sheepSheared(int x, int y, int z);
+    // t398 鸡下蛋（spec「periodically lays an EGG item」）：MobChicken 周期性下蛋 —— eggTimer 倒计时到 0 时
+    //   发本信号。坐标 = 鸡当前格 floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在鸡身旁）。
+    //   呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem(0x22B=蛋 ×1)（同 mobDied→spawnItem 模式；
+    //   单向事件流，PLAN §2 分层：Entities 层发语义事件、呈现层只消费，绝不反向写栅格）。机制等价 MC 1.0 鸡
+    //   5-10 分钟下一枚蛋；周期长（kEggLayMin..Max 秒）避免满屏鸡蛋 spam。
+    void chickenLaidEgg(int x, int y, int z);
 
 private:
     struct Entity {
@@ -472,6 +478,10 @@ private:
         //   即长回；spec「加一个重新长毛冷却，免得刷屏」）。未剪羊毛的羊永远 sheared=false（默认状态）。
         bool  sheared = false;       // 是否已被剪羊毛（QML delegate 据它切换毛茸 vs 裸外观）
         float regrowCooldown = 0.0f; // 剪羊毛后到能吃草方块重新长毛的冷却倒计时（秒；仅 sheared=true 时推进 / 触发）
+        // t398 鸡下蛋态（仅 mobType==MobChicken 用；其余 mob 留默认 0 不触发）：
+        //   eggTimer 到下次下蛋的倒计时（秒）；tick Mob 分支推进，<=0 → emit chickenLaidEgg + 重置随机周期
+        //   （kEggLayMin..Max，机制等价 MC 1.0 鸡 5-10 分钟下一枚蛋）。spawn 时随机化初值防批量 spawn 的鸡同步下蛋。
+        float eggTimer = 0.0f;       // 到下次下蛋倒计时（秒；仅 MobChicken 用）
         // t250 环境音态（仅 Mob kind 用；FallingBlock/Item 留默认不触发）：
         float stepAccum = 0.0f;  // walkPhase 半步累加器（弧度）；行走时累加 moveSpeed*dt*kWalkFreq，≥π → emit mobStep
         float ambientTimer = 0.0f; // 到下次 idle 叫声的倒计时（秒）；≤0 → emit mobAmbient + 重置随机周期
@@ -727,15 +737,21 @@ private:
     static constexpr float kSpawnerMobCheckRadius = 4.0f;  // 笼周敌对计数半径（blocks）
     static constexpr int   kSpawnerLocalCap       = 4;     // 单笼周围敌对上限（机制等价 MC 刷怪笼 6 mob cap，本工程取 4）
     // t374 被动生物群系权重表 kPassiveSpawnWeights[biome][mob]：行 = 群系（同 World::biomeIdAt 编码
-    //   0=Plains, 1=Hills, 2=Desert, 3=Forest），列 = mob（0=牛 MobCow, 1=羊 MobSheep, 2=猪 MobPig）。
+    //   0=Plains, 1=Hills, 2=Desert, 3=Forest），列 = mob（0=牛 MobCow, 1=羊 MobSheep, 2=猪 MobPig, 3=鸡 MobChicken）。
     //   Plains 牛羊富集（开阔草原）、Forest 猪富集（机制等价 MC 1.0 平原牛羊 / 森林猪富集）、Hills 均衡、
-    //   Desert 稀疏均匀（沙漠少动物，非排斥，仅概率差异）。pickPassiveMobType 据本表加权随机选 mob 类型。
-    static constexpr int kPassiveSpawnWeights[4][3] = {
-        { 4, 4, 2 }, // Plains（牛 40% / 羊 40% / 猪 20%；牛羊富集）
-        { 2, 2, 2 }, // Hills（均衡）
-        { 1, 1, 1 }, // Desert（稀疏均匀）
-        { 2, 2, 6 }, // Forest（牛 20% / 羊 20% / 猪 60%；猪富集）
+    //   Desert 稀疏均匀（沙漠少动物，非排斥，仅概率差异）。鸡在平原 / 森林常见（机制等价 MC 1.0 鸡在草地群系
+    //   富集）、沙漠稀少。pickPassiveMobType 据本表加权随机选 mob 类型。
+    static constexpr int kPassiveSpawnWeights[4][4] = {
+        { 4, 4, 2, 3 }, // Plains（牛 4 / 羊 4 / 猪 2 / 鸡 3；牛羊富集，鸡常见）
+        { 2, 2, 2, 2 }, // Hills（均衡）
+        { 1, 1, 1, 1 }, // Desert（稀疏均匀）
+        { 2, 2, 6, 3 }, // Forest（牛 2 / 羊 2 / 猪 6 / 鸡 3；猪富集）
     };
+    // t398 鸡下蛋周期（秒）：活体鸡每 [kEggLayMin, kEggLayMax] 秒下一枚蛋（emit chickenLaidEgg）。机制等价
+    //   MC 1.0 鸡 5-10 分钟下一枚蛋（6000-12000 tick）；数值为本工程小世界量身调（PLAN §4「机制对标」非数值
+    //   1:1）—— 取 4-8 分钟保「周期性可观察」而不刷屏。spawn 时初值随机化防批量 spawn 的鸡同步下蛋。
+    static constexpr float kEggLayMin = 240.0f; // 鸡下蛋周期下限（秒；~4 分钟）
+    static constexpr float kEggLayMax = 480.0f; // 鸡下蛋周期上限（秒；~8 分钟）
 public:
     // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
     //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。

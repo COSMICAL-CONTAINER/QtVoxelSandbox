@@ -1624,7 +1624,8 @@ void PlayerController::placeBlock()
             || heldItemId == RecipeRegistry::SpawnEggShamblerId
             || heldItemId == RecipeRegistry::SpawnEggBonesId
             || heldItemId == RecipeRegistry::SpawnEggStalkerId
-            || heldItemId == RecipeRegistry::SpawnEggSpiderId)) {
+            || heldItemId == RecipeRegistry::SpawnEggSpiderId
+            || heldItemId == RecipeRegistry::SpawnEggChickenId)) {
         if (m_hasHit) {
             int mobType = 0;
             QString color; // 占位串（pig/cow/sheep 走 MobModel + 贴图，不读 color）
@@ -1640,6 +1641,8 @@ void PlayerController::placeBlock()
                 mobType = EntityManager::MobBones;    color = QStringLiteral("#d8d8d0"); // t287 敌对：灰白骨（机制等价骷髅）
             } else if (heldItemId == RecipeRegistry::SpawnEggStalkerId) {
                 mobType = EntityManager::MobStalker;  color = QStringLiteral("#3a5a3a"); // t287 敌对：暗绿（机制等价苦力怕）
+            } else if (heldItemId == RecipeRegistry::SpawnEggChickenId) {
+                mobType = EntityManager::MobChicken;  color = QStringLiteral("#f5f0e4"); // t398 鸡：白羽（机制等价鸡；走 MobModel + 贴图）
             } else { // SpawnEggSpiderId
                 mobType = EntityManager::MobSpider;   color = QStringLiteral("#2a1a1a"); // t285 敌对：暗黑（机制等价蜘蛛）
             }

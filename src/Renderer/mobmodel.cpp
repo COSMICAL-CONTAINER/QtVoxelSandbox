@@ -325,6 +325,19 @@ void MobModel::rebuild()
         addBox( 0.00f, -0.05f,  0.00f, 0.40f, 0.18f, 0.30f, verts, idx, bMin, bMax); // 宽矮躯干
         addBox( 0.00f, -0.02f, -0.32f, 0.18f, 0.14f, 0.18f, verts, idx, bMin, bMax); // 小头（前伸）
         addSpiderLegs(0.40f, -0.05f, m_walkPhase, verts, idx, bMin, bMax);           // 8 腿（4 对，Z 轴步态）
+    } else if (m_mobType == 8) {
+        // t398 Chicken（鸡；机制等价 MC 1.0 鸡，§9 原创模型 + 贴图）—— 小型鸟：圆胖身躯 + 前伸小头 + 后翘尾 +
+        //   **2 细腿**（biped walk cycle，区别于猪/牛/羊的 4 腿；鸡是两足鸟）。腿底本地 y≈−0.40 贴 collision 底面
+        //   （EntityManager halfH=0.40 → offset=0，腿底贴地）。喙 / 鸡冠 / 肉垂由 Main.qml delegate 补（纯色子 Model，
+        //   同猪眼模式 —— 单材质无法同几何双色，故头饰独立子节点）。机制等价 MC 1.0 鸡形态（小体型 + 两足 + 后翘尾）。
+        addBox( 0.00f,  0.05f,  0.00f, 0.20f, 0.16f, 0.22f, verts, idx, bMin, bMax); // 圆胖躯干（紧凑小型鸟身）
+        addHeadRot( 0.00f,  0.26f, -0.18f, 0.11f, 0.12f, 0.11f, m_headPitch, verts, idx, bMin, bMax); // 小头（前伸顶位）
+        addBox( 0.00f,  0.14f,  0.22f, 0.09f, 0.09f, 0.05f, verts, idx, bMin, bMax); // 后翘尾（+Z 后方上翘小撮）
+        // 2 细腿（biped walk cycle，绕髋左右反相摆动 —— 同 Shambler/Bones 双腿模式，区别于四足 addLegs）：
+        //   髋枢 hipY=−0.05（躯干底面）；腿盒心 y=−0.225（腿顶 y=−0.05、腿底 y=−0.40）→ 腿底贴 collision 底面。
+        const float sw8 = kLegSwingAmp * std::sin(m_walkPhase);
+        addBoxRot(-0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, +sw8, verts, idx, bMin, bMax); // 左腿（细）
+        addBoxRot( 0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, -sw8, verts, idx, bMin, bMax); // 右腿（细）
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）

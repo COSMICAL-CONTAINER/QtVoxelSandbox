@@ -398,11 +398,11 @@ static_assert(RecipeRegistry::GoldOreDropId   == 0x21E, "GoldOreDropId 须与 Bl
 static_assert(RecipeRegistry::GoldIngotId     == 0x21F, "GoldIngotId 须为材料段序号 0x21F");
 
 // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 材料 / mob
-//   掉落 / 生物蛋段「MC 1.0.0」列一致）。行索引 = engineMaterialId - MaterialIdBase（覆盖 [0x200, 0x227] = 40 项，
-//   含材料 / mob 死亡掉落 / 生物蛋 / 熟肉 / 战利品表物品五子集——MC 1.0 均为「物品」）。**不重排常量**（保存档 /
+//   掉落 / 生物蛋段「MC 1.0.0」列一致）。行索引 = engineMaterialId - MaterialIdBase（覆盖 [0x200, 0x22C] = 45 项，
+//   含材料 / mob 死亡掉落 / 生物蛋 / 熟肉 / 战利品表物品 / 鸡系列六子集——MC 1.0 均为「物品」）。**不重排常量**（保存档 /
 //   配方 / 掉落表向后兼容）。无 MC 1.0 等价（铁 / 金 / 铜原矿与锭 1.17+、熟羊肉 1.8+、命名牌 1.6+、附魔书 1.4+）
 //   → -1；生物蛋（spawn_egg_*）→ 383（MC 1.0 单一 spawn egg id + metadata）。新增材料段物品须在此补一行（否则越界 -1）。
-constexpr int kMcMaterialIdCount = RecipeRegistry::EnchantedBookId - RecipeRegistry::MaterialIdBase + 1; // 0x200..0x227 = 40
+constexpr int kMcMaterialIdCount = RecipeRegistry::SpawnEggChickenId - RecipeRegistry::MaterialIdBase + 1; // 0x200..0x22C = 45
 constexpr int kMcMaterialId[kMcMaterialIdCount] = {
     /* 0x200 stick        */ 280, /* 0x201 coal         */ 263, /* 0x202 iron_ore_drop */ -1,  /* 0x203 iron_ingot */ 265,
     /* 0x204 glass        */ 20,  /* 0x205 charcoal     */ 263, /* 0x206 bucket_empty */ 325, /* 0x207 water_bucket */ 326,
@@ -416,8 +416,10 @@ constexpr int kMcMaterialId[kMcMaterialIdCount] = {
     /* 0x220 lava_bucket  */ 327,
     /* 0x221 cooked_porkchop */ 320, /* 0x222 cooked_beef */ 364, /* 0x223 cooked_mutton */ -1, // t344 烤肉（mutton 1.8+ → -1）
     /* 0x224 redstone     */ 331, /* 0x225 saddle       */ 329, /* 0x226 name_tag     */ -1,  /* 0x227 enchanted_book */ -1, // t393 战利品（命名牌 1.6+ / 附魔书 1.4+ → -1）
+    /* 0x228 feather      */ 288, /* 0x229 raw_chicken  */ 365, /* 0x22A cooked_chicken */ 366, /* 0x22B egg */ 344,
+    /* 0x22C spawn_egg_chicken */ 383, // t398 鸡系列（feather / raw_chicken / cooked_chicken / egg / spawn_egg）
 };
-static_assert(kMcMaterialIdCount == 40, "材料段 MC 映射表长度须 = [MaterialIdBase, EnchantedBookId] = 40");
+static_assert(kMcMaterialIdCount == 45, "材料段 MC 映射表长度须 = [MaterialIdBase, SpawnEggChickenId] = 45");
 } // namespace
 
 // ── 匹配算法 ──

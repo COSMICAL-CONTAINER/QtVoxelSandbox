@@ -269,6 +269,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::SpawnEggBonesId),    // 生物蛋（骸骨）
         int(RecipeRegistry::SpawnEggStalkerId),  // 生物蛋（潜行者）
         int(RecipeRegistry::SpawnEggSpiderId),   // 生物蛋（蜘蛛）t285
+        int(RecipeRegistry::SpawnEggChickenId),  // t398 生物蛋（鸡）：右键 → 生成鸡
         // t244 mob 死亡掉落物（杀猪 / 牛 / 羊产出；机制等价 MC 1.0 被动生物掉落，纯原创自绘 MaterialIcon §9a）：
         //   完成创造调色板一览 —— 生存时由 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
         //   可堆叠 64（走材料段默认 maxStack）；非方块 → 右键不放置（playercontroller selectedBlock 守 Air）。
@@ -307,7 +308,13 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RedstoneId),        // 红石粉：地牢战利品（机制等价 MC 1.0 redstone dust）
         int(RecipeRegistry::SaddleId),          // 马鞍：地牢稀有战利品（机制等价 MC 1.0 saddle）
         int(RecipeRegistry::NameTagId),         // 命名牌：地牢稀有战利品（机制等价 MC name tag，1.6+）
-        int(RecipeRegistry::EnchantedBookId)    // 附魔书占位：地牢极稀有战利品（占位无真附魔，1.4+）
+        int(RecipeRegistry::EnchantedBookId),   // 附魔书占位：地牢极稀有战利品（占位无真附魔，1.4+）
+        // t398 鸡相关材料（机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉 + 周期下蛋；生存由杀鸡 / 拾鸡蛋获得，
+        //   创造调色板补全便于测试 / 装饰）。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘图标。
+        int(RecipeRegistry::FeatherId),         // 羽毛：杀鸡掉落
+        int(RecipeRegistry::RawChickenId),      // 生鸡肉：杀鸡掉落
+        int(RecipeRegistry::CookedChickenId),   // 熟鸡肉：鸡燃烧致死掉落
+        int(RecipeRegistry::EggId)              // 蛋：鸡周期性下蛋掉落
     };
 }
 
@@ -484,6 +491,12 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SaddleId)        return QStringLiteral("马鞍");   // 地牢稀有战利品（机制等价 MC 1.0 saddle）
         if (blockId == RecipeRegistry::NameTagId)       return QStringLiteral("命名牌"); // 地牢稀有战利品（机制等价 MC name tag）
         if (blockId == RecipeRegistry::EnchantedBookId) return QStringLiteral("附魔书"); // 地牢极稀有战利品（占位，无真附魔）
+        // t398 鸡相关材料（机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉 + 周期下蛋；零 MC 专名 §9）。
+        if (blockId == RecipeRegistry::FeatherId)         return QStringLiteral("羽毛");     // 杀鸡掉落
+        if (blockId == RecipeRegistry::RawChickenId)      return QStringLiteral("生鸡肉");   // 杀鸡掉落
+        if (blockId == RecipeRegistry::CookedChickenId)   return QStringLiteral("熟鸡肉");   // 鸡燃烧致死掉落
+        if (blockId == RecipeRegistry::EggId)             return QStringLiteral("蛋");       // 鸡周期性下蛋掉落
+        if (blockId == RecipeRegistry::SpawnEggChickenId) return QStringLiteral("生物蛋（鸡）"); // 右键地面 → 生成鸡
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
