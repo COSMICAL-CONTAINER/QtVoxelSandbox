@@ -141,6 +141,14 @@ class PlayerController : public QQuickItem
     //   RightButton press 据 selectedItemId==Bow 分流）；松开 / 换槽 / 失焦 / 暂停 → 清零（cancelBowDraw）。
     Q_PROPERTY(bool bowDrawing READ bowDrawing NOTIFY bowDrawChanged)
     Q_PROPERTY(float bowDrawProgress READ bowDrawProgress NOTIFY bowDrawChanged)
+    // t401 钓鱼态（手持钓鱼竿右键抛浮标入水 → 等咬钩 → 拉起获物）。fishing=浮标已抛出（呈现层据此显浮标 Model）；
+    //   bobberPosition=浮标世界坐标（浮标 Model position 绑它）；hasBite=当前正在咬钩（拉起即可获物，呈现层
+    //   据此让浮标下沉 / 抖动）。右键按下边缘（eventFilter 据持物 == FishingRod 分流调 useFishingRod）：未钓→抛竿、
+    //   已钓→拉起（咬钩则获物，否则空收）。抛竿 / 咬钩 / 拉起 / 换槽 / 失焦 / 暂停 → 发 fishingChanged。
+    //   分层（PLAN §2）：钓鱼态属 Game/Physics 层（持 world + hotbar + 自身 RNG），呈现层只读消费浮标位置。
+    Q_PROPERTY(bool fishing READ fishing NOTIFY fishingChanged)
+    Q_PROPERTY(QVector3D bobberPosition READ bobberPosition NOTIFY fishingChanged)
+    Q_PROPERTY(bool hasBite READ hasBite NOTIFY fishingChanged)
     // 模式行为门控（t21）：由当前模式派生的能力标志（随 modeChanged 通知 QML）。
     // Spectator 禁放破（用户核心诉求：观察者不能破坏/放置）；飞仅 Creative/Spectator 可用。
     Q_PROPERTY(bool canBreak READ canBreak NOTIFY modeChanged)
@@ -258,6 +266,10 @@ public:
     // t304 弓拉弓态（Q_PROPERTY：bowDrawing / bowDrawProgress）。仅持弓右键蓄力时为真。
     bool bowDrawing() const { return m_bowDrawing; }
     float bowDrawProgress() const; // 蓄力进度 0..1（钳到 [0,1]；满弓=1）
+    // t401 钓鱼态（Q_PROPERTY：fishing / bobberPosition / hasBite）。仅持钓竿右键抛出浮标时 fishing 为真。
+    bool fishing() const { return m_fishing; }
+    QVector3D bobberPosition() const { return m_bobberPos; }
+    bool hasBite() const { return m_hasBite; }
 
     // 模式行为门控（t21，PLAN §2-D：模式标志由 PlayerController 持有，输入边缘统一查）。
     // 三模式差异化：Spectator 禁放破 + 可飞；Creative 可放破 + 可飞（双击空格切）；生存可放破 + 禁飞。
@@ -324,6 +336,11 @@ public:
     //   t322：生存拉弓 / 射箭均须背包有箭（机制等价 MC 1.0 生存弓无箭不可拉 / 射）；创造完全免费。
     Q_INVOKABLE void beginBowDraw();
     Q_INVOKABLE void endBowDraw();
+    // t401 钓鱼竿抛 / 拉（手持钓竿右键按下边缘触发，单次切换非长按）：未钓 → 抛浮标入水（视线 DDA 命中首个
+    //   水格 → 浮标落水面；无水则不抛）；已钓 → 拉起（正在咬钩 → 按 LootTable::fishingPool 抽一件获物落为掉落
+    //   实体 + 生存钓竿 -1 耐久，否则空收）。机制等价 MC 1.0 右键钓竿抛 / 收。创造不消耗耐久。分流：eventFilter
+    //   RightButton press 据持物 == FishingRod 调本方法而非 placeBlock（钓竿非方块，selectedBlock 已守 Air）。
+    Q_INVOKABLE void useFishingRod();
     // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 装入 hotbar。仅指针捕获时生效
     // （与破/放同窗口级 MouseButtonPress 路径）。
     // spec：「无论背包开关」—— captured=true 蕴含背包已关，故等价于「游戏内中键」；命中空气 / 无
@@ -458,6 +475,12 @@ signals:
     void eatingProgressChanged();
     // t304 弓拉弓态翻转 / 蓄力进度变（驱动 viewModelHand 拉 / 弓动画启停 + 进度跟随）。
     void bowDrawChanged();
+    // t401 钓鱼态翻转（抛竿 / 拉起 / 咬钩 / 换槽 / 失焦 / 暂停）：驱动 QML 浮标 Model 显隐 / 位置 / 下沉抖动。
+    //   fishing / bobberPosition / hasBite 三者同变一次性发（少抖动 QML 绑定）。
+    void fishingChanged();
+    // t401 钓获物（拉起咬钩时按 LootTable::fishingPool 抽一件获物，落为掉落实体）：携获物 id + 数量 + 浮标
+    //   整数格坐标。Main.qml Connections 转发到 ItemEntityManager.spawnItem（同 spawnItem / mobDied 模式）。
+    void fishCaught(int itemId, int count, int x, int y, int z);
     // t267 进食屑粒（持面包按住右键累积进食时每跨一节拍发一次）：携嘴部世界坐标（= 玩家眼位 position()，
     //   float 坐标非方块格 —— 进食屑粒从玩家嘴部迸发而非方块中心）。呈现层 Connections 转发到
     //   BlockParticles.burstEat 迸发少量屑粒（机制等价 MC 进食屑粒）。分层同 miningParticle。
@@ -640,6 +663,11 @@ private:
     void cancelEating();
     // t264 清弓拉弓累积态（松开射出后 / 换槽（持物不再是弓）/ 失焦 / 暂停）。无拉弓态时静默（不发信号）。
     void cancelBowDraw();
+    // t401 持续钓鱼：每 tick 累积咬钩倒计时（m_biteTimer → 0 即咬钩 m_hasBite=true），咬钩后开 kFishBiteWindow
+    //   窗口（过期则咬钩作废、空收）。由 tickImpl 调（captured 时）。机制等价 MC 1.0 抛竿后等若干秒咬钩。
+    void updateFishing(float dt);
+    // t401 清钓鱼态（拉起后 / 换槽（持物不再是钓竿）/ 失焦 / 暂停 / 重生）。无钓鱼态时静默（不发信号）。
+    void cancelFishing();
     // t388 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调）：夜间 + 床周无怪物 → 进 fade 态
     //   （m_sleeping=true）；否则 emit sleepRefused（白天 / 附近有怪物，机制等价 MC 1.0 床拒绝提示）。
     //   分层（PLAN §2）：Game/Physics 层判定（读 worldClock.isNight + entityManager.hostileNearby，均向下依赖）。
@@ -853,6 +881,17 @@ private:
     bool m_bowDrawing = false;
     float m_bowDrawTime = 0.0f;
 
+    // t401 钓鱼态（手持钓竿右键抛浮标入水 → 等咬钩 → 拉起获物）。仅持钓竿时进入（eventFilter RightButton
+    //   press 据持物 == FishingRod 分流调 useFishingRod，钓竿不进 placeBlock）。
+    //   m_fishing=浮标已抛出；m_bobberPos=浮标世界坐标（浮标 Model position 绑它）；m_biteTimer=咬钩倒计时
+    //   （抛竿时随机 kFishBiteMin..Max 秒，递减到 0 即咬钩 m_hasBite=true）；m_biteTimer<0 时表示「咬钩窗口」
+    //   （|m_biteTimer| 递增到 kFishBiteWindow 则窗口过期、自动 cancelFishing 空收）。拉起 / 换槽 / 失焦 / 暂停
+    //   → cancelFishing。
+    bool m_fishing = false;
+    QVector3D m_bobberPos;
+    bool m_hasBite = false;
+    float m_biteTimer = 0.0f;
+
     // 射线选体命中态（整数格坐标 + 整数法线分量；仅变化时 emit hitChanged，避免每帧抖动 QML）
     bool m_hasHit = false;
     qint32 m_hitBx = 0, m_hitBy = 0, m_hitBz = 0;
@@ -1024,6 +1063,15 @@ private:
     static constexpr int   kBowMinDamage     = 1;      // 短蓄力箭命中伤害（HP）
     static constexpr int   kBowMaxDamage     = 6;      // 满弓箭命中伤害（HP；Hotbar::bowArrowMaxDamage 同源）
     static constexpr float kBowSlowMul       = 0.5f;   // 拉弓时水平速度倍数（spec「拉弓减速」）
+    // t401 钓鱼机制常量（机制对齐 MC 1.0 钓鱼：抛竿后随机若干秒咬钩、咬钩后短窗口内拉起才获物）。
+    //   kFishCastRange：抛竿 DDA 射程（格）；沿视线找首个水格，命中即抛、无水不抛。
+    //   kFishBiteMin/Max：抛竿到咬钩的随机区间（秒）；取 3..7s（MC 1.0 钓鱼 ~5-45s 受 luck 影响，本工程简化缩短
+    //     到便于测试的量级）。kFishBiteWindow：咬钩后可拉起的窗口（秒）；过期则咬钩作废、自动空收（机制等价
+    //     MC「咬钩后未及时拉，鱼跑掉」；取 2.5s 留足反应时间）。
+    static constexpr float kFishCastRange  = 8.0f;
+    static constexpr float kFishBiteMin    = 3.0f;
+    static constexpr float kFishBiteMax    = 7.0f;
+    static constexpr float kFishBiteWindow = 2.5f;
     static constexpr float kCamMax = 3.5f;     // 第三人称相机最大距离（格；t40，与 Main.qml 默认 d 对齐）
     static constexpr float kCamMargin = 0.1f;  // 相机贴命中面前的余量（防卡面 z-fight / 近裁面穿插；t40）
     // t388 睡觉机制常量（机制对齐 MC 1.0 床：fade 后跳清晨、床周有敌对即拒绝；数值为本工程小世界量身调）。

@@ -1,5 +1,6 @@
 #include "playercontroller.h"
 #include "playerstate.h" // t311 DeathCause 枚举（致死来源区分：Fall/Suffocation/Drowning/Starvation）
+#include "loottable.h"   // t401 钓鱼获物池（fishingPool / roll）；同层 Game，向下依赖 Core
 #include "world.h"
 
 #include <QEvent>
@@ -208,6 +209,7 @@ void PlayerController::respawn()
     cancelMining();           // 清生存累积挖掘态（裂纹叠层随之隐）
     cancelEating();           // t267：清进食累积态（防 respawn 后 updateEating 误续食）
     cancelBowDraw();          // t304：清弓拉弓态（防 respawn 后误续拉）
+    cancelFishing();          // t401：清钓鱼态（防 respawn 后误续钓；浮标作废）
     cancelSleep();            // t388：清睡觉 fade 态（重生即醒；防 respawn 后 updateSleep 误续睡）
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
     m_rightDown = false;      // t267：清右键按下态（防 respawn 后 updateEating 误续食）
@@ -242,6 +244,7 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     cancelMining();
     cancelEating(); // t267：清进食累积态（防加载后 updateEating 误续食）
     cancelBowDraw(); // t304：清弓拉弓态（防加载后误续拉）
+    cancelFishing(); // t401：清钓鱼态（存档不持久化钓鱼；防加载后误续钓）
     cancelSleep();   // t388：清睡觉 fade 态（存档不持久化睡觉；防加载后误续睡）
     m_leftDown = false;
     m_rightDown = false; // t267：清右键按下态（防加载后 updateEating 误续食）
@@ -289,6 +292,7 @@ void PlayerController::release()
     cancelMining();                           // t34：暂停 / 失焦 → 清累积挖掘态（spec：失焦清零）
     cancelEating();                           // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零）
     cancelBowDraw();                          // t304：暂停 / 失焦 → 清弓拉弓态（spec：失焦清零）
+    cancelFishing();                          // t401：暂停 / 失焦 → 收浮标（spec：失焦清零）
     cancelSleep();                            // t388：暂停 / 失焦 → 中断睡觉 fade（未跳清晨即醒）
     m_leftDown = false;                       // t44：暂停 / 失焦 → 视同松手（切断续挖）
     m_rightDown = false;                      // t267：暂停 / 失焦 → 视同松手（切断连食）
@@ -354,6 +358,9 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
                     // t304 手持弓 → 右键长按拉弓（不进 placeBlock；弓非方块，selectedBlock 已守 Air）。机制等价
                     //   MC 1.0 右键拉弓。持物判据直读 hotbar（单一权威，免 QML 绑定滞后窗口，同面包 / 桶修法）。
                     if (heldForEat == int(ToolRegistry::Bow)) { beginBowDraw(); return true; }
+                    // t401 手持钓鱼竿 → 右键抛 / 拉切换（不进 placeBlock；钓竿非方块，selectedBlock 已守 Air）。机制
+                    //   等价 MC 1.0 右键钓竿抛 / 收（单次切换，非长按）。持物判据直读 hotbar（单一权威，同面包 / 弓修法）。
+                    if (heldForEat == int(ToolRegistry::FishingRod)) { useFishingRod(); return true; }
                     // t377 手持护甲 → 右键装备 / 互换（不进 placeBlock；护甲非方块，selectedBlock 已守 Air）。
                     //   equipSelectedArmor 自判 isArmor，非护甲返 false → 回退 placeBlock。机制等价 MC 1.0 右键装备。
                     if (m_hotbar && m_hotbar->equipSelectedArmor()) return true;
@@ -486,6 +493,7 @@ void PlayerController::tickImpl()
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
         cancelEating(); // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零，未完成不消耗）
         cancelBowDraw(); // t304：暂停 / 失焦 → 清弓拉弓态（spec：失焦清零，未射出不消耗箭 / 耐久）
+        cancelFishing(); // t401：暂停 / 失焦 → 收浮标（spec：失焦清零；浮标 / 倒计时作废）
         cancelSleep();   // t388：暂停 / 失焦 → 中断睡觉 fade（未跳清晨即醒）
         // t253：暂停 / 背包开时清 mob 目标框（updateRaycast 仅 captured 时跑 → 不清则残留旧目标）。
         if (m_targetedMob >= 0) { m_targetedMob = -1; emit targetedMobChanged(); }
@@ -516,6 +524,7 @@ void PlayerController::tickImpl()
             emit bowDrawChanged();
         }
     }
+    updateFishing(float(dt)); // t401：累积咬钩倒计时 / 咬钩窗口（持钓竿抛出后；其它情况早 return）
 }
 
 // 视线方向：用与相机相同的欧拉→四元数（QQuaternion::fromEulerAngles(pitch,yaw,0)）旋转
@@ -1298,6 +1307,79 @@ void PlayerController::cancelBowDraw()
     m_bowDrawing = false;
     m_bowDrawTime = 0.0f;
     emit bowDrawChanged();
+}
+
+// t401 钓鱼竿抛 / 拉切换（手持钓竿右键按下边缘触发；机制等价 MC 1.0 右键钓竿抛 / 收）。单次切换非长按：
+//   未钓 → 抛浮标入水（视线 DDA HitWater 命中首个水格 → 浮标落水面；命中非水 / 无水 → 不抛）；已钓 → 拉起
+//   （咬钩则按 LootTable::fishingPool 抽一件获物落为掉落实体 + 生存钓竿 -1 耐久，否则空收）。
+void PlayerController::useFishingRod()
+{
+    if (m_fishing) {
+        // 拉起：快照咬钩态 / 浮标位（cancelFishing 会清），再据咬钩决定获物 / 空收。
+        const bool bite = m_hasBite;
+        const QVector3D bp = m_bobberPos;
+        cancelFishing(); // 收浮标（无论获物否；拉起即结束）
+        emit swingArm(); // 拉起挥手反馈（一次「使用」动作）
+        if (!bite) return; // 未咬钩 → 空收（无获物 / 不损耐久）
+        if (!m_world) return;
+        // 咬钩 → 按 fishingPool 抽一件获物（roll 1 次；RNG 用运行期随机 → 每次拉起不同）。
+        const auto &pool = LootTable::fishingPool();
+        const quint32 seed = QRandomGenerator::global()->generate();
+        const std::vector<LootTable::Stack> stacks = LootTable::roll(pool, 1, seed);
+        if (!stacks.empty() && stacks[0].itemId != 0 && stacks[0].count > 0) {
+            // 获物落为掉落实体（浮标整数格；Main.qml Connections 转发到 ItemEntityManager.spawnItem）。
+            const int bx = int(std::floor(bp.x()));
+            const int by = int(std::floor(bp.y()));
+            const int bz = int(std::floor(bp.z()));
+            emit fishCaught(stacks[0].itemId, stacks[0].count, bx, by, bz);
+            // 生存钓竿 -1 耐久（归零自动清槽，同弓 / 镐）；创造不消耗（无限源）。
+            if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem();
+        }
+        return;
+    }
+    // 抛竿：沿视线 DDA（HitWater）找首个水格；无世界 / 无水命中（墙挡在前 / 射程内无水）→ 不抛。
+    if (!m_world) return;
+    const RayHit hit = raycastVoxel(*m_world, position(), lookDirection(), kFishCastRange, RayFilter::HitWater);
+    if (!hit.valid) return;
+    if (m_world->blockAt(hit.bx, hit.by, hit.bz) != quint8(BlockRegistry::Water)) return; // 命中非水 → 不抛
+    // 浮标落水格顶面（略下沉表「浮在水面」）；m_biteTimer 随机咬钩倒计时（kFishBiteMin..Max 秒）。
+    m_bobberPos = QVector3D(float(hit.bx) + 0.5f, float(hit.by) + 0.875f, float(hit.bz) + 0.5f);
+    m_fishing = true;
+    m_hasBite = false;
+    m_biteTimer = kFishBiteMin + float(QRandomGenerator::global()->generateDouble()) * (kFishBiteMax - kFishBiteMin);
+    emit fishingChanged();
+    emit swingArm(); // 抛竿挥手反馈
+}
+
+// t401 持续钓鱼：每 tick 累积咬钩倒计时。换槽（持物不再是钓竿）→ cancel。机制等价 MC 1.0 抛竿后等若干秒咬钩。
+//   m_biteTimer 两阶段复用：>0 = 等待咬钩倒计时（→0 即咬钩，重置为 kFishBiteWindow）；咬钩后 >0 = 咬钩窗口
+//   （→0 即窗口过期、鱼跑了 → cancelFishing 空收）。仅 captured 时跑（pause 早 return 之前已 cancelFishing）。
+void PlayerController::updateFishing(float dt)
+{
+    if (!m_fishing) return;
+    // 换槽（持物不再是钓竿）→ 收浮标（机制等价 MC 切物品即收竿）。
+    if (!m_hotbar || m_hotbar->selectedItemId() != int(ToolRegistry::FishingRod)) { cancelFishing(); return; }
+    m_biteTimer -= dt;
+    if (m_biteTimer > 0.0f) return;
+    if (!m_hasBite) {
+        // 等待阶段到点 → 咬钩：进入咬钩窗口（m_biteTimer 重置为窗口时长，m_hasBite=true）。
+        m_hasBite = true;
+        m_biteTimer = kFishBiteWindow;
+        emit fishingChanged(); // 呈现层据 hasBite 让浮标下沉 / 抖动
+    } else {
+        // 咬钩窗口过期（玩家未及时拉）→ 鱼跑了 → 空收。
+        cancelFishing();
+    }
+}
+
+// t401 清钓鱼态（拉起后 / 换槽（持物不再是钓竿）/ 失焦 / 暂停 / 重生）。无钓鱼态时静默（不发信号）。
+void PlayerController::cancelFishing()
+{
+    if (!m_fishing) return;
+    m_fishing = false;
+    m_hasBite = false;
+    m_biteTimer = 0.0f;
+    emit fishingChanged();
 }
 
 // t388 sleepProgress 派生（Q_PROPERTY READ）：clamp(m_sleepTimer/kSleepDuration, 0, 1)。手写 clamp 免加 <algorithm>。

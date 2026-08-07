@@ -189,6 +189,11 @@ public:
     //   生物的繁殖食物表（EntityManager::feedMob 据 mobType 判食物匹配）。
     static constexpr int CarrotId          = 0x22F; // 胡萝卜：猪繁殖食物（喂成体猪 → 求偶；机制等价 MC 1.0 carrot）
     static constexpr int PotatoId          = 0x230; // 马铃薯：猪繁殖食物（喂成体猪 → 求偶；机制等价 MC 1.0 potato）
+    // t401 生鱼（钓鱼获物；机制等价 MC 1.0 raw fish / cod）。材料段 0x231。钓竿抛浮标入水 → 等咬钩 → 拉起按
+    //   LootTable::fishingPool 抽获，本 id 是「鱼」类获物（高权重）。可堆叠 64；非方块（材料段）→ 右键不放置。
+    //   MaterialIcon 自绘鱼形图标（银蓝鱼身 + 尾鳍 + 眼）；创造调色板补全便于测试。名称 / 图标全原创（§9a 区隔）。
+    //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘）。
+    static constexpr int RawFishId         = 0x231; // 生鱼：钓竿拉起获物（机制等价 MC 1.0 raw fish；钓鱼常见获物）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

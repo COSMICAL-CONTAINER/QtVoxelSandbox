@@ -84,7 +84,14 @@ public:
         //   （两片交叉刀刃 + 中央枢轴 + 弹性弧环）；剪刀的真正价值在剪羊毛（playercontroller placeBlock shears 分支
         //   → EntityManager shearSheep），非挖掘。displayName「剪刀」（§9 通用词；非 MC 专名）。
         Shears       = 0x110, // 剪刀：type=Shears tier 1，speedMul 2.0（仅羊毛方块激活）；右键羊 → 剪羊毛（t300）
-        ToolCount    = 17,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
+        // t401 钓鱼竿（功能性工具）：type=FishingRod（BlockRegistry::FishingRod=8；不参与挖掘速度，miningSpeedMul 恒
+        //   1.0 等同空手，机制等价 MC 1.0 钓竿不影响挖掘）。tier=1 / speedMul=1.0 仅为记账占位（钓竿的「速度」概念
+        //   走抛竿 → 咬钩 → 拉起时序，非挖掘 speedMul）。maxDurability=64（机制等价 MC 1.0 钓竿耐久；生存每次成功
+        //   钓获 -1，创造不消耗）。钓竿近战 = 徒手（attackDamage 返 kFistDamage）。**不可堆叠**（工具段 maxStack=1）。
+        //   ToolIcon 据 toolType===FishingRod 自绘钓竿图标（长杆 + 钓线 + 浮标）；右键抛竿 / 拉起由 PlayerController
+        //   useFishingRod 驱动（机制等价 MC 1.0 钓鱼）。displayName「钓鱼竿」（§9 通用词；非 MC 专名）。
+        FishingRod   = 0x111, // 钓鱼竿：type=FishingRod tier 1，speedMul 1.0（不参与挖掘）；右键抛浮标入水 → 拉起获物（t401）
+        ToolCount    = 18,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
     };
 
     // 工具定义。表行索引 == itemId - ToolIdBase（连续）；详见 toolregistry.cpp kTools。

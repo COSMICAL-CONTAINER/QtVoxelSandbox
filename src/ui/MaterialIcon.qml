@@ -1126,6 +1126,32 @@ Item {
             // 护甲段范围前置分支（避免为 20 个 id 各写 case；范围 [0x300, 0x314)）。
             if (root.materialId >= 0x300 && root.materialId < 0x314) { drawArmor(); return }
 
+            // t401 生鱼（0x231）：钓竿拉起获物。MC 风格生鱼 = 银蓝色侧视鱼形（椭圆鱼身 + 尾鳍 + 背鳍 + 眼）。
+            //   机制等价 MC 1.0 raw fish 图标（§9 区隔：纯原创抽象鱼形，非照搬）。配色：body #9fb8c8（银蓝鱼身）/
+            //   bodyLite #c8d8e4（腹部受光）/ bodyDark #5a7080（背脊暗 + 描边）/ fin #4a6070（鳍，深蓝灰）/ eye #1a1a22（眼）。
+            const drawRawFish = () => {
+                const body = "#9fb8c8", bodyLite = "#c8d8e4", bodyDark = "#5a7080", fin = "#4a6070", eye = "#1a1a22"
+                // 鱼身（左头右尾水平椭圆；头部略高、尾部收窄，rows 8..15 中部最宽）
+                R(6, 9, 11, 6, body)           // 主体 rows 9..14
+                R(7, 8, 9, 1, body)            // 顶沿（背部）
+                R(7, 15, 9, 1, body)           // 底沿（腹部）
+                R(5, 10, 2, 4, body)           // 头部前突（嘴部）
+                R(5, 11, 1, 2, bodyDark)       // 嘴尖暗
+                R(6, 9, 11, 1, bodyDark)       // 背脊暗线
+                R(7, 15, 9, 1, bodyLite)       // 腹部受光亮
+                R(8, 13, 8, 1, bodyLite)       // 腹侧亮带
+                // 尾鳍（右侧分叉，上 / 下两片三角）
+                R(17, 7, 4, 3, fin)            // 上尾鳍
+                R(17, 14, 4, 3, fin)           // 下尾鳍
+                R(17, 10, 2, 4, bodyDark)      // 尾柄（连鱼身的窄收口）
+                // 背鳍（顶部三角，表鱼背鳍）
+                R(9, 6, 5, 2, fin)
+                R(10, 5, 3, 1, fin)
+                // 眼（头部圆点）
+                R(6, 10, 2, 2, eye)
+                R(7, 10, 1, 1, bodyLite)       // 眼上反光
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -1176,6 +1202,7 @@ Item {
             case 0x22E: drawSpawnEgg("squid");    break // t399 生物蛋（鱿鱼）
             case 0x22F: drawCarrot();             break // t400 胡萝卜（猪繁殖食物；喂成体猪 → 求偶）
             case 0x230: drawPotato();             break // t400 马铃薯（猪繁殖食物；喂成体猪 → 求偶）
+            case 0x231: drawRawFish();            break // t401 生鱼（钓竿拉起获物；机制等价 MC 1.0 raw fish）
             default:    drawStick();        break
             }
         }

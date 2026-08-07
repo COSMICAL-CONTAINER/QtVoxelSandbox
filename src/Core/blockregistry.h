@@ -472,6 +472,11 @@ public:
                      //   （等同空手）。机制等价 MC 1.0「弓不影响挖掘」。仅用作 ToolRegistry::ToolDef.type 标识，
                      //   供 ToolIcon / 手持 3D 几何（BowGeometry）/ tooltip 据 toolType===Bow 分流到弓形渲染。
                      //   真实伤害 / 速度来自拉弓蓄力（PlayerController bow draw），不走 attackDamage（弓近战 = 徒手）。
+        FishingRod = 8, // 钓鱼竿（t401）：右键抛浮标入水 → 等咬钩 → 拉起获物（t393 战利品表）。**不参与挖掘速度**——
+                     //   本工程无任何方块的 BlockDef.toolType 取 FishingRod（钓竿是功能工具、非采掘工具），miningSpeedMul
+                     //   恒 1.0（等同空手）。机制等价 MC 1.0「钓竿不影响挖掘」。仅用作 ToolRegistry::ToolDef.type 标识，
+                     //   供 ToolIcon / tooltip 据 toolType===FishingRod 分流到钓竿图标渲染。获物 / 时序由 PlayerController
+                     //   抛竿 / 拉起驱动（不走 attackDamage，钓竿近战 = 徒手）。
     };
 
     // 音效材质分组（t118）：决定破 / 挖 / 走音色按方块材质分流（石 / 木 / 草 / 沙 / 叶 5 组 +

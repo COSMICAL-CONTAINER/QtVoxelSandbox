@@ -260,6 +260,15 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::IronIngotId, 0,                         0,
         0, 0, 0 },
       int(ToolRegistry::Shears), 1, 1, "shears" },
+    // t401 钓鱼竿：3 木棒反对角 + 2 线 → 1 钓鱼竿（有序 3×3，仅工作台）。机制等价 MC 1.0 钓竿配方
+    //   （左下到右上的反对角三木棒 + 右下 L 形两线）。最小包围盒 3×3（满，[0][2] / [2][0] 两角占位 → 满框），
+    //   只能在 3×3 工作台合。与弓配方（左斜三木棒 + 右纵三线）内容不同（弓 [0][0]=木棒、本 [0][0]=空）→ 不冲突。
+    //   产物 FishingRod（工具段 0x111，maxStack=1 → canTake 一次取 1 件）。木棒（材料段 0x200）+ 线（材料段 0x219）。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0,                  0,                  kStickId,
+        0,                  kStickId,           RecipeRegistry::StringId,
+        kStickId,           RecipeRegistry::StringId, 0 },
+      int(ToolRegistry::FishingRod), 1, 1, "fishing_rod" },
     // ── t345 护甲（5 套材质 × 4 部位 = 20 件；机制等价 MC 1.0 护甲配方，有序 3×3 仅工作台）──
     //   每材质 M（皮革 LeatherId / 铁 IronIngotId / 铜 CopperIngotId / 金 GoldIngotId / 钻石 DiamondId），
     //   4 部位共用 MC 经典形状（最小包围盒各异 → 互不冲突，且与既有工具 / 方块配方包围盒尺寸不同）：

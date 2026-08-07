@@ -41,10 +41,14 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     //   其余方块持剪刀 miningSpeedMul 恒 1.0（类型不匹配，等同空手）。tier/speedMul 仅记账 —— 剪刀的真正用途是
     //   右键剪羊毛（非挖掘）。maxDurability=238（机制等价 MC 1.0 剪刀耐久；每次剪羊毛 -1）。displayName「剪刀」。
     /* Shears       */ {int(BlockRegistry::Shears),  1, 2.0f,  238, "shears",        "剪刀"},
+    // t401 钓鱼竿（type=FishingRod=8）：不参与挖掘 → miningSpeedMul 恒 1.0 等同空手。maxDurability=64（机制等价
+    //   MC 1.0 钓竿耐久；生存每次成功钓获 -1）。tier/speedMul 仅记账（语义同弓 / 剪刀：无对应采掘方块）。
+    //   displayName「钓鱼竿」（§9 通用词；非 MC 专名）。
+    /* FishingRod   */ {int(BlockRegistry::FishingRod), 1, 1.0f,  64, "fishing_rod",  "钓鱼竿"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
-static_assert(int(ToolRegistry::ToolCount) == 17, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+static_assert(int(ToolRegistry::ToolCount) == 18, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
 
 // t348 引擎工具 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 工具段
 //   「MC 1.0.0」列一致）。行索引 = engineToolId - ToolIdBase（与 kTools 同序）。**不重排枚举**（保存档 / 配方
@@ -55,6 +59,7 @@ constexpr int kMcToolId[int(ToolRegistry::ToolCount)] = {
     /* AxeIron      */ 258, /* ShovelWood   */ 269, /* ShovelStone  */ 273, /* ShovelIron */ 256,
     /* SwordWood    */ 272, /* SwordStone   */ 276, /* SwordIron    */ 267, /* Bow */ 261,
     /* Shears       */ 359,
+    /* FishingRod   */ 346, // t401 钓竿（MC 1.0 fishing rod）
 };
 static_assert(sizeof(kMcToolId) / sizeof(kMcToolId[0]) == int(ToolRegistry::ToolCount),
               "kMcToolId 行数须与 ToolRegistry::ToolCount 一致；新工具需补一行 MC 1.0 对齐值");

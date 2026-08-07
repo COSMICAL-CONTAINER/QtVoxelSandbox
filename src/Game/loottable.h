@@ -46,6 +46,12 @@ public:
     //   「常见材料多 / 稀有件少」分布。static 存储（返回 const 引用，调用方不持副本）。
     static const std::vector<Entry> &dungeonChestPool();
 
+    // t401 钓鱼获物池（生鱼 / 垃圾 / 宝藏三档；机制对齐 MC 1.0 fishing loot「鱼常见 / 垃圾次之 / 宝藏稀有」）。
+    //   生鱼（RawFishId，高权重）+ 垃圾（皮革 / 线 / 骨头 / 腐肉 / 木棒 / 墨囊，中权重）+ 宝藏（马鞍 / 命名牌 /
+    //   钻石，低权重）。复用 roll（按 weight 抽一次 → 一件获物）；钓竿拉起时 PlayerController 注入运行期 RNG
+    //   （每次抛竿 seed 不同 → 获物随机）。static 存储（返回 const 引用，调用方不持副本）。
+    static const std::vector<Entry> &fishingPool();
+
     // 地牢箱子单次开启的抽取次数（机制等价 MC 1.0 dungeon chest ~8 stacks；27 槽绰绰有余）。
     static constexpr int kDungeonRolls = 8;
 

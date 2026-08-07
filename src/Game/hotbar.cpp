@@ -234,7 +234,10 @@ QVariantList Hotbar::creativeTools() const
             int(ToolRegistry::Bow),
             // t300 剪刀（功能性工具）：归工具段（maxStack=1，耐久 238），故入 creativeTools。拾取即满耐久新剪刀；
             //   创造剪羊毛不消耗耐久（同弓 / 镐 创造无限源）。ToolIcon 据 toolType===Shears 自绘剪刀图标。
-            int(ToolRegistry::Shears)};
+            int(ToolRegistry::Shears),
+            // t401 钓鱼竿（功能性工具）：归工具段（maxStack=1，耐久 64），故入 creativeTools。拾取即满耐久新钓竿；
+            //   创造钓鱼不消耗耐久（同弓 / 剪刀 创造无限源）。ToolIcon 据 toolType===FishingRod 自绘钓竿图标。
+            int(ToolRegistry::FishingRod)};
 }
 
 // 创造调色板材料段（t114）：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃（材料段 id >= 0x200，
@@ -322,7 +325,10 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::PotatoId),          // 马铃薯：猪繁殖食物（喂成体猪 → 求偶）
         // t399 鱿鱼相关材料（机制等价 MC 1.0 鱿鱼死亡掉墨囊；生存由杀鱿鱼获得，创造调色板补全便于测试 / 装饰）。
         //   可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘图标。
-        int(RecipeRegistry::InkSacId)           // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac）
+        int(RecipeRegistry::InkSacId),          // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac）
+        // t401 钓鱼获物（机制等价 MC 1.0 raw fish；生存由钓竿拉起咬钩获物获得，创造调色板补全便于测试 / 装饰）。
+        //   可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘鱼形图标。
+        int(RecipeRegistry::RawFishId)          // 生鱼：钓竿拉起获物（机制等价 MC 1.0 raw fish；钓鱼常见获物）
     };
 }
 
@@ -511,6 +517,8 @@ QString Hotbar::nameForBlock(int blockId) const
         // t399 鱿鱼相关（机制等价 MC 1.0 鱿鱼；§9 区隔改名 + 原创名）。
         if (blockId == RecipeRegistry::InkSacId)        return QStringLiteral("墨囊");       // 杀鱿鱼掉落
         if (blockId == RecipeRegistry::SpawnEggSquidId) return QStringLiteral("生物蛋（鱿鱼）"); // 右键地面 → 生成鱿鱼
+        // t401 钓鱼获物（机制等价 MC 1.0 raw fish；钓竿拉起咬钩获物）。
+        if (blockId == RecipeRegistry::RawFishId)       return QStringLiteral("生鱼");       // 钓鱼常见获物
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

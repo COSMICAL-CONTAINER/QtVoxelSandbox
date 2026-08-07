@@ -1340,6 +1340,9 @@ Window {
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
         // t64：spawnItem 信号带 count 参数（整栈丢弃为 1 实体；破块掉落走 BlockDef.dropCount）。
         function onSpawnItem(x, y, z, id, count) { itemEntities.spawnItem(x, y, z, id, count) }
+        // t401 钓获物（拉起咬钩 → player 发 fishCaught，携获物 id + 数量 + 浮标整数格）→ 转发到 manager 生成
+        //   掉落实体（同 spawnItem / mobDied 模式；单向事件流：Game 层发语义事件、呈现层只消费）。
+        function onFishCaught(itemId, count, x, y, z) { itemEntities.spawnItem(x, y, z, itemId, count) }
         // t61：挖掘过程粒子 —— 生存累积挖掘时每跨一阶，player 发 miningParticle（被挖方块坐标+id），
         // 转发到 BlockParticles.burstMine（复用破块碎屑 emitter / 色逻辑 / 重力，少量迸发，进度反馈）。
         // 破块完成时的 +30% 大迸发仍由 onBlockBroken → burstBreak 驱动（burstBreak 已在此任务内 +30%）。
@@ -1931,6 +1934,29 @@ Window {
                         }
                     }
                 }
+                // t401 钓鱼竿（type=FishingRod）第一人称手持：钓竿无独立 3D 几何 → billboard ToolIcon 平图标
+                //   （同剪刀路径：BillboardQuad + Canvas sourceItem + 抵消手 X 旋转 → billboard +Z 恒指回相机）。
+                //   ToolIcon toolType===8 自绘钓竿（杆 + 线 + 浮标）；alphaCutoff:0.5 + opacity:0.99 沿用透明底 alpha-test。
+                Model {
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 8
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    scale: Qt.vector3d(0.18, 0.18, 0.18)
+                    eulerRotation: Qt.vector3d(-(viewModelHand.baseTilt + viewModelHand.swingAngle), 0, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        alphaCutoff: 0.5
+                        opacity: 0.99
+                        baseColor: terrainLight(worldClock.skyLight)
+                        baseColorMap: Texture {
+                            flipV: false
+                            sourceItem: ToolIcon {
+                                toolType: 8
+                                width: 64; height: 64
+                            }
+                        }
+                    }
+                }
                 // t169 手持材料（木棒/煤/木炭/铁锭 等）：选中材料段槽（isMaterial(selectedItem)）时，手前显
                 //   该材料的平图标 billboard。机制对齐 MC（手持非方块物品=平图标贴脸相机）+ spec t169
                 //   「四类贴图都要有」覆盖材料段（①背包槽 MaterialIcon / ②本手持 / ③掉落物 BillboardQuad+
@@ -2490,6 +2516,22 @@ Window {
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 baseColor: "#101010"
+            }
+        }
+
+        // t401 钓鱼浮标（仅 player.fishing 时显）：小立方体浮在水面（player.bobberPosition），咬钩时下沉一点
+        //   （hasBite → y -0.12，表「鱼扯浮标」）。NoLighting（同地形 / 线框已验证可见路径）。红顶 + 白底表浮标。
+        //   分层（PLAN §2）：呈现层只读 player.fishing / bobberPosition / hasBite（Game 层算时序），不反向写。
+        Model {
+            visible: player.fishing
+            position: Qt.vector3d(player.bobberPosition.x,
+                                  player.bobberPosition.y - (player.hasBite ? 0.12 : 0.0),
+                                  player.bobberPosition.z)
+            scale: Qt.vector3d(0.14, 0.14, 0.14)
+            geometry: UnitCube {}
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                baseColor: "#d83838" // 浮标红（与 ToolIcon 浮标红顶同色）
             }
         }
 

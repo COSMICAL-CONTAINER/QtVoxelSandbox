@@ -127,6 +127,39 @@ Item {
                 R(14, 3, 1, 18, silk)
                 return // 弓绘制完成（跳过下方工具柄 / 头）
             }
+            // t401 钓鱼竿（toolType===8 / BlockRegistry::FishingRod）：长对角木杆 + 斜向白钓线 + 红白浮标（钓鱼工具轮廓）。
+            //   早 return 跳过下方对角木柄 / 工具头默认（钓竿自成杆 + 线 + 浮标，不套用镐 / 锄等头部）。
+            //   配色：杆 = 木色 handle（同 tier 把手）；线 = 蜘蛛丝白 silk；浮标 = 红顶 bobberRed + 白底 bobberWhite。
+            if (root.toolType === 8) {
+                const silk = "#f5f5f5"             // 蜘蛛丝白钓线（同弓弦白）
+                const bobberRed = "#d83838"        // 浮标红顶
+                const bobberWhite = "#f0f0f0"      // 浮标白底
+                const bobberDark = "#8a1818"       // 浮标描边
+                // 钓竿杆（从左下 (4,20) 到右上 (15,9) 的对角木柄，同镐 / 锄把手但更长更直）
+                const rodSegs = [
+                    [4, 20], [6, 18], [8, 16], [10, 14], [12, 12], [14, 10], [15, 9]
+                ]
+                for (const [c, r] of rodSegs) {
+                    R(c, r, 2, 2, handle)
+                    R(c, r, 1, 1, light)            // 左上角受光
+                    R(c + 1, r + 1, 1, 1, handleDark) // 右下角阴影
+                }
+                // 杆尖（右上端，线接点）
+                R(16, 8, 2, 2, handleDark)
+                // 钓线（从杆尖 (17,8) 斜向右下到浮标 (20,17)，逐段阶梯）
+                R(17, 9, 1, 2, silk)
+                R(18, 11, 1, 2, silk)
+                R(19, 13, 1, 2, silk)
+                R(20, 15, 1, 2, silk)
+                // 浮标（右下圆球：红顶 + 白底 + 描边，表「水面浮标」）
+                R(19, 16, 5, 4, bobberWhite)       // 浮标主体（白底）
+                R(19, 16, 5, 2, bobberRed)         // 红顶（上半红）
+                R(19, 16, 5, 1, bobberDark)        // 顶描边
+                R(19, 19, 5, 1, bobberDark)        // 底描边
+                R(19, 17, 1, 3, bobberDark)        // 左描边
+                R(23, 17, 1, 3, bobberDark)        // 右描边
+                return // 钓竿绘制完成（跳过下方工具柄 / 头）
+            }
 
             // 剑无对角木柄（整把纵向），其余四类共用对角木柄（从左下到右上）。
             if (root.toolType !== 5) {
