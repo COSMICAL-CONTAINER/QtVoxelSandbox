@@ -383,6 +383,19 @@ private:
     //   岩石天然封闭 → 岩浆源无水平 air 邻居可蔓延 → 稳态（tickLavaFlow 不扩散）；气室无天光 → 黑暗（机制等价
     //   MC 1.0 地下岩浆湖 / 封闭熔岩洼地）。纯函数于 seed（hashColumn）→ 同 seed 同岩浆湖分布（PLAN §2-K）。
     void placeLavaLakes();
+    // t392 地下地牢（spec「地下小结构（圆石/石砖/苔石房），中央刷怪笼 + 1 战利品箱；worldgen 地下随机放置
+    //   （一定密度）」；机制等价 MC 1.0 地牢 / 怪物房间）。carveCaves / carveCaveEntrances / placeLavaLakes 之后、
+    //   fillWater 之前，地下深处（y ∈ [kBedrockTop+3, kDungeonMaxY]）确定性散布小型封闭房间：carve 一个
+    //   W×H×D（默认 5×4×5）air 室 + 周界（地板 / 顶板 / 四壁）填 Cobble / Stone（机制等价 MC 1.0 地牢圆石 +
+    //   苔石墙体；本工程暂无 mossy_cobble / stone_brick 方块，故墙体用 Cobble + Stone 混排）+ 中央放 Spawner +
+    //   角落放 Chest（t393 战利品表填内容，本任务仅放置空箱方块）。空腔被实体墙天然封闭 → 房间内无天光 →
+    //   黑暗（机制等价 MC 1.0 地牢黑暗 / 刷怪笼刷怪条件）。与既有洞穴重叠时（carveCaves 已挖空同位）→ 墙体
+    //   在洞穴侧被截断仍可见地牢轮廓（同 MC 1.0 地牢可被洞穴穿墙暴露）。纯函数于 seed（hashColumn）→ 同 seed
+    //   同地牢分布（PLAN §2-K）。**Spawner 不存清单**：tickSpawners 在 EntityManager 内**扫玩家周围**Spawner
+    //   块（按需扫描，player-near 才扫），故 World 无需维护 spawner 位置列表 —— 破坏即停止刷怪由 tickSpawners
+    //   查 blockAt != Spawner 自然实现（无 setBlock 钩子）。存档 round-trip：Spawner 是普通方块 id，chunk blob
+    //   随存随读，加载后 tickSpawners 仍能扫到（同 Chest 物品存 ChestStore 独立于 chunk，Spawner 无状态）。
+    void placeDungeons();
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
     //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
     //   （surfaceY-1 / surfaceY-2 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶 -1，

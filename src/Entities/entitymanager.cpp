@@ -439,6 +439,100 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
     }
 }
 
+// t392 刷怪笼周期刷怪（见头文件方法注释）。机制等价 MC 1.0 刷怪笼：玩家在范围内时周期 spawn 1 敌对 mob。
+//   实现策略 —— **按需扫描**：每 kSpawnerInterval 秒扫玩家所在格周围 ±kSpawnerScanRange 立方体找 Spawner 方块，
+//   对每个笼判「玩家近 + 笼周敌对 < 本地 cap + 全局敌对 < 全局 cap + 找到合法 spawn 位」四条件全过 → spawn 1 只。
+//   不维护 spawner 位置列表 → 破坏即停（blockAt != Spawner 自然跳过）、存档加载后仍能扫到（无 index 维护负担）。
+void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &playerPos)
+{
+    if (!world) return;
+    m_spawnAccumSpawner += float(dt);
+    if (m_spawnAccumSpawner < kSpawnerInterval) return;
+    m_spawnAccumSpawner = 0.0f;
+
+    // 全局敌对上限（与 tickHostileLife 共享 kHostileMobCap；防刷怪笼 + 黑暗刷怪叠加爆量）。
+    const int hostiles = hostileCount();
+    if (hostiles >= kHostileMobCap || m_liveCount >= kCap) return;
+
+    // 扫玩家所在格周围 ±kSpawnerScanRange 立方体（限 Y 到 [0, worldHeight)，防越界）。
+    const int pcx = int(std::floor(playerPos.x()));
+    const int pcy = int(std::floor(playerPos.y()));
+    const int pcz = int(std::floor(playerPos.z()));
+    const int worldW = world->width();
+    const int worldD = world->depth();
+    const int worldH = world->height();
+    const int x0 = std::max(0, pcx - kSpawnerScanRange);
+    const int x1 = std::min(worldW - 1, pcx + kSpawnerScanRange);
+    const int y0 = std::max(0, pcy - kSpawnerScanRange);
+    const int y1 = std::min(worldH - 1, pcy + kSpawnerScanRange);
+    const int z0 = std::max(0, pcz - kSpawnerScanRange);
+    const int z1 = std::min(worldD - 1, pcz + kSpawnerScanRange);
+
+    int hostilesRunning = hostiles; // 本周期内已 spawn 的敌对数累加（防一周期刷出多笼 × N）
+    bool dirty = false;
+
+    for (int y = y0; y <= y1; ++y) {
+        for (int z = z0; z <= z1; ++z) {
+            for (int x = x0; x <= x1; ++x) {
+                if (world->blockAt(x, y, z) != BlockRegistry::Spawner) continue;
+                // 玩家在范围内（XZ 距离 ≤ kSpawnerPlayerRange）。机制等价 MC 1.0 刷怪笼玩家 16 格内激活。
+                const float ddx = float(x) - playerPos.x();
+                const float ddz = float(z) - playerPos.z();
+                if (ddx * ddx + ddz * ddz > kSpawnerPlayerRange * kSpawnerPlayerRange) continue;
+
+                // 笼周敌对数（kSpawnerMobCheckRadius 球内）：≥ kSpawnerLocalCap 则本笼跳过（防刷爆）。
+                const QVector3D spawnerCenter(float(x) + 0.5f, float(y) + 0.5f, float(z) + 0.5f);
+                if (hostileNearby(spawnerCenter, kSpawnerMobCheckRadius)) continue;
+
+                // 全局敌对 cap：本周期已刷够则停（防多笼同周期刷爆）。
+                if (hostilesRunning >= kHostileMobCap) break;
+
+                // 找合法 spawn 位（笼 8 水平邻 + 笼同格上方 / 下方共 10 候选；首个「air + 下方 solid」）。
+                //   spawnMobTyped 把 (x,y,z) 当格坐标、mob 中心放 (x+0.5, y+0.5, z+0.5)。机制等价 MC 刷怪笼
+                //   在笼旁刷怪（笼自身不可站立 → 邻格 spawn）。Y 优先笼同高（玩家走入触发高度）。
+                static const int kSpawnDx[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
+                static const int kSpawnDz[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+                int sx = -1, sy = -1, sz = -1;
+                for (int i = 0; i < 8; ++i) {
+                    const int cx = x + kSpawnDx[i];
+                    const int cz = z + kSpawnDz[i];
+                    if (cx < 0 || cz < 0 || cx >= worldW || cz >= worldD) continue;
+                    // 优先笼同高（y）、次之 y+1（玩家跳上触发高度）；二者均堵 → 跳过本邻位。
+                    for (int cyOff = 0; cyOff <= 1; ++cyOff) {
+                        const int cy = y + cyOff;
+                        if (cy < 0 || cy >= worldH - 1) continue;        // 须留一格空气在上（mob 占 2 格高）
+                        const quint8 here = world->blockAt(cx, cy, cz);
+                        const quint8 above = world->blockAt(cx, cy + 1, cz);
+                        const quint8 below = world->blockAt(cx, cy - 1, cz);
+                        if (here == BlockRegistry::Air && above == BlockRegistry::Air
+                            && world->isSolid(cx, cy - 1, cz) && below != BlockRegistry::Water
+                            && below != BlockRegistry::Lava) {
+                            sx = cx; sy = cy; sz = cz;
+                            break;
+                        }
+                    }
+                    if (sx >= 0) break;
+                }
+                if (sx < 0) continue; // 笼周无合法 spawn 位 → 跳过本笼（下周期再试）
+
+                // spawn 1 只敌对（Shambler / Bones 等概率；机制等价 MC 1.0 刷怪笼等概率随机刷怪）。
+                auto *rng = QRandomGenerator::global();
+                const int mobType = (rng->bounded(2) == 0) ? int(MobShambler) : int(MobBones);
+                spawnHostileMob(sx, sy, sz, mobType);
+                ++hostilesRunning;
+                dirty = true;
+            }
+            if (hostilesRunning >= kHostileMobCap) break;
+        }
+        if (hostilesRunning >= kHostileMobCap) break;
+    }
+
+    if (dirty) {
+        ++m_revision;
+        emit entitiesChanged();
+    }
+}
+
 // t256：第 i 个槽位是否活体（已分配未释放）。空槽 → false（呈现层 delegate 据它 visible 隐藏）。
 bool EntityManager::aliveAt(int i) const
 {

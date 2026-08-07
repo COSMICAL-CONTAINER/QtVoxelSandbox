@@ -307,6 +307,19 @@ public:
     //   playerPos 由 Game 层（PlayerController）传入 —— Game 层读 WorldClock.skyLight（Game→World 向下）+ m_pos。
     //   无向上依赖。world==null / 无实体 → 早 return。
     void tickHostileLife(qreal dt, World *world, const QVector3D &playerPos, float skyBrightness);
+    // t392 刷怪笼周期刷怪（C++ 直调；PlayerController::tickImpl 每 tick 调，与 tickHostileLife 同级）。
+    //   独立于玩家捕获态（菜单 / 暂停时仍推进 —— 玩家在范围内时刷怪笼照样刷，世界模拟连续；同 tickHostileLife）。
+    //   机制等价 MC 1.0 刷怪笼（mob spawner）：玩家在 kSpawnerPlayerRange 内 + 该笼周 kSpawnerMobCheckRadius 内敌对
+    //   数 < kSpawnerLocalCap + 全局 hostileCount < kHostileMobCap 时，周期 spawn 1 只敌对（Shambler/Bones 等概率）。
+    //   **player-near 才扫**：内部 m_spawnAccumSpawner 节流（kSpawnerInterval 秒一次），满 → 扫玩家所在格周围
+    //   ±kSpawnerScanRange 的立方体找 Spawner 方块（按需扫描，玩家不在范围 → 不扫 → 远场零开销），对每个找到的
+    //   笼：玩家 XZ 距离 ≤ kSpawnerPlayerRange + 笼周敌对 < kSpawnerLocalCap + 全局敌对 < kHostileMobCap + 找到合法
+    //   空气 spawn 位 → spawn 1 只敌对（找邻 8 格中首个「air + 下方 solid」的格子；全堵 → 跳过本笼）。
+    //   **破笼即停**：tickSpawners 每周期读 blockAt 判格 == Spawner，玩家破坏后下次扫描自然跳过（无 setBlock 钩子，
+    //   同 spec「spawner ... can be broken to stop」）。
+    //   分层（PLAN §2）：Entities 层（同 tickHostileLife）只读 World（blockAt/isSolid）+ 自身实体数据；写
+    //   EntityManager 自身（spawnHostileMob）。playerPos 由 Game 层（PlayerController）传入。无向上依赖。world==null → 早 return。
+    void tickSpawners(qreal dt, World *world, const QVector3D &playerPos);
 
 signals:
     void entitiesChanged(); // spawn / 推动位移 / 重力下落 / AI 行走 / 受击红闪 / 死亡移除 触发；驱动 count/revision + QML 绑定刷新
@@ -503,6 +516,9 @@ private:
     //   任一 mob 经 mobAttackedPlayer 命中玩家时置 kPlayerHitThrottle；tick 每帧扣 dt。详见 kPlayerHitThrottle 注释。
     //   解决「多 mob 围攻各独立冷却叠加 → 满血瞬死」：把 N 只 mob 的并行冷却串行化为单线节拍（轮替出手）。
     float m_playerHitCooldown = 0.0f;
+    // t392 刷怪笼 spawn 节流累积器（秒）：tickSpawners 每 tick 累加 dt，达 kSpawnerInterval 才扫描玩家周围 Spawner
+    //   块（按需扫描，避免每帧扫 ~28³ 体素；playerPos 由 PlayerController 传 m_pos）。同 m_spawnAccum 模式。
+    float m_spawnAccumSpawner = 0.0f;
 
     // 把构造好的实体放入槽位（优先复用空槽，否则追加）。move 入槽后 alive=true（Entity 默认）。++m_liveCount。
     int acquireSlot(Entity &&e)
@@ -691,6 +707,24 @@ private:
     static constexpr float kBurnDamageInterval   = 1.0f;  // 燃烧扣血间隔（秒/HP；机制等价 MC 日光燃烧 1HP/s）
     static constexpr float kFarDespawn           = 56.0f; // 敌对远距消失半径（blocks）
     static constexpr int   kHostileDefaultHealth = 20;    // Shambler/Bones 满血（机制等价 MC 1.0 僵尸 / 骷髅 20HP）
+    // t392 刷怪笼周期刷怪常量（spec「periodically spawns ONE hostile mob while a player is within range;
+    //   spawn capped」；机制等价 MC 1.0 刷怪笼：玩家在 16 格内 + 笼周 6 只上限 + 每 ~5-10s 刷一只）。数值为本工程
+    //   小世界量身调，非 MC 精确复刻（PLAN §4「机制对标」非数值 1:1）。独立于 tickHostileLife 的「黑暗刷怪」
+    //   —— 刷怪笼无视光照（地牢天然黑暗）、仅在玩家范围内刷、有局部上限（防刷爆）。
+    //   - kSpawnerInterval：刷怪周期（秒；每周期扫一次玩家周围 Spawner、每笼尝试刷 1 只）。MC 1.0 刷怪笼每 ~10-40s
+    //     刷一次；取 6s 平衡「可见可验收」与「不刷爆」（地牢多笼时也按周期节流）。
+    //   - kSpawnerPlayerRange：玩家激活范围（blocks；XZ 距离 ≤ 此才刷，spec「player within range」）。MC 1.0 刷怪笼
+    //     玩家 16 格内激活；取 16 同 MC（同 kDetectRange 量级 → 玩家进地牢即刷、走远即停）。
+    //   - kSpawnerScanRange：玩家周围扫描半径（blocks；±此值立方体内找 Spawner 块）。= kSpawnerPlayerRange + 2 余量
+    //     → 笼在激活带边沿时仍在扫描范围（playerPos 中心 + 半径覆盖激活带）。
+    //   - kSpawnerMobCheckRadius：笼周敌对计数半径（blocks；笼为中心球内敌对数 ≥ kSpawnerLocalCap 则不刷）。
+    //     MC 1.0 刷怪笼 6 只上限（球半径 ~8）；本工程取半径 4 + 上限 4（小世界合理密度；防地牢刷出十几只塞满）。
+    //   - kSpawnerLocalCap：单笼周围敌对上限（≥ 此则本笼跳过；机制等价 MC 1.0 刷怪笼 6 mob cap）。
+    static constexpr float kSpawnerInterval      = 6.0f;  // 刷怪周期（秒；每周期扫一次玩家周围 Spawner）
+    static constexpr float kSpawnerPlayerRange   = 16.0f; // 玩家激活范围（blocks；XZ 距离 ≤ 此才刷）
+    static constexpr int   kSpawnerScanRange      = 18;    // 玩家周围扫描半径（blocks；±此值立方体内找 Spawner）
+    static constexpr float kSpawnerMobCheckRadius = 4.0f;  // 笼周敌对计数半径（blocks）
+    static constexpr int   kSpawnerLocalCap       = 4;     // 单笼周围敌对上限（机制等价 MC 刷怪笼 6 mob cap，本工程取 4）
     // t374 被动生物群系权重表 kPassiveSpawnWeights[biome][mob]：行 = 群系（同 World::biomeIdAt 编码
     //   0=Plains, 1=Hills, 2=Desert, 3=Forest），列 = mob（0=牛 MobCow, 1=羊 MobSheep, 2=猪 MobPig）。
     //   Plains 牛羊富集（开阔草原）、Forest 猪富集（机制等价 MC 1.0 平原牛羊 / 森林猪富集）、Hills 均衡、

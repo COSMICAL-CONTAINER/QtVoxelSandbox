@@ -164,6 +164,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* bed_blue     */ {int(BlockRegistry::BedBlue),                   48, 48, 48, 48, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedBlue),       1, 64, "bed_blue",     "蓝色床"},
     /* bed_magenta  */ {int(BlockRegistry::BedMagenta),                49, 49, 49, 49, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedMagenta),    1, 64, "bed_magenta",  "品红色床"},
     /* bed_black    */ {int(BlockRegistry::BedBlack),                  50, 50, 50, 50, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedBlack),      1, 64, "bed_black",    "黑色床"},
+    // ── t392 刷怪笼（Spawner）：机制等价 MC 1.0 刷怪笼（地下地牢中央放置的整立方方块，玩家在范围内时周期刷 1 敌对 mob，
+    //   破坏后停止刷怪）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 chest / wool
+    //   同族）、hardness=5.0（同 MC 1.0 刷怪笼量级，需镐且耗时）、toolType=Pickaxe、requiresTool=true、minToolTier=1
+    //   （木镐可破）、**dropId=0**（破块不掉落 —— MC 1.0 刷怪笼不可正常获得，本工程无精准采集故恒不掉落）、dropCount=0、
+    //   maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图=spawner(51)（暗蓝灰底
+    //   + 铁灰栅栏 + 中心青绿光斑，原创自绘 §9a）。音色归 GroupStone（铁笼金属敲击）。worldgen placeDungeons 在地下地牢
+    //   中央放置；玩家可破坏以停止刷怪（EntityManager::tickSpawners 扫到该格 blockAt != Spawner 即跳过）。不进创造调色板。
+    /* spawner      */ {int(BlockRegistry::Spawner),                    51, 51, 51, 51, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,                             0, 0, 64, "spawner",      "刷怪笼"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -205,6 +213,7 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* lava           */ 10,
     /* bed_red        */ 26,  /* bed_orange     */ 26,  /* bed_yellow     */ 26,  /* bed_green      */ 26, // t387 床 8 色变体 → MC 1.0 床 id 26（统一；MC 1.0 床颜色由 metadata 分，本工程用独立 id）
     /* bed_cyan       */ 26,  /* bed_blue       */ 26,  /* bed_magenta    */ 26,  /* bed_black      */ 26,
+    /* spawner        */ 52, // t392 刷怪笼 → MC 1.0 mob spawner id 52
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -538,6 +547,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     switch (blockId) {
     case Stone: case Cobble: case Furnace: case CoalOre: case IronOre: case DiamondOre:
     case CopperOre: case GoldOre: // t308 铜/金矿石 → 石质音色（同 coal/iron/diamond 矿石族）
+    case Spawner: // t392 刷怪笼 → 石质音色（铁笼金属敲击感，最接近 MC 1.0 刷怪笼 metal SoundType）
         return GroupStone;
     case Log: case Planks: case CraftingTable:
     case WoodSlab: case WoodStairs: case WoodFence:

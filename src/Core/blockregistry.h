@@ -218,7 +218,23 @@ public:
         BedBlue        = 37, // 蓝床
         BedMagenta     = 38, // 品红床
         BedBlack       = 39, // 黑床
-        Count         = 40, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        Spawner        = 40, // 刷怪笼（t392）：机制等价 MC 1.0 刷怪笼（mob spawner）。整立方 opaque
+                                  //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 chest /
+                                  //   wool 同族）、hardness=5.0（同 MC 1.0 刷怪笼量级，需镐且耗时）、toolType=Pickaxe、
+                                  //   requiresTool=true、minToolTier=1（木镐可破）、**dropId=0**（破块不掉落 —— MC 1.0
+                                  //   刷怪笼不可正常获得，仅创造 / 精准采集；本工程无精准采集故恒不掉落）、dropCount=0、
+                                  //   maxStack=64。各面贴图=spawner(51)（暗蓝灰底 + 铁灰栅栏 + 中心青绿光斑，原创自绘 §9a）。
+                                  //   音色归 GroupStone（铁笼金属敲击感，最接近 MC 1.0 刷怪笼 metal SoundType）。
+                                  //   **worldgen 专属**（placeDungeons 在地下地牢中央放置），不进创造调色板（非玩家常规
+                                  //   放置 —— 与水 / 岩浆同属「worldgen / 系统获得」语义）；玩家可破坏以**停止刷怪**
+                                  //   （spec「spawner ... can be broken to stop」—— 破坏后 EntityManager::tickSpawners 扫到
+                                  //   该格 blockAt != Spawner 即跳过，刷怪停止）。**刷怪 tick**：EntityManager::tickSpawners
+                                  //   周期扫玩家周围 Spawner 块，玩家在 kSpawnerPlayerRange 内 + 该笼周 kSpawnerMobCheckRadius
+                                  //   内敌对数 < kSpawnerLocalCap + 全局 hostileCount < kHostileMobCap 时，在笼旁合法空气格
+                                  //   spawn 1 只敌对 mob（Shambler / Bones 等概率，机制等价 MC 1.0 刷怪笼周期刷怪 +
+                                  //   玩家近才刷 + 数量上限）。玩家不在范围 / 笼被破 → 不刷（spec「player near 才刷」、
+                                  //   「broken → stop」）。
+        Count         = 41, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -466,12 +482,14 @@ public:
     //   42=lava（t343 岩浆；各面同贴图=深红橙底+亮黄橙鼓泡+白炽热点，原创自绘 §9a；岩浆段材质 opacity≈0.95 近不透）。
     //   43..50=bed_red..bed_black（t387 床方块 8 色变体；简化单格整立方，机制等价 MC 1.0 床。各面同贴图=彩色被面底
     //      + 顶部枕垫亮带 + 绗缝针脚暗点 + 边缘暗化，原创自绘 §9a；tools/build_bed.py 程序生成。配方 planks+wool → 红床）。
-    // 图集由 tools/build_atlas.py 打包全部 51 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   51=spawner（t392 刷怪笼；机制等价 MC 1.0 刷怪笼，名称/贴图原创自绘 §9a；各面同贴图=暗蓝灰底 + 铁灰栅栏
+    //      + 中心青绿光斑；tools/build_spawner.py 程序生成）。
+    // 图集由 tools/build_atlas.py 打包全部 52 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 51）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 52）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -479,7 +497,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 51;
+    static constexpr int AtlasTileCount = 52;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

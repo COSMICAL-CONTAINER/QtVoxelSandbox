@@ -121,6 +121,10 @@ TILES = [
     "default_bed_blue",             # 48 bed_blue（蓝床）
     "default_bed_magenta",          # 49 bed_magenta（品红床）
     "default_bed_black",            # 50 bed_black（黑床）
+    "default_spawner",              # 51 spawner（t392 刷怪笼；地下地牢中央放置的整立方方块，
+                                    #    玩家在范围内时周期性刷一只敌对 mob，破坏后停止；机制等价 MC 1.0 刷怪笼，
+                                    #    名称/贴图原创自绘 §9a；各面同贴图=暗蓝灰底+铁灰栅栏+中心青绿光斑；
+                                    #    tools/build_spawner.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

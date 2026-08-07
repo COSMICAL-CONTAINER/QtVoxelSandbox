@@ -470,6 +470,10 @@ void PlayerController::tickImpl()
     //   skyLight 取自 m_worldClock（Q_PROPERTY 注入；[0,1] 昼夜乘子）。m_worldClock=null → 跳过（无昼夜 → 无 spawn）。
     if (m_entityManager && m_world && m_worldClock)
         m_entityManager->tickHostileLife(dt, m_world, m_pos, m_worldClock->skyLight());
+    // t392 刷怪笼周期刷怪（同 tickHostileLife 同级常开 —— 玩家在范围内时刷怪笼照样刷，世界模拟连续；
+    //   菜单 / 暂停时仍推进，独立于捕获态）。无 m_worldClock 依赖（刷怪笼无视光照 / 昼夜，地牢天然黑暗）。
+    if (m_entityManager && m_world)
+        m_entityManager->tickSpawners(dt, m_world, m_pos);
     // t92：拾取扫描提到 m_captured 早 return **之前**——打开背包（release→m_captured=false）时
     // 原 pickupScan 落在早 return 之后永不执行，玩家走近掉落物拾不起（仅见实体掉地）。掉落物物理
     // （itemEntities->tick）本就在早 return 前跑（独立于捕获态），拾取与之同级、同样常开才一致。

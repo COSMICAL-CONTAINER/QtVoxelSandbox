@@ -232,6 +232,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_bed_blue.png
         textures/default_bed_magenta.png
         textures/default_bed_black.png
+        textures/default_spawner.png              # t392 刷怪笼贴图（build_spawner.py 程序生成原创像素图；暗蓝灰底+铁灰栅栏+中心青绿光斑）
         textures/default_chest_top.png         # t173/t179 箱子各面贴图（build_chest.py 程序生成原创像素图）
         textures/default_chest_side.png
         textures/default_chest_front.png

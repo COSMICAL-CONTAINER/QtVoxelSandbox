@@ -1347,6 +1347,7 @@ void World::generate()
                           //   / 树 / 草 → 洞口刻在完整地表）。仅该列近表有真实洞穴 air 才开口 → 永不产孤立竖井。
     placeUndergroundWaterPools(); // t309：封闭地下水池（carveCaves / 入口之后；先于填水 → 地表海平面与地下水各自独立）。
     placeLavaLakes(); // t343：地下封闭岩浆湖（Y<30；carveCaves 之后 → 湖独立于洞穴；先于填水 → 岩浆不与海水冲突）。
+    placeDungeons(); // t392：地下地牢（carveCaves / 岩浆湖之后 → 房间独立；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 地表特征放于完整地表）。
     carveCanyon(); // t342：大峡谷（caves/ores 之后 → 峡壁既有矿石层被 carve 暴露；先于填水 → 内陆干涸峡谷，
                    //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
@@ -2301,6 +2302,107 @@ void World::placeLavaLakes()
         }
     }
     qInfo() << "worldgen: underground lava lakes =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t392 地下地牢（见 world.h 头注释）。机制等价 MC 1.0 地牢 / 怪物房间：地下深处的小型封闭石室，中央放刷怪笼
+//   + 角落放战利品箱。确定性散布（hashColumn + seed 偏移，PLAN §2-K），结构与 placeUndergroundWaterPools /
+//   placeLavaLakes 同源（网格采样 + 概率筛选 + 抖动 + y 范围派生），但 carve 出的是矩形房间 + 周界填墙。
+//
+//   房间几何（固定 5×4×5 = 内部空气体积 W×H×D，墙体在 [-1, W]×[-1, H]×[-1, D] 外圈）：
+//     - 地板 / 顶板 / 四壁：填 Cobble（默认）+ Stone（按 hashVoxel 散布少量石块混排，机制等价 MC 1.0 地牢
+//       圆石 + 苔石 + 石砖混合墙体；本工程无 mossy_cobble / stone_brick 方块故用 cobble + stone 二者混排）。
+//     - 内部 (0..W-1, 0..H-1, 0..D-1)：置 Air（清空原 stone / ore / cave air → 干净房间）。不动 Bedrock
+//       （基岩层不可破）。
+//     - 中央 (W/2, 1, D/2)：置 Spawner（地板上方一格 = 站立高度；玩家走过来触发刷怪）。
+//     - 角落 (0, 1, 0)：置 Chest（t393 填战利品内容；本任务仅放置空箱方块，机制等价 MC 1.0 地牢箱子）。
+//
+//   空腔被实体墙天然封闭 → 房间内无天光 → 黑暗（机制等价 MC 1.0 地牢黑暗环境 + 刷怪笼刷怪条件）。
+//   与既有洞穴重叠时（carveCaves 已挖空同位）→ 墙体在洞穴侧被截断，地牢轮廓仍可见（同 MC 1.0 地牢被洞穴
+//   穿墙暴露）。t343 岩浆湖之后（避免岩浆湖填进地牢房间 —— placeLavaLakes 不动 Cobble 墙体，地牢墙体先于
+//   岩浆湖不存在 → 顺序无关；此处放其后保持「流体 worldgen 优先于结构」惯例，避免岩浆与房间争夺同列）。
+//   fillWater 之前（房间独立于海平面；fillWater 仅填地表低洼 → 地下房间不被灌水）。
+void World::placeDungeons()
+{
+    constexpr int kDungeonGrid     = 18;     // 候选网格间距（比岩浆湖 16 略稀 → 地牢更稀有）
+    constexpr unsigned kDungeonPct = 35u;    // 候选命中概率（spec「一定密度」；35% → 每网格平均 ~0.35 个地牢）
+    constexpr int kBedrockTop      = 4;      // 不动基岩（同 carveCaves / placeBedrock）
+    constexpr int kSurfaceFloor    = 6;      // 与地表保留的最小距离（地牢上方至少 6 格石顶 → 不破地表、封闭黑暗）
+    constexpr int kDungeonMaxY     = 36;     // 地牢最高 y（spec「地下」；避开近地表 / 仅地下深处）
+    constexpr int kRoomW           = 5;      // 房间内部宽度（X 方向格子数）
+    constexpr int kRoomH           = 4;      // 房间内部高度（Y 方向格子数；机制等价 MC 1.0 地牢 4 高）
+    constexpr int kRoomD           = 5;      // 房间内部深度（Z 方向格子数）
+    // 房间边界（墙在 [-1, kRoomW] / [-1, kRoomD] 外圈）→ 留 (kRoomW+2) 格 X/Z 边界防越界。
+    constexpr int kMargin          = (kRoomW > kRoomD ? kRoomW : kRoomD) + 1;
+
+    int placed = 0;
+    const int dungSeed = m_seed + 12037; // 地牢哈希偏移（与其它 worldgen hashColumn 解耦）
+    for (int bx = kDungeonGrid / 2; bx < m_width; bx += kDungeonGrid) {
+        for (int bz = kDungeonGrid / 2; bz < m_depth; bz += kDungeonGrid) {
+            const quint32 r = hashColumn(dungSeed, bx, bz);
+            if ((r % 100u) >= kDungeonPct) continue; // 概率筛选
+            const int span = kDungeonGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
+                continue; // 留 margin 格边界（房间墙体半径 ≤ margin 不越界）
+            if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠地牢（避免与海水柱冲突）
+            const int h = std::min(heightAt(cx, cz), m_height - 1);
+            // 地牢 y 范围：基岩之上 ~ kDungeonMaxY 之下；上方至少留 kSurfaceFloor 格石顶（不破地表、封闭黑暗）。
+            const int yLo = kBedrockTop + 2;
+            const int yHi = std::min(kDungeonMaxY - kRoomH, h - kSurfaceFloor - kRoomH);
+            if (yHi <= yLo) continue; // 此列地下空间不足（极低洼 / 山顶浅层）→ 跳过
+            const int yRange = yHi - yLo + 1;
+            const int cy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 房间底面（地板）y
+
+            // 房间墙体材料：Cobble（默认）+ Stone（散布混排，机制等价 MC 1.0 苔石 / 石砖混入）。
+            //   per-cell hash 位 → ~25% Stone / ~75% Cobble（Cobble 主体显「圆石房」，Stone 点缀差异）。
+            auto wallBlock = [&](int wx, int wy, int wz) -> quint8 {
+                const quint32 wb = hashVoxel(dungSeed ^ 0x5a5a, wx, wy, wz);
+                return (wb % 100u) < 25u ? BlockRegistry::Stone : BlockRegistry::Cobble;
+            };
+
+            // 1) 周界填墙（地板 / 顶板 / 四壁）：遍历 [-1, kRoomW]×[−1, kRoomH]×[−1, kRoomD] 外圈，
+            //    对每个边界格置 wallBlock（不动 Bedrock）。内部空气在步骤 2 清空。
+            for (int dy = -1; dy <= kRoomH; ++dy) {
+                const int yy = cy + dy;
+                if (yy < 0 || yy >= m_height) continue;
+                const bool yEdge = (dy == -1 || dy == kRoomH); // 地板（dy=-1）/ 顶板（dy=kRoomH）
+                for (int dx = -1; dx <= kRoomW; ++dx) {
+                    for (int dz = -1; dz <= kRoomD; ++dz) {
+                        const bool xEdge = (dx == -1 || dx == kRoomW);
+                        const bool zEdge = (dz == -1 || dz == kRoomD);
+                        if (!yEdge && !xEdge && !zEdge) continue; // 内部格由步骤 2 处理（清空气）
+                        const int px = cx + dx, pz = cz + dz;
+                        const quint8 cur = m_chunks.blockAt(px, yy, pz);
+                        if (cur == BlockRegistry::Bedrock) continue; // 不动基岩（保留 worldgen 底层）
+                        m_chunks.setBlock(px, yy, pz, wallBlock(px, yy, pz));
+                    }
+                }
+            }
+            // 2) 内部清空气（W×H×D）：覆盖原 stone / ore / cave air → 干净房间（防墙体填充误入内部、
+            //    防 cave 残余格子留洞）。不动 Bedrock（防穿透基岩底层）。
+            for (int dy = 0; dy < kRoomH; ++dy) {
+                const int yy = cy + dy;
+                if (yy < 0 || yy >= m_height) continue;
+                for (int dx = 0; dx < kRoomW; ++dx) {
+                    for (int dz = 0; dz < kRoomD; ++dz) {
+                        const quint8 cur = m_chunks.blockAt(cx + dx, yy, cz + dz);
+                        if (cur == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(cx + dx, yy, cz + dz, BlockRegistry::Air);
+                    }
+                }
+            }
+            // 3) 中央 Spawner（地板上方一格 = cy+1 = 站立高度）。覆盖原空气格；不动非空气（防 cave 重叠时
+            //    误覆盖既有方块，但步骤 2 已清空气 → 此处恒为 Air，覆盖安全）。
+            m_chunks.setBlock(cx + kRoomW / 2, cy + 1, cz + kRoomD / 2, BlockRegistry::Spawner);
+            // 4) 角落 Chest（与 Spawner 对角 = 角落 (0, 1, 0)）：t393 填战利品内容；本任务仅放置空箱方块。
+            //    state=0（chestFrontFace 兜底 NegZ；worldgen 不关心箱子朝向，玩家放置后才走朝向 state）。
+            m_chunks.setBlock(cx, cy + 1, cz, BlockRegistry::Chest);
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: underground dungeons =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t309 地表小湖泊（见 world.h 头注释）。机制等价 MC 1.0 地表小湖泊 / 池塘：地表局部低洼处的浅水洼。
