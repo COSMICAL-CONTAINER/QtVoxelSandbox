@@ -444,12 +444,29 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 if (f == 0 || f == 1) { cu = dz; cv = dy; }       // ±X
                                 else if (f == 4 || f == 5) { cu = dx; cv = dy; }  // ±Z
                                 else { cu = dx; cv = dz; }                        // ±Y
+                                // t391 水面波动/透明度润色（spec「水面有波动质感、非死板」）：仅水段顶面（+Y，f==2）
+                                //   叠加一层随 waterAnimPhase 翻转的**空间正弦涟漪**——每顶点据世界角点 (wx+dx, wz+dz)
+                                //   算 sin（k=1.1，周期 ~5.7 格，对角涟漪）；相邻 cell 共享同一角点 → 涟漪跨格连续
+                                //   （非逐格跳变）。phase 0/1 在 sin 自变量上 ±π 偏移（半周期）→ flipbook 切帧时亮/暗
+                                //   波带整体互换 = 阳光在水面细碎反光的「闪烁」感，叠加 t223 贴图 flipbook → 水面微动、
+                                //   非全平死板。仅水（fluidId==Water，!m_lavaOnly）；岩浆段不参与（浓稠近不透、无涟漪语义）。
+                                //   亮度 ±12%（反光起伏）+ vertex.a [0.85,1.0]（材质 opacity 0.7 × vertex.a → 有效
+                                //   alpha [0.595,0.7]，透射起伏）；侧面/底面 brightMul=alphaMul=1（原行为）。
+                                float brightMul = 1.0f, alphaMul = 1.0f;
+                                if (!m_lavaOnly && f == 2) { // +Y 顶面（水面）
+                                    const float sarg = float(wx + dx + wz + dz) * 1.1f;
+                                    const float wave = std::sin(sarg + (m_waterAnimPhase != 0 ? 3.14159265f : 0.0f));
+                                    brightMul = 1.0f + 0.12f * wave;                 // [0.88, 1.12] 反光起伏
+                                    alphaMul = 0.85f + 0.15f * (0.5f + 0.5f * wave);   // [0.85, 1.00] 透射起伏
+                                }
                                 Vtx v;
                                 v.x = float(lx) + dx; v.y = float(ly) + yy; v.z = float(lz) + dz; // 局部坐标
                                 v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
                                 v.u = u0 + cu * (u1 - u0);
                                 v.v = v0 + cv * (v1 - v0);
-                                v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f; // t151 光场 × t153 PCF 软影顶点色
+                                // t151 光场 × t153 PCF 软影顶点色；t391 水面顶面（+Y）再乘涟漪亮/透射因子。
+                                v.r = vc * brightMul; v.g = vc * brightMul; v.b = vc * brightMul;
+                                v.a = alphaMul; // 侧面/底面 = 1.0；水面顶面 = [0.85,1.0] 涟漪透射
                                 verts.append(v);
                             }
                             idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);
