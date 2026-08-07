@@ -170,6 +170,9 @@ TILES = [
     "default_obsidian",             # 77 obsidian（t411 黑曜石；流水触静岩浆源凝固产物——机制等价 MC 1.0
                                     #    obsidian，名称/贴图原创自绘 §9a；各面同贴图=深紫黑火山玻璃底+紫红纹理嵌点+
                                     #    少量品紫玻璃微反光；tools/build_obsidian.py 程序生成原创像素图）
+    "default_ladder",               # 78 ladder（t413 木梯 cross 贴图；透明底 + 棕色两根纵轨 + 横向梯级；
+                                    #    alphaCutoff cutout；Ladder 各面=本 tile，mesher 走 cross 几何段；
+                                    #    机制等价 MC 1.0 梯子，名称/贴图原创自绘 §9a；tools/build_ladder.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

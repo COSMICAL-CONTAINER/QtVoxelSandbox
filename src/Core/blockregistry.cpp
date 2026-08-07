@@ -297,6 +297,12 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* cobble_stairs        */ {int(BlockRegistry::CobbleStairs),        5, 5, 5, 5, false, BlockRegistry::ShapeStairs,   2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CobbleStairs),        1, 64, "cobble_stairs",        "圆石楼梯"}, // state[1:0]=朝向 bit2=倒置（与 WoodStairs 同编码）
     /* cobble_fence         */ {int(BlockRegistry::CobbleFence),         5, 5, 5, 5, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CobbleFence),         1, 64, "cobble_fence",         "圆石墙"}, // 中心立柱 + 四向横档连邻居（机制等价 MC 圆石墙；与 WoodFence 同几何）；state=0
     /* cobble_pressure_plate */ {int(BlockRegistry::CobblePressurePlate), 5, 5, 5, 5, false, BlockRegistry::ShapePlate,   2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CobblePressurePlate), 1, 64, "cobble_pressure_plate", "圆石压力板"}, // 贴地薄板（与 WoodPressurePlate 同几何）；state=0
+    // ── t413 垂直爬梯（vertical climb ladder）：机制等价 MC 1.0 梯子（ladder）。cross 形广告牌方块（两片对角相交双面 quad，
+    //   贴 ladder(78) 瓦片，alpha 透明底 cutout）。solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（无碰撞 →
+    //   玩家穿入梯格；爬升走 PlayerController 物理，非碰撞）、hardness=0.4（同 MC 1.0 梯子量级，软质木质）、toolType=Axe
+    //   （木质；requiresTool=false → 空手也掉落，仅速度受斧影响）、dropId=自身（破梯掉梯可放回）、dropCount=1、maxStack=64。
+    //   各面贴图=ladder(78)；音色归 GroupWood。进创造调色板。state inert（mesher/collision/选中均不读梯 state）。
+    /* ladder       */ {int(BlockRegistry::Ladder),                       78, 78, 78, 78, false, BlockRegistry::ShapeNone,     0.4f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Ladder),           1, 64, "ladder",       "木梯"}, // t413 竖直爬行梯（玩家入格+按前向上爬）；cross 路由；state=0
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -360,6 +366,7 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* cobble_stairs           */ 67, // t412 圆石楼梯 → MC 1.0 stairs id 67（1.0 楼梯含木/石/cobble 统一 id）
     /* cobble_fence            */ -1, // t412 圆石墙 → MC 1.0 无等价（cobblestone wall id 139 为 1.4+；1.0 仅木栅栏 id 85）
     /* cobble_pressure_plate   */ 70, // t412 圆石压力板 → MC 1.0 stone pressure plate id 70
+    /* ladder                  */ 65, // t413 木梯 → MC 1.0 ladder id 65
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -427,6 +434,7 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == Sugarcane) return true; // t397 段外 cross（甘蔗细茎，同 Sapling 模式）
     if (blockId == CarrotCrop) return true; // t407 段外 cross（胡萝卜作物，同小麦作物按 state 选阶段贴图）
     if (blockId == PotatoCrop) return true; // t407 段外 cross（马铃薯作物，同小麦作物按 state 选阶段贴图）
+    if (blockId == Ladder) return true; // t413 段外 cross（木梯竖直爬行梯，两片对角相交双面 quad 贴梯瓦片）
     if (blockId >= FirstFlower && blockId <= LastFlower) return true; // t397 段外花段（4 色 cross）
     return blockId >= FirstCross && blockId <= LastCross;
 }
@@ -444,6 +452,14 @@ bool BlockRegistry::isBed(quint8 blockId)
 bool BlockRegistry::isFlower(quint8 blockId)
 {
     return blockId >= FirstFlower && blockId <= LastFlower;
+}
+
+// t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理 + mesher cross 路由分流
+//   （已并入 isCrossBillboard；本谓词专供爬升逻辑读「是否梯」，避免把「cross 渲染」与「可爬」语义耦合——
+//   未来若有不可爬的 cross 方块，爬升仍只读本谓词不误判）。单 id 故裸相等判定。
+bool BlockRegistry::isLadder(quint8 blockId)
+{
+    return blockId == Ladder;
 }
 
 // 方块是否「有碰撞 sub-AABB」（考虑开合态）。air / torch / water（ShapeNone）→ false。
@@ -756,6 +772,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case BedRed: case BedOrange: case BedYellow: case BedGreen: // t387 床 → 木质音色（软质被面闷击，同 wool）
     case BedCyan: case BedBlue: case BedMagenta: case BedBlack:
     case SpruceLog: // t395 云杉原木 → 木质音色（同 log / planks 族）
+    case Ladder: // t413 木梯 → 木质音色（木质梯，同 planks 族）
         return GroupWood;
     case Grass: case Dirt:
     case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）

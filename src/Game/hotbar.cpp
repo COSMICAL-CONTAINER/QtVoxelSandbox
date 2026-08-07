@@ -75,6 +75,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CobbleStairs:        return "icon_cobble_stairs.png";        // 圆石楼梯：3D L 阶（背墙 + 整步）
     case BlockRegistry::CobbleFence:         return "icon_cobble_fence.png";         // 圆石墙：3D 立柱 + 横档
     case BlockRegistry::CobblePressurePlate: return "icon_cobble_pressure_plate.png";// 圆石压力板：3D 更薄更小
+    case BlockRegistry::Ladder:        return "icon_ladder.png";      // t413 木梯（cross 透明底；两纵轨 + 横梯级；竖直爬行梯）
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
@@ -402,6 +403,7 @@ QVariantList Hotbar::creativeBlocks() const
              // t412 圆石变体（cobble variants）：石质半方块（台阶 / 楼梯 / 墙 / 压力板），复用异形方块系统 + 圆石贴图。
              int(BlockRegistry::CobbleSlab),        int(BlockRegistry::CobbleStairs),
              int(BlockRegistry::CobbleFence),       int(BlockRegistry::CobblePressurePlate),
+             int(BlockRegistry::Ladder),                                     // t413 木梯（竖直爬行梯；玩家入格+按前向上爬；可放置）
              // t244 cross 广告牌方块（透明底 cutout；与火把同走非整立方渲染）：
              int(BlockRegistry::TallGrass),                                     // 草丛（worldgen 散布 / 杀草掉种子）
              int(BlockRegistry::WheatCrop),                                    // 小麦作物（state=阶段；种 0..7，图标显成熟态）

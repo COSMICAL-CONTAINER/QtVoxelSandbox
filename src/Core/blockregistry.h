@@ -387,7 +387,17 @@ public:
         CobbleStairs        = 59, // 圆石楼梯：整步 + 背墙。state[1:0]=朝向 bit2=倒置（与 WoodStairs 同编码）。
         CobbleFence         = 60, // 圆石墙：中心立柱 + 四向横档连邻居（机制等价 MC 圆石墙；与 WoodFence 同几何）。
         CobblePressurePlate = 61, // 圆石压力板：贴地薄板（与 WoodPressurePlate 同几何）。
-        Count          = 62, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t413 垂直爬梯（vertical climb ladder）：机制等价 MC 1.0 梯子（ladder）。既有 WoodStairs 是台阶式楼梯
+        //   （逐级步行上行），本方块是**竖直爬行**梯——玩家走进梯格 + 按前即逐格**向上爬**（竖井用）。cross 形广告牌
+        //   方块（与草丛 / 树苗同走 cross 几何段，两片对角相交双面 quad 贴梯瓦片，alpha 透明底 cutout）—— 非 1×1×1 整立方。
+        //   solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（**无碰撞** → 玩家穿入梯格；爬升由
+        //   PlayerController 检测「玩家 AABB 覆盖的梯格」+ 按前覆写垂直速度实现，非碰撞）、hardness=0.4（同 MC 1.0 梯子量级，
+        //   软质木质）、toolType=Axe（木质梯；requiresTool=false → 空手也掉落，仅速度受斧影响）、dropId=自身（破梯掉梯，
+        //   可放回）、dropCount=1、maxStack=64。各面贴图=ladder(78)（透明底 + 棕色两根纵轨 + 横向梯级，alphaCutoff cutout）。
+        //   音色归 GroupWood（木质，同 planks 族）。进创造调色板（玩家可取用 / 放置）。**无放置预检**（随处可放，
+        //   不强制贴墙——本工程简化为独立可爬梯方块；机制对标 MC 梯子贴墙但放宽以适配竖井场景）。
+        Ladder          = 62, // 木梯：竖直爬行梯（玩家入格 + 按前向上爬；cross 路由 + 爬升物理）
+        Count          = 63, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
@@ -404,6 +414,11 @@ public:
     static constexpr int FirstFlower = FlowerRed;
     static constexpr int LastFlower  = FlowerWhite;
     static bool isFlower(quint8 blockId);
+
+    // t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理判定
+    //   「玩家 AABB 覆盖的格是否梯」（入梯格 + 按前 → 向上爬）+ mesher cross 路由分流，避免各处自写 id 判定漂移
+    //   （同 isBed / isCrossBillboard 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（改 id 时一处同步）。
+    static bool isLadder(quint8 blockId);
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
     //   （mesher 合批进 chunk mesh，不走 1×1×1 立方面路径）。t134 落地 6 类（WoodSlab=15 ... WoodTrapdoor=20）。
@@ -710,6 +725,8 @@ public:
     //   73..76=potato_crop_0..3（t407 马铃薯作物 4 阶段贴图；同 carrot_crop 4 阶段机制；PotatoCrop def 各面=73；
     //      mesher 在 PotatoCrop case 内选 tile = 73 + state/2）。
     //      半透段；纹理不透明，半透由材质 opacity 实现，同 water 模式；tools/build_glass.py 程序生成原创像素图）。
+    //   78=ladder（t413 木梯 cross 贴图；透明底 + 棕色两根纵轨 + 横向梯级，alphaCutoff cutout；Ladder 各面=本 tile，
+    //      mesher 走 cross 几何段；机制等价 MC 1.0 梯子，名称/贴图原创自绘 §9a；tools/build_ladder.py 程序生成原创像素图）。
     // 图集由 tools/build_atlas.py 打包全部 69 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
@@ -723,7 +740,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 78;
+    static constexpr int AtlasTileCount = 79;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

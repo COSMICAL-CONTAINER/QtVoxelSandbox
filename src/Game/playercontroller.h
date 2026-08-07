@@ -653,6 +653,11 @@ private:
     //   在 AABB footprint 内任一列实体即算支撑）。step() 据此判定「蹲下时若水平移动后脚下将无方块
     //   则不水平移动」（防走下方块边缘）。仅读 World（isSolid），与碰撞同层。
     bool hasGroundBelowAt(float x, float z) const;
+    // t413 贴梯检测（spec「玩家走进梯格 + 按前 → 向上爬」）：玩家 AABB 覆盖的任一格 == Ladder 即「贴梯」。
+    //   Ladder 无碰撞（ShapeNone）→ 玩家穿入梯格占据该格；本方法扫玩家 footprint 各列在脚位 + 身体（脚 +1）两行的
+    //   方块，命中 Ladder 即真。step() 据此在走路模式覆写垂直速度：按前（wish 非零）/ 空格 → 爬升、按蹲 → 悬挂、
+    //   松手 → 缓降（机制等价 MC 1.0 梯子）。仅读 World::blockAt（向下依赖）；无世界 → false。
+    bool onLadder() const;
     // t134 玩家水平朝向（据 yaw 推 4 向）：前向 = (-sin(yaw), -cos(yaw))（与 wishHoriz/lookDirection 同源）。
     //   返回 0=+X 1=-X 2=+Z 3=-Z（与不完整方块 state 朝向编码一致：stairs/door/trapdoor 均用此编码）。
     //   供 placeBlock 放 stairs/door 时定朝向、useBlock 开 trapdoor 时定开向。
@@ -943,6 +948,15 @@ private:
     static constexpr float kWaterGravity = 6.0f;  // 水中重力（缓沉；≈ kGravity×0.21）
     static constexpr float kSwimUp       = 4.5f;  // 按空格游泳上浮速度（blocks/sec）
     static constexpr float kWaterSinkMax = 3.0f;  // 水中最大下沉速度（钳制）
+    // t413 竖直爬梯物理（机制等价 MC 1.0 梯子：贴梯时按前爬升、按蹲静止悬挂、松手缓降；不上梯走正常重力）。
+    //   kLadderClimb：贴梯 + 按前（wish 非零）时的向上爬升速度（blocks/sec）。略低于走速 4.3 → 爬升稳不窜，机制
+    //     对标 MC 梯子攀爬速度（约走速量级）。同时按空格也爬升（向上意图统一），便于竖井上行。
+    //   kLadderGravity：贴梯时的等效重力（远小于 kGravity=28 → 缓降；机制对标 MC 梯子上「松手缓慢下滑」）。
+    //   kLadderSinkMax：贴梯时最大下沉速度（钳制防穿梯底；远小于 kMaxFall）。
+    //   仅走路模式生效（Survival / Creative-未飞；飞 / 观察者 early return 不进此分支）。
+    static constexpr float kLadderClimb   = 3.0f; // 贴梯 + 按前 / 空格的爬升速度（blocks/sec）
+    static constexpr float kLadderGravity = 6.0f; // 贴梯等效重力（缓降；同水中 kWaterGravity 量级）
+    static constexpr float kLadderSinkMax = 3.0f; // 贴梯最大下沉速度（钳制）
     // t223 近流水 proximity 水流声（spec「近流动水一定范围持续水流声 ambience loop」）：
     //   kFlowSoundRadius：扫描盒半径（格）= 水流声可闻范围；玩家到最近流水格距离 ≥ 此 → level=0（无声）。
     //     8 格 ≈ MC 近流水可闻距离量级（机制对齐，非精确数值复刻）。

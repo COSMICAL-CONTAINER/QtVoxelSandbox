@@ -278,6 +278,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_potato_crop_1.png
         textures/default_potato_crop_2.png
         textures/default_potato_crop_3.png
+        textures/default_ladder.png              # t413 木梯 cross 贴图（build_ladder.py；透明底 + 棕色两纵轨 + 横梯级；alphaCutoff cutout）
         textures/mob_pig.png                # t240 猪/牛/羊生物贴图（build_mob.py 程序生成原创像素图，§9a）
         textures/mob_cow.png                # 三种 passive mob 各一张「全脸」贴图，MobModel 几何每面铺同图（非 MC UV 拆皮）
         textures/mob_sheep.png
@@ -335,6 +336,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_flower_blue.png
         textures/icon_flower_white.png
         textures/icon_sugarcane.png                # t397 甘蔗 flat 2D 图标（透明底+绿色节段细茎+顶部尖叶；build_cube_icons.py）
+        textures/icon_ladder.png                   # t413 木梯 flat 2D 图标（透明底 + 棕色两纵轨 + 横梯级；build_ladder.py）
 )
 
 # t89 / t118 音效资源（tools/build_sounds.py 程序合成，§4 原创 SFX；零 MC 资产）。

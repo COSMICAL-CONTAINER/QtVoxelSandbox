@@ -2583,6 +2583,27 @@ bool PlayerController::hasGroundBelowAt(float x, float z) const
     return false;
 }
 
+// t413 贴梯检测（spec「玩家走进梯格 + 按前 → 向上爬」）：扫玩家 AABB footprint 各列在脚位 + 身体（脚 +1）两行
+//   的方块，命中 Ladder 即真。Ladder 无碰撞（ShapeNone）→ 玩家穿入梯格占据该格，故覆盖即贴梯。取样策略同
+//   hasGroundBelowAt / overlapSubAABBs（footprint 全列严格覆盖）；Y 取脚位行（floor(m_pos.y)）+ 身体行（+1）覆盖
+//   玩家 1.8 高 AABB 的两格。只读 World::blockAt（向下依赖）；无世界 → false。
+bool PlayerController::onLadder() const
+{
+    if (!m_world) return false;
+    const int by0 = int(std::floor(m_pos.y()));           // 脚位行
+    const int by1 = by0 + 1;                              // 身体行（玩家 1.8 高 AABB 上格）
+    const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
+    const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
+    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
+    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
+    for (int zz = z0; zz <= z1; ++zz)
+        for (int xx = x0; xx <= x1; ++xx) {
+            if (m_world->blockAt(xx, by0, zz) == BlockRegistry::Ladder) return true;
+            if (m_world->blockAt(xx, by1, zz) == BlockRegistry::Ladder) return true;
+        }
+    return false;
+}
+
 bool PlayerController::aabbHitsSolid() const
 {
     // t146：委托 overlapSubAABBs（axis<0 仅判命中）。逐格逐 sub-AABB 测试 → 不完整方块精确碰撞
@@ -2885,6 +2906,20 @@ void PlayerController::step(qreal dt)
         const float sinkMax = waterfall ? kWaterfallSinkMax : kWaterSinkMax;
         m_vel.setY(std::clamp(float(m_vel.y() - kWaterGravity * dt), -sinkMax, kSwimUp));
         if (space) m_vel.setY(kSwimUp); // 按住空格 = 游泳上浮（连续；离水后 spaceEdge 跳跃边沿仍由下方分支处理）
+    } else if (onLadder()) {
+        // t413 竖直爬梯物理（机制等价 MC 1.0 梯子）：梯无碰撞 → 玩家穿入梯格；此处覆写垂直速度实现攀爬 / 悬挂 /
+        //   缓降（取代正常重力，否则玩家会穿梯坠落）。仅走路模式生效（飞 / 观察者 early return）。
+        //   按前（wish 非零）/ 空格 → 向上爬（kLadderClimb；spec「入梯 + 按前 → 向上爬」）；按蹲（shift）→ 悬挂静止
+        //   （机制等价 MC 梯子按蹲不下滑）；松手 → 缓降（kLadderGravity << kGravity，机制对标 MC 梯子缓慢下滑）。
+        //   spaceEdge 跳跃边沿：贴梯 + 着地按空格仍给一次跳跃（从梯顶 / 梯旁地面起跳离梯）。
+        if (shift) {
+            m_vel.setY(0.0f); // 蹲 = 悬挂静止（机制等价 MC 梯子按蹲不下滑）
+        } else if (wish.lengthSquared() > 0.001f || space) {
+            m_vel.setY(kLadderClimb); // 按前 / 空格 = 向上意图 → 爬升（spec 验收：入梯 + 按前 → 向上爬）
+        } else {
+            m_vel.setY(std::max(float(m_vel.y() - kLadderGravity * dt), -kLadderSinkMax)); // 松手缓降（贴梯不下坠）
+        }
+        if (spaceEdge && m_onGround) m_vel.setY(kJump); // 贴梯 + 着地按空格 = 起跳（离梯）
     } else {
         m_vel.setY(std::max(float(m_vel.y() - kGravity * dt), -kMaxFall));
         if (spaceEdge && m_onGround) m_vel.setY(kJump);

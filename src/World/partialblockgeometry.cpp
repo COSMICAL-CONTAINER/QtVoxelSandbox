@@ -426,6 +426,22 @@ int PartialBlockGeometry::append(
                       tile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::Ladder: {
+        // t413 木梯 cross 模型：与 TallGrass / Sapling 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
+        //   机制等价 MC 1.0 梯子（ladder）—— cross 模型上贴 ladder(78) 瓦片（透明底 + 棕色两根纵轨 + 横向梯级，
+        //   alphaCutoff cutout）。玩家从任意水平方向走入梯格（Ladder 无碰撞 → 玩家穿入），按前即由 PlayerController
+        //   覆写垂直速度向上爬（竖井用）。两片对角 cross 使梯从四面均可攀爬（区别于 MC 梯子贴单墙 —— 本工程简化
+        //   为独立可攀爬竖井梯，不强制贴墙）。**无 state 派生贴图**（单一梯瓦片）。tile 由 BlockRegistry::tileIndex
+        //   (Ladder, PosX) = sideTile = 78 给出。不做邻居剔除（cross 透明 + 梯，同 TallGrass；Ladder solid=false）。
+        //   材质 alphaCutoff:0.5 丢弃透明底 → 仅梯像素显。
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::Farmland: {
         // t408 耕地矮盒：机制等价 MC 耕地比整立方矮 1 像素（15/16=0.9375）→ 顶面略陷，相邻整立方（草地等）上方
         //   露出 1/16 唇。全 footprint、y[0, 0.9375]：顶面 farmland_dry(26)（湿润暗化由 mesher 在 lctx.face[+Y] 预乘

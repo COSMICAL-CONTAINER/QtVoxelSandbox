@@ -186,6 +186,7 @@ FLAT_2D_CROSS = [
     ("flower_blue",   "default_flower_blue"),   # 蓝花（绿茎 + 蓝花头）
     ("flower_white",  "default_flower_white"),  # 白花（绿茎 + 白花头）
     ("sugarcane",     "default_sugarcane"),     # 甘蔗（绿色节段细茎 + 顶部尖叶）
+    ("ladder",        "default_ladder"),        # t413 木梯 cross（透明底 + 棕色两纵轨 + 横梯级；竖直爬行梯）
 ]
 
 PARTIALS_3D = [
