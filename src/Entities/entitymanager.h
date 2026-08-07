@@ -102,7 +102,11 @@ public:
     //     机制对齐「黑暗刷怪 / 近距自爆」）。Entity.hostile=true → 走 tickHostileLife 燃烧 / 远距消失 / spawn 调度
     //     （同 Shambler/Bones）；tick Mob 分支据 mobType==MobStalker 路由到 aiStalker（蓄力 fuse → detonateStalker
     //     爆炸：球形破坏方块 + 距离衰减伤害玩家 + emit explosion 音效）。inflateAt 暴露 fuse 进度供 QML 膨胀动画。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8 };
+    //   t399 鱿鱼（squid）= MobSquid(9)：机制等价 MC 1.0 squid —— 水生被动生物，水里游（aiSquid：周期喷水推进上浮 +
+    //   水平漂游，离水则慢爬搁浅）。passive（hostile=false），死亡掉墨囊（InkSacId；呈现层 onMobDied 据本 enum 分流）。
+    //   tick Mob 分支据 mobType==MobSquid 路由到 aiSquid（替代 aiWander）；水中物理复用通用 mob 水物理（speedScale
+    //   减速 + kWaterGravity 缓沉 + 流水推动），aiSquid 在其上叠加周期 vy 上冲量 → 「喷水上浮 → 缓沉」节律性游动。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9 };
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -482,6 +486,11 @@ private:
         //   eggTimer 到下次下蛋的倒计时（秒）；tick Mob 分支推进，<=0 → emit chickenLaidEgg + 重置随机周期
         //   （kEggLayMin..Max，机制等价 MC 1.0 鸡 5-10 分钟下一枚蛋）。spawn 时随机化初值防批量 spawn 的鸡同步下蛋。
         float eggTimer = 0.0f;       // 到下次下蛋倒计时（秒；仅 MobChicken 用）
+        // t399 鱿鱼喷水游动态（仅 mobType==MobSquid 用；其余 mob 留默认 0 不触发）：
+        //   swimTimer 到下次「喷水推进」倒计时（秒）；水中（脚位在水格）倒计时到 → 给 vy 正冲量（上浮）+ 随机换向
+        //   （机制等价 MC 1.0 鱿鱼喷水推进：周期性上冲后缓沉 = 节律性上下游动）。离水不推进（搁浅态走 aiWander 慢爬）。
+        //   spawn 时随机化初值防批量 spawn 的鱿鱼同步喷水（同 ambientTimer 错峰模式）。
+        float swimTimer = 0.0f;      // 到下次喷水推进倒计时（秒；仅 MobSquid 用）
         // t250 环境音态（仅 Mob kind 用；FallingBlock/Item 留默认不触发）：
         float stepAccum = 0.0f;  // walkPhase 半步累加器（弧度）；行走时累加 moveSpeed*dt*kWalkFreq，≥π → emit mobStep
         float ambientTimer = 0.0f; // 到下次 idle 叫声的倒计时（秒）；≤0 → emit mobAmbient + 重置随机周期
@@ -561,6 +570,20 @@ private:
     // speedScale：水平位移缩放（t298 水中减速；1.0 陆地、kWaterSpeedMul 水中）。透传给 mob 的水平移动，
     //   使在水中时既减位移又同步降低 moveSpeed（t241 腿摆频率随 moveSpeed，故水中腿也变慢 = 视觉上「挣扎」）。
     bool aiWander(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale = 1.0f);
+    // t399 鱿鱼水生 AI（tick 内 passive mob 且 mobType==MobSquid 分支调，替代 aiWander）。spec t399「squid water mob:
+    //   swims in water bodies」。
+    //   机制对齐 MC 1.0 squid：水生被动生物，水里周期喷水推进（上浮 + 水平漂移）+ 缓沉；离水搁浅慢爬。
+    //   (1) 水中（脚位在水格）：swimTimer 倒计时到 → 设 e.vy=+kSquidSwimUp（喷水推进上冲量；正=向上）+ 随机换 yawRad
+    //       （水平漂游方向）+ 重置随机周期（kSquidSwimIntervalMin..Max）。其下通用重力段以 kWaterGravity 缓沉把上冲
+    //       减速到 0 再反向 → 「上浮 → 缓沉」节律性游动（机制等价 MC squid 喷水推进 + 浮力缓沉）。水平位移走 yaw 漂游
+    //       （kSquidSwimSpeed，慢于陆地 wander → 漂浮感），逐轴 mobAabbHitsSolid 撤回防穿墙 + 边界 clamp。
+    //   (2) 离水（搁浅）：委托 aiWander（陆地慢爬，机制等价 MC squid 上岸后笨拙挪动；不复用喷水推进）。
+    //   返回是否真位移（驱动 dirty + moveSpeed + walkPhase 触腕摆）。speedScale 见 aiWander（t298 水中减速；透传
+    //     给 aiWander 离水回退分支；水中漂游用独立 kSquidSwimSpeed 不受 speedScale 影响 —— 鱿鱼游速是其物种特征，
+    //     不应再被通用水中减速叠加）。
+    //   分层（PLAN §2）：只读 World::blockAt（mobFeetInWater 脚位水格判）+ 自身数据；写 EntityManager 自身（pos / vy /
+    //   yawRad / swimTimer）。无向上依赖。mobFeetInWater 同文件静态助手（同 tick / aiWander 越障查）。
+    bool aiSquid(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale = 1.0f);
     // t281 敌对生物 AI（detect→pathfind→attack 三段；tick 内 hostile Mob 分支调，替代 aiWander）。
     //   spec t281「敌对生物基类（AI/寻路）：detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）
     //   + attack」。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI；标识符 / 美术全原创（§9 区隔）。
@@ -752,6 +775,19 @@ private:
     //   1:1）—— 取 4-8 分钟保「周期性可观察」而不刷屏。spawn 时初值随机化防批量 spawn 的鸡同步下蛋。
     static constexpr float kEggLayMin = 240.0f; // 鸡下蛋周期下限（秒；~4 分钟）
     static constexpr float kEggLayMax = 480.0f; // 鸡下蛋周期上限（秒；~8 分钟）
+    // t399 鱿鱼喷水游动常量（spec「squid water mob: swims in water bodies」；机制对齐 MC 1.0 squid 周期喷水推进 +
+    //   浮力缓沉的节律性游动；数值为本工程小世界量身调，非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）。
+    //   - kSquidSwimUp：喷水推进上冲量（blocks/s，正=向上）。水中 swimTimer 到 → e.vy=+本值；其下通用重力段以
+    //     kWaterGravity(=6) 缓沉把它减速到 0 再反向 → 上浮峰值高 ≈ v²/(2·g) = 9/12 ≈ 0.75 格，缓沉回 ~1s → 节律性
+    //     「上浮 0.75 → 缓沉」bobbing 游动（机制等价 squid 喷水推进）。取 3.0 让推进观感明显（非贴底不动）。
+    //   - kSquidSwimIntervalMin/Max：喷水推进随机周期（秒）。1.5-3.0s 一次 → 节律舒缓（非高频抖动），近 MC squid
+    //     偶发喷水节律。spawn 初值随机化防批量同步喷水（同 ambientTimer 错峰）。
+    //   - kSquidSwimSpeed：水中水平漂游速度（blocks/s）。慢于陆地 wander kWalkSpeed=1.0 → 漂浮感（非疾游）；
+    //     squid 是缓游生物。不受通用 speedScale（kWaterSpeedMul）叠加 —— 物种游速特征，叠加会过慢。
+    static constexpr float kSquidSwimUp          = 3.0f;  // 喷水推进上冲量（blocks/s；峰值 ~0.75 格上浮）
+    static constexpr float kSquidSwimIntervalMin = 1.5f;  // 喷水推进周期下限（秒）
+    static constexpr float kSquidSwimIntervalMax = 3.0f;  // 喷水推进周期上限（秒）
+    static constexpr float kSquidSwimSpeed       = 0.8f;  // 水中水平漂游速度（blocks/s；慢漂非疾游）
 public:
     // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
     //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。

@@ -222,8 +222,9 @@ void MobModel::setMobType(int type)
 {
     // 0（测试生物）/ 越界 → 兜底 Pig（保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube，
     //   不进本类，故此处兜底仅防误设）。合法 mobType：1 猪 / 2 牛 / 3 羊 / 4 Shambler(僵尸) /
-    //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛)。修：原仅接 1-5 且误标 5=Stalker（实际 enum 5=Bones）。
-    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7) type = 1;
+    //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛) / 8 Chicken(鸡) / 9 Squid(鱿鱼)。
+    //   修：原仅接 1-5 且误标 5=Stalker（实际 enum 5=Bones）。
+    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9) type = 1;
     if (type == m_mobType) return;
     m_mobType = type;
     emit mobTypeChanged();
@@ -261,7 +262,7 @@ void MobModel::rebuild()
 {
     std::vector<MobVtx> verts;
     std::vector<quint32> idx;
-    verts.reserve(16 * 24); // 至多 Bones 镂空骨架 = 14 盒（脊柱+胸骨+8 肋+头+左臂+2 腿）；Spider = 10；其余 ≤8
+    verts.reserve(16 * 24); // 至多 Bones 镂空骨架 = 14 盒（脊柱+胸骨+8 肋+头+左臂+2 腿）；Spider/Squid = 10；其余 ≤8
     idx.reserve(16 * 36);
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
 
@@ -338,6 +339,30 @@ void MobModel::rebuild()
         const float sw8 = kLegSwingAmp * std::sin(m_walkPhase);
         addBoxRot(-0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, +sw8, verts, idx, bMin, bMax); // 左腿（细）
         addBoxRot( 0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, -sw8, verts, idx, bMin, bMax); // 右腿（细）
+    } else if (m_mobType == 9) {
+        // t399 Squid（鱿鱼；机制等价 MC 1.0 squid，§9 原创模型 + 贴图）—— 水生软体：圆胖躯干（mantle）+ 顶端小尖 +
+        //   **8 触腕**（环绕身体底沿八向分布，机制等价 MC 1.0 squid 8 触腕）。触腕绕各自顶端枢轴做 X 轴摆动（前后
+        //   波浪式起伏，相位错开 → 游动时触腕飘动；walkPhase 驱动）。squid 水中持续漂移（moveSpeed 恒 >0）→ 触腕常驻
+        //   摆动（区别于陆地 mob idle 时腿停）。mobModelYOff 见 Main.qml（触腕底本地 |y|≈0.46 贴 collision 底面）。
+        //   局部原点 = 躯干中心；无「头朝 -Z」语义（squid 软体无固定前后，yawAt 仅驱动整体朝向 → 触腕环对称无所谓前）。
+        addBox( 0.00f,  0.08f,  0.00f, 0.28f, 0.24f, 0.28f, verts, idx, bMin, bMax); // 圆胖躯干（mantle 主体）
+        addBox( 0.00f,  0.45f,  0.00f, 0.15f, 0.13f, 0.15f, verts, idx, bMin, bMax); // 顶端小尖（mantle 尖顶）
+        // 8 触腕（环绕躯干底沿八向分布，半径 0.20）：每条细垂直盒（half 0.045×0.15×0.045），顶端枢轴 y=-0.16（躯干底）。
+        //   绕 X 轴摆动（前后波浪式起伏）：angle = 0.18·sin(walkPhase + i·π/4)，相位错开 → 触腕此起彼伏飘动（游动感）。
+        //   摆幅 0.18 弧度（~10°）小于四足 kLegSwingAmp（触腕是飘动非大跨步）；pivZ = 各触腕 z（绕各自 z 线旋转）。
+        constexpr float kSquidTentacleSwing = 0.18f; // 触腕摆幅（弧度，~10°；飘动非大跨步）
+        constexpr float kSquidRingR = 0.20f;          // 触腕环半径（躯干底沿八向分布）
+        constexpr float kSquidPivotY = -0.16f;        // 触腕顶端枢轴 y（= 躯干底面）
+        constexpr float kSquidTentHy = 0.15f;         // 触腕半高（垂直悬挂长度）
+        for (int i = 0; i < 8; ++i) {
+            const float ang = float(i) * 0.7853982f;          // i·π/4（八向：0°,45°,...,315°）
+            const float tx = kSquidRingR * std::cos(ang);      // 触腕心 x
+            const float tz = kSquidRingR * std::sin(ang);      // 触腕心 z
+            const float swing = kSquidTentacleSwing * std::sin(m_walkPhase + float(i) * 0.7853982f);
+            // 触腕心 y = 枢轴 y − 半高（顶端贴枢轴、底端下垂）。绕 (pivY, pivZ=tz) 的 X 轴旋转。
+            addBoxRot(tx, kSquidPivotY - kSquidTentHy, tz, 0.045f, kSquidTentHy, 0.045f,
+                      kSquidPivotY, tz, swing, verts, idx, bMin, bMax);
+        }
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）

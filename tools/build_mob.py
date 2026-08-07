@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""生成猪 / 牛 / 羊 / 蹒跚者 / 鸡（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
+"""生成猪 / 牛 / 羊 / 蹒跚者 / 鸡 / 鱿鱼（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
 
-机制等价 MC 1.0 三种被动生物（pig / cow / sheep）+ 鸡（chicken）+ 一种敌对生物（zombie）—— 名称 / 模型 /
-贴图全原创、**不**拷贝任何 MC 资产（PLAN §9 区隔：Zombie→Shambler「蹒跚者」改名）。本脚本程序生成
-五种 mob 各一张「全脸」贴图（MobModel 几何的每面都铺同一张贴图，非 MC 式 UV 拆皮）—— 简单稳健，
-配方块化模型比例让五种 mob 肉眼可辨。
+机制等价 MC 1.0 三种被动生物（pig / cow / sheep）+ 鸡（chicken）+ 一种敌对生物（zombie）+ 一种水生被动
+生物（squid）—— 名称 / 模型 / 贴图全原创、**不**拷贝任何 MC 资产（PLAN §9 区隔：Zombie→Shambler「蹒跚者」
+改名）。本脚本程序生成六种 mob 各一张「全脸」贴图（MobModel 几何的每面都铺同一张贴图，非 MC 式 UV 拆皮）——
+简单稳健，配方块化模型比例让六种 mob 肉眼可辨。
 
 视觉意图（每张 16×16，无 alpha 透明底 —— 实心贴图走不透明 PrincipledMaterial）：
   - mob_pig.png      ：粉红皮 + 几个深粉斑点 + 浅腹纹（读作「粉红猪皮」）。
@@ -13,11 +13,12 @@
   - mob_shambler.png ：暗绿腐肉底 + 深绿霉斑 + 棕色腐痕 + 青蓝/赭褐「破布」残片 + 深色缝合痕
                        （读作「不死亡灵腐尸」；机制等价 MC 1.0 僵尸皮肤，§9 改名 + 原创贴图）。
   - mob_chicken.png  ：白羽底 + 棕褐翅尖 / 尾羽斑 + 浅暖黄腹部（读作「白色母鸡羽毛」；t398）。
+  - mob_squid.png    ：深褐橘斑软体底 + 浅腹纹 + 暗点（读作「鱿鱼软体皮」；t399）。
 
 图案采用固定位置 + 确定性散布（无随机源 → CI 可复现、与 build_atlas.py / build_tall_grass.py 同风格）。
 
 输出（覆盖写入 textures/）：
-  mob_pig.png   /   mob_cow.png   /   mob_sheep.png   /   mob_shambler.png   /   mob_chicken.png
+  mob_pig.png   /   mob_cow.png   /   mob_sheep.png   /   mob_shambler.png   /   mob_chicken.png   /   mob_squid.png
 
 依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
 生成原创像素图，§9 override (a)）。
@@ -197,7 +198,7 @@ def make_shambler():
 
 def make_chicken():
     """鸡（Chicken；机制等价 MC 1.0 鸡，§9 原创贴图非照搬）：
-    白色羽毛底 + 棕红色翅尖 / 尾羽斑（读作「白色母鸡羽毛」）。每面铺同图（同猪牛羊全脸 UV 方案）→
+    白色羽毛底 + 棕红色的翅尖 / 尾羽斑（读作「白色母鸡羽毛」）。每面铺同图（同猪牛羊全脸 UV 方案）→
     躯干 / 头 / 尾 / 腿各盒都铺同一张羽毛纹。配方块化小型鸟比例 + 喙 / 鸡冠纯色子 Model → 肉眼读作「鸡」。
     """
     img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
@@ -235,12 +236,52 @@ def make_chicken():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_squid():
+    """鱿鱼（Squid；机制等价 MC 1.0 squid，§9 原创贴图非照搬）：
+    深褐橘斑软体底 + 浅腹纹 + 暗点（读作「鱿鱼软体皮」）。每面铺同图（同猪牛羊全脸 UV 方案）→
+    躯干 / 顶端尖 / 触腕各盒都铺同一张软体纹。配方块化水生软体比例 + 黑眼纯色子 Model → 肉眼读作「鱿鱼」。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0x6a, 0x4a, 0x3a, 255)   # 深褐主色 #6a4a3a（与 EntityManager squid 占位色同色，机制等价 squid 软体色）
+    fill(img, base)
+
+    # 橘褐斑（软体上的浅色斑驳，散布于身体，固定坐标 —— 拟鱿鱼皮肤斑点 / 色素细胞）
+    tan = (0xa8, 0x78, 0x4a, 255)    # 橘褐 #a8784a
+    blot(img, [
+        (3, 3), (4, 3), (3, 4),
+        (8, 2), (9, 2), (9, 3),
+        (12, 4), (13, 4), (12, 5),
+        (2, 8), (3, 8), (2, 9),
+        (6, 7), (7, 7), (6, 8),
+        (10, 9), (11, 9), (11, 10),
+        (13, 12), (14, 12), (13, 13),
+        (4, 12), (5, 12), (4, 13),
+    ], tan)
+
+    # 暗点（深色小点，拟皮肤皱褶 / 色素细胞暗斑，提层次）
+    dark = (0x3a, 0x28, 0x1a, 255)   # 深褐近黑 #3a281a
+    blot(img, [
+        (6, 3), (10, 5), (5, 10), (8, 11), (12, 2), (2, 11), (14, 9), (7, 13),
+    ], dark)
+
+    # 浅腹纹（底部 2 行换浅色，拟腹部更亮 —— 软体腹面常偏浅）
+    light = (0x8a, 0x6a, 0x4a, 255)  # 浅褐 #8a6a4a
+    blot(img, [
+        (x, TS - 1) for x in range(2, TS - 2)
+    ], light)
+
+    out = os.path.join(SRC, "mob_squid.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def main():
     make_pig()
     make_cow()
     make_sheep()
     make_shambler()
     make_chicken()
+    make_squid()
 
 
 if __name__ == "__main__":

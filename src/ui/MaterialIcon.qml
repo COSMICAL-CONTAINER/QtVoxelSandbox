@@ -595,6 +595,19 @@ Item {
                     R(9, 13, 1, 1, brown); R(13, 14, 1, 1, brown); R(7, 12, 1, 1, brown)
                     // 顶红色鸡冠（蛋顶上方一格，鸡的身份特征）
                     R(10, 5, 4, 1, comb)
+                } else if (kind === "squid") {
+                    // 鱿鱼（t399）：深褐橘斑壳 + 底部下垂触腕线 + 顶小尖（触腕 + 顶尖一眼辨「鱿鱼」）。
+                    //   纯原创抽象纹样（§9 区隔：非 MC 鱿鱼皮；机制对齐即可）。主色取 squid 渲染色 #6a4a3a。
+                    const shell = "#6a4a3a", lite = "#8a6a4a", dark = "#3a2a1a"
+                    const tentacle = "#3a2a1a"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边
+                    // 顶小尖（蛋顶上方一格，鱿鱼 mantle 尖顶身份）
+                    R(11, 5, 2, 1, dark)
+                    // 底部触腕线（蛋底下方几条短垂线，表「8 触腕下垂」）
+                    R(8, 19, 1, 1, tentacle); R(10, 19, 1, 1, tentacle); R(12, 19, 1, 1, tentacle)
                 }
             }
 
@@ -883,6 +896,21 @@ Item {
                 R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark) // 底阴影
                 R(15, 9, 1, 7, dark)        // 右暗边
             }
+            // 墨囊（0x22D）：杀鱿鱼掉落。MC 风格墨囊 = 黑色水滴形囊袋（顶收窄 + 底圆鼓 + 顶部小颈）。
+            //   机制等价 MC 1.0 ink sac 图标（§9 区隔：纯原创抽象水滴形，非照搬）。配色：ink #1a1a22（近黑墨囊）/
+            //   inkLite #3a3a48（受光高光）/ inkDark #0a0a12（暗边 + 颈口）/ sheen #5a5a6a（亮面反光）。
+            const drawInkSac = () => {
+                const ink = "#1a1a22", inkLite = "#3a3a48", inkDark = "#0a0a12", sheen = "#5a5a6a"
+                R(10, 6, 4, 1, inkDark)     // 顶颈口（窄收口）
+                R(9, 7, 6, 1, ink)          // 颈下
+                R(7, 8, 10, 9, ink)         // 囊袋主体 rows 8..16（中部最宽）
+                R(8, 17, 8, 2, ink)         // 底部圆收
+                R(9, 19, 6, 1, inkDark)     // 底暗
+                R(7, 8, 10, 1, inkLite)     // 顶受光（囊袋上沿亮）
+                R(7, 9, 1, 6, inkDark)      // 左暗边（圆收体积感）
+                R(16, 9, 1, 6, inkDark)     // 右暗边
+                R(9, 10, 2, 4, sheen)       // 左侧亮面反光（拟囊袋鼓面高光）
+            }
 
             // t305 树苗物品（0x21B）：破叶概率掉落；右键草地/泥土种植 → Sapling 方块（WorldClock tick 推进成长）。
             //   机制等价 MC 1.0 橡树树苗（sapling）图标；纯原创自绘（§9a）。MC 风格树苗 = 一根棕色短树干 +
@@ -1096,6 +1124,8 @@ Item {
             case 0x22A: drawCookedChicken();  break // t398 熟鸡肉（鸡燃烧致死掉落）
             case 0x22B: drawEgg();            break // t398 蛋（鸡周期性下蛋掉落）
             case 0x22C: drawSpawnEgg("chicken"); break // t398 生物蛋（鸡）
+            case 0x22D: drawInkSac();             break // t399 墨囊（杀鱿鱼掉落）
+            case 0x22E: drawSpawnEgg("squid");    break // t399 生物蛋（鱿鱼）
             default:    drawStick();        break
             }
         }

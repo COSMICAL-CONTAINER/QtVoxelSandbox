@@ -25,6 +25,9 @@
 //   8 = Chicken（鸡；t398）：小型鸟——圆胖躯干 + 前伸小头 + 后翘尾 + **2 细腿**（biped walk cycle，机制等价
 //     MC 1.0 鸡两足鸟形态）。喙 / 鸡冠由 Main.qml delegate 补（纯色子 Model）。声音 mobType=8 越界兜底
 //     mob_idle（generic）。
+//   9 = Squid（鱿鱼；t399）：水生软体——圆胖躯干（ mantle ）+ 顶端小尖 + **8 触腕**（环绕身体底沿分布，机制
+//     等价 MC 1.0 squid 8 触腕）。触腕绕各自顶端枢轴做 X 轴摆动（前后波浪式起伏，相位错开 → 游动时触腕飘动），
+//     walkPhase 驱动（squid 水中持续漂移 → moveSpeed 恒 >0 → 触腕常驻摆动）。眼由 Main.qml delegate 补（纯色子 Model）。
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
 //
 // 顶点格式：pos(3) + uv(2) = 5 float。每盒 6 面 × 4 角 = 24 顶点 / 36 索引；多盒累加。

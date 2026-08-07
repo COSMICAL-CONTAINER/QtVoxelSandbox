@@ -175,6 +175,12 @@ public:
     static constexpr int CookedChickenId   = 0x22A; // 熟鸡肉：鸡燃烧致死掉落（机制等价 MC 1.0 cooked chicken）
     static constexpr int EggId             = 0x22B; // 蛋：鸡周期性下蛋掉落（机制等价 MC 1.0 egg）；可堆叠 16（§9 简化走材料段默认 64）
     static constexpr int SpawnEggChickenId = 0x22C; // 生物蛋（鸡）：右键地面 → 生成鸡（MobChicken）
+    // t399 鱿鱼（squid）相关材料段物品（0x22D..0x22E；机制等价 MC 1.0 鱿鱼水里游 + 死亡掉墨囊）：
+    //   杀鱿鱼掉墨囊（1-3）；墨囊非食物 / 非燃料（§9 简化预留，未来染料 / 书与笔原料）。可堆叠 64；非方块（材料段）
+    //   → 右键不放置。MaterialIcon 自绘图标（墨囊黑水滴），创造调色板补全。名称 / 图标全原创（§9 区隔，零 MC 资产）。
+    //   **生物蛋（鱿鱼）** SpawnEggSquidId：创造模式物品，右键地面 → EntityManager::spawnMobTyped 生成 MobSquid。
+    static constexpr int InkSacId          = 0x22D; // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac；染料 / 书与笔原料预留）
+    static constexpr int SpawnEggSquidId   = 0x22E; // 生物蛋（鱿鱼）：右键地面 → 生成鱿鱼（MobSquid）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

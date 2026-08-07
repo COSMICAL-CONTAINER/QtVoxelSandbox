@@ -270,6 +270,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::SpawnEggStalkerId),  // 生物蛋（潜行者）
         int(RecipeRegistry::SpawnEggSpiderId),   // 生物蛋（蜘蛛）t285
         int(RecipeRegistry::SpawnEggChickenId),  // t398 生物蛋（鸡）：右键 → 生成鸡
+        int(RecipeRegistry::SpawnEggSquidId),    // t399 生物蛋（鱿鱼）：右键 → 生成鱿鱼
         // t244 mob 死亡掉落物（杀猪 / 牛 / 羊产出；机制等价 MC 1.0 被动生物掉落，纯原创自绘 MaterialIcon §9a）：
         //   完成创造调色板一览 —— 生存时由 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
         //   可堆叠 64（走材料段默认 maxStack）；非方块 → 右键不放置（playercontroller selectedBlock 守 Air）。
@@ -314,7 +315,10 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::FeatherId),         // 羽毛：杀鸡掉落
         int(RecipeRegistry::RawChickenId),      // 生鸡肉：杀鸡掉落
         int(RecipeRegistry::CookedChickenId),   // 熟鸡肉：鸡燃烧致死掉落
-        int(RecipeRegistry::EggId)              // 蛋：鸡周期性下蛋掉落
+        int(RecipeRegistry::EggId),             // 蛋：鸡周期性下蛋掉落
+        // t399 鱿鱼相关材料（机制等价 MC 1.0 鱿鱼死亡掉墨囊；生存由杀鱿鱼获得，创造调色板补全便于测试 / 装饰）。
+        //   可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘图标。
+        int(RecipeRegistry::InkSacId)           // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac）
     };
 }
 
@@ -497,6 +501,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::CookedChickenId)   return QStringLiteral("熟鸡肉");   // 鸡燃烧致死掉落
         if (blockId == RecipeRegistry::EggId)             return QStringLiteral("蛋");       // 鸡周期性下蛋掉落
         if (blockId == RecipeRegistry::SpawnEggChickenId) return QStringLiteral("生物蛋（鸡）"); // 右键地面 → 生成鸡
+        // t399 鱿鱼相关（机制等价 MC 1.0 鱿鱼；§9 区隔改名 + 原创名）。
+        if (blockId == RecipeRegistry::InkSacId)        return QStringLiteral("墨囊");       // 杀鱿鱼掉落
+        if (blockId == RecipeRegistry::SpawnEggSquidId) return QStringLiteral("生物蛋（鱿鱼）"); // 右键地面 → 生成鱿鱼
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

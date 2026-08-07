@@ -446,6 +446,21 @@ Window {
                      : (mt === EntityManager.MobChicken) ? "#f5f0e4" : "#f0a8b0"
             entityManager.spawnMobTyped(sx, sh + 1, sz, mt, col, 10)
         }
+
+        // t399 鱿鱼水生散布（spec「squid ... swims in water bodies」；机制等价 MC 1.0 squid 在水里生成）：
+        //   在整图随机散布一群鱿鱼，**仅取水面列**（blockAt==Water；跳陆地 / 空气），在水面格生成 → EntityManager
+        //   aiSquid 喷水推进游动（feet 入水即触发水中物理 + 周期上浮）。数量少（kSquidScatterCount）免水底塞满。
+        //   无群系门控（MC 1.0 squid 各群系水体均可，本工程简化为全图水面随机）。col 占位串（MobSquid 走 MobModel
+        //   + 贴图，不读 color；mobType 0 UnitCube 路径才读，此处不涉）。
+        const kSquidScatterCount = 6
+        for (let i = 0; i < kSquidScatterCount; ++i) {
+            const qsx = 4 + Math.floor(Math.random() * (wdim - 8)) // [4, wdim-4)，避世界边
+            const qsz = 4 + Math.floor(Math.random() * (wdim - 8))
+            const qsh = theWorld.heightAt(qsx, qsz)
+            if (qsh <= 0) continue
+            if (theWorld.blockAt(qsx, qsh, qsz) !== 21 /* Water */) continue // 非水面 → 跳（仅水里生成）
+            entityManager.spawnMobTyped(qsx, qsh, qsz, EntityManager.MobSquid, "#6a4a3a", 10)
+        }
     }
     // t78 立即重生（死亡界面按钮）：满血 + 清死亡态 + 传回出生点 + 清挖掘/飞行态 + 重新锁定指针回游戏。
     //   PlayerState.respawn 复位血量/死亡态；PlayerController.respawn 传回出生点 + 清物理态；
@@ -750,7 +765,8 @@ Window {
             "bones": EntityManager.MobBones,
             "stalker": EntityManager.MobStalker,
             "spider": EntityManager.MobSpider,
-            "chicken": EntityManager.MobChicken
+            "chicken": EntityManager.MobChicken,
+            "squid": EntityManager.MobSquid
         }
         return (name in m) ? m[name] : -1
     }
@@ -1186,6 +1202,12 @@ Window {
                 itemEntities.spawnItem(x, y, z, 0x228, 1)   // 羽毛 ×1-2（非肉，燃烧不变）
                 itemEntities.spawnItem(x, y, z, 0x228, 1)
                 itemEntities.spawnItem(x, y, z, burned ? 0x22A : 0x229, 1)  // 熟鸡肉 / 生鸡肉 ×1
+            } else if (mobType === EntityManager.MobSquid) {
+                // t399 鱿鱼掉落：墨囊 ×1-3（机制等价 MC 1.0 鱿鱼掉墨囊 ink sac）。墨囊非食物 / 非燃料
+                //   （§9 简化预留，未来染料 / 书与笔原料），着火不替换（无熟变体）。0x22D=RecipeRegistry::InkSacId。
+                itemEntities.spawnItem(x, y, z, 0x22D, 1)             // 墨囊 ×1（恒掉）
+                if (Math.random() < 0.66) itemEntities.spawnItem(x, y, z, 0x22D, 1)  // ~66% ×2
+                if (Math.random() < 0.33) itemEntities.spawnItem(x, y, z, 0x22D, 1)  // ~33% ×3（独立 → 总量 1-3）
             }
             // MobTest（通用测试生物）/ MobStalker（潜行者；爆炸型，机制等价 MC 苦力怕无常规掉落）不掉落 —— 调试 /
             //   爆炸型无游戏内常规产出。Stalker 爆炸破坏方块的掉落由 detonateStalker 的 explosionDroppedItem 单独发（t297）。
@@ -2204,6 +2226,9 @@ Window {
         // t398 鸡（Chicken；机制等价 MC 1.0 鸡，§9 原创）：白羽底 + 棕褐翅尖 / 尾羽斑 + 浅暖黄腹部（build_mob.py
         //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 小型鸟几何（躯干/头/尾/2 腿）每面铺整张贴图。
         Texture { id: mobChickenTex; source: "qrc:/textures/mob_chicken.png"; generateMipmaps: false }
+        // t399 鱿鱼（Squid；机制等价 MC 1.0 squid，§9 原创）：深褐橘斑软体底 + 浅腹纹 + 暗点（build_mob.py
+        //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 水生软体几何（躯干 + 顶端尖 + 8 触腕）每面铺整张贴图。
+        Texture { id: mobSquidTex; source: "qrc:/textures/mob_squid.png"; generateMipmaps: false }
 
         // t218 火把手持/掉落贴图：火把在世界内是异形（torchHost 木柄+火焰小立方，非 1×1×1 立方体），
         //   但手持/掉落旧路径走 BlockCube（6 面立方贴图集 tile 17）→ 即便 alphaCutoff 丢弃透明底，肉眼仍是
@@ -3671,6 +3696,7 @@ Window {
                         if (entMobType === EntityManager.MobBones) return 0.90 - mobHalfH   // t287 Bones 人形（腿底 0.90）
                         if (entMobType === EntityManager.MobSpider) return 0.30 - mobHalfH  // t285 Spider 宽矮（腿底 0.30）
                         if (entMobType === EntityManager.MobChicken) return 0.40 - mobHalfH // t398 Chicken 小型鸟（腿底 0.40）
+                        if (entMobType === EntityManager.MobSquid) return 0.46 - mobHalfH // t399 Squid 触腕底 0.46（贴 collision 底面）
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
                     }
                     Model {
@@ -4296,6 +4322,38 @@ Window {
                             geometry: UnitCube {}
                             position: Qt.vector3d(0.08, 0.27, -0.27)
                             scale: Qt.vector3d(0.025, 0.03, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                    }
+                    // t399 Squid（鱿鱼；mobType 9）：MobModel 水生软体几何（圆胖躯干 + 顶端尖 + 8 触腕；机制等价
+                    //   MC 1.0 squid，§9 原创模型 + 贴图）。passive → EntityManager AI 走 aiSquid（水里喷水推进游动）；
+                    //   死亡掉墨囊（onMobDied → spawnItem InkSacId）。受击红闪。眼为本 Model 子节点（纯色 NoLighting，
+                    //   同鸡眼模式 —— 单材质无法同几何双色，故眼独立子节点继承 bodyYaw + visible）。MobModel 躯干心
+                    //   (0,0.08,0) 半 (0.28,0.24,0.28) → 前面 z=-0.28；眼贴躯干前侧（z≈-0.29 略凸出防 z-fight）。
+                    Model {
+                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSquid
+                        geometry: MobModel {
+                            mobType: 9
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
+                        position: Qt.vector3d(0, mobModelYOff, 0)
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                            baseColorMap: mobSquidTex
+                        }
+                        // 眼（2 颗黑点；躯干前侧偏前 z=-0.29、y=0.10、x=±0.10）。同鸡眼纯色子 Model 模式。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.10, 0.10, -0.29)
+                            scale: Qt.vector3d(0.03, 0.03, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.10, 0.10, -0.29)
+                            scale: Qt.vector3d(0.03, 0.03, 0.02)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                         }
                     }

@@ -106,6 +106,7 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
         case MobStalker:  e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 苦力怕 0.6 宽；旧 0.9 偏大一圈；t284）
         case MobSpider:   e.halfW = 0.45f; e.halfH = 0.30f; e.hostile = true; break; // 0.9×0.6 宽矮（躯干 0.8 宽 + 余量；旧 1.1 偏大；快速，t285）
         case MobChicken:  e.halfW = 0.30f; e.halfH = 0.40f; break; // 0.6×0.8 小型鸟（躯干 0.4 宽 / 站立 0.7 高；t398）
+        case MobSquid:    e.halfW = 0.40f; e.halfH = 0.45f; break; // 0.8×0.9 水生软体（机制等价 MC 1.0 squid 0.8 宽；t399）
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
@@ -138,6 +139,12 @@ void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QStrin
     e.eggTimer = (mobType == MobChicken)
                  ? (kEggLayMin + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kEggLayMax - kEggLayMin))
                  : 0.0f;
+    // t399 鱿鱼喷水推进计时初值：随机化（kSquidSwimIntervalMin..Max）防批量 spawn 的鱿鱼同步喷水（同 ambientTimer
+    //   错峰模式）。非 MobSquid 的 mob 保留 0 不触发（tick Mob 分支仅 mobType==MobSquid 推进 swimTimer）。
+    e.swimTimer = (mobType == MobSquid)
+                  ? (kSquidSwimIntervalMin
+                     + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kSquidSwimIntervalMax - kSquidSwimIntervalMin))
+                  : 0.0f;
     e.ambientTimer = kAmbientMin
                      + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
     // t377 mob 随机护甲（仅 Shambler/Bones；spec「~80% no armor, ~20% a random piece/set」）。机制等价 MC 1.0
@@ -985,6 +992,52 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
     // 撞墙（两轴都未动）→ 缩短 timer 下帧大概率换向离开墙角（避免一直顶墙原地不动）。
     if (!moved) e.wanderTimer = std::min(e.wanderTimer, 0.2f);
 
+    return moved;
+}
+
+// t399 鱿鱼水生 AI（详见头文件 aiSquid 注释）。机制对齐 MC 1.0 squid：水里周期喷水推进（上浮 + 水平漂游）+
+//   通用重力缓沉 → 节律性游动；离水搁浅走 aiWander 慢爬。分层（PLAN §2）：只读 World::blockAt（mobFeetInWater
+//   脚位水格判，同文件静态助手）+ 自身数据；写 EntityManager 自身（pos / vy / yawRad / swimTimer）。无向上依赖。
+bool EntityManager::aiSquid(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale)
+{
+    // 离水（搁浅）：委托 aiWander 陆地慢爬（机制等价 MC squid 上岸后笨拙挪动；不复用喷水推进）。speedScale 透传
+    //   （搁浅态不在水中 → speedScale=1.0 正常走速；若恰在浅水边沿 speedScale<1 亦无妨，慢爬更符合搁浅笨拙感）。
+    if (!mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)) {
+        return aiWander(e, dt, world, worldW, worldD, speedScale);
+    }
+
+    // 水中：swimTimer 倒计时到 → 喷水推进（vy 上冲量 + 随机换向漂游方向）+ 重置随机周期。
+    e.swimTimer -= dt;
+    if (e.swimTimer <= 0.0f) {
+        e.swimTimer = kSquidSwimIntervalMin
+                      + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kSquidSwimIntervalMax - kSquidSwimIntervalMin);
+        // 喷水推进上冲量（正=向上）。其下通用重力段以 kWaterGravity 缓沉把它减速到 0 再反向 → 上浮→缓沉 bobbing。
+        e.vy = kSquidSwimUp;
+        // 随机换向（水平漂游方向）；与 player / aiWander 同 yaw 约定：dir = (-sin,0,-cos)。
+        e.yawRad = float(QRandomGenerator::global()->bounded(62832)) / 10000.0f;
+    }
+
+    // 水平漂游（沿 yaw 慢速漂移；kSquidSwimSpeed 不受 speedScale 影响 —— 物种游速特征，叠加通用减速会过慢）。
+    //   逐轴（X 后 Z）边界 clamp + mobAabbHitsSolid 撤回防穿墙（同 aiWander 移动模式；水中漂游遇实体方块亦撤回）。
+    const float spd = kSquidSwimSpeed;
+    const float dx = -std::sin(e.yawRad) * spd * dt;
+    const float dz = -std::cos(e.yawRad) * spd * dt;
+    const float ehw = e.halfW;
+    const float ehh = e.halfH;
+    float newX = e.pos.x() + dx;
+    if (newX < ehw) newX = ehw;
+    if (newX > worldW - ehw) newX = worldW - ehw;
+    if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+    float newZ = e.pos.z() + dz;
+    if (newZ < ehw) newZ = ehw;
+    if (newZ > worldD - ehw) newZ = worldD - ehw;
+    if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+
+    bool moved = false;
+    if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+    if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+    // moveSpeed 恒取漂游速（水中持续漂移 → 触腕摆动画常驻；区别于 aiWander 的 idle/行走二态）。
+    e.moveSpeed = spd;
     return moved;
 }
 
@@ -1957,6 +2010,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
             } else {
                 // 非吃草：扫描冷却倒数（仅羊）；AI wander；羊 idle 且冷却到 → 扫前方草丛决定是否开吃。
+                //   t399 鱿鱼（mobType==MobSquid）走 aiSquid（水里喷水游动；非 aiWander），且无吃草分支（非羊）。
+                if (e.mobType == MobSquid) {
+                    if (aiSquid(e, float(dt), world, worldW, worldD, speedScale)) dirty = true;
+                } else {
                 if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(dt);
                 if (aiWander(e, float(dt), world, worldW, worldD, speedScale)) dirty = true;
                 if (isSheep && e.eatCooldown <= 0.0f && e.wanderSpeed <= 0.0f) {
@@ -2000,6 +2057,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         }
                     }
                 }
+                } // 非 squid 的 passive（sheep 吃草 / 通用 wander）；squid 走上面 aiSquid 分支
             }
 
             // t298 流水推动 mob（机制等价玩家 t211：脚位在流水格 state>0 → 沿「离源方向」叠入水平位移）。
