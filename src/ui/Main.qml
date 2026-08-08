@@ -5622,7 +5622,7 @@ Window {
                     Text { text: "状态：" + (resourcePack.active ? "已加载资源包，贴图已覆盖"
                                                                 : "未加载资源包（用默认贴图）")
                            color: resourcePack.active ? "#7fe57f" : "#b08060"; font.pixelSize: 11 }
-                    Text { text: "材质包目录（需含 assets/minecraft/textures/block 子树）"
+                    Text { text: "材质包目录（可选 pack 根目录，loader 会自动查找 assets/minecraft/textures/block）"
                            color: "#9aa0a6"; font.pixelSize: 11; wrapMode: Text.WordWrap; width: parent.width }
                     Row {
                         spacing: 8
@@ -5653,7 +5653,7 @@ Window {
                     //   （decodeURIComponent 处理空格 / 中文）→ packPath + enabled + apply（一步到位即时切换）。
                     FolderDialog {
                         id: rpFolderDialog
-                        title: "选择材质包目录（需含 assets/minecraft/textures/block）"
+                        title: "选择材质包目录（pack 根目录或其下任意层级均可）"
                         onAccepted: {
                             var u = selectedFolder.toString()
                             if (u.startsWith("file:///"))

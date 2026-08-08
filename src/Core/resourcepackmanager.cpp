@@ -42,12 +42,52 @@ QMutex &stateMutex()
     return m;
 }
 
-// 合法包判定：含 assets/minecraft/textures/block/ 子树（spec t414 的 pack 结构）。
-bool isValidPack(const QString &absPath)
+// t419 浅层有界 DFS：在 root 子树内寻找路径以 assets/minecraft/textures/block 结尾的目录。
+//   命中即返（DFS，首个即取，足够唯一）。maxDepth 限制递归深度——pack 标准布局 block 在 root 下 4 层
+//   （assets/minecraft/textures/block），留 2 层余量给 wrapper / 子包目录，避免扫遍巨大包树。
+QString findBlockDirBounded(const QDir &dir, int depth, int maxDepth)
+{
+    if (depth > maxDepth)
+        return {};
+    // 本层目录自身即 block 目录（root 自身命中：用户直选 .../textures/block；或递归过程中命中）。
+    if (dir.dirName() == QStringLiteral("block")) {
+        const QString path = QDir::cleanPath(dir.absolutePath());
+        const QString suffix = QStringLiteral("/assets/minecraft/textures/block");
+        if (path.endsWith(suffix) || path == QStringLiteral("assets/minecraft/textures/block"))
+            return path;
+    }
+    const QStringList subs =
+            dir.entryList(QDir::Dirs | QDir::NoSymLinks | QDir::NoDotAndDotDot);
+    for (const QString &sub : subs) {
+        const QString r = findBlockDirBounded(QDir(dir.filePath(sub)), depth + 1, maxDepth);
+        if (!r.isEmpty())
+            return r;
+    }
+    return {};
+}
+
+// t419 在任意层级 packPath 上定位 block 贴图目录（spec t419）：
+//   1) <packPath>/assets/minecraft/textures/block（pack 根标准布局，最常见 → 快速直命中，避免递归开销）
+//   2)/(3) packPath 即 block 目录，或 packPath 是 pack 根 / 中间层（assets/minecraft/textures）：
+//         浅层有界 DFS 在子树内找路径以 assets/minecraft/textures/block 结尾的目录（root 自身也在范围内）。
+//   → 用户选 pack 根、block 目录、或中间任意层，均可加载。返回 block 目录绝对路径（cleanPath）；找不到为空。
+QString resolveBlockDir(const QString &absPath)
 {
     if (absPath.isEmpty())
-        return false;
-    return QDir(absPath + QStringLiteral("/assets/minecraft/textures/block")).exists();
+        return {};
+    const QDir root(absPath);
+    if (!root.exists())
+        return {};
+    const QString direct = root.filePath(QStringLiteral("assets/minecraft/textures/block"));
+    if (QFileInfo(direct).isDir())
+        return QDir::cleanPath(direct);
+    return findBlockDirBounded(root, 0, 6);
+}
+
+// 合法包判定：能在 packPath（任意层级）上定位到 block 贴图目录（spec t419）。
+bool isValidPack(const QString &absPath)
+{
+    return !resolveBlockDir(absPath).isEmpty();
 }
 
 // 相对路径 → 绝对（相对 exe 目录；exe 在 build/ → 解析到 <工程根>/...）。
@@ -357,7 +397,14 @@ void ensureBuiltLocked()
     }
 
     // 合成：对映射里存在的瓦片，把包内 PNG 缩放到 TILE=16 后覆盖。
-    const QDir blockDir(packPath + QStringLiteral("/assets/minecraft/textures/block"));
+    // t419 packPath 可为 pack 根 / 中间层 / block 目录任意层级，统一经 resolveBlockDir 定位贴图目录。
+    const QString blockDirPath = resolveBlockDir(packPath);
+    if (blockDirPath.isEmpty()) {
+        // isValidPack 已保证非空；此处守卫仅防竞态（包在解析后、合成前被删 / 移）。
+        qWarning("ResourcePack: 包 %s 的 block 贴图目录解析失败，跳过覆盖。", qPrintable(packPath));
+        return;
+    }
+    const QDir blockDir(blockDirPath);
     QPainter p(&s.atlas);
     int overridden = 0;
     for (const auto &m : tileFilenameMap()) {
