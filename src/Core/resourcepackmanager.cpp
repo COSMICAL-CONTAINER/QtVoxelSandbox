@@ -259,6 +259,39 @@ const QList<QPair<int, QString>> &tileFilenameMap()
     return kMap;
 }
 
+// t416 MC「灰度可着色」瓦片集合（grass_top / grass_side / leaves / tall_grass）：本体是灰度贴图，由
+//   生物群系着色覆绿（机制等价 MC foliageColor/grassColor）。loader 直接用包内灰度原色会渲染成苔石色，
+//   故合成时把这些 tile 的包内贴图乘上叶绿素色调。非着色瓦片（stone/dirt/...）原样，不受影响。
+//   注：grass_block_side 仅顶部 overlay 着色，乘绿会把下方泥土也偏绿，但 MC 该贴图灰度区集中顶部，
+//   HD 包常已带色；本单色近似（plains 平均叶绿素 #5a8a3a）可接受，验收以「叶子绿 + 草顶/侧读绿」为准。
+bool isFoliageTinted(int tileIndex)
+{
+    return tileIndex == 0   // grass_top
+        || tileIndex == 1   // grass_side（顶部 overlay 着色）
+        || tileIndex == 9   // oak_leaves
+        || tileIndex == 28; // tall_grass
+}
+
+// 乘色着色：tile 已是 Format_ARGB32_Premultiplied——直接乘预乘后的 RGB = 正确保持预乘关系
+//   （newR = tintR * R * A，alpha 不动）。灰度部分乘绿 → 绿。
+void applyFoliageTint(QImage &tile)
+{
+    constexpr int tintR = 0x5a; // plains foliage 平均叶绿素 #5a8a3a（归一化用 /255）
+    constexpr int tintG = 0x8a;
+    constexpr int tintB = 0x3a;
+    const int w = tile.width(), h = tile.height();
+    for (int y = 0; y < h; ++y) {
+        QRgb *scan = reinterpret_cast<QRgb *>(tile.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const QRgb c = scan[x];
+            scan[x] = qRgba((qRed(c) * tintR) / 255,
+                            (qGreen(c) * tintG) / 255,
+                            (qBlue(c) * tintB) / 255,
+                            qAlpha(c));
+        }
+    }
+}
+
 // 合成构建（调用者须已持 stateMutex()）。幂等（built 标志）。运行期经 apply() 置 built=false 强制重建。
 //   config 首次从 settings.json 加载；之后只信 BuiltState 内存值（setter 已持久化保持同步）。
 void ensureBuiltLocked()
@@ -341,6 +374,8 @@ void ensureBuiltLocked()
         tile = tile.convertToFormat(QImage::Format_ARGB32_Premultiplied);
         if (tile.size() != QSize(kTile, kTile))
             tile = tile.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        if (isFoliageTinted(m.first))
+            applyFoliageTint(tile); // t416：灰度可着色瓦片乘叶绿素（叶子/草顶/草侧/草丛 → 绿）
         p.drawImage(m.first * kTile, 0, tile);
         ++overridden;
     }
