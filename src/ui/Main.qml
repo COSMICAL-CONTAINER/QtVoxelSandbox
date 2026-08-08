@@ -2396,6 +2396,17 @@ Window {
         // 地形段 chunk Model 模板（culled mesh，非水方块）。cx/cz 由 createObject initial properties 注入；
         //   内层 ChunkGeometry 经 terrainModel（本组件实例根 id）读 chunkCX/CZ —— 与 t170 torchDelegate 子引用
         //   torchGlow 同一 Component 内根-id 引用模式（已验证）。
+        // t442 alphaMode 修复（根因）：terrain 段唯一的 alpha 带 tile = leaves(9)。oak_leaves 贴图是「fancy 叶」
+        //   ——约 21% 像素带 alpha（叶间隙），且这些透明像素的 RGB 多为纯黑 (0,0,0)（fancy 叶贴图的间隙约定）。
+        //   旧材质虽写了 `alphaCutoff:0.5` 但**未设 alphaMode**（缺省 Opaque）→ Qt 6.8+ 下 alphaCutoff 仅在
+        //   alphaMode:Mask 时才生效（lessons-learned t439）：Opaque 模式 alpha 被完全忽略 → 叶间隙的黑 RGB
+        //   透明像素当不透明渲染 = 整叶面散布黑斑、且无透空 → 用户「树叶颜色/贴图不对」（t416/t422 加 tint / 改
+        //   grass_side 均未触及此根因——根因在材质 alphaMode，非 tint / 非贴图源 / 非路由误分类）。修：加
+        //   `alphaMode:Mask` 让既有 alphaCutoff 生效（同 cross/cutout 段契约，t439）：叶间隙 alpha<0.5 像素硬丢弃
+        //   → 干净透空绿叶、黑斑消失；地形其余 tile（grass/dirt/stone/...）全 alpha=255 → Mask 下零丢弃、外观不变。
+        //   Mask 走不透明 pass 写深度，与旧 Opaque 深度行为一致 → 零剔除 / z-fight 回归。Leaves 经 PASS 2 立方面
+        //   路由（solid 整立方，非 cross / 非异形），leaf tint 仍由 ResourcePackManager 对包内灰度 oak_leaves.png
+        //   applyFoliageTint 处理（tile 9 isFoliageTinted=true）；本默认图集 leaves 已是预染绿，无需再 tint。
         Component {
             id: terrainChunkComp
             Model {
@@ -2411,7 +2422,7 @@ Window {
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
             }
         }
 
