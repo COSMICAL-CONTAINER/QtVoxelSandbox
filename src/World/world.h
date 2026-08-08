@@ -212,14 +212,16 @@ public:
     //   worldChanged（无重建、无开销）。spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickCropGrowth();
-    // t406 甘蔗生长 tick（spec「甘蔗 max5、仅邻水处长高」）：由呈现层 Main.qml 经 WorldClock.ticked 桥接调用
+    // t406 甘蔗生长 tick（spec「甘蔗 max5、仅邻水处长高、5 罕见」）：由呈现层 Main.qml 经 WorldClock.ticked 桥接调用
     //   （每 100ms 一 tick；节流到 ~每 kSugarcaneTickInterval×0.1s 一窗）。机制等价 MC 1.0 sugar cane 生长
     //   （random-tick 散布概率升柱）：扫甘蔗柱顶（上方为空气的甘蔗格），据柱基是否邻水（4 水平邻于基 / 基下一层）
     //   + 柱高 < kSugarcaneMaxHeight(5) + 确定性散布概率 → 命中即在柱顶上方一格长一格（setWaterSilent 静默写，
-    //   无破/放反馈，机制等价 MC「甘蔗生长无反馈」）。柱基不邻水 → 永不长（满足 spec「仅邻水处长高」）；
-    //   柱高已达 5 → 停长。稳态（无甘蔗 / 全满高 / 全不邻水）每窗无变化 → 不发 worldChanged。散布确定性哈希
-    //   （seed + 位置 + 窗口序号，PLAN §2-K，同 tickCropGrowth/tickSaplingGrowth）。分层（PLAN §2）：World 层，
-    //   只读 / 写 m_chunks + 发 worldChanged。不依赖 Renderer/Physics/Game。
+    //   无破/放反馈，机制等价 MC「甘蔗生长无反馈」）。柱基不邻水 → 永不长（满足 spec「仅邻水处长高」）；柱高已达 5
+    //   → 停长。t418 拔高潜力门：柱高 ≥3 时据列位一次性哈希判 kSugarcaneTallPct 潜力 —— 多数柱止于 1..3、仅少数潜力
+    //   柱可长到 4..5（满足 spec「1..3 common、5 rare」；修旧「全柱最终长到 5」稳态）。稳态（无甘蔗 / 全满高 / 全不邻水
+    //   / 全无潜力）每窗无变化 → 不发 worldChanged。散布确定性哈希（seed + 位置 + 窗口序号，PLAN §2-K，同
+    //   tickCropGrowth/tickSaplingGrowth）。分层（PLAN §2）：World 层，只读 / 写 m_chunks + 发 worldChanged。
+    //   不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickSugarcaneGrowth();
     // t406 耕地湿润复算 tick（spec「被附近水湿润、4 级」的动态实现）：由呈现层 Main.qml 经 WorldClock.ticked 桥接
     //   （每 100ms 一 tick；节流到 ~每 kFarmlandHydrTickInterval×0.1s 一窗）。扫全图 Farmland 格，逐格用
@@ -407,12 +409,12 @@ private:
     //   （setVoxelIfAir）→ 不覆盖草上已生成的方块（树 / 草丛）。纯函数于 seed + biomeAt → 同 seed 同分布；
     //   禁用任何运行期随机源（与 placeTallGrass / placeSwampFlora 同守卫语义）。
     void placeFlowers();
-    // t397 甘蔗散布（PLAN §2-K 确定性）：遍历水域（海平面 Water 格 / 沼泽浅水格）的**水平 4 邻**陆地列
-    //   （草地 / 沙地），在邻水陆地格的草 / 沙顶上方确定性散布 1..3 格高甘蔗柱（Sugarcane cross，每格仅写空气格）。
-    //   机制等价 MC 1.0 sugar cane 生于水边（沙 / 草地邻水）。仅在水**直接邻接**的陆地生（机制等价 MC 甘蔗须邻水；
-    //   远水陆地不生）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），逐格向上仅写空气格 → 不覆盖
-    //   已生成的方块（树 / 草 / 花）。纯函数于 seed + biomeAt + 水域（经 hashColumn）→ 同 seed 同分布；禁用任何
-    //   运行期随机源（与 placeTallGrass / placeDesertFlora 同守卫语义）。
+    // t397 甘蔗散布（PLAN §2-K 确定性）：遍历邻水陆地列，在邻水**沙顶**（沙滩 / 海岸）上方确定性散布 1..3 格高
+    //   甘蔗柱（Sugarcane cross，每格仅写空气格）。t418：仅沙地顶生（spec「beach/sand near water, not forest lakes」；
+    //   草地滨水列含森林湖岸，因 surf≠Sand 自动排除）。机制等价 MC 1.0 sugar cane 常见于水边沙岸。仅在水**直接邻接**
+    //   的陆地生（机制等价 MC 甘蔗须邻水；远水陆地不生）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），
+    //   逐格向上仅写空气格 → 不覆盖已生成的方块（树 / 草 / 花）。纯函数于 seed + biomeAt + 水域（经 hashColumn）→
+    //   同 seed 同分布；禁用任何运行期随机源（与 placeTallGrass / placeDesertFlora 同守卫语义）。
     void placeSugarcane();
     // t395 雪原/针叶群系水面冻结（PLAN §2-K 确定性）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water
     //   格）冻结为 Ice（机制等价 MC 1.0 寒冷群系水面结冰）。仅冻最顶层水面（同 MC 仅表层结冰；下层水保留）；
@@ -558,14 +560,19 @@ private:
     // t406 甘蔗生长 tick 节流计数 + 常量：tickSugarcaneGrowth() 每 100ms 被 WorldClock.ticked 调一次；累积到
     //   kSugarcaneTickInterval 才做一次生长判定（~每 kSugarcaneTickInterval×0.1s 一窗）。窗口序号
     //   m_sugarcaneIntervalIndex 每窗 +1 喂入 hashVoxel 散布概率 → 不同甘蔗柱错峰生长。
-    //   kSugarcaneTickInterval=50（5s/窗）+ kSugarcaneGrowPct=20% → 每柱每升一格平均 ~25s（从 1 到 5 共 4 升 ~100s；
-    //   可见、可验收；MC 1.0 约 ~每 16 ticks 一次随机 tick 取快便于肉眼复核，机制对齐非精确数值复刻）。
-    //   kSugarcaneMaxHeight=5：甘蔗柱最高 5 格（spec「max5」；worldgen 初生 1..3，生长补到 5）。
+    //   kSugarcaneTickInterval=50（5s/窗）+ kSugarcaneGrowPct=20% → 每柱每升一格平均 ~25s（可见、可验收；MC 1.0 约 ~每
+    //   16 ticks 一次随机 tick 取快便于肉眼复核，机制对齐非精确数值复刻）。
+    //   kSugarcaneMaxHeight=5：甘蔗柱最高 5 格（spec「max5」；但 5 高须罕见 → 由 kSugarcaneTallPct 门控）。
+    //   kSugarcaneTallPct=10：柱基「拔高潜力」一次性门控（% of 列；列位 + seed 哈希，与窗口无关 → 稳态确定）。
+    //     多数柱止于 worldgen 初生 1..3 高；仅 ~10% 潜力柱可继续长到 4..5（spec「5 rare / 1..3 common」；
+    //     机制等价 MC 自然甘蔗多 1..3、偶有更高）。t418 修「全柱最终长到 5」bug：旧逻辑每柱不停生长直至封顶
+    //     → 稳态全 5 高，与 spec 不符。
     int m_sugarcaneTickCounter = 0;
     int m_sugarcaneIntervalIndex = 0;
     static constexpr int kSugarcaneTickInterval = 50; // tickSugarcaneGrowth 节流间隔（WorldClock tick = 100ms → 5s/窗）
     static constexpr int kSugarcaneGrowPct      = 20; // 每窗每柱升一格的散布概率（%；20% → 平均 ~25s/升）
     static constexpr int kSugarcaneMaxHeight    = 5;  // 甘蔗柱最高格数（spec「max5」；超出停长）
+    static constexpr int kSugarcaneTallPct      = 10; // 拔高潜力柱占比（%；稳态仅此比例柱可达 5 → 5 高罕见）
     // t406 耕地湿润复算 tick 节流计数 + 常量：tickFarmlandHydration() 每 100ms 被 WorldClock.ticked 调一次；累积到
     //   kFarmlandHydrTickInterval 才复算一次（~每 kFarmlandHydrTickInterval×0.1s 一窗）。复算用
     //   farmlandHydrationLevel（水源切比雪夫半径 4）→ 与存档 state 不等才静默写新等级。kFarmlandHydrTickInterval=30

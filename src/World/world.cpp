@@ -818,6 +818,14 @@ void World::tickSugarcaneGrowth()
         while (by - 1 >= 0 && m_chunks.blockAt(t.x, by - 1, t.z) == BlockRegistry::Sugarcane) --by;
         const int height = t.y - by + 1; // 柱高（含柱顶）
         if (height >= kSugarcaneMaxHeight) continue; // 已达 5 格上限 → 停长（spec「max5」）
+        // t418 拔高潜力门（列位 + seed 一次性哈希，与窗口无关 → 稳态确定）。worldgen 初生 1..3 高；多数柱止于 3，
+        //   仅 kSugarcaneTallPct 潜力柱可超 3 长到 4..5（spec「1..3 common、5 rare」）。修旧「每柱不停长直至封顶
+        //   → 稳态全 5 高」bug：高度 ≥3 且无拔高潜力 → 本柱不再升格。用列哈希（同 worldgen 源）非体素哈希，
+        //   使「潜力」是柱的固有属性（同柱每窗判定一致），不随窗口抖动。
+        if (height >= 3) {
+            const quint32 baseHash = hashColumn(m_seed, t.x, t.z);
+            if (int(baseHash % 100u) >= kSugarcaneTallPct) continue; // 无拔高潜力 → 止于 3（5 高罕见）
+        }
 
         // 柱基邻水判定（4 水平邻于基 y / 基下一层 y-1）：与 worldgen placeSugarcane 同语义（草 / 沙顶邻水）。
         //   基下一层 = 草 / 沙地格（worldgen 在 surfaceY 查水）；基层查水兼容沼泽浅水（placeSwampPools 改草顶为水）。
@@ -2061,16 +2069,18 @@ void World::placeFlowers()
             << "/ blue" << blue << "/ white" << white << ")"; // 同 seed → 同计数（确定性核对）
 }
 
-// t397 甘蔗散布（见 world.h 头注释）：遍历水域（海平面 Water 格 y==waterLevel / 沼泽浅水格）的水平 4 邻陆地列
-//   （草地 / 沙地），在邻水陆地格的草 / 沙顶上方确定性散布 1..3 格高甘蔗柱。机制等价 MC 1.0 sugar cane 生于水边。
-//   「邻水」判定 = 该列草 / 沙顶（surfaceY）的水平 4 邻任一为 Water（海平面水 / 沼泽浅水均算）；远水陆地不生
-//   （机制等价 MC 甘蔗须直接邻水）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），逐格向上仅写
-//   空气格 → 不覆盖已生成的方块（树 / 草 / 花）。仅写空气格（setVoxelIfAir）。
-//   纯函数于 seed + biomeAt + 水域（经 hashColumn，PLAN §2-K）→ 同 seed 同分布；禁用任何运行期随机源。
-//   worldgen 顺序：placeFlowers 之后（花占草顶上方一格优先），甘蔗仅写空气格 → 已被占的列自然跳过。
+// t397 甘蔗散布（见 world.h 头注释）：遍历邻水陆地列，在邻水沙顶（沙滩）上方确定性散布 1..3 格高甘蔗柱。
+//   t418：仅沙地顶（沙滩 / 海岸）生甘蔗 —— 草地滨水（森林湖 / 草原岸）不生（spec「beach/sand near water, not forest
+//   lakes」）。机制等价 MC 甘蔗常见于水边沙岸。本世界地形中沙顶仅出现在沙海（海域）海岸（surfaceFill 沙海盘铺
+//   沙），故「沙顶 + 邻水」= 海岸沙滩；森林 / 草原 / 沼泽的草顶滨水列（含森林湖岸）因 surf≠Sand 自动排除。
+//   「邻水」判定 = 该列沙顶（surfaceY）的水平 4 邻任一为 Water（海平面水）；远水陆地不生（机制等价 MC 甘蔗须直接
+//   邻水）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），逐格向上仅写空气格 → 不覆盖已生成的
+//   方块（树 / 草 / 花）。仅写空气格（setVoxelIfAir）。纯函数于 seed + biomeAt + 水域（经 hashColumn，PLAN §2-K）
+//   → 同 seed 同分布；禁用任何运行期随机源。worldgen 顺序：placeFlowers 之后（花占草顶上方一格优先），甘蔗仅写
+//   空气格 → 已被占的列自然跳过。
 void World::placeSugarcane()
 {
-    constexpr unsigned kSugarcanePct = 30; // 邻水陆地列生甘蔗密度（% of 邻水草/沙顶列；机制等价 MC 水边甘蔗较常见）
+    constexpr unsigned kSugarcanePct = 30; // 邻水沙滩列生甘蔗密度（% of 邻水沙顶列；机制等价 MC 水边甘蔗较常见）
     int placed = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
@@ -2078,9 +2088,9 @@ void World::placeSugarcane()
             if (bio == Biome::Desert) continue; // 沙漠群系甘蔗归 placeDesertFlora（仙人掌 / 枯灌木）—— 不在此散布
             const int surfaceY = heightAt(x, z);
             if (surfaceY <= 0 || surfaceY >= m_height) continue; // 防御（界内）
-            // 仅草地 / 沙地顶生甘蔗（机制等价 MC 甘蔗生于草地 / 沙地；雪原覆雪不生 → Snowy 草顶已被 SnowLayer 替换 → 跳过）。
+            // 仅沙地顶生甘蔗（t418：沙滩 / 海岸；草地滨水不生 → 森林湖岸等草顶列自动排除）。
             const quint8 surf = m_chunks.blockAt(x, surfaceY, z);
-            if (surf != BlockRegistry::Grass && surf != BlockRegistry::Sand) continue;
+            if (surf != BlockRegistry::Sand) continue;
 
             // 「邻水」判定：草 / 沙顶（surfaceY）的水平 4 邻任一为 Water。海平面水（y==waterLevel）+ 沼泽浅水
             //   （placeSwampPools 改的草顶 Water）均算。机制等价 MC 甘蔗须直接邻水（半径 1 内有水）。
