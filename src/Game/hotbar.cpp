@@ -213,6 +213,18 @@ bool Hotbar::isPartialBlock(int itemId) const
     return BlockRegistry::isPartialBlock(quint8(itemId));
 }
 
+// t440 cross 广告牌方块段判定（手持 / 掉落渲染分流用）：cross 植物（草丛 / 作物 / 树苗 / 花 / 蘑菇 / 睡莲 /
+//   甘蔗 / 枯灌木 / 木梯）在世界内是双面对角 cross 广告牌（非整立方），手持 / 掉落须走 flat 2D 图标
+//   BillboardQuad（icon_*.png + alphaCutoff discard 透明底），非 BlockCube 满格立方——cross 贴图透明底，
+//   BlockCube 材质无 alpha 处理会把透明底当不透明 → 渲成黑底方块（用户实测「火把/花/蘑菇/睡莲手持+掉落黑底」）。
+//   走 BlockRegistry::isCrossBillboard 单一权威（同 mesher cross 段路由谓词），避免 QML 与 mesher 路由漂移。
+//   火把（id 13）在 QML 有独立分支（mesher 火把亦非 cross 段），故不含；供其余 cross 方块统一路由进 flat billboard。
+bool Hotbar::isCrossBlock(int itemId) const
+{
+    if (itemId <= 0 || itemId >= int(BlockRegistry::Count)) return false;
+    return BlockRegistry::isCrossBillboard(quint8(itemId));
+}
+
 int Hotbar::toolTier(int itemId) const
 {
     const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);

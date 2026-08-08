@@ -148,6 +148,14 @@ public:
     //   **闭区间** [FirstPartial, LastPartial]（lessons-learned t194：单边 >= FirstPartial 会误路由段后整立方
     //   如 Chest(22) 进异形路径）。机制等价 MC「不完整方块手持 / 掉落显其立体图标」。
     Q_INVOKABLE bool isPartialBlock(int itemId) const;
+    // t440 cross 广告牌方块段判定（手持 / 掉落渲染分流用）：cross 植物（草丛 / 作物 / 树苗 / 花 / 蘑菇 /
+    //   睡莲 / 甘蔗 / 枯灌木 / 木梯）在世界内是双面对角 cross 广告牌（非整立方），手持 / 掉落须走 flat 2D
+    //   图标 BillboardQuad（icon_*.png + alphaCutoff discard 透明底），非 BlockCube 满格立方——cross 贴图是
+    //   透明底，BlockCube 材质无 alpha 处理会把透明底当不透明 → 渲成黑底方块（用户实测「火把/花/蘑菇/睡莲
+    //   手持+掉落黑底」）。走 BlockRegistry::isCrossBillboard 单一权威（同 mesher cross 段路由谓词），避免
+    //   QML 与 mesher 路由漂移。火把（id 13）在 QML 有独立手持 / 掉落分支（火焰动画 + 细立柱比例，mesher
+    //   火把亦非 cross 段），故本谓词不含火把；其余 cross 方块统一经本谓词路由进 flat billboard 路径。
+    Q_INVOKABLE bool isCrossBlock(int itemId) const;
     // t345 护甲段判定（id 在护甲段 [ArmorIdBase, ArmorIdEnd) 内）。与 isTool / isMaterial 互斥（护甲段在
     //   材料段之上 0x300）。供 QML delegate 据 isArmor 切到护甲自绘图标 + 装备槽校验「部位匹配」。
     Q_INVOKABLE bool isArmor(int itemId) const;

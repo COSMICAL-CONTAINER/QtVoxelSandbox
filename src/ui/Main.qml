@@ -1609,14 +1609,14 @@ Window {
                 //   （草顶/草侧…），复用地形贴图（零 MC 资产）。作 viewModelHand 子节点 → 随挥动同步运动（块在手中）。
                 //   selectedBlock=0 时 BlockCube 兜底为 Stone 但 Model.visible=false 不渲染（blockId 兜底仅防空 UV）。
                 Model {
-                    visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock)
+                    visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock) && !hotbarVM.isCrossBlock(player.selectedBlock)
                     geometry: BlockCube { blockId: player.selectedBlock }
                     position: Qt.vector3d(0.0 + window.heldBlockX, 0.02 + window.heldBlockY, -0.22 + window.heldBlockZ)    // t156 基线 + t166c ESC 滑条偏移（heldBlockX/Y/Z）
                     scale: Qt.vector3d(0.12, 0.12, 0.12)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
-                        alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）已走下方 billboard 分支，本立方路径不再处理它们
+                        alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）已走下方 billboard 分支，本立方路径不再处理它们
                     }
                 }
                 // t219 手持木板衍生方块（第一人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）在世界内非整立方
@@ -1628,7 +1628,7 @@ Window {
                 //   alpha-test 契约（图标外透明底不丢弃会被当不透明黑 → 坍黑块）。partialIconTex.source 绑定
                 //   iconSourceForBlock(selectedBlock) → 选不同异形自动换图（单一 Texture 覆盖全部 6 类）。
                 Model {
-                    visible: hotbarVM.isPartialBlock(player.selectedBlock)
+                    visible: hotbarVM.isPartialBlock(player.selectedBlock) || hotbarVM.isCrossBlock(player.selectedBlock)
                     geometry: BillboardQuad {}
                     position: Qt.vector3d(0.02 + window.heldBlockX, 0.04 + window.heldBlockY, -0.22 + window.heldBlockZ)
                     scale: Qt.vector3d(0.18, 0.18, 0.18)
@@ -1637,7 +1637,7 @@ Window {
                         lighting: PrincipledMaterial.NoLighting
                         alphaCutoff: 0.5
                         opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
-                        baseColorMap: partialIconTex
+                        baseColorMap: partialIconTex   // t440：cross 段（花/蘑菇/睡莲/树苗/枯木/草丛…）透明底 flat 图标同 partialIconTex（iconSourceForBlock 返回 icon_*.png）
                     }
                 }
                 // t218/t260 手持火把（第一人称）：火把非立方（世界内异形），手持走 billboard 平图标（细立柱），
@@ -2920,7 +2920,7 @@ Window {
                     //   alphaCutoff 0.5 丢弃透明像素，否则材质把透明底当不透明 → 渲成黑色立方体（用户实测
                     //   「手持火把黑方块」）。仅火把（id 13）启用；其余方块贴图无 alpha，alphaCutoff=0。
                     Model {
-                        visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock) && player.mode !== PlayerController.Spectator
+                        visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock) && !hotbarVM.isCrossBlock(player.selectedBlock) && player.mode !== PlayerController.Spectator
                         geometry: BlockCube { blockId: player.selectedBlock }
                         position: Qt.vector3d(0, -0.55, -0.30)   // t72：移到手前方（手心前缘 z≈-0.125 前），不嵌进手里
                         scale: Qt.vector3d(0.22, 0.22, 0.22)
@@ -2929,7 +2929,7 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             opacity: playerModel.bodyOpacity
-                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）走下方 billboard 分支
+                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）走下方 billboard 分支
                         }
                     }
                     // t219 手持木板衍生方块（第三人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）非整立方 →
@@ -2939,7 +2939,7 @@ Window {
                     //   三相机模式都可见。scale 0.22（同手持方块立方，平图标等大）；opacity 跟 bodyOpacity（观察者
                     //   半透一致）；alphaCutoff:0.5 沿用透明底 alpha-test 契约。partialIconTex 共享第一人称同一份。
                     Model {
-                        visible: hotbarVM.isPartialBlock(player.selectedBlock) && player.mode !== PlayerController.Spectator
+                        visible: (hotbarVM.isPartialBlock(player.selectedBlock) || hotbarVM.isCrossBlock(player.selectedBlock)) && player.mode !== PlayerController.Spectator
                         geometry: BillboardQuad {}
                         position: Qt.vector3d(0, -0.55, -0.30)
                         scale: Qt.vector3d(0.22, 0.22, 0.22)
@@ -2948,7 +2948,7 @@ Window {
                             cullMode: Material.NoCulling   // 双面（第三人称-前见背面；异形图标近对称）
                             alphaCutoff: 0.5
                             opacity: 0.99   // visible 已排除 Spectator → bodyOpacity 恒 1.0；<1 尊重贴图 alpha（透明底不渲染）
-                            baseColorMap: partialIconTex
+                            baseColorMap: partialIconTex   // t440：cross 段（花/蘑菇/睡莲/树苗…）flat 图标同 partialIconTex
                         }
                     }
                     // t218/t260 手持火把（第三人称）：火把非立方 → billboard 平图标（细立柱）。作 rightArmPivot 子节点
@@ -3453,7 +3453,7 @@ Window {
                     //   仅留火把像素 → 透明底不再显黑（机制同手持火把 viewModelHand / CrackBox 的 alphaCutoff 路径）。
                     //   仅火把（id 13）启用；其余方块贴图无 alpha，保持 alphaCutoff=0（默认不透明）。
                     Model {
-                        visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock(entRoot.entId) && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
+                        visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock(entRoot.entId) && !hotbarVM.isCrossBlock(entRoot.entId) && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
                         geometry: BlockCube { blockId: entRoot.entId }
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -3461,7 +3461,7 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             baseColor: terrainLight(worldClock.skyLight)
-                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）走下方 billboard 分支
+                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）走下方 billboard 分支
                         }
                     }
                     // t219 木板衍生方块掉落实体：异形段（台阶/楼梯/栅栏/压力板/门/活板门）非整立方 → BillboardQuad
@@ -3472,7 +3472,7 @@ Window {
                     //   terrainLight(skyLight) 夜间变暗（同方块段）；alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test 契约。
                     //   Texture inline 读 per-entity entId（每个掉落物各显示自己的异形图标）。
                     Model {
-                        visible: hotbarVM.isPartialBlock(entRoot.entId)
+                        visible: hotbarVM.isPartialBlock(entRoot.entId) || hotbarVM.isCrossBlock(entRoot.entId)
                         geometry: BillboardQuad {}
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -3483,7 +3483,7 @@ Window {
                             opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
                             baseColor: terrainLight(worldClock.skyLight)
                             baseColorMap: Texture {
-                                source: hotbarVM.iconSourceForBlock(entRoot.entId)
+                                source: hotbarVM.iconSourceForBlock(entRoot.entId)   // t440：cross 段（花/蘑菇/睡莲/树苗…）flat 图标同此（icon_*.png 透明底）
                                 generateMipmaps: false
                             }
                         }
