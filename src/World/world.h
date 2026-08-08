@@ -214,14 +214,15 @@ public:
     Q_INVOKABLE void tickCropGrowth();
     // t406 甘蔗生长 tick（spec「甘蔗 max5、仅邻水处长高、5 罕见」）：由呈现层 Main.qml 经 WorldClock.ticked 桥接调用
     //   （每 100ms 一 tick；节流到 ~每 kSugarcaneTickInterval×0.1s 一窗）。机制等价 MC 1.0 sugar cane 生长
-    //   （random-tick 散布概率升柱）：扫甘蔗柱顶（上方为空气的甘蔗格），据柱基是否邻水（4 水平邻于基 / 基下一层）
-    //   + 柱高 < kSugarcaneMaxHeight(5) + 确定性散布概率 → 命中即在柱顶上方一格长一格（setWaterSilent 静默写，
-    //   无破/放反馈，机制等价 MC「甘蔗生长无反馈」）。柱基不邻水 → 永不长（满足 spec「仅邻水处长高」）；柱高已达 5
-    //   → 停长。t418 拔高潜力门：柱高 ≥3 时据列位一次性哈希判 kSugarcaneTallPct 潜力 —— 多数柱止于 1..3、仅少数潜力
-    //   柱可长到 4..5（满足 spec「1..3 common、5 rare」；修旧「全柱最终长到 5」稳态）。稳态（无甘蔗 / 全满高 / 全不邻水
-    //   / 全无潜力）每窗无变化 → 不发 worldChanged。散布确定性哈希（seed + 位置 + 窗口序号，PLAN §2-K，同
-    //   tickCropGrowth/tickSaplingGrowth）。分层（PLAN §2）：World 层，只读 / 写 m_chunks + 发 worldChanged。
-    //   不依赖 Renderer/Physics/Game。
+    //   （random-tick 散布概率升柱）：扫甘蔗柱顶（上方为空气的甘蔗格），据柱基是否**沙地支撑**（t446：柱基支撑格须
+    //   Sand，与 worldgen placeSugarcane 沙顶-only 一致 → 排除玩家误放 / 旧世界残留的草地 / 泥土 / 水中甘蔗柱，关闭
+    //   「草上长高」残留路径）+ 柱基是否邻水（4 水平邻于基 / 基下一层）+ 柱高 < kSugarcaneMaxHeight(5) + 确定性散布概率
+    //   → 命中即在柱顶上方一格长一格（setWaterSilent 静默写，无破/放反馈，机制等价 MC「甘蔗生长无反馈」）。柱基不
+    //   邻水 / 非沙基 → 永不长；柱高已达 5 → 停长。t418 拔高潜力门：柱高 ≥3 时据列位一次性哈希判 kSugarcaneTallPct
+    //   潜力 —— 多数柱止于 1..3、仅少数潜力柱可长到 4..5（满足 spec「1..3 common、5 rare」；修旧「全柱最终长到 5」
+    //   稳态）。稳态（无甘蔗 / 全满高 / 全不邻水 / 全非沙基 / 全无潜力）每窗无变化 → 不发 worldChanged。散布确定性
+    //   哈希（seed + 位置 + 窗口序号，PLAN §2-K，同 tickCropGrowth/tickSaplingGrowth）。分层（PLAN §2）：World 层，
+    //   只读 / 写 m_chunks + 发 worldChanged。不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickSugarcaneGrowth();
     // t406 耕地湿润复算 tick（spec「被附近水湿润、4 级」的动态实现）：由呈现层 Main.qml 经 WorldClock.ticked 桥接
     //   （每 100ms 一 tick；节流到 ~每 kFarmlandHydrTickInterval×0.1s 一窗）。扫全图 Farmland 格，逐格用
@@ -427,14 +428,18 @@ private:
     //   （setVoxelIfAir）→ 不覆盖草上已生成的方块（树 / 草丛）。纯函数于 seed + biomeAt → 同 seed 同分布；
     //   禁用任何运行期随机源（与 placeTallGrass / placeSwampFlora 同守卫语义）。
     void placeFlowers();
-    // t397 甘蔗散布（PLAN §2-K 确定性）：遍历邻水陆地列，在邻水**沙顶**（沙滩 / 海岸）上方确定性散布 1..3 格高
-    //   甘蔗柱（Sugarcane cross，每格仅写空气格）。t418：仅沙地顶生（spec「beach/sand near water, not forest lakes」；
-    //   草地滨水列含森林湖岸，因 surf≠Sand 自动排除）。机制等价 MC 1.0 sugar cane 常见于水边沙岸。仅在水**直接邻接**
-    //   的陆地生（机制等价 MC 甘蔗须邻水；远水陆地不生）。t423：邻水查沙顶 surfaceY 与沙顶下一层 surfaceY-1 双层（沙滩
-    //   沙顶常在 waterLevel+1、海水在 waterLevel 即沙顶下一层 → 须兼查 surfaceY-1 才命中海岸沙滩；与 tickSugarcaneGrowth
-    //   的 wateredAt(by)/wateredAt(by-1) 同语义）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），
-    //   逐格向上仅写空气格 → 不覆盖已生成的方块（树 / 草 / 花）。纯函数于 seed + biomeAt + 水域（经 hashColumn）→
-    //   同 seed 同分布；禁用任何运行期随机源（与 placeTallGrass / placeDesertFlora 同守卫语义）。
+    // t397 甘蔗散布（PLAN §2-K 确定性）：在邻水**沙顶**（沙滩 / 海岸）上方确定性散布 1..3 格高甘蔗柱（Sugarcane
+    //   cross，每格仅写空气格）。spec t446 收紧三条件：(1) 直接坐在 Sand 上、(2) 沙顶层 surfaceY 或其下一层
+    //   surfaceY-1 的水平 4 邻有 Water（任意 state）、(3) 沙顶正上方为空气（不在水里 / 湖底生）。草地 / 泥土 /
+    //   湖底 / 沼泽 / 水中一律排除。机制等价 MC 1.0 sugar cane 常见于水边沙岸。
+    //   t446 根因（复现 seed 1337 全图 0 甘蔗）：沙顶 y 须用 seaColumnHeight（海域重塑高度），**非** heightAt
+    //     （自然 fbm 高度）—— t338/t372 海面重塑后两者对海域列恒不等，旧实现误用 heightAt 读错 y → surf 恒非 Sand
+    //     → 0 甘蔗。修：海域列用 seaColumnHeight 取真实沙顶；非海域列无沙顶直接跳过。
+    //   t423：邻水查沙顶 surfaceY 与沙顶下一层 surfaceY-1 双层（沙滩沙顶常在 waterLevel+1、海水在 waterLevel 即
+    //     沙顶下一层 → 须兼查 surfaceY-1 才命中海岸沙滩；与 tickSugarcaneGrowth 的 wateredAt(by)/wateredAt(by-1)
+    //     同语义）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），逐格向上仅写空气格 → 不覆盖已
+    //     生成的方块（树 / 草 / 花）。纯函数于 seed + biomeAt + 海域（seaColumnHeight/isSeaSandColumn/hashColumn）→
+    //     同 seed 同分布；禁用任何运行期随机源（与 placeTallGrass / placeDesertFlora 同守卫语义）。
     void placeSugarcane();
     // t395 雪原/针叶群系水面冻结（PLAN §2-K 确定性）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water
     //   格）冻结为 Ice（机制等价 MC 1.0 寒冷群系水面结冰）。仅冻最顶层水面（同 MC 仅表层结冰；下层水保留）；
