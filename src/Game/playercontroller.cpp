@@ -2059,13 +2059,22 @@ void PlayerController::placeBlock()
         if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
             && below != BlockRegistry::Farmland) return;
     }
-    // t397 甘蔗放置预检：仅可放在草地 / 泥土 / 沙地 / 甘蔗正上方（机制等价 MC 1.0 sugar cane 须草地 / 沙地 / 甘蔗
-    //   支撑）。机制等价 cactus 预检（cactus 须 Sand / Cactus；甘蔗放宽到 Grass / Dirt / Sand / Sugarcane ——
-    //   MC 甘蔗生于草地与沙地，故支撑族比仙人掌宽）。邻水判定留 worldgen（创造放置不强制邻水，机制等价 MC）。
+    // t397/t423 甘蔗放置预检：（1）仅可放在草地 / 泥土 / 沙地 / 甘蔗正上方（机制等价 MC 1.0 sugar cane 须草地 /
+    //   沙地 / 甘蔗支撑）。（2）t423 须邻水：甘蔗的支撑格（ty-1）或其下一层（ty-2）的水平 4 邻任一为 Water 才可放
+    //   （机制等价 MC 甘蔗须直接邻水；双层查水同 worldgen placeSugarcane 的 surfaceY / surfaceY-1 语义 → 玩家可在
+    //   worldgen 生甘蔗的海岸沙顶补种，远水陆地 / 沙漠内陆拒）。水格水平 4 邻走 blockAt（越界安全返回，同火把预检）。
     if (m_selectedBlock == BlockRegistry::Sugarcane) {
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
         if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
             && below != BlockRegistry::Sand && below != BlockRegistry::Sugarcane) return;
+        // t423 邻水门：支撑格 ty-1 / 下一层 ty-2 的水平 4 邻任一为 Water → 允；否则拒（机制等价 MC 甘蔗须直接邻水）。
+        const auto waterAdj = [&](int yy) -> bool {
+            return m_world->blockAt(tx + 1, yy, tz)     == BlockRegistry::Water
+                || m_world->blockAt(tx - 1, yy, tz)     == BlockRegistry::Water
+                || m_world->blockAt(tx,     yy, tz + 1) == BlockRegistry::Water
+                || m_world->blockAt(tx,     yy, tz - 1) == BlockRegistry::Water;
+        };
+        if (!waterAdj(ty - 1) && !waterAdj(ty - 2)) return; // 支撑两层均不邻水 → 拒（不挥）
     }
     // t134 不完整方块放置：door 占两格（下格 + 上格），需上格也为空气；其余单格。走 setBlock 5 参数版
     //   （写 id + state）。state 复用上方算出的 placeState / doorFacing（逻辑同源，无重复推导）。

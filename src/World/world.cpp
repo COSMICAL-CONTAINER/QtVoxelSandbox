@@ -2165,8 +2165,10 @@ void World::placeFlowers()
 //   t418：仅沙地顶（沙滩 / 海岸）生甘蔗 —— 草地滨水（森林湖 / 草原岸）不生（spec「beach/sand near water, not forest
 //   lakes」）。机制等价 MC 甘蔗常见于水边沙岸。本世界地形中沙顶仅出现在沙海（海域）海岸（surfaceFill 沙海盘铺
 //   沙），故「沙顶 + 邻水」= 海岸沙滩；森林 / 草原 / 沼泽的草顶滨水列（含森林湖岸）因 surf≠Sand 自动排除。
-//   「邻水」判定 = 该列沙顶（surfaceY）的水平 4 邻任一为 Water（海平面水）；远水陆地不生（机制等价 MC 甘蔗须直接
-//   邻水）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），逐格向上仅写空气格 → 不覆盖已生成的
+//   「邻水」判定 = 该列沙顶（surfaceY）或沙顶下一层（surfaceY-1）的水平 4 邻任一为 Water；远水陆地不生（机制等价
+//   MC 甘蔗须直接邻水）。t423：补查 surfaceY-1 —— 沙滩沙顶常位于 waterLevel+1、海水在 waterLevel（即沙顶下一层），
+//   仅查 surfaceY 会漏掉整个海岸沙滩列（t418 报「甘蔗不再生成」根因）；与 tickSugarcaneGrowth 的 wateredAt(by)/
+//   wateredAt(by-1) 双层查水语义一致。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），逐格向上仅写空气格 → 不覆盖已生成的
 //   方块（树 / 草 / 花）。仅写空气格（setVoxelIfAir）。纯函数于 seed + biomeAt + 水域（经 hashColumn，PLAN §2-K）
 //   → 同 seed 同分布；禁用任何运行期随机源。worldgen 顺序：placeFlowers 之后（花占草顶上方一格优先），甘蔗仅写
 //   空气格 → 已被占的列自然跳过。
@@ -2184,15 +2186,20 @@ void World::placeSugarcane()
             const quint8 surf = m_chunks.blockAt(x, surfaceY, z);
             if (surf != BlockRegistry::Sand) continue;
 
-            // 「邻水」判定：草 / 沙顶（surfaceY）的水平 4 邻任一为 Water。海平面水（y==waterLevel）+ 沼泽浅水
-            //   （placeSwampPools 改的草顶 Water）均算。机制等价 MC 甘蔗须直接邻水（半径 1 内有水）。
-            const auto isWaterNb = [&](int dx, int dz) -> bool {
+            // 「邻水」判定：沙顶（surfaceY）或沙顶下一层（surfaceY-1）的水平 4 邻任一为 Water。t423：须兼查
+            //   surfaceY-1 —— 沙滩沙顶常在 waterLevel+1、海水在 waterLevel（沙顶下一层），仅查 surfaceY 会漏掉整片
+            //   海岸沙滩（t418 报「甘蔗不再生成」根因）；双层语义同 tickSugarcaneGrowth 的 wateredAt(by)/wateredAt(by-1)。
+            const auto isWaterNb = [&](int yy, int dx, int dz) -> bool {
+                if (yy < 0 || yy >= m_height) return false;
                 const int nx = x + dx, nz = z + dz;
                 if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) return false;
-                return m_chunks.blockAt(nx, surfaceY, nz) == BlockRegistry::Water;
+                return m_chunks.blockAt(nx, yy, nz) == BlockRegistry::Water;
             };
             const bool adjacentToWater =
-                isWaterNb( 1, 0) || isWaterNb(-1, 0) || isWaterNb(0,  1) || isWaterNb(0, -1);
+                isWaterNb(surfaceY, 1, 0) || isWaterNb(surfaceY, -1, 0)
+                || isWaterNb(surfaceY, 0, 1) || isWaterNb(surfaceY, 0, -1)
+                || isWaterNb(surfaceY - 1, 1, 0) || isWaterNb(surfaceY - 1, -1, 0)
+                || isWaterNb(surfaceY - 1, 0, 1) || isWaterNb(surfaceY - 1, 0, -1);
             if (!adjacentToWater) continue; // 远水陆地不生甘蔗
 
             const quint32 r = hashColumn(m_seed, x, z);

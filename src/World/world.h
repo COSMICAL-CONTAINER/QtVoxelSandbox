@@ -412,7 +412,9 @@ private:
     // t397 甘蔗散布（PLAN §2-K 确定性）：遍历邻水陆地列，在邻水**沙顶**（沙滩 / 海岸）上方确定性散布 1..3 格高
     //   甘蔗柱（Sugarcane cross，每格仅写空气格）。t418：仅沙地顶生（spec「beach/sand near water, not forest lakes」；
     //   草地滨水列含森林湖岸，因 surf≠Sand 自动排除）。机制等价 MC 1.0 sugar cane 常见于水边沙岸。仅在水**直接邻接**
-    //   的陆地生（机制等价 MC 甘蔗须邻水；远水陆地不生）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），
+    //   的陆地生（机制等价 MC 甘蔗须邻水；远水陆地不生）。t423：邻水查沙顶 surfaceY 与沙顶下一层 surfaceY-1 双层（沙滩
+    //   沙顶常在 waterLevel+1、海水在 waterLevel 即沙顶下一层 → 须兼查 surfaceY-1 才命中海岸沙滩；与 tickSugarcaneGrowth
+    //   的 wateredAt(by)/wateredAt(by-1) 同语义）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），
     //   逐格向上仅写空气格 → 不覆盖已生成的方块（树 / 草 / 花）。纯函数于 seed + biomeAt + 水域（经 hashColumn）→
     //   同 seed 同分布；禁用任何运行期随机源（与 placeTallGrass / placeDesertFlora 同守卫语义）。
     void placeSugarcane();
