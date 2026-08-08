@@ -1960,11 +1960,15 @@ Window {
                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                  : "#8a5a2e"
                     }
-                    // t330 白弦 + t368 搭箭（nocked arrow）：弦与箭同处一 Node，沿 -X 随 drawAmount 后拉
+                    // t330 白弦 + t368 搭箭（nocked arrow）：弦与箭同处一 Node，随 drawAmount 沿 +X 后拉
                     //   （player.bowDrawProgress 0..1）→ 弦中点 (0.06,0,0) 与箭尾（nocks）恒同位，免脱弦。
-                    //   箭仅拉弓时可见（player.bowDrawing）；箭身沿 -X（朝准星方向）。机制等价 MC 1.0 拉弓搭箭。
+                    //   箭仅拉弓时可见（player.bowDrawing）；箭身沿 -X（朝准星方向 = 朝目标）。机制等价 MC 1.0 拉弓搭箭。
+                    //   t451 方向修正：BowGeometry 的 belly/握把在 -X（前=目标侧）、弓梢+弦在 +X（后=射手侧），
+                    //     箭沿 -X 指向目标 → 故「向后拉（向射手）」= +X。旧版误写 -X（= 朝目标侧=往前推），观感
+                    //     「拉弓时弦+箭往前走」；翻号为 +X 后，弓本体不动、弦+箭随蓄力向射手侧后移蓄力（机制正确）。
+                    //     lighting:NoLighting（沿用具名路径）；无 pack pulling 贴图依赖（本弓为程序几何，非贴图精灵）。
                     Node {
-                        position: Qt.vector3d(player.bowDrawing ? -player.bowDrawProgress * 0.05 : 0.0, 0.0, 0.0)
+                        position: Qt.vector3d(player.bowDrawing ? player.bowDrawProgress * 0.05 : 0.0, 0.0, 0.0)
                         // 白弦（蜘蛛丝白，独立于 tier）：继承父 position/scale/eulerRotation → 与弓身同位。
                         Model {
                             geometry: BowStringGeometry {}
