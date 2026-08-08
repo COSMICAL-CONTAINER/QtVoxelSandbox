@@ -30,6 +30,7 @@ struct BuiltState {
     QString packPath;             // t415 镜像 settings.json resourcePack（空 = 走环境变量/默认探查）
     bool configLoaded = false;    // t415 config 是否已从 settings.json 加载（之后只信内存 + setter 持久化）
     int revision = 0;             // t415 apply() 重建计数（保留；file:// 不挂查询串，仅作历史/调试用）
+    QString itemDir;              // t420 包内物品图标目录（assets/minecraft/textures/item）绝对路径；空 = 无 item 覆盖
 };
 BuiltState &state()
 {
@@ -42,46 +43,70 @@ QMutex &stateMutex()
     return m;
 }
 
-// t419 浅层有界 DFS：在 root 子树内寻找路径以 assets/minecraft/textures/block 结尾的目录。
-//   命中即返（DFS，首个即取，足够唯一）。maxDepth 限制递归深度——pack 标准布局 block 在 root 下 4 层
-//   （assets/minecraft/textures/block），留 2 层余量给 wrapper / 子包目录，避免扫遍巨大包树。
-QString findBlockDirBounded(const QDir &dir, int depth, int maxDepth)
+// t420 ResourcePackManager 实例注册表：ToolIcon/MaterialIcon 各持一个实例查 itemIconSource，但 apply()
+//   （pack 切换）只在一个实例（Main.qml 的 resourcePack）上调用 → 仅该实例 emit activeChanged。注册表让
+//   apply() 向全部实例广播（同步 m_active + emit），使各 icon 的 active/itemIconSource 绑定随 pack 切换刷新。
+//   GUI 线程内 QML 对象生命周期，注册表本身无需加锁（BuiltState 仍由 stateMutex 保护）。
+QList<ResourcePackManager *> &rpInstances()
+{
+    static QList<ResourcePackManager *> l;
+    return l;
+}
+
+// t419 浅层有界 DFS：在 root 子树内寻找路径以 assets/minecraft/textures/<leaf> 结尾的目录
+//   （leaf = "block" 方块贴图目录 / "item" 物品图标目录，t420）。命中即返（DFS，首个即取，足够唯一）。
+//   maxDepth 限制递归深度——pack 标准布局 <leaf> 在 root 下 4 层（assets/minecraft/textures/<leaf>），
+//   留 2 层余量给 wrapper / 子包目录，避免扫遍巨大包树。
+QString findTexturesSubDirBounded(const QDir &dir, const QString &leaf, int depth, int maxDepth)
 {
     if (depth > maxDepth)
         return {};
-    // 本层目录自身即 block 目录（root 自身命中：用户直选 .../textures/block；或递归过程中命中）。
-    if (dir.dirName() == QStringLiteral("block")) {
+    // 本层目录自身即目标子目录（root 自身命中：用户直选 .../textures/<leaf>；或递归过程中命中）。
+    if (dir.dirName() == leaf) {
         const QString path = QDir::cleanPath(dir.absolutePath());
-        const QString suffix = QStringLiteral("/assets/minecraft/textures/block");
-        if (path.endsWith(suffix) || path == QStringLiteral("assets/minecraft/textures/block"))
+        const QString suffix = QStringLiteral("/assets/minecraft/textures/") + leaf;
+        const QString bare = QStringLiteral("assets/minecraft/textures/") + leaf;
+        if (path.endsWith(suffix) || path == bare)
             return path;
     }
     const QStringList subs =
             dir.entryList(QDir::Dirs | QDir::NoSymLinks | QDir::NoDotAndDotDot);
     for (const QString &sub : subs) {
-        const QString r = findBlockDirBounded(QDir(dir.filePath(sub)), depth + 1, maxDepth);
+        const QString r = findTexturesSubDirBounded(QDir(dir.filePath(sub)), leaf, depth + 1, maxDepth);
         if (!r.isEmpty())
             return r;
     }
     return {};
 }
 
-// t419 在任意层级 packPath 上定位 block 贴图目录（spec t419）：
-//   1) <packPath>/assets/minecraft/textures/block（pack 根标准布局，最常见 → 快速直命中，避免递归开销）
-//   2)/(3) packPath 即 block 目录，或 packPath 是 pack 根 / 中间层（assets/minecraft/textures）：
-//         浅层有界 DFS 在子树内找路径以 assets/minecraft/textures/block 结尾的目录（root 自身也在范围内）。
-//   → 用户选 pack 根、block 目录、或中间任意层，均可加载。返回 block 目录绝对路径（cleanPath）；找不到为空。
-QString resolveBlockDir(const QString &absPath)
+// t419/t420 在任意层级 packPath 上定位 textures 子目录（leaf = "block" / "item"）：
+//   1) <packPath>/assets/minecraft/textures/<leaf>（pack 根标准布局，最常见 → 快速直命中，避免递归开销）
+//   2)/(3) packPath 即该子目录，或 packPath 是 pack 根 / 中间层（assets/minecraft/textures）：
+//         浅层有界 DFS 在子树内找路径以 assets/minecraft/textures/<leaf> 结尾的目录（root 自身也在范围内）。
+//   → 用户选 pack 根、子目录、或中间任意层，均可加载。返回该子目录绝对路径（cleanPath）；找不到为空。
+QString resolveTexturesSubDir(const QString &absPath, const QString &leaf)
 {
     if (absPath.isEmpty())
         return {};
     const QDir root(absPath);
     if (!root.exists())
         return {};
-    const QString direct = root.filePath(QStringLiteral("assets/minecraft/textures/block"));
+    const QString direct = root.filePath(QStringLiteral("assets/minecraft/textures/") + leaf);
     if (QFileInfo(direct).isDir())
         return QDir::cleanPath(direct);
-    return findBlockDirBounded(root, 0, 6);
+    return findTexturesSubDirBounded(root, leaf, 0, 6);
+}
+
+// 方块贴图目录（t419，leaf="block"）。
+QString resolveBlockDir(const QString &absPath)
+{
+    return resolveTexturesSubDir(absPath, QStringLiteral("block"));
+}
+
+// t420 物品图标目录（leaf="item"；同 packPath 解析，与 block 并列）。
+QString resolveItemDir(const QString &absPath)
+{
+    return resolveTexturesSubDir(absPath, QStringLiteral("item"));
 }
 
 // 合法包判定：能在 packPath（任意层级）上定位到 block 贴图目录（spec t419）。
@@ -299,6 +324,108 @@ const QList<QPair<int, QString>> &tileFilenameMap()
     return kMap;
 }
 
+// t420「引擎物品 id → 包内 item 标准贴图文件名」映射（item-ids.md 单一权威；id 取 toolregistry.h ToolId /
+//   recipe.h MaterialId / ArmorId 段）。文件名用现代（1.13+ flattening）标准 item 命名（wooden_pickaxe /
+//   iron_ingot / cooked_beef ...），与现网大多数资源包 assets/minecraft/textures/item/ 一致。包内缺该 PNG
+//   时 itemIconSource 安全跳过（回退自绘），故映射可慷慨：唯一要保证的是 id↔文件名配对正确，而非文件名都存在。
+//   工具段 0x100..0x111（镐/锄/斧/铲/剑×木/石/铁 + 弓/剪刀/钓竿）；材料段 0x200..0x231（合成材料 / 食物 / 桶 /
+//   mob 掉落 / 生物蛋 / 战利品 / 鸡鱿鱼族 / 胡萝卜马铃薯 / 生鱼）；护甲段 0x300..0x313（皮革/铁/金/钻石×4 部位；
+//   铜护甲无 vanilla 贴图 → 不映射，回退自绘）。raw_*（铜/金/铁原矿物品 1.17+）/spawn_egg_*/oak_sapling 等
+//   旧版 / HD 包常缺 → 缺则跳过回退自绘，不崩。
+const QList<QPair<int, QString>> &itemFilenameMap()
+{
+    static const QList<QPair<int, QString>> kMap = {
+        // —— 工具段（ToolId；item-ids.md §2）——
+        {0x100, QStringLiteral("wooden_pickaxe.png")},  // 木镐
+        {0x101, QStringLiteral("stone_pickaxe.png")},   // 石镐
+        {0x102, QStringLiteral("iron_pickaxe.png")},    // 铁镐
+        {0x103, QStringLiteral("wooden_hoe.png")},      // 木锄
+        {0x104, QStringLiteral("stone_hoe.png")},       // 石锄
+        {0x105, QStringLiteral("iron_hoe.png")},        // 铁锄
+        {0x106, QStringLiteral("wooden_axe.png")},      // 木斧
+        {0x107, QStringLiteral("stone_axe.png")},       // 石斧
+        {0x108, QStringLiteral("iron_axe.png")},        // 铁斧
+        {0x109, QStringLiteral("wooden_shovel.png")},   // 木铲
+        {0x10A, QStringLiteral("stone_shovel.png")},    // 石铲
+        {0x10B, QStringLiteral("iron_shovel.png")},     // 铁铲
+        {0x10C, QStringLiteral("wooden_sword.png")},    // 木剑
+        {0x10D, QStringLiteral("stone_sword.png")},     // 石剑
+        {0x10E, QStringLiteral("iron_sword.png")},      // 铁剑
+        {0x10F, QStringLiteral("bow.png")},             // 弓
+        {0x110, QStringLiteral("shears.png")},          // 剪刀
+        {0x111, QStringLiteral("fishing_rod.png")},     // 钓鱼竿
+        // —— 材料段（MaterialId；item-ids.md §3-5）——
+        {0x200, QStringLiteral("stick.png")},           // 木棒
+        {0x201, QStringLiteral("coal.png")},            // 煤炭
+        {0x202, QStringLiteral("raw_iron.png")},        // 铁原矿（1.17+ raw_iron；缺则跳过）
+        {0x203, QStringLiteral("iron_ingot.png")},      // 铁锭
+        {0x204, QStringLiteral("glass.png")},           // 玻璃（多数包在 block/；缺则跳过）
+        {0x205, QStringLiteral("charcoal.png")},        // 木炭
+        {0x206, QStringLiteral("bucket.png")},          // 铁桶（空）
+        {0x207, QStringLiteral("water_bucket.png")},    // 装水铁桶
+        {0x208, QStringLiteral("wheat_seeds.png")},     // 小麦种子
+        {0x209, QStringLiteral("wheat.png")},           // 小麦物品
+        {0x20A, QStringLiteral("bread.png")},           // 面包
+        {0x20B, QStringLiteral("porkchop.png")},        // 生猪排
+        {0x20C, QStringLiteral("beef.png")},            // 生牛肉
+        {0x20D, QStringLiteral("leather.png")},         // 皮革
+        {0x20E, QStringLiteral("white_wool.png")},      // 羊毛（多数包在 block/；缺则跳过）
+        {0x20F, QStringLiteral("pig_spawn_egg.png")},   // 生物蛋（猪）
+        {0x210, QStringLiteral("cow_spawn_egg.png")},   // 生物蛋（牛）
+        {0x211, QStringLiteral("sheep_spawn_egg.png")}, // 生物蛋（羊）
+        {0x212, QStringLiteral("diamond.png")},         // 钻石
+        {0x213, QStringLiteral("zombie_spawn_egg.png")},// 生物蛋（蹒跚者；机制等价 zombie）
+        {0x214, QStringLiteral("skeleton_spawn_egg.png")},// 生物蛋（骸骨；机制等价 skeleton）
+        {0x215, QStringLiteral("creeper_spawn_egg.png")},// 生物蛋（潜行者；机制等价 creeper）
+        {0x216, QStringLiteral("spider_spawn_egg.png")},// 生物蛋（蜘蛛）
+        {0x217, QStringLiteral("bone.png")},            // 骨头
+        {0x218, QStringLiteral("rotten_flesh.png")},    // 腐肉
+        {0x219, QStringLiteral("string.png")},          // 线
+        {0x21A, QStringLiteral("arrow.png")},           // 箭
+        {0x21B, QStringLiteral("oak_sapling.png")},     // 树苗物品（多数包在 block/；缺则跳过）
+        {0x21C, QStringLiteral("raw_copper.png")},      // 铜原矿（1.17+；缺则跳过）
+        {0x21D, QStringLiteral("copper_ingot.png")},    // 铜锭（缺则跳过）
+        {0x21E, QStringLiteral("raw_gold.png")},        // 金原矿（1.17+；缺则跳过）
+        {0x21F, QStringLiteral("gold_ingot.png")},      // 金锭
+        {0x220, QStringLiteral("lava_bucket.png")},     // 装岩浆铁桶
+        {0x221, QStringLiteral("cooked_porkchop.png")}, // 熟猪排
+        {0x222, QStringLiteral("cooked_beef.png")},     // 熟牛肉
+        {0x223, QStringLiteral("cooked_mutton.png")},   // 熟羊肉
+        {0x224, QStringLiteral("redstone.png")},        // 红石粉
+        {0x225, QStringLiteral("saddle.png")},          // 马鞍
+        {0x226, QStringLiteral("name_tag.png")},        // 命名牌
+        {0x227, QStringLiteral("enchanted_book.png")},  // 附魔书占位
+        {0x228, QStringLiteral("feather.png")},         // 羽毛
+        {0x229, QStringLiteral("chicken.png")},         // 生鸡肉
+        {0x22A, QStringLiteral("cooked_chicken.png")},  // 熟鸡肉
+        {0x22B, QStringLiteral("egg.png")},             // 蛋
+        {0x22C, QStringLiteral("chicken_spawn_egg.png")},// 生物蛋（鸡）
+        {0x22D, QStringLiteral("ink_sac.png")},         // 墨囊
+        {0x22E, QStringLiteral("squid_spawn_egg.png")}, // 生物蛋（鱿鱼）
+        {0x22F, QStringLiteral("carrot.png")},          // 胡萝卜
+        {0x230, QStringLiteral("potato.png")},          // 马铃薯
+        {0x231, QStringLiteral("cod.png")},             // 生鱼（MC 1.0 raw fish = modern cod）
+        // —— 护甲段（ArmorId；皮革/铁/金/钻石×头盔/胸甲/护腿/靴子。铜护甲无 vanilla 贴图 → 不映射）——
+        {0x300, QStringLiteral("leather_helmet.png")},
+        {0x301, QStringLiteral("leather_chestplate.png")},
+        {0x302, QStringLiteral("leather_leggings.png")},
+        {0x303, QStringLiteral("leather_boots.png")},
+        {0x304, QStringLiteral("iron_helmet.png")},
+        {0x305, QStringLiteral("iron_chestplate.png")},
+        {0x306, QStringLiteral("iron_leggings.png")},
+        {0x307, QStringLiteral("iron_boots.png")},
+        {0x30C, QStringLiteral("golden_helmet.png")},
+        {0x30D, QStringLiteral("golden_chestplate.png")},
+        {0x30E, QStringLiteral("golden_leggings.png")},
+        {0x30F, QStringLiteral("golden_boots.png")},
+        {0x310, QStringLiteral("diamond_helmet.png")},
+        {0x311, QStringLiteral("diamond_chestplate.png")},
+        {0x312, QStringLiteral("diamond_leggings.png")},
+        {0x313, QStringLiteral("diamond_boots.png")},
+    };
+    return kMap;
+}
+
 // t416 MC「灰度可着色」瓦片集合（grass_top / grass_side / leaves / tall_grass）：本体是灰度贴图，由
 //   生物群系着色覆绿（机制等价 MC foliageColor/grassColor）。loader 直接用包内灰度原色会渲染成苔石色，
 //   故合成时把这些 tile 的包内贴图乘上叶绿素色调。非着色瓦片（stone/dirt/...）原样，不受影响。
@@ -341,6 +468,7 @@ void ensureBuiltLocked()
         return;
     s.built = true;
     s.active = false; // reset；仅当包合法 + 覆盖成功才置 true
+    s.itemDir.clear(); // t420 reset 物品图标目录（仅当包合法时重填）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -405,6 +533,10 @@ void ensureBuiltLocked()
         return;
     }
     const QDir blockDir(blockDirPath);
+
+    // t420 物品图标目录（assets/minecraft/textures/item；与 block 同 packPath 并列解析）。包内无 item 目录
+    //   时为空 → itemIconSource 恒返空串 → ToolIcon/MaterialIcon 回退自绘（不阻塞 block 图集合成）。
+    s.itemDir = resolveItemDir(packPath);
     QPainter p(&s.atlas);
     int overridden = 0;
     for (const auto &m : tileFilenameMap()) {
@@ -459,6 +591,12 @@ ResourcePackManager::ResourcePackManager(QObject *parent)
     QMutexLocker lock(&stateMutex());
     ensureBuiltLocked();
     m_active = state().active;
+    rpInstances().append(this); // t420 注册（供 apply 广播 activeChanged 到全部实例）
+}
+
+ResourcePackManager::~ResourcePackManager()
+{
+    rpInstances().removeAll(this); // t420 注销
 }
 
 bool ResourcePackManager::enabled() const
@@ -512,8 +650,13 @@ void ResourcePackManager::apply()
         ++s.revision;           // cache-bust：atlasSource 查询串变 → QML Texture 重载
         newActive = s.active;
     }
-    m_active = newActive;       // 实例态在锁外更新 + emit（避免持锁 emit 连到再加锁的槽）
-    emit activeChanged();
+    // t420 广播到全部实例（含 ToolIcon/MaterialIcon 内持有的实例）：同步 m_active + emit activeChanged，
+    //   使全工程所有 active / atlasSource / itemIconSource 绑定随 pack 切换刷新（不止触发调用 apply 的本实例）。
+    //   实例态在锁外更新 + emit（避免持锁 emit 连到再加锁的槽）。
+    for (ResourcePackManager *inst : rpInstances()) {
+        inst->m_active = newActive;
+        emit inst->activeChanged();
+    }
 }
 
 QString ResourcePackManager::atlasSource() const
@@ -536,4 +679,27 @@ bool ResourcePackManager::packActive()
     QMutexLocker lock(&stateMutex());
     ensureBuiltLocked();
     return state().active;
+}
+
+QString ResourcePackManager::itemIconSource(int itemId) const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active || s.itemDir.isEmpty())
+        return {};
+    // 引擎物品 id → 包内标准 item 文件名（itemFilenameMap 单一权威）。无映射 / 包内缺 PNG → 空串（回退自绘）。
+    QString filename;
+    for (const auto &m : itemFilenameMap()) {
+        if (m.first == itemId) {
+            filename = m.second;
+            break;
+        }
+    }
+    if (filename.isEmpty())
+        return {};
+    const QString path = QDir(s.itemDir).absoluteFilePath(filename);
+    if (!QFile::exists(path))
+        return {}; // 包内无该 item 贴图 → 不覆盖（保留自绘 Canvas）；红线 §9：仅运行期读本地 pack PNG。
+    return QStringLiteral("file:///") + path;
 }

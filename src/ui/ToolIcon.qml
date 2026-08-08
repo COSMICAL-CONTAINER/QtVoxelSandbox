@@ -1,4 +1,6 @@
 import QtQuick
+// t420 资源包物品图标覆盖：用到模块 C++ 类型 ResourcePackManager（子目录文件须显式 import 自身模块，t41）。
+import VoxelSandbox
 
 // 工具图标（t33 / t233 / t264）：自绘原创像素工具（§9 override (a)，Canvas；非 MC 资产 PNG）。
 //
@@ -22,9 +24,38 @@ Item {
     property int tier: 1     // 1=木 2=石 3=铁（0 / 越界 → 兜底木色配色）
     property int toolType: 1 // 1=镐 Pickaxe（默认）/ 2=锄 Hoe / 3=斧 Axe / 4=铲 Shovel / 5=剑 Sword / 6=剪刀 Shears / 7=弓 Bow（0 / 越界 → 兜底镐形）
 
+    // t420 资源包物品图标覆盖：pack 启用且该工具在「引擎工具 id → pack item 文件名」映射内、且包内 PNG 存在
+    //   时，用 pack 的 item PNG 覆盖自绘 Canvas（缩到图标尺寸）；pack 关 / 无映射 → packImg.source 空 → Image
+    //   隐藏、Canvas 自绘（现状不变）。红线（§9）：仅运行期读本地 gitignored pack 路径 PNG，绝不 bake 进 qrc/VCS。
+    //   进程全局态（ResourcePackManager 静态 state）→ 每 icon 实例化一个轻 QObject 共享同一解析结果，开销可忽略。
+    ResourcePackManager { id: rp }
+    // 工具段 id 布局（item-ids.md §2 / toolregistry.h ToolId）由 (toolType, tier) 确定：type 1-5 =
+    //   0x100+(type-1)*3+(tier-1)；shears/bow/fishingrod 独立 id。重建 itemId 供 pack 查询（与 C++ id 布局一致；
+    //   id 若变只致 pack 回退自绘，不崩）。tier 越界兜底木（1）。
+    function itemIdFromTypeTier(tt, t) {
+        if (tt === 6) return 0x110  // 剪刀 Shears
+        if (tt === 7) return 0x10F  // 弓 Bow
+        if (tt === 8) return 0x111  // 钓鱼竿 FishingRod
+        if (tt < 1 || tt > 5) return 0
+        const tier = (t < 1 || t > 3) ? 1 : t
+        return 0x100 + (tt - 1) * 3 + (tier - 1)
+    }
+    Image {
+        id: packImg
+        anchors.fill: parent
+        visible: source.length > 0
+        // 触碰 tier/toolType/rp.active 建立绑定依赖（任一变 / pack 切换 → 重查 pack 源）。
+        source: { root.tier; root.toolType; rp.active
+                  const id = root.itemIdFromTypeTier(root.toolType, root.tier)
+                  return id ? rp.itemIconSource(id) : "" }
+        fillMode: Image.PreserveAspectFit
+        smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；MC item 图标为像素艺术）
+    }
+
     Canvas {
         id: canvas
         anchors.fill: parent
+        visible: packImg.source.length === 0 // pack 覆盖时隐藏自绘（避免透明底穿透叠显）
         // 尺寸 / tier / toolType 变化时重绘（Canvas 不自动据外部 property 刷新）。
         onWidthChanged: requestPaint()
         onHeightChanged: requestPaint()

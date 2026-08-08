@@ -1,4 +1,6 @@
 import QtQuick
+// t420 资源包物品图标覆盖：用到模块 C++ 类型 ResourcePackManager（子目录文件须显式 import 自身模块，t41）。
+import VoxelSandbox
 
 // 材料图标（t50）：自绘原创像素图（§9 override (a)，Canvas；非 MC 资产 PNG）。
 //
@@ -43,9 +45,25 @@ Item {
     id: root
     property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）/ 0x21C 铜原矿 / 0x21D 铜锭 / 0x21E 金原矿 / 0x21F 金锭（t308）/ 0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（t344）/ 0x224 红石粉 / 0x225 马鞍 / 0x226 命名牌 / 0x227 附魔书占位（t393 战利品表）；0/未知 → 兜底木棒）
 
+    // t420 资源包物品图标覆盖：pack 启用且 materialId 在「引擎物品 id → pack item 文件名」映射内、且包内 PNG
+    //   存在时，用 pack 的 item PNG 覆盖自绘 Canvas；pack 关 / 无映射 → packImg.source 空 → Image 隐藏、Canvas
+    //   自绘（现状不变）。materialId 即引擎物品 id（材料段 + 护甲段共用本组件），直接查 pack。红线 §9：仅运行期
+    //   读本地 gitignored pack 路径 PNG，不 bake 进 qrc/VCS。
+    ResourcePackManager { id: rp }
+    Image {
+        id: packImg
+        anchors.fill: parent
+        visible: source.length > 0
+        // 触碰 materialId/rp.active 建立绑定依赖（id 变 / pack 切换 → 重查 pack 源）。
+        source: { root.materialId; rp.active; return rp.itemIconSource(root.materialId) }
+        fillMode: Image.PreserveAspectFit
+        smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；MC item 图标为像素艺术）
+    }
+
     Canvas {
         id: canvas
         anchors.fill: parent
+        visible: packImg.source.length === 0 // pack 覆盖时隐藏自绘（避免透明底穿透叠显）
         onWidthChanged: requestPaint()
         onHeightChanged: request_paint_safe() // 防 0 尺寸
         Component.onCompleted: requestPaint()

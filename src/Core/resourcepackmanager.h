@@ -55,6 +55,8 @@ class ResourcePackManager : public QObject
 
 public:
     explicit ResourcePackManager(QObject *parent = nullptr);
+    // t420 注销实例注册表（apply 广播 activeChanged 用）；默认析构即可，显式声明以配套注册表注销。
+    ~ResourcePackManager();
 
     bool active() const { return m_active; }
     QString atlasSource() const;
@@ -65,6 +67,12 @@ public:
     void setPackPath(const QString &p);
     // t415 应用当前 enabled/packPath：重新解析包 + 重建合成图集 + 刷新 atlasSource（cache-bust）。
     Q_INVOKABLE void apply();
+
+    // t420 物品图标覆盖：pack 启用且 itemId 在「引擎物品 id → pack item 文件名」映射内、且包内对应 PNG
+    //   存在时，返回 file:///<itemDir>/<file> 供 QtQuick Image 直接加载（缩到图标尺寸）；否则返空串
+    //   → ToolIcon/MaterialIcon 回退自绘 Canvas。运行期读本地 gitignored pack 路径（红线 §9：PNG 不进 qrc/VCS）。
+    //   itemDir 在 ensureBuiltLocked 与 block 目录一并解析缓存；active=false / itemDir 空 / 无映射 / 文件缺 → ""。
+    Q_INVOKABLE QString itemIconSource(int itemId) const;
 
     // 引擎图集瓦片尺寸（tools/build_atlas.py TILE=16 + chunkgeometry UV 的 N*16 同源；公开供 image provider 复用）。
     static constexpr int kTile = 16;
