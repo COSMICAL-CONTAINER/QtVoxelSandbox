@@ -3841,6 +3841,7 @@ Window {
             Repeater {
                 model: entityManager.count
                 delegate: Node {
+                    id: mobDelegate
                     // t256 slot-reuse：实体移除（沙着地 / mob 死亡 / 跌出）改 releaseSlot 标空（不 erase）→
                     //   count 单调不降 → 本 Repeater 永不销毁 delegate（修掉落沙频繁 spawn/land 致 delegate
                     //   泄漏：reparent 后的 3D delegate count 减小不销毁，lessons-learned t170）。空槽 aliveAt=false
@@ -3865,7 +3866,41 @@ Window {
                     // t239 身体朝向：Mob 按 yawAt 转（模型本地 -Z 正对 AI 行走方向，与 player.yaw 同约定）；
                     //   FallingBlock（沙立方）对称 → 不转（bodyYaw=0）。子节点（Mob Model / F3+B 箭头）随之继承。
                     property real bodyYaw: { entityManager.revision; return entKind === EntityManager.Mob ? entityManager.yawAt(index) : 0 }
-                    eulerRotation: Qt.vector3d(0, bodyYaw, 0)
+                    // t449 死亡过渡：血归零 → dead=true（dying 态，C++ 冻结 AI/重力/攻击，延迟 ~500ms 才掉落 + 移除）。
+                    //   本 delegate 据 deadAt 翻 true 的瞬间：① spawn 白烟（消散感）② 播侧倒旋转 ~90°（围绕身体前向
+                    //   轴 = local Z，模型本地 -Z 朝行走方向，绕 Z 倒向侧边 = MC 式「侧倒」）。
+                    //   deathTilt 由 deathFallAnim 推 0→90；slot 复用（新 mob 进空槽）时 entDead 翻 false → 即时归 0。
+                    property real deathTilt: 0.0
+                    property bool wasDead: false
+                    property bool entDead: { entityManager.revision; return entKind === EntityManager.Mob && entityManager.deadAt(index) }
+                    onEntDeadChanged: {
+                        if (entDead && !wasDead) {
+                            // 死亡起始：白烟 puff（复用 BlockParticles 的 Model+Timer 池，t465 模式）+ 启动侧倒动画。
+                            //   烟源 = mob 碰撞中心（pos）；上飘 + 渐隐 = 消散感（机制等价 MC mob 倒地白烟）。
+                            wasDead = true
+                            if (particleLoader.item) {
+                                const dp = entityManager.posAt(index)
+                                particleLoader.item.burstDeathSmoke(dp.x, dp.y, dp.z)
+                            }
+                            deathFallAnim.start()
+                        } else if (!entDead && wasDead) {
+                            // slot 复用：上一任 mob 死后释放的槽被新 mob 占用 → 立即归位（新 mob 不应继承侧倒态）。
+                            wasDead = false
+                            deathFallAnim.stop()
+                            mobDelegate.deathTilt = 0.0
+                        }
+                    }
+                    // 侧倒动画：0 → 90°（300ms，ease-out 缓冲如「倒地砸下」；C++ deathTimer≈500ms 留尾段稳态躺地
+                    //   + 烟雾消散，再 emit mobDied 掉落）。绕 Z（bodyYaw 已在 Y 朝向行走方向；Z 叠加 = 侧倒）。
+                    NumberAnimation {
+                        id: deathFallAnim
+                        target: mobDelegate
+                        property: "deathTilt"
+                        from: 0; to: 90
+                        duration: 300
+                        easing.type: Easing.OutCubic
+                    }
+                    eulerRotation: Qt.vector3d(0, bodyYaw, deathTilt)
                     Component.onCompleted: {
                         // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
                         // onCompleted 显式 reparent 进 mobHost（同 itemHost / torchHost delegate）。

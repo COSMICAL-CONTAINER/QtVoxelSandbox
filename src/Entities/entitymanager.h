@@ -374,12 +374,14 @@ signals:
     //   呈现层（Main.qml）Connections 转发到 ItemEntityManager.spawnItem 生成掉落实体（同
     //   PlayerController.spawnItem 模式；分层：Entities 层发语义事件，呈现层只消费，绝不反向写栅格）。
     void fallingBlockDropped(int x, int y, int z, int blockId);
-    // t239 mob 死亡一次性事件（damageEntity 把 health 首次扣到 ≤0 时发）。坐标 = 死亡格 floor(pos)，
-    //   mobType = 子类 id（0=通用 / t240 pig/cow/sheep）。t242 据它 + mobType 决定掉落物（猪:生猪排 /
-    //   牛:皮革+牛肉 / 羊:羊毛）→ 呈现层转发 ItemEntityManager.spawnItem（同 fallingBlockDropped 模式）。
-    //   t344 burned = 致死时刻 mob 是否处于火烧态（fireTimer>0，触碰岩浆 / 火点燃）：true → 呈现层 onMobDied
-    //   据此把被动生物的「生肉掉落」替换为熟肉（猪→熟猪排 / 牛→熟牛肉 / 羊→熟羊肉；机制等价 MC 1.0 着火死亡
-    //   掉熟肉）。仅 fireTimer>0 触发（日光 burning 仅敌对、不掉肉故不参与）。
+    // t239 mob 死亡一次性事件。t449：**延迟到 deathTimer 归零**（≈500ms 倒地动画播完）才发，而非 damageEntity
+    //   致死瞬间 —— 给「侧倒 + 白烟 → 掉落」的 MC 式过渡（旧实现红闪与掉落同帧太急）。damageEntity 致死时仅
+    //   置 dead=true + deathTimer + 快照 deathBurned；tick 死亡态分支 deathTimer≤0 时 emit 本信号 + releaseSlot。
+    //   坐标 = 死亡格 floor(pos)（dead 态 pos 冻结，与致死瞬间同位），mobType = 子类 id（0=通用 / t240 pig/cow/sheep）。
+    //   t242 据它 + mobType 决定掉落物（猪:生猪排 / 牛:皮革+牛肉 / 羊:羊毛）→ 呈现层转发 ItemEntityManager.spawnItem
+    //   （同 fallingBlockDropped 模式）。t344 burned = 致死时刻 mob 是否处于火烧态（fireTimer>0，触碰岩浆 / 火点燃）：
+    //   true → 呈现层 onMobDied 据此把被动生物的「生肉掉落」替换为熟肉（猪→熟猪排 / 牛→熟牛肉 / 羊→熟羊肉；
+    //   机制等价 MC 1.0 着火死亡掉熟肉）。仅 fireTimer>0 触发（日光 burning 仅敌对、不掉肉故不参与）。
     //   分层（PLAN §2）：Entities 层发语义事件，呈现层只消费，绝不反向写栅格。
     void mobDied(int x, int y, int z, int mobType, bool burned);
     // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：hostile mob（Shambler/Bones/Spider）在 aiHostile 内检测到
@@ -473,6 +475,11 @@ private:
         bool dead = false;       // 死亡态（health<=0 → true；dead 期间冻结 AI/重力，deathTimer 到 0 移除）
         float hurtFlash = 0.0f;  // 受击红闪剩余秒数（damageEntity 设 kHurtFlashTime；tick 衰减；>0 → QML 红）
         float deathTimer = 0.0f; // 死亡到移除倒计时（dead 翻 true 时设 kDeathTime；给 QML 播死亡动画窗口）
+        // t449 死亡掉落延迟：mobDied（→ 掉落物）不再在 damageEntity 致死瞬间 emit，而是延迟到 deathTimer
+        //   归零（= 倒地动画播完）才 emit —— 给玩家「侧倒 + 白烟 → 掉落」的 MC 式死亡过渡（旧实现红闪与掉落
+        //   同帧出现「太急」）。deathBurned 在致死瞬间快照 fireTimer>0（机制等价 MC「着火致死掉熟肉」），因
+        //   dead 态 fireTimer 冻结，故与 expiry 时复算等价；显式快照更稳（防未来 dead 期间动 fireTimer 的改动）。
+        bool deathBurned = false;
         // t280 黑暗刷怪（敌对生物 Shambler/Bones 专用；passive / FallingBlock 留默认 false/0 不触发）：
         //   hostile=true 的 Mob 走 tickHostileLife 的燃烧 + 远距消失 + spawn 调度逻辑。passive（pig/cow/sheep/
         //   test）hostile=false → 不燃烧 / 不计入敌对上限 / 不远距消失（passive 永驻世界，机制等价 MC 被动生物

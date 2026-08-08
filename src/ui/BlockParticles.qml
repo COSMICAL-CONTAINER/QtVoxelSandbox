@@ -52,26 +52,34 @@ Node {
     function burstExplosion(x, y, z) {
         burst(x, y, z, 20, "#d8d8d8", 0.08, 4.5, 2.5, 3.0, 0.9)
     }
+    // t449 mob 死亡白烟（机制等价 MC 1.0 mob 倒地消散的白烟 puff；delegate 检测 deadAt 翻 true 时调）。
+    //   白色 + 上飘 + **轻浮力（gravity<0 → 持续上飘而非回落）** + 较长寿命渐隐 = 消散感。数量适中（10）
+    //   覆盖 mob 体。重力 -1.5（向上浮力；区别碎屑 / 爆炸的下落 14 / 横飞 14）。
+    function burstDeathSmoke(x, y, z) {
+        burstFloat(x, y, z, 10, "#f0f0f0", 0.09, 1.2, 1.0, 1.0, 0.7, -1.5)
+    }
 
-    // 通用方块中心迸发（坐标先 +0.5 到方块中心）。
+    // 通用方块中心迸发（坐标先 +0.5 到方块中心）。gravity 缺省 14（碎屑强落；t449 加可选参数供烟雾上飘）。
     function burst(x, y, z, count, color, scale, vYBase, vYVar, hScale, life) {
-        burstFloat(x + 0.5, y + 0.5, z + 0.5, count, color, scale, vYBase, vYVar, hScale, life)
+        burstFloat(x + 0.5, y + 0.5, z + 0.5, count, color, scale, vYBase, vYVar, hScale, life, 14.0)
     }
     // 通用 float 坐标迸发：在 (px,py,pz) 周围水平随机角度 + 上抛 + 横向初速度散出。
     //   vYBase + [0,vYVar) 随机上抛分量；hScale 控制横向散开幅度；life + [0,0.25) 寿命抖动。
-    function burstFloat(px, py, pz, count, color, scale, vYBase, vYVar, hScale, life) {
+    //   gravity = 该粒子重力加速度（>0 下落如碎屑 / <0 上飘如烟雾 / 0 惯性）；缺省 14（碎屑手感）。
+    function burstFloat(px, py, pz, count, color, scale, vYBase, vYVar, hScale, life, gravity) {
+        const g = (gravity === undefined) ? 14.0 : gravity
         for (let i = 0; i < count; i++) {
             const angle = Math.random() * Math.PI * 2
             const hSpeed = (0.4 + Math.random() * 0.8) * hScale
             const vx = Math.cos(angle) * hSpeed
             const vz = Math.sin(angle) * hSpeed
             const vy = vYBase + Math.random() * vYVar
-            spawnParticle(px, py, pz, vx, vy, vz, color, scale, life + Math.random() * 0.25)
+            spawnParticle(px, py, pz, vx, vy, vz, color, scale, life + Math.random() * 0.25, g)
         }
     }
 
-    // 从池中找空闲槽激活一颗粒子；池满则丢（防爆量、防 new）。
-    function spawnParticle(x, y, z, vx, vy, vz, color, scale, life) {
+    // 从池中找空闲槽激活一颗粒子；池满则丢（防爆量、防 new）。gravity = 该粒子重力（默认碎屑 14）。
+    function spawnParticle(x, y, z, vx, vy, vz, color, scale, life, gravity) {
         const arr = root.pool
         for (let i = 0; i < arr.length; i++) {
             const p = arr[i]
@@ -79,6 +87,7 @@ Node {
             p.active = true
             p.life = life
             p.maxLife = life
+            p.gravity = (gravity === undefined) ? 14.0 : gravity
             p.vel = Qt.vector3d(vx, vy, vz)
             const m = p.obj
             m.x = x; m.y = y; m.z = z      // 直写 position 三轴（避免每帧 new vector3d）
@@ -98,7 +107,7 @@ Node {
         for (let i = 0; i < root.poolSize; i++) {
             const m = particleComponent.createObject(root)
             m.visible = false
-            root.pool.push({ obj: m, vel: null, life: 0.0, maxLife: 1.0, active: false })
+            root.pool.push({ obj: m, vel: null, life: 0.0, maxLife: 1.0, active: false, gravity: 14.0 })
         }
         tickTimer.start()
         console.info("[t465] BlockParticles ready; pool=" + root.poolSize
@@ -106,7 +115,8 @@ Node {
     }
 
     // 弹道推进 Timer：~50fps（20ms）。每帧推进激活粒子的弹道 + 渐隐，到期归位（visible=false 入池等复用）。
-    //   重力 = 14（与旧 Particles3D Gravity3D magnitude 一致，碎屑强落手感）。
+    //   重力 = per-particle p.gravity（碎屑 14 强落 / 烟雾 -1.5 上飘 / 惯性 0）；t449 加 per-particle 以支持
+    //   死亡白烟上飘（旧版常量 14 会让烟弹起即落，不像「消散」）。
     //   渐隐：opacity = clamp(life / maxLife * 1.5)，使后 2/3 寿命平滑淡出（前 1/3 保满 alpha 显眼）。
     //   dt 取 interval/1000 标称值（不读实际墙钟——视觉弹道对微小帧率波动不敏感，且免每帧读 clock 开销）。
     Timer {
@@ -116,7 +126,6 @@ Node {
         running: false
         onTriggered: {
             const dt = 0.020
-            const g = 14.0
             const arr = root.pool
             for (let i = 0; i < arr.length; i++) {
                 const p = arr[i]
@@ -127,10 +136,10 @@ Node {
                     p.obj.visible = false
                     continue
                 }
-                // 重力下落（Y 速度递减 → 上抛到顶后回落，模拟碎屑落地）
+                // 弹道：Y 速度按 p.gravity 递变（>0 减速下落如碎屑 / <0 加速上飘如烟）。
                 const v = p.vel
                 const nvx = v.x
-                const nvy = v.y - g * dt
+                const nvy = v.y - p.gravity * dt
                 const nvz = v.z
                 p.vel = Qt.vector3d(nvx, nvy, nvz)
                 const m = p.obj

@@ -136,6 +136,7 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
     e.dead = false;
     e.hurtFlash = 0.0f;
     e.deathTimer = 0.0f;
+    e.deathBurned = false;
     e.yawRad = 0.0f;
     e.wanderTimer = 0.0f; // 0 → tick 首帧选第一次向（避免所有 mob 同步起步）
     e.wanderSpeed = 0.0f;
@@ -992,10 +993,11 @@ float EntityManager::hurtFlashAt(int i) const
 
 // t239 受击（Q_INVOKABLE 兼调试 + t242 攻击路径双入口）：第 i 个 mob 受 amount 伤害。
 //   - clamp health 到 [0, maxHealth]；hurtFlash = kHurtFlashTime（QML 红闪）。
-//   - health≤0 且未 dead → dead=true + deathTimer=kDeathTime + emit mobDied（坐标 floor(pos) + mobType；
-//     t242 据它掉落猪排/皮革/羊毛）。dead 期间冻结 AI / 重力。
+//   - health≤0 且未 dead → dead=true + deathTimer=kDeathTime（冻结 AI/重力；**不**立即掉落）。
+//     t449：mobDied（→ 掉落物）改在 tick 死亡态 deathTimer 归零时 emit（倒地动画播完才掉落），本处仅
+//     快照 deathBurned（致死时刻 fireTimer>0）供延迟 emit 携带。dead 期间冻结 AI / 重力 / 攻击。
 //   - dead / 非 Mob / 越界 / amount≤0 → 静默早退。
-//   bump revision → 驱动 QML health/红闪/死亡绑定刷新。
+//   bump revision → 驱动 QML health/红闪/死亡绑定刷新（QML 据 deadAt 进入侧倒动画 + 白烟）。
 void EntityManager::damageEntity(int i, int amount)
 {
     if (i < 0 || i >= int(m_entities.size())) return;
@@ -1007,20 +1009,22 @@ void EntityManager::damageEntity(int i, int amount)
     e.hurtFlash = kHurtFlashTime;
 
     if (e.health <= 0) {
-        // 死亡：冻结 AI / 重力（dead=true → tick 跳过 aiWander / 重力，仅 deathTimer 倒计时）+ 给 QML
-        //   死亡动画窗口（kDeathTime）+ emit mobDied 让 t242 掉落。坐标用 floor(pos)（与 spawnItem 整数
-        //   入口一致；t242 转发 ItemEntityManager.spawnItem）。
+        // 死亡：冻结 AI / 重力（dead=true → tick 跳过 aiWander / 重力 / 敌对攻击，仅 deathTimer 倒计时）+
+        //   给 QML 播死亡动画窗口（kDeathTime ≈ 500ms：侧倒旋转 + 白烟消散）。**mobDied 延迟到 deathTimer
+        //   归零才 emit**（见 tick 死亡态分支）—— 机制等价 MC「血归零 → 倒地动画 → 掉落物」三段过渡，
+        //   旧实现「红闪 + 掉落物同帧」太急（t449 修）。
         e.dead = true;
         e.deathTimer = kDeathTime;
         e.wanderSpeed = 0.0f;
         e.moveSpeed = 0.0f;
-        const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
         // t344 burned = 致死时刻是否处于火烧态（fireTimer>0）：着火死亡掉熟肉（被动动物）。仅 fireTimer
-        //   触发（日光 burning 仅敌对、不掉肉故不参与 cooked 判定）。
-        const bool burned = e.fireTimer > 0.0f;
-        qCInfo(lcEnt) << "mob" << i << "type" << e.mobType << "died at" << dx << dy << dz
-                      << (burned ? "(burned)" : "");
-        emit mobDied(dx, dy, dz, e.mobType, burned);
+        //   触发（日光 burning 仅敌对、不掉肉故不参与 cooked 判定）。t449 快照进 deathBurned 供延迟 emit 携带
+        //   （dead 态 fireTimer 冻结，故与 expiry 复算等价；快照更稳）。
+        e.deathBurned = e.fireTimer > 0.0f;
+        const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
+        qCInfo(lcEnt) << "mob" << i << "type" << e.mobType << "entering death at" << dx << dy << dz
+                      << (e.deathBurned ? "(burned)" : "")
+                      << "-> drops deferred" << kDeathTime << "s (t449 side-fall anim)";
     } else {
         qCInfo(lcEnt) << "mob" << i << "took" << amount << "dmg, health=" << e.health << "/" << e.maxHealth;
     }
@@ -2020,10 +2024,19 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         // --- Mob（t239）---
         if (e.kind == Mob) {
             if (e.dead) {
-                // 死亡态：冻结 AI / 重力，仅 deathTimer 倒计时（给 QML 播死亡动画窗口）+ hurtFlash 衰减
-                //   （让 killing blow 的红闪自然褪去）。deathTimer≤0 → 标记移除（逆序 erase）。
+                // 死亡态：冻结 AI / 重力 / 敌对攻击，仅 deathTimer 倒计时（给 QML 播侧倒动画 + 白烟窗口）+
+                //   hurtFlash 衰减（让 killing blow 的红闪自然褪去）。deathTimer≤0 → emit mobDied（掉落物，
+                //   t449 延迟到此刻）+ 标记移除（releaseSlot）。
                 e.deathTimer -= float(dt);
-                if (e.deathTimer <= 0.0f) { toRemove.push_back(idx); dirty = true; }
+                if (e.deathTimer <= 0.0f) {
+                    // t449 死亡过渡结束才掉落（机制等价 MC 倒地动画后产掉落物）：mobDied 在 damageEntity 致死
+                    //   瞬间不再 emit，改在此 emit —— 侧倒 + 白烟已播完 kDeathTime → 此刻掉落物自然弹出。
+                    //   坐标 floor(pos) 与 spawnItem 整数格入口一致（dead 态 pos 冻结，与致死瞬间同位）。
+                    const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
+                    emit mobDied(dx, dy, dz, e.mobType, e.deathBurned);
+                    toRemove.push_back(idx);
+                    dirty = true;
+                }
                 if (e.hurtFlash > 0.0f) {
                     e.hurtFlash -= float(dt);
                     if (e.hurtFlash <= 0.0f) { e.hurtFlash = 0.0f; dirty = true; } // 红闪结束 → bump 让 QML 翻回 baseColor
