@@ -68,8 +68,9 @@ Window {
     //   仅一处盖子（一次只开一只箱子，chestOpen 单 bool），坐标读 chestX/Y/Z。同步 ChestUI 显隐
     //   （二者同源于 openChest/closeChest）。纯呈现层态，不写栅格（PLAN §2 分层）。
     property real chestLidAngle: 0
-    // 盖子全开角（度）：略过 90° 让盖子后仰（机制等价 MC 箱子开盖姿态）；铰链子节点绕局部 X 旋让前缘上扬。
-    readonly property real kChestLidOpenAngle: 105
+    // 盖子全开角（度）：t441 改 95（≈90° 略后仰，机制等价 MC 箱子开盖姿态；浅盖 0.5 深立起 ~0.5 高，无需过冲）。
+    //   旧 105° 配满深 1.0 盖 → 立起满高像第二只箱子（旧 bug 根因之一）；浅盖 + 95° 立起 ~0.5 明显矮于本体。
+    readonly property real kChestLidOpenAngle: 95
     // t225 盖子铰链 yaw（据 chestFacing 把「局部 +Z = 背侧（铰链所在）」转到箱子实际背侧方向）。
     //   前面 = 玩家侧（放置时锁面朝玩家）；背侧 = 前面反向 = 铰链侧。local +Z 经 Y 旋转 → 世界背侧：
     //   前面 +X(0)→背 -X→yaw -90 / 前面 -X(1)→背 +X→yaw 90 / 前面 +Z(2)→背 -Z→yaw 180 / 前面 -Z(3)→背 +Z→yaw 0。
@@ -4754,19 +4755,22 @@ Window {
             }
         }
 
-        // t196 / t225 箱子盖子开合动画（场景内 3D Node，与 torchHost / itemHost 同层）。仅当前所开箱子
+        // t196 / t225 / t441 箱子盖子开合动画（场景内 3D Node，与 torchHost / itemHost 同层）。仅当前所开箱子
         //   （chestX/Y/Z）一处显盖子（一次只开一只箱子，chestOpen 单 bool）。chestLidAngle 由 openChest/
         //   closeChest 驱动（window 级 Behavior 平滑过渡 0↔全开角）。
         //
-        // t225 朝向 + t409 盖子属立方本体顶部 1/4（修「盖子像脱离实体 / 像上一格方块刷新动画」）：
-        //   - 朝向：箱子放置时前面（锁面）朝玩家（placeBlock 写 state=horizontalFacing^1）。盖子铰链在锁面
-        //     **背侧**（开盖向远离玩家翻）。用「外层 pivot（顶面中心 + Yaw）+ 内层铰链（局部背棱 + X 旋转）」
-        //     嵌套，使局部「+Z=背 / -Z=前」约定对所有朝向统一：pivot 的 Yaw 把局部 +Z 转到箱子实际背侧方向
-        //     （chestLidYaw 据 chestFacing 算），铰链摆在局部 +Z=+0.5（背棱），其 X 旋转翻起局部 -Z（前缘）。
-        //   - t409 盖子 = 立方本体顶部 1/4（机制等价 MC 箱子：盖子是方块自身的一部分，非脱离实体）。盖子缩为
-        //     1.0×0.25×1.0，相对铰链摆 (0, -0.125, -0.5) → closed 时正好填满立方顶 1/4（顶面齐 cy+1.0、四向齐
-        //     cell 边）。closed 完全嵌在立方本体内 → 被本体（mesher 渲的整立方）遮挡，无 z-fight；随铰链 +X
-        //     翻开，前缘自立方顶面冒出、向后上方仰翻（机制等价 MC 后铰链前翻），动画明确归属本格箱子本体。
+        // 朝向：箱子放置时前面（锁面）朝玩家（placeBlock 写 state=horizontalFacing^1）。盖子铰链在锁面
+        //   **背侧**（开盖向远离玩家翻）。用「外层 pivot（顶面中心 + Yaw）+ 内层铰链（局部背棱 + X 旋转）」
+        //   嵌套，使局部「+Z=背 / -Z=前」约定对所有朝向统一：pivot 的 Yaw 把局部 +Z 转到箱子实际背侧方向
+        //   （chestLidYaw 据 chestFacing 算），铰链摆在局部 +Z=+0.5（背棱），其 X 旋转翻起局部 -Z（前缘）。
+        //
+        // t441 根因 + 重做盖几何（修「右键打开仍见整方块 + 额外错位件」）：旧盖子满深 1.0×0.25×1.0（仅压厚度，
+        //   深仍占满 cell）。绕后棱 +X 翻 ~90° 时，盖子的「深 1.0」变成「立起高 ~1.0」= 与本体（整立方 1.0）等高，
+        //   正面呈现一张满格贴图面 → 肉眼读作「箱子背后立着第二只箱子」（额外错位件）。历次修（t409 等）只改
+        //   厚度数值（0.16→0.10→0.25），而**决定开盖立起高度的是「深」不是「厚」** → 改厚度对开盖观感零效果，
+        //   即「反复修仍坏」的真因。重做：盖子缩为 1.0×0.30×0.50（机制等价 MC 箱子盖 8/16 深 / 5/16 厚 ——
+        //   盖子只占背半，浅），原点在后顶棱（铰链）。开盖 ~95° 只立起 ~0.5 格（明显矮于本体 1.0）→ 读作「翻起
+        //   的盖子」而非「第二只箱子」；合态盖子嵌在背顶（被本体遮挡，仅动画期可见）。lighting:NoLighting（红线）。
         //
         // 盖子本体 = BlockCube(Chest)（复用图集 per-face 贴图 chest_top/side/front → 与箱子本体 mesher
         //   整立方同外观，零 MC 资产）。可见性：playing 态且（chestOpen 或 角>0）→ 合盖动画播放期间
@@ -4779,20 +4783,20 @@ Window {
             position: Qt.vector3d(window.chestX + 0.5, window.chestY + 1.0, window.chestZ + 0.5)
             eulerRotation: Qt.vector3d(0, window.chestLidYaw, 0)
 
-            // 内层铰链：局部背棱（local +Z = +0.5，即箱子背侧顶棱中点）；绕局部 X 翻开（chestLidAngle）
+            // 内层铰链：局部背棱（local +Z = +0.5，即箱子背侧顶棱中点 = 铰链轴）；绕局部 X 翻开（chestLidAngle）
             //   → 局部 -Z（前缘 = 锁面侧）上扬 = 开盖向背侧翻（机制等价 MC 箱子后铰链前翻）。
             Node {
                 position: Qt.vector3d(0, 0, 0.5)
                 eulerRotation: Qt.vector3d(window.chestLidAngle, 0, 0)
 
                 Model {
-                    // 盖子 = 立方顶部 1/4：BlockCube 顶点 ±0.5，缩 (1.0, 0.25, 1.0) → 1 宽 × 0.25 高 × 1 深。
-                    //   摆位相对铰链（铰链原点 = 背侧顶棱中点）：X 居中(0)、Y 向下(-0.125 → 中心 cy+0.875、
-                    //   顶面齐 cy+1.0)、Z 向前(-0.5 → 覆盖 cell 全深 [前 0, 背 1.0])。closed 完全嵌在立方顶
-                    //   1/4 内、被本体遮挡（无 z-fight）；随铰链 +X 翻开前缘自顶面冒出上扬。
+                    // t441 浅盖：BlockCube 顶点 ±0.5，缩 (1.0, 0.30, 0.50) → 1 宽 × 0.30 厚 × 0.50 深（仅背半）。
+                    //   摆位相对铰链（铰链原点 = 背侧顶棱中点）：X 居中(0)、Y 向下(-0.15 → 中心 cy+0.85、顶面齐
+                    //   cy+1.0)、Z 向前(-0.25 → 覆盖背半 [前 -0.5, 背 0])。开盖 ~95°：0.50 的「深」变立起高 ~0.5
+                    //   （矮于本体 1.0）→ 读作翻起的盖子；满深 1.0 会立起满高像第二只箱子（旧 bug）。
                     geometry: BlockCube { blockId: 22 }   // 22 = BlockRegistry::Chest（与 blockregistry.h Id 枚举同源；同 torch=13 既有字面量 + 注释模式）
-                    position: Qt.vector3d(0.0, -0.125, -0.5)
-                    scale: Qt.vector3d(1.0, 0.25, 1.0)
+                    position: Qt.vector3d(0.0, -0.15, -0.25)
+                    scale: Qt.vector3d(1.0, 0.30, 0.50)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
