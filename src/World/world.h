@@ -282,6 +282,20 @@ public:
     struct DestroyedVoxel { int x, y, z; quint8 oldId; };
     std::vector<DestroyedVoxel> destroySphereSilent(int cx, int cy, int cz, float radius);
 
+    // t445 仙人掌整柱坍落为掉落物（机制等价 MC 1.0 仙人掌失撑 / 邻接方块即整柱破坏掉落）。自 (x,y,z) 起向上
+    //   逐格：凡 Cactus → 静默写 Air（m_chunks.setBlock 直写 + 标脏，**不**经 World::setBlock → 不递归触发本逻辑
+    //   / 不重复发 blockBroken 链）+ emit blockBroken（破块粒子 / 音）+ emit blockDroppedAsItem（呈掉落物实体）+
+    //   recomputeLightAround（遮光柱消失重 flood）。末尾若有破坏则 1 次 emit worldChanged + clearAllDirty（N 写
+    //   1 emit，同 destroySphereSilent 批量收口）。供 setBlock 破块（② 失撑）/ 放块（④ 邻接）路径调。非 Q_INVOKABLE
+    //   （内部 helper）。分层（PLAN §2）：World 层，只读 / 写 m_chunks + lightField + 发信号；不依赖 Game / Entities。
+    void dropCactusColumn(int x, int y, int z);
+    // t445 setBlock 编辑后仙人掌完整性复检（② 失撑 + ④ 邻接方块）。（x,y,z,oldId,id）= 本格刚发生的编辑。
+    //   ②：本格被破为 Air 且被破块非 Cactus → 若正上方是 Cactus，则该 Cactus 失撑 → dropCactusColumn（递归整柱）。
+    //      （被破块本身是 Cactus 时不在此处理 —— 玩家直破仙人掌的整柱坍落由 PlayerController 级联 spawnItem 负责，
+    //      避免双重掉落。）④：本格新放了非 Air 方块 → 水平 4 邻任一为 Cactus 即「邻接方块」→ 该 Cactus 整柱掉落。
+    //   静默 dropCactusColumn 不经 World::setBlock → 不重入本检查。供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。
+    void checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 
@@ -314,6 +328,10 @@ signals:
     // 编辑语义事件（id：broken 带被破的原方块 id；placed 带新放方块 id）。
     void blockBroken(int x, int y, int z, int id);
     void blockPlaced(int x, int y, int z, int id);
+    // t445 世界侧产出的掉落物（仙人掌失撑 / 邻接方块即整柱坍落为掉落物）：携世界坐标 + 方块 id。
+    //   呈现层（Main.qml）据本信号 spawnItem 生成掉落实体（同 player.spawnItem / fallingBlockDropped 模式：
+    //   World 低层只发语义事件，不反向依赖 Game/Entities）。仅仙人掌走此路径（玩家破块走 player.spawnItem）。
+    void blockDroppedAsItem(int x, int y, int z, int id);
 
 private:
     void generate();          // 重建置换表 + ChunkManager + 填充地形（静默，不 emit）

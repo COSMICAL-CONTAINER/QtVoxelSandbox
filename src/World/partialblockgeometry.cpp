@@ -442,6 +442,21 @@ int PartialBlockGeometry::append(
                       tile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::Cactus: {
+        // t445 仙人掌细柱：机制对标 MC 1.0 仙人掌 14/16（~0.875）宽的居中柱。本工程取 0.8（X/Z [0.1,0.9]）
+        //   居中、Y 满高 [0,1]，整柱贴 cactus 顶 / 侧贴图。**非满格整立方** —— cactus solid=false（同 Farmland /
+        //   glass），mesher 路由进 PASS 1（chunkgeometry），不进 PASS 2 立方面（否则满格立方覆盖细柱）。
+        //   全 6 面发（pushBox 不剔面）：+Y 顶面 cactus_top(54)（def.topTile，露出柱顶绿截面环纹）、侧·底
+        //   cactus_side(55)（tile = tileIndex(PosX)=sideTile；底贴侧贴图不可见 —— 柱底压在沙 / 下段仙人掌上）。
+        //   仙人掌柱（worldgen 1-3 格 / 玩家叠放）每格独立走本 case 各画满高 0.8 柱 → 视觉如整根细柱（段间
+        //   顶 / 底面相贴不可见，overdraw 可忽）。不做邻居剔除（异形小体约定，同 Farmland）。topTile 取 def.topTile(54)。
+        constexpr float kCactusInset = 0.1f; // (1 - 0.8) / 2 = 0.1（X/Z 内缩，居中 0.8 见方）
+        pushBox(verts, idx, lx, ly, lz,
+                kCactusInset, 1.0f - kCactusInset, 0.f, 1.f, kCactusInset, 1.0f - kCactusInset,
+                tile, light, tileW, hx, hy, v0, v1,
+                BlockRegistry::def(blockId).topTile); // +Y 顶面 cactus_top(54)；侧·底用 tile(=cactus_side 55)
+        break;
+    }
     case BlockRegistry::Farmland: {
         // t408 耕地矮盒：机制等价 MC 耕地比整立方矮 1 像素（15/16=0.9375）→ 顶面略陷，相邻整立方（草地等）上方
         //   露出 1/16 唇。全 footprint、y[0, 0.9375]：顶面 farmland_dry(26)（湿润暗化由 mesher 在 lctx.face[+Y] 预乘

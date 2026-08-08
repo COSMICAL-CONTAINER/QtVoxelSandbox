@@ -186,13 +186,17 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   sandstone_top(52)（压实沙面 + 细密噪点 + 暗框）/ 底·侧=sandstone_side(53)（暖沙底 + 横向层理带）。音色归
     //   GroupStone（石质）。worldgen 在 desert 沙表层下铺砂岩（区别于直接下接 Stone）；进创造调色板（玩家可取用）。
     /* sandstone    */ {int(BlockRegistry::Sandstone),                  52, 53, 53, 53, true,  BlockRegistry::ShapeFull,     0.8f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Sandstone),     1, 64, "sandstone",    "砂岩"},
-    //   仙人掌（Cactus）：沙漠标志性植物方块（接触伤害实体）。solid=true / ShapeFull（整立方实体碰撞 → mob/玩家撞其侧
-    //   或站其上即「接触」，接触伤害由 EntityManager/PlayerController 环境 tick 处理）、hardness=0.4（同 MC 1.0 仙人掌
-    //   量级，软质）、toolType=NoTool（空手即采且掉落，机制等价 MC 仙人掌无工具要求）、requiresTool=false、dropId=
-    //   自身（破仙人掌掉仙人掌方块，可放回）、dropCount=1、maxStack=64。各面贴图：顶·底=cactus_top(54)（绿截面 +
-    //   同心方框环纹）/ 侧=cactus_side(55)（深绿底 + 4 垂直棱脊 + 棱上刺点）。音色归 GroupGrass（植物，软质）。
-    //   worldgen 在 desert 沙顶散布 1-3 格高柱；放置预检（placeBlock）须 Sand/Cactus 在下方。进创造调色板。
-    /* cactus       */ {int(BlockRegistry::Cactus),                     54, 54, 55, 55, true,  BlockRegistry::ShapeFull,     0.4f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Cactus),         1, 64, "cactus",       "仙人掌"},
+    //   仙人掌（Cactus）：沙漠标志性植物方块（接触伤害实体）。**t445 几何缩到 ~80% 居中**：mesher 经
+    //   PartialBlockGeometry 画 0.8×1.0×0.8 居中柱（X/Z [0.1,0.9]、Y 满高；机制对标 MC 1.0 仙人掌 14/16 细柱），
+    //   非满格整立方。solid=**false**（同 Farmland / glass 模式：非满格渲染 → 不挡邻居面剔除 → 下方沙顶面画出、
+    //   填住柱底 0.1 环隙防 x-ray 缝；碰撞 / 选中仍走 ShapeFull 整格，与渲染解耦）。shape=ShapeFull（整立方实体碰撞 →
+    //   mob/玩家撞其侧或站其上即「接触」，接触伤害由 EntityManager/PlayerController 环境 tick 处理）、hardness=0.4
+    //   （同 MC 1.0 仙人掌量级，软质）、toolType=NoTool（空手即采且掉落，机制等价 MC 仙人掌无工具要求）、
+    //   requiresTool=false、dropId=自身（破仙人掌掉仙人掌方块，可放回）、dropCount=1、maxStack=64。各面贴图：顶·底=
+    //   cactus_top(54)（绿截面 + 同心方框环纹）/ 侧=cactus_side(55)（深绿底 + 4 垂直棱脊 + 棱上刺点）。音色归
+    //   GroupGrass（植物，软质）。worldgen 在 desert 沙顶散布 1-3 格高柱；放置预检（placeBlock）须 Sand/Cactus 在
+    //   下方 + **水平 4 邻无方块**（t445 ④）；失撑 / 邻接方块 → World 把整柱转掉落物（t445 ②/④）。进创造调色板。
+    /* cactus       */ {int(BlockRegistry::Cactus),                     54, 54, 55, 55, false, BlockRegistry::ShapeFull,     0.4f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Cactus),         1, 64, "cactus",       "仙人掌"},
     //   枯死的灌木（DeadBush）：沙漠干旱地表枯枝装饰。cross 形广告牌方块（与 TallGrass/Sapling 同走 cross 几何段，两片
     //   对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。solid=false（非实体 → 不挡邻居面剔除，同 torch/
     //   草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过）、hardness=0（瞬破）、NoTool（空手可采）、dropId=0（破枯灌木
@@ -688,6 +692,7 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
     case CobbleSlab:   return 7;                      // t412 圆石台阶半遮光（同 WoodSlab，半高占空比 0.5）
     case Farmland:     return 15;                     // t408 耕地 solid=false（矮盒渲染）但仍是 opaque 土块 → 满遮光
+    case Cactus:       return 15;                     // t445 仙人掌 solid=false（0.8 细柱渲染）但仍是 opaque 实体植物 → 满遮光
     default:           return 0;                      // 其余全透（air/torch/water/stairs/fence/plate/door/cross）
     }
 }

@@ -167,6 +167,16 @@ void ItemEntityManager::tick(qreal dt, World *world)
             dirty = true;
             continue;
         }
+        // t445 ⑤ 掉落物落到 / 触碰仙人掌被摧毁（spec「Q 丢物落到仙人掌→被顶掉/销毁」）：实体中心下方一格 ==
+        //   Cactus（即落在仙人掌顶上 / 贴其侧下落）→ 摧毁释放该槽。机制等价 MC 1.0 掉落物接触仙人掌即消失
+        //   （MC 仙人掌摧毁触碰它的物品实体）。releaseSlot 标 alive=false（slot-reuse，同岩浆 / 拾取路径），
+        //   本迭代即结束（continue）；末尾 dirty=true 触发 emit entitiesChanged → QML delegate 隐藏。
+        if (cy - 1 >= 0 && world->blockAt(cx, cy - 1, cz) == BlockRegistry::Cactus) {
+            const int idx = int(&e - &m_entities.front());
+            releaseSlot(idx);
+            dirty = true;
+            continue;
+        }
         const bool inWater = (cy >= 0 && world->blockAt(cx, cy, cz) == BlockRegistry::Water);
         // t271 瀑布：水格下方为空气 = 水柱下落 → 不上浮（随水柱下沉，落入下方水池后转浮水）。
         const bool waterfall = inWater

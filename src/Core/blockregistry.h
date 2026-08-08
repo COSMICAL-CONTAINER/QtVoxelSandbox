@@ -254,16 +254,24 @@ public:
                                   //   sandstone_top(52) / 侧·底=sandstone_side(53)（暖沙色 + 横向层理带，原创自绘 §9a）。
                                   //   音色归 GroupStone（石质，同 cobble/stone）。进创造调色板（玩家可取用 / 放置）。
         Cactus         = 42, // 仙人掌：沙漠标志性植物方块（worldgen 在 desert 沙顶散布 1-3 格高柱；玩家可放置在沙 / 仙人掌
-                                  //   上）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形；
-                                  //   实体碰撞 → mob/玩家撞其侧或站其上即「接触」）、hardness=0.4（同 MC 1.0 仙人掌量级，软质）、
+                                  //   上）。**t445 几何缩到 ~80% 居中**：mesher 经 PartialBlockGeometry 画 0.8×1.0×0.8 居中柱
+                                  //   （X/Z [0.1,0.9] / Y 满高，机制对标 MC 1.0 仙人掌 14/16 细柱），非满格整立方。solid=false
+                                  //   （同 Farmland / glass 模式：非满格 → 不挡邻居面剔除 → 下方沙顶画出填住柱底环隙；光照仍满遮，
+                                  //   lightOpacity 特例返 15）、shape=ShapeFull（碰撞 / 选中仍走整格，与渲染解耦 → 实体碰撞 →
+                                  //   mob/玩家撞其侧或站其上即「接触」）、hardness=0.4（同 MC 1.0 仙人掌量级，软质）、
                                   //   toolType=NoTool（空手即采且掉落，机制等价 MC 仙人掌无工具要求）、requiresTool=false、
                                   //   dropId=自身（破仙人掌掉仙人掌方块，可放回）、dropCount=1、maxStack=64。各面贴图：顶·底=
                                   //   cactus_top(54)（绿截面 + 同心方框环纹）/ 侧=cactus_side(55)（深绿底 + 4 垂直棱脊 + 棱上刺点，
                                   //   原创自绘 §9a）。音色归 GroupGrass（植物，软质）。**接触伤害**（spec「contact damages
                                   //   entities that touch it」）：EntityManager mob tick + PlayerController 环境 tick 检测实体
-                                  //   脚位/身体格及其水平 4 邻 + 脚下格任一 == Cactus 即「接触」→ 每 kCactusDamageInterval(0.5s) 扣
+                                  //   脚位/身体格及其水平 4 邻 + 脚下格任一 == Cactus 即「接触」（**t445 ③ 全方位**：玩家侧改查
+                                  //   footprint 格 + 水平 4 邻，覆盖撞侧面而非仅站顶）→ 每 kCactusDamageInterval(0.5s) 扣
                                   //   1HP（机制等价 MC 仙人掌触碰即伤）。**放置预检**（placeBlock）：目标格下方须为 Sand 或
-                                  //   Cactus（机制等价 MC 仙人掌须沙地 / 仙人掌支撑），否则拒放。进创造调色板。
+                                  //   Cactus（机制等价 MC 仙人掌须沙地 / 仙人掌支撑）+ **水平 4 邻无方块**（t445 ④，机制等价 MC
+                                  //   仙人掌不可邻接任何方块），否则拒放。**失撑 / 邻接方块即整柱转掉落物**（t445 ②/④）：World
+                                  //   setBlock 破块时若正上方是仙人掌（且被破块非仙人掌本身）→ dropCactusColumn 递归向上把整柱
+                                  //   转 Air + 发 blockDroppedAsItem（呈掉落物）；放块时若邻接仙人掌 → 同（立即破坏掉落）。
+                                  //   进创造调色板。
         DeadBush       = 43, // 枯死的灌木：沙漠干旱地表的枯枝装饰（worldgen 在 desert 沙顶低密度散布）。**cross 形广告牌
                                   //   方块**（与 TallGrass / Sapling 同走 PartialBlockGeometry 的 cross 几何段，两片对角相交
                                   //   双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。机制等价 MC 1.0 dead bush（沙漠

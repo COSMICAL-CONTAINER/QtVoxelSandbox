@@ -5104,6 +5104,10 @@ Window {
             // t117：新放的沙若下方空气 → 自身塌落（玩家在半空放沙立即落）。
             if (id === 8) maybeTriggerFallingBlock(x, y, z)
         }
+        // t445 世界侧产出的掉落物（仙人掌失撑 / 邻接方块即整柱坍落）→ 转发到 itemEntities.spawnItem 生成掉落实体。
+        //   同 player.onSpawnItem / fallingBlockDropped 模式（单向事件流：World 低层发语义事件、呈现层只消费，
+        //   PLAN §2 分层）。id = 方块 id（仙人掌），count = 1（每格一件，整柱坍落 = 多件散落物）。
+        function onBlockDroppedAsItem(x, y, z, id) { itemEntities.spawnItem(x, y, z, id, 1) }
         // t88：worldgen 重生（seed 变 / 初始生成）清除旧火把 → 伪光源列表校验清理。worldgen 不发
         // blockBroken（m_chunks.setBlock 直写），故旧火把位置不会经 onBlockBroken 移除；此处扫描
         // torchPositions，把已不再是火把的条目删掉。setBlock 编辑也会触发 worldChanged，但此时

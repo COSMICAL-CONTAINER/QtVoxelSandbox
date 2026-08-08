@@ -167,6 +167,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     if (id == BlockRegistry::Lava)
         m_lavaFlowTickCounter = kLavaFlowTickInterval - 1;
     pokeFluidDirty(x, y, z); // t380：块编辑可能扰动邻接流体平衡 → 标流体脏（驱动 tickWaterFlow/tickLavaFlow 早退后重扫）
+    checkCactusOnEdit(x, y, z, oldId, id); // t445：仙人掌失撑（②）/ 邻接方块（④）整柱坍落复检
     return true;
 }
 
@@ -249,6 +250,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     if (id == BlockRegistry::Lava)
         m_lavaFlowTickCounter = kLavaFlowTickInterval - 1;
     pokeFluidDirty(x, y, z); // t380：块编辑可能扰动邻接流体平衡 → 标流体脏
+    checkCactusOnEdit(x, y, z, oldId, id); // t445：仙人掌失撑（②）/ 邻接方块（④）整柱坍落复检
     return true;
 }
 
@@ -1140,6 +1142,53 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
     qInfo("vo.edit: explosion destroyed = %d (center %d,%d,%d r=%g)",
           int(destroyed.size()), cx, cy, cz, double(radius)); // 可观测：一次爆炸的破坏块数
     return destroyed;
+}
+
+// t445 仙人掌整柱坍落为掉落物（见 world.h 头注释）。机制等价 MC 1.0 仙人掌失撑 / 邻接方块即整柱破坏掉落。
+//   自 (x,y,z) 起向上逐格静默清 Cactus + 发 blockBroken（粒子 / 音）+ blockDroppedAsItem（掉落物）+ 重 flood 光，
+//   末尾 1 次 worldChanged + clearAllDirty（N 写 1 emit，同 destroySphereSilent 批量收口）。静默写不经 World::setBlock
+//   → 不递归触发 ②/④ 检查（无重入），也不发额外 blockBroken 链（本方法自发）。空柱（首格非 Cactus）→ no-op。
+void World::dropCactusColumn(int x, int y, int z)
+{
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    bool any = false;
+    int cy = y;
+    while (cy >= 0 && cy < m_height && m_chunks.blockAt(x, cy, z) == BlockRegistry::Cactus) {
+        m_chunks.setBlock(x, cy, z, BlockRegistry::Air); // 静默直写 + 标脏（含边界邻接）；不经 World::setBlock（无重入）
+        noteGrowthWrite(x, cy, z, BlockRegistry::Cactus, BlockRegistry::Air); // t425：仙人掌本不在生长索引，保持一致 no-op
+        emit blockBroken(x, cy, z, int(BlockRegistry::Cactus));                // 破块粒子 / 音（机制等价 MC 整柱坍落反馈）
+        emit blockDroppedAsItem(x, cy, z, int(BlockRegistry::Cactus));        // 呈掉落物实体（Main.qml spawnItem）
+        recomputeLightAround(x, cy, z, BlockRegistry::Cactus, BlockRegistry::Air); // 遮光柱消失 → 重 flood 邻域光场
+        any = true;
+        ++cy;
+    }
+    if (any) {
+        emit worldChanged();        // 驱动 mesh 重建（细柱段消失）
+        m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+    }
+}
+
+// t445 setBlock 编辑后仙人掌完整性复检（见 world.h 头注释；② 失撑 + ④ 邻接方块）。
+void World::checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    // ② 失撑：本格破为 Air 且被破块非 Cactus → 正上方 Cactus 失撑 → 整柱掉落。（被破块为 Cactus 时跳过 ——
+    //   玩家直破仙人掌的整柱坍落由 PlayerController 级联 spawnItem 负责，避免双重掉落。）
+    if (id == BlockRegistry::Air && oldId != BlockRegistry::Cactus) {
+        if (y + 1 < m_height && m_chunks.blockAt(x, y + 1, z) == BlockRegistry::Cactus)
+            dropCactusColumn(x, y + 1, z);
+    }
+    // ④ 邻接方块：本格新放非 Air 方块 → 水平 4 邻任一为 Cactus 即「邻接方块」→ 该 Cactus 整柱掉落
+    //   （机制等价 MC 1.0 仙人掌邻接任何方块即被扎破；覆盖玩家放沙旁 / 落沙落旁等非玩家放置路径）。
+    if (id != BlockRegistry::Air) {
+        constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        for (const auto &d : kNb) {
+            const int nx = x + d[0], nz = z + d[1];
+            if (nx >= 0 && nz >= 0 && nx < m_width && nz < m_depth
+                && y >= 0 && y < m_height
+                && m_chunks.blockAt(nx, y, nz) == BlockRegistry::Cactus)
+                dropCactusColumn(nx, y, nz);
+        }
+    }
 }
 
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。

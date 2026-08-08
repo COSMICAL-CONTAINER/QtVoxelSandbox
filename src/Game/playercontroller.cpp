@@ -2058,12 +2058,19 @@ void PlayerController::placeBlock()
         const bool nz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz - 1));
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
     }
-    // t394 仙人掌放置预检：仅可放在沙子或仙人掌正上方（机制等价 MC 1.0 仙人掌须沙地 / 仙人掌支撑）。
+    // t394/t445 仙人掌放置预检：（1）仅可放在沙子或仙人掌正上方（机制等价 MC 1.0 仙人掌须沙地 / 仙人掌支撑）。
     //   目标格的下方须为 Sand 或 Cactus；否则拒绝放置（不挥）。命中方块顶面放置 → target 下方 = 命中方块
     //   （须沙 / 仙人掌）；命中侧壁放置 → target 下方 = 空气 / 其它 → 拒（侧壁悬空不能放仙人掌，机制等价 MC）。
+    //   （2）t445 ④ 水平 4 邻须无方块（机制等价 MC 1.0 仙人掌不可邻接任何方块 —— 邻接即被扎破掉落）：
+    //   目标格水平 4 邻任一非 Air → 拒（不挥）。World setBlock 放块路径另做反应式验证（邻接仙人掌即整柱掉落），
+    //   覆盖「放置后邻接方块出现」（如落沙落旁、玩家放沙旁）的非玩家放置路径。
     if (m_selectedBlock == BlockRegistry::Cactus) {
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
         if (below != BlockRegistry::Sand && below != BlockRegistry::Cactus) return;
+        if (m_world->blockAt(tx + 1, ty, tz) != BlockRegistry::Air
+            || m_world->blockAt(tx - 1, ty, tz) != BlockRegistry::Air
+            || m_world->blockAt(tx, ty, tz + 1) != BlockRegistry::Air
+            || m_world->blockAt(tx, ty, tz - 1) != BlockRegistry::Air) return;
     }
     // t394 枯死的灌木放置预检：仅可放在沙子正上方（机制等价 MC 1.0 dead bush 生于沙地）。
     //   目标格的下方须为 Sand；否则拒绝放置（不挥）。与种子 / 树苗「须草地 / 泥土」同支撑语义。
@@ -3286,12 +3293,13 @@ void PlayerController::step(qreal dt)
         if (m_burning) { m_burning = false; emit burningChanged(); }
     }
 
-    // t394 玩家仙人掌接触伤害（spec「contact damages entities that touch it」；机制等价 MC 1.0 仙人掌触碰即伤）。
-    //   接触判定：扫描玩家 AABB footprint（±0.3 覆盖玩家宽 0.6 的 1~4 格）在脚位 / 眼位 Y 层 + 脚下格，任一 ==
-    //   Cactus 即接触（覆盖「撞其侧」+「站其顶」；Cactus 是实体整立方 → 玩家碰撞停在邻格，故须查邻接格 / 脚下格
-    //   而非玩家所在格本身）。每 kCactusDamageInterval(0.5s) 扣 1HP（fallDamageTaken(1, Cactus) 复用 takeDamage→
-    //   damaged 红闪 / 视角晃链，同窒息 / 溺水 / 火）。仅 Survival（Creative/Spectator 无敌）；离开即重置累积器。
-    //   只读 World::blockAt（向下依赖）。
+    // t394/t445 玩家仙人掌接触伤害（spec「contact damages entities that touch it」；机制等价 MC 1.0 仙人掌触碰即伤）。
+    //   接触判定：扫描玩家 AABB footprint（±0.3 覆盖玩家宽 0.6 的 1~4 格）在脚位 / 眼位 Y 层，对每个 footprint 格查
+    //   其自身 + 水平 4 邻，任一 == Cactus 即接触；再加脚下格（站仙人掌顶）。**t445 ③ 全方位**：旧版仅查 footprint 自身
+    //   格 —— 但 Cactus 实体（碰撞停在邻格）→ 玩家自身格恒非 Cactus → 仅「脚下格」分支生效（只判站顶，撞侧面不伤）。
+    //   改查 footprint 格 + 水平 4 邻 → 覆盖「撞其任意侧」（与 mob 版 EntityManager 同源 4 邻判定）。每 kCactusDamageInterval
+    //   (0.5s) 扣 1HP（fallDamageTaken(1, Cactus) 复用 takeDamage→damaged 红闪 / 视角晃链，同窒息 / 溺水 / 火）。仅
+    //   Survival（Creative/Spectator 无敌）；离开即重置累积器。只读 World::blockAt（向下依赖）。
     if (m_mode == Survival && m_world) {
         const int fx0 = int(std::floor(m_pos.x() - 0.3f)), fx1 = int(std::floor(m_pos.x() + 0.3f));
         const int fz0 = int(std::floor(m_pos.z() - 0.3f)), fz1 = int(std::floor(m_pos.z() + 0.3f));
@@ -3301,11 +3309,15 @@ void PlayerController::step(qreal dt)
             return yy >= 0 && yy < m_world->height()
                    && m_world->blockAt(xx, yy, zz) == BlockRegistry::Cactus;
         };
+        constexpr int kCactusNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         bool touch = false;
         for (int yy : {footY, eyeY}) {
             for (int cx = fx0; cx <= fx1 && !touch; ++cx)
-                for (int cz = fz0; cz <= fz1 && !touch; ++cz)
-                    if (cactusAt(cx, yy, cz)) touch = true;
+                for (int cz = fz0; cz <= fz1 && !touch; ++cz) {
+                    if (cactusAt(cx, yy, cz)) { touch = true; break; } // 嵌入（罕见）
+                    for (const auto &d : kCactusNb)                    // 水平 4 邻（撞侧面）
+                        if (cactusAt(cx + d[0], yy, cz + d[1])) { touch = true; break; }
+                }
         }
         if (!touch) { // 站在仙人掌顶（脚下格）
             for (int cx = fx0; cx <= fx1 && !touch; ++cx)
