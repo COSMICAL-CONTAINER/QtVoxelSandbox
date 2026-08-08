@@ -4384,37 +4384,38 @@ Window {
                         }
                         // t377 Bones 随机护甲（4 部位；同 Shambler，但 Bones 身形瘦 → 护甲盒按比例缩窄，贴骨身）。
                         //   作 mob Model 子节点继承 bodyYaw + 父 visible；MobModel 局部坐标（瘦躯干 half 0.14 / 细腿 0.06）。
+                        //   ids 必须 main.qml 全局唯一 → Bones 段用 bonesArmor* 前缀（Shambler 段仍 mobArmor*）。
                         Model { // 头盔（piece 0）
-                            id: mobArmorHead
+                            id: bonesArmorHead
                             property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 0) }
                             visible: armId !== 0
                             geometry: UnitCube {}
                             position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.36, 0.26, 0.36)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorHead.armId) }
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorHead.armId) }
                         }
                         Model { // 胸甲（piece 1）
-                            id: mobArmorChest
+                            id: bonesArmorChest
                             property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 1) }
                             visible: armId !== 0
                             geometry: UnitCube {}
                             position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.34, 0.50, 0.24)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorChest.armId) }
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorChest.armId) }
                         }
                         Model { // 护腿（piece 2）
-                            id: mobArmorLegs
+                            id: bonesArmorLegs
                             property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 2) }
                             visible: armId !== 0
                             geometry: UnitCube {}
                             position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.30, 0.40, 0.20)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegs.armId) }
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegs.armId) }
                         }
                         Model { // 靴子（piece 3）
-                            id: mobArmorBoots
+                            id: bonesArmorBoots
                             property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 3) }
                             visible: armId !== 0
                             geometry: UnitCube {}
                             position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.30, 0.16, 0.20)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorBoots.armId) }
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorBoots.armId) }
                         }
                     }
                     // t285/t302 Spider（蜘蛛；mobType 7）：MobModel 宽矮躯干 + 前伸小头 + **8 腿**（原创 §9，4 对
