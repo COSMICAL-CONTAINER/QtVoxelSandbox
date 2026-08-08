@@ -1,4 +1,5 @@
 #include "hotbar.h"
+#include "resourcepackmanager.h" // t456 pack item 图标覆盖（blockItemIconSource 静态查询）
 
 #include <QDebug>
 #include <QStringList>
@@ -501,6 +502,13 @@ QString Hotbar::iconSourceForBlock(int blockId) const
     // （ToolIcon / 材料图标 Canvas，§9a）→ 返空串，调用方据 isTool / isMaterial 切到对应自绘 delegate。
     // 越界先判再 cast，防 quint8 截断别名。
     if (blockId <= 0 || blockId >= int(BlockRegistry::Count)) return QString();
+    // t456 pack item 图标覆盖：pack 启用且该方块在「方块→pack item/前贴图」映射内（现 CraftingTable/Furnace）、
+    //   包内有 PNG 时，返 pack 的 file:// URL（2D 物品图标改用 pack item 贴图，机制等价 MC item icon）；pack 关 /
+    //   无映射 / 包内缺 → 落下方程序生成 icon_<block>.png（现状不变）。仅 2D 物品图标路径（hotbar/背包/光标）消费；
+    //   3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径，不调本函数，故不受影响。
+    const QString packSrc = ResourcePackManager::blockItemIconSource(blockId);
+    if (!packSrc.isEmpty())
+        return packSrc;
     const char *file = iconFileForBlock(quint8(blockId));
     if (!file) return QString();
     return QStringLiteral("qrc:/textures/") + QString::fromLatin1(file);

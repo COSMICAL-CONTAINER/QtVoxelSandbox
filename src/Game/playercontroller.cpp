@@ -1990,6 +1990,12 @@ void PlayerController::placeBlock()
         //   机制等价 MC 1.0 箱子放置锁面朝玩家）。编码与 horizontalFacing 同源（0=+X 1=-X 2=+Z 3=-Z）；
         //   mesher 据 state 把 chest_front 贴到对应面，QML 盖子铰链摆在前面背侧（锁面相对）。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
+    } else if (m_selectedBlock == BlockRegistry::Furnace) {
+        // t456 熔炉前面（炉口 furnace_front）朝玩家侧：state = horizontalFacing ^ 1（同箱子编码；机制等价 MC 1.0
+        //   熔炉放置炉口朝玩家）。mesher 据 state 把 furnace_front 贴到对应面，其余侧面 furnace_side、顶/底
+        //   furnace_top。此前熔炉无 placeState 分支 → state 恒 0 → 前面固定（tileFor 落 tileIndex 兜底恒 -Z），
+        //   不随玩家朝向。
+        placeState = quint8((horizontalFacing() & 3) ^ 1);
     } else if (m_selectedBlock == BlockRegistry::Leaves) {
         // t305 玩家放置的树叶标 PersistentLeafBit（持久，不参与自然衰减）—— 机制等价 MC 1.0「玩家放置的树叶
         //   不衰减」。worldgen 叶 state=0（衰减候选）；玩家叶 state=本 bit → decayLeavesAround 跳过 → 创造建筑

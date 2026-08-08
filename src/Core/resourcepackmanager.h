@@ -90,6 +90,13 @@ public:
     static QImage compositeAtlas();
     // 包是否启用且存在（与 active() 同源；ensureBuilt 后稳定）。供 image provider / main 判定。
     static bool packActive();
+    // t456 方块 item 图标覆盖（静态，供 Hotbar 等 Game 层无实例调用）：pack 启用且 blockId 在「方块→pack item/
+    //   前贴图文件名」映射内（现 CraftingTable/Furnace）、且包内 PNG 存在时（item 目录优先、block 目录兜底），
+    //   返 file:// URL；否则空串 → Hotbar::iconSourceForBlock 回退程序生成 icon_<block>.png。工作台/熔炉等 2D
+    //   物品图标此前用程序绘制等距立方体 icon_*.png（"旧版"）；pack 有对应 item 贴图则改用 pack（机制等价 MC
+    //   1.0 item icon）。仅 2D 物品图标路径消费；3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径，不受影响。
+    //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。active=false / 无映射 / 文件缺 → ""。
+    static QString blockItemIconSource(int blockId);
 
 signals:
     void activeChanged();   // active 或 atlasSource（revision）变（驱动 QML Texture 重载）

@@ -32,6 +32,7 @@ struct BuiltState {
     int revision = 0;             // t415 apply() 重建计数（保留；file:// 不挂查询串，仅作历史/调试用）
     QString itemDir;              // t420 包内物品图标目录（assets/minecraft/textures/item）绝对路径；空 = 无 item 覆盖
     QString entityDir;            // t421 包内生物贴图目录（assets/minecraft/textures/entity）绝对路径；空 = 无 entity 覆盖
+    QString blockDir;             // t456 包内方块贴图目录（assets/minecraft/textures/block）绝对路径；blockItemIconSource 兜底探测（pack 把前贴图放 block/ 时）
 };
 BuiltState &state()
 {
@@ -480,6 +481,22 @@ const QList<QPair<int, QString>> &mobEntityMap()
     return kMap;
 }
 
+// t456「引擎方块 id → pack item/前贴图文件名候选」映射（功能性元数据，红线 §9 可随代码提交；贴图文件不进仓库）。
+//   方块段 id（与 BlockRegistry::Id 同源；Core 不依赖 Game 故用字面量 + 注释钉死，同 itemFilenameMap 不引
+//   toolregistry 之例）：9=CraftingTable 工作台 / 10=Furnace 熔炉。这俩方块的 2D 物品图标此前用程序绘制的
+//   等距立方体 icon_*.png（"旧版"）；pack 启用且包内有对应 item / 前贴图时改用 pack（机制等价 MC 1.0 item icon：
+//   工作台 / 熔炉在物品栏显示其 item 贴图）。候选顺序 = 探测优先级：item 目录的 vanilla 风格 item/<name>.png 优先
+//   （多数包有），block 目录的 <name>_front.png 兜底（pack 把前贴图放 block/ 的布局，如 furnace_front.png 在 block/）。
+//   blockItemIconSource 逐候选 itemDir→blockDir 探测，首个命中即返；全缺返空（Hotbar 回退程序生成图标）。
+const QList<QPair<int, QStringList>> &blockItemIconMap()
+{
+    static const QList<QPair<int, QStringList>> kMap = {
+        { 9,  { QStringLiteral("crafting_table.png"), QStringLiteral("crafting_table_front.png") } }, // BlockRegistry::CraftingTable 工作台
+        { 10, { QStringLiteral("furnace.png"),        QStringLiteral("furnace_front.png") } },         // BlockRegistry::Furnace 熔炉
+    };
+    return kMap;
+}
+
 // t416/t444 MC「灰度可着色」瓦片 → 着色 tint 查表（单一权威）。这些 tile 的包内贴图本体是灰度（机制等价 MC
 //   foliageColor/grassColor / lily pad fixed tint），loader 直接用包内灰度原色会渲染成苔石色 / 灰白（用户「睡莲
 //   现灰」），故合成时乘上对应群系 tint。非着色瓦片（stone/dirt/...）原样，不受影响（返 nullptr）。
@@ -563,6 +580,7 @@ void ensureBuiltLocked()
     s.active = false; // reset；仅当包合法 + 覆盖成功才置 true
     s.itemDir.clear(); // t420 reset 物品图标目录（仅当包合法时重填）
     s.entityDir.clear(); // t421 reset 生物贴图目录（仅当包合法时重填）
+    s.blockDir.clear(); // t456 reset 方块贴图目录（仅当包合法时重填）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -634,6 +652,8 @@ void ensureBuiltLocked()
     // t421 生物贴图目录（assets/minecraft/textures/entity；同 packPath 并列解析）。包内无 entity 目录时为空
     //   → mobTextureSource 恒返空串 → Main.qml 各 mob delegate 回退程序生成贴图 / 纯色（不阻塞 block 图集合成）。
     s.entityDir = resolveEntityDir(packPath);
+    // t456 方块贴图目录（已由 resolveBlockDir 解析为 blockDirPath；缓存供 blockItemIconSource 兜底探测 block/<name>.png）。
+    s.blockDir = blockDirPath;
     QPainter p(&s.atlas);
     int overridden = 0;
     for (const auto &m : tileFilenameMap()) {
@@ -807,6 +827,39 @@ QString ResourcePackManager::itemIconSource(int itemId) const
     if (!QFile::exists(path))
         return {}; // 包内无该 item 贴图 → 不覆盖（保留自绘 Canvas）；红线 §9：仅运行期读本地 pack PNG。
     return QStringLiteral("file:///") + path;
+}
+
+QString ResourcePackManager::blockItemIconSource(int blockId)
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active)
+        return {};
+    // 该方块的候选文件名列表（无映射 → 空串，调用方回退程序生成图标）。
+    QStringList candidates;
+    for (const auto &m : blockItemIconMap()) {
+        if (m.first == blockId) {
+            candidates = m.second;
+            break;
+        }
+    }
+    if (candidates.isEmpty())
+        return {};
+    // 逐候选：item 目录优先（vanilla item icon），block 目录兜底（pack 把前贴图放 block/）。首个命中即返。
+    for (const QString &name : candidates) {
+        if (!s.itemDir.isEmpty()) {
+            const QString p = QDir(s.itemDir).absoluteFilePath(name);
+            if (QFile::exists(p))
+                return QStringLiteral("file:///") + p;
+        }
+        if (!s.blockDir.isEmpty()) {
+            const QString p = QDir(s.blockDir).absoluteFilePath(name);
+            if (QFile::exists(p))
+                return QStringLiteral("file:///") + p;
+        }
+    }
+    return {}; // 包内无该方块 item / 前贴图 → 不覆盖（保留程序生成 icon_<block>.png）。
 }
 
 QString ResourcePackManager::mobTextureSource(int mobType) const

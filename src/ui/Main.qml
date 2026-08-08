@@ -6382,7 +6382,7 @@ Window {
                             anchors.fill: parent
                             visible: { hotbarVM.slotRevision; const id = hotbarVM.blockIdAt(index)
                                        return !hotbarVM.isTool(id) && !hotbarVM.isMaterial(id) }
-                            source: { hotbarVM.slotRevision; return hotbarVM.iconSourceForBlock(hotbarVM.blockIdAt(index)) }
+                            source: { hotbarVM.slotRevision; resourcePack.active; return hotbarVM.iconSourceForBlock(hotbarVM.blockIdAt(index)) }
                             fillMode: Image.PreserveAspectFit
                             smooth: true
                         }
@@ -6924,7 +6924,7 @@ Window {
         Image {
             anchors.fill: parent
             visible: !hotbarVM.isTool(hotbarVM.heldBlock) && !hotbarVM.isMaterial(hotbarVM.heldBlock)
-            source: hotbarVM.iconSourceForBlock(hotbarVM.heldBlock)
+            source: { resourcePack.active; return hotbarVM.iconSourceForBlock(hotbarVM.heldBlock) }
             fillMode: Image.PreserveAspectFit
             smooth: true
         }

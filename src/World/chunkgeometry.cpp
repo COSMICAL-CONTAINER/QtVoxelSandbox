@@ -189,6 +189,18 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
             return d.topTile;                                            // 顶/底 = chest_top
         return d.sideTile;                                               // 其余三侧面 = chest_side
     }
+    // t456 熔炉朝向：前面（炉口 furnace_front）所朝面由 state 决定（放置时朝玩家，同箱子 horizontalFacing 同源
+    //   编码）；其余三侧面 furnace_side(13)、顶/底 furnace_top(12)。此前熔炉未在此特判 → 落 BlockRegistry::tileIndex
+    //   兜底（前面恒 -Z 固定方向）。chestFrontFace 是「state 低 2 位 → 水平前面 Face」通用解码器（命名历史性，
+    //   0=+X 1=-X 2=+Z 3=-Z），chest / furnace 共用（编码同源）；熔炉复用之，不改箱子行为。
+    if (block == BlockRegistry::Furnace) {
+        const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
+        const int frontFace = int(BlockRegistry::chestFrontFace(state)); // 前面（炉口）所朝面
+        if (face == frontFace) return d.frontTile;                       // furnace_front（炉口）
+        if (face == int(BlockRegistry::Top) || face == int(BlockRegistry::Bottom))
+            return d.topTile;                                            // 顶/底 = furnace_top
+        return d.sideTile;                                               // 其余三侧面 = furnace_side
+    }
     // t234/t406 耕地：顶面（+Y）恒 farmland_dry(26)（topTile）；湿润等级 0..3（state 低 2 位）由顶点色暗化
     //   体现（darker=wetter，见 buildMesh 内 farmlandHydrBrightMul），不再切换 dry/wet 两贴图（4 级靠顶点色
     //   连续暗化实现，无需扩图集 + 2 贴图）。侧/底 = dirt(2)。
