@@ -11,6 +11,32 @@
 #include <unordered_map> // t185 tickWaterFlow 的 adds 哈希表（key = 体素线性编码 → 新 level，多源取 min）
 #include <unordered_set> // t221 tickWaterFlow 的 evapKeys 集合（本 tick 将退场的格 key，供扩散 pass 跳过）
 
+// t425 perf：生长方块（作物 / 甘蔗 / 耕地 / 树苗）位置索引的坐标打包 / 解包 + 成员判定。
+//   生长 tick（tickCropGrowth / tickSugarcaneGrowth / tickFarmlandHydration / tickSaplingGrowth）旧版每窗
+//   **全图扫 W×D×H**（160×160×128 ≈ 3.3M 格 / 数十 ms）即便世界无任何生长方块也照扫 —— 在放大世界（t276
+//   10×10 chunk）上成持续掉帧主因（suspect c/d：新扫描 + 甘蔗/耕地 tick 扫全图）。改维护一份「生长方格」位置
+//   集合（m_growthCells），写入路径（setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）经 noteGrowthWrite
+//   增量维护，生长 tick 改遍历该集合（O(生长格数) 而非 O(全图)）；集合空 → 各 tick 零开销早退。
+//   打包布局同 packLeafCell（三轴各 16 位；世界 ≤160³ 远小于 16 位范围），定义在文件顶部供生长 tick（早于
+//   packLeafCell 第 891 行）使用。
+static inline quint64 packGrowthCell(int x, int y, int z)
+{
+    return (quint64(quint16(x)) << 32) | (quint64(quint16(y)) << 16) | quint64(quint16(z));
+}
+static inline void unpackGrowthCell(quint64 k, int &x, int &y, int &z)
+{
+    x = int(quint16(k >> 32));
+    y = int(quint16(k >> 16));
+    z = int(quint16(k));
+}
+// 是否「生长方块」（生长 tick 关心的 4 类：作物 / 甘蔗 / 耕地 / 树苗）。只读 BlockRegistry 枚举。
+static inline bool isGrowthBlock(quint8 id)
+{
+    using BR = BlockRegistry;
+    return id == BR::WheatCrop || id == BR::CarrotCrop || id == BR::PotatoCrop
+        || id == BR::Sugarcane || id == BR::Farmland || id == BR::Sapling;
+}
+
 // t149 海平面（水位）：worldgen 沙滩带 / 沙漠水位 / 填水 / 树·矿石阈值的单一权威常量。
 //   spec 原文 waterLevel=8 是 t119 重定标（heightAt 3..11 → 16..40）**之前**的旧地形范围；
 //   t119 后 heightAt∈[16,40]，8 < min(16) → 无任何列满足 h<8 → 填水为零、沙滩不可见。故按
@@ -39,6 +65,7 @@ void World::beginLoad(int seed)
     m_chunks.recreate(m_width, m_depth, m_height); // 零填充 + 全标脏（recreate 实现）
     buildPermutation();                            // 新 seed 的 Perlin 置换表（heightAt 查询一致性）
     m_decayingLeaves.clear(); // t325 网格重置 → 渐进衰减队列作废（坐标已不指向当前栅格；防误清新世界叶）
+    m_growthCells.clear();   // t425 网格重置 → 生长方格索引作废（finishLoad 写完 blob 后 rebuildGrowthCells 全图重建）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
     emit seedChanged();
 }
@@ -61,6 +88,35 @@ void World::finishLoad()
     // t380：加载存档后置流体脏 —— 存档可能含未稳流场（玩家存档时水正流），首次流体 tick 重扫恢复流动。
     m_waterDirty = true;
     m_lavaDirty = true;
+    // t425：存档 blob 由 WorldStore 直写 chunk（不经 World 写入路径 → noteGrowthWrite 不会捕获）→ 全图重建
+    //   生长方格索引一次，使后续生长 tick 走 O(生长格数) 遍历而非全图扫描（一次性 3.3M 扫描在加载期可接受）。
+    rebuildGrowthCells();
+}
+
+// t425 perf：生长方格索引增量维护。写入路径（setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）在
+//   m_chunks.setBlock 之后调本方法。id 不变（仅 state 变，如作物升阶段 / 耕地湿润度变）→ 成员资格不变 → no-op。
+//   id 变更 → 按 oldId/newId 是否生长方块增删集合项。O(1) 哈希操作（编辑低频，开销可忽略），换得生长 tick
+//   从 O(全图 3.3M) 降到 O(生长格数)。
+void World::noteGrowthWrite(int x, int y, int z, quint8 oldId, quint8 newId)
+{
+    if (oldId == newId) return; // id 不变 → 成员资格不变（作物升阶段 / 耕地湿润度变均 id 不变）
+    const quint64 k = packGrowthCell(x, y, z);
+    if (isGrowthBlock(oldId)) m_growthCells.erase(k);
+    if (isGrowthBlock(newId)) m_growthCells.insert(k);
+}
+
+// t425 perf：全图扫描重建生长方格索引。仅加载存档（finishLoad）调一次 —— 存档 blob 直写不经写入路径。
+//   运行期由 noteGrowthWrite 增量维护，无需重扫。一次性 3.3M 扫描在加载期可接受（非每 tick）。
+void World::rebuildGrowthCells()
+{
+    m_growthCells.clear();
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y)
+                if (isGrowthBlock(m_chunks.blockAt(x, y, z)))
+                    m_growthCells.insert(packGrowthCell(x, y, z));
 }
 
 // t176 新世界生成：按 seed 全量 worldgen + emit。generate() 内部 recreate 网格（清上一世界残留），
@@ -95,6 +151,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     const quint8 oldId = m_chunks.blockAt(x, y, z);
     if (oldId == id) return false; // 无变化
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏（→5 参数 id,0 重置 state）
+    noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
     qInfo("vo.edit: setBlock %d,%d,%d  %d->%d", x, y, z, int(oldId), int(id)); // t155f 诊断：编辑时序
     if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
         emit blockBroken(x, y, z, int(oldId)); // 破：带原方块 id（粒子/音效按它取色/取声）
@@ -168,6 +225,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     const quint8 oldState = m_chunks.stateAt(x, y, z);
     if (oldId == id && oldState == state) return false; // id 与 state 均无变化
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
+    noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
     if (oldId != id) {
         // id 变化 → 发 broken/placed（同 4 参数语义：破带原 id、放带新 id）；id 不变只 state 变（门开合）不发。
         if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
@@ -204,6 +262,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
     const quint8 occ = m_chunks.blockAt(x, y, z);
     if (occ != BlockRegistry::Air && occ != BlockRegistry::Water) return false; // 仅空气 / 水可被实体着地覆盖
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
+    noteGrowthWrite(x, y, z, occ, id); // t425：维护生长方格索引（沙落覆盖作物 / 耕地时正确移除）
     recomputeLightAround(x, y, z, occ, id); // t154：增量重 flood（oldId=被覆盖的 air/水 → newId=id）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -223,6 +282,7 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     if (oldId == id && oldState == state) return false; // 无变化（含 id 同 state 同）
     const quint8 lightOldId = oldId; // recomputeLightAround 用编辑前后 id（水 isSolid=false 非遮光，光照通常无变化）
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
+    noteGrowthWrite(x, y, z, lightOldId, id); // t425：维护生长方格索引（作物升阶段 id 不变 → no-op；甘蔗生长 / 耕地增删正确）
     recomputeLightAround(x, y, z, lightOldId, id);
     // t380：流体 tick 内部写入 → 标流体脏（链式扩散：本次写入改变流场 → 下次 tick 续扫直到稳态）。
     //   按 id / oldId 设对应标志：写 / 移除 Water → m_waterDirty；写 / 移除 Lava → m_lavaDirty。
@@ -708,17 +768,24 @@ void World::tickCropGrowth()
     // 1) 快照当前作物格 + 阶段（tick 内栅格不变 —— 升阶段在 pass 末统一应用，避免半遍历态读到刚升的阶段）。
     //   t407：快照涵盖全部三种作物（小麦 / 胡萝卜 / 马铃薯）—— 三者生长机制完全同构（同耕地支撑 + 光照 +
     //   湿润 + 确定性散布概率，复用 WheatCropStageMax 共享阶段上界），故共一生长判定，仅写入时按各自 id。
+    //   t425：遍历生长方格索引 m_growthCells（O(生长格数)）替代全图扫描（O(W×D×H)=3.3M）；顺带剔除被直接写入
+    //     清掉的生长格（blockAt 已非生长方块 → 索引项过期），防索引随直接写入单调累积。
     struct CCell { int x, y, z; quint8 id; quint8 stage; };
     std::vector<CCell> cells;
-    for (int x = 0; x < W; ++x)
-        for (int z = 0; z < D; ++z)
-            for (int y = 0; y < H; ++y) {
-                const quint8 b = m_chunks.blockAt(x, y, z);
-                if (b == BlockRegistry::WheatCrop
-                    || b == BlockRegistry::CarrotCrop
-                    || b == BlockRegistry::PotatoCrop)
-                    cells.push_back({x, y, z, b, m_chunks.stateAt(x, y, z)});
-            }
+    {
+        std::vector<quint64> stale;
+        for (quint64 k : m_growthCells) {
+            int x, y, z;
+            unpackGrowthCell(k, x, y, z);
+            const quint8 b = m_chunks.blockAt(x, y, z);
+            if (!isGrowthBlock(b)) { stale.push_back(k); continue; } // 直接写入清掉 → 剔除过期索引项
+            if (b == BlockRegistry::WheatCrop
+                || b == BlockRegistry::CarrotCrop
+                || b == BlockRegistry::PotatoCrop)
+                cells.push_back({x, y, z, b, m_chunks.stateAt(x, y, z)});
+        }
+        for (quint64 k : stale) m_growthCells.erase(k);
+    }
 
     // 2) 成长判定：每株据「下方耕地支撑 + 头顶光照足 + 未成熟」筛后，按确定性散布概率决定本窗是否升阶段。
     //    散布：hashVoxel(seed, x, y, z) 混入窗口序号 m_cropIntervalIndex 取低 16 位 % 100，落在 [0, kCropGrowPct)
@@ -795,16 +862,23 @@ void World::tickSugarcaneGrowth()
     if (W <= 0 || D <= 0 || H <= 0) return;
 
     // 1) 快照柱顶甘蔗格（上方为空气的甘蔗格 = 有长高余地的柱顶；中间 / 底格上方是甘蔗 → 非柱顶，跳过）。
+    //   t425：遍历生长方格索引 m_growthCells（O(生长格数)）替代全图扫描；顺带剔除过期索引项。
     struct SCell { int x, y, z; };
     std::vector<SCell> tops;
-    for (int x = 0; x < W; ++x)
-        for (int z = 0; z < D; ++z)
-            for (int y = 0; y < H; ++y) {
-                if (m_chunks.blockAt(x, y, z) != BlockRegistry::Sugarcane) continue;
-                if (y + 1 >= H) continue;                                  // 柱顶贴世界顶 → 无上方空间，不长
-                if (m_chunks.blockAt(x, y + 1, z) != BlockRegistry::Air) continue; // 上方非空气（被挡）→ 非可长柱顶
-                tops.push_back({x, y, z});
-            }
+    {
+        std::vector<quint64> stale;
+        for (quint64 k : m_growthCells) {
+            int x, y, z;
+            unpackGrowthCell(k, x, y, z);
+            const quint8 b = m_chunks.blockAt(x, y, z);
+            if (!isGrowthBlock(b)) { stale.push_back(k); continue; }
+            if (b != BlockRegistry::Sugarcane) continue;
+            if (y + 1 >= H) continue;                                  // 柱顶贴世界顶 → 无上方空间，不长
+            if (m_chunks.blockAt(x, y + 1, z) != BlockRegistry::Air) continue; // 上方非空气（被挡）→ 非可长柱顶
+            tops.push_back({x, y, z});
+        }
+        for (quint64 k : stale) m_growthCells.erase(k);
+    }
     if (tops.empty()) { ++m_sugarcaneIntervalIndex; return; }
 
     // 散布种子混入窗口序号（每窗一新种子 → 每柱每窗一新伪随机滚，错峰生长；全 int 运算避符号转换告警）。
@@ -865,14 +939,21 @@ void World::tickFarmlandHydration()
     if (W <= 0 || D <= 0 || H <= 0) return;
 
     // 快照耕地格 + 当前湿润等级（tick 内栅格不变 —— 写入在末尾统一应用）。
+    //   t425：遍历生长方格索引 m_growthCells（O(生长格数)）替代全图扫描；顺带剔除过期索引项。
     struct FCell { int x, y, z; quint8 hydr; };
     std::vector<FCell> cells;
-    for (int x = 0; x < W; ++x)
-        for (int z = 0; z < D; ++z)
-            for (int y = 0; y < H; ++y) {
-                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Farmland)
-                    cells.push_back({x, y, z, quint8(m_chunks.stateAt(x, y, z) & BlockRegistry::FarmlandHydrationMask)});
-            }
+    {
+        std::vector<quint64> stale;
+        for (quint64 k : m_growthCells) {
+            int x, y, z;
+            unpackGrowthCell(k, x, y, z);
+            const quint8 b = m_chunks.blockAt(x, y, z);
+            if (!isGrowthBlock(b)) { stale.push_back(k); continue; }
+            if (b == BlockRegistry::Farmland)
+                cells.push_back({x, y, z, quint8(m_chunks.stateAt(x, y, z) & BlockRegistry::FarmlandHydrationMask)});
+        }
+        for (quint64 k : stale) m_growthCells.erase(k);
+    }
 
     // 复算湿润等级；与存档不等才记为待写（changes.hydr 存新等级；避免稳态零意义写入 + 零 worldChanged）。
     std::vector<FCell> changes;
@@ -1062,13 +1143,22 @@ void World::tickSaplingGrowth()
     if (W <= 0 || D <= 0 || H <= 0) return;
 
     // 1) 快照当前树苗格（tick 内栅格不变 —— 生长在 pass 末统一应用，避免半遍历态读到刚生成的树）。
+    //   t425：遍历生长方格索引 m_growthCells（O(生长格数)）替代全图扫描；顺带剔除过期索引项（本 tick 末段
+    //     直写 m_chunks.setBlock(Air) 清树苗不经 noteGrowthWrite → 下一窗此剔除回收之，防索引累积）。
     struct SCell { int x, y, z; int trunkH; };
     std::vector<SCell> cells;
-    for (int x = 0; x < W; ++x)
-        for (int z = 0; z < D; ++z)
-            for (int y = 0; y < H; ++y)
-                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Sapling)
-                    cells.push_back({x, y, z, 0});
+    {
+        std::vector<quint64> stale;
+        for (quint64 k : m_growthCells) {
+            int x, y, z;
+            unpackGrowthCell(k, x, y, z);
+            const quint8 b = m_chunks.blockAt(x, y, z);
+            if (!isGrowthBlock(b)) { stale.push_back(k); continue; }
+            if (b == BlockRegistry::Sapling)
+                cells.push_back({x, y, z, 0});
+        }
+        for (quint64 k : stale) m_growthCells.erase(k);
+    }
 
     // 2) 成长判定：每株据「下方草地/泥土支撑 + 头顶光照足 + 主干列畅通」筛后，按确定性散布概率决定本窗是否长成。
     //    trunkH 据哈希高位取 4..6（与 worldgen placeTrees 同范围，保长出的树与自然树一致），按世界高度钳制。
@@ -1491,6 +1581,7 @@ void World::generate()
     buildPermutation();
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
     m_decayingLeaves.clear(); // t325 全新世界无失撑叶 → 清渐进衰减队列（防旧世界坐标误清新世界叶）
+    m_growthCells.clear();   // t425 全新世界 → 清生长方格索引（worldgen placeSugarcane 经 setVoxelIfAir 增量重建）
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）
 
     // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 海域」决定，下层 dirt / 深 stone。
@@ -1644,6 +1735,7 @@ void World::setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state)
     if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air)
         return;
     m_chunks.setBlock(x, y, z, id, state);
+    noteGrowthWrite(x, y, z, BlockRegistry::Air, id); // t425：worldgen placeSugarcane 经此 → 甘蔗入索引
 }
 
 // 单棵橡树：surfaceY=草顶 y；主干 trunkH 格原木(id5)从 surfaceY+1 起；顶部树叶(id7)树冠。

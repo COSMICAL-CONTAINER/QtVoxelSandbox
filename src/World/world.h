@@ -598,6 +598,11 @@ private:
     //   （t379：t325 原值 3/2 ~15s 仍偏快 → 放慢约 2.5×，叶子更持久渐退）；MC 1.0 叶衰为 random-tick 式渐退，
     //   本工程机制对齐非精确数值复刻。
     std::unordered_set<quint64> m_decayingLeaves; // 失撑叶坐标集合（packCell 打包键；tickLeafDecay 消费 + 清出队）
+    // t425 perf：生长方格（作物 / 甘蔗 / 耕地 / 树苗）位置索引 —— 生长 tick（crop/sugarcane/farmland/sapling）
+    //   遍历此集合（O(生长格数)）替代全图扫描（O(W×D×H)=3.3M，suspect c/d 掉帧主因）。写入路径
+    //   （setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）经 noteGrowthWrite 增量维护；
+    //   generate/beginLoad 清空、finishLoad 全图重建（存档 blob 直写不经写入路径）。
+    std::unordered_set<quint64> m_growthCells;
     int m_leafDecayTickCounter = 0;
     int m_leafDecayIntervalIndex = 0;
     static constexpr int kLeafDecayTickInterval = 4; // tickLeafDecay 节流间隔（WorldClock tick 单位 = 100ms → 0.4s/窗）
@@ -634,6 +639,11 @@ private:
     //   内（World 不知玩家位 → 不依赖上层；闪光 / 雷声为全局反馈，落点仅决定火 / 实体伤）。分层（PLAN §2）：
     //   只读 m_chunks + 写栅格（setBlock）+ 发信号；不依赖 Renderer / Physics / Game / Entities。
     void strikeLightning();
+    // t425 perf：生长方格集合增量维护（写入路径在 m_chunks.setBlock 后调；id 变更时按 oldId/newId 是否
+    //   生长方块增删集合项；id 不变如作物升阶段 / 耕地湿润度变 → no-op）。
+    void noteGrowthWrite(int x, int y, int z, quint8 oldId, quint8 newId);
+    // t425 perf：全图扫描重建生长方格集合（finishLoad 存档 blob 直写后调一次；运行期由 noteGrowthWrite 维护）。
+    void rebuildGrowthCells();
 };
 
 #endif // WORLD_H
