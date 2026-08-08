@@ -412,6 +412,13 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::DiamondId, 0,                         RecipeRegistry::DiamondId,
         RecipeRegistry::DiamondId, 0,                         RecipeRegistry::DiamondId },
       int(RecipeRegistry::DiamondBoots), 1, 1, "diamond_boots" },
+    // t447 骨粉：1 骨头 → 3 骨粉（无序 2×2）。机制等价 MC 1.0 bone→3 bone meal（1 骨头磨 3 骨粉）。无序
+    //   （单原料任意位置即可；2×2 背包栏 / 3×3 工作台均可）。骨粉为消耗品（每右键作物催熟一阶段即消耗 1），
+    //   故取 MC 的 1:3 产出比使实用（3 骨粉 = 3 次催熟）。骨头原料 = RecipeRegistry::BoneId（0x217，杀骸骨掉落；
+    //   创造调色板亦有）。产物 BonemealId（材料段 0x232，可堆叠 64）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::BoneId, 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::BonemealId, 3, 1, "bone_meal" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

@@ -1709,7 +1709,13 @@ void PlayerController::placeBlock()
         }
         // 未喂（无 mob / 食物不匹配 / 幼崽 / 冷却 / 已求偶）：
         //   种子 fall-through 到下方种植分支（右键耕地仍可种小麦）；其余 3 种食物无其他用途 → return（不放置）。
-        if (heldItemId != RecipeRegistry::SeedId) return;
+        //   **t447 ①**：胡萝卜 / 马铃薯物品**既是食物又是种子**（机制等价 MC 1.0 carrot/potato「种一个长成
+        //   作物」）→ 未喂时亦须 fall-through 到下方种植分支（右键耕地种对应作物），不能 return。旧 `!= SeedId`
+        //   一刀切让胡萝卜 / 马铃薯命中非猪 / 无命中时直接 return → 永远种不下（用户报「胡萝卜 / 马铃薯种不了」）。
+        //   小麦（WheatId）不是种子（小麦物品纯食物，种小麦用 SeedId）→ 仍 return（无种植用途）。
+        if (heldItemId != RecipeRegistry::SeedId
+            && heldItemId != RecipeRegistry::CarrotId
+            && heldItemId != RecipeRegistry::PotatoId) return;
     }
     // t234 锄头 useBlock（spec「持锄右键泥土/草方块→变耕地」）：手持为 Hoe 类工具（木/石/铁锄）+ 命中格为
     //   Dirt/Grass → 该格转 Farmland（湿润等级由 World::farmlandHydrationLevel 据水源邻近判定写 state 低 2 位；
@@ -1771,6 +1777,32 @@ void PlayerController::placeBlock()
             }
             return; // 作物种子（种植成功 / 命中非耕地 / 未命中）均不再走方块放置路径
         }
+    }
+    // t447 ④ 骨粉催熟（spec「骨粉右键作物→催熟一阶段」）：手持骨粉（BonemealId，材料段非方块）右键命中**未成熟**
+    //   作物（小麦 / 胡萝卜 / 马铃薯，state<WheatCropStageMax）→ 作物 state+1（即时催熟一阶段）。机制等价 MC 1.0
+    //   骨粉右键作物 +1 age。骨粉非方块 → selectedBlock 经 hotbar 归 Air，须在下方 `m_selectedBlock == Air` 守卫
+    //   之前分流（同桶 / 锄 / 种子 / 树苗 / 玻璃分支模式）。命中非作物 / 已成熟（state==max）→ 不催不挥（机制等价
+    //   MC 骨粉对成熟作物 / 非作物无效应；本工程简化：骨粉仅催作物，不催草 / 树苗）。spectator 已被入口 canPlace()
+    //   守卫拦截；Creative / Survival 均可催。生存消耗 1 骨粉（创造不耗）。分层（PLAN §2）：催熟属 Game/Physics
+    //   （读射线命中 + 写 World + 写 Hotbar VM），不改 setBlock 语义。
+    //   写入走 5 参数 setBlock（保留 crop id + 写 state+1）：id 不变 → 不发 broken/placed；发 worldChanged → 作物
+    //   mesh 重建（阶段贴图更新）。机制等价 MC 骨粉即时 +1 age（不走 tick 等待）。
+    if (m_hotbar && m_world && heldItemId == RecipeRegistry::BonemealId) {
+        if (m_hasHit) {
+            const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+            if (hitId == BlockRegistry::WheatCrop || hitId == BlockRegistry::CarrotCrop
+                || hitId == BlockRegistry::PotatoCrop) {
+                const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz); // 催熟前快照（< max 才催）
+                if (st < BlockRegistry::WheatCropStageMax) { // 三种作物共享阶段上界（blockregistry.h 注释）
+                    m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, quint8(st + 1)); // id 不变 + state+1
+                    if (m_mode != Creative)
+                        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 骨粉（创造不耗）
+                    m_lastPlaceMs = now;
+                    emit swingArm(); // 催熟也是一次「使用」动作 → 挥手（t29）
+                }
+            }
+        }
+        return; // 骨粉（催熟成功 / 命中非作物 / 已成熟 / 未命中）均不再走方块放置路径
     }
     // t305 树苗种植（spec「树苗种植→长大成完整树」）：手持树苗物品（SaplingItemId，材料段非方块）右键命中
     //   草地 / 泥土 → 在命中格正上方空气格种下 Sapling 方块（机制等价 MC 1.0 树苗种植）。树苗物品非方块 →

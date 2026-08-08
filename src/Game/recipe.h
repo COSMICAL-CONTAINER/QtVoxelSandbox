@@ -194,6 +194,13 @@ public:
     //   MaterialIcon 自绘鱼形图标（银蓝鱼身 + 尾鳍 + 眼）；创造调色板补全便于测试。名称 / 图标全原创（§9a 区隔）。
     //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘）。
     static constexpr int RawFishId         = 0x231; // 生鱼：钓竿拉起获物（机制等价 MC 1.0 raw fish；钓鱼常见获物）
+    // t447 骨粉（bone meal）：材料段 0x232。**骨头合成产物**（1 骨头 → 3 骨粉，无序 2×2 / 3×3，机制等价 MC 1.0
+    //   bone→3 bone meal）。可堆叠 64；非方块（材料段）→ 右键不放置，走 useBlock「催熟」分支（同桶 / 种子：在
+    //   selectedBlock Air 守卫之前分流）：右键命中**未成熟作物**（小麦 / 胡萝卜 / 马铃薯，state<WheatCropStageMax）
+    //   → 作物 state+1（即时催熟一阶段，机制等价 MC 1.0 骨粉右键作物 +1 age）。生存消耗 1 骨粉 / 创造不耗。
+    //   MaterialIcon 自绘骨粉图标（米白粉末堆 + 几粒骨碎，§9a 区隔原创）。创造调色板补全便于测试 / 装饰取用。
+    //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘）。
+    static constexpr int BonemealId        = 0x232; // 骨粉：骨头合成产物；右键未成熟作物 → 催熟一阶段（t447）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

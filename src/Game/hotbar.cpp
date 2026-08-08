@@ -347,7 +347,10 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::InkSacId),          // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac）
         // t401 钓鱼获物（机制等价 MC 1.0 raw fish；生存由钓竿拉起咬钩获物获得，创造调色板补全便于测试 / 装饰）。
         //   可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘鱼形图标。
-        int(RecipeRegistry::RawFishId)          // 生鱼：钓竿拉起获物（机制等价 MC 1.0 raw fish；钓鱼常见获物）
+        int(RecipeRegistry::RawFishId),         // 生鱼：钓竿拉起获物（机制等价 MC 1.0 raw fish；钓鱼常见获物）
+        // t447 骨粉（机制等价 MC 1.0 bone meal；生存由骨头合成获得，创造调色板补全便于测试 / 装饰）。
+        //   可堆叠 64；非方块 → 右键不走放置，走 useBlock 催熟分支。MaterialIcon 自绘骨粉图标。
+        int(RecipeRegistry::BonemealId)         // 骨粉：骨头合成产物；右键未成熟作物催熟一阶段（t447）
     };
 }
 
@@ -542,6 +545,8 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggSquidId) return QStringLiteral("生物蛋（鱿鱼）"); // 右键地面 → 生成鱿鱼
         // t401 钓鱼获物（机制等价 MC 1.0 raw fish；钓竿拉起咬钩获物）。
         if (blockId == RecipeRegistry::RawFishId)       return QStringLiteral("生鱼");       // 钓鱼常见获物
+        // t447 骨粉（机制等价 MC 1.0 bone meal；骨头合成产物，右键未成熟作物催熟一阶段）。
+        if (blockId == RecipeRegistry::BonemealId)      return QStringLiteral("骨粉");       // 骨头合成产物；右键作物催熟
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

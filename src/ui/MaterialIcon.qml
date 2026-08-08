@@ -816,6 +816,31 @@ Item {
                 R(11, 17, 2, 1, marrow)
             }
 
+            // t447 骨粉（0x232）：骨头合成产物（1 骨头 → 3 骨粉），右键未成熟作物催熟一阶段。MC 风格骨粉 = 米白
+            //   粉末堆（不规则的粉末锥）+ 几粒骨碎点缀，一眼辨「磨碎的骨头粉末」（区别于骨头 0x217 的硬质骨段：
+            //   骨粉是无定形粉末堆，无骨干 / 膨节结构）。纯原创自绘（§9a）。
+            const drawBonemeal = () => {
+                // 米白粉末 + 暖阴影 + 几粒骨碎。配色：meal #f4ecdc（粉末主体，比骨头骨干更亮更柔）/
+                //   mealLight #fcf8ee（受光高光）/ mealShade #c8b894（粉末阴影 + 堆底）/ chip #e0d4b8
+                //   （骨碎粒，比粉末略暗显颗粒）/ chipShade #a89878（骨碎暗边）。
+                const meal = "#f4ecdc", mealLight = "#fcf8ee", mealShade = "#c8b894"
+                const chip = "#e0d4b8", chipShade = "#a89878"
+                // 粉末堆底（不规则椭圆底盘，rows 11..17，cols 6..17 —— 上窄下宽的粉末锥投影）
+                R(9, 11, 6, 1, mealShade)        // 顶（窄）
+                R(7, 12, 10, 1, mealShade)       // 上缘
+                R(6, 13, 12, 4, meal)            // 主体 rows 13..16
+                R(6, 17, 12, 1, mealShade)       // 堆底阴影（最宽，表「铺开的粉」）
+                // 受光高光（左上偏亮，表「粉末反光」）
+                R(8, 12, 5, 1, mealLight)
+                R(7, 13, 3, 2, mealLight)
+                // 骨碎粒（3-4 粒小方块散布在粉末上，表「未磨尽的骨碎」，区别于纯面粉）
+                R(10, 13, 2, 2, chip)
+                R(14, 14, 2, 2, chip)
+                R(8, 15, 2, 1, chip)
+                R(12, 12, 1, 1, chipShade)       // 骨碎暗边点缀
+                R(10, 14, 1, 1, chipShade)
+            }
+
             // 腐肉（0x218，t299）：杀蹒跚者（僵尸）掉落。MC 风格腐肉 = 暗红褐腐块 + 绿斑霉点 + 腐败裂痕。
             //   纯原创自绘（§9a）。区别于生牛肉：主色更暗（褐红 vs 鲜红）+ 绿霉斑（变质的身份特征）。
             //   配色：flesh #6a3028（暗红褐主体）/ fleshDark #3e1818（腐败裂痕 + 底阴影）/ fleshLight #8a4838
@@ -1226,6 +1251,7 @@ Item {
             case 0x22F: drawCarrot();             break // t400 胡萝卜（猪繁殖食物；喂成体猪 → 求偶）
             case 0x230: drawPotato();             break // t400 马铃薯（猪繁殖食物；喂成体猪 → 求偶）
             case 0x231: drawRawFish();            break // t401 生鱼（钓竿拉起获物；机制等价 MC 1.0 raw fish）
+            case 0x232: drawBonemeal();           break // t447 骨粉（骨头合成产物；右键未成熟作物催熟一阶段）
             default:    drawStick();        break
             }
         }

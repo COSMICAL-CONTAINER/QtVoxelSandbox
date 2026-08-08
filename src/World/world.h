@@ -574,14 +574,18 @@ private:
     // t236 小麦作物生长 tick 节流计数 + 常量：tickCropGrowth() 每 100ms 被 WorldClock.ticked 调一次；
     //   累积到 kCropTickInterval 才做一次成长判定（~每 kCropTickInterval×0.1s 一窗）。窗口序号 m_cropIntervalIndex
     //   每窗 +1，喂入 hashVoxel 散布概率 → 不同窗口不同作物错峰升阶段（防全部同步生长的机械感）。
-    //   kCropTickInterval=25（2.5s/窗）+ kCropGrowPct=35% → 单株平均 ~7s/阶段、~50s 长满 7 阶段（可见、可验收；
+    //   kCropTickInterval=25（2.5s/窗）+ kCropGrowPct=6% → 单株平均 ~42s/阶段、~5min 长满 7 阶段（可见、可验收；
     //   MC 1.0 约 31min 长满，本工程取快便于肉眼 / 测试复核，机制对齐非精确数值复刻）。kCropMinLight=9：头顶
     //   天光 ≥9/15 才长（机制等价 MC 作物需 light level 9+；夜间 / 洞穴不长）。
+    //   **t447 减速修正**：旧 kCropGrowPct=35% 配耕地湿润倍率（dry 1×..wettest 4×）+ 雨水 2× → 湿润耕地
+    //   growPct 常超 100% 被钳到 100%（每窗必升 = ~17s 长满 = 用户报「秒熟」）。降到 6% 后：dry ~42s/阶段、
+    //   wettest(hydr=3) ~10s/阶段、wettest+rain ~5s/阶段——最大 48%（不再被钳到 100%，湿润不再秒熟），机制
+    //   仍对齐 MC「湿润加速」但整体慢到合理。倍率 / 雨水逻辑（tickCropGrowth 内）不变，仅降基底概率。
     int m_cropTickCounter = 0;
     int m_cropIntervalIndex = 0;
     static constexpr int kCropTickInterval = 25;  // tickCropGrowth 节流间隔（WorldClock tick 单位 = 100ms → 2.5s/窗）
     static constexpr int kCropMinLight     = 9;   // 生长所需最低天光（/15；机制等价 MC 作物 light level 9+）
-    static constexpr int kCropGrowPct      = 35;  // 每窗每株升阶段的散布概率（%；35% → 平均 ~7s/阶段）
+    static constexpr int kCropGrowPct      = 6;   // 每窗每株升阶段的散布概率（%；6% → dry 平均 ~42s/阶段；t447 由 35 降）
     // t406 甘蔗生长 tick 节流计数 + 常量：tickSugarcaneGrowth() 每 100ms 被 WorldClock.ticked 调一次；累积到
     //   kSugarcaneTickInterval 才做一次生长判定（~每 kSugarcaneTickInterval×0.1s 一窗）。窗口序号
     //   m_sugarcaneIntervalIndex 每窗 +1 喂入 hashVoxel 散布概率 → 不同甘蔗柱错峰生长。
