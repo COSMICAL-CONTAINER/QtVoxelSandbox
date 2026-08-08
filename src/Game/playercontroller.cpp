@@ -1881,7 +1881,18 @@ void PlayerController::placeBlock()
     }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
-    const int tx = m_hitBx + m_hitNx, ty = m_hitBy + m_hitNy, tz = m_hitBz + m_hitNz;
+    const int tx = m_hitBx + m_hitNx, tz = m_hitBz + m_hitNz;
+    int ty = m_hitBy + m_hitNy;
+    // t417 睡莲浮水面：选体射线走 HitTorch（updateRaycast）—— 水不挡射线 → 瞄水面时射线**穿过水**命中水底
+    //   实块（如沼泽 1 格深水下的泥土），命中面 +Y → 放置目标格 ty = 水底+1 = **水源格**本身。睡莲几何贴格底
+    //   （PartialBlockGeometry cellLocalY 1/16）→ 渲染在该水格底部 → 视觉沉到水下（spec「睡莲被放到水下方」）。
+    //   修：睡莲须浮水面 → 目标格为水时逐格上爬到水面之上首个非水格（air），睡莲落该 air 格、几何贴其底 =
+    //   水面 + 1/16 → 浮于水面（机制等价 MC 1.0 lily pad 浮水面非沉底）。worldgen 睡莲（placeSwampFlora）已置于
+    //   水格上方一格 → 本修正仅补玩家放置路径（射线穿水落水格）。深水（海）逐格爬到海平面 air 格亦成立。
+    if (m_selectedBlock == BlockRegistry::LilyPad) {
+        while (ty < m_world->height() && m_world->blockAt(tx, ty, tz) == BlockRegistry::Water)
+            ++ty;
+    }
     const quint8 idByte = quint8(m_selectedBlock);
     // t146 放置态先算（供「重叠校验」+「实际写入」+「t163(b) 合并判定」复用，逻辑同源）：slab 据命中面 /
     //   玩家俯仰、stairs/door 据玩家水平朝向、fence/pressure_plate/trapdoor 默认 0（trapdoor 默认水平合）。
