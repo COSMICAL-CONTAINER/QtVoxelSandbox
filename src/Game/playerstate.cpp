@@ -21,6 +21,15 @@ void PlayerState::takeDamage(int amount, int cause)
     if (m_health <= 0) {
         m_dead = true;
         m_deathCause = m_lastCause;  // t311 致死来源 = 致死那一击的来源
+        // t443 死亡清空 XP（spec「死亡清空 XP 条」）：xp / level / intoLevel 归零。Game 层持有此死亡规则
+        //   （同 dead / deathCause 在致死分支置位），呈现层（Main.qml onDied）另在死亡点 spawn 一个少量
+        //   经验球（约 1 只被动 mob 量）作可回收的部分 XP。level 真降才 emit levelChanged；xp 真变才 emit
+        //   xpChanged（无变化不发信号，同 healthChanged 纪律）。intoLevel 随 xp 归零（xp=0 → intoLevel 恒 0）。
+        const bool xpWas = (m_xp != 0);
+        m_xp = 0;
+        m_intoLevel = 0;
+        if (m_level != 0) { m_level = 0; emit levelChanged(); }
+        if (xpWas) emit xpChanged();
         emit deadChanged();          // 驱动 QML 死亡界面显（dead 绑定）
         emit deathCauseChanged();    // t311 驱动 deathCause / deathCauseText 绑定
         emit died();                 // 一次性事件：呈现层据此释放指针 / 关背包面板

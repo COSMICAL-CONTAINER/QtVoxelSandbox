@@ -1194,14 +1194,22 @@ Window {
         //     id 改动须同步 src/Game/recipe.h（单一权威）。
         function onMobDied(x, y, z, mobType, burned) {
             // t402 杀怪产经验球（spec「killing mobs spawns XP orbs」；机制等价 MC 1.0 杀怪掉经验）。
-            //   敌对 mob（Shambler/Bones/Stalker/Spider）掉 XP；被动 mob（猪/牛/羊/鸡/鱿鱼，繁殖经济用）
-            //   不掉（MC 1.0 杀被动动物不给 XP，仅敌对给）。MobTest（调试）不掉。XP 数值为本工程小世界
-            //   量身调（非 MC 精确复刻，PLAN §4 机制对标非数值 1:1）。
+            //   t443 放宽到所有 mob（spec「杀被动 mob 也掉 XP」）：敌对 mob 给较多（5 XP），被动 mob 给少量
+            //   （1-3 XP 随机，量级远小于敌对，鼓励杀怪经济）。MobTest（调试）不在表 → 不掉。XP 数值为本工程
+            //   小世界量身调（非 MC 精确复刻，PLAN §4 机制对标非数值 1:1）。
             const xpForMob = {}
             xpForMob[EntityManager.MobShambler] = 5   // 蹒跚者（僵尸）：5 XP
             xpForMob[EntityManager.MobBones]    = 5   // 骸骨（骷髅）：5 XP
             xpForMob[EntityManager.MobStalker]  = 5   // 潜行者（苦力怕）：5 XP（自爆型，同敌对量级）
             xpForMob[EntityManager.MobSpider]   = 5   // 蜘蛛：5 XP
+            // t443 被动 mob 也掉少量 XP（spec「杀被动 mob（牛/羊/猪/鸡）也掉 XP」）：1-3 XP 随机。
+            //   牛/羊/猪/鸡/鱿鱼均掉（被动经济生物）；MobTest 不在表 → 不掉。每次死亡独立掷骰（mob 死亡非
+            //   worldgen，无确定性约束，同 onMobDied 既有 Math.random 稀有掉落模式）。
+            xpForMob[EntityManager.MobPig]     = 1 + Math.floor(Math.random() * 3) // 猪：1-3 XP
+            xpForMob[EntityManager.MobCow]     = 1 + Math.floor(Math.random() * 3) // 牛：1-3 XP
+            xpForMob[EntityManager.MobSheep]   = 1 + Math.floor(Math.random() * 3) // 羊：1-3 XP
+            xpForMob[EntityManager.MobChicken] = 1 + Math.floor(Math.random() * 3) // 鸡：1-3 XP
+            xpForMob[EntityManager.MobSquid]   = 1 + Math.floor(Math.random() * 3) // 鱿鱼：1-3 XP
             const xpAmt = xpForMob[mobType]
             if (xpAmt && xpAmt > 0) xpOrbs.spawnOrb(x, y, z, xpAmt)
             // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
@@ -5041,6 +5049,15 @@ Window {
             if (window.chatOpen) window.chatOpen = false   // t312：死亡关聊天（死亡屏接管光标）
             window.returnHeldToHotbar()
             player.dropAllItems()     // t175：死亡掉落整个背包到死亡点 + 清空背包
+            // t443 死亡掉部分 XP（spec「死亡地点掉部分 XP，约 1 只怪量」）：在死亡点 spawn 1 个经验球
+            //   （量约 1 只被动 mob = 1-3 XP）。XP 清零已在 PlayerState.takeDamage 致死分支完成（Game 层规则，
+            //   先于本 onDied 触发）；此处仅 spawn 球（呈现层编排，需死亡位置 + XpOrbManager；PLAN §2 分层：
+            //   Game 层持 XP 数值 / 死亡规则，呈现层持位置 + 实体生成）。坐标同 dropAllItems 死亡格（脚底
+            //   floor），球与掉落物同处便于玩家走回拾取。机制对齐项目决策（MC 死亡掉经验，本工程简化为定量
+            //   「约 1 只被动 mob」而非 level 比例，spec 明示）。
+            const dp = player.feetPosition
+            xpOrbs.spawnOrb(Math.floor(dp.x), Math.floor(dp.y), Math.floor(dp.z),
+                            1 + Math.floor(Math.random() * 3))  // 1-3 XP（约 1 只被动 mob 量）
             player.release()           // 释放指针 → 光标可见（点「立即重生 / 回主菜单」按钮）
             // t312 死亡播报：聊天栏推一条系统消息（机制等价 MC 1.0 死亡消息「<player> <death reason>」）。
             //   文案 = 玩家名 + 空格 + playerState.deathCauseText（如「玩家 从高处坠落」）。deathCauseText 是
@@ -6356,10 +6373,12 @@ Window {
     //   每级所需 XP 单调递增（曲线见 PlayerState::xpNeedForLevel）。等级数仅 level>0 显（MC：0 级无数）。
     //   分层（PLAN §2）：呈现层只读 playerState.level / xpBarFraction，曲线 + level 派生全在 Game 层
     //   PlayerState（单一权威），绝不反向写。绿条 + 绿字自绘原创（§9 override (a) 非 MC GUI PNG）。
-    //   全 playing 模式均显（机制等价 MC：创造 / 生存都显经验条 + 等级）。
+    //   t443 仅 Survival 显（spec「创造/观察者隐藏 XP 条」）：创造/观察者无生存经济，经验条无意义 →
+    //     与心/饥饿条同仅在 Survival 显（player.mode === Survival 门控，同 vitalsBar）。
     Item {
         id: xpBar
         visible: window.appState === "playing"
+                 && player.mode === PlayerController.Survival
         anchors.bottom: hotbarBar.top
         anchors.bottomMargin: 4
         anchors.horizontalCenter: parent.horizontalCenter

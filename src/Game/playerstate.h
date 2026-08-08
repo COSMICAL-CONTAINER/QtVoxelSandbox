@@ -97,6 +97,8 @@ public:
     // spec t78）。amount<=0 忽略（无治疗语义）。dead 期间早退（不再扣血、不再发 damaged）。
     // t311 cause=致死来源（DeathCause 枚举），默认 Generic（单参调用兜底）；每次受伤记录最近来源，致死那一击
     //   （health 扣到 ≤0）的 cause 即 deathCause。分层（PLAN §2）：Game 层持值，呈现层只读。
+    // t443 致死分支同步清空 XP（xp / level / intoLevel 归零 + emit xpChanged / levelChanged；spec「死亡清空 XP 条」）。
+    //   死亡地点掉部分 XP（约 1 只被动 mob 量）由呈现层 onDied spawn 经验球（需死亡位置 + XpOrbManager）。
     Q_INVOKABLE void takeDamage(int amount, int cause = Generic);
     // 恢复生命：加 amount HP，clamp 到 maxHealth。amount<=0 忽略。
     Q_INVOKABLE void heal(int amount);
