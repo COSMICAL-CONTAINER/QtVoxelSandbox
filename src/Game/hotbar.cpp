@@ -96,9 +96,14 @@ bool isValidItemId(int id)
 
 // t263 把「写入时传入的 durability」归一为合法的工具 / 护甲实例耐久。
 //   - 非工具 / 非护甲 id（含 air / 方块 / 材料）→ 恒 0（inert；不带耐久）。
-//   - 工具 / 护甲 id + durability<0（缺省「自动」）→ maxDurability（新实例：创造取件 / 合成产物 / 世界拾取兜底）。
-//   - 工具 / 护甲 id + durability>=0（显式保真）→ clamp 到 [1, maxDurability]（搬运 / 拾取时槽内旧耐久）；
-//     0 视作 1（耐久归零的实例不应再进槽——破损在 damageSelectedItem / damageArmor 内清槽，不写 0 耐久实例）。
+//   - 工具 / 护甲 id + durability<=0（缺省 -1 / ItemStack 默认 0 = 未初始化）→ maxDurability（新实例满耐久）。
+//   - 工具 / 护甲 id + durability>0（显式保真）→ clamp 到 (0, maxDurability]（搬运 / 拾取时槽内旧耐久）。
+// t448：0 不再视作「1 次耐久」。ItemStack 的 durability 默认值为 0（=「未显式赋值的新工具」），旧版把它归一为 1
+//   会导致「用一次就消失」——任何写入路径（合成 / 取件 / 存档 round-trip / 旧档迁移 / 拾取兜底）意外落 0 时，
+//   工具实例被当成仅剩 1 点耐久，首次锄地 / 挖掘 / 攻击即触发 damageSelectedItem 归零清槽 → 工具凭空消失。
+//   0 与缺省 -1 同义（未初始化 → 新实例满耐久）。耐久真正归零的实例本就不应再进槽——破损在
+//   damageSelectedItem / damageArmor 内清槽（写空栈），故「0 耐久实例进槽」只可能是 bug / 脏数据，按新工具满耐久
+//   兜底远比「1 次耐久」安全（机制等价 MC「新工具满耐久」，杜绝一次性工具）。
 // t345：护甲走 ArmorRegistry::maxDurability（同工具语义；护甲受击 -1，归零破损）。
 // 调用者：setStack / mainSetStack / addStack / mainAddStack / addToAny / armorSetStack（统一入口，防各处散写漏归一）。
 int normalizeDurability(int id, int durability)
@@ -108,10 +113,9 @@ int normalizeDurability(int id, int durability)
     if (!isTool && !isArm) return 0;
     const int cap = isTool ? ToolRegistry::maxDurability(id) : ArmorRegistry::maxDurability(id);
     if (cap <= 0) return 0; // 防御：表未配耐久（不应发生；maxDurability 对工具 / 护甲恒 >0）
-    if (durability < 0) return cap;         // 缺省 → 新实例满耐久
-    if (durability > cap) return cap;       // 超 max 钳到 max
-    if (durability == 0) return 1;          // 0 视作 1（破损实例不写槽；最小 1 次耐久）
-    return durability;
+    if (durability <= 0) return cap;    // <=0（缺省 -1 / 默认 0=未初始化）→ 新实例满耐久（t448：杜绝 0→1「用一次就消失」）
+    if (durability > cap) return cap;   // 超 max 钳到 max
+    return durability;                   // (0, cap] 显式保真（搬运 / 拾取实例耐久）
 }
 } // namespace
 
