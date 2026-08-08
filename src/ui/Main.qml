@@ -4992,6 +4992,48 @@ Window {
         }
     }
 
+    // t465 受击红色 vignette（机制等价 MC 1.0 受伤屏边红雾；spec「屏幕红色 vignette 闪 ~200ms」）。
+    //   玩家受击（PlayerState.damaged → 上方 Connections.onDamaged → damageVignetteAnim.start()）→
+    //   屏幕四角/边缘红半透渐变（中心透明、边缘暗红）闪现后淡回 0（~200ms）。Canvas 一次性绘制径向渐变
+    //   （中心透明 → 70% 暗红 → 边缘亮红），只在窗口尺寸变时重绘；闪烁靠 Item.opacity 动画（不每帧重绘 Canvas）。
+    //   与 t67「模型变红 + 相机晃动」并存：模型变红是 3D 模型层反馈、相机晃动是相机层反馈、本 vignette 是
+    //   屏幕层反馈——三层叠加完整覆盖「受击」的全方位视觉反馈（spec「红色 vignette + 轻微相机震动」）。
+    //   纯 Canvas/Item 无 MouseArea → 不拦截鼠标（同水下蓝雾 / 闪电白闪经验）。仅 playing 态显。
+    //   放在 View3D 之后、HUD/背包/暂停叠层之前（同水下蓝雾：只染 3D 场景区，HUD 仍清晰可读）。
+    //   分层（PLAN §2）：呈现层只消费 PlayerState 语义事件（damaged），绝不反向写数值（同 hurtAnim / shakeAnim）。
+    Item {
+        id: damageVignette
+        anchors.fill: parent
+        visible: window.appState === "playing"
+        opacity: 0.0   // 静止时透明；受击时由下方动画闪现后淡回 0
+        Canvas {
+            anchors.fill: parent
+            // 一次性绘制径向渐变（中心透明、边缘红），只在窗口尺寸变时重绘。闪烁靠 damageVignette.opacity
+            //   动画驱动（每帧改 Item.opacity 而非重绘 Canvas → 性能稳）。
+            onPaint: {
+                const ctx = getContext('2d')
+                ctx.reset()
+                const w = width, h = height
+                const cx = w / 2, cy = h / 2
+                const innerR = Math.max(1, Math.min(w, h) * 0.30)
+                const outerR = Math.max(innerR + 1, Math.max(w, h) * 0.75)
+                const g = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
+                g.addColorStop(0.0, "rgba(0,0,0,0)")             // 中心透明（不挡视野核心区）
+                g.addColorStop(0.65, "rgba(120,0,0,0.30)")       // 中环暗红（渐显）
+                g.addColorStop(1.0, "rgba(190,0,0,0.85)")        // 边缘亮红（四角渐变最浓）
+                ctx.fillStyle = g
+                ctx.fillRect(0, 0, w, h)
+            }
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            Component.onCompleted: requestPaint()
+        }
+        SequentialAnimation on opacity { id: damageVignetteAnim; running: false
+            // 受击瞬间满 alpha 闪现 → 200ms 衰减回透明（spec「闪 ~200ms」；连击 start() 重启 → 重新闪）
+            NumberAnimation { from: 1.0; to: 0.0; duration: 200; easing.type: Easing.OutQuad }
+        }
+    }
+
     // t388 睡觉 fade 叠层（夜间右键床 → 全屏黑 ramp → 跳清晨后隐藏）：机制等价 MC 1.0 睡觉过渡。
     //   状态驱动 = player.sleeping + player.sleepProgress（tickImpl 算时序、翻转才发 sleepingChanged；进度每 tick
     //   发 sleepProgressChanged）。sleeping 期间随进度 ramp 到近全黑（×1.7 使前 ~60% 进度即达峰值，余为「闭眼」
@@ -5031,6 +5073,8 @@ Window {
             playerModel.hurt = 1.0    // 立即满红（hurtAnim 从 1.0 淡到 0）
             hurtAnim.start()           // 400ms 回正（重启进行中的动画 → 连击重新变红）
             shakeAnim.start()          // 200ms 视角晃动
+            // t465 受击红色 vignette（屏幕层反馈，与模型变红 + 相机晃动三层叠加完整覆盖受击反馈）
+            damageVignetteAnim.start() // 200ms 红色 vignette 闪现淡出（连击 start() 重启 → 重新闪）
             // t177 受伤音：与变红 / 视角晃同源事件（PlayerState.damaged）触发，机制等价 MC 玩家受伤声。
             audio.playHurt()
         }
