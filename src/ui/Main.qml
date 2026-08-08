@@ -2839,15 +2839,18 @@ Window {
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
                     }
-                    // t377 头盔（装备槽 0）：作 headNode 子节点 → 随头部俯仰。略大于头、覆盖头顶（帽型）。
-                    //   visible 绑装备槽 0 是否有护甲（armorRevision 触碰）。材质色 = tier（armorMatColor）。
+                    // t377/t452 头盔（装备槽 0）：作 headNode 子节点 → 随头部俯仰。visible 绑装备槽 0 是否有护甲
+                    //   （armorRevision 触碰）；材质色 = tier（armorMatColor）。
+                    //   t452 根因修复：t377 把护甲壳做得仅比身体部件大 0.02 → 第三人称近乎不可见（"仍不显示"）。
+                    //   放大到明显包裹头部（X/Z 各探出 0.05、头顶探出 0.04），并把盔体后移（+Z）让前面部 / 眼不被
+                    //   盔面遮挡（玩家面 -Z；前 z=-0.17 在眼 z=-0.25 之后 → 脸可见，盔覆盖头顶 / 后脑 / 两侧）。
                     Model {
                         id: playerArmorHead
                         property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(0) }
                         visible: armId !== 0
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, 0.32, 0)
-                        scale: Qt.vector3d(0.54, 0.40, 0.54)
+                        position: Qt.vector3d(0, 0.30, 0.06)
+                        scale: Qt.vector3d(0.60, 0.48, 0.46)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorHead.armId); opacity: playerModel.bodyOpacity }
                     }
                     // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
@@ -2891,14 +2894,15 @@ Window {
                     scale: Qt.vector3d(0.5, 0.7, 0.3)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
                 }
-                // t377 胸甲（装备槽 1）：作 upperBody 子节点 → 随鞠躬前倾。略大于躯干、覆盖胸腹（甲片型）。
+                // t377/t452 胸甲（装备槽 1）：作 upperBody 子节点 → 随鞠躬前倾。t452 放大到明显包裹躯干
+                //   （同 center，各轴 ~16% 大：X 探 0.04 / Y 探 0.02 / Z 探 0.03），第三人称清晰可见的胸甲壳。
                 Model {
                     id: playerArmorChest
                     property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(1) }
                     visible: armId !== 0
                     geometry: UnitCube {}
-                    position: Qt.vector3d(0, 0.42, 0)
-                    scale: Qt.vector3d(0.56, 0.56, 0.36)
+                    position: Qt.vector3d(0, 0.35, 0)
+                    scale: Qt.vector3d(0.58, 0.74, 0.36)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorChest.armId); opacity: playerModel.bodyOpacity }
                 }
                 // 左臂枢轴（t45 走 / t52 仅右手挖）：枢轴位于左肩（相对 upperBody：-0.375, 0.7, 0；世界 -0.375, 1.3, 0），
@@ -3201,14 +3205,16 @@ Window {
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                 }
-                // t377 左护腿（装备槽 2）：作大腿枢轴子节点 → 随大腿行走 / 蹲下摆动。略大于大腿、覆盖裤腿。
+                // t377/t452 左护腿-大腿段（装备槽 2）：作大腿枢轴子节点 → 随大腿行走 / 蹲下摆动。t452 放大
+                //   （X/Z 探 0.025、Y 探 0.02）使第三人称可见；小腿段见 leftKneePivot 内 playerArmorCalfL（MC 护腿
+                //   覆盖整条腿，故分大腿 / 小腿两段随膝关弯折）。
                 Model {
                     id: playerArmorLegL
                     property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
                     visible: armId !== 0
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.15, 0)
-                    scale: Qt.vector3d(0.27, 0.32, 0.27)
+                    scale: Qt.vector3d(0.30, 0.34, 0.30)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorLegL.armId); opacity: playerModel.bodyOpacity }
                 }
                 // 膝盖关节（t65）：位于大腿末端（髋下 0.3）。站立 0°（小腿续大腿成直线）；蹲下回折
@@ -3224,14 +3230,26 @@ Window {
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                     }
-                    // t377 左靴（装备槽 3）：作膝盖枢轴子节点 → 随小腿摆动。覆盖脚踝 / 脚部（靴型）。
+                    // t452 左护腿-小腿段（装备槽 2）：作膝盖枢轴子节点 → 随小腿 / 蹲下弯折。与大腿段 playerArmorLegL
+                    //   共享装备槽 2（护腿覆盖整条腿）；放大同大腿段（探 0.025），第三人称小腿护甲清晰可见。
+                    Model {
+                        id: playerArmorCalfL
+                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
+                        visible: armId !== 0
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.15, 0)
+                        scale: Qt.vector3d(0.30, 0.34, 0.30)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorCalfL.armId); opacity: playerModel.bodyOpacity }
+                    }
+                    // t377/t452 左靴（装备槽 3）：作膝盖枢轴子节点 → 随小腿摆动。t452 放大并前移（-Z=玩家前方）
+                    //   形成明显靴头：X 探 0.025、Z 前探 0.075（靴头超出小腿）、覆盖脚踝。脚底约贴地（微入地 <0.02）。
                     Model {
                         id: playerArmorBootL
                         property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(3) }
                         visible: armId !== 0
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.27, 0)
-                        scale: Qt.vector3d(0.27, 0.12, 0.29)
+                        position: Qt.vector3d(0, -0.24, -0.03)
+                        scale: Qt.vector3d(0.30, 0.14, 0.34)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorBootL.armId); opacity: playerModel.bodyOpacity }
                     }
                 }
@@ -3251,14 +3269,14 @@ Window {
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                 }
-                // t377 右护腿（装备槽 2）：镜像左护腿（随大腿摆动）。
+                // t377/t452 右护腿-大腿段（装备槽 2）：镜像左大腿护腿（t452 放大；小腿段见 rightKneePivot）。
                 Model {
                     id: playerArmorLegR
                     property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
                     visible: armId !== 0
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.15, 0)
-                    scale: Qt.vector3d(0.27, 0.32, 0.27)
+                    scale: Qt.vector3d(0.30, 0.34, 0.30)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorLegR.armId); opacity: playerModel.bodyOpacity }
                 }
                 Node {
@@ -3271,14 +3289,24 @@ Window {
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                     }
-                    // t377 右靴（装备槽 3）：镜像左靴（随小腿摆动）。
+                    // t452 右护腿-小腿段（装备槽 2）：镜像左小腿护腿（随小腿 / 蹲下弯折；与右大腿段共享槽 2）。
+                    Model {
+                        id: playerArmorCalfR
+                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
+                        visible: armId !== 0
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.15, 0)
+                        scale: Qt.vector3d(0.30, 0.34, 0.30)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorCalfR.armId); opacity: playerModel.bodyOpacity }
+                    }
+                    // t377/t452 右靴（装备槽 3）：镜像左靴（t452 放大 + 前移成靴头；随小腿摆动）。
                     Model {
                         id: playerArmorBootR
                         property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(3) }
                         visible: armId !== 0
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.27, 0)
-                        scale: Qt.vector3d(0.27, 0.12, 0.29)
+                        position: Qt.vector3d(0, -0.24, -0.03)
+                        scale: Qt.vector3d(0.30, 0.14, 0.34)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorBootR.armId); opacity: playerModel.bodyOpacity }
                     }
                 }

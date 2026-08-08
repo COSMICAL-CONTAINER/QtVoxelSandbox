@@ -596,14 +596,26 @@ Item {
                                 materialId: armId
                             }
                             // 装备耐久（仅 < max 时显，提示损耗；机制等价 MC 装备耐久条——此处用数字简化）。
-                            Text {
-                                anchors.right: parent.right; anchors.bottom: parent.bottom
-                                anchors.rightMargin: 3; anchors.bottomMargin: 1
-                                visible: armId !== 0 && armDur > 0
-                                        && armDur < root.hotbar.armorMaxDurability(armId)
-                                text: armDur + "/" + root.hotbar.armorMaxDurability(armId)
-                                color: "#cccccc"; style: Text.Outline; styleColor: "#000000"
-                                font.pixelSize: 10
+                            // t452 装备耐久条（同 hotbar 工具耐久条模式，t315）：槽底薄条，宽 ∝ remaining/max，
+                            //   色 绿(>50%)/黄(20–50%)/红(<20%)；满耐久隐。原数字（cur/max）改入 tooltip（同工具套路：
+                            //   槽内显条、悬停显数）。触碰 armorRevision → 受击损耗后重算（armorDurabilityAt /
+                            //   armorMaxDurability 是 Q_INVOKABLE，靠版本号触发）。
+                            Item {
+                                id: armorDurBar
+                                property int curDur: { root.hotbar.armorRevision; return armDur }
+                                property int maxDur: { root.hotbar.armorRevision; return root.hotbar.armorMaxDurability(armId) }
+                                property real ratio: maxDur > 0 ? curDur / maxDur : 0.0
+                                anchors.left: parent.left; anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
+                                height: 3
+                                visible: armId !== 0 && maxDur > 0 && curDur > 0 && curDur < maxDur
+                                Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.55 }
+                                Rectangle {
+                                    anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                                    width: parent.width * (parent.maxDur > 0 ? parent.curDur / parent.maxDur : 0)
+                                    color: parent.ratio > 0.5 ? "#5fd35f" : (parent.ratio >= 0.2 ? "#e8e85a" : "#e05050")
+                                }
                             }
                             // 装备 / 脱下（左键单点）。护甲不可堆叠 → count 恒 1；走 armorSetStack（含部位校验）。
                             TapHandler {
@@ -650,15 +662,21 @@ Item {
                                     }
                                 }
                             }
-                            // t345 悬停 tooltip：显护甲名 + 护甲值（spec「hover an armor piece shows its armor value」）。
+                            // t345/t452 悬停 tooltip：显护甲名 + 护甲值（spec「hover an armor piece shows its armor value」）
+                            //   + 耐久 cur/max（t452：槽内改耐久条后，数字移此）。同时写 hoveredTipPos 让 tooltip 定位
+                            //   到本槽（原仅写 hoveredItemId/Value，tooltip 停留在上一槽位置）。
                             HoverHandler {
                                 onHoveredChanged: {
                                     if (hovered && armId !== 0) {
                                         root.hoveredItemId = armId
                                         root.hoveredArmorValue = root.hotbar.armorPointsFor(armId)
+                                        root.hoveredArmorDurability = armDur
+                                        const p = parent.mapToItem(root, parent.width / 2, 0)
+                                        root.hoveredTipPos = Qt.point(p.x, p.y)
                                     } else if (root.hoveredItemId === armId) {
                                         root.hoveredItemId = 0
                                         root.hoveredArmorValue = 0
+                                        root.hoveredArmorDurability = 0
                                     }
                                 }
                             }
@@ -973,6 +991,9 @@ Item {
     // t345 当前 hover 槽的护甲值（>0 = 护甲 → tooltip 附「护甲 N」行；0 = 非护甲 / 未跟踪）。装备槽 HoverHandler
     //   写入；离开按 id 守卫清 0（同 hoveredItemId 模式，防相邻槽进出竞态互清）。
     property int hoveredArmorValue: 0
+    // t452 当前 hover 护甲槽的装备剩余耐久（>0 = 已装备护甲且在跟踪 → tooltip 附「耐久 cur/max」行；0 = 未跟踪）。
+    //   装备槽 HoverHandler 写入（槽内耐久改用条后，数字移 tooltip 显，同工具套路）；离开按 id 守卫清 0。
+    property int hoveredArmorDurability: 0
     // t263 当前 hover 槽的工具剩余耐久（-1=未跟踪 → tooltip 不显耐久行）。据 hoveredKey 查 hotbar/main。
     property int hoveredDurability: {
         if (!root.hotbar || !root.hoveredItemId || !root.hotbar.isTool(root.hoveredItemId)) return -1
@@ -1015,10 +1036,12 @@ Item {
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行（如「铁镐  5/250」）；非工具 / 未跟踪 → 仅显名。
             //   t345 护甲槽 tooltip 附「护甲 N」行（spec「hover an armor piece shows its armor value」）。
+            //   t452 护甲槽 tooltip 附「耐久 cur/max」行（槽内改耐久条后数字移此，同工具套路）。
             //   t304 弓槽 tooltip 附「攻击 1-N」行。
             text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
                 + (root.hoveredArmorValue > 0 ? "  护甲 " + root.hoveredArmorValue : "")
+                + (root.hoveredArmorDurability > 0 ? "  耐久 " + root.hoveredArmorDurability + "/" + root.hotbar.armorMaxDurability(root.hoveredItemId) : "")
                 + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : ""
             color: "#f2f2f2"
             font.pixelSize: 12
