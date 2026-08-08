@@ -2433,7 +2433,7 @@ Window {
                     waterOnly: true
                     waterAnimPhase: window.waterAnimPhase
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; baseColor: terrainLight(worldClock.skyLight) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: terrainLight(worldClock.skyLight) }
             }
         }
 
@@ -2458,7 +2458,7 @@ Window {
                     greedyMeshing: window.greedyMeshing
                     lavaOnly: true
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.95; baseColor: Qt.rgba(1.0, 0.82, 0.6, 1.0) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.95; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(1.0, 0.82, 0.6, 1.0) }
             }
         }
 
@@ -2486,19 +2486,23 @@ Window {
                     greedyMeshing: window.greedyMeshing
                     glassOnly: true
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.45; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.45; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
             }
         }
 
-        // t326 cross cutout 段 chunk Model 模板：cross 广告牌方块（草丛 / 小麦作物 / 树苗）的独立半透段。
+        // t326 cross cutout 段 chunk Model 模板：cross 广告牌方块（草丛 / 小麦作物 / 树苗）的独立 cutout 段。
         //   cross 贴图带 alpha 透明底（草叶 / 树苗本体 alpha=255、底 alpha=0），须 alpha-test cutout 才显透明
-        //   间隙（否则显成两片实心板挡视线）。PrincipledMaterial 在本 D3D11 后端 **alphaCutoff 仅在 opacity<1**
-        //   （透明通道）下生效（见 crack 材质 B1 注释 / lessons-learned alpha 契约条）—— 地形段材质 opacity=1 →
-        //   alpha 被忽略 → 透明底当不透明显成实心板（用户「草丛挡住视线」根因）。本段配 opacity:0.99 +
-        //   alphaCutoff:0.5（沿用 torch / crack / MaterialIcon alpha-test 契约）。terrain / water 段不能整体
-        //   降 opacity（全地形半透 + 透明通道无深度写 = z-fight），故拆独立段（机制等价 waterOnly 的透明分流）。
-        //   cutoutOnly:true 让 ChunkGeometry 仅网格化 cross（PASS 1 pushCross）、跳过立方面（PASS 2）。
+        //   间隙（否则显成两片实心板挡视线）。
+        // t439 透明 Z-fighting 修复（核心）：改用 **alphaMode: Mask**（Qt 6.8+ 原生 alpha-test）。Mask 模式让本段在
+        //   **不透明 pass** 渲染（深度写 ON、alpha 硬丢弃：alpha<alphaCutoff 的像素直接 discard、保留像素按不透明写深度），
+        //   而非透明 pass。旧实现靠 `opacity:0.99` 强制走透明通道（pre-6.8 alphaCutoff 仅在 opacity<1 下生效的 backend
+        //   workaround），把 cutout 草丛错误地塞进透明 pass（深度写 OFF、按 Model 排序）→ 草丛不写深度、相邻草丛 / 远处
+        //   透明面无正确遮挡 → 「透过草丛看远处闪烁 / 穿透错乱」（spec t439 根因）。Mask 模式 = 教科书 cutout foliage：
+        //   草叶写深度 → 近草丛正确遮挡远草丛 / 远处水与玻璃、无 z-fight；透明底照常 discard（不显黑底、不挡视线）。
+        //   alphaCutoff:0.5 沿用 torch / crack / MaterialIcon alpha-test 契约（Mask 模式下 alphaCutoff 真正生效，
+        //   无需再降 opacity）。cutoutOnly:true 让 ChunkGeometry 仅网格化 cross（PASS 1 pushCross）、跳过立方面（PASS 2）。
         //   几何顶点为 chunk 局部坐标、position 同 terrain/water 段；顶点色光照（terrainLight + vertexColors）沿用同管线。
+        //   不变量（PLAN §2-H）：lighting 仍 NoLighting（lit 在 D3D11 不出像素，见 lessons-learned）。
         Component {
             id: crossChunkComp
             Model {
@@ -2513,9 +2517,9 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
-                    cutoutOnly: true   // t326：仅 cross 方块（草丛/作物/树苗）→ 半透 cutout 材质 cutout 透明底
+                    cutoutOnly: true   // t326：仅 cross 方块（草丛/作物/树苗）→ cutout 材质（t439 alphaMode:Mask 不透明 pass）
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaCutoff: 0.5; opacity: 0.99; baseColor: terrainLight(worldClock.skyLight) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
             }
         }
 
