@@ -1254,3 +1254,70 @@ t18                        （背包，依赖 hotbar）
 - **P1/P2（t429-t436）拆 R18q**——需 compact 后轻装做（mob entity UV 解析 + 资源查看器是大研究/大功能）。
 - **法律**：所有 pack 解析仅本地 gitignored，commit 仅代码。
 - **建议执行序（R18p）**：t422→t423→t424→t425→t426→t427→t428（t425 流水性能最优先之一）。
+
+---
+
+# R18q 规划（综合大批量：R18p 遗留 + 新反馈 ~30 项）
+
+> 来源：用户 R18p playtest 全量反馈（2026-08-08，~38 项）。t429-t436（旧草案）被本表吸收/更新。
+> ⚠️ **本轮量大，必须 compact 后执行**。法律红线同前。
+> **P0 = 游戏杀手（性能/流体）；先做 P0 再 P1+。**
+
+## A. P0 性能/流体（游戏杀手）
+
+| 任务ID | 状态 | 标题 | 文件 |
+|---|---|---|---|
+| t437 | ⏳ | **内存泄漏/卡顿深度修复**（t425 未根治；3 min→2-3 FPS）：深度 profile——chunk mesh 累积？实体(item/xp)不回收？纹理内存增长？per-tick 扫描残留？**退存档再进仍卡 = 状态/内存未清**。 | world.cpp/entitymanager/Renderer + profiling |
+| t438 | ⏳ | **水+岩浆交互**（t411 仍坏；水火共融）：流水+静岩浆→黑曜石；流岩浆+静水→**石头**；流岩浆+流水→圆石；桶放岩浆入静水→黑曜石；桶放水入静岩浆→黑曜石。生成后方块留下、两液体继续流至平衡。 | world.cpp(fluid tick 交互) |
+| t439 | ⏳ | **透明 Z-fighting**（玻璃/水/草 透过看远处会闪/穿透）：深度排序或 blend 修复透明渲染。 | chunkgeometry/Renderer(透明 pass 排序) |
+
+## B. 渲染修复
+
+| t440 | ⏳ | **cross-block 手持/掉落黑底**（火把/枯木/花/蘑菇/睡莲/树苗手持+掉落有黑背景）：billboard/cross 几何在手持/掉落路径用正确 flat 渲染，非黑底方块。 | Main.qml(held/drop delegate) + partialblockgeometry |
+| t441 | ⏳ | **箱子开合动画**（t409/t416 仍坏；右键打开仍见整方块+额外件）：严格做 MC 式——整方块本体、顶 ~1/4（0.3 格）绕后铰链翻起。**反复修不好，这次彻底搞定。** | Main.qml(chest model) |
+| t442 | ⏳ | **树叶仍怪**（t416/t422 后仍不对）：核实贴图来源（oak_leaves？）+ tint 正确；用户反复报怪。 | resourcepackmanager(leaves tile) + mobmodel |
+
+## C. XP/死亡
+
+| t443 | ⏳ | **XP 系统修**：① 观察者/创造模式隐藏 XP 条（仅生存显）；② 杀**被动 mob**(牛/羊/猪/鸡) **也掉 XP**（现仅敌对掉）；③ 死亡→清空 XP 条 + 死亡地点掉部分 XP（≈1 只怪量）。 | PlayerState + entitymanager + Main.qml(XP 条 visible) |
+
+## D. 农业/植物
+
+| t444 | ⏳ | **睡莲全套**：① 绿 tint（现灰）；② 掉落物平面非 6 面叠；③ 手持第一人称正确形状非黑底；④ 仅**静止水面**可放（地上/流水不可）；⑤ **可在上面走**（水上行走辅助）；⑥ 不可叠放睡莲。 | partialblockgeometry + playercontroller + resourcepackmanager |
+| t445 | ⏳ | **仙人掌全套**：① 缩到 ~80% 居中（非满格）；② 挖掉下方沙→仙人掌掉落；③ **全方位**触碰伤害（非仅上方）；④ 放置需水平 4 邻无方块（否则立即破坏掉落）；⑤ Q 丢物落到仙人掌→被顶掉。 | blockregistry + playercontroller + world.cpp |
+| t446 | ⏳ | **甘蔗不生在湖里**：仅沙滩/沙近水（t423 修过 worldgen 但仍有湖中草长出？核实）。 | world.cpp |
+| t447 | ⏳ | **作物修**：① 胡萝卜/马铃薯=同物（种子即作物，右键耕地直接种，非"种子+作物"分开）；② 小麦生长**减速**（现秒熟）；③ 挖耕地→作物**掉落**（非消失）；④ 骨头→**骨粉**合成（催熟作物）。 | recipe + playercontroller + world.cpp |
+| t448 | ⏳ | **锄头耐久**（用一次就消失→修耐久消耗）。 | toolregistry/hoes |
+
+## E. 战斗/生物/弓/装甲
+
+| t449 | ⏳ | **mob 死亡动画**：血量归零→**侧倒+白烟**→再掉物（现红闪+物同出太急）。 | entitymanager + Main.qml(mob death anim) |
+| t450 | ⏳ | **鱿鱼不生成**：核实 spawn 条件（水中？深度？）。 | entitymanager(spawn) |
+| t451 | ⏳ | **弓拉弓方向**：现弦+箭**往前**走（错）；应**往后拉**（弦拉伸、弓不动、箭随弦后移）+ bow_pulling_0/1/2 阶段贴图。 | bow.h/cpp + Main.qml |
+| t452 | ⏳ | **装甲**：① F5 第三人称**见护甲**（t377 仍不显示）；② 耐久用**条**非数字（数字仅 tooltip，同工具套路）。 | Main.qml(player armor) + SurvivalInventory |
+
+## F. 物品/UI
+
+| t453 | ⏳ | **创造中键复制→空槽优先**：手已有方块+有空槽→新开空槽复制（非替换）；满才替换。 | playercontroller(pickBlock) |
+| t454 | ⏳ | **沙子 item 图标对齐**（现太橙，放置却黄）+ **枯木高清**（现糊）。 | hotbar(iconSource) + tools/build_dead_bush |
+| t455 | ⏳ | **羊毛 16 色**：补全 16 色 wool（创造图标不空）+ 床配方=对应色羊毛+木板→对应色床。 | blockregistry/recipe(wool 16 色) + bed recipe |
+| t456 | ⏳ | **工作台/熔炉 item 图标从包**（现仍旧版）+ **熔炉朝向**（应朝玩家，现固定方向）。 | ToolIcon/MaterialIcon + playercontroller(furnace facing) |
+| t457 | ⏳ | **床重做**：低 3D 模型（~0.3 格高，四角木柱腿+木板面+羊毛面，上方空气）；**睡觉动画**（躺下→渐黑→中间"起床"按钮→不按则度过夜晚→按则醒）；**非瞬黑瞬醒**。 | blockregistry + Main.qml(bed model+sleep) |
+| t458 | ⏳ | **资源查看器按钮**（用户找不到）：在设置面板加醒目按钮→打开 JEI 式 3D 预览(block/item/entity)。 | Main.qml(settings+viewer) |
+| t459 | ⏳ | **附魔书+命名牌功能**（现占位无效果）：附魔书=附魔台产物（先占位留附魔系统）；命名牌=铁砧改名（先占位）。 | (占位系统) |
+
+## G. 世界/环境
+
+| t460 | ⏳ | **群系+世界**：① 群系过渡平滑+大片（现碎小）；② 沼泽生**藤蔓**；③ 花/蘑菇 **worldgen 散布**（现不生）；④ 云改**方块体素**（现白道）；⑤ 峡谷**不生水**（干裂缝）；⑥ 地表矿洞入口**多些**。 | world.cpp(biome/worldgen) + Main.qml(clouds) |
+| t461 | ⏳ | **湖泊仍多**（t427 不够？再减密度）。 | world.cpp(lake 概率) |
+| t462 | ⏳ | **岩浆**：① 音效；② 空桶可收岩浆；③ 岩浆贴图从 pack（现非 MC 风）。 | audiomanager + playercontroller(bucket) + resourcepackmanager(lava) |
+
+## H. 指令
+
+| t463 | ⏳ | **/time set** day|night|midnight|\<num\>：改游戏时间。注册入 commandRegistry。 | Main.qml(commandRegistry) + WorldClock |
+
+## 执行备注
+- **P0 先行**（t437 性能最优先——退存档再进仍卡 = 有状态/内存不清，非纯 per-tick）。
+- **反复修不好的**（箱子动画 t409→t416→仍坏、树叶 tint、性能 t320→t354→t425→仍卡）= 须找**真根因**，子 agent **先复现再修**。
+- **法律**：所有 pack 仅本地 gitignored；commit 仅代码。
+- **量大（~27 任务）→ 建议分 2 批 workflow**：批 1 = P0(t437-t439) + 高频bug(t440-t453)；批 2 = 内容/世界(t454-t463)。**compact 后执行。**
