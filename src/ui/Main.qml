@@ -456,20 +456,38 @@ Window {
             entityManager.spawnMobTyped(sx, sh + 1, sz, mt, col, 10)
         }
 
-        // t399 鱿鱼水生散布（spec「squid ... swims in water bodies」；机制等价 MC 1.0 squid 在水里生成）：
+        // t399/t450 鱿鱼水生散布（spec「squid ... swims in water bodies」；机制等价 MC 1.0 squid 在水里生成）：
         //   在整图随机散布一群鱿鱼，**仅取水面列**（blockAt==Water；跳陆地 / 空气），在水面格生成 → EntityManager
-        //   aiSquid 喷水推进游动（feet 入水即触发水中物理 + 周期上浮）。数量少（kSquidScatterCount）免水底塞满。
+        //   aiSquid 喷水推进游动（feet 入水即触发水中物理 + 周期上浮）。数量少（kSquidTargetCount）免水底塞满。
         //   无群系门控（MC 1.0 squid 各群系水体均可，本工程简化为全图水面随机）。col 占位串（MobSquid 走 MobModel
         //   + 贴图，不读 color；mobType 0 UnitCube 路径才读，此处不涉）。
-        const kSquidScatterCount = 6
-        for (let i = 0; i < kSquidScatterCount; ++i) {
+        //
+        //   t450 根因：旧实现用 heightAt 取「水面 y」—— heightAt 是**纯 worldgen fBm 自然地表高度**（不含水 / 不含
+        //   海域重塑），对任何水柱恒指向「水底地形或水面之上的空气」：
+        //     - 海域列：generate 把地形重塑成沙海底（seaColumnHeight，~52-59），fillWater 在 [海底+1, 水位58] 灌水；
+        //       而 heightAt 返纯 fBm（~62-66，高于水位）→ blockAt(heightAt) 是水面之上的空气 → 非水。
+        //     - 沼泽/湖泊列：水偶发恰好压在自然地表高度上才命中，概率极低。
+        //   故 blockAt(heightAt)==Water 恒 false → 鱿鱼 0 生成。改用 heightmapAt（列顶首个非空气，**含水面** ——
+        //   fillWater 把水置入后 setBlock 增量维护把 heightmap 抬到水面 y）：对水柱返水面 y、blockAt==Water 命中；
+        //   对陆地返草/树顶不命中跳过；空列返 -1 由 qsh<=0 跳过。这才是「在水面格生成」的正确高度查询。
+        //
+        //   另：水柱占比低（海角四分之一盘 + 沼泽/湖泊零星 ≈9%）。旧「固定 kSquidScatterCount 次随机拒绝采样」期望
+        //   命中仅 ~0.5、过半存档 0 鱿鱼（即便修了 heightmap 仍不可靠）。改「刷到目标 kSquidTargetCount 或耗尽
+        //   kSquidMaxAttempts 次尝试」：每命中 1 个水柱就 +1，达目标即停（充分采样水柱）；无水世界耗尽尝试刷 0（正确）。
+        //   每次尝试仅 2 次 O(1) 读（heightmapAt + blockAt），200 次上限在进世界时一次性开销可忽略。
+        const kSquidTargetCount = 6
+        const kSquidMaxAttempts = 200
+        let squidSpawned = 0
+        for (let i = 0; i < kSquidMaxAttempts && squidSpawned < kSquidTargetCount; ++i) {
             const qsx = 4 + Math.floor(Math.random() * (wdim - 8)) // [4, wdim-4)，避世界边
             const qsz = 4 + Math.floor(Math.random() * (wdim - 8))
-            const qsh = theWorld.heightAt(qsx, qsz)
+            const qsh = theWorld.heightmapAt(qsx, qsz) // 列顶首个非空气（含水面；非 worldgen 自然地表 heightAt）
             if (qsh <= 0) continue
             if (theWorld.blockAt(qsx, qsh, qsz) !== 21 /* Water */) continue // 非水面 → 跳（仅水里生成）
             entityManager.spawnMobTyped(qsx, qsh, qsz, EntityManager.MobSquid, "#6a4a3a", 10)
+            ++squidSpawned
         }
+        console.info("[t450] squid scattered: " + squidSpawned + "/" + kSquidTargetCount) // 进世界一次性核对（非每帧）
     }
     // t78 立即重生（死亡界面按钮）：满血 + 清死亡态 + 传回出生点 + 清挖掘/飞行态 + 重新锁定指针回游戏。
     //   PlayerState.respawn 复位血量/死亡态；PlayerController.respawn 传回出生点 + 清物理态；
