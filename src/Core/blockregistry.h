@@ -208,8 +208,9 @@ public:
                                   //   **t343 交互**：(a) 铁桶舀 / 放（playercontroller 桶分支 + HitLava 射线）；(b) 木质方块邻岩浆概率着火焚毁
                                   //   （tickLavaFlow 末 ignite pass：Log/Planks/CraftingTable/Leaves 等木类 + 概率 setBlock Air）；(c) 掉落物丢入
                                   //   岩浆被摧毁（ItemEntityManager tick 检中心格 == Lava → releaseSlot）。不进创造调色板（worldgen / 桶交互获得）。
-        // ── t387 床方块（bed）8 色变体：机制等价 MC 1.0 床（bed），简化为单格整立方（spec「head+foot 双格，
-        //   或简化单格 if cleaner」→ 取单格，避免双格配对放置 / 状态机的复杂度）。每色一个方块 id（连续段
+        // ── t387 床方块（bed）8 色变体：机制等价 MC 1.0 床（bed）。**t428 双格化**（原 t387 简化为单格整立方；
+        //   t428 改为 head+foot 双格横置，如门但水平——玩家放置 foot 于命中面相邻格，head 自动落于 foot 的
+        //   「玩家朝向反向」水平邻格；state 编码见 BlockRegistry::bedPartnerOffset）。每色一个方块 id（连续段
         //   [FirstBed, LastBed]）→ 创造调色板每个色变体独立取用 + 右键放置（复用既有 selectedBlockId → placeBlock
         //   通用放置路径，无需新交互；物品系统是 id 驱动，故「同 id 不同 state」的色变无法经背包表达 → 多 id）。
         //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 wool / chest 同族；
@@ -406,6 +407,14 @@ public:
     static constexpr int FirstBed = BedRed;
     static constexpr int LastBed  = BedBlack;
     static bool isBed(quint8 blockId);
+
+    // t428 床 state 编码 + 配对格偏移（机制等价 MC 1.0 床 head+foot 双格横置，如门但水平相邻）。每半格存
+    //   state——bit3 = head(1)/foot(0)、bit[1:0] = 玩家放置时的水平朝向（0=+X 1=-X 2=+Z 3=-Z，与 door/
+    //   trapdoor/chest 同源编码）。head 落在 foot 的「玩家朝向反向」水平邻格（玩家面 +X 时 head 在 -X 侧 →
+    //   脚踩 foot、头朝后躺下，机制等价 MC 床头朝玩家背后）。bedPartnerOffset(state)：给定本格 state，返回
+    //   配对格（另一半）相对本格的水平 (dx,dz)（y 同层故 dy=0）；playercontroller 放置 / 破坏联动读此单一权威，
+    //   不各处自写朝向解码（同 chestFrontFace 模式）。
+    static void bedPartnerOffset(quint8 state, int &dx, int &dz);
 
     // t397 花方块段哨兵：id ∈ [FirstFlower, LastFlower] 为花色变体（4 色）。isFlower(id) 单一权威谓词供 worldgen /
     //   放置预检 / 未来花相关机制（如花生成染料、花蜜）判定「是否花」，避免各处自写 id 区间漂移（同 isBed /

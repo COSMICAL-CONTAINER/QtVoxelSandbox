@@ -446,6 +446,20 @@ bool BlockRegistry::isBed(quint8 blockId)
     return blockId >= FirstBed && blockId <= LastBed;
 }
 
+// t428 床配对格偏移（state 解码 → 配对另一半相对本格的水平 (dx,dz)）。bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z
+//   （与 horizontalFacing / chestFrontFace 同源）；bit3=head(1)/foot(0)。玩家放置时 head 落 foot 的「朝向反向」
+//   邻格 → 本格为 foot(bit3=0) 时配对(head)在 -front；本格为 head(bit3=1) 时配对(foot)在 +front。y 同层（dy=0）。
+//   纯 state 解码（单一权威，同 chestFrontFace 模式）；playercontroller 放置 / 破坏联动读此，不各处自写朝向。
+void BlockRegistry::bedPartnerOffset(quint8 state, int &dx, int &dz)
+{
+    static constexpr int kFrontX[4] = { 1, -1, 0, 0 };
+    static constexpr int kFrontZ[4] = { 0, 0, 1, -1 };
+    const int f = state & 3;
+    const int sgn = (state & 8) ? +1 : -1; // head → +front 找 foot；foot → -front 找 head
+    dx = sgn * kFrontX[f];
+    dz = sgn * kFrontZ[f];
+}
+
 // t397 花方块段统一谓词（单一权威）：id ∈ [FirstFlower, LastFlower]（4 色变体）即花。供 worldgen placeFlowers
 //   / 放置预检 / 未来花相关机制判定「是否花」，避免各处自写 id 区间漂移（同 isBed / isCrossBillboard 模式）。
 //   连续段，裸区间即可。

@@ -790,6 +790,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   t237：WheatCrop 同理须读旧 state（state==WheatCropStageMax 判成熟 → 掉小麦 vs 仅种子），setBlock 后
     //   state 重置为 0 → 永判未成熟 → 成熟作物收割不掉小麦（同族 lessons-learned t134「先快照再改 id」坑）。
     const quint8 brokenState = (brokenId == BlockRegistry::WoodDoor
+                                || BlockRegistry::isBed(brokenId)
                                 || brokenId == BlockRegistry::Planks
                                 || brokenId == BlockRegistry::WheatCrop
                                 || brokenId == BlockRegistry::CarrotCrop
@@ -800,6 +801,15 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         const int py = ((brokenState & 8) != 0) ? y - 1 : y + 1;
         if (m_world->blockAt(x, py, z) == BlockRegistry::WoodDoor)
             m_world->setBlock(x, py, z, BlockRegistry::Air);
+    }
+    // t428 床双格破坏联动：破任一半 → 静默清配对格（另一半），防留半截悬空床（同门破坏联动模式）。
+    //   drop 仅对本格发（配对格 setBlock(Air) 虽发 blockBroken 但不走 spawnItem → 1 床物体只掉 1 件）。
+    //   brokenState 须在 setBlock(Air) 前 capture（同门 t134 lessons-learned：id 变更重置 state=0）。
+    if (BlockRegistry::isBed(brokenId)) {
+        int pdx = 0, pdz = 0;
+        BlockRegistry::bedPartnerOffset(brokenState, pdx, pdz);
+        if (BlockRegistry::isBed(m_world->blockAt(x + pdx, y, z + pdz)))
+            m_world->setBlock(x + pdx, y, z + pdz, BlockRegistry::Air);
     }
     emit playerMined(x, y, z, int(brokenId), drop); // 破块语义事件（含 drop 标志；当前无消费端，留扩展）
     // t214 火把失支撑立即掉落：破块后扫 6 邻火把，其**附着格**（state 编码）若已非 solid（含本格刚被置
@@ -2024,11 +2034,19 @@ void PlayerController::placeBlock()
     }
     const bool isDoor = (m_selectedBlock == BlockRegistry::WoodDoor);
     const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
+    // t428 床双格（head+foot 横置，如门但水平相邻）：foot 落命中面相邻格 (tx,ty,tz)，head 落 foot 的「玩家
+    //   朝向反向」水平邻格。state 编码 bit[1:0]=朝向、bit3=head(1)/foot(0)（同 door 复用 bit3 标半格）。
+    //   bedPartnerOffset(footState=bedFacing, bit3=0) 返回 head 相对 foot 的偏移 = 玩家前向反向。
+    const bool isBed = BlockRegistry::isBed(idByte);
+    const quint8 bedFacing = quint8(horizontalFacing() & 3);
+    int hdx = 0, hdz = 0;
+    BlockRegistry::bedPartnerOffset(bedFacing, hdx, hdz); // foot → 配对 head 偏移
     // 与玩家重叠 → 不放（防自埋 / 卡死）。t146：按「将放置方块的实际形状 sub-AABB」判 —— 不完整方块可能
     //   只占半格，玩家在另半格内仍可放；air/torch 无 sub-AABB → 不挡（允许放入玩家格，机制等价 MC）。
-    //   door 占两格 → 上下格都查。
+    //   door 占两格 → 上下格都查；bed 占两格 → foot + head 两格都查（bed ShapeFull 与 state 无关，state 任意）。
     if (overlapsPlayerAABB(tx, ty, tz, idByte, isDoor ? doorFacing : placeState)) return;
     if (isDoor && overlapsPlayerAABB(tx, ty + 1, tz, idByte, quint8(doorFacing | 8))) return;
+    if (isBed && overlapsPlayerAABB(tx + hdx, ty, tz + hdz, idByte, quint8(bedFacing | 8))) return;
     // t114 火把放置预检：火把需挂到实体邻居（下 / 四侧之一为实体方块），否则拒绝（机制等价 MC「火把
     // 需要支撑面」—— 平地或墙面）。判定用 BlockRegistry::isSolid（实体方块语义；不挂到空气 / 另一火把
     // / 工作台等非实体方块）。torchHost 据同样语义在运行期推断朝向（下 solid=垂直 / 侧 solid=横插）。
@@ -2090,6 +2108,19 @@ void PlayerController::placeBlock()
         }
         m_world->setBlock(tx, ty, tz, idByte, doorFacing);              // 下格：bit3=0(下格) bit2=0(合) bit[1:0]=朝向
         m_world->setBlock(tx, ty + 1, tz, idByte, quint8(doorFacing | 8)); // 上格：bit3=1
+    } else if (isBed) {
+        // t428 床 head 格须在界内且为 air/water/lava（同 door 上格预检，机制等价 MC 床需两格空位），否则整床
+        //   拒绝（两格都不放，防半截床）。foot 经 setBlock 写（发 blockPlaced → 生存消耗 1 件 + 放置音 / 粒子），
+        //   head 经 setWaterSilent 静默写（重建 mesh + 重光照，但**不**发 blockPlaced → 1 床物体只耗 1 件、只一次
+        //   放置反馈；机制等价 MC「放 1 床 = 1 物品 = 一次动作」）。door 靠 maxStack=1 碰巧避双耗，bed maxStack=64
+        //   故必须用静默写第二格（setWaterSilent 是通用静默 state 写入口，非仅水流）。
+        const int hx = tx + hdx, hz = tz + hdz;
+        if (hx < 0 || hx >= m_world->width() || hz < 0 || hz >= m_world->depth()) return; // head 越界 → 整床拒
+        const quint8 headOcc = m_world->blockAt(hx, ty, hz);
+        if (headOcc != BlockRegistry::Air && headOcc != BlockRegistry::Water
+            && headOcc != BlockRegistry::Lava) return; // head 格非空 → 床放不下
+        m_world->setBlock(tx, ty, tz, idByte, bedFacing);                  // foot: bit3=0 bit[1:0]=朝向
+        m_world->setWaterSilent(hx, ty, hz, idByte, quint8(bedFacing | 8)); // head: bit3=1（静默，免双耗）
     } else {
         // fence / pressure_plate / trapdoor：placeState=0（trapdoor 默认水平合）。
         m_world->setBlock(tx, ty, tz, idByte, placeState);
