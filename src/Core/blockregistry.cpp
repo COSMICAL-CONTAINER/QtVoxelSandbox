@@ -311,6 +311,41 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   （木质；requiresTool=false → 空手也掉落，仅速度受斧影响）、dropId=自身（破梯掉梯可放回）、dropCount=1、maxStack=64。
     //   各面贴图=ladder(78)；音色归 GroupWood。进创造调色板。state inert（mesher/collision/选中均不读梯 state）。
     /* ladder       */ {int(BlockRegistry::Ladder),                       78, 78, 78, 78, false, BlockRegistry::ShapeNone,     0.4f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Ladder),           1, 64, "ladder",       "木梯"}, // t413 竖直爬行梯（玩家入格+按前向上爬）；cross 路由；state=0
+    // ── t455 16 色 wool 其余 15 色变体（white 复用既有 Wool=27；本段 orange..black）。机制等价 MC 1.0 羊毛 16 色
+    //   变体。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 white Wool 同族）、
+    //   hardness=0.8、toolType=Shears（requiresTool=false 空手也掉落，仅剪刀给速度加成）、dropId=自身（破块掉同色
+    //   羊毛方块，可放置）、dropCount=1、maxStack=64。各面贴图=default_wool_<color>（tile 79..93；卷绒纹 + 标准 16
+    //   色着色，原创自绘 §9a）。音色归 GroupWood（同 white Wool）。**获得途径**：创造调色板直接取用（无染料系统，
+    //   机制对齐 MC「彩色羊毛需染料」但染料留后续）。进创造调色板（每色独立取用 + 右键放置）。
+    /* wool_orange     */ {int(BlockRegistry::WoolOrange),      79, 79, 79, 79, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolOrange),     1, 64, "wool_orange",     "橙色羊毛"},
+    /* wool_magenta    */ {int(BlockRegistry::WoolMagenta),     80, 80, 80, 80, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolMagenta),    1, 64, "wool_magenta",    "品红色羊毛"},
+    /* wool_light_blue */ {int(BlockRegistry::WoolLightBlue),   81, 81, 81, 81, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolLightBlue),  1, 64, "wool_light_blue", "浅蓝色羊毛"},
+    /* wool_yellow     */ {int(BlockRegistry::WoolYellow),      82, 82, 82, 82, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolYellow),     1, 64, "wool_yellow",     "黄色羊毛"},
+    /* wool_lime       */ {int(BlockRegistry::WoolLime),        83, 83, 83, 83, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolLime),       1, 64, "wool_lime",       "柠绿色羊毛"},
+    /* wool_pink       */ {int(BlockRegistry::WoolPink),        84, 84, 84, 84, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolPink),       1, 64, "wool_pink",       "粉红色羊毛"},
+    /* wool_gray       */ {int(BlockRegistry::WoolGray),        85, 85, 85, 85, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolGray),       1, 64, "wool_gray",       "灰色羊毛"},
+    /* wool_light_gray */ {int(BlockRegistry::WoolLightGray),   86, 86, 86, 86, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolLightGray),  1, 64, "wool_light_gray", "浅灰色羊毛"},
+    /* wool_cyan       */ {int(BlockRegistry::WoolCyan),        87, 87, 87, 87, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolCyan),       1, 64, "wool_cyan",       "青色羊毛"},
+    /* wool_purple     */ {int(BlockRegistry::WoolPurple),      88, 88, 88, 88, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolPurple),     1, 64, "wool_purple",     "紫色羊毛"},
+    /* wool_blue       */ {int(BlockRegistry::WoolBlue),        89, 89, 89, 89, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolBlue),       1, 64, "wool_blue",       "蓝色羊毛"},
+    /* wool_brown      */ {int(BlockRegistry::WoolBrown),       90, 90, 90, 90, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolBrown),      1, 64, "wool_brown",      "棕色羊毛"},
+    /* wool_green      */ {int(BlockRegistry::WoolGreen),       91, 91, 91, 91, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolGreen),      1, 64, "wool_green",      "绿色羊毛"},
+    /* wool_red        */ {int(BlockRegistry::WoolRed),         92, 92, 92, 92, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolRed),        1, 64, "wool_red",        "红色羊毛"},
+    /* wool_black      */ {int(BlockRegistry::WoolBlack),       93, 93, 93, 93, true, BlockRegistry::ShapeFull, 0.8f, int(BlockRegistry::Shears), 0, false, int(BlockRegistry::WoolBlack),      1, 64, "wool_black",      "黑色羊毛"},
+    // ── t455 16 色床补齐 8 色新变体（既存 8 色床 id 32..39 不动；本段 white/light_blue/lime/pink/gray/light_gray/
+    //   purple/brown）。机制等价 MC 1.0 床 16 色变体。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面
+    //   路径，**非**异形，与既存床同族）、hardness=0.2、toolType=Axe（requiresTool=false 空手也掉落）、dropId=自身
+    //   （破床掉同色床方块，可放回）、dropCount=1、maxStack=64。各面贴图=default_bed_<color>（tile 94..101；与同色
+    //   羊毛同色板一致，原创自绘 §9a）。音色归 GroupWood（同既存床）。**配方**：3 同色羊毛 + 3 木板 → 该色床。
+    //   睡觉机制（t388）经 isBed 谓词覆盖本段（同既存 8 色床）。进创造调色板（每色独立取用 + 右键放置）。
+    /* bed_white       */ {int(BlockRegistry::BedWhite),      94, 94, 94, 94, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedWhite),      1, 64, "bed_white",      "白色床"},
+    /* bed_light_blue  */ {int(BlockRegistry::BedLightBlue),  95, 95, 95, 95, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLightBlue),  1, 64, "bed_light_blue", "浅蓝色床"},
+    /* bed_lime        */ {int(BlockRegistry::BedLime),       96, 96, 96, 96, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLime),       1, 64, "bed_lime",       "柠绿色床"},
+    /* bed_pink        */ {int(BlockRegistry::BedPink),       97, 97, 97, 97, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedPink),       1, 64, "bed_pink",       "粉红色床"},
+    /* bed_gray        */ {int(BlockRegistry::BedGray),       98, 98, 98, 98, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedGray),       1, 64, "bed_gray",       "灰色床"},
+    /* bed_light_gray  */ {int(BlockRegistry::BedLightGray),  99, 99, 99, 99, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLightGray),  1, 64, "bed_light_gray", "浅灰色床"},
+    /* bed_purple      */ {int(BlockRegistry::BedPurple),    100,100,100,100, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedPurple),     1, 64, "bed_purple",     "紫色床"},
+    /* bed_brown       */ {int(BlockRegistry::BedBrown),     101,101,101,101, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedBrown),      1, 64, "bed_brown",      "棕色床"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -375,6 +410,15 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* cobble_fence            */ -1, // t412 圆石墙 → MC 1.0 无等价（cobblestone wall id 139 为 1.4+；1.0 仅木栅栏 id 85）
     /* cobble_pressure_plate   */ 70, // t412 圆石压力板 → MC 1.0 stone pressure plate id 70
     /* ladder                  */ 65, // t413 木梯 → MC 1.0 ladder id 65
+    // t455 16 色 wool 其余 15 色变体 → MC 1.0 wool id 35（统一；MC 1.0 羊毛颜色由 metadata 分，本工程用独立 id）。
+    /* wool_orange             */ 35, /* wool_magenta            */ 35, /* wool_light_blue         */ 35,
+    /* wool_yellow             */ 35, /* wool_lime               */ 35, /* wool_pink               */ 35,
+    /* wool_gray               */ 35, /* wool_light_gray         */ 35, /* wool_cyan               */ 35,
+    /* wool_purple             */ 35, /* wool_blue               */ 35, /* wool_brown              */ 35,
+    /* wool_green              */ 35, /* wool_red                */ 35, /* wool_black              */ 35,
+    // t455 16 色床补齐 8 色新变体 → MC 1.0 床 id 26（统一；同既存 8 色床，颜色由 metadata 分）。
+    /* bed_white               */ 26, /* bed_light_blue          */ 26, /* bed_lime                */ 26, /* bed_pink */ 26,
+    /* bed_gray                */ 26, /* bed_light_gray          */ 26, /* bed_purple              */ 26, /* bed_brown */ 26,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -447,11 +491,23 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     return blockId >= FirstCross && blockId <= LastCross;
 }
 
-// t387 床方块段统一谓词（单一权威）：id ∈ [FirstBed, LastBed]（8 色变体）即床。供 t388 睡觉机制判定「命中格
-//   是否床」（右键床 → 跳清晨 + 重生点），避免各处自写 id 区间漂移（同 isCrossBillboard 模式）。连续段，裸区间即可。
+// t387/t455 床方块统一谓词（单一权威）：id ∈ 既存 8 色段 [FirstBed, LastBed]（red..black）**或** t455 新增 8 色
+//   段 [FirstExtraBed, LastExtraBed]（white/light_blue/lime/pink/gray/light_gray/purple/brown）即床。供 t388 睡觉
+//   机制判定「命中格是否床」（右键床 → 跳清晨 + 重生点），避免各处自写 id 区间漂移（同 isCrossBillboard 段外
+//   模式）。两段不连续（既存 8 色 32..39，新 8 色 78..85），故两段并判；改段时一处同步谓词即可。
 bool BlockRegistry::isBed(quint8 blockId)
 {
-    return blockId >= FirstBed && blockId <= LastBed;
+    return (blockId >= FirstBed && blockId <= LastBed)
+        || (blockId >= FirstExtraBed && blockId <= LastExtraBed);
+}
+
+// t455 16 色 wool 统一谓词（单一权威）：white（Wool=27）**或** 15 色变体段 [FirstWoolVariant, LastWoolVariant]
+//   （WoolOrange=63..WoolBlack=77）即羊毛。供未来染料 / 配方 / 渲染判定「是否羊毛方块」，避免各处自写 id 判定
+//   漂移（同 isBed 模式）。white 与变体段不连续故两段并判。
+bool BlockRegistry::isWool(quint8 blockId)
+{
+    return blockId == Wool
+        || (blockId >= FirstWoolVariant && blockId <= LastWoolVariant);
 }
 
 // t428 床配对格偏移（state 解码 → 配对另一半相对本格的水平 (dx,dz)）。bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z
@@ -805,8 +861,14 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case WoodPressurePlate: case WoodDoor: case WoodTrapdoor: // t134 木制半方块 → 木质音色
     case Chest: // t173 箱子 → 木质音色
     case Wool: // t300 羊毛 → 木质音色（软质闷击，最接近 MC 1.0 羊毛 cloth SoundType）
+    case WoolOrange: case WoolMagenta: case WoolLightBlue: case WoolYellow: // t455 16 色 wool 变体 → 木质音色（同 white Wool）
+    case WoolLime: case WoolPink: case WoolGray: case WoolLightGray:
+    case WoolCyan: case WoolPurple: case WoolBlue: case WoolBrown:
+    case WoolGreen: case WoolRed: case WoolBlack:
     case BedRed: case BedOrange: case BedYellow: case BedGreen: // t387 床 → 木质音色（软质被面闷击，同 wool）
     case BedCyan: case BedBlue: case BedMagenta: case BedBlack:
+    case BedWhite: case BedLightBlue: case BedLime: case BedPink: // t455 16 色床新变体 → 木质音色（同既存床）
+    case BedGray: case BedLightGray: case BedPurple: case BedBrown:
     case SpruceLog: // t395 云杉原木 → 木质音色（同 log / planks 族）
     case Ladder: // t413 木梯 → 木质音色（木质梯，同 planks 族）
         return GroupWood;

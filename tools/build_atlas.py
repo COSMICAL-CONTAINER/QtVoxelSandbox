@@ -173,6 +173,36 @@ TILES = [
     "default_ladder",               # 78 ladder（t413 木梯 cross 贴图；透明底 + 棕色两根纵轨 + 横向梯级；
                                     #    alphaCutoff cutout；Ladder 各面=本 tile，mesher 走 cross 几何段；
                                     #    机制等价 MC 1.0 梯子，名称/贴图原创自绘 §9a；tools/build_ladder.py 程序生成原创像素图）
+    # t455 16 色 wool 其余 15 色变体（white 复用 tile 38 default_wool；本段为 orange..black，tile 79..93）。
+    #   机制等价 MC 1.0 羊毛 16 色变体；名称/贴图全原创自绘 §9a（build_wool.py 程序生成卷绒纹 + 标准 16 色着色）。
+    #   各色羊毛方块各面=本 tile，走 culled 立方面路径（同 white Wool）。每色一个方块 id（WoolOrange=63..WoolBlack=77）。
+    "default_wool_orange",          # 79 wool_orange
+    "default_wool_magenta",         # 80 wool_magenta
+    "default_wool_light_blue",      # 81 wool_light_blue
+    "default_wool_yellow",          # 82 wool_yellow
+    "default_wool_lime",            # 83 wool_lime
+    "default_wool_pink",            # 84 wool_pink
+    "default_wool_gray",            # 85 wool_gray
+    "default_wool_light_gray",      # 86 wool_light_gray
+    "default_wool_cyan",            # 87 wool_cyan
+    "default_wool_purple",          # 88 wool_purple
+    "default_wool_blue",            # 89 wool_blue
+    "default_wool_brown",           # 90 wool_brown
+    "default_wool_green",           # 91 wool_green
+    "default_wool_red",             # 92 wool_red
+    "default_wool_black",           # 93 wool_black
+    # t455 16 色床补齐 8 色新变体（white/light_blue/lime/pink/gray/light_gray/purple/brown，tile 94..101）。
+    #   既存 8 色床在 tile 43..50（不动）；本段为新色，与 build_wool.py 同色板（羊毛↔床同色一致）。
+    #   机制等价 MC 1.0 床 16 色变体；名称/贴图全原创自绘 §9a（build_bed.py 程序生成被面+枕垫+绗缝针脚）。
+    #   每色一个方块 id（BedWhite=78..BedBrown=85），配方 = 3 同色羊毛 + 3 木板 → 该色床。
+    "default_bed_white",            # 94 bed_white
+    "default_bed_light_blue",       # 95 bed_light_blue
+    "default_bed_lime",             # 96 bed_lime
+    "default_bed_pink",             # 97 bed_pink
+    "default_bed_gray",             # 98 bed_gray
+    "default_bed_light_gray",       # 99 bed_light_gray
+    "default_bed_purple",           # 100 bed_purple
+    "default_bed_brown",            # 101 bed_brown
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

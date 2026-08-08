@@ -32,6 +32,22 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Chest:         return "icon_chest.png";          // t173 箱子立方体图标（顶盖缝+侧铁箍）
     case BlockRegistry::Farmland:      return "icon_farmland.png";       // t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
     case BlockRegistry::Wool:          return "icon_wool.png";           // t300 羊毛立方体图标（奶白绒毛）
+    // t455 16 色 wool 其余 15 色变体立方体图标（彩色卷绒纹；build_cube_icons.py 程序生成）。
+    case BlockRegistry::WoolOrange:     return "icon_wool_orange.png";     // 橙色羊毛
+    case BlockRegistry::WoolMagenta:    return "icon_wool_magenta.png";    // 品红色羊毛
+    case BlockRegistry::WoolLightBlue:  return "icon_wool_light_blue.png"; // 浅蓝色羊毛
+    case BlockRegistry::WoolYellow:     return "icon_wool_yellow.png";     // 黄色羊毛
+    case BlockRegistry::WoolLime:       return "icon_wool_lime.png";       // 柠绿色羊毛
+    case BlockRegistry::WoolPink:       return "icon_wool_pink.png";       // 粉红色羊毛
+    case BlockRegistry::WoolGray:       return "icon_wool_gray.png";       // 灰色羊毛
+    case BlockRegistry::WoolLightGray:  return "icon_wool_light_gray.png"; // 浅灰色羊毛
+    case BlockRegistry::WoolCyan:       return "icon_wool_cyan.png";       // 青色羊毛
+    case BlockRegistry::WoolPurple:     return "icon_wool_purple.png";     // 紫色羊毛
+    case BlockRegistry::WoolBlue:       return "icon_wool_blue.png";       // 蓝色羊毛
+    case BlockRegistry::WoolBrown:      return "icon_wool_brown.png";      // 棕色羊毛
+    case BlockRegistry::WoolGreen:      return "icon_wool_green.png";      // 绿色羊毛
+    case BlockRegistry::WoolRed:        return "icon_wool_red.png";        // 红色羊毛
+    case BlockRegistry::WoolBlack:      return "icon_wool_black.png";      // 黑色羊毛
     case BlockRegistry::Sandstone:     return "icon_sandstone.png";      // t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
@@ -45,6 +61,16 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::BedBlue:       return "icon_bed_blue.png";       // 蓝床
     case BlockRegistry::BedMagenta:    return "icon_bed_magenta.png";    // 品红床
     case BlockRegistry::BedBlack:      return "icon_bed_black.png";      // 黑床
+    // t455 床方块补齐 8 色新变体立方体图标（white/light_blue/lime/pink/gray/light_gray/purple/brown；
+    //   build_cube_icons.py 程序生成；与同色羊毛视觉一致）。
+    case BlockRegistry::BedWhite:      return "icon_bed_white.png";      // 白床
+    case BlockRegistry::BedLightBlue:  return "icon_bed_light_blue.png"; // 浅蓝床
+    case BlockRegistry::BedLime:       return "icon_bed_lime.png";       // 柠绿床
+    case BlockRegistry::BedPink:       return "icon_bed_pink.png";       // 粉红床
+    case BlockRegistry::BedGray:       return "icon_bed_gray.png";       // 灰床
+    case BlockRegistry::BedLightGray:  return "icon_bed_light_gray.png"; // 浅灰床
+    case BlockRegistry::BedPurple:     return "icon_bed_purple.png";     // 紫床
+    case BlockRegistry::BedBrown:      return "icon_bed_brown.png";      // 棕床
     // t244 cross 广告牌方块图标：草丛 / 小麦作物在世界内是 cross 形广告牌（透明底 + 像素草叶 / 麦穗），
     //   图标走 flat 2D 平面路径（同火把 icon_torch）—— build_cube_icons.py 的 render_flat_2d 直接放大源
     //   贴图保留 alpha → 「纯草叶 / 麦穗无方块底」。小麦作物图标取成熟阶段 7（金黄麦穗），肉眼一眼可辨。
@@ -427,6 +453,12 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::TallGrass),                                     // 草丛（worldgen 散布 / 杀草掉种子）
              int(BlockRegistry::WheatCrop),                                    // 小麦作物（state=阶段；种 0..7，图标显成熟态）
              int(BlockRegistry::Wool),                                        // t300 羊毛方块（剪羊毛 / 杀羊掉落；可放置）
+             // t455 16 色 wool 其余 15 色变体（机制等价 MC 1.0 羊毛 16 色；创造调色板每色独立取用 + 右键放置）。
+             int(BlockRegistry::WoolOrange), int(BlockRegistry::WoolMagenta), int(BlockRegistry::WoolLightBlue),
+             int(BlockRegistry::WoolYellow),  int(BlockRegistry::WoolLime),   int(BlockRegistry::WoolPink),
+             int(BlockRegistry::WoolGray),    int(BlockRegistry::WoolLightGray), int(BlockRegistry::WoolCyan),
+             int(BlockRegistry::WoolPurple),  int(BlockRegistry::WoolBlue),   int(BlockRegistry::WoolBrown),
+             int(BlockRegistry::WoolGreen),   int(BlockRegistry::WoolRed),    int(BlockRegistry::WoolBlack),
              // t394 沙漠群系内容：砂岩（沙下成岩）/ 仙人掌（接触伤害）/ 枯死的灌木（cross 装饰）。机制等价 MC 1.0
              //   沙漠三件套（sandstone / cactus / dead bush），名称 / 贴图原创自绘 §9a。
              int(BlockRegistry::Sandstone),                                   // 砂岩（沙下成岩；需镐采掘；可放置）
@@ -450,7 +482,12 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::BedRed),    int(BlockRegistry::BedOrange),
              int(BlockRegistry::BedYellow), int(BlockRegistry::BedGreen),
              int(BlockRegistry::BedCyan),   int(BlockRegistry::BedBlue),
-             int(BlockRegistry::BedMagenta),int(BlockRegistry::BedBlack) };
+             int(BlockRegistry::BedMagenta),int(BlockRegistry::BedBlack),
+             // t455 16 色床补齐 8 色新变体（机制等价 MC 1.0 床 16 色；配方 = 3 同色羊毛 + 3 木板 → 该色床）。
+             int(BlockRegistry::BedWhite),    int(BlockRegistry::BedLightBlue),
+             int(BlockRegistry::BedLime),     int(BlockRegistry::BedPink),
+             int(BlockRegistry::BedGray),     int(BlockRegistry::BedLightGray),
+             int(BlockRegistry::BedPurple),   int(BlockRegistry::BedBrown) };
 }
 
 QString Hotbar::iconSourceAt(int slot) const

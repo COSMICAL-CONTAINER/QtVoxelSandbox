@@ -246,6 +246,30 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_bed_blue.png
         textures/default_bed_magenta.png
         textures/default_bed_black.png
+        textures/default_bed_white.png             # t455 16 色床补齐 8 色新变体贴图（build_bed.py 程序生成；与同色羊毛同色板）
+        textures/default_bed_light_blue.png
+        textures/default_bed_lime.png
+        textures/default_bed_pink.png
+        textures/default_bed_gray.png
+        textures/default_bed_light_gray.png
+        textures/default_bed_purple.png
+        textures/default_bed_brown.png
+        textures/default_wool.png                  # t300/t455 羊毛白色贴图（build_wool.py；曾漏 qrc 致创造调色板羊毛图标空，t455 补登）
+        textures/default_wool_orange.png           # t455 16 色 wool 其余 15 色变体贴图（build_wool.py 程序生成卷绒纹+标准 16 色着色）
+        textures/default_wool_magenta.png
+        textures/default_wool_light_blue.png
+        textures/default_wool_yellow.png
+        textures/default_wool_lime.png
+        textures/default_wool_pink.png
+        textures/default_wool_gray.png
+        textures/default_wool_light_gray.png
+        textures/default_wool_cyan.png
+        textures/default_wool_purple.png
+        textures/default_wool_blue.png
+        textures/default_wool_brown.png
+        textures/default_wool_green.png
+        textures/default_wool_red.png
+        textures/default_wool_black.png
         textures/default_spawner.png              # t392 刷怪笼贴图（build_spawner.py 程序生成原创像素图；暗蓝灰底+铁灰栅栏+中心青绿光斑）
         textures/default_sandstone_top.png        # t394 砂岩顶面贴图（build_sandstone.py 程序生成；压实沙面+细密噪点+暗框）
         textures/default_sandstone_side.png       # t394 砂岩侧面/底面贴图（build_sandstone.py；暖沙底+横向层理带）
@@ -316,6 +340,30 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_bed_blue.png
         textures/icon_bed_magenta.png
         textures/icon_bed_black.png
+        textures/icon_bed_white.png               # t455 16 色床补齐 8 色新变体立方体图标（build_cube_icons.py 程序生成）
+        textures/icon_bed_light_blue.png
+        textures/icon_bed_lime.png
+        textures/icon_bed_pink.png
+        textures/icon_bed_gray.png
+        textures/icon_bed_light_gray.png
+        textures/icon_bed_purple.png
+        textures/icon_bed_brown.png
+        textures/icon_wool.png                    # t300/t455 羊毛白色立方体图标（build_cube_icons.py；曾漏 qrc 致创造调色板羊毛图标空，t455 补登）
+        textures/icon_wool_orange.png             # t455 16 色 wool 其余 15 色变体立方体图标（build_cube_icons.py 程序生成）
+        textures/icon_wool_magenta.png
+        textures/icon_wool_light_blue.png
+        textures/icon_wool_yellow.png
+        textures/icon_wool_lime.png
+        textures/icon_wool_pink.png
+        textures/icon_wool_gray.png
+        textures/icon_wool_light_gray.png
+        textures/icon_wool_cyan.png
+        textures/icon_wool_purple.png
+        textures/icon_wool_blue.png
+        textures/icon_wool_brown.png
+        textures/icon_wool_green.png
+        textures/icon_wool_red.png
+        textures/icon_wool_black.png
         textures/icon_chest.png                 # t173/t179 箱子立方体图标（顶盖缝+侧铁箍；曾漏注册→运行时 WRN 无图标）
         textures/icon_farmland.png              # t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
         textures/icon_wood_slab.png           # t145 不完整方块 flat 2D 区分图标

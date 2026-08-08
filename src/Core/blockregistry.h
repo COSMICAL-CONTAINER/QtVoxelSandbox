@@ -410,15 +410,63 @@ public:
         //   音色归 GroupWood（木质，同 planks 族）。进创造调色板（玩家可取用 / 放置）。**无放置预检**（随处可放，
         //   不强制贴墙——本工程简化为独立可爬梯方块；机制对标 MC 梯子贴墙但放宽以适配竖井场景）。
         Ladder          = 62, // 木梯：竖直爬行梯（玩家入格 + 按前向上爬；cross 路由 + 爬升物理）
-        Count          = 63, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t455 16 色 wool 其余 15 色变体（white 复用既有 Wool=27；本段为 orange..black，id 63..77）。
+        //   机制等价 MC 1.0 羊毛 16 色变体。每色一个方块 id（物品系统是 id 驱动 → 同 id 不同 state 无法经背包
+        //   表达色变 → 多 id）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，
+        //   与 white Wool / chest 同族）、hardness=0.8、toolType=Shears（requiresTool=false 空手也掉落）、dropId=自身
+        //   （破块掉同色羊毛方块，可放置）、dropCount=1、maxStack=64。各面贴图=default_wool_<color>（tile 79..93；
+        //   卷绒纹 + 标准 16 色着色，原创自绘 §9a）。音色归 GroupWood（同 white Wool）。**获得途径**：创造调色板
+        //   直接取用（本工程无染料系统，机制对齐 MC「彩色羊毛需染料」但染料留后续任务）；白色羊毛仍由剪 / 杀羊获得。
+        //   进创造调色板（每色独立取用 + 右键放置）。isWool(id) 单一权威谓词供未来染料 / 配方判定。
+        WoolOrange     = 63, // 橙色羊毛
+        WoolMagenta    = 64, // 品红色羊毛
+        WoolLightBlue  = 65, // 浅蓝色羊毛
+        WoolYellow     = 66, // 黄色羊毛
+        WoolLime       = 67, // 柠绿色羊毛
+        WoolPink       = 68, // 粉红色羊毛
+        WoolGray       = 69, // 灰色羊毛
+        WoolLightGray  = 70, // 浅灰色羊毛
+        WoolCyan       = 71, // 青色羊毛
+        WoolPurple     = 72, // 紫色羊毛
+        WoolBlue       = 73, // 蓝色羊毛
+        WoolBrown      = 74, // 棕色羊毛
+        WoolGreen      = 75, // 绿色羊毛
+        WoolRed        = 76, // 红色羊毛
+        WoolBlack      = 77, // 黑色羊毛
+        // ── t455 16 色床补齐 8 色新变体（既存 8 色床 id 32..39 不动；本段为 white/light_blue/lime/pink/gray/
+        //   light_gray/purple/brown，id 78..85）。机制等价 MC 1.0 床 16 色变体。每色一个方块 id（同 wool 多 id 模式）。
+        //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与既存床同族）、hardness=0.2、
+        //   toolType=Axe（requiresTool=false 空手也掉落）、dropId=自身（破床掉同色床方块，可放回）、dropCount=1、
+        //   maxStack=64。各面贴图=default_bed_<color>（tile 94..101；与同色羊毛同色板一致，原创自绘 §9a）。
+        //   音色归 GroupWood（同既存床）。**配方**：3 同色羊毛 + 3 木板 → 该色床（recipe.cpp 每色一条）。
+        //   睡觉机制（t388）经 isBed 谓词覆盖本段（同既存 8 色床）。进创造调色板（每色独立取用 + 右键放置）。
+        BedWhite       = 78, // 白色床（配方：3 白色羊毛 + 3 木板）
+        BedLightBlue   = 79, // 浅蓝色床
+        BedLime        = 80, // 柠绿色床
+        BedPink        = 81, // 粉红色床
+        BedGray        = 82, // 灰色床
+        BedLightGray   = 83, // 浅灰色床
+        BedPurple      = 84, // 紫色床
+        BedBrown       = 85, // 棕色床
+        Count          = 86, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
-    // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（8 色）。isBed(id) 单一权威谓词供 t388 睡觉机制
-    //   （右键床 → 跳清晨 + 重生点）判定「命中格是否床」，避免各处自写 id 区间漂移（同 isCrossBillboard 模式）。
-    //   连续段（无段外夹入），故裸区间判定即可；仍提供 isBed 谓词作单一权威（改段时一处同步）。
+    // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
+    //   [FirstExtraBed, LastExtraBed]（white/light_blue/lime/pink/gray/light_gray/purple/brown）。isBed(id) 单一权威
+    //   谓词供 t388 睡觉机制（右键床 → 跳清晨 + 重生点）判定「命中格是否床」，覆盖**两个**连续段（既存 8 色 + 新 8 色），
+    //   避免各处自写 id 区间漂移（同 isCrossBillboard 段外 cross 模式）。改段时一处同步谓词即可。
     static constexpr int FirstBed = BedRed;
     static constexpr int LastBed  = BedBlack;
+    static constexpr int FirstExtraBed = BedWhite;    // t455 新增 8 色床段下界
+    static constexpr int LastExtraBed  = BedBrown;    // t455 新增 8 色床段上界
     static bool isBed(quint8 blockId);
+
+    // t455 16 色 wool 统一谓词（单一权威）：white（Wool=27）+ 15 色变体段 [FirstWoolVariant, LastWoolVariant]
+    //   （WoolOrange=63..WoolBlack=77）即羊毛。供未来染料 / 配方 / 渲染判定「是否羊毛方块」，避免各处自写 id
+    //   判定漂移（同 isBed / isCrossBillboard 模式）。white 与变体段不连续（Wool=27 夹在中间），故两段并判。
+    static constexpr int FirstWoolVariant = WoolOrange; // 15 色羊毛变体段下界（white 复用 Wool=27）
+    static constexpr int LastWoolVariant  = WoolBlack;  // 15 色羊毛变体段上界
+    static bool isWool(quint8 blockId);
 
     // t428 床 state 编码 + 配对格偏移（机制等价 MC 1.0 床 head+foot 双格横置，如门但水平相邻）。每半格存
     //   state——bit3 = head(1)/foot(0)、bit[1:0] = 玩家放置时的水平朝向（0=+X 1=-X 2=+Z 3=-Z，与 door/
@@ -748,12 +796,16 @@ public:
     //      半透段；纹理不透明，半透由材质 opacity 实现，同 water 模式；tools/build_glass.py 程序生成原创像素图）。
     //   78=ladder（t413 木梯 cross 贴图；透明底 + 棕色两根纵轨 + 横向梯级，alphaCutoff cutout；Ladder 各面=本 tile，
     //      mesher 走 cross 几何段；机制等价 MC 1.0 梯子，名称/贴图原创自绘 §9a；tools/build_ladder.py 程序生成原创像素图）。
-    // 图集由 tools/build_atlas.py 打包全部 69 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   79..93=wool_orange..wool_black（t455 16 色 wool 其余 15 色变体；white 复用 tile 38。卷绒纹 + 标准 16 色着色，
+    //      原创自绘 §9a；tools/build_wool.py 程序生成。WoolOrange=63..WoolBlack=77 各面=本段对应 tile）。
+    //   94..101=bed_white..bed_brown（t455 16 色床补齐 8 色新变体；既存 8 色床在 tile 43..50。与同色羊毛同色板，
+    //      原创自绘 §9a；tools/build_bed.py 程序生成。BedWhite=78..BedBrown=85 各面=本段对应 tile）。
+    // 图集由 tools/build_atlas.py 打包全部 102 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 68）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 102）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -761,7 +813,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 79;
+    static constexpr int AtlasTileCount = 102;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

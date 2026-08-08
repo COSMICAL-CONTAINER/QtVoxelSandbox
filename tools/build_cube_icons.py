@@ -44,6 +44,24 @@ BLOCKS = [
     ("copper_ore",      "default_copper_ore", "default_copper_ore"),    # t308 铜矿石（各面同贴图=石头底+橙铜斑+孔雀绿锈）
     ("gold_ore",        "default_gold_ore", "default_gold_ore"),        # t308 金矿石（各面同贴图=石头底+金黄斑簇）
     ("wool",            "default_wool", "default_wool"),  # t300 羊毛方块（各面同贴图=奶白羊毛卷绒纹）
+    # t455 16 色 wool 其余 15 色变体立方体图标（各面同贴图=彩色卷绒纹；build_wool.py 程序生成原创像素图）。
+    #   15 色顶 + 两侧明暗 → hotbar / 创造调色板肉眼即可辨色（橙 / 品红 / 浅蓝 / 黄 / 柠绿 / 粉 / 灰 / 浅灰 /
+    #   青 / 紫 / 蓝 / 棕 / 绿 / 红 / 黑）。white 复用既有 icon_wool.png，故本段不含 white。
+    ("wool_orange",     "default_wool_orange",     "default_wool_orange"),
+    ("wool_magenta",    "default_wool_magenta",    "default_wool_magenta"),
+    ("wool_light_blue", "default_wool_light_blue", "default_wool_light_blue"),
+    ("wool_yellow",     "default_wool_yellow",     "default_wool_yellow"),
+    ("wool_lime",       "default_wool_lime",       "default_wool_lime"),
+    ("wool_pink",       "default_wool_pink",       "default_wool_pink"),
+    ("wool_gray",       "default_wool_gray",       "default_wool_gray"),
+    ("wool_light_gray", "default_wool_light_gray", "default_wool_light_gray"),
+    ("wool_cyan",       "default_wool_cyan",       "default_wool_cyan"),
+    ("wool_purple",     "default_wool_purple",     "default_wool_purple"),
+    ("wool_blue",       "default_wool_blue",       "default_wool_blue"),
+    ("wool_brown",      "default_wool_brown",      "default_wool_brown"),
+    ("wool_green",      "default_wool_green",      "default_wool_green"),
+    ("wool_red",        "default_wool_red",        "default_wool_red"),
+    ("wool_black",      "default_wool_black",      "default_wool_black"),
     # t387 床方块 8 色变体立方体图标（各面同贴图=彩色被面+枕垫亮带+绗缝针脚；build_bed.py 程序生成原创像素图）。
     #   8 色顶 + 两侧明暗 → hotbar / 创造调色板肉眼即可辨色（红 / 橙 / 黄 / 绿 / 青 / 蓝 / 品红 / 黑）。
     ("bed_red",         "default_bed_red",     "default_bed_red"),
@@ -54,6 +72,16 @@ BLOCKS = [
     ("bed_blue",        "default_bed_blue",    "default_bed_blue"),
     ("bed_magenta",     "default_bed_magenta", "default_bed_magenta"),
     ("bed_black",       "default_bed_black",   "default_bed_black"),
+    # t455 床方块补齐 8 色新变体立方体图标（white/light_blue/lime/pink/gray/light_gray/purple/brown；
+    #   build_bed.py 程序生成原创像素图；与同色羊毛视觉一致）。
+    ("bed_white",       "default_bed_white",       "default_bed_white"),
+    ("bed_light_blue",  "default_bed_light_blue",  "default_bed_light_blue"),
+    ("bed_lime",        "default_bed_lime",        "default_bed_lime"),
+    ("bed_pink",        "default_bed_pink",        "default_bed_pink"),
+    ("bed_gray",        "default_bed_gray",        "default_bed_gray"),
+    ("bed_light_gray",  "default_bed_light_gray",  "default_bed_light_gray"),
+    ("bed_purple",      "default_bed_purple",      "default_bed_purple"),
+    ("bed_brown",       "default_bed_brown",       "default_bed_brown"),
     ("torch",           "default_torch", "default_torch"),  # t88 火把（透明底+木柄+火焰；走平面 2D 分支非立方体投影）
     ("chest",           "default_chest_top", "default_chest_side"),  # t173 箱子（顶=盖缝+铰链；侧=铁箍带；图标显顶+侧）
     ("farmland",        "default_farmland_dry", "default_dirt"),  # t234 耕地（顶=干态翻耕土；侧=泥土；图标显顶+侧）

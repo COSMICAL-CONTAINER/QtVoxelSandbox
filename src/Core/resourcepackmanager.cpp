@@ -327,6 +327,31 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {76, QStringLiteral("potatoes_stage_3.png")},    // potato_crop_3
         {77, QStringLiteral("obsidian.png")},            // obsidian 黑曜石
         {78, QStringLiteral("ladder.png")},              // ladder 木梯 cross
+        // t455 16 色 wool 其余 15 色变体（white 复用 tile 38 white_wool；缺则跳过保程序生成瓦片）。
+        {79, QStringLiteral("orange_wool.png")},         // wool_orange
+        {80, QStringLiteral("magenta_wool.png")},        // wool_magenta
+        {81, QStringLiteral("light_blue_wool.png")},     // wool_light_blue
+        {82, QStringLiteral("yellow_wool.png")},         // wool_yellow
+        {83, QStringLiteral("lime_wool.png")},           // wool_lime
+        {84, QStringLiteral("pink_wool.png")},           // wool_pink
+        {85, QStringLiteral("gray_wool.png")},           // wool_gray
+        {86, QStringLiteral("light_gray_wool.png")},     // wool_light_gray
+        {87, QStringLiteral("cyan_wool.png")},           // wool_cyan
+        {88, QStringLiteral("purple_wool.png")},         // wool_purple
+        {89, QStringLiteral("blue_wool.png")},           // wool_blue
+        {90, QStringLiteral("brown_wool.png")},          // wool_brown
+        {91, QStringLiteral("green_wool.png")},          // wool_green
+        {92, QStringLiteral("red_wool.png")},            // wool_red
+        {93, QStringLiteral("black_wool.png")},          // wool_black
+        // t455 16 色床补齐 8 色新变体（既存 8 色床 tile 43..50；本段为新色）。
+        {94, QStringLiteral("white_bed.png")},           // bed_white
+        {95, QStringLiteral("light_blue_bed.png")},      // bed_light_blue
+        {96, QStringLiteral("lime_bed.png")},            // bed_lime
+        {97, QStringLiteral("pink_bed.png")},            // bed_pink
+        {98, QStringLiteral("gray_bed.png")},            // bed_gray
+        {99, QStringLiteral("light_gray_bed.png")},      // bed_light_gray
+        {100, QStringLiteral("purple_bed.png")},         // bed_purple
+        {101, QStringLiteral("brown_bed.png")},          // bed_brown
     };
     return kMap;
 }
