@@ -55,11 +55,18 @@ Item {
     Canvas {
         id: canvas
         anchors.fill: parent
-        visible: packImg.source.length === 0 // pack 覆盖时隐藏自绘（避免透明底穿透叠显）
+        // t424: pack 关 / 无映射时回退自绘。**不能用 `packImg.source.length === 0`**：Image.source 是 url
+        //   类型，空 url 的 .length 在 QML JS 中为 undefined（非 0）→ `=== 0` 恒 false → canvas 永隐 → 所有
+        //   非 pack 工具图标空白（hover 名仍对）。改 `!packImg.visible`：packImg.visible 走 `source.length > 0`，
+        //   空 url 时 undefined > 0 = false（正确隐），取反即 canvas 显——与 packImg 互补且对空 url 稳健。
+        visible: !packImg.visible
         // 尺寸 / tier / toolType 变化时重绘（Canvas 不自动据外部 property 刷新）。
         onWidthChanged: requestPaint()
         onHeightChanged: requestPaint()
         Component.onCompleted: requestPaint()
+        // t424: canvas 由隐藏切回显（pack 切换 / 槽位换物后回退自绘）时不会自动重绘 → 显式重绘，
+        //   否则该 canvas 此前隐藏期间未绘制、变显后仍空白（pack ON↔OFF 切换后非 pack 物品需此补绘）。
+        onVisibleChanged: if (visible) requestPaint()
         Connections {
             target: root
             function onTierChanged() { canvas.requestPaint() }

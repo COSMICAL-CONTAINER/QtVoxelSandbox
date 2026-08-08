@@ -63,10 +63,15 @@ Item {
     Canvas {
         id: canvas
         anchors.fill: parent
-        visible: packImg.source.length === 0 // pack 覆盖时隐藏自绘（避免透明底穿透叠显）
+        // t424: 同 ToolIcon。Image.source 是 url，空 url 的 .length 在 QML JS 为 undefined（非 0）→
+        //   `=== 0` 恒 false → canvas 永隐 → 所有非 pack 材料 / 护甲图标空白（创造调色板 hover 名仍对）。
+        //   改 `!packImg.visible`（packImg.visible 走 `> 0`，对空 url = undefined>false=false 正确），互补且稳健。
+        visible: !packImg.visible
         onWidthChanged: requestPaint()
         onHeightChanged: request_paint_safe() // 防 0 尺寸
         Component.onCompleted: requestPaint()
+        // t424: canvas 由隐藏切回显（pack 切换 / 槽位换物后回退自绘）时不自动重绘 → 显式重绘防空白。
+        onVisibleChanged: if (visible) request_paint_safe()
         function request_paint_safe() { if (width > 0 && height > 0) requestPaint() }
         Connections {
             target: root
