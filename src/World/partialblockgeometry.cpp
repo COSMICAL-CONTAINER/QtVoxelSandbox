@@ -469,6 +469,50 @@ int PartialBlockGeometry::append(
                 BlockRegistry::def(blockId).topTile); // +Y 顶面 farmland_dry(26)，侧·底用 tile(=sideTile dirt 2)
         break;
     }
+    case BlockRegistry::BedRed: case BlockRegistry::BedOrange: case BlockRegistry::BedYellow:
+    case BlockRegistry::BedGreen: case BlockRegistry::BedCyan: case BlockRegistry::BedBlue:
+    case BlockRegistry::BedMagenta: case BlockRegistry::BedBlack:
+    case BlockRegistry::BedWhite: case BlockRegistry::BedLightBlue: case BlockRegistry::BedLime:
+    case BlockRegistry::BedPink: case BlockRegistry::BedGray: case BlockRegistry::BedLightGray:
+    case BlockRegistry::BedPurple: case BlockRegistry::BedBrown: {
+        // t457 低 3D 床模型（~0.3 格高）：四角木柱腿 + 木板面 + 羊毛床垫，上方留空气可躺。head 半（bit3=1）
+        //   额外加枕垫（床头端半 footprint 略高于床垫的羊毛枕）。机制等价 MC 1.0 床模型（低矮床架 + 床垫 +
+        //   枕头，非整立方）。每半（foot/head）独立渲染本 case，两半并排组成完整床（玩家放置 foot/head 双格
+        //   横置，见 playercontroller placeBlock）。腿 / 木板面贴 planks tile(8)；床垫 / 枕垫贴床色 tile（tile）。
+        //   不做邻居剔除（异形小体约定，同 Farmland；内 / 底面被自身遮挡 overdraw 可忽）。床 solid=false
+        //   （shapeBoxes 走 ShapeBed 低盒）→ 不参与邻居整立面剔除（无 x-ray 洞）。
+        const int planksTile = BlockRegistry::tileIndex(BlockRegistry::Planks, BlockRegistry::PosX); // 木板瓦片 8
+        const float leg = BlockRegistry::kBedLegHalf;        // 腿半宽（角柱 2*leg 见方）
+        const float legTop = BlockRegistry::kBedLegTop;      // 腿顶 = 木板面底
+        const float plankTop = BlockRegistry::kBedPlankTop;  // 木板面顶 = 床垫底
+        const float matTop = BlockRegistry::kBedMattressTop; // 床垫顶（~0.31，低床总高）
+        const float ins = BlockRegistry::kBedInset;          // 床垫 footprint 内缩
+        // 四角木柱腿（4 个角柱，planks 贴图）。
+        pushBox(verts, idx, lx, ly, lz, 0.f, 2*leg, 0.f, legTop, 0.f, 2*leg, planksTile, light, tileW, hx, hy, v0, v1);
+        pushBox(verts, idx, lx, ly, lz, 1.f-2*leg, 1.f, 0.f, legTop, 0.f, 2*leg, planksTile, light, tileW, hx, hy, v0, v1);
+        pushBox(verts, idx, lx, ly, lz, 0.f, 2*leg, 0.f, legTop, 1.f-2*leg, 1.f, planksTile, light, tileW, hx, hy, v0, v1);
+        pushBox(verts, idx, lx, ly, lz, 1.f-2*leg, 1.f, 0.f, legTop, 1.f-2*leg, 1.f, planksTile, light, tileW, hx, hy, v0, v1);
+        // 木板面（全 footprint 薄板，planks 贴图）。
+        pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, legTop, plankTop, 0.f, 1.f, planksTile, light, tileW, hx, hy, v0, v1);
+        // 羊毛床垫（内缩 footprint，床色贴图）。
+        pushBox(verts, idx, lx, ly, lz, ins, 1.f-ins, plankTop, matTop, ins, 1.f-ins, tile, light, tileW, hx, hy, v0, v1);
+        // 头半（bit3=1）加枕垫：床头端半 footprint 略高于床垫的羊毛枕。床头端 = 朝向反向边（foot 在 +front 方向，
+        //   pillow 在 -front 边，由 bedPartnerOffset 编码推导）。机制等价 MC 床头枕头（区分头/脚端）。
+        if (state & 8) {
+            const int f = state & 3;
+            const float pHalf = 0.5f; // 枕垫占床头端半 footprint
+            float bx0 = ins, bx1 = 1.f-ins, bz0 = ins, bz1 = 1.f-ins;
+            switch (f) {
+            case 0: bx0 = ins; bx1 = pHalf; break;          // 朝 +X（foot 在 +X）→ 枕在 -X 半
+            case 1: bx0 = 1.f-pHalf; bx1 = 1.f-ins; break;  // 朝 -X（foot 在 -X）→ 枕在 +X 半
+            case 2: bz0 = ins; bz1 = pHalf; break;          // 朝 +Z（foot 在 +Z）→ 枕在 -Z 半
+            case 3: bz0 = 1.f-pHalf; bz1 = 1.f-ins; break;  // 朝 -Z（foot 在 -Z）→ 枕在 +Z 半
+            }
+            pushBox(verts, idx, lx, ly, lz, bx0, bx1, matTop, BlockRegistry::kBedPillowTop, bz0, bz1,
+                    tile, light, tileW, hx, hy, v0, v1);
+        }
+        break;
+    }
     default:
         return 0; // 非异形方块 / 未实现 → 不追加（chunkgeometry 的 continue 跳过此格）
     }

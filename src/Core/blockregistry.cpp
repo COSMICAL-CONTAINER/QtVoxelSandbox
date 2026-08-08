@@ -163,14 +163,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   可放回）、dropCount=1、maxStack=64。各面贴图=default_bed_<color>（tile 43..50；彩色被面底 + 顶部枕垫亮带 +
     //   绗缝针脚暗点 + 边缘暗化，原创自绘 §9a）。配方 planks+wool → 红床（BedRed，默认色）；其余色变体创造调色板
     //   直接取用（无染料系统）。音色归 GroupWood（软质闷击，同 wool / chest）。睡觉机制归 t388。
-    /* bed_red      */ {int(BlockRegistry::BedRed),                    43, 43, 43, 43, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedRed),        1, 64, "bed_red",      "红色床"}, // 配方产物（planks+wool）；默认色
-    /* bed_orange   */ {int(BlockRegistry::BedOrange),                 44, 44, 44, 44, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedOrange),     1, 64, "bed_orange",   "橙色床"},
-    /* bed_yellow   */ {int(BlockRegistry::BedYellow),                 45, 45, 45, 45, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedYellow),     1, 64, "bed_yellow",   "黄色床"},
-    /* bed_green    */ {int(BlockRegistry::BedGreen),                  46, 46, 46, 46, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedGreen),      1, 64, "bed_green",    "绿色床"},
-    /* bed_cyan     */ {int(BlockRegistry::BedCyan),                   47, 47, 47, 47, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedCyan),       1, 64, "bed_cyan",     "青色床"},
-    /* bed_blue     */ {int(BlockRegistry::BedBlue),                   48, 48, 48, 48, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedBlue),       1, 64, "bed_blue",     "蓝色床"},
-    /* bed_magenta  */ {int(BlockRegistry::BedMagenta),                49, 49, 49, 49, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedMagenta),    1, 64, "bed_magenta",  "品红色床"},
-    /* bed_black    */ {int(BlockRegistry::BedBlack),                  50, 50, 50, 50, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedBlack),      1, 64, "bed_black",    "黑色床"},
+    /* bed_red      */ {int(BlockRegistry::BedRed),                    43, 43, 43, 43, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedRed),        1, 64, "bed_red",      "红色床"}, // 配方产物（planks+wool）；默认色
+    /* bed_orange   */ {int(BlockRegistry::BedOrange),                 44, 44, 44, 44, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedOrange),     1, 64, "bed_orange",   "橙色床"},
+    /* bed_yellow   */ {int(BlockRegistry::BedYellow),                 45, 45, 45, 45, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedYellow),     1, 64, "bed_yellow",   "黄色床"},
+    /* bed_green    */ {int(BlockRegistry::BedGreen),                  46, 46, 46, 46, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedGreen),      1, 64, "bed_green",    "绿色床"},
+    /* bed_cyan     */ {int(BlockRegistry::BedCyan),                   47, 47, 47, 47, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedCyan),       1, 64, "bed_cyan",     "青色床"},
+    /* bed_blue     */ {int(BlockRegistry::BedBlue),                   48, 48, 48, 48, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedBlue),       1, 64, "bed_blue",     "蓝色床"},
+    /* bed_magenta  */ {int(BlockRegistry::BedMagenta),                49, 49, 49, 49, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedMagenta),    1, 64, "bed_magenta",  "品红色床"},
+    /* bed_black    */ {int(BlockRegistry::BedBlack),                  50, 50, 50, 50, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedBlack),      1, 64, "bed_black",    "黑色床"},
     // ── t392 刷怪笼（Spawner）：机制等价 MC 1.0 刷怪笼（地下地牢中央放置的整立方方块，玩家在范围内时周期刷 1 敌对 mob，
     //   破坏后停止刷怪）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 chest / wool
     //   同族）、hardness=5.0（同 MC 1.0 刷怪笼量级，需镐且耗时）、toolType=Pickaxe、requiresTool=true、minToolTier=1
@@ -338,14 +338,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   （破床掉同色床方块，可放回）、dropCount=1、maxStack=64。各面贴图=default_bed_<color>（tile 94..101；与同色
     //   羊毛同色板一致，原创自绘 §9a）。音色归 GroupWood（同既存床）。**配方**：3 同色羊毛 + 3 木板 → 该色床。
     //   睡觉机制（t388）经 isBed 谓词覆盖本段（同既存 8 色床）。进创造调色板（每色独立取用 + 右键放置）。
-    /* bed_white       */ {int(BlockRegistry::BedWhite),      94, 94, 94, 94, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedWhite),      1, 64, "bed_white",      "白色床"},
-    /* bed_light_blue  */ {int(BlockRegistry::BedLightBlue),  95, 95, 95, 95, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLightBlue),  1, 64, "bed_light_blue", "浅蓝色床"},
-    /* bed_lime        */ {int(BlockRegistry::BedLime),       96, 96, 96, 96, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLime),       1, 64, "bed_lime",       "柠绿色床"},
-    /* bed_pink        */ {int(BlockRegistry::BedPink),       97, 97, 97, 97, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedPink),       1, 64, "bed_pink",       "粉红色床"},
-    /* bed_gray        */ {int(BlockRegistry::BedGray),       98, 98, 98, 98, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedGray),       1, 64, "bed_gray",       "灰色床"},
-    /* bed_light_gray  */ {int(BlockRegistry::BedLightGray),  99, 99, 99, 99, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLightGray),  1, 64, "bed_light_gray", "浅灰色床"},
-    /* bed_purple      */ {int(BlockRegistry::BedPurple),    100,100,100,100, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedPurple),     1, 64, "bed_purple",     "紫色床"},
-    /* bed_brown       */ {int(BlockRegistry::BedBrown),     101,101,101,101, true, BlockRegistry::ShapeFull, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedBrown),      1, 64, "bed_brown",      "棕色床"},
+    /* bed_white       */ {int(BlockRegistry::BedWhite),      94, 94, 94, 94, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedWhite),      1, 64, "bed_white",      "白色床"},
+    /* bed_light_blue  */ {int(BlockRegistry::BedLightBlue),  95, 95, 95, 95, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLightBlue),  1, 64, "bed_light_blue", "浅蓝色床"},
+    /* bed_lime        */ {int(BlockRegistry::BedLime),       96, 96, 96, 96, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLime),       1, 64, "bed_lime",       "柠绿色床"},
+    /* bed_pink        */ {int(BlockRegistry::BedPink),       97, 97, 97, 97, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedPink),       1, 64, "bed_pink",       "粉红色床"},
+    /* bed_gray        */ {int(BlockRegistry::BedGray),       98, 98, 98, 98, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedGray),       1, 64, "bed_gray",       "灰色床"},
+    /* bed_light_gray  */ {int(BlockRegistry::BedLightGray),  99, 99, 99, 99, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLightGray),  1, 64, "bed_light_gray", "浅灰色床"},
+    /* bed_purple      */ {int(BlockRegistry::BedPurple),    100,100,100,100, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedPurple),     1, 64, "bed_purple",     "紫色床"},
+    /* bed_brown       */ {int(BlockRegistry::BedBrown),     101,101,101,101, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedBrown),      1, 64, "bed_brown",      "棕色床"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -681,6 +681,11 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
         }
         return out;
     }
+    case BlockRegistry::ShapeBed:
+        // t457 床低盒（与 partialblockgeometry 床床垫顶同高）：cell 底低盒 y[0, 0.3125]（床垫顶 ~0.31）。
+        //   玩家立于床垫顶（机制等价 MC 床矮半高 hitbox；非整格满高碰撞）。foot / head 半同盒（碰撞不区分头脚）。
+        out.push_back({0, 0, 0, 1, BlockRegistry::kBedMattressTop, 1});
+        return out;
     }
     return out; // 未知 shape → 空（兜底）
 }
@@ -743,6 +748,7 @@ bool BlockRegistry::isFullCube(quint8 blockId)
 quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
 {
     if (isSolid(blockId)) return 15;                  // 全实体方块：满遮光（保旧 isSolid 光照语义）
+    if (isBed(blockId)) return 15;                    // t457 床 solid=false（低 3D 渲染）但仍是 opaque 实体木床 → 满遮光（同 Farmland/Cactus）
     switch (blockId) {
     case WoodTrapdoor: return (state & 1) ? 0 : 15;   // 合=满遮（修「合活版门透光」）/ 开=全透
     case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
@@ -775,6 +781,7 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
     case ShapeStairs:   return 1.0f;                          // 背墙到顶（整步+背墙最高点 = cellY+1）
     case ShapeFull:     return 1.0f;                          // 整立方
     case ShapeDoor:     return 1.0f;                          // 满高薄板
+    case ShapeBed:      return kBedMattressTop;               // t457 床床垫顶 ~0.31（PCF 软影遮挡高度同床垫顶）
     default:            return 1.0f;                          // ShapeNone（air/torch/water）不入 heightmap 顶，兜底 1.0
     }
 }

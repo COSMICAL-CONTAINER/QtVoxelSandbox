@@ -356,6 +356,14 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
             // 内按模式分流（spec：创造单击瞬破 = 单次边缘；生存 = 按住累积）。
             auto *me = static_cast<QMouseEvent *>(e);
             if (m_captured) {
+                // t457 睡觉 Settled 阶段（全黑 + 起床按钮）：左键 / 右键点击 → 平滑起床（wakeUpFromBed，非瞬切）。
+                //   spec「中间显起床按钮→按则立即醒」。屏幕全黑光标隐藏 → 玩家任意点击即醒（按钮居中作视觉提示）。
+                //   非 Settled 阶段（Lying 渐黑 / Waking 渐显）点击忽略（防误打断过渡动画）；受惊醒走 wakeUp 瞬切。
+                if (m_sleeping && m_sleepPhase == kSleepPhaseSettled
+                    && (me->button() == Qt::LeftButton || me->button() == Qt::RightButton)) {
+                    wakeUpFromBed();
+                    return true;
+                }
                 if (me->button() == Qt::LeftButton)   { beginMining(); return true; }
                 // t267：手持面包 → 右键**按住**进食（不再单击即食；spec「单击即食→改长按右键」）。
                 //   持物判据直读 hotbar（单一权威，同 updateMining / placeBlock 的 t57/t186 修法，免 QML
@@ -517,6 +525,14 @@ void PlayerController::tickImpl()
         }
         return;
     }
+    // t457 睡觉期间冻结玩家（不移动 / 不挖 / 不吃 / 不射 / 不钓）——仅推进 fade 状态机。玩家整个睡觉序列
+    //   保持 captured（不释放指针 → 光标隐藏，但屏幕渐黑不可见），点击唤醒经 eventFilter 接管（wakeUpFromBed）。
+    //   跳过 step() → 无重力 / 无位移 = 玩家定格在床边（机制等价 MC 躺床期间玩家静止）；重力缺失 1-3s 无影响
+    //   （玩家本就立于地面）。updateSleep 跑完即 return，避免下方 pollMouse/updateMining 等干扰睡眠过渡。
+    if (m_sleeping) {
+        updateSleep(float(dt));
+        return;
+    }
     pollMouse();
     step(dt);
     // t95：玩家推动可推动实体（仅 captured/playing；玩家主动移动后才有位移可传给实体）。在 step() 解析
@@ -527,7 +543,6 @@ void PlayerController::tickImpl()
     updateCameraDistance(); // t40：第三人称相机距离钳制（防穿墙）
     updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
     updateEating(float(dt)); // t267：累积进食进度（持面包按住右键时；其它情况早 return）
-    updateSleep(float(dt));  // t388：累积睡觉 fade 进度（满 kSleepDuration → 跳清晨 + 设重生点）
     // t304 弓拉弓蓄力：持弓按住右键时累加 m_bowDrawTime（钳 kBowFullCharge）。换槽（持物不再是弓）→ cancel。
     //   仅 captured 时跑（pause 早 return 之前已清）。每 tick emit bowDrawChanged → QML 拉弓动画跟随进度。
     if (m_bowDrawing) {
@@ -1436,18 +1451,24 @@ void PlayerController::cancelFishing()
     emit fishingChanged();
 }
 
-// t388 sleepProgress 派生（Q_PROPERTY READ）：clamp(m_sleepTimer/kSleepDuration, 0, 1)。手写 clamp 免加 <algorithm>。
-float PlayerController::sleepProgress() const
+// t457 自动跳清晨（Settled 阶段计时满 / 内部调）：worldClock.skipToDawn + 设 m_spawnPos=床位 + 进 Waking 阶段
+//   （fade-in 平滑回显清晨场景）。与 wakeUpFromBed（按钮，不跳清晨）共用 Waking fade-in，差异仅在 skipToDawn + spawn。
+void PlayerController::sleepAdvanceToDawn()
 {
-    if (kSleepDuration <= 0.0f) return 0.0f;
-    const float p = m_sleepTimer / kSleepDuration;
-    return p < 0.0f ? 0.0f : (p > 1.0f ? 1.0f : p);
+    // 跳清晨（WorldClock 时间向前快进到黎明 phase；PLAN §2-H 时间单向，只加 m_elapsedMs）。
+    if (m_worldClock) m_worldClock->skipToDawn();
+    // 设重生点 = 床位（床格中心 + 上方 1.0 = 玩家站床顶；respawn 时 snapSpawnToGround 再贴地表兜底）。
+    m_spawnPos = QVector3D(float(m_sleepBx) + 0.5f, float(m_sleepBy) + 1.0f, float(m_sleepBz) + 0.5f);
+    m_sleepPhase = kSleepPhaseWaking;
+    m_sleepPhaseTimer = 0.0f;
+    // 离开 Settled（隐藏起床按钮）；fade/lie 保持满值（Waking 内从 1 渐降到 0）。
+    if (m_sleepSettled) { m_sleepSettled = false; emit sleepSettledChanged(); }
 }
 
-// t388 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调）。机制等价 MC 1.0 床：夜间 + 床周无怪物才睡。
+// t388/t457 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调）。机制等价 MC 1.0 床：夜间 + 床周无怪物才睡。
 void PlayerController::trySleepAt(int bx, int by, int bz)
 {
-    if (m_sleeping) return; // fade 进行中再右键无效（防重入）
+    if (m_sleeping) return; // 睡觉序列进行中再右键无效（防重入）
     // 夜间判定（WorldClock.isNight 纯函数；无 worldClock → 当非夜间拒绝，安全降级）。
     if (!m_worldClock || !m_worldClock->isNight()) {
         emit sleepRefused(QStringLiteral("只有在夜晚才能睡觉"));
@@ -1461,42 +1482,97 @@ void PlayerController::trySleepAt(int bx, int by, int bz)
             return;
         }
     }
-    // 通过 → 进 fade 态（玩家定格等跳清晨；fade 短 1.2s，简化不冻结输入位移）。
+    // 通过 → 进 Lying 阶段（玩家相机降低 + 渐黑过渡；spec「右键床→玩家躺下→渐黑过渡 ~1s fade」）。
     m_sleeping = true;
-    m_sleepTimer = 0.0f;
+    m_sleepPhase = kSleepPhaseLying;
+    m_sleepPhaseTimer = 0.0f;
+    m_sleepFade = 0.0f;
+    m_sleepLie = 0.0f;
+    m_sleepSettled = false;
     m_sleepBx = bx; m_sleepBy = by; m_sleepBz = bz;
     emit sleepingChanged();
 }
 
-// t388 持续睡觉（tickImpl 调）：累积 fade 进度，满 kSleepDuration → 跳清晨 + 设重生点 + 清态。
+// t388/t457 持续睡觉三阶段状态机（tickImpl 调）：Lying（躺下渐黑）→ Settled（全黑显起床按钮，自动跳清晨）
+//   → Waking（fade 回显）。sleepFade/Lie/Settled 据阶段 + 计时派生，值真变才 emit（驱动 QML 黑叠层 + 相机躺姿 + 按钮）。
 void PlayerController::updateSleep(float dt)
 {
     if (!m_sleeping) return;
-    m_sleepTimer += float(dt);
-    emit sleepProgressChanged(); // 驱动 QML 黑叠层 ramp（每 tick 推进）
-    if (m_sleepTimer >= kSleepDuration) {
-        // 跳清晨（WorldClock 时间向前快进到黎明 phase 0.75；PLAN §2-H 时间单向，只加 m_elapsedMs）。
-        if (m_worldClock) m_worldClock->skipToDawn();
-        // 设重生点 = 床位（床格中心 + 上方 1.0 = 玩家站床顶；respawn 时 snapSpawnToGround 再贴地表兜底）。
-        m_spawnPos = QVector3D(float(m_sleepBx) + 0.5f, float(m_sleepBy) + 1.0f, float(m_sleepBz) + 0.5f);
-        cancelSleep(); // 清态 + emit sleepingChanged（QML 黑叠层随 sleeping=false 隐藏，显清晨场景）
+    m_sleepPhaseTimer += float(dt);
+
+    // 计算本 tick 阶段派生的目标 fade / lie / settled（与旧值比对，真变才 emit，免每帧抖 QML 绑定）。
+    float fade = m_sleepFade, lie = m_sleepLie;
+    bool settled = m_sleepSettled;
+
+    const auto clamp01 = [](float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); };
+
+    if (m_sleepPhase == kSleepPhaseLying) {
+        // Lying：fade/lie 0→1（躺下 + 渐黑，spec「~1s fade」）。
+        const float t = clamp01(m_sleepPhaseTimer / kSleepLieDur);
+        fade = t; lie = t; settled = false;
+        if (m_sleepPhaseTimer >= kSleepLieDur) {
+            // 进 Settled（全黑 + 显起床按钮）。
+            m_sleepPhase = kSleepPhaseSettled;
+            m_sleepPhaseTimer = 0.0f;
+            fade = 1.0f; lie = 1.0f; settled = true;
+        }
+    } else if (m_sleepPhase == kSleepPhaseSettled) {
+        // Settled：全黑 + 起床按钮；玩家不按则计时满自动跳清晨（spec「不按则度过夜晚（跳到黎明）」）。
+        fade = 1.0f; lie = 1.0f; settled = true;
+        if (m_sleepPhaseTimer >= kSleepSettleDur) {
+            sleepAdvanceToDawn(); // skipToDawn + spawn + 进 Waking（fade/lie 在 Waking 内从 1 降到 0）
+            fade = 1.0f; lie = 1.0f; settled = false; // sleepAdvanceToDawn 已发 sleepSettledChanged
+        }
+    } else if (m_sleepPhase == kSleepPhaseWaking) {
+        // Waking：fade/lie 1→0（平滑回显清晨 / 当前场景，spec「非瞬醒」）。
+        const float t = clamp01(m_sleepPhaseTimer / kSleepWakeDur);
+        fade = 1.0f - t; lie = 1.0f - t; settled = false;
+        if (m_sleepPhaseTimer >= kSleepWakeDur) {
+            // fade 回显完毕 → 结束整个睡觉序列。
+            cancelSleep(); // 瞬切 None + sleeping=false（fade 已 0，黑叠层随 sleeping=false 隐藏无跳变）
+            return;
+        }
     }
+
+    // 派生值真变才 emit（免每 tick 抖 QML 绑定；同 miningProgressChanged 高频但值稳态时静默）。
+    if (fade != m_sleepFade) { m_sleepFade = fade; emit sleepFadeChanged(); }
+    if (lie != m_sleepLie)   { m_sleepLie = lie;   emit sleepLieChanged(); }
+    if (settled != m_sleepSettled) { m_sleepSettled = settled; emit sleepSettledChanged(); }
 }
 
-// t388 清睡觉 fade 态（完成 / 受惊醒 / 失焦 / 暂停 / 重生）。无变化时静默（不发信号，免抖动 QML 绑定）。
+// t388/t457 清整个睡觉态（受惊醒 wakeUp / 失焦 / 暂停 / 重生 / Waking 完成）：瞬切 None + sleeping=false。
+//   非睡觉态静默（不发信号，免抖动 QML 绑定）。中断式瞬醒（紧急打断，黑叠层随 sleeping=false 立即隐藏）。
 void PlayerController::cancelSleep()
 {
     if (!m_sleeping) return;
     m_sleeping = false;
-    m_sleepTimer = 0.0f;
-    emit sleepingChanged();
+    m_sleepPhase = kSleepPhaseNone;
+    m_sleepPhaseTimer = 0.0f;
+    m_sleepFade = 0.0f;
+    m_sleepLie = 0.0f;
+    const bool wasSettled = m_sleepSettled;
+    m_sleepSettled = false;
+    emit sleepingChanged(); // 驱动 QML 黑叠层 / 相机躺姿 / 起床按钮全部随 sleeping=false 复位
+    if (wasSettled) emit sleepSettledChanged();
 }
 
 // t388 受惊醒（Q_INVOKABLE；呈现层 Connections 据玩家受击 fallDamageTaken / mobAttackedPlayer 路由调）。
-//   spec「受击即醒」。非睡觉态静默（cancelSleep 自守）。
+//   spec「受击即醒」。受击是紧急打断 → 瞬切（cancelSleep），区别于 wakeUpFromBed 的平滑 fade-in 醒。
+//   非睡觉态静默（cancelSleep 自守）。
 void PlayerController::wakeUp()
 {
     cancelSleep();
+}
+
+// t457 平滑起床（Q_INVOKABLE；QML「起床」按钮调）：从 Settled 阶段平滑过渡到 Waking（fade 1→0 渐显），不跳清晨
+//   （玩家选择立即醒 = 仍处夜晚，spec「按则立即醒」）。非 Settled 阶段调无效（防重入 / 防误触）。
+void PlayerController::wakeUpFromBed()
+{
+    if (!m_sleeping || m_sleepPhase != kSleepPhaseSettled) return;
+    m_sleepPhase = kSleepPhaseWaking;
+    m_sleepPhaseTimer = 0.0f;
+    if (m_sleepSettled) { m_sleepSettled = false; emit sleepSettledChanged(); }
+    // fade/lie 保持满值（Waking 内从 1 渐降到 0）；不调 skipToDawn / 不设 spawn（区别于 sleepAdvanceToDawn）。
 }
 
 // t304 在背包（hotbar 9 + main 27）查首格含箭（ArrowId）。优先 hotbar（入手语义同拾取），再 main。

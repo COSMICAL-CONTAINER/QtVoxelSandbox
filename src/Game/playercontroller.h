@@ -195,12 +195,18 @@ class PlayerController : public QQuickItem
     //   （避免每帧抖 QML 绑定，同 eyeInWater 模式）。Main.qml 据它显底部火焰叠层（屏幕下 ~35%，机制等价 MC
     //   着火屏边火焰）。仅 Survival 生效（Creative/Spectator 无敌不着火）；无世界 → false。
     Q_PROPERTY(bool burning READ burning NOTIFY burningChanged)
-    // t388 睡觉态（夜间右键床 → 短暂 fade → 跳清晨 + 设重生点）。sleeping=正在睡觉（fade 期间，玩家定格在床）；
-    //   sleepProgress=0..1 fade 进度（驱动 QML 全屏黑叠层透明度 ramp）。受击即取消（wakeUp，spec「受惊醒」）。
-    //   分层（PLAN §2）：睡觉态属 Game/Physics 层（持 worldClock + entityManager + 自身 spawn 点），呈现层只读
-    //   消费（同 miningStateChanged / eatingStateChanged 模式）。
+    // t388/t457 睡觉态（夜间右键床 → 躺下 + fade 黑 → 显「起床」按钮 → 不按则跳清晨 / 按则立即醒，全程过渡动画
+    //   非瞬黑瞬醒）。三阶段状态机（m_sleepPhase）驱动三个派生属性供 QML 呈现层只读消费：
+    //   - sleeping：整个睡觉序列进行中（从右键床到 fade 回显完毕）。
+    //   - sleepFade：0..1 全屏黑叠层透明度（Lying 阶段 0→1 渐黑；Settled 阶段恒 1 全黑；Waking 阶段 1→0 渐显）。
+    //   - sleepLie：0..1 躺下量（驱动 QML 第一人称相机降低 + 上仰转躺；与 sleepFade 同步 ramp）。
+    //   - sleepSettled：true 时处于全黑「入睡」阶段，QML 显「起床」按钮（玩家可点按钮立即醒，否则自动跳清晨）。
+    //   受击即醒（wakeUp 受惊醒，瞬切；spec「受惊醒」）。分层（PLAN §2）：睡觉态属 Game/Physics 层（持 worldClock
+    //   + entityManager + 自身 spawn 点），呈现层只读消费（同 miningStateChanged / eatingStateChanged 模式）。
     Q_PROPERTY(bool sleeping READ sleeping NOTIFY sleepingChanged)
-    Q_PROPERTY(float sleepProgress READ sleepProgress NOTIFY sleepProgressChanged)
+    Q_PROPERTY(float sleepFade READ sleepFade NOTIFY sleepFadeChanged)
+    Q_PROPERTY(float sleepLie READ sleepLie NOTIFY sleepLieChanged)
+    Q_PROPERTY(bool sleepSettled READ sleepSettled NOTIFY sleepSettledChanged)
     // 掉落伤害事件（t22）：生存模式着地时按落差结算，发出本次应扣 HP（每 HP = 半心）。
     // 不直接持有 PlayerState（保持 Physics/Game→呈现 的单向事件流，分层干净；与 blockBroken
     // 同模式）：呈现层经 Connections 路由到 PlayerState.takeDamage。0 表示无伤害（不路出）。
@@ -306,13 +312,19 @@ public:
     // t344 玩家火烧态（Q_PROPERTY burning READ）：m_burning 缓存（tickImpl 算时序、翻转才 emit burningChanged）。
     //   仅 Survival 着火（Creative/Spectator 无敌）。Main.qml 据它显底部火焰叠层。
     bool burning() const { return m_burning; }
-    // t388 睡觉态（Q_PROPERTY sleeping/sleepProgress READ）。
+    // t388/t457 睡觉态（Q_PROPERTY sleeping/sleepFade/sleepLie/sleepSettled READ）。
     bool sleeping() const { return m_sleeping; }
-    float sleepProgress() const; // fade 进度 0..1（clamp(m_sleepTimer/kSleepDuration,0,1)）；定义在 .cpp
+    float sleepFade() const { return m_sleepFade; }    // 0..1 全屏黑叠层透明度（阶段派生，updateSleep 每 tick 写）
+    float sleepLie() const { return m_sleepLie; }      // 0..1 躺下量（阶段派生；驱动 QML 相机降低 + 上仰）
+    bool sleepSettled() const { return m_sleepSettled; } // true=全黑入睡阶段（QML 显「起床」按钮）
 
-    // t388 睡觉取消（受惊醒）：清睡觉 fade 态 + emit sleepingChanged（QML 黑叠层隐藏）。非睡觉态静默。
-    //   呈现层 Connections 据玩家受击（fallDamageTaken / mobAttackedPlayer）路由调本方法（spec「受击即醒」）。
+    // t388 睡觉取消（受惊醒）：受击时立即清睡觉态（瞬切 sleeping=false + 隐藏黑叠层，spec「受惊醒」）。
+    //   呈现层 Connections 据玩家受击（fallDamageTaken / mobAttackedPlayer）路由调本方法。非睡觉态静默。
+    //   注意：这是「中断式」瞬醒（紧急打断），区别于 wakeUpFromBed 的「平滑 fade-in 醒」（按钮 / 自动跳清晨）。
     Q_INVOKABLE void wakeUp();
+    // t457 平滑起床（Q_INVOKABLE；QML「起床」按钮调）：从 Settled 阶段平滑过渡到 Waking（fade 1→0 渐显），
+    //   不跳清晨（玩家选择立即醒 = 仍处夜晚）。非 Settled 阶段调无效（防重入）。spec「按则立即醒」。
+    Q_INVOKABLE void wakeUpFromBed();
 
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
@@ -446,10 +458,14 @@ signals:
     void flowSoundLevelChanged(); // t223 近流水 proximity 强度变（驱动 AudioManager 水流声 start/stop/setLevel）
     void lavaSoundLevelChanged(); // t343 近岩浆 proximity 强度变（驱动 AudioManager 岩浆声 start/stop/setLevel）
     void burningChanged(); // t344 玩家火烧态翻转（驱动底部火焰叠层显隐；值真变才发，免每帧抖 QML 绑定）
-    // t388 睡觉态翻转（开始 / 结束睡觉）：驱动 QML 全屏 fade 叠层显隐（同 miningStateChanged 模式）。
+    // t388/t457 睡觉态翻转（开始 / 结束睡觉）：驱动 QML 全屏 fade 叠层显隐（同 miningStateChanged 模式）。
     void sleepingChanged();
-    // t388 睡觉 fade 进度连续变化（0..1）：高频独立信号（同 miningProgressChanged），驱动 QML 黑叠层 ramp。
-    void sleepProgressChanged();
+    // t457 睡觉 fade / 躺下量连续变化（0..1，阶段派生）：高频独立信号（同 miningProgressChanged），驱动 QML
+    //   黑叠层透明度 ramp + 第一人称相机降低 / 上仰。值真变才发（updateSleep 内对比旧值门控，免每帧抖 QML 绑定）。
+    void sleepFadeChanged();
+    void sleepLieChanged();
+    // t457 睡觉进入 / 离开「全黑入睡」阶段翻转：驱动 QML「起床」按钮显隐（仅 Settled 阶段显）。
+    void sleepSettledChanged();
     // t388 睡觉被拒（白天 / 附近有怪物）：携中文文案，呈现层 Connections 路由到 appendChatMessage 系统播报
     //   （同死亡播报模式）。机制等价 MC 1.0 床的拒绝提示。
     void sleepRefused(const QString &reason);
@@ -681,14 +697,19 @@ private:
     void updateFishing(float dt);
     // t401 清钓鱼态（拉起后 / 换槽（持物不再是钓竿）/ 失焦 / 暂停 / 重生）。无钓鱼态时静默（不发信号）。
     void cancelFishing();
-    // t388 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调）：夜间 + 床周无怪物 → 进 fade 态
-    //   （m_sleeping=true）；否则 emit sleepRefused（白天 / 附近有怪物，机制等价 MC 1.0 床拒绝提示）。
-    //   分层（PLAN §2）：Game/Physics 层判定（读 worldClock.isNight + entityManager.hostileNearby，均向下依赖）。
+    // t388/t457 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调）：夜间 + 床周无怪物 → 进 Lying 阶段
+    //   （m_sleeping=true，相机降低 + 渐黑过渡）；否则 emit sleepRefused（白天 / 附近有怪物，机制等价 MC 1.0 床
+    //   拒绝提示）。分层（PLAN §2）：Game/Physics 层判定（读 worldClock.isNight + entityManager.hostileNearby，均向下依赖）。
     void trySleepAt(int bx, int by, int bz);
-    // t388 持续睡觉：每 tick 累积 fade 进度，满 kSleepDuration → 跳清晨（worldClock.skipToDawn）+ 设重生点为
-    //   床位（m_spawnPos）。由 tickImpl 调（captured 时）。spec「夜间右键床跳清晨 + 重生点更新」。
+    // t388/t457 持续睡觉三阶段状态机（tickImpl 调）：Lying（躺下渐黑 ~1s）→ Settled（全黑显起床按钮，自动跳清晨）
+    //   → Waking（跳清晨后 fade 回显清晨场景）。设重生点发生在 Settled→Waking 跳清晨瞬间（m_spawnPos=床位）。
+    //   sleepFade/Lie/Settled 阶段派生，值真变才 emit（驱动 QML 黑叠层 + 相机躺姿 + 起床按钮）。
     void updateSleep(float dt);
-    // t388 清睡觉 fade 态（完成 / 受惊醒 wakeUp / 失焦 / 暂停 / 重生）。无变化时静默（不发信号，免抖动 QML 绑定）。
+    // t457 自动跳清晨（Settled 阶段计时满调）：worldClock.skipToDawn + 设 m_spawnPos=床位 + 进 Waking 阶段。
+    //   与 wakeUpFromBed（按钮，不跳清晨）共用 Waking fade-in，区别仅在是否调 skipToDawn + 设 spawn。
+    void sleepAdvanceToDawn();
+    // t388/t457 清整个睡觉态（受惊醒 wakeUp / 失焦 / 暂停 / 重生）：瞬切 None + sleeping=false + 黑叠层隐藏 +
+    //   相机归位。非睡觉态静默（不发信号，免抖动 QML 绑定）。中断式瞬醒（紧急打断，区别于 wakeUpFromBed 平滑醒）。
     void cancelSleep();
     // t304 在背包（hotbar 9 + main 27）查首格含箭（ArrowId）的 (group,index)，找不到返 {false,0,0}。
     //   group=0 hotbar / 1 main。供 fireArrow 判「需箭在背包」（spec）+ 生存消耗 1 箭定位槽。
@@ -839,10 +860,16 @@ private:
     // t394 仙人掌接触伤害累积（玩家 AABB 接触 Cactus 方块时累加，每 EntityManager::kCactusDamageInterval 扣 1HP；
     //   离开即归零）。机制等价 MC 1.0 仙人掌触碰即伤。仅 Survival（Creative/Spectator 无敌不累）。
     float m_cactusDmgTimer = 0.0f;
-    // t388 睡觉 fade 态（夜间右键床 → fade → 跳清晨 + 设重生点）。m_sleeping=正在睡觉；m_sleepTimer 累积到
-    //   kSleepDuration 即完成（跳清晨 + 设 spawn）；m_sleepBx/By/Bz=所睡床格（完成后据此设 m_spawnPos）。
+    // t388/t457 睡觉三阶段状态机（夜间右键床 → 躺下 + fade → 跳清晨 / 立即醒，过渡动画非瞬黑瞬醒）。
+    //   m_sleepPhase=Lying(躺下渐黑)→Settled(全黑显起床按钮)→Waking(fade 回显)→None；m_sleepPhaseTimer 当前
+    //   阶段累积时间；m_sleepFade/Lie/Settled 阶段派生呈现量（updateSleep 写 + 值真变才 emit）；m_sleepBx/By/Bz
+    //   所睡床格（跳清晨时据此设 m_spawnPos）。受惊醒（wakeUp）瞬切 None；按钮 / 自动跳清晨走 Waking 平滑醒。
     bool m_sleeping = false;
-    float m_sleepTimer = 0.0f;
+    int m_sleepPhase = 0;            // SleepPhase: 0=None 1=Lying 2=Settled 3=Waking
+    float m_sleepPhaseTimer = 0.0f;  // 当前阶段累积秒数
+    float m_sleepFade = 0.0f;        // 0..1 全屏黑叠层透明度（阶段派生）
+    float m_sleepLie = 0.0f;         // 0..1 躺下量（阶段派生；驱动 QML 相机降低 + 上仰）
+    bool m_sleepSettled = false;     // true=全黑入睡阶段（QML 显起床按钮）
     qint32 m_sleepBx = 0, m_sleepBy = 0, m_sleepBz = 0;
     bool m_dead = false;             // t175 死亡态镜像（dropAllItems 置 true / respawn 置 false）：抑制死亡后
                                      //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）
@@ -1094,12 +1121,21 @@ private:
     static constexpr float kFishBiteWindow = 2.5f;
     static constexpr float kCamMax = 3.5f;     // 第三人称相机最大距离（格；t40，与 Main.qml 默认 d 对齐）
     static constexpr float kCamMargin = 0.1f;  // 相机贴命中面前的余量（防卡面 z-fight / 近裁面穿插；t40）
-    // t388 睡觉机制常量（机制对齐 MC 1.0 床：fade 后跳清晨、床周有敌对即拒绝；数值为本工程小世界量身调）。
-    //   kSleepDuration：右键床后到跳清晨的 fade 时长（秒）；sleepProgress = m_sleepTimer/kSleepDuration 驱动
-    //     QML 全屏黑叠层 ramp。取 1.2s：足够 fade 过渡可见、又不拖沓（MC 即时跳，本工程加 fade 做视觉过渡）。
+    // t388/t457 睡觉机制常量（机制对齐 MC 1.0 床：fade 后跳清晨、床周有敌对即拒绝；数值为本工程小世界量身调）。
+    //   三阶段时长（t457 过渡动画，非瞬黑瞬醒）：
+    //     kSleepLieDur：Lying 阶段（躺下 + 渐黑 fade-out），spec「~1s fade」；sleepFade/sleepLie 0→1。
+    //     kSleepSettleDur：Settled 阶段（全黑显「起床」按钮），玩家不按则自动跳清晨的等待时长。
+    //     kSleepWakeDur：Waking 阶段（跳清晨后 / 按钮醒后 fade-in 渐显），smooth 过渡回场景。
     //   kSleepMonsterRadius：床周敌对判定半径（格）；机制等价 MC 1.0 床周 8 格内有敌对即不能睡。
-    static constexpr float kSleepDuration = 1.2f;
+    //   kSleepPhase*：阶段枚举值（与 m_sleepPhase 同；私有数字编码，不入 Q_ENUM，纯内部状态机）。
+    static constexpr float kSleepLieDur     = 1.0f;
+    static constexpr float kSleepSettleDur  = 2.0f;
+    static constexpr float kSleepWakeDur    = 0.8f;
     static constexpr float kSleepMonsterRadius = 8.0f;
+    static constexpr int kSleepPhaseNone    = 0;
+    static constexpr int kSleepPhaseLying   = 1;
+    static constexpr int kSleepPhaseSettled = 2;
+    static constexpr int kSleepPhaseWaking  = 3;
 };
 
 #endif // PLAYERCONTROLLER_H

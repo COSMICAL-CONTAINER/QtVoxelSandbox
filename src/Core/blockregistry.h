@@ -213,8 +213,9 @@ public:
         //   「玩家朝向反向」水平邻格；state 编码见 BlockRegistry::bedPartnerOffset）。每色一个方块 id（连续段
         //   [FirstBed, LastBed]）→ 创造调色板每个色变体独立取用 + 右键放置（复用既有 selectedBlockId → placeBlock
         //   通用放置路径，无需新交互；物品系统是 id 驱动，故「同 id 不同 state」的色变无法经背包表达 → 多 id）。
-        //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 wool / chest 同族；
-        //   简化：碰撞满格，非 MC 床的矮半高 hitbox）、hardness=0.2（同 MC 1.0 床量级，软质）、toolType=Axe
+        //   低 3D 模型（t457：~0.3 格高 = 四角木柱腿 + 木板面 + 羊毛面，上方留空气可躺；solid=false /
+        //   ShapeBed —— 走 PartialBlockGeometry 异形渲染路径，**非**整立方面；碰撞 = cell 底低盒 ~0.31 高，
+        //   机制等价 MC 床矮半高 hitbox）、hardness=0.2（同 MC 1.0 床量级，软质）、toolType=Axe
         //   （木制床架；requiresTool=false → 空手也掉落，仅速度受斧影响）、dropId=自身（破床掉同色床方块，可放回）、
         //   dropCount=1、maxStack=64。各面贴图=default_bed_<color>（tile 43..50；彩色被面底 + 顶部枕垫亮带 +
         //   绗缝针脚暗点 + 边缘暗化，原创自绘 §9a）。音色归 GroupWood（软质闷击，同 wool / chest）。**配方**：
@@ -461,6 +462,17 @@ public:
     static constexpr int LastExtraBed  = BedBrown;    // t455 新增 8 色床段上界
     static bool isBed(quint8 blockId);
 
+    // t457 床低 3D 模型几何常量（cell-local [0,1]）—— PartialBlockGeometry 渲染 + shapeBoxes 碰撞共用同一组值，
+    //   保证「碰撞盒顶 = 渲染床垫顶」（玩家立于床垫顶）。kBedMattressTop=床垫顶高（~0.31 = 5/16，低床）；
+    //   kBedLegTop=腿顶（3/16）；kBedLegHalf=腿半宽（1/16，角柱 2/16 见方）；kBedPlankTop=木板面顶（4/16）；
+    //   kBedInset=床垫 / 枕头 footprint 内缩；kBedPillowTop=头半枕垫顶（6/16）。
+    static constexpr float kBedMattressTop = 0.3125f; // 5/16
+    static constexpr float kBedLegTop      = 0.1875f; // 3/16（腿高 = 木板面底）
+    static constexpr float kBedLegHalf     = 0.0625f; // 1/16（腿半宽 → 角柱 [0,2/16] 见方）
+    static constexpr float kBedPlankTop    = 0.25f;   // 4/16（木板面顶 = 羊毛面底）
+    static constexpr float kBedInset       = 0.0625f; // 1/16（床垫 footprint 内缩）
+    static constexpr float kBedPillowTop   = 0.375f;  // 6/16（头半枕垫顶，略高于床垫）
+
     // t455 16 色 wool 统一谓词（单一权威）：white（Wool=27）+ 15 色变体段 [FirstWoolVariant, LastWoolVariant]
     //   （WoolOrange=63..WoolBlack=77）即羊毛。供未来染料 / 配方 / 渲染判定「是否羊毛方块」，避免各处自写 id
     //   判定漂移（同 isBed / isCrossBillboard 模式）。white 与变体段不连续（Wool=27 夹在中间），故两段并判。
@@ -688,6 +700,11 @@ public:
         ShapePlate    = 5, // 木板压力板：贴地薄板 {0.0625,0,0.0625,0.9375,0.0625,0.9375}
         ShapeDoor     = 6, // 木板门：满高薄板（state 朝向/开合；上下半由所在格的 y 自然分，bit3 标识上下）
         ShapeTrapdoor = 7, // 木活板门：合=水平薄板 / 开=竖直薄板（state bit0 开合 + bit[2:1] 朝向）
+        ShapeBed      = 8, // t457 床：低 3D 模型（~0.3 格高 = 四角木柱腿 + 木板面 + 羊毛面，上方留空气可躺）。
+                           //   collision/selection = cell 底低盒 {0,0,0,1,0.3125,1}（玩家立于床垫顶 = 床顶 ~0.31 高，
+                           //   机制等价 MC 床矮半高 hitbox；solid=false 避免相邻整立方误剔面出 x-ray 洞，同 Farmland /
+                           //   Cactus 模式）。渲染走 PartialBlockGeometry（legs+plank+wool 子盒），不走整立方面。
+                           //   state bit[1:0]=朝向、bit3=head(1)/foot(0)（同 door；head 半加枕头枕垫区分头/脚）。
     };
 
     // t146 方块子碰撞/选中盒（**cell-local [0,1]^3 AABB**；世界坐标由 caller + (bx,by,bz) 偏移）。

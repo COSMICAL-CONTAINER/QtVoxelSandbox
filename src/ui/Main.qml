@@ -1547,7 +1547,12 @@ Window {
             // t40：第三人称距离 d 不再写死 3.5，改读 player.cameraDistance（控制器每帧沿偏移方向 DDA 钳制到
             // 首个实体命中距离；无命中=3.5，命中则贴在面前）→ 相机贴墙不穿入。Math.min 为安全钳（值已 ≤3.5）。
             position: {
-                const eye = player.position
+                let eye = player.position
+                // t457 睡觉躺下（第一人称视角降低）：sleepLie 0→1 平滑降低相机 Y（从站立眼位 1.62 降到近床床垫
+                //   ~0.2，机制等价 MC 躺床第一人称视点降低）。与 sleepFade 同步 ramp（Lying 阶段 0→1）。
+                //   仅 sleeping 时 sleepLie 非 0（非睡觉恒 0 → 不影响常规视角）。三模式都加（第三人称也跟降）。
+                if (player.sleepLie > 0.0)
+                    eye = Qt.vector3d(eye.x, eye.y - player.sleepLie * 1.4, eye.z)
                 const look = player.lookVector
                 const m = player.cameraMode
                 if (m === PlayerController.FirstPerson) return eye
@@ -1559,9 +1564,12 @@ Window {
                 // t67 受伤视角晃动：shakePitch/shakeYaw 小幅抖动叠加进相机俯仰/偏航（onDamaged 触发 shakeAnim，
                 //   ~0.2s 衰减到 0 → 平时为 0 不影响视角）。三模式都加（第一人称最显；第三人称相机方向微抖）。
                 const sp = cam.shakePitch, sy = cam.shakeYaw
+                // t457 睡觉躺下「转躺」：sleepLie 0→1 平滑上仰相机（+pitch 看 ~20° 上方，如躺床仰视）。
+                //   与 position Y 降低同步 ramp（Lying 阶段）；sleepFade 全黑后视点已不可见，但 fade 前/后短暂可见。
+                const lieTilt = player.sleepLie * 20.0
                 if (player.cameraMode === PlayerController.ThirdPersonFront)
-                    return Qt.vector3d(-player.pitch + sp, player.yaw + 180 + sy, 0) // 回看正面：俯仰反向 + 偏航 +180
-                return Qt.vector3d(player.pitch + sp, player.yaw + sy, 0)            // 第一人称 & 第三人称-后：朝前看
+                    return Qt.vector3d(-player.pitch + sp + lieTilt, player.yaw + 180 + sy, 0) // 回看正面：俯仰反向 + 偏航 +180
+                return Qt.vector3d(player.pitch + sp + lieTilt, player.yaw + sy, 0)            // 第一人称 & 第三人称-后：朝前看
             }
             // 受伤视角晃动偏移（t67）：由 shakeAnim 驱动（衰减抖动，静止恒 0）。读 cam.shakePitch/shakeYaw 进
             //   上方 eulerRotation 绑定 → NOTIFY 触发绑定重算 → 视角随抖动偏移；静止时 = 0 不影响。
@@ -5119,16 +5127,52 @@ Window {
         }
     }
 
-    // t388 睡觉 fade 叠层（夜间右键床 → 全屏黑 ramp → 跳清晨后隐藏）：机制等价 MC 1.0 睡觉过渡。
-    //   状态驱动 = player.sleeping + player.sleepProgress（tickImpl 算时序、翻转才发 sleepingChanged；进度每 tick
-    //   发 sleepProgressChanged）。sleeping 期间随进度 ramp 到近全黑（×1.7 使前 ~60% 进度即达峰值，余为「闭眼」
-    //   停留）；sleeping=false（跳清晨完成 / 受惊醒）即隐藏 → 显清晨场景（睁眼见白昼）。纯 Rectangle 无 MouseArea
-    //   → 不拦截鼠标（同水下蓝雾 / 闪电白闪经验）。仅 playing 态显；放在 View3D 之后、HUD/背包/暂停叠层之前。
+    // t388/t457 睡觉过渡叠层（夜间右键床 → 躺下渐黑 → 全黑显「起床」按钮 → 跳清晨/按钮醒 fade 回显）：
+    //   机制等价 MC 1.0 睡觉过渡，但**非瞬黑瞬醒**——三阶段平滑动画（Lying 渐黑 + Settled 全黑 + Waking 渐显）。
+    //   状态驱动 = player.sleeping（序列进行中）+ player.sleepFade（0..1 全屏黑透明度，阶段派生）。
+    //   Lying：sleepFade 0→1（~1s 渐黑，相机同步 sleepLie 降低 + 上仰转躺）；Settled：恒 1（全黑 + 起床按钮）；
+    //   Waking：1→0（~0.8s 渐显清晨/当前场景，sleeping=false 时叠层隐藏，此时 fade 已 0 无跳变）。
+    //   纯 Rectangle 无 MouseArea → 不拦截鼠标（同水下蓝雾 / 闪电白闪经验）。仅 playing 态显；放 View3D 之后、
+    //   HUD/背包/暂停叠层之前（起床按钮在其上层单独声明，点得到）。
     Rectangle {
         anchors.fill: parent
         visible: window.appState === "playing" && player.sleeping
         color: "#000000"
-        opacity: Math.min(1.0, player.sleepProgress * 1.7) * 0.95
+        opacity: player.sleepFade * 0.98
+    }
+
+    // t457「起床」按钮（Settled 全黑入睡阶段显）：玩家可点（左/右键）立即平滑醒（不跳清晨，仍处夜晚），不点则自动跳清晨。
+    //   spec「中间显起床按钮→玩家不按则度过夜晚（跳到黎明）→按则立即醒」。仅 sleepSettled 阶段显（其它阶段隐）。
+    //   睡觉期间指针保持 captured（光标隐藏，屏幕渐黑不可见）→ 点击唤醒走 PlayerController eventFilter（任意左/右键
+    //   点击 → wakeUpFromBed），不依赖光标位置。本按钮纯视觉提示（居中显「起床」+「点击起床」副标），不持 MouseArea
+    //   （eventFilter 已消费 press，MouseArea 收不到）。放黑叠层之上（声明顺序在后 → Z 序在上），Settled 时黑叠层全黑
+    //   盖背景、按钮清晰可见。
+    Rectangle {
+        visible: window.appState === "playing" && player.sleepSettled
+        anchors.centerIn: parent
+        width: 220
+        height: 96
+        radius: 10
+        color: "#222230"
+        border.color: "#9aa0b0"
+        border.width: 2
+        Column {
+            anchors.centerIn: parent
+            spacing: 6
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: qsTr("起床")
+                color: "#f0f0f0"
+                font.pixelSize: 26
+                font.bold: true
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: qsTr("（点击任意处起床，否则将度过夜晚）")
+                color: "#c0c0cc"
+                font.pixelSize: 13
+            }
+        }
     }
 
     // t88 火把位置列表（火把伪光源 Repeater 的 model；blockPlaced/blockBroken/worldChanged 维护）。
