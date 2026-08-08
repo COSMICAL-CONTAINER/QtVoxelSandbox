@@ -356,7 +356,10 @@ public:
     // 世界 / 无 hotbar → 不动作。t288：pick-block 仅 Creative（创造式复制方块能力；生存无之 →
     // 不动作），Spectator 亦禁（与 canBreak/canPlace 同「观察者不交互」语义，不改栅格但属选择作弊）。
     // t291：优先「切槽」——hotbar 9 槽已有同 id 方块时切到该槽（setSelectedSlot，不动栈 / 数量）；
-    // 仅 hotbar 全无该方块时才覆盖当前选中槽（setStack 满栈）。机制等价 MC 1.0 pick-block。
+    //   仅 hotbar 全无该方块时才「复制入背包」（setStack 满栈，创造源无限）。机制等价 MC 1.0 pick-block。
+    // t453：复制 → 空槽优先（修「手持有方块中键另一块丢失原手持」）——hotbar 全无该方块时复制入**空槽** +
+    //   切到该槽（手持 = 新方块，原选中槽内容保留）；当前选中槽本就空 → 直接写入它；仅满背包（无空槽）才
+    //   回退替换当前选中槽。取代旧「恒覆盖选中槽」（防丢失原手持）。
     Q_INVOKABLE void pickBlock();
     // t296 玩家受击击退（机制等价 MC 1.0 玩家被僵尸 / 箭 / 苦力怕爆炸击退 —— 命中后向被攻击方向小弹 + 水平推）。
     //   EntityManager.mobAttackedPlayer(amount, mobType, kbX, kbZ) 携「欲推开玩家的水平单位方向」，Main.qml

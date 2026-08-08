@@ -2328,7 +2328,7 @@ void PlayerController::pickBlock()
     if (id == BlockRegistry::Air) return; // 命中空气 → 无可拾取
     // t291：创造中键切槽 —— 机制等价 MC 1.0 pick-block：先扫 hotbar 9 槽是否已有同 id 方块，有则切到该槽
     // （setSelectedSlot，不动栈内容 / 数量 → 不重复占槽、不覆盖既有数量，选中槽即该槽时等值早退 no-op）；
-    // 仅当 hotbar 全无该方块时才落到「复制入当前选中槽」（setStack 写满栈，创造源无限）。区别于 t37/t288
+    // 仅当 hotbar 全无该方块时才落到「复制入背包」（setStack 写满栈，创造源无限）。区别于 t37/t288
     // 「恒覆盖选中槽」：避免把「已在别槽的方块」又塞一份进选中槽挤掉原内容。
     const int n = m_hotbar->slotCount();
     for (int s = 0; s < n; ++s) {
@@ -2337,7 +2337,22 @@ void PlayerController::pickBlock()
             return;
         }
     }
-    m_hotbar->setStack(m_hotbar->selectedSlot(), int(id), m_hotbar->maxStackSize(int(id)));
+    // t453 复制 → 空槽优先（修「手持有方块中键另一块丢失原手持」）：hotbar 全无该方块时，复制入**空槽**
+    //   而非替换当前选中槽。当前选中槽为空 → 直接写入它（无内容损失、无需切槽）；当前选中槽非空（手持有
+    //   方块）→ 另找空槽复制 + 切到该槽（手持 = 新方块，原选中槽内容保留，机制等价 MC 1.0 pick-block
+    //   「取目标方块到手」不破坏既有栈）；仅满背包（无空槽）才回退替换当前选中槽（不可避免）。创造源无限
+    //   故写满栈（maxStackSize），与旧「覆盖选中槽」的 setStack 数量语义一致。
+    int target = m_hotbar->selectedSlot();
+    if (m_hotbar->blockIdAt(target) != int(BlockRegistry::Air)) {
+        // 当前选中槽非空 → 找空槽保护原手持内容
+        target = -1;
+        for (int s = 0; s < n; ++s) {
+            if (m_hotbar->blockIdAt(s) == int(BlockRegistry::Air)) { target = s; break; }
+        }
+        if (target < 0) target = m_hotbar->selectedSlot(); // 满背包 → 回退替换当前
+    }
+    m_hotbar->setStack(target, int(id), m_hotbar->maxStackSize(int(id)));
+    m_hotbar->setSelectedSlot(target); // 切到复制入的槽（手持 = 新方块；同值时 setSelectedSlot 内部早退）
 }
 
 // 拾取扫描（t36 / t64 / t97）：每帧扫附近掉落实体 → Hotbar::addToAny（跨 main + hotbar 智能堆叠，
