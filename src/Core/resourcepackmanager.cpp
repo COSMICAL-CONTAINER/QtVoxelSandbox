@@ -31,6 +31,7 @@ struct BuiltState {
     bool configLoaded = false;    // t415 config 是否已从 settings.json 加载（之后只信内存 + setter 持久化）
     int revision = 0;             // t415 apply() 重建计数（保留；file:// 不挂查询串，仅作历史/调试用）
     QString itemDir;              // t420 包内物品图标目录（assets/minecraft/textures/item）绝对路径；空 = 无 item 覆盖
+    QString entityDir;            // t421 包内生物贴图目录（assets/minecraft/textures/entity）绝对路径；空 = 无 entity 覆盖
 };
 BuiltState &state()
 {
@@ -107,6 +108,12 @@ QString resolveBlockDir(const QString &absPath)
 QString resolveItemDir(const QString &absPath)
 {
     return resolveTexturesSubDir(absPath, QStringLiteral("item"));
+}
+
+// t421 生物贴图目录（leaf="entity"；同 packPath 解析，与 block/item 并列）。
+QString resolveEntityDir(const QString &absPath)
+{
+    return resolveTexturesSubDir(absPath, QStringLiteral("entity"));
 }
 
 // 合法包判定：能在 packPath（任意层级）上定位到 block 贴图目录（spec t419）。
@@ -426,6 +433,28 @@ const QList<QPair<int, QString>> &itemFilenameMap()
     return kMap;
 }
 
+// t421「引擎 mob id（EntityManager::MobType）→ pack entity 子目录 + 标准贴图文件名」映射（功能性元数据，
+//   红线 §9 可随代码提交；贴图文件本身不进仓库）。mob id 取 EntityManager::MobType（pig=1/cow=2/sheep=3/
+//   shambler=4/bones=5/stalker=6/spider=7/chicken=8）。文件名用 MC 1.0 entity 子目录命名（entity/<mob>/<mob>.png，
+//   现网大多数包此布局；mobTextureSource 在子目录缺时自动回退扁平 entity/<mob>.png 兼容旧 / HD 包）。机制等价
+//   MC 1.0 mob 外观，标识符 / 名称全原创（§9 区隔：Shambler↔zombie / Bones↔skeleton / Stalker↔creeper）。
+//   包内缺该 PNG 时 mobTextureSource 安全跳过（回退程序生成 / 纯色），故映射可慷慨：唯一要保证的是 id↔目录配对正确。
+//   Squid(9) 不映射（spec t421 未列；保留程序生成 mob_squid 贴图，pack 启用也不变）。
+const QList<QPair<int, QString>> &mobEntityMap()
+{
+    static const QList<QPair<int, QString>> kMap = {
+        {1, QStringLiteral("pig/pig.png")},         // MobPig → entity/pig/pig.png
+        {2, QStringLiteral("cow/cow.png")},         // MobCow → entity/cow/cow.png
+        {3, QStringLiteral("sheep/sheep.png")},     // MobSheep → entity/sheep/sheep.png（羊毛态；剪羊毛态走程序生成）
+        {4, QStringLiteral("zombie/zombie.png")},   // MobShambler → entity/zombie/zombie.png（机制等价 zombie，§9 改名）
+        {5, QStringLiteral("skeleton/skeleton.png")},// MobBones → entity/skeleton/skeleton.png（机制等价 skeleton，§9 改名）
+        {6, QStringLiteral("creeper/creeper.png")}, // MobStalker → entity/creeper/creeper.png（机制等价 creeper，§9 改名）
+        {7, QStringLiteral("spider/spider.png")},   // MobSpider → entity/spider/spider.png
+        {8, QStringLiteral("chicken/chicken.png")}, // MobChicken → entity/chicken/chicken.png
+    };
+    return kMap;
+}
+
 // t416 MC「灰度可着色」瓦片集合（grass_top / grass_side / leaves / tall_grass）：本体是灰度贴图，由
 //   生物群系着色覆绿（机制等价 MC foliageColor/grassColor）。loader 直接用包内灰度原色会渲染成苔石色，
 //   故合成时把这些 tile 的包内贴图乘上叶绿素色调。非着色瓦片（stone/dirt/...）原样，不受影响。
@@ -469,6 +498,7 @@ void ensureBuiltLocked()
     s.built = true;
     s.active = false; // reset；仅当包合法 + 覆盖成功才置 true
     s.itemDir.clear(); // t420 reset 物品图标目录（仅当包合法时重填）
+    s.entityDir.clear(); // t421 reset 生物贴图目录（仅当包合法时重填）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -537,6 +567,9 @@ void ensureBuiltLocked()
     // t420 物品图标目录（assets/minecraft/textures/item；与 block 同 packPath 并列解析）。包内无 item 目录
     //   时为空 → itemIconSource 恒返空串 → ToolIcon/MaterialIcon 回退自绘（不阻塞 block 图集合成）。
     s.itemDir = resolveItemDir(packPath);
+    // t421 生物贴图目录（assets/minecraft/textures/entity；同 packPath 并列解析）。包内无 entity 目录时为空
+    //   → mobTextureSource 恒返空串 → Main.qml 各 mob delegate 回退程序生成贴图 / 纯色（不阻塞 block 图集合成）。
+    s.entityDir = resolveEntityDir(packPath);
     QPainter p(&s.atlas);
     int overridden = 0;
     for (const auto &m : tileFilenameMap()) {
@@ -702,4 +735,34 @@ QString ResourcePackManager::itemIconSource(int itemId) const
     if (!QFile::exists(path))
         return {}; // 包内无该 item 贴图 → 不覆盖（保留自绘 Canvas）；红线 §9：仅运行期读本地 pack PNG。
     return QStringLiteral("file:///") + path;
+}
+
+QString ResourcePackManager::mobTextureSource(int mobType) const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active || s.entityDir.isEmpty())
+        return {};
+    // 引擎 mob id → pack entity 子目录/文件名（mobEntityMap 单一权威）。无映射 → 空串（回退程序生成 / 纯色）。
+    QString relPath;
+    for (const auto &m : mobEntityMap()) {
+        if (m.first == mobType) {
+            relPath = m.second;
+            break;
+        }
+    }
+    if (relPath.isEmpty())
+        return {};
+    const QDir entityDir(s.entityDir);
+    // 1) 子目录布局（entity/<mob>/<mob>.png，现网大多数包）：MC 1.0 标准。
+    const QString sub = entityDir.absoluteFilePath(relPath);
+    if (QFile::exists(sub))
+        return QStringLiteral("file:///") + sub;
+    // 2) 扁平回退（entity/<mob>.png，旧 / HD 包常省略子目录）：取文件名（去子目录）。
+    const QFileInfo fi(relPath);
+    const QString flat = entityDir.absoluteFilePath(fi.fileName());
+    if (QFile::exists(flat))
+        return QStringLiteral("file:///") + flat;
+    return {}; // 包内无该 entity 贴图 → 不覆盖（保留程序生成 / 纯色）；红线 §9：仅运行期读本地 pack PNG。
 }

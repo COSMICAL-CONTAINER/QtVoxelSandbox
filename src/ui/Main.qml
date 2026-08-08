@@ -2306,6 +2306,21 @@ Window {
         // t399 鱿鱼（Squid；机制等价 MC 1.0 squid，§9 原创）：深褐橘斑软体底 + 浅腹纹 + 暗点（build_mob.py
         //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 水生软体几何（躯干 + 顶端尖 + 8 触腕）每面铺整张贴图。
         Texture { id: mobSquidTex; source: "qrc:/textures/mob_squid.png"; generateMipmaps: false }
+        // t421 资源包生物贴图（pack entity texture）：pack 启用且 resourcePack.mobTextureSource(mobType) 命中包内
+        //   entity PNG 时，source 为 file:///<entityDir>/<mob>/<mob>.png → 各 mob delegate 把 baseColorMap 切到本
+        //   Texture + MobModel.packTextured=true（几何按 T 字 UV 展开进贴图）。pack 关 / 包内无该贴图 → source 空 →
+        //   delegate 回退程序生成 mob_*.png（pig/cow/sheep/shambler/chicken）或纯色 baseColor（stalker/bones/spider）。
+        //   source 绑定触碰 resourcePack.active → pack 切换即时刷新。运行期读本地 gitignored pack PNG，不 bake 进
+        //   qrc/VCS（红线 §9）。mobType: pig=1/cow=2/sheep=3/shambler=4(zombie)/bones=5(skeleton)/stalker=6(creeper)/
+        //   spider=7/chicken=8。Squid(9) 不映射（spec 未列，保留程序生成）。
+        Texture { id: mobPigPackTex;      source: resourcePack.active ? resourcePack.mobTextureSource(1) : ""; generateMipmaps: false }
+        Texture { id: mobCowPackTex;      source: resourcePack.active ? resourcePack.mobTextureSource(2) : ""; generateMipmaps: false }
+        Texture { id: mobSheepPackTex;    source: resourcePack.active ? resourcePack.mobTextureSource(3) : ""; generateMipmaps: false }
+        Texture { id: mobShamblerPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(4) : ""; generateMipmaps: false }
+        Texture { id: mobBonesPackTex;    source: resourcePack.active ? resourcePack.mobTextureSource(5) : ""; generateMipmaps: false }
+        Texture { id: mobStalkerPackTex;  source: resourcePack.active ? resourcePack.mobTextureSource(6) : ""; generateMipmaps: false }
+        Texture { id: mobSpiderPackTex;   source: resourcePack.active ? resourcePack.mobTextureSource(7) : ""; generateMipmaps: false }
+        Texture { id: mobChickenPackTex;  source: resourcePack.active ? resourcePack.mobTextureSource(8) : ""; generateMipmaps: false }
 
         // t218 火把手持/掉落贴图：火把在世界内是异形（torchHost 木柄+火焰小立方，非 1×1×1 立方体），
         //   但手持/掉落旧路径走 BlockCube（6 面立方贴图集 tile 17）→ 即便 alphaCutoff 丢弃透明底，肉眼仍是
@@ -4000,6 +4015,8 @@ Window {
                         visible: entKind === EntityManager.Mob && entMobType === 1
                         geometry: MobModel {
                             mobType: 1
+                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_pig）。
+                            packTextured: mobPigPackTex.source.length > 0
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
                         position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面（halfH 变后免悬空 / 穿地）
@@ -4008,7 +4025,8 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0 红闪语义）。
                             baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            baseColorMap: mobPigTex
+                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_pig。
+                            baseColorMap: mobPigPackTex.source.length > 0 ? mobPigPackTex : mobPigTex
                         }
                         // t251 眼睛：mob 贴图是「全脸」身体纹（铺每盒每面，无五官）→ 头部正面无眼显「怪」。补 2 白眼底
                         //   (#e8e8e8) + 2 深色瞳 (#1a1a1a) 小方块作 MobModel 子节点（同 t39 玩家眼睛模式：呈现层独立
@@ -4048,6 +4066,8 @@ Window {
                         visible: entKind === EntityManager.Mob && entMobType === 2
                         geometry: MobModel {
                             mobType: 2
+                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_cow）。
+                            packTextured: mobCowPackTex.source.length > 0
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
                         position: Qt.vector3d(0, mobModelYOff, 0) // t252 cow halfH=0.70 → offset −0.20 腿底贴地
@@ -4055,7 +4075,8 @@ Window {
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            baseColorMap: mobCowTex
+                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_cow。
+                            baseColorMap: mobCowPackTex.source.length > 0 ? mobCowPackTex : mobCowTex
                         }
                         // t251 眼睛（牛）：同猪眼模式（mob Model 子节点，纯色 NoLighting，继承 bodyYaw + visible）。
                         //   牛头心 (0,0.15,-0.60) 半 (0.20,0.22,0.20) → 前面 z=-0.80；眼上半 y≈0.22、x=±0.09。
@@ -4099,6 +4120,8 @@ Window {
                         }
                         geometry: MobModel {
                             mobType: 3
+                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_sheep）。
+                            packTextured: mobSheepPackTex.source.length > 0
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                             headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
                         }
@@ -4107,7 +4130,8 @@ Window {
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            baseColorMap: mobSheepTex
+                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
+                            baseColorMap: mobSheepPackTex.source.length > 0 ? mobSheepPackTex : mobSheepTex
                         }
                         // t251 眼睛（羊）：同猪/牛模式（mob Model 子节点纯色 NoLighting），但羊吃草时 MobModel 把头绕
                         //   颈枢俯仰（headPitch<0=低头，几何内部旋转）→ 若眼直接定位则会与俯仰的头脱离（眼悬浮原位、
@@ -4213,6 +4237,8 @@ Window {
                         visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobShambler
                         geometry: MobModel {
                             mobType: 4
+                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_shambler）。
+                            packTextured: mobShamblerPackTex.source.length > 0
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
                         position: Qt.vector3d(0, mobModelYOff, 0) // t282 halfH=0.90 → offset 0（腿底贴 collision 底面）
@@ -4221,7 +4247,8 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0/1/2/3 红闪语义）。
                             baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            baseColorMap: mobShamblerTex
+                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_shambler。
+                            baseColorMap: mobShamblerPackTex.source.length > 0 ? mobShamblerPackTex : mobShamblerTex
                         }
                         // t282 眼睛：亡灵红眼（不沿用猪牛羊的白眼底+深瞳 —— 不死亡灵的赤红发光眼更贴「僵尸」语义，
                         //   且红眼不受身体贴图调制 → 实心红 #b01818 独立 Model，原创纯色 §9a）。mob Model 子节点 →
@@ -4286,6 +4313,8 @@ Window {
                         property real inflate: { entityManager.revision; return entityManager.inflateAt(index) }
                         geometry: MobModel {
                             mobType: 6
+                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色）。
+                            packTextured: mobStalkerPackTex.source.length > 0
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
                         position: Qt.vector3d(0, mobModelYOff, 0) // t284 halfH=0.90 → offset 0（腿底贴 collision 底面）
@@ -4293,6 +4322,9 @@ Window {
                         scale: Qt.vector3d(1.0 + inflate * 0.5, 1.0 + inflate * 0.5, 1.0 + inflate * 0.5)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
+                            // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint 调制贴图：受击红 / 蓄力白）；
+                            //   否则 null（纯色，现状）。pack 关时 baseColor 即体色。
+                            baseColorMap: mobStalkerPackTex.source.length > 0 ? mobStalkerPackTex : null
                             // 受击红闪优先；否则青绿色（terrainLight 调昼夜暗），蓄力时 lerp 向白（蓄力发白）。
                             baseColor: {
                                 entityManager.revision
@@ -4332,6 +4364,8 @@ Window {
                         visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobBones
                         geometry: MobModel {
                             mobType: 5
+                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色骨白）。
+                            packTextured: mobBonesPackTex.source.length > 0
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
                         position: Qt.vector3d(0, mobModelYOff, 0)
@@ -4340,6 +4374,8 @@ Window {
                         materials: PrincipledMaterial {
                             id: boneMat
                             lighting: PrincipledMaterial.NoLighting
+                            // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜灰阶）；否则 null（纯色）。
+                            baseColorMap: mobBonesPackTex.source.length > 0 ? mobBonesPackTex : null
                             baseColor: {
                                 entityManager.revision
                                 const tl = terrainLight(worldClock.skyLight)
@@ -4435,12 +4471,16 @@ Window {
                         visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSpider
                         geometry: MobModel {
                             mobType: 7
+                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色暗黑红）。
+                            packTextured: mobSpiderPackTex.source.length > 0
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
                         position: Qt.vector3d(0, mobModelYOff, 0)
                         scale: Qt.vector3d(1.0, 1.0, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
+                            // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜暗）；否则 null（纯色）。
+                            baseColorMap: mobSpiderPackTex.source.length > 0 ? mobSpiderPackTex : null
                             baseColor: {
                                 entityManager.revision
                                 const tl = terrainLight(worldClock.skyLight)
@@ -4488,6 +4528,8 @@ Window {
                         visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobChicken
                         geometry: MobModel {
                             mobType: 8
+                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_chicken）。
+                            packTextured: mobChickenPackTex.source.length > 0
                             walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
                         }
                         position: Qt.vector3d(0, mobModelYOff, 0)
@@ -4495,7 +4537,8 @@ Window {
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            baseColorMap: mobChickenTex
+                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_chicken。
+                            baseColorMap: mobChickenPackTex.source.length > 0 ? mobChickenPackTex : mobChickenTex
                         }
                         // 喙（前伸尖嘴，橙黄；头前面 z=-0.29）。MobModel 头前面 = 头心 cz(-0.18) - hz(0.11) = -0.29。
                         Model {

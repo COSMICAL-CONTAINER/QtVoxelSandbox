@@ -38,6 +38,55 @@ const Sgn kFace[6][4] = {
 // t241 腿摆动幅度（弧度，约 29°）。机制等价 MC 四足 mob 腿摆幅（非精确数值复刻）。
 constexpr float kLegSwingAmp = 0.5f;
 
+// t421 资源包生物贴图（pack entity texture）UV 模式：rebuild 入口设一次，addBox 系列读（GUI 线程内 MobModel
+//   生命周期，无并发）。pack 关 → 全脸 [0,1]²（kFace 原 u,v）；pack 开 → 每盒 6 面按「T 字展开」映射进 entity
+//   贴图一个不重叠小格（游标逐盒前进 + 行回绕）→ 身体各部贴到贴图不同区域。
+bool g_packTextured = false;
+constexpr float kMobUVBox = 0.06f;    // 每盒归一化尺寸（T 字足印宽=2d+2w、高=2d+h；小值使多盒铺进 [0,1]² 不重叠）
+constexpr float kMobUVMargin = 0.02f; // 格间 / 行间留白
+float g_mobCurU = kMobUVMargin, g_mobCurV = kMobUVMargin, g_mobRowH = 0.0f; // 纹理游标（归一化 [0,1] 坐标）
+
+// 计算某面 T 字展开子区（归一化 [0,1] 纹理坐标）。盒区域原点 (u0,v0)、归一化盒尺寸 (w,h,d)。
+// 面序同 kFace：0=+X 右、1=-X 左、2=+Y 顶、3=-Y 底、4=+Z 前、5=-Z 后。6 面在贴图内无重叠（立方体验证 = 经典 T 字）。
+void mobFaceRect(int face, float u0, float v0, float w, float h, float d,
+                 float &umin, float &vmin, float &umax, float &vmax)
+{
+    const float sd = v0 + d;      // 侧面行 v 起点
+    const float sh = v0 + d + h;  // 侧面行 v 终点
+    switch (face) {
+    case 0: umin = u0;            vmin = sd; umax = u0 + d;           vmax = sh;             break; // +X 右（d×h）
+    case 1: umin = u0 + d + w;    vmin = sd; umax = u0 + 2 * d + w;   vmax = sh;             break; // -X 左（d×h）
+    case 2: umin = u0 + d;        vmin = v0; umax = u0 + d + w;       vmax = v0 + d;         break; // +Y 顶（w×d）
+    case 3: umin = u0 + d;        vmin = sh; umax = u0 + d + w;       vmax = v0 + 2 * d + h; break; // -Y 底（w×d）
+    case 4: umin = u0 + d;        vmin = sd; umax = u0 + d + w;       vmax = sh;             break; // +Z 前（w×h）
+    case 5: umin = u0 + 2*d + w;  vmin = sd; umax = u0 + 2*d + 2*w;   vmax = sh;             break; // -Z 后（w×h）
+    default: umin = 0.0f; vmin = 0.0f; umax = 1.0f; vmax = 1.0f; break;
+    }
+}
+
+// 游标推进到下一格（足印宽 = 2d+2w）；行末（下一格足印超出 [0,1]）回绕到下一行（行高 = 2d+h）。
+void mobAdvanceCursor(float w, float d)
+{
+    const float fpW = 2.0f * d + 2.0f * w;
+    g_mobCurU += fpW + kMobUVMargin;
+    if (g_mobCurU + fpW > 1.0f) {
+        g_mobCurU = kMobUVMargin;
+        g_mobCurV += g_mobRowH + kMobUVMargin;
+        g_mobRowH = 0.0f;
+    }
+}
+
+// 写入一角的 UV：pack 关 → kFace 全脸 u,v；pack 开 → T 字子区（本盒原点 bu,bv）插值并 clamp 进 [0,1]。
+inline void writeMobUV(MobVtx &vt, const Sgn &s, int face, bool pack,
+                       float bu, float bv, float bw, float bh, float bd)
+{
+    if (!pack) { vt.u = s.u; vt.v = s.v; return; }
+    float ru0, rv0, ru1, rv1;
+    mobFaceRect(face, bu, bv, bw, bh, bd, ru0, rv0, ru1, rv1);
+    vt.u = std::clamp(ru0 + s.u * (ru1 - ru0), 0.0f, 1.0f);
+    vt.v = std::clamp(rv0 + s.v * (rv1 - rv0), 0.0f, 1.0f);
+}
+
 // 追加一个轴对齐盒（心 cx,cy,cz；半长 hx,hy,hz）到 verts/idx，全脸 UV。每面 4 角 + 2 三角，24 顶点 / 36 索引。
 // base = 当前进度顶点数；索引以 base 为偏移写入。（与 hoe.cpp / pickaxe.cpp addBox 同实现思路，仅多 uv 通道。）
 // 同时累计 bMin/bMax（局部 AABB，供 setBounds 给视锥剔除盒）。
@@ -46,6 +95,11 @@ void addBox(float cx, float cy, float cz, float hx, float hy, float hz,
             QVector3D &bMin, QVector3D &bMax)
 {
     const quint32 base = quint32(verts.size());
+    // t421 本盒纹理区域原点（pack 关时 writeMobUV 不使用）；归一化盒尺寸统一小格（多盒可铺进 [0,1]²）。
+    const float bu = g_mobCurU, bv = g_mobCurV;
+    constexpr float bw = kMobUVBox, bh = kMobUVBox, bd = kMobUVBox;
+    if (g_packTextured)
+        g_mobRowH = std::max(g_mobRowH, 2.0f * bd + bh);
     for (int f = 0; f < 6; ++f) {
         for (int c = 0; c < 4; ++c) {
             const Sgn &s = kFace[f][c];
@@ -53,8 +107,7 @@ void addBox(float cx, float cy, float cz, float hx, float hy, float hz,
             vt.x = cx + float(s.sx) * hx;
             vt.y = cy + float(s.sy) * hy;
             vt.z = cz + float(s.sz) * hz;
-            vt.u = s.u;
-            vt.v = s.v;
+            writeMobUV(vt, s, f, g_packTextured, bu, bv, bw, bh, bd);
             verts.push_back(vt);
         }
         const quint32 b = base + quint32(f * 4);
@@ -68,6 +121,8 @@ void addBox(float cx, float cy, float cz, float hx, float hy, float hz,
     bMax.setX(std::max(bMax.x(), cx + hx));
     bMax.setY(std::max(bMax.y(), cy + hy));
     bMax.setZ(std::max(bMax.z(), cz + hz));
+    if (g_packTextured)
+        mobAdvanceCursor(bw, bd);
 }
 
 // t241 追加一个**绕过 (pivY, pivZ) 的 X 轴旋转**的盒（腿摆动 / 头部俯仰用）。X 轴旋转 → x 分量不变
@@ -81,6 +136,11 @@ void addBoxRot(float cx, float cy, float cz, float hx, float hy, float hz,
 {
     const float ca = std::cos(angle), sa = std::sin(angle);
     const quint32 base = quint32(verts.size());
+    // t421 本盒纹理区域原点（同 addBox；pack 关不使用）。
+    const float bu = g_mobCurU, bv = g_mobCurV;
+    constexpr float bw = kMobUVBox, bh = kMobUVBox, bd = kMobUVBox;
+    if (g_packTextured)
+        g_mobRowH = std::max(g_mobRowH, 2.0f * bd + bh);
     for (int f = 0; f < 6; ++f) {
         for (int c = 0; c < 4; ++c) {
             const Sgn &s = kFace[f][c];
@@ -92,8 +152,7 @@ void addBoxRot(float cx, float cy, float cz, float hx, float hy, float hz,
             const float dz = lz - pivZ;
             vt.y = pivY + dy * ca - dz * sa;                     // X 轴旋转（右手）：y' = y·cos − z·sin
             vt.z = pivZ + dy * sa + dz * ca;                     //             z' = y·sin + z·cos
-            vt.u = s.u;
-            vt.v = s.v;
+            writeMobUV(vt, s, f, g_packTextured, bu, bv, bw, bh, bd);
             verts.push_back(vt);
             // 旋转后实际范围（逐顶点；解析 AABB 对旋转盒不再适用）。
             bMin.setX(std::min(bMin.x(), vt.x)); bMax.setX(std::max(bMax.x(), vt.x));
@@ -104,6 +163,8 @@ void addBoxRot(float cx, float cy, float cz, float hx, float hy, float hz,
         idx.push_back(b + 0); idx.push_back(b + 1); idx.push_back(b + 2);
         idx.push_back(b + 0); idx.push_back(b + 2); idx.push_back(b + 3);
     }
+    if (g_packTextured)
+        mobAdvanceCursor(bw, bd);
 }
 
 // t302 Z 轴旋转盒（蜘蛛腿步态用；镜像 addBoxRot 的 X 轴旋转，但绕 Z 轴 → z 分量不变，x/y 在 X-Y 平面旋转）。
@@ -118,6 +179,11 @@ void addBoxRotZ(float cx, float cy, float cz, float hx, float hy, float hz,
 {
     const float ca = std::cos(angle), sa = std::sin(angle);
     const quint32 base = quint32(verts.size());
+    // t421 本盒纹理区域原点（同 addBox；pack 关不使用）。
+    const float bu = g_mobCurU, bv = g_mobCurV;
+    constexpr float bw = kMobUVBox, bh = kMobUVBox, bd = kMobUVBox;
+    if (g_packTextured)
+        g_mobRowH = std::max(g_mobRowH, 2.0f * bd + bh);
     for (int f = 0; f < 6; ++f) {
         for (int c = 0; c < 4; ++c) {
             const Sgn &s = kFace[f][c];
@@ -129,8 +195,7 @@ void addBoxRotZ(float cx, float cy, float cz, float hx, float hy, float hz,
             const float dy = ly - pivY;
             vt.x = pivX + dx * ca - dy * sa;                     // Z 轴旋转（右手）：x' = x·cos − y·sin
             vt.y = pivY + dx * sa + dy * ca;                     //             y' = x·sin + y·cos
-            vt.u = s.u;
-            vt.v = s.v;
+            writeMobUV(vt, s, f, g_packTextured, bu, bv, bw, bh, bd);
             verts.push_back(vt);
             // 旋转后实际范围（逐顶点；解析 AABB 对旋转盒不再适用）。
             bMin.setX(std::min(bMin.x(), vt.x)); bMax.setX(std::max(bMax.x(), vt.x));
@@ -141,6 +206,8 @@ void addBoxRotZ(float cx, float cy, float cz, float hx, float hy, float hz,
         idx.push_back(b + 0); idx.push_back(b + 1); idx.push_back(b + 2);
         idx.push_back(b + 0); idx.push_back(b + 2); idx.push_back(b + 3);
     }
+    if (g_packTextured)
+        mobAdvanceCursor(bw, bd);
 }
 
 // t241 头部盒（+ 牛角等头附肢）：pitch==0 走 addBox 轴对齐快路径（猪 / 牛 / 非吃草态羊，每帧不进旋转），
@@ -250,6 +317,16 @@ void MobModel::setHeadPitch(float pitch)
     rebuild();
 }
 
+// t421 pack entity 贴图开关 setter：值变 → rebuild 把每盒 UV 从全脸切到 T 字展开（pack 开）或反之。
+//   QML 绑定 `packTextured: mobXxxPackTex.source.length > 0`（pack 切换 / 包内命中与否均刷新）。
+void MobModel::setPackTextured(bool on)
+{
+    if (on == m_packTextured) return;
+    m_packTextured = on;
+    emit packTexturedChanged();
+    rebuild();
+}
+
 // 按 m_mobType 选比例建「躯干 + 头（俯仰）+ 4 腿（摆动）（+ 牛角随头转）」多盒几何；t282 加 Shambler 人形分支。
 // 局部原点 = 躯干中心；头朝 -Z（前）。比例经手调使每种 mob 在 ~1×1×1 碰撞立方（EntityManager radius=0.5）内可辨：
 //   - 猪：紧凑低矮、短腿、大头；   - 牛：高大长身 + 头顶两小角盒；  - 羊：圆胖躯干、小头、短腿。
@@ -265,6 +342,12 @@ void MobModel::rebuild()
     verts.reserve(16 * 24); // 至多 Bones 镂空骨架 = 14 盒（脊柱+胸骨+8 肋+头+左臂+2 腿）；Spider/Squid = 10；其余 ≤8
     idx.reserve(16 * 36);
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
+
+    // t421 设置 UV 模式（pack 关=全脸 / 开=T 字展开进 entity 贴图）+ 重置纹理游标（每盒前进一格）。
+    g_packTextured = m_packTextured;
+    g_mobCurU = kMobUVMargin;
+    g_mobCurV = kMobUVMargin;
+    g_mobRowH = 0.0f;
 
     if (m_mobType == 4) {
         // t282 Shambler（蹒跚者；机制等价 MC 1.0 僵尸，§9 区隔改名 + 原创模型/贴图）：

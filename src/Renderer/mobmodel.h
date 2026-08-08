@@ -31,9 +31,14 @@
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
 //
 // 顶点格式：pos(3) + uv(2) = 5 float。每盒 6 面 × 4 角 = 24 顶点 / 36 索引；多盒累加。
-// UV：每面铺**整张贴图** [0,1]×[0,1]（同 CrackBox 全脸 UV，区别于 BlockCube 的图集子区）→ QML 给每类
-//   mob 一张独占贴图（mob_pig / mob_cow / mob_sheep），躯干 / 头 / 腿各盒都铺同一张贴图。简单稳健，
-//   配合各方块比例 + 配色让三种 mob 肉眼可辨（非 MC 式 UV 拆皮）。
+// UV（两态，t421）：
+//   - packTextured=false（默认 / pack 关）：每面铺**整张贴图** [0,1]×[0,1]（同 CrackBox 全脸 UV）→ QML 给每类
+//     mob 一张程序生成独占贴图（mob_pig / mob_cow / mob_sheep / mob_shambler / ...）。零回归。
+//   - packTextured=true（pack 启用且包内命中 entity PNG）：每盒 6 面按「T 字展开」映射进 pack entity 贴图的
+//     一个不重叠小格子（游标逐盒前进 + 行回绕）→ 身体各部贴到贴图不同区域，mob 看上去「贴了皮」而非每面
+//     重复同一整张图。注：本工程 mob 几何为原创方块化、与 MC 实体模型比例不同，故**非** MC 精确 UV 拆皮
+//     （无法逐部位 1:1 对齐 MC 贴图）；目标是「贴图可见且分布合理」。贴图文件由 QML 据
+//     ResourcePackManager.mobTextureSource(mobType) 切换（运行期读本地 gitignored pack PNG，红线 §9）。
 //
 // 局部坐标约定：原点 = 躯干中心；+Y 上、-Z 前（头朝 -Z，与 EntityManager yawAt 约定「模型本地 -Z 正对
 //   行走方向」一致 → delegate Node eulerRotation.y = yawAt 后头朝行走方向）。bounds 据各盒实际范围算
@@ -62,6 +67,8 @@ class MobModel : public QQuick3DGeometry
     Q_PROPERTY(float walkPhase READ walkPhase WRITE setWalkPhase NOTIFY walkPhaseChanged)
     // t241 头部俯仰（弧度，负=低头吃草）：仅羊绑非零；猪/牛恒 0 → addBox 轴对齐快路径。
     Q_PROPERTY(float headPitch READ headPitch WRITE setHeadPitch NOTIFY headPitchChanged)
+    // t421 是否用 pack entity 贴图（T 字 UV 展开）；pack 关 / 包内无贴图 → false（全脸 UV + 程序生成贴图）。
+    Q_PROPERTY(bool packTextured READ packTextured WRITE setPackTextured NOTIFY packTexturedChanged)
 
 public:
     explicit MobModel(QQuick3DObject *parent = nullptr);
@@ -75,10 +82,14 @@ public:
     float headPitch() const { return m_headPitch; }
     void setHeadPitch(float pitch);
 
+    bool packTextured() const { return m_packTextured; }
+    void setPackTextured(bool on);
+
 signals:
     void mobTypeChanged();
     void walkPhaseChanged();
     void headPitchChanged();
+    void packTexturedChanged();
 
 private:
     void rebuild(); // 按 m_mobType / m_walkPhase / m_headPhase 选比例 + 动画角度建多盒几何。
@@ -86,6 +97,7 @@ private:
     int m_mobType = 1;    // 默认猪（合法非空，防未设 mobType 时空几何）
     float m_walkPhase = 0.0f; // 行走相位（弧度）；sin 驱动腿摆
     float m_headPitch = 0.0f; // 头部俯仰（弧度，负=低头）；0 → 头走轴对齐快路径
+    bool m_packTextured = false; // t421 pack entity 贴图（T 字 UV）；false → 全脸 UV（程序生成贴图）
 };
 
 #endif // MOBMODEL_H

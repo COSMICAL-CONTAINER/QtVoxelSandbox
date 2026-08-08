@@ -74,6 +74,15 @@ public:
     //   itemDir 在 ensureBuiltLocked 与 block 目录一并解析缓存；active=false / itemDir 空 / 无映射 / 文件缺 → ""。
     Q_INVOKABLE QString itemIconSource(int itemId) const;
 
+    // t421 生物模型贴图覆盖：pack 启用且 mobType 在「引擎 mob id → pack entity 子目录/文件名」映射内、且包内
+    //   对应 PNG 存在时，返回 file:///<entityDir>/<mob>/<mob>.png 供 QtQuick3D Texture 直接加载（MobModel 据
+    //   packTextured 把几何 UV 按 T 字展开进该贴图）；否则返空串 → Main.qml 各 mob delegate 回退程序生成
+    //   mob_*.png（pig/cow/sheep/shambler/chicken）或纯色 baseColor（stalker/bones/spider）。映射取标准 MC 1.0
+    //   entity 子目录命名（pig/cow/sheep/chicken/zombie/skeleton/creeper/spider），是功能性元数据（红线 §9 可随
+    //   代码提交）；贴图文件本身仅运行期读本地 gitignored pack，不 bake 进 qrc/VCS。active=false / 无 entity 目录 /
+    //   无映射 / 文件缺 → ""。子目录缺时自动回退扁平 entity/<mob>.png（兼容旧 / HD 包布局）。
+    Q_INVOKABLE QString mobTextureSource(int mobType) const;
+
     // 引擎图集瓦片尺寸（tools/build_atlas.py TILE=16 + chunkgeometry UV 的 N*16 同源；公开供 image provider 复用）。
     static constexpr int kTile = 16;
 
