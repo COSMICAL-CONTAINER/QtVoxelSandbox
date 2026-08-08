@@ -2967,14 +2967,14 @@ void World::placeLavaLakes()
 //   fillWater 之前（房间独立于海平面；fillWater 仅填地表低洼 → 地下房间不被灌水）。
 void World::placeDungeons()
 {
-    constexpr int kDungeonGrid     = 18;     // 候选网格间距（比岩浆湖 16 略稀 → 地牢更稀有）
-    constexpr unsigned kDungeonPct = 35u;    // 候选命中概率（spec「一定密度」；35% → 每网格平均 ~0.35 个地牢）
+    constexpr int kDungeonGrid     = 24;     // 候选网格间距（t426：18→24，比岩浆湖 16 明显更稀 → 地牢更稀有）
+    constexpr unsigned kDungeonPct = 10u;    // 候选命中概率（t426：35%→10%，spec「稀有但房间级」；10% → 每网格平均 ~0.10 个地牢）
     constexpr int kBedrockTop      = 4;      // 不动基岩（同 carveCaves / placeBedrock）
     constexpr int kSurfaceFloor    = 6;      // 与地表保留的最小距离（地牢上方至少 6 格石顶 → 不破地表、封闭黑暗）
     constexpr int kDungeonMaxY     = 36;     // 地牢最高 y（spec「地下」；避开近地表 / 仅地下深处）
-    constexpr int kRoomW           = 5;      // 房间内部宽度（X 方向格子数）
-    constexpr int kRoomH           = 4;      // 房间内部高度（Y 方向格子数；机制等价 MC 1.0 地牢 4 高）
-    constexpr int kRoomD           = 5;      // 房间内部深度（Z 方向格子数）
+    constexpr int kRoomW           = 7;      // 房间内部宽度（t426：5→7，房间级而非「几格」；X 方向格子数）
+    constexpr int kRoomH           = 4;      // 房间内部高度（Y 方向格子数；3-4 高范围，取 4 ≈ MC 1.0 地牢高度）
+    constexpr int kRoomD           = 7;      // 房间内部深度（t426：5→7；Z 方向格子数）
     // 房间边界（墙在 [-1, kRoomW] / [-1, kRoomD] 外圈）→ 留 (kRoomW+2) 格 X/Z 边界防越界。
     constexpr int kMargin          = (kRoomW > kRoomD ? kRoomW : kRoomD) + 1;
 
