@@ -1133,3 +1133,30 @@ t18                        （背包，依赖 hotbar）
 - **联动**：t403 XP 条 接 t402 经验球；t407 胡萝卜/马铃薯 接 t406 耕地；t408 耕地矮 接 t406；玻璃(t405)透光需调研渲染。
 - **资产**：沙子/胡萝卜/马铃薯/玻璃 贴图程序生成或 CC0，禁 MC；僵尸=Shambler。
 - **建议执行序**：t401 → A → B → C → D → E。
+
+---
+
+# R18n 规划（材质包系统 — 方块部分）
+
+> 来源：用户（2026-08-08）提供 MC 资源包（Default HD 128x，放 docs/，**gitignored 本地**），要做材质包加载器，先适配方块。
+> ⚠️ **法律红线（强制，子 agent 提示词须重申）**：仅做**加载器功能**；MC 贴图**绝不进 git/qrc/构建产物**（pack 留本地 docs/ 或 resourcepacks/，gitignored）；引擎默认仍**程序生成贴图**；pack 为**可选本地覆盖**（运行期从磁盘读）；仅个人使用，**不得随游戏分发 MC 资产**。
+
+## 优先级总览
+| 级 | 任务 | 主题 |
+|---|---|---|
+| **核心** | t414 | 材质包加载器核心（方块）：config + 扫包 + 瓦片→MC映射 + 运行时覆写 atlas |
+| **完善** | t415 | 映射表全 + 设置开关 UI |
+
+## 任务
+
+| 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
+|---|---|---|---|---|
+| t414 | ⏳ | **材质包加载器核心（方块）**：新 `ResourcePackManager`——config 读 pack 路径（settings.json `resourcePack` 字段，默认查 `resourcepacks/active/` 或环境变量）；扫 `assets/minecraft/textures/block/*.png`；用「atlas 瓦片→MC 文件名」映射表（源自 build_atlas.py TILES 注释：tile0 grass_top→grass_block_top.png, tile2 dirt→dirt.png, tile3 stone→stone.png, tile5 cobble→cobblestone.png …）把 pack 贴图**缩到 TILE=16** 覆写默认 atlas 对应瓦片；**运行时**合成覆写后的 atlas 并上传为纹理（默认仍 qrc 程序 atlas，仅 pack 启用时本地加载覆盖）。**验收**：启用 pack 后地形方块贴图变 MC 风（grass/dirt/stone/sand/cobble/log/planks/leaves 等）。 | — | 新 ResourcePackManager.{h,cpp} + 找 atlas 纹理上传点（chunkgeometry/Renderer/Main.qml 材质）+ .gitignore 加 `resourcepacks/` |
+| t415 | ⏳ | **映射表完善 + 设置开关**：补全所有有 MC 对应的 atlas 瓦片映射（grass_top/side、dirt、stone、sand、cobble、log_top/side、planks、leaves、ores 煤/铁/铜/金/钻石、wool、glass、bed_*、sandstone_*、cobblestone-变体、lava、water、farmland、chest_*、crafting_table_*、furnace_* 等）→ MC 文件名；设置 UI 加「启用材质包」开关 + pack 路径输入。**验收**：多数方块正确切换 + UI 可开关 pack。 | t414 | ResourcePackManager 映射表 + 设置 UI（Main.qml）+ settings 持久化 |
+
+## 执行备注
+- **法律**：子 agent 提示词须重申「MC 贴图禁入 git/qrc；loader 仅从本地 gitignored 路径读；commit 时绝不 add 贴图文件」。
+- **先方块**（用户要求）；物品/实体贴图留后续轮。
+- **HD 暂缓**：phase 1 pack 缩到 TILE=16（简单可用）；HD（TILE=128 + 程序贴图重生成高清版）留后续。
+- 映射源自 `tools/build_atlas.py` 的 TILES 注释（每瓦片语义→MC 文件名）。pack 路径默认指向用户提供的 `docs/Default HD 128x Demo 1.8.2.2/`（dev 验证用；该目录已 gitignored）。
+- **建议执行序**：t414 → t415。
