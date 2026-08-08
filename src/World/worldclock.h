@@ -71,6 +71,12 @@ class WorldClock : public QObject
     //   NOTIFY=moonPhaseChanged（仅跨天时发，非每 tick → QML 不无谓刷贴图）。呈现层据本值选
     //   moon_<phase>.png（Main.qml 月 Model）。Game 层时间源派生（只读消费，PLAN §2 分层）。
     Q_PROPERTY(int moonPhase READ moonPhase NOTIFY moonPhaseChanged)
+    // t464 游戏时间天数（PLAN §2-F F3 调试叠层「游戏时间：时间 + day count」）：m_elapsedMs 累计流逝
+    //   的完整「天周期」数（dayCount = floor(elapsed/period)；同 moonPhase 的基准，但 moonPhase 只 % 8
+    //   会把第 N 天压回 0..7 → F3 想看「已过第几天」必须暴露**完整** dayCount）。NOTIFY=dayChanged
+    //   （跨天时发，独立于 moonPhaseChanged —— moonPhase 8 天才变，F3 day count 每 1 天一刷需独立信号）。
+    //   单调递增（时间单向，PLAN §2-H），供 F3 叠层 + 调试展示。Game 层时间源派生（只读）。
+    Q_PROPERTY(qint64 dayCount READ dayCount NOTIFY dayChanged)
 
 public:
     explicit WorldClock(QObject *parent = nullptr);
@@ -87,6 +93,9 @@ public:
     float sunAzimuth() const { return m_sunAzimDeg; }
     // t389 月相（0..7；纯函数 dayCount%8，跨天时 onTick 更新 + emit moonPhaseChanged）。
     int moonPhase() const { return m_moonPhase; }
+    // t464 完整天数（floor(elapsed/period)；跨天时更新 + emit dayChanged）。F3 叠层「day count」读它。
+    //   m_dayCount 初值 -1（哨兵，保首 tick 必 emit）；clamp 到 ≥0 暴露给 QML（首 tick 前的极短窗口不显 -1）。
+    qint64 dayCount() const { return m_dayCount < 0 ? 0 : m_dayCount; }
 
     // 调试加速键（呈现层按键调）：切 ~30s 周期，便于肉眼快速看一圈昼夜。仅调试便利、
     // 不影响生产节律常量（kDaySecs 不变；切换的是运行期所用周期）。
@@ -110,6 +119,9 @@ signals:
     // t123：太阳量化步进跨步时发（驱动 mesher 重建顶点光）。skyLight 不绑此信号（仍随
     //   dayPhaseChanged 平滑刷）。
     void sunChanged();
+    // t464 跨天时发（驱动 F3 day count 刷新）；与 moonPhaseChanged 同 onTick 跨天分支，但独立信号
+    //   —— moonPhase 8 天才变，day count 每 1 天一刷需独立 NOTIFY，否则 F3 day count 7 天不刷新。
+    void dayChanged();
     // t389：跨天时发（驱动月 Model 切 moon_<phase>.png 贴图）；非每 tick → 仅 8 次周期切换刷新。
     void moonPhaseChanged();
     // t87 游戏时间 tick：每 kTickMs（100ms）发一次，携带本 tick 推进的秒数（恒 kTickMs/1000=0.1）。

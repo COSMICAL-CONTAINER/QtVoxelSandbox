@@ -126,6 +126,7 @@ void WorldClock::onTick()
         const qint64 day = m_elapsedMs / qint64(periodMs);
         if (day != m_dayCount) {
             m_dayCount = day;
+            emit dayChanged();   // t464：day count 每跨 1 天刷新（F3 叠层读；独立于 moonPhase 的 8 天周期）
             const int phase = int(((day % 8) + 8) % 8);   // %8 轮回；+8 防 day 为负（哨兵初值 -1 → 0）
             if (phase != m_moonPhase) {
                 m_moonPhase = phase;

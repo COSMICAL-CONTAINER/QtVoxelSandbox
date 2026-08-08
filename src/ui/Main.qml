@@ -5527,7 +5527,7 @@ Window {
                 Text { text: "[F6] toggle fast day/night (" + (worldClock.debugFast ? "ON · ~30s" : "OFF · ~20min") + ")"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[F3] toggle debug overlay (fps / frame / cpu ms / draw-calls / mesh)   [F3+B] toggle hitboxes   [F3+G] toggle chunk bounds"
+                Text { text: "[F3] toggle debug overlay (fps / pos / entities / biome / mesh / time)   [F3+B] toggle hitboxes   [F3+G] toggle chunk bounds"
                        color: "#999999"; font.pixelSize: 12
                        anchors.horizontalCenter: parent.horizontalCenter }
                 // 按钮行：t139 设置 + 返回主菜单。Row 居中，两按钮间距 10。
@@ -6091,6 +6091,17 @@ Window {
     //   1s 平均）；draw-call 改为**估算值**（≈，非伪造：chunks 地形+水两段 + 掉落物 + mob + 火把 + ~6 固定
     //   场景 Model）—— QtQuick3D 路径仍不暴露逐帧真值，真计时 / 真 draw-call 待自研 RHI 迁移（QRhiGpuTimer）。
     //   mesh 行加模式（greedy/culled）—— greedy 顶点/三角大幅降，可观测 PLAN §4 性能打磨成效。
+    //
+    // t464 诊断级增强（PLAN §2-F F3 + 帮验证 t437 性能修复）：
+    //   - **entities 行（liveCount 三类）**：mobs/items/orbs 各自的**活体**计数（liveCount()，非 Repeater count）。
+    //     用于验证 t437 orphan 修复——退存档→再进世界时，若这三类 liveCount 跨世界单调累积（每进出一次变高）=
+    //     orphan delegate 泄漏复现（C++ 侧 clearAll 已修，但若 QML 场景图侧仍有孤儿累积，liveCount 仍会涨）。
+    //     liveCount 是 C++ 数据侧真值（slot-reuse 后已释放槽不计入），不掺 Repeater 高水位。
+    //   - **game time（time HH:MM · day N · moon M）**：worldClock.dayPhase 派生 24h 制 HH:MM（phase 0=noon=12:00、
+    //     0.25=dusk=18:00、0.5=midnight=00:00、0.75=dawn=06:00）+ worldClock.dayCount（完整天数）+ moonPhase（月相）。
+    //   - **biome 行**：玩家**脚底所在格**的群系（theWorld.biomeIdAt(floor(feetX), floor(feetZ)) → 通用名 Plains/Hills/
+    //     Desert/Forest/Snowy/Swamp）。仅消费 World 层 Q_INVOKABLE（不反向写；PLAN §2 分层：UI ← World 向下读）。
+    //   不涉及 lighting / alphaMode（PLAN §2-H / t439-t442 不变量不动）。
     Text {
         visible: window.appState === "playing" && window.f3Visible
         x: 12; y: 62
@@ -6123,9 +6134,22 @@ Window {
             const frameMs = window.fps > 0 ? (1000.0 / window.fps) : 0.0
             // t256：draw 估算用 liveCount（活体实体）非 count（含已 release 的空槽）—— 空槽 delegate
             //   visible=false 不参与绘制，count 会高估（slot-reuse 后 count=槽位数 ≠ 渲染实体数）。
-            const itemLive = itemEntities.liveCount(), mobLive = entityManager.liveCount()
+            const itemLive = itemEntities.liveCount(), mobLive = entityManager.liveCount(), orbLive = xpOrbs.liveCount()
             const drawEst = ncx * ncz * 2 + itemLive + mobLive + torchPositions.count + 6
             const meshMode = window.greedyMeshing ? "greedy" : "culled"
+            // t464 玩家脚底所在格 → 群系名（theWorld.biomeIdAt 是 Q_INVOKABLE，但本绑定已读 player.feetPosition
+            //   （NOTIFY positionChanged）→ 玩家每移动一格整 text 重算，biome 即时随脚刷新）。群系编码 0..5 见
+            //   World::Biome enum（私有，此处按 Q_INVOKABLE int 返回映射通用名；§9 区隔，零 MC 专名）。
+            const fpx = Math.floor(player.feetPosition.x), fpz = Math.floor(player.feetPosition.z)
+            const biomeNames = ["Plains", "Hills", "Desert", "Forest", "Snowy", "Swamp"]
+            const bid = theWorld.biomeIdAt(fpx, fpz)
+            const biomeName = (bid >= 0 && bid < biomeNames.length) ? biomeNames[bid] : ("?" + bid)
+            // t464 时间：worldClock.dayPhase（0=noon）派生 24h 制 HH:MM。phase 0→12:00、0.25→18:00、0.5→00:00、0.75→06:00。
+            //   hour = (12 + phase*24) mod 24；minute = frac(phase*24)*60。dayCount 跨天刷新（dayChanged）。
+            const dayPhase = worldClock.dayPhase
+            const totalMin = ((12.0 + dayPhase * 24.0) % 24.0) * 60.0
+            const hh = Math.floor(totalMin / 60.0), mm = Math.floor(totalMin % 60.0)
+            const timeStr = (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm
             return "voxelsandbox  [F3 debug]"
                  + "\nfps: " + window.fps + "  frame: " + frameMs.toFixed(1) + "ms  cpu sim: " + player.simMs.toFixed(2) + "ms"
                  + "\npos: " + player.position.x.toFixed(2) + "  " + player.position.y.toFixed(2) + "  " + player.position.z.toFixed(2)
@@ -6137,16 +6161,22 @@ Window {
                     ? "  fly: " + player.flySpeed.toFixed(1) + " b/s (x" + player.flySpeedMul.toFixed(2) + ")"
                     : "") // t159/t210：飞态额外报当前有效飞速 + 倍数（仅 spectator 滚轮可调；创造飞态恒 x1.00）
                  + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
+                 // t464 玩家脚底群系（仅消费 World Q_INVOKABLE，PLAN §2 UI ← World 向下读；§9 通用名）。
+                 + "\nbiome: " + biomeName + "  (col " + fpx + "," + fpz + ")"
                  // t276：world 行读 worldChunksPerSide（权威）+ theWorld.height（literal，非绑定，无 loop），
                  //   不读 theWorld.width/depth（绑定链 → binding loop）。t307：height 64→128。
                  + "\nworld: " + (window.worldChunksPerSide * 16) + "×" + (window.worldChunksPerSide * 16) + "×" + theWorld.height
                  + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"
                  + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr // t178：mesh 模式 + 顶点/三角（greedy 大幅降）
+                 // t464 实体行（liveCount 三类）—— 验证 t437 orphan 修复的关键诊断：退存档→再进应回落，跨世界不累积。
+                 + "\nentities: mobs " + mobLive + " / items " + itemLive + " / orbs " + orbLive
                  + "\ndraw-calls: ~" + drawEst + "  (chunks×2 " + (ncx * ncz * 2) + " + items " + itemLive
                  + " + mobs " + mobLive + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
-                 + "\nday: phase " + worldClock.dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
-                 + "  xp: " + playerState.xp + "  orbs: " + xpOrbs.liveCount()
+                 // t464 game time：HH:MM（dayPhase 派生）+ day N（dayCount）+ moon M（moonPhase）+ phase/sky（t09 调试）。
+                 + "\ntime: " + timeStr + "  day " + worldClock.dayCount + "  moon " + worldClock.moonPhase
+                 + "  phase " + dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
                  + (worldClock.debugFast ? "  (fast)" : "")
+                 + "\nxp: " + playerState.xp + (playerState.xp > 0 ? "  lvl " + playerState.level : "")
                  + "\n[B] hitboxes: " + (window.showHitboxes ? "ON" : "off")
                  + "   [G] chunk bounds: " + (window.showChunkBounds ? "ON" : "off")
         }
