@@ -91,6 +91,10 @@ Window {
     //   true → 显设置面板（手臂调试 ArmSlider 等）覆盖在暂停叠层之上；「返回」按钮置 false 回暂停菜单。
     //   回主菜单 / 点击恢复游戏时一并复位。属纯呈现态，PLAN §2 分层（UI 层）。
     property bool settingsOpen: false
+    // t458 资源查看器子态（PLAN §2 UI 层，纯呈现）：设置面板「资源查看器」按钮触发 → 显 JEI 式浏览面板
+    //   （全物品网格 + 选中物 3D 旋转 / 大图标预览）。仅在暂停 + 设置态下有意义（!captured）；Esc / 返回按钮关。
+    //   不改指针态（设置面板已 release；关闭回设置面板仍 !captured）。属纯呈现态，PLAN §2 分层（UI 层）。
+    property bool resourceBrowserOpen: false
     // t312 聊天栏子态（PLAN §2 UI 层，纯呈现）：T/Enter 开 / Esc/Enter 关。开 → release 指针（光标可见
     //   供打字 + TextField 取焦点，同背包面板模式）；关 → 恢复 grab + 焦点回键位层。开时抑制暂停叠层
     //   （二者互斥：都是 !captured 态）+ 抑制滚轮切 hotbar（防打字时误切槽）。与背包/工作台/熔炉/箱子
@@ -383,6 +387,7 @@ Window {
         chestOpen = false
         chestLidAngle = 0    // t196：复位盖子角（防 worldlist→再进世界时残留半开盖子；scene 已离场，动画不可见）
         settingsOpen = false
+        resourceBrowserOpen = false   // t458：退出世界时关资源查看器（防遗留）
         itemEntities.clearAll()
         entityManager.clearAll()
         xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
@@ -401,6 +406,7 @@ Window {
         chatOpen = false                  // t312：回菜单关聊天（防遗留；非死亡流）
         chestLidAngle = 0    // t196：复位盖子角（防回菜单 / 再进世界残留半开盖子）
         settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
+        resourceBrowserOpen = false    // t458：回菜单时关资源查看器（防遗留）
         // t312：清聊天历史（不持久化 / 不跨世界；下一局从空起）。
         chatMessages.clear()
         returnHeldToHotbar()           // t56：返回菜单前归还光标手持栈（防遗留 heldBlock）
@@ -5520,6 +5526,11 @@ Window {
             if (e.key === Qt.Key_Escape && window.inventoryOpen) {
                 window.closeInventory(); e.accepted = true; return
             }
+            // t458 资源查看器：Esc 关（回设置面板，仍 !captured）。资源查看器在暂停 + 设置态打开（!captured，
+            //   Esc 不被 C++ 事件过滤器拦截，落到 QML → 本分支处理）。
+            if (e.key === Qt.Key_Escape && window.resourceBrowserOpen) {
+                window.resourceBrowserOpen = false; e.accepted = true; return
+            }
             if (e.key === Qt.Key_Escape && window.craftingTableOpen) {
                 window.closeCraftingTable(); e.accepted = true; return
             }
@@ -5671,6 +5682,7 @@ Window {
                 anchors.fill: parent
                 onClicked: {
                     if (window.settingsOpen) return
+                    if (window.resourceBrowserOpen) return   // t458：资源查看器开时不响应背景点击
                     player.grab(); keyInput.forceActiveFocus()
                 }
             }
@@ -5763,6 +5775,27 @@ Window {
                     anchors.fill: parent; anchors.margins: 20; spacing: 10
                     Text { text: "设置"; color: "#eeeeee"; font.pixelSize: 22; font.bold: true
                            anchors.horizontalCenter: parent.horizontalCenter }
+                    // t458 资源查看器入口（醒目大按钮）：用户诉求「找不到入口浏览所有方块 / 物品样貌」→
+                    //   在设置面板顶部置高对比大按钮，点击显 ResourceBrowser（JEI 式网格 + 3D 旋转预览）。
+                    //   pack 启用时预览显实际贴图效果（atlasSource / 图标均随 pack 切换刷新）。
+                    //   消费点击，不冒泡到背景；宽按钮 + 高亮色作「醒目」处理。
+                    Rectangle {
+                        width: parent.width; height: 40; radius: 8
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        color: resViewArea.containsMouse ? "#2a4a5a" : "#1a3a4a"
+                        border.color: "#3a7a9a"; border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "🔍  资源查看器（浏览全部方块 / 物品）"
+                            color: "#7fe5e5"; font.pixelSize: 14; font.bold: true
+                        }
+                        MouseArea {
+                            id: resViewArea
+                            anchors.fill: parent; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.resourceBrowserOpen = true
+                        }
+                    }
                     // 手臂调试（从生存背包 t129 调试区迁入）：滑动写回 window 级属性 → viewModelHand
                     //   绑定读取 → 第一人称手臂 baseTilt / position 实时变。
                     Text { text: "手臂调试（实时）"
@@ -5938,6 +5971,21 @@ Window {
                 }
             }
         }
+    }
+    // t458 资源查看器面板（JEI 式方块 / 物品浏览 + 3D 旋转预览）。设置面板「资源查看器」按钮触发
+    //   （resourceBrowserOpen）。仅 playing && resourceBrowserOpen 显；覆盖在暂停 / 设置叠层之上
+    //   （z=160，高于暂停 100 / 背包 150，低于死亡 180 / 主菜单 200）。Esc / 返回按钮关 → 回设置面板。
+    //   复用 hotbar VM（creativeBlocks/Tools/Materials/Armor + iconSourceForBlock + isTool/isMaterial 路由）
+    //   与共享图集（atlasSource = resourcePack.atlasSource → pack 切换即时刷新预览）。
+    //   仅依赖 QtQuick / QtQuick3D（无特殊模块），直接实例化（同 Inventory / SurvivalInventory 模式）。
+    ResourceBrowser {
+        anchors.fill: parent
+        hotbar: hotbarVM
+        atlasSource: resourcePack.atlasSource
+        packActive: resourcePack.active
+        visible: window.appState === "playing" && window.resourceBrowserOpen
+        z: 160
+        onClosed: window.resourceBrowserOpen = false
     }
     // t78 死亡界面（仅 Survival 血量 0 触发）：半透黑遮罩 + 「你死了」+ 死因文案 + [立即重生] / [回主菜单]。
     //   触发链：PlayerState.takeDamage 扣血到 ≤0 → dead=true + emit died → 上方 Connections(onDied) 释放指针
