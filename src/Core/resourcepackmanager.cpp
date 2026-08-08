@@ -19,16 +19,17 @@ constexpr int kTile = ResourcePackManager::kTile;
 namespace {
 
 // 合成结果 + active 态 + t415 运行期可改配置的进程全局缓存（资源包配置是 process-global）。
-// 由 stateMutex() 保护：image provider（可能渲染线程）读 compositeAtlas 与 apply()（GUI 线程）重建互斥，
+// 由 stateMutex() 保护：apply()（GUI 线程）重建 / 落盘 atlasFile 与 atlasSource()（GUI 线程）读互斥，
 // 防 QImage 在被 painter 修改时被另一线程采样（PLAN §2-E：保持运行而非崩溃；线程安全属 Core 叶子职责）。
 struct BuiltState {
     bool built = false;
     bool active = false;
     QImage atlas;
-    bool enabled = true;          // t415 镜像 settings.json resourcePackEnabled（缺省 true）
+    QString atlasFile;            // t415c 落盘的合成图集绝对路径（atlasSource 返回 file:///<atlasFile>）
+    bool enabled = false;         // t415 镜像 settings.json resourcePackEnabled（缺省 false：避免无感切换）
     QString packPath;             // t415 镜像 settings.json resourcePack（空 = 走环境变量/默认探查）
     bool configLoaded = false;    // t415 config 是否已从 settings.json 加载（之后只信内存 + setter 持久化）
-    int revision = 0;             // t415 atlasSource cache-busting 计数（apply 重建即 ++，bust QML image cache）
+    int revision = 0;             // t415 apply() 重建计数（保留；file:// 不挂查询串，仅作历史/调试用）
 };
 BuiltState &state()
 {
@@ -115,9 +116,9 @@ QString discoverDefault()
     return {};
 }
 
-// 读 settings.json：resourcePackEnabled（缺省 true）+ resourcePack（可空）。
+// 读 settings.json：resourcePackEnabled（缺省 false）+ resourcePack（可空）。
 struct Settings {
-    bool enabled = true;
+    bool enabled = false;
     QString packPath;
 };
 Settings readSettings()
@@ -132,7 +133,7 @@ Settings readSettings()
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
     const QJsonObject obj = doc.object();
     if (obj.contains(QStringLiteral("resourcePackEnabled")))
-        s.enabled = obj.value(QStringLiteral("resourcePackEnabled")).toBool(true);
+        s.enabled = obj.value(QStringLiteral("resourcePackEnabled")).toBool(false);
     if (obj.contains(QStringLiteral("resourcePack")))
         s.packPath = obj.value(QStringLiteral("resourcePack")).toString();
     return s;
@@ -346,8 +347,27 @@ void ensureBuiltLocked()
     p.end();
 
     s.active = true;
-    qInfo("ResourcePack: 启用包 %s（覆盖 %d 瓦片）。",
-          qPrintable(packPath), overridden);
+
+    // 落盘合成图集到 AppLocalDataLocation（QtQuick3D Texture 不支持 image:// QQuickImageProvider →
+    //   image://rp/atlas 在 Texture 上是空贴图 = 全白方块；file:// 才会被 Texture 加载）。每次 apply()
+    //   重建都覆盖此文件。落盘失败则回退程序生成图集（active=false），宁可不变白也不渲染空贴图。
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty()) {
+        qWarning("ResourcePack: AppLocalDataLocation 为空，无法落盘图集；回退程序生成图集。");
+        s.active = false;
+        s.atlasFile.clear();
+        return;
+    }
+    QDir().mkpath(dir); // 缺目录先建（首次落盘或新装机器）
+    s.atlasFile = QDir(dir).absoluteFilePath(QStringLiteral("voxelsandbox_rp_atlas.png"));
+    if (!s.atlas.save(s.atlasFile, "PNG")) {
+        qWarning("ResourcePack: 无法写入图集文件 %s；回退程序生成图集。", qPrintable(s.atlasFile));
+        s.active = false;
+        s.atlasFile.clear();
+        return;
+    }
+    qInfo("ResourcePack: 启用包 %s（覆盖 %d 瓦片，图集 → %s）。",
+          qPrintable(packPath), overridden, qPrintable(s.atlasFile));
 }
 } // namespace
 
@@ -419,7 +439,7 @@ QString ResourcePackManager::atlasSource() const
     if (!m_active)
         return QStringLiteral("qrc:/textures/atlas.png");
     QMutexLocker lock(&stateMutex());
-    return QStringLiteral("image://rp/atlas?") + QString::number(state().revision);
+    return QStringLiteral("file:///") + state().atlasFile;
 }
 
 QImage ResourcePackManager::compositeAtlas()

@@ -1,5 +1,7 @@
 import QtQuick
 import QtQuick3D
+// t415c 资源包目录选择器（FolderDialog；原生文件夹拾取，MC 式 UX）。
+import QtQuick.Dialogs
 // t41：QML 源文件迁入 src/ui/ 子目录后，不再位于模块根 → 丢失对模块 C++ 类型
 // （World / Hotbar / PlayerController / ChunkGeometry / CrackBox …）的隐式访问。
 // 显式 import 自身模块以恢复类型解析（Qt6 子目录 QML 文件的标准做法）。行为不变。
@@ -5592,10 +5594,10 @@ Window {
                         value: window.heldBlockZ
                         onValueChanged: window.heldBlockZ = value
                     }
-                    // t415 资源包（resource pack）：启用开关 + 包路径输入 + 应用。持久化 settings.json；
-                    //   apply() 即时重建合成图集并刷新 atlasSource（bust QML image cache）→ 贴图即时切换，
-                    //   无需重启。红线（PLAN §9）：loader 仅运行期读取本地 gitignored 包 PNG，绝不 bake MC
-                    //   资产进 qrc；此处只暴露「开关 + 路径」配置，不接触任何纹理文件。
+                    // t415c 资源包（resource pack）：启用开关 + 目录选择器（FolderDialog）。持久化 settings.json；
+                    //   apply() 即时重建合成图集、覆盖落盘 + 刷新 atlasSource（file:// 与 qrc:/ 间切换 → QML
+                    //   Texture 重载）→ 贴图即时切换，无需重启。红线（PLAN §9）：loader 仅运行期读取本地
+                    //   gitignored 包 PNG，绝不 bake MC 资产进 qrc；此处只暴露「开关 + 目录选择」，不接触纹理文件。
                     Text { text: "资源包（resource pack）"
                            color: "#7fae7f"; font.pixelSize: 12 }
                     Row {
@@ -5620,43 +5622,46 @@ Window {
                     Text { text: "状态：" + (resourcePack.active ? "已加载资源包，贴图已覆盖"
                                                                 : "未加载资源包（用默认贴图）")
                            color: resourcePack.active ? "#7fe57f" : "#b08060"; font.pixelSize: 11 }
-                    Text { text: "资源包路径（含 assets/minecraft/textures/block 的目录；留空走默认探查）"
+                    Text { text: "材质包目录（需含 assets/minecraft/textures/block 子树）"
                            color: "#9aa0a6"; font.pixelSize: 11; wrapMode: Text.WordWrap; width: parent.width }
-                    // 路径输入框（Rectangle + TextInput，不依赖 QtQuick.Controls TextField；项目未链接 Controls）。
-                    Rectangle {
-                        width: parent.width; height: 30; radius: 4
-                        color: "#2a2f36"; border.color: "#3a444f"; border.width: 1
-                        TextInput {
-                            id: rpPathInput
-                            anchors.fill: parent; anchors.margins: 6
-                            verticalAlignment: TextInput.AlignVCenter
-                            color: "#eaf2ea"; font.pixelSize: 12
-                            // 初始值绑当前 packPath；用户键入即断绑定（QML TextInput 编辑行为），此后字段为权威。
-                            text: resourcePack.packPath
-                            selectByMouse: true
-                        }
-                    }
                     Row {
                         spacing: 8
-                        // 应用：把输入框路径写入 + 重建图集（即时生效）。
+                        // 选择材质包目录：打开原生 FolderDialog。accepted → 写 packPath + 启用 + 重建（即时切换）。
                         Rectangle {
-                            width: 100; height: 28; radius: 6
-                            color: rpApplyArea.containsMouse ? "#2a4a3a" : "#1a3a2a"
+                            width: 160; height: 28; radius: 6
+                            color: rpPickArea.containsMouse ? "#2a4a3a" : "#1a3a2a"
                             border.color: "#3a6a4a"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "应用"
+                            Text { anchors.centerIn: parent; text: "选择材质包目录..."
                                    color: "#7fe5a0"; font.pixelSize: 12 }
                             MouseArea {
-                                id: rpApplyArea
+                                id: rpPickArea
                                 anchors.fill: parent; hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: { resourcePack.packPath = rpPathInput.text
-                                             resourcePack.apply() }
+                                onClicked: rpFolderDialog.open()
                             }
                         }
-                        Text { text: "应用后即时生效；如贴图未变请核对路径（需含 assets/minecraft/textures/block）"
-                               color: "#8090a0"; font.pixelSize: 10
+                        // 当前已选目录（只读文本；未选时给提示）。
+                        Text { text: resourcePack.packPath.length > 0
+                                        ? resourcePack.packPath
+                                        : "（未选；点左侧按钮挑选材质包目录）"
+                               color: resourcePack.packPath.length > 0 ? "#c0d0c0" : "#8090a0"
+                               font.pixelSize: 11
                                anchors.verticalCenter: parent.verticalCenter
-                               wrapMode: Text.WordWrap; width: 270 }
+                               wrapMode: Text.WordWrap; width: 260 }
+                    }
+                    // t415c 原生文件夹拾取器：accepted 取 selectedFolder（url），剥 file:/// 前缀得本地路径
+                    //   （decodeURIComponent 处理空格 / 中文）→ packPath + enabled + apply（一步到位即时切换）。
+                    FolderDialog {
+                        id: rpFolderDialog
+                        title: "选择材质包目录（需含 assets/minecraft/textures/block）"
+                        onAccepted: {
+                            var u = selectedFolder.toString()
+                            if (u.startsWith("file:///"))
+                                u = u.slice("file:///".length)
+                            resourcePack.packPath = decodeURIComponent(u)
+                            resourcePack.enabled = true
+                            resourcePack.apply()
+                        }
                     }
                     // 返回按钮：关设置面板回暂停菜单。
                     Rectangle {

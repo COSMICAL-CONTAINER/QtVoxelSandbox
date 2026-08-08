@@ -19,32 +19,36 @@
 // 找到合法包（含 assets/minecraft/textures/block/）时：以 qrc 程序生成图集为底，对「引擎 tile
 // → 包内标准贴图文件名」映射里存在的瓦片，把包内 PNG 缩放到 TILE=16（= 引擎瓦片尺寸，与
 // tools/build_atlas.py TILE=16 / chunkgeometry N*16 UV 对齐）后覆盖该瓦片，得到一份运行期合成图集。
-// 合成图集经 QQuickImageProvider（main.cpp 注册 "rp" provider）以 image://rp/atlas 暴露给 QML；
-// active=false（无包 / 被禁用）时 atlasSource 回退 qrc:/textures/atlas.png（程序生成默认）。
+// 合成图集落盘到 AppLocalDataLocation/voxelsandbox_rp_atlas.png，atlasSource 返回 file:/// 该路径供
+// QtQuick3D Texture 直接加载（QtQuick3D 的贴图加载器不走 QtQuick QQuickImageProvider → image:// URL
+// 在 Texture 上是空贴图 = 全白方块，故必须 file://）；active=false（无包 / 被禁用）时回退
+// qrc:/textures/atlas.png（程序生成默认）。缺省 enabled=false：启动用程序生成图集，用户在设置面板
+// 显式选目录后才覆盖，避免无感知切换贴图。
 //
 // t415 运行期开关：enabled / packPath 为 QML 可写属性（持久化 settings.json）；apply() 触发重新解析 +
-// 重建合成图集并刷新 atlasSource（带 revision 查询串 bust QML image cache）→ 用户在设置面板切换 /
-// 改路径后即时生效，无需重启。合成状态由进程全局 mutex 保护（image provider 可能从渲染线程拉图，
-// apply 从 GUI 线程重建 → 互斥防 QImage 竞态）。
+// 重建合成图集、覆盖落盘 + 刷新 atlasSource（file:// URL 随 active 切换在 file:/// 与 qrc:/ 间变化 →
+// QML Texture 重载）→ 用户在设置面板切换 / 改路径后即时生效，无需重启。合成状态由进程全局 mutex
+// 保护（atlasSource 落盘路径读与 apply() 重建 / 重写互斥，防 QImage 竞态）。
 //
 // 红线（PLAN §9）：本类只读取本地 / gitignored 路径的包 PNG，绝不把任何 MC 资产 bake 进 qrc 或提交进 VCS。
 // 映射表（引擎 tile → 标准贴图文件名）是功能性元数据，可随代码提交；纹理文件本身不进仓库。引擎默认在
 // 无包时仍以程序生成图集正常工作。
 //
 // 分层（PLAN §2）：Core 叶子工具，只依赖 Qt（Core/Gui），不 include World/Renderer/Game。被 Main.qml
-// （呈现层）实例化（QML_NAMED_ELEMENT 门面），合成图集经静态方法 compositeAtlas() 被 main.cpp 注册的
-// image provider 访问（QtQuick 依赖留在 main.cpp 的 app 胶水层，Core 不沾 QtQuick）。
+// （呈现层）实例化（QML_NAMED_ELEMENT 门面）；合成图集仅落盘为 PNG 供 QtQuick3D Texture 经 file:// 直
+// 接加载（Core 不沾 QtQuick）。compositeAtlas()/packActive() 仍保留以兼容 main.cpp 注册的 image provider
+// （仅 QtQuick 路径，地形贴图不依赖该 provider）。
 class ResourcePackManager : public QObject
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(ResourcePackManager)
     // 资源包是否启用且存在（启动期解析，运行期经 apply() 重建）。active=false → QML 用 qrc 程序生成图集。
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
-    // 地形图集贴图源 URL：active → image://rp/atlas?<rev>（合成图集，rev 变即 bust QML 缓存重载）；
-    // 否则 qrc:/textures/atlas.png（程序生成默认）。
+    // 地形图集贴图源 URL：active → file:///<AppLocalData>/voxelsandbox_rp_atlas.png（落盘的合成图集；
+    //   QtQuick3D Texture 不支持 image:// QQuickImageProvider，故必须 file://）；否则 qrc:/textures/atlas.png。
     Q_PROPERTY(QString atlasSource READ atlasSource NOTIFY activeChanged)
-    // t415 资源包总开关（镜像 settings.json resourcePackEnabled，缺省 true）。setter 立即持久化；
-    // 配合 apply() 即时重建图集（也可仅持久化等下次重启生效）。
+    // t415 资源包总开关（镜像 settings.json resourcePackEnabled，缺省 false：避免无感知切换贴图）。
+    //   setter 立即持久化；配合 apply() 即时重建图集（也可仅持久化等下次重启生效）。
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY configChanged)
     // t415 资源包路径（镜像 settings.json resourcePack，空 = 走环境变量/默认探查）。setter 立即持久化。
     Q_PROPERTY(QString packPath READ packPath WRITE setPackPath NOTIFY configChanged)
