@@ -5498,7 +5498,7 @@ Window {
                 MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
             }
             Rectangle {
-                width: 440; height: 580; radius: 10
+                width: 440; height: 780; radius: 10
                 anchors.centerIn: parent
                 color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
                 Column {
@@ -5591,6 +5591,72 @@ Window {
                         from: -0.5; to: 0.5
                         value: window.heldBlockZ
                         onValueChanged: window.heldBlockZ = value
+                    }
+                    // t415 资源包（resource pack）：启用开关 + 包路径输入 + 应用。持久化 settings.json；
+                    //   apply() 即时重建合成图集并刷新 atlasSource（bust QML image cache）→ 贴图即时切换，
+                    //   无需重启。红线（PLAN §9）：loader 仅运行期读取本地 gitignored 包 PNG，绝不 bake MC
+                    //   资产进 qrc；此处只暴露「开关 + 路径」配置，不接触任何纹理文件。
+                    Text { text: "资源包（resource pack）"
+                           color: "#7fae7f"; font.pixelSize: 12 }
+                    Row {
+                        spacing: 8
+                        Rectangle {
+                            id: rpToggleBox
+                            width: 22; height: 22; radius: 4
+                            color: resourcePack.enabled ? "#2a5a3a" : "#2a2a2a"
+                            border.color: resourcePack.enabled ? "#5fe57f" : "#555555"; border.width: 1
+                            Text { anchors.centerIn: parent; text: resourcePack.enabled ? "✓" : ""
+                                   color: "#7fe57f"; font.pixelSize: 16; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: { resourcePack.enabled = !resourcePack.enabled
+                                             resourcePack.apply() } }
+                        }
+                        Text { text: resourcePack.enabled ? "启用（尝试加载资源包覆盖贴图）"
+                                                          : "禁用（始终用程序生成默认贴图）"
+                               color: "#cccccc"; font.pixelSize: 12
+                               anchors.verticalCenter: parent.verticalCenter
+                               wrapMode: Text.WordWrap; width: 350 }
+                    }
+                    Text { text: "状态：" + (resourcePack.active ? "已加载资源包，贴图已覆盖"
+                                                                : "未加载资源包（用默认贴图）")
+                           color: resourcePack.active ? "#7fe57f" : "#b08060"; font.pixelSize: 11 }
+                    Text { text: "资源包路径（含 assets/minecraft/textures/block 的目录；留空走默认探查）"
+                           color: "#9aa0a6"; font.pixelSize: 11; wrapMode: Text.WordWrap; width: parent.width }
+                    // 路径输入框（Rectangle + TextInput，不依赖 QtQuick.Controls TextField；项目未链接 Controls）。
+                    Rectangle {
+                        width: parent.width; height: 30; radius: 4
+                        color: "#2a2f36"; border.color: "#3a444f"; border.width: 1
+                        TextInput {
+                            id: rpPathInput
+                            anchors.fill: parent; anchors.margins: 6
+                            verticalAlignment: TextInput.AlignVCenter
+                            color: "#eaf2ea"; font.pixelSize: 12
+                            // 初始值绑当前 packPath；用户键入即断绑定（QML TextInput 编辑行为），此后字段为权威。
+                            text: resourcePack.packPath
+                            selectByMouse: true
+                        }
+                    }
+                    Row {
+                        spacing: 8
+                        // 应用：把输入框路径写入 + 重建图集（即时生效）。
+                        Rectangle {
+                            width: 100; height: 28; radius: 6
+                            color: rpApplyArea.containsMouse ? "#2a4a3a" : "#1a3a2a"
+                            border.color: "#3a6a4a"; border.width: 1
+                            Text { anchors.centerIn: parent; text: "应用"
+                                   color: "#7fe5a0"; font.pixelSize: 12 }
+                            MouseArea {
+                                id: rpApplyArea
+                                anchors.fill: parent; hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: { resourcePack.packPath = rpPathInput.text
+                                             resourcePack.apply() }
+                            }
+                        }
+                        Text { text: "应用后即时生效；如贴图未变请核对路径（需含 assets/minecraft/textures/block）"
+                               color: "#8090a0"; font.pixelSize: 10
+                               anchors.verticalCenter: parent.verticalCenter
+                               wrapMode: Text.WordWrap; width: 270 }
                     }
                     // 返回按钮：关设置面板回暂停菜单。
                     Rectangle {

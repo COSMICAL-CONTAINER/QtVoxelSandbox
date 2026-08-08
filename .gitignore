@@ -44,6 +44,8 @@ saves/
 *.db
 # t414 资源包目录（用户本地 MC 资源包；版权资产，绝不进 VCS。loader 仅运行期读取本地 PNG，不 bake 进 qrc）
 resourcepacks/
+# t415 用户设置（settings.json：含机器特定的资源包路径等；用户配置，绝不进 VCS）
+settings.json
 # Android (Phase 2)
 android-build/
 *.apk
