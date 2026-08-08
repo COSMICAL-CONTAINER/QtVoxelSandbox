@@ -455,17 +455,16 @@ const QList<QPair<int, QString>> &mobEntityMap()
     return kMap;
 }
 
-// t416 MC「灰度可着色」瓦片集合（grass_top / grass_side / leaves / tall_grass）：本体是灰度贴图，由
+// t416 MC「灰度可着色」瓦片集合（grass_top / leaves / tall_grass）：本体是灰度贴图，由
 //   生物群系着色覆绿（机制等价 MC foliageColor/grassColor）。loader 直接用包内灰度原色会渲染成苔石色，
 //   故合成时把这些 tile 的包内贴图乘上叶绿素色调。非着色瓦片（stone/dirt/...）原样，不受影响。
-//   注：grass_block_side 仅顶部 overlay 着色，乘绿会把下方泥土也偏绿，但 MC 该贴图灰度区集中顶部，
-//   HD 包常已带色；本单色近似（plains 平均叶绿素 #5a8a3a）可接受，验收以「叶子绿 + 草顶/侧读绿」为准。
+//   注：grass_side 不在此列——它 = dirt 基底 + 顶部绿 overlay（仅顶部绿条着色），整张乘绿会把下方
+//   泥土也染绿（t422 修：改走 composeGrassSide 走 overlay 合成路径）。
 bool isFoliageTinted(int tileIndex)
 {
-    return tileIndex == 0   // grass_top
-        || tileIndex == 1   // grass_side（顶部 overlay 着色）
-        || tileIndex == 9   // oak_leaves
-        || tileIndex == 28; // tall_grass
+    return tileIndex == 0   // grass_top（整张灰度，全幅着色）
+        || tileIndex == 9   // oak_leaves（整张灰度，全幅着色）
+        || tileIndex == 28; // tall_grass（整张灰度，全幅着色）
 }
 
 // 乘色着色：tile 已是 Format_ARGB32_Premultiplied——直接乘预乘后的 RGB = 正确保持预乘关系
@@ -486,6 +485,43 @@ void applyFoliageTint(QImage &tile)
                             qAlpha(c));
         }
     }
+}
+
+// t422 grass_side 正确合成：dirt 基底 + 顶部绿色 overlay。t416 误把整张 grass_block_side.png
+//   乘叶绿素 → 下方泥土也被染绿（错误）。MC 实际语义 = dirt.png（彩色泥土）打底，
+//   grass_block_side_overlay.png（仅顶部 alpha 绿条的灰度蒙版）乘叶绿素后 SourceOver 叠在
+//   dirt 上 → 仅顶部绿条变绿、下方泥土保泥土色。overlay / dirt 任一缺失 → 回退
+//   grass_block_side.png 原样不着色（HD 包常已带色；缺 overlay 的旧包保原色，绝不染绿泥土）。
+//   返回已缩放到 kTile×kTile 的 Format_ARGB32_Premultiplied；全缺则返回空 QImage（调用方跳过）。
+QImage composeGrassSide(const QDir &blockDir)
+{
+    const QString overlayPath = blockDir.absoluteFilePath(QStringLiteral("grass_block_side_overlay.png"));
+    const QString dirtPath = blockDir.absoluteFilePath(QStringLiteral("dirt.png"));
+    if (QFile::exists(overlayPath) && QFile::exists(dirtPath)) {
+        QImage dirt(dirtPath);
+        QImage overlay(overlayPath);
+        if (!dirt.isNull() && !overlay.isNull()) {
+            dirt = dirt.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            overlay = overlay.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            if (dirt.size() != QSize(kTile, kTile))
+                dirt = dirt.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            if (overlay.size() != QSize(kTile, kTile))
+                overlay = overlay.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            applyFoliageTint(overlay); // 仅 alpha>0 处（顶部绿条）乘绿 → 绿；alpha=0 处保留透明
+            QPainter op(&dirt);
+            op.drawImage(0, 0, overlay); // SourceOver：绿条叠在泥土上，透明处保泥土色
+            op.end();
+            return dirt;
+        }
+    }
+    // 回退：overlay / dirt 缺失 → grass_block_side.png 原样不着色（绝不染绿泥土）。
+    QImage side(blockDir.absoluteFilePath(QStringLiteral("grass_block_side.png")));
+    if (side.isNull())
+        return {};
+    side = side.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (side.size() != QSize(kTile, kTile))
+        side = side.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    return side;
 }
 
 // 合成构建（调用者须已持 stateMutex()）。幂等（built 标志）。运行期经 apply() 置 built=false 强制重建。
@@ -575,19 +611,27 @@ void ensureBuiltLocked()
     for (const auto &m : tileFilenameMap()) {
         if (m.first < 0 || m.first >= tileCount)
             continue; // 越界守卫（防图集宽度 < 映射索引 → 画到图集外）。
-        const QString png = blockDir.absoluteFilePath(m.second);
-        if (!QFile::exists(png))
-            continue; // 包内无该贴图 → 不覆盖（保留程序生成瓦片）。
-        QImage tile(png);
-        if (tile.isNull()) {
-            qWarning("ResourcePack: 无法解码 %s，跳过。", qPrintable(png));
-            continue;
+        QImage tile;
+        if (m.first == 1) {
+            // t422 grass_side 走专用合成（dirt 基底 + 顶部绿 overlay，不整张染绿）；全缺 → 跳过。
+            tile = composeGrassSide(blockDir);
+            if (tile.isNull())
+                continue;
+        } else {
+            const QString png = blockDir.absoluteFilePath(m.second);
+            if (!QFile::exists(png))
+                continue; // 包内无该贴图 → 不覆盖（保留程序生成瓦片）。
+            tile = QImage(png);
+            if (tile.isNull()) {
+                qWarning("ResourcePack: 无法解码 %s，跳过。", qPrintable(png));
+                continue;
+            }
+            tile = tile.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            if (tile.size() != QSize(kTile, kTile))
+                tile = tile.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            if (isFoliageTinted(m.first))
+                applyFoliageTint(tile); // t416：灰度可着色瓦片乘叶绿素（叶子/草顶/草丛 → 绿）
         }
-        tile = tile.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-        if (tile.size() != QSize(kTile, kTile))
-            tile = tile.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        if (isFoliageTinted(m.first))
-            applyFoliageTint(tile); // t416：灰度可着色瓦片乘叶绿素（叶子/草顶/草侧/草丛 → 绿）
         p.drawImage(m.first * kTile, 0, tile);
         ++overridden;
     }
