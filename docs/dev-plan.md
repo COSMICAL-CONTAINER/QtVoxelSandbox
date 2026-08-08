@@ -1179,17 +1179,17 @@ t18                        （背包，依赖 hotbar）
 
 | 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
 |---|---|---|---|---|
-| t416 | ⏳ | **叶子/草贴图绿色染色**：MC 的 oak_leaves / grass_block_top/side / tall_grass 是**灰度 tintable 贴图**（MC 用 foliage 颜色染绿），引擎现直接用 → 灰像苔藓圆石。**修**：loader 覆盖这些瓦片时对灰度贴图**乘以叶绿色**（foliage green，~#5a8a3a）染色后再写入 atlas。**验收**：启用 pack 后叶子是绿的、草顶/侧绿。 | — | resourcepackmanager.cpp（compositeAtlas 染色；tintable 瓦片集：0 grass_top,1 grass_side,9 leaves,28 tall_grass,等） |
-| t417 | ⏳ | **睡莲水面放置**：现睡莲被放到**水下方**（错）。应浮在**水面**（y 在水位顶面）。修 placement/几何使睡莲在水面。**验收**：睡莲浮水面不下沉。 | — | partialblockgeometry.cpp / world.cpp（lily pad 放置高度） |
-| t418 | ⏳ | **甘蔗 worldgen 修正**：现固定/偏高。应：自然生成**高度 1-3 为主，5 格罕见**（不是每根都 5）；生成于**沙滩/沙近水**处，**不在森林湖泊**。修 worldgen 散布 + 高度分布。**验收**：沙滩见 1-3 高甘蔗，森林湖无。 | — | world.cpp（sugarcane scatter + tickSugarcaneGrowth 高度概率） |
-| t419 | ⏳ | **文件夹选择器接受包根目录**：现要选到最里层 `.../textures/block`。应选**包主目录**（`Default HD 128x.../`）即可，loader 自找 `assets/minecraft/textures/block`。**修**：loader 给定 packPath（任意层级）时，**搜索**其下 `assets/minecraft/textures/block`（先试 `<path>/assets/.../block`，再浅层递归找）。**验收**：选包根目录即生效。 | — | resourcepackmanager.cpp（resolve block dir 搜索） |
+| t416 | ✅ | **叶子/草贴图绿色染色**：MC 的 oak_leaves / grass_block_top/side / tall_grass 是**灰度 tintable 贴图**（MC 用 foliage 颜色染绿），引擎现直接用 → 灰像苔藓圆石。**修**：loader 覆盖这些瓦片时对灰度贴图**乘以叶绿色**（foliage green，~#5a8a3a）染色后再写入 atlas。**验收**：启用 pack 后叶子是绿的、草顶/侧绿。 | — | resourcepackmanager.cpp（compositeAtlas 染色；tintable 瓦片集：0 grass_top,1 grass_side,9 leaves,28 tall_grass,等） |
+| t417 | ✅ | **睡莲水面放置**：现睡莲被放到**水下方**（错）。应浮在**水面**（y 在水位顶面）。修 placement/几何使睡莲在水面。**验收**：睡莲浮水面不下沉。 | — | partialblockgeometry.cpp / world.cpp（lily pad 放置高度） |
+| t418 | ✅ | **甘蔗 worldgen 修正**：现固定/偏高。应：自然生成**高度 1-3 为主，5 格罕见**（不是每根都 5）；生成于**沙滩/沙近水**处，**不在森林湖泊**。而且挖掉最下面的一格会全都掉落，修 worldgen 散布 + 高度分布。**验收**：沙滩见 1-3 高甘蔗，森林湖无。 | — | world.cpp（sugarcane scatter + tickSugarcaneGrowth 高度概率） |
+| t419 | ✅ | **文件夹选择器接受包根目录**：现要选到最里层 `.../textures/block`。应选**包主目录**（`Default HD 128x.../`）即可，loader 自找 `assets/minecraft/textures/block`。**修**：loader 给定 packPath（任意层级）时，**搜索**其下 `assets/minecraft/textures/block`（先试 `<path>/assets/.../block`，再浅层递归找）。**验收**：选包根目录即生效。 | — | resourcepackmanager.cpp（resolve block dir 搜索） |
 
 ## B. P1 包扩展
 
 | 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
 |---|---|---|---|---|
-| t420 | ⏳ | **背包物品图标从 pack**：pack 内 `assets/minecraft/textures/item/*.png`（剑/镐/斧/铲/锄/弓/箭/剪刀/桶/...）。建「引擎 item id → pack item 文件名」映射；启用 pack 时物品图标（ToolIcon/MaterialIcon）用 pack 的 item 贴图覆盖（缩到图标尺寸）。**验收**：启用 pack 后背包工具/物品图标变 MC 风。 | t419 | 新 item 映射 + icon source 覆盖（ToolIcon.qml/MaterialIcon.qml/hotbar iconSourceForBlock） |
-| t421 | ⏳ | **生物模型贴图**：pack 内 `assets/minecraft/textures/entity/<mob>/*.png`（cow/pig/sheep/chicken/带护甲的 zombie/skeleton/spider）。mob 现是纯色 box；加 **UV 贴图**让 mob 用 pack 的 entity 贴图（按部位映射贴图区域）。**验收**：启用 pack 后生物外观像 MC（贴图而非纯色）。注：mob 几何需加 UV（较大）。| t419 | mobmodel.cpp（UV）+ ResourcePack 扩 entity 映射 + Main.qml mob Texture |
+| t420 | ✅ | **背包物品图标从 pack**：pack 内 `assets/minecraft/textures/item/*.png`（剑/镐/斧/铲/锄/弓/箭/剪刀/桶/...）。建「引擎 item id → pack item 文件名」映射；启用 pack 时物品图标（ToolIcon/MaterialIcon）用 pack 的 item 贴图覆盖（缩到图标尺寸）。**验收**：启用 pack 后背包工具/物品图标变 MC 风。 | t419 | 新 item 映射 + icon source 覆盖（ToolIcon.qml/MaterialIcon.qml/hotbar iconSourceForBlock） |
+| t421 | ✅ | **生物模型贴图**：pack 内 `assets/minecraft/textures/entity/<mob>/*.png`（cow/pig/sheep/chicken/带护甲的 zombie/skeleton/spider）。mob 现是纯色 box；加 **UV 贴图**让 mob 用 pack 的 entity 贴图（按部位映射贴图区域）。**验收**：启用 pack 后生物外观像 MC（贴图而非纯色）。注：mob 几何需加 UV（较大）。| t419 | mobmodel.cpp（UV）+ ResourcePack 扩 entity 映射 + Main.qml mob Texture |
 
 ## 执行备注
 - **资产 MC-pack 结构重组**（把引擎程序美术重组成 `assets/minecraft/textures/{block,item,entity,gui}/` + 让引擎自身美术=一个 MC 材质包 + 背包 GUI 贴图从包挑）= 大重构，**拆 R18p 专项**（牵涉 qrc/路径全改）。
