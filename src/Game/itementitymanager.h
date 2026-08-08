@@ -100,9 +100,22 @@ public:
     // 否则末位 delegate 会瞬移到被拾取位 → 视觉跳变）。越界静默。bump revision → QML Repeater
     // delegate 的 posAt/itemIdAt 绑定（触碰 revision）整列重算，shift 后各 delegate 对齐新数据。
     Q_INVOKABLE void removeAt(int i);
-    // t176 存档：清空所有掉落实体（切世界 / 退出存档前调，防上一世界的掉落物残留进新世界）。emit
-    //   entitiesChanged → count=0 → QML Repeater 清空 delegate。t256：同步清空槽位 free list + live 计数。
-    Q_INVOKABLE void clearAll() { m_entities.clear(); m_freeSlots.clear(); m_liveCount = 0; emit entitiesChanged(); }
+    // t176 存档：清空所有掉落实体（切世界 / 退出存档前调，防上一世界的掉落物残留进新世界）。
+    //   t437：改「释放全部活体槽位」而非「清空 vector」——保 slot-reuse 单调不变量（count 不降）。根因同
+    //   EntityManager::clearAll：旧 m_entities.clear() 把 count→0，QML itemHost Repeater 随之→0，但 reparent
+    //   进 itemHost 的 3D delegate（QQuick3DNode）不进 QQuickRepeater 跟踪表、所有权已转给 itemHost → Repeater
+    //   销毁不到 → delegate 永久成孤儿（lessons-learned t170）。每次退存档→再进都把上一世界全部掉落物 delegate
+    //   孤儿化 + 新世界从 0 重建 → 跨世界单调累积 → 内存只增不减、FPS 掉到个位数（"退存档再进仍卡"的直接根因；
+    //   C++ 审计全 clean，泄漏在 QML 场景图侧；t256 已用 slot-reuse 修「游玩期」却漏了「切世界 clearAll」断点）。
+    //   改释放槽位：alive=false + 入 free list + liveCount=0，保留 vector → count 不降 → Repeater 不销毁 delegate
+    //   （无孤儿）→ 下次进世界复用既有 delegate（aliveAt 翻 true + revision bump 重绑）。高水位受 kCap(200) 钳制，
+    //   有界常驻开销远优于跨世界无界泄漏。仅释放活体槽（幂等）。emit entitiesChanged → QML 据 revision 翻释放槽
+    //   delegate visible=false 隐藏（不销毁）。
+    Q_INVOKABLE void clearAll() {
+        for (size_t i = 0; i < m_entities.size(); ++i)
+            if (m_entities[i].alive) releaseSlot(int(i));
+        emit entitiesChanged();
+    }
 
     // t53：第 i 个实体是否已过「新生免拾取期」（spawn 后 kPickupDelayMs 内 false → pickupScan 跳过）。
     // 破块瞬间实体常落在玩家近旁（如脚下方块中心距玩家中心仅 ~1.4 格 < kPickupDist 1.5），若无免拾窗

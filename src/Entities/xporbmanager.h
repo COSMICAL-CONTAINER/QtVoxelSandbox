@@ -68,9 +68,21 @@ public:
     // 第 i 个球携带的 XP 数量（呈现层据此调色 / 大小：大球更显眼）。越界返回 0。
     Q_INVOKABLE int amountAt(int i) const;
 
-    // 存档 / 切世界：清空所有球（防上一世界经验球残留进新世界）。emit entitiesChanged →
-    //   count=0 → QML Repeater 清空 delegate。同步清空槽位 free list + live 计数。
-    Q_INVOKABLE void clearAll() { m_orbs.clear(); m_freeSlots.clear(); m_liveCount = 0; emit entitiesChanged(); }
+    // 存档 / 切世界：清空所有球（防上一世界经验球残留进新世界）。t437：改「释放全部活体槽位」而非
+    //   「清空 vector」——保 slot-reuse 单调不变量（count 不降）。根因同 ItemEntityManager/EntityManager：
+    //   旧 m_orbs.clear() 把 count→0，QML xpOrbHost Repeater 随之→0，但 reparent 进 xpOrbHost 的 3D delegate
+    //   （QQuick3DNode）不进 QQuickRepeater 跟踪表 → Repeater 销毁不到 → delegate 永久成孤儿（lessons-learned
+    //   t170），退存档→再进单调累积 → 内存只增不减、FPS 掉到个位数（"退存档再进仍卡"的直接根因；C++ 审计全
+    //   clean，泄漏在 QML 场景图侧；t256 slot-reuse 修了「游玩期」却漏了「切世界 clearAll」断点）。改释放槽位：
+    //   alive=false + 入 free list + liveCount=0，保留 vector → count 不降 → Repeater 不销毁 delegate（无孤儿）→
+    //   下次进世界复用既有 delegate（aliveAt 翻 true + revision bump 重绑）。高水位受 kCap(64) 钳制，有界常驻开销
+    //   远优于跨世界无界泄漏。仅释放活体槽（幂等）。emit entitiesChanged → QML 据 revision 翻释放槽 delegate
+    //   visible=false 隐藏（不销毁）。
+    Q_INVOKABLE void clearAll() {
+        for (size_t i = 0; i < m_orbs.size(); ++i)
+            if (m_orbs[i].alive) releaseSlot(int(i));
+        emit entitiesChanged();
+    }
 
     // 磁吸 + 拾取（C++ 直调；PlayerController::tick 每帧调，常开、独立于捕获态——菜单 / 暂停时
     //   球仍向玩家飞 / 仍可拾取，世界模拟连续，同 ItemEntityManager::tick）。playerCenter = 玩家

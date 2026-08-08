@@ -161,9 +161,22 @@ public:
     //   达 kCap → 跳过 + 告警（防溢出，同 spawnArrow）。
     Q_INVOKABLE void spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
-    //   emit entitiesChanged → count=0 → QML Repeater 清空 delegate。t256：同步清空槽位 free list +
-    //   live 计数（slot 复用模型见 acquireSlot/releaseSlot）。
-    Q_INVOKABLE void clearAll() { m_entities.clear(); m_freeSlots.clear(); m_liveCount = 0; emit entitiesChanged(); }
+    //   t437：改「释放全部活体槽位」而非「清空 vector」。根因：旧 m_entities.clear() 把 count→0，QML
+    //   Repeater count 随之→0；但 reparent 进 mobHost 的 3D delegate（QQuick3DNode，非 QQuickItem）不进
+    //   QQuickRepeater 跟踪表、所有权已转给 mobHost → Repeater 找不到 delegate 销毁 → delegate 永久挂在
+    //   mobHost 下成孤儿（lessons-learned t170）。每次退存档→再进都把上一世界全部 mob delegate 孤儿化 +
+    //   新世界从 0 重建 → 跨世界单调累积（每 delegate 含 MobModel + 多 mob-type Model + 眼/火舌子树 + 动画
+    //   = 数十 3D 对象）→ 内存只增不减、FPS 掉到个位数（"退存档再进仍卡"的直接根因；C++ 审计全 clean，泄漏
+    //   在 QML 场景图侧；t256 已用 slot-reuse 修了「游玩期掉落沙」却漏了「切世界 clearAll」这一断点）。改释放
+    //   槽位：alive=false + 入 free list + liveCount=0，但**保留 vector** → count 不降 → Repeater 不销毁 delegate
+    //   （无孤儿）→ 下次进世界复用既有 delegate（aliveAt 翻回 true + revision bump 重绑新世界数据）。高水位受 kCap
+    //   钳制（≤64 槽），属有界常驻开销，远优于跨世界无界泄漏。仅释放活体槽（已释放的跳过 → 幂等、保 liveCount /
+    //   free list 一致）。emit entitiesChanged → QML 据 revision 把释放槽 delegate 翻 visible=false 隐藏（不销毁）。
+    Q_INVOKABLE void clearAll() {
+        for (size_t i = 0; i < m_entities.size(); ++i)
+            if (m_entities[i].alive) releaseSlot(int(i));
+        emit entitiesChanged();
+    }
 
     // 第 i 个实体的渲染数据（呈现层 Repeater delegate 绑它摆位 + 配色）。越界返回安全默认。
     Q_INVOKABLE QVector3D posAt(int i) const;
