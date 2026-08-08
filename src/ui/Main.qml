@@ -908,6 +908,12 @@ Window {
     // 呈现层只读消费、绝不反向写时间（PLAN §2 分层）。F6 切调试加速（~30s 一周期）便于肉眼验收。
     WorldClock { id: worldClock }
 
+    // t414 资源包加载器（Core 层，QML 门面）：启动期解析资源包（settings.json "resourcePack" /
+    //   环境变量 / 默认探查），把包内方块贴图缩放到 TILE=16 覆盖程序生成图集对应瓦片。active=true 时
+    //   atlasSource = image://rp/atlas（合成图集，由 main.cpp 注册的 provider 提供）；否则回退 qrc 默认。
+    //   只读本地 gitignored 包 PNG，零 MC 资产进 qrc（PLAN §9 红线）。无包时引擎仍用程序生成图集正常工作。
+    ResourcePackManager { id: resourcePack }
+
     // t155 编辑活跃期 → 太阳步进节流桥接：World 任一编辑（破 / 放 / 落沙着地 / 尺寸初始化）发 worldChanged；
     //   呈现层把「编辑活跃」反馈给 WorldClock.noteEditActivity()，使其在编辑活跃期（近 1.5s 内有编辑）跳过
     //   太阳跨步全量 mesh 重建（避免与编辑即时重建争帧）。纯 QML 桥接，不引入 C++ 跨层依赖
@@ -2277,7 +2283,9 @@ Window {
         }
 
         // 共享图集纹理：3×3=9 个 per-chunk Model 共用一份 atlas（声明一次、按 id 引用）。
-        Texture { id: voxelAtlas; source: "qrc:/textures/atlas.png"; generateMipmaps: false }
+        // t414：resourcePack.active 时用 image://rp/atlas（合成图集 = 程序生成图集 + 包覆盖瓦片），
+        //   否则 qrc:/textures/atlas.png（程序生成默认）。无包 / 禁用时 100% 沿用旧路径（零回归）。
+        Texture { id: voxelAtlas; source: resourcePack.atlasSource; generateMipmaps: false }
 
         // t240 猪牛羊贴图：三种 passive mob 各一张「全脸」贴图（build_mob.py 程序生成原创像素图，§9a 区隔
         //   不照搬 MC）。MobModel 几何每面铺整张贴图 [0,1]×[0,1]（同 CrackBox 全脸 UV）→ mobHost delegate 据

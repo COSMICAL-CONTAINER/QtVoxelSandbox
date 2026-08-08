@@ -42,6 +42,8 @@ saves/
 *.sqlite
 *.sqlite-journal
 *.db
+# t414 资源包目录（用户本地 MC 资源包；版权资产，绝不进 VCS。loader 仅运行期读取本地 PNG，不 bake 进 qrc）
+resourcepacks/
 # Android (Phase 2)
 android-build/
 *.apk

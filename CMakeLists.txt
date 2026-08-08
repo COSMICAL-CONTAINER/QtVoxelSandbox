@@ -18,6 +18,13 @@ qt_add_executable(voxelsandbox
     #   仅依赖 Qt（Quick/Gui/Qml），无自有层依赖 → Core 叶子工具，依赖只向下铁律成立。
     src/Core/screengrab.cpp
     src/Core/screengrab.h
+    # t414 资源包加载器（Core 叶子）：启动期解析 pack 路径（settings.json / 环境变量 / 默认探查），
+    #   以 qrc 程序生成图集为底、把包内贴图缩放到 TILE=16 覆盖对应瓦片，合成运行期图集。
+    #   只读本地 gitignored 路径的 PNG，绝不 bake MC 资产进 qrc（PLAN §9 红线）。合成图集经
+    #   main.cpp 注册的 QQuickImageProvider("rp") 以 image://rp/atlas 暴露给 QML；无包时回退 qrc 默认。
+    #   Core 只依赖 Qt Core/Gui；QtQuick（image provider）留在 main.cpp 胶水层（依赖只向下）。
+    src/Core/resourcepackmanager.cpp
+    src/Core/resourcepackmanager.h
     src/World/chunk.cpp
     src/World/chunk.h
     src/World/chunkmanager.cpp

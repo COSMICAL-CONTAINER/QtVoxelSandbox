@@ -4,15 +4,37 @@
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QImage>
 #include <QLoggingCategory>
 #include <QQmlApplicationEngine>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QQuickImageProvider>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QTimer>
+
+#include "resourcepackmanager.h"
+
+// t414 image provider：把 ResourcePackManager 合成的运行期图集（默认图集 + 包覆盖）以
+//   image://rp/atlas 暴露给 QML 的 terrain Texture。QtQuick 依赖留在此 app 胶水层（Core 不沾 QtQuick）。
+//   合成图集构建幂等（首调解析包 + 覆盖瓦片并缓存），无包时返回程序生成默认图集像素。
+class ResourcePackAtlasProvider : public QQuickImageProvider
+{
+public:
+    ResourcePackAtlasProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
+    QImage requestImage(const QString &id, QSize *size, const QSize &requestedSize) override
+    {
+        Q_UNUSED(id);
+        Q_UNUSED(requestedSize);
+        QImage img = ResourcePackManager::compositeAtlas();
+        if (size)
+            *size = img.size();
+        return img;
+    }
+};
 
 // --- 日志系统（内联；后续抽成 Core/Logger 模块，PLAN §2 不变量 F）---
 static QFile *g_log = nullptr;
@@ -85,6 +107,9 @@ int main(int argc, char *argv[])
     qInfo() << "graphics api (enum):" << int(QQuickWindow::graphicsApi());
 
     QQmlApplicationEngine engine;
+    // t414：注册资源包图集 image provider（image://rp/atlas）。必须在 loadFromModule 之前注册，
+    //   供 Main.qml 的 terrain Texture（voxelAtlas）按需拉取合成图集。engine 接管 provider 生命周期。
+    engine.addImageProvider(QStringLiteral("rp"), new ResourcePackAtlasProvider);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
                      &app, []() { qCritical("QML objectCreationFailed"); QCoreApplication::exit(-1); },
                      Qt::QueuedConnection);
