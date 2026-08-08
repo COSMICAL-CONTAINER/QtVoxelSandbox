@@ -615,14 +615,20 @@ void World::tickLavaFlow()
                     cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
             }
 
-    // t411 流体交互 pass B（流岩浆 → 静水源 → 圆石）：遍历快照中的**流岩浆**格（state>0），查 6 正交邻是否
-    //   为**静水源**（Water state=0）；命中则把该静水源凝固为 Cobblestone（**非** stone——机制等价 MC 1.0
-    //   「流岩浆触水源 → 圆石」，区别于 stone：MC 1.0 中水源遇流岩浆变石、流岩浆遇水源变圆石，本工程对齐
-    //   spec 显式要求「becomes COBBLESTONE (NOT stone)」）。仅流岩浆触发（岩浆源触水不反应）；6 正交邻覆盖
-    //   「流岩浆自上而下浇到水源顶」的瀑布情形。凝固目标延迟到批量应用阶段写入（流场计算 pass 2-3 读旧栅格，
-    //   但岩浆本就无法流入水/cobble 实体 → 无副作用）。setWaterSilent 写 Cobble：旧 id=Water → 内部标
-    //   m_waterDirty，驱动下次水 tick 续扫该水格的水源邻居（它们因源被凝固而失支撑，应退场/扩散）。
-    std::vector<LCell> cobbleTargets;
+    // t438 流体交互 pass B（流岩浆 → 静水源→石头 / 流水→圆石）：遍历快照中的**流岩浆**格（state>0），查 6
+    //   正交邻的水格，按对方 state 凝固：**静水源**（Water state=0）→ **Stone**；**流水**（state>0）→ **Cobblestone**。
+    //   机制等价 MC 1.0「流岩浆触静水→石头」「流岩浆触流水→圆石」（spec t438 三规则之二、三）。
+    //   **t438 修 t411 两处 bug**：(1) 旧实现流岩浆+静水源恒产 Cobblestone，spec 要求 Stone（流岩浆把水源烧成石）；
+    //   (2) 旧实现只查对方 source（state==0），**流水+流岩浆相遇时双方都不是 source → 两侧 pass 互不反应 = 水火共融
+    //   不凝固 bug 的真根因**——现补「流水→圆石」分支，两流相遇即凝固。仅流岩浆触发（岩浆源触水不反应）；6 正交
+    //   邻覆盖「流岩浆自上而下浇到水顶」的瀑布情形。凝固目标延迟到批量应用阶段写入（流场计算 pass 2-3 读旧栅格，
+    //   但岩浆本就无法流入水/stone/cobble 实体 → 无副作用）。setWaterSilent 写入：旧 id=Water → 内部标
+    //   m_waterDirty，驱动下次水 tick 续扫该水格邻居（被凝固的水消失 → 邻水可能失支撑应退场/扩散）。
+    //   交互规则完整矩阵（与 tickWaterFlow pass A 互补、无重叠）：
+    //     流水 + 岩浆源 → 黑曜石（pass A，改岩浆格） / 水源 + 岩浆源 → 不反应（双源静置，机制等价 MC）
+    //     流岩浆 + 水源 → 石头（本 pass，改水格） / 流岩浆 + 流水 → 圆石（本 pass，改水格）
+    struct SolidifyTarget { int x, y, z; quint8 result; };
+    std::vector<SolidifyTarget> solidifyTargets;
     {
         static const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
         for (const LCell &c : cells) {
@@ -630,10 +636,13 @@ void World::tickLavaFlow()
             for (const auto &n : neigh) {
                 const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
                 if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
-                if (m_chunks.blockAt(nx, ny, nz) == BlockRegistry::Water
-                    && m_chunks.stateAt(nx, ny, nz) == 0) {
-                    cobbleTargets.push_back({nx, ny, nz, 0});
-                }
+                if (m_chunks.blockAt(nx, ny, nz) != BlockRegistry::Water) continue;
+                const quint8 wState = m_chunks.stateAt(nx, ny, nz);
+                // 静水源 → 石头（spec「流岩浆+静水→石头」）；流水 → 圆石（spec「流岩浆+流水→圆石」）。
+                // 两支均显式转 quint8（BlockRegistry::Id 枚举），避免 -Wextra 枚举/标量混用告警（lessons-learned）。
+                const quint8 result = (wState == 0) ? quint8(BlockRegistry::Stone)
+                                                    : quint8(BlockRegistry::Cobble);
+                solidifyTargets.push_back({nx, ny, nz, result});
             }
         }
     }
@@ -707,10 +716,10 @@ void World::tickLavaFlow()
     //    clearDirty」合并为末尾 1 次 emit + clear，消除活跃岩浆扩散期 N 次重建扇出（同 t350 水流批量化的根因）。
     m_batchFluid = true;
     bool anyChange = false;
-    // t411：先写流岩浆→静水源凝固为 Cobblestone（与 evaps/adds 操作的格互不相交 —— cobble 目标是 Water 源格，
-    //   evaps/adds 操作 Lava/Air 格；故写入顺序安全）。
-    for (const LCell &cb : cobbleTargets)
-        anyChange |= setWaterSilent(cb.x, cb.y, cb.z, BlockRegistry::Cobble, 0);
+    // t438：先写流岩浆凝固水格（静水源→Stone / 流水→Cobblestone；与 evaps/adds 操作的格互不相交 ——
+    //   solidifyTargets 是 Water 格，evaps/adds 操作 Lava/Air 格；故写入顺序安全）。
+    for (const SolidifyTarget &s : solidifyTargets)
+        anyChange |= setWaterSilent(s.x, s.y, s.z, s.result, 0);
     for (const LCell &e : evaps)
         anyChange |= setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
     for (const auto &kv : adds) {
@@ -727,7 +736,8 @@ void World::tickLavaFlow()
         m_chunks.clearAllDirty(); // 两段重建完统一清脏
     }
     qInfo("vo.perf: tickLavaFlow %lldus cells=%d writes=%d settled=%d",
-          t380t.elapsed(), int(cells.size()), int(evaps.size() + int(adds.size())),
+          t380t.elapsed(), int(cells.size()),
+          int(solidifyTargets.size() + evaps.size() + int(adds.size())),
           anyChange ? 0 : 1);
 
     // 5) ignite pass（spec「木质方块邻岩浆概率着火焚毁」）：遍历本 tick 岩浆格，扫 6 邻，木类方块按散布概率焚毁。
