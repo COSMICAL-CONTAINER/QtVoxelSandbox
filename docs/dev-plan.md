@@ -1196,3 +1196,61 @@ t18                        （背包，依赖 hotbar）
 - **HD**（TILE=128 + 程序贴图高清重做，解甘蔗糊）= 也拆 R18p。
 - **法律**：所有 pack 扩展仅本地 gitignored 加载，commit 仅代码（映射表=元数据可提交，贴图文件绝不）。
 - **建议执行序**：A（t416→t417→t418→t419）→ B（t420→t421）。
+
+---
+
+# R18p 规划（pack/世界 bug 修复 P0 + pack 算法/资源查看器 P1/P2）
+
+> 来源：用户 R18o playtest 反馈（2026-08-08，大批量）。任务号续 R18o（t421 止）→ t422 起。
+> ⚠️ 法律红线同前：MC 贴图仅本地 gitignored 加载，绝不进 git/qrc。
+> **本轮先做 P0（游戏降级的紧急修复）；P1/P2 拆 R18q**（compact 后做）。
+
+## 优先级总览
+| 级 | 任务 | 主题 |
+|---|---|---|
+| **P0 紧急**（本轮） | t422-t428 | 草侧 tint / 甘蔗 / 图标空白 / 流水性能 / 地牢 / 湖泊 / 床 2 格 |
+| **P1 pack 算法**（R18q） | t429-t433 | destroy_stage / bow 拉弓阶段 / 羊毛 16 色+羊随机 / 睡莲白 / crop 阶段核实 |
+| **P1 实体/箱子解析**（R18q） | t434-t435 | mob entity UV 正确解析 / chest entity 贴图 |
+| **P2 功能**（R18q） | t436 | 资源查看器（JEI 式 3D 预览） |
+| **（更早记的 R18q 项）** | — | 资产 MC-pack 结构重组 + HD + GUI 贴图从包 |
+
+## A. P0 紧急修复（本轮先做）
+
+| 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
+|---|---|---|---|---|
+| t422 | ⏳ | **草侧 tint 修正（dirt 部分不染绿）**：t416 把整块 grass_side 染绿→侧边 dirt 部分也绿，与下方泥土格格不入。**MC 算法**：grass_side = dirt 底 + `grass_block_side_overlay`（仅绿色 alpha 层）tint 绿。**修**：grass_side 瓦片 = dirt 贴图底 + 染绿的 overlay 层合成（仅 overlay 染绿）；grass_top/leaves/tall_grass 整块染绿保持。**验收**：草侧只顶部绿、dirt 部分是泥土色。 | — | resourcepackmanager.cpp（composite：grass_side 用 overlay 合成；查 MC tint 算法） |
+| t423 | ⏳ | **甘蔗修复（不见了 + 必须邻水种）**：t418 改 Sand-only 后甘蔗不生成（太严）。**修**：恢复生成（沙滩/沙近水）+ **种植必须邻水**（放甘蔗时检查相邻格有水，否则拒绝，同 MC）。cascade-drop(t18) 已做保留。**验收**：沙滩见甘蔗；种甘蔗必须旁边有水。 | — | world.cpp（sugarcane 散布恢复）+ playercontroller.cpp（placeBlock 邻水校验） |
+| t424 | ⏳ | **创造图标空白修复（fallback 失败）**：t420 pack item override 对未映射/无 pack 贴图的 item 回退程序绘制失败→空白。**修**：itemIconSource 对无 pack 贴图的 item 返回空→ToolIcon/MaterialIcon 正确回退程序 Canvas；且 pack 关时全部回退。**验收**：创造背包所有 item 有图标（pack 开/关都非空白）。 | — | ToolIcon.qml/MaterialIcon.qml/hotbar itemIconSource |
+| t425 | ⏳ | **流水/帧数爆炸性能修复**：玩几分钟 FPS 掉到个位数（严重回归）。**profile 定位**：累积成本（流动触发 chunk dirty 风暴？实体(item/xp)累积？per-tick 扫描随时间增长？水重写 t350 回归？）。修最热点。**验收**：长时间游玩 FPS 稳（不单调跌）。 | — | world.cpp（tickWaterFlow/dirty）+ entitymanager/itementitymanager + profiling |
+| t426 | ⏳ | **地牢少而大**：现太多太小（几个格）。**修**：降生成频率 + 增大尺寸（5x5~7x7 房间）。**验收**：地牢少见但像样。 | — | world.cpp（placeDungeons 频率/尺寸） |
+| t427 | ⏳ | **湖泊减少**：现太多。**修**：降湖生成概率。**验收**：湖适度不密集。 | — | world.cpp（lake 概率） |
+| t428 | ⏳ | **床改 2 格（head+foot 横置如门）**：现床是单格（t387 简化）。应 MC 式 2 格（头+脚，横置如门）。**修**：床改多格放置（如门的双格逻辑，水平方向）+ 贴图分头/脚。**验收**：床占 2 格、可见头脚。 | — | blockregistry（bed 双格）+ playercontroller placeBlock（多格如门）+ 贴图 |
+
+## B. P1 pack 算法（拆 R18q）
+
+| 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
+|---|---|---|---|---|
+| t429 | ⏳ | **destroy_stage 破坏纹理**：方块破坏 overlay 用 pack 的 `destroy_stage_0..9.png`（10 阶），替程序绘制。 | — | Renderer(break overlay) + 映射 |
+| t430 | ⏳ | **bow 拉弓阶段图标**：`bow.png` + `bow_pulling_0/1/2.png`；玩家拉弓时物品栏/手持弓显对应拉弓阶段。 | — | bow 持手/图标 + pulling 映射 |
+| t431 | ⏳ | **羊毛 16 色 + 羊随机色（白主导）**：`wool_colored_*.png` 16 色；羊生成随机色（白 ~85% 主导，余色稀有）。 | — | recipe/blockregistry(wool 16 色) + entitymanager(sheep 随机色) |
+| t432 | ⏳ | **睡莲白单独处理**：pack lily_pad 偏白→单独处理（tint 或专用贴图）使其不像纯白方块。 | — | resourcepackmanager(lily tile 特殊处理) |
+| t433 | ⏳ | **crop 阶段映射核实**：`potatoes_stage_0..` / `wheat_stage_7` 等正确映射到引擎作物阶段。 | — | resourcepackmanager crop 映射核实 |
+
+## C. P1 实体/箱子解析（拆 R18q，需研究 MC UV）
+
+| 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
+|---|---|---|---|---|
+| t434 | ⏳ | **mob entity 贴图正确解析**：现 t421 best-effort UV 失败→mob 仍原贴图。MC entity 贴图是**单 PNG → 按 entity UV layout 贴到 3D**（如玩家皮肤）。**研究** MC 各 entity（cow/pig/sheep/chicken/zombie/skeleton/creeper/spider）的 UV 布局，正确解析贴到引擎 mob 几何。**验收**：启用 pack 后生物像 MC（贴图正确）。 | — | mobmodel.cpp（按 MC entity UV）+ ResourcePack entity 映射 |
+| t435 | ⏳ | **chest entity 贴图**：`entity/chest/normal.png`（普通）+ `left`/`right`（大箱子左右）。单 PNG→贴到箱子模型（配合 t409 开合）。**验收**：箱子贴图正确。 | — | chest model + ResourcePack chest 映射 |
+
+## D. P2 功能（拆 R18q）
+
+| 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
+|---|---|---|---|---|
+| t436 | ⏳ | **资源查看器（JEI 式）**：设置里按钮→打开查看器，预览导入的 **block 3D / item 图标 / entity 3D 模型**（类 JEI），方便查看 pack 加载效果。 | t434,t435 | 新 ResourceViewer QML + 复用 pack 贴图 |
+
+## 执行备注
+- **本轮（R18p）只做 P0（t422-t428）**——游戏降级的紧急修复。
+- **P1/P2（t429-t436）拆 R18q**——需 compact 后轻装做（mob entity UV 解析 + 资源查看器是大研究/大功能）。
+- **法律**：所有 pack 解析仅本地 gitignored，commit 仅代码。
+- **建议执行序（R18p）**：t422→t423→t424→t425→t426→t427→t428（t425 流水性能最优先之一）。
