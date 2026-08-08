@@ -29,6 +29,9 @@
 //     0x202=IronOreDrop，t85 在 recipe.h 给这两个 id 命名 + 加图标/中文名）；air 不掉。
 //   - maxStack：MC 1.0 方块标准 64；air=0（不可拾取 / 不可放置）。
 namespace {
+// t444 睡莲薄板碰撞顶面高度：与 partialblockgeometry.cpp LilyPad case 的浮叶 quad 高度 yp=1/16 同源
+//   （玩家脚位停在睡莲顶面 = 水面 + 1/16，视觉立于浮叶上）。单一常量避免两处魔数漂移。
+constexpr float kLilyPadTop = 1.0f / 16.0f;
 constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* air            */ {int(BlockRegistry::Air),           0,  0, 0,  0,  false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0,  0, "air",            ""},
     /* grass          */ {int(BlockRegistry::Grass),         0,  2, 1,  1,  true,  BlockRegistry::ShapeFull,     0.6f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::Grass),         1, 64, "grass",          "草方块"}, // t265 铲加速（requiresTool=false 空手仍掉落）；顶=grass_top 底=dirt 侧=grass_side
@@ -224,8 +227,9 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     // ── t396 沼泽群系内容（机制等价 MC 1.0 沼泽植物：lily pad / mushroom；名称 / 贴图全原创自绘 §9a）：
     //   睡莲（LilyPad）：沼泽浅水水面浮叶。**cross 路由的横向浮叶**（mesher PartialBlockGeometry::append 的 LilyPad
     //   case 画一片水平双面 quad 贴 cell 底部 → 浮于水面；同走 isCrossBillboard 路由 + alphaCutoff cutout，但几何为
-    //   水平非竖直）。solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制
-    //   等价 MC 睡莲薄叶无硬碰撞；可踩过）、hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身（破睡莲掉
+    //   水平非竖直）。solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（selection 空 / 不进 heightmap /
+    //   不遮光；raycast 整格命中），但 **t444 碰撞特例**（collisionAABBs 返 cell 底 1/16 薄板 + isCollidable true）→
+    //   玩家立于睡莲顶面不掉进水（水上行走辅助）。其余 ShapeNone 语义不变、hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身（破睡莲掉
     //   睡莲方块，可放回）、dropCount=1、maxStack=64。各面贴图=lily_pad(61)（透明底 + 绿色圆叶 + V 形缺口，alphaCutoff
     //   cutout）。音色归 GroupGrass（软植物音）。worldgen placeSwampFlora 在沼泽水格上方一格散布。进创造调色板。
     /* lily_pad     */ {int(BlockRegistry::LilyPad),                     61, 61, 61, 61, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::LilyPad),       1, 64, "lily_pad",     "睡莲"},
@@ -482,6 +486,11 @@ bool BlockRegistry::isLadder(quint8 blockId)
 //   （合=水平薄板顶站立 / 开=铰链侧整高竖直板顶站立 —— 「半门 / 1 格高 ledge」，玩家立于板顶 + 蹲行走）。
 bool BlockRegistry::isCollidable(quint8 blockId, quint8 state)
 {
+    // t444 睡莲薄叶可踩（spec「可在上面走 / 水上行走辅助」）：shape=ShapeNone（selection 空 / 不挡邻居面剔除 /
+    //   不遮光 / 不进 heightmap），但碰撞当可踩实体（collisionAABBs 特例返 cell 底薄板）。isCollidable 须与
+    //   collisionAABBs 一致返 true，否则 hasGroundBelowAt（脚底支撑复探，读 isCollidable）会判睡莲「无支撑」→
+    //   蹲下边缘安全误锁移动。仅此一 ShapeNone 方块特例；torch / water 仍 false（穿过）。
+    if (blockId == LilyPad) return true;
     switch (def(blockId).shape) {
     case ShapeDoor:     return true;             // t261 门板无论开合都实存（合=贴朝向边 / 开=旋后贴铰链侧），恒挡一面
     case ShapeTrapdoor: return true;             // t359 开合都实存：合=水平薄板顶站立 / 开=铰链侧整高竖直板顶站立（见 collisionAABBs/shapeBoxes）
@@ -633,6 +642,14 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
 //   + F3+B 碰撞箱均显薄板。
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 blockId, quint8 state)
 {
+    // t444 睡莲水上行走（spec「站在睡莲上不掉进水 / 水上行走辅助」）：睡莲 shape=ShapeNone（selection 空、
+    //   raycast 整格命中、不挡邻居面剔除、不进 heightmap、不遮光），但须当可踩实体 → 在此特例返 cell 底薄板
+    //   （顶面 = 睡莲 quad 高度 1/16，与 partialblockgeometry.cpp LilyPad case 的 yp 同源）。玩家脚位停在睡莲顶面
+    //   （= 水面 + 1/16）→ 站在睡莲上不掉进水（机制等价 MC 1.0 lily pad 薄叶可站立）。仅碰撞特例；selection /
+    //   raycast / solid / 光照仍走 ShapeNone（四者解耦，同 Farmland 矮盒碰撞特例模式）。薄板厚 1/16 < kEmbedTol(0.1)
+    //   且玩家立于板顶（非嵌入）→ isLockedBuried / extrudeEmbedded 不误触（边界 FP 不计嵌入，见 playercontroller）。
+    if (blockId == LilyPad)
+        return {BlockAABB{0, 0, 0, 1, kLilyPadTop, 1}};
     if (!isCollidable(blockId, state)) return {}; // air / torch / water → 无碰撞 sub-AABB（玩家穿过）
     // t234 耕地碰撞略矮（15/16=0.9375）：机制等价 MC 耕地碰撞箱比整立方矮 1 像素。Farmland 走 ShapeFull
     //   （mesher 邻居面剔除 + raycast isFullCube=true 整格命中 + selectionAABBs 整格选中框，三者不动），

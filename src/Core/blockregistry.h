@@ -298,8 +298,12 @@ public:
                                   //   **cross 路由的横向浮叶**（mesher 经 PartialBlockGeometry::append 的 LilyPad case 画一片
                                   //   水平双面 quad 贴 cell 底部 → 浮于水面；与 TallGrass 等竖直 cross 同走 isCrossBillboard
                                   //   路由 + alphaCutoff cutout 透明底，但几何为水平非竖直）。solid=false（非实体 → 不挡邻居
-                                  //   面剔除，同 torch / 草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC 睡莲薄叶
-                                  //   无硬碰撞；可踩过）、hardness=0（瞬破，同草丛）、NoTool（空手可采且掉落）、dropId=自身
+                                  //   面剔除，同 torch / 草丛）、shape=ShapeNone（selection 空 / 不进 heightmap / 不遮光 / 不挡
+                                  //   邻居面剔除；raycast 整格命中可瞄准破），但 **t444 碰撞特例**：collisionAABBs 返 cell 底
+                                  //   1/16 薄板（顶面 = 浮叶 quad 高度）→ 玩家立于睡莲顶面不掉进水（水上行走辅助；机制对标
+                                  //   MC lily pad 可站立）。isCollidable 同步 true（与碰撞一致，保 hasGroundBelowAt 脚底支撑
+                                  //   复探）。其余 ShapeNone 语义不变（torch/water 仍穿过）、hardness=0（瞬破，同草丛）、NoTool
+                                  //   （空手可采且掉落）、dropId=自身
                                   //   （破睡莲掉睡莲方块，可放回）、dropCount=1、maxStack=64。各面贴图=lily_pad(61)
                                   //   （透明底 + 绿色圆叶 + V 形缺口，alphaCutoff cutout）。音色归 GroupGrass（软植物音）。
                                   //   进创造调色板（玩家可取用 / 放置）。

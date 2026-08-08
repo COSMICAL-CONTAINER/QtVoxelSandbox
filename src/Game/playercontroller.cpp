@@ -2094,6 +2094,20 @@ void PlayerController::placeBlock()
         };
         if (!waterAdj(ty - 1) && !waterAdj(ty - 2)) return; // 支撑两层均不邻水 → 拒（不挥）
     }
+    // t444 睡莲放置预检（spec「仅静止水面可放 / 地上流水不可 / 不可叠放」）：
+    //   放置目标格 ty 经上方 climb（见入口段）已是水面之上首个非水格（air）。机制等价 MC 1.0 lily pad 仅可放于
+    //   静水源水面、不可叠放。
+    //   ④ 仅静止水面：目标格正下方（ty-1 = 水面格）须为水源 Water state==0。流水(state>0) / 地面（下方非水） /
+    //      悬空（无下方）→ 拒（不挥）。worldgen 睡莲（placeSwampFlora）仅放水源面，玩家放置须同守。
+    //   ⑥ 不可叠放：目标格已有睡莲 → 拒（机制等价 MC lily pad 不可堆叠，防叠柱）。瞄水面时射线穿水、climb 落到
+    //      已有睡莲格；瞄睡莲顶时 ty 落其上空气格但下方非水（是睡莲）→ ④ 即拒。本条对「同格已有睡莲」显式补刀。
+    if (m_selectedBlock == BlockRegistry::LilyPad) {
+        if (ty >= m_world->height() || ty - 1 < 0) return;              // 全高水柱无表面气格 / y=0 无下方水 → 拒
+        const quint8 belowId = m_world->blockAt(tx, ty - 1, tz);
+        const quint8 belowState = m_world->stateAt(tx, ty - 1, tz);
+        if (belowId != BlockRegistry::Water || belowState != 0) return;     // ④ 非静水源 → 拒
+        if (m_world->blockAt(tx, ty, tz) == BlockRegistry::LilyPad) return; // ⑥ 已有睡莲 → 拒（叠放）
+    }
     // t134 不完整方块放置：door 占两格（下格 + 上格），需上格也为空气；其余单格。走 setBlock 5 参数版
     //   （写 id + state）。state 复用上方算出的 placeState / doorFacing（逻辑同源，无重复推导）。
     if (isDoor) {

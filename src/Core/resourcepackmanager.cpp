@@ -455,25 +455,28 @@ const QList<QPair<int, QString>> &mobEntityMap()
     return kMap;
 }
 
-// t416 MC「灰度可着色」瓦片集合（grass_top / leaves / tall_grass）：本体是灰度贴图，由
-//   生物群系着色覆绿（机制等价 MC foliageColor/grassColor）。loader 直接用包内灰度原色会渲染成苔石色，
-//   故合成时把这些 tile 的包内贴图乘上叶绿素色调。非着色瓦片（stone/dirt/...）原样，不受影响。
-//   注：grass_side 不在此列——它 = dirt 基底 + 顶部绿 overlay（仅顶部绿条着色），整张乘绿会把下方
-//   泥土也染绿（t422 修：改走 composeGrassSide 走 overlay 合成路径）。
-bool isFoliageTinted(int tileIndex)
+// t416/t444 MC「灰度可着色」瓦片 → 着色 tint 查表（单一权威）。这些 tile 的包内贴图本体是灰度（机制等价 MC
+//   foliageColor/grassColor / lily pad fixed tint），loader 直接用包内灰度原色会渲染成苔石色 / 灰白（用户「睡莲
+//   现灰」），故合成时乘上对应群系 tint。非着色瓦片（stone/dirt/...）原样，不受影响（返 nullptr）。
+//   注：grass_side 不在此列——它 = dirt 基底 + 顶部绿 overlay（仅顶部绿条着色），整张乘绿会把下方泥土也染绿
+//   （t422 修：改走 composeGrassSide 走 overlay 合成路径）。
+//   - grass_top(0) / oak_leaves(9) / tall_grass(28)：plains 叶绿素 #5a8a3a（t416）。
+//   - lily_pad(61)（t444）：沼泽水生绿 #4aa852。MC lily_pad.png 是灰度可着色贴图（demo pack 实测灰 133,133,133），
+//     MC 用硬编码水生绿着色；本引擎无 BlockColors → 合成时固定乘本 tint（机制等价 MC lily pad fixed tint）。
+//     不着色则 pack 睡莲渲染成灰白方块（用户「现灰」）。
+const int *tileTint(int tileIndex)
 {
-    return tileIndex == 0   // grass_top（整张灰度，全幅着色）
-        || tileIndex == 9   // oak_leaves（整张灰度，全幅着色）
-        || tileIndex == 28; // tall_grass（整张灰度，全幅着色）
+    static constexpr int kFoliage[3] = {0x5a, 0x8a, 0x3a}; // plains 叶绿素 #5a8a3a
+    static constexpr int kLily[3]    = {0x4a, 0xa8, 0x52}; // t444 睡莲沼泽水生绿 #4aa852
+    if (tileIndex == 0 || tileIndex == 9 || tileIndex == 28) return kFoliage; // grass_top / oak_leaves / tall_grass
+    if (tileIndex == 61) return kLily;                                       // lily_pad
+    return nullptr;
 }
 
 // 乘色着色：tile 已是 Format_ARGB32_Premultiplied——直接乘预乘后的 RGB = 正确保持预乘关系
-//   （newR = tintR * R * A，alpha 不动）。灰度部分乘绿 → 绿。
-void applyFoliageTint(QImage &tile)
+//   （newR = tintR * R * A，alpha 不动）。灰度部分乘 tint → 着色（灰度×绿 → 绿）。
+void applyTint(QImage &tile, int tintR, int tintG, int tintB)
 {
-    constexpr int tintR = 0x5a; // plains foliage 平均叶绿素 #5a8a3a（归一化用 /255）
-    constexpr int tintG = 0x8a;
-    constexpr int tintB = 0x3a;
     const int w = tile.width(), h = tile.height();
     for (int y = 0; y < h; ++y) {
         QRgb *scan = reinterpret_cast<QRgb *>(tile.scanLine(y));
@@ -507,7 +510,7 @@ QImage composeGrassSide(const QDir &blockDir)
                 dirt = dirt.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
             if (overlay.size() != QSize(kTile, kTile))
                 overlay = overlay.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-            applyFoliageTint(overlay); // 仅 alpha>0 处（顶部绿条）乘绿 → 绿；alpha=0 处保留透明
+            applyTint(overlay, 0x5a, 0x8a, 0x3a); // 仅 alpha>0 处（顶部绿条）乘 plains 绿 → 绿；alpha=0 处保留透明
             QPainter op(&dirt);
             op.drawImage(0, 0, overlay); // SourceOver：绿条叠在泥土上，透明处保泥土色
             op.end();
@@ -629,8 +632,8 @@ void ensureBuiltLocked()
             tile = tile.convertToFormat(QImage::Format_ARGB32_Premultiplied);
             if (tile.size() != QSize(kTile, kTile))
                 tile = tile.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-            if (isFoliageTinted(m.first))
-                applyFoliageTint(tile); // t416：灰度可着色瓦片乘叶绿素（叶子/草顶/草丛 → 绿）
+            if (const int *tint = tileTint(m.first))
+                applyTint(tile, tint[0], tint[1], tint[2]); // t416/t444：灰度可着色瓦片乘群系 tint（叶/草顶/草丛 plains 绿；睡莲沼泽水生绿）
         }
         p.drawImage(m.first * kTile, 0, tile);
         ++overridden;
