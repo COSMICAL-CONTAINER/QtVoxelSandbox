@@ -67,6 +67,8 @@ void World::beginLoad(int seed)
     buildPermutation();                            // 新 seed 的 Perlin 置换表（heightAt 查询一致性）
     m_decayingLeaves.clear(); // t325 网格重置 → 渐进衰减队列作废（坐标已不指向当前栅格；防误清新世界叶）
     m_growthCells.clear();   // t425 网格重置 → 生长方格索引作废（finishLoad 写完 blob 后 rebuildGrowthCells 全图重建）
+    m_waterCells.clear();    // perf：网格重置 → 流体方格索引作废（finishLoad 写完 blob 后 rebuildFluidCells 全图重建）
+    m_lavaCells.clear();
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
     emit seedChanged();
 }
@@ -92,6 +94,9 @@ void World::finishLoad()
     // t425：存档 blob 由 WorldStore 直写 chunk（不经 World 写入路径 → noteGrowthWrite 不会捕获）→ 全图重建
     //   生长方格索引一次，使后续生长 tick 走 O(生长格数) 遍历而非全图扫描（一次性 3.3M 扫描在加载期可接受）。
     rebuildGrowthCells();
+    // perf：同上 —— 存档 blob 直写不经写入路径 → noteFluidWrite 不会捕获 → 全图重建流体方格索引一次，
+    //   使后续流体 tick（water/lava/ice）走 O(流体格数) 遍历而非全图扫描（一次性 3.3M 扫描在加载期可接受）。
+    rebuildFluidCells();
 }
 
 // t425 perf：生长方格索引增量维护。写入路径（setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）在
@@ -118,6 +123,36 @@ void World::rebuildGrowthCells()
             for (int y = 0; y < H; ++y)
                 if (isGrowthBlock(m_chunks.blockAt(x, y, z)))
                     m_growthCells.insert(packGrowthCell(x, y, z));
+}
+
+// perf：流体方格集合增量维护（同 noteGrowthWrite 模式）。id 不变（仅 state 变，如水流 level 升降 /
+//   岩浆流 level 变）→ 成员资格不变 → no-op。id 变更 → 按 oldId/newId 是否 Water/Lava 增删对应集合项。
+//   O(1) 哈希操作（编辑 / 流体 tick 写入低频），换得流体 tick 从 O(全图 3.28M) 降到 O(流体格数)。
+void World::noteFluidWrite(int x, int y, int z, quint8 oldId, quint8 newId)
+{
+    if (oldId == newId) return; // id 不变 → 成员资格不变（水流 level 变 / 岩浆流 level 变均 id 不变）
+    const quint64 k = packGrowthCell(x, y, z); // 复用同一坐标打包（x<<32|y<<16|z）
+    if (oldId == BlockRegistry::Water) m_waterCells.erase(k);
+    else if (oldId == BlockRegistry::Lava) m_lavaCells.erase(k);
+    if (newId == BlockRegistry::Water) m_waterCells.insert(k);
+    else if (newId == BlockRegistry::Lava) m_lavaCells.insert(k);
+}
+
+// perf：全图扫描重建流体方格集合（generate / finishLoad 末调一次 —— worldgen / 存档 blob 直写不经写入路径）。
+//   运行期由 noteFluidWrite 增量维护，无需重扫。一次性 3.3M 扫描在生成 / 加载期可接受（非每 tick）。
+void World::rebuildFluidCells()
+{
+    m_waterCells.clear();
+    m_lavaCells.clear();
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y) {
+                const quint8 b = m_chunks.blockAt(x, y, z);
+                if (b == BlockRegistry::Water) m_waterCells.insert(packGrowthCell(x, y, z));
+                else if (b == BlockRegistry::Lava) m_lavaCells.insert(packGrowthCell(x, y, z));
+            }
 }
 
 // t176 新世界生成：按 seed 全量 worldgen + emit。generate() 内部 recreate 网格（清上一世界残留），
@@ -153,6 +188,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     if (oldId == id) return false; // 无变化
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏（→5 参数 id,0 重置 state）
     noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
+    noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（流体 tick 据它遍历，免全图扫描）
     qInfo("vo.edit: setBlock %d,%d,%d  %d->%d", x, y, z, int(oldId), int(id)); // t155f 诊断：编辑时序
     if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
         emit blockBroken(x, y, z, int(oldId)); // 破：带原方块 id（粒子/音效按它取色/取声）
@@ -228,6 +264,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     if (oldId == id && oldState == state) return false; // id 与 state 均无变化
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
     noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
+    noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（流体 tick 据它遍历，免全图扫描）
     if (oldId != id) {
         // id 变化 → 发 broken/placed（同 4 参数语义：破带原 id、放带新 id）；id 不变只 state 变（门开合）不发。
         if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
@@ -266,6 +303,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
     if (occ != BlockRegistry::Air && occ != BlockRegistry::Water) return false; // 仅空气 / 水可被实体着地覆盖
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
     noteGrowthWrite(x, y, z, occ, id); // t425：维护生长方格索引（沙落覆盖作物 / 耕地时正确移除）
+    noteFluidWrite(x, y, z, occ, id);  // perf：维护流体方格索引（沙落覆盖水时正确移除水格）
     recomputeLightAround(x, y, z, occ, id); // t154：增量重 flood（oldId=被覆盖的 air/水 → newId=id）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -286,6 +324,7 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     const quint8 lightOldId = oldId; // recomputeLightAround 用编辑前后 id（水 isSolid=false 非遮光，光照通常无变化）
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
     noteGrowthWrite(x, y, z, lightOldId, id); // t425：维护生长方格索引（作物升阶段 id 不变 → no-op；甘蔗生长 / 耕地增删正确）
+    noteFluidWrite(x, y, z, lightOldId, id);  // perf：维护流体方格索引（水/岩浆增删 / level 变 id 不变 → 流体格增删正确）
     recomputeLightAround(x, y, z, lightOldId, id);
     // t380：流体 tick 内部写入 → 标流体脏（链式扩散：本次写入改变流场 → 下次 tick 续扫直到稳态）。
     //   按 id / oldId 设对应标志：写 / 移除 Water → m_waterDirty；写 / 移除 Lava → m_lavaDirty。
@@ -382,14 +421,19 @@ void World::tickWaterFlow()
     };
 
     // 1) 快照当前水格（tick 内栅格不变 —— 新增/蒸发在 pass 末统一应用）。
+    //    perf：遍历 m_waterCells（O(水格数)）替代全图 W×D×H 扫描（O(3.28M) × chunk 路由除法）。集合由
+    //      noteFluidWrite 增量维护（写入路径 setBlock / setWaterSilent 等）；rebuildFluidCells 在 generate /
+    //      finishLoad 末全图重建一次。防御：某条直写路径漏 noteFluidWrite 致集合含过期项（cell 已非水）→
+    //      blockAt 复核跳过（不影响正确性，仅少扫一格；稳态早退保证零扫描时此遍历不跑）。
     struct WCell { int x, y, z; quint8 level; };
     std::vector<WCell> cells;
-    for (int x = 0; x < W; ++x)
-        for (int z = 0; z < D; ++z)
-            for (int y = 0; y < H; ++y) {
-                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Water)
-                    cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
-            }
+    cells.reserve(m_waterCells.size());
+    for (const quint64 k : m_waterCells) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        if (m_chunks.blockAt(x, y, z) != BlockRegistry::Water) continue; // 过期索引项（直写漏通知）→ 跳过
+        cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
+    }
 
     // t411 流体交互 pass A（流水 → 静岩浆源 → 黑曜石）：遍历快照中的**流水**格（state>0），查 6 正交邻是否
     //   为**静岩浆源**（Lava state=0）；命中则把该静岩浆源凝固为 Obsidian。机制等价 MC 1.0「流水触岩浆源 →
@@ -610,15 +654,16 @@ void World::tickLavaFlow()
              + static_cast<long long>(y) * static_cast<long long>(W) * D;
     };
 
-    // 1) 快照当前岩浆格。
+    // 1) 快照当前岩浆格（perf：遍历 m_lavaCells O(岩浆格数) 替代全图扫描 O(3.28M)；同 tickWaterFlow）。
     struct LCell { int x, y, z; quint8 level; };
     std::vector<LCell> cells;
-    for (int x = 0; x < W; ++x)
-        for (int z = 0; z < D; ++z)
-            for (int y = 0; y < H; ++y) {
-                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Lava)
-                    cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
-            }
+    cells.reserve(m_lavaCells.size());
+    for (const quint64 k : m_lavaCells) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        if (m_chunks.blockAt(x, y, z) != BlockRegistry::Lava) continue; // 过期索引项 → 跳过
+        cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
+    }
 
     // t438 流体交互 pass B（流岩浆 → 静水源→石头 / 流水→圆石）：遍历快照中的**流岩浆**格（state>0），查 6
     //   正交邻的水格，按对方 state 凝固：**静水源**（Water state=0）→ **Stone**；**流水**（state>0）→ **Cobblestone**。
@@ -1655,6 +1700,8 @@ void World::generate()
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
     m_decayingLeaves.clear(); // t325 全新世界无失撑叶 → 清渐进衰减队列（防旧世界坐标误清新世界叶）
     m_growthCells.clear();   // t425 全新世界 → 清生长方格索引（worldgen placeSugarcane 经 setVoxelIfAir 增量重建）
+    m_waterCells.clear();    // perf：全新世界 → 清流体方格索引（worldgen 直写 chunk 不经写入路径 → 末尾 rebuildFluidCells 全图重建）
+    m_lavaCells.clear();
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）
 
     // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 海域」决定，下层 dirt / 深 stone。
@@ -1751,6 +1798,10 @@ void World::generate()
     placeSugarcane(); // t397：水域邻接陆地确定性散布 1..3 格高甘蔗（PLAN §2-K；花后，仅写空气格不覆盖草 / 树 / 花）
     placeSweetBerryBushes(); // t467：Snowy 群系雪顶确定性散布浆果灌木丛（PLAN §2-K；甘蔗后，仅写空气格不覆盖雪上已占格）
     recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
+    // perf：worldgen 末全图重建流体方格索引一次 —— worldgen 经 m_chunks.setBlock / fillWater 直写 chunk
+    //   （不经 World 写入路径 → noteFluidWrite 不捕获）。一次性 3.3M 扫描在生成期可接受（非每 tick），
+    //   使后续流体 tick 走 O(流体格数) 遍历而非全图扫描。
+    rebuildFluidCells();
     // t380：worldgen 末置流体脏 → 进世界后首次 tickWaterFlow/tickLavaFlow 各扫一次确认稳态（海洋 / 岩浆湖
     //   全源 → 零候选 → 即清标志停扫）。一次性确认扫描（防御：避免标志初始 false 漏掉 worldgen 引入的流场）。
     m_waterDirty = true;
@@ -1810,6 +1861,7 @@ void World::setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state)
         return;
     m_chunks.setBlock(x, y, z, id, state);
     noteGrowthWrite(x, y, z, BlockRegistry::Air, id); // t425：worldgen placeSugarcane 经此 → 甘蔗入索引
+    noteFluidWrite(x, y, z, BlockRegistry::Air, id);  // perf：worldgen 填水若经此 → 水格入索引（防御性，主要靠 generate 末 rebuildFluidCells）
 }
 
 // 单棵橡树：surfaceY=草顶 y；主干 trunkH 格原木(id5)从 surfaceY+1 起；顶部树叶(id7)树冠。
@@ -2372,36 +2424,41 @@ void World::freezeSurfaceWater()
     qInfo() << "worldgen: frozen surface ice =" << frozen; // 同 seed → 同计数（确定性核对）
 }
 
-// t468 结冰 tick（spec「寒冷群系暴露天空的水源→冰」）：见 world.h 头注释。每 5s 一窗，扫 Snowy 群系列，自顶向下
-//   找暴露天空（skyLightAt>=15）的水源（Water state==0）按散布概率冻结为 Ice（setWaterSilent 静默写 + worldChanged）。
-//   进入阴影区（skyLight<15）即停该列向下扫（下方水都不暴露天空，无谓扫描）。worldgen freezeSurfaceWater 已在生成期
-//   冻结雪原表层水；本 tick 处理玩家后放 / 冰破回水 / 动态暴露的延迟冻结（机制等价 MC random-tick 结冰）。
+// t468 结冰 tick（spec「寒冷群系暴露天空的水源→冰」）：见 world.h 头注释。每 5s 一窗，遍历水格索引
+//   （m_waterCells，O(水格数)），挑 Snowy 群系 + 暴露天空（skyLightAt>=15）的水源（Water state==0）按散布
+//   概率冻结为 Ice（setWaterSilent 静默写 + worldChanged）。worldgen freezeSurfaceWater 已在生成期冻结雪原表层水；
+//   本 tick 处理玩家后放 / 冰破回水 / 动态暴露的延迟冻结（机制等价 MC random-tick 结冰）。
 void World::tickIceFreeze()
 {
     FrameProfiler::Scope prof("wIce"); // perf：含节流 / 早退
     if (++m_freezeTickCounter < kFreezeTickInterval) return; // 节流：每 kFreezeTickInterval tick（~5s）做一次判定
     m_freezeTickCounter = 0;
-    const int W = m_width, D = m_depth, H = m_height;
-    if (W <= 0 || D <= 0 || H <= 0) return;
+    if (m_width <= 0 || m_depth <= 0 || m_height <= 0) return;
 
     const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_freezeIntervalIndex) * 0x9E3779B9u)); // 窗口序号混入散布种子
     int frozen = 0;
-    for (int x = 0; x < W; ++x) {
-        for (int z = 0; z < D; ++z) {
-            if (biomeAt(x, z) != Biome::Snowy) continue; // 仅雪原/针叶群系结冰（寒冷生物群系）
-            // 自顶向下扫：进入阴影区（skyLight<15）即停（下方水都不暴露天空）。暴露天空的水源按概率冻结。
-            for (int y = H - 1; y >= 0; --y) {
-                if (m_chunks.skyLightAt(x, y, z) < 15) break; // 进入阴影区 → 下方都不暴露天空，停扫（性能 + 正确）
-                const quint8 b = m_chunks.blockAt(x, y, z);
-                if (b != BlockRegistry::Water) continue;
-                if (m_chunks.stateAt(x, y, z) != 0) continue; // 仅水源结冰（流水 state>0 不结，机制等价 MC）
-                // 散布概率：seed + 位置 + 窗口序号哈希 → 不同格不同窗错峰冻结（非瞬时全冻，PLAN §2-K）。
-                const quint32 h = hashVoxel(mixedSeed, x, y, z);
-                if (int(h % 100u) >= kFreezePct) continue; // 散布落空 → 本窗不冻
-                setWaterSilent(x, y, z, BlockRegistry::Ice, 0); // 静默写 Ice（系统模拟，非玩家破/放 → 无反馈）
-                ++frozen;
-            }
-        }
+    // perf：遍历 m_waterCells（O(水格数)）替代全图 W×D×H 扫描（O(3.28M)）。原全图扫「自顶向下进入阴影区即停」
+    //   的列短路优化，改为「逐水格直接判 skyLightAt>=15」—— 语义等价（暴露天空的水源 skyLight=15），且免扫
+    //   非水格 / 阴影区格。先收集冻结目标再统一应用：setWaterSilent 写 Ice 会经 noteFluidWrite 删 m_waterCells
+    //   里的水格项 → 边遍历边删会迭代器失效（unordered_set erase 破坏当前迭代器）。
+    struct FreezeTarget { int x, y, z; };
+    std::vector<FreezeTarget> toFreeze;
+    toFreeze.reserve(m_waterCells.size());
+    for (const quint64 k : m_waterCells) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        if (biomeAt(x, z) != Biome::Snowy) continue; // 仅雪原/针叶群系结冰（寒冷生物群系）
+        if (m_chunks.blockAt(x, y, z) != BlockRegistry::Water) continue; // 过期索引项 → 跳过
+        if (m_chunks.stateAt(x, y, z) != 0) continue; // 仅水源结冰（流水 state>0 不结，机制等价 MC）
+        if (m_chunks.skyLightAt(x, y, z) < 15) continue; // 阴影区不暴露天空 → 不冻（原全图扫的列短路等价）
+        // 散布概率：seed + 位置 + 窗口序号哈希 → 不同格不同窗错峰冻结（非瞬时全冻，PLAN §2-K）。
+        const quint32 h = hashVoxel(mixedSeed, x, y, z);
+        if (int(h % 100u) >= kFreezePct) continue; // 散布落空 → 本窗不冻
+        toFreeze.push_back({x, y, z});
+    }
+    for (const FreezeTarget &t : toFreeze) {
+        setWaterSilent(t.x, t.y, t.z, BlockRegistry::Ice, 0); // 静默写 Ice（系统模拟，非玩家破/放 → 无反馈）
+        ++frozen;
     }
     ++m_freezeIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同格错峰冻结）
     if (frozen > 0) qInfo("vo.world: tickIceFreeze frozen=%d", frozen); // 可观测性（同 tickCropGrowth）

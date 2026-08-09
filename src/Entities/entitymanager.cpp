@@ -2506,7 +2506,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   永久卡死（用户「下台阶卡住变活靶」）。改 footprint 后：只要还有任一列压在更高支撑上就保 resting，
             //   悬出台阶沿继续前行；直到 trailing 边也越过台阶沿（footprint 全离支撑）才下沉 → 落低地时 trailing
             //   已不在高块列 → 腿不卡、干净步下（机制等价 MC mob 越过台阶沿后才自动步下 1 格）。
-            const int supportY = qFloor(e.pos.y() - e.halfH) - 1; // 实体底面下方那一格（= 支撑方块 cellY）
+            // perf FP-robust：restY = mobSolidY+1+halfH（落地时设）。pos.y - halfH 应恰为整数 mobSolidY+1，但
+            //   halfH 非 2 的幂时（pig/sheep 0.45、敌对 0.9、spider 0.3）float 运算有 ~1 ULP 残差 → pos.y-halfH
+            //   可能落在 mobSolidY+0.9999 → floor 取 mobSolidY → supportY=mobSolidY-1（支撑格下方一格）。
+            //   厚地面下邻格也是实体 → 误判不暴露；但**薄地板**（1 格厚天花板 / 生成的结构顶）下邻格是空气 →
+            //   误判失支撑 → resting 翻 false → 重力下落 1 帧 → 落回同位 resting=true → 下个 aiTick 又翻 false
+            //   = 周期振荡（每 aiTick 一次重力 + dirty bump + emit，驱动 QML 全 delegate 绑定重算 = 持续卡顿源）。
+            //   加 0.01f（>> 1 ULP ~1e-5、<< 1.0 格）把任何向下残差推回整数之上 → supportY 稳定 = mobSolidY。
+            //   仅在 resting 复探生效（pos.y 已 snap 到 restY，feet 恒 ≈ 整数）；下落中 mob 不走此分支。
+            const int supportY = qFloor(e.pos.y() - e.halfH + 0.01f) - 1; // 实体底面下方那一格（= 支撑方块 cellY）
             if (mobFootprintHasSupport(world, e.pos.x(), e.pos.z(), supportY, e.halfW)) continue; // 仍实体 → 保持静止
             e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
             dirty = true;

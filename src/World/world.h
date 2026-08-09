@@ -659,6 +659,12 @@ private:
     //   （setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）经 noteGrowthWrite 增量维护；
     //   generate/beginLoad 清空、finishLoad 全图重建（存档 blob 直写不经写入路径）。
     std::unordered_set<quint64> m_growthCells;
+    // perf：流体方格位置索引（Water / Lava 各一集）—— 流体 tick 遍历此集（O(流体格数)）替代全图扫描
+    //   （O(W×D×H)=3.28M）。写入路径经 noteFluidWrite 增量维护；generate/beginLoad 清空、finishLoad
+    //   全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。稳态（无流体写入）
+    //   时配合 m_waterDirty / m_lavaDirty 早退 → 零扫描；活跃流场时扫描量 = 流体格数（远 < 3.28M）。
+    std::unordered_set<quint64> m_waterCells;
+    std::unordered_set<quint64> m_lavaCells;
     int m_leafDecayTickCounter = 0;
     int m_leafDecayIntervalIndex = 0;
     static constexpr int kLeafDecayTickInterval = 4; // tickLeafDecay 节流间隔（WorldClock tick 单位 = 100ms → 0.4s/窗）
@@ -700,6 +706,14 @@ private:
     void noteGrowthWrite(int x, int y, int z, quint8 oldId, quint8 newId);
     // t425 perf：全图扫描重建生长方格集合（finishLoad 存档 blob 直写后调一次；运行期由 noteGrowthWrite 维护）。
     void rebuildGrowthCells();
+    // perf：流体方格（Water / Lava）位置索引增量维护 —— 流体 tick（tickWaterFlow / tickLavaFlow /
+    //   tickIceFreeze）遍历此集合（O(流体格数)）替代全图扫描（O(W×D×H)=3.28M × chunk 路由除法）。
+    //   写入路径（setBlock / setBlockFromEntity / setWaterSilent / setVoxelIfAir）在 m_chunks.setBlock 后调
+    //   本方法（id 变更时按 oldId/newId 是否流体方块增删对应集合项；id 不变如水流 level 变 → no-op）。
+    //   generate / finishLoad 末重建一次（worldgen / 存档 blob 直写不经写入路径）。键编码复用 packGrowthCell。
+    void noteFluidWrite(int x, int y, int z, quint8 oldId, quint8 newId);
+    // perf：全图扫描重建流体方格集合（generate / finishLoad 末调一次；运行期由 noteFluidWrite 增量维护）。
+    void rebuildFluidCells();
 };
 
 #endif // WORLD_H
