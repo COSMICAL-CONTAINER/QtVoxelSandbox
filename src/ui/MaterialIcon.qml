@@ -841,6 +841,41 @@ Item {
                 R(10, 14, 1, 1, chipShade)
             }
 
+            // t467 甜浆果（0x233）：雪原浆果灌木丛采摘产物 + 食物（右键成熟丛采得 2-3、长按右键食 +2 饥饿）。
+            //   MC 风格甜浆果 = 一簇红色圆润浆果（3-4 颗挤在一起）+ 顶端绿色花萼小叶。一眼辨「红色浆果簇」
+            //   （区别于苹果 / 生牛肉的单块肉：浆果是多颗小圆果聚簇 + 绿萼）。纯原创自绘（§9a）。
+            //   配色：berry #b81c2a（浆果主体，深红）/ berryLight #e84030（受光高光，鲜红）/ berryDark #74101a
+            //   （浆果暗边 + 阴影）/ calyx #4a8a3a（绿萼）/ calyxDark #2a5a1a（萼底暗收）。
+            const drawSweetBerry = () => {
+                const berry = "#b81c2a", berryLight = "#e84030", berryDark = "#74101a"
+                const calyx = "#4a8a3a", calyxDark = "#2a5a1a"
+                // 顶端绿萼（3 条小叶，rows 3..6，呈「花萼张开」）
+                R(7, 3, 2, 4, calyx)
+                R(10, 2, 2, 5, calyx)
+                R(13, 3, 2, 4, calyx)
+                R(10, 6, 2, 1, calyxDark)        // 萼底暗收
+                // 浆果簇（4 颗圆角小红果挤在一起，rows 7..18）：左上 / 右上 / 左下 / 右下四果错位聚簇。
+                //   左上果（rows 7..12）
+                R(5, 7, 6, 6, berry)
+                R(5, 7, 2, 2, berryLight)        // 受光高光（左上）
+                R(10, 11, 1, 2, berryDark)       // 右下暗边
+                //   右上果（rows 7..12）
+                R(11, 7, 6, 6, berry)
+                R(11, 7, 2, 2, berryLight)       // 受光高光
+                R(15, 11, 2, 2, berryDark)       // 右下暗边
+                //   左下果（rows 12..18）
+                R(6, 12, 6, 6, berry)
+                R(6, 12, 2, 2, berryLight)       // 受光高光
+                R(10, 17, 2, 1, berryDark)       // 底阴影
+                //   右下果（rows 12..18）
+                R(11, 12, 6, 6, berry)
+                R(11, 12, 2, 2, berryLight)      // 受光高光
+                R(15, 17, 2, 1, berryDark)       // 底阴影
+                // 果间缝隙暗线（中央十字暗缝，表「4 颗果的接缝」）
+                R(10, 8, 1, 9, berryDark)        // 垂直缝
+                R(6, 11, 11, 1, berryDark)       // 水平缝
+            }
+
             // 腐肉（0x218，t299）：杀蹒跚者（僵尸）掉落。MC 风格腐肉 = 暗红褐腐块 + 绿斑霉点 + 腐败裂痕。
             //   纯原创自绘（§9a）。区别于生牛肉：主色更暗（褐红 vs 鲜红）+ 绿霉斑（变质的身份特征）。
             //   配色：flesh #6a3028（暗红褐主体）/ fleshDark #3e1818（腐败裂痕 + 底阴影）/ fleshLight #8a4838
@@ -1252,6 +1287,7 @@ Item {
             case 0x230: drawPotato();             break // t400 马铃薯（猪繁殖食物；喂成体猪 → 求偶）
             case 0x231: drawRawFish();            break // t401 生鱼（钓竿拉起获物；机制等价 MC 1.0 raw fish）
             case 0x232: drawBonemeal();           break // t447 骨粉（骨头合成产物；右键未成熟作物催熟一阶段）
+            case 0x233: drawSweetBerry();         break // t467 甜浆果（成熟浆果丛采摘得；可食 +2 饥饿）
             default:    drawStick();        break
             }
         }

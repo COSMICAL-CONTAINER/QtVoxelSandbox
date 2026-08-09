@@ -207,6 +207,13 @@ TILES = [
     #   一族木制品共享，同橡木 WoodSlab/Fence/Door 复用 planks(8) 模式）。深色木纹区别橡木木板；机制等价
     #   MC 1.0 spruce 木制品。tools/build_spruce.py 程序生成原创像素图（§9 override (a)）。
     "default_spruce_planks",        # 102 spruce_planks（云杉木板 / 台阶 / 栅栏 / 门 共享；深色木纹）
+    # t467 雪原浆果灌木丛 3 阶段贴图（SweetBerryBush cross 几何段，alpha 透明底 cutout；机制等价 MC 1.0
+    #   sweet berry bush）。mesher 在 PartialBlockGeometry::append 的 SweetBerryBush case 内据 state 选
+    #   tile = 103 + stage（0 无果嫩丛 / 1 小果 / 2 成熟红浆果簇）。SweetBerryBush 方块 def 各面 = 基底 103。
+    #   名称 / 贴图原创自绘 §9a；tools/build_sweet_berry.py 程序生成原创像素图。
+    "default_sweet_berry_bush_0",   # 103 sweet_berry_bush_0（阶段 0 无果嫩丛；SweetBerryBush def 基底 tile）
+    "default_sweet_berry_bush_1",   # 104 sweet_berry_bush_1（阶段 1 小果；mesher 据 state 选）
+    "default_sweet_berry_bush_2",   # 105 sweet_berry_bush_2（阶段 2 成熟红浆果簇；右键采摘得 2-3 浆果）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

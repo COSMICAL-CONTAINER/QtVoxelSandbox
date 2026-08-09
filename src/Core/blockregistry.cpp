@@ -358,6 +358,18 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* spruce_slab   */ {int(BlockRegistry::SpruceSlab),     102,102,102,102, false, BlockRegistry::ShapeSlab,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceSlab),     1, 64, "spruce_slab",   "云杉台阶"}, // 半高（state bit0=上半(1)/下半(0)；与 WoodSlab 同编码）
     /* spruce_fence  */ {int(BlockRegistry::SpruceFence),    102,102,102,102, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceFence),    1, 64, "spruce_fence",  "云杉栅栏"}, // 中心立柱 + 四向横档连邻居（与 WoodFence 同几何）；state=0
     /* spruce_door   */ {int(BlockRegistry::SpruceDoor),     102,102,102,102, false, BlockRegistry::ShapeDoor,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceDoor),     1,  1, "spruce_door",   "云杉门"}, // 两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向（与 WoodDoor 同编码）
+    // ── t467 雪原浆果灌木丛（SweetBerryBush）：机制等价 MC 1.0 sweet berry bush（雪原 Snowy 群系散布的可采摘
+    //   灌木）。**cross 形广告牌方块**（与 TallGrass / Sapling / 作物同走 PartialBlockGeometry 的 cross 几何段，两片
+    //   对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。**3 生长阶段存 chunk state**（state = 阶段
+    //   0..SweetBerryBushStageMax；0=无果嫩丛、1=小果、2=成熟可采摘）。solid=false（非实体 → 不挡邻居面剔除，同草丛 /
+    //   作物）、shape=ShapeNone（**无碰撞** → 玩家穿过；机制等价 MC 浆果丛可踩过，stage>0 踩过受少量伤害归
+    //   playercontroller 环境伤害 tick）、hardness=0（瞬破，同草丛 / 作物）、NoTool（空手可采且掉落）、dropId=0x233
+    //   （甜浆果**物品**，材料段 RecipeRegistry::SweetBerryId；Core 不依赖 Game 故字面量 0x233 —— 破丛掉浆果物品非丛
+    //   方块，机制等价 MC 破浆果丛掉浆果）、dropCount=1、maxStack=64。各面贴图=sweet_berry_bush_<state>（tile 103..105；
+    //   本表 topTile/sideTile 存阶段 0 基底 tile 103，partialblockgeometry 的 SweetBerryBush case 内 state + 基底算实际
+    //   阶段贴图，同 WheatCrop 模式）。音色归 GroupGrass（软植物音，同草丛 / 蘑菇）。worldgen placeSweetBerryBushes 在
+    //   Snowy 群系 SnowLayer 地表上方低密度散布（机制等价 MC 寒冷群系浆果丛）。进创造调色板。
+    /* sweet_berry_bush */ {int(BlockRegistry::SweetBerryBush), 103,103,103,103, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x233, 1, 64, "sweet_berry_bush", "雪原浆果灌木丛"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -437,6 +449,7 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* spruce_slab             */ -1, // t466 云杉台阶 → MC 1.0 无等价（1.0 仅石台阶 id 44，木台阶 1.3+；云杉更晚）
     /* spruce_fence            */ -1, // t466 云杉栅栏 → MC 1.0 无等价（1.0 仅橡木栅栏 id 85，云杉栅栏 1.7+ metadata 分）
     /* spruce_door             */ -1, // t466 云杉门 → MC 1.0 无等价（1.0 仅橡木门 id 64，云杉门 1.8+ 独立 id）
+    /* sweet_berry_bush        */ -1, // t467 雪原浆果灌木丛 → MC 1.0 无等价（sweet berry bush id 105 为 1.14+；本工程作 cross 装饰灌木故无 1.0 等价）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -516,6 +529,7 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == CarrotCrop) return true; // t407 段外 cross（胡萝卜作物，同小麦作物按 state 选阶段贴图）
     if (blockId == PotatoCrop) return true; // t407 段外 cross（马铃薯作物，同小麦作物按 state 选阶段贴图）
     if (blockId == Ladder) return true; // t413 段外 cross（木梯竖直爬行梯，两片对角相交双面 quad 贴梯瓦片）
+    if (blockId == SweetBerryBush) return true; // t467 段外 cross（雪原浆果灌木丛，两片对角相交双面 quad 贴 stage 贴图）
     if (blockId >= FirstFlower && blockId <= LastFlower) return true; // t397 段外花段（4 色 cross）
     return blockId >= FirstCross && blockId <= LastCross;
 }

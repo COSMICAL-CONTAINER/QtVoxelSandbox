@@ -13,6 +13,16 @@
 #include <algorithm>
 #include <cmath>
 
+// t467 食物饥饿恢复量（单一权威）：返回 itemId 作为食物一次恢复的饥饿值；非食物 → 0。
+//   面包（BreadId）= kBreadHungerAmount(5)、甜浆果（SweetBerryId）= kSweetBerryHungerAmount(2)。
+//   机制等价 MC 1.0 各食物恢复不同饥饿（面包 5 / 浆果 2）。新增食物只改本方法一处（避免各处硬编码 BreadId）。
+int PlayerController::foodHungerAmount(int itemId)
+{
+    if (itemId == RecipeRegistry::BreadId)      return kBreadHungerAmount;
+    if (itemId == RecipeRegistry::SweetBerryId) return kSweetBerryHungerAmount;
+    return 0;
+}
+
 PlayerController::PlayerController(QQuickItem *parent) : QQuickItem(parent)
 {
     connect(this, &QQuickItem::windowChanged, this, &PlayerController::onWindowChanged);
@@ -371,7 +381,9 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
                 //   分支已移除）。其它持物（方块 / 桶 / 锄 / 种子 / 蛋 / 工具）仍走 placeBlock 单击路径。
                 if (me->button() == Qt::RightButton)  {
                     const int heldForEat = m_hotbar ? m_hotbar->selectedItemId() : 0;
-                    if (heldForEat == RecipeRegistry::BreadId) { beginEating(); return true; }
+                    // t267：手持食物（面包 / 甜浆果）→ 右键**按住**进食（不再单击即食；spec「单击即食→改长按右键」）。
+                    //   t467：经 foodHungerAmount 单一权威判「是否食物」，新增食物只改本判定一处（避免各处硬编码 BreadId）。
+                    if (foodHungerAmount(heldForEat) > 0) { beginEating(); return true; }
                     // t304 手持弓 → 右键长按拉弓（不进 placeBlock；弓非方块，selectedBlock 已守 Air）。机制等价
                     //   MC 1.0 右键拉弓。持物判据直读 hotbar（单一权威，免 QML 绑定滞后窗口，同面包 / 桶修法）。
                     if (heldForEat == int(ToolRegistry::Bow)) { beginBowDraw(); return true; }
@@ -1222,7 +1234,8 @@ void PlayerController::beginEating()
     m_rightDown = true;
     if (!canPlace()) return; // 观察者不能进食（沿用 placeBlock 入口门控）
     if (!m_hotbar || !m_captured) return;
-    if (m_hotbar->selectedItemId() != RecipeRegistry::BreadId) return; // 持物非面包 → 不进（仍记 m_rightDown）
+    // t467：经 foodHungerAmount 单一权威判「持物是否食物」（面包 / 甜浆果）；非食物 → 不进（仍记 m_rightDown）。
+    if (foodHungerAmount(m_hotbar->selectedItemId()) == 0) return;
     m_eating = true;
     m_eatingProgress = 0.0f;
     m_eatBeat = -1; // 首拍 0 立即触发屑粒（进食开始的反馈即时）
@@ -1258,8 +1271,9 @@ void PlayerController::cancelEating()
 void PlayerController::finishEating()
 {
     if (!m_hotbar) { cancelEating(); return; }
-    // 饥饿 +5（clamp；Survival 真增 / Creative 锁满无变化静默）。
-    const int nv = std::clamp(m_hunger + int(kBreadHungerAmount), 0, int(kMaxHunger));
+    // t467：经 foodHungerAmount 取当前食物恢复量（面包 +5 / 甜浆果 +2；clamp；Survival 真增 / Creative 锁满静默）。
+    const int amount = foodHungerAmount(m_hotbar->selectedItemId());
+    const int nv = std::clamp(m_hunger + amount, 0, int(kMaxHunger));
     if (nv != m_hunger) { m_hunger = nv; emit hungerUpdated(m_hunger); } // 呈现层 → PlayerState.setHunger
     if (m_mode == Survival)
         m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 面包（创造不耗）
@@ -1278,14 +1292,14 @@ void PlayerController::updateEating(float dt)
     // 连食：右键仍按但当前未进食（刚吃完一件 m_eating 被 cancelEating 清 / 或持面包后按下时 beginEating
     //   因某早 return 未进）→ 若仍持面包 + 可进食 → 自动 beginEating（progress 归 0）。仅非 spectator。
     if (!m_eating && m_rightDown && canPlace() && m_hotbar
-        && m_hotbar->selectedItemId() == RecipeRegistry::BreadId) {
+        && foodHungerAmount(m_hotbar->selectedItemId()) > 0) {
         beginEating();
     }
 
     if (!m_eating) return;
     if (!m_hotbar || !m_captured) { cancelEating(); return; }
-    // 持物变（切槽 / 面包耗尽）→ 取消进食（同挖掘目标变更清进度）。
-    if (m_hotbar->selectedItemId() != RecipeRegistry::BreadId) { cancelEating(); return; }
+    // 持物变（切槽 / 食物耗尽换非食物）→ 取消进食（同挖掘目标变更清进度）。t467 经 foodHungerAmount 单一权威判食物。
+    if (foodHungerAmount(m_hotbar->selectedItemId()) == 0) { cancelEating(); return; }
 
     m_eatingProgress += dt / kEatDuration;
     // 跨节拍屑粒：progress×kEatBeats 跨阶时发 eatingParticle（嘴部 = 玩家眼位 position()）。
@@ -1682,6 +1696,35 @@ void PlayerController::placeBlock()
             emit doorToggled(willOpen);
             emit swingArm();
             return;
+        }
+    }
+    // t467 雪原浆果灌木丛采摘 useBlock（spec「成熟右键采摘得 2-3 浆果、丛回阶段 0 重新长」；机制等价 MC 1.0
+    //   sweet berry bush 右键成熟丛采摘）。右键**成熟**浆果丛（SweetBerryBush state==SweetBerryBushStageMax）→
+    //   spawnItem 掉落 2-3 甜浆果（RecipeRegistry::SweetBerryId；count = 2 + hash&1）+ 5 参数 setBlock 把丛降回
+    //   阶段 0（id 不变只 state 变 → 不发 broken/placed，发 worldChanged 重建 mesh 同 t447 骨粉模式）+ 挥手。
+    //   优先于放置（同工作台 / 门：右键成熟丛即采，不另放块），空手亦可（采摘是「使用」语义，与手持何物无关）。
+    //   非成熟丛（state<max）右键 → 不采（机制等价 MC 右键未成熟丛无效应），fall-through 到下方放块路径。spectator
+    //   已被入口 canPlace() 守卫拦截；Creative / Survival 均可采（创造采得浆果仅作装饰，丛仍降阶段 0 重长）。
+    //   分层（PLAN §2）：采摘属 Game/Physics（读射线命中 + 写 World + 发 spawnItem 语义事件），不改 setBlock 语义。
+    if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::SweetBerryBush) {
+        const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz); // 采摘前快照（==max 才采）
+        if (st >= BlockRegistry::SweetBerryBushStageMax) {
+            // 2-3 浆果（QRandomGenerator 玩家交互掉落的随机性，非 worldgen 确定性范畴 §2-K，同 dropCropDrops）。
+            const int berryCount = 2 + int(QRandomGenerator::global()->bounded(0, 2)); // 2 或 3
+            // 散布到破格 + 非实体水平邻格做视觉分离（同 dropCropDrops 小麦种子模式）。
+            constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+            int sx = m_hitBx, sz = m_hitBz;
+            for (const auto &o : kHoriz) {
+                if (!BlockRegistry::isSolid(m_world->blockAt(m_hitBx + o[0], m_hitBy, m_hitBz + o[1]))) {
+                    sx = m_hitBx + o[0]; sz = m_hitBz + o[1]; break;
+                }
+            }
+            emit spawnItem(sx, m_hitBy, sz, RecipeRegistry::SweetBerryId, berryCount);
+            // 丛降回阶段 0（5 参数 setBlock：id 不变 + state=0 → 不发 broken/placed，发 worldChanged 重建 mesh）。
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::SweetBerryBush, 0);
+            m_lastPlaceMs = now;
+            emit swingArm(); // 采摘也是一次「使用」动作 → 挥手（t29）
+            return; // 采摘成功 → 不再走放置路径
         }
     }
     } // t174：m_hasHit 局部门控结束（工作台/熔炉/门/活版门需命中；桶分支与放块路径各自处理命中需求）
@@ -3432,13 +3475,18 @@ void PlayerController::step(qreal dt)
         if (m_burning) { m_burning = false; emit burningChanged(); }
     }
 
-    // t394/t445 玩家仙人掌接触伤害（spec「contact damages entities that touch it」；机制等价 MC 1.0 仙人掌触碰即伤）。
+    // t394/t445 玩家仙人掌接触伤害 + t467 雪原浆果灌木丛穿越伤害（spec「contact damages entities that touch it」
+    //   / 「踩过 stage>0 丛的实体受少量伤害」；机制等价 MC 1.0 仙人掌触碰即伤 + 甜浆果丛穿越即伤）。
     //   接触判定：扫描玩家 AABB footprint（±0.3 覆盖玩家宽 0.6 的 1~4 格）在脚位 / 眼位 Y 层，对每个 footprint 格查
     //   其自身 + 水平 4 邻，任一 == Cactus 即接触；再加脚下格（站仙人掌顶）。**t445 ③ 全方位**：旧版仅查 footprint 自身
     //   格 —— 但 Cactus 实体（碰撞停在邻格）→ 玩家自身格恒非 Cactus → 仅「脚下格」分支生效（只判站顶，撞侧面不伤）。
     //   改查 footprint 格 + 水平 4 邻 → 覆盖「撞其任意侧」（与 mob 版 EntityManager 同源 4 邻判定）。每 kCactusDamageInterval
     //   (0.5s) 扣 1HP（fallDamageTaken(1, Cactus) 复用 takeDamage→damaged 红闪 / 视角晃链，同窒息 / 溺水 / 火）。仅
     //   Survival（Creative/Spectator 无敌）；离开即重置累积器。只读 World::blockAt（向下依赖）。
+    //   t467 浆果丛穿越：SweetBerryBush 是 ShapeNone 无碰撞 → 玩家**穿过**丛格（嵌入丛内）。stage>0（带果）丛有刺，
+    //   穿越即伤（机制等价 MC 甜浆果丛穿越即伤 + 减速，本工程简化仅伤害不减速）。检测 = footprint 自身格（脚位 / 眼位）
+    //   含 stage>0 SweetBerryBush 即接触（丛无碰撞 → 玩家自身格即丛格，不查 4 邻）。伤害复用同一 m_cactusDmgTimer +
+    //   fallDamageTaken(1, Cactus)（同为「带刺植物接触伤害」语义；死因归 Cactus 接触植物，简化避免新增 DeathCause 枚举）。
     if (m_mode == Survival && m_world) {
         const int fx0 = int(std::floor(m_pos.x() - 0.3f)), fx1 = int(std::floor(m_pos.x() + 0.3f));
         const int fz0 = int(std::floor(m_pos.z() - 0.3f)), fz1 = int(std::floor(m_pos.z() + 0.3f));
@@ -3448,13 +3496,20 @@ void PlayerController::step(qreal dt)
             return yy >= 0 && yy < m_world->height()
                    && m_world->blockAt(xx, yy, zz) == BlockRegistry::Cactus;
         };
+        // t467 浆果丛（stage>0 带果即有刺）：ShapeNone 无碰撞 → 玩家穿过丛格，自身格即丛格。stateAt 判 stage>0。
+        auto thornyBushAt = [&](int xx, int yy, int zz) -> bool {
+            return yy >= 0 && yy < m_world->height()
+                   && m_world->blockAt(xx, yy, zz) == BlockRegistry::SweetBerryBush
+                   && m_world->stateAt(xx, yy, zz) > 0;
+        };
         constexpr int kCactusNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         bool touch = false;
         for (int yy : {footY, eyeY}) {
             for (int cx = fx0; cx <= fx1 && !touch; ++cx)
                 for (int cz = fz0; cz <= fz1 && !touch; ++cz) {
-                    if (cactusAt(cx, yy, cz)) { touch = true; break; } // 嵌入（罕见）
-                    for (const auto &d : kCactusNb)                    // 水平 4 邻（撞侧面）
+                    if (cactusAt(cx, yy, cz)) { touch = true; break; }       // 仙人掌嵌入（罕见）
+                    if (thornyBushAt(cx, yy, cz)) { touch = true; break; }   // t467 浆果丛穿越（丛无碰撞，自身格即丛格）
+                    for (const auto &d : kCactusNb)                          // 仙人掌水平 4 邻（撞侧面）
                         if (cactusAt(cx + d[0], yy, cz + d[1])) { touch = true; break; }
                 }
         }

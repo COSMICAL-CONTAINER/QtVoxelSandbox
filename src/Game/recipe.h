@@ -201,6 +201,15 @@ public:
     //   MaterialIcon 自绘骨粉图标（米白粉末堆 + 几粒骨碎，§9a 区隔原创）。创造调色板补全便于测试 / 装饰取用。
     //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘）。
     static constexpr int BonemealId        = 0x232; // 骨粉：骨头合成产物；右键未成熟作物 → 催熟一阶段（t447）
+    // t467 甜浆果（sweet berry）：材料段 0x233。机制等价 MC 1.0 sweet berries——雪原浆果灌木丛（SweetBerryBush）的
+    //   采摘产物 + 可食食物。可堆叠 64；非方块（材料段）→ 右键不放置，走 useBlock「食用」分支（playercontroller
+    //   beginEating/finishEating，长按右键累积进食进度满后消耗 1 浆果 + 恢复饥饿 kSweetBerryHungerAmount=2，机制等价
+    //   MC 1.0 甜浆果 +2 hunger）。**获得途径**：右键**成熟**浆果丛（SweetBerryBush state==SweetBerryBushStageMax）→
+    //   2-3 浆果 + 丛回阶段 0 重新长（playercontroller useBlock 采摘分支，5 参数 setBlock 降阶段 id 不变只 state 变 +
+    //   worldChanged 重建 mesh，同 t447 骨粉模式）；破丛亦掉 1 浆果（BlockDef.dropId 兜底）。创造调色板补全便于测试。
+    //   MaterialIcon 自绘浆果图标（红色圆润浆果簇 + 绿色花萼，§9a 区隔原创）。无 MC 1.0 mcMaterialId 映射
+    //   （sweet berries id 477 为 1.14+；id 越表界 → -1 → 资源包回退引擎自绘 MaterialIcon）。
+    static constexpr int SweetBerryId      = 0x233; // 甜浆果：成熟浆果丛采摘得；可食（右键长按 +2 饥饿，t467）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

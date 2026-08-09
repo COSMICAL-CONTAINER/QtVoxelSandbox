@@ -441,6 +441,15 @@ private:
     //     生成的方块（树 / 草 / 花）。纯函数于 seed + biomeAt + 海域（seaColumnHeight/isSeaSandColumn/hashColumn）→
     //     同 seed 同分布；禁用任何运行期随机源（与 placeTallGrass / placeDesertFlora 同守卫语义）。
     void placeSugarcane();
+    // t467 雪原浆果灌木丛散布（PLAN §2-K 确定性）：遍历 Snowy 群系列，在积雪层（SnowLayer）地表上方一格低密度
+    //   散布浆果灌木丛（SweetBerryBush cross 广告牌，仅写空气格）。机制等价 MC 1.0 sweet berry bush（寒冷群系浆果丛）。
+    //   三守卫（同 placeTallGrass / placeFlowers 同族教训 t446 用对高度查询）：(1) 仅 Snowy 群系（biomeAt==Snowy，
+    //   其它群系地表非雪）；(2) 地表须为 SnowLayer（雪原覆雪地表判定；海域 seaColumnHeight>=0 独立、湖/洞口顶替换了
+    //   雪 → 跳过，不在水里 / 湖里生）；(3) surfaceY > kWaterLevel+1（不在沙滩带 / 水下生，机制等价 MC 浆果丛不生于
+    //   水边沙）。阶段随机 1..2（独立哈希位段，与密度位段解耦）—— 不散布阶段 0（无果嫩丛无意义，worldgen 丛均带果）。
+    //   纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；禁用任何运行期随机源。仅写空气格（setVoxelIfAir）
+    //   → 不覆盖雪上已生成的方块（云杉树干 / 树叶 / 任何已占格）。
+    void placeSweetBerryBushes();
     // t395 雪原/针叶群系水面冻结（PLAN §2-K 确定性）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water
     //   格）冻结为 Ice（机制等价 MC 1.0 寒冷群系水面结冰）。仅冻最顶层水面（同 MC 仅表层结冰；下层水保留）；
     //   地下水池（cy ≤ h-7 << waterLevel）不在 y==waterLevel 故不受影响。generate 在 fillWater 之后调（水已就位）。

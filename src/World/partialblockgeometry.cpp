@@ -318,6 +318,24 @@ int PartialBlockGeometry::append(
                       wheatTile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::SweetBerryBush: {
+        // t467 雪原浆果灌木丛 cross 模型：与 WheatCrop 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
+        //   机制等价 MC 1.0 sweet berry bush —— cross 模型上贴「当前生长阶段」对应的贴图：state = 阶段
+        //   0..SweetBerryBushStageMax（0=无果嫩丛、1=小果、2=成熟），mesher 在此据 state 选 tile = 基底
+        //   (sweet_berry_bush_0=103) + stage（3 视觉阶段，同小麦的基底 + state 全阶段贴图模式）。cross 几何满格高
+        //   不变（同 MC：丛模型尺寸不变、贴图编码「果实多寡」）。stage 越界（state>max，不应出现）clamp 到
+        //   SweetBerryBushStageMax 防读图集越界。不做邻居剔除（cross 透明 + 灌木，同 TallGrass / WheatCrop；
+        //   SweetBerryBush solid=false）。材质 alphaCutoff:0.5 丢弃透明底（仅丛像素显）。
+        const int stage = std::min(int(state), int(BlockRegistry::SweetBerryBushStageMax));
+        const int bushTile = tile + stage; // tile = 基底 sweet_berry_bush_0(103)；bushTile = 103..105（阶段 0..2）
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      bushTile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      bushTile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::CarrotCrop:
     case BlockRegistry::PotatoCrop: {
         // t407 胡萝卜/马铃薯作物 cross 模型：与 WheatCrop 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。

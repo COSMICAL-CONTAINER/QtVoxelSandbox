@@ -1740,6 +1740,7 @@ void World::generate()
     placeSwampFlora(); // t396：Swamp 群系睡莲（水面）+ 蘑菇（草岛）；PLAN §2-K；仅写空气格不覆盖水 / 草 / 树
     placeFlowers(); // t397：各群系草地确定性散布 4 色花（PLAN §2-K；草丛后，仅写空气格不覆盖草 / 树）
     placeSugarcane(); // t397：水域邻接陆地确定性散布 1..3 格高甘蔗（PLAN §2-K；花后，仅写空气格不覆盖草 / 树 / 花）
+    placeSweetBerryBushes(); // t467：Snowy 群系雪顶确定性散布浆果灌木丛（PLAN §2-K；甘蔗后，仅写空气格不覆盖雪上已占格）
     recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
     // t380：worldgen 末置流体脏 → 进世界后首次 tickWaterFlow/tickLavaFlow 各扫一次确认稳态（海洋 / 岩浆湖
     //   全源 → 零候选 → 即清标志停扫）。一次性确认扫描（防御：避免标志初始 false 漏掉 worldgen 引入的流场）。
@@ -2298,6 +2299,46 @@ void World::placeSugarcane()
         }
     }
     qInfo() << "worldgen: sugarcane placed =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t467 雪原浆果灌木丛散布（见 world.h 头注释）：遍历 Snowy 群系列，在积雪层（SnowLayer）地表上方一格低密度
+//   散布浆果灌木丛（SweetBerryBush cross 广告牌，仅写空气格）。机制等价 MC 1.0 sweet berry bush（寒冷群系浆果丛）。
+//   三守卫（同 placeTallGrass / placeFlowers 同族；t446 教训：用对 heightAt / seaColumnHeight）：
+//   (1) 仅 Snowy 群系（biomeAt==Snowy；其它群系地表非雪 → SnowLayer 守卫天然跳过）；
+//   (2) 地表须为 SnowLayer（generate 在 Snowy 群系把草顶替换为 SnowLayer，故真实雪顶 y = heightAt 自然地表；
+//       海域 seaColumnHeight>=0 独立、地表湖 / 洞口顶替换了雪 → surf 恒非 SnowLayer → 跳过，不在水里 / 湖里生）；
+//   (3) surfaceY > kWaterLevel+1（不在沙滩带 / 水下生，同 placeTallGrass 阈值；机制等价 MC 浆果丛不生于水边沙）。
+//   阶段随机 1..2（独立哈希位段 (r>>16)&1 + 1，与密度位段 r%100 解耦）—— worldgen 丛均带果（阶段 0 无果嫩丛无散布意义，
+//   玩家采摘后丛回阶段 0 由 tickSweetBerryBushGrowth 重新长，同小麦 / 树苗生长机制）。仅写空气格（setVoxelIfAir）
+//   → 不覆盖雪上已生成的方块（云杉树干 / 树叶 / 任何已占格）。纯函数于 seed + biomeAt（经 hashColumn，PLAN §2-K）。
+void World::placeSweetBerryBushes()
+{
+    constexpr unsigned kBushPct = 5; // 雪原雪顶列生浆果丛密度（% of 雪顶列；低密度点缀，机制等价 MC 浆果丛稀疏）
+    int placed = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            if (biomeAt(x, z) != Biome::Snowy) continue; // 仅雪原/针叶群系
+            const int surfaceY = heightAt(x, z);
+            // 同 placeTallGrass / placeFlowers 阈值：沙滩带(wl±1)/水下(h<wl)/低洼不生（机制等价 MC 浆果丛不生于沙/水下）。
+            if (surfaceY <= kWaterLevel + 1) continue;
+            // 仅雪顶列生（机制等价 MC 浆果丛生于雪原覆雪地表；海域 / 地表湖 / 洞口顶替换了雪 → 跳过）。
+            if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::SnowLayer) continue;
+
+            const quint32 r = hashColumn(m_seed, x, z);
+            if (r % 100u >= kBushPct) continue; // 密度筛选
+
+            // 阶段随机 1..2（独立位段 (r>>16)&1 + 1，与密度位段解耦）。worldgen 丛均带果（不散布阶段 0）。
+            const quint8 stage = quint8(1u + ((r >> 16) & 1u)); // 1 或 2
+
+            const int y = surfaceY + 1; // 雪顶上方一格
+            if (y >= m_height) continue; // 世界顶之上不放（防御）
+            // 仅写空气格 → 不覆盖雪上已生成的方块（云杉树干 / 树叶）。已被占的列自然跳过。
+            if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) continue;
+            setVoxelIfAir(x, y, z, BlockRegistry::SweetBerryBush, stage);
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: sweet berry bush placed =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t395 雪原/针叶群系水面冻结（见 world.h 头注释）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water

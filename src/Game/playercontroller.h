@@ -717,6 +717,10 @@ private:
     ArrowSlot findArrowInInventory() const;
     // t267 完成（progress 满）：消耗 1 面包 + 恢复饥饿（kBreadHungerAmount）+ 清态。Survival 消耗 / Creative 不耗。
     void finishEating();
+    // t467 食物饥饿恢复量查询（单一权威）：返回物品作为食物一次恢复的饥饿值（面包=kBreadHungerAmount、甜浆果=
+    //   kSweetBerryHungerAmount），非食物 → 0。供 eventFilter / beginEating / updateEating / finishEating 统一判
+    //   「是否食物」与「恢复多少」，避免各处硬编码 BreadId 判定（新增食物只改本方法一处）。纯函数于 itemId。
+    static int foodHungerAmount(int itemId);
     // 完成（progress 满）：写 air + 发 playerMined + 清态。drop 由 caller 算（生存走 ToolRegistry）。
     void finishMiningAt(int x, int y, int z, bool drop);
     // t214 破块后扫 6 邻火把：若其**附着格**（state 编码，BlockRegistry::torchAttachOffset）已非 solid
@@ -1057,6 +1061,8 @@ private:
     //   kRegenHungerThreshold：回血所需饥饿下限（18 = 9 鼓腿；机制等价 MC 1.0 hunger≥18 才回血）。
     static constexpr int kMaxHunger = 20;
     static constexpr int kBreadHungerAmount = 5;
+    // t467 甜浆果一次恢复的饥饿值（2 = 1 鼓腿；机制等价 MC 1.0 sweet berries +2 hunger）。小于面包（5），同 MC 量级。
+    static constexpr int kSweetBerryHungerAmount = 2;
     // t267 长按右键进食时序（机制对齐 MC 1.0：按住右键 ~1.6s 食完一件面包）。
     //   kEatDuration：食一件面包的累积时长（秒）；progress 增量 = dt / kEatDuration。32 ticks ≈ 1.6s
     //     （MC 1.0 食物进食 32 ticks；机制对齐，非精确数值复刻）。

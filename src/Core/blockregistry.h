@@ -470,7 +470,21 @@ public:
                                   //   bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（与 WoodDoor 同编码；门双格放置/破坏联动/右键
                                   //   开合经 isDoor 谓词统一处理）。maxStack=1（单件，不可堆叠）。solid=false / ShapeDoor；
                                   //   hardness=2.0、Axe、dropId=自身、dropCount=1。配方：3 云杉木板纵列 → 1 云杉门。
-        Count          = 90, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t467 雪原浆果灌木丛（SweetBerryBush）：机制等价 MC 1.0 甜浆果丛（sweet berry bush）——雪原 Snowy 群系
+        //   散布的可采摘灌木。**cross 形广告牌方块**（与 TallGrass / Sapling / 作物同走 PartialBlockGeometry 的 cross
+        //   几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。**3 生长阶段存 chunk state**
+        //   （state = 阶段 0..SweetBerryBushStageMax；0=无果嫩丛、1=小果、2=成熟可采摘），worldgen placeSweetBerryBushes
+        //   散布阶段 1..2 的丛、玩家右键成熟丛采摘（playercontroller useBlock 分支）。solid=false（非实体 → 不挡邻居面
+        //   剔除，同草丛 / 作物）、shape=ShapeNone（**无碰撞** → 玩家穿过；机制等价 MC 浆果丛可踩过，stage>0 踩过受少量
+        //   伤害归 playercontroller 环境伤害 tick）、hardness=0（瞬破，同草丛 / 作物）、NoTool（空手可采且掉落）、
+        //   dropId=0x233（甜浆果**物品**，材料段 RecipeRegistry::SweetBerryId；Core 不依赖 Game 故字面量 0x233 —— 破丛掉
+        //   浆果物品非丛方块，机制等价 MC 破浆果丛掉浆果）、dropCount=1、maxStack=64。各面贴图=sweet_berry_bush_<state>
+        //   （tile 103..105；mesher 走 cross 几何段时据 state 选 stage 0/1/2 贴图；本表 topTile/sideTile 存阶段 0 基底
+        //   tile 103，partialblockgeometry 的 SweetBerryBush case 内 state + 基底算实际阶段贴图，同 WheatCrop 模式）。
+        //   音色归 GroupGrass（软植物音，同草丛 / 蘑菇）。worldgen 在 Snowy 群系 SnowLayer 地表上方低密度散布（机制
+        //   等价 MC 寒冷群系浆果丛）。进创造调色板（玩家可取用 / 放置，便于测试 / 装饰）。
+        SweetBerryBush = 90, // 雪原浆果灌木丛：cross 形灌木（机制等价 MC 1.0 sweet berry bush）；3 阶段、右键采摘
+        Count          = 91, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -570,7 +584,8 @@ public:
     //   + 段外 DeadBush(43)（t394）+ 段外 Mushroom(48)（t396）+ 段外 LilyPad(47)（t396：横向浮叶，几何为水平
     //   quad 非竖直 cross，但同走本路由 + alphaCutoff cutout 路径 —— PartialBlockGeometry::append 的 LilyPad
     //   case 内画水平 quad）+ 段外花段 [FirstFlower, LastFlower]（t397：4 色 cross）+ 段外 Sugarcane(53)（t397：
-    //   细茎 cross，1..3 高叠柱）+ 段外 CarrotCrop(55)/PotatoCrop(56)（t407：作物 cross，同小麦作物按 state 选阶段贴图）。
+    //   细茎 cross，1..3 高叠柱）+ 段外 CarrotCrop(55)/PotatoCrop(56)（t407：作物 cross，同小麦作物按 state 选阶段贴图）
+    //   + 段外 Ladder(62)（t413：木梯竖直爬行梯 cross）+ 段外 SweetBerryBush(90)（t467：雪原浆果灌木丛 cross，按 state 选 3 阶段贴图）。
     //   mesher（chunkgeometry 3 处路由）+ 选中框（Main.qml isCross 分流）一律读本谓词，不各持区间判定
     //   （PLAN §2：单一权威，避免「mesher 路由到 cross 但选中框仍按区间漏某方块」撕裂）。
     static bool isCrossBillboard(quint8 blockId);
@@ -586,6 +601,17 @@ public:
     //   age 7 成熟」机制，state 编码与判定完全同小麦）。tickCropGrowth / 收割 / 几何阶段贴图选择对三种作物统一读
     //   本常量（不另立 CropStageMax，避免三处常量漂移；改名 WheatCropStageMax 会触动多文件故保留原名 + 本注释）。
     static constexpr quint8 WheatCropStageMax = 7;
+
+    // t467 雪原浆果灌木丛生长阶段：state = 阶段 0..2（0=无果嫩丛、1=小果、2=成熟可采摘）。mesher
+    //   （PartialBlockGeometry::append 的 SweetBerryBush case）据 state 选对应阶段贴图（tile 103..105）；
+    //   worldgen placeSweetBerryBushes 散布阶段 1..2 的丛；玩家右键成熟丛（state==max）采摘得 2-3 浆果 + 丛回
+    //   阶段 0（playercontroller useBlock 分支走 5 参数 setBlock 降阶段，id 不变只 state 变 + worldChanged 重建 mesh，
+    //   同 t447 骨粉催熟模式）。state 经 m_states 落 SQLite round-trip 保真（存档读回仍带阶段）。唯一消费点：
+    //   partialblockgeometry 的 SweetBerryBush case（贴图选择）+ playercontroller 采摘（state==max 判成熟）+
+    //   环境伤害 tick（stage>0 踩过受少量伤害）。mesher / collisionAABBs / selectionAABBs 不读 bush state
+    //   （bush 走 ShapeNone + cross 几何，state inert 于碰撞/选中）→ 复用 state 作阶段编码零回归
+    //   （同 WheatCropStage / PlanksFromDoubleSlabBit 复用 state 的模式）。
+    static constexpr quint8 SweetBerryBushStageMax = 2;
 
     // t310 草变种（矮/中/高）state 编码：mesher（PartialBlockGeometry::append 的 TallGrass case）据 state 选
     //   cross 高度。机制对标 MC 1.0 cross 草丛，但按用户要求做 3 高度变种（MC 1.0 原版仅 1 格满高 cross）。
@@ -848,7 +874,11 @@ public:
     //      原创自绘 §9a；tools/build_wool.py 程序生成。WoolOrange=63..WoolBlack=77 各面=本段对应 tile）。
     //   94..101=bed_white..bed_brown（t455 16 色床补齐 8 色新变体；既存 8 色床在 tile 43..50。与同色羊毛同色板，
     //      原创自绘 §9a；tools/build_bed.py 程序生成。BedWhite=78..BedBrown=85 各面=本段对应 tile）。
-    // 图集由 tools/build_atlas.py 打包全部 102 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   103..105=sweet_berry_bush_0..2（t467 雪原浆果灌木丛 3 阶段贴图；cross 几何段，alpha 透明底 cutout。
+    //      SweetBerryBush 方块 def 各面=103（基底阶段 0），mesher 在 PartialBlockGeometry::append 的
+    //      SweetBerryBush case 内据 state 选 tile = 103 + stage（0/1/2）。机制等价 MC 1.0 sweet berry bush；
+    //      名称/贴图原创自绘 §9a；tools/build_sweet_berry.py 程序生成原创像素图）。
+    // 图集由 tools/build_atlas.py 打包全部 105 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -861,7 +891,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 103;
+    static constexpr int AtlasTileCount = 106;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
