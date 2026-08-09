@@ -98,6 +98,8 @@ BLOCKS = [
     # t466 云杉木板立方体图标（深色木纹；机制等价橡木木板 icon_planks，仅贴图换 spruce_planks）。
     ("spruce_planks",   "default_spruce_planks", "default_spruce_planks"), # t466 云杉木板（各面同贴图=深色木板）
     ("obsidian",        "default_obsidian", "default_obsidian"),  # t472 黑曜石（各面同贴图=深紫黑火山玻璃；流体交互产物）
+    ("enchanting_table", "default_enchanting_table_top", "default_enchanting_table_side"),  # t474 附魔台（顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点+边缘暗化）
+    ("bookshelf",       "default_bookshelf", "default_bookshelf"),  # t474 书架（各面同贴图=木板边框+彩色书脊书列）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

@@ -573,6 +573,30 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::PaperId,   RecipeRegistry::LeatherId, 0,
         0,                         0,                         0 },
       RecipeRegistry::BookId, 1, 1, "book" },
+    // t474 附魔台（enchanting_table）：1 书 + 2 钻石 + 4 黑曜石 → 1 附魔台（有序 3×3，仅工作台）。
+    //   机制等价 MC 1.0 enchanting table 配方（book top-center / 2 diamonds middle-sides / 4 obsidian 其余）。
+    //   最小包围盒 3×3（占用整工作台网格）；产物 EnchantingTable 方块（可堆叠 64）。原料 BookId（0x238，t473
+    //   书配方产物）+ DiamondId（0x212，钻石矿挖掘掉落）+ Obsidian（黑曜石方块，流水/水源触静岩浆源凝固产物，
+    //   t411/t472）。只能工作台合（3×3 包围盒放不进 2×2 背包栏，机制等价 MC 附魔台须工作台）。
+    //   行优先 pattern[9]（[0..2]=顶行、[3..5]=中行、[6..8]=底行）：
+    //     [0]=空 [1]=book [2]=空
+    //     [3]=diamond [4]=obsidian [5]=diamond
+    //     [6]=obsidian [7]=obsidian [8]=obsidian
+    //   合计：1 book + 2 diamond + 4 obsidian，与 spec「2 diamond + 4 obsidian + 1 book」一致。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0,                                RecipeRegistry::BookId,    0,
+        RecipeRegistry::DiamondId,        int(BlockRegistry::Obsidian), RecipeRegistry::DiamondId,
+        int(BlockRegistry::Obsidian),     int(BlockRegistry::Obsidian), int(BlockRegistry::Obsidian) },
+      int(BlockRegistry::EnchantingTable), 1, 1, "enchanting_table" },
+    // t474 书架（bookshelf）：6 木板 + 3 书 → 1 书架（有序 3×3，仅工作台）。机制等价 MC 1.0 bookshelf 配方
+    //   （上 / 下两行木板、中间一行 3 书）。最小包围盒 3×3（占用整工作台网格）；产物 Bookshelf 方块（可堆叠 64）。
+    //   原料 Planks（橡木木板，原木合成产物）+ BookId（0x238，t473 书配方产物）。只能工作台合（3×3 包围盒）。
+    //   pattern：[0..2]=planks / [3..5]=book / [6..8]=planks，合计 6 planks + 3 book，与 spec「6 planks + 3 books」一致。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
+        RecipeRegistry::BookId,     RecipeRegistry::BookId,     RecipeRegistry::BookId,
+        int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks) },
+      int(BlockRegistry::Bookshelf), 1, 1, "bookshelf" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

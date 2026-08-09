@@ -1692,6 +1692,14 @@ void PlayerController::placeBlock()
         emit chestOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
+    // t474：右键附魔台 → 打开 EnchantingUI 附魔界面（同工作台 / 熔炉 / 箱子模式：优先于放置，无论手持
+    //   何物右键附魔台即开）。发 enchantingTableOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开
+    //   EnchantingTableUI（释放指针）；UI 据坐标查 World.countBookshelvesAround 算书架加成 → 提升可选
+    //   附魔等级上限（机制等价 MC 1.0 附魔台书架 power）。空手亦可（开界面是「使用」语义，与手持何物无关）。
+    if (BlockRegistry::isEnchantingTable(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+        emit enchantingTableOpened(m_hitBx, m_hitBy, m_hitBz);
+        return;
+    }
     // t387/t388 右键床 → 尝试睡觉（useBlock 语义；优先于放置，同工作台 / 箱子模式：右键已放置的床即睡，不另放块）。
     //   空手亦可（睡是「使用」语义，与手持何物无关）。命中格为任一床色变体（BlockRegistry::isBed）→ trySleepAt：
     //   夜间 + 床周无怪物 → 进 fade 态（完成后跳清晨 + 设重生点）；白天 / 附近有怪物 → emit sleepRefused 文案。

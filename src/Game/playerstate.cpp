@@ -130,6 +130,24 @@ void PlayerState::setXp(int value)
     }
 }
 
+// t474 消耗 XP 等级（附魔台每次附魔扣 1/2/3 级；机制等价 MC 1.0 附魔消耗 player level）。
+//   余额不足（m_level < amount）→ 返 false（caller 不应推进附魔）。否则把 m_xp 截到「升至 (level-amount)
+//   所需 XP」即 xpTotalForLevel(newLevel) —— 由于 level 是 m_xp 的派生（recomputeLevel 据曲线倒推），
+//   把 m_xp 设到「恰好升至 newLevel 所需」即等价于「保留前 newLevel 级、丢弃级内进度 + 后续 N 级」。
+//   级内进度（m_intoLevel）随之归零（机制等价 MC 附魔后级内条清空）。重算后 emit xpChanged + levelChanged。
+//   amount<=0 → 视作无消耗返 true（防御，caller 应保证 >=1）。
+bool PlayerState::spendLevels(int amount)
+{
+    if (amount <= 0) return true;          // 防御：无消耗视为成功
+    if (m_level < amount) return false;    // 余额不足 → 拒绝（caller 不扣 lapis / 不推进）
+    const int newLevel = m_level - amount;
+    m_xp = xpTotalForLevel(newLevel);      // 截到「升至 newLevel 所需」总量（级内进度归零）
+    recomputeLevel();                       // 同步 m_level / m_intoLevel（恒等于 newLevel / 0）
+    emit xpChanged();
+    // levelChanged 由 recomputeLevel 内部 emit（level 真降必发）；此处不再重复 emit。
+    return true;
+}
+
 // t403 MC 1.0 风格递增曲线（机制等价 MC，三段斜率；need 单调递增 → 每级比上一级要更多 XP）。
 int PlayerState::xpNeedForLevel(int level)
 {
@@ -137,6 +155,17 @@ int PlayerState::xpNeedForLevel(int level)
     if (level < 15) return 2 * level + 7;
     if (level < 30) return 5 * level - 38;
     return 9 * level - 158;
+}
+
+// t474 升至 level 所需总 XP（= sum_{i=0..level-1} xpNeedForLevel(i)；机制等价 MC「level 0 起，每升一级累加
+//   需要的 XP」）。用于 spendLevels 把 m_xp 截到「恰好升至 newLevel 所需」总量。level<=0 → 0（0 级无累计）。
+//   纯函数于曲线（与 xpNeedForLevel 同源；改曲线须同步二者，单一权威在 xpNeedForLevel）。
+int PlayerState::xpTotalForLevel(int level)
+{
+    if (level <= 0) return 0;
+    int total = 0;
+    for (int i = 0; i < level; ++i) total += xpNeedForLevel(i);
+    return total;
 }
 
 // t403 升下一级所需 XP（曲线驱动；level 变才变）。

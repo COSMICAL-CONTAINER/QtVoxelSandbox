@@ -193,6 +193,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/CraftingTableUI.qml
         src/ui/FurnaceUI.qml
         src/ui/ChestUI.qml
+        src/ui/EnchantingTableUI.qml
         src/ui/VitalIcon.qml
         src/ui/ToolIcon.qml
         src/ui/MaterialIcon.qml
@@ -228,6 +229,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_diamond_ore.png          # t279 钻矿石贴图（build_ore.py 程序生成原创像素图；散布于 stone 深层 y∈[5,40]）
         textures/default_gold_ore.png            # t308 金矿石贴图（build_ore.py 程序生成原创像素图；散布于 stone 深层 y∈[5,25]）
         textures/default_lapis_ore.png           # t471 青金矿石贴图（build_ore.py 程序生成原创像素图；石头底+群青深蓝斑簇+黄铁矿金点；散布于 stone 深层 y∈[5,31]）
+        textures/default_enchanting_table_top.png # t474 附魔台顶面贴图（build_enchanting_table.py；黑曜石深紫黑底+钻石青白四角+中央立书轮廓）
+        textures/default_enchanting_table_side.png # t474 附魔台侧面/底面/前面贴图（build_enchanting_table.py；黑曜石深紫黑底+钻石四角+边缘暗化）
+        textures/default_bookshelf.png           # t474 书架各面贴图（build_bookshelf.py；橡木木板边框+彩色书脊书列）
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
@@ -339,6 +343,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_gold_ore.png               # t308 金矿石立方体图标（build_cube_icons.py；石头底+金黄斑簇）
         textures/icon_lapis_ore.png              # t471 青金矿石立方体图标（build_cube_icons.py；石头底+群青深蓝斑簇+黄铁矿金点）
         textures/icon_obsidian.png               # t472 黑曜石立方体图标（build_cube_icons.py；深紫黑火山玻璃；流体交互产物，钻石镐采掘）
+        textures/icon_enchanting_table.png       # t474 附魔台立方体图标（build_cube_icons.py；顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点+边缘暗化）
+        textures/icon_bookshelf.png              # t474 书架立方体图标（build_cube_icons.py；各面=木板边框+彩色书脊书列）
         textures/icon_crafting_table.png
         textures/icon_dirt.png
         textures/icon_furnace.png

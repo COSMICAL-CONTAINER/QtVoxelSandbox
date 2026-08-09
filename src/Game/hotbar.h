@@ -213,6 +213,15 @@ public:
     //   耐久归零 → 清空槽（工具破损消失）+ emit slotsChanged + emit toolBroken（t315 破损音）。创造模式由
     //   caller 不调本方法（不消耗）。
     Q_INVOKABLE void damageSelectedItem();
+    // t474 跨槽材料消耗（附魔台每次附魔扣 1/2/3 青金石；青金石在 hotbar / 主栏任意槽散堆）：
+    //   consumeMaterial(id, n)：扫全部 hotbar + 主栏槽，凑足 n 件 id 物品即扣（按槽逐个 takeStack，
+    //   槽满扣后清空 id 移到下一槽）；凑不足则**回滚已扣**（恢复原态）+ 返 false（caller 不应推进附魔）。
+    //   成功扣足 → emit slotsChanged + 返 true。id<=0 / n<=0 → 返 true（无消耗，防御）。机制等价 MC
+    //   附魔台从背包任意位置扣青金石。单一权威：跨槽扣材料只此一处（避免各 UI 自写遍历）。
+    Q_INVOKABLE bool consumeMaterial(int id, int n);
+    // t474 跨槽材料计数（附魔 UI 显示「当前青金石 N」+ 点附魔槽前置「青金石 >= 消耗 ?」判定）。
+    //   扫全部 hotbar + 主栏槽，返 id 物品总数（同 id 累加）。id<=0 → 0。只读，不改槽态。
+    Q_INVOKABLE int materialCount(int id) const;
     // t50 合成桥接（QML 不能直接调 C++ 静态类 RecipeRegistry，经 VM 透传）：
     //   - recipeMatch(slotIds, gridSize)：slotIds 为行优先 id 数组（QVariantList<int>，0=空格），
     //     gridSize = 2（背包 2×2）/ 3（工作台 3×3）。返回匹配配方（QVariantMap：outputId/outputCount/

@@ -58,6 +58,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::PackIce:      return "icon_pack_ice.png";       // t468 浮冰立方体图标（各面=实白细裂纹）
     case BlockRegistry::BlueIce:      return "icon_blue_ice.png";       // t468 蓝冰立方体图标（各面=淡蓝纵向纹路）
     case BlockRegistry::Obsidian:     return "icon_obsidian.png";       // t472 黑曜石立方体图标（各面=深紫黑火山玻璃；流体交互产物，钻石镐采掘）
+    case BlockRegistry::EnchantingTable: return "icon_enchanting_table.png"; // t474 附魔台立方体图标（顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点）
+    case BlockRegistry::Bookshelf:    return "icon_bookshelf.png";      // t474 书架立方体图标（各面=木板边框+彩色书脊书列）
     // t387 床方块 8 色变体立方体图标（彩色被面 + 枕垫亮带 + 绗缝针脚；build_cube_icons.py 程序生成）。
     case BlockRegistry::BedRed:        return "icon_bed_red.png";        // 红床（配方产物默认色）
     case BlockRegistry::BedOrange:     return "icon_bed_orange.png";     // 橙床
@@ -531,7 +533,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::BedWhite),    int(BlockRegistry::BedLightBlue),
              int(BlockRegistry::BedLime),     int(BlockRegistry::BedPink),
              int(BlockRegistry::BedGray),     int(BlockRegistry::BedLightGray),
-             int(BlockRegistry::BedPurple),   int(BlockRegistry::BedBrown) };
+             int(BlockRegistry::BedPurple),   int(BlockRegistry::BedBrown),
+             // t474 附魔链两件方块（机制等价 MC 1.0 enchanting table / bookshelf；右键附魔台开 UI / 书架作加成源）。
+             int(BlockRegistry::EnchantingTable),                              // 附魔台（右键开附魔 UI；配方书+钻石+黑曜石）
+             int(BlockRegistry::Bookshelf) };                                  // 书架（合成产物；附魔台加成来源；配方木板+书）
 }
 
 QString Hotbar::iconSourceAt(int slot) const
@@ -1057,6 +1062,49 @@ void Hotbar::damageSelectedItem()
     s.durability -= 1;
     qInfo().noquote() << "[inv] tool damage slot=" << m_selectedSlot << "id=" << s.id << "dur=" << s.durability;
     bumpRevision(); // tooltip 「cur/max」+（未来）HUD 耐久条刷新
+}
+
+// t474 跨槽材料消耗（附魔台扣青金石）：扫 hotbar + 主栏，凑足 n 件 id 即扣（按槽逐个 takeStack）；
+//   凑不足 → 回滚已扣（恢复原态）+ 返 false。成功 → bumpRevision + 返 true。
+//   机制等价 MC 附魔台从背包任意位置扣青金石。id<=0 / n<=0 → 返 true（防御；caller 应保证 id/n 合法）。
+bool Hotbar::consumeMaterial(int id, int n)
+{
+    if (id <= 0 || n <= 0) return true; // 防御：无消耗视为成功
+    // 先扫一遍算总量，不足直接返 false（不开始扣，免回滚复杂度）。
+    int total = 0;
+    for (const ItemStack &s : m_slots)        if (s.id == id) total += s.count;
+    for (const ItemStack &s : m_mainSlots)    if (s.id == id) total += s.count;
+    if (total < n) return false; // 余额不足 → 拒绝（caller 不应推进附魔）
+    // 凑足 → 逐槽扣（先 hotbar 后 main；同槽累扣到 count 归 0 即清 id，takeStack 已处理）。
+    int remaining = n;
+    for (size_t i = 0; i < m_slots.size() && remaining > 0; ++i) {
+        if (m_slots[i].id != id || m_slots[i].count <= 0) continue;
+        const int took = takeStack(int(i), remaining);
+        remaining -= took;
+    }
+    for (size_t i = 0; i < m_mainSlots.size() && remaining > 0; ++i) {
+        if (m_mainSlots[i].id != id || m_mainSlots[i].count <= 0) continue;
+        // takeStack 仅作用于 hotbar（slot 索引）；主栏直接写（同 mainSetStack 路径）。
+        const int have = m_mainSlots[i].count;
+        const int take = std::min(have, remaining);
+        if (take >= have) m_mainSlots[i] = ItemStack{0, 0, 0};
+        else              m_mainSlots[i].count -= take;
+        remaining -= take;
+    }
+    bumpRevision(); // 驱动 QML 槽显示 + 数量刷新（青金石堆减少；hotbar 段）
+    bumpMainRevision(); // t97 主栏也参与（青金石可能在主栏；主栏段 NOTIFY）
+    return remaining == 0; // 恒 true（前已判 total>=n），防御性返回
+}
+
+// t474 跨槽材料计数（附魔 UI「青金石 N」显示 + 点附魔前置判定）：扫 hotbar + 主栏累加同 id 数量。
+//   只读，不改槽态。id<=0 → 0。
+int Hotbar::materialCount(int id) const
+{
+    if (id <= 0) return 0;
+    int total = 0;
+    for (const ItemStack &s : m_slots)     if (s.id == id) total += s.count;
+    for (const ItemStack &s : m_mainSlots) if (s.id == id) total += s.count;
+    return total;
 }
 
 // t50 合成桥接：QML 不能直接调 C++ 静态 RecipeRegistry，经 VM 透传（VM 属 Game 同层，向下查 RecipeRegistry）。

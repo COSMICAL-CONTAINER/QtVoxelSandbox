@@ -511,7 +511,30 @@ public:
         //   worldgen 高度分层散布于深层 y∈[5,31]（机制等价 MC 1.0 青金矿 Y<32 浅深层富集）。**洞穴裸露**：
         //   carveCaves 暴露矿脉于洞壁（同其它矿石）。**进创造调色板**（与 coal/iron 矿石同走立方体图标）。
         LapisOre       = 93, // 青金矿石：散布于 stone 深层 y∈[5,31]；需石镐采掘；掉青金石物品（t471 附魔前置材料）
-        Count          = 94, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t474 附魔链两件方块（机制等价 MC 1.0 enchanting table / bookshelf；名称 / 贴图全原创自绘 §9a）：
+        //   附魔台（EnchantingTable）：右键打开附魔 UI（playercontroller useBlock 分支发 enchantingTableOpened
+        //   信号 → Main.qml 显 EnchantingTableUI：3 附魔选项预览槽，每槽消耗 XP 等级 1/2/3 + 对应青金石 1/2/3；
+        //   周围书架数（≤15，2 格切比雪夫半径内）提升可选附魔等级上限，机制等价 MC 1.0 书架加成）。
+        //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 crafting_table /
+        //   furnace / chest 同族；MC 1.0 附魔台是异形低盒 + 顶上立书，本工程简化为整立方以复用既有渲染路径，
+        //   机制等价非视觉对齐 §4）、hardness=5.0（同 MC 1.0 附魔台量级，石质偏硬）、toolType=Pickaxe、
+        //   requiresTool=true、minToolTier=1（木镐可破且掉落）、dropId=自身（破块掉附魔台方块，可放回）、
+        //   dropCount=1、maxStack=64。各面贴图：顶=enchanting_table_top(109)（黑曜石底+钻石纹+顶部立书轮廓）/
+        //   底·侧·前=enchanting_table_side(110)（黑曜石底+钻石嵌点+边缘暗化）。音色归 GroupStone（石质）。
+        //   配方：1 书 + 2 钻石 + 4 黑曜石 → 1 附魔台（工作台 3×3 有序，recipe.cpp）。进创造调色板。
+        EnchantingTable = 94, // 附魔台：右键开附魔 UI（3 选项槽，消耗 XP 等级 + 青金石）；书架加成；配方书+钻石+黑曜石
+        //   书架（Bookshelf）：纯装饰合成产物（机制等价 MC 1.0 bookshelf —— 仅作为附魔台加成来源；本工程无
+        //   「书架可放书」物品栏，纯合成 / 放置方块）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立面
+        //   面路径，**非**异形，与 chest / wool 同族）、hardness=1.5（同 MC 1.0 书架量级，木质偏软）、toolType=Axe
+        //   （木制；requiresTool=false → 空手也掉落，仅斧给速度加成）、dropId=自身（破书架掉书架方块，可放回 ——
+        //   机制简化：MC 1.0 破书架掉**书**物品，本工程掉书架方块以便玩家回收重放，区别于 MC 留记录）、
+        //   dropCount=1、maxStack=64。各面贴图：顶·底=bookshelf(111)（木板边框 + 中央书脊彩色书列）/ 侧·前=
+        //   bookshelf(111)（同顶；机制等价 MC 书架各面书脊纹，本工程六面同贴图简化）。音色归 GroupWood（木质）。
+        //   配方：6 木板 + 3 书 → 1 书架（工作台 3×3 有序：上 / 下两行木板、中间一行 3 书，recipe.cpp）。
+        //   进创造调色板（玩家可取用 / 放置；附魔台加成测试用）。isBookshelf 单一权威谓词供 World::countBookshelvesAround
+        //   （附魔台加成）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移（同 isBed / isLadder 模式）。
+        Bookshelf       = 95, // 书架：合成产物（6 木板 + 3 书）；附魔台加成来源（2 格内计数 ≤15）；木质整立方
+        Count           = 96, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -562,6 +585,14 @@ public:
     //   「玩家 AABB 覆盖的格是否梯」（入梯格 + 按前 → 向上爬）+ mesher cross 路由分流，避免各处自写 id 判定漂移
     //   （同 isBed / isCrossBillboard 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（改 id 时一处同步）。
     static bool isLadder(quint8 blockId);
+    // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台
+    //   加成计算：扫切比雪夫半径 2 内书架数 ≤15）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移
+    //   （同 isLadder 单 id 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加书架变体时一处同步）。
+    static bool isBookshelf(quint8 blockId);
+    // t474 附魔台统一谓词（单一权威）：blockId == EnchantingTable 即附魔台。供 playercontroller placeBlock
+    //   useBlock 分支判定「右键命中格是否附魔台 → 开 EnchantingTableUI」（避免各处硬编码 id 判定漂移，同
+    //   isLadder 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来变体时一处同步）。
+    static bool isEnchantingTable(quint8 blockId);
 
     // t468 冰族统一谓词（单一权威，机制等价 MC 1.0 ice / packed ice / blue ice）：blockId == Ice / PackIce /
     //   BlueIce 即冰。供 PlayerController 冰滑行物理 + ItemEntityManager 物品冰摩擦 + mesher iceOnly 段路由
@@ -923,7 +954,14 @@ public:
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 102）。
+    //   109=enchanting_table_top（t474 附魔台顶面贴图；黑曜石深紫黑底 + 钻石青白菱斑 + 顶部立书轮廓，
+    //      原创自绘 §9a；EnchantingTable 顶面=本 tile；tools/build_enchanting_table.py 程序生成）。
+    //   110=enchanting_table_side（t474 附魔台侧面/底面/前面贴图；黑曜石深紫黑底 + 钻石嵌点 + 边缘暗化，
+    //      原创自绘 §9a；EnchantingTable 底/侧/前=本 tile）。
+    //   111=bookshelf（t474 书架各面贴图；木板边框 + 中央书脊彩色书列（红 / 蓝 / 绿 / 棕书脊），原创自绘
+    //      §9a；Bookshelf 各面=本 tile；tools/build_bookshelf.py 程序生成）。
+
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 112）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -931,7 +969,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 109;
+    static constexpr int AtlasTileCount = 112;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

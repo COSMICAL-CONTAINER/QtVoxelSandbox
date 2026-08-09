@@ -122,6 +122,13 @@ public:
     // t402 设经验值（存档加载用；与 setHealth/setHunger 同模式）：直接设（不走任何派生判定），
     //   clamp 到 >=0；无变化不发信号。供 Main.qml::applyPlayerState 在 playerState.xp 灌入存档值。
     Q_INVOKABLE void setXp(int value);
+    // t474 消耗 XP 等级（附魔台每次附魔消耗 1/2/3 级；机制等价 MC 1.0 附魔消耗 player level）。
+    //   若当前 level < amount → 返 false（余额不足，caller 不应推进附魔）；否则把总 xp 截到「升至
+    //   (level-amount) 所需」即 m_xp = xpTotalForLevel(newLevel)，级内进度（m_intoLevel）随之归零
+    //   （机制等价 MC 附魔后「等级降 N、级内经验条清空」）。重算后 emit xpChanged（条 / 总值刷新）
+    //   + levelChanged（HUD 等级数降）。分层（PLAN §2）：Game 层持显值 + 派生，呈现层（EnchantingTableUI）
+    //   只读消费（点附魔槽 → 调本方法 → 据 bool 决定是否扣 lapis / 提示）。
+    Q_INVOKABLE bool spendLevels(int amount);
 
 signals:
     void healthChanged();
@@ -161,6 +168,9 @@ private:
     // t403 MC 1.0 风格递增曲线（机制等价 MC，三段斜率；need 单调递增）：从 level 升到 level+1 所需 XP。
     //   低级（0..14）2L+7、中级（15..29）5L−38、高级（30+）9L−158。level<0 → 0（防御）。
     static int xpNeedForLevel(int level);
+    // t474 升至 level 所需总 XP（= sum_{i=0..level-1} xpNeedForLevel(i)）。spendLevels 据此把 m_xp 截到
+    //   「恰好升至 newLevel 所需」总量（级内进度归零，机制等价 MC 附魔后级内条清空）。
+    static int xpTotalForLevel(int level);
     // 据 m_xp（总）重算 m_level + m_intoLevel；level 真变才 emit levelChanged（驱动 HUD 等级数 / 条分母）。
     // addXp / setXp 在改 m_xp 后调（xpChanged + levelChanged 同帧发，QML 绑定齐刷）。
     void recomputeLevel();

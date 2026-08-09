@@ -57,6 +57,14 @@ Window {
     property int chestX: 0
     property int chestY: 0
     property int chestZ: 0
+    // t474 附魔台子态：右键附魔台方块 → player.enchantingTableOpened(x,y,z) → 显 EnchantingTableUI（3
+    //   附魔选项槽 + XP 等级 / 青金石消耗）+ 释放指针。与 inventoryOpen / craftingTableOpen / furnaceOpen /
+    //   chestOpen 互斥；E/Esc 关 → 恢复 grab。enchantX/Y/Z 记当前所开附魔台的方块世界坐标（UI 据此查
+    //   theWorld.countBookshelvesAround 算书架加成 → 提升可选附魔等级上限）。
+    property bool enchantingTableOpen: false
+    property int enchantX: 0
+    property int enchantY: 0
+    property int enchantZ: 0
     // t225 当前所开箱子的「前面（锁面）」朝向（0=+X 1=-X 2=+Z 3=-Z；与 BlockRegistry::chestFrontFace /
     //   horizontalFacing 同源编码 = 前面所朝方向）。openChest 读 theWorld.stateAt(x,y,z) 设置；驱动盖子
     //   铰链侧（chestLidYaw）→ 放置时锁面朝玩家，开盖铰链在锁面背侧。默认 3（-Z，对齐旧默认 / 兜底）。
@@ -763,6 +771,7 @@ Window {
     function openCraftingTable() {
         if (appState !== "playing" || craftingTableOpen) return
         if (inventoryOpen) closeInventory()
+        if (enchantingTableOpen) closeEnchantingTable()
         craftingTableOpen = true
         player.release()
     }
@@ -779,6 +788,7 @@ Window {
         if (appState !== "playing" || furnaceOpen) return
         if (inventoryOpen) closeInventory()
         if (craftingTableOpen) closeCraftingTable()
+        if (enchantingTableOpen) closeEnchantingTable()
         furnaceOpen = true
         player.release()
     }
@@ -808,6 +818,7 @@ Window {
         if (inventoryOpen) closeInventory()
         if (craftingTableOpen) closeCraftingTable()
         if (furnaceOpen) closeFurnace()
+        if (enchantingTableOpen) closeEnchantingTable()
         chestX = x; chestY = y; chestZ = z
         // t225 读箱子朝向 state（前面所朝方向；placeBlock 写入 = horizontalFacing^1，锁面朝玩家）→
         //   驱动盖子铰链侧（chestLidYaw）。& 3 防御性掩码（与 BlockRegistry::chestFrontFace 的 state&3 同源）。
@@ -831,6 +842,25 @@ Window {
         player.grab()
         keyInput.forceActiveFocus()
     }
+    // t474 打开 / 关闭附魔台面板。打开 → release（光标可见点选项槽）；关 → grab + 焦点回键位层。
+    // 与 inventoryOpen / craftingTableOpen / furnaceOpen / chestOpen 互斥（开附魔台前关其它四个，反之同）。
+    //   x/y/z = 所开附魔台的方块世界坐标（player.enchantingTableOpened 携带 → UI 据此查书架加成）。
+    function openEnchantingTable(x, y, z) {
+        if (appState !== "playing" || enchantingTableOpen) return
+        if (inventoryOpen) closeInventory()
+        if (craftingTableOpen) closeCraftingTable()
+        if (furnaceOpen) closeFurnace()
+        if (chestOpen) closeChest()
+        enchantX = x; enchantY = y; enchantZ = z
+        enchantingTableOpen = true
+        player.release()
+    }
+    function closeEnchantingTable() {
+        if (!enchantingTableOpen) return
+        enchantingTableOpen = false
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
 
     // t312 聊天栏开关 / 收发（PLAN §2 UI 层，纯呈现；聊天历史 = ListModel 呈现态，无 C++ ViewModel ——
     //   单机 Phase 1.0 无联机，聊天仅为「输入回显 + 系统播报」容器，Phase 3 联机接入时改走 LocalServer/
@@ -843,6 +873,7 @@ Window {
         if (craftingTableOpen) closeCraftingTable()
         if (furnaceOpen) closeFurnace()
         if (chestOpen) closeChest()
+        if (enchantingTableOpen) closeEnchantingTable()
         // 死亡态不开聊天（死亡信息已由死亡屏接管；防聊天 input 抢死亡按钮焦点）。
         if (playerState.dead) return
         chatOpen = true
@@ -1668,6 +1699,9 @@ Window {
         // t173/t179：右键箱子 → player 发 chestOpened(x,y,z) → 开 ChestUI（释放指针 / 关包互斥）。
         //   坐标供 ChestStore 寻址该箱子的 27 槽。
         function onChestOpened(x, y, z) { window.openChest(x, y, z) }
+        // t474：右键附魔台 → player 发 enchantingTableOpened(x,y,z) → 开 EnchantingTableUI（释放指针 / 关包互斥）。
+        //   坐标供 UI 查 theWorld.countBookshelvesAround 算书架加成 → 提升可选附魔等级上限。
+        function onEnchantingTableOpened(x, y, z) { window.openEnchantingTable(x, y, z) }
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
@@ -5863,6 +5897,7 @@ Window {
                 if (window.craftingTableOpen) window.closeCraftingTable()
                 else if (window.furnaceOpen) window.closeFurnace()
                 else if (window.chestOpen) window.closeChest()
+                else if (window.enchantingTableOpen) window.closeEnchantingTable()
                 else window.toggleInventory()
                 e.accepted = true; return
             }
@@ -5882,6 +5917,10 @@ Window {
             }
             if (e.key === Qt.Key_Escape && window.chestOpen) {
                 window.closeChest(); e.accepted = true; return
+            }
+            // t474 附魔台面板：Esc 关（同工作台 / 熔炉 / 箱子；!captured 时 Esc 落 QML → 本分支）。
+            if (e.key === Qt.Key_Escape && window.enchantingTableOpen) {
+                window.closeEnchantingTable(); e.accepted = true; return
             }
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
             //   t143：同时跟踪 f3Held=true（无条件，menu 态也设，与 shiftHeld 同模式），供 B 键修饰判定。
@@ -7260,6 +7299,25 @@ Window {
         onClosed: window.closeChest()
         onDiscardHeldRequested: player.dropHeldCursor()
         onDiscardHeldOneRequested: player.dropHeldCursorOne()
+    }
+
+    // t474 附魔台面板：右键附魔台方块打开（player.enchantingTableOpened → openEnchantingTable）。
+    //   仅 playing && enchantingTableOpen 时显（与背包 / 工作台 / 熔炉 / 箱子面板互斥）。
+    //   3 选项槽消耗 XP 等级 + 青金石（点槽 → playerState.spendLevels + hotbar.consumeMaterial）；
+    //   书架加成据 theWorld.countBookshelvesAround(enchantX/Y/Z) 算 → 提升可选档位。
+    //   PERF：选项列表只在 visible → true 或点击附魔后刷新（refreshOptions），永不 per-frame（spec 护栏）。
+    EnchantingTableUI {
+        id: enchantingPanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        playerState: playerState
+        theWorld: theWorld
+        enchantX: window.enchantX
+        enchantY: window.enchantY
+        enchantZ: window.enchantZ
+        visible: window.appState === "playing" && window.enchantingTableOpen
+        z: 150
+        onClosed: window.closeEnchantingTable()
     }
 
     // t87 冶炼 tick：WorldClock 每 100ms 发 ticked(0.1) → 转发到 furnacePanel.tick 推进冶炼。

@@ -392,6 +392,26 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   lazurite 底 + 黄铁矿 pyrite 金点」）。音色归 GroupStone（石质）。worldgen 高度分层散布于深层 y∈[5,31]
     //   （机制等价 MC 1.0 青金矿 Y<32 浅深层富集）。进创造调色板（与 coal/iron 矿石同走立方体图标）。
     /* lapis_ore    */ {int(BlockRegistry::LapisOre),        108,108,108,108, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 2, true,                           0x236, 1, 64, "lapis_ore",    "青金矿石"},
+    // ── t474 附魔链两件方块（机制等价 MC 1.0 enchanting table / bookshelf；名称 / 贴图全原创自绘 §9a）：
+    //   附魔台（EnchantingTable）：右键打开附魔 UI（3 选项槽，消耗 XP 等级 1/2/3 + 对应青金石 1/2/3）；
+    //   周围书架数（≤15，2 格切比雪夫半径内）提升可选附魔等级上限。整立方 opaque（solid=true / ShapeFull
+    //   —— 走 mesher 整立方面路径，**非**异形，与 crafting_table / furnace / chest 同族；MC 1.0 附魔台是
+    //   异形低盒 + 顶上立书，本工程简化为整立方以复用既有渲染路径，机制等价非视觉对齐 §4）、
+    //   hardness=5.0（同 MC 1.0 附魔台量级，石质偏硬）、toolType=Pickaxe、requiresTool=true、minTier1
+    //   （木镐可破且掉落）、dropId=自身、dropCount=1、maxStack=64。各面贴图：顶=enchanting_table_top(109)
+    //   （黑曜石深紫黑底 + 钻石青白菱斑 + 顶部立书轮廓）/ 底·侧·前=enchanting_table_side(110)（黑曜石
+    //   深紫黑底 + 钻石嵌点 + 边缘暗化）。音色归 GroupStone（石质）。配方：1 书 + 2 钻石 + 4 黑曜石 → 1
+    //   附魔台（工作台 3×3 有序）。进创造调色板。
+    /* enchanting_table */ {int(BlockRegistry::EnchantingTable), 109, 110, 110, 110, true,  BlockRegistry::ShapeFull,   5.0f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::EnchantingTable), 1, 64, "enchanting_table", "附魔台"},
+    //   书架（Bookshelf）：纯装饰合成产物（机制等价 MC 1.0 bookshelf —— 仅作为附魔台加成来源；本工程无
+    //   「书架可放书」物品栏，纯合成 / 放置方块）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整
+    //   立方面路径，**非**异形，与 chest / wool 同族）、hardness=1.5（同 MC 1.0 书架量级，木质偏软）、
+    //   toolType=Axe（木制；requiresTool=false → 空手也掉落，仅斧给速度加成）、dropId=自身（破书架掉书架
+    //   方块，可放回 —— MC 1.0 破书架掉**书**物品，本工程掉书架方块以便玩家回收重放，区别于 MC 留记录）、
+    //   dropCount=1、maxStack=64。各面贴图=bookshelf(111)（木板边框 + 中央书脊彩色书列）。音色归 GroupWood
+    //   （木质）。配方：6 木板 + 3 书 → 1 书架（工作台 3×3 有序：上 / 下两行木板、中间一行 3 书）。进创造
+    //   调色板（玩家可取用 / 放置；附魔台加成测试用）。
+    /* bookshelf    */ {int(BlockRegistry::Bookshelf),       111,111,111,111, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Bookshelf),      1, 64, "bookshelf",    "书架"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -475,6 +495,8 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* pack_ice                */ -1, // t468 浮冰 → MC 1.0 无等价（packed_ice id 174 为 1.8+；1.0 仅 ice id 79；独立 id 故无 1.0 等价）
     /* blue_ice                */ -1, // t468 蓝冰 → MC 1.0 无等价（blue_ice id 211 为 1.13+；1.0 仅 ice id 79；独立 id 故无 1.0 等价）
     /* lapis_ore               */ 21, // t471 青金矿石 → MC 1.0 lapis lazuli ore id 21
+    /* enchanting_table        */ 116, // t474 附魔台 → MC 1.0 enchanting table id 116
+    /* bookshelf               */ 47,  // t474 书架 → MC 1.0 bookshelf id 47
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -606,6 +628,22 @@ bool BlockRegistry::isFlower(quint8 blockId)
 bool BlockRegistry::isLadder(quint8 blockId)
 {
     return blockId == Ladder;
+}
+
+// t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台加成
+//   计算：扫切比雪夫半径 2 内书架数 ≤15）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移（同 isLadder
+//   单 id 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来追加书架变体时一处同步）。
+bool BlockRegistry::isBookshelf(quint8 blockId)
+{
+    return blockId == Bookshelf;
+}
+
+// t474 附魔台统一谓词（单一权威）：blockId == EnchantingTable 即附魔台。供 playercontroller placeBlock
+//   useBlock 分支判定「右键命中格是否附魔台 → 开 EnchantingTableUI」（避免各处硬编码 id 判定漂移，同
+//   isLadder 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来变体时一处同步）。
+bool BlockRegistry::isEnchantingTable(quint8 blockId)
+{
+    return blockId == EnchantingTable;
 }
 
 // t468 冰族统一谓词（单一权威）：Ice(45) / PackIce(91) / BlueIce(92) 即冰。三 id 不连续（Ice 夹中间）故显式并判。
@@ -948,6 +986,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Sandstone: // t394 砂岩 → 石质音色（成岩，同 cobble/stone 族）
     case Obsidian: // t411 黑曜石 → 石质音色（致密火山玻璃，同 cobble/stone 族）
     case CobbleSlab: case CobbleStairs: case CobbleFence: case CobblePressurePlate: // t412 圆石变体 → 石质音色（同 cobble 族）
+    case EnchantingTable: // t474 附魔台 → 石质音色（黑曜石+钻石基座，石质偏硬，同 obsidian 族）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）
@@ -968,6 +1007,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case SpruceLog: // t395 云杉原木 → 木质音色（同 log / planks 族）
     case SprucePlanks: case SpruceSlab: case SpruceFence: case SpruceDoor: // t466 云杉木制品 → 木质音色（同 planks 族）
     case Ladder: // t413 木梯 → 木质音色（木质梯，同 planks 族）
+    case Bookshelf: // t474 书架 → 木质音色（木板边框，同 planks 族）
         return GroupWood;
     case Grass: case Dirt:
     case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）

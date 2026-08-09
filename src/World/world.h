@@ -153,6 +153,15 @@ public:
     //   只读 m_chunks.blockAt（向下依赖）；世界空 → 0（干态兜底）。非 Q_INVOKABLE（C++ 调）。
     int farmlandHydrationLevel(int x, int y, int z) const;
 
+    // t474 附魔台书架加成计数（机制等价 MC 1.0 enchanting table bookshelf power：附魔台周围 2 格切比雪夫
+    //   距离内的书架数提升可选附魔等级上限）。给定附魔台方块格 (x,y,z)，扫 (x±2, y±2, z±2) 立方体范围内
+    //   的 Bookshelf 数（共 5×5×5 = 125 格，去除中心附魔台自身），上限钳到 15（spec「count bookshelves
+    //   within 2 blocks (<=15)」）。机制对齐 MC「中间需空气格」本工程简化为纯计数（不查阻隔）。
+    //   呈现层 EnchantingTableUI 据本值算 maxEnchantLevel（书架数 / 2 + 1，钳 [1,3]，机制等价 MC 每两级
+    //   书架解锁更高档）。分层（PLAN §2）：World 层只读 m_chunks.blockAt + BlockRegistry::isBookshelf，
+    //   不依赖 Renderer/Game/UI。OOB blockAt 返 Air 安全（不计入）。
+    Q_INVOKABLE int countBookshelvesAround(int x, int y, int z) const;
+
     // t117/t220 FallingBlock 着地专用：经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + 边界邻接，同 setBlock
     //   的写入路径）+ emit worldChanged（驱动 mesh 重建），但**不**发 blockPlaced（与玩家放置语义分离）。
     //   沿用 worldgen 经 m_chunks.setBlock 直写不触发 blockPlaced 的既有约定——避免 onBlockPlaced 的 survival

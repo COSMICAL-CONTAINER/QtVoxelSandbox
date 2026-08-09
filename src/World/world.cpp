@@ -944,6 +944,31 @@ int World::farmlandHydrationLevel(int x, int y, int z) const
     return (level > 0) ? level : 0;
 }
 
+// t474 附魔台书架加成计数（见 world.h 头注释）。机制等价 MC 1.0 enchanting table bookshelf power：
+//   附魔台周围 2 格切比雪夫距离（5×5×5 立方体）内的书架数提升可选附魔等级上限，钳到 15。
+//   纯只读（blockAt + BlockRegistry::isBookshelf）；OOB 返 Air 安全（不计入）；世界空 → 0。
+int World::countBookshelvesAround(int x, int y, int z) const
+{
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return 0;
+    constexpr int kRadius = 2;     // MC 1.0 附魔台书架加成半径（2 格切比雪夫距离）
+    constexpr int kMaxBookshelves = 15; // spec 上限（>15 仍按 15 算）
+    int count = 0;
+    for (int dy = -kRadius; dy <= kRadius; ++dy) {
+        const int yy = y + dy;
+        for (int dx = -kRadius; dx <= kRadius; ++dx) {
+            for (int dz = -kRadius; dz <= kRadius; ++dz) {
+                if (dx == 0 && dy == 0 && dz == 0) continue; // 跳过中心附魔台自身（即使附魔台是书架也不计；防御）
+                if (BlockRegistry::isBookshelf(m_chunks.blockAt(x + dx, yy, z + dz))) {
+                    ++count;
+                    if (count >= kMaxBookshelves) return kMaxBookshelves; // 早退：达上限即返（避免无谓遍历余格）
+                }
+            }
+        }
+    }
+    return count;
+}
+
 // t406 甘蔗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 sugar cane random-tick 生长。
 void World::tickSugarcaneGrowth()
 {

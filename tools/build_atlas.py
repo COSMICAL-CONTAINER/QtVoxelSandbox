@@ -217,6 +217,9 @@ TILES = [
     "default_pack_ice",             # 106 pack_ice（t468 浮冰各面贴图；实白底+细裂纹，比 Ice 更密实；PackIce 各面=本 tile）
     "default_blue_ice",             # 107 blue_ice（t468 蓝冰各面贴图；淡蓝底+纵向纹路，最滑；BlueIce 各面=本 tile）
     "default_lapis_ore",            # 108 lapis_ore（t471 青金矿石各面贴图；石头底+群青深蓝斑簇+黄铁矿金点；散布于 stone 深层 y∈[5,31]）
+    "default_enchanting_table_top", # 109 enchanting_table_top（t474 附魔台顶面贴图；黑曜石深紫黑底+钻石青白四角嵌点+中央立书轮廓；EnchantingTable 顶面=本 tile；tools/build_enchanting_table.py 程序生成原创像素图）
+    "default_enchanting_table_side", # 110 enchanting_table_side（t474 附魔台侧面/底面/前面贴图；黑曜石深紫黑底+钻石青白四角嵌点+顶/底边缘暗化带；EnchantingTable 底/侧/前=本 tile）
+    "default_bookshelf",           # 111 bookshelf（t474 书架各面贴图；橡木木板边框+中央书脊彩色书列（红/蓝/绿/棕）；Bookshelf 各面=本 tile；tools/build_bookshelf.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
