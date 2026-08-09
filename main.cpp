@@ -16,6 +16,7 @@
 #include <QTextStream>
 #include <QTimer>
 
+#include "frameprofiler.h"
 #include "resourcepackmanager.h"
 
 // t414 image provider：把 ResourcePackManager 合成的运行期图集（默认图集 + 包覆盖）以
@@ -119,9 +120,38 @@ int main(int argc, char *argv[])
         return -1;
 
     // FPS：frameSwapped（GUI 线程，每帧）+1，每秒写到 QML 的 fps 属性。
+    // perf-t520 帧时间分解桶（main_total / render_cpu）：frameSwapped 间隔 ≈ GUI 线程帧周期
+    //   （含 sim + QML binding/scenegraph update + 同步等待）；beforeRendering → afterRendering
+    //   ≈ 渲染线程 CPU 侧编码 + GPU 提交阻塞（非真 GPU 时间，QtQuick3D 路径无公开 GPU 计时查询）。
+    //   两者推入 FrameProfiler 单例，1s 窗口 ÷ frames 得 ms/frame → F3 / logs 报告区分主线程 vs 渲染线程瓶颈。
+    //   threaded render loop 诊断公式：frame ≈ max(main_total, render_cpu)。
     if (auto *win = qobject_cast<QQuickWindow *>(engine.rootObjects().value(0))) {
         auto *frames = new int(0);
-        QObject::connect(win, &QQuickWindow::frameSwapped, win, [frames]() { ++(*frames); });
+        // main_total：本帧 frameSwapped 与上帧 frameSwapped 的间隔（ns）。首帧 lastNs=0 跳过（无基准）。
+        auto *lastSwapNs = new qint64(0);
+        QObject::connect(win, &QQuickWindow::frameSwapped, win, [frames, lastSwapNs]() {
+            ++(*frames);
+            const qint64 now = FrameProfiler::nowNs();
+            if (*lastSwapNs > 0) {
+                const double ms = double(now - *lastSwapNs) / 1e6;
+                FrameProfiler::instance()->addSampleMs(QStringLiteral("main_total"), ms);
+            }
+            *lastSwapNs = now;
+        });
+        // render_cpu：渲染线程内 beforeRendering → afterRendering 的耗时（DirectConnection = 在发射线程
+        //   即渲染线程上运行 lambda）。beforeRendering / afterRendering 之间是 QtQuick3D 渲染队列的
+        //   场景图 commit + draw call 编码 + RHI 提交（含 GPU stall）。仅计时，不改渲染流程。
+        auto *renderStartNs = new qint64(0);
+        QObject::connect(win, &QQuickWindow::beforeRendering, win, [renderStartNs]() {
+            *renderStartNs = FrameProfiler::nowNs();
+        }, Qt::DirectConnection);
+        QObject::connect(win, &QQuickWindow::afterRendering, win, [renderStartNs]() {
+            if (*renderStartNs > 0) {
+                const double ms = double(FrameProfiler::nowNs() - *renderStartNs) / 1e6;
+                FrameProfiler::instance()->addSampleMs(QStringLiteral("render_cpu"), ms);
+                *renderStartNs = 0; // 守卫：防 beforeRendering 漏一帧导致 stale 算
+            }
+        }, Qt::DirectConnection);
         auto *fpsTimer = new QTimer(win);
         fpsTimer->setInterval(1000);
         QObject::connect(fpsTimer, &QTimer::timeout, win, [win, frames]() {

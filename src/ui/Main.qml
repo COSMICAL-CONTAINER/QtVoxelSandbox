@@ -142,6 +142,13 @@ Window {
     //   调高 = 整体暗部变亮（兼顾可辨识），调低 = 夜更黑（氛围）。洞穴 / 阴影顶点色地板另由 C++ kVcMin（0.08）托底。
     property real minLight: 0.4
 
+    // perf-t520 天光基色缓存：原 ~300 chunk Model material 各自 `baseColor: terrainLight(skyLight)`
+    //   （terrain / water / cross 段，每段 100 chunk = 300 material 实例）→ 10Hz skyLight 变更触发 300 绑定重算
+    //   （3000 次/秒 JS 调用 + Qt.rgba QColor 分配 + scenegraph 标脏）。改为单一 window.skyBaseColor 绑定 + 各
+    //   material 只读它 → 10Hz 仅 1 次重算，材料绑定从「计算 + QColor 分配」降为「常数属性读取」。
+    //   tintBySkyLight（mob tier 色）不在 chunk material 路径，结构不同（mob delegate 数 << 300），保留独立调。
+    property color skyBaseColor: terrainLight(worldClock.skyLight)
+
     // t384 云层漂移累积（单一时间权威 WorldClock.ticked 推进，不在 QML 另起 Timer，PLAN §2）。
     //   云 Model 的 position.x = player.x + (cloudDrift) —— cloudDrift 随时间增长并在「一个 tile 世界宽」
     //   处取模回绕（贴图可无缝平铺 → 回绕点无接缝），实现「缓慢漂移的无限云盖」。driftSpeed=1.5 格/s。
@@ -192,6 +199,16 @@ Window {
     property bool chunksBuilt: false
     property int meshVertices: 0     // 全幅地形段顶点汇总（recomputeMeshStats 写；F3 只读）
     property int meshTriangles: 0    // 全幅地形段三角面汇总（recomputeMeshStats 写；F3 只读）
+    // perf-t520 F3 文本节流（PLAN §4 性能打磨：用户报 <10FPS 主因之一 = F3 文本绑定重算）。
+    //   旧 F3 text 绑定读 player.position/feetPosition/yaw/pitch/speed/onGround/hasHit/hitBlock +
+    //   theWorld.biomeIdAt(...) Q_INVOKABLE + liveCount() Q_INVOKABLE 等 —— 这些属性 NOTIFY 60Hz
+    //   （player.positionChanged 每 tick 发）→ 整块多行字符串（~30 行 concat + Q_INVOKABLE 调用）
+    //   每帧重算，每秒 ~60 次。10Hz Timer 把所有读取移出 text 绑定，buildF3Text() 内读最新值，
+    //   结果写 f3Text 单一 string 属性 → text 元素只绑 f3Text（NOTIFY 10Hz）→ F3 文本重算频率
+    //   从 60Hz 降到 10Hz（~6× 降）。F3 是调试叠层（非玩法关键），100ms 延迟可接受。
+    //   perf-t520 加 frame 行（main_total / render_cpu）—— 同窗口桶已在 FrameProfiler.flush() 拼。
+    property string f3Text: ""
+    property string hudPosText: ""
     // t470 渲染距离 culling（PLAN §4 性能打磨；用户报 9 FPS 主因 = 100 chunk × 6 段 = 600 Model 全渲染无视距）。
     //   仅玩家所在 chunk 周围 renderDistance 切比雪夫半径内的 chunk Model 设 visible=true，其余 false → 远端
     //   chunk 不参与 draw call、不进渲染队列排序，按距离大幅省 GPU / draw-call 开销。
@@ -225,6 +242,76 @@ Window {
         }
         window.meshVertices = v
         window.meshTriangles = t
+    }
+    // perf-t520 F3 文本节流：把原 F3 text 绑定的全部读取 / 字符串拼接抽成普通函数 —— 由 10Hz Timer
+    //   调用（f3RefreshTimer），结果写 window.f3Text 单一 string 属性，F3 Text 元素只读它。这样所有
+    //   per-tick 属性（player.position / feetPosition / yaw / pitch / speed / onGround / hasHit / hitBlock /
+    //   liveCount() / biomeIdAt() / dayPhase / skyLight）从「QML binding 依赖」降为「普通 JS 读取」——
+    //   即 QML 引擎不再为它们建立 NOTIFY 触发链，F3 整块字符串的重算频率由 60Hz（每帧）降到 10Hz（每秒 10 次）。
+    //   100ms 延迟对调试叠层零影响（人眼读字 ~200ms 起跳），但 main thread binding 工作量直降 6×。
+    //   F3 未显（f3Visible=false）时 f3RefreshTimer.running=false → 零开销。
+    function buildF3Text() {
+        // 同原 F3 text 绑定 body（不动逻辑，仅从「绑定 body」抽成「函数 body」）。
+        const vx = window.meshVertices, tr = window.meshTriangles
+        const modeName = player.mode === PlayerController.Spectator ? "SPECTATOR"
+                       : player.mode === PlayerController.Creative ? "CREATIVE" : "SURVIVAL"
+        const camName = player.cameraMode === PlayerController.FirstPerson ? "1st"
+                      : player.cameraMode === PlayerController.ThirdPersonBack ? "3rd-back" : "3rd-front"
+        const moveName = player.moveState === PlayerController.Sprint ? "sprint"
+                       : player.moveState === PlayerController.Crouch ? "crouch" : "walk"
+        const ncx = window.worldChunksPerSide, ncz = window.worldChunksPerSide
+        const frameMs = window.fps > 0 ? (1000.0 / window.fps) : 0.0
+        const itemLive = itemEntities.liveCount(), mobLive = entityManager.liveCount(), orbLive = xpOrbs.liveCount()
+        const drawEst = window.visibleSegmentCount + itemLive + mobLive + torchPositions.count + 6
+        const meshMode = window.greedyMeshing ? "greedy" : "culled"
+        const fpx = Math.floor(player.feetPosition.x), fpz = Math.floor(player.feetPosition.z)
+        const biomeNames = ["Plains", "Hills", "Desert", "Forest", "Snowy", "Swamp"]
+        const bid = theWorld.biomeIdAt(fpx, fpz)
+        const biomeName = (bid >= 0 && bid < biomeNames.length) ? biomeNames[bid] : ("?" + bid)
+        const dayPhase = worldClock.dayPhase
+        const totalMin = ((12.0 + dayPhase * 24.0) % 24.0) * 60.0
+        const hh = Math.floor(totalMin / 60.0), mm = Math.floor(totalMin % 60.0)
+        const timeStr = (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm
+        return "voxelsandbox  [F3 debug]"
+             + "\nfps: " + window.fps + "  frame: " + frameMs.toFixed(1) + "ms  cpu sim: " + player.simMs.toFixed(2) + "ms"
+             + "\npos: " + player.position.x.toFixed(2) + "  " + player.position.y.toFixed(2) + "  " + player.position.z.toFixed(2)
+             + "  (feet " + player.feetPosition.x.toFixed(1) + "," + player.feetPosition.y.toFixed(1) + "," + player.feetPosition.z.toFixed(1) + ")"
+             + "\nyaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch) + "  look " + camName
+             + "\nmode: " + modeName + (player.flying ? " (fly)" : "") + "  move: " + moveName + "  ground: " + (player.onGround ? "yes" : "no")
+             + "\nspeed: " + player.speed.toFixed(2) + " b/s"
+             + (player.flying || player.mode === PlayerController.Spectator
+                ? "  fly: " + player.flySpeed.toFixed(1) + " b/s (x" + player.flySpeedMul.toFixed(2) + ")"
+                : "")
+             + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
+             + "\nbiome: " + biomeName + "  (col " + fpx + "," + fpz + ")"
+             + "\nworld: " + (window.worldChunksPerSide * 16) + "×" + (window.worldChunksPerSide * 16) + "×" + theWorld.height
+             + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz)
+             + "  render r=" + window.renderDistance + " visible " + window.visibleChunkCount + "/" + (ncx * ncz)
+             + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr
+             + "\nentities: mobs " + mobLive + " / items " + itemLive + " / orbs " + orbLive
+             + "\ndraw-calls: ~" + drawEst + "  (segs vis " + window.visibleSegmentCount
+             + " + items " + itemLive
+             + " + mobs " + mobLive + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
+             + "\ntime: " + timeStr + "  day " + worldClock.dayCount + "  moon " + worldClock.moonPhase
+             + "  phase " + dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
+             + (worldClock.debugFast ? "  (fast)" : "")
+             + "\nxp: " + playerState.xp + (playerState.xp > 0 ? "  lvl " + playerState.level : "")
+             + "\n[B] hitboxes: " + (window.showHitboxes ? "ON" : "off")
+             + "   [G] chunk bounds: " + (window.showChunkBounds ? "ON" : "off")
+    }
+    // perf-t520 HUD pos 文本节流：同上，把原 HUD 顶部小条 text 绑定（player.position/yaw/pitch/onGround +
+    //   hotbarVM.nameAt/countAt）抽成普通函数，由 10Hz Timer 调用。HUD 不是 F3 调试，玩家正常游戏时也显
+    //   （playing 态常驻），节流收益对**所有**玩家有效（非仅 F3 开时）。
+    function buildHudPosText() {
+        const held = player.captured
+            ? ("   ground: " + (player.onGround ? "yes" : "no")
+               + "   held: " + hotbarVM.nameAt(hotbarVM.selectedSlot)
+               + " (#" + player.selectedBlock + ")"
+               + " ×" + hotbarVM.countAt(hotbarVM.selectedSlot))
+            : "   pointer free"
+        return "pos: " + player.position.x.toFixed(1) + ", " + player.position.y.toFixed(1) + ", " + player.position.z.toFixed(1)
+              + "   yaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch)
+              + held
     }
     // t470 玩家跨 chunk 边界检测 → 触发远端 chunk visibility 刷新。每 positionChanged 调一次（60Hz tick 玩家
     //   移动时），但仅在 chunk 坐标真变时才走 _refreshChunkVisibility（O(chunk 数) 全扫）。stationary 玩家零开销。
@@ -1081,6 +1168,37 @@ Window {
         repeat: true
         running: window.appState === "playing"
         onTriggered: window.waterAnimPhase = (window.waterAnimPhase === 0) ? 1 : 0
+    }
+    // perf-t520 F3 / HUD 文本节流 Timer：每 100ms（10Hz）调 buildF3Text + buildHudPosText 写
+    //   window.f3Text / hudPosText 单一 string 属性。原 text 绑定读 60Hz player.position 等 → 每帧重算
+    //   ~30 行字符串 + Q_INVOKABLE（biomeIdAt / liveCount）。节流后频率降到 10Hz（6× 降）。
+    //   进 playing 或 F3 切换时由下方 Connections 立即跑一次（避免首帧空白 / 100ms 延迟）。
+    //   HUD pos 文本（playing 常驻）：10Hz 节流仍近实时（100ms 延迟肉眼读字 < 200ms 起跳阈值）。
+    //   F3 未显时 f3Text 不算（节省）；HUD pos 在 playing 时 always-on 计算。
+    Timer {
+        id: f3RefreshTimer
+        interval: 100
+        repeat: true
+        running: window.appState === "playing"
+        onTriggered: {
+            window.hudPosText = window.buildHudPosText()
+            if (window.f3Visible) window.f3Text = window.buildF3Text()
+        }
+    }
+    // perf-t520 进 playing 立即刷新（避免 hudPosText 首帧空白），F3 切换 on 时立即刷一次。
+    //   本 two-phase Connections 与 10Hz Timer 并行（Timer 100ms 后接管），用 QML 内置信号无需 triggeredOnStartup。
+    Connections {
+        target: window
+        function onAppStateChanged() {
+            if (window.appState === "playing") {
+                window.hudPosText = window.buildHudPosText()
+                if (window.f3Visible) window.f3Text = window.buildF3Text()
+            }
+        }
+        function onF3VisibleChanged() {
+            if (window.appState === "playing" && window.f3Visible)
+                window.f3Text = window.buildF3Text()
+        }
     }
     // t223 近流水 proximity 水流声：PlayerController.flowSoundLevel（每 ~0.25s 节流扫描更新，0=无近流水 / 近=1）
     //   → AudioManager.startWaterFlow/stopWaterFlow/setWaterFlowLevel。level>0 启动并设音量；level<=0 停。
@@ -2569,7 +2687,7 @@ Window {
                     greedyMeshing: window.greedyMeshing
                     chunkInRange: terrainModel.chunkInRange // t472：视距门控传给 mesher（远端跳过 sun/water/编辑重建）
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: window.skyBaseColor }
             }
         }
 
@@ -2596,7 +2714,7 @@ Window {
                     waterOnly: true
                     waterAnimPhase: window.waterAnimPhase
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: terrainLight(worldClock.skyLight) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: window.skyBaseColor }
             }
         }
 
@@ -2725,7 +2843,7 @@ Window {
                     chunkInRange: crossModel.chunkInRange // t472：视距门控传给 mesher（远端 cutout 段跳过 sun 重建）
                     cutoutOnly: true   // t326：仅 cross 方块（草丛/作物/树苗）→ cutout 材质（t439 alphaMode:Mask 不透明 pass）
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: window.skyBaseColor }
             }
         }
 
@@ -6533,12 +6651,9 @@ Window {
         visible: window.appState === "playing"
         x: 12; y: 36
         color: "#cccccc"; font.pixelSize: 13
-        text: "pos: " + player.position.x.toFixed(1) + ", " + player.position.y.toFixed(1) + ", " + player.position.z.toFixed(1)
-              + "   yaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch)
-              + (player.captured ? ("   ground: " + (player.onGround ? "yes" : "no")
-                                   + "   held: " + hotbarVM.nameAt(hotbarVM.selectedSlot)
-                                   + " (#" + player.selectedBlock + ")"
-                                   + " ×" + hotbarVM.countAt(hotbarVM.selectedSlot)) : "   pointer free")
+        // perf-t520 节流：原绑定读 player.position/yaw/pitch/onGround + hotbarVM.nameAt/countAt → 60Hz 重算；
+        //   现读 hudPosText 单一 string（由 f3RefreshTimer 10Hz 刷新），main thread binding 工作降 6×。
+        text: window.hudPosText
     }
 
     // F3 调试叠层（t10，PLAN §2-F）：左上角多行调试文本，绑各运行期计数 / 玩家态 / chunk 网格统计，
@@ -6571,91 +6686,27 @@ Window {
         color: "#ffff00"                        // 单色（黄）+ 黑描边，亮/暗背景均高对比可读
         style: Text.Outline; styleColor: "#000000"
         font.pixelSize: 12; font.family: "monospace"
-        text: {
-            // t276 全幅 chunk 顶点 / 三角面汇总（meshVertices / meshTriangles 标量由每个地形段 meshRebuilt
-            //   经 Connections → recomputeMeshStats 增量刷新；F3 只读标量，不把 var 数组进 text 绑定 → 无 loop）。
-            //   旧 5×5 仅汇总中心 3×3（geo00..geo22），动态化后改为全幅（更诚实的 mesh 预算观测）。
-            const vx = window.meshVertices, tr = window.meshTriangles
-            const modeName = player.mode === PlayerController.Spectator ? "SPECTATOR"
-                           : player.mode === PlayerController.Creative ? "CREATIVE" : "SURVIVAL"
-            const camName = player.cameraMode === PlayerController.FirstPerson ? "1st"
-                          : player.cameraMode === PlayerController.ThirdPersonBack ? "3rd-back" : "3rd-front"
-            // t51：移动态（walk/sprint/crouch）入 F3 叠层，便于核对疾跑 / 蹲下触发。
-            const moveName = player.moveState === PlayerController.Sprint ? "sprint"
-                           : player.moveState === PlayerController.Crouch ? "crouch" : "walk"
-            // t276：chunk 列数读 window.worldChunksPerSide（单一权威），不读 theWorld.chunksX/Z —— World.width/depth
-            //   现为 QML 绑定（← worldChunksPerSide），在 text 绑定里读 theWorld.chunksX（NOTIFY widthChanged）会与
-            //   width 绑定链构成 QML binding loop（误报，但留 WRN）。worldChunksPerSide 是常量 int，读它无 loop。
-            const ncx = window.worldChunksPerSide, ncz = window.worldChunksPerSide
-            // t178 帧时间切分（PLAN §4 验收「写死帧时间切分 CPU/GPU ms + draw-call 预算」）：
-            //   - frameMs：总帧预算 = 1000/fps（fps=0 → 0，防除零）。
-            //   - cpuSimMs：主线程 tick() CPU 耗时 1s 平均（player.simMs；物理/射线/实体/挖掘/拾取）。
-            //   - drawEst：估算 draw-call 数（chunks 地形+水两段 + 掉落物 + mob + 火把 + ~6 固定场景 Model：
-            //     太阳/玩家模型/手/选框/裂纹/粒子；明确标 ≈ 因 QtQuick3D 路径不暴露逐帧真值，spec 禁伪造）。
-            //   GPU 真计时 / 逐帧 draw-call 待自研 RHI 迁移（QRhiGpuTimer / RHI stats）。
-            const frameMs = window.fps > 0 ? (1000.0 / window.fps) : 0.0
-            // t256：draw 估算用 liveCount（活体实体）非 count（含已 release 的空槽）—— 空槽 delegate
-            //   visible=false 不参与绘制，count 会高估（slot-reuse 后 count=槽位数 ≠ 渲染实体数）。
-            const itemLive = itemEntities.liveCount(), mobLive = entityManager.liveCount(), orbLive = xpOrbs.liveCount()
-            // t470：draw 估算用 visibleSegmentCount（双重剔除后实际渲染段数：range + 空段）。替代旧 ncx*ncz*2
-            //   （过时：当时仅 terrain+water 两段且无视距；现 6 段 + culling visible < total）。
-            const drawEst = window.visibleSegmentCount + itemLive + mobLive + torchPositions.count + 6
-            const meshMode = window.greedyMeshing ? "greedy" : "culled"
-            // t464 玩家脚底所在格 → 群系名（theWorld.biomeIdAt 是 Q_INVOKABLE，但本绑定已读 player.feetPosition
-            //   （NOTIFY positionChanged）→ 玩家每移动一格整 text 重算，biome 即时随脚刷新）。群系编码 0..5 见
-            //   World::Biome enum（私有，此处按 Q_INVOKABLE int 返回映射通用名；§9 区隔，零 MC 专名）。
-            const fpx = Math.floor(player.feetPosition.x), fpz = Math.floor(player.feetPosition.z)
-            const biomeNames = ["Plains", "Hills", "Desert", "Forest", "Snowy", "Swamp"]
-            const bid = theWorld.biomeIdAt(fpx, fpz)
-            const biomeName = (bid >= 0 && bid < biomeNames.length) ? biomeNames[bid] : ("?" + bid)
-            // t464 时间：worldClock.dayPhase（0=noon）派生 24h 制 HH:MM。phase 0→12:00、0.25→18:00、0.5→00:00、0.75→06:00。
-            //   hour = (12 + phase*24) mod 24；minute = frac(phase*24)*60。dayCount 跨天刷新（dayChanged）。
-            const dayPhase = worldClock.dayPhase
-            const totalMin = ((12.0 + dayPhase * 24.0) % 24.0) * 60.0
-            const hh = Math.floor(totalMin / 60.0), mm = Math.floor(totalMin % 60.0)
-            const timeStr = (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm
-            return "voxelsandbox  [F3 debug]"
-                 + "\nfps: " + window.fps + "  frame: " + frameMs.toFixed(1) + "ms  cpu sim: " + player.simMs.toFixed(2) + "ms"
-                 + "\npos: " + player.position.x.toFixed(2) + "  " + player.position.y.toFixed(2) + "  " + player.position.z.toFixed(2)
-                 + "  (feet " + player.feetPosition.x.toFixed(1) + "," + player.feetPosition.y.toFixed(1) + "," + player.feetPosition.z.toFixed(1) + ")"
-                 + "\nyaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch) + "  look " + camName
-                 + "\nmode: " + modeName + (player.flying ? " (fly)" : "") + "  move: " + moveName + "  ground: " + (player.onGround ? "yes" : "no")
-                 + "\nspeed: " + player.speed.toFixed(2) + " b/s" // t159：实际水平速度（位移/dt；含疾跑/飞/水下倍数/撞墙归零）
-                 + (player.flying || player.mode === PlayerController.Spectator
-                    ? "  fly: " + player.flySpeed.toFixed(1) + " b/s (x" + player.flySpeedMul.toFixed(2) + ")"
-                    : "") // t159/t210：飞态额外报当前有效飞速 + 倍数（仅 spectator 滚轮可调；创造飞态恒 x1.00）
-                 + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
-                 // t464 玩家脚底群系（仅消费 World Q_INVOKABLE，PLAN §2 UI ← World 向下读；§9 通用名）。
-                 + "\nbiome: " + biomeName + "  (col " + fpx + "," + fpz + ")"
-                 // t276：world 行读 worldChunksPerSide（权威）+ theWorld.height（literal，非绑定，无 loop），
-                 //   不读 theWorld.width/depth（绑定链 → binding loop）。t307：height 64→128。
-                 //   t470：chunks 段加 render distance + visible 计数（culling 验收：visible < total = 远端 chunk 已剔除）。
-                 + "\nworld: " + (window.worldChunksPerSide * 16) + "×" + (window.worldChunksPerSide * 16) + "×" + theWorld.height
-                 + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz)
-                 + "  render r=" + window.renderDistance + " visible " + window.visibleChunkCount + "/" + (ncx * ncz)
-                 + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr // t178：mesh 模式 + 顶点/三角（greedy 大幅降）
-                 // t464 实体行（liveCount 三类）—— 验证 t437 orphan 修复的关键诊断：退存档→再进应回落，跨世界不累积。
-                 + "\nentities: mobs " + mobLive + " / items " + itemLive + " / orbs " + orbLive
-                 // t470：draw-calls 估算改用 visibleSegmentCount（双重剔除后实际渲染的段 Model 数；替代旧 ncx*ncz*2
-                 //   上界——当时仅 terrain+water 两段且无视距，现 6 段 + culling 后实际渲染段数远低于 chunk×6）。
-                 + "\ndraw-calls: ~" + drawEst + "  (segs vis " + window.visibleSegmentCount
-                 + " + items " + itemLive
-                 + " + mobs " + mobLive + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
-                 // t464 game time：HH:MM（dayPhase 派生）+ day N（dayCount）+ moon M（moonPhase）+ phase/sky（t09 调试）。
-                 + "\ntime: " + timeStr + "  day " + worldClock.dayCount + "  moon " + worldClock.moonPhase
-                 + "  phase " + dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
-                 + (worldClock.debugFast ? "  (fast)" : "")
-                 + "\nxp: " + playerState.xp + (playerState.xp > 0 ? "  lvl " + playerState.level : "")
-                 + "\n[B] hitboxes: " + (window.showHitboxes ? "ON" : "off")
-                 + "   [G] chunk bounds: " + (window.showChunkBounds ? "ON" : "off")
-        }
+        // perf-t520 节流：原 text 绑定读 60Hz player.position/feetPosition/yaw/pitch/speed/onGround/hasHit/hitBlock +
+        //   theWorld.biomeIdAt(...) Q_INVOKABLE + liveCount() ×3 Q_INVOKABLE + worldClock.dayPhase/skyLight（100Hz）→
+        //   整块 ~30 行字符串每帧重算（每秒 ~60 次）。改读 window.f3Text 单一 string（由 f3RefreshTimer 10Hz 刷新，
+        //   buildF3Text() 内读最新值），重算频率降 6×。F3 是调试叠层，100ms 延迟零影响。
+        text: window.f3Text
     }
 
     // perf 帧时间分解叠层（FrameProfiler：C++ 各热路径 Scope 累加 → 每 ~1s flush 报告字符串）。
     //   tick 行 = 60Hz tickImpl 各阶段 ms/frame（env/item/xp/boat/mob/pickup/phys/ray/input）；
-    //   win 行 = 1s 窗口内 mesh 总 ms（含 rebuild 次数）+ world tick 各总 ms。
-    //   诊断 <10 FPS 时读此叠层定位「每帧固定开销」花在哪（实体 tick / mesh 重建 / 物理 / ...），不再猜。
-    //   F3 关时不显；报告内容亦每秒落 logs/voxelsandbox.log（grep vo.prof）。
+    //   win 行 = 1s 窗口内 mesh 总 ms（含 rebuild 次数）+ world tick 各总 ms；
+    //   perf-t520 frame 行 = 帧时间切分桶（main_total / render_cpu，ms/frame）—— 区分 GUI 主线程 vs 渲染线程瓶颈：
+    //     - main_total = frameSwapped 间隔（GUI 线程帧周期；含 sim + QML binding/scenegraph update + 同步等待）；
+    //     - render_cpu = beforeRendering → afterRendering（渲染线程 CPU 侧编码 + GPU 提交阻塞；**非**真 GPU 时间，
+    //       QtQuick3D 路径无公开 GPU 计时查询，render_cpu 含 GPU stall 但不等同纯 GPU 时间，已在报告中标注）。
+    //     threaded render loop 下 frame ≈ max(main_total, render_cpu)：
+    //       - main_total >> render_cpu → 主线程 bound（QML binding / 物理 tick / scene-graph update）；
+    //       - render_cpu >> main_total → 渲染线程 bound（GPU 提交 / draw-call 多 / 渲染队列长）。
+    //     max 一侧标 *（视觉提示瓶颈侧）。
+    //   mob sub 行 = mob 桶拆分（ai/phys/hostile/spawn/loop）。
+    //   诊断 <10 FPS 时读此叠层定位「每帧固定开销」花在哪（实体 tick / mesh 重建 / 物理 / QML binding / 渲染），
+    //   不再猜。F3 关时不显；报告内容亦每秒落 logs/voxelsandbox.log（grep vo.prof）。
     Text {
         visible: window.appState === "playing" && window.f3Visible
         x: 12; y: 62 + 200   // 在主 F3 块下方（主块约 12 行 × ~16px）

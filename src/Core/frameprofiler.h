@@ -2,6 +2,7 @@
 #define FRAMEPROFILER_H
 
 #include <QObject>
+#include <QMutex>
 #include <QString>
 #include <QtQml/qqml.h>
 
@@ -28,8 +29,22 @@
 //     → report 为窗口内总 ms。
 //   sim（= 逐帧桶之和 / 帧数）≈ player.simMs（既有 1s tick CPU 平均），交叉核对两路计时一致。
 //
+// 帧分解桶（main_total / render_cpu，perf-t520 新增）—— 区分 GUI 主线程 vs 渲染线程瓶颈：
+//   - main_total：frameSwapped → 下一 frameSwapped 的总耗时（GUI 线程帧周期；含 sim + QML binding /
+//     scenegraph update / 同步等待）。在 threaded render loop 下 ≈ 整帧时间，是「帧率上限」。
+//   - render_cpu：beforeRendering → afterRendering 的耗时（渲染线程 CPU 侧编码 + GPU 提交阻塞；
+//     **非**真 GPU 时间 —— QtQuick3D 路径无公开 GPU 计时查询，render_cpu 含 GPU stall 但不等同纯 GPU
+//     时间，已在报告字串中诚实标注）。两者均从 main.cpp 经 addSampleMs 推入，按 ms/frame 报告。
+//   诊断公式（threaded render loop）：frame = max(main_total, render_cpu) 近似。
+//     - main_total >> render_cpu → 主线程 bound（QML binding / 物理 tick / scene-graph update）。
+//     - render_cpu >> main_total → 渲染线程 bound（GPU 提交 / 渲染队列长 / draw-call 多）。
+//   main.cpp hook：QQuickWindow::frameSwapped（GUI 线程）→ main_total；
+//     QQuickWindow::beforeRendering / afterRendering（渲染线程，DirectConnection）→ render_cpu。
+//
 // 全 GUI 线程访问（PlayerController QTimer / QML 信号槽直连 / WorldClock QTimer 均在 GUI 线程）→
 //   无锁。即便将来线程化，本探针是诊断工具、非数据通路，竞态最坏导致某次报告数字偏差一帧，可接受。
+//   perf-t520 新增 main_total / render_cpu 走 addSampleMs（QtQuick3D beforeRendering / afterRendering
+//   在渲染线程发射 → 跨线程写 m_ns → 加 QMutex 保护，免 hash race 导致崩溃 / 数字乱跳）。
 //
 // 分层（PLAN §2）：Core 叶子（只依赖 Qt Core/Qml），无向上依赖。所有上层 include 它推送数据；
 //   QML F3 只读 report 字符串。属 Core → Game/World/Renderer 任意上层均可向下 include（铁律成立）。
@@ -43,13 +58,15 @@ class FrameProfiler : public QObject
 public:
     // QML 单例工厂（QML_SINGLETON 要求）：返回全局唯一实例（C++ / QML 共用同一对象）。
     static FrameProfiler *create(QQmlEngine *, QJSEngine *) { return instance(); }
-    // C++ 全局访问点（PlayerController / ChunkGeometry / World 经它推送计时）。
+    // C++ 全局访问点（PlayerController / ChunkGeometry / World / main.cpp 经它推送计时）。
     static FrameProfiler *instance();
 
     // 单调纳秒（进程启动来累；RAII Scope 与手动子桶计时共用同一静态 QElapsedTimer，时间基一致可交叉对照）。
     //   手动计时用途：热路径内一段代码跨多条 continue / 分支无法用单个 RAII Scope 包裹时（如 EntityManager
     //   tick 的 mob 循环内 AI-pass vs 物理-pass 拆分），用 nowNs() 手动取 t0/t1 累加进具名桶，避免每实体
     //   构造 Scope 的开销（nowNs 仅 1× nsecsElapsed，比 Scope 构造+析构 2× nowNs + map add 更轻）。
+    //   亦被 main.cpp 跨线程读取（render_cpu 计时取 before/afterRendering 时间戳）—— QElapsedTimer
+    //   ::nsecsElapsed 本身是线程安全的（只读静态计时器），无需加锁。
     static qint64 nowNs();
 
     // RAII 计时段：构造记 t0，析构把耗时累加进 name 桶。name 须为静态字面量（不拷贝、不释放）。
@@ -59,7 +76,7 @@ public:
     public:
         explicit Scope(const char *name) : m_name(name), m_t0(FrameProfiler::nowNs()) {}
         ~Scope() { FrameProfiler::instance()->add(m_name, FrameProfiler::nowNs() - m_t0); }
-        Q_DISABLE_COPY(Scope)
+        Q_DISABLE_COPY_MOVE(Scope)
     private:
         const char *m_name;
         qint64 m_t0;
@@ -68,7 +85,8 @@ public:
     QString report() const { return m_report; }
     int frames() const { return m_lastFrames; }
 
-    // 累加 name 桶 ns（Scope 析构调）。name 静态字面量。
+    // 累加 name 桶 ns（Scope 析构调）。name 静态字面量。GUI 线程调用，加锁（perf-t520：addSampleMs
+    //   跨线程后，所有写路径统一锁保护 m_ns）。
     void add(const char *name, qint64 ns);
     // 累加 name 事件计数（用于统计 mesh rebuild 次数等）。name 静态字面量。
     void count(const char *name);
@@ -77,10 +95,12 @@ public:
     // 每 ~1s 调一次（PlayerController 既有 perf 窗口）：把当前窗口各桶 → 报告，重置窗口，emit + qInfo。
     void flush();
 
-    // t500 perf：QML 侧（如 BlockParticles.qml 的 50Hz Timer）经它推一个样本到 name 桶（ms 单位）。
-    //   QML Timer 跑在 GUI 线程、与 C++ 60Hz tick 同线程但异步节拍 → 样本累加进窗口桶、report 时按
-    //   「窗口总 ms」展示（同 mesh/w 前缀桶），不除帧数。name 须为静态字面量（同 add 契约）。
-    //   分层（PLAN §2）：Core 叶子，仅依赖 Qt Core/Qml；QML 经 QML_NAMED_ELEMENT 单例访问。
+    // t500 perf / perf-t520：调用方推一个 ms 样本到 name 桶。name 可为静态字面量（add）亦可为
+    //   动态 QString（addSampleMs 内部转 std::string 做 unordered_map 键）。QML 侧（BlockParticles.qml
+    //   的 50Hz Timer）与 C++ 侧（main.cpp 的 frameSwapped / beforeRendering / afterRendering）共用本入口。
+    //   跨线程安全：内部加 QMutex（render_cpu 由渲染线程发射、main_total 由 GUI 线程发射 → 必须锁）。
+    //   ms<=0 忽略（防 0 / 负值噪声）。分层（PLAN §2）：Core 叶子，仅依赖 Qt Core/Qml；QML 经
+    //   QML_NAMED_ELEMENT 单例访问，C++ 经 instance() 访问。
     Q_INVOKABLE void addSampleMs(const QString &name, double ms);
 
 signals:
@@ -90,14 +110,15 @@ private:
     FrameProfiler();
     // 逐帧桶（report 时 ÷ m_frameCount 得 ms/frame）。
     static const char *const kFramePhases[9];
-    // 查桶 ns（不存在 → 0）。
-    qint64 bucket(const char *name) const;
+    // 查桶 ns（不存在 → 0）。锁内调用（持 m_mutex）。
+    qint64 bucketLocked(const char *name) const;
 
-    std::unordered_map<std::string, qint64> m_ns;     // 当前窗口累加耗时（ns），键 = phase name
-    std::unordered_map<std::string, qint64> m_counts; // 当前窗口累加事件计数，键 = name（如 "meshN"）
-    int m_frameCount = 0;                              // 当前窗口 60Hz tick 帧数
-    QString m_report;                                  // 上次 flush 的报告（F3 绑定读它）
-    int m_lastFrames = 0;                              // 上次窗口帧数（Q_PROPERTY frames 读它）
+    mutable QMutex m_mutex;                              // 保护 m_ns / m_counts / m_frameCount（跨线程读写）
+    std::unordered_map<std::string, qint64> m_ns;        // 当前窗口累加耗时（ns），键 = phase name
+    std::unordered_map<std::string, qint64> m_counts;    // 当前窗口累加事件计数，键 = name（如 "meshN"）
+    int m_frameCount = 0;                                // 当前窗口 60Hz tick 帧数
+    QString m_report;                                    // 上次 flush 的报告（F3 绑定读它；锁外只读 OK）
+    int m_lastFrames = 0;                                // 上次窗口帧数（Q_PROPERTY frames 读它）
 };
 
 #endif // FRAMEPROFILER_H
