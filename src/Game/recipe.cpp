@@ -555,6 +555,24 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::SprucePlanks), 0,                               int(BlockRegistry::SprucePlanks),
         int(BlockRegistry::SprucePlanks), int(BlockRegistry::SprucePlanks), int(BlockRegistry::SprucePlanks) },
       RecipeRegistry::SpruceBoatId, 1, 1, "spruce_boat" },
+    // t473 纸：3 甘蔗横排（任意一行）→ 3 纸（有序 3×3，仅工作台）。机制等价 MC 1.0 paper（3 sugar cane 横排 → 3 paper）。
+    //   原料甘蔗 = BlockRegistry::Sugarcane（破甘蔗掉自身方块，可入合成格）。最小包围盒 3×1（一行 3 甘蔗）；
+    //   shapedEqual 允许该行在网格内任意纵向平移（顶 / 中 / 底行均可命中）。产物 PaperId（材料段 0x237，可堆叠 64）。
+    //   取 3 件产出与 MC 1:3 比一致（3 甘蔗 → 3 纸）。**只能工作台合**（一行 3 宽放不进 2×2 背包栏）。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Sugarcane), int(BlockRegistry::Sugarcane), int(BlockRegistry::Sugarcane),
+        0, 0, 0,
+        0, 0, 0 },
+      RecipeRegistry::PaperId, 3, 1, "paper" },
+    // t473 书：3 纸 + 1 皮革 → 1 书（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0 book（3 paper + 1 leather）。
+    //   2×2 左上四格：纸×3（左上 / 右上 / 左下）+ 皮革×1（右下）；最小包围盒 2×2。原料 PaperId（本任务纸配方产物）+
+    //   LeatherId（0x20D，杀牛 / 杀猪掉落，t242 + t473）。产物 BookId（材料段 0x238，可堆叠 64）。下游消费：附魔台 /
+    //   附魔书 / 书架材料。2×2 gridSize 使其背包栏即可合（不强制工作台，便于早期附魔准备）。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { RecipeRegistry::PaperId,   RecipeRegistry::PaperId,   0,
+        RecipeRegistry::PaperId,   RecipeRegistry::LeatherId, 0,
+        0,                         0,                         0 },
+      RecipeRegistry::BookId, 1, 1, "book" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

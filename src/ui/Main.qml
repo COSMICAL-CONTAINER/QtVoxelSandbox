@@ -1450,6 +1450,9 @@ Window {
             //   着火死亡掉熟肉）：猪→熟猪排 / 牛→熟牛肉（皮革非肉、不变）/ 羊→熟羊肉（替代羊毛）。熟肉 id：
             //   0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（RecipeRegistry::CookedPorkchopId 等；⚠️ QML 用字面量同上约定）。
             if (mobType === EntityManager.MobPig) {
+                // t473 spec：猪也掉皮革（机制等价 MC 1.0 leather 来源；spec「leather from cow+pig」，
+                //   皮革非肉 → 燃烧不变，同 MobCow 皮革掉落约定）。0x20D=RecipeRegistry::LeatherId。
+                itemEntities.spawnItem(x, y, z, 0x20D, 1) // 皮革 ×1（t473 扩到猪；非肉，燃烧不变）
                 const meat = burned ? 0x221 : 0x20B      // 熟猪排 / 生猪排 ×1-2
                 itemEntities.spawnItem(x, y, z, meat, 1)
                 itemEntities.spawnItem(x, y, z, meat, 1)

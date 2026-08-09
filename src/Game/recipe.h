@@ -228,6 +228,17 @@ public:
     //   消耗机制归 t474 附魔台）。创造调色板补全便于测试 / 装饰取用。无 MC 1.0 mcMaterialId 映射
     //   （id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘 MaterialIcon）。
     static constexpr int LapisId        = 0x236; // 青金石：青金矿石挖掘掉落（BlockRegistry::LapisOre.dropId）；附魔台消耗材料（t474）
+    // t473 纸 + 书（paper / book；机制等价 MC 1.0 甘蔗造纸 → 书，附魔台 / 附魔书 / 书架的核心材料链）：
+    //   纸 PaperId：材料段 0x237。机制等价 MC 1.0 paper——**3 甘蔗横排合成 → 3 纸**（recipe.cpp paper 配方）。
+    //   原料甘蔗 = BlockRegistry::Sugarcane（破甘蔗掉自身方块，可入合成格）。可堆叠 64；非方块（材料段）→ 右键不放置。
+    //   书 BookId：材料段 0x238。机制等价 MC 1.0 book——**3 纸 + 1 皮革合成 → 1 书**（recipe.cpp book 配方，2×2
+    //   左上 P P / P L）。皮革来源：杀牛 / 杀猪掉落（t242 LeatherId=0x20D；t473 扩到猪也掉）。可堆叠 64；非方块
+    //   → 右键不放置。下游消费：附魔台（t474）/ 附魔书 / 书架（书架方块配方原料，后续任务）。MaterialIcon 自绘
+    //   图标（纸=米黄纸页 / 书=合上的书带封面书脊，§9a 区隔原创）。创造调色板补全便于测试 / 装饰取用。
+    //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘
+    //   MaterialIcon；与 carrot / potato / bonemeal / lapis 等近期材料段物品同模式，不扩 kMcMaterialId 表）。
+    static constexpr int PaperId        = 0x237; // 纸：3 甘蔗横排合成 → 3 件；书配方原料（t473）
+    static constexpr int BookId         = 0x238; // 书：3 纸 + 1 皮革合成 → 1 件；附魔台 / 附魔书 / 书架材料（t473）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

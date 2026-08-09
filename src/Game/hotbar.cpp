@@ -407,7 +407,12 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::SpruceBoatId),      // 云杉船：5 云杉木板合成；右键水面放船 + 骑乘
         // t471 青金石（机制等价 MC 1.0 lapis lazuli；青金矿石挖掘掉落，附魔台消耗材料）。生存由挖青金矿石获得，
         //   创造调色板补全便于测试 / 装饰。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘青金石图标。
-        int(RecipeRegistry::LapisId)            // 青金石：青金矿石挖掘掉落；附魔台消耗材料（t474）
+        int(RecipeRegistry::LapisId),           // 青金石：青金矿石挖掘掉落；附魔台消耗材料（t474）
+        // t473 纸 + 书（机制等价 MC 1.0 甘蔗造纸 → 书；附魔台 / 附魔书 / 书架的核心材料链）。生存由合成获得
+        //   （纸=3 甘蔗横排 → 3 纸；书=3 纸 + 1 皮革 → 1 书），创造调色板补全便于测试 / 装饰。可堆叠 64；
+        //   非方块 → 右键不放置。MaterialIcon 自绘纸页 / 书本图标。
+        int(RecipeRegistry::PaperId),           // 纸：3 甘蔗横排合成；书配方原料（t473）
+        int(RecipeRegistry::BookId)             // 书：3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料（t473）
     };
 }
 
@@ -599,6 +604,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::DiamondId)       return QStringLiteral("钻石"); // t279 钻石矿挖掘掉落
         // t471 青金石：青金矿石挖掘掉落（需石镐；机制等价 MC 1.0 青金石）；附魔台消耗材料（t474）。
         if (blockId == RecipeRegistry::LapisId)         return QStringLiteral("青金石"); // 青金矿石挖掘掉落
+        // t473 纸 + 书（机制等价 MC 1.0 paper / book；甘蔗造纸 → 书，附魔台 / 附魔书 / 书架的核心材料链）。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::PaperId)         return QStringLiteral("纸");     // 3 甘蔗横排合成；书配方原料
+        if (blockId == RecipeRegistry::BookId)          return QStringLiteral("书");     // 3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料
         // t299 敌对 mob 死亡掉落物：杀骸骨 / 蹒跚者 / 蜘蛛产出（机制等价 MC 1.0 敌对生物掉落，名称用通用词、零 MC 专名 §9）。
         if (blockId == RecipeRegistry::BoneId)        return QStringLiteral("骨头"); // 杀骸骨掉落
         if (blockId == RecipeRegistry::RottenFleshId) return QStringLiteral("腐肉"); // 杀蹒跚者掉落
