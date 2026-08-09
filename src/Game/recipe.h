@@ -210,6 +210,17 @@ public:
     //   MaterialIcon 自绘浆果图标（红色圆润浆果簇 + 绿色花萼，§9a 区隔原创）。无 MC 1.0 mcMaterialId 映射
     //   （sweet berries id 477 为 1.14+；id 越表界 → -1 → 资源包回退引擎自绘 MaterialIcon）。
     static constexpr int SweetBerryId      = 0x233; // 甜浆果：成熟浆果丛采摘得；可食（右键长按 +2 饥饿，t467）
+    // t469 船物品（boat）：材料段 0x234/0x235。机制等价 MC 1.0 boat（5 木板 U 形合成；右键水面放置；浮水 + 可骑乘
+    //   WASD 操控；冰上加速；高速撞硬墙损坏掉落船物品）。**橡木船 OakBoatId（浅色）/ 云杉船 SpruceBoatId（深色）**
+    //   仅贴图 / 配色不同，机制完全同构（对应橡木 / 云杉木板合成，机制等价 MC 1.0 oak/spruce boat）。可堆叠 64；
+    //   非方块（材料段）→ 右键不走方块放置，走 useBlock 船交互分支（playercontroller placeBlock 船段：先试骑乘命中的
+    //   船实体 findBoatHit → mount；否则持船物品 → 在水面放置船实体 BoatManager.spawnBoat；生存消耗 1 / 创造不耗）。
+    //   船实体是 Entities 层 BoatManager 的新实体类型（浮水 + 骑乘 + WASD + 冰上加速 + 撞坏掉落），呈现层 Main.qml
+    //   boatHost Repeater 渲染船 Model（橡木 / 云杉贴图，NoLighting）。MaterialIcon 自绘船图标（俯视船形，橡木浅 /
+    //   云杉深）。无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎
+    //   自绘 MaterialIcon）。§9 区隔：仅机制对齐 MC 1.0 boat，名称 / 模型 / 贴图全原创。
+    static constexpr int OakBoatId    = 0x234; // 橡木船：5 橡木木板 U 形合成；右键水面放置 + 骑乘（机制等价 MC 1.0 oak boat）
+    static constexpr int SpruceBoatId = 0x235; // 云杉船：5 云杉木板 U 形合成；右键水面放置 + 骑乘（机制等价 MC 1.0 spruce boat）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

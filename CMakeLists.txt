@@ -121,6 +121,10 @@ qt_add_executable(voxelsandbox
     # t402 经验球管理器（Entities 层）：磁吸 + 拾取；杀怪 / 冶炼产出经验球，玩家吸收累积 XP。
     src/Entities/xporbmanager.cpp
     src/Entities/xporbmanager.h
+    # t469 船实体管理器（Entities 层）：浮水 + 骑乘 + WASD 操控 + 冰上加速 + 撞坏掉落（机制等价 MC 1.0 boat）。
+    #   新实体类型（Boat），slot-reuse 模型（同 EntityManager / ItemEntityManager）。
+    src/Entities/boatmanager.cpp
+    src/Entities/boatmanager.h
     src/Game/raycast.cpp
     src/Game/raycast.h
     src/Game/recipe.cpp

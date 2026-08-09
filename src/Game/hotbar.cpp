@@ -395,7 +395,12 @@ QVariantList Hotbar::creativeMaterials() const
         // t467 甜浆果（机制等价 MC 1.0 sweet berries；雪原浆果灌木丛采摘产物 + 食物）。生存由右键成熟浆果丛采摘
         //   得（2-3 浆果 + 丛回阶段 0 重长），创造调色板补全便于测试 / 装饰。可堆叠 64；非方块 → 右键不放置，
         //   走「食用」分支（长按右键累积进食 +2 饥饿）。MaterialIcon 自绘红色浆果簇图标。
-        int(RecipeRegistry::SweetBerryId)       // 甜浆果：成熟浆果丛采摘得；可食（右键长按 +2 饥饿，t467）
+        int(RecipeRegistry::SweetBerryId),      // 甜浆果：成熟浆果丛采摘得；可食（右键长按 +2 饥饿，t467）
+        // t469 船物品（机制等价 MC 1.0 boat；5 木板 U 形合成；右键水面放船 + 骑乘 + WASD + 冰上加速 + 撞坏掉落）。
+        //   生存由合成获得，创造调色板补全便于测试。可堆叠 64；非方块（材料段）→ 右键不走方块放置，走 useBlock
+        //   船交互分支（playercontroller placeBlock 船段：先试骑乘命中的船 → mount；否则放船）。MaterialIcon 自绘船图标。
+        int(RecipeRegistry::OakBoatId),         // 橡木船：5 橡木木板合成；右键水面放船 + 骑乘
+        int(RecipeRegistry::SpruceBoatId)       // 云杉船：5 云杉木板合成；右键水面放船 + 骑乘
     };
 }
 
@@ -623,6 +628,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::BonemealId)      return QStringLiteral("骨粉");       // 骨头合成产物；右键作物催熟
         // t467 甜浆果（机制等价 MC 1.0 sweet berries；雪原浆果灌木丛采摘产物 + 食物）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::SweetBerryId)    return QStringLiteral("甜浆果");     // 成熟浆果丛采摘得；可食（+2 饥饿）
+        // t469 船物品（机制等价 MC 1.0 boat；5 木板 U 形合成；右键水面放置 + 骑乘）。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::OakBoatId)       return QStringLiteral("橡木船");     // 5 橡木木板合成；右键水面放船 + 骑乘
+        if (blockId == RecipeRegistry::SpruceBoatId)    return QStringLiteral("云杉船");     // 5 云杉木板合成；右键水面放船 + 骑乘
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

@@ -109,6 +109,14 @@ void PlayerController::setXpOrbManager(XpOrbManager *m)
     emit xpOrbManagerChanged();
 }
 
+// t469 船管理器注入（同 setXpOrbManager 模式）。
+void PlayerController::setBoatManager(BoatManager *m)
+{
+    if (m_boatManager == m) return;
+    m_boatManager = m;
+    emit boatManagerChanged();
+}
+
 void PlayerController::onWindowChanged(QQuickWindow *win)
 {
     if (m_window) m_window->removeEventFilter(this);
@@ -230,6 +238,10 @@ void PlayerController::respawn()
     cancelBowDraw();          // t304：清弓拉弓态（防 respawn 后误续拉）
     cancelFishing();          // t401：清钓鱼态（防 respawn 后误续钓；浮标作废）
     cancelSleep();            // t388：清睡觉 fade 态（重生即醒；防 respawn 后 updateSleep 误续睡）
+    // t469：重生下船（清骑乘态；玩家离死亡点的船，船保留在世界）。outFeet 不用（重生用 m_spawnPos）。
+    if (m_boatManager && m_boatManager->ridingIndex() >= 0) {
+        QVector3D dummyFeet; m_boatManager->dismount(m_world, dummyFeet);
+    }
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
     m_rightDown = false;      // t267：清右键按下态（防 respawn 后 updateEating 误续食）
     m_dead = false;           // t175：清死亡态镜像 → pickupScan 恢复（重生后玩家已离开死亡点，可正常拾取）
@@ -496,6 +508,10 @@ void PlayerController::tickImpl()
     //   playerCenter = 玩家 AABB 中心（脚底 m_pos + 半高），磁吸 / 拾取都相对此点。无 World 依赖
     //   （经验球是纯磁吸实体）。拾取经 XpOrbManager::xpPickedUp 语义信号 → 呈现层路由 PlayerState.addXp。
     if (m_xpOrbManager) m_xpOrbManager->tick(dt, m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f));
+    // t469 船浮水 tick（常开，独立于捕获态——菜单 / 暂停时船仍浮水 / 衰减，世界模拟连续，同掉落物 / mob tick）。
+    //   被骑船的「操控位移」由 step() 骑乘分支的 tickRiddenBoat 推进（骑乘期 WASD 驱动）；本 tick 只做浮水 +
+    //   空船摩擦衰减。PlayerController 是唯一同时持 World* + BoatManager* 的对象，故由此驱动（同 itemEntities / entityManager）。
+    if (m_boatManager && m_world) m_boatManager->tick(dt, m_world);
     // t95：统一实体（测试生物）重力 + 地面静止，同掉落物常开（菜单 / 暂停时仍模拟）。机制同源
     // （EntityManager::tick 向下只读 World::isSolid）。PlayerController 现亦持 EntityManager* → 由它驱动。
     //   t250：传 m_pos 作听者位置，门控 mob idle/step 叫声（近 mob 才发声；菜单态 m_pos 仍有效）。
@@ -2066,6 +2082,40 @@ void PlayerController::placeBlock()
         }
         return; // 剪刀（剪羊毛成功 / 命中非羊 / 已剪羊毛 / 无命中）均不再走方块放置路径
     }
+    // t469 船交互（spec「右键船→骑乘；持船物品右键水面→放船」；机制等价 MC 1.0 boat）。两分支：
+    //   (a) 骑乘（优先于放船）：跑独立 boat 命中射线（tryMount 内 findBoatHit，同剪刀剪羊 / 喂食的实体射线模式），
+    //       命中船 → 上车。**不要求 m_hasHit**（瞄的是船实体非方块；悬空船亦可上，同剪刀 / 喂食）。已骑乘 → 不重复上。
+    //   (b) 放船：手持船物品（OakBoat/SpruceBoat）+ 命中（需目标面定位放船点）→ 在命中水格 / 命中面相邻格放船
+    //       （spawnBoat）；生存消耗 1 / 创造不耗。船物品非方块（材料段）→ selectedBlock 归 Air，须在 m_selectedBlock
+    //       ==Air 守卫之前分流（同桶 / 蛋 / 剪刀模式）。
+    //   spectator 已被入口 canPlace() 拦截；Creative / Survival 均可。分层：船交互属 Game/Physics（读射线 + 调
+    //   BoatManager），不改栅格语义（setBlock 入口）。
+    if (m_boatManager) {
+        // (a) 骑乘：未骑乘 + 命中船 → 上车（即便手持船物品也不另放，机制等价 MC 右键船优先上车）。
+        if (m_boatManager->ridingIndex() < 0
+            && m_boatManager->tryMount(position(), lookDirection(), kReach)) {
+            m_lastPlaceMs = now;
+            emit swingArm();
+            return;
+        }
+        // (b) 放船：手持船物品 + 命中 → 放船。
+        if (m_hotbar && m_hasHit
+            && (heldItemId == RecipeRegistry::OakBoatId || heldItemId == RecipeRegistry::SpruceBoatId)) {
+            // 目标格：优先命中格本身（若为水 → 船浮该水面）；否则命中面相邻格（同方块放置 tx/ty/tz 约定）。
+            int tx = m_hitBx, ty = m_hitBy, tz = m_hitBz;
+            if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) != BlockRegistry::Water) {
+                tx = m_hitBx + m_hitNx; ty = m_hitBy + m_hitNy; tz = m_hitBz + m_hitNz;
+            }
+            const int boatType = (heldItemId == RecipeRegistry::SpruceBoatId)
+                ? BoatManager::Spruce : BoatManager::Oak;
+            m_boatManager->spawnBoat(tx, ty, tz, boatType);
+            if (m_mode != Creative)
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 船（创造不耗 → 无限放）
+            m_lastPlaceMs = now;
+            emit swingArm();
+            return;
+        }
+    }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, tz = m_hitBz + m_hitNz;
@@ -3074,6 +3124,55 @@ void PlayerController::step(qreal dt)
     const bool space = m_keys.value(Qt::Key_Space), shift = m_keys.value(Qt::Key_Shift);
     const bool spaceEdge = space && !m_spacePrev; // 跳跃边沿：长按只跳一次（生存/创造-走路统一）
     m_spacePrev = space;
+    const bool shiftEdge = shift && !m_shiftPrev; // t469 下船边沿：骑乘期 Shift 按下沿 → dismount（长按只一次）
+    m_shiftPrev = shift;
+
+    // t469 船骑乘分支（spec「骑乘时禁用玩家自身移动，由船位移带动玩家」；机制等价 MC 1.0 船骑乘）。
+    //   优先于 Spectator / Creative-飞 / 走路分支 —— 骑乘期一律走船物理（无视走路 / 飞行物理，机制等价 MC 骑船）。
+    //   Shift 按下沿 → 下船（dismount，玩家摆船侧安全位）；WASD（wish）驱动船（tickRiddenBoat：水上快移 + 冰面加速）；
+    //   高速撞硬墙 → 撞毁（breakRiddenBoat 移除船 + emit boatBroken 掉船物品），玩家摆末位船位（不坠虚空）。
+    //   玩家脚底 = 船中心（坐船舱），眼位 / 相机自动跟随 position()。骑乘期禁重力 / 跳跃 / 自身移动（船浮水 Y 钉水面）。
+    if (m_boatManager && m_boatManager->ridingIndex() >= 0) {
+        // 走步动画驱动（按 WASD 显划船腿摆，松键停；机制等价 MC 船上无走步，但保留腿摆供第三人称可视）。
+        const bool moving = wish.lengthSquared() > 0.001f;
+        const float walk = moving ? kWalk : 0.0f;
+        if (walk != m_moveSpeed) { m_moveSpeed = walk; emit moveSpeedChanged(); }
+        if (m_moveSpeed > 0.1f) {
+            m_walkPhase += m_moveSpeed * float(dt) * kStrideRate;
+            if (m_walkPhase >= 6.28318530718f) m_walkPhase -= 6.28318530718f;
+            emit walkPhaseChanged();
+        }
+        if (shiftEdge) {
+            // 下船：dismount 清骑乘态 + 玩家摆船侧安全位。
+            QVector3D feet;
+            m_boatManager->dismount(m_world, feet);
+            m_pos = feet;
+            m_vel = QVector3D(0, 0, 0);
+            if (m_onGround) { m_onGround = false; emit onGroundChanged(); }
+            reportHorizSpeed(posBefore, dt);
+            emit positionChanged();
+            return;
+        }
+        // WASD 驱动船。
+        QVector3D boatPos; bool crashed = false;
+        m_boatManager->tickRiddenBoat(dt, m_world, wish.x(), wish.z(), boatPos, crashed);
+        if (crashed) {
+            // 高速撞硬墙 → 船损坏（breakRiddenBoat 移除船 + emit boatBroken → 呈层 spawnItem 掉船物品）。
+            m_boatManager->breakRiddenBoat();
+            m_pos = QVector3D(boatPos.x(), boatPos.y(), boatPos.z()); // 玩家留撞击点（下 tick 回正常重力物理）
+            m_vel = QVector3D(0, 0, 0);
+            if (m_onGround) { m_onGround = false; emit onGroundChanged(); }
+            reportHorizSpeed(posBefore, dt);
+            emit positionChanged();
+            return;
+        }
+        // 玩家随船位移（脚底 = 船中心）。
+        m_pos = QVector3D(boatPos.x(), boatPos.y(), boatPos.z());
+        m_vel = QVector3D(0, 0, 0);
+        reportHorizSpeed(posBefore, dt);
+        emit positionChanged();
+        return;
+    }
     // t159 水下速度倍数：眼位在水格 → 水平（及飞垂直）速度 ×kUnderwaterSpeedMul（~0.4）。所有模式统一适用
     //   （走 / 飞 / 观察者进水都变慢，机制等价 MC 水中减速）。每 tick 查一次（blockAt 单查，廉价）。
     const float waterMul = eyeInWater() ? kUnderwaterSpeedMul : 1.0f;

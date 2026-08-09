@@ -531,6 +531,22 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { RecipeRegistry::BoneId, 0, 0, 0, 0, 0, 0, 0, 0 },
       RecipeRegistry::BonemealId, 3, 1, "bone_meal" },
+    // t469 船：5 木板 U 形（底行 3 + 中行左右各 1，中空）→ 1 船（有序 3×3，仅工作台）。机制等价 MC 1.0 boat
+    //   （MC 1.0 boat = 5 木板 U 形 / 底 3 + 中 2）。最小包围盒 3×2（底行 + 中行），与床（3×2 含羊毛）包围盒同尺寸但
+    //   内容不同（船中行为木板 + 中空 / 床中行为羊毛 + 木板）→ 不冲突。橡木船用 Planks / 云杉船用 SprucePlanks；
+    //   两配方同形（仅原料 id 不同）→ 不会互相匹配（shaped 逐格比 id）。
+    //   oak_boat：5 橡木木板 U 形（中行左右 + 底行 3，中空 = 经典 MC 1.0 boat U）→ 1 橡木船。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0,                          0,                            0,
+        int(BlockRegistry::Planks), 0,                            int(BlockRegistry::Planks),
+        int(BlockRegistry::Planks), int(BlockRegistry::Planks),   int(BlockRegistry::Planks) },
+      RecipeRegistry::OakBoatId, 1, 1, "oak_boat" },
+    //   spruce_boat：5 云杉木板 U 形（同 oak_boat 形状，换 SprucePlanks 原料）→ 1 云杉船。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0,                               0,                               0,
+        int(BlockRegistry::SprucePlanks), 0,                               int(BlockRegistry::SprucePlanks),
+        int(BlockRegistry::SprucePlanks), int(BlockRegistry::SprucePlanks), int(BlockRegistry::SprucePlanks) },
+      RecipeRegistry::SpruceBoatId, 1, 1, "spruce_boat" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

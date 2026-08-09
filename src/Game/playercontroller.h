@@ -13,6 +13,7 @@
 #include <limits>
 
 #include "blockregistry.h"      // 方块 id（默认手持方块 / 破放校验）
+#include "boatmanager.h"        // t469 船实体管理器（骑乘 / WASD 操控 / 冰上加速 / 撞坏掉落）
 #include "entitymanager.h"      // 统一实体管理器（t95 测试生物 / 玩家推动）
 #include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
 #include "itementitymanager.h"  // 掉落实体管理器（t36 拾取扫描 / removeAt）
@@ -58,6 +59,12 @@ class PlayerController : public QQuickItem
     //   分层（PLAN §2）：PlayerController 属 Game/Physics，XpOrbManager 属 Entities，经 QML 绑定注入
     //   （运行期连接、非编译期反向依赖，同 itemEntities 先例）。
     Q_PROPERTY(XpOrbManager *xpOrbManager READ xpOrbManager WRITE setXpOrbManager NOTIFY xpOrbManagerChanged)
+    // t469 船实体管理器（同 world/hotbar/.../xpOrbManager 模式，QML 注入 peer ViewModel）。每帧调 boatManager.tick
+    //   （浮水，独立于捕获态）+ captured 且 ridingIndex()>=0 时 tickRiddenBoat（WASD 操控被骑船）。右键瞄船 →
+    //   tryMount 上船；持船物品右键水面 → spawnBoat 放船；Shift 下船 / 撞毁 → dismount / breakRiddenBoat。
+    //   分层（PLAN §2）：PlayerController 属 Game/Physics，BoatManager 属 Entities，经 QML 绑定注入（运行期连接、
+    //   非编译期反向依赖，同 entityManager 先例）。null 时跳过船交互 / 操控（安全降级）。
+    Q_PROPERTY(BoatManager *boatManager READ boatManager WRITE setBoatManager NOTIFY boatManagerChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -237,6 +244,8 @@ public:
     void setWorldClock(WorldClock *c);
     XpOrbManager *xpOrbManager() const { return m_xpOrbManager; }
     void setXpOrbManager(XpOrbManager *m);
+    BoatManager *boatManager() const { return m_boatManager; }
+    void setBoatManager(BoatManager *m);
 
     QVector3D position() const { return m_pos + QVector3D(0, m_eyeHeight, 0); }
     float yaw() const { return m_yaw; }
@@ -445,6 +454,7 @@ signals:
     void entityManagerChanged();
     void worldClockChanged();
     void xpOrbManagerChanged(); // t402 经验球管理器注入变更
+    void boatManagerChanged(); // t469 船管理器注入变更
     void positionChanged();
     void yawChanged();
     void pitchChanged();
@@ -777,6 +787,8 @@ private:
     EntityManager *m_entityManager = nullptr;    // 统一实体（t95 测试生物）：重力 tick + 玩家推动（Q_PROPERTY 绑定）
     WorldClock *m_worldClock = nullptr;          // t280 黑暗刷怪：读 skyLight 驱动敌对 spawn / 燃烧（Q_PROPERTY 绑定）
     XpOrbManager *m_xpOrbManager = nullptr;      // t402 经验球：磁吸 + 拾取扫描（Q_PROPERTY 绑定）
+    BoatManager *m_boatManager = nullptr;        // t469 船：浮水 tick + 骑乘操控 / 放船 / 下船（Q_PROPERTY 绑定）
+    bool m_shiftPrev = false;                    // t469 下船边沿触发（骑乘期 Shift 按下沿 → dismount；长按只下一次）
     QQuickWindow *m_window = nullptr;
     QTimer m_timer;
     QElapsedTimer m_clock;

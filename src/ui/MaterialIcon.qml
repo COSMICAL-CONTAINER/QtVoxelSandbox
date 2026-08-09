@@ -876,6 +876,39 @@ Item {
                 R(6, 11, 11, 1, berryDark)       // 水平缝
             }
 
+            // t469 船（0x234 橡木 / 0x235 云杉）：5 木板 U 形合成；右键水面放置 + 骑乘。俯视船形（尖头菱形船体
+            //   + 中央横座板 + 船头/船尾翘端）。橡木浅木色 / 云杉深木色（isSpruce 切配色）。纯原创自绘（§9a）。
+            const drawBoat = (isSpruce) => {
+                const hull     = isSpruce ? "#4f3a26" : "#9a7b4d" // 船体主色（云杉深褐 / 橡木浅褐）
+                const hullDark = isSpruce ? "#33241a" : "#6f5634" // 船体暗边 / 翘端
+                const hullHi   = isSpruce ? "#5f4830" : "#b8915e" // 受光高光（左上）
+                const seat     = isSpruce ? "#5a4630" : "#a88856" // 座板（略亮于船体）
+                // 船体俯视轮廓（尖头菱形：船头 / 船尾收尖，中部最宽）。沿垂直方向 = 船头朝上。
+                //   中段宽体（cols 6..17，rows 8..15）。
+                R(6, 8, 12, 8, hull)
+                // 船头收尖（顶部三角，rows 5..8 逐行收窄）。
+                R(8, 7, 8, 1, hull)
+                R(9, 6, 6, 1, hull)
+                R(10, 5, 4, 1, hull)
+                // 船尾收尖（底部三角，rows 16..18 逐行收窄）。
+                R(8, 16, 8, 1, hull)
+                R(9, 17, 6, 1, hull)
+                R(10, 18, 4, 1, hull)
+                // 受光高光（左上沿，表「弧形船舷受光」）。
+                R(6, 8, 1, 7, hullHi)
+                R(7, 8, 1, 1, hullHi)
+                // 船体右下暗边（背光）。
+                R(17, 9, 1, 7, hullDark)
+                R(16, 15, 2, 1, hullDark)
+                // 船头 / 船尾翘端暗色（顶端 / 底端各一短横，表「翘起的船头 / 船尾板」）。
+                R(10, 4, 4, 1, hullDark)
+                R(10, 19, 4, 1, hullDark)
+                // 中央横座板（cols 7..16，row 11..13，略亮 = 木板座）。
+                R(7, 11, 10, 3, seat)
+                R(7, 11, 10, 1, hullHi)   // 座板顶沿受光
+                R(7, 13, 10, 1, hullDark) // 座板底沿暗
+            }
+
             // 腐肉（0x218，t299）：杀蹒跚者（僵尸）掉落。MC 风格腐肉 = 暗红褐腐块 + 绿斑霉点 + 腐败裂痕。
             //   纯原创自绘（§9a）。区别于生牛肉：主色更暗（褐红 vs 鲜红）+ 绿霉斑（变质的身份特征）。
             //   配色：flesh #6a3028（暗红褐主体）/ fleshDark #3e1818（腐败裂痕 + 底阴影）/ fleshLight #8a4838
@@ -1288,6 +1321,8 @@ Item {
             case 0x231: drawRawFish();            break // t401 生鱼（钓竿拉起获物；机制等价 MC 1.0 raw fish）
             case 0x232: drawBonemeal();           break // t447 骨粉（骨头合成产物；右键未成熟作物催熟一阶段）
             case 0x233: drawSweetBerry();         break // t467 甜浆果（成熟浆果丛采摘得；可食 +2 饥饿）
+            case 0x234: drawBoat(false);          break // t469 橡木船（5 橡木木板合成；右键水面放船 + 骑乘）
+            case 0x235: drawBoat(true);           break // t469 云杉船（5 云杉木板合成；右键水面放船 + 骑乘）
             default:    drawStick();        break
             }
         }

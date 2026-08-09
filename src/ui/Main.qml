@@ -1173,6 +1173,22 @@ Window {
     //   路由到 playerState.addXp（单向事件流，PLAN §2 分层：Entities 发语义事件、呈现层只消费）。
     XpOrbManager { id: xpOrbs }
 
+    // t469 船实体管理器（Entities 层）：浮水 + 骑乘 + WASD 操控 + 冰上加速 + 撞坏掉落（机制等价 MC 1.0 boat）。
+    //   纯数据持有（pos + 变体 + 朝向），呈现层（下方 boatHost Repeater）只读；浮水 / 骑乘操控由
+    //   PlayerController.tick / step 驱动（持 BoatManager*）。撞坏掉船物品经 boatBroken 语义信号 → 下方
+    //   Connections 路由到 itemEntities.spawnItem（单向事件流，PLAN §2 分层）。
+    BoatManager { id: boats }
+
+    // t469 船撞坏 → 掉船物品（语义事件路由，同 fallingBlockDropped→spawnItem 模式；PLAN §2 分层）。
+    //   boatType 决定掉哪种船物品（Oak → OakBoatId / Spruce → SpruceBoatId）。机制等价 MC 船撞坏掉船物品。
+    Connections {
+        target: boats
+        function onBoatBroken(x, y, z, boatType) {
+            const itemId = (boatType === boats.Spruce) ? 0x235 /*SpruceBoatId*/ : 0x234 /*OakBoatId*/
+            itemEntities.spawnItem(x, y, z, itemId, 1)
+        }
+    }
+
     // t402 经验球拾取 → 玩家累积 XP（语义事件路由，同 fallDamageTaken→takeDamage 模式；
     //   PLAN §2 分层：Entities 发语义事件、呈现层只消费）。拾取音复用掉落物拾取声（playPickup）。
     Connections {
@@ -1383,6 +1399,7 @@ Window {
         entityManager: entityManager
         worldClock: worldClock
         xpOrbManager: xpOrbs
+        boatManager: boats
         selectedBlock: hotbarVM.selectedBlockId
         selectedItem: hotbarVM.selectedItemId
     }
@@ -3911,6 +3928,74 @@ Window {
                         loops: Animation.Infinite
                         NumberAnimation { from: 0.85; to: 1.15; duration: 500; easing.type: Easing.InOutSine }
                         NumberAnimation { from: 1.15; to: 0.85; duration: 500; easing.type: Easing.InOutSine }
+                    }
+                }
+            }
+        }
+
+        // t469 船渲染（BoatManager 的船实体）：Repeater 父节点 = 场景内 3D Node（boatHost）→ delegate 被
+        //   reparent 进 3D 场景图（同 itemHost / mobHost / xpOrbHost 模式；lessons-learned「动态 3D 对象必须挂到
+        //   场景 Node，否则孤儿不渲染」）。slot-reuse：count 单调不降 → 空槽 delegate visible=false 隐藏不销毁
+        //   （同 itemHost 族；lessons-learned t170/t256）。
+        // 触发：boats.count 随 spawnBoat 自增（NOTIFY entitiesChanged）→ Repeater 追加 delegate。位置 / 朝向随
+        //   浮水 / 骑乘操控 bump revision → {revision; posAt / yawAt} 绑定重算（呈现层只读消费，绝不反向写；PLAN §2）。
+        // 外观：简化船体（平底船舱 + 两端翘起船头/船尾，3 个 UnitCube 组合；§9a 原创纯色，无 MC 资产）。NoLighting
+        //   必备（可见 Model 红线；lit 材质在本 D3D11 后端不渲染）。橡木浅木色 / 云杉深木色（boatTypeAt 区分）。
+        Node {
+            id: boatHost
+            Component.onCompleted: {
+                console.info("[t469] boatHost UP parent=" + boatHost.parent + " (须为 3D Node 非 null)")
+            }
+
+            Repeater {
+                model: boats.count
+                delegate: Node {
+                    visible: { boats.revision; return boats.aliveAt(index) }
+                    id: boatRoot
+                    // 船中心位（C++ 浮水 / 骑乘操控写入；呈现层只读）。绕 Y 转船头朝向（yawAt）。
+                    position: { boats.revision; return boats.posAt(index) }
+                    // 船头朝向（度；先读进 property，再喂 eulerRotation —— 块表达式不能作函数实参）。
+                    property real boatYaw: { boats.revision; return boats.yawAt(index) }
+                    eulerRotation: Qt.vector3d(0, boatRoot.boatYaw, 0)
+                    // 变体配色（Oak 浅木色 / Spruce 深木色；§9 原创配色，区别于 MC 资产）。
+                    property int bt: { boats.revision; return boats.boatTypeAt(index) }
+                    property color hullColor: boatRoot.bt === boats.Spruce ? "#4f3a26" : "#9a7b4d" // 云杉深褐 / 橡木浅褐
+                    property color trimColor: boatRoot.bt === boats.Spruce ? "#3a2a1a" : "#7a6038" // 翘端更深（轮廓感）
+
+                    Component.onCompleted: {
+                        if (parent === null) parent = boatHost
+                    }
+
+                    // 船舱底（平底船身：长 1.5（沿 Z = 船头方向 -Z 前）× 高 0.3 × 宽 0.7）。长度沿 Z 使
+                    //   eulerRotation.y=boatYaw 时船头（-Z）对齐行进方向（同 mob -Z 前约定）。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.05, 0)
+                        scale: Qt.vector3d(0.7, 0.3, 1.5)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: boatRoot.hullColor
+                        }
+                    }
+                    // 船头翘端（-Z 端，高 0.45 × 长 0.25（沿 Z）× 宽 0.7；略高于船舱 = 翘起船头）。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.05, -0.7)
+                        scale: Qt.vector3d(0.7, 0.45, 0.25)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: boatRoot.trimColor
+                        }
+                    }
+                    // 船尾翘端（+Z 端，对称）。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.05, 0.7)
+                        scale: Qt.vector3d(0.7, 0.45, 0.25)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: boatRoot.trimColor
+                        }
                     }
                 }
             }
