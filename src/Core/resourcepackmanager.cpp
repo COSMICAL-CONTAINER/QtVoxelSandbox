@@ -361,7 +361,7 @@ const QList<QPair<int, QString>> &tileFilenameMap()
 //   recipe.h MaterialId / ArmorId 段）。文件名用现代（1.13+ flattening）标准 item 命名（wooden_pickaxe /
 //   iron_ingot / cooked_beef ...），与现网大多数资源包 assets/minecraft/textures/item/ 一致。包内缺该 PNG
 //   时 itemIconSource 安全跳过（回退自绘），故映射可慷慨：唯一要保证的是 id↔文件名配对正确，而非文件名都存在。
-//   工具段 0x100..0x111（镐/锄/斧/铲/剑×木/石/铁 + 弓/剪刀/钓竿）；材料段 0x200..0x231（合成材料 / 食物 / 桶 /
+//   工具段 0x100..0x112（镐/锄/斧/铲/剑×木/石/铁 + 弓/剪刀/钓竿 + t472 钻石镐）；材料段 0x200..0x231（合成材料 / 食物 / 桶 /
 //   mob 掉落 / 生物蛋 / 战利品 / 鸡鱿鱼族 / 胡萝卜马铃薯 / 生鱼）；护甲段 0x300..0x313（皮革/铁/金/钻石×4 部位；
 //   铜护甲无 vanilla 贴图 → 不映射，回退自绘）。raw_*（铜/金/铁原矿物品 1.17+）/spawn_egg_*/oak_sapling 等
 //   旧版 / HD 包常缺 → 缺则跳过回退自绘，不崩。
@@ -387,6 +387,7 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x10F, QStringLiteral("bow.png")},             // 弓
         {0x110, QStringLiteral("shears.png")},          // 剪刀
         {0x111, QStringLiteral("fishing_rod.png")},     // 钓鱼竿
+        {0x112, QStringLiteral("diamond_pickaxe.png")}, // t472 钻石镐
         // —— 材料段（MaterialId；item-ids.md §3-5）——
         {0x200, QStringLiteral("stick.png")},           // 木棒
         {0x201, QStringLiteral("coal.png")},            // 煤炭

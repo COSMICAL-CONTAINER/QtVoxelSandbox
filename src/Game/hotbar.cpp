@@ -57,6 +57,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Ice:          return "icon_ice.png";            // t468 冰立方体图标（各面=浅蓝反光裂纹）
     case BlockRegistry::PackIce:      return "icon_pack_ice.png";       // t468 浮冰立方体图标（各面=实白细裂纹）
     case BlockRegistry::BlueIce:      return "icon_blue_ice.png";       // t468 蓝冰立方体图标（各面=淡蓝纵向纹路）
+    case BlockRegistry::Obsidian:     return "icon_obsidian.png";       // t472 黑曜石立方体图标（各面=深紫黑火山玻璃；流体交互产物，钻石镐采掘）
     // t387 床方块 8 色变体立方体图标（彩色被面 + 枕垫亮带 + 绗缝针脚；build_cube_icons.py 程序生成）。
     case BlockRegistry::BedRed:        return "icon_bed_red.png";        // 红床（配方产物默认色）
     case BlockRegistry::BedOrange:     return "icon_bed_orange.png";     // 橙床
@@ -285,7 +286,9 @@ QVariantList Hotbar::creativeTools() const
 {
     // 创造调色板工具（无限源：拾取时 heldCount=1，工具不可堆叠）。t264 完整工具集：5 类（镐 / 锄 / 斧 / 铲 / 剑）
     //   × 3 档（木 / 石 / 铁）= 15 件，机制等价 MC 1.0 工具集。按「同类 3 档」分组排列，肉眼易辨。
-    return {int(ToolRegistry::PickaxeWood),  int(ToolRegistry::PickaxeStone),  int(ToolRegistry::PickaxeIron),
+    //   t472：镐组追加钻石镐（tier 4，采掘 Obsidian 的唯一工具）—— 钻石档仅镐一类（钻石锄 / 斧 / 铲 / 剑留后续），
+    //   故只列在镐组 3 档之后（不另起一组），与「同类按 tier 排列」一致。
+    return {int(ToolRegistry::PickaxeWood),  int(ToolRegistry::PickaxeStone),  int(ToolRegistry::PickaxeIron), int(ToolRegistry::PickaxeDiamond),
             int(ToolRegistry::HoeWood),      int(ToolRegistry::HoeStone),      int(ToolRegistry::HoeIron),
             int(ToolRegistry::AxeWood),      int(ToolRegistry::AxeStone),      int(ToolRegistry::AxeIron),
             int(ToolRegistry::ShovelWood),   int(ToolRegistry::ShovelStone),   int(ToolRegistry::ShovelIron),

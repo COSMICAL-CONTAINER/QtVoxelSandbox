@@ -97,6 +97,7 @@ BLOCKS = [
     ("spruce_log",      "default_spruce_log_top", "default_spruce_log_side"), # t395 云杉原木（顶=年轮截面；侧=深棕树皮）
     # t466 云杉木板立方体图标（深色木纹；机制等价橡木木板 icon_planks，仅贴图换 spruce_planks）。
     ("spruce_planks",   "default_spruce_planks", "default_spruce_planks"), # t466 云杉木板（各面同贴图=深色木板）
+    ("obsidian",        "default_obsidian", "default_obsidian"),  # t472 黑曜石（各面同贴图=深紫黑火山玻璃；流体交互产物）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

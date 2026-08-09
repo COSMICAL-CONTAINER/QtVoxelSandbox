@@ -45,10 +45,14 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     //   MC 1.0 钓竿耐久；生存每次成功钓获 -1）。tier/speedMul 仅记账（语义同弓 / 剪刀：无对应采掘方块）。
     //   displayName「钓鱼竿」（§9 通用词；非 MC 专名）。
     /* FishingRod   */ {int(BlockRegistry::FishingRod), 1, 1.0f,  64, "fishing_rod",  "钓鱼竿"},
+    // t472 钻石镐：tier 4（最高档）、speedMul 8.0（项目设计预留的钻石档倍率，见上「铁档 6 留金 12 / 钻石 8 空间」；
+    //   机制对齐 MC 1.0 钻石镐采掘速度）。maxDurability=1561（MC 1.0 钻石镐耐久，铁 250 之上的最高耐久）。
+    //   采掘 Obsidian 的唯一工具（Obsidian.minToolTier=4）。追加在末尾（与 ToolId 枚举同序；不重排保向后兼容）。
+    /* PickaxeDiamond */ {int(BlockRegistry::Pickaxe), 4, 8.0f, 1561, "pickaxe_diamond", "钻石镐"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
-static_assert(int(ToolRegistry::ToolCount) == 18, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+static_assert(int(ToolRegistry::ToolCount) == 19, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
 
 // t348 引擎工具 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 工具段
 //   「MC 1.0.0」列一致）。行索引 = engineToolId - ToolIdBase（与 kTools 同序）。**不重排枚举**（保存档 / 配方
@@ -60,6 +64,7 @@ constexpr int kMcToolId[int(ToolRegistry::ToolCount)] = {
     /* SwordWood    */ 272, /* SwordStone   */ 276, /* SwordIron    */ 267, /* Bow */ 261,
     /* Shears       */ 359,
     /* FishingRod   */ 346, // t401 钓竿（MC 1.0 fishing rod）
+    /* PickaxeDiamond */ 278, // t472 钻石镐（MC 1.0 diamond_pickaxe）
 };
 static_assert(sizeof(kMcToolId) / sizeof(kMcToolId[0]) == int(ToolRegistry::ToolCount),
               "kMcToolId 行数须与 ToolRegistry::ToolCount 一致；新工具需补一行 MC 1.0 对齐值");

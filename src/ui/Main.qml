@@ -1976,8 +1976,9 @@ Window {
                     position: Qt.vector3d(0.02, 0.10, -0.22)     // t266：y 上移让手握柄下段（正握），镐头朝上前方；z=-0.22 脱离手臂 z 包围
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, 28)       // t369 修 Z 符号：正 Z roll 把几何头（+Y）摆向屏幕左（柄下右/头上左对角，类 MC 手持）；旧 -15 反把头摆向右、与「头上左」注释相悖（手本地 X 轴不受手 baseTilt 的 X 旋转影响 → Z 符号直接定头左右）
-                    // 镐头 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白（同 2D ToolIcon 配色）
-                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁镐银白
+                    // 镐头 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白 / 钻石青绿（同 2D ToolIcon 配色）
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // 钻石镐青绿（t472）
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁镐银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石镐中灰
                                                                                                  : "#8a5a2e"                                                   // 木镐褐（默认 / tier 1）
                     // 木柄（竖直）：心 (0,-0.05,0)，半长 0.04×0.40×0.04（同 pickaxe.cpp 木柄 addBox）→ scale 2×半长
@@ -3344,7 +3345,8 @@ Window {
                         eulerRotation: Qt.vector3d(0, 20, -35)   // 柄沿小臂方向、镐头斜上，自然手持
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // t472 钻石镐青绿
+                                     : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                      : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                      : "#8a5a2e"
                             opacity: playerModel.bodyOpacity
@@ -3876,10 +3878,12 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             // t144：tier 色乘天光乘子（tintBySkyLight）夜间变暗，与方块段统一。
                             //   原 hex #d8d8e6 / #9a9a9a / #8a5a2e = (216,216,230)/(154,154,154)/(138,90,46)。
+                            //   t472 钻石镐 #4fd9d2 = (79,217,210)（采掘 Obsidian 的唯一工具）。
                             baseColor: {
                                 const m = worldClock.skyLight
                                 const t = hotbarVM.toolTier(entRoot.entId)
-                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                return t === 4 ? tintBySkyLight(79/255, 217/255, 210/255, m)
+                                         : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
                             }

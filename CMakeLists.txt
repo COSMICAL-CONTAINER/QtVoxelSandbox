@@ -250,6 +250,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_water_flow.png          # t197 流水贴图（build_water_flow.py；曾漏注 qrc 清单，补登）
         textures/default_water_flow_2.png        # t223 流水动画第二帧（build_water_flow.py 程序生成原创像素图）
         textures/default_lava.png                # t343 岩浆贴图（build_lava.py 程序生成原创像素图；深红橙底+亮黄橙鼓泡+白炽热点）
+        textures/default_obsidian.png            # t411/t472 黑曜石贴图（build_obsidian.py 程序生成原创像素图；深紫黑火山玻璃底+紫红纹理嵌点+品紫微反光；流体交互产物）
         textures/default_bed_red.png             # t387 床方块 8 色变体贴图（build_bed.py 程序生成原创像素图；彩色被面+枕垫亮带+绗缝针脚）
         textures/default_bed_orange.png
         textures/default_bed_yellow.png
@@ -337,6 +338,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_diamond_ore.png            # t279 钻矿石立方体图标（build_cube_icons.py；石头底+青白菱斑晶体）
         textures/icon_gold_ore.png               # t308 金矿石立方体图标（build_cube_icons.py；石头底+金黄斑簇）
         textures/icon_lapis_ore.png              # t471 青金矿石立方体图标（build_cube_icons.py；石头底+群青深蓝斑簇+黄铁矿金点）
+        textures/icon_obsidian.png               # t472 黑曜石立方体图标（build_cube_icons.py；深紫黑火山玻璃；流体交互产物，钻石镐采掘）
         textures/icon_crafting_table.png
         textures/icon_dirt.png
         textures/icon_furnace.png

@@ -36,6 +36,9 @@ Item {
         if (tt === 6) return 0x110  // 剪刀 Shears
         if (tt === 7) return 0x10F  // 弓 Bow
         if (tt === 8) return 0x111  // 钓鱼竿 FishingRod
+        // t472 钻石镐脱离「每类 3 档 contiguous」布局（追加在 ToolId 末尾 0x112 保向后兼容）→ tier 4 特例映射，
+        //   否则公式 0x100+(tt-1)*3+(tier-1) 对 (Pickaxe=1, tier=4) 错算成 0x103（HoeWood）→ pack 查询错图标。
+        if (tt === 1 && t === 4) return 0x112  // 钻石镐 PickaxeDiamond
         if (tt < 1 || tt > 5) return 0
         const tier = (t < 1 || t > 3) ? 1 : t
         return 0x100 + (tt - 1) * 3 + (tier - 1)
@@ -87,13 +90,17 @@ Item {
             }
 
             // tier → 头部材质颜色（把手恒木色：通用工具柄；五类同 tier 同色）。
-            const head  = root.tier === 2 ? "#9a9a9a"    // 石：中灰
+            //   t472 tier 4 = 钻石（青绿，机制对齐 MC 钻石工具配色）；目前仅镐有钻石档。
+            const head  = root.tier === 4 ? "#4fd9d2"    // 钻石：青绿
+                         : root.tier === 2 ? "#9a9a9a"    // 石：中灰
                          : root.tier === 3 ? "#d8d8e6"   // 铁：银白
                          : "#9c6b3c"                      // 木：褐铜（默认 / tier 0 兜底）
-            const headDark = root.tier === 2 ? "#5a5a5a"
+            const headDark = root.tier === 4 ? "#2e9a96"
+                             : root.tier === 2 ? "#5a5a5a"
                              : root.tier === 3 ? "#8a8a9a"
                              : "#5a3a1c"
-            const headLight = root.tier === 2 ? "#c4c4c4"
+            const headLight = root.tier === 4 ? "#8ff0ea"
+                              : root.tier === 2 ? "#c4c4c4"
                               : root.tier === 3 ? "#f0f0fa"
                               : "#c48a5a"
             const handle = "#7a5230" // 木把手

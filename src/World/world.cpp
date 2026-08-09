@@ -437,10 +437,11 @@ void World::tickWaterFlow()
 
     // t411 流体交互 pass A（流水 → 静岩浆源 → 黑曜石）：遍历快照中的**流水**格（state>0），查 6 正交邻是否
     //   为**静岩浆源**（Lava state=0）；命中则把该静岩浆源凝固为 Obsidian。机制等价 MC 1.0「流水触岩浆源 →
-    //   黑曜石」（仅流水触发；水源触岩浆不反应——区别于岩浆侧交互，源-源不凝固）。6 正交邻覆盖「水流自上
-    //   而下浇到岩浆源顶」的瀑布情形。凝固目标延迟到批量应用阶段写入（流场计算 pass 2-4 读旧栅格，但水本就
-    //   无法流入岩浆/obsidian 实体 → 无副作用）。setWaterSilent 写 Obsidian：旧 id=Lava → 内部标 m_lavaDirty，
-    //   驱动下次岩浆 tick 续扫该岩浆格的流岩浆邻居（它们因源被凝固而失支撑，应凝固/退场）。
+    //   黑曜石」（本 pass 仅流水触发；水源触岩浆源的凝固归 tickLavaFlow pass B 的 t472 补丁——双源亦产黑曜石，
+    //   机制对齐 spec「water source + lava source → obsidian」）。6 正交邻覆盖「水流自上而下浇到岩浆源顶」的瀑布
+    //   情形。凝固目标延迟到批量应用阶段写入（流场计算 pass 2-4 读旧栅格，但水本就无法流入岩浆/obsidian 实体 →
+    //   无副作用）。setWaterSilent 写 Obsidian：旧 id=Lava → 内部标 m_lavaDirty，驱动下次岩浆 tick 续扫该岩浆格的
+    //   流岩浆邻居（它们因源被凝固而失支撑，应凝固/退场）。
     std::vector<WCell> obsidianTargets;
     {
         static const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
@@ -675,7 +676,7 @@ void World::tickLavaFlow()
     //   但岩浆本就无法流入水/stone/cobble 实体 → 无副作用）。setWaterSilent 写入：旧 id=Water → 内部标
     //   m_waterDirty，驱动下次水 tick 续扫该水格邻居（被凝固的水消失 → 邻水可能失支撑应退场/扩散）。
     //   交互规则完整矩阵（与 tickWaterFlow pass A 互补、无重叠）：
-    //     流水 + 岩浆源 → 黑曜石（pass A，改岩浆格） / 水源 + 岩浆源 → 不反应（双源静置，机制等价 MC）
+    //     流水 + 岩浆源 → 黑曜石（pass A，改岩浆格） / 水源 + 岩浆源 → 黑曜石（本 pass t472 补丁，改岩浆格）
     //     流岩浆 + 水源 → 石头（本 pass，改水格） / 流岩浆 + 流水 → 圆石（本 pass，改水格）
     struct SolidifyTarget { int x, y, z; quint8 result; };
     std::vector<SolidifyTarget> solidifyTargets;
@@ -693,6 +694,30 @@ void World::tickLavaFlow()
                 const quint8 result = (wState == 0) ? quint8(BlockRegistry::Stone)
                                                     : quint8(BlockRegistry::Cobble);
                 solidifyTargets.push_back({nx, ny, nz, result});
+            }
+        }
+    }
+
+    // t472 流体交互 pass B 补丁（静岩浆源 + 静水源 → 黑曜石）：遍历快照中的**岩浆源**格（state==0），查 6 正交邻是否
+    //   为**静水源**（Water state==0）；命中则把本岩浆源凝固为 Obsidian。机制等价 spec t472「water source + lava
+    //   source → obsidian」（双源静置凝固）。**与 pass A「流水→岩浆源」互补、无重叠**：pass A（tickWaterFlow）由流水
+    //   触发改岩浆格，本支由岩浆源视角查水源邻接改岩浆格 —— 二者改的都是岩浆源格、但触发条件不同（流水 vs 水源邻接）；
+    //   一旦凝固为 Obsidian 即非岩浆 → 下次 tick 不再命中任一支，无双触发。流岩浆（state>0）由上方 solidify pass 处理
+    //   （触水源→石头 / 流水→圆石），故本支只看岩浆源（state==0）。凝固目标延迟到批量应用阶段写入（与 solidifyTargets
+    //   同批；obsidianTargets 是岩浆源格，与 solidifyTargets 水格 / evaps+adds 流岩浆格互不相交 → 写入顺序安全）。
+    std::vector<LCell> obsidianTargets;
+    {
+        static const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for (const LCell &c : cells) {
+            if (c.level != 0) continue; // 仅岩浆源触发本支（流岩浆由上方 solidify pass 处理）
+            for (const auto &n : neigh) {
+                const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
+                if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                if (m_chunks.blockAt(nx, ny, nz) == BlockRegistry::Water
+                    && m_chunks.stateAt(nx, ny, nz) == 0) {
+                    obsidianTargets.push_back(c); // 凝固本岩浆源格（机制对齐 MC：岩浆源被水凝固为黑曜石）
+                    break; // 任一水源邻接即凝固本格，无需重复登记
+                }
             }
         }
     }
@@ -766,6 +791,10 @@ void World::tickLavaFlow()
     //    clearDirty」合并为末尾 1 次 emit + clear，消除活跃岩浆扩散期 N 次重建扇出（同 t350 水流批量化的根因）。
     m_batchFluid = true;
     bool anyChange = false;
+    // t472：先写岩浆源→Obsidian（与 solidifyTargets/evaps/adds 互不相交 —— obsidianTargets 是岩浆源格，
+    //   solidifyTargets 是水格，evaps/adds 操作流岩浆/air 格；故写入顺序安全）。
+    for (const LCell &o : obsidianTargets)
+        anyChange |= setWaterSilent(o.x, o.y, o.z, BlockRegistry::Obsidian, 0);
     // t438：先写流岩浆凝固水格（静水源→Stone / 流水→Cobblestone；与 evaps/adds 操作的格互不相交 ——
     //   solidifyTargets 是 Water 格，evaps/adds 操作 Lava/Air 格；故写入顺序安全）。
     for (const SolidifyTarget &s : solidifyTargets)
@@ -787,7 +816,7 @@ void World::tickLavaFlow()
     }
     qInfo("vo.perf: tickLavaFlow %lldus cells=%d writes=%d settled=%d",
           t380t.elapsed(), int(cells.size()),
-          int(solidifyTargets.size() + evaps.size() + int(adds.size())),
+          int(obsidianTargets.size() + solidifyTargets.size() + evaps.size() + int(adds.size())),
           anyChange ? 0 : 1);
 
     // 5) ignite pass（spec「木质方块邻岩浆概率着火焚毁」）：遍历本 tick 岩浆格，扫 6 邻，木类方块按散布概率焚毁。
@@ -1170,8 +1199,10 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
                 const int bx = cx + dx, by = cy + dy, bz = cz + dz;
                 if (bx < 0 || bz < 0 || bx >= m_width || bz >= m_depth || by < 0 || by >= m_height) continue;
                 const quint8 b = m_chunks.blockAt(bx, by, bz);
-                if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water)
-                    continue; // 空气 / 基岩 / 水不破坏（机制等价 MC 爆炸：不毁水体、不破基岩）
+                if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water
+                    || b == BlockRegistry::Obsidian)
+                    continue; // 空气 / 基岩 / 水 / 黑曜石不破坏（机制等价 MC 爆炸：不毁水体、不破基岩；
+                              //   t472 黑曜石爆炸抗性 6000 → 免疫 Stalker/TNT 爆炸，spec「blast-resistant」）
                 m_chunks.setBlock(bx, by, bz, BlockRegistry::Air); // 直写 + 标脏（含跨 chunk 边界邻接脏），不 emit
                 destroyed.push_back({bx, by, bz, b});
                 if (!any) { minX = maxX = bx; minY = maxY = by; minZ = maxZ = bz; any = true; }

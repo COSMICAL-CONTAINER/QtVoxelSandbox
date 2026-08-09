@@ -287,14 +287,17 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   tile = 基底 + state/2（4 阶段贴图覆盖 8 年龄，机制对齐 MC 1.0 carrot/potato 4 张阶段贴图）。
     /* carrot_crop  */ {int(BlockRegistry::CarrotCrop),                    69, 69, 69, 69, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x22F, 1, 64, "carrot_crop",  "胡萝卜作物"},
     /* potato_crop  */ {int(BlockRegistry::PotatoCrop),                    73, 73, 73, 73, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x230, 1, 64, "potato_crop",  "马铃薯作物"},
-    // ── t411 黑曜石（Obsidian）：机制等价 MC 1.0 obsidian（流水 state>0 触到静岩浆源 state=0 时，静岩浆源凝固成
-    //   本方块——见 World::tickWaterFlow 流体交互 pass）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方
-    //   面路径，**非**异形，与 stone/cobble/sandstone 同族）、hardness=12.0（同 MC 1.0 obsidian 量级，极硬极耐挖）、
-    //   toolType=Pickaxe（石族）、requiresTool=true、minToolTier=1（木镐起可破且掉落；本工程工具等级表无钻石镐门槛，
-    //   简化为木镐即采，便于玩家回收流体交互产物）、dropId=自身（破黑曜石掉黑曜石方块，可放置）、dropCount=1、maxStack=64。
+    // ── t411 黑曜石（Obsidian）：机制等价 MC 1.0 obsidian（流体交互凝固产物——见 World::tickWaterFlow / tickLavaFlow
+    //   流体交互 pass：流水触静岩浆源 / 静水源触静岩浆源 → 本方块）。整立方 opaque（solid=true / ShapeFull —— 走 mesher
+    //   整立方面路径，**非**异形，与 stone/cobble/sandstone 同族）、hardness=50.0（同 MC 1.0 obsidian 量级，极硬极耐挖 ——
+    //   t472 由 12.0 提到 MC 真值 50.0：钻石镐 speedMul 8.0 → 6.25s 慢挖（spec「+ slow」），低档镐 / 空手 speedMul 1.0 →
+    //   50s 极慢且不掉落）、toolType=Pickaxe（石族）、requiresTool=true、minToolTier=4（**t472 需钻石镐** —— tier<4 的镐
+    //   miningSpeedMul 恒 1.0（慢）+ canHarvest false（破后仅 AIR，spec「hand / lower-tier pick -> NO drop」）；仅钻石镐
+    //   tier 4 给速度加成且掉落）、dropId=自身（破黑曜石掉黑曜石方块，可放置）、dropCount=1、maxStack=64。
     //   各面贴图=obsidian(77)（深紫黑火山玻璃底 + 紫红纹理嵌点 + 少量品紫玻璃微反光，原创自绘 §9a）。音色归 GroupStone
-    //   （石质）。worldgen 不直接生成（仅由 t411 流体交互产生），不进创造调色板（系统获得语义，同 ice）。
-    /* obsidian     */ {int(BlockRegistry::Obsidian),                       77, 77, 77, 77, true,  BlockRegistry::ShapeFull,    12.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Obsidian),      1, 64, "obsidian",     "黑曜石"},
+    //   （石质）。worldgen 不直接生成（仅由流体交互产生），不进创造调色板（系统获得语义，同 ice）。**抗爆**：destroySphereSilent
+    //   跳过本方块（机制等价 MC obsidian 爆炸抗性 6000，免疫 Stalker/TNT 爆炸）。
+    /* obsidian     */ {int(BlockRegistry::Obsidian),                       77, 77, 77, 77, true,  BlockRegistry::ShapeFull,    50.0f, int(BlockRegistry::Pickaxe), 4, true,  int(BlockRegistry::Obsidian),      1, 64, "obsidian",     "黑曜石"},
     // ── t412 圆石变体（cobble variants）：机制等价 MC 1.0 石质半方块（cobblestone slab/stairs/wall/pressure-plate）。
     //   复用既有异形方块系统（PartialBlockGeometry 几何 + ShapeSlab/ShapeStairs/ShapeFence/ShapePlate 子 AABB），仅换
     //   圆石贴图（各面=cobble(5)）与石质属性：solid=false（非整立方 → 不挡邻居面剔除，同木制半砖）、hardness=2.0

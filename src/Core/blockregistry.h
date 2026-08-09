@@ -386,15 +386,16 @@ public:
         //   区别于小麦的基底 + state 全 8 阶段贴图）。方块 def topTile/sideTile 存基底阶段 0 tile（69/73），几何段算实际。
         CarrotCrop     = 55, // 胡萝卜作物：cross 形作物方块（机制等价 MC 1.0 carrot crop）；dropId=CarrotId(0x22F)
         PotatoCrop     = 56, // 马铃薯作物：cross 形作物方块（机制等价 MC 1.0 potato crop）；dropId=PotatoId(0x230)
-        // ── t411 黑曜石（Obsidian）：机制等价 MC 1.0 obsidian（流水 state>0 触到静岩浆源 state=0 时，静岩浆源凝固
-        //   成本方块——见 World::tickWaterFlow 流体交互 pass）。整立方 opaque（solid=true / ShapeFull —— 走 mesher
-        //   整立方面路径，**非**异形，与 stone/cobble/sandstone 同族）、hardness=12.0（同 MC 1.0 obsidian 量级，
-        //   极硬极耐挖）、toolType=Pickaxe（石族）、requiresTool=true、minToolTier=1（木镐起可破且掉落；本工程工具
-        //   等级表无钻石镐门槛，简化为木镐即采，便于玩家回收流体交互产物）、dropId=自身（破黑曜石掉黑曜石方块，
-        //   可放置）、dropCount=1、maxStack=64。各面贴图=obsidian(77)（深紫黑火山玻璃底 + 紫红纹理嵌点 + 少量品紫
-        //   玻璃微反光，原创自绘 §9a）。音色归 GroupStone（石质）。worldgen 不直接生成（仅由 t411 流体交互产生），
-        //   不进创造调色板（系统获得语义，同 ice）。
-        Obsidian       = 57, // 黑曜石：流水触静岩浆源凝固产物（t411 流体交互）
+        // ── t411 黑曜石（Obsidian）：机制等价 MC 1.0 obsidian（流体交互凝固产物——见 World::tickWaterFlow /
+        //   tickLavaFlow 流体交互 pass：流水触静岩浆源 / 静水源触静岩浆源 → 本方块）。整立方 opaque（solid=true /
+        //   ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 stone/cobble/sandstone 同族）、hardness=50.0
+        //   （同 MC 1.0 obsidian 真值，极硬极耐挖）、toolType=Pickaxe（石族）、requiresTool=true、minToolTier=4
+        //   （**t472 需钻石镐**：tier<4 的镐 / 空手慢挖且不掉落，仅钻石镐 tier 4 给速度加成且掉落）、dropId=自身
+        //   （破黑曜石掉黑曜石方块，可放置）、dropCount=1、maxStack=64。各面贴图=obsidian(77)（深紫黑火山玻璃底 +
+        //   紫红纹理嵌点 + 少量品紫玻璃微反光，原创自绘 §9a）。音色归 GroupStone（石质）。worldgen 不直接生成（仅由
+        //   流体交互产生），不进创造调色板（系统获得语义，同 ice）。**抗爆**：destroySphereSilent 跳过本方块（机制
+        //   等价 MC obsidian 爆炸抗性 6000，免疫 Stalker/TNT 爆炸）。
+        Obsidian       = 57, // 黑曜石：流体交互凝固产物（流水/水源触静岩浆源 → 本方块；t411/t472）
         // ── t412 圆石变体（cobble variants）：机制等价 MC 1.0 石质半方块（cobblestone slab/stairs/wall/pressure-plate）。
         //   复用既有异形方块系统（PartialBlockGeometry 几何 + ShapeSlab/ShapeStairs/ShapeFence/ShapePlate 子 AABB），
         //   仅换圆石贴图（tile 5，各面同）与石质属性（hardness 2.0、Pickaxe、requiresTool=true、minTier1、GroupStone）。

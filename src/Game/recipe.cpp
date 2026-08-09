@@ -67,6 +67,14 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                           kStickId,                    0,
         0,                           kStickId,                    0 },
       int(ToolRegistry::PickaxeIron), 1, 1, "iron_pickaxe" },
+    // diamondPickaxe（t472）：3 钻石顶行 + 中列 2 木棒（T 形）→ 1 钻石镐（有序 3×3，仅工作台）。机制等价 MC 钻石镐。
+    //   钻石为材料段物品（DiamondId=0x212，由钻石矿挖掘掉落 —— 钻石矿需铁镐采掘）。钻石镐 tier 4 是采掘黑曜石
+    //   Obsidian 的唯一工具（Obsidian.minToolTier=4）。T 形同铁镐配方（顶行材料换钻石）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::DiamondId, RecipeRegistry::DiamondId, RecipeRegistry::DiamondId,
+        0,                          kStickId,                   0,
+        0,                          kStickId,                   0 },
+      int(ToolRegistry::PickaxeDiamond), 1, 1, "diamond_pickaxe" },
     // ── 锄（t233）：顶行 2 材料（左 + 中）+ 中列 2 木棒 → 1 锄（有序 3×3，仅工作台）。机制等价 MC 1.0 锄配方。
     //   与镐 T 形的差异：顶行**2**材料（镐为 3），最小包围盒 2×3 vs 镐 3×3 → shaped 匹配包围盒尺寸不同，
     //   不会与镐配方冲突（输入 2 材料 + 2 木棒 → 包围盒 2×3 命中锄、3 材料 + 2 木棒 → 包围盒 3×3 命中镐）。

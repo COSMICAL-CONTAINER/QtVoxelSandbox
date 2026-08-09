@@ -91,7 +91,16 @@ public:
         //   ToolIcon 据 toolType===FishingRod 自绘钓竿图标（长杆 + 钓线 + 浮标）；右键抛竿 / 拉起由 PlayerController
         //   useFishingRod 驱动（机制等价 MC 1.0 钓鱼）。displayName「钓鱼竿」（§9 通用词；非 MC 专名）。
         FishingRod   = 0x111, // 钓鱼竿：type=FishingRod tier 1，speedMul 1.0（不参与挖掘）；右键抛浮标入水 → 拉起获物（t401）
-        ToolCount    = 18,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
+        // t472 钻石镐（diamond pickaxe）：tier 4（铁档之上的最高档），speedMul 8.0（机制等价 MC 1.0 钻石镐
+        //   —— 采掘黑曜石 Obsidian 的唯一工具：Obsidian.minToolTier=4，仅 tier>=4 的镐给速度加成且掉落；
+        //   木 / 石 / 铁镐 tier<4 → miningSpeedMul 恒 1.0（慢）+ canHarvest false（破后仅 AIR，spec「lower-tier
+        //   pick -> NO drop」））。maxDurability=1561（MC 1.0 钻石镐耐久）。**追加在末尾 0x112 而非插在铁镐后**：
+        //   不重排既有枚举（保存档 / 配方向后兼容 —— 工具段 id 落 player_state JSON + 配方 outputId，重排会破坏
+        //   旧存档与配方表），故钻石镐脱离「每类 3 档 contiguous」布局（ToolIcon.qml 的 itemIdFromTypeTier 对
+        //   tier 4 特例映射到 0x112）。配方 = 3 钻石（RecipeRegistry::DiamondId）+ 2 木棒（仅工作台，机制等价
+        //   MC 钻石镐配方）。displayName「钻石镐」（§9 通用词；非 MC 专名）。
+        PickaxeDiamond = 0x112, // 钻石镐：type=Pickaxe tier 4，speedMul 8.0；采掘 Obsidian 的唯一工具（t472）
+        ToolCount    = 19,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
     };
 
     // 工具定义。表行索引 == itemId - ToolIdBase（连续）；详见 toolregistry.cpp kTools。
