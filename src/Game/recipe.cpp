@@ -566,6 +566,9 @@ static_assert(RecipeRegistry::CopperOreDropId == 0x21C, "CopperOreDropId 须与 
 static_assert(RecipeRegistry::CopperIngotId   == 0x21D, "CopperIngotId 须为材料段序号 0x21D");
 static_assert(RecipeRegistry::GoldOreDropId   == 0x21E, "GoldOreDropId 须与 BlockRegistry::GoldOre.dropId 字面量 0x21E 一致");
 static_assert(RecipeRegistry::GoldIngotId     == 0x21F, "GoldIngotId 须为材料段序号 0x21F");
+// t471 青金石跨层契约（同 Coal/Iron/Copper/Gold 模式）：Core 层 blockregistry.cpp LapisOre 的 dropId 用字面量
+//   0x236（Core 不 include Game 头）；本处钉死 recipe.h 常量 == 字面量，防漂移致掉落断裂。
+static_assert(RecipeRegistry::LapisId         == 0x236, "LapisId 须与 BlockRegistry::LapisOre.dropId 字面量 0x236 一致");
 
 // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 材料 / mob
 //   掉落 / 生物蛋段「MC 1.0.0」列一致）。行索引 = engineMaterialId - MaterialIdBase（覆盖 [0x200, 0x22E] = 47 项，

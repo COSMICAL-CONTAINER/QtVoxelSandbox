@@ -498,7 +498,19 @@ public:
         //   isIce(id) 单一权威谓词覆盖三者（Ice/PackIce/BlueIce），t469 船会复用判冰面加船速。
         PackIce        = 91, // 浮冰：Ice 的更滑变种（机制等价 MC 1.0 packed ice）；滑动速度中等
         BlueIce        = 92, // 蓝冰：最滑冰变种（机制等价 MC 1.0 blue ice）；滑动速度最快
-        Count          = 93, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t471 青金矿石（LapisOre）：机制等价 MC 1.0 青金石矿（lapis lazuli ore）—— 嵌于 stone 深层、需石镐
+        //   采掘、掉青金石物品（附魔台每次附魔消耗 1-3 个 + 经验等级，附魔前置材料）。整立方 opaque
+        //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 coal/iron/diamond/copper/gold
+        //   矿石同族）、hardness=3.0（同族量级，需镐）、toolType=Pickaxe、requiresTool=true、minToolTier=2
+        //   （**需石镐**才掉落 —— 木镐挖了不掉落，机制等价 MC 1.0 青金矿需石镐；同 iron/copper 矿石门槛）、
+        //   dropId=0x236（青金石物品，材料段 RecipeRegistry::LapisId；Core 不依赖 Game 故用字面量 0x236 ——
+        //   机制等价 MC 1.0「青金矿采下直接掉青金石物品」（多枚），区别于铁/铜/金矿掉原矿须冶炼）、dropCount=1、
+        //   maxStack=64。各面贴图=lapis_ore(108)（石头底 + 群青深蓝斑簇 + 黄铁矿金点，原创自绘 §9a；真实青金石
+        //   矿物即「深蓝 lazurite 底 + 黄铁矿 pyrite 金点」）。音色归 GroupStone（石质，同 coal/iron 矿石）。
+        //   worldgen 高度分层散布于深层 y∈[5,31]（机制等价 MC 1.0 青金矿 Y<32 浅深层富集）。**洞穴裸露**：
+        //   carveCaves 暴露矿脉于洞壁（同其它矿石）。**进创造调色板**（与 coal/iron 矿石同走立方体图标）。
+        LapisOre       = 93, // 青金矿石：散布于 stone 深层 y∈[5,31]；需石镐采掘；掉青金石物品（t471 附魔前置材料）
+        Count          = 94, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -902,6 +914,9 @@ public:
     //      SweetBerryBush 方块 def 各面=103（基底阶段 0），mesher 在 PartialBlockGeometry::append 的
     //      SweetBerryBush case 内据 state 选 tile = 103 + stage（0/1/2）。机制等价 MC 1.0 sweet berry bush；
     //      名称/贴图原创自绘 §9a；tools/build_sweet_berry.py 程序生成原创像素图）。
+    //   106=pack_ice（t468 浮冰各面贴图）/ 107=blue_ice（t468 蓝冰各面贴图）；tools/build_ice.py 程序生成。
+    //   108=lapis_ore（t471 青金矿石各面贴图；石头底 + 群青深蓝斑簇 + 黄铁矿金点，原创自绘 §9a；
+    //      LapisOre 各面=本 tile；tools/build_ore.py 程序生成）。
     // 图集由 tools/build_atlas.py 打包全部 105 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
@@ -915,7 +930,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 108;
+    static constexpr int AtlasTileCount = 109;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

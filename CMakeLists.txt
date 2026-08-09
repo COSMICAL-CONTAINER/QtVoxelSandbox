@@ -227,6 +227,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_copper_ore.png          # t308 铜矿石贴图（build_ore.py 程序生成原创像素图；散布于 stone 浅中层 y∈[5,45]）
         textures/default_diamond_ore.png          # t279 钻矿石贴图（build_ore.py 程序生成原创像素图；散布于 stone 深层 y∈[5,40]）
         textures/default_gold_ore.png            # t308 金矿石贴图（build_ore.py 程序生成原创像素图；散布于 stone 深层 y∈[5,25]）
+        textures/default_lapis_ore.png           # t471 青金矿石贴图（build_ore.py 程序生成原创像素图；石头底+群青深蓝斑簇+黄铁矿金点；散布于 stone 深层 y∈[5,31]）
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
@@ -335,6 +336,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_copper_ore.png             # t308 铜矿石立方体图标（build_cube_icons.py；石头底+橙铜斑+孔雀绿锈）
         textures/icon_diamond_ore.png            # t279 钻矿石立方体图标（build_cube_icons.py；石头底+青白菱斑晶体）
         textures/icon_gold_ore.png               # t308 金矿石立方体图标（build_cube_icons.py；石头底+金黄斑簇）
+        textures/icon_lapis_ore.png              # t471 青金矿石立方体图标（build_cube_icons.py；石头底+群青深蓝斑簇+黄铁矿金点）
         textures/icon_crafting_table.png
         textures/icon_dirt.png
         textures/icon_furnace.png

@@ -29,6 +29,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::DiamondOre:    return "icon_diamond_ore.png";    // t279 钻矿石立方体图标（石头底+青白菱斑晶体）
     case BlockRegistry::CopperOre:     return "icon_copper_ore.png";     // t308 铜矿石立方体图标（石头底+橙铜斑+孔雀绿锈）
     case BlockRegistry::GoldOre:       return "icon_gold_ore.png";       // t308 金矿石立方体图标（石头底+金黄斑簇）
+    case BlockRegistry::LapisOre:      return "icon_lapis_ore.png";      // t471 青金矿石立方体图标（石头底+群青深蓝斑簇+黄铁矿金点）
     case BlockRegistry::Torch:         return "icon_torch.png";          // t88 火把立方体图标（伪光源）
     case BlockRegistry::Chest:         return "icon_chest.png";          // t173 箱子立方体图标（顶盖缝+侧铁箍）
     case BlockRegistry::Farmland:      return "icon_farmland.png";       // t234 耕地立方体图标（顶=干态翻耕土+侧泥土）
@@ -400,7 +401,10 @@ QVariantList Hotbar::creativeMaterials() const
         //   生存由合成获得，创造调色板补全便于测试。可堆叠 64；非方块（材料段）→ 右键不走方块放置，走 useBlock
         //   船交互分支（playercontroller placeBlock 船段：先试骑乘命中的船 → mount；否则放船）。MaterialIcon 自绘船图标。
         int(RecipeRegistry::OakBoatId),         // 橡木船：5 橡木木板合成；右键水面放船 + 骑乘
-        int(RecipeRegistry::SpruceBoatId)       // 云杉船：5 云杉木板合成；右键水面放船 + 骑乘
+        int(RecipeRegistry::SpruceBoatId),      // 云杉船：5 云杉木板合成；右键水面放船 + 骑乘
+        // t471 青金石（机制等价 MC 1.0 lapis lazuli；青金矿石挖掘掉落，附魔台消耗材料）。生存由挖青金矿石获得，
+        //   创造调色板补全便于测试 / 装饰。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘青金石图标。
+        int(RecipeRegistry::LapisId)            // 青金石：青金矿石挖掘掉落；附魔台消耗材料（t474）
     };
 }
 
@@ -458,6 +462,7 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::DiamondOre),                                   // t279 钻矿石（散布于 stone 深层 y∈[5,40]、需铁镐采掘；掉钻石材料）
              int(BlockRegistry::CopperOre),                                    // t308 铜矿石（散布于 stone 浅中层 y∈[5,45]、需石镐采掘；掉铜原矿→熔炉烧铜锭）
              int(BlockRegistry::GoldOre),                                      // t308 金矿石（散布于 stone 深层 y∈[5,25]、需铁镐采掘；掉金原矿→熔炉烧金锭）
+             int(BlockRegistry::LapisOre),                                     // t471 青金矿石（散布于 stone 深层 y∈[5,31]、需石镐采掘；掉青金石物品）
              int(BlockRegistry::Torch),
              int(BlockRegistry::Chest),                                    // t173 箱子（右键开 27 槽）
              int(BlockRegistry::Farmland),                                 // t234 耕地（持锄右键泥土/草得；干/湿两态）
@@ -589,6 +594,8 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggStalkerId)  return QStringLiteral("生物蛋（潜行者）");
         if (blockId == RecipeRegistry::SpawnEggSpiderId)   return QStringLiteral("生物蛋（蜘蛛）");
         if (blockId == RecipeRegistry::DiamondId)       return QStringLiteral("钻石"); // t279 钻石矿挖掘掉落
+        // t471 青金石：青金矿石挖掘掉落（需石镐；机制等价 MC 1.0 青金石）；附魔台消耗材料（t474）。
+        if (blockId == RecipeRegistry::LapisId)         return QStringLiteral("青金石"); // 青金矿石挖掘掉落
         // t299 敌对 mob 死亡掉落物：杀骸骨 / 蹒跚者 / 蜘蛛产出（机制等价 MC 1.0 敌对生物掉落，名称用通用词、零 MC 专名 §9）。
         if (blockId == RecipeRegistry::BoneId)        return QStringLiteral("骨头"); // 杀骸骨掉落
         if (blockId == RecipeRegistry::RottenFleshId) return QStringLiteral("腐肉"); // 杀蹒跚者掉落

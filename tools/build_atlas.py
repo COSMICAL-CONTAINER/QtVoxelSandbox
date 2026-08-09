@@ -216,6 +216,7 @@ TILES = [
     "default_sweet_berry_bush_2",   # 105 sweet_berry_bush_2（阶段 2 成熟红浆果簇；右键采摘得 2-3 浆果）
     "default_pack_ice",             # 106 pack_ice（t468 浮冰各面贴图；实白底+细裂纹，比 Ice 更密实；PackIce 各面=本 tile）
     "default_blue_ice",             # 107 blue_ice（t468 蓝冰各面贴图；淡蓝底+纵向纹路，最滑；BlueIce 各面=本 tile）
+    "default_lapis_ore",            # 108 lapis_ore（t471 青金矿石各面贴图；石头底+群青深蓝斑簇+黄铁矿金点；散布于 stone 深层 y∈[5,31]）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

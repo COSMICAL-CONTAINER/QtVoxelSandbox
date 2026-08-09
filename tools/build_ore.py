@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成矿石（CoalOre / IronOre / DiamondOre / CopperOre / GoldOre）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
+"""生成矿石（CoalOre / IronOre / DiamondOre / CopperOre / GoldOre / LapisOre）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
 
 机制等价 MC 1.0 矿石（嵌于 stone 区段、需镐采掘），但贴图为本项目程序生成的原创像素图，
 **不**拷贝任何 MC 资产。基底取本工程既有石头（default_stone.png）逐像素副本，保证与
@@ -13,6 +13,9 @@
     名称/贴图原创）。橙铜主色 + 绿锈副色显「铜氧化」，区别于铁的纯棕橙；
   - 金矿（gold_ore，t308）：石头底 + 多簇金黄斑点（机制等价 MC 1.0 金矿，名称/贴图原创）。
     暖金高光 + 深金阴影显「贵金属反光」，最亮最暖的矿石族一眼可辨。
+  - 青金矿（lapis_ore，t471）：石头底 + 多簇深群青蓝斑点 + 少量黄铁矿金点（机制等价 MC 1.0
+    青金石矿 lapis lazuli ore，名称/贴图原创 §9）。群青深蓝主色 + 黄铁金点副色显「青金石
+    特征性金斑」（真实青金石 lazurite 矿物即深蓝底嵌黄铁矿 pyrite 金点），区别于钻石的青白晶体。
 
 色块位置固定（无随机源）→ 同输入同输出（确定性，便于 CI 校验 & 与 build_atlas.py 顺序对齐）。
 斑块布局刻意打散、不对称，避免「网格化 / 重复纹理」的人工感。
@@ -23,6 +26,7 @@
   default_diamond_ore.png
   default_copper_ore.png
   default_gold_ore.png
+  default_lapis_ore.png
 
 依赖：本脚本须先有 textures/default_stone.png（既有 CC0/原创资产）。
 """
@@ -117,6 +121,24 @@ def draw_gold(canvas):
     return canvas
 
 
+def draw_lapis(canvas):
+    """青金矿（lapis_ore，t471）：石头底 + 多簇深群青蓝斑点 + 少量黄铁矿金点（散布；冷蓝高光显「青金石
+    深蓝晶体」）。机制等价 MC 1.0 青金石矿（lapis lazuli ore），名称/贴图全原创（§9）。
+    真实青金石矿物即「深蓝 lazurite 底 + 黄铁矿 pyrite 金点」→ 用群青深蓝主色 + 金黄副色显此特征，
+    区别于钻石的青白晶体（钻石更亮更冷白、青金更深更蓝）。"""
+    lapis_base = np.array([34.0, 58.0, 158.0])    # 深群青蓝（青金石 lazurite 外露，深沉饱和）
+    lapis_hi = np.array([96.0, 130.0, 220.0])     # 高光（深蓝反光，亮群青）
+    pyrite = np.array([218.0, 178.0, 56.0])       # 黄铁矿金点（青金石特征性金斑，副色点缀）
+    # 群青蓝簇（散布；刻意不对称，避开边角溢出）
+    centers = [(4, 4), (11, 3), (3, 11), (12, 10), (8, 7), (10, 13)]
+    paint_blobs(canvas, centers, radius=1, color=lapis_base, highlight=lapis_hi)
+    # 黄铁矿金点（少量散布，表「青金石特征金斑」—— 区别于钻石的纯青白晶体，青金带金点）
+    canvas[6, 9, 0:3] = pyrite
+    canvas[9, 13, 0:3] = pyrite
+    canvas[13, 5, 0:3] = pyrite
+    return canvas
+
+
 def save(arr, name):
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA")
     out = os.path.join(SRC, name + ".png")
@@ -130,6 +152,7 @@ def main():
     save(draw_diamond(stone_base()), "default_diamond_ore")
     save(draw_copper(stone_base()), "default_copper_ore")
     save(draw_gold(stone_base()), "default_gold_ore")
+    save(draw_lapis(stone_base()), "default_lapis_ore")
 
 
 if __name__ == "__main__":

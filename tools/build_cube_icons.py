@@ -43,6 +43,7 @@ BLOCKS = [
     ("diamond_ore",     "default_diamond_ore", "default_diamond_ore"),  # t279 钻矿石（各面同贴图）
     ("copper_ore",      "default_copper_ore", "default_copper_ore"),    # t308 铜矿石（各面同贴图=石头底+橙铜斑+孔雀绿锈）
     ("gold_ore",        "default_gold_ore", "default_gold_ore"),        # t308 金矿石（各面同贴图=石头底+金黄斑簇）
+    ("lapis_ore",       "default_lapis_ore", "default_lapis_ore"),      # t471 青金矿石（各面同贴图=石头底+群青深蓝斑簇+黄铁矿金点）
     ("wool",            "default_wool", "default_wool"),  # t300 羊毛方块（各面同贴图=奶白羊毛卷绒纹）
     # t455 16 色 wool 其余 15 色变体立方体图标（各面同贴图=彩色卷绒纹；build_wool.py 程序生成原创像素图）。
     #   15 色顶 + 两侧明暗 → hotbar / 创造调色板肉眼即可辨色（橙 / 品红 / 浅蓝 / 黄 / 柠绿 / 粉 / 灰 / 浅灰 /

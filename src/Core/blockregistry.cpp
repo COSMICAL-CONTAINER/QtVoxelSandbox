@@ -379,6 +379,16 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   GroupStone（玻璃质，同 Ice）。worldgen 不直接生成（系统获得语义）；进创造调色板供测试 / 装饰。
     /* pack_ice     */ {int(BlockRegistry::PackIce),        106,106,106,106, false, BlockRegistry::ShapeFull,     0.5f, int(BlockRegistry::Pickaxe), 1, true,                             0, 0, 64, "pack_ice",     "浮冰"},
     /* blue_ice     */ {int(BlockRegistry::BlueIce),        107,107,107,107, false, BlockRegistry::ShapeFull,     0.5f, int(BlockRegistry::Pickaxe), 1, true,                             0, 0, 64, "blue_ice",     "蓝冰"},
+    // ── t471 青金矿石（LapisOre）：机制等价 MC 1.0 青金石矿（嵌于 stone 深层、需石镐采掘、掉青金石物品）。
+    //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 coal/iron/diamond/
+    //   copper/gold 矿石同族）、hardness=3.0（同族量级，需镐）、toolType=Pickaxe、requiresTool=true、
+    //   minToolTier=2（**需石镐**才掉落 —— 木镐挖了不掉落，机制等价 MC 1.0 青金矿需石镐；同 iron/copper 门槛）、
+    //   dropId=0x236（青金石物品，材料段 RecipeRegistry::LapisId；Core 不依赖 Game 故字面量 0x236 —— 机制等价
+    //   MC 1.0「青金矿采下直接掉青金石物品」，区别于铁/铜/金矿掉原矿须冶炼）、dropCount=1、maxStack=64。
+    //   各面贴图=lapis_ore(108)（石头底 + 群青深蓝斑簇 + 黄铁矿金点，原创自绘 §9a；真实青金石矿物即「深蓝
+    //   lazurite 底 + 黄铁矿 pyrite 金点」）。音色归 GroupStone（石质）。worldgen 高度分层散布于深层 y∈[5,31]
+    //   （机制等价 MC 1.0 青金矿 Y<32 浅深层富集）。进创造调色板（与 coal/iron 矿石同走立方体图标）。
+    /* lapis_ore    */ {int(BlockRegistry::LapisOre),        108,108,108,108, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 2, true,                           0x236, 1, 64, "lapis_ore",    "青金矿石"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -461,6 +471,7 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* sweet_berry_bush        */ -1, // t467 雪原浆果灌木丛 → MC 1.0 无等价（sweet berry bush id 105 为 1.14+；本工程作 cross 装饰灌木故无 1.0 等价）
     /* pack_ice                */ -1, // t468 浮冰 → MC 1.0 无等价（packed_ice id 174 为 1.8+；1.0 仅 ice id 79；独立 id 故无 1.0 等价）
     /* blue_ice                */ -1, // t468 蓝冰 → MC 1.0 无等价（blue_ice id 211 为 1.13+；1.0 仅 ice id 79；独立 id 故无 1.0 等价）
+    /* lapis_ore               */ 21, // t471 青金矿石 → MC 1.0 lapis lazuli ore id 21
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");

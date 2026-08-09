@@ -221,6 +221,13 @@ public:
     //   自绘 MaterialIcon）。§9 区隔：仅机制对齐 MC 1.0 boat，名称 / 模型 / 贴图全原创。
     static constexpr int OakBoatId    = 0x234; // 橡木船：5 橡木木板 U 形合成；右键水面放置 + 骑乘（机制等价 MC 1.0 oak boat）
     static constexpr int SpruceBoatId = 0x235; // 云杉船：5 云杉木板 U 形合成；右键水面放置 + 骑乘（机制等价 MC 1.0 spruce boat）
+    // t471 青金石（lapis）：材料段 0x236。机制等价 MC 1.0 青金石（lapis lazuli）—— **青金矿石挖掘掉落**
+    //   （BlockRegistry::LapisOre.dropId=0x236；机制等价 MC 1.0「青金矿采下直接掉青金石物品」，区别于铁/铜/金
+    //   矿掉原矿须冶炼）。可堆叠 64；非方块（材料段）→ 右键不放置。MaterialIcon 自绘青金石图标（深群青蓝
+    //   多面晶体 + 黄铁矿金点，§9a 区隔原创）。**附魔台每次附魔消耗 1-3 个 + 经验等级**（附魔前置材料，
+    //   消耗机制归 t474 附魔台）。创造调色板补全便于测试 / 装饰取用。无 MC 1.0 mcMaterialId 映射
+    //   （id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘 MaterialIcon）。
+    static constexpr int LapisId        = 0x236; // 青金石：青金矿石挖掘掉落（BlockRegistry::LapisOre.dropId）；附魔台消耗材料（t474）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。
