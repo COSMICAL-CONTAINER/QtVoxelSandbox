@@ -161,7 +161,8 @@ int PartialBlockGeometry::append(
 
     switch (blockId) {
     case BlockRegistry::WoodSlab:
-    case BlockRegistry::CobbleSlab: { // t412 圆石台阶（与 WoodSlab 同几何，tile 由 tileIndex 取本方块 sideTile=cobble）
+    case BlockRegistry::CobbleSlab: // t412 圆石台阶（与 WoodSlab 同几何，tile 由 tileIndex 取本方块 sideTile=cobble）
+    case BlockRegistry::SpruceSlab: { // t466 云杉台阶（与 WoodSlab 同几何，tile=spruce_planks）
         // 半高：state bit0=上半 → y[0.5,1]；下半 → y[0,0.5]。全 footprint。
         const bool upper = (state & 1) != 0;
         const float y0 = upper ? 0.5f : 0.0f, y1 = upper ? 1.0f : 0.5f;
@@ -190,7 +191,8 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::WoodFence:
-    case BlockRegistry::CobbleFence: { // t412 圆石墙（与 WoodFence 同几何；机制等价 MC 圆石墙）
+    case BlockRegistry::CobbleFence: // t412 圆石墙（与 WoodFence 同几何；机制等价 MC 圆石墙）
+    case BlockRegistry::SpruceFence: { // t466 云杉栅栏（与 WoodFence 同几何，tile=spruce_planks）
         // t209 栅栏 = 中心立柱（0.4 见方，1.5 高）+ 四向横档（连接相邻栅栏 / 实体方块）。
         //   立柱 y[0, 1.5] 与 collisionAABBs(ShapeFence) 同高（{0.3,0,0.3,0.7,1.5,0.7}）→ 玩家跳不过
         //   （跳跃顶点 ~1.25 < 1.5；机制等价 MC 栅栏 1.5 高不可越）。立柱顶探入上格 0.5（栅栏上格必为空气，
@@ -230,7 +232,8 @@ int PartialBlockGeometry::append(
                 tile, light, tileW, hx, hy, v0, v1);
         break;
     }
-    case BlockRegistry::WoodDoor: {
+    case BlockRegistry::WoodDoor:
+    case BlockRegistry::SpruceDoor: { // t466 云杉门（与 WoodDoor 同几何，tile=spruce_planks）
         // 两格高门：每格各画满高薄板（下格画门下半 / 上格画门上半，几何同 —— 区别仅在 isUpper state，
         //   用于破坏联动 & 朝向同步）。朝向 state[1:0]（0=+X 1=-X 2=+Z 3=-Z）、开合 state bit2。
         //   合：薄板贴在「朝向」边（朝向 +X → 板在 x[0.8125,1]）；开：板旋 90° 贴邻边。

@@ -203,6 +203,10 @@ TILES = [
     "default_bed_light_gray",       # 99 bed_light_gray
     "default_bed_purple",           # 100 bed_purple
     "default_bed_brown",            # 101 bed_brown
+    # t466 云杉木板（tile 102）：云杉木制品链共享贴图（SprucePlanks / SpruceSlab / SpruceFence / SpruceDoor
+    #   一族木制品共享，同橡木 WoodSlab/Fence/Door 复用 planks(8) 模式）。深色木纹区别橡木木板；机制等价
+    #   MC 1.0 spruce 木制品。tools/build_spruce.py 程序生成原创像素图（§9 override (a)）。
+    "default_spruce_planks",        # 102 spruce_planks（云杉木板 / 台阶 / 栅栏 / 门 共享；深色木纹）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

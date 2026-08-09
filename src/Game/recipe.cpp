@@ -324,10 +324,36 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0, 0, 0 },
       int(BlockRegistry::CobbleFence), 3, 1, "cobble_fence" },
     //   cobble_pressure_plate：2 圆石横排 → 1 圆石压力板（有序 2×2 背包栏；最小包围盒 2×1）。机制等价 MC 石压力板配方。
-    { int(RecipeRegistry::Inventory2x2), false,
+    { int(RecipeRegistry::Table3x3), false,
       { int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), 0,
         0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::CobblePressurePlate), 1, 1, "cobble_pressure_plate" },
+    // ── t466 云杉木制品链配方（机制等价 MC 1.0 spruce 木制品；名称 / 贴图原创自绘 §9a）。复用既有木制品配方
+    //   形状（仅把橡木木板 / 原木换云杉木板 / 云杉原木），与橡木木制品同形 → 同包围盒判定，互不冲突（原料不同）。
+    //   spruce_planks：1 云杉原木 → 4 云杉木板（无序；2×2 背包栏 / 3×3 工作台均可，同橡木原木→橡木木板）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::SpruceLog), 0, 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::SprucePlanks), 4, 1, "spruce_planks" },
+    //   spruce_slab：3 云杉木板横排 → 6 云杉台阶（有序 3×3，仅工作台；最小包围盒 3×1）。复用木板台阶配方形状
+    //     （机制等价 MC 木台阶配方）；原料为云杉木板 → 与橡木木板台阶（原料 Planks）不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::SprucePlanks), int(BlockRegistry::SprucePlanks), int(BlockRegistry::SprucePlanks),
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::SpruceSlab), 6, 1, "spruce_slab" },
+    //   spruce_fence：6 云杉木板 + 2 木棒（板-棒-板 ×2 行）→ 3 云杉栅栏（有序 3×3，仅工作台）。复用木栅栏配方形状
+    //     （机制等价栅栏配方）；最小包围盒 3×2，与橡木木栅栏包围盒同形但原料不同 → 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::SprucePlanks), kStickId,                  int(BlockRegistry::SprucePlanks),
+        int(BlockRegistry::SprucePlanks), kStickId,                  int(BlockRegistry::SprucePlanks),
+        0, 0, 0 },
+      int(BlockRegistry::SpruceFence), 3, 1, "spruce_fence" },
+    //   spruce_door：3 云杉木板纵列 → 1 云杉门（有序 3×3，仅工作台；最小包围盒 1×3）。复用木门配方形状
+    //     （机制等价 MC 门配方）；outputCount=1（门 maxStack=1，canTake 一次取不满 3，同 wood_door）。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::SprucePlanks), 0, 0,
+        int(BlockRegistry::SprucePlanks), 0, 0,
+        int(BlockRegistry::SprucePlanks), 0, 0 },
+      int(BlockRegistry::SpruceDoor), 1, 1, "spruce_door" },
     // t174 铁桶（空）：3 铁锭 V 形（顶左 + 顶右 + 底中）→ 1 空桶（有序 3×3，仅工作台）。机制等价 MC 1.0
     //   铁桶配方（3 铁锭 V 形）。最小包围盒 3×2（顶行两端 + 底行中），可在工作台任意 3×2 子区放（包围盒
     //   对齐后逐格比）。产物 BucketEmptyId（材料段 0x206，maxStack=1 不可堆叠 —— canTake 一次取 1 件）。

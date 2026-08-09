@@ -346,6 +346,18 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* bed_light_gray  */ {int(BlockRegistry::BedLightGray),  99, 99, 99, 99, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedLightGray),  1, 64, "bed_light_gray", "浅灰色床"},
     /* bed_purple      */ {int(BlockRegistry::BedPurple),    100,100,100,100, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedPurple),     1, 64, "bed_purple",     "紫色床"},
     /* bed_brown       */ {int(BlockRegistry::BedBrown),     101,101,101,101, false, BlockRegistry::ShapeBed, 0.2f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::BedBrown),      1, 64, "bed_brown",      "棕色床"},
+    // ── t466 云杉木制品链（机制等价 MC 1.0 spruce 木制品；名称 / 贴图全原创自绘 §9a）。云杉原木 SpruceLog(46)
+    //   已有（t395），本段是其延伸制品。复用既有木制品机制（solid/shape/碰撞/朝向解码/门双格），仅换 id + 贴图
+    //   （tile = spruce_planks(102)，深色木纹区别橡木 planks(8)）。各面同贴图（同橡木木制品「一族共享一贴图」模式）。
+    //   hardness=2.0（木质）、toolType=Axe + requiresTool=false（斧加速、空手可采且掉落）、dropId=自身（破块掉自身
+    //   方块，可放回）、dropCount=1。mesher 经 PartialBlockGeometry::append 按 (id,state) 生成异形顶点（SpruceSlab/
+    //   SpruceFence/SpruceDoor 与 WoodSlab/WoodFence/WoodDoor 同 case 几何，仅 tile 由 tileIndex 取本方块 sideTile
+    //   =spruce_planks）。音色归 GroupWood（木质，同 planks 族）。配方：1 云杉原木 → 4 云杉木板（无序 2×2，同橡木）；
+    //   云杉木板 → 台阶/栅栏/门（同橡木配方，原料换云杉木板）。进创造调色板（每件独立取用 + 右键放置）。
+    /* spruce_planks */ {int(BlockRegistry::SprucePlanks),   102,102,102,102, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SprucePlanks),   1, 64, "spruce_planks", "云杉木板"}, // 整立方 opaque；state 复用 bit0 作双半砖合并 marker（DoubleSlabMarkerBit）
+    /* spruce_slab   */ {int(BlockRegistry::SpruceSlab),     102,102,102,102, false, BlockRegistry::ShapeSlab,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceSlab),     1, 64, "spruce_slab",   "云杉台阶"}, // 半高（state bit0=上半(1)/下半(0)；与 WoodSlab 同编码）
+    /* spruce_fence  */ {int(BlockRegistry::SpruceFence),    102,102,102,102, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceFence),    1, 64, "spruce_fence",  "云杉栅栏"}, // 中心立柱 + 四向横档连邻居（与 WoodFence 同几何）；state=0
+    /* spruce_door   */ {int(BlockRegistry::SpruceDoor),     102,102,102,102, false, BlockRegistry::ShapeDoor,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceDoor),     1,  1, "spruce_door",   "云杉门"}, // 两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向（与 WoodDoor 同编码）
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -419,6 +431,12 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     // t455 16 色床补齐 8 色新变体 → MC 1.0 床 id 26（统一；同既存 8 色床，颜色由 metadata 分）。
     /* bed_white               */ 26, /* bed_light_blue          */ 26, /* bed_lime                */ 26, /* bed_pink */ 26,
     /* bed_gray                */ 26, /* bed_light_gray          */ 26, /* bed_purple              */ 26, /* bed_brown */ 26,
+    // t466 云杉木制品链 → MC 1.0 无独立 id（1.0 仅橡木 planks id 5 / 木门 id 64 / 木栅栏 id 85 / 木台阶仅石 44；
+    //   云杉变种 1.7+ 才以 metadata 分；本工程用独立 id 故无 1.0 等价，同 spruce_log=-1 模式）。
+    /* spruce_planks           */ -1, // t466 云杉木板 → MC 1.0 planks id 5（仅橡木，云杉 1.7+ metadata 分，独立 id 故无 1.0 等价）
+    /* spruce_slab             */ -1, // t466 云杉台阶 → MC 1.0 无等价（1.0 仅石台阶 id 44，木台阶 1.3+；云杉更晚）
+    /* spruce_fence            */ -1, // t466 云杉栅栏 → MC 1.0 无等价（1.0 仅橡木栅栏 id 85，云杉栅栏 1.7+ metadata 分）
+    /* spruce_door             */ -1, // t466 云杉门 → MC 1.0 无等价（1.0 仅橡木门 id 64，云杉门 1.8+ 独立 id）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -451,25 +469,36 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
 {
     if (blockId == CobbleSlab || blockId == CobbleStairs
         || blockId == CobbleFence || blockId == CobblePressurePlate) return true; // t412 段外圆石变体
+    if (blockId == SpruceSlab || blockId == SpruceFence || blockId == SpruceDoor) return true; // t466 段外云杉木制品（与 WoodSlab/WoodFence/WoodDoor 同几何）
     return blockId >= FirstPartial && blockId <= LastPartial;
 }
-bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab; }
+bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab || blockId == SpruceSlab; }
 bool BlockRegistry::isStairs(quint8 blockId)         { return blockId == WoodStairs || blockId == CobbleStairs; }
-bool BlockRegistry::isFence(quint8 blockId)          { return blockId == WoodFence || blockId == CobbleFence; }
+bool BlockRegistry::isFence(quint8 blockId)          { return blockId == WoodFence || blockId == CobbleFence || blockId == SpruceFence; }
 bool BlockRegistry::isPressurePlate(quint8 blockId)  { return blockId == WoodPressurePlate || blockId == CobblePressurePlate; }
 
-// t412 双半砖合并映射（木 / 石两族共用一套合并与掉落逻辑）：半砖 → 其满格整立方（合并写入目标）；
+// t466 门方块统一谓词（单一权威，段外云杉门并入）：blockId == WoodDoor（连续段内）或 SpruceDoor（段外）即门。
+//   供 playercontroller 的门放置 / 右键开合 / 破坏联动统一读，避免各处硬编码 WoodDoor id 判定（同 isFence
+//   把段外圆石墙 / 云杉栅栏并入的模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威。
+bool BlockRegistry::isDoor(quint8 blockId)
+{
+    return blockId == WoodDoor || blockId == SpruceDoor;
+}
+
+// t412/t466 双半砖合并映射（木 / 石 / 云杉三族共用一套合并与掉落逻辑）：半砖 → 其满格整立方（合并写入目标）；
 //   满格整立方 → 其半砖（破坏掉落）。非半砖 / 非双砖源 → Air / 0（兜底）。
 quint8 BlockRegistry::slabFullBlock(quint8 slabId)
 {
     if (slabId == WoodSlab)   return Planks;
     if (slabId == CobbleSlab) return Cobble;
+    if (slabId == SpruceSlab) return SprucePlanks;
     return Air;
 }
 quint8 BlockRegistry::fullBlockSlabDrop(quint8 fullId)
 {
-    if (fullId == Planks) return WoodSlab;
-    if (fullId == Cobble) return CobbleSlab;
+    if (fullId == Planks)       return WoodSlab;
+    if (fullId == Cobble)       return CobbleSlab;
+    if (fullId == SprucePlanks) return SpruceSlab;
     return 0;
 }
 
@@ -753,6 +782,7 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     case WoodTrapdoor: return (state & 1) ? 0 : 15;   // 合=满遮（修「合活版门透光」）/ 开=全透
     case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
     case CobbleSlab:   return 7;                      // t412 圆石台阶半遮光（同 WoodSlab，半高占空比 0.5）
+    case SpruceSlab:   return 7;                      // t466 云杉台阶半遮光（同 WoodSlab/CobbleSlab，半高占空比 0.5）
     case Farmland:     return 15;                     // t408 耕地 solid=false（矮盒渲染）但仍是 opaque 土块 → 满遮光
     case Cactus:       return 15;                     // t445 仙人掌 solid=false（0.8 细柱渲染）但仍是 opaque 实体植物 → 满遮光
     default:           return 0;                      // 其余全透（air/torch/water/stairs/fence/plate/door/cross）
@@ -877,6 +907,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case BedWhite: case BedLightBlue: case BedLime: case BedPink: // t455 16 色床新变体 → 木质音色（同既存床）
     case BedGray: case BedLightGray: case BedPurple: case BedBrown:
     case SpruceLog: // t395 云杉原木 → 木质音色（同 log / planks 族）
+    case SprucePlanks: case SpruceSlab: case SpruceFence: case SpruceDoor: // t466 云杉木制品 → 木质音色（同 planks 族）
     case Ladder: // t413 木梯 → 木质音色（木质梯，同 planks 族）
         return GroupWood;
     case Grass: case Dirt:

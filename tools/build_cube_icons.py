@@ -92,6 +92,8 @@ BLOCKS = [
     ("snow_layer",      "default_snow",          "default_snow"),            # t395 积雪层（各面=冷白冰晶噪点）
     ("ice",             "default_ice",           "default_ice"),             # t395 冰（各面=浅蓝反光裂纹）
     ("spruce_log",      "default_spruce_log_top", "default_spruce_log_side"), # t395 云杉原木（顶=年轮截面；侧=深棕树皮）
+    # t466 云杉木板立方体图标（深色木纹；机制等价橡木木板 icon_planks，仅贴图换 spruce_planks）。
+    ("spruce_planks",   "default_spruce_planks", "default_spruce_planks"), # t466 云杉木板（各面同贴图=深色木板）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----
@@ -233,6 +235,15 @@ PARTIALS_3D_COBBLE = [
     ("cobble_stairs",         "stairs"),
     ("cobble_pressure_plate", "pressure_plate"),
     ("cobble_fence",          "fence"),
+]
+
+# t466 云杉木制品链图标（机制等价橡木木制品，仅 fill 换 default_spruce_planks 深色木纹）。
+#   slab / fence / door 同 shape 几何（与 PARTIALS_3D 的木制半方块同流程），fill 透传 spruce_planks。
+#   云杉木板（SprucePlanks）走 BLOCKS 立方体路径（上已加），本段只列异形半方块。
+PARTIALS_3D_SPRUCE = [
+    ("spruce_slab",           "slab"),
+    ("spruce_fence",          "fence"),
+    ("spruce_door",           "door"),
 ]
 
 
@@ -472,6 +483,12 @@ def main():
     # t412 圆石变体 3D dimetric 立体图标：同 shape 几何，fill 换 default_cobble（机制等价木制半方块图标流程）。
     for out_name, shape in PARTIALS_3D_COBBLE:
         img = render_partial_3d(shape, "default_cobble", "default_cobble")
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t466 云杉木制品链 3D dimetric 立体图标：同 shape 几何，fill 换 default_spruce_planks（机制等价木制半方块图标流程）。
+    for out_name, shape in PARTIALS_3D_SPRUCE:
+        img = render_partial_3d(shape, "default_spruce_planks", "default_spruce_planks")
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)

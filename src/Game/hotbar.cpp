@@ -102,6 +102,13 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CobbleStairs:        return "icon_cobble_stairs.png";        // 圆石楼梯：3D L 阶（背墙 + 整步）
     case BlockRegistry::CobbleFence:         return "icon_cobble_fence.png";         // 圆石墙：3D 立柱 + 横档
     case BlockRegistry::CobblePressurePlate: return "icon_cobble_pressure_plate.png";// 圆石压力板：3D 更薄更小
+    // t466 云杉木制品链图标：云杉木板（立方体 3D）/ 云杉台阶（3D 半高盒）/ 云杉栅栏（3D 立柱+横档）/ 云杉门
+    //   （3D 两格高薄板）。同橡木木制品图标流程，仅 fill 换 default_spruce_planks（深色木纹）。tools/build_cube_icons.py
+    //   程序生成；与橡木木制品图标形状一致但贴图深色 → 肉眼即可辨「云杉」。
+    case BlockRegistry::SprucePlanks:        return "icon_spruce_planks.png";        // 云杉木板：3D 立方体（顶+两侧深色木纹）
+    case BlockRegistry::SpruceSlab:          return "icon_spruce_slab.png";          // 云杉台阶：3D 半高盒（深色木纹）
+    case BlockRegistry::SpruceFence:         return "icon_spruce_fence.png";         // 云杉栅栏：3D 立柱 + 横档（深色木纹）
+    case BlockRegistry::SpruceDoor:          return "icon_spruce_door.png";          // 云杉门：3D 两格高薄板（深色木纹）
     case BlockRegistry::Ladder:        return "icon_ladder.png";      // t413 木梯（cross 透明底；两纵轨 + 横梯级；竖直爬行梯）
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
@@ -470,6 +477,12 @@ QVariantList Hotbar::creativeBlocks() const
              //   属系统获得），不进创造调色板。
              int(BlockRegistry::SnowLayer),                                  // 积雪层（雪原地表覆雪；铲加速；可放置）
              int(BlockRegistry::SpruceLog),                                  // 云杉原木（云杉树主干；斧加速；可放置）
+             // t466 云杉木制品链（机制等价 MC 1.0 spruce 木制品；名称 / 贴图原创自绘 §9a）。复用既有木制品机制，
+             //   仅换 id + 贴图（深色木纹 spruce_planks 区别橡木 planks）。云杉原木→4 云杉木板；云杉木板→台阶/栅栏/门。
+             int(BlockRegistry::SprucePlanks),                               // 云杉木板（深色木纹整立方；配方：云杉原木→4）
+             int(BlockRegistry::SpruceSlab),                                 // 云杉台阶（半高；配方：3 云杉木板→6）
+             int(BlockRegistry::SpruceFence),                                // 云杉栅栏（立柱+横档；配方：云杉木板+棒→3）
+             int(BlockRegistry::SpruceDoor),                                 // 云杉门（两格高；配方：3 云杉木板→1）
              // t396 沼泽群系内容：睡莲（水面浮叶）/ 蘑菇（草地小蘑菇）。机制等价 MC 1.0 沼泽植物
              //   （lily pad / mushroom），名称/贴图原创自绘 §9a。cross 路由（alphaCutoff cutout 透明底）。
              int(BlockRegistry::LilyPad),                                    // 睡莲（沼泽水面浮叶；横向浮叶 cross 路由；可放置）

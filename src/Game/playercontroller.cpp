@@ -804,17 +804,23 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   破上格（bit3=1 本应 y-1 找下格）时下格不清，留半截悬空门。useBlock 路径在 setBlock 前读 st 故无此坑。
     //   t237：WheatCrop 同理须读旧 state（state==WheatCropStageMax 判成熟 → 掉小麦 vs 仅种子），setBlock 后
     //   state 重置为 0 → 永判未成熟 → 成熟作物收割不掉小麦（同族 lessons-learned t134「先快照再改 id」坑）。
-    const quint8 brokenState = (brokenId == BlockRegistry::WoodDoor
+    const quint8 brokenState = (BlockRegistry::isDoor(brokenId)
                                 || BlockRegistry::isBed(brokenId)
                                 || brokenId == BlockRegistry::Planks
+                                || brokenId == BlockRegistry::SprucePlanks
                                 || brokenId == BlockRegistry::WheatCrop
                                 || brokenId == BlockRegistry::CarrotCrop
                                 || brokenId == BlockRegistry::PotatoCrop)
         ? m_world->stateAt(x, y, z) : quint8(0);
     m_world->setBlock(x, y, z, BlockRegistry::Air); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
-    if (brokenId == BlockRegistry::WoodDoor) {
+    // t134/t466 门两格破坏联动（统一经 isDoor 谓词覆盖 WoodDoor + SpruceDoor）：破任一格 → 同步清配对格
+    //   （另一格），防留半截悬空门。配对格据本格 state bit3（isUpper）判上 / 下：本格上格 → 配对 y-1；
+    //   本格下格 → 配对 y+1。仅当配对格**同为门**（isDoor）才清（防御：state 不一致时不误清异格；不同材质门
+    //   不互为配对 —— 云杉门配对格不会误清橡木门，反之亦然，因配对格须 isDoor 但其 id 不强制 == 本格 id，
+    //   实践中门放置仅产生同 id 配对故安全）。drop 仅对本格发（配对格静默清，避免双掉落）。
+    if (BlockRegistry::isDoor(brokenId)) {
         const int py = ((brokenState & 8) != 0) ? y - 1 : y + 1;
-        if (m_world->blockAt(x, py, z) == BlockRegistry::WoodDoor)
+        if (BlockRegistry::isDoor(m_world->blockAt(x, py, z)))
             m_world->setBlock(x, py, z, BlockRegistry::Air);
     }
     // t428 床双格破坏联动：破任一半 → 静默清配对格（另一半），防留半截悬空床（同门破坏联动模式）。
@@ -1641,16 +1647,20 @@ void PlayerController::placeBlock()
     //   （发 worldChanged 不发 broken/placed）。门两格同翻（找配对格：据本格 state bit3 判上 / 下）。
     {
         const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
-        if (hitId == BlockRegistry::WoodDoor) {
+        // t134/t466 右键门翻 state 开合（统一经 isDoor 谓词覆盖 WoodDoor + SpruceDoor）。门两格同翻（找配对格：
+        //   据本格 state bit3 判上 / 下；配对格须同为门 isDoor）。配对格写入用其自身 id（配对格 id 与本格一致 ——
+        //   门放置仅产生同 id 配对），故读配对格 blockAt 而非硬编码 WoodDoor。
+        if (BlockRegistry::isDoor(hitId)) {
             const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
             const quint8 flipped = quint8((st & ~4) | (((st & 4) == 0) ? 4 : 0)); // 翻 bit2（开合）
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, flipped);
             // 配对格（上 / 下）同步翻：本格 isUpper(bit3)=1 → 配对在 y-1；否则 y+1。
             const int py = ((st & 8) != 0) ? m_hitBy - 1 : m_hitBy + 1;
-            if (m_world->blockAt(m_hitBx, py, m_hitBz) == BlockRegistry::WoodDoor) {
+            const quint8 partnerId = m_world->blockAt(m_hitBx, py, m_hitBz);
+            if (BlockRegistry::isDoor(partnerId)) {
                 const quint8 pst = m_world->stateAt(m_hitBx, py, m_hitBz);
                 const quint8 pflipped = quint8((pst & ~4) | (((pst & 4) == 0) ? 4 : 0));
-                m_world->setBlock(m_hitBx, py, m_hitBz, BlockRegistry::WoodDoor, pflipped);
+                m_world->setBlock(m_hitBx, py, m_hitBz, partnerId, pflipped);
             }
             m_lastPlaceMs = now;
             // t152：开合音（门两格同翻只发一次 = 一次动作一次音）。flipped.bit2 = 新的开合态。
@@ -2146,7 +2156,7 @@ void PlayerController::placeBlock()
         if (tid != BlockRegistry::Air && tid != BlockRegistry::Water
             && tid != BlockRegistry::Lava) return; // 已有实体方块 → 不放
     }
-    const bool isDoor = (m_selectedBlock == BlockRegistry::WoodDoor);
+    const bool isDoor = BlockRegistry::isDoor(m_selectedBlock); // t466 统一经 isDoor 谓词覆盖 WoodDoor + SpruceDoor
     const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
     // t428 床双格（head+foot 横置，如门但水平相邻）：foot 落命中面相邻格 (tx,ty,tz)，head 落 foot 的「玩家
     //   朝向反向」水平邻格。state 编码 bit[1:0]=朝向、bit3=head(1)/foot(0)（同 door 复用 bit3 标半格）。

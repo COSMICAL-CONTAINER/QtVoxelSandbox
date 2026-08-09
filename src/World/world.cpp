@@ -749,7 +749,8 @@ void World::tickLavaFlow()
         using BR = BlockRegistry;
         return id == BR::Log || id == BR::SpruceLog || id == BR::Planks || id == BR::CraftingTable || id == BR::Leaves
             || id == BR::WoodSlab || id == BR::WoodStairs || id == BR::WoodFence
-            || id == BR::WoodPressurePlate || id == BR::WoodDoor || id == BR::WoodTrapdoor || id == BR::Chest;
+            || id == BR::WoodPressurePlate || id == BR::WoodDoor || id == BR::WoodTrapdoor || id == BR::Chest
+            || id == BR::SprucePlanks || id == BR::SpruceSlab || id == BR::SpruceFence || id == BR::SpruceDoor; // t466 云杉木制品（木质，邻岩浆焚毁）
     };
     for (const LCell &c : cells) {
         const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
@@ -1552,7 +1553,8 @@ void World::strikeLightning()
         using BR = BlockRegistry;
         return bid == BR::Log || bid == BR::SpruceLog || bid == BR::Planks || bid == BR::CraftingTable || bid == BR::Leaves
             || bid == BR::WoodSlab || bid == BR::WoodStairs || bid == BR::WoodFence
-            || bid == BR::WoodPressurePlate || bid == BR::WoodDoor || bid == BR::WoodTrapdoor || bid == BR::Chest;
+            || bid == BR::WoodPressurePlate || bid == BR::WoodDoor || bid == BR::WoodTrapdoor || bid == BR::Chest
+            || bid == BR::SprucePlanks || bid == BR::SpruceSlab || bid == BR::SpruceFence || bid == BR::SpruceDoor; // t466 云杉木制品（木质，雷击焚毁）
     };
     if (isWoodLike(id)) {
         setBlock(x, y, z, BlockRegistry::Air); // 焚毁（发 blockBroken → 破块粒子 / 音 + worldChanged 重建）

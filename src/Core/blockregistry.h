@@ -449,7 +449,28 @@ public:
         BedLightGray   = 83, // 浅灰色床
         BedPurple      = 84, // 紫色床
         BedBrown       = 85, // 棕色床
-        Count          = 86, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t466 云杉木制品链（机制等价 MC 1.0 spruce 木制品；名称 / 贴图全原创自绘 §9a）：
+        //   云杉木板 / 云杉木制品复用既有木制品机制（solid/shape/碰撞/朝向解码/门双格），仅换 id+贴图（深色
+        //   木纹 spruce_planks 区别于橡木 planks）。云杉原木 SpruceLog(46) 已有（t395），本段是其延伸制品。
+        //   tile 全部 = spruce_planks(102)（同橡木 WoodSlab/Fence/Door 复用 planks(8) 的「一族木制品共享一贴图」
+        //   模式；区别仅深色木纹）。
+        SprucePlanks   = 86, // 云杉木板：独立方块 + 深色木纹贴图（区别橡木 OakPlanks）。整立方 opaque
+                                  //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，与 Planks 同族）；
+                                  //   hardness=2.0、toolType=Axe（requiresTool=false 空手也掉落）、dropId=自身、
+                                  //   dropCount=1、maxStack=64。配方：1 云杉原木 → 4 云杉木板（同橡木原木→橡木木板）。
+                                  //   state 复用 bit0 作双半砖合并 marker（DoubleSlabMarkerBit，见 blockregistry.cpp
+                                  //   fullBlockSlabDrop：SprucePlanks → SpruceSlab），机制同 Planks→WoodSlab。
+        SpruceSlab     = 87, // 云杉台阶：半高（state bit0=上半(1)/下半(0)；与 WoodSlab 同编码）。solid=false
+                                  //   / ShapeSlab（走 PartialBlockGeometry 异形渲染，与 WoodSlab 同几何）；hardness=2.0、
+                                  //   Axe、dropId=自身、dropCount=1、maxStack=64。配方：3 云杉木板横排 → 6 云杉台阶。
+        SpruceFence    = 88, // 云杉栅栏：中心立柱 + 四向横档连邻居（与 WoodFence 同几何；连接由 mesher 读水平
+                                  //   邻居 id 运行期决定）。solid=false / ShapeFence；hardness=2.0、Axe、dropId=自身、
+                                  //   dropCount=1、maxStack=64。配方：云杉木板-棒-云杉木板 ×2 行 → 3 云杉栅栏。
+        SpruceDoor     = 89, // 云杉门：两格高（下/上格同 id）。state bit3=上格(1)/下格(0)、bit2=开(1)/合(0)、
+                                  //   bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（与 WoodDoor 同编码；门双格放置/破坏联动/右键
+                                  //   开合经 isDoor 谓词统一处理）。maxStack=1（单件，不可堆叠）。solid=false / ShapeDoor；
+                                  //   hardness=2.0、Axe、dropId=自身、dropCount=1。配方：3 云杉木板纵列 → 1 云杉门。
+        Count          = 90, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -524,6 +545,13 @@ public:
     static bool isFence(quint8 blockId);
     static bool isPressurePlate(quint8 blockId);
 
+    // t466 门方块统一谓词（单一权威，段外云杉门并入，同 isBed / isCrossBillboard 段外模式）：
+    //   blockId == WoodDoor（连续段内单一 id）或 SpruceDoor（段外）即门。供 playercontroller 的门放置
+    //   （两格预检 + 双格写入）、右键开合（state 翻 bit2 + 配对格同翻）、破坏联动（破任一格清配对格）
+    //   统一读「是否门」，避免各处硬编码 WoodDoor id 判定（同 isFence 把段外圆石墙 / 云杉栅栏并入的模式）。
+    //   单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加新材质门时一处同步）。
+    static bool isDoor(quint8 blockId);
+
     // t235 cross 广告牌方块段哨兵：id ∈ [FirstCross, LastCross] 走 PartialBlockGeometry 的 cross 几何
     //   （两片对角十字相交的双面 quad，机制等价 MC 草丛 / 花 / 作物的 cross 模型）。与 [FirstPartial, LastPartial]
     //   的「轴对齐盒体异形」**不同类** —— cross 是对角双面平面（非盒组合），故独立成段（避免与 partial 盒体几何混在
@@ -583,11 +611,14 @@ public:
     //   round-trip 保真（存档读回仍带本 bit → 重载后破块仍掉 2 块半砖）。
     static constexpr quint8 PlanksFromDoubleSlabBit = 0x01; // Planks state bit0 = 源自双半砖合并（仅 Planks 复用）
     // t412 双半砖合并泛化（圆石变体）：两块互补半砖同格合并 → 写入该半砖对应的「满格整立方」(WoodSlab→Planks /
-    //   CobbleSlab→Cobble) + DoubleSlabMarkerBit 标记；finishMiningAt 检本 bit → 破块掉 2× 对应半砖（机制等价
-    //   MC「double slab 破坏掉 2 块半砖」）。满格方块的 state 对 ShapeFull inert（mesher / collision / 选中均不读），
-    //   复用 bit0 作 marker 零回归（同 PlanksFromDoubleSlabBit 模式；本常量值与之一致 = 0x01，木 / 石两族共用）。
-    //   slabFullBlock(slabId)：半砖 → 其满格整立方（WoodSlab→Planks / CobbleSlab→Cobble；非半砖→Air）。
-    //   fullBlockSlabDrop(fullId)：满格整立方 → 其半砖（Planks→WoodSlab / Cobble→CobbleSlab；非双砖源→0）。
+    //   CobbleSlab→Cobble / SpruceSlab→SprucePlanks) + DoubleSlabMarkerBit 标记；finishMiningAt 检本 bit → 破块掉
+    //   2× 对应半砖（机制等价 MC「double slab 破坏掉 2 块半砖」）。满格方块的 state 对 ShapeFull inert
+    //   （mesher / collision / 选中均不读），复用 bit0 作 marker 零回归（同 PlanksFromDoubleSlabBit 模式；
+    //   本常量值与之一致 = 0x01，木 / 石 / 云杉三族共用）。
+    //   slabFullBlock(slabId)：半砖 → 其满格整立方（WoodSlab→Planks / CobbleSlab→Cobble / SpruceSlab→SprucePlanks；
+    //   非半砖→Air）。
+    //   fullBlockSlabDrop(fullId)：满格整立方 → 其半砖（Planks→WoodSlab / Cobble→CobbleSlab / SprucePlanks→SpruceSlab；
+    //   非双砖源→0）。
     static constexpr quint8 DoubleSlabMarkerBit = 0x01; // 满格方块 state bit0 = 源自双半砖合并（Planks / Cobble 复用）
     static quint8 slabFullBlock(quint8 slabId);
     static quint8 fullBlockSlabDrop(quint8 fullId);
@@ -830,7 +861,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 102;
+    static constexpr int AtlasTileCount = 103;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
