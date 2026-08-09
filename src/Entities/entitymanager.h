@@ -554,6 +554,13 @@ private:
         //   期间位移减速到停 = SLOWS + pauses to aim）。脱射程 / 视线断 / 冷却中 → 清零（中止拉弓）。drawAmountAt 据
         //   它返 0..1 驱动 QML 抬臂 + 弦后拉。
         float aimTimer = 0.0f;    // 拉弓瞄准计时（秒；>0 = 正在拉弓；仅 MobBones 用）
+        // t500 perf 骨骸弓手视线缓存（仅 MobBones chasing 用）：lineOfSightClear 是 32 步 isSolid march
+        //   （每 AI tick 跑 = chasing 时每 ~66ms 32 blockAt）。缓存视线结果 kLosCacheInterval 秒（~0.5s = 每
+        //   ~8 个 AI tick 复查一次）→ chasing 时 march 频率降 ~87%。losClear = 缓存的视线结果；losCacheTimer =
+        //   到下次复查倒计时。非 Bones / 非 chasing 留默认（false/0）不触发。缓存误差：玩家躲墙后 ≤0.5s 内
+        //   弓手可能仍判视线清（多发一箭）—— 可接受（MC 骷髅也有反应延迟）。
+        bool  losClear = false;     // 缓存的 lineOfSightClear 结果（仅 MobBones chasing 射程内用）
+        float losCacheTimer = 0.0f; // 到下次 lineOfSightClear 复查的倒计时（秒；仅 MobBones 用）
         // t377 mob 护甲（4 部位护甲物品 id；0=无）。仅 Shambler/Bones spawn 时随机分配（~80% 无 / ~20% 一件或
         //   一套）。QML delegate 据它叠加 tier 色护甲 Model（机制等价 MC 1.0 僵尸/骷髅随机护甲；spec t377）。
         //   其余 mob 留 0 不显。仅视觉 + spawn 随机（不参与 mob 减伤计算 —— spec 仅要求视觉 + 偶遇）。
@@ -967,6 +974,10 @@ private:
     // t331 拉弓瞄准时长（秒）：射程内 + 视线清 + 冷却到 → 先累加 aimTimer 满 kAimWindup 才射；期间位移减速到停
     //   （机制等价 MC 1.0 骷髅停步拉弓瞄准；顺带拉低攻击节奏，缓解 t321 围攻压迫感）。drawAmountAt 据 it 返 0..1。
     static constexpr float kAimWindup        = 0.5f;   // 拉弓瞄准时长（秒；满才射）
+    // t500 perf 骨骸弓手视线复查间隔（秒）：chasing 射程内时 lineOfSightClear 的 32 步 isSolid march 每
+    //   kLosCacheInterval 秒复查一次（缓存结果用至下次复查）。0.5s ≈ 每 8 个 AI tick（15Hz）复查 → march
+    //   频率降 ~87%。缓存误差 ≤0.5s（玩家躲墙后弓手可能多发一箭；MC 骷髅亦有反应延迟，可接受）。
+    static constexpr float kLosCacheInterval = 0.5f;   // 视线复查间隔（秒；chasing 射程内缓存 lineOfSightClear）
     static constexpr float kArrowSpeed       = 14.0f;  // 箭水平速度（blocks/s）
     static constexpr float kArrowMaxVert     = 18.0f;  // vy 钳（blocks/s；防极端弧）
     static constexpr float kArrowSpread      = 1.2f;   // 三轴初速随机抖动（blocks/s）

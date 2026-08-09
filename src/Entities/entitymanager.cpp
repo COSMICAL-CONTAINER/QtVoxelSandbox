@@ -1,5 +1,6 @@
 #include "entitymanager.h"
 #include "world.h" // tick / resolvePlayerPush / aiWander 只读 World::isSolid/blockAt/width/depth（向下依赖；PLAN §2 Entities→World 合规）
+#include "frameprofiler.h" // t500 perf：mob 桶子分解探针（mobLoop/mobAI/mobPhys/mobHostile/mobSpawn）
 
 #include <QLoggingCategory>
 #include <QRandomGenerator>
@@ -354,6 +355,7 @@ bool EntityManager::isBurningAt(int i) const
 void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &playerPos, float skyBrightness)
 {
     if (!world) return;
+    FrameProfiler::Scope profHostile("mobHostile"); // t500 perf：mob 桶子分解（黑暗刷怪 / 燃烧 / 远距消失）
     const int worldW = world->width();
     const int worldD = world->depth();
     const int worldH = world->height();
@@ -488,6 +490,7 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
 void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &playerPos)
 {
     if (!world) return;
+    FrameProfiler::Scope profSpawn("mobSpawn"); // t500 perf：mob 桶子分解（刷怪笼周期扫描）
     m_spawnAccumSpawner += float(dt);
     if (m_spawnAccumSpawner < kSpawnerInterval) return;
     m_spawnAccumSpawner = 0.0f;
@@ -1430,10 +1433,18 @@ bool EntityManager::aiArcher(Entity &e, float dt, World *world, const QVector3D 
 
     // (5) shoot：射程内 + 垂直同层 + 视线清 + 冷却到 → t331 先累加 aimTimer（拉弓瞄准），满 kAimWindup 才射 +
     //   重置冷却（防每帧连发）。脱射程 / 视线断 / 冷却中 → 清 aimTimer（中止拉弓，下帧 draw 归 0 → 全速）。
+    //   t500 perf：lineOfSightClear（32 步 isSolid march）降到每 kLosCacheInterval 秒复查一次 → chasing 时
+    //     march 频率降 ~87%。复查用 losCacheTimer 倒计时（aiDt 推进）；缓存结果 losClear 供间隔内复用。
+    //     误差：玩家躲墙后 ≤0.5s 内弓手可能仍判视线清多发一箭（MC 骷髅亦有反应延迟，可接受）。
     if (distXZ <= kArcherShootRange && std::abs(dy) <= kShootVertRange && e.attackCooldown <= 0.0f) {
         const QVector3D origin(e.pos.x(), e.pos.y() + e.halfH * 0.5f, e.pos.z());
         const QVector3D target(playerPos.x(), playerPos.y() + 0.9f, playerPos.z()); // 玩家上身（眼位 ~ 脚+1.62）
-        if (lineOfSightClear(world, origin, target)) {
+        e.losCacheTimer -= float(dt);
+        if (e.losCacheTimer <= 0.0f) {
+            e.losClear = lineOfSightClear(world, origin, target);
+            e.losCacheTimer = kLosCacheInterval;
+        }
+        if (e.losClear) {
             e.aimTimer += float(dt);
             if (e.aimTimer >= kAimWindup) {
                 fireArrow(e, target);
@@ -1836,12 +1847,17 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         float listenerHalfW, float listenerHeight, bool playerTargetable)
 {
     if (!world || m_entities.empty()) return;
+    FrameProfiler::Scope profLoop("mobLoop"); // t500 perf：mob 桶子分解（EntityManager::tick 整段）
     const float worldW = float(world->width());
     const float worldD = float(world->depth());
     bool dirty = false;
     std::vector<int> toRemove; // FallingBlock 着地 / 跌出 + t239 mob deathTimer 到 / void-loss 索引（逆序 erase）
     // t500 perf：tick 节拍 +1（每 60Hz tick 一次）；mob AI / 环境扫描错峰节流据它判本帧哪些 mob 跑重活。
     ++m_tickPhase;
+    // t500 perf mob 子桶手动计时：mob-loop 内逐实体 aiTick 段（火烧 / 仙人掌 / AI 决策移动）累 aiNs、
+    //   每帧段（重力 / resting / flow / knockback / 音频 / walkPhase）累 physNs；末尾推入 FrameProfiler。
+    //   手动 nowNs 比 RAII Scope 更轻（每实体 2× nowNs vs 2× Scope 构造析构含 map add）且能跨 continue。
+    qint64 aiNs = 0, physNs = 0;
 
     // t321 玩家受击全局节流倒计时（每帧扣一次，非每实体；防多 mob 围攻秒杀，详见 kPlayerHitThrottle 注释）。
     if (m_playerHitCooldown > 0.0f) {
@@ -2068,11 +2084,17 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             const bool aiTick = ((m_tickPhase + quint32(idx)) % quint32(kAiTickInterval)) == 0;
             const float aiDt = aiTick ? e.aiAccum : 0.0f;
             if (aiTick) e.aiAccum = 0.0f;
-            // speedScale：每帧算（水中物理 + 水流推动都需它；1 blockAt 廉价，无需节流）。
-            const float speedScale = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)
-                                     ? kWaterSpeedMul : 1.0f;
+            // t500 fix：speedScale 降到 aiTick 块内（AI 函数 + flow push 用它）。非 aiTick 帧默认 1.0 → flow push
+            //   的 `if (speedScale < 1.0f)` 自然跳过（水中 flow push 每 N 帧跑一次、N× 步长，平均推力不变）。
+            //   省 1 blockAt/mob/非-aiTick-帧（60 槽 × 3/4 帧 ≈ 45 blockAt/帧）。
+            float speedScale = 1.0f;
 
+            // t500 perf mob 子桶：mobAI 计时 —— 包裹整个 aiTick 块（火烧 / 仙人掌 / AI 决策移动 / 吃草）。
+            //   非 aiTick 帧此块全跳过 → aiNs 不累（mobAI≈0）；aiTick 帧 aiNs 累入 mobAI 桶。
+            const qint64 aiT0 = FrameProfiler::nowNs();
             if (aiTick) {
+                speedScale = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)
+                             ? kWaterSpeedMul : 1.0f;
             // t344 火烧系统（岩浆 / 火点燃；ALL mobs 含 passive；机制等价 MC 1.0 实体触岩浆着火 + 火伤 + 熄灭）。
             //   分两段：
             //   (1) 岩浆接触点燃：mob 脚位格 floor(pos.y−halfH) 或身体中心格 floor(pos.y) 任一 == Lava → 刷新
@@ -2299,6 +2321,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 } // 非 squid 的 passive（sheep 吃草 / 通用 wander）；squid 走上面 aiSquid 分支
             }
             } // /aiTick（t500 perf：火烧 / 仙人掌 / AI / 吃草 节流到此；下方物理 + 音频每帧跑）
+            aiNs += FrameProfiler::nowNs() - aiT0; // t500 mob 子桶：mobAI 累入（含 aiTick 跳过的近零开销）
 
             // t298 流水推动 mob（机制等价玩家 t211：脚位在流水格 state>0 → 沿「离源方向」叠入水平位移）。
             //   流向据脚位 4 向邻居 state 梯度推算：state 低于脚位的邻居 = 近源方向 → 推力朝远离它（离源）。
@@ -2467,25 +2490,34 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         const int cz = qFloor(e.pos.z());
         if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过
 
-        // t298 水中浮力判定：仅 Mob kind（vestigial Item 不涉水物理）。脚位（AABB 底面）格 == Water → mobInWater。
-        //   feetCellY = floor(pos.y − halfH)（mob 底面格；pos.y 是中心）。用于下方重力分流（缓沉 vs 自由落体）。
-        const int mobFeetY = qFloor(e.pos.y() - e.halfH);
-        const bool mobInWater = (e.kind == Mob) && mobFeetY >= 0
-                                 && world->blockAt(cx, mobFeetY, cz) == BlockRegistry::Water;
-
-        // 已落地：复探支撑是否仍实体。失支撑 → 续落。
-        // t362 改「footprint 任一列有支撑」（旧版仅中心列 cx/cz）：mob 走下 1 格台阶时，中心先越过台阶沿、
-        //   但后半 footprint 仍压在更高支撑块上。旧版即判失支撑 → 重力把整格 snap 下沉到低地 → 此时 trailing
-        //   边仍压在高块列 → 落地后水平移动被 mobAabbHitsSolid 判 trailing 腿卡进身后高块 → 每帧撤回 →
-        //   永久卡死（用户「下台阶卡住变活靶」）。改 footprint 后：只要还有任一列压在更高支撑上就保 resting，
-        //   悬出台阶沿继续前行；直到 trailing 边也越过台阶沿（footprint 全离支撑）才下沉 → 落低地时 trailing
-        //   已不在高块列 → 腿不卡、干净步下（机制等价 MC mob 越过台阶沿后才自动步下 1 格）。
+        // t500 fix perf：resting 复探 + mobInWater 降到 aiTick——resting mob 每 N 帧查一次支撑（mobAabbFootprint
+        //   全足迹扫 1-4 blockAt）足够；非 aiTick 帧 continue 跳过重力（resting mob 不下落，无需重力 / 水分流）。
+        //   失支撑后（aiTick 翻 resting=false）重力仍每帧跑保平滑下落。重算 aiTick（Mob 块内局部变量不跨块；
+        //   同公式同 m_tickPhase → 同一组 mob 在 tick 内两处一致）。
+        //   mobInWater（1 blockAt）延迟到此处——仅非 resting mob 走重力时需水分流；resting mob 已 continue 免查。
+        const bool mobAiTick = (e.kind == Mob)
+                               && ((m_tickPhase + quint32(idx)) % quint32(kAiTickInterval)) == 0;
         if (e.resting) {
-            const int supportY = mobFeetY - 1; // 实体底面下方那一格（= 支撑方块 cellY）
+            if (!mobAiTick) continue; // 非 aiTick：信上次复探结果，保 resting，跳过重力 + mobInWater（省 blockAt）
+            // aiTick：复探支撑。
+            // t362 改「footprint 任一列有支撑」（旧版仅中心列 cx/cz）：mob 走下 1 格台阶时，中心先越过台阶沿、
+            //   但后半 footprint 仍压在更高支撑块上。旧版即判失支撑 → 重力把整格 snap 下沉到低地 → 此时 trailing
+            //   边仍压在高块列 → 落地后水平移动被 mobAabbHitsSolid 判 trailing 腿卡进身后高块 → 每帧撤回 →
+            //   永久卡死（用户「下台阶卡住变活靶」）。改 footprint 后：只要还有任一列压在更高支撑上就保 resting，
+            //   悬出台阶沿继续前行；直到 trailing 边也越过台阶沿（footprint 全离支撑）才下沉 → 落低地时 trailing
+            //   已不在高块列 → 腿不卡、干净步下（机制等价 MC mob 越过台阶沿后才自动步下 1 格）。
+            const int supportY = qFloor(e.pos.y() - e.halfH) - 1; // 实体底面下方那一格（= 支撑方块 cellY）
             if (mobFootprintHasSupport(world, e.pos.x(), e.pos.z(), supportY, e.halfW)) continue; // 仍实体 → 保持静止
             e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
             dirty = true;
         }
+
+        // t298 水中浮力判定：仅 Mob kind（vestigial Item 不涉水物理）。脚位（AABB 底面）格 == Water → mobInWater。
+        //   feetCellY = floor(pos.y − halfH)（mob 底面格；pos.y 是中心）。用于下方重力分流（缓沉 vs 自由落体）。
+        //   仅非 resting mob 到此（resting 已 continue）→ 每帧仅对下落中的 mob 算（省 resting mob 的 1 blockAt/帧）。
+        const int mobFeetY = qFloor(e.pos.y() - e.halfH);
+        const bool mobInWater = (e.kind == Mob) && mobFeetY >= 0
+                                 && world->blockAt(cx, mobFeetY, cz) == BlockRegistry::Water;
 
         // 重力 + 下移（vy 向下为负）。t298：mob 在水中 → 缓沉（kWaterGravity << kGravity）+ 钳最大下沉
         //   （kWaterSinkMax << kMaxFall，防加速穿水底）；机制等价玩家 t174 水中浮力（mobs 不按空格故无上浮，
@@ -2543,4 +2575,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     if (tickBreeding(dt)) dirty = true;
 
     if (dirty || !toRemove.empty()) { ++m_revision; emit entitiesChanged(); }
+
+    // t500 perf mob 子桶：mobAI 累入（mobPhys = mobLoop − mobAI 在 report 派生）。
+    FrameProfiler::instance()->add("mobAI", aiNs);
 }

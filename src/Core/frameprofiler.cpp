@@ -26,10 +26,10 @@ FrameProfiler *FrameProfiler::instance()
     return &inst;
 }
 
-qint64 FrameProfiler::Scope::nowNs()
+// 单调纳秒（进程启动来累）。RAII Scope 与手动子桶计时共用同一静态 QElapsedTimer → 时间基一致可交叉对照。
+//   实现同原 Scope::nowNs（静态 QElapsedTimer 启动即 start），提到 FrameProfiler 级以便手动计时调用。
+qint64 FrameProfiler::nowNs()
 {
-    // 用静态 QElapsedTimer（启动即 start）累纳秒；比 QElapsedTimer::nsecsElapsed() 实例化便宜。
-    // RAII Scope 频繁构造析构（~每帧 9+ 次），用进程启动来算单调 ns 足够诊断精度。
     static QElapsedTimer t;
     if (!t.isValid()) t.start();
     return t.nsecsElapsed();
@@ -121,7 +121,22 @@ void FrameProfiler::flush()
         + " leaf " + QString::number(wMs[7], 'f', 1)
         + " wthr " + QString::number(wMs[8], 'f', 1) + "]";
 
-    m_report = QStringLiteral("prof[1s] %1fr\n  %2\n  %3").arg(frames).arg(tickLine, winLine);
+    // t500 perf mob 子分解（逐帧 ms/f，÷ frames）：mob 桶（PlayerController tickImpl 整段）拆成 mobLoop
+    //   （EntityManager::tick）/ mobHostile（tickHostileLife）/ mobSpawn（tickSpawners）三函数，mobLoop 再拆
+    //   mobAI（aiTick 节流段：火烧/仙人掌/AI 决策移动）vs mobPhys（= mobLoop − mobAI：每帧段 重力/resting/
+    //   flow/knockback/音频/walkPhase）。mobAI 手动 nowNs 计时（跨 continue）；mobPhys 派生免再计时。
+    //   诊断 mob 桶瓶颈：mob≈27ms 时看这行即可知「27ms 在 tick 还是 hostileLife、AI-pass 还是物理-pass」。
+    auto mobSubMs = [this, f](const char *key) { return double(bucket(key)) / 1e6 / f; };
+    const double mobLoopMs = mobSubMs("mobLoop");
+    const double mobAiMs = mobSubMs("mobAI");
+    QString mobLine = QStringLiteral("mob sub ms/f: ")
+        + "ai " + QString::number(mobAiMs, 'f', 2)
+        + "  phys " + QString::number(mobLoopMs - mobAiMs, 'f', 2)
+        + "  hostile " + QString::number(mobSubMs("mobHostile"), 'f', 2)
+        + "  spawn " + QString::number(mobSubMs("mobSpawn"), 'f', 2)
+        + "  loop " + QString::number(mobLoopMs, 'f', 2);
+
+    m_report = QStringLiteral("prof[1s] %1fr\n  %2\n  %3\n  %4").arg(frames).arg(tickLine, winLine, mobLine);
     m_lastFrames = frames;
 
     // 重置窗口。

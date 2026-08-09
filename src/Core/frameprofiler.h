@@ -46,16 +46,21 @@ public:
     // C++ 全局访问点（PlayerController / ChunkGeometry / World 经它推送计时）。
     static FrameProfiler *instance();
 
+    // 单调纳秒（进程启动来累；RAII Scope 与手动子桶计时共用同一静态 QElapsedTimer，时间基一致可交叉对照）。
+    //   手动计时用途：热路径内一段代码跨多条 continue / 分支无法用单个 RAII Scope 包裹时（如 EntityManager
+    //   tick 的 mob 循环内 AI-pass vs 物理-pass 拆分），用 nowNs() 手动取 t0/t1 累加进具名桶，避免每实体
+    //   构造 Scope 的开销（nowNs 仅 1× nsecsElapsed，比 Scope 构造+析构 2× nowNs + map add 更轻）。
+    static qint64 nowNs();
+
     // RAII 计时段：构造记 t0，析构把耗时累加进 name 桶。name 须为静态字面量（不拷贝、不释放）。
     //   用法：{ FrameProfiler::Scope s("mob"); ...work... }
     class Scope
     {
     public:
-        explicit Scope(const char *name) : m_name(name), m_t0(nowNs()) {}
-        ~Scope() { FrameProfiler::instance()->add(m_name, nowNs() - m_t0); }
+        explicit Scope(const char *name) : m_name(name), m_t0(FrameProfiler::nowNs()) {}
+        ~Scope() { FrameProfiler::instance()->add(m_name, FrameProfiler::nowNs() - m_t0); }
         Q_DISABLE_COPY(Scope)
     private:
-        static qint64 nowNs();
         const char *m_name;
         qint64 m_t0;
     };
