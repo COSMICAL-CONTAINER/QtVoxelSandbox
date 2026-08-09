@@ -3,6 +3,8 @@
 #include "loottable.h"   // t401 钓鱼获物池（fishingPool / roll）；同层 Game，向下依赖 Core
 #include "world.h"
 
+#include "frameprofiler.h" // perf：帧时间分解探针（tickImpl 各阶段 Scope + 1s 窗口 flush）
+
 #include <QEvent>
 #include <QGuiApplication>
 #include <QKeyEvent>
@@ -444,12 +446,18 @@ void PlayerController::tick()
         m_simAccumNs = 0;
         m_simTickCount = 0;
         emit perfChanged();
+        // perf：每 ~1s flush 帧时间分解（FrameProfiler 各桶 → 报告 → F3 / 日志）。
+        FrameProfiler::instance()->flush();
     }
 }
 
 void PlayerController::tickImpl()
 {
     const qreal dt = qMin(m_clock.restart() / 1000.0, 0.05); // 钳 50ms，防卡顿后穿墙
+    // perf：本帧计入 FrameProfiler 窗口（flush 时除以它得逐帧 ms）。
+    FrameProfiler::instance()->tickFrame();
+    // perf「env」桶：每帧环境探测（攻击冷却 + 眼/脚位水岩浆态 + 近流水/岩浆 proximity 扫描）。
+    { FrameProfiler::Scope profEnv("env");
     // t248 攻击冷却递减（独立于捕获态 —— 菜单 / 背包开时也应自然走完，复击不卡陈旧值）。钳到 0。
     if (m_attackCooldown > 0.0f) {
         m_attackCooldown -= float(dt);
@@ -500,18 +508,29 @@ void PlayerController::tickImpl()
             emit lavaSoundLevelChanged();
         }
     }
+    } // /profEnv
+    // perf「item/xp/boat/mob」桶：实体 tick（每帧常开，与捕获态无关 —— 菜单 / 暂停时仍推进）。
+    //   高水位 slot-reuse（ItemEntityManager kCap=200 / EntityManager 64 / XpOrb 64）→ 即便活体少，
+    //   vector::size() 停在高水位，每帧遍历所有槽跳空 —— 「段数无关 + 每帧固定」开销头号怀疑项。
+    { FrameProfiler::Scope s("item");
     // t60：掉落物重力（世界模拟，独立于玩家捕获态——菜单 / 暂停时实体仍落到地面）。
     // PlayerController 是唯一同时持 World* + ItemEntityManager* 的对象，故由此驱动；实体物理态
     // （vy / resting）与 pos 同住在 ItemEntityManager 内部数据里（分层：Entities→World 向下只读）。
     if (m_itemEntities && m_world) m_itemEntities->tick(dt, m_world);
+    } // /profItem
+    { FrameProfiler::Scope s("xp");
     // t402 经验球磁吸 + 拾取（同掉落物 tick 常开 —— 菜单 / 暂停时球仍向玩家飞，世界模拟连续）。
     //   playerCenter = 玩家 AABB 中心（脚底 m_pos + 半高），磁吸 / 拾取都相对此点。无 World 依赖
     //   （经验球是纯磁吸实体）。拾取经 XpOrbManager::xpPickedUp 语义信号 → 呈现层路由 PlayerState.addXp。
     if (m_xpOrbManager) m_xpOrbManager->tick(dt, m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f));
+    } // /profXp
+    { FrameProfiler::Scope s("boat");
     // t469 船浮水 tick（常开，独立于捕获态——菜单 / 暂停时船仍浮水 / 衰减，世界模拟连续，同掉落物 / mob tick）。
     //   被骑船的「操控位移」由 step() 骑乘分支的 tickRiddenBoat 推进（骑乘期 WASD 驱动）；本 tick 只做浮水 +
     //   空船摩擦衰减。PlayerController 是唯一同时持 World* + BoatManager* 的对象，故由此驱动（同 itemEntities / entityManager）。
     if (m_boatManager && m_world) m_boatManager->tick(dt, m_world);
+    } // /profBoat
+    { FrameProfiler::Scope s("mob");
     // t95：统一实体（测试生物）重力 + 地面静止，同掉落物常开（菜单 / 暂停时仍模拟）。机制同源
     // （EntityManager::tick 向下只读 World::isSolid）。PlayerController 现亦持 EntityManager* → 由它驱动。
     //   t250：传 m_pos 作听者位置，门控 mob idle/step 叫声（近 mob 才发声；菜单态 m_pos 仍有效）。
@@ -530,6 +549,8 @@ void PlayerController::tickImpl()
     //   菜单 / 暂停时仍推进，独立于捕获态）。无 m_worldClock 依赖（刷怪笼无视光照 / 昼夜，地牢天然黑暗）。
     if (m_entityManager && m_world)
         m_entityManager->tickSpawners(dt, m_world, m_pos);
+    } // /profMob
+    { FrameProfiler::Scope s("pickup");
     // t92：拾取扫描提到 m_captured 早 return **之前**——打开背包（release→m_captured=false）时
     // 原 pickupScan 落在早 return 之后永不执行，玩家走近掉落物拾不起（仅见实体掉地）。掉落物物理
     // （itemEntities->tick）本就在早 return 前跑（独立于捕获态），拾取与之同级、同样常开才一致。
@@ -538,6 +559,7 @@ void PlayerController::tickImpl()
     // t323 嵌入箭近距拾取（与掉落物拾取同级常开：背包开 / 失焦时玩家仍可走近拾嵌入箭）。内自检
     //   m_entityManager/m_hotbar 非空 + 死亡 / 观察者门控，常开安全（同 pickupScan）。
     arrowPickupScan();
+    } // /profPickup
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
         cancelEating(); // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零，未完成不消耗）
@@ -558,17 +580,22 @@ void PlayerController::tickImpl()
     //   跳过 step() → 无重力 / 无位移 = 玩家定格在床边（机制等价 MC 躺床期间玩家静止）；重力缺失 1-3s 无影响
     //   （玩家本就立于地面）。updateSleep 跑完即 return，避免下方 pollMouse/updateMining 等干扰睡眠过渡。
     if (m_sleeping) {
-        updateSleep(float(dt));
+        { FrameProfiler::Scope profInput("input"); updateSleep(float(dt)); }
         return;
     }
+    { FrameProfiler::Scope profPhys("phys");
     pollMouse();
     step(dt);
     // t95：玩家推动可推动实体（仅 captured/playing；玩家主动移动后才有位移可传给实体）。在 step() 解析
     // 完玩家与世界碰撞后调 —— 用已贴墙的玩家 AABB 做圆-vs-AABB 推解，把穿透量传给实体（swept 碰撞解析
     // 玩家位移传给实体，spec）。m_height 用当前 AABB 高（蹲下变矮 → 推动区间随之收，与碰撞同源）。
     if (m_entityManager) m_entityManager->resolvePlayerPush(m_pos, kHalfW, m_height, m_world);
+    } // /profPhys
+    { FrameProfiler::Scope profRay("ray");
     updateRaycast();   // 沿视线 DDA 选体 → 更新线框命中态
     updateCameraDistance(); // t40：第三人称相机距离钳制（防穿墙）
+    } // /profRay
+    { FrameProfiler::Scope profInput("input");
     updateMining(float(dt)); // t34：累积生存挖掘进度（创造不进入此态；无操作时早 return）
     updateEating(float(dt)); // t267：累积进食进度（持面包按住右键时；其它情况早 return）
     // t304 弓拉弓蓄力：持弓按住右键时累加 m_bowDrawTime（钳 kBowFullCharge）。换槽（持物不再是弓）→ cancel。
@@ -581,6 +608,7 @@ void PlayerController::tickImpl()
         }
     }
     updateFishing(float(dt)); // t401：累积咬钩倒计时 / 咬钩窗口（持钓竿抛出后；其它情况早 return）
+    } // /profInput
 }
 
 // 视线方向：用与相机相同的欧拉→四元数（QQuaternion::fromEulerAngles(pitch,yaw,0)）旋转

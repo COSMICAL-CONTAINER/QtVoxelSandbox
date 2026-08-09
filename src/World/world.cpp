@@ -1,6 +1,7 @@
 #include "world.h"
 
 #include "blockregistry.h"
+#include "frameprofiler.h" // perf：tick 函数计时进 w* 桶（诊断 WorldClock 10Hz 路径开销）
 
 #include <QDebug>
 #include <QElapsedTimer> // t155c：recomputeLightAround 计时（测每帧编辑光照开销）
@@ -361,6 +362,7 @@ void World::pokeFluidDirty(int x, int y, int z)
 
 void World::tickWaterFlow()
 {
+    FrameProfiler::Scope prof("wWater"); // perf：含节流 / 早退（稳态零开销仍计入极小常数，便于对照）
     if (++m_flowTickCounter < kFlowTickInterval) return; // 节流：每 3 tick（~0.3s）把波前推进 1 格
     m_flowTickCounter = 0;
     // t380 perf：稳态（海洋全源、无玩家扰动）早退 —— 跳过全图 W×D×H 扫描（~41 万格 chunk 路由除法 ≈ 3-5ms）。
@@ -591,6 +593,7 @@ void World::tickWaterFlow()
 //   节流更慢（kLavaFlowTickInterval=30 → 3s/格）、扩散更短（kMaxLavaFlowLevel=3）。末尾 ignite pass 焚毁邻岩浆木类。
 void World::tickLavaFlow()
 {
+    FrameProfiler::Scope prof("wLava"); // perf：含节流 / 早退
     if (++m_lavaFlowTickCounter < kLavaFlowTickInterval) return; // 节流：每 30 tick（~3s）把波前推进 1 格
     m_lavaFlowTickCounter = 0;
     // t380 perf：稳态早退（同 tickWaterFlow；m_lavaDirty 由 pokeFluidDirty / setWaterSilent 写 Lava 时设）。
@@ -773,6 +776,7 @@ void World::tickLavaFlow()
 //   概率升 state 一档（0→1→…→WheatCropStageMax=7 成熟）。写入走 setWaterSilent（静默 state 写，无破/放反馈）。
 void World::tickCropGrowth()
 {
+    FrameProfiler::Scope prof("wCrop"); // perf：含节流 / 早退（无作物 / 全暗零开销仍计极小常数）
     if (++m_cropTickCounter < kCropTickInterval) return; // 节流：每 kCropTickInterval tick（~2.5s）做一次判定
     m_cropTickCounter = 0;
     const int W = m_width, D = m_depth, H = m_height;
@@ -869,6 +873,7 @@ int World::farmlandHydrationLevel(int x, int y, int z) const
 // t406 甘蔗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 sugar cane random-tick 生长。
 void World::tickSugarcaneGrowth()
 {
+    FrameProfiler::Scope prof("wSug"); // perf：含节流 / 早退
     if (++m_sugarcaneTickCounter < kSugarcaneTickInterval) return; // 节流：每 kSugarcaneTickInterval tick（~5s）一窗
     m_sugarcaneTickCounter = 0;
     const int W = m_width, D = m_depth, H = m_height;
@@ -949,6 +954,7 @@ void World::tickSugarcaneGrowth()
 // t406 耕地湿润复算 tick（见 world.h 头注释）。机制等价 MC 1.0 farmland 随机 tick 补 / 失水。
 void World::tickFarmlandHydration()
 {
+    FrameProfiler::Scope prof("wFarm"); // perf：含节流 / 早退
     if (++m_farmlandHydrTickCounter < kFarmlandHydrTickInterval) return; // 节流：每 kFarmlandHydrTickInterval tick（~3s）一窗
     m_farmlandHydrTickCounter = 0;
     const int W = m_width, D = m_depth, H = m_height;
@@ -1045,6 +1051,7 @@ void World::decayLeavesAround(int x, int y, int z)
 //   同 tickCropGrowth/tickSaplingGrowth：seed + 位置 + 窗口序号 → 可复现，无 Math.random / 时间源）。
 void World::tickLeafDecay()
 {
+    FrameProfiler::Scope prof("wLeaf"); // perf：含队列空早退（稳态零开销）
     if (m_decayingLeaves.empty()) return;                       // 稳态（无失撑叶）→ 零开销早退
     if (++m_leafDecayTickCounter < kLeafDecayTickInterval) return; // 节流：每 kLeafDecayTickInterval tick（~0.4s）开一窗
     m_leafDecayTickCounter = 0;
@@ -1200,6 +1207,7 @@ void World::checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 //   确定性散布概率长成 → 清除树苗 + 在原位生成完整橡树（placeTreeAt 主干 + 树叶球冠）。
 void World::tickSaplingGrowth()
 {
+    FrameProfiler::Scope prof("wSap"); // perf：含节流 / 早退
     if (++m_saplingTickCounter < kSaplingTickInterval) return; // 节流：每 kSaplingTickInterval tick（~5s）判一次
     m_saplingTickCounter = 0;
     const int W = m_width, D = m_depth, H = m_height;
@@ -1501,6 +1509,7 @@ void World::resetWeather()
 // t385 天气 tick（见 world.h 头注释）。机制等价 MC 1.0 天气：晴 ↔ 降水（雨/雪/雷）随机时长转换。
 void World::tickWeather(qreal dt)
 {
+    FrameProfiler::Scope prof("wWeath"); // perf：计时未到零开销
     if (m_weatherTimer <= 0.0f) return; // 防御（构造已设首时长；正常不触发）
     m_weatherTimer -= float(dt);
     if (m_weatherTimer > 0.0f) return;  // 计时未到 → 不转换（零开销：无写入 / 无 emit）
@@ -2369,6 +2378,7 @@ void World::freezeSurfaceWater()
 //   冻结雪原表层水；本 tick 处理玩家后放 / 冰破回水 / 动态暴露的延迟冻结（机制等价 MC random-tick 结冰）。
 void World::tickIceFreeze()
 {
+    FrameProfiler::Scope prof("wIce"); // perf：含节流 / 早退
     if (++m_freezeTickCounter < kFreezeTickInterval) return; // 节流：每 kFreezeTickInterval tick（~5s）做一次判定
     m_freezeTickCounter = 0;
     const int W = m_width, D = m_depth, H = m_height;

@@ -1,6 +1,7 @@
 #include "chunkgeometry.h"
 #include "blockregistry.h"
 #include "chunk.h"
+#include "frameprofiler.h"        // perf：buildMesh 计时进「mesh」桶（settle t470 重建频率假设）
 #include "partialblockgeometry.h" // t133：Vtx（chunk 顶点格式）+ PartialBlockGeometry 异形分支
 #include "voxellight.h"           // t257：PCF 软影 + 光场顶点色单点实现（mesher 与 BlockCube 共用）
 #include "world.h"
@@ -258,6 +259,10 @@ float ChunkGeometry::sunShadowAt(float wx, float wy, float wz) const
 void ChunkGeometry::buildMesh(RebuildReason reason)
 {
     QElapsedTimer bt; bt.start(); // t155f：诊断编辑卡顿（每 chunk 重建耗时）
+    // perf「mesh」桶：本 chunk 重建耗时累加进窗口（flush 时报窗口内 mesh 总 ms + rebuild 次数）。
+    //   settle t470 假设：静态读 dirty-gated，但若某路径每帧标脏会致全量重建 —— 此桶量化真值。
+    FrameProfiler::Scope profMesh("mesh");
+    FrameProfiler::instance()->count("meshN");
     Chunk *c = myChunk();
     const int H = m_world ? m_world->height() : 0;
     constexpr int S = Chunk::kSize; // 16（X、Z chunk 边长）

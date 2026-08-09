@@ -6642,6 +6642,21 @@ Window {
         }
     }
 
+    // perf 帧时间分解叠层（FrameProfiler：C++ 各热路径 Scope 累加 → 每 ~1s flush 报告字符串）。
+    //   tick 行 = 60Hz tickImpl 各阶段 ms/frame（env/item/xp/boat/mob/pickup/phys/ray/input）；
+    //   win 行 = 1s 窗口内 mesh 总 ms（含 rebuild 次数）+ world tick 各总 ms。
+    //   诊断 <10 FPS 时读此叠层定位「每帧固定开销」花在哪（实体 tick / mesh 重建 / 物理 / ...），不再猜。
+    //   F3 关时不显；报告内容亦每秒落 logs/voxelsandbox.log（grep vo.prof）。
+    Text {
+        visible: window.appState === "playing" && window.f3Visible
+        x: 12; y: 62 + 200   // 在主 F3 块下方（主块约 12 行 × ~16px）
+        z: 50
+        color: "#00ff88"
+        style: Text.Outline; styleColor: "#000000"
+        font.pixelSize: 11; font.family: "monospace"
+        text: FrameProfiler.report   // 单例直接按类型名引用（QML_SINGLETON，不可在 QML 实例化）
+    }
+
     // Hotbar（9 槽，1.0 风格）：底部居中，方形凹槽槽框 + 选中槽选框（凸起边框，随 selectedSlot 位移）。
     // 全部槽框/选框/准星为本项目自绘原创（Rectangle 组合，无外部 MC PNG；§9 override (a)）。
     // Spectator 模式不显（1.0 spectator 无 hotbar）；保留 1–9/滚轮选槽 + 选中高亮。

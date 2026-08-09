@@ -25,6 +25,12 @@ qt_add_executable(voxelsandbox
     #   Core 只依赖 Qt Core/Gui；QtQuick（image provider）留在 main.cpp 胶水层（依赖只向下）。
     src/Core/resourcepackmanager.cpp
     src/Core/resourcepackmanager.h
+    # perf：帧时间分解探针（PLAN §2-F / §4 帧时间切分）。进程全局单例：C++ 各热路径
+    #   （PlayerController tickImpl / ChunkGeometry buildMesh / World tick 函数）经 RAII Scope 把各阶段
+    #   CPU 耗时累加进具名桶，每 ~1s flush → QML F3 叠层只读 + qInfo 落日志。诊断「每帧固定开销」
+    #   （实体 tick / mesh 重建 / 物理 / ...）瓶颈，不再猜。Core 叶子（只依赖 Qt Core/Qml）。
+    src/Core/frameprofiler.cpp
+    src/Core/frameprofiler.h
     src/World/chunk.cpp
     src/World/chunk.h
     src/World/chunkmanager.cpp
