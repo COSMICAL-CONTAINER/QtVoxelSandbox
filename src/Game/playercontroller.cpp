@@ -2712,6 +2712,18 @@ bool PlayerController::feetInWater() const
            == BlockRegistry::Water;
 }
 
+// t468 脚下冰面判定：着地（m_onGround，上一 tick 解算结果）且脚底下方一格为冰族（isIce）。供 step() 冰滑行物理
+//   分流：在冰上时水平速度向目标做指数接近（低摩擦 → 松键惯性滑行），非冰走瞬时设速（常规地面手感）。
+//   脚底下方一格 = floor(m_pos.y) - 1（m_pos 存脚底中心）。无世界 → false。只读 World::blockAt + BlockRegistry::isIce。
+bool PlayerController::onIce() const
+{
+    if (!m_world || !m_onGround) return false;
+    const int bx = int(std::floor(m_pos.x()));
+    const int by = int(std::floor(m_pos.y())) - 1; // 脚底下方一格（支撑面）
+    const int bz = int(std::floor(m_pos.z()));
+    return BlockRegistry::isIce(m_world->blockAt(bx, by, bz));
+}
+
 // t223 flowSoundLevel 属性 READ：返回 m_flowSoundLevel（tickImpl 节流扫描缓存值）。
 float PlayerController::flowSoundLevel() const
 {
@@ -3132,8 +3144,25 @@ void PlayerController::step(qreal dt)
     // t304 拉弓减速（spec「拉弓减速（叠 shift）」）：m_bowDrawing 时水平速度再 ×kBowSlowMul=0.5（与蹲下
     //   ×0.4 叠加 → 蹲拉弓 = 走速×0.4×0.5=0.2，机制等价 MC 1.0 拉弓大幅减速）。仅走路模式（飞态早 return）。
     const float bowMul = m_bowDrawing ? kBowSlowMul : 1.0f;
-    m_vel.setX(wish.x() * kWalk * speedMul() * waterMul * bowMul);
-    m_vel.setZ(wish.z() * kWalk * speedMul() * waterMul * bowMul);
+    // t468 冰上滑动（spec「冰面摩擦力极低→玩家移动加速滑；松键后惯性继续滑一段才停」）。机制等价 MC 1.0 冰滑行：
+    //   非冰地面 → 瞬时设速（旧手感：松键即停）；冰面 → 水平速度向「目标速度」做指数接近（1 - exp(-rate*dt)），
+    //   rate = iceSlipApproach（Ice 中等 / PackIce 更滑 / BlueIce 最滑）。松键时 wish=0 → 目标=0 → 速度按同 rate
+    //   衰减 → 冰上明显惯性滑行（BlueIce 滑得最远）。帧率无关（exp(-rate*dt)）。仅走路模式（飞态已 early return）。
+    //   水中（feetInWater）不走冰滑行（水中已减速 + 浮力，无冰面；waterMul 仍乘入目标速度）。
+    const float targetVx = wish.x() * kWalk * speedMul() * waterMul * bowMul;
+    const float targetVz = wish.z() * kWalk * speedMul() * waterMul * bowMul;
+    if (onIce() && !feetInWater()) {
+        const quint8 iceBlk = m_world->blockAt(int(std::floor(m_pos.x())),
+                                                int(std::floor(m_pos.y())) - 1,
+                                                int(std::floor(m_pos.z())));
+        const float rate = BlockRegistry::iceSlipApproach(iceBlk); // 1/s（>0 即冰族；越小越滑）
+        const float alpha = 1.0f - std::exp(-rate * float(dt));    // 本 tick 接近比例（帧率无关）
+        m_vel.setX(m_vel.x() + (targetVx - m_vel.x()) * alpha);
+        m_vel.setZ(m_vel.z() + (targetVz - m_vel.z()) * alpha);
+    } else {
+        m_vel.setX(targetVx); // 常规地面：瞬时设速（松键即停，旧手感）
+        m_vel.setZ(targetVz);
+    }
     // t174 水中浮力 / 游泳（spec「浮力/游泳」）：脚位在水格 → 缓沉（kWaterGravity << kGravity）+ 按住空格
     //   上浮（kSwimUp，连续非边沿）+ 钳最大下沉（防穿水底）。机制等价 MC 1.0 水中：减速 + 浮力 + 空格上浮。
     //   离水（脚位非水）走原重力 + 跳跃（spaceEdge && onGround）。waterMul 已乘水平速度（眼位在水中减速）。

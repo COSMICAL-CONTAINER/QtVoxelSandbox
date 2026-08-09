@@ -91,6 +91,8 @@ BLOCKS = [
     # t395 雪原/针叶群系内容：积雪层（地表覆雪）/ 冰（水面冻结）/ 云杉原木（云杉树主干）立方体图标（顶+两侧明暗）。
     ("snow_layer",      "default_snow",          "default_snow"),            # t395 积雪层（各面=冷白冰晶噪点）
     ("ice",             "default_ice",           "default_ice"),             # t395 冰（各面=浅蓝反光裂纹）
+    ("pack_ice",        "default_pack_ice",      "default_pack_ice"),        # t468 浮冰（各面=实白细裂纹；Ice 更滑变种）
+    ("blue_ice",        "default_blue_ice",      "default_blue_ice"),        # t468 蓝冰（各面=淡蓝纵向纹路；最滑冰种）
     ("spruce_log",      "default_spruce_log_top", "default_spruce_log_side"), # t395 云杉原木（顶=年轮截面；侧=深棕树皮）
     # t466 云杉木板立方体图标（深色木纹；机制等价橡木木板 icon_planks，仅贴图换 spruce_planks）。
     ("spruce_planks",   "default_spruce_planks", "default_spruce_planks"), # t466 云杉木板（各面同贴图=深色木板）

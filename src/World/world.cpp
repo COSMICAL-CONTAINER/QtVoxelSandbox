@@ -2363,6 +2363,40 @@ void World::freezeSurfaceWater()
     qInfo() << "worldgen: frozen surface ice =" << frozen; // 同 seed → 同计数（确定性核对）
 }
 
+// t468 结冰 tick（spec「寒冷群系暴露天空的水源→冰」）：见 world.h 头注释。每 5s 一窗，扫 Snowy 群系列，自顶向下
+//   找暴露天空（skyLightAt>=15）的水源（Water state==0）按散布概率冻结为 Ice（setWaterSilent 静默写 + worldChanged）。
+//   进入阴影区（skyLight<15）即停该列向下扫（下方水都不暴露天空，无谓扫描）。worldgen freezeSurfaceWater 已在生成期
+//   冻结雪原表层水；本 tick 处理玩家后放 / 冰破回水 / 动态暴露的延迟冻结（机制等价 MC random-tick 结冰）。
+void World::tickIceFreeze()
+{
+    if (++m_freezeTickCounter < kFreezeTickInterval) return; // 节流：每 kFreezeTickInterval tick（~5s）做一次判定
+    m_freezeTickCounter = 0;
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+
+    const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_freezeIntervalIndex) * 0x9E3779B9u)); // 窗口序号混入散布种子
+    int frozen = 0;
+    for (int x = 0; x < W; ++x) {
+        for (int z = 0; z < D; ++z) {
+            if (biomeAt(x, z) != Biome::Snowy) continue; // 仅雪原/针叶群系结冰（寒冷生物群系）
+            // 自顶向下扫：进入阴影区（skyLight<15）即停（下方水都不暴露天空）。暴露天空的水源按概率冻结。
+            for (int y = H - 1; y >= 0; --y) {
+                if (m_chunks.skyLightAt(x, y, z) < 15) break; // 进入阴影区 → 下方都不暴露天空，停扫（性能 + 正确）
+                const quint8 b = m_chunks.blockAt(x, y, z);
+                if (b != BlockRegistry::Water) continue;
+                if (m_chunks.stateAt(x, y, z) != 0) continue; // 仅水源结冰（流水 state>0 不结，机制等价 MC）
+                // 散布概率：seed + 位置 + 窗口序号哈希 → 不同格不同窗错峰冻结（非瞬时全冻，PLAN §2-K）。
+                const quint32 h = hashVoxel(mixedSeed, x, y, z);
+                if (int(h % 100u) >= kFreezePct) continue; // 散布落空 → 本窗不冻
+                setWaterSilent(x, y, z, BlockRegistry::Ice, 0); // 静默写 Ice（系统模拟，非玩家破/放 → 无反馈）
+                ++frozen;
+            }
+        }
+    }
+    ++m_freezeIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同格错峰冻结）
+    if (frozen > 0) qInfo("vo.world: tickIceFreeze frozen=%d", frozen); // 可观测性（同 tickCropGrowth）
+}
+
 // t119 底层基岩：遍历列，在 y 0..4 铺一层 Bedrock（不可破坏方块，hardness=-1.0 → canMine=false）。
 // 厚度按 hashVoxel(seed,x,y,z) 确定 —— 底层（y 小）近乎全实，顶层（y=4）稀疏（坑洼露出上方石层），
 // 机制等价 MC 1.0 基岩层「底实顶疏」。具体阈值：(hash%100) < (5-y)*25 → 置 Bedrock，否则保留地形原样：

@@ -214,6 +214,8 @@ TILES = [
     "default_sweet_berry_bush_0",   # 103 sweet_berry_bush_0（阶段 0 无果嫩丛；SweetBerryBush def 基底 tile）
     "default_sweet_berry_bush_1",   # 104 sweet_berry_bush_1（阶段 1 小果；mesher 据 state 选）
     "default_sweet_berry_bush_2",   # 105 sweet_berry_bush_2（阶段 2 成熟红浆果簇；右键采摘得 2-3 浆果）
+    "default_pack_ice",             # 106 pack_ice（t468 浮冰各面贴图；实白底+细裂纹，比 Ice 更密实；PackIce 各面=本 tile）
+    "default_blue_ice",             # 107 blue_ice（t468 蓝冰各面贴图；淡蓝底+纵向纹路，最滑；BlueIce 各面=本 tile）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

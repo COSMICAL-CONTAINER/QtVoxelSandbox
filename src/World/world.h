@@ -240,6 +240,16 @@ public:
     //   spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickSaplingGrowth();
+    // t468 结冰 tick（spec「寒冷群系(雪原 Snowy)暴露天空的水源(Water state==0)→冰；MC 规则：暴露天空 +
+    //   寒冷生物群系→水变冰」）：由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部
+    //   节流到 ~每 kFreezeTickInterval×0.1s = 5s 一窗）。机制等价 MC 1.0 random-tick 结冰：扫 Snowy 群系列，自顶
+    //   向下扫到进入阴影区（skyLight<15）停，对暴露天空（skyLightAt>=15）的水源（Water state==0）按散布概率
+    //   kFreezePct 冻结为 Ice（setWaterSilent：直写 Ice + worldChanged 重建，非玩家破/放无反馈）。worldgen
+    //   freezeSurfaceWater 已在生成期冻结雪原表层水；本 tick 处理玩家后放 / 冰破回水 / 动态暴露的延迟冻结。
+    //   散布确定性哈希（seed + 位置 + 窗口序号 → 错峰冻结非瞬时全冻，PLAN §2-K 精神，同 tickCropGrowth）。
+    //   稳态（无 Snowy 暴露水源 / 本窗散布落空）零写入、零 worldChanged。spectator/创造/生存均推进（结冰是世界
+    //   模拟）。分层（PLAN §2）：本方法属 World 层，只读 m_chunks + biomeAt + skyLightAt + 发 worldChanged。
+    Q_INVOKABLE void tickIceFreeze();
     // t325 树叶渐进消退 tick（spec「挖光一棵树所有原木→树叶消失」的渐进化修：旧 t305 瞬时清半树冠叶 →
     //   改为逐叶按概率渐退，散布 ~30-90s；t379 在 t325 基础上进一步放慢）。由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；
     //   本方法内部节流到 ~每 kLeafDecayTickInterval×0.1s 做一次判定窗口）。机制等价 MC 1.0 叶衰 random-tick：
@@ -580,6 +590,14 @@ private:
     static constexpr int kMaxLavaFlowLevel    = 3;   // 岩浆流最大蔓延等级（state 1..3；MC 1.0 主世界岩浆 3 格扩散）
     static constexpr int kLavaIgnitePct       = 8;   // 邻岩浆木类每窗焚毁概率（%；8% → 平均 ~37s 焚毁，可见可验收）
     static constexpr int kLavaLakeMaxY        = 30;  // 岩浆湖最高 y（spec「Y<30」；仅地下深处）
+    // t468 结冰 tick 节流计数 + 常量：tickIceFreeze() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFreezeTickInterval
+    //   才做一次冻结判定（~每 kFreezeTickInterval×0.1s = 5s 一窗）。窗口序号 m_freezeIntervalIndex 每窗 +1，喂入
+    //   hashVoxel 散布概率 → 不同格不同窗错峰冻结（非瞬时全冻，PLAN §2-K 精神）。kFreezePct=20（每窗 20% 暴露水源
+    //   冻结 → 平均 ~25s/格，可见可验收；worldgen 已冻结表层水，本 tick 主要处理动态暴露 / 玩家后放）。
+    int m_freezeTickCounter = 0;
+    int m_freezeIntervalIndex = 0;
+    static constexpr int kFreezeTickInterval = 50;  // tickIceFreeze 节流间隔（WorldClock tick 单位 = 100ms → 5s/窗）
+    static constexpr int kFreezePct          = 20;  // 每窗暴露水源冻结概率（%）
     // t236 小麦作物生长 tick 节流计数 + 常量：tickCropGrowth() 每 100ms 被 WorldClock.ticked 调一次；
     //   累积到 kCropTickInterval 才做一次成长判定（~每 kCropTickInterval×0.1s 一窗）。窗口序号 m_cropIntervalIndex
     //   每窗 +1，喂入 hashVoxel 散布概率 → 不同窗口不同作物错峰升阶段（防全部同步生长的机械感）。

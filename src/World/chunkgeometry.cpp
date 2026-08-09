@@ -120,6 +120,17 @@ void ChunkGeometry::setGlassOnly(bool on)
     buildMesh(RebuildReason::Dirty);
 }
 
+// t468：冰段开关变 → 重建（冰段只画冰族 isIce、地形段跳冰族 → 两段选块不同，需重网格化）。值未变则早退。
+//   用 Dirty reason（同编辑即时重建路径，绕过 sun-step 节流）。冰段走 culled/greedy 立方面路径（满格立方 +
+//   自剔 nb==冰族 + 邻实体剔 + 邻空气画半透面，同 glass 模式）。冰非流体（无 state 液面），不走水的变高水面路径。
+void ChunkGeometry::setIceOnly(bool on)
+{
+    if (m_iceOnly == on) return;
+    m_iceOnly = on;
+    emit iceOnlyChanged();
+    buildMesh(RebuildReason::Dirty);
+}
+
 // t166b 阴影开关变 → 重网格化（顶点光 PCF 软影随开关重算；语义同光照变 → 用 Sun reason）。值未变早退。
 void ChunkGeometry::setShadowsEnabled(bool on)
 {
@@ -295,7 +306,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
         //   每 cell 仅一次 append。独立于 PASS 2 的面 mask——否则 6 面 mask 各扫一次会 6× 重复 append。
         //   torch / 整立方 / 水不进此 pass。光照上下文（cellLight）按本格光场 + 本格中心 PCF 软影算
         //   （同 t151/t153 异形约定），打包进 PartialLightCtx 传入。
-        if (!m_waterOnly && !m_lavaOnly && !m_glassOnly) for (int ly = 0; ly < H; ++ly) { // t343/t405：岩浆/玻璃段只画流体/玻璃立方面，跳过 partial/cross（PASS 1）
+        if (!m_waterOnly && !m_lavaOnly && !m_glassOnly && !m_iceOnly) for (int ly = 0; ly < H; ++ly) { // t343/t405/t468：岩浆/玻璃/冰段只画对应立方面，跳过 partial/cross（PASS 1）
             for (int lz = 0; lz < S; ++lz) {
                 for (int lx = 0; lx < S; ++lx) {
                     const int wx = originX + lx, wz = originZ + lz;
@@ -564,23 +575,28 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             const bool isWater = (blk == BlockRegistry::Water);
                             const bool isLava  = (blk == BlockRegistry::Lava);
                             const bool isGlass = (blk == BlockRegistry::Glass);
-                            // t343/t405 段分流：岩浆段只画 Lava；水段只画 Water；玻璃段只画 Glass；地形段跳过流体+玻璃（各自独立段渲染）。
-                            if (m_glassOnly) { if (!isGlass) continue; }
+                            const bool isIceBlk = BlockRegistry::isIce(blk); // t468 冰族（Ice/PackIce/BlueIce）
+                            // t343/t405/t468 段分流：岩浆段只画 Lava；水段只画 Water；玻璃段只画 Glass；冰段只画冰族；
+                            //   地形段跳过流体+玻璃+冰族（各自独立段渲染）。
+                            if (m_iceOnly)   { if (!isIceBlk) continue; }
+                            else if (m_glassOnly) { if (!isGlass) continue; }
                             else if (m_lavaOnly) { if (!isLava) continue; }
                             else if (m_waterOnly) { if (!isWater) continue; }
-                            else { if (isWater || isLava || isGlass) continue; }       // 地形段跳流体 + 玻璃
-                            if (!isWater && !isLava && !isGlass && blk == BlockRegistry::Torch) continue;
-                            if (!isWater && !isLava && !isGlass && BlockRegistry::isPartialBlock(blk)) continue; // t412 异形已在 PASS 1（含段外圆石变体）；段后整立方（Chest）正常进立方面
-                            if (!isWater && !isLava && !isGlass && blk == BlockRegistry::Farmland) continue; // t408 耕地矮盒已在 PASS 1；不进整立方面（否则满格立方覆盖矮盒唇）
-                            if (!isWater && !isLava && !isGlass && BlockRegistry::isCrossBillboard(blk)) continue; // t235/t305 cross（草丛/作物/树苗）已在 PASS 1；不进立方面
-                            if (!isWater && !isLava && !isGlass && blk == BlockRegistry::Cactus) continue; // t445 仙人掌 0.8 细柱已在 PASS 1；不进整立方面（否则满格立方覆盖细柱）
-                            if (!isWater && !isLava && !isGlass && BlockRegistry::isBed(blk)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面（否则满格立方覆盖低床）
+                            else { if (isWater || isLava || isGlass || isIceBlk) continue; }       // 地形段跳流体 + 玻璃 + 冰族
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Torch) continue;
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isPartialBlock(blk)) continue; // t412 异形已在 PASS 1（含段外圆石变体）；段后整立方（Chest）正常进立方面
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Farmland) continue; // t408 耕地矮盒已在 PASS 1；不进整立方面（否则满格立方覆盖矮盒唇）
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isCrossBillboard(blk)) continue; // t235/t305 cross（草丛/作物/树苗）已在 PASS 1；不进立方面
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Cactus) continue; // t445 仙人掌 0.8 细柱已在 PASS 1；不进整立方面（否则满格立方覆盖细柱）
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(blk)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面（否则满格立方覆盖低床）
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                             if (BlockRegistry::isSolid(nb)) continue;       // 邻居实体 → 剔除（跨 chunk 路由正确）
                             if (isWater && nb == BlockRegistry::Water) continue; // 水-水面互剔
                             if (isLava && nb == BlockRegistry::Lava) continue;   // t343 岩浆-岩浆面互剔
                             // t405 玻璃-玻璃面互剔（Glass solid=false → isSolid(nb) 不剔除玻璃邻；显式剔除避免两玻璃共面重复绘制）。
                             if (isGlass && nb == BlockRegistry::Glass) continue;
+                            // t468 冰-冰面互剔（冰族 solid=false → isSolid(nb) 不剔除冰邻；显式剔除避免两冰共面重复绘制，同 glass 模式）。
+                            if (isIceBlk && BlockRegistry::isIce(nb)) continue;
                             const int ax = wx + F.dir[0], ay = ly + F.dir[1], az = wz + F.dir[2];
                             e.valid = true;
                             // t225 箱子前面朝向由 state 决定（其余方块 state inert）→ mask tile 含 state，
@@ -669,17 +685,20 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         const bool isWater = (b == BlockRegistry::Water);
                         const bool isLava  = (b == BlockRegistry::Lava);
                         const bool isGlass = (b == BlockRegistry::Glass);
-                        // t343/t405 段分流：岩浆段只画 Lava；水段只画 Water；玻璃段只画 Glass；地形段跳过流体+玻璃（各自独立段渲染）。
-                        if (m_glassOnly) { if (!isGlass) continue; }
+                        const bool isIceBlk = BlockRegistry::isIce(b); // t468 冰族（Ice/PackIce/BlueIce）
+                        // t343/t405/t468 段分流：岩浆段只画 Lava；水段只画 Water；玻璃段只画 Glass；冰段只画冰族；
+                        //   地形段跳过流体+玻璃+冰族（各自独立段渲染）。
+                        if (m_iceOnly)   { if (!isIceBlk) continue; }
+                        else if (m_glassOnly) { if (!isGlass) continue; }
                         else if (m_lavaOnly) { if (!isLava) continue; }
                         else if (m_waterOnly) { if (!isWater) continue; }
-                        else { if (isWater || isLava || isGlass) continue; }
-                        if (!isWater && !isLava && !isGlass && b == BlockRegistry::Torch) continue;
-                        if (!isWater && !isLava && !isGlass && BlockRegistry::isPartialBlock(b)) continue; // t412 异形已在 PASS 1（含段外圆石变体）；段后整立方（Chest）正常进立方面
-                        if (!isWater && !isLava && !isGlass && b == BlockRegistry::Farmland) continue; // t408 耕地矮盒已在 PASS 1；不进整立方面
-                        if (!isWater && !isLava && !isGlass && BlockRegistry::isCrossBillboard(b)) continue; // t235/t305 cross（草丛/作物/树苗）已在 PASS 1；不进立方面
-                        if (!isWater && !isLava && !isGlass && b == BlockRegistry::Cactus) continue; // t445 仙人掌 0.8 细柱已在 PASS 1；不进整立方面
-                        if (!isWater && !isLava && !isGlass && BlockRegistry::isBed(b)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面
+                        else { if (isWater || isLava || isGlass || isIceBlk) continue; }
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Torch) continue;
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isPartialBlock(b)) continue; // t412 异形已在 PASS 1（含段外圆石变体）；段后整立方（Chest）正常进立方面
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Farmland) continue; // t408 耕地矮盒已在 PASS 1；不进整立方面
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isCrossBillboard(b)) continue; // t235/t305 cross（草丛/作物/树苗）已在 PASS 1；不进立方面
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Cactus) continue; // t445 仙人掌 0.8 细柱已在 PASS 1；不进整立方面
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(b)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
@@ -688,6 +707,8 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (isLava && nb == BlockRegistry::Lava) continue;
                             // t405 玻璃-玻璃面互剔（Glass solid=false → isSolid(nb) 不剔除玻璃邻；显式剔除避免两玻璃共面重复绘制）。
                             if (isGlass && nb == BlockRegistry::Glass) continue;
+                            // t468 冰-冰面互剔（冰族 solid=false → isSolid(nb) 不剔除冰邻；显式剔除避免两冰共面重复绘制，同 glass 模式）。
+                            if (isIceBlk && BlockRegistry::isIce(nb)) continue;
                             const quint8 st = stateAtWorld(wx, ly, wz); // t225/t406 箱子前面朝向 / 耕地湿润由 state 决定
                             const int t = tileFor(b, f, st); // t225 箱子前面朝向由 state 决定
                             const float u0 = t * tileW + hx, u1 = (t + 1) * tileW - hx;

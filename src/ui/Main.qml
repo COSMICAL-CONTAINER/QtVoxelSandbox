@@ -2428,6 +2428,7 @@ Window {
                         objs.push(lavaChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t343 岩浆段
                         objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t326 cutout 段（草丛/作物/树苗）
                         objs.push(glassChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t405 玻璃段（透明）
+                        objs.push(iceChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t468 冰段（半透）
                     }
                 }
                 window.terrainGeos = geos
@@ -2543,6 +2544,33 @@ Window {
                     glassOnly: true
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.45; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
+            }
+        }
+
+        // t468 冰段 chunk Model 模板（iceOnly 只网格化冰族 Ice/PackIce/BlueIce，opacity≈0.7 半透 + NoLighting + 顶点色
+        //   光照 → 透过半透冰可见背后的方块 / 实体，机制等价 MC 1.0 半透冰）。机制 / 路由完全同玻璃段（glassOnly）：
+        //   透明整立方走 culled/greedy 立方面路径（满格立方 + 自剔 nb==冰族 + 邻实体剔 + 邻空气画）；冰族 solid=false →
+        //   相邻实体方块不剔面 → 透过半透冰可见背后方块（关键透视保证，同 glass）。三冰种（Ice/PackIce/BlueIce）共用
+        //   一个半透材质——视觉差异由各自贴图（ice 浅蓝 / pack_ice 实白 / blue_ice 淡蓝）表达，半透度统一 0.7（避免
+        //   per-block 多材质 / 多段的复杂度）。baseColor 取冷青白略提亮（NoLighting 下 baseColor 直接乘进最终色 → 冰显
+        //   冷玻璃质感；区别于玻璃的浅青白）。摆位同地形 / 水 / 岩浆 / 玻璃段。lit 红线：NoLighting（默认 lit 不出像素）。
+        Component {
+            id: iceChunkComp
+            Model {
+                id: iceModel
+                property int chunkCX: 0
+                property int chunkCZ: 0
+                position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
+                geometry: ChunkGeometry {
+                    world: theWorld
+                    cx: iceModel.chunkCX
+                    cz: iceModel.chunkCZ
+                    sunDir: worldClock.sunDir
+                    shadowsEnabled: window.shadowsEnabled
+                    greedyMeshing: window.greedyMeshing
+                    iceOnly: true
+                }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.88, 0.95, 1.0, 1.0) }
             }
         }
 
@@ -6973,6 +7001,10 @@ Window {
             //   做一次成长判定，树苗据光强 + 草地/泥土支撑 + 主干列畅通 + 散布概率逐步长成完整橡树）。纯 QML
             //   桥接（同 tickCropGrowth 模式）。tickSaplingGrowth 内部对稳态（无树苗 / 全不满足）静默 → 无重建开销。
             theWorld.tickSaplingGrowth()
+            // t468 结冰 tick：WorldClock 每 100ms tick → 驱动 World.tickIceFreeze（内部节流到 ~每 5s 一窗，把
+            //   Snowy 群系暴露天空的水源按散布概率冻结为 Ice，机制等价 MC 1.0 寒冷群系水变冰）。纯 QML 桥接
+            //   （同 tickCropGrowth 模式，PLAN §2 分层不破）。稳态（无 Snowy 暴露水源 / 本窗散布落空）静默 → 无开销。
+            theWorld.tickIceFreeze()
             // t325 树叶渐进消退 tick：WorldClock 每 100ms tick → 驱动 World.tickLeafDecay（内部节流到 ~每 0.4s
             //   开一窗，队列内每叶按散布概率 1%/窗独立判定是否消失 → 几何分布散布 ~30-90s 渐退，非瞬时全消；
             //   t379 在 t325 基础上放慢约 2.5×）。

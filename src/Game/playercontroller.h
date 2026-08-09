@@ -300,6 +300,9 @@ public:
     //   做浮力 / 游泳 / 水流推动物理；QML 读它驱动水中走路声分流（playWaterStep vs playStep）。const 只读
     //   World::blockAt（向下依赖）；无世界 → false。定义在 .cpp。
     bool feetInWater() const;
+    // t468 脚下冰面判定（非 Q_PROPERTY，仅 step() 内部读）：着地（m_onGround）且脚底下方一格为冰族（isIce）。
+    //   供 step() 冰滑行物理分流。const 只读 World::blockAt + BlockRegistry::isIce；无世界 → false。定义在 .cpp。
+    bool onIce() const;
     // t351 岩浆中判定（Q_PROPERTY eyeInLava READ）：眼位格 == Lava（与 eyeInWater 平行）。QML 读它驱动岩浆橙雾叠层。
     //   const 只读 World::blockAt（向下依赖）；眼位 = position()（脚底+eyeHeight）；无世界 → false。定义在 .cpp。
     bool eyeInLava() const;

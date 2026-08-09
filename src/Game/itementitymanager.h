@@ -163,6 +163,11 @@ private:
         int count = 1;       // t64：实体携带数量（整栈丢弃为 1 实体；拾取按此数入背包）
         qint64 spawnMs = 0;  // 生成时刻（m_clock.elapsed()）；t53 isPickupReady 算 age 用
         float vy = 0.0f;     // t60：垂直速度（blocks/s；向下为负）；落地后归 0
+        // t468 水平速度（blocks/s）：掉落物生成时带初始「弹出」水平速度（机制等价 MC 破块 / 丢弃物品弹出），
+        //   每 tick 积分位移 + 摩擦衰减。冰面摩擦极低 → 持续滑动（spec「冰上丢弃物品会一直滑动往前」）；
+        //   常规地面摩擦高 → 快速停下。放 resting 之前（alive 仍须末位，保聚合初始化 tail-default）。
+        float vx = 0.0f;
+        float vz = 0.0f;
         bool resting = false;// t60：是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
         // t256：槽位占用标志（slot-reuse 模型，同 EntityManager::Entity::alive）。true = 活体；false = 已释放
         //   空槽（待复用）。放末位：spawnItem 的聚合初始化 {pos,itemId,count,spawnMs} 不显式列 alive →
@@ -243,6 +248,15 @@ private:
     static constexpr float kItemRiseSpeed   = 2.5f;
     static constexpr float kItemFlowSpeed   = 2.0f;
     static constexpr float kItemFloatOffset = 0.05f;
+    // t468 掉落物水平弹出 + 冰面滑动常量（spec「冰上丢弃物品会一直滑动往前」）：
+    //   kItemPopSpeed：生成时初始水平弹出速度（blocks/s；机制等价 MC 破块 / 丢弃物品弹出方向随机、幅值小）。
+    //     确定性哈希（位置 + itemId）给每件一个固定方向 + 幅值抖动 → 同一掉落可复现，非运行期随机源。
+    //   kItemGroundFriction：常规地面水平摩擦衰减率（1/s；exp(-rate*dt) 衰减；6 → ~0.5s 基本停下）。
+    //   kItemIceFriction：冰面水平摩擦衰减率（1/s；0.4 → 滑行 ~数秒，机制等价 MC 冰上物品长滑）。
+    //     冰上摩擦远低于常规地面 → 用户肉眼「冰上丢弃物品会一直滑动往前」。
+    static constexpr float kItemPopSpeed      = 2.0f;
+    static constexpr float kItemGroundFriction = 6.0f;
+    static constexpr float kItemIceFriction    = 0.4f;
 };
 
 #endif // ITEMENTITYMANAGER_H

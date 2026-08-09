@@ -38,7 +38,19 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count)
             qCWarning(lcItem) << "item entity cap reached (" << kCap << "); evicted oldest at slot" << oldest;
         }
     }
-    acquireSlot(ItemEntity{QVector3D(x + 0.5f, y + 0.5f, z + 0.5f), itemId, count, m_clock.elapsed()}); // t256 slot 复用
+    const int slot = acquireSlot(ItemEntity{QVector3D(x + 0.5f, y + 0.5f, z + 0.5f), itemId, count, m_clock.elapsed()}); // t256 slot 复用
+    // t468 初始水平弹出速度（机制等价 MC 破块 / 丢弃物品弹出）：确定性哈希（位置 + itemId）给每件一个固定方向
+    //   + 幅值抖动 → 同一掉落可复现。冰面摩擦极低 → 弹出后持续滑动（spec「冰上丢弃物品会一直滑动往前」）；
+    //   常规地面摩擦高 → 快速停下。取 acquireSlot 写入的实体引用设 vx/vz。
+    {
+        ItemEntity &e = m_entities[size_t(slot)];
+        // 简单整数哈希（非 worldgen 确定性范畴 —— 掉落弹出是即时反馈，确定性仅为可复现，无 PLAN §2-K 约束）。
+        quint32 h = quint32(x) * 73856093u ^ quint32(y) * 19349663u ^ quint32(z) * 83492791u ^ quint32(itemId) * 2654435761u;
+        const float angle = float(h % 3600u) * (3.14159265358979f / 1800.0f); // 0.1° 精度方向（全圆）
+        const float mag = kItemPopSpeed * (0.7f + 0.6f * float((h >> 11) % 100u) / 100.0f); // 幅值抖动 0.7×..1.3×
+        e.vx = std::cos(angle) * mag;
+        e.vz = std::sin(angle) * mag;
+    }
     notifyChanged(); // t354：经批量收口（批内不 emit，endBatch 末尾 1 次 emit）
     qCInfo(lcItem) << "spawned item entity id=" << itemId << "count=" << count << "at" << x << y << z
                    << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
@@ -287,6 +299,33 @@ void ItemEntityManager::tick(qreal dt, World *world)
         } else if (newY != e.pos.y()) {
             e.pos.setY(newY); // 自由下落（无命中）
             dirty = true;
+        }
+
+        // t468 水平速度积分 + 摩擦（spec「冰上丢弃物品会一直滑动往前」）。仅非水实体（水实体由 flow drift 处理
+        //   水平；瀑布实体 inWater=true 也跳过）。生成时带初始弹出 vx/vz（机制等价 MC 破块 / 丢弃弹出），每 tick
+        //   积分位移 + per-axis isCollidable 查（撞墙该轴不动，沿墙滑）。着地时按支撑面摩擦衰减：冰面（isIce）
+        //   kItemIceFriction 极低 → 持续滑动数秒；常规地面 kItemGroundFriction 高 → ~0.5s 停下。空中不衰减
+        //   （保留水平动量，机制等价 MC 物品空中弧线）。停止阈值 0.05 防微观抖动永久微移。
+        if (!inWater && (std::fabs(e.vx) > 1e-4f || std::fabs(e.vz) > 1e-4f)) {
+            const int hcy = qFloor(e.pos.y()); // 当前中心所在格（水平碰撞用，垂直已解算）
+            float px = e.pos.x(), pz = e.pos.z();
+            const float tryX = px + e.vx * float(dt);
+            if (!world->isCollidable(qFloor(tryX), hcy, cz)) px = tryX;
+            const float tryZ = pz + e.vz * float(dt);
+            if (!world->isCollidable(qFloor(px), hcy, qFloor(tryZ))) pz = tryZ;
+            if (px != e.pos.x() || pz != e.pos.z()) { e.pos.setX(px); e.pos.setZ(pz); dirty = true; }
+            if (e.resting) {
+                const int supportY = qFloor(e.pos.y()) - 1; // 支撑面格（同 resting 复探约定）
+                // 三目两支统一 quint8（blockAt 返 quint8，false 支显式强转枚举避 -Wextra 枚举/非枚举混用告警）。
+                const quint8 sb = (supportY >= 0) ? world->blockAt(qFloor(e.pos.x()), supportY, qFloor(e.pos.z()))
+                                                   : quint8(BlockRegistry::Air);
+                const float fric = BlockRegistry::isIce(sb) ? kItemIceFriction : kItemGroundFriction;
+                const float decay = std::exp(-fric * float(dt)); // 帧率无关指数衰减
+                e.vx *= decay;
+                e.vz *= decay;
+                if (std::fabs(e.vx) < 0.05f) e.vx = 0.0f; // 停止阈值（防微观抖动永久微移）
+                if (std::fabs(e.vz) < 0.05f) e.vz = 0.0f;
+            }
         }
     }
     if (dirty) notifyChanged(); // t354：经批量收口（内部 ++revision + 按需 emit）

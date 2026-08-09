@@ -53,6 +53,9 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
     case BlockRegistry::SpruceLog:    return "icon_spruce_log.png";    // t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮）
+    case BlockRegistry::Ice:          return "icon_ice.png";            // t468 冰立方体图标（各面=浅蓝反光裂纹）
+    case BlockRegistry::PackIce:      return "icon_pack_ice.png";       // t468 浮冰立方体图标（各面=实白细裂纹）
+    case BlockRegistry::BlueIce:      return "icon_blue_ice.png";       // t468 蓝冰立方体图标（各面=淡蓝纵向纹路）
     // t387 床方块 8 色变体立方体图标（彩色被面 + 枕垫亮带 + 绗缝针脚；build_cube_icons.py 程序生成）。
     case BlockRegistry::BedRed:        return "icon_bed_red.png";        // 红床（配方产物默认色）
     case BlockRegistry::BedOrange:     return "icon_bed_orange.png";     // 橙床
@@ -481,6 +484,11 @@ QVariantList Hotbar::creativeBlocks() const
              //   属系统获得），不进创造调色板。
              int(BlockRegistry::SnowLayer),                                  // 积雪层（雪原地表覆雪；铲加速；可放置）
              int(BlockRegistry::SpruceLog),                                  // 云杉原木（云杉树主干；斧加速；可放置）
+             // t468 冰族（Ice / PackIce / BlueIce）：透明整立方（iceOnly 段 Blend 半透）+ 冰上低摩擦滑动。Ice 由 worldgen
+             //   冻结水面 / tickIceFreeze 获得，PackIce/BlueIce 创造调色板取用测试 / 装饰（滑动速度递增 Ice<PackIce<BlueIce）。
+             int(BlockRegistry::Ice),                                        // 冰（雪原水面冻结；半透；冰上滑行）
+             int(BlockRegistry::PackIce),                                    // 浮冰（更滑变种；半透；可放置）
+             int(BlockRegistry::BlueIce),                                    // 蓝冰（最滑变种；半透；可放置）
              // t466 云杉木制品链（机制等价 MC 1.0 spruce 木制品；名称 / 贴图原创自绘 §9a）。复用既有木制品机制，
              //   仅换 id + 贴图（深色木纹 spruce_planks 区别橡木 planks）。云杉原木→4 云杉木板；云杉木板→台阶/栅栏/门。
              int(BlockRegistry::SprucePlanks),                               // 云杉木板（深色木纹整立方；配方：云杉原木→4）

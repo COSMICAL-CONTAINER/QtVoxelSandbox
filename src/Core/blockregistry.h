@@ -293,14 +293,17 @@ public:
                                   //   toolType=Shovel（铲加速；requiresTool=false → 空手也掉落，仅速度受铲影响）、dropId=自身
                                   //   （破积雪层掉积雪层方块，可放回）、dropCount=1、maxStack=64。各面贴图=snow(57)（冷白底 +
                                   //   细密冰晶噪点，原创自绘 §9a）。音色归 GroupSand（颗粒雪响）。进创造调色板（玩家可取用 / 放置）。
-        Ice            = 45, // 冰：雪原/针叶群系水面冻结产物（worldgen freezeSurfaceWater 把 Snowy 群系海/湖表层水冻结为冰）。
-                                  //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形；可踩 / 实体碰撞；
-                                  //   简化为不透明整立方，非 MC 半透冰，避开透明体积网格化复杂度）、hardness=0.5（同 MC 1.0 冰量级）、
-                                  //   toolType=Pickaxe、requiresTool=true、minToolTier=1（木镐可破）、**dropId=0**（破冰不掉落 —— 机制
-                                  //   等价 MC 1.0 冰需精准采集才掉落，本工程无精准采集故恒不掉落）、dropCount=0、maxStack=64
-                                  //   （worldgen 专属冻结 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图=ice(58)
-                                  //   （浅蓝底 + 反光裂纹，原创自绘 §9a）。音色归 GroupStone（玻璃质敲击，最接近 MC 1.0 冰 glass
-                                  //   SoundType）。不进创造调色板（worldgen 冻结获得；与 water / lava 同属「worldgen / 系统获得」语义）。
+        Ice            = 45, // 冰：雪原/针叶群系水面冻结产物（worldgen freezeSurfaceWater / tickIceFreeze 把 Snowy 群系
+                                  //   暴露天空的水源冻结为冰）。**t468 改透明整立方**（机制等价 MC 1.0 半透冰）：solid=false /
+                                  //   ShapeFull（同 glass 契约 —— solid=false → 相邻实体方块不剔面 → 透过半透冰可见背后方块；
+                                  //   碰撞 / 选中仍走 ShapeFull 整格，可踩 / 实体碰撞；走 mesher 的 iceOnly 段 Blend 半透渲染，
+                                  //   非旧 t395 不透明整立方）、hardness=0.5（同 MC 1.0 冰量级）、toolType=Pickaxe、requiresTool=true、
+                                  //   minToolTier=1（木镐可破）、**dropId=0**（破冰不掉落 —— 机制等价 MC 1.0 冰需精准采集才掉落，
+                                  //   本工程无精准采集故恒不掉落）、dropCount=0、maxStack=64。各面贴图=ice(58)（浅蓝底 + 反光
+                                  //   裂纹，原创自绘 §9a）。音色归 GroupStone（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）。
+                                  //   **冰上低摩擦**：玩家 / 掉落物在冰面上滑动速度衰减极慢（机制等价 MC 冰滑行手感）；滑动
+                                  //   速度递增 Ice < PackIce < BlueIce（iceSlipFactor）。进创造调色板（t468：与 PackIce/BlueIce 一并
+                                  //   取出测试 / 装饰；旧 t395「worldgen 系统获得不进调色板」语义由 PackIce/BlueIce 创造取用覆盖）。
         SpruceLog      = 46, // 云杉原木：雪原/针叶群系云杉树的主干（worldgen placeSpruceTreeAt 在 Snowy 群系种云杉变种树）。
         // ── t396 沼泽群系内容（机制等价 MC 1.0 沼泽植物：lily pad / mushroom；名称 / 贴图全原创自绘 §9a）：
         LilyPad        = 47, // 睡莲：沼泽浅水水面浮叶（worldgen placeSwampFlora 在沼泽水格上方一格散布）。
@@ -484,7 +487,18 @@ public:
         //   音色归 GroupGrass（软植物音，同草丛 / 蘑菇）。worldgen 在 Snowy 群系 SnowLayer 地表上方低密度散布（机制
         //   等价 MC 寒冷群系浆果丛）。进创造调色板（玩家可取用 / 放置，便于测试 / 装饰）。
         SweetBerryBush = 90, // 雪原浆果灌木丛：cross 形灌木（机制等价 MC 1.0 sweet berry bush）；3 阶段、右键采摘
-        Count          = 91, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t468 冰的物理（机制等价 MC 1.0 ice / packed ice / blue ice：结冰 + 冰上低摩擦滑动）：
+        //   浮冰（PackIce）/ 蓝冰（BlueIce）是 Ice 的更滑变种（冰上滑动速度递增 Ice < PackIce < BlueIce）。
+        //   与 Ice(45) 同属「冰族」——透明整立方（solid=false + ShapeFull，走 iceOnly 段 Blend 半透渲染，
+        //   同 glass 契约；碰撞仍整格可踩）、hardness=0.5（同 Ice）、toolType=Pickaxe、requiresTool=true、
+        //   minTier1（木镐可破）、dropId=0（破冰不掉落，机制等价 MC 冰需精准采集）、dropCount=0、maxStack=64。
+        //   各面同贴图：PackIce=pack_ice(106)（实白 + 细裂纹，比 Ice 更密实）/ BlueIce=blue_ice(107)（淡蓝 +
+        //   纵向纹路，最滑）。音色归 GroupStone（玻璃质，同 Ice）。worldgen 不直接生成（系统获得：Ice 在雪原
+        //   worldgen 冻结 / 玩家合成 PackIce/BlueIce 留后续）；进创造调色板供测试 / 装饰（与 Ice 一并取出）。
+        //   isIce(id) 单一权威谓词覆盖三者（Ice/PackIce/BlueIce），t469 船会复用判冰面加船速。
+        PackIce        = 91, // 浮冰：Ice 的更滑变种（机制等价 MC 1.0 packed ice）；滑动速度中等
+        BlueIce        = 92, // 蓝冰：最滑冰变种（机制等价 MC 1.0 blue ice）；滑动速度最快
+        Count          = 93, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -535,6 +549,16 @@ public:
     //   「玩家 AABB 覆盖的格是否梯」（入梯格 + 按前 → 向上爬）+ mesher cross 路由分流，避免各处自写 id 判定漂移
     //   （同 isBed / isCrossBillboard 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（改 id 时一处同步）。
     static bool isLadder(quint8 blockId);
+
+    // t468 冰族统一谓词（单一权威，机制等价 MC 1.0 ice / packed ice / blue ice）：blockId == Ice / PackIce /
+    //   BlueIce 即冰。供 PlayerController 冰滑行物理 + ItemEntityManager 物品冰摩擦 + mesher iceOnly 段路由
+    //   + t469 船冰面加速（单一权威，避免各处自写三个 id 判定漂移，同 isBed / isWool 模式）。三个 id 不连续
+    //   （Ice=45 夹中间，PackIce=91 / BlueIce=92 段末），故显式并判；改族时一处同步谓词即可。
+    static bool isIce(quint8 blockId);
+    // t468 冰面「滑动接近率」（1/s；越小越滑）：玩家水平速度向目标速度的指数接近速率。Ice 中等滑 / PackIce
+    //   更滑 / BlueIce 最滑（机制等价 MC 1.0 ice < packed_ice < blue_ice 滑度递增）。非冰 → 0（caller 据此走
+    //   瞬时设速的常规地面路径）。单一权威：玩家与（未来）船的冰面手感都读它，避免两处魔数漂移。
+    static float iceSlipApproach(quint8 blockId);
 
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
     //   （mesher 合批进 chunk mesh，不走 1×1×1 立方面路径）。t134 落地 6 类（WoodSlab=15 ... WoodTrapdoor=20）。
@@ -891,7 +915,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 106;
+    static constexpr int AtlasTileCount = 108;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
