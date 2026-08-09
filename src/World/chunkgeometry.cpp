@@ -72,11 +72,20 @@ void ChunkGeometry::setCz(int cz)
 //   值未变（WorldClock 跨步但量化值恰好相同 / QML 重绑）则早退，避免无谓重建。
 //   t155：编辑活跃期 WorldClock 节流跳过 sunChanged（见 worldclock.cpp onTick）→ 本 setter 在编辑密集
 //   段不被太阳跨步触发，编辑即时重建（onWorldChanged）独占主线程，无抢帧。
+// t123：太阳方向变（WorldClock 量化跨步 → sunChanged → QML 绑定重算 → 本 setter）。
+//   体素未变、仅光照变 → 直接 buildMesh(Sun)（绕过 chunk dirty：dirty 是「体素改动」标记，与此无关）。
+//   值未变（WorldClock 跨步但量化值恰好相同 / QML 重绑）则早退，避免无谓重建。
+//   t155：编辑活跃期 WorldClock 节流跳过 sunChanged（见 worldclock.cpp onTick）→ 本 setter 在编辑密集
+//   段不被太阳跨步触发，编辑即时重建（onWorldChanged）独占主线程，无抢帧。
+//   t472 视距门控：远端 chunk（!m_chunkInRange）**仍更新 m_sunDir**（保 catch-up 时值已最新）但**跳过
+//   buildMesh**（远 chunk 不绘制 → 无谓全量重建顶点光是「600 段无视距全成本」真因）。回 true 时
+//   setChunkInRange 主动 catch-up 一次。
 void ChunkGeometry::setSunDir(const QVector3D &dir)
 {
     if (m_sunDir == dir) return;
     m_sunDir = dir;
     emit sunInputChanged();
+    if (!m_chunkInRange) return; // t472：远端 chunk 静默跟随值变，不重建
     buildMesh(RebuildReason::Sun);
 }
 
@@ -133,27 +142,32 @@ void ChunkGeometry::setIceOnly(bool on)
 }
 
 // t166b 阴影开关变 → 重网格化（顶点光 PCF 软影随开关重算；语义同光照变 → 用 Sun reason）。值未变早退。
+//   t472 视距门控：远端 chunk 静默更新值，回 true 时 catch-up。
 void ChunkGeometry::setShadowsEnabled(bool on)
 {
     if (m_shadowsEnabled == on) return;
     m_shadowsEnabled = on;
     emit shadowsEnabledChanged();
+    if (!m_chunkInRange) return; // t472：远端跳过，回 true catch-up
     buildMesh(RebuildReason::Sun);
 }
 
 // t178 贪婪网格化开关变 → 重网格化（greedy vs 逐格 culled 顶点布局不同，须重建）。值未变早退。
 //   用 Dirty reason（同编辑即时重建路径，绕过 sun-step 节流）。
+//   t472 视距门控：远端 chunk 静默更新值，回 true 时 catch-up。
 void ChunkGeometry::setGreedyMeshing(bool on)
 {
     if (m_greedyMeshing == on) return;
     m_greedyMeshing = on;
     emit greedyMeshingChanged();
+    if (!m_chunkInRange) return; // t472：远端跳过，回 true catch-up
     buildMesh(RebuildReason::Dirty);
 }
 
 // t223 水贴图动画 phase 变（flipbook 换帧）。仅水段（waterOnly=true）受影响：地形段不引用水 tile，
 //   phase 变化对其顶点 UV 无影响 → 早退不重建（避免地形段无谓 buildMesh）。水段重网格化用 Water reason
 //   （同 waterOnly 切换语义；绕过 sun-step 节流）。phase 钳到 0/1（两帧 flipbook；超界兜底取 0）。
+//   t472 视距门控：远端水段跳过翻页重建（每 2s 一次的水翻页只重建视距内水段，远端水不绘制 → 无需换帧）。
 void ChunkGeometry::setWaterAnimPhase(int phase)
 {
     if (phase < 0 || phase > 1) phase = 0; // 钳到合法两帧范围
@@ -161,7 +175,23 @@ void ChunkGeometry::setWaterAnimPhase(int phase)
     m_waterAnimPhase = phase;
     emit waterAnimPhaseChanged();
     if (!m_waterOnly) return; // 地形段不引用水 tile → 无视觉影响，跳过重建
+    if (!m_chunkInRange) return; // t472：远端水段跳过翻页，回 true catch-up
     buildMesh(RebuildReason::Water);
+}
+
+// t472 视距门控 setter（修 t470 盲点 + 砍 mesh 重建风暴）：由所在段 Model.chunkInRange 绑定注入。
+//   false→true 转变（玩家走近远 chunk 进视野）触发**一次** buildMesh(Sun) catch-up —— 把离开视野期间
+//   错过的 sun 步进 / 水翻页 / shadow / greedy 变化一并应用（远 chunk 重进视野时贴图 / 光照非陈旧）。
+//   true→false 不重建（远 chunk 不绘制，下次回 true 再 catch up）。值未变早退。
+//   reason=Sun：catch-up 走 Sun 语义（绕 chunk dirty；远 chunk 的 dirty 早被 clearAllDirty 清，且 onWorldChanged
+//   本身也门控跳过 → dirty 不可靠，故用无条件重建路径）。
+void ChunkGeometry::setChunkInRange(bool inRange)
+{
+    if (m_chunkInRange == inRange) return;
+    m_chunkInRange = inRange;
+    emit chunkInRangeChanged();
+    if (inRange) buildMesh(RebuildReason::Sun); // false→true：catch-up 错过的 sun/water/shadow/greedy 更新
+    // true→false：不重建（远 chunk 不绘制）
 }
 
 // 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
@@ -181,6 +211,11 @@ Chunk *ChunkGeometry::myChunk() const
 //   恒 true 清除，二者语义解耦、对任何太阳时序 immediate rebuild 都稳健（见 buildMesh 末尾清脏）。
 void ChunkGeometry::onWorldChanged()
 {
+    // t472 视距门控：远端 chunk（!m_chunkInRange）跳过编辑即时重建 —— 它不绘制（visible=false），
+    //   破块/放块无须当帧刷远端 mesh。dirty 标记会被 World::clearAllDirty 清掉，但远 chunk 重进视野
+    //   时 setChunkInRange(false→true) 的 catch-up buildMesh(Sun) 无条件重建，覆盖此情况（mesh 不会陈旧）。
+    //   首次构建期（启动）chunkInRange 默认 true，此门控不影响首次 mesh 生成。
+    if (!m_chunkInRange) return;
     Chunk *c = myChunk();
     if (c && c->dirty()) buildMesh(RebuildReason::Dirty);
 }

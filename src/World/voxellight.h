@@ -29,7 +29,10 @@ namespace VoxelLight {
 //     且低角度时影被截断不无限延伸。
 constexpr float kSunMin    = 0.30f; // ≈17.5° 仰角门（max 仰角 50°→sin=0.766；日中窗 [17.5°,50°]）
 constexpr float kSunFade   = 0.10f; // 门附近 ±0.10 band 平滑淡入
-constexpr int   kMaxShadow = 4;     // 步进上限 4 格（每顶点 4×4=16 次 heightmap 查询；影短促紧凑）
+//   t472 性能：4→2。每顶点 PCF 软影耗 kMaxShadow×4 次 heightmap 查询（4 步 × 2×2 PCF），是 mesh 重建
+//   的主要 CPU 税（每顶点 16 次 → 8 次，减半）。影缩短到 2 格（仍贴障碍根脚可见，只是离障碍更近处才显影）；
+//   PCF 2×2 软过渡保留，影边仍软。配合视距门控（远 chunk 不重建）+ sun 步进稀化，PCF 税进一步降。
+constexpr int   kMaxShadow = 2;     // 步进上限 2 格（每顶点 2×4=8 次 heightmap 查询；影短促紧凑）
 
 // t166 顶点色钳制（PLAN §2-H / §M）：未照明格（深洞无天光 / 无火把）的底亮度 —— 防纯黑撕裂、保留
 //   微弱可辨识（MC 为纯黑，此处取小底兼顾可玩性；火把光池 0.93 与之强对比，洞穴暗 / 火把亮一目了然）。

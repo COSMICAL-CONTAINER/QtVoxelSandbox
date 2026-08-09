@@ -1067,14 +1067,17 @@ Window {
         function onDayPhaseChanged() { audio.setAmbientLevel(0.5 + 0.5 * worldClock.skyLight) }
     }
 
-    // t223 水贴图动画 flipbook 驱动：每 ~800ms 把 window.waterAnimPhase 0↔1 翻转 → 水段 ChunkGeometry
+    // t223 水贴图动画 flipbook 驱动：每 ~2s 把 window.waterAnimPhase 0↔1 翻转 → 水段 ChunkGeometry
     //   （绑了 waterAnimPhase）setWaterAnimPhase 触发 buildMesh(Water) 换帧。spec「静止水 2 帧慢播，勿快」：
-    //   800ms 节拍肉眼读作「轻微荡漾」而非快闪刺眼。仅 playing 态跑（菜单态 View3D 已隐、水段离场，无需动；
-    //   且避免菜单态无谓重建水段 mesh 浪费主线程）。triggered 翻转 phase：0→1→0 循环。
+    //   t472 性能：800ms→2000ms。800ms 节拍 = 每秒 1.25 次全量水段重建（视距门控前 100 水段全成本），
+    //   是 mesh 重建风暴第二根因；2s 节拍肉眼仍读作「轻微荡漾」（水动画稍慢但远没那么卡），配合 t472
+    //   chunkInRange 门控（远水段跳过翻页）水翻页税从「100 段 × 每 0.8s」降到「视距内水段 × 每 2s」。
+    //   仅 playing 态跑（菜单态 View3D 已隐、水段离场，无需动；且避免菜单态无谓重建水段 mesh 浪费主线程）。
+    //   triggered 翻转 phase：0→1→0 循环。
     //   分层（PLAN §2）：纯 QML 呈现层 Timer（不进 Game 层 WorldClock；动画是呈现层选择，非时间语义）。
     Timer {
         id: waterAnimTimer
-        interval: 800
+        interval: 2000
         repeat: true
         running: window.appState === "playing"
         onTriggered: window.waterAnimPhase = (window.waterAnimPhase === 0) ? 1 : 0
@@ -2564,6 +2567,7 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
+                    chunkInRange: terrainModel.chunkInRange // t472：视距门控传给 mesher（远端跳过 sun/water/编辑重建）
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }
             }
@@ -2588,6 +2592,7 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
+                    chunkInRange: waterModel.chunkInRange // t472：视距门控传给 mesher（远端水段跳过翻页重建）
                     waterOnly: true
                     waterAnimPhase: window.waterAnimPhase
                 }
@@ -2617,6 +2622,7 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
+                    chunkInRange: lavaModel.chunkInRange // t472：视距门控传给 mesher（远端岩浆段跳过 sun 重建）
                     lavaOnly: true
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.95; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(1.0, 0.82, 0.6, 1.0) }
@@ -2648,6 +2654,7 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
+                    chunkInRange: glassModel.chunkInRange // t472：视距门控传给 mesher（远端玻璃段跳过 sun 重建）
                     glassOnly: true
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.45; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
@@ -2678,6 +2685,7 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
+                    chunkInRange: iceModel.chunkInRange // t472：视距门控传给 mesher（远端冰段跳过 sun 重建）
                     iceOnly: true
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.88, 0.95, 1.0, 1.0) }
@@ -2714,6 +2722,7 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
+                    chunkInRange: crossModel.chunkInRange // t472：视距门控传给 mesher（远端 cutout 段跳过 sun 重建）
                     cutoutOnly: true   // t326：仅 cross 方块（草丛/作物/树苗）→ cutout 材质（t439 alphaMode:Mask 不透明 pass）
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: terrainLight(worldClock.skyLight) }

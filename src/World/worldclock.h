@@ -154,8 +154,12 @@ private:
     //     t153 PCF 软影进一步柔化跨步过渡：影因子是 sunDir 的连续 0..1 函数（2×2 邻列平均 + 门附近
     //     kSunFade 淡入），小步进 ΔsunDir → 小 Δ影，跨步无突变。步进而非每 tick 刷 = 把「全量 mesh
     //     重建」从 10Hz 降到 ~步数/周期 Hz，代价是顶点光按步进变化（baseColor 仍平滑补昼夜过渡）。
+    //     t472 性能：360→72。360 步在 1200s 周期 = 每 3.3s 一次全量 mesh 重建风暴（视距门控前 600 段
+    //     全成本重建）；72 步 = 每 ~16.7s 一次（5× 稀），昼夜过渡仍可见只是影步进粗一点（每步 ~5°，
+    //     PCF 软影 + 视距内才重建 → 视觉可接受）。配合 t472 ChunkGeometry chunkInRange 门控（远 chunk
+    //     不随 sun 步进重建），sun 风暴从「全量 600 段 × 每 3.3s」降到「视距内段 × 每 16.7s」。
     static constexpr float kSunMaxElevDeg = 50.f;
-    static constexpr int   kSunSteps      = 360;
+    static constexpr int   kSunSteps      = 72;
     // t155 编辑活跃期窗口（毫秒）：近此窗口内有 setBlock（worldChanged）即视为「编辑活跃」→ 太阳跨步
     //   节流跳过。取 1500ms：单次破/放冻结随后 1 个太阳跨步、连续编辑期间持续冻结、玩家停手 >1.5s
     //   即恢复（影 / 天空太阳 catch-up）。值偏小 → 编辑间隙仍偶发抢帧；偏大 → 停手后影滞后明显。1.5s

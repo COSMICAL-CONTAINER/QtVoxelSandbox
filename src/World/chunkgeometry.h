@@ -100,6 +100,21 @@ public:
     //   顶点格式 / dev-plan 偏差 1/2），属推迟项。**t183 默认 false**（用户实测拉伸不可接受）；ESC 设置面板仍可手动
     //   打开 greedy（性能对比 / 纹理数组落地后切回）。值变 → buildMesh 重网格化。
     Q_PROPERTY(bool greedyMeshing READ greedyMeshing WRITE setGreedyMeshing NOTIFY greedyMeshingChanged)
+    // t472 性能：chunk 是否在玩家渲染距离内（视距门控，修 t470 视距盲点 + 砍 mesh 重建风暴）。
+    //   由所在段 Model.chunkInRange 绑定注入（Main.qml `_refreshChunkVisibility` 据玩家所在 chunk +
+    //   renderDistance 切比雪夫半径切换）。**false = 远端 chunk**：sun 步进（setSunDir）/ 水翻页
+    //   （setWaterAnimPhase）/ 阴影开关（setShadowsEnabled）/ greedy 开关（setGreedyMeshing）/ 编辑
+    //   （onWorldChanged）的 setter **仍更新内部值**（保 catch-up 时值已是最新），但**跳过 buildMesh**
+    //   （远 chunk 不绘制 → 不需要重建；这是「600→154 段零 FPS 提升」真因的根治：t470 只门控了
+    //   Model.visible，未门控绑在 Model 内部 ChunkGeometry 上的 sun/water 重建，所有 600 段每 ~3.3s/
+    //   800ms 无视距全成本重建）。
+    //   false→true 转变（玩家走近远 chunk 进视野）触发**一次** buildMesh(Sun) catch-up：把离开视野期间
+    //   错过的 sun/water/shadow/greedy 变化一并应用（远 chunk 重新进视野时贴图 / 光照非陈旧）。
+    //   true→false 不重建（远 chunk 不绘制，下次回 true 再 catch up）。默认 true（首帧 mesh 未绑前按近程
+    //   处理，启动期 worldChanged 触发首次构建后再被 _refreshChunkVisibility 切换）。
+    //   分层（PLAN §2）：纯呈现层门控信号（bool），不依赖 Game 层；与 Model.visible 双重剔除（远端剔除
+    //   + 空段剔除）配套 —— visible 决定「GPU 是否绘制」，chunkInRange 决定「CPU 是否重建 mesh」。
+    Q_PROPERTY(bool chunkInRange READ chunkInRange WRITE setChunkInRange NOTIFY chunkInRangeChanged)
     // t223 水贴图动画 phase（flipbook 帧索引 0/1）：仅水段（waterOnly=true）使用。mesher 据本值在
     //   静水 tile {19,24}（水源 state=0）与流水 tile {23,25}（流水 state>0）间选帧——phase 0 用 {19,23}，
     //   phase 1 用 {24,25}。两帧 flipbook 慢速切换（Main.qml Timer ~800ms 切 0/1，spec「勿快」）→ 静水轻微
@@ -155,6 +170,9 @@ public:
     // t223 水贴图动画 phase（0/1；仅水段使用）。值变 → 水段 buildMesh(Water)（地形段早退）。
     int waterAnimPhase() const { return m_waterAnimPhase; }
     void setWaterAnimPhase(int phase);
+    // t472 视距门控（见 Q_PROPERTY 注释）：true=近程（重建启用）；false=远端（setter 跳过 buildMesh）。
+    bool chunkInRange() const { return m_chunkInRange; }
+    void setChunkInRange(bool inRange);
 
     // 网格统计（t10 F3 叠层）：上次 buildMesh 产出的顶点 / 三角面数。
     int vertexCount() const { return m_vertexCount; }
@@ -173,6 +191,7 @@ signals:
     void shadowsEnabledChanged(); // t166b：阴影开关变（→ buildMesh 重算顶点光 PCF）
     void greedyMeshingChanged();  // t178：贪婪网格化开关变（→ buildMesh 重网格化）
     void waterAnimPhaseChanged(); // t223：水贴图动画 phase 变（→ 水段 buildMesh(Water) 换帧）
+    void chunkInRangeChanged();   // t472：视距门控变（false→true 触发一次 catch-up buildMesh）
     // buildMesh 完成（顶点 / 三角面数已更新；t10 F3 叠层据此刷新汇总）。
     void meshRebuilt();
 
@@ -210,6 +229,7 @@ private:
     bool m_shadowsEnabled = true; // t166b：PCF 软影开关（false → sunShadowAt 返 0，跳过 per-vertex 采样）
     bool m_greedyMeshing = false; // t178/t183：贪婪网格化开关（true=合并同面但贴图拉伸；false=逐格 culled 贴图清晰，t183 默认）
     int m_waterAnimPhase = 0; // t223：水贴图动画 phase（0/1；仅水段使用，flipbook 在 {19,24}/{23,25} 间选帧）
+    bool m_chunkInRange = true; // t472：视距门控（false=远端跳过 buildMesh；false→true catch-up 一次）
     int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
     int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）
 };
