@@ -192,6 +192,27 @@ Window {
     property bool chunksBuilt: false
     property int meshVertices: 0     // 全幅地形段顶点汇总（recomputeMeshStats 写；F3 只读）
     property int meshTriangles: 0    // 全幅地形段三角面汇总（recomputeMeshStats 写；F3 只读）
+    // t470 渲染距离 culling（PLAN §4 性能打磨；用户报 9 FPS 主因 = 100 chunk × 6 段 = 600 Model 全渲染无视距）。
+    //   仅玩家所在 chunk 周围 renderDistance 切比雪夫半径内的 chunk Model 设 visible=true，其余 false → 远端
+    //   chunk 不参与 draw call、不进渲染队列排序，按距离大幅省 GPU / draw-call 开销。
+    //   - 单位 = chunk（每 chunk 16×16 格）；默认 3 → 玩家周围 7×7=49 chunk 可见（中心出生 49/100，省 51% chunk）。
+    //     MC 标准视距 8-12 chunk（128-192 格）适用于 200+ chunk 大世界；本工程 10×10 chunk 小世界取 3 平衡
+    //     性能与可见范围（半径 ≥5 时小世界中心全可见 = 无 culling 收益）。改值经 ESC 设置滑条 + 立即重算。
+    //   - 玩家跨 chunk 边界才重算（每 ~16 格位移触发一次），开销 O(chunk 数) 一次性遍历 chunkObjects；
+    //     非每帧扫描、非每 positionChanged 扫描（_playerCX/_playerCZ 缓存守门）。
+    //   - 数据保留：不可见 chunk 的栅格数据仍在 World 内存（setBlock / 流体 tick 等仍可读写），只是 Model.visible=false
+    //     不绘制几何；玩家走近时 Model.visible=true 即时复显（mesh 已在 chunkAnchor.onCompleted 一次性建好）。
+    //   分层（PLAN §2）：本属呈现层 visibility 决策，只读 player.feetPosition（Game 层 Q_PROPERTY）+ 写各 chunk Model
+    //     的 visible（Renderer 层自有属性），不写栅格 / 不反向依赖 Game。机制等价 MC render distance（仅渲视野半径内 chunk）。
+    property int renderDistance: 3
+    property int _playerCX: -1       // 玩家所在 chunk X（缓存；未初始化 -1，跨 chunk 边界才刷新）
+    property int _playerCZ: -1       // 玩家所在 chunk Z（同上）
+    property int visibleChunkCount: 0 // 当前 chunkInRange=true 的 chunk 数（F3 显示；可见 ≠ 全 meshed 100）
+    // t470 实际 visible=true 的段 Model 数（chunkInRange && geo.vertexCount>0；空段被剔）。draw-call 估算读它
+    //   （替代旧 ncx*ncz*2 / visibleChunkCount*6 上界——空段不出 draw，此为更诚实的估算）。
+    //   注意：值在 _refreshChunkVisibility 末刷新；meshRebuilt 改 vertexCount 时各段 visible 绑定自动重算，
+    //   但本属性不实时跟踪（仅在 chunk 跨界 / 渲染距离调整时刷新）—— F3 draw-call 行仅示性，无需逐帧精度。
+    property int visibleSegmentCount: 0
     // 全幅顶点 / 三角面汇总（遍历 terrainGeos 求和 → 写标量属性）。由每个地形段 ChunkGeometry 的 meshRebuilt
     //   信号经 Connections 触发（buildChunkModels 末也调一次取初值）。在普通函数里读 var 数组不创建绑定依赖，
     //   故不触发 binding loop（与在 text 绑定里读 var 数组相反）。
@@ -204,6 +225,54 @@ Window {
         }
         window.meshVertices = v
         window.meshTriangles = t
+    }
+    // t470 玩家跨 chunk 边界检测 → 触发远端 chunk visibility 刷新。每 positionChanged 调一次（60Hz tick 玩家
+    //   移动时），但仅在 chunk 坐标真变时才走 _refreshChunkVisibility（O(chunk 数) 全扫）。stationary 玩家零开销。
+    function _updatePlayerChunk() {
+        if (!window.chunksBuilt) return // chunkObjects 未就绪（启动初期 / 切世界途中）→ 等创建完再刷新
+        const p = player.feetPosition
+        const cx = Math.floor(p.x / 16)
+        const cz = Math.floor(p.z / 16)
+        if (cx === window._playerCX && cz === window._playerCZ) return
+        window._playerCX = cx
+        window._playerCZ = cz
+        window._refreshChunkVisibility()
+    }
+    // t470 切比雪夫半径内的 chunk Model.chunkInRange=true；外的 false。每 chunk 6 段 Model 共享 chunkCX/CZ，遍历
+    //   chunkObjects 一次性处理（每段独立设 chunkInRange，相邻段同 chunk 一并切换）。Model.visible 由各模板
+    //   的 `visible: chunkInRange && geo.vertexCount > 0` 绑定自动决定（双重剔除：远端 + 空段）。
+    //   visible 计数写 visibleChunkCount 供 F3 显示。玩家越界（cx<0 等）不影响——判 abs(dcx)<=r 自然过滤。
+    function _refreshChunkVisibility() {
+        const objs = window.chunkObjects
+        const pcx = window._playerCX, pcz = window._playerCZ
+        const r = window.renderDistance
+        let vis = 0
+        // chunk Model 6 段共享同 chunkCX/chunkCZ；用「首段」统计 unique chunk 数（避免重复计 6 段）。
+        // 简化：每 6 段为一组，组内首段命中即 chunk 计数 +1。
+        const totalChunks = window.worldChunksPerSide * window.worldChunksPerSide
+        const segmentsPerChunk = 6 // terrain + water + lava + cross + glass + ice
+        for (let i = 0; i < objs.length; ++i) {
+            const o = objs[i]
+            if (!o) continue
+            const inRange = (Math.abs(o.chunkCX - pcx) <= r && Math.abs(o.chunkCZ - pcz) <= r)
+            o.chunkInRange = inRange // visible 由各模板绑定读 chunkInRange && geo.vertexCount > 0
+            // 每 segmentsPerChunk 段为一组；组首（i % 6 == 0）且 inRange → chunk 计数 +1。
+            if (inRange && (i % segmentsPerChunk) === 0) ++vis
+        }
+        window.visibleChunkCount = vis
+        // 防御：若 chunkObjects 长度 ≠ totalChunks*6（构造期未齐 / 异常），visibleChunkCount 不超 totalChunks。
+        if (window.visibleChunkCount > totalChunks) window.visibleChunkCount = totalChunks
+        // t470 诊断日志：首次刷新 + chunk 跨界时记录可见数（确认 culling 生效 + 玩家移动后正确更新）。
+        // segVis = 实际 visible=true 的段数（chunkInRange && geo.vertexCount>0），验证空段剔除生效。
+        let segVis = 0
+        for (let j = 0; j < objs.length; ++j) {
+            const o = objs[j]
+            if (o && o.visible) ++segVis
+        }
+        window.visibleSegmentCount = segVis
+        console.info("[t470] chunk visibility: player chunk (" + pcx + "," + pcz + ") r=" + r
+                     + " chunks " + vis + "/" + totalChunks
+                     + " segs visible " + segVis + "/" + objs.length)
     }
 
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
@@ -953,6 +1022,10 @@ Window {
     //   不连每个 chunk 的 meshRebuilt：100 chunk 创建期会级联 100 次 recompute → meshVertices 写 → F3 text 绑定
     //   连续重算 → QML binding-loop 检测器误报（虽自收敛，但留 WRN）。worldChanged 是几何变化的唯一汇聚点，足够。
     Connections { target: theWorld; function onWorldChanged() { window.recomputeMeshStats() } }
+    // t470 玩家位置变 → 检测 chunk 边界跨越 → 刷新 chunk visibility。仅 chunksBuilt 后生效（启动初期跳过）。
+    //   _updatePlayerChunk 内 _playerCX/_playerCZ 缓存守门：仅在 chunk 坐标真变时才走 O(chunk 数) visibility 重算，
+    //   不每 positionChanged 都重算（玩家在同 chunk 内移动 60Hz positionChanged 但零刷新开销）。
+    Connections { target: player; function onPositionChanged() { window._updatePlayerChunk() } }
 
     // t386 闪电击中（雷雨天随机，World::strikeLightning 发）：闪光 + 雷声 + 击中点附近实体伤害的单一入口。
     //   分层（PLAN §2）：World 低层只发 lightningStruck(x,y,z) 语义事件 + 自身焚毁木类方块；呈现层（白闪动画 +
@@ -2452,6 +2525,9 @@ Window {
                 window.chunkObjects = objs
                 window.recomputeMeshStats()   // 取初值（createObject 时各段已 buildMesh；后续 meshRebuilt 增量刷新）
                 console.info("[t276] built", objs.length, "chunk Models (" + nx + "x" + nz + "=" + (nx*nz) + " chunks)")
+                // t470 首次刷新 chunk visibility：player.feetPosition 此前可能已 emit positionChanged 但 chunksBuilt
+                //   守门跳过；chunks 现就绪 → 显式初始化 _playerCX/_playerCZ + 应用 culling（远端 chunk 不可见）。
+                window._updatePlayerChunk()
             }
         }
 
@@ -2475,8 +2551,13 @@ Window {
                 id: terrainModel
                 property int chunkCX: 0
                 property int chunkCZ: 0
+                // t470 渲染距离 + 空段剔除：chunkInRange 由 _refreshChunkVisibility 设（玩家跨 chunk 边界时）；
+                //   geo.vertexCount > 0 跳过空段（本段几乎总有内容，但绑定统一为「在范围内且非空」）。
+                property bool chunkInRange: true
+                visible: chunkInRange && terrainGeo.vertexCount > 0
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
+                    id: terrainGeo
                     world: theWorld
                     cx: terrainModel.chunkCX
                     cz: terrainModel.chunkCZ
@@ -2496,8 +2577,11 @@ Window {
                 id: waterModel
                 property int chunkCX: 0
                 property int chunkCZ: 0
+                property bool chunkInRange: true
+                visible: chunkInRange && waterGeo.vertexCount > 0
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
+                    id: waterGeo
                     world: theWorld
                     cx: waterModel.chunkCX
                     cz: waterModel.chunkCZ
@@ -2522,8 +2606,11 @@ Window {
                 id: lavaModel
                 property int chunkCX: 0
                 property int chunkCZ: 0
+                property bool chunkInRange: true
+                visible: chunkInRange && lavaGeo.vertexCount > 0
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
+                    id: lavaGeo
                     world: theWorld
                     cx: lavaModel.chunkCX
                     cz: lavaModel.chunkCZ
@@ -2550,8 +2637,11 @@ Window {
                 id: glassModel
                 property int chunkCX: 0
                 property int chunkCZ: 0
+                property bool chunkInRange: true
+                visible: chunkInRange && glassGeo.vertexCount > 0
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
+                    id: glassGeo
                     world: theWorld
                     cx: glassModel.chunkCX
                     cz: glassModel.chunkCZ
@@ -2577,8 +2667,11 @@ Window {
                 id: iceModel
                 property int chunkCX: 0
                 property int chunkCZ: 0
+                property bool chunkInRange: true
+                visible: chunkInRange && iceGeo.vertexCount > 0
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
+                    id: iceGeo
                     world: theWorld
                     cx: iceModel.chunkCX
                     cz: iceModel.chunkCZ
@@ -2610,8 +2703,11 @@ Window {
                 id: crossModel
                 property int chunkCX: 0
                 property int chunkCZ: 0
+                property bool chunkInRange: true
+                visible: chunkInRange && crossGeo.vertexCount > 0
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
+                    id: crossGeo
                     world: theWorld
                     cx: crossModel.chunkCX
                     cz: crossModel.chunkCZ
@@ -5962,6 +6058,29 @@ Window {
                         Text { text: window.shadowsEnabled ? "开（软影，较吃性能）" : "关（无影，更快 — 测卡顿用）"
                                color: "#cccccc"; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter }
                     }
+                    // t470 渲染距离滑条（用户报 9 FPS 主因 = 全 100 chunk 渲染无视距；动态调可见 chunk 半径）。
+                    //   机制等价 MC video display setting 的 render distance 滑条。range 1..8 chunk（= 16..128 格）：
+                    //   小→省 draw-call/GPU、视野收；大→视野广、吃性能。本工程 10×10 chunk 小世界半径 ≥5 时全可见
+                    //   无 culling 收益，故默认 4（中心出生 81/100 chunk 可见）。改值触发 _refreshChunkVisibility
+                    //   立即重算（onValueChanged 直调，无需等玩家跨界）。
+                    Text { text: "渲染距离（chunk 半径；当前 " + window.renderDistance
+                                 + " → 可见 " + window.visibleChunkCount + "/" + (window.worldChunksPerSide * window.worldChunksPerSide)
+                                 + " chunk）"
+                           color: "#7fae7f"; font.pixelSize: 12 }
+                    ArmSlider {
+                        width: parent.width
+                        label: "render distance"
+                        from: 1; to: 8
+                        value: window.renderDistance
+                        // chunksBuilt 守门：ArmSlider 默认 value=0，初次绑 window.renderDistance(=3) 时 0→3
+                        //   会触发 onValueChanged；此时 chunks 未建 / _playerCX 未定 → 跳过（chunkAnchor.onCompleted
+                        //   末会显式 _updatePlayerChunk 取首值）。
+                        onValueChanged: {
+                            if (!window.chunksBuilt) return
+                            window.renderDistance = Math.round(value)
+                            window._refreshChunkVisibility()
+                        }
+                    }
                     // t166 暗度参数：minLight 滑条（terrainLight floor）。越大夜间/阴暗越亮（用户「黑的地方稍太黑」可调）。
                     Text { text: "暗度（minLight：夜间/阴暗最低亮度）"
                            color: "#7fae7f"; font.pixelSize: 12 }
@@ -6469,7 +6588,9 @@ Window {
             // t256：draw 估算用 liveCount（活体实体）非 count（含已 release 的空槽）—— 空槽 delegate
             //   visible=false 不参与绘制，count 会高估（slot-reuse 后 count=槽位数 ≠ 渲染实体数）。
             const itemLive = itemEntities.liveCount(), mobLive = entityManager.liveCount(), orbLive = xpOrbs.liveCount()
-            const drawEst = ncx * ncz * 2 + itemLive + mobLive + torchPositions.count + 6
+            // t470：draw 估算用 visibleSegmentCount（双重剔除后实际渲染段数：range + 空段）。替代旧 ncx*ncz*2
+            //   （过时：当时仅 terrain+water 两段且无视距；现 6 段 + culling visible < total）。
+            const drawEst = window.visibleSegmentCount + itemLive + mobLive + torchPositions.count + 6
             const meshMode = window.greedyMeshing ? "greedy" : "culled"
             // t464 玩家脚底所在格 → 群系名（theWorld.biomeIdAt 是 Q_INVOKABLE，但本绑定已读 player.feetPosition
             //   （NOTIFY positionChanged）→ 玩家每移动一格整 text 重算，biome 即时随脚刷新）。群系编码 0..5 见
@@ -6499,12 +6620,17 @@ Window {
                  + "\nbiome: " + biomeName + "  (col " + fpx + "," + fpz + ")"
                  // t276：world 行读 worldChunksPerSide（权威）+ theWorld.height（literal，非绑定，无 loop），
                  //   不读 theWorld.width/depth（绑定链 → binding loop）。t307：height 64→128。
+                 //   t470：chunks 段加 render distance + visible 计数（culling 验收：visible < total = 远端 chunk 已剔除）。
                  + "\nworld: " + (window.worldChunksPerSide * 16) + "×" + (window.worldChunksPerSide * 16) + "×" + theWorld.height
-                 + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz) + " (all meshed)"
+                 + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz)
+                 + "  render r=" + window.renderDistance + " visible " + window.visibleChunkCount + "/" + (ncx * ncz)
                  + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr // t178：mesh 模式 + 顶点/三角（greedy 大幅降）
                  // t464 实体行（liveCount 三类）—— 验证 t437 orphan 修复的关键诊断：退存档→再进应回落，跨世界不累积。
                  + "\nentities: mobs " + mobLive + " / items " + itemLive + " / orbs " + orbLive
-                 + "\ndraw-calls: ~" + drawEst + "  (chunks×2 " + (ncx * ncz * 2) + " + items " + itemLive
+                 // t470：draw-calls 估算改用 visibleSegmentCount（双重剔除后实际渲染的段 Model 数；替代旧 ncx*ncz*2
+                 //   上界——当时仅 terrain+water 两段且无视距，现 6 段 + culling 后实际渲染段数远低于 chunk×6）。
+                 + "\ndraw-calls: ~" + drawEst + "  (segs vis " + window.visibleSegmentCount
+                 + " + items " + itemLive
                  + " + mobs " + mobLive + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
                  // t464 game time：HH:MM（dayPhase 派生）+ day N（dayCount）+ moon M（moonPhase）+ phase/sky（t09 调试）。
                  + "\ntime: " + timeStr + "  day " + worldClock.dayCount + "  moon " + worldClock.moonPhase
