@@ -119,12 +119,16 @@ Node {
     //   死亡白烟上飘（旧版常量 14 会让烟弹起即落，不像「消散」）。
     //   渐隐：opacity = clamp(life / maxLife * 1.5)，使后 2/3 寿命平滑淡出（前 1/3 保满 alpha 显眼）。
     //   dt 取 interval/1000 标称值（不读实际墙钟——视觉弹道对微小帧率波动不敏感，且免每帧读 clock 开销）。
+    //   t500 perf：包测本轮弹道推进耗时，经 FrameProfiler.addSampleMs("bp", ms) 推进 bp 桶（窗口总 ms）。
+    //     用户「碎屑运动慢 + 更卡」需区分「被 mob tick 吃满帧 → 粒子掉帧」vs「池本身扫描开销」——本桶给数。
     Timer {
         id: tickTimer
         interval: 20
         repeat: true
         running: false
         onTriggered: {
+            // t500 perf：测本轮 onTriggered 总耗时（含 Date.now 调用，本身 ~0）。
+            const t0 = (typeof performance !== "undefined") ? performance.now() : Date.now()
             const dt = 0.020
             const arr = root.pool
             for (let i = 0; i < arr.length; i++) {
@@ -148,6 +152,9 @@ Node {
                 m.z = m.z + nvz * dt
                 m.particleOpacity = Math.min(1.0, p.life / p.maxLife * 1.5)
             }
+            // t500 perf：推 ms 样本到 bp 桶（FrameProfiler 单例，QML_GLOBAL 进程唯一）。
+            const t1 = (typeof performance !== "undefined") ? performance.now() : Date.now()
+            FrameProfiler.addSampleMs("bp", t1 - t0)
         }
     }
 

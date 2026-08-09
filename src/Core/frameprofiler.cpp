@@ -45,6 +45,14 @@ void FrameProfiler::count(const char *name)
     m_counts[name] += 1;
 }
 
+// t500 QML 侧样本入口（BlockParticles.qml 等）：name → ns 累加进 m_ns（同 add 路径，但 name 非 const char* 字面量
+//   而是 QString → 转 std::string 做 unordered_map 键；QML 一周 ~50 调用，开销可忽略）。
+void FrameProfiler::addSampleMs(const QString &name, double ms)
+{
+    if (ms <= 0.0) return; // 防 0 / 负值（Date.now 精度噪声）
+    m_ns[name.toStdString()] += qint64(ms * 1e6);
+}
+
 qint64 FrameProfiler::bucket(const char *name) const
 {
     auto it = m_ns.find(name);
@@ -102,6 +110,7 @@ void FrameProfiler::flush()
         + "sim " + QString::number(simMs, 'f', 2)
         + "  mesh " + QString::number(meshMs, 'f', 2) + "(" + QString::number(meshN) + "reb)"
         + "  world " + QString::number(worldMs, 'f', 2)
+        + "  bp " + QString::number(double(bucket("bp")) / 1e6, 'f', 2)
         + "  [wat " + QString::number(wMs[0], 'f', 1)
         + " lav " + QString::number(wMs[1], 'f', 1)
         + " crop " + QString::number(wMs[2], 'f', 1)

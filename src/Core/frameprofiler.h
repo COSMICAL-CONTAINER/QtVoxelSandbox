@@ -72,6 +72,12 @@ public:
     // 每 ~1s 调一次（PlayerController 既有 perf 窗口）：把当前窗口各桶 → 报告，重置窗口，emit + qInfo。
     void flush();
 
+    // t500 perf：QML 侧（如 BlockParticles.qml 的 50Hz Timer）经它推一个样本到 name 桶（ms 单位）。
+    //   QML Timer 跑在 GUI 线程、与 C++ 60Hz tick 同线程但异步节拍 → 样本累加进窗口桶、report 时按
+    //   「窗口总 ms」展示（同 mesh/w 前缀桶），不除帧数。name 须为静态字面量（同 add 契约）。
+    //   分层（PLAN §2）：Core 叶子，仅依赖 Qt Core/Qml；QML 经 QML_NAMED_ELEMENT 单例访问。
+    Q_INVOKABLE void addSampleMs(const QString &name, double ms);
+
 signals:
     void reportChanged();
 

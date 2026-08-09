@@ -365,6 +365,17 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
         if (!e.alive || e.kind != Mob || !e.hostile) continue; // 仅敌对 Mob；passive / FallingBlock 跳过
         if (e.dead) continue; // 尸体走 deathTimer 链（tick 内已处理），不燃烧 / 不远距消失
 
+        // t500 perf：每 hostile 每 kAiTickInterval 帧才跑一次燃烧 / 远距消失扫描（错峰 idx，同 tick 内 aiTick
+        //   判定一致 —— m_tickPhase 同帧两处用同式 → 同一组 mob 在 tick / tickHostileLife 同步节流）。skyLightAt +
+        //   isPrecipitatingAt（biomeAt 内含 4 次 fbm × 4 阶噪声）是 hostile 每 mob 每帧主开销，节流后平均削 1/N。
+        //   burnTimer 据 hostileAccum 累积 aiDt 推进 → 平均燃烧扣血速率不变（kBurnDamageInterval=1s 量级，
+        //   节流到 15Hz 误差 <100ms 不可察觉）。spawn 调度（段 c）已有 kSpawnInterval=2s 独立节流不受影响。
+        e.hostileAccum += float(dt);
+        const bool aiTick = ((m_tickPhase + quint32(idx)) % quint32(kAiTickInterval)) == 0;
+        if (!aiTick) continue;
+        const float aiDt = e.hostileAccum;
+        e.hostileAccum = 0.0f;
+
         // (a) 日光燃烧判定：mob 所在格直接见天（skyLightAt>=15 = 无遮挡）且白天（skyBrightness>门槛）→ 燃烧。
         //   mob 中心格 (sx, sy, sz)：用 body 中心 Y（pos.y）所处方块格（同 tick 的窒息判定取身体高度处格）。
         //   shade（skyLightAt<15，如树叶下 / 屋檐 / 洞口）→ 不燃烧（机制等价 MC 树荫保护敌对）。
@@ -384,7 +395,7 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                                  && e.mobType != MobStalker && !rainingHere;
         if (inDaylight) {
             if (!e.burning) { e.burning = true; dirty = true; } // 翻入燃烧 → bump（QML 显火焰）
-            e.burnTimer += float(dt);
+            e.burnTimer += aiDt;
             if (e.burnTimer >= kBurnDamageInterval) {
                 e.burnTimer -= kBurnDamageInterval;
                 damageEntity(idx, 1); // 复用受击链：扣 1HP + 红闪 + （归零时）mobDied 死亡消失
@@ -1829,6 +1840,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     const float worldD = float(world->depth());
     bool dirty = false;
     std::vector<int> toRemove; // FallingBlock 着地 / 跌出 + t239 mob deathTimer 到 / void-loss 索引（逆序 erase）
+    // t500 perf：tick 节拍 +1（每 60Hz tick 一次）；mob AI / 环境扫描错峰节流据它判本帧哪些 mob 跑重活。
+    ++m_tickPhase;
 
     // t321 玩家受击全局节流倒计时（每帧扣一次，非每实体；防多 mob 围攻秒杀，详见 kPlayerHitThrottle 注释）。
     if (m_playerHitCooldown > 0.0f) {
@@ -2044,6 +2057,22 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 continue; // dead：不走 AI / 重力
             }
 
+            // t500 perf：mob AI / 环境扫描错峰节流 —— 每 kAiTickInterval 帧（按 idx 错峰）跑一次「火烧 / 仙人掌 /
+            //   AI 决策 + 移动 / 窒息」重活，传 aiDt = 自上帧起的累积 dt → AI 速度 / 火伤 / 仙人掌扎伤 / 窒息 /
+            //   吃草推进「每秒平均速率」与原每帧路径一致（aiDt = N·dt 抵消 N 倍节流）。物理（重力 / resting /
+            //   推动 / 击退）+ 受击红闪 + 走路声 + 环境音 + 水流推动仍每帧跑（连续体感 + 即时反馈）。
+            //   mob 桶瓶颈（用户实测 24.99ms/f）由每 mob 每帧 ~50 blockAt（mobAabbHitsSolid×2 全格扫 + 仙人掌
+            //   10 邻接 + 视线 raycast）× 60 槽 = 数千 blockAt/帧 构成；错峰节流后单帧平均 1/N mob 跑重活 →
+            //   削到目标 <5ms/f。机制等价 MC 1.0 mob AI 节流（mob think 每 4-5 tick，非每 tick 全员跑）。
+            e.aiAccum += float(dt);
+            const bool aiTick = ((m_tickPhase + quint32(idx)) % quint32(kAiTickInterval)) == 0;
+            const float aiDt = aiTick ? e.aiAccum : 0.0f;
+            if (aiTick) e.aiAccum = 0.0f;
+            // speedScale：每帧算（水中物理 + 水流推动都需它；1 blockAt 廉价，无需节流）。
+            const float speedScale = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)
+                                     ? kWaterSpeedMul : 1.0f;
+
+            if (aiTick) {
             // t344 火烧系统（岩浆 / 火点燃；ALL mobs 含 passive；机制等价 MC 1.0 实体触岩浆着火 + 火伤 + 熄灭）。
             //   分两段：
             //   (1) 岩浆接触点燃：mob 脚位格 floor(pos.y−halfH) 或身体中心格 floor(pos.y) 任一 == Lava → 刷新
@@ -2080,8 +2109,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     }
                 }
                 if (e.fireTimer > 0.0f) {
-                    if (!touchingLava) e.fireTimer -= float(dt);
-                    e.fireDamageTimer += float(dt);
+                    if (!touchingLava) e.fireTimer -= float(aiDt);
+                    e.fireDamageTimer += float(aiDt);
                     if (e.fireDamageTimer >= kFireDamageInterval) {
                         e.fireDamageTimer -= kFireDamageInterval;
                         // 先掷随机提前熄灭（机制等价 MC 火 random extinguish）；不熄才扣 1HP 火伤。
@@ -2128,7 +2157,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
                 if (!touch && cactusCell(fx, footY - 1, fz)) touch = true; // 站在仙人掌顶
                 if (touch) {
-                    e.cactusDamageTimer += float(dt);
+                    e.cactusDamageTimer += float(aiDt);
                     if (e.cactusDamageTimer >= kCactusDamageInterval) {
                         e.cactusDamageTimer = 0.0f;
                         if (!e.dead) { damageEntity(idx, 1); dirty = true; } // 仙人掌扎伤 1HP（复用受击链）
@@ -2145,13 +2174,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   吃草周期；否则走 AI wander，并据 idle + 扫描冷却决定是否开吃草周期。
             // t298 怪物受水流影响：脚位在水格 → 水平减速（speedScale=kWaterSpeedMul）。透传给各 AI 函数缩放位移；
             //   浮力缓沉 + 流水推动在下方 Mob 分支末段（flow push）+ 共享垂直段（buoyancy）处理。
-            const float speedScale = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)
-                                     ? kWaterSpeedMul : 1.0f;
+            // t500 perf：speedScale 已提到 aiTick 守卫之外（每帧算，供水流推动用）；此处不重复。
             const bool isSheep = (e.mobType == MobSheep);
             const bool eating = isSheep && e.eatTimer > 0.0f;
             if (eating) {
                 // 吃草周期：推进计时；到 apply 阈值时消耗前方草丛（草丛→空气 + 下草→泥土）；周期内强制 idle。
-                e.eatTimer -= float(dt);
+                // t500 perf：节流帧用 aiDt（累积值）推进 → 平均速率与原每帧路径一致。
+                e.eatTimer -= float(aiDt);
                 const float eatElapsed = kEatDuration - e.eatTimer;
                 if (!e.eatApplied && eatElapsed >= kEatApplyAt) {
                     // 即时消耗（apply 在周期中段、近 sin(πp) 包络峰 = 头最低时嚼）。consume=true 写栅格。
@@ -2178,19 +2207,19 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         e.fuseTimer = 0.0f;
                         dirty = true; // chasing/fuse 翻转 → bump 让 QML 收回追踪高亮 / 蓄力膨胀
                     }
-                    if (aiWander(e, float(dt), world, worldW, worldD, speedScale)) dirty = true;
+                    if (aiWander(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
                 } else if (e.mobType == MobBones) {
                     // t281/t283/t284 敌对 AI：替代 wander。listener = 玩家脚位（tick 参数）。
                     //   t281 Shambler（僵尸）→ aiHostile（detect→pathfind→melee attack）。
                     //   t283 Bones（骷髅弓箭手）→ aiArcher（detect→keep-distance→shoot 远程射箭）。
                     //   t284 Stalker（潜行者/苦力怕）→ aiStalker（detect→chase→fuse→detonate 近距自爆）。
                     //   非追踪回退到 wander（在 aiHostile / aiArcher / aiStalker 内）。
-                    if (aiArcher(e, float(dt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    if (aiArcher(e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                     // t331 拉弓期（chasing）每帧 bump revision → QML drawAmountAt 绑定刷新（驱动抬臂 + 弦后拉）；
                     //   即使 aiArcher 返 moved=false（拉弓减速到停），aimTimer 仍在变 → 须 dirty（同 Stalker inflate 模式）。
                     if (e.chasing) dirty = true;
                 } else if (e.mobType == MobStalker) {
-                    if (aiStalker(e, float(dt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    if (aiStalker(e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                     // 蓄力期（chasing）每帧 bump revision → QML inflateAt 绑定刷新（驱动膨胀动画 + 蓄力发白）；
                     //   即使 aiStalker 返 moved=false（蓄力站立不动），inflate 仍在变 → 须 dirty。熄火（fuseTimer→0）
                     //   亦在 chasing 态内 → 一并刷新让 QML 收回膨胀。
@@ -2198,13 +2227,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     // 引爆当帧移除：detonateStalker 置 exploded=true → 跳过后续重力 / resting（尸体即除）。
                     if (e.exploded) { toRemove.push_back(idx); continue; }
                 } else {
-                    if (aiHostile(e, float(dt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    if (aiHostile(e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                 }
             } else {
                 // 非吃草：扫描冷却倒数（仅羊）；AI wander；羊 idle 且冷却到 → 扫前方草丛决定是否开吃。
                 //   t399 鱿鱼（mobType==MobSquid）走 aiSquid（水里喷水游动；非 aiWander），且无吃草分支（非羊）。
                 if (e.mobType == MobSquid) {
-                    if (aiSquid(e, float(dt), world, worldW, worldD, speedScale)) dirty = true;
+                    if (aiSquid(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
                 } else {
                 // t400 求偶寻偶（spec「喂食 → 求偶 → 同种配对」；机制等价 MC 1.0 love mode 寻偶）：成体可繁殖 mob
                 //   在求偶期（loveTimer>0）→ 覆盖 wander 的随机选向，把 yaw 钉向最近同种求偶配偶 + 强制行走 +
@@ -2224,8 +2253,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         e.wanderTimer = 0.4f;       // 防 aiWander 本帧重新随机选向（0.4s > 一帧 dt，下帧再重设）
                     }
                 }
-                if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(dt);
-                if (aiWander(e, float(dt), world, worldW, worldD, speedScale)) dirty = true;
+                if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(aiDt);
+                if (aiWander(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
                 if (isSheep && e.eatCooldown <= 0.0f && e.wanderSpeed <= 0.0f) {
                     // idle 且扫描冷却到：前方有草丛 → 开吃草周期（headPitch 动画 + 中段消耗）；无 → 重置短冷却再等。
                     if (sheepEatGrass(e, world, worldW, worldD, /*consume=*/false)) {
@@ -2247,7 +2276,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   派生效果，非主动行为，不强制站立）；spec「偶尔」表概率性，节流扫描间隔本身就是「偶尔」语义。
                 if (isSheep && e.sheared) {
                     if (e.regrowCooldown > 0.0f) {
-                        e.regrowCooldown -= float(dt);
+                        e.regrowCooldown -= float(aiDt);
                     } else {
                         // 冷却到：扫脚下方块（AABB 底面下一格 = 支撑格）。是 Grass → 重新长毛 + 草方块→泥土。
                         const int gx = qFloor(e.pos.x());
@@ -2269,6 +2298,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
                 } // 非 squid 的 passive（sheep 吃草 / 通用 wander）；squid 走上面 aiSquid 分支
             }
+            } // /aiTick（t500 perf：火烧 / 仙人掌 / AI / 吃草 节流到此；下方物理 + 音频每帧跑）
 
             // t298 流水推动 mob（机制等价玩家 t211：脚位在流水格 state>0 → 沿「离源方向」叠入水平位移）。
             //   流向据脚位 4 向邻居 state 梯度推算：state 低于脚位的邻居 = 近源方向 → 推力朝远离它（离源）。
@@ -2412,12 +2442,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   isCollidable 判定；仅「头部被完整碰撞方块包裹」才窒息，机制等价 MC 头卡进 solid block）。
             //   注：damageEntity 内 bump revision + emit，本 tick 末尾仍再 emit 一次（同帧多次 emit 无副作用，
             //   QML 绑定合并到下次事件循环求值）。
-            {
+            //   t500 perf：与火烧 / 仙人掌同走 aiTick 节流 —— 每 mob 每 kAiTickInterval 帧扫一次头部格，
+            //   suffocationTimer 用 aiDt 累积 → 平均窒息扣血速率不变（kSuffocationInterval=1s 量级，节流到 15Hz
+            //   误差 <100ms 不可察觉）。每帧跑会浪费每 mob 1 isCollidable（60 槽 = 60 次 / 帧）。
+            if (aiTick) {
                 const int sx = qFloor(e.pos.x());
                 const int sz = qFloor(e.pos.z());
                 const int sy = qFloor(e.pos.y() + e.halfH - 1e-3f);
                 if (sy >= 0 && world->isCollidable(sx, sy, sz)) {
-                    e.suffocationTimer += float(dt);
+                    e.suffocationTimer += float(aiDt);
                     if (e.suffocationTimer >= kSuffocationInterval) {
                         e.suffocationTimer -= kSuffocationInterval;
                         damageEntity(idx, 1); // 复用受击链：扣 1HP + 红闪 + （归零时）死亡掉落（内含 dead/越界/amount 守）

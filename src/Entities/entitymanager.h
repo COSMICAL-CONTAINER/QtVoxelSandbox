@@ -561,6 +561,15 @@ private:
         int armorChest  = 0;      // 胸甲护甲 id（0=无）
         int armorLegs   = 0;      // 护腿护甲 id（0=无）
         int armorBoots  = 0;      // 靴子护甲 id（0=无）
+        // t500 perf：mob AI / 环境扫描节流累积器（秒）。每帧 += dt；aiTick 帧（每 kAiTickInterval 帧一次，
+        //   错峰 idx % kAiTickInterval）才跑 AI 决策 + 火烧 / 仙人掌 / 窒息 / 吃草扫描，传 aiDt = 累积值 →
+        //   AI 速度 / 火伤 / 仙人掌扎伤 / 吃草推进「每秒平均值」与原每帧路径一致（aiDt = N·dt 抵消 N 倍节流）。
+        //   放 struct 末尾保既有聚合初始化不错位（lessons-learned t256 元教训）。
+        float aiAccum = 0.0f;
+        // t500 perf：tickHostileLife 节流累积器（秒；仅 hostile Mob 用）。tickHostileLife 每 tick 遍历所有
+        //   槽，但每个 hostile 仅每 kAiTickInterval 帧（同 aiAccum 错峰）跑燃烧 / 远距消失判定（光照 +
+        //   距离 + 降水群系解析）。burnTimer 据本累积器按 aiDt 推进 → 平均燃烧扣血速率不变。
+        float hostileAccum = 0.0f;
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;
@@ -586,6 +595,11 @@ private:
     // t392 刷怪笼 spawn 节流累积器（秒）：tickSpawners 每 tick 累加 dt，达 kSpawnerInterval 才扫描玩家周围 Spawner
     //   块（按需扫描，避免每帧扫 ~28³ 体素；playerPos 由 PlayerController 传 m_pos）。同 m_spawnAccum 模式。
     float m_spawnAccumSpawner = 0.0f;
+    // t500 perf：tick 节拍计数（每 tickImpl 一次 +1，单调不溢出 —— quint32 ~2.1e9，可玩 414 天不回绕）。
+    //   每 mob 的「本帧是否跑 AI / 环境扫描」据 ((m_tickPhase + idx) % kAiTickInterval) == 0 错峰判定 →
+    //   每 kAiTickInterval 帧一轮、每帧约 1/N 的 mob 跑重活 → 单帧负载均摊（无 GC spike）。
+    //   机制等价 MC 1.0 mob AI 节流（mob 每 4-5 tick 才 think 一次而非每 tick），只是分布到不同 mob。
+    quint32 m_tickPhase = 0;
 
     // 把构造好的实体放入槽位（优先复用空槽，否则追加）。move 入槽后 alive=true（Entity 默认）。++m_liveCount。
     int acquireSlot(Entity &&e)
@@ -729,6 +743,16 @@ private:
     static constexpr int kCap = 64;            // 实体数上限（测试用，防溢出）
     static constexpr float kGravity = 28.0f;   // 重力加速度（blocks/s²；与玩家/掉落物同值，世界手感一致）
     static constexpr float kMaxFall = 78.4f;   // 终端下落速度（blocks/s；防无限加速）
+    // t500 perf：mob AI / 环境扫描节流间隔（帧）。每 kAiTickInterval 帧每 mob 才跑一次「AI 决策 + 火烧 /
+    //   仙人掌 / 窒息 / 吃草扫描」（错峰 idx % kAiTickInterval → 单帧 1/N mob 跑重活）。N=4 → 每 mob ~15Hz
+    //   AI（MC 1.0 mob think 每 4-5 tick ≈ 12-15Hz 量级；机制对齐）。mob 物理（重力 / resting / 击退 / 推动）
+    //   + 受击红闪 + 走路声 + 环境音仍每帧跑（连续体感 + 即时反馈）。mob 移动也走节流（每 N 帧 aiDt=N·dt
+    //   一次走完 → 平均位移速度不变；aiDt=N·dt 下位移 0.05-0.15 block/AI-tick，远 < 1 block → 不穿墙）。
+    //   作用：mob 桶瓶颈（用户实测 24.99ms/f，60FPS 预算 16.6ms/f）由每 mob 每帧 ~50 blockAt（mobAabbHitsSolid
+    //   ×2 全格扫 + 仙人掌邻接 + 视线 raycast）× 60 槽 = 数千 blockAt/帧 构成；节流后平均 1/N → 目标 <5ms/f。
+    //   保留 gameplay：mob 仍正常 AI / 攻击 / 刷怪（仅决策频率降；玩家受击 / 碰撞仍即时）；移动平滑度略降
+    //   （肉眼可见小幅「步进」），MC 自身也这样（机制等价；PLAN §4 机制对标非数值 1:1）。
+    static constexpr int kAiTickInterval = 4;
     // t252：kRestOffset 移除 —— resting 贴地偏移现按 per-entity halfH（底面贴支撑方块顶面 = top + halfH），
     //   不再是固定 0.5（cow halfH=0.70 → 比 1×1 高 0.2，单一常量无法表达）。
     // t239 生物基类常量：
