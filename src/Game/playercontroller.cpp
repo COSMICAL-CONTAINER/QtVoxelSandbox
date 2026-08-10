@@ -83,6 +83,7 @@ void PlayerController::setWorld(World *w)
 {
     if (m_world == w) return;
     m_world = w;
+    m_dispenserCooldowns.clear(); // t486：换世界清发射器冷却（防跨世界同坐标串扰；冷却键按世界坐标打包）
     snapSpawnToGround(); // t137：世界注入后贴地表（构造期 m_pos=kSpawnY 兜底，此处覆盖为真实地表）
     emit worldChanged();
 }
@@ -596,6 +597,9 @@ void PlayerController::tickImpl()
     // t485 TNT 陷阱触发（踩压力板引爆）：与拾取同级常开（玩家走进入密室踩板即触发，独立于捕获态）。
     //   内自检 m_entityManager/m_world 非空 + 死亡门控，常开安全（同 pickupScan / arrowPickupScan）。
     scanTntTraps();
+    // t486 发射器陷阱触发（踩压力板 → 邻接发射器射箭）：与 TNT 陷阱同级常开（玩家走入神殿走廊踩板即射箭，
+    //   独立于捕获态）。内自检 + 死亡门控；per-dispenser 冷却防每帧刷屏。dt 用于冷却递减。
+    scanDispenserTraps(dt);
     } // /profPickup
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
@@ -2446,6 +2450,11 @@ void PlayerController::placeBlock()
         //   furnace_top。此前熔炉无 placeState 分支 → state 恒 0 → 前面固定（tileFor 落 tileIndex 兜底恒 -Z），
         //   不随玩家朝向。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
+    } else if (m_selectedBlock == BlockRegistry::Dispenser) {
+        // t486 发射器前面（排出口 dispenser_front）朝玩家侧：state = horizontalFacing ^ 1（同箱子 / 熔炉编码；
+        //   机制等价 MC 1.0 发射器放置排出口朝玩家）。mesher 据 state 把 dispenser_front 贴到对应面；触发时
+        //   scanDispenserTraps 据发射器→压力板方向射箭（与 state 朝向一致）。
+        placeState = quint8((horizontalFacing() & 3) ^ 1);
     } else if (m_selectedBlock == BlockRegistry::Leaves) {
         // t305 玩家放置的树叶标 PersistentLeafBit（持久，不参与自然衰减）—— 机制等价 MC 1.0「玩家放置的树叶
         //   不衰减」。worldgen 叶 state=0（衰减候选）；玩家叶 state=本 bit → decayLeavesAround 跳过 → 创造建筑
@@ -2945,6 +2954,63 @@ void PlayerController::scanTntTraps()
             //   爆炸即摧毁压力板 + TNT（在半径内）→ 同帧不会重复触发；return 防同帧多候选多次引爆。
             m_entityManager->detonateTntBlock(bx, feetY - 1, bz, m_world, m_pos);
             return;
+        }
+    }
+}
+
+// t486 发射器陷阱触发（见 playercontroller.h 头注释）。扫玩家 footprint 格——压力板的 4 水平邻格（同 Y）之一
+//   == Dispenser → 朝压力板方向水平射箭。per-dispenser 冷却（m_dispenserCooldowns）防每帧刷屏。
+//   机制等价 MC 1.0 发射器陷阱（无红石系统，用「踩板直接触发」简化）。复用既有 Arrow 弹丸 tick（抛物 + 命中
+//   玩家伤害 kArrowDamage，spawnArrow 射出的箭 arrowFromPlayer=false → 命中玩家，同骷髅箭 t283）。
+void PlayerController::scanDispenserTraps(float dt)
+{
+    if (!m_entityManager || !m_world) return;
+    if (m_dead) return; // 死亡态不触发（同 scanTntTraps 门控）
+
+    // 递减 per-dispenser 冷却（每 tick）；到期移除。无发射器陷阱场景 m_dispenserCooldowns 恒空（零开销）。
+    if (!m_dispenserCooldowns.isEmpty()) {
+        for (auto it = m_dispenserCooldowns.begin(); it != m_dispenserCooldowns.end(); ) {
+            it.value() -= dt;
+            if (it.value() <= 0.0f) it = m_dispenserCooldowns.erase(it);
+            else ++it;
+        }
+    }
+
+    // 玩家 footprint 格（脚位 cellY + AABB 覆盖的 X/Z 格；同 scanTntTraps 采样）。
+    constexpr float kDispenserCooldown = 2.0f; // 每发射器触发间隔（秒；防每帧刷屏，机制等价 MC 发射器触发间隔）
+    const int feetY = int(std::floor(m_pos.y()));
+    const int x0 = int(std::floor(m_pos.x() - kHalfW));
+    const int x1 = int(std::floor(m_pos.x() + kHalfW));
+    const int z0 = int(std::floor(m_pos.z() - kHalfW));
+    const int z1 = int(std::floor(m_pos.z() + kHalfW));
+    for (int bx = x0; bx <= x1; ++bx) {
+        for (int bz = z0; bz <= z1; ++bz) {
+            const quint8 plate = m_world->blockAt(bx, feetY, bz);
+            if (!BlockRegistry::isPressurePlate(plate)) continue; // 本格非压力板 → 跳过
+            // 压力板的 4 水平邻格（同 Y）查 Dispenser（发射器嵌在走廊石壁，朝向走廊中央的压力板）。
+            static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+            for (const auto &d : kDirs) {
+                const int dx = bx + d[0], dz = bz + d[1];
+                const quint8 db = m_world->blockAt(dx, feetY, dz);
+                if (!BlockRegistry::isDispenser(db)) continue; // 非发射器 → 跳过
+                // per-dispenser 冷却（按列坐标键 (x,z) 打包）：冷却内不射（防每帧刷屏满天箭）。发射器每柱唯一
+                //   （单格方块，一柱至多一个）故 (x,z) 足以唯一定位发射器格；Y 不进键（防与 x 高位重叠）。
+                const quint64 key = (quint64(quint32(dx)) << 32) | quint64(quint32(dz));
+                if (m_dispenserCooldowns.contains(key)) continue; // 该发射器冷却中 → 跳过
+                // 射箭：从发射器格中心 + 朝压力板方向前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同 fireArrow），
+                //   水平速度朝压力板方向（= 玩家所在），Y 取发射器格中心高（feetY+0.5 → 命中玩家下半身 AABB）。
+                //   vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中玩家）。spawnArrow 射出的箭 arrowFromPlayer
+                //   =false → 命中玩家（同骷髅箭 t283），damage=kArrowDamage。
+                const QVector3D origin(dx + 0.5f + float(d[0]) * 0.5f,
+                                       float(feetY) + 0.5f,
+                                       dz + 0.5f + float(d[1]) * 0.5f);
+                const QVector3D vel(float(d[0]) * kDispenserArrowSpeed, 0.0f,
+                                    float(d[1]) * kDispenserArrowSpeed);
+                m_entityManager->spawnArrow(origin, vel);
+                m_dispenserCooldowns.insert(key, kDispenserCooldown); // 写冷却
+                // return 防同帧多发射器刷箭（同 scanTntTraps 单触发）；下帧再处理其余候选。
+                return;
+            }
         }
     }
 }

@@ -54,6 +54,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Sandstone:     return "icon_sandstone.png";      // t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带）
     case BlockRegistry::CutSandstone:  return "icon_cut_sandstone.png"; // t485 切制砂岩立方体图标（各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
     case BlockRegistry::TntBlock:      return "icon_tnt.png";           // t485 TNT 立方体图标（各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
+    case BlockRegistry::MossyCobble:   return "icon_mossy_cobble.png";  // t486 苔石立方体图标（各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
+    case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486 发射器立方体图标（顶=排出口俯视 / 侧=石质边框 / 前=暗腔排出口；丛林神殿陷阱机关）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
     case BlockRegistry::SpruceLog:    return "icon_spruce_log.png";    // t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮）
@@ -584,7 +586,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Rail),                                        // 铁轨（贴地薄板 flat；矿井木地板散布；配方 6 铁锭+1 木棒→16）
              // t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；worldgen 散布 / 创造取用）。
              int(BlockRegistry::CutSandstone),                                // 切制砂岩（装饰砂岩变体；金字塔外框；可放置）
-             int(BlockRegistry::TntBlock) };                                  // TNT（可引爆爆炸物；沙漠神殿陷阱；配方 5 火药+4 沙→1）
+             int(BlockRegistry::TntBlock),                                   // TNT（可引爆爆炸物；沙漠神殿陷阱；配方 5 火药+4 沙→1）
+             // t486 丛林神殿结构方块（机制等价 MC 1.0 丛林神殿 jungle temple 的苔石 / 发射器；worldgen 散布 / 创造取用）。
+             int(BlockRegistry::MossyCobble),                                // 苔石（长苔圆石变体；丛林神殿主体；可放置）
+             int(BlockRegistry::Dispenser) };                                // 发射器（踩压力板触发的射箭机关；丛林神殿陷阱；可放置 / 自建机关）
 }
 
 QString Hotbar::iconSourceAt(int slot) const

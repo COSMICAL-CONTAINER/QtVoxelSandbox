@@ -896,6 +896,11 @@ Window {
         //   isPyramidChest 返 true。首开时由 LootTable::pyramidChestPool 抽 4 件（钻石 / 金 / 青金石 / 骨头 / 腐肉等）
         //   分散入随机空槽（坐标确定性 seed → 同箱同战利品）。同地牢 / 矿井箱机制（一份首开一次性 roll）。
         if (theWorld.isPyramidChest(x, y, z)) chestStore.populatePyramidLoot(x, y, z)
+        // t486 丛林神殿箱首开填充战利品：worldgen placeJungleTemple 给神殿箱 state 置 ChestStateJungleFlag(bit5) →
+        //   isJungleTempleChest 返 true。首开时由 LootTable::jungleTempleChestPool 抽 5 件（骨头 / 腐肉 / 铁 / 金 /
+        //   钻石 / 箭 / 附魔书等）分散入随机空槽（坐标确定性 seed → 同箱同战利品）。同地牢 / 矿井 / 神殿箱机制
+        //   （一份首开一次性 roll）。
+        if (theWorld.isJungleTempleChest(x, y, z)) chestStore.populateJungleTempleLoot(x, y, z)
         chestOpen = true
         // t196：触发盖子翻开动画（chestLidAngle 0→全开，Behavior 平滑过渡）；chestLidPivot 据坐标 + 朝向摆位。
         chestLidAngle = kChestLidOpenAngle

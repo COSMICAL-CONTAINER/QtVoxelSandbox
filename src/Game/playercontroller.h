@@ -797,6 +797,13 @@ private:
     //   mobAttackedPlayer 仅 Survival 应用，创造 / 观察者无伤跳过，同 Stalker）。向下依赖 World（blockAt）+
     //   EntityManager（detonateTntBlock）+ BlockRegistry（isTnt / isPressurePlate），不写栅格（破坏由 detonate 负责）。
     void scanTntTraps();
+    // t486 发射器陷阱触发（spec「踩压力板 → 邻接发射器射箭」）：扫玩家 footprint 格——任一格为压力板
+    //   （Wood/Cobble）且其 4 水平邻格（同 Y）之一 == Dispenser → EntityManager::spawnArrow 从发射器格中心
+    //   朝压力板方向（= 玩家所在）水平射箭（复用既有 Arrow 弹丸 tick：抛物 + 命中伤害，机制等价 MC 1.0 发射器
+    //   射箭；无红石系统故用「踩板直接触发」）。每发射器 per-dispenser 冷却（m_dispenserCooldowns，防每帧刷屏
+    //   满天箭；机制等价 MC 发射器有内含冷却 / 单次触发间隔）。门控：死亡 / 无世界 / 无 entityManager → no-op。
+    //   向下依赖 World（blockAt）+ EntityManager（spawnArrow）+ BlockRegistry（isDispenser / isPressurePlate）。
+    void scanDispenserTraps(float dt);
     // t137 出生贴地表：查出生列 (kSpawnX,kSpawnZ) 的 worldgen 地表高度 → 把脚底 Y 设为 h+1（站地表方块
     //   上方）+ 同步 m_peakY 防误判落差。kSpawnY=80 是高于最高地表(~71，t307 后 hills 顶)的兜底初值（防
     //   卡地形），但玩家从 80 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生
@@ -816,6 +823,11 @@ private:
     QTimer m_timer;
     QElapsedTimer m_clock;
     QElapsedTimer m_evtClock; // 事件时间戳（双击检测；不被 tick restart）
+    // t486 发射器陷阱 per-dispenser 冷却：打包坐标键（dispenserCell）→ 剩余冷却秒。玩家踩压力板触发发射器
+    //   射箭后写 kDispenserCooldown 秒；每 tick 递减 dt，到期移除。冷却内同发射器不再射（防每帧刷屏满天箭，
+    //   机制等价 MC 发射器触发间隔）。换世界时 clearAllTrapsState() 清空（防跨世界串扰）。无发射器陷阱场景
+    //   恒空（零开销）。
+    QHash<quint64, float> m_dispenserCooldowns;
     // t178 帧时间切分：累加每 tick 的主线程 CPU 耗时（ns），每 ~60 tick（≈1s@60Hz）算平均写 m_simMs + emit。
     float m_simMs = 0.0f;
     qint64 m_simAccumNs = 0;
@@ -1151,6 +1163,10 @@ private:
     static constexpr float kBowMinChargeRatio = 0.15f; // 可射箭最低蓄力比（< 此松开 = 取消）
     static constexpr float kBowMinSpeed      = 12.0f;  // 短蓄力箭水平速度（blocks/s）
     static constexpr float kBowMaxSpeed      = 26.0f;  // 满弓箭水平速度（blocks/s）
+    // t486 发射器陷阱射箭水平速度（blocks/s）。取与骷髅箭（EntityManager::kArrowSpeed=14）同量级 → 玩家有反应
+    //   时间侧身躲避（机制等价 MC 发射器射箭）；playercontroller 不依赖 EntityManager 私有常量，故本工程本地
+    //   定义（同 kBowMin/Max 本地定义模式；改骷髅箭速时此处手对齐）。
+    static constexpr float kDispenserArrowSpeed = 14.0f; // 发射器射箭水平速度（blocks/s）
     static constexpr int   kBowMinDamage     = 1;      // 短蓄力箭命中伤害（HP）
     static constexpr int   kBowMaxDamage     = 6;      // 满弓箭命中伤害（HP；Hotbar::bowArrowMaxDamage 同源）
     static constexpr float kBowSlowMul       = 0.5f;   // 拉弓时水平速度倍数（spec「拉弓减速」）

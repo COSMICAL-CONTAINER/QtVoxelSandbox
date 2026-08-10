@@ -246,6 +246,17 @@ TILES = [
     "default_cut_sandstone",      # 123 cut_sandstone（切制砂岩各面同贴图；暖沙色平滑底 + 内陷矩形装饰边框，区别于
                                   #    普通砂岩的层理纹；机制等价 MC 1.0 切制砂岩——沙漠神殿金字塔外框装饰变体；
                                   #    tools/build_cut_sandstone.py 程序生成原创像素图）
+    # t486 丛林神殿结构方块（机制等价 MC 1.0 丛林神殿 jungle temple 的苔石 / 发射器；名称 / 贴图全原创自绘 §9a）。
+    #   各由独立 build_*.py 程序生成原创像素图（不透明整立方，与圆石/砂岩/熔炉同走 culled 立方面路径）。
+    "default_mossy_cobble",       # 124 mossy_cobble（苔石各面同贴图；圆石灰底 + 散布暗绿苔藓斑簇；机制等价 MC 1.0
+                                  #    mossy cobblestone 长苔圆石变体；丛林神殿主体；tools/build_mossy_cobble.py 程序生成）
+    "default_dispenser_top",      # 125 dispenser_top（发射器顶/底面贴图；石质灰底 + 中央圆形排出口俯视环纹；
+                                  #    Dispenser 顶/底=本 tile；tools/build_dispenser.py 程序生成原创像素图）
+    "default_dispenser_side",     # 126 dispenser_side（发射器侧面贴图；石质灰底 + 边框暗带 + 四角铆钉；
+                                  #    Dispenser 三侧面=本 tile；tools/build_dispenser.py 程序生成原创像素图）
+    "default_dispenser_front",    # 127 dispenser_front（发射器前面（排出口所朝面）贴图；石质灰底 + 中央暗腔排出口；
+                                  #    Dispenser 前面=本 tile（mesher 据 state 选，同熔炉 tileFor 分支）；
+                                  #    tools/build_dispenser.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

@@ -1904,6 +1904,7 @@ void World::generate()
     placeDungeons(); // t392：地下地牢（carveCaves / 岩浆湖之后 → 房间独立；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 地表特征放于完整地表）。
     placeMineshaft(); // t484：废弃矿井（placeDungeons 之后 → 矿井独立；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 地表特征放于完整地表）。
     placeDesertTemple(); // t485：沙漠神殿（placeMineshaft 之后 → 神殿独立；仅 Desert 群系；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 金字塔放于完整沙漠地表）。
+    placeJungleTemple(); // t486：丛林神殿（placeDesertTemple 之后 → 神殿独立；仅 Jungle 群系；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 苔石建筑放于完整丛林地表）。
     carveCanyon(); // t342：大峡谷（caves/ores 之后 → 峡壁既有矿石层被 carve 暴露；先于填水 → 内陆干涸峡谷，
                    //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
@@ -3826,6 +3827,184 @@ void World::placeDesertTemple()
         }
     }
     qInfo() << "worldgen: desert temples =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t486 丛林神殿（见 world.h 头注释）。机制等价 MC 1.0 丛林神殿 jungle temple：丛林地表的苔石建筑 + 内部走廊 +
+//   发射器陷阱（踩压力板 → 邻接发射器射箭，无红石用 dispenser 直接触发）+ 宝藏箱。确定性散布
+//   （hashColumn + seed 偏移，PLAN §2-K）。
+//
+//   结构几何（中心 (cx,surfaceY,cz)，surfaceY = 丛林草顶 heightAt；floorY = surfaceY，建筑坐于地表）：
+//     A) 苔石平台地板（floorY）：[-half, +half]² × 1 层 MossyCobble（覆盖草 / 土 / 石，不动 Bedrock）→
+//        建筑坐于平整苔石基座（spec「苔石建筑」）。
+//     B) 苔石围墙 + 天花板：围墙 = 外圈 (|dx|==half 或 |dz|==half) y∈[floorY+1 .. floorY+3]（3 高）MossyCobble；
+//        +X 墙中央 (dz=0) 留 2 高入口（floorY+1/floorY+2 不放墙 → 玩家可走入）；天花板 = y=floorY+4 全 [-half,+half]²
+//        MossyCobble（封顶无天光 → 内部黑暗，机制等价 MC 神殿阴暗环境）。不动 Bedrock。
+//     C) 内部空气（floorY+1 .. floorY+3 × [-half+1, +half-1]²）：清空气成 9×9×3 走廊（覆盖原土/石 → 干净室内）。
+//        + 顶上一格 (floorY+5) 清空气 → 屋顶不被地表 / 树叶埋（肉眼可见苔石顶）。
+//     D) 发射器陷阱（走廊两侧石壁嵌 Dispenser + 走廊地板 CobblePressurePlate）：
+//        - Dispenser 嵌入 ±Z 围墙（dz=±half，替换底部墙块 y=floorY+1），朝走廊中央（±Z 侧分别朝 ∓Z）；
+//          state 编码朝向（+Z 侧 dispenser 朝 -Z = state 3 / -Z 侧 dispenser 朝 +Z = state 2，同 chest/furnace 编码）。
+//        - CobblePressurePlate 置 Dispenser 朝向的相邻走廊格（dz=±(half-1)）y=floorY+1（玩家踩板 →
+//          playercontroller scanDispenserTraps 扫 footprint 查压力板的 4 水平邻格之一 == Dispenser → spawnArrow
+//          朝压力板方向射箭，机制等价 MC 1.0 丛林神殿发射器陷阱；无红石故「踩板直接触发」）。
+//        - 走廊纵深放 2 组（dx=-1 / dx=+1），玩家走入触发两次 → 多波箭雨（机制等价 MC 丛林神殿多发射器）。
+//     E) 宝藏箱（走廊尽头 -X 端 (dx=-(half-1), dz=0)，y=floorY+1）：带 ChestStateJungleFlag bit5 标记 →
+//        isJungleTempleChest 返 true → Main.qml.openChest 首开填充 jungleTempleChestPool 战利品（骨头 / 腐肉 /
+//        铁 / 金 / 钻石 / 箭 / 附魔书等）。
+//
+//   placeDesertTemple 之后、fillWater 之前（仅 Jungle 群系 → 与海 / 湖独立；fillWater 仅填海域低洼，丛林内陆不被
+//   灌水）。纯函数于 seed + biomeAt（经 hashColumn / hashVoxel）→ 同 seed 同神殿分布（PLAN §2-K）。仅扫候选丛林
+//   格 → 不全图扫描。
+void World::placeJungleTemple()
+{
+    constexpr int kTempleGrid     = 40;     // 候选网格间距（略密于沙漠神殿 48 → 丛林群系本身较稀有，补偿密度使神殿可被发现）
+    constexpr unsigned kTemplePct = 50u;    // 候选命中概率（仅丛林候选 → 已天然稀有；50% 命中 → 160×160 世界约 1-2 座神殿，spec「低频」）
+    constexpr int kHalf           = 5;      // 建筑外圈半边（11×11 = (2*5+1)² 外圈；9×9 内部 = (2*4+1)²）
+    constexpr int kWallH          = 3;      // 围墙高度（内部空气层数 y∈[floorY+1 .. floorY+3]）
+    constexpr int kBedrockTop     = 4;      // 不动基岩顶（同 carveCaves / placeDungeons / placeMineshaft / placeDesertTemple）
+    // 留边界（外圈半边 5 + 抖动余量 → 半径 ≤ 6 不越界）。
+    constexpr int kMargin = kHalf + 1;
+
+    int placed = 0;
+    const int templeSeed = m_seed + 22617; // 丛林神殿哈希偏移（与其它 worldgen hashColumn 解耦）
+    for (int bx = kTempleGrid / 2; bx < m_width; bx += kTempleGrid) {
+        for (int bz = kTempleGrid / 2; bz < m_depth; bz += kTempleGrid) {
+            const quint32 r = hashColumn(templeSeed, bx, bz);
+            if ((r % 100u) >= kTemplePct) continue; // 概率筛选
+            const int span = kTempleGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
+                continue; // 留 margin 边界（建筑半径 ≤ margin 不越界）
+            // 仅 Jungle 群系（spec「丛林群系生成」；biomeAt 收口单一权威）。非丛林 → 跳过（不在草原 / 森林 / 沙漠生神殿）。
+            if (biomeAt(cx, cz) != Biome::Jungle) continue;
+            if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠神殿（避免与海水柱冲突）
+            const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
+            const int floorY = surfaceY;            // 苔石地板 = 地表草顶（建筑坐于地表）
+            const int ceilY = floorY + kWallH + 1;  // 天花板 y（内部空气顶 + 1 = floorY+4）
+            if (floorY < kBedrockTop + 1) continue; // 地板太低（贴基岩）→ 跳过
+            if (ceilY >= m_height - 1) continue;    // 几何保护（surfaceY 异常高时防越界，留 1 格顶上清空气）
+
+            // A) 苔石平台地板（floorY）：[-half, +half]² × 1 层 MossyCobble（不动 Bedrock）。
+            for (int dx = -kHalf; dx <= kHalf; ++dx) {
+                for (int dz = -kHalf; dz <= kHalf; ++dz) {
+                    const int px = cx + dx, pz = cz + dz;
+                    const quint8 cur = m_chunks.blockAt(px, floorY, pz);
+                    if (cur == BlockRegistry::Bedrock) continue;
+                    m_chunks.setBlock(px, floorY, pz, BlockRegistry::MossyCobble);
+                }
+            }
+
+            // B) 苔石围墙（外圈 y∈[floorY+1 .. floorY+3]）+ 天花板（y=ceilY）。
+            //    +X 墙中央 (dz=0) 留 2 高入口（floorY+1/floorY+2 不放墙 → 玩家可走入，机制等价 MC 神殿入口）。
+            for (int dy = 1; dy <= kWallH; ++dy) {
+                const int yy = floorY + dy;
+                if (yy >= m_height) break;
+                for (int d = -kHalf; d <= kHalf; ++d) {
+                    // -X / +X 墙（dx=±half），整列 dz；+X 墙 dz=0 留入口（dy<=2 不放）。
+                    for (int sgn = -1; sgn <= 1; sgn += 2) {
+                        const int px = cx + sgn * kHalf;
+                        if (sgn == 1 && d == 0 && dy <= 2) continue; // +X 墙 dz=0 入口（2 高）
+                        const quint8 cur = m_chunks.blockAt(px, yy, cz + d);
+                        if (cur == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(px, yy, cz + d, BlockRegistry::MossyCobble);
+                    }
+                    // -Z / +Z 墙（dz=±half），整行 dx。
+                    for (int sgn = -1; sgn <= 1; sgn += 2) {
+                        const int pz = cz + sgn * kHalf;
+                        const quint8 cur = m_chunks.blockAt(cx + d, yy, pz);
+                        if (cur == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(cx + d, yy, pz, BlockRegistry::MossyCobble);
+                    }
+                }
+            }
+            // 天花板（y=ceilY，全 [-half,+half]² MossyCobble，封顶无天光）。
+            if (ceilY < m_height) {
+                for (int dx = -kHalf; dx <= kHalf; ++dx) {
+                    for (int dz = -kHalf; dz <= kHalf; ++dz) {
+                        const quint8 cur = m_chunks.blockAt(cx + dx, ceilY, cz + dz);
+                        if (cur == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(cx + dx, ceilY, cz + dz, BlockRegistry::MossyCobble);
+                    }
+                }
+            }
+
+            // C) 内部空气（floorY+1 .. floorY+3 × [-half+1, +half-1]² = 9×9×3 走廊）+ 顶上 1 格清空气（屋顶可见）。
+            for (int dy = 1; dy <= kWallH; ++dy) {
+                const int yy = floorY + dy;
+                if (yy >= m_height) break;
+                for (int dx = -(kHalf - 1); dx <= (kHalf - 1); ++dx) {
+                    for (int dz = -(kHalf - 1); dz <= (kHalf - 1); ++dz) {
+                        const quint8 cur = m_chunks.blockAt(cx + dx, yy, cz + dz);
+                        if (cur == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(cx + dx, yy, cz + dz, BlockRegistry::Air);
+                    }
+                }
+            }
+            if (ceilY + 1 < m_height) {
+                for (int dx = -kHalf; dx <= kHalf; ++dx) {
+                    for (int dz = -kHalf; dz <= kHalf; ++dz) {
+                        const quint8 cur = m_chunks.blockAt(cx + dx, ceilY + 1, cz + dz);
+                        if (cur == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(cx + dx, ceilY + 1, cz + dz, BlockRegistry::Air);
+                    }
+                }
+            }
+
+            // D) 发射器陷阱：走廊纵深 2 组（dx=-1 / dx=+1），每组 ±Z 两侧各一 Dispenser（嵌 ±Z 围墙 dz=±half，
+            //    y=floorY+1）+ 走廊地板 CobblePressurePlate（dz=±(half-1)，y=floorY+1，dispenser 朝向相邻格）。
+            //    dispenser state：+Z 侧（dz=+half）朝 -Z（state 3）/ -Z 侧（dz=-half）朝 +Z（state 2）
+            //    （chestFrontFace 编码 0=+X 1=-X 2=+Z 3=-Z）。
+            const int trapY = floorY + 1;
+            for (int tdx : {-1, 1}) {
+                // -Z 侧 dispenser（dz=-half）朝 +Z（state 2）+ 压力板（dz=-(half-1)）。
+                {
+                    const int px = cx + tdx, pz = cz - kHalf;
+                    if (trapY < m_height) {
+                        const quint8 cur = m_chunks.blockAt(px, trapY, pz);
+                        if (cur != BlockRegistry::Bedrock)
+                            m_chunks.setBlock(px, trapY, pz, BlockRegistry::Dispenser, /*state*/ 2);
+                    }
+                    const int ppz = cz - (kHalf - 1);
+                    if (trapY < m_height) {
+                        const quint8 cur = m_chunks.blockAt(px, trapY, ppz);
+                        if (cur == BlockRegistry::Air) // 仅空气格放（防覆盖已放宝藏箱）
+                            m_chunks.setBlock(px, trapY, ppz, BlockRegistry::CobblePressurePlate);
+                    }
+                }
+                // +Z 侧 dispenser（dz=+half）朝 -Z（state 3）+ 压力板（dz=+(half-1)）。
+                {
+                    const int px = cx + tdx, pz = cz + kHalf;
+                    if (trapY < m_height) {
+                        const quint8 cur = m_chunks.blockAt(px, trapY, pz);
+                        if (cur != BlockRegistry::Bedrock)
+                            m_chunks.setBlock(px, trapY, pz, BlockRegistry::Dispenser, /*state*/ 3);
+                    }
+                    const int ppz = cz + (kHalf - 1);
+                    if (trapY < m_height) {
+                        const quint8 cur = m_chunks.blockAt(px, trapY, ppz);
+                        if (cur == BlockRegistry::Air)
+                            m_chunks.setBlock(px, trapY, ppz, BlockRegistry::CobblePressurePlate);
+                    }
+                }
+            }
+
+            // E) 宝藏箱（走廊尽头 -X 端 dx=-(half-1), dz=0，y=floorY+1）：带 ChestStateJungleFlag 标记 → 首开填充
+            //    丛林神殿战利品。朝向低 2 位 = 0（chestFrontFace 兜底 NegZ；worldgen 不关心箱子朝向）。
+            {
+                const int px = cx - (kHalf - 1), pz = cz;
+                if (trapY < m_height) {
+                    const quint8 cur = m_chunks.blockAt(px, trapY, pz);
+                    if (cur != BlockRegistry::Bedrock) // 不动基岩（防御）
+                        m_chunks.setBlock(px, trapY, pz, BlockRegistry::Chest,
+                                          BlockRegistry::ChestStateJungleFlag);
+                }
+            }
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: jungle temples =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t309 地表小湖泊（见 world.h 头注释）。机制等价 MC 1.0 地表小湖泊 / 池塘：地表局部低洼处的浅水洼。

@@ -89,6 +89,28 @@ const std::vector<LootTable::Entry> &LootTable::pyramidChestPool()
     return pool;
 }
 
+// t486 丛林神殿箱子战利品池（见 loottable.h 头注释）。权重总和 = 28+24+16+12+10+5+4+3+2 = 104。
+//   分布（每 roll 命中概率）：腐肉 ~27% / 骨头 ~23%（亡灵族常见 ~50%）；铁锭 ~15% / 金锭 ~12%（金属族次常见
+//   ~27%）；箭 ~10%（发射器陷阱配套弹药，机制等价 MC 丛林神殿多箭）；钻石 ~5%（稀有）；马鞍 ~4% / 命名牌 ~3%
+//   （稀有件 ~7%）；附魔书占位 ~2%（极稀有）。机制对齐 MC 1.0 丛林神殿战利品（骨头/腐肉亡灵族 + 金属族 + 箭
+//   + 稀有件）。数量区间：常见件 1..N（一堆），稀有件恒 1（单件，避免一堆钻石/马鞍）。static 局部 + 返回
+//   const 引用（单一权威；调用方不持副本）。
+const std::vector<LootTable::Entry> &LootTable::jungleTempleChestPool()
+{
+    static const std::vector<Entry> pool = {
+        { RecipeRegistry::RottenFleshId,  28, 1, 4 }, // 腐肉：亡灵族常见（机制等价 MC 丛林神殿腐肉），1..4
+        { RecipeRegistry::BoneId,         24, 1, 5 }, // 骨头：亡灵族常见（spec 配套骸骨陷阱），1..5
+        { RecipeRegistry::IronIngotId,    16, 1, 4 }, // 铁锭：次常见金属，1..4
+        { RecipeRegistry::GoldIngotId,    12, 1, 3 }, // 金锭：次常见金属，1..3
+        { RecipeRegistry::ArrowId,        10, 2, 8 }, // 箭：发射器陷阱配套弹药（机制等价 MC 丛林神殿多箭），2..8
+        { RecipeRegistry::DiamondId,       5, 1, 1 }, // 钻石：稀有矿物，单件
+        { RecipeRegistry::SaddleId,        4, 1, 1 }, // 马鞍：稀有件，单件
+        { RecipeRegistry::NameTagId,       3, 1, 1 }, // 命名牌：稀有件，单件
+        { RecipeRegistry::EnchantedBookId, 2, 1, 1 }, // 附魔书占位：极稀有，单件
+    };
+    return pool;
+}
+
 // 按 weight 有放回加权抽 rolls 次。RNG 由 seed 确定（QRandomGenerator(seed)；PLAN §2-K 精神：同 seed 同产物）。
 //   pool 为空 / rolls<=0 → 空。weight<=0 条目跳过（不入总权重；若全 <=0 → 空）。maxCount<minCount → 取 minCount。
 std::vector<LootTable::Stack> LootTable::roll(const std::vector<Entry> &pool, int rolls, quint32 seed)

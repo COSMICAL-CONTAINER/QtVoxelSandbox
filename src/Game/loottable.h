@@ -58,6 +58,13 @@ public:
     //   亡灵掉落族 + 钻石 / 金 / 青金石矿物族）。static 存储（返回 const 引用，调用方不持副本）。
     static const std::vector<Entry> &pyramidChestPool();
 
+    // t486 丛林神殿箱子战利品池（机制等价 MC 1.0 jungle temple chest loot 的「骨头 / 腐肉 / 铁 / 金 / 钻石 / 箭 /
+    //   附魔书」分布）。spec t486「宝藏箱战利品表」—— 8 条：骨头 / 腐肉（亡灵族常见，高权重）+ 铁锭 / 金锭
+    //   （金属族次常见）+ 箭（发射器陷阱配套弹药，次常见）+ 钻石（稀有矿物）+ 马鞍 / 命名牌（稀有件）+
+    //   附魔书占位（极稀有）。机制对齐 MC 1.0 丛林神殿战利品（含骨头 / 腐肉亡灵族 + 金属族 + 箭 + 稀有件）。
+    //   static 存储（返回 const 引用，调用方不持副本）。
+    static const std::vector<Entry> &jungleTempleChestPool();
+
     // t401 钓鱼获物池（生鱼 / 垃圾 / 宝藏三档；机制对齐 MC 1.0 fishing loot「鱼常见 / 垃圾次之 / 宝藏稀有」）。
     //   生鱼（RawFishId，高权重）+ 垃圾（皮革 / 线 / 骨头 / 腐肉 / 木棒 / 墨囊，中权重）+ 宝藏（马鞍 / 命名牌 /
     //   钻石，低权重）。复用 roll（按 weight 抽一次 → 一件获物）；钓竿拉起时 PlayerController 注入运行期 RNG
@@ -72,6 +79,9 @@ public:
 
     // t485 沙漠神殿箱子单次开启的抽取次数（机制等价 MC 1.0 desert temple chest ~2-4 stacks/箱 × 4 箱 → 总 ~8-16 件）。
     static constexpr int kPyramidRolls = 4;
+
+    // t486 丛林神殿箱子单次开启的抽取次数（机制等价 MC 1.0 jungle temple chest ~2-5 stacks/箱 × 1-2 箱 → 总 ~5 件）。
+    static constexpr int kJungleRolls = 5;
 
     // 按 weight 有放回加权抽 rolls 次，返回最多 rolls 个 Stack。RNG 由 caller 注入（确定性 seed 重载见下）。
     //   pool 为空 / rolls<=0 → 空 vector。weight<=0 的条目跳过（不入总权重）。maxCount<minCount → 取 minCount。

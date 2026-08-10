@@ -99,6 +99,14 @@ public:
         return blockAt(x, y, z) == BlockRegistry::Chest
             && (stateAt(x, y, z) & BlockRegistry::ChestStatePyramidFlag) != 0;
     }
+    // t486 该格箱子是否「丛林神殿生成箱」（worldgen placeJungleTemple 写入的箱子，state 带
+    //   ChestStateJungleFlag bit5；玩家放置的箱子 / 地牢箱 / 矿井箱 / 神殿箱无此位）。Main.qml.openChest 据此判
+    //   「是否首开填充丛林神殿战利品」（LootTable::jungleTempleChestPool：骨头 / 腐肉 / 铁 / 金 / 钻石 / 箭等）。
+    //   分层（PLAN §2）：纯只读谓词（blockAt + stateAt + BlockRegistry），不写栅格。非箱子格 → false。
+    Q_INVOKABLE bool isJungleTempleChest(int x, int y, int z) const {
+        return blockAt(x, y, z) == BlockRegistry::Chest
+            && (stateAt(x, y, z) & BlockRegistry::ChestStateJungleFlag) != 0;
+    }
     // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
     //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/
     //   trapdoor，state 解码同 partialblockgeometry）。玩家碰撞迭代玩家 AABB 覆盖的所有格，逐 sub-AABB
@@ -570,6 +578,18 @@ private:
     //   （PLAN §2-K；确定性 + 不全图扫描，仅扫候选沙漠格）。**宝藏箱内容**：Chest 物品存 ChestStore，首开填充由
     //   isPyramidChest 判定 → pyramidChestPool（钻石 / 金 / 青金石 / 骨头 / 腐肉等）。
     void placeDesertTemple();
+    // t486 丛林神殿（spec「丛林群系生成：苔石建筑 + 机关（绊线→发射器射箭，无红石用 dispenser 方块直接触发）
+    //   + 宝藏箱」；机制等价 MC 1.0 丛林神殿 jungle temple）。placeDesertTemple 之后、fillWater 之前，**仅 Jungle
+    //   群系**（biomeAt == Jungle 守卫，spec「丛林群系生成」）确定性稀疏散布（grid 40，略密于沙漠神殿 48 补偿丛林群系
+    //   本身稀有；pct 50，spec「低频」→ 160×160 世界约 1-2 座）：选丛林中心点（hashColumn + seed 偏移，PLAN §2-K）→ 地表苔石建筑主体（MossyCobble 矩形围墙 +
+    //   顶板 + 地板，spec「苔石建筑」）→ 内部走廊（空气 + 苔石墙）→ 走廊内嵌 Dispenser 陷阱（发射器嵌入走廊石壁
+    //   朝向走廊中央 + 走廊地板 CobblePressurePlate 压力板；玩家踩板 → playercontroller tick 扫 footprint 触发
+    //   scanDispenserTraps → spawnArrow 朝压力板方向射箭，机制等价 MC 1.0 丛林神殿发射器陷阱；无红石系统故
+    //   「踩板直接触发」）→ 走廊尽头放 1 只带 ChestStateJungleFlag 标记的 Chest 宝藏箱。纯函数于 seed
+    //   （hashColumn / hashVoxel / biomeAt）→ 同 seed 同神殿分布（PLAN §2-K；确定性 + 不全图扫描，仅扫候选丛林格）。
+    //   **宝藏箱内容**：Chest 物品存 ChestStore，首开填充由 isJungleTempleChest 判定 → jungleTempleChestPool
+    //   （骨头 / 腐肉 / 铁 / 金 / 钻石 / 箭 / 附魔书等）。
+    void placeJungleTemple();
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
     //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
     //   （surfaceY-1 / surfaceY-2 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶 -1，

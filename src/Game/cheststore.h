@@ -76,6 +76,12 @@ public:
     //   caller（Main.qml.openChest）须先确认该坐标是神殿箱（theWorld.isPyramidChest —— 由 chest state bit4 标记，
     //   worldgen placeDesertTemple 写入）。
     Q_INVOKABLE bool populatePyramidLoot(int x, int y, int z);
+    // t486 首开填充丛林神殿战利品（机制等价 MC 1.0 jungle temple chest loot）。与 populateDungeonLoot /
+    //   populateMineshaftLoot / populatePyramidLoot 同源语义：仅对「尚未有条目」的箱子生效（首次开），用
+    //   LootTable::jungleTempleChestPool + 坐标确定性 seed 抽 5 件（骨头 / 腐肉 / 铁 / 金 / 钻石 / 箭 / 附魔书等，
+    //   PLAN §2-K 同箱同战利品）。caller（Main.qml.openChest）须先确认该坐标是丛林神殿箱
+    //   （theWorld.isJungleTempleChest —— 由 chest state bit5 标记，worldgen placeJungleTemple 写入）。
+    Q_INVOKABLE bool populateJungleTempleLoot(int x, int y, int z);
 
 signals:
     // 任一箱子任一槽内容变更（setSlot）/ 条目移除（clearChest）。驱动 revision 自增 + ChestUI delegate 刷新。

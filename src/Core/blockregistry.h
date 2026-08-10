@@ -617,7 +617,31 @@ public:
         //   音色归 GroupStone（石质，同砂岩）。worldgen placeDesertTemple 金字塔外框装饰（与砂岩混排）。
         //   进创造调色板（玩家可取用 / 放置）。
         CutSandstone    = 105, // 切制砂岩：装饰砂岩变体（机制等价 MC 1.0 cut sandstone）；金字塔外框 + 创造可放置
-        Count           = 106, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t486 丛林神殿结构方块（机制等价 MC 1.0 丛林神殿 jungle temple 的苔石 / 发射器；名称 / 贴图全原创自绘 §9a）：
+        //   苔石（MossyCobble）：长满苔藓的圆石变体（机制等价 MC 1.0 mossy cobblestone——圆石上覆盖苔斑，
+        //   丛林 / 地牢 / 神殿等阴暗潮湿环境的风化石材）。整立方 opaque（solid=true / ShapeFull，与圆石/砂岩
+        //   同走 culled 立方面路径，**非**异形）、hardness=2.0（同圆石量级，需镐加速）、toolType=Pickaxe、
+        //   requiresTool=true、minTier1（木镐可破且掉落；同 Cobble）、dropId=自身（破苔石掉苔石方块，可放回）、
+        //   dropCount=1、maxStack=64。各面贴图=mossy_cobble(124)（圆石灰底 + 散布的暗绿苔藓斑簇，原创自绘
+        //   §9a；tools/build_mossy_cobble.py 程序生成）。音色归 GroupStone（石质，同 cobble 族）。worldgen
+        //   placeJungleTemple 神殿主体（苔石建筑，spec「苔石建筑」）。进创造调色板（玩家可取用 / 放置）。
+        MossyCobble     = 106, // 苔石：长苔圆石变体（机制等价 MC 1.0 mossy cobblestone）；丛林神殿主体 + 创造可放置
+        //   发射器（Dispenser）：受触发时朝所朝方向发射箭矢弹丸的机关方块（机制等价 MC 1.0 发射器 dispenser——
+        //   无红石系统，故用「踩压力板 → 邻接发射器射箭」直接触发，spec「无红石用 dispenser 方块直接触发」）。
+        //   整立方 opaque（solid=true / ShapeFull，与熔炉/箱子同走 culled 立方面路径，**非**异形）、hardness=3.5
+        //   （同熔炉量级，石质偏硬）、toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落，同熔炉）、
+        //   dropId=自身（破发射器掉发射器方块，可放回）、dropCount=1、maxStack=64。
+        //   各面贴图：顶/底=dispenser_top(125)（石质灰底 + 中央圆形排出口俯视环纹）/ 侧=dispenser_side(126)
+        //   （石质灰底 + 边框暗带）/ 前面（所朝方向，排出口）=dispenser_front(127)（石质灰底 + 中央暗腔排出口）。
+        //   **state 编码朝向**：bit[1:0] = 0=+X 1=-X 2=+Z 3=-Z（与 chest / furnace / door horizontalFacing 同源）；
+        //   放置时前面朝玩家（同熔炉）；mesher 据 state 选前面贴图（同 furnace tileFor 分支）。
+        //   音色归 GroupStone（石质）。**触发路径**：PlayerController::scanDispenserTraps 扫玩家 footprint 格——
+        //   任一格为压力板（Wood/Cobble）且其 4 水平邻格之一 == Dispenser → EntityManager::spawnArrow 从发射器
+        //   格中心朝压力板方向（= 玩家所在）水平射箭（复用既有 Arrow 弹丸 tick：抛物 + 命中伤害，机制等价
+        //   MC 1.0 发射器射箭）。每发射器 per-dispenser 冷却（防每帧刷屏）。worldgen placeJungleTemple 把发射器
+        //   嵌入走廊石壁（朝向走廊中央的压力板）。进创造调色板（玩家可取用 / 放置 / 自建机关）。
+        Dispenser       = 107, // 发射器：踩压力板触发的射箭机关方块（机制等价 MC 1.0 dispenser）；丛林神殿陷阱
+        Count           = 108, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -673,6 +697,11 @@ public:
     //   placeDesertTemple 写入，避免各处硬编码 TntBlock id 判定（同 isLadder 单 id 模式）。单 id 故裸相等
     //   判定即可，仍提供谓词作单一权威（未来追加 TNT 变体时一处同步）。
     static bool isTnt(quint8 blockId);
+    // t486 发射器统一谓词（单一权威）：blockId == Dispenser 即发射器。供 PlayerController 发射器陷阱触发判定
+    //   （扫玩家 footprint 格——压力板的 4 水平邻格之一 == Dispenser 即触发）+ worldgen placeJungleTemple 写入，
+    //   避免各处硬编码 Dispenser id 判定（同 isTnt / isLadder 单 id 模式）。单 id 故裸相等判定，仍提供谓词作
+    //   单一权威（未来追加发射器变体时一处同步）。
+    static bool isDispenser(quint8 blockId);
     // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台
     //   加成计算：扫切比雪夫半径 2 内书架数 ≤15）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移
     //   （同 isLadder 单 id 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加书架变体时一处同步）。
@@ -1075,7 +1104,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 124;
+    static constexpr int AtlasTileCount = 128;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
@@ -1212,6 +1241,14 @@ public:
     //   ChestStateMineshaftFlag bit3 / torch marker 同族）。state 经 m_states 落 SQLite round-trip 保真
     //   （旧存档箱子 state 无 bit4 → 非神殿箱，不填充，安全）。
     static constexpr quint8 ChestStatePyramidFlag = 0x10;
+    // t486 箱子 state bit5（值 32）=「丛林神殿生成箱」标记（worldgen placeJungleTemple 写入；玩家放置的箱子 /
+    //   地牢箱 / 矿井箱 / 神殿箱无此位）。仅供 World::isJungleTempleChest 读 → Main.qml.openChest 据此判
+    //   「是否首开填充丛林神殿战利品」（LootTable::jungleTempleChestPool：骨头 / 腐肉 / 铁锭 / 金锭 / 钻石 /
+    //   箭 / 附魔书等，区别于地牢 / 矿井 / 神殿表）。**不影响** chestFrontFace（后者只读低 2 位 state&3，bit5
+    //   被忽略 → 朝向编码零回归）；collisionAABBs / selectionAABBs 亦不读 chest state → 复用 bit5 作 marker
+    //   零回归（同 ChestStateDungeonFlag bit2 / Mineshaft bit3 / Pyramid bit4 / torch marker 同族）。state 经
+    //   m_states 落 SQLite round-trip 保真（旧存档箱子 state 无 bit5 → 非丛林神殿箱，不填充，安全）。
+    static constexpr quint8 ChestStateJungleFlag = 0x20;
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度

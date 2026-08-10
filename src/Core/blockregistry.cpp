@@ -465,6 +465,27 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   砂岩方块）、dropCount=1、maxStack=64。各面=cut_sandstone(123)（暖沙色平滑底+内陷矩形装饰边框）。音色归
     //   GroupStone（石质，同砂岩）。worldgen placeDesertTemple 金字塔外框装饰（与砂岩混排）。进创造调色板。
     /* cut_sandstone*/ {int(BlockRegistry::CutSandstone),     123,123,123,123, true,  BlockRegistry::ShapeFull,     0.8f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CutSandstone),   1, 64, "cut_sandstone","切制砂岩"},
+    // ── t486 丛林神殿结构方块（机制等价 MC 1.0 丛林神殿 jungle temple 的苔石 / 发射器；名称 / 贴图全原创自绘 §9a）。
+    //   苔石（MossyCobble）：长满苔藓的圆石变体（机制等价 MC 1.0 mossy cobblestone——圆石上覆盖暗绿苔斑，潮湿
+    //   阴暗环境的风化石材）。整立方 opaque（solid=true / ShapeFull，与圆石 / 砂岩同走 culled 立方面路径，**非**
+    //   异形）、hardness=2.0（同圆石量级，需镐加速）、toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且
+    //   掉落，同 Cobble）、dropId=自身（破苔石掉苔石方块，可放回）、dropCount=1、maxStack=64。
+    //   各面贴图=mossy_cobble(124)（圆石灰底 + 散布暗绿苔藓斑簇，原创自绘 §9a；tools/build_mossy_cobble.py 程序
+    //   生成）。音色归 GroupStone（石质，同 cobble 族）。worldgen placeJungleTemple 神殿主体（苔石建筑）。
+    //   进创造调色板（玩家可取用 / 放置）。
+    /* mossy_cobble */ {int(BlockRegistry::MossyCobble),       124,124,124,124, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::MossyCobble),    1, 64, "mossy_cobble","苔石"},
+    //   发射器（Dispenser）：受触发时朝所朝方向发射箭矢弹丸的机关方块（机制等价 MC 1.0 发射器 dispenser——无红石
+    //   系统，故用「踩压力板 → 邻接发射器射箭」直接触发，spec「无红石用 dispenser 方块直接触发」）。整立方 opaque
+    //   （solid=true / ShapeFull，与熔炉 / 箱子同走 culled 立方面路径，**非**异形）、hardness=3.5（同熔炉量级，石质
+    //   偏硬）、toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落，同熔炉）、
+    //   dropId=自身（破发射器掉发射器方块，可放回）、dropCount=1、maxStack=64。各面贴图：顶/底=dispenser_top(125)
+    //   （石质灰底 + 中央圆形排出口俯视环纹）/ 侧=dispenser_side(126)（石质灰底 + 边框暗带）/ 前面=dispenser_front(127)
+    //   （石质灰底 + 中央暗腔排出口，所朝方向，mesher 据 state 选，同熔炉 tileFor 分支）。state bit[1:0]=朝向
+    //   0=+X 1=-X 2=+Z 3=-Z（同 chest / furnace horizontalFacing）。音色归 GroupStone（石质）。触发：
+    //   PlayerController::scanDispenserTraps 扫玩家 footprint——压力板的 4 水平邻格之一 == Dispenser →
+    //   EntityManager::spawnArrow 朝压力板方向射箭（复用既有 Arrow 弹丸 tick，机制等价 MC 发射器射箭）。per-dispenser
+    //   冷却防刷屏。worldgen placeJungleTemple 把发射器嵌入走廊石壁。进创造调色板。
+    /* dispenser    */ {int(BlockRegistry::Dispenser),        125,125,126,127, true,  BlockRegistry::ShapeFull,     3.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Dispenser),      1, 64, "dispenser",   "发射器"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -565,6 +586,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   （1.0 sandstone id 24 仅以 metadata 分变体，本工程用独立 id 故 cut_sandstone 无 1.0 等价 → -1，资源包回退引擎自绘）。
     /* tnt                     */ 46, // t485 TNT → MC 1.0 TNT id 46
     /* cut_sandstone           */ -1, // t485 切制砂岩 → MC 1.0 无等价（cut sandstone id 43 为 1.8+；1.0 sandstone id 24 仅 metadata 分变体，独立 id 故无 1.0 等价）
+    // t486 丛林神殿结构方块 → MC 1.0 对齐：mossy cobblestone 为 cobble id 4 的 metadata 变体（data 2，1.0 无独立 id，
+    //   独立 id 故取 cobble id 4 近似）；dispenser id 23（1.0 存在）。
+    /* mossy_cobble            */ 4,  // t486 苔石 → MC 1.0 cobble id 4（mossy 为 data 2 变体，独立 id 故取 cobble 近似）
+    /* dispenser               */ 23, // t486 发射器 → MC 1.0 dispenser id 23
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -706,6 +731,14 @@ bool BlockRegistry::isLadder(quint8 blockId)
 bool BlockRegistry::isTnt(quint8 blockId)
 {
     return blockId == TntBlock;
+}
+
+// t486 发射器统一谓词（单一权威）：blockId == Dispenser 即发射器。供 PlayerController 发射器陷阱触发判定
+//   （扫玩家 footprint 格——压力板的 4 水平邻格之一 == Dispenser 即触发）+ worldgen placeJungleTemple 写入，
+//   避免各处硬编码 Dispenser id 判定（同 isTnt / isLadder 单 id 模式）。单 id 故裸相等判定。
+bool BlockRegistry::isDispenser(quint8 blockId)
+{
+    return blockId == Dispenser;
 }
 
 // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台加成
@@ -1094,6 +1127,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case EnchantingTable: // t474 附魔台 → 石质音色（黑曜石+钻石基座，石质偏硬，同 obsidian 族）
     case IronBlock: case Anvil: case AnvilChipped: case AnvilDamaged: // t477 铁块/铁砧 → 石质音色（金属质，同 obsidian 族；机制等价 MC 1.0 iron/anvil metal SoundType）
     case Rail: // t484 铁轨 → 石质音色（金属质敲击，最接近 MC 1.0 铁轨 metal SoundType）
+    case MossyCobble: // t486 苔石 → 石质音色（长苔圆石，同 cobble 族）
+    case Dispenser: // t486 发射器 → 石质音色（石质机关盒，同 furnace 族）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）
