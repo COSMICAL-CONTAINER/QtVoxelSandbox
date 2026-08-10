@@ -325,7 +325,17 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
     noteGrowthWrite(x, y, z, lightOldId, id); // t425：维护生长方格索引（作物升阶段 id 不变 → no-op；甘蔗生长 / 耕地增删正确）
     noteFluidWrite(x, y, z, lightOldId, id);  // perf：维护流体方格索引（水/岩浆增删 / level 变 id 不变 → 流体格增删正确）
-    recomputeLightAround(x, y, z, lightOldId, id);
+    // t380r perf：批量流体 tick 延迟光照重算（N 次 per-write recomputeLightAround → 末尾联合盒 1 次
+    //   refloodBox；同 destroySphereSilent t383 批量收口模式）。判据与 recomputeLightAround 早退一致：
+    //   t334 遮光翻转（lightOpacity 变）+ t351 发光增删（岩浆）。非批量仍逐写即时重 flood（编辑路径须立即反映）。
+    const bool lightSky = BlockRegistry::lightOpacity(lightOldId, oldState) != BlockRegistry::lightOpacity(id, state);
+    const bool lightSource = BlockRegistry::lightEmission(lightOldId) > 0 || BlockRegistry::lightEmission(id) > 0;
+    if (m_batchFluid) {
+        if (lightSky || lightSource)
+            m_pendingLightEdits.push_back({x, y, z, lightSky});
+    } else {
+        recomputeLightAround(x, y, z, lightOldId, id);
+    }
     // t380：流体 tick 内部写入 → 标流体脏（链式扩散：本次写入改变流场 → 下次 tick 续扫直到稳态）。
     //   按 id / oldId 设对应标志：写 / 移除 Water → m_waterDirty；写 / 移除 Lava → m_lavaDirty。
     //   非 fluid 写入（作物升阶 / 羊吃草经此入口）id/oldId 均非 Water/Lava → 不设标志，无副作用。
@@ -335,6 +345,38 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     return true;
+}
+
+// t380r：收口批量流体写延迟的光照重算（见 setWaterSilent 延迟分支 + world.h m_pendingLightEdits）。
+//   联合盒 = 各延迟编辑的 ±R 盒之并（recomputeLightAround 单编辑盒：x0=ex-R,x1=ex+R,z0=ez-R,z1=ez+R；
+//   sky 编辑 y1=H-1 覆盖整列重 seed 天光，非 sky y1=ey+R）。doSky=任一 sky（超集，正确）。refloodBox
+//   精确标脏（t383）→ 终态与逐写 recomputeLightAround 一致，仅把 N 次重 flood 合并为 1 次。
+void World::flushPendingLightEdits()
+{
+    if (m_pendingLightEdits.empty()) return;
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) { m_pendingLightEdits.clear(); return; }
+    constexpr int R = 15; // = recomputeLightAround 的盒半径（最大光值）
+    const auto &f = m_pendingLightEdits.front();
+    int x0 = f.x - R, y0 = f.y - R, z0 = f.z - R;
+    int x1 = f.x + R, y1max = f.y + R, z1 = f.z + R;
+    bool anySky = f.sky;
+    for (size_t i = 1; i < m_pendingLightEdits.size(); ++i) {
+        const PendingLight &e = m_pendingLightEdits[i];
+        if (e.x - R < x0) x0 = e.x - R;
+        if (e.x + R > x1) x1 = e.x + R;
+        if (e.y - R < y0) y0 = e.y - R;
+        if (e.y + R > y1max) y1max = e.y + R;
+        if (e.z - R < z0) z0 = e.z - R;
+        if (e.z + R > z1) z1 = e.z + R;
+        anySky = anySky || e.sky;
+    }
+    const int y1 = anySky ? (H - 1) : std::min(H - 1, y1max);
+    x0 = std::max(0, x0); y0 = std::max(0, y0); z0 = std::max(0, z0);
+    x1 = std::min(W - 1, x1); z1 = std::min(D - 1, z1);
+    if (x0 > x1 || y0 > y1 || z0 > z1) { m_pendingLightEdits.clear(); return; }
+    refloodBox(x0, y0, z0, x1, y1, z1, anySky);
+    m_pendingLightEdits.clear();
 }
 
 // t185 水流重做（增量波前扩散；修 t174 全量 BFS 的「瞬间填平 + 闪烁」bug）。每 kFlowTickInterval
@@ -623,6 +665,7 @@ void World::tickWaterFlow()
         anyChange |= setWaterSilent(x, y, z, BlockRegistry::Water, kv.second);
     }
     m_batchFluid = false;
+    flushPendingLightEdits(); // t380r：批量写延迟的光照重算 → 联合盒一次 refloodBox（无延迟编辑则 no-op）
     if (anyChange) {
         emit worldChanged();       // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
         m_chunks.clearAllDirty();  // 两段重建完统一清脏（同逐格路径的 emit→clear 顺序）
@@ -810,6 +853,7 @@ void World::tickLavaFlow()
         anyChange |= setWaterSilent(x, y, z, BlockRegistry::Lava, kv.second);
     }
     m_batchFluid = false;
+    flushPendingLightEdits(); // t380r：批量写延迟的光照重算 → 联合盒一次 refloodBox（无延迟编辑则 no-op）
     if (anyChange) {
         emit worldChanged();      // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
         m_chunks.clearAllDirty(); // 两段重建完统一清脏

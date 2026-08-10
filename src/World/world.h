@@ -554,6 +554,12 @@ private:
     //     clearDirty 竞态也非缺批合并，而是「相邻失效」over-invalidate）。返回被标脏的 chunk 数（诊断）。
     //     三 caller（recomputeLightAround / decayLeavesAround / destroySphereSilent）统一经此精确标脏。
     int refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky);
+    // t380r perf：批量流体 tick 延迟光照重算收口。setWaterSilent 在 m_batchFluid 下跳过 per-write
+    //   recomputeLightAround（记入 m_pendingLightEdits）；本方法把延迟编辑的 ±R 盒之并做**一次** refloodBox
+    //   （N 次重 flood → 1 次，同 destroySphereSilent t383 批量收口模式）。caller（tickWaterFlow /
+    //   tickLavaFlow）在 m_batchFluid=false 后、emit worldChanged 前调用。正确性：每编辑影响区 ⊆ 其 ±R 盒
+    //   ⊆ 联合盒 → 联合盒面边界种子法成立，终态与逐写 recomputeLightAround 一致。
+    void flushPendingLightEdits();
     void setVoxelIfAir(int x, int y, int z, quint8 id);       // 仅写空气格（树冠不覆盖主干/地形）
     void setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state); // t310：带 state（草变种 worldgen）
     quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希（列级 seed/x/z）→ 确定性伪随机
@@ -574,6 +580,11 @@ private:
     //   不 emit worldChanged / 不 clearAllDirty；caller 末尾一次性 emit + clearDirty。把「每 tick 写 N 格
     //   → N 次 worldChanged 扇出重建」合并为「1 次重建」，消除活跃扩散期卡顿。通用机制（t351 岩浆可同用）。
     bool m_batchFluid = false;
+    // t380r perf：批量流体写延迟的光照重算缓冲（见 flushPendingLightEdits）。非批量（玩家/世界编辑）路径
+    //   仍逐写即时 recomputeLightAround —— 光变化要立即反映；仅流体批量 tick 延迟合并。每项记录编辑坐标 +
+    //   是否遮光变化（sky）—— 遮光变化须重 seed 天光列到顶（y1=H-1）。
+    struct PendingLight { int x, y, z; bool sky; };
+    std::vector<PendingLight> m_pendingLightEdits;
     // t380 流体脏标志（perf：tickWaterFlow/tickLavaFlow 早退优化）。稳态（海洋全源、无玩家扰动）时两 tick
     //   仍每 ~0.3s / ~3s 全图扫 W×D×H（80×80×64≈41 万格 × chunk 路由除法）只为发现「无候选 → 零变化」
     //   → 稳态帧每 0.3s 白付 ~3-5ms 扫描（= 大水域 / 长时游戏周期性卡顿；关联 t320/t354 屡报 lag）。改：
