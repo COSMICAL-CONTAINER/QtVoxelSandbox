@@ -111,8 +111,8 @@ Item {
     // t38 左键整组（拾取/放置/合并/互换 4 case）+ t49 右键半份：算法见 InventoryOps.resolveClick /
     //   resolveRightClick（四面板共享）。返回 {slotId,slotCount,heldId,heldCount} 或 null=无操作；调用方
     //   据返回值写对应槽 + 更新 held（手持栈由 hotbar VM 单一持有，PLAN §2 VM 单一权威）。
-    function resolveClick(curId, curCount, curDur) { return InventoryOps.resolveClick(root, curId, curCount, curDur) }
-    function resolveRightClick(curId, curCount, curDur) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur) }
+    function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
+    function resolveRightClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch) }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
     function writeSlot(group, index, id, count) { InventoryOps.writeSlot(root, group, index, id, count) }
 
@@ -553,6 +553,7 @@ Item {
                             // 装备槽栈 id / 数量 / 耐久（触碰 armorRevision → 装备 / 脱下 / 破损后重算；air=0 空）。
                             property int armId: { root.hotbar.armorRevision; return root.hotbar.armorBlockIdAt(index) }
                             property int armDur: { root.hotbar.armorRevision; return root.hotbar.armorDurabilityAt(index) }
+                            property var armEnch: { root.hotbar.armorRevision; return root.hotbar.armorEnchantsAt(index) } // t475 附魔
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent; wellColor: "#262b30" }
                             // 空槽部位占位剪影（暗灰金属头盔/胸甲/护腿/靴像素图；§9a 原创，非 MC 资产）。
@@ -631,20 +632,23 @@ Item {
                                     const heldId = root.hotbar.heldBlock
                                     const heldCnt = root.hotbar.heldCount
                                     const heldDur = root.hotbar.heldDurability
+                                    const heldEnch = root.hotbar.heldEnchants()
                                     const slotHas = armId !== 0
                                     // 持物：须是护甲且部位匹配该槽 → 装备（与槽内旧物互换到光标）；否则 no-op。
                                     if (heldId !== 0) {
                                         if (!root.hotbar.isArmor(heldId)) return
                                         if (root.hotbar.armorPiece(heldId) !== index) return
                                         // 互换：先把槽内旧护甲取到光标，再装备手持护甲（armorSetStack 守部位）。
-                                        const oldId = armId, oldDur = armDur
+                                        //   t475 附魔随实例互换（旧物附魔 → 光标；手持附魔 → 装备槽）。
+                                        const oldId = armId, oldDur = armDur, oldEnch = armEnch
                                         root.hotbar.armorSetStack(index, 0, 0)        // 先清槽（脱下旧物）
-                                        root.hotbar.armorSetStack(index, heldId, 1, heldDur) // 装备手持
+                                        root.hotbar.armorSetStack(index, heldId, 1, heldDur, heldEnch) // 装备手持
                                         // 光标手持 = 旧物（若有），否则空。
                                         if (oldId !== 0) {
                                             root.hotbar.heldBlock = oldId
                                             root.hotbar.heldCount = 1
                                             root.hotbar.heldDurability = oldDur
+                                            root.hotbar.setHeldEnchants(oldEnch)
                                         } else {
                                             root.hotbar.heldBlock = 0
                                             root.hotbar.heldCount = 0
@@ -657,6 +661,7 @@ Item {
                                         root.hotbar.heldBlock = armId
                                         root.hotbar.heldCount = 1
                                         root.hotbar.heldDurability = armDur
+                                        root.hotbar.setHeldEnchants(armEnch)
                                         root.hotbar.armorSetStack(index, 0, 0)
                                         root.armorChanged() // t345 脱下音
                                     }
@@ -701,6 +706,7 @@ Item {
                         property int mainId: { root.hotbar.mainRevision; return root.hotbar.mainBlockIdAt(index) }
                         property int mainCount: { root.hotbar.mainRevision; return root.hotbar.mainCountAt(index) }
                         property int mainDur: { root.hotbar.mainRevision; return root.hotbar.mainDurabilityAt(index) } // t263 工具耐久
+                        property var mainEnch: { root.hotbar.mainRevision; return root.hotbar.mainEnchantsAt(index) } // t475 附魔
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent }
                         Item {
@@ -750,24 +756,26 @@ Item {
                                 root.lastTapMs = now
                                 root.lastTapKey = key
                                 if (isDouble) { root.doMergeSameId("main", index); return }
-                                const r = root.resolveClick(mainId, mainCount, mainDur)
+                                const r = root.resolveClick(mainId, mainCount, mainDur, mainEnch)
                                 if (!r) return
-                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur)
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                 root.hotbar.heldBlock = r.heldId
                                 root.hotbar.heldCount = r.heldCount
                                 root.hotbar.heldDurability = r.heldDur
+                                root.hotbar.setHeldEnchants(r.heldEnch)
                             }
                         }
                         // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey（同左键 per-slot 模式）。
                         TapHandler {
                             acceptedButtons: Qt.RightButton
                             onTapped: {
-                                const r = root.resolveRightClick(mainId, mainCount, mainDur)
+                                const r = root.resolveRightClick(mainId, mainCount, mainDur, mainEnch)
                                 if (!r) return
-                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur)
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                 root.hotbar.heldBlock = r.heldId
                                 root.hotbar.heldCount = r.heldCount
                                 root.hotbar.heldDurability = r.heldDur
+                                root.hotbar.setHeldEnchants(r.heldEnch)
                             }
                         }
                         HoverHandler {
@@ -894,12 +902,13 @@ Item {
                                     root.lastTapMs = now
                                     root.lastTapKey = key
                                     if (isDouble) { root.doMergeSameId("hotbar", index); return }
-                                    const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index))
+                                    const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index))
                                     if (r) {
-                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur)
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                         root.hotbar.heldBlock = r.heldId
                                         root.hotbar.heldCount = r.heldCount
                                         root.hotbar.heldDurability = r.heldDur
+                                        root.hotbar.setHeldEnchants(r.heldEnch)
                                     }
                                 }
                             }
@@ -907,12 +916,13 @@ Item {
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: {
-                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index))
+                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index))
                                     if (r) {
-                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur)
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                         root.hotbar.heldBlock = r.heldId
                                         root.hotbar.heldCount = r.heldCount
                                         root.hotbar.heldDurability = r.heldDur
+                                        root.hotbar.setHeldEnchants(r.heldEnch)
                                     }
                                 }
                             }

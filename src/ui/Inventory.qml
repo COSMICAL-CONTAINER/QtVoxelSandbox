@@ -106,8 +106,8 @@ Item {
     // t46/t49 左键整组（拾取/放置/合并/互换）+ 右键半份：算法见 InventoryOps.resolveClick /
     //   resolveRightClick（四面板共享）。本面板 hotbar 行支持把物品在槽间搬动/互换（非「创造覆盖」销毁）；
     //   调色板点击仍是「无限源拾取」（在 TapHandler 内直接 setHeldBlock，不走 resolveClick）。
-    function resolveClick(curId, curCount, curDur) { return InventoryOps.resolveClick(root, curId, curCount, curDur) }
-    function resolveRightClick(curId, curCount, curDur) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur) }
+    function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
+    function resolveRightClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch) }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
     function writeSlot(group, index, id, count) { InventoryOps.writeSlot(root, group, index, id, count) }
 
@@ -498,12 +498,13 @@ Item {
                                         root.lastTapMs = now
                                         root.lastTapKey = key
                                         if (isDouble) { root.doMergeSameId("hotbar", index); return }
-                                        const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index))
+                                        const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index))
                                         if (r) {
-                                            root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur)
+                                            root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                             root.hotbar.heldBlock = r.heldId
                                             root.hotbar.heldCount = r.heldCount
                                             root.hotbar.heldDurability = r.heldDur
+                                            root.hotbar.setHeldEnchants(r.heldEnch)
                                         }
                                     }
                                 }
@@ -511,12 +512,13 @@ Item {
                                 TapHandler {
                                     acceptedButtons: Qt.RightButton
                                     onTapped: {
-                                        const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index))
+                                        const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index))
                                         if (r) {
-                                            root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur)
+                                            root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                             root.hotbar.heldBlock = r.heldId
                                             root.hotbar.heldCount = r.heldCount
                                             root.hotbar.heldDurability = r.heldDur
+                                            root.hotbar.setHeldEnchants(r.heldEnch)
                                         }
                                     }
                                 }

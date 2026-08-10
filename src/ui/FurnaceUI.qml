@@ -167,21 +167,23 @@ Item {
             return
         }
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability)
+        const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
+        root.hotbar.setHeldEnchants(r.heldEnch)
     }
     function slotRight(group, index) {
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability)
+        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability, cur.enchants)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
+        root.hotbar.setHeldEnchants(r.heldEnch)
     }
 
     // ── t79/t98/t108/t167 拖动均分 + t110 数字键交换：算法见 InventoryOps（四面板共享）。本处薄委托包装，

@@ -114,8 +114,8 @@ Item {
         }
     }
     // resolveClick / resolveRightClick（拾取/放置/合并/互换 + 半份）：算法见 InventoryOps（五面板共享）。
-    function resolveClick(curId, curCount, curDur) { return InventoryOps.resolveClick(root, curId, curCount, curDur) }
-    function resolveRightClick(curId, curCount, curDur) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur) }
+    function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
+    function resolveRightClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch) }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
     function writeSlot(group, index, id, count) { InventoryOps.writeSlot(root, group, index, id, count) }
 
@@ -350,6 +350,7 @@ Item {
                         property int mainId: { root.hotbar.mainRevision; return root.hotbar.mainBlockIdAt(index) }
                         property int mainCount: { root.hotbar.mainRevision; return root.hotbar.mainCountAt(index) }
                         property int mainDur: { root.hotbar.mainRevision; return root.hotbar.mainDurabilityAt(index) } // t263 工具耐久
+                        property var mainEnch: { root.hotbar.mainRevision; return root.hotbar.mainEnchantsAt(index) } // t475 附魔
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent }
                         Item {
@@ -394,23 +395,25 @@ Item {
                                 root.lastTapMs = now
                                 root.lastTapKey = key
                                 if (isDouble) { root.doMergeSameId("main", index); return }
-                                const r = root.resolveClick(mainId, mainCount, mainDur)
+                                const r = root.resolveClick(mainId, mainCount, mainDur, mainEnch)
                                 if (!r) return
-                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur)
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                 root.hotbar.heldBlock = r.heldId
                                 root.hotbar.heldCount = r.heldCount
                                 root.hotbar.heldDurability = r.heldDur
+                                root.hotbar.setHeldEnchants(r.heldEnch)
                             }
                         }
                         TapHandler {
                             acceptedButtons: Qt.RightButton
                             onTapped: {
-                                const r = root.resolveRightClick(mainId, mainCount, mainDur)
+                                const r = root.resolveRightClick(mainId, mainCount, mainDur, mainEnch)
                                 if (!r) return
-                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur)
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                 root.hotbar.heldBlock = r.heldId
                                 root.hotbar.heldCount = r.heldCount
                                 root.hotbar.heldDurability = r.heldDur
+                                root.hotbar.setHeldEnchants(r.heldEnch)
                             }
                         }
                         HoverHandler {
@@ -508,24 +511,26 @@ Item {
                                     root.lastTapMs = now
                                     root.lastTapKey = key
                                     if (isDouble) { root.doMergeSameId("hotbar", index); return }
-                                    const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index))
+                                    const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index))
                                     if (r) {
-                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur)
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                         root.hotbar.heldBlock = r.heldId
                                         root.hotbar.heldCount = r.heldCount
                                         root.hotbar.heldDurability = r.heldDur
+                                        root.hotbar.setHeldEnchants(r.heldEnch)
                                     }
                                 }
                             }
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: {
-                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index))
+                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index))
                                     if (r) {
-                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur)
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                                         root.hotbar.heldBlock = r.heldId
                                         root.hotbar.heldCount = r.heldCount
                                         root.hotbar.heldDurability = r.heldDur
+                                        root.hotbar.setHeldEnchants(r.heldEnch)
                                     }
                                 }
                             }

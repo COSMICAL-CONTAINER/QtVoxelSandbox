@@ -11,6 +11,7 @@
 
 #include "armor.h"        // t345 护甲段 id + 属性（ArmorRegistry；护甲槽 / 减伤 / 图标走它）
 #include "blockregistry.h" // 物品 id（方块段 0..Count-1；图标/中文名走单一注册表）
+#include "enchantregistry.h" // t475 附魔段 id + 选择逻辑（EnchantRegistry；附魔元数据 / 选择 / 名走它）
 #include "recipe.h"        // 材料段 id（>=0x200，t50 木棒）；nameForBlock 材料段查 RecipeRegistry::StickId
 #include "smelting.h"      // t87 冶炼 / 燃料判定（smeltResult / fuelBurnSeconds 桥接到 QML）
 #include "toolregistry.h"  // 工具段 id（>=0x100）；工具判定 / tier / 中文名 / 创造调色板走工具注册表（t33）
@@ -21,11 +22,16 @@
 //   - count 上限经 Hotbar::maxStackSize(id)：方块 64、工具 1。
 //   - durability（t263）：仅工具有意义（工具 count 恒 1 → 每实例独立耐久）；非工具栈恒 0（inert）。
 //     工具实例耐久 ∈ [1, ToolRegistry::maxDurability(id)]；归零即破损（槽位清空，不会出现 durability=0 的工具栈）。
+//   - enchants[4]（t475）：附魔元数据 —— 每槽一个 int，按 EnchantRegistry::pack(id,level) 打包
+//     （(enchantId<<8)|level；0 = 空槽）。一件物品最多带 4 个附魔（机制等价 MC 1.0 单件多附魔）。仅工具 /
+//     武器 / 护甲有意义（可附魔物品）；方块 / 材料段恒全 0（inert）。附魔随物品实例走（同耐久语义：工具 /
+//     护甲 count 恒 1 → 每实例独立附魔；背包搬运经 setStack 显式传 enchants 保真）。
 //   - 不变式：id==0 当且仅当 count==0（空栈）；非空栈 count 恒 >=1（写入处统一钳制）。
 struct ItemStack {
     int id = 0;
     int count = 0;
-    int durability = 0; // t263 工具剩余耐久（非工具 / 空栈 = 0，inert）
+    int durability = 0;     // t263 工具剩余耐久（非工具 / 空栈 = 0，inert）
+    int enchants[4] = {0,0,0,0}; // t475 附魔元数据（4 槽 × (id<<8|level)；0 = 空槽；非可附魔物品恒全 0）
 
     bool isEmpty() const { return id == 0 || count <= 0; }
 };
@@ -83,6 +89,10 @@ class Hotbar : public QObject
     Q_PROPERTY(int heldBlock READ heldBlock WRITE setHeldBlock NOTIFY heldBlockChanged)
     Q_PROPERTY(int heldCount READ heldCount WRITE setHeldCount NOTIFY heldBlockChanged)
     Q_PROPERTY(int heldDurability READ heldDurability WRITE setHeldDurability NOTIFY heldBlockChanged)
+    // t475 光标手持物附魔（同 heldDurability 语义：随工具 / 护甲实例走；背包搬运经 setHeldEnchants 保真）。
+    //   QML 边界走 Q_INVOKABLE heldEnchants() 取（QVariantList<int> 4 元素，每 = pack 值；lessons-learned：
+    //   moc 拒绝 Q_PROPERTY(QVariantList)）；InventoryOps.readSlot / writeSlot 据此透传。空栈 / 非可附魔 → 4 个 0。
+    //   NOTIFY 复用 heldBlockChanged（id / count / dur / enchants 强耦合，同信号驱动）。
     // t97 主栏 VM 共享：27 主栏槽（生存背包 / 工作台 / 熔炉三菜单共享同一份）。mainRevision NOTIFY 驱动
     // 三菜单 delegate 触碰刷新（同 hotbar 行 slotRevision 模式）；mainCount CONSTANT=27 供 Repeater model。
     Q_PROPERTY(int mainCount READ mainCount CONSTANT)
@@ -113,6 +123,10 @@ public:
     //   路径覆盖为槽内实例耐久（保真搬运）。clamp 到 [0, maxDurability(id)]；非工具 id 写入静默归 0。
     int heldDurability() const { return m_heldStack.durability; }
     void setHeldDurability(int d);
+    // t475 光标手持物附魔（QVariantList<int> 4 元素，每 = EnchantRegistry::pack 值；空手 / 非可附魔 → 4 个 0）。
+    //   setter 供 pickup-from-slot 路径覆盖为槽内实例附魔（保真搬运）；列表不足 4 元素按 0 补齐，越界截断。
+    Q_INVOKABLE QVariantList heldEnchants() const;
+    void setHeldEnchants(const QVariantList &enchants);
 
     // t97 主栏 VM（27 槽，三菜单共享）。mainCount 恒 27；mainRevision 随主栏栈写入自增。
     int mainCount() const { return int(m_mainSlots.size()); }
@@ -165,6 +179,27 @@ public:
     Q_INVOKABLE int armorTier(int itemId) const;      // ArmorRegistry::ArmorTier（0 皮革..4 钻石）；非护甲 -1
     Q_INVOKABLE int armorPointsFor(int itemId) const; // 单件护甲值；非护甲 0
     Q_INVOKABLE int armorMaxDurability(int itemId) const; // 单件最大耐久；非护甲 0
+    // ── t475 附魔桥接（透传 EnchantRegistry；QML 不能直接调 C++ 静态类）──
+    //   - itemEnchantCategory(itemId)：物品的可附魔类别（0=None / 1=Weapon / 2=Tool / 4=Armor；单类别非叠加）。
+    //     附魔台 UI 据此判「选中槽物品是否可附魔」+ 据类别选适用附魔池。
+    //   - isEnchantable(itemId)：物品是否可附魔（category != None）。附魔台 UI 门控「选项槽 enabled」用。
+    //   - enchantDisplayName(enchantId) / enchantMaxLevel(enchantId) / enchantLevelText(level)：附魔名 / 最大等级 /
+    //     等级罗马数字后缀（如「III」）；tooltip / 附魔台显示「锐锋 III」用。
+    //   - selectEnchantsPreview(category, offeredLevel, seed)：纯查询（不改槽态）—— 给定类别 + 提供等级 + 种子
+    //     返回 EnchantRegistry::selectEnchants 结果（QVariantMap list {id,level}）。附魔台 UI 选项槽预览「这次会
+    //     附上哪些」+ 点击时 enchantSelected 用同 seed 复算写入（预览 = 写入，机制等价 MC「点槽即所见即所得」）。
+    Q_INVOKABLE int itemEnchantCategory(int itemId) const;
+    Q_INVOKABLE bool isEnchantable(int itemId) const;
+    Q_INVOKABLE QString enchantDisplayName(int enchantId) const;
+    Q_INVOKABLE int enchantMaxLevel(int enchantId) const;
+    Q_INVOKABLE QString enchantLevelText(int level) const;
+    Q_INVOKABLE QVariantList selectEnchantsPreview(int category, int offeredLevel, int seed) const;
+    // ── t475 槽位附魔元数据读写（QVariantList<int> 4 元素，每 = EnchantRegistry::pack 值；0 = 空槽）──
+    //   供 InventoryOps.readSlot / writeSlot 透传（同 durabilityAt / mainDurabilityAt 模式）：搬运工具 / 护甲时
+    //   附魔随实例保真。空槽 / 非可附魔物品 → 4 个 0（inert）。
+    Q_INVOKABLE QVariantList enchantsAt(int slot) const;
+    Q_INVOKABLE QVariantList mainEnchantsAt(int slot) const;
+    Q_INVOKABLE QVariantList armorEnchantsAt(int slot) const;
 
     // 每槽物品 id（air=0 即空栈）。越界返回 0。兼容旧消费者（player.selectedBlock 绑定 / 背包 swap）。
     Q_INVOKABLE int blockIdAt(int slot) const;
@@ -190,15 +225,17 @@ public:
     Q_INVOKABLE void scroll(int delta);
 
     // ── 栈操作（t32 基础；t36 拾取/丢弃消费）──
-    // 直接写入栈 (slot, id, count, durability=-1)；范围 + id 合法性 + count 上限校验；id==0 或 count<=0 → 清空该槽。
+    // 直接写入栈 (slot, id, count, durability=-1, enchants={})；范围 + id 合法性 + count 上限校验；id==0 或 count<=0 → 清空该槽。
     //   durability（t263）：-1=自动（工具填 maxDurability=新工具、非工具 0）；>=0=显式（搬运保真，clamp 到 [1,max]）。
+    //   enchants（t475）：QVariantList<int> 4 元素（每 = pack 值；缺省空 = 清空附魔）。搬运工具 / 护甲时透传槽内实例附魔保真。
     //   改当前选中槽时补发 selectedSlotChanged（驱动 selectedBlockId → player.selectedBlock 刷新）。
-    Q_INVOKABLE void setStack(int slot, int id, int count, int durability = -1);
+    Q_INVOKABLE void setStack(int slot, int id, int count, int durability = -1, const QVariantList &enchants = {});
     // 智能堆叠放入（t36 拾取消费）：先选中槽（空 / 同 id 可入 ——「入手」语义，用户核心诉求
     // 「手持空→入手；手持有(异)物→入背包」），再其它同 id 槽合并，再空槽；返回未放入数（0=全入）。
     // 非法 id 全额退回。改了选中槽内容时补发 selectedSlotChanged。
     //   durability（t263）：-1=自动（工具新实例满耐久，世界拾取 / 合成产物场景）；>=0=显式（掉落物拾取保真）。
-    Q_INVOKABLE int addStack(int id, int n, int durability = -1);
+    //   enchants（t475）：同 setStack（工具 / 护甲单件入空槽时写其实例附魔；可堆叠物品合并路径附魔恒 0）。
+    Q_INVOKABLE int addStack(int id, int n, int durability = -1, const QVariantList &enchants = {});
     // 从 slot 取最多 n 件（不超过该栈实际持有）；返回实际取走数；栈空则 id 归 0。
     Q_INVOKABLE int takeStack(int slot, int n);
     // 单件最大堆叠：方块段 64、工具段（id>=0x100，t33 预留）1（不可堆叠）。
@@ -270,13 +307,16 @@ public:
     Q_INVOKABLE int mainDurabilityAt(int slot) const;
     // 直接写入主栏栈（背包点击放置 / 互换 / 拖拽均分写回主栏用）。校验同 setStack；air/非法 id/count<=0 → 清空。
     //   durability（t263）：同 setStack（-1=自动 / >=0=显式保真）。
-    Q_INVOKABLE void mainSetStack(int slot, int id, int count, int durability = -1);
+    //   enchants（t475）：同 setStack。
+    Q_INVOKABLE void mainSetStack(int slot, int id, int count, int durability = -1, const QVariantList &enchants = {});
     // 智能堆叠放入主栏（同 id 合并 → 空槽开新）。返回未放入数。仅主栏范围（hotbar 由 addStack / addToAny 管）。
     //   durability（t263）：同 addStack。
-    Q_INVOKABLE int mainAddStack(int id, int n, int durability = -1);
+    //   enchants（t475）：同 addStack。
+    Q_INVOKABLE int mainAddStack(int id, int n, int durability = -1, const QVariantList &enchants = {});
     // 跨 main + hotbar 的智能堆叠（拾取 / 丢弃回栏合并）。优先序（spec t109）：
     //   durability（t263）：同 addStack（-1=自动 / >=0=显式保真，掉落物拾取场景）。
-    Q_INVOKABLE int addToAny(int id, int n, int durability = -1);
+    //   enchants（t475）：同 addStack。
+    Q_INVOKABLE int addToAny(int id, int n, int durability = -1, const QVariantList &enchants = {});
 
     // ── t345 护甲槽 VM（4 槽：头 / 胸 / 腿 / 脚）── 玩家自身装备（非物品流，独立 4 槽）。
     //   - armorBlockIdAt(slot) / armorCountAt(slot) / armorDurabilityAt(slot)：每装备槽栈数据（air=0=空；越界返 0）。
@@ -291,9 +331,16 @@ public:
     Q_INVOKABLE int armorBlockIdAt(int slot) const;
     Q_INVOKABLE int armorCountAt(int slot) const;
     Q_INVOKABLE int armorDurabilityAt(int slot) const;
-    Q_INVOKABLE void armorSetStack(int slot, int id, int count, int durability = -1);
+    Q_INVOKABLE void armorSetStack(int slot, int id, int count, int durability = -1, const QVariantList &enchants = {});
     Q_INVOKABLE QVariantList creativeArmor() const;
     Q_INVOKABLE void damageArmor();
+    // t475 附魔选中槽物品（附魔台点选项槽 → 写附魔元数据到目标物品）。机制等价 MC 1.0 附魔台点槽即附魔。
+    //   offeredLevel 1..30（来自 t474 书架加成映射到三槽）；seed 该槽随机种子（与 selectEnchantsPreview 同 seed →
+    //   预览 = 写入）。流程：取选中槽物品 → category = itemEnchantCategory(id)；category==None / 空槽 / 已有附魔
+    //   → no-op（UI 应已门控；MC 1.0 不允许重复附魔已附魔物品）。selectEnchants(category, offeredLevel, seed) →
+    //   写入 item.enchants[4]（清空旧 + 填新；最多 4 个）。bumpRevision + 补发 selectedSlotChanged（附魔显示刷新）。
+    //   不改 id / count / durability（附魔是叠加元数据，非替换物品）。返回 true = 已附魔；false = 不附魔物品 / 已有附魔。
+    Q_INVOKABLE bool enchantSelected(int offeredLevel, int seed);
     // t377 在世界中右键手持护甲 → 装备 / 互换（spec t377「held armor RIGHT-CLICK = equip/swap」）。
     //   取当前选中槽护甲：空对应部位槽 → 直接装备；占用 → 先把旧件换回选中槽（手持），再装备新件。
     //   返回 true = 已处理（caller PlayerController 据此消费右键，不走 placeBlock）；选中非护甲 → false。

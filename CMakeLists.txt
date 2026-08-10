@@ -150,6 +150,9 @@ qt_add_executable(voxelsandbox
     #   无 Q_OBJECT / 无实例；item id 引用 recipe.h 材料段常量。ChestStore::populateDungeonLoot 调它填箱。
     src/Game/loottable.cpp
     src/Game/loottable.h
+    # t475 附魔表（Game 层）：附魔属性集 + 据等级/种子选附魔的纯静态注册表；hotbar(ItemStack 附魔字段) 调它。
+    src/Game/enchantregistry.cpp
+    src/Game/enchantregistry.h
     # t89 音效（Core/Platform 层）：miniaudio 单头 + AudioManager 封装。
     #   miniaudio.h 是 vendored 第三方单头（~4MB），仅 miniaudio_impl.cpp 含 MINIAUDIO_IMPLEMENTATION；
     #   audiomanager.h/cpp 是项目自有代码（pimpl 隔离重头）。
