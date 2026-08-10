@@ -536,4 +536,21 @@ FrameProfiler 实测：mesh 稳态 0.5-1.5ms/frame（风暴已灭）；sun 重�
 
 ## R18r batch 1 附魔链（t471-t477，性能修好后自动开工）
 
-> Workflow `wf_a64222c5-649`（7 任务串行 voxel-dev，shared files blockregistry/world/recipe/qrc）。开工时间：c282bc0 性能修好后（用户指令"性能 agent 修改好回来后自动开工"）。记录待 workflow 完成后补。
+> 主 workflow `wf_a64222c5-649`（5 agent 跑了 4.33 个，784,802 tok / 480 calls / 107m）+ 尾 workflow `wf_2ac1880a-f64`（2 agent，384,753 tok / 207 calls / 72m）+ 主编排抢救 t475。合计 ~1.17M tok / ~3h（含限额空等）。开工前提：c282bc0 性能修好（用户指令"性能 agent 修改好回来后自动开工"）。
+
+**7 任务全 ✅**（附魔前置材料 → 附魔系统全链）：
+
+| 任务 | 提交 | 做了什么 |
+|---|---|---|
+| t471 青金石 | `ed840f9` | LapisOre 块(id93, Y<32 矿脉 0.6%, 用 r2>>16 空闲位段不改既有矿分布) + 青金石物品(0x236, 挖直接掉青金石) + 创造栏 + 程序贴图(青金石矿/图标) |
+| t472 黑曜石 | `eb45bf6` | Obsidian(t411 已有) 补 source+source→obsidian 流体分支(t438 的 flow+flow→圆石之外) + 爆抗(destroySphereSilent 跳过) + **新钻石镐 tier4**(0x112, 速度8/耐久1561, 3钻+2棍) + 黑曜石 minTier1→4/hardness12→50(仅钻石镐掉落) |
+| t473 皮革纸书 | `cc7df90` | 纸(0x237, 3甘蔗横排→3纸) + 书(0x238, 3纸+1皮革) + 皮革掉落扩到猪(牛原有) + 创造栏 + MaterialIcon 自绘 |
+| t474 附魔台 | `75c8f02` | EnchantingTable(94) + Bookshelf(95, 6板+3书) 块 + 2钻+4黑曜+1书合成 + 附魔 UI 外壳(3 槽, 消耗 XP1/2/3 + 青金石1/2/3) + 书架数(2格内≤15)提等级上限 |
+| t475 附魔逻辑 | `bb25908` | **限额被杀后主编排抢救**：EnchantRegistry(14 附魔: 锋利/亡灵杀手/节肢克星/击退/燃焰/效率/精准/时运/耐久/保护×4/水上亲和, 各 maxLevel/weight/互斥组) + ItemStack.enchants[4](pack id<<8\|level) + InventoryOps/UI 搬运保附魔 + hotbar Q_INVOKABLE 桥。agent 死前漏加 enchantregistry.cpp 进 CMake → 链接报 undefined ref → 主编排补 1 行 CMake 即零警告通过 |
+| t476 附魔效果 | `462b75d` | 全 14 附魔在**单点 calc** 实装(非每帧): 锋利+0.5\*lvl攻 / 亡灵杀手+节肢克星对族加成 / 击退 / 燃焰(ignite) / 效率挖速/(1+lvl) / 精准掉方块 / 时运掉落×(1..1+lvl) / 耐久 100/(lvl+1)% 跳 / 保护系 armorProtectionFactor EPF 减伤。新增 EnchantRegistry::findLevel + EntityManager::ignite + knockback 强度参 |
+| t477 铁砧 | `279c347` | IronBlock(96, 9铁锭) + Anvil(97)+微损(98)+重损(99) 三阶段 + 3铁块+4铁锭合成 + AnvilUI(修复+12%耐久 / 附魔合并(pack/unpack) / 重命名 customName, 各消耗 XP via spendLevels) + 每操作 1/3 概率进阶损坏, 第3次碎→setBlock Air + 程序贴图(铁块/铁砧顶/底/2损坏态, atlas→117 tile) + slotRevision/selectedSlotChanged 低频 NOTIFY(非每帧) |
+
+- **限额事故 + 抢救**（t475）：agent 跑了 23m/118 calls 在写附魔逻辑时撞 5h 限额(429, 重置 05:34:41)被杀, 留半成品(enchantregistry 新文件 + hotbar/ItemStack/InventoryOps/5 UI 改)。主编编排编译诊断=唯一缺口是漏加 CMake 源(链接 undefined ref), 补 1 行 `src/Game/enchantregistry.cpp` 即零警告 build green, 抢救提交 `bb25908`(没重做, 保住 23m 工作)。同 t467 先例(那次 stash 重做, 这次因缺口极小直接补)。
+- **构建**：全 7 任务串行(shared files blockregistry/world/recipe/qrc/hotbar/Main.qml → 必须串行), 每 agent 自带 build 零警告 gate + targeted git add(无 .pyc)。最终 HEAD `279c347` 主编编排复核 build exit 0。
+- **验收**：✅ 编译零警告 + smoke(root objects=1, 不崩)；**待用户 playing 实测**：附魔链是否真好用——挖到青金石/黑曜石、造附魔台附一把锋利剑看伤害、时运镐看掉落倍增、铁砧修复/合并/改名、铁砧损坏碎裂。mob phys 性能(c282bc0 caveat)仍待 28-mob 场景实测。
+- **未做(留批2/批3)**：C 繁殖伙伴(t478-t483, **加 4 新 mob=perf 敏感**, 需用户先验收附魔链+确认 kCap/节流) + D 结构(t484-t487, worldgen 需增量非全扫)。
