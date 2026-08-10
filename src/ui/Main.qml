@@ -1481,7 +1481,7 @@ Window {
             itemEntities.spawnItem(x, y, z, itemId, 1)
         }
         // t242 mob 死亡掉落（spec「血 0→死亡掉落物：猪:生猪排 / 牛:皮革+生牛肉 / 羊:羊毛」）：damageEntity
-        //   扣血到 ≤0 时 EntityManager 发 mobDied(x,y,z,mobType,burned) → 据子类 id 转发到 ItemEntityManager.spawnItem
+        //   扣血到 ≤0 时 EntityManager 发 mobDied(x,y,z,mobType,burned,wasBaby) → 据子类 id 转发到 ItemEntityManager.spawnItem
         //   生成对应掉落实体（机制等价 MC 1.0 被动生物掉落；数量取 MC 1.0 量级：猪 1-2 生猪排 / 牛 1 皮革
         //   + 1-2 生牛肉 / 羊 1 羊毛；MobTest 不掉落）。同 fallingBlockDropped 模式：单向事件流（PLAN §2 分层：
         //   Entities 层发语义事件、呈现层只消费）。坐标 = mob 死亡格 floor(pos)，与 spawnItem 整数格约定一致。
@@ -1492,7 +1492,11 @@ Window {
         //     0x217=骨头 / 0x218=腐肉 / 0x219=线（RecipeRegistry::BoneId / RottenFleshId / StringId，t299）。
         //     0x228=羽毛 / 0x229=生鸡肉 / 0x22A=熟鸡肉（RecipeRegistry::FeatherId 等，t398 鸡掉落）。
         //     id 改动须同步 src/Game/recipe.h（单一权威）。
-        function onMobDied(x, y, z, mobType, burned) {
+        function onMobDied(x, y, z, mobType, burned, wasBaby) {
+            // t479 幼崽死亡不掉落（机制等价 MC 1.0 幼崽不掉落）：幼崽（baby）死亡 → 不掉战利品 + 不掉 XP。
+            //   wasBaby = EntityManager 致死瞬间快照（deathBaby）—— 0.5s 死亡动画窗口内 growTimer 可能到 0 长大，
+            //   快照保「致死时是幼崽」语义（同 deathBurned 快照模式）。成体（wasBaby=false）走既有掉落流程。
+            if (wasBaby) return
             // t402 杀怪产经验球（spec「killing mobs spawns XP orbs」；机制等价 MC 1.0 杀怪掉经验）。
             //   t443 放宽到所有 mob（spec「杀被动 mob 也掉 XP」）：敌对 mob 给较多（5 XP），被动 mob 给少量
             //   （1-3 XP 随机，量级远小于敌对，鼓励杀怪经济）。MobTest（调试）不在表 → 不掉。XP 数值为本工程

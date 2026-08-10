@@ -225,12 +225,25 @@ public:
     //   属 Game 层（RecipeRegistry），Entities 层不向上依赖（PLAN §2）。caller 先据 mobTypeAt + 持物判匹配，再调本方法。
     //   Q_INVOKABLE 兼调试 + PlayerController placeBlock 食物分支双入口（playercontroller 是 C++ 直调）。
     Q_INVOKABLE bool enterLoveMode(int i);
+    // t479 幼崽喂食加速成长（spec「喂幼崽对应繁殖食物 → 加速长大」；机制等价 MC 1.0 喂幼崽减 ~10% 剩余成长时间）。
+    //   第 i 个**幼崽**可繁殖 mob（pig/cow/sheep/chicken）+ 非 dead → growTimer 减 kBabyFeedGrow（≈kBabyGrowTime 的
+    //   10%）加速长大 + 返 true。非幼崽 / 非可繁殖 mob / dead / 越界 → 返 false（caller 不消耗食物）。
+    //   **食物匹配**由 caller（PlayerController，Game 层）判（同 enterLoveMode：物品 id 属 RecipeRegistry，Entities 层
+    //   不向上依赖，PLAN §2）。caller 先据 isBabyAt + 持物判「是否幼崽 + 食物匹配该物种」——幼崽 → 调本方法（加速
+    //   成长）；成体 → 调 enterLoveMode（求偶）。二者互斥分流：幼崽不可求偶（enterLoveMode 守卫返 false）、成体
+    //   无成长可加（feedBaby 守卫返 false），机制等价 MC「喂幼崽加速生长、喂成体进 love mode」。不查 breedCooldown
+    //   （幼崽无繁殖冷却；喂食只加速成长，同 MC）。bump revision + emit → 喂食是状态变更，通知纪律同 enterLoveMode。
+    Q_INVOKABLE bool feedBaby(int i);
     // t400 第 i 个 mob 是否处于求偶期（loveTimer>0）。QML delegate 据它显心形 Model（繁殖可观察反馈 ——
     //   玩家喂食后立即见心，确认求偶已触发）。非 mob / 越界 / 未求偶 → false。
     Q_INVOKABLE bool inLoveAt(int i) const;
     // t400 第 i 个 mob 的模型缩放（幼崽 kBabyScale=0.5 / 成体 1.0）。QML delegate Node scale 绑它 → 幼崽半大
     //   （机制等价 MC 幼崽体型小）。非 mob / 越界 → 1.0。revision 在长大（baby→false）时 bump 让 QML 重缩。
     Q_INVOKABLE float babyScaleAt(int i) const;
+    // t479 第 i 个 mob 是否**幼崽**（baby=true）。PlayerController 喂食分流据它（幼崽 → feedBaby 加速成长 /
+    //   成体 → enterLoveMode 求偶）；呈现层守卫也可据它（幼崽死亡不掉落，见 mobDied 的 wasBaby 参数）。非 Mob /
+    //   越界 → false。
+    Q_INVOKABLE bool isBabyAt(int i) const;
     // t400 当前**可繁殖**被动 mob 数（pig/cow/sheep/chicken 的成体 + 幼崽，alive 且非 dead）。供繁殖上限判定
     //   （kPassiveMobCap；达上限 → 配对不再产幼崽，防种群爆炸，spec「种群上限」）。hostile / MobTest /
     //   MobSquid / FallingBlock / Item 不计。const 只读自身数据。
@@ -390,7 +403,10 @@ signals:
     //   true → 呈现层 onMobDied 据此把被动生物的「生肉掉落」替换为熟肉（猪→熟猪排 / 牛→熟牛肉 / 羊→熟羊肉；
     //   机制等价 MC 1.0 着火死亡掉熟肉）。仅 fireTimer>0 触发（日光 burning 仅敌对、不掉肉故不参与）。
     //   分层（PLAN §2）：Entities 层发语义事件，呈现层只消费，绝不反向写栅格。
-    void mobDied(int x, int y, int z, int mobType, bool burned);
+    //   t479 wasBaby = **致死瞬间**快照（Entity.deathBaby）—— 幼崽死亡不掉落（呈现层 onMobDied 守卫跳过战利品 +
+    //   XP，机制等价 MC 幼崽不掉落）。0.5s 死亡动画窗口内 tickBreeding 仍衰减 growTimer，幼崽可能在其中长大
+    //   （baby→false），故延迟 emit 时读 e.baby 会漏判；快照保「致死时是幼崽」语义稳定（同 deathBurned 快照模式）。
+    void mobDied(int x, int y, int z, int mobType, bool burned, bool wasBaby);
     // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：hostile mob（Shambler/Bones/Spider）在 aiHostile 内检测到
     //   玩家处于攻击范围（XZ<=kAttackRange + 垂直同层）且攻击冷却（kAttackCooldown）到时发本信号。amount = 单次伤害 HP
     //   （kAttackDamage=3，MC 简单难度僵尸）；mobType = 子类 id（Shambler/Bones/Stalker/Spider）。呈现层（Main.qml）
@@ -487,6 +503,10 @@ private:
         //   同帧出现「太急」）。deathBurned 在致死瞬间快照 fireTimer>0（机制等价 MC「着火致死掉熟肉」），因
         //   dead 态 fireTimer 冻结，故与 expiry 时复算等价；显式快照更稳（防未来 dead 期间动 fireTimer 的改动）。
         bool deathBurned = false;
+        // t479 幼崽死亡快照：damageEntity 致死瞬间快照 e.baby（同 deathBurned 模式）。dead 态 tickBreeding 仍衰减
+        //   growTimer —— 幼崽可能在 kDeathTime≈0.5s 死亡动画窗口内长大（baby→false），故 mobDied 延迟 emit 时读
+        //   e.baby 会漏判「致死时是幼崽」；快照保「幼崽死亡不掉落」语义稳定（机制等价 MC 幼崽死亡不掉物）。
+        bool deathBaby = false;
         // t280 黑暗刷怪（敌对生物 Shambler/Bones 专用；passive / FallingBlock 留默认 false/0 不触发）：
         //   hostile=true 的 Mob 走 tickHostileLife 的燃烧 + 远距消失 + spawn 调度逻辑。passive（pig/cow/sheep/
         //   test）hostile=false → 不燃烧 / 不计入敌对上限 / 不远距消失（passive 永驻世界，机制等价 MC 被动生物
@@ -919,6 +939,7 @@ private:
     static constexpr float kLoveDuration    = 30.0f; // 求偶期持续（秒；MC love mode ~30s 窗口）
     static constexpr float kBreedCooldown   = 60.0f; // 繁殖后冷却（秒；防同对立即再繁；MC 5 分钟，本工程取 60 便测试）
     static constexpr float kBabyGrowTime    = 120.0f; // 幼崽长大（秒；MC 20 分钟，本工程取 120 便观察）
+    static constexpr float kBabyFeedGrow    = 12.0f;  // 每次喂幼崽减成长时间（秒；≈kBabyGrowTime 的 10% —— MC 喂幼崽减 ~10% 剩余时间，t479）
     static constexpr float kBreedRange      = 3.0f;  // 配对 XZ 中心距上界（blocks；求偶寻偶 AI 把双方拉到一起后触发）
     static constexpr int   kPassiveMobCap   = 24;    // 可繁殖被动 mob 总数上限（防种群爆炸；spec「种群上限」）
     static constexpr float kBabyScale       = 0.5f;  // 幼崽模型缩放（babyScaleAt 返它；成体 1.0）

@@ -1936,9 +1936,12 @@ void PlayerController::placeBlock()
     }
     // t400 繁殖喂食 useBlock（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding）：
     //   手持繁殖食物（小麦 WheatId / 胡萝卜 CarrotId / 马铃薯 PotatoId / 种子 SeedId）右键 → 在主选体射线之外
-    //   **独立**跑一条「mob 命中射线」（findMobHit，同剪刀剪羊 / 攻击路径）；命中**成体**可繁殖 mob 且食物匹配
-    //   该物种（牛/羊=小麦、猪=胡萝卜·马铃薯、鸡=种子）→ EntityManager::enterLoveMode（设 loveTimer + emit）+
-    //   生存消耗 1 食物 / 创造不耗 + 挥手。命中非 mob / 食物不匹配 / 幼崽 / 冷却中 / 已求偶 / 无命中 → 未喂。
+    //   **独立**跑一条「mob 命中射线」（findMobHit，同剪刀剪羊 / 攻击路径）；命中可繁殖 mob 且食物匹配该物种
+    //   （牛/羊=小麦、猪=胡萝卜·马铃薯、鸡=种子）→ EntityManager::enterLoveMode（设 loveTimer + emit，成体求偶）+
+    //   生存消耗 1 食物 / 创造不耗 + 挥手。命中非 mob / 食物不匹配 / 无命中 → 未喂。
+    //   **t479 幼崽特例**：命中**幼崽**（isBabyAt）且食物匹配 → 不走求偶（幼崽不可繁殖，enterLoveMode 守卫返 false），
+    //   改 EntityManager::feedBaby 加速成长（growTimer 减 kBabyFeedGrow ≈ kBabyGrowTime 的 10%，机制等价 MC 喂幼崽
+    //   加速长大）—— 同样消耗食物 + 挥手。冷却中 / 已求偶的成体 → 未喂。
     //   **不要求 m_hasHit**（命中方块）：喂食瞄准的是 mob（实体），不依赖方块命中格；瞄准悬空 mob 亦可喂
     //   （同剪刀剪羊模式）。食物非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前
     //   分流（同桶 / 锄 / 蛋 / 剪刀分支模式）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可喂。
@@ -1968,7 +1971,15 @@ void PlayerController::placeBlock()
             else if (mt == EntityManager::MobChicken)
                 match = (heldItemId == RecipeRegistry::SeedId);
             // enterLoveMode 内含成体 / 冷却 / 已求偶 / 可繁殖 mob 守卫；返 true 才算喂成功（消耗食物）。
-            if (match) fed = m_entityManager->enterLoveMode(mobIdx);
+            // t479 幼崽喂食分流（机制等价 MC 1.0 喂幼崽加速长大）：isBabyAt 判「是否幼崽」→ 幼崽走 feedBaby
+            //   （growTimer 减 kBabyFeedGrow 加速成长，不触发求偶）；成体走 enterLoveMode（求偶）。二者互斥：
+            //   幼崽不可求偶（enterLoveMode 守卫返 false）、成体无成长可加（feedBaby 守卫返 false）。
+            if (match) {
+                if (m_entityManager->isBabyAt(mobIdx))
+                    fed = m_entityManager->feedBaby(mobIdx);
+                else
+                    fed = m_entityManager->enterLoveMode(mobIdx);
+            }
         }
         if (fed) {
             if (m_mode != Creative)

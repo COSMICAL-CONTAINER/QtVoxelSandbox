@@ -839,6 +839,28 @@ bool EntityManager::enterLoveMode(int i)
     return true; // caller 据返值消耗 1 食物（生存）
 }
 
+// t479 幼崽喂食加速成长（spec「喂幼崽对应繁殖食物 → 加速长大」；机制等价 MC 1.0 喂幼崽减 ~10% 剩余成长时间）。
+//   第 i 个幼崽可繁殖 mob → growTimer 减 kBabyFeedGrow（≈kBabyGrowTime 的 10%）+ 返 true。**食物匹配**由 caller
+//   判（同 enterLoveMode：物品 id 属 RecipeRegistry Game 层，Entities 层不向上依赖，PLAN §2）。非幼崽 / 非可繁殖
+//   mob / dead / 越界 → 返 false（caller 不消耗食物）。不查 breedCooldown（幼崽无繁殖冷却；喂食只加速成长，同 MC
+//   与 enterLoveMode 的冷却守卫无关）。growTimer clamp 到 0（到 0 → 下 tick tickBreeding 自然长大，无需本方法翻
+//   baby —— 延迟 ≤1 帧，观感无差）。bump revision + emit → 喂食是状态变更，通知纪律同 enterLoveMode / shearSheep。
+bool EntityManager::feedBaby(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || !e.alive || e.dead) return false;   // 仅活体 mob 可喂
+    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken 可繁殖
+    if (!e.baby) return false;                                // 非幼崽 → 走成体求偶路径（enterLoveMode）
+    e.growTimer -= kBabyFeedGrow;
+    if (e.growTimer < 0.0f) e.growTimer = 0.0f;               // clamp 0（防负成长；到 0 即下 tick 长大）
+    qCInfo(lcEnt) << "baby fed at slot" << i << "type" << e.mobType
+                  << "-> growTimer reduced to" << e.growTimer << "s left";
+    ++m_revision;
+    emit entitiesChanged();
+    return true; // caller 据返值消耗 1 食物（生存）
+}
+
 // t400 第 i 个 mob 是否处于求偶期（loveTimer>0）。QML delegate 据它显心形 Model（繁殖可观察反馈）。
 bool EntityManager::inLoveAt(int i) const
 {
@@ -855,6 +877,16 @@ float EntityManager::babyScaleAt(int i) const
     const Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || !e.alive) return 1.0f;
     return e.baby ? kBabyScale : 1.0f;
+}
+
+// t479 第 i 个 mob 是否幼崽（baby=true）。PlayerController 喂食分流（幼崽 → feedBaby 加速成长 / 成体 →
+//   enterLoveMode 求偶）+ 呈现层守卫读。非 Mob / 越界 → false。
+bool EntityManager::isBabyAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || !e.alive) return false;
+    return e.baby;
 }
 
 // t400 当前可繁殖被动 mob 数（pig/cow/sheep/chicken 成体 + 幼崽，alive 且非 dead）。供繁殖上限判定。
@@ -1035,6 +1067,9 @@ void EntityManager::damageEntity(int i, int amount)
         //   触发（日光 burning 仅敌对、不掉肉故不参与 cooked 判定）。t449 快照进 deathBurned 供延迟 emit 携带
         //   （dead 态 fireTimer 冻结，故与 expiry 复算等价；快照更稳）。
         e.deathBurned = e.fireTimer > 0.0f;
+        // t479 幼崽死亡快照：致死瞬间 e.baby（同 deathBurned 快照模式）—— mobDied 延迟到 deathTimer 归零才 emit，
+        //   期间 tickBreeding 仍衰减 growTimer（dead 态不冻结），幼崽可能在 0.5s 窗口内长大 → 延迟读 e.baby 会漏判。
+        e.deathBaby = e.baby;
         const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
         qCInfo(lcEnt) << "mob" << i << "type" << e.mobType << "entering death at" << dx << dy << dz
                       << (e.deathBurned ? "(burned)" : "")
@@ -1872,10 +1907,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     std::vector<int> toRemove; // FallingBlock 着地 / 跌出 + t239 mob deathTimer 到 / void-loss 索引（逆序 erase）
     // t500 perf：tick 节拍 +1（每 60Hz tick 一次）；mob AI / 环境扫描错峰节流据它判本帧哪些 mob 跑重活。
     ++m_tickPhase;
-    // t500 perf mob 子桶手动计时：mob-loop 内逐实体 aiTick 段（火烧 / 仙人掌 / AI 决策移动）累 aiNs、
-    //   每帧段（重力 / resting / flow / knockback / 音频 / walkPhase）累 physNs；末尾推入 FrameProfiler。
-    //   手动 nowNs 比 RAII Scope 更轻（每实体 2× nowNs vs 2× Scope 构造析构含 map add）且能跨 continue。
-    qint64 aiNs = 0, physNs = 0;
+    // t500 perf mob 子桶手动计时：mob-loop 内逐实体 aiTick 段（火烧 / 仙人掌 / AI 决策移动）累 aiNs；
+    //   mobPhys（每帧段：重力 / resting / flow / knockback / 音频 / walkPhase）不单独累 —— 在 report 派生出
+    //   mobLoop − mobAI（见函数末尾 mobAI 桶注释）。手动 nowNs 比 RAII Scope 更轻（每实体 2× nowNs vs 2×
+    //   Scope 构造析构含 map add）且能跨 continue。
+    qint64 aiNs = 0;
 
     // t321 玩家受击全局节流倒计时（每帧扣一次，非每实体；防多 mob 围攻秒杀，详见 kPlayerHitThrottle 注释）。
     if (m_playerHitCooldown > 0.0f) {
@@ -2079,8 +2115,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     // t449 死亡过渡结束才掉落（机制等价 MC 倒地动画后产掉落物）：mobDied 在 damageEntity 致死
                     //   瞬间不再 emit，改在此 emit —— 侧倒 + 白烟已播完 kDeathTime → 此刻掉落物自然弹出。
                     //   坐标 floor(pos) 与 spawnItem 整数格入口一致（dead 态 pos 冻结，与致死瞬间同位）。
+                    //   t479 wasBaby = 致死瞬间快照（deathBaby）—— 幼崽死亡不掉落（呈现层 onMobDied 守卫跳战利品 +
+                    //   XP）；0.5s 死亡动画窗口内 growTimer 可能到 0 长大，快照保「致死时是幼崽」语义（同 deathBurned）。
                     const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
-                    emit mobDied(dx, dy, dz, e.mobType, e.deathBurned);
+                    emit mobDied(dx, dy, dz, e.mobType, e.deathBurned, e.deathBaby);
                     toRemove.push_back(idx);
                     dirty = true;
                 }
