@@ -300,10 +300,15 @@ void MobModel::setMobType(int type)
 
 // t241 行走相位 setter：值未变早退（idle 时 EntityManager 返回同一 float → 不触发 rebuild）；
 //   变化则 rebuild 把腿摆到新角度。QML 绑定 `{revision; walkPhaseAt(i)}` 在 revision bump 时重算。
+// perf：量化到每周期 12 个离散腿姿（2π/12 ≈ 0.52rad）才 rebuild。旧版每帧每个行走 mob 都 rebuild（全顶点重生成
+//   + setVertexData/setIndexData/update GPU 重上传）= mob 卡顿主因（用户实测 mob 22ms 恒定 + ~65ms QML，与视距无关）。
+//   腿只需 ~12 姿态在远处即读作平滑行走；量化使 rebuild 频率降 ~3-12×（视步频），无位置/朝向延迟、腿部仅微小阶跃。
 void MobModel::setWalkPhase(float phase)
 {
-    if (phase == m_walkPhase) return;
-    m_walkPhase = phase;
+    constexpr float kStep = 6.2831853f / 12.0f; // 每周期 12 腿姿（量化粒度；越小越平滑越费，12 为距离可视的平衡）
+    const float q = std::round(phase / kStep) * kStep;
+    if (q == m_walkPhase) return; // 同一量化格 → 腿姿未变 → 不 rebuild（idle / 帧间微小相位推进）
+    m_walkPhase = q;
     emit walkPhaseChanged();
     rebuild();
 }

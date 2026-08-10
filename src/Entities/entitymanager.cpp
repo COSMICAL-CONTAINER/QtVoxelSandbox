@@ -2600,7 +2600,18 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     //   末尾统一一次 bump + emit（批量收口，避免 N 幼崽 N 次 notify 风暴，同 t320/t354 纪律）。
     if (tickBreeding(dt)) dirty = true;
 
-    if (dirty || !toRemove.empty()) { ++m_revision; emit entitiesChanged(); }
+    // perf：节流 entitiesChanged emit。mob 每帧 wander/gravity 致 dirty 几乎每帧 → 旧版每帧 ++revision+emit 触发
+    //   全体 delegate（count × ~12 revision 绑定）NOTIFY 激活 + 行走 mob 的 MobModel 全几何 rebuild+GPU 重上传
+    //   = mob 卡顿主因（用户实测 mob 22ms 恒定 + ~65ms QML，与视距无关；前几轮 AI/blockAt 节流无效因瓶颈在此）。
+    //   改：dirty/toRemove 只置 m_pendingEmit；每 kEmitEveryN 帧（~20Hz）才 ++revision+emit 一次 → NOTIFY 激活 +
+    //   MobModel 重建频率降 3×。mob 位置/腿/外观 20Hz 刷新（缓慢生物视觉够），spawn/despawn ≤3 帧延迟。配合
+    //   MobModel::setWalkPhase 量化（腿姿 12 步/cycle），双重削减每帧 mob 渲染开销。m_pendingEmit 持续脏确保不丢更新。
+    if (dirty || !toRemove.empty()) m_pendingEmit = true;
+    if (m_pendingEmit && (m_tickPhase % quint32(kEmitEveryN) == 0)) {
+        m_pendingEmit = false;
+        ++m_revision;
+        emit entitiesChanged();
+    }
 
     // t500 perf mob 子桶：mobAI 累入（mobPhys = mobLoop − mobAI 在 report 派生）。
     FrameProfiler::instance()->add("mobAI", aiNs);

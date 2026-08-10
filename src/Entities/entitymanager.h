@@ -587,6 +587,11 @@ private:
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;
+    // perf：节流 entitiesChanged emit 的「待发」脏标记。mob 每帧 wander 致 dirty 几乎每帧 → emit 每帧触发全体
+    //   delegate（count × ~12 revision 绑定）NOTIFY 激活 + MobModel 重建 = mob 卡顿主因。改：dirty 只置 m_pendingEmit，
+    //   每 kEmitEveryN 帧（~20Hz）才 ++revision + emit 一次。位置 / 腿动画 / 外观 20Hz 刷新（缓慢生物视觉够），
+    //   spawn/despawn ≤kEmitEveryN 帧延迟（可察觉但优先恢复 FPS）。m_pendingEmit 持续脏确保节流帧间累积变更不丢。
+    bool m_pendingEmit = false;
 
     // t256 slot-reuse（修掉落沙 delegate 泄漏）：实体移除（着地 / 死亡 / 跌出）不再 erase-shift，而把槽位
     //   标 alive=false + 入 m_freeSlots；下次 spawn 优先复用空槽。于是 m_entities.size()（=count 属性 = QML
@@ -767,6 +772,10 @@ private:
     //   保留 gameplay：mob 仍正常 AI / 攻击 / 刷怪（仅决策频率降；玩家受击 / 碰撞仍即时）；移动平滑度略降
     //   （肉眼可见小幅「步进」），MC 自身也这样（机制等价；PLAN §4 机制对标非数值 1:1）。
     static constexpr int kAiTickInterval = 4;
+    // perf：entitiesChanged emit 节流间隔（帧）。tick 末 dirty 只置 m_pendingEmit；每 kEmitEveryN 帧（m_tickPhase%i==0）
+    //   才 ++revision+emit。N=3 → ~20Hz 刷新（60Hz 计时器下）→ NOTIFY 激活 + MobModel 重建频率降 3×。mob 视觉 20Hz
+    //   对缓慢生物足够（电影 24Hz）；spawn/despawn ≤3 帧延迟。低 FPS 时帧更长 → 实际刷新更稀，但优先减负恢复 FPS。
+    static constexpr int kEmitEveryN = 3;
     // t252：kRestOffset 移除 —— resting 贴地偏移现按 per-entity halfH（底面贴支撑方块顶面 = top + halfH），
     //   不再是固定 0.5（cow halfH=0.70 → 比 1×1 高 0.2，单一常量无法表达）。
     // t239 生物基类常量：
