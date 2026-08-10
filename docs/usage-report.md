@@ -554,3 +554,29 @@ FrameProfiler 实测：mesh 稳态 0.5-1.5ms/frame（风暴已灭）；sun 重�
 - **构建**：全 7 任务串行(shared files blockregistry/world/recipe/qrc/hotbar/Main.qml → 必须串行), 每 agent 自带 build 零警告 gate + targeted git add(无 .pyc)。最终 HEAD `279c347` 主编编排复核 build exit 0。
 - **验收**：✅ 编译零警告 + smoke(root objects=1, 不崩)；**待用户 playing 实测**：附魔链是否真好用——挖到青金石/黑曜石、造附魔台附一把锋利剑看伤害、时运镐看掉落倍增、铁砧修复/合并/改名、铁砧损坏碎裂。mob phys 性能(c282bc0 caveat)仍待 28-mob 场景实测。
 - **未做(留批2/批3)**：C 繁殖伙伴(t478-t483, **加 4 新 mob=perf 敏感**, 需用户先验收附魔链+确认 kCap/节流) + D 结构(t484-t487, worldgen 需增量非全扫)。
+
+---
+
+## 性能 mob 22ms→8.8ms（entitiesChanged 节流 + walkPhase 量化）——mob 卡顿真根因
+
+> 主编排自主定位（不经 agent；agent 已 4 轮无效修复）。commit `15f4655`。**这是 mob 卡顿的最终根因**。
+
+**真因（直接读代码 + 用户 F3 双证）**：`entityManager` 每帧 `++m_revision; emit entitiesChanged()`（只要 dirty 或有移除）→ 每个 mob delegate 的 **~12 个 revision 键控绑定**全部重估（O(slots×bindings) NOTIFY）+ 每个行走 mob 的 `MobModel` **walkPhase 一变就全量几何重建 + GPU 重传**（setWalkPhase→rebuild()，每帧触发）。F3 实测 `mob sub: ai 0.00 phys 22.35` —— AI 已节流到 0，重活在绑定扇出 + 几何重建。
+
+**修复 `15f4655`**：
+- entitiesChanged **节流**：dirty/移除时置 `m_pendingEmit`，每 `kEmitEveryN=3` tick 才真正 `++m_revision; emit`（绑定扇出 3×↓）。
+- walkPhase **量化**：`kStep=2π/12`（每周期 12 腿姿），phase 量化到最近步长，同值即 return（不发 change、不 rebuild）→ 几何重建量骤降。
+
+- **验收**：✅ 编译零警告；**用户实测 F3 `mob 22.35→8.80ms`**（在湿区测——瓶颈已移走，说明 mob 修复生效）。caveat：湿区（水+岩浆）成为新瓶颈（wat 157 + lav 138 + 454 reb），见下一条。
+
+---
+
+## 性能 水+岩浆交互区 9 FPS（wat 157/lav 138/454reb）——流体批量光照合并
+
+> 主编排自主定位 + 修复。commit `d26cef8`。用户飞入水+岩浆密集区：`world 299.65 [wat 157.0 lav 138.4] mesh 112.41(454reb)`，日志 `tickLavaFlow 26us cells=1149 writes=31 settled=0`。
+
+**真因**：流体 tick 已批量（`m_batchFluid`，t350/t380），但 `setWaterSilent` 仍在批量模式下**逐写调用 `recomputeLightAround`**——水写早退（lightOpacity=0 无发光），但**岩浆写必触发全盒重 flood**（lightEmission=15 → t351 判据）且凝固/蒸发改遮光（水→石/黑曜石 opacity 0→15 → t334 判据）也触发。交互区每岩浆 tick ~31 次写 = **31 次 31×64×31 盒 refloodBox** + 每次写标脏 → 触发 chunk 重建风暴（454 reb）→ world 桶 ~300ms、9 FPS。`settled=0` = 水/岩浆界面持续凝固→新液流入→再凝固的合法活跃态（MC 机制如此），非 bug；瓶颈在每写重 flood 的成本。
+
+**修复 `d26cef8`**：批量模式下 `setWaterSilent` 把光受影响编辑（同 recomputeLightAround 早退判据：遮光翻转 ‖ 发光增删）延迟记入 `m_pendingLightEdits`；`tickWaterFlow`/`tickLavaFlow` 在 `m_batchFluid=false` 后调 `flushPendingLightEdits()` —— 对延迟编辑的 **±R 盒之并做一次 `refloodBox`**（每编辑影响区 ⊆ 其 ±R 盒 ⊆ 联合盒，盒面边界种子法成立；任一 sky 编辑则 doSky=true 超集）。N 次重 flood → 1 次。非批量路径（玩家/世界编辑）不变（立即重 flood）。套用 `destroySphereSilent` t383 已验收的批量收口模式。
+
+- **验收**：✅ 编译零警告 + `cmake --build --target voxelsandbox` no work to do（world.cpp 强制重编 exit 0）。**待用户 playing 实测**：飞入原水+岩浆区按 F3 —— `lav` 桶应显著下降（light 合并）、mesh reb 数应随 settle 归零、FPS 回升。caveat：若湿区 FPS 仍低，下一步查 chunk 重建风暴本身（reb 数不降 → 属 `settled=0` 持续写 + 全量段重建，非 light）。
