@@ -124,6 +124,7 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
         case MobChicken:  e.halfW = 0.30f; e.halfH = 0.40f; break; // 0.6×0.8 小型鸟（躯干 0.4 宽 / 站立 0.7 高；t398）
         case MobSquid:    e.halfW = 0.40f; e.halfH = 0.45f; break; // 0.8×0.9 水生软体（机制等价 MC 1.0 squid 0.8 宽；t399）
         case MobWolf:     e.halfW = 0.35f; e.halfH = 0.45f; break; // 0.7×0.9 犬科（细长躯干 0.36 宽 + 余量；略小于猪；t480）
+        case MobOcelot:   e.halfW = 0.30f; e.halfH = 0.35f; break; // 0.6×0.7 猫科（细长躯干 + 长尾，紧凑小体型；t481）
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
@@ -813,13 +814,14 @@ void EntityManager::shearSheep(int i)
     emit entitiesChanged(); // bump → QML delegate 据 shearedAt 翻羊为裸外观
 }
 
-// t400 mobType 是否可繁殖被动生物（pig/cow/sheep/chicken 之一；t480 加 MobWolf）。hostile / MobTest / MobSquid
-//   不可繁殖。feedMob 食物匹配 / 求偶寻偶 / 配对均先据它门控。机制等价 MC 1.0 仅被动 farm 动物可繁殖；
-//   狼的「仅驯服可繁殖」门控在 enterLoveMode / feedBaby 内（isBreedableType 是类型级门，驯服是实例级门）。
+// t400 mobType 是否可繁殖被动生物（pig/cow/sheep/chicken 之一；t480 加 MobWolf；t481 加 MobOcelot）。hostile /
+//   MobTest / MobSquid 不可繁殖。feedMob 食物匹配 / 求偶寻偶 / 配对均先据它门控。机制等价 MC 1.0 仅被动 farm
+//   动物可繁殖；狼/猫的「仅驯服可繁殖」门控在 enterLoveMode / feedBaby 内（isBreedableType 是类型级门，
+//   驯服是实例级门）。
 bool EntityManager::isBreedableType(int mobType)
 {
     return mobType == MobPig || mobType == MobCow || mobType == MobSheep || mobType == MobChicken
-           || mobType == MobWolf;
+           || mobType == MobWolf || mobType == MobOcelot;
 }
 
 // t400 触发求偶期（spec「喂对应食物 → 求偶」；机制等价 MC 1.0 breeding 的 feed-to-enter-love-mode）。
@@ -833,8 +835,9 @@ bool EntityManager::enterLoveMode(int i)
     if (i < 0 || i >= int(m_entities.size())) return false;
     Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || !e.alive || e.dead) return false;   // 仅活体 mob 可触发
-    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken/wolf 可繁殖
+    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken/wolf/ocelot 可繁殖
     if (e.mobType == MobWolf && !e.wolfTamed) return false;   // t480：仅**驯服狼**可繁殖（野狼喂肉无求偶，机制等价 MC）
+    if (e.mobType == MobOcelot && !e.ocelotTamed) return false; // t481：仅**驯服猫**可繁殖（野豹猫喂鱼无求偶，机制等价 MC）
     if (e.baby) return false;                                 // 幼崽未成熟，不可触发求偶
     if (e.breedCooldown > 0.0f) return false;                 // 繁殖冷却中 → 喂食无效（防刷屏；caller 保住食物）
     if (e.loveTimer > 0.0f) return false;                     // 已求偶 → 不重复触发（防一次喂多个叠加）
@@ -856,8 +859,9 @@ bool EntityManager::feedBaby(int i)
     if (i < 0 || i >= int(m_entities.size())) return false;
     Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || !e.alive || e.dead) return false;   // 仅活体 mob 可喂
-    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken/wolf 可繁殖
+    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken/wolf/ocelot 可繁殖
     if (e.mobType == MobWolf && !e.wolfTamed) return false;   // t480：仅**驯服狼**幼崽可喂（野狼幼崽不驯）
+    if (e.mobType == MobOcelot && !e.ocelotTamed) return false; // t481：仅**驯服猫**幼崽可喂（野豹猫幼崽不驯）
     if (!e.baby) return false;                                // 非幼崽 → 走成体求偶路径（enterLoveMode）
     e.growTimer -= kBabyFeedGrow;
     if (e.growTimer < 0.0f) e.growTimer = 0.0f;               // clamp 0（防负成长；到 0 即下 tick 长大）
@@ -927,6 +931,75 @@ void EntityManager::toggleWolfSit(int i)
     emit entitiesChanged(); // bump → QML 据 wolfSittingAt 切坐姿/站姿
 }
 
+// t481 第 i 只 mob 是否已驯服猫（ocelotTamed=true）。仅 MobOcelot 用；其余 mob 恒 false。越界 → false。
+bool EntityManager::ocelotTamedAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobOcelot) return false; // 仅 ocelot 有驯服态
+    return e.ocelotTamed;
+}
+
+// t481 第 i 只驯服猫是否坐着（ocelotSitting=true；留守）。仅驯服猫用（未驯服 / 非 ocelot 恒 false）。越界 → false。
+bool EntityManager::ocelotSittingAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobOcelot || !e.ocelotTamed) return false; // 仅驯服猫有坐态
+    return e.ocelotSitting;
+}
+
+// t481 第 i 只驯服猫的毛色变体（0..2）。仅 MobOcelot 用；未驯服 / 非 ocelot → 0（走豹猫贴图不读变体）。越界 → 0。
+int EntityManager::ocelotVariantAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobOcelot) return 0; // 仅 ocelot 有毛色变体
+    return e.ocelotVariant;
+}
+
+// t481 生鱼驯服（spec「生鱼驯服 → 变猫（3 毛色变体随机）」；机制等价 MC 1.0 豹猫生鱼驯服 ~1/3）。
+//   未驯服活体豹猫 → ~kOcelotTameChance 概率驯服（ocelotTamed=true + 随机毛色变体 0..2 + 清敌对追踪残留）+
+//   bump revision（QML 收豹猫外观、转猫外观 + 跟随态）+ 返 true；未中（~2/3）→ 返 false（**生鱼仍消耗**，
+//   机制等价 MC 喂鱼无论成败都耗）。已驯服 / 非 ocelot / dead / 越界 → 返 false（caller 不消耗生鱼）。
+//   Q_INVOKABLE 兼调试 + PlayerController 生鱼分支双入口。
+bool EntityManager::tameOcelot(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobOcelot) return false; // 仅 ocelot 可驯
+    if (e.dead || !e.alive) return false;                      // 尸体 / 空槽不可驯
+    if (e.ocelotTamed) return false;                           // 已驯服 → 不重复（caller 不消耗生鱼）
+    if (QRandomGenerator::global()->generateDouble() >= double(kOcelotTameChance)) {
+        qCInfo(lcEnt) << "ocelot tame attempt failed (slot" << i << ") - raw fish consumed, ocelot stays wild";
+        return false; // ~2/3 失败（生鱼仍消耗，机制等价 MC 喂鱼无论成败都耗）
+    }
+    e.ocelotTamed = true;
+    e.ocelotVariant = int(QRandomGenerator::global()->bounded(3)); // 随机毛色变体 0..2（黑 / 姜黄 / 奶油）
+    e.chasing = false;     // 清野豹猫残留追踪态（驯服即转跟随，防下帧误走敌对分支）
+    e.chaseTimer = 0.0f;
+    qCInfo(lcEnt) << "ocelot tamed at slot" << i << "pos" << e.pos << "variant" << e.ocelotVariant;
+    ++m_revision;
+    emit entitiesChanged(); // bump → QML 据 ocelotTamedAt 切猫外观 / 跟随态
+    return true; // caller 据返值消耗 1 生鱼（生存）
+}
+
+// t481 坐/站切换（spec「驯服猫坐/站（同狼模式）」；机制等价 MC 1.0 驯服猫右键坐/站）。
+//   已驯服活体猫 → 翻转 ocelotSitting + bump revision（QML 切坐姿 / 站姿；aiOcelot 切留守 / 跟随）。
+//   未驯服 / 非 ocelot / dead / 越界 → 静默 no-op（野豹猫右键无反应）。Q_INVOKABLE 兼调试 + PlayerController 空手分支双入口。
+void EntityManager::toggleOcelotSit(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobOcelot) return; // 仅 ocelot 可命令坐/站
+    if (e.dead || !e.alive) return;                      // 尸体 / 空槽不可命令
+    if (!e.ocelotTamed) return;                          // 未驯服 → 右键无反应（机制等价 MC 野豹猫不可命令）
+    e.ocelotSitting = !e.ocelotSitting;
+    qCInfo(lcEnt) << "ocelot slot" << i << (e.ocelotSitting ? "sitting (stay)" : "standing (follow)");
+    ++m_revision;
+    emit entitiesChanged(); // bump → QML 据 ocelotSittingAt 切坐姿/站姿
+}
+
 // t400 第 i 个 mob 是否处于求偶期（loveTimer>0）。QML delegate 据它显心形 Model（繁殖可观察反馈）。
 bool EntityManager::inLoveAt(int i) const
 {
@@ -955,8 +1028,9 @@ bool EntityManager::isBabyAt(int i) const
     return e.baby;
 }
 
-// t400 当前可繁殖被动 mob 数（pig/cow/sheep/chicken 成体 + 幼崽 + t480 驯服狼，alive 且非 dead）。供繁殖上限判定。
+// t400 当前可繁殖被动 mob 数（pig/cow/sheep/chicken 成体 + 幼崽 + t480 驯服狼 + t481 驯服猫，alive 且非 dead）。供繁殖上限判定。
 //   t480：未驯服狼不计入（野狼不可繁殖，参与上限会虚占 kPassiveMobCap 名额 → 人为压低 farm 种群上限）。
+//   t481：未驯服豹猫同理不计入（野豹猫不可繁殖）。
 int EntityManager::passiveBreedableCount() const
 {
     int n = 0;
@@ -964,6 +1038,7 @@ int EntityManager::passiveBreedableCount() const
         if (!e.alive || e.dead || e.kind != Mob) continue;
         if (!isBreedableType(e.mobType)) continue;
         if (e.mobType == MobWolf && !e.wolfTamed) continue; // 仅驯服狼计入（野狼不可繁殖）
+        if (e.mobType == MobOcelot && !e.ocelotTamed) continue; // t481 仅驯服猫计入（野豹猫不可繁殖）
         ++n;
     }
     return n;
@@ -986,6 +1061,27 @@ int EntityManager::findNearestMate(int idx) const
         const float dx = m.pos.x() - self.pos.x();
         const float dz = m.pos.z() - self.pos.z();
         const float d2 = dx * dx + dz * dz;
+        if (best < 0 || d2 < bestDistSq) { best = j; bestDistSq = d2; }
+    }
+    return best;
+}
+
+// t481 最近豹猫/猫查找（aiStalker 驱赶调）：返距 pos 在 range 内最近一只 alive && !dead && kind==Mob &&
+//   mobType==MobOcelot 的 mob 索引；无 → -1。XZ 距离（Stalker 逃离是水平行为，Y 不参与）。O(n) 每 Stalker
+//   每 AI tick，n≤kCap=64 可忽略。const 只读自身数据。
+int EntityManager::nearestOcelot(const QVector3D &pos, float range) const
+{
+    const float r2 = range * range;
+    int best = -1;
+    float bestDistSq = 0.0f;
+    for (int j = 0; j < int(m_entities.size()); ++j) {
+        const Entity &m = m_entities[size_t(j)];
+        if (!m.alive || m.dead || m.kind != Mob) continue;
+        if (m.mobType != MobOcelot) continue;
+        const float dx = m.pos.x() - pos.x();
+        const float dz = m.pos.z() - pos.z();
+        const float d2 = dx * dx + dz * dz;
+        if (d2 > r2) continue;
         if (best < 0 || d2 < bestDistSq) { best = j; bestDistSq = d2; }
     }
     return best;
@@ -1027,7 +1123,9 @@ bool EntityManager::tickBreeding(qreal dt)
     //   配对阶段仅 reset 父母 loveTimer / 设冷却 + 记 pending 幼崽；spawn 推迟到末段（批量 + 避引用失效）。
     //   t480：PendingBaby 带 tamed —— 狼幼崽继承父代驯服态（配对仅驯服狼进求偶 → 恒 tamed=true；保留字段
     //   传递语义，未来若野狼可配对则各按父代）。
-    struct PendingBaby { float x, y, z; int mobType; QString color; bool tamed; };
+    //   t481：PendingBaby 带 variant —— 猫幼崽继承父代毛色变体（配对仅驯服猫进求偶 → 恒 tamed=true；
+    //   variant 取 e.ocelotVariant = 配对循环首个父母的变体，机制等价 MC 幼猫继承其一父母毛色）。
+    struct PendingBaby { float x, y, z; int mobType; QString color; bool tamed; int variant = 0; };
     std::vector<PendingBaby> pending;
     int remaining = kPassiveMobCap - passiveBreedableCount();
     const float rangeSq = kBreedRange * kBreedRange;
@@ -1054,7 +1152,7 @@ bool EntityManager::tickBreeding(qreal dt)
             const float bx = (e.pos.x() + m.pos.x()) * 0.5f;
             const float by = std::min(e.pos.y(), m.pos.y());
             const float bz = (e.pos.z() + m.pos.z()) * 0.5f;
-            pending.push_back({ bx, by, bz, e.mobType, e.color, e.wolfTamed });
+            pending.push_back({ bx, by, bz, e.mobType, e.color, e.wolfTamed, e.ocelotVariant });
             --remaining;
             dirty = true;
             qCInfo(lcEnt) << "breed pair: slots" << idx << "&" << j << "type" << e.mobType
@@ -1075,6 +1173,12 @@ bool EntityManager::tickBreeding(qreal dt)
             baby.growTimer = kBabyGrowTime; // 长大倒计时
             if (b.mobType == MobWolf)
                 baby.wolfTamed = b.tamed; // t480：狼幼崽继承父代驯服态（配对仅驯服狼 → 恒 true；驯服幼崽跟随主人）
+            if (b.mobType == MobOcelot) {
+                // t481：猫幼崽继承父代驯服态 + 毛色变体（配对仅驯服猫 → 恒 tamed=true；变体随父代，QML 据
+                //   ocelotVariantAt 选 3 色猫贴图 → 幼猫毛色与父母一致，机制等价 MC 幼猫继承父母毛色）。
+                baby.ocelotTamed = b.tamed;
+                baby.ocelotVariant = b.variant;
+            }
         }
     }
     return dirty;
@@ -1513,6 +1617,96 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
     return false;
 }
 
+// t481 豹猫/猫 AI（详见头文件 aiOcelot 注释）。机制对齐 MC 1.0 豹猫/猫三态：
+//   (1) 未驯服 → 被动游荡（丛林野豹猫；不攻击玩家不敌对，纯 aiWander）。
+//   (2) 驯服 + 坐 → 留守（不移动不跟随，机制等价 MC 坐猫）。
+//   (3) 驯服 + 站 → 跟随主人（走近 / 停步 / 过远瞬移）；求偶期优先寻偶。
+//   猫**不防御**（机制等价 MC 1.0 猫不攻击怪物 —— 驱赶 Stalker 由 aiStalker 侧对猫/豹猫临近时逃离实现）。
+//   返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。分层（PLAN §2）：只读 World::isSolid + 自身数据。
+bool EntityManager::aiOcelot(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
+                             float worldW, float worldD, float speedScale)
+{
+    // (1) 未驯服：被动游荡（丛林野豹猫；不攻击不敌对。驯服前的野生形态，机制等价 MC 1.0 野豹猫）。
+    if (!e.ocelotTamed) {
+        return aiWander(e, dt, world, worldW, worldD, speedScale);
+    }
+
+    // (2) 坐：留守 —— 不移动（跟随主人回来时仍坐原地；机制等价 MC 坐猫）。moveSpeed 清零 → walkPhase 冻结。
+    if (e.ocelotSitting) {
+        e.wanderSpeed = 0.0f;
+        e.moveSpeed = 0.0f;
+        return false;
+    }
+
+    // 水平追击移动 lambda（复用 aiWolf chase 模式）：朝 (tx,tz) 以 spd 走，返是否真位移。
+    //   捕获 e/dt/world/worldW/worldD（本函数内唯一移动路径；求偶 / 跟随两处复用免两份内联副本）。
+    auto chase = [&](float tx, float tz, float spd, float distXZ) -> bool {
+        if (distXZ <= 1e-4f) { e.moveSpeed = 0.0f; return false; } // 目标重合 → 不位移（避免除零）
+        const float ehw = e.halfW; // XZ 半宽（边界 clamp + 碰撞）
+        const float ehh = e.halfH; // Y 半高（footprint 格扫）
+        const float nx = (tx - e.pos.x()) / distXZ;
+        const float nz = (tz - e.pos.z()) / distXZ;
+        float newX = e.pos.x() + nx * spd * dt;
+        if (newX < ehw) newX = ehw;
+        if (newX > worldW - ehw) newX = worldW - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+        float newZ = e.pos.z() + nz * spd * dt;
+        if (newZ < ehw) newZ = ehw;
+        if (newZ > worldD - ehw) newZ = worldD - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+        bool moved = false;
+        if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+        if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+        e.moveSpeed = moved ? spd : 0.0f; // 撞墙 → 腿停（t241 腿摆频率随它）
+        return moved;
+    };
+
+    // 求偶优先（机制等价 MC 求偶者走向配偶）：驯服猫在求偶期 → 覆盖跟随，主动走向最近同种求偶配偶
+    //   （进入配对距离后由 tickBreeding 产幼崽）；无配偶（仅一方求偶）→ 照常跟随。
+    if (e.loveTimer > 0.0f && !e.baby) {
+        const int mate = findNearestMate(idx);
+        if (mate >= 0) {
+            const Entity &mp = m_entities[size_t(mate)];
+            const float mdx = mp.pos.x() - e.pos.x();
+            const float mdz = mp.pos.z() - e.pos.z();
+            const float md = std::sqrt(mdx * mdx + mdz * mdz);
+            if (md > 1e-4f) e.yawRad = std::atan2(-mdx, -mdz);
+            return chase(mp.pos.x(), mp.pos.z(), kOcelotFollowSpeed * speedScale, md);
+        }
+    }
+
+    // 跟随主人：distXZ > kFollowMinDist 走近（kFollowMinDist 内停步贴近）；过远 kOcelotTeleportDist 瞬移到主人
+    //   附近安全位（防跟随永久掉队 —— 机制等价 MC 猫距主人过远传送；同狼 aiWolf 瞬移模式）。
+    const float fdx = playerPos.x() - e.pos.x();
+    const float fdz = playerPos.z() - e.pos.z();
+    const float followDist = std::sqrt(fdx * fdx + fdz * fdz);
+    if (followDist > kOcelotTeleportDist) {
+        auto *rng = QRandomGenerator::global();
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            const float ang = float(rng->bounded(62832)) / 10000.0f; // [0, 2π)
+            const float rad = 2.0f + float(rng->bounded(100)) / 100.0f * 3.0f; // [2, 5) 格环
+            const int tx = qFloor(playerPos.x() + std::cos(ang) * rad);
+            const int tz = qFloor(playerPos.z() + std::sin(ang) * rad);
+            if (tx < 0 || tz < 0 || tx >= int(worldW) || tz >= int(worldD)) continue;
+            // 自主人高度向上 1 格起向下扫 5 格，找「本格 air + 下方实体」（防瞬移进墙 / 悬空 / 天花板）。
+            for (int y = qFloor(playerPos.y()) + 1; y >= std::max(0, qFloor(playerPos.y()) - 4); --y) {
+                if (world->blockAt(tx, y, tz) == BlockRegistry::Air && world->isSolid(tx, y - 1, tz)) {
+                    e.pos = QVector3D(float(tx) + 0.5f, float(y) + e.halfH, float(tz) + 0.5f);
+                    e.vy = 0.0f;
+                    e.resting = true; // 落安全位 → 贴地（下帧 resting 复探支撑；pos 变化须返 true 驱动 dirty）
+                    return true; // 瞬移 = 位置变更（tick 据返值标 dirty → 末尾 bump revision 刷新 QML）
+                }
+            }
+        }
+    }
+    if (followDist > 1e-4f) e.yawRad = std::atan2(-fdx, -fdz); // 跟随期间朝主人
+    if (followDist > kFollowMinDist)
+        return chase(playerPos.x(), playerPos.z(), kOcelotFollowSpeed * speedScale, followDist);
+    e.wanderSpeed = 0.0f;
+    e.moveSpeed = 0.0f; // 已到位（贴近主人）→ 停步（腿停）
+    return false;
+}
+
 // t281 敌对生物 AI（detect→pathfind→attack；详见头文件 aiHostile 注释）。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI。
 //   简化 A* = 贪心方向（直线朝玩家）+ 1 格墙越障跳；非完整 A*（每帧多 mob 跑 A* 开销过大，近战 mob 直线 + 跳够用，
 //   平地 / 1 格台阶 / 树根 / 矮墙均能通过；复杂洞穴几何会卡墙，作为基类可接受，留给后续寻路增强）。
@@ -1816,6 +2010,42 @@ bool EntityManager::aiStalker(int idx, Entity &e, float dt, World *world, const 
     } else if (e.chasing) {
         e.chaseTimer -= dt;
         if (e.chaseTimer <= 0.0f) { e.chaseTimer = 0.0f; e.chasing = false; }
+    }
+
+    // t481 豹猫/猫驱赶 Stalker（spec「驱赶 Stalker：近距 Stalker 逃走远离玩家/猫」；机制等价 MC 1.0 苦力怕
+    //   被豹猫/猫吓跑）：距本 Stalker kStalkerFleeRange 内有活体豹猫/猫（未驯服豹猫与驯服猫均驱赶，机制等价
+    //   MC 1.0 豹猫与猫都吓苦力怕）→ **逃离**：沿背离最近猫方向走 + 熄火（fuseTimer 归零，不蓄力不爆炸）+
+    //   优先于追踪 / 蓄力 / 游荡（近猫即逃，不管玩家是否在近旁）。猫离开范围 → 下 AI tick 恢复原行为
+    //   （chasing 记忆仍在，恢复追玩家 / 蓄力）。移动逐轴 AABB 撤回 + 边界 clamp（同下方追踪移动模式）。
+    const int catIdx = nearestOcelot(e.pos, kStalkerFleeRange);
+    if (catIdx >= 0) {
+        const Entity &cat = m_entities[size_t(catIdx)];
+        const float cdx = e.pos.x() - cat.pos.x(); // 背离猫方向（e − cat）XZ
+        const float cdz = e.pos.z() - cat.pos.z();
+        const float cdist = std::sqrt(cdx * cdx + cdz * cdz);
+        if (cdist > 1e-4f) e.yawRad = std::atan2(-cdx, -cdz); // 同 yaw 约定 dir=(-sin,-cos) → 移动向量 = (e−cat)/d = 背离猫
+        e.fuseTimer = 0.0f; // 近猫熄火（不蓄力不爆炸，机制等价 MC 苦力怕被猫吓跑后熄灭）
+        e.wanderSpeed = kStalkerFleeSpeed; // 供 walkPhase 腿摆频率 + 语义（逃离行走态；raw 值，水中减速不写入避免二次缩放）
+        const float fleeSpd = kStalkerFleeSpeed * speedScale; // t298 水中减速（逃离时落水亦减速，同其他移动路径）
+        bool moved = false;
+        if (cdist > 1e-4f) {
+            const float ehw = e.halfW;
+            const float ehh = e.halfH;
+            const float nx = cdx / cdist; // 背离猫单位向量
+            const float nz = cdz / cdist;
+            float newX = e.pos.x() + nx * fleeSpd * float(dt);
+            if (newX < ehw) newX = ehw;
+            if (newX > worldW - ehw) newX = worldW - ehw;
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+            float newZ = e.pos.z() + nz * fleeSpd * float(dt);
+            if (newZ < ehw) newZ = ehw;
+            if (newZ > worldD - ehw) newZ = worldD - ehw;
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+            if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+            if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+        }
+        e.moveSpeed = moved ? fleeSpd : 0.0f; // t298 含水中减速
+        return moved;
     }
 
     // (4) fuse：追踪态下据距离蓄力 / 熄火。蓄力中（fuseTimer>0）→ 站立不动（机制等价 MC 苦力怕近距嘶嘶蓄力停步）。
@@ -2550,11 +2780,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   t399 鱿鱼（mobType==MobSquid）走 aiSquid（水里喷水游动；非 aiWander），且无吃草分支（非羊）。
                 //   t480 狼（mobType==MobWolf）走 aiWolf（未驯服敌对玩家 / 驯服跟随 + 防御 / 坐留守 / 求偶寻偶；
                 //     替代 aiWander + 吃草分支，狼非羊无吃草语义）。
+                //   t481 豹猫/猫（mobType==MobOcelot）走 aiOcelot（未驯服游荡 / 驯服跟随 + 坐留守 / 求偶寻偶；
+                //     替代 aiWander + 吃草分支，猫非羊无吃草语义）。
                 if (e.mobType == MobSquid) {
                     if (aiSquid(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
                 } else if (e.mobType == MobWolf) {
                     if (aiWolf(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, playerTargetable))
                         dirty = true;
+                } else if (e.mobType == MobOcelot) {
+                    if (aiOcelot(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                 } else {
                 // t400 求偶寻偶（spec「喂食 → 求偶 → 同种配对」；机制等价 MC 1.0 love mode 寻偶）：成体可繁殖 mob
                 //   在求偶期（loveTimer>0）→ 覆盖 wander 的随机选向，把 yaw 钉向最近同种求偶配偶 + 强制行走 +

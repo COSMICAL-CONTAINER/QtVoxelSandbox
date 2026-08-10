@@ -2073,6 +2073,63 @@ void PlayerController::placeBlock()
         }
         return; // 肉（喂成功 / 未喂）均不再走放置路径
     }
+    // t481 生鱼驯服/繁殖豹猫 useBlock（spec「生鱼驯服 → 变猫（3 毛色变体随机）；繁殖：生鱼喂食触发」；机制等价
+    //   MC 1.0 豹猫生鱼驯服 + 驯服猫生鱼繁殖）：手持生鱼（RawFishId，材料段非方块）右键 → 独立 mob 命中射线
+    //   （同喂食/骨头路径）→ 命中豹猫（mobType==MobOcelot）：
+    //   - 未驯服 → EntityManager::tameOcelot（~kOcelotTameChance 概率驯服变猫 + 随机毛色；**无论成败生鱼都消耗**，
+    //     机制等价 MC 喂鱼无论成败都耗）。
+    //   - 已驯服 → 幼崽 feedBaby 加速成长 / 成体 enterLoveMode 求偶（二者互斥分流同 t479；食物匹配 = 生鱼，
+    //     Game 层 RawFishId 判）。繁殖产幼崽复用 t400 框架（MobOcelot 入 isBreedableType + tamed 守卫）。
+    //   喂成功 → 生存消耗 1 生鱼 + 挥手；未喂（无豹猫 / 冷却 / 已求偶）→ return（生鱼无其他 useBlock 用途，
+    //   不放置）。生鱼非方块 → 须在 `m_selectedBlock == Air` 守卫之前分流（同骨头 / 肉 / 桶分支模式）。spectator
+    //   已被入口 canPlace() 守卫拦截。分层（PLAN §2）：喂食属 Game/Physics（读射线 + 调 EntityManager），不改栅格语义。
+    if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::RawFishId) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        bool fed = false;
+        if (mobIdx >= 0 && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobOcelot) {
+            if (!m_entityManager->ocelotTamedAt(mobIdx)) {
+                // 驯服尝试（~1/3 概率；成功/失败生鱼都消耗，机制等价 MC 喂鱼无论成败都耗）。tameOcelot 内部
+                //   选随机毛色变体 0..2（黑 / 姜黄 / 奶油）→ 变猫；返 false 仅表示本次未驯中（生鱼照耗）。
+                m_entityManager->tameOcelot(mobIdx);
+                fed = true; // 喂鱼动作发生（无论驯中与否）→ 消耗生鱼
+            } else {
+                // t479 幼崽喂食分流（机制等价 MC 喂幼崽加速长大 / 喂成体进求偶）：幼崽 → feedBaby；成体 → enterLoveMode。
+                if (m_entityManager->isBabyAt(mobIdx))
+                    fed = m_entityManager->feedBaby(mobIdx);
+                else
+                    fed = m_entityManager->enterLoveMode(mobIdx);
+            }
+        }
+        if (fed) {
+            if (m_mode != Creative)
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 生鱼（创造不耗 → 无限喂）
+            m_lastPlaceMs = now;
+            emit swingArm(); // 喂食也是一次「使用」动作 → 挥手（t29）
+        }
+        return; // 生鱼（驯服成功失败 / 繁殖 / 未命中豹猫）均不再走放置路径
+    }
+    // t481 空手右键驯服猫 → 坐/站切换（spec「坐/站（同狼模式）」；机制等价 MC 1.0 右键驯服猫坐/站命令）：
+    //   空手（heldItemId==0，selectedBlock 归 Air）右键 → 独立 mob 命中射线（同喂食/骨头路径）→ 命中**已驯服**
+    //   猫（mobType==MobOcelot && ocelotTamed）→ toggleOcelotSit（坐/站翻转；不消耗物品）。命中未驯服豹猫 /
+    //   非 ocelot / 无命中 → 无操作（fall-through 到下方 `m_selectedBlock == Air` 守卫返回，不放置；野豹猫右键
+    //   无反应，机制等价 MC 只有驯服猫可命令坐/站）。空手 selectedBlock 恒 Air → 须在 Air 守卫之前分流（同
+    //   骨头 / 肉 / 桶 / 生鱼分支模式）。spectator 已被入口 canPlace() 守卫拦截。
+    if (m_hotbar && m_world && m_entityManager && heldItemId == 0) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        if (mobIdx >= 0 && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobOcelot
+            && m_entityManager->ocelotTamedAt(mobIdx)) {
+            m_entityManager->toggleOcelotSit(mobIdx); // 已驯服猫 → 坐/站切换（不消耗物品）
+            m_lastPlaceMs = now;
+            emit swingArm(); // 命令坐/站也是一次「使用」动作 → 挥手（t29）
+            return; // 坐/站切换 → 不再走放置路径
+        }
+    }
     // t234 锄头 useBlock（spec「持锄右键泥土/草方块→变耕地」）：手持为 Hoe 类工具（木/石/铁锄）+ 命中格为
     //   Dirt/Grass → 该格转 Farmland（湿润等级由 World::farmlandHydrationLevel 据水源邻近判定写 state 低 2 位；
     //   t406 4 级湿润，darker=wetter）。机制等价 MC 1.0 锄耕地（机制对齐，非名词照搬）。锄非方块（工具段 id>=0x100）

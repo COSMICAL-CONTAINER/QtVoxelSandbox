@@ -346,6 +346,10 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/mob_chicken.png            # t398 鸡（Chicken；机制等价 MC 鸡，§9 原创）小型鸟白羽 + 棕褐斑贴图（build_mob.py）
         textures/mob_squid.png              # t399 鱿鱼（Squid；机制等价 MC squid，§9 原创）水生软体深褐橘斑贴图（build_mob.py）
         textures/mob_wolf.png               # t480 狼（Wolf；机制等价 MC 狼，§9 原创）灰狼毛皮贴图（build_mob.py）
+        textures/mob_ocelot.png             # t481 豹猫（Ocelot；机制等价 MC 豹猫，§9 原创）斑点橙棕猫科贴图（build_mob.py）
+        textures/mob_cat_black.png          # t481 猫变体 0 黑猫（驯服豹猫随机毛色；build_mob.py）
+        textures/mob_cat_ginger.png         # t481 猫变体 1 姜黄虎斑（驯服豹猫随机毛色；build_mob.py）
+        textures/mob_cat_cream.png          # t481 猫变体 2 奶油暹罗（驯服豹猫随机毛色；build_mob.py）
         textures/icon_cobble.png
         textures/icon_coal_ore.png
         textures/icon_copper_ore.png             # t308 铜矿石立方体图标（build_cube_icons.py；石头底+橙铜斑+孔雀绿锈）

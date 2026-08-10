@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""生成猪 / 牛 / 羊 / 蹒跚者 / 鸡 / 鱿鱼 / 狼（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
+"""生成猪 / 牛 / 羊 / 蹒跚者 / 鸡 / 鱿鱼 / 狼 / 豹猫（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
 
 机制等价 MC 1.0 三种被动生物（pig / cow / sheep）+ 鸡（chicken）+ 一种敌对生物（zombie）+ 一种水生被动
-生物（squid）+ 一种犬科驯服生物（wolf）—— 名称 / 模型 / 贴图全原创、**不**拷贝任何 MC 资产（PLAN §9 区隔：
-Zombie→Shambler「蹒跚者」改名）。本脚本程序生成七种 mob 各一张「全脸」贴图（MobModel 几何的每面都铺同一张
-贴图，非 MC 式 UV 拆皮）——简单稳健，配方块化模型比例让七种 mob 肉眼可辨。
+生物（squid）+ 一种犬科驯服生物（wolf）+ 一种猫科驯服生物（ocelot/cat）—— 名称 / 模型 / 贴图全原创、
+**不**拷贝任何 MC 资产（PLAN §9 区隔：Zombie→Shambler「蹒跚者」改名）。本脚本程序生成十一种 mob 各一张
+「全脸」贴图（MobModel 几何的每面都铺同一张贴图，非 MC 式 UV 拆皮）——简单稳健，配方块化模型比例让
+十一种 mob 肉眼可辨。
 
 视觉意图（每张 16×16，无 alpha 透明底 —— 实心贴图走不透明 PrincipledMaterial）：
   - mob_pig.png      ：粉红皮 + 几个深粉斑点 + 浅腹纹（读作「粉红猪皮」）。
@@ -15,11 +16,16 @@ Zombie→Shambler「蹒跚者」改名）。本脚本程序生成七种 mob 各�
   - mob_chicken.png  ：白羽底 + 棕褐翅尖 / 尾羽斑 + 浅暖黄腹部（读作「白色母鸡羽毛」；t398）。
   - mob_squid.png    ：深褐橘斑软体底 + 浅腹纹 + 暗点（读作「鱿鱼软体皮」；t399）。
   - mob_wolf.png     ：灰狼毛皮底 + 深灰背脊 / 侧纹 + 浅灰腹纹（读作「灰狼皮毛」；t480）。
+  - mob_ocelot.png   ：斑点橙棕底 + 深棕圆斑 + 浅奶黄腹纹（读作「丛林豹猫斑点皮」；t481 未驯服形态）。
+  - mob_cat_black.png ：乌黑底 + 深灰高光纹 + 暗灰腹（读作「黑猫」；t481 驯服毛色变体 0）。
+  - mob_cat_ginger.png：姜黄底 + 深橙横纹（虎斑）+ 浅奶黄腹（读作「姜黄虎斑猫」；t481 驯服毛色变体 1）。
+  - mob_cat_cream.png ：奶油底 + 深褐面部/耳尖/尾尖深色点 + 浅白腹（读作「奶油暹罗猫」；t481 驯服毛色变体 2）。
 
 图案采用固定位置 + 确定性散布（无随机源 → CI 可复现、与 build_atlas.py / build_tall_grass.py 同风格）。
 
 输出（覆盖写入 textures/）：
-  mob_pig.png / mob_cow.png / mob_sheep.png / mob_shambler.png / mob_chicken.png / mob_squid.png / mob_wolf.png
+  mob_pig.png / mob_cow.png / mob_sheep.png / mob_shambler.png / mob_chicken.png / mob_squid.png / mob_wolf.png /
+  mob_ocelot.png / mob_cat_black.png / mob_cat_ginger.png / mob_cat_cream.png
 
 依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
 生成原创像素图，§9 override (a)）。
@@ -308,6 +314,159 @@ def make_wolf():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_ocelot():
+    """豹猫（Ocelot；机制等价 MC 1.0 豹猫，§9 原创贴图非照搬）：
+    斑点橙棕底 + 深棕圆斑 + 浅奶黄腹纹（读作「丛林豹猫斑点皮」）。每面铺同图（同猪牛羊全脸 UV 方案）→
+    躯干 / 头 / 耳 / 长尾 / 腿各盒都铺同一张斑点纹。配方块化猫科比例 + 尖耳 + 长尾 → 肉眼读作「豹猫」。
+    未驯服形态（驯服变猫后由 QML 据 ocelotVariantAt 切 mob_cat_* 贴图）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xc8, 0x92, 0x4a, 255)   # 斑点橙棕主色 #c8924a（暖橙棕，非 MC 豹猫精确色）
+    fill(img, base)
+
+    # 深棕圆斑（豹猫标志性斑纹 —— 散布于皮面，固定坐标）
+    spot = (0x5a, 0x3a, 0x1a, 255)   # 深棕 #5a3a1a
+    blot(img, [
+        (3, 3), (4, 3), (3, 4),
+        (8, 2), (9, 2), (8, 3),
+        (12, 4), (13, 4), (12, 5),
+        (2, 8), (3, 8), (2, 9),
+        (6, 7), (7, 7), (6, 8),
+        (10, 9), (11, 9), (11, 10),
+        (13, 12), (14, 12), (13, 13),
+        (4, 12), (5, 12), (4, 13),
+    ], spot)
+
+    # 深棕细条斑（豹猫沿脊 / 侧身的纵向条点，提层次，少量免乱）
+    strip = (0x7a, 0x52, 0x2a, 255)  # 中棕 #7a522a
+    blot(img, [
+        (7, 5), (8, 5),
+        (5, 10), (6, 10),
+        (10, 6), (10, 7),
+        (1, 12), (14, 10),
+    ], strip)
+
+    # 浅奶黄腹纹（底部 2 行换浅色，拟豹猫腹 / 喉部浅毛）
+    light = (0xf0, 0xe0, 0xc0, 255)  # 奶黄 #f0e0c0
+    blot(img, [
+        (x, TS - 1) for x in range(2, TS - 2)
+    ], light)
+
+    out = os.path.join(SRC, "mob_ocelot.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def make_cat_black():
+    """黑猫（Cat 毛色变体 0；机制等价 MC 1.0 驯服猫变体，§9 原创贴图非照搬）：
+    乌黑底 + 深灰高光纹 + 暗灰腹（读作「黑猫」）。每面铺同图（同全脸 UV 方案）→ 驯服豹猫转猫后据
+    ocelotVariantAt==0 切本贴图。黑色底上深灰纹让纯黑方块模型有毛皮质感（非死黑平面）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0x1a, 0x18, 0x18, 255)   # 乌黑主色 #1a1818（近黑，非 MC 猫精确色）
+    fill(img, base)
+
+    # 深灰高光纹（黑猫毛皮在光下的深灰光泽纹 —— 散布于皮面，固定坐标）
+    sheen = (0x38, 0x36, 0x34, 255)  # 深灰 #383634
+    blot(img, [
+        (2, 3), (3, 3), (4, 3),
+        (8, 2), (9, 2),
+        (12, 4), (13, 4),
+        (3, 8), (4, 8), (5, 8),
+        (7, 7), (8, 7),
+        (11, 9), (12, 9),
+        (13, 12), (14, 12),
+        (5, 13), (6, 13),
+    ], sheen)
+
+    # 暗灰腹纹（底部 2 行换略浅色，拟黑猫腹毛在暗处稍亮）
+    belly = (0x2e, 0x2c, 0x2a, 255)  # 暗灰 #2e2c2a
+    blot(img, [
+        (x, TS - 1) for x in range(2, TS - 2)
+    ], belly)
+
+    out = os.path.join(SRC, "mob_cat_black.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def make_cat_ginger():
+    """姜黄虎斑猫（Cat 毛色变体 1；机制等价 MC 1.0 驯服猫变体，§9 原创贴图非照搬）：
+    姜黄底 + 深橙横纹（虎斑）+ 浅奶黄腹（读作「姜黄虎斑猫」）。每面铺同图（同全脸 UV 方案）→ 驯服豹猫转猫后
+    据 ocelotVariantAt==1 切本贴图。横向条带拟经典虎斑猫纹（非 MC 精确纹样）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xe0, 0x8a, 0x3a, 255)   # 姜黄主色 #e08a3a（暖姜橙，非 MC 猫精确色）
+    fill(img, base)
+
+    # 深橙横纹（虎斑 —— 横向条带逐行错位，固定坐标；拟猫身横纹）
+    tabby = (0xa8, 0x5a, 0x22, 255)  # 深橙 #a85a22
+    blot(img, [
+        # 横纹带（每行一条短横纹，逐行错位 → 读作虎斑）
+        (2, 2), (3, 2), (4, 2),
+        (10, 3), (11, 3), (12, 3),
+        (4, 5), (5, 5), (6, 5),
+        (11, 6), (12, 6), (13, 6),
+        (2, 8), (3, 8), (4, 8),
+        (9, 9), (10, 9), (11, 9),
+        (5, 11), (6, 11), (7, 11),
+        (12, 12), (13, 12),
+        (3, 13), (4, 13),
+    ], tabby)
+
+    # 浅奶黄腹纹（底部 2 行换浅色，拟虎斑猫腹 / 喉部浅毛）
+    light = (0xf0, 0xd0, 0xa0, 255)  # 奶黄 #f0d0a0
+    blot(img, [
+        (x, TS - 1) for x in range(2, TS - 2)
+    ], light)
+
+    out = os.path.join(SRC, "mob_cat_ginger.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def make_cat_cream():
+    """奶油暹罗猫（Cat 毛色变体 2；机制等价 MC 1.0 驯服猫变体，§9 原创贴图非照搬）：
+    奶油底 + 深褐面部 / 耳尖 / 尾尖深色点 + 浅白腹（读作「奶油暹罗猫」—— 浅色身体 + 深色远端点的花色）。
+    每面铺同图（同全脸 UV 方案）→ 驯服豹猫转猫后据 ocelotVariantAt==2 切本贴图。深色点分布在贴图四角 /
+    中央模拟面 / 尾端深点（全脸铺同图时四角 = 耳 / 尾尖位、底部 = 腹，读作暹罗花色）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xe8, 0xd8, 0xb8, 255)   # 奶油底 #e8d8b8（浅暖奶油，非 MC 猫精确色）
+    fill(img, base)
+
+    # 深褐点（面部 / 耳尖 / 尾尖 —— 暹罗花色标志性深色远端；贴图四角 + 中央上缘 + 底缘两点）
+    point = (0x4a, 0x32, 0x20, 255)  # 深褐 #4a3220
+    blot(img, [
+        # 四角（耳 / 尾尖端）
+        (1, 1), (2, 1), (1, 2),
+        (14, 1), (13, 1), (14, 2),
+        (1, 14), (2, 14), (1, 13),
+        (14, 14), (13, 14), (14, 13),
+        # 中央上缘（面部深点带）
+        (6, 3), (7, 3), (8, 3), (9, 3),
+        # 底缘两点（尾尖深点）
+        (6, 12), (7, 12), (9, 12), (10, 12),
+    ], point)
+
+    # 浅褐柔晕（深点周围的过渡柔晕，免生硬）
+    soft = (0xbe, 0xa0, 0x78, 255)   # 浅褐 #bea078
+    blot(img, [
+        (3, 2), (13, 2), (3, 13), (13, 13),
+        (5, 4), (10, 4), (5, 11), (10, 11),
+    ], soft)
+
+    # 浅白腹纹（底部 2 行换近白色，拟暹罗猫腹 / 喉部浅毛）
+    light = (0xf8, 0xf0, 0xe0, 255)  # 近白 #f8f0e0
+    blot(img, [
+        (x, TS - 1) for x in range(3, TS - 3)
+    ], light)
+
+    out = os.path.join(SRC, "mob_cat_cream.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def main():
     make_pig()
     make_cow()
@@ -316,6 +475,10 @@ def main():
     make_chicken()
     make_squid()
     make_wolf()
+    make_ocelot()
+    make_cat_black()
+    make_cat_ginger()
+    make_cat_cream()
 
 
 if __name__ == "__main__":

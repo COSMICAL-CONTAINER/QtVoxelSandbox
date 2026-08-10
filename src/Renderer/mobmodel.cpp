@@ -289,9 +289,10 @@ void MobModel::setMobType(int type)
 {
     // 0（测试生物）/ 越界 → 兜底 Pig（保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube，
     //   不进本类，故此处兜底仅防误设）。合法 mobType：1 猪 / 2 牛 / 3 羊 / 4 Shambler(僵尸) /
-    //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛) / 8 Chicken(鸡) / 9 Squid(鱿鱼) / 10 Wolf(狼)。
+    //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛) / 8 Chicken(鸡) / 9 Squid(鱿鱼) / 10 Wolf(狼) /
+    //   11 Ocelot(豹猫/猫；t481)。
     //   修：原仅接 1-5 且误标 5=Stalker（实际 enum 5=Bones）。
-    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10) type = 1;
+    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10 && type != 11) type = 1;
     if (type == m_mobType) return;
     m_mobType = type;
     emit mobTypeChanged();
@@ -462,6 +463,19 @@ void MobModel::rebuild()
         addBox(-0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（头顶小尖盒）
         addBox( 0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
         addLegs(-0.26f,  0.16f,  0.18f, 0.24f, 0.08f, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长，比猪腿瘦）
+    } else if (m_mobType == 11) {
+        // t481 豹猫/猫（Ocelot/Cat；机制等价 MC 1.0 豹猫，§9 原创模型 + 贴图）—— 中型猫科：细长躯干 +
+        //   前伸圆头 + 双尖耳 + 长尾（几何内带尾，随身体贴图同纹）+ 4 细腿。未驯服 = 丛林豹猫（斑点橙棕贴图）、
+        //   驯服 = 家猫（3 色变体贴图），几何共用（机制等价 MC 1.0 豹猫/猫同模型异贴图；毛色变体由 Main.qml
+        //   据 ocelotVariantAt 切贴图，几何不变）。腿底本地 y=−0.40 贴 collision 底面（halfH=0.35 →
+        //   Main.qml mobModelYOff=0.40−0.35=0.05）。walkPhase 驱动 4 腿对角摆动（addLegs，同狼四足 walk cycle）；
+        //   坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动，几何本身不参与。
+        addBox( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f, verts, idx, bMin, bMax); // 细长躯干（比狼更窄长；猫科体型）
+        addHeadRot( 0.00f,  0.12f, -0.46f, 0.11f, 0.12f, 0.14f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸圆润）
+        addBox(-0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（头顶小三角）
+        addBox( 0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
+        addBox( 0.00f,  0.18f,  0.36f, 0.04f, 0.05f, 0.16f, verts, idx, bMin, bMax); // 长尾（身后 +Z 后伸上翘；随身体同纹）
+        addLegs(-0.24f,  0.16f,  0.16f, 0.20f, 0.06f, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）

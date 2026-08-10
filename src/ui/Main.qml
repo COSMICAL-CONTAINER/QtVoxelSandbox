@@ -691,6 +691,30 @@ Window {
             ++wolfSpawned
         }
         console.info("[t480] wolf scattered: " + wolfSpawned + "/" + kWolfTargetCount) // 进世界一次性核对（非每帧）
+
+        // t481 豹猫（Ocelot）散布（spec「丛林群系生成」；机制等价 MC 1.0 豹猫在丛林群系生成）：
+        //   在整图随机散布一群豹猫，**仅取丛林群系列**（theWorld.biomeIdAt==6 Jungle；跳过其余群系，机制等价
+        //   MC 1.0 豹猫只在丛林刷）。每只落在该列地表上方一格（同被动散布：跳水面 / 头顶非空列）。数量少
+        //   （kOcelotTargetCount=3）免成片聚集 + 繁殖可增（驯服后喂生鱼繁殖）。col 占位串（MobOcelot 走 MobModel
+        //   + 贴图，不读 color；mobType 0 UnitCube 路径才读，此处不涉）。maxHealth=10（同被动）。未驯服豹猫被动
+        //   游荡（aiOcelot 未驯服分支）→ 散布到丛林深处（不在出生点平原），玩家探索丛林时偶遇（机制等价 MC 野豹猫）。
+        const kOcelotTargetCount = 3
+        const kOcelotMaxAttempts = 200
+        let ocelotSpawned = 0
+        for (let i = 0; i < kOcelotMaxAttempts && ocelotSpawned < kOcelotTargetCount; ++i) {
+            const ox = 4 + Math.floor(Math.random() * (wdim - 8)) // [4, wdim-4)，避世界边
+            const oz = 4 + Math.floor(Math.random() * (wdim - 8))
+            if (theWorld.biomeIdAt(ox, oz) !== 6) continue        // 仅丛林群系（biomeIdAt==6 Jungle，spec）
+            const oh = theWorld.heightAt(ox, oz)
+            if (oh <= 0) continue
+            const osurface = theWorld.blockAt(ox, oh, oz)
+            if (osurface === 21 /* Water */ || osurface === 0 /* Air */) continue // 非陆地 / 水面
+            const oheadroom = theWorld.blockAt(ox, oh + 1, oz)
+            if (oheadroom !== 0 /* Air */ && oheadroom !== 24 /* TallGrass */) continue // 头顶非空（树干等）
+            entityManager.spawnMobTyped(ox, oh + 1, oz, EntityManager.MobOcelot, "#c8924a", 10)
+            ++ocelotSpawned
+        }
+        console.info("[t481] ocelot scattered: " + ocelotSpawned + "/" + kOcelotTargetCount) // 进世界一次性核对（非每帧）
     }
     // t78 立即重生（死亡界面按钮）：满血 + 清死亡态 + 传回出生点 + 清挖掘/飞行态 + 重新锁定指针回游戏。
     //   PlayerState.respawn 复位血量/死亡态；PlayerController.respawn 传回出生点 + 清物理态；
@@ -1540,6 +1564,7 @@ Window {
             xpForMob[EntityManager.MobChicken] = 1 + Math.floor(Math.random() * 3) // 鸡：1-3 XP
             xpForMob[EntityManager.MobSquid]   = 1 + Math.floor(Math.random() * 3) // 鱿鱼：1-3 XP
             xpForMob[EntityManager.MobWolf]    = 1 + Math.floor(Math.random() * 3) // t480 狼：1-3 XP（被动经济生物；无常规掉落）
+            xpForMob[EntityManager.MobOcelot]  = 1 + Math.floor(Math.random() * 3) // t481 豹猫/猫：1-3 XP（被动经济生物；无常规掉落）
             const xpAmt = xpForMob[mobType]
             if (xpAmt && xpAmt > 0) xpOrbs.spawnOrb(x, y, z, xpAmt)
             // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
@@ -2675,6 +2700,10 @@ Window {
         // t480 狼（Wolf；机制等价 MC 1.0 狼，§9 原创）：灰狼毛皮底 + 深灰背脊 / 侧纹 + 浅灰腹纹（build_mob.py
         //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 犬科几何（细长躯干 + 尖头 + 立耳 + 4 腿）每面铺整张贴图。
         Texture { id: mobWolfTex; source: "qrc:/textures/mob_wolf.png"; generateMipmaps: false }
+        Texture { id: mobOcelotTex;    source: "qrc:/textures/mob_ocelot.png";    generateMipmaps: false } // t481 豹猫（未驯服）
+        Texture { id: mobCatBlackTex;  source: "qrc:/textures/mob_cat_black.png"; generateMipmaps: false } // t481 猫变体 0（黑）
+        Texture { id: mobCatGingerTex; source: "qrc:/textures/mob_cat_ginger.png"; generateMipmaps: false } // t481 猫变体 1（姜黄）
+        Texture { id: mobCatCreamTex;  source: "qrc:/textures/mob_cat_cream.png"; generateMipmaps: false } // t481 猫变体 2（奶油）
         // t421 资源包生物贴图（pack entity texture）：pack 启用且 resourcePack.mobTextureSource(mobType) 命中包内
         //   entity PNG 时，source 为 file:///<entityDir>/<mob>/<mob>.png → 各 mob delegate 把 baseColorMap 切到本
         //   Texture + MobModel.packTextured=true（几何按 T 字 UV 展开进贴图）。pack 关 / 包内无该贴图 → source 空 →
@@ -4483,6 +4512,7 @@ Window {
                         if (entMobType === EntityManager.MobChicken) return 0.40 - mobHalfH // t398 Chicken 小型鸟（腿底 0.40）
                         if (entMobType === EntityManager.MobSquid) return 0.46 - mobHalfH // t399 Squid 触腕底 0.46（贴 collision 底面）
                         if (entMobType === EntityManager.MobWolf) return 0.42 - mobHalfH // t480 Wolf 犬科（腿底 0.42）
+                        if (entMobType === EntityManager.MobOcelot) return 0.40 - mobHalfH // t481 Ocelot/Cat 猫科（腿底 0.40）
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
                     }
                     // t400 求偶心形指示（spec 繁殖可观察反馈；机制等价 MC 1.0 love mode 心形粒子）：mob 处于求偶期
@@ -5256,6 +5286,58 @@ Window {
                             geometry: UnitCube {}
                             position: Qt.vector3d(0.08, 0.16, -0.71)
                             scale: Qt.vector3d(0.04, 0.05, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                    }
+                    // t481 Ocelot/Cat（豹猫/猫；mobType 11）：MobModel 猫科几何（细长躯干 + 尖耳 + 长尾 + 4 细腿）
+                    //   + 贴图（机制等价 MC 1.0 豹猫/猫，§9 原创模型 + 贴图）。passive（hostile=false）→ 生命周期
+                    //   同被动生物；未驯服走 aiOcelot 游荡分支（丛林野豹猫被动散步），生鱼驯服 → 变猫（随机毛色
+                    //   变体 0..2，ocelotVariantAt 选 mob_cat_* 贴图；未驯服用 mob_ocelot 斑点豹猫贴图）。驯服猫
+                    //   跟随主人（aiOcelot follow）+ 空手右键坐/站切换。受击红闪（同既有 hurtFlashAt>0 → baseColor
+                    //   红模式）。坐姿（ocelotSittingAt=true）→ 整个 Model 垂直压缩 + 后倾 + 略下沉（同狼坐姿，
+                    //   读作「坐地留守」）。眼为子节点（纯色 NoLighting，同猪眼模式）。
+                    Model {
+                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobOcelot
+                        property real ocatSit: { entityManager.revision; return entityManager.ocelotSittingAt(index) ? 1 : 0 }
+                        geometry: MobModel {
+                            mobType: 11
+                            // 豹猫/猫无 pack entity 贴图映射（同 Wolf/Squid，spec 未列 → 保程序生成贴图全脸 UV）。
+                            packTextured: false
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
+                        // t481 坐姿变换：坐 → 垂直压缩（1−0.22=0.78）+ 后倾（-18° 绕 X，鼻略抬）+ 略下沉 0.08 格 →
+                        //   读作「坐地留守」；站 → 原比例 / 无倾 / 原高。ocatSit 绑 revision → toggleOcelotSit 翻转即时切姿。
+                        position: Qt.vector3d(0, mobModelYOff - ocatSit * 0.08, 0)
+                        scale: Qt.vector3d(1.0, 1.0 - ocatSit * 0.22, 1.0)
+                        eulerRotation.x: ocatSit * -18
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                            // 驯服 → 据 ocelotVariantAt 选 3 色猫贴图；未驯服 → mob_ocelot 豹猫贴图（几何同，异贴图
+                            //   区分豹猫/猫，机制等价 MC 1.0 同模型异贴图）。
+                            baseColorMap: {
+                                entityManager.revision
+                                if (entityManager.ocelotTamedAt(index)) {
+                                    const v = entityManager.ocelotVariantAt(index)
+                                    if (v === 0) return mobCatBlackTex
+                                    if (v === 1) return mobCatGingerTex
+                                    return mobCatCreamTex
+                                }
+                                return mobOcelotTex
+                            }
+                        }
+                        // 眼（2 颗斜挑深色点；头前侧。MobModel 头心 (0,0.12,-0.46) 半 (0.11,0.12,0.14) → 前面 z=-0.60；
+                        //   眼 y≈0.15、x=±0.07；z 贴头前面略凸（-0.61，同 t52 贴脸防 z-fight）。同猪眼纯色子 Model 模式。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.07, 0.15, -0.61)
+                            scale: Qt.vector3d(0.035, 0.04, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.07, 0.15, -0.61)
+                            scale: Qt.vector3d(0.035, 0.04, 0.02)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                         }
                     }

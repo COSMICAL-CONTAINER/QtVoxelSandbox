@@ -114,7 +114,18 @@ public:
     //   （机制等价 MC 1.0 狼无常规掉落；仍掉少量 XP，见 Main.qml onMobDied）。§9 原创：名称 / 模型（方块化犬科 +
     //   立耳 + 尾巴）/ 贴图（程序生成灰狼毛皮）全原创，仅机制对齐「驯服 + 跟随 + 防御 + 繁殖」。尾巴角度示血量
     //   （QML 独立尾巴 Model 据 healthAt/maxHealthAt 旋转 —— 满血竖起、残血下垂，机制等价 MC 狼尾随血量升降）。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10 };
+    //   t481 豹猫/猫（ocelot/cat）= MobOcelot(11)：机制等价 MC 1.0 豹猫 —— 丛林驯服伙伴。丛林群系生成
+    //   （biomeIdAt==6 Jungle），中性 non-hostile（hostile=false → 不参与黑暗刷怪 / 日光燃烧 / 远距消失，生命周期
+    //   同 passive）。未驯服豹猫被动游荡（aiOcelot 未驯服分支 → aiWander，不攻击玩家）；生鱼右键概率驯服
+    //   （~33%，kOcelotTameChance）→ **变猫**：随机毛色变体（ocelotVariant 0..2，QML 据 it 切 3 色猫贴图）。
+    //   驯服猫跟随主人 + 坐/站切换（空手右键坐留守 / 再右键站跟随，同狼模式）；**不防御**（机制等价 MC 1.0 猫
+    //   不攻击怪物，与驯服狼防御咬击区分）。生鱼喂食 → love mode 繁殖产幼崽（复用 t400 框架，MobOcelot 入
+    //   isBreedableType + tamed 守卫 + 幼崽继承毛色变体）。**驱赶 Stalker**：豹猫/猫在 kStalkerFleeRange 内 →
+    //   Stalker 逃离（aiStalker 侧据 nearestOcelot 背离最近猫走 + 熄火不蓄力，机制等价 MC 1.0 苦力怕被猫吓跑）。
+    //   死亡不掉落（机制等价 MC 1.0 豹猫/猫无常规掉落；仍掉少量 XP，见 Main.qml onMobDied）。§9 原创：名称 /
+    //   模型（方块化猫科 + 尖耳 + 长尾）/ 贴图（程序生成斑点橙棕豹猫 + 3 色猫）全原创，仅机制对齐「丛林生成 +
+    //   驯服变猫 + 跟随坐站 + 驱赶苦力怕 + 繁殖」。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11 };
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -274,6 +285,27 @@ public:
     //   （QML 切坐姿/站姿 + aiWolf 切留守/跟随）。未驯服 / 非 wolf / dead / 越界 → 静默 no-op（野狼右键无反应，
     //   机制等价 MC 只有驯服狼可命令坐/站）。Q_INVOKABLE 兼调试 + PlayerController 骨头分支双入口。
     Q_INVOKABLE void toggleWolfSit(int i);
+    // t481 第 i 只 mob 是否**已驯服猫**（ocelotTamed=true）。仅 mobType==MobOcelot 用（其余 mob 恒 false）。QML
+    //   delegate 据它切豹猫/猫外观（未驯服=斑点橙棕豹猫、驯服=3 色猫）+ 行为态（驯服=跟随+坐/站）；PlayerController
+    //   生鱼驯服 / 繁殖分流读它。越界 / 非 ocelot → false。
+    Q_INVOKABLE bool ocelotTamedAt(int i) const;
+    // t481 第 i 只驯服猫是否**坐着**（ocelotSitting=true；留守原地不跟随）。仅驯服猫用（未驯服恒 false）；QML
+    //   delegate 据它显坐姿（压缩 + 后倾）+ 行为（aiOcelot 坐态留守）。越界 / 非驯服猫 → false。
+    Q_INVOKABLE bool ocelotSittingAt(int i) const;
+    // t481 第 i 只驯服猫的毛色变体（0=黑 / 1=姜黄 / 2=奶油；驯服瞬间随机选，QML 据它选 mob_cat_* 贴图）。
+    //   未驯服 / 非 ocelot → 0（走 mob_ocelot 豹猫贴图，不读变体）。越界 → 0。
+    Q_INVOKABLE int ocelotVariantAt(int i) const;
+    // t481 生鱼驯服（spec「生鱼驯服 → 变猫（3 毛色变体随机）」；机制等价 MC 1.0 豹猫生鱼驯服 ~1/3）：
+    //   第 i 只**未驯服**活体豹猫 → ~kOcelotTameChance 概率驯服（ocelotTamed=true + 随机毛色变体 0..2）+
+    //   bump revision（QML 收豹猫外观、转猫外观 + 跟随态）+ 返 true；未中（~2/3）→ 返 false（**生鱼仍消耗**，
+    //   机制等价 MC 喂鱼无论成败都消耗）。已驯服 / 非 ocelot / dead / 越界 → 返 false（caller 不消耗生鱼）。
+    //   Q_INVOKABLE 兼调试 + PlayerController 生鱼分支双入口。
+    Q_INVOKABLE bool tameOcelot(int i);
+    // t481 坐/站切换（spec「驯服猫坐/站（同狼模式）」；机制等价 MC 1.0 驯服猫右键坐/站）：第 i 只**已驯服**猫 →
+    //   翻转 ocelotSitting + bump revision（QML 切坐姿/站姿 + aiOcelot 切留守/跟随）。未驯服 / 非 ocelot / dead /
+    //   越界 → 静默 no-op（野豹猫右键无反应，机制等价 MC 只有驯服猫可命令坐/站）。Q_INVOKABLE 兼调试 +
+    //   PlayerController 空手分支双入口。
+    Q_INVOKABLE void toggleOcelotSit(int i);
     // t480 设置驯服狼的防御目标（主人攻击的 mob；C++ 直调，PlayerController::attackMob 命中后调，Game→Entities
     //   向下依赖）。**共享目标**：所有驯服且站立的狼都追击它（机制等价 MC 1.0 驯服狼群攻主人攻击的目标）。
     //   索引经 slot-reuse 稳定（release 不 shift）；目标死亡 / 移除由 aiWolf 每 AI tick 校验清除。越界 → 忽略。
@@ -608,6 +640,15 @@ private:
         bool  wolfTamed = false;       // 是否已驯服（骨头驯服；QML wolfTamedAt 读）
         bool  wolfSitting = false;     // 是否坐着留守（右键切换；QML wolfSittingAt 读）
         float wolfAttackCooldown = 0.0f; // 狼咬击冷却（秒；仅 MobWolf 用）
+        // t481 豹猫/猫态（仅 mobType==MobOcelot 用；其余 mob 留默认 false/0 不触发）：
+        //   ocelotTamed=false → 丛林野豹猫（游荡被动）；true → 驯服猫（跟随主人 + 坐/站 + 繁殖）。
+        //   ocelotSitting=true → 坐（留守原地不跟随；机制等价 MC 1.0 驯服猫右键坐）。toggleOcelotSit 翻转。
+        //   ocelotVariant = 驯服后毛色变体（0=黑 / 1=姜黄 / 2=奶油；驯服瞬间随机选，QML 据 ocelotVariantAt
+        //     切 mob_cat_* 贴图；未驯服豹猫不读变体走 mob_ocelot 贴图）。spawnMobCore 默认成员初始化已清回
+        //     （move 入槽覆盖旧值，同狼态初值约定）。
+        bool  ocelotTamed = false;       // 是否已驯服（生鱼驯服；QML ocelotTamedAt 读）
+        bool  ocelotSitting = false;     // 是否坐着留守（右键切换；QML ocelotSittingAt 读）
+        int   ocelotVariant = 0;         // 驯服猫毛色变体（0..2；随机；QML ocelotVariantAt 读）
         // t250 环境音态（仅 Mob kind 用；FallingBlock/Item 留默认不触发）：
         float stepAccum = 0.0f;  // walkPhase 半步累加器（弧度）；行走时累加 moveSpeed*dt*kWalkFreq，≥π → emit mobStep
         float ambientTimer = 0.0f; // 到下次 idle 叫声的倒计时（秒）；≤0 → emit mobAmbient + 重置随机周期
@@ -753,6 +794,17 @@ private:
     //   受击链（mobAttackedPlayer 语义信号 / damageEntity），无向上依赖。
     bool aiWolf(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
                 float speedScale, bool playerTargetable);
+    // t481 豹猫/猫 AI（tick Mob 分支 mobType==MobOcelot 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐
+    //   MC 1.0 豹猫/猫三态：
+    //   (1) 未驯服（ocelotTamed=false）：**被动游荡**（丛林野豹猫，不攻击玩家不敌对；aiWander）。
+    //   (2) 驯服 + 坐（ocelotSitting=true）：**留守** —— 不移动（跟随主人回来自动续跟）；机制等价 MC 坐猫。
+    //   (3) 驯服 + 站：**跟随主人**（distXZ > kFollowMinDist 走近 / <= 停步；过远 kOcelotTeleportDist 瞬移到
+    //       主人附近防掉队）；求偶期（loveTimer>0）优先寻偶（findNearestMate + 走近配偶，复用 t400 逻辑）。
+    //   猫**不防御**（机制等价 MC 1.0 猫不攻击怪物 —— 与驯服狼的防御咬击区分；驱赶 Stalker 由 aiStalker 侧对
+    //   猫/豹猫临近时逃离实现）。返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。idx = 本 mob 槽
+    //   索引（求偶寻偶 findNearestMate 排除自身）。分层（PLAN §2）：只读 World::isSolid + 自身数据，无向上依赖。
+    bool aiOcelot(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
+                  float speedScale);
     // t281 敌对生物 AI（detect→pathfind→attack 三段；tick 内 hostile Mob 分支调，替代 aiWander）。
     //   spec t281「敌对生物基类（AI/寻路）：detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）
     //   + attack」。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI；标识符 / 美术全原创（§9 区隔）。
@@ -845,6 +897,9 @@ private:
     //   loveTimer>0 且 mobType==e.mobType 的 mob 索引（排除 self）；无 → -1。供求偶者设 yaw 朝配偶 → aiWander
     //   行走相遇。O(n) 每 mob 每帧，n≤64 可忽略。const 只读。
     int findNearestMate(int idx) const;
+    // t481 最近豹猫/猫查找（aiStalker 驱赶调）：返距 pos 在 range 内最近一只 alive && !dead && kind==Mob &&
+    //   mobType==MobOcelot 的 mob 索引；无 → -1。O(n) 每 Stalker 每 AI tick，n≤64 可忽略。const 只读。
+    int nearestOcelot(const QVector3D &pos, float range) const;
     // t400 mobType 是否**可繁殖被动生物**（pig/cow/sheep/chicken 之一）。求偶寻偶 / 配对 / feedMob 食物匹配
     //   均先据它门控（hostile / MobTest / MobSquid 不可繁殖）。静态纯函数。
     static bool isBreedableType(int mobType);
@@ -1035,6 +1090,22 @@ private:
     static constexpr float kFollowMinDist      = 2.5f;  // 跟随到位 XZ 距离（blocks）
     static constexpr float kWolfTeleportDist   = 24.0f; // 距主人过远瞬移阈值（blocks；XZ）
     static constexpr float kWolfTameChance     = 0.33f; // 骨头驯服概率（spec ~33%）
+    // t481 豹猫/猫常量（spec「丛林生成 + 生鱼驯服变猫 3 色 + 跟随坐站 + 驱赶 Stalker + 繁殖」；机制对齐
+    //   MC 1.0 豹猫：丛林群系生成、生鱼驯服、驯服猫跟随 + 坐、驱赶苦力怕；数值为本工程量身调，非 MC 精确
+    //   复刻 —— PLAN §4「机制对标」非数值 1:1）。
+    //   - kOcelotTameChance：生鱼驯服概率（机制等价 MC 1.0 豹猫 ~1/3 驯服概率；失败生鱼仍消耗，同 wolf）。
+    //   - kOcelotFollowSpeed：驯服猫跟随速度（blocks/s）。MC 猫跟随较快；取 4.0（≈玩家走速 4.3 → 不掉队）。
+    //   - kOcelotTeleportDist：驯服猫距主人过远 → 瞬移到主人附近（blocks；XZ）。同狼 kWolfTeleportDist=24
+    //     （小世界；猫速 4.0 接近玩家走速 → 正常情况下不掉队，仅极端地形触发）。
+    //   - kStalkerFleeRange：豹猫/猫驱赶 Stalker 半径（blocks；XZ 距离 ≤ 此 → Stalker 逃离）。MC 苦力怕被猫
+    //     吓跑半径 ~6；取 6.0（玩家牵猫近距即可见驱赶，又不致全场 Stalker 逃离）。
+    //   - kStalkerFleeSpeed：Stalker 逃离速度（blocks/s）。快于其追踪速 kStalkerChaseSpeed=2.6、≈玩家走速
+    //     → 可逃掉但玩家追上仍有威胁（机制等价 MC 苦力怕被猫吓跑速度）。
+    static constexpr float kOcelotTameChance    = 0.33f; // 生鱼驯服概率（spec ~1/3）
+    static constexpr float kOcelotFollowSpeed   = 4.0f;  // 驯服猫跟随速度（blocks/s）
+    static constexpr float kOcelotTeleportDist  = 24.0f; // 距主人过远瞬移阈值（blocks；XZ）
+    static constexpr float kStalkerFleeRange    = 6.0f;  // 豹猫/猫驱赶 Stalker 半径（blocks）
+    static constexpr float kStalkerFleeSpeed    = 4.0f;  // Stalker 逃离速度（blocks/s）
 public:
     // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
     //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。
