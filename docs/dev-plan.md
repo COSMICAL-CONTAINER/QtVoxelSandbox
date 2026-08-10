@@ -1374,11 +1374,11 @@ t18                        （背包，依赖 hotbar）
 | 任务ID | 状态 | 标题 | 验收细节 |
 |---|---|---|---|
 | t478 | ✅(t400) | **动物繁殖** | 牛/羊喂小麦、猪喂胡萝卜/马铃薯、鸡喂种子 → 爱心模式（需成对，半径内找另一只）→ 繁殖产 1 幼崽 + 短冷却（MC 5min，可缩到 1-2min）+ 消耗手持食物 1。entitymanager(love 模式+冷却) + playercontroller(右键喂食判定)。**t400 已实现**（feedMob 食物匹配 + enterLoveMode + tickBreeding 配对产崽 + 冷却 + kPassiveMobCap）；R18r 仅复核。 |
-| t479 | ⏳(部分) | **幼崽成长** | 幼崽实体（缩放 mob 模型 ~0.5 + 头大身小）+ 喂食加速成长 + 时间到（MC 20min，可缩）变成年。幼崽不繁殖/不掉落。entitymanager(baby 字段) + MobModel(缩放渲染)。**t400 已实现大半**（growTimer 长大 / babyScaleAt=0.5 / 幼崽不可繁殖）；**缺口**：① 喂食加速成长（无 feedGrow 逻辑）；② 幼崽死亡不掉落（onMobDied 无 baby 守卫）。 |
-| t480 | ⏳ | **狼 Wolf（驯服战斗伙伴）** | 森林/针叶林生成（中性）+ **骨头驯服**（右键，概率）→ 坐/站切换 + 攻击主人攻击/受击的 mob + 跟随主人（站时坐守）+ 尾巴角度示血量 + 繁殖（驯服狼+肉）+ 受击红牌。新 MobType MobWolf + entitymanager(AI:follow/defend) + MobModel + playercontroller(驯服/交互) |
-| t481 | ⏳ | **豹猫 Ocelot** | 丛林生成（**依赖丛林群系，项目若无则推迟或加丛林群系**）+ 生鱼驯服 → 变猫（3 毛色变体）+ 驱赶苦力怕(Stalker) + 跟随 + 坐/站。MobType MobOcelot + AI |
-| t482 | ⏳ | **雪傀儡 SnowGolem（防御造物）** | **南瓜 + 雪块×2 竖直放置自动生成**（非 spawn）+ 抛雪球攻击敌对 mob + 行走留雪层 + 沙漠/热群系/下雨融化消失。新实体（玩家造物）+ entitymanager + Main.qml(南瓜头+雪身) |
-| t483 | ⏳ | **铁傀儡 IronGolem（防御造物）** | **铁块×4（T 形）+ 南瓜 自动生成** + 大力攻击敌对（高伤害+击退）+ 死亡掉铁锭/罂粟。新实体（造物）+ entitymanager + Main.qml |
+| t479 | ✅ | **幼崽成长** | 幼崽实体（缩放 mob 模型 ~0.5 + 头大身小）+ 喂食加速成长 + 时间到（MC 20min，可缩）变成年。幼崽不繁殖/不掉落。entitymanager(baby 字段) + MobModel(缩放渲染)。t400 已实现大半；**R18r 补两缺口**（`49f6387`）：feedBaby 每喂减 kBabyFeedGrow=12s（≈10%）加速成长 + mobDied 加 wasBaby → Main.qml onMobDied 早退跳过战利品+XP（幼崽不掉落）。 |
+| t480 | ✅ | **狼 Wolf（驯服战斗伙伴）** | 森林/针叶林生成（中性）+ **骨头驯服**（右键，概率）→ 坐/站切换 + 攻击主人攻击/受击的 mob + 跟随主人（站时坐守）+ 尾巴角度示血量 + 繁殖（驯服狼+肉）+ 受击红牌。MobWolf=10 + aiWolf(tameWolf 33%/toggleWolfSit/跟随/防御三来源/喂肉繁殖 tamed 门控) + MobModel 犬科几何 + build_mob.py 程序贴图（`ce279a3`）。 |
+| t481 | ✅ | **豹猫 Ocelot** | 丛林生成（**丛林群系 R18r 已加** `857343d`，Biome=6 / biomeAt 第 5 独立 fBm 阈值 0.25 / ~13.4% 覆盖 / 高树浓叶 / 确定性）+ 生鱼驯服 → 变猫（3 毛色变体）+ 驱赶苦力怕(Stalker) + 跟随 + 坐/站。MobOcelot=11 + aiOcelot(tameOcelot 33%/3 色/aiStalker nearestOcelot 逃离) + 程序贴图（`5e98481`）。 |
+| t482 | ✅ | **雪傀儡 SnowGolem（防御造物）** | **南瓜 + 雪块×2 竖直放置自动生成**（placeBlock 摆放检测 + 静默移除 3 块）+ 抛雪球攻击敌对 mob（Snowball 弹丸 damageEntity 1HP + 3s 减速）+ 行走留雪层（身后 SnowLayer）+ 沙漠/热群系/下雨融化消失（biomeIdAt==Desert OR isPrecipitatingAt → 致死）。MobSnowGolem=12 + 新方块 Pumpkin(100)/Snow(101)（`907a990`）。 |
+| t483 | ✅ | **铁傀儡 IronGolem（防御造物）** | **铁块×4（T 形）+ 南瓜 自动生成**（双向检测 + 移除 5 块）+ 大力攻击敌对（damageEntity 8HP + 1.5× 击退）+ 死亡掉铁锭×3-5/罂粟。MobIronGolem=13 + aiIronGolem 追击（`907a990`）。 |
 
 ## D. 世界结构（探索+战利品，独立）
 

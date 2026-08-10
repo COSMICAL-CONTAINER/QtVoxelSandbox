@@ -580,3 +580,24 @@ FrameProfiler 实测：mesh 稳态 0.5-1.5ms/frame（风暴已灭）；sun 重�
 **修复 `d26cef8`**：批量模式下 `setWaterSilent` 把光受影响编辑（同 recomputeLightAround 早退判据：遮光翻转 ‖ 发光增删）延迟记入 `m_pendingLightEdits`；`tickWaterFlow`/`tickLavaFlow` 在 `m_batchFluid=false` 后调 `flushPendingLightEdits()` —— 对延迟编辑的 **±R 盒之并做一次 `refloodBox`**（每编辑影响区 ⊆ 其 ±R 盒 ⊆ 联合盒，盒面边界种子法成立；任一 sky 编辑则 doSky=true 超集）。N 次重 flood → 1 次。非批量路径（玩家/世界编辑）不变（立即重 flood）。套用 `destroySphereSilent` t383 已验收的批量收口模式。
 
 - **验收**：✅ 编译零警告 + `cmake --build --target voxelsandbox` no work to do（world.cpp 强制重编 exit 0）。**待用户 playing 实测**：飞入原水+岩浆区按 F3 —— `lav` 桶应显著下降（light 合并）、mesh reb 数应随 settle 归零、FPS 回升。caveat：若湿区 FPS 仍低，下一步查 chunk 重建风暴本身（reb 数不降 → 属 `settled=0` 持续写 + 全量段重建，非 light）。
+
+---
+
+## R18r batch 2 繁殖/伙伴（t479 缺口 + 丛林群系 + t480-t483，4 新 mob）
+
+> Workflow `wf_59ee8dd5-ebd`（5 voxel-dev agent 串行，共享文件必须串行）。1,464,940 tok / 552 calls / 274m（16472104ms）。批 1 完成后用户指令「直接开工，子 agent + workflow 完成所有剩余任务」。开工前提：性能护栏已焊死（mob `15f4655` + 流体 `d26cef8`，见上两条）。
+
+**5 任务全 ✅**（t478 繁殖主体 t400 已实现，仅复核）：
+
+| 任务 | 提交 | 做了什么 |
+|---|---|---|
+| t479 缺口+t478 复核 | `49f6387` | feedBaby(i) 每喂减 kBabyFeedGrow=12s（≈kBabyGrowTime=120s 的 10%）加速成长；PlayerController 喂食分支据 isBabyAt(i) 分流（幼崽→feedBaby / 成体→enterLoveMode）；mobDied 信号新增 wasBaby（deathBaby 致死瞬间快照，同 deathBurned 模式，规避 0.5s 死亡动画窗口内 growTimer 衰减漏判）→ Main.qml onMobDied 早退跳过战利品+XP（幼崽不掉落）。t478 主体（enterLoveMode/loveTimer/breedCooldown/baby/growTimer/tickBreeding/kPassiveMobCap）未改，纯增量。顺带修 entitymanager.cpp tick() 既有的未用变量 physNs（t500 遗留）。 |
+| 丛林群系（t481/t486 前置） | `857343d` | Biome 加 Jungle=6；biomeAt 第 5 独立低频 fBm（0.014, seed offset +5133）从 Forest+Plains band 雕出（阈值 0.25 → 160×160 日志 jungle=3418/25600=13.4%，10 次种子均值 13.5%，在 10-20% 目标内）；heightAt 丛林 amp=5.0；placeJungleTrees 高树（主干 5-7，半径 3 浓密 5 层冠 vs 橡树 4 层）+ placeTallGrass 丛林浓密下层；Desert/Hills/Snowy/Swamp 早退保留；确定性（双 16×16 run 同，160×160 与纯函数 Python 复现逐位一致）。pickPassiveMobType clamp biomeId≥4→Plains 保护下游。无 WorldgenVersion → 旧存档 chunk 保留、新 chunk 按新群系（可接受）。 |
+| t480 狼 | `ce279a3` | MobWolf=10 + 犬科 MobModel 几何（躯干/头/立耳/腿）+ build_mob.py 程序灰狼贴图。森林/针叶林散布（biomeIdAt 3/4）；骨头驯服 tameWolf（33%，成败都耗骨）+ toggleWolfSit（右键驯服狼切坐留守/站跟随）；aiWolf 跟随主人（kFollowMinDist 停步 + kWolfTeleportDist 防掉队瞬移）+ 防御三来源（m_wolfTarget 由 attackMob 近战 / Stalker 爆炸 / Bones 箭 arrowShooter 注册 → 狼追击咬击）；喂肉繁殖（isWolfMeatItem → 驯服狼 enterLoveMode/feedBaby，MobWolf 入 isBreedableType 带 tamed 门控 + 幼崽继承驯服态）；尾巴角度据 healthAt/maxHealthAt（满血 35°→残血 140°，QML wolfTailPivot 独立尾 Model）；未驯服狼敌对玩家；受击红闪复用 hurtFlashAt；kCap=64 + t500 aiTick 节流保留。 |
+| t481 豹猫 | `5e98481` | MobOcelot=11 + 斑点豹猫 + 3 色猫变体（mob_cat_black/ginger/cream）程序贴图。丛林散布（biomeIdAt==6）；生鱼驯服 tameOcelot（~33%，失败仍耗）→ 随机毛色 0..2，QML 据 ocelotTamedAt/ocelotVariantAt 切贴图；aiStalker 顶部 nearestOcelot（kStalkerFleeRange=6）→ 背离猫逃离 + fuseTimer 归零（优先于追踪/蓄力）；aiOcelot（未驯服游荡 / 驯服跟随 walk+瞬移 / 坐留守），空手右键已驯服猫 toggleOcelotSit；繁殖（生鱼触发，幼崽继承驯服态与毛色）。**⚠️ 此 agent 审查时安全分类器临时不可用 → 主编排复核提交**：纯代码 + 4 张程序贴图（167-219 字节，build_mob.py 生成，非 MC 资产），无 docs/ 包文件，无 git add -A 越界。HEAD 构建绿。 |
+| t482+t483 双傀儡 | `907a990` | MobSnowGolem=12：南瓜+雪块×2 摆放检测（placeBlock 钩子 + setWaterSilent 静默移除 3 块）+ aiSnowGolem 抛 Snowball 弹丸（damageEntity 1HP + 3s slowTimer ×0.5 减速，只打敌对）+ 行走身后留 SnowLayer + 沙漠/热/下雨融化（biomeIdAt==Desert OR isPrecipitatingAt → 致死，无掉落）。MobIronGolem=13：T 形铁块×4+南瓜双向检测（移除 5 块）+ aiIronGolem 追击（damageEntity 8HP + 1.5× knockback）+ 死掉铁锭 0x203×3-5 / 红花(49) ~50%。新方块 Pumpkin(100)/Snow(101) 加进创造调色板 + 图标。南瓜头+方块身模型（Main.qml UnitCube 堆叠含刻面双眼）。 |
+
+- **构建**：5 agent 串行（共享 entitymanager/mobmodel/Main.qml/blockregistry/world → 必须串行），每 agent 自带 build 零警告 gate（cmake --build --target voxelsandbox exit 0）+ targeted git add（无 -A、无 .pyc、无 docs 包）+ smoke（exe 启动 6s 不崩，root objects after load: 1）。HEAD（907a990）主编排复核 `cmake --build` no work to do = 全绿。
+- **MobType 现状**：0 Test/1 Pig/2 Cow/3 Sheep/4 Shambler/5 Bones/6 Stalker/7 Spider/8 Chicken/9 Squid/**10 Wolf/11 Ocelot/12 SnowGolem/13 IronGolem**。kCap=64 保留（含新 mob）+ t500 aiTick 节流（新 mob AI 全走 aiTick/aiDt 错峰）。
+- **验收**：✅ 编译零警告 + 启动不崩 + QML 加载正常；**待用户 playing 实测**：① 喂幼崽加速成长（t479）；② 杀幼崽无掉落；③ 森林见狼/骨头驯服坐站跟随尾巴（t480）；④ 丛林见豹猫/生鱼驯服变 3 色猫/Stalker 被驱赶（t481，**需飞到新生成的丛林 chunk，旧存档区无丛林**）；⑤ 摆南瓜+雪块×2 出雪傀儡（抛雪球/留雪/沙漠融化）/T 形铁块+南瓜出铁傀儡（高伤击退/掉铁锭）（t482/t483）。mob 性能（10→13 种 mob，kCap=64）待 playing 实测确认。
+- **未做（留批 3）**：D 结构 t484-t487（批 3 workflow `wf_72752a0c-fa0` 已启动，4 串行 voxel-dev：Mineshaft/DesertTemple/JungleTemple/Stronghold）。
