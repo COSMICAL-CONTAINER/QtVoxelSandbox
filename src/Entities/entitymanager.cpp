@@ -131,6 +131,7 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
         //   halfH=1.20，重装体型）。hostile 默认 false（造物不攻击玩家）。
         case MobSnowGolem: e.halfW = 0.35f; e.halfH = 0.90f; break; // 0.7×1.8 雪傀儡（柱身 2 雪块 + 南瓜头；t482）
         case MobIronGolem: e.halfW = 0.60f; e.halfH = 1.20f; break; // 1.2×2.4 铁傀儡（T 形铁块 + 南瓜头；t483）
+        case MobSilverfish: e.halfW = 0.22f; e.halfH = 0.15f; e.hostile = true; break; // 0.44×0.30 小型虫（机制等价 MC 1.0 银鱼 0.43×0.18 宽矮；要塞刷怪笼刷出，t487）
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
@@ -312,12 +313,14 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
         color = QStringLiteral("#d8d4c4"); // Bones：灰白骨色（机制等价 MC 骷髅；原创配色非照搬）
     } else if (mobType == MobStalker) {
         color = QStringLiteral("#5fa83a"); // Stalker：青绿色（机制等价 MC 苦力怕；原创配色非照搬）
+    } else if (mobType == MobSilverfish) {
+        color = QStringLiteral("#c8c2b8"); // Silverfish：灰白甲壳色（机制等价 MC 银鱼；原创配色，t487）
     } else {
         color = QStringLiteral("#4a6a3a"); // Shambler：暗绿腐肉色（机制等价 MC 僵尸；原创配色）
-        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones/Stalker 一律按 Shambler
+        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones/Stalker/Silverfish 一律按 Shambler
     }
     spawnMobTyped(x, y, z, mobType, color, health);
-    // spawnMobTyped 内 switch 已对 Shambler/Bones/Stalker 设 hostile=true；spawnHostileMob 仅收口语义入口。
+    // spawnMobTyped 内 switch 已对 Shambler/Bones/Stalker/Silverfish 设 hostile=true；spawnHostileMob 仅收口语义入口。
 }
 
 // t374 被动生物群系化类型选取：据群系 id（World::biomeIdAt 编码）按 kPassiveSpawnWeights 加权随机返
@@ -603,8 +606,14 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                 if (sx < 0) continue; // 笼周无合法 spawn 位 → 跳过本笼（下周期再试）
 
                 // spawn 1 只敌对（Shambler / Bones 等概率；机制等价 MC 1.0 刷怪笼等概率随机刷怪）。
+                //   t487：刷怪笼 state 带 SpawnerStateSilverfishFlag(bit0) → spawn Silverfish（要塞银鱼刷怪笼），
+                //   否则 Shambler/Bones（地牢默认）。读 world->stateAt 区分两类刷怪笼（worldgen placeStronghold
+                //   给要塞银鱼刷怪笼写 flag；placeDungeons 给地牢刷怪笼 state=0 无 flag）。
                 auto *rng = QRandomGenerator::global();
-                const int mobType = (rng->bounded(2) == 0) ? int(MobShambler) : int(MobBones);
+                const quint8 spawnerState = world->stateAt(x, y, z);
+                const int mobType = ((spawnerState & BlockRegistry::SpawnerStateSilverfishFlag) != 0)
+                                    ? int(MobSilverfish)
+                                    : ((rng->bounded(2) == 0) ? int(MobShambler) : int(MobBones));
                 spawnHostileMob(sx, sy, sz, mobType);
                 ++hostilesRunning;
                 dirty = true;

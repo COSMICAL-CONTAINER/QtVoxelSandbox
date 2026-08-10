@@ -82,6 +82,12 @@ public:
     //   PLAN §2-K 同箱同战利品）。caller（Main.qml.openChest）须先确认该坐标是丛林神殿箱
     //   （theWorld.isJungleTempleChest —— 由 chest state bit5 标记，worldgen placeJungleTemple 写入）。
     Q_INVOKABLE bool populateJungleTempleLoot(int x, int y, int z);
+    // t487 首开填充要塞战利品（机制等价 MC 1.0 stronghold chest loot）。与 populateDungeonLoot /
+    //   populateMineshaftLoot / populatePyramidLoot / populateJungleTempleLoot 同源语义：仅对「尚未有条目」的
+    //   箱子生效（首次开），用 LootTable::strongholdChestPool + 坐标确定性 seed 抽 6 件（末影之眼 / 骨头 / 腐肉 /
+    //   铁锭 / 青金石 / 红石 / 钻石 / 附魔书等，PLAN §2-K 同箱同战利品）。caller（Main.qml.openChest）须先确认该
+    //   坐标是要塞箱（theWorld.isStrongholdChest —— 由 chest state bit6 标记，worldgen placeStronghold 写入）。
+    Q_INVOKABLE bool populateStrongholdLoot(int x, int y, int z);
 
 signals:
     // 任一箱子任一槽内容变更（setSlot）/ 条目移除（clearChest）。驱动 revision 自增 + ChestUI delegate 刷新。

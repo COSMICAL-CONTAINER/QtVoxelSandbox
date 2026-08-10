@@ -65,6 +65,14 @@ public:
     //   static 存储（返回 const 引用，调用方不持副本）。
     static const std::vector<Entry> &jungleTempleChestPool();
 
+    // t487 要塞箱子战利品池（机制等价 MC 1.0 stronghold chest loot 的「末影之眼 / 骨头 / 腐肉 / 铁锭 / 青金石 /
+    //   红石 / 钻石 / 附魔书」分布）。spec t487「图书馆（书架，附魔加成）+ 末地传送门房 ... + 银鱼刷怪笼」——
+    //   要塞作为深层稀有探索目标，战利品含末影之眼（激活传送门的关键物品，稀有）+ 亡灵族骨头/腐肉 + 金属族
+    //   铁锭 + 矿物族青金石/红石 + 钻石 + 附魔书。8 条：末影之眼（稀有关键件，低权重）+ 骨头 / 腐肉（亡灵族
+    //   常见）+ 铁锭 / 青金石 / 红石（矿物族次常见）+ 钻石（稀有）+ 附魔书占位（极稀有）。机制对齐 MC 1.0 要塞
+    //   战利品（末影之眼是要塞标志性掉落，用于激活末地传送门）。static 存储（返回 const 引用，调用方不持副本）。
+    static const std::vector<Entry> &strongholdChestPool();
+
     // t401 钓鱼获物池（生鱼 / 垃圾 / 宝藏三档；机制对齐 MC 1.0 fishing loot「鱼常见 / 垃圾次之 / 宝藏稀有」）。
     //   生鱼（RawFishId，高权重）+ 垃圾（皮革 / 线 / 骨头 / 腐肉 / 木棒 / 墨囊，中权重）+ 宝藏（马鞍 / 命名牌 /
     //   钻石，低权重）。复用 roll（按 weight 抽一次 → 一件获物）；钓竿拉起时 PlayerController 注入运行期 RNG
@@ -82,6 +90,10 @@ public:
 
     // t486 丛林神殿箱子单次开启的抽取次数（机制等价 MC 1.0 jungle temple chest ~2-5 stacks/箱 × 1-2 箱 → 总 ~5 件）。
     static constexpr int kJungleRolls = 5;
+
+    // t487 要塞箱子单次开启的抽取次数（机制等价 MC 1.0 stronghold chest ~3-6 stacks/箱 × 1-2 箱 → 总 ~6 件；
+    //   要塞稀有故单箱件数略多补偿探索成本）。末影之眼权重低（~6%）→ 平均 ~10 箱出 1 个，玩家须多次探索要塞。
+    static constexpr int kStrongholdRolls = 6;
 
     // 按 weight 有放回加权抽 rolls 次，返回最多 rolls 个 Stack。RNG 由 caller 注入（确定性 seed 重载见下）。
     //   pool 为空 / rolls<=0 → 空 vector。weight<=0 的条目跳过（不入总权重）。maxCount<minCount → 取 minCount。

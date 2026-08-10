@@ -311,3 +311,46 @@ bool ChestStore::populateJungleTempleLoot(int x, int y, int z)
     emit chestChanged();
     return true;
 }
+
+// t487 首开填充要塞战利品（见 cheststore.h 头注释）。与 populateDungeonLoot / populateMineshaftLoot /
+//   populatePyramidLoot / populateJungleTempleLoot 同源逻辑，仅换战利品池（LootTable::strongholdChestPool：
+//   末影之眼 / 骨头 / 腐肉 / 铁锭 / 青金石 / 红石 / 钻石 / 附魔书等）+ 抽取次数（kStrongholdRolls=6）+
+//   坐标确定性 seed 盐（0x5A17D1C7 专用盐，与其它四表解耦 → 同坐标要塞箱与其它箱战利品各自独立）。
+bool ChestStore::populateStrongholdLoot(int x, int y, int z)
+{
+    const QString k = key(x, y, z);
+    if (m_chests.find(k) != m_chests.end()) return false; // 已开过 / 已填充 → 不再生（首开一次性）
+
+    // 坐标确定性 seed（PLAN §2-K）：同坐标箱子 → 同战利品（与其它四表同模式，盐不同 → 五表独立）。
+    const quint32 sx = quint32(quint32(x) * 73856093u);
+    const quint32 sy = quint32(quint32(y) * 19349663u);
+    const quint32 sz = quint32(quint32(z) * 83492791u);
+    const quint32 seed = (sx ^ sy ^ sz) ^ 0x5A17D1C7u; // 要塞专用盐（0x5A17D1C7，与其它四表解耦）
+
+    // 抽取战利品 stack 列表（最多 kStrongholdRolls=6 件，同 id 不合并）。
+    const auto &pool = LootTable::strongholdChestPool();
+    const std::vector<LootTable::Stack> stacks = LootTable::roll(pool, LootTable::kStrongholdRolls, seed);
+
+    // 建空箱子条目，逐 stack 找随机空槽写入（同 id 不合并 → 分散多槽，机制等价 MC 要塞箱散布）。
+    Chest chest; // 默认 27 空槽
+    QRandomGenerator slotRng(seed ^ 0x9E3779B9u); // 与抽取 RNG 不同的盐 → 槽位分布独立
+    for (const LootTable::Stack &st : stacks) {
+        if (st.itemId <= 0 || st.count <= 0) continue;
+        int slot = -1;
+        for (int t = 0; t < kSlotsPerChest; ++t) {
+            const int cand = int(slotRng.bounded(kSlotsPerChest));
+            if (chest[size_t(cand)].id == 0) { slot = cand; break; }
+        }
+        if (slot < 0) {
+            for (int i = 0; i < kSlotsPerChest; ++i)
+                if (chest[size_t(i)].id == 0) { slot = i; break; }
+        }
+        if (slot < 0) break;
+        chest[size_t(slot)] = Slot{ st.itemId, st.count };
+    }
+
+    m_chests[k] = std::move(chest);
+    ++m_revision;
+    emit chestChanged();
+    return true;
+}

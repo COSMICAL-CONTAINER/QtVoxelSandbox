@@ -486,6 +486,35 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   EntityManager::spawnArrow 朝压力板方向射箭（复用既有 Arrow 弹丸 tick，机制等价 MC 发射器射箭）。per-dispenser
     //   冷却防刷屏。worldgen placeJungleTemple 把发射器嵌入走廊石壁。进创造调色板。
     /* dispenser    */ {int(BlockRegistry::Dispenser),        125,125,126,127, true,  BlockRegistry::ShapeFull,     3.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Dispenser),      1, 64, "dispenser",   "发射器"},
+    // ── t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶·楼梯 / 末地传送门；名称 / 贴图全
+    //   原创自绘 §9a；§9 区隔：末地/末影之眼为通用描述词，机制对齐非专名照搬）：
+    //   石砖（StoneBrick）：石质整立方装饰方块（要塞墙体主体）。整立方 opaque（solid=true / ShapeFull ——
+    //   走 mesher 整立方面路径，**非**异形，与 stone/cobble/mossy 同族）、hardness=1.5（同 stone 量级，需镐）、
+    //   toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落）、dropId=自身（破石砖掉石砖方块，可放回）、
+    //   dropCount=1、maxStack=64。各面贴图=stone_brick(128)（石质灰底 + 砖块缝纹网格）。音色归 GroupStone。
+    //   worldgen placeStronghold 要塞墙体 / 走廊 / 房间围栏主体。进创造调色板。
+    /* stone_brick  */ {int(BlockRegistry::StoneBrick),       128,128,128,128, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::StoneBrick),     1, 64, "stone_brick",  "石砖"},
+    //   石砖台阶（StoneBrickSlab）：半高（上/下半）。复用既有异形方块系统（ShapeSlab + PartialBlockGeometry
+    //   几何），仅换石砖贴图（tile 128）+ 石质属性。solid=false（非整立方 → 不挡邻居面剔除，同木/圆石半砖）、
+    //   hardness=1.5、Pickaxe、requiresTool=true、minTier1、dropId=自身、dropCount=1、maxStack=64。
+    //   state bit0=上半(1)/下半(0)（与 WoodSlab / CobbleSlab 同编码）。经 isSlab 谓词并入异形路由（段外）。
+    /* stone_brick_slab */ {int(BlockRegistry::StoneBrickSlab),   128,128,128,128, false, BlockRegistry::ShapeSlab,   1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::StoneBrickSlab), 1, 64, "stone_brick_slab", "石砖台阶"},
+    //   石砖楼梯（StoneBrickStairs）：整步 + 背墙。复用既有异形方块系统（ShapeStairs + PartialBlockGeometry
+    //   几何），仅换石砖贴图（tile 128）+ 石质属性。solid=false、hardness=1.5、Pickaxe、requiresTool=true、
+    //   minTier1、dropId=自身、dropCount=1、maxStack=64。state[1:0]=朝向 bit2=倒置（与 WoodStairs / CobbleStairs
+    //   同编码）。经 isStairs 谓词并入异形路由（段外）。
+    /* stone_brick_stairs */ {int(BlockRegistry::StoneBrickStairs), 128,128,128,128, false, BlockRegistry::ShapeStairs, 1.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::StoneBrickStairs), 1, 64, "stone_brick_stairs", "石砖楼梯"},
+    //   末地传送门（EndPortal）：要塞传送门房中央的传送门方块（机制等价 MC 1.0 end portal；§9 区隔：末地为
+    //   通用描述词）。**整立方不透明**——简化为满格整立方（机制等价 MC 末地传送门「传送门平面」外观，本工程
+    //   不做异形框架；激活后由 Main.qml 伪光源 + state 切换显星空黑洞视觉）。solid=false（非实体 → 不挡邻居
+    //   面剔除，与地形解耦；机制等价 MC 末地传送门无碰撞可走过）/ ShapeFull（碰撞/选中仍走整格可踩/可瞄准）、
+    //   **hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，防创造秒破传送门；同 bedrock/Water 哨兵
+    //   语义）、dropId=0 不掉落、dropCount=0、maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，填 64
+    //   与方块族一致）。各面贴图=end_portal(129)（深紫黑星空底 + 中心亮绿旋涡 + 散布星点）。音色归 GroupStone
+    //   （石质兜底）。激活：玩家持末影之眼物品右键传送门 → placeBlock useBlock 分支翻 state bit0（激活态）+
+    //   qInfo 日志（末地预热占位，不实现末地维度）。mesher 据 state bit0 切 end_portal(129)/end_portal_active(130)。
+    //   不进创造调色板（worldgen 专属；玩家经末影之眼激活交互）。
+    /* end_portal   */ {int(BlockRegistry::EndPortal),         129,129,129,129, false, BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "end_portal",   "末地传送门"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -590,6 +619,13 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   独立 id 故取 cobble id 4 近似）；dispenser id 23（1.0 存在）。
     /* mossy_cobble            */ 4,  // t486 苔石 → MC 1.0 cobble id 4（mossy 为 data 2 变体，独立 id 故取 cobble 近似）
     /* dispenser               */ 23, // t486 发射器 → MC 1.0 dispenser id 23
+    // t487 要塞结构方块 → MC 1.0 对齐：stone brick id 98（1.0 存在）；stone brick slab/stairs 为 stone slab id 44 /
+    //   stairs id 67（1.0 仅以 metadata 分变体，独立 id 故取近似）；end portal frame id 120 / end portal id 119
+    //   （1.0 末地传送门相关）—— 本工程 EndPortal 简化为整立方传送门方块，取 end portal id 119。
+    /* stone_brick             */ 98,  // t487 石砖 → MC 1.0 stone brick id 98
+    /* stone_brick_slab        */ 44,  // t487 石砖台阶 → MC 1.0 stone slab id 44（metadata 5 = stone brick；统一取 slab id）
+    /* stone_brick_stairs      */ 67,  // t487 石砖楼梯 → MC 1.0 stairs id 67（1.0 楼梯含木/石/cobble/brick 统一 id）
+    /* end_portal              */ 119, // t487 末地传送门 → MC 1.0 end portal id 119
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -623,10 +659,11 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
     if (blockId == CobbleSlab || blockId == CobbleStairs
         || blockId == CobbleFence || blockId == CobblePressurePlate) return true; // t412 段外圆石变体
     if (blockId == SpruceSlab || blockId == SpruceFence || blockId == SpruceDoor) return true; // t466 段外云杉木制品（与 WoodSlab/WoodFence/WoodDoor 同几何）
+    if (blockId == StoneBrickSlab || blockId == StoneBrickStairs) return true; // t487 段外石砖台阶/楼梯（与 WoodSlab/WoodStairs 同几何）
     return blockId >= FirstPartial && blockId <= LastPartial;
 }
-bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab || blockId == SpruceSlab; }
-bool BlockRegistry::isStairs(quint8 blockId)         { return blockId == WoodStairs || blockId == CobbleStairs; }
+bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab || blockId == SpruceSlab || blockId == StoneBrickSlab; }
+bool BlockRegistry::isStairs(quint8 blockId)         { return blockId == WoodStairs || blockId == CobbleStairs || blockId == StoneBrickStairs; }
 bool BlockRegistry::isFence(quint8 blockId)          { return blockId == WoodFence || blockId == CobbleFence || blockId == SpruceFence; }
 bool BlockRegistry::isPressurePlate(quint8 blockId)  { return blockId == WoodPressurePlate || blockId == CobblePressurePlate; }
 
@@ -642,16 +679,18 @@ bool BlockRegistry::isDoor(quint8 blockId)
 //   满格整立方 → 其半砖（破坏掉落）。非半砖 / 非双砖源 → Air / 0（兜底）。
 quint8 BlockRegistry::slabFullBlock(quint8 slabId)
 {
-    if (slabId == WoodSlab)   return Planks;
-    if (slabId == CobbleSlab) return Cobble;
-    if (slabId == SpruceSlab) return SprucePlanks;
+    if (slabId == WoodSlab)       return Planks;
+    if (slabId == CobbleSlab)     return Cobble;
+    if (slabId == SpruceSlab)     return SprucePlanks;
+    if (slabId == StoneBrickSlab) return StoneBrick; // t487 石砖双半砖合并 → 石砖满格
     return Air;
 }
 quint8 BlockRegistry::fullBlockSlabDrop(quint8 fullId)
 {
-    if (fullId == Planks)       return WoodSlab;
-    if (fullId == Cobble)       return CobbleSlab;
-    if (fullId == SprucePlanks) return SpruceSlab;
+    if (fullId == Planks)           return WoodSlab;
+    if (fullId == Cobble)           return CobbleSlab;
+    if (fullId == SprucePlanks)     return SpruceSlab;
+    if (fullId == StoneBrick)       return StoneBrickSlab; // t487 石砖满格双砖源 → 破块掉 2 石砖台阶
     return 0;
 }
 
@@ -741,6 +780,14 @@ bool BlockRegistry::isDispenser(quint8 blockId)
     return blockId == Dispenser;
 }
 
+// t487 末地传送门统一谓词（单一权威）：blockId == EndPortal 即末地传送门。供 PlayerController placeBlock
+//   useBlock 分支判定「右键命中格是否末地传送门 → 持末影之眼激活」（避免各处硬编码 id 判定漂移，同 isLadder
+//   单 id 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来追加变体时一处同步）。
+bool BlockRegistry::isEndPortal(quint8 blockId)
+{
+    return blockId == EndPortal;
+}
+
 // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台加成
 //   计算：扫切比雪夫半径 2 内书架数 ≤15）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移（同 isLadder
 //   单 id 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来追加书架变体时一处同步）。
@@ -809,6 +856,8 @@ float BlockRegistry::iceSlipApproach(quint8 blockId)
 //   （合=水平薄板顶站立 / 开=铰链侧整高竖直板顶站立 —— 「半门 / 1 格高 ledge」，玩家立于板顶 + 蹲行走）。
 bool BlockRegistry::isCollidable(quint8 blockId, quint8 state)
 {
+    Q_UNUSED(state); // 开合态由 shapeBoxes 内部解码（shape 决定碰撞族；state 仅对 door/trapdoor 精确 AABB 用，
+                     //   shapeBoxes 内部读 state，本函数只需 shape 族判定）→ 避免 -Wextra unused-parameter。
     // t444 睡莲薄叶可踩（spec「可在上面走 / 水上行走辅助」）：shape=ShapeNone（selection 空 / 不挡邻居面剔除 /
     //   不遮光 / 不进 heightmap），但碰撞当可踩实体（collisionAABBs 特例返 cell 底薄板）。isCollidable 须与
     //   collisionAABBs 一致返 true，否则 hasGroundBelowAt（脚底支撑复探，读 isCollidable）会判睡莲「无支撑」→
@@ -1017,6 +1066,7 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
     case CobbleSlab:   return 7;                      // t412 圆石台阶半遮光（同 WoodSlab，半高占空比 0.5）
     case SpruceSlab:   return 7;                      // t466 云杉台阶半遮光（同 WoodSlab/CobbleSlab，半高占空比 0.5）
+    case StoneBrickSlab: return 7;                    // t487 石砖台阶半遮光（同 WoodSlab/CobbleSlab/SpruceSlab，半高占空比 0.5）
     case Farmland:     return 15;                     // t408 耕地 solid=false（矮盒渲染）但仍是 opaque 土块 → 满遮光
     case Cactus:       return 15;                     // t445 仙人掌 solid=false（0.8 细柱渲染）但仍是 opaque 实体植物 → 满遮光
     default:           return 0;                      // 其余全透（air/torch/water/stairs/fence/plate/door/cross）
@@ -1029,6 +1079,8 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
     switch (blockId) {
     case Torch: return 14;  // 既有：火把方块光种子 14（radius14 泛光）
     case Lava:  return 15;  // t351：岩浆方块光种子 15（地底发光照亮洞穴；MC 1.0 岩浆光 level 15）
+    case EndPortal: return 10; // t487：末地传送门方块光种子 10（地下黑暗要塞中的星绿旋涡泛光，玩家可见传送门；
+                               //    机制等价 MC 1.0 末地传送门自发光显眼，非 MC 精确光级，仅照亮自身 + 近旁）
     default:    return 0;   // 其余不自发光
     }
 }
@@ -1129,6 +1181,9 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Rail: // t484 铁轨 → 石质音色（金属质敲击，最接近 MC 1.0 铁轨 metal SoundType）
     case MossyCobble: // t486 苔石 → 石质音色（长苔圆石，同 cobble 族）
     case Dispenser: // t486 发射器 → 石质音色（石质机关盒，同 furnace 族）
+    case StoneBrick: // t487 石砖 → 石质音色（石质整立方，同 stone 族）
+    case StoneBrickSlab: case StoneBrickStairs: // t487 石砖台阶/楼梯 → 石质音色（同 stone 族）
+    case EndPortal: // t487 末地传送门 → 石质兜底音色（不可破，仅创造敲响兜底）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

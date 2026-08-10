@@ -138,7 +138,13 @@ public:
     //       铁傀儡重拳）；死亡掉落铁锭 / 罂粟（呈现层 onMobDied 据 mobType 分流，机制等价 MC 铁傀儡掉落铁锭 + 花）。
     //   §9 原创：名称 / 模型（南瓜头 + 方块身，Main.qml 用 BlockCube 贴图堆叠）/ 贴图全原创，仅机制对齐「搭建
     //   造物 + 防御攻击敌对」。计入实体槽（spawnMobCore 走 kCap 上限，勿超 64）。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13 };
+    //   t487 银鱼（Silverfish）= MobSilverfish(14)：机制等价 MC 1.0 银鱼——小型虫类敌对生物，要塞（Stronghold）
+    //   银鱼刷怪笼周期刷出。hostile=true → 走 tickHostileLife（白天暴露日光燃烧 / 黑暗刷怪调度）+ 默认 aiHostile
+    //   （detect→chase→melee attack，近战追击玩家，区别于 Shambler 仅为小体型 + 快速）。§9 原创：名称 / 模型
+    //   （MobModel 小型虫形：分节躯干 + 前伸小头 + 多对短腿）/ 贴图（程序生成灰白甲壳 + 体节纹）全原创，仅机制
+    //   对齐「小虫群涌追击」。要塞 placeStronghold 在传送门房放银鱼刷怪笼（Spawner state 带 SpawnerStateSilverfishFlag）→
+    //   tickSpawners 据该 flag 刷 Silverfish（区别于地牢 Shambler/Bones）。Entity hostilesCount / hostileNearby 均含 Silverfish。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14 };
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs

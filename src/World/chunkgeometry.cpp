@@ -267,6 +267,13 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
             return BlockRegistry::def(block).topTile;     // farmland_dry(26) —— 湿润由顶点色暗化体现
         return BlockRegistry::def(block).sideTile;        // 侧/底 = dirt(2)
     }
+    // t487 末地传送门激活态：state bit0（EndPortalStateActiveFlag）翻 → 贴图切换 end_portal(129) →
+    //   end_portal_active(130)（激活后中心旋涡更亮 + 白绿高光，玩家放末影之眼后的可见反馈）。
+    //   各面同贴图（整立方不透明简化，机制等价 MC 末地传送门「传送门平面」外观）。玩家持末影之眼右键传送门 →
+    //   placeBlock useBlock 分支翻 state bit0（末地预热占位：仅激活效果 + 日志，不实现末地维度）。
+    if (block == BlockRegistry::EndPortal) {
+        return (state & BlockRegistry::EndPortalStateActiveFlag) != 0 ? 130 : 129;
+    }
     return BlockRegistry::tileIndex(block, BlockRegistry::Face(face));
 }
 

@@ -244,6 +244,16 @@ public:
     //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘
     //   MaterialIcon；与 paper / book / lapis 等近期材料段物品同模式，不扩 kMcMaterialId 表）。
     static constexpr int GunpowderId    = 0x239; // 火药：杀潜行者掉落；TNT 合成原料（5 火药 + 4 沙 → 1 TNT，t485）
+    // t487 末影之眼（EndEye）：材料段 0x23A。机制等价 MC 1.0 末影之眼（ender eye）—— 持本物品右键末地传送门
+    //   （EndPortal 方块）→ placeBlock useBlock 分支翻传送门 state bit0（激活态）+ qInfo 日志（末地预热占位：
+    //   仅激活效果 + 日志，不实现末地维度，spec「实际传送末地可推迟为占位/告警」）。可堆叠 64；非方块（材料段）
+    //   → 右键不走放置，走 useBlock 末地传送门激活分支（同桶 / 食物：在 selectedBlock Air 守卫之前分流）。
+    //   MaterialIcon 自绘末影之眼图标（绿蓝球体 + 中心瞳孔）。**获得途径**：要塞（Stronghold）宝藏箱战利品
+    //   （LootTable::strongholdChestPool，t487）—— 末影之眼是要塞稀有掉落，玩家探索要塞开箱获得用于激活传送门。
+    //   创造调色板补全（hotbar creativeMaterials，便于测试激活）。无合成配方（同末影珍珠 / 烈焰粉，本工程无
+    //   下界 / 末影人故不作合成链；机制等价 MC 末影之眼 = 末影珍珠 + 烈焰粉合成，但前置生物留后续）。
+    //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘）。
+    static constexpr int EndEyeId       = 0x23A; // 末影之眼：要塞宝藏箱战利品；右键末地传送门激活（占位，t487）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

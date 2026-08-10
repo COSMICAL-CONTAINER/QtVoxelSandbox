@@ -641,7 +641,43 @@ public:
         //   MC 1.0 发射器射箭）。每发射器 per-dispenser 冷却（防每帧刷屏）。worldgen placeJungleTemple 把发射器
         //   嵌入走廊石壁（朝向走廊中央的压力板）。进创造调色板（玩家可取用 / 放置 / 自建机关）。
         Dispenser       = 107, // 发射器：踩压力板触发的射箭机关方块（机制等价 MC 1.0 dispenser）；丛林神殿陷阱
-        Count           = 108, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶/楼梯 / 末地传送门；名称 / 贴图
+        //   全原创自绘 §9a；§9 区隔：末地/末影之眼为通用描述词，机制对齐非专名照搬）：
+        //   石砖（StoneBrick）：石质整立方装饰方块（要塞墙体主体；机制等价 MC 1.0 stone brick）。整立方 opaque
+        //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 stone/cobble/mossy 同族）、
+        //   hardness=1.5（同 stone 量级，需镐）、toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落）、
+        //   dropId=自身（破石砖掉石砖方块，可放回）、dropCount=1、maxStack=64。各面贴图=stone_brick(128)
+        //   （石质灰底 + 砖块缝纹网格，原创自绘 §9a；tools/build_stone_brick.py 程序生成）。音色归 GroupStone。
+        //   worldgen placeStronghold 要塞墙体 / 走廊 / 房间围栏主体。进创造调色板（玩家可取用 / 放置）。
+        StoneBrick      = 108, // 石砖：要塞墙体主体（机制等价 MC 1.0 stone brick）；石质整立方 + 砖纹贴图
+        //   石砖台阶（StoneBrickSlab）：半高（上/下半）。复用既有异形方块系统（ShapeSlab + PartialBlockGeometry
+        //   几何），仅换石砖贴图（tile 128）+ 石质属性。solid=false（非整立方 → 不挡邻居面剔除，同木/圆石半砖）、
+        //   hardness=1.5、Pickaxe、requiresTool=true、minTier1、dropId=自身、dropCount=1、maxStack=64。
+        //   state bit0=上半(1)/下半(0)（与 WoodSlab / CobbleSlab 同编码）。经 isSlab 谓词并入异形路由（段外，
+        //   同 CobbleSlab 模式）。mesher PartialBlockGeometry::append 的 slab case 内 tile 由 tileIndex 取本方块
+        //   sideTile=stone_brick(128)。音色归 GroupStone。worldgen placeStronghold 走廊 / 楼梯井装饰；进创造调色板。
+        StoneBrickSlab  = 109, // 石砖台阶：半高（机制等价 MC 1.0 stone brick slab）；复用 ShapeSlab 几何 + 石砖贴图
+        //   石砖楼梯（StoneBrickStairs）：整步 + 背墙。复用既有异形方块系统（ShapeStairs + PartialBlockGeometry
+        //   几何），仅换石砖贴图（tile 128）+ 石质属性。solid=false、hardness=1.5、Pickaxe、requiresTool=true、
+        //   minTier1、dropId=自身、dropCount=1、maxStack=64。state[1:0]=朝向 bit2=倒置（与 WoodStairs / CobbleStairs
+        //   同编码）。经 isStairs 谓词并入异形路由（段外，同 CobbleStairs 模式）。音色归 GroupStone。
+        //   worldgen placeStronghold 楼梯井；进创造调色板。
+        StoneBrickStairs= 110, // 石砖楼梯：整步+背墙（机制等价 MC 1.0 stone brick stairs）；复用 ShapeStairs 几何
+        //   末地传送门（EndPortal）：要塞传送门房中央的传送门方块（机制等价 MC 1.0 end portal；§9 区隔：末地为
+        //   通用描述词，机制对齐非 MC 专名照搬）。**整立方不透明**——简化为满格整立方（机制等价 MC 1.0 末地传送门
+        //   的「传送门平面」外观，本工程不做异形框架；激活后由 Main.qml 伪光源 + state 切换显星空黑洞视觉）。
+        //   solid=false（非实体 → 不挡邻居面剔除，与地形解耦；机制等价 MC 末地传送门无碰撞可走过）/ ShapeFull
+        //   （碰撞 / 选中仍走整格可踩 / 可瞄准）、**hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，
+        //   防创造秒破传送门；同 bedrock / Water 哨兵语义）、dropId=0 不掉落、dropCount=0、maxStack=64
+        //   （worldgen 专属 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图=end_portal(129)
+        //   （深紫黑星空底 + 中心亮绿旋涡 + 散布星点，原创自绘 §9a；tools/build_end_portal.py 程序生成）。
+        //   音色归 GroupStone（石质兜底）。**激活机制**：玩家持末影之眼物品（EndEyeId）右键传送门 → placeBlock
+        //   useBlock 分支检测命中 EndPortal + 持 EndEyeId → 翻 state bit0（激活态）+ emit swingArm + qInfo 日志
+        //   （末地预热占位：仅激活效果 + 日志，不实现末地维度，spec「实际传送末地可推迟为占位/告警」）。
+        //   mesher 据 state bit0 切贴图（未激活=end_portal(129) / 激活=end_portal_active(130) 同星空但中心旋涡更亮）。
+        //   不进创造调色板（worldgen 专属；玩家经末影之眼激活交互，非放置）。state 经 m_states 落 SQLite round-trip 保真。
+        EndPortal       = 111, // 末地传送门：要塞传送门房中央（机制等价 MC 1.0 end portal）；末影之眼右键激活（占位）
+        Count           = 112, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -702,6 +738,10 @@ public:
     //   避免各处硬编码 Dispenser id 判定（同 isTnt / isLadder 单 id 模式）。单 id 故裸相等判定，仍提供谓词作
     //   单一权威（未来追加发射器变体时一处同步）。
     static bool isDispenser(quint8 blockId);
+    // t487 要塞结构方块统一谓词（单一权威）：blockId == EndPortal 即末地传送门。供 PlayerController placeBlock
+    //   useBlock 分支判定「右键命中格是否末地传送门 → 持末影之眼激活」（避免各处硬编码 id 判定漂移，同 isLadder
+    //   单 id 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来追加变体时一处同步）。
+    static bool isEndPortal(quint8 blockId);
     // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台
     //   加成计算：扫切比雪夫半径 2 内书架数 ≤15）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移
     //   （同 isLadder 单 id 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加书架变体时一处同步）。
@@ -1104,7 +1144,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 128;
+    static constexpr int AtlasTileCount = 131;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
@@ -1249,6 +1289,24 @@ public:
     //   零回归（同 ChestStateDungeonFlag bit2 / Mineshaft bit3 / Pyramid bit4 / torch marker 同族）。state 经
     //   m_states 落 SQLite round-trip 保真（旧存档箱子 state 无 bit5 → 非丛林神殿箱，不填充，安全）。
     static constexpr quint8 ChestStateJungleFlag = 0x20;
+    // t487 箱子 state bit6（值 64）=「要塞生成箱」标记（worldgen placeStronghold 写入；玩家放置的箱子 /
+    //   地牢箱 / 矿井箱 / 神殿箱 / 丛林神殿箱无此位）。仅供 World::isStrongholdChest 读 → Main.qml.openChest
+    //   据此判「是否首开填充要塞战利品」（LootTable::strongholdChestPool：末影之眼 / 骨头 / 腐肉 / 铁锭 /
+    //   青金石 / 红石 / 钻石 / 附魔书等，区别于其它结构表）。**不影响** chestFrontFace（后者只读低 2 位 state&3，
+    //   bit6 被忽略 → 朝向编码零回归）；collisionAABBs / selectionAABBs 亦不读 chest state → 复用 bit6 作 marker
+    //   零回归（同 ChestStateDungeonFlag bit2 / Mineshaft bit3 / Pyramid bit4 / Jungle bit5 / torch marker 同族）。
+    //   state 经 m_states 落 SQLite round-trip 保真（旧存档箱子 state 无 bit6 → 非要塞箱，不填充，安全）。
+    static constexpr quint8 ChestStateStrongholdFlag = 0x40;
+    // t487 末地传送门 state bit0（值 1）=「已激活」标记（玩家持末影之眼右键传送门翻此位）。mesher 据 bit0 切
+    //   end_portal(129) / end_portal_active(130) 贴图（激活后中心旋涡更亮）。state 经 m_states 落 SQLite
+    //   round-trip 保真。旧存档 / worldgen 传送门 state=0 → 未激活（玩家需放末影之眼激活）。
+    static constexpr quint8 EndPortalStateActiveFlag = 0x01;
+    // t487 刷怪笼 state bit0（值 1）=「银鱼刷怪笼」标记（worldgen placeStronghold 写入；地牢刷怪笼 state=0
+    //   无此位）。EntityManager::tickSpawners 据本位分流：bit0=1 → spawn Silverfish（要塞银鱼）；bit0=0 →
+    //   spawn Shambler/Bones（地牢默认）。**不影响** spawner 其它行为（玩家破坏即停止刷怪由 blockAt!=Spawner
+    //   自然实现，与 state 无关）。state 经 m_states 落 SQLite round-trip 保真（旧存档 spawner state=0 → 地牢
+    //   默认刷怪，非要塞银鱼，安全）。
+    static constexpr quint8 SpawnerStateSilverfishFlag = 0x01;
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度

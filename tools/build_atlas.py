@@ -257,6 +257,18 @@ TILES = [
     "default_dispenser_front",    # 127 dispenser_front（发射器前面（排出口所朝面）贴图；石质灰底 + 中央暗腔排出口；
                                   #    Dispenser 前面=本 tile（mesher 据 state 选，同熔炉 tileFor 分支）；
                                   #    tools/build_dispenser.py 程序生成原创像素图）
+    # t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 末地传送门；名称 / 贴图全原创自绘 §9a）。
+    #   各由独立 build_*.py 程序生成原创像素图（石砖走 culled 立方面路径；末地传送门 solid=false 整立方）。
+    "default_stone_brick",        # 128 stone_brick（石砖各面同贴图；石质灰底 + 砖块缝纹网格；StoneBrick 各面=本 tile；
+                                  #    StoneBrickSlab/StoneBrickStairs 经 tileIndex 取 sideTile 共享本 tile；
+                                  #    机制等价 MC 1.0 stone brick——要塞墙体主体；tools/build_stone_brick.py 程序生成）
+    "default_end_portal",         # 129 end_portal（末地传送门未激活态各面贴图；深紫黑星空底 + 中心暗绿旋涡；EndPortal
+                                  #    各面=本 tile，mesher 据 state bit0 选 129(未激活)/130(激活)；机制等价 MC 1.0 end portal
+                                  #    ——要塞传送门房中央；§9 区隔末地为通用描述词；tools/build_end_portal.py 程序生成）
+    "default_end_portal_active",  # 130 end_portal_active（末地传送门激活态各面贴图；深紫黑星空底 + 中心亮绿旋涡 + 白绿
+                                  #    高光；玩家持末影之眼右键传送门翻 state bit0 → mesher 切本 tile 显激活视觉；
+                                  #    不绑定方块 id（EndPortal def 各面=129），属 mesher 据 state 的呈现选择，非方块属性；
+                                  #    tools/build_end_portal.py 程序生成）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

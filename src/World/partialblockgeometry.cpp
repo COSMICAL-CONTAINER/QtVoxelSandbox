@@ -162,7 +162,8 @@ int PartialBlockGeometry::append(
     switch (blockId) {
     case BlockRegistry::WoodSlab:
     case BlockRegistry::CobbleSlab: // t412 圆石台阶（与 WoodSlab 同几何，tile 由 tileIndex 取本方块 sideTile=cobble）
-    case BlockRegistry::SpruceSlab: { // t466 云杉台阶（与 WoodSlab 同几何，tile=spruce_planks）
+    case BlockRegistry::SpruceSlab: // t466 云杉台阶（与 WoodSlab 同几何，tile=spruce_planks）
+    case BlockRegistry::StoneBrickSlab: { // t487 石砖台阶（与 WoodSlab 同几何，tile=stone_brick）
         // 半高：state bit0=上半 → y[0.5,1]；下半 → y[0,0.5]。全 footprint。
         const bool upper = (state & 1) != 0;
         const float y0 = upper ? 0.5f : 0.0f, y1 = upper ? 1.0f : 0.5f;
@@ -170,7 +171,8 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::WoodStairs:
-    case BlockRegistry::CobbleStairs: { // t412 圆石楼梯（与 WoodStairs 同几何）
+    case BlockRegistry::CobbleStairs: // t412 圆石楼梯（与 WoodStairs 同几何）
+    case BlockRegistry::StoneBrickStairs: { // t487 石砖楼梯（与 WoodStairs 同几何，tile=stone_brick）
         // 楼梯 = 整步（全 footprint 半高）+ 背墙（朝向对侧半 footprint 的另半高）。
         //   state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 → 背墙在对侧 -d 半）。
         //   t147 state bit2=上下倒置：正置整步在下层(y 0..0.5)+背墙在上层(y 0.5..1)；

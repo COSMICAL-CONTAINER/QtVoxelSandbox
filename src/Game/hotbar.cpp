@@ -56,6 +56,11 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::TntBlock:      return "icon_tnt.png";           // t485 TNT 立方体图标（各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
     case BlockRegistry::MossyCobble:   return "icon_mossy_cobble.png";  // t486 苔石立方体图标（各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
     case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486 发射器立方体图标（顶=排出口俯视 / 侧=石质边框 / 前=暗腔排出口；丛林神殿陷阱机关）
+    // t487 要塞结构方块图标：石砖（立方体 3D）/ 石砖台阶（3D 半高盒）/ 石砖楼梯（3D L 阶）。同圆石变体图标流程，
+    //   仅 fill 换 default_stone_brick（砖纹）。tools/build_cube_icons.py 程序生成；与圆石变体形状一致但砖纹不同。
+    case BlockRegistry::StoneBrick:       return "icon_stone_brick.png";       // 石砖：3D 立方体（顶+两侧砖纹）
+    case BlockRegistry::StoneBrickSlab:   return "icon_stone_brick_slab.png";  // 石砖台阶：3D 半高盒（砖纹）
+    case BlockRegistry::StoneBrickStairs: return "icon_stone_brick_stairs.png";// 石砖楼梯：3D L 阶（背墙 + 整步，砖纹）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
     case BlockRegistry::SpruceLog:    return "icon_spruce_log.png";    // t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮）
@@ -452,7 +457,11 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::BookId),            // 书：3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料（t473）
         // t485 火药（机制等价 MC 1.0 gunpowder）：杀潜行者（Stalker）掉落；TNT 合成原料（5 火药 + 4 沙 → 1 TNT）。
         //   创造调色板补全便于测试 TNT 合成 / 引爆。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘火药图标。
-        int(RecipeRegistry::GunpowderId)        // 火药：杀潜行者掉落；TNT 合成原料
+        int(RecipeRegistry::GunpowderId),       // 火药：杀潜行者掉落；TNT 合成原料
+        // t487 末影之眼（机制等价 MC 1.0 ender eye）：要塞宝藏箱战利品 + 创造调色板补全（便于测试激活传送门）。
+        //   可堆叠 64；非方块（材料段）→ 右键不走方块放置，走 useBlock 末地传送门激活分支（placeBlock 检测命中
+        //   EndPortal + 持末影之眼 → 翻传送门 state bit0 激活）。MaterialIcon 自绘末影之眼图标（绿蓝球体 + 瞳孔）。
+        int(RecipeRegistry::EndEyeId)           // 末影之眼：要塞宝藏箱战利品；右键末地传送门激活（t487）
     };
 }
 
@@ -589,7 +598,11 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::TntBlock),                                   // TNT（可引爆爆炸物；沙漠神殿陷阱；配方 5 火药+4 沙→1）
              // t486 丛林神殿结构方块（机制等价 MC 1.0 丛林神殿 jungle temple 的苔石 / 发射器；worldgen 散布 / 创造取用）。
              int(BlockRegistry::MossyCobble),                                // 苔石（长苔圆石变体；丛林神殿主体；可放置）
-             int(BlockRegistry::Dispenser) };                                // 发射器（踩压力板触发的射箭机关；丛林神殿陷阱；可放置 / 自建机关）
+             int(BlockRegistry::Dispenser),                                  // 发射器（踩压力板触发的射箭机关；丛林神殿陷阱；可放置 / 自建机关）
+             // t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶 / 石砖楼梯；worldgen 散布 / 创造取用）。
+             int(BlockRegistry::StoneBrick),                                 // 石砖（石质整立方 + 砖纹；要塞墙体主体；可放置）
+             int(BlockRegistry::StoneBrickSlab),                             // 石砖台阶（半高；复用 ShapeSlab 几何 + 石砖贴图；可放置）
+             int(BlockRegistry::StoneBrickStairs) };                         // 石砖楼梯（整步+背墙；复用 ShapeStairs 几何 + 石砖贴图；可放置）
 }
 
 QString Hotbar::iconSourceAt(int slot) const
@@ -672,6 +685,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::BookId)          return QStringLiteral("书");     // 3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料
         // t485 火药（机制等价 MC 1.0 gunpowder）：杀潜行者（Stalker，机制等价 MC 苦力怕）掉落；TNT 合成原料（5 火药 + 4 沙 → 1 TNT）。
         if (blockId == RecipeRegistry::GunpowderId)   return QStringLiteral("火药"); // 杀潜行者掉落；TNT 合成原料
+        // t487 末影之眼（机制等价 MC 1.0 ender eye）：要塞宝藏箱战利品；右键末地传送门激活（末地预热占位）。
+        //   名称用通用词「末影之眼」、零 MC 专名（§9 区隔）。
+        if (blockId == RecipeRegistry::EndEyeId)      return QStringLiteral("末影之眼"); // 要塞宝藏箱战利品；激活末地传送门
         // t299 敌对 mob 死亡掉落物：杀骸骨 / 蹒跚者 / 蜘蛛产出（机制等价 MC 1.0 敌对生物掉落，名称用通用词、零 MC 专名 §9）。
         if (blockId == RecipeRegistry::BoneId)        return QStringLiteral("骨头"); // 杀骸骨掉落
         if (blockId == RecipeRegistry::RottenFleshId) return QStringLiteral("腐肉"); // 杀蹒跚者掉落

@@ -107,6 +107,15 @@ public:
         return blockAt(x, y, z) == BlockRegistry::Chest
             && (stateAt(x, y, z) & BlockRegistry::ChestStateJungleFlag) != 0;
     }
+    // t487 该格箱子是否「要塞生成箱」（worldgen placeStronghold 写入的箱子，state 带
+    //   ChestStateStrongholdFlag bit6；玩家放置的箱子 / 地牢箱 / 矿井箱 / 神殿箱 / 丛林神殿箱无此位）。
+    //   Main.qml.openChest 据此判「是否首开填充要塞战利品」（LootTable::strongholdChestPool：末影之眼 / 骨头 /
+    //   腐肉 / 铁锭 / 青金石 / 红石 / 钻石 / 附魔书等）。分层（PLAN §2）：纯只读谓词（blockAt + stateAt +
+    //   BlockRegistry），不写栅格。非箱子格 → false。
+    Q_INVOKABLE bool isStrongholdChest(int x, int y, int z) const {
+        return blockAt(x, y, z) == BlockRegistry::Chest
+            && (stateAt(x, y, z) & BlockRegistry::ChestStateStrongholdFlag) != 0;
+    }
     // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
     //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/
     //   trapdoor，state 解码同 partialblockgeometry）。玩家碰撞迭代玩家 AABB 覆盖的所有格，逐 sub-AABB
@@ -590,6 +599,24 @@ private:
     //   **宝藏箱内容**：Chest 物品存 ChestStore，首开填充由 isJungleTempleChest 判定 → jungleTempleChestPool
     //   （骨头 / 腐肉 / 铁 / 金 / 钻石 / 箭 / 附魔书等）。
     void placeJungleTemple();
+    // t487 要塞（spec「地下深（Y<30）生成：石砖迷宫 + 末地传送门房（末地传送门方块 + 12 末影之眼激活 → 末地
+    //   预热，末地本身可推迟）+ 图书馆（书架，附魔加成）+ 银鱼刷怪笼」；机制等价 MC 1.0 要塞 stronghold）。
+    //   placeJungleTemple 之后、fillWater 之前，地下深处（y ∈ [kBedrockTop+4, kStrongholdMaxY=30]，spec「Y<30」）
+    //   确定性散布（grid 40，比矿井 36 略稀 → 要塞稀有；PLAN §2-K，仅扫候选格 → 不全图扫描）：选要塞中心点
+    //   （hashColumn + seed 偏移）→ 生成一个 13×13×5 石砖地下迷宫：
+    //     - 外圈石砖墙（StoneBrick 整立方围合）+ 地板 / 顶板（StoneBrick）→ 封闭黑暗（机制等价 MC 1.0 要塞石砖
+    //       地牢氛围）；
+    //     - 内部迷宫走廊（Air，石砖墙隔出十字形走道）+ 角落房间；
+    //     - **图书馆**（一间 5×3×5 房间）：四壁内侧摆 Bookshelf（t474 书架，附魔台加成来源）+ 中央石砖台阶 /
+    //       石砖楼梯（楼梯井装饰）→ 探索者可在附魔台旁补书架加成（机制等价 MC 1.0 要塞图书馆书架墙）；
+    //     - **末地传送门房**（中央 7×7×3 房间）：地板中央 3×3 EndPortal（末地传送门方块，未激活 state=0）+
+    //       周界 StoneBrick 墙 + 角落一只 ChestStateStrongholdFlag 标记的战利品箱（t487 首开填要塞战利品含末影之眼）；
+    //     - **银鱼刷怪笼**（传送门房墙内 / 走廊）：Spawner + SpawnerStateSilverfishFlag state 标记 → tickSpawners
+    //       据 flag 刷 Silverfish（机制等价 MC 1.0 要塞银鱼刷怪笼）；
+    //     - 走廊交叉处散布 Cobweb 蜘蛛网（阴暗地下装饰，复用 t484 矿井蛛网机制）。
+    //   纯函数于 seed（hashColumn / hashVoxel）→ 同 seed 同要塞分布（PLAN §2-K）。**宝藏箱内容**：Chest 物品存
+    //   ChestStore，首开填充由 isStrongholdChest 判定 → strongholdChestPool（含末影之眼，激活传送门关键物品）。
+    void placeStronghold();
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
     //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
     //   （surfaceY-1 / surfaceY-2 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶 -1，

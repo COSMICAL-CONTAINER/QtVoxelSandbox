@@ -476,6 +476,25 @@ void MobModel::rebuild()
         addBox( 0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
         addBox( 0.00f,  0.18f,  0.36f, 0.04f, 0.05f, 0.16f, verts, idx, bMin, bMax); // 长尾（身后 +Z 后伸上翘；随身体同纹）
         addLegs(-0.24f,  0.16f,  0.16f, 0.20f, 0.06f, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿
+    } else if (m_mobType == 14) {
+        // t487 Silverfish（银鱼；机制等价 MC 1.0 银鱼，§9 原创模型 + 贴图）—— 小型虫类：分节躯干 + 前伸小头 +
+        //   多对短腿（机制等价 MC 1.0 银鱼多足 + 多节体）。腿底本地 y≈−0.15 贴 collision 底面（halfH=0.15 →
+        //   Main.qml mobModelYOff=0.15−0.15=0）。walkPhase 驱动短腿摆动（缩小幅度，虫类快步频）。
+        //   hostile → EntityManager AI 自动追击玩家（默认 aiHostile 近战追击）。眼由 Main.qml delegate 补（纯色
+        //   子 Model）。mob_silverfish 贴图：灰白甲壳 + 体节横纹（build_mob.py 程序生成原创像素图）。
+        addBox( 0.00f,  0.00f,  0.00f, 0.20f, 0.12f, 0.32f, verts, idx, bMin, bMax); // 分节躯干（细长，比蜘蛛更小）
+        addBox( 0.00f,  0.00f, -0.24f, 0.14f, 0.11f, 0.10f, verts, idx, bMin, bMax); // 前伸小头（虫头部，略窄于躯干）
+        // 多对短腿（3 对沿躯干 Z 分布；每对绕躯干侧面髋枢 X 轴摆动，前后对反相 → 快步频虫类交替步态）。
+        const float sw = kLegSwingAmp * 0.6f * std::sin(m_walkPhase); // 虫腿摆幅缩 0.6（短腿快频小步）
+        // 前对（z=−0.12，前段躯干）：左 +X 外、右 −X 外。
+        addBoxRot(-0.20f, -0.075f, -0.12f, 0.06f, 0.075f, 0.04f, 0.00f, -0.12f, +sw, verts, idx, bMin, bMax);
+        addBoxRot( 0.20f, -0.075f, -0.12f, 0.06f, 0.075f, 0.04f, 0.00f, -0.12f, -sw, verts, idx, bMin, bMax);
+        // 中对（z=0.00，中段躯干）：反相于前对（交替步态）。
+        addBoxRot(-0.20f, -0.075f,  0.00f, 0.06f, 0.075f, 0.04f, 0.00f,  0.00f, -sw, verts, idx, bMin, bMax);
+        addBoxRot( 0.20f, -0.075f,  0.00f, 0.06f, 0.075f, 0.04f, 0.00f,  0.00f, +sw, verts, idx, bMin, bMax);
+        // 后对（z=+0.12，后段躯干）：同相于前对。
+        addBoxRot(-0.20f, -0.075f,  0.12f, 0.06f, 0.075f, 0.04f, 0.00f,  0.12f, +sw, verts, idx, bMin, bMax);
+        addBoxRot( 0.20f, -0.075f,  0.12f, 0.06f, 0.075f, 0.04f, 0.00f,  0.12f, -sw, verts, idx, bMin, bMax);
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）

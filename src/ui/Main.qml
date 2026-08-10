@@ -901,6 +901,11 @@ Window {
         //   钻石 / 箭 / 附魔书等）分散入随机空槽（坐标确定性 seed → 同箱同战利品）。同地牢 / 矿井 / 神殿箱机制
         //   （一份首开一次性 roll）。
         if (theWorld.isJungleTempleChest(x, y, z)) chestStore.populateJungleTempleLoot(x, y, z)
+        // t487 要塞箱首开填充战利品：worldgen placeStronghold 给要塞箱 state 置 ChestStateStrongholdFlag(bit6) →
+        //   isStrongholdChest 返 true。首开时由 LootTable::strongholdChestPool 抽 6 件（末影之眼 / 骨头 / 腐肉 /
+        //   铁锭 / 青金石 / 红石 / 钻石 / 附魔书等）分散入随机空槽（坐标确定性 seed → 同箱同战利品；末影之眼是
+        //   激活传送门的关键物品，机制等价 MC 1.0 要塞战利品）。同地牢 / 矿井 / 神殿 / 丛林神殿箱机制（一份首开一次性 roll）。
+        if (theWorld.isStrongholdChest(x, y, z)) chestStore.populateStrongholdLoot(x, y, z)
         chestOpen = true
         // t196：触发盖子翻开动画（chestLidAngle 0→全开，Behavior 平滑过渡）；chestLidPivot 据坐标 + 朝向摆位。
         chestLidAngle = kChestLidOpenAngle
@@ -1582,6 +1587,7 @@ Window {
             //   统一杀 mob 给 XP）。铁傀儡 5 XP（重型造物，同敌对量级）；雪傀儡 1-3 XP（轻型造物）。
             xpForMob[EntityManager.MobSnowGolem] = 1 + Math.floor(Math.random() * 3) // t482 雪傀儡：1-3 XP
             xpForMob[EntityManager.MobIronGolem] = 5 // t483 铁傀儡：5 XP（重型防御造物）
+            xpForMob[EntityManager.MobSilverfish] = 5 // t487 银鱼：5 XP（敌对近战小虫，同敌对量级；无常规掉落）
             const xpAmt = xpForMob[mobType]
             if (xpAmt && xpAmt > 0) xpOrbs.spawnOrb(x, y, z, xpAmt)
             // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
@@ -2742,6 +2748,9 @@ Window {
         Texture { id: mobCatBlackTex;  source: "qrc:/textures/mob_cat_black.png"; generateMipmaps: false } // t481 猫变体 0（黑）
         Texture { id: mobCatGingerTex; source: "qrc:/textures/mob_cat_ginger.png"; generateMipmaps: false } // t481 猫变体 1（姜黄）
         Texture { id: mobCatCreamTex;  source: "qrc:/textures/mob_cat_cream.png"; generateMipmaps: false } // t481 猫变体 2（奶油）
+        // t487 银鱼（Silverfish；机制等价 MC 1.0 银鱼，§9 原创）：灰白甲壳底 + 深灰体节横纹 + 暗头斑（build_mob.py
+        //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 小型虫几何（分节躯干 + 前伸小头 + 多对短腿）每面铺整张贴图。
+        Texture { id: mobSilverfishTex; source: "qrc:/textures/mob_silverfish.png"; generateMipmaps: false }
         // t421 资源包生物贴图（pack entity texture）：pack 启用且 resourcePack.mobTextureSource(mobType) 命中包内
         //   entity PNG 时，source 为 file:///<entityDir>/<mob>/<mob>.png → 各 mob delegate 把 baseColorMap 切到本
         //   Texture + MobModel.packTextured=true（几何按 T 字 UV 展开进贴图）。pack 关 / 包内无该贴图 → source 空 →
@@ -4551,6 +4560,7 @@ Window {
                         if (entMobType === EntityManager.MobSquid) return 0.46 - mobHalfH // t399 Squid 触腕底 0.46（贴 collision 底面）
                         if (entMobType === EntityManager.MobWolf) return 0.42 - mobHalfH // t480 Wolf 犬科（腿底 0.42）
                         if (entMobType === EntityManager.MobOcelot) return 0.40 - mobHalfH // t481 Ocelot/Cat 猫科（腿底 0.40）
+                        if (entMobType === EntityManager.MobSilverfish) return 0.15 - mobHalfH // t487 Silverfish 银鱼（腿底 0.15）
                         // t482/t483 防御造物：方块身 + 南瓜头堆叠 Model（不走 MobModel；局部原点 = 碰撞中心），
                         //   底部方块（腿/底雪块）底面须贴 collision 底面（= 地面）。底部方块 local y center = -halfH + 0.45
                         //   （0.45 = 底块半高）；mobModelYOff 把整组 Model 下移（halfH-0.45），使底块底面（-halfH-0.45...）
@@ -5291,6 +5301,44 @@ Window {
                             position: Qt.vector3d(0.07, -0.08, -0.51)
                             scale: Qt.vector3d(0.05, 0.05, 0.02)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                        }
+                    }
+                    // t487 Silverfish（银鱼；mobType 14）：MobModel 小型虫几何（分节躯干 + 前伸小头 + 多对短腿；
+                    //   机制等价 MC 1.0 银鱼，§9 原创模型 + 贴图）。hostile → EntityManager AI 自动追击玩家
+                    //   （默认 aiHostile 近战追击，小体型快速）。银鱼刷怪笼（要塞，Spawner state 带
+                    //   SpawnerStateSilverfishFlag）周期刷出。受击红闪。mob_silverfish 贴图（灰白甲壳 + 体节纹）。
+                    //   mobModelYOff=0.15−halfH（腿底 0.15 贴 collision 底面）；halfH=0.15 → offset=0。
+                    Model {
+                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSilverfish
+                        geometry: MobModel {
+                            mobType: 14
+                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                        }
+                        position: Qt.vector3d(0, mobModelYOff, 0)
+                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColorMap: mobSilverfishTex
+                            baseColor: {
+                                entityManager.revision
+                                const tl = terrainLight(worldClock.skyLight)
+                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                return tl
+                            }
+                        }
+                        // 银鱼眼（2 颗黑点；头前侧。MobModel 头心 (0,0.00,-0.24) 半 (0.14,0.11,0.10) → 前面 z=-0.34；
+                        //   眼贴头前侧 z=-0.35（略凸出防与头面 z-fight，同 t52 贴脸）。受击红闪时身体变红 → 黑眼仍辨。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.05, 0.00, -0.35)
+                            scale: Qt.vector3d(0.03, 0.03, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.05, 0.00, -0.35)
+                            scale: Qt.vector3d(0.03, 0.03, 0.02)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
                         }
                     }
                     // t398 Chicken（鸡；mobType 8）：MobModel 小型鸟几何（圆胖躯干 + 前伸小头 + 后翘尾 + 2 细腿

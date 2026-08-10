@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""生成猪 / 牛 / 羊 / 蹒跚者 / 鸡 / 鱿鱼 / 狼 / 豹猫（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
+"""生成猪 / 牛 / 羊 / 蹒跚者 / 鸡 / 鱿鱼 / 狼 / 豹猫 / 银鱼（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
 
 机制等价 MC 1.0 三种被动生物（pig / cow / sheep）+ 鸡（chicken）+ 一种敌对生物（zombie）+ 一种水生被动
-生物（squid）+ 一种犬科驯服生物（wolf）+ 一种猫科驯服生物（ocelot/cat）—— 名称 / 模型 / 贴图全原创、
-**不**拷贝任何 MC 资产（PLAN §9 区隔：Zombie→Shambler「蹒跚者」改名）。本脚本程序生成十一种 mob 各一张
-「全脸」贴图（MobModel 几何的每面都铺同一张贴图，非 MC 式 UV 拆皮）——简单稳健，配方块化模型比例让
-十一种 mob 肉眼可辨。
+生物（squid）+ 一种犬科驯服生物（wolf）+ 一种猫科驯服生物（ocelot/cat）+ 一种小型虫类敌对生物（silverfish）
+—— 名称 / 模型 / 贴图全原创、**不**拷贝任何 MC 资产（PLAN §9 区隔：Zombie→Shambler「蹒跚者」改名）。
+本脚本程序生成十二种 mob 各一张「全脸」贴图（MobModel 几何的每面都铺同一张贴图，非 MC 式 UV 拆皮）
+——简单稳健，配方块化模型比例让十二种 mob 肉眼可辨。
 
 视觉意图（每张 16×16，无 alpha 透明底 —— 实心贴图走不透明 PrincipledMaterial）：
   - mob_pig.png      ：粉红皮 + 几个深粉斑点 + 浅腹纹（读作「粉红猪皮」）。
@@ -20,12 +20,13 @@
   - mob_cat_black.png ：乌黑底 + 深灰高光纹 + 暗灰腹（读作「黑猫」；t481 驯服毛色变体 0）。
   - mob_cat_ginger.png：姜黄底 + 深橙横纹（虎斑）+ 浅奶黄腹（读作「姜黄虎斑猫」；t481 驯服毛色变体 1）。
   - mob_cat_cream.png ：奶油底 + 深褐面部/耳尖/尾尖深色点 + 浅白腹（读作「奶油暹罗猫」；t481 驯服毛色变体 2）。
+  - mob_silverfish.png：灰白甲壳底 + 深灰体节横纹 + 暗头斑（读作「银灰多节小虫」；t487 要塞银鱼）。
 
 图案采用固定位置 + 确定性散布（无随机源 → CI 可复现、与 build_atlas.py / build_tall_grass.py 同风格）。
 
 输出（覆盖写入 textures/）：
   mob_pig.png / mob_cow.png / mob_sheep.png / mob_shambler.png / mob_chicken.png / mob_squid.png / mob_wolf.png /
-  mob_ocelot.png / mob_cat_black.png / mob_cat_ginger.png / mob_cat_cream.png
+  mob_ocelot.png / mob_cat_black.png / mob_cat_ginger.png / mob_cat_cream.png / mob_silverfish.png
 
 依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
 生成原创像素图，§9 override (a)）。
@@ -467,6 +468,47 @@ def make_cat_cream():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_silverfish():
+    """银鱼（Silverfish；机制等价 MC 1.0 银鱼——小型虫类敌对生物，§9 改名 + 原创贴图非照搬）：
+    灰白甲壳底 + 深灰体节横纹 + 暗头斑（读作「小型银灰色多节虫」）。每面铺同图（同全脸 UV 方案）→
+    MobModel 银鱼几何（小躯干 + 前伸小头 + 多对短腿）各盒都显同一张甲壳纹，配小体型 + 灰白色 → 肉眼
+    读作「银灰色小虫」（机制等价 MC 银鱼，名称/美术全原创）。横向体节纹拟昆虫分节体表（非 MC 精确纹样）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xc8, 0xc2, 0xb8, 255)   # 灰白甲壳主色 #c8c2b8（银灰，非 MC 银鱼精确色）
+    fill(img, base)
+
+    # 深灰体节横纹（昆虫分节体表 —— 横向条带逐行错位，固定坐标）
+    seg = (0x88, 0x82, 0x78, 255)    # 深灰 #888278
+    blot(img, [
+        # 体节横纹（每行一条短横纹，逐行错位 → 读作多节体段）
+        (2, 3), (3, 3), (4, 3), (5, 3),
+        (10, 4), (11, 4), (12, 4), (13, 4),
+        (3, 6), (4, 6), (5, 6), (6, 6),
+        (9, 7), (10, 7), (11, 7), (12, 7),
+        (2, 9), (3, 9), (4, 9),
+        (11, 10), (12, 10), (13, 10),
+        (4, 12), (5, 12), (6, 12),
+        (10, 13), (11, 13),
+    ], seg)
+
+    # 暗头斑（前部小深色块 —— 拟虫头部稍深，固定坐标位于贴图上缘中央）
+    head = (0x5a, 0x54, 0x4a, 255)   # 暗灰 #5a544a
+    blot(img, [
+        (7, 1), (8, 1), (7, 2), (8, 2),
+    ], head)
+
+    # 亮高光点（甲壳反光 —— 少量亮像素提金属银灰质感）
+    sheen = (0xe8, 0xe4, 0xdc, 255)  # 近白 #e8e4dc
+    blot(img, [
+        (6, 5), (11, 8), (3, 11), (12, 12),
+    ], sheen)
+
+    out = os.path.join(SRC, "mob_silverfish.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def main():
     make_pig()
     make_cow()
@@ -479,6 +521,7 @@ def main():
     make_cat_black()
     make_cat_ginger()
     make_cat_cream()
+    make_silverfish()
 
 
 if __name__ == "__main__":

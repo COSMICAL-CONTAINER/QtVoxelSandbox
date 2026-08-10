@@ -35,6 +35,11 @@
 //     贴图同纹）+ **4 腿**（四足 walk cycle，机制等价 MC 1.0 豹猫）。未驯服 = 丛林豹猫（斑点橙棕贴图）、
 //     驯服 = 家猫（3 色变体贴图），几何共用（机制等价 MC 1.0 豹猫/猫同模型异贴图；毛色变体由 Main.qml 据
 //     ocelotVariantAt 切贴图，几何不变）。坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动。眼由 Main.qml delegate 补。
+//   14 = Silverfish（银鱼；t487）：小型虫类敌对生物——分节躯干 + 前伸小头 + **3 对短腿**（机制等价 MC 1.0 银鱼
+//     多足 + 多节体）。腿底本地 y=−0.15 贴 collision 底面（halfH=0.15 → offset=0）。walkPhase 驱动短腿摆动
+//     （缩 0.6 幅度，虫类快步频）。hostile → EntityManager AI 默认 aiHostile 近战追击玩家。要塞银鱼刷怪笼
+//     （Spawner state 带 SpawnerStateSilverfishFlag）周期刷出。眼由 Main.qml delegate 补（2 颗黑点）。
+//     mob_silverfish 贴图：灰白甲壳 + 体节横纹（build_mob.py 程序生成原创像素图，§9a 区隔不照搬 MC）。
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
 //
 // 顶点格式：pos(3) + uv(2) = 5 float。每盒 6 面 × 4 角 = 24 顶点 / 36 索引；多盒累加。

@@ -36,6 +36,7 @@ import VoxelSandbox
 //   0x217 骨头 —— 米白骨段 + 两端膨节（骨骺）+ 髓腔暗点（t299；杀骸骨掉落，机制等价 MC 骨头）。
 //   0x218 腐肉 —— 暗红褐腐块 + 绿霉斑 + 腐败裂痕（t299；杀蹒跚者掉落，区别于生牛肉的鲜亮红 + 横纹）。
 //   0x219 线 —— 浅米黄缠绕线团（多圈同心椭圆 + 交叉亮丝）（t299；杀蜘蛛掉落，弓 / 钓竿原料）。
+//   0x23A 末影之眼 —— 绿蓝法眼球体（深绿底座 + 中央竖瞳 + 受光高光）（t487；要塞宝藏箱战利品；右键末地传送门激活）。
 // 木棒既非方块（无等距立方体 PNG）也非工具（非 ToolIcon 镐形），煤/铁原矿/铁锭/玻璃/木炭/桶同理 → 均独立自绘。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体 Repeater（sourceItem），
@@ -1302,6 +1303,27 @@ Item {
                 R(12, 12, 1, 1, grainDark)         // 暗粒边点缀
                 R(10, 14, 1, 1, grainDark)
             }
+            // t487 末影之眼（0x23A）：绿蓝法眼球体（机制等价 MC 1.0 ender eye，§9 原创配色）。
+            //   配色：eyeBase #1a4a3a（深绿底座，末影绿）/ eyeMid #2a7a55（球体中段绿）/ eyeLight #7ae8a0（受光高光
+            //   亮绿）/ pupil #0a2a1a（中央竖瞳，末影之眼标志性瞳孔）/ ring #3a8a6a（外环装饰）/ spark #c0f0d8（高光点）。
+            const drawEndEye = () => {
+                const eyeBase = "#1a4a3a", eyeMid = "#2a7a55", eyeLight = "#7ae8a0"
+                const pupil = "#0a2a1a", ring = "#3a8a6a", spark = "#c0f0d8"
+                // 法眼球体外廓（竖直椭圆球体，rows 6..18、cols 7..16，中央偏上）
+                R(9, 6, 6, 2, eyeMid)              // 球顶（受光上缘）
+                R(7, 8, 10, 6, eyeBase)            // 球体上部主体（深绿）
+                R(8, 14, 8, 3, eyeMid)             // 球体中段（过渡绿）
+                R(9, 17, 6, 1, ring)               // 球底外环（收口）
+                // 中央竖瞳（末影之眼标志性绿色瞳孔，rows 9..14、cols 11..12）
+                R(11, 9, 2, 6, pupil)              // 竖瞳
+                // 瞳孔外圈高光环（亮绿，围绕竖瞳）
+                R(10, 9, 1, 6, eyeLight)
+                R(13, 9, 1, 6, eyeLight)
+                R(11, 8, 2, 1, eyeLight)
+                // 受光高光点（球体左上，白色亮点）
+                R(9, 7, 2, 1, spark)
+                R(8, 9, 1, 2, spark)
+            }
 
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             // t345 护甲段（0x300..0x313，5 套材质 × 4 部位 = 20 件）。按 tier（配色）+ piece（形状）派生绘制，
@@ -1438,6 +1460,7 @@ Item {
             case 0x237: drawPaper();              break // t473 纸（3 甘蔗横排合成；书配方原料）
             case 0x238: drawBook();               break // t473 书（3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料）
             case 0x239: drawGunpowder();          break // t485 火药（杀潜行者掉落；TNT 合成原料）
+            case 0x23A: drawEndEye();             break // t487 末影之眼（要塞宝藏箱战利品；右键末地传送门激活）
             default:    drawStick();        break
             }
         }

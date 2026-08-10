@@ -252,6 +252,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_dispenser_top.png       # t486 发射器顶/底面贴图（build_dispenser.py；石质灰底+中央圆形排出口俯视环纹）
         textures/default_dispenser_side.png      # t486 发射器侧面贴图（build_dispenser.py；石质灰底+边框暗带+四角铆钉）
         textures/default_dispenser_front.png     # t486 发射器前面（排出口所朝面）贴图（build_dispenser.py；石质灰底+中央暗腔排出口）
+        textures/default_stone_brick.png         # t487 石砖各面贴图（build_stone_brick.py；石质灰底+砖块缝纹网格；要塞墙体主体）
+        textures/default_end_portal.png          # t487 末地传送门未激活态贴图（build_end_portal.py；深紫黑星空底+中心暗绿旋涡）
+        textures/default_end_portal_active.png   # t487 末地传送门激活态贴图（build_end_portal.py；深紫黑星空底+中心亮绿旋涡+白绿高光）
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
@@ -361,6 +364,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/mob_cat_black.png          # t481 猫变体 0 黑猫（驯服豹猫随机毛色；build_mob.py）
         textures/mob_cat_ginger.png         # t481 猫变体 1 姜黄虎斑（驯服豹猫随机毛色；build_mob.py）
         textures/mob_cat_cream.png          # t481 猫变体 2 奶油暹罗（驯服豹猫随机毛色；build_mob.py）
+        textures/mob_silverfish.png         # t487 银鱼（Silverfish；机制等价 MC 1.0 银鱼，§9 原创）灰白甲壳+体节横纹贴图（build_mob.py）
         textures/icon_cobble.png
         textures/icon_coal_ore.png
         textures/icon_copper_ore.png             # t308 铜矿石立方体图标（build_cube_icons.py；石头底+橙铜斑+孔雀绿锈）
@@ -382,6 +386,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_cut_sandstone.png          # t485 切制砂岩立方体图标（build_cube_icons.py；各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
         textures/icon_mossy_cobble.png           # t486 苔石立方体图标（build_cube_icons.py；各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
         textures/icon_dispenser.png              # t486 发射器立方体图标（build_cube_icons.py；顶=排出口俯视环纹 / 侧=石质边框+铆钉；丛林神殿陷阱机关）
+        textures/icon_stone_brick.png            # t487 石砖立方体图标（build_cube_icons.py；各面=石质灰底+砖块缝纹网格；要塞墙体主体）
+        textures/icon_stone_brick_slab.png       # t487 石砖台阶立方体图标（build_cube_icons.py；3D 半高盒，砖纹）
+        textures/icon_stone_brick_stairs.png     # t487 石砖楼梯立方体图标（build_cube_icons.py；3D L 阶，砖纹）
         textures/icon_crafting_table.png
         textures/icon_dirt.png
         textures/icon_furnace.png

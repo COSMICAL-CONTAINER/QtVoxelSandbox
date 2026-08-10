@@ -113,6 +113,11 @@ BLOCKS = [
     # t486 丛林神殿结构方块立方体图标（build_mossy_cobble.py / build_dispenser.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
     ("mossy_cobble",    "default_mossy_cobble",  "default_mossy_cobble"),  # t486 苔石（各面同贴图=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
     ("dispenser",       "default_dispenser_top", "default_dispenser_side"), # t486 发射器（顶=排出口俯视环纹 / 侧=石质边框+铆钉；丛林神殿陷阱机关）
+    # t487 要塞结构方块立方体图标（build_stone_brick.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
+    #   石砖台阶/楼梯复用石砖贴图（同橡木木制品一族共享一贴图模式），立方体图标显满砖便于创造调色板取用区分。
+    ("stone_brick",     "default_stone_brick", "default_stone_brick"),  # t487 石砖（各面同贴图=石质灰底+砖块缝纹网格；要塞墙体主体）
+    ("stone_brick_slab",   "default_stone_brick", "default_stone_brick"),  # t487 石砖台阶（共享石砖贴图；创造调色板取用）
+    ("stone_brick_stairs", "default_stone_brick", "default_stone_brick"),  # t487 石砖楼梯（共享石砖贴图；创造调色板取用）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

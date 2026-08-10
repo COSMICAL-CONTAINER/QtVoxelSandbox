@@ -1892,6 +1892,27 @@ void PlayerController::placeBlock()
             return; // 采摘成功 → 不再走放置路径
         }
     }
+    // t487 末影之眼激活末地传送门（spec「末影之眼放满激活传送门」；机制等价 MC 1.0 持末影之眼右键末地传送门
+    //   激活）。右键命中格为末地传送门（EndPortal）+ 手持末影之眼物品（EndEyeId）→ 翻 state bit0
+    //   （EndPortalStateActiveFlag）→ mesher 切激活贴图（end_portal_active 中心旋涡更亮）+ qInfo 日志（末地预热
+    //   占位：仅激活效果 + 日志，不实现末地维度，spec「实际传送末地可推迟为占位/告警」）。生存消耗 1 末影之眼
+    //   （创造不耗，同桶 / 食物 / 种子模式）。优先于放置（右键传送门即激活，不另放块）。
+    //   分层（PLAN §2）：激活属 Game/Physics（读射线命中 + 写 World state + 写 Hotbar VM），不改 setBlock 语义。
+    if (BlockRegistry::isEndPortal(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))
+        && m_hotbar && m_hotbar->selectedItemId() == RecipeRegistry::EndEyeId) {
+        const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+        if ((st & BlockRegistry::EndPortalStateActiveFlag) == 0) { // 仅未激活时激活（防重复激活刷消耗）
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::EndPortal,
+                              quint8(st | BlockRegistry::EndPortalStateActiveFlag));
+            if (m_mode == Survival)
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 末影之眼（创造不耗 → 无限激活）
+            m_lastPlaceMs = now;
+            emit swingArm();
+            qInfo() << "end portal activated at" << m_hitBx << m_hitBy << m_hitBz
+                    << "(end dimension deferred - placeholder)"; // 末地预热占位（日志，不实现末地维度）
+        }
+        return; // 已是激活态 → 右键无效应（不重复消耗 / 不放置），机制等价 MC 已激活传送门无法再插眼
+    }
     } // t174：m_hasHit 局部门控结束（工作台/熔炉/门/活版门需命中；桶分支与放块路径各自处理命中需求）
     // t174 铁桶 useBlock（spec「右键舀水/倒水交互」）：选空桶 / 装水桶时右键走桶交互，不走方块放置路径
     //   （桶非方块；selectedBlock 经 hotbar 已归 Air，下方 Air 守卫会拦，故在此提前分支）。机制等价 MC 1.0

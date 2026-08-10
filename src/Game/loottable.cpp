@@ -111,6 +111,27 @@ const std::vector<LootTable::Entry> &LootTable::jungleTempleChestPool()
     return pool;
 }
 
+// t487 要塞箱子战利品池（见 loottable.h 头注释）。权重总和 = 28+24+16+12+10+5+3+2 = 100。
+//   分布（每 roll 命中概率）：腐肉 ~28% / 骨头 ~24%（亡灵族常见 ~52%）；铁锭 ~16%（金属族次常见）；青金石
+//   ~12% / 红石 ~10%（矿物族次常见 ~22%）；末影之眼 ~6%（稀有关键件 —— 激活传送门的关键物品，机制等价 MC
+//   1.0 要塞末影之眼掉落，低权重须探索多箱）；钻石 ~5%（稀有）；附魔书占位 ~2%（极稀有）。机制对齐 MC 1.0
+//   要塞战利品（末影之眼标志性掉落 + 亡灵族 + 矿物族 + 稀有件）。数量区间：常见件 1..N（一堆），稀有件恒 1
+//   （单件，避免一堆钻石/末影之眼）。static 局部 + 返回 const 引用（单一权威；调用方不持副本）。
+const std::vector<LootTable::Entry> &LootTable::strongholdChestPool()
+{
+    static const std::vector<Entry> pool = {
+        { RecipeRegistry::RottenFleshId,  28, 1, 4 }, // 腐肉：亡灵族常见（要塞石砖房阴森环境），1..4
+        { RecipeRegistry::BoneId,         24, 1, 5 }, // 骨头：亡灵族常见，1..5
+        { RecipeRegistry::IronIngotId,    16, 1, 4 }, // 铁锭：次常见金属（要塞藏物），1..4
+        { RecipeRegistry::LapisId,        12, 1, 3 }, // 青金石：次常见矿物（附魔前置材料），1..3
+        { RecipeRegistry::RedstoneId,     10, 1, 4 }, // 红石粉：次常见矿物，1..4
+        { RecipeRegistry::EndEyeId,        6, 1, 1 }, // 末影之眼：稀有关键件（激活传送门，机制等价 MC 1.0 要塞掉落），单件
+        { RecipeRegistry::DiamondId,       5, 1, 1 }, // 钻石：稀有矿物，单件
+        { RecipeRegistry::EnchantedBookId, 2, 1, 1 }, // 附魔书占位：极稀有，单件
+    };
+    return pool;
+}
+
 // 按 weight 有放回加权抽 rolls 次。RNG 由 seed 确定（QRandomGenerator(seed)；PLAN §2-K 精神：同 seed 同产物）。
 //   pool 为空 / rolls<=0 → 空。weight<=0 条目跳过（不入总权重；若全 <=0 → 空）。maxCount<minCount → 取 minCount。
 std::vector<LootTable::Stack> LootTable::roll(const std::vector<Entry> &pool, int rolls, quint32 seed)
