@@ -15,6 +15,26 @@
 #include <algorithm>
 #include <cmath>
 
+// t476 时运附魔适用方块判定：矿石类（破块掉对应材料物品，掉落数量受时运加成）。机制等价 MC fortune 仅对
+//   矿石 / 部分方块生效。本工程矿石段：煤 / 铁 / 钻 / 铜 / 金 / 青金（破块掉冶炼材料，掉落数 ×时运有意义）。
+//   非矿石（草 / 石 / 圆石等掉落数恒 1 的方块）时运不放大 —— MC 时运对石 / 圆石无效，避免无限石刷。
+namespace {
+bool isFortuneOre(quint8 blockId)
+{
+    switch (blockId) {
+    case BlockRegistry::CoalOre:
+    case BlockRegistry::IronOre:
+    case BlockRegistry::DiamondOre:
+    case BlockRegistry::CopperOre:
+    case BlockRegistry::GoldOre:
+    case BlockRegistry::LapisOre:
+        return true;
+    default:
+        return false;
+    }
+}
+} // namespace
+
 // t467 食物饥饿恢复量（单一权威）：返回 itemId 作为食物一次恢复的饥饿值；非食物 → 0。
 //   面包（BreadId）= kBreadHungerAmount(5)、甜浆果（SweetBerryId）= kSweetBerryHungerAmount(2)。
 //   机制等价 MC 1.0 各食物恢复不同饥饿（面包 5 / 浆果 2）。新增食物只改本方法一处（避免各处硬编码 BreadId）。
@@ -949,7 +969,25 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             emit spawnItem(x, y, z, dropId, 1);
             emit spawnItem(sx, y, sz, dropId, 1);
         } else {
-            emit spawnItem(x, y, z, dropId, dropCount); // t83：传 dropId（Stone→Cobble / 矿石→材料），非 brokenId
+            // t476 工具附魔改通用掉落（机制等价 MC 1.0 silk-touch / fortune）：
+            //   - 精准采集 SilkTouch：掉方块**自身**（brokenId，count 1）而非 dropId（石→石非圆石 / 草→草非土 /
+            //     矿石→矿石方块非材料 / 刷怪笼→刷怪笼）。仅 Tool 类工具（镐等）可带 silk；空手无 silk → 走原 dropId。
+            //   - 时运 Fortune：对矿石（isFortuneOre）掉落数 ×(1..1+level)（机制等价 MC fortune ore multiplier）。
+            //     非矿石（石 / 圆石等）时运不放大（MC 时运对石无效）。silk 与 fortune 互斥（silk 优先：掉 1 块自身）。
+            int finalDropId = dropId;
+            int finalDropCount = dropCount;
+            if (m_hotbar) {
+                const int silkLvl = m_hotbar->selectedItemEnchantLevel(EnchantRegistry::SilkTouch);
+                const int fortuneLvl = m_hotbar->selectedItemEnchantLevel(EnchantRegistry::Fortune);
+                if (silkLvl > 0) {
+                    finalDropId = int(brokenId);
+                    finalDropCount = 1;
+                } else if (fortuneLvl > 0 && isFortuneOre(brokenId)) {
+                    // 矿石掉落数 ×(1 + [0, level])：时运 I 1-2× / II 1-3× / III 1-4×（MC 风格区间放大）。
+                    finalDropCount = dropCount * (1 + QRandomGenerator::global()->bounded(0, fortuneLvl + 1));
+                }
+            }
+            emit spawnItem(x, y, z, finalDropId, finalDropCount); // t83：传 finalDropId（silk→brokenId / 余→dropId）
         }
     }
     // t418 垂直植物级联掉落（机制等价 MC 甘蔗 / 仙人掌柱：破任一格 → 其上整柱坍落）：当被破格为 Sugarcane /
@@ -1104,8 +1142,24 @@ void PlayerController::attackMob(int entityIndex)
     //   旧 t242 固定 kAttackDamage=4 已替换为 ToolRegistry::attackDamage（机制等价 MC 1.0 武器 vs 徒手）。
     //   直读 hotbar.selectedItemId（单一权威，同 updateMining 持物判定，免 QML 绑定滞后窗口）；无 hotbar → 0=空手。
     const int heldItemId = m_hotbar ? m_hotbar->selectedItemId() : 0;
-    const int baseDmg = ToolRegistry::attackDamage(heldItemId);
-    const int dmg = crit ? baseDmg * 3 / 2 : baseDmg; // 暴击 = base × 1.5 向下取整（同旧 kCritDamage 公式）
+    const int mobType = m_entityManager->mobTypeAt(entityIndex);
+    // t476 武器附魔伤害加成（机制等价 MC 1.0 剑附魔：锐锋通用 + 亡灵 / 节肢对族）。在暴击乘算**之前**叠入 base，
+    //   即暴击对「base + 附魔加成」整体 ×1.5（与 MC crit 对总伤乘算一致）。base 用 float 累加附魔加成后取整。
+    //   - 锐锋 Sharpness：+0.5*level HP（spec「0.5*level per hit」）。
+    //   - 亡灵杀手 UndeadSlay：对亡灵族（Shambler 蹒跚者 / Bones 骸骨）+2.5*level HP。
+    //   - 节肢克星 ArthropodSlay：对节肢族（Spider 蜘蛛）+2.5*level HP。
+    //   互斥组 1 已保证锐锋 / 亡灵 / 节肢三选一（selectEnchants 剔冲突）→ 同一武器至多一类伤害加成生效。
+    float dmg = float(ToolRegistry::attackDamage(heldItemId));
+    if (m_hotbar) {
+        const int sharp = m_hotbar->selectedItemEnchantLevel(EnchantRegistry::Sharpness);
+        if (sharp > 0) dmg += 0.5f * float(sharp);
+        const bool undead = (mobType == int(EntityManager::MobShambler) || mobType == int(EntityManager::MobBones));
+        const bool arthropod = (mobType == int(EntityManager::MobSpider));
+        if (undead)     dmg += 2.5f * float(m_hotbar->selectedItemEnchantLevel(EnchantRegistry::UndeadSlay));
+        if (arthropod)  dmg += 2.5f * float(m_hotbar->selectedItemEnchantLevel(EnchantRegistry::ArthropodSlay));
+    }
+    if (crit) dmg *= 1.5f;                      // 暴击 = base × 1.5（含附魔加成）
+    const int dmgInt = std::max(1, int(std::round(dmg))); // 至少 1 HP（防御：负 / 零兜底）
     // t249 击退方向：玩家脚底 → mob 中心 的水平向量（未归一，knockback 内归一）。
     const QVector3D mobPos = m_entityManager->posAt(entityIndex);
     float kbx = mobPos.x() - m_pos.x();
@@ -1116,16 +1170,23 @@ void PlayerController::attackMob(int entityIndex)
         kbx = look.x();
         kbz = look.z();
     }
-    m_entityManager->damageEntity(entityIndex, dmg);
-    m_entityManager->knockback(entityIndex, kbx, kbz);
+    // t476 击退附魔：每级 +50% 击退冲量（机制等价 MC knockback 附魔 +击退距离）。knockback 内归一方向 × strength。
+    const int kbLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::Knockback) : 0;
+    const float kbStrength = 1.0f + 0.5f * float(kbLvl);
+    m_entityManager->damageEntity(entityIndex, dmgInt);
+    m_entityManager->knockback(entityIndex, kbx, kbz, kbStrength);
+    // t476 燃焰附魔：命中即点燃 mob（机制等价 MC fire-aspect ignite on hit）。fireTimer = level*4s；tick 火烧分支扣血 +
+    //   致死掉熟肉。先 damageEntity 再 ignite：若本次击杀（health→0→dead），ignite 内 dead 守卫早退（尸体不燃）。
+    const int fireLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::FireAspect) : 0;
+    if (fireLvl > 0) m_entityManager->ignite(entityIndex, float(fireLvl) * 4.0f);
     emit swingArm();
     // t295 mob 受击音效 + 敌对专属：随 mobAttacked 下传被攻击 mob 的 mobType，供呈现层据它路由到
     //   AudioManager.playMobHurt(mobType) —— 被动走通用 creature yelp、敌对各走专属音（哀嚎/骨头敲击/蜘蛛嘶/嘶嘶）。
     //   mobTypeAt 越界（理论不可达：entityIndex 由 findMobHit 选定的活体 mob）→ 兜底 0（通用 mob_hurt）。
-    const int mobType = m_entityManager->mobTypeAt(entityIndex);
     emit mobAttacked(mobType, crit);
     // t265 剑 / 工具攻击消耗耐久（机制等价 MC「工具每次命中 mob -1 耐久」）。仅 Survival（创造无限源不消耗）；
     //   damageSelectedItem 对空手 / 非工具静默 no-op，耐久归零自动清槽（工具破损消失）。同 finishMiningAt 的耐久消耗模式。
+    //   t476 耐久附魔：damageSelectedItem 内按 Unbreaking 等级掷骰跳过部分损耗。
     if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem();
     m_attackCooldown = kAttackCooldown;
 }
@@ -1207,7 +1268,11 @@ void PlayerController::updateMining(float dt)
     // t141：基岩（hardness<0，canMine=false）现也走到此累积路径给反馈 —— miningTime 对 hardness<=0 走
     //   0.05s 地板（不除 hardness），故恒 >0，无除零；基岩 progress 快速达 1.0 但被完成守卫拦下不破。
     const float miningTime = ToolRegistry::miningTime(bid, heldItemId);
-    m_miningProgress += dt / miningTime;
+    // t476 效率附魔：挖掘速度 ×(1+level)（机制等价 MC efficiency mining speedup）。把 miningTime ÷ 此倍率
+    //   → progress 增量同比放大（每级约缩短一半挖掘时间，明显可测）。effMul >= 1（level 0 = 1.0 无加成）。
+    const int effLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::Efficiency) : 0;
+    const float effMul = 1.0f + float(effLvl);
+    m_miningProgress += (dt * effMul) / miningTime;
 
     // t165：不可挖方块（基岩 canMine=false）持续累积给「挥臂」反馈但**不显裂纹**（spec「一直不出现裂纹」）。
     //   可挖方块 progress 到 1.0 → 下方完成守卫 finishMiningAt 破块；不可挖方块 progress 到 1.0 **回绕**

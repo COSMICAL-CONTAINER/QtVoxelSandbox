@@ -204,6 +204,18 @@ int EnchantRegistry::packLevel(int packed)
     return packed & 0xff;
 }
 
+// t476 读物品附魔等级：扫 4 槽 packed int，首个 id 匹配槽的 level（0 = 无该附魔）。
+//   机制等价 MC「读 item enchantments list 取某附魔等级」。同附魔不重复（selectEnchants 已剔），首个即唯一。
+int EnchantRegistry::findLevel(const int *enchants, int enchantId)
+{
+    if (!enchants || !isEnchant(enchantId)) return 0;
+    for (int i = 0; i < 4; ++i) {
+        if (packEnchantId(enchants[i]) == enchantId)
+            return std::max(0, packLevel(enchants[i]));
+    }
+    return 0;
+}
+
 QString EnchantRegistry::levelSuffix(int level)
 {
     switch (level) {

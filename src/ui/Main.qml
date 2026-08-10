@@ -1569,11 +1569,13 @@ Window {
                 else if (mobType === EntityManager.MobBones) cause = PlayerState.Bones
                 else if (mobType === EntityManager.MobSpider) cause = PlayerState.Spider
                 else if (mobType === EntityManager.MobStalker) cause = PlayerState.Stalker
-                // t345 护甲减伤（同 onFallDamageTaken 路径：mob 近战 / 箭 / 爆炸命中也走护甲减伤 + 耐久损耗）。
+                // t345 护甲减伤 + t476 保护族附魔减伤（mob 近战 / 箭 / 爆炸命中也走护甲值 + 附魔 EPF 减伤 + 耐久损耗）。
+                //   护甲值每点 4%（cap 0.80）+ 附魔 EPF 每点 4%（cap 0.80），合计 cap 0.85；至少 1 点穿透。
                 var finalAmt = amount
                 const totalArmor = hotbarVM.totalArmorPoints
-                if (amount > 0 && totalArmor > 0) {
-                    const ratio = Math.min(0.80, totalArmor * 0.04)
+                const epf = hotbarVM.armorProtectionFactor(cause)
+                if (amount > 0 && (totalArmor > 0 || epf > 0)) {
+                    const ratio = Math.min(0.85, Math.min(0.80, totalArmor * 0.04) + Math.min(0.80, epf * 0.04))
                     finalAmt = Math.max(1, Math.round(amount * (1 - ratio)))
                     hotbarVM.damageArmor()
                 }
@@ -1637,15 +1639,17 @@ Window {
     // 语义事件，呈现层只消费）。PlayerController 不持有 PlayerState，保持单向事件流、分层干净。
     Connections {
         target: player
-        // t345 护甲减伤：路由到 takeDamage 前先按 totalArmor 算减伤比例（每点 4%，上限 80%；机制等价 MC 1.0
-        //   护甲减伤）。至少 1 点穿透（护甲不彻底免伤）。护甲受击 -1 耐久（damageArmor；归零破损消失）。
-        //   spec「armor reduces incoming damage by its armor value」+「DURABILITY degrades on hits」。
-        //   覆盖所有走 fallDamageTaken 的伤害源（坠落 / 窒息 / 溺水 / 饥饿 / 燃烧）；mobAttackedPlayer 同此减伤。
+        // t345 护甲减伤 + t476 保护族附魔减伤：路由到 takeDamage 前先按 totalArmor（每点 4%，cap 0.80）+
+        //   附魔 EPF（每点 4%，cap 0.80）合计算减伤比例（cap 0.85）。至少 1 点穿透（护甲不彻底免伤）。
+        //   护甲受击 -1 耐久（damageArmor；归零破损消失）。spec「armor reduces incoming damage by its armor value」
+        //   +「DURABILITY degrades on hits」。覆盖所有走 fallDamageTaken 的伤害源（坠落 / 窒息 / 溺水 / 饥饿 / 燃烧）；
+        //   mobAttackedPlayer 同此减伤。t476 EPF 据 cause 取匹配保护族（Fall→摔落保护 / Fire→火焰保护 / 余→通用保护）。
         function onFallDamageTaken(hp, cause) {
             let finalDmg = hp
             const totalArmor = hotbarVM.totalArmorPoints
-            if (hp > 0 && totalArmor > 0) {
-                const ratio = Math.min(0.80, totalArmor * 0.04)
+            const epf = hotbarVM.armorProtectionFactor(cause)
+            if (hp > 0 && (totalArmor > 0 || epf > 0)) {
+                const ratio = Math.min(0.85, Math.min(0.80, totalArmor * 0.04) + Math.min(0.80, epf * 0.04))
                 finalDmg = Math.max(1, Math.round(hp * (1 - ratio)))
                 hotbarVM.damageArmor()
             }

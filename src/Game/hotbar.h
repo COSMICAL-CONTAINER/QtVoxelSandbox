@@ -200,6 +200,17 @@ public:
     Q_INVOKABLE QVariantList enchantsAt(int slot) const;
     Q_INVOKABLE QVariantList mainEnchantsAt(int slot) const;
     Q_INVOKABLE QVariantList armorEnchantsAt(int slot) const;
+    // ── t476 附魔效果查询（供 Game 层 attack / mining calc point 直读 + 呈现层减伤算 EPF）──
+    //   - selectedItemEnchantLevel(enchantId)：选中槽物品该附魔的等级（0=无；空槽 / 非可附魔 → 0）。
+    //     PlayerController 在 attackMob（锐锋 / 亡灵 / 节肢 / 击退 / 燃焰）、updateMining（效率）、finishMiningAt
+    //     （精准采集 / 时运）calc point 调，把附魔效果叠进伤害 / 速度 / 掉落（机制等价 MC「手持物品附魔生效」）。
+    //   - armorEnchantLevelSum(enchantId)：4 装备槽该附魔等级之和（耐久 / 保护族累加用）。
+    //   - armorProtectionFactor(cause)：受击减伤 EPF（0..~20），据 PlayerState::DeathCause 序数取匹配保护族
+    //     累加（通用 Protection 每级 1 EPF + 匹配专项每级 2 EPF）。呈现层（Main.qml）在 takeDamage 前按 EPF
+    //     算减伤比例（ratio = min(0.85, (armorRatio + epf*0.04))），与既有护甲值减伤叠加。
+    int selectedItemEnchantLevel(int enchantId) const;
+    int armorEnchantLevelSum(int enchantId) const;
+    Q_INVOKABLE int armorProtectionFactor(int cause) const;
 
     // 每槽物品 id（air=0 即空栈）。越界返回 0。兼容旧消费者（player.selectedBlock 绑定 / 背包 swap）。
     Q_INVOKABLE int blockIdAt(int slot) const;

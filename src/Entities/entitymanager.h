@@ -292,7 +292,14 @@ public:
     //   MC 1.0 knockback：受击实体沿攻击方向被推开 + 小幅上弹（不旋转、无受击硬直打断 AI，仅速度叠加）。
     //   非 Mob / dead（尸体不被推，同 resolvePlayerPush）/ 越界 → 静默早退。bump revision → QML 位置绑定刷新。
     //   分层（PLAN §2）：与 damageEntity 同层（Entities），只改自身数据，无向下依赖；由 Game/Physics 层调。
-    void knockback(int i, float dirX, float dirZ);
+    //   t476 strength（缺省 1.0）：击退冲量倍率。玩家「击退」附魔命中时传 >1 → 拉大击退距离（机制等价 MC
+    //     knockback 附魔 +击退量）。冲量 = kKnockbackHoriz * strength 沿方向。
+    void knockback(int i, float dirX, float dirZ, float strength = 1.0f);
+    // t476 点燃 mob（玩家「燃焰」FireAspect 命中触发；机制等价 MC fire-aspect ignite on hit）：把第 i 个 mob 的
+    //   fireTimer 刷到至少 duration 秒（取 max，不覆盖更长的已有燃烧）。fireTimer>0 → tick 火烧分支按既有时序
+    //   扣血（fireDamageTimer→damageEntity）+ 视觉火焰（isBurningAt），且致死时 mobDied 带 burned=true 掉熟肉。
+    //   非 Mob / dead / 越界 / duration<=0 → 静默早退。bump revision（QML 显火焰 Model）。
+    Q_INVOKABLE void ignite(int i, float duration);
 
     // 玩家推动解析（C++ 直调；PlayerController::tick 每帧调，captured 时）。
     //   playerFeet=玩家脚底中心，halfW=玩家 AABB 半宽，height=玩家 AABB 高，world=只读世界（钳制穿墙用）。

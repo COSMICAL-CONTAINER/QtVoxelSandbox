@@ -1106,7 +1106,7 @@ int EntityManager::findMobHit(const QVector3D &origin, const QVector3D &dir, flo
 //   约定）避免零冲量。非 Mob（掉落物 / 下落方块）/ dead（尸体不被推，同 resolvePlayerPush）/ 越界 → 早退。
 //   bump revision + emit → 驱动 QML {revision; posAt} 位置绑定重算（击退位移可见）。knockback 与 damageEntity
 //   分离：扣血走 damageEntity，位移冲量走本方法，各自 bump revision（attackMob 内顺序调用，二者都生效）。
-void EntityManager::knockback(int i, float dirX, float dirZ)
+void EntityManager::knockback(int i, float dirX, float dirZ, float strength)
 {
     if (i < 0 || i >= int(m_entities.size())) return;
     Entity &e = m_entities[size_t(i)];
@@ -1121,14 +1121,32 @@ void EntityManager::knockback(int i, float dirX, float dirZ)
     }
     dirX /= len;
     dirZ /= len;
+    // t476 strength 缺省 1.0；玩家「击退」附魔命中时传 >1 拉大冲量（kKnockbackHoriz × strength）。
+    const float horiz = kKnockbackHoriz * std::max(0.0f, strength);
 
-    e.vx = dirX * kKnockbackHoriz;
-    e.vz = dirZ * kKnockbackHoriz;
+    e.vx = dirX * horiz;
+    e.vz = dirZ * horiz;
     e.vy = kKnockbackUp;   // 小跳垂直速度（向上为正；tick 重力分支接手）
     e.resting = false;     // 解除静止 → tick 处理上跳 + 下落 + 着地（否则 resting continue 跳过）
     ++m_revision;
     emit entitiesChanged();
-    qCInfo(lcEnt) << "mob" << i << "knockback dir=(" << dirX << dirZ << ") horiz=" << kKnockbackHoriz;
+    qCInfo(lcEnt) << "mob" << i << "knockback dir=(" << dirX << dirZ << ") horiz=" << horiz;
+}
+
+// t476 点燃 mob（玩家「燃焰」命中触发；机制等价 MC fire-aspect ignite on hit）。把 fireTimer 刷到至少
+//   duration 秒（取 max，不覆盖更长已有燃烧；duration<=0 早退）。fireTimer>0 → tick 火烧分支按既有时序扣血 +
+//   isBurningAt 显火焰 + 致死掉熟肉（mobDied burned）。非 Mob / dead / 越界 → 静默早退。bump revision。
+void EntityManager::ignite(int i, float duration)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Mob || e.dead || duration <= 0.0f) return;
+    if (e.fireTimer < duration) {
+        e.fireTimer = duration;
+        ++m_revision;
+        emit entitiesChanged();
+        qCInfo(lcEnt) << "mob" << i << "ignited duration=" << duration;
+    }
 }
 
 // t239 AI wander 自主移动（机制等价 MC passive mob「随机选向 + 时间片游荡 / 停驻」循环）。

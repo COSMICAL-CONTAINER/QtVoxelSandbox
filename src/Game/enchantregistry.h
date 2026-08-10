@@ -117,6 +117,12 @@ public:
     static int packEnchantId(int packed);
     static int packLevel(int packed);
 
+    // t476 在物品 4 槽附魔元数据中查指定附魔的等级（0 = 无）。供 Game 层在挖掘 / 攻击 / 受击 calc point
+    //   读手持 / 装备物品的附魔等级并据此改伤害 / 速度 / 掉落（机制等价 MC「读 item enchantments 算附魔效果」）。
+    //   enchants 指向 4 个 packed int（同 ItemStack.enchants[4] 布局；0=空槽）。非附魔 id / 空指针 / 越界 → 0。
+    //   同一附魔不会重复（selectEnchants 已剔重复），故取首个匹配槽的 level 即可。
+    static int findLevel(const int *enchants, int enchantId);
+
     // 等级 → 罗马数字后缀字符串（如 level=3 → "III"；level=1 → "I"）。供 tooltip / 附魔台显示「锐锋 III」。
     //   level<=0 → 空串；level 1..5 → I/II/III/IV/V；>5 → 阿拉伯数字（防御）。
     static QString levelSuffix(int level);
