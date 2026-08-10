@@ -32,6 +32,13 @@ struct ItemStack {
     int count = 0;
     int durability = 0;     // t263 工具剩余耐久（非工具 / 空栈 = 0，inert）
     int enchants[4] = {0,0,0,0}; // t475 附魔元数据（4 槽 × (id<<8|level)；0 = 空槽；非可附魔物品恒全 0）
+    // t477 自定义名（铁砧重命名写；空串 = 用注册表默认名 displayName）。随物品实例走（同耐久 / 附魔语义）。
+    //   **当前未进 gatherPlayerState 序列化**（同 t475 附魔的会话内保真、跨存档不持久的对等缺口 —— 重命名
+    //   在会话内生效；存档持久化归后续任务统一补附魔 + 名一并落盘）。
+    //   显式默认成员初始化（= QString()） suppress -Wmissing-field-initializers：本结构体大量处用部分聚合
+    //   初始化（ItemStack{0,0} / {id,count,dur}），无 DMI 的尾字段会触发该 -Wextra 警告（lessons-learned：
+    //   项目零警告门按 -Wall -Wextra 口径）。
+    QString customName = QString();
 
     bool isEmpty() const { return id == 0 || count <= 0; }
 };
@@ -200,6 +207,28 @@ public:
     Q_INVOKABLE QVariantList enchantsAt(int slot) const;
     Q_INVOKABLE QVariantList mainEnchantsAt(int slot) const;
     Q_INVOKABLE QVariantList armorEnchantsAt(int slot) const;
+    // ── t477 槽位自定义名读写（铁砧重命名；空串 = 用注册表默认名）── 同 durabilityAt / enchantsAt 模式，
+    //   供铁砧 UI 读（结果预览显重命名）+ 写（setCustomName）。空槽 / 无自定义名 → 空串。
+    Q_INVOKABLE QString customNameAt(int slot) const;
+    Q_INVOKABLE QString mainCustomNameAt(int slot) const;
+    Q_INVOKABLE void setCustomName(int slot, const QString &name);
+    Q_INVOKABLE void mainSetCustomName(int slot, const QString &name);
+    // ── t477 铁砧三功能（作用于**当前选中 hotbar 槽**作为目标；C++ 单一权威算 + 写，UI 仅调 + 据 bool 决定提示）──
+    //   机制等价 MC 1.0 铁砧 repair / enchant-merge / rename；目标 = 选中槽物品（简化：MC 铁砧有显式左右槽，
+    //   本工程同附魔台 shell 模式操作选中槽，避免复制完整 InventoryOps 光标系统）。
+    //   - anvilCanRepairSelected()：选中槽是工具 / 护甲（有耐久）且背包别处（hotbar 其它槽 + 主栏）有同 id 第二件 → true。
+    //   - anvilDoRepairSelected()：执行修复（耐久 = min(选中 + 第二件 + 0.12*max, max)；消耗 1 件第二件）→ true；
+    //     不满足前置（同 anvilCanRepairSelected）→ false（no-op）。
+    //   - anvilCanMergeEnchantsSelected()：选中槽可附魔（category != None）且别处有同 id 带附魔的第二件 → true。
+    //   - anvilDoMergeEnchantsSelected()：把第二件附魔合并到选中（逐附魔取 max 等级写入空槽，≤4 槽）+ 消耗第二件 → true。
+    //   - anvilDoRenameSelected(name)：选中槽非空且 name 非空 → 写 customName → true（重命名，小 XP 消耗由 UI 调
+    //     playerState.spendLevels 后再调本方法；本方法只写名）。
+    //   三 Do 方法成功后 emit slotsChanged（槽内容变 → UI 刷新）。消耗材料扣第二件（hotbar 其它槽 + 主栏扫描）。
+    Q_INVOKABLE bool anvilCanRepairSelected() const;
+    Q_INVOKABLE bool anvilDoRepairSelected();
+    Q_INVOKABLE bool anvilCanMergeEnchantsSelected() const;
+    Q_INVOKABLE bool anvilDoMergeEnchantsSelected();
+    Q_INVOKABLE bool anvilDoRenameSelected(const QString &name);
     // ── t476 附魔效果查询（供 Game 层 attack / mining calc point 直读 + 呈现层减伤算 EPF）──
     //   - selectedItemEnchantLevel(enchantId)：选中槽物品该附魔的等级（0=无；空槽 / 非可附魔 → 0）。
     //     PlayerController 在 attackMob（锐锋 / 亡灵 / 节肢 / 击退 / 燃焰）、updateMining（效率）、finishMiningAt

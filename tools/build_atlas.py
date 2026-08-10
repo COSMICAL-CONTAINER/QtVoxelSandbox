@@ -220,6 +220,11 @@ TILES = [
     "default_enchanting_table_top", # 109 enchanting_table_top（t474 附魔台顶面贴图；黑曜石深紫黑底+钻石青白四角嵌点+中央立书轮廓；EnchantingTable 顶面=本 tile；tools/build_enchanting_table.py 程序生成原创像素图）
     "default_enchanting_table_side", # 110 enchanting_table_side（t474 附魔台侧面/底面/前面贴图；黑曜石深紫黑底+钻石青白四角嵌点+顶/底边缘暗化带；EnchantingTable 底/侧/前=本 tile）
     "default_bookshelf",           # 111 bookshelf（t474 书架各面贴图；橡木木板边框+中央书脊彩色书列（红/蓝/绿/棕）；Bookshelf 各面=本 tile；tools/build_bookshelf.py 程序生成原创像素图）
+    "default_iron_block",          # 112 iron_block（t477 铁块各面贴图；金属灰底+铆钉网格+高光；IronBlock 各面=本 tile；tools/build_anvil.py 程序生成原创像素图）
+    "default_anvil_top",           # 113 anvil_top（t477 铁砧完好顶面贴图；深铁砧台+宽砧面+尖角+边缘暗化；Anvil 顶面=本 tile；tools/build_anvil.py 程序生成原创像素图）
+    "default_anvil_base",          # 114 anvil_base（t477 铁砧侧/底/前面贴图；深铁砧身+横向分层暗带；Anvil/AnvilChipped/AnvilDamaged 底·侧·前共享本 tile；tools/build_anvil.py）
+    "default_anvil_damaged_1_top", # 115 anvil_damaged_1_top（t477 微损铁砧顶面贴图；砧台+一条细裂纹；AnvilChipped 顶面=本 tile；tools/build_anvil.py）
+    "default_anvil_damaged_2_top", # 116 anvil_damaged_2_top（t477 重损铁砧顶面贴图；砧台+粗裂纹网+尖角缺角；AnvilDamaged 顶面=本 tile；tools/build_anvil.py）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

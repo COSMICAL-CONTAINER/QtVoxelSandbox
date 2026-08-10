@@ -412,6 +412,21 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   （木质）。配方：6 木板 + 3 书 → 1 书架（工作台 3×3 有序：上 / 下两行木板、中间一行 3 书）。进创造
     //   调色板（玩家可取用 / 放置；附魔台加成测试用）。
     /* bookshelf    */ {int(BlockRegistry::Bookshelf),       111,111,111,111, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Bookshelf),      1, 64, "bookshelf",    "书架"},
+    // ── t477 铁块（IronBlock）：9 铁锭合成的金属存储方块（铁砧配方前置）。整立方 opaque（solid=true /
+    //   ShapeFull，与 obsidian/wool 同族走整立方面路径）、hardness=5.0（金属偏硬）、Pickaxe、requiresTool=true、
+    //   minTier1（木镐可破且掉落）、dropId=自身、dropCount=1、maxStack=64。各面=iron_block(112)（金属灰底+
+    //   铆钉网格+高光）。音色归 GroupStone（金属质）。配方：9 铁锭 3×3 满铺 → 1 铁块。进创造调色板。
+    /* iron_block   */ {int(BlockRegistry::IronBlock),       112,112,112,112, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::IronBlock),       1, 64, "iron_block",   "铁块"},
+    // ── t477 铁砧 3 损坏阶段（机制等价 MC 1.0 anvil：右键开铁砧 UI 修复/合并/重命名 + 自身损坏）。
+    //   整立方 opaque（solid=true / ShapeFull，与附魔台同族走整立方面路径，**非**异形 —— MC 1.0 铁砧是异形
+    //   低体+砧台，本工程简化为整立方，机制等价非视觉对齐 §4）、hardness=5.0（金属偏硬）、Pickaxe、
+    //   requiresTool=true、minTier1（木镐可破且掉落）、dropId=自身（破任一阶段掉对应阶段铁砧，可放回）、
+    //   dropCount=1、maxStack=64。顶面贴图按阶段递增裂纹（113 完好 / 115 微损 / 116 重损）；底·侧·前共享
+    //   anvil_base(114)（深铁砧身）。音色归 GroupStone（金属质）。配方（仅完好 Anvil）：3 铁块顶行 + 4 铁锭
+    //   中底行 → 1 完好铁砧。进创造调色板（仅 Anvil 完好；微损/重损由使用产生不进调色板）。
+    /* anvil        */ {int(BlockRegistry::Anvil),           113,114,114,114, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Anvil),           1, 64, "anvil",        "铁砧"},
+    /* anvil_chipped*/ {int(BlockRegistry::AnvilChipped),    115,114,114,114, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::AnvilChipped),    1, 64, "anvil_chipped","微损铁砧"},
+    /* anvil_damaged*/ {int(BlockRegistry::AnvilDamaged),    116,114,114,114, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::AnvilDamaged),    1, 64, "anvil_damaged","重损铁砧"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -497,6 +512,11 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* lapis_ore               */ 21, // t471 青金矿石 → MC 1.0 lapis lazuli ore id 21
     /* enchanting_table        */ 116, // t474 附魔台 → MC 1.0 enchanting table id 116
     /* bookshelf               */ 47,  // t474 书架 → MC 1.0 bookshelf id 47
+    // t477 铁块 / 铁砧 → MC 1.0 对齐：iron block id 42（1.0 存在）；anvil id 145 为 1.4+（1.0 无铁砧）→ -1（资源包回退引擎自绘）。
+    /* iron_block              */ 42,  // t477 铁块 → MC 1.0 iron block id 42
+    /* anvil                   */ -1, // t477 铁砧 → MC 1.0 无等价（anvil id 145 为 1.4+；本工程独立 id 故无 1.0 等价）
+    /* anvil_chipped           */ -1, // t477 微损铁砧 → MC 1.0 无等价（同 anvil，1.4+ 才以 metadata 分损坏态）
+    /* anvil_damaged           */ -1, // t477 重损铁砧 → MC 1.0 无等价（同 anvil）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -644,6 +664,32 @@ bool BlockRegistry::isBookshelf(quint8 blockId)
 bool BlockRegistry::isEnchantingTable(quint8 blockId)
 {
     return blockId == EnchantingTable;
+}
+
+// t477 铁砧统一谓词（单一权威，覆盖 3 损坏阶段 Anvil/AnvilChipped/AnvilDamaged）：供 playercontroller
+//   useBlock 判定「右键命中格是否铁砧 → 开 AnvilUI」+ 破块掉落判定，避免各处硬编码 3 个 id 判定漂移
+//   （同 isIce 三阶段并判模式）。
+bool BlockRegistry::isAnvil(quint8 blockId)
+{
+    return blockId == Anvil || blockId == AnvilChipped || blockId == AnvilDamaged;
+}
+
+// t477 铁砧损坏阶段（0=完好 / 1=微损 / 2=重损）；非铁砧 → 0。
+int BlockRegistry::anvilDamageStage(quint8 blockId)
+{
+    if (blockId == AnvilChipped) return 1;
+    if (blockId == AnvilDamaged) return 2;
+    return 0; // Anvil（完好）或非铁砧
+}
+
+// t477 铁砧损坏 +1 后的目标方块 id：完好→微损 / 微损→重损 / 重损→Air（碎裂移除）。
+//   playercontroller damageAnvil 据本单一权威推进阶段（不各处自写 id 推进）。非铁砧 → 原 id（不变）。
+quint8 BlockRegistry::anvilNextStage(quint8 blockId)
+{
+    if (blockId == Anvil)        return quint8(AnvilChipped);
+    if (blockId == AnvilChipped) return quint8(AnvilDamaged);
+    if (blockId == AnvilDamaged) return quint8(Air); // 重损再损 → 碎裂移除
+    return blockId; // 非铁砧 → 不变
 }
 
 // t468 冰族统一谓词（单一权威）：Ice(45) / PackIce(91) / BlueIce(92) 即冰。三 id 不连续（Ice 夹中间）故显式并判。
@@ -987,6 +1033,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Obsidian: // t411 黑曜石 → 石质音色（致密火山玻璃，同 cobble/stone 族）
     case CobbleSlab: case CobbleStairs: case CobbleFence: case CobblePressurePlate: // t412 圆石变体 → 石质音色（同 cobble 族）
     case EnchantingTable: // t474 附魔台 → 石质音色（黑曜石+钻石基座，石质偏硬，同 obsidian 族）
+    case IronBlock: case Anvil: case AnvilChipped: case AnvilDamaged: // t477 铁块/铁砧 → 石质音色（金属质，同 obsidian 族；机制等价 MC 1.0 iron/anvil metal SoundType）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

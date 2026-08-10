@@ -65,6 +65,14 @@ Window {
     property int enchantX: 0
     property int enchantY: 0
     property int enchantZ: 0
+    // t477 铁砧子态：右键铁砧方块 → player.anvilOpened(x,y,z) → 显 AnvilUI（修复 / 附魔合并 / 重命名三功能，
+    //   各消耗 XP 等级）+ 释放指针。与 inventoryOpen / craftingTableOpen / furnaceOpen / chestOpen /
+    //   enchantingTableOpen 互斥；E/Esc 关 → 恢复 grab。anvilX/Y/Z 记当前所开铁砧的方块世界坐标（UI 据此
+    //   调 player.damageAnvil 推进铁砧损坏阶段）。
+    property bool anvilOpen: false
+    property int anvilX: 0
+    property int anvilY: 0
+    property int anvilZ: 0
     // t225 当前所开箱子的「前面（锁面）」朝向（0=+X 1=-X 2=+Z 3=-Z；与 BlockRegistry::chestFrontFace /
     //   horizontalFacing 同源编码 = 前面所朝方向）。openChest 读 theWorld.stateAt(x,y,z) 设置；驱动盖子
     //   铰链侧（chestLidYaw）→ 放置时锁面朝玩家，开盖铰链在锁面背侧。默认 3（-Z，对齐旧默认 / 兜底）。
@@ -772,6 +780,7 @@ Window {
         if (appState !== "playing" || craftingTableOpen) return
         if (inventoryOpen) closeInventory()
         if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
         craftingTableOpen = true
         player.release()
     }
@@ -789,6 +798,7 @@ Window {
         if (inventoryOpen) closeInventory()
         if (craftingTableOpen) closeCraftingTable()
         if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
         furnaceOpen = true
         player.release()
     }
@@ -819,6 +829,7 @@ Window {
         if (craftingTableOpen) closeCraftingTable()
         if (furnaceOpen) closeFurnace()
         if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
         chestX = x; chestY = y; chestZ = z
         // t225 读箱子朝向 state（前面所朝方向；placeBlock 写入 = horizontalFacing^1，锁面朝玩家）→
         //   驱动盖子铰链侧（chestLidYaw）。& 3 防御性掩码（与 BlockRegistry::chestFrontFace 的 state&3 同源）。
@@ -851,6 +862,7 @@ Window {
         if (craftingTableOpen) closeCraftingTable()
         if (furnaceOpen) closeFurnace()
         if (chestOpen) closeChest()
+        if (anvilOpen) closeAnvil()
         enchantX = x; enchantY = y; enchantZ = z
         enchantingTableOpen = true
         player.release()
@@ -858,6 +870,28 @@ Window {
     function closeEnchantingTable() {
         if (!enchantingTableOpen) return
         enchantingTableOpen = false
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
+
+    // t477 打开 / 关闭铁砧面板。打开 → release（光标可见点按钮 / 输入名）；关 → grab + 焦点回键位层。
+    // 与 inventoryOpen / craftingTableOpen / furnaceOpen / chestOpen / enchantingTableOpen 互斥。
+    //   x/y/z = 所开铁砧的方块世界坐标（player.anvilOpened 携带 → UI 据此调 player.damageAnvil 推进损坏）。
+    function openAnvil(x, y, z) {
+        if (appState !== "playing" || anvilOpen) return
+        if (inventoryOpen) closeInventory()
+        if (craftingTableOpen) closeCraftingTable()
+        if (furnaceOpen) closeFurnace()
+        if (chestOpen) closeChest()
+        if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
+        anvilX = x; anvilY = y; anvilZ = z
+        anvilOpen = true
+        player.release()
+    }
+    function closeAnvil() {
+        if (!anvilOpen) return
+        anvilOpen = false
         player.grab()
         keyInput.forceActiveFocus()
     }
@@ -874,6 +908,7 @@ Window {
         if (furnaceOpen) closeFurnace()
         if (chestOpen) closeChest()
         if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
         // 死亡态不开聊天（死亡信息已由死亡屏接管；防聊天 input 抢死亡按钮焦点）。
         if (playerState.dead) return
         chatOpen = true
@@ -1706,6 +1741,9 @@ Window {
         // t474：右键附魔台 → player 发 enchantingTableOpened(x,y,z) → 开 EnchantingTableUI（释放指针 / 关包互斥）。
         //   坐标供 UI 查 theWorld.countBookshelvesAround 算书架加成 → 提升可选附魔等级上限。
         function onEnchantingTableOpened(x, y, z) { window.openEnchantingTable(x, y, z) }
+        // t477：右键铁砧 → player 发 anvilOpened(x,y,z) → 开 AnvilUI（释放指针 / 关包互斥）。
+        //   坐标供 UI 调 player.damageAnvil 推进铁砧损坏阶段（每次成功操作 ~1/3 概率损坏 +1）。
+        function onAnvilOpened(x, y, z) { window.openAnvil(x, y, z) }
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
@@ -5902,6 +5940,7 @@ Window {
                 else if (window.furnaceOpen) window.closeFurnace()
                 else if (window.chestOpen) window.closeChest()
                 else if (window.enchantingTableOpen) window.closeEnchantingTable()
+                else if (window.anvilOpen) window.closeAnvil()
                 else window.toggleInventory()
                 e.accepted = true; return
             }
@@ -5925,6 +5964,10 @@ Window {
             // t474 附魔台面板：Esc 关（同工作台 / 熔炉 / 箱子；!captured 时 Esc 落 QML → 本分支）。
             if (e.key === Qt.Key_Escape && window.enchantingTableOpen) {
                 window.closeEnchantingTable(); e.accepted = true; return
+            }
+            // t477 铁砧面板：Esc 关（同附魔台 / 工作台 / 熔炉 / 箱子；!captured 时 Esc 落 QML → 本分支）。
+            if (e.key === Qt.Key_Escape && window.anvilOpen) {
+                window.closeAnvil(); e.accepted = true; return
             }
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
             //   t143：同时跟踪 f3Held=true（无条件，menu 态也设，与 shiftHeld 同模式），供 B 键修饰判定。
@@ -7322,6 +7365,25 @@ Window {
         visible: window.appState === "playing" && window.enchantingTableOpen
         z: 150
         onClosed: window.closeEnchantingTable()
+    }
+
+    // t477 铁砧面板：右键铁砧方块打开（player.anvilOpened → openAnvil）。
+    //   仅 playing && anvilOpen 时显（与背包 / 工作台 / 熔炉 / 箱子 / 附魔台面板互斥）。
+    //   以选中 hotbar 槽为目标，三功能（修复 / 附魔合并 / 重命名）各消耗 XP 等级；每次成功操作调
+    //   player.damageAnvil(anvilX/Y/Z) 推进铁砧损坏（~1/3 概率 +1 阶段；重损再损碎裂移除）。
+    //   PERF：所有显示绑定到 slotRevision / selectedSlotChanged / levelChanged（低频 NOTIFY），永不 per-frame。
+    AnvilUI {
+        id: anvilPanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        playerState: playerState
+        player: player
+        anvilX: window.anvilX
+        anvilY: window.anvilY
+        anvilZ: window.anvilZ
+        visible: window.appState === "playing" && window.anvilOpen
+        z: 150
+        onClosed: window.closeAnvil()
     }
 
     // t87 冶炼 tick：WorldClock 每 100ms 发 ticked(0.1) → 转发到 furnacePanel.tick 推进冶炼。

@@ -406,3 +406,29 @@
     每根线画成 ≥2px 横带 → 即此（×4 放大后过粗）。修源贴图线宽到 1px（仅锚点 / 尖端局部加粗），勿在图标层改。
   - **通用形态**：凡图标 = 源贴图「直接整数倍 NEAREST 放大」的，**图标的可读线宽 = 源线宽 × 放大倍**。设计源贴图时要按
     「放大后仍清晰」倒推源线宽（4× 放大 → 源 1px = 图标 4px 合适；源 2px = 图标 8px 偏粗）。
+
+---
+
+## 值类型结构体新增字段与部分聚合初始化（t477 验证）
+
+> 元原则：**给一个「大量处用部分聚合初始化」的值类型结构体（如 `ItemStack`）追加字段时，新字段必须带
+> 显式默认成员初始化（`= T()`），否则 `-Wextra` 的 `-Wmissing-field-initializers` 会在**全工程所有既有部分初始化处**
+> 爆一片警告 —— 即便那些初始化处不是你这次改的文件。**
+
+- **`ItemStack{0,0}` / `{id,count,dur}` 这类「只写前几个字段、靠默认值补齐尾部」的写法，依赖尾字段有默认成员初始化
+  （DMI）才不触发 `-Wmissing-field-initializers`**：旧 `ItemStack{id,count,durability,enchants[4]={0,0,0,0}}` 里
+  `enchants` 有 DMI，故 `{0,0}`（只写 id/count）不告警 —— durability 与 enchants 都有 DMI 兜底。但**新增一个无 DMI 的
+  字段**（如 `QString customName;`）后，`{0,0}` 现在漏掉了**无 DMI 的** customName → -Wextra 在 22 处既有初始化全爆
+  （hotbar.cpp 全工程的栈构造点）。**判别信号**：给值类型 struct 加字段后，`-Wall -Wextra -fsyntax-only` 报一片
+  `missing initializer for member 'X::newField'` 且行号遍布既有代码（非本次 diff）→ 即新字段缺 DMI。
+- **修法**：新字段写 `QString customName = QString();`（显式 DMI），-Wmissing-field-initializers 即对它静默
+  （与既有 `enchants[4] = {0,0,0,0}` 同机制 —— 有 DMI 的尾字段不告警）。**不要**去改 22 处既有 `{0,0}` → `{0,0,0,{},QString()}`
+  （既 invasive 又每处重复、易错）；DMI 是单点根治。
+- **通用形态 / 自检门槛**：凡给「被广泛部分聚合初始化」的值类型（物品栈 / 配置项 / 消息包 / 颜色结构…）追加字段，
+  一律给新字段显式 DMI（`= T()` 或合理默认），即便该字段类型默认构造本就空（QString / std::vector / 智能指针）——
+  DMI 的作用在此不是「给默认值」（成员本就默认构造），而是**告诉 -Wextra「此字段允许部分初始化时缺省」**。
+  CI / build-test 角色按 `-Wall -Wextra` 口径扫全量代码（非本次 diff），故单文件复核 + 全量构建两关都要过。
+  - 证据：t477——给 `ItemStack` 加 `QString customName;`（铁砧重命名），缺 DMI → hotbar.cpp 22 处既有
+    `{0,0}`/`{id,count,dur}` 全报 `-Wmissing-field-initializers`（默认 cmake 构建**不开** -Wextra 故不可见，须
+    `-Wall -Wextra -fsyntax-only` 单文件复核才暴露，同 t271 enum/scalar 三目族）；改 `= QString()` 后清零。
+

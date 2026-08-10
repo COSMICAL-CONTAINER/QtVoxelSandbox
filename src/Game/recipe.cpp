@@ -597,6 +597,22 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::BookId,     RecipeRegistry::BookId,     RecipeRegistry::BookId,
         int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks) },
       int(BlockRegistry::Bookshelf), 1, 1, "bookshelf" },
+    // t477 铁块（iron_block）：9 铁锭 3×3 满铺 → 1 铁块（有序 3×3，仅工作台）。机制等价 MC 1.0 iron block
+    //   （9 ingots ↔ 1 block 存储方块，机制对标）。铁锭 = RecipeRegistry::IronIngotId（0x203，铁原矿冶炼产物）。
+    //   产物 = IronBlock（铁砧配方前置）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
+        RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
+        RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId },
+      int(BlockRegistry::IronBlock), 1, 1, "iron_block" },
+    // t477 铁砧（anvil）：3 铁块顶行 + 中格 1 铁锭 + 底行 3 铁锭（4 铁锭）→ 1 完好铁砧（有序 3×3，仅工作台）。
+    //   机制等价 MC 1.0 anvil 配方（顶 3 iron block + 中 1 iron ingot + 底 3 iron ingot = 3 块 + 4 锭）。
+    //   产物 = Anvil（完好铁砧；损坏态 AnvilChipped/AnvilDamaged 不经合成，由使用产生）。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::IronBlock), int(BlockRegistry::IronBlock), int(BlockRegistry::IronBlock),
+        0,                              RecipeRegistry::IronIngotId,  0,
+        RecipeRegistry::IronIngotId,    RecipeRegistry::IronIngotId,  RecipeRegistry::IronIngotId },
+      int(BlockRegistry::Anvil), 1, 1, "anvil" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

@@ -393,6 +393,12 @@ public:
     //   tick 被 wish 输入覆盖，无法存击退），step() 走路路径每帧衰减 + 重力 + 叠入位移。分层（PLAN §2）：
     //   Game/Physics 层持击退态；方向由 Entities 层（mob 位置 / 箭速）经语义信号向下传（Game→Physics 同层）。
     Q_INVOKABLE void applyHitKnockback(float dirX, float dirZ);
+    // t477 铁砧损坏推进（AnvilUI 每次成功操作后调）：滚概率（~1/3）损坏铁砧 +1 阶段。据当前阶段经
+    //   BlockRegistry::anvilNextStage 推进：完好→微损 / 微损→重损 / 重损→Air（碎裂移除）。重损→碎裂时
+    //   发 blockBroken(Anvil) 触发破块粒子 / 音（机制等价 MC 铁砧用坏碎裂）。坐标 = 玩家所点铁砧格世界坐标。
+    //   分层（PLAN §2）：Game/Physics 层写世界方块（m_world），呈现层（AnvilUI）只调本方法 + 据 bool 无关
+    //   （损坏结果由 worldChanged 重建 mesh 呈现，UI 无需读返回）。
+    Q_INVOKABLE void damageAnvil(int x, int y, int z);
     // Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格）。仅指针捕获时生效
     // （spec）。空手 / 取失败 → 不丢。spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem
     // （同破块掉落 t35 路径）；丢弃后实体可被重新拾取（闭环）。
@@ -586,6 +592,11 @@ signals:
     //   开附魔界面。同 chestOpened 模式：Game/Physics 层发语义事件（携坐标供 World.countBookshelvesAround
     //   算书架加成 → 提升可选附魔等级上限），呈现层只消费（PLAN §2 分层）。坐标 = 玩家所点附魔台格的整数世界坐标。
     void enchantingTableOpened(int x, int y, int z);
+    // t477 右键铁砧（anvil）：placeBlock 检测到命中格为铁砧（BlockRegistry::isAnvil 覆盖完好/微损/重损三阶段）
+    //   → 发本信号（不放置；携命中格世界坐标）→ 呈现层 Connections 打开 AnvilUI（释放指针）。机制等价 MC
+    //   右键铁砧开铁砧界面。同 enchantingTableOpened 模式：Game 层发语义事件（携坐标供 damageAnvil 推进损坏），
+    //   呈现层只消费。坐标 = 玩家所点铁砧格的整数世界坐标。
+    void anvilOpened(int x, int y, int z);
     // 火把放置（t125 朝向修正）：placeBlock 成功放置 Torch 后发，携带玩家点击面的外法线（指向玩家侧，
     //   = m_hitNx/Ny/Nz）。呈现层（torchHost）据此把火把定向为「柄嵌玩家所点墙面」——替代旧 recomputeOrient
     //   固定优先级（下>-X>+X>-Z>+Z）：旧逻辑在「墙+地并存」（墙插火把下方恰有地面）时误判垂直立柱，

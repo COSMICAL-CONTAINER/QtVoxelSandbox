@@ -534,7 +534,33 @@ public:
         //   进创造调色板（玩家可取用 / 放置；附魔台加成测试用）。isBookshelf 单一权威谓词供 World::countBookshelvesAround
         //   （附魔台加成）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移（同 isBed / isLadder 模式）。
         Bookshelf       = 95, // 书架：合成产物（6 木板 + 3 书）；附魔台加成来源（2 格内计数 ≤15）；木质整立方
-        Count           = 96, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t477 铁块 + 铁砧（机制等价 MC 1.0 iron block / anvil；名称 / 贴图全原创自绘 §9a）：
+        //   铁块（IronBlock）：**9 铁锭合成**的金属存储方块（机制等价 MC 1.0 iron block；3 铁块 + 4 铁锭合成铁砧
+        //   的前置）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 obsidian /
+        //   wool 同族）、hardness=5.0（同 MC 1.0 铁块量级，金属偏硬）、toolType=Pickaxe、requiresTool=true、
+        //   minTier1（木镐可破且掉落）、dropId=自身、dropCount=1、maxStack=64。各面贴图=iron_block(112)
+        //   （金属灰底 + 细密铆钉网格 + 高光，原创自绘 §9a）。音色归 GroupStone（金属质，同 obsidian 族）。
+        //   配方：9 铁锭 3×3 满铺 → 1 铁块（recipe.cpp）。进创造调色板（玩家可取用 / 放置）。
+        IronBlock       = 96, // 铁块：9 铁锭合成存储方块；铁砧配方前置（3 铁块 + 4 铁锭 → 铁砧）
+        //   铁砧（Anvil）：右键开铁砧界面（playercontroller useBlock 分支发 anvilOpened(x,y,z) → Main.qml 显
+        //   AnvilUI：修复 / 附魔合并 / 重命名三功能，各消耗 XP 等级）。机制等价 MC 1.0 铁砧。**铁砧自身耐久**：
+        //   3 个损坏阶段（完好 / 微损 / 重损），每次成功操作有概率损坏 +1；重损态再损坏 → 方块碎裂移除
+        //   （playercontroller damageAnvil 滚概率，据当前阶段 → 写下一阶段 id 或 setBlock Air）。**三阶段用三个
+        //   方块 id**（非 state 编码）—— 因 mesher 整立方路径按 BlockDef 静态 tile 渲染、无 per-state top tile
+        //   选择先例（water/wheat 走水段/cross 段），故同 bed/wool 多 id 模式（每阶段独立 tile 顶面 + 共享侧面）。
+        //   isAnvil 单一权威谓词覆盖三阶段（playercontroller 右键开 UI / 破块掉落统一读它）。
+        //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形；MC 1.0 铁砧是异形低体
+        //   + 上方砧台，本工程简化为整立方以复用既有渲染路径，机制等价非视觉对齐 §4）、hardness=5.0（同 MC
+        //   1.0 铁砧量级，金属偏硬）、toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落）、
+        //   dropId=自身（破任一阶段铁砧掉对应阶段铁砧方块，可放回；玩家仅在创造调色板取用**完好**铁砧）、
+        //   dropCount=1、maxStack=64。各面贴图：顶=anvil_top / anvil_damaged_1_top / anvil_damaged_2_top
+        //   （tile 113/115/116，深铁砧台 + 砧面轮廓 + 阶段递增裂纹）/ 底·侧·前=anvil_base(114)（深铁砧身，
+        //   三阶段共享）。音色归 GroupStone（金属质）。配方：3 铁块顶行 + 4 铁锭中底行（T 形下方实心）→ 1 完好
+        //   铁砧（recipe.cpp 有序 3×3）。进创造调色板（仅完好铁砧 Anvil；微损 / 重损不进调色板，由使用产生）。
+        Anvil           = 97, // 铁砧（完好）：右键开铁砧 UI（修复/合并/重命名，耗 XP）；3 铁块+4 铁锭合成；损坏阶段 0
+        AnvilChipped    = 98, // 铁砧（微损）：使用损坏态 1（顶面 anvil_damaged_1_top，细裂纹）；再损→重损
+        AnvilDamaged    = 99, // 铁砧（重损）：使用损坏态 2（顶面 anvil_damaged_2_top，粗裂纹）；再损→碎裂移除
+        Count           = 100, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -593,6 +619,16 @@ public:
     //   useBlock 分支判定「右键命中格是否附魔台 → 开 EnchantingTableUI」（避免各处硬编码 id 判定漂移，同
     //   isLadder 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来变体时一处同步）。
     static bool isEnchantingTable(quint8 blockId);
+    // t477 铁砧统一谓词（单一权威，覆盖 3 损坏阶段 Anvil/AnvilChipped/AnvilDamaged）：供 playercontroller
+    //   placeBlock useBlock 分支判定「右键命中格是否铁砧 → 开 AnvilUI」+ 破块掉落判定，避免各处硬编码 3 个
+    //   id 判定漂移（同 isIce 三阶段模式）。三 id 不连续于单一区间（紧邻 97/98/99，实为连续段，故裸区间亦可，
+    //   但仍提供谓词作单一权威，改段时一处同步）。
+    static bool isAnvil(quint8 blockId);
+    // t477 铁砧损坏阶段（0=完好 Anvil / 1=微损 AnvilChipped / 2=重损 AnvilDamaged）；非铁砧 → 0。
+    static int anvilDamageStage(quint8 blockId);
+    // t477 铁砧损坏 +1 后的目标方块 id：完好→微损 / 微损→重损 / 重损→Air（碎裂移除）。非铁砧 → 原 id。
+    //   playercontroller damageAnvil 据本单一权威推进阶段（不各处自写 id 推进，同 bedPartnerOffset 模式）。
+    static quint8 anvilNextStage(quint8 blockId);
 
     // t468 冰族统一谓词（单一权威，机制等价 MC 1.0 ice / packed ice / blue ice）：blockId == Ice / PackIce /
     //   BlueIce 即冰。供 PlayerController 冰滑行物理 + ItemEntityManager 物品冰摩擦 + mesher iceOnly 段路由
@@ -969,7 +1005,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 112;
+    static constexpr int AtlasTileCount = 117;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），

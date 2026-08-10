@@ -1210,6 +1210,22 @@ void PlayerController::applyHitKnockback(float dirX, float dirZ)
     qInfo("player hit-knockback dir=(%.3f,%.3f) horiz=%.1f", dirX, dirZ, kHitKnockbackHoriz);
 }
 
+// t477 铁砧损坏推进（AnvilUI 每次成功操作后调）。机制等价 MC 1.0 铁砧 12% 概率损坏 —— 本工程取 ~1/3
+//   （更易观察损坏链，便于测试 3 阶段 + 碎裂；机制对标非数值 1:1）。据当前阶段经 BlockRegistry::anvilNextStage
+//   推进：完好→微损 / 微损→重损 / 重损→Air（碎裂移除）。setBlock 触发 worldChanged（mesh 重建显新顶面贴图）；
+//   重损→Air 由 World setBlock 发 blockBroken（破块粒子 / 音，机制等价 MC 铁砧用坏碎裂）。
+void PlayerController::damageAnvil(int x, int y, int z)
+{
+    if (!m_world) return;
+    const quint8 cur = m_world->blockAt(x, y, z);
+    if (!BlockRegistry::isAnvil(cur)) return;     // 非铁砧（已被破 / 替换）→ no-op
+    // ~1/3 概率损坏（bounded(3) ∈ {0,1,2}；==0 即损坏）。
+    if (QRandomGenerator::global()->bounded(3) != 0) return;
+    const quint8 next = BlockRegistry::anvilNextStage(cur);
+    if (next == cur) return;                       // 非铁砧兜底（anvilNextStage 对非铁砧返原 id）
+    m_world->setBlock(x, y, z, next);              // 推进阶段（或重损→Air 碎裂；World 发 blockBroken + worldChanged）
+}
+
 // 每 tick 推进生存挖掘进度（t34）+ 连续续挖（t44）。创造不进入此态（beginMining 内瞬破已 return）。
 // spec：progress += dt * speed(block, tool)；speed = 1 / miningTime（ToolRegistry 已含 hardness/speedMul）。
 //   - 失命中 / 目标已被破（变 air）→ cancelMining。
@@ -1763,6 +1779,14 @@ void PlayerController::placeBlock()
     //   附魔等级上限（机制等价 MC 1.0 附魔台书架 power）。空手亦可（开界面是「使用」语义，与手持何物无关）。
     if (BlockRegistry::isEnchantingTable(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         emit enchantingTableOpened(m_hitBx, m_hitBy, m_hitBz);
+        return;
+    }
+    // t477：右键铁砧 → 打开 AnvilUI 铁砧界面（同工作台 / 熔炉 / 箱子 / 附魔台模式：优先于放置，无论手持
+    //   何物右键铁砧即开）。发 anvilOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开 AnvilUI（释放
+    //   指针）；UI 据坐标调 damageAnvil 推进铁砧损坏阶段。机制等价 MC 右键铁砧开铁砧界面。空手亦可（开界面
+    //   是「使用」语义，与手持何物无关）。isAnvil 覆盖完好 / 微损 / 重损三阶段（任一皆可开 UI）。
+    if (BlockRegistry::isAnvil(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+        emit anvilOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
     // t387/t388 右键床 → 尝试睡觉（useBlock 语义；优先于放置，同工作台 / 箱子模式：右键已放置的床即睡，不另放块）。

@@ -61,6 +61,10 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Obsidian:     return "icon_obsidian.png";       // t472 黑曜石立方体图标（各面=深紫黑火山玻璃；流体交互产物，钻石镐采掘）
     case BlockRegistry::EnchantingTable: return "icon_enchanting_table.png"; // t474 附魔台立方体图标（顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点）
     case BlockRegistry::Bookshelf:    return "icon_bookshelf.png";      // t474 书架立方体图标（各面=木板边框+彩色书脊书列）
+    case BlockRegistry::IronBlock:    return "icon_iron_block.png";     // t477 铁块立方体图标（各面=金属灰底+铆钉网格+高光）
+    case BlockRegistry::Anvil:        return "icon_anvil.png";          // t477 铁砧立方体图标（顶=砧台+砧面+尖角 / 侧=深铁砧身）
+    case BlockRegistry::AnvilChipped: return "icon_anvil_chipped.png";  // t477 微损铁砧立方体图标（顶=砧台+细裂纹）
+    case BlockRegistry::AnvilDamaged: return "icon_anvil_damaged.png";  // t477 重损铁砧立方体图标（顶=砧台+粗裂纹网+缺角）
     // t387 床方块 8 色变体立方体图标（彩色被面 + 枕垫亮带 + 绗缝针脚；build_cube_icons.py 程序生成）。
     case BlockRegistry::BedRed:        return "icon_bed_red.png";        // 红床（配方产物默认色）
     case BlockRegistry::BedOrange:     return "icon_bed_orange.png";     // 橙床
@@ -557,7 +561,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::BedPurple),   int(BlockRegistry::BedBrown),
              // t474 附魔链两件方块（机制等价 MC 1.0 enchanting table / bookshelf；右键附魔台开 UI / 书架作加成源）。
              int(BlockRegistry::EnchantingTable),                              // 附魔台（右键开附魔 UI；配方书+钻石+黑曜石）
-             int(BlockRegistry::Bookshelf) };                                  // 书架（合成产物；附魔台加成来源；配方木板+书）
+             int(BlockRegistry::Bookshelf),                                   // 书架（合成产物；附魔台加成来源；配方木板+书）
+             // t477 铁块 + 铁砧（机制等价 MC 1.0 iron block / anvil；右键铁砧开铁砧 UI）。
+             int(BlockRegistry::IronBlock),                                   // 铁块（9 铁锭合成存储方块；铁砧配方前置）
+             int(BlockRegistry::Anvil) };                                     // 铁砧（右键开铁砧 UI 修复/合并/重命名；配方 3 铁块+4 铁锭；微损/重损不进调色板）
 }
 
 QString Hotbar::iconSourceAt(int slot) const
@@ -585,6 +592,11 @@ QString Hotbar::iconSourceForBlock(int blockId) const
 
 QString Hotbar::nameAt(int slot) const
 {
+    // t477 优先返回自定义名（铁砧重命名）；无自定义名 → 走注册表默认名 displayName。
+    if (slot >= 0 && slot < int(m_slots.size())) {
+        const QString &cn = m_slots[size_t(slot)].customName;
+        if (!cn.isEmpty()) return cn;
+    }
     return nameForBlock(blockIdAt(slot));
 }
 
@@ -1405,6 +1417,168 @@ QVariantList Hotbar::armorEnchantsAt(int slot) const
 {
     if (slot < 0 || slot >= int(m_armorSlots.size())) return {0, 0, 0, 0};
     return readEnchants(m_armorSlots[size_t(slot)]);
+}
+
+// ── t477 自定义名读写（铁砧重命名）── 同 durabilityAt 模式（越界 → 空串）。
+QString Hotbar::customNameAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_slots.size())) return QString();
+    return m_slots[size_t(slot)].customName;
+}
+QString Hotbar::mainCustomNameAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_mainSlots.size())) return QString();
+    return m_mainSlots[size_t(slot)].customName;
+}
+void Hotbar::setCustomName(int slot, const QString &name)
+{
+    if (slot < 0 || slot >= int(m_slots.size())) return;
+    ItemStack &s = m_slots[size_t(slot)];
+    if (s.isEmpty()) return;              // 空槽不写名
+    s.customName = name.trimmed();        // 去首尾空白（防误输入全空格）
+    ++m_slotRevision; emit slotsChanged();
+    if (slot == m_selectedSlot) emit selectedSlotChanged(); // 驱动 nameAt / HUD 名刷新
+}
+void Hotbar::mainSetCustomName(int slot, const QString &name)
+{
+    if (slot < 0 || slot >= int(m_mainSlots.size())) return;
+    ItemStack &s = m_mainSlots[size_t(slot)];
+    if (s.isEmpty()) return;
+    s.customName = name.trimmed();
+    emit mainSlotsChanged();
+}
+
+// ── t477 铁砧三功能内部辅助 ──
+
+// 工具 / 护甲的最大耐久（供修复算 max 上限）；非可修复物品 → 0。单一权威：工具走 ToolRegistry、护甲走
+//   ArmorRegistry（二者 maxDurability 各持；本 helper 按段分流，避免 caller 自写两套判定）。
+static int repairMaxDurability(int itemId)
+{
+    if (ToolRegistry::isTool(itemId))    return ToolRegistry::maxDurability(itemId);
+    if (ArmorRegistry::isArmor(itemId))  return ArmorRegistry::maxDurability(itemId);
+    return 0;
+}
+
+// 在 hotbar（除选中槽）+ 主栏找一件同 id 第二件（count>0）。找到 → 返回 true 并经 outGroup/outIndex 写
+//   位置（'h'=hotbar / 'm'=main）；调用方据之取栈引用。找不到 → false。excludeSel = 跳过的 hotbar 槽
+//   （铁砧操作目标 = 选中槽，第二件不能是它自己）。
+static bool findSecondSameId(const std::vector<ItemStack> &hotSlots,
+                             const std::vector<ItemStack> &mainSlots, int id, int excludeSel,
+                             char &outGroup, int &outIndex)
+{
+    for (size_t i = 0; i < hotSlots.size(); ++i) {
+        if (int(i) == excludeSel) continue;
+        if (hotSlots[i].id == id && hotSlots[i].count > 0) { outGroup = 'h'; outIndex = int(i); return true; }
+    }
+    for (size_t i = 0; i < mainSlots.size(); ++i) {
+        if (mainSlots[i].id == id && mainSlots[i].count > 0) { outGroup = 'm'; outIndex = int(i); return true; }
+    }
+    return false;
+}
+
+// 取组:下标 对应栈引用（'h'=hotbar / 'm'=main）。范围已由 findSecondSameId 保证。
+static ItemStack &secondRef(std::vector<ItemStack> &hotSlots, std::vector<ItemStack> &mainSlots,
+                            char group, int index)
+{
+    return group == 'h' ? hotSlots[size_t(index)] : mainSlots[size_t(index)];
+}
+
+bool Hotbar::anvilCanRepairSelected() const
+{
+    if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return false;
+    const ItemStack &sel = m_slots[size_t(m_selectedSlot)];
+    if (sel.isEmpty()) return false;
+    if (repairMaxDurability(sel.id) <= 0) return false; // 非工具 / 护甲不可修复
+    char g = 0; int idx = 0;
+    return findSecondSameId(m_slots, m_mainSlots, sel.id, m_selectedSlot, g, idx);
+}
+
+bool Hotbar::anvilDoRepairSelected()
+{
+    if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return false;
+    ItemStack &sel = m_slots[size_t(m_selectedSlot)];
+    if (sel.isEmpty()) return false;
+    const int maxD = repairMaxDurability(sel.id);
+    if (maxD <= 0) return false;
+    char g = 0; int idx = 0;
+    if (!findSecondSameId(m_slots, m_mainSlots, sel.id, m_selectedSlot, g, idx)) return false;
+    ItemStack &second = secondRef(m_slots, m_mainSlots, g, idx);
+    // 机制等价 MC 1.0 铁砧修复：合并耐久 + 12% max 加成，clamp 到 max。
+    const int repaired = std::min(maxD, sel.durability + second.durability + maxD / 8);
+    sel.durability = repaired;
+    // 消耗 1 件第二件（工具 / 护甲 count 恒 1 → 取 1 即清空该槽）。
+    if (second.count > 1) second.count -= 1;
+    else                  second = ItemStack{0, 0, 0};
+    ++m_slotRevision; emit slotsChanged();
+    if (g == 'm') emit mainSlotsChanged();
+    return true;
+}
+
+bool Hotbar::anvilCanMergeEnchantsSelected() const
+{
+    if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return false;
+    const ItemStack &sel = m_slots[size_t(m_selectedSlot)];
+    if (sel.isEmpty()) return false;
+    if (EnchantRegistry::categoryForItem(sel.id) == EnchantRegistry::None) return false; // 非可附魔
+    char g = 0; int idx = 0;
+    if (!findSecondSameId(m_slots, m_mainSlots, sel.id, m_selectedSlot, g, idx)) return false;
+    const ItemStack &second = (g == 'h') ? m_slots[size_t(idx)] : m_mainSlots[size_t(idx)];
+    // 第二件须带至少一个附魔。
+    for (int i = 0; i < 4; ++i) if (second.enchants[i] != 0) return true;
+    return false;
+}
+
+bool Hotbar::anvilDoMergeEnchantsSelected()
+{
+    if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return false;
+    ItemStack &sel = m_slots[size_t(m_selectedSlot)];
+    if (sel.isEmpty()) return false;
+    if (EnchantRegistry::categoryForItem(sel.id) == EnchantRegistry::None) return false;
+    char g = 0; int idx = 0;
+    if (!findSecondSameId(m_slots, m_mainSlots, sel.id, m_selectedSlot, g, idx)) return false;
+    ItemStack &second = secondRef(m_slots, m_mainSlots, g, idx);
+    bool merged = false;
+    // 逐附魔：第二件每个附魔，选中件已有同 id → 取 max 等级；否则写入首个空槽（≤4）。
+    //   机制等价 MC 1.0 铁砧附魔合并（同附魔取高等级、新附魔加入）。
+    for (int i = 0; i < 4; ++i) {
+        const int packed = second.enchants[i];
+        if (packed == 0) continue;
+        const int eid = EnchantRegistry::packEnchantId(packed);
+        const int lvl = EnchantRegistry::packLevel(packed);
+        int slot = -1;
+        for (int j = 0; j < 4; ++j) {
+            if (EnchantRegistry::packEnchantId(sel.enchants[j]) == eid) { slot = j; break; }
+        }
+        if (slot >= 0) {
+            const int cur = EnchantRegistry::packLevel(sel.enchants[slot]);
+            sel.enchants[slot] = EnchantRegistry::pack(eid, std::max(cur, lvl));
+            merged = true;
+        } else {
+            for (int j = 0; j < 4; ++j) {
+                if (sel.enchants[j] == 0) { sel.enchants[j] = EnchantRegistry::pack(eid, lvl); merged = true; break; }
+            }
+        }
+    }
+    if (!merged) return false; // 第二件无附魔（理论 anvilCanMerge 已守；防御）
+    // 消耗第二件（count 1 → 清空）。
+    if (second.count > 1) second.count -= 1;
+    else                  second = ItemStack{0, 0, 0};
+    ++m_slotRevision; emit slotsChanged();
+    if (g == 'm') emit mainSlotsChanged();
+    return true;
+}
+
+bool Hotbar::anvilDoRenameSelected(const QString &name)
+{
+    if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return false;
+    ItemStack &sel = m_slots[size_t(m_selectedSlot)];
+    if (sel.isEmpty()) return false;
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) return false;
+    sel.customName = trimmed;
+    ++m_slotRevision; emit slotsChanged();
+    emit selectedSlotChanged(); // 驱动 nameAt / HUD 名刷新（显重命名）
+    return true;
 }
 
 // t476 选中槽物品附魔等级（供 Game 层 attack / mining calc point 直读）。空槽 / 越界 / 非可附魔 → 0。

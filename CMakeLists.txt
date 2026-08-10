@@ -197,6 +197,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/FurnaceUI.qml
         src/ui/ChestUI.qml
         src/ui/EnchantingTableUI.qml
+        src/ui/AnvilUI.qml
         src/ui/VitalIcon.qml
         src/ui/ToolIcon.qml
         src/ui/MaterialIcon.qml
@@ -235,6 +236,11 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_enchanting_table_top.png # t474 附魔台顶面贴图（build_enchanting_table.py；黑曜石深紫黑底+钻石青白四角+中央立书轮廓）
         textures/default_enchanting_table_side.png # t474 附魔台侧面/底面/前面贴图（build_enchanting_table.py；黑曜石深紫黑底+钻石四角+边缘暗化）
         textures/default_bookshelf.png           # t474 书架各面贴图（build_bookshelf.py；橡木木板边框+彩色书脊书列）
+        textures/default_iron_block.png          # t477 铁块各面贴图（build_anvil.py；金属灰底+铆钉网格+高光；9 铁锭存储方块）
+        textures/default_anvil_top.png           # t477 铁砧完好顶面贴图（build_anvil.py；深铁砧台+宽砧面+尖角+边缘暗化）
+        textures/default_anvil_base.png          # t477 铁砧侧/底/前面贴图（build_anvil.py；深铁砧身+横向分层暗带；三损坏阶段共享）
+        textures/default_anvil_damaged_1_top.png # t477 微损铁砧顶面贴图（build_anvil.py；砧台+一条细裂纹）
+        textures/default_anvil_damaged_2_top.png # t477 重损铁砧顶面贴图（build_anvil.py；砧台+粗裂纹网+尖角缺角）
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
@@ -348,6 +354,10 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_obsidian.png               # t472 黑曜石立方体图标（build_cube_icons.py；深紫黑火山玻璃；流体交互产物，钻石镐采掘）
         textures/icon_enchanting_table.png       # t474 附魔台立方体图标（build_cube_icons.py；顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点+边缘暗化）
         textures/icon_bookshelf.png              # t474 书架立方体图标（build_cube_icons.py；各面=木板边框+彩色书脊书列）
+        textures/icon_iron_block.png             # t477 铁块立方体图标（build_cube_icons.py；各面=金属灰底+铆钉网格+高光）
+        textures/icon_anvil.png                  # t477 铁砧立方体图标（build_cube_icons.py；顶=砧台+砧面+尖角 / 侧=深铁砧身+横向分层）
+        textures/icon_anvil_chipped.png          # t477 微损铁砧立方体图标（build_cube_icons.py；顶=砧台+细裂纹 / 侧=深铁砧身）
+        textures/icon_anvil_damaged.png          # t477 重损铁砧立方体图标（build_cube_icons.py；顶=砧台+粗裂纹网+缺角 / 侧=深铁砧身）
         textures/icon_crafting_table.png
         textures/icon_dirt.png
         textures/icon_furnace.png
