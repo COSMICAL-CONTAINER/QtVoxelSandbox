@@ -601,3 +601,24 @@ FrameProfiler 实测：mesh 稳态 0.5-1.5ms/frame（风暴已灭）；sun 重�
 - **MobType 现状**：0 Test/1 Pig/2 Cow/3 Sheep/4 Shambler/5 Bones/6 Stalker/7 Spider/8 Chicken/9 Squid/**10 Wolf/11 Ocelot/12 SnowGolem/13 IronGolem**。kCap=64 保留（含新 mob）+ t500 aiTick 节流（新 mob AI 全走 aiTick/aiDt 错峰）。
 - **验收**：✅ 编译零警告 + 启动不崩 + QML 加载正常；**待用户 playing 实测**：① 喂幼崽加速成长（t479）；② 杀幼崽无掉落；③ 森林见狼/骨头驯服坐站跟随尾巴（t480）；④ 丛林见豹猫/生鱼驯服变 3 色猫/Stalker 被驱赶（t481，**需飞到新生成的丛林 chunk，旧存档区无丛林**）；⑤ 摆南瓜+雪块×2 出雪傀儡（抛雪球/留雪/沙漠融化）/T 形铁块+南瓜出铁傀儡（高伤击退/掉铁锭）（t482/t483）。mob 性能（10→13 种 mob，kCap=64）待 playing 实测确认。
 - **未做（留批 3）**：D 结构 t484-t487（批 3 workflow `wf_72752a0c-fa0` 已启动，4 串行 voxel-dev：Mineshaft/DesertTemple/JungleTemple/Stronghold）。
+
+---
+
+## R18r batch 3 世界结构（t484-t487，4 结构 + 8 新方块 + 1 新 mob）
+
+> Workflow `wf_72752a0c-fa0`（4 voxel-dev agent 串行，共享 world.cpp/blockregistry/playercontroller → 必须串行）。1,377,330 tok / 705 calls / 184m（11023348ms）。批 2 完成后立即启动（依赖丛林群系 `857343d`）。
+
+**4 任务全 ✅**：
+
+| 任务 | 提交 | 做了什么 |
+|---|---|---|
+| t484 废弃矿井 | `2e40396` | 新 Cobweb(102)/Rail(103)（cross/贴地 + 程序贴图 build_cobweb.py/build_rail.py + atlas tile 120/121 + 6 铁锭→16 铁轨配方）；placeMineshaft 确定性（hashColumn 网格采样 + hashVoxel 散布，Y<48；kMinePct 18→40 使默认 seed 1337 稳定 ~6 座；Planks 地板 + WoodFence 立柱 + Rail + Cobweb + 暴露煤/铁矿 + 末端宝藏箱）；ChestStateMineshaftFlag bit3 → 首开填 mineshaftChestPool（矿物/附魔书/铁锭）。 |
+| t485 沙漠神殿 | `8087799` | 新 TntBlock(104)/CutSandstone(105)/火药物品(0x239，Stalker 掉 1-2 + TNT 配方 5 火药+4 沙)；placeDesertTemple（isDesert 守卫 + grid 48 + 45%；阶梯金字塔底 15×15 顶 3×3 CutSandstone 顶冠 + 7×7×4 密室 + 4 箱 ChestStatePyramidFlag + 中央 3×3 TNT 上垫 CobblePressurePlate）；scanTntTraps 每 tick 扫玩家 footprint → detonateTntBlock（复用 destroySphereSilent 球形破坏 + 距离衰减伤玩家 + explosion 音/视 + ~50% 掉落，伤害仅 Survival）；pyramidChestPool（腐肉30/骨25/金锭18/青金石12/红石10/钻石5/附魔书3，kPyramidRolls=4，坐标确定性 seed 盐）。 |
+| t486 丛林神殿 | `52afc8c` | 新 MossyCobble(106)/Dispenser(107)（state 编码朝向同熔炉，tileFor 按 state 选前面排出口贴图，放置朝玩家）；placeJungleTemple（Jungle 群系 grid 40/pct 50，苔石围墙+地板+天花板+入口缺口+走廊，实测 160×160 产 1 座）；scanDispenserTraps（压力板 4 水平邻 == Dispenser → spawnArrow 朝板方向水平射箭，per-dispenser 2s 冷却，无红石直接触发）；ChestStateJungleFlag bit5 → jungleTempleChestPool。 |
+| t487 要塞 | `187498b` | 新 StoneBrick(108)+石砖台阶/EndPortal(110)/EndEye 物品/银鱼 mob（MobSilverfish=14，小型虫追击 AI + mobmodel + 程序贴图）；placeStronghold（Y<30 确定性，迷宫大厅 + 书架图书馆 + 中央 3×3 末地传送门房 + 银鱼刷怪笼 + 战利品箱）；持末影之眼右键传送门 → state bit0 翻 → end_portal_active 亮绿旋涡视觉 + 日志（末地维度占位，不实现）。 |
+
+- **构建**：4 agent 串行（共享 world.cpp/blockregistry/playercontroller → 必须串行），每 agent 自带 build 零警告 gate + targeted git add + smoke（root objects after load: 1 不崩）。HEAD（187498b）主编排复核 `cmake --build --target voxelsandbox` grep error/warning 空 = 全绿。
+- **新方块**：Cobweb(102)/Rail(103)/TntBlock(104)/CutSandstone(105)/MossyCobble(106)/Dispenser(107)/StoneBrick(108)/EndPortal(110) + 火药物品(0x239)/EndEye 物品 + 银鱼 mob。**MobType 现 0-14**（+Silverfish）。Atlas tile 120-127 + AtlasTileCount 128。
+- **既有告警说明**：多个 agent 用 `-Wall -Wextra -fsyntax-only` 全文件复核时报告 blockregistry.cpp:777 'state' 未用 + world.cpp destroySphereSilent misleading-indentation + az1 未用为**既有非本任务代码**（历史遗留，非批 3 引入）；实际构建 gate（cmake --build）零 warning。留作后续清理项。
+- **验收**：✅ 编译零警告 + 启动不崩 + worldgen 确定性（同 seed 同结构计数，日志佐证）；**待用户 playing 实测**：① 地下挖到废弃矿井（巷道/立柱/铁轨/蛛网/暴露矿/宝藏箱首开填矿物）；② 沙漠见金字塔 + 踩压力板引爆 TNT；③ 丛林见苔石神殿 + 踩板被发射器射箭；④ 地下深处挖到石砖要塞（图书馆/传送门房/银鱼）+ 持末影之眼右键激活传送门（绿旋涡）。**需飞到新生成的 chunk**（结构只在新 chunk worldgen 时放，旧存档区无）。
+- **R18r 全批完结**：t471-t487 全部 ✅（附魔链 t471-t477 / 繁殖伙伴 t478-t483 / 结构 t484-t487），HEAD `187498b`。性能护栏（mob `15f4655` + 流体 `d26cef8`）+ 批 1（`ed840f9`-`279c347`）+ 批 2（`49f6387`-`907a990`）+ 批 3（`2e40396`-`187498b`）全绿。遗留：水+岩浆交互区 perf 待 playing 实测确认；既有 `-Wmisleading-indentation` 等告警清理。

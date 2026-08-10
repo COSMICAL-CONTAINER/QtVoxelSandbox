@@ -1384,10 +1384,10 @@ t18                        （背包，依赖 hotbar）
 
 | 任务ID | 状态 | 标题 | 验收细节 |
 |---|---|---|---|
-| t484 | ✅ | **废弃矿井 Mineshaft** | 地下（Y<50）随机生成：木栅栏立柱 + 矿车道（木地板/铁轨，无矿车可简化）+ 蜘蛛网 + 暴露矿石 + 宝藏箱子（矿物/苹果/附魔书/铁锭）。world.cpp(structure gen) + blockregistry(cobweb/rail 若无) |
-| t485 | ✅ | **沙漠神殿 DesertTemple** | 沙漠群系生成：金字塔外形（沙岩/切制沙岩）+ 地下密室 + 4 宝藏箱（钻石/金/青金石/骨头/腐肉）+ **TNT 陷阱**（踩压力板引爆）。world.cpp + blockregistry(沙岩/切制沙岩/压力板/TNT 引爆) |
-| t486 | ⏳ | **丛林神殿 JungleTemple** | **依赖丛林群系**（项目若无则推迟或先加群系）：苔石建筑 + 机关（绊线→发射器射箭，无红石用 dispenser 方块直接触发）+ 宝藏箱。world.cpp + blockregistry(mossStone/dispenser) |
-| t487 | ⏳ | **要塞 Stronghold** | 地下深（Y<30）生成：石砖迷宫 + **末地传送门房**（末地传送门方块 + 12 末影之眼激活 → 末地预热，末地本身可推迟）+ 图书馆（书架，附魔加成）+ 银鱼刷怪笼。world.cpp + blockregistry(末地传送门/末影之眼/书架/银鱼/stairsStoneBrick) |
+| t484 | ✅ | **废弃矿井 Mineshaft** | 地下（Y<50）随机生成：木栅栏立柱 + 矿车道（木地板/铁轨，无矿车可简化）+ 蜘蛛网 + 暴露矿石 + 宝藏箱子（矿物/苹果/附魔书/铁锭）。**`2e40396`**：新 Cobweb(102)/Rail(103)（cross/贴地 + 程序贴图 + 6 铁锭→16 铁轨配方）；placeMineshaft（hashColumn 网格 + hashVoxel，Y<48，kMinePct=40 → 默认 seed ~6 座；Planks 地板 + WoodFence 立柱 + Rail + Cobweb + 暴露煤/铁矿 + 末端宝藏箱）；ChestStateMineshaftFlag bit3 → 首开填 mineshaftChestPool（矿物/附魔书/铁锭）。 |
+| t485 | ✅ | **沙漠神殿 DesertTemple** | 沙漠群系生成：金字塔外形（沙岩/切制沙岩）+ 地下密室 + 4 宝藏箱（钻石/金/青金石/骨头/腐肉）+ **TNT 陷阱**（踩压力板引爆）。**`8087799`**：新 TntBlock(104)/CutSandstone(105)/火药物品(0x239，Stalker 掉落 + TNT 配方 5 火药+4 沙)；placeDesertTemple（isDesert 守卫 + grid 48 + 45%，阶梯金字塔底 15×15 顶 3×3 + 7×7×4 密室 + 4 箱 ChestStatePyramidFlag + 中央 3×3 TNT 上垫压力板）；scanTntTraps 每 tick 扫玩家 footprint → detonateTntBlock（复用 destroySphereSilent 爆炸，伤害仅 Survival）；pyramidChestPool 权重表。 |
+| t486 | ✅ | **丛林神殿 JungleTemple** | **依赖丛林群系**（R18r 已加 `857343d`，Biome=6）：苔石建筑 + 机关（绊线→发射器射箭，无红石用 dispenser 方块直接触发）+ 宝藏箱。**`52afc8c`**：新 MossyCobble(106)/Dispenser(107)（state 编码朝向同熔炉，放置朝玩家）；placeJungleTemple（Jungle 群系 grid 40/pct 50，苔石围墙+地板+天花板+走廊，实测 160×160 产 1 座）；scanDispenserTraps（压力板 4 水平邻 == Dispenser → spawnArrow 水平射箭，per-dispenser 2s 冷却）；ChestStateJungleFlag bit5 → jungleTempleChestPool。 |
+| t487 | ✅ | **要塞 Stronghold** | 地下深（Y<30）生成：石砖迷宫 + **末地传送门房**（末地传送门方块 + 12 末影之眼激活 → 末地预热，末地本身可推迟）+ 图书馆（书架，附魔加成）+ 银鱼刷怪笼。**`187498b`**：新 StoneBrick(108)/石砖台阶/EndPortal(110)/EndEye 物品/银鱼 mob(MobSilverfish=14)；placeStronghold（Y<30 确定性，迷宫大厅 + 书架图书馆 + 中央 3×3 末地传送门房 + 银鱼刷怪笼 + 战利品箱）；持末影之眼右键传送门 → state bit0 翻 → end_portal_active 亮绿旋涡视觉 + 日志（末地维度占位）。 |
 
 ## 执行备注
 - **性能护栏先焊死**（性能 agent 修水蔓延+mob 碰撞后）：加 mob 前 kCap 上限 + AI/phys 节流确认；加结构前 worldgen 不全网格扫；附魔/铁砧 UI 不每帧重算（同 a36b4b0 的 F3 节流模式）。
