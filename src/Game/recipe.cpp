@@ -613,6 +613,15 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                              RecipeRegistry::IronIngotId,  0,
         RecipeRegistry::IronIngotId,    RecipeRegistry::IronIngotId,  RecipeRegistry::IronIngotId },
       int(BlockRegistry::Anvil), 1, 1, "anvil" },
+    // t484 铁轨（rail）：6 铁锭（顶行 + 中行两行满铺）→ 16 铁轨（有序 3×3，仅工作台）。
+    //   机制等价 MC 1.0 rail 配方（6 iron ingot 满两行 → 16 rail；MC 实际是「6 铁锭纵列」最小包围盒 1×6，
+    //   本工作台 3×3 取「顶行 + 中行 = 6 锭」2×3 包围盒，对齐 MC 数量与质材，避开 1×6 在 3×3 内的歧义）。
+    //   最小包围盒 3×2（顶 + 中两行铁锭满），与铁块（3×3 满铺）包围盒尺寸不同 → 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
+        RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
+        0,                           0,                           0 },
+      int(BlockRegistry::Rail), 16, 1, "rail" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

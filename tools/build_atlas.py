@@ -231,6 +231,13 @@ TILES = [
     "default_pumpkin_face",       # 118 pumpkin_face（南瓜刻面前面贴图；橙色 + 刻面双眼 + 锯齿嘴 + 顶部短茎；Pumpkin frontTile=本 tile，
                                   #    作造物头时面朝玩家侧，机制等价 MC 刻面南瓜 jack o'lantern）
     "default_pumpkin_top",        # 119 pumpkin_top（南瓜顶/底面贴图；橙色瓜顶 + 中央短茎 + 高光；Pumpkin top/bottomTile=本 tile）
+    # t484 废弃矿井结构方块（机制等价 MC 1.0 废弃矿井 mineshaft 的蛛网 / 铁轨；名称 / 贴图全原创自绘 §9a）。
+    #   各由独立 build_*.py 程序生成原创像素图（透明底 + alphaCutoff cutout；mesher 走 cross / 水平 quad case）。
+    "default_cobweb",             # 120 cobweb（蜘蛛网 cross 贴图；透明底 + 灰白蛛丝放射网纹；Cobweb 各面=本 tile，
+                                  #    mesher 走 cross 几何段；机制等价 MC 1.0 cobweb；tools/build_cobweb.py 程序生成原创像素图）
+    "default_rail",               # 121 rail（铁轨贴地薄板 flat 贴图；透明底 + 棕色枕木 + 灰铁双轨；Rail 各面=本 tile，
+                                  #    mesher 走 PartialBlockGeometry Rail 水平 quad case；机制等价 MC 1.0 rail；
+                                  #    tools/build_rail.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

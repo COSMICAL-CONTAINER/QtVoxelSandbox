@@ -463,6 +463,37 @@ int PartialBlockGeometry::append(
                       tile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::Cobweb: {
+        // t484 蜘蛛网 cross 模型：与 TallGrass / Ladder 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
+        //   机制等价 MC 1.0 蛛网（cobweb）—— cross 模型上贴 cobweb(120) 瓦片（透明底 + 灰白蛛丝放射网纹，
+        //   alphaCutoff cutout）。蛛网无碰撞（ShapeNone → 玩家穿过；本工程简化不做减速系统，纯装饰）。两片对角
+        //   cross 使蛛网从四面均可见（玩家绕到背面仍见蛛丝）。**无 state 派生贴图**（单一蛛网瓦片）。tile 由
+        //   BlockRegistry::tileIndex(Cobweb, PosX) = sideTile = 120 给出。不做邻居剔除（cross 透明 + 蛛网，同
+        //   TallGrass；Cobweb solid=false）。材质 alphaCutoff:0.5 丢弃透明底 → 仅蛛丝像素显。
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
+    case BlockRegistry::Rail: {
+        // t484 铁轨「贴地薄板」模型：**一片水平双面 quad 贴 cell 底部**（y≈1/16，刚好浮于地面之上）—— 与睡莲
+        //   横向浮叶（LilyPad）同源几何，区别仅贴图（rail 瓦片 = 透明底 + 棕色枕木 + 灰铁双轨）。机制等价
+        //   MC 1.0 铁轨（rail）。worldgen placeMineshaft 把本方块置于木地板（Planks）上方一格，其 cell 底部
+        //   quad（world y ≈ 地板顶 + 1/16）恰贴地板顶面 → 视觉如铁轨铺地。
+        //   复用 pushCrossQuad（水平 quad 双面可见，从地面上下均见轨 —— 实际玩家视角从上方见轨面为主）。
+        //   四角取 cell 全 footprint（xz [0,1]）+ y=1/16（略高于 cell 底防 z-fight 地板）；UV 满铺整张瓦片
+        //   （枕木 + 双轨由贴图 alpha cutout 表达，几何为整张 quad）。不做邻居剔除（透明 + 薄板，同睡莲；
+        //   Rail solid=false）。材质 alphaCutoff:0.5 丢弃透明底 → 仅轨像素显。tile 由 BlockRegistry::tileIndex
+        //   (Rail, PosX) = sideTile = 121 给出。
+        constexpr float yr = 1.0f / 16.0f; // 铁轨厚度（cell 底以上 1/16，贴地板防 z-fight）
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, yr, 0.f,  1.f, yr, 0.f,  1.f, yr, 1.f,  0.f, yr, 1.f, // 水平 quad：BL→BR→TR→TL（xz 全 footprint）
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::Cactus: {
         // t445 仙人掌细柱：机制对标 MC 1.0 仙人掌 14/16（~0.875）宽的居中柱。本工程取 0.8（X/Z [0.1,0.9]）
         //   居中、Y 满高 [0,1]，整柱贴 cactus 顶 / 侧贴图。**非满格整立方** —— cactus solid=false（同 Farmland /

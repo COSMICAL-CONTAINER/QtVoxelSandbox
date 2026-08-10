@@ -1384,7 +1384,7 @@ t18                        （背包，依赖 hotbar）
 
 | 任务ID | 状态 | 标题 | 验收细节 |
 |---|---|---|---|
-| t484 | ⏳ | **废弃矿井 Mineshaft** | 地下（Y<50）随机生成：木栅栏立柱 + 矿车道（木地板/铁轨，无矿车可简化）+ 蜘蛛网 + 暴露矿石 + 宝藏箱子（矿物/苹果/附魔书/铁锭）。world.cpp(structure gen) + blockregistry(cobweb/rail 若无) |
+| t484 | ✅ | **废弃矿井 Mineshaft** | 地下（Y<50）随机生成：木栅栏立柱 + 矿车道（木地板/铁轨，无矿车可简化）+ 蜘蛛网 + 暴露矿石 + 宝藏箱子（矿物/苹果/附魔书/铁锭）。world.cpp(structure gen) + blockregistry(cobweb/rail 若无) |
 | t485 | ⏳ | **沙漠神殿 DesertTemple** | 沙漠群系生成：金字塔外形（沙岩/切制沙岩）+ 地下密室 + 4 宝藏箱（钻石/金/青金石/骨头/腐肉）+ **TNT 陷阱**（踩压力板引爆）。world.cpp + blockregistry(沙岩/切制沙岩/压力板/TNT 引爆) |
 | t486 | ⏳ | **丛林神殿 JungleTemple** | **依赖丛林群系**（项目若无则推迟或先加群系）：苔石建筑 + 机关（绊线→发射器射箭，无红石用 dispenser 方块直接触发）+ 宝藏箱。world.cpp + blockregistry(mossStone/dispenser) |
 | t487 | ⏳ | **要塞 Stronghold** | 地下深（Y<30）生成：石砖迷宫 + **末地传送门房**（末地传送门方块 + 12 末影之眼激活 → 末地预热，末地本身可推迟）+ 图书馆（书架，附魔加成）+ 银鱼刷怪笼。world.cpp + blockregistry(末地传送门/末影之眼/书架/银鱼/stairsStoneBrick) |

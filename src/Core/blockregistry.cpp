@@ -440,6 +440,17 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   GroupSand（颗粒雪响）。进创造调色板（搭建用；区别 SnowLayer 的满格整立方 —— 雪傀儡机制等价 MC 用
     //   「雪块」满格而非薄雪层）。
     /* snow         */ {int(BlockRegistry::Snow),             57, 57, 57, 57,  true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Shovel),   0, false, int(BlockRegistry::Snow),          1, 64, "snow",        "雪块"},
+    // ── t484 废弃矿井结构方块（机制等价 MC 1.0 废弃矿井 mineshaft 的蛛网 / 铁轨；名称 / 贴图全原创自绘 §9a）。
+    //   蜘蛛网（Cobweb）：cross 形蛛网（透明底 + 灰白蛛丝放射网纹，alphaCutoff cutout），与草丛 / 树苗同走 cross
+    //   几何段。solid=false（不挡邻居面剔除）、ShapeNone（无碰撞，玩家穿过）、hardness=0（瞬破）、NoTool（空手可采）、
+    //   dropId=0x219（线材料段 StringId；破蛛网掉线非蛛网方块，机制等价 MC 1.0 破蛛网掉线）、maxStack=64。
+    //   各面=cobweb(120)。音色归 GroupGrass。worldgen placeMineshaft 散布；进创造调色板。
+    /* cobweb       */ {int(BlockRegistry::Cobweb),          120,120,120,120, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false, 0x219,                                 1, 64, "cobweb",      "蜘蛛网"},
+    //   铁轨（Rail）：贴地薄板 flat（透明底 + 棕色枕木 + 灰铁双轨，alphaCutoff cutout），mesher 走 PartialBlockGeometry
+    //   的 Rail 水平 quad case（与睡莲横向浮叶同源）。solid=false、ShapeNone（无碰撞，玩家走过）、hardness=0（瞬破）、
+    //   NoTool（空手可采且掉落）、dropId=自身（破铁轨掉铁轨方块，可放回）、maxStack=64。各面=rail(121)。
+    //   音色归 GroupStone（金属质）。worldgen placeMineshaft 散布；进创造调色板。配方 6 铁锭 + 1 木棒 → 16 铁轨。
+    /* rail         */ {int(BlockRegistry::Rail),            121,121,121,121, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::Rail),           1, 64, "rail",        "铁轨"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -533,6 +544,9 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     // t482/t483 造物方块 → MC 1.0 对齐：pumpkin id 86（1.0 存在）；snow block id 80（同 snow_layer 取雪方块 80）。
     /* pumpkin                 */ 86, // t482 南瓜 → MC 1.0 pumpkin id 86
     /* snow                    */ 80, // t482 雪块 → MC 1.0 snow block id 80（同 SnowLayer 的 80；满格雪方块）
+    // t484 废弃矿井结构方块 → MC 1.0 对齐：cobweb id 30（1.0 存在）；rail id 66（1.0 存在）。
+    /* cobweb                  */ 30, // t484 蜘蛛网 → MC 1.0 cobweb id 30
+    /* rail                    */ 66, // t484 铁轨 → MC 1.0 rail id 66
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -613,6 +627,8 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == PotatoCrop) return true; // t407 段外 cross（马铃薯作物，同小麦作物按 state 选阶段贴图）
     if (blockId == Ladder) return true; // t413 段外 cross（木梯竖直爬行梯，两片对角相交双面 quad 贴梯瓦片）
     if (blockId == SweetBerryBush) return true; // t467 段外 cross（雪原浆果灌木丛，两片对角相交双面 quad 贴 stage 贴图）
+    if (blockId == Cobweb) return true; // t484 段外 cross（蜘蛛网，两片对角相交双面 quad 贴蛛网贴图；矿井散布）
+    if (blockId == Rail) return true;   // t484 cross 路由的贴地薄板（几何水平 quad 非竖直 cross，但同走 PASS 1 alphaCutoff 路径，见头注释；与睡莲同族）
     if (blockId >= FirstFlower && blockId <= LastFlower) return true; // t397 段外花段（4 色 cross）
     return blockId >= FirstCross && blockId <= LastCross;
 }
@@ -1050,6 +1066,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case CobbleSlab: case CobbleStairs: case CobbleFence: case CobblePressurePlate: // t412 圆石变体 → 石质音色（同 cobble 族）
     case EnchantingTable: // t474 附魔台 → 石质音色（黑曜石+钻石基座，石质偏硬，同 obsidian 族）
     case IronBlock: case Anvil: case AnvilChipped: case AnvilDamaged: // t477 铁块/铁砧 → 石质音色（金属质，同 obsidian 族；机制等价 MC 1.0 iron/anvil metal SoundType）
+    case Rail: // t484 铁轨 → 石质音色（金属质敲击，最接近 MC 1.0 铁轨 metal SoundType）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）
@@ -1086,6 +1103,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case CarrotCrop: // t407 胡萝卜作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）
     case PotatoCrop: // t407 马铃薯作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）
     case Pumpkin: // t482 南瓜 → 软草音色（瓜类植物，同草丛；机制等价 MC pumpkin SoundType = wood 取软草近似）
+    case Cobweb: // t484 蜘蛛网 → 软草音色（蛛丝软质，同草丛；机制等价 MC cobweb SoundType = grass）
         return GroupGrass;
     case Sand:
     case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）

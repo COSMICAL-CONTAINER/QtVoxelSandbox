@@ -125,6 +125,9 @@ const char *iconFileForBlock(quint8 id)
     // t482/t483 防御造物方块立方体图标（build_cube_icons.py 程序生成原创像素图）。
     case BlockRegistry::Pumpkin:       return "icon_pumpkin.png";     // 南瓜（顶=橙色瓜顶+短茎 / 侧=橙色瓜棱；造物头部方块）
     case BlockRegistry::Snow:          return "icon_snow.png";        // 雪块（各面=冷白冰晶噪点，同积雪层；雪傀儡身体方块）
+    // t484 废弃矿井结构方块图标（build_cube_icons.py flat 2D 透明底；程序生成原创像素图）。
+    case BlockRegistry::Cobweb:        return "icon_cobweb.png";      // 蜘蛛网（cross 透明底；灰白蛛丝放射网纹；矿井散布）
+    case BlockRegistry::Rail:          return "icon_rail.png";        // 铁轨（flat 透明底；棕色枕木 + 灰铁双轨；贴地薄板）
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
@@ -570,7 +573,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Anvil),                                       // 铁砧（右键开铁砧 UI 修复/合并/重命名；配方 3 铁块+4 铁锭；微损/重损不进调色板）
              // t482/t483 防御造物方块（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建材料；南瓜放好 + 下方排列 → 造物）。
              int(BlockRegistry::Pumpkin),                                     // 南瓜（造物头部方块；雪傀儡/铁傀儡搭建触发物）
-             int(BlockRegistry::Snow) };                                      // 雪块（造物身体方块；雪傀儡 = 南瓜 + 雪块×2 竖直）
+             int(BlockRegistry::Snow),                                        // 雪块（造物身体方块；雪傀儡 = 南瓜 + 雪块×2 竖直）
+             // t484 废弃矿井结构方块（机制等价 MC 1.0 废弃矿井 mineshaft 的蛛网 / 铁轨；worldgen 散布 / 创造取用）。
+             int(BlockRegistry::Cobweb),                                      // 蜘蛛网（cross 形蛛网；矿井散布；无碰撞瞬破掉线）
+             int(BlockRegistry::Rail) };                                      // 铁轨（贴地薄板 flat；矿井木地板散布；配方 6 铁锭+1 木棒→16）
 }
 
 QString Hotbar::iconSourceAt(int slot) const

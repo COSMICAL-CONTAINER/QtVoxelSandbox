@@ -244,6 +244,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_pumpkin_side.png        # t482 南瓜侧面贴图（build_pumpkin.py；深橙底+纵向瓜棱深纹；Pumpkin sideTile）
         textures/default_pumpkin_face.png        # t482 南瓜刻面前面贴图（build_pumpkin.py；橙底+刻面双眼+锯齿嘴+短茎；Pumpkin frontTile=-Z）
         textures/default_pumpkin_top.png         # t482 南瓜顶/底面贴图（build_pumpkin.py；橙色瓜顶+中央短茎+高光；Pumpkin top/bottomTile）
+        textures/default_cobweb.png              # t484 蜘蛛网 cross 贴图（build_cobweb.py；透明底+灰白蛛丝放射网纹；alphaCutoff cutout；Cobweb 各面）
+        textures/default_rail.png                # t484 铁轨贴地薄板 flat 贴图（build_rail.py；透明底+棕色枕木+灰铁双轨；alphaCutoff cutout；Rail 各面）
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
@@ -368,6 +370,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_anvil_damaged.png          # t477 重损铁砧立方体图标（build_cube_icons.py；顶=砧台+粗裂纹网+缺角 / 侧=深铁砧身）
         textures/icon_pumpkin.png                # t482 南瓜立方体图标（build_cube_icons.py；顶=橙色瓜顶+短茎 / 侧=橙色瓜棱）
         textures/icon_snow.png                   # t482 雪块立方体图标（build_cube_icons.py；各面=冷白冰晶噪点，同积雪层）
+        textures/icon_cobweb.png                 # t484 蜘蛛网 flat 2D 图标（build_cube_icons.py；透明底+灰白蛛丝放射网纹）
+        textures/icon_rail.png                   # t484 铁轨 flat 2D 图标（build_cube_icons.py；透明底+棕色枕木+灰铁双轨）
         textures/icon_crafting_table.png
         textures/icon_dirt.png
         textures/icon_furnace.png

@@ -888,6 +888,10 @@ Window {
         //   （坐标确定性 seed → 同箱同战利品；已开过则 populateDungeonLoot 返 false 不再生）。玩家自放箱无此
         //   标记 → 不填（机制对齐 MC）。在 chestOpen=true / 盖子动画之前填 → ChestUI 显时即见战利品。
         if (theWorld.isDungeonChest(x, y, z)) chestStore.populateDungeonLoot(x, y, z)
+        // t484 废弃矿井箱首开填充战利品：worldgen placeMineshaft 给矿井箱 state 置 ChestStateMineshaftFlag(bit3) →
+        //   isMineshaftChest 返 true。首开时由 LootTable::mineshaftChestPool 抽 6 件（矿物 / 附魔书 / 铁锭等）
+        //   分散入随机空槽（坐标确定性 seed → 同箱同战利品）。同地牢箱机制（一份首开一次性 roll）。
+        if (theWorld.isMineshaftChest(x, y, z)) chestStore.populateMineshaftLoot(x, y, z)
         chestOpen = true
         // t196：触发盖子翻开动画（chestLidAngle 0→全开，Behavior 平滑过渡）；chestLidPivot 据坐标 + 朝向摆位。
         chestLidAngle = kChestLidOpenAngle

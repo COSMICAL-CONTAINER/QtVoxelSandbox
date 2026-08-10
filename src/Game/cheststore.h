@@ -65,6 +65,11 @@ public:
     //   该坐标是地牢箱（theWorld.isDungeonChest —— 由 chest state bit2 标记，worldgen 写入；玩家放置的无此标记）。
     //   分层（PLAN §2）：本层 Game，依赖同层 LootTable + QtCore；不依赖 World（「是否地牢箱」由 caller 查 World）。
     Q_INVOKABLE bool populateDungeonLoot(int x, int y, int z);
+    // t484 首开填充废弃矿井战利品（机制等价 MC 1.0 mineshaft chest loot）。与 populateDungeonLoot 同源语义：
+    //   仅对「尚未有条目」的箱子生效（首次开），用 LootTable::mineshaftChestPool + 坐标确定性 seed 抽 6 件
+    //   （矿物 / 附魔书 / 铁锭等，PLAN §2-K 同箱同战利品）。caller（Main.qml.openChest）须先确认该坐标是矿井箱
+    //   （theWorld.isMineshaftChest —— 由 chest state bit3 标记，worldgen placeMineshaft 写入）。
+    Q_INVOKABLE bool populateMineshaftLoot(int x, int y, int z);
 
 signals:
     // 任一箱子任一槽内容变更（setSlot）/ 条目移除（clearChest）。驱动 revision 自增 + ChestUI delegate 刷新。

@@ -1902,6 +1902,7 @@ void World::generate()
     placeUndergroundWaterPools(); // t309：封闭地下水池（carveCaves / 入口之后；先于填水 → 地表海平面与地下水各自独立）。
     placeLavaLakes(); // t343：地下封闭岩浆湖（Y<30；carveCaves 之后 → 湖独立于洞穴；先于填水 → 岩浆不与海水冲突）。
     placeDungeons(); // t392：地下地牢（carveCaves / 岩浆湖之后 → 房间独立；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 地表特征放于完整地表）。
+    placeMineshaft(); // t484：废弃矿井（placeDungeons 之后 → 矿井独立；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 地表特征放于完整地表）。
     carveCanyon(); // t342：大峡谷（caves/ores 之后 → 峡壁既有矿石层被 carve 暴露；先于填水 → 内陆干涸峡谷，
                    //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
@@ -3512,6 +3513,176 @@ void World::placeDungeons()
         }
     }
     qInfo() << "worldgen: underground dungeons =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t484 废弃矿井（见 world.h 头注释）。机制等价 MC 1.0 废弃矿井 mineshaft：地下深处（Y<50）的木支撑巷道系统，
+//   含木栅栏立柱 + 木地板 + 铁轨 + 蜘蛛网 + 暴露矿石 + 宝藏箱子。确定性散布（hashColumn + seed 偏移，PLAN §2-K），
+//   结构与 placeDungeons / placeLavaLakes 同源（网格采样 + 概率筛选 + 抖动 + y 范围派生），但 carve 出的是一条
+//   3×3 水平巷道 + 木地板 + 立柱 + 铁轨 + 蛛网 + 矿石 + 末端宝藏箱。
+//
+//   巷道几何（沿水平方向 (dx,dz) 逐段推进，每段 3 宽 × 3 高内部空气 + 1 层木地板）：
+//     - 轴位置 (ax,az) 沿方向逐段 +1；垂直宽度轴 perp（方向旋转 90°）取 w ∈ {-1,0,+1} → 3 宽截面。
+//     - 木地板：每段 3 宽铺 Planks 于 y=sy（覆盖原 stone/ore/泥土，不动 Bedrock；机制等价 MC 矿井木板地板）。
+//     - 内部空气：每段 3 宽 × 3 高（y=sy+1..sy+3）置 Air（清空原 stone/ore → 干净巷道；不动 Bedrock）。
+//     - 木栅栏立柱：每 kFenceInterval 段（4），在 w=±1 边缘从 y=sy+1 到 y=sy+2 置 WoodFence（支撑柱，机制等价 MC
+//       矿井橡木栅栏立柱；fence 1.5 高碰撞但本处 2 格高视觉立柱）。
+//     - 铁轨：每 kRailInterval 段（2），在 w=0 中线 y=sy+1 置 Rail（贴在木地板上，机制等价 MC 矿井铁轨）。
+//     - 蜘蛛网：按 hashVoxel 概率（~12%）在 w=±1 上角 y=sy+3 置 Cobweb（巷道角落蛛网，机制等价 MC 矿井蛛网）。
+//     - 暴露矿石：按 hashVoxel 概率（~15%）在 w=±2 巷壁（截面外侧）+ y=sy+1..sy+3 置 CoalOre/IronOre（巷壁裸露矿脉）。
+//     - 宝藏箱：巷道末端最后一段 w=0 中线 y=sy+1 置 Chest（带 ChestStateMineshaftFlag bit3 标记 → isMineshaftChest 返
+//       true → Main.qml.openChest 首开填充 mineshaftChestPool 战利品：矿物 / 附魔书 / 铁锭等）。
+//
+//   巷道被周围实体岩天然封闭 → 内部无天光 → 黑暗（机制等价 MC 1.0 矿井黑暗环境）。与既有洞穴重叠时
+//   （carveCaves 已挖空同位）→ 木地板/立柱/铁轨仍画出（矿井结构叠加于洞穴，同 placeDungeons 墙体被洞穴截断）。
+//   placeDungeons 之后、fillWater 之前（独立于海平面；fillWater 仅填地表低洼 → 地下矿井不被灌水）。
+void World::placeMineshaft()
+{
+    constexpr int kMineshaftGrid    = 36;     // 候选网格间距（比地牢 24 更稀 → 矿井更稀有；spec「随机生成」）
+    constexpr unsigned kMinePct     = 40u;    // 候选命中概率（每网格平均 ~0.40 个矿井 → 160×160 世界约 6 个矿井，机制等价 MC「稀疏但存在」）
+    constexpr int kBedrockTop       = 4;      // 不动基岩（同 carveCaves / placeDungeons）
+    constexpr int kSurfaceFloor     = 6;      // 与地表保留的最小距离（矿井上方至少 6 格石顶 → 不破地表、封闭黑暗）
+    constexpr int kMineshaftMaxY    = 48;     // 矿井最高 y（spec「Y<50」；地下深处）
+    constexpr int kTunnelLenMin     = 16;     // 巷道最短长度（段数）
+    constexpr int kTunnelLenMax     = 28;     // 巷道最长长度（段数）
+    constexpr int kTunnelH          = 3;      // 巷道内部高度（空气层数；y=sy+1..sy+kTunnelH）
+    constexpr int kFenceInterval    = 4;      // 木栅栏立柱间隔（每 N 段一对立柱）
+    constexpr int kRailInterval     = 2;      // 铁轨间隔（每 N 段一根铁轨）
+    constexpr unsigned kCobwebPct   = 12u;    // 上角蛛网概率（每段每侧 ~12%）
+    constexpr unsigned kOrePct      = 15u;    // 巷壁矿石概率（每段每侧 ~15%）
+    constexpr int kMargin           = 4;      // 留边界（巷道长度 + 宽度余量防越界）
+
+    int placed = 0;
+    const int mineSeed = m_seed + 15047; // 矿井哈希偏移（与其它 worldgen hashColumn 解耦）
+    for (int bx = kMineshaftGrid / 2; bx < m_width; bx += kMineshaftGrid) {
+        for (int bz = kMineshaftGrid / 2; bz < m_depth; bz += kMineshaftGrid) {
+            const quint32 r = hashColumn(mineSeed, bx, bz);
+            if ((r % 100u) >= kMinePct) continue; // 概率筛选
+            const int span = kMineshaftGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            // 留 margin 边界（巷道沿方向走 kTunnelLenMax 段 + 宽度 3 → 半径 ≤ kMargin 不越界）。
+            if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
+                continue;
+            if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠矿井（避免与海水柱冲突）
+            const int h = std::min(heightAt(cx, cz), m_height - 1);
+            // 矿井 y 范围：基岩之上 ~ kMineshaftMaxY 之下；上方至少留 kSurfaceFloor 格石顶。
+            const int yLo = kBedrockTop + 2;
+            const int yHi = std::min(kMineshaftMaxY - kTunnelH - 1, h - kSurfaceFloor - kTunnelH - 1);
+            if (yHi <= yLo) continue; // 此列地下空间不足 → 跳过
+            const int yRange = yHi - yLo + 1;
+            const int sy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 木地板 y（巷道底面）
+
+            // 巷道方向（4 水平主向，由 hash 高位选；机制等价 MC 矿井主巷道水平延伸）。
+            const int dirIdx = int((r >> 14) & 3u);
+            int dx = 0, dz = 0;
+            switch (dirIdx) {
+            case 0: dx =  1; dz =  0; break; // +X
+            case 1: dx = -1; dz =  0; break; // -X
+            case 2: dx =  0; dz =  1; break; // +Z
+            case 3: dx =  0; dz = -1; break; // -Z
+            }
+            // 巷道长度（kTunnelLenMin..kTunnelLenMax，由 hash 另一段位选）。
+            const int tunnelLen = kTunnelLenMin
+                + int((r >> 16) & 0xFu) % (kTunnelLenMax - kTunnelLenMin + 1);
+
+            // 逐段 carve 巷道。
+            for (int step = 0; step < tunnelLen; ++step) {
+                const int ax = cx + step * dx;
+                const int az = cz + step * dz;
+                // 垂直宽度轴 perp = 方向旋转 90°：(perpX, perpZ) = (-dz, dx)；w ∈ {-1,0,+1} → 3 宽截面。
+                for (int w = -1; w <= 1; ++w) {
+                    const int px = ax + w * (-dz);
+                    const int pz = az + w * dx;
+                    // 木地板（y=sy）：覆盖原 stone/ore/泥土，不动 Bedrock。
+                    const quint8 fb = m_chunks.blockAt(px, sy, pz);
+                    if (fb != BlockRegistry::Bedrock)
+                        m_chunks.setBlock(px, sy, pz, BlockRegistry::Planks);
+                    // 内部空气（y=sy+1..sy+kTunnelH）：清空原 stone/ore，不动 Bedrock。
+                    for (int dy = 1; dy <= kTunnelH; ++dy) {
+                        const int yy = sy + dy;
+                        if (yy >= m_height) break;
+                        const quint8 ib = m_chunks.blockAt(px, yy, pz);
+                        if (ib == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(px, yy, pz, BlockRegistry::Air);
+                    }
+                }
+
+                // 木栅栏立柱（每 kFenceInterval 段，w=±1 边缘，y=sy+1..sy+2 两格高立柱）。
+                if (step % kFenceInterval == 0) {
+                    for (int w = -1; w <= 1; w += 2) { // w = -1, +1
+                        const int px = ax + w * (-dz);
+                        const int pz = az + w * dx;
+                        for (int dy = 1; dy <= 2; ++dy) {
+                            const int yy = sy + dy;
+                            if (yy >= m_height) break;
+                            const quint8 ib = m_chunks.blockAt(px, yy, pz);
+                            if (ib == BlockRegistry::Bedrock) continue;
+                            m_chunks.setBlock(px, yy, pz, BlockRegistry::WoodFence);
+                        }
+                    }
+                }
+
+                // 铁轨（每 kRailInterval 段，w=0 中线，y=sy+1 贴在木地板上）。
+                if (step % kRailInterval == 0) {
+                    const int yy = sy + 1;
+                    if (yy < m_height) {
+                        const quint8 ib = m_chunks.blockAt(ax, yy, az);
+                        if (ib == BlockRegistry::Air) // 仅在空气格放（防覆盖已放立柱等）
+                            m_chunks.setBlock(ax, yy, az, BlockRegistry::Rail);
+                    }
+                }
+
+                // 蜘蛛网（按 hashVoxel 概率，w=±1 上角 y=sy+kTunnelH）。
+                for (int w = -1; w <= 1; w += 2) {
+                    const int px = ax + w * (-dz);
+                    const int pz = az + w * dx;
+                    const int yy = sy + kTunnelH;
+                    if (yy >= m_height) continue;
+                    const quint32 wh = hashVoxel(mineSeed ^ 0xC0B, px, yy, pz);
+                    if ((wh % 100u) >= kCobwebPct) continue;
+                    const quint8 ib = m_chunks.blockAt(px, yy, pz);
+                    if (ib != BlockRegistry::Bedrock) // 仅空气格放（防覆盖已放立柱顶端）
+                        m_chunks.setBlock(px, yy, pz, BlockRegistry::Cobweb);
+                }
+
+                // 暴露矿石（按 hashVoxel 概率，w=±2 巷壁 y=sy+1..sy+kTunnelH）。
+                for (int w = -2; w <= 2; w += 4) { // w = -2, +2
+                    const int px = ax + w * (-dz);
+                    const int pz = az + w * dx;
+                    for (int dy = 1; dy <= kTunnelH; ++dy) {
+                        const int yy = sy + dy;
+                        if (yy >= m_height) break;
+                        const quint32 oh = hashVoxel(mineSeed ^ 0xCAFE, px, yy, pz);
+                        if ((oh % 100u) >= kOrePct) continue;
+                        const quint8 ib = m_chunks.blockAt(px, yy, pz);
+                        // 仅在实体石类方块处置矿（不动 Bedrock / Air / 已放结构方块）。
+                        if (ib != BlockRegistry::Stone && ib != BlockRegistry::Dirt) continue;
+                        // 煤矿（常见）/ 铁矿（次常见）按 hash 位选；机制等价 MC 矿井壁裸露矿物。
+                        const quint8 ore = ((oh >> 8) & 1u) ? BlockRegistry::IronOre
+                                                            : BlockRegistry::CoalOre;
+                        m_chunks.setBlock(px, yy, pz, ore);
+                    }
+                }
+            }
+
+            // 宝藏箱（巷道末端最后一段，w=0 中线，y=sy+1）：带 ChestStateMineshaftFlag 标记 → 首开填充矿井战利品。
+            //   朝向低 2 位 = 0（chestFrontFace 兜底 NegZ；worldgen 不关心箱子朝向）。覆盖末端空气格（安全）。
+            {
+                const int ax = cx + (tunnelLen - 1) * dx;
+                const int az = cz + (tunnelLen - 1) * dz;
+                const int yy = sy + 1;
+                if (yy < m_height) {
+                    const quint8 ib = m_chunks.blockAt(ax, yy, az);
+                    if (ib != BlockRegistry::Bedrock) // 不动基岩（防御）
+                        m_chunks.setBlock(ax, yy, az, BlockRegistry::Chest,
+                                          BlockRegistry::ChestStateMineshaftFlag);
+                }
+            }
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: underground mineshafts =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t309 地表小湖泊（见 world.h 头注释）。机制等价 MC 1.0 地表小湖泊 / 池塘：地表局部低洼处的浅水洼。

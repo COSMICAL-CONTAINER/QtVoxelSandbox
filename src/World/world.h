@@ -83,6 +83,14 @@ public:
         return blockAt(x, y, z) == BlockRegistry::Chest
             && (stateAt(x, y, z) & BlockRegistry::ChestStateDungeonFlag) != 0;
     }
+    // t484 该格箱子是否「废弃矿井生成箱」（worldgen placeMineshaft 写入的箱子，state 带
+    //   ChestStateMineshaftFlag bit3；玩家放置的箱子 / 地牢箱无此位）。Main.qml.openChest 据此判
+    //   「是否首开填充矿井战利品」（LootTable::mineshaftChestPool）。分层（PLAN §2）：纯只读谓词
+    //   （blockAt + stateAt + BlockRegistry），不写栅格。非箱子格 → false。
+    Q_INVOKABLE bool isMineshaftChest(int x, int y, int z) const {
+        return blockAt(x, y, z) == BlockRegistry::Chest
+            && (stateAt(x, y, z) & BlockRegistry::ChestStateMineshaftFlag) != 0;
+    }
     // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
     //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/
     //   trapdoor，state 解码同 partialblockgeometry）。玩家碰撞迭代玩家 AABB 覆盖的所有格，逐 sub-AABB
@@ -532,6 +540,17 @@ private:
     //   查 blockAt != Spawner 自然实现（无 setBlock 钩子）。存档 round-trip：Spawner 是普通方块 id，chunk blob
     //   随存随读，加载后 tickSpawners 仍能扫到（同 Chest 物品存 ChestStore 独立于 chunk，Spawner 无状态）。
     void placeDungeons();
+    // t484 废弃矿井（spec「地下（Y<50）随机生成：木栅栏立柱 + 矿车道（木地板/轨道）+ 蜘蛛网 + 暴露矿石 +
+    //   宝藏箱子」；机制等价 MC 1.0 废弃矿井 mineshaft）。carveCaves / carveCaveEntrances / placeLavaLakes /
+    //   placeDungeons 之后、fillWater 之前，地下深处（y ∈ [kBedrockTop+3, kMineshaftMaxY=48]）确定性散布
+    //   矿井隧道系统：选起点 + 方向（hashColumn + seed 偏移，PLAN §2-K）→ 沿方向逐段 carve 一条 3×3 巷道
+    //   （清空气、铺 Planks 木地板、按间距放 WoodFence 木栅栏立柱支撑、按间距放 Rail 铁轨、间隙散布 Cobweb 蜘蛛网、
+    //   沿巷壁按 hashVoxel 散布矿石暴露、隧道末端 / 分支末端放带 ChestStateMineshaftFlag 标记的 Chest 宝藏箱，
+    //   t393 同族首开填充由 Main.qml.openChest 据本标记触发 mineshaftChestPool）。隧道被周围实体岩天然封闭 →
+    //   内部无天光 → 黑暗（机制等价 MC 1.0 矿井黑暗环境）。与既有洞穴重叠时（carveCaves 已挖空同位）→ 木地板 /
+    //   立柱 / 铁轨仍画出（矿井结构叠加于洞穴）。纯函数于 seed（hashColumn / hashVoxel）→ 同 seed 同矿井分布
+    //   （PLAN §2-K）。**宝藏箱内容**：Chest 物品存 ChestStore（同地牢箱），首开填充由 isMineshaftChest 判定。
+    void placeMineshaft();
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
     //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
     //   （surfaceY-1 / surfaceY-2 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶 -1，

@@ -579,7 +579,27 @@ public:
         //   生成雪傀儡 + 移除结构。进创造调色板（玩家取用 / 搭建；区别 SnowLayer 的满格整立方 —— 雪傀儡
         //   机制等价 MC 用「雪块」（满格）而非薄雪层，故独立方块 id）。
         Snow            = 101, // 雪块：造物身体方块（雪傀儡 2 块竖直）
-        Count           = 102, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t484 废弃矿井结构方块（机制等价 MC 1.0 废弃矿井 mineshaft 的蛛网 / 铁轨；名称 / 贴图全原创自绘 §9a）：
+        //   蜘蛛网（Cobweb）：**cross 形广告牌方块**（与 TallGrass / Sapling 同走 PartialBlockGeometry 的 cross 几何段，
+        //   两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。机制等价 MC 1.0 蛛网（cobweb / web）。
+        //   worldgen placeMineshaft 在矿井巷道间隙确定性散布（同 seed 同分布，PLAN §2-K）。
+        //   solid=false（非实体 → 不挡邻居面剔除，同草丛 / 火把）、shape=ShapeNone（**无碰撞** → 玩家穿过；
+        //   机制简化等价 MC 蛛网减速但本工程不做减速系统，故纯装饰无碰撞）、hardness=0（瞬破，同火把 / 草丛）、
+        //   NoTool（空手可采）、dropId=0x219（**线**材料段 RecipeRegistry::StringId；Core 不依赖 Game 故用字面量 0x219 ——
+        //   破蛛网掉线而非蛛网方块，机制等价 MC 1.0「破蛛网掉线」/ 剪刀掉蛛网方块本工程无剪刀剪取故恒掉线）、
+        //   dropCount=1、maxStack=64。各面贴图=cobweb(120)（透明底 + 灰白蛛丝放射网纹，alphaCutoff cutout）。
+        //   音色归 GroupGrass（软植物音，同草丛）。进创造调色板（玩家可取用 / 放置）。
+        Cobweb          = 102, // 蜘蛛网：cross 形蛛网（机制等价 MC 1.0 cobweb）；矿井散布；无碰撞瞬破掉线
+        //   铁轨（Rail）：**贴地薄板 cross/flat 方块**（mesher 走 PartialBlockGeometry 的 Rail case 画一片水平双面
+        //   quad 贴 cell 底部 → 平铺地面，与 LilyPad 横向浮叶同源几何；alpha 透明底 cutout）—— 非 1×1×1 整立方。
+        //   机制等价 MC 1.0 铁轨（rail）。worldgen placeMineshaft 在矿井木地板上确定性散布（同 seed 同分布）。
+        //   solid=false（非实体 → 不挡邻居面剔除，同睡莲）、shape=ShapeNone（**无碰撞** → 玩家走过；本工程无矿车，
+        //   铁轨纯装饰故无碰撞）、hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身（破铁轨掉铁轨方块，
+        //   可放回）、dropCount=1、maxStack=64。各面贴图=rail(121)（透明底 + 棕色枕木 + 灰铁双轨，alphaCutoff cutout）。
+        //   音色归 GroupStone（金属质敲击，最接近 MC 1.0 铁轨 metal SoundType）。进创造调色板（玩家可取用 / 放置）。
+        //   配方：6 铁锭 + 1 木棒（中行）→ 16 铁轨（工作台 3×3 有序，recipe.cpp；机制等价 MC 1.0 铁轨配方）。
+        Rail            = 103, // 铁轨：贴地薄板 flat（机制等价 MC 1.0 rail）；矿井木地板散布；无碰撞瞬破掉自身
+        Count           = 104, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1008,7 +1028,11 @@ public:
     //   118=pumpkin_face（t482 南瓜前面贴图；橙色 + 刻面双眼 + 锯齿嘴；Pumpkin frontTile=本 tile，机制等价
     //     MC 刻面南瓜 jack o'lantern；作造物头时面朝玩家侧）。
     //   119=pumpkin_top（t482 南瓜顶/底面贴图；橙色瓜顶 + 中央短茎；Pumpkin top/bottomTile=本 tile）。
-    // 图集由 tools/build_atlas.py 打包全部 120 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   120=cobweb（t484 蜘蛛网 cross 贴图；透明底 + 灰白蛛丝放射网纹，alphaCutoff cutout；Cobweb 各面=本 tile，
+    //      mesher 走 cross 几何段；机制等价 MC 1.0 cobweb；tools/build_cobweb.py 程序生成原创像素图）。
+    //   121=rail（t484 铁轨贴地薄板 flat 贴图；透明底 + 棕色枕木 + 灰铁双轨，alphaCutoff cutout；Rail 各面=本 tile，
+    //      mesher 走 PartialBlockGeometry Rail 水平 quad case；机制等价 MC 1.0 rail；tools/build_rail.py 程序生成原创像素图）。
+    // 图集由 tools/build_atlas.py 打包全部 122 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -1028,7 +1052,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 120;
+    static constexpr int AtlasTileCount = 122;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
@@ -1150,6 +1174,13 @@ public:
     //   selectionAABBs 亦不读 chest state → 复用 bit2 作 marker 零回归（同 torch / 双半砖 marker 同族）。
     //   state 经 m_states 落 SQLite round-trip 保真（旧存档箱子 state=0 → 非地牢箱，不填充，安全）。
     static constexpr quint8 ChestStateDungeonFlag = 0x04;
+    // t484 箱子 state bit3（值 8）=「废弃矿井生成箱」标记（worldgen placeMineshaft 写入；玩家放置的箱子 / 地牢箱
+    //   无此位）。仅供 World::isMineshaftChest 读 → Main.qml.openChest 据此判「是否首开填充矿井战利品」
+    //   （LootTable::mineshaftChestPool：矿物 / 附魔书 / 铁锭等，区别于地牢表）。**不**影响 chestFrontFace
+    //   （后者只读低 2 位 state&3，bit3 被忽略 → 朝向编码零回归）；collisionAABBs / selectionAABBs 亦不读
+    //   chest state → 复用 bit3 作 marker 零回归（同 ChestStateDungeonFlag bit2 / torch marker 同族）。
+    //   state 经 m_states 落 SQLite round-trip 保真（旧存档箱子 state 无 bit3 → 非矿井箱，不填充，安全）。
+    static constexpr quint8 ChestStateMineshaftFlag = 0x08;
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度
