@@ -1279,6 +1279,30 @@ Item {
                 R(6, 15, 10, 1, coverDark)   // 下边框
             }
 
+            // t485 火药（0x239）：杀潜行者（Stalker）掉落 + TNT 合成原料。一眼辨「黑色火药堆」—— 深灰黑粉末
+            //   堆 + 几粒亮颗粒（未研细的硝石 / 硫磺粒）。区别于骨粉（米白粉末） / 煤（黑块）：火药是「深灰黑散堆
+            //   + 亮颗粒」，配色冷灰偏黑（非纯黑煤块、非米白骨粉）。纯原创自绘（§9a）。
+            const drawGunpowder = () => {
+                // 配色：powder #3a3a40（火药主体，深灰黑）/ powderLight #5a5a62（受光高光，中灰）/ powderShade #202028
+                //   （粉末阴影 + 堆底）/ grain #7a7a82（亮颗粒，未研细的硝石 / 硫磺粒反光）/ grainDark #181820（暗粒边）。
+                const powder = "#3a3a40", powderLight = "#5a5a62", powderShade = "#202028"
+                const grain = "#7a7a82", grainDark = "#181820"
+                // 粉末堆底（不规则椭圆底盘，rows 11..17，cols 6..17 —— 上窄下宽的粉末锥投影）
+                R(9, 11, 6, 1, powderShade)        // 顶（窄）
+                R(7, 12, 10, 1, powderShade)       // 上缘
+                R(6, 13, 12, 4, powder)            // 主体 rows 13..16
+                R(6, 17, 12, 1, powderShade)       // 堆底阴影（最宽，表「铺开的粉」）
+                // 受光高光（左上偏亮，表「粉末反光」，冷灰调）
+                R(8, 12, 5, 1, powderLight)
+                R(7, 13, 3, 2, powderLight)
+                // 亮颗粒（3-4 粒小方块散布在粉末上，表「未研细的硝石 / 硫磺粒」，区别于纯炭粉）
+                R(10, 13, 2, 2, grain)
+                R(14, 14, 2, 2, grain)
+                R(8, 15, 2, 1, grain)
+                R(12, 12, 1, 1, grainDark)         // 暗粒边点缀
+                R(10, 14, 1, 1, grainDark)
+            }
+
             // 按 materialId 分流（default / 未知 → 兜底木棒，与旧行为一致）。
             // t345 护甲段（0x300..0x313，5 套材质 × 4 部位 = 20 件）。按 tier（配色）+ piece（形状）派生绘制，
             //   不为每件写独立 case（20 件 × 像素图过冗；tier/piece 两维即足够区分：皮革棕 / 铁银 / 铜橙 /
@@ -1413,6 +1437,7 @@ Item {
             case 0x236: drawLapis();              break // t471 青金石（青金矿石挖掘掉落；附魔台消耗材料）
             case 0x237: drawPaper();              break // t473 纸（3 甘蔗横排合成；书配方原料）
             case 0x238: drawBook();               break // t473 书（3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料）
+            case 0x239: drawGunpowder();          break // t485 火药（杀潜行者掉落；TNT 合成原料）
             default:    drawStick();        break
             }
         }

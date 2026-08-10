@@ -107,6 +107,9 @@ BLOCKS = [
     # t482/t483 防御造物方块立方体图标（build_pumpkin.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
     ("pumpkin",         "default_pumpkin_top",  "default_pumpkin_side"),  # t482 南瓜（顶=橙色瓜顶+短茎 / 侧=橙色瓜棱；造物头部方块）
     ("snow",            "default_snow",         "default_snow"),          # t482 雪块（各面=冷白冰晶噪点，同积雪层；雪傀儡身体方块）
+    # t485 沙漠神殿结构方块立方体图标（build_tnt.py / build_cut_sandstone.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
+    ("tnt",             "default_tnt",          "default_tnt"),           # t485 TNT（各面同贴图=深红药柱+横向捆带+亮黄标识；沙漠神殿 TNT 陷阱方块）
+    ("cut_sandstone",   "default_cut_sandstone", "default_cut_sandstone"), # t485 切制砂岩（各面同贴图=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

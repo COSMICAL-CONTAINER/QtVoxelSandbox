@@ -1903,6 +1903,7 @@ void World::generate()
     placeLavaLakes(); // t343：地下封闭岩浆湖（Y<30；carveCaves 之后 → 湖独立于洞穴；先于填水 → 岩浆不与海水冲突）。
     placeDungeons(); // t392：地下地牢（carveCaves / 岩浆湖之后 → 房间独立；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 地表特征放于完整地表）。
     placeMineshaft(); // t484：废弃矿井（placeDungeons 之后 → 矿井独立；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 地表特征放于完整地表）。
+    placeDesertTemple(); // t485：沙漠神殿（placeMineshaft 之后 → 神殿独立；仅 Desert 群系；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 金字塔放于完整沙漠地表）。
     carveCanyon(); // t342：大峡谷（caves/ores 之后 → 峡壁既有矿石层被 carve 暴露；先于填水 → 内陆干涸峡谷，
                    //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
@@ -3683,6 +3684,148 @@ void World::placeMineshaft()
         }
     }
     qInfo() << "worldgen: underground mineshafts =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t485 沙漠神殿（见 world.h 头注释）。机制等价 MC 1.0 沙漠神殿 desert temple：沙漠地表的阶梯金字塔 + 正下方地下
+//   密室 + 4 宝藏箱 + 中央压力板下 TNT 陷阱（踩板引爆）。确定性散布（hashColumn + seed 偏移，PLAN §2-K）。
+//
+//   结构几何（中心 (cx,surfaceY,cz)，surfaceY = 沙漠沙顶 heightAt）：
+//     A) 金字塔（阶梯砂岩，逐层缩成金字塔外形）：
+//        - 8 层（layer 0..kPyramidH-1），layer L 位于 y=surfaceY+L，layer L 的水平半边 = kPyramidHalf - L。
+//        - 每层填一层 Sandstone 实心盘（[-half, +half]² 范围内逐格置 Sandstone，覆盖沙顶 / 空气，不动 Bedrock）；
+//          顶饰最高层（layer L==kPyramidH-1，半边=1 → 3×3）置 CutSandstone 区分顶冠（机制等价 MC 神殿顶部装饰）。
+//        - 层叠加 → 阶梯金字塔外形（底 15×15，每升 1 层半边 -1，顶 3×3 CutSandstone 顶冠）。
+//     B) 地下密室（金字塔正下方，封入地下）：
+//        - 内部 7×7×4 空气（roomW=7 / roomH=4）；地板 y=floorY=surfaceY-kChamberDepth（kChamberDepth=7，深地下）；
+//          内部空气 y∈[floorY+1 .. floorY+roomH]；天花板块 y=floorY+roomH+1=surfaceY-2。
+//        - 周界（地板 / 天花板 / 四壁）填 Sandstone（沙漠成岩，机制等价 MC 神殿密室砂岩墙）→ 封闭无天光（黑暗，
+//          spec「地下密室」）。不动 Bedrock。
+//     C) 4 宝藏箱（密室四角，y=floorY+1 站立高度）：带 ChestStatePyramidFlag bit4 标记 → isPyramidChest 返 true →
+//        Main.qml.openChest 首开填充 pyramidChestPool 战利品（钻石 / 金 / 青金石 / 骨头 / 腐肉等）。朝向低 2 位=0。
+//     D) TNT 陷阱（密室中央地板）：3×3 TntBlock 位于 y=floorY（密室地板层，中央 3×3 替换砂岩地板为 TNT），
+//        中央格正上方 y=floorY+1（站立层）置 CobblePressurePlate（沙漠石质主题）。玩家进入密室踩压力板 →
+//        playercontroller tick 扫 footprint 格（压力板 + 下方 TNT）→ detonateTntBlock → destroySphereSilent
+//        球形破坏（破坏方块 + 衰减伤玩家 + explosion 音/视，机制等价 MC 1.0 沙漠神殿踩板引爆 TNT）。
+//
+//   placeMineshaft 之后、fillWater 之前（仅 Desert 群系 → 与海 / 湖独立；fillWater 仅填海域低洼，沙漠内陆不被灌水）。
+//   纯函数于 seed + biomeAt（经 hashColumn / hashVoxel）→ 同 seed 同神殿分布（PLAN §2-K）。仅扫候选沙漠格 → 不全图扫描。
+void World::placeDesertTemple()
+{
+    constexpr int kTempleGrid     = 48;     // 候选网格间距（比矿井 36 更稀 → 神殿更稀有；spec「低频」）
+    constexpr unsigned kTemplePct = 45u;    // 候选命中概率（仅沙漠候选 → 已天然稀有；45% 命中 → 沙漠中可见但不密集）
+    constexpr int kPyramidHalf    = 7;      // 金字塔底半边（底 15×15 = (2*7+1)²）
+    constexpr int kPyramidH       = 8;      // 金字塔层数（layer 0..7；顶冠 layer 7 半边=0 → 但取 min 1 保 3×3 顶冠）
+    constexpr int kChamberDepth   = 7;      // 密室地板相对地表的深度（surfaceY-7；深地下、封入沙/石）
+    constexpr int kRoomW          = 7;      // 密室内部宽度（X/Z 格子数；7×7 内部）
+    constexpr int kRoomH          = 4;      // 密室内部高度（Y 空气层数）
+    constexpr int kTntHalf        = 1;      // TNT 陷阱半边（3×3 = (2*1+1)²，置于密室地板中央）
+    constexpr int kBedrockTop      = 4;      // 不动基岩顶（同 carveCaves / placeDungeons / placeMineshaft）
+    // 留边界（金字塔底半边 7 + 密室半边 3 + 抖动余量 → 半径 ≤ 8 不越界）。
+    constexpr int kMargin = (kPyramidHalf > kRoomW / 2 ? kPyramidHalf : kRoomW / 2) + 1;
+
+    int placed = 0;
+    const int templeSeed = m_seed + 19487; // 神殿哈希偏移（与其它 worldgen hashColumn 解耦）
+    for (int bx = kTempleGrid / 2; bx < m_width; bx += kTempleGrid) {
+        for (int bz = kTempleGrid / 2; bz < m_depth; bz += kTempleGrid) {
+            const quint32 r = hashColumn(templeSeed, bx, bz);
+            if ((r % 100u) >= kTemplePct) continue; // 概率筛选
+            const int span = kTempleGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
+                continue; // 留 margin 边界（金字塔 + 密室半径 ≤ margin 不越界）
+            // 仅 Desert 群系（spec「沙漠群系生成」；biomeAt 收口单一权威）。非沙漠 → 跳过（不在草原 / 森林生神殿）。
+            if (!isDesert(cx, cz)) continue;
+            if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠神殿（避免与海水柱冲突）
+            const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
+            const int floorY = surfaceY - kChamberDepth;
+            const int ceilBlockY = floorY + kRoomH + 1; // 天花板块 y（内部空气顶 + 1）
+            if (floorY < kBedrockTop + 1) continue; // 密室地板太低（贴基岩）→ 跳过本候选（保墙 / 地板完整）
+            if (ceilBlockY >= m_height) continue;   // 几何保护（surfaceY 异常高时防越界）
+            for (int layer = 0; layer < kPyramidH; ++layer) {
+                const int yy = surfaceY + layer;
+                if (yy < 0 || yy >= m_height) continue;
+                const int half = kPyramidHalf - layer;
+                if (half < 1) break; // 金字塔已收顶（半边 ≤ 0）→ 上层不再画
+                const bool topCap = (layer == kPyramidH - 1) || (half <= 1); // 顶冠 / 最小层用 CutSandstone 区分
+                for (int dx = -half; dx <= half; ++dx) {
+                    for (int dz = -half; dz <= half; ++dz) {
+                        const int px = cx + dx, pz = cz + dz;
+                        const quint8 cur = m_chunks.blockAt(px, yy, pz);
+                        if (cur == BlockRegistry::Bedrock) continue; // 不动基岩
+                        m_chunks.setBlock(px, yy, pz,
+                                          topCap ? BlockRegistry::CutSandstone : BlockRegistry::Sandstone);
+                    }
+                }
+            }
+
+            // B) 地下密室（金字塔正下方）：地板 y=floorY，内部 7×7×4 空气，周界砂岩墙 / 地板 / 顶板。
+            const int roomHalf = kRoomW / 2; // 3（内部 7×7 = [-3, +3]²）            // 周界填砂岩（地板 / 天花板 / 四壁）—— 遍历 [-roomHalf-1, roomHalf+1]³ 外圈，边界格置 Sandstone（不动 Bedrock）。
+            for (int dy = -1; dy <= kRoomH; ++dy) {
+                const int yy = floorY + dy;
+                if (yy < 0 || yy >= m_height) continue;
+                const bool yEdge = (dy == -1 || dy == kRoomH); // 地板（dy=-1）/ 天花板（dy=kRoomH）
+                for (int dx = -roomHalf - 1; dx <= roomHalf + 1; ++dx) {
+                    for (int dz = -roomHalf - 1; dz <= roomHalf + 1; ++dz) {
+                        const bool xEdge = (dx == -roomHalf - 1 || dx == roomHalf + 1);
+                        const bool zEdge = (dz == -roomHalf - 1 || dz == roomHalf + 1);
+                        if (!yEdge && !xEdge && !zEdge) continue; // 内部格由下一步清空气
+                        const int px = cx + dx, pz = cz + dz;
+                        const quint8 cur = m_chunks.blockAt(px, yy, pz);
+                        if (cur == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(px, yy, pz, BlockRegistry::Sandstone);
+                    }
+                }
+            }
+            // 内部清空气（7×7×4，覆盖原沙 / 石 / 矿 → 干净密室；不动 Bedrock）。
+            for (int dy = 0; dy < kRoomH; ++dy) {
+                const int yy = floorY + dy;
+                if (yy < 0 || yy >= m_height) continue;
+                for (int dx = -roomHalf; dx <= roomHalf; ++dx) {
+                    for (int dz = -roomHalf; dz <= roomHalf; ++dz) {
+                        const quint8 cur = m_chunks.blockAt(cx + dx, yy, cz + dz);
+                        if (cur == BlockRegistry::Bedrock) continue;
+                        m_chunks.setBlock(cx + dx, yy, cz + dz, BlockRegistry::Air);
+                    }
+                }
+            }
+
+            // C) 4 宝藏箱（密室四角，y=floorY+1 站立高度）：带 ChestStatePyramidFlag 标记 → 首开填充神殿战利品。
+            //    四角 = 内部 [-roomHalf, -roomHalf] / [+roomHalf, -roomHalf] / [-roomHalf, +roomHalf] / [+roomHalf, +roomHalf]。
+            const int chestY = floorY + 1;
+            const int cornerOff[4][2] = {{-roomHalf, -roomHalf}, {roomHalf, -roomHalf},
+                                          {-roomHalf, roomHalf}, {roomHalf, roomHalf}};
+            for (const auto &c : cornerOff) {
+                const int px = cx + c[0], pz = cz + c[1];
+                if (chestY < m_height) {
+                    const quint8 cur = m_chunks.blockAt(px, chestY, pz);
+                    if (cur != BlockRegistry::Bedrock) // 不动基岩（防御）
+                        m_chunks.setBlock(px, chestY, pz, BlockRegistry::Chest,
+                                          BlockRegistry::ChestStatePyramidFlag);
+                }
+            }
+
+            // D) TNT 陷阱（密室中央地板）：3×3 TntBlock 于 y=floorY（替换砂岩地板），中央格上方 y=floorY+1 置压力板。
+            //    玩家踩压力板 → playercontroller 扫 footprint（压力板 + 下方 TNT）→ detonateTntBlock 球形破坏。
+            for (int dx = -kTntHalf; dx <= kTntHalf; ++dx) {
+                for (int dz = -kTntHalf; dz <= kTntHalf; ++dz) {
+                    const int px = cx + dx, pz = cz + dz;
+                    const quint8 cur = m_chunks.blockAt(px, floorY, pz);
+                    if (cur != BlockRegistry::Bedrock)
+                        m_chunks.setBlock(px, floorY, pz, BlockRegistry::TntBlock);
+                }
+            }
+            // 中央压力板（CobblePressurePlate，沙漠石质主题；圆石压力板区别于木质，更贴合神殿石质风）。
+            if (chestY < m_height) {
+                const quint8 cur = m_chunks.blockAt(cx, chestY, cz);
+                if (cur == BlockRegistry::Air) // 仅空气格放（防覆盖已放宝藏箱 / TNT）
+                    m_chunks.setBlock(cx, chestY, cz, BlockRegistry::CobblePressurePlate);
+            }
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: desert temples =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t309 地表小湖泊（见 world.h 头注释）。机制等价 MC 1.0 地表小湖泊 / 池塘：地表局部低洼处的浅水洼。

@@ -239,6 +239,11 @@ public:
     //   MaterialIcon；与 carrot / potato / bonemeal / lapis 等近期材料段物品同模式，不扩 kMcMaterialId 表）。
     static constexpr int PaperId        = 0x237; // 纸：3 甘蔗横排合成 → 3 件；书配方原料（t473）
     static constexpr int BookId         = 0x238; // 书：3 纸 + 1 皮革合成 → 1 件；附魔台 / 附魔书 / 书架材料（t473）
+    // t485 火药（gunpowder）：材料段 0x239。机制等价 MC 1.0 gunpowder——潜行者（Stalker，机制等价 MC 苦力怕）
+    //   死亡掉落 + TNT 合成原料（5 火药 + 4 沙 → 1 TNT）。可堆叠 64；非方块 → 右键不放置。
+    //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘
+    //   MaterialIcon；与 paper / book / lapis 等近期材料段物品同模式，不扩 kMcMaterialId 表）。
+    static constexpr int GunpowderId    = 0x239; // 火药：杀潜行者掉落；TNT 合成原料（5 火药 + 4 沙 → 1 TNT，t485）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

@@ -790,6 +790,13 @@ private:
     //   销毁嵌入箭 + emit itemPickedUp（拾取音 / 手弹跳，同掉落物）；背包满 → 嵌入箭留。骷髅箭（arrowFromPlayer=
     //   false）不拾（防刷箭）；飞行中箭（未嵌入）不拾（免误拾）。门控同 pickupScan（死亡 / 观察者不拾）。
     void arrowPickupScan();
+    // t485 TNT 陷阱触发（spec「踩压力板引爆」）：扫玩家 footprint 格——任一格为压力板（Wood/Cobble）且其下方
+    //   格 == TntBlock → 调 EntityManager::detonateTntBlock（destroySphereSilent 球形破坏 + 衰减伤玩家 + explosion
+    //   音/视，机制等价 MC 1.0 沙漠神殿踩板引爆 TNT）。每 tick 至多触发 1 次（一次爆炸即摧毁陷阱，防同帧多次）。
+    //   门控：死亡 / 无世界 / 无 entityManager → no-op。玩家模式下均触发（爆炸破坏方块对所有模式生效；伤害经
+    //   mobAttackedPlayer 仅 Survival 应用，创造 / 观察者无伤跳过，同 Stalker）。向下依赖 World（blockAt）+
+    //   EntityManager（detonateTntBlock）+ BlockRegistry（isTnt / isPressurePlate），不写栅格（破坏由 detonate 负责）。
+    void scanTntTraps();
     // t137 出生贴地表：查出生列 (kSpawnX,kSpawnZ) 的 worldgen 地表高度 → 把脚底 Y 设为 h+1（站地表方块
     //   上方）+ 同步 m_peakY 防误判落差。kSpawnY=80 是高于最高地表(~71，t307 后 hills 顶)的兜底初值（防
     //   卡地形），但玩家从 80 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生

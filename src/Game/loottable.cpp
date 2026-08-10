@@ -70,6 +70,25 @@ const std::vector<LootTable::Entry> &LootTable::mineshaftChestPool()
     return pool;
 }
 
+// t485 沙漠神殿箱子战利品池（见 loottable.h 头注释）。权重总和 = 30+25+18+12+10+5+3 = 103。
+//   分布（每 roll 命中概率）：腐肉 ~29% / 骨头 ~24%（亡灵掉落族常见 ~53%）；
+//   金锭 ~17% / 青金石 ~12% / 红石 ~10%（矿物族次常见 ~39%）；钻石 ~5%（稀有）；附魔书占位 ~3%（极稀有）。
+//   机制对齐 MC 1.0 沙漠神殿战利品（骨头/腐肉亡灵族 + 钻石/金/青金石矿物族）。数量区间：常见件 1..N（一堆），
+//   稀有件恒 1（单件，避免一堆钻石）。static 局部 + 返回 const 引用（单一权威；调用方不持副本）。
+const std::vector<LootTable::Entry> &LootTable::pyramidChestPool()
+{
+    static const std::vector<Entry> pool = {
+        { RecipeRegistry::RottenFleshId,  30, 1, 4 }, // 腐肉：亡灵族常见（机制等价 MC 沙漠神殿腐肉），1..4
+        { RecipeRegistry::BoneId,         25, 1, 5 }, // 骨头：亡灵族常见（spec「骨头」），1..5
+        { RecipeRegistry::GoldIngotId,    18, 1, 3 }, // 金锭：次常见金属（spec「金」），1..3
+        { RecipeRegistry::LapisId,        12, 1, 3 }, // 青金石：次常见矿物（spec「青金石」），1..3
+        { RecipeRegistry::RedstoneId,     10, 1, 4 }, // 红石粉：次常见矿物，1..4
+        { RecipeRegistry::DiamondId,       5, 1, 1 }, // 钻石：稀有矿物（spec「钻石」），单件
+        { RecipeRegistry::EnchantedBookId, 3, 1, 1 }, // 附魔书占位：极稀有，单件
+    };
+    return pool;
+}
+
 // 按 weight 有放回加权抽 rolls 次。RNG 由 seed 确定（QRandomGenerator(seed)；PLAN §2-K 精神：同 seed 同产物）。
 //   pool 为空 / rolls<=0 → 空。weight<=0 条目跳过（不入总权重；若全 <=0 → 空）。maxCount<minCount → 取 minCount。
 std::vector<LootTable::Stack> LootTable::roll(const std::vector<Entry> &pool, int rolls, quint32 seed)

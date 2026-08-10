@@ -593,6 +593,9 @@ void PlayerController::tickImpl()
     // t323 嵌入箭近距拾取（与掉落物拾取同级常开：背包开 / 失焦时玩家仍可走近拾嵌入箭）。内自检
     //   m_entityManager/m_hotbar 非空 + 死亡 / 观察者门控，常开安全（同 pickupScan）。
     arrowPickupScan();
+    // t485 TNT 陷阱触发（踩压力板引爆）：与拾取同级常开（玩家走进入密室踩板即触发，独立于捕获态）。
+    //   内自检 m_entityManager/m_world 非空 + 死亡门控，常开安全（同 pickupScan / arrowPickupScan）。
+    scanTntTraps();
     } // /profPickup
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
@@ -2916,6 +2919,32 @@ void PlayerController::arrowPickupScan()
         if (leftover <= 0) { // 全入 → 销毁嵌入箭（满则留，spec「满→不拾」）
             m_entityManager->removeEntityAt(i);
             emit itemPickedUp(int(RecipeRegistry::ArrowId), 1); // 拾取音 / 手弹跳（同掉落物拾取）
+        }
+    }
+}
+
+// t485 TNT 陷阱触发（见 playercontroller.h 头注释）。扫玩家 footprint 格——压力板 + 下方 TNT 即引爆。
+void PlayerController::scanTntTraps()
+{
+    if (!m_entityManager || !m_world) return;
+    if (m_dead) return; // 死亡态不触发（同 pickupScan / arrowPickupScan 门控）
+    // 玩家 footprint 格（脚位 cellY + AABB 覆盖的 X/Z 格）。脚位 cellY = floor(m_pos.y())；玩家立于压力板顶
+    //   (cellY+0.0625) → floor 取 cellY → 该格即压力板格。X/Z 取 AABB 覆盖范围（半宽 kHalfW）。
+    const int feetY = int(std::floor(m_pos.y()));
+    const int x0 = int(std::floor(m_pos.x() - kHalfW));
+    const int x1 = int(std::floor(m_pos.x() + kHalfW));
+    const int z0 = int(std::floor(m_pos.z() - kHalfW));
+    const int z1 = int(std::floor(m_pos.z() + kHalfW));
+    for (int bx = x0; bx <= x1; ++bx) {
+        for (int bz = z0; bz <= z1; ++bz) {
+            const quint8 plate = m_world->blockAt(bx, feetY, bz);
+            if (!BlockRegistry::isPressurePlate(plate)) continue;        // 本格非压力板 → 跳过
+            const quint8 below = m_world->blockAt(bx, feetY - 1, bz);
+            if (!BlockRegistry::isTnt(below)) continue;                  // 压力板下非 TNT → 跳过
+            // 触发：调 entityManager 在 TNT 格引爆（destroySphereSilent 球形破坏 + 衰减伤玩家 + explosion 音/视）。
+            //   爆炸即摧毁压力板 + TNT（在半径内）→ 同帧不会重复触发；return 防同帧多候选多次引爆。
+            m_entityManager->detonateTntBlock(bx, feetY - 1, bz, m_world, m_pos);
+            return;
         }
     }
 }

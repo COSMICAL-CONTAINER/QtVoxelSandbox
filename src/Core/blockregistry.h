@@ -599,7 +599,25 @@ public:
         //   音色归 GroupStone（金属质敲击，最接近 MC 1.0 铁轨 metal SoundType）。进创造调色板（玩家可取用 / 放置）。
         //   配方：6 铁锭 + 1 木棒（中行）→ 16 铁轨（工作台 3×3 有序，recipe.cpp；机制等价 MC 1.0 铁轨配方）。
         Rail            = 103, // 铁轨：贴地薄板 flat（机制等价 MC 1.0 rail）；矿井木地板散布；无碰撞瞬破掉自身
-        Count           = 104, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；名称 / 贴图全原创自绘 §9a）：
+        //   TNT（TntBlock）：可引爆的爆炸物方块（机制等价 MC 1.0 TNT）。整立方 opaque（solid=true / ShapeFull ——
+        //   走 mesher 整立方面路径，**非**异形，与砂岩/箱子同族）、hardness=0.0（MC 1.0 TNT 瞬破，无工具要求）、
+        //   toolType=NoTool（空手可采且掉落）、requiresTool=false、dropId=自身（破 TNT 掉 TNT 方块，可放回）、
+        //   dropCount=1、maxStack=64。各面贴图=tnt(122)（深红药柱底 + 横向深棕捆带 + 中央亮黄标识 + 顶部引线点，
+        //   原创自绘 §9a）。音色归 GroupGrass（软质闷击，机制等价 MC 1.0 TNT 草地音色）。**引爆路径**：
+        //   踩压力板触发（playercontroller tick 扫玩家 footprint 格——压力板下垫 TNT 即引爆）→ EntityManager::
+        //   detonateTntBlock（复用 destroySphereSilent 球形破坏 + 距离衰减伤玩家 + explosion 音/视，同 Stalker
+        //   爆炸路径 t284）。配方：5 火药 + 4 沙 → 1 TNT（recipe.cpp；机制等价 MC 1.0 TNT）。进创造调色板。
+        TntBlock        = 104, // TNT：可引爆爆炸物方块（机制等价 MC 1.0 TNT）；沙漠神殿陷阱 + 创造可放置 / 合成
+        //   切制砂岩（CutSandstone）：装饰用砂岩变体（机制等价 MC 1.0 切制砂岩 cut sandstone——表面更平滑、带
+        //   切割倒角边框，区别于普通砂岩 Sandstone 的横向层理纹）。整立方 opaque（solid=true / ShapeFull —— 走
+        //   mesher 整立方面路径，**非**异形，与砂岩/石头同族）、hardness=0.8（同砂岩量级，需镐）、toolType=Pickaxe、
+        //   requiresTool=true、minTier1（木镐可破）、dropId=自身（破切制砂岩掉切制砂岩方块，可放回）、dropCount=1、
+        //   maxStack=64。各面贴图=cut_sandstone(123)（暖沙色平滑底 + 内陷矩形装饰边框，原创自绘 §9a）。
+        //   音色归 GroupStone（石质，同砂岩）。worldgen placeDesertTemple 金字塔外框装饰（与砂岩混排）。
+        //   进创造调色板（玩家可取用 / 放置）。
+        CutSandstone    = 105, // 切制砂岩：装饰砂岩变体（机制等价 MC 1.0 cut sandstone）；金字塔外框 + 创造可放置
+        Count           = 106, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -650,6 +668,11 @@ public:
     //   「玩家 AABB 覆盖的格是否梯」（入梯格 + 按前 → 向上爬）+ mesher cross 路由分流，避免各处自写 id 判定漂移
     //   （同 isBed / isCrossBillboard 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（改 id 时一处同步）。
     static bool isLadder(quint8 blockId);
+    // t485 TNT 统一谓词（单一权威）：blockId == TntBlock 即 TNT。供 PlayerController TNT 陷阱触发判定
+    //   （扫玩家 footprint 格——压力板下垫 TNT 即引爆）+ EntityManager::detonateTntBlock + worldgen
+    //   placeDesertTemple 写入，避免各处硬编码 TntBlock id 判定（同 isLadder 单 id 模式）。单 id 故裸相等
+    //   判定即可，仍提供谓词作单一权威（未来追加 TNT 变体时一处同步）。
+    static bool isTnt(quint8 blockId);
     // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台
     //   加成计算：扫切比雪夫半径 2 内书架数 ≤15）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移
     //   （同 isLadder 单 id 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加书架变体时一处同步）。
@@ -1052,7 +1075,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 122;
+    static constexpr int AtlasTileCount = 124;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
@@ -1181,6 +1204,14 @@ public:
     //   chest state → 复用 bit3 作 marker 零回归（同 ChestStateDungeonFlag bit2 / torch marker 同族）。
     //   state 经 m_states 落 SQLite round-trip 保真（旧存档箱子 state 无 bit3 → 非矿井箱，不填充，安全）。
     static constexpr quint8 ChestStateMineshaftFlag = 0x08;
+    // t485 箱子 state bit4（值 16）=「沙漠神殿生成箱」标记（worldgen placeDesertTemple 写入；玩家放置的箱子 /
+    //   地牢箱 / 矿井箱无此位）。仅供 World::isPyramidChest 读 → Main.qml.openChest 据此判「是否首开填充
+    //   沙漠神殿战利品」（LootTable::pyramidChestPool：钻石 / 金 / 青金石 / 骨头 / 腐肉等，区别于地牢 / 矿井表）。
+    //   **不**影响 chestFrontFace（后者只读低 2 位 state&3，bit4 被忽略 → 朝向编码零回归）；collisionAABBs /
+    //   selectionAABBs 亦不读 chest state → 复用 bit4 作 marker 零回归（同 ChestStateDungeonFlag bit2 /
+    //   ChestStateMineshaftFlag bit3 / torch marker 同族）。state 经 m_states 落 SQLite round-trip 保真
+    //   （旧存档箱子 state 无 bit4 → 非神殿箱，不填充，安全）。
+    static constexpr quint8 ChestStatePyramidFlag = 0x10;
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度

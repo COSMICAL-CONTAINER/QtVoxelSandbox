@@ -348,6 +348,14 @@ public:
     //   [0, maxHealth]；hurtFlash = kHurtFlashTime（QML 红闪）。health≤0 且未 dead → dead=true + deathTimer=
     //   kDeathTime + emit mobDied（t242 据它掉落）。dead / 非 Mob / 越界 / amount≤0 → 静默早退。bump revision。
     Q_INVOKABLE void damageEntity(int i, int amount);
+    // t485 TNT 方块爆炸（playercontroller scanTntTraps 触发——玩家踩压力板、板下垫 TNT 即引爆时调）。机制等价
+    //   MC 1.0 TNT 爆炸：以 (x,y,z) TNT 格为中心、kExplosionRadius 为半径的球内破坏方块（destroySphereSilent
+    //   一次收口 N 写 + 1 次 refloodBox + 1 次 worldChanged + 1 次 clearAllDirty，同 Stalker t320 批量收口模式）
+    //   + 距离衰减伤害玩家（emit mobAttackedPlayer，仅 Survival 应用）+ emit explosion（呈现层播爆炸音 / 迸发）+
+    //   按概率 emit explosionDroppedItem（破坏块掉落，同 Stalker t297）。与 detonateStalker 的差异：无 mob 实体
+    //   （TNT 是方块）→ 不标 exploded / 不 releaseSlot / 不注册驯服狼防御目标。分层（PLAN §2）：向下写 World
+    //   （destroySphereSilent）+ 发语义信号；只读 World::blockAt。无向上依赖。
+    void detonateTntBlock(int x, int y, int z, World *world, const QVector3D &playerPos);
     // t242 攻击射线 vs mob AABB 命中测试（C++ 直调；PlayerController::beginMining 左键攻击路径调）。
     //   返回沿射线 (origin, dir) maxDist 内**最近**的活体 mob 索引；无命中 → -1。
     //   outDist（若非 null）写入命中距离（起点到 AABB 表面欧氏距离）。
@@ -934,6 +942,7 @@ private:
     //   粒子 / 音 spam；爆炸的音 / 视反馈由 explosion 信号单一入口驱动）。
     //   t480 idx = 本 mob 槽索引：爆炸伤害玩家（dmg>0）时注册驯服狼防御目标（m_wolfTarget = idx）。
     void detonateStalker(int idx, Entity &e, World *world, const QVector3D &playerPos);
+    // t283 朝 target 解抛物初速并发射一支箭（aiArcher shoot 段调）。origin = shooter 中心 + 朝 target 前移
     // t283 朝 target 解抛物初速并发射一支箭（aiArcher shoot 段调）。origin = shooter 中心 + 朝 target 前移
     //   0.5 格（避免贴墙时箭 spawn 入墙即没）。水平速度固定 kArrowSpeed → 飞行时间 t=d/vH；据 target 高度差
     //   反解 vy=(Δy+0.5·g·t²)/t（命中 target 高度的抛物解）；vy 钳到 ±kArrowMaxVert 防极端弧。三轴加 ±kArrowSpread

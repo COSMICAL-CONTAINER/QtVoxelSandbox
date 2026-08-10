@@ -70,6 +70,12 @@ public:
     //   （矿物 / 附魔书 / 铁锭等，PLAN §2-K 同箱同战利品）。caller（Main.qml.openChest）须先确认该坐标是矿井箱
     //   （theWorld.isMineshaftChest —— 由 chest state bit3 标记，worldgen placeMineshaft 写入）。
     Q_INVOKABLE bool populateMineshaftLoot(int x, int y, int z);
+    // t485 首开填充沙漠神殿战利品（机制等价 MC 1.0 desert temple chest loot）。与 populateDungeonLoot /
+    //   populateMineshaftLoot 同源语义：仅对「尚未有条目」的箱子生效（首次开），用 LootTable::pyramidChestPool
+    //   + 坐标确定性 seed 抽 4 件（钻石 / 金 / 青金石 / 骨头 / 腐肉 / 红石 / 附魔书等，PLAN §2-K 同箱同战利品）。
+    //   caller（Main.qml.openChest）须先确认该坐标是神殿箱（theWorld.isPyramidChest —— 由 chest state bit4 标记，
+    //   worldgen placeDesertTemple 写入）。
+    Q_INVOKABLE bool populatePyramidLoot(int x, int y, int z);
 
 signals:
     // 任一箱子任一槽内容变更（setSlot）/ 条目移除（clearChest）。驱动 revision 自增 + ChestUI delegate 刷新。

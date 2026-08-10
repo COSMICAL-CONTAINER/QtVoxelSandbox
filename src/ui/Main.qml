@@ -892,6 +892,10 @@ Window {
         //   isMineshaftChest 返 true。首开时由 LootTable::mineshaftChestPool 抽 6 件（矿物 / 附魔书 / 铁锭等）
         //   分散入随机空槽（坐标确定性 seed → 同箱同战利品）。同地牢箱机制（一份首开一次性 roll）。
         if (theWorld.isMineshaftChest(x, y, z)) chestStore.populateMineshaftLoot(x, y, z)
+        // t485 沙漠神殿箱首开填充战利品：worldgen placeDesertTemple 给神殿箱 state 置 ChestStatePyramidFlag(bit4) →
+        //   isPyramidChest 返 true。首开时由 LootTable::pyramidChestPool 抽 4 件（钻石 / 金 / 青金石 / 骨头 / 腐肉等）
+        //   分散入随机空槽（坐标确定性 seed → 同箱同战利品）。同地牢 / 矿井箱机制（一份首开一次性 roll）。
+        if (theWorld.isPyramidChest(x, y, z)) chestStore.populatePyramidLoot(x, y, z)
         chestOpen = true
         // t196：触发盖子翻开动画（chestLidAngle 0→全开，Behavior 平滑过渡）；chestLidPivot 据坐标 + 朝向摆位。
         chestLidAngle = kChestLidOpenAngle
@@ -1618,6 +1622,14 @@ Window {
                 // t299 敌对掉落：蜘蛛 → 线 ×1-2（机制等价 MC 1.0 蜘蛛掉线；弓 / 钓竿原料，t304 弓配方用）。
                 itemEntities.spawnItem(x, y, z, 0x219, 1)   // 线 ×1-2
                 itemEntities.spawnItem(x, y, z, 0x219, 1)
+            } else if (mobType === EntityManager.MobStalker) {
+                // t485 潜行者（苦力怕）掉落：火药 ×1-2（机制等价 MC 1.0 苦力怕掉火药 gunpowder）。
+                //   0x239 = RecipeRegistry::GunpowderId（材料段火药；⚠️ QML 不 import C++ 静态类故用字面量，同 onMobDied
+                //   既有约定）。火药是 TNT 合成原料（5 火药 + 4 沙 → 1 TNT，t485 沙漠神殿 TNT 陷阱方块），玩家由杀潜行者
+                //   获得 → 合成 TNT → 创造之外的生存获取路径。爆炸型 mob 常规掉落归本分支（区别于 t297
+                //   explosionDroppedItem 是爆炸破坏方块的掉落，二者独立）。
+                itemEntities.spawnItem(x, y, z, 0x239, 1)   // 火药 ×1-2
+                itemEntities.spawnItem(x, y, z, 0x239, 1)
             } else if (mobType === EntityManager.MobChicken) {
                 // t398 鸡掉落：羽毛 ×1-2 + 生鸡肉 ×1（机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉）。
                 //   burned=true（着火致死）→ 生鸡肉替换为熟鸡肉（机制等价 MC 1.0 着火死亡掉熟肉，同猪/牛/羊）。
@@ -1645,8 +1657,8 @@ Window {
             }
             // t482 雪傀儡（MobSnowGolem）死亡不掉落（机制等价 MC 雪傀儡无常规掉落，仅融化时无产出）。
             //   融化（沙漠 / 降水）→ 死亡粒子链（白烟 + 侧倒）→ onMobDied 走本无分支 → 不掉。被杀也不掉（spec 未要求）。
-            // MobTest（通用测试生物）/ MobStalker（潜行者；爆炸型，机制等价 MC 苦力怕无常规掉落）不掉落 —— 调试 /
-            //   爆炸型无游戏内常规产出。Stalker 爆炸破坏方块的掉落由 detonateStalker 的 explosionDroppedItem 单独发（t297）。
+            // MobTest（通用测试生物）不掉落 —— 调试生物无游戏内常规产出。Stalker 爆炸破坏方块的掉落由
+            //   detonateStalker 的 explosionDroppedItem 单独发（t297）；MobStalker 常规击杀掉火药归本 onMobDied 上方分支（t485）。
         }
         // t300 剪羊毛掉落（spec「剪刀右键羊 → 羊变裸 + 掉羊毛物品」）：EntityManager shearSheep 内发
         //   sheepSheared(x,y,z)（坐标 = 羊当前格 floor(pos)，与 spawnItem 整数格约定一致）→ 转发到

@@ -52,6 +52,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::WoolRed:        return "icon_wool_red.png";        // 红色羊毛
     case BlockRegistry::WoolBlack:      return "icon_wool_black.png";      // 黑色羊毛
     case BlockRegistry::Sandstone:     return "icon_sandstone.png";      // t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带）
+    case BlockRegistry::CutSandstone:  return "icon_cut_sandstone.png"; // t485 切制砂岩立方体图标（各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
+    case BlockRegistry::TntBlock:      return "icon_tnt.png";           // t485 TNT 立方体图标（各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
     case BlockRegistry::SpruceLog:    return "icon_spruce_log.png";    // t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮）
@@ -445,7 +447,10 @@ QVariantList Hotbar::creativeMaterials() const
         //   （纸=3 甘蔗横排 → 3 纸；书=3 纸 + 1 皮革 → 1 书），创造调色板补全便于测试 / 装饰。可堆叠 64；
         //   非方块 → 右键不放置。MaterialIcon 自绘纸页 / 书本图标。
         int(RecipeRegistry::PaperId),           // 纸：3 甘蔗横排合成；书配方原料（t473）
-        int(RecipeRegistry::BookId)             // 书：3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料（t473）
+        int(RecipeRegistry::BookId),            // 书：3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料（t473）
+        // t485 火药（机制等价 MC 1.0 gunpowder）：杀潜行者（Stalker）掉落；TNT 合成原料（5 火药 + 4 沙 → 1 TNT）。
+        //   创造调色板补全便于测试 TNT 合成 / 引爆。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘火药图标。
+        int(RecipeRegistry::GunpowderId)        // 火药：杀潜行者掉落；TNT 合成原料
     };
 }
 
@@ -576,7 +581,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Snow),                                        // 雪块（造物身体方块；雪傀儡 = 南瓜 + 雪块×2 竖直）
              // t484 废弃矿井结构方块（机制等价 MC 1.0 废弃矿井 mineshaft 的蛛网 / 铁轨；worldgen 散布 / 创造取用）。
              int(BlockRegistry::Cobweb),                                      // 蜘蛛网（cross 形蛛网；矿井散布；无碰撞瞬破掉线）
-             int(BlockRegistry::Rail) };                                      // 铁轨（贴地薄板 flat；矿井木地板散布；配方 6 铁锭+1 木棒→16）
+             int(BlockRegistry::Rail),                                        // 铁轨（贴地薄板 flat；矿井木地板散布；配方 6 铁锭+1 木棒→16）
+             // t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；worldgen 散布 / 创造取用）。
+             int(BlockRegistry::CutSandstone),                                // 切制砂岩（装饰砂岩变体；金字塔外框；可放置）
+             int(BlockRegistry::TntBlock) };                                  // TNT（可引爆爆炸物；沙漠神殿陷阱；配方 5 火药+4 沙→1）
 }
 
 QString Hotbar::iconSourceAt(int slot) const
@@ -657,6 +665,8 @@ QString Hotbar::nameForBlock(int blockId) const
         // t473 纸 + 书（机制等价 MC 1.0 paper / book；甘蔗造纸 → 书，附魔台 / 附魔书 / 书架的核心材料链）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::PaperId)         return QStringLiteral("纸");     // 3 甘蔗横排合成；书配方原料
         if (blockId == RecipeRegistry::BookId)          return QStringLiteral("书");     // 3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料
+        // t485 火药（机制等价 MC 1.0 gunpowder）：杀潜行者（Stalker，机制等价 MC 苦力怕）掉落；TNT 合成原料（5 火药 + 4 沙 → 1 TNT）。
+        if (blockId == RecipeRegistry::GunpowderId)   return QStringLiteral("火药"); // 杀潜行者掉落；TNT 合成原料
         // t299 敌对 mob 死亡掉落物：杀骸骨 / 蹒跚者 / 蜘蛛产出（机制等价 MC 1.0 敌对生物掉落，名称用通用词、零 MC 专名 §9）。
         if (blockId == RecipeRegistry::BoneId)        return QStringLiteral("骨头"); // 杀骸骨掉落
         if (blockId == RecipeRegistry::RottenFleshId) return QStringLiteral("腐肉"); // 杀蹒跚者掉落

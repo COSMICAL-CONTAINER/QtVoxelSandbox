@@ -622,6 +622,14 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
         0,                           0,                           0 },
       int(BlockRegistry::Rail), 16, 1, "rail" },
+    // t485 TNT：5 火药（X 形对角）+ 4 沙（四角）→ 1 TNT（有序 3×3，仅工作台）。机制等价 MC 1.0 TNT 配方
+    //   （5 gunpowder + 4 sand，沙填四角 + 中边、火药走对角与中心）。最小包围盒 3×3 满铺，与铁块（9 铁锭满铺）、
+    //   TNT 自身的多重集 {火药:5, 沙:4} 唯一 → 不与既有配方冲突（原料组合独一无二）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GunpowderId, int(BlockRegistry::Sand),    RecipeRegistry::GunpowderId,
+        int(BlockRegistry::Sand),    RecipeRegistry::GunpowderId, int(BlockRegistry::Sand),
+        RecipeRegistry::GunpowderId, int(BlockRegistry::Sand),    RecipeRegistry::GunpowderId },
+      int(BlockRegistry::TntBlock), 1, 1, "tnt" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

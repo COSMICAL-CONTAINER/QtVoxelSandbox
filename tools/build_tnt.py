@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""生成 TNT 方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
+
+t485 沙漠神殿 TNT 陷阱方块（机制等价 MC 1.0 TNT——可引爆的爆炸物方块）。名称 / 贴图纯原创自绘
+（§9 区隔，零 MC 资产 / 专名）：红色药柱捆绑外观 + 横向捆带 + 顶部引线，读作「炸药包」。
+
+视觉意图：读作「捆扎的红药柱炸药」——
+  - 主体：深红底（火药+染料混合的标志色），细密噪点表药柱粗糙质感。
+  - 横向捆带：3 条深棕带（表捆绑药柱的绳/带），强化「成捆炸药」读感。
+  - 顶部引线：顶面中央一个亮黄/橙小圆点（引燃点），暗示「点燃即爆」。
+  - 侧面贴一张字面「TNT」风格标识（用原创几何色块，非商标字样）。
+
+输出（覆盖写入 textures/）：
+  default_tnt.png   （tile 122，TNT 各面同贴图）
+
+依赖：仅 PIL/numpy，无外部贴图。与 build_sandstone.py / build_ore.py 同风格（程序生成原创像素图）。
+"""
+import os
+import numpy as np
+from PIL import Image
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(HERE, "..", "textures")
+TS = 16  # 贴图边长（像素）
+
+# 确定性伪随机（同 seed 同图案；便于 CI 校验 & 与 build_atlas.py 顺序对齐）。
+_RNG = np.random.RandomState(485)
+
+
+def tnt_base():
+    """深红药柱底（alpha=255：TNT 不透明整立方，与砂岩/石头同走整立方面路径）。"""
+    canvas = np.zeros((TS, TS, 4), dtype=np.float64)
+    canvas[..., 0] = 176.0  # R
+    canvas[..., 1] = 48.0   # G
+    canvas[..., 2] = 40.0   # B（深红，火药+染料混合的标志色）
+    canvas[..., 3] = 255.0
+    return canvas
+
+
+def px(canvas, x, y, rgb):
+    if 0 <= x < TS and 0 <= y < TS:
+        canvas[y, x, 0:3] = rgb
+
+
+def rect(canvas, x0, y0, x1, y1, rgb):
+    for y in range(y0, y1 + 1):
+        for x in range(x0, x1 + 1):
+            px(canvas, x, y, rgb)
+
+
+def speckle(canvas, rng, density=0.30):
+    """撒细密噪点（暗/亮交替），表药柱粗糙质感。确定性（传入 rng）。"""
+    dark = np.array([150.0, 38.0, 32.0])
+    lite = np.array([200.0, 64.0, 52.0])
+    mask = rng.random((TS, TS)) < density
+    canvas[mask, 0:3] = dark
+    mask2 = rng.random((TS, TS)) < density * 0.6
+    canvas[mask2, 0:3] = lite
+
+
+def draw_side():
+    """侧面：深红药柱底 + 3 条横向深棕捆带 + 中央原创几何标识。"""
+    c = tnt_base()
+    speckle(c, _RNG, density=0.28)
+    band = np.array([96.0, 60.0, 32.0])    # 深棕捆带
+    band_hi = np.array([128.0, 82.0, 44.0])  # 捆带高光上沿
+    # 3 条横向捆带（位置 3 / 8 / 12），表捆绑药柱的带子。
+    for y in [3, 8, 12]:
+        rect(c, 0, y, TS - 1, y, band)
+        rect(c, 0, y - 1, TS - 1, y - 1, band_hi)
+    # 中央原创几何标识（3×3 色块组合，非商标字样）：亮黄圆点 + 暗框，读作「危险品标志」。
+    mark_bg = np.array([232.0, 196.0, 56.0])   # 亮黄标识底
+    mark_fg = np.array([40.0, 28.0, 20.0])     # 暗框/暗心
+    # 标识位于捆带之间的中段（rows 5..6 区域的中央 cols 6..9）。
+    rect(c, 6, 5, 9, 6, mark_bg)
+    px(c, 7, 5, mark_fg)
+    px(c, 8, 6, mark_fg)
+    # 边缘暗化（表药柱边缘磨损）。
+    edge = np.array([120.0, 30.0, 26.0])
+    rect(c, 0, 0, TS - 1, 0, edge)
+    rect(c, 0, TS - 1, TS - 1, TS - 1, edge)
+    rect(c, 0, 0, 0, TS - 1, edge)
+    rect(c, TS - 1, 0, TS - 1, TS - 1, edge)
+    return c
+
+
+def draw_top():
+    """顶面：深红药柱截面 + 中央亮黄引燃点（引线接口）+ 四角暗化。"""
+    c = tnt_base()
+    speckle(c, _RNG, density=0.25)
+    # 中央引燃点（亮黄小圆 + 暗心），暗示「点燃即爆」。
+    fuse = np.array([232.0, 196.0, 56.0])
+    fuse_core = np.array([60.0, 40.0, 24.0])
+    rect(c, 7, 7, 8, 8, fuse)
+    px(c, 7, 7, fuse_core)
+    # 四角暗化（表药柱捆扎角落磨损）。
+    corner = np.array([140.0, 36.0, 30.0])
+    rect(c, 0, 0, 2, 2, corner)
+    rect(c, TS - 3, 0, TS - 1, 2, corner)
+    rect(c, 0, TS - 3, 2, TS - 1, corner)
+    rect(c, TS - 3, TS - 3, TS - 1, TS - 1, corner)
+    return c
+
+
+def save(arr, name):
+    img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA")
+    out = os.path.join(SRC, name + ".png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def main():
+    # TNT 各面同贴图（侧/顶/底统一走 draw_side 观感；顶面细节差异不影响立方体读感，
+    # 且 mesher 整立方路径对 TNT 的 6 面统一用 tile 122）。生成 single default_tnt.png。
+    save(draw_side(), "default_tnt")
+
+
+if __name__ == "__main__":
+    main()

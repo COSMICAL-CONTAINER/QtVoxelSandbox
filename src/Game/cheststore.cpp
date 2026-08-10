@@ -224,3 +224,47 @@ bool ChestStore::populateMineshaftLoot(int x, int y, int z)
     emit chestChanged();
     return true;
 }
+
+// t485 首开填充沙漠神殿战利品（见 cheststore.h 头注释）。与 populateDungeonLoot / populateMineshaftLoot 同源逻辑，
+//   仅换战利品池（LootTable::pyramidChestPool：钻石 / 金 / 青金石 / 骨头 / 腐肉等）+ 抽取次数（kPyramidRolls=4）
+//   + 坐标确定性 seed 盐（0xDE5E72B 异或，与地牢盐 0xC0FFEE / 矿井盐 0x5BD1E995 解耦 → 同坐标神殿箱与地牢 / 矿井
+//   箱战利品各自独立）。
+bool ChestStore::populatePyramidLoot(int x, int y, int z)
+{
+    const QString k = key(x, y, z);
+    if (m_chests.find(k) != m_chests.end()) return false; // 已开过 / 已填充 → 不再生（首开一次性）
+
+    // 坐标确定性 seed（PLAN §2-K）：同坐标箱子 → 同战利品（与 populateDungeonLoot / populateMineshaftLoot 同模式，
+    //   盐不同 → 三表独立）。
+    const quint32 sx = quint32(quint32(x) * 73856093u);
+    const quint32 sy = quint32(quint32(y) * 19349663u);
+    const quint32 sz = quint32(quint32(z) * 83492791u);
+    const quint32 seed = (sx ^ sy ^ sz) ^ 0xDE5E72B5u; // 神殿专用盐（与地牢 0xC0FFEE / 矿井 0x5BD1E995 解耦）
+
+    // 抽取战利品 stack 列表（最多 kPyramidRolls=4 件，同 id 不合并）。
+    const auto &pool = LootTable::pyramidChestPool();
+    const std::vector<LootTable::Stack> stacks = LootTable::roll(pool, LootTable::kPyramidRolls, seed);
+
+    // 建空箱子条目，逐 stack 找随机空槽写入（同 id 不合并 → 分散多槽，机制等价 MC 沙漠神殿箱散布）。
+    Chest chest; // 默认 27 空槽
+    QRandomGenerator slotRng(seed ^ 0x9E3779B9u); // 与抽取 RNG 不同的盐 → 槽位分布独立
+    for (const LootTable::Stack &st : stacks) {
+        if (st.itemId <= 0 || st.count <= 0) continue;
+        int slot = -1;
+        for (int t = 0; t < kSlotsPerChest; ++t) {
+            const int cand = int(slotRng.bounded(kSlotsPerChest));
+            if (chest[size_t(cand)].id == 0) { slot = cand; break; }
+        }
+        if (slot < 0) {
+            for (int i = 0; i < kSlotsPerChest; ++i)
+                if (chest[size_t(i)].id == 0) { slot = i; break; }
+        }
+        if (slot < 0) break;
+        chest[size_t(slot)] = Slot{ st.itemId, st.count };
+    }
+
+    m_chests[k] = std::move(chest);
+    ++m_revision;
+    emit chestChanged();
+    return true;
+}

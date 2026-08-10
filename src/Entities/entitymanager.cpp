@@ -2423,6 +2423,56 @@ void EntityManager::detonateStalker(int idx, Entity &e, World *world, const QVec
                   << (originInWater ? "(in water: no terrain damage)" : "");
 }
 
+// t485 TNT 方块爆炸（见 entitymanager.h 头注释；机制等价 MC 1.0 TNT 爆炸）。与 detonateStalker 同源球形破坏 +
+//   距离衰减伤玩家 + explosion 音/视，差异：无 mob 实体（TNT 是方块）→ 无 exploded / releaseSlot / 驯服狼目标。
+//   playercontroller tick 扫玩家 footprint 格（压力板下垫 TNT）触发本方法。破坏方块走 destroySphereSilent 一次收口
+//   （N 写 1 emit，同 Stalker t320 批量模式），破坏块按 kExplosionDropChance 概率 emit explosionDroppedItem（掉落物，
+//   同 Stalker t297）。水中不破坏的守卫留简化（TNT 陷阱在密室内不在水中）。
+void EntityManager::detonateTntBlock(int x, int y, int z, World *world, const QVector3D &playerPos)
+{
+    // (a) 球形破坏方块：destroySphereSilent 一次收口（跳过 Air / Bedrock / Water / Obsidian，同 Stalker t320）。
+    //   返回被破坏块（坐标 + 原 id），caller 据原 id 派生掉落物。
+    if (world) {
+        const auto destroyed = world->destroySphereSilent(x, y, z, kExplosionRadius);
+        // t297 爆炸掉落（~50% / 破坏块，同 Stalker）：取 BlockRegistry::dropId → 概率门控 → emit explosionDroppedItem。
+        for (const World::DestroyedVoxel &d : destroyed) {
+            const int dropItemId = BlockRegistry::dropId(d.oldId);
+            if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
+                emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
+        }
+    }
+
+    // (b) 距离衰减伤害玩家（同 Stalker：身体中心到爆炸中心 3D 距离 → dmg=round(max·(1−dist/radius))，至少 1）。
+    //   TNT 爆炸中心 = TNT 格中心（x+0.5, y+0.5, z+0.5），机制等价 MC TNT 爆炸。半径外 → 0 不发。
+    int dmg = 0;
+    if (kExplosionRadius > 0.0f) {
+        const float ex = float(x) + 0.5f, ey = float(y) + 0.5f, ez = float(z) + 0.5f;
+        const float pdx = playerPos.x() - ex;
+        const float pdy = (playerPos.y() + 0.9f) - ey;
+        const float pdz = playerPos.z() - ez;
+        const float pd = std::sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
+        if (pd <= kExplosionRadius) {
+            dmg = int(std::round(float(kExplosionDamageMax) * (1.0f - pd / kExplosionRadius)));
+            if (dmg < 1) dmg = 1; // 半径内 → 至少 1HP
+        }
+        // 击退方向 = (玩家 − 爆炸中心) XZ 归一（同 Stalker t296）。
+        if (dmg > 0) {
+            float kbX = 0.0f, kbZ = 0.0f;
+            const float dxh = playerPos.x() - ex;
+            const float dzh = playerPos.z() - ez;
+            const float phlen = std::sqrt(dxh * dxh + dzh * dzh);
+            if (phlen > 1e-3f) { kbX = dxh / phlen; kbZ = dzh / phlen; }
+            else { kbX = 1.0f; } // 兜底：水平重合 → 朝 +X 推
+            // mobType 占位传 MobStalker（爆炸型；呈现层仅用作受击音色 / 死因标签，TNT 爆炸用 Stalker 同族音）。
+            emit mobAttackedPlayer(dmg, int(MobStalker), kbX, kbZ);
+        }
+    }
+
+    // (c) 爆炸音 / 视反馈（单一入口，同 Stalker：呈现层 onExplosion → playExplosion + burstExplosion）。
+    emit explosion(x, y, z);
+    qCInfo(lcEnt) << "TNT detonated at" << x << y << z << "player dmg" << dmg;
+}
+
 // t241 羊吃草：检测 / 消耗 entity 前方一格草丛（机制等价 MC 羊吃草：草丛消失 + 其下草方块变泥土）。
 //   目标列 = 沿 yaw 朝向 reach=0.7 前方（头部前方）；草丛格 y = 身体格（floor(pos.y − radius)，草丛生于地
 //   表上方一格 = 羊身体所在格）；其下地表格 = bodyY − 1（草方块 Grass）。OOB → 安全返 false（blockAt 越界

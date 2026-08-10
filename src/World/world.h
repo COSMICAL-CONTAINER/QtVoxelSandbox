@@ -91,6 +91,14 @@ public:
         return blockAt(x, y, z) == BlockRegistry::Chest
             && (stateAt(x, y, z) & BlockRegistry::ChestStateMineshaftFlag) != 0;
     }
+    // t485 该格箱子是否「沙漠神殿生成箱」（worldgen placeDesertTemple 写入的箱子，state 带
+    //   ChestStatePyramidFlag bit4；玩家放置的箱子 / 地牢箱 / 矿井箱无此位）。Main.qml.openChest 据此判
+    //   「是否首开填充沙漠神殿战利品」（LootTable::pyramidChestPool：钻石 / 金 / 青金石 / 骨头 / 腐肉等）。
+    //   分层（PLAN §2）：纯只读谓词（blockAt + stateAt + BlockRegistry），不写栅格。非箱子格 → false。
+    Q_INVOKABLE bool isPyramidChest(int x, int y, int z) const {
+        return blockAt(x, y, z) == BlockRegistry::Chest
+            && (stateAt(x, y, z) & BlockRegistry::ChestStatePyramidFlag) != 0;
+    }
     // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
     //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/
     //   trapdoor，state 解码同 partialblockgeometry）。玩家碰撞迭代玩家 AABB 覆盖的所有格，逐 sub-AABB
@@ -551,6 +559,17 @@ private:
     //   立柱 / 铁轨仍画出（矿井结构叠加于洞穴）。纯函数于 seed（hashColumn / hashVoxel）→ 同 seed 同矿井分布
     //   （PLAN §2-K）。**宝藏箱内容**：Chest 物品存 ChestStore（同地牢箱），首开填充由 isMineshaftChest 判定。
     void placeMineshaft();
+    // t485 沙漠神殿（spec「沙漠群系生成：金字塔外形（沙岩/切制沙岩）+ 地下密室 + 4 宝藏箱（钻石/金/青金石/
+    //   骨头/腐肉）+ TNT 陷阱（踩压力板引爆）」；机制等价 MC 1.0 沙漠神殿 desert temple）。placeMineshaft 之后、
+    //   fillWater 之前，**仅 Desert 群系**（isDesert 守卫，spec「沙漠群系生成」）确定性稀疏散布（grid 48，比矿井 36
+    //   更稀；spec「低频」）：选沙漠中心点（hashColumn + seed 偏移，PLAN §2-K）→ 地表铺金字塔（阶梯砂岩 Sandstone +
+    //   CutSandstone 顶饰，逐层缩半高成金字塔外形）→ 金字塔正下方地下挖密室（7×7×4 空气 + 砂岩墙 / 地板 / 顶板）→
+    //   密室四角放 4 只带 ChestStatePyramidFlag 标记的 Chest 宝藏箱 → 密室中央 CobblePressurePlate 压力板下垫 3×3
+    //   TntBlock（踩板 → playercontroller tick 扫 footprint 触发 detonateTntBlock → destroySphereSilent 球形破坏，
+    //   机制等价 MC 1.0 沙漠神殿 TNT 陷阱）。纯函数于 seed（hashColumn / hashVoxel / biomeAt）→ 同 seed 同神殿分布
+    //   （PLAN §2-K；确定性 + 不全图扫描，仅扫候选沙漠格）。**宝藏箱内容**：Chest 物品存 ChestStore，首开填充由
+    //   isPyramidChest 判定 → pyramidChestPool（钻石 / 金 / 青金石 / 骨头 / 腐肉等）。
+    void placeDesertTemple();
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
     //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
     //   （surfaceY-1 / surfaceY-2 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶 -1，

@@ -238,6 +238,14 @@ TILES = [
     "default_rail",               # 121 rail（铁轨贴地薄板 flat 贴图；透明底 + 棕色枕木 + 灰铁双轨；Rail 各面=本 tile，
                                   #    mesher 走 PartialBlockGeometry Rail 水平 quad case；机制等价 MC 1.0 rail；
                                   #    tools/build_rail.py 程序生成原创像素图）
+    # t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；名称 / 贴图全原创自绘 §9a）。
+    #   各由独立 build_*.py 程序生成原创像素图（不透明整立方，与砂岩/箱子同走 culled 立方面路径）。
+    "default_tnt",                # 122 tnt（TNT 各面同贴图；深红药柱底 + 横向深棕捆带 + 中央亮黄标识 + 顶部引线点；
+                                  #    机制等价 MC 1.0 TNT——可引爆的爆炸物方块；沙漠神殿 TNT 陷阱 + 创造可放置 / 合成；
+                                  #    tools/build_tnt.py 程序生成原创像素图）
+    "default_cut_sandstone",      # 123 cut_sandstone（切制砂岩各面同贴图；暖沙色平滑底 + 内陷矩形装饰边框，区别于
+                                  #    普通砂岩的层理纹；机制等价 MC 1.0 切制砂岩——沙漠神殿金字塔外框装饰变体；
+                                  #    tools/build_cut_sandstone.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

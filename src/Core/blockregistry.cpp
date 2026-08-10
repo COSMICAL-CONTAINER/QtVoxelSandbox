@@ -451,6 +451,20 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   NoTool（空手可采且掉落）、dropId=自身（破铁轨掉铁轨方块，可放回）、maxStack=64。各面=rail(121)。
     //   音色归 GroupStone（金属质）。worldgen placeMineshaft 散布；进创造调色板。配方 6 铁锭 + 1 木棒 → 16 铁轨。
     /* rail         */ {int(BlockRegistry::Rail),            121,121,121,121, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::Rail),           1, 64, "rail",        "铁轨"},
+    // ── t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；名称 / 贴图全原创自绘 §9a）。
+    //   TNT（TntBlock）：可引爆爆炸物方块。整立方 opaque（solid=true / ShapeFull，与砂岩/箱子同走 culled 立方面
+    //   路径）、hardness=0.0（MC 1.0 TNT 瞬破）、NoTool（空手可采且掉落）、dropId=自身（破 TNT 掉 TNT 方块）、
+    //   dropCount=1、maxStack=64。各面=tnt(122)（深红药柱底+横向深棕捆带+中央亮黄标识+顶部引线点）。音色归
+    //   GroupGrass（软质闷击，机制等价 MC 1.0 TNT 草地音色）。引爆：踩压力板触发（playercontroller 扫 footprint
+    //   压力板下垫 TNT）→ EntityManager::detonateTntBlock（复用 destroySphereSilent 球形破坏 + 距离衰减伤玩家 +
+    //   explosion 音/视，同 Stalker t284）。配方 5 火药 + 4 沙 → 1 TNT。进创造调色板。
+    /* tnt          */ {int(BlockRegistry::TntBlock),         122,122,122,122, true,  BlockRegistry::ShapeFull,     0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::TntBlock),       1, 64, "tnt",         "TNT"},
+    //   切制砂岩（CutSandstone）：装饰砂岩变体（机制等价 MC 1.0 cut sandstone——平滑+切割倒角边框，区别于普通
+    //   砂岩层理纹）。整立方 opaque（solid=true / ShapeFull，与砂岩/石头同走 culled 立方面路径）、hardness=0.8
+    //   （同砂岩量级，需镐）、Pickaxe、requiresTool=true、minTier1（木镐可破）、dropId=自身（破切制砂岩掉切制
+    //   砂岩方块）、dropCount=1、maxStack=64。各面=cut_sandstone(123)（暖沙色平滑底+内陷矩形装饰边框）。音色归
+    //   GroupStone（石质，同砂岩）。worldgen placeDesertTemple 金字塔外框装饰（与砂岩混排）。进创造调色板。
+    /* cut_sandstone*/ {int(BlockRegistry::CutSandstone),     123,123,123,123, true,  BlockRegistry::ShapeFull,     0.8f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CutSandstone),   1, 64, "cut_sandstone","切制砂岩"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -547,6 +561,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     // t484 废弃矿井结构方块 → MC 1.0 对齐：cobweb id 30（1.0 存在）；rail id 66（1.0 存在）。
     /* cobweb                  */ 30, // t484 蜘蛛网 → MC 1.0 cobweb id 30
     /* rail                    */ 66, // t484 铁轨 → MC 1.0 rail id 66
+    // t485 沙漠神殿结构方块 → MC 1.0 对齐：TNT id 46（1.0 存在）；切制砂岩 cut sandstone id 43 为 1.8+ 独立 id
+    //   （1.0 sandstone id 24 仅以 metadata 分变体，本工程用独立 id 故 cut_sandstone 无 1.0 等价 → -1，资源包回退引擎自绘）。
+    /* tnt                     */ 46, // t485 TNT → MC 1.0 TNT id 46
+    /* cut_sandstone           */ -1, // t485 切制砂岩 → MC 1.0 无等价（cut sandstone id 43 为 1.8+；1.0 sandstone id 24 仅 metadata 分变体，独立 id 故无 1.0 等价）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -680,6 +698,14 @@ bool BlockRegistry::isFlower(quint8 blockId)
 bool BlockRegistry::isLadder(quint8 blockId)
 {
     return blockId == Ladder;
+}
+
+// t485 TNT 统一谓词（单一权威）：blockId == TntBlock 即 TNT。供 PlayerController TNT 陷阱触发判定
+//   （扫玩家 footprint 格——压力板下垫 TNT 即引爆）+ EntityManager::detonateTntBlock + worldgen
+//   placeDesertTemple，避免各处硬编码 TntBlock id 判定（同 isLadder 单 id 模式）。
+bool BlockRegistry::isTnt(quint8 blockId)
+{
+    return blockId == TntBlock;
 }
 
 // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台加成
@@ -1062,6 +1088,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case CopperOre: case GoldOre: // t308 铜/金矿石 → 石质音色（同 coal/iron/diamond 矿石族）
     case Spawner: // t392 刷怪笼 → 石质音色（铁笼金属敲击感，最接近 MC 1.0 刷怪笼 metal SoundType）
     case Sandstone: // t394 砂岩 → 石质音色（成岩，同 cobble/stone 族）
+    case CutSandstone: // t485 切制砂岩 → 石质音色（同砂岩族）
     case Obsidian: // t411 黑曜石 → 石质音色（致密火山玻璃，同 cobble/stone 族）
     case CobbleSlab: case CobbleStairs: case CobbleFence: case CobblePressurePlate: // t412 圆石变体 → 石质音色（同 cobble 族）
     case EnchantingTable: // t474 附魔台 → 石质音色（黑曜石+钻石基座，石质偏硬，同 obsidian 族）
@@ -1104,6 +1131,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case PotatoCrop: // t407 马铃薯作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）
     case Pumpkin: // t482 南瓜 → 软草音色（瓜类植物，同草丛；机制等价 MC pumpkin SoundType = wood 取软草近似）
     case Cobweb: // t484 蜘蛛网 → 软草音色（蛛丝软质，同草丛；机制等价 MC cobweb SoundType = grass）
+    case TntBlock: // t485 TNT → 软草音色（火药捆软质闷击；机制等价 MC 1.0 TNT SoundType = grass）
         return GroupGrass;
     case Sand:
     case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）
