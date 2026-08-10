@@ -123,6 +123,7 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
         case MobSpider:   e.halfW = 0.45f; e.halfH = 0.30f; e.hostile = true; break; // 0.9×0.6 宽矮（躯干 0.8 宽 + 余量；旧 1.1 偏大；快速，t285）
         case MobChicken:  e.halfW = 0.30f; e.halfH = 0.40f; break; // 0.6×0.8 小型鸟（躯干 0.4 宽 / 站立 0.7 高；t398）
         case MobSquid:    e.halfW = 0.40f; e.halfH = 0.45f; break; // 0.8×0.9 水生软体（机制等价 MC 1.0 squid 0.8 宽；t399）
+        case MobWolf:     e.halfW = 0.35f; e.halfH = 0.45f; break; // 0.7×0.9 犬科（细长躯干 0.36 宽 + 余量；略小于猪；t480）
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
@@ -221,11 +222,12 @@ void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
 // t283 生成箭矢投射物：存 origin + 3D 速度 vel（含 vy 抛物）+ kind=Arrow + pushable=false + 寿命。
 //   halfW/halfH=0.06（细长杆视觉 + 碰撞最小；箭命中走 point-in-AABB 不读 halfW）。bump revision → QML
 //   Repeater 追加 delegate（Arrow 分支细长杆定向 Model）。达 kCap 跳过 + 告警（防溢出）。
-void EntityManager::spawnArrow(const QVector3D &origin, const QVector3D &vel)
+//   t480：返新箭槽索引（fireArrow 用它设 arrowShooter —— 骷髅箭命中玩家时驯服狼反击发射者）；达 kCap → -1。
+int EntityManager::spawnArrow(const QVector3D &origin, const QVector3D &vel)
 {
     if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); arrow spawn skipped at" << origin;
-        return;
+        return -1;
     }
     Entity e;
     e.pos = origin;
@@ -237,9 +239,10 @@ void EntityManager::spawnArrow(const QVector3D &origin, const QVector3D &vel)
     e.vy = vel.y();
     e.vz = vel.z();
     e.arrowLife = kArrowLifetime;
-    acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
+    return slot;
 }
 
 // t304 玩家弓射出的箭：与 spawnArrow（骷髅射出，命中玩家 t283）对称，差异在 arrowFromPlayer=true（命中 mob）+
@@ -810,11 +813,13 @@ void EntityManager::shearSheep(int i)
     emit entitiesChanged(); // bump → QML delegate 据 shearedAt 翻羊为裸外观
 }
 
-// t400 mobType 是否可繁殖被动生物（pig/cow/sheep/chicken 之一）。hostile / MobTest / MobSquid 不可繁殖。
-//   feedMob 食物匹配 / 求偶寻偶 / 配对均先据它门控。机制等价 MC 1.0 仅被动 farm 动物可繁殖。
+// t400 mobType 是否可繁殖被动生物（pig/cow/sheep/chicken 之一；t480 加 MobWolf）。hostile / MobTest / MobSquid
+//   不可繁殖。feedMob 食物匹配 / 求偶寻偶 / 配对均先据它门控。机制等价 MC 1.0 仅被动 farm 动物可繁殖；
+//   狼的「仅驯服可繁殖」门控在 enterLoveMode / feedBaby 内（isBreedableType 是类型级门，驯服是实例级门）。
 bool EntityManager::isBreedableType(int mobType)
 {
-    return mobType == MobPig || mobType == MobCow || mobType == MobSheep || mobType == MobChicken;
+    return mobType == MobPig || mobType == MobCow || mobType == MobSheep || mobType == MobChicken
+           || mobType == MobWolf;
 }
 
 // t400 触发求偶期（spec「喂对应食物 → 求偶」；机制等价 MC 1.0 breeding 的 feed-to-enter-love-mode）。
@@ -828,7 +833,8 @@ bool EntityManager::enterLoveMode(int i)
     if (i < 0 || i >= int(m_entities.size())) return false;
     Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || !e.alive || e.dead) return false;   // 仅活体 mob 可触发
-    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken 可繁殖
+    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken/wolf 可繁殖
+    if (e.mobType == MobWolf && !e.wolfTamed) return false;   // t480：仅**驯服狼**可繁殖（野狼喂肉无求偶，机制等价 MC）
     if (e.baby) return false;                                 // 幼崽未成熟，不可触发求偶
     if (e.breedCooldown > 0.0f) return false;                 // 繁殖冷却中 → 喂食无效（防刷屏；caller 保住食物）
     if (e.loveTimer > 0.0f) return false;                     // 已求偶 → 不重复触发（防一次喂多个叠加）
@@ -850,7 +856,8 @@ bool EntityManager::feedBaby(int i)
     if (i < 0 || i >= int(m_entities.size())) return false;
     Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || !e.alive || e.dead) return false;   // 仅活体 mob 可喂
-    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken 可繁殖
+    if (!isBreedableType(e.mobType)) return false;            // 仅 pig/cow/sheep/chicken/wolf 可繁殖
+    if (e.mobType == MobWolf && !e.wolfTamed) return false;   // t480：仅**驯服狼**幼崽可喂（野狼幼崽不驯）
     if (!e.baby) return false;                                // 非幼崽 → 走成体求偶路径（enterLoveMode）
     e.growTimer -= kBabyFeedGrow;
     if (e.growTimer < 0.0f) e.growTimer = 0.0f;               // clamp 0（防负成长；到 0 即下 tick 长大）
@@ -859,6 +866,65 @@ bool EntityManager::feedBaby(int i)
     ++m_revision;
     emit entitiesChanged();
     return true; // caller 据返值消耗 1 食物（生存）
+}
+
+// t480 第 i 只 mob 是否已驯服狼（wolfTamed=true）。仅 MobWolf 用；其余 mob 恒 false。越界 → false。
+bool EntityManager::wolfTamedAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobWolf) return false; // 仅 wolf 有驯服态
+    return e.wolfTamed;
+}
+
+// t480 第 i 只驯服狼是否坐着（wolfSitting=true；留守）。仅驯服狼用（未驯服 / 非 wolf 恒 false）。越界 → false。
+bool EntityManager::wolfSittingAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobWolf || !e.wolfTamed) return false; // 仅驯服狼有坐态
+    return e.wolfSitting;
+}
+
+// t480 骨头驯服（spec「右键概率驯服 ~33%」；机制等价 MC 1.0 狼 33% 驯服概率 + 失败骨头仍消耗）。
+//   未驯服活体狼 → ~kWolfTameChance 概率驯服（wolfTamed=true + 清敌对追踪态 chasing/fuse 残留 → aiWolf
+//   转跟随/防御态）+ bump revision（QML 切狼外观 / 行为态）+ 返 true；未中 → 返 false（caller 照常消耗骨头）。
+//   已驯服 / 非 wolf / dead / 越界 → 返 false（caller 不消耗）。Q_INVOKABLE 兼调试 + PlayerController 骨头分支双入口。
+bool EntityManager::tameWolf(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobWolf) return false; // 仅 wolf 可驯
+    if (e.dead || !e.alive) return false;                    // 尸体 / 空槽不可驯
+    if (e.wolfTamed) return false;                           // 已驯服 → 不重复（caller 不消耗骨头）
+    if (QRandomGenerator::global()->generateDouble() >= double(kWolfTameChance)) {
+        qCInfo(lcEnt) << "tame attempt failed (slot" << i << ") - bone consumed, wolf stays wild";
+        return false; // ~67% 失败（骨头仍消耗，机制等价 MC 喂骨无论成败都耗）
+    }
+    e.wolfTamed = true;
+    e.chasing = false;     // 清野狼敌对追踪残留（驯服即停攻玩家，防下帧 aiWolf 仍追咬）
+    e.chaseTimer = 0.0f;
+    e.attackCooldown = 0.0f; // 清咬击冷却（驯服后无攻击语义残留）
+    qCInfo(lcEnt) << "wolf tamed at slot" << i << "pos" << e.pos;
+    ++m_revision;
+    emit entitiesChanged(); // bump → QML 据 wolfTamedAt 切狼行为态
+    return true; // caller 据返值消耗 1 骨头（生存）
+}
+
+// t480 坐/站切换（spec「驯服狼右键坐 → 再右键站」；机制等价 MC 1.0 驯服狼右键坐/站命令）。
+//   已驯服活体狼 → 翻转 wolfSitting + bump revision（QML 切坐姿 / 站姿；aiWolf 切留守 / 跟随）。
+//   未驯服 / 非 wolf / dead / 越界 → 静默 no-op（野狼右键无反应）。Q_INVOKABLE 兼调试 + PlayerController 骨头分支双入口。
+void EntityManager::toggleWolfSit(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobWolf) return; // 仅 wolf 可命令坐/站
+    if (e.dead || !e.alive) return;                    // 尸体 / 空槽不可命令
+    if (!e.wolfTamed) return;                          // 未驯服 → 右键无反应（机制等价 MC 野狼不可命令）
+    e.wolfSitting = !e.wolfSitting;
+    qCInfo(lcEnt) << "wolf slot" << i << (e.wolfSitting ? "sitting (stay)" : "standing (follow)");
+    ++m_revision;
+    emit entitiesChanged(); // bump → QML 据 wolfSittingAt 切坐姿/站姿
 }
 
 // t400 第 i 个 mob 是否处于求偶期（loveTimer>0）。QML delegate 据它显心形 Model（繁殖可观察反馈）。
@@ -889,13 +955,16 @@ bool EntityManager::isBabyAt(int i) const
     return e.baby;
 }
 
-// t400 当前可繁殖被动 mob 数（pig/cow/sheep/chicken 成体 + 幼崽，alive 且非 dead）。供繁殖上限判定。
+// t400 当前可繁殖被动 mob 数（pig/cow/sheep/chicken 成体 + 幼崽 + t480 驯服狼，alive 且非 dead）。供繁殖上限判定。
+//   t480：未驯服狼不计入（野狼不可繁殖，参与上限会虚占 kPassiveMobCap 名额 → 人为压低 farm 种群上限）。
 int EntityManager::passiveBreedableCount() const
 {
     int n = 0;
     for (const Entity &e : m_entities) {
         if (!e.alive || e.dead || e.kind != Mob) continue;
-        if (isBreedableType(e.mobType)) ++n;
+        if (!isBreedableType(e.mobType)) continue;
+        if (e.mobType == MobWolf && !e.wolfTamed) continue; // 仅驯服狼计入（野狼不可繁殖）
+        ++n;
     }
     return n;
 }
@@ -956,7 +1025,9 @@ bool EntityManager::tickBreeding(qreal dt)
     }
     // (2) 配对：求偶期成体同种相遇 → 产幼崽。先算「本帧还可产几只」= 上限 − 当前可繁殖数（防超 cap）。
     //   配对阶段仅 reset 父母 loveTimer / 设冷却 + 记 pending 幼崽；spawn 推迟到末段（批量 + 避引用失效）。
-    struct PendingBaby { float x, y, z; int mobType; QString color; };
+    //   t480：PendingBaby 带 tamed —— 狼幼崽继承父代驯服态（配对仅驯服狼进求偶 → 恒 tamed=true；保留字段
+    //   传递语义，未来若野狼可配对则各按父代）。
+    struct PendingBaby { float x, y, z; int mobType; QString color; bool tamed; };
     std::vector<PendingBaby> pending;
     int remaining = kPassiveMobCap - passiveBreedableCount();
     const float rangeSq = kBreedRange * kBreedRange;
@@ -983,7 +1054,7 @@ bool EntityManager::tickBreeding(qreal dt)
             const float bx = (e.pos.x() + m.pos.x()) * 0.5f;
             const float by = std::min(e.pos.y(), m.pos.y());
             const float bz = (e.pos.z() + m.pos.z()) * 0.5f;
-            pending.push_back({ bx, by, bz, e.mobType, e.color });
+            pending.push_back({ bx, by, bz, e.mobType, e.color, e.wolfTamed });
             --remaining;
             dirty = true;
             qCInfo(lcEnt) << "breed pair: slots" << idx << "&" << j << "type" << e.mobType
@@ -1002,6 +1073,8 @@ bool EntityManager::tickBreeding(qreal dt)
             Entity &baby = m_entities[size_t(slot)];
             baby.baby = true;            // 标幼崽（QML babyScaleAt → 0.5 缩小）
             baby.growTimer = kBabyGrowTime; // 长大倒计时
+            if (b.mobType == MobWolf)
+                baby.wolfTamed = b.tamed; // t480：狼幼崽继承父代驯服态（配对仅驯服狼 → 恒 true；驯服幼崽跟随主人）
         }
     }
     return dirty;
@@ -1291,11 +1364,162 @@ bool EntityManager::aiSquid(Entity &e, float dt, World *world, float worldW, flo
     return moved;
 }
 
+// t480 狼 AI（详见头文件 aiWolf 注释）。机制对齐 MC 1.0 狼三态：
+//   (1) 未驯服 → 敌对玩家（侦测 → 追击 → 近距咬击；非追踪回退 wander）。
+//   (2) 驯服 + 坐 → 留守（不移动不攻击）。
+//   (3) 驯服 + 站 → 跟随主人 + 防御（追击咬击 m_wolfTarget 目标 mob）；求偶期优先寻偶。
+//   返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。分层（PLAN §2）：只读 World::isSolid + 自身数据；
+//   咬玩家走 mobAttackedPlayer 语义信号（呈现层路由 PlayerState）、咬 mob 走 damageEntity（同层受击链）。
+bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
+                           float worldW, float worldD, float speedScale, bool playerTargetable)
+{
+    // 坐：留守 —— 不移动不攻击（跟随主人回来时仍坐原地；机制等价 MC 坐狼）。moveSpeed 清零 → walkPhase 冻结。
+    if (e.wolfSitting) {
+        e.wanderSpeed = 0.0f;
+        e.moveSpeed = 0.0f;
+        return false;
+    }
+
+    if (e.wolfAttackCooldown > 0.0f) {
+        e.wolfAttackCooldown -= dt;
+        if (e.wolfAttackCooldown < 0.0f) e.wolfAttackCooldown = 0.0f;
+    }
+
+    // 水平追击移动 lambda（复用 aiHostile 逐轴 AABB 撤回 + 世界边界 clamp 模式）：朝 (tx,tz) 以 spd 走，
+    //   返是否真位移。捕获 e/dt/world/worldW/worldD（本函数内唯一移动路径；三处复用免三次内联副本）。
+    auto chase = [&](float tx, float tz, float spd, float distXZ) -> bool {
+        if (distXZ <= 1e-4f) { e.moveSpeed = 0.0f; return false; } // 目标重合 → 不位移（避免除零）
+        const float ehw = e.halfW; // XZ 半宽（边界 clamp + 碰撞）
+        const float ehh = e.halfH; // Y 半高（footprint 格扫）
+        const float nx = (tx - e.pos.x()) / distXZ;
+        const float nz = (tz - e.pos.z()) / distXZ;
+        float newX = e.pos.x() + nx * spd * dt;
+        if (newX < ehw) newX = ehw;
+        if (newX > worldW - ehw) newX = worldW - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+        float newZ = e.pos.z() + nz * spd * dt;
+        if (newZ < ehw) newZ = ehw;
+        if (newZ > worldD - ehw) newZ = worldD - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+        bool moved = false;
+        if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+        if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+        e.moveSpeed = moved ? spd : 0.0f; // 撞墙 → 腿停（t241 腿摆频率随它）
+        return moved;
+    };
+
+    // (1) 未驯服：敌对玩家（玩家可锁定才追咬；创造/观察者不可锁定 → 纯游荡，同 t290 门控）。
+    if (!e.wolfTamed) {
+        if (!playerTargetable) {
+            if (e.chasing) { e.chasing = false; e.chaseTimer = 0.0f; } // 清追踪残留（防模式切换后仍追）
+            return aiWander(e, dt, world, worldW, worldD, speedScale);
+        }
+        const float dx = playerPos.x() - e.pos.x();
+        const float dz = playerPos.z() - e.pos.z();
+        const float dy = playerPos.y() - e.pos.y();
+        const float distXZ = std::sqrt(dx * dx + dz * dz);
+        // detect + chase memory（同 aiHostile）：进入 kWolfDetectRange → 追踪 + 刷新记忆；脱离后记忆期内续追。
+        if (distXZ <= kWolfDetectRange) {
+            e.chasing = true;
+            e.chaseTimer = kChaseMemory;
+        } else if (e.chasing) {
+            e.chaseTimer -= dt;
+            if (e.chaseTimer <= 0.0f) { e.chaseTimer = 0.0f; e.chasing = false; }
+        }
+        if (!e.chasing) return aiWander(e, dt, world, worldW, worldD, speedScale); // 非追踪 → 游荡
+        // 追踪：yaw 朝玩家 + 走近 + 近距咬击（复用 aiHostile attack 门控：冷却 + t321 全局节流）。
+        if (distXZ > 1e-4f) e.yawRad = std::atan2(-dx, -dz);
+        const bool moved = chase(playerPos.x(), playerPos.z(), kWolfChaseSpeed * speedScale, distXZ);
+        if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange
+            && e.wolfAttackCooldown <= 0.0f && m_playerHitCooldown <= 0.0f) {
+            e.wolfAttackCooldown = kWolfAttackCooldown;
+            m_playerHitCooldown = kPlayerHitThrottle; // t321 串行化玩家受击（野狼群围攻轮替出手）
+            float kbX, kbZ;
+            if (distXZ > 1e-3f) { kbX = dx / distXZ; kbZ = dz / distXZ; }
+            else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); }
+            emit mobAttackedPlayer(kWolfAttackDamage, int(MobWolf), kbX, kbZ);
+            qCInfo(lcEnt) << "untamed wolf" << idx << "bit player for" << kWolfAttackDamage << "HP";
+        }
+        return moved;
+    }
+
+    // (2)(3) 驯服 + 站。
+    // t400 求偶优先（机制等价 MC 求偶者走向配偶）：驯服狼在求偶期 → 覆盖跟随/防御，主动走向最近同种求偶配偶
+    //   （进入配对距离后由 tickBreeding 产幼崽）；无配偶（仅一方求偶）→ 照常跟随。
+    if (e.loveTimer > 0.0f && !e.baby) {
+        const int mate = findNearestMate(idx);
+        if (mate >= 0) {
+            const Entity &mp = m_entities[size_t(mate)];
+            const float mdx = mp.pos.x() - e.pos.x();
+            const float mdz = mp.pos.z() - e.pos.z();
+            const float md = std::sqrt(mdx * mdx + mdz * mdz);
+            if (md > 1e-4f) e.yawRad = std::atan2(-mdx, -mdz);
+            return chase(mp.pos.x(), mp.pos.z(), kWolfChaseSpeed * speedScale, md);
+        }
+    }
+
+    // 防御目标校验（目标死亡 / 释放槽 / 自身 → 清除；slot-reuse 索引稳定但槽可被新 mob 复用 → 每 AI tick 复核）。
+    if (m_wolfTarget >= 0 && m_wolfTarget < int(m_entities.size())) {
+        const Entity &t = m_entities[size_t(m_wolfTarget)];
+        if (m_wolfTarget == idx || !t.alive || t.kind != Mob || t.dead) m_wolfTarget = -1;
+    }
+    if (m_wolfTarget >= 0) {
+        const Entity &t = m_entities[size_t(m_wolfTarget)];
+        const float dx = t.pos.x() - e.pos.x();
+        const float dz = t.pos.z() - e.pos.z();
+        const float dy = t.pos.y() - e.pos.y();
+        const float distXZ = std::sqrt(dx * dx + dz * dz);
+        if (distXZ > 1e-4f) e.yawRad = std::atan2(-dx, -dz);
+        const bool moved = chase(t.pos.x(), t.pos.z(), kWolfChaseSpeed * speedScale, distXZ);
+        // 近距咬击目标 mob（damageEntity 复用受击链：扣血 + 红闪 + 归零 mobDied 死亡掉落；冷却门控防连抽）。
+        if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange && e.wolfAttackCooldown <= 0.0f) {
+            e.wolfAttackCooldown = kWolfAttackCooldown;
+            damageEntity(m_wolfTarget, kWolfAttackDamage);
+            qCInfo(lcEnt) << "tamed wolf" << idx << "bit mob" << m_wolfTarget
+                          << "for" << kWolfAttackDamage << "HP";
+        }
+        return moved;
+    }
+
+    // 无防御目标 → 跟随主人：distXZ > kFollowMinDist 走近（kFollowMinDist 内停步贴近）；过远 kWolfTeleportDist
+    //   瞬移到主人附近安全位（防跟随永久掉队 —— 狼速 3.5 < 玩家 4.3；机制等价 MC 狼距主人过远传送）。
+    const float fdx = playerPos.x() - e.pos.x();
+    const float fdz = playerPos.z() - e.pos.z();
+    const float followDist = std::sqrt(fdx * fdx + fdz * fdz);
+    if (followDist > kWolfTeleportDist) {
+        auto *rng = QRandomGenerator::global();
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            const float ang = float(rng->bounded(62832)) / 10000.0f; // [0, 2π)
+            const float rad = 2.0f + float(rng->bounded(100)) / 100.0f * 3.0f; // [2, 5) 格环
+            const int tx = qFloor(playerPos.x() + std::cos(ang) * rad);
+            const int tz = qFloor(playerPos.z() + std::sin(ang) * rad);
+            if (tx < 0 || tz < 0 || tx >= int(worldW) || tz >= int(worldD)) continue;
+            // 自主人高度向上 1 格起向下扫 5 格，找「本格 air + 下方实体」（防瞬移进墙 / 悬空 / 天花板）。
+            for (int y = qFloor(playerPos.y()) + 1; y >= std::max(0, qFloor(playerPos.y()) - 4); --y) {
+                if (world->blockAt(tx, y, tz) == BlockRegistry::Air && world->isSolid(tx, y - 1, tz)) {
+                    e.pos = QVector3D(float(tx) + 0.5f, float(y) + e.halfH, float(tz) + 0.5f);
+                    e.vy = 0.0f;
+                    e.resting = true; // 落安全位 → 贴地（下帧 resting 复探支撑；pos 变化须返 true 驱动 dirty）
+                    return true; // 瞬移 = 位置变更（tick 据返值标 dirty → 末尾 bump revision 刷新 QML）
+                }
+            }
+        }
+    }
+    if (followDist > 1e-4f) e.yawRad = std::atan2(-fdx, -fdz); // 跟随期间朝主人
+    if (followDist > kFollowMinDist)
+        return chase(playerPos.x(), playerPos.z(), kWolfChaseSpeed * speedScale, followDist);
+    e.wanderSpeed = 0.0f;
+    e.moveSpeed = 0.0f; // 已到位（贴近主人）→ 停步（腿停）
+    return false;
+}
+
 // t281 敌对生物 AI（detect→pathfind→attack；详见头文件 aiHostile 注释）。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI。
 //   简化 A* = 贪心方向（直线朝玩家）+ 1 格墙越障跳；非完整 A*（每帧多 mob 跑 A* 开销过大，近战 mob 直线 + 跳够用，
 //   平地 / 1 格台阶 / 树根 / 矮墙均能通过；复杂洞穴几何会卡墙，作为基类可接受，留给后续寻路增强）。
 //   分层（PLAN §2）：只读 World::isSolid + 自身数据；attack 走语义信号 mobAttackedPlayer（呈现层路由 PlayerState）。
-bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D &playerPos,
+//   t480 idx = 本 mob 槽索引：近战攻击命中玩家时注册驯服狼防御目标（m_wolfTarget = idx，机制等价 MC 驯服狼
+//   攻击咬伤主人的怪物）。
+bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
                               float worldW, float worldD, float speedScale)
 {
     // 攻击冷却递减（不论追踪与否；自然走完，复击不卡陈旧值）。钳到 0。
@@ -1386,6 +1610,8 @@ bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D
         float kbX, kbZ;
         if (distXZ > 1e-3f) { kbX = dx / distXZ; kbZ = dz / distXZ; }
         else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); } // 兜底：朝 mob 面朝方向（= 推开）
+        // t480 主人受击 → 驯服狼攻击本敌对（防御目标 = 咬伤主人的 mob；机制等价 MC 驯服狼报复攻击者）。
+        m_wolfTarget = idx;
         emit mobAttackedPlayer(kAttackDamage, e.mobType, kbX, kbZ);
         qCInfo(lcEnt) << "hostile mob" << e.mobType << "attacked player for" << kAttackDamage << "HP";
     }
@@ -1396,7 +1622,8 @@ bool EntityManager::aiHostile(Entity &e, float dt, World *world, const QVector3D
 // t283 骷髅弓箭手 AI（detect→keep-distance→shoot；详见头文件 aiArcher 注释）。机制对齐 MC 1.0 骷髅射手。
 //   分层（PLAN §2）：只读 World::isSolid + 自身数据；shoot 走 spawnArrow（箭实体），命中由 Arrow tick 分支
 //   发 mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile attack 模式）。
-bool EntityManager::aiArcher(Entity &e, float dt, World *world, const QVector3D &playerPos,
+//   t480 idx = 本 mob 槽索引：传给 fireArrow 设箭 arrowShooter（箭命中玩家 → 驯服狼反击发射者）。
+bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
                              float worldW, float worldD, float speedScale)
 {
     // 攻击（射箭）冷却递减（不论追踪与否；自然走完，复射不卡陈旧值）。钳到 0。
@@ -1500,7 +1727,7 @@ bool EntityManager::aiArcher(Entity &e, float dt, World *world, const QVector3D 
         if (e.losClear) {
             e.aimTimer += float(dt);
             if (e.aimTimer >= kAimWindup) {
-                fireArrow(e, target);
+                fireArrow(idx, e, target); // t480 idx = 发射者槽（箭 arrowShooter = idx）
                 e.attackCooldown = kShootCooldown;
                 e.aimTimer = 0.0f;
                 qCInfo(lcEnt) << "archer (Bones) fired arrow; dist=" << distXZ;
@@ -1533,7 +1760,9 @@ bool EntityManager::lineOfSightClear(World *world, const QVector3D &from, const 
 }
 
 // t283 朝 target 解抛物初速并射箭（aiArcher shoot 段调；详见头文件 fireArrow 注释）。
-void EntityManager::fireArrow(const Entity &shooter, const QVector3D &target)
+//   t480 shooterIdx = 发射者（骸骨）槽索引：spawnArrow 返槽后写 arrowShooter —— 箭命中玩家时驯服狼据此
+//   反击发射者（主人受击 → 狼攻击射箭的骸骨）。
+void EntityManager::fireArrow(int shooterIdx, const Entity &shooter, const QVector3D &target)
 {
     // origin = shooter 中心高度 + 朝 target 前移 0.5 格（避免贴墙时箭 spawn 入墙即被 tick 判方块命中）。
     const float dx0 = target.x() - shooter.pos.x();
@@ -1563,14 +1792,17 @@ void EntityManager::fireArrow(const Entity &shooter, const QVector3D &target)
     vx += rnd() * kArrowSpread;
     vz += rnd() * kArrowSpread;
     vy += rnd() * kArrowSpread;
-    spawnArrow(origin, QVector3D(vx, vy, vz));
+    const int arrowSlot = spawnArrow(origin, QVector3D(vx, vy, vz));
+    if (arrowSlot >= 0 && arrowSlot < int(m_entities.size()))
+        m_entities[size_t(arrowSlot)].arrowShooter = shooterIdx; // t480 箭记发射者（驯服狼防御用）
 }
 
 // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI（detect→chase→fuse→detonate；详见头文件 aiStalker 注释）。
 //   机制对齐 MC 苦力怕：缓慢逼近 → 近距蓄力（站立膨胀）→ 引爆；玩家逃远熄火。
 //   分层（PLAN §2）：只读 World::isSolid/blockAt + 自身数据；爆炸破坏方块走 setWaterSilent、伤害玩家走
 //   mobAttackedPlayer 语义信号（呈现层路由 PlayerState），同 aiHostile attack / aiArcher shoot 模式。
-bool EntityManager::aiStalker(Entity &e, float dt, World *world, const QVector3D &playerPos,
+//   t480 idx = 本 mob 槽索引：传给 detonateStalker 注册驯服狼防御目标（爆炸伤玩家 → 狼反击 Stalker）。
+bool EntityManager::aiStalker(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
                               float worldW, float worldD, float speedScale)
 {
     const float dx = playerPos.x() - e.pos.x();
@@ -1608,7 +1840,7 @@ bool EntityManager::aiStalker(Entity &e, float dt, World *world, const QVector3D
     // (5) detonate：蓄力满 → 引爆（破坏方块 + 伤害玩家 + emit explosion）+ 标 exploded。caller（tick Mob 分支）
     //   据 exploded 当帧 releaseSlot 移除。detonate 后不再移动 → 直接返 false（moved=false）。
     if (e.fuseTimer >= kFuseTime) {
-        detonateStalker(e, world, playerPos);
+        detonateStalker(idx, e, world, playerPos); // t480 idx = 本 mob 槽（爆炸伤玩家 → 驯服狼防御目标）
         e.moveSpeed = 0.0f;
         e.wanderSpeed = 0.0f;
         return false;
@@ -1668,7 +1900,8 @@ bool EntityManager::aiStalker(Entity &e, float dt, World *world, const QVector3D
 // t284 Stalker 爆炸（aiStalker fuse 满时调；详见头文件 detonateStalker 注释）。机制等价 MC 苦力怕球形爆炸。
 //   分层（PLAN §2）：向下写 World（setWaterSilent 破坏方块 + worldChanged 重建 mesh）+ 发语义信号
 //   （explosion 音/视反馈、mobAttackedPlayer 伤害玩家）；只读 World::blockAt 判定破坏目标。无向上依赖。
-void EntityManager::detonateStalker(Entity &e, World *world, const QVector3D &playerPos)
+//   t480 idx = 本 mob 槽索引：爆炸伤害玩家（dmg>0）时注册驯服狼防御目标（m_wolfTarget = idx）。
+void EntityManager::detonateStalker(int idx, Entity &e, World *world, const QVector3D &playerPos)
 {
     const float ex = e.pos.x();
     const float ey = e.pos.y();
@@ -1739,6 +1972,8 @@ void EntityManager::detonateStalker(Entity &e, World *world, const QVector3D &pl
         const float phlen = std::sqrt(dxh * dxh + dzh * dzh);
         if (phlen > 1e-3f) { kbX = dxh / phlen; kbZ = dzh / phlen; }
         else { kbX = 1.0f; } // 兜底：水平重合 → 朝 +X 推（任意非零向）
+        // t480 主人受炸 → 驯服狼攻击本 Stalker（防御目标 = 爆炸伤主的潜行者）。
+        m_wolfTarget = idx;
         emit mobAttackedPlayer(dmg, int(MobStalker), kbX, kbZ);
     }
 
@@ -2009,6 +2244,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   死因映射兜底 Generic，机制等价 MC「被自己的箭砸死」无特定凶手）。
                     const int dmg = e.arrowFromPlayer ? e.arrowDamage : kArrowDamage;
                     const int srcMobType = e.arrowFromPlayer ? -1 : int(MobBones);
+                    // t480 骷髅箭命中玩家 → 驯服狼防御目标 = 射箭的骸骨（arrowShooter 由 fireArrow 记发射者槽）。
+                    if (!e.arrowFromPlayer && e.arrowShooter >= 0 && e.arrowShooter < int(m_entities.size()))
+                        m_wolfTarget = e.arrowShooter;
                     emit mobAttackedPlayer(dmg, srcMobType, kbX, kbZ);
                     m_playerHitCooldown = kPlayerHitThrottle; // t321 串行化玩家受击（多弓手轮替命中）
                     hitPlayer = true;
@@ -2292,12 +2530,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   t283 Bones（骷髅弓箭手）→ aiArcher（detect→keep-distance→shoot 远程射箭）。
                     //   t284 Stalker（潜行者/苦力怕）→ aiStalker（detect→chase→fuse→detonate 近距自爆）。
                     //   非追踪回退到 wander（在 aiHostile / aiArcher / aiStalker 内）。
-                    if (aiArcher(e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    if (aiArcher(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                     // t331 拉弓期（chasing）每帧 bump revision → QML drawAmountAt 绑定刷新（驱动抬臂 + 弦后拉）；
                     //   即使 aiArcher 返 moved=false（拉弓减速到停），aimTimer 仍在变 → 须 dirty（同 Stalker inflate 模式）。
                     if (e.chasing) dirty = true;
                 } else if (e.mobType == MobStalker) {
-                    if (aiStalker(e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    if (aiStalker(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                     // 蓄力期（chasing）每帧 bump revision → QML inflateAt 绑定刷新（驱动膨胀动画 + 蓄力发白）；
                     //   即使 aiStalker 返 moved=false（蓄力站立不动），inflate 仍在变 → 须 dirty。熄火（fuseTimer→0）
                     //   亦在 chasing 态内 → 一并刷新让 QML 收回膨胀。
@@ -2305,13 +2543,18 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     // 引爆当帧移除：detonateStalker 置 exploded=true → 跳过后续重力 / resting（尸体即除）。
                     if (e.exploded) { toRemove.push_back(idx); continue; }
                 } else {
-                    if (aiHostile(e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    if (aiHostile(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                 }
             } else {
                 // 非吃草：扫描冷却倒数（仅羊）；AI wander；羊 idle 且冷却到 → 扫前方草丛决定是否开吃。
                 //   t399 鱿鱼（mobType==MobSquid）走 aiSquid（水里喷水游动；非 aiWander），且无吃草分支（非羊）。
+                //   t480 狼（mobType==MobWolf）走 aiWolf（未驯服敌对玩家 / 驯服跟随 + 防御 / 坐留守 / 求偶寻偶；
+                //     替代 aiWander + 吃草分支，狼非羊无吃草语义）。
                 if (e.mobType == MobSquid) {
                     if (aiSquid(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
+                } else if (e.mobType == MobWolf) {
+                    if (aiWolf(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, playerTargetable))
+                        dirty = true;
                 } else {
                 // t400 求偶寻偶（spec「喂食 → 求偶 → 同种配对」；机制等价 MC 1.0 love mode 寻偶）：成体可繁殖 mob
                 //   在求偶期（loveTimer>0）→ 覆盖 wander 的随机选向，把 yaw 钉向最近同种求偶配偶 + 强制行走 +

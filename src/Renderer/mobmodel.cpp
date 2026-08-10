@@ -289,9 +289,9 @@ void MobModel::setMobType(int type)
 {
     // 0（测试生物）/ 越界 → 兜底 Pig（保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube，
     //   不进本类，故此处兜底仅防误设）。合法 mobType：1 猪 / 2 牛 / 3 羊 / 4 Shambler(僵尸) /
-    //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛) / 8 Chicken(鸡) / 9 Squid(鱿鱼)。
+    //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛) / 8 Chicken(鸡) / 9 Squid(鱿鱼) / 10 Wolf(狼)。
     //   修：原仅接 1-5 且误标 5=Stalker（实际 enum 5=Bones）。
-    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9) type = 1;
+    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10) type = 1;
     if (type == m_mobType) return;
     m_mobType = type;
     emit mobTypeChanged();
@@ -451,6 +451,17 @@ void MobModel::rebuild()
             addBoxRot(tx, kSquidPivotY - kSquidTentHy, tz, 0.045f, kSquidTentHy, 0.045f,
                       kSquidPivotY, tz, swing, verts, idx, bMin, bMax);
         }
+    } else if (m_mobType == 10) {
+        // t480 Wolf（狼；机制等价 MC 1.0 狼，§9 原创模型 + 贴图）—— 中型犬科：细长躯干 + 前伸尖头 + 双立耳 + 4 腿。
+        //   尾巴**不在本几何** —— 呈现层 QML 据血量旋转独立尾巴 Model（spec「尾巴角度示血量」；独立子 Model
+        //   才能绕尾根枢独立旋转，嵌在几何里的尾巴无法单独动）。腿底本地 y=−0.42 贴 collision 底面（halfH=0.45
+        //   → Main.qml mobModelYOff=0.42−0.45=−0.03）。walkPhase 驱动 4 腿对角摆动（addLegs，同猪/牛/羊四足
+        //   walk cycle）；坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动，几何本身不参与。
+        addBox( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f, verts, idx, bMin, bMax); // 细长躯干（比猪窄瘦；狼体型特征）
+        addHeadRot( 0.00f,  0.12f, -0.52f, 0.14f, 0.15f, 0.18f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸略尖；鼻吻）
+        addBox(-0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（头顶小尖盒）
+        addBox( 0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
+        addLegs(-0.26f,  0.16f,  0.18f, 0.24f, 0.08f, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长，比猪腿瘦）
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）

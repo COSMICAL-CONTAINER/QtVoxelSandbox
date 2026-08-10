@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""生成猪 / 牛 / 羊 / 蹒跚者 / 鸡 / 鱿鱼（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
+"""生成猪 / 牛 / 羊 / 蹒跚者 / 鸡 / 鱿鱼 / 狼（passive + hostile mob）贴图（16×16 像素，原创程序自绘，§9 override (a)）。
 
 机制等价 MC 1.0 三种被动生物（pig / cow / sheep）+ 鸡（chicken）+ 一种敌对生物（zombie）+ 一种水生被动
-生物（squid）—— 名称 / 模型 / 贴图全原创、**不**拷贝任何 MC 资产（PLAN §9 区隔：Zombie→Shambler「蹒跚者」
-改名）。本脚本程序生成六种 mob 各一张「全脸」贴图（MobModel 几何的每面都铺同一张贴图，非 MC 式 UV 拆皮）——
-简单稳健，配方块化模型比例让六种 mob 肉眼可辨。
+生物（squid）+ 一种犬科驯服生物（wolf）—— 名称 / 模型 / 贴图全原创、**不**拷贝任何 MC 资产（PLAN §9 区隔：
+Zombie→Shambler「蹒跚者」改名）。本脚本程序生成七种 mob 各一张「全脸」贴图（MobModel 几何的每面都铺同一张
+贴图，非 MC 式 UV 拆皮）——简单稳健，配方块化模型比例让七种 mob 肉眼可辨。
 
 视觉意图（每张 16×16，无 alpha 透明底 —— 实心贴图走不透明 PrincipledMaterial）：
   - mob_pig.png      ：粉红皮 + 几个深粉斑点 + 浅腹纹（读作「粉红猪皮」）。
@@ -14,11 +14,12 @@
                        （读作「不死亡灵腐尸」；机制等价 MC 1.0 僵尸皮肤，§9 改名 + 原创贴图）。
   - mob_chicken.png  ：白羽底 + 棕褐翅尖 / 尾羽斑 + 浅暖黄腹部（读作「白色母鸡羽毛」；t398）。
   - mob_squid.png    ：深褐橘斑软体底 + 浅腹纹 + 暗点（读作「鱿鱼软体皮」；t399）。
+  - mob_wolf.png     ：灰狼毛皮底 + 深灰背脊 / 侧纹 + 浅灰腹纹（读作「灰狼皮毛」；t480）。
 
 图案采用固定位置 + 确定性散布（无随机源 → CI 可复现、与 build_atlas.py / build_tall_grass.py 同风格）。
 
 输出（覆盖写入 textures/）：
-  mob_pig.png   /   mob_cow.png   /   mob_sheep.png   /   mob_shambler.png   /   mob_chicken.png   /   mob_squid.png
+  mob_pig.png / mob_cow.png / mob_sheep.png / mob_shambler.png / mob_chicken.png / mob_squid.png / mob_wolf.png
 
 依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
 生成原创像素图，§9 override (a)）。
@@ -275,6 +276,38 @@ def make_squid():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_wolf():
+    """狼（Wolf；机制等价 MC 1.0 狼，§9 原创贴图非照搬）：
+    灰狼毛皮底 + 深灰背脊 / 侧纹 + 浅灰腹纹（读作「灰狼皮毛」）。每面铺同图（同猪牛羊全脸 UV 方案）→
+    躯干 / 头 / 耳 / 腿各盒都铺同一张灰狼纹。配方块化犬科比例 + 立耳 + 尾巴（QML 独立旋转 Model）→ 肉眼读作「狼」。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0x8a, 0x8a, 0x84, 255)   # 灰狼毛主色 #8a8a84（暖灰，非纯灰 / 非 MC 狼灰精确色）
+    fill(img, base)
+
+    # 深灰背脊 / 侧纹（狼背典型的深灰纵带 + 侧斑，散布固定坐标）
+    dark = (0x5a, 0x58, 0x52, 255)   # 深灰 #5a5852
+    blot(img, [
+        # 背脊纵带（中列，拟狼背深灰脊线）
+        (7, 1), (8, 1), (7, 2), (8, 2), (7, 3), (8, 3),
+        (7, 4), (8, 4), (7, 5), (8, 5),
+        # 侧斑（两肩 / 两胯的深灰斑，拟狼侧身纹）
+        (3, 6), (4, 6), (3, 7),
+        (12, 7), (13, 7), (12, 8),
+        (5, 11), (6, 11), (10, 12), (11, 12),
+    ], dark)
+
+    # 浅灰腹纹（底部 2 行换浅色，拟狼腹 / 喉部浅毛）
+    light = (0xc8, 0xc8, 0xc0, 255)  # 浅灰 #c8c8c0
+    blot(img, [
+        (x, TS - 1) for x in range(2, TS - 2)
+    ], light)
+
+    out = os.path.join(SRC, "mob_wolf.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def main():
     make_pig()
     make_cow()
@@ -282,6 +315,7 @@ def main():
     make_shambler()
     make_chicken()
     make_squid()
+    make_wolf()
 
 
 if __name__ == "__main__":

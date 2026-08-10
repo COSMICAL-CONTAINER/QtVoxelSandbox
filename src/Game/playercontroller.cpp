@@ -33,6 +33,20 @@ bool isFortuneOre(quint8 blockId)
         return false;
     }
 }
+
+// t480 狼肉食判定（单一权威）：该物品 id 是否为狼繁殖食物（生/熟肉，机制等价 MC 1.0 狼吃生/熟肉繁殖）。
+//   RecipeRegistry id（Game 层）；含生/熟猪排、生/熟牛肉、生/熟鸡肉、熟羊肉（羊肉仅熟变体，燃烧致死掉落）。
+//   未列入的肉（如生鱼 RawFishId）不喂狼 —— 机制等价 MC 1.0 狼不吃鱼。PlayerController 肉食喂狼分支据它门控。
+bool isWolfMeatItem(int itemId)
+{
+    return itemId == RecipeRegistry::RawPorkchopId
+        || itemId == RecipeRegistry::RawBeefId
+        || itemId == RecipeRegistry::RawChickenId
+        || itemId == RecipeRegistry::CookedPorkchopId
+        || itemId == RecipeRegistry::CookedBeefId
+        || itemId == RecipeRegistry::CookedMuttonId
+        || itemId == RecipeRegistry::CookedChickenId;
+}
 } // namespace
 
 // t467 食物饥饿恢复量（单一权威）：返回 itemId 作为食物一次恢复的饥饿值；非食物 → 0。
@@ -1179,6 +1193,9 @@ void PlayerController::attackMob(int entityIndex)
     //   致死掉熟肉。先 damageEntity 再 ignite：若本次击杀（health→0→dead），ignite 内 dead 守卫早退（尸体不燃）。
     const int fireLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::FireAspect) : 0;
     if (fireLvl > 0) m_entityManager->ignite(entityIndex, float(fireLvl) * 4.0f);
+    // t480 主人攻击 → 驯服狼防御目标 = 本 mob（setWolfTarget 记共享目标：所有驯服且站立的狼追击它，机制等价
+    //   MC 1.0 驯服狼攻击主人攻击的怪物）。Game→Entities 向下依赖（同 damageEntity / knockback / ignite 直调）。
+    m_entityManager->setWolfTarget(entityIndex);
     emit swingArm();
     // t295 mob 受击音效 + 敌对专属：随 mobAttacked 下传被攻击 mob 的 mobType，供呈现层据它路由到
     //   AudioManager.playMobHurt(mobType) —— 被动走通用 creature yelp、敌对各走专属音（哀嚎/骨头敲击/蜘蛛嘶/嘶嘶）。
@@ -1997,6 +2014,64 @@ void PlayerController::placeBlock()
         if (heldItemId != RecipeRegistry::SeedId
             && heldItemId != RecipeRegistry::CarrotId
             && heldItemId != RecipeRegistry::PotatoId) return;
+    }
+    // t480 骨头驯狼 useBlock（spec「右键狼概率驯服 ~33% → 驯服后右键坐/站切换」；机制等价 MC 1.0 狼骨头驯服）：
+    //   手持骨头（BoneId，材料段非方块）右键 → 在主选体射线之外**独立**跑一条「mob 命中射线」（findMobHit，
+    //   同剪刀剪羊 / 喂食路径）。命中狼（mobType==MobWolf）：
+    //   - 未驯服 → EntityManager::tameWolf（~33% 概率驯服；**无论成败骨头都消耗**，机制等价 MC 喂骨 ——
+    //     生存 takeStack 1 骨头、创造不耗）。
+    //   - 已驯服 → EntityManager::toggleWolfSit（坐/站切换，不消耗骨头）。
+    //   命中非狼 / 无命中 → return（骨头无其他 useBlock 用途，不放置方块）。**不要求 m_hasHit**（瞄的是 mob
+    //   实体，同剪刀 / 喂食模式）。骨头非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air`
+    //   守卫之前分流（同桶 / 锄 / 蛋分支模式）。spectator 已被入口 canPlace() 守卫拦截。
+    //   分层（PLAN §2）：驯服属 Game/Physics（读射线 + 调 EntityManager），不改栅格语义（setBlock 入口）。
+    if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::BoneId) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        if (mobIdx >= 0 && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobWolf) {
+            if (!m_entityManager->wolfTamedAt(mobIdx)) {
+                // 驯服尝试（~33% 概率；成功/失败骨头都消耗，机制等价 MC 喂骨无论成败都耗）。
+                m_entityManager->tameWolf(mobIdx);
+                if (m_mode != Creative)
+                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 骨头（创造不耗 → 无限驯）
+            } else {
+                m_entityManager->toggleWolfSit(mobIdx); // 已驯服 → 坐/站切换（不消耗骨头）
+            }
+            m_lastPlaceMs = now;
+            emit swingArm(); // 喂骨 / 命令坐站都是一次「使用」动作 → 挥手（t29）
+        }
+        return; // 骨头（驯服成功失败 / 切换坐站 / 未命中狼）均不再走方块放置路径
+    }
+    // t480 狼肉食繁殖 useBlock（spec「喂驯服狼生/熟肉 → love mode 产幼崽」；机制等价 MC 1.0 喂驯服狼肉繁殖）：
+    //   手持生/熟肉（RawPorkchop/RawBeef/RawChicken/CookedPorkchop/CookedBeef/CookedMutton/CookedChicken，材料段
+    //   非方块）右键 → 独立 mob 命中射线（同喂食路径）→ 命中**已驯服**狼 → 幼崽 feedBaby 加速成长 / 成体
+    //   enterLoveMode 求偶（二者互斥分流同 t479；食物匹配 = 生/熟肉，Game 层 isWolfMeatItem 判）。喂成功 → 生存
+    //   消耗 1 肉 + 挥手；未喂（无狼 / 未驯服 / 幼崽 / 冷却 / 已求偶）→ return（肉无其他 useBlock 用途，不放置）。
+    //   肉非方块 → 须在 `m_selectedBlock == Air` 守卫之前分流（同骨头 / 桶 / 蛋分支模式）。spectator 已被入口
+    //   canPlace() 守卫拦截。分层（PLAN §2）：喂食属 Game/Physics（读射线 + 调 EntityManager），不改栅格语义。
+    if (m_hotbar && m_world && m_entityManager && isWolfMeatItem(heldItemId)) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        bool fed = false;
+        if (mobIdx >= 0 && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobWolf
+            && m_entityManager->wolfTamedAt(mobIdx)) {
+            // t479 幼崽喂食分流（机制等价 MC 喂幼崽加速长大 / 喂成体进求偶）：幼崽 → feedBaby；成体 → enterLoveMode。
+            if (m_entityManager->isBabyAt(mobIdx))
+                fed = m_entityManager->feedBaby(mobIdx);
+            else
+                fed = m_entityManager->enterLoveMode(mobIdx);
+        }
+        if (fed) {
+            if (m_mode != Creative)
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 肉（创造不耗 → 无限喂）
+            m_lastPlaceMs = now;
+            emit swingArm(); // 喂食也是一次「使用」动作 → 挥手（t29）
+        }
+        return; // 肉（喂成功 / 未喂）均不再走放置路径
     }
     // t234 锄头 useBlock（spec「持锄右键泥土/草方块→变耕地」）：手持为 Hoe 类工具（木/石/铁锄）+ 命中格为
     //   Dirt/Grass → 该格转 Farmland（湿润等级由 World::farmlandHydrationLevel 据水源邻近判定写 state 低 2 位；

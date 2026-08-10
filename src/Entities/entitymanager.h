@@ -106,7 +106,15 @@ public:
     //   水平漂游，离水则慢爬搁浅）。passive（hostile=false），死亡掉墨囊（InkSacId；呈现层 onMobDied 据本 enum 分流）。
     //   tick Mob 分支据 mobType==MobSquid 路由到 aiSquid（替代 aiWander）；水中物理复用通用 mob 水物理（speedScale
     //   减速 + kWaterGravity 缓沉 + 流水推动），aiSquid 在其上叠加周期 vy 上冲量 → 「喷水上浮 → 缓沉」节律性游动。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9 };
+    //   t480 狼（wolf）= MobWolf(10)：机制等价 MC 1.0 狼 —— 驯服战斗伙伴。森林/针叶林群系生成（biomeIdAt==3 Forest
+    //   / ==4 Snowy），中性 non-hostile（hostile=false → 不参与黑暗刷怪 / 日光燃烧 / 远距消失，生命周期同 passive）。
+    //   未驯服狼攻击玩家（aiWolf 敌对分支，机制等价 MC 1.0 野狼攻击）；骨头右键概率驯服（~33%，kWolfTameChance）→
+    //   驯服狼跟随主人 + 防御（主人攻击 / 主人受击来源的 mob → 狼追击咬击）+ 坐/站切换（右键坐留守 / 再右键站跟随）；
+    //   喂生/熟肉 → love mode 繁殖产幼崽（复用 t400 框架，MobWolf 入 isBreedableType + 食物匹配表）。死亡不掉落
+    //   （机制等价 MC 1.0 狼无常规掉落；仍掉少量 XP，见 Main.qml onMobDied）。§9 原创：名称 / 模型（方块化犬科 +
+    //   立耳 + 尾巴）/ 贴图（程序生成灰狼毛皮）全原创，仅机制对齐「驯服 + 跟随 + 防御 + 繁殖」。尾巴角度示血量
+    //   （QML 独立尾巴 Model 据 healthAt/maxHealthAt 旋转 —— 满血竖起、残血下垂，机制等价 MC 狼尾随血量升降）。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10 };
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -152,7 +160,9 @@ public:
     //   mobAttackedPlayer(kArrowDamage, MobBones) + 移除）+ 寿命 / 边界超界兜底移除。呈现层 mobHost delegate 据
     //   kindAt==Arrow 走细长杆 Model + arrowYawAt/arrowPitchAt 定向。机制等价 MC 1.0 骷髅射箭（箭抛物 + 命中伤害）；
     //   名称 / 视觉全原创（§9 区隔，不照搬 MC 美术）。达 kCap → 跳过 + 告警（防溢出）。
-    Q_INVOKABLE void spawnArrow(const QVector3D &origin, const QVector3D &vel);
+    //   t480：返值 = 新箭槽索引（fireArrow 用它设 arrowShooter —— 骷髅箭命中玩家时驯服狼据发射者反击；
+    //   无 QML 消费，仅 C++ fireArrow 用）；达 kCap → -1。
+    Q_INVOKABLE int spawnArrow(const QVector3D &origin, const QVector3D &vel);
     // t304 玩家弓射出的箭（spec「松开射箭（抛物+伤害 mobs）」）：与 spawnArrow（骷髅射出，命中玩家）对称，
     //   差异在 arrowFromPlayer=true（命中 mob 而非玩家）+ arrowDamage 由弓蓄力决定（1..6 HP，caller 传）。
     //   命中 mob 走 damageEntity（扣血 + 红闪 + 归零 mobDied 死亡掉落）+ emit mobAttacked(mobType, false)
@@ -248,6 +258,26 @@ public:
     //   （kPassiveMobCap；达上限 → 配对不再产幼崽，防种群爆炸，spec「种群上限」）。hostile / MobTest /
     //   MobSquid / FallingBlock / Item 不计。const 只读自身数据。
     Q_INVOKABLE int passiveBreedableCount() const;
+    // t480 第 i 只 mob 是否**已驯服狼**（wolfTamed=true）。仅 mobType==MobWolf 用（其余 mob 恒 false）。QML delegate
+    //   据它切狼外观 / 行为态（未驯服=攻击玩家、驯服=跟随+防御）；PlayerController 骨头驯服 / 肉食繁殖分流读它。
+    //   越界 / 非 wolf → false。
+    Q_INVOKABLE bool wolfTamedAt(int i) const;
+    // t480 第 i 只驯服狼是否**坐着**（wolfSitting=true；留守原地不跟随不攻击）。仅驯服狼用（未驯服恒 false）；QML
+    //   delegate 据它显坐姿（压缩 + 后倾）+ 行为（aiWolf 坐态留守）。越界 / 非驯服狼 → false。
+    Q_INVOKABLE bool wolfSittingAt(int i) const;
+    // t480 骨头驯服（spec「右键概率驯服 ~33%」）：第 i 只**未驯服**活体狼 → ~33% 概率驯服（wolfTamed=true）+
+    //   bump revision（QML 收攻击态、转跟随态）+ 返 true；未中（~67%）→ 返 false（**骨头仍消耗**，机制等价 MC
+    //   喂骨无论成败都消耗）。已驯服 / 非 wolf / dead / 越界 → 返 false（caller 不消耗骨头）。Q_INVOKABLE 兼调试 +
+    //   PlayerController placeBlock 骨头分支双入口。
+    Q_INVOKABLE bool tameWolf(int i);
+    // t480 坐/站切换（spec「驯服狼右键坐 → 再右键站」）：第 i 只**已驯服**狼 → 翻转 wolfSitting + bump revision
+    //   （QML 切坐姿/站姿 + aiWolf 切留守/跟随）。未驯服 / 非 wolf / dead / 越界 → 静默 no-op（野狼右键无反应，
+    //   机制等价 MC 只有驯服狼可命令坐/站）。Q_INVOKABLE 兼调试 + PlayerController 骨头分支双入口。
+    Q_INVOKABLE void toggleWolfSit(int i);
+    // t480 设置驯服狼的防御目标（主人攻击的 mob；C++ 直调，PlayerController::attackMob 命中后调，Game→Entities
+    //   向下依赖）。**共享目标**：所有驯服且站立的狼都追击它（机制等价 MC 1.0 驯服狼群攻主人攻击的目标）。
+    //   索引经 slot-reuse 稳定（release 不 shift）；目标死亡 / 移除由 aiWolf 每 AI tick 校验清除。越界 → 忽略。
+    void setWolfTarget(int idx) { if (idx >= 0 && idx < int(m_entities.size())) m_wolfTarget = idx; }
     // t239 mob 血量 / 受击 / 死亡态（呈现层心条 / 红闪 / 死亡动画；t242 攻击 HUD 读）：
     //   healthAt / maxHealthAt = 当前 / 上限血量（供心条 / 攻击反馈）；deadAt = 死亡态（QML 播死亡动画）；
     //   hurtFlashAt = 受击红闪剩余比 0..1（>0 → QML baseColor 红，机制等价 MC mob 受击 10 tick 红闪）。
@@ -485,6 +515,10 @@ private:
         //   arrowDamage = 本箭命中时造成的伤害 HP（骷髅箭恒 kArrowDamage=2；玩家箭由弓蓄力 1..6 决定，spawnArrowPlayer 传）。
         bool arrowFromPlayer = false; // 是否玩家射出（命中目标分流：true→mob / false→玩家）
         int arrowDamage = 0;          // 命中伤害（HP；仅 kind==Arrow 用；骷髅箭 = kArrowDamage）
+        // t480 箭发射者槽索引（骷髅箭专用；玩家箭 arrowFromPlayer=true 不设 = -1）：fireArrow 在 spawnArrow 后写
+        //   它（= 发射的 Bones 槽索引）→ 箭命中玩家时注册驯服狼防御目标（m_wolfTarget = arrowShooter，主人受击 →
+        //   狼攻击射箭的骸骨）。slot-reuse 索引稳定（release 不 shift），发射者存活期间索引有效。非 Arrow → -1 不读。
+        int arrowShooter = -1; // 发射者槽索引（仅 kind==Arrow && !arrowFromPlayer 用；-1 = 无 / 玩家箭）
         // t323 箭嵌入态（命中方块后冻结物理）：arrowStuck=true → tick Arrow 分支仅推进 despawn 倒计时，不再
         //   重力 / 位移 / 命中判定。vx/vy/vz 保留作定向（arrowYawAt/arrowPitchAt 据 vel 算 → 嵌入箭仍朝命中
         //   飞行方向）。命中瞬间 e.pos 钉到入射面（半嵌可见）+ arrowLife 重置 kStuckArrowLifetime（~60s despawn）。
@@ -565,6 +599,15 @@ private:
         float breedCooldown = 0.0f;  // 繁殖后冷却（秒；>0 喂食不触发求偶；防刷屏）
         bool  baby = false;          // 是否幼崽（QML 据 babyScaleAt 缩 0.5；不可繁殖 / 不可喂食触发求偶）
         float growTimer = 0.0f;      // 幼崽长大倒计时（秒；baby=true 时推进，到 0 → baby=false 长大成体）
+        // t480 狼态（仅 mobType==MobWolf 用；其余 mob 留默认 false/0 不触发）：
+        //   wolfTamed=false → 野狼（aiWolf 敌对玩家：追击 + 咬击）；true → 驯服狼（跟随主人 + 防御主人目标）。
+        //   wolfSitting=true → 坐（留守原地不跟随不攻击；机制等价 MC 1.0 驯服狼右键坐）。toggleWolfSit 翻转。
+        //   wolfAttackCooldown = 狼咬击冷却（秒；<=0 可咬；aiWolf 递减，命中后置 kWolfAttackCooldown）——
+        //     与敌对 attackCooldown 字段分离（狼走独立 aiWolf，不复用 aiHostile 的 attackCooldown 语义）。
+        //   spawnMobCore 默认成员初始化已清回（move 入槽覆盖旧值，同繁殖态初值约定）。
+        bool  wolfTamed = false;       // 是否已驯服（骨头驯服；QML wolfTamedAt 读）
+        bool  wolfSitting = false;     // 是否坐着留守（右键切换；QML wolfSittingAt 读）
+        float wolfAttackCooldown = 0.0f; // 狼咬击冷却（秒；仅 MobWolf 用）
         // t250 环境音态（仅 Mob kind 用；FallingBlock/Item 留默认不触发）：
         float stepAccum = 0.0f;  // walkPhase 半步累加器（弧度）；行走时累加 moveSpeed*dt*kWalkFreq，≥π → emit mobStep
         float ambientTimer = 0.0f; // 到下次 idle 叫声的倒计时（秒）；≤0 → emit mobAmbient + 重置随机周期
@@ -631,6 +674,11 @@ private:
     //   任一 mob 经 mobAttackedPlayer 命中玩家时置 kPlayerHitThrottle；tick 每帧扣 dt。详见 kPlayerHitThrottle 注释。
     //   解决「多 mob 围攻各独立冷却叠加 → 满血瞬死」：把 N 只 mob 的并行冷却串行化为单线节拍（轮替出手）。
     float m_playerHitCooldown = 0.0f;
+    // t480 驯服狼**共享**防御目标（槽索引）：主人攻击的 mob（PlayerController::attackMob → setWolfTarget）或
+    //   主人受击来源（aiHostile 近战 / Stalker 爆炸 / 骷髅箭 arrowShooter 命中玩家 → 本成员赋值）。所有驯服且
+    //   站立的狼都追击咬击它（机制等价 MC 1.0 驯服狼群攻主人目标）。-1 = 无目标。slot-reuse 索引稳定；aiWolf
+    //   每 AI tick 校验目标存活（alive && kind==Mob && !dead），失效即清（防追尸体 / 追释放槽）。
+    int m_wolfTarget = -1;
     // t392 刷怪笼 spawn 节流累积器（秒）：tickSpawners 每 tick 累加 dt，达 kSpawnerInterval 才扫描玩家周围 Spawner
     //   块（按需扫描，避免每帧扫 ~28³ 体素；playerPos 由 PlayerController 传 m_pos）。同 m_spawnAccum 模式。
     float m_spawnAccumSpawner = 0.0f;
@@ -690,6 +738,21 @@ private:
     //   分层（PLAN §2）：只读 World::blockAt（mobFeetInWater 脚位水格判）+ 自身数据；写 EntityManager 自身（pos / vy /
     //   yawRad / swimTimer）。无向上依赖。mobFeetInWater 同文件静态助手（同 tick / aiWander 越障查）。
     bool aiSquid(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale = 1.0f);
+    // t480 狼 AI（tick Mob 分支 mobType==MobWolf 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐 MC 1.0 狼
+    //   三态：
+    //   (1) 未驯服（wolfTamed=false）：**敌对玩家** —— 侦测范围（kWolfDetectRange）内追击 + 近距咬击
+    //       （emit mobAttackedPlayer(kWolfAttackDamage, MobWolf) → 呈现层仅 Survival 应用伤害，同 aiHostile
+    //       攻击模式）；非追踪 → 回退 aiWander。playerTargetable=false（创造/观察者）→ 不追咬（同 t290 门控）。
+    //   (2) 驯服 + 坐（wolfSitting=true）：**留守** —— 不移动不攻击（跟随主人回来自动续跟）；机制等价 MC 坐狼。
+    //   (3) 驯服 + 站：**跟随 + 防御** —— 有防御目标（m_wolfTarget：主人攻击 / 主人受击来源的 mob）→ 追击并
+    //       咬击该 mob（damageEntity(targetIdx, kWolfAttackDamage)）；无目标 → 跟随主人（distXZ > kFollowMinDist
+    //       走近 / <= 停步；过远 kWolfTeleportDist 瞬移到主人附近防掉队）。求偶期（loveTimer>0）优先寻偶
+    //       （findNearestMate + 走近配偶，复用 t400 求偶寻偶逻辑）。
+    //   返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。idx = 本 mob 槽索引（求偶寻偶 findNearestMate
+    //   排除自身 + 防御目标自我排除）。分层（PLAN §2）：只读 World::isSolid + 自身数据；咬玩家 / 咬 mob 走既有
+    //   受击链（mobAttackedPlayer 语义信号 / damageEntity），无向上依赖。
+    bool aiWolf(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
+                float speedScale, bool playerTargetable);
     // t281 敌对生物 AI（detect→pathfind→attack 三段；tick 内 hostile Mob 分支调，替代 aiWander）。
     //   spec t281「敌对生物基类（AI/寻路）：detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）
     //   + attack」。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI；标识符 / 美术全原创（§9 区隔）。
@@ -703,7 +766,9 @@ private:
     //   playerPos = 玩家脚位（tick 的 listener = PlayerController::m_pos）。分层（PLAN §2）：只读 World::isSolid +
     //   自身数据；attack 走语义信号（mobAttackedPlayer）让呈现层路由到 PlayerState（同 fallDamageTaken 模式）。
     // speedScale 见 aiWander（t298 水中减速；追踪速度 / 内部回退 wander 一并缩放）。
-    bool aiHostile(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
+    //   t480 idx = 本 mob 槽索引：近战攻击命中玩家时注册驯服狼防御目标（m_wolfTarget = idx，机制等价 MC 驯服狼
+    //   攻击咬伤主人的怪物）。
+    bool aiHostile(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
                    float speedScale = 1.0f);
     // t283 骷髅弓箭手 AI（detect→keep-distance→shoot 三段；tick 内 hostile mob 且 mobType==MobBones 分支调，
     //   替代 aiHostile 的近战 attack）。spec t283「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」。
@@ -721,7 +786,8 @@ private:
     //   返回是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。playerPos = 玩家脚位（tick 的 listener）。
     //   分层（PLAN §2）：只读 World::isSolid + 自身数据；shoot 走 spawnArrow（箭实体）+ 命中由 Arrow 分支发
     //   mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile 的 attack 模式）。
-    bool aiArcher(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
+    //   t480 idx = 本 mob 槽索引：传给 fireArrow 设箭 arrowShooter（箭命中玩家 → 驯服狼反击发射者）。
+    bool aiArcher(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
                   float speedScale = 1.0f);
     // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI（detect→chase→fuse→detonate；tick 内 hostile mob 且
     //   mobType==MobStalker 分支调，替代 aiHostile/aiArcher）。spec t284「近距蓄力膨胀动画 → 爆炸」。
@@ -739,19 +805,23 @@ private:
     //   返回是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。playerPos = 玩家脚位（tick 的 listener）。
     //   分层（PLAN §2）：只读 World::isSolid/blockAt + 自身数据；爆炸破坏方块走 World::setWaterSilent（向下
     //   写栅格 + worldChanged 重建 mesh）；伤害玩家走 mobAttackedPlayer 语义信号（呈现层路由 PlayerState）。
-    bool aiStalker(Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
+    //   t480 idx = 本 mob 槽索引：传给 detonateStalker 注册驯服狼防御目标（爆炸伤玩家 → 狼反击 Stalker）。
+    bool aiStalker(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
                    float speedScale = 1.0f);
     // t284 Stalker 爆炸（aiStalker fuse 满时调）：以 e.pos 为中心、kExplosionRadius 为半径的球内破坏方块
     //   （setWaterSilent 写 Air，跳过 Bedrock / Water / Air）+ 距离衰减伤害玩家（emit mobAttackedPlayer）+
     //   emit explosion（呈现层播爆炸音 / 迸发）+ 标 e.exploded=true（tick 当帧移除）。机制等价 MC 苦力怕爆炸。
     //   破坏方块走 setWaterSilent（静默写 + worldChanged 重建 mesh，**不**发 blockBroken → 免球形内每块破块
     //   粒子 / 音 spam；爆炸的音 / 视反馈由 explosion 信号单一入口驱动）。
-    void detonateStalker(Entity &e, World *world, const QVector3D &playerPos);
+    //   t480 idx = 本 mob 槽索引：爆炸伤害玩家（dmg>0）时注册驯服狼防御目标（m_wolfTarget = idx）。
+    void detonateStalker(int idx, Entity &e, World *world, const QVector3D &playerPos);
     // t283 朝 target 解抛物初速并发射一支箭（aiArcher shoot 段调）。origin = shooter 中心 + 朝 target 前移
     //   0.5 格（避免贴墙时箭 spawn 入墙即没）。水平速度固定 kArrowSpeed → 飞行时间 t=d/vH；据 target 高度差
     //   反解 vy=(Δy+0.5·g·t²)/t（命中 target 高度的抛物解）；vy 钳到 ±kArrowMaxVert 防极端弧。三轴加 ±kArrowSpread
     //   随机抖动（MC 骷髅非 100% 精准；spread ≪ vH 不改飞行时间量级）。d 太小（<0.01）→ 安全早退（防除零）。
-    void fireArrow(const Entity &shooter, const QVector3D &target);
+    //   t480 shooterIdx = 发射者（骸骨）槽索引：spawnArrow 返槽后写 arrowShooter —— 箭命中玩家时驯服狼据此
+    //   反击发射者（主人受击 → 狼攻击该 mob）。
+    void fireArrow(int shooterIdx, const Entity &shooter, const QVector3D &target);
     // t283 视线清查（aiArcher shoot 前调，防穿墙盲射）：从 from 到 to 沿连线 0.5 格步进采样，任一采样点所在
     //   格 isSolid → 视线被挡返 false。0.5 格步进足以抓 1 格墙（箭速 ~14 blocks/s、每帧 0.22 格，墙厚 ≥1）。
     //   分层：只读 World::isSolid（同 tick / aiHostile 越障查），不向下加依赖。
@@ -943,6 +1013,28 @@ private:
     static constexpr float kBreedRange      = 3.0f;  // 配对 XZ 中心距上界（blocks；求偶寻偶 AI 把双方拉到一起后触发）
     static constexpr int   kPassiveMobCap   = 24;    // 可繁殖被动 mob 总数上限（防种群爆炸；spec「种群上限」）
     static constexpr float kBabyScale       = 0.5f;  // 幼崽模型缩放（babyScaleAt 返它；成体 1.0）
+    // t480 狼常量（spec「骨头驯服 ~33% / 坐站切换 / 跟随 + 防御 / 咬击」；机制对齐 MC 1.0 驯服狼：跟随主人、
+    //   攻击主人攻击/咬伤主人的 mob、咬击伤害；数值为本工程量身调，非 MC 精确复刻 —— PLAN §4「机制对标」
+    //   非数值 1:1）。
+    //   - kWolfDetectRange：未驯服狼侦测玩家范围（blocks；XZ）。取 12（略低于敌对 kDetectRange=16 —— 野狼非
+    //     夜间刷怪敌对，属「地盘性攻击」，侦测近些；玩家走近才受袭）。
+    //   - kWolfChaseSpeed：追击 / 跟随速度（blocks/s）。3.5 介于玩家走速 4.3 与 wander 1.0 之间 —— 跟随不掉队
+    //     但玩家正常走略快（疾跑可拉开；机制等价 MC 狼跟随速度略低于玩家）。
+    //   - kWolfAttackDamage：狼咬击伤害（HP）。机制等价 MC 1.0 驯服狼咬击 ~3 心 = 6HP；本工程取 4（2 心，
+    //     介于玩家剑伤 4-6 之间 —— 战斗伙伴咬击威胁与剑相当，打敌对 20HP 需 5 咬）。
+    //   - kWolfAttackCooldown：咬击间隔（秒）。机制等价 MC 狼 ~0.75s/击；取 1.0 对齐敌对 kAttackCooldown 节奏。
+    //   - kFollowMinDist：驯服狼跟随到位的最小 XZ 距离（blocks；<= 停步、> 走近主人）。取 2.5（贴近不挤压）。
+    //   - kWolfTeleportDist：驯服狼距主人过远 → 瞬移到主人附近（blocks；XZ）。机制等价 MC 1.0 狼距主人 >32 格
+    //     传送；本工程取 24（小世界）+ 近主人选安全位，防跟随永久掉队（狼速 3.5 < 玩家 4.3）。
+    //   - kWolfTameChance：骨头驯服概率（spec「~33%」）。取 0.33（机制等价 MC 1.0 狼 33% 驯服概率；失败骨头
+    //     仍消耗）。
+    static constexpr float kWolfDetectRange    = 12.0f; // 未驯服狼侦测玩家范围（blocks；XZ）
+    static constexpr float kWolfChaseSpeed     = 3.5f;  // 追击 / 跟随速度（blocks/s）
+    static constexpr int   kWolfAttackDamage   = 4;     // 狼咬击伤害（HP）
+    static constexpr float kWolfAttackCooldown = 1.0f;  // 咬击间隔（秒）
+    static constexpr float kFollowMinDist      = 2.5f;  // 跟随到位 XZ 距离（blocks）
+    static constexpr float kWolfTeleportDist   = 24.0f; // 距主人过远瞬移阈值（blocks；XZ）
+    static constexpr float kWolfTameChance     = 0.33f; // 骨头驯服概率（spec ~33%）
 public:
     // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
     //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。
