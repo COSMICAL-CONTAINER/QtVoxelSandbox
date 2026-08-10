@@ -1348,6 +1348,7 @@ t18                        （背包，依赖 hotbar）
 # R18r 规划（内容扩展：繁殖/伙伴 + 附魔 + 结构）—— 性能修好后执行
 
 > 用户指定（2026-08-10）。⚠️ **前置硬条件**：性能（main bound：水蔓延 wat 57ms/s + mob 碰撞 phys 23ms + QML scene-graph）必须先修好——这批加 mob/worldgen 会加重 main 线程。**性能护栏（mob kCap + AI/phys 节流 + 水 settle 增量化 + render distance + 离 chunk Model 销毁）必须先焊死**，否则每个新版本比上个更卡。
+> **护栏状态（2026-08-10 更新）**：mob 碰撞已修（`15f4655`，entitiesChanged 节流 + walkPhase 量化 → 用户实测 mob 22.35→8.80ms）；水/岩浆批量 tick 光照已合并（`d26cef8`，N 次 per-write refloodBox → 联合盒 1 次）。**水+岩浆交互区（wat 157/lav 138/454reb）仍待用户 playing 实测**（light 合并应降 lav 桶；若 reb 不降则属交互区持续写 + 全量段重建，批 2/3 期间再查）。批 2 开工 = 性能护栏已焊死（见 c885785 usage-report 两条 perf 记录）。
 > 依赖：附魔(B) 依赖前置材料(A)；繁殖(C) 独立；结构(D) 独立（丛林神殿需丛林群系）。
 > 机制等价 MC 1.0；零 MC 专有资产/名词（原创名 + 机制等价描述）；资源包 PNG 仅本地 gitignored。
 
@@ -1372,8 +1373,8 @@ t18                        （背包，依赖 hotbar）
 
 | 任务ID | 状态 | 标题 | 验收细节 |
 |---|---|---|---|
-| t478 | ⏳ | **动物繁殖** | 牛/羊喂小麦、猪喂胡萝卜/马铃薯、鸡喂种子 → 爱心模式（需成对，半径内找另一只）→ 繁殖产 1 幼崽 + 短冷却（MC 5min，可缩到 1-2min）+ 消耗手持食物 1。entitymanager(love 模式+冷却) + playercontroller(右键喂食判定) |
-| t479 | ⏳ | **幼崽成长** | 幼崽实体（缩放 mob 模型 ~0.5 + 头大身小）+ 喂食加速成长 + 时间到（MC 20min，可缩）变成年。幼崽不繁殖/不掉落。entitymanager(baby 字段) + MobModel(缩放渲染) |
+| t478 | ✅(t400) | **动物繁殖** | 牛/羊喂小麦、猪喂胡萝卜/马铃薯、鸡喂种子 → 爱心模式（需成对，半径内找另一只）→ 繁殖产 1 幼崽 + 短冷却（MC 5min，可缩到 1-2min）+ 消耗手持食物 1。entitymanager(love 模式+冷却) + playercontroller(右键喂食判定)。**t400 已实现**（feedMob 食物匹配 + enterLoveMode + tickBreeding 配对产崽 + 冷却 + kPassiveMobCap）；R18r 仅复核。 |
+| t479 | ⏳(部分) | **幼崽成长** | 幼崽实体（缩放 mob 模型 ~0.5 + 头大身小）+ 喂食加速成长 + 时间到（MC 20min，可缩）变成年。幼崽不繁殖/不掉落。entitymanager(baby 字段) + MobModel(缩放渲染)。**t400 已实现大半**（growTimer 长大 / babyScaleAt=0.5 / 幼崽不可繁殖）；**缺口**：① 喂食加速成长（无 feedGrow 逻辑）；② 幼崽死亡不掉落（onMobDied 无 baby 守卫）。 |
 | t480 | ⏳ | **狼 Wolf（驯服战斗伙伴）** | 森林/针叶林生成（中性）+ **骨头驯服**（右键，概率）→ 坐/站切换 + 攻击主人攻击/受击的 mob + 跟随主人（站时坐守）+ 尾巴角度示血量 + 繁殖（驯服狼+肉）+ 受击红牌。新 MobType MobWolf + entitymanager(AI:follow/defend) + MobModel + playercontroller(驯服/交互) |
 | t481 | ⏳ | **豹猫 Ocelot** | 丛林生成（**依赖丛林群系，项目若无则推迟或加丛林群系**）+ 生鱼驯服 → 变猫（3 毛色变体）+ 驱赶苦力怕(Stalker) + 跟随 + 坐/站。MobType MobOcelot + AI |
 | t482 | ⏳ | **雪傀儡 SnowGolem（防御造物）** | **南瓜 + 雪块×2 竖直放置自动生成**（非 spawn）+ 抛雪球攻击敌对 mob + 行走留雪层 + 沙漠/热群系/下雨融化消失。新实体（玩家造物）+ entitymanager + Main.qml(南瓜头+雪身) |
