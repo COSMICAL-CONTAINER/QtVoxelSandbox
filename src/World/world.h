@@ -105,7 +105,7 @@ public:
     //   （含增量）。出生用 heightAt —— 贴 worldgen 地表，语义稳定（同 seed 同地表）。只读查询，不改栅格。
     Q_INVOKABLE int heightAt(int x, int z) const;
     // t374 群系查询（暴露给上层 Entities / 呈现层做群系化逻辑；worldgen 私有 Biome 枚举不外泄类型，仅返 int
-    //   编码）。编码同私有 enum Biome：0=Plains, 1=Hills, 2=Desert, 3=Forest, 4=Snowy, 5=Swamp。纯函数于 seed（委托 biomeAt；
+    //   编码）。编码同私有 enum Biome：0=Plains, 1=Hills, 2=Desert, 3=Forest, 4=Snowy, 5=Swamp, 6=Jungle。纯函数于 seed（委托 biomeAt；
     //   PLAN §2-K 确定性，同 seed 同群系图）。分层（PLAN §2）：World 低层只读查询，不依赖 Entities / Renderer。
     //   消费点：EntityManager::pickPassiveMobType 据本值加权选被动生物类型（t374 群系化刷怪）。
     Q_INVOKABLE int biomeIdAt(int x, int z) const { return int(biomeAt(x, z)); }
@@ -367,7 +367,10 @@ private:
     //   （worldgen 细节，不外泄到 QML；如需 F3 调试可后续暴露 Q_INVOKABLE 查询）。
     //   t306 在 t274 三分基础上把原 plains 中段 carve 出 forest：forest 多树（密闭林）、plains 少树多草（开阔草原），
     //   机制等价 MC 1.0 森林 / 平原群系分化（spec「森林（现多树）+ 草原（少树多草）」）。
-    enum class Biome { Plains, Hills, Desert, Forest, Snowy, Swamp };
+    //   t481/t486 前置：新增 Jungle（6，编码 6）—— 第五条独立低频 fBm 从 forest 带 + plains 候选带里 carve 出
+    //   丛林（温热湿润林地，高树浓叶，见 biomeAt / heightAt / placeJungleTrees）。Hills/Desert/Snowy/Swamp 判定
+    //   均先于丛林早退 → 丛林绝不吞掉既有群系（spec「勿让既有 Desert/Swamp/Snowy 消失」）。
+    enum class Biome { Plains, Hills, Desert, Forest, Snowy, Swamp, Jungle };
     // t385 天气状态机枚举（机制等价 MC 1.0 天气四态）。私有嵌套（天气细节，不外泄类型到 QML；
     //   Q_INVOKABLE weatherState / weatherStateAt 返 int 编码）。Thunder = 降水 + 风暴（雷电闪光 / 引燃留 t386）。
     enum class Weather : int { Clear = 0, Rain = 1, Snow = 2, Thunder = 3 };
@@ -405,6 +408,14 @@ private:
     //   worldgen placeTrees 在 Snowy 群系改种本变种（区别于橡树：深色云杉主干 + 高窄锥形树冠）。仅写空气格
     //   （setVoxelIfAir）→ 不覆盖主干 / 地形。纯由 seed 派生（leafRand 驱动锥层四角叶有无，确定性 PLAN §2-K）。
     void placeSpruceTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
+    // t481/t486 前置 丛林树散布（PLAN §2-K 确定性）：遍历 Jungle 群系列，按 hashColumn(seed,x,z) 密度筛选 +
+    //   间距栅格（3×3 邻域不得已有树干 → 主干间距 ≥2 列）散布高树。树干更高（5..7 格，spec「树干更高 ~5-7」）
+    //   + 树冠更大更浓（placeJungleTreeAt 半径 3 大伞盖，spec「树冠更大更浓」）→ 丛林观感（高树浓叶）。
+    //   仅 grass 表层（Jungle 地表为草，与 placeTrees 同守卫）种；纯函数于 seed + biomeAt → 同 seed 同分布。
+    void placeJungleTrees();
+    // t481/t486 前置 单棵丛林树：主干 trunkH 格原木 + 半径 3「大伞盖」树冠（比橡树半径 2 球冠更大更浓，
+    //   底层两层满填、仅伞缘四角按 leafRand 有无 → 每棵轮廓各异）。主干先置、树冠后置且仅写空气格 → 不覆盖主干。
+    void placeJungleTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
     // 确定性矿石散布（t84/t279，PLAN §2-K）：地形填充后遍历 stone 区段，按 hashVoxel(seed,x,y,z)
     //   决定是否替换为煤矿 / 铁矿 / **钻石矿**。**t279 高度分层**（煤浅 / 铁中 / 钻石深，机制等价 MC 1.0
     //   矿物随深度分层）：煤仅浅层（y≥8，靠近地表富集）、铁中层（y≤30）、钻石仅深层（y∈[5,16]，靠近基岩

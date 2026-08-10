@@ -1556,6 +1556,10 @@ int World::heightAt(int x, int z) const
                                              //   平坦是浅水池稳态的前提 —— placeSwampPools 把约半数草顶改造成 1 格深
                                              //   Water 源，全列等高 → 水源层水平邻接同高草岛（Grass）→ 不溢流（机制等价
                                              //   MC 1.0 沼泽平地 + 浅水洼地貌；非 MC 沼泽的微起伏，本工程取严格平坦保水源稳定）。
+        case Biome::Jungle: amp = 5.0; break; // 丛林（t481/t486 前置）：**略高于平原、同森林级**（spec「丛林振幅略高于
+                                             //   平原、同森林级」→ amp 5 与 Forest 同级；温热湿润低地轻微起伏，供高树
+                                             //   扎根 + 与森林边界高差小 → 无缝衔接。不取 plains 的 amp 2 —— 丛林非开阔
+                                             //   草原，且与森林邻接时同振幅保边界零高差）。
         case Biome::Plains: // 草原（多数陆地）
         default:            amp = 2.0; break; // 极平（spec「大草原=平地」）
     }
@@ -1576,6 +1580,18 @@ World::Biome World::biomeAt(int x, int z) const
     const double b = fbm((x + m_seed + 3571) * 0.012, (z + m_seed + 3571) * 0.012); // [-1,1]
     if (b > 0.5)  return Biome::Hills;
     if (b < -0.4) return Biome::Desert;
+    // t481/t486 前置 丛林（Jungle）：第五条独立低频 fBm（频率 0.014 + seed 偏移 +5133，与主群系图 0.012/+3571、
+    //   森林图 0.020/+977、雪原图 0.016/+6420、沼泽图 0.024/+8842、高度图 0.09 均不同）→ 丛林图与五者解耦。
+    //   低频 → 丛林成片（非逐格斑点，机制等价 MC 1.0 丛林大尺度分布）。**从 Forest/Plains 中分出**：同一张 j 图
+    //   在森林候选带（f>0.40）内把 Jungle 从 Forest 里 carve 出、在平原剩余候选带内把 Jungle 从 Plains 里 carve 出
+    //   → 丛林区域跨森林/平原连片（两处都读 j，非两次独立随机 → 边界无缝）。Hills/Desert 判定先于丛林早退、
+    //   Snowy/Swamp 判定也在丛林-plains 判定之前早退 → 丛林**绝不**吞掉既有 Desert/Swamp/Snowy（spec「勿让既有
+    //   Desert/Swamp/Snowy 消失」；hills 先于丛林 → 山地也保留）。阈值 kJungleBiomeThresh → 全图 ~10-20% 列成丛林
+    //   （10 seed 实测均值 ~13.5%，见 kJungleBiomeThresh 旁注释）。纯函数于 seed → 同 seed 同丛林分布（PLAN §2-K）。
+    constexpr double kJungleBiomeThresh = 0.25; // 实测（160×160 全域，Python 复刻同款 Perlin fBm 遍历 10 seed）：丛林
+                                                //   平均 ~13.5%（seed 1337 = 13.4%、seed 42 = 15.1%），落 spec「~10-20%」中段；
+                                                //   fBm 阈值单图分区随 seed 有方差（5%..20%），均值即目标带（机制等价 MC 群系面积随 seed 变）。
+    const double j = fbm((x + m_seed + 5133) * 0.014, (z + m_seed + 5133) * 0.014); // [-1,1]
     // t306：原 plains 候选带（b ∈ [-0.4,0.5]）用第二条独立低频 fBm 把 forest 从草原里 carve 出来。
     //   独立频率 0.020 + seed 偏移 +977（与主群系图 0.012/+3571、高度图 0.09 均不同）→ 森林图与三者解耦；
     //   低频 → 森林成片（非逐格斑点，机制等价 MC 1.0 森林群系大尺度分布）。
@@ -1584,7 +1600,7 @@ World::Biome World::biomeAt(int x, int z) const
     //   把森林压成少数（候选带内 ~15-20%），草原重新成为大片开阔地带（spec「大草原」原意）；森林仍
     //   成片共存（spec「森林+草原」二者共存，森林不消失）。纯函数于 seed → 同 seed 同 forest/plains 划分（PLAN §2-K）。
     const double f = fbm((x + m_seed + 977) * 0.020, (z + m_seed + 977) * 0.020); // [-1,1]
-    if (f > 0.40) return Biome::Forest;
+    if (f > 0.40) return (j > kJungleBiomeThresh) ? Biome::Jungle : Biome::Forest; // 森林带内：丛林 fBm 高 → Jungle
     // t395 雪原/针叶群系：用第三条独立低频 fBm 把 Snowy 从草原里 carve 出来。独立频率 0.016 + seed 偏移 +6420
     //   （与主群系图 0.012/+3571、森林图 0.020/+977、高度图 0.09 均不同）→ 雪原图与四者解耦；低频 → 雪原成片
     //   （非逐格斑点，机制等价 MC 1.0 寒冷群系大尺度分布）。阈值 0.45 → 候选带内少数（~10-15%）成雪原（与沙漠 /
@@ -1597,7 +1613,7 @@ World::Biome World::biomeAt(int x, int z) const
     //   沼泽（略多于雪原，沼泽为本任务标志性群系；仍为少数，草原占多数）。纯函数于 seed → 同 seed 同沼泽分布（§2-K）。
     const double sw = fbm((x + m_seed + 8842) * 0.024, (z + m_seed + 8842) * 0.024); // [-1,1]
     if (sw > 0.30) return Biome::Swamp;
-    return Biome::Plains;
+    return (j > kJungleBiomeThresh) ? Biome::Jungle : Biome::Plains; // 平原剩余带内：丛林 fBm 高 → Jungle（从 Plains 分出）
 }
 
 // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威）。旧 t117 独立 fBm（0.018/+7919/0.35）
@@ -1816,7 +1832,7 @@ void World::generate()
     //   t338：旧「全域 h<=waterLevel+1 → 散布沙滩/水下沙」已移除 —— 内陆低洼列不再产散沙（spec「内陆无散沙」），
     //     沙 + 海水集中于此一角。逐列独立 → 跨 chunk 边界天然连续；同 seed 确定（fbm / seaColumnHeight 纯函数，§2-K）。
     //   走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
-    int desertCols = 0, seaCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0, snowyCols = 0, swampCols = 0;
+    int desertCols = 0, seaCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0, snowyCols = 0, swampCols = 0, jungleCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const Biome bio = biomeAt(x, z);
@@ -1842,6 +1858,7 @@ void World::generate()
             else if (bio == Biome::Forest) ++forestCols;
             else if (bio == Biome::Snowy) ++snowyCols;
             else if (bio == Biome::Swamp) ++swampCols;
+            else if (bio == Biome::Jungle) ++jungleCols;
             for (int y = 0; y <= h; ++y) {
                 quint8 b;
                 if (inSandSea) {
@@ -1872,6 +1889,7 @@ void World::generate()
             << "hills =" << hillsCols << "desert =" << desertCols
             << "snowy =" << snowyCols
             << "swamp =" << swampCols
+            << "jungle =" << jungleCols
             << "sea/beach =" << seaCols
             << "/" << (m_width * m_depth);
 
@@ -1891,6 +1909,7 @@ void World::generate()
     placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
     placeSwampPools(); // t396：Swamp 群系浅水池（fillWater / 地表湖之后 → 沼泽水独立；先于树 / 草 → 水格使树 / 草据「草顶」守卫跳过）。
     placeTrees(); // 地形填充后确定性种树（grass 表层，PLAN §2-K）
+    placeJungleTrees(); // t481/t486 前置：Jungle 群系高树（5..7 格 + 大伞盖）单独散布（placeTrees 已跳过 Jungle 列）
     placeTallGrass(); // t235：grass 表层上方确定性散布草丛（PLAN §2-K；树定型后，仅写空气格不覆盖树）
     placeDesertFlora(); // t394：沙漠沙顶确定性散布仙人掌（1-3 格高柱）+ 枯死的灌木（PLAN §2-K；草丛后，仅写空气格）
     placeSwampFlora(); // t396：Swamp 群系睡莲（水面）+ 蘑菇（草岛）；PLAN §2-K；仅写空气格不覆盖水 / 草 / 树
@@ -2053,6 +2072,105 @@ void World::placeSpruceTreeAt(int x, int surfaceY, int z, int trunkH, quint32 le
     }
 }
 
+// t481/t486 前置 单棵丛林树（机制等价 MC 1.0 丛林树）：surfaceY=草顶 y；主干 trunkH 格原木（id5）从 surfaceY+1 起；
+//   顶部「大伞盖」树冠（普通树叶 id Leaves）。树冠比橡树（placeTreeAt 半径 2 球冠）更大更浓（spec「树冠更大更浓」）：
+//   trunkTopY-1 / trunkTopY 两层半径 3（7×7）**满填**（仅伞缘四角按 leafRand 低 4 位各一位决定有无 → 每棵伞缘轮廓
+//   各异；橡树底层也是 5×5 四角随机，丛林伞更大 + 中层半径 2 / 上层半径 1 全满填 → 更密），trunkTopY+1 半径 2（5×5
+//   去中心满填）、trunkTopY+2 半径 1（3×3 十字）、trunkTopY+3 顶尖单叶 → 共 5 层大伞（比橡树 4 层多一层 + 每层更宽）。
+//   主干先置、树冠后置且仅写空气格（setVoxelIfAir）→ 树冠绝不覆盖主干 / 地形。纯由 seed 派生（leafRand，确定性 PLAN §2-K）。
+void World::placeJungleTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand)
+{
+    const int trunkBase = surfaceY + 1;
+    const int trunkTopY = trunkBase + trunkH - 1;
+
+    // 主干（地表上方空气，逐格置原木）。
+    for (int y = trunkBase; y <= trunkTopY; ++y)
+        setVoxelIfAir(x, y, z, BlockRegistry::Log);
+
+    const auto absi = [](int v) { return v < 0 ? -v : v; };
+
+    // 大伞盖：自 trunkTopY-1 到 trunkTopY+3 逐层。半径：底层两层 3、中层 2、上层 1、顶尖 0。
+    //   半径 3 层四角（|dx|=3 且 |dz|=3）按 leafRand 低 4 位各一位决定有无（与橡树 placeTreeAt 同模式）→ 伞缘轮廓各异；
+    //   半径 ≤2 层**满填**（去中心主干列）→ 比橡树（底层 5×5 四角半随机 + 上三层稀）更浓（spec「更密叶」）。
+    for (int y = trunkTopY - 1; y <= trunkTopY + 3; ++y) {
+        const int radius = (y <= trunkTopY) ? 3
+                         : (y == trunkTopY + 1) ? 2
+                         : (y == trunkTopY + 2) ? 1
+                                                : 0;
+        if (radius == 0) { // 顶尖单叶（伞顶收口）。
+            setVoxelIfAir(x, y, z, BlockRegistry::Leaves);
+            continue;
+        }
+        for (int dx = -radius; dx <= radius; ++dx) {
+            for (int dz = -radius; dz <= radius; ++dz) {
+                if (dx == 0 && dz == 0) continue; // 主干列保留原木
+                if (absi(dx) > radius || absi(dz) > radius) continue; // 切比雪夫半径
+                // 半径 3 层四角按 leafRand 决定有无（与橡树 placeTreeAt 同模式）；半径 ≤2 层满填（更浓）。
+                if (radius == 3 && absi(dx) == 3 && absi(dz) == 3) {
+                    const unsigned bit = (dx > 0 ? 1u : 0u) + (dz > 0 ? 2u : 0u); // 0..3 → 四角各一位
+                    if (!((leafRand >> bit) & 1u)) continue; // 该角本轮不生叶
+                }
+                setVoxelIfAir(x + dx, y, z + dz, BlockRegistry::Leaves);
+            }
+        }
+    }
+}
+
+// t481/t486 前置 丛林树散布（见 world.h 头注释）：遍历 Jungle 群系列，按 hashColumn(seed,x,z) 密度筛选 + 间距栅格
+//   （3×3 邻域不得已有树干 → 主干间距 ≥2 列，同 placeTrees）散布高树。仅在 grass 表层（heightAt > waterLevel+1，
+//   同 placeTrees 阈值）种；沙滩/水下/越界/近邻有树干 → 跳过。树干更高（5..7 格，spec「树干更高 ~5-7」；橡树 4..7、
+//   云杉 6..9）+ 树冠更大更浓（placeJungleTreeAt 半径 3 大伞盖，spec「树冠更大更浓」）→ 丛林观感（高树浓叶）。
+//   密度 14% > 森林 10% → 丛林更密（机制等价 MC 1.0 丛林密林；间距封顶 ~25% → 14% 全数通过间距）。
+//   placeTrees 已在 biomeAt==Jungle 列跳过（丛林树只由本 pass 散布）→ 不与橡树重复。纯函数于 seed + biomeAt
+//   （经 hashColumn）→ 同 seed 同分布；禁用任何运行期随机源（PLAN §2-K）。
+void World::placeJungleTrees()
+{
+    std::vector<char> occupied(size_t(m_width) * size_t(m_depth), 0); // 主干占用栅格（1=该列已有树干）
+
+    constexpr int kMinJungleTrunk = 5; // 丛林主干最少格数（spec「树干更高 ~5-7」；高于橡树 4）
+    constexpr int kMaxJungleTrunk = 7; // 最多 7（同橡树上限，但下界更高 → 平均更高）
+    constexpr int kCanopyExtra    = 3; // 大伞盖在主干顶之上再升的格数（半径 1 层 + 顶尖）
+    constexpr unsigned kJungleTreePct = 14; // 丛林树密度（% of grass 列；高于森林 10 → 更密，机制等价 MC 丛林密林）
+
+    int placed = 0;
+    for (int z = 0; z < m_depth; ++z) {
+        for (int x = 0; x < m_width; ++x) {
+            if (biomeAt(x, z) != Biome::Jungle) continue; // 仅丛林群系
+            const int surfaceY = heightAt(x, z);
+            // 与 placeTrees 同阈值：沙滩带(wl±1)/水下(h<wl)/低洼不种树（机制等价 MC 树不生于沙滩/水下）。
+            if (surfaceY <= kWaterLevel + 1) continue;
+            // 仅草顶列种（Jungle 地表为 Grass，与 generate 同；地表湖 / 洞口顶替换了草 → 不种）。
+            if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::Grass) continue;
+
+            const quint32 r = hashColumn(m_seed, x, z);
+            if (r % 100u >= kJungleTreePct) continue; // 密度筛选
+
+            // 间距：主干列的 3×3 邻域（chebyshev 距离 ≤1）不得已有树干 → 保证主干间距 ≥2 列（同 placeTrees）。
+            bool tooClose = false;
+            for (int dz = -1; dz <= 1 && !tooClose; ++dz) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const int nx = x + dx, nz = z + dz;
+                    if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
+                    if (occupied[size_t(nx) + size_t(m_width) * size_t(nz)]) { tooClose = true; break; }
+                }
+            }
+            if (tooClose) continue;
+
+            // 主干高度（哈希高位取 [kMinJungleTrunk,kMaxJungleTrunk]，与密度位段 r%100 解耦），按世界高度钳制
+            // （留出大伞盖空间）。放不下最小树 → 确定性跳过。
+            int trunkH = kMinJungleTrunk + int((r >> 8) % unsigned(kMaxJungleTrunk - kMinJungleTrunk + 1));
+            const int maxTrunkH = (m_height - 1) - surfaceY - kCanopyExtra; // 留出伞盖空间后主干上限
+            if (maxTrunkH < kMinJungleTrunk) continue; // 此列放不下最小丛林树 → 确定性跳过
+            if (trunkH > maxTrunkH) trunkH = maxTrunkH;
+
+            placeJungleTreeAt(x, surfaceY, z, trunkH, r >> 16); // leafRand 高位 → 伞缘四角叶有无（每棵轮廓各异）
+            occupied[size_t(x) + size_t(m_width) * size_t(z)] = 1;
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: jungle trees placed =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
 // 确定性树木散布：遍历列，按哈希(seed,x,z) 决定是否尝试种树；占用栅格保证主干间距 ≥2 列。
 // 仅在 grass 表层（heightAt > waterLevel+1，与 generate() 沙层判定同阈值）种；沙滩/水下/沙漠/越界/近邻有
 // 树干 → 跳过。主干高度按世界高度钳制（留出树冠空间），放不下最小树则确定性跳过。全部纯函数于 seed → 可复现。
@@ -2080,6 +2198,9 @@ void World::placeTrees()
             if (surfaceY <= kWaterLevel + 1) continue;
             const Biome bio = biomeAt(x, z);
             if (bio == Biome::Desert) continue;  // t117 沙漠群系不种树（机制等价 MC 沙漠无树）
+            // t481/t486 前置：丛林群系跳过本 pass —— 丛林树（更高 + 大伞盖）由 placeJungleTrees 单独散布
+            //   （同 spec 命名；不在本橡树 pass 重复种，避免「稀疏橡树混进密林」）。
+            if (bio == Biome::Jungle) continue;
             // t309：跳过非草顶 / 非雪顶列（地表湖水面 / 洞穴入口竖井顶等已把草 / 雪替换 → 不种树；机制等价 MC 树仅
             //   生于草地 / 雪地）。读栅格当前方块（heightAt 是 worldgen 高度、不含 t309 改动）→ 湖列水面 / 洞口 air
             //   皆被本守卫拦截。t395：Snowy 群系地表为 SnowLayer（覆雪）→ 云杉生于雪上（机制等价 MC 寒冷群系针叶树）。
@@ -2151,6 +2272,7 @@ void World::placeTallGrass()
     // t337 群系密度表（% of grass 列生草丛）：forest 茂盛 / plains 适中 / hills 稀疏（spec「森林多草，草原适量草」）。
     constexpr int kPlainsGrassPct = 18; // 草原适量（spec「草原=少树适量草」：开阔点缀；旧 40% 偏密致全图铺草）
     constexpr int kForestGrassPct = 35; // 森林茂盛（spec「森林=密树多草」：林下密下木；旧 18% 偏稀致森林不显密）
+    constexpr int kJungleGrassPct = 35; // 丛林茂盛（t481/t486 前置：同森林，林下密下木；丛林高树浓叶 + 茂密林下草）
     constexpr int kHillsGrassPct  = 12; // 山地稀疏（裸岩 / 林感）
 
     // t310 各群系草变种配比（矮 / 中 / 高，% ；累积阈值见下方 vr 判定）。plains 矮/中为主、forest 林下茂盛多
@@ -2158,10 +2280,11 @@ void World::placeTallGrass()
     struct VarMix { int shortPct, mediumPct; }; // 高草 = 100 - short - medium 兜底
     constexpr VarMix kPlainsMix = { 55, 35 }; // plains：55% 矮 / 35% 中 / 10% 高
     constexpr VarMix kForestMix = { 20, 40 }; // forest：20% 矮 / 40% 中 / 40% 高（林下茂盛）
+    constexpr VarMix kJungleMix = { 15, 35 }; // jungle：15% 矮 / 35% 中 / 50% 高（比森林更茂盛的林下高草）
     constexpr VarMix kHillsMix  = { 65, 25 }; // hills：65% 矮 / 25% 中 / 10% 高
 
     int placed = 0;
-    int plainsCols = 0, hillsCols = 0, forestCols = 0;
+    int plainsCols = 0, hillsCols = 0, forestCols = 0, jungleCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int surfaceY = heightAt(x, z);
@@ -2176,6 +2299,7 @@ void World::placeTallGrass()
             // t274/t306 群系分流密度：plains 密集 / forest 适中 / hills 稀疏。
             const unsigned densityPct = (bio == Biome::Plains) ? unsigned(kPlainsGrassPct)
                                         : (bio == Biome::Forest) ? unsigned(kForestGrassPct)
+                                        : (bio == Biome::Jungle) ? unsigned(kJungleGrassPct)
                                                                  : unsigned(kHillsGrassPct);
             const quint32 r = hashColumn(m_seed, x, z);
             if (r % 100u >= densityPct) continue; // 密度筛选
@@ -2183,6 +2307,7 @@ void World::placeTallGrass()
             // t310 草变种：独立哈希位段 (r>>16)%100 选矮/中/高（与密度位段 r%100 解耦）。
             const VarMix mix = (bio == Biome::Plains) ? kPlainsMix
                              : (bio == Biome::Forest) ? kForestMix
+                             : (bio == Biome::Jungle) ? kJungleMix
                                                       : kHillsMix;
             const unsigned vr = (r >> 16) % 100u;
             quint8 variant = (vr < unsigned(mix.shortPct))                       ? quint8(BlockRegistry::TallGrassShort)
@@ -2200,11 +2325,13 @@ void World::placeTallGrass()
             ++placed;
             if (bio == Biome::Plains) ++plainsCols;
             else if (bio == Biome::Forest) ++forestCols;
+            else if (bio == Biome::Jungle) ++jungleCols;
             else ++hillsCols;
         }
     }
     qInfo() << "worldgen: tall grass placed =" << placed
             << "(plains" << plainsCols << "/ forest" << forestCols
+            << "/ jungle" << jungleCols
             << "/ hills" << hillsCols << ")"; // 同 seed → 同计数（确定性核对）
 }
 
