@@ -83,8 +83,9 @@ public:
     Q_INVOKABLE bool aliveAt(int i) const;
 
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
-    // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model））。
-    enum Kind { Mob, Item, FallingBlock, Arrow };
+    // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model）/
+    // Snowball=雪球投射物（t482 雪傀儡远程攻击，白色小球定向 Model，低伤害 + 减速））。
+    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball };
     Q_ENUM(Kind)
 
     // t240 mob 子类 id（与 Entity.mobType 同值；Q_ENUM 供 QML 据 mobTypeAt 选 MobModel 比例 + 贴图）。
@@ -125,7 +126,19 @@ public:
     //   死亡不掉落（机制等价 MC 1.0 豹猫/猫无常规掉落；仍掉少量 XP，见 Main.qml onMobDied）。§9 原创：名称 /
     //   模型（方块化猫科 + 尖耳 + 长尾）/ 贴图（程序生成斑点橙棕豹猫 + 3 色猫）全原创，仅机制对齐「丛林生成 +
     //   驯服变猫 + 跟随坐站 + 驱赶苦力怕 + 繁殖」。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11 };
+    //   t482 雪傀儡（SnowGolem）= MobSnowGolem(12) / t483 铁傀儡（IronGolem）= MobIronGolem(13)：**防御造物**
+    //   （机制等价 MC 1.0 雪傀儡 / 铁傀儡）—— 非 spawn 而是**玩家摆放方块触发生成**（placeBlock 放南瓜检测下方
+    //   排列 → spawnMobTyped + 静默移除结构方块）。neutral non-hostile（hostile=false → 不参与黑暗刷怪 / 日光
+    //   燃烧 / 远距消失，生命周期同 passive）。**攻击敌对 mob**（非玩家）：
+    //     - 雪傀儡（aiSnowGolem）：抛雪球远程攻击（kind=Snowball 弹丸；低伤害 1HP + 轻微减速 slowTimer →
+    //       mob 水平移动减速 kSnowSlowMul，QML isSlowedAt 显蓝调）；行走留雪层（走过的 air 格地面放 SnowLayer）；
+    //       沙漠群系（热）/ 降水（雨雪）→ 融化（damageEntity 大伤害 → 死亡粒子链，机制等价 MC 雪傀儡沙漠/雨天
+    //       融化消失）。
+    //     - 铁傀儡（aiIronGolem）：大力攻击敌对（高伤害 kIronGolemAttackDamage + 击退 knockback，机制等价 MC
+    //       铁傀儡重拳）；死亡掉落铁锭 / 罂粟（呈现层 onMobDied 据 mobType 分流，机制等价 MC 铁傀儡掉落铁锭 + 花）。
+    //   §9 原创：名称 / 模型（南瓜头 + 方块身，Main.qml 用 BlockCube 贴图堆叠）/ 贴图全原创，仅机制对齐「搭建
+    //   造物 + 防御攻击敌对」。计入实体槽（spawnMobCore 走 kCap 上限，勿超 64）。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13 };
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -159,6 +172,10 @@ public:
     //   t344 火烧态（fireTimer>0，岩浆 / 火点燃；ALL mobs 含 passive）。QML 据 isBurningAt 显火焰 Model +
     //   baseColor 偏橙。t344 扩展：passive 着火亦显火焰（机制等价 MC 动物着火视觉）。越界 / 非 Mob → false。
     Q_INVOKABLE bool isBurningAt(int i) const;
+    // t482 第 i 个 mob 是否**被雪球减速**（slowTimer>0）：雪傀儡雪球命中后短暂减速（水平移动 ×kSnowSlowMul，
+    //   ~kSnowSlowDuration 秒）。QML 据 isSlowedAt 给 mob baseColor 叠蓝调（机制等价 MC 雪球减速可观察反馈）。
+    //   越界 / 非 Mob / 未减速 → false。
+    Q_INVOKABLE bool isSlowedAt(int i) const;
     // t117 沙子重力方块：在方块格 (x,y,z) 生成一个下落方块实体（携带 blockId）。位置存该格中心
     // (x+0.5, y+0.5, z+0.5)；pushable=false（不被玩家推动，同掉落物变体）；kind=FallingBlock；
     // blockId 存实体携带的方块 id（着地放置用它）。重力 tick 下落，着地时 world->setBlockFromEntity
@@ -181,6 +198,14 @@ public:
     //   origin = 玩家眼位 + 视线前移 0.5（防贴墙 spawn 入墙即没）；vel = 视线方向 × 蓄力速度（含抛物 vy）。
     //   达 kCap → 跳过 + 告警（防溢出，同 spawnArrow）。
     Q_INVOKABLE void spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage);
+    // t482 雪球投射物（雪傀儡 aiSnowGolem 远程攻击）：在 origin 处生成一个携带初速度 vel（blocks/s，含 vy 抛物）
+    //   的雪球实体。kind=Snowball、pushable=false（玩家走碰不推）、halfW/halfH=0.10（白色小球视觉 + 碰撞最小）。
+    //   tick 内 Snowball 分支：重力改 vy（抛物）+ 速度位移 + 方块碰撞（命中即移除）+ **敌对 mob** AABB 碰撞
+    //   （命中发 damageEntity(kSnowballDamage=1 低伤害) + 设目标 mob slowTimer=kSnowSlowDuration（轻微减速，
+    //     QML isSlowedAt 显蓝调）+ 移除）。**只打敌对 mob**（passive / 玩家穿过，机制等价 MC 雪球不伤友好生物）。
+    //   机制等价 MC 1.0 雪傀儡抛雪球（远程弹丸 + 伤害 + 减速）；名称 / 视觉全原创（§9 区隔）。达 kCap → 跳过 +
+    //   告警（防溢出）。返新雪球槽索引（调试用）；达 kCap → -1。
+    Q_INVOKABLE int spawnSnowball(const QVector3D &origin, const QVector3D &vel);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
     //   t437：改「释放全部活体槽位」而非「清空 vector」。根因：旧 m_entities.clear() 把 count→0，QML
     //   Repeater count 随之→0；但 reparent 进 mobHost 的 3D delegate（QQuick3DNode，非 QQuickItem）不进
@@ -688,6 +713,17 @@ private:
         //   槽，但每个 hostile 仅每 kAiTickInterval 帧（同 aiAccum 错峰）跑燃烧 / 远距消失判定（光照 +
         //   距离 + 降水群系解析）。burnTimer 据本累积器按 aiDt 推进 → 平均燃烧扣血速率不变。
         float hostileAccum = 0.0f;
+        // t482 雪球减速态（仅被雪傀儡雪球命中的 mob 用；其余 mob 留默认 0 不触发）：
+        //   slowTimer > 0 = 正被减速（水平移动 ×kSnowSlowMul 缓慢；机制等价 MC 雪球减速）。tick Mob 分支
+        //   每帧递减（跨 0 时 bump revision → QML isSlowedAt 翻回蓝调）；减速叠加进 speedScale（与水中减速
+        //   相乘）。雪傀儡 / 铁傀儡自身不被雪球减速（它们是投掷者 / 免疫）。
+        float slowTimer = 0.0f; // 雪球减速剩余秒数（>0 减速；t482）
+        // t482 雪傀儡行走留雪层：跟踪上一脚位格（golem 进入新格时在「刚离开的格」放 SnowLayer，避免放脚下
+        //   致嵌入 / 攀爬 —— SnowLayer 是满格整立方，放脚下会让 golem 嵌入后碰撞顶上去 → 无限攀爬阶梯；
+        //   放身后则 golem 已离开该格不嵌入，留下平铺雪脚印轨迹）。初值 -1 = 无上一格（首帧只记录不放置）。
+        qint32 snowTrailLastX = -1; // 上一脚位格 X（golem 刚离开的格；-1=未记录）
+        qint32 snowTrailLastY = -1; // 上一脚位格 Y
+        qint32 snowTrailLastZ = -1; // 上一脚位格 Z
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;
@@ -805,6 +841,37 @@ private:
     //   索引（求偶寻偶 findNearestMate 排除自身）。分层（PLAN §2）：只读 World::isSolid + 自身数据，无向上依赖。
     bool aiOcelot(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
                   float speedScale);
+    // t482 雪傀儡 AI（tick Mob 分支 mobType==MobSnowGolem 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐
+    //   MC 1.0 雪傀儡（防御造物：游荡 + 抛雪球打敌对 + 行走留雪 + 热/雨融化）：
+    //   (1) 融化：沙漠群系（biomeIdAt==Desert，热）或降水（isPrecipitatingAt，雨/雪）→ damageEntity 大伤害
+    //       → 死亡粒子链 + 移除（机制等价 MC 雪傀儡沙漠 / 雨天融化消失）。
+    //   (2) 行走留雪层：节流（kSnowTrailInterval）在脚下空气格地面放 SnowLayer（setWaterSilent 静默写，
+    //       非玩家破/放不发 broken/placed → 免粒子/音，同羊吃草消耗草丛模式）。
+    //   (3) 远程雪球：节流（kSnowGolemThrowInterval）扫最近敌对 mob（nearestHostile）→ fireSnowball（抛物弹丸，
+    //       命中敌对低伤害 1HP + 减速 kSnowSlowDuration）。
+    //   (4) 游荡（aiWander）。返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。
+    //   分层（PLAN §2）：只读 World::blockAt/isSolid/biomeIdAt/isPrecipitatingAt + 自身数据；写自身（pos /
+    //   slowTimer / damageEntity）+ 向下静默写 World（setWaterSilent 雪层）。无向上依赖。
+    bool aiSnowGolem(int idx, Entity &e, float dt, World *world, float worldW, float worldD, float speedScale);
+    // t483 铁傀儡 AI（tick Mob 分支 mobType==MobIronGolem 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐
+    //   MC 1.0 铁傀儡（防御造物：游荡 + 追击打敌对 + 重拳击退）：
+    //   (1) 节流扫最近敌对 mob（nearestHostile，kIronGolemDetectRange）→ 有目标则朝它走（kIronGolemWalkSpeed，
+    //       yaw 朝目标）+ 近距（kIronGolemAttackRange）大力攻击（damageEntity kIronGolemAttackDamage 高伤害 +
+    //       knockback 击退，机制等价 MC 铁傀儡重拳 + 击退）。
+    //   (2) 无目标 → 游荡（aiWander）。
+    //   返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。分层（PLAN §2）：只读 World::isSolid + 自身数据；
+    //   攻击敌对走 damageEntity/knockback（同层），无向上依赖。
+    bool aiIronGolem(int idx, Entity &e, float dt, World *world, float worldW, float worldD, float speedScale);
+    // t482 朝 target 解抛物初速并抛雪球（aiSnowGolem 远程攻击调）。origin = shooter 中心 + 朝 target 前移 0.5 格
+    //   （避免贴墙时雪球 spawn 入墙即被 tick 判方块命中）。水平速度固定 kSnowballSpeed → 飞行时间 t=d/vH；
+    //   据 target 高度差反解 vy=(Δy+0.5·g·t²)/t（命中 target 高度的抛物解）；vy 钳到 ±kSnowballMaxVert。
+    //   三轴加 ±kSnowballSpread 随机抖动（非 100% 精准）。d 太小（<0.01）→ 安全早退（防除零）。
+    void fireSnowball(int idx, const Entity &shooter, const QVector3D &target);
+    // t482/t483 最近**敌对** mob 查找（雪傀儡抛雪球 / 铁傀儡追击攻击调）：返距 pos 在 range 内最近一只
+    //   alive && !dead && kind==Mob && hostile（敌对生物：Shambler/Bones/Stalker/Spider）的 mob 索引；无 → -1。
+    //   **只打敌对**（passive / golem 自身 / 造物不攻击玩家，机制等价 MC 防御造物只打怪物）。O(n) 每 golem 每
+    //   AI tick，n≤kCap=64 可忽略。const 只读自身数据。
+    int nearestHostile(const QVector3D &pos, float range) const;
     // t281 敌对生物 AI（detect→pathfind→attack 三段；tick 内 hostile Mob 分支调，替代 aiWander）。
     //   spec t281「敌对生物基类（AI/寻路）：detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）
     //   + attack」。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI；标识符 / 美术全原创（§9 区隔）。
@@ -1106,6 +1173,47 @@ private:
     static constexpr float kOcelotTeleportDist  = 24.0f; // 距主人过远瞬移阈值（blocks；XZ）
     static constexpr float kStalkerFleeRange    = 6.0f;  // 豹猫/猫驱赶 Stalker 半径（blocks）
     static constexpr float kStalkerFleeSpeed    = 4.0f;  // Stalker 逃离速度（blocks/s）
+    // t482/t483 防御造物常量（spec「雪傀儡抛雪球打敌对 / 行走留雪 / 热雨融化；铁傀儡大力攻击 + 击退 / 死掉
+    //   铁锭罂粟」；机制对齐 MC 1.0 雪傀儡 / 铁傀儡；数值为本工程量身调，非 MC 精确复刻 —— PLAN §4「机制对标」
+    //   非数值 1:1）。
+    //   - kSnowGolemThrowInterval：雪傀儡抛雪球间隔（秒）。MC 雪傀儡 ~1.5-3s 抛一次；取 2.5（节流可见不刷屏）。
+    //   - kSnowGolemAttackRange：雪球攻击侦测范围（blocks；XZ）。MC 雪傀儡 ~10 格抛程；取 10（玩家牵怪近距可见攻击）。
+    //   - kSnowballSpeed：雪球水平速度（blocks/s）。慢于箭 kArrowSpeed=14（雪球轻飘）；取 10（可见弧线可躲避）。
+    //   - kSnowballMaxVert：vy 钳（blocks/s；防极端弧，同箭）。
+    //   - kSnowballSpread：三轴初速随机抖动（blocks/s；非 100% 精准）。
+    //   - kSnowballDamage：雪球命中敌对伤害（HP）。机制等价 MC 雪球 0 伤 / 对火焰系 3 伤；本工程取 1（低伤害，
+    //     主要价值在减速骚扰，spec「伤害低 + 轻微减速」）。
+    //   - kSnowSlowDuration：雪球减速持续（秒）。取 3.0（明显可感知的减速窗口）。
+    //   - kSnowSlowMul：减速水平速度倍数（<1）。取 0.5（一半速度，机制等价 MC 雪球减速）。
+    //   - kSnowTrailInterval：行走留雪层节流间隔（秒）。取 1.0（每秒一块雪层 → 走出一串雪脚印，不刷屏）。
+    //   - kSnowMeltDamage：雪傀儡融化单次伤害（HP，> 满血 → 一击致死）。满血取 10（kDefaultMaxHealth）；
+    //     大伤害触发死亡链（死亡粒子 + 移除）。
+    //   - kIronGolemDetectRange：铁傀儡敌对侦测范围（blocks；XZ）。MC 铁傀儡 ~16 格；取 12（近守卫）。
+    //   - kIronGolemAttackRange：近战攻击 XZ 距离（blocks）。铁傀儡重拳臂长；取 2.0（略大于敌对近战 1.6，
+    //     重拳挥臂范围大）。
+    //   - kIronGolemAttackDamage：重拳伤害（HP）。机制等价 MC 铁傀儡 7.5-21.5 伤害（正常难度 ~7-8 心）；
+    //     本工程取 8（4 心，几拳打死 20HP 敌对）。
+    //   - kIronGolemKnockbackStrength：重拳击退强度（倍率；knockback strength 参数，>1 拉大击退距离）。取 1.5。
+    //   - kIronGolemAttackCooldown：重拳间隔（秒）。取 1.5（重拳慢而沉）。
+    //   - kIronGolemWalkSpeed：追击行走速度（blocks/s）。铁傀儡迟缓；取 2.2（慢于敌对 kChaseSpeed 2.8）。
+    static constexpr float kSnowGolemThrowInterval = 2.5f;  // 雪傀儡抛雪球间隔（秒）
+    static constexpr float kSnowGolemAttackRange   = 10.0f; // 雪球攻击侦测范围（blocks；XZ）
+    static constexpr float kSnowballSpeed          = 10.0f; // 雪球水平速度（blocks/s）
+    static constexpr float kSnowballMaxVert        = 14.0f; // 雪球 vy 钳（blocks/s；防极端弧）
+    static constexpr float kSnowballSpread         = 1.0f;  // 雪球三轴初速随机抖动（blocks/s）
+    static constexpr float kSnowballLifetime       = 5.0f;  // 雪球最长存活（秒；飞行未命中兜底移除，同箭）
+    static constexpr float kSnowballHitHalfW       = 0.3f;  // 雪球 vs 敌对 mob 命中盒 XZ/Y 外扩（blocks；雪球是小点）
+    static constexpr int   kSnowballDamage         = 1;     // 雪球命中伤害（HP；低伤害）
+    static constexpr float kSnowSlowDuration       = 3.0f;  // 雪球减速持续（秒）
+    static constexpr float kSnowSlowMul            = 0.5f;  // 减速水平速度倍数（<1）
+    static constexpr float kSnowTrailInterval      = 1.0f;  // 行走留雪层节流间隔（秒）
+    static constexpr int   kSnowMeltDamage         = 100;   // 雪傀儡融化伤害（HP；> 满血一击致死）
+    static constexpr float kIronGolemDetectRange   = 12.0f; // 铁傀儡敌对侦测范围（blocks；XZ）
+    static constexpr float kIronGolemAttackRange   = 2.0f;  // 铁傀儡近战攻击 XZ 距离（blocks）
+    static constexpr int   kIronGolemAttackDamage  = 8;     // 铁傀儡重拳伤害（HP；高伤害）
+    static constexpr float kIronGolemKnockbackStrength = 1.5f; // 铁傀儡重拳击退强度（倍率）
+    static constexpr float kIronGolemAttackCooldown = 1.5f; // 铁傀儡重拳间隔（秒）
+    static constexpr float kIronGolemWalkSpeed     = 2.2f;  // 铁傀儡追击行走速度（blocks/s）
 public:
     // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
     //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。

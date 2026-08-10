@@ -1565,6 +1565,10 @@ Window {
             xpForMob[EntityManager.MobSquid]   = 1 + Math.floor(Math.random() * 3) // 鱿鱼：1-3 XP
             xpForMob[EntityManager.MobWolf]    = 1 + Math.floor(Math.random() * 3) // t480 狼：1-3 XP（被动经济生物；无常规掉落）
             xpForMob[EntityManager.MobOcelot]  = 1 + Math.floor(Math.random() * 3) // t481 豹猫/猫：1-3 XP（被动经济生物；无常规掉落）
+            // t482/t483 防御造物 XP：造物为玩家搭建的防御单位，杀之给少量 XP（机制等价 MC 造物无明确 XP 但本工程
+            //   统一杀 mob 给 XP）。铁傀儡 5 XP（重型造物，同敌对量级）；雪傀儡 1-3 XP（轻型造物）。
+            xpForMob[EntityManager.MobSnowGolem] = 1 + Math.floor(Math.random() * 3) // t482 雪傀儡：1-3 XP
+            xpForMob[EntityManager.MobIronGolem] = 5 // t483 铁傀儡：5 XP（重型防御造物）
             const xpAmt = xpForMob[mobType]
             if (xpAmt && xpAmt > 0) xpOrbs.spawnOrb(x, y, z, xpAmt)
             // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
@@ -1623,7 +1627,20 @@ Window {
                 itemEntities.spawnItem(x, y, z, 0x22D, 1)             // 墨囊 ×1（恒掉）
                 if (Math.random() < 0.66) itemEntities.spawnItem(x, y, z, 0x22D, 1)  // ~66% ×2
                 if (Math.random() < 0.33) itemEntities.spawnItem(x, y, z, 0x22D, 1)  // ~33% ×3（独立 → 总量 1-3）
+            } else if (mobType === EntityManager.MobIronGolem) {
+                // t483 铁傀儡掉落：铁锭 ×3-5 + 罂粟（红花）×0-1（机制等价 MC 1.0 铁傀儡掉铁锭 + 罂粟 poppy）。
+                //   0x203=RecipeRegistry::IronIngotId（材料段铁锭）/ FlowerRed=49（红花方块，机制等价 MC 罂粟 poppy，
+                //   §9 区隔：红花的 MC 等价是罂粟，方块 id 即物品 id）。⚠️ QML 不 import C++ 静态类故用字面量，
+                //   同 onMobDied 既有约定。铁锭总量 3-5（恒掉 3 + ~66%/33% 独立加成，机制等价 MC 铁傀儡 3-5 铁锭）。
+                itemEntities.spawnItem(x, y, z, 0x203, 1)             // 铁锭 ×1（恒掉）
+                itemEntities.spawnItem(x, y, z, 0x203, 1)
+                itemEntities.spawnItem(x, y, z, 0x203, 1)
+                if (Math.random() < 0.66) itemEntities.spawnItem(x, y, z, 0x203, 1)  // ~66% ×4
+                if (Math.random() < 0.33) itemEntities.spawnItem(x, y, z, 0x203, 1)  // ~33% ×5（独立 → 总量 3-5）
+                if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 49, 1)      // 红花（罂粟）~50% ×1
             }
+            // t482 雪傀儡（MobSnowGolem）死亡不掉落（机制等价 MC 雪傀儡无常规掉落，仅融化时无产出）。
+            //   融化（沙漠 / 降水）→ 死亡粒子链（白烟 + 侧倒）→ onMobDied 走本无分支 → 不掉。被杀也不掉（spec 未要求）。
             // MobTest（通用测试生物）/ MobStalker（潜行者；爆炸型，机制等价 MC 苦力怕无常规掉落）不掉落 —— 调试 /
             //   爆炸型无游戏内常规产出。Stalker 爆炸破坏方块的掉落由 detonateStalker 的 explosionDroppedItem 单独发（t297）。
         }
@@ -4513,6 +4530,13 @@ Window {
                         if (entMobType === EntityManager.MobSquid) return 0.46 - mobHalfH // t399 Squid 触腕底 0.46（贴 collision 底面）
                         if (entMobType === EntityManager.MobWolf) return 0.42 - mobHalfH // t480 Wolf 犬科（腿底 0.42）
                         if (entMobType === EntityManager.MobOcelot) return 0.40 - mobHalfH // t481 Ocelot/Cat 猫科（腿底 0.40）
+                        // t482/t483 防御造物：方块身 + 南瓜头堆叠 Model（不走 MobModel；局部原点 = 碰撞中心），
+                        //   底部方块（腿/底雪块）底面须贴 collision 底面（= 地面）。底部方块 local y center = -halfH + 0.45
+                        //   （0.45 = 底块半高）；mobModelYOff 把整组 Model 下移（halfH-0.45），使底块底面（-halfH-0.45...）
+                        //   贴 collision 底。简化：golem 模型组自身用「position.y 已含 -halfH 偏移」（见下方 golem Model），
+                        //   故 mobModelYOff = 0（模型组原点 = 碰撞中心，组内各块按碰撞中心定位）。返回 0 退化为「无偏移」。
+                        if (entMobType === EntityManager.MobSnowGolem) return 0.0
+                        if (entMobType === EntityManager.MobIronGolem) return 0.0
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
                     }
                     // t400 求偶心形指示（spec 繁殖可观察反馈；机制等价 MC 1.0 love mode 心形粒子）：mob 处于求偶期
@@ -4552,6 +4576,129 @@ Window {
                                 if (entityManager.isBurningAt(index)) return "#ff7a3a"
                                 return entityManager.colorAt(index)
                             }
+                        }
+                    }
+                    // t482 雪傀儡（SnowGolem，mobType 12）：防御造物，南瓜头 + 雪块身堆叠（机制等价 MC 1.0 雪傀儡，
+                    //   §9 区隔纯色原创非照搬 MC）。delegate 原点 = 碰撞中心（pos.y）；mobModelYOff=0 故组内各块按
+                    //   碰撞中心定位（halfH=0.90 → feet local y=-0.90）。UnitCube + NoLighting（红线）。受击红闪 /
+                    //   减速蓝调（isSlowedAt） / 昼夜灰阶（terrainLight）经 tinted() 函数统一驱动所有部件（base 色 × tint）。
+                    Node {
+                        visible: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem }
+                        position: Qt.vector3d(0, mobModelYOff, 0)
+                        // tint = 当前调制色（红闪 / 蓝调 / 昼夜灰阶）；tinted(hex) 把部件 base 色按 tint 逐通道相乘。
+                        property color tint: {
+                            entityManager.revision
+                            if (entityManager.hurtFlashAt(index) > 0) return Qt.rgba(1.0, 0.0, 0.0, 1.0)
+                            if (entityManager.isSlowedAt(index)) return Qt.rgba(0.60, 0.72, 1.0, 1.0)
+                            return terrainLight(worldClock.skyLight)
+                        }
+                        function tinted(hex) {
+                            const b = Qt.color(hex)
+                            return Qt.rgba(b.r * tint.r, b.g * tint.g, b.b * tint.b, 1.0)
+                        }
+                        // 底雪块（雪傀儡身体下块）：local y center -0.45，scale 0.8 → spans y [-0.85, -0.05]，冷白。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, -0.45, 0)
+                            scale: Qt.vector3d(0.80, 0.90, 0.80)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#f0f4f8") }
+                        }
+                        // 顶雪块（雪傀儡身体上块）：local y center +0.45。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.45, 0)
+                            scale: Qt.vector3d(0.80, 0.90, 0.80)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#f0f4f8") }
+                        }
+                        // 南瓜头（橙色）：local y center +1.30，scale 0.65。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 1.30, 0)
+                            scale: Qt.vector3d(0.65, 0.65, 0.65)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e87a28") }
+                        }
+                        // 南瓜头刻面双眼（深色小方块贴头前面 -Z，机制等价 MC 刻面南瓜 jack o'lantern 双眼）。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.12, 1.35, -0.30)
+                            scale: Qt.vector3d(0.08, 0.10, 0.03)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.12, 1.35, -0.30)
+                            scale: Qt.vector3d(0.08, 0.10, 0.03)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                        }
+                    }
+                    // t483 铁傀儡（IronGolem，mobType 13）：防御造物，南瓜头 + 铁块身（躯干 + 双腿 + 双臂）堆叠
+                    //   （机制等价 MC 1.0 铁傀儡，§9 区隔纯色原创非照搬 MC）。halfH=1.20 → feet local y=-1.20。
+                    //   UnitCube + NoLighting（红线）。受击红闪 / 减速蓝调 / 昼夜灰阶经 tinted() 统一驱动。
+                    Node {
+                        visible: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobIronGolem }
+                        position: Qt.vector3d(0, mobModelYOff, 0)
+                        property color tint: {
+                            entityManager.revision
+                            if (entityManager.hurtFlashAt(index) > 0) return Qt.rgba(1.0, 0.0, 0.0, 1.0)
+                            if (entityManager.isSlowedAt(index)) return Qt.rgba(0.60, 0.72, 1.0, 1.0)
+                            return terrainLight(worldClock.skyLight)
+                        }
+                        function tinted(hex) {
+                            const b = Qt.color(hex)
+                            return Qt.rgba(b.r * tint.r, b.g * tint.g, b.b * tint.b, 1.0)
+                        }
+                        // 双腿（铁灰）：local y center -0.90，左右 ±0.22。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.22, -0.90, 0)
+                            scale: Qt.vector3d(0.36, 0.60, 0.36)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.22, -0.90, 0)
+                            scale: Qt.vector3d(0.36, 0.60, 0.36)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                        }
+                        // 躯干（铁灰宽体）：local y center +0.05。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.05, 0)
+                            scale: Qt.vector3d(0.95, 1.05, 0.65)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                        }
+                        // 双臂（铁灰长臂，机制等价 MC 铁傀儡重拳长臂）：local y center +0.10，左右 ±0.62。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.62, 0.10, 0)
+                            scale: Qt.vector3d(0.28, 0.78, 0.45)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.62, 0.10, 0)
+                            scale: Qt.vector3d(0.28, 0.78, 0.45)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                        }
+                        // 南瓜头（橙色）：local y center +0.95。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.95, 0)
+                            scale: Qt.vector3d(0.72, 0.66, 0.72)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e87a28") }
+                        }
+                        // 南瓜头刻面双眼（深色小方块贴头前面 -Z）。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.14, 1.00, -0.34)
+                            scale: Qt.vector3d(0.09, 0.11, 0.03)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.14, 1.00, -0.34)
+                            scale: Qt.vector3d(0.09, 0.11, 0.03)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
                         }
                     }
                     // t371 燃烧火焰视觉（重做 t280/t344）：旧版「略大于 mob 的橙黄半透立方整块包覆」→ 读作
@@ -5399,6 +5546,25 @@ Window {
                             position: Qt.vector3d(0, 0, 0.02)
                             scale: Qt.vector3d(0.13, 0.02, 0.05)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#cccccc" }
+                        }
+                    }
+                    // t482 雪球（Snowball）：雪傀儡抛出的远程弹丸。白色小球（雪傀儡远程攻击，机制等价 MC 1.0
+                    //   snowball）。delegate Node 已摆 position（雪球世界坐标）+ 不转（雪球对称无需定向）。NoLighting
+                    //   （红线：可见 Model 必须 NoLighting）。
+                    Node {
+                        visible: { entityManager.revision; return entKind === EntityManager.Snowball }
+                        // 外层白球（近纯白 + 冷蓝阴影 → 读作「压实雪球」）。
+                        Model {
+                            geometry: UnitCube {}
+                            scale: Qt.vector3d(0.20, 0.20, 0.20)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f0f4f8" }
+                        }
+                        // 内层亮白高光（冰晶反光点，强化「雪球」非纯白方块）。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.04, 0.04, 0.06)
+                            scale: Qt.vector3d(0.10, 0.10, 0.10)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
                         }
                     }
                 }

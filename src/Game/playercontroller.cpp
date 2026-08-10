@@ -2631,6 +2631,47 @@ void PlayerController::placeBlock()
         // fence / pressure_plate / trapdoor：placeState=0（trapdoor 默认水平合）。
         m_world->setBlock(tx, ty, tz, idByte, placeState);
     }
+    // t482/t483 防御造物生成（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建）：玩家放置**南瓜**后检测下方排列，
+    //   命中 → 生成对应防御造物（spawnMobTyped 计入实体槽 kCap）+ 静默移除结构方块（setWaterSilent —— 非玩家
+    //   破块不发 broken → 免破块粒子/音噪音；结构方块雪/铁是玩家先放好的，南瓜刚放已发 blockPlaced → 生存已
+    //   消耗 1 南瓜）。spec「南瓜 + 雪块×2 竖直 → 雪傀儡 / 铁块×4 T 形 + 南瓜 → 铁傀儡」。分层（PLAN §2）：
+    //   Game/Physics 层（读 World + 写 World setWaterSilent + 调 EntityManager spawn），不改 setBlock 语义。
+    //   **支持 T 形 X / Z 双向**（玩家从任一侧搭底排均能触发，机制等价 MC 铁傀儡 T 形不锁向）。
+    if (idByte == BlockRegistry::Pumpkin && m_world && m_entityManager && ty >= 2
+        && ty - 2 < m_world->height()) {
+        // (a) 雪傀儡：南瓜下方两格均为雪块（南瓜 + 雪块×2 竖直）→ 生成 MobSnowGolem + 移除 3 块。
+        //     生成位置 feet = 南瓜下方两格（雪块底）；spawnMobTyped 把 pos 设为 (x+0.5, feet + halfH, z+0.5)。
+        if (m_world->blockAt(tx, ty - 1, tz) == BlockRegistry::Snow
+            && m_world->blockAt(tx, ty - 2, tz) == BlockRegistry::Snow) {
+            m_world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0);     // 南瓜（刚放）
+            m_world->setWaterSilent(tx, ty - 1, tz, BlockRegistry::Air, 0); // 雪块 1
+            m_world->setWaterSilent(tx, ty - 2, tz, BlockRegistry::Air, 0); // 雪块 2
+            m_entityManager->spawnMobTyped(tx, ty - 2, tz, EntityManager::MobSnowGolem,
+                                           QStringLiteral("#f0f4f8"), 4);
+            qInfo("snow golem built at %d %d %d", tx, ty, tz);
+        }
+        // (b) 铁傀儡：南瓜下方第一格铁块（T 顶）+ 第二格铁块（T 中）+ 第二格水平左右各一铁块（T 底排）→
+        //     生成 MobIronGolem + 移除 5 块（南瓜 + 4 铁块）。底排支持 X 向（±X）或 Z 向（±Z）双向。
+        else if (m_world->blockAt(tx, ty - 1, tz) == BlockRegistry::IronBlock
+                 && m_world->blockAt(tx, ty - 2, tz) == BlockRegistry::IronBlock) {
+            const bool rowX = (m_world->blockAt(tx - 1, ty - 2, tz) == BlockRegistry::IronBlock
+                               && m_world->blockAt(tx + 1, ty - 2, tz) == BlockRegistry::IronBlock);
+            const bool rowZ = (m_world->blockAt(tx, ty - 2, tz - 1) == BlockRegistry::IronBlock
+                               && m_world->blockAt(tx, ty - 2, tz + 1) == BlockRegistry::IronBlock);
+            if (rowX || rowZ) {
+                m_world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0);     // 南瓜
+                m_world->setWaterSilent(tx, ty - 1, tz, BlockRegistry::Air, 0); // T 顶铁块
+                m_world->setWaterSilent(tx, ty - 2, tz, BlockRegistry::Air, 0); // T 中铁块
+                m_world->setWaterSilent(tx - 1, ty - 2, tz, BlockRegistry::Air, 0); // X 向左
+                m_world->setWaterSilent(tx + 1, ty - 2, tz, BlockRegistry::Air, 0); // X 向右
+                m_world->setWaterSilent(tx, ty - 2, tz - 1, BlockRegistry::Air, 0); // Z 向前
+                m_world->setWaterSilent(tx, ty - 2, tz + 1, BlockRegistry::Air, 0); // Z 向后
+                m_entityManager->spawnMobTyped(tx, ty - 2, tz, EntityManager::MobIronGolem,
+                                               QStringLiteral("#c8c8d0"), 100);
+                qInfo("iron golem built at %d %d %d", tx, ty, tz);
+            }
+        }
+    }
     m_lastPlaceMs = now; // 放置成功 → 刷新 CD 计时（t128；now 为入口时间戳，同帧无意义漂移）
     // t125 火把朝向：把玩家点击面外法线随放置事件传出，供呈现层按玩家意图定向（柄嵌所点墙面，
     //   非旧固定优先级误判）。法线为射线命中面外法线（指向玩家侧），值在 placeBlock 入口已由 updateRaycast

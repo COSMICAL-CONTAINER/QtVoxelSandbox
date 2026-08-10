@@ -427,6 +427,19 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* anvil        */ {int(BlockRegistry::Anvil),           113,114,114,114, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Anvil),           1, 64, "anvil",        "铁砧"},
     /* anvil_chipped*/ {int(BlockRegistry::AnvilChipped),    115,114,114,114, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::AnvilChipped),    1, 64, "anvil_chipped","微损铁砧"},
     /* anvil_damaged*/ {int(BlockRegistry::AnvilDamaged),    116,114,114,114, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::AnvilDamaged),    1, 64, "anvil_damaged","重损铁砧"},
+    // ── t482/t483 防御造物方块（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建材料；名称 / 贴图全原创自绘 §9a）。
+    //   南瓜（Pumpkin）：造物头部方块（玩家放置南瓜 + 下方排列 → 触发造物生成）。整立方 opaque（solid=true /
+    //   ShapeFull，与 chest/wool 同族走整立方面路径）、hardness=1.0（软质）、NoTool（空手可采且掉落）、
+    //   dropId=自身、dropCount=1、maxStack=64。各面贴图：顶·底=pumpkin_top(119)/侧=pumpkin_side(117)/
+    //   -Z 前面=pumpkin_face(118)（刻面双眼 + 锯齿嘴，机制等价 MC 刻面南瓜；作造物头时面朝玩家侧）。
+    //   音色归 GroupGrass（软植物音）。进创造调色板（搭建用）。
+    /* pumpkin      */ {int(BlockRegistry::Pumpkin),          119,119,117,118, true,  BlockRegistry::ShapeFull,     1.0f, int(BlockRegistry::NoTool),    0, false, int(BlockRegistry::Pumpkin),        1, 64, "pumpkin",     "南瓜"},
+    //   雪块（Snow）：雪傀儡身体方块（南瓜 + 雪块×2 竖直搭建）。整立方 opaque（solid=true / ShapeFull，与
+    //   SnowLayer 同族）、hardness=0.2（软质）、Shovel（铲加速；requiresTool=false 空手也掉落）、dropId=自身、
+    //   dropCount=1、maxStack=64。各面贴图=snow(57)（冷白底+细密冰晶噪点，与 SnowLayer 共享）。音色归
+    //   GroupSand（颗粒雪响）。进创造调色板（搭建用；区别 SnowLayer 的满格整立方 —— 雪傀儡机制等价 MC 用
+    //   「雪块」满格而非薄雪层）。
+    /* snow         */ {int(BlockRegistry::Snow),             57, 57, 57, 57,  true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Shovel),   0, false, int(BlockRegistry::Snow),          1, 64, "snow",        "雪块"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -517,6 +530,9 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* anvil                   */ -1, // t477 铁砧 → MC 1.0 无等价（anvil id 145 为 1.4+；本工程独立 id 故无 1.0 等价）
     /* anvil_chipped           */ -1, // t477 微损铁砧 → MC 1.0 无等价（同 anvil，1.4+ 才以 metadata 分损坏态）
     /* anvil_damaged           */ -1, // t477 重损铁砧 → MC 1.0 无等价（同 anvil）
+    // t482/t483 造物方块 → MC 1.0 对齐：pumpkin id 86（1.0 存在）；snow block id 80（同 snow_layer 取雪方块 80）。
+    /* pumpkin                 */ 86, // t482 南瓜 → MC 1.0 pumpkin id 86
+    /* snow                    */ 80, // t482 雪块 → MC 1.0 snow block id 80（同 SnowLayer 的 80；满格雪方块）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1069,9 +1085,11 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Sugarcane: // t397 甘蔗 → 软草音色（细茎软植物，同草丛；机制等价 MC sugar cane SoundType = grass）
     case CarrotCrop: // t407 胡萝卜作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）
     case PotatoCrop: // t407 马铃薯作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）
+    case Pumpkin: // t482 南瓜 → 软草音色（瓜类植物，同草丛；机制等价 MC pumpkin SoundType = wood 取软草近似）
         return GroupGrass;
     case Sand:
     case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）
+    case Snow: // t482 雪块 → 颗粒雪响（同积雪层；雪傀儡身体材质）
         return GroupSand;
     case Leaves:
         return GroupLeaves;

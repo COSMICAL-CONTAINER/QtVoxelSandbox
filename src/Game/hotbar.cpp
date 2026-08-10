@@ -122,6 +122,9 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::SpruceFence:         return "icon_spruce_fence.png";         // 云杉栅栏：3D 立柱 + 横档（深色木纹）
     case BlockRegistry::SpruceDoor:          return "icon_spruce_door.png";          // 云杉门：3D 两格高薄板（深色木纹）
     case BlockRegistry::Ladder:        return "icon_ladder.png";      // t413 木梯（cross 透明底；两纵轨 + 横梯级；竖直爬行梯）
+    // t482/t483 防御造物方块立方体图标（build_cube_icons.py 程序生成原创像素图）。
+    case BlockRegistry::Pumpkin:       return "icon_pumpkin.png";     // 南瓜（顶=橙色瓜顶+短茎 / 侧=橙色瓜棱；造物头部方块）
+    case BlockRegistry::Snow:          return "icon_snow.png";        // 雪块（各面=冷白冰晶噪点，同积雪层；雪傀儡身体方块）
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
@@ -564,7 +567,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Bookshelf),                                   // 书架（合成产物；附魔台加成来源；配方木板+书）
              // t477 铁块 + 铁砧（机制等价 MC 1.0 iron block / anvil；右键铁砧开铁砧 UI）。
              int(BlockRegistry::IronBlock),                                   // 铁块（9 铁锭合成存储方块；铁砧配方前置）
-             int(BlockRegistry::Anvil) };                                     // 铁砧（右键开铁砧 UI 修复/合并/重命名；配方 3 铁块+4 铁锭；微损/重损不进调色板）
+             int(BlockRegistry::Anvil),                                       // 铁砧（右键开铁砧 UI 修复/合并/重命名；配方 3 铁块+4 铁锭；微损/重损不进调色板）
+             // t482/t483 防御造物方块（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建材料；南瓜放好 + 下方排列 → 造物）。
+             int(BlockRegistry::Pumpkin),                                     // 南瓜（造物头部方块；雪傀儡/铁傀儡搭建触发物）
+             int(BlockRegistry::Snow) };                                      // 雪块（造物身体方块；雪傀儡 = 南瓜 + 雪块×2 竖直）
 }
 
 QString Hotbar::iconSourceAt(int slot) const

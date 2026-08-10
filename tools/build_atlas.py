@@ -225,6 +225,12 @@ TILES = [
     "default_anvil_base",          # 114 anvil_base（t477 铁砧侧/底/前面贴图；深铁砧身+横向分层暗带；Anvil/AnvilChipped/AnvilDamaged 底·侧·前共享本 tile；tools/build_anvil.py）
     "default_anvil_damaged_1_top", # 115 anvil_damaged_1_top（t477 微损铁砧顶面贴图；砧台+一条细裂纹；AnvilChipped 顶面=本 tile；tools/build_anvil.py）
     "default_anvil_damaged_2_top", # 116 anvil_damaged_2_top（t477 重损铁砧顶面贴图；砧台+粗裂纹网+尖角缺角；AnvilDamaged 顶面=本 tile；tools/build_anvil.py）
+    # t482/t483 防御造物方块（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建材料；名称 / 贴图全原创自绘 §9a）。
+    #   tools/build_pumpkin.py 程序生成原创像素图（橙色南瓜系：底 + 纵向瓜棱深纹 + 高光）。
+    "default_pumpkin_side",       # 117 pumpkin_side（南瓜侧面贴图；深橙底 + 纵向瓜棱深纹 + 边缘暗化；Pumpkin sideTile=本 tile）
+    "default_pumpkin_face",       # 118 pumpkin_face（南瓜刻面前面贴图；橙色 + 刻面双眼 + 锯齿嘴 + 顶部短茎；Pumpkin frontTile=本 tile，
+                                  #    作造物头时面朝玩家侧，机制等价 MC 刻面南瓜 jack o'lantern）
+    "default_pumpkin_top",        # 119 pumpkin_top（南瓜顶/底面贴图；橙色瓜顶 + 中央短茎 + 高光；Pumpkin top/bottomTile=本 tile）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

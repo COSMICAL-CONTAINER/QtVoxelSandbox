@@ -560,7 +560,26 @@ public:
         Anvil           = 97, // 铁砧（完好）：右键开铁砧 UI（修复/合并/重命名，耗 XP）；3 铁块+4 铁锭合成；损坏阶段 0
         AnvilChipped    = 98, // 铁砧（微损）：使用损坏态 1（顶面 anvil_damaged_1_top，细裂纹）；再损→重损
         AnvilDamaged    = 99, // 铁砧（重损）：使用损坏态 2（顶面 anvil_damaged_2_top，粗裂纹）；再损→碎裂移除
-        Count           = 100, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t482/t483 防御造物方块（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建材料；名称 / 贴图全原创自绘 §9a）：
+        //   南瓜（Pumpkin）：雪傀儡 / 铁傀儡的「头」（玩家放置南瓜并搭好下方排列 → 触发造物生成）。整立方
+        //   opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 chest / wool 同族）、
+        //   hardness=1.0（同 MC 1.0 南瓜量级，软质）、toolType=NoTool（空手可采且掉落）、requiresTool=false、
+        //   dropId=自身（破南瓜掉南瓜方块，可放回）、dropCount=1、maxStack=64。各面贴图：顶·底=
+        //   pumpkin_top(119)（橙色瓜顶 + 中央短茎）/ 侧=pumpkin_side(117)（橙色 + 纵向瓜棱深纹）/-Z 前面=
+        //   pumpkin_face(118)（橙色 + 刻面双眼 + 锯齿嘴，作造物头时朝向玩家侧，机制等价 MC 刻面南瓜 jack o'lantern）。
+        //   音色归 GroupGrass（软植物音）。**造物触发**：PlayerController::placeBlock 放置南瓜后检测下方排列
+        //   （雪块×2 竖直 → 雪傀儡 / 铁块×4 T 形 → 铁傀儡），命中 → 生成对应防御造物 + 静默移除结构方块。
+        //   进创造调色板（玩家取用 / 搭建）。
+        Pumpkin         = 100, // 南瓜：造物头部方块（雪傀儡 / 铁傀儡搭建触发物）
+        //   雪块（Snow）：雪傀儡的身体（南瓜 + 雪块×2 竖直搭建）。整立方 opaque（solid=true / ShapeFull ——
+        //   走 mesher 整立方面路径，**非**异形，与 SnowLayer 同族）、hardness=0.2（同 MC 1.0 雪块量级，软质）、
+        //   toolType=Shovel（铲加速；requiresTool=false → 空手也掉落）、dropId=自身、dropCount=1、maxStack=64。
+        //   各面贴图=snow(57)（冷白底 + 细密冰晶噪点，与 SnowLayer 共享；tools/build_snow.py 程序生成）。
+        //   音色归 GroupSand（颗粒雪响，同 SnowLayer）。**造物触发**：placeBlock 放置南瓜后检测下方雪块×2 →
+        //   生成雪傀儡 + 移除结构。进创造调色板（玩家取用 / 搭建；区别 SnowLayer 的满格整立方 —— 雪傀儡
+        //   机制等价 MC 用「雪块」（满格）而非薄雪层，故独立方块 id）。
+        Snow            = 101, // 雪块：造物身体方块（雪傀儡 2 块竖直）
+        Count           = 102, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -985,7 +1004,11 @@ public:
     //   106=pack_ice（t468 浮冰各面贴图）/ 107=blue_ice（t468 蓝冰各面贴图）；tools/build_ice.py 程序生成。
     //   108=lapis_ore（t471 青金矿石各面贴图；石头底 + 群青深蓝斑簇 + 黄铁矿金点，原创自绘 §9a；
     //      LapisOre 各面=本 tile；tools/build_ore.py 程序生成）。
-    // 图集由 tools/build_atlas.py 打包全部 105 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   117=pumpkin_side（t482 南瓜侧面贴图；橙色 + 纵向瓜棱深纹；tools/build_pumpkin.py 程序生成原创像素图）。
+    //   118=pumpkin_face（t482 南瓜前面贴图；橙色 + 刻面双眼 + 锯齿嘴；Pumpkin frontTile=本 tile，机制等价
+    //     MC 刻面南瓜 jack o'lantern；作造物头时面朝玩家侧）。
+    //   119=pumpkin_top（t482 南瓜顶/底面贴图；橙色瓜顶 + 中央短茎；Pumpkin top/bottomTile=本 tile）。
+    // 图集由 tools/build_atlas.py 打包全部 120 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -997,7 +1020,7 @@ public:
     //   111=bookshelf（t474 书架各面贴图；木板边框 + 中央书脊彩色书列（红 / 蓝 / 绿 / 棕书脊），原创自绘
     //      §9a；Bookshelf 各面=本 tile；tools/build_bookshelf.py 程序生成）。
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 112）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 120）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -1005,7 +1028,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 117;
+    static constexpr int AtlasTileCount = 120;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
