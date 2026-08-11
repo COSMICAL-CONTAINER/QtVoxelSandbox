@@ -90,6 +90,13 @@ public:
     //   itemDir 在 ensureBuiltLocked 与 block 目录一并解析缓存；active=false / itemDir 空 / 无映射 / 文件缺 → ""。
     Q_INVOKABLE QString itemIconSource(int itemId) const;
 
+    // t497 生存背包空护甲槽图标覆盖：pack 启用且包内 item 目录有 empty_armor_slot_<piece>.png（piece 取
+    //   "helmet"/"chestplate"/"leggings"/"boots" 四部位，与 ArmorRegistry::ArmorPiece 同序 0..3）时，
+    //   返 file:///<itemDir>/empty_armor_slot_<piece>.png 供 QtQuick Image 加载（alpha-test 透明底，机制等价
+    //   MC 1.0 survival 背包空装备槽占位图）；否则返空串 → SurvivalInventory 回退自绘 Canvas 暗灰金属剪影。
+    //   运行期读本地 gitignored pack PNG（红线 §9：PNG 不进 qrc/VCS）。active=false / 无 item 目录 / 文件缺 → ""。
+    Q_INVOKABLE QString emptyArmorSlotSource(int armorPiece) const;
+
     // t421 生物模型贴图覆盖：pack 启用且 mobType 在「引擎 mob id → pack entity 子目录/文件名」映射内、且包内
     //   对应 PNG 存在时，返回 file:///<entityDir>/<mob>/<mob>.png 供 QtQuick3D Texture 直接加载（MobModel 据
     //   packTextured 把几何 UV 按 T 字展开进该贴图）；否则返空串 → Main.qml 各 mob delegate 回退程序生成

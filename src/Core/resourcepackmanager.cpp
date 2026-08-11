@@ -451,6 +451,12 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x22F, QStringLiteral("carrot.png")},          // 胡萝卜
         {0x230, QStringLiteral("potato.png")},          // 马铃薯
         {0x231, QStringLiteral("cod.png")},             // 生鱼（MC 1.0 raw fish = modern cod）
+        // t497 末影之眼（EndEyeId=0x23A）：机制等价 MC 1.0 ender eye（要塞宝藏箱战利品；右键末地传送门激活）。
+        //   t487 引入物品但 itemFilenameMap 漏映射 → pack 启用时仍走自绘 Canvas（drawEndEye）。补映射 → pack 有
+        //   ender_eye.png 时改用包内贴图（alpha-test 透明底，机制等价 MC item icon）；包缺 → 安全跳过保自绘。
+        //   注：MC「末影珍珠 ender_pearl」是另一物品（合成末影之眼的原料），本工程无独立物品 id 故不映射；
+        //   本工程的「末影之眼」即机制等价物，故 ender_eye.png 是其正确 pack 图标。
+        {0x23A, QStringLiteral("ender_eye.png")},        // 末影之眼（t497：pack 启用用包内贴图，回落 drawEndEye 自绘）
         // —— 护甲段（ArmorId；皮革/铁/金/钻石×头盔/胸甲/护腿/靴子。铜护甲无 vanilla 贴图 → 不映射）——
         {0x300, QStringLiteral("leather_helmet.png")},
         {0x301, QStringLiteral("leather_chestplate.png")},
@@ -960,6 +966,32 @@ QString ResourcePackManager::itemIconSource(int itemId) const
     const QString path = QDir(s.itemDir).absoluteFilePath(filename);
     if (!QFile::exists(path))
         return {}; // 包内无该 item 贴图 → 不覆盖（保留自绘 Canvas）；红线 §9：仅运行期读本地 pack PNG。
+    return QStringLiteral("file:///") + path;
+}
+
+// t497 生存背包空护甲槽图标源（pack 内 empty_armor_slot_<piece>.png）。piece = ArmorRegistry::ArmorPiece
+//   序（0 头盔 / 1 胸甲 / 2 护腿 / 3 靴子，与 SurvivalInventory 装备槽 Repeater index 同源）；越界 → 空串。
+//   active=false / 无 item 目录 / 包内缺该 PNG → 空串（SurvivalInventory 回退自绘 Canvas 暗灰剪影，§9a）。
+QString ResourcePackManager::emptyArmorSlotSource(int armorPiece) const
+{
+    // 部位 → 标准 MC item 文件名（empty_armor_slot_helmet.png 等，现网多数包此 4 文件在 item/ 下）。
+    //   empty_armor_slot_shield.png（副手槽）本工程无副手槽故不映射；仅 4 护甲部位。
+    const char *filename = nullptr;
+    switch (armorPiece) {
+    case 0: filename = "empty_armor_slot_helmet.png";     break;     // Helmet
+    case 1: filename = "empty_armor_slot_chestplate.png"; break;     // Chestplate
+    case 2: filename = "empty_armor_slot_leggings.png";   break;     // Leggings
+    case 3: filename = "empty_armor_slot_boots.png";      break;     // Boots
+    default: return {};
+    }
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active || s.itemDir.isEmpty())
+        return {};
+    const QString path = QDir(s.itemDir).absoluteFilePath(QString::fromLatin1(filename));
+    if (!QFile::exists(path))
+        return {};
     return QStringLiteral("file:///") + path;
 }
 

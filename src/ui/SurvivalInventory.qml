@@ -556,12 +556,29 @@ Item {
                             property var armEnch: { root.hotbar.armorRevision; return root.hotbar.armorEnchantsAt(index) } // t475 附魔
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent; wellColor: "#262b30" }
+                            // t497 空槽部位占位图：pack 启用且包内 item 目录有 empty_armor_slot_<piece>.png 时
+                            //   （机制等价 MC 1.0 survival 背包空装备槽占位图），用 pack PNG 覆盖自绘剪影（alpha-test
+                            //   透明底）；pack 关 / 无映射 → packImg.source 空 → Image 隐藏、Canvas 自绘（现状不变）。
+                            //   红线 §9：仅运行期读本地 gitignored pack 路径 PNG，不 bake 进 qrc/VCS。
+                            //   piece = index（0 头盔 / 1 胸甲 / 2 护腿 / 3 靴子，与 ArmorRegistry::ArmorPiece 同序）。
+                            ResourcePackManager { id: armorRp }
+                            Image {
+                                id: armorEmptyPackImg
+                                anchors.centerIn: parent
+                                width: 26; height: 26
+                                visible: armId === 0 && source.length > 0
+                                // 触碰 armId/armorRp.active 建立绑定依赖（槽位变 / pack 切换 → 重查源）。
+                                source: { armorRp.active; return armId === 0 ? armorRp.emptyArmorSlotSource(index) : "" }
+                                fillMode: Image.PreserveAspectFit
+                                smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；MC 1.0 占位图为像素艺术）
+                            }
                             // 空槽部位占位剪影（暗灰金属头盔/胸甲/护腿/靴像素图；§9a 原创，非 MC 资产）。
-                            //   仅 armId===0 时显（有装备时让位给 MaterialIcon 护甲图）。
+                            //   仅 armId===0 且 pack 无该空槽图标时显（有装备时让位给 MaterialIcon 护甲图；
+                            //   pack 有空槽图时让位给上方 armorEmptyPackImg）。
                             Canvas {
                                 anchors.centerIn: parent
                                 width: 26; height: 26
-                                visible: armId === 0
+                                visible: armId === 0 && !armorEmptyPackImg.visible
                                 onPaint: {
                                     const ctx = getContext("2d"); ctx.reset()
                                     ctx.imageSmoothingEnabled = false
