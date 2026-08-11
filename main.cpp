@@ -152,6 +152,22 @@ int main(int argc, char *argv[])
                 *renderStartNs = 0; // 守卫：防 beforeRendering 漏一帧导致 stale 算
             }
         }, Qt::DirectConnection);
+        // qmlSync：GUI 线程 beforeSynchronizing → afterSynchronizing = QML scene-graph 同步期（Node 树 commit
+        //   到渲染侧：transform/geometry/material/draw-list 重算）。mob delegate 节点爆炸 / 绑定扇出等成本藏在这里
+        //   —— F3 既有桶（sim/main_total/render_cpu）都不单独覆盖此段（main_total 含它但不拆）。1s 窗口 ÷ frames
+        //   报 ms/frame，与 sim 相加逼近 main_total 即证实瓶颈归因（残差 = 事件循环空闲 / 其它）。
+        //   beforeSynchronizing/afterSynchronizing 在 GUI 线程发射（默认 AutoConnection = 直接调用），无需 DirectConnection。
+        auto *syncStartNs = new qint64(0);
+        QObject::connect(win, &QQuickWindow::beforeSynchronizing, win, [syncStartNs]() {
+            *syncStartNs = FrameProfiler::nowNs();
+        });
+        QObject::connect(win, &QQuickWindow::afterSynchronizing, win, [syncStartNs]() {
+            if (*syncStartNs > 0) {
+                const double ms = double(FrameProfiler::nowNs() - *syncStartNs) / 1e6;
+                FrameProfiler::instance()->addSampleMs(QStringLiteral("qmlSync"), ms);
+                *syncStartNs = 0;
+            }
+        });
         auto *fpsTimer = new QTimer(win);
         fpsTimer->setInterval(1000);
         QObject::connect(fpsTimer, &QTimer::timeout, win, [win, frames]() {

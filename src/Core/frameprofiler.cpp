@@ -142,13 +142,15 @@ void FrameProfiler::flush()
     auto frameMs = [this, f](const char *key) { return double(bucketLocked(key)) / 1e6 / f; };
     const double mainMs = frameMs("main_total");
     const double renderMs = frameMs("render_cpu");
+    const double syncMs = frameMs("qmlSync"); // GUI 线程 QML scene-graph 同步期（Node 树 commit；mob delegate 节点扇出成本藏此）
     // 瓶颈标注：max 一侧标 *（视觉提示「这一侧是瓶颈」），近相等标 ≈。
     const QLatin1String mainTag = (mainMs >= renderMs && mainMs > 0.0) ? QLatin1String("*") : QLatin1String(" ");
     const QLatin1String renderTag = (renderMs > mainMs && renderMs > 0.0) ? QLatin1String("*") : QLatin1String(" ");
     QString frameLine = QStringLiteral("frame ms/f: ")
         + "main" + mainTag + QString::number(mainMs, 'f', 1)
         + "  render" + renderTag + QString::number(renderMs, 'f', 1)
-        + "  (frame ≈ max; render_cpu=CPU+GPU stall, not pure GPU time)";
+        + "  qmlSync " + QString::number(syncMs, 'f', 1)
+        + "  (frame ≈ max(main,render); main ≈ sim+qmlSync+循环; qmlSync=GUI scene-graph 同步)";
 
     // t500 perf mob 子分解（逐帧 ms/f，÷ frames）：mob 桶（PlayerController tickImpl 整段）拆成 mobLoop
     //   （EntityManager::tick）/ mobHostile（tickHostileLife）/ mobSpawn（tickSpawners）三函数，mobLoop 再拆
