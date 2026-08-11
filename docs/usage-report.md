@@ -622,3 +622,23 @@ FrameProfiler 实测：mesh 稳态 0.5-1.5ms/frame（风暴已灭）；sun 重�
 - **既有告警说明**：多个 agent 用 `-Wall -Wextra -fsyntax-only` 全文件复核时报告 blockregistry.cpp:777 'state' 未用 + world.cpp destroySphereSilent misleading-indentation + az1 未用为**既有非本任务代码**（历史遗留，非批 3 引入）；实际构建 gate（cmake --build）零 warning。留作后续清理项。
 - **验收**：✅ 编译零警告 + 启动不崩 + worldgen 确定性（同 seed 同结构计数，日志佐证）；**待用户 playing 实测**：① 地下挖到废弃矿井（巷道/立柱/铁轨/蛛网/暴露矿/宝藏箱首开填矿物）；② 沙漠见金字塔 + 踩压力板引爆 TNT；③ 丛林见苔石神殿 + 踩板被发射器射箭；④ 地下深处挖到石砖要塞（图书馆/传送门房/银鱼）+ 持末影之眼右键激活传送门（绿旋涡）。**需飞到新生成的 chunk**（结构只在新 chunk worldgen 时放，旧存档区无）。
 - **R18r 全批完结**：t471-t487 全部 ✅（附魔链 t471-t477 / 繁殖伙伴 t478-t483 / 结构 t484-t487），HEAD `187498b`。性能护栏（mob `15f4655` + 流体 `d26cef8`）+ 批 1（`ed840f9`-`279c347`）+ 批 2（`49f6387`-`907a990`）+ 批 3（`2e40396`-`187498b`）全绿。遗留：水+岩浆交互区 perf 待 playing 实测确认；既有 `-Wmisleading-indentation` 等告警清理。
+
+---
+
+## 性能 5 FPS 回归诊断 + 修复（R18r 批 2/3 后；不算 t 轮，perf 前缀）
+
+> 用户报"加入东西后 FPS 从 9 掉到 5，F3 输出看着正常"。诊断 workflow `wf_25b11141-292`（5 路并行 general-purpose，267,972 tok / 153 calls，中途断网 2 路 502 失败 → 主编排重跑 qml-render + frame-attribution 两路同步 agent）。全部 5 路高置信收敛。
+
+**真因（5 路交叉核对 + 主编排自己读代码确认）**：成本在 **QtQuick3D GUI 线程 scene-graph 同步期**（F3 无具名桶，藏身 `main_total − sim` 残差）。mob Repeater 每 delegate 槽**无条件实例化全部 ~16 种 mob 类型的模型子树**（~108 Model/槽 × 64 槽 ≈ **8000 场景图节点**，95% invisible-but-synced）+ mobBurnFlames 的 **448 个 loops:Infinite 动画每渲染帧推进**（QML 动画 visible:false 不暂停，revision 节流管不住）。批 2 加 5 新 mob → 每槽 +23 Model（+1472 节点 ~29%）→ sync O(节点) 涨 +88ms，正好对上 111ms(9FPS)→200ms(5FPS) 回归。
+**排除项**（4 路证实非真凶）：mob AI 已在 aiTick 门控内（扫描微秒级）；陷阱扫描只扫玩家脚下几格；worldgen 一次性（无 per-chunk 流式，结构全 hashColumn 稀疏采样）；实体上限 kCap=64 健全（无泄漏，稳态 ~36-64）；F3 文本 10Hz 节流已生效。
+
+**修复（3 commit + 1 探针）**：
+- `31bf3bd` perf(mob): mobBurnFlames Repeater `model: isBurningAt ? [7] : []`（非燃烧 0 delegate → 杀 448 空转动画 + 1344 节点）+ MobModel::setMobType 加 14（silverfish 原被钳成猪几何，正确性 bug）。
+- `1604730` perf(mob): **每槽 Loader 按 entMobType 只实例化匹配块**（16 个 mob 类型块各包 `Loader{active:原visible条件; sourceComponent:Component{原块verbatim}; onLoaded:item.parent=mobDelegate}`）。节点 8000→~500（仅活跃 mob 的块）。onLoaded 领养走 t16 教训（Loader 是 2D QQuickItem，加载的 3D Node 默认孤儿）。voxel-dev agent 实现 + 自测编译零警告 + smoke root objects=1；主编排复核 Pig/SnowGolem 两例 Loader 结构 + 16:16 onLoaded 对齐。
+- `d19be60` perf(prof): **qmlSync 帧桶**（main.cpp beforeSynchronizing→afterSynchronizing）+ F3 frameLine 显示。让 GUI scene-graph 同步成本**可见**——下次"还卡"时 F3 直接看 qmlSync 是否仍高（vs sim/render）。main ≈ sim + qmlSync + 事件循环残差。
+
+**遗留/待办**：
+- **待用户 playing 实测**：进世界按 F3 看 `qmlSync` 应从 ~150ms 大降、FPS 回升；mob 仍正常可见（Loader 领养生效）。若 mob 隐形 → onLoaded 领养在该 Qt 版本失效（退回直接子节点 + 其它削减）。
+- **既有告警清理**（非本轮）：blockregistry.cpp:777 isCollidable 'state' 未用；world.cpp destroySphereSilent misleading-indentation + az1 未用。
+- **AI 微优化**（跳过，微秒级非真凶）：aiStalker nearestOcelot 加 m_aliveOcelotCount 早退；aiIronGolem nearestHostile 加 attackCooldown 门控（同 aiSnowGolem）。
+- **架构审查**：voxel-tester-arch agent 后台审查 Loader 重构正确性（active 条件对齐 / onLoaded 覆盖 / tinted id 自包含 / 类型无关块未动），待回报。
