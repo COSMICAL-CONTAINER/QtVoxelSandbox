@@ -3366,18 +3366,20 @@ Window {
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
                     }
-                    // t377/t452 头盔（装备槽 0）：作 headNode 子节点 → 随头部俯仰。visible 绑装备槽 0 是否有护甲
+                    // t377/t452/t498 头盔（装备槽 0）：作 headNode 子节点 → 随头部俯仰。visible 绑装备槽 0 是否有护甲
                     //   （armorRevision 触碰）；材质色 = tier（armorMatColor）。
-                    //   t452 根因修复：t377 把护甲壳做得仅比身体部件大 0.02 → 第三人称近乎不可见（"仍不显示"）。
-                    //   放大到明显包裹头部（X/Z 各探出 0.05、头顶探出 0.04），并把盔体后移（+Z）让前面部 / 眼不被
-                    //   盔面遮挡（玩家面 -Z；前 z=-0.17 在眼 z=-0.25 之后 → 脸可见，盔覆盖头顶 / 后脑 / 两侧）。
+                    //   t498 真因（用户「穿装甲 F5 第三人称看不见」）：t452 把头盔 z scale 设 0.46（< 头 z scale 0.5）→
+                    //   头盔在 z 方向完全嵌在头内（前后面均被头遮挡），只剩 X 两侧 0.05 边缘 + z=0.06 后移的尾边可见，
+                    //   第三人称正常视距下肉眼读作「没戴头盔」。修：z scale 提到 0.56（> 头 0.5，前后各探 0.03 凸出），
+                    //   X/Y 各探 0.05（旧值），position z 保留 +0.06（头盔后移 → 前面 z=-0.22 在眼 z=-0.25 之后 → 脸/眼
+                    //   可见，盔覆盖头顶 / 后脑 / 两侧）。整体凸出量 0.03~0.05 在第三人称视距清晰可辨。
                     Model {
                         id: playerArmorHead
                         property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(0) }
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, 0.30, 0.06)
-                        scale: Qt.vector3d(0.60, 0.48, 0.46)
+                        scale: Qt.vector3d(0.60, 0.58, 0.56)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorHead.armId); opacity: playerModel.bodyOpacity }
                     }
                     // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
@@ -3421,15 +3423,16 @@ Window {
                     scale: Qt.vector3d(0.5, 0.7, 0.3)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
                 }
-                // t377/t452 胸甲（装备槽 1）：作 upperBody 子节点 → 随鞠躬前倾。t452 放大到明显包裹躯干
-                //   （同 center，各轴 ~16% 大：X 探 0.04 / Y 探 0.02 / Z 探 0.03），第三人称清晰可见的胸甲壳。
+                // t377/t452/t498 胸甲（装备槽 1）：作 upperBody 子节点 → 随鞠躬前倾。t498 增厚 z 凸出（0.36→0.44）：
+                //   躯干 z scale 0.30，旧 0.36 仅前探 0.03 第三人称难辨；0.44 前后各探 0.07 清晰可见的胸甲壳。
+                //   X/Y 同 t452（X 探 0.04 / Y 探 0.02）。
                 Model {
                     id: playerArmorChest
                     property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(1) }
                     visible: armId !== 0
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, 0.35, 0)
-                    scale: Qt.vector3d(0.58, 0.74, 0.36)
+                    scale: Qt.vector3d(0.58, 0.74, 0.44)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorChest.armId); opacity: playerModel.bodyOpacity }
                 }
                 // 左臂枢轴（t45 走 / t52 仅右手挖）：枢轴位于左肩（相对 upperBody：-0.375, 0.7, 0；世界 -0.375, 1.3, 0），
@@ -3742,7 +3745,7 @@ Window {
                     visible: armId !== 0
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.15, 0)
-                    scale: Qt.vector3d(0.30, 0.34, 0.30)
+                    scale: Qt.vector3d(0.34, 0.34, 0.34)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorLegL.armId); opacity: playerModel.bodyOpacity }
                 }
                 // 膝盖关节（t65）：位于大腿末端（髋下 0.3）。站立 0°（小腿续大腿成直线）；蹲下回折
@@ -3766,7 +3769,7 @@ Window {
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.15, 0)
-                        scale: Qt.vector3d(0.30, 0.34, 0.30)
+                        scale: Qt.vector3d(0.34, 0.34, 0.34)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorCalfL.armId); opacity: playerModel.bodyOpacity }
                     }
                     // t377/t452 左靴（装备槽 3）：作膝盖枢轴子节点 → 随小腿摆动。t452 放大并前移（-Z=玩家前方）
@@ -3777,7 +3780,7 @@ Window {
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.24, -0.03)
-                        scale: Qt.vector3d(0.30, 0.14, 0.34)
+                        scale: Qt.vector3d(0.34, 0.14, 0.38)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorBootL.armId); opacity: playerModel.bodyOpacity }
                     }
                 }
@@ -3804,7 +3807,7 @@ Window {
                     visible: armId !== 0
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.15, 0)
-                    scale: Qt.vector3d(0.30, 0.34, 0.30)
+                    scale: Qt.vector3d(0.34, 0.34, 0.34)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorLegR.armId); opacity: playerModel.bodyOpacity }
                 }
                 Node {
@@ -3824,7 +3827,7 @@ Window {
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.15, 0)
-                        scale: Qt.vector3d(0.30, 0.34, 0.30)
+                        scale: Qt.vector3d(0.34, 0.34, 0.34)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorCalfR.armId); opacity: playerModel.bodyOpacity }
                     }
                     // t377/t452 右靴（装备槽 3）：镜像左靴（t452 放大 + 前移成靴头；随小腿摆动）。
@@ -3834,7 +3837,7 @@ Window {
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.24, -0.03)
-                        scale: Qt.vector3d(0.30, 0.14, 0.34)
+                        scale: Qt.vector3d(0.34, 0.14, 0.38)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorBootR.armId); opacity: playerModel.bodyOpacity }
                     }
                 }
@@ -4766,25 +4769,39 @@ Window {
                                     scale: Qt.vector3d(0.80, 0.90, 0.80)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#f0f4f8") }
                                 }
-                                // 南瓜头（橙色）：local y center +1.30，scale 0.65。
+                                // 南瓜头（机制等价 MC 1.0 雪傀儡戴刻面南瓜；§9 区隔纯色原创非照搬 MC）。
+                                //   t499：放大到 ~0.72 宽（顶/底雪块各 0.80 宽 → 头略窄于身，自然头身比；旧 0.65 太小），
+                                //   z 略扁（0.62，南瓜前后扁圆非正方）。色 #e8821e（更亮的橙，旧 #e87a28 在昼夜 tint 下偏褐
+                                //   辨识弱）。local y center +1.21 → 头底 (y=1.21-0.31=0.90) 贴顶雪块顶（y=+0.90），无断脖缝隙。
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 1.30, 0)
-                                    scale: Qt.vector3d(0.65, 0.65, 0.65)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e87a28") }
+                                    position: Qt.vector3d(0, 1.21, 0)
+                                    scale: Qt.vector3d(0.72, 0.62, 0.62)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e8821e") }
                                 }
-                                // 南瓜头刻面双眼（深色小方块贴头前面 -Z，机制等价 MC 刻面南瓜 jack o'lantern 双眼）。
+                                // 南瓜头刻面双眼 + 嘴（机制等价 MC jack o'lantern 刻面：双眼 + 锯齿嘴）。
+                                //   t499 真因（用户「纯雪块无头无眼」）：旧眼 z=-0.30，南瓜 z scale 0.65 → 头前面 z=-0.325；
+                                //   眼在头前内 0.01 → 被不透明南瓜面整体遮挡（UnitCube NoLighting opaque）。修：眼/嘴 z=-0.34
+                                //   （凸出头前 0.03，非内嵌），刻面深色 (#1a0e04) 必现于头前。眼位 y=1.30（头中心上下，头
+                                //   span [0.90,1.52] → 中心 1.21，眼略上偏 1.30 留嘴位下方）；嘴位 y=1.12（眼下，咧嘴笑）。
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.12, 1.35, -0.30)
-                                    scale: Qt.vector3d(0.08, 0.10, 0.03)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                                    position: Qt.vector3d(-0.15, 1.30, -0.34)
+                                    scale: Qt.vector3d(0.10, 0.13, 0.03)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.12, 1.35, -0.30)
-                                    scale: Qt.vector3d(0.08, 0.10, 0.03)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                                    position: Qt.vector3d(0.15, 1.30, -0.34)
+                                    scale: Qt.vector3d(0.10, 0.13, 0.03)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
+                                }
+                                // 刻面嘴（横向长条，呈咧嘴笑剪影；机制等价 MC 南瓜嘴刻面）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 1.12, -0.34)
+                                    scale: Qt.vector3d(0.28, 0.06, 0.03)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                             }
                         }
@@ -4847,20 +4864,21 @@ Window {
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 0.95, 0)
                                     scale: Qt.vector3d(0.72, 0.66, 0.72)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e87a28") }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e8821e") }
                                 }
-                                // 南瓜头刻面双眼（深色小方块贴头前面 -Z）。
+                                // 南瓜头刻面双眼（深色小方块贴头前面 -Z）。t499 同 SnowGolem 修：眼 z=-0.38（凸出头前 0.02，
+                                //   头 z scale 0.72 → 头前面 z=-0.36；旧 z=-0.34 在头内 0.02 → 被遮挡不可见）。
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.14, 1.00, -0.34)
+                                    position: Qt.vector3d(-0.14, 1.00, -0.38)
                                     scale: Qt.vector3d(0.09, 0.11, 0.03)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.14, 1.00, -0.34)
+                                    position: Qt.vector3d(0.14, 1.00, -0.38)
                                     scale: Qt.vector3d(0.09, 0.11, 0.03)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                             }
                         }
