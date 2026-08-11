@@ -349,6 +349,15 @@ public:
     //   静默 dropCactusColumn 不经 World::setBlock → 不重入本检查。供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。
     void checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t504 setBlock 编辑后枯死灌木失撑复检（机制等价 MC 1.0 枯灌木失去下方支撑即掉自身；同甘蔗 / 仙人掌支撑校验族）。
+    //   （x,y,z,oldId,id）= 本格刚发生的编辑。本格被破为 Air（破下方支撑方块）→ 若正上方是 DeadBush → 该枯灌木失撑
+    //   → 静默清 Air（m_chunks.setBlock 直写 + 标脏，不经 World::setBlock → 不递归触发）+ emit blockBroken（破块粒子 / 音）
+    //   + emit blockDroppedAsItem（呈掉落物实体，Main.qml 转 spawnItem）+ recomputeLightAround（遮光消失重 flood）+
+    //   1 次 worldChanged + clearAllDirty。DeadBush 恒单格（无柱状生长，与 Cactus 不同），仅清正上方 1 格。dropId=0 故
+    //   玩家直破枯灌木无产物（机制等价 MC 空手破 dead bush 无产物 / 剪刀才掉，本工程无剪刀）；仅失撑（破下方支撑）才掉。
+    //   供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
+    void checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 

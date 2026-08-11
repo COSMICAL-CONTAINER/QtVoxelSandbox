@@ -206,6 +206,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
         m_lavaFlowTickCounter = kLavaFlowTickInterval - 1;
     pokeFluidDirty(x, y, z); // t380：块编辑可能扰动邻接流体平衡 → 标流体脏（驱动 tickWaterFlow/tickLavaFlow 早退后重扫）
     checkCactusOnEdit(x, y, z, oldId, id); // t445：仙人掌失撑（②）/ 邻接方块（④）整柱坍落复检
+    checkDeadBushOnEdit(x, y, z, oldId, id); // t504：枯死灌木失撑（破下方支撑 → 正上方枯灌木掉落）复检
     return true;
 }
 
@@ -290,6 +291,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
         m_lavaFlowTickCounter = kLavaFlowTickInterval - 1;
     pokeFluidDirty(x, y, z); // t380：块编辑可能扰动邻接流体平衡 → 标流体脏
     checkCactusOnEdit(x, y, z, oldId, id); // t445：仙人掌失撑（②）/ 邻接方块（④）整柱坍落复检
+    checkDeadBushOnEdit(x, y, z, oldId, id); // t504：枯死灌木失撑（破下方支撑 → 正上方枯灌木掉落）复检
     return true;
 }
 
@@ -979,6 +981,7 @@ void World::tickLavaFlow()
             m_pendingLightEdits.push_back({b.x, b.y, b.z, true});      // 木→air 天光通（遮光块消失，sky），延迟联合 reflood
             emit blockBroken(b.x, b.y, b.z, int(oldId));               // 焚毁破块粒子 / 音（机制等价 MC 燃烧破块反馈）
             checkCactusOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // ② 失撑复检（正上方 Cactus 整柱坍落，同 setBlock 路径）
+            checkDeadBushOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t504：枯灌木失撑复检（正上方枯灌木掉落，同 setBlock 路径）
             pokeFluidDirty(b.x, b.y, b.z); // 焚毁邻接流体 → 标脏 + 活动盒扩展（级联焚毁 / 水流入新坑，同旧 setBlock 语义）
         }
         m_batchFluid = false;
@@ -1482,6 +1485,29 @@ void World::checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
                 dropCactusColumn(nx, y, nz);
         }
     }
+}
+
+// t504 setBlock 编辑后枯死灌木失撑复检（见 world.h 头注释）。机制等价 MC 1.0 枯灌木失去下方支撑即掉自身（同甘蔗 /
+//   仙人掌支撑校验族）。DeadBush 恒单格（无柱状生长），故仅清正上方 1 格（与 Cactus dropCactusColumn 逐柱不同）。
+//   玩家直破枯灌木（oldId==DeadBush → id==Air）走 finishMiningAt，dropId=0 → 无产物；失撑（破下方支撑方块，oldId 非
+//   DeadBush → 正上方 DeadBush 掉落）才发掉落物，避免双重掉落。静默直写不经 World::setBlock → 不递归触发本检查。
+void World::checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    // 仅本格被破为 Air 且被破块非 DeadBush 时，查正上方是否 DeadBush 失撑。（被破块本身是 DeadBush 时跳过 ——
+    //   玩家直破枯灌木的掉落由 dropId=0 决定无产物，避免双重掉落。）
+    if (id != BlockRegistry::Air || oldId == BlockRegistry::DeadBush) return;
+    const int by = y + 1;
+    if (by < 0 || by >= m_height) return;
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    if (m_chunks.blockAt(x, by, z) != BlockRegistry::DeadBush) return;
+    // 枯灌木失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落物 + 重 flood 光。
+    m_chunks.setBlock(x, by, z, BlockRegistry::Air);
+    noteGrowthWrite(x, by, z, BlockRegistry::DeadBush, BlockRegistry::Air); // 枯灌木非生长方块 → no-op，保持一致
+    emit blockBroken(x, by, z, int(BlockRegistry::DeadBush));                 // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
+    emit blockDroppedAsItem(x, by, z, int(BlockRegistry::DeadBush));         // 呈掉落物实体（Main.qml spawnItem）
+    recomputeLightAround(x, by, z, BlockRegistry::DeadBush, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
+    emit worldChanged();        // 驱动 mesh 重建（cross 段消失）
+    m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
 }
 
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。

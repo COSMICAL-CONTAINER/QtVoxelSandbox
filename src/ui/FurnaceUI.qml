@@ -82,6 +82,10 @@ Item {
     // （0..kSmeltSecs；满则产 1 件、归零或留余）。ticked 驱动推进（见 tick()）。
     property real burnRemain: 0.0
     property real smeltProgress: 0.0
+    // t502 当前燃料件的总燃烧秒数（点燃时随 burnRemain 一起置；逐 tick burnRemain 递减、burnTotal 不变 →
+    //   burnRemain/burnTotal = 当前燃料件的剩余燃烧比例，驱动火焰 / 燃料进度条按比例收缩（机制等价 MC 1.0
+    //   熔炉火焰指示器随当前燃料件消耗而缩短）。未燃烧时 0；火焰 / 进度条据比例 0..1 绘制。
+    property real burnTotal: 0.0
     // t494 熔炉「燃烧中」态镜像（state bit2 FurnaceStateLitFlag）：tick 末据 burnRemain>0 算本值，与
     //   furnaceLit 比对，跨 0 边界（点燃 / 熄火）时调 player.setFurnaceLit 翻转熔炉格 state 的燃烧 bit →
     //   mesher 切 front(灭)/front_on(带火) 贴图。初值 false（无熔炉格坐标前不写）；player 未注入 / 坐标
@@ -255,12 +259,14 @@ Item {
 
         // 点燃：未燃烧 + 可冶炼 + 燃料槽有可燃物 → consume 1 燃料、置 burnRemain。
         // MC 行为：仅在「有活干」时才点火（避免空烧燃料）。
+        // t502：同时记 burnTotal（当前燃料件总燃烧秒数），驱动火焰 / 燃料进度条按 burnRemain/burnTotal 比例收缩。
         if (root.burnRemain <= 0 && root.fuelId !== 0 && root.fuelCount > 0 && canSmelt()) {
             const burn = root.hotbar.fuelBurnSeconds(root.fuelId)
             if (burn > 0) {
                 root.fuelCount = root.fuelCount - 1
                 if (root.fuelCount <= 0) { root.fuelId = 0; root.fuelCount = 0 }
                 root.burnRemain = burn
+                root.burnTotal = burn
                 changed = true
             }
         }
@@ -377,8 +383,10 @@ Item {
                 }
             }
 
-            // 熔炉行：左输入槽 + 火焰（下接燃料槽） + 中箭头 + 右输出槽。整体水平居中（同 CraftingTableUI
-            // craftRow 的 rowOffsetX 算法：行宽 = 2*slotSize + 28 + slotSize = 148，在 360 行宽内居中）。
+            // 熔炉行：左上输入槽 + 左下燃料槽（其底沿燃料进度条） + 中箭头（原材料→成品居间）+ 右成品槽（垂直居中）。
+            //   t502 布局对齐 MC 1.0：成品槽右侧且垂直居中（两左槽中线）、箭头水平居间于原材料与成品之间、火焰 +
+            //   底沿进度条显燃料剩余比例（机制等价 MC 熔炉火焰 / 燃料指示）。整体水平居中（行宽 = 2*slotSize + 28 +
+            //   slotSize = 148，在 360 行宽内居中，rowOffsetX 算法同 CraftingTableUI craftRow）。
             Item {
                 id: furnaceRow
                 width: parent.width
@@ -456,6 +464,8 @@ Item {
                 }
 
                 // 燃料槽（输入槽下方）。MC 布局：燃料在输入下方、火焰夹其间。
+                // t502 燃料进度条：火焰（输入/燃料间）按 burnRemain/burnTotal 整体收缩（见 flameCanvas），
+                //   本槽下方另显一条水平燃料进度条（满=当前燃料件刚点燃、空=近烧尽），机制等价 MC 1.0 熔炉燃料指示。
                 Item {
                     x: furnaceRow.rowOffsetX; y: root.slotSize + 4
                     width: root.slotSize; height: root.slotSize - 4
@@ -522,10 +532,26 @@ Item {
                         }
                         z: 10
                     }
+                    // t502 燃料进度条（燃料槽底沿）：burnRemain>0 时显，按 burnRemain/burnTotal 比例从满宽收缩到 0。
+                    //   机制等价 MC 1.0 熔炉燃料指示（满=当前燃料件刚点燃 / 空=近烧尽）；与上方收缩火焰同源数据，
+                    //   双重呈现（火焰动画 + 比例条）让「燃料进度可见」验收无歧义。z:5 在槽图标之上、拖拽高亮之下。
+                    Rectangle {
+                        anchors.left: parent.left; anchors.bottom: parent.bottom
+                        anchors.leftMargin: 2; anchors.bottomMargin: 2
+                        height: 3
+                        // 比例 0..1 → 宽度 0..(槽宽-4)；burnTotal=0（防御）→ 0 宽（不可见，与未燃烧一致）。
+                        width: root.burnRemain > 0 && root.burnTotal > 0
+                               ? Math.max(0, (parent.width - 4) * Math.max(0, Math.min(1, root.burnRemain / root.burnTotal)))
+                               : 0
+                        color: "#e85a18"
+                        visible: root.burnRemain > 0
+                        z: 5
+                    }
                 }
-
                 // 火焰图标（输入 / 燃料之间）：burnRemain>0 时显并闪烁（flameFlicker 驱动 Canvas 重绘）。
                 // 自绘原创像素火焰（§9a）。flameFlicker 由 NumberAnimation（燃烧时跑）驱动。
+                // t502：火焰高度随当前燃料件剩余比例（burnRemain/burnTotal）整体收缩 —— 满燃料时火焰最高、近烧尽时
+                //   矮到一线，机制等价 MC 1.0 熔炉火焰指示器随当前燃料件消耗而缩短（视觉即「燃料进度」）。
                 Canvas {
                     id: flameCanvas
                     x: furnaceRow.rowOffsetX + 4; y: root.slotSize - 6
@@ -534,8 +560,11 @@ Item {
                     onPaint: {
                         const ctx = getContext("2d"); ctx.reset()
                         ctx.imageSmoothingEnabled = false
-                        // 火焰高度随 flicker 0..1 在 8..14 间跳；底宽随 flicker 微变。
-                        const fh = 8 + root.flameFlicker * 6
+                        // 燃料剩余比例（burnRemain/burnTotal）：驱动火焰整体高度收缩（满=1 → 高 14；近尽=0 → 高 ~3）。
+                        //   burnTotal=0（初值 / 防御）→ ratio=1（满焰，与新点燃瞬时一致）。
+                        const ratio = root.burnTotal > 0 ? Math.max(0, Math.min(1, root.burnRemain / root.burnTotal)) : 1
+                        // 火焰高度随 flicker 0..1 在 6..10 间跳（闪烁），再乘 ratio 整体收缩（满燃料满跳、近烧尽缩到一线）。
+                        const fh = Math.max(3, (6 + root.flameFlicker * 4) * (0.4 + 0.6 * ratio))
                         const fw = 8 + root.flameFlicker * 3
                         const cx = width / 2
                         // 外焰（橙红）：底部宽矩形 + 顶部三角。
@@ -551,14 +580,19 @@ Item {
                         ctx.fillRect(cx - fw / 4, height - fh + 3, fw / 2, fh - 4)
                     }
                     Connections { target: root; function onFlameFlickerChanged() { flameCanvas.requestPaint() } }
+                    Connections { target: root; function onBurnRemainChanged() { flameCanvas.requestPaint() } }
                     Component.onCompleted: flameCanvas.requestPaint()
                 }
 
-                // 冶炼进度箭头（火焰右侧 → 输出槽）：按 smeltProgress / kSmeltSecs 填充。
+                // 冶炼进度箭头（原材料 → 成品槽之间）：按 smeltProgress / kSmeltSecs 填充。
                 // 自绘像素箭头（§9a）：底色暗灰 + 进度亮绿覆盖（clip 按比例）。
+                // t502 布局对齐 MC：箭头水平居间于原材料槽（右沿 = rowOffsetX+slotSize）与成品槽（左沿 = rowOffsetX+
+                //   2*slotSize+28）的正中、垂直对齐成品槽中心（成品槽已下移到两左槽垂直中线，故箭头 y 与之同高）。
+                //   原版箭头贴原材料右沿（x=slotSize+2）→ 用户报「贴原材料」；现居中到两槽间隙正中。
                 Canvas {
                     id: smeltArrow
-                    x: furnaceRow.rowOffsetX + root.slotSize + 2; y: root.slotSize / 2 - 10
+                    x: furnaceRow.rowOffsetX + root.slotSize + (root.slotSize + 28 - 24) / 2
+                    y: (furnaceRow.height - 20) / 2
                     width: 24; height: 20
                     onPaint: {
                         const ctx = getContext("2d"); ctx.reset()
@@ -589,8 +623,11 @@ Item {
                 }
 
                 // 输出槽（最右）：冶炼产物堆叠。可左键拾取 / 右键半份（同其它槽；MC 输出槽可取可换）。
+                // t502 布局对齐 MC：成品槽右侧、垂直居中于两左槽（原材料 + 燃料）的整体行高（两左槽中线 = 行高/2）。
+                //   原版成品槽 y=0（与原材料顶对齐）→ 用户报「对齐原材料」；现居中到行高正中（y=(height-slotSize)/2）。
                 Item {
-                    x: furnaceRow.rowOffsetX + 2 * root.slotSize + 28; y: 0
+                    x: furnaceRow.rowOffsetX + 2 * root.slotSize + 28
+                    y: (furnaceRow.height - root.slotSize) / 2
                     width: root.slotSize; height: root.slotSize
                     InvSlot { anchors.fill: parent; wellColor: "#262b30" }
                     Item {
