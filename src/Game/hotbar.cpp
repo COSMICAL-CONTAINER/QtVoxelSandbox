@@ -23,8 +23,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Planks:        return "icon_planks.png";
     case BlockRegistry::Leaves:        return "icon_leaves.png";
     case BlockRegistry::Sand:          return "icon_sand.png";
-    case BlockRegistry::CraftingTable: return "icon_crafting_table.png"; // t50 工作台立方体图标
-    case BlockRegistry::Furnace:       return "icon_furnace.png";        // t80 熔炉立方体图标
+    case BlockRegistry::CraftingTable: return "icon_crafting_table.png"; // t50/t492 工作台立方体图标（正面为主投影，显正面网格）
+    case BlockRegistry::Furnace:       return "icon_furnace.png";        // t80/t492 熔炉立方体图标（正面为主投影，显炉口）
     case BlockRegistry::CoalOre:       return "icon_coal_ore.png";       // t84 煤矿石立方体图标
     case BlockRegistry::IronOre:       return "icon_iron_ore.png";       // t84 铁矿石立方体图标
     case BlockRegistry::DiamondOre:    return "icon_diamond_ore.png";    // t279 钻矿石立方体图标（石头底+青白菱斑晶体）
@@ -55,7 +55,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CutSandstone:  return "icon_cut_sandstone.png"; // t485 切制砂岩立方体图标（各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
     case BlockRegistry::TntBlock:      return "icon_tnt.png";           // t485 TNT 立方体图标（各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
     case BlockRegistry::MossyCobble:   return "icon_mossy_cobble.png";  // t486 苔石立方体图标（各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
-    case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486 发射器立方体图标（顶=排出口俯视 / 侧=石质边框 / 前=暗腔排出口；丛林神殿陷阱机关）
+    case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486/t492 发射器立方体图标（正面为主投影，显排出口面板；丛林神殿陷阱机关）
     // t487 要塞结构方块图标：石砖（立方体 3D）/ 石砖台阶（3D 半高盒）/ 石砖楼梯（3D L 阶）。同圆石变体图标流程，
     //   仅 fill 换 default_stone_brick（砖纹）。tools/build_cube_icons.py 程序生成；与圆石变体形状一致但砖纹不同。
     case BlockRegistry::StoneBrick:       return "icon_stone_brick.png";       // 石砖：3D 立方体（顶+两侧砖纹）

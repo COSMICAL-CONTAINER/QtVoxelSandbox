@@ -36,8 +36,10 @@ BLOCKS = [
     ("planks",          "default_wood",      "default_wood"),
     ("leaves",          "default_leaves",    "default_leaves"),
     ("sand",            "default_sand",      "default_sand"),
-    ("crafting_table",  "default_crafting_table_top", "default_crafting_table_side"),  # t50
-    ("furnace",         "default_furnace_top", "default_furnace_side"),  # t80（图标显顶+侧，不显炉口前面）
+    # t492 工作台 / 熔炉 / 发射器移到 BLOCKS_FRONT（正面为主的 dimetric 投影，显炉口 / 网格 / 排出口面板）。
+    #   旧版用 (顶+两侧) 2:1 dimetric 投影，但「正面有辨识特征」的方块（熔炉炉口 / 工作台网格 / 发射器排出口）
+    #   其正面（+Z）被立体投影遮挡 → 图标只显顶 + 无特征侧面 → 肉眼读不出「这是熔炉 / 工作台」（用户「像 2D / 像普通石块」）。
+    #   t492 改 render_front：正面（+Z）为主面贴 front 贴图 + 顶细带（+Y）+ 右细带（+X）→ 一眼看到炉口 / 网格。
     ("coal_ore",        "default_coal_ore", "default_coal_ore"),  # t84 煤矿石（各面同贴图）
     ("iron_ore",        "default_iron_ore", "default_iron_ore"),  # t84 铁矿石（各面同贴图）
     ("diamond_ore",     "default_diamond_ore", "default_diamond_ore"),  # t279 钻矿石（各面同贴图）
@@ -112,12 +114,24 @@ BLOCKS = [
     ("cut_sandstone",   "default_cut_sandstone", "default_cut_sandstone"), # t485 切制砂岩（各面同贴图=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
     # t486 丛林神殿结构方块立方体图标（build_mossy_cobble.py / build_dispenser.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
     ("mossy_cobble",    "default_mossy_cobble",  "default_mossy_cobble"),  # t486 苔石（各面同贴图=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
-    ("dispenser",       "default_dispenser_top", "default_dispenser_side"), # t486 发射器（顶=排出口俯视环纹 / 侧=石质边框+铆钉；丛林神殿陷阱机关）
+    # dispenser 移到 BLOCKS_FRONT（t492：正面排出口面板是其辨识特征，显正面才可辨）。
     # t487 要塞结构方块立方体图标（build_stone_brick.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
     #   石砖台阶/楼梯复用石砖贴图（同橡木木制品一族共享一贴图模式），立方体图标显满砖便于创造调色板取用区分。
     ("stone_brick",     "default_stone_brick", "default_stone_brick"),  # t487 石砖（各面同贴图=石质灰底+砖块缝纹网格；要塞墙体主体）
     ("stone_brick_slab",   "default_stone_brick", "default_stone_brick"),  # t487 石砖台阶（共享石砖贴图；创造调色板取用）
     ("stone_brick_stairs", "default_stone_brick", "default_stone_brick"),  # t487 石砖楼梯（共享石砖贴图；创造调色板取用）
+]
+
+# t492 「正面有辨识特征」的方块（正面贴图, 顶面贴图, 侧面贴图）—— 走 render_front（正面为主的 dimetric 投影），
+#   让炉口 / 网格 / 排出口面板显在正面（用户一眼可辨），与其它方块的 (顶+两侧) 投影同属 dimetric 立体家族（顶 / 右深带
+#   保 3D 体积感），但正面成主面 → 辨识特征不被立体投影遮挡。
+#   - furnace：正面=default_furnace_front（带炉口），燃烧态 front_on 见 t494（本任务只关静态 icon front）。
+#   - crafting_table：正面=default_crafting_table_side（含网格；工作台无独立 front 贴图，side 即带网格辨识面）。
+#   - dispenser：正面=default_dispenser_front（暗腔排出口），顶 / 侧同 default_dispenser_top / _side。
+BLOCKS_FRONT = [
+    ("furnace",         "default_furnace_front",         "default_furnace_top",         "default_furnace_side"),         # t80/t492 熔炉（正面=炉口）
+    ("crafting_table",  "default_crafting_table_side",   "default_crafting_table_top",  "default_crafting_table_side"),  # t50/t492 工作台（正面=网格 side）
+    ("dispenser",       "default_dispenser_front",       "default_dispenser_top",       "default_dispenser_side"),       # t486/t492 发射器（正面=排出口面板）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----
@@ -193,6 +207,64 @@ def render(top_name, side_name):
         col = sample(face, np.clip(u, 0, 1), np.clip(v, 0, 1)).copy()
         col[..., 0:3] *= shade  # 明暗（alpha 不变）
         canvas[m] = col[m]
+    img = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGBA")
+    return img.resize((OUT, OUT), Image.LANCZOS)
+
+
+# t492 「正面为主」dimetric 投影几何（工作画布坐标，y 向下）。与 render() 的顶菱形投影正交：render() 视角
+#   俯视立方体（顶菱形 + 左右两侧可见、正面 +Z 背向），适合「各面同贴图 / 顶面是辨识特征」的方块；
+#   render_front() 视角近似正视立方体略偏右上（正面 +Z 成主面 + 顶细带 +Y + 右细带 +X），适合「正面有辨识特征」
+#   的方块（熔炉炉口 / 工作台网格 / 发射器排出口），让辨识特征贴在正面不被遮挡。
+#   深度剪切：世界 -Z（向远）映射为屏幕 (ddx, +ddy 向上)，背面在屏幕右上方 → 右细带（+X 面）与顶细带（+Y 面）
+#   暴露在正面右 / 上 → 形成「正面是主面 + 右上 L 形深度带」的 3D 立方体观感（仍是 dimetric 家族，保体积感）。
+F_DDX = 0.14 * W   # 深度水平剪切（背面相对正面向右偏）
+F_DDY = -0.14 * W  # 深度竖直剪切（背面相对正面向上偏；y 向下故负值=上）
+# 正面四角占画布 [f_lo, f_hi]²；留 0.10 边距 + 0.14 深度带 → 整体立方体居中（背面右偏上偏后仍在画布内）。
+F_LO = 0.10 * W
+F_HI = 0.72 * W
+
+
+def render_front(front_name, top_name, side_name):
+    """正面为主的 dimetric 立方体图标：正面（+Z，主面，贴 front 贴图）+ 顶细带（+Y，贴 top）+ 右细带（+X，贴 side）。
+
+    根因（t492）：render()（顶菱形 + 两侧）的视角下，方块正面（+Z）背向观察者、立体投影遮挡 → 「正面有辨识
+    特征」的方块（熔炉炉口 / 工作台网格 / 发射器排出口）的辨识面在图标里完全不可见 → 用户只看到顶 + 无特征
+    侧面，读作「普通石块 / 像木板」，且因无正面纵深提示 → 显得「2D / 平」。改正面为主投影后，辨识特征贴在
+    主面正面一眼可辨，顶 / 右深度细带保 3D 立体感（与 render() 立方体图标同为 dimetric 家族，槽位观感不割裂）。
+
+    明暗：右 0.70 / 顶 0.85 / 正面 1.00（正面成主面 → 最亮；顶 / 右深度带渐暗保体积感）。与 render()（顶 1.0 /
+    右 0.80 / 左 0.62）同为「最亮主面 + 渐暗深度面」的 dimetric 明暗家族，但主面从「顶」改为「正面」以适配正面为主
+    投影；保整体调性一致（槽位里与其它立方体图标同属立体明暗家族，观感不割裂）。渲染序：右 → 顶 → 正面（正面最后画、
+    最前，盖住顶 / 右与正面共边，无透明缝；同 render()「顶最后画」的共边归属逻辑）。
+    """
+    front = load_face(front_name)
+    top = load_face(top_name)
+    side = load_face(side_name)
+    canvas = np.zeros((W, W, 4), dtype=np.float64)
+    # 正面四角（屏幕坐标，y 向下）：FBL 底左 / FBR 底右 / FTR 顶右 / FTL 顶左。
+    FBL = np.array([F_LO, F_HI])
+    FBR = np.array([F_HI, F_HI])
+    FTR = np.array([F_HI, F_LO])
+    FTL = np.array([F_LO, F_LO])
+    depth = np.array([F_DDX, F_DDY])
+    # 背面四角 = 正面 + 深度剪切。
+    BBR = FBR + depth
+    BTR = FTR + depth
+    BTL = FTL + depth
+
+    def paint(o, uax, vax, face, shade):
+        u, v = face_uv(o, uax, vax)
+        m = (u >= 0) & (u <= 1) & (v >= 0) & (v <= 1)
+        col = sample(face, np.clip(u, 0, 1), np.clip(v, 0, 1)).copy()
+        col[..., 0:3] *= shade
+        canvas[m] = col[m]
+
+    # 右面（+X）：屏幕四角 FBR→BBR→BTR→FTR。o=FBR，u 沿深度（FBR→BBR，front→back），v 沿垂直（FBR→FTR，底→顶）。
+    paint(FBR, BBR - FBR, FTR - FBR, side, 0.70)
+    # 顶面（+Y）：屏幕四角 FTL→FTR→BTR→BTL。o=FTL，u 沿水平（FTL→FTR，左→右），v 沿深度（FTL→BTL，front→back）。
+    paint(FTL, FTR - FTL, BTL - FTL, top, 0.85)
+    # 正面（+Z，主面）：屏幕四角 FBL→FBR→FTR→FTL。o=FBL，u 沿水平（FBL→FBR），v 沿垂直（FBL→FTL）。
+    paint(FBL, FBR - FBL, FTL - FBL, front, 1.00)
     img = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGBA")
     return img.resize((OUT, OUT), Image.LANCZOS)
 
@@ -506,6 +578,13 @@ def main():
             img = render_flat_2d(top_name)
         else:
             img = render(top_name, side_name)
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t492 「正面有辨识特征」方块（熔炉 / 工作台 / 发射器）正面为主 dimetric 立体图标（render_front）：
+    #   正面（+Z）贴 front 贴图成主面，显炉口 / 网格 / 排出口面板；顶 + 右深度细带保 3D 体积感。
+    for out_name, front_name, top_name, side_name in BLOCKS_FRONT:
+        img = render_front(front_name, top_name, side_name)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)
