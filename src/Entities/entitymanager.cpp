@@ -73,7 +73,10 @@ bool mobFootprintHasSupport(World *world, float cx, float cz, int supportY, floa
 }
 } // namespace
 
-EntityManager::EntityManager(QObject *parent) : QObject(parent) {}
+EntityManager::EntityManager(QObject *parent) : QObject(parent)
+{
+    m_clock.start(); // 任务（弓箭 60s despawn）：墙钟计时器（arrowSpawnMs / tick 硬上限用）
+}
 
 // 生成默认测试生物：委托 spawnMobTyped（mobType=0、#ff5555、满血）。t239 调试入口（M 键）。
 void EntityManager::spawnMob(int x, int y, int z)
@@ -247,6 +250,7 @@ int EntityManager::spawnArrow(const QVector3D &origin, const QVector3D &vel)
     e.vy = vel.y();
     e.vz = vel.z();
     e.arrowLife = kArrowLifetime;
+    e.arrowSpawnMs = m_clock.elapsed(); // 任务（60s despawn）：spawn 墙钟（tick 硬上限用）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -271,6 +275,7 @@ void EntityManager::spawnArrowPlayer(const QVector3D &origin, const QVector3D &v
     e.vy = vel.y();
     e.vz = vel.z();
     e.arrowLife = kArrowLifetime;
+    e.arrowSpawnMs = m_clock.elapsed(); // 任务（60s despawn）：spawn 墙钟（tick 硬上限用）
     e.arrowFromPlayer = true;                  // 命中 mob（非玩家）
     e.arrowDamage = damage > 0 ? damage : 1;   // 蓄力伤害（防御 ≥1）
     acquireSlot(std::move(e));
@@ -2655,6 +2660,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
 
         // --- Arrow（t283 骷髅弓箭手箭矢）：抛物 + 方块命中 / 玩家命中 / 寿命 / 越界 → 移除（不走 Mob AI / resting）---
         if (e.kind == Arrow) {
+            // 任务（弓箭 60s 必 despawn）：**硬墙钟上限** —— 任何箭（玩家 / 骷髅 / 飞行 / 嵌入）自 spawn 起
+            //   60s 必 despawn（机制等价 MC 1.0 箭 60s 消失）。这是 arrowLife dt-累加 despawn（飞行 5s / 嵌入 60s）
+            //   的真值源 + 安全网：dt 累加在低帧率 / dt=0 / t500 节流帧时会滞后或漂移，墙钟不依赖 dt → 必然移除，
+            //   杜绝用户报告「骷髅弓手射出的箭插墙 / 落地不消失」。放在 stuck 分支之前，对飞行 + 嵌入态统一生效。
+            if (m_clock.elapsed() - e.arrowSpawnMs >= kArrowDespawnMs) {
+                toRemove.push_back(idx);
+                dirty = true;
+                continue;
+            }
             // t323 嵌入态（命中方块后冻结物理）：仅 despawn 倒计时；玩家箭的近距拾取由
             //   PlayerController::arrowPickupScan 处理（嵌入箭仍渲染：kind=Arrow + pos 钉面 + vel 定向不变）。
             if (e.arrowStuck) {

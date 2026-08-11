@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QVector3D>
+#include <QElapsedTimer>
 #include <QtQml/qqml.h>
 
 #include <vector>
@@ -580,6 +581,12 @@ private:
         //   arrowLife = 寿命倒计时（秒；tick Arrow 分支递减，<=0 或命中 / 越界 → releaseSlot 移除）。
         //   非 Arrow 实体 arrowLife=0 不读。
         float arrowLife = 0.0f;  // 箭寿命倒计时（秒；仅 kind==Arrow 用）
+        // 任务（弓箭 60s 必 despawn）：箭 spawn 时刻墙钟（m_clock.elapsed()）。tick Arrow 分支用它做硬上限 ——
+        //   任何箭（玩家 / 骷髅 / 飞行 / 嵌入）自 spawn 起 60s 必 despawn（机制等价 MC 箭 60s 消失）。这是对
+        //   arrowLife dt-累加 despawn 的安全网 + 真值源（dt 累加在低帧率 / dt=0 / 节流帧漂移时可能滞后，墙钟
+        //   不依赖 dt → 必然 60s 移除，杜绝用户报告「骷髅箭插墙 / 落地不消失」）。spawn 时写入；非 Arrow 默认 0。
+        //   放 arrowLife 之后（聚合初始化未显式列它 → 默认 0；DMI 兜底，同 alive 放末尾的 lessons t256 模式）。
+        qint64 arrowSpawnMs = 0; // 箭 spawn 墙钟 ms（仅 kind==Arrow 用；tick 算 age 做硬 60s despawn）
         // t304 玩家射出的箭（spawnArrowPlayer）专用：arrowFromPlayer=true 的箭命中 **mob**（damageEntity +
         //   mobAttacked 语义事件）；false（骷髅 spawnArrow 射出）命中 **玩家**（mobAttackedPlayer，t283 旧路径）。
         //   机制等价 MC 1.0「玩家箭打怪、怪箭打玩家」（敌我判别由发射者决定，非箭本身阵营）。非 Arrow 默认 false。
@@ -778,6 +785,10 @@ private:
     //   每 kAiTickInterval 帧一轮、每帧约 1/N 的 mob 跑重活 → 单帧负载均摊（无 GC spike）。
     //   机制等价 MC 1.0 mob AI 节流（mob 每 4-5 tick 才 think 一次而非每 tick），只是分布到不同 mob。
     quint32 m_tickPhase = 0;
+    // 任务（弓箭 60s 必 despawn）：墙钟计时器（构造时 start()）。箭 spawn 记 m_clock.elapsed() 到 Entity
+    //   .arrowSpawnMs；tick Arrow 分支用它算 age 做硬 60s despawn（机制等价 MC 箭 60s 消失；不依赖 dt 累加，
+    //   低帧率 / dt=0 / 节流帧漂移时仍必然移除）。同 ItemEntityManager / XpOrbManager 的 m_clock 模式。
+    QElapsedTimer m_clock;
 
     // 把构造好的实体放入槽位（优先复用空槽，否则追加）。move 入槽后 alive=true（Entity 默认）。++m_liveCount。
     int acquireSlot(Entity &&e)
@@ -1318,6 +1329,11 @@ private:
     //   - kArrowEmbed：嵌入时箭心相对入射面的回退（blocks；正 → 心在面外侧、杆沿飞行方向伸入面内半嵌可见；
     //     箭杆长 ~0.55，取 0.2 → 尖入面内 ~0.35、杆尾露面外 ~0.2，半嵌观感）。
     static constexpr float kStuckArrowLifetime = 60.0f; // 嵌入箭存活（秒；despawn）
+    // 任务（弓箭 60s 必 despawn）：箭自 spawn 起的**硬墙钟上限**（ms）。任何箭（玩家 / 骷髅 / 飞行 / 嵌入）
+    //   自 spawn 起 60s 必 despawn（机制等价 MC 1.0 箭 60s 消失）。这是 arrowLife dt-累加 despawn（飞行 5s /
+    //   嵌入 60s）的**真值源 + 安全网**：dt 累加在低帧率 / dt=0 / t500 节流帧漂移时会滞后，墙钟不依赖 dt →
+    //   必然 60s 移除，杜绝用户报告「骷髅弓手射出的箭插墙 / 落地不消失」。= 60000ms = 60s。
+    static constexpr qint64 kArrowDespawnMs = 60000; // 箭墙钟上限（ms；自 spawn 必 despawn）
     static constexpr float kArrowEmbed         = 0.20f; // 嵌入回退（blocks；心在面外、尖入面内）
     // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI / 爆炸常量（spec t284「近距蓄力膨胀动画 → 爆炸（破坏方块
     //   + 伤害玩家 + 音效）」；机制对齐 MC 1.0 苦力怕：缓慢逼近 + 近距蓄力 + 球形爆炸 + 距离衰减伤害；数值为

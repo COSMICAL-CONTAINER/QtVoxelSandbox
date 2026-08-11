@@ -1117,8 +1117,11 @@ Window {
         }
 
         if (typeFilter.length === 0) {
-            entityManager.clearAll()
-            xpOrbs.clearAll()   // t402 经验球同族一并清
+            entityManager.clearAll()      // mobs + 下落方块 + 箭矢 + 雪球（Entities 全清）
+            itemEntities.clearAll()       // 掉落物（修 /kill @e 漏清掉落物 → F3 items 不归零）
+            xpOrbs.clearAll()             // 经验球（同族一并清）
+            // 三类 clearAll 各自 emit 自家 entitiesChanged（mobs/items/orbs）→ 对应 Repeater
+            //   delegate 据存活标记 visible=false 隐藏，F3 entities 行 mobs/items/orbs 全归零。
             return "已清除所有非玩家实体"
         }
         const tid = window.mobTypeIdFromName(typeFilter)
