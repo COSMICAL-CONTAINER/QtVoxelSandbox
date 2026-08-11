@@ -539,41 +539,97 @@ int PartialBlockGeometry::append(
     case BlockRegistry::BedWhite: case BlockRegistry::BedLightBlue: case BlockRegistry::BedLime:
     case BlockRegistry::BedPink: case BlockRegistry::BedGray: case BlockRegistry::BedLightGray:
     case BlockRegistry::BedPurple: case BlockRegistry::BedBrown: {
-        // t457 低 3D 床模型（~0.3 格高）：四角木柱腿 + 木板面 + 羊毛床垫，上方留空气可躺。head 半（bit3=1）
-        //   额外加枕垫（床头端半 footprint 略高于床垫的羊毛枕）。机制等价 MC 1.0 床模型（低矮床架 + 床垫 +
-        //   枕头，非整立方）。每半（foot/head）独立渲染本 case，两半并排组成完整床（玩家放置 foot/head 双格
-        //   横置，见 playercontroller placeBlock）。腿 / 木板面贴 planks tile(8)；床垫 / 枕垫贴床色 tile（tile）。
+        // t457/t496 低 3D 床模型（cell-local [0,1]）：四角木柱腿 + 木板床架 + 彩色被面床垫 + 床头板（head 半）/ 床尾板
+        //   （foot 半）+ 床头端白色枕头（head 半）。机制等价 MC 1.0 床模型（低矮床架 + 床垫 + 床头板 + 枕头，非整立方）。
+        //   每半（foot/head）独立渲染本 case，两半并排组成完整床（玩家放置 foot/head 双格横置，见 playercontroller
+        //   placeBlock）。腿 / 床架 / 床头板 / 床尾板贴 planks tile(8)；床垫贴床色 tile（tile）；枕头贴白色 wool tile(38)
+        //   （机制等价 MC 床头白色枕头，与被面色区分）。
+        //
+        //   **t496 重设计根因**（旧版「丑」）：旧版床垫仅 1/16 厚（plankTop 4/16 → matTop 5/16）→ 视觉薄如平板；
+        //   床贴图顶部带「枕垫亮带」区，床垫六面铺同图 → 枕垫区出现在床垫顶面（与真正的枕头盒重复）+ 床垫侧面
+        //   把 5 行枕垫区压在 1/16 厚度上 → 拉伸糊化；无床头板 / 床尾板 → 看不出是床（像带凸起的平板）。t496 修：
+        //   (a) 贴图改纯绗缝被面（build_bed.py，无枕垫区）→ 床垫顶 / 侧面都干净不糊；
+        //   (b) 床头板（head 半床头端竖立木板，高于床垫）+ 床尾板（foot 半床尾端矮木板）→ 一眼辨「这是床」
+        //       （机制等价 MC 床头板 / 床尾板）；
+        //   (c) 枕头改白色 wool tile(38)（旧版同被色 → 与床垫糊成一片分不清）；
+        //   (d) 腿改「外角 2 条腿」（head 半的 -front 端两角 / foot 半的 +front 端两角）→ 双格并排共 4 条腿
+        //       （旧版每半 4 条腿 → 双格 8 条腿 + 内侧腿并贴成裙边，观感乱）。
         //   不做邻居剔除（异形小体约定，同 Farmland；内 / 底面被自身遮挡 overdraw 可忽）。床 solid=false
-        //   （shapeBoxes 走 ShapeBed 低盒）→ 不参与邻居整立面剔除（无 x-ray 洞）。
+        //   （shapeBoxes 走 ShapeBed 低盒 y[0, kBedMattressTop]）→ 不参与邻居整立面剔除（无 x-ray 洞）。
+        //   床头板 / 床尾板 / 枕头凸出碰撞盒顶（纯视觉），机制等价 MC 床低 hitbox + 视觉床头板凸出。
         const int planksTile = BlockRegistry::tileIndex(BlockRegistry::Planks, BlockRegistry::PosX); // 木板瓦片 8
-        const float leg = BlockRegistry::kBedLegHalf;        // 腿半宽（角柱 2*leg 见方）
-        const float legTop = BlockRegistry::kBedLegTop;      // 腿顶 = 木板面底
-        const float plankTop = BlockRegistry::kBedPlankTop;  // 木板面顶 = 床垫底
-        const float matTop = BlockRegistry::kBedMattressTop; // 床垫顶（~0.31，低床总高）
-        const float ins = BlockRegistry::kBedInset;          // 床垫 footprint 内缩
-        // 四角木柱腿（4 个角柱，planks 贴图）。
-        pushBox(verts, idx, lx, ly, lz, 0.f, 2*leg, 0.f, legTop, 0.f, 2*leg, planksTile, light, tileW, hx, hy, v0, v1);
-        pushBox(verts, idx, lx, ly, lz, 1.f-2*leg, 1.f, 0.f, legTop, 0.f, 2*leg, planksTile, light, tileW, hx, hy, v0, v1);
-        pushBox(verts, idx, lx, ly, lz, 0.f, 2*leg, 0.f, legTop, 1.f-2*leg, 1.f, planksTile, light, tileW, hx, hy, v0, v1);
-        pushBox(verts, idx, lx, ly, lz, 1.f-2*leg, 1.f, 0.f, legTop, 1.f-2*leg, 1.f, planksTile, light, tileW, hx, hy, v0, v1);
-        // 木板面（全 footprint 薄板，planks 贴图）。
+        const int woolTile = BlockRegistry::tileIndex(BlockRegistry::Wool, BlockRegistry::PosX); // 白色羊毛瓦片 38（枕头）
+        const float leg = BlockRegistry::kBedLegHalf;          // 腿半宽（角柱 2*leg 见方）
+        const float legTop = BlockRegistry::kBedLegTop;        // 腿顶 = 床架底
+        const float plankTop = BlockRegistry::kBedPlankTop;    // 床架顶 = 床垫底
+        const float matTop = BlockRegistry::kBedMattressTop;   // 床垫顶（碰撞盒顶 ~0.31）
+        const float ins = BlockRegistry::kBedInset;            // 床垫 footprint 内缩
+        const bool isHead = (state & 8) != 0; // head 半（床头端）= true
+        const int f = state & 3;              // 朝向 0=+X 1=-X 2=+Z 3=-Z（head 落 foot 的 -front 邻格）
+
+        // (a) 木柱腿：仅画「外角」2 条腿（远离配对半的两角）。head 半的外端 = -front 方向端；foot 半的外端 = +front
+        //   方向端。双格并排时 head 外端 + foot 外端分属床的两端 → 共 4 条腿（机制等价 MC 床 4 角腿）。腿在
+        //   xz 全 footprint 的外端两角，y[0, legTop]，planks 贴图。
+        //   外端轴向：front 是 ±X（f=0/1）→ 外端是 X 端，腿在 X 端的 ±Z 两角；front 是 ±Z（f=2/3）→ 外端是 Z 端，
+        //   腿在 Z 端的 ±X 两角。外端正负号：head 半 = -front 方向（f=0→-X 端 / f=1→+X 端 / f=2→-Z 端 / f=3→+Z 端）；
+        //   foot 半 = +front 方向（f=0→+X 端 / f=1→-X 端 / f=2→+Z 端 / f=3→-Z 端）。
+        const float sgn = isHead ? -1.0f : 1.0f; // 外端方向符号（head→-front / foot→+front）
+        if (f == 0 || f == 1) {
+            // front 是 ±X → 外端是 X 端；腿在 X 端的 ±Z 两角（z[0,2leg] 与 z[1-2leg,1]）。
+            const float ex0 = (sgn < 0) ? 0.f : 1.f - 2 * leg; // 外端 X 起点（-X 端→0 / +X 端→1-2leg）
+            const float ex1 = ex0 + 2 * leg;
+            pushBox(verts, idx, lx, ly, lz, ex0, ex1, 0.f, legTop, 0.f, 2 * leg, planksTile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, ex0, ex1, 0.f, legTop, 1.f - 2 * leg, 1.f, planksTile, light, tileW, hx, hy, v0, v1);
+        } else {
+            // front 是 ±Z → 外端是 Z 端；腿在 Z 端的 ±X 两角（x[0,2leg] 与 x[1-2leg,1]）。
+            const float ez0 = (sgn < 0) ? 0.f : 1.f - 2 * leg; // 外端 Z 起点
+            const float ez1 = ez0 + 2 * leg;
+            pushBox(verts, idx, lx, ly, lz, 0.f, 2 * leg, 0.f, legTop, ez0, ez1, planksTile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, 1.f - 2 * leg, 1.f, 0.f, legTop, ez0, ez1, planksTile, light, tileW, hx, hy, v0, v1);
+        }
+
+        // (b) 木板床架：全 footprint 薄板，planks 贴图（承托床垫的木框）。
         pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, legTop, plankTop, 0.f, 1.f, planksTile, light, tileW, hx, hy, v0, v1);
-        // 羊毛床垫（内缩 footprint，床色贴图）。
-        pushBox(verts, idx, lx, ly, lz, ins, 1.f-ins, plankTop, matTop, ins, 1.f-ins, tile, light, tileW, hx, hy, v0, v1);
-        // 头半（bit3=1）加枕垫：床头端半 footprint 略高于床垫的羊毛枕。床头端 = 朝向反向边（foot 在 +front 方向，
-        //   pillow 在 -front 边，由 bedPartnerOffset 编码推导）。机制等价 MC 床头枕头（区分头/脚端）。
-        if (state & 8) {
-            const int f = state & 3;
-            const float pHalf = 0.5f; // 枕垫占床头端半 footprint
-            float bx0 = ins, bx1 = 1.f-ins, bz0 = ins, bz1 = 1.f-ins;
-            switch (f) {
-            case 0: bx0 = ins; bx1 = pHalf; break;          // 朝 +X（foot 在 +X）→ 枕在 -X 半
-            case 1: bx0 = 1.f-pHalf; bx1 = 1.f-ins; break;  // 朝 -X（foot 在 -X）→ 枕在 +X 半
-            case 2: bz0 = ins; bz1 = pHalf; break;          // 朝 +Z（foot 在 +Z）→ 枕在 -Z 半
-            case 3: bz0 = 1.f-pHalf; bz1 = 1.f-ins; break;  // 朝 -Z（foot 在 -Z）→ 枕在 +Z 半
+
+        // (c) 彩色被面床垫：内缩 footprint，床色贴图（被面包裹的床垫；内缩留出床架边缘可见）。
+        pushBox(verts, idx, lx, ly, lz, ins, 1.f - ins, plankTop, matTop, ins, 1.f - ins, tile, light, tileW, hx, hy, v0, v1);
+
+        // (d) 床头板（head 半）/ 床尾板（foot 半）：外端竖立木板。床头板高（kBedHeadboardTop 9/16），
+        //   床尾板矮（kBedFootboardTop 7/16），机制等价 MC 床头板高于床尾板。板厚 kBedBoardThick(2/16 = kBedInset)
+        //   贴外端边缘（正好填满床垫内缩外的端面条带 → 板足迹与内缩床垫不重叠，零共面 z-fight）。
+        //   板 y[plankTop, boardTop] —— 坐在床架平台上（不覆盖腿区，腿区 y[0,legTop] 在板下方独立可见）。
+        const float boardThick = BlockRegistry::kBedBoardThick;
+        const float boardTop = isHead ? BlockRegistry::kBedHeadboardTop : BlockRegistry::kBedFootboardTop;
+        if (f == 0 || f == 1) {
+            // front 是 ±X → 板竖立在 X 外端（与腿同 X 端），跨越全 z 宽。
+            const float bx0 = (sgn < 0) ? 0.f : 1.f - boardThick;
+            pushBox(verts, idx, lx, ly, lz, bx0, bx0 + boardThick, plankTop, boardTop, 0.f, 1.f, planksTile, light, tileW, hx, hy, v0, v1);
+        } else {
+            // front 是 ±Z → 板竖立在 Z 外端，跨越全 x 宽。
+            const float bz0 = (sgn < 0) ? 0.f : 1.f - boardThick;
+            pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, plankTop, boardTop, bz0, bz0 + boardThick, planksTile, light, tileW, hx, hy, v0, v1);
+        }
+
+        // (e) 白色枕头（仅 head 半）：床头端（-front 方向端）床垫上方的白色 wool 枕。机制等价 MC 床头枕头
+        //   （区分头/脚端 + 白色与被面色对比）。枕头占床头端 ~3/8 长 × 全床垫宽（略内缩留被面边缘），
+        //   y[matTop, kBedPillowTop]，wool tile(38) 白色。
+        if (isHead) {
+            const float pLen = 0.375f;      // 枕头沿床长方向占 6/16（床头端 3/8，留出大半被面）
+            const float pEdge = ins * 1.5f; // 枕头沿床宽方向内缩（留出被面侧边可见）
+            // 床长轴 = front 方向（f=0/1 → X 为长轴 / f=2/3 → Z 为长轴）。床头端 = -front 方向端（与床头板同端）。
+            // 沿长轴取床头端 pLen 段；沿宽轴取 [pEdge, 1-pEdge]（比床垫 ins 更内缩 → 被面侧边可见）。
+            float bx0, bx1, bz0, bz1;
+            if (f == 0) {        // 长 +X，head 在 -X 端
+                bx0 = ins; bx1 = ins + pLen; bz0 = pEdge; bz1 = 1.f - pEdge;
+            } else if (f == 1) { // 长 -X，head 在 +X 端
+                bx0 = 1.f - ins - pLen; bx1 = 1.f - ins; bz0 = pEdge; bz1 = 1.f - pEdge;
+            } else if (f == 2) { // 长 +Z，head 在 -Z 端
+                bx0 = pEdge; bx1 = 1.f - pEdge; bz0 = ins; bz1 = ins + pLen;
+            } else {             // 长 -Z，head 在 +Z 端
+                bx0 = pEdge; bx1 = 1.f - pEdge; bz0 = 1.f - ins - pLen; bz1 = 1.f - ins;
             }
             pushBox(verts, idx, lx, ly, lz, bx0, bx1, matTop, BlockRegistry::kBedPillowTop, bz0, bz1,
-                    tile, light, tileW, hx, hy, v0, v1);
+                    woolTile, light, tileW, hx, hy, v0, v1);
         }
         break;
     }

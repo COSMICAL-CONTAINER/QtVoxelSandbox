@@ -719,15 +719,23 @@ public:
     static bool isBed(quint8 blockId);
 
     // t457 床低 3D 模型几何常量（cell-local [0,1]）—— PartialBlockGeometry 渲染 + shapeBoxes 碰撞共用同一组值，
-    //   保证「碰撞盒顶 = 渲染床垫顶」（玩家立于床垫顶）。kBedMattressTop=床垫顶高（~0.31 = 5/16，低床）；
+    //   保证「碰撞盒顶 = 渲染床垫顶」（玩家立于床垫顶）。kBedMattressTop=床垫顶高（~0.31 = 5/16，低床，碰撞盒顶）；
     //   kBedLegTop=腿顶（3/16）；kBedLegHalf=腿半宽（1/16，角柱 2/16 见方）；kBedPlankTop=木板面顶（4/16）；
-    //   kBedInset=床垫 / 枕头 footprint 内缩；kBedPillowTop=头半枕垫顶（6/16）。
-    static constexpr float kBedMattressTop = 0.3125f; // 5/16
-    static constexpr float kBedLegTop      = 0.1875f; // 3/16（腿高 = 木板面底）
-    static constexpr float kBedLegHalf     = 0.0625f; // 1/16（腿半宽 → 角柱 [0,2/16] 见方）
-    static constexpr float kBedPlankTop    = 0.25f;   // 4/16（木板面顶 = 羊毛面底）
-    static constexpr float kBedInset       = 0.0625f; // 1/16（床垫 footprint 内缩）
-    static constexpr float kBedPillowTop   = 0.375f;  // 6/16（头半枕垫顶，略高于床垫）
+    //   kBedInset=床垫 footprint 内缩。
+    //   t496 床头板 / 床尾板 / 枕头高度（纯视觉，不进碰撞 —— 碰撞仍走 kBedMattressTop 低盒，机制等价 MC 床
+    //   低矮 hitbox + 视觉上凸出的床头板）：kBedHeadboardTop=床头板顶（9/16，床头端竖立木板，高于床垫表
+    //   「床头」）；kBedFootboardTop=床尾板顶（7/16，床尾端竖立矮木板，比床头板矮）；kBedPillowTop=枕头顶
+    //   （7/16，床头端床垫上的白色枕头，略凸于床垫）；kBedBoardThick=床头板/床尾板厚度（2/16 = kBedInset，
+    //   端面条带正好贴满床垫内缩外 → 与内缩床垫零重叠 / 零共面 z-fight）。
+    static constexpr float kBedMattressTop  = 0.3125f; // 5/16（碰撞盒顶 = 床垫顶）
+    static constexpr float kBedLegTop       = 0.1875f; // 3/16（腿高 = 床架底）
+    static constexpr float kBedLegHalf      = 0.0625f; // 1/16（腿半宽 → 角柱 2/16 见方）
+    static constexpr float kBedPlankTop     = 0.25f;   // 4/16（床架顶 = 床垫底；床板从此处起，坐在床架上）
+    static constexpr float kBedInset        = 0.125f;  // 2/16（床垫 footprint 内缩；= 床板厚度 → 床板端面条带与床垫不重叠）
+    static constexpr float kBedHeadboardTop = 0.5625f; // 9/16（床头板顶，床头端竖立木板，纯视觉不进碰撞）
+    static constexpr float kBedFootboardTop = 0.4375f; // 7/16（床尾板顶，床尾端竖立矮木板，纯视觉不进碰撞）
+    static constexpr float kBedPillowTop    = 0.4375f; // 7/16（枕头顶，床头端床垫上白色枕，纯视觉不进碰撞）
+    static constexpr float kBedBoardThick   = 0.125f;  // 2/16（床头板 / 床尾板厚度 = kBedInset，端面条带贴满内缩外）
 
     // t455 16 色 wool 统一谓词（单一权威）：white（Wool=27）+ 15 色变体段 [FirstWoolVariant, LastWoolVariant]
     //   （WoolOrange=63..WoolBlack=77）即羊毛。供未来染料 / 配方 / 渲染判定「是否羊毛方块」，避免各处自写 id

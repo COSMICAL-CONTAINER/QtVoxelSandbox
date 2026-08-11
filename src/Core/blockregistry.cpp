@@ -1018,8 +1018,10 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
         return out;
     }
     case BlockRegistry::ShapeBed:
-        // t457 床低盒（与 partialblockgeometry 床床垫顶同高）：cell 底低盒 y[0, 0.3125]（床垫顶 ~0.31）。
+        // t457/t496 床低盒（与 partialblockgeometry 床床垫顶同高）：cell 底低盒 y[0, kBedMattressTop ~0.31]（床垫顶）。
         //   玩家立于床垫顶（机制等价 MC 床矮半高 hitbox；非整格满高碰撞）。foot / head 半同盒（碰撞不区分头脚）。
+        //   t496：床头板 / 床尾板 / 枕头视觉凸出碰撞盒顶（partialblockgeometry 渲染到 9/16 / 7/16），但碰撞仍走
+        //   本低盒（机制等价 MC 床低 hitbox + 视觉床头板凸出 —— 玩家可站床垫顶、床头板不挡碰撞）。
         out.push_back({0, 0, 0, 1, BlockRegistry::kBedMattressTop, 1});
         return out;
     }
