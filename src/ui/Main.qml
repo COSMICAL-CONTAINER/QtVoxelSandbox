@@ -4598,12 +4598,11 @@ Window {
                         active: entKind === EntityManager.Mob && entMobType === 0
                         sourceComponent: Component {
                             Model {
-                                // mobType 0 / 5：通用测试生物（t95/t239）+ t280 敌对 Bones(5)（骷髅，t283 待做原创模型）
-                                //   —— UnitCube 单色立方（原创几何，§9 区隔不照搬 MC 美术）。敌对走 EntityManager.spawnHostileMob
-                                //   设的 colorAt（Bones 灰白 #d8d4c4）；mobType 0 仍走 spawnMob 的 #ff5555。
-                                //   受击红闪：hurtFlashAt>0 → baseColor #ff0000 覆盖。t280 燃烧：isBurningAt>0 → baseColor
-                                //   偏橙（火焰色调制单色立方，与下方 flame Model 共显「着火」感）。
-                                //   t282：Shambler(4) 不再走本 UnitCube 路径 —— 已迁到下方专属 MobModel 人形 + 贴图分支。
+                                // mobType 0：通用测试生物（t95/t239）—— UnitCube 单色立方（原创几何，§9 区隔
+                                //   不照搬 MC 美术）。走 spawnMob 的 #ff5555。受击红闪：hurtFlashAt>0 → baseColor
+                                //   #ff0000 覆盖。t280 燃烧：isBurningAt>0 → baseColor 偏橙（火焰色调制单色立方，
+                                //   与下方 flame Model 共显「着火」感）。
+                                //   t282：Shambler(4) / t287：Bones(5) 等其余 mob 已各自迁到专属 Loader（MobModel 人形 + 贴图）。
                                 visible: entKind === EntityManager.Mob
                                          && entMobType === 0
                                 geometry: UnitCube {}
