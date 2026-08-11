@@ -245,6 +245,11 @@ Window {
     //   注意：值在 _refreshChunkVisibility 末刷新；meshRebuilt 改 vertexCount 时各段 visible 绑定自动重算，
     //   但本属性不实时跟踪（仅在 chunk 跨界 / 渲染距离调整时刷新）—— F3 draw-call 行仅示性，无需逐帧精度。
     property int visibleSegmentCount: 0
+    // t489 流体材质级动画帧（水/岩浆条带 flipbook）。由下方 waterAnimTimer / lavaAnimTimer 推进；
+    //   绑水/岩浆段 Texture 的 positionV（= frame / stripFrames）→ 帧切换纯材质参数，零 mesh 重建
+    //   （修 t222/t223「水 2s 全量重建水段 261 段/次」回归；F3 [w]/[s] reb 不回升）。
+    property int waterAnimFrame: 0   // 0..(waterStripFrames-1)，循环
+    property int lavaAnimFrame: 0    // 0..(lavaStripFrames-1)，循环
     // 全幅顶点 / 三角面汇总（遍历 terrainGeos 求和 → 写标量属性）。由每个地形段 ChunkGeometry 的 meshRebuilt
     //   信号经 Connections 触发（buildChunkModels 末也调一次取初值）。在普通函数里读 var 数组不创建绑定依赖，
     //   故不触发 binding loop（与在 text 绑定里读 var 数组相反）。
@@ -1313,6 +1318,27 @@ Window {
             window.hudPosText = window.buildHudPosText()
             if (window.f3Visible) window.f3Text = window.buildF3Text()
         }
+    }
+    // t489 流体材质级 flipbook 驱动：推进 waterAnimFrame / lavaAnimFrame → 绑水/岩浆段 Texture.positionV
+    //   重算 → 帧切换。**绝不触发 setWaterAnimPhase / buildMesh**（C++ 侧 setWaterAnimPhase 已不重建）。
+    //   节拍对齐 MC 1.0：水 32 帧 × ~150ms ≈ 4.8s/圈（MC frametime=2 tick=100ms → 3.2s/圈，本引擎略慢保不刺眼）；
+    //   岩浆 16 帧 × ~250ms = 4s/圈（MC frametime=2-3 tick）。每帧仅 2 个属性写（waterStripTex/lavaStripTex 的
+    //   positionV 绑定重算）→ 开销可忽略（F3 [w]/[s] reb 不回升，验收「不重建 mesh」）。
+    //   分层（PLAN §2）：纯呈现层动画（不进 Game 层 WorldClock）；水/岩浆声（onFlowSoundLevelChanged）与
+    //   本动画正交（声音走 PlayerController 节流扫描，动画走本 Timer）。
+    Timer {
+        id: waterAnimTimer
+        interval: 150
+        repeat: true
+        running: true   // 不门控 appState：菜单态水/岩浆段不渲染（visible 绑 vertexCount>0），Timer 空跑零成本
+        onTriggered: window.waterAnimFrame = (window.waterAnimFrame + 1) % resourcePack.waterStripFrames
+    }
+    Timer {
+        id: lavaAnimTimer
+        interval: 250
+        repeat: true
+        running: true
+        onTriggered: window.lavaAnimFrame = (window.lavaAnimFrame + 1) % resourcePack.lavaStripFrames
     }
     // perf-t520 进 playing 立即刷新（避免 hudPosText 首帧空白），F3 切换 on 时立即刷一次。
     //   本 two-phase Connections 与 10Hz Timer 并行（Timer 100ms 后接管），用 QML 内置信号无需 triggeredOnStartup。
@@ -2720,6 +2746,33 @@ Window {
         //   否则 qrc:/textures/atlas.png（程序生成默认）。无包 / 禁用时 100% 沿用旧路径（零回归）。
         Texture { id: voxelAtlas; source: resourcePack.atlasSource; generateMipmaps: false }
 
+        // t489 流体条带纹理（材质级 flipbook，替代 t222/t223 重建式水动画）：水/岩浆段独立材质 baseColorMap
+        //   指向本条带（不走共享图集 voxelAtlas）→ 动画 positionV 只动水/岩浆面，不动其它方块。
+        //   source：active → file:/// 落盘合成条带（程序生成条带 + 包内帧覆盖）；否则 qrc 程序生成条带。
+        //   positionV：Qt 6.11 把旧 Texture.vOffset 更名为 positionV（positive positionV 上移采样 → 帧 k 在 v∈[k/N,(k+1)/N]）。
+        //     绑 waterAnimFrame / lavaAnimFrame（下方 Timer 驱动），帧切换纯材质参数 → **零 mesh 重建**
+        //     （F3 [w]/[s] reb 不回升；修 t222/t223「水 2s 全量重建水段 261 段/次」回归）。
+        //   tilingMode Repeat：positionV 在 6.11 实测会把 UV 偏移到 [0,1] 外（采样坐标超出条带）→ 设 Repeat
+        //     使超界部分回绕到对侧帧，避免 ClampToEdge 在动画中段把采样钳死在边缘帧（实测：ClampToEdge 下
+        //     posV=0.5 采到 1.0 边缘条带而非中部帧）。N 帧 / 帧像素 16 由 resourcePack.stripFrames（与 BlockRegistry
+        //     kWaterStripFrames=32 / kLavaStripFrames=16 同源）单一权威。
+        Texture {
+            id: waterStripTex
+            source: resourcePack.waterStripSource
+            generateMipmaps: false
+            tilingModeHorizontal: Texture.Repeat
+            tilingModeVertical: Texture.Repeat
+            positionV: window.waterAnimFrame / resourcePack.waterStripFrames
+        }
+        Texture {
+            id: lavaStripTex
+            source: resourcePack.lavaStripSource
+            generateMipmaps: false
+            tilingModeHorizontal: Texture.Repeat
+            tilingModeVertical: Texture.Repeat
+            positionV: window.lavaAnimFrame / resourcePack.lavaStripFrames
+        }
+
         // t240 猪牛羊贴图：三种 passive mob 各一张「全脸」贴图（build_mob.py 程序生成原创像素图，§9a 区隔
         //   不照搬 MC）。MobModel 几何每面铺整张贴图 [0,1]×[0,1]（同 CrackBox 全脸 UV）→ mobHost delegate 据
         //   entityManager.mobTypeAt 选 pig/cow/sheep 贴图。实心无 alpha → 走不透明 PrincipledMaterial（无需
@@ -2898,7 +2951,7 @@ Window {
                     chunkInRange: waterModel.chunkInRange // t472：视距门控传给 mesher（远端水段跳过重建）
                     waterOnly: true
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: window.skyBaseColor }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: waterStripTex; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: window.skyBaseColor }
             }
         }
 
@@ -2927,7 +2980,7 @@ Window {
                     chunkInRange: lavaModel.chunkInRange // t472：视距门控传给 mesher（远端岩浆段跳过 sun 重建）
                     lavaOnly: true
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.95; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(1.0, 0.82, 0.6, 1.0) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: lavaStripTex; vertexColorsEnabled: true; opacity: 0.95; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(1.0, 0.82, 0.6, 1.0) }
             }
         }
 

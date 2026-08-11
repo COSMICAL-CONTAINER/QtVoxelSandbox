@@ -534,17 +534,35 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
             //   def 仍各面=19 静水；流水贴图选择是呈现层决定，非方块属性）。
             // t351 流体参数化（水 / 岩浆共用此变高路径，差异仅 id / 贴图 / 最大 level）：
             //   fluidId：本段画哪种流体（水段=Water / 岩浆段=Lava）。
-            //   stillTile/flowTile：水源/岩浆源用静贴图，流水/流岩浆用流贴图。水有 flipbook 两帧 + 独立 flow 贴图(23/25)；
-            //     岩浆仅 tile 42（无独立 flow 贴图）→ 源 / 流均用 42（分层高度差异已足够表达衰减，机制等价 MC 岩浆分层）。
             //   maxLevel：液面衰减分级。水 8 级（state 1..7 → 液面 (8-s)/8）；岩浆 4 级（state 1..3 → 液面 (4-s)/4）。
             const quint8 fluidId  = m_lavaOnly ? BlockRegistry::Lava  : BlockRegistry::Water;
             const int maxLevel    = m_lavaOnly ? 4 : 8;                 // 源(0) + 流(1..maxLevel-1)
-            // t223/tXXX 水贴图动画 phase 换帧已废弃（静态水单帧，见 setWaterAnimPhase）：恒用 phase 0 帧
-            //   —— 静水 tile 19（旧 flipbook {19,24} 的帧 0）、流水 tile 23（旧 {23,25} 的帧 0）。tiles 24/25
-            //   （第 2 帧）不再被 mesher 引用（图集保留，视觉损失=两帧交替的荡漾动势，保留烘死的空间涟漪，
-            //   见下方 t391 涟漪；水动画重建消除是 tXXX 核心收益，2s 换帧代价 261 段全量重网格化）。
-            const int stillTile   = m_lavaOnly ? 42 : 19;
-            const int flowTile    = m_lavaOnly ? 42 : 23;
+            // t489 材质级 flipbook：水/岩浆段不再采样共享图集（tile 19/23/42），改采样**独立条带纹理**
+            //   （waterStrip: 2 列×32 帧 / lavaStrip: 1 列×16 帧）。面 UV 烘焙为「单帧区域」约定：
+            //     - u：水双列——水源(st==0) 采左列（静水）、流水(st>0) 采右列（流水）；岩浆单列。
+            //     - v ∈ [0, 1/N]：帧 0 区（v=0=条带底）。帧切换由材质 positionV 动画（QtQuick3D Texture 6.11 已把
+            //       vOffset 更名 positionV；positive positionV 上移采样 → 帧 k 在 v∈[k/N,(k+1)/N]）驱动——
+            //       **mesh 一次性构建、动画纯材质参数，零 buildMesh**（修 t222/t223「水 2s 一次全量重建水段 261 段/次」
+            //       的 mesh 重建风暴回归；F3 [w]/[s] reb 不回升）。静水/流水同帧索引同步动画（机制等价 MC 1.0
+            //       still/flow 同步 flipbook）。
+            //   t391 水面顶面空间涟漪（brightMul/alphaMul）仍按 phase 0 烘死（材质动画接管时间维度的荡漾，
+            //   空间维度的反光起伏保留在顶点色）。tiles 19/23/24/25/42（图集水/岩浆瓦片）保留供 BlockCube
+            //   手持 / 掉落路径消费；水/岩浆**段** mesh 不再引用图集瓦片。
+            //   帧数 N / 帧像素 16 与 blockregistry kWaterStripFrames/kLavaStripFrames/kFluidStripFramePx 同源单一权威
+            //   （条带构建方 resourcepackmanager/build_fluid_strips.py 与此处 UV 烘焙 + Main.qml positionV 步长三方共用）。
+            const int stripFrames = m_lavaOnly ? BlockRegistry::kLavaStripFrames : BlockRegistry::kWaterStripFrames;
+            const float frameH = 1.0f / float(stripFrames);                       // 单帧高（帧 0 区 v∈[0,1/N]）
+            // 半像素内缩防帧间 / 列间渗色（线性采样越过帧/列边界采到相邻帧/列）。
+            //   **关键**：内缩量是「半纹素」，纹素的归一化 V 尺寸 = 1/条带总高 = 1/(N×帧高px)，不是 1/帧高px
+            //   ——早期写成 0.5/帧高px 会恰好等于半帧高（N=16 时 0.5/16 = 0.03125 = (1/16)/2），把帧 0 区
+            //   [0,1/N] 内缩成单点 → 面四顶点 v 全相同 → V 维坍缩（采单行纹素）。正确：hys = 0.5/(N×帧高px)。
+            //   水条带高 32×16=512 → hys=0.5/512；岩浆条带高 16×16=256 → hys=0.5/256。
+            //   hxs：水双列条带宽 32px → 0.5/32；岩浆单列 16px → 0.5/16。
+            const float stripPxH = float(stripFrames * BlockRegistry::kFluidStripFramePx); // 条带总高（像素）
+            const float hys = 0.5f / stripPxH;
+            const float hxs = m_lavaOnly ? (0.5f / float(BlockRegistry::kFluidStripFramePx))
+                                         : (0.5f / float(2 * BlockRegistry::kFluidStripFramePx));
+            const float stripV0 = hys, stripV1 = frameH - hys;                    // v 子区（帧 0 区，内缩）
             // state → 液面高度（cell-local Y，0..1）。源 1.0；流 (maxLevel-level)/maxLevel（越远越矮）。
             //   state 越界 clamp 兜底防负值（极端坏数据 → 最低一级液面而非负值）。
             auto surfH = [maxLevel](quint8 state) -> float {
@@ -570,8 +588,11 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         if (blockAtWorld(wx, ly, wz) != fluidId) continue;
                         const quint8 st = stateAtWorld(wx, ly, wz);
                         const float myTop = renderTop(st, wx, ly, wz); // t350：上方有水 → 满高（柱连续无缝）
-                        const int tile = (st == 0) ? stillTile : flowTile; // 水源静水 / 流水斜纹（t223 按 phase 选帧）
-                        const float u0 = tile * tileW + hx, u1 = (tile + 1) * tileW - hx;
+                        // t489：条带 UV（替代图集 tile UV）。水双列：源(st==0)→左列静水、流(st>0)→右列流水；
+                        //   岩浆单列。u ∈ 列宽 [colX, colX+0.5/1.0]，v ∈ [0,1/N]（帧 0 区，内缩）。详见上方 t489 注释。
+                        const float colL = m_lavaOnly ? 0.0f : ((st == 0) ? 0.0f : 0.5f); // 左列(still) / 右列(flow)
+                        const float colW = m_lavaOnly ? 1.0f : 0.5f;                     // 单列宽（岩浆整宽 / 水半宽）
+                        const float u0 = colL + hxs, u1 = colL + colW - hxs;
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
                             const int nwx = wx + F.dir[0], nwy = ly + F.dir[1], nwz = wz + F.dir[2];
@@ -644,7 +665,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 v.x = float(lx) + dx; v.y = float(ly) + yy; v.z = float(lz) + dz; // 局部坐标
                                 v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
                                 v.u = u0 + cu * (u1 - u0);
-                                v.v = v0 + cv * (v1 - v0);
+                                v.v = stripV0 + cv * (stripV1 - stripV0); // t489：条带帧 0 区（v∈[0,1/N]）；帧切换由材质 positionV 驱动
                                 // t151 光场 × t153 PCF 软影顶点色；t391 水面顶面（+Y）再乘涟漪亮/透射因子。
                                 v.r = vc * brightMul; v.g = vc * brightMul; v.b = vc * brightMul;
                                 v.a = alphaMul; // 侧面/底面 = 1.0；水面顶面 = [0.85,1.0] 涟漪透射

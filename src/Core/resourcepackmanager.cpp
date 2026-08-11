@@ -33,6 +33,9 @@ struct BuiltState {
     QString itemDir;              // t420 包内物品图标目录（assets/minecraft/textures/item）绝对路径；空 = 无 item 覆盖
     QString entityDir;            // t421 包内生物贴图目录（assets/minecraft/textures/entity）绝对路径；空 = 无 entity 覆盖
     QString blockDir;             // t456 包内方块贴图目录（assets/minecraft/textures/block）绝对路径；blockItemIconSource 兜底探测（pack 把前贴图放 block/ 时）
+    // t489 流体条带落盘路径（active 时 file:///）；waterStrip = 2 列×32 帧（静水|流水），lavaStrip = 1 列×16 帧。
+    QString waterStripFile;
+    QString lavaStripFile;
 };
 BuiltState &state()
 {
@@ -570,6 +573,89 @@ QImage composeGrassSide(const QDir &blockDir)
     return side;
 }
 
+// t489 从包内动画贴图（water_still / water_flow / lava_still）抽帧：MC 动画贴图是单列竖排 strip ——
+//   宽 = 帧像素边长、高 = 帧数 × 帧边长。抽第 i 帧 = 行 [i*framePx, (i+1)*framePx)。包内帧边长 = image.width
+//   （demo 包 water_still 16 宽 → 16×16 帧；water_flow 32 宽 → 32×32 帧；lava_still 16 宽 → 16×16 帧）。
+//   返回缩放到 kFluidStripFramePx(=16)×16 的帧列表（最多 maxFrames 帧；不足 maxFrames 不补齐——调用方按需补）。
+//   解码失败 / 帧数为 0 → 返回空列表（调用方回退程序生成帧）。
+QList<QImage> extractAnimFrames(const QString &pngPath, int maxFrames)
+{
+    QList<QImage> frames;
+    QImage src(pngPath);
+    if (src.isNull())
+        return frames;
+    const int framePx = src.width();                 // 单列 strip：宽 = 帧边长
+    if (framePx <= 0 || src.height() < framePx)
+        return frames;
+    const int count = src.height() / framePx;        // 帧数 = 高 / 帧边长
+    const int take = qMin(count, maxFrames);
+    for (int i = 0; i < take; ++i) {
+        QImage f = src.copy(0, i * framePx, framePx, framePx);
+        if (f.size() != QSize(BlockRegistry::kFluidStripFramePx, BlockRegistry::kFluidStripFramePx))
+            f = f.scaled(BlockRegistry::kFluidStripFramePx, BlockRegistry::kFluidStripFramePx,
+                         Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        frames.append(f.convertToFormat(QImage::Format_ARGB32_Premultiplied));
+    }
+    return frames;
+}
+
+// t489 把某列（col=0..1）的前 N 帧覆盖进条带。strip 是 (2 列 × N 行) 合成图，每帧 16×16。
+//   frames 不足 N 时：末尾用最后一帧循环补齐（保条带恒为 N 帧 → mesher UV 1/N 子区与 QML positionV 步长不错配）。
+//   frames 为空（包缺该贴图）→ 该列保留程序生成底（不覆盖）。
+void paintColumnFrames(QImage &strip, int col, int cols, int framePx, int frameCount, const QList<QImage> &frames)
+{
+    if (frames.isEmpty())
+        return; // 包缺该贴图 → 保留程序生成底
+    const int x0 = col * framePx;
+    for (int k = 0; k < frameCount; ++k) {
+        // 帧 k 占 PIL 行 [H-(k+1)*16, H-k*16)（帧 0 在图像底）。
+        const int yTop = strip.height() - (k + 1) * framePx;
+        const int fi = (k < frames.size()) ? k : (frames.size() - 1); // 不足末尾循环
+        QPainter p(&strip);
+        p.drawImage(x0, yTop, frames.at(fi));
+    }
+}
+
+// t489 构建流体条带（水 / 岩浆）：以 qrc 程序生成条带为底，包内帧覆盖对应列/行 → 落盘 AppLocalData。
+//   返回落盘绝对路径（file:/// 前缀由调用方加）；构建失败返空串（调用方回退 qrc）。
+//   - 水条带（cols=2）：左列 = water_still 帧、右列 = water_flow 帧。两列各 32 帧（kWaterStripFrames）。
+//   - 岩浆条带（cols=1）：单列 = lava_still 帧，16 帧（kLavaStripFrames）。
+QString buildFluidStrip(const QDir &blockDir, const QString &baseStripResource,
+                        int cols, int frameCount, const QList<QPair<int, QString>> &sourceFiles)
+{
+    QImage strip(baseStripResource);
+    if (strip.isNull()) {
+        qWarning("ResourcePack: 无法加载程序生成流体条带底 %s。", qPrintable(baseStripResource));
+        return {};
+    }
+    strip = strip.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    const int framePx = BlockRegistry::kFluidStripFramePx;
+    // cols 列各取包内帧覆盖；sourceFiles[i].first = 列号、.second = 包内文件名。
+    for (const auto &sf : sourceFiles) {
+        const QString png = blockDir.absoluteFilePath(sf.second);
+        if (QFile::exists(png)) {
+            const QList<QImage> frames = extractAnimFrames(png, frameCount);
+            if (!frames.isEmpty())
+                paintColumnFrames(strip, sf.first, cols, framePx, frameCount, frames);
+        }
+    }
+    // 落盘（同图集落盘路径规则）。
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty()) {
+        qWarning("ResourcePack: AppLocalDataLocation 为空，无法落盘流体条带；回退程序生成条带。");
+        return {};
+    }
+    QDir().mkpath(dir);
+    const QString name = (cols == 2) ? QStringLiteral("voxelsandbox_water_strip.png")
+                                     : QStringLiteral("voxelsandbox_lava_strip.png");
+    const QString path = QDir(dir).absoluteFilePath(name);
+    if (!strip.save(path, "PNG")) {
+        qWarning("ResourcePack: 无法写入流体条带 %s；回退程序生成条带。", qPrintable(path));
+        return {};
+    }
+    return path;
+}
+
 // 合成构建（调用者须已持 stateMutex()）。幂等（built 标志）。运行期经 apply() 置 built=false 强制重建。
 //   config 首次从 settings.json 加载；之后只信 BuiltState 内存值（setter 已持久化保持同步）。
 void ensureBuiltLocked()
@@ -582,6 +668,8 @@ void ensureBuiltLocked()
     s.itemDir.clear(); // t420 reset 物品图标目录（仅当包合法时重填）
     s.entityDir.clear(); // t421 reset 生物贴图目录（仅当包合法时重填）
     s.blockDir.clear(); // t456 reset 方块贴图目录（仅当包合法时重填）
+    s.waterStripFile.clear(); // t489 reset 流体条带落盘路径（仅当包合法时重填）
+    s.lavaStripFile.clear();
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -708,6 +796,19 @@ void ensureBuiltLocked()
     }
     qInfo("ResourcePack: 启用包 %s（覆盖 %d 瓦片，图集 → %s）。",
           qPrintable(packPath), overridden, qPrintable(s.atlasFile));
+
+    // t489 流体条带（材质级 flipbook）：以 qrc 程序生成条带为底，包内帧覆盖对应列/行 → 落盘。
+    //   水条带 2 列（water_still | water_flow）× kWaterStripFrames 帧；岩浆条带 1 列（lava_still）×
+    //   kLavaStripFrames 帧。构建失败（落盘目录不可写 / 底图缺）→ 路径留空 → QML 回退 qrc 程序生成条带
+    //   （仍动画，只是无包内高清帧）。包缺某源文件 → 该列保留程序生成底（不覆盖），条带仍 N 帧（动画不破）。
+    s.waterStripFile = buildFluidStrip(
+            blockDir, QStringLiteral(":/textures/water_strip.png"),
+            2, BlockRegistry::kWaterStripFrames,
+            { {0, QStringLiteral("water_still.png")}, {1, QStringLiteral("water_flow.png")} });
+    s.lavaStripFile = buildFluidStrip(
+            blockDir, QStringLiteral(":/textures/lava_strip.png"),
+            1, BlockRegistry::kLavaStripFrames,
+            { {0, QStringLiteral("lava_still.png")} });
 }
 } // namespace
 
@@ -791,6 +892,29 @@ QString ResourcePackManager::atlasSource() const
         return QStringLiteral("qrc:/textures/atlas.png");
     QMutexLocker lock(&stateMutex());
     return QStringLiteral("file:///") + state().atlasFile;
+}
+
+// t489 流体条带贴图源（材质级 flipbook；详见 .h Q_PROPERTY 注释）。
+//   active 且条带落盘成功 → file:///<AppLocalData>/voxelsandbox_<x>_strip.png（包内帧覆盖的合成条带）；
+//   否则 qrc:/textures/<x>_strip.png（程序生成条带）。条带落盘路径为空（包缺 / 落盘失败）→ 回退 qrc。
+QString ResourcePackManager::waterStripSource() const
+{
+    if (!m_active)
+        return QStringLiteral("qrc:/textures/water_strip.png");
+    QMutexLocker lock(&stateMutex());
+    const QString &f = state().waterStripFile;
+    return f.isEmpty() ? QStringLiteral("qrc:/textures/water_strip.png")
+                       : QStringLiteral("file:///") + f;
+}
+
+QString ResourcePackManager::lavaStripSource() const
+{
+    if (!m_active)
+        return QStringLiteral("qrc:/textures/lava_strip.png");
+    QMutexLocker lock(&stateMutex());
+    const QString &f = state().lavaStripFile;
+    return f.isEmpty() ? QStringLiteral("qrc:/textures/lava_strip.png")
+                       : QStringLiteral("file:///") + f;
 }
 
 QImage ResourcePackManager::compositeAtlas()

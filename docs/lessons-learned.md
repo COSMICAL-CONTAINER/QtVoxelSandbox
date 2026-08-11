@@ -433,3 +433,55 @@
     `{0,0}`/`{id,count,dur}` 全报 `-Wmissing-field-initializers`（默认 cmake 构建**不开** -Wextra 故不可见，须
     `-Wall -Wextra -fsyntax-only` 单文件复核才暴露，同 t271 enum/scalar 三目族）；改 `= QString()` 后清零。
 
+---
+
+## Qt 6.11 Texture API 重命名 + 条带 flipbook 动画（t489 验证）
+
+> 元原则：**Qt 小版本会静默重命名 QML 属性；旧名（vOffset/hOffset）在新版被 `Cannot assign to non-existent
+> property` 拒绝 → 编译期不报错、qmlcachegen AOT 通过、运行期组件加载失败 → `root objects after load: 0`。
+> 凡「文档记忆里的旧属性名」跨 Qt 小版本前都要实测命中，不能照搬记忆。**
+
+- **QtQuick3D `Texture.vOffset` / `hOffset` 在 Qt 6.11 已被 `positionV` / `positionU` 取代**（伴 `scaleU/V`、
+  `rotationUV`、`pivotU/V`、`flipU/V` 等一批 UV 变换属性）：用旧名 `Texture { vOffset: 0.5 }` 会运行期报
+  `Cannot assign to non-existent property "vOffset"`、该组件加载失败、整个 QML 文档 `root objects: 0`。旧教程 /
+  记忆里的 `vOffset` 在 6.11+ 必须改 `positionV`。**判别信号**：日志 `root objects after load: 0` + `non-existent
+  property "vOffset"`（或 hOffset）→ 即此重命名；改 positionV/positionU 即过。本工程 `flipV` 名未变（仍可用），
+  但 `vOffset/hOffset` 已废。
+- **`positionV` 的方向语义 = 正值上移采样（采更高 V 区）**：经最小 QtQuick3D 测试程序（`Texture{ positionV:X }` +
+  `window.grabWindow()` 读像素）实测：positionV=k/N 把面 UV v∈[0,1/N]（帧 0 区）上移到 v∈[k/N,(k+1)/N]（帧 k 区）。
+  故 flipbook 条带应「帧 0 放条带**底部**」、positionV 从 0 递增到 (N-1)/N 正向播放（QtQuick3D Texture 把图像顶部
+  对应 v=1，故底部 = 帧 0 = v∈[0,1/N]）。**QtQuick3D 默认 V 约定：图像顶 ↔ v=1**（与 OpenGL 底纹素原点相反，由
+  Texture 上传时翻转；与既有 grass_side「绿在顶 = v=1」、Canvas flipV:false「开口朝上」两处证据一致）。
+  - **方向无法静态/无头验证时， Repeat tiling 兜底**：若方向判反，`tilingModeVertical: Texture.Repeat` 让
+    positionV 超出 [0,1] 的采样回绕 → 仍是循环动画（仅反向播放），不会 ClampToEdge 钉死单帧。无头环境做不了
+    动画肉眼验证时，Repeat 是「方向错也不破」的保险（牺牲：方向判反 = 反向动画，肉眼需 playtest 确认）。
+- **材质级 flipbook（独立条带纹理 + positionV 动画）替代「mesh 烘帧」是流体/连续动画的正确范式**：把 N 帧竖排
+  成**独立条带**（不走共享图集 voxelAtlas，才能只动画水/岩浆而不动其它方块）；mesher 一次性烘焙面 UV 到「单帧
+  区域」v∈[0,1/N]；帧切换由 QML Timer 推进 `property int frame` → 绑 Texture `positionV: frame / N` → 纯材质参数
+  变化。**零 mesh 重建**（F3 `[Xw]` 水重建计数不回升）。对比 t222/t223 旧「每 2s setWaterAnimPhase → buildMesh
+  换 UV 帧」（Swamp 261 段/次 mesh 重建风暴）是结构升级：动画时间维度的变化由材质参数承担，空间维度的几何（水面
+  高度 / 侧面带）由 mesh 承担，两者解耦。
+  - **静水/流水同帧同步**：水条带做「2 列（左=静水 / 右=流水）× N 帧」，mesher 按 cell state 选列（源→左、流→右），
+    两列共享同一 positionV → 静水/流水同帧索引同步动画（机制等价 MC 1.0 still/flow 同步 flipbook）。
+- **半纹素内缩量 = 半纹素 / **纹理总尺寸**，不是 / 单帧尺寸**：flipbook 条带做帧间防渗色时，V 内缩 `hys` 应是
+  `0.5 / 条带总高(px) = 0.5/(N×帧高px)`，**不是** `0.5/帧高px`。后者（如 N=16、帧高 16px 时 = 0.5/16 = 0.03125）
+  恰好等于半帧高 → 把帧 0 区 [0,1/N] 内缩成单点 → 面四顶点 v 全相同 → V 维坍缩成单纹素行（采一条横纹而非整帧）。
+  写成 `0.5/framePx` 看似合理（「半纹素」），但忽略了「归一化 V 的纹素尺寸取决于纹理总高、非单帧高」——条带的
+  纹素密度是按整条带算的。**通用形态**：凡 UV 内缩防渗色，内缩量的分母是该轴的**纹理总尺寸**（像素），与瓦片/
+  帧是否子区无关；子区只决定 UV 落点 [k/N, (k+1)/N]，不改变纹素密度。
+- **动画贴图抽帧规则（MC 动画贴图是单列竖排 strip）**：MC water_still/water_flow/lava_still/lava_flow 等「.png +
+  .png.mcmeta」动画贴图，其 PNG 是**单列竖排 flipbook**：图像宽 = 帧像素边长、高 = 帧数 × 帧边长。抽第 i 帧 = 行
+  [i×width, (i+1)×width)（width 既是帧宽也是帧高，因为正方形帧）。包内帧数与本引擎常量（如 kLavaStripFrames=16）
+  不一致时：取前 N 帧 + 末尾循环补齐（保条带恒 N 帧 → mesher UV 1/N 子区与 QML positionV 步长不错配）。帧数不一致
+  是常态（demo 包 lava_still 20 帧 vs MC 1.0 16 帧），不要假设包帧数 == 引擎常量。
+- **动画方向 / V 约定这类「肉眼才能确认」的渲染细节，用最小 QtQuick3D 测试程序 + grabWindow 读像素可无头验证**：
+  写一个独立 `main.cpp` + `main.qml`（用 `Model{ source:"#Rectangle" }` 内建网格，**勿用 `PlaneGeometry`——Qt 6.11
+  未注册该 QML 类型**，会报 `PlaneGeometry is not a type`；内建网格用 `source:"#Rectangle"/"#Cube"/"#Sphere"`），
+  `Texture{ positionV:X }` + `QTimer::singleShot` 后 `win->grabWindow()` 存 PNG → Python 读像素均色判方向。
+  编译：`g++ main.cpp -lQt6Core -lQt6Gui -lQt6Qml -lQt6Quick -lQt6Quick3D`（MinGW 工具链 g++ 在 D:/Qt/Tools/，
+  Qt 在 D:/Qt/6.11.1/mingw_64/）。这种「最小复现 + 像素断言」是肉眼盲区（动画方向 / 透明排序 / UV 朝向 / 着色）的
+  可迁移验证范式——比「编译过即应可见」（已被 lessons 多条判 FAIL）可靠得多。
+  - 证据：t489——水/岩浆条带 flipbook。用上述测试程序确认 positionV 方向（正向 = 正值上移采样）+ V 约定（图像顶 =
+    v=1）+ Repeat tiling 兜底（方向判反仍循环不破）。运行期实测：稳态 prof `mesh Xreb [Nd 0s **0w**]`（水重建恒 0，
+    动画纯材质参数），`root objects after load: 1`。肉眼动画观感（水面/岩浆面流动）需用户 playtest 确认（无头盲区）。
+

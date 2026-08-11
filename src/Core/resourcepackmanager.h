@@ -8,6 +8,8 @@
 #include <QPair>
 #include <QtQml/qqml.h>
 
+#include "blockregistry.h"   // t489 流体条带帧数常量（kWaterStripFrames / kLavaStripFrames）
+
 // Resource-pack loader core（t414，phase 1：方块贴图覆盖；t415：完整 tile→文件名映射 + 运行期开关 UI）。
 //
 // 启动时解析资源包路径，优先级（spec t414）：
@@ -47,6 +49,15 @@ class ResourcePackManager : public QObject
     // 地形图集贴图源 URL：active → file:///<AppLocalData>/voxelsandbox_rp_atlas.png（落盘的合成图集；
     //   QtQuick3D Texture 不支持 image:// QQuickImageProvider，故必须 file://）；否则 qrc:/textures/atlas.png。
     Q_PROPERTY(QString atlasSource READ atlasSource NOTIFY activeChanged)
+    // t489 流体条带贴图源（材质级 flipbook 动画）：active → file:///<AppLocalData>/voxelsandbox_<x>_strip.png
+    //   （落盘的合成条带 = qrc 程序生成条带 + 包内帧覆盖）；否则 qrc:/textures/<x>_strip.png。水/岩浆段
+    //   独立材质 baseColorMap 指向此条带（不走共享图集 voxelAtlas）→ 动画 positionV 只动水/岩浆，不动其它方块。
+    Q_PROPERTY(QString waterStripSource READ waterStripSource NOTIFY activeChanged)
+    Q_PROPERTY(QString lavaStripSource READ lavaStripSource NOTIFY activeChanged)
+    // t489 条带帧数（与 BlockRegistry::kWaterStripFrames / kLavaStripFrames 同源单一权威；QML positionV 动画
+    //   步长 = k/N 用此值，mesher UV 子区高 1/N 用 blockregistry 常量）。CONSTANT：值不随运行期变。
+    Q_PROPERTY(int waterStripFrames READ waterStripFrames CONSTANT)
+    Q_PROPERTY(int lavaStripFrames READ lavaStripFrames CONSTANT)
     // t415 资源包总开关（镜像 settings.json resourcePackEnabled，缺省 false：避免无感知切换贴图）。
     //   setter 立即持久化；配合 apply() 即时重建图集（也可仅持久化等下次重启生效）。
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY configChanged)
@@ -60,6 +71,11 @@ public:
 
     bool active() const { return m_active; }
     QString atlasSource() const;
+    // t489 流体条带贴图源（材质级 flipbook；详见 Q_PROPERTY 注释）。active → file:/// 落盘合成条带；否则 qrc 程序生成条带。
+    QString waterStripSource() const;
+    QString lavaStripSource() const;
+    int waterStripFrames() const { return BlockRegistry::kWaterStripFrames; }
+    int lavaStripFrames() const { return BlockRegistry::kLavaStripFrames; }
 
     bool enabled() const;
     void setEnabled(bool e);

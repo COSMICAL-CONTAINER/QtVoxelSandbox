@@ -1147,6 +1147,24 @@ public:
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
     static constexpr int AtlasTileCount = 131;
 
+    // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
+    //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
+    //   positionV 动画（QtQuick3D Texture 在 6.11 已把 vOffset 更名 positionV）驱动——**mesh 一次性构建、
+    //   动画纯材质参数，零 buildMesh**（F3 [w]/[s] reb 不回升）。
+    //   **单一权威**：条带构建方（resourcepackmanager：包内帧缩放拼条带 / tools/build_fluid_strips.py：
+    //   程序生成条带）与消费方（chunkgeometry UV 烘焙 + Main.qml positionV 动画）三方都读本常量算帧区
+    //   宽 1/N。改帧数必须三方同步——否则 UV 子区与 positionV 步长错配 → 采到相邻帧或帧间缝。
+    //   - kWaterStripFrames=32：水条带 32 帧（静水列 32 帧 + 流水列 32 帧，2 列各 32 帧）。MC 1.0 静水
+    //     flipbook 为 32 帧（frametime=2 tick），demo 包 water_still.png 实测 16×512 = 32 帧、water_flow.png
+    //     32×1024 = 32 帧 → 包内帧数天然与本常量对齐；包内帧不足时 resourcepackmanager 末尾补齐（循环）。
+    //   - kLavaStripFrames=16：岩浆条带 16 帧（单列）。MC 1.0 岩浆 flipbook 为 16 帧（demo 包 lava_still.png
+    //     16×320 = 20 帧、lava_flow.png 32×512 = 16 帧）→ 取前 16 帧（机制对齐 MC 1.0 16 帧前向循环，
+    //     非 1.13+ 的 ping-pong；demo 包多出的 4 帧 + 回放被裁）。
+    //   - kFluidStripFramePx=16：条带帧像素边长（与图集瓦片 kTile=16 同源；包内帧 >16 缩放到 16）。
+    static constexpr int kWaterStripFrames = 32;
+    static constexpr int kLavaStripFrames = 16;
+    static constexpr int kFluidStripFramePx = 16;
+
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
     //   切勿在渲染层另写 `!= 0`（会把 torch 当 solid → 误剔邻居面 → 透明 bug，见 t130）。
