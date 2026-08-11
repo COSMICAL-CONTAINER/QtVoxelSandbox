@@ -303,7 +303,8 @@ Window {
              + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz)
              + "  render r=" + window.renderDistance + " visible " + window.visibleChunkCount + "/" + (ncx * ncz)
              + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr
-             + "\nentities: mobs " + mobLive + " / items " + itemLive + " / orbs " + orbLive
+             + "\nentities: mobs " + mobLive + "/" + entityManager.count + "  items " + itemLive + "/" + itemEntities.count
+             + "  orbs " + orbLive + "/" + xpOrbs.count
              + "\ndraw-calls: ~" + drawEst + "  (segs vis " + window.visibleSegmentCount
              + " + items " + itemLive
              + " + mobs " + mobLive + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
@@ -7293,10 +7294,10 @@ Window {
     //   mesh 行加模式（greedy/culled）—— greedy 顶点/三角大幅降，可观测 PLAN §4 性能打磨成效。
     //
     // t464 诊断级增强（PLAN §2-F F3 + 帮验证 t437 性能修复）：
-    //   - **entities 行（liveCount 三类）**：mobs/items/orbs 各自的**活体**计数（liveCount()，非 Repeater count）。
-    //     用于验证 t437 orphan 修复——退存档→再进世界时，若这三类 liveCount 跨世界单调累积（每进出一次变高）=
-    //     orphan delegate 泄漏复现（C++ 侧 clearAll 已修，但若 QML 场景图侧仍有孤儿累积，liveCount 仍会涨）。
-    //     liveCount 是 C++ 数据侧真值（slot-reuse 后已释放槽不计入），不掺 Repeater 高水位。
+    //   - **entities 行（liveCount 三类 + t488 槽利用率）**：mobs/items/orbs 各自的**活体**计数（liveCount()）
+    //     与**槽总数**（count = Repeater 高水位）。活体/槽比揭示 slot-reuse 高水位：实体爆发（TNT 爆炸 /
+    //     刷怪）后 count 停在高水位不缩（t488 (a) 根因面），live/slots 接近 0 说明空槽 delegate 高占比 ——
+    //     配合 t488 的 releaseSlot kind 中性化（空槽 Loader 卸载重子树）判断高水位是否还在拖累。
     //   - **game time（time HH:MM · day N · moon M）**：worldClock.dayPhase 派生 24h 制 HH:MM（phase 0=noon=12:00、
     //     0.25=dusk=18:00、0.5=midnight=00:00、0.75=dawn=06:00）+ worldClock.dayCount（完整天数）+ moonPhase（月相）。
     //   - **biome 行**：玩家**脚底所在格**的群系（theWorld.biomeIdAt(floor(feetX), floor(feetZ)) → 通用名 Plains/Hills/

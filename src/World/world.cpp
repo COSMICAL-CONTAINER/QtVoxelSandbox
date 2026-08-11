@@ -69,6 +69,7 @@ void World::beginLoad(int seed)
     m_growthCells.clear();   // t425 网格重置 → 生长方格索引作废（finishLoad 写完 blob 后 rebuildGrowthCells 全图重建）
     m_waterCells.clear();    // perf：网格重置 → 流体方格索引作废（finishLoad 写完 blob 后 rebuildFluidCells 全图重建）
     m_lavaCells.clear();
+    fluidActReset();         // t488：网格重置 → 活动盒作废（旧世界坐标不指向新栅格；finishLoad 置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
     emit seedChanged();
 }
@@ -331,8 +332,27 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     const bool lightSky = BlockRegistry::lightOpacity(lightOldId, oldState) != BlockRegistry::lightOpacity(id, state);
     const bool lightSource = BlockRegistry::lightEmission(lightOldId) > 0 || BlockRegistry::lightEmission(id) > 0;
     if (m_batchFluid) {
+        // t488 perf：天光通道按「列上方是否真能到达」细化。遮光翻转（lightSky）时，若本格上方天光本就被
+        //   某遮光块挡死（如地下岩浆池，列上覆土石）→ 本编辑不改变任何天光（该处恒 0），sky 置 false →
+        //   批量 flush 时 anySky 可能变 false → refloodBox 不再整列（y1=H-1）重 seed 天光，只重算方块光 +
+        //   天光通道保持原值。水×岩浆交互（→黑曜石/石头/圆石，全是 opaque 形成）多为地下深区 → 列上必被
+        //   遮挡 → sky=false → lav 桶 reflood 从 ~125ms 降到 ~40ms（用户实测 lav 110.7ms/s 的剩大头）。
+        //   正确性：天光在「本格上方无遮光块」时才可能受本编辑影响（新 opaque 挡下方 / 移除挡块放天光）；
+        //   上方已有遮光块 → 本格上方天光恒 0、下方天光由上方遮光块决定（与本编辑无关）→ sky 不变，跳过正确。
+        //   非批量路径（recomputeLightAround）不动（逐写即时 re flood，编辑路径须立即反映，代价可接受）。
+        bool skyEff = lightSky;
+        if (skyEff) {
+            bool blockedAbove = false;
+            for (int yy = y + 1; yy < m_height; ++yy) {
+                if (BlockRegistry::lightOpacity(m_chunks.blockAt(x, yy, z), m_chunks.stateAt(x, yy, z)) > 0) {
+                    blockedAbove = true;
+                    break; // 上方首个遮光块即挡死天光（常见：地下交互列上覆土石，1-2 次 blockAt 早退）
+                }
+            }
+            if (blockedAbove) skyEff = false;
+        }
         if (lightSky || lightSource)
-            m_pendingLightEdits.push_back({x, y, z, lightSky});
+            m_pendingLightEdits.push_back({x, y, z, skyEff});
     } else {
         recomputeLightAround(x, y, z, lightOldId, id);
     }
@@ -341,6 +361,11 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     //   非 fluid 写入（作物升阶 / 羊吃草经此入口）id/oldId 均非 Water/Lava → 不设标志，无副作用。
     if (id == BlockRegistry::Water || lightOldId == BlockRegistry::Water) m_waterDirty = true;
     if (id == BlockRegistry::Lava || lightOldId == BlockRegistry::Lava) m_lavaDirty = true;
+    // t488：流体相关写（Water/Lava 增删 + 凝固 Obsidian/Stone/Cobble 覆盖流体）→ 活动盒扩到该格 ±1
+    //   （相邻流体格下 tick 据它重扫；见 m_fluidAct* 头注释）。非流体写不扩（其不置 dirty → 无扫描）。
+    if (id == BlockRegistry::Water || id == BlockRegistry::Lava
+        || lightOldId == BlockRegistry::Water || lightOldId == BlockRegistry::Lava)
+        fluidActExpand(x, y, z);
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -439,6 +464,34 @@ void World::pokeFluidDirty(int x, int y, int z)
         if (b == BlockRegistry::Water) m_waterDirty = true;
         else if (b == BlockRegistry::Lava) m_lavaDirty = true;
     }
+    // t488：编辑点邻接流体 → 活动盒扩到该格 ±1（流体 tick 据此只扫盒内区域，见 m_fluidAct* 头注释）。
+    fluidActExpand(x, y, z);
+}
+
+// t488：活动盒扩展到 (x,y,z)±1。首次扩展（盒空）以该格为初值；后续取并（min/max）。O(1)。
+void World::fluidActExpand(int x, int y, int z)
+{
+    if (!m_fluidActValid) {
+        m_fluidActX0 = m_fluidActX1 = x;
+        m_fluidActY0 = m_fluidActY1 = y;
+        m_fluidActZ0 = m_fluidActZ1 = z;
+        m_fluidActValid = true;
+    } else {
+        if (x - 1 < m_fluidActX0) m_fluidActX0 = x - 1;
+        if (x + 1 > m_fluidActX1) m_fluidActX1 = x + 1;
+        if (y - 1 < m_fluidActY0) m_fluidActY0 = y - 1;
+        if (y + 1 > m_fluidActY1) m_fluidActY1 = y + 1;
+        if (z - 1 < m_fluidActZ0) m_fluidActZ0 = z - 1;
+        if (z + 1 > m_fluidActZ1) m_fluidActZ1 = z + 1;
+    }
+}
+
+// t488：清空活动盒（每次流体 tick 扫描后 + 世界重置时）。扫描后清 → 盒只累积「自上次扫描以来」的活动。
+void World::fluidActReset()
+{
+    m_fluidActValid = false;
+    m_fluidActX0 = m_fluidActY0 = m_fluidActZ0 = 0;
+    m_fluidActX1 = m_fluidActY1 = m_fluidActZ1 = 0;
 }
 
 void World::tickWaterFlow()
@@ -451,6 +504,12 @@ void World::tickWaterFlow()
     //   Water 时设 true。本行清 false；apply 内 setWaterSilent 若真写则重设 → 稳态（零写入）后停扫。
     if (!m_waterDirty) return;
     m_waterDirty = false;
+    // t488：拷贝活动盒到局部（本次扫描范围）+ 清盒（下次 tick 盒 = 本次 tick 的写入 / 编辑 → 波前逐 tick
+    //   向前推，级联正确）。盒空（worldgen / 加载一次性确认 / 无近期流体活动但标志残留）→ 全量快照兜底。
+    const bool actValid = m_fluidActValid;
+    const int ax0 = m_fluidActX0, ay0 = m_fluidActY0, az0 = m_fluidActZ0;
+    const int ax1 = m_fluidActX1, ay1 = m_fluidActY1, az1 = m_fluidActZ1;
+    fluidActReset();
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return;
     QElapsedTimer t380t;
@@ -473,6 +532,9 @@ void World::tickWaterFlow()
     for (const quint64 k : m_waterCells) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
+        // t488：盒过滤 —— 只保留「最近有流体相关写入/编辑区域」内的格（±1 margin 已覆盖可反应格）；盒空
+        //   不滤（worldgen / 加载全量确认）。索引项可能含过期格（直写漏通知）→ blockAt 复核跳过（同旧路径）。
+        if (actValid && (x < ax0 || x > ax1 || y < ay0 || y > ay1 || z < az0 || z > az1)) continue;
         if (m_chunks.blockAt(x, y, z) != BlockRegistry::Water) continue; // 过期索引项（直写漏通知）→ 跳过
         cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
     }
@@ -671,9 +733,11 @@ void World::tickWaterFlow()
         m_chunks.clearAllDirty();  // 两段重建完统一清脏（同逐格路径的 emit→clear 顺序）
     }
     // t380 perf：活跃水扫描耗时（仅非稳态扫描打：cells=参与计算的水格数、writes=本 tick 实写数、settled=是否收敛停扫）。
-    qInfo("vo.perf: tickWaterFlow %lldus cells=%d writes=%d settled=%d",
+    //   t488：box=活动盒是否命中（1=盒过滤快照 / 0=全量兜底）—— 看 cells 数量对比即可知盒收窄了多少扫描范围。
+    //   注：elapsed() 单位 ms（旧版误标 "us"，t488 改正 —— 此值含末尾批量 reflood+emit 重建，非纯扫描）。
+    qInfo("vo.perf: tickWaterFlow %lldms cells=%d writes=%d settled=%d box=%d",
           t380t.elapsed(), int(cells.size()), int(srcRegs.size() + evaps.size() + int(adds.size())),
-          anyChange ? 0 : 1);
+          anyChange ? 0 : 1, actValid ? 1 : 0);
 }
 
 // t343 岩浆流 tick（见 world.h 头注释）。机制等价 MC 1.0 主世界岩浆：比水慢 ~30 倍、扩散 3 格、无源再生。
@@ -687,6 +751,11 @@ void World::tickLavaFlow()
     // t380 perf：稳态早退（同 tickWaterFlow；m_lavaDirty 由 pokeFluidDirty / setWaterSilent 写 Lava 时设）。
     if (!m_lavaDirty) return;
     m_lavaDirty = false;
+    // t488：拷贝活动盒到局部（本次扫描范围）+ 清盒（同 tickWaterFlow；盒空 → 全量快照兜底）。
+    const bool actValid = m_fluidActValid;
+    const int ax0 = m_fluidActX0, ay0 = m_fluidActY0, az0 = m_fluidActZ0;
+    const int ax1 = m_fluidActX1, ay1 = m_fluidActY1, az1 = m_fluidActZ1;
+    fluidActReset();
     ++m_lavaIgniteIndex; // ignite 窗口序号（每流 tick +1，喂散布概率 → 错峰焚毁）
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return;
@@ -705,6 +774,8 @@ void World::tickLavaFlow()
     for (const quint64 k : m_lavaCells) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
+        // t488：盒过滤（同 tickWaterFlow；只扫最近活动区域，盒空 → 全量兜底）。
+        if (actValid && (x < ax0 || x > ax1 || y < ay0 || y > ay1 || z < az0 || z > az1)) continue;
         if (m_chunks.blockAt(x, y, z) != BlockRegistry::Lava) continue; // 过期索引项 → 跳过
         cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
     }
@@ -858,14 +929,15 @@ void World::tickLavaFlow()
         emit worldChanged();      // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
         m_chunks.clearAllDirty(); // 两段重建完统一清脏
     }
-    qInfo("vo.perf: tickLavaFlow %lldus cells=%d writes=%d settled=%d",
-          t380t.elapsed(), int(cells.size()),
-          int(obsidianTargets.size() + solidifyTargets.size() + evaps.size() + int(adds.size())),
-          anyChange ? 0 : 1);
-
-    // 5) ignite pass（spec「木质方块邻岩浆概率着火焚毁」）：遍历本 tick 岩浆格，扫 6 邻，木类方块按散布概率焚毁。
+    // 5) ignite pass（spec「木质方块邻岩浆概率着火焚毁」）：先收集焚毁目标（扫描），日志后再批量应用。
     //    散布确定性（hashVoxel + 窗口序号，PLAN §2-K）→ 同 seed 同窗口同焚毁，错峰非全部同步烧光。setBlock Air
     //    发 blockBroken → 触发破块粒子 / 音（机制等价 MC 木块被岩浆点燃焚毁）。t344 完整着火系统留后续。
+    //    t488 perf 批量焚毁（N 焚毁 1 重建）：旧实现逐焚毁调 setBlock → 每焚毁 1× recomputeLightAround +
+    //    1× emit worldChanged + 1× clearAllDirty = 一岩浆 tick 30-48 次 chunk mesh 重建（lav 桶 155ms spike，
+    //    用户实测 lav 110.7ms/s 的组成部分）。改：先收集全部焚毁目标，再批量应用 —— m_batchFluid 下直写
+    //    （只标脏 + 延迟光照，不 emit）+ 逐焚毁 emit blockBroken（粒子/音反馈，不触发 mesh 重建）+ 末尾
+    //    1 次 flushPendingLightEdits + 1 次 emit worldChanged + 1 次 clearAllDirty（同 destroySphereSilent
+    //    t383 批量收口模式）。blockBroken 信号语义不变（焚毁仍破块粒子 / 音）；仅把「N 次世界重建」折叠为 1 次。
     auto isWoodLike = [](quint8 id) -> bool {
         using BR = BlockRegistry;
         return id == BR::Log || id == BR::SpruceLog || id == BR::Planks || id == BR::CraftingTable || id == BR::Leaves
@@ -873,6 +945,8 @@ void World::tickLavaFlow()
             || id == BR::WoodPressurePlate || id == BR::WoodDoor || id == BR::WoodTrapdoor || id == BR::Chest
             || id == BR::SprucePlanks || id == BR::SpruceSlab || id == BR::SpruceFence || id == BR::SpruceDoor; // t466 云杉木制品（木质，邻岩浆焚毁）
     };
+    struct BurnTarget { int x, y, z; };
+    std::vector<BurnTarget> burnTargets;
     for (const LCell &c : cells) {
         const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
         for (const auto &n : neigh) {
@@ -882,10 +956,35 @@ void World::tickLavaFlow()
             if (!isWoodLike(nb)) continue;
             // 散布概率判定（hashVoxel + 窗口序号 → 确定性伪随机，PLAN §2-K）。命中即焚毁。
             const quint32 hv = hashVoxel(m_seed ^ 0x1A7A, nx, ny, nz) ^ (quint32(m_lavaIgniteIndex) * 2654435761u);
-            if ((hv % 100u) < unsigned(kLavaIgnitePct)) {
-                setBlock(nx, ny, nz, BlockRegistry::Air); // 焚毁（发 blockBroken → 破块粒子/音）
-            }
+            if ((hv % 100u) < unsigned(kLavaIgnitePct))
+                burnTargets.push_back({nx, ny, nz});
         }
+    }
+    // t488：box=活动盒是否命中（1=盒过滤快照 / 0=全量兜底）—— 看 cells 数量对比即可知盒收窄了多少扫描范围。
+    //   burns=本 tick 岩浆焚毁木块数（ignite pass 收集数；成本在下方批量 reflood+重建，不在此行计时内）。
+    //   注：elapsed() 单位 ms（旧版误标 "us"，t488 改正 —— 此值含末尾批量 reflood+emit 重建，非纯扫描）。
+    qInfo("vo.perf: tickLavaFlow %lldms cells=%d writes=%d settled=%d box=%d burns=%d",
+          t380t.elapsed(), int(cells.size()),
+          int(obsidianTargets.size() + solidifyTargets.size() + evaps.size() + int(adds.size())),
+          anyChange ? 0 : 1, actValid ? 1 : 0, int(burnTargets.size()));
+
+    if (!burnTargets.empty()) {
+        m_batchFluid = true;
+        for (const BurnTarget &b : burnTargets) {
+            const quint8 oldId = m_chunks.blockAt(b.x, b.y, b.z);
+            if (oldId == BlockRegistry::Air) continue; // 两岩浆格邻同一木块重复命中 → 已焚毁，跳过（防重复 blockBroken / 光编辑）
+            m_chunks.setBlock(b.x, b.y, b.z, BlockRegistry::Air); // 直写 + 标脏（含跨 chunk 边界邻接），不 emit
+            noteGrowthWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t425：木类非生长方块 → no-op，保持一致
+            noteFluidWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air);  // perf：木类非流体 → no-op，保持一致
+            m_pendingLightEdits.push_back({b.x, b.y, b.z, true});      // 木→air 天光通（遮光块消失，sky），延迟联合 reflood
+            emit blockBroken(b.x, b.y, b.z, int(oldId));               // 焚毁破块粒子 / 音（机制等价 MC 燃烧破块反馈）
+            checkCactusOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // ② 失撑复检（正上方 Cactus 整柱坍落，同 setBlock 路径）
+            pokeFluidDirty(b.x, b.y, b.z); // 焚毁邻接流体 → 标脏 + 活动盒扩展（级联焚毁 / 水流入新坑，同旧 setBlock 语义）
+        }
+        m_batchFluid = false;
+        flushPendingLightEdits(); // 延迟光照重算 → 联合盒一次 refloodBox（无编辑则 no-op）
+        emit worldChanged();       // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
+        m_chunks.clearAllDirty();  // 两段重建完统一清脏（同逐格路径 emit→clear 顺序）
     }
 }
 
@@ -1328,6 +1427,9 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
     //   poke 略重，直接置两标志 true 保守（稳态扫描后即清，一次性开销可忽略）。
     m_waterDirty = true;
     m_lavaDirty = true;
+    // t488：破坏区扩进活动盒（±1 由 fluidActExpand 单格并）→ 下次流体 tick 只扫破坏区而非全量快照。
+    //   逐破坏块 O(1)（半径 3 球 ≤ ~343 项），爆炸稀有可忽略。
+    for (const DestroyedVoxel &d : destroyed) fluidActExpand(d.x, d.y, d.z);
     emit worldChanged();
     m_chunks.clearAllDirty();
     qInfo("vo.edit: explosion destroyed = %d (center %d,%d,%d r=%g)",
@@ -1853,6 +1955,7 @@ void World::generate()
     m_growthCells.clear();   // t425 全新世界 → 清生长方格索引（worldgen placeSugarcane 经 setVoxelIfAir 增量重建）
     m_waterCells.clear();    // perf：全新世界 → 清流体方格索引（worldgen 直写 chunk 不经写入路径 → 末尾 rebuildFluidCells 全图重建）
     m_lavaCells.clear();
+    fluidActReset();         // t488：全新世界 → 活动盒作废（generate 末置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）
 
     // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 海域」决定，下层 dirt / 深 stone。

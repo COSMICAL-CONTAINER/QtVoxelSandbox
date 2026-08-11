@@ -693,6 +693,25 @@ private:
     //   即清，防御加载态含未稳流场）。标志只设 true（tick 自身清），不会漏触发（所有块写路径均 poke）。
     bool m_waterDirty = false;
     bool m_lavaDirty = false;
+    // t488 perf：流体 tick **增量扫描活动盒**。根因：水×岩浆交互区（水流/岩浆流触邻凝固黑曜石/石头/圆石）
+    //   每 tick 写入 → setWaterSilent / pokeFluidDirty 持续置 m_*Dirty → tickWaterFlow/tickLavaFlow 每回
+    //   全量快照遍历**整个**水/岩浆格集合（大水体数万格 × 每格 ~15-40 blockAt）→ 用户实测 wat 29.7 + lav
+    //   110.7 ms/s（lav 单次 ~330ms 每 3s 一次 spike）。修：只扫「最近有流体相关写入/编辑的区域」—— 每次
+    //   setWaterSilent（写 Water/Lava 及凝固 Obsidian/Stone/Cobble，oldId/newId 含流体）与 pokeFluidDirty
+    //   （块编辑邻接流体）把盒扩展到该格 ±1；tick 扫描前把盒拷到局部 + 清盒（下次 tick 盒 = 本次 tick 的
+    //   写入），建快照时跳过盒外格 → 稳态大水体零扫描、交互区只扫波前 + 凝固区。正确性：流体格状态只可能
+    //   因写入改变（本 tick apply 或外部编辑），任何会变化的格 ⊆ 最近写入 ±1 = 盒 → 无漏扫；流场波前 / 蒸发 /
+    //   凝固级联逐 tick 经盒向前推（新写入再扩盒），行为与全量扫描一致。盒空但 m_*Dirty 置位（worldgen /
+    //   加载一次性确认）→ 全量扫描兜底。ignite pass（邻岩浆木焚毁）用盒内格 —— 焚毁经 setBlock→pokeFluidDirty
+    //   再扩盒，焚毁级联同样逐窗推进；远离活动的木块不焚毁（机制近似收敛，可接受）。
+    int m_fluidActX0 = 0, m_fluidActY0 = 0, m_fluidActZ0 = 0;
+    int m_fluidActX1 = 0, m_fluidActY1 = 0, m_fluidActZ1 = 0;
+    bool m_fluidActValid = false; // 盒非空（有最近流体活动）
+    // 把活动盒扩展到 (x,y,z)±1（含被写格本身，margin 1 覆盖 6 正交邻可反应格）。O(1)；流体 tick 内部写入 /
+    //   块编辑触发，频率由活动强度决定。世界越界由写入路径先挡，此处不再钳。
+    void fluidActExpand(int x, int y, int z);
+    // 清空活动盒（每次流体 tick 扫描后 + 世界重置时）。扫描后清 → 盒只累积「自上次扫描以来」的活动。
+    void fluidActReset();
     static constexpr int kFlowTickInterval = 3;   // tickWaterFlow 节流间隔（WorldClock tick 单位 = 100ms → 0.3s/格）
     static constexpr int kMaxFlowLevel = 7;       // 水流最大蔓延等级（state 1..7；机制等价 MC 1.0 流水 7 格扩散）
     // t343 岩浆流 tick 节流计数 + 常量：tickLavaFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到

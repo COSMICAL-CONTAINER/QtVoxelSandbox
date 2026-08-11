@@ -29,12 +29,17 @@
 //     → report 为窗口内总 ms。
 //   sim（= 逐帧桶之和 / 帧数）≈ player.simMs（既有 1s tick CPU 平均），交叉核对两路计时一致。
 //
-// 帧分解桶（main_total / render_cpu，perf-t520 新增）—— 区分 GUI 主线程 vs 渲染线程瓶颈：
+// 帧分解桶（main_total / render_cpu / qmlSync，perf-t520 新增）—— 区分 GUI 主线程 vs 渲染线程瓶颈：
 //   - main_total：frameSwapped → 下一 frameSwapped 的总耗时（GUI 线程帧周期；含 sim + QML binding /
 //     scenegraph update / 同步等待）。在 threaded render loop 下 ≈ 整帧时间，是「帧率上限」。
 //   - render_cpu：beforeRendering → afterRendering 的耗时（渲染线程 CPU 侧编码 + GPU 提交阻塞；
 //     **非**真 GPU 时间 —— QtQuick3D 路径无公开 GPU 计时查询，render_cpu 含 GPU stall 但不等同纯 GPU
 //     时间，已在报告字串中诚实标注）。两者均从 main.cpp 经 addSampleMs 推入，按 ms/frame 报告。
+//   - t488 residual 残留桶：report 时按 main_total − (sim 逐帧和 + qmlSync) 派生（不单独计时），显式量化
+//     main_total 内没被 sim/qmlSync 覆盖的部分。诊断：residual 大 + render_cpu 同量级大 → 主线程在等渲染
+//     线程（frameSwapped 被渲染节奏拖晚，vsync / 渲染 bound）；residual 大 + render_cpu 小 → 主线程有
+//     未插桩重活（QML 绑定扇出 / chunk mesh 重建 / 实体 delegate 高水位）。residual ≈ frame 周期 − 已知
+//     桶之和，正常帧率下 ≈ vsync 等待（非浪费 CPU）。
 //   诊断公式（threaded render loop）：frame = max(main_total, render_cpu) 近似。
 //     - main_total >> render_cpu → 主线程 bound（QML binding / 物理 tick / scene-graph update）。
 //     - render_cpu >> main_total → 渲染线程 bound（GPU 提交 / 渲染队列长 / draw-call 多）。

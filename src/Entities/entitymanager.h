@@ -806,10 +806,19 @@ private:
         return slot;
     }
     // 释放槽位：alive=false + 入 free list + --m_liveCount。不 erase → count 不降 → Repeater delegate 稳定。
+    //   t488 perf：释放时把 kind 清回中性值（Item=非 Mob / 非 FallingBlock）→ 空槽的 QML delegate 内所有
+    //   mobType Loader / FallingBlock Model 的 active/visible 条件（entKind===Mob/FallingBlock）立即翻 false →
+    //   Loader 卸载重子树（MobModel + 多子 Model + 贴图），空槽 delegate 坍缩为裸隐藏 Node。高水位 slot-reuse
+    //   保 count 单调不降（Repeater delegate 永不销毁，lessons-learned t170），代价是空槽 delegate 常驻场景图；
+    //   旧实现空槽残留上一任实体的 kind/mobType → 对应 Loader 仍 active → 重子树被实例化 + 每 revision bump
+    //   同步遍历（64 槽高水位 × ~108 节点 = 数千 3D 节点 / 帧），是「/kill @e 后 main 仍高」的主嫌疑（t488 (a)）。
+    //   索引语义零变化（release 不 shift；kind 仅影响已释放空槽的只读呈现，spawn 复用槽时 std::move 覆盖回真值）。
     void releaseSlot(int idx)
     {
         if (idx < 0 || idx >= int(m_entities.size())) return;
-        m_entities[size_t(idx)].alive = false;
+        Entity &e = m_entities[size_t(idx)];
+        e.alive = false;
+        e.kind = Item; // t488：空槽视觉中性化（QML Loader 据此卸载重子树；见方法注释）
         m_freeSlots.push_back(idx);
         --m_liveCount;
     }

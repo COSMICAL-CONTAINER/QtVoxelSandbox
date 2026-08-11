@@ -155,11 +155,20 @@ void FrameProfiler::flush()
     // 瓶颈标注：max 一侧标 *（视觉提示「这一侧是瓶颈」），近相等标 ≈。
     const QLatin1String mainTag = (mainMs >= renderMs && mainMs > 0.0) ? QLatin1String("*") : QLatin1String(" ");
     const QLatin1String renderTag = (renderMs > mainMs && renderMs > 0.0) ? QLatin1String("*") : QLatin1String(" ");
+    // t488 perf residual 残留桶：main_total 与「已知桶（sim 逐帧和 + qmlSync）」之差，显式量化主线程帧周期内
+    //   没被 sim/qmlSync 覆盖的部分（事件循环 / QML binding 同步外开销 / mesh 重建 / 等渲染线程）。诊断公式：
+    //   main ≈ sim + qmlSync + residual。residual 大时对照 render_cpu：
+    //     - render_cpu 同量级大 → 主线程在等渲染线程（frameSwapped 被渲染节奏拖晚）→ 瓶颈在渲染侧（draw-call /
+    //       GPU 提交），应查渲染开销而非主线程；
+    //     - render_cpu 小、residual 仍大 → 主线程有未插桩重活（QML 绑定扇出 / chunk mesh 重建 / 实体 delegate
+    //       高水位）→ 去那侧查。residual 可为负（main_total 样本与 tick 帧数不对齐的测量噪声，负值即噪声标志）。
+    const double residualMs = mainMs - simMs - syncMs;
     QString frameLine = QStringLiteral("frame ms/f: ")
         + "main" + mainTag + QString::number(mainMs, 'f', 1)
         + "  render" + renderTag + QString::number(renderMs, 'f', 1)
         + "  qmlSync " + QString::number(syncMs, 'f', 1)
-        + "  (frame ≈ max(main,render); main ≈ sim+qmlSync+循环; qmlSync=GUI scene-graph 同步)";
+        + "  residual " + QString::number(residualMs, 'f', 1)
+        + "  (frame≈max(main,render); main≈sim+qmlSync+residual; residual=未插桩/等渲染)";
 
     // t500 perf mob 子分解（逐帧 ms/f，÷ frames）：mob 桶（PlayerController tickImpl 整段）拆成 mobLoop
     //   （EntityManager::tick）/ mobHostile（tickHostileLife）/ mobSpawn（tickSpawners）三函数，mobLoop 再拆
