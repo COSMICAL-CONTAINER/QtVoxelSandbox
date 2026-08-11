@@ -1409,9 +1409,9 @@ t18                        （背包，依赖 hotbar）
 
 | 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
 |---|---|---|---|---|
-| t488 | ⏳ | **性能残留诊断（/kill @e 后 main 仍 ~52ms）** | — | profiling + 全栈 |
-| t489 | ⏳ | **水 + 岩浆流动动画（材质级，替代静态水）** | t488 | resourcepackmanager + chunkgeometry + shaders/material |
-| t490 | ⏳ | **TNT 连锁爆炸（沙漠神殿 3×3 陷阱只爆 1 个）** | — | world.cpp / entitymanager.cpp（detonateTntBlock） |
+| t488 | ✅ | **性能残留诊断（/kill @e 后 main 仍 ~52ms）** `42cfb88` | — | profiling + 全栈 |
+| t489 | ✅ | **水 + 岩浆流动动画（材质级，替代静态水）** `f298b87` | t488 | resourcepackmanager + chunkgeometry + Main.qml |
+| t490 | ✅ | **TNT 连锁爆炸（沙漠神殿 3×3 陷阱只爆 1 个）** `41f795c` | — | entitymanager.cpp（PrimedTnt）+ playercontroller.cpp（点火源）+ Main.qml（白闪） |
 
 **t488 详细**：用户实测——开局 87 FPS 但 `world 140 [wat 29.7 lav 110.7]`（水+岩浆交互区，老流体瓶颈仍在）；TNT 爆炸+/kill @e 清实体后 mobs 1/items 0，但 **main 仍 ~52ms**（sim 5.77 + qmlSync 1.6 = 7.4 → **残留 ~44ms**），且 **mob 桶 5.23ms 给 1 只怪**（疑实体槽高水位不缩，m_entities vector 不 shrink → 每 tick 迭代空槽）。诊断：(a) EntityManager/ItemEntityManager 的 slot 高水位（vector size）在实体爆发（爆炸掉落/箭）后是否永久膨胀 → 每 tick 迭代大量空槽；(b) main_total − sim − qmlSync 的 44ms 残留在哪（Qt 事件循环 / 某每帧 QML 绑定 / 信号扇出 / chunk Model 绑定）；(c) 流体交互区 wat 29.7 + lav 110.7（d26cef8 light 合并后仍高 → 是否 settled=0 持续写 + mesh 重建，或岩浆 tick 本身重）。**用探针/日志定位**（FrameProfiler 加 residual 桶 / entity 槽利用率日志）。验收：定位残留根因 + 修到 /kill @e 后 main <15ms（回近 87 FPS）。
 **t489 详细**：现水翻页改静态（b5cc1c6 消 mesh 风暴）→ 用户要流动动画回来。**正确做法 = 材质级动画（不重建 mesh）**：MC 资源包 `lava_flow.png`/`lava_still.png`/`water_flow.png`/`water_still.png` 是 **32×512（= 16 帧 32×32 竖排 flipbook）**。实现动画纹理系统：loader 把 32×512 切成 16 帧 → 运行期按时间选帧（材质 uniform / 纹理数组 / UV 偏移），**不触发 buildMesh**（水段/岩浆段 mesh 用静态 UV，动画由材质参数驱动）。同时恢复水 + 岩浆（静/流）的流动视觉。验收：水面/岩浆面有流动动画；F3 mesh reb 不回升（材质驱动非 mesh 重建）；性能不退化。注：若 QtQuick3D PrincipledMaterial 不支持 per-vertex UV 动画，评估纹理数组 + shader 或 QtQuick3D 的 Texture flipbook。
