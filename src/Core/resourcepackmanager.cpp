@@ -356,6 +356,15 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {99, QStringLiteral("light_gray_bed.png")},      // bed_light_gray
         {100, QStringLiteral("purple_bed.png")},         // bed_purple
         {101, QStringLiteral("brown_bed.png")},          // bed_brown
+        // t493 青金矿背景用包石头：tile 108 lapis_ore → pack 内 lapis_ore.png（包内 stone 底纹 + 青金斑，
+        //   与普通 stone 风格一致 → 矿脉不再一眼可见）。非 pack 时回落程序生成 default_lapis_ore.png
+        //   （自绘石头底 + 群青斑簇 + 黄铁矿金点）。包内缺该 PNG 时安全跳过（保留程序生成瓦片）。
+        {108, QStringLiteral("lapis_ore.png")},          // lapis_ore（t493：pack 激活用包内贴图，背景与包 stone 一致）
+        // t494 熔炉点燃态正面：tile 134 furnace_front_on → pack 内 furnace_front_on.png（拱洞内带火，机制等价
+        //   MC 1.0 熔炉燃烧时正面发光）。mesher 据 Furnace state 的 FurnaceStateLitFlag 选 14(灭)/134(点燃)；
+        //   非 pack 时回落程序生成 default_furnace_front_on.png（圆石底 + 拱框 + 亮黄橙火焰）。包内缺该 PNG
+        //   时安全跳过（保留程序生成瓦片）。注：demo 包（1.8.2.2）有 furnace_front_on.png（带火正面）。
+        {134, QStringLiteral("furnace_front_on.png")},   // furnace_front_on（t494：熔炉燃烧正面带火炉口）
     };
     return kMap;
 }
@@ -602,7 +611,7 @@ QList<QImage> extractAnimFrames(const QString &pngPath, int maxFrames)
 // t489 把某列（col=0..1）的前 N 帧覆盖进条带。strip 是 (2 列 × N 行) 合成图，每帧 16×16。
 //   frames 不足 N 时：末尾用最后一帧循环补齐（保条带恒为 N 帧 → mesher UV 1/N 子区与 QML positionV 步长不错配）。
 //   frames 为空（包缺该贴图）→ 该列保留程序生成底（不覆盖）。
-void paintColumnFrames(QImage &strip, int col, int cols, int framePx, int frameCount, const QList<QImage> &frames)
+void paintColumnFrames(QImage &strip, int col, int /*cols*/, int framePx, int frameCount, const QList<QImage> &frames)
 {
     if (frames.isEmpty())
         return; // 包缺该贴图 → 保留程序生成底

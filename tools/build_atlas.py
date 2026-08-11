@@ -6,7 +6,8 @@
   0 grass_top / 1 grass_side / 2 dirt / 3 stone / 4 sand
   5 cobble / 6 log_top / 7 log_side / 8 planks / 9 leaves
   10 crafting_table_top / 11 crafting_table_side
-  12 furnace_top / 13 furnace_side / 14 furnace_front
+  12 furnace_top / 13 furnace_side / 14 furnace_front（t80，炉口朝 -Z）
+  134 furnace_front_on（t494，熔炉点燃态前面：拱洞内亮黄橙火焰；mesher 据 Furnace state 点燃 bit 选 14/134）
   15 coal_ore / 16 iron_ore
   17 torch（t88，程序生成原创像素图）
   18 bedrock（t119，程序生成原创像素图）
@@ -274,6 +275,9 @@ TILES = [
     "default_lever",              # 131 lever（杠杆各面同贴图；木质底座 + 中央竖直扳柄 + 顶部圆柄头；右键扳动点燃邻接 TNT）
     "default_wood_button",        # 132 wood_button（木按钮各面同贴图；木质底座 + 中央凸起圆钮；右键按点点燃邻接 TNT）
     "default_stone_button",       # 133 stone_button（石按钮各面同贴图；石质底座 + 中央凸起圆钮；右键按点点燃邻接 TNT）
+    "default_furnace_front_on",   # 134 furnace_front_on（t494 熔炉点燃态前面贴图；圆石底 + 拱框 + 拱洞内亮黄橙火焰；
+                                  #    mesher 据 Furnace state 的点燃 bit（FurnaceStateLitFlag）选 14(灭)/134(点燃)；
+                                  #    机制等价 MC 1.0 熔炉燃烧时正面发光；tools/build_furnace.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

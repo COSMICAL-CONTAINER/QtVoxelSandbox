@@ -296,10 +296,15 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
     //   编码）；其余三侧面 furnace_side(13)、顶/底 furnace_top(12)。此前熔炉未在此特判 → 落 BlockRegistry::tileIndex
     //   兜底（前面恒 -Z 固定方向）。chestFrontFace 是「state 低 2 位 → 水平前面 Face」通用解码器（命名历史性，
     //   0=+X 1=-X 2=+Z 3=-Z），chest / furnace 共用（编码同源）；熔炉复用之，不改箱子行为。
+    // t494 熔炉燃烧态：state 的 FurnaceStateLitFlag（bit2）= 1 表「冶炼进行中」→ 前面用 furnace_front_on(134)
+    //   （拱洞内带火，机制等价 MC 1.0 熔炉燃烧时正面发光）；bit2=0 用 furnace_front(14)（灭）。由 FurnaceUI
+    //   冶炼 tick 在点燃/熄火边界经 PlayerController::setFurnaceLit 翻转本位（5 参数 setBlock → 仅 worldChanged
+    //   重建 mesh，朝向低 2 位保留）。侧面/顶底不受燃烧态影响（同 furnace_side / furnace_top）。
     if (block == BlockRegistry::Furnace) {
         const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
         const int frontFace = int(BlockRegistry::chestFrontFace(state)); // 前面（炉口）所朝面
-        if (face == frontFace) return d.frontTile;                       // furnace_front（炉口）
+        if (face == frontFace)
+            return (state & BlockRegistry::FurnaceStateLitFlag) != 0 ? 134 : 14; // 134=front_on(带火) / 14=front(灭)
         if (face == int(BlockRegistry::Top) || face == int(BlockRegistry::Bottom))
             return d.topTile;                                            // 顶/底 = furnace_top
         return d.sideTile;                                               // 其余三侧面 = furnace_side

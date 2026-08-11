@@ -1151,9 +1151,11 @@ public:
     //      SweetBerryBush 方块 def 各面=103（基底阶段 0），mesher 在 PartialBlockGeometry::append 的
     //      SweetBerryBush case 内据 state 选 tile = 103 + stage（0/1/2）。机制等价 MC 1.0 sweet berry bush；
     //      名称/贴图原创自绘 §9a；tools/build_sweet_berry.py 程序生成原创像素图）。
-    //   106=pack_ice（t468 浮冰各面贴图）/ 107=blue_ice（t468 蓝冰各面贴图）；tools/build_ice.py 程序生成。
-    //   108=lapis_ore（t471 青金矿石各面贴图；石头底 + 群青深蓝斑簇 + 黄铁矿金点，原创自绘 §9a；
-    //      LapisOre 各面=本 tile；tools/build_ore.py 程序生成）。
+    //   106=pack_ice（t468/t495 浮冰各面贴图；淡蓝白压实冰 + 密实细裂纹 + 反光高光，非白羊毛；
+    //      tools/build_ice.py 程序生成）/ 107=blue_ice（t468 蓝冰各面贴图；淡蓝 + 纵向纹路，最滑）。
+    //   108=lapis_ore（t471/t493 青金矿石各面贴图；非 pack 时=石头底 + 群青深蓝斑簇 + 黄铁矿金点，
+    //      原创自绘 §9a；pack 激活时由 resourcepackmanager 用包内 lapis_ore.png（包内 stone 底纹 +
+    //      青金斑，与普通石头风格一致 → 矿脉不再一眼可见）；LapisOre 各面=本 tile；tools/build_ore.py 程序生成）。
     //   117=pumpkin_side（t482 南瓜侧面贴图；橙色 + 纵向瓜棱深纹；tools/build_pumpkin.py 程序生成原创像素图）。
     //   118=pumpkin_face（t482 南瓜前面贴图；橙色 + 刻面双眼 + 锯齿嘴；Pumpkin frontTile=本 tile，机制等价
     //     MC 刻面南瓜 jack o'lantern；作造物头时面朝玩家侧）。
@@ -1162,7 +1164,10 @@ public:
     //      mesher 走 cross 几何段；机制等价 MC 1.0 cobweb；tools/build_cobweb.py 程序生成原创像素图）。
     //   121=rail（t484 铁轨贴地薄板 flat 贴图；透明底 + 棕色枕木 + 灰铁双轨，alphaCutoff cutout；Rail 各面=本 tile，
     //      mesher 走 PartialBlockGeometry Rail 水平 quad case；机制等价 MC 1.0 rail；tools/build_rail.py 程序生成原创像素图）。
-    // 图集由 tools/build_atlas.py 打包全部 122 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   134=furnace_front_on（t494 熔炉点燃态前面贴图；圆石底 + 拱框 + 拱洞内亮黄橙火焰，机制等价 MC 1.0
+    //     熔炉燃烧时正面发光；mesher 据 Furnace state 的 FurnaceStateLitFlag 选 14(灭)/134(点燃)；
+    //     tools/build_furnace.py 程序生成原创像素图）。
+    // 图集由 tools/build_atlas.py 打包全部 135 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -1174,7 +1179,7 @@ public:
     //   111=bookshelf（t474 书架各面贴图；木板边框 + 中央书脊彩色书列（红 / 蓝 / 绿 / 棕书脊），原创自绘
     //      §9a；Bookshelf 各面=本 tile；tools/build_bookshelf.py 程序生成）。
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 120）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 135）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -1182,7 +1187,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 134;
+    static constexpr int AtlasTileCount = 135;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
@@ -1363,6 +1368,16 @@ public:
     //   自然实现，与 state 无关）。state 经 m_states 落 SQLite round-trip 保真（旧存档 spawner state=0 → 地牢
     //   默认刷怪，非要塞银鱼，安全）。
     static constexpr quint8 SpawnerStateSilverfishFlag = 0x01;
+    // t494 熔炉 state bit2（值 4）=「燃烧中」标记（机制等价 MC 1.0 熔炉冶炼进行时正面发光）。FurnaceUI
+    //   冶炼 tick 在点燃（有燃料 + 有可冶炼输入）/熄火（燃料烧尽 / 输入断 / 取走）边界翻转本位：经
+    //   PlayerController::setFurnaceLit 走 5 参数 setBlock（id 不变 → 只发 worldChanged 重建 mesh、不发
+    //   broken/placed；保留低 2 位朝向编码）。mesher（ChunkGeometry::tileFor）据本位选前面贴图
+    //   14(furnace_front 灭) / 134(furnace_front_on 带火)；侧面 / 顶底不受影响（同 furnace_side / furnace_top）。
+    //   **不影响** chestFrontFace（后者只读低 2 位 state&3，bit2 被忽略 → 朝向编码零回归）；collisionAABBs /
+    //   selectionAABBs 亦不读 furnace state（furnace 走 ShapeFull 整立方）→ 复用 bit2 作 marker 零回归
+    //   （同 ChestStateDungeonFlag bit2 / torch marker 同族）。state 经 m_states 落 SQLite round-trip 保真
+    //   （旧存档熔炉 state 无 bit2 → 非燃烧态，安全；重新点燃 / 熄火时 FurnaceUI 重写本位）。
+    static constexpr quint8 FurnaceStateLitFlag = 0x04;
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度

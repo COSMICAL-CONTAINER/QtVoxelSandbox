@@ -39,6 +39,13 @@ Item {
     // 宿主注入：hotbar 视图模型（heldBlock/heldCount/maxStackSize/iconSourceForBlock/nameForBlock/
     // isTool/isMaterial/slotRevision/smeltResult/fuelBurnSeconds/setStack 等）。
     property Hotbar hotbar
+    // t494 宿主注入：PlayerController（setFurnaceLit Q_INVOKABLE）+ 熔炉格世界坐标。冶炼 tick 据 burnRemain
+    //   跨 0 边界调 player.setFurnaceLit(fx,fy,fz,lit) 翻转该格 state 的燃烧 bit → mesher 切 front/front_on
+    //   贴图（机制等价 MC 1.0 熔炉燃烧时正面发光）。坐标由 furnaceOpened 携带、宿主存 window.furnaceX/Y/Z。
+    property var player
+    property int furnaceX: 0
+    property int furnaceY: 0
+    property int furnaceZ: 0
     // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // t402 冶炼产出取走 → 请求宿主产经验球（spec「removing a finished smelt item grants XP scaled
@@ -75,6 +82,11 @@ Item {
     // （0..kSmeltSecs；满则产 1 件、归零或留余）。ticked 驱动推进（见 tick()）。
     property real burnRemain: 0.0
     property real smeltProgress: 0.0
+    // t494 熔炉「燃烧中」态镜像（state bit2 FurnaceStateLitFlag）：tick 末据 burnRemain>0 算本值，与
+    //   furnaceLit 比对，跨 0 边界（点燃 / 熄火）时调 player.setFurnaceLit 翻转熔炉格 state 的燃烧 bit →
+    //   mesher 切 front(灭)/front_on(带火) 贴图。初值 false（无熔炉格坐标前不写）；player 未注入 / 坐标
+    //   未初始化（0,0,0）→ 不调（防误写世界原点）。
+    property bool furnaceLit: false
 
     // t97：27 主物品栏自本任务起上移至 hotbar VM（m_mainSlots），与 SurvivalInventory / CraftingTableUI 三
     // 菜单共享同一份 → 三菜单主栏同步、returnHeldToHotbar/pickupScan 经 addToAny 能合并进主栏。原本地
@@ -272,6 +284,18 @@ Item {
                 }
             }
             // 燃料烧尽或输入中断时 smeltProgress 保留（MC 行为：部分进度不丢失，仅不再推进）。
+        }
+
+        // t494 熔炉燃烧态切换检测：据 burnRemain>0 算「应燃烧态」，与上次 furnaceLit 比对。跨 0 边界
+        //   （点燃：0→>0 / 熄火：>0→0）时调 player.setFurnaceLit 翻转熔炉格 state 的燃烧 bit → mesher 切
+        //   front(灭)/front_on(带火) 贴图（机制等价 MC 1.0 熔炉燃烧时正面发光）。player 未注入 / 坐标未
+        //   初始化（初值 0,0,0）→ 不调（防误写世界原点格）。setFurnaceLit 内已是目标态时 no-op。
+        const wantLit = root.burnRemain > 0
+        if (wantLit !== root.furnaceLit) {
+            root.furnaceLit = wantLit
+            if (root.player && (root.furnaceX || root.furnaceY || root.furnaceZ)) {
+                root.player.setFurnaceLit(root.furnaceX, root.furnaceY, root.furnaceZ, wantLit)
+            }
         }
 
         if (changed) root.slotRev++

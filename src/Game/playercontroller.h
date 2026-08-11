@@ -401,6 +401,13 @@ public:
     //   分层（PLAN §2）：Game/Physics 层写世界方块（m_world），呈现层（AnvilUI）只调本方法 + 据 bool 无关
     //   （损坏结果由 worldChanged 重建 mesh 呈现，UI 无需读返回）。
     Q_INVOKABLE void damageAnvil(int x, int y, int z);
+    // t494 熔炉燃烧态切换（FurnaceUI 冶炼 tick 在点燃 / 熄火边界调）：据 lit 翻转 Furnace 格 state 的
+    //   FurnaceStateLitFlag（bit2）。走 5 参数 setBlock（id 不变 → 仅发 worldChanged 重建 mesh、不发 broken/
+    //   placed；保留低 2 位朝向编码）→ mesher 据本位选前面贴图 14(灭)/134(带火 front_on)。非 Furnace 格 / 已
+    //   是目标态 / 越界 → no-op。分层（PLAN §2）：Game/Physics 层写世界方块 state（m_world）；FurnaceUI（呈现层）
+    //   只在 burnRemain 跨 0 边界调本方法（机制等价 MC 1.0 熔炉燃烧时正面发光）。坐标 = FurnaceUI 打开时
+    //   furnaceOpened 携带的熔炉格世界坐标（存 window.furnaceX/Y/Z）。
+    Q_INVOKABLE void setFurnaceLit(int x, int y, int z, bool lit);
     // Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格）。仅指针捕获时生效
     // （spec）。空手 / 取失败 → 不丢。spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem
     // （同破块掉落 t35 路径）；丢弃后实体可被重新拾取（闭环）。
@@ -579,11 +586,12 @@ signals:
     // Connections 打开 3×3 工作台 UI（释放指针 / 关包归还合成栏）。机制等价 MC 右键工作台开合成界面。
     // 分层（PLAN §2）：Game/Physics 层发语义事件，呈现层只消费（同 spawnItem / swingArm 模式）。
     void craftingTableOpened();
-    // 右键熔炉（t87）：placeBlock 检测到命中格为 Furnace → 发本信号（不放置）→ 呈现层 Connections
-    // 打开 FurnaceUI（释放指针）。机制等价 MC 右键熔炉开冶炼界面。同 craftingTableOpened 模式：
-    // Game/Physics 层发语义事件，呈现层只消费（PLAN §2 分层）。熔炉槽状态 / 冶炼 tick 由 FurnaceUI
-    // 自持（面板常驻、visible 切换；WorldClock.ticked 驱动 tick）。
-    void furnaceOpened();
+    // 右键熔炉（t87）：placeBlock 检测到命中格为 Furnace → 发本信号（不放置；携命中格世界坐标）→ 呈现层
+    // Connections 打开 FurnaceUI（释放指针）。机制等价 MC 右键熔炉开冶炼界面。同 chestOpened 模式：
+    // Game/Physics 层发语义事件（t494 携坐标供 FurnaceUI 经 setFurnaceLit 翻转燃烧 bit 写回该格 state），
+    // 呈现层只消费（PLAN §2 分层）。熔炉槽状态 / 冶炼 tick 由 FurnaceUI 自持（面板常驻、visible 切换；
+    // WorldClock.ticked 驱动 tick）。坐标 = 玩家所点熔炉格的整数世界坐标。
+    void furnaceOpened(int x, int y, int z);
     // 右键箱子（t173）：placeBlock 检测到命中格为 Chest → 发本信号（不放置；携命中格世界坐标）→ 呈现层
     //   Connections 打开 ChestUI（释放指针 + 启动盖子开合动画）。机制等价 MC 右键箱子开物品栏。同
     //   craftingTableOpened / furnaceOpened 模式：Game/Physics 层发语义事件（携坐标供 ChestStore 寻址该

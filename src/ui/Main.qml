@@ -50,6 +50,11 @@ Window {
     // t87 熔炉子态：右键熔炉方块 → player.furnaceOpened → 显本面板（冶炼）+ 释放指针。与 inventoryOpen
     // / craftingTableOpen 互斥（关一个再开另一个）；E/Esc 关 → 恢复 grab。开时抑制暂停叠层。
     property bool furnaceOpen: false
+    // t494 熔炉格世界坐标（furnaceOpened 携坐标存此；FurnaceUI 冶炼 tick 据 burnRemain 跨 0 边界经
+    //   player.setFurnaceLit(furnaceX/Y/Z, lit) 翻转该格 state 的燃烧 bit → mesher 切 front/front_on 贴图）。
+    property int furnaceX: 0
+    property int furnaceY: 0
+    property int furnaceZ: 0
     // t173/t179 箱子子态：右键箱子方块 → player.chestOpened(x,y,z) → 显 ChestUI（箱子 27 槽 + 玩家主栏 +
     //   hotbar）+ 释放指针。与 inventoryOpen / craftingTableOpen / furnaceOpen 互斥；E/Esc 关 → 恢复 grab。
     //   chestX/Y/Z 记当前所开箱子的方块世界坐标（ChestStore 据此寻址该箱子的 27 槽；切箱子时坐标变）。
@@ -847,12 +852,14 @@ Window {
     }
     // t87 打开 / 关闭熔炉面板。打开 → release（光标可见点槽位）；关 → grab + 焦点回键位层。
     // 与 inventoryOpen / craftingTableOpen 互斥（开熔炉前关其它两个，反之同）。
-    function openFurnace() {
+    // t494 携熔炉格世界坐标（fx/fy/fz）→ 存 window.furnaceX/Y/Z，供 FurnaceUI 经 setFurnaceLit 翻燃烧 bit。
+    function openFurnace(fx, fy, fz) {
         if (appState !== "playing" || furnaceOpen) return
         if (inventoryOpen) closeInventory()
         if (craftingTableOpen) closeCraftingTable()
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
+        furnaceX = fx; furnaceY = fy; furnaceZ = fz  // t494 记熔炉格坐标（供 FurnaceUI setFurnaceLit）
         furnaceOpen = true
         player.release()
     }
@@ -1854,8 +1861,9 @@ Window {
         function onItemPickedUp(id, count) { audio.playPickup(); handPopAnim.start() }
         // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
         function onCraftingTableOpened() { window.openCraftingTable() }
-        // t87：右键熔炉 → player 发 furnaceOpened → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
-        function onFurnaceOpened() { window.openFurnace() }
+        // t87/t494：右键熔炉 → player 发 furnaceOpened(x,y,z) → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
+        //   坐标存 window.furnaceX/Y/Z，供 FurnaceUI 经 setFurnaceLit 翻燃烧 bit 切 front/front_on 贴图。
+        function onFurnaceOpened(x, y, z) { window.openFurnace(x, y, z) }
         // t173/t179：右键箱子 → player 发 chestOpened(x,y,z) → 开 ChestUI（释放指针 / 关包互斥）。
         //   坐标供 ChestStore 寻址该箱子的 27 槽。
         function onChestOpened(x, y, z) { window.openChest(x, y, z) }
@@ -7952,6 +7960,11 @@ Window {
         id: furnacePanel
         anchors.fill: parent
         hotbar: hotbarVM
+        // t494 注入 PlayerController（setFurnaceLit）+ 熔炉格世界坐标（furnaceOpened 携坐标存 window.furnaceX/Y/Z）。
+        player: player
+        furnaceX: window.furnaceX
+        furnaceY: window.furnaceY
+        furnaceZ: window.furnaceZ
         visible: window.appState === "playing" && window.furnaceOpen
         z: 150
         onClosed: window.closeFurnace()

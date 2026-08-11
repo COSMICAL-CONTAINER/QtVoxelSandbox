@@ -262,6 +262,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_crafting_table_top.png
         textures/default_dirt.png
         textures/default_furnace_front.png
+        textures/default_furnace_front_on.png     # t494 熔炉点燃态前面贴图（build_furnace.py；圆石底+拱框+亮黄橙火焰；mesher 据 Furnace state 燃烧 bit 选 front/front_on）
         textures/default_furnace_side.png
         textures/default_furnace_top.png
         textures/default_grass_side.png
@@ -323,7 +324,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_dead_bush.png            # t394 枯死的灌木 cross 贴图（build_dead_bush.py；透明底+棕褐放射干枝；alphaCutoff cutout）
         textures/default_snow.png                 # t395 积雪层贴图（build_snow.py；冷白底+细密冰晶噪点；SnowLayer 各面）
         textures/default_ice.png                  # t395 冰贴图（build_ice.py；浅蓝底+反光裂纹；Ice 各面）
-        textures/default_pack_ice.png             # t468 浮冰贴图（build_ice.py；实白底+细裂纹；PackIce 各面）
+        textures/default_pack_ice.png             # t468/t495 浮冰贴图（build_ice.py；淡蓝白压实冰+密实细裂纹+反光高光；PackIce 各面）
         textures/default_blue_ice.png             # t468 蓝冰贴图（build_ice.py；淡蓝底+纵向纹路；BlueIce 各面）
         textures/default_spruce_log_top.png       # t395 云杉原木顶/底面贴图（build_spruce.py；深棕同心年轮截面）
         textures/default_spruce_log_side.png      # t395 云杉原木侧面贴图（build_spruce.py；深棕垂直树皮条带）

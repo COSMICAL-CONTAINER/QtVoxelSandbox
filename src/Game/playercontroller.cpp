@@ -1257,6 +1257,22 @@ void PlayerController::damageAnvil(int x, int y, int z)
     m_world->setBlock(x, y, z, next);              // 推进阶段（或重损→Air 碎裂；World 发 blockBroken + worldChanged）
 }
 
+// t494 熔炉燃烧态切换：翻转 Furnace 格 state 的 FurnaceStateLitFlag（bit2）。FurnaceUI 冶炼 tick 在
+//   点燃（有燃料 + 可冶炼输入）/ 熄火（燃料烧尽 / 输入断）边界调本方法 → mesher 据本位切前面贴图
+//   14(灭)/134(front_on 带火)。走 5 参数 setBlock 保留低 2 位朝向（id 不变 → 只发 worldChanged 重建 mesh、
+//   不发 broken/placed）。已是目标态 / 非 Furnace / 越界 → no-op（避免无谓 worldChanged 刷重建）。
+void PlayerController::setFurnaceLit(int x, int y, int z, bool lit)
+{
+    if (!m_world) return;
+    const quint8 cur = m_world->blockAt(x, y, z);
+    if (cur != BlockRegistry::Furnace) return;     // 非熔炉（已被破 / 替换）→ no-op
+    const quint8 oldState = m_world->stateAt(x, y, z);
+    const quint8 newState = lit ? quint8(oldState | BlockRegistry::FurnaceStateLitFlag)
+                                : quint8(oldState & quint8(~BlockRegistry::FurnaceStateLitFlag));
+    if (newState == oldState) return;              // 已是目标态 → no-op（避免无谓 worldChanged）
+    m_world->setBlock(x, y, z, cur, newState);     // id 不变 → 仅 worldChanged 重建 mesh（保留朝向低 2 位）
+}
+
 // 每 tick 推进生存挖掘进度（t34）+ 连续续挖（t44）。创造不进入此态（beginMining 内瞬破已 return）。
 // spec：progress += dt * speed(block, tool)；speed = 1 / miningTime（ToolRegistry 已含 hardness/speedMul）。
 //   - 失命中 / 目标已被破（变 air）→ cancelMining。
@@ -1794,7 +1810,7 @@ void PlayerController::placeBlock()
     }
     // t87：右键熔炉 → 打开 FurnaceUI 冶炼界面（同工作台模式：优先于放置，无论手持何物右键熔炉即开）。
     if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Furnace) {
-        emit furnaceOpened();
+        emit furnaceOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
     // t173/t179：右键箱子 → 打开 ChestUI 物品栏（同工作台 / 熔炉模式：优先于放置，无论手持何物右键箱子
