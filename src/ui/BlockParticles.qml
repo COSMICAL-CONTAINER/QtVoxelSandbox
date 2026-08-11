@@ -187,19 +187,160 @@ Node {
         }
     }
 
-    // 方块 → 粒子主色（呈现层视觉约定色；非用户可见命名，对齐 BlockRegistry id 0..8）。
-    //   纯呈现决策，故随粒子节点放一起（不污染 World 数据层）。与旧 Particles3D 版完全一致 → 视觉零回归。
+    // 方块 → 粒子主色（呈现层视觉约定色；非用户可见命名，对齐 BlockRegistry 全枚举）。
+    //   纯呈现决策，故随粒子节点放一起（不污染 World 数据层）。色取各方块贴图主色（草 / 叶绿系、
+    //   木棕系、石灰系、沙黄系、矿石按矿斑色），仅取一格近拟——碎屑是抛落小颗粒、肉眼辨方块材质即可，
+    //   无需逐像素精确。
+    //
+    // **t491 关键**：旧版 switch 只覆盖 id 1..8，id > 8 全落 default → 白。用户破「草」（最常见是 worldgen
+    //   在地表散布的草丛 TallGrass=24，中文「草」的日常指代）迸发白粒子，正是 24 落 default 的症状（机制
+    //   上 Grass=1 本应显绿，但用户实测的「草」实际是 TallGrass=24）。本任务把表扩到全枚举，使常见方块
+    //   破块都迸材质色而非白；仍保留 default 作未来新方块的兜底（新方块先显白，肉眼即可察觉缺色并补表）。
+    //
+    // **跨块掉落路径同源**：dropUnsupportedCropsAround / dropCactusColumn / tickLavaFlow 焚毁等系统事件
+    //   也发 blockBroken → 同走本表取色。故本表是全工程「破块粒子色」单一权威（PLAN §2 单一权威；避免
+    //   多处各持色表漂移）。
     function blockColor(id) {
         switch (id) {
-            case 1: return "#6aaa3f" // grass
-            case 2: return "#7a5a3c" // dirt
-            case 3: return "#8a8a8a" // stone
-            case 4: return "#6e6e6e" // cobble
-            case 5: return "#6b4f2a" // log
-            case 6: return "#b08a4f" // planks
-            case 7: return "#4f7f33" // leaves
-            case 8: return "#d8c896" // sand
-            default: return "#ffffff"
+            // ── 地表 / 土沙族（id 1..8）── 既有色（视觉零回归）
+            case 1: return "#6aaa3f" // grass（草方块；顶面草绿）
+            case 2: return "#7a5a3c" // dirt（泥土）
+            case 3: return "#8a8a8a" // stone（石头）
+            case 4: return "#6e6e6e" // cobble（圆石）
+            case 5: return "#6b4f2a" // log（橡木原木）
+            case 6: return "#b08a4f" // planks（橡木木板）
+            case 7: return "#4f7f33" // leaves（橡树叶）
+            case 8: return "#d8c896" // sand（沙子）
+            // ── 功能 / 基础族（id 9..14）──
+            case 9: return "#9a7a4a"  // crafting_table（工作台，木板棕）
+            case 10: return "#8a8a8a" // furnace（熔炉，石灰）
+            case 11: return "#3a3a3a" // coal_ore（煤矿石，深灰底）
+            case 12: return "#b8a89a" // iron_ore（铁矿石，浅褐斑）
+            case 13: return "#e8c060" // torch（火把，火焰暖黄）
+            case 14: return "#3a3a3a" // bedrock（基岩，深灰）
+            // ── 异形木半方块族（id 15..20）── 同 planks 木板棕
+            case 15: return "#b08a4f" // wood_slab
+            case 16: return "#b08a4f" // wood_stairs
+            case 17: return "#b08a4f" // wood_fence
+            case 18: return "#b08a4f" // wood_pressure_plate
+            case 19: return "#b08a4f" // wood_door
+            case 20: return "#b08a4f" // wood_trapdoor
+            // ── 流体 / 容器 / 耕地（id 21..23）──
+            case 21: return "#3f6fd8" // water（水，蓝）
+            case 22: return "#9a7a4a" // chest（箱子，木板棕）
+            case 23: return "#6a4a2c" // farmland（耕地，湿土棕）
+            // ── cross 草本族（id 24..25）── t491 核心：草丛迸绿、作物迸麦黄
+            case 24: return "#5a8a35" // tall_grass（草丛；t491 核心修复——用户「草」白粒子真因）
+            case 25: return "#b8a040" // wheat_crop（小麦作物，麦穗黄绿）
+            // ── 矿石 / 羊毛 / 树苗 / 流体续（id 26..31）──
+            case 26: return "#4ab8b8" // diamond_ore（钻石矿石，青白斑）
+            case 27: return "#e8e8e0" // wool（白色羊毛）
+            case 28: return "#5a8a35" // sapling（树苗，嫩叶绿）
+            case 29: return "#c87a3a" // copper_ore（铜矿石，橙铜斑）
+            case 30: return "#e8c850" // gold_ore（金矿石，金黄斑）
+            case 31: return "#d85020" // lava（岩浆，红橙）
+            // ── 床 8 色变体（id 32..39）── 被面色
+            case 32: return "#c83030" // bed_red
+            case 33: return "#e88040"  // bed_orange（近似）
+            case 34: return "#e8d040" // bed_yellow
+            case 35: return "#4aaa3a" // bed_green
+            case 36: return "#3a9a9a" // bed_cyan
+            case 37: return "#3a5ad8" // bed_blue
+            case 38: return "#c83ac8" // bed_magenta
+            case 39: return "#3a3a3a" // bed_black
+            case 40: return "#4a6a7a" // spawner（刷怪笼，暗蓝灰）
+            // ── 沙漠族（id 41..43）──
+            case 41: return "#d8c896" // sandstone（砂岩，沙黄）
+            case 42: return "#3a7a3a" // cactus（仙人掌，深绿）
+            case 43: return "#7a5a3a" // dead_bush（枯灌木，枯褐）
+            // ── 雪原族（id 44..46）──
+            case 44: return "#f0f0f0" // snow_layer（积雪，冷白）
+            case 45: return "#a8c8e8" // ice（冰，浅蓝）
+            case 46: return "#4a3a28" // spruce_log（云杉原木，深棕）
+            // ── 沼泽植物（id 47..48）──
+            case 47: return "#3a8a4a" // lily_pad（睡莲，绿）
+            case 48: return "#c83030" // mushroom（蘑菇，红菌盖）
+            // ── 花 + 甘蔗（id 49..53）── 按花头色
+            case 49: return "#c83030" // flower_red
+            case 50: return "#e8d040" // flower_yellow
+            case 51: return "#3a5ad8" // flower_blue
+            case 52: return "#e8e8e0" // flower_white
+            case 53: return "#6a9a3a" // sugarcane（甘蔗，绿茎）
+            case 54: return "#c8d8d8" // glass（玻璃，近白青）
+            // ── 作物 cross（id 55..56）── 同小麦作物黄绿
+            case 55: return "#7aaa3a" // carrot_crop（胡萝卜作物，绿叶）
+            case 56: return "#6a8a3a" // potato_crop（马铃薯作物，绿叶）
+            case 57: return "#2a1838" // obsidian（黑曜石，深紫黑）
+            // ── 圆石变体（id 58..61）── 同 cobble 灰
+            case 58: return "#6e6e6e" // cobble_slab
+            case 59: return "#6e6e6e" // cobble_stairs
+            case 60: return "#6e6e6e" // cobble_fence
+            case 61: return "#6e6e6e" // cobble_pressure_plate
+            case 62: return "#6b4f2a" // ladder（木梯，棕）
+            // ── 15 色羊毛变体（id 63..77）── 按色名
+            case 63: return "#e88040"  // wool_orange（近似）
+            case 64: return "#c83ac8" // wool_magenta
+            case 65: return "#3a8ad8" // wool_light_blue
+            case 66: return "#e8d040" // wool_yellow
+            case 67: return "#5ad84a" // wool_lime
+            case 68: return "#e88aa8" // wool_pink
+            case 69: return "#5a5a5a" // wool_gray
+            case 70: return "#8a8a8a" // wool_light_gray
+            case 71: return "#3a8a8a" // wool_cyan
+            case 72: return "#7a3a9a" // wool_purple
+            case 73: return "#3a3ad8" // wool_blue
+            case 74: return "#6a4a2a" // wool_brown
+            case 75: return "#4aaa3a" // wool_green
+            case 76: return "#c83030" // wool_red
+            case 77: return "#3a3a3a" // wool_black
+            // ── 8 色床补齐（id 78..85）── 同色羊毛色
+            case 78: return "#e8e8e0" // bed_white
+            case 79: return "#3a8ad8" // bed_light_blue
+            case 80: return "#5ad84a" // bed_lime
+            case 81: return "#e88aa8" // bed_pink
+            case 82: return "#5a5a5a" // bed_gray
+            case 83: return "#8a8a8a" // bed_light_gray
+            case 84: return "#7a3a9a" // bed_purple
+            case 85: return "#6a4a2a" // bed_brown
+            // ── 云杉木制品（id 86..89）── 深棕（同 spruce_log）
+            case 86: return "#4a3a28" // spruce_planks
+            case 87: return "#4a3a28" // spruce_slab
+            case 88: return "#4a3a28" // spruce_fence
+            case 89: return "#4a3a28" // spruce_door
+            case 90: return "#8a2a2a" // sweet_berry_bush（浆果灌木，红果绿叶 → 取红果色）
+            // ── 冰续（id 91..92）── 同 ice
+            case 91: return "#b8d8e8" // pack_ice（浮冰，白蓝）
+            case 92: return "#8ab8d8" // blue_ice（蓝冰，更蓝）
+            case 93: return "#2a4ad8" // lapis_ore（青金矿石，群青蓝）
+            case 94: return "#3a2a4a" // enchanting_table（附魔台，黑曜石底深紫黑）
+            case 95: return "#9a7a4a" // bookshelf（书架，木板棕）
+            case 96: return "#d8d8d8" // iron_block（铁块，金属灰）
+            // ── 铁砧 3 阶段（id 97..99）── 同铁深灰
+            case 97: return "#4a4a4a" // anvil（铁砧完好）
+            case 98: return "#4a4a4a" // anvil_chipped
+            case 99: return "#4a4a4a" // anvil_damaged
+            // ── 防御造物方块（id 100..101）──
+            case 100: return "#e88040" // pumpkin（南瓜，橙）
+            case 101: return "#f0f0f0" // snow（雪块，冷白）
+            // ── 矿井结构（id 102..103）──
+            case 102: return "#e8e8e0" // cobweb（蛛网，灰白）
+            case 103: return "#6a4a2a" // rail（铁轨，棕枕木 + 灰铁 → 取棕）
+            // ── 沙漠神殿（id 104..105）──
+            case 104: return "#c83020" // tnt（TNT，深红药柱）
+            case 105: return "#d8c896" // cut_sandstone（切制砂岩，沙黄）
+            // ── 丛林神殿（id 106..107）──
+            case 106: return "#6a6a5a" // mossy_cobble（苔石，圆石灰 + 苔绿 → 取苔灰绿）
+            case 107: return "#8a8a8a" // dispenser（发射器，石灰）
+            // ── 要塞结构（id 108..111）──
+            case 108: return "#7a7a7a" // stone_brick（石砖，石灰）
+            case 109: return "#7a7a7a" // stone_brick_slab
+            case 110: return "#7a7a7a" // stone_brick_stairs
+            case 111: return "#1a0a2a" // end_portal（末地传送门，深紫黑星空）
+            // ── 手动点火机关（id 112..114）──
+            case 112: return "#6b4f2a" // lever（杠杆，木质底座棕）
+            case 113: return "#6b4f2a" // wood_button（木按钮，棕）
+            case 114: return "#8a8a8a" // stone_button（石按钮，灰）
+            default: return "#ffffff" // 未来新方块兜底（显白便于察觉缺色并补表）
         }
     }
 }
