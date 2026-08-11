@@ -515,6 +515,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   qInfo 日志（末地预热占位，不实现末地维度）。mesher 据 state bit0 切 end_portal(129)/end_portal_active(130)。
     //   不进创造调色板（worldgen 专属；玩家经末影之眼激活交互）。
     /* end_portal   */ {int(BlockRegistry::EndPortal),         129,129,129,129, false, BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "end_portal",   "末地传送门"},
+    // t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / wooden button / stone button；无红石故右键激活即点燃邻接
+    //   TNT）。三者复用 ShapePlate（贴地薄板，同 WoodPressurePlate 几何）。PartialBlockGeometry 据 state bit0
+    //   （激活态）切亮色高光（非 MC 资产，tools/build_lever_button.py 程序生成）。激活：placeBlock useBlock 分支
+    //   检测命中机关 → 翻 state bit0 + 点燃水平四邻 TNT。
+    /* lever        */ {int(BlockRegistry::Lever),           131,131,131,131, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Lever),       1, 64, "lever",        "杠杆"},
+    /* wood_button  */ {int(BlockRegistry::WoodButton),      132,132,132,132, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::WoodButton),  1, 64, "wood_button",  "木按钮"},
+    /* stone_button */ {int(BlockRegistry::StoneButton),     133,133,133,133, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::StoneButton), 1, 64, "stone_button", "石按钮"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -626,6 +633,11 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* stone_brick_slab        */ 44,  // t487 石砖台阶 → MC 1.0 stone slab id 44（metadata 5 = stone brick；统一取 slab id）
     /* stone_brick_stairs      */ 67,  // t487 石砖楼梯 → MC 1.0 stairs id 67（1.0 楼梯含木/石/cobble/brick 统一 id）
     /* end_portal              */ 119, // t487 末地传送门 → MC 1.0 end portal id 119
+    // t490 手动 TNT 点火机关 → MC 1.0 对齐：lever id 69（1.0 存在）；stone button id 77（1.0 存在）；
+    //   wooden button id 143 为 1.5+ 独立 id（1.0 仅石按钮，木按钮 1.5+）→ -1（资源包回退引擎自绘）。
+    /* lever                   */ 69,  // t490 杠杆 → MC 1.0 lever id 69
+    /* wood_button             */ -1,  // t490 木按钮 → MC 1.0 无等价（wooden button id 143 为 1.5+；1.0 仅石按钮）
+    /* stone_button            */ 77,  // t490 石按钮 → MC 1.0 stone button id 77
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -660,6 +672,7 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
         || blockId == CobbleFence || blockId == CobblePressurePlate) return true; // t412 段外圆石变体
     if (blockId == SpruceSlab || blockId == SpruceFence || blockId == SpruceDoor) return true; // t466 段外云杉木制品（与 WoodSlab/WoodFence/WoodDoor 同几何）
     if (blockId == StoneBrickSlab || blockId == StoneBrickStairs) return true; // t487 段外石砖台阶/楼梯（与 WoodSlab/WoodStairs 同几何）
+    if (blockId == Lever || blockId == WoodButton || blockId == StoneButton) return true; // t490 段外手动点火机关（与 WoodPressurePlate 同几何：贴地薄板）
     return blockId >= FirstPartial && blockId <= LastPartial;
 }
 bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab || blockId == SpruceSlab || blockId == StoneBrickSlab; }
@@ -778,6 +791,17 @@ bool BlockRegistry::isTnt(quint8 blockId)
 bool BlockRegistry::isDispenser(quint8 blockId)
 {
     return blockId == Dispenser;
+}
+
+// t490 手动 TNT 点火机关统一谓词（单一权威；见 blockregistry.h 头注释）。Lever / WoodButton / StoneButton 三者
+//   机制等价 MC 1.0 lever / button——右键激活即点燃水平四邻 TNT。各单 id 裸相等判定；isManualIgniter 聚合三者
+//   供 placeBlock useBlock 分支统一判定「右键命中的机关方块 → 点燃邻接 TNT」。
+bool BlockRegistry::isLever(quint8 blockId)       { return blockId == Lever; }
+bool BlockRegistry::isWoodButton(quint8 blockId)  { return blockId == WoodButton; }
+bool BlockRegistry::isStoneButton(quint8 blockId) { return blockId == StoneButton; }
+bool BlockRegistry::isManualIgniter(quint8 blockId)
+{
+    return blockId == Lever || blockId == WoodButton || blockId == StoneButton;
 }
 
 // t487 末地传送门统一谓词（单一权威）：blockId == EndPortal 即末地传送门。供 PlayerController placeBlock

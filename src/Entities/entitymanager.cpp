@@ -2442,25 +2442,47 @@ void EntityManager::detonateStalker(int idx, Entity &e, World *world, const QVec
 //   playercontroller tick 扫玩家 footprint 格（压力板下垫 TNT）触发本方法。破坏方块走 destroySphereSilent 一次收口
 //   （N 写 1 emit，同 Stalker t320 批量模式），破坏块按 kExplosionDropChance 概率 emit explosionDroppedItem（掉落物，
 //   同 Stalker t297）。水中不破坏的守卫留简化（TNT 陷阱在密室内不在水中）。
+// t490 连锁引燃（spec 验收核心）：本 TNT 引爆时，球内其它 TNT 方块应被引燃（转 PrimedTnt 延时引爆）→ 链式引爆全部。
+//   实现委托 detonateTntSphere（公共主体）—— destroyed 列表里 oldId==TntBlock 的格子 spawnPrimedTnt（fuse=Jitter
+//   随机错峰）→ 各 PrimedTnt fuse 到 0 再次 detonatePrimedTnt 引爆其球内 TNT，递归连锁。踩沙漠神殿压力板 →
+//   3×3 TNT 连锁全爆（大坑 + 战利品箱暴露）。
 void EntityManager::detonateTntBlock(int x, int y, int z, World *world, const QVector3D &playerPos)
 {
+    detonateTntSphere(x, y, z, world, playerPos);
+}
+
+// t490 TNT 球形爆炸公共主体（detonateTntBlock 方块路径 + detonatePrimedTnt 实体路径共用；机制等价 MC 1.0 TNT 爆炸
+//   + 连锁引燃）。① destroySphereSilent 球形破坏；② 爆炸掉落；③ 链式引燃（destroyed 内 TntBlock 格 → spawnPrimedTnt）；
+//   ④ 距离衰减伤玩家 + 击退；⑤ emit explosion（音/视单一入口）。
+void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, const QVector3D &playerPos)
+{
     // (a) 球形破坏方块：destroySphereSilent 一次收口（跳过 Air / Bedrock / Water / Obsidian，同 Stalker t320）。
-    //   返回被破坏块（坐标 + 原 id），caller 据原 id 派生掉落物。
-    if (world) {
-        const auto destroyed = world->destroySphereSilent(x, y, z, kExplosionRadius);
-        // t297 爆炸掉落（~50% / 破坏块，同 Stalker）：取 BlockRegistry::dropId → 概率门控 → emit explosionDroppedItem。
-        for (const World::DestroyedVoxel &d : destroyed) {
-            const int dropItemId = BlockRegistry::dropId(d.oldId);
-            if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
-                emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
+    //   返回被破坏块（坐标 + 原 id），caller 据原 id 派生掉落物 + 链式引燃。
+    std::vector<World::DestroyedVoxel> destroyed;
+    if (world) destroyed = world->destroySphereSilent(cx, cy, cz, kExplosionRadius);
+
+    // (b) 爆炸掉落（~50% / 破坏块，同 Stalker）：取 BlockRegistry::dropId → 概率门控 → emit explosionDroppedItem。
+    //   **链式引燃**（spec t490 验收核心）：destroyed 内 oldId==TntBlock 的格子 → spawnPrimedTnt（fuse=Jitter 随机
+    //   错峰）→ 各 PrimedTnt fuse 到 0 再次 detonatePrimedTnt 引爆其球内 TNT，递归连锁引爆全部。
+    //   顺序：先掉落 / 引燃（据 destroyed 列表，TNT 方块已被 destroySphereSilent 清为 Air 故不重复破坏），再伤玩家 + 音视。
+    for (const World::DestroyedVoxel &d : destroyed) {
+        const int dropItemId = BlockRegistry::dropId(d.oldId);
+        if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
+            emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
+        // 链式引燃：TNT 方块（oldId==TntBlock）→ 转 PrimedTnt（引燃态实体，延时引爆）。destroySphereSilent 已把该格
+        //   清为 Air，故此处仅 spawn 实体（不重复破块）。fuse 随机错峰（0..Jitter）避免同帧全部引爆 = 错峰连锁。
+        if (d.oldId == BlockRegistry::TntBlock) {
+            const float jit = kPrimedTntFuseJitterSec > 0.0f
+                              ? float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * kPrimedTntFuseJitterSec : 0.0f;
+            spawnPrimedTnt(d.x, d.y, d.z, kPrimedTntFuseSec + jit);
         }
     }
 
-    // (b) 距离衰减伤害玩家（同 Stalker：身体中心到爆炸中心 3D 距离 → dmg=round(max·(1−dist/radius))，至少 1）。
-    //   TNT 爆炸中心 = TNT 格中心（x+0.5, y+0.5, z+0.5），机制等价 MC TNT 爆炸。半径外 → 0 不发。
+    // (c) 距离衰减伤害玩家（同 Stalker：身体中心到爆炸中心 3D 距离 → dmg=round(max·(1−dist/radius))，至少 1）。
+    //   TNT 爆炸中心 = TNT 格中心（cx+0.5, cy+0.5, cz+0.5），机制等价 MC TNT 爆炸。半径外 → 0 不发。
     int dmg = 0;
     if (kExplosionRadius > 0.0f) {
-        const float ex = float(x) + 0.5f, ey = float(y) + 0.5f, ez = float(z) + 0.5f;
+        const float ex = float(cx) + 0.5f, ey = float(cy) + 0.5f, ez = float(cz) + 0.5f;
         const float pdx = playerPos.x() - ex;
         const float pdy = (playerPos.y() + 0.9f) - ey;
         const float pdz = playerPos.z() - ez;
@@ -2482,9 +2504,73 @@ void EntityManager::detonateTntBlock(int x, int y, int z, World *world, const QV
         }
     }
 
-    // (c) 爆炸音 / 视反馈（单一入口，同 Stalker：呈现层 onExplosion → playExplosion + burstExplosion）。
-    emit explosion(x, y, z);
-    qCInfo(lcEnt) << "TNT detonated at" << x << y << z << "player dmg" << dmg;
+    // (d) 爆炸音 / 视反馈（单一入口，同 Stalker：呈现层 onExplosion → playExplosion + burstExplosion）。
+    emit explosion(cx, cy, cz);
+    qCInfo(lcEnt) << "TNT detonated at" << cx << cy << cz << "player dmg" << dmg
+                  << "chain tnt primed:" << [destroyed]() {
+                         int n = 0; for (const auto &d : destroyed) if (d.oldId == BlockRegistry::TntBlock) ++n; return n;
+                     }();
+}
+
+// t490 生成 PrimedTnt（引燃态 TNT 实体；见 entitymanager.h 头注释）。复用 FallingBlock kind + blockId=TntBlock
+//   + primed=true + fuseTicks。位置存 (x+0.5, y+0.5, z+0.5)。halfW/halfH=0（玩家碰撞跳过 → 可穿过）+ pushable=false
+//   + 不查占用（同格可叠多个）。tick FallingBlock 分支据 primed 走 fuse 倒计 → detonatePrimedTnt 引爆。
+void EntityManager::spawnPrimedTnt(int x, int y, int z, float fuseSec)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); primed TNT spawn skipped at" << x << y << z;
+        return;
+    }
+    Entity e;
+    e.pos = QVector3D(x + 0.5f, y + 0.5f, z + 0.5f);
+    // t490 非完整方块 + 可穿透 + 可堆叠：halfW/halfH=0 → resolvePlayerPush / mobAabbHitsSolid 等碰撞检测零半宽
+    //   → 玩家 / mob AABB 永不与 PrimedTnt 重叠 → 可穿过；spawn 不查占用 → 同格可叠多个 PrimedTnt（各自独立引爆）。
+    e.halfW = 0.0f;
+    e.halfH = 0.0f;
+    e.pushable = false;       // 不被玩家推动（同掉落物 / FallingBlock）
+    e.kind = FallingBlock;    // 复用 FallingBlock（重力 + tick FallingBlock 分支）
+    e.blockId = BlockRegistry::TntBlock; // 携带 TNT 方块 id（QML delegate BlockCube 据它取 TNT 贴图）
+    e.primed = true;          // 标 PrimedTnt（tick 走 fuse 倒计而非着地放置）
+    e.fuse = (fuseSec > 0.0f) ? fuseSec : kPrimedTntFuseSec; // 引信（caller 传链式错峰 / 默认 5s）
+    acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    ++m_revision;
+    emit entitiesChanged();
+    qCInfo(lcEnt) << "spawned primed TNT at" << x << y << z << "fuse" << e.fuse << "s"
+                  << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+}
+
+// t490 引爆 PrimedTnt（见 entitymanager.h 头注释；机制等价 MC 1.0 TNT 爆炸）。委托 detonateTntSphere（公共主体，
+//   球形破坏 + 链式引燃 + 衰减伤玩家 + explosion 音/视）+ releaseSlot 移除实体。idx = PrimedTnt 槽索引。
+void EntityManager::detonatePrimedTnt(int idx, World *world, const QVector3D &playerPos)
+{
+    if (idx < 0 || idx >= int(m_entities.size())) return;
+    const Entity &e = m_entities[size_t(idx)];
+    if (!e.alive || !e.primed) return; // 非活体 / 非 PrimedTnt → 静默（防误调）
+    const int cx = qFloor(e.pos.x()), cy = qFloor(e.pos.y()), cz = qFloor(e.pos.z());
+    releaseSlot(idx); // 先释放槽（爆炸即除，不再模拟；releaseSlot 不 erase 保 count 单调，同 t256）
+    detonateTntSphere(cx, cy, cz, world, playerPos); // 球形爆炸 + 链式引燃 + 伤玩家 + 音视
+    ++m_revision; // releaseSlot 改了槽位 → bump revision 让 QML delegate 隐藏空槽（aliveAt 翻 false）
+    emit entitiesChanged();
+}
+
+// t490 第 i 个实体是否 PrimedTnt（kind==FallingBlock && primed && alive）。QML delegate 据它对 FallingBlock 叠白闪脉冲。
+bool EntityManager::isPrimedAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    return e.alive && e.kind == FallingBlock && e.primed;
+}
+
+// t490 第 i 个 PrimedTnt 的引信进度（0..1，1=刚点燃、0=即将引爆）。QML delegate 据它驱动白闪脉冲频率（频率随 fuse
+//   减少加速，机制等价 MC TNT 引信将尽时闪烁加快）。越界 / 非 primed → 0。
+float EntityManager::fuseProgressAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (!e.alive || !e.primed || e.fuse <= 0.0f) return 0.0f;
+    // 进度 = 当前 fuse / 初始 fuse（kPrimedTntFuseSec 为基准；链式 fuse 略长故 progress 可能 >1，clamp 到 1）。
+    float p = e.fuse / kPrimedTntFuseSec;
+    return p > 1.0f ? 1.0f : p;
 }
 
 // t241 羊吃草：检测 / 消耗 entity 前方一格草丛（机制等价 MC 羊吃草：草丛消失 + 其下草方块变泥土）。
@@ -2862,6 +2948,60 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         }
 
         // --- FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）---
+        //   t490 PrimedTnt（引燃态 TNT）：复用 FallingBlock kind 但 primed=true → 不走着地放置路径，改走 fuse
+        //   倒计（dt 递减）→ 到 0 调 detonatePrimedTnt（球形破坏 + 链式引燃 + 伤玩家 + 音视）+ 移除。仍受重力
+        //   （机制等价 MC primed TNT 受重力下落）；着地（下方非 air/水）停在下落支撑面顶但 **不放置方块**（保持
+        //   「引燃态非完整方块可穿透」语义，spec），fuse 继续倒计直到引爆。listener = 玩家脚位（tick 签名传，由
+        //   PlayerController::m_pos 喂入），detonatePrimedTnt 用它算距离衰减伤害 + 击退方向（同 detonateStalker）。
+        if (e.kind == FallingBlock && e.primed) {
+            // (1) fuse 倒计：每帧 -= dt（机制等价 MC primed TNT 80 tick fuse ~4s；本工程 ~5s）。到 0 → 引爆。
+            e.fuse -= float(dt);
+            if (e.fuse <= 0.0f) {
+                detonatePrimedTnt(idx, world, listener); // 球形破坏 + 链式引燃 + 衰减伤玩家 + explosion 音/视
+                // detonatePrimedTnt 内已 releaseSlot(idx) + bump revision/emit；这里直接 continue 跳过下方重力段
+                //   （实体已除不再模拟）。不 push toRemove（detonatePrimedTnt 已释放槽）。
+                continue;
+            }
+            // (2) 重力下落（复用沙子物理；机制等价 MC primed TNT 受重力）。着地判定同沙子：下落路径扫首个实体
+            //   方块 → 贴其顶面停下（vy=0），但 **不放置方块 / 不变掉落物**（primed 实体保持引燃态继续倒计）。
+            const int cx = qFloor(e.pos.x());
+            const int cz = qFloor(e.pos.z());
+            if (cx < 0 || cz < 0) {
+                // 列坐标非法（飞出世界 XZ 边界）→ 仍继续倒计（下一帧位置可能合法）；不动 pos（防写入非法列）。
+                dirty = true; // fuse 变了 → bump revision（QML 据 fuseProgressAt 加速白闪）
+                continue;
+            }
+            e.vy -= kGravity * float(dt);
+            if (e.vy < -kMaxFall) e.vy = -kMaxFall;
+            const float newY = e.pos.y() + e.vy * float(dt);
+            const int topCell = qFloor(e.pos.y());
+            int botCell = qFloor(newY);
+            if (botCell > topCell) botCell = topCell; // 防浮点噪声致 botCell>topCell
+            int supportCellY = -1; // 首个完整立方支撑（primed TNT 停在其顶面 cy+1，不放置方块）
+            for (int cy = topCell; cy >= botCell; --cy) {
+                if (cy < 0) break; // 越界下方=空气 → 不视作地面
+                const quint8 b = world->blockAt(cx, cy, cz);
+                if (b == BlockRegistry::Air || b == BlockRegistry::Water) continue; // 穿透（同沙子）
+                if (BlockRegistry::isFullCube(b)) { supportCellY = cy; break; } // 完整立方 → 着地支撑（不放置方块）
+                supportCellY = cy; break; // 不完整方块也作支撑（primed TNT 落其上停住，机制等价 MC primed TNT 落火把上停住）
+            }
+            if (supportCellY >= 0) {
+                // 着地：停在支撑方块顶面（= cy+1，实体中心 pos.y = cy+1+0.5；halfH=0 故贴 cell 底面 = cy+1.0），
+                //   **不放置方块**（保持引燃态非完整方块可穿透；spec）。机制等价 MC primed TNT 着地停止下落但仍是实体。
+                const float restY = float(supportCellY + 1); // halfH=0 → 中心 = 顶面
+                if (e.pos.y() != restY) { e.pos.setY(restY); e.vy = 0.0f; dirty = true; }
+            } else if (newY <= 0.0f) {
+                // 全列无支撑且已跌出世界底部 → 静默移除（防永久下落；正常世界 y=0 有石头层不触发）。
+                toRemove.push_back(idx);
+                dirty = true;
+            } else if (newY != e.pos.y()) {
+                e.pos.setY(newY); // 继续自由下落（穿过 air / 水）
+                dirty = true;
+            }
+            dirty = true; // fuse 每帧变 → bump revision（QML 白闪脉冲频率随 fuseProgressAt 加速）
+            continue; // 不走 Mob 的 AI / resting / 重力逻辑，也不走下方普通 FallingBlock 着地放置路径
+        }
+
         if (e.kind == FallingBlock) {
             const int cx = qFloor(e.pos.x());
             const int cz = qFloor(e.pos.z());

@@ -234,6 +234,16 @@ int PartialBlockGeometry::append(
                 tile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::Lever:
+    case BlockRegistry::WoodButton:
+    case BlockRegistry::StoneButton: { // t490 手动点火机关（与 WoodPressurePlate 同贴地薄板几何）
+        // 贴地薄板（同压力板 1/16 厚 + 1/16 边距）。激活态（state bit0=1）由本面 pushBox 画完后不再额外改 UV
+        //   （激活视觉走 mesher 材质亮度 / 图标层，几何不动）—— 机关方块本体几何不随激活态变形（机制对标 MC
+        //   按钮按下变矮的细节为次要视觉，本项目简化为贴地薄板常形，激活由 state 高光表达）。
+        pushBox(verts, idx, lx, ly, lz, 0.0625f, 0.9375f, 0.f, 0.0625f, 0.0625f, 0.9375f,
+                tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::WoodDoor:
     case BlockRegistry::SpruceDoor: { // t466 云杉门（与 WoodDoor 同几何，tile=spruce_planks）
         // 两格高门：每格各画满高薄板（下格画门下半 / 上格画门上半，几何同 —— 区别仅在 isUpper state，

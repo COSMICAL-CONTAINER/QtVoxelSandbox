@@ -272,6 +272,16 @@ PARTIALS_3D_SPRUCE = [
     ("spruce_door",           "door"),
 ]
 
+# t490 手动 TNT 点火机关图标（lever / wood_button / stone_button）：贴地薄板几何（同 WoodPressurePlate，
+#   render_partial_3d pressure_plate shape），fill 各自机关贴图。木质机关（lever / wood_button）走 wood 系
+#   贴图、石质机关（stone_button）走 stone 系贴图。3D dimetric 立体图标使 hotbar / 创造调色板肉眼可辨
+#   「这是机关方块」（区别于压力板：lever 有竖柄 / button 是凸钮，由源贴图体现）。
+PARTIALS_3D_IGNITER = [
+    ("lever",        "default_lever",        "default_lever"),        # 杠杆（木质底座+竖柄）
+    ("wood_button",  "default_wood_button",  "default_wood_button"),  # 木按钮（木质底座+凸钮）
+    ("stone_button", "default_stone_button", "default_stone_button"), # 石按钮（石质底座+凸钮）
+]
+
 
 def project_pt(x, y, z, cy_local, scale=1.0):
     """dimetric 投影 unit cube [0,1]^3 → 画布坐标。复用 render() 的 hw/dv/v/cx 几何；cy 可调以按形状竖直居中。
@@ -515,6 +525,12 @@ def main():
     # t466 云杉木制品链 3D dimetric 立体图标：同 shape 几何，fill 换 default_spruce_planks（机制等价木制半方块图标流程）。
     for out_name, shape in PARTIALS_3D_SPRUCE:
         img = render_partial_3d(shape, "default_spruce_planks", "default_spruce_planks")
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t490 手动 TNT 点火机关 3D dimetric 立体图标（pressure_plate shape + 各机关贴图 fill；机制等价木 / 石压力板图标流程）。
+    for out_name, fill_top, fill_side in PARTIALS_3D_IGNITER:
+        img = render_partial_3d("pressure_plate", fill_top, fill_side)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)

@@ -1920,6 +1920,45 @@ void PlayerController::placeBlock()
         }
         return; // 已是激活态 → 右键无效应（不重复消耗 / 不放置），机制等价 MC 已激活传送门无法再插眼
     }
+    // t490 手动 TNT 点火机关（spec「右键 lever / 木按钮 / 石按钮 → 点燃水平四邻 TNT」；机制等价 MC 1.0 lever /
+    //   button 红石点火源——本项目无红石，故把「激活脉冲」直接绑在右键动作）。右键命中的机关方块（Lever /
+    //   WoodButton / StoneButton）→ 翻 state bit0（扳柄 / 按下态）+ 点燃其 **水平四邻** 的 TNT 方块（移除 TNT 方块
+    //   + spawnPrimedTnt 延时引爆）+ 挥手。空手亦可（激活机关是「使用」语义，与手持何物无关）。优先于放置（右键
+    //   机关即激活，不另放块），机制等价 MC 1.0 杠杆 / 按下激活红石脉冲点火 TNT。
+    //   isManualIgniter 覆盖 Lever / WoodButton / StoneButton 三类机关（单一权威谓词，避免三处硬编码 id 判定漂移）。
+    //   点燃 = 移除 TNT 方块（setBlockFromEntity 静默写 + worldChanged 重建 mesh，不发 broken/placed → 免粒子 / 音
+    //   spam，同 scanTntTraps 的压力板四邻点燃模式）+ spawnPrimedTnt（默认 fuse ~5s）→ 引爆时链式引燃邻接 TNT。
+    //   分层（PLAN §2）：点火属 Game/Physics（读射线命中 + 写 World state + 调 EntityManager.spawnPrimedTnt），向下依赖。
+    if (BlockRegistry::isManualIgniter(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+        const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+        const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+        // 翻 state bit0（激活态：lever 扳柄 / button 按下）→ mesher 切亮色高光（机关激活视觉反馈）。
+        m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, quint8(st ^ 1));
+        // 点燃水平四邻的 TNT 方块（同 scanTntTraps 压力板四邻点燃模式）。逐邻查 TNT → 移除 + spawnPrimedTnt。
+        static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        for (const auto &d : kDirs) {
+            const int tx = m_hitBx + d[0], tz = m_hitBz + d[1];
+            if (BlockRegistry::isTnt(m_world->blockAt(tx, m_hitBy, tz))) {
+                m_world->setBlockFromEntity(tx, m_hitBy, tz, BlockRegistry::Air); // 移除 TNT 方块（静默写）
+                m_entityManager->spawnPrimedTnt(tx, m_hitBy, tz); // 点燃（默认 fuse；引爆时链式引燃邻接 TNT）
+            }
+        }
+        m_lastPlaceMs = now;
+        emit swingArm(); // 扳柄 / 按下是一次「使用」动作 → 挥手（t29）
+        return; // 机关激活 → 不再走放置路径
+    }
+    // t490 玩家手动点燃 TNT（spec「创造放多 TNT + 点燃一个 → 连锁全爆」；机制等价 MC 1.0 空手 / 持物右键 TNT
+    //   方块点燃）：右键命中格为 TNT 方块本身 → 移除 TNT 方块 + spawnPrimedTnt（默认 fuse ~5s）+ 挥手。空手或持物
+    //   均可（点燃是「使用」语义，与手持何物无关，同工作台 / 门）。优先于放置（右键 TNT 即点燃，不另放块）。
+    //   点燃后 PrimedTnt fuse 到 0 → detonateTntSphere 球形破坏 + 链式引燃邻接 TNT → 连锁全爆（spec 验收核心）。
+    //   分层（PLAN §2）：同上（读射线命中 + 写 World + 调 EntityManager.spawnPrimedTnt），向下依赖。
+    if (BlockRegistry::isTnt(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+        m_world->setBlockFromEntity(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Air); // 移除 TNT 方块（静默写）
+        m_entityManager->spawnPrimedTnt(m_hitBx, m_hitBy, m_hitBz); // 点燃（默认 fuse ~5s）
+        m_lastPlaceMs = now;
+        emit swingArm();
+        return;
+    }
     } // t174：m_hasHit 局部门控结束（工作台/熔炉/门/活版门需命中；桶分支与放块路径各自处理命中需求）
     // t174 铁桶 useBlock（spec「右键舀水/倒水交互」）：选空桶 / 装水桶时右键走桶交互，不走方块放置路径
     //   （桶非方块；selectedBlock 经 hotbar 已归 Air，下方 Air 守卫会拦，故在此提前分支）。机制等价 MC 1.0
@@ -2960,7 +2999,12 @@ void PlayerController::arrowPickupScan()
     }
 }
 
-// t485 TNT 陷阱触发（见 playercontroller.h 头注释）。扫玩家 footprint 格——压力板 + 下方 TNT 即引爆。
+// t485/t490 TNT 陷阱触发（见 playercontroller.h 头注释）。扫玩家 footprint 格：
+//   (a) 旧路径：压力板下垫 TNT（feetY-1）→ 直接引爆（spec 沙漠神殿经典陷阱：板下 TNT 块即引爆）。
+//   (b) t490 新增：玩家踩的压力板，其 **水平四邻格** 有 TntBlock → 点燃（移除 TNT 方块 + spawnPrimedTnt，
+//       引燃态实体延时引爆触发连锁）。机制等价 MC 1.0 压力板经红石点燃邻接 TNT（本项目无红石，故「踩板即点燃
+//       四邻 TNT」直接绑在 footprint 扫描上）。点燃 TNT 块转 PrimedTnt（非直接引爆）→ fuse 倒计 ~5s → 引爆
+//       → detonateTntSphere 内链式引燃邻接 TNT → 连锁全爆（spec「创造放多 TNT + 点燃一个 → 连锁全爆」）。
 void PlayerController::scanTntTraps()
 {
     if (!m_entityManager || !m_world) return;
@@ -2976,12 +3020,27 @@ void PlayerController::scanTntTraps()
         for (int bz = z0; bz <= z1; ++bz) {
             const quint8 plate = m_world->blockAt(bx, feetY, bz);
             if (!BlockRegistry::isPressurePlate(plate)) continue;        // 本格非压力板 → 跳过
+            // (a) 旧路径：压力板下垫 TNT → 直接引爆（destroySphereSilent 球形破坏 + 衰减伤玩家 + explosion 音/视）。
+            //   爆炸即摧毁压力板 + TNT（在半径内）→ 同帧不会重复触发。
             const quint8 below = m_world->blockAt(bx, feetY - 1, bz);
-            if (!BlockRegistry::isTnt(below)) continue;                  // 压力板下非 TNT → 跳过
-            // 触发：调 entityManager 在 TNT 格引爆（destroySphereSilent 球形破坏 + 衰减伤玩家 + explosion 音/视）。
-            //   爆炸即摧毁压力板 + TNT（在半径内）→ 同帧不会重复触发；return 防同帧多候选多次引爆。
-            m_entityManager->detonateTntBlock(bx, feetY - 1, bz, m_world, m_pos);
-            return;
+            if (BlockRegistry::isTnt(below)) {
+                m_entityManager->detonateTntBlock(bx, feetY - 1, bz, m_world, m_pos);
+                return; // return 防同帧多候选多次引爆
+            }
+            // (b) t490 新增：压力板水平四邻格有 TNT → 点燃（移除 TNT 方块 + spawnPrimedTnt 延时引爆 + 链式）。
+            //   水平四邻（同 feetY）：上下左右各查一格。命中首个 TNT → 点燃即 return（防同帧点燃多个刷屏；
+            //   链式引爆由 detonateTntSphere 内 spawnPrimedTnt 递归传播，单次点燃足以触发整片连锁）。
+            //   点燃 = 移除 TNT 方块（setBlockFromEntity 直写 + worldChanged 重建 mesh，不发 broken/placed → 免粒子 /
+            //   音 spam，同水流蔓延 / 系统破坏模式）+ spawnPrimedTnt（默认 fuse ~5s）。机制等价 MC 压力板激活邻接 TNT。
+            static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+            for (const auto &d : kDirs) {
+                const int tx = bx + d[0], tz = bz + d[1];
+                if (BlockRegistry::isTnt(m_world->blockAt(tx, feetY, tz))) {
+                    m_world->setBlockFromEntity(tx, feetY, tz, BlockRegistry::Air); // 移除 TNT 方块（静默写）
+                    m_entityManager->spawnPrimedTnt(tx, feetY, tz); // 点燃（默认 fuse；引爆时链式引燃邻接 TNT）
+                    return; // 单次点燃 → return（链式引爆由 PrimedTnt fuse 到 0 后递归触发）
+                }
+            }
         }
     }
 }

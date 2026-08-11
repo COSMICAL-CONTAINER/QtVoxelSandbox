@@ -4559,7 +4559,13 @@ Window {
                     //   挖底沙→掉落沙明显变亮」（旧版无 baseColor 也无顶点色 → 恒全亮，洞穴/夜间格外刺眼）。
                     //   worldPos 绑 posAt（触碰 revision 建依赖 → 每帧位移 / 重力下落重烘顶点色）；sunDir 绑
                     //   worldClock.sunDir（太阳跨步重烘）；shadowsEnabled 绑 window.shadowsEnabled（开关同步）。
+                    //   t490 PrimedTnt（引燃态 TNT）白闪脉冲：primed 实体（isPrimedAt）据 fuseProgressAt 驱动
+                    //   白闪频率（fuse 将尽时加快，机制等价 MC TNT 引信将尽闪烁加快）+ 微缩 scale 0.98（机制等价
+                    //   MC TNT 引燃收缩）。tntFlashPhase 由循环 NumberAnimation 推 0→1，duration 随 fuseProgress
+                    //   递减缩短（progress 1=刚点燃慢闪 / 0=即将引爆快闪）。baseColor 在原色 ↔ 白色间 lerp by
+                    //   sin(phase·π) 脉冲（参考 :5212 Stalker 蓄力发白 lerp 模式）。
                     Model {
+                        id: fallingBlockModel
                         visible: entKind === EntityManager.FallingBlock
                         geometry: BlockCube {
                             blockId: { entityManager.revision; return entityManager.blockIdAt(index) }
@@ -4568,12 +4574,59 @@ Window {
                             sunDir: worldClock.sunDir
                             shadowsEnabled: window.shadowsEnabled
                         }
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
+                        // t490 PrimedTnt 引燃收缩 scale 0.98（机制等价 MC TNT 引燃收缩）；非 primed 保持 1.0。
+                        property bool entPrimed: { entityManager.revision; return entityManager.isPrimedAt(index) }
+                        property real entFuseProg: { entityManager.revision; return entityManager.fuseProgressAt(index) }
+                        scale: entPrimed ? Qt.vector3d(0.98, 0.98, 0.98) : Qt.vector3d(1.0, 1.0, 1.0)
+                        // t490 白闪脉冲相位（0..1 循环）。仅 primed 实体跑动画（非 primed 静止 0 不影响 baseColor）。
+                        property real tntFlashPhase: 0.0
+                        // 循环动画推 phase 0→1；duration 随 fuseProgress 变（progress 1=刚点燃 800ms 慢周期 /
+                        //   progress 0=即将引爆 120ms 快周期）。每次循环结束 onFinished 重启 + 重设 duration（据当前
+                        //   entFuseProg）→ 频率随 fuse 减少平滑加快。非 primed running=false（不动）。
+                        NumberAnimation on tntFlashPhase {
+                            id: tntFlashAnim
+                            from: 0; to: 1
+                            duration: 800
+                            running: fallingBlockModel.entPrimed
+                            loops: 1
+                            onFinished: {
+                                // 仅 primed 实体重启（slot 复用成非 primed 时 entPrimed=false → 不重启）。
+                                if (fallingBlockModel.entPrimed) {
+                                    tntFlashAnim.duration = fallingBlockModel.tntFlashDuration()
+                                    tntFlashAnim.start()
+                                }
+                            }
+                        }
+                        // 据当前 fuseProgress 算脉冲周期（ms）：progress 1 → 800ms（慢，刚点燃）/ progress 0 → 120ms
+                        //   （快，即将引爆），线性插值。fuseProgress>1（链式 fuse 略长）clamp 到 1。
+                        function tntFlashDuration() {
+                            const p = Math.max(0.0, Math.min(1.0, entFuseProg))
+                            return 120 + (800 - 120) * p
+                        }
+                        // fuseProgress 变（revision bump）→ 重设动画 duration（下次循环生效，当前循环不中断）。
+                        onEntFuseProgChanged: {
+                            if (tntFlashAnim.running) tntFlashAnim.duration = tntFlashDuration()
+                        }
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
-                            baseColor: terrainLight(worldClock.skyLight)  // t257 昼夜灰阶（同 chunk Model）
-                            vertexColorsEnabled: true                      // t257 顶点色光场 × PCF 软影
+                            // t490 primed → 白闪脉冲（baseColor 在原色 ↔ 白色间 lerp by sin(phase·π) 脉冲）；
+                            //   非 primed → 原 terrainLight 昼夜灰阶（t257）。primed 时取消 vertexColorsEnabled（顶点色
+                            //   光场会让白闪暗化，pulse 视觉不纯；改 baseColor 直接脉冲更亮）。
+                            baseColor: {
+                                entityManager.revision
+                                const tl = terrainLight(worldClock.skyLight)
+                                if (!fallingBlockModel.entPrimed) return tl
+                                // 脉冲强度 = sin(phase·π)：phase 0/1 = 0（原色）、0.5 = 1（全白）。机制等价 MC TNT
+                                //   引燃态白闪（原色 ↔ 白色往复）。白色 lerp 量 = sin(phase·π)·0.85（留 15% 原色免
+                                //   全白丢失 TNT 贴图纹理识别）。
+                                const pulse = Math.sin(fallingBlockModel.tntFlashPhase * Math.PI) * 0.85
+                                const r = tl.r * (1 - pulse) + 1.0 * pulse
+                                const g = tl.g * (1 - pulse) + 1.0 * pulse
+                                const b = tl.b * (1 - pulse) + 1.0 * pulse
+                                return Qt.rgba(r, g, b, 1.0)
+                            }
+                            vertexColorsEnabled: !fallingBlockModel.entPrimed  // primed 白闪不叠顶点色光场
                         }
                     }
                     // Mob（原 t95 测试生物；t239 生物基类；t240 猪牛羊模型 + 贴图）：

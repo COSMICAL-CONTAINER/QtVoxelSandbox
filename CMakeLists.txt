@@ -255,6 +255,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_stone_brick.png         # t487 石砖各面贴图（build_stone_brick.py；石质灰底+砖块缝纹网格；要塞墙体主体）
         textures/default_end_portal.png          # t487 末地传送门未激活态贴图（build_end_portal.py；深紫黑星空底+中心暗绿旋涡）
         textures/default_end_portal_active.png   # t487 末地传送门激活态贴图（build_end_portal.py；深紫黑星空底+中心亮绿旋涡+白绿高光）
+        textures/default_lever.png               # t490 杠杆贴图（build_lever_button.py；木质底座+竖直扳柄+圆柄头；手动点火机关）
+        textures/default_wood_button.png         # t490 木按钮贴图（build_lever_button.py；木质底座+凸起圆钮）
+        textures/default_stone_button.png        # t490 石按钮贴图（build_lever_button.py；石质底座+凸起圆钮）
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
@@ -391,6 +394,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_stone_brick.png            # t487 石砖立方体图标（build_cube_icons.py；各面=石质灰底+砖块缝纹网格；要塞墙体主体）
         textures/icon_stone_brick_slab.png       # t487 石砖台阶立方体图标（build_cube_icons.py；3D 半高盒，砖纹）
         textures/icon_stone_brick_stairs.png     # t487 石砖楼梯立方体图标（build_cube_icons.py；3D L 阶，砖纹）
+        textures/icon_lever.png                  # t490 杠杆立方体图标（build_cube_icons.py；pressure_plate shape+lever 贴图；手动点火机关）
+        textures/icon_wood_button.png            # t490 木按钮立方体图标（build_cube_icons.py；pressure_plate shape+wood_button 贴图）
+        textures/icon_stone_button.png           # t490 石按钮立方体图标（build_cube_icons.py；pressure_plate shape+stone_button 贴图）
         textures/icon_crafting_table.png
         textures/icon_dirt.png
         textures/icon_furnace.png

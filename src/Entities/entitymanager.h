@@ -363,6 +363,29 @@ public:
     //   （TNT 是方块）→ 不标 exploded / 不 releaseSlot / 不注册驯服狼防御目标。分层（PLAN §2）：向下写 World
     //   （destroySphereSilent）+ 发语义信号；只读 World::blockAt。无向上依赖。
     void detonateTntBlock(int x, int y, int z, World *world, const QVector3D &playerPos);
+    // t490 生成 PrimedTnt（引燃态 TNT 实体；机制等价 MC 1.0 primed TNT）。复用 FallingBlock kind + blockId=TntBlock
+    //   + primed=true + fuse=fuseSec（caller 传，默认 kPrimedTntFuseSec ~5s）。位置存 (x+0.5, y+0.5, z+0.5)。
+    //   **非完整方块 + 可穿透 + 可堆叠**（spec）：halfW/halfH=0（玩家碰撞跳过 → 可穿过）、pushable=false、不查占用
+    //   （同格可叠多个 PrimedTnt）。tick FallingBlock 分支据 primed 走 fuse 倒计 → 到 0 detonatePrimedTnt 引爆。
+    //   fuseJitter = 引信错峰随机量（秒；0 = 无抖动）。链式引爆时传小随机 fuseJitter 避免同帧全部引爆（错峰）。
+    //   分层（PLAN §2）：Entities 层自持实体数据 + acquireSlot；无向下依赖。达 kCap → 跳过 + 告警（防溢出）。
+    Q_INVOKABLE void spawnPrimedTnt(int x, int y, int z, float fuseSec = -1.0f);
+    // t490 引爆 PrimedTnt（tick fuse 到 0 调；机制等价 MC 1.0 TNT 爆炸）。与 detonateTntBlock 同源（球形破坏 +
+    //   引燃邻接 TNT 链式 + 衰减伤玩家 + explosion 音/视），差异：中心是 PrimedTnt 实体 pos（floor）而非 TNT 方块格，
+    //   引爆后实体移除（releaseSlot）。idx = PrimedTnt 槽索引；world/playerPos 由 tick 传入。
+    void detonatePrimedTnt(int idx, World *world, const QVector3D &playerPos);
+    // t490 私有：以 (cx,cy,cz) 为中心的 TNT 球形爆炸公共主体（detonateTntBlock 方块路径 + detonatePrimedTnt 实体
+    //   路径共用）。① destroySphereSilent 球形破坏（N 写 1 emit）；② 爆炸掉落（~50%/块，同 Stalker）；③ 链式引燃
+    //   （spec t490 验收核心）：destroyed 列表中 oldId==TntBlock 的格子 spawnPrimedTnt（fuse=Jitter 随机错峰）→
+    //   各 PrimedTnt fuse 到 0 再次 detonatePrimedTnt 引爆其球内 TNT，递归连锁引爆全部（踩沙漠神殿压力板 → 3×3 连锁全爆）；
+    //   ④ 距离衰减伤玩家 + 击退；⑤ emit explosion（音/视单一入口）。分层：向下写 World（destroySphereSilent）+ 发语义信号。
+    void detonateTntSphere(int cx, int cy, int cz, World *world, const QVector3D &playerPos);
+    // t490 第 i 个实体是否 PrimedTnt（kind==FallingBlock && primed）。QML delegate 据它对 FallingBlock 叠白闪脉冲
+    //   （primed=true → baseColor 白闪；false → 普通下落方块原色）。越界 / 非 primed → false。
+    Q_INVOKABLE bool isPrimedAt(int i) const;
+    // t490 第 i 个 PrimedTnt 的引信进度（0..1，1=刚点燃、0=即将引爆）。QML delegate 据它驱动白闪脉冲频率（频率随
+    //   fuse 减少加速，机制等价 MC TNT 引信将尽时闪烁加快）。越界 / 非 primed → 0。
+    Q_INVOKABLE float fuseProgressAt(int i) const;
     // t242 攻击射线 vs mob AABB 命中测试（C++ 直调；PlayerController::beginMining 左键攻击路径调）。
     //   返回沿射线 (origin, dir) maxDist 内**最近**的活体 mob 索引；无命中 → -1。
     //   outDist（若非 null）写入命中距离（起点到 AABB 表面欧氏距离）。
@@ -569,6 +592,15 @@ private:
         bool pushable = true;    // 玩家是否可推动（掉落物变体 pushable=false，统一基类预留）
         int kind = Mob;          // 渲染分流（Mob/Item/FallingBlock；Q_ENUM）
         int blockId = 0;         // t117 FallingBlock 携带的方块 id（着地 setBlock 用；其余 kind=0）
+        // t490 PrimedTnt 引燃态（复用 kind=FallingBlock + blockId=TntBlock 表达「点燃的 TNT 实体」）：
+        //   primed=true → 本 FallingBlock 是 PrimedTnt（TNT 方块被引燃 / 链式引爆时由 spawnPrimedTnt 生成）。
+        //     tick FallingBlock 分支据 primed 走「fuse 倒计 → 到 0 引爆（detonatePrimedTnt）」而非「着地放置方块」。
+        //   fuse = 引信剩余秒数（spawnPrimedTnt 设 ~5s = kPrimedTntFuseSec；tick 每帧递减 dt）。
+        //     到 0 → detonatePrimedTnt（球形破坏 + 引燃邻接 TNT 链式 + 衰减伤玩家 + explosion 音/视）+ 移除实体。
+        //   **非完整方块 + 可穿透 + 可堆叠**（spec t490）：primed 实体 halfW/halfH=0（玩家碰撞跳过 → 可穿过），
+        //     spawn 时不查占用（同格可叠多个 PrimedTnt，各自独立引爆）。复用 FallingBlock 重力（沙子般受重力下落）。
+        bool primed = false;       // 是否 PrimedTnt（引燃态 TNT；复用 FallingBlock kind）
+        float fuse = 0.0f;         // 引信剩余秒（仅 primed 用；spawnPrimedTnt 设 kPrimedTntFuseSec，tick 递减 dt）
         QString color = QStringLiteral("#ff5555"); // 渲染配色（醒目纯色）
         float vy = 0.0f;         // 垂直速度（blocks/s；向下为负）；落地后归 0；t249 击退小跳设正值（向上）
         bool resting = false;    // 是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
@@ -1366,6 +1398,12 @@ private:
     // t297 爆炸掉落：每个被爆炸破坏的方块以此概率掉落其物品实体（机制等价 MC 爆炸弹毁方块掉物；
     //   spec「~50% 成掉落物」）。掉落 id 走 BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落）。
     static constexpr float kExplosionDropChance = 0.5f;  // 破坏块掉落概率（~50%；MC 实为 1/radius≈33%，spec 取 50%）
+    // t490 PrimedTnt 引信常量（机制等价 MC 1.0 primed TNT fuse ~80 tick = 4s；本工程取 ~5s，spec「~5s」）。
+    //   kPrimedTntFuseSec = 引信总长（秒）；spawnPrimedTnt 默认值。tick 每帧递减 dt，到 0 → detonatePrimedTnt。
+    //   kPrimedTntFuseJitterSec = 链式引爆时各 PrimedTnt 引信的随机错峰量（秒；避免同帧全部引爆 = 一次性大爆炸，
+    //   错峰后各 TNT 略延时引爆，机制等价 MC TNT 链式逐个引爆的连锁观感）。
+    static constexpr float kPrimedTntFuseSec = 5.0f;      // PrimedTnt 引信总长（秒；spec ~5s）
+    static constexpr float kPrimedTntFuseJitterSec = 0.6f; // 链式引爆引信随机错峰（秒；0..Jitter 随机偏移避免同帧全爆）
     // t298 怪物受水流影响（spec「怪在水中正常走（错）→减速/浮（同玩家水中物理）」；机制等价玩家水中物理
     //   t174 浮力缓沉 + t159 水下减速 + t211 流水推动 —— mobs 不按空格故无 kSwimUp 上浮，仅被动缓沉）。
     //   数值与玩家同源（PlayerController kUnderwaterSpeedMul/kWaterGravity/kWaterSinkMax/kWaterFlowPush），保世界

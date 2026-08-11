@@ -269,6 +269,11 @@ TILES = [
                                   #    高光；玩家持末影之眼右键传送门翻 state bit0 → mesher 切本 tile 显激活视觉；
                                   #    不绑定方块 id（EndPortal def 各面=129），属 mesher 据 state 的呈现选择，非方块属性；
                                   #    tools/build_end_portal.py 程序生成）
+    # t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / wooden button / stone button；无红石故右键激活即点燃邻接
+    #   TNT）。各由独立 build_lever_button.py 程序生成原创像素图（不透明贴地薄板，同 WoodPressurePlate 几何）。
+    "default_lever",              # 131 lever（杠杆各面同贴图；木质底座 + 中央竖直扳柄 + 顶部圆柄头；右键扳动点燃邻接 TNT）
+    "default_wood_button",        # 132 wood_button（木按钮各面同贴图；木质底座 + 中央凸起圆钮；右键按点点燃邻接 TNT）
+    "default_stone_button",       # 133 stone_button（石按钮各面同贴图；石质底座 + 中央凸起圆钮；右键按点点燃邻接 TNT）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

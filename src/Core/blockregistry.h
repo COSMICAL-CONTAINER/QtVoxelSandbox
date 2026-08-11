@@ -677,7 +677,35 @@ public:
         //   mesher 据 state bit0 切贴图（未激活=end_portal(129) / 激活=end_portal_active(130) 同星空但中心旋涡更亮）。
         //   不进创造调色板（worldgen 专属；玩家经末影之眼激活交互，非放置）。state 经 m_states 落 SQLite round-trip 保真。
         EndPortal       = 111, // 末地传送门：要塞传送门房中央（机制等价 MC 1.0 end portal）；末影之眼右键激活（占位）
-        Count           = 112, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / 木按钮 / 石按钮；无红石系统，故用「右键激活 →
+        //   点燃水平四邻 TNT」简化为单次脉冲触发，spec「若时间紧，拉杆/按钮可简化为放置即点燃邻接 TNT 或右键触发
+        //   单一路径」）。名称 / 贴图全原创自绘 §9a（tools/build_lever_button.py 程序生成）。三者本身是可放置 / 可破的
+        //   装饰机关方块（进创造调色板），右键激活时点燃邻接 TNT（机制等价 MC 1.0 红石点火源——本项目无红石，故
+        //   把「激活即点火邻接 TNT」直接绑在右键动作上）。复用既有异形方块系统（ShapePlate 贴地薄板几何 + 单 id
+        //   谓词路由），机制等价 MC 1.0 三类机关（杠杆 lever / 木按钮 wooden button / 石按钮 stone button），仅机制
+        //   对齐非照搬 MC 美术。
+        //   Lever（杠杆）：木质底座 + 竖直 / 拉下两态扳手柄（state bit0=激活态）。solid=false（非整立方 → 不挡
+        //     邻居面剔除，同压力板）、ShapePlate（碰撞/选中贴地薄板，与 WoodPressurePlate 同几何——简化为贴地薄
+        //     板而非墙面附着，本项目放置即贴地，机制对标可接受）、hardness=0.5（木软，徒手可破）、NoTool、
+        //     requiresTool=false（空手掉落）、dropId=自身、dropCount=1、maxStack=64。各面贴图=lever(131)
+        //     （木质底座 + 中央竖直扳柄 + 顶部圆柄头；激活态由 mesher 据 state bit0 切亮色高光，非 MC 资产）。
+        //     音色归 GroupWood（木质）。**激活路径**：PlayerController placeBlock useBlock 分支检测命中 Lever →
+        //     翻 state bit0（扳柄态）+ 点燃水平四邻 TNT（spawnPrimedTnt）+ emit swingArm（机制等价 MC 1.0 杠杆扳动即
+        //     红石脉冲点火 TNT）。进创造调色板（玩家可取用 / 放置 / 自建机关）。
+        Lever           = 112, // 杠杆：右键扳动 → 点燃水平四邻 TNT（机制等价 MC 1.0 lever；简化无红石）
+        //   WoodButton（木按钮）：木质小按钮（state bit0=激活态，按下后短暂亮起）。solid=false / ShapePlate
+        //     （与 Lever 同几何）、hardness=0.5、NoTool、requiresTool=false、dropId=自身、dropCount=1、maxStack=64。
+        //     各面贴图=button_wood(132)（木质底座 + 中央凸起圆钮；激活态由 mesher 据 state bit0 切亮色高光）。
+        //     音色归 GroupWood。**激活路径**：同 Lever——右键 → 翻 state bit0 + 点燃水平四邻 TNT（机制等价 MC 1.0
+        //     木按钮按下红石脉冲点火 TNT）。进创造调色板。
+        WoodButton      = 113, // 木按钮：右键按下 → 点燃水平四邻 TNT（机制等价 MC 1.0 wooden button；简化无红石）
+        //   StoneButton（石按钮）：石质小按钮（state bit0=激活态，按下后短暂亮起）。solid=false / ShapePlate
+        //     （与 Lever / WoodButton 同几何）、hardness=0.5、Pickaxe（石质）、requiresTool=true、minTier1（木镐可破
+        //     且掉落）、dropId=自身、dropCount=1、maxStack=64。各面贴图=button_stone(133)（石质底座 + 中央凸起圆钮；
+        //     激活态由 mesher 据 state bit0 切亮色高光）。音色归 GroupStone。**激活路径**：同 Lever/WoodButton——
+        //     右键 → 翻 state bit0 + 点燃水平四邻 TNT（机制等价 MC 1.0 石按钮按下红石脉冲点火 TNT）。进创造调色板。
+        StoneButton     = 114, // 石按钮：右键按下 → 点燃水平四邻 TNT（机制等价 MC 1.0 stone button；简化无红石）
+        Count           = 115, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -738,6 +766,15 @@ public:
     //   避免各处硬编码 Dispenser id 判定（同 isTnt / isLadder 单 id 模式）。单 id 故裸相等判定，仍提供谓词作
     //   单一权威（未来追加发射器变体时一处同步）。
     static bool isDispenser(quint8 blockId);
+    // t490 手动 TNT 点火机关统一谓词（单一权威）。Lever / WoodButton / StoneButton 三者机制等价 MC 1.0 lever /
+    //   wooden button / stone button——右键激活即点燃水平四邻 TNT（本项目无红石，故把「激活脉冲」直接绑在右键动作）。
+    //   isLever / isWoodButton / isStoneButton 各单 id 裸相等判定；isManualIgniter（任一机关）供 placeBlock useBlock
+    //   分支统一判定「右键命中的机关方块 → 点燃邻接 TNT」，避免三处硬编码 id 判定漂移（同 isTnt 单 id 模式 +
+    //   聚合谓词模式，单一权威，未来追加机关变体时一处同步）。
+    static bool isLever(quint8 blockId);
+    static bool isWoodButton(quint8 blockId);
+    static bool isStoneButton(quint8 blockId);
+    static bool isManualIgniter(quint8 blockId); // 任一手动点火机关（Lever / WoodButton / StoneButton）
     // t487 要塞结构方块统一谓词（单一权威）：blockId == EndPortal 即末地传送门。供 PlayerController placeBlock
     //   useBlock 分支判定「右键命中格是否末地传送门 → 持末影之眼激活」（避免各处硬编码 id 判定漂移，同 isLadder
     //   单 id 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来追加变体时一处同步）。
@@ -1145,7 +1182,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 131;
+    static constexpr int AtlasTileCount = 134;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
