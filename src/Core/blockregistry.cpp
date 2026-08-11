@@ -34,7 +34,7 @@ namespace {
 constexpr float kLilyPadTop = 1.0f / 16.0f;
 constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* air            */ {int(BlockRegistry::Air),           0,  0, 0,  0,  false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0,  0, "air",            ""},
-    /* grass          */ {int(BlockRegistry::Grass),         0,  2, 1,  1,  true,  BlockRegistry::ShapeFull,     0.6f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::Grass),         1, 64, "grass",          "草方块"}, // t265 铲加速（requiresTool=false 空手仍掉落）；顶=grass_top 底=dirt 侧=grass_side
+    /* grass          */ {int(BlockRegistry::Grass),         0,  2, 1,  1,  true,  BlockRegistry::ShapeFull,     0.6f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::Dirt),          1, 64, "grass",          "草方块"}, // t265 铲加速（requiresTool=false 空手仍掉落）；顶=grass_top 底=dirt 侧=grass_side。**t500 dropId=Dirt**（生存挖掉泥土，机制等价 MC 1.0「草方块非精准采集掉泥土」）；精准采集附魔覆盖掉 Grass 自身（playercontroller finishMiningAt silk 分支）
     /* dirt           */ {int(BlockRegistry::Dirt),          2,  2, 2,  2,  true,  BlockRegistry::ShapeFull,     0.5f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::Dirt),          1, 64, "dirt",           "泥土"}, // t265 铲加速（空手也掉落）
     /* stone          */ {int(BlockRegistry::Stone),         3,  3, 3,  3,  true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Cobble),        1, 64, "stone",          "石头"}, // 需木镐+ 采掘；掉圆石（原石→圆石）
     /* cobble         */ {int(BlockRegistry::Cobble),        5,  5, 5,  5,  true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Cobble),        1, 64, "cobble",         "圆石"},
