@@ -4586,151 +4586,177 @@ Window {
                             baseColor: "#ff3a5a" // 求偶红心
                         }
                     }
-                    Model {
-                        // mobType 0 / 5：通用测试生物（t95/t239）+ t280 敌对 Bones(5)（骷髅，t283 待做原创模型）
-                        //   —— UnitCube 单色立方（原创几何，§9 区隔不照搬 MC 美术）。敌对走 EntityManager.spawnHostileMob
-                        //   设的 colorAt（Bones 灰白 #d8d4c4）；mobType 0 仍走 spawnMob 的 #ff5555。
-                        //   受击红闪：hurtFlashAt>0 → baseColor #ff0000 覆盖。t280 燃烧：isBurningAt>0 → baseColor
-                        //   偏橙（火焰色调制单色立方，与下方 flame Model 共显「着火」感）。
-                        //   t282：Shambler(4) 不再走本 UnitCube 路径 —— 已迁到下方专属 MobModel 人形 + 贴图分支。
-                        visible: entKind === EntityManager.Mob
-                                 && entMobType === 0
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: {
-                                entityManager.revision
-                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                // t280 燃烧中 → 橙红偏色（与 flame Model 叠加显「着火」），否则走 mob 配色。
-                                if (entityManager.isBurningAt(index)) return "#ff7a3a"
-                                return entityManager.colorAt(index)
+                    // [perf] mob 类型特定块改为 Loader 门控：仅匹配 entMobType 的那一个 Loader 实例化其子树，
+                    //   其余 mobType 的 Loader inactive（0 子节点）。旧版每槽无条件实例化全部 ~16 mob 类型块
+                    //   （每槽 ~108 Model）× 64 槽(kCap) ≈ 8000 节点每帧 GUI 线程 scene-graph 同步（95% invisible
+                    //   仍被遍历）→ 5 FPS 真凶。Loader active = 该块原 visible 条件；sourceComponent 包原块 verbatim
+                    //   （不改块内任何代码/绑定/注释，块内 visible 行保留——Loader inactive 时本就不实例化，active 时
+                    //   条件恒真亦无害）。onLoaded 领养：Loader 是 2D QQuickItem，加载出的 3D Node/Model 默认
+                    //   parent=null（孤儿不渲染，lessons-learned t16）→ 显式领养进 delegate Node（mobDelegate）并入
+                    //   3D 场景图（同 particleLoader 模式）。视觉/行为零变化（仅按 mobType 选择性实例化）。
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === 0
+                        sourceComponent: Component {
+                            Model {
+                                // mobType 0 / 5：通用测试生物（t95/t239）+ t280 敌对 Bones(5)（骷髅，t283 待做原创模型）
+                                //   —— UnitCube 单色立方（原创几何，§9 区隔不照搬 MC 美术）。敌对走 EntityManager.spawnHostileMob
+                                //   设的 colorAt（Bones 灰白 #d8d4c4）；mobType 0 仍走 spawnMob 的 #ff5555。
+                                //   受击红闪：hurtFlashAt>0 → baseColor #ff0000 覆盖。t280 燃烧：isBurningAt>0 → baseColor
+                                //   偏橙（火焰色调制单色立方，与下方 flame Model 共显「着火」感）。
+                                //   t282：Shambler(4) 不再走本 UnitCube 路径 —— 已迁到下方专属 MobModel 人形 + 贴图分支。
+                                visible: entKind === EntityManager.Mob
+                                         && entMobType === 0
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: {
+                                        entityManager.revision
+                                        if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        // t280 燃烧中 → 橙红偏色（与 flame Model 叠加显「着火」），否则走 mob 配色。
+                                        if (entityManager.isBurningAt(index)) return "#ff7a3a"
+                                        return entityManager.colorAt(index)
+                                    }
+                                }
                             }
                         }
+                        onLoaded: if (item) item.parent = mobDelegate
                     }
-                    // t482 雪傀儡（SnowGolem，mobType 12）：防御造物，南瓜头 + 雪块身堆叠（机制等价 MC 1.0 雪傀儡，
-                    //   §9 区隔纯色原创非照搬 MC）。delegate 原点 = 碰撞中心（pos.y）；mobModelYOff=0 故组内各块按
-                    //   碰撞中心定位（halfH=0.90 → feet local y=-0.90）。UnitCube + NoLighting（红线）。受击红闪 /
-                    //   减速蓝调（isSlowedAt） / 昼夜灰阶（terrainLight）经 tinted() 函数统一驱动所有部件（base 色 × tint）。
-                    Node {
-                        visible: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem }
-                        position: Qt.vector3d(0, mobModelYOff, 0)
-                        // tint = 当前调制色（红闪 / 蓝调 / 昼夜灰阶）；tinted(hex) 把部件 base 色按 tint 逐通道相乘。
-                        property color tint: {
-                            entityManager.revision
-                            if (entityManager.hurtFlashAt(index) > 0) return Qt.rgba(1.0, 0.0, 0.0, 1.0)
-                            if (entityManager.isSlowedAt(index)) return Qt.rgba(0.60, 0.72, 1.0, 1.0)
-                            return terrainLight(worldClock.skyLight)
+                    Loader {
+                        active: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem }
+                        sourceComponent: Component {
+                            // t482 雪傀儡（SnowGolem，mobType 12）：防御造物，南瓜头 + 雪块身堆叠（机制等价 MC 1.0 雪傀儡，
+                            //   §9 区隔纯色原创非照搬 MC）。delegate 原点 = 碰撞中心（pos.y）；mobModelYOff=0 故组内各块按
+                            //   碰撞中心定位（halfH=0.90 → feet local y=-0.90）。UnitCube + NoLighting（红线）。受击红闪 /
+                            //   减速蓝调（isSlowedAt） / 昼夜灰阶（terrainLight）经 tinted() 函数统一驱动所有部件（base 色 × tint）。
+                            Node {
+                                visible: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem }
+                                position: Qt.vector3d(0, mobModelYOff, 0)
+                                // tint = 当前调制色（红闪 / 蓝调 / 昼夜灰阶）；tinted(hex) 把部件 base 色按 tint 逐通道相乘。
+                                property color tint: {
+                                    entityManager.revision
+                                    if (entityManager.hurtFlashAt(index) > 0) return Qt.rgba(1.0, 0.0, 0.0, 1.0)
+                                    if (entityManager.isSlowedAt(index)) return Qt.rgba(0.60, 0.72, 1.0, 1.0)
+                                    return terrainLight(worldClock.skyLight)
+                                }
+                                function tinted(hex) {
+                                    const b = Qt.color(hex)
+                                    return Qt.rgba(b.r * tint.r, b.g * tint.g, b.b * tint.b, 1.0)
+                                }
+                                // 底雪块（雪傀儡身体下块）：local y center -0.45，scale 0.8 → spans y [-0.85, -0.05]，冷白。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, -0.45, 0)
+                                    scale: Qt.vector3d(0.80, 0.90, 0.80)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#f0f4f8") }
+                                }
+                                // 顶雪块（雪傀儡身体上块）：local y center +0.45。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.45, 0)
+                                    scale: Qt.vector3d(0.80, 0.90, 0.80)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#f0f4f8") }
+                                }
+                                // 南瓜头（橙色）：local y center +1.30，scale 0.65。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 1.30, 0)
+                                    scale: Qt.vector3d(0.65, 0.65, 0.65)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e87a28") }
+                                }
+                                // 南瓜头刻面双眼（深色小方块贴头前面 -Z，机制等价 MC 刻面南瓜 jack o'lantern 双眼）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.12, 1.35, -0.30)
+                                    scale: Qt.vector3d(0.08, 0.10, 0.03)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.12, 1.35, -0.30)
+                                    scale: Qt.vector3d(0.08, 0.10, 0.03)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                                }
+                            }
                         }
-                        function tinted(hex) {
-                            const b = Qt.color(hex)
-                            return Qt.rgba(b.r * tint.r, b.g * tint.g, b.b * tint.b, 1.0)
-                        }
-                        // 底雪块（雪傀儡身体下块）：local y center -0.45，scale 0.8 → spans y [-0.85, -0.05]，冷白。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, -0.45, 0)
-                            scale: Qt.vector3d(0.80, 0.90, 0.80)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#f0f4f8") }
-                        }
-                        // 顶雪块（雪傀儡身体上块）：local y center +0.45。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 0.45, 0)
-                            scale: Qt.vector3d(0.80, 0.90, 0.80)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#f0f4f8") }
-                        }
-                        // 南瓜头（橙色）：local y center +1.30，scale 0.65。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 1.30, 0)
-                            scale: Qt.vector3d(0.65, 0.65, 0.65)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e87a28") }
-                        }
-                        // 南瓜头刻面双眼（深色小方块贴头前面 -Z，机制等价 MC 刻面南瓜 jack o'lantern 双眼）。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.12, 1.35, -0.30)
-                            scale: Qt.vector3d(0.08, 0.10, 0.03)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.12, 1.35, -0.30)
-                            scale: Qt.vector3d(0.08, 0.10, 0.03)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
-                        }
+                        onLoaded: if (item) item.parent = mobDelegate
                     }
-                    // t483 铁傀儡（IronGolem，mobType 13）：防御造物，南瓜头 + 铁块身（躯干 + 双腿 + 双臂）堆叠
-                    //   （机制等价 MC 1.0 铁傀儡，§9 区隔纯色原创非照搬 MC）。halfH=1.20 → feet local y=-1.20。
-                    //   UnitCube + NoLighting（红线）。受击红闪 / 减速蓝调 / 昼夜灰阶经 tinted() 统一驱动。
-                    Node {
-                        visible: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobIronGolem }
-                        position: Qt.vector3d(0, mobModelYOff, 0)
-                        property color tint: {
-                            entityManager.revision
-                            if (entityManager.hurtFlashAt(index) > 0) return Qt.rgba(1.0, 0.0, 0.0, 1.0)
-                            if (entityManager.isSlowedAt(index)) return Qt.rgba(0.60, 0.72, 1.0, 1.0)
-                            return terrainLight(worldClock.skyLight)
+                    Loader {
+                        active: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobIronGolem }
+                        sourceComponent: Component {
+                            // t483 铁傀儡（IronGolem，mobType 13）：防御造物，南瓜头 + 铁块身（躯干 + 双腿 + 双臂）堆叠
+                            //   （机制等价 MC 1.0 铁傀儡，§9 区隔纯色原创非照搬 MC）。halfH=1.20 → feet local y=-1.20。
+                            //   UnitCube + NoLighting（红线）。受击红闪 / 减速蓝调 / 昼夜灰阶经 tinted() 统一驱动。
+                            Node {
+                                visible: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobIronGolem }
+                                position: Qt.vector3d(0, mobModelYOff, 0)
+                                property color tint: {
+                                    entityManager.revision
+                                    if (entityManager.hurtFlashAt(index) > 0) return Qt.rgba(1.0, 0.0, 0.0, 1.0)
+                                    if (entityManager.isSlowedAt(index)) return Qt.rgba(0.60, 0.72, 1.0, 1.0)
+                                    return terrainLight(worldClock.skyLight)
+                                }
+                                function tinted(hex) {
+                                    const b = Qt.color(hex)
+                                    return Qt.rgba(b.r * tint.r, b.g * tint.g, b.b * tint.b, 1.0)
+                                }
+                                // 双腿（铁灰）：local y center -0.90，左右 ±0.22。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.22, -0.90, 0)
+                                    scale: Qt.vector3d(0.36, 0.60, 0.36)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.22, -0.90, 0)
+                                    scale: Qt.vector3d(0.36, 0.60, 0.36)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                }
+                                // 躯干（铁灰宽体）：local y center +0.05。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.05, 0)
+                                    scale: Qt.vector3d(0.95, 1.05, 0.65)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                }
+                                // 双臂（铁灰长臂，机制等价 MC 铁傀儡重拳长臂）：local y center +0.10，左右 ±0.62。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.62, 0.10, 0)
+                                    scale: Qt.vector3d(0.28, 0.78, 0.45)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.62, 0.10, 0)
+                                    scale: Qt.vector3d(0.28, 0.78, 0.45)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                }
+                                // 南瓜头（橙色）：local y center +0.95。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.95, 0)
+                                    scale: Qt.vector3d(0.72, 0.66, 0.72)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e87a28") }
+                                }
+                                // 南瓜头刻面双眼（深色小方块贴头前面 -Z）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.14, 1.00, -0.34)
+                                    scale: Qt.vector3d(0.09, 0.11, 0.03)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.14, 1.00, -0.34)
+                                    scale: Qt.vector3d(0.09, 0.11, 0.03)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
+                                }
+                            }
                         }
-                        function tinted(hex) {
-                            const b = Qt.color(hex)
-                            return Qt.rgba(b.r * tint.r, b.g * tint.g, b.b * tint.b, 1.0)
-                        }
-                        // 双腿（铁灰）：local y center -0.90，左右 ±0.22。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.22, -0.90, 0)
-                            scale: Qt.vector3d(0.36, 0.60, 0.36)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.22, -0.90, 0)
-                            scale: Qt.vector3d(0.36, 0.60, 0.36)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
-                        }
-                        // 躯干（铁灰宽体）：local y center +0.05。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 0.05, 0)
-                            scale: Qt.vector3d(0.95, 1.05, 0.65)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
-                        }
-                        // 双臂（铁灰长臂，机制等价 MC 铁傀儡重拳长臂）：local y center +0.10，左右 ±0.62。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.62, 0.10, 0)
-                            scale: Qt.vector3d(0.28, 0.78, 0.45)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.62, 0.10, 0)
-                            scale: Qt.vector3d(0.28, 0.78, 0.45)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
-                        }
-                        // 南瓜头（橙色）：local y center +0.95。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 0.95, 0)
-                            scale: Qt.vector3d(0.72, 0.66, 0.72)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e87a28") }
-                        }
-                        // 南瓜头刻面双眼（深色小方块贴头前面 -Z）。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.14, 1.00, -0.34)
-                            scale: Qt.vector3d(0.09, 0.11, 0.03)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.14, 1.00, -0.34)
-                            scale: Qt.vector3d(0.09, 0.11, 0.03)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#2a1a08" }
-                        }
+                        onLoaded: if (item) item.parent = mobDelegate
                     }
                     // t371 燃烧火焰视觉（重做 t280/t344）：旧版「略大于 mob 的橙黄半透立方整块包覆」→ 读作
                     //   「橙色方块 / 放大火把」而非火焰。改为「贴身的动画火舌」—— 沿身体表面（collision 箱表面，
@@ -4796,769 +4822,855 @@ Window {
                             }
                         }
                     }
-                    Model {
-                        // t240 猪（mobType 1）：MobModel 方块化原创模型 + mob_pig 贴图。
-                        // t241 行走动画：walkPhase 绑定驱动 4 腿对角摆动（moveSpeed>0 时 EntityManager 每帧推进相位）。
-                        visible: entKind === EntityManager.Mob && entMobType === 1
-                        geometry: MobModel {
-                            mobType: 1
-                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_pig）。
-                            packTextured: mobPigPackTex.source.length > 0
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === 1
+                        sourceComponent: Component {
+                            Model {
+                                // t240 猪（mobType 1）：MobModel 方块化原创模型 + mob_pig 贴图。
+                                // t241 行走动画：walkPhase 绑定驱动 4 腿对角摆动（moveSpeed>0 时 EntityManager 每帧推进相位）。
+                                visible: entKind === EntityManager.Mob && entMobType === 1
+                                geometry: MobModel {
+                                    mobType: 1
+                                    // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_pig）。
+                                    packTextured: mobPigPackTex.source.length > 0
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面（halfH 变后免悬空 / 穿地）
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0 红闪语义）。
+                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_pig。
+                                    baseColorMap: mobPigPackTex.source.length > 0 ? mobPigPackTex : mobPigTex
+                                }
+                                // t251 眼睛：mob 贴图是「全脸」身体纹（铺每盒每面，无五官）→ 头部正面无眼显「怪」。补 2 白眼底
+                                //   (#e8e8e8) + 2 深色瞳 (#1a1a1a) 小方块作 MobModel 子节点（同 t39 玩家眼睛模式：呈现层独立
+                                //   纯色 Model，不进 MobModel 几何 / 不共享 mob 贴图 → 实心眼色不受身体贴图调制）。NoLighting（红线）。
+                                //   眼作 mob Model 子节点 → 继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible（mobType 切换同步隐显）。
+                                //   猪/牛 headPitch 恒 0（EntityManager.headPitchAt 非 sheep 返 0）→ 眼直接定位头前面、无需俯仰 Node。
+                                //   位置 = MobModel 局部坐标（原点躯干中心）：猪头心 (0,0.05,-0.50) 半 (0.22,0.22,0.18) → 前面 z=-0.68，
+                                //   眼在上半 y≈0.13、左右 x=±0.10；z 贴头前面（眼底 z=-0.68、瞳 z=-0.69 略凸出，同 t52 贴脸防 z-fight）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.10, 0.13, -0.68)
+                                    scale: Qt.vector3d(0.08, 0.10, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.10, 0.13, -0.68)
+                                    scale: Qt.vector3d(0.08, 0.10, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.10, 0.13, -0.69)
+                                    scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.10, 0.13, -0.69)
+                                    scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                            }
                         }
-                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面（halfH 变后免悬空 / 穿地）
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0 红闪语义）。
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_pig。
-                            baseColorMap: mobPigPackTex.source.length > 0 ? mobPigPackTex : mobPigTex
-                        }
-                        // t251 眼睛：mob 贴图是「全脸」身体纹（铺每盒每面，无五官）→ 头部正面无眼显「怪」。补 2 白眼底
-                        //   (#e8e8e8) + 2 深色瞳 (#1a1a1a) 小方块作 MobModel 子节点（同 t39 玩家眼睛模式：呈现层独立
-                        //   纯色 Model，不进 MobModel 几何 / 不共享 mob 贴图 → 实心眼色不受身体贴图调制）。NoLighting（红线）。
-                        //   眼作 mob Model 子节点 → 继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible（mobType 切换同步隐显）。
-                        //   猪/牛 headPitch 恒 0（EntityManager.headPitchAt 非 sheep 返 0）→ 眼直接定位头前面、无需俯仰 Node。
-                        //   位置 = MobModel 局部坐标（原点躯干中心）：猪头心 (0,0.05,-0.50) 半 (0.22,0.22,0.18) → 前面 z=-0.68，
-                        //   眼在上半 y≈0.13、左右 x=±0.10；z 贴头前面（眼底 z=-0.68、瞳 z=-0.69 略凸出，同 t52 贴脸防 z-fight）。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.10, 0.13, -0.68)
-                            scale: Qt.vector3d(0.08, 0.10, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.10, 0.13, -0.68)
-                            scale: Qt.vector3d(0.08, 0.10, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.10, 0.13, -0.69)
-                            scale: Qt.vector3d(0.04, 0.05, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.10, 0.13, -0.69)
-                            scale: Qt.vector3d(0.04, 0.05, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
+                        onLoaded: if (item) item.parent = mobDelegate
                     }
-                    Model {
-                        // t240 牛（mobType 2）：MobModel + mob_cow 贴图（高大长身 + 头顶两小角盒）。
-                        // t241 行走动画：walkPhase 绑定驱动腿摆（同猪）。
-                        visible: entKind === EntityManager.Mob && entMobType === 2
-                        geometry: MobModel {
-                            mobType: 2
-                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_cow）。
-                            packTextured: mobCowPackTex.source.length > 0
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === 2
+                        sourceComponent: Component {
+                            Model {
+                                // t240 牛（mobType 2）：MobModel + mob_cow 贴图（高大长身 + 头顶两小角盒）。
+                                // t241 行走动画：walkPhase 绑定驱动腿摆（同猪）。
+                                visible: entKind === EntityManager.Mob && entMobType === 2
+                                geometry: MobModel {
+                                    mobType: 2
+                                    // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_cow）。
+                                    packTextured: mobCowPackTex.source.length > 0
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0) // t252 cow halfH=0.70 → offset −0.20 腿底贴地
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_cow。
+                                    baseColorMap: mobCowPackTex.source.length > 0 ? mobCowPackTex : mobCowTex
+                                }
+                                // t251 眼睛（牛）：同猪眼模式（mob Model 子节点，纯色 NoLighting，继承 bodyYaw + visible）。
+                                //   牛头心 (0,0.15,-0.60) 半 (0.20,0.22,0.20) → 前面 z=-0.80；眼上半 y≈0.22、x=±0.09。
+                                //   牛 headPitch 恒 0 → 直接定位，无俯仰 Node（同猪）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.09, 0.22, -0.80)
+                                    scale: Qt.vector3d(0.07, 0.09, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.09, 0.22, -0.80)
+                                    scale: Qt.vector3d(0.07, 0.09, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.09, 0.22, -0.81)
+                                    scale: Qt.vector3d(0.035, 0.045, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.09, 0.22, -0.81)
+                                    scale: Qt.vector3d(0.035, 0.045, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                            }
                         }
-                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 cow halfH=0.70 → offset −0.20 腿底贴地
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_cow。
-                            baseColorMap: mobCowPackTex.source.length > 0 ? mobCowPackTex : mobCowTex
-                        }
-                        // t251 眼睛（牛）：同猪眼模式（mob Model 子节点，纯色 NoLighting，继承 bodyYaw + visible）。
-                        //   牛头心 (0,0.15,-0.60) 半 (0.20,0.22,0.20) → 前面 z=-0.80；眼上半 y≈0.22、x=±0.09。
-                        //   牛 headPitch 恒 0 → 直接定位，无俯仰 Node（同猪）。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.09, 0.22, -0.80)
-                            scale: Qt.vector3d(0.07, 0.09, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.09, 0.22, -0.80)
-                            scale: Qt.vector3d(0.07, 0.09, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.09, 0.22, -0.81)
-                            scale: Qt.vector3d(0.035, 0.045, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.09, 0.22, -0.81)
-                            scale: Qt.vector3d(0.035, 0.045, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
+                        onLoaded: if (item) item.parent = mobDelegate
                     }
-                    Model {
-                        // t240 羊（mobType 3）毛茸态：MobModel + mob_sheep 贴图（圆胖躯干 + 小头 + 短腿）。
-                        // t241 行走动画 + 吃草低头：walkPhase 驱动腿摆；headPitch 驱动头部俯仰（仅吃草周期内非零，
-                        //   headPitchAt 据 eatTimer 返 sin(πp) 包络 → 低头→嚼→抬头；草丛在 C++ tick 内被消耗）。
-                        // t300 剪羊毛态：shearedAt=false（未剪羊毛 / 已重新长毛）→ 显本毛茸贴图 Model；sheared=true
-                        //   时切到下方裸肤色 Model（互斥 visible，由 revision 触碰刷新）。机制等价 MC 1.0 剪羊毛后
-                        //   羊裸露皮肤。
-                        visible: {
+                    Loader {
+                        active: {
                             entityManager.revision
                             return entKind === EntityManager.Mob && entMobType === 3
                                    && !entityManager.shearedAt(index)
                         }
-                        geometry: MobModel {
-                            mobType: 3
-                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_sheep）。
-                            packTextured: mobSheepPackTex.source.length > 0
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                            headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                        sourceComponent: Component {
+                            Model {
+                                // t240 羊（mobType 3）毛茸态：MobModel + mob_sheep 贴图（圆胖躯干 + 小头 + 短腿）。
+                                // t241 行走动画 + 吃草低头：walkPhase 驱动腿摆；headPitch 驱动头部俯仰（仅吃草周期内非零，
+                                //   headPitchAt 据 eatTimer 返 sin(πp) 包络 → 低头→嚼→抬头；草丛在 C++ tick 内被消耗）。
+                                // t300 剪羊毛态：shearedAt=false（未剪羊毛 / 已重新长毛）→ 显本毛茸贴图 Model；sheared=true
+                                //   时切到下方裸肤色 Model（互斥 visible，由 revision 触碰刷新）。机制等价 MC 1.0 剪羊毛后
+                                //   羊裸露皮肤。
+                                visible: {
+                                    entityManager.revision
+                                    return entKind === EntityManager.Mob && entMobType === 3
+                                           && !entityManager.shearedAt(index)
+                                }
+                                geometry: MobModel {
+                                    mobType: 3
+                                    // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_sheep）。
+                                    packTextured: mobSheepPackTex.source.length > 0
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
+                                    baseColorMap: mobSheepPackTex.source.length > 0 ? mobSheepPackTex : mobSheepTex
+                                }
+                                // t251 眼睛（羊）：同猪/牛模式（mob Model 子节点纯色 NoLighting），但羊吃草时 MobModel 把头绕
+                                //   颈枢俯仰（headPitch<0=低头，几何内部旋转）→ 若眼直接定位则会与俯仰的头脱离（眼悬浮原位、
+                                //   头下沉）。故把眼放进一个「颈枢 Node」：position = MobModel 头部颈附着点 (0, 0.10, -0.29)
+                                //   （= 头心 cy=0.10、cz+hz=-0.45+0.16；MobModel addHeadRot 绕此点 X 轴旋转），eulerRotation.x 绑
+                                //   headPitchAt → 眼随头同步俯仰（QML X 轴旋转与 MobModel addBoxRot 同向，绕同枢 → 视觉一致）。
+                                //   眼位置相对颈枢：头前面 abs z=-0.61 → 相对 -0.32；眼上半 abs y≈0.16 → 相对 0.06；x=±0.055。
+                                Node {
+                                    position: Qt.vector3d(0, 0.10, -0.29)
+                                    // headPitch 用 property 暂存（QML 绑定里 {block} 不能作 Qt.vector3d 内联参数 → 先算成属性）。
+                                    property real headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                                    eulerRotation: Qt.vector3d(headPitch, 0, 0)
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(-0.055, 0.06, -0.32)
+                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                    }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0.055, 0.06, -0.32)
+                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                    }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(-0.055, 0.06, -0.33)
+                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                    }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0.055, 0.06, -0.33)
+                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                    }
+                                }
+                            }
                         }
-                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
-                            baseColorMap: mobSheepPackTex.source.length > 0 ? mobSheepPackTex : mobSheepTex
-                        }
-                        // t251 眼睛（羊）：同猪/牛模式（mob Model 子节点纯色 NoLighting），但羊吃草时 MobModel 把头绕
-                        //   颈枢俯仰（headPitch<0=低头，几何内部旋转）→ 若眼直接定位则会与俯仰的头脱离（眼悬浮原位、
-                        //   头下沉）。故把眼放进一个「颈枢 Node」：position = MobModel 头部颈附着点 (0, 0.10, -0.29)
-                        //   （= 头心 cy=0.10、cz+hz=-0.45+0.16；MobModel addHeadRot 绕此点 X 轴旋转），eulerRotation.x 绑
-                        //   headPitchAt → 眼随头同步俯仰（QML X 轴旋转与 MobModel addBoxRot 同向，绕同枢 → 视觉一致）。
-                        //   眼位置相对颈枢：头前面 abs z=-0.61 → 相对 -0.32；眼上半 abs y≈0.16 → 相对 0.06；x=±0.055。
-                        Node {
-                            position: Qt.vector3d(0, 0.10, -0.29)
-                            // headPitch 用 property 暂存（QML 绑定里 {block} 不能作 Qt.vector3d 内联参数 → 先算成属性）。
-                            property real headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
-                            eulerRotation: Qt.vector3d(headPitch, 0, 0)
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(-0.055, 0.06, -0.32)
-                                scale: Qt.vector3d(0.05, 0.06, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                            }
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(0.055, 0.06, -0.32)
-                                scale: Qt.vector3d(0.05, 0.06, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                            }
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(-0.055, 0.06, -0.33)
-                                scale: Qt.vector3d(0.025, 0.03, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                            }
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(0.055, 0.06, -0.33)
-                                scale: Qt.vector3d(0.025, 0.03, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                            }
-                        }
+                        onLoaded: if (item) item.parent = mobDelegate
                     }
-                    Model {
-                        // t300 羊（mobType 3）裸态：剪羊毛后（shearedAt=true）的羊外观。复用 MobModel 几何（同
-                        //   毛茸态四肢 + 头 + 躯干），但去贴图改裸肤色 #d6b890（机制等价 MC 1.0 剪羊毛后羊裸露
-                        //   皮肤；t363 改肤色而非纯粉：贴近玩家手肤 + 略带残白羊毛，无 mob_sheep 毛茸贴图 → 直接
-                        //   baseColor 实色渲染，受 terrainLight 调制保昼夜明暗 + hurtFlash 红闪仍生效）。与上方毛茸态
-                        //   Model 互斥 visible（shearedAt 翻转 → 切换）。
-                        //   walkPhase / headPitch 同步绑定 → 裸羊照常行走 + 吃草低头动画。
-                        //   重长毛（C++ tick 内吃草方块 → sheared=false）→ 上方毛茸 Model 显、本 Model 隐。
-                        visible: {
+                    Loader {
+                        active: {
                             entityManager.revision
                             return entKind === EntityManager.Mob && entMobType === 3
                                    && entityManager.shearedAt(index)
                         }
-                        geometry: MobModel {
-                            mobType: 3
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                            headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
-                        }
-                        position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面（同毛茸态）
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            // 受击红闪覆盖肤色（同毛茸态红闪语义）；否则肤色 × terrainLight 调昼夜明暗。
-                            // t363 baseColor=肤色 #d6b890（玩家手肤 0.792/0.643/0.447=#caa472 略向白偏，留少量残白羊毛感，
-                            //   非猪粉 #e8b8b8）：剪羊毛后裸露的是肤色调而非纯粉，贴近玩家手肤、带一丝残白。
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#d6b890" }
-                            // 无 baseColorMap → PrincipaledMaterial 走纯 baseColor 实色路径（默认即无贴图）。
-                        }
-                        // 裸态眼同步（同毛茸态颈枢 Node 结构；复用 headPitchAt 绑头俯仰）。
-                        Node {
-                            position: Qt.vector3d(0, 0.10, -0.29)
-                            property real headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
-                            eulerRotation: Qt.vector3d(headPitch, 0, 0)
+                        sourceComponent: Component {
                             Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(-0.055, 0.06, -0.32)
-                                scale: Qt.vector3d(0.05, 0.06, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                            }
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(0.055, 0.06, -0.32)
-                                scale: Qt.vector3d(0.05, 0.06, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                            }
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(-0.055, 0.06, -0.33)
-                                scale: Qt.vector3d(0.025, 0.03, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                            }
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(0.055, 0.06, -0.33)
-                                scale: Qt.vector3d(0.025, 0.03, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                            }
-                        }
-                    }
-                    Model {
-                        // t282 蹒跚者（Shambler，mobType 4；机制等价 MC 1.0 僵尸，§9 改名 + 原创模型/贴图）：
-                        //   MobModel 人形几何（躯干 + 头 + 双臂前伸僵尸姿态 + 双腿 walkPhase 摆动）+ mob_shambler 贴图。
-                        //   近战 AI（detect→pathfind→attack，t281 已就绪）→ 走向玩家攻击；本任务仅交付原创模型 + 贴图。
-                        //   walkPhase 绑定驱动双腿绕髋左右反相摆动（biped walk cycle，EntityManager moveSpeed>0 时推进）。
-                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobShambler
-                        geometry: MobModel {
-                            mobType: 4
-                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_shambler）。
-                            packTextured: mobShamblerPackTex.source.length > 0
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                        }
-                        position: Qt.vector3d(0, mobModelYOff, 0) // t282 halfH=0.90 → offset 0（腿底贴 collision 底面）
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0/1/2/3 红闪语义）。
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_shambler。
-                            baseColorMap: mobShamblerPackTex.source.length > 0 ? mobShamblerPackTex : mobShamblerTex
-                        }
-                        // t282 眼睛：亡灵红眼（不沿用猪牛羊的白眼底+深瞳 —— 不死亡灵的赤红发光眼更贴「僵尸」语义，
-                        //   且红眼不受身体贴图调制 → 实心红 #b01818 独立 Model，原创纯色 §9a）。mob Model 子节点 →
-                        //   继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible。MobModel 头心 (0,0.57,0) 半 (0.22,0.22,0.22)
-                        //   → 前面 z=-0.22；眼在上半 y≈0.62、x=±0.09；z 贴头前面略凸（-0.23，同 t52 贴脸防 z-fight）。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.09, 0.62, -0.23)
-                            scale: Qt.vector3d(0.07, 0.08, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.09, 0.62, -0.23)
-                            scale: Qt.vector3d(0.07, 0.08, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
-                        }
-                        // t377 Shambler 随机护甲（4 部位；mobArmorAt 返护甲 id，0=无 → 隐）。作 mob Model 子节点 →
-                        //   继承 bodyYaw + 父 visible。MobModel 局部坐标（头心 0.57 / 躯干心 0.05 / 腿底 -0.90）。
-                        //   腿摆动烘焙在几何里 → 护腿 / 靴为静态盒（近似的视觉提示，~20% mob 偶遇可接受）。
-                        //   tier 色 × terrainLight + 受击红闪（mobArmorColor）；NoLighting（红线）。
-                        Model { // 头盔（piece 0）
-                            id: mobArmorHead
-                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 0) }
-                            visible: armId !== 0
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.48, 0.30, 0.48)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorHead.armId) }
-                        }
-                        Model { // 胸甲（piece 1）
-                            id: mobArmorChest
-                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 1) }
-                            visible: armId !== 0
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.48, 0.50, 0.30)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorChest.armId) }
-                        }
-                        Model { // 护腿（piece 2）
-                            id: mobArmorLegs
-                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 2) }
-                            visible: armId !== 0
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.46, 0.40, 0.26)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegs.armId) }
-                        }
-                        Model { // 靴子（piece 3）
-                            id: mobArmorBoots
-                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 3) }
-                            visible: armId !== 0
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.46, 0.16, 0.26)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorBoots.armId) }
-                        }
-                    }
-                    Model {
-                        // t284 潜行者（Stalker，mobType 6；机制等价 MC 1.0 苦力怕，§9 改名 + 原创模型/纯色无贴图）：
-                        //   MobModel 四短腿 + 高瘦躯干 + 小头（mobType 5）。近距蓄力 → 爆炸（C++ aiStalker 已就绪）。
-                        //   walkPhase 绑定驱动四腿对角 walk cycle（EntityManager moveSpeed>0 时推进相位）。
-                        //   蓄力膨胀：inflateAt(i) 驱动 Model scale（1+inflate·0.5，机制等价 MC 苦力怕近距蓄力膨胀）+
-                        //     baseColor 蓄力发白（绿→白 lerp by inflate；机制等价 MC 苦力怕蓄力发白闪烁）。
-                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobStalker
-                        property real inflate: { entityManager.revision; return entityManager.inflateAt(index) }
-                        geometry: MobModel {
-                            mobType: 6
-                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色）。
-                            packTextured: mobStalkerPackTex.source.length > 0
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                        }
-                        position: Qt.vector3d(0, mobModelYOff, 0) // t284 halfH=0.90 → offset 0（腿底贴 collision 底面）
-                        // 蓄力膨胀：scale 随 inflate 增长（0 → 1.0、满蓄力 → 1.5；机制等价 MC 苦力怕膨胀）。
-                        scale: Qt.vector3d(1.0 + inflate * 0.5, 1.0 + inflate * 0.5, 1.0 + inflate * 0.5)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint 调制贴图：受击红 / 蓄力白）；
-                            //   否则 null（纯色，现状）。pack 关时 baseColor 即体色。
-                            baseColorMap: mobStalkerPackTex.source.length > 0 ? mobStalkerPackTex : null
-                            // 受击红闪优先；否则青绿色（terrainLight 调昼夜暗），蓄力时 lerp 向白（蓄力发白）。
-                            baseColor: {
-                                entityManager.revision
-                                const tl = terrainLight(worldClock.skyLight)
-                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                let r = 0.37, g = 0.66, b = 0.23 // Stalker 青绿色（呈现层视觉约定色，原创）
-                                const infl = entityManager.inflateAt(index)
-                                if (infl > 0) {
-                                    const t = Math.min(1, infl)
-                                    r = r * (1 - t) + 1.0 * t
-                                    g = g * (1 - t) + 1.0 * t
-                                    b = b * (1 - t) + 1.0 * t
+                                // t300 羊（mobType 3）裸态：剪羊毛后（shearedAt=true）的羊外观。复用 MobModel 几何（同
+                                //   毛茸态四肢 + 头 + 躯干），但去贴图改裸肤色 #d6b890（机制等价 MC 1.0 剪羊毛后羊裸露
+                                //   皮肤；t363 改肤色而非纯粉：贴近玩家手肤 + 略带残白羊毛，无 mob_sheep 毛茸贴图 → 直接
+                                //   baseColor 实色渲染，受 terrainLight 调制保昼夜明暗 + hurtFlash 红闪仍生效）。与上方毛茸态
+                                //   Model 互斥 visible（shearedAt 翻转 → 切换）。
+                                //   walkPhase / headPitch 同步绑定 → 裸羊照常行走 + 吃草低头动画。
+                                //   重长毛（C++ tick 内吃草方块 → sheared=false）→ 上方毛茸 Model 显、本 Model 隐。
+                                visible: {
+                                    entityManager.revision
+                                    return entKind === EntityManager.Mob && entMobType === 3
+                                           && entityManager.shearedAt(index)
                                 }
-                                return Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0)
-                            }
-                        }
-                        // t284 眼睛：潜行者的深色眼（头部前面，原创纯色 §9a；mob Model 子节点继承 bodyYaw +
-                        //   蓄力 scale）。MobModel 头心 (0,0.66,0) 半 (0.15,0.15,0.15) → 前面 z=-0.15；眼 y≈0.68、x=±0.06。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.06, 0.68, -0.17)
-                            scale: Qt.vector3d(0.05, 0.06, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.06, 0.68, -0.17)
-                            scale: Qt.vector3d(0.05, 0.06, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                    }
-                    // t287/t301/t331 Bones（骸骨/骷髅；mobType 5）：MobModel 瘦骨人形（窄躯干/细四肢/小头骨）。
-                    //   灰白骨色 baseColor（无专属贴图，纯色原创 §9a）。受击红闪。远程射箭由 EntityManager 负责。
-                    //   t331：弓 + 右臂移出 MobModel（单材质无法同几何双色）→ 见下方「肩枢 Node」：木色弓（MobBowGeometry，
-                    //   修「弓误用骨白」）+ 右臂（骨白 UnitCube 共享 boneMat）随 drawAmount（aimTimer）抬起瞄准 + 弦后拉。
-                    Model {
-                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobBones
-                        geometry: MobModel {
-                            mobType: 5
-                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色骨白）。
-                            packTextured: mobBonesPackTex.source.length > 0
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                        }
-                        position: Qt.vector3d(0, mobModelYOff, 0)
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        // boneMat 带 id：右臂（肩枢 Node 子节点）共享同一材质 → 受击红闪 + 昼夜灰阶与身体完全同步。
-                        materials: PrincipledMaterial {
-                            id: boneMat
-                            lighting: PrincipledMaterial.NoLighting
-                            // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜灰阶）；否则 null（纯色）。
-                            baseColorMap: mobBonesPackTex.source.length > 0 ? mobBonesPackTex : null
-                            baseColor: {
-                                entityManager.revision
-                                const tl = terrainLight(worldClock.skyLight)
-                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 灰白骨色（身体 + 右臂）
-                            }
-                        }
-                        // t301 骷髅黑色眼窝（头骨标志性的空洞眼窝，纯色 NoLighting §9a；mob Model 子节点继承 bodyYaw +
-                        //   父 visible）。区别于 Shambler 的赤红亡灵眼 —— Bones 用纯黑 #1a1a1a 显「空洞眼窝」而非「发光
-                        //   眼」，更贴头骨语义。MobModel 头骨心 (0,0.57,0) 半 (0.16,0.18,0.16) → 前面 z=-0.16；眼贴头
-                        //   前面 z=-0.17（略凸出防 z-fight，同 t52 贴脸）。眼在上半 y≈0.62（头骨上半 = 眼眶位）、x=±0.06。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.06, 0.62, -0.17)
-                            scale: Qt.vector3d(0.06, 0.07, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.06, 0.62, -0.17)
-                            scale: Qt.vector3d(0.06, 0.07, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                        // t331 右臂 + 弓 肩枢 Node：drawAmount（EntityManager::drawAmountAt，aimTimer 驱动）抬起右臂瞄准。
-                        //   臂与弓同处一 Node 绕肩枢刚体同转 → 抬臂时弓精确随臂移动（免错位）。肩枢 = 右臂根与躯干相接处
-                        //   (0.20,0.28,-0.12)（MobModel 局部坐标；Node 继承 bodyYaw + 父 position）。drawAmount=0 → 臂/弓在
-                        //   原持弓静态位（与 t301 MobModel 内建位一致）。机制等价 MC 1.0 骷髅停步抬弓瞄准。
-                        Node {
-                            position: Qt.vector3d(0.20, 0.28, -0.12)
-                            eulerRotation.x: { entityManager.revision; return entityManager.drawAmountAt(index) * 30 } // 度；+draw 前端（-Z）上扬
-                            // 右臂（骨白 UnitCube，共享 boneMat）：臂心相对肩枢 = (0,-0.05,-0.25)；半 (0.05,0.05,0.25)。
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(0.0, -0.05, -0.25)
-                                scale: Qt.vector3d(0.10, 0.10, 0.50)
-                                materials: boneMat
-                            }
-                            // 弓（木褐色 MobBowGeometry，独立于骨白体色；弦随 drawAmount 后拉 + 肢增弯）：握把相对肩枢 = (0.02,-0.06,-0.38)。
-                            Model {
-                                geometry: MobBowGeometry {
-                                    drawAmount: { entityManager.revision; return entityManager.drawAmountAt(index) }
+                                geometry: MobModel {
+                                    mobType: 3
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
                                 }
-                                position: Qt.vector3d(0.02, -0.06, -0.38)
+                                position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面（同毛茸态）
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    baseColor: {
-                                        const tl = terrainLight(worldClock.skyLight) // 昼夜灰阶（同身体；受击期暂持木色，短可接受）
-                                        return Qt.rgba(0.42 * tl.r, 0.27 * tl.g, 0.15 * tl.b, 1.0) // 木褐色（修「弓误用骨白」）
+                                    // 受击红闪覆盖肤色（同毛茸态红闪语义）；否则肤色 × terrainLight 调昼夜明暗。
+                                    // t363 baseColor=肤色 #d6b890（玩家手肤 0.792/0.643/0.447=#caa472 略向白偏，留少量残白羊毛感，
+                                    //   非猪粉 #e8b8b8）：剪羊毛后裸露的是肤色调而非纯粉，贴近玩家手肤、带一丝残白。
+                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#d6b890" }
+                                    // 无 baseColorMap → PrincipaledMaterial 走纯 baseColor 实色路径（默认即无贴图）。
+                                }
+                                // 裸态眼同步（同毛茸态颈枢 Node 结构；复用 headPitchAt 绑头俯仰）。
+                                Node {
+                                    position: Qt.vector3d(0, 0.10, -0.29)
+                                    property real headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                                    eulerRotation: Qt.vector3d(headPitch, 0, 0)
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(-0.055, 0.06, -0.32)
+                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                    }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0.055, 0.06, -0.32)
+                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                    }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(-0.055, 0.06, -0.33)
+                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                    }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0.055, 0.06, -0.33)
+                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                     }
                                 }
                             }
                         }
-                        // t377 Bones 随机护甲（4 部位；同 Shambler，但 Bones 身形瘦 → 护甲盒按比例缩窄，贴骨身）。
-                        //   作 mob Model 子节点继承 bodyYaw + 父 visible；MobModel 局部坐标（瘦躯干 half 0.14 / 细腿 0.06）。
-                        //   ids 必须 main.qml 全局唯一 → Bones 段用 bonesArmor* 前缀（Shambler 段仍 mobArmor*）。
-                        Model { // 头盔（piece 0）
-                            id: bonesArmorHead
-                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 0) }
-                            visible: armId !== 0
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.36, 0.26, 0.36)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorHead.armId) }
-                        }
-                        Model { // 胸甲（piece 1）
-                            id: bonesArmorChest
-                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 1) }
-                            visible: armId !== 0
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.34, 0.50, 0.24)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorChest.armId) }
-                        }
-                        Model { // 护腿（piece 2）
-                            id: bonesArmorLegs
-                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 2) }
-                            visible: armId !== 0
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.30, 0.40, 0.20)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegs.armId) }
-                        }
-                        Model { // 靴子（piece 3）
-                            id: bonesArmorBoots
-                            property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 3) }
-                            visible: armId !== 0
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.30, 0.16, 0.20)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorBoots.armId) }
-                        }
+                        onLoaded: if (item) item.parent = mobDelegate
                     }
-                    // t285/t302 Spider（蜘蛛；mobType 7）：MobModel 宽矮躯干 + 前伸小头 + **8 腿**（原创 §9，4 对
-                    //   沿躯干 Z 分布；t302 升级自 t285 简化 4 腿。爬墙留后续）。暗黑红 baseColor（纯色原创 §9a）。
-                    //   受击红闪。hostile → EntityManager AI 自动追击玩家。t302 加 4 颗红眼（蜘蛛标志性，纯色子 Model）。
-                    Model {
-                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSpider
-                        geometry: MobModel {
-                            mobType: 7
-                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色暗黑红）。
-                            packTextured: mobSpiderPackTex.source.length > 0
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                        }
-                        position: Qt.vector3d(0, mobModelYOff, 0)
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜暗）；否则 null（纯色）。
-                            baseColorMap: mobSpiderPackTex.source.length > 0 ? mobSpiderPackTex : null
-                            baseColor: {
-                                entityManager.revision
-                                const tl = terrainLight(worldClock.skyLight)
-                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                return Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) // 暗黑红
-                            }
-                        }
-                        // t302 蜘蛛眼（4 颗红眼；蜘蛛标志性 8 眼简化为 4 颗醒目红眼，原创纯色 NoLighting §9a）：
-                        //   mob Model 子节点 → 继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible。同猪/牛/羊眼模式
-                        //   （呈现层独立纯色 Model，不进 MobModel 几何 / 不共享 mob 贴图 → 实心眼色不受身体色调制）。
-                        //   Spider 头心 (0,-0.02,-0.32) 半 (0.18,0.14,0.18) → 前面 z=-0.50；眼贴头前面 z=-0.51（略凸出
-                        //   防与头部面 z-fight，同 t52 贴脸）。4 颗分上下两对（y=+0.04 / -0.08；x=±0.07），暗体上红眼醒目。
-                        //   受击红闪时身体变 #ff0000 → 红眼暂融色（短暂可接受，非 bug；与猪/牛/羊红闪同理）。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.07, 0.04, -0.51)
-                            scale: Qt.vector3d(0.05, 0.05, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.07, 0.04, -0.51)
-                            scale: Qt.vector3d(0.05, 0.05, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.07, -0.08, -0.51)
-                            scale: Qt.vector3d(0.05, 0.05, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.07, -0.08, -0.51)
-                            scale: Qt.vector3d(0.05, 0.05, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
-                        }
-                    }
-                    // t487 Silverfish（银鱼；mobType 14）：MobModel 小型虫几何（分节躯干 + 前伸小头 + 多对短腿；
-                    //   机制等价 MC 1.0 银鱼，§9 原创模型 + 贴图）。hostile → EntityManager AI 自动追击玩家
-                    //   （默认 aiHostile 近战追击，小体型快速）。银鱼刷怪笼（要塞，Spawner state 带
-                    //   SpawnerStateSilverfishFlag）周期刷出。受击红闪。mob_silverfish 贴图（灰白甲壳 + 体节纹）。
-                    //   mobModelYOff=0.15−halfH（腿底 0.15 贴 collision 底面）；halfH=0.15 → offset=0。
-                    Model {
-                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSilverfish
-                        geometry: MobModel {
-                            mobType: 14
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                        }
-                        position: Qt.vector3d(0, mobModelYOff, 0)
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColorMap: mobSilverfishTex
-                            baseColor: {
-                                entityManager.revision
-                                const tl = terrainLight(worldClock.skyLight)
-                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                return tl
-                            }
-                        }
-                        // 银鱼眼（2 颗黑点；头前侧。MobModel 头心 (0,0.00,-0.24) 半 (0.14,0.11,0.10) → 前面 z=-0.34；
-                        //   眼贴头前侧 z=-0.35（略凸出防与头面 z-fight，同 t52 贴脸）。受击红闪时身体变红 → 黑眼仍辨。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.05, 0.00, -0.35)
-                            scale: Qt.vector3d(0.03, 0.03, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.05, 0.00, -0.35)
-                            scale: Qt.vector3d(0.03, 0.03, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
-                        }
-                    }
-                    // t398 Chicken（鸡；mobType 8）：MobModel 小型鸟几何（圆胖躯干 + 前伸小头 + 后翘尾 + 2 细腿
-                    //   biped walk cycle；机制等价 MC 1.0 鸡，§9 原创模型 + 贴图）。passive → EntityManager AI 走
-                    //   aiWander（同猪/牛/羊）；周期性下蛋（chickenLaidEgg → onChickenLaidEgg 转发 spawnItem EGG）。
-                    //   受击红闪。喙 / 鸡冠 / 肉垂为本 Model 子节点（纯色 NoLighting，同猪眼模式 —— 单材质无法同几何
-                    //   双色，故头饰独立子节点继承 bodyYaw + visible）。MobModel 头心 (0,0.26,-0.18) 半 (0.11,0.12,0.11)。
-                    Model {
-                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobChicken
-                        geometry: MobModel {
-                            mobType: 8
-                            // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_chicken）。
-                            packTextured: mobChickenPackTex.source.length > 0
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                        }
-                        position: Qt.vector3d(0, mobModelYOff, 0)
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_chicken。
-                            baseColorMap: mobChickenPackTex.source.length > 0 ? mobChickenPackTex : mobChickenTex
-                        }
-                        // 喙（前伸尖嘴，橙黄；头前面 z=-0.29）。MobModel 头前面 = 头心 cz(-0.18) - hz(0.11) = -0.29。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 0.24, -0.32)
-                            scale: Qt.vector3d(0.04, 0.025, 0.06)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8a020" }
-                        }
-                        // 鸡冠（头顶红色小冠，3 颗粒状凸起；头心上方 y≈0.39）。机制等价 MC 鸡冠视觉。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0, 0.39, -0.16)
-                            scale: Qt.vector3d(0.05, 0.04, 0.04)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.04, 0.39, -0.18)
-                            scale: Qt.vector3d(0.035, 0.035, 0.04)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.04, 0.39, -0.18)
-                            scale: Qt.vector3d(0.035, 0.035, 0.04)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
-                        }
-                        // 眼（2 颗黑点；头两侧偏前 z=-0.27、y=0.27、x=±0.08）。同猪/牛眼纯色子 Model 模式。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.08, 0.27, -0.27)
-                            scale: Qt.vector3d(0.025, 0.03, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.08, 0.27, -0.27)
-                            scale: Qt.vector3d(0.025, 0.03, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                    }
-                    // t399 Squid（鱿鱼；mobType 9）：MobModel 水生软体几何（圆胖躯干 + 顶端尖 + 8 触腕；机制等价
-                    //   MC 1.0 squid，§9 原创模型 + 贴图）。passive → EntityManager AI 走 aiSquid（水里喷水推进游动）；
-                    //   死亡掉墨囊（onMobDied → spawnItem InkSacId）。受击红闪。眼为本 Model 子节点（纯色 NoLighting，
-                    //   同鸡眼模式 —— 单材质无法同几何双色，故眼独立子节点继承 bodyYaw + visible）。MobModel 躯干心
-                    //   (0,0.08,0) 半 (0.28,0.24,0.28) → 前面 z=-0.28；眼贴躯干前侧（z≈-0.29 略凸出防 z-fight）。
-                    Model {
-                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSquid
-                        geometry: MobModel {
-                            mobType: 9
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                        }
-                        position: Qt.vector3d(0, mobModelYOff, 0)
-                        scale: Qt.vector3d(1.0, 1.0, 1.0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            baseColorMap: mobSquidTex
-                        }
-                        // 眼（2 颗黑点；躯干前侧偏前 z=-0.29、y=0.10、x=±0.10）。同鸡眼纯色子 Model 模式。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.10, 0.10, -0.29)
-                            scale: Qt.vector3d(0.03, 0.03, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.10, 0.10, -0.29)
-                            scale: Qt.vector3d(0.03, 0.03, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                    }
-                    // t480 Wolf（狼；mobType 10）：MobModel 犬科几何（细长躯干 + 尖头 + 立耳 + 4 腿）+ mob_wolf 贴图
-                    //   （机制等价 MC 1.0 狼，§9 原创模型 + 贴图）。passive（hostile=false）→ 生命周期同被动生物；
-                    //   未驯服走 aiWolf 敌对玩家（追击咬击）；驯服后跟随主人 + 防御主人目标（攻击 / 受击来源的 mob）。
-                    //   受击红闪（同既有 hurtFlashAt>0 → baseColor 红模式）。尾巴为**独立子 Model**（spec「尾巴角度
-                    //   示血量」）：绕尾根枢旋转 —— 满血竖起（~35°）、残血下垂（~140°），机制等价 MC 狼尾随血量升降。
-                    //   坐姿（wolfSittingAt=true）→ 整个狼 Model 垂直压缩 + 后倾 + 略下沉（读作「坐地留守」，与站姿
-                    //   明显区分）。眼为子节点（纯色 NoLighting，同猪眼模式）。
-                    Model {
-                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobWolf
-                        property real wolfSit: { entityManager.revision; return entityManager.wolfSittingAt(index) ? 1 : 0 }
-                        geometry: MobModel {
-                            mobType: 10
-                            // 狼无 pack entity 贴图映射（同 Squid(9)，spec 未列 → 保程序生成 mob_wolf 全脸 UV）。
-                            packTextured: false
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                        }
-                        // t480 坐姿变换：坐 → 垂直压缩（1−0.22=0.78）+ 后倾（-18° 绕 X，鼻略抬）+ 略下沉 0.08 格 →
-                        //   读作「坐地留守」；站 → 原比例 / 无倾 / 原高。wolfSit 绑 revision → toggleWolfSit 翻转即时切姿。
-                        position: Qt.vector3d(0, mobModelYOff - wolfSit * 0.08, 0)
-                        scale: Qt.vector3d(1.0, 1.0 - wolfSit * 0.22, 1.0)
-                        eulerRotation.x: wolfSit * -18
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            baseColorMap: mobWolfTex
-                        }
-                        // 尾巴枢（身体后上部，绕根旋转）：尾根 = 身体后上 (0, 0.16, 0.38)（MobModel 局部坐标：躯干心
-                        //   0.02 半 0.15×0.40 → 后上角）。eulerRotation.x 正 → +Y 端朝 +Z（尾向后竖）；满血 → 140−105×1=35°
-                        //   （竖起）、残血 → 140−105×0=140°（下垂）。随 bodyYaw + 父 visible + 坐姿变换继承。
-                        Node {
-                            id: wolfTailPivot
-                            position: Qt.vector3d(0, 0.16, 0.38)
-                            property real tailAngle: {
-                                entityManager.revision
-                                const h = entityManager.healthAt(index)
-                                const m = entityManager.maxHealthAt(index)
-                                return (m > 0) ? (140 - 105 * Math.max(0, Math.min(1, h / m))) : 0
-                            }
-                            eulerRotation.x: tailAngle
-                            // 尾巴本体（垂直细盒，尾根下方 0.10 中心 → 竖尾时从尾根向上伸出；灰狼毛色 × 昼夜灰阶 +
-                            //   受击红闪同身体）。
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobShambler
+                        sourceComponent: Component {
                             Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(0, 0.10, 0)
-                                scale: Qt.vector3d(0.06, 0.20, 0.06)
+                                // t282 蹒跚者（Shambler，mobType 4；机制等价 MC 1.0 僵尸，§9 改名 + 原创模型/贴图）：
+                                //   MobModel 人形几何（躯干 + 头 + 双臂前伸僵尸姿态 + 双腿 walkPhase 摆动）+ mob_shambler 贴图。
+                                //   近战 AI（detect→pathfind→attack，t281 已就绪）→ 走向玩家攻击；本任务仅交付原创模型 + 贴图。
+                                //   walkPhase 绑定驱动双腿绕髋左右反相摆动（biped walk cycle，EntityManager moveSpeed>0 时推进）。
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobShambler
+                                geometry: MobModel {
+                                    mobType: 4
+                                    // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_shambler）。
+                                    packTextured: mobShamblerPackTex.source.length > 0
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0) // t282 halfH=0.90 → offset 0（腿底贴 collision 底面）
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
+                                    // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0/1/2/3 红闪语义）。
+                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_shambler。
+                                    baseColorMap: mobShamblerPackTex.source.length > 0 ? mobShamblerPackTex : mobShamblerTex
+                                }
+                                // t282 眼睛：亡灵红眼（不沿用猪牛羊的白眼底+深瞳 —— 不死亡灵的赤红发光眼更贴「僵尸」语义，
+                                //   且红眼不受身体贴图调制 → 实心红 #b01818 独立 Model，原创纯色 §9a）。mob Model 子节点 →
+                                //   继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible。MobModel 头心 (0,0.57,0) 半 (0.22,0.22,0.22)
+                                //   → 前面 z=-0.22；眼在上半 y≈0.62、x=±0.09；z 贴头前面略凸（-0.23，同 t52 贴脸防 z-fight）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.09, 0.62, -0.23)
+                                    scale: Qt.vector3d(0.07, 0.08, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.09, 0.62, -0.23)
+                                    scale: Qt.vector3d(0.07, 0.08, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
+                                }
+                                // t377 Shambler 随机护甲（4 部位；mobArmorAt 返护甲 id，0=无 → 隐）。作 mob Model 子节点 →
+                                //   继承 bodyYaw + 父 visible。MobModel 局部坐标（头心 0.57 / 躯干心 0.05 / 腿底 -0.90）。
+                                //   腿摆动烘焙在几何里 → 护腿 / 靴为静态盒（近似的视觉提示，~20% mob 偶遇可接受）。
+                                //   tier 色 × terrainLight + 受击红闪（mobArmorColor）；NoLighting（红线）。
+                                Model { // 头盔（piece 0）
+                                    id: mobArmorHead
+                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 0) }
+                                    visible: armId !== 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.48, 0.30, 0.48)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorHead.armId) }
+                                }
+                                Model { // 胸甲（piece 1）
+                                    id: mobArmorChest
+                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 1) }
+                                    visible: armId !== 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.48, 0.50, 0.30)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorChest.armId) }
+                                }
+                                Model { // 护腿（piece 2）
+                                    id: mobArmorLegs
+                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 2) }
+                                    visible: armId !== 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.46, 0.40, 0.26)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegs.armId) }
+                                }
+                                Model { // 靴子（piece 3）
+                                    id: mobArmorBoots
+                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 3) }
+                                    visible: armId !== 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.46, 0.16, 0.26)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorBoots.armId) }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobStalker
+                        sourceComponent: Component {
+                            Model {
+                                // t284 潜行者（Stalker，mobType 6；机制等价 MC 1.0 苦力怕，§9 改名 + 原创模型/纯色无贴图）：
+                                //   MobModel 四短腿 + 高瘦躯干 + 小头（mobType 5）。近距蓄力 → 爆炸（C++ aiStalker 已就绪）。
+                                //   walkPhase 绑定驱动四腿对角 walk cycle（EntityManager moveSpeed>0 时推进相位）。
+                                //   蓄力膨胀：inflateAt(i) 驱动 Model scale（1+inflate·0.5，机制等价 MC 苦力怕近距蓄力膨胀）+
+                                //     baseColor 蓄力发白（绿→白 lerp by inflate；机制等价 MC 苦力怕蓄力发白闪烁）。
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobStalker
+                                property real inflate: { entityManager.revision; return entityManager.inflateAt(index) }
+                                geometry: MobModel {
+                                    mobType: 6
+                                    // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色）。
+                                    packTextured: mobStalkerPackTex.source.length > 0
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0) // t284 halfH=0.90 → offset 0（腿底贴 collision 底面）
+                                // 蓄力膨胀：scale 随 inflate 增长（0 → 1.0、满蓄力 → 1.5；机制等价 MC 苦力怕膨胀）。
+                                scale: Qt.vector3d(1.0 + inflate * 0.5, 1.0 + inflate * 0.5, 1.0 + inflate * 0.5)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint 调制贴图：受击红 / 蓄力白）；
+                                    //   否则 null（纯色，现状）。pack 关时 baseColor 即体色。
+                                    baseColorMap: mobStalkerPackTex.source.length > 0 ? mobStalkerPackTex : null
+                                    // 受击红闪优先；否则青绿色（terrainLight 调昼夜暗），蓄力时 lerp 向白（蓄力发白）。
                                     baseColor: {
                                         entityManager.revision
                                         const tl = terrainLight(worldClock.skyLight)
                                         if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                        return Qt.rgba(0.55 * tl.r, 0.55 * tl.g, 0.55 * tl.b, 1.0)
+                                        let r = 0.37, g = 0.66, b = 0.23 // Stalker 青绿色（呈现层视觉约定色，原创）
+                                        const infl = entityManager.inflateAt(index)
+                                        if (infl > 0) {
+                                            const t = Math.min(1, infl)
+                                            r = r * (1 - t) + 1.0 * t
+                                            g = g * (1 - t) + 1.0 * t
+                                            b = b * (1 - t) + 1.0 * t
+                                        }
+                                        return Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0)
                                     }
                                 }
-                            }
-                        }
-                        // 眼（2 颗深色点；头前侧。MobModel 头心 (0,0.12,-0.52) 半 (0.14,0.15,0.18) → 前面 z=-0.70；
-                        //   眼 y≈0.16、x=±0.08；z 贴头前面略凸（-0.71，同 t52 贴脸防 z-fight）。同猪眼纯色子 Model 模式。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.08, 0.16, -0.71)
-                            scale: Qt.vector3d(0.04, 0.05, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.08, 0.16, -0.71)
-                            scale: Qt.vector3d(0.04, 0.05, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                        }
-                    }
-                    // t481 Ocelot/Cat（豹猫/猫；mobType 11）：MobModel 猫科几何（细长躯干 + 尖耳 + 长尾 + 4 细腿）
-                    //   + 贴图（机制等价 MC 1.0 豹猫/猫，§9 原创模型 + 贴图）。passive（hostile=false）→ 生命周期
-                    //   同被动生物；未驯服走 aiOcelot 游荡分支（丛林野豹猫被动散步），生鱼驯服 → 变猫（随机毛色
-                    //   变体 0..2，ocelotVariantAt 选 mob_cat_* 贴图；未驯服用 mob_ocelot 斑点豹猫贴图）。驯服猫
-                    //   跟随主人（aiOcelot follow）+ 空手右键坐/站切换。受击红闪（同既有 hurtFlashAt>0 → baseColor
-                    //   红模式）。坐姿（ocelotSittingAt=true）→ 整个 Model 垂直压缩 + 后倾 + 略下沉（同狼坐姿，
-                    //   读作「坐地留守」）。眼为子节点（纯色 NoLighting，同猪眼模式）。
-                    Model {
-                        visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobOcelot
-                        property real ocatSit: { entityManager.revision; return entityManager.ocelotSittingAt(index) ? 1 : 0 }
-                        geometry: MobModel {
-                            mobType: 11
-                            // 豹猫/猫无 pack entity 贴图映射（同 Wolf/Squid，spec 未列 → 保程序生成贴图全脸 UV）。
-                            packTextured: false
-                            walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                        }
-                        // t481 坐姿变换：坐 → 垂直压缩（1−0.22=0.78）+ 后倾（-18° 绕 X，鼻略抬）+ 略下沉 0.08 格 →
-                        //   读作「坐地留守」；站 → 原比例 / 无倾 / 原高。ocatSit 绑 revision → toggleOcelotSit 翻转即时切姿。
-                        position: Qt.vector3d(0, mobModelYOff - ocatSit * 0.08, 0)
-                        scale: Qt.vector3d(1.0, 1.0 - ocatSit * 0.22, 1.0)
-                        eulerRotation.x: ocatSit * -18
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
-                            // 驯服 → 据 ocelotVariantAt 选 3 色猫贴图；未驯服 → mob_ocelot 豹猫贴图（几何同，异贴图
-                            //   区分豹猫/猫，机制等价 MC 1.0 同模型异贴图）。
-                            baseColorMap: {
-                                entityManager.revision
-                                if (entityManager.ocelotTamedAt(index)) {
-                                    const v = entityManager.ocelotVariantAt(index)
-                                    if (v === 0) return mobCatBlackTex
-                                    if (v === 1) return mobCatGingerTex
-                                    return mobCatCreamTex
+                                // t284 眼睛：潜行者的深色眼（头部前面，原创纯色 §9a；mob Model 子节点继承 bodyYaw +
+                                //   蓄力 scale）。MobModel 头心 (0,0.66,0) 半 (0.15,0.15,0.15) → 前面 z=-0.15；眼 y≈0.68、x=±0.06。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.06, 0.68, -0.17)
+                                    scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
-                                return mobOcelotTex
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.06, 0.68, -0.17)
+                                    scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
                             }
                         }
-                        // 眼（2 颗斜挑深色点；头前侧。MobModel 头心 (0,0.12,-0.46) 半 (0.11,0.12,0.14) → 前面 z=-0.60；
-                        //   眼 y≈0.15、x=±0.07；z 贴头前面略凸（-0.61，同 t52 贴脸防 z-fight）。同猪眼纯色子 Model 模式。
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(-0.07, 0.15, -0.61)
-                            scale: Qt.vector3d(0.035, 0.04, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobBones
+                        sourceComponent: Component {
+                            // t287/t301/t331 Bones（骸骨/骷髅；mobType 5）：MobModel 瘦骨人形（窄躯干/细四肢/小头骨）。
+                            //   灰白骨色 baseColor（无专属贴图，纯色原创 §9a）。受击红闪。远程射箭由 EntityManager 负责。
+                            //   t331：弓 + 右臂移出 MobModel（单材质无法同几何双色）→ 见下方「肩枢 Node」：木色弓（MobBowGeometry，
+                            //   修「弓误用骨白」）+ 右臂（骨白 UnitCube 共享 boneMat）随 drawAmount（aimTimer）抬起瞄准 + 弦后拉。
+                            Model {
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobBones
+                                geometry: MobModel {
+                                    mobType: 5
+                                    // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色骨白）。
+                                    packTextured: mobBonesPackTex.source.length > 0
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0)
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                // boneMat 带 id：右臂（肩枢 Node 子节点）共享同一材质 → 受击红闪 + 昼夜灰阶与身体完全同步。
+                                materials: PrincipledMaterial {
+                                    id: boneMat
+                                    lighting: PrincipledMaterial.NoLighting
+                                    // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜灰阶）；否则 null（纯色）。
+                                    baseColorMap: mobBonesPackTex.source.length > 0 ? mobBonesPackTex : null
+                                    baseColor: {
+                                        entityManager.revision
+                                        const tl = terrainLight(worldClock.skyLight)
+                                        if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 灰白骨色（身体 + 右臂）
+                                    }
+                                }
+                                // t301 骷髅黑色眼窝（头骨标志性的空洞眼窝，纯色 NoLighting §9a；mob Model 子节点继承 bodyYaw +
+                                //   父 visible）。区别于 Shambler 的赤红亡灵眼 —— Bones 用纯黑 #1a1a1a 显「空洞眼窝」而非「发光
+                                //   眼」，更贴头骨语义。MobModel 头骨心 (0,0.57,0) 半 (0.16,0.18,0.16) → 前面 z=-0.16；眼贴头
+                                //   前面 z=-0.17（略凸出防 z-fight，同 t52 贴脸）。眼在上半 y≈0.62（头骨上半 = 眼眶位）、x=±0.06。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.06, 0.62, -0.17)
+                                    scale: Qt.vector3d(0.06, 0.07, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.06, 0.62, -0.17)
+                                    scale: Qt.vector3d(0.06, 0.07, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                // t331 右臂 + 弓 肩枢 Node：drawAmount（EntityManager::drawAmountAt，aimTimer 驱动）抬起右臂瞄准。
+                                //   臂与弓同处一 Node 绕肩枢刚体同转 → 抬臂时弓精确随臂移动（免错位）。肩枢 = 右臂根与躯干相接处
+                                //   (0.20,0.28,-0.12)（MobModel 局部坐标；Node 继承 bodyYaw + 父 position）。drawAmount=0 → 臂/弓在
+                                //   原持弓静态位（与 t301 MobModel 内建位一致）。机制等价 MC 1.0 骷髅停步抬弓瞄准。
+                                Node {
+                                    position: Qt.vector3d(0.20, 0.28, -0.12)
+                                    eulerRotation.x: { entityManager.revision; return entityManager.drawAmountAt(index) * 30 } // 度；+draw 前端（-Z）上扬
+                                    // 右臂（骨白 UnitCube，共享 boneMat）：臂心相对肩枢 = (0,-0.05,-0.25)；半 (0.05,0.05,0.25)。
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0.0, -0.05, -0.25)
+                                        scale: Qt.vector3d(0.10, 0.10, 0.50)
+                                        materials: boneMat
+                                    }
+                                    // 弓（木褐色 MobBowGeometry，独立于骨白体色；弦随 drawAmount 后拉 + 肢增弯）：握把相对肩枢 = (0.02,-0.06,-0.38)。
+                                    Model {
+                                        geometry: MobBowGeometry {
+                                            drawAmount: { entityManager.revision; return entityManager.drawAmountAt(index) }
+                                        }
+                                        position: Qt.vector3d(0.02, -0.06, -0.38)
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: {
+                                                const tl = terrainLight(worldClock.skyLight) // 昼夜灰阶（同身体；受击期暂持木色，短可接受）
+                                                return Qt.rgba(0.42 * tl.r, 0.27 * tl.g, 0.15 * tl.b, 1.0) // 木褐色（修「弓误用骨白」）
+                                            }
+                                        }
+                                    }
+                                }
+                                // t377 Bones 随机护甲（4 部位；同 Shambler，但 Bones 身形瘦 → 护甲盒按比例缩窄，贴骨身）。
+                                //   作 mob Model 子节点继承 bodyYaw + 父 visible；MobModel 局部坐标（瘦躯干 half 0.14 / 细腿 0.06）。
+                                //   ids 必须 main.qml 全局唯一 → Bones 段用 bonesArmor* 前缀（Shambler 段仍 mobArmor*）。
+                                Model { // 头盔（piece 0）
+                                    id: bonesArmorHead
+                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 0) }
+                                    visible: armId !== 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.36, 0.26, 0.36)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorHead.armId) }
+                                }
+                                Model { // 胸甲（piece 1）
+                                    id: bonesArmorChest
+                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 1) }
+                                    visible: armId !== 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.34, 0.50, 0.24)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorChest.armId) }
+                                }
+                                Model { // 护腿（piece 2）
+                                    id: bonesArmorLegs
+                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 2) }
+                                    visible: armId !== 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.30, 0.40, 0.20)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegs.armId) }
+                                }
+                                Model { // 靴子（piece 3）
+                                    id: bonesArmorBoots
+                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 3) }
+                                    visible: armId !== 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.30, 0.16, 0.20)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorBoots.armId) }
+                                }
+                            }
                         }
-                        Model {
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.07, 0.15, -0.61)
-                            scale: Qt.vector3d(0.035, 0.04, 0.02)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobSpider
+                        sourceComponent: Component {
+                            // t285/t302 Spider（蜘蛛；mobType 7）：MobModel 宽矮躯干 + 前伸小头 + **8 腿**（原创 §9，4 对
+                            //   沿躯干 Z 分布；t302 升级自 t285 简化 4 腿。爬墙留后续）。暗黑红 baseColor（纯色原创 §9a）。
+                            //   受击红闪。hostile → EntityManager AI 自动追击玩家。t302 加 4 颗红眼（蜘蛛标志性，纯色子 Model）。
+                            Model {
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSpider
+                                geometry: MobModel {
+                                    mobType: 7
+                                    // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色暗黑红）。
+                                    packTextured: mobSpiderPackTex.source.length > 0
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0)
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜暗）；否则 null（纯色）。
+                                    baseColorMap: mobSpiderPackTex.source.length > 0 ? mobSpiderPackTex : null
+                                    baseColor: {
+                                        entityManager.revision
+                                        const tl = terrainLight(worldClock.skyLight)
+                                        if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        return Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) // 暗黑红
+                                    }
+                                }
+                                // t302 蜘蛛眼（4 颗红眼；蜘蛛标志性 8 眼简化为 4 颗醒目红眼，原创纯色 NoLighting §9a）：
+                                //   mob Model 子节点 → 继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible。同猪/牛/羊眼模式
+                                //   （呈现层独立纯色 Model，不进 MobModel 几何 / 不共享 mob 贴图 → 实心眼色不受身体色调制）。
+                                //   Spider 头心 (0,-0.02,-0.32) 半 (0.18,0.14,0.18) → 前面 z=-0.50；眼贴头前面 z=-0.51（略凸出
+                                //   防与头部面 z-fight，同 t52 贴脸）。4 颗分上下两对（y=+0.04 / -0.08；x=±0.07），暗体上红眼醒目。
+                                //   受击红闪时身体变 #ff0000 → 红眼暂融色（短暂可接受，非 bug；与猪/牛/羊红闪同理）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.07, 0.04, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.07, 0.04, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.07, -0.08, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.07, -0.08, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                            }
                         }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobSilverfish
+                        sourceComponent: Component {
+                            // t487 Silverfish（银鱼；mobType 14）：MobModel 小型虫几何（分节躯干 + 前伸小头 + 多对短腿；
+                            //   机制等价 MC 1.0 银鱼，§9 原创模型 + 贴图）。hostile → EntityManager AI 自动追击玩家
+                            //   （默认 aiHostile 近战追击，小体型快速）。银鱼刷怪笼（要塞，Spawner state 带
+                            //   SpawnerStateSilverfishFlag）周期刷出。受击红闪。mob_silverfish 贴图（灰白甲壳 + 体节纹）。
+                            //   mobModelYOff=0.15−halfH（腿底 0.15 贴 collision 底面）；halfH=0.15 → offset=0。
+                            Model {
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSilverfish
+                                geometry: MobModel {
+                                    mobType: 14
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0)
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColorMap: mobSilverfishTex
+                                    baseColor: {
+                                        entityManager.revision
+                                        const tl = terrainLight(worldClock.skyLight)
+                                        if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        return tl
+                                    }
+                                }
+                                // 银鱼眼（2 颗黑点；头前侧。MobModel 头心 (0,0.00,-0.24) 半 (0.14,0.11,0.10) → 前面 z=-0.34；
+                                //   眼贴头前侧 z=-0.35（略凸出防与头面 z-fight，同 t52 贴脸）。受击红闪时身体变红 → 黑眼仍辨。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.05, 0.00, -0.35)
+                                    scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.05, 0.00, -0.35)
+                                    scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobChicken
+                        sourceComponent: Component {
+                            // t398 Chicken（鸡；mobType 8）：MobModel 小型鸟几何（圆胖躯干 + 前伸小头 + 后翘尾 + 2 细腿
+                            //   biped walk cycle；机制等价 MC 1.0 鸡，§9 原创模型 + 贴图）。passive → EntityManager AI 走
+                            //   aiWander（同猪/牛/羊）；周期性下蛋（chickenLaidEgg → onChickenLaidEgg 转发 spawnItem EGG）。
+                            //   受击红闪。喙 / 鸡冠 / 肉垂为本 Model 子节点（纯色 NoLighting，同猪眼模式 —— 单材质无法同几何
+                            //   双色，故头饰独立子节点继承 bodyYaw + visible）。MobModel 头心 (0,0.26,-0.18) 半 (0.11,0.12,0.11)。
+                            Model {
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobChicken
+                                geometry: MobModel {
+                                    mobType: 8
+                                    // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_chicken）。
+                                    packTextured: mobChickenPackTex.source.length > 0
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0)
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_chicken。
+                                    baseColorMap: mobChickenPackTex.source.length > 0 ? mobChickenPackTex : mobChickenTex
+                                }
+                                // 喙（前伸尖嘴，橙黄；头前面 z=-0.29）。MobModel 头前面 = 头心 cz(-0.18) - hz(0.11) = -0.29。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.24, -0.32)
+                                    scale: Qt.vector3d(0.04, 0.025, 0.06)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8a020" }
+                                }
+                                // 鸡冠（头顶红色小冠，3 颗粒状凸起；头心上方 y≈0.39）。机制等价 MC 鸡冠视觉。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.39, -0.16)
+                                    scale: Qt.vector3d(0.05, 0.04, 0.04)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.04, 0.39, -0.18)
+                                    scale: Qt.vector3d(0.035, 0.035, 0.04)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.04, 0.39, -0.18)
+                                    scale: Qt.vector3d(0.035, 0.035, 0.04)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
+                                }
+                                // 眼（2 颗黑点；头两侧偏前 z=-0.27、y=0.27、x=±0.08）。同猪/牛眼纯色子 Model 模式。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.08, 0.27, -0.27)
+                                    scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.08, 0.27, -0.27)
+                                    scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobSquid
+                        sourceComponent: Component {
+                            // t399 Squid（鱿鱼；mobType 9）：MobModel 水生软体几何（圆胖躯干 + 顶端尖 + 8 触腕；机制等价
+                            //   MC 1.0 squid，§9 原创模型 + 贴图）。passive → EntityManager AI 走 aiSquid（水里喷水推进游动）；
+                            //   死亡掉墨囊（onMobDied → spawnItem InkSacId）。受击红闪。眼为本 Model 子节点（纯色 NoLighting，
+                            //   同鸡眼模式 —— 单材质无法同几何双色，故眼独立子节点继承 bodyYaw + visible）。MobModel 躯干心
+                            //   (0,0.08,0) 半 (0.28,0.24,0.28) → 前面 z=-0.28；眼贴躯干前侧（z≈-0.29 略凸出防 z-fight）。
+                            Model {
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSquid
+                                geometry: MobModel {
+                                    mobType: 9
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0)
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColorMap: mobSquidTex
+                                }
+                                // 眼（2 颗黑点；躯干前侧偏前 z=-0.29、y=0.10、x=±0.10）。同鸡眼纯色子 Model 模式。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.10, 0.10, -0.29)
+                                    scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.10, 0.10, -0.29)
+                                    scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobWolf
+                        sourceComponent: Component {
+                            // t480 Wolf（狼；mobType 10）：MobModel 犬科几何（细长躯干 + 尖头 + 立耳 + 4 腿）+ mob_wolf 贴图
+                            //   （机制等价 MC 1.0 狼，§9 原创模型 + 贴图）。passive（hostile=false）→ 生命周期同被动生物；
+                            //   未驯服走 aiWolf 敌对玩家（追击咬击）；驯服后跟随主人 + 防御主人目标（攻击 / 受击来源的 mob）。
+                            //   受击红闪（同既有 hurtFlashAt>0 → baseColor 红模式）。尾巴为**独立子 Model**（spec「尾巴角度
+                            //   示血量」）：绕尾根枢旋转 —— 满血竖起（~35°）、残血下垂（~140°），机制等价 MC 狼尾随血量升降。
+                            //   坐姿（wolfSittingAt=true）→ 整个狼 Model 垂直压缩 + 后倾 + 略下沉（读作「坐地留守」，与站姿
+                            //   明显区分）。眼为子节点（纯色 NoLighting，同猪眼模式）。
+                            Model {
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobWolf
+                                property real wolfSit: { entityManager.revision; return entityManager.wolfSittingAt(index) ? 1 : 0 }
+                                geometry: MobModel {
+                                    mobType: 10
+                                    // 狼无 pack entity 贴图映射（同 Squid(9)，spec 未列 → 保程序生成 mob_wolf 全脸 UV）。
+                                    packTextured: false
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                // t480 坐姿变换：坐 → 垂直压缩（1−0.22=0.78）+ 后倾（-18° 绕 X，鼻略抬）+ 略下沉 0.08 格 →
+                                //   读作「坐地留守」；站 → 原比例 / 无倾 / 原高。wolfSit 绑 revision → toggleWolfSit 翻转即时切姿。
+                                position: Qt.vector3d(0, mobModelYOff - wolfSit * 0.08, 0)
+                                scale: Qt.vector3d(1.0, 1.0 - wolfSit * 0.22, 1.0)
+                                eulerRotation.x: wolfSit * -18
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColorMap: mobWolfTex
+                                }
+                                // 尾巴枢（身体后上部，绕根旋转）：尾根 = 身体后上 (0, 0.16, 0.38)（MobModel 局部坐标：躯干心
+                                //   0.02 半 0.15×0.40 → 后上角）。eulerRotation.x 正 → +Y 端朝 +Z（尾向后竖）；满血 → 140−105×1=35°
+                                //   （竖起）、残血 → 140−105×0=140°（下垂）。随 bodyYaw + 父 visible + 坐姿变换继承。
+                                Node {
+                                    id: wolfTailPivot
+                                    position: Qt.vector3d(0, 0.16, 0.38)
+                                    property real tailAngle: {
+                                        entityManager.revision
+                                        const h = entityManager.healthAt(index)
+                                        const m = entityManager.maxHealthAt(index)
+                                        return (m > 0) ? (140 - 105 * Math.max(0, Math.min(1, h / m))) : 0
+                                    }
+                                    eulerRotation.x: tailAngle
+                                    // 尾巴本体（垂直细盒，尾根下方 0.10 中心 → 竖尾时从尾根向上伸出；灰狼毛色 × 昼夜灰阶 +
+                                    //   受击红闪同身体）。
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, 0.10, 0)
+                                        scale: Qt.vector3d(0.06, 0.20, 0.06)
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: {
+                                                entityManager.revision
+                                                const tl = terrainLight(worldClock.skyLight)
+                                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                                return Qt.rgba(0.55 * tl.r, 0.55 * tl.g, 0.55 * tl.b, 1.0)
+                                            }
+                                        }
+                                    }
+                                }
+                                // 眼（2 颗深色点；头前侧。MobModel 头心 (0,0.12,-0.52) 半 (0.14,0.15,0.18) → 前面 z=-0.70；
+                                //   眼 y≈0.16、x=±0.08；z 贴头前面略凸（-0.71，同 t52 贴脸防 z-fight）。同猪眼纯色子 Model 模式。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.08, 0.16, -0.71)
+                                    scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.08, 0.16, -0.71)
+                                    scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobOcelot
+                        sourceComponent: Component {
+                            // t481 Ocelot/Cat（豹猫/猫；mobType 11）：MobModel 猫科几何（细长躯干 + 尖耳 + 长尾 + 4 细腿）
+                            //   + 贴图（机制等价 MC 1.0 豹猫/猫，§9 原创模型 + 贴图）。passive（hostile=false）→ 生命周期
+                            //   同被动生物；未驯服走 aiOcelot 游荡分支（丛林野豹猫被动散步），生鱼驯服 → 变猫（随机毛色
+                            //   变体 0..2，ocelotVariantAt 选 mob_cat_* 贴图；未驯服用 mob_ocelot 斑点豹猫贴图）。驯服猫
+                            //   跟随主人（aiOcelot follow）+ 空手右键坐/站切换。受击红闪（同既有 hurtFlashAt>0 → baseColor
+                            //   红模式）。坐姿（ocelotSittingAt=true）→ 整个 Model 垂直压缩 + 后倾 + 略下沉（同狼坐姿，
+                            //   读作「坐地留守」）。眼为子节点（纯色 NoLighting，同猪眼模式）。
+                            Model {
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobOcelot
+                                property real ocatSit: { entityManager.revision; return entityManager.ocelotSittingAt(index) ? 1 : 0 }
+                                geometry: MobModel {
+                                    mobType: 11
+                                    // 豹猫/猫无 pack entity 贴图映射（同 Wolf/Squid，spec 未列 → 保程序生成贴图全脸 UV）。
+                                    packTextured: false
+                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                }
+                                // t481 坐姿变换：坐 → 垂直压缩（1−0.22=0.78）+ 后倾（-18° 绕 X，鼻略抬）+ 略下沉 0.08 格 →
+                                //   读作「坐地留守」；站 → 原比例 / 无倾 / 原高。ocatSit 绑 revision → toggleOcelotSit 翻转即时切姿。
+                                position: Qt.vector3d(0, mobModelYOff - ocatSit * 0.08, 0)
+                                scale: Qt.vector3d(1.0, 1.0 - ocatSit * 0.22, 1.0)
+                                eulerRotation.x: ocatSit * -18
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    // 驯服 → 据 ocelotVariantAt 选 3 色猫贴图；未驯服 → mob_ocelot 豹猫贴图（几何同，异贴图
+                                    //   区分豹猫/猫，机制等价 MC 1.0 同模型异贴图）。
+                                    baseColorMap: {
+                                        entityManager.revision
+                                        if (entityManager.ocelotTamedAt(index)) {
+                                            const v = entityManager.ocelotVariantAt(index)
+                                            if (v === 0) return mobCatBlackTex
+                                            if (v === 1) return mobCatGingerTex
+                                            return mobCatCreamTex
+                                        }
+                                        return mobOcelotTex
+                                    }
+                                }
+                                // 眼（2 颗斜挑深色点；头前侧。MobModel 头心 (0,0.12,-0.46) 半 (0.11,0.12,0.14) → 前面 z=-0.60；
+                                //   眼 y≈0.15、x=±0.07；z 贴头前面略凸（-0.61，同 t52 贴脸防 z-fight）。同猪眼纯色子 Model 模式。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.07, 0.15, -0.61)
+                                    scale: Qt.vector3d(0.035, 0.04, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.07, 0.15, -0.61)
+                                    scale: Qt.vector3d(0.035, 0.04, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
                     }
                     // t293 mob 碰撞箱仅 F3+B：旧版 t253「准星瞄准的单个 mob 常驻显白色目标框」（hover 即显）
                     //   被用户判为「hover 常显碰撞箱」——MC 1.0 准星瞄准 mob 无 wireframe（仅十字准星），
