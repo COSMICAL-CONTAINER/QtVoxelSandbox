@@ -1217,8 +1217,13 @@ void PlayerController::attackMob(int entityIndex)
 
 // t296 玩家受击击退（见头文件 applyHitKnockback 注释；机制等价 MC 1.0 玩家被击退）。由 Main.qml 的
 //   EntityManager.mobAttackedPlayer Connections 调（仅 Survival —— 创造 / 观察者无敌不弹，mobAttackedPlayer 经
-//   t290 门控本就只在 Survival 发）。把 (dirX,dirZ) 单位方向 × kHitKnockbackHoriz 写入独立冲量 m_knockback 的 XZ，
-//   并设小跳垂直分量 kHitKnockbackUp（step() 走路路径每帧衰减 + 重力 + 叠入位移）。
+//   t290 门控本就只在 Survival 发）。水平击退把 (dirX,dirZ) 单位方向 × kHitKnockbackHoriz 写入独立冲量 m_knockback 的 XZ
+//   （m_vel.x/z 每 tick 被 wish 输入覆盖，无法存击退，故独立累加 + step() 指数衰减）；垂直小跳 kHitKnockbackUp 直接写入
+//   m_vel.y（max，不抵消进行中的跳跃 / 上浮）：m_vel.y 不被 wish 覆盖、由 step() 单一重力积分 + 着地归零自然走完弧线，
+//   无需独立冲量。旧版把垂直也放 m_knockback.y 并在 step() 每 tick 再施重力 → 与 m_vel.y 自身重力叠加 = 双重力，水平击退
+//   （XZ ~1s 衰减）未衰减完时积分块仍每 tick 跑、把已着地清零的 m_knockback.y 反复拉负 → 叠入 delta.y 把玩家向下拽 →
+//   其后的跳跃（m_vel.y=kJump）/ 水中上浮（m_vel.y=kSwimUp）有效向上速度被双重力吃掉、峰值腰斩 = 用户实测「被怪打后
+//   跳不起来 / 水里跳不上一格」，~1s 后水平击退衰减完才恢复。改走 m_vel.y 根治（见 step() 击退积分注释）。
 //   防御：归一输入（caller 已归一，此处再守）；非 Survival / 死亡 / 未捕获（菜单态）/ 零方向 → 静默早退。
 void PlayerController::applyHitKnockback(float dirX, float dirZ)
 {
@@ -1230,7 +1235,9 @@ void PlayerController::applyHitKnockback(float dirX, float dirZ)
     dirZ /= len;
     m_knockback.setX(dirX * kHitKnockbackHoriz);
     m_knockback.setZ(dirZ * kHitKnockbackHoriz);
-    m_knockback.setY(kHitKnockbackUp); // 小跳（向上为正；step() 重力分支接手 → 上跳→减速→下落→着地）
+    // 垂直小跳直接给 m_vel.y（max：不抵消进行中更高的跳跃 / 上浮；向下坠落被转成上弹 = MC 受击小弹）。
+    //   m_vel.y 由 step() 单一重力积分 + 着地归零自然走完弧线（不经 m_knockback.y → 无双重力，见上方注释）。
+    m_vel.setY(std::max(m_vel.y(), kHitKnockbackUp));
     qInfo("player hit-knockback dir=(%.3f,%.3f) horiz=%.1f", dirX, dirZ, kHitKnockbackHoriz);
 }
 
@@ -3762,15 +3769,22 @@ void PlayerController::step(qreal dt)
     //   真被埋且头顶有方块的玩家上跳仍被 moveAxis(1,+) 顶头 snap 挡住（锁定语义不破）；头顶无方块时上跳脱困
     //   合理（t317 既定设计）。水平清零保留 → 防穿墙目的不破。
     if (isLockedBuried()) { m_vel.setX(0); m_vel.setZ(0); m_knockback = QVector3D(0, 0, 0); }
-    // t296 受击击退冲量积分（仅走路模式；Spectator / Creative-飞 noclip 早 return 不至此）。m_knockback 与 m_vel
-    //   分离（m_vel.x/z 每 tick 被 wish 覆盖）。每帧：水平指数衰减 + 垂直受重力（小跳弧自然），衰减殆尽 → 整体清零。
-    //   叠入位移：delta = (m_vel + m_knockback) * dt（子步 / 防穿墙照常按合成位移算）。
-    if (m_knockback.x() != 0.0f || m_knockback.y() != 0.0f || m_knockback.z() != 0.0f) {
+    // t296 受击击退冲量水平积分（仅走路模式；Spectator / Creative-飞 noclip 早 return 不至此）。m_knockback 只剩 XZ
+    //   （垂直小跳 kHitKnockbackUp 已在 applyHitKnockback 直接写入 m_vel.y，由上方 gravity / 着地分支统一处理）。
+    //   每帧水平指数衰减，衰减殆尽（|x|+|z| < 阈）→ 清零。叠入位移 delta = (m_vel + m_knockback) * dt；m_knockback.y 恒 0
+    //   → 垂直位移纯由 m_vel.y 决定（单一重力）。
+    //   【旧 bug 根因 / 用户「被怪打后跳不起来」】旧版把垂直小跳也放 m_knockback.y 并在此每 tick 施重力（kGravity），
+    //   与 m_vel.y 自身的重力（行上方 gravity 分支）叠加 = 双重力（dv/dt=-56）。小跳着地后 m_knockback.y 被清零，但只要
+    //   水平击退（XZ）还在衰减（~1s），本积分块仍每 tick 跑 → 再把已清零的 m_knockback.y 按 -kGravity*dt 拉成负值 →
+    //   叠入 delta.y 把玩家向下拽。其后的跳跃（m_vel.y=kJump=8.4）/ 水中上浮（m_vel.y=kSwimUp=4.5）有效向上速度被这股
+    //   陈旧负冲量 + 双重力吃掉，峰值腰斩（跳跃 1.25→~0.5 格、水中上浮几乎顶不住），~1s 后水平击退衰减完才恢复 = 用户实测
+    //   「被怪打后只跳半格、水里跳不上一格、过一会儿恢复」。根治：垂直走 m_vel.y（单一重力），m_knockback 只管水平
+    //   （无重力、只衰减）→ 跳跃 / 上浮不再被陈旧击退拽下。
+    if (m_knockback.x() != 0.0f || m_knockback.z() != 0.0f) {
         const float decay = std::max(0.0f, 1.0f - kHitKnockbackDrag * float(dt)); // 水平指数衰减（钳 ≥0 防 dt 过大翻负）
         m_knockback.setX(m_knockback.x() * decay);
         m_knockback.setZ(m_knockback.z() * decay);
-        m_knockback.setY(m_knockback.y() - kGravity * float(dt)); // 垂直受重力（与世界重力同值 → 小跳弧自然）
-        const float km = std::fabs(m_knockback.x()) + std::fabs(m_knockback.y()) + std::fabs(m_knockback.z());
+        const float km = std::fabs(m_knockback.x()) + std::fabs(m_knockback.z());
         if (km < 0.08f) m_knockback = QVector3D(0, 0, 0); // 衰减殆尽 → 清零（防浮点噪声永久残留）
     }
     // 防穿墙：每子步任意轴移动 ≤0.4 格
@@ -3835,8 +3849,8 @@ void PlayerController::step(qreal dt)
     if (aabbHitsSolid()) m_onGround = true;
     m_pos.setY(oy);
     if (m_onGround && m_vel.y() < 0) m_vel.setY(0);
-    // t296 击退小跳着地：向下分量被地面吸收（同 m_vel.y 着地归零），防重力持续累负致 m_knockback.y 滞留。
-    if (m_onGround && m_knockback.y() < 0.0f) m_knockback.setY(0.0f);
+    // t296 击退小跳着地：垂直小跳已走 m_vel.y（applyHitKnockback 写入），由上一行 m_vel.y 着地归零统一吸收。
+    //   旧版 m_knockback.y 的着地清零已随「垂直走 m_vel.y」重构移除（m_knockback.y 恒 0，无需再清）。
 
     // 掉落伤害（t22，仅 Survival）：滞空期间记录最高点 m_peakY，着地瞬间按 MC 1.0 公式
     // floor(落差-3) 结算（fall>3 才伤，每整格 1 HP = 半心）。上 tick 已着地 → 重置基准；

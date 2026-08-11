@@ -389,8 +389,10 @@ public:
     //   EntityManager.mobAttackedPlayer(amount, mobType, kbX, kbZ) 携「欲推开玩家的水平单位方向」，Main.qml
     //   Connections 据它调本方法。仅 Survival 生效（Creative/Spectator 无敌不弹；mobAttackedPlayer 经 t290 门控
     //   本就只在 Survival 发，此处再守防御）+ 非死亡 + 已捕获（菜单态不弹）。kbX/kbZ 由 caller 归一（EntityManager
-    //   内已归一并兜底零向量）；本方法再防御性归一一次。击退写入独立冲量累加器 m_knockback（玩家 m_vel.x/z 每
-    //   tick 被 wish 输入覆盖，无法存击退），step() 走路路径每帧衰减 + 重力 + 叠入位移。分层（PLAN §2）：
+    //   内已归一并兜底零向量）；本方法再防御性归一一次。水平击退写入独立冲量累加器 m_knockback 的 XZ（玩家 m_vel.x/z 每
+    //   tick 被 wish 输入覆盖，无法存击退），step() 走路路径每帧指数衰减 + 叠入位移；垂直小跳 kHitKnockbackUp 直接写入
+    //   m_vel.y（m_vel.y 不被 wish 覆盖、由重力 / 着地分支统一管，无需独立冲量 —— 旧版垂直亦入 m_knockback.y 致双重力吃掉
+    //   其后跳跃 / 上浮，已根治，见 .cpp applyHitKnockback / step 击退积分注释）。分层（PLAN §2）：
     //   Game/Physics 层持击退态；方向由 Entities 层（mob 位置 / 箭速）经语义信号向下传（Game→Physics 同层）。
     Q_INVOKABLE void applyHitKnockback(float dirX, float dirZ);
     // t477 铁砧损坏推进（AnvilUI 每次成功操作后调）：滚概率（~1/3）损坏铁砧 +1 阶段。据当前阶段经
@@ -949,12 +951,14 @@ private:
     // t248 攻击冷却剩余秒数（>0 时 attackMob 早退不扣血）：tickImpl 每帧递减；attackMob 成功命中后置
     //   kAttackCooldown。修长按左键每 tick 重触 beginMining 致 mob 瞬秒（见 kAttackCooldown 注释）。
     float m_attackCooldown = 0.0f;
-    // t296 玩家受击击退冲量累加器（XZ 水平推 + Y 小跳弧）。与 m_vel 分离 —— 玩家 m_vel.x/z 每 tick 被 wish
-    //   输入覆盖（走路 / 疾跑 / 水中），击退若写入 m_vel 一帧即被覆盖 → 看不见。故独立累加：applyHitKnockback
-    //   设本向量（水平 = dir×kHitKnockbackHoriz / 垂直 = kHitKnockbackUp 小跳）；step() 走路路径每帧水平指数衰减
-    //   + 垂直受重力 → 叠入 delta = (m_vel + m_knockback)*dt；衰减殆尽（L1 < 阈）→ 整体清零。仅走路模式积分
-    //   （Spectator / Creative-飞 noclip 早 return 不至此 → setMode 切走时清零，防陈旧冲量残留）。着地（onGround
-    //   且向下分量 <0）清 Y 分量（小跳被地面吸收，同 m_vel.y 着地归零）。
+    // t296 玩家受击击退冲量累加器（仅 XZ 水平推；Y 分量恒 0）。与 m_vel.x/z 分离 —— 玩家 m_vel.x/z 每 tick 被 wish
+    //   输入覆盖（走路 / 疾跑 / 水中），水平击退若写入 m_vel.x/z 一帧即被覆盖 → 看不见，故独立累加：applyHitKnockback
+    //   设 XZ = dir×kHitKnockbackHoriz；step() 走路路径每帧水平指数衰减 → 叠入 delta = (m_vel + m_knockback)*dt；
+    //   衰减殆尽（|x|+|z| < 阈）→ 整体清零。仅走路模式积分（Spectator / Creative-飞 noclip 早 return 不至此 → setMode
+    //   切走时清零，防陈旧冲量残留）。垂直小跳 kHitKnockbackUp 不入本向量、直接写 m_vel.y（m_vel.y 不被 wish 覆盖，由
+    //   重力 / 着地分支统一管）—— 旧版垂直亦入 m_knockback.y 并每 tick 再施重力，与 m_vel.y 自身重力叠加 = 双重力，水平
+    //   击退（~1s 衰减）未衰减完时把 m_knockback.y 反复拉负、吃掉后续跳跃 / 上浮冲量（用户实测「被怪打后跳不起来」），已
+    //   改走 m_vel.y 根治（见 .cpp applyHitKnockback / step 击退积分注释）。
     QVector3D m_knockback{0, 0, 0};
     // t267 持续进食态（手持面包按住右键累积，机制等价 MC 1.0 长按右键食面包 ~1.6s）。仅持面包时进入
     //   （eventFilter RightButton press 据持物 == BreadId 分流调 beginEating，面包不进 placeBlock）。
@@ -1088,7 +1092,7 @@ private:
     //     MC 受击小幅上弹），重力 28 拉回走原 tick 着地路径。
     //   - kHitKnockbackDrag：水平衰减率（1/s）。时间常数 1/drag≈0.22s → ~0.5s 衰到 ~10%、~1s 近停；总位移 ≈ v0/drag。
     static constexpr float kHitKnockbackHoriz = 6.0f;  // 受击水平初速（blocks/s）
-    static constexpr float kHitKnockbackUp    = 4.2f;  // 受击小跳垂直初速（blocks/s；峰值 ~0.32 格）
+    static constexpr float kHitKnockbackUp    = 4.2f;  // 受击小跳垂直初速（blocks/s；applyHitKnockback 直接写 m_vel.y，峰值 v²/(2g)≈0.32 格）
     static constexpr float kHitKnockbackDrag  = 4.5f;  // 受击水平衰减率（1/s；~0.5s 基本停下）
     static constexpr float kSuffocationInterval = 1.0f; // t160 窒息扣血间隔（秒；每秒 1HP，机制等价 MC 窒息 1/秒）
     // t202 气泡 + 溺水时序（机制等价 MC 1.0：10 气泡 ≈ 15s 入水耗尽，归零后每秒 1HP）。
