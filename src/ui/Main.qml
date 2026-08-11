@@ -188,10 +188,9 @@ Window {
     //   逐格平铺；细分成 per-block 子格又与 culled 输出一致、无顶点收益）→ t183 默认 false 恢复逐格清晰贴图。
     //   逐格清晰 + 顶点预算兼得需纹理数组（自研 RHI，dev-plan 偏差 1/2）。ESC 设置面板仍可手动开 greedy 对比。
     property bool greedyMeshing: false
-    // t223 水贴图动画 phase（flipbook 帧索引 0/1）：仅水段 ChunkGeometry 绑定。下方 waterAnimTimer 每
-    //   ~800ms 切 0↔1（spec「静止水 2 帧慢播，勿快」）→ 水段在 {19,24}(静水)/{23,25}(流水) 间换帧 →
-    //   静水荡漾 / 流水斜纹流动动势。仅 playing 态 tick（菜单态水段已离场，无需动）。
-    property int waterAnimPhase: 0
+    // t223/tXXX 水贴图动画 phase（flipbook 帧索引）：**已废弃删除**（tXXX 水动画重建消除，静态水单帧）——
+    //   旧属性驱动 2s 一次水段全量重建（Swamp 261 段/次，mesh 重建风暴第二根因）。waterAnimTimer 随动删除，
+    //   水段 mesh 恒用 phase 0 帧（C++ 侧 setWaterAnimPhase 也不再触发重建；属性 + Timer 无消费方即删）。
     // t166c 第一人称手持方块位置（用户「加滑动条调手持方块位置」）：viewModelHand 内 BlockCube 的相对偏移。
     //   默认 (0,0,0)（t156「手前方」基线）；ESC 滑条实时调。
     property real heldBlockX: 0.0
@@ -1287,21 +1286,14 @@ Window {
         function onDayPhaseChanged() { audio.setAmbientLevel(0.5 + 0.5 * worldClock.skyLight) }
     }
 
-    // t223 水贴图动画 flipbook 驱动：每 ~2s 把 window.waterAnimPhase 0↔1 翻转 → 水段 ChunkGeometry
-    //   （绑了 waterAnimPhase）setWaterAnimPhase 触发 buildMesh(Water) 换帧。spec「静止水 2 帧慢播，勿快」：
-    //   t472 性能：800ms→2000ms。800ms 节拍 = 每秒 1.25 次全量水段重建（视距门控前 100 水段全成本），
-    //   是 mesh 重建风暴第二根因；2s 节拍肉眼仍读作「轻微荡漾」（水动画稍慢但远没那么卡），配合 t472
-    //   chunkInRange 门控（远水段跳过翻页）水翻页税从「100 段 × 每 0.8s」降到「视距内水段 × 每 2s」。
-    //   仅 playing 态跑（菜单态 View3D 已隐、水段离场，无需动；且避免菜单态无谓重建水段 mesh 浪费主线程）。
-    //   triggered 翻转 phase：0→1→0 循环。
-    //   分层（PLAN §2）：纯 QML 呈现层 Timer（不进 Game 层 WorldClock；动画是呈现层选择，非时间语义）。
-    Timer {
-        id: waterAnimTimer
-        interval: 2000
-        repeat: true
-        running: window.appState === "playing"
-        onTriggered: window.waterAnimPhase = (window.waterAnimPhase === 0) ? 1 : 0
-    }
+    // t223/tXXX 水贴图动画 flipbook 驱动：**已移除**（tXXX 水动画重建消除）。旧 Timer 每 ~2s 翻转
+    //   window.waterAnimPhase → 水段 ChunkGeometry setWaterAnimPhase 触发全量 buildMesh(Water) 换 2 帧 UV
+    //   （Swamp 场景 261 段/次，mesh 重建风暴第二根因）。2 帧 UV 子区换帧不必重建整段 → 现改**静态水**：
+    //   水段 mesh 恒用 phase 0 帧（静水 tile 19 / 流水 tile 23）+ 烘死的空间涟漪（t391，明暗波带质感），
+    //   setWaterAnimPhase 不再触发重建（C++ 侧），故本 Timer / waterAnimPhase 属性一并删除（否则每 2s 一次
+    //   无意义的 phase 翻转 + QML 绑定重算）。水动画重建从 261 段/2s → 0；视觉损失 = 两帧交替的荡漾动势
+    //   （保留单帧 + 涟漪，水面仍有明暗波带、非全平死板；material 级动画（UV offset / shader 位移）留待将来）。
+    //   分层（PLAN §2）：动画本属呈现层选择（不进 Game 层 WorldClock），删除后无残留依赖。
     // perf-t520 F3 / HUD 文本节流 Timer：每 100ms（10Hz）调 buildF3Text + buildHudPosText 写
     //   window.f3Text / hudPosText 单一 string 属性。原 text 绑定读 60Hz player.position 等 → 每帧重算
     //   ~30 行字符串 + Q_INVOKABLE（biomeIdAt / liveCount）。节流后频率降到 10Hz（6× 降）。
@@ -2880,8 +2872,8 @@ Window {
             }
         }
 
-        // 水段 chunk Model 模板（t148：waterOnly 只网格化 Water，opacity 0.7 半透；t223 waterAnimPhase flipbook）。
-        //   摆位与地形段同（chunk 世界起点）；透明物体由 QtQuick3D 渲染队列自动排在不透明地形之后。
+        // 水段 chunk Model 模板（t148：waterOnly 只网格化 Water，opacity 0.7 半透；tXXX 静态水——mesh 恒用
+        //   phase 0 帧（静水 tile 19 / 流水 tile 23）+ 烘死的空间涟漪，flipbook 换帧驱动已删，见 tXXX 注释）。
         Component {
             id: waterChunkComp
             Model {
@@ -2899,9 +2891,8 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
-                    chunkInRange: waterModel.chunkInRange // t472：视距门控传给 mesher（远端水段跳过翻页重建）
+                    chunkInRange: waterModel.chunkInRange // t472：视距门控传给 mesher（远端水段跳过重建）
                     waterOnly: true
-                    waterAnimPhase: window.waterAnimPhase
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: window.skyBaseColor }
             }

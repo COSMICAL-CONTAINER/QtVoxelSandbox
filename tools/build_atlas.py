@@ -16,12 +16,12 @@
      流水 state=1..7 用本 tile（左上→右下斜向条纹），与水面随 level 下降的阶梯感配合，传达「逐格衰减流动」。
      该 tile 不绑定任何方块 id（Water 方块 def 仍各面=19），mesher 在水段按 cell 的 state 选 19/23——属
      渲染层呈现选择，非方块属性。tools/build_water_flow.py 生成。）
-  24 water_2（t223 水贴图动画第二帧：静水 flipbook frame 1——波纹位置相对 tile 19 略下移 1 像素 + 高光位移，
-     mesher 在水段据慢速 waterAnimPhase 0/1 在 tile 19/24 间切换 → 静水轻微荡漾感。不绑定方块 id；属渲染层
-     呈现选择，非方块属性。tools/build_water.py 生成。）
-  25 water_flow_2（t223 流水动画第二帧：流水 flipbook frame 1——斜纹沿流动方向 (+1,+1) 平移半周期，
-     mesher 据水段 waterAnimPhase 在 tile 23/25 间切换 → 斜纹「向右下流动」动势。不绑定方块 id；属渲染层
-     呈现选择，非方块属性。tools/build_water_flow.py 生成。）
+  24 water_2（t223 水贴图动画第二帧：静水 flipbook frame 1——波纹位置相对 tile 19 略下移 1 像素 + 高光位移。
+     **tXXX 静态水后 mesher 不再引用**（flipbook 换帧重建已消除，水段恒用 tile 19/23）；瓦片保留供将来
+     material 级动画复用。不绑定方块 id；属渲染层呈现选择，非方块属性。tools/build_water.py 生成。）
+  25 water_flow_2（t223 流水动画第二帧：流水 flipbook frame 1——斜纹沿流动方向 (+1,+1) 平移半周期。
+     **tXXX 静态水后 mesher 不再引用**（同上）；瓦片保留。不绑定方块 id；属渲染层呈现选择，非方块属性。
+     tools/build_water_flow.py 生成。）
   26 farmland_dry（t234 耕地顶面干态：浅棕色翻耕干土 + 纵向犁沟纹。Farmland 方块 topTile 字段 = 本 tile；
      mesher 据 Farmland state bit0=0（干）选本 tile 画 +Y 顶面。tools/build_farmland.py 生成。）
   27 farmland_wet（t234 耕地顶面湿态：深棕色湿润翻耕土 + 同犁沟纹（区别 dry 仅色更深）。Farmland 方块

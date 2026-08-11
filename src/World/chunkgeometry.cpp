@@ -11,6 +11,7 @@
 #include <QVector3D>
 
 #include <algorithm> // std::clamp / std::max（t151 真光场顶点色钳制；PCF 软影的 sqrt/floor 已迁 voxellight.h）
+#include <cmath>     // tXXX sun 粗量化门：std::asin/std::acos/std::fabs（仰角/方位角累计变化阈值判定）
 #include <cstddef>
 #include <cstring>
 #include <vector>    // t178 greedy meshing mask 缓冲（std::vector）
@@ -82,6 +83,12 @@ void ChunkGeometry::setCz(int cz)
 //   setChunkInRange 主动 catch-up 一次。
 //   perf：空段（m_vertexCount==0，无该段方块）无顶点可打光 → 太阳步进对其无视觉影响，跳过重建
 //   （100 chunk × 6 段中大部分段为空——地形的 lava/glass/ice/cross/水段常空，只有非空段需随太阳重烘顶点色）。
+//   tXXX 粗量化门：WorldClock 每 ~16.7s 跨一步太阳（72 步/1200s 天）→ 旧行为每步全量 buildMesh(Sun)
+//   （每非空段重跑 mesher + 逐顶点 PCF 烘光 + GPU 重传）≈ 325 段/16.7s，是残余卡顿主因之一。但昼夜亮度
+//   已由 QML baseColor=terrainLight 平滑 lerp —— sun 步进重建只为「方向软影」（PCF 沿 sunDir 步进
+//   heightmap）；方向只动几度时影边位移 <0.2 格、PCF 软边又抹掉跳变，肉眼无感 → 不必每步重烘。
+//   门（sunRebuildDue）收敛到三类事件才重烘：影淡入/淡出带穿越 | 仰角/方位角累计变超阈值 | 距上次重烘
+//   超硬顶。重烘前方向变被跳过 → 只更新 m_sunDir（下次 buildMesh 用最新值），不重建（见 sunRebuildDue）。
 void ChunkGeometry::setSunDir(const QVector3D &dir)
 {
     if (m_sunDir == dir) return;
@@ -89,7 +96,52 @@ void ChunkGeometry::setSunDir(const QVector3D &dir)
     emit sunInputChanged();
     if (!m_chunkInRange) return; // t472：远端 chunk 静默跟随值变，不重建
     if (m_vertexCount == 0) return; // 空段无顶点可打光 → 太阳步进零影响，跳过重建
+    if (!sunRebuildDue(dir)) return; // tXXX：方向变太小 / 未穿影带 / 未超硬顶 → 只更新值不重建
     buildMesh(RebuildReason::Sun);
+}
+
+// tXXX sun-step 粗量化门（性能：mesh 重建风暴根治 #1——sun 步进）。WorldClock 量化 72 步/天（每 ~16.7s
+//   跨一步）→ 旧行为每步 buildMesh(Sun)，325 段/16.7s 全量重跑 mesher。昼夜亮度已由 QML baseColor
+//   （terrainLight）平滑 lerp，本门只负责「方向软影」该不该重烘。三类事件才返 true：
+//   (a) 影淡入/淡出带穿越：sunDir.y 跨 kSunMin(=0.30) / kSunMax(=kSunMin+kSunFade=0.40) —— 只有跨带时
+//       影因子才 0↔非0 切换，是唯一需要「立即」重烘的方向变化点（否则影在错误时刻出现/消失）。
+//   (b) 仰角 / 方位角累计变化超阈值：日间影缓慢旋转 + 收缩，攒够 kSunElevThresh / kSunAzimThresh 才重烘
+//       一次（PCF 软边掩跳变，粗更新视觉可接受；正常 1200s 天 ≈ 十几次，325 段/16.7s → 罕见）。
+//   (c) 距上次重烘超 kSunMaxInterval：硬顶——影绝不冻结超过该时长（防低变化率时段方向阈值永不达）。
+//   夜/低仰角（y<=kSunMin）恒返 false：无影，方位角 / 时间都无需重烘（夜间零 sun 重建；黎明跨 0.30 才醒）。
+//   层：只读裸 sunDir + 单调时钟（FrameProfiler::nowNs），不依赖 Game 层 WorldClock（Renderer→向下）。
+//   debugFast（30s 天）下每步 0.42s，阈值步数不变 → 重烘每 ~1.7s 一次，调试仍见影动；生产 1200s 天每
+//   ~30-70s 一次。m_lastBakedSunDir/m_lastSunBakeNs 在 buildMesh 末尾更新（任何 reason 都烘顶点色）。
+bool ChunkGeometry::sunRebuildDue(const QVector3D &dir) const
+{
+    static constexpr float kSunMinY  = VoxelLight::kSunMin;                        // 0.30：影起始门（与 sunShadow 同源）
+    static constexpr float kSunMaxY  = VoxelLight::kSunMin + VoxelLight::kSunFade; // 0.40：满影门（淡入带顶）
+    static constexpr double kSunElevThresh = 0.12;   // ~6.9° 仰角累计变（影长 / 淡入淡出速率感知）
+    static constexpr double kSunAzimThresh  = 0.35;  // ~20° 方位角累计变（日中影缓慢旋转攒够才重烘）
+    static constexpr qint64 kSunMaxIntervalNs = 120LL * 1000000000LL; // 120s 硬顶（影绝不冻结超 2 分钟）
+
+    const QVector3D &last = m_lastBakedSunDir;
+    // (a) 影带穿越（上一烘 vs 当前）：带边界任一方向穿越都重烘。
+    const bool lastBelow = last.y() <= kSunMinY;
+    const bool curBelow  = dir.y()  <= kSunMinY;
+    const bool lastAbove = last.y() >= kSunMaxY;
+    const bool curAbove  = dir.y()  >= kSunMaxY;
+    if (lastBelow != curBelow || lastAbove != curAbove) return true;
+    if (dir.y() <= kSunMinY) return false; // 夜/低仰角：无影，方位角 / 时间都无需重烘
+    // (b) 方位角累计变化（XZ 投影夹角；太阳近天顶 / 水平分量≈0 时退化不判，同 sunShadow 退化语义）。
+    const float lh = std::sqrt(last.x()*last.x() + last.z()*last.z());
+    const float ch = std::sqrt(dir.x()*dir.x() + dir.z()*dir.z());
+    if (lh > 1e-4f && ch > 1e-4f) {
+        const float dot = (last.x()*dir.x() + last.z()*dir.z()) / (lh * ch);
+        if (std::acos(std::clamp(dot, -1.0f, 1.0f)) > kSunAzimThresh) return true;
+    }
+    // (b2) 仰角累计变化（asin 差值；日出日落影长剧变区比 (a) 更细粒度地追影长）。
+    const float lastElev = std::asin(std::clamp(last.y(), -1.0f, 1.0f));
+    const float curElev  = std::asin(std::clamp(dir.y(),  -1.0f, 1.0f));
+    if (std::fabs(lastElev - curElev) > kSunElevThresh) return true;
+    // (c) 距上次重烘超硬顶。
+    if (FrameProfiler::nowNs() - m_lastSunBakeNs > kSunMaxIntervalNs) return true;
+    return false;
 }
 
 // t148：水段开关变 → 重建（水段 / 地形段选块不同，需重网格化）。值未变则早退。
@@ -167,20 +219,18 @@ void ChunkGeometry::setGreedyMeshing(bool on)
     buildMesh(RebuildReason::Dirty);
 }
 
-// t223 水贴图动画 phase 变（flipbook 换帧）。仅水段（waterOnly=true）受影响：地形段不引用水 tile，
-//   phase 变化对其顶点 UV 无影响 → 早退不重建（避免地形段无谓 buildMesh）。水段重网格化用 Water reason
-//   （同 waterOnly 切换语义；绕过 sun-step 节流）。phase 钳到 0/1（两帧 flipbook；超界兜底取 0）。
-//   t472 视距门控：远端水段跳过翻页重建（每 2s 一次的水翻页只重建视距内水段，远端水不绘制 → 无需换帧）。
+// t223/tXXX 水贴图动画 phase（flipbook 换帧）——**tXXX 起不再触发重建**（水动画重建消除，静态水单帧）。
+//   旧行为：2s 一次全量水段 buildMesh(Water) 换 2 帧 UV（Swamp 场景 261 段/次），是 mesh 重建风暴第二根因；
+//   2 帧 UV 子区换帧不必重建整段（重跑 mesher + 逐顶点烘光 + GPU 重传）。现改静态水：本 setter 只记录值 +
+//   emit（API 稳定 + 将来 material 级动画复用），mesh 恒用 phase 0 帧（buildMesh 内硬编码 tiles 19/23）。
+//   非水段（地形）本就不引用水 tile → 更无重建。phase 钳到 0/1（两帧 flipbook；超界兜底取 0）。
 void ChunkGeometry::setWaterAnimPhase(int phase)
 {
     if (phase < 0 || phase > 1) phase = 0; // 钳到合法两帧范围
     if (m_waterAnimPhase == phase) return;
     m_waterAnimPhase = phase;
     emit waterAnimPhaseChanged();
-    if (!m_waterOnly) return; // 地形段不引用水 tile → 无视觉影响，跳过重建
-    if (!m_chunkInRange) return; // t472：远端水段跳过翻页，回 true catch-up
-    if (m_vertexCount == 0) return; // 空水段（无水体）翻页换帧无视觉影响 → 跳过重建（多数 chunk 无水体）
-    buildMesh(RebuildReason::Water);
+    // tXXX：不 buildMesh —— 翻页换帧不再重网格化（静态水单帧；视觉损失可接受，见 tXXX 验收）。
 }
 
 // t472 视距门控 setter（修 t470 盲点 + 砍 mesh 重建风暴）：由所在段 Model.chunkInRange 绑定注入。
@@ -489,8 +539,12 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
             //   maxLevel：液面衰减分级。水 8 级（state 1..7 → 液面 (8-s)/8）；岩浆 4 级（state 1..3 → 液面 (4-s)/4）。
             const quint8 fluidId  = m_lavaOnly ? BlockRegistry::Lava  : BlockRegistry::Water;
             const int maxLevel    = m_lavaOnly ? 4 : 8;                 // 源(0) + 流(1..maxLevel-1)
-            const int stillTile   = m_lavaOnly ? 42 : (m_waterAnimPhase == 0 ? 19 : 24);
-            const int flowTile    = m_lavaOnly ? 42 : (m_waterAnimPhase == 0 ? 23 : 25);
+            // t223/tXXX 水贴图动画 phase 换帧已废弃（静态水单帧，见 setWaterAnimPhase）：恒用 phase 0 帧
+            //   —— 静水 tile 19（旧 flipbook {19,24} 的帧 0）、流水 tile 23（旧 {23,25} 的帧 0）。tiles 24/25
+            //   （第 2 帧）不再被 mesher 引用（图集保留，视觉损失=两帧交替的荡漾动势，保留烘死的空间涟漪，
+            //   见下方 t391 涟漪；水动画重建消除是 tXXX 核心收益，2s 换帧代价 261 段全量重网格化）。
+            const int stillTile   = m_lavaOnly ? 42 : 19;
+            const int flowTile    = m_lavaOnly ? 42 : 23;
             // state → 液面高度（cell-local Y，0..1）。源 1.0；流 (maxLevel-level)/maxLevel（越远越矮）。
             //   state 越界 clamp 兜底防负值（极端坏数据 → 最低一级液面而非负值）。
             auto surfH = [maxLevel](quint8 state) -> float {
@@ -570,17 +624,19 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 else if (f == 4 || f == 5) { cu = dx; cv = dy; }  // ±Z
                                 else { cu = dx; cv = dz; }                        // ±Y
                                 // t391 水面波动/透明度润色（spec「水面有波动质感、非死板」）：仅水段顶面（+Y，f==2）
-                                //   叠加一层随 waterAnimPhase 翻转的**空间正弦涟漪**——每顶点据世界角点 (wx+dx, wz+dz)
-                                //   算 sin（k=1.1，周期 ~5.7 格，对角涟漪）；相邻 cell 共享同一角点 → 涟漪跨格连续
-                                //   （非逐格跳变）。phase 0/1 在 sin 自变量上 ±π 偏移（半周期）→ flipbook 切帧时亮/暗
-                                //   波带整体互换 = 阳光在水面细碎反光的「闪烁」感，叠加 t223 贴图 flipbook → 水面微动、
-                                //   非全平死板。仅水（fluidId==Water，!m_lavaOnly）；岩浆段不参与（浓稠近不透、无涟漪语义）。
+                                //   叠加一层**空间正弦涟漪**——每顶点据世界角点 (wx+dx, wz+dz) 算 sin（k=1.1，
+                                //   周期 ~5.7 格，对角涟漪）；相邻 cell 共享同一角点 → 涟漪跨格连续（非逐格跳变）。
+                                //   tXXX：涟漪相位**烘死为 phase 0**（静态水）——旧 flipbook 的 ±π 相位翻转
+                                //   （切帧时亮/暗波带互换 = 「闪烁」感）需随 waterAnimPhase 重网格化，已随翻页
+                                //   一并废弃；保留烘死的涟漪 → 水面仍有明暗波带质感、非全平死板，但不再随时间
+                                //   翻转（静态水视觉损失可接受，见 tXXX 验收）。仅水（fluidId==Water，!m_lavaOnly）；
+                                //   岩浆段不参与（浓稠近不透、无涟漪语义）。
                                 //   亮度 ±12%（反光起伏）+ vertex.a [0.85,1.0]（材质 opacity 0.7 × vertex.a → 有效
                                 //   alpha [0.595,0.7]，透射起伏）；侧面/底面 brightMul=alphaMul=1（原行为）。
                                 float brightMul = 1.0f, alphaMul = 1.0f;
                                 if (!m_lavaOnly && f == 2) { // +Y 顶面（水面）
                                     const float sarg = float(wx + dx + wz + dz) * 1.1f;
-                                    const float wave = std::sin(sarg + (m_waterAnimPhase != 0 ? 3.14159265f : 0.0f));
+                                    const float wave = std::sin(sarg); // tXXX 静态水：相位 0（不再随 phase 翻转）
                                     brightMul = 1.0f + 0.12f * wave;                 // [0.88, 1.12] 反光起伏
                                     alphaMul = 0.85f + 0.15f * (0.5f + 0.5f * wave);   // [0.85, 1.00] 透射起伏
                                 }
@@ -856,6 +912,13 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     //   先处理的段清掉后，后处理的段 onWorldChanged 见 dirty=false 跳过 → 那段 mesh 陈旧到下个 sun-step
     //   （= 用户「挖/放后贴图 2s 才刷新」根因）。现 dirty 由 World 在 emit worldChanged（两段都重建完）后
     //   经 ChunkManager::clearAllDirty() 统一清。buildMesh 只管重建，不清脏。
+
+    // tXXX sun-step 粗量化：记录「本次实际烘进顶点色的太阳方向」+ 时刻 —— 下次 setSunDir 据此判是否值得
+    //   重烘（方向变太小 → 只更新 m_sunDir 不重建）。**任何 reason** 的 buildMesh 都烘顶点色（PCF 软影用
+    //   m_sunDir）→ 一律更新，门从「最近一次实际烘光的太阳位」起算（编辑即时重建后，sun 门从编辑时的太阳位
+    //   重新累积，不会把编辑前旧方向也计入）。
+    m_lastBakedSunDir = m_sunDir;
+    m_lastSunBakeNs = FrameProfiler::nowNs();
 
     // 可观测性（dev-spec t03 / t155 验收）：dirty = 编辑 / 初次加载即时重建（同步于 setBlock，破/放后当帧）；
     //   sun = 太阳跨步全量重建（绕 dirty，t155 编辑活跃期被 WorldClock 节流跳过）；water = 水段切换。

@@ -1054,8 +1054,9 @@ public:
     //   20=chest_top / 21=chest_side / 22=chest_front（t173；箱子顶=盖缝+铰链、侧=铁箍带、前=锁孔）
     //   23=water_flow（t197；**流水专用**贴图，不绑定任何方块 id——Water 方块 def 仍各面=19 静水；
     //      mesher 在水段按 cell 的 state 选 19(水源)/23(流水)。属渲染层呈现选择，非方块属性）。
-    //   24=water_2（t223 静水动画第二帧；mesher 在水段据 waterAnimPhase 在 19/24 间慢速切换 → 静水荡漾感）。
-    //   25=water_flow_2（t223 流水动画第二帧；mesher 在水段据 waterAnimPhase 在 23/25 间切换 → 斜纹流动动势）。
+    //   24=water_2（t223 静水动画第二帧；**tXXX 静态水后 mesher 不再引用**——flipbook 换帧重建已消除，
+    //      水段恒用 19/23（phase 0 帧）。图集保留瓦片供将来 material 级动画 / 手工切换，索引不回收）。
+    //   25=water_flow_2（t223 流水动画第二帧；同上，**tXXX 静态水后 mesher 不再引用**，图集保留）。
     //   26=farmland_dry（t234 耕地顶面干态；浅色翻耕干土，纵向犁沟纹）。
     //   27=farmland_wet（t234 耕地顶面湿态；深色湿润翻耕土，同犁沟纹 + 深色；mesher 据 Farmland state bit0
     //      选 26(干)/27(湿)；Farmland 方块 def topTile=26，tileFor 特例覆盖）。

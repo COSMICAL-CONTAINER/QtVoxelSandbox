@@ -115,12 +115,11 @@ public:
     //   分层（PLAN §2）：纯呈现层门控信号（bool），不依赖 Game 层；与 Model.visible 双重剔除（远端剔除
     //   + 空段剔除）配套 —— visible 决定「GPU 是否绘制」，chunkInRange 决定「CPU 是否重建 mesh」。
     Q_PROPERTY(bool chunkInRange READ chunkInRange WRITE setChunkInRange NOTIFY chunkInRangeChanged)
-    // t223 水贴图动画 phase（flipbook 帧索引 0/1）：仅水段（waterOnly=true）使用。mesher 据本值在
-    //   静水 tile {19,24}（水源 state=0）与流水 tile {23,25}（流水 state>0）间选帧——phase 0 用 {19,23}，
-    //   phase 1 用 {24,25}。两帧 flipbook 慢速切换（Main.qml Timer ~800ms 切 0/1，spec「勿快」）→ 静水轻微
-    //   荡漾、流水斜纹呈「向右下流动」动势（机制等价 MC still/flowing_water flipbook，§9 原创）。
-    //   非水段（地形）不引用水 tile，phase 变化对其无视觉影响 → setter 仅在 waterOnly 时触发 buildMesh
-    //   （避免地形段无谓重建）。值变 → 水段 buildMesh(Water) 重网格化（顶点 UV 子区换帧）。
+    // t223/tXXX 水贴图动画 phase（flipbook 帧索引 0/1）：**历史遗留属性**。tXXX 水动画重建消除——
+    //   flipbook 翻页换帧（2s 一次全量水段 buildMesh，Swamp 场景 261 段/次）是 mesh 重建风暴第二根因；
+    //   2 帧 UV 子区换帧不必重建整段 → 现改**静态水**（mesher 恒用 phase 0 帧：静水 tile 19 / 流水 tile 23 +
+    //   烘死的空间涟漪），本 setter 只记录值**不再触发 buildMesh**（API 稳定 + 将来 material 级动画
+    //   （UV offset / shader 位移）落地后复用；静态化视觉损失可接受，见 tXXX 验收）。值变早退同旧。
     //   分层（PLAN §2）：本属 Renderer（mesher），只接收裸 int phase（不依赖 Game 层时间源 / Timer），保持
     //   Renderer→向下 依赖方向。
     Q_PROPERTY(int waterAnimPhase READ waterAnimPhase WRITE setWaterAnimPhase NOTIFY waterAnimPhaseChanged)
@@ -190,7 +189,7 @@ signals:
     void iceOnlyChanged(); // t468：冰段开关变（QML 改 iceOnly → 重建，冰段 / 地形段重网格化）
     void shadowsEnabledChanged(); // t166b：阴影开关变（→ buildMesh 重算顶点光 PCF）
     void greedyMeshingChanged();  // t178：贪婪网格化开关变（→ buildMesh 重网格化）
-    void waterAnimPhaseChanged(); // t223：水贴图动画 phase 变（→ 水段 buildMesh(Water) 换帧）
+    void waterAnimPhaseChanged(); // t223/tXXX：水贴图动画 phase 变（历史遗留；tXXX 起**不再触发 buildMesh**，静态水单帧，见 Q_PROPERTY 注释）
     void chunkInRangeChanged();   // t472：视距门控变（false→true 触发一次 catch-up buildMesh）
     // buildMesh 完成（顶点 / 三角面数已更新；t10 F3 叠层据此刷新汇总）。
     void meshRebuilt();
@@ -206,6 +205,10 @@ private:
     //   mesher 据此把天光分量乘 (1-sh)，火把方光取 max 保留。只读 World::heightmapAt + 裸 sunDir（不依赖
     //   Game 层 WorldClock，保持 Renderer→向下）。
     float sunShadowAt(float wx, float wy, float wz) const;
+    // tXXX sun-step 粗量化门：判定本次 sunDir 变化是否需要重烘顶点色（否则只更新 m_sunDir 不重建）。
+    //   三类事件才重烘：影淡入/淡出带穿越（y 跨 kSunMin/kSunMax）| 仰角/方位角累计变超阈值 | 距上次重烘
+    //   超硬顶。昼夜亮度由 QML baseColor 平滑，方向软影粗更新无亮度跳变（见 .cpp 实现注释）。
+    bool sunRebuildDue(const QVector3D &dir) const;
     Chunk *myChunk() const;           // 本几何负责的 chunk（world/cx/cz 无效 → nullptr）
     // 世界坐标查询（跨 chunk 经 world.blockAt 路由 → 边界面剔除正确）
     quint8 blockAtWorld(int wx, int wy, int wz) const {
@@ -228,8 +231,12 @@ private:
     bool m_iceOnly = false; // t468：true=只网格化冰族段（Ice/PackIce/BlueIce 透明整立方半透）；false=地形段跳冰族
     bool m_shadowsEnabled = true; // t166b：PCF 软影开关（false → sunShadowAt 返 0，跳过 per-vertex 采样）
     bool m_greedyMeshing = false; // t178/t183：贪婪网格化开关（true=合并同面但贴图拉伸；false=逐格 culled 贴图清晰，t183 默认）
-    int m_waterAnimPhase = 0; // t223：水贴图动画 phase（0/1；仅水段使用，flipbook 在 {19,24}/{23,25} 间选帧）
+    int m_waterAnimPhase = 0; // t223/tXXX：水贴图动画 phase（**历史遗留**，静态水后恒 0；setter 不重建，见 Q_PROPERTY 注释）
     bool m_chunkInRange = true; // t472：视距门控（false=远端跳过 buildMesh；false→true catch-up 一次）
+    // tXXX sun-step 粗量化：上次「实际烘进顶点色的太阳方向」与时刻（buildMesh 末尾更新）。setSunDir 据此
+    //   判是否值得重烘（方向变太小 / 未穿影带 → 只更新 m_sunDir 不重建；影边 PCF 软 → 粗更新无亮度跳变）。
+    QVector3D m_lastBakedSunDir{0.f, 1.f, 0.f};
+    qint64 m_lastSunBakeNs = 0;
     int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
     int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）
 };
