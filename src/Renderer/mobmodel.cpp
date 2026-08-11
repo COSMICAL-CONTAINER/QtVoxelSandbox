@@ -290,9 +290,10 @@ void MobModel::setMobType(int type)
     // 0（测试生物）/ 越界 → 兜底 Pig（保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube，
     //   不进本类，故此处兜底仅防误设）。合法 mobType：1 猪 / 2 牛 / 3 羊 / 4 Shambler(僵尸) /
     //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛) / 8 Chicken(鸡) / 9 Squid(鱿鱼) / 10 Wolf(狼) /
-    //   11 Ocelot(豹猫/猫；t481)。
+    //   11 Ocelot(豹猫/猫；t481) / 14 Silverfish(银鱼；t487)。
     //   修：原仅接 1-5 且误标 5=Stalker（实际 enum 5=Bones）。
-    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10 && type != 11) type = 1;
+    //   注：12 SnowGolem / 13 IronGolem 不走 MobModel（Main.qml UnitCube 堆叠），故不在接受集。
+    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10 && type != 11 && type != 14) type = 1;
     if (type == m_mobType) return;
     m_mobType = type;
     emit mobTypeChanged();

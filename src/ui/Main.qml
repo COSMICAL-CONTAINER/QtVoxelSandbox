@@ -4746,8 +4746,11 @@ Window {
                         visible: { entityManager.revision; return entityManager.isBurningAt(index) }
                         // 火舌点表：[x, y, z, phaseIdx]，坐标为 delegate 本地框（collision 箱中心 = 原点，
                         //   身体 ±mobHalfW × ±mobHalfH）。phaseIdx 选相位（错开闪烁）。火焰贴身表面分布脚/腰/肩/顶。
+                        // perf：非燃烧时 model=[] → 0 delegate（免 64 槽 × 7 = 448 火焰节点常驻 scene-graph 同步
+                        //   + 448 个 loops:Infinite SequentialAnimation 每渲染帧推进 —— QML 动画 visible:false 不暂停，
+                        //   revision 节流管不住它）。燃烧是稀有瞬态，toggle 时实例化/销毁 churn 可接受。
                         Repeater {
-                            model: [
+                            model: entityManager.isBurningAt(index) ? [
                                 [0.0,      -mobHalfH * 0.65,  mobHalfW,        0],   // 脚前
                                 [0.0,      -mobHalfH * 0.65, -mobHalfW,        1],   // 脚后
                                 [0.0,       0.0,               mobHalfW,        2],   // 腰前
@@ -4755,7 +4758,7 @@ Window {
                                 [-mobHalfW, 0.0,               0.0,             0],   // 左腰
                                 [0.0,       mobHalfH * 0.65,  -mobHalfW,        1],   // 肩后
                                 [0.0,       mobHalfH * 0.95,   0.0,             2]    // 头顶
-                            ]
+                            ] : []
                             delegate: Node {
                                 position: Qt.vector3d(modelData[0], modelData[1], modelData[2])
                                 // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
