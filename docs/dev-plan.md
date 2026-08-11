@@ -1395,3 +1395,76 @@ t18                        （背包，依赖 hotbar）
 - **量大（17 任务）→ 分批 workflow**：批1 = A+B 附魔链（t471-t477，7 任务）；批2 = C 繁殖伙伴（t478-t483，6 任务）；批3 = D 结构（t484-t487，4 任务）。
 - 法律红线：所有结构/方块/生物原创命名或机制等价描述，不抄 MC 资产/专名。
 - **性能修好前不开工**（用户睡前 compact，性能 agent 回来修水+mob，确认 FPS 回升后再启批1）。
+
+---
+
+# R18s 规划（综合大批量：性能残留 + 水岩浆动画 + 渲染/方块机制/UI 修复，27 任务 t488-t514）
+
+> 来源：用户 R18r 后大批量 playtest 反馈（2026-08-11，~27 项）。任务号续 R18r（t487 止）→ t488 起。
+> **P0 = 性能（游戏杀手，先做）**；B 渲染/视觉；C 方块/机制；D UI/交互。
+> ⚠️ 法律红线（强制）：MC 资源包 PNG 仅本地 gitignored 加载（`docs/Default HD 128x Demo 1.8.2.2/`），commit 仅代码 + 程序生成贴图，**绝不 add 包 PNG 进 git/qrc/构建产物**；子 agent 提示词须重申。原创名（Creeper→Stalker 等）。
+> **分批 workflow**（用户要求子 agent + workflow 串行开发）：批1 = A 性能（t488-t490，先做）；批2 = B 渲染（t491-t499）；批3 = C 方块机制（t500-t510）；批4 = D UI（t511-t514）。
+
+## A. P0 性能（先做，游戏杀手）
+
+| 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
+|---|---|---|---|---|
+| t488 | ⏳ | **性能残留诊断（/kill @e 后 main 仍 ~52ms）** | — | profiling + 全栈 |
+| t489 | ⏳ | **水 + 岩浆流动动画（材质级，替代静态水）** | t488 | resourcepackmanager + chunkgeometry + shaders/material |
+| t490 | ⏳ | **TNT 连锁爆炸（沙漠神殿 3×3 陷阱只爆 1 个）** | — | world.cpp / entitymanager.cpp（detonateTntBlock） |
+
+**t488 详细**：用户实测——开局 87 FPS 但 `world 140 [wat 29.7 lav 110.7]`（水+岩浆交互区，老流体瓶颈仍在）；TNT 爆炸+/kill @e 清实体后 mobs 1/items 0，但 **main 仍 ~52ms**（sim 5.77 + qmlSync 1.6 = 7.4 → **残留 ~44ms**），且 **mob 桶 5.23ms 给 1 只怪**（疑实体槽高水位不缩，m_entities vector 不 shrink → 每 tick 迭代空槽）。诊断：(a) EntityManager/ItemEntityManager 的 slot 高水位（vector size）在实体爆发（爆炸掉落/箭）后是否永久膨胀 → 每 tick 迭代大量空槽；(b) main_total − sim − qmlSync 的 44ms 残留在哪（Qt 事件循环 / 某每帧 QML 绑定 / 信号扇出 / chunk Model 绑定）；(c) 流体交互区 wat 29.7 + lav 110.7（d26cef8 light 合并后仍高 → 是否 settled=0 持续写 + mesh 重建，或岩浆 tick 本身重）。**用探针/日志定位**（FrameProfiler 加 residual 桶 / entity 槽利用率日志）。验收：定位残留根因 + 修到 /kill @e 后 main <15ms（回近 87 FPS）。
+**t489 详细**：现水翻页改静态（b5cc1c6 消 mesh 风暴）→ 用户要流动动画回来。**正确做法 = 材质级动画（不重建 mesh）**：MC 资源包 `lava_flow.png`/`lava_still.png`/`water_flow.png`/`water_still.png` 是 **32×512（= 16 帧 32×32 竖排 flipbook）**。实现动画纹理系统：loader 把 32×512 切成 16 帧 → 运行期按时间选帧（材质 uniform / 纹理数组 / UV 偏移），**不触发 buildMesh**（水段/岩浆段 mesh 用静态 UV，动画由材质参数驱动）。同时恢复水 + 岩浆（静/流）的流动视觉。验收：水面/岩浆面有流动动画；F3 mesh reb 不回升（材质驱动非 mesh 重建）；性能不退化。注：若 QtQuick3D PrincipledMaterial 不支持 per-vertex UV 动画，评估纹理数组 + shader 或 QtQuick3D 的 Texture flipbook。
+**t490 详细**：沙漠神殿 3×3 TNT 陷阱踩压力板只爆 1 个（scanTntTraps → detonateTntBlock 单 TNT）。MC 语义：TNT 爆炸应**连锁点燃邻接 TNT**（爆炸范围内 TNT 被引燃 → 延时引爆 → 链式）。修：detonateTntBlock（或 destroySphereSilent TNT 路径）爆炸时扫球内 TNT 方块 → 引燃（延时 ~mc 燃丝秒数后引爆），链式炸完全部。验收：踩沙漠神殿压力板 → 3×3 TNT 连锁全爆（大坑 + 战利品箱暴露/破坏按 MC）；单放多 TNT 点燃一个也连锁。
+
+## B. 渲染/视觉修复
+
+| 任务ID | 状态 | 标题（详细） | 文件 |
+|---|---|---|---|
+| t491 | ⏳ | **草挖掘粒子改绿色（现白色）** | Renderer 破块粒子色 / BlockParticles.qml |
+| t492 | ⏳ | **创造背包工作台/熔炉改 3D 方块显示（现 2D 贴图）** | hotbar 创造调色板 + icon 渲染（ToolIcon/MaterialIcon/3D block icon 统一） |
+| t493 | ⏳ | **青金石矿贴图背景用材质包石头（现旧石头，矿太明显）** | resourcepackmanager lapis_ore 映射 / build_atlas |
+| t494 | ⏳ | **熔炉正面 furnace_front_on.png（烧制时带火正面）** | resourcepackmanager furnace_front_on 映射 + world.cpp 熔炉 state（燃烧中切正面） |
+| t495 | ⏳ | **浮冰贴图（现像白色羊毛）** | tools/build_packed_ice.py 程序贴图 / resourcepack 映射 |
+| t496 | ⏳ | **床：创造图标（bed.png 按色改）+ 3D 模型（用 entity/bed 组装；现丑）** | bed icon + Main.qml bed 3D model（参考 pack entity/bed） |
+| t497 | ⏳ | **物品图标全替换（pack item 文件夹）**：木/石/铁/金/钻 工具五件套 + 对应套装（iron_chestplate 等）+ 钓鱼竿 + 末影珍珠 + empty_armor_slot_{helmet,chestplate,leggings,boots}（生存盔甲槽位图标） | resourcepackmanager item 映射 + ToolIcon/MaterialIcon/armor slot UI |
+| t498 | ⏳ | **玩家装甲 F5 第三人称显示（现不显示）** | Main.qml 玩家模型 + PlayerState 装甲 → 第三人称叠加 tier 色护甲 Model（t377 mob 护甲同模式） |
+| t499 | ⏳ | **雪傀儡模型（南瓜头 + 眼；现纯雪块无头无眼）** | Main.qml SnowGolem delegate（加南瓜头 Model + 刻面眼） |
+
+**t491**：破块粒子按方块材质取色（草 = 叶绿 #5a8a3a 系），现硬白。**t492**：创造背包里工作台/熔炉当前是 2D item 贴图，应与其它方块一致用 3D 方块 icon（统一 icon 渲染路径）。**t493**：青金石矿放下来背景是旧石头（材质包前的 stone），应映射 pack 的 stone 贴图为矿背景（现矿脉一眼可见 = 不合理）。**t494**：熔炉燃烧时正面用 furnace_front_on（带火），非燃烧用 furnace_front_off。**t495**：浮冰贴图重做（现像白羊毛，应是淡蓝白压实冰）。**t496**：床创造图标按色（bed.png 红床为模板，16 色变体）；放下的 3D 模型用 pack `entity/bed` 的模型组装（现 2 格但丑）。**t497**：批量替换 item 图标（工具+套装 4 材质×5件 + 4 套套装 + 钓鱼竿 + 末影珍珠 + 4 个空盔甲槽图标），全部从 pack `textures/item/`。**t498**：玩家穿装甲 F5 第二/三人称看不见（mob 能显 t377）→ 玩家模型同样叠加护甲 Model。**t499**：雪傀儡当前纯雪块堆叠无南瓜头无眼 → 加南瓜头 Model + 刻面双眼（机制等价 MC 雪傀儡南瓜头）。
+
+## C. 方块/机制修复
+
+| 任务ID | 状态 | 标题（详细） | 文件 |
+|---|---|---|---|
+| t500 | ⏳ | **草方块生存挖掉泥土（精准采集才掉草方块）** | playercontroller 挖掘掉落 + silk_touch 附魔判定 |
+| t501 | ⏳ | **木梯侧边放置（似火把；须完整方块侧；Space 爬/Shift 降）** | blockregistry Ladder 形状 + playercontroller placeBlock 侧边校验 + 爬升物理（空格上/Shift 下） |
+| t502 | ⏳ | **熔炉 UI 布局修复**：燃料进度条（一煤烧几个）+ 成品位置（两左槽中间，现对齐原材料）+ 进度条位置（现贴原材料） | Main.qml FurnaceUI 布局 |
+| t503 | ⏳ | **仙人掌**：worldgen 不生在水平 4 邻有方块处；挖任意部位 → 上方整柱掉落（同甘蔗）；挖下方沙 → 整柱掉落 | world.cpp cactus worldgen + dropCactusColumn |
+| t504 | ⏳ | **枯死灌木**：挖下方方块 → 掉落（同草逻辑） | playercontroller / blockregistry（DeadBush 支撑校验） |
+| t505 | ⏳ | **雪方块体系**：积雪层（SnowLayer，薄 1/8 格、可堆 8 层、可踩、8 级高度平滑）vs 雪块（Snow，实心）；雪原 worldgen = 雪块底 + 积雪层顶（不同高度）；挖雪规则（空手不掉 / 铲掉雪球 / 4 雪球合雪块 / 积雪层不可合但创造栏可见）；积雪层可踩上去（半格平滑上行） | blockregistry SnowLayer/Snow + world.cpp 雪原 worldgen + playercontroller 挖掘/合成 + 物理（踩积雪层上行） |
+| t506 | ⏳ | **冰/浮冰/蓝冰**：浮冰贴图修（t495）；MC 掉落规则核实并实装——冰（生存挖→水方块如置一桶水 / 精准采集掉冰）/ 浮冰（不掉）/ 蓝冰（不掉）；冰上行走/船打滑（t468 部分有，核实加速） | blockregistry Ice/PackIce/BlueIce 掉落 + world.cpp 挖冰生水 |
+| t507 | ⏳ | **花/蘑菇**：挖下方草/泥土 → 花蘑菇掉落（植物支撑校验）；加白蘑菇（BrownMushroom，现仅红）；蘑菇碗 + 红/白蘑菇 → 蘑菇汤（食物） | blockregistry 花/蘑菇支撑 + recipe 蘑菇汤 + MobType 无关 |
+| t508 | ⏳ | **船**：实体可被推动 / 水面漂浮 / 可开动（玩家骑乘 WASD）/ 冰上打滑且更快；模型修正（现仅前后凸、左右空 → 完整船体）；挖船 → 掉落船物品（现挖不掉） | BoatManager + Main.qml 船模型 + playercontroller 骑乘/挖船掉落 |
+| t509 | ⏳ | **铁傀儡建造修复**：T 形铁块×4 + 南瓜（摆放触发）当前不生成 → 修 placeBlock 检测 T 形（核实 t483 的检测逻辑为何失效） | playercontroller placeBlock 铁傀儡检测 |
+| t510 | ⏳ | **雪傀儡机制**：沙漠召唤应扣血但不即死（~10 HP，热群系慢慢扣）/ 下水扣血 / 死掉雪球 / 南瓜头可被剪刀剪下变掉落物（剪后变无头形态带眼不死的 derpy 版）；行走留积雪层（t505） | entitymanager SnowGolem AI（热/水扣血）+ playercontroller 剪南瓜 + Main.qml 无头形态 |
+
+**t500**：草方块生存挖 → 掉泥土（dirt）；精准采集附魔（silk_touch，附魔书/工具）→ 掉草方块。机制等价 MC 1.0。**t501**：木梯当前放方块中间（错）→ 应贴方块侧边（似火把），须完整方块侧支撑（草/门/活版门等不完整方块侧不可放）；贴图面向所贴侧；玩家对有梯侧按空格爬升 / Shift 下降。**t502**：熔炉 UI——加燃料进度条（显示当前燃料剩余可烧数），成品槽移到两左槽（燃料+原材料）的中间下方（现对齐原材料），熔烧进度条位置移到原材料与成品之间（现贴原材料）。**t503**：仙人掌 worldgen 不生于水平 4 邻有实体方块处（否则立即破坏掉落，t445 有放置校验，worldgen 散布要守同样规则）；挖任意仙人掌格 → 其上整柱掉落（dropCactusColumn 已有，核实 worldgen/挖路径）；挖下方沙 → 整柱掉落（checkCactusOnEdit）。**t504**：枯死灌木（DeadBush）挖其下方方块 → 灌木掉落（同草/花的支撑校验）。**t505**：积雪层重做——薄（1/8 格高），可堆叠 8 层（state 0-7 = 高度），玩家可踩（半格平滑上行，8 级）；雪块（Snow）= 实心整块；雪原 worldgen 改：底雪块 + 顶不同高度积雪层（真实积雪）；挖掘：空手不掉，铲掉雪球（SnowLayer 掉 1 雪球/层，Snow 掉 4 雪球），4 雪球合成 1 雪块，积雪层不可合成但创造栏可见。**t506**：冰生存挖 → 生成水方块（如置水源）；浮冰/蓝冰挖 → 不掉（需精准采集）；浮冰贴图修（t495）；冰上船打滑加速核实。**t507**：花/蘑菇挖其下方草/泥土 → 掉落（支撑校验，同甘蔗/仙人掌模式）；加白蘑菇（BrownMushroom）；蘑菇汤 = 蘑菇碗 + 红蘑菇 + 白蘑菇。**t508**：船重做——实体（可被玩家/方块推动）、水面漂浮、玩家骑乘 WASD 开动、冰上打滑且更快；模型修正（完整船体，现左右空）；挖船 → 掉落船物品（现挖不掉，回收修复）。**t509**：铁傀儡 T 形铁块×4 + 南瓜摆放检测（t483 实装但用户造不出）→ 核实检测逻辑（十字 T 形 vs 玩家朝向）修复。**t510**：雪傀儡机制——沙漠/热群系召唤扣血但不即死（~10 HP 慢扣，现召唤即死）、下水扣血、死掉雪球、南瓜头可剪（剪刀 → 南瓜掉落 + 傀儡变无头 derpy 形态带眼不死的 sheared 版）、行走留积雪层（联动 t505）。
+
+## D. UI/交互
+
+| 任务ID | 状态 | 标题（详细） | 文件 |
+|---|---|---|---|
+| t511 | ⏳ | **创造背包分类标签（MC 式 tabs）+ 去冗余文字 + chest 标签 → 生存背包** | Main.qml 创造背包 UI（tabs + 布局） |
+| t512 | ⏳ | **创造背包 hover 物品 + 按 1-9 快速换组（强制替换）** | Main.qml 创造背包 hover/按键处理 + hotbar |
+| t513 | ⏳ | **食物系统修复**：胡萝卜/土豆可吃；吃动画/粒子（甜浆果现吐橙色方块 → 加食物吃粒子贴图）；吃完冷却（非连续右键一直吃） | playercontroller 进食 + Main.qml 吃粒子 |
+| t514 | ⏳ | **甜浆果丛可种植（现只能吃不能种）** | playercontroller 种植 + blockregistry SweetBerryBush 放置 |
+
+**t511**：创造背包加分类标签（参考 MC 1.0 创造模式 tabs：建筑方块/装饰/红石/交通工具/食物/工具/战斗/酿造/材料 等，按本项目已有内容裁剪）；点击 tab 切换分类页；**移除**「创造物品栏」标题、「当前选中：xxx」行、「点击右侧销毁 xxx」文字（用户嫌冗余）；**chest 标签**点击 → 跳转生存背包（可对物品操作含装甲）。**t512**：创造背包中鼠标 hover 一个方块/物品 + 按数字键 1-9 → 取一组该物品**强制替换**到对应 hotbar 槽（不管原槽有无物品）。**t513**：食物——胡萝卜/马铃薯/马铃薯当前不能吃 → 修可吃；吃的时候甜浆果吐橙色方块（现占位）→ 加专门的食物咀嚼/碎屑粒子贴图（从 pack 或程序生成）；进食机制——右键一次启动进食 → 吃完一个 → 短冷却（非按住右键连续吃），手持动画在冷却期显示。**t514**：甜浆果丛（SweetBerryBush）当前只能采摘吃，不能种下 → 右键草地/泥土种植（浆果物品作种子，机制等价 MC 浆果丛种植）。
+
+## 执行备注
+- **P0 性能先做**（t488-t490）：用户痛点是"清实体仍卡 + TNT 只爆 1 + 要水动画"。t488 诊断残留是后续所有判断的基础（若残留是流体/槽位，可能影响批 2-4）。
+- **依赖**：t489（水动画）依赖 t488（确认性能预算）；t494 熔炉正面 + t502 熔炉 UI 同属熔炉可合并；t495 浮冰贴图 + t506 冰掉落同属冰系可合并；t499 雪傀儡模型 + t510 雪傀儡机制 + t505 雪体系 联动（雪傀儡留积雪层）；t497 物品图标批量替换独立大任务。
+- **量大（27 任务）→ 4 批 workflow**（用户要求子 agent + workflow 串行）：批1 A 性能（t488-t490）/ 批2 B 渲染（t491-t499）/ 批3 C 方块机制（t500-t510）/ 批4 D UI（t511-t514）。每批内共享文件串行、跨批可并行评估。
+- **法律**：所有 pack PNG 仅本地 gitignored 加载，commit 仅代码 + 程序贴图 + 映射表（元数据可提交）。子 agent 提示词重申。
+- **参考素材路径**（仅读不改/不 add）：`docs/Default HD 128x Demo 1.8.2.2/assets/minecraft/textures/{block,item,entity}/` —— block（furnace_front_on/lava_flow/lava_still/water_flow/water_still/spruce_sapling 等）、item（工具+套装+bed+empty_armor_slot_*）、entity（bed 模型）。
