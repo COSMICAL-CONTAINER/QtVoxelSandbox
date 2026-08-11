@@ -642,3 +642,19 @@ FrameProfiler 实测：mesh 稳态 0.5-1.5ms/frame（风暴已灭）；sun 重�
 - **既有告警清理**（非本轮）：blockregistry.cpp:777 isCollidable 'state' 未用；world.cpp destroySphereSilent misleading-indentation + az1 未用。
 - **AI 微优化**（跳过，微秒级非真凶）：aiStalker nearestOcelot 加 m_aliveOcelotCount 早退；aiIronGolem nearestHostile 加 attackCooldown 门控（同 aiSnowGolem）。
 - **架构审查**：voxel-tester-arch agent 后台审查 Loader 重构正确性（active 条件对齐 / onLoaded 覆盖 / tinted id 自包含 / 类型无关块未动），待回报。
+
+---
+
+## 性能 mesh 重建风暴诊断 + 修复（Loader 修复后暴露的第二层瓶颈；perf 前缀）
+
+> 用户实测 3 张 F3：开局 100 FPS（`qmlSync 0.0` = Loader 修复生效）→ 夜晚战斗 14 FPS（mesh 254reb + mob phys 14ms + bp 22ms）→ **第 4 天白天 mobs 0 仍 9 FPS（mesh 116ms 441reb）**。1 个 voxel-dev agent 诊断 + 修复（commit `901bc2e`）。
+
+**数据重新推算（关键）**：F3 flush 每 60 PlayerController tick 触发，9 FPS 时窗口被饿到 ~6.7s 而非 1s → 441reb ≈ **66 reb/s**（非 441/s）；"每帧全 49 chunk 重建"是窗口假设错误的错算。
+
+**根因（agent 逐 markDirty 路径核验 + 修复，4 项）**：
+1. **非批量静默写 tick**：tickCropGrowth/tickSugarcaneGrowth/tickFarmlandHydration/tickIceFreeze 的 apply 循环裸调 setWaterSilent（m_batchFluid 只在 water/lava 开过）→ 每次写 emit worldChanged + clearAllDirty = N 写 N emit + 清后又被下一格标回（"clear-then-re-dirty"）。每 chunk 6 段共享脏标记 → 1 脏 chunk 6 次 buildMesh。农场/雪原成熟格数随时间增多 = "渐进恶化"。**修**：4 tick 全套 `m_batchFluid=true` + flushPendingLightEdits + 末尾 1 次 emit/clear（照搬 tickWaterFlow:649 模式）。
+2. **refloodBox 逐 chunk 切片比对 z 界 bug**（world.cpp refloodBox）：z 循环用全局 `z1` 而非 chunk 局部 `az1` → 中间 chunk 越界读**下一 chunk**光格 → 误标邻 chunk 脏 → 一次光照重算本只标 1 chunk 却连带标盒内一串（脏集放大）。**修**：z 上界改 az1（顺带消 az1 未用告警）。
+3. **sun 步进/水翻页对空段无谓重建**（chunkgeometry.cpp）：setSunDir 每 ~16.7s 重建 294 段、setWaterAnimPhase 每 2s 重建 49 段，多数 chunk 的 lava/glass/ice/cross/水段为空（0 顶点）→ 纯浪费。**修**：`m_vertexCount==0` 守卫跳过空段（setChunkInRange catch-up 不加守卫，防出视距期间编辑陈旧）。
+4. **F3 rebuild 原因拆分**：prof 行现为 `mesh Xms (Yreb [Ndirty d Nsun s Nwater w])`，重建驱动直接可见。
+
+**验收（待用户实测）**：静止场景（无农场/雪原/不移动）mesh reb 应大幅降（空段守卫砍 sun/水翻页）；农场/雪原活跃期 reb 应从 N×每窗 → 1×每窗；F3 看 `[d s w]` 占比定位残余。**次要点**：夜晚战斗 14 FPS 含 mob phys 14ms（54 怪移动的每帧物理，战斗固有）+ bp 22ms（粒子），mesh 修复后应改善但不消除战斗开销——若战斗仍卡下轮降 kHostileMobCap 或节流移动物理。
