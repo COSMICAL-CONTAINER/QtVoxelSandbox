@@ -405,16 +405,19 @@ public:
         CobbleStairs        = 59, // 圆石楼梯：整步 + 背墙。state[1:0]=朝向 bit2=倒置（与 WoodStairs 同编码）。
         CobbleFence         = 60, // 圆石墙：中心立柱 + 四向横档连邻居（机制等价 MC 圆石墙；与 WoodFence 同几何）。
         CobblePressurePlate = 61, // 圆石压力板：贴地薄板（与 WoodPressurePlate 同几何）。
-        // ── t413 垂直爬梯（vertical climb ladder）：机制等价 MC 1.0 梯子（ladder）。既有 WoodStairs 是台阶式楼梯
-        //   （逐级步行上行），本方块是**竖直爬行**梯——玩家走进梯格 + 按前即逐格**向上爬**（竖井用）。cross 形广告牌
-        //   方块（与草丛 / 树苗同走 cross 几何段，两片对角相交双面 quad 贴梯瓦片，alpha 透明底 cutout）—— 非 1×1×1 整立方。
+        // ── t413 / t501 垂直爬梯（vertical climb ladder）：机制等价 MC 1.0 梯子（ladder）。既有 WoodStairs 是
+        //   台阶式楼梯（逐级步行上行），本方块是**竖直爬行**梯——玩家走进梯格 + 按前即逐格**向上爬**（竖井用）。
+        //   t501 放置改贴**完整立方方块的侧面**（机制等价 MC 梯子须贴实体方块面）：placeBlock 时命中面须为完整
+        //   立方（isFullCube）方块的**侧面**（顶/底面拒；草丛/门/活版门/栅栏等不完整方块的侧亦拒），木梯贴该面；
+        //   state[1:0] 编码所贴墙面水平方向（0=+X 1=-X 2=+Z 3=-Z，与 horizontalFacing/chest 同源）。几何由 t413
+        //   的两片对角 cross 改为**单片贴墙 quad**（贴所贴面、贴图朝外朝玩家侧，PartialBlockGeometry Ladder case
+        //   据 state 摆位）。支撑墙被破 → finishMiningAt dropUnsupportedLaddersAround 据解 state 失撑掉落（同火把）。
         //   solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（**无碰撞** → 玩家穿入梯格；爬升由
         //   PlayerController 检测「玩家 AABB 覆盖的梯格」+ 按前覆写垂直速度实现，非碰撞）、hardness=0.4（同 MC 1.0 梯子量级，
         //   软质木质）、toolType=Axe（木质梯；requiresTool=false → 空手也掉落，仅速度受斧影响）、dropId=自身（破梯掉梯，
         //   可放回）、dropCount=1、maxStack=64。各面贴图=ladder(78)（透明底 + 棕色两根纵轨 + 横向梯级，alphaCutoff cutout）。
-        //   音色归 GroupWood（木质，同 planks 族）。进创造调色板（玩家可取用 / 放置）。**无放置预检**（随处可放，
-        //   不强制贴墙——本工程简化为独立可爬梯方块；机制对标 MC 梯子贴墙但放宽以适配竖井场景）。
-        Ladder          = 62, // 木梯：竖直爬行梯（玩家入格 + 按前向上爬；cross 路由 + 爬升物理）
+        //   音色归 GroupWood（木质，同 planks 族）。进创造调色板（玩家可取用 / 放置）。
+        Ladder          = 62, // 木梯：贴墙竖直爬行梯（玩家入格 + 按前向上爬；贴完整方块侧 + state 编码贴墙方向）
         // ── t455 16 色 wool 其余 15 色变体（white 复用既有 Wool=27；本段为 orange..black，id 63..77）。
         //   机制等价 MC 1.0 羊毛 16 色变体。每色一个方块 id（物品系统是 id 驱动 → 同 id 不同 state 无法经背包
         //   表达色变 → 多 id）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，
@@ -1318,6 +1321,25 @@ public:
     // 火把支撑邻居相对偏移 (dx,dy,dz)（state 解码）：TorchFloor→(0,-1,0)；OnNX→(-1,0,0)；OnPX→(+1,0,0)；
     //   OnNZ→(0,0,-1)；OnPZ→(0,0,+1)。越界 state 值 → TorchFloor 兜底。finishMiningAt 据此定位唯一附着格。
     static void torchAttachOffset(quint8 state, int &dx, int &dy, int &dz);
+
+    // t501 木梯贴墙方向（存 chunk state，低 2 位编码水平方向）：木梯贴**完整立方方块的侧面**（机制等价
+    //   MC 1.0 ladder 须贴实体方块面，不能贴草丛/门/活版门等不完整方块的侧）。placeBlock 放置时据「玩家点击
+    //   命中面的外法线」推导木梯所贴墙面方向，写入 state；mesher 据 state 把单片贴墙 quad 摆到对应面（贴图
+    //   朝外，即朝玩家侧）；finishMiningAt 据 state 定位唯一支撑墙，墙被破 → 木梯掉落（不粘到附近其它邻居）。
+    //   编码 0=+X 1=-X 2=+Z 3=-Z（=「支撑墙所在的水平方向」，与 horizontalFacing / chest state 同源 4 向编码）。
+    //   state 经 m_states 落 SQLite round-trip 保真（旧存档 state=0 → +X 墙兜底；木梯仅玩家放置、罕见旧存档）。
+    //   **唯一消费点**：PartialBlockGeometry（mesher 据 state 摆贴墙 quad 位置）+ PlayerController 失撑掉落
+    //   （dropUnsupportedLaddersAround 据 state 定位支撑墙）。collisionAABBs / selectionAABBs 不读 ladder state
+    //   （Ladder 走 ShapeNone 无碰撞，选中框由 Main.qml 分流；零回归）。
+    // 由放置命中面外法线（指向玩家侧）推木梯贴墙方向：玩家点中 +X 面（nx>0）→ 木梯在命中方块的 +X 侧 →
+    //   命中方块是其 -X 邻 → 支撑墙在木梯的 -X 侧 → state=1(-X)。其余三向同理。ny≠0（顶/底面）→ 木梯须贴
+    //   侧墙，顶/底面非合法贴墙方向 → 返回 -1（placeBlock 拒绝放置）；与火把允许地面（TorchFloor）不同，
+    //   木梯仅水平贴墙（spec「贴方块侧边」）。
+    static int ladderFaceFromNormal(int nx, int ny, int nz);
+    // 木梯支撑墙相对偏移 (dx,dz)（state 解码，dy 恒 0：墙在水平方向）：state 0(+X)→(+1,0,0)；1(-X)→(-1,0,0)；
+    //   2(+Z)→(0,0,+1)；3(-Z)→(0,0,-1)。越界 state 值 → +X 兜底（与 ladderFaceFromNormal 兜底一致）。
+    //   dropUnsupportedLaddersAround 据此定位唯一支撑墙格。
+    static void ladderSupportOffset(quint8 state, int &dx, int &dz);
 
     // t225 箱子朝向（存 chunk state，低 2 位编码水平朝向）：放置时记录箱子「前面（锁面，chest_front 贴图）」
     //   朝哪一侧，mesher 据此把 chest_front 贴到对应面（其余三侧面 chest_side、顶/底 chest_top）。机制等价

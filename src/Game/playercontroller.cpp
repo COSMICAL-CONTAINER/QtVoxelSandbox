@@ -937,6 +937,10 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   worldChanged → Main.qml 移除伪光源（removeTorchAt / onWorldChanged 兜底）+ mesh 重建。火把非
     //   solid → 不撑他火把 → 单趟 6 邻扫即足够（无级联，破一块不会链式掉一串）。
     dropUnsupportedTorchesAround(x, y, z);
+    // t501 木梯失支撑立即掉落：破块后扫 6 邻木梯，其**支撑墙**（state 编码）若已非完整立方（含本格刚被置
+    //   Air）→ 木梯直接掉落为物品。机制等价 MC「梯子贴墙被移除即脱落」（同火把失撑语义）。木梯非 solid
+    //   → 不撑他木梯 → 单趟 6 邻扫即足够（无级联）。
+    dropUnsupportedLaddersAround(x, y, z);
     // t247 草丛 / 小麦作物失撑掉落：破块后其正上方的草丛 / 小麦作物（唯一支撑 = 本格，刚被破为 Air）
     //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
     //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
@@ -1055,6 +1059,29 @@ void PlayerController::dropUnsupportedTorchesAround(int x, int y, int z)
         m_world->setBlock(tx, ty, tz, BlockRegistry::Air); // → World 发 blockBroken + worldChanged → 清伪光源 + 重建
         emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Torch),
                        std::max(1, BlockRegistry::dropCount(BlockRegistry::Torch)));
+    }
+}
+
+// t501 破块后扫 (x,y,z) 的 6 邻木梯：解码每木梯 state 的支撑墙方向（BlockRegistry::ladderSupportOffset）
+//   定位其**唯一支撑墙格**，该格已非完整立方（含刚被置 Air 的本破块）→ 木梯直接掉落为物品（setBlock(Air) +
+//   spawnItem）。机制等价 MC「梯子贴墙被移除即脱落，不重新粘到附近其它可支撑方块」（同火把失撑语义）。
+//   木梯非 solid → 不撑他木梯 → 单趟扫即足够（无级联）。与 placeBlock 木梯预检（须完整立方侧面支撑）正交：
+//   放置守「完整立方」，掉落看「state 记录的唯一支撑墙」—— 故破墙后即便木梯下方仍有地面，也因「墙是它的
+//   唯一支撑」而掉落（不粘地，与火把行为一致）。
+void PlayerController::dropUnsupportedLaddersAround(int x, int y, int z)
+{
+    if (!m_world) return;
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &d : kNb) {
+        const int tx = x + d[0], ty = y + d[1], tz = z + d[2];
+        if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Ladder) continue;
+        int ax, az;
+        BlockRegistry::ladderSupportOffset(m_world->stateAt(tx, ty, tz), ax, az);
+        const int sx = tx + ax, sy = ty, sz = tz + az;
+        if (BlockRegistry::isFullCube(m_world->blockAt(sx, sy, sz))) continue; // 支撑墙仍完整立方 → 木梯保留
+        m_world->setBlock(tx, ty, tz, BlockRegistry::Air); // → World 发 blockBroken + worldChanged → mesh 重建
+        emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Ladder),
+                       std::max(1, BlockRegistry::dropCount(BlockRegistry::Ladder)));
     }
 }
 
@@ -2522,6 +2549,14 @@ void PlayerController::placeBlock()
         //   放置时一致）。torch 走 ShapeNone → collisionAABBs/selectionAABBs/mesher 均不读 state，复用 state
         //   作附着编码零回归。
         placeState = quint8(BlockRegistry::torchOrientFromNormal(m_hitNx, m_hitNy, m_hitNz));
+    } else if (m_selectedBlock == BlockRegistry::Ladder) {
+        // t501 木梯贴墙方向写入 state（供 mesher 单片贴墙 quad 摆位 + finishMiningAt 失撑掉落）。由命中面外
+        //   法线推导所贴墙面水平方向（同 torch state 同源模式）。Ladder 走 ShapeNone → collision/selection
+        //   不读 state，复用 state 作贴墙编码零回归（同 torch / chest 模式）。placeState 此处先粗赋（4 向），
+        //   放置预检段再据 ladderFaceFromNormal（ny≠0 返 -1 = 非侧面）+ isFullCube（完整立方支撑面）守卫。
+        //   placeState 不变（int→quint8 截断为 0..3 合法值；若预检段判拒则 placeBlock return 不写入）。
+        const int lf = BlockRegistry::ladderFaceFromNormal(m_hitNx, m_hitNy, m_hitNz);
+        placeState = quint8((lf < 0) ? 0 : lf); // 顶/底面 → 临时 0（预检段会拒）
     } else if (m_selectedBlock == BlockRegistry::Chest) {
         // t225 箱子前面（锁面）朝玩家侧：state = horizontalFacing ^ 1（玩家朝向的反向 = 箱子前面所朝方向，
         //   机制等价 MC 1.0 箱子放置锁面朝玩家）。编码与 horizontalFacing 同源（0=+X 1=-X 2=+Z 3=-Z）；
@@ -2637,6 +2672,21 @@ void PlayerController::placeBlock()
         const bool pz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz + 1));
         const bool nz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz - 1));
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
+    }
+    // t501 木梯放置预检（spec「须完整方块侧支撑」）：木梯贴**完整立方方块的侧面**（机制等价 MC 1.0 ladder
+    //   须贴实体方块面）。两重守卫：
+    //   ① 必须侧面贴墙（命中面法线 ny==0）—— 顶/底面非合法贴墙方向，玩家点顶/底放梯 → 拒（不挥）。法线
+    //     方向同时决定 placeState（ladderFaceFromNormal）。
+    //   ② 命中方块必须是**完整立方**（isFullCube）—— 草丛/门/活版门/栅栏/火把等不完整或非实体方块的侧不
+    //     可贴（机制等价 MC「梯子须贴完整方块面」，spec 明确点名草/门/活版门不完整方块侧不可放）。半砖、
+    //     楼梯等异形方块亦不完整（isFullCube=false）→ 拒。
+    //   命中方块 = (m_hitBx, m_hitBy, m_hitBz)（玩家射线命中格），非放置目标格 (tx,ty,tz)。木梯贴命中方块的
+    //   「玩家侧」面 → 命中方块即其支撑墙。
+    if (m_selectedBlock == BlockRegistry::Ladder) {
+        const int lf = BlockRegistry::ladderFaceFromNormal(m_hitNx, m_hitNy, m_hitNz);
+        if (lf < 0) return; // ① 非侧面（顶/底面）→ 拒
+        const quint8 hitBlock = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+        if (!BlockRegistry::isFullCube(hitBlock)) return; // ② 非完整立方支撑 → 拒
     }
     // t394/t445 仙人掌放置预检：（1）仅可放在沙子或仙人掌正上方（机制等价 MC 1.0 仙人掌须沙地 / 仙人掌支撑）。
     //   目标格的下方须为 Sand 或 Cactus；否则拒绝放置（不挥）。命中方块顶面放置 → target 下方 = 命中方块

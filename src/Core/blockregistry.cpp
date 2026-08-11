@@ -312,8 +312,9 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   贴 ladder(78) 瓦片，alpha 透明底 cutout）。solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（无碰撞 →
     //   玩家穿入梯格；爬升走 PlayerController 物理，非碰撞）、hardness=0.4（同 MC 1.0 梯子量级，软质木质）、toolType=Axe
     //   （木质；requiresTool=false → 空手也掉落，仅速度受斧影响）、dropId=自身（破梯掉梯可放回）、dropCount=1、maxStack=64。
-    //   各面贴图=ladder(78)；音色归 GroupWood。进创造调色板。state inert（mesher/collision/选中均不读梯 state）。
-    /* ladder       */ {int(BlockRegistry::Ladder),                       78, 78, 78, 78, false, BlockRegistry::ShapeNone,     0.4f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Ladder),           1, 64, "ladder",       "木梯"}, // t413 竖直爬行梯（玩家入格+按前向上爬）；cross 路由；state=0
+    //   各面贴图=ladder(78)；音色归 GroupWood。进创造调色板。t501 state[1:0] 编码所贴墙面水平方向（0=+X 1=-X 2=+Z
+    //   3=-Z）；mesher（单片贴墙 quad）+ finishMiningAt（失撑掉落）读 state；collision/选中仍不读（ShapeNone）。
+    /* ladder       */ {int(BlockRegistry::Ladder),                       78, 78, 78, 78, false, BlockRegistry::ShapeNone,     0.4f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Ladder),           1, 64, "ladder",       "木梯"}, // t413/t501 贴墙竖直爬行梯（玩家入格+按前向上爬）；贴完整方块侧；state[1:0]=贴墙方向
     // ── t455 16 色 wool 其余 15 色变体（white 复用既有 Wool=27；本段 orange..black）。机制等价 MC 1.0 羊毛 16 色
     //   变体。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 white Wool 同族）、
     //   hardness=0.8、toolType=Shears（requiresTool=false 空手也掉落，仅剪刀给速度加成）、dropId=自身（破块掉同色
@@ -720,7 +721,7 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == Sugarcane) return true; // t397 段外 cross（甘蔗细茎，同 Sapling 模式）
     if (blockId == CarrotCrop) return true; // t407 段外 cross（胡萝卜作物，同小麦作物按 state 选阶段贴图）
     if (blockId == PotatoCrop) return true; // t407 段外 cross（马铃薯作物，同小麦作物按 state 选阶段贴图）
-    if (blockId == Ladder) return true; // t413 段外 cross（木梯竖直爬行梯，两片对角相交双面 quad 贴梯瓦片）
+    if (blockId == Ladder) return true; // t413/t501 段外 cross（木梯贴墙竖直爬行梯；t501 改单片贴墙 quad 据 state 摆位，同走 PASS 1 alphaCutoff 路径）
     if (blockId == SweetBerryBush) return true; // t467 段外 cross（雪原浆果灌木丛，两片对角相交双面 quad 贴 stage 贴图）
     if (blockId == Cobweb) return true; // t484 段外 cross（蜘蛛网，两片对角相交双面 quad 贴蛛网贴图；矿井散布）
     if (blockId == Rail) return true;   // t484 cross 路由的贴地薄板（几何水平 quad 非竖直 cross，但同走 PASS 1 alphaCutoff 路径，见头注释；与睡莲同族）
@@ -1174,6 +1175,31 @@ void BlockRegistry::torchAttachOffset(quint8 state, int &dx, int &dy, int &dz)
     case TorchOnNZ:  dx =  0; dy =  0; dz = -1; return; // 柄伸 +Z：支撑 = -Z 邻
     case TorchOnPZ:  dx =  0; dy =  0; dz =  1; return; // 柄伸 -Z：支撑 = +Z 邻
     default:         dx =  0; dy = -1; dz =  0; return; // 越界 → 地面火把兜底
+    }
+}
+
+// t501 木梯贴墙方向（见头注释）：玩家点击命中面外法线推所贴墙面水平方向。仅水平面（ny==0）合法 —— 顶/底面
+//   非贴墙方向，返回 -1（placeBlock 拒绝放置）。4 向编码同 horizontalFacing（0=+X 1=-X 2=+Z 3=-Z）。
+//   「支撑墙所在方向」= 命中方块相对木梯格的方向：玩家点中 +X 面（nx>0）→ 木梯在命中方块 +X 侧 → 命中方块
+//   是木梯 -X 邻 → 支撑墙在 -X 方向 → 返 1。其余三向同理。
+int BlockRegistry::ladderFaceFromNormal(int nx, int ny, int nz)
+{
+    if (ny != 0) return -1; // 顶/底面非合法贴墙方向 → 拒（placeBlock 须查此返值）
+    if (nx > 0) return 1;   // 点中 +X 面 → 支撑墙在 -X 侧 → state=1
+    if (nx < 0) return 0;   // 点中 -X 面 → 支撑墙在 +X 侧 → state=0
+    if (nz > 0) return 3;   // 点中 +Z 面 → 支撑墙在 -Z 侧 → state=3
+    if (nz < 0) return 2;   // 点中 -Z 面 → 支撑墙在 +Z 侧 → state=2
+    return 0;               // 无法线（不应发生）→ +X 兜底
+}
+
+// t501 木梯支撑墙相对偏移（state 解码）：支撑墙在水平方向（dy 恒 0）。越界 state 值 → +X 兜底。
+void BlockRegistry::ladderSupportOffset(quint8 state, int &dx, int &dz)
+{
+    switch (state & 3) {
+    case 0: dx =  1; dz =  0; return; // 支撑墙在 +X 邻
+    case 1: dx = -1; dz =  0; return; // 支撑墙在 -X 邻
+    case 2: dx =  0; dz =  1; return; // 支撑墙在 +Z 邻
+    default: dx = 0; dz = -1; return; // 支撑墙在 -Z 邻（含越界高位兜底为 -Z；& 3 后 case 3）
     }
 }
 

@@ -460,19 +460,35 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::Ladder: {
-        // t413 木梯 cross 模型：与 TallGrass / Sapling 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
-        //   机制等价 MC 1.0 梯子（ladder）—— cross 模型上贴 ladder(78) 瓦片（透明底 + 棕色两根纵轨 + 横向梯级，
-        //   alphaCutoff cutout）。玩家从任意水平方向走入梯格（Ladder 无碰撞 → 玩家穿入），按前即由 PlayerController
-        //   覆写垂直速度向上爬（竖井用）。两片对角 cross 使梯从四面均可攀爬（区别于 MC 梯子贴单墙 —— 本工程简化
-        //   为独立可攀爬竖井梯，不强制贴墙）。**无 state 派生贴图**（单一梯瓦片）。tile 由 BlockRegistry::tileIndex
-        //   (Ladder, PosX) = sideTile = 78 给出。不做邻居剔除（cross 透明 + 梯，同 TallGrass；Ladder solid=false）。
-        //   材质 alphaCutoff:0.5 丢弃透明底 → 仅梯像素显。
-        pushCrossQuad(verts, idx, lx, ly, lz,
-                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
-                      tile, light, tileW, hx, hy, v0, v1);
-        pushCrossQuad(verts, idx, lx, ly, lz,
-                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
-                      tile, light, tileW, hx, hy, v0, v1);
+        // t413/t501 木梯「单片贴墙 quad」模型（机制等价 MC 1.0 ladder 贴实体方块面）：t501 把 t413 的两片对角
+        //   cross 改为**单片贴墙 quad** —— 据所贴墙面水平方向（state[1:0]，placeBlock 经 ladderFaceFromNormal
+        //   写入）把 quad 摆到对应面、贴图朝外（朝玩家侧）。须贴**完整立方方块**的侧面（placeBlock placeState
+        //   算好后经 isFullCube 守卫；草丛/门/活版门等不完整方块侧拒放）。
+        //   state 编码：0=+X 1=-X 2=+Z 3=-Z（=「支撑墙所在的水平方向」）。
+        //   quad 位置：贴所贴面（cell 边 - 1/16 留嵌墙余量，防 z-fight + 视觉如梯嵌墙），覆盖另两轴全 [0,1]。
+        //   贴图朝外：法线背离墙面（朝玩家侧）。pushCrossQuad 发正反双面三角形 → 玩家从面侧见梯正面、绕到
+        //   墙后（透视）亦见背面（机制对标 MC 木梯单面贴图双面可见）。Ladder solid=false（不挡邻居面剔除，
+        //   同草丛）；材质 alphaCutoff:0.5 丢弃透明底 → 仅梯像素显（两根纵轨 + 横向梯级 cutout）。无 state 派生
+        //   贴图（单一梯瓦片）。tile 由 BlockRegistry::tileIndex(Ladder, PosX) = sideTile = 78 给出。
+        //   UV 映射对齐 kBoxFaces 轴面约定（±X 面 cu=z,cv=y；±Z 面 cu=x,cv=y）：角点序 BL→BR→TR→TL 使贴图
+        //   纵向（两根纵轨，沿贴图 V/行）映射到 world Y（垂直）→ 梯轨竖立、横级水平（贴图正向不旋转）。
+        constexpr float kInset = 1.0f / 16.0f; // 贴墙内缩（cell 边以内 1/16，留嵌墙余量防 z-fight）
+        const int face = state & 3;
+        if (face == 0 || face == 1) {
+            // 支撑墙 ±X：quad 贴 x 面（face 0=+X 边 1-kInset；face 1=-X 边 kInset），yz 全 footprint。
+            //   U→z（横级水平）、V→y（纵轨竖立）。
+            const float xw = (face == 0) ? (1.0f - kInset) : kInset;
+            pushCrossQuad(verts, idx, lx, ly, lz,
+                          xw, 0.f, 0.f,  xw, 0.f, 1.f,  xw, 1.f, 1.f,  xw, 1.f, 0.f, // BL→BR→TR→TL（U=z,V=y）
+                          tile, light, tileW, hx, hy, v0, v1);
+        } else {
+            // 支撑墙 ±Z：quad 贴 z 面（face 2=+Z 边 1-kInset；face 3=-Z 边 kInset），xy 全 footprint。
+            //   U→x（横级水平）、V→y（纵轨竖立）。
+            const float zw = (face == 2) ? (1.0f - kInset) : kInset;
+            pushCrossQuad(verts, idx, lx, ly, lz,
+                          0.f, 0.f, zw,  1.f, 0.f, zw,  1.f, 1.f, zw,  0.f, 1.f, zw, // BL→BR→TR→TL（U=x,V=y）
+                          tile, light, tileW, hx, hy, v0, v1);
+        }
         break;
     }
     case BlockRegistry::Cobweb: {

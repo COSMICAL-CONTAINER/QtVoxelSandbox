@@ -766,6 +766,11 @@ private:
     //   （含本格刚被置 Air）→ 火把直接掉落为物品（不「粘」到附近其它 solid 邻居）。机制等价 MC「火把
     //   附着面被移除即脱落」。火把非 solid → 不撑他火把 → 单趟扫即足够（无级联）。
     void dropUnsupportedTorchesAround(int x, int y, int z);
+    // t501 破块后扫 6 邻木梯：若其**支撑墙**（state 编码，BlockRegistry::ladderSupportOffset）已非完整立方
+    //   （含本格刚被置 Air）→ 木梯直接掉落为物品（同火把失撑语义，机制等价 MC「梯子贴墙被移除即脱落」）。
+    //   木梯非 solid → 不撑他木梯 → 单趟扫即足够（无级联）。仅扫 6 邻（破块点周围），不重判贴墙（贴墙由
+    //   placeBlock 预检保证，失撑只看 state 记录的那一面支撑墙）。
+    void dropUnsupportedLaddersAround(int x, int y, int z);
     // t247 草丛 / 小麦作物掉落产出（玩家破块 / 失撑共用）：把 WheatCrop（按 state 判成熟，t237 收割：
     //   成熟掉 1 小麦物品 + 1-2 种子、未成熟仅 1 种子）/ TallGrass（1/kTallGrassSeedDropDenom 概率掉种，
     //   t246）的 spawnItem 计算收敛到此 → finishMiningAt 与 dropUnsupportedCropsAround 共用，**失撑掉落
