@@ -94,6 +94,14 @@ void FrameProfiler::flush()
     // 窗口桶（事件 / 10Hz，与帧数无关）：mesh 总 ms + rebuild 次数；world tick 各总 ms + 汇总。
     const double meshMs = double(bucketLocked("mesh")) / 1e6;
     const qint64 meshN = [this]() { auto it = m_counts.find("meshN"); return it == m_counts.end() ? 0 : it->second; }();
+    // perf：meshN 按重建原因细分（chunkgeometry.cpp buildMesh 按 RebuildReason 计数）—— dirty=编辑/标脏驱动、
+    //   sun=太阳步进、water=水翻页。占比最大者即「mesh 风暴」主源（定位脏标记泄漏 / 无谓重建用）。
+    auto meshReasonN = [this](const char *key) {
+        auto it = m_counts.find(key); return it == m_counts.end() ? 0 : it->second;
+    };
+    const qint64 meshND = meshReasonN("meshNdirty");
+    const qint64 meshNS = meshReasonN("meshNsun");
+    const qint64 meshNW = meshReasonN("meshNwater");
     // w 前缀桶：World 9 个 tick 函数（wWater/wLava/wCrop/wSug/wFarm/wSap/wIce/wLeaf/wWeath）。
     struct WEnt { const char *key; const char *label; };
     static const WEnt wEntries[] = {
@@ -123,7 +131,8 @@ void FrameProfiler::flush()
         + "  in " + QString::number(fpMs[8], 'f', 2);
     QString winLine = QStringLiteral("win ms: ")
         + "sim " + QString::number(simMs, 'f', 2)
-        + "  mesh " + QString::number(meshMs, 'f', 2) + "(" + QString::number(meshN) + "reb)"
+        + "  mesh " + QString::number(meshMs, 'f', 2) + "(" + QString::number(meshN) + "reb"
+        + " [" + QString::number(meshND) + "d " + QString::number(meshNS) + "s " + QString::number(meshNW) + "w])"
         + "  world " + QString::number(worldMs, 'f', 2)
         + "  bp " + QString::number(double(bucketLocked("bp")) / 1e6, 'f', 2)
         + "  [wat " + QString::number(wMs[0], 'f', 1)

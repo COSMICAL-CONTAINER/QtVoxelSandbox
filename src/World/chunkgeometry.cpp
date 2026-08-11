@@ -80,12 +80,15 @@ void ChunkGeometry::setCz(int cz)
 //   t472 视距门控：远端 chunk（!m_chunkInRange）**仍更新 m_sunDir**（保 catch-up 时值已最新）但**跳过
 //   buildMesh**（远 chunk 不绘制 → 无谓全量重建顶点光是「600 段无视距全成本」真因）。回 true 时
 //   setChunkInRange 主动 catch-up 一次。
+//   perf：空段（m_vertexCount==0，无该段方块）无顶点可打光 → 太阳步进对其无视觉影响，跳过重建
+//   （100 chunk × 6 段中大部分段为空——地形的 lava/glass/ice/cross/水段常空，只有非空段需随太阳重烘顶点色）。
 void ChunkGeometry::setSunDir(const QVector3D &dir)
 {
     if (m_sunDir == dir) return;
     m_sunDir = dir;
     emit sunInputChanged();
     if (!m_chunkInRange) return; // t472：远端 chunk 静默跟随值变，不重建
+    if (m_vertexCount == 0) return; // 空段无顶点可打光 → 太阳步进零影响，跳过重建
     buildMesh(RebuildReason::Sun);
 }
 
@@ -176,6 +179,7 @@ void ChunkGeometry::setWaterAnimPhase(int phase)
     emit waterAnimPhaseChanged();
     if (!m_waterOnly) return; // 地形段不引用水 tile → 无视觉影响，跳过重建
     if (!m_chunkInRange) return; // t472：远端水段跳过翻页，回 true catch-up
+    if (m_vertexCount == 0) return; // 空水段（无水体）翻页换帧无视觉影响 → 跳过重建（多数 chunk 无水体）
     buildMesh(RebuildReason::Water);
 }
 
@@ -192,6 +196,8 @@ void ChunkGeometry::setChunkInRange(bool inRange)
     emit chunkInRangeChanged();
     if (inRange) buildMesh(RebuildReason::Sun); // false→true：catch-up 错过的 sun/water/shadow/greedy 更新
     // true→false：不重建（远 chunk 不绘制）
+    // 注：catch-up 不设 m_vertexCount==0 空段守卫 —— 出视距期间的编辑不重建（onWorldChanged 门控跳过），
+    //   远 chunk 的 m_vertexCount 可能陈旧（空→非空未反映），回程必须无条件重建（t472「dirty 不可靠」）。
 }
 
 // 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
@@ -316,6 +322,12 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     //   settle t470 假设：静态读 dirty-gated，但若某路径每帧标脏会致全量重建 —— 此桶量化真值。
     FrameProfiler::Scope profMesh("mesh");
     FrameProfiler::instance()->count("meshN");
+    // perf：按重建原因细分计数（meshNdirty/meshNsun/meshNwater）→ FrameProfiler::flush 报告拆出 rebuild 原因
+    //   构成，定位「mesh 风暴」是 dirty（编辑 / 标脏泄漏）还是 sun（太阳步进）/ water（水翻页）驱动。
+    //   读报告：`mesh Xms (Yreb)` 后附 `[Ndirty d Nsun s Nwater w]`，占比最大者即风暴主源。
+    if (reason == RebuildReason::Dirty) FrameProfiler::instance()->count("meshNdirty");
+    else if (reason == RebuildReason::Sun) FrameProfiler::instance()->count("meshNsun");
+    else FrameProfiler::instance()->count("meshNwater");
     Chunk *c = myChunk();
     const int H = m_world ? m_world->height() : 0;
     constexpr int S = Chunk::kSize; // 16（X、Z chunk 边长）

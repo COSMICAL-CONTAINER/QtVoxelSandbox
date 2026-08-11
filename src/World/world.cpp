@@ -953,13 +953,22 @@ void World::tickCropGrowth()
         grows.push_back(c);
     }
 
-    // 3) 应用升阶段（静默写：setWaterSilent 支持任意 id+state；作物升阶段是系统模拟，无破/放反馈）。
-    //    setWaterSilent 内部对「无变化」早退（oldId==newId && oldState==newState）；但作物升阶段 stage→stage+1
-    //    必有变化 → 每株触发一次 emit worldChanged。无作物可升时 grows 为空 → 零写入、零 worldChanged（稳态无开销）。
-    //    注：逐株 emit worldChanged 会导致多株同窗升阶段时多次 mesh 重建请求 —— 25 个 ChunkGeometry 各检各的 dirty，
-    //    仅含升阶段作物的 chunk 真正重建（per-chunk dirty 协作，见 lessons-learned t03），故实际重建 = 受影响 chunk 数。
+    // 3) 应用升阶段（静默批量写：m_batchFluid 收口使每株 setWaterSilent 只写栅格 + 延迟光照重算、**不**
+    //    emit worldChanged / 不 clearAllDirty；末尾本窗所有改动一次性 emit + clear，把「N 株升阶段 = N 次
+    //    emit worldChanged + N×全 chunk onWorldChanged 扇出 + N×clearAllDirty」折叠为 1 次（同 tickWaterFlow
+    //    t350 批量收口模式）。修 perf「非批量静默写 tick 每 setWaterSilent 各发一次 worldChanged → clearAllDirty
+    //    清完又被下一格标回 → N 次重建请求」的 mesh 风暴。setWaterSilent 内部对「无变化」早退（作物升阶段
+    //    stage→stage+1 必有变化 → anyChange 真 → 末尾 1 次 emit）。无作物可升时 grows 为空 → 零写入零 emit（稳态无开销）。
+    m_batchFluid = true;
+    bool anyChange = false;
     for (const CCell &g : grows)
-        setWaterSilent(g.x, g.y, g.z, g.id, quint8(g.stage + 1)); // t407：按各自作物 id 写回（小麦/胡萝卜/马铃薯）
+        anyChange |= setWaterSilent(g.x, g.y, g.z, g.id, quint8(g.stage + 1)); // t407：按各自作物 id 写回（小麦/胡萝卜/马铃薯）
+    m_batchFluid = false;
+    flushPendingLightEdits(); // t380r：批量写延迟的光照重算 → 联合盒一次 refloodBox（无延迟编辑则 no-op）
+    if (anyChange) {
+        emit worldChanged();       // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
+        m_chunks.clearAllDirty();  // 两段重建完统一清脏（同 tickWaterFlow emit→clear 顺序）
+    }
 
     ++m_cropIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同株错峰）
 }
@@ -1087,9 +1096,19 @@ void World::tickSugarcaneGrowth()
         grows.push_back({t.x, t.y + 1, t.z}); // 在柱顶上方一格长一格
     }
 
-    // 3) 应用生长（setWaterSilent 静默写：甘蔗生长是系统模拟，无破 / 放反馈；与 tickCropGrowth 同写入路径）。
+    // 3) 应用生长（setWaterSilent 静默批量写：m_batchFluid 收口使每次写入只写栅格 + 延迟光照，末尾 1 次 emit +
+    //    clearAllDirty，把「N 株长高 = N 次 emit worldChanged + N×clearAllDirty（清完又被下一格标回）」折叠为 1 次，
+    //    同 tickCropGrowth / tickWaterFlow 批量收口模式。无生长时 grows 为空 → 零写入零 emit（稳态无开销）。
+    m_batchFluid = true;
+    bool anyChange = false;
     for (const SCell &g : grows)
-        setWaterSilent(g.x, g.y, g.z, BlockRegistry::Sugarcane, 0);
+        anyChange |= setWaterSilent(g.x, g.y, g.z, BlockRegistry::Sugarcane, 0);
+    m_batchFluid = false;
+    flushPendingLightEdits(); // t380r：批量写延迟的光照重算 → 联合盒一次 refloodBox（无延迟编辑则 no-op）
+    if (anyChange) {
+        emit worldChanged();       // 一次重建（仅脏 chunk）
+        m_chunks.clearAllDirty();  // 两段重建完统一清脏
+    }
 
     ++m_sugarcaneIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗不同柱错峰）
 }
@@ -1127,9 +1146,19 @@ void World::tickFarmlandHydration()
         if (newHydr != c.hydr) changes.push_back({c.x, c.y, c.z, newHydr});
     }
 
-    // 应用（setWaterSilent 静默写 Farmland + 新湿润等级；驱动 mesher 顶点色暗化重建 → 肉眼见湿润度变）。
+    // 应用（setWaterSilent 静默批量写 Farmland + 新湿润等级；m_batchFluid 收口把「N 块耕地变湿 = N 次
+    //    emit worldChanged + N×clearAllDirty」折叠为 1 次 emit + clear（同 tickCropGrowth / tickWaterFlow 批量
+    //    收口模式）。驱动 mesher 顶点色暗化重建 → 肉眼见湿润度变。changes 空（稳态无变化）→ 零写入零 emit。
+    m_batchFluid = true;
+    bool anyChange = false;
     for (const FCell &c : changes)
-        setWaterSilent(c.x, c.y, c.z, BlockRegistry::Farmland, c.hydr);
+        anyChange |= setWaterSilent(c.x, c.y, c.z, BlockRegistry::Farmland, c.hydr);
+    m_batchFluid = false;
+    flushPendingLightEdits(); // t380r：批量写延迟的光照重算 → 联合盒一次 refloodBox（无延迟编辑则 no-op）
+    if (anyChange) {
+        emit worldChanged();       // 一次重建（仅脏 chunk）
+        m_chunks.clearAllDirty();  // 两段重建完统一清脏
+    }
 }
 
 // t325 树叶渐进衰减队列的坐标打包 / 解包（文件内工具）。世界 ≤ 256³（实际 80×80×64），三轴各取低 16 位
@@ -1221,9 +1250,12 @@ void World::tickLeafDecay()
             decayed.push_back(*it);                       // 本窗命中 → 待清
             if (!any) { minX = maxX = lx; minY = maxY = ly; minZ = maxZ = lz; any = true; }
             else {
-                if (lx < minX) minX = lx; if (lx > maxX) maxX = lx;
-                if (ly < minY) minY = ly; if (ly > maxY) maxY = ly;
-                if (lz < minZ) minZ = lz; if (lz > maxZ) maxZ = lz;
+                if (lx < minX) minX = lx;
+                if (lx > maxX) maxX = lx;
+                if (ly < minY) minY = ly;
+                if (ly > maxY) maxY = ly;
+                if (lz < minZ) minZ = lz;
+                if (lz > maxZ) maxZ = lz;
             }
             it = m_decayingLeaves.erase(it);              // 命中 → 出队（不再参与后续窗口）
         } else {
@@ -1276,9 +1308,12 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
                 destroyed.push_back({bx, by, bz, b});
                 if (!any) { minX = maxX = bx; minY = maxY = by; minZ = maxZ = bz; any = true; }
                 else {
-                    if (bx < minX) minX = bx; if (bx > maxX) maxX = bx;
-                    if (by < minY) minY = by; if (by > maxY) maxY = by;
-                    if (bz < minZ) minZ = bz; if (bz > maxZ) maxZ = bz;
+                    if (bx < minX) minX = bx;
+                    if (bx > maxX) maxX = bx;
+                    if (by < minY) minY = by;
+                    if (by > maxY) maxY = by;
+                    if (bz < minZ) minZ = bz;
+                    if (bz > maxZ) maxZ = bz;
                 }
             }
     if (destroyed.empty()) return destroyed;
@@ -2687,9 +2722,18 @@ void World::tickIceFreeze()
         if (int(h % 100u) >= kFreezePct) continue; // 散布落空 → 本窗不冻
         toFreeze.push_back({x, y, z});
     }
+    // 批量静默写 Ice（m_batchFluid 收口把「N 格结冰 = N 次 emit worldChanged + N×clearAllDirty（清完又被下一格
+    //    标回 → N 次重建请求）」折叠为 1 次 emit + clear；同 tickWaterFlow t350 批量收口模式）。setWaterSilent
+    //    内部无变化早退（已冻结 / 已非水格不写入）；frozen 计数仅供可观测日志。
+    m_batchFluid = true;
     for (const FreezeTarget &t : toFreeze) {
-        setWaterSilent(t.x, t.y, t.z, BlockRegistry::Ice, 0); // 静默写 Ice（系统模拟，非玩家破/放 → 无反馈）
-        ++frozen;
+        if (setWaterSilent(t.x, t.y, t.z, BlockRegistry::Ice, 0)) ++frozen; // 静默写 Ice（系统模拟，非玩家破/放 → 无反馈）
+    }
+    m_batchFluid = false;
+    flushPendingLightEdits(); // t380r：批量写延迟的光照重算 → 联合盒一次 refloodBox（无延迟编辑则 no-op）
+    if (frozen > 0) {
+        emit worldChanged();       // 一次重建（仅脏 chunk）
+        m_chunks.clearAllDirty();  // 两段重建完统一清脏
     }
     ++m_freezeIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同格错峰冻结）
     if (frozen > 0) qInfo("vo.world: tickIceFreeze frozen=%d", frozen); // 可观测性（同 tickCropGrowth）
@@ -4635,7 +4679,11 @@ int World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky
             bool changed = false;
             for (int x = ax0; x <= ax1 && !changed; ++x)
                 for (int y = y0; y <= y1 && !changed; ++y)
-                    for (int z = az0; z <= z1 && !changed; ++z) {
+                    // perf：z 循环上界用 chunk 局部 az1（非全局 z1）—— 旧版用 z1 会读到**下一 chunk**的格
+                    //   （ccz 中间块 az1 < z1），把邻 chunk 的光变误判为本 chunk 光变 → 误标本 chunk 脏 →
+                    //   放大 dirty-storm（本只光变那 1 个 chunk，却连带标了盒内其后所有 chunk）。az1 亦因此
+                    //   恒未使用触发 -Wextra。改 az1 后切片严格限于本 chunk、逐 chunk 精确比对。
+                    for (int z = az0; z <= az1 && !changed; ++z) {
                         const size_t i = size_t(x - x0) + bw * (size_t(z - z0) + bd * size_t(y - y0));
                         if (snapSky[i] != m_chunks.skyLightAt(x, y, z) ||
                             snapBlock[i] != m_chunks.blockLightAt(x, y, z))
