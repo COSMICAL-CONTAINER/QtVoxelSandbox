@@ -1421,15 +1421,15 @@ t18                        （背包，依赖 hotbar）
 
 | 任务ID | 状态 | 标题（详细） | 文件 |
 |---|---|---|---|
-| t491 | ⏳ | **草挖掘粒子改绿色（现白色）** | Renderer 破块粒子色 / BlockParticles.qml |
-| t492 | ⏳ | **创造背包工作台/熔炉改 3D 方块显示（现 2D 贴图）** | hotbar 创造调色板 + icon 渲染（ToolIcon/MaterialIcon/3D block icon 统一） |
-| t493 | ⏳ | **青金石矿贴图背景用材质包石头（现旧石头，矿太明显）** | resourcepackmanager lapis_ore 映射 / build_atlas |
-| t494 | ⏳ | **熔炉正面 furnace_front_on.png（烧制时带火正面）** | resourcepackmanager furnace_front_on 映射 + world.cpp 熔炉 state（燃烧中切正面） |
-| t495 | ⏳ | **浮冰贴图（现像白色羊毛）** | tools/build_packed_ice.py 程序贴图 / resourcepack 映射 |
-| t496 | ⏳ | **床：创造图标（bed.png 按色改）+ 3D 模型（用 entity/bed 组装；现丑）** | bed icon + Main.qml bed 3D model（参考 pack entity/bed） |
-| t497 | ⏳ | **物品图标全替换（pack item 文件夹）**：木/石/铁/金/钻 工具五件套 + 对应套装（iron_chestplate 等）+ 钓鱼竿 + 末影珍珠 + empty_armor_slot_{helmet,chestplate,leggings,boots}（生存盔甲槽位图标） | resourcepackmanager item 映射 + ToolIcon/MaterialIcon/armor slot UI |
-| t498 | ⏳ | **玩家装甲 F5 第三人称显示（现不显示）** | Main.qml 玩家模型 + PlayerState 装甲 → 第三人称叠加 tier 色护甲 Model（t377 mob 护甲同模式） |
-| t499 | ⏳ | **雪傀儡模型（南瓜头 + 眼；现纯雪块无头无眼）** | Main.qml SnowGolem delegate（加南瓜头 Model + 刻面眼） |
+| t491 | ✅ | **草挖掘粒子改绿色（现白色）** `8890d45` | BlockParticles.qml blockColor 扩全枚举（tall_grass=24 白落 default） |
+| t492 | ✅ | **创造背包工作台/熔炉改 3D 方块显示（现 2D 贴图）** `a381cfa` | build_cube_icons.py render_front 正面 dimetric（顶投影遮炉口/网格） |
+| t493 | ✅ | **青金石矿贴图背景用材质包石头（现旧石头，矿太明显）** `acac3d5` | resourcepackmanager tile 108→lapis_ore.png（pack 激活用包 stone 底） |
+| t494 | ✅ | **熔炉正面 furnace_front_on.png（烧制时带火正面）** `acac3d5` | FurnaceStateLitFlag=0x04 + tile 134 + FurnaceUI 燃烧态驱动 setFurnaceLit |
+| t495 | ✅ | **浮冰贴图（现像白色羊毛）** `acac3d5` | build_ice.py draw_pack_ice 淡蓝白重做（B>G>R 冰蓝调） |
+| t496 | ✅ | **床：创造图标（bed.png 按色改）+ 3D 模型（用 entity/bed 组装；现丑）** `ca159b5+38a37dc` | partialblockgeometry ShapeBed 重写（床头/尾板+白枕+4腿+绗缝）+16色 icon |
+| t497 | ✅ | **物品图标全替换（pack item 文件夹）** `e823288` | resourcepackmanager emptyArmorSlotSource + EndEye 映射 + SurvivalInventory 空槽 pack 图（金/钻全套工具因项目无物品 id 属系统限制） |
+| t498 | ✅ | **玩家装甲 F5 第三人称显示（现不显示）** `3faec95` | Main.qml playerModel 护甲凸出量（z scale 被身体内嵌遮挡） |
+| t499 | ✅ | **雪傀儡模型（南瓜头 + 眼；现纯雪块无头无眼）** `3faec95` | Main.qml SnowGolem 眼/嘴 z 凸出（被南瓜遮挡）+头放大+刻面嘴+IronGolem 同修 |
 
 **t491**：破块粒子按方块材质取色（草 = 叶绿 #5a8a3a 系），现硬白。**t492**：创造背包里工作台/熔炉当前是 2D item 贴图，应与其它方块一致用 3D 方块 icon（统一 icon 渲染路径）。**t493**：青金石矿放下来背景是旧石头（材质包前的 stone），应映射 pack 的 stone 贴图为矿背景（现矿脉一眼可见 = 不合理）。**t494**：熔炉燃烧时正面用 furnace_front_on（带火），非燃烧用 furnace_front_off。**t495**：浮冰贴图重做（现像白羊毛，应是淡蓝白压实冰）。**t496**：床创造图标按色（bed.png 红床为模板，16 色变体）；放下的 3D 模型用 pack `entity/bed` 的模型组装（现 2 格但丑）。**t497**：批量替换 item 图标（工具+套装 4 材质×5件 + 4 套套装 + 钓鱼竿 + 末影珍珠 + 4 个空盔甲槽图标），全部从 pack `textures/item/`。**t498**：玩家穿装甲 F5 第二/三人称看不见（mob 能显 t377）→ 玩家模型同样叠加护甲 Model。**t499**：雪傀儡当前纯雪块堆叠无南瓜头无眼 → 加南瓜头 Model + 刻面双眼（机制等价 MC 雪傀儡南瓜头）。
 
