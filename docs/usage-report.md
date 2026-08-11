@@ -658,3 +658,20 @@ FrameProfiler 实测：mesh 稳态 0.5-1.5ms/frame（风暴已灭）；sun 重�
 4. **F3 rebuild 原因拆分**：prof 行现为 `mesh Xms (Yreb [Ndirty d Nsun s Nwater w])`，重建驱动直接可见。
 
 **验收（待用户实测）**：静止场景（无农场/雪原/不移动）mesh reb 应大幅降（空段守卫砍 sun/水翻页）；农场/雪原活跃期 reb 应从 N×每窗 → 1×每窗；F3 看 `[d s w]` 占比定位残余。**次要点**：夜晚战斗 14 FPS 含 mob phys 14ms（54 怪移动的每帧物理，战斗固有）+ bp 22ms（粒子），mesh 修复后应改善但不消除战斗开销——若战斗仍卡下轮降 kHostileMobCap 或节流移动物理。
+
+---
+
+## mesh 风暴根治 + 箭消失 + /kill + 跳跃 bug（3 串行 voxel-dev，workflow `wf_de0c9a2b-81e`）
+
+> 用户 F3（14 FPS Swamp 夜 r=8）：`mesh 159.66ms (622reb [36d 325s 261w])` + 报骷髅箭不消失 + /kill 不清掉落物 + 被怪打后跳不起来。553k tok / 222 calls / 128m。
+
+**3 任务全 ✅（构建零警告，主编排复核）**：
+
+| commit | 任务 | 做了什么 |
+|---|---|---|
+| `b5cc1c6` | mesh 风暴根治 | **sun 步进粗量化门** `sunRebuildDue()`：只在影带穿越(0.30/0.40)/仰角累计>0.12rad/方位角>0.35rad/>120s 硬顶 才重烘（325段/16.7s→日间~十几次/~30-70s，夜间零）；**水翻页静态化**（删 waterAnimTimer+绑定，水 tile 硬编 phase 0 帧 + 烘死空间涟漪，261段/2s→0）。agent 自测静态场景 281/331 窗口零重建。昼夜亮度仍由材质 baseColor 平滑，阴影粗更新无亮度跳变。 |
+| `f64f8a9` | 箭 60s 必消失 + /kill 清掉落物 | 箭 spawn 记墙钟 `arrowSpawnMs`，tick 硬检 `>=kArrowDespawnMs(60000)` 必 releaseSlot（任何箭：玩家/骷髅/飞行/嵌入，不依赖 dt→低帧/dt=0 仍删）；`/kill @e` 加 `itemEntities.clearAll()`（连 mobs+items+orbs 全清，三类各 emit changed→F3 entities 归零）。 |
+| `87a129a` | 被怪打后跳不起来 | **根因（引擎级）**：受击垂直击退放 `m_knockback.y` 又每 tick 施重力 → 与 `m_vel.y` 自身重力**双重力**（dv/dt=-2g）；着地清零 m_knockback.y 后，水平击退衰减期(~1s)积分块仍跑、反复把它拉负向下拽 → 吃掉其后跳跃(kJump=8.4)/上浮(kSwimUp=4.5) → "被怪打后只跳半格、水里跳不上一格、过一会恢复"。**修**：垂直击退走 `m_vel.setY(max(m_vel.y, kHitKnockbackUp))`（单一重力、不抵消更高跳跃/上浮），`m_knockback` 只剩水平 XZ。经验入 lessons-learned。 |
+
+- **验收（待用户实测）**：① F3 mesh reb 的 [s][w] 应~0（水静态、sun 罕见），总 reb << 622；② 水面无流动动画但有空间涟漪（视觉可接受？用户定夺要不要找回动画）；③ 骷髅箭落地/插墙 60s 消失；④ /kill @e 后 F3 entities 归零；⑤ 被怪打后能正常跳（≥1 格）+ 水里跳上一格。
+- **次要点遗留**：夜晚战斗 mob phys 10-14ms（54-43 怪移动的每帧物理，战斗固有）；若仍嫌卡可下轮降 kHostileMobCap 或节流移动物理。
