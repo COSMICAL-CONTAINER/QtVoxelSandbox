@@ -1455,10 +1455,10 @@ t18                        （背包，依赖 hotbar）
 
 | 任务ID | 状态 | 标题（详细） | 文件 |
 |---|---|---|---|
-| t511 | ⏳ | **创造背包分类标签（MC 式 tabs）+ 去冗余文字 + chest 标签 → 生存背包** | Main.qml 创造背包 UI（tabs + 布局） |
-| t512 | ⏳ | **创造背包 hover 物品 + 按 1-9 快速换组（强制替换）** | Main.qml 创造背包 hover/按键处理 + hotbar |
-| t513 | ⏳ | **食物系统修复**：胡萝卜/土豆可吃；吃动画/粒子（甜浆果现吐橙色方块 → 加食物吃粒子贴图）；吃完冷却（非连续右键一直吃） | playercontroller 进食 + Main.qml 吃粒子 |
-| t514 | ⏳ | **甜浆果丛可种植（现只能吃不能种）** | playercontroller 种植 + blockregistry SweetBerryBush 放置 |
+| t511 | ✅ | **创造背包分类标签（MC 式 tabs）+ 去冗余文字 + chest 标签 → 生存背包** `94f20ee` | Inventory.qml 6 tabs（方块/工具/材料/护甲/食物/箱子）+ filteredPalette + 去标题/选中/销毁提示 + chest→setMode(Survival) |
+| t512 | ✅ | **创造背包 hover 物品 + 按 1-9 快速换组（强制替换）** `5a9e765` | Inventory.qml creativeHoveredItemId + forceReplaceHotbarFromCreative（setStack 覆盖），keyInput 1-9 分流 |
+| t513 | ✅ | **食物系统修复** `527db24` | foodHungerAmount 加胡萝卜+3/土豆+1 + foodColor 按食物色屑粒（甜浆果暗红等）+ m_eatCooldown 1s |
+| t514 | ✅ | **甜浆果丛可种植（现只能吃不能种）** `527db24` | placeBlock SweetBerryId 分支右键 Grass/Dirt→setBlock SweetBerryBush state 0（eventFilter 种植优先于进食） |
 
 **t511**：创造背包加分类标签（参考 MC 1.0 创造模式 tabs：建筑方块/装饰/红石/交通工具/食物/工具/战斗/酿造/材料 等，按本项目已有内容裁剪）；点击 tab 切换分类页；**移除**「创造物品栏」标题、「当前选中：xxx」行、「点击右侧销毁 xxx」文字（用户嫌冗余）；**chest 标签**点击 → 跳转生存背包（可对物品操作含装甲）。**t512**：创造背包中鼠标 hover 一个方块/物品 + 按数字键 1-9 → 取一组该物品**强制替换**到对应 hotbar 槽（不管原槽有无物品）。**t513**：食物——胡萝卜/马铃薯/马铃薯当前不能吃 → 修可吃；吃的时候甜浆果吐橙色方块（现占位）→ 加专门的食物咀嚼/碎屑粒子贴图（从 pack 或程序生成）；进食机制——右键一次启动进食 → 吃完一个 → 短冷却（非按住右键连续吃），手持动画在冷却期显示。**t514**：甜浆果丛（SweetBerryBush）当前只能采摘吃，不能种下 → 右键草地/泥土种植（浆果物品作种子，机制等价 MC 浆果丛种植）。
 
