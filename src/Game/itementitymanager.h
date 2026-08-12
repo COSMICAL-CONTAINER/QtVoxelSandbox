@@ -123,18 +123,6 @@ public:
             if (m_entities[i].alive) releaseSlot(int(i));
         emit entitiesChanged();
     }
-    // t492 跨世界 delegate 泄漏修复：真正清空 vector（count→0）。clearAll 只标 alive=false（delegate 隐藏不销毁，
-    //   保 count 单调修 t170），但爆炸期 count 飙到 kCap(200) 后 200 个 delegate（每个含多个 Model 子节点）永久
-    //   驻留场景图，重进世界它们仍在（仅隐藏）→ 持续吃场景图遍历 / 绘制开销 = 用户报「TNT 爆炸后退存档再进仍卡」
-    //   的根因。hardReset 让 count→0 触发 Repeater model 变化；但 reparent 的 3D delegate 仍不被 Repeater 销毁
-    //   （t170），故 caller（QML world-exit）须配套手动 destroy itemHost 的 delegate 子节点（见 Main.qml
-    //   clearEntDelegates）。**仅 world-exit / enterWorld 清旧段调**（非游玩期，无并发 spawn / pickup）。游玩期
-    //   的拾取 / 寿命到期仍走 releaseSlot（保 t256 slot-reuse 不变量）。m_batchDepth / m_batchDirty 不动（world-exit
-    //   不在批内）。
-    Q_INVOKABLE void hardReset() {
-        m_entities.clear(); m_freeSlots.clear(); m_liveCount = 0;
-        ++m_revision; emit entitiesChanged();
-    }
 
     // t53：第 i 个实体是否已过「新生免拾取期」（spawn 后 kPickupDelayMs 内 false → pickupScan 跳过）。
     // 破块瞬间实体常落在玩家近旁（如脚下方块中心距玩家中心仅 ~1.4 格 < kPickupDist 1.5），若无免拾窗
