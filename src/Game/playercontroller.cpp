@@ -2782,6 +2782,14 @@ void PlayerController::placeBlock()
     //   消耗 1 南瓜）。spec「南瓜 + 雪块×2 竖直 → 雪傀儡 / 铁块×4 T 形 + 南瓜 → 铁傀儡」。分层（PLAN §2）：
     //   Game/Physics 层（读 World + 写 World setWaterSilent + 调 EntityManager spawn），不改 setBlock 语义。
     //   **支持 T 形 X / Z 双向**（玩家从任一侧搭底排均能触发，机制等价 MC 铁傀儡 T 形不锁向）。
+    // t509 诊断可观测性：t483 检测逻辑经穷尽静态复核**结构正确**（标准 MC 1.0 T 形：南瓜在中柱顶正上方，
+    //   下方连续 2 铁块 = 中柱顶 + 底排中间，底排两端任一水平向各 1 铁块 → rowX||rowZ 双向覆盖）；雪傀儡同结构
+    //   （少底排）用户报可造 → 检测链路（m_entityManager 绑定 / setWaterSilent / spawnMobTyped）全通。故 t483
+    //   失效最可能根因是「玩家实际搭建与检测假设不符」（底排朝向偏 / 南瓜放偏一格 / 少一个铁块）或 stale 构建，
+    //   而原检测**静默失败**（不命中无任何反馈）→ 用户「摆了不生成」无法定位。修法：加诊断 qInfo 让运行期可观测
+    //   （lessons「先 run + 加诊断确认当前态，禁照旧报告打补丁」）—— ① 南瓜下方命中铁柱但底排不全 → 打底排
+    //   4 邻格 id + rowX/rowZ；② 南瓜下方非铁柱/雪柱 → 打 below1/below2 id；用户跑一次 logs/voxelsandbox.log
+    //   即可精确定位是「南瓜放偏 / 底排不全 / 还是别的」。生成逻辑（rowX||rowZ → 移除 5 块 + spawn）不变。
     if (idByte == BlockRegistry::Pumpkin && m_world && m_entityManager && ty >= 2
         && ty - 2 < m_world->height()) {
         // (a) 雪傀儡：南瓜下方两格均为雪块（南瓜 + 雪块×2 竖直）→ 生成 MobSnowGolem + 移除 3 块。
@@ -2803,6 +2811,13 @@ void PlayerController::placeBlock()
                                && m_world->blockAt(tx + 1, ty - 2, tz) == BlockRegistry::IronBlock);
             const bool rowZ = (m_world->blockAt(tx, ty - 2, tz - 1) == BlockRegistry::IronBlock
                                && m_world->blockAt(tx, ty - 2, tz + 1) == BlockRegistry::IronBlock);
+            // t509 诊断：竖柱已对（南瓜下方 2 铁块），记录底排 4 邻格 id + rowX/rowZ，定位「底排不全」失效。
+            qInfo("iron golem probe at %d %d %d: rowX=%d rowZ=%d | -X=%d +X=%d -Z=%d +Z=%d",
+                  tx, ty, tz, int(rowX), int(rowZ),
+                  int(m_world->blockAt(tx - 1, ty - 2, tz)),
+                  int(m_world->blockAt(tx + 1, ty - 2, tz)),
+                  int(m_world->blockAt(tx, ty - 2, tz - 1)),
+                  int(m_world->blockAt(tx, ty - 2, tz + 1)));
             if (rowX || rowZ) {
                 m_world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0);     // 南瓜
                 m_world->setWaterSilent(tx, ty - 1, tz, BlockRegistry::Air, 0); // T 顶铁块
@@ -2815,6 +2830,13 @@ void PlayerController::placeBlock()
                                                QStringLiteral("#c8c8d0"), 100);
                 qInfo("iron golem built at %d %d %d", tx, ty, tz);
             }
+        }
+        // t509 诊断：南瓜放置但下方非雪块竖柱 / 非铁块竖柱 → 记录下方 2 格 id，定位「南瓜放偏 / 竖柱不全」。
+        //   （仅当两柱都没命中才打，避免与上面命中分支重复。下方 1 格是关键：是 Snow→雪傀儡缺 1 雪块 / 是
+        //   IronBlock→铁傀儡缺中柱顶 / 是其它→南瓜放错了位置。）
+        else {
+            qInfo("golem build miss at %d %d %d: below1=%d below2=%d (need Snow/Snow or IronBlock/IronBlock column)",
+                  tx, ty, tz, int(m_world->blockAt(tx, ty - 1, tz)), int(m_world->blockAt(tx, ty - 2, tz)));
         }
     }
     m_lastPlaceMs = now; // 放置成功 → 刷新 CD 计时（t128；now 为入口时间戳，同帧无意义漂移）
