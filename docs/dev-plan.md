@@ -1405,6 +1405,8 @@ t18                        （背包，依赖 hotbar）
 > ⚠️ 法律红线（强制）：MC 资源包 PNG 仅本地 gitignored 加载（`docs/Default HD 128x Demo 1.8.2.2/`），commit 仅代码 + 程序生成贴图，**绝不 add 包 PNG 进 git/qrc/构建产物**；子 agent 提示词须重申。原创名（Creeper→Stalker 等）。
 > **分批 workflow**（用户要求子 agent + workflow 串行开发）：批1 = A 性能（t488-t490，先做）；批2 = B 渲染（t491-t499）；批3 = C 方块机制（t500-t510）；批4 = D UI（t511-t514）。
 
+> **⚠️ R18s 复盘（2026-08-12 用户 playtest 后）**：用户逐项复查，**t500/t502/t503/t506/t507/t512 保持 ✅**（用户确认 OK），**其余 19 任务降为 ⚠️ 待修**（t491-t499、t501、t504-t505、t508-t511、t513-t514）。每任务「复盘补遗」块（批次 B/C/D 表格下方）含用户报的具体 bug 细节。**本批继续开发 = 按 ⚠️ 任务清单逐个修**（复盘状态比原 ✅ 为准，原 ✅ 只是首轮完成不代表用户验收）。
+
 ## A. P0 性能（先做，游戏杀手）
 
 | 任务ID | 状态 | 标题（详细） | 依赖 | 文件 |
@@ -1421,15 +1423,26 @@ t18                        （背包，依赖 hotbar）
 
 | 任务ID | 状态 | 标题（详细） | 文件 |
 |---|---|---|---|
-| t491 | ✅ | **草挖掘粒子改绿色（现白色）** `8890d45` | BlockParticles.qml blockColor 扩全枚举（tall_grass=24 白落 default） |
-| t492 | ✅ | **创造背包工作台/熔炉改 3D 方块显示（现 2D 贴图）** `a381cfa` | build_cube_icons.py render_front 正面 dimetric（顶投影遮炉口/网格） |
-| t493 | ✅ | **青金石矿贴图背景用材质包石头（现旧石头，矿太明显）** `acac3d5` | resourcepackmanager tile 108→lapis_ore.png（pack 激活用包 stone 底） |
-| t494 | ✅ | **熔炉正面 furnace_front_on.png（烧制时带火正面）** `acac3d5` | FurnaceStateLitFlag=0x04 + tile 134 + FurnaceUI 燃烧态驱动 setFurnaceLit |
-| t495 | ✅ | **浮冰贴图（现像白色羊毛）** `acac3d5` | build_ice.py draw_pack_ice 淡蓝白重做（B>G>R 冰蓝调） |
-| t496 | ✅ | **床：创造图标（bed.png 按色改）+ 3D 模型（用 entity/bed 组装；现丑）** `ca159b5+38a37dc` | partialblockgeometry ShapeBed 重写（床头/尾板+白枕+4腿+绗缝）+16色 icon |
-| t497 | ✅ | **物品图标全替换（pack item 文件夹）** `e823288` | resourcepackmanager emptyArmorSlotSource + EndEye 映射 + SurvivalInventory 空槽 pack 图（金/钻全套工具因项目无物品 id 属系统限制） |
-| t498 | ✅ | **玩家装甲 F5 第三人称显示（现不显示）** `3faec95` | Main.qml playerModel 护甲凸出量（z scale 被身体内嵌遮挡） |
-| t499 | ✅ | **雪傀儡模型（南瓜头 + 眼；现纯雪块无头无眼）** `3faec95` | Main.qml SnowGolem 眼/嘴 z 凸出（被南瓜遮挡）+头放大+刻面嘴+IronGolem 同修 |
+| t491 | ⚠️ | **草挖掘粒子（复盘：草方块挖出绿色粒子，应和泥土同色）** `8890d45` | BlockParticles.qml blockColor 扩全枚举（tall_grass=24 白落 default） |
+| t492 | ⚠️ | **创造背包工作台/熔炉 3D 方块显示（复盘：还是 2D 图标）** `a381cfa` | build_cube_icons.py render_front 正面 dimetric（顶投影遮炉口/网格） |
+| t493 | ⚠️ | **青金石矿贴图背景（复盘：放下 OK=石头色，但背包 Item 图标没改）** `acac3d5` | resourcepackmanager tile 108→lapis_ore.png（pack 激活用包 stone 底） |
+| t494 | ⚠️ | **熔炉燃烧发光（复盘：贴图改了但不会发光，需加光源；火灭光消）** `acac3d5` | FurnaceStateLitFlag=0x04 + tile 134 + FurnaceUI 燃烧态驱动 setFurnaceLit |
+| t495 | ⚠️ | **浮冰贴图 + 冰水过渡（复盘：冰水透明度突变难受；高温/高亮融化成水）** `acac3d5` | build_ice.py draw_pack_ice 淡蓝白重做（B>G>R 冰蓝调） |
+| t496 | ⚠️ | **床（复盘：Item 图标没换仍整方块；放下朝向错：床脚应落地处、床头应朝玩家反向=熔炉开口对玩家；床头床尾拼接错乱；中间空隙要填实）** `ca159b5+38a37dc` | partialblockgeometry ShapeBed 重写（床头/尾板+白枕+4腿+绗缝）+16色 icon |
+| t497 | ⚠️ | **物品图标全替换（复盘：图标链接被吞，钻石/金/铁/皮革护甲 item 图标全没换）** `e823288` | resourcepackmanager emptyArmorSlotSource + EndEye 映射 + SurvivalInventory 空槽 pack 图 |
+| t498 | ⚠️ | **玩家装甲 F5 第三人称显示（复盘：修 3-4 次仍不显示，mob 却有）** `3faec95` | Main.qml playerModel 护甲凸出量（z scale 被身体内嵌遮挡） |
+| t499 | ⚠️ | **雪傀儡模型（复盘：头朝玩家应固定；没南瓜头；炎热/水扣血无变红动画；剪刀剪头未知）** `3faec95` | Main.qml SnowGolem 眼/嘴 z 凸出 + 头放大 + 刻面嘴 + IronGolem 同修 |
+
+**复盘补遗（2026-08-12 用户 playtest，覆盖 t491-t499）**：
+- **t491**：挖掘**草方块**（Grass=1）粒子是**绿色**（草叶绿），应和**泥土同色**（草方块挖出的是泥土，破块粒子应为泥土色 #8a6b3a 系）。
+- **t492**：创造背包里工作台/熔炉**仍是 2D item 图标**，未用 3D 方块 icon（上轮 render_front 没生效或路径没走通）。
+- **t493**：放下青金石矿 OK（石头背景色），但**背包 Item 图标**还是旧的（需换 lapis_ore 对应 item 图标）。
+- **t494**：熔炉燃烧正面贴图改了（furnace_front_on），但**不发光**。需：燃烧时熔炉作为光源（方块光 flood，火把/岩浆同源）；熄灭后光消。
+- **t495**：冰/浮冰/蓝冰三者和**水放在一起**透明度突变（冰不透/水透的边界跳变难看）。需平滑过渡。且**普通冰在高温/高亮环境（火把/熔炉/火）有概率融化成水**。
+- **t496**：**床完全重做**——① Item 图标：dev-plan 没写路径，未换（应换 `textures/item/bed.png` 红床为模板，16 色变体）；② 放下朝向：现在床头床尾错乱（用户实测朝 +X 放时床脚落地处正确但床头指向玩家脚侧；朝 -X 放时床横在两格中间凸起）→ 应**床脚落在放置处、床头朝远离玩家**（同熔炉开口对玩家反向）；③ 床头床尾中间（羊毛处）**空隙要填实**；④ 放下 3D 模型应为完整床体。
+- **t497**：`textures/item/` 下 `diamond_helmet.png`+`diamond_chestplate.png`+`diamond_leggings.png`+`diamond_boots.png` 分别=钻石的头/胸/腿/鞋 item 图标，**金/铁/皮革同族**也是xxx_helmet等前缀；当前**全没换**（上轮链接被吞），然后还有生存模式装甲显示的空装甲图标分别是empty_armor_slot_boots.png靴子+empty_armor_slot_leggings.png裤子+empty_armor_slot_chestplate.png胸甲+empty_armor_slot_helmet.png头盔，在QtMinecraft\docs\Default HD 128x Demo 1.8.2.2\assets\minecraft\textures\item文件夹，你也来修改一下，以及各种工具也是在这个item目录下diamond_axe.png是钻石斧头，diamond_hoe.png是钻石锄头，diamond_pickaxe.png是钻石镐，diamond_shovel.png是钻石铲子，diamond_sword.png是钻石剑，当然还有铁金石头和木头的。
+- **t498**：玩家装甲 F5 穿了**仍无变化**（修 3-4 次未好）；mob 装甲（t377）正常 → 玩家模型护甲叠加路径仍有 bug。
+- **t499**：雪傀儡——① 生成头朝向玩家（应固定朝向）；② **没有南瓜头**（用户没看到）；③ 炎热/水扣血**无变红动画掉血**；④ 剪刀剪南瓜头功能未知。
 
 **t491**：破块粒子按方块材质取色（草 = 叶绿 #5a8a3a 系），现硬白。**t492**：创造背包里工作台/熔炉当前是 2D item 贴图，应与其它方块一致用 3D 方块 icon（统一 icon 渲染路径）。**t493**：青金石矿放下来背景是旧石头（材质包前的 stone），应映射 pack 的 stone 贴图为矿背景（现矿脉一眼可见 = 不合理）。**t494**：熔炉燃烧时正面用 furnace_front_on（带火），非燃烧用 furnace_front_off。**t495**：浮冰贴图重做（现像白羊毛，应是淡蓝白压实冰）。**t496**：床创造图标按色（bed.png 红床为模板，16 色变体）；放下的 3D 模型用 pack `entity/bed` 的模型组装（现 2 格但丑）。**t497**：批量替换 item 图标（工具+套装 4 材质×5件 + 4 套套装 + 钓鱼竿 + 末影珍珠 + 4 个空盔甲槽图标），全部从 pack `textures/item/`。**t498**：玩家穿装甲 F5 第二/三人称看不见（mob 能显 t377）→ 玩家模型同样叠加护甲 Model。**t499**：雪傀儡当前纯雪块堆叠无南瓜头无眼 → 加南瓜头 Model + 刻面双眼（机制等价 MC 雪傀儡南瓜头）。
 
@@ -1438,29 +1451,42 @@ t18                        （背包，依赖 hotbar）
 | 任务ID | 状态 | 标题（详细） | 文件 |
 |---|---|---|---|
 | t500 | ✅ | **草方块生存挖掉泥土（精准采集才掉草方块）** `a10a369` | blockregistry Grass dropId Grass→Dirt（silk_touch 附魔 t475 已覆盖掉 Grass） |
-| t501 | ✅ | **木梯侧边放置（似火把；须完整方块侧；Space 爬/Shift 降）** `f864312` | blockregistry ladderFaceFromNormal + placeBlock full-cube 侧校验 + partialblockgeometry 单片贴墙 quad + 失撑掉落 |
+| t501 | ⚠️ | **木梯侧边放置（复盘：贴图未换 ladder.png；爬梯时优先挖梯子，应像火把可透视）** `f864312` | blockregistry ladderFaceFromNormal + placeBlock full-cube 侧校验 + partialblockgeometry 单片贴墙 quad + 失撑掉落 |
 | t502 | ✅ | **熔炉 UI 布局修复** `4d32637` | FurnaceUI 成品居中 + 进度箭头居间 + burnTotal 燃料进度（火焰收缩+底条） |
 | t503 | ✅ | **仙人掌** `e382d41` | worldgen placeDesertFlora 4 邻 isSolid 守卫（dropCactusColumn/checkCactusOnEdit 核实已全） |
-| t504 | ✅ | **枯死灌木** `4d32637` | world checkDeadBushOnEdit（破下方支撑→正上方枯灌木掉落，同仙人掌模式） |
-| t505 | ✅ | **雪方块体系** `51a8b04` | ShapeSnowLayer 薄板（state 0-7 = (state+1)/8 高）+ 铲掉雪球 + 4雪球合雪块 + worldgen 3 级随机 + 堆叠 + auto-step 上行 |
+| t504 | ⚠️ | **枯死灌木（复盘：挖下方方块应掉木棍非枯木自身；贴图边缘平滑怪）** `4d32637` | world checkDeadBushOnEdit（破下方支撑→正上方枯灌木掉落，同仙人掌模式） |
+| t505 | ⚠️ | **雪方块体系（复盘：雪块铲掉应掉 2-3 雪球；雪球 item 创造栏无显示；雪球可丢出砸怪受击红闪+小击退不扣血；右键发射+雪傀儡发射；砸地破碎消失=实体仿箭）** `51a8b04` | ShapeSnowLayer 薄板（state 0-7 = (state+1)/8 高）+ 铲掉雪球 + 4雪球合雪块 + worldgen 3 级随机 + 堆叠 + auto-step 上行 |
 | t506 | ✅ | **冰/浮冰/蓝冰** `e382d41` | Ice 破→生 Water（非精准）/ silk 掉 Ice；PackIce/BlueIce silk 掉自身（船冰加速 t508 修 blockBelow off-by-one） |
 | t507 | ✅ | **花/蘑菇** `e382d41` | BrownMushroom=115 + checkFlowerMushroomOnEdit 失撑 + placeBlock 草/土预检 + 蘑菇汤(碗+红+白)配方 |
-| t508 | ✅ | **船** `27b48ff` | 水面放置+32 深浮力 lerp + U 形船体 + 挖船→掉落 + 冰加速 blockBelow 修复 + 可推动 |
-| t509 | ✅ | **铁傀儡建造修复** `fb56fb1` | T 形检测静态复核正确 + 加诊断 qInfo（probe/miss 日志定位静默失效：南瓜放偏/底排不全/overlaps 拒放） |
-| t510 | ✅ | **雪傀儡机制** `5380afa` | aiSnowGolem meltAccum 慢扣血（1HP/s，非即死）+ 水扣血 + 死掉 0-15 雪球 + 剪刀剪南瓜→derpy 无头形态 + 行走留 SnowLayer(t482) |
+| t508 | ⚠️ | **船（复盘：贴图错误；模型是碗形非 U 形（四面凸中间凹）；创造背包归入材料应放工具）** `27b48ff` | 水面放置+32 深浮力 lerp + U 形船体 + 挖船→掉落 + 冰加速 blockBelow 修复 + 可推动, 坐上船的时候物品栏上方提示按shift下船，并且可以在船上右键另外一艘船来坐上去，还有船在水里的时候中间不要显示水了，是隔绝的，以及就是船从冰上走下水直接沉底了，有问题，还有生存模式下有可能坐船沉底按shift之后还是下不来 |
+| t509 | ⚠️ | **铁傀儡建造修复（复盘：仍生成不了）** `fb56fb1` | T 形检测静态复核正确 + 加诊断 qInfo（probe/miss 日志定位静默失效：南瓜放偏/底排不全/overlaps 拒放） |
+| t510 | ⚠️ | **雪傀儡机制（复盘：积雪层显示完整方块但身体可穿过=应半格；底下应永远有积雪层铲掉即时再生可刷雪球）** `5380afa` | aiSnowGolem meltAccum 慢扣血（1HP/s，非即死）+ 水扣血 + 死掉 0-15 雪球 + 剪刀剪南瓜→derpy 无头形态 + 行走留 SnowLayer(t482) |
 
 **t500**：草方块生存挖 → 掉泥土（dirt）；精准采集附魔（silk_touch，附魔书/工具）→ 掉草方块。机制等价 MC 1.0。**t501**：木梯当前放方块中间（错）→ 应贴方块侧边（似火把），须完整方块侧支撑（草/门/活版门等不完整方块侧不可放）；贴图面向所贴侧；玩家对有梯侧按空格爬升 / Shift 下降。**t502**：熔炉 UI——加燃料进度条（显示当前燃料剩余可烧数），成品槽移到两左槽（燃料+原材料）的中间下方（现对齐原材料），熔烧进度条位置移到原材料与成品之间（现贴原材料）。**t503**：仙人掌 worldgen 不生于水平 4 邻有实体方块处（否则立即破坏掉落，t445 有放置校验，worldgen 散布要守同样规则）；挖任意仙人掌格 → 其上整柱掉落（dropCactusColumn 已有，核实 worldgen/挖路径）；挖下方沙 → 整柱掉落（checkCactusOnEdit）。**t504**：枯死灌木（DeadBush）挖其下方方块 → 灌木掉落（同草/花的支撑校验）。**t505**：积雪层重做——薄（1/8 格高），可堆叠 8 层（state 0-7 = 高度），玩家可踩（半格平滑上行，8 级）；雪块（Snow）= 实心整块；雪原 worldgen 改：底雪块 + 顶不同高度积雪层（真实积雪）；挖掘：空手不掉，铲掉雪球（SnowLayer 掉 1 雪球/层，Snow 掉 4 雪球），4 雪球合成 1 雪块，积雪层不可合成但创造栏可见。**t506**：冰生存挖 → 生成水方块（如置水源）；浮冰/蓝冰挖 → 不掉（需精准采集）；浮冰贴图修（t495）；冰上船打滑加速核实。**t507**：花/蘑菇挖其下方草/泥土 → 掉落（支撑校验，同甘蔗/仙人掌模式）；加白蘑菇（BrownMushroom）；蘑菇汤 = 蘑菇碗 + 红蘑菇 + 白蘑菇。**t508**：船重做——实体（可被玩家/方块推动）、水面漂浮、玩家骑乘 WASD 开动、冰上打滑且更快；模型修正（完整船体，现左右空）；挖船 → 掉落船物品（现挖不掉，回收修复）。**t509**：铁傀儡 T 形铁块×4 + 南瓜摆放检测（t483 实装但用户造不出）→ 核实检测逻辑（十字 T 形 vs 玩家朝向）修复。**t510**：雪傀儡机制——沙漠/热群系召唤扣血但不即死（~10 HP 慢扣，现召唤即死）、下水扣血、死掉雪球、南瓜头可剪（剪刀 → 南瓜掉落 + 傀儡变无头 derpy 形态带眼不死的 sheared 版）、行走留积雪层（联动 t505）。
+
+**复盘补遗（2026-08-12 用户 playtest，覆盖 t501-t510）**：
+- **t501**：① 木梯贴图未换 pack `textures/block/ladder.png`；② 爬梯时挖掘优先选中梯子（挖不了旁边方块）→ 应像火把：**不优先选中梯子、可透视穿过**，只有指针完全对准梯子才选中挖掘。
+- **t504**：① 挖掉枯木**下方方块**应掉**木棍**（枯木挖掉后概率掉的木棍），非枯木自身（像草挖下方不掉草物品）；② 枯木贴图**边缘平滑奇怪**（应像素化粗糙）。
+- **t505**：① 雪块被铲子挖掉应掉 **2-3 个雪球**（现掉落数不对）snowball.png雪球的贴图文件，在item里面；② **雪球 item** 创造模式物品栏无显示（应属**材料类**）；③ **雪球可丢弃发射**：右键发射（仿箭实体），砸到怪物**不扣血但红色受击动画 + 少量击退**；雪傀儡也可发射雪球攻击敌对（爬行者/骷髅弓手/僵尸/蜘蛛）；砸地面 → **破碎动画消失**。
+- **t508**：① 船贴图错误；② 3D 模型应是**碗形**（四面八方都凸起、中间凹下去），现只有船头船尾凸起（U 形=碗形错）；③ 创造背包里船归入**材料** tab，应放**工具** tab。
+- **t509**：铁傀儡**仍生成不了**（上轮加诊断日志但用户反馈未解决，需继续查运行时原因）。
+- **t510**：① 积雪层显示**完整方块**但身体可穿过（应半格薄层显示，高度 1-8 格预设是对的）；② 雪傀儡**底下应永远有积雪层**，铲掉后没立即生成回来（应即时再生，可无限刷雪球）。
 
 ## D. UI/交互
 
 | 任务ID | 状态 | 标题（详细） | 文件 |
 |---|---|---|---|
-| t511 | ✅ | **创造背包分类标签（MC 式 tabs）+ 去冗余文字 + chest 标签 → 生存背包** `94f20ee` | Inventory.qml 6 tabs（方块/工具/材料/护甲/食物/箱子）+ filteredPalette + 去标题/选中/销毁提示 + chest→setMode(Survival) |
+| t511 | ⚠️ | **创造背包分类标签（复盘：点箱子 tab 竟切到生存模式，应保持创造但显示物品/护甲便于穿上）** `94f20ee` | Inventory.qml 6 tabs（方块/工具/材料/护甲/食物/箱子）+ filteredPalette + 去标题/选中/销毁提示 + chest→setMode(Survival) |
 | t512 | ✅ | **创造背包 hover 物品 + 按 1-9 快速换组（强制替换）** `5a9e765` | Inventory.qml creativeHoveredItemId + forceReplaceHotbarFromCreative（setStack 覆盖），keyInput 1-9 分流 |
-| t513 | ✅ | **食物系统修复** `527db24` | foodHungerAmount 加胡萝卜+3/土豆+1 + foodColor 按食物色屑粒（甜浆果暗红等）+ m_eatCooldown 1s |
-| t514 | ✅ | **甜浆果丛可种植（现只能吃不能种）** `527db24` | placeBlock SweetBerryId 分支右键 Grass/Dirt→setBlock SweetBerryBush state 0（eventFilter 种植优先于进食） |
+| t513 | ⚠️ | **食物系统修复（复盘：生猪肉/生牛肉/熟肉都吃不了；长按右键一直吃停不下来）** `527db24` | foodHungerAmount 加胡萝卜+3/土豆+1 + foodColor 按食物色屑粒（甜浆果暗红等）+ m_eatCooldown 1s |
+| t514 | ⚠️ | **甜浆果丛可种植（复盘：可种但不知会不会长大/长大贴图/摘成熟浆果/生存碰到扣血）** `527db24` | placeBlock SweetBerryId 分支右键 Grass/Dirt→setBlock SweetBerryBush state 0（eventFilter 种植优先于进食） |
 
 **t511**：创造背包加分类标签（参考 MC 1.0 创造模式 tabs：建筑方块/装饰/红石/交通工具/食物/工具/战斗/酿造/材料 等，按本项目已有内容裁剪）；点击 tab 切换分类页；**移除**「创造物品栏」标题、「当前选中：xxx」行、「点击右侧销毁 xxx」文字（用户嫌冗余）；**chest 标签**点击 → 跳转生存背包（可对物品操作含装甲）。**t512**：创造背包中鼠标 hover 一个方块/物品 + 按数字键 1-9 → 取一组该物品**强制替换**到对应 hotbar 槽（不管原槽有无物品）。**t513**：食物——胡萝卜/马铃薯/马铃薯当前不能吃 → 修可吃；吃的时候甜浆果吐橙色方块（现占位）→ 加专门的食物咀嚼/碎屑粒子贴图（从 pack 或程序生成）；进食机制——右键一次启动进食 → 吃完一个 → 短冷却（非按住右键连续吃），手持动画在冷却期显示。**t514**：甜浆果丛（SweetBerryBush）当前只能采摘吃，不能种下 → 右键草地/泥土种植（浆果物品作种子，机制等价 MC 浆果丛种植）。
+
+**复盘补遗（2026-08-12 用户 playtest，覆盖 t511-t514）**：
+- **t511**：点**箱子 tab** 竟**直接切到生存模式**（错）→ 应**保持创造模式**，但显示物品/护甲（便于创造直接拿起护甲穿上去）；箱子 tab 是图标类入口，不该切模式。
+- **t513**：① 生猪肉/生牛肉/熟肉**都吃不了**（食物列表有但右键无反应）；② **长按右键一直吃停不下来**（应吃完一个 + 短冷却，非按住连吃）。
+- **t514**：浆果**可种植了**，但需确认：① 会不会长大（生长阶段）；② 长大后的贴图做了没；③ 右键摘成熟浆果做好没；④ 生存模式碰到浆果丛**扣血**做了没。
 
 ## 执行备注
 - **P0 性能先做**（t488-t490）：用户痛点是"清实体仍卡 + TNT 只爆 1 + 要水动画"。t488 诊断残留是后续所有判断的基础（若残留是流体/槽位，可能影响批 2-4）。
