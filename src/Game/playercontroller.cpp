@@ -930,7 +930,8 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
                                 || brokenId == BlockRegistry::SprucePlanks
                                 || brokenId == BlockRegistry::WheatCrop
                                 || brokenId == BlockRegistry::CarrotCrop
-                                || brokenId == BlockRegistry::PotatoCrop)
+                                || brokenId == BlockRegistry::PotatoCrop
+                                || brokenId == BlockRegistry::SnowLayer) // t505 雪层按 state 掉 (state+1) 雪球
         ? m_world->stateAt(x, y, z) : quint8(0);
     // t506 冰（Ice）生存挖掘 → 生成水方块（机制等价 MC 1.0 冰破成水）：精准采集（SilkTouch）→ 走通用 silk 分支
     //   掉 Ice 自身（line ~1007），不在此处理；非精准采集 → 破冰格置水源（Water state=0）而非 Air。PackIce /
@@ -1007,6 +1008,15 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             //   （decayLeavesAround）不走此（无掉落）。brokenState 不影响叶掉落（无 state 派生 —— PersistentLeafBit
             //   仅控衰减，破叶掉落同）。
             dropLeafDrops(x, y, z);
+        } else if (brokenId == BlockRegistry::SnowLayer) {
+            // t505 雪层铲挖掉雪球（机制等价 MC 1.0 snow layer 铲挖掉 (layer+1) 雪球；空手不掉落由 canHarvest
+            //   requiresTool=true 守卫，到 drop=true 路径即已持铲）。每层雪球数 = state+1（state 0..7 → 1..8 雪球，
+            //   机制等价 MC 雪层掉雪球按层数；brokenState 已在 setBlock(Air) 前 capture，stateAt 读旧层数可靠）。
+            //   走 spawnItem 一次 emit count=(state+1) 件（同甘蔗 / 仙人掌级联外的单格多件，1 实体携多层雪球，
+            //   拾取 addStack 一次入多层；机制对标 MC 雪层挖出多雪球）。SnowLayer.dropId=SnowballId(0x23D) 表兜底，
+            //   本分支按 state 精确放大 count 覆盖通用 dropId/dropCount（同 WheatCrop/TallGrass 按 state 掉落模式）。
+            const int layers = std::min(int(brokenState) + 1, int(BlockRegistry::SnowLayerStageMax) + 1); // clamp 1..8
+            emit spawnItem(x, y, z, RecipeRegistry::SnowballId, layers);
         } else if ((brokenState & BlockRegistry::DoubleSlabMarkerBit)
                    && BlockRegistry::fullBlockSlabDrop(brokenId) != 0) {
             // t215/t412 双半砖（合并态）破块掉 2× 对应半砖为**2 个独立物品实体**（非 1 个 count=2 栈）：
@@ -2712,6 +2722,26 @@ void PlayerController::placeBlock()
                 return;
             }
         }
+    }
+    // t505 积雪层堆叠（机制等价 MC 1.0 snow layer 同格堆叠 8 层）：玩家持 SnowLayer 右键**已存在的 SnowLayer**
+    //   → 层数 +1（state +1，clamp 到 SnowLayerStageMax=7；高度 (state+1)/8 递增，机制等价 MC 雪层逐层堆高到满格）。
+    //   命中格（m_hitBx/y/bz）= 玩家点击的现有雪层；在其上「补雪」而非落到邻格。同格满 8 层（state=7 = 满格高 1.0）
+    //   时不再叠加（继续堆会变满格，机制对标 MC 雪层 8 层封顶）。合成也是「放置」→ 挥手；走 5 参数 setBlock
+    //   （id 不变只 state 变 → 仅 worldChanged 重建 mesh、不发 broken/placed；同甘蔗采摘降阶段模式）。
+    //   预检 overlapsPlayerAABB：更高层雪层碰撞盒更高，可能嵌入玩家 → 合成前查自埋（同 slab 合成满砖）。
+    //   **区别 slab 合并**（两半合成整砖、清空再写满格 + marker）：雪层堆叠保留 SnowLayer id，仅 state+1。
+    if (m_selectedBlock == BlockRegistry::SnowLayer
+        && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::SnowLayer) {
+        const quint8 curState = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+        if (curState < BlockRegistry::SnowLayerStageMax) {
+            const quint8 newState = quint8(curState + 1);
+            if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::SnowLayer, newState)) return;
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::SnowLayer, newState);
+            m_lastPlaceMs = now;
+            emit swingArm();
+            return;
+        }
+        // state 已满（7 = 满格高 1.0）→ 不再叠加，落回常规放置（在邻格放新雪层 state=0）。
     }
     // t198 水中可放方块（排开水）/ t351 岩浆同理（排开岩浆）：目标格为空气 / 水 / 岩浆均可放置；流体被
     //   方块直接覆盖 → World::setBlock 内 oldId=Water/Lava → newId=实体走「放置」分支（仅发 blockPlaced，

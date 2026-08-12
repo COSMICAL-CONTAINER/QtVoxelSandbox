@@ -453,6 +453,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     const bool isPartialX = BlockRegistry::isPartialBlock(b)
                                             || b == BlockRegistry::Farmland // t408 耕地矮盒经 PartialBlockGeometry 渲染（露 1/16 唇）
                                             || b == BlockRegistry::Cactus   // t445 仙人掌 0.8 细柱经 PartialBlockGeometry 渲染（非满格）
+                                            || b == BlockRegistry::SnowLayer // t505 积雪层薄板经 PartialBlockGeometry 渲染（state 高度 1/8..1.0；非满格）
                                             || BlockRegistry::isBed(b);     // t457 床低 3D 模型经 PartialBlockGeometry 渲染（非整立方）
                     const bool isCrossX   = BlockRegistry::isCrossBillboard(b);
                     // t326 cross cutout 分流：cross 方块（草丛/作物/树苗）贴图带 alpha 透明底 → 进独立 cutout 段
@@ -740,6 +741,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Farmland) continue; // t408 耕地矮盒已在 PASS 1；不进整立方面（否则满格立方覆盖矮盒唇）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isCrossBillboard(blk)) continue; // t235/t305 cross（草丛/作物/树苗）已在 PASS 1；不进立方面
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Cactus) continue; // t445 仙人掌 0.8 细柱已在 PASS 1；不进整立方面（否则满格立方覆盖细柱）
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::SnowLayer) continue; // t505 积雪层薄板已在 PASS 1；不进整立方面（否则满格立方覆盖薄板）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(blk)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面（否则满格立方覆盖低床）
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                             if (BlockRegistry::isSolid(nb)) continue;       // 邻居实体 → 剔除（跨 chunk 路由正确）

@@ -647,6 +647,16 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                       0,                            0,
         0,                       0,                            0 },
       RecipeRegistry::MushroomStewId, 1, 1, "mushroom_stew" },
+    // t505 雪块（snow block）：4 雪球 2×2 方阵 → 1 雪块（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0
+    //   雪块配方（4 snowballs → 1 snow block）。最小包围盒 2×2（满），与 craftingTable（2×2 满铺木板）包围盒
+    //   尺寸同但原料不同（本为雪球 / 工作台为木板）→ shaped 逐格比对区分（不冲突）。原料 SnowballId（材料段
+    //   0x23D，雪傀儡死亡掉落 / 铲挖雪层 / 铲挖雪块获得）。产物 = Snow（方块段 101，实心整立方；4 雪球 ↔ 1 雪块
+    //   存储方块，机制对标 MC snow block 配方）。铲挖雪块掉 4 雪球 + 4 雪球合雪块 → 闭环（无损耗，机制等价 MC）。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { RecipeRegistry::SnowballId, RecipeRegistry::SnowballId, 0,
+        RecipeRegistry::SnowballId, RecipeRegistry::SnowballId, 0,
+        0,                           0,                          0 },
+      int(BlockRegistry::Snow), 1, 1, "snow_block" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

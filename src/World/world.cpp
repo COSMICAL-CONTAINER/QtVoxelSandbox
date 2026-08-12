@@ -2068,10 +2068,24 @@ void World::generate()
                     else if (h - y < desertSandThickness + desertSandstoneThickness) b = BlockRegistry::Sandstone; // 沙下砂岩
                     else                                                b = BlockRegistry::Stone;      // 深石
                 } else {
-                    if (y == h)          b = (bio == Biome::Snowy) ? BlockRegistry::SnowLayer  // t395 雪原地表覆雪（机制等价 MC 寒冷群系覆雪）
-                                                                  : BlockRegistry::Grass;      // 草地表层
-                    else if (y >= h - 2) b = BlockRegistry::Dirt;  // 土
-                    else                 b = BlockRegistry::Stone; // 石
+                    if (y == h && bio == Biome::Snowy) {
+                        // t395/t505 雪原地表覆雪（机制等价 MC 寒冷群系覆雪）。**t505 改薄层**（SnowLayer 薄板，
+                        //   state 0..2 随机 = 高度 1/8..3/8 真实积雪，区别旧满格整立方）。worldgen 把草顶替换为薄雪
+                        //   层 → 下方 y-1 仍 Dirt 故雪覆土上。state 走 hashColumn 独立位段 (colHash>>4)%3（与沙漠沙
+                        //   厚度位段解耦；同列同 seed 确定 → PLAN §2-K）→ 真实积雪 3 级随机厚度（机制等价 MC 雪原
+                        //   覆雪不均匀）。m_chunks.setBlock 5 参数版写 id+state（worldgen 静默；光场随后 recomputeLightField
+                        //   重算）。云杉树 / 浆果丛据 SnowLayer 守卫仍生于雪顶（spec「云杉生于雪上」）。
+                        const quint32 slHash = hashColumn(m_seed, x, z);
+                        const quint8 snowState = quint8((slHash >> 4) % 3u); // 0..2（独立位段，确定性）
+                        m_chunks.setBlock(x, y, z, BlockRegistry::SnowLayer, snowState);
+                        continue; // 已写 SnowLayer（含 state），跳过下方默认 4 参数 setBlock（其会重置 state=0）
+                    } else if (y == h) {
+                        b = BlockRegistry::Grass;      // 草地表层
+                    } else if (y >= h - 2) {
+                        b = BlockRegistry::Dirt;       // 土
+                    } else {
+                        b = BlockRegistry::Stone;      // 石
+                    }
                 }
                 m_chunks.setBlock(x, y, z, b);
             }

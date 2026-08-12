@@ -537,6 +537,21 @@ int PartialBlockGeometry::append(
                 BlockRegistry::def(blockId).topTile); // +Y 顶面 cactus_top(54)；侧·底用 tile(=cactus_side 55)
         break;
     }
+    case BlockRegistry::SnowLayer: {
+        // t505 积雪层薄板（机制等价 MC 1.0 snow layer 8 层）：贴地薄板，高度由 state 驱动（state 0..7 → 高度
+        //   (state+1)/8，1/8..1.0 八级；snowLayerHeight 单一权威）。全 footprint xz[0,1]、y[0, height]：+Y 顶面
+        //   snow(57)（def.topTile，玩家踩薄层顶所见）、侧·底 snow(57)（同 tile；侧面露出薄层高度带，底部不可见）。
+        //   **非满格整立方** —— SnowLayer solid=false（同 Farmland / glass / Cactus），mesher 路由进 PASS 1
+        //   （chunkgeometry），不进 PASS 2 立方面（否则满格立方覆盖薄板）。相邻整立方不剔面（solid=false）→
+        //   画出满高侧壁填住薄层上方缺口（防透视 x-ray 洞，同 Farmland 模式）。全 6 面发（pushBox 不剔面；
+        //   异形小体约定，内 / 底面被自身或下方实体遮挡，overdraw 可忽）。state 越界 clamp 由 snowLayerHeight 兜底。
+        //   topTile 取 def.topTile(57) → +Y 顶面贴 snow 贴图；侧·底用 tile(=sideTile snow 57)。
+        const float h = BlockRegistry::snowLayerHeight(state);
+        pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, h, 0.f, 1.f,
+                tile, light, tileW, hx, hy, v0, v1,
+                BlockRegistry::def(blockId).topTile); // +Y 顶面 snow(57)；侧·底用 tile(=sideTile snow 57)
+        break;
+    }
     case BlockRegistry::Farmland: {
         // t408 耕地矮盒：机制等价 MC 耕地比整立方矮 1 像素（15/16=0.9375）→ 顶面略陷，相邻整立方（草地等）上方
         //   露出 1/16 唇。全 footprint、y[0, 0.9375]：顶面 farmland_dry(26)（湿润暗化由 mesher 在 lctx.face[+Y] 预乘

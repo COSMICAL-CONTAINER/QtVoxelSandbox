@@ -206,12 +206,17 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   isCrossBillboard 谓词（同 Sapling 模式），mesher 路由一律读谓词。进创造调色板（装饰取用）。
     /* dead_bush    */ {int(BlockRegistry::DeadBush),                   56, 56, 56, 56, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "dead_bush",    "枯死的灌木"},
     // ── t395 雪原/针叶群系内容（机制等价 MC 1.0 寒冷群系三件套：snow / ice / spruce log；名称 / 贴图全原创自绘 §9a）：
-    //   积雪层（SnowLayer）：雪原/针叶群系地表覆盖（worldgen 在 Snowy 群系把草顶替换为积雪层）。整立方 opaque
-    //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 sand / sandstone 同族；简化为满格整立方
-    //   非 MC 薄雪层，避免异形几何复杂度）、hardness=0.2（同 MC 1.0 雪层量级，软质）、toolType=Shovel（铲加速；
-    //   requiresTool=false → 空手也掉落，仅速度受铲影响）、dropId=自身（破积雪层掉积雪层方块，可放回）、dropCount=1、
+    // ── t395 雪原/针叶群系内容（机制等价 MC 1.0 寒冷群系三件套：snow / ice / spruce log；名称 / 贴图全原创自绘 §9a）：
+    //   积雪层（SnowLayer）：**t505 改薄层**（机制等价 MC 1.0 snow layer 8 层）——贴地薄板，高度由 state 驱动
+    //   （state 0..7 → 高度 (state+1)/8，1/8..1.0 八级；MC 薄雪层可堆 8 层、玩家可踩 + 半格平滑 auto-step 上行）。
+    //   solid=false / ShapeSnowLayer（走 PartialBlockGeometry 薄板渲染，**非**整立方；同 Farmland / glass 模式 ——
+    //   solid=false → 相邻整立方不剔面、画出满高侧壁填住薄层上方缺口，防透视 x-ray 洞）。collision/selection =
+    //   cell 底薄板 {0,0,0,1,height,1}（玩家立于薄层顶 = cell+height；高度 ≤0.5 时玩家 t163 auto-step 抬升 0.55
+    //   即可跨过，无需跳）。hardness=0.2（软质）、**toolType=Shovel + requiresTool=true + minTier=0**（铲挖掉雪球；
+    //   空手挖不掉落 —— 机制等价 MC 雪层铲挖掉雪球、空手无掉落）、dropId=0x23D（雪球 SnowballId，t510）、
+    //   dropCount=1（基础兜底，每层雪球数由 playercontroller 按 state+1 精确掉落，同 WheatCrop 按 state 掉落模式）、
     //   maxStack=64。各面贴图=snow(57)（冷白底 + 细密冰晶噪点）。音色归 GroupSand（颗粒雪响）。进创造调色板。
-    /* snow_layer   */ {int(BlockRegistry::SnowLayer),                  57, 57, 57, 57, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::SnowLayer),     1, 64, "snow_layer",   "积雪层"},
+    /* snow_layer   */ {int(BlockRegistry::SnowLayer),                  57, 57, 57, 57, false, BlockRegistry::ShapeSnowLayer, 0.2f, int(BlockRegistry::Shovel), 0, true,                            0x23D, 1, 64, "snow_layer",   "积雪层"},
     //   冰（Ice）：雪原/针叶群系水面冻结产物（worldgen freezeSurfaceWater / tickIceFreeze 把 Snowy 群系暴露天空
     //   的水源冻结为冰）。**t468 改透明整立方**（机制等价 MC 1.0 半透冰）：solid=**false** / ShapeFull（同 glass 契约 ——
     //   solid=false → 相邻实体方块不剔面 → 透过半透冰可见背后方块；碰撞 / 选中仍走 ShapeFull 整格可踩；走 mesher 的
@@ -436,11 +441,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   音色归 GroupGrass（软植物音）。进创造调色板（搭建用）。
     /* pumpkin      */ {int(BlockRegistry::Pumpkin),          119,119,117,118, true,  BlockRegistry::ShapeFull,     1.0f, int(BlockRegistry::NoTool),    0, false, int(BlockRegistry::Pumpkin),        1, 64, "pumpkin",     "南瓜"},
     //   雪块（Snow）：雪傀儡身体方块（南瓜 + 雪块×2 竖直搭建）。整立方 opaque（solid=true / ShapeFull，与
-    //   SnowLayer 同族）、hardness=0.2（软质）、Shovel（铲加速；requiresTool=false 空手也掉落）、dropId=自身、
-    //   dropCount=1、maxStack=64。各面贴图=snow(57)（冷白底+细密冰晶噪点，与 SnowLayer 共享）。音色归
-    //   GroupSand（颗粒雪响）。进创造调色板（搭建用；区别 SnowLayer 的满格整立方 —— 雪傀儡机制等价 MC 用
-    //   「雪块」满格而非薄雪层）。
-    /* snow         */ {int(BlockRegistry::Snow),             57, 57, 57, 57,  true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Shovel),   0, false, int(BlockRegistry::Snow),          1, 64, "snow",        "雪块"},
+    //   SnowLayer 同族；区别 SnowLayer 是薄层、Snow 是实心满格 —— 雪傀儡机制等价 MC 用「雪块」满格而非薄雪层）、
+    //   hardness=0.2（软质）、**toolType=Shovel + requiresTool=true + minTier=0**（t505：铲挖掉 4 雪球；空手挖不掉落
+    //   —— 机制等价 MC 1.0 雪块铲挖掉 4 雪球、空手无掉落）、dropId=0x23D（雪球 SnowballId，材料段 t510）、
+    //   **dropCount=4**（MC 1.0 雪块铲挖掉 4 雪球）、maxStack=64。各面贴图=snow(57)（冷白底+细密冰晶噪点，与
+    //   SnowLayer 共享）。音色归 GroupSand（颗粒雪响，同 SnowLayer）。**4 雪球合 1 雪块**（recipe.cpp）。
+    //   进创造调色板（搭建用；区别 SnowLayer 的薄层 —— 雪傀儡机制等价 MC 用「雪块」满格而非薄雪层）。
+    /* snow         */ {int(BlockRegistry::Snow),             57, 57, 57, 57,  true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Shovel),   0, true,                            0x23D, 4, 64, "snow",        "雪块"},
     // ── t484 废弃矿井结构方块（机制等价 MC 1.0 废弃矿井 mineshaft 的蛛网 / 铁轨；名称 / 贴图全原创自绘 §9a）。
     //   蜘蛛网（Cobweb）：cross 形蛛网（透明底 + 灰白蛛丝放射网纹，alphaCutoff cutout），与草丛 / 树苗同走 cross
     //   几何段。solid=false（不挡邻居面剔除）、ShapeNone（无碰撞，玩家穿过）、hardness=0（瞬破）、NoTool（空手可采）、
@@ -898,6 +905,17 @@ float BlockRegistry::iceSlipApproach(quint8 blockId)
     return 0.0f;                          // 非冰（caller 走常规地面路径）
 }
 
+// t505 积雪层 state → 薄板高度（cell-local [0,1]；state 0..7 → 1/8..1.0；机制等价 MC 1.0 snow layer 8 层）。
+//   state 越界 clamp 到 [0, SnowLayerStageMax=7] 兜底（防异常 / 旧存档脏 state）。单一权威：mesher
+//   （PartialBlockGeometry SnowLayer case 薄板高度）+ collisionAABBs / selectionAABBs / raycastAABBs /
+//   solidTopOffset / worldgen / playercontroller 雪层掉雪球（state+1）统一读本函数，避免各处自写 (state+1)/8
+//   漂移。返回 (clamp(state,0,7)+1)/8.0f → state 0=1/8(0.125) .. state 7=8/8(1.0 满格)。
+float BlockRegistry::snowLayerHeight(quint8 state)
+{
+    const quint8 s = (state > SnowLayerStageMax) ? SnowLayerStageMax : state;
+    return float(int(s) + 1) / 8.0f;
+}
+
 // 方块是否「有碰撞 sub-AABB」（考虑开合态）。air / torch / water（ShapeNone）→ false。
 //   越界 → false（air 兜底）。单一权威：isCollidable 与 collisionAABBs 共用，保证「预判」与「精确碰撞」
 //   对开合态一致。t261：门恒挡（门板开合都实存 —— 合贴朝向边 / 开旋 90° 贴铰链侧邻边）。t359：活版门开合都实存
@@ -1048,6 +1066,15 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
         //   本低盒（机制等价 MC 床低 hitbox + 视觉床头板凸出 —— 玩家可站床垫顶、床头板不挡碰撞）。
         out.push_back({0, 0, 0, 1, BlockRegistry::kBedMattressTop, 1});
         return out;
+    case BlockRegistry::ShapeSnowLayer: {
+        // t505 积雪层薄板（机制等价 MC 1.0 snow layer 8 层）：cell 底薄板 y[0, snowLayerHeight(state)]。
+        //   高度由 state 驱动（state 0..7 → 1/8..1.0；snowLayerHeight 单一权威）。玩家立于薄层顶 = cell+height；
+        //   高度 ≤0.5 时玩家 t163 auto-step 抬升 0.55 即可跨过（机制等价 MC 薄雪层可踩 + 半格平滑上行）。
+        //   与 partialblockgeometry SnowLayer case 渲染同源（同一 height，碰撞与渲染贴合）。
+        const float h = BlockRegistry::snowLayerHeight(state);
+        out.push_back({0, 0, 0, 1, h, 1});
+        return out;
+    }
     }
     return out; // 未知 shape → 空（兜底）
 }
@@ -1148,6 +1175,7 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
     case ShapeFull:     return 1.0f;                          // 整立方
     case ShapeDoor:     return 1.0f;                          // 满高薄板
     case ShapeBed:      return kBedMattressTop;               // t457 床床垫顶 ~0.31（PCF 软影遮挡高度同床垫顶）
+    case ShapeSnowLayer: return snowLayerHeight(state);       // t505 积雪层薄板顶 = snowLayerHeight(state)（1/8..1.0）
     default:            return 1.0f;                          // ShapeNone（air/torch/water）不入 heightmap 顶，兜底 1.0
     }
 }

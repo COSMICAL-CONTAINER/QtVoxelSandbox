@@ -288,12 +288,22 @@ public:
                                   //   中间且非 cross），故并入 isCrossBillboard 谓词（同 Sapling 模式 —— 单一权威，避免 mesher /
                                   //   选中框多处分流漂移），mesher 路由一律读谓词。
         // ── t395 雪原/针叶群系内容（机制等价 MC 1.0 寒冷群系三件套：snow / ice / spruce log；名称 / 贴图全原创自绘 §9a）：
-        SnowLayer      = 44, // 积雪层：雪原/针叶群系地表覆盖（worldgen 在 Snowy 群系把草顶替换为积雪层）。整立方 opaque
-                                  //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 sand / sandstone 同族；
-                                  //   简化为满格整立方非 MC 薄雪层，避免异形几何复杂度）、hardness=0.2（同 MC 1.0 雪层量级，软质）、
-                                  //   toolType=Shovel（铲加速；requiresTool=false → 空手也掉落，仅速度受铲影响）、dropId=自身
-                                  //   （破积雪层掉积雪层方块，可放回）、dropCount=1、maxStack=64。各面贴图=snow(57)（冷白底 +
-                                  //   细密冰晶噪点，原创自绘 §9a）。音色归 GroupSand（颗粒雪响）。进创造调色板（玩家可取用 / 放置）。
+        SnowLayer      = 44, // 积雪层：雪原/针叶群系地表覆盖（worldgen 在 Snowy 群系把草顶替换为积雪层）。
+                                  //   **t505 改薄层**（机制等价 MC 1.0 snow layer 8 层）：贴地薄板，高度由 state 驱动
+                                  //   （state 0..7 → 高度 (state+1)/8，1/8..1.0 八级；机制等价 MC 薄雪层可堆 8 层、
+                                  //   玩家可踩 + 半格平滑 auto-step 上行）。solid=false / ShapeSnowLayer（走
+                                  //   PartialBlockGeometry 薄板渲染，**非**整立方；同 Farmland / glass 模式 ——
+                                  //   solid=false → 相邻整立方不剔面、画出满高侧壁填住薄层上方缺口，防透视 x-ray 洞）。
+                                  //   collision/selection = cell 底薄板 {0,0,0,1,height,1}（玩家立于薄层顶 = cell+height；
+                                  //   高度 ≤0.5 时玩家 t163 auto-step 抬升 0.55 即可跨过，无需跳）。
+                                  //   hardness=0.2（同 MC 1.0 雪层量级，软质）、**toolType=Shovel + requiresTool=true +
+                                  //   minToolTier=0**（铲挖掉雪球；空手挖不掉落 —— 机制等价 MC 1.0 雪层铲挖掉雪球、
+                                  //   空手无掉落；minTier=0 → 任意等级铲均可采掘）、dropId=0x23D（雪球 SnowballId 材料段，
+                                  //   t510）、dropCount=1（基础兜底，每层雪球数由 playercontroller 按 state+1 精确掉落，
+                                  //   同 WheatCrop 按 state 掉落模式）、maxStack=64。各面贴图=snow(57)（冷白底 +
+                                  //   细密冰晶噪点）。音色归 GroupSand（颗粒雪响）。进创造调色板（玩家可取用 / 放置）。
+                                  //   **state 经 m_states 落 SQLite round-trip 保真**（存档读回仍带层数；旧存档雪层
+                                  //   state=0 → 1/8 薄层，迁移自然）。worldgen 在 Snowy 群系草顶散布薄层（state 随机 0..2）。
         Ice            = 45, // 冰：雪原/针叶群系水面冻结产物（worldgen freezeSurfaceWater / tickIceFreeze 把 Snowy 群系
                                   //   暴露天空的水源冻结为冰）。**t468 改透明整立方**（机制等价 MC 1.0 半透冰）：solid=false /
                                   //   ShapeFull（同 glass 契约 —— solid=false → 相邻实体方块不剔面 → 透过半透冰可见背后方块；
@@ -576,12 +586,14 @@ public:
         //   进创造调色板（玩家取用 / 搭建）。
         Pumpkin         = 100, // 南瓜：造物头部方块（雪傀儡 / 铁傀儡搭建触发物）
         //   雪块（Snow）：雪傀儡的身体（南瓜 + 雪块×2 竖直搭建）。整立方 opaque（solid=true / ShapeFull ——
-        //   走 mesher 整立方面路径，**非**异形，与 SnowLayer 同族）、hardness=0.2（同 MC 1.0 雪块量级，软质）、
-        //   toolType=Shovel（铲加速；requiresTool=false → 空手也掉落）、dropId=自身、dropCount=1、maxStack=64。
-        //   各面贴图=snow(57)（冷白底 + 细密冰晶噪点，与 SnowLayer 共享；tools/build_snow.py 程序生成）。
-        //   音色归 GroupSand（颗粒雪响，同 SnowLayer）。**造物触发**：placeBlock 放置南瓜后检测下方雪块×2 →
-        //   生成雪傀儡 + 移除结构。进创造调色板（玩家取用 / 搭建；区别 SnowLayer 的满格整立方 —— 雪傀儡
-        //   机制等价 MC 用「雪块」（满格）而非薄雪层，故独立方块 id）。
+        //   走 mesher 整立方面路径，**非**异形，与 SnowLayer 同族；区别 SnowLayer 是薄层、Snow 是实心满格 ——
+        //   雪傀儡机制等价 MC 用「雪块」满格而非薄雪层，故独立方块 id）、hardness=0.2（同 MC 1.0 雪块量级，软质）、
+        //   **toolType=Shovel + requiresTool=true + minTier=0**（t505：铲挖掉 4 雪球；空手挖不掉落 —— 机制等价
+        //   MC 1.0 雪块铲挖掉 4 雪球、空手无掉落）、dropId=0x23D（雪球 SnowballId，材料段 t510）、**dropCount=4**
+        //   （MC 1.0 雪块铲挖掉 4 雪球，机制等价非 1）、maxStack=64。各面贴图=snow(57)（冷白底 + 细密冰晶噪点，
+        //   与 SnowLayer 共享；tools/build_snow.py 程序生成）。音色归 GroupSand（颗粒雪响，同 SnowLayer）。
+        //   **造物触发**：placeBlock 放置南瓜后检测下方雪块×2 → 生成雪傀儡 + 移除结构。**4 雪球合 1 雪块**
+        //   （recipe.cpp 4 雪球 → 1 雪块，机制等价 MC 1.0 雪块配方）。进创造调色板（玩家取用 / 搭建）。
         Snow            = 101, // 雪块：造物身体方块（雪傀儡 2 块竖直）
         // ── t484 废弃矿井结构方块（机制等价 MC 1.0 废弃矿井 mineshaft 的蛛网 / 铁轨；名称 / 贴图全原创自绘 §9a）：
         //   蜘蛛网（Cobweb）：**cross 形广告牌方块**（与 TallGrass / Sapling 同走 PartialBlockGeometry 的 cross 几何段，
@@ -1065,7 +1077,26 @@ public:
                            //   机制等价 MC 床矮半高 hitbox；solid=false 避免相邻整立方误剔面出 x-ray 洞，同 Farmland /
                            //   Cactus 模式）。渲染走 PartialBlockGeometry（legs+plank+wool 子盒），不走整立方面。
                            //   state bit[1:0]=朝向、bit3=head(1)/foot(0)（同 door；head 半加枕头枕垫区分头/脚）。
+        ShapeSnowLayer = 9, // t505 积雪层薄层：贴地薄板，高度由 state 驱动（state 0..7 → 高度 (state+1)/8，
+                            //   1/8 .. 1.0 八级；机制等价 MC 1.0 snow layer 8 层堆叠）。solid=false（同 Farmland /
+                            //   glass —— 非满格 → 相邻整立方不剔面、画出满高侧壁填住薄层上方的缺口，防透视 x-ray
+                            //   洞）。渲染走 PartialBlockGeometry（顶面 snow 贴图的薄板 pushBox，y[0,height]）。
+                            //   collision/selection/raycast = cell 底薄板 {0,0,0,1,height,1}（玩家立于薄层顶 = cell+height；
+                            //   机制等价 MC 薄雪层可踩 + 半格平滑 auto-step 上行；高度 ≤0.5 时玩家 t163 auto-step
+                            //   抬升 0.55 即可跨过，无需跳）。state 经 m_states 落 SQLite round-trip 保真。
     };
+
+    // t505 积雪层（SnowLayer）层数上界（state 0..7 = 8 级高度）。机制等价 MC 1.0 snow layer 8 层
+    //   （state 0=1 层雪 / state 7=8 层雪 ≈ 满格）。state 经 m_states 落 SQLite round-trip 保真。
+    //   唯一消费点：snowLayerHeight（state → 高度比）、playercontroller 雪层掉雪球（state+1 个雪球）、
+    //   mesher PartialBlockGeometry SnowLayer case（薄板高度）。collision/selectionAABBs/solidTopOffset
+    //   经 snowLayerHeight 复用，单一权威（改高度映射只改本函数）。state 越界 clamp 到 0..7 兜底。
+    static constexpr quint8 SnowLayerStageMax = 7;
+
+    // t505 积雪层 state → 薄板高度（cell-local [0,1]，state 0..7 → 1/8..1.0）。state 越界 clamp 到
+    //   [0, 7] 兜底。mesher / collision / selection / solidTopOffset / worldgen / playercontroller 掉落
+    //   统一读本函数（单一权威，避免各处自写 (state+1)/8 漂移）。
+    static float snowLayerHeight(quint8 state);
 
     // t146 方块子碰撞/选中盒（**cell-local [0,1]^3 AABB**；世界坐标由 caller + (bx,by,bz) 偏移）。
     //   min/max 各轴，min <= max。完整方块单盒 {0,0,0,1,1,1}；异形方块可能多盒（stairs = 下步 + 背墙）。
