@@ -83,6 +83,16 @@ public:
             if (m_orbs[i].alive) releaseSlot(int(i));
         emit entitiesChanged();
     }
+    // t492 跨世界 delegate 泄漏修复：真正清空 vector（count→0）。clearAll 只标 alive=false（delegate 隐藏不销毁，
+    //   保 count 单调修 t170），但高水位（爆炸杀多怪产大量经验球等）后这些 delegate 永久驻留场景图，重进世界仍
+    //   在（仅隐藏）→ 持续吃场景图开销（同 itemHost/mobHost 族）。hardReset 让 count→0；但 reparent 的 3D delegate
+    //   仍不被 Repeater 销毁（t170），故 caller（QML world-exit）须配套手动 destroy xpOrbHost 的 delegate 子节点
+    //   （见 Main.qml clearEntDelegates）。**仅 world-exit / enterWorld 清旧段调**（非游玩期，无并发 spawn）。游玩期
+    //   的拾取 / 寿命到期仍走 releaseSlot（保 t256 slot-reuse 不变量）。
+    Q_INVOKABLE void hardReset() {
+        m_orbs.clear(); m_freeSlots.clear(); m_liveCount = 0;
+        ++m_revision; emit entitiesChanged();
+    }
 
     // 磁吸 + 拾取（C++ 直调；PlayerController::tick 每帧调，常开、独立于捕获态——菜单 / 暂停时
     //   球仍向玩家飞 / 仍可拾取，世界模拟连续，同 ItemEntityManager::tick）。playerCenter = 玩家

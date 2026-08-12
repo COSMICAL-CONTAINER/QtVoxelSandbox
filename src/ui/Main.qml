@@ -403,6 +403,26 @@ Window {
         keyInput.forceActiveFocus()
         audio.startAmbient()   // t177 环境音：进游戏启风声床（幂等；menu/worldlist 态已 stop）
     }
+    // t492 销毁 reparent 到 host（itemHost / mobHost / xpOrbHost）的实体 delegate。
+    //   背景：Repeater 创建的 3D delegate 在 onCompleted 里 reparent 进 host Node 进场景（t53/t95/t402）；但
+    //   QQuickRepeater 的跟踪表是 QQuickItem*，3D delegate（QQuick3DNode）不进表 + 所有权已转给 host → Repeater
+    //   在 count 减小时**不销毁** reparent 的 delegate（lessons-learned t170）。t256/t437 用 slot-reuse 让
+    //   clearAll 只标 alive=false（delegate visible=false 隐藏不销毁），保 count 单调修了游玩期 / 切世界孤儿化；
+    //   但代价是「爆炸期 count 飙到高位后，N 个 delegate（每个含多 Model 子节点）永久驻留 host 子树」，重进世界
+    //   它们仍在（仅隐藏）→ 持续吃场景图遍历 / 绘制开销 = 用户报「TNT 爆炸后退存档再进仍卡、只有重启 exe 才恢复」
+    //   的根因。
+    //   修法：world-exit / enterWorld 清旧段调 hardReset（count→0）后，配套调本函数扫 host.children 把标了
+    //   isEntDelegate 的子节点手动 destroy（destroy 是 QML 动态对象标准销毁，可靠回收整棵 delegate 子树，绕过
+    //   Repeater 不销毁坑）。Repeater 自身也是 host 的 child（无 isEntDelegate → undefined falsy → 跳过不误毁）。
+    //   destroy() 异步（延迟到事件循环），故先 children.slice() 复制再遍历（destroy 会改 children，原表迭代失效）。
+    //   仅 world-exit / enterWorld 清旧段调（非游玩期，无并发 spawn / pickup；游玩期走 releaseSlot 保 delegate）。
+    function clearEntDelegates(host) {
+        if (!host) return
+        const kids = host.children.slice()   // 复制（destroy 会改 children，故 slice 后遍历）
+        for (let i = 0; i < kids.length; ++i) {
+            if (kids[i] && kids[i].isEntDelegate) kids[i].destroy()
+        }
+    }
     // t176 进入指定世界（从世界列表点「进入 / 创建并进入」调）：打开存档 → 按是否有 chunk blob 分流
     //   （有 → 加载存档地形；无 → 新世界 worldgen）→ 加载玩家态（无 → 默认出生）→ 清实体残留 → 进游戏。
     //  机制等价 MC：选世界进游戏时若曾保存则恢复地形 + 玩家位姿，否则按 seed 新生。
@@ -430,10 +450,15 @@ Window {
         //   整体替换内存（先清后填）—— 无存档 chests 表 → 空列表 → 清空，杜绝上一世界箱子残留串入新世界。
         //   存档 chests 由 saveAndExitToWorldList 经 saveAll(name, chestStore.allChests()) 落盘。
         chestStore.loadAll(worldStore.loadChests())
-        // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）
-        itemEntities.clearAll()
-        entityManager.clearAll()
-        xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
+        // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）。
+        //   t492：用 hardReset（真清 vector → count→0）+ clearEntDelegates（destroy reparent 的 3D delegate）替代
+        //   clearAll。clearAll 只标 alive=false（delegate 隐藏不销毁，保 count 单调修 t170），但上一世界若 count 曾
+        //   飙到高位（爆炸 / 大量刷怪），那些 delegate 永久驻留 host 子树 → 重进仍卡。hardReset + destroy 真正清掉
+        //   它们，新世界 spawn 从 count=0 起重建 delegate（无 t170 残留：旧的已 destroy）。仅此处 + 退出世界两路径调
+        //   （非游玩期，无并发 spawn / pickup）；游玩期拾取 / 寿命到期仍走 releaseSlot（t256 不变量不变）。
+        itemEntities.hardReset();   clearEntDelegates(itemHost)
+        entityManager.hardReset();  clearEntDelegates(mobHost)
+        xpOrbs.hardReset();         clearEntDelegates(xpOrbHost)
         // t312：清聊天历史（不持久化 / 不跨世界；新世界从空起）。
         chatMessages.clear()
         // t240 进世界生成猪 / 牛 / 羊各一只于出生点附近地表（ EntityManager 已注册 3 类 mobType 1/2/3；
@@ -578,9 +603,12 @@ Window {
         chestLidAngle = 0    // t196：复位盖子角（防 worldlist→再进世界时残留半开盖子；scene 已离场，动画不可见）
         settingsOpen = false
         resourceBrowserOpen = false   // t458：退出世界时关资源查看器（防遗留）
-        itemEntities.clearAll()
-        entityManager.clearAll()
-        xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
+        // t492 跨世界 delegate 泄漏修复：hardReset（count→0）+ clearEntDelegates（destroy reparent 的 3D delegate）。
+        //   详 enterWorld 清旧段注释。退出世界是真清场，须把上一世界的 delegate 子树（爆炸期可能飙到数百）真正
+        //   destroy，否则它们驻留 host 子树 → 再进世界仍卡（用户报「只有重启 exe 才恢复」的根因）。
+        itemEntities.hardReset();   clearEntDelegates(itemHost)
+        entityManager.hardReset();  clearEntDelegates(mobHost)
+        xpOrbs.hardReset();         clearEntDelegates(xpOrbHost)
         player.release()
         appState = "worldlist"
         audio.stopAmbient()   // t177 环境音：退出世界停风声床（菜单态无声）
@@ -601,9 +629,11 @@ Window {
         chatMessages.clear()
         returnHeldToHotbar()           // t56：返回菜单前归还光标手持栈（防遗留 heldBlock）
         worldStore.closeWorld()        // t176：回主菜单关存档连接（防残留打开库）
-        itemEntities.clearAll()        // t176：清实体残留
-        entityManager.clearAll()
-        xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
+        // t492 跨世界 delegate 泄漏修复：hardReset（count→0）+ clearEntDelegates（destroy reparent 的 3D delegate）。
+        //   详 enterWorld 清旧段注释。回主菜单是真清场，须 destroy 上一世界 delegate 子树防跨会话累积。
+        itemEntities.hardReset();   clearEntDelegates(itemHost)   // t176：清实体残留
+        entityManager.hardReset();  clearEntDelegates(mobHost)
+        xpOrbs.hardReset();         clearEntDelegates(xpOrbHost)
         player.release()
         appState = "menu"
         audio.stopAmbient()   // t177 环境音：回主菜单停风声床
@@ -4032,6 +4062,10 @@ Window {
                     //   spawn/拾取抖动致 delegate 泄漏，同 mobHost 族；lessons-learned t170）。空槽 aliveAt=false
                     //   → visible=false 隐藏；复用时 aliveAt=true + revision bump → 重显重绑。索引稳定。
                     visible: { itemEntities.revision; return itemEntities.aliveAt(index) }
+                    // t492 跨世界 delegate 泄漏修复：标记本 delegate 为「实体 delegate」。Reparent 进 itemHost 后
+                    //   Repeater 不再销毁它（t170），world-exit 时由 clearEntDelegates(host) 扫 host.children 识别此
+                    //   标记手动 destroy（itemHost 下还挂 Repeater 本身，它无此标记 → 跳过，不会被误毁）。
+                    property bool isEntDelegate: true
                     // 基准位置 + 物品 id + count：触碰 itemEntities.revision（Q_PROPERTY NOTIFY=entitiesChanged）
                     // 建立依赖。t36 removeAt 用 releaseSlot（标空，slot 稳定不 shift），revision 自增 → 本绑定
                     // 重算 → delegate[k] 对齐 slot[k] 的 pos/itemId/count。外层 Node 持基准 pos + 绕 Y 旋转。
@@ -4393,6 +4427,10 @@ Window {
                 model: xpOrbs.count
                 delegate: Node {
                     visible: { xpOrbs.revision; return xpOrbs.aliveAt(index) }
+                    // t492 跨世界 delegate 泄漏修复：标记本 delegate 为「实体 delegate」（同 itemHost/mobHost 族；
+                    //   详见 itemEntities Repeater delegate 的 isEntDelegate 注释）。world-exit 时 clearEntDelegates
+                    //   扫 xpOrbHost.children 据本标记 destroy reparent 进来的 delegate。
+                    property bool isEntDelegate: true
                     id: orbRoot
                     position: { xpOrbs.revision; return xpOrbs.posAt(index) }
                     property int orbAmount: { xpOrbs.revision; return xpOrbs.amountAt(index) }
@@ -4549,6 +4587,11 @@ Window {
                     //   → 本 Node visible=false 隐藏整棵子树；slot 被复用时 aliveAt=true + revision bump → 重显
                     //   并重绑新实体数据。索引稳定（release 不 shift）→ delegate[index] 恒对齐 slot[index]。
                     visible: { entityManager.revision; return entityManager.aliveAt(index) }
+                    // t492 跨世界 delegate 泄漏修复：标记本 delegate 为「实体 delegate」（同 itemHost 族；详见
+                    //   itemEntities Repeater delegate 的 isEntDelegate 注释）。world-exit 时 clearEntDelegates 扫
+                    //   mobHost.children 据本标记 destroy reparent 进来的 delegate（mobHost 下还挂 Repeater 本身，
+                    //   无此标记 → 跳过不误毁）。
+                    property bool isEntDelegate: true
                     // 触碰 revision 建立依赖（push 位移 / 重力下落 / t239 AI 行走 / 受击红闪 / 死亡移除
                     //   bump revision → 位置 / 配色 / kind / yaw 重算）。t117 FallingBlock 着地 releaseSlot 后
                     //   revision 自增 → delegate 对齐新 entity 数据（同 itemEntities delegate 模式）。

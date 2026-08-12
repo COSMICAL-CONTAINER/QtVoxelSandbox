@@ -230,6 +230,17 @@ public:
             if (m_entities[i].alive) releaseSlot(int(i));
         emit entitiesChanged();
     }
+    // t492 跨世界 delegate 泄漏修复：真正清空 vector（count→0）。clearAll 只标 alive=false（delegate 隐藏不销毁，
+    //   保 count 单调修 t170），但爆炸期 / 大量刷怪期 count 飙到高位后这些 delegate（每个 mob delegate 含 MobModel +
+    //   多 mob-type Model + 眼 / 火舌子树 = 数十 3D 对象）永久驻留场景图，重进世界它们仍在（仅隐藏）→ 持续吃场景图
+    //   遍历 / 绘制开销 = 用户报「TNT 爆炸后退存档再进仍卡」的根因。hardReset 让 count→0 触发 Repeater model 变化；
+    //   但 reparent 的 3D delegate 仍不被 Repeater 销毁（t170），故 caller（QML world-exit）须配套手动 destroy mobHost
+    //   的 delegate 子节点（见 Main.qml clearEntDelegates）。**仅 world-exit / enterWorld 清旧段调**（非游玩期，无并发
+    //   spawn）。游玩期的死亡 / 着地 / 跌出 / 拾取仍走 releaseSlot（保 t256 slot-reuse 不变量）。
+    Q_INVOKABLE void hardReset() {
+        m_entities.clear(); m_freeSlots.clear(); m_liveCount = 0;
+        ++m_revision; emit entitiesChanged();
+    }
 
     // 第 i 个实体的渲染数据（呈现层 Repeater delegate 绑它摆位 + 配色）。越界返回安全默认。
     Q_INVOKABLE QVector3D posAt(int i) const;
