@@ -1757,15 +1757,19 @@ void World::tickSweetBerryBushGrowth()
     //    散布：hashVoxel(seed, x, y, z) 混入窗口序号 m_berryBushIntervalIndex 取低 16 位 % 100，落在
     //    [0, kBerryBushGrowPct) 内即升 → 不同丛错峰、同 seed 同窗口序号同结果（无随机源，可复现）。
     //    土壤支撑：下方为 Grass / Dirt / Farmland（机制等价 MC 浆果丛生于草地 / 泥土 / 耕地；与 playercontroller
-    //      种植分支 Grass/Dirt 一致 + 耕地兼容）。SnowLayer 不算土壤 → worldgen 雪顶丛采后回 0 不再长（枯丛稳态）。
+    //      种植分支 Grass/Dirt 一致 + 耕地兼容）。**t514 二轮复盘：SnowLayer 亦算有效支撑** —— worldgen
+    //      placeSweetBerryBushes 把丛散布在 Snowy 群系雪顶（surfaceY=SnowLayer）正上方，雪层下方才是 Grass/Dirt
+    //      （generate 把 Snowy 群系草顶替换为薄雪层）。旧版仅认 Grass/Dirt/Farmland → worldgen 雪顶丛「下方=SnowLayer」
+    //      永不满足 → state 1 丛永不升到 2（采后回 0 的丛也永不重长），用户实测「丛一直是放下的阶段不往成熟长」。
+    //      现 SnowLayer 视为透光支撑（机制等价 MC 寒冷群系浆果丛在覆雪地表仍生长 —— 雪层薄不阻根系、雪下仍是土）。
     std::vector<BCell> grows;
     for (const BCell &c : cells) {
         if (c.stage >= BlockRegistry::SweetBerryBushStageMax) continue;   // 已成熟 → 不再升
         if (c.y == 0) continue;                                           // 世界底无「下方土壤」支撑
         const quint8 below = m_chunks.blockAt(c.x, c.y - 1, c.z);
         if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
-            && below != BlockRegistry::Farmland)
-            continue;                                                     // 下方非透光土壤 → 不长
+            && below != BlockRegistry::Farmland && below != BlockRegistry::SnowLayer)
+            continue;                                                     // 下方非透光土壤 / 雪层 → 不长
         if (m_chunks.skyLightAt(c.x, c.y, c.z) < kBerryBushMinLight)
             continue;                                                     // 头顶天光不足 → 不长（夜间 / 洞穴）
         // 确定性散布概率：纯函数于 seed + 位置 + 窗口序号（PLAN §2-K 精神，无 Math.random / 时间源 → 可复现）。

@@ -4512,7 +4512,15 @@ void PlayerController::step(qreal dt)
         };
         constexpr int kCactusNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         bool touch = false;
-        for (int yy : {footY, eyeY}) {
+        // t514 二轮复盘：扫描层加 footY+1。浆果丛为单格高（state>0 即有刺），玩家穿过丛格时其 AABB（脚位→眼位）
+        //   可能在任意 Y 与丛重叠 —— 站雪层薄板（snowLayerHeight 1/8..3/8）时 footY=h、eyeY=h+1 已覆盖；但站更厚
+        //   支撑（满格方块顶）或 AABB 因蹲下 / 着陆瞬时压缩时，footY..eyeY 可能恰好跳过丛所在 h+1 层（footY=h+1、
+        //   蹲下 eyeY 仍 h+1 同层，或着地瞬时脚位压低 → footY=h，eyeY 暂未到 h+1）。补 footY+1 确保「丛在脚位正上方
+        //   一格」的常见落地姿态也命中（脚位格 + 脚位上一格覆盖玩家躯干穿越丛格的几何）。仙人掌 footY+1 无副作用
+        //   （仅判嵌入 / 4 邻，满格支撑时恒 false）。旧版「碰了不扣」根因：worldgen 丛永 state 1 不升 2 + 玩家种丛
+        //   state 0 不长（world.cpp tickSweetBerryBushGrowth 下方 SnowLayer 误判不支撑）→ stage>0 判据常不满足 →
+        //   thornyBushAt 恒 false；本处补层 + world.cpp 修支撑 → 两者合力修通接触扣血。
+        for (int yy : {footY, footY + 1, eyeY}) {
             for (int cx = fx0; cx <= fx1 && !touch; ++cx)
                 for (int cz = fz0; cz <= fz1 && !touch; ++cz) {
                     if (cactusAt(cx, yy, cz)) { touch = true; break; }       // 仙人掌嵌入（罕见）

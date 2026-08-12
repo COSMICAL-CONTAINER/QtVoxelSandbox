@@ -372,13 +372,15 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。**3 生长阶段存 chunk state**（state = 阶段
     //   0..SweetBerryBushStageMax；0=无果嫩丛、1=小果、2=成熟可采摘）。solid=false（非实体 → 不挡邻居面剔除，同草丛 /
     //   作物）、shape=ShapeNone（**无碰撞** → 玩家穿过；机制等价 MC 浆果丛可踩过，stage>0 踩过受少量伤害归
-    //   playercontroller 环境伤害 tick）、hardness=0（瞬破，同草丛 / 作物）、NoTool（空手可采且掉落）、dropId=0x233
-    //   （甜浆果**物品**，材料段 RecipeRegistry::SweetBerryId；Core 不依赖 Game 故字面量 0x233 —— 破丛掉浆果物品非丛
-    //   方块，机制等价 MC 破浆果丛掉浆果）、dropCount=1、maxStack=64。各面贴图=sweet_berry_bush_<state>（tile 103..105；
-    //   本表 topTile/sideTile 存阶段 0 基底 tile 103，partialblockgeometry 的 SweetBerryBush case 内 state + 基底算实际
-    //   阶段贴图，同 WheatCrop 模式）。音色归 GroupGrass（软植物音，同草丛 / 蘑菇）。worldgen placeSweetBerryBushes 在
-    //   Snowy 群系 SnowLayer 地表上方低密度散布（机制等价 MC 寒冷群系浆果丛）。进创造调色板。
-    /* sweet_berry_bush */ {int(BlockRegistry::SweetBerryBush), 103,103,103,103, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x233, 1, 64, "sweet_berry_bush", "雪原浆果灌木丛"},
+    //   playercontroller 环境伤害 tick）、hardness=0（瞬破，同草丛 / 作物）、NoTool（空手可采且掉落）、
+    //   **dropId=0 / dropCount=0（t514 二轮复盘：破丛不掉落任何物品 —— 机制等价 MC 1.0 破浆果丛不掉浆果，
+    //   只掉丛本身且丛非可拾取方块故等价无掉落）；浆果仅由右键**成熟**丛采摘得 2-3（playercontroller 采摘分支
+    //   spawnItem 浆果，非走 dropId 路径）**，避免「挖任何阶段丛都掉浆果」的 MC 不符行为**。maxStack=64。各面贴图
+    //   =sweet_berry_bush_<state>（tile 103..105；本表 topTile/sideTile 存阶段 0 基底 tile 103，partialblockgeometry 的
+    //   SweetBerryBush case 内 state + 基底算实际阶段贴图，同 WheatCrop 模式）。音色归 GroupGrass（软植物音，同草丛 /
+    //   蘑菇）。worldgen placeSweetBerryBushes 在 Snowy 群系 SnowLayer 地表上方低密度散布（机制等价 MC 寒冷群系浆果丛）。
+    //   进创造调色板。
+    /* sweet_berry_bush */ {int(BlockRegistry::SweetBerryBush), 103,103,103,103, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0, 0, 64, "sweet_berry_bush", "雪原浆果灌木丛"},
     // ── t468 冰的物理（机制等价 MC 1.0 packed ice / blue ice；名称 / 贴图全原创自绘 §9a）。Ice(45) 的更滑变种：
     //   滑动速度递增 Ice < PackIce < BlueIce（iceSlipApproach 越小越滑）。与 Ice 同属冰族（isIce 单一权威）——
     //   透明整立方（solid=false / ShapeFull —— 走 iceOnly 段 Blend 半透渲染，同 glass 契约；碰撞仍整格可踩）、
