@@ -3113,14 +3113,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             }
             if (supportCellY >= 0) {
                 // 着地：停在支撑方块**顶面**上方半格（TNT 视觉高 1.0 → 中心 = 支撑顶面 + 0.5）。
-                //   t494 修「落半砖悬空」：旧 restY = supportCellY+1.5 恒按**完整立方顶面**（=cy+1.0）算 → 落
-                //   下半砖（顶面 cy+0.5）时中心停在 cy+1.5 = 悬空半格空气。改据支撑方块的碰撞 AABB 顶面
-                //   topOffset（cell-local 最大 maxY：全立方 1.0 / 下半砖 0.5 / 压力板 ~0.0625）→ restY =
-                //   supportCellY + topOffset + 0.5（TNT 底面贴支撑顶面）。halfH=0 可穿透 + 不放置方块（引燃态）。
-                float topOffset = 1.0f; // 兜底：默认完整立方顶面（旧行为）
+                //   t494b 修「落半砖仍悬空」：旧实现从 topOffset=1.0 起「只更新更大的」→ 下半砖 maxY=0.5 < 1.0
+                //   永不命中 → topOffset 恒 1.0 → 落半砖中心停在 cy+1.5 仍悬空。改从 **0 起取最大 maxY**（全立方
+                //   1.0 / 下半砖 0.5 / 压力板 ~0.0625 / 上半砖 1.0 / stairs 多盒取最高）→ restY = supportCellY +
+                //   topOffset + 0.5（TNT 底面贴支撑顶面）。halfH=0 可穿透 + 不放置方块（引燃态）。
+                float topOffset = 0.0f;
                 const auto aabbs = BlockRegistry::collisionAABBs(supportId, world->stateAt(cx, supportCellY, cz));
                 for (const BlockRegistry::BlockAABB &bb : aabbs)
                     if (bb.maxY > topOffset) topOffset = bb.maxY; // 取最大顶面（stairs 多盒取最高）
+                if (aabbs.empty()) topOffset = 1.0f; // 兜底（不应发生）
                 const float restY = float(supportCellY) + topOffset + 0.5f; // 支撑顶面 + TNT 半高
                 if (e.pos.y() != restY) { e.pos.setY(restY); e.vy = 0.0f; dirty = true; }
             } else if (newY <= 0.0f) {
