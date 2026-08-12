@@ -1437,17 +1437,17 @@ t18                        （背包，依赖 hotbar）
 
 | 任务ID | 状态 | 标题（详细） | 文件 |
 |---|---|---|---|
-| t500 | ⏳ | **草方块生存挖掉泥土（精准采集才掉草方块）** | playercontroller 挖掘掉落 + silk_touch 附魔判定 |
-| t501 | ⏳ | **木梯侧边放置（似火把；须完整方块侧；Space 爬/Shift 降）** | blockregistry Ladder 形状 + playercontroller placeBlock 侧边校验 + 爬升物理（空格上/Shift 下） |
-| t502 | ⏳ | **熔炉 UI 布局修复**：燃料进度条（一煤烧几个）+ 成品位置（两左槽中间，现对齐原材料）+ 进度条位置（现贴原材料） | Main.qml FurnaceUI 布局 |
-| t503 | ⏳ | **仙人掌**：worldgen 不生在水平 4 邻有方块处；挖任意部位 → 上方整柱掉落（同甘蔗）；挖下方沙 → 整柱掉落 | world.cpp cactus worldgen + dropCactusColumn |
-| t504 | ⏳ | **枯死灌木**：挖下方方块 → 掉落（同草逻辑） | playercontroller / blockregistry（DeadBush 支撑校验） |
-| t505 | ⏳ | **雪方块体系**：积雪层（SnowLayer，薄 1/8 格、可堆 8 层、可踩、8 级高度平滑）vs 雪块（Snow，实心）；雪原 worldgen = 雪块底 + 积雪层顶（不同高度）；挖雪规则（空手不掉 / 铲掉雪球 / 4 雪球合雪块 / 积雪层不可合但创造栏可见）；积雪层可踩上去（半格平滑上行） | blockregistry SnowLayer/Snow + world.cpp 雪原 worldgen + playercontroller 挖掘/合成 + 物理（踩积雪层上行） |
-| t506 | ⏳ | **冰/浮冰/蓝冰**：浮冰贴图修（t495）；MC 掉落规则核实并实装——冰（生存挖→水方块如置一桶水 / 精准采集掉冰）/ 浮冰（不掉）/ 蓝冰（不掉）；冰上行走/船打滑（t468 部分有，核实加速） | blockregistry Ice/PackIce/BlueIce 掉落 + world.cpp 挖冰生水 |
-| t507 | ⏳ | **花/蘑菇**：挖下方草/泥土 → 花蘑菇掉落（植物支撑校验）；加白蘑菇（BrownMushroom，现仅红）；蘑菇碗 + 红/白蘑菇 → 蘑菇汤（食物） | blockregistry 花/蘑菇支撑 + recipe 蘑菇汤 + MobType 无关 |
-| t508 | ⏳ | **船**：实体可被推动 / 水面漂浮 / 可开动（玩家骑乘 WASD）/ 冰上打滑且更快；模型修正（现仅前后凸、左右空 → 完整船体）；挖船 → 掉落船物品（现挖不掉） | BoatManager + Main.qml 船模型 + playercontroller 骑乘/挖船掉落 |
-| t509 | ⏳ | **铁傀儡建造修复**：T 形铁块×4 + 南瓜（摆放触发）当前不生成 → 修 placeBlock 检测 T 形（核实 t483 的检测逻辑为何失效） | playercontroller placeBlock 铁傀儡检测 |
-| t510 | ⏳ | **雪傀儡机制**：沙漠召唤应扣血但不即死（~10 HP，热群系慢慢扣）/ 下水扣血 / 死掉雪球 / 南瓜头可被剪刀剪下变掉落物（剪后变无头形态带眼不死的 derpy 版）；行走留积雪层（t505） | entitymanager SnowGolem AI（热/水扣血）+ playercontroller 剪南瓜 + Main.qml 无头形态 |
+| t500 | ✅ | **草方块生存挖掉泥土（精准采集才掉草方块）** `a10a369` | blockregistry Grass dropId Grass→Dirt（silk_touch 附魔 t475 已覆盖掉 Grass） |
+| t501 | ✅ | **木梯侧边放置（似火把；须完整方块侧；Space 爬/Shift 降）** `f864312` | blockregistry ladderFaceFromNormal + placeBlock full-cube 侧校验 + partialblockgeometry 单片贴墙 quad + 失撑掉落 |
+| t502 | ✅ | **熔炉 UI 布局修复** `4d32637` | FurnaceUI 成品居中 + 进度箭头居间 + burnTotal 燃料进度（火焰收缩+底条） |
+| t503 | ✅ | **仙人掌** `e382d41` | worldgen placeDesertFlora 4 邻 isSolid 守卫（dropCactusColumn/checkCactusOnEdit 核实已全） |
+| t504 | ✅ | **枯死灌木** `4d32637` | world checkDeadBushOnEdit（破下方支撑→正上方枯灌木掉落，同仙人掌模式） |
+| t505 | ✅ | **雪方块体系** `51a8b04` | ShapeSnowLayer 薄板（state 0-7 = (state+1)/8 高）+ 铲掉雪球 + 4雪球合雪块 + worldgen 3 级随机 + 堆叠 + auto-step 上行 |
+| t506 | ✅ | **冰/浮冰/蓝冰** `e382d41` | Ice 破→生 Water（非精准）/ silk 掉 Ice；PackIce/BlueIce silk 掉自身（船冰加速 t508 修 blockBelow off-by-one） |
+| t507 | ✅ | **花/蘑菇** `e382d41` | BrownMushroom=115 + checkFlowerMushroomOnEdit 失撑 + placeBlock 草/土预检 + 蘑菇汤(碗+红+白)配方 |
+| t508 | ✅ | **船** `27b48ff` | 水面放置+32 深浮力 lerp + U 形船体 + 挖船→掉落 + 冰加速 blockBelow 修复 + 可推动 |
+| t509 | ✅ | **铁傀儡建造修复** `fb56fb1` | T 形检测静态复核正确 + 加诊断 qInfo（probe/miss 日志定位静默失效：南瓜放偏/底排不全/overlaps 拒放） |
+| t510 | ✅ | **雪傀儡机制** `5380afa` | aiSnowGolem meltAccum 慢扣血（1HP/s，非即死）+ 水扣血 + 死掉 0-15 雪球 + 剪刀剪南瓜→derpy 无头形态 + 行走留 SnowLayer(t482) |
 
 **t500**：草方块生存挖 → 掉泥土（dirt）；精准采集附魔（silk_touch，附魔书/工具）→ 掉草方块。机制等价 MC 1.0。**t501**：木梯当前放方块中间（错）→ 应贴方块侧边（似火把），须完整方块侧支撑（草/门/活版门等不完整方块侧不可放）；贴图面向所贴侧；玩家对有梯侧按空格爬升 / Shift 下降。**t502**：熔炉 UI——加燃料进度条（显示当前燃料剩余可烧数），成品槽移到两左槽（燃料+原材料）的中间下方（现对齐原材料），熔烧进度条位置移到原材料与成品之间（现贴原材料）。**t503**：仙人掌 worldgen 不生于水平 4 邻有实体方块处（否则立即破坏掉落，t445 有放置校验，worldgen 散布要守同样规则）；挖任意仙人掌格 → 其上整柱掉落（dropCactusColumn 已有，核实 worldgen/挖路径）；挖下方沙 → 整柱掉落（checkCactusOnEdit）。**t504**：枯死灌木（DeadBush）挖其下方方块 → 灌木掉落（同草/花的支撑校验）。**t505**：积雪层重做——薄（1/8 格高），可堆叠 8 层（state 0-7 = 高度），玩家可踩（半格平滑上行，8 级）；雪块（Snow）= 实心整块；雪原 worldgen 改：底雪块 + 顶不同高度积雪层（真实积雪）；挖掘：空手不掉，铲掉雪球（SnowLayer 掉 1 雪球/层，Snow 掉 4 雪球），4 雪球合成 1 雪块，积雪层不可合成但创造栏可见。**t506**：冰生存挖 → 生成水方块（如置水源）；浮冰/蓝冰挖 → 不掉（需精准采集）；浮冰贴图修（t495）；冰上船打滑加速核实。**t507**：花/蘑菇挖其下方草/泥土 → 掉落（支撑校验，同甘蔗/仙人掌模式）；加白蘑菇（BrownMushroom）；蘑菇汤 = 蘑菇碗 + 红蘑菇 + 白蘑菇。**t508**：船重做——实体（可被玩家/方块推动）、水面漂浮、玩家骑乘 WASD 开动、冰上打滑且更快；模型修正（完整船体，现左右空）；挖船 → 掉落船物品（现挖不掉，回收修复）。**t509**：铁傀儡 T 形铁块×4 + 南瓜摆放检测（t483 实装但用户造不出）→ 核实检测逻辑（十字 T 形 vs 玩家朝向）修复。**t510**：雪傀儡机制——沙漠/热群系召唤扣血但不即死（~10 HP 慢扣，现召唤即死）、下水扣血、死掉雪球、南瓜头可剪（剪刀 → 南瓜掉落 + 傀儡变无头 derpy 形态带眼不死的 sheared 版）、行走留积雪层（联动 t505）。
 
