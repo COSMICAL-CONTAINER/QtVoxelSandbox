@@ -2699,9 +2699,17 @@ void PlayerController::placeBlock()
                 if (waterY < 0 && sy - 1 >= 0 && m_world->blockAt(sx, sy - 1, sz) == BlockRegistry::Water)
                     waterY = sy - 1;
                 if (waterY >= 0) {
-                    tx = sx; ty = waterY; tz = sz; // 船放水面格
+                    tx = sx; ty = waterY; tz = sz; // 船放水面格（spawnBoat pos.y = waterY+1 = 水面顶）
                 } else {
-                    tx = sx; ty = sy; tz = sz;     // 无水（陆地 / 冰面）→ 船放命中面相邻格
+                    // t508 二轮复盘修「放陆地悬空半格」（用户报③）：旧版 ty=sy（命中面相邻 Air 格），spawnBoat
+                    //   pos.y = sy+1 = 支撑面顶 +1（船悬空 1 格），tick 无重力时永远悬着；即便有重力，spawn 瞬间到
+                    //   落地之间肉眼能见「掉一格」。改：让 ty = 命中实块格（支撑面），spawnBoat pos.y = 实块格+1 =
+                    //   支撑面顶 → spawn 即刻贴地，无悬空 / 无掉落闪烁。仅当命中实块（可踩 / 可碰撞）才这样取；
+                    //   命中非实（如命中空气边缘 —— 罕见，瞄半砖下沿等）回退 sy 旧逻辑。
+                    const bool hitSolid = m_world->isCollidable(m_hitBx, m_hitBy, m_hitBz)
+                                          || BlockRegistry::isSolid(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz));
+                    tx = sx; tz = sz;
+                    ty = hitSolid ? m_hitBy : sy; // 命中实块 → 船中心 = 实块顶（spawnBoat +1）；否则旧 sy 行为
                 }
             }
             const int boatType = (heldItemId == RecipeRegistry::SpruceBoatId)

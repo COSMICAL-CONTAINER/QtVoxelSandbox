@@ -185,7 +185,10 @@ private:
     //   可碰撞 = World::isCollidable（含实体方块 / 门 / 活版门；不含水 / 火把 / 空气）。
     bool boatFootprintBlocked(World *world, float px, float py, float pz) const;
     // 算船当前 XZ 列的水面 Y（找最顶水格 + 1 - kBoatDraft；无水 → 返当前 py 不浮）。用于浮水 lerp 目标。
-    float waterSurfaceY(World *world, float px, float pz, float fallbackY) const;
+    //   t508 二轮复盘：outFoundWater（可空）写真是否找到水柱 —— tick 据此判「浮水」vs「无水重力落地」
+    //     （旧版用船中心格 == Water 判 hasWater，但船浮水面时中心格常是水上空气格 → 误判无水 → 重力把船拽下水，
+    //     用户报②「放水上直接飞到水下」真因）。waterSurfaceY 内已扫水柱，复用其结论更准。
+    float waterSurfaceY(World *world, float px, float pz, float fallbackY, bool *outFoundWater = nullptr) const;
     // 船当前所在「支撑面」的方块 id（判冰面加速）：从船中心所在格向下找首个**可踩实体方块**（含船中心格本身）。
     //   t508 修：旧版固定读 floor(pos.y) − 1（船中心格的下方一格），但船中心本就浮在水面 / 冰面格内
     //   （pos.y = surfaceY + 1 − draft → floor = surface 格），「−1」跳过了船实际踩着的表面格 → 永远读到
@@ -197,7 +200,15 @@ private:
     // 船几何 / 物理常量（机制等价 MC 1.0 boat；手感可玩）：
     static constexpr float kBoatHalfW    = 0.6f;   // 船 footprint 半宽 / 半长（约 1.2×1.2；碰撞 + 命中盒）
     static constexpr float kBoatHalfH    = 0.5f;   // 船命中盒半高（1.0 高，略大于视觉船舱 0.5；放宽右键骑乘命中）
-    static constexpr float kBoatDraft    = 0.25f;  // 船吃水（船中心距水面下沉量；浮在水面略没入）
+    //   t508 二轮复盘修「整个悬浮在水中」（用户报⑦）：旧 kBoatDraft=0.25 → 船中心 Y = 水面顶 - 0.25（船吃水 0.25），
+    //     而船舷顶（model +0.225）恰与水面平齐 → 整条船视觉沉在水面下、只露舷沿 =「悬浮在水中」。改为 0.0：
+    //     船中心 Y = 水源格 cell 顶（= 水面顶），船底（model -0.2）略入水 0.2、舷顶（+0.225）出水 0.225 →
+    //     船大部分浮在水面之上、仅船底没入，视觉等同 MC 船浮水。spawnBoat / waterSurfaceY / dismount 共用本常量。
+    static constexpr float kBoatDraft    = 0.0f;   // 船吃水（船中心距水面下沉量；0 = 船中心贴水面顶）
+    // t508 二轮复盘：船底相对船中心的下沉量（视觉船底甲板底面 ≈ 中心 - 0.2）。无水重力落地稳态 Y =
+    //   支撑方块顶 + kBoatHullBottom（船底贴支撑顶）。与 boats delegate 船底甲板 Model（position.y=-0.15、
+    //   scale.y=0.1 → 底面 -0.2）对齐 —— 改几何时同步改本常量（两处一致才不沉地 / 不悬空）。
+    static constexpr float kBoatHullBottom = 0.2f;
     //   kBoatSpeed：水上基础船速（blocks/s；明显快于游泳 kSwimUp=4.5 / 走 kWalk=4.3，机制等价 MC 船水上快）。
     //   kBoatAccel：船速向目标 lerp 接近率（1/s；越小越滑有惯性 —— 冰上叠加速时惯性明显）。
     //   kBoatFriction：空船 / 松键水平摩擦衰减率（1/s）。
@@ -211,6 +222,11 @@ private:
     // t508 玩家推船给的水平速度冲量（blocks/s；每次接触分离时叠入 vx/vz）。机制等价 MC 1.0 船被实体撞开
     //   后会滑一小段；取 2.0 使船明显被弹开但摩擦很快停（kBoatFriction=3 → ~0.3s 基本停）。
     static constexpr float kBoatPushImpulse = 2.0f;
+    // t508 二轮复盘修「陆地悬空 + 卡住沉底」（用户报③⑥）：船在无水格（陆地 / 冰面）应有重力 —— 旧 tick 浮水
+    //   段无水时 waterSurfaceY 返 fallback（= 当前 pos.y）→ dy=0，船 Y 永不动 → 放陆地悬在放置点（pos.y = 放置
+    //   格顶 + 0.75，悬空半格），且骑乘下船摆位算错。加常速重力让陆地船落到支撑面（boatFootprintBlocked 挡实块
+    //   即停），与 MC 船放陆地会落地一致。取值 8.0（blocks/s²，明显但不过猛，落半格 ~0.3s 即贴地）。
+    static constexpr float kBoatGravity = 8.0f;
 };
 
 #endif // BOATMANAGER_H

@@ -3365,6 +3365,21 @@ Window {
             readonly property real crouchThigh: 60.0 * playerModel.crouchBlend   // 蹲时大腿前抬（度；+x = 腿尖前摆 = -Z）
             readonly property real crouchKnee: -60.0 * playerModel.crouchBlend     // 蹲时膝盖回折（度；= −crouchThigh → 小腿保持竖直、脚前移落地）
 
+            // t508 二轮复盘修「坐上去是站着」（用户报④）：骑船时玩家应呈坐姿（大腿前抬近水平 + 小腿竖直下垂），
+            //   机制等价 MC 船骑乘坐姿。旧版骑乘期 m_pos 同步到船中心但玩家模型仍走站立姿态（腿笔直竖、与船舱
+            //   不贴合）→ 肉眼读作「站着」。加 sitBlend（=1 骑船 / 0 否则），驱动大腿前抬 sitThigh(85°) +
+            //   小腿回折 sitKnee(-85°) → 大腿水平前伸、小腿竖直下垂 = 坐姿（脚不穿船底，因船底已贴水面 / 地面）。
+            //   sitThigh 与 crouchThigh 叠加（蹲+骑乘不会同时 —— 蹲需走路模式，骑乘禁走路，故二者互斥；为稳
+            //   妥两量相加，crouchBlend 骑乘期恒 0 → sitThigh 独占）。坐姿不抬高身体（船中心已是骑乘 m_pos，
+            //   body 上半身在 m_pos 之上正常高度，仅腿弯成坐姿）。
+            //   ⚠ 绑定依赖：ridingIndex() 是 Q_INVOKABLE 无 NOTIFY → 直接调不随骑乘切重算。显式读 boats.revision
+            //   （NOTIFY=entitiesChanged，tryMount/dismount/clearAll 都发）建依赖 → 上 / 下船时 revision bump →
+            //   isRidingBoat / sitBlend 重算 → 腿姿切换（同 boats delegate {revision; posAt} 模式）。
+            readonly property bool isRidingBoat: { boats.revision; return player.boatManager ? player.boatManager.ridingIndex() >= 0 : false }
+            readonly property real sitBlend: playerModel.isRidingBoat ? 1.0 : 0.0
+            readonly property real sitThigh: 85.0 * playerModel.sitBlend      // 坐姿大腿前抬（度；+x = 腿尖前摆 = -Z，近水平）
+            readonly property real sitKnee: -85.0 * playerModel.sitBlend      // 坐姿膝盖回折（度；= −sitThigh → 小腿保持竖直下垂）
+
             // [t31] 诊断：确认本 Node 已加载、parent=场景节点（非 null 孤儿）、feetPosition 合法、visible 状态。
             // 打印到 voxelsandbox.log。若运行后日志无此行 → Main.qml 未进二进制（stale build）。
             Component.onCompleted: console.info("[t31] playerModel UP  parent=" + playerModel.parent
@@ -3772,9 +3787,9 @@ Window {
                 id: leftLegPivot
                 position: Qt.vector3d(-0.125, 0.6 - playerModel.crouchDrop, 0)
                 eulerRotation: {
-                    // 行走摆幅（t51 ×swingAmp）+ 蹲下大腿前抬（t65 crouchThigh）。
+                    // 行走摆幅（t51 ×swingAmp）+ 蹲下大腿前抬（t65 crouchThigh）+ 坐姿大腿前抬（t508 sitThigh）。
                     const walk = -Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp
-                    return Qt.vector3d(walk + playerModel.crouchThigh, 0, 0)
+                    return Qt.vector3d(walk + playerModel.crouchThigh + playerModel.sitThigh, 0, 0)
                 }
                 // 大腿段（裤色 #3a3a5a；髋下 0..0.3，中心 -0.15、scale.y=0.3）
                 Model {
@@ -3800,7 +3815,7 @@ Window {
                 Node {
                     id: leftKneePivot
                     position: Qt.vector3d(0, -0.3, 0)
-                    eulerRotation: Qt.vector3d(playerModel.crouchKnee, 0, 0)
+                    eulerRotation: Qt.vector3d(playerModel.crouchKnee + playerModel.sitKnee, 0, 0)
                     // 小腿段（膝下 0..0.3，中心 -0.15、scale.y=0.3）
                     Model {
                         geometry: UnitCube {}
@@ -3839,9 +3854,9 @@ Window {
                 id: rightLegPivot
                 position: Qt.vector3d(0.125, 0.6 - playerModel.crouchDrop, 0)
                 eulerRotation: {
-                    // 行走摆幅（t51 ×swingAmp；与左腿对称）+ 蹲下大腿前抬（t65 crouchThigh）。
+                    // 行走摆幅（t51 ×swingAmp；与左腿对称）+ 蹲下大腿前抬（t65 crouchThigh）+ 坐姿大腿前抬（t508 sitThigh）。
                     const walk = Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp
-                    return Qt.vector3d(walk + playerModel.crouchThigh, 0, 0)
+                    return Qt.vector3d(walk + playerModel.crouchThigh + playerModel.sitThigh, 0, 0)
                 }
                 Model {
                     geometry: UnitCube {}
@@ -3863,7 +3878,7 @@ Window {
                 Node {
                     id: rightKneePivot
                     position: Qt.vector3d(0, -0.3, 0)
-                    eulerRotation: Qt.vector3d(playerModel.crouchKnee, 0, 0)
+                    eulerRotation: Qt.vector3d(playerModel.crouchKnee + playerModel.sitKnee, 0, 0)
                     Model {
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.15, 0)
@@ -4561,6 +4576,24 @@ Window {
                             baseColorMap: voxelAtlas
                             baseColor: "#ffffff"
                         }
+                    }
+                    // t508 二轮复盘修「F3+B 船没有碰撞箱」（用户报⑤）：船是实体（BoatManager 命中盒 kBoatHalfW=0.6 /
+                    //   kBoatHalfH=0.5），但旧版 F3+B hitbox 只画玩家 / mob / 掉落物（Main.qml 各自 delegate），boatHost
+                    //   Repeater 内未加 → 用户报「船不是实体」。补船 hitbox（WireCube ±0.5 居中 → scale = (2·0.6, 2·0.5, 2·0.6)）
+                    //   + 朝向棒（船头 -Z 方向，boatYaw 已在 boatRoot Node 继承）。同 mob hitbox 模式（PLAN §2-F F3 调试叠层）。
+                    Model {
+                        visible: window.showHitboxes
+                        geometry: WireCube {}
+                        scale: Qt.vector3d(1.21, 1.01, 1.21) // 2·kBoatHalfW+0.01 / 2·kBoatHalfH+0.01 / 2·kBoatHalfW+0.01（外扩 0.01 避面重叠）
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
+                    }
+                    Model {
+                        visible: window.showHitboxes
+                        geometry: UnitCube {}
+                        // 朝向棒：从船中心沿本地 -Z（船头）延伸 0.65（船头前伸辨识朝向）。
+                        position: Qt.vector3d(0, 0, -0.325)
+                        scale: Qt.vector3d(0.03, 0.03, 0.65)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
                 }
             }

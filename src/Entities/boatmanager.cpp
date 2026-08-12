@@ -150,8 +150,9 @@ bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float p
     return false;
 }
 
-float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbackY) const
+float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbackY, bool *outFoundWater) const
 {
+    if (outFoundWater) *outFoundWater = false;
     if (!world) return fallbackY;
     const int cx = int(std::floor(px)), cz = int(std::floor(pz));
     // 自船中心格向上扫找最顶水格（其上为非水 = 水面）；目标 Y = 顶水格 cell 顶（y+1）− 吃水。
@@ -183,6 +184,7 @@ float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbac
         }
     }
     if (topWaterY < 0) return fallbackY;
+    if (outFoundWater) *outFoundWater = true;
     return float(topWaterY) + 1.0f - kBoatDraft;
 }
 
@@ -211,11 +213,15 @@ void BoatManager::tick(qreal dt, World *world)
     for (size_t i = 0; i < m_boats.size(); ++i) {
         Boat &b = m_boats[i];
         if (!b.alive) continue;
+        // t508 二轮复盘：被骑船的物理（浮水 / 落地 / 操控位移 / 摩擦）由 step() 调 tickRiddenBoat 全权推进；
+        //   本 tick 跳过被骑船，避免同帧 tick + tickRiddenBoat 双跑（浮水被覆盖做无用功、重力双落、摩擦误衰减
+        //   wish 速度）。仅未骑的船在本 tick 跑浮水 + 玩家推开 + 残留惯性摩擦（空船物理）。
+        if (int(i) == m_riderBoat) continue;
         // t508 玩家推船（pushable；机制等价 MC 1.0 船可被实体推开）：玩家 AABB 与船 footprint（水平圆 /
         // 方框）重叠 → 把船沿「玩家中心 → 船中心」水平方向推开（接触分离），并给船一小段水平速度（玩家
-        //   走开后船继续滑一小段，机制等价 MC 玩家撞船船被弹开 + 滑行）。仅未骑的船可被推（骑乘中船由
-        //   tickRiddenBoat 操控，玩家正是骑乘者不可能同时「推」）。船 y 上贴近水面（浮水段统一管），推力只改 XZ。
-        if (m_playerValid && int(i) != m_riderBoat) {
+        //   走开后船继续滑一小段，机制等价 MC 玩家撞船船被弹开 + 滑行）。船 y 上贴近水面（浮水段统一管），推力只改 XZ。
+        //   注：被骑船已在上文 continue 跳过本循环体，此处都是未骑船（玩家正是骑乘者不可能同时「推」骑乘船）。
+        if (m_playerValid) {
             const float dpx = b.pos.x() - m_playerCenter.x();
             const float dpz = b.pos.z() - m_playerCenter.z();
             const float dh2 = dpx * dpx + dpz * dpz;
@@ -237,13 +243,47 @@ void BoatManager::tick(qreal dt, World *world)
                 changed = true;
             }
         }
-        // 浮水：pos.y 向水面 lerp（恒速接近，机制等价 MC 船浮水稳态）。
-        const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y());
+        // 浮水 / 落地（t508 二轮复盘）：查本列水面 Y（waterSurfaceY 内扫水柱并回报是否找到水）。
+        //   - 有水：pos.y 向水面 lerp（恒速上浮 / 下沉到水面），机制等价 MC 船浮水稳态。
+        //   - 无水（陆地 / 冰面 / 空中）：加常速重力让船落向支撑面（boatFootprintBlocked 挡实块即停）。
+        //     修「放陆地悬空半格」（用户报③）+「陆地卡住沉底」（⑥：旧版无水时 Y 不变、卡在放船点；现落地贴
+        //     支撑面，骑乘下船摆位才正常）+「放水上飞到水下」（②：旧版 hasWater 用船中心格 == Water 判，但船浮
+        //     水面时中心格是水上空气 → 误判无水 → 重力拽船下沉；改用 waterSurfaceY 的扫柱结论判有无水，准）。
+        bool foundWater = false;
+        const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
         const float dy = surfY - b.pos.y();
-        if (std::fabs(dy) > 1e-3f) {
-            // 恒速上浮 / 下沉（kBoatAccel 作速率），钳到本帧不超过 |dy|（防过冲振荡）。
-            const float step = std::clamp(kBoatAccel * float(dt), 0.0f, std::fabs(dy)) * (dy > 0 ? 1.0f : -1.0f);
-            b.pos.setY(b.pos.y() + step);
+        if (foundWater) {
+            if (std::fabs(dy) > 1e-3f) {
+                // 恒速上浮 / 下沉（kBoatAccel 作速率），钳到本帧不超过 |dy|（防过冲振荡）。
+                const float step = std::clamp(kBoatAccel * float(dt), 0.0f, std::fabs(dy)) * (dy > 0 ? 1.0f : -1.0f);
+                b.pos.setY(b.pos.y() + step);
+                changed = true;
+            }
+        } else {
+            // 无水重力（t508 二轮复盘）：找船 footprint 下方首个可碰撞方块作支撑面（其顶 = cy+1）。
+            //   船底低于中心 kBoatHullBottom（0.2），稳态船中心 Y = 支撑顶 + 0.2（船底贴顶）。
+            //   - 船中心 < 稳态 Y（已穿 / 接触支撑顶）→ 直接贴稳态 Y（防下落穿过 + 防落地后每帧抖动：旧版
+            //     「落进实块格 → 贴格顶」因 dt 步进使船在「格顶」与「下一格」间反复横跳 0.2+ → 可见抖动）。
+            //   - 船中心 > 稳态 Y → 匀加速下落（但本帧下落不穿稳态 Y，钳到稳态 Y）。
+            //   扫描深度 3 格（船底 + 其下 2 格，防只查紧邻格漏台阶级差）。
+            const int bcx = int(std::floor(b.pos.x())), bcz = int(std::floor(b.pos.z()));
+            int supportCell = -1;
+            for (int y = int(std::floor(b.pos.y())); y >= 0 && y >= int(std::floor(b.pos.y())) - 3; --y) {
+                if (world->isCollidable(bcx, y, bcz)) { supportCell = y; break; }
+            }
+            if (supportCell >= 0) {
+                // 有支撑：稳态 Y = 支撑顶 + 船底偏移；落不穿。
+                const float restY = float(supportCell) + 1.0f + kBoatHullBottom;
+                if (b.pos.y() <= restY) {
+                    b.pos.setY(restY); // 贴稳态（防抖动）
+                } else {
+                    const float gy = b.pos.y() - kBoatGravity * float(dt);
+                    b.pos.setY(std::max(gy, restY)); // 下落但钳到不穿支撑
+                }
+            } else {
+                // 无支撑（虚空 / 高空）→ 自由下落。
+                b.pos.setY(b.pos.y() - kBoatGravity * float(dt));
+            }
             changed = true;
         }
         // 水平速度积分位移 + 逐轴碰撞（空船被推 / 残留惯性滑行；被骑船的操控位移由 tickRiddenBoat 推进）。
@@ -316,12 +356,22 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     }
 
     // 逐轴（X 后 Z）积分位移 + 碰撞：撞可碰撞方块则该轴不动；高速撞（speed>kBoatCrashSpeed）→ 撞毁。
+    //   t508 二轮复盘修「能开出虚空」（用户报⑧）：船 XZ 位移只查 boatFootprintBlocked（世界内实块），
+    //     但世界边缘外 blockAt 返 Air → isCollidable=false → 不挡船 → 船可开出世界边界进虚空。加世界边界
+    //     clamp：船 footprint（±kBoatHalfW）必须落在 [0,width]×[0,depth] 内（半宽留 1 格缓冲防骑跨边界卡 delegate）。
     const float speed = std::sqrt(b.vx * b.vx + b.vz * b.vz);
     const float dx = b.vx * float(dt);
     const float dz = b.vz * float(dt);
+    // 世界边界（半宽外扩防船头穿出）：无 world → 不限。
+    const float minX = world ? kBoatHalfW : -1e9f;
+    const float maxX = world ? float(world->width()) - kBoatHalfW : 1e9f;
+    const float minZ = world ? kBoatHalfW : -1e9f;
+    const float maxZ = world ? float(world->depth()) - kBoatHalfW : 1e9f;
     // X 轴
     if (dx != 0.0f) {
-        const float nx = b.pos.x() + dx;
+        float nx = b.pos.x() + dx;
+        if (nx < minX) nx = minX;
+        if (nx > maxX) nx = maxX;
         if (!boatFootprintBlocked(world, nx, b.pos.y(), b.pos.z())) {
             b.pos.setX(nx);
         } else {
@@ -332,7 +382,9 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     }
     // Z 轴
     if (dz != 0.0f && !outCrashed) {
-        const float nz = b.pos.z() + dz;
+        float nz = b.pos.z() + dz;
+        if (nz < minZ) nz = minZ;
+        if (nz > maxZ) nz = maxZ;
         if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nz)) {
             b.pos.setZ(nz);
         } else {
@@ -341,9 +393,30 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
         }
     }
 
-    // 浮水（同 tick：Y 钉水面），与操控位移（XZ）同帧合。
-    const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y());
-    b.pos.setY(surfY);
+    // 浮水 / 落地（同 tick 段逻辑；t508 二轮复盘）：有水 → Y 钉水面；无水 → 重力落支撑面。
+    //   旧版无脑 b.pos.setY(surfY) 在无水时 surfY=fallback=pos.y → 陆地骑船 Y 恒不变（悬空）。改分支同 tick。
+    //   hasWater 用 waterSurfaceY 的扫柱结论（非船中心格 == Water），避免船浮水面时中心格为空气 → 误判无水。
+    bool foundWater = false;
+    const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
+    if (foundWater) {
+        b.pos.setY(surfY);
+    } else {
+        // 无水重力落地（同 tick 段：扫支撑面 → 贴稳态 restY 防抖动）。
+        const int bcx = int(std::floor(b.pos.x())), bcz = int(std::floor(b.pos.z()));
+        int supportCell = -1;
+        if (world) {
+            for (int y = int(std::floor(b.pos.y())); y >= 0 && y >= int(std::floor(b.pos.y())) - 3; --y) {
+                if (world->isCollidable(bcx, y, bcz)) { supportCell = y; break; }
+            }
+        }
+        if (supportCell >= 0) {
+            const float restY = float(supportCell) + 1.0f + kBoatHullBottom;
+            if (b.pos.y() <= restY) b.pos.setY(restY);
+            else b.pos.setY(std::max(b.pos.y() - kBoatGravity * float(dt), restY));
+        } else {
+            b.pos.setY(b.pos.y() - kBoatGravity * float(dt));
+        }
+    }
 
     outBoatPos = b.pos;
     notifyChanged();
