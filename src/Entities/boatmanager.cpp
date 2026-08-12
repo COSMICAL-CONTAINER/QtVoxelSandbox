@@ -9,6 +9,13 @@
 
 BoatManager::BoatManager(QObject *parent) : QObject(parent) {}
 
+void BoatManager::setPlayerCenter(const QVector3D &center)
+{
+    // t508 玩家中心注入：NaN（菜单 / 暂停 / 未设）→ 不推船；合法坐标 → tick 内据此判玩家 ↔ 船重叠。
+    m_playerCenter = center;
+    m_playerValid = std::isfinite(center.x()) && std::isfinite(center.y()) && std::isfinite(center.z());
+}
+
 bool BoatManager::aliveAt(int i) const
 {
     if (i < 0 || i >= int(m_boats.size())) return false;
@@ -142,15 +149,20 @@ float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbac
     const int cx = int(std::floor(px)), cz = int(std::floor(pz));
     // 自船中心格向上扫找最顶水格（其上为非水 = 水面）；目标 Y = 顶水格 cell 顶（y+1）− 吃水。
     //   没水（船在陆地 / 空中）→ 返 fallbackY（不浮，tick 由重力 / 玩家放置决定其 Y）。
+    //   t508：扫描深度从 4 格扩到 32 格 —— 旧版仅扫 startY..startY+3，船若被放到深水中（pos.y 在水底附近）
+    //     只能向上找 4 格内的水，到不了真水面 → 船卡在水柱中途（用户报「船下沉」的真因之一）。
     int topWaterY = -1;
     const int startY = int(std::floor(fallbackY));
-    for (int y = startY; y < startY + 4 && y < 256; ++y) {
+    for (int y = startY; y < startY + 32 && y < 256; ++y) {
         if (world->blockAt(cx, y, cz) == BlockRegistry::Water) topWaterY = y;
         else if (topWaterY >= 0) break; // 已过水面（水 → 非水），停在最顶水格
     }
-    // 起点格本身或其下也可能是水（船略没入）→ 向下补扫 1 格覆盖「船中心在水面下一点」。
-    if (topWaterY < 0 && startY - 1 >= 0 && world->blockAt(cx, startY - 1, cz) == BlockRegistry::Water)
-        topWaterY = startY - 1;
+    // 起点格本身或其下也可能是水（船略没入）→ 向下补扫 4 格覆盖「船中心在水面下较深」。
+    if (topWaterY < 0) {
+        for (int y = startY - 1; y >= 0 && y >= startY - 4; --y) {
+            if (world->blockAt(cx, y, cz) == BlockRegistry::Water) { topWaterY = y; break; }
+        }
+    }
     if (topWaterY < 0) return fallbackY;
     return float(topWaterY) + 1.0f - kBoatDraft;
 }
@@ -158,10 +170,19 @@ float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbac
 quint8 BoatManager::blockBelowBoat(World *world, const QVector3D &boatPos) const
 {
     if (!world) return BlockRegistry::Air;
-    // 船「脚下」格 = 船中心 Y − 1 的格（船浮水面，水面格下方是水底 / 冰）。判冰面加速读它。
-    return world->blockAt(int(std::floor(boatPos.x())),
-                          int(std::floor(boatPos.y())) - 1,
-                          int(std::floor(boatPos.z())));
+    // t508 从船中心格向下扫（含本格）找首个「可踩实体方块」（isCollidable），作为船的支撑面：
+    //   - 船在冰面（pos.y 落在 Ice 格内，floor = Ice 格）：本格即 Ice → 直接返回 Ice / PackIce / BlueIce。
+    //   - 船在水面（pos.y 落在 Water 格内，floor = Water 格，水非 collidable）：跳过水继续向下，到水底实体
+    //     （沙 / 石）→ 返水底（非冰，无加速，正确）。
+    //   旧版固定「floor(pos.y) − 1」跳过了船中心格 → 永远读到水底 / 冰下，冰面加速从未生效（t508 修）。
+    const int cx = int(std::floor(boatPos.x()));
+    const int cyBase = int(std::floor(boatPos.y()));
+    const int cz = int(std::floor(boatPos.z()));
+    for (int y = cyBase; y >= 0 && y >= cyBase - 3; --y) {
+        const quint8 id = world->blockAt(cx, y, cz);
+        if (world->isCollidable(cx, y, cz)) return id;
+    }
+    return BlockRegistry::Air;
 }
 
 void BoatManager::tick(qreal dt, World *world)
@@ -171,6 +192,32 @@ void BoatManager::tick(qreal dt, World *world)
     for (size_t i = 0; i < m_boats.size(); ++i) {
         Boat &b = m_boats[i];
         if (!b.alive) continue;
+        // t508 玩家推船（pushable；机制等价 MC 1.0 船可被实体推开）：玩家 AABB 与船 footprint（水平圆 /
+        // 方框）重叠 → 把船沿「玩家中心 → 船中心」水平方向推开（接触分离），并给船一小段水平速度（玩家
+        //   走开后船继续滑一小段，机制等价 MC 玩家撞船船被弹开 + 滑行）。仅未骑的船可被推（骑乘中船由
+        //   tickRiddenBoat 操控，玩家正是骑乘者不可能同时「推」）。船 y 上贴近水面（浮水段统一管），推力只改 XZ。
+        if (m_playerValid && int(i) != m_riderBoat) {
+            const float dpx = b.pos.x() - m_playerCenter.x();
+            const float dpz = b.pos.z() - m_playerCenter.z();
+            const float dh2 = dpx * dpx + dpz * dpz;
+            // 玩家半宽 0.3 + 船半宽 kBoatHalfW ≈ 接触阈值；水平重叠（dh < 阈）→ 推。
+            const float contactDist = 0.3f + kBoatHalfW;
+            if (dh2 < contactDist * contactDist && dh2 > 1e-6f) {
+                const float dh = std::sqrt(dh2);
+                // 接触分离量 = 把船推到刚好接触距离之外（防 AABB 持续穿叠）。
+                const float push = (contactDist - dh);
+                const float nx = dpx / dh, nz = dpz / dh;
+                const float nxTry = b.pos.x() + nx * push;
+                const float nzTry = b.pos.z() + nz * push;
+                // 逐轴试推（撞可碰撞方块则该轴不推，防把船推进墙里）。
+                if (!boatFootprintBlocked(world, nxTry, b.pos.y(), b.pos.z())) b.pos.setX(nxTry);
+                if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nzTry)) b.pos.setZ(nzTry);
+                // 给船一小段水平速度（玩家走开后船继续滑）。
+                b.vx += nx * kBoatPushImpulse;
+                b.vz += nz * kBoatPushImpulse;
+                changed = true;
+            }
+        }
         // 浮水：pos.y 向水面 lerp（恒速接近，机制等价 MC 船浮水稳态）。
         const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y());
         const float dy = surfY - b.pos.y();
@@ -180,7 +227,23 @@ void BoatManager::tick(qreal dt, World *world)
             b.pos.setY(b.pos.y() + step);
             changed = true;
         }
-        // 水平速度摩擦衰减（空船渐停；被骑船的操控位移由 tickRiddenBoat 推进，此处衰减其残留惯性）。
+        // 水平速度积分位移 + 逐轴碰撞（空船被推 / 残留惯性滑行；被骑船的操控位移由 tickRiddenBoat 推进）。
+        if (b.vx != 0.0f || b.vz != 0.0f) {
+            const float dx = b.vx * float(dt);
+            const float dz = b.vz * float(dt);
+            if (dx != 0.0f) {
+                const float nx = b.pos.x() + dx;
+                if (!boatFootprintBlocked(world, nx, b.pos.y(), b.pos.z())) b.pos.setX(nx);
+                else b.vx = 0.0f;
+            }
+            if (dz != 0.0f) {
+                const float nz = b.pos.z() + dz;
+                if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nz)) b.pos.setZ(nz);
+                else b.vz = 0.0f;
+            }
+            changed = true;
+        }
+        // 水平速度摩擦衰减（空船渐停）。
         if (b.vx != 0.0f || b.vz != 0.0f) {
             const float decay = std::max(0.0f, 1.0f - kBoatFriction * float(dt));
             b.vx *= decay; b.vz *= decay;
@@ -279,4 +342,20 @@ void BoatManager::breakRiddenBoat()
     // 掉船物品（呈层据信号 spawnItem）：格坐标取船中心所在格。
     emit boatBroken(int(std::floor(bp.x())), int(std::floor(bp.y())), int(std::floor(bp.z())), bt);
     notifyChanged();
+}
+
+bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist)
+{
+    float dist = 0.0f;
+    const int idx = findBoatHit(origin, dir, maxDist, &dist);
+    if (idx < 0 || idx >= int(m_boats.size()) || !m_boats[size_t(idx)].alive) return false;
+    // t508 挖船：移除该船 + 清骑乘态（若挖的是被骑的船）+ emit boatBroken → 呈层 spawnItem 掉船物品
+    //   （机制等价 MC 1.0 攻击船 → 船破坏掉船物品）。格坐标取船中心所在格；boatType 决定掉哪种船物品。
+    const QVector3D bp = m_boats[size_t(idx)].pos;
+    const int bt = m_boats[size_t(idx)].boatType;
+    if (idx == m_riderBoat) m_riderBoat = -1; // 挖骑乘中的船 → 玩家自然下马
+    releaseSlot(idx);
+    emit boatBroken(int(std::floor(bp.x())), int(std::floor(bp.y())), int(std::floor(bp.z())), bt);
+    notifyChanged();
+    return true;
 }

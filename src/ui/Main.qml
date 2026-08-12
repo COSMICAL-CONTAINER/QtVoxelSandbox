@@ -4440,32 +4440,57 @@ Window {
                         if (parent === null) parent = boatHost
                     }
 
-                    // 船舱底（平底船身：长 1.5（沿 Z = 船头方向 -Z 前）× 高 0.3 × 宽 0.7）。长度沿 Z 使
-                    //   eulerRotation.y=boatYaw 时船头（-Z）对齐行进方向（同 mob -Z 前约定）。
+                    // t508 完整船体模型（spec「完整船体，非前后凸左右空」；§9a 原创程序几何 UnitCube 组合，
+                    //   参考船轮廓但原创，无 MC 资产）。原模型仅一块扁平船舱底 + 两端翘块，侧面观感「空」
+                    //   （无左右船舷）；现重做成「U 形敞舱船」= 船底 + 左右两道船舷 + 两头翘起的船头/船尾。
+                    //   坐标约定：长轴沿 Z（船头 = -Z 前，eulerRotation.y=boatYaw 对齐行进方向）、宽轴 X、高 Y。
+                    //   总尺寸：长 1.4（Z）× 宽 0.7（X）× 高 ~0.5（含翘端）。所有块 NoLighting 必备（可见 Model 红线）。
+                    //
+                    //   船底（薄板）：宽 0.7 × 高 0.1 × 长 1.3，沉到水面略下（吃水）。船的「甲板基底」。
                     Model {
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.05, 0)
-                        scale: Qt.vector3d(0.7, 0.3, 1.5)
+                        position: Qt.vector3d(0, -0.15, 0)
+                        scale: Qt.vector3d(0.7, 0.1, 1.3)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: boatRoot.hullColor
                         }
                     }
-                    // 船头翘端（-Z 端，高 0.45 × 长 0.25（沿 Z）× 宽 0.7；略高于船舱 = 翘起船头）。
+                    // 左船舷（左纵向壁）：贴 -X 边的薄长壁，构成「U」的左侧。高 0.32 × 厚 0.06 × 长 1.3。
                     Model {
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, 0.05, -0.7)
-                        scale: Qt.vector3d(0.7, 0.45, 0.25)
+                        position: Qt.vector3d(-0.32, 0.0, 0)
+                        scale: Qt.vector3d(0.06, 0.32, 1.3)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: boatRoot.hullColor
+                        }
+                    }
+                    // 右船舷（右纵向壁）：贴 +X 边的薄长壁，构成「U」的右侧（与左舷对称）。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0.32, 0.0, 0)
+                        scale: Qt.vector3d(0.06, 0.32, 1.3)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: boatRoot.hullColor
+                        }
+                    }
+                    // 船头翘端（-Z 端整块封头 + 上翘）：跨满宽（连两舷）的端块，顶高 0.5 比船舷高 → 读作翘起的船头。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.08, -0.7)
+                        scale: Qt.vector3d(0.7, 0.5, 0.18)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: boatRoot.trimColor
                         }
                     }
-                    // 船尾翘端（+Z 端，对称）。
+                    // 船尾翘端（+Z 端整块封头 + 上翘；与船头对称）。
                     Model {
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, 0.05, 0.7)
-                        scale: Qt.vector3d(0.7, 0.45, 0.25)
+                        position: Qt.vector3d(0, 0.08, 0.7)
+                        scale: Qt.vector3d(0.7, 0.5, 0.18)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: boatRoot.trimColor

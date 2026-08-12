@@ -565,7 +565,11 @@ void PlayerController::tickImpl()
     // t469 船浮水 tick（常开，独立于捕获态——菜单 / 暂停时船仍浮水 / 衰减，世界模拟连续，同掉落物 / mob tick）。
     //   被骑船的「操控位移」由 step() 骑乘分支的 tickRiddenBoat 推进（骑乘期 WASD 驱动）；本 tick 只做浮水 +
     //   空船摩擦衰减。PlayerController 是唯一同时持 World* + BoatManager* 的对象，故由此驱动（同 itemEntities / entityManager）。
-    if (m_boatManager && m_world) m_boatManager->tick(dt, m_world);
+    //   t508 pushable：每帧把玩家 AABB 中心（脚底 + 半高）灌进 BoatManager，tick 内据此判玩家 ↔ 船重叠 → 推船。
+    if (m_boatManager && m_world) {
+        m_boatManager->setPlayerCenter(m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f));
+        m_boatManager->tick(dt, m_world);
+    }
     } // /profBoat
     { FrameProfiler::Scope s("mob");
     // t95：统一实体（测试生物）重力 + 地面静止，同掉落物常开（菜单 / 暂停时仍模拟）。机制同源
@@ -830,6 +834,23 @@ void PlayerController::beginMining()
         const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
         if (mobIdx >= 0 && mobDist <= m_hitDist) {
             attackMob(mobIdx);
+            return;
+        }
+    }
+    // t508 挖船掉落（spec「攻击 / 挖船 → 船实体消失 + 掉落船物品」；机制等价 MC 1.0 攻击船 → 船破坏掉船物品）。
+    //   独立跑 boat 命中射线（findBoatHit，同 mob 攻击路径模式）：命中活体船且（无方块命中 OR 船比方块更近）
+    //   → hitBoatFromRay 移除船 + emit boatBroken（→ 呈层 spawnItem 掉船物品）+ swingArm，不进破块分支。
+    //   任一不满足（无船命中 / 方块更近）→ 落回破块 / 挥空手路径。挖的是被骑的船 → 玩家自然下马（hitBoatFromRay 内清骑乘态）。
+    //   t248 攻击冷却门控（kAttackCooldown）：防长按左键 updateMining 续挖分支每 tick 重触 beginMining → 瞬秒多船。
+    if (m_boatManager && m_attackCooldown <= 0.0f) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float boatDist = 0.0f;
+        const int boatIdx = m_boatManager->findBoatHit(eye, look, kReach, &boatDist);
+        if (boatIdx >= 0 && boatDist <= m_hitDist) {
+            m_boatManager->hitBoatFromRay(eye, look, kReach);
+            m_attackCooldown = kAttackCooldown; // 挖船也走攻击冷却（防长按瞬秒多船）
+            emit swingArm();
             return;
         }
     }
@@ -2504,10 +2525,33 @@ void PlayerController::placeBlock()
         // (b) 放船：手持船物品 + 命中 → 放船。
         if (m_hotbar && m_hasHit
             && (heldItemId == RecipeRegistry::OakBoatId || heldItemId == RecipeRegistry::SpruceBoatId)) {
-            // 目标格：优先命中格本身（若为水 → 船浮该水面）；否则命中面相邻格（同方块放置 tx/ty/tz 约定）。
+            // 目标格定位（t508 修「船下沉」根因之一）：主选体射线**不挡水**（t165 / lessons-learned：Water 在
+            //   blocksRay 排除清单），故瞄水面时射线穿水命中**水底实块**（m_hitBy = 水底格 ≠ 水面格）。
+            //   旧逻辑拿「水底格 + 命中面法线」算放船点 → 深水时船被放到水柱中途（远低于水面）→ 浮水 lerp
+            //   速率（kBoatAccel）有限 → 船「慢慢上浮」肉眼读作「船下沉」。修：自命中面相邻格向上扫，
+            //   找水柱的**最顶水格**（连续 Water 段的顶端 = 真水面），把船放到该水面格 → pos.y = 水面 + 1 − 吃水，
+            //   即刻稳定浮在水面。瞄陆地 / 冰面（命中非水、向上无水）→ 用命中面相邻格（陆地 / 冰面放船，
+            //   tick 无水不改 Y 停在放置点）。
             int tx = m_hitBx, ty = m_hitBy, tz = m_hitBz;
             if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) != BlockRegistry::Water) {
-                tx = m_hitBx + m_hitNx; ty = m_hitBy + m_hitNy; tz = m_hitBz + m_hitNz;
+                // 起点 = 命中面相邻格（瞄岸边 / 冰面时该格常即邻水的 Air / Water 格）。
+                const int sx = m_hitBx + m_hitNx, sz = m_hitBz + m_hitNz;
+                int sy = m_hitBy + m_hitNy;
+                // 向上找**最顶水格**（连续 Water 段的顶端 = 真水面）：扫到非水停，记最后一个 Water 格。
+                //   深水：起点可能落在水柱底部，向上扫到水面 → 取最顶。无水（陆地 / 冰面）→ waterY<0 走兜底。
+                int waterY = -1;
+                for (int y = sy; y < sy + 8 && y < m_world->height(); ++y) {
+                    if (m_world->blockAt(sx, y, sz) == BlockRegistry::Water) waterY = y;
+                    else if (waterY >= 0) break; // 已过水面（水 → 非水），停在最顶水格
+                }
+                // 起点 (sx,sy) 已在水面之上（sy 是 Air，其下 sy-1 是水）→ waterY = sy-1。
+                if (waterY < 0 && sy - 1 >= 0 && m_world->blockAt(sx, sy - 1, sz) == BlockRegistry::Water)
+                    waterY = sy - 1;
+                if (waterY >= 0) {
+                    tx = sx; ty = waterY; tz = sz; // 船放水面格
+                } else {
+                    tx = sx; ty = sy; tz = sz;     // 无水（陆地 / 冰面）→ 船放命中面相邻格
+                }
             }
             const int boatType = (heldItemId == RecipeRegistry::SpruceBoatId)
                 ? BoatManager::Spruce : BoatManager::Oak;

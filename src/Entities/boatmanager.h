@@ -93,8 +93,15 @@ public:
 
     // 跑独立 boat 命中射线（slab ray-AABB，同 EntityManager::findMobHit 模式）：从 origin 沿 dir（单位向量）
     //   maxDist 内命中首个活体船 → 返其索引（outDist 写命中距离）；无命中 → -1。供 PlayerController 右键骑乘 /
-    //   放船前判「是否瞄着已有船」。
+    //   放船前判「是否瞄着已有船」+ 左键挖船判目标。
     int findBoatHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist) const;
+
+    // t508 挖船掉落（spec「攻击 / 挖船 → 船实体消失 + 掉落船物品」；机制等价 MC 1.0 攻击船 → 船破坏掉船物品）。
+    //   跑 findBoatHit 命中船 → 移除该船（releaseSlot）+ emit boatBroken（呈层据它 spawnItem 掉船物品）。
+    //   若命中的是被骑的船（idx == m_riderBoat）→ 同步清 m_riderBoat（船没了玩家自然没骑）。
+    //   由 PlayerController.beginMining 调（左键瞄船 → 挖船，优先于破块 / 挥空手路径，同 mob 攻击分流模式）。
+    //   返 true = 命中并移除（caller 据此发 swingArm + 不再走破块）；false = 未命中（caller 落回破块路径）。
+    bool hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist);
 
     // 尝试骑乘：跑 findBoatHit 命中船 → 设 m_riderBoat + 返 true；未命中 → false（不改态）。由 PlayerController
     //   placeBlock 船段调（右键瞄船 → 上船）。已骑乘（m_riderBoat>=0）→ 不重复上（返 false）。
@@ -105,9 +112,9 @@ public:
     bool dismount(World *world, QVector3D &outPlayerFeet);
 
     // 推进所有船物理（常开，由 PlayerController.tick 每帧调；菜单 / 暂停时世界照常模拟）：
-    //   未骑的船 → 浮水（pos.y 向水面 lerp）+ 水平速度摩擦衰减（空船渐停）。被骑的船的「操控位移」由
-    //   tickRiddenBoat 单独推进（骑乘期 wish 驱动），tick 只做浮水（与 tickRiddenBoat 同帧先后跑，浮水把船
-    //   Y 钉水面、操控位移改 XZ）。world null / 无船 → 早 return。
+    //   未骑的船 → 浮水（pos.y 向水面 lerp）+ 水平速度摩擦衰减（空船渐停）+ 玩家碰撞推开（pushable，机制等价
+    //   MC 1.0 船可被实体推开）。被骑的船的「操控位移」由 tickRiddenBoat 单独推进（骑乘期 wish 驱动），tick 只做
+    //   浮水（与 tickRiddenBoat 同帧先后跑，浮水把船 Y 钉水面、操控位移改 XZ）。world null / 无船 → 早 return。
     void tick(qreal dt, World *world);
 
     // 推进被骑船的操控物理（PlayerController.step 骑乘分支调）：wishX/wishZ = 玩家 WASD 据 yaw 算出的水平
@@ -121,6 +128,11 @@ public:
     // 撞毁被骑的船：移除该船（releaseSlot）+ 清 m_riderBoat + emit boatBroken（呈层掉船物品）。
     //   由 PlayerController 骑乘期 outCrashed=true 时调。无骑乘 → no-op。
     void breakRiddenBoat();
+
+    // t508 玩家位置注入（pushable 用）：PlayerController.tick 每帧 tick 前调一次，写玩家 AABB 中心（脚底 +
+    //   半高）。tick 内据此判玩家 ↔ 船重叠 → 把船推开（机制等价 MC 1.0 船可被玩家 / 实体推开）。无玩家时
+    //   （菜单 / 暂停）传 NaN 坐标 → 不推（实现 .cpp，用 std::isfinite 判有效）。
+    void setPlayerCenter(const QVector3D &center);
 
 signals:
     void entitiesChanged();                       // spawn / 撞毁 / 浮水 / 骑乘物理触发；驱动 count/revision + QML 绑定刷新
@@ -140,6 +152,10 @@ private:
     int m_riderBoat = -1;   // 玩家当前骑的船索引（-1 = 未骑）
     std::vector<int> m_freeSlots; // slot-reuse：已释放可复用的槽索引（LIFO）
     int m_liveCount = 0;          // 活体船数
+    // t508 玩家中心（pushable 用）：每帧由 PlayerController.setPlayerCenter 写入。tick 内读它判玩家 ↔ 船重叠
+    //   → 推船。m_playerValid=false（NaN / 未设）时不推（菜单 / 暂停态）。
+    QVector3D m_playerCenter{0, 0, 0};
+    bool m_playerValid = false;
 
     int acquireSlot(Boat &&b)
     {
@@ -169,7 +185,11 @@ private:
     bool boatFootprintBlocked(World *world, float px, float py, float pz) const;
     // 算船当前 XZ 列的水面 Y（找最顶水格 + 1 - kBoatDraft；无水 → 返当前 py 不浮）。用于浮水 lerp 目标。
     float waterSurfaceY(World *world, float px, float pz, float fallbackY) const;
-    // 船当前所在格（脚下）的方块 id（判冰面加速 / 水面）。返脚下格 blockAt。
+    // 船当前所在「支撑面」的方块 id（判冰面加速）：从船中心所在格向下找首个**可踩实体方块**（含船中心格本身）。
+    //   t508 修：旧版固定读 floor(pos.y) − 1（船中心格的下方一格），但船中心本就浮在水面 / 冰面格内
+    //   （pos.y = surfaceY + 1 − draft → floor = surface 格），「−1」跳过了船实际踩着的表面格 → 永远读到
+    //   水底 / 冰下，冰面加速从未生效。改：自船中心格向下扫（含本格）首个可踩实体（isCollidable）→ 船在
+    //   冰面格时直接读到 Ice / PackIce / BlueIce。船在水面（水非 collidable）→ 跳过水继续向下到水底实体。
     quint8 blockBelowBoat(World *world, const QVector3D &boatPos) const;
 
     static constexpr int kCap = 64;            // 船数上限（防溢出；船相对稀有，cap 取 mob 量级）
@@ -187,6 +207,9 @@ private:
     static constexpr float kBoatFriction = 3.0f;
     static constexpr float kBoatCrashSpeed = 7.0f;
     static constexpr float kBoatTurnRate = 360.0f;
+    // t508 玩家推船给的水平速度冲量（blocks/s；每次接触分离时叠入 vx/vz）。机制等价 MC 1.0 船被实体撞开
+    //   后会滑一小段；取 2.0 使船明显被弹开但摩擦很快停（kBoatFriction=3 → ~0.3s 基本停）。
+    static constexpr float kBoatPushImpulse = 2.0f;
 };
 
 #endif // BOATMANAGER_H
