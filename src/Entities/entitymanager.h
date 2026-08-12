@@ -1433,7 +1433,7 @@ private:
     static constexpr int   kExplosionDamageMax  = 24;    // 贴脸爆炸伤害（HP；随距离线性衰减到 0）
     // t297 爆炸掉落：每个被爆炸破坏的方块以此概率掉落其物品实体（机制等价 MC 爆炸弹毁方块掉物；
     //   spec「~50% 成掉落物」）。掉落 id 走 BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落）。
-    static constexpr float kExplosionDropChance = 0.5f;  // 破坏块掉落概率（~50%；MC 实为 1/radius≈33%，spec 取 50%）
+    static constexpr float kExplosionDropChance = 0.25f;  // 破坏块掉落概率（~25%；连锁爆炸掉落物控量，原 50% 致 items 顶满 200 卡顿）
     // t490 PrimedTnt 引信常量（机制等价 MC 1.0 primed TNT fuse ~80 tick = 4s；本工程取 ~5s，spec「~5s」）。
     //   kPrimedTntFuseSec = 引信总长（秒）；spawnPrimedTnt 默认值。tick 每帧递减 dt，到 0 → detonatePrimedTnt。
     //   kPrimedTntFuseJitterSec = 链式引爆时各 PrimedTnt 引信的随机错峰量（秒；避免同帧全部引爆 = 一次性大爆炸，

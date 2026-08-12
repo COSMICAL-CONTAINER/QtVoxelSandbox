@@ -50,7 +50,10 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count)
                                    << "count ->" << e.count << "(at" << x << y << z << ")";
                     if (count <= 0) return; // 完全合并 → 不新 spawn（少一个 delegate = 用户「掉落物太多」的诉求）
                 }
-                break; // 仅合到第一个可合并实体（机制等价 MC 单点合并；余数（>cap）走新 spawn 在同格再合下批）
+                continue; // 爆炸批量合并优化：不 break（旧 break 仅合第一个就停），继续扫其余活体找下一个可合并的
+                //   （count<cap 的）。爆炸同帧 N 个同 id 掉落物同格 spawn 时，优先填满已有实体（同格多件聚拢）
+                //   而非急着新 spawn。第一个满了（count==cap）也继续找第二个、第三个可合并的，直到 count 用完
+                //   或扫完。最坏遍历 O(n)，n≤kCap=200 常数级可接受。
             }
         }
     }

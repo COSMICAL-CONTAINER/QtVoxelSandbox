@@ -267,8 +267,8 @@ private:
     // t490fix 掉落物就近合并（机制等价 MC 1.0 同 itemId 掉落物在近邻合并为 1 实体；用户报告「2 个 TNT 爆炸后掉落物太多」）。
     //   spawnItem 入口扫现有活体，找同 itemId 且 pos 距 (x+0.5,y+0.5,z+0.5) ≤ kMergeRadius 的第一个 → count 累加（clamp
     //   maxStack，溢出走新 spawn）。合并方向：新 spawn 往已有实体合，不动已有 pos（避免视觉跳变）。
-    //   kMergeRadius=1.0：可同格多件 + 1 格近邻合并（机制等价 MC 掉落物合并半径 ~0.5-1 格，本工程取宽松 1.0 便于爆炸批量合并）。
-    static constexpr float kMergeRadius = 1.0f;
+    //   kMergeRadius=2.0：2 格（爆炸散布广，1 格命中率低致顶满；2 格兼顾合并率与视觉聚集）。
+    static constexpr float kMergeRadius = 2.0f;
 };
 
 #endif // ITEMENTITYMANAGER_H
