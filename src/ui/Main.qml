@@ -145,6 +145,14 @@ Window {
         if (survivalPanel.visible)       return survivalPanel.hoveredKey
         return ""
     }
+    // t512 创造调色板 hover 物品 id（提升到 window 级，供 keyInput 数字键 1-9 路由读取）。仅创造背包面板
+    //   （Inventory.qml）持 creativeHoveredItemId（调色板单元格 hover 写 / 离开按 id 守卫清）；其余面板无此源
+    //   （生存/工作台/熔炉/箱子无创造无限调色板）→ 0。面板 visible=false 时返 0（避免读隐藏面板陈旧态）。
+    property int creativeHoveredItemId: {
+        if (window.appState !== "playing") return 0
+        if (inventoryPanel.visible)        return inventoryPanel.creativeHoveredItemId
+        return 0
+    }
 
     // 第一人称手臂 viewmodel 的角度 / 位置 window 级中转属性（t129 引入作临时调试；t156 固化为用户终值）。
     //   t139 起 ESC 暂停叠层「设置」面板的 ArmSlider 写这些属性 → viewModelHand（下方 PerspectiveCamera
@@ -6751,8 +6759,16 @@ Window {
 
             if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) {            // 1–9 直选 hotbar 槽 0..8（属性赋值走 WRITE setter）
                 if (bagOpen) {
-                    // 数字键：背包开 + 当前 hover 槽 → 与 hotbar[idx] 整栈互换（MC 1.0）；无 hover → 不动 selectedSlot。
-                    if (window.hoveredSlotKey !== "") window.swapHoveredWithHotbar(e.key - Qt.Key_1)
+                    // t512 创造调色板 hover 物品 + 1-9 → 强制替换对应 hotbar 槽（覆盖原物，不论原槽有无）。
+                    //   机制等价 MC 1.0 创造模式 hotbar；优先于槽 hover 互换（指针同一时刻只在一个区域，二者互斥，
+                    //   但显式优先级让「调色板 hover」路径不被「槽 hover」误覆盖，且调色板单元格无 hoveredSlotKey
+                    //   → 此处不会与 swapHoveredWithHotbar 串台）。hotbar 槽 hover（hoveredSlotKey≠""）仍走 t110
+                    //   整栈互换；两者皆无 → 不动 selectedSlot。
+                    if (window.creativeHoveredItemId !== 0 && player.mode === PlayerController.Creative) {
+                        inventoryPanel.forceReplaceHotbarFromCreative(e.key - Qt.Key_1)
+                    } else if (window.hoveredSlotKey !== "") {
+                        window.swapHoveredWithHotbar(e.key - Qt.Key_1)
+                    }
                 } else {
                     hotbarVM.selectedSlot = e.key - Qt.Key_1
                 }

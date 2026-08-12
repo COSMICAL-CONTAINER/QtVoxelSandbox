@@ -68,6 +68,12 @@ Item {
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
     property string hoveredName: ""
 
+    // t512 创造调色板 hover 物品 id（仅调色板单元格 hover 时非 0；区别于 hoveredItemId —— 后者 hotbar 槽
+    //   hover 也写，故另设专属性区分「调色板无限源 hover」与「已有 hotbar 槽 hover」）。供宿主 Main.qml 数字键
+    //   1-9 路由：调色板 hover + 1-9 → 强制替换对应 hotbar 槽（覆盖原物，不论原槽有无）；hotbar 槽 hover + 1-9
+    //   → 仍走既有 swapHoveredWithHotbar 整栈互换（t110）。进入写 modelData、离开按 id 守卫清（防相邻格进出竞态互清）。
+    property int creativeHoveredItemId: 0
+
     // t167 左键拖动均分（spec：左键按住拖过 N 格 → 实时均分 floor(count/N)、余数留光标）。创造背包仅
     //   hotbar 行作分发目标（调色板=无限源，不作目标）。手势由 root 级 DragHandler(LeftButton) 总控：按下
     //   不动时 per-slot 左键 TapHandler 抓（单点拾取/放置/合并/互换 / 调色板无限拿取），拖动越阈值 → DragHandler
@@ -133,6 +139,19 @@ Item {
     function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
     function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
+
+    // t512 创造调色板 hover 物品 + 数字键 1-9 → 强制替换对应 hotbar 槽（覆盖原物，不论原槽有无物品）。
+    //   机制等价 MC 1.0 创造模式 hotbar：hover 创造物品按 1-9 直接把一组该物品塞进对应 hotbar 槽（1→槽0 ...
+    //   9→槽8）。区别于 swapHoveredWithHotbar（t110 整栈互换、需源槽）：调色板=无限源，无源槽概念 → 直接 setStack
+    //   覆盖目标槽（不读原槽、不还光标）。count 走 maxStackSize（方块/材料 64、工具/桶/护甲 1）；durability=-1
+    //   （VM normalizeDurability 自动满耐久 = 创造取新物语义）；enchants 空（无附魔，创造取新物语义）。
+    //   分层（PLAN §2）：本面板只做槽位改写（经 hotbar VM），宿主 Main.qml 负责按键路由 + hover 态提升。
+    function forceReplaceHotbarFromCreative(hotbarIdx) {
+        if (!root.hotbar) return
+        const id = root.creativeHoveredItemId
+        if (id === 0) return
+        root.hotbar.setStack(hotbarIdx, id, root.hotbar.maxStackSize(id))
+    }
 
     // t167 左键拖动均分总控：DragHandler(LeftButton) 在 root 监听。按下不动时 per-slot 左键 TapHandler 抓
     //   （单点拾取/放置/合并/互换 / 调色板无限拿取 / Shift 搬运 / 双击合并）；拖动越阈值 → DragHandler 激活夺抓
@@ -323,10 +342,13 @@ Item {
                                     if (hovered) {
                                         root.hoveredName = root.hotbar.nameForBlock(modelData)
                                         root.hoveredItemId = modelData
+                                        root.creativeHoveredItemId = modelData   // t512 调色板 hover（数字键 1-9 强制替换源）
                                         const p = parent.mapToItem(root, parent.width / 2, 0)
                                         root.hoveredTipPos = Qt.point(p.x, p.y)
-                                    } else if (root.hoveredItemId === modelData) {
-                                        root.hoveredItemId = 0
+                                    } else {
+                                        if (root.hoveredItemId === modelData) root.hoveredItemId = 0
+                                        // t512 离开调色板格：按 id 守卫清（防相邻格进出竞态互清，同 hoveredItemId 模式）。
+                                        if (root.creativeHoveredItemId === modelData) root.creativeHoveredItemId = 0
                                     }
                                 }
                             }
