@@ -3111,6 +3111,9 @@ void PlayerController::placeBlock()
                 m_world->setWaterSilent(tx, ty - 1, tz, BlockRegistry::Air, 0);    // 中柱铁块（stem 顶 / crossbar 顶）
                 m_world->setWaterSilent(tx, ty - 2, tz, BlockRegistry::Air, 0);    // 中柱铁块（stem 底 / crossbar 底）
                 // crossbar 横梁两端（仅 crossY 层；另一层是单 stem 中柱，两端为空气，移除中柱已含）。
+                //   code review B1（2026-08-13）：玩家若摆非标准「双横梁」（两层都是 3 块 = 7 铁块），朝向 A 优先
+                //   只清 crossY=ty-2 层两端，ty-1 层两端 2 块残留。**符合 MC 行为**（MC 铁傀儡严格只消耗标准 5 块：
+                //   南瓜 + 2 中柱 stem + 1 层 crossbar 两端）；玩家多放的 2 块是溢出，MC 也不清。故保留现状。
                 if (rowX) {
                     m_world->setWaterSilent(tx - 1, crossY, tz, BlockRegistry::Air, 0);
                     m_world->setWaterSilent(tx + 1, crossY, tz, BlockRegistry::Air, 0);

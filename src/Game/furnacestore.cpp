@@ -91,7 +91,8 @@ void FurnaceStore::setSmelting(int x, int y, int z, qreal val)
     emit furnaceChanged();
 }
 
-// 移除某熔炉条目（破块清孤儿）。不存在则 no-op（仍发 furnaceChanged 驱动任何残留绑定刷新，幂等安全）。
+// 移除某熔炉条目（破块清孤儿）。不存在则 no-op（仅实际 erase 命中时才 ++revision + emit furnaceChanged，
+//   驱动残留绑定刷新；空 erase 不发信号免无谓抖动，幂等安全）。
 void FurnaceStore::clearFurnace(int x, int y, int z)
 {
     const QString k = key(x, y, z);
