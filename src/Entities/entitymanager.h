@@ -954,10 +954,17 @@ private:
     //       非玩家破/放不发 broken/placed → 免粒子/音，同羊吃草消耗草丛模式）。
     //   (3) 远程雪球：节流（kSnowGolemThrowInterval）扫最近敌对 mob（nearestHostile）→ fireSnowball（抛物弹丸，
     //       命中敌对低伤害 1HP + 减速 kSnowSlowDuration）。
-    //   (4) 游荡（aiWander）。返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。
+    //   (4) 朝玩家（t499 二轮复盘）：玩家在 kSnowGolemFaceRange 内 → yawRad 朝玩家（atan2(-dx,-dz)，同 yaw 约定
+    //       dir=(-sin,-cos) → QML eulerRotation.y=yawDeg 模型 -Z 正对玩家）。机制等价 MC 造物面向接近的玩家（防御
+    //       造物本就「观察」玩家）；spec t499 明确「雪傀儡应朝玩家（能见正脸/南瓜脸）」。玩家离开范围 → aiWander 自主
+    //       选向（造物自由游荡）。修 t499 旧「背对玩家」：旧 aiSnowGolem 不接 playerPos → 只走 aiWander 随机朝向，
+    //       常背对玩家 → 玩家只见南瓜背（无刻面眼/嘴）误判「无头无眼」。
+    //   (5) 游荡（aiWander；玩家不在范围时走）。返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。
     //   分层（PLAN §2）：只读 World::blockAt/isSolid/biomeIdAt/isPrecipitatingAt + 自身数据；写自身（pos /
-    //   slowTimer / damageEntity）+ 向下静默写 World（setWaterSilent 雪层）。无向上依赖。
-    bool aiSnowGolem(int idx, Entity &e, float dt, World *world, float worldW, float worldD, float speedScale);
+    //   slowTimer / damageEntity / yawRad）+ 向下静默写 World（setWaterSilent 雪层）。无向上依赖。playerPos 由
+    //   Game 层（PlayerController）传入（同 aiHostile / aiWolf 先例，Game→Entities 向下依赖）。
+    bool aiSnowGolem(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
+                     float worldW, float worldD, float speedScale);
     // t483 铁傀儡 AI（tick Mob 分支 mobType==MobIronGolem 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐
     //   MC 1.0 铁傀儡（防御造物：游荡 + 追击打敌对 + 重拳击退）：
     //   (1) 节流扫最近敌对 mob（nearestHostile，kIronGolemDetectRange）→ 有目标则朝它走（kIronGolemWalkSpeed，
@@ -1309,6 +1316,10 @@ private:
     //   - kIronGolemWalkSpeed：追击行走速度（blocks/s）。铁傀儡迟缓；取 2.2（慢于敌对 kChaseSpeed 2.8）。
     static constexpr float kSnowGolemThrowInterval = 2.5f;  // 雪傀儡抛雪球间隔（秒）
     static constexpr float kSnowGolemAttackRange   = 10.0f; // 雪球攻击侦测范围（blocks；XZ）
+    // t499 二轮复盘：雪傀儡朝玩家的 XZ 距离阈值（blocks）。玩家在此范围内 → yawRad 朝玩家（模型 -Z 正对玩家，
+    //   玩家可见南瓜头刻面眼/嘴正脸）；玩家出范围 → aiWander 自主游荡朝向。机制等价 MC 防御造物观察接近的玩家。
+    //   取 10（= kSnowGolemAttackRange，造物在「能抛雪球防敌对」的同一感知范围内即面向玩家，无需更近）。
+    static constexpr float kSnowGolemFaceRange     = 10.0f; // 雪傀儡朝玩家的 XZ 距离阈值（blocks；t499 二轮）
     static constexpr float kSnowballSpeed          = 10.0f; // 雪球水平速度（blocks/s）
     static constexpr float kSnowballMaxVert        = 14.0f; // 雪球 vy 钳（blocks/s；防极端弧）
     static constexpr float kSnowballSpread         = 1.0f;  // 雪球三轴初速随机抖动（blocks/s）

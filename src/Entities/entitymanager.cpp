@@ -1853,8 +1853,8 @@ void EntityManager::fireSnowball(int idx, const Entity &shooter, const QVector3D
 //     「慢慢扣血到 0 才死」。改：热群系 / 入水 / 降水 → 累加 meltAccum，达 kSnowMeltInterval 扣 kSnowMeltDamage=1 HP
 //     （每秒 1HP，满血 4 → ~4s 融化死亡，机制等价 MC 1.0 持续热伤害而非即死）。新增「入水扣血」分支（脚位 /
 //     身体格在水 → 同热伤害路径，机制等价 MC 雪傀儡入水融化）。
-bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, float worldW, float worldD,
-                                float speedScale)
+bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
+                                float worldW, float worldD, float speedScale)
 {
     bool dirty = false;
     // (1) 热伤害累积（机制等价 MC 雪傀儡在热群系 / 入水 / 雨天持续受热伤害直至融化死亡，**非即死**）：
@@ -1879,6 +1879,14 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, floa
             e.meltAccum = 0.0f; // 离开热/水/雨 → 累积清零（防跨段累积，机制等价 MC 离开热源不再受伤）
         }
     }
+    // t499 二轮复盘 ② 朝玩家（spec「雪傀儡应朝玩家」）：玩家在 kSnowGolemFaceRange 内 → yawRad 朝玩家
+    //   （atan2(-dx,-dz)，同 yaw 约定 dir=(-sin,-cos) → QML eulerRotation.y=yawDeg 模型 -Z 正对玩家 → 玩家见
+    //   南瓜头刻面眼/嘴正脸）。修 t499 一轮「背对玩家」根因：旧 aiSnowGolem 不接 playerPos → 只走 aiWander
+    //   随机朝向，常背对玩家 → 玩家只见南瓜背（无眼/嘴）误判「纯雪块无头」。
+    //   **放在 aiWander 之后**（下方 (4)）：aiWander 在 wanderTimer 到期时设随机 yawRad 会覆盖朝玩家，故朝玩家
+    //   须后置保最终决定权（视觉朝向恒朝玩家）。aiWander 的位移用本帧入口的 yawRad（= 上帧设的朝玩家）→ 玩家
+    //   在范围内时雪傀儡边朝玩家走边面朝玩家（防御造物靠近观察对象）；玩家出范围 → 本段不覆盖，aiWander 的
+    //   随机 yaw 生效（造物自由游荡）。distXZ 极小（贴脸）→ 不改（防除零 / 抖动）。
     // (2) 行走留雪层 + 铲后即时再生（机制等价 MC 雪傀儡走过留雪 + 雪层被铲后立即重生可无限刷雪球）：
     //    SnowLayer 现为**非实体薄层**（solid=false，collisionAABB 仅底面 1/8..1 高，不挡 mob isSolid 碰撞 + 不
     //    作支撑格）→ 放在 golem 脚位格不会嵌入 / 攀爬（旧版「放脚下致嵌入阶梯」是 SnowLayer 曾当满格实体时的顾虑，
@@ -1913,6 +1921,18 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, floa
     }
     // (4) 游荡（同 passive：随机选向 + 时间片）。
     if (aiWander(e, dt, world, worldW, worldD, speedScale)) dirty = true;
+    // t499 二轮复盘 ② 朝玩家最终决定权：aiWander 后置覆盖 yawRad 朝玩家（玩家在 kSnowGolemFaceRange 内）。
+    //   放 aiWander 之后是因 aiWander 在 wanderTimer 到期时设随机 yawRad 会覆盖朝玩家；后置保视觉朝向恒朝玩家。
+    //   用 aiWander 后的 e.pos 算距离（更精准；aiWander 单步位移 ≤0.15 block 影响微小但取最新位）。
+    //   玩家出范围 → 不覆盖（aiWander 随机 yaw 生效，造物自由游荡）。
+    {
+        const float sgDx = playerPos.x() - e.pos.x();
+        const float sgDz = playerPos.z() - e.pos.z();
+        const float sgDistXZ = std::sqrt(sgDx * sgDx + sgDz * sgDz);
+        if (sgDistXZ <= kSnowGolemFaceRange && sgDistXZ > 1e-4f) {
+            e.yawRad = std::atan2(-sgDx, -sgDz); // 朝玩家（dir=(-sin,-cos) → 模型 -Z 正对玩家 → 玩家见南瓜脸正脸）
+        }
+    }
     return dirty;
 }
 
@@ -3418,7 +3438,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   t482/t483 防御造物（mobType==MobSnowGolem/MobIronGolem）走各自 AI（抛雪球 / 大力攻击敌对），
                 //     无吃草 / 求偶 / 繁殖语义（造物不可繁殖）→ 进各自分支早退，不落 aiWander + 吃草 / 求偶段。
                 if (e.mobType == MobSnowGolem) {
-                    if (aiSnowGolem(idx, e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
+                    // t499 二轮复盘：传 listener（玩家脚位）给 aiSnowGolem 使其朝玩家（spec「雪傀儡应朝玩家」）。
+                    if (aiSnowGolem(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                     // 雪傀儡融化（damageEntity 大伤害）可能本帧致死 → 本帧不再走后续逻辑（同仙人掌 / 火伤致死守卫）。
                     if (e.dead) continue;
                 } else if (e.mobType == MobIronGolem) {
