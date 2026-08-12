@@ -142,6 +142,8 @@
 - **「count 减小不销毁」的泄漏量 ∝ count 抖动频率；高频抖动源（掉落沙 / 拾取）喂出 GB 级泄漏，且 C++ 内存审计查不出来**：上一条 t170 的「reparent 后 3D delegate count 减小不销毁」在**低频**场景（火把挖掉 / mob 偶发死亡）只是「视觉残留」（几个 delegate，用户难察觉）；但当某个实体类型**高频 spawn + 高频移除**时，每次「count 升」新建的 delegate（含 `QQuick3DGeometry` + `PrincipledMaterial` + 子 `Model` 树）在「count 降」时全部不回收 → 累积。典型：掉落沙——沙柱塌落每帧 spawn 多个 FallingBlock、着地即 erase 移除，count 上下剧烈抖动 → 10min 累积数千孤儿 delegate → ~2GB / 卡顿；重启进程清零（孤儿 delegate 随进程死）。**致命的查不出**：C++ 侧 `EntityManager`/`ItemEntityManager` 持 `std::vector<Entity>` 且有 `kCap` 上限、无裸 `new`、light recompute 用栈上 `std::queue`/`std::vector` 函数返回即释放——**所有 C++ 内存审计（leak sanitizer / 容器 size 检查）全 CLEAN**。泄漏在 QML 场景图侧（delegate 对象归 QtQuick3D 场景图管，C++ 容器看不见），C++ 工具盲区。**判别信号**：(1) 玩某**特定玩法**（掉落沙 / 大量挖掘产出掉落物）时间越长越卡、内存单调涨、重启恢复；(2) C++ 审计干净（容器有界、无裸 new）；(3) 该玩法对应「Repeater int-count model 频繁增减」的实体类型 → 即此坑（QML delegate 累积，非 C++ 泄漏）。**通用修法（二选一，按改动面）**：(a) **slot-reuse / tombstone**——C++ 容器移除时**不 erase-shift**，改标槽位空（`alive=false`）+ 入 free list，下次 spawn 复用空槽；于是 `count`（= `vector::size()` = QML Repeater model）在游玩期**单调不降** → Repeater 永不需要销毁 delegate → 无累积（空槽 delegate 绑 `visible:aliveAt(index)` 隐藏，复用时 revision bump 重显重绑；索引稳定不 shift）。改动小（容器内部存储模型 + 各遍历跳空槽 + delegate 加 visible 绑定），不动 QML delegate 结构。**注意 `alive` 标志位放 struct 末尾**——若该 struct 有聚合初始化 `{field1,field2,...}`，新加首字段会错位（`cannot convert X to bool`）；放末尾则聚合初始化尾字段缺省取 default member init。(b) **createObject/destroy + 稳定 id**（t170 推荐）——C++ 暴露单调 id + spawn/remove 信号，QML 维护 `{id:delegate}` 表 + `.destroy()`。改动大（QML delegate 全部重写为 id-based），适合 delegate 结构简单、id-based 数据访问易迁移的场景。两者都根治；slot-reuse 对「QML delegate 已复杂、index-based 绑定多」（如 mobHost 含 MobModel + F3+B + 攻击框）更省改动。**自测门槛**：修完须 run 该高频玩法一段时间（掉落沙 / 连续挖掘）+ 观察内存**不单调涨**（F3 / 任务管理器），仅 build 绿不算 PASS——泄漏是运行期累积，静态/编译期测试全盲。**元教训**：「C++ 审计干净」不等于「无内存泄漏」——凡呈现层（QML 场景图）按 C++ 容器 count 动态创建对象、而 C++ 容器又做 erase-shift 的，泄漏面在 C++ 视野外；排查「玩法相关、时间累积、重启恢复」型内存涨时，优先怀疑「Repeater/Loader 装 3D delegate + 容器 erase-shift」组合，而非 C++ 容器本身。
   - 证据：t256——掉落沙玩 ~10min → 2GB / 卡顿、重启恢复。C++ 审计干净（EntityManager `std::vector<Entity>` + kCap=64；ItemEntityManager kCap=200；light recompute 栈上 queue）。根因：`mobHost`（mob + FallingBlock 共用）/`itemHost`（掉落物）Repeater 的 reparent 3D delegate 在 count 减小（沙着地 erase / 掉落物拾取 erase）时不销毁（t170 族）；掉落沙高频 spawn/land 使 count 剧烈抖动 → 每次升新建的 BlockCube + MobModel delegate 在降时全泄漏。修法 (a) slot-reuse：两 manager 加 `alive` 标志 + `m_freeSlots` + `m_liveCount` + `acquireSlot/releaseSlot`（移除改 release 不 erase → count 单调不降）；遍历（tick/findMobHit/resolvePlayerPush/pickupScan）跳空槽；QML 两 delegate 加 `visible:{revision;aliveAt(index)}`；F3 draw 估算改用 `liveCount()`（空槽 delegate 隐藏不绘制，count 会高估）。
 - **slot-reuse 的「count 单调不变量」必须覆盖所有 count-reducer 路径，包括「语义上理应全清」的 reset/clearAll——漏掉任何一条，跨世界（或跨会话）的退场即把全部 reparent 3D delegate 一次性孤儿化，比游玩期的高频抖动泄漏更隐蔽、更致命**：上一条 t256 把「游玩期」移除（拾取 / 死亡 / 落沙着地）改成 `releaseSlot`（不 erase → count 不降 → Repeater 不销毁 delegate），根除了「玩法相关、高频抖动」型泄漏。但**「切世界 / 退存档」走的 `clearAll()` 仍写 `m_entities.clear()`**（即 `vector::clear()` 把 `size()→0`，count 属性随之→0）。这条路径**语义上**是「全部实体作废、进新世界从空起」，作者直觉「clearAll 理应清空 vector」看似无可挑剔；但它把 count 砸到 0，触发的正是 t170 族「Repeater count 减小 → reparent 进 host Node 的 3D delegate 销毁不到 → 孤儿」——而且**一次清掉全部**（不是掉落沙那种逐个抖动）。于是：退存档 → clearAll 把上一世界全部 mob/item/xp delegate 一次性孤儿化（挂在 mobHost/itemHost/xpOrbHost 下永不回收）；再进新世界 → spawn 从 0 起重建 → **孤儿堆之上再加新一层** → 跨世界单调累积。每个 mob delegate 含 MobModel（多 mob-type Model）+ 眼 Model + 火舌 Repeater（7×3 Model + 动画）= 数十 3D 对象；item/xp 各自的 BlockCube/billboard/球 delegate 子树同理。用户症状「**退存档再进仍然卡**」正是此机制的指纹——卡顿跨世界保留（孤儿在 QML 场景图、重启进程才清），而 C++ 内存审计（容器有界、无裸 new、size 检查）**全 CLEAN**（泄漏面在 QML 场景图侧，C++ 视野外，同 t256 元教训）。**判别信号**：(1) 性能问题「**跨世界保留**」（退存档再进不缓解、甚至更糟），区别于「纯 per-tick 扫描残留」（仅当 tick 跑才卡、换世界即清）；(2) C++ 审计干净；(3) 该实体 / 对象有「切世界 / 退会话时走 `clearAll`-style 全量 `vector::clear()` reset」的入口 → 即此坑（reset 断点漏盖 slot-reuse 不变量）。**通用修法**：凡已用 slot-reuse（releaseSlot 不 erase）保 count 单调的实体 / 资源容器，其 `clearAll()` / `reset()` / `unloadWorld()` **也必须走「释放全部活体槽（标 alive=false + 入 free list + liveCount=0）但保留 vector」**，**绝不** `vector::clear()`。这样 count 在切世界时也单调不降 → Repeater delegate 既不销毁（无孤儿）也不重建 → 下次进世界直接复用既有 delegate 子树（aliveAt 翻回 true + revision bump 重绑新世界数据），稳态常驻受 cap 钳制（有界），远优于跨世界无界泄漏。幂等要点：clearAll 仅释放「当前 alive」的槽（已释放的跳过），否则 free list 重复入栈 + liveCount 下溢。**自测门槛**：修「跨世界保留型」卡顿，必须 run「进世界 A→退→进世界 B（甚至同一世界重复进出 N 次）」+ 观察内存 / FPS **不随进出次数单调恶化**（仅 build 绿、仅单世界内玩不算 PASS——孤儿是跨世界累积的，单世界内 slot-reuse 本就正常）。**元教训**：不变量（如「count 单调」）是**全局**契约，不能只在「热路径」守、「冷路径 / 重置路径」破——「重置语义上想清空」与「不变量要求不降」冲突时，**不变量优先**，重置改走「释放但不销毁容器」语义（把「作废」从「销毁对象」降级为「标记空槽」，复用时重生）。任何「先全局不变量、后局部实现」的设计，审计时要把**每一条**会减 count 的路径（含 reset/clear/unload/quit）逐一对照不变量，而非只盯热路径。
+- **「用隐藏替代销毁」修 Repeater-3D-delegate 不销毁坑时，delegate 的**稳态常驻数 = 历史最高并发峰值**——任何一次峰值（爆炸 / 大规模刷怪 / 玩法峰值）会把 count 推到高水位，之后即使全部 slot 释放（delegate visible=false 隐藏），那些 delegate（每个含完整子树：BlockCube + Material + 多 Model + 动画）**永久驻留 host 场景图**，重进世界它们仍在（仅隐藏），持续吃场景图遍历 / 绘制 / 绑定重算开销 → 用户报「峰值玩法后退存档再进仍卡、只有重启 exe 才恢复」**：上一条把 clearAll 改成 slot-reuse（释放槽保 count 不降）解决了「跨世界孤儿化」，但留下了它的对偶问题——既然 delegate「永不被销毁」，那么**历史峰值期间创建的所有 delegate 都永久驻留**。cap（kCap=200/64）只钳「最大并发活体数」，不钳「曾经达到过的 delegate 总数」（二者在 slot-reuse 下相等，因为 count 单调不降 = delegate 永不回收 = count 恒等于历史峰值）。判别信号：(1) 用户报某种**峰值玩法**（TNT 连锁爆炸一次产数百掉落物、大规模刷怪、群攻）之后**整个进程**变卡；(2) 退存档再进**同一世界**（甚至新世界）仍卡；(3) 完全关闭 exe 重开才恢复（delegate 随进程死）；(4) C++ 审计干净（slot-reuse 容器有界）；(5) 该实体用了「Repeater int-count + reparent 3D delegate + slot-reuse 保 count 单调」组合 → 即此坑（隐藏≠销毁，高水位 delegate 永驻）。**通用修法（双层）**：(a) **真正重置入口**（world-exit / enterWorld 清旧 / unloadWorld）须提供一个「真清 vector（count→0）」的 `hardReset()`（区别于只标 alive=false 的 `clearAll()`），让 count 真正回落到 0——hardReset 让 Repeater model 变 0，但 reparent 的 3D delegate **仍不被 Repeater 销毁**（t170：跟踪表是 QQuickItem*，3D delegate 不进表），所以 (b) **caller 须配套手动 destroy** reparent 的 delegate：给每个 delegate 加一个**布尔标记 property**（如 `isEntDelegate: true`），world-exit 时扫 `host.children`、对带该标记的子节点调 `.destroy()`（绕过 Repeater 直接销毁 QML 动态对象）。遍历 `host.children` 时**先 `.slice()` 复制**再遍历（destroy 异步但会改 children 列表，原表迭代失效）；Repeater 自身也是 host 的 child 但无该标记（undefined falsy）→ 跳过不误毁。**仅重置路径调 hardReset + destroy**，游玩期的拾取 / 死亡 / 移除仍走 releaseSlot（保 slot-reuse 不变量、防高频抖动重建 delegate）。**关键区分**：`clearAll`（标空保 count 单调）vs `hardReset`（真清 count→0）是**两种语义**——前者用于「游玩期 / 同世界内」的移除（保 delegate 复用、避免抖动重建），后者用于「跨世界 / 跨会话」的真清场（连 delegate 一起销毁、下一世界从 0 起重建）。把二者混用（用 clearAll 做跨世界清场 → delegate 永驻；或用 hardReset 做游玩期移除 → 高频抖动重建 delegate 致卡顿）都是错的。**自测门槛**：必须 run「峰值玩法（让 count 冲到 cap）→ 退存档 → 再进 → 验证不再卡、F3 / 任务管理器内存回落到基线」，仅 build 绿 / 单世界内测不算 PASS——高水位 delegate 是峰值后累积的，静态测试盲。**元教训**：「用隐藏替代销毁」是性能权衡（避免高频销毁/重建抖动），但**任何「永不被销毁」的对象池都有「稳态 = 历史峰值」的代价**——峰值越高、池越大、常驻开销越大；当存在「理应彻底清场」的语义入口（换世界 / 换关卡 / 换会话）时，必须配套「真正销毁」的路径，不能让对象池只增不减。对象池（slot-reuse / tombstone / 隐藏池）设计三问：① 峰值有多大？② 谁负责在「真清场」时排空池？③ 排空路径是否覆盖了 Repeater-3D-delegate 的手动 destroy？（漏任一 → 峰值后永久变卡，重启才恢复）。
+  - 证据：t492——TNT 连锁爆炸一次产大量掉落物，itemEntities.count 冲到 kCap(200) → 200 个 item delegate（每个 BlockCube/BillboardQuad + Material + 动画）驻留 itemHost 子树。t437 的 clearAll 只标 alive=false（delegate visible=false 隐藏），保了 count 单调无孤儿，但 200 个 delegate **永驻不销毁**。退存档→再进同一世界：clearAll 释放所有槽（items 0/0、F3 显示归零），但 200 个隐藏 delegate 仍在 itemHost.children → 场景图每帧遍历 / 绘制排序仍扫这 200 棵子树 → 卡顿跨世界保留；完全关 exe 重开 → delegate 随进程死 → 恢复。修法：ItemEntityManager/EntityManager/XpOrbManager 加 `hardReset()`（真 `m_entities.clear()` → count→0）；QML 三个 delegate Node 加 `property bool isEntDelegate: true`；window 级 `clearEntDelegates(host)` 扫 `host.children.slice()` destroy 带 isEntDelegate 的子节点（Repeater 自身无此标记 → 跳过）；三处 world-exit/enterWorld-清旧 段把 `xxx.clearAll()` 改 `xxx.hardReset(); clearEntDelegates(host)`；`/kill @e` 游玩期路径保 clearAll（同世界内 slot-reuse 复用 delegate，不重建）。
 
 - **qmlcachegen AOT 编译通过 ≠ QML 正确**：`qt_add_qml_module` 的 qmlcachegen 把 `.qml` 预编译进二进制，但它**只做词法/语法层**校验，**不**校验「信号处理器名是否存在」「属性能否被赋值」这类语义绑定。一个写错的信号处理器（如 `onHoverChanged`，应为 `onHoveredChanged`——源自 `HoverHandler.hovered` 属性的 `hoveredChanged` 信号）能通过 AOT 编译 + 链接成功 + ninja 报「no work to do」，却在**运行期组件加载**时报「类型 X 不可用 / 无法分配到不存在的属性」→ `objectCreationFailed` / `root objects after load: 0`。**判别信号**：build 绿 但启动日志 `QQmlApplicationEngine failed to load component` + 「不可用」/「不存在」 + `root objects after load: 0` → 即此坑。**通用原则**：改 QML 后的自测门槛**必须**包含「启动 app + 日志 `root objects after load: 1`」，仅「编译通过 / build 绿」**不算** PASS（与 t16「编译通过但粒子不可见」同族：静态/编译期测试漏判运行期问题）。**Handler 信号命名规则**：Pointer Handler（`HoverHandler`/`TapHandler`/`DragHandler`/`DropArea`）的 change 信号严格由属性名推导：`hovered`→`onHoveredChanged`、`active`→`onActiveChanged`、`pressed`→`onPressedChanged`、`containsDrag`→`onContainsDragChanged`，没有简写；DropArea 的事件处理用 `onDropped`/`onEntered`/`onPositionChanged`（是其声明的方法，非属性 change 信号）。
   - 证据：t23——`Inventory.qml` 的 `HoverHandler { onHoverChanged: ... }` 编译通过、build 绿，运行期 `qrc:/VoxelSandbox/Inventory.qml: 类型 Inventory 不可用 ... 无法分配到不存在的属性"onHoverChanged"`，`root objects = 0`；改 `onHoveredChanged` 后 `root objects = 1`。
@@ -484,4 +486,60 @@
   - 证据：t489——水/岩浆条带 flipbook。用上述测试程序确认 positionV 方向（正向 = 正值上移采样）+ V 约定（图像顶 =
     v=1）+ Repeat tiling 兜底（方向判反仍循环不破）。运行期实测：稳态 prof `mesh Xreb [Nd 0s **0w**]`（水重建恒 0，
     动画纯材质参数），`root objects after load: 1`。肉眼动画观感（水面/岩浆面流动）需用户 playtest 确认（无头盲区）。
+
+---
+
+## 「语义守卫被跨语义复用」+「失败被同坐标副作用掩盖」（t490fix 验证）
+
+> 元原则：**一个带「专用语义守卫」的写入 helper（如 setBlockFromEntity 的 occ 守卫「仅 air/水可被覆盖」）
+> 被语义不匹配的路径复用时，守卫会静默拒写；若 caller 又忽略返回值、且后续在同坐标做了「看起来成功」
+> 的副作用（如生成实体），失败就被完全掩盖——用户只看到「方块没消 + 实体叠在原位 = 1.5 格高」。**
+
+- **「FallingBlock 着地专用」的 occ 守卫（仅 air/水可被覆盖）不能复用到「清任意实体方块」路径——后者守卫必命中
+  被拒写**：`setBlockFromEntity(x,y,z,Air)` 本是「FallingBlock（沙）着地时把 air/水格写成沙」的专用入口，其
+  occ 守卫 `if (occ != Air && occ != Water) return false;` 语义是「沙落非空格不覆盖」（正确，防沙覆盖玩家放的方块）。
+  但点火 TNT 路径想「清掉原 TNT 方块（实体方块）」也调它 → TNT 是实体方块 → occ 守卫命中 → **静默 return false 不写**
+  → 原 TNT 方块没清，而 spawnPrimedTnt 又在同格生成 PrimedTnt 实体 → 1.5 格叠加；爆炸时 detonateTntSphere
+  球心格还是原 TNT 方块 → 连锁递归 + 坑越炸越大。**判别信号**：某「移除某方块」路径调 setBlockFromEntity(Air)
+  但「方块没消」（mesh 仍在 / 碰撞仍在 / 旁生实体叠在其位），且该方块是实体方块（非 air/水）→ 即 occ 守卫拒写。
+  **通用形态**：凡带「专用语义守卫」的写入 helper（着地 occ / 放置需 air / 系统模拟无条件覆盖 …），**绝不为新
+  caller 去削弱守卫**（会破坏原语义，如沙覆盖玩家方块）；而是**新写一个独立 helper**（如 `clearBlockSilent`），
+  名字 + 头注释**明确钉死「仅供 X 路径用」**，复用原 helper 的全部写后钩子（noteGrowth/noteFluid/recomputeLight/
+  clearAllDirty/emit worldChanged）仅去掉守卫。这样两条语义各自独立、守卫各自正确，不互相污染。**自检**：审任何
+  `setBlockFromEntity(...,Air)` / `setXxx(条件覆盖)` 调用，问「被清/覆盖的方块语义上是否满足守卫？」不满足 → 守卫
+  必拒，写一个绕守卫的独立入口，别改守卫。
+  - **失败被「同坐标副作用」掩盖是这类 bug 最阴险处**：caller 忽略 setBlockFromEntity 的 `false` 返回值（无告警），
+    而紧随其后的 `spawnPrimedTnt(tx,ty,tz)` 在**同坐标**生成实体（这条路径不查原方块、必成功）→ 肉眼看到一个「实体
+    在原 TNT 位置」就以为「清 + 生成」都成功了，唯独「原方块没清」看不见（被实体挡住）直到爆炸才暴露（坑越炸越大）。
+    机制等价「主流程成功掩盖了前置清场的失败」。**通用形态**：凡「先清场（fallible）→ 再在同位置做事（必成功）」的
+    序列，若清场返回值被忽略，失败必被掩盖——清场 helper 应 `[[nodiscard]]` 或 caller 须检查，否则静默坏。
+- **证据**：t490fix——3 处 TNT 点火路径（playercontroller 右键机关四邻 / 右键 TNT 本体 / 压力板四邻）原写
+  `setBlockFromEntity(...,Air)` 清原 TNT 方块，但 occ 守卫拒写（TNT 实体方块）→ 原 TNT 方块没清 + spawnPrimedTnt
+  同格生成 PrimedTnt → 用户实测「引燃变成实体掉落了，但原来方块没消除，1.5 格高的 TNT」+ 爆炸连锁坑变大。修：新增
+  `World::clearBlockSilent`（照搬 setBlockFromEntity 主体仅删 occ 守卫；头注释明确「点火专用，勿用于破坏/沙着地/放置」），
+  3 处点火路径全换它；setBlockFromEntity 守卫保留不动（沙着地的 FallingBlock 路径仍依赖它防覆盖玩家方块）。
+
+---
+
+## 「低层需查高层拥有的物品属性」的分层解法（t490fix 验证）
+
+> 元原则：**低层（如 Entities）需要查询某个物品属性（如 maxStack），但属性的权威实现位于高层（如 Game 层
+> Hotbar::maxStackSize，含桶/蘑菇汤/护甲特例）—— 低层不能 include 高层。解法二选一：(a) 在最低公共依赖（Core）
+> 加一个**纯函数近似查询**，明确标注「仅供 X 语义用、不替代高层权威」；或 (b) 由高层注入回调。两者都接受
+> 「近似在高层特例上偏差，但偏差在该语义下无害」的取舍。**
+
+- **掉落物就近合并需查 maxStack，但 Entities 不能 include Game 层 Hotbar → 在 Core 加近似 maxStackSize(int)**：
+  ItemEntityManager（Entities）做「同 itemId 掉落物近邻合并」需知 maxStack（工具不可叠=1，材料=64）。但权威的
+  `Hotbar::maxStackSize`（Game 层）含桶/蘑菇汤/护甲特例（maxStack=1）+ 工具段 + 材料段判定，Entities 不能 include
+  Game（PLAN §2 依赖只向下）。解法：在 Core `BlockRegistry` 加 `maxStackSize(int itemId)` 纯函数（方块段走
+  BlockDef.maxStack；[0x100,0x200) 工具段=1；≥0x200 材料=64），明确标注「仅供掉落物合并用、不替代 Hotbar::maxStackSize
+  作为背包槽权威」。偏差：桶/蘑菇汤/护甲（材料段内 maxStack=1 的特例）按 64 合并 → 但这些**不会作为 mob/破块掉落物出现**
+  （仅玩家 Q 键丢弃），即便按 64 合并也无数据错（拾取时 Hotbar.addStack 按真实 maxStack=1 自然分槽）。**判别信号**：
+  某低层需查「物品属性 X」但 X 的权威实现含高层语义 → 别在低层重复实现完整 X（重复 + 漂移），也别破分层去 include
+  高层；在 Core 加**近似版**（标注语义边界 + 偏差无害性），或让高层注入回调。**通用形态**：分层铁律下「低层需要高层
+  知识」时，接受「近似 + 边界无害」优于「完整 + 破分层」——前提是文档明确近似在哪类输入上偏差、为何在该语义下无害。
+  - **证据**：t490fix——ItemEntityManager 掉落物合并查 Core `BlockRegistry::maxStackSize(int)`（新加），不 include
+    Hotbar；mob 掉落物（骨头/腐肉/箭/火药/羽毛/线/皮革/墨囊/蛋/肉/铁锭/花/雪球，均材料段 64）合并正确；工具（弓 0x10F）
+    maxStack=1 不合并（独立耐久，正确）；桶/汤/护甲按 64（偏差，但掉落物中不存在，无害）。
+
 
