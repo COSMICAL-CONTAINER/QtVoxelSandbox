@@ -273,7 +273,16 @@ void ChunkGeometry::onWorldChanged()
     //   首次构建期（启动）chunkInRange 默认 true，此门控不影响首次 mesh 生成。
     if (!m_chunkInRange) return;
     Chunk *c = myChunk();
-    if (c && c->dirty()) buildMesh(RebuildReason::Dirty);
+    if (!c || !c->dirty()) return;
+    // t188 perf：流体专用脏跳过 —— 当本 chunk 自上次 clearAllDirty 以来只收到流体类写（Air/Water/Lava，
+    //   由 ChunkManager::setBlock 据 oldId/newId 分类累积于 chunk::fluidOnlyDirty），本段若为 terrain/cross/
+    //   glass/ice（非 water/lava 段）则顶点不变（这些段只画非流体方块，流体写必产相同 mesh）→ 跳过重建。
+    //   水流风暴时一 tick 数百段无谓重建的真因即此（共享 dirty 拖 terrain 段每 tick 重跑 culled/greedy）。
+    //   water/lava 段（m_waterOnly / m_lavaOnly）恒重建（流体写确改变其水面/流面几何）。流体专用假定由
+    //   clearAllDirty 复位 true、固体写清 false（固体 dominate → 必重建）；故「混窗」（流体+固体）终态 false →
+    //   重建，无误跳。冰段（m_iceOnly）跳过同理：冰↔水经 setWaterSilent 写 Ice（实体）→ fluidOnly=false → 重建。
+    if (c->fluidOnlyDirty() && !m_waterOnly && !m_lavaOnly) return;
+    buildMesh(RebuildReason::Dirty);
 }
 
 // 查表（单一权威：BlockRegistry）。行为与历史硬编码一致：草顶/草侧/草底、其余各面统一。

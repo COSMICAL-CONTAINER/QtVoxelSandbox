@@ -852,6 +852,13 @@ public:
     //   瞬时设速的常规地面路径）。单一权威：玩家与（未来）船的冰面手感都读它，避免两处魔数漂移。
     static float iceSlipApproach(quint8 blockId);
 
+    // t188 perf：流体类格子判定（Air / Water / Lava）。供 ChunkManager::setBlock 把 chunk 标「流体专用脏」
+    //   （fluidOnlyDirty）—— 当一次写操作 oldId/newId **均**属流体类时，terrain/cross/glass/ice 段顶点不变
+    //   （它们只画非流体方块），可跳过重建（水流风暴时一 tick 数百段无谓重建的真因）。三 id 非连续
+    //   （Air=0 / Water=21 / Lava=31）故显式并判。仅这三者：冰（融化经 setWaterSilent 写 Water 触发本判定，
+    //   oldId=Ice 非流体类 → fluidOnly=false → ice 段重建，正确）、玻璃（同）等均非流体类 → 固体路径重建。
+    static bool isFluidLike(quint8 blockId);
+
     // t133 不完整方块段起止哨兵：id ∈ [FirstPartial, LastPartial] 走 PartialBlockGeometry 异形渲染
     //   （mesher 合批进 chunk mesh，不走 1×1×1 立方面路径）。t134 落地 6 类（WoodSlab=15 ... WoodTrapdoor=20）。
     //   机制等价 MC 1.0 (id, metadata) 方块模型：id ∈ [FirstPartial, LastPartial] 即「异形方块」（非整立方）。

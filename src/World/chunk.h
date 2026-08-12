@@ -58,6 +58,21 @@ public:
     void markDirty() { m_dirty = true; }
     void clearDirty() { m_dirty = false; }
 
+    // t188 perf：流体专用脏标记。语义：fluidOnlyDirty=true ⟺ 「自上次 clearAllDirty 以来该 chunk 收到的
+    //   **全部** setBlock 写入均为流体类（oldId/newId 均属 Air/Water/Lava）」→ terrain/cross/glass/ice 段顶点
+    //   不变（它们只画非流体方块），onWorldChanged 可跳过重建（水流风暴一 tick 数百段无谓重建的真因：
+    //   水流/蒸发只动水面/流面几何 = water/lava 段事，terrain 段却被共享 dirty 拖着每 tick 重跑 culled/greedy）。
+    //   water/lava 段不受影响（恒据 dirty 重建）。
+    //   **累积规则（AND）**：默认值 true（中性「假定为流体专用」）。每次 setBlock：流体类写 → 不动本标
+    //     （保留原值；若已被某次固体写清 false 则继续 false）；固体类写 → clearFluidOnlyDirty() 置 false。
+    //     clearAllDirty 把它 reset 回 true（中性，开新一轮窗口）。如此「固体写」终态 false、「纯流体窗」终态 true、
+    //     「流体+固体混窗」终态 false（固体 dominate → terrain 须重建）。chunk 新建即 true（首帧全段重建走 dirty 路径，
+    //     fluidOnlyDirty=true 不影响 —— dirty=true && 首次 buildMesh 各段都跑）。
+    //   判定：terrain/cross/glass/ice 段 rebuild iff `dirty() && !fluidOnlyDirty()`（非流体专用才重建）。
+    bool fluidOnlyDirty() const { return m_fluidOnlyDirty; }
+    void clearFluidOnlyDirty() { m_fluidOnlyDirty = false; } // 固体写 / 显式清（每次 clearAllDirty 后由 resetFluidOnlyDirty 复位 true）
+    void resetFluidOnlyDirty() { m_fluidOnlyDirty = true; }  // clearAllDirty 末调：开新窗，假定流体专用待固体写否决
+
     // t176 存档（SQLite）原始字节访问：m_voxels / m_states / m_lightField 三块定长连续数组
     //   （同尺寸同索引 lx + kSize*(lz + kSize*ly)，长 = voxelCount()）。WorldStore（同 World 层）
     //   经这三组访问器把整 chunk 序列化为 BLOB（save）或从 BLOB memcpy 回填（load）——避免逐格
@@ -89,6 +104,9 @@ private:
     //   mesher 只读。与 m_voxels / m_states 同尺寸 / 同索引（lx + kSize*(lz + kSize*ly)）。
     std::vector<quint8> m_lightField;
     std::atomic<bool> m_dirty{true};     // 新建即脏（首帧需 mesh）。atomic：未来 mesh-worker 读脏标记无 TSan 数据竞争（voxel 数组仍需 §2-C per-chunk 锁，线程化时补）
+    // t188 perf：流体专用脏标记（见 fluidOnlyDirty() 注释）。默认 true（中性「假定流体专用」；固体写清 false，
+    //   clearAllDirty 复位 true）。atomic 同 m_dirty（ChunkGeometry 读 / World 写跨「逻辑线程」）。
+    std::atomic<bool> m_fluidOnlyDirty{true};
 };
 
 #endif // CHUNK_H

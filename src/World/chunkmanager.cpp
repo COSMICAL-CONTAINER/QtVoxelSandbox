@@ -44,10 +44,11 @@ Chunk *ChunkManager::chunkAtWorld(int x, int z) const
 //   旧版 buildMesh 末尾 clearDirty 由「先处理的 segment」抢先清掉共享 chunk 脏标记 →
 //   后处理的 segment（terrain/water 二者之一）见 dirty=false 跳过重建 → 那段 mesh 陈旧到下个 sun-step。
 //   改：buildMesh 不再清脏，统一由 World 在两段都重建完（emit worldChanged 同步返回后）清。
+//   t188 perf：同时把 fluidOnlyDirty 复位 true（中性「假定下窗流体专用」），开新一轮累积窗口。
 void ChunkManager::clearAllDirty()
 {
     for (auto &c : m_chunks)
-        if (c) c->clearDirty();
+        if (c) { c->clearDirty(); c->resetFluidOnlyDirty(); }
 }
 
 quint8 ChunkManager::blockAt(int x, int y, int z) const
@@ -137,13 +138,22 @@ bool ChunkManager::setBlock(int x, int y, int z, quint8 id, quint8 state)
     const int lx = x - cx * kSize, lz = z - cz * kSize;
     Chunk *c = chunk(cx, cz);
     if (!c) return false;
+    // t188 perf：读 oldId 用于「流体专用脏」分类。isFluidLike(oldId) && isFluidLike(id) = 流体类写
+    //   （水流/岩浆流扩散/蒸发/re-leveling、桶倒水）→ 不动 fluidOnlyDirty（保留中性 true / 已被固体清则续 false）；
+    //   否则（任一为实体方块：破/放固体、水×岩浆→Stone/Cobble/Obsidian、沙着地）→ clearFluidOnlyDirty
+    //   （固体 dominate → terrain 类段须重建）。classification 对目标 chunk 与边界邻接 chunk 同源（同一次写）。
+    const quint8 oldId = c->blockAt(lx, y, lz);
+    const bool fluidOnly = BlockRegistry::isFluidLike(oldId) && BlockRegistry::isFluidLike(id);
+    if (!fluidOnly) c->clearFluidOnlyDirty(); // 固体写 → 否决「流体专用」假定
     c->setBlock(lx, y, lz, id, state);
     c->markDirty();
     // 边界格（local x/z 贴 chunk 边沿）→ 该格面可见性可能影响邻接 chunk 的边界剔除，
     // 标邻接 chunk 脏（dev-spec t02 验收；为 t03「跨边界破放不破坏邻居 mesh」准备）。
-    if (lx == kSize - 1) { if (Chunk *n = chunk(cx + 1, cz)) n->markDirty(); } // +X 邻
-    if (lx == 0)         { if (Chunk *n = chunk(cx - 1, cz)) n->markDirty(); } // -X 邻
-    if (lz == kSize - 1) { if (Chunk *n = chunk(cx, cz + 1)) n->markDirty(); } // +Z 邻
-    if (lz == 0)         { if (Chunk *n = chunk(cx, cz - 1)) n->markDirty(); } // -Z 邻
+    // t188 perf：边界流体写对邻接 chunk 的 terrain 类段同样无影响（流体格不进 terrain 段、不影响实体面剔除）
+    //   → 固体否决同步传给邻接 chunk（同一次写的分类），保邻接 terrain 类段也按同一 fluidOnlyDirty 行为。
+    if (lx == kSize - 1) { if (Chunk *n = chunk(cx + 1, cz)) { n->markDirty(); if (!fluidOnly) n->clearFluidOnlyDirty(); } } // +X 邻
+    if (lx == 0)         { if (Chunk *n = chunk(cx - 1, cz)) { n->markDirty(); if (!fluidOnly) n->clearFluidOnlyDirty(); } } // -X 邻
+    if (lz == kSize - 1) { if (Chunk *n = chunk(cx, cz + 1)) { n->markDirty(); if (!fluidOnly) n->clearFluidOnlyDirty(); } } // +Z 邻
+    if (lz == 0)         { if (Chunk *n = chunk(cx, cz - 1)) { n->markDirty(); if (!fluidOnly) n->clearFluidOnlyDirty(); } } // -Z 邻
     return true;
 }

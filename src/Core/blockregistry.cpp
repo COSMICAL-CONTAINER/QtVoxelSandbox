@@ -1151,6 +1151,12 @@ bool BlockRegistry::isFullCube(quint8 blockId)
     return def(blockId).shape == ShapeFull;
 }
 
+// t188 perf：流体类格子（Air/Water/Lava）判定，供 chunk 流体专用脏标记分类（见头注释）。
+bool BlockRegistry::isFluidLike(quint8 blockId)
+{
+    return blockId == Air || blockId == Water || blockId == Lava;
+}
+
 // t334 per-block 光衰减量（见头注释）。flood-fill 据本值算邻格衰减 = max(1, lightOpacity)，取代旧 isSolid 二值遮光。
 //   全实体方块（isSolid）满遮光 → 15（保旧语义）；活版门合=15 / 开=0；台阶=7（半遮）；其余 → 0（全透）。
 quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
