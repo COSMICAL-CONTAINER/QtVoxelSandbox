@@ -51,6 +51,13 @@ Item {
     //   发，hotbar 槽间搬动 / 互换不算「拿新物」。
     signal itemTaken()
 
+    // t511 二轮复盘：箱子 tab 点击 → 宿主切生存模式背包。分层（PLAN §2）：本面板只发意图，是否切模式由宿主
+    //   （持 PlayerController）定。宿主 setMode(Survival) + inventoryOpen 保持 true（面板由 player.mode 绑定自动
+    //   换成 SurvivalInventory）；heldBlock 是 hotbar VM 共享光标栈（跨创造/生存同一栈）→ 切模式天然保留，玩家可
+    //   在创造护甲 tab 拿钻石护腿后点箱子 tab 切生存背包直接穿上。第一轮曾改成「保持创造综合页」被用户否决
+    //   （「点箱子竟不切生存」）。
+    signal switchToSurvivalRequested()
+
     // ① 调色板数据：t511 改为分类 tabs（MC 1.0 式）。currentTab 决定调色板只显某一类（方块 / 工具 / 材料 /
     //   护甲 / 食物）。各分类 id 段恒定（方块→creativeBlocks、工具→creativeTools、材料→creativeMaterials、
     //   护甲→creativeArmor），食物段从 creativeMaterials 里挑可食用子集（JS 端按 RecipeRegistry 材料段 id 常量
@@ -120,15 +127,9 @@ Item {
             }
             return out
         }
-        if (root.currentTab === 5) {
-            // t511 箱子 tab（综合页）：保持创造模式，合并显示材料 + 护甲（便于玩家在创造模式直接拿起护甲穿上，
-            //   而非旧版切到生存模式）。用户复盘「点箱子 tab 竟切到生存模式，应保持创造但显示物品/护甲」。
-            //   顺序 = 先材料（含食物）后护甲，与既有 tab2/3 口径一致；护甲来自 creativeArmor()。
-            const out = root.hotbar.creativeMaterials().slice() // 含食物的材料全集
-            const armor = root.hotbar.creativeArmor()
-            for (let i = 0; i < armor.length; ++i) out.push(armor[i])
-            return out
-        }
+        // t511 二轮复盘：箱子 tab 不再用 currentTab=5 综合页（第一轮「保持创造」被否决）—— 点击箱子 tab 直接
+        //   发 switchToSurvivalRequested 切生存背包（宿主 setMode(Survival)，本面板由 player.mode 绑定自动隐藏，
+        //   SurvivalInventory 接管）。故 filteredPalette 无 case 5（currentTab 永不取 5）。
         return []
     }
 
@@ -297,9 +298,10 @@ Item {
             anchors.margins: 14
             spacing: 8
 
-            // t511 分类 tabs（MC 1.0 式创造背包分类）：方块 / 工具 / 材料 / 护甲 / 食物 / 箱子。
-            //   前 5 项切 currentTab（调色板只显该类，filteredPalette 过滤）；箱子 tab → currentTab=5 综合页
-            //   （材料+护甲合并显示，保持创造模式 —— 不复用生存背包，t511 复盘「点箱子竟切生存」已改）。
+            // t511 分类 tabs（MC 1.0 式创造背包分类）：方块 / 工具 / 材料 / 护甲 / 食物 / 生存模式背包。
+            //   前 5 项切 currentTab（调色板只显该类，filteredPalette 过滤）；生存模式背包 tab（原「箱子」tab，
+            //   t511 二轮复盘改名）→ 发 switchToSurvivalRequested 由宿主切 player.mode=Survival（inventoryOpen 保持
+            //   true，面板由 mode 绑定自动换成 SurvivalInventory；heldBlock 共享光标栈天然保留跨切）。
             //   选中态：白底深字 + 下沉边；未选：暗底亮字。自绘原创（§9 override (a)，无 MC GUI PNG）。
             //   去掉旧「创造物品栏」标题 + 「[E]/[Esc] 关闭」提示（用户嫌啰嗦；关闭键提示已在 HUD/暂停叠层）。
             Row {
@@ -308,24 +310,26 @@ Item {
                 width: parent.width
 
                 Repeater {
-                    // [标签, 对应 currentTab（-1=箱子特殊，不进 currentTab）]。
+                    // [标签, 对应 currentTab（-1=生存模式背包特殊，不进 currentTab）]。
                     model: [
                         { label: "方块", tab: 0 },
                         { label: "工具", tab: 1 },
                         { label: "材料", tab: 2 },
                         { label: "护甲", tab: 3 },
                         { label: "食物", tab: 4 },
-                        { label: "箱子", tab: -1 }
+                        { label: "生存模式背包", tab: -1 }
                     ]
                     delegate: Rectangle {
                         width: Math.floor((parent.width - (6 - 1) * 2) / 6)
                         height: 26
-                        // t511：箱子 tab（tab:-1）现在映射到 currentTab=5（综合页，保持创造模式），故选中态判据
-                        //   = (tab===-1 ? currentTab===5 : currentTab===tab)，选中绿底 / 未选暗底。
+                        // t511 二轮复盘：生存模式背包 tab（tab:-1）发 switchToSurvivalRequested 切生存，不再用
+                        //   currentTab=5 综合页。本 Inventory 面板只在 Creative 显（Main.qml 绑定），切到 Survival 后
+                        //   自动隐藏 → 该 tab 永远不会有「选中态」（选中态只在 SurvivalInventory 里体现，那边独立）。
+                        //   故 isSelected 判据保留 (tab===-1 ? false : currentTab===tab)，-1 恒未选（切走即隐）。
                         property bool isSelected: (modelData.tab === -1)
-                                                  ? (root.currentTab === 5)
+                                                  ? false
                                                   : (root.currentTab === modelData.tab)
-                        color: isSelected ? "#5a8a4a" : "#262b30" // 选中绿底 / 未选暗底（t511 箱子 tab 不再特殊暗黄底）
+                        color: isSelected ? "#5a8a4a" : "#262b30" // 选中绿底 / 未选暗底
                         border.color: isSelected ? "#7fe57f" : "#3a444f"
                         border.width: 1
                         radius: 3
@@ -340,10 +344,11 @@ Item {
                         TapHandler {
                             onTapped: {
                                 if (modelData.tab === -1) {
-                                    // t511 箱子 tab → 保持创造模式，切到综合页（currentTab=5 = 材料+护甲，
-                                    //   filteredPalette case 5 合并显示）。旧版发 switchToSurvivalRequested 切生存，
-                                    //   用户复盘「点箱子 tab 竟切生存，应保持创造但显示物品/护甲便于穿上」。
-                                    root.currentTab = 5
+                                    // t511 二轮复盘：生存模式背包 tab → 发 switchToSurvivalRequested 由宿主切生存。
+                                    //   heldBlock 是 hotbar VM 共享光标栈（跨创造/生存同一栈）→ 切模式天然保留，
+                                    //   玩家可在护甲 tab 拿钻石护腿后点本 tab 切生存背包穿上。第一轮「保持创造综合页」
+                                    //   被用户否决（「点箱子竟不切生存，应切过去」）。
+                                    root.switchToSurvivalRequested()
                                 } else {
                                     root.currentTab = modelData.tab
                                 }
