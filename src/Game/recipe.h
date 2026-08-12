@@ -254,6 +254,21 @@ public:
     //   下界 / 末影人故不作合成链；机制等价 MC 末影之眼 = 末影珍珠 + 烈焰粉合成，但前置生物留后续）。
     //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘）。
     static constexpr int EndEyeId       = 0x23A; // 末影之眼：要塞宝藏箱战利品；右键末地传送门激活（占位，t487）
+    // t507 木碗 + 蘑菇汤（机制等价 MC 1.0 bowl / mushroom stew；名称 / 图标全原创自绘 §9a 区隔）：
+    //   木碗 BowlId：材料段 0x23B。**4 木板菱形合成 → 1 木碗**（recipe.cpp bowl 配方，2×2：3 木板左上 / 右上 / 左下，
+    //   右下空 —— MC 1.0 木碗 V 形合成的本地化）。可堆叠 64；非方块（材料段）→ 右键不放置。MaterialIcon 自绘
+    //   木碗图标（米色木质浅碗俯视）。下游消费：蘑菇汤配方原料（碗 + 红蘑菇 + 白蘑菇 → 1 蘑菇汤）。创造调色板补全
+    //   便于测试。无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退）。
+    //   蘑菇汤 MushroomStewId：材料段 0x23C。**碗 + 红蘑菇 + 白蘑菇合成 → 1 蘑菇汤**（recipe.cpp stew 配方，无序
+    //   shapeless 2×2 / 3×3：三原料各 1 件）。可堆叠 **1**（Hotbar::maxStackSize 特判，同铁桶 —— MC 1.0 蘑菇汤
+    //   maxStack 1，碗装液体食物不可叠；机制等价非数值复刻）；非方块（材料段）→ 右键不放置，走「食用」分支
+    //   （playercontroller beginEating / finishEating，长按右键累积进食进度满后消耗 1 蘑菇汤 + 恢复饥饿
+    //   kMushroomStewHungerAmount=10，机制等价 MC 1.0 蘑菇汤 +10 hunger / 5 鼓腿 —— 同 MC 量级最高档食物之一）。
+    //   MaterialIcon 自绘蘑菇汤图标（木碗 + 红 / 白蘑菇块 + 汤面）。创造调色板补全。食用后**返空碗**（finishEating
+    //   内特判：消耗 1 蘑菇汤 + 给回 1 空碗物品，机制等价 MC 1.0「喝完汤碗留下」；同 MC 量级非精确复刻）。
+    //   无 MC 1.0 mcMaterialId 映射（id 越表界 → -1 → 资源包回退引擎自绘 MaterialIcon）。
+    static constexpr int BowlId          = 0x23B; // 木碗：4 木板合成；蘑菇汤配方原料（t507）
+    static constexpr int MushroomStewId  = 0x23C; // 蘑菇汤：碗+红蘑菇+白蘑菇合成；右键食 +10 饥饿（t507）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

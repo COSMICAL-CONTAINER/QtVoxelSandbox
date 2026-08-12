@@ -278,6 +278,9 @@ TILES = [
     "default_furnace_front_on",   # 134 furnace_front_on（t494 熔炉点燃态前面贴图；圆石底 + 拱框 + 拱洞内亮黄橙火焰；
                                   #    mesher 据 Furnace state 的点燃 bit（FurnaceStateLitFlag）选 14(灭)/134(点燃)；
                                   #    机制等价 MC 1.0 熔炉燃烧时正面发光；tools/build_furnace.py 程序生成原创像素图）
+    "default_brown_mushroom",     # 135 brown_mushroom（t507 白蘑菇 / 棕蘑菇 cross 贴图；透明底 + 米色菌柄 + 棕色菌盖
+                                  #    浅黄褐斑，alphaCutoff cutout；BrownMushroom 各面=本 tile，mesher 走 cross 几何段；
+                                  #    机制等价 MC 1.0 brown mushroom；tools/build_brown_mushroom.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

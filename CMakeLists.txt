@@ -331,6 +331,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_spruce_planks.png        # t466 云杉木板贴图（build_spruce.py；深色木纹；SprucePlanks/Slab/Fence/Door 共享 tile 102）
         textures/default_lily_pad.png             # t396 睡莲浮叶贴图（build_lily_pad.py；透明底+绿圆叶+V缺口；alphaCutoff cutout）
         textures/default_mushroom.png             # t396 蘑菇 cross 贴图（build_mushroom.py；透明底+米色菌柄+红底白斑菌盖；alphaCutoff cutout）
+        textures/default_brown_mushroom.png       # t507 白蘑菇 / 棕蘑菇 cross 贴图（build_brown_mushroom.py；透明底+米色菌柄+棕色菌盖浅黄褐斑；alphaCutoff cutout；蘑菇汤原料）
         textures/default_flower_red.png           # t397 花 4 色变体 cross 贴图（build_flower.py；透明底+绿茎+彩色花头；alphaCutoff cutout）
         textures/default_flower_yellow.png
         textures/default_flower_blue.png
@@ -469,6 +470,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_spruce_door.png              # t466 云杉门 3D 立体图标（两格高薄板深色木纹；build_cube_icons.py）
         textures/icon_lily_pad.png                 # t396 睡莲 flat 2D 图标（透明底+绿圆叶+V缺口；build_cube_icons.py）
         textures/icon_mushroom.png                 # t396 蘑菇 flat 2D 图标（透明底+米色菌柄+红底白斑菌盖；build_cube_icons.py）
+        textures/icon_brown_mushroom.png           # t507 白蘑菇 / 棕蘑菇 flat 2D 图标（透明底+米色菌柄+棕色菌盖浅黄褐斑；build_cube_icons.py；蘑菇汤原料）
         textures/icon_flower_red.png               # t397 花 4 色 flat 2D 图标（透明底+绿茎+彩色花头；build_cube_icons.py）
         textures/icon_flower_yellow.png
         textures/icon_flower_blue.png

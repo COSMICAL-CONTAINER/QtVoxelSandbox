@@ -1130,6 +1130,9 @@ private:
     static constexpr int kBreadHungerAmount = 5;
     // t467 甜浆果一次恢复的饥饿值（2 = 1 鼓腿；机制等价 MC 1.0 sweet berries +2 hunger）。小于面包（5），同 MC 量级。
     static constexpr int kSweetBerryHungerAmount = 2;
+    // t507 蘑菇汤一次恢复的饥饿值（10 = 5 鼓腿；机制等价 MC 1.0 mushroom_stew +10 hunger）。
+    //   同 MC 量级最高档食物之一（仅次金苹果 8 鼓腿）。食用后 finishEating 特判返空碗（消耗 1 蘑菇汤 + 给回 1 空碗物品）。
+    static constexpr int kMushroomStewHungerAmount = 10;
     // t267 长按右键进食时序（机制对齐 MC 1.0：按住右键 ~1.6s 食完一件面包）。
     //   kEatDuration：食一件面包的累积时长（秒）；progress 增量 = dt / kEatDuration。32 ticks ≈ 1.6s
     //     （MC 1.0 食物进食 32 ticks；机制对齐，非精确数值复刻）。

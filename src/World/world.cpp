@@ -207,6 +207,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     pokeFluidDirty(x, y, z); // t380：块编辑可能扰动邻接流体平衡 → 标流体脏（驱动 tickWaterFlow/tickLavaFlow 早退后重扫）
     checkCactusOnEdit(x, y, z, oldId, id); // t445：仙人掌失撑（②）/ 邻接方块（④）整柱坍落复检
     checkDeadBushOnEdit(x, y, z, oldId, id); // t504：枯死灌木失撑（破下方支撑 → 正上方枯灌木掉落）复检
+    checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑（破下方支撑 → 正上方花 / 蘑菇掉落）复检
     return true;
 }
 
@@ -292,6 +293,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     pokeFluidDirty(x, y, z); // t380：块编辑可能扰动邻接流体平衡 → 标流体脏
     checkCactusOnEdit(x, y, z, oldId, id); // t445：仙人掌失撑（②）/ 邻接方块（④）整柱坍落复检
     checkDeadBushOnEdit(x, y, z, oldId, id); // t504：枯死灌木失撑（破下方支撑 → 正上方枯灌木掉落）复检
+    checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑（破下方支撑 → 正上方花 / 蘑菇掉落）复检
     return true;
 }
 
@@ -1510,6 +1512,33 @@ void World::checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
 }
 
+// t507 setBlock 编辑后花 / 蘑菇失撑复检（见 world.h 头注释）。机制等价 MC 1.0 花 / 蘑菇失去下方支撑即掉自身
+//   （同甘蔗 / 仙人掌 / 枯灌木支撑校验族）。花 / 蘑菇恒单格（无柱状生长，与 Cactus dropCactusColumn 不同），故
+//   仅清正上方 1 格。破下方支撑（id==Air 且 oldId 非 flower/mushroom）→ 正上方是 Flower/Mushroom/BrownMushroom
+//   → 静默清 Air + emit 破块反馈 + 掉落物（dropId=自身）+ 重 flood 光。玩家直破花 / 蘑菇（oldId==flower/mushroom
+//   → id==Air）走 finishMiningAt 通用 drop 路径（dropId=自身方块），避免双重掉落。经 isFlower / isMushroom 单一
+//   权威谓词覆盖花 4 色 + 红 / 白两蘑菇（不各处自写 id 判定，同 isBed / isIce 段不连续并判模式）。
+void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    // 仅本格被破为 Air 且被破块非花 / 蘑菇时，查正上方是否花 / 蘑菇失撑。（被破块本身是花 / 蘑菇时跳过 ——
+    //   玩家直破花 / 蘑菇的掉落由通用 finishMiningAt drop 路径负责（dropId=自身），避免双重掉落。）
+    if (id != BlockRegistry::Air || BlockRegistry::isFlower(oldId)
+        || BlockRegistry::isMushroom(oldId)) return;
+    const int by = y + 1;
+    if (by < 0 || by >= m_height) return;
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    const quint8 above = m_chunks.blockAt(x, by, z);
+    if (!BlockRegistry::isFlower(above) && !BlockRegistry::isMushroom(above)) return;
+    // 花 / 蘑菇失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落物 + 重 flood 光。
+    m_chunks.setBlock(x, by, z, BlockRegistry::Air);
+    noteGrowthWrite(x, by, z, above, BlockRegistry::Air); // 花 / 蘑菇非生长方块 → no-op，保持一致
+    emit blockBroken(x, by, z, int(above));                 // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
+    emit blockDroppedAsItem(x, by, z, int(above));         // 呈掉落物实体（Main.qml spawnItem；dropId=自身）
+    recomputeLightAround(x, by, z, above, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
+    emit worldChanged();        // 驱动 mesh 重建（cross 段消失）
+    m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。
 //   节流到 ~每 kSaplingTickInterval tick（5s）做一次成长判定窗口；每窗遍历全图树苗格，符合条件者按
 //   确定性散布概率长成 → 清除树苗 + 在原位生成完整橡树（placeTreeAt 主干 + 树叶球冠）。
@@ -2526,15 +2555,35 @@ void World::placeDesertFlora()
             const quint32 r = hashColumn(m_seed, x, z);
             const unsigned cr = r % 100u; // 密度位段
             if (cr < kCactusPct) {
-                // 仙人掌柱：高度 1..3（独立位段 (r>>16)%3 + 1，与密度位段解耦）。逐格向上仅写空气格
-                //   （不穿透树叶 / 实块；遇非空气即止）。机制等价 MC 仙人掌可叠高。
+                // t503 仙人掌柱 4 邻守卫：MC 1.0 仙人掌不可邻接任何方块（邻接即被扎破掉落）。worldgen 散布时
+                //   跳过「柱位任一格的水平 4 邻有实体方块」的位置（否则生成即立即破坏掉落，等同浪费 + 留下掉落物
+                //   堆积）。整柱（surfaceY+1..surfaceY+height）4 邻全无实体方块（isSolid）才放置。沙丘起伏时邻格可能
+                //   更高（实体沙）→ 守卫跳过，仅平坦沙顶散布（机制等价 MC 沙漠仙人掌稀疏独立柱，不挤在沙丘边）。
+                //   注意 isSolid 取 mesher 邻居面剔除语义（同 setBlock 放块路径 checkCactusOnEdit ④ 守卫），覆盖
+                //   沙 / 石 / 木等实体方块；非 solid（草丛 / 火把 / 水）不算「邻接方块」（MC 仙人掌可邻草丛 / 水）。
                 const int height = 1 + int((r >> 16) % 3u);
-                for (int i = 0; i < height; ++i) {
-                    const int y = surfaceY + 1 + i;
-                    if (y >= m_height) break;
-                    if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) break; // 遇实块即止（不覆盖）
-                    setVoxelIfAir(x, y, z, BlockRegistry::Cactus, 0);
-                    ++cactusPlaced;
+                bool neighborsClear = true;
+                for (int i = 0; i < height && neighborsClear; ++i) {
+                    const int yy = surfaceY + 1 + i;
+                    if (yy >= m_height) break;
+                    constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+                    for (const auto &d : kNb) {
+                        if (BlockRegistry::isSolid(m_chunks.blockAt(x + d[0], yy, z + d[1]))) {
+                            neighborsClear = false; // 邻接实体方块 → 跳过此柱位
+                            break;
+                        }
+                    }
+                }
+                // 仙人掌柱：高度 1..3（独立位段 (r>>16)%3 + 1，与密度位段解耦）。逐格向上仅写空气格
+                //   （不穿透树叶 / 实块；遇非空气即止）。机制等价 MC 仙人掌可叠高。4 邻守卫已过 → 放置不会立即破。
+                if (neighborsClear) {
+                    for (int i = 0; i < height; ++i) {
+                        const int y = surfaceY + 1 + i;
+                        if (y >= m_height) break;
+                        if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) break; // 遇实块即止（不覆盖）
+                        setVoxelIfAir(x, y, z, BlockRegistry::Cactus, 0);
+                        ++cactusPlaced;
+                    }
                 }
             } else if (cr < kCactusPct + kDeadBushPct) {
                 // 枯死的灌木（cross 广告牌）：沙顶上方一格（surfaceY+1），须空气（不覆盖）。

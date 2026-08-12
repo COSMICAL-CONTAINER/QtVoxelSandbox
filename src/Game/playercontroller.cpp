@@ -50,12 +50,14 @@ bool isWolfMeatItem(int itemId)
 } // namespace
 
 // t467 食物饥饿恢复量（单一权威）：返回 itemId 作为食物一次恢复的饥饿值；非食物 → 0。
-//   面包（BreadId）= kBreadHungerAmount(5)、甜浆果（SweetBerryId）= kSweetBerryHungerAmount(2)。
-//   机制等价 MC 1.0 各食物恢复不同饥饿（面包 5 / 浆果 2）。新增食物只改本方法一处（避免各处硬编码 BreadId）。
+//   面包（BreadId）= kBreadHungerAmount(5)、甜浆果（SweetBerryId）= kSweetBerryHungerAmount(2)、
+//   蘑菇汤（MushroomStewId）= kMushroomStewHungerAmount(10)。
+//   机制等价 MC 1.0 各食物恢复不同饥饿（面包 5 / 浆果 2 / 蘑菇汤 10）。新增食物只改本方法一处（避免各处硬编码）。
 int PlayerController::foodHungerAmount(int itemId)
 {
-    if (itemId == RecipeRegistry::BreadId)      return kBreadHungerAmount;
-    if (itemId == RecipeRegistry::SweetBerryId) return kSweetBerryHungerAmount;
+    if (itemId == RecipeRegistry::BreadId)        return kBreadHungerAmount;
+    if (itemId == RecipeRegistry::SweetBerryId)   return kSweetBerryHungerAmount;
+    if (itemId == RecipeRegistry::MushroomStewId) return kMushroomStewHungerAmount; // t507 蘑菇汤 +10 饥饿
     return 0;
 }
 
@@ -909,7 +911,17 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
                                 || brokenId == BlockRegistry::CarrotCrop
                                 || brokenId == BlockRegistry::PotatoCrop)
         ? m_world->stateAt(x, y, z) : quint8(0);
-    m_world->setBlock(x, y, z, BlockRegistry::Air); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
+    // t506 冰（Ice）生存挖掘 → 生成水方块（机制等价 MC 1.0 冰破成水）：精准采集（SilkTouch）→ 走通用 silk 分支
+    //   掉 Ice 自身（line ~1007），不在此处理；非精准采集 → 破冰格置水源（Water state=0）而非 Air。PackIce /
+    //   BlueIce 非精准 dropId=0 不掉、且不生水（MC 1.0 浮冰 / 蓝冰破坏无水）→ 仅 Ice 走生水分支。Water setBlock
+    //   发 blockBroken(Ice→Water 的 oldId=Ice) + worldChanged（mesh 重建，iceOnly 段消失 / waterOnly 段冒出）+
+    //   poke 水流节流（让水源即刻外溢，机制等价 MC「冰破成水后水会流动」）。创造 drop=false 仍生水（机制等价 MC
+    //   创造破冰亦成水 —— 冰的「破成水」是方块本身属性，与是否掉落无关）。
+    const bool iceSilkTouch = (brokenId == BlockRegistry::Ice && m_hotbar
+                               && m_hotbar->selectedItemEnchantLevel(EnchantRegistry::SilkTouch) > 0);
+    const quint8 replaceId = (brokenId == BlockRegistry::Ice && !iceSilkTouch)
+                             ? BlockRegistry::Water : BlockRegistry::Air;
+    m_world->setBlock(x, y, z, replaceId, quint8(0)); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
     // t134/t466 门两格破坏联动（统一经 isDoor 谓词覆盖 WoodDoor + SpruceDoor）：破任一格 → 同步清配对格
     //   （另一格），防留半截悬空门。配对格据本格 state bit3（isUpper）判上 / 下：本格上格 → 配对 y-1；
     //   本格下格 → 配对 y+1。仅当配对格**同为门**（isDoor）才清（防御：state 不一致时不误清异格；不同材质门
@@ -1470,12 +1482,18 @@ void PlayerController::cancelEating()
 void PlayerController::finishEating()
 {
     if (!m_hotbar) { cancelEating(); return; }
-    // t467：经 foodHungerAmount 取当前食物恢复量（面包 +5 / 甜浆果 +2；clamp；Survival 真增 / Creative 锁满静默）。
-    const int amount = foodHungerAmount(m_hotbar->selectedItemId());
+    // t467：经 foodHungerAmount 取当前食物恢复量（面包 +5 / 甜浆果 +2 / 蘑菇汤 +10；clamp；Survival 真增 / Creative 锁满静默）。
+    const int eatenId = m_hotbar->selectedItemId();
+    const int amount = foodHungerAmount(eatenId);
     const int nv = std::clamp(m_hunger + amount, 0, int(kMaxHunger));
     if (nv != m_hunger) { m_hunger = nv; emit hungerUpdated(m_hunger); } // 呈现层 → PlayerState.setHunger
     if (m_mode == Survival)
-        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 面包（创造不耗）
+        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 件食物（创造不耗）
+    // t507 蘑菇汤食完返空碗（机制等价 MC 1.0 mushroom_stew 喝完碗留下）：消耗 1 蘑菇汤 + 给回 1 空碗物品。
+    //   addStack 智能堆叠（同 id 合并 → 入空槽；木碗 maxStack=64 可堆叠故多数情况并入既有碗槽）。生存 / 创造均给回
+    //   （创造不消耗蘑菇汤但碗仍累积，机制等价 MC 创造喝汤也留碗 —— 创造 maxStack=1 蘑菇汤槽恒单件故不影响主流程）。
+    if (eatenId == RecipeRegistry::MushroomStewId)
+        m_hotbar->addStack(RecipeRegistry::BowlId, 1);
     m_lastPlaceMs = m_evtClock.elapsed();
     emit swingArm(); // 进食完成挥手（一次「使用」动作）
     cancelEating();  // 清进食态（m_rightDown 不动 → 连食分支接手）
@@ -2713,6 +2731,14 @@ void PlayerController::placeBlock()
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
         if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
             && below != BlockRegistry::Farmland) return;
+    }
+    // t507 蘑菇放置预检（红 Mushroom / 白 BrownMushroom）：仅可放在草地 / 泥土正上方（机制等价 MC 1.0 蘑菇
+    //   生于草地 / 泥土 / 阴暗处，本工程不强制光照判定）。目标格下方须为 Grass / Dirt；否则拒（不挥）。
+    //   与花同支撑语义（蘑菇族与花共用 cross 几何 + 失撑掉落校验，但放置支撑更宽：MC 蘑菇亦可生于石头 / 倒木
+    //   等阴暗面，本工程简化仅草地 / 泥土）。经 isMushroom 单一权威谓词覆盖红 / 白两蘑菇（同 isFlower 段模式）。
+    if (BlockRegistry::isMushroom(m_selectedBlock)) {
+        const quint8 below = m_world->blockAt(tx, ty - 1, tz);
+        if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt) return;
     }
     // t397/t423 甘蔗放置预检：（1）仅可放在草地 / 泥土 / 沙地 / 甘蔗正上方（机制等价 MC 1.0 sugar cane 须草地 /
     //   沙地 / 甘蔗支撑）。（2）t423 须邻水：甘蔗的支撑格（ty-1）或其下一层（ty-2）的水平 4 邻任一为 Water 才可放

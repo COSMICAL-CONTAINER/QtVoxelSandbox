@@ -101,6 +101,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::DeadBush:      return "icon_dead_bush.png";      // t394 枯死的灌木（cross 透明底；棕褐干枝；沙漠装饰）
     case BlockRegistry::LilyPad:       return "icon_lily_pad.png";       // t396 睡莲（cross 路由横向浮叶；透明底 + 绿圆叶 + V 缺口）
     case BlockRegistry::Mushroom:      return "icon_mushroom.png";       // t396 蘑菇（cross 透明底；米色菌柄 + 红底白斑菌盖）
+    case BlockRegistry::BrownMushroom: return "icon_brown_mushroom.png"; // t507 白蘑菇 / 棕蘑菇（cross 透明底；米色菌柄 + 棕色菌盖白斑）
     // t397 花 4 色变体 + 甘蔗（cross 透明底；flat 2D 图标，build_cube_icons.py render_flat_2d 放大源贴图保留 alpha）。
     case BlockRegistry::FlowerRed:     return "icon_flower_red.png";     // 红花（cross 透明底；绿茎 + 红花头）
     case BlockRegistry::FlowerYellow:  return "icon_flower_yellow.png";  // 黄花（cross 透明底；绿茎 + 黄花头）
@@ -461,7 +462,12 @@ QVariantList Hotbar::creativeMaterials() const
         // t487 末影之眼（机制等价 MC 1.0 ender eye）：要塞宝藏箱战利品 + 创造调色板补全（便于测试激活传送门）。
         //   可堆叠 64；非方块（材料段）→ 右键不走方块放置，走 useBlock 末地传送门激活分支（placeBlock 检测命中
         //   EndPortal + 持末影之眼 → 翻传送门 state bit0 激活）。MaterialIcon 自绘末影之眼图标（绿蓝球体 + 瞳孔）。
-        int(RecipeRegistry::EndEyeId)           // 末影之眼：要塞宝藏箱战利品；右键末地传送门激活（t487）
+        int(RecipeRegistry::EndEyeId),          // 末影之眼：要塞宝藏箱战利品；右键末地传送门激活（t487）
+        // t507 木碗 + 蘑菇汤（机制等价 MC 1.0 bowl / mushroom stew）：生存由合成获得（碗=3 木板 V 形 / 蘑菇汤=碗+红+白
+        //   蘑菇），创造调色板补全便于测试食用。木碗可堆叠 64；蘑菇汤 maxStack=1（碗装液体食物不可叠，同铁桶族）。
+        //   非方块（材料段）→ 右键不放置（蘑菇汤走「食用」分支：长按右键累积进食 +10 饥饿，食完返空碗）。
+        int(RecipeRegistry::BowlId),             // 木碗：3 木板 V 形合成；蘑菇汤原料
+        int(RecipeRegistry::MushroomStewId)      // 蘑菇汤：碗+红蘑菇+白蘑菇合成；右键食 +10 饥饿（食完返空碗）
     };
 }
 
@@ -566,6 +572,7 @@ QVariantList Hotbar::creativeBlocks() const
              //   （lily pad / mushroom），名称/贴图原创自绘 §9a。cross 路由（alphaCutoff cutout 透明底）。
              int(BlockRegistry::LilyPad),                                    // 睡莲（沼泽水面浮叶；横向浮叶 cross 路由；可放置）
              int(BlockRegistry::Mushroom),                                   // 蘑菇（沼泽草地小蘑菇；cross 装饰；可放置）
+             int(BlockRegistry::BrownMushroom),                              // t507 白蘑菇 / 棕蘑菇（沼泽草地小蘑菇；cross 装饰；蘑菇汤原料；可放置）
              // t397 多群系装饰植物：花 4 色变体 + 甘蔗（机制等价 MC 1.0 花 / 甘蔗；名称 / 贴图原创自绘 §9a）。
              //   cross 路由（alphaCutoff cutout 透明底）；每色花独立 id 便于创造调色板取用 + 右键放置。
              int(BlockRegistry::FlowerRed),    int(BlockRegistry::FlowerYellow), // 红花 / 黄花（worldgen 散布 / 各群系花点缀）
@@ -688,6 +695,9 @@ QString Hotbar::nameForBlock(int blockId) const
         // t487 末影之眼（机制等价 MC 1.0 ender eye）：要塞宝藏箱战利品；右键末地传送门激活（末地预热占位）。
         //   名称用通用词「末影之眼」、零 MC 专名（§9 区隔）。
         if (blockId == RecipeRegistry::EndEyeId)      return QStringLiteral("末影之眼"); // 要塞宝藏箱战利品；激活末地传送门
+        // t507 木碗 + 蘑菇汤（机制等价 MC 1.0 bowl / mushroom stew；零 MC 专名 §9）。
+        if (blockId == RecipeRegistry::BowlId)         return QStringLiteral("木碗");     // 4 木板合成；蘑菇汤原料
+        if (blockId == RecipeRegistry::MushroomStewId) return QStringLiteral("蘑菇汤");   // 碗+红蘑菇+白蘑菇合成；右键食 +10 饥饿（食完返空碗）
         // t299 敌对 mob 死亡掉落物：杀骸骨 / 蹒跚者 / 蜘蛛产出（机制等价 MC 1.0 敌对生物掉落，名称用通用词、零 MC 专名 §9）。
         if (blockId == RecipeRegistry::BoneId)        return QStringLiteral("骨头"); // 杀骸骨掉落
         if (blockId == RecipeRegistry::RottenFleshId) return QStringLiteral("腐肉"); // 杀蹒跚者掉落
@@ -1115,6 +1125,9 @@ int Hotbar::maxStackSize(int id) const
     //   才在此分流。与 isMaterial 不冲突（MaterialIcon 仍画桶图标）。
     if (id == RecipeRegistry::BucketEmptyId || id == RecipeRegistry::WaterBucketId
         || id == RecipeRegistry::LavaBucketId) return 1;
+    // t507 蘑菇汤（MushroomStewId，材料段 0x23C）：不可堆叠（机制等价 MC 1.0 蘑菇汤 maxStack 1 —— 碗装液体
+    //   食物不可叠；同铁桶族）。须在通用材料段判定**之前**特判（否则落 64）。食用后返空碗（finishEating 特判）。
+    if (id == RecipeRegistry::MushroomStewId) return 1;
     // t345 护甲段（>= ArmorIdBase）：不可堆叠（每件独立耐久，同工具段语义）。
     if (ArmorRegistry::isArmor(id)) return 1;
     if (id >= kMaterialIdBase) return 64; // 材料段（t50 木棒等）：可堆叠 64（MC 标准）

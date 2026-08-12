@@ -358,6 +358,16 @@ public:
     //   供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
     void checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t507 setBlock 编辑后花 / 蘑菇失撑复检（机制等价 MC 1.0 花 / 蘑菇失去下方支撑即掉自身；同甘蔗 / 仙人掌 /
+    //   枯灌木支撑校验族）。（x,y,z,oldId,id）= 本格刚发生的编辑。本格被破为 Air（破下方支撑方块）→ 若正上方是
+    //   Flower（4 色任一）/ Mushroom（红）/ BrownMushroom（白）→ 该植物失撑 → 静默清 Air（m_chunks.setBlock 直写
+    //   + 标脏，不经 World::setBlock → 不递归触发）+ emit blockBroken（破块粒子 / 音）+ emit blockDroppedAsItem
+    //   （呈掉落物实体，Main.qml 转 spawnItem）+ recomputeLightAround（遮光消失重 flood）+ 1 次 worldChanged +
+    //   clearAllDirty。花 / 蘑菇恒单格（无柱状生长，与 Cactus 不同），仅清正上方 1 格。dropId=自身故玩家直破 /
+    //   失撑都掉同色花 / 同种蘑菇方块（机制等价 MC 破花掉花、破蘑菇掉蘑菇；区别于枯灌木 dropId=0 无产物）。
+    //   供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
+    void checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 

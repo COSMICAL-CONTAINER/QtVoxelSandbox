@@ -630,6 +630,23 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::Sand),    RecipeRegistry::GunpowderId, int(BlockRegistry::Sand),
         RecipeRegistry::GunpowderId, int(BlockRegistry::Sand),    RecipeRegistry::GunpowderId },
       int(BlockRegistry::TntBlock), 1, 1, "tnt" },
+    // t507 木碗（bowl）：3 木板 V 形（左上 / 右上 / 左下，右下空）→ 1 木碗（有序 2×2，背包栏 / 工作台均可）。
+    //   机制等价 MC 1.0 木碗配方（3 planks V 形）。最小包围盒 2×2（[P,P]/[P,0]），与 craftingTable（2×2 满铺 [P,P]/[P,P]）
+    //   包围盒尺寸同但内容不同（木碗右下须为空）→ shaped 逐格比对区分（不冲突）。产物 = BowlId（材料段，蘑菇汤原料）。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks), 0,
+        int(BlockRegistry::Planks), 0,                          0,
+        0,                          0,                          0 },
+      RecipeRegistry::BowlId, 1, 1, "bowl" },
+    // t507 蘑菇汤（mushroom_stew）：碗 + 红蘑菇 + 白蘑菇 → 1 蘑菇汤（无序 2×2，背包栏 / 工作台均可）。
+    //   机制等价 MC 1.0 mushroom_stew 配方（bowl + red mushroom + brown mushroom 任意摆放）。3 原料各 1 件、
+    //   多重集 {Bowl:1, Mushroom:1, BrownMushroom:1} 唯一 → shapeless 不与既有配方冲突。产物 = MushroomStewId
+    //   （材料段，maxStack=1 不可堆叠；右键食 +10 饥饿，食完返空碗 —— finishEating 特判）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::BowlId, int(BlockRegistry::Mushroom), int(BlockRegistry::BrownMushroom),
+        0,                       0,                            0,
+        0,                       0,                            0 },
+      RecipeRegistry::MushroomStewId, 1, 1, "mushroom_stew" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

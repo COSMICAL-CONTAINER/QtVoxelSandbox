@@ -306,6 +306,7 @@ FLAT_2D_CROSS = [
     ("dead_bush",  "default_dead_bush"),      # t394 枯死的灌木 cross（透明底 + 棕褐干枝；沙漠装饰）
     ("lily_pad",   "default_lily_pad"),       # t396 睡莲（透明底 + 绿色圆叶 + V 形缺口；沼泽水面浮叶）
     ("mushroom",   "default_mushroom"),       # t396 蘑菇（透明底 + 米色菌柄 + 红底白斑菌盖；沼泽草地小蘑菇）
+    ("brown_mushroom", "default_brown_mushroom"),  # t507 白蘑菇 / 棕蘑菇（透明底 + 米色菌柄 + 棕色菌盖浅黄褐斑；沼泽草地小蘑菇；蘑菇汤原料）
     # t397 多群系装饰植物：花 4 色变体 + 甘蔗（cross 透明底；flat 2D 图标走 render_flat_2d 放大源贴图保留 alpha）。
     ("flower_red",    "default_flower_red"),    # 红花（绿茎 + 红花头）
     ("flower_yellow", "default_flower_yellow"), # 黄花（绿茎 + 黄花头）

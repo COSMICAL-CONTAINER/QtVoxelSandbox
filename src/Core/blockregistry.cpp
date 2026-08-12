@@ -523,6 +523,16 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* lever        */ {int(BlockRegistry::Lever),           131,131,131,131, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Lever),       1, 64, "lever",        "杠杆"},
     /* wood_button  */ {int(BlockRegistry::WoodButton),      132,132,132,132, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::WoodButton),  1, 64, "wood_button",  "木按钮"},
     /* stone_button */ {int(BlockRegistry::StoneButton),     133,133,133,133, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::StoneButton), 1, 64, "stone_button", "石按钮"},
+    // ── t507 白蘑菇 / 棕蘑菇（BrownMushroom）：机制等价 MC 1.0 brown mushroom（沼泽 / 阴暗草地小蘑菇，与红蘑菇
+    //   Mushroom=48 同族，仅配色区别 —— 棕色菌盖 + 米色菌柄）。cross 形广告牌方块（与 Mushroom / Sapling / DeadBush
+    //   同走 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。solid=false（非实体 →
+    //   不挡邻居面剔除，同草丛 / 红蘑菇）、shape=ShapeNone（**无碰撞** → 玩家穿过）、hardness=0（瞬破，同红蘑菇 /
+    //   草丛）、NoTool（空手可采且掉落）、dropId=自身（破白蘑菇掉白蘑菇方块，可放回）、dropCount=1、maxStack=64。
+    //   各面贴图=brown_mushroom(135)（透明底 + 米色菌柄 + 棕色菌盖白斑，alphaCutoff cutout）。音色归 GroupGrass
+    //   （软植物音，同红蘑菇 / 草丛）。worldgen 在沼泽草地散布（同红蘑菇，与 placeSwampFlora 共址）；进创造调色板。
+    //   **蘑菇汤配方原料**（recipe.cpp：碗 + 红蘑菇 + 白蘑菇 → 1 蘑菇汤）。§9 区隔：仅机制对齐 MC 1.0 brown mushroom，
+    //   名称 / 贴图全原创自绘（§9a，tools/build_brown_mushroom.py）。
+    /* brown_mushroom */ {int(BlockRegistry::BrownMushroom),  135,135,135,135, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::BrownMushroom), 1, 64, "brown_mushroom","白蘑菇"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -639,6 +649,9 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* lever                   */ 69,  // t490 杠杆 → MC 1.0 lever id 69
     /* wood_button             */ -1,  // t490 木按钮 → MC 1.0 无等价（wooden button id 143 为 1.5+；1.0 仅石按钮）
     /* stone_button            */ 77,  // t490 石按钮 → MC 1.0 stone button id 77
+    // t507 白蘑菇 / 棕蘑菇 → MC 1.0 brown mushroom 仅以 item（id 39）或巨型菌盖方块（id 99）存在，无「小蘑菇植物
+    //   方块」等价；本工程作 cross 装饰方块故无 1.0 等价（同 red Mushroom=48 取 -1 模式）。
+    /* brown_mushroom          */ -1, // t507 白蘑菇 → MC 1.0 无等价（同 red mushroom；本工程作 cross 装饰故无 1.0 等价）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -717,6 +730,7 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == Sapling) return true;
     if (blockId == DeadBush) return true; // t394 段外 cross（枯死的灌木，同 Sapling 模式）
     if (blockId == Mushroom) return true; // t396 段外 cross（蘑菇，同 Sapling 模式）
+    if (blockId == BrownMushroom) return true; // t507 段外 cross（白蘑菇 / 棕蘑菇，同 Mushroom 模式）
     if (blockId == LilyPad) return true;  // t396 cross 路由的横向浮叶（几何水平非竖直 cross，但同走 PASS 1 alphaCutoff 路径，见头注释）
     if (blockId == Sugarcane) return true; // t397 段外 cross（甘蔗细茎，同 Sapling 模式）
     if (blockId == CarrotCrop) return true; // t407 段外 cross（胡萝卜作物，同小麦作物按 state 选阶段贴图）
@@ -768,6 +782,15 @@ void BlockRegistry::bedPartnerOffset(quint8 state, int &dx, int &dz)
 bool BlockRegistry::isFlower(quint8 blockId)
 {
     return blockId >= FirstFlower && blockId <= LastFlower;
+}
+
+// t507 蘑菇统一谓词（单一权威，见 blockregistry.h 头注释）：blockId == Mushroom（红，=48）或
+//   BrownMushroom（白 / 棕，=115）即蘑菇。两 id 不连续（48 夹中间、115 段末）故显式并判
+//   （同 isIce / isBed 段不连续并判模式）。供失撑掉落 / 放置预检 / 蘑菇汤配方判定「蘑菇族」语义统一读，
+//   避免各处硬编码 2 个 id 判定漂移。
+bool BlockRegistry::isMushroom(quint8 blockId)
+{
+    return blockId == Mushroom || blockId == BrownMushroom;
 }
 
 // t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理 + mesher cross 路由分流
@@ -1267,6 +1290,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case DeadBush: // t394 枯死的灌木 → 软草音色（枯枝软质，同草丛；机制等价 MC dead bush SoundType = grass）
     case LilyPad: // t396 睡莲 → 软草音色（浮叶软质植物，同草丛；机制等价 MC lily pad SoundType = grass）
     case Mushroom: // t396 蘑菇 → 软草音色（软质真菌，同草丛；机制等价 MC mushroom SoundType = grass / stone 取软草近似）
+    case BrownMushroom: // t507 白蘑菇 / 棕蘑菇 → 软草音色（同红蘑菇；机制等价 MC brown mushroom SoundType = grass）
     case FlowerRed: case FlowerYellow: case FlowerBlue: case FlowerWhite: // t397 4 色花 → 软草音色（软植物，同草丛；机制等价 MC 花 SoundType = grass）
     case Sugarcane: // t397 甘蔗 → 软草音色（细茎软植物，同草丛；机制等价 MC sugar cane SoundType = grass）
     case CarrotCrop: // t407 胡萝卜作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）

@@ -30,6 +30,7 @@
 //   49..52=flower_red/yellow/blue/white / 53=sugarcane（t397 多群系装饰植物：4 色花 + 水边甘蔗）。
 //   54=glass（t405 玻璃：沙子冶炼产物方块；透明整立方——solid=false 透面剔除 + glassOnly 段半透渲染，
 //      机制等价 MC 1.0 玻璃 glass）。
+//   115=brown_mushroom（t507 白蘑菇 / 棕蘑菇：cross 形蘑菇，机制等价 MC 1.0 brown mushroom；蘑菇汤原料）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
 class BlockRegistry
 {
@@ -708,7 +709,19 @@ public:
         //     激活态由 mesher 据 state bit0 切亮色高光）。音色归 GroupStone。**激活路径**：同 Lever/WoodButton——
         //     右键 → 翻 state bit0 + 点燃水平四邻 TNT（机制等价 MC 1.0 石按钮按下红石脉冲点火 TNT）。进创造调色板。
         StoneButton     = 114, // 石按钮：右键按下 → 点燃水平四邻 TNT（机制等价 MC 1.0 stone button；简化无红石）
-        Count           = 115, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t507 白蘑菇 / 棕蘑菇（BrownMushroom）：机制等价 MC 1.0 brown mushroom（沼泽 / 阴暗草地小蘑菇，
+        //   与红蘑菇 Mushroom=48 同族，仅配色区别 —— 棕色菌盖 + 米色菌柄）。**cross 形广告牌方块**（与 Mushroom /
+        //   Sapling / DeadBush 同走 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。
+        //   solid=false（非实体 → 不挡邻居面剔除，同草丛 / 红蘑菇）、shape=ShapeNone（**无碰撞** → 玩家穿过）、
+        //   hardness=0（瞬破，同红蘑菇 / 草丛）、NoTool（空手可采且掉落）、dropId=自身（破白蘑菇掉白蘑菇方块，可放回）、
+        //   dropCount=1、maxStack=64。各面贴图=brown_mushroom(135)（透明底 + 米色菌柄 + 棕色菌盖白斑，alphaCutoff cutout）。
+        //   音色归 GroupGrass（软植物音，同红蘑菇 / 草丛）。worldgen 在沼泽草地散布（同红蘑菇，与 placeSwampFlora
+        //   共址）；进创造调色板（装饰取用）。**蘑菇汤配方原料**（recipe.cpp：碗 + 红蘑菇 + 白蘑菇 → 1 蘑菇汤）。
+        //   §9 区隔：仅机制对齐 MC 1.0 brown mushroom，名称 / 贴图全原创自绘（§9a，tools/build_brown_mushroom.py）。
+        //   isMushroom(id) 单一权威谓词覆盖红 / 白两蘑菇（mesher cross 路由 / 失撑掉落 / 放置预检统一读，避免各处
+        //   硬编码 2 个 id 判定漂移，同 isBed / isIce 模式）。
+        BrownMushroom   = 115, // 白蘑菇 / 棕蘑菇：cross 形蘑菇（机制等价 MC 1.0 brown mushroom）；蘑菇汤原料
+        Count           = 116, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -762,6 +775,13 @@ public:
     static constexpr int FirstFlower = FlowerRed;
     static constexpr int LastFlower  = FlowerWhite;
     static bool isFlower(quint8 blockId);
+
+    // t507 蘑菇统一谓词（单一权威）：blockId == Mushroom（红，=48）或 BrownMushroom（白 / 棕，=115）即蘑菇。
+    //   供 mesher cross 路由（已并入 isCrossBillboard，本谓词专供失撑掉落 / 放置预检等「蘑菇族」语义判定读，
+    //   避免把「cross 渲染」与「蘑菇族机制」耦合 —— 未来若有不可食 / 不可入蘑菇汤配方的 cross 蘑菇变体，
+    //   蘑菇汤配方 / 失撑掉落仍只读本谓词不误判）。两 id 不连续（Mushroom=48 夹中间、BrownMushroom=115 段末）
+    //   故显式并判（同 isIce / isBed 段不连续并判模式）；改族时一处同步谓词即可。
+    static bool isMushroom(quint8 blockId);
 
     // t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理判定
     //   「玩家 AABB 覆盖的格是否梯」（入梯格 + 按前 → 向上爬）+ mesher cross 路由分流，避免各处自写 id 判定漂移
@@ -1178,7 +1198,10 @@ public:
     //   134=furnace_front_on（t494 熔炉点燃态前面贴图；圆石底 + 拱框 + 拱洞内亮黄橙火焰，机制等价 MC 1.0
     //     熔炉燃烧时正面发光；mesher 据 Furnace state 的 FurnaceStateLitFlag 选 14(灭)/134(点燃)；
     //     tools/build_furnace.py 程序生成原创像素图）。
-    // 图集由 tools/build_atlas.py 打包全部 135 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   135=brown_mushroom（t507 白蘑菇 / 棕蘑菇 cross 贴图；透明底 + 米色菌柄 + 棕色菌盖白斑，alphaCutoff cutout；
+    //     BrownMushroom 各面=本 tile，mesher 走 cross 几何段；机制等价 MC 1.0 brown mushroom；
+    //     tools/build_brown_mushroom.py 程序生成原创像素图）。
+    // 图集由 tools/build_atlas.py 打包全部 136 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -1190,7 +1213,7 @@ public:
     //   111=bookshelf（t474 书架各面贴图；木板边框 + 中央书脊彩色书列（红 / 蓝 / 绿 / 棕书脊），原创自绘
     //      §9a；Bookshelf 各面=本 tile；tools/build_bookshelf.py 程序生成）。
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 135）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 136）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -1198,7 +1221,7 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 135;
+    static constexpr int AtlasTileCount = 136;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
