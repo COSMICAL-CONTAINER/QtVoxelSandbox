@@ -2009,11 +2009,13 @@ Window {
             // 首个实体命中距离；无命中=3.5，命中则贴在面前）→ 相机贴墙不穿入。Math.min 为安全钳（值已 ≤3.5）。
             position: {
                 let eye = player.position
-                // t457 睡觉躺下（第一人称视角降低）：sleepLie 0→1 平滑降低相机 Y（从站立眼位 1.62 降到近床床垫
-                //   ~0.2，机制等价 MC 躺床第一人称视点降低）。与 sleepFade 同步 ramp（Lying 阶段 0→1）。
-                //   仅 sleeping 时 sleepLie 非 0（非睡觉恒 0 → 不影响常规视角）。三模式都加（第三人称也跟降）。
+                // t457/t496 二轮复盘 睡觉躺下（第一人称视角降低）：sleepLie 0→1 平滑降低相机 Y（从站立眼位 1.62 降到
+                //   床垫顶 + 枕头高 ~0.62，机制等价 MC 躺床第一人称视点降到床高平视）。与 sleepFade 同步 ramp
+                //   （Lying 阶段 0→1）。仅 sleeping 时 sleepLie 非 0（非睡觉恒 0 → 不影响常规视角）。三模式都加。
+                //   t496 二轮复盘：旧降量 1.4 把眼位降到 0.22（近地 / 入床下实体方块）→ 用户「镜头落到底黑屏」。
+                //   改降量 1.0 → 眼位 0.62（床垫顶 0.31 之上 + 枕头高，平视床面不穿地，机制等价 MC 床高平视躺姿）。
                 if (player.sleepLie > 0.0)
-                    eye = Qt.vector3d(eye.x, eye.y - player.sleepLie * 1.4, eye.z)
+                    eye = Qt.vector3d(eye.x, eye.y - player.sleepLie * 1.0, eye.z)
                 const look = player.lookVector
                 const m = player.cameraMode
                 if (m === PlayerController.FirstPerson) return eye
@@ -2025,9 +2027,11 @@ Window {
                 // t67 受伤视角晃动：shakePitch/shakeYaw 小幅抖动叠加进相机俯仰/偏航（onDamaged 触发 shakeAnim，
                 //   ~0.2s 衰减到 0 → 平时为 0 不影响视角）。三模式都加（第一人称最显；第三人称相机方向微抖）。
                 const sp = cam.shakePitch, sy = cam.shakeYaw
-                // t457 睡觉躺下「转躺」：sleepLie 0→1 平滑上仰相机（+pitch 看 ~20° 上方，如躺床仰视）。
-                //   与 position Y 降低同步 ramp（Lying 阶段）；sleepFade 全黑后视点已不可见，但 fade 前/后短暂可见。
-                const lieTilt = player.sleepLie * 20.0
+                // t457/t496 二轮复盘 睡觉躺下「转躺」：sleepLie 0→1 平滑上仰相机（+pitch 看 ~10° 上方，平躺略仰，
+                //   机制等价 MC 躺床平视略仰）。与 position Y 降低同步 ramp（Lying 阶段）。
+                //   t496 二轮复盘：旧仰角 20° 太陡（眼位已降到床高，再仰 20° → 视线偏向天花板 / 床头板正上方，
+                //   配合降量过大显「黑屏」）。改 10° → 平视床尾方向，眼位 0.62 平视不被床头板 / 天花板遮满。
+                const lieTilt = player.sleepLie * 10.0
                 if (player.cameraMode === PlayerController.ThirdPersonFront)
                     return Qt.vector3d(-player.pitch + sp + lieTilt, player.yaw + 180 + sy, 0) // 回看正面：俯仰反向 + 偏航 +180
                 return Qt.vector3d(player.pitch + sp + lieTilt, player.yaw + sy, 0)            // 第一人称 & 第三人称-后：朝前看
@@ -2105,14 +2109,14 @@ Window {
                 //   （草顶/草侧…），复用地形贴图（零 MC 资产）。作 viewModelHand 子节点 → 随挥动同步运动（块在手中）。
                 //   selectedBlock=0 时 BlockCube 兜底为 Stone 但 Model.visible=false 不渲染（blockId 兜底仅防空 UV）。
                 Model {
-                    visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock) && !hotbarVM.isCrossBlock(player.selectedBlock)
+                    visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock) && !hotbarVM.isCrossBlock(player.selectedBlock) && !hotbarVM.isBed(player.selectedBlock)
                     geometry: BlockCube { blockId: player.selectedBlock }
                     position: Qt.vector3d(0.0 + window.heldBlockX, 0.02 + window.heldBlockY, -0.22 + window.heldBlockZ)    // t156 基线 + t166c ESC 滑条偏移（heldBlockX/Y/Z）
                     scale: Qt.vector3d(0.12, 0.12, 0.12)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
-                        alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）已走下方 billboard 分支，本立方路径不再处理它们
+                        alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）/ 床段（isBed，t496）已走下方 billboard 分支，本立方路径不再处理它们
                     }
                 }
                 // t219 手持木板衍生方块（第一人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）在世界内非整立方
@@ -2123,8 +2127,12 @@ Window {
                 //   scale 0.18（同手持材料 billboard，平图标稍大显眼）；alphaCutoff:0.5 + opacity:0.99 沿用透明底
                 //   alpha-test 契约（图标外透明底不丢弃会被当不透明黑 → 坍黑块）。partialIconTex.source 绑定
                 //   iconSourceForBlock(selectedBlock) → 选不同异形自动换图（单一 Texture 覆盖全部 6 类）。
+                // t496 二轮复盘 床亦走本 billboard 分支：床 ShapeBed 在世界内是双格横置低异形（非整立方），手持走
+                //   bed 图标（icon_bed_<color>.png / pack 染色 bed 图），非 BlockCube 满格被面色立方（用户复盘
+                //   「第一人称手持拿的是方块立方体」修复）。partialIconTex 已含 bed（iconSourceForBlock 命中床返
+                //   床图标），无需另建 Texture。
                 Model {
-                    visible: hotbarVM.isPartialBlock(player.selectedBlock) || hotbarVM.isCrossBlock(player.selectedBlock)
+                    visible: hotbarVM.isPartialBlock(player.selectedBlock) || hotbarVM.isCrossBlock(player.selectedBlock) || hotbarVM.isBed(player.selectedBlock)
                     geometry: BillboardQuad {}
                     position: Qt.vector3d(0.02 + window.heldBlockX, 0.04 + window.heldBlockY, -0.22 + window.heldBlockZ)
                     scale: Qt.vector3d(0.18, 0.18, 0.18)
@@ -2133,7 +2141,7 @@ Window {
                         lighting: PrincipledMaterial.NoLighting
                         alphaCutoff: 0.5
                         opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
-                        baseColorMap: partialIconTex   // t440：cross 段（花/蘑菇/睡莲/树苗/枯木/草丛…）透明底 flat 图标同 partialIconTex（iconSourceForBlock 返回 icon_*.png）
+                        baseColorMap: partialIconTex   // t440：cross 段（花/蘑菇/睡莲/树苗/枯木/草丛…）透明底 flat 图标同 partialIconTex（iconSourceForBlock 返回 icon_*.png）；t496 床段亦同
                     }
                 }
                 // t218/t260 手持火把（第一人称）：火把非立方（世界内异形），手持走 billboard 平图标（细立柱），
@@ -3565,7 +3573,7 @@ Window {
                     //   alphaCutoff 0.5 丢弃透明像素，否则材质把透明底当不透明 → 渲成黑色立方体（用户实测
                     //   「手持火把黑方块」）。仅火把（id 13）启用；其余方块贴图无 alpha，alphaCutoff=0。
                     Model {
-                        visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock) && !hotbarVM.isCrossBlock(player.selectedBlock) && player.mode !== PlayerController.Spectator
+                        visible: player.selectedBlock !== 0 && player.selectedBlock !== 13 && !hotbarVM.isPartialBlock(player.selectedBlock) && !hotbarVM.isCrossBlock(player.selectedBlock) && !hotbarVM.isBed(player.selectedBlock) && player.mode !== PlayerController.Spectator
                         geometry: BlockCube { blockId: player.selectedBlock }
                         position: Qt.vector3d(0, -0.55, -0.30)   // t72：移到手前方（手心前缘 z≈-0.125 前），不嵌进手里
                         scale: Qt.vector3d(0.22, 0.22, 0.22)
@@ -3574,7 +3582,7 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             opacity: playerModel.bodyOpacity
-                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）走下方 billboard 分支
+                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）/ 床段（isBed，t496）走下方 billboard 分支
                         }
                     }
                     // t219 手持木板衍生方块（第三人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）非整立方 →
@@ -3583,8 +3591,9 @@ Window {
                     //   被剔 → 图标消失；故 cullMode:NoCulling 双面渲染（背面镜像图标，异形近对称无明显差异）→
                     //   三相机模式都可见。scale 0.22（同手持方块立方，平图标等大）；opacity 跟 bodyOpacity（观察者
                     //   半透一致）；alphaCutoff:0.5 沿用透明底 alpha-test 契约。partialIconTex 共享第一人称同一份。
+                    // t496 二轮复盘 床亦走本 billboard 分支（同第一人称 viewModelHand；bed 图标而非满格被面色立方）。
                     Model {
-                        visible: (hotbarVM.isPartialBlock(player.selectedBlock) || hotbarVM.isCrossBlock(player.selectedBlock)) && player.mode !== PlayerController.Spectator
+                        visible: (hotbarVM.isPartialBlock(player.selectedBlock) || hotbarVM.isCrossBlock(player.selectedBlock) || hotbarVM.isBed(player.selectedBlock)) && player.mode !== PlayerController.Spectator
                         geometry: BillboardQuad {}
                         position: Qt.vector3d(0, -0.55, -0.30)
                         scale: Qt.vector3d(0.22, 0.22, 0.22)
@@ -3593,7 +3602,7 @@ Window {
                             cullMode: Material.NoCulling   // 双面（第三人称-前见背面；异形图标近对称）
                             alphaCutoff: 0.5
                             opacity: 0.99   // visible 已排除 Spectator → bodyOpacity 恒 1.0；<1 尊重贴图 alpha（透明底不渲染）
-                            baseColorMap: partialIconTex   // t440：cross 段（花/蘑菇/睡莲/树苗…）flat 图标同 partialIconTex
+                            baseColorMap: partialIconTex   // t440：cross 段（花/蘑菇/睡莲/树苗…）flat 图标同 partialIconTex；t496 床段亦同
                         }
                     }
                     // t218/t260 手持火把（第三人称）：火把非立方 → billboard 平图标（细立柱）。作 rightArmPivot 子节点
@@ -4128,7 +4137,7 @@ Window {
                     //   仅留火把像素 → 透明底不再显黑（机制同手持火把 viewModelHand / CrackBox 的 alphaCutoff 路径）。
                     //   仅火把（id 13）启用；其余方块贴图无 alpha，保持 alphaCutoff=0（默认不透明）。
                     Model {
-                        visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock(entRoot.entId) && !hotbarVM.isCrossBlock(entRoot.entId) && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
+                        visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock(entRoot.entId) && !hotbarVM.isCrossBlock(entRoot.entId) && !hotbarVM.isBed(entRoot.entId) && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
                         geometry: BlockCube { blockId: entRoot.entId }
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -4136,7 +4145,7 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             baseColor: terrainLight(worldClock.skyLight)
-                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）走下方 billboard 分支
+                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）/ 床段（isBed，t496）走下方 billboard 分支
                         }
                     }
                     // t219 木板衍生方块掉落实体：异形段（台阶/楼梯/栅栏/压力板/门/活板门）非整立方 → BillboardQuad
@@ -4146,8 +4155,9 @@ Window {
                     //   → +Z 恒指回相机、正面恒可见。scale 0.3（同方块段 / 材料段掉落物统一）；baseColor 乘
                     //   terrainLight(skyLight) 夜间变暗（同方块段）；alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test 契约。
                     //   Texture inline 读 per-entity entId（每个掉落物各显示自己的异形图标）。
+                    // t496 二轮复盘 床掉落亦走本 billboard 分支（bed 图标而非满格被面色立方）。
                     Model {
-                        visible: hotbarVM.isPartialBlock(entRoot.entId) || hotbarVM.isCrossBlock(entRoot.entId)
+                        visible: hotbarVM.isPartialBlock(entRoot.entId) || hotbarVM.isCrossBlock(entRoot.entId) || hotbarVM.isBed(entRoot.entId)
                         geometry: BillboardQuad {}
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -4158,7 +4168,7 @@ Window {
                             opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
                             baseColor: terrainLight(worldClock.skyLight)
                             baseColorMap: Texture {
-                                source: hotbarVM.iconSourceForBlock(entRoot.entId)   // t440：cross 段（花/蘑菇/睡莲/树苗…）flat 图标同此（icon_*.png 透明底）
+                                source: hotbarVM.iconSourceForBlock(entRoot.entId)   // t440：cross 段（花/蘑菇/睡莲/树苗…）flat 图标同此（icon_*.png 透明底）；t496 床段返染色 bed 图标
                                 generateMipmaps: false
                             }
                         }

@@ -311,6 +311,15 @@ bool Hotbar::isCrossBlock(int itemId) const
     return BlockRegistry::isCrossBillboard(quint8(itemId));
 }
 
+// t496 二轮复盘 床方块段判定（手持 / 掉落渲染分流用）：床（ShapeBed 低 3D 模型）在世界内是双格横置异形
+//   （非整立方），手持 / 掉落走 bed 图标 BillboardQuad（icon_bed_<color>.png），非 BlockCube 满格立方。
+//   走 BlockRegistry::isBed 单一权威（同 mesher bed 段路由谓词），避免 QML 与 mesher 路由漂移。
+bool Hotbar::isBed(int itemId) const
+{
+    if (itemId <= 0 || itemId >= int(BlockRegistry::Count)) return false;
+    return BlockRegistry::isBed(quint8(itemId));
+}
+
 int Hotbar::toolTier(int itemId) const
 {
     const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);

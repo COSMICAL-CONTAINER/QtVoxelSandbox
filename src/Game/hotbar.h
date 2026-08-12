@@ -177,6 +177,12 @@ public:
     //   QML 与 mesher 路由漂移。火把（id 13）在 QML 有独立手持 / 掉落分支（火焰动画 + 细立柱比例，mesher
     //   火把亦非 cross 段），故本谓词不含火把；其余 cross 方块统一经本谓词路由进 flat billboard 路径。
     Q_INVOKABLE bool isCrossBlock(int itemId) const;
+    // t496 二轮复盘 床方块段判定（手持 / 掉落渲染分流用）：床（ShapeBed 低 3D 模型）在世界内是双格横置异形
+    //   （非整立方），手持 / 掉落须走 bed 图标 BillboardQuad（icon_bed_<color>.png + alphaCutoff discard 透明底），
+    //   非 BlockCube 满格立方——bed 的 tile 是整张被面色，BlockCube 6 面同色 → 渲成「一块色块」与床不可辨
+    //   （用户复盘「第一人称手持拿的是方块立方体」）。走 BlockRegistry::isBed 单一权威（同 mesher bed 段路由
+    //   谓词），避免 QML 与 mesher 路由漂移。供 QML 三处手持 / 掉落 delegate 据 isBed 切到 bed 图标 BillboardQuad。
+    Q_INVOKABLE bool isBed(int itemId) const;
     // t345 护甲段判定（id 在护甲段 [ArmorIdBase, ArmorIdEnd) 内）。与 isTool / isMaterial 互斥（护甲段在
     //   材料段之上 0x300）。供 QML delegate 据 isArmor 切到护甲自绘图标 + 装备槽校验「部位匹配」。
     Q_INVOKABLE bool isArmor(int itemId) const;

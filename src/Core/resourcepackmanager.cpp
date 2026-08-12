@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMutex>
@@ -36,6 +37,10 @@ struct BuiltState {
     // t489 流体条带落盘路径（active 时 file:///）；waterStrip = 2 列×32 帧（静水|流水），lavaStrip = 1 列×16 帧。
     QString waterStripFile;
     QString lavaStripFile;
+    // t496 二轮复盘 床 16 色 item 图标染色缓存：bedId→落盘的染色后 bed 图标 file:// 路径。bed.png 是红床模板，
+    //   每床色首次查询时按目标色重染（retintBedTemplate）落盘 voxelsandbox_rp_bed_<id>.png，后续命中直接返。
+    //   apply() 重建时清空（pack 切换 / 重解析）；随 atlasFile 同目录写（AppLocalDataLocation，已 mkpath）。
+    QHash<int, QString> bedIconFiles;
 };
 BuiltState &state()
 {
@@ -534,12 +539,11 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
         { 9,  { QStringLiteral("crafting_table.png"), QStringLiteral("crafting_table_front.png") } }, // BlockRegistry::CraftingTable 工作台
         { 10, { QStringLiteral("furnace.png"),        QStringLiteral("furnace_front.png") } },         // BlockRegistry::Furnace 熔炉
         // t493 恢复：青金石矿不再映射 → 回落程序绘制 3D 立方体 icon（与其它矿石一致；第一轮误加，二轮复盘撤销）。
-        // t496 床 16 色变体（BedRed=32..BedBlack=39 既存 8 色 + BedWhite=78..BedBrown=85 t455 新增 8 色）。用户复盘
-        //   「创造背包床 item 图标没换」—— pack 仅有一张 item/bed.png（红床模板，机制等价 MC 1.0 1.8 前 bed item 图标
-        //   单张红色床），故 16 色床全部映射到同一 bed.png（图标色不可知，红床模板，spec 明确「红床为模板」可接受）。
-        //   pack 实测 textures/item/bed.png 存在。pack 关闭时本映射候选落空 → 回退程序生成 icon（可接受）。
-        //   不像工作台 / 熔炉那样跳过本映射：床 3D 模型是双格横置异形体，程序绘制的立方体 dimetric 图标表达不出
-        //   「这是一张床」（用户复盘「看不出是床」），pack 的 bed.png 平面图（侧视床体 + 四柱腿）辨识度更高。
+        // t496 床 16 色变体（BedRed=32..BedBlack=39 既存 8 色 + BedWhite=78..BedBrown=85 t455 新增 8 色）。
+        //   pack 仅有一张 item/bed.png（红床模板）→ 16 床色全映射到 bed.png；blockItemIconSource 命中床段时按目标
+        //   床色重染模板（retintBedTemplate）落盘 voxelsandbox_rp_bed_<id>.png，返染色图路径 → 16 床色 item 图标
+        //   各显各色（机制等价 MC 1.0 床 item icon 各色不同 / 各色羊毛染色；用户复盘「16 色床图标全是红床」修复）。
+        //   pack 关闭时本映射候选落空 → 回退程序生成 icon_bed_<color>.png（hotbar.cpp，本身已是各色）。
         { 32, { QStringLiteral("bed.png") } }, // BedRed
         { 33, { QStringLiteral("bed.png") } }, // BedOrange
         { 34, { QStringLiteral("bed.png") } }, // BedYellow
@@ -591,6 +595,76 @@ void applyTint(QImage &tile, int tintR, int tintG, int tintB)
                             (qGreen(c) * tintG) / 255,
                             (qBlue(c) * tintB) / 255,
                             qAlpha(c));
+        }
+    }
+}
+
+// t496 二轮复盘 床 16 色染色表（单一权威，与 tools/build_bed.py BED_COLORS 同色板：羊毛↔床同色一致，
+//   机制等价 MC 1.0 床 16 色变体）。返 nullptr = 非床段。作为 retintBedTemplate 的「目标色」——红床模板 bed.png
+//   按本表重染出 16 色被面（红床行 (160,45,45) 仅是 16 色之一，无基准色语义，重染算法按 R 亮度调制而非通道比）。
+struct BedTint { int r, g, b; };
+const BedTint *bedTintForBlock(int blockId)
+{
+    // 顺序与 BlockRegistry 床段 id 对齐（BedRed=32..BedBlack=39 既存 8 色 + BedWhite=78..BedBrown=85 t455 新 8 色）。
+    static const BedTint kTints[] = {
+        {160,  45,  45}, // 32 BedRed
+        {200,  95,  30}, // 33 BedOrange
+        {190, 170,  40}, // 34 BedYellow
+        { 60, 130,  50}, // 35 BedGreen
+        { 55, 130, 140}, // 36 BedCyan
+        { 55,  70, 165}, // 37 BedBlue
+        {170,  70, 150}, // 38 BedMagenta
+        { 38,  38,  44}, // 39 BedBlack
+        {240, 240, 238}, // 78 BedWhite
+        { 70, 150, 210}, // 79 BedLightBlue
+        { 95, 175,  45}, // 80 BedLime
+        {225, 145, 175}, // 81 BedPink
+        { 70,  70,  80}, // 82 BedGray
+        {155, 155, 160}, // 83 BedLightGray
+        {130,  60, 165}, // 84 BedPurple
+        {115,  75,  45}, // 85 BedBrown
+    };
+    if (blockId >= 32 && blockId <= 39) return &kTints[blockId - 32];
+    if (blockId >= 78 && blockId <= 85) return &kTints[8 + (blockId - 78)];
+    return nullptr;
+}
+
+// t496 二轮复盘 红床模板 bed.png 重染成目标床色。bed.png 被面以红为主色（实测被面像素 R 主导、G≈B≈0，
+//   纯红调），按「目标/红基准通道比」缩放会因 G/B 通道为 0 而失败（蓝床 G/B 恒 0 → 仍红/黑，非蓝）。故改用
+//   「红被面区域识别 + 亮度调制重染」：
+//   - 红被面判据：不透明 + R > (G+B)*1.5 且 R > 40（demo 包实测此条件精确圈中被面，排开枕垫白 / 床头板木色 /
+//     床沿暗灰）。非红区域（枕垫 / 木色 / 暗灰）原样保留 → 染色后被面色随目标色变、枕头仍白、床腿仍木色，
+//     整张图标辨识度与红床模板一致。
+//   - 亮度调制：被面像素的 R 强度（40..224）归一为 f = R/224（最亮红被面 = 1.0），略提 1.15 保高光 → 目标色 × f
+//     → 被面随折边亮带 / 绗缝暗线保持明暗层次，仅色相迁移（红→蓝 / 绿 / 白 …）。机制等价 MC「同一床模板按染料
+//     染色出 16 色」。
+//   img 为 Format_ARGB32_Premultiplied；输出亦保持预乘。透明像素（alpha=0，边框外）不动。
+void retintBedTemplate(QImage &img, int tgtR, int tgtG, int tgtB)
+{
+    const int w = img.width(), h = img.height();
+    for (int y = 0; y < h; ++y) {
+        QRgb *scan = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const QRgb c = scan[x];
+            const int a = qAlpha(c);
+            if (a == 0) continue; // 透明像素不动（bed.png 边框外 alpha=0）
+            // 反预乘取线性 RGB（保通用正确；demo 包不透明像素近似非预乘，反解值 = 原值）。
+            const int r = qBound(0, qRed(c) * 255 / qMax(1, a), 255);
+            const int g = qBound(0, qGreen(c) * 255 / qMax(1, a), 255);
+            const int b = qBound(0, qBlue(c) * 255 / qMax(1, a), 255);
+            // 非红被面（枕垫白 / 床头板木色 / 床沿暗灰）→ 原样保留（仅重写预乘，保 a 与线性 RGB 关系一致）。
+            if (!(r > (g + b) * 3 / 2 && r > 40)) {
+                continue; // 线性 RGB 与原像素一致 → 不改写（保留原预乘值，无失真）
+            }
+            // 红被面：按 R 强度亮度调制到目标色（保折边 / 绗缝明暗层次）。
+            // f = min(1.0, R/224*1.15) 归一（被面最亮 ~224，提 1.15 保高光，饱和到 1.0 = 目标色满色）。
+            // Q8.8 风格：f256 = min(256, R*256*1.15/224)；暗处 f→0 近黑目标色，亮处 f=1 满目标色。
+            int f256 = (r * 256 * 23 / 20) / 224; // = r*256*1.15/224（值域 0..256+）
+            if (f256 > 256) f256 = 256;           // 饱和到满目标色（min(1.0,...)）
+            const int nr = qBound(0, (tgtR * f256) / 256, 255);
+            const int ng = qBound(0, (tgtG * f256) / 256, 255);
+            const int nb = qBound(0, (tgtB * f256) / 256, 255);
+            scan[x] = qRgba((nr * a) / 255, (ng * a) / 255, (nb * a) / 255, a);
         }
     }
 }
@@ -729,6 +803,7 @@ void ensureBuiltLocked()
     s.blockDir.clear(); // t456 reset 方块贴图目录（仅当包合法时重填）
     s.waterStripFile.clear(); // t489 reset 流体条带落盘路径（仅当包合法时重填）
     s.lavaStripFile.clear();
+    s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -1057,19 +1132,51 @@ QString ResourcePackManager::blockItemIconSource(int blockId)
     if (candidates.isEmpty())
         return {};
     // 逐候选：item 目录优先（vanilla item icon），block 目录兜底（pack 把前贴图放 block/）。首个命中即返。
+    QString foundPath;
     for (const QString &name : candidates) {
         if (!s.itemDir.isEmpty()) {
             const QString p = QDir(s.itemDir).absoluteFilePath(name);
-            if (QFile::exists(p))
-                return QStringLiteral("file:///") + p;
+            if (QFile::exists(p)) { foundPath = p; break; }
         }
         if (!s.blockDir.isEmpty()) {
             const QString p = QDir(s.blockDir).absoluteFilePath(name);
-            if (QFile::exists(p))
-                return QStringLiteral("file:///") + p;
+            if (QFile::exists(p)) { foundPath = p; break; }
         }
     }
-    return {}; // 包内无该方块 item / 前贴图 → 不覆盖（保留程序生成 icon_<block>.png）。
+    if (foundPath.isEmpty())
+        return {}; // 包内无该方块 item / 前贴图 → 不覆盖（保留程序生成 icon_<block>.png）。
+
+    // t496 二轮复盘 床 16 色区分：pack 只有红床模板 bed.png（blockItemIconMap 把 16 床色全映射到 bed.png）。
+    //   用户复盘「16 色床图标全是红床」。修：bed 段命中时，按目标床色重染模板（retintBedTemplate）落盘
+    //   voxelsandbox_rp_bed_<id>.png，返该染色图 file:// 路径 → 16 床色 item 图标各显各色（机制等价 MC 1.0
+    //   床 item icon 各色不同 / 各色羊毛染色）。命中缓存直接返（首次染色后落盘，后续 O(1)）。非床段直接返
+    //   foundPath（工作台 / 熔炉等原样用 pack 2D 图标，不染色）。bedIconFiles 随 atlasFile 同目录，已 mkpath。
+    if (const BedTint *tint = bedTintForBlock(blockId)) {
+        // 命中缓存（pack 未重解析期间稳定）→ 直接返。
+        const auto it = s.bedIconFiles.constFind(blockId);
+        if (it != s.bedIconFiles.constEnd() && QFile::exists(it.value()))
+            return QStringLiteral("file:///") + it.value();
+        // 加载红床模板 bed.png 并按目标色重染。解码失败 → 回退返未染色的 foundPath（红床，可接受降级）。
+        QImage bed(foundPath);
+        if (bed.isNull())
+            return QStringLiteral("file:///") + foundPath;
+        bed = bed.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        retintBedTemplate(bed, tint->r, tint->g, tint->b);
+        // 落盘到 AppLocalDataLocation（与 atlasFile 同目录，ensureBuiltLocked 已 mkpath；此处再保底）。
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        if (dir.isEmpty())
+            return QStringLiteral("file:///") + foundPath; // 无可写目录 → 回退红床（不染色，降级）
+        QDir().mkpath(dir);
+        const QString out = QDir(dir).absoluteFilePath(
+            QStringLiteral("voxelsandbox_rp_bed_%1.png").arg(blockId));
+        if (!bed.save(out, "PNG"))
+            return QStringLiteral("file:///") + foundPath; // 落盘失败 → 回退红床（降级）
+        // 记缓存（mutable：s 是 state() 引用但 bedIconFiles 需写；stateMutex 已持锁，安全）。
+        state().bedIconFiles.insert(blockId, out);
+        return QStringLiteral("file:///") + out;
+    }
+
+    return QStringLiteral("file:///") + foundPath;
 }
 
 QString ResourcePackManager::mobTextureSource(int mobType) const
