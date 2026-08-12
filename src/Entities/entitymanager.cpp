@@ -2510,11 +2510,16 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
     //   错峰）→ 各 PrimedTnt fuse 到 0 再次 detonatePrimedTnt 引爆其球内 TNT，递归连锁引爆全部。
     //   顺序：先掉落 / 引燃（据 destroyed 列表，TNT 方块已被 destroySphereSilent 清为 Air 故不重复破坏），再伤玩家 + 音视。
     for (const World::DestroyedVoxel &d : destroyed) {
-        // t492：TNT 爆炸 **不再链式引燃** 邻接 TNT（用户明确要求：只有机关 / 压力板直接激活的邻接 TNT 被引燃，
-        //   不该「放一堆 TNT 点一个就全爆」）。故 TNT 方块被爆炸破坏时直接消失，**不** spawnPrimedTnt、**不** 掉落
-        //   物品（TNT 被炸应销毁而非变成可拾取物品 / 引燃实体）。机制：本项目 TNT 仅由机关（lever/button 4 水平邻）
-        //   + 压力板（6 邻：4 水平 + 上下）激活，爆炸本身不传播引燃（简化 + 避免连锁性能风暴 + 符合用户心智模型）。
-        if (d.oldId == BlockRegistry::TntBlock) continue; // TNT 被爆炸破坏 → 不掉落、不引燃（直接销毁）
+        // t493 恢复爆炸**链式引燃**（用户明确要链式传递）：爆炸破坏的 TNT 方块 → spawnPrimedTnt（引燃态实体，
+        //   fuse=jitter 随机错峰）→ 各 PrimedTnt fuse 到 0 再次引爆 → 递归连锁传播。机制等价 MC TNT 连锁。
+        //   t492 曾去链式（用户嫌「一堆全爆」），t493 用户改口要链式 → 恢复。**不**走爆炸掉落（TNT 被炸引燃而非
+        //   掉落成物品，避免「TNT 被炸成掉落物」错乱）。
+        if (d.oldId == BlockRegistry::TntBlock) {
+            const float jit = kPrimedTntFuseJitterSec > 0.0f
+                              ? float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * kPrimedTntFuseJitterSec : 0.0f;
+            spawnPrimedTnt(d.x, d.y, d.z, kPrimedTntFuseSec + jit);
+            continue; // 引燃完毕，跳过掉落（TNT 不掉物品）
+        }
         const int dropItemId = BlockRegistry::dropId(d.oldId);
         if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
             emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
@@ -3016,8 +3021,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             e.vy -= kGravity * float(dt);
             if (e.vy < -kMaxFall) e.vy = -kMaxFall;
             const float newY = e.pos.y() + e.vy * float(dt);
-            const int topCell = qFloor(e.pos.y());
-            int botCell = qFloor(newY);
+            // t493 修「primed TNT 上下震荡」：旧 topCell=qFloor(pos.y) 扫 TNT 自己所在格（已被 clearBlockSilent 清成
+            //   Air，pos.y=10.5 → floor=10 = TNT 已移除的格）→ 永远找不到支撑 → 每帧重力拉下又弹回 restY → 上下抖动。
+            //   改从**模型底面正下方**一格开始扫：TNT 视觉占 pos.y±0.5，底面 pos.y-0.5，正下方格 = floor(pos.y-0.5)。
+            //   pos.y=10.5 → floor(10.0)=10 仍是自己格 —— 需再下移 1 格 = floor(pos.y)-1 = 9 = 支撑格。下落时同理：
+            //   TNT 中心在某 cell 内，支撑是它下方第一个实体格。故扫描范围 [floor(pos.y)-1 .. floor(newY)-1]。
+            const int topCell = qFloor(e.pos.y()) - 1; // 模型底面正下方的格（支撑判定起点；TNT 占 pos.y±0.5）
+            int botCell = qFloor(newY) - 1;            // 下落目标底面下方的格
             if (botCell > topCell) botCell = topCell; // 防浮点噪声致 botCell>topCell
             int supportCellY = -1; // 首个完整立方支撑（primed TNT 停在其顶面 cy+1，不放置方块）
             for (int cy = topCell; cy >= botCell; --cy) {

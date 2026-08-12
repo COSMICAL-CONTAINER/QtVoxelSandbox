@@ -3295,23 +3295,17 @@ void PlayerController::scanTntTraps()
         for (int bz = z0; bz <= z1; ++bz) {
             const quint8 plate = m_world->blockAt(bx, feetY, bz);
             if (!BlockRegistry::isPressurePlate(plate)) continue;        // 本格非压力板 → 跳过
-            // (a) 旧路径：压力板下垫 TNT → 直接引爆（destroySphereSilent 球形破坏 + 衰减伤玩家 + explosion 音/视）。
-            //   爆炸即摧毁压力板 + TNT（在半径内）→ 同帧不会重复触发。
-            const quint8 below = m_world->blockAt(bx, feetY - 1, bz);
-            if (BlockRegistry::isTnt(below)) {
-                m_entityManager->detonateTntBlock(bx, feetY - 1, bz, m_world, m_pos);
-                return; // return 防同帧多候选多次引爆
-            }
             // (b) t490/t492：压力板 **6 邻**（4 水平 + 上 + 下）有 TNT → 点燃（移除 TNT 方块 + spawnPrimedTnt 延时引爆）。
-            //   t492 改 6 邻（用户要求「水平四方向 + 上下两个方向」），不再依赖爆炸链式引燃（detonateTntSphere 已
-            //   去链式 → 只有直接机关 / 压力板激活的 TNT 才引燃，放一堆 TNT 踩板只爆邻接的、不全爆）。
+            //   t492 改 6 邻（用户要求「水平四方向 + 上下两个方向」）；t493 删旧路径(a)「压力板下垫 TNT 直接引爆」——
+            //   用户实测「压力板放 TNT 上面一踩直接爆」不对：应**点燃**（变白闪 primed 实体、fuse ~5s 后爆）而非瞬爆，
+            //   且下方 TNT 由本 6 邻的向下方向 (0,-1,0) 覆盖。t493 恢复爆炸链式（用户要）→ 点燃后可连锁传播。
             //   点燃 = clearBlockSilent 移除 TNT 方块（绕 occ 守卫）+ spawnPrimedTnt（默认 fuse ~5s）。命中首个 → return。
             static constexpr int kDirs6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
             for (const auto &d : kDirs6) {
                 const int tx = bx + d[0], ty = feetY + d[1], tz = bz + d[2];
                 if (BlockRegistry::isTnt(m_world->blockAt(tx, ty, tz))) {
                     m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
-                    m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸不链式）
+                    m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸链式传播）
                     return; // 单次点燃 → return
                 }
             }
