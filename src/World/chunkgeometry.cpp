@@ -852,6 +852,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Farmland) continue; // t408 耕地矮盒已在 PASS 1；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isCrossBillboard(b)) continue; // t235/t305 cross（草丛/作物/树苗）已在 PASS 1；不进立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Cactus) continue; // t445 仙人掌 0.8 细柱已在 PASS 1；不进整立方面
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::SnowLayer) continue; // t505/t510 二轮复盘：积雪层薄板已在 PASS 1；不进整立方面（否则满格立方覆盖薄板，雪层显完整方块）
                         if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(b)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
