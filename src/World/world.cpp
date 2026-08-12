@@ -30,12 +30,13 @@ static inline void unpackGrowthCell(quint64 k, int &x, int &y, int &z)
     y = int(quint16(k >> 16));
     z = int(quint16(k));
 }
-// 是否「生长方块」（生长 tick 关心的 4 类：作物 / 甘蔗 / 耕地 / 树苗）。只读 BlockRegistry 枚举。
+// 是否「生长方块」（生长 tick 关心的类：作物 / 甘蔗 / 耕地 / 树苗 / t514 浆果丛）。只读 BlockRegistry 枚举。
 static inline bool isGrowthBlock(quint8 id)
 {
     using BR = BlockRegistry;
     return id == BR::WheatCrop || id == BR::CarrotCrop || id == BR::PotatoCrop
-        || id == BR::Sugarcane || id == BR::Farmland || id == BR::Sapling;
+        || id == BR::Sugarcane || id == BR::Farmland || id == BR::Sapling
+        || id == BR::SweetBerryBush; // t514：浆果丛生长 tick 据 m_growthCells 遍历（O(丛格数) 替代全图扫描）
 }
 
 // t149 海平面（水位）：worldgen 沙滩带 / 沙漠水位 / 填水 / 树·矿石阈值的单一权威常量。
@@ -69,6 +70,7 @@ void World::beginLoad(int seed)
     m_growthCells.clear();   // t425 网格重置 → 生长方格索引作废（finishLoad 写完 blob 后 rebuildGrowthCells 全图重建）
     m_waterCells.clear();    // perf：网格重置 → 流体方格索引作废（finishLoad 写完 blob 后 rebuildFluidCells 全图重建）
     m_lavaCells.clear();
+    m_iceCells.clear();      // t495：网格重置 → 普通冰方格索引作废（finishLoad 写完 blob 后 rebuildIceCells 全图重建）
     fluidActReset();         // t488：网格重置 → 活动盒作废（旧世界坐标不指向新栅格；finishLoad 置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
     emit seedChanged();
@@ -98,6 +100,9 @@ void World::finishLoad()
     // perf：同上 —— 存档 blob 直写不经写入路径 → noteFluidWrite 不会捕获 → 全图重建流体方格索引一次，
     //   使后续流体 tick（water/lava/ice）走 O(流体格数) 遍历而非全图扫描（一次性 3.3M 扫描在加载期可接受）。
     rebuildFluidCells();
+    // t495：同上 —— 存档 blob 直写不经写入路径 → noteIceWrite 不会捕获 → 全图重建普通冰方格索引一次，
+    //   使后续融化 tick（tickIceMelt）走 O(冰格数) 遍历而非全图扫描。
+    rebuildIceCells();
 }
 
 // t425 perf：生长方格索引增量维护。写入路径（setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）在
@@ -156,6 +161,31 @@ void World::rebuildFluidCells()
             }
 }
 
+// t495 perf：普通冰（Ice=45）方格集合增量维护（同 noteFluidWrite 模式）。id 不变 → 成员资格不变 → no-op。
+//   id 变更 → 按 oldId/newId 是否普通冰 Ice 增删集合项。仅 Ice=45 入集（PackIce/BlueIce 永不融化 → 不入集，
+//   免 tickIceMelt 无谓扫描它们）。O(1) 哈希操作（编辑低频），换得融化 tick 从 O(全图 3.28M) 降到 O(冰格数)。
+void World::noteIceWrite(int x, int y, int z, quint8 oldId, quint8 newId)
+{
+    if (oldId == newId) return; // id 不变 → 成员资格不变
+    const quint64 k = packGrowthCell(x, y, z); // 复用同一坐标打包
+    if (oldId == BlockRegistry::Ice) m_iceCells.erase(k);
+    if (newId == BlockRegistry::Ice) m_iceCells.insert(k);
+}
+
+// t495 perf：全图扫描重建普通冰方格集合（generate / finishLoad 末调一次；运行期由 noteIceWrite 增量维护）。
+//   一次性 3.3M 扫描在生成 / 加载期可接受（非每 tick）。仅 Ice=45 入集。
+void World::rebuildIceCells()
+{
+    m_iceCells.clear();
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y)
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Ice)
+                    m_iceCells.insert(packGrowthCell(x, y, z));
+}
+
 // t176 新世界生成：按 seed 全量 worldgen + emit。generate() 内部 recreate 网格（清上一世界残留），
 //   故无需先 beginLoad。emit seedChanged（QML 绑定刷新）+ worldChanged（ChunkGeometry 重建）。
 void World::regenerate(int seed)
@@ -190,6 +220,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏（→5 参数 id,0 重置 state）
     noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
     noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（流体 tick 据它遍历，免全图扫描）
+    noteIceWrite(x, y, z, oldId, id);    // t495：维护普通冰方格索引（融化 tick 据它遍历，免全图扫描）
     qInfo("vo.edit: setBlock %d,%d,%d  %d->%d", x, y, z, int(oldId), int(id)); // t155f 诊断：编辑时序
     if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
         emit blockBroken(x, y, z, int(oldId)); // 破：带原方块 id（粒子/音效按它取色/取声）
@@ -269,6 +300,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
     noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
     noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（流体 tick 据它遍历，免全图扫描）
+    noteIceWrite(x, y, z, oldId, id);    // t495：维护普通冰方格索引（融化 tick 据它遍历，免全图扫描）
     if (oldId != id) {
         // id 变化 → 发 broken/placed（同 4 参数语义：破带原 id、放带新 id）；id 不变只 state 变（门开合）不发。
         if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
@@ -311,6 +343,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
     noteGrowthWrite(x, y, z, occ, id); // t425：维护生长方格索引（沙落覆盖作物 / 耕地时正确移除）
     noteFluidWrite(x, y, z, occ, id);  // perf：维护流体方格索引（沙落覆盖水时正确移除水格）
+    noteIceWrite(x, y, z, occ, id);    // t495：维护普通冰方格索引（沙落覆盖冰时正确移除）
     recomputeLightAround(x, y, z, occ, id); // t154：增量重 flood（oldId=被覆盖的 air/水 → newId=id）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -330,6 +363,7 @@ bool World::clearBlockSilent(int x, int y, int z)
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏（无条件覆盖为 Air）
     noteGrowthWrite(x, y, z, occ, id); // t425：维护生长方格索引（TNT 不属生长段 → no-op，但同族写入路径保持一致）
     noteFluidWrite(x, y, z, occ, id);  // perf：维护流体方格索引（TNT 不属流体 → no-op；保持一致）
+    noteIceWrite(x, y, z, occ, id);    // t495：维护普通冰方格索引（TNT 不属冰 → no-op；保持一致）
     recomputeLightAround(x, y, z, occ, id); // t154：增量重 flood（oldId=TNT → newId=Air；TNT 遮光 → 移除放天光）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 点火是系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -352,11 +386,13 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
     noteGrowthWrite(x, y, z, lightOldId, id); // t425：维护生长方格索引（作物升阶段 id 不变 → no-op；甘蔗生长 / 耕地增删正确）
     noteFluidWrite(x, y, z, lightOldId, id);  // perf：维护流体方格索引（水/岩浆增删 / level 变 id 不变 → 流体格增删正确）
+    noteIceWrite(x, y, z, lightOldId, id);    // t495：维护普通冰方格索引（冰↔水融化/冻结经 setWaterSilent → 索引正确增删）
     // t380r perf：批量流体 tick 延迟光照重算（N 次 per-write recomputeLightAround → 末尾联合盒 1 次
     //   refloodBox；同 destroySphereSilent t383 批量收口模式）。判据与 recomputeLightAround 早退一致：
-    //   t334 遮光翻转（lightOpacity 变）+ t351 发光增删（岩浆）。非批量仍逐写即时重 flood（编辑路径须立即反映）。
+    //   t334 遮光翻转（lightOpacity 变）+ t351 发光增删（岩浆）。t494 改用状态感知版 lightEmission
+    //   （传 oldState/state）—— 燃烧熔炉（lit bit2）经本入口写时也检出光变（单参版恒 0，潜在陷阱）。
     const bool lightSky = BlockRegistry::lightOpacity(lightOldId, oldState) != BlockRegistry::lightOpacity(id, state);
-    const bool lightSource = BlockRegistry::lightEmission(lightOldId) > 0 || BlockRegistry::lightEmission(id) > 0;
+    const bool lightSource = BlockRegistry::lightEmission(lightOldId, oldState) > 0 || BlockRegistry::lightEmission(id, state) > 0;
     if (m_batchFluid) {
         // t488 perf：天光通道按「列上方是否真能到达」细化。遮光翻转（lightSky）时，若本格上方天光本就被
         //   某遮光块挡死（如地下岩浆池，列上覆土石）→ 本编辑不改变任何天光（该处恒 0），sky 置 false →
@@ -1010,6 +1046,7 @@ void World::tickLavaFlow()
             m_chunks.setBlock(b.x, b.y, b.z, BlockRegistry::Air); // 直写 + 标脏（含跨 chunk 边界邻接），不 emit
             noteGrowthWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t425：木类非生长方块 → no-op，保持一致
             noteFluidWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air);  // perf：木类非流体 → no-op，保持一致
+            noteIceWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air);    // t495：木类非冰 → no-op，保持一致
             m_pendingLightEdits.push_back({b.x, b.y, b.z, true});      // 木→air 天光通（遮光块消失，sky），延迟联合 reflood
             emit blockBroken(b.x, b.y, b.z, int(oldId));               // 焚毁破块粒子 / 音（机制等价 MC 燃烧破块反馈）
             checkCactusOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // ② 失撑复检（正上方 Cactus 整柱坍落，同 setBlock 路径）
@@ -1465,6 +1502,14 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
     // t488：破坏区扩进活动盒（±1 由 fluidActExpand 单格并）→ 下次流体 tick 只扫破坏区而非全量快照。
     //   逐破坏块 O(1)（半径 3 球 ≤ ~343 项），爆炸稀有可忽略。
     for (const DestroyedVoxel &d : destroyed) fluidActExpand(d.x, d.y, d.z);
+    // t495 code review 补：爆炸批量直写不经 note*Write → m_iceCells / m_waterCells / m_lavaCells /
+    //   m_growthCells 残留已被清成 Air 的 stale key（tick 侧有防御 guard 不崩，但每窗白扫）。
+    //   爆炸稀有 → 逐破坏块 O(1) note 维护（同 dropCactusColumn / clearBlockSilent 口径），索引保持精确。
+    for (const DestroyedVoxel &d : destroyed) {
+        noteIceWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
+        noteFluidWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
+        noteGrowthWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
+    }
     emit worldChanged();
     m_chunks.clearAllDirty();
     qInfo("vo.edit: explosion destroyed = %d (center %d,%d,%d r=%g)",
@@ -1519,10 +1564,14 @@ void World::checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     }
 }
 
-// t504 setBlock 编辑后枯死灌木失撑复检（见 world.h 头注释）。机制等价 MC 1.0 枯灌木失去下方支撑即掉自身（同甘蔗 /
-//   仙人掌支撑校验族）。DeadBush 恒单格（无柱状生长），故仅清正上方 1 格（与 Cactus dropCactusColumn 逐柱不同）。
-//   玩家直破枯灌木（oldId==DeadBush → id==Air）走 finishMiningAt，dropId=0 → 无产物；失撑（破下方支撑方块，oldId 非
-//   DeadBush → 正上方 DeadBush 掉落）才发掉落物，避免双重掉落。静默直写不经 World::setBlock → 不递归触发本检查。
+// t504 setBlock 编辑后枯死灌木失撑复检（见 world.h 头注释）。机制等价 MC 1.0 枯灌木失去下方支撑即坍落（同甘蔗 /
+//   仙人掌支撑校验族）；但坍落产物为 **木棒**（材料段 0x200）而非枯灌木自身（机制等价 MC dead bush 掉 0-2 木棒，
+//   不掉自身 —— 与破花掉花 / 破蘑菇掉蘑菇不同：枯灌木 dropId=0 故即便掉自身也无意义，故失撑走木棒）。
+//   DeadBush 恒单格（无柱状生长），故仅清正上方 1 格（与 Cactus dropCactusColumn 逐柱不同）。
+//   玩家直破枯灌木（oldId==DeadBush → id==Air）走 finishMiningAt，dropId=0 → 无产物；仅失撑（破下方支撑方块，
+//   oldId 非 DeadBush → 正上方 DeadBush 掉木棒）才发掉落物，避免双重掉落。静默直写不经 World::setBlock → 不递归触发本检查。
+//   产物 id 用字面量 0x200（= RecipeRegistry::StickId，材料段基址 0x200）—— Core/World 层不依赖 Game（PLAN §2 分层），
+//   故不能 include recipe.h；与 blockregistry.cpp 矿石 dropId 用字面量 0x201/0x202 同模式（单一权威契约对齐）。
 void World::checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
     // 仅本格被破为 Air 且被破块非 DeadBush 时，查正上方是否 DeadBush 失撑。（被破块本身是 DeadBush 时跳过 ——
@@ -1532,11 +1581,12 @@ void World::checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     if (by < 0 || by >= m_height) return;
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
     if (m_chunks.blockAt(x, by, z) != BlockRegistry::DeadBush) return;
-    // 枯灌木失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落物 + 重 flood 光。
+    // 枯灌木失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落木棒 + 重 flood 光。
+    constexpr int kStickItemId = 0x200; // 木棒（= RecipeRegistry::StickId，材料段基址 0x200；Core 不依赖 Game 故字面量）
     m_chunks.setBlock(x, by, z, BlockRegistry::Air);
     noteGrowthWrite(x, by, z, BlockRegistry::DeadBush, BlockRegistry::Air); // 枯灌木非生长方块 → no-op，保持一致
-    emit blockBroken(x, by, z, int(BlockRegistry::DeadBush));                 // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
-    emit blockDroppedAsItem(x, by, z, int(BlockRegistry::DeadBush));         // 呈掉落物实体（Main.qml spawnItem）
+    emit blockBroken(x, by, z, int(BlockRegistry::DeadBush));        // 破块粒子 / 音（坍落的是枯灌木方块，id 用 DeadBush）
+    emit blockDroppedAsItem(x, by, z, kStickItemId);                // 掉落物 = 木棒（材料段 0x200；机制等价 MC dead bush 掉木棒）
     recomputeLightAround(x, by, z, BlockRegistry::DeadBush, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
     emit worldChanged();        // 驱动 mesh 重建（cross 段消失）
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
@@ -1675,6 +1725,75 @@ void World::tickSaplingGrowth()
         qInfo("vo.edit: saplings grew = %d", int(grows.size())); // 可观测：长成树苗计数
     }
     ++m_saplingIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同株错峰）
+}
+
+// t514 甜浆果丛生长 tick（见 world.h 头注释）。机制等价 MC 1.0 sweet berry bush random-tick 生长。
+void World::tickSweetBerryBushGrowth()
+{
+    FrameProfiler::Scope prof("wBerry"); // perf：含节流 / 早退
+    if (++m_berryBushTickCounter < kBerryBushTickInterval) return; // 节流：每 kBerryBushTickInterval tick（~5s）判一次
+    m_berryBushTickCounter = 0;
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+
+    // 1) 快照当前浆果丛格 + 阶段（tick 内栅格不变 —— 升阶段在 pass 末统一应用，避免半遍历态读到刚升的阶段）。
+    //   t425：遍历生长方格索引 m_growthCells（O(生长格数)）替代全图扫描；顺带剔除被直接写入清掉的生长格。
+    struct BCell { int x, y, z; quint8 stage; };
+    std::vector<BCell> cells;
+    {
+        std::vector<quint64> stale;
+        for (quint64 k : m_growthCells) {
+            int x, y, z;
+            unpackGrowthCell(k, x, y, z);
+            const quint8 b = m_chunks.blockAt(x, y, z);
+            if (!isGrowthBlock(b)) { stale.push_back(k); continue; } // 直接写入清掉 → 剔除过期索引项
+            if (b == BlockRegistry::SweetBerryBush)
+                cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
+        }
+        for (quint64 k : stale) m_growthCells.erase(k);
+    }
+
+    // 2) 成长判定：每丛据「下方透光土壤支撑 + 头顶光照足 + 未成熟」筛后，按确定性散布概率决定本窗是否升阶段。
+    //    散布：hashVoxel(seed, x, y, z) 混入窗口序号 m_berryBushIntervalIndex 取低 16 位 % 100，落在
+    //    [0, kBerryBushGrowPct) 内即升 → 不同丛错峰、同 seed 同窗口序号同结果（无随机源，可复现）。
+    //    土壤支撑：下方为 Grass / Dirt / Farmland（机制等价 MC 浆果丛生于草地 / 泥土 / 耕地；与 playercontroller
+    //      种植分支 Grass/Dirt 一致 + 耕地兼容）。SnowLayer 不算土壤 → worldgen 雪顶丛采后回 0 不再长（枯丛稳态）。
+    std::vector<BCell> grows;
+    for (const BCell &c : cells) {
+        if (c.stage >= BlockRegistry::SweetBerryBushStageMax) continue;   // 已成熟 → 不再升
+        if (c.y == 0) continue;                                           // 世界底无「下方土壤」支撑
+        const quint8 below = m_chunks.blockAt(c.x, c.y - 1, c.z);
+        if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
+            && below != BlockRegistry::Farmland)
+            continue;                                                     // 下方非透光土壤 → 不长
+        if (m_chunks.skyLightAt(c.x, c.y, c.z) < kBerryBushMinLight)
+            continue;                                                     // 头顶天光不足 → 不长（夜间 / 洞穴）
+        // 确定性散布概率：纯函数于 seed + 位置 + 窗口序号（PLAN §2-K 精神，无 Math.random / 时间源 → 可复现）。
+        //   全 int 运算避免符号转换告警（hashVoxel 参数为 int）。
+        const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_berryBushIntervalIndex) * 0x9E3779B9u));
+        const int hy = c.y * 7 + int(c.stage);
+        const quint32 h = hashVoxel(mixedSeed, c.x, hy, c.z);
+        if (int(h & 0xFFFFu) % 100 >= kBerryBushGrowPct) continue;        // 散布落空 → 本窗不升
+        grows.push_back(c);
+    }
+
+    // 3) 应用升阶段（静默批量写：m_batchFluid 收口使每丛 setWaterSilent 只写栅格 + 延迟光照重算、**不**
+    //    emit worldChanged / 不 clearAllDirty；末尾本窗所有改动一次性 emit + clear，把「N 丛升阶段 = N 次
+    //    emit worldChanged + N×全 chunk onWorldChanged 扇出 + N×clearAllDirty」折叠为 1 次（同 tickCropGrowth /
+    //    tickWaterFlow 批量收口模式）。setWaterSilent 对「无变化」早退（stage→stage+1 必有变化 → anyChange 真）。
+    //    无丛可升时 grows 为空 → 零写入零 emit（稳态无开销）。
+    m_batchFluid = true;
+    bool anyChange = false;
+    for (const BCell &g : grows)
+        anyChange |= setWaterSilent(g.x, g.y, g.z, BlockRegistry::SweetBerryBush, quint8(g.stage + 1));
+    m_batchFluid = false;
+    flushPendingLightEdits(); // 批量写延迟的光照重算 → 联合盒一次 refloodBox（无延迟编辑则 no-op）
+    if (anyChange) {
+        emit worldChanged();       // 一次重建（mesher 据 state 选 stage tile → 升阶段丛贴图换新）
+        m_chunks.clearAllDirty();  // 两段重建完统一清脏（同 tickCropGrowth emit→clear 顺序）
+    }
+
+    ++m_berryBushIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同丛错峰）
 }
 
 // --- Perlin（2D fBm）---
@@ -2066,6 +2185,7 @@ void World::generate()
     m_growthCells.clear();   // t425 全新世界 → 清生长方格索引（worldgen placeSugarcane 经 setVoxelIfAir 增量重建）
     m_waterCells.clear();    // perf：全新世界 → 清流体方格索引（worldgen 直写 chunk 不经写入路径 → 末尾 rebuildFluidCells 全图重建）
     m_lavaCells.clear();
+    m_iceCells.clear();      // t495：全新世界 → 清普通冰方格索引（worldgen freezeSurfaceWater 直写 chunk → 末尾 rebuildIceCells 全图重建）
     fluidActReset();         // t488：全新世界 → 活动盒作废（generate 末置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）
 
@@ -2188,6 +2308,10 @@ void World::generate()
     //   （不经 World 写入路径 → noteFluidWrite 不捕获）。一次性 3.3M 扫描在生成期可接受（非每 tick），
     //   使后续流体 tick 走 O(流体格数) 遍历而非全图扫描。
     rebuildFluidCells();
+    // t495：worldgen 末全图重建普通冰方格索引一次 —— worldgen freezeSurfaceWater 经 m_chunks.setBlock 直写 chunk
+    //   （不经写入路径 → noteIceWrite 不捕获）。一次性扫描在生成期可接受（非每 tick），使后续融化 tick（tickIceMelt）
+    //   走 O(冰格数) 遍历而非全图扫描。
+    rebuildIceCells();
     // t380：worldgen 末置流体脏 → 进世界后首次 tickWaterFlow/tickLavaFlow 各扫一次确认稳态（海洋 / 岩浆湖
     //   全源 → 零候选 → 即清标志停扫）。一次性确认扫描（防御：避免标志初始 false 漏掉 worldgen 引入的流场）。
     m_waterDirty = true;
@@ -2248,6 +2372,7 @@ void World::setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state)
     m_chunks.setBlock(x, y, z, id, state);
     noteGrowthWrite(x, y, z, BlockRegistry::Air, id); // t425：worldgen placeSugarcane 经此 → 甘蔗入索引
     noteFluidWrite(x, y, z, BlockRegistry::Air, id);  // perf：worldgen 填水若经此 → 水格入索引（防御性，主要靠 generate 末 rebuildFluidCells）
+    noteIceWrite(x, y, z, BlockRegistry::Air, id);    // t495：worldgen 冻结水若经此 → 冰格入索引（防御性，主要靠 generate 末 rebuildIceCells）
 }
 
 // 单棵橡树：surfaceY=草顶 y；主干 trunkH 格原木(id5)从 surfaceY+1 起；顶部树叶(id7)树冠。
@@ -2985,6 +3110,71 @@ void World::tickIceFreeze()
     }
     ++m_freezeIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同格错峰冻结）
     if (frozen > 0) qInfo("vo.world: tickIceFreeze frozen=%d", frozen); // 可观测性（同 tickCropGrowth）
+}
+
+// t495 普通冰融化 tick（spec「普通冰在高温/高亮环境（火把/熔炉/火）有概率融化成水」；机制等价 MC 1.0 ice 受高
+//   方块光照射融化 —— 仅普通冰 Ice(45)，浮冰 PackIce / 蓝冰 BlueIce 永不融化）：见 world.h 头注释。每 2s 一窗，
+//   遍历冰格索引（m_iceCells，O(冰格数)），挑「高亮邻」候选（6 正交邻发光源 OR 自身方块光 ≥ kIceMeltBlockLight）
+//   按散布概率融化 Ice→Water（setWaterSilent 静默写 + worldChanged）。worldgen freezeSurfaceWater 已在生成期冻结
+//   雪原表层水；本 tick 处理玩家把冰放到火把旁 / 把火把放在冰旁等动态高亮场景的延迟融化。
+void World::tickIceMelt()
+{
+    FrameProfiler::Scope prof("wIceMelt"); // perf：含节流 / 早退
+    if (++m_iceMeltTickCounter < kIceMeltTickInterval) return; // 节流：每 kIceMeltTickInterval tick（~2s）做一次判定
+    m_iceMeltTickCounter = 0;
+    if (m_width <= 0 || m_depth <= 0 || m_height <= 0) return;
+
+    const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_iceMeltIntervalIndex) * 0x85EBCA6Bu)); // 窗口序号混入散布种子
+    int melted = 0;
+    // perf：遍历 m_iceCells（O(冰格数)）替代全图 W×D×H 扫描（O(3.28M)）。先收集融化目标再统一应用：setWaterSilent
+    //   写 Water 会经 noteIceWrite 删 m_iceCells 里的冰格项 → 边遍历边删会迭代器失效（unordered_set erase 破坏当前
+    //   迭代器，同 tickIceFreeze 教训）。索引项可能过期（某条直写路径漏 noteIceWrite）→ blockAt 复核跳过非冰格。
+    struct MeltTarget { int x, y, z; };
+    std::vector<MeltTarget> toMelt;
+    toMelt.reserve(m_iceCells.size());
+    // 6 正交邻偏移（冰融化查水平 + 上下邻的发光方块；机制等价 MC 冰从任意邻面受光照射均可融）。
+    static const int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const quint64 k : m_iceCells) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        if (m_chunks.blockAt(x, y, z) != BlockRegistry::Ice) continue; // 过期索引项（非冰，如已融化 / 被破）→ 跳过
+        // 「高亮邻」判定（机制等价 MC ice light ≥12 融化；本工程简化为二者其一即触发候选）：
+        //   (a) 6 正交邻格任一为发光方块（BlockRegistry::lightEmission(id,state)>0：火把 14 / 燃烧熔炉 13 / 岩浆 15 /
+        //       末地传送门 10）—— 即「邻接热源 / 强光源」；
+        //   (b) OR 本格方块光（blockLightAt）≥ kIceMeltBlockLight(12) —— 火把近场照射（火把 14 衰减 1 → 距 1 格 = 13，
+        //       距 2 格 = 12，均 ≥12 触发；机制等价 MC 冰需 light level ≥12 从 ≥2 邻面照射）。
+        //   二者其一 → 本格为融化候选。注意不查天光（skyLight）：MC 冰只在「方块光 / 高亮」下融，阳光下不融
+        //   （阳光下冰原不会自然融），故仅方块光路径。
+        bool litNeighbor = false;
+        for (const auto &d : kNb) {
+            const int nx = x + d[0], ny = y + d[1], nz = z + d[2];
+            const quint8 nid = m_chunks.blockAt(nx, ny, nz);
+            if (nid == BlockRegistry::Air) continue; // air 不发光（lightEmission 早返 0，但显式跳过省一次 stateAt）
+            const quint8 nst = m_chunks.stateAt(nx, ny, nz);
+            if (BlockRegistry::lightEmission(nid, nst) > 0) { litNeighbor = true; break; } // 邻发光源 → 候选
+        }
+        if (!litNeighbor && m_chunks.blockLightAt(x, y, z) < kIceMeltBlockLight) continue; // 无高亮邻 + 自身方块光不足 → 不融
+        // 散布概率：seed + 位置 + 窗口序号哈希 → 不同格不同窗错峰融化（非瞬时全融，PLAN §2-K）。
+        const quint32 h = hashVoxel(mixedSeed, x, y, z);
+        if (int(h % 100u) >= kIceMeltPct) continue; // 散布落空 → 本窗不融
+        toMelt.push_back({x, y, z});
+    }
+    // 批量静默写 Water（m_batchFluid 收口把「N 格融化 = N 次 emit worldChanged + N×clearAllDirty」折叠为 1 次 emit +
+    //    clear；同 tickIceFreeze t350 批量收口模式）。Ice 融为水源 state=0（机制等价 MC 冰融化成水源；下游
+    //    tickWaterFlow 自然处理水源蔓延 / tickIceFreeze 在雪原群系可重新冻结 → 冰-水动态循环稳态）。
+    //    setWaterSilent 内部无变化早退；melted 计数仅供可观测日志。
+    m_batchFluid = true;
+    for (const MeltTarget &t : toMelt) {
+        if (setWaterSilent(t.x, t.y, t.z, BlockRegistry::Water, 0)) ++melted; // 静默写 Water（系统模拟，非玩家破/放 → 无反馈）
+    }
+    m_batchFluid = false;
+    flushPendingLightEdits(); // t380r：批量写延迟的光照重算 → 联合盒一次 refloodBox（无延迟编辑则 no-op）
+    if (melted > 0) {
+        emit worldChanged();       // 一次重建（仅脏 chunk）
+        m_chunks.clearAllDirty();  // 两段重建完统一清脏
+    }
+    ++m_iceMeltIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同格错峰融化）
+    if (melted > 0) qInfo("vo.world: tickIceMelt melted=%d", melted); // 可观测性（同 tickIceFreeze）
 }
 
 // t119 底层基岩：遍历列，在 y 0..4 铺一层 Bedrock（不可破坏方块，hardness=-1.0 → canMine=false）。
@@ -4645,13 +4835,14 @@ void World::recomputeLightField()
         }
     }
 
-    // 种子 2 — 方块光（发光方块）：扫所有格，lightEmission>0（火把=14 / 岩浆=15）→ block=该值（保留天光）。
+    // 种子 2 — 方块光（发光方块）：扫所有格，lightEmission>0（火把=14 / 岩浆=15 / 燃烧熔炉=13）→ block=该值（保留天光）。
     //   t351：岩浆自发光 15，地底岩浆湖照亮封闭洞穴（MC 1.0 岩浆光 level 15）。沿用 BlockRegistry::lightEmission
     //   单一权威（火把/岩浆/未来发光方块均经此），消除「每加一个光源改一处种子」回归类。
+    //   t494：调状态感知版（传 cell state）—— 燃烧中的熔炉（state bit2）发 13、熄灭熔炉发 0（普通方块不自发光）。
     for (int x = 0; x < W; ++x)
         for (int y = 0; y < H; ++y)
             for (int z = 0; z < D; ++z) {
-                const quint8 emission = BlockRegistry::lightEmission(m_chunks.blockAt(x, y, z));
+                const quint8 emission = BlockRegistry::lightEmission(m_chunks.blockAt(x, y, z), m_chunks.stateAt(x, y, z));
                 if (emission > 0) {
                     m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), emission);
                     blockQ.push({x, y, z});
@@ -4732,7 +4923,9 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ol
     const bool opacityChanged = (BlockRegistry::lightOpacity(oldId, oldState) != BlockRegistry::lightOpacity(newId, newState));
     // t351：发光方块增删（火把/岩浆）触发方块光重 flood。岩浆 lightOpacity=0（solid=false）→ opacityChanged 恒 false，
     //   若不纳入本判据则岩浆流/凝（tickLavaFlow → setWaterSilent → 此处）会因「无变化」早退 → 岩浆光不更新。
-    const bool lightSourceChanged = (BlockRegistry::lightEmission(oldId) > 0 || BlockRegistry::lightEmission(newId) > 0);
+    //   t494：改用状态感知版（传 oldState/newState）—— 熔炉点燃/熄火（id 不变、state bit2 翻转）须检出光变重 flood；
+    //   单参版两 Furnace 均 0 → 恒 false → 燃烧熔炉光永不更新（flood 不发生）。
+    const bool lightSourceChanged = (BlockRegistry::lightEmission(oldId, oldState) > 0 || BlockRegistry::lightEmission(newId, newState) > 0);
     if (!opacityChanged && !lightSourceChanged) return; // 光照无变化（如门开合：lightOpacity 恒 0、非发光方块）
 
     QElapsedTimer t; t.start(); // t155c：测编辑光照开销（找卡顿根因）
@@ -4817,12 +5010,13 @@ int World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky
         }
     }
 
-    // 3. 盒内重 seed 方块光：发光格（lightEmission>0：火把=14 / 岩浆=15）→ block=该值（保留天光）。无论 doSky。
+    // 3. 盒内重 seed 方块光：发光格（lightEmission>0：火把=14 / 岩浆=15 / 燃烧熔炉=13）→ block=该值（保留天光）。无论 doSky。
     //   t351：岩浆自发光 15，流/凝时（tickLavaFlow → setWaterSilent → recomputeLightAround）须重 flood 其方块光。
+    //   t494：调状态感知版（传 cell state）—— 燃烧熔炉（state bit2）发 13；熄灭熔炉发 0（其格清零后不入种子，自然无光）。
     for (int x = x0; x <= x1; ++x)
         for (int y = y0; y <= y1; ++y)
             for (int z = z0; z <= z1; ++z) {
-                const quint8 emission = BlockRegistry::lightEmission(m_chunks.blockAt(x, y, z));
+                const quint8 emission = BlockRegistry::lightEmission(m_chunks.blockAt(x, y, z), m_chunks.stateAt(x, y, z));
                 if (emission > 0) {
                     m_chunks.setLight(x, y, z, m_chunks.skyLightAt(x, y, z), emission);
                     blockQ.push({x, y, z});

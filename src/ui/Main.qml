@@ -1787,6 +1787,13 @@ Window {
         // t304 玩家箭命中 mob（spec「抛物+伤害 mobs」）：damageEntity 已扣血 + 红闪（delegate 绑 hurtFlashAt）+
         //   归零 mobDied；本信号驱动命中音（同近战 attackMob→onMobAttacked→playMobHurt 模式）。
         function onArrowHitMob(mobType) { audio.playMobHurt(mobType) }
+        // t505 雪球撞方块破碎（spec「砸地面 → 破碎动画消失」）：EntityManager tick 内 Snowball 命中方块时发
+        //   snowballBreak(x,y,z)（float 命中点世界坐标）→ 转发到 BlockParticles.burstSnowball 迸发冷白雪沫
+        //   （机制对标 MC 1.0 雪球撞方块碎裂）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，
+        //   同 blockBroken→burstBreak 模式）。
+        function onSnowballBreak(x, y, z) {
+            if (particleLoader.item) particleLoader.item.burstSnowball(x, y, z)
+        }
     }
 
     // t89 / t118 / t177 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 / 门开关 /
@@ -3080,7 +3087,14 @@ Window {
                     chunkInRange: iceModel.chunkInRange // t472：视距门控传给 mesher（远端冰段跳过 sun 重建）
                     iceOnly: true
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.88, 0.95, 1.0, 1.0) }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: window.skyBaseColor }
+                // t495 冰-水透明度过渡：冰段 baseColor 改用 window.skyBaseColor（与水段 / 地形段同一昼夜亮度曲线），
+                //   取代原固定 Qt.rgba(0.88,0.95,1.0) 浅蓝。原因：水段 baseColor=skyBaseColor（灰阶 × 天光，夜间变暗），
+                //   冰段旧 baseColor 是固定浅蓝（夜间不变暗）→ 冰-水邻接处出现亮度 / 色调跳变（夜间冰仍亮、水变暗），
+                //   肉眼读作「冰不透 / 水透的边界硬跳」。统一到 skyBaseColor 后，冰与水共享同一亮度基底，邻接处仅
+                //   纹理（冰裂纹 vs 水涟漪）不同、无亮度跳变 → 平滑过渡。冰的浅蓝色由其贴图 tile 58 自身提供
+                //   （baseColor 灰阶只调亮度，不染色）。opacity 0.7 与水段一致（水涟漪 vertex.a [0.85,1.0] 致有效
+                //   透射 [0.595,0.7]，冰恒 0.7 —— 差异 < 0.105，肉眼可接受，不强行抹平以免冰失去质感）。
             }
         }
 
@@ -3395,16 +3409,20 @@ Window {
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
                     }
-                    // t377/t452/t498 头盔（装备槽 0）：作 headNode 子节点 → 随头部俯仰。visible 绑装备槽 0 是否有护甲
-                    //   （armorRevision 触碰）；材质色 = tier（armorMatColor）。
-                    //   t498 真因（用户「穿装甲 F5 第三人称看不见」）：t452 把头盔 z scale 设 0.46（< 头 z scale 0.5）→
-                    //   头盔在 z 方向完全嵌在头内（前后面均被头遮挡），只剩 X 两侧 0.05 边缘 + z=0.06 后移的尾边可见，
-                    //   第三人称正常视距下肉眼读作「没戴头盔」。修：z scale 提到 0.56（> 头 0.5，前后各探 0.03 凸出），
-                    //   X/Y 各探 0.05（旧值），position z 保留 +0.06（头盔后移 → 前面 z=-0.22 在眼 z=-0.25 之后 → 脸/眼
-                    //   可见，盔覆盖头顶 / 后脑 / 两侧）。整体凸出量 0.03~0.05 在第三人称视距清晰可辨。
+                    // t377/t452/t498 头盔（装备槽 0）：作 headNode 子节点 → 随头部俯仰。visible 绑装备槽 0 是否有护甲；
+                    //   材质色 = tier（armorMatColor）。
+                    //   t498 真因（用户「穿装甲 F5 第三人称看不见」，前 3-4 次只调凸出量仍未好）：armId 绑定用
+                    //     语句块形式 `{ hotbarVM.armorRevision; return armorBlockIdAt(0) }` —— 该形式在静态构建的
+                    //     QQuick3D Model 上**不注册 armorRevision 的 NOTIFY 依赖**（实测：装备后 armId 恒 0、visible 恒
+                    //     false，armorSlotsChanged 信号已到 playerModel 但 Model 内 armId 绑定不重算）。mob 护甲
+                    //     (t377) 同语句块形式却"看似工作"只因 entityManager.revision 每帧随实体移动高频刷新、顺带
+                    //     重算；player armorRevision 仅装备时变 → 语句块依赖漏注册即永久不更新。修：改表达式形式
+                    //     `armorRevision >= 0 ? armorBlockIdAt(0) : 0` —— NOTIFY 属性参与值计算，依赖被可靠注册，
+                    //     装备/脱下后 armId/visible 正确刷新（实测 onArmIdChanged→772、visible→true）。此模式同时应用
+                    //     到胸/腿/小腿/靴共 8 个护甲 Model。凸出量（z scale 0.56 等）本身是对的，不是根因。
                     Model {
                         id: playerArmorHead
-                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(0) }
+                        property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(0) : 0
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, 0.30, 0.06)
@@ -3452,12 +3470,12 @@ Window {
                     scale: Qt.vector3d(0.5, 0.7, 0.3)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
                 }
-                // t377/t452/t498 胸甲（装备槽 1）：作 upperBody 子节点 → 随鞠躬前倾。t498 增厚 z 凸出（0.36→0.44）：
-                //   躯干 z scale 0.30，旧 0.36 仅前探 0.03 第三人称难辨；0.44 前后各探 0.07 清晰可见的胸甲壳。
-                //   X/Y 同 t452（X 探 0.04 / Y 探 0.02）。
+                // t377/t452/t498 胸甲（装备槽 1）：作 upperBody 子节点 → 随鞠躬前倾。t452 放大包裹躯干
+                //   （X 探 0.04 / Y 探 0.02 / Z 探 0.07）；t498 绑定改表达式形式（见头盔注：语句块形式不注册
+                //   armorRevision NOTIFY → armId/visible 恒 0）。
                 Model {
                     id: playerArmorChest
-                    property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(1) }
+                    property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(1) : 0
                     visible: armId !== 0
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, 0.35, 0)
@@ -3767,10 +3785,10 @@ Window {
                 }
                 // t377/t452 左护腿-大腿段（装备槽 2）：作大腿枢轴子节点 → 随大腿行走 / 蹲下摆动。t452 放大
                 //   （X/Z 探 0.025、Y 探 0.02）使第三人称可见；小腿段见 leftKneePivot 内 playerArmorCalfL（MC 护腿
-                //   覆盖整条腿，故分大腿 / 小腿两段随膝关弯折）。
+                //   覆盖整条腿，故分大腿 / 小腿两段随膝关弯折）。t498 绑定改表达式形式（见头盔注）。
                 Model {
                     id: playerArmorLegL
-                    property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
+                    property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(2) : 0
                     visible: armId !== 0
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.15, 0)
@@ -3792,9 +3810,10 @@ Window {
                     }
                     // t452 左护腿-小腿段（装备槽 2）：作膝盖枢轴子节点 → 随小腿 / 蹲下弯折。与大腿段 playerArmorLegL
                     //   共享装备槽 2（护腿覆盖整条腿）；放大同大腿段（探 0.025），第三人称小腿护甲清晰可见。
+                    //   t498 绑定改表达式形式（见头盔注）。
                     Model {
                         id: playerArmorCalfL
-                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
+                        property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(2) : 0
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.15, 0)
@@ -3803,9 +3822,10 @@ Window {
                     }
                     // t377/t452 左靴（装备槽 3）：作膝盖枢轴子节点 → 随小腿摆动。t452 放大并前移（-Z=玩家前方）
                     //   形成明显靴头：X 探 0.025、Z 前探 0.075（靴头超出小腿）、覆盖脚踝。脚底约贴地（微入地 <0.02）。
+                    //   t498 绑定改表达式形式（见头盔注）。
                     Model {
                         id: playerArmorBootL
-                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(3) }
+                        property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(3) : 0
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.24, -0.03)
@@ -3830,9 +3850,10 @@ Window {
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                 }
                 // t377/t452 右护腿-大腿段（装备槽 2）：镜像左大腿护腿（t452 放大；小腿段见 rightKneePivot）。
+                //   t498 绑定改表达式形式（见头盔注）。
                 Model {
                     id: playerArmorLegR
-                    property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
+                    property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(2) : 0
                     visible: armId !== 0
                     geometry: UnitCube {}
                     position: Qt.vector3d(0, -0.15, 0)
@@ -3850,9 +3871,10 @@ Window {
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
                     }
                     // t452 右护腿-小腿段（装备槽 2）：镜像左小腿护腿（随小腿 / 蹲下弯折；与右大腿段共享槽 2）。
+                    //   t498 绑定改表达式形式（见头盔注）。
                     Model {
                         id: playerArmorCalfR
-                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(2) }
+                        property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(2) : 0
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.15, 0)
@@ -3860,9 +3882,10 @@ Window {
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorCalfR.armId); opacity: playerModel.bodyOpacity }
                     }
                     // t377/t452 右靴（装备槽 3）：镜像左靴（t452 放大 + 前移成靴头；随小腿摆动）。
+                    //   t498 绑定改表达式形式（见头盔注）。
                     Model {
                         id: playerArmorBootR
-                        property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(3) }
+                        property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(3) : 0
                         visible: armId !== 0
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, -0.24, -0.03)
@@ -4442,8 +4465,11 @@ Window {
         //   （同 itemHost 族；lessons-learned t170/t256）。
         // 触发：boats.count 随 spawnBoat 自增（NOTIFY entitiesChanged）→ Repeater 追加 delegate。位置 / 朝向随
         //   浮水 / 骑乘操控 bump revision → {revision; posAt / yawAt} 绑定重算（呈现层只读消费，绝不反向写；PLAN §2）。
-        // 外观：简化船体（平底船舱 + 两端翘起船头/船尾，3 个 UnitCube 组合；§9a 原创纯色，无 MC 资产）。NoLighting
-        //   必备（可见 Model 红线；lit 材质在本 D3D11 后端不渲染）。橡木浅木色 / 云杉深木色（boatTypeAt 区分）。
+        // 外观（t508 重做碗形船体 + 真木板贴图；§9a 原创程序几何，无 MC 资产）：原模型仅平底舱 + 两端翘块，呈
+        //   U 形（左右无舷）+ 无贴图（纯色）→ 用户报「碗形错 / 贴图错」。改「碗形」= 1 块封闭底板（船底，挡水
+        //   不漏）+ 4 面等高船舷壁（前后左右整圈上凸、中间凹下成舱），即「四面凸中间凹」的方碗。贴图用 BlockCube
+        //   按木方面查图集（Oak→Planks 浅木 / Spruce→SprucePlanks 深木），复用既有 atlas 半纹素内缩防渗色。
+        //   NoLighting 必备（可见 Model 红线；lit 材质在本 D3D11 后端不渲染）。
         Node {
             id: boatHost
             Component.onCompleted: {
@@ -4460,69 +4486,80 @@ Window {
                     // 船头朝向（度；先读进 property，再喂 eulerRotation —— 块表达式不能作函数实参）。
                     property real boatYaw: { boats.revision; return boats.yawAt(index) }
                     eulerRotation: Qt.vector3d(0, boatRoot.boatYaw, 0)
-                    // 变体配色（Oak 浅木色 / Spruce 深木色；§9 原创配色，区别于 MC 资产）。
+                    // 变体（Oak→Planks 浅木 / Spruce→SprucePlanks 深木；§9a 原创贴图，区别于 MC 资产）。
+                    //   btBlockId 给 BlockCube 按方块查图集瓦片序号 → 每面铺整张木纹 tile（半纹素内缩防渗色）。
                     property int bt: { boats.revision; return boats.boatTypeAt(index) }
-                    property color hullColor: boatRoot.bt === boats.Spruce ? "#4f3a26" : "#9a7b4d" // 云杉深褐 / 橡木浅褐
-                    property color trimColor: boatRoot.bt === boats.Spruce ? "#3a2a1a" : "#7a6038" // 翘端更深（轮廓感）
+                    property int btBlockId: boatRoot.bt === boats.Spruce ? 86 /*SprucePlanks*/ : 6 /*Planks*/
 
                     Component.onCompleted: {
                         if (parent === null) parent = boatHost
                     }
 
-                    // t508 完整船体模型（spec「完整船体，非前后凸左右空」；§9a 原创程序几何 UnitCube 组合，
-                    //   参考船轮廓但原创，无 MC 资产）。原模型仅一块扁平船舱底 + 两端翘块，侧面观感「空」
-                    //   （无左右船舷）；现重做成「U 形敞舱船」= 船底 + 左右两道船舷 + 两头翘起的船头/船尾。
-                    //   坐标约定：长轴沿 Z（船头 = -Z 前，eulerRotation.y=boatYaw 对齐行进方向）、宽轴 X、高 Y。
-                    //   总尺寸：长 1.4（Z）× 宽 0.7（X）× 高 ~0.5（含翘端）。所有块 NoLighting 必备（可见 Model 红线）。
+                    // t508 碗形船体（spec「碗形 = 四面凸中间凹」；§9a 原创程序几何 BlockCube 组合，参考船轮廓但
+                    //   原创，无 MC 资产）。原模型 U 形（仅前后凸、左右无舷）+ 纯色无贴图 → 用户报错。重做「方碗」：
+                    //   1 块封闭底板（船底甲板，沉到水面略下挡水不漏）+ 4 面等高舷壁（前后左右整圈，构成碗沿），
+                    //   中间（4 壁之间）凹下成舱 = 「四面凸中间凹」的方碗。
+                    //   坐标约定：长轴 Z（船头 = -Z 前，eulerRotation.y=boatYaw 对齐行进方向）、宽轴 X、高 Y。
+                    //   总尺寸：长 1.4（Z）× 宽 0.7（X）× 高 ~0.45（舷顶 0.225 / 舱底 -0.1）。所有块 NoLighting 必备。
+                    //   贴图：BlockCube 按木方面查图集 → Planks(6) 橡木 / SprucePlanks(86) 云杉；baseColorMap = voxelAtlas
+                    //   （item entity / 手持方块同源；半纹素内缩防渗色）。无 world → BlockCube 顶点色恒白（全亮，
+                    //   船不被地形光场调制，与天光无关 —— 船是实体非地形块）。vertexColorsEnabled 不开（恒白顶点色
+                    //   × baseColor × 贴图 = 贴图本色 × baseColor；baseColor 取白色免二次调制）。
                     //
-                    //   船底（薄板）：宽 0.7 × 高 0.1 × 长 1.3，沉到水面略下（吃水）。船的「甲板基底」。
+                    // 船底甲板（封闭整底）：宽 0.7 × 高 0.1 × 长 1.4，沉到水面略下（吃水 -0.1）。船的「碗底」：
+                    //   封闭整面挡住下方水，水不从船舱中间漏上来（spec「船中间不要显示水」）。同时是骑乘玩家的「甲板」。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: BlockCube { blockId: boatRoot.btBlockId }
                         position: Qt.vector3d(0, -0.15, 0)
-                        scale: Qt.vector3d(0.7, 0.1, 1.3)
+                        scale: Qt.vector3d(0.7, 0.1, 1.4)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: boatRoot.hullColor
+                            baseColorMap: voxelAtlas
+                            baseColor: "#ffffff"
                         }
                     }
-                    // 左船舷（左纵向壁）：贴 -X 边的薄长壁，构成「U」的左侧。高 0.32 × 厚 0.06 × 长 1.3。
+                    // 左舷壁（-X 纵长壁）：宽 0.06 × 高 0.35 × 长 1.4，贴 -X 边。等高于前后舷 → 碗沿连续。
                     Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(-0.32, 0.0, 0)
-                        scale: Qt.vector3d(0.06, 0.32, 1.3)
+                        geometry: BlockCube { blockId: boatRoot.btBlockId }
+                        position: Qt.vector3d(-0.32, 0.05, 0)
+                        scale: Qt.vector3d(0.06, 0.35, 1.4)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: boatRoot.hullColor
+                            baseColorMap: voxelAtlas
+                            baseColor: "#ffffff"
                         }
                     }
-                    // 右船舷（右纵向壁）：贴 +X 边的薄长壁，构成「U」的右侧（与左舷对称）。
+                    // 右舷壁（+X 纵长壁）：贴 +X 边（与左舷对称）。
                     Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0.32, 0.0, 0)
-                        scale: Qt.vector3d(0.06, 0.32, 1.3)
+                        geometry: BlockCube { blockId: boatRoot.btBlockId }
+                        position: Qt.vector3d(0.32, 0.05, 0)
+                        scale: Qt.vector3d(0.06, 0.35, 1.4)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: boatRoot.hullColor
+                            baseColorMap: voxelAtlas
+                            baseColor: "#ffffff"
                         }
                     }
-                    // 船头翘端（-Z 端整块封头 + 上翘）：跨满宽（连两舷）的端块，顶高 0.5 比船舷高 → 读作翘起的船头。
+                    // 船头舷壁（-Z 端横壁）：跨满宽（连两舷），等高于左右舷 → 碗沿四角闭合。
                     Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, 0.08, -0.7)
-                        scale: Qt.vector3d(0.7, 0.5, 0.18)
+                        geometry: BlockCube { blockId: boatRoot.btBlockId }
+                        position: Qt.vector3d(0, 0.05, -0.62)
+                        scale: Qt.vector3d(0.7, 0.35, 0.16)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: boatRoot.trimColor
+                            baseColorMap: voxelAtlas
+                            baseColor: "#ffffff"
                         }
                     }
-                    // 船尾翘端（+Z 端整块封头 + 上翘；与船头对称）。
+                    // 船尾舷壁（+Z 端横壁；与船头对称）。
                     Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, 0.08, 0.7)
-                        scale: Qt.vector3d(0.7, 0.5, 0.18)
+                        geometry: BlockCube { blockId: boatRoot.btBlockId }
+                        position: Qt.vector3d(0, 0.05, 0.62)
+                        scale: Qt.vector3d(0.7, 0.35, 0.16)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: boatRoot.trimColor
+                            baseColorMap: voxelAtlas
+                            baseColor: "#ffffff"
                         }
                     }
                 }
@@ -7894,6 +7931,29 @@ Window {
         }
     }
 
+    // t508 骑船下船提示（spec「坐上船时物品栏上方提示按 shift 下船」）：玩家骑船时（player.boatManager.ridingIndex>=0）
+    //   在 hotbar 上方（vitalsBar / xpBar 之上）居中显「按潜行键（Shift）下船」。触碰 boats.revision 令上下马瞬时刷新
+    //   （tryMount / dismount / 撞毁都 bump revision）。纯 QtQuick Text 自绘（§9 override (a)），无 MC GUI PNG。
+    //   Creative/Survival 均显（两种模式都骑船）；非骑乘 / 非游戏态不显。
+    //   ridingBoat 先读进 property：boats.revision 写进三元表达式（非裸语句）建可靠 NOTIFY 依赖（ridingIndex 是
+    //   Q_INVOKABLE 不被 NOTIFY 自动跟踪；且本节点是静态构建的 window 级属性，按 lessons-learned「静态节点绑定用
+    //   表达式形式」铁律，revision 须参与值计算而非裸语句，否则漏注册 → 提示上下马不刷新）。
+    property bool ridingBoat: boats.revision >= 0
+                              ? (player.boatManager ? player.boatManager.ridingIndex() >= 0 : false)
+                              : false
+    Text {
+        visible: window.appState === "playing" && ridingBoat
+        anchors.bottom: vitalsBar.top
+        anchors.bottomMargin: 8
+        anchors.horizontalCenter: parent.horizontalCenter
+        text: qsTr("按潜行键（Shift）下船")
+        color: "#f2f2f2"
+        style: Text.Outline
+        styleColor: "#202020"
+        font.pixelSize: 13
+        font.bold: true
+    }
+
     // t202 / t227 气泡条（仅 Survival）：置 vitalsBar 上一行，且**右对齐贴在饥饿（食物）鼓腿条正上方**
     //   （非居中于血+食上方）。机制等价 MC 1.0：氧气泡排在右侧食物条上方（左侧食物条上方为护甲，本项目未做）。
     //   airBar.width === vitalsBar.width 且两者同 horizontalCenter → 右边沿对齐 → 内 Row 锚 parent.right
@@ -8031,15 +8091,6 @@ Window {
         onReturnHeldToVoidRequested: hotbarVM.heldBlock = 0
         // t120：创造拿物品（调色板点击）→ 手弹跳（同生存拾取的手弹反馈，spec「创造拿物品到手也触发」）。
         onItemTaken: handPopAnim.start()
-        // t511 创造背包「箱子」分类 tab → 切生存背包（玩家可放/取物品 + 操作护甲槽）。机制：player.setMode
-        //   (Survival) → SurvivalInventory 面板（visible 绑 player.mode===Survival）显出，与本面板互斥。
-        //   共享同一 hotbar VM（m_slots/m_mainSlots/m_armorSlots）→ 创造拿的物 / 放的护甲在生存背包可见可操作。
-        //   setMode 不清背包（resetForMode 仅重生调用，hotbar.cpp:1281 + playercontroller.cpp:249）→ 物品不丢。
-        onSwitchToSurvivalRequested: {
-            // 若光标手持物先归还虚空（创造无限源语义，避免切模式后浮动图标悬空）。
-            if (hotbarVM.heldBlock !== 0) hotbarVM.heldBlock = 0
-            player.setMode(PlayerController.Survival)
-        }
     }
 
     // 生存背包 1.0（t24）：2×2 合成 + 结果槽 + 4 护甲槽 + 角色预览 + 3×9 主栏 + 9 槽 hotbar 栏。
@@ -8194,10 +8245,21 @@ Window {
             //   做一次成长判定，树苗据光强 + 草地/泥土支撑 + 主干列畅通 + 散布概率逐步长成完整橡树）。纯 QML
             //   桥接（同 tickCropGrowth 模式）。tickSaplingGrowth 内部对稳态（无树苗 / 全不满足）静默 → 无重建开销。
             theWorld.tickSaplingGrowth()
+            // t514 浆果丛生长 tick：WorldClock 每 100ms tick → 驱动 World.tickSweetBerryBushGrowth（内部节流到 ~每 5s
+            //   一窗，浆果丛据光强 + 透光土壤支撑 + 散布概率逐步升生长阶段 0→1→2，机制等价 MC 1.0 sweet berry bush
+            //   random-tick 生长）。纯 QML 桥接（同 tickCropGrowth / tickSaplingGrowth 模式，PLAN §2 分层不破）。
+            //   玩家种植落地 state=0 + 采摘降回 state=0 → 本 tick 把丛推回成熟（采→回 0→生长→成熟→可再采循环）。
+            //   稳态（无丛 / 全成熟 / 全无土壤 / 全暗）静默 → 无重建开销。
+            theWorld.tickSweetBerryBushGrowth()
             // t468 结冰 tick：WorldClock 每 100ms tick → 驱动 World.tickIceFreeze（内部节流到 ~每 5s 一窗，把
             //   Snowy 群系暴露天空的水源按散布概率冻结为 Ice，机制等价 MC 1.0 寒冷群系水变冰）。纯 QML 桥接
             //   （同 tickCropGrowth 模式，PLAN §2 分层不破）。稳态（无 Snowy 暴露水源 / 本窗散布落空）静默 → 无开销。
             theWorld.tickIceFreeze()
+            // t495 冰融化 tick：WorldClock 每 100ms tick → 驱动 World.tickIceMelt（内部节流到 ~每 2s 一窗，把高亮邻
+            //   （火把 / 燃烧熔炉 / 岩浆 / 火）旁的普通冰按散布概率融为水，机制等价 MC 1.0 冰受高方块光照射融化；
+            //   仅普通冰 Ice，浮冰 / 蓝冰永不融）。纯 QML 桥接（同 tickIceFreeze 模式，PLAN §2 分层不破）。
+            //   稳态（无冰 / 无高亮邻 / 本窗散布落空）静默 → 无开销。
+            theWorld.tickIceMelt()
             // t325 树叶渐进消退 tick：WorldClock 每 100ms tick → 驱动 World.tickLeafDecay（内部节流到 ~每 0.4s
             //   开一窗，队列内每叶按散布概率 1%/窗独立判定是否消失 → 几何分布散布 ~30-90s 渐退，非瞬时全消；
             //   t379 在 t325 基础上放慢约 2.5×）。

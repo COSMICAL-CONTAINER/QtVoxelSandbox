@@ -67,6 +67,12 @@ Node {
     function burstDeathSmoke(x, y, z) {
         burstFloat(x, y, z, 10, "#f0f0f0", 0.09, 1.2, 1.0, 1.0, 0.7, -1.5)
     }
+    // t505 雪球撞方块破碎（机制等价 MC 1.0 雪球砸方块碎裂成雪沫）：冷白雪沫 + 小幅四散 + 弱重力（雪沫轻飘
+    //   慢落，区别碎屑的强落）。数量少（6 < 破块 8，雪球小）、起跳弱（vYBase 1.5）、横向适中。原点 = float
+    //   世界坐标（雪球命中点，非方块格中心 → 不加 +0.5，同 burstEat 模式）。色 #f0f4f8 冷白（同雪块 / 雪傀儡身）。
+    function burstSnowball(px, py, pz) {
+        burstFloat(px, py, pz, 6, "#f0f4f8", 0.06, 1.5, 1.0, 1.2, 0.5, 6.0)
+    }
 
     // 通用方块中心迸发（坐标先 +0.5 到方块中心）。gravity 缺省 14（碎屑强落；t449 加可选参数供烟雾上飘）。
     function burst(x, y, z, count, color, scale, vYBase, vYVar, hScale, life) {
@@ -212,7 +218,10 @@ Node {
     function blockColor(id) {
         switch (id) {
             // ── 地表 / 土沙族（id 1..8）── 既有色（视觉零回归）
-            case 1: return "#6aaa3f" // grass（草方块；顶面草绿）
+            // ── 地表 / 土沙族（id 1..8）── t491：破草方块迸发的是翻出的泥土碎屑（机制等价 MC 1.0：
+            //   草方块被挖 → 生存掉泥土、表面草层碎落 → 粒子应为泥土色，而非草顶面绿色）。
+            //   旧值 "#6aaa3f"（草顶绿）是草叶色，用户复盘实测挖草方块迸绿粒不对 → 改泥土棕系（同 case 2 dirt）。
+            case 1: return "#7a5a3c" // grass（草方块；破块翻出泥土 → 泥土色碎屑，非草绿）
             case 2: return "#7a5a3c" // dirt（泥土）
             case 3: return "#8a8a8a" // stone（石头）
             case 4: return "#6e6e6e" // cobble（圆石）

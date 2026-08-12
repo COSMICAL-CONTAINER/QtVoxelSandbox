@@ -773,11 +773,12 @@ public:
     static bool isWool(quint8 blockId);
 
     // t428 床 state 编码 + 配对格偏移（机制等价 MC 1.0 床 head+foot 双格横置，如门但水平相邻）。每半格存
-    //   state——bit3 = head(1)/foot(0)、bit[1:0] = 玩家放置时的水平朝向（0=+X 1=-X 2=+Z 3=-Z，与 door/
-    //   trapdoor/chest 同源编码）。head 落在 foot 的「玩家朝向反向」水平邻格（玩家面 +X 时 head 在 -X 侧 →
-    //   脚踩 foot、头朝后躺下，机制等价 MC 床头朝玩家背后）。bedPartnerOffset(state)：给定本格 state，返回
-    //   配对格（另一半）相对本格的水平 (dx,dz)（y 同层故 dy=0）；playercontroller 放置 / 破坏联动读此单一权威，
-    //   不各处自写朝向解码（同 chestFrontFace 模式）。
+    //   state——bit3 = head(1)/foot(0)、bit[1:0] = head→foot 方向（0=+X 1=-X 2=+Z 3=-Z，与 door/trapdoor/chest
+    //   同源编码值域；语义 = 从 head 半指向 foot 半的水平轴向）。t496：head 落 foot 的「玩家朝向同向」水平邻格
+    //   （玩家面 +X 时 foot 在脚下、head 在 +X 前方 → 头朝远离玩家躺下，机制等价 MC 床头朝玩家前方）。放置时
+    //   bedFacing = horizontalFacing ^ 1（玩家前向反向 = head→foot 方向），playercontroller placeBlock 处定权。
+    //   bedPartnerOffset(state)：给定本格 state，返回配对格（另一半）相对本格的水平 (dx,dz)（y 同层故 dy=0）；
+    //   playercontroller 放置 / 破坏联动读此单一权威，不各处自写朝向解码（同 chestFrontFace 模式）。
     static void bedPartnerOffset(quint8 state, int &dx, int &dz);
 
     // t397 花方块段哨兵：id ∈ [FirstFlower, LastFlower] 为花色变体（4 色）。isFlower(id) 单一权威谓词供 worldgen /
@@ -1332,6 +1333,11 @@ public:
     //   岩浆=15（MC 1.0 岩浆光 level 15，地底发光照亮洞穴；机制对齐非精确复刻）。其余 → 0（不自发光）。
     //   越界 → 0。与 lightOpacity 解耦：岩浆 lightOpacity=0（solid=false 全透）但 lightEmission=15（既透光又自发光）。
     static quint8 lightEmission(quint8 blockId);
+    // t494 状态感知自发光强度：默认按 state=0 委托单参版（保持既有火把/岩浆/末地传送门行为零回归）。仅个别方块
+    //   的自发光与 state 相关 —— 当前唯一特例：燃烧中的熔炉（id==Furnace 且 state 含 FurnaceStateLitFlag bit2）
+    //   → 13（MC 1.0 熔炉光 level 13，略低于火把 14）。熄灭态（bit2 清）→ 0（同普通方块不自发光）。
+    //   仅 World 光照 flood 种子调用此重载（读 cell 真实 state 区分燃/熄）；非状态相关发光方块两版等价。
+    static quint8 lightEmission(quint8 blockId, quint8 state);
 
     // t360 列顶实面 Y 偏移（cell-local 0..~1.5）：该格最高实面在世界 y = cellY + 本值。PCF 软影据此判列顶
     //   是否挡光（取代旧「heightmap+1.0 整格」假设）—— 修「下半砖 / 合活版门被当整格高 → 投出整格黑影、
@@ -1340,15 +1346,18 @@ public:
     static float solidTopOffset(quint8 blockId, quint8 state);
 
     // t213 射线命中 sub-AABB（cell-local [0,1]^3）：射线进入含该方块的体素后，**须命中其中某个 sub-AABB**
-    //   才算选中——不完整方块 / 火把的「空气部分」让射线穿过命中后方块（修「挖半砖背后的方块却撸掉了
-    //   半砖/火把」，命中点是否落在该方块 sub-AABB 内）。与 selectionAABBs 的差异：
+    //   才算选中——不完整方块 / 火把 / 木梯的「空气部分」让射线穿过命中后方块（修「挖半砖背后的方块却撸掉了
+    //   半砖/火把/木梯」，命中点是否落在该方块 sub-AABB 内）。与 selectionAABBs 的差异：
     //   - 完整立方（ShapeFull）→ 单盒 {0,0,0,1,1,1}（射线进格即中，等同旧行为）；
     //   - 不完整方块段（ShapeSlab/...）→ 同 selectionAABBs（实体 sub 形状；空气部分穿过）；
     //   - 火把（ShapeNone，selectionAABBs 空 → 选中框由 Main.qml isTorch 分支特殊定向）→ 此处给一个贴火把
     //     视觉范围的中央小立柱盒（瞄柄/焰才命中，格角落空气穿过）；
+    //   - 木梯（ShapeNone，t501：selectionAABBs 空）→ 此处给一个贴墙薄板盒（按 state[1:0] 贴墙方向摆位、
+    //     3/16 厚）—— 准星完全落在木梯视觉面才命中，瞄格中空气穿过命中后方块（机制对标火把）；
     //   - air/water → 单盒 {0,0,0,1,1,1}（water 经 HitWater 命中整格舀水；air 不进本路径，兜底）。
     //   火把朝向需邻居上下文（由呈现层 QML 持 + 邻居推导），Core 层无 World → 此处取覆盖所有朝向焰/柄的
-    //   保守中央区（焰恒在格中央偏上）。raycast 用本方法 + stateAt 做命中点 vs sub-AABB 精确测试。
+    //   保守中央区（焰恒在格中央偏上）。木梯朝向由 state[1:0] 直接读（玩家放置时写入，无需邻居推导）。
+    //   raycast 用本方法 + stateAt 做命中点 vs sub-AABB 精确测试。
     static std::vector<BlockAABB> raycastAABBs(quint8 blockId, quint8 state);
 
     // t214 火把附着方向（存 chunk state，低 3 位编码）：火把放置时记录其所「贴」的唯一支撑邻居方向，

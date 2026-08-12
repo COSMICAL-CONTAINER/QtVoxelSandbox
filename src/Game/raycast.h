@@ -28,25 +28,30 @@ struct RayHit
     float  dist = 0.0f;              // 命中面距起点欧氏距离（归一化方向上的 t；valid=false 时为 0）
 };
 
-// 阻挡谓词（filter）—— 同一份 DDA 被多种语义复用，Torch / Water 是否挡射线按调用方语义切换：
-//   - 空气恒穿过；实体方块（非 Torch / Water）恒挡。
+// 阻挡谓词（filter）—— 同一份 DDA 被多种语义复用，Torch / Water / Ladder 是否挡射线按调用方语义切换：
+//   - 空气恒穿过；实体方块（非 Torch / Water / Ladder）恒挡。
 //   - HitTorch（t184）：Torch 亦挡射线 —— 选体模式下准星瞄火把即**命中火把**（可显示火把边界框 +
 //     直接左键挖）。t157 旧设计「射线永远穿透火把」导致火把不可直挖（须先挖支撑块），违背用户原意
 //     （「火把可选可挖、空气可穿」），t184 修正：选体射线纳入 Torch。仅当光标在空气 / 不完整方块的
 //     空气部分时才穿到后方实体 —— 即空气穿过、火把命中（机制等价 MC 1.0 火把可被准星选中并秒破）。
+//   - HitLadder（t501）：Ladder 亦挡射线 —— 机制同 HitTorch：木梯默认穿（玩家爬梯时准星瞄后方 / 邻格
+//     方块应选中方块本体而非先撸梯子，spec「爬梯时挖掘优先选中梯子 → 应像火把不优先选中、可透视穿过」）；
+//     仅当准星完全落在木梯视觉面（贴墙薄 quad 的精确 sub-AABB）时才命中木梯本身（可显示框 + 左键拆梯）。
+//     相机距离 / 桶射线走 Default（不设 HitLadder）→ 木梯穿（non-solid 不拉近视距 / 不挡舀水），保 t40 / t174。
 //   - HitWater（t174）：Water 亦挡射线 —— 铁桶舀水专用（命中首个水格）。
-//   - 默认（filter=0，RayFilter::Default）：Torch / Water 均穿过 —— 用于相机碰撞距离（t40）：
-//     Torch / Water 皆 non-solid（玩家可走过 / 游过），相机不应被其拉近视距（保 t40 行为不回归）。
+//   - 默认（filter=0，RayFilter::Default）：Torch / Water / Ladder 均穿过 —— 用于相机碰撞距离（t40）：
+//     Torch / Water / Ladder 皆 non-solid（玩家可走过 / 游过 / 穿入梯格），相机不应被其拉近视距（保 t40）。
 namespace RayFilter {
-    constexpr unsigned Default  = 0u;                  // Torch / Water 均穿过（相机距离 t40）
+    constexpr unsigned Default  = 0u;                  // Torch / Water / Ladder 均穿过（相机距离 t40）
     constexpr unsigned HitTorch = 1u << 0;             // Torch 挡射线（选体 t184：火把可选中 / 直挖）
     constexpr unsigned HitWater = 1u << 1;             // Water 挡射线（铁桶舀水 t174）
     constexpr unsigned HitLava  = 1u << 2;             // Lava 挡射线（铁桶舀岩浆 t343）
+    constexpr unsigned HitLadder = 1u << 3;            // Ladder 挡射线（选体 t501：木梯可选中 / 直拆；同 HitTorch 模式）
 } // namespace RayFilter
 
 // 从 origin 沿 dir（无需归一化，内部归一）步进，maxDist 内返回首个「该 filter 视为阻挡」的方块命中。
-//   选体（updateRaycast）传 RayFilter::HitTorch（火把命中、水穿过）；相机距离（updateCameraDistance）
-//   传 RayFilter::Default（火把 / 水均穿过，保 t40）；铁桶舀水传 RayFilter::HitWater（命中首个水格）。
+//   选体（updateRaycast）传 RayFilter::HitTorch|HitLadder（火把 / 木梯命中、水穿过）；相机距离（updateCameraDistance）
+//   传 RayFilter::Default（火把 / 水 / 木梯均穿过，保 t40）；铁桶舀水传 RayFilter::HitWater（命中首个水格）。
 //   详见 .cpp blocksRay / 起点退化注释。
 RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float maxDist, unsigned filter = RayFilter::Default);
 

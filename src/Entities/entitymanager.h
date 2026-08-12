@@ -205,14 +205,17 @@ public:
     //   origin = 玩家眼位 + 视线前移 0.5（防贴墙 spawn 入墙即没）；vel = 视线方向 × 蓄力速度（含抛物 vy）。
     //   达 kCap → 跳过 + 告警（防溢出，同 spawnArrow）。
     Q_INVOKABLE void spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage);
-    // t482 雪球投射物（雪傀儡 aiSnowGolem 远程攻击）：在 origin 处生成一个携带初速度 vel（blocks/s，含 vy 抛物）
-    //   的雪球实体。kind=Snowball、pushable=false（玩家走碰不推）、halfW/halfH=0.10（白色小球视觉 + 碰撞最小）。
-    //   tick 内 Snowball 分支：重力改 vy（抛物）+ 速度位移 + 方块碰撞（命中即移除）+ **敌对 mob** AABB 碰撞
-    //   （命中发 damageEntity(kSnowballDamage=1 低伤害) + 设目标 mob slowTimer=kSnowSlowDuration（轻微减速，
-    //     QML isSlowedAt 显蓝调）+ 移除）。**只打敌对 mob**（passive / 玩家穿过，机制等价 MC 雪球不伤友好生物）。
-    //   机制等价 MC 1.0 雪傀儡抛雪球（远程弹丸 + 伤害 + 减速）；名称 / 视觉全原创（§9 区隔）。达 kCap → 跳过 +
-    //   告警（防溢出）。返新雪球槽索引（调试用）；达 kCap → -1。
-    Q_INVOKABLE int spawnSnowball(const QVector3D &origin, const QVector3D &vel);
+    // t482/t505 雪球投射物（雪傀儡 aiSnowGolem 远程攻击 / t505 玩家右键抛掷）：在 origin 处生成一个携带初速度 vel
+    //   （blocks/s，含 vy 抛物）的雪球实体。kind=Snowball、pushable=false（玩家走碰不推）、halfW/halfH=0.10
+    //   （白色小球视觉 + 碰撞最小）。tick 内 Snowball 分支：重力改 vy（抛物）+ 速度位移 + 方块碰撞（命中即碎 →
+    //   emit snowballBreak 粒子 + 移除）+ **敌对 mob** AABB 碰撞（命中发 damageEntity(damage) + 设目标 mob
+    //     slowTimer=kSnowSlowDuration（轻微减速，QML isSlowedAt 显蓝调）+ 击退 + 移除）。
+    //   **damage 按发射者分流**（t505 机制对标 MC 1.0：雪傀儡雪球对敌对有伤害 / 玩家雪球对 mob 0 伤害只触发红闪 +
+    //     击退）。caller 传：雪傀儡 fireSnowball 传 kSnowballDamage（敌对伤害）；玩家右键抛（playercontroller）
+    //     传 0（0 伤害但 damageEntity 仍发 hurtFlash 红闪 + knockback 击退）。**只打敌对 mob**（passive / 玩家穿过）。
+    //   机制等价 MC 1.0 雪傀儡抛雪球（远程弹丸 + 伤害 + 减速）/ MC 1.0 玩家抛雪球（无伤 + 击退 + 红闪）；
+    //   名称 / 视觉全原创（§9 区隔）。达 kCap → 跳过 + 告警（防溢出）。返新雪球槽索引（调试用）；达 kCap → -1。
+    Q_INVOKABLE int spawnSnowball(const QVector3D &origin, const QVector3D &vel, int damage);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
     //   t437：改「释放全部活体槽位」而非「清空 vector」。根因：旧 m_entities.clear() 把 count→0，QML
     //   Repeater count 随之→0；但 reparent 进 mobHost 的 3D delegate（QQuick3DNode，非 QQuickItem）不进
@@ -586,6 +589,11 @@ signals:
     //   同 sheepSheared→spawnItem 模式；单向事件流，PLAN §2 分层：Entities 层发语义事件、呈现层只消费，绝不
     //   反向写栅格）。机制等价 MC 1.0 剪刀剪雪傀儡南瓜头 → 南瓜掉落 + 雪傀儡变无头 derpy 形态（不死，仅外观变化）。
     void snowGolemSheared(int x, int y, int z);
+    // t505 雪球撞方块破碎（spec「砸地面 → 破碎动画消失」）：Snowball 命中方块（地面 / 墙）时发。坐标 = 雪球
+    //   命中点（float 世界坐标，非整数格 —— 雪球是抛物弹丸，命中点在格内任意位置），呈现层据它在命中点迸发
+    //   白色雪沫碎屑（particleLoader.item.burstSnowball，机制对标 MC 1.0 雪球撞方块碎裂成雪沫）。单向事件流
+    //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费，同 blockBroken→burstBreak 模式）。
+    void snowballBreak(float x, float y, float z);
     // t398 鸡下蛋（spec「periodically lays an EGG item」）：MobChicken 周期性下蛋 —— eggTimer 倒计时到 0 时
     //   发本信号。坐标 = 鸡当前格 floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在鸡身旁）。
     //   呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem(0x22B=蛋 ×1)（同 mobDied→spawnItem 模式；
@@ -655,6 +663,13 @@ private:
         //   玩家箭（arrowFromPlayer）嵌入后可被 PlayerController::arrowPickupScan 近距拾取；骷髅箭嵌入不可拾取
         //   （防刷箭，spec）。非 Arrow / 飞行中默认 false。
         bool arrowStuck = false; // 箭是否已嵌入方块（仅 kind==Arrow 用；spawn 默认 false，acquireSlot 覆写新实体）
+        // t505 雪球命中伤害（仅 kind==Snowball 用）：雪球命 mob 时的伤害 HP。**按发射者分流**（机制对标 MC 1.0：
+        //   雪傀儡抛雪球对敌对有伤害 / 玩家抛雪球对 mob 0 伤害只触发红闪 + 击退）。spawnSnowball 入口收 damage 参数
+        //   写入：雪傀儡 fireSnowball 传 kSnowballDamage（保持敌对伤害）；玩家右键抛（playercontroller）传 0
+        //   （0 伤害但 damageEntity 仍发 hurtFlash 红闪 + knockback 击退，机制对标 MC 玩家雪球打 mob 无伤有反馈）。
+        //   命中分支读它替代旧硬编码 kSnowballDamage → 同一雪球实体两种伤害语义由 spawn 入口决定。
+        //   默认 0（非 Snowball / 未传 → 安全无伤；玩家路径显式传 0 亦无伤）。
+        int snowballDamage = 0;  // 雪球命中伤害 HP（仅 kind==Snowball；golem=kSnowballDamage / player=0）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
         int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；t280 Shambler/Bones；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
@@ -801,12 +816,6 @@ private:
         //     初始化不错位（同 aiAccum / slowTimer 模式，DMI 兜底）。
         float meltAccum = 0.0f;       // 雪傀儡热伤害累积器（秒；达 kSnowMeltInterval 扣 1HP；仅 MobSnowGolem）
         bool  snowGolemSheared = false; // 雪傀儡是否已被剪南瓜头（true=无头 derpy 形态；仅 MobSnowGolem）
-        // t482 雪傀儡行走留雪层：跟踪上一脚位格（golem 进入新格时在「刚离开的格」放 SnowLayer，避免放脚下
-        //   致嵌入 / 攀爬 —— SnowLayer 是满格整立方，放脚下会让 golem 嵌入后碰撞顶上去 → 无限攀爬阶梯；
-        //   放身后则 golem 已离开该格不嵌入，留下平铺雪脚印轨迹）。初值 -1 = 无上一格（首帧只记录不放置）。
-        qint32 snowTrailLastX = -1; // 上一脚位格 X（golem 刚离开的格；-1=未记录）
-        qint32 snowTrailLastY = -1; // 上一脚位格 Y
-        qint32 snowTrailLastZ = -1; // 上一脚位格 Z
     };
     std::vector<Entity> m_entities;
     int m_revision = 0;

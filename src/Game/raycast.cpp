@@ -1,7 +1,7 @@
 #include "raycast.h"
 #include "world.h"
-#include "blockregistry.h" // Torch / Water 是否挡射线由 filter 决定；t213 isFullCube / raycastAABBs 做
-                           // 命中点 vs sub-AABB 精确测试（不完整方块/火把空气部分穿过命中后方块）。
+#include "blockregistry.h" // Torch / Water / Ladder 是否挡射线由 filter 决定；t213 isFullCube / raycastAABBs 做
+                           // 命中点 vs sub-AABB 精确测试（不完整方块/火把/木梯空气部分穿过命中后方块）。
 
 #include <algorithm> // std::min / std::swap
 #include <cmath>
@@ -14,11 +14,11 @@
 // 参考：A Fast Voxel Traversal Algorithm for Ray Tracing (1987)。整数格坐标按
 // World 约定（+Y 朝上，越界=空气）；阻挡谓词见 blocksRay（按 filter 切换 Torch / Water）。
 //
-// 同一份 DDA 被多种语义复用（选体 / 相机距离 / 铁桶舀水），它们对「Torch / Water 是否挡射线」
+// 同一份 DDA 被多种语义复用（选体 / 相机距离 / 铁桶舀水），它们对「Torch / Water / Ladder 是否挡射线」
 // 需求不同，故用 filter 标志位独立切换（详见 raycast.h RayFilter 注释）：
-//   - 选体（HitTorch）：火把挡（t184，可选中 / 直挖）、水穿过（t165 水下可挖实体）。
-//   - 相机距离（Default）：火把 / 水均穿过（皆 non-solid，相机不应被拉近视距，保 t40）。
-//   - 铁桶（HitWater）：水挡（命中首个水格舀水）、火把穿过。
+//   - 选体（HitTorch|HitLadder）：火把 / 木梯挡（t184/t501，可选中 / 直挖）、水穿过（t165 水下可挖实体）。
+//   - 相机距离（Default）：火把 / 水 / 木梯均穿过（皆 non-solid，相机不应被拉近视距，保 t40）。
+//   - 铁桶（HitWater）：水挡（命中首个水格舀水）、火把 / 木梯穿过。
 namespace {
 // t213 射线 vs cell-local sub-AABB（世界坐标 = cell + local）精确命中测试。
 //   选体射线进入含不完整方块 / 火把的体素后，须命中其中某个 sub-AABB 才算选中（空气部分穿过命中后方块）。
@@ -119,16 +119,17 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
         return h; // 零向量：无方向，不命中
     dir.normalize();
 
-    // 射线「阻挡」谓词：空气恒穿过；实体方块（非 Torch / Water）恒挡；Torch / Water 由 filter 决定。
+    // 射线「阻挡」谓词：空气恒穿过；实体方块（非 Torch / Water / Ladder）恒挡；Torch / Water / Ladder 由 filter 决定。
     //   不复用 World::isSolid（语义=blockAt!=0 会把 Torch / Water 当 solid；且选体要 Torch 挡、相机要
     //   Torch 穿，需按 filter 区分），改读 blockAt + filter 显式判定（单一权威 + 模式可切换）。
     auto blocksRay = [&world, filter](int cx, int cy, int cz) {
         const quint8 b = world.blockAt(cx, cy, cz);
         if (b == quint8(0)) return false; // 空气：永远穿过
-        // Torch / Water / Lava 是否挡射线由 filter 决定（不同射线模式语义不同，见 RayFilter 注释）。
+        // Torch / Water / Lava / Ladder 是否挡射线由 filter 决定（不同射线模式语义不同，见 RayFilter 注释）。
         if (b == BlockRegistry::Torch && !(filter & RayFilter::HitTorch)) return false;
         if (b == BlockRegistry::Water && !(filter & RayFilter::HitWater)) return false;
         if (b == BlockRegistry::Lava  && !(filter & RayFilter::HitLava))  return false; // t343 岩浆（铁桶舀）
+        if (b == BlockRegistry::Ladder && !(filter & RayFilter::HitLadder)) return false; // t501 木梯（选体可拆）
         return true;
     };
 
@@ -158,14 +159,17 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
 
     // t213 命中决策：射线进入「该 filter 视为阻挡」的格后，是否选中 + 命中点/法线。
     //   - 完整立方（isFullCube）/ 水 → 整格命中（射线进格即中，等同旧行为；水经 HitWater 命中整格舀水）。
-    //   - 不完整方块 / 火把 + **选体模式**（HitTorch）→ 命中点 vs sub-AABB 精确测试（空气部分穿过命中后方块）。
-    //     非选体模式（相机 Default / 桶 HitWater）对不完整方块维持整格阻挡（旧行为，防相机穿半砖 / 桶射线行为变）。
+    //   - 不完整方块 / 火把 + **选体模式**（HitTorch）/ 木梯 + 选体模式（HitLadder）→ 命中点 vs sub-AABB 精确测试
+    //     （空气部分穿过命中后方块）。非选体模式（相机 Default / 桶 HitWater / HitLava）对不完整方块维持整格阻挡
+    //     （旧行为，防相机穿半砖 / 桶射线行为变）。
     //   hitFull=true 时用 DDA 进格面法线 + 进格 t（cellEntryN 全格命中）；否则 sub-AABB 命中（法线由 slab 算）。
     //   返回 true=已命中（h 已填，caller return）；false=此格空气部分穿过（caller 继续 DDA 步进）。
     auto tryHitCell = [&](int cx, int cy, int cz, float tEnterCell, float tExitCell,
                           int cellNx, int cellNy, int cellNz) -> bool {
         const quint8 b = world.blockAt(cx, cy, cz);
-        const bool selectionMode = (filter & RayFilter::HitTorch) != 0;
+        // 选体模式 = 命中方块的精确 sub-AABB 测试生效（火把 / 木梯等 non-solid 方块的「准星完全落在视觉面才命中」
+        //   语义）：HitTorch 覆盖火把、HitLadder 覆盖木梯。二者均可经 updateRaycast 同时启用。
+        const bool selectionMode = (filter & (RayFilter::HitTorch | RayFilter::HitLadder)) != 0;
         // 完整立方 → 整格命中；水（仅 HitWater 模式进此分支）→ 整格命中舀水；岩浆（仅 HitLava 模式）→ 整格命中舀岩浆；
         //   非选体模式（相机 Default / 桶 HitWater / HitLava）对不完整方块亦整格阻挡（旧行为，防相机穿半砖）。
         const bool fullCell = BlockRegistry::isFullCube(b) || b == BlockRegistry::Water
@@ -177,7 +181,7 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
             h.dist = tEnterCell; // DDA 进格面距起点欧氏距离（dir 已归一 → t 即距离）；t40 相机钳制复用
             return true;
         }
-        // 选体模式 + 不完整方块 / 火把 → 命中点 vs sub-AABB 精确测试。
+        // 选体模式 + 不完整方块 / 火把 / 木梯 → 命中点 vs sub-AABB 精确测试。
         const std::vector<BlockRegistry::BlockAABB> boxes =
             BlockRegistry::raycastAABBs(b, world.stateAt(cx, cy, cz));
         float subT; int snx, sny, snz;
@@ -197,7 +201,7 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
     //   t174 例外：HitWater 模式下起点在水格属正常（玩家在水中游泳），视该水格为首个命中 ——
     //   桶舀「身处水」（眼位在水时含水射线起点即水格，否则判退化会漏掉水下舀水）。无外法线
     //   （射线未跨面进入此格，nx/ny/nz 保持 0；桶舀水只读格坐标不读法线，无碍）。
-    //   t213：选体模式下起点在**不完整方块 / 火把**格内 → 不一刀切退化：眼位在空气部分（sub-AABB 外）时
+    //   t213：选体模式下起点在**不完整方块 / 火把 / 木梯**格内 → 不一刀切退化：眼位在空气部分（sub-AABB 外）时
     //   射线应继续命中后方方块（修「贴脸火把/半砖挡选后方块」）；仅眼位在 sub-AABB 内（真嵌入实体）才退化。
     //   完整立方 / 非选体模式沿用旧「起点嵌阻挡格 → 退化」语义。
     if (blocksRay(x, y, z)) {
@@ -213,13 +217,13 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
             return h; // 起点即岩浆格 → 命中该格（dist=0；法线 0）
         }
         const quint8 startB = world.blockAt(x, y, z);
-        const bool startPartial = (filter & RayFilter::HitTorch) != 0
+        const bool startPartial = (filter & (RayFilter::HitTorch | RayFilter::HitLadder)) != 0
                                   && !BlockRegistry::isFullCube(startB)
                                   && startB != BlockRegistry::Water
                                   && startB != BlockRegistry::Lava;
         if (!startPartial)
             return h; // 完整立方 / 非选体模式起点嵌阻挡格 → 退化（相机穿模 / 贴脸火把旧语义）
-        // 选体模式 + 起点在不完整方块/火把格：sub-AABB 测试（段 = 起点格 [0, tExitStartCell]）。
+        // 选体模式 + 起点在不完整方块/火把/木梯格：sub-AABB 测试（段 = 起点格 [0, tExitStartCell]）。
         const float tExitStart = std::min(std::min(tMaxX, tMaxY), tMaxZ);
         const std::vector<BlockRegistry::BlockAABB> boxes =
             BlockRegistry::raycastAABBs(startB, world.stateAt(x, y, z));

@@ -365,6 +365,14 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         //   非 pack 时回落程序生成 default_furnace_front_on.png（圆石底 + 拱框 + 亮黄橙火焰）。包内缺该 PNG
         //   时安全跳过（保留程序生成瓦片）。注：demo 包（1.8.2.2）有 furnace_front_on.png（带火正面）。
         {134, QStringLiteral("furnace_front_on.png")},   // furnace_front_on（t494：熔炉燃烧正面带火炉口）
+        // t514 浆果丛 3 视觉阶段贴图（tile 103..105 → pack sweet_berry_bush_stage{0,1,2}.png）。mesher 在
+        //   PartialBlockGeometry::append 的 SweetBerryBush case 据 state 选 tile = 103 + stage（0 无果嫩丛 / 1 小果 /
+        //   2 成熟红浆果簇）。SweetBerryBushStageMax=2（项目用 3 阶段 0..2，MC 虽有 stage 3 但本工程不取 → stage3.png
+        //   不映射）。非 pack 时回落程序生成 default_sweet_berry_bush_{0,1,2}.png（tools/build_sweet_berry.py 原创自绘）。
+        //   包内缺某阶段 PNG 时安全跳过（保留程序生成瓦片，不崩）。
+        {103, QStringLiteral("sweet_berry_bush_stage0.png")}, // sweet_berry_bush_0（阶段 0 无果嫩丛）
+        {104, QStringLiteral("sweet_berry_bush_stage1.png")}, // sweet_berry_bush_1（阶段 1 小果）
+        {105, QStringLiteral("sweet_berry_bush_stage2.png")}, // sweet_berry_bush_2（阶段 2 成熟红浆果簇）
     };
     return kMap;
 }
@@ -457,6 +465,13 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         //   注：MC「末影珍珠 ender_pearl」是另一物品（合成末影之眼的原料），本工程无独立物品 id 故不映射；
         //   本工程的「末影之眼」即机制等价物，故 ender_eye.png 是其正确 pack 图标。
         {0x23A, QStringLiteral("ender_eye.png")},        // 末影之眼（t497：pack 启用用包内贴图，回落 drawEndEye 自绘）
+        // t507 木碗 / 蘑菇汤（bowl / mushroom_stew）：pack item 目录通常有 bowl.png / mushroom_stew.png。包内缺则
+        //   安全跳过（保留自绘 MaterialIcon）。
+        {0x23B, QStringLiteral("bowl.png")},              // 木碗（t507）
+        {0x23C, QStringLiteral("mushroom_stew.png")},     // 蘑菇汤（t507）
+        // t505 雪球（snowball）：pack item 目录通常有 snowball.png（demo 包 1.8.2.2 含 textures/item/snowball.png）。
+        //   包内缺则安全跳过（保留自绘 MaterialIcon drawSnowball）。机制等价 MC 1.0 snowball item icon。
+        {0x23D, QStringLiteral("snowball.png")},         // 雪球（t505：pack 启用用包内贴图，回落 drawSnowball 自绘）
         // —— 护甲段（ArmorId；皮革/铁/金/钻石×头盔/胸甲/护腿/靴子。铜护甲无 vanilla 贴图 → 不映射）——
         {0x300, QStringLiteral("leather_helmet.png")},
         {0x301, QStringLiteral("leather_chestplate.png")},
@@ -502,16 +517,46 @@ const QList<QPair<int, QString>> &mobEntityMap()
 
 // t456「引擎方块 id → pack item/前贴图文件名候选」映射（功能性元数据，红线 §9 可随代码提交；贴图文件不进仓库）。
 //   方块段 id（与 BlockRegistry::Id 同源；Core 不依赖 Game 故用字面量 + 注释钉死，同 itemFilenameMap 不引
-//   toolregistry 之例）：9=CraftingTable 工作台 / 10=Furnace 熔炉。这俩方块的 2D 物品图标此前用程序绘制的
-//   等距立方体 icon_*.png（"旧版"）；pack 启用且包内有对应 item / 前贴图时改用 pack（机制等价 MC 1.0 item icon：
-//   工作台 / 熔炉在物品栏显示其 item 贴图）。候选顺序 = 探测优先级：item 目录的 vanilla 风格 item/<name>.png 优先
-//   （多数包有），block 目录的 <name>_front.png 兜底（pack 把前贴图放 block/ 的布局，如 furnace_front.png 在 block/）。
-//   blockItemIconSource 逐候选 itemDir→blockDir 探测，首个命中即返；全缺返空（Hotbar 回退程序生成图标）。
+//   toolregistry 之例）。blockItemIconSource 逐候选 itemDir→blockDir 探测，首个命中即返；全缺返空（Hotbar 回退
+//   程序生成图标）。
+// t492：CraftingTable(9) / Furnace(10) 已从本映射移除。原因：这俩方块的「正面有辨识特征」（工作台正面网格 / 熔炉
+//   炉口），程序绘制的 icon_crafting_table.png / icon_furnace.png 是「正面为主」dimetric 立方体（build_cube_icons.py
+//   render_front：正面贴 front 贴图 + 顶 / 右深度细带，3D 体积感 + 辨识特征均显）。若留本映射，pack 激活时
+//   blockItemIconSource 会返 pack 的 item/crafting_table.png / item/furnace.png —— pack item 贴图是 2D 平面图，
+//   覆盖 3D 立方体图标后用户只看到无体积感的 2D 图（用户复盘「创造背包工作台 / 熔炉还是 2D 图标」）。故这两方块
+//   特意不进本映射 → iconSourceForBlock 落到 iconFileForBlock → 3D 立方体图标胜出（与 Dispenser 同路径，参照外观）。
+//   候选顺序 = 探测优先级：item 目录的 vanilla 风格 item/<name>.png 优先（多数包有），block 目录的 <name>.png 兜底。
 const QList<QPair<int, QStringList>> &blockItemIconMap()
 {
     static const QList<QPair<int, QStringList>> kMap = {
-        { 9,  { QStringLiteral("crafting_table.png"), QStringLiteral("crafting_table_front.png") } }, // BlockRegistry::CraftingTable 工作台
-        { 10, { QStringLiteral("furnace.png"),        QStringLiteral("furnace_front.png") } },         // BlockRegistry::Furnace 熔炉
+        // t493：青金石矿（LapisOre=93）。用户复盘「放下 OK（石头背景色对了），但创造背包 item 图标没换」——
+        //   旧版走程序绘制 icon_lapis_ore.png（等距立方体），pack 激活时应改用 pack 的 lapis_ore.png 平铺物品图标
+        //   （机制等价 MC 1.0 矿石 item icon = 矿石正面贴图）。候选顺序：item 目录优先、block 兜底。
+        //   pack 实测 textures/block/lapis_ore.png 存在（item 目录无 lapis_ore.png → 自动落到 block 候选）。
+        //   （区别于工作台 / 熔炉：矿石正面贴图无辨识特征 → 2D 平铺与 3D 立方体观感差异小，用户明确要 pack 平铺。）
+        { 93, { QStringLiteral("lapis_ore.png") } },                                   // BlockRegistry::LapisOre 青金石矿
+        // t496 床 16 色变体（BedRed=32..BedBlack=39 既存 8 色 + BedWhite=78..BedBrown=85 t455 新增 8 色）。用户复盘
+        //   「创造背包床 item 图标没换」—— pack 仅有一张 item/bed.png（红床模板，机制等价 MC 1.0 1.8 前 bed item 图标
+        //   单张红色床），故 16 色床全部映射到同一 bed.png（图标色不可知，红床模板，spec 明确「红床为模板」可接受）。
+        //   pack 实测 textures/item/bed.png 存在。pack 关闭时本映射候选落空 → 回退程序生成 icon（可接受）。
+        //   不像工作台 / 熔炉那样跳过本映射：床 3D 模型是双格横置异形体，程序绘制的立方体 dimetric 图标表达不出
+        //   「这是一张床」（用户复盘「看不出是床」），pack 的 bed.png 平面图（侧视床体 + 四柱腿）辨识度更高。
+        { 32, { QStringLiteral("bed.png") } }, // BedRed
+        { 33, { QStringLiteral("bed.png") } }, // BedOrange
+        { 34, { QStringLiteral("bed.png") } }, // BedYellow
+        { 35, { QStringLiteral("bed.png") } }, // BedGreen
+        { 36, { QStringLiteral("bed.png") } }, // BedCyan
+        { 37, { QStringLiteral("bed.png") } }, // BedBlue
+        { 38, { QStringLiteral("bed.png") } }, // BedMagenta
+        { 39, { QStringLiteral("bed.png") } }, // BedBlack
+        { 78, { QStringLiteral("bed.png") } }, // BedWhite
+        { 79, { QStringLiteral("bed.png") } }, // BedLightBlue
+        { 80, { QStringLiteral("bed.png") } }, // BedLime
+        { 81, { QStringLiteral("bed.png") } }, // BedPink
+        { 82, { QStringLiteral("bed.png") } }, // BedGray
+        { 83, { QStringLiteral("bed.png") } }, // BedLightGray
+        { 84, { QStringLiteral("bed.png") } }, // BedPurple
+        { 85, { QStringLiteral("bed.png") } }, // BedBrown
     };
     return kMap;
 }

@@ -104,7 +104,8 @@ public:
     bool hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist);
 
     // 尝试骑乘：跑 findBoatHit 命中船 → 设 m_riderBoat + 返 true；未命中 → false（不改态）。由 PlayerController
-    //   placeBlock 船段调（右键瞄船 → 上船）。已骑乘（m_riderBoat>=0）→ 不重复上（返 false）。
+    //   placeBlock 船段调（右键瞄船 → 上船）。t508 换船：已骑乘时命中**另一艘**船（idx != m_riderBoat）→ 直接切到
+    //   新船（spec「骑船时右键另一艘船来坐上去」；旧船释放骑乘态自然浮水）；命中当前骑的船 → no-op（返 false）。
     bool tryMount(const QVector3D &origin, const QVector3D &dir, float maxDist);
 
     // 下船：清 m_riderBoat + 把玩家摆到船侧安全位（outPlayerFeet 写玩家脚底 m_pos）。由 PlayerController

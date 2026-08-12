@@ -467,7 +467,12 @@ QVariantList Hotbar::creativeMaterials() const
         //   蘑菇），创造调色板补全便于测试食用。木碗可堆叠 64；蘑菇汤 maxStack=1（碗装液体食物不可叠，同铁桶族）。
         //   非方块（材料段）→ 右键不放置（蘑菇汤走「食用」分支：长按右键累积进食 +10 饥饿，食完返空碗）。
         int(RecipeRegistry::BowlId),             // 木碗：3 木板 V 形合成；蘑菇汤原料
-        int(RecipeRegistry::MushroomStewId)      // 蘑菇汤：碗+红蘑菇+白蘑菇合成；右键食 +10 饥饿（食完返空碗）
+        int(RecipeRegistry::MushroomStewId),     // 蘑菇汤：碗+红蘑菇+白蘑菇合成；右键食 +10 饥饿（食完返空碗）
+        // t505 雪球（机制等价 MC 1.0 snowball；材料段 0x23D）。生存由铲挖雪层 / 雪块 / 雪傀儡死亡掉落获得，
+        //   创造调色板补全便于测试抛掷。可堆叠 64；非方块（材料段）→ 右键不走方块放置，走 useBlock 雪球抛掷分支
+        //   （playercontroller placeBlock 雪球段：spawnSnowball 玩家抛雪球，砸敌对 mob 0 伤害 + 红闪 + 击退）。
+        //   MaterialIcon 自绘雪球图标（drawSnowball 冷白小球，§9 原创）。
+        int(RecipeRegistry::SnowballId)         // 雪球：铲挖雪层/雪块/雪傀儡死亡掉落；右键抛掷（砸 mob 红闪+击退）
     };
 }
 
@@ -623,10 +628,11 @@ QString Hotbar::iconSourceForBlock(int blockId) const
     // （ToolIcon / 材料图标 Canvas，§9a）→ 返空串，调用方据 isTool / isMaterial 切到对应自绘 delegate。
     // 越界先判再 cast，防 quint8 截断别名。
     if (blockId <= 0 || blockId >= int(BlockRegistry::Count)) return QString();
-    // t456 pack item 图标覆盖：pack 启用且该方块在「方块→pack item/前贴图」映射内（现 CraftingTable/Furnace）、
-    //   包内有 PNG 时，返 pack 的 file:// URL（2D 物品图标改用 pack item 贴图，机制等价 MC item icon）；pack 关 /
-    //   无映射 / 包内缺 → 落下方程序生成 icon_<block>.png（现状不变）。仅 2D 物品图标路径（hotbar/背包/光标）消费；
-    //   3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径，不调本函数，故不受影响。
+    // t456 pack item 图标覆盖：pack 启用且该方块在「方块→pack item/前贴图」映射内（现含 LapisOre=93 + 16 色床
+    //   {32..39,78..85}→bed.png；t492 已把 CraftingTable/Furnace 移出 —— 这俩正面有辨识特征，保留 3D 立方体图标
+    //   胜过 pack 2D item 平铺）、包内有 PNG 时，返 pack 的 file:// URL（2D 物品图标改用 pack item 贴图，机制等价
+    //   MC item icon）；pack 关 / 无映射 / 包内缺 → 落下方程序生成 icon_<block>.png。仅 2D 物品图标路径
+    //   （hotbar/背包/光标）消费；3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径，不调本函数，故不受影响。
     const QString packSrc = ResourcePackManager::blockItemIconSource(blockId);
     if (!packSrc.isEmpty())
         return packSrc;

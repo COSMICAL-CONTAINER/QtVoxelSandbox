@@ -102,16 +102,17 @@ void FrameProfiler::flush()
     const qint64 meshND = meshReasonN("meshNdirty");
     const qint64 meshNS = meshReasonN("meshNsun");
     const qint64 meshNW = meshReasonN("meshNwater");
-    // w 前缀桶：World 9 个 tick 函数（wWater/wLava/wCrop/wSug/wFarm/wSap/wIce/wLeaf/wWeath）。
+    // w 前缀桶：World 10 个 tick 函数（wWater/wLava/wCrop/wSug/wFarm/wSap/wIce/wLeaf/wWeath + t495 wIceMelt）。
     struct WEnt { const char *key; const char *label; };
     static const WEnt wEntries[] = {
         {"wWater", "water"}, {"wLava", "lava"}, {"wCrop", "crop"},
         {"wSug", "sug"}, {"wFarm", "farm"}, {"wSap", "sap"},
-        {"wIce", "ice"}, {"wLeaf", "leaf"}, {"wWeath", "wthr"}
+        {"wIce", "ice"}, {"wLeaf", "leaf"}, {"wWeath", "wthr"},
+        {"wIceMelt", "imelt"}
     };
     double worldMs = 0.0;
     std::vector<double> wMs;
-    wMs.reserve(9);
+    wMs.reserve(10);
     for (const WEnt &e : wEntries) {
         const double ms = double(bucketLocked(e.key)) / 1e6;
         wMs.push_back(ms);
@@ -143,7 +144,8 @@ void FrameProfiler::flush()
         + " sap " + QString::number(wMs[5], 'f', 1)
         + " ice " + QString::number(wMs[6], 'f', 1)
         + " leaf " + QString::number(wMs[7], 'f', 1)
-        + " wthr " + QString::number(wMs[8], 'f', 1) + "]";
+        + " wthr " + QString::number(wMs[8], 'f', 1)
+        + " imelt " + QString::number(wMs[9], 'f', 1) + "]";
 
     // perf-t520 帧时间分解桶：main_total（frameSwapped 间隔）+ render_cpu（beforeRendering→afterRendering）。
     //   按 ms/frame 报告（÷ frames），与 tick 各阶段同口径。诊断公式：threaded render loop 下

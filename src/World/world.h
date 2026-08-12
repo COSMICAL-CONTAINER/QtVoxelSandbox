@@ -295,6 +295,22 @@ public:
     //   spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickSaplingGrowth();
+    // t514 甜浆果丛生长 tick（spec「浆果丛会长大（生长阶段）」）：由呈现层 Main.qml 经 WorldClock.ticked 桥接
+    //   调用（每 100ms 一 tick；本方法内部节流到 ~每 kBerryBushTickInterval×0.1s 一窗）。机制等价 MC 1.0 sweet
+    //   berry bush random-tick 生长：阶段 0..SweetBerryBushStageMax 的丛在「下方透光土壤支撑 + 头顶光照足 + 未成熟」
+    //   时按确定性散布概率升一阶段。玩家种植落地 state=0（playercontroller t514 种植分支）；worldgen
+    //   placeSweetBerryBushes 散布 state 1..2；玩家采摘把成熟丛降回 state 0（playercontroller t467 采摘分支）→
+    //   本 tick 把这些 state<max 的丛再逐步推回成熟（形成「采→回 0→生长→成熟→可再采」循环，同小麦 / 树苗生长）。
+    //   土壤支撑：下方为 Grass / Dirt / Farmland（机制等价 MC 浆果丛生于草地 / 泥土 / 耕地；与 playercontroller 种植
+    //   分支 Grass/Dirt 一致 + 耕地兼容）。worldgen 丛立于 SnowLayer 上 —— SnowLayer 不算土壤（雪非泥土），故
+    //   worldgen 丛不靠本 tick 升阶段（保持散布时阶段 1..2 稳态，采后回 0 即停长为枯丛，同 MC 雪原丛采后不长）。
+    //   光照：头顶天光 >= kBerryBushMinLight（/15；机制等价 MC 浆果丛 light level 9+，夜间 / 洞穴不长）。
+    //   静默写：升阶段走 setWaterSilent（系统模拟非玩家动作 → 无 broken/placed 反馈，机制等价 MC「生长无破/放反馈」）。
+    //   perf（PLAN §2 / lessons perf-fluid-scan）：遍历生长方格索引 m_growthCells（O(丛格数)）而非全图 W×D×H；
+    //   SweetBerryBush 经 isGrowthBlock 入索引、noteGrowthWrite 增量维护。稳态（无丛 / 全成熟 / 全无土壤 / 全暗）
+    //   每窗零写入、零 worldChanged。spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
+    //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
+    Q_INVOKABLE void tickSweetBerryBushGrowth();
     // t468 结冰 tick（spec「寒冷群系(雪原 Snowy)暴露天空的水源(Water state==0)→冰；MC 规则：暴露天空 +
     //   寒冷生物群系→水变冰」）：由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部
     //   节流到 ~每 kFreezeTickInterval×0.1s = 5s 一窗）。机制等价 MC 1.0 random-tick 结冰：扫 Snowy 群系列，自顶
@@ -305,6 +321,22 @@ public:
     //   稳态（无 Snowy 暴露水源 / 本窗散布落空）零写入、零 worldChanged。spectator/创造/生存均推进（结冰是世界
     //   模拟）。分层（PLAN §2）：本方法属 World 层，只读 m_chunks + biomeAt + skyLightAt + 发 worldChanged。
     Q_INVOKABLE void tickIceFreeze();
+    // t495 普通冰融化 tick（spec「普通冰在高温/高亮环境（火把/熔炉/火）有概率融化成水」；机制等价 MC 1.0
+    //   ice 受高方块光照射融化 —— 仅普通冰 Ice(45)，浮冰 PackIce / 蓝冰 BlueIce 永不融化）。由呈现层 Main.qml
+    //   经 WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kIceMeltTickInterval×0.1s 一窗）。
+    //   每窗遍历冰格索引（m_iceCells，O(冰格数) 替代全图扫描，同 tickIceFreeze / tickCropGrowth 的位置索引模式）：
+    //   对每个 Ice 格查其「高亮邻居」—— 任一 6 正交邻格是发光方块（BlockRegistry::lightEmission(state)>0：火把/
+    //   燃烧熔炉/岩浆/火/末地传送门）或本格格方块光 ≥ kIceMeltBlockLight（~12，机制等价 MC 冰需 light level ≥12
+    //   从 ≥2 邻面照射才融；本工程简化为「单邻发光源或自身高方块光」即触发候选）→ 命中按散布概率 kIceMeltPct
+    //   （hashVoxel(seed, x,y,z) + 窗口序号，PLAN §2-K 确定性散布，同 tickCropGrowth / tickIceFreeze 错峰）融为水
+    //   （setWaterSilent 静默写 Water state=0：系统模拟非玩家破/放 → 无 broken/placed 噪音，机制等价 MC 冰融化无
+    //   反馈；静默写同时把冰格移出 m_iceCells、把新水格入 m_waterCells，下游 tickWaterFlow / tickIceFreeze 自然续
+    //   稳态）。散布 ~平均数秒/格（kIceMeltPct 窗概率 → 几何分布），贴近 MC 冰在火把旁数秒融的观感。
+    //   稳态（无冰 / 无高亮邻 / 本窗散布落空）零写入、零 worldChanged。spectator/创造/生存均推进（融化是世界模拟）。
+    //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + m_lightField(blockLightAt) + 发 worldChanged。
+    //   perf（PLAN §2 / lessons perf-fluid-scan）：遍历 m_iceCells 位置索引（O(冰格数)）而非全图 W×D×H；冰在世界
+    //   中数量有限（雪原表层冻结），扫描量 << 3.28M 全图。索引经 noteIceWrite 增量维护（同 m_waterCells 模式）。
+    Q_INVOKABLE void tickIceMelt();
     // t325 树叶渐进消退 tick（spec「挖光一棵树所有原木→树叶消失」的渐进化修：旧 t305 瞬时清半树冠叶 →
     //   改为逐叶按概率渐退，散布 ~30-90s；t379 在 t325 基础上进一步放慢）。由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；
     //   本方法内部节流到 ~每 kLeafDecayTickInterval×0.1s 做一次判定窗口）。机制等价 MC 1.0 叶衰 random-tick：
@@ -362,13 +394,16 @@ public:
     //   静默 dropCactusColumn 不经 World::setBlock → 不重入本检查。供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。
     void checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
-    // t504 setBlock 编辑后枯死灌木失撑复检（机制等价 MC 1.0 枯灌木失去下方支撑即掉自身；同甘蔗 / 仙人掌支撑校验族）。
+    // t504 setBlock 编辑后枯死灌木失撑复检（机制等价 MC 1.0 枯灌木失去下方支撑即坍落；同甘蔗 / 仙人掌支撑校验族）。
     //   （x,y,z,oldId,id）= 本格刚发生的编辑。本格被破为 Air（破下方支撑方块）→ 若正上方是 DeadBush → 该枯灌木失撑
-    //   → 静默清 Air（m_chunks.setBlock 直写 + 标脏，不经 World::setBlock → 不递归触发）+ emit blockBroken（破块粒子 / 音）
-    //   + emit blockDroppedAsItem（呈掉落物实体，Main.qml 转 spawnItem）+ recomputeLightAround（遮光消失重 flood）+
+    //   → 静默清 Air（m_chunks.setBlock 直写 + 标脏，不经 World::setBlock → 不递归触发）+ emit blockBroken（破块粒子 / 音，
+    //   id 用 DeadBush：坍落的是枯灌木方块本身）+ emit blockDroppedAsItem（掉落物 = **木棒** 材料段 0x200；机制等价 MC
+    //   dead bush 掉 0-2 木棒、不掉自身 —— 区别于花 / 蘑菇失撑掉自身）+ recomputeLightAround（遮光消失重 flood）+
     //   1 次 worldChanged + clearAllDirty。DeadBush 恒单格（无柱状生长，与 Cactus 不同），仅清正上方 1 格。dropId=0 故
-    //   玩家直破枯灌木无产物（机制等价 MC 空手破 dead bush 无产物 / 剪刀才掉，本工程无剪刀）；仅失撑（破下方支撑）才掉。
-    //   供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
+    //   玩家直破枯灌木无产物（机制等价 MC 空手破 dead bush 无产物 / 剪刀才掉，本工程无剪刀）；仅失撑（破下方支撑）才掉木棒。
+    //   木棒 id 用字面量 0x200（= RecipeRegistry::StickId，材料段基址 0x200）—— Core/World 不依赖 Game（PLAN §2 分层），
+    //   不能 include recipe.h，与 blockregistry.cpp 矿石 dropId 用字面量 0x201/0x202 同模式。供 4/5 参数 setBlock 末尾各调
+    //   一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
     void checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
     // t507 setBlock 编辑后花 / 蘑菇失撑复检（机制等价 MC 1.0 花 / 蘑菇失去下方支撑即掉自身；同甘蔗 / 仙人掌 /
@@ -773,6 +808,18 @@ private:
     int m_freezeIntervalIndex = 0;
     static constexpr int kFreezeTickInterval = 50;  // tickIceFreeze 节流间隔（WorldClock tick 单位 = 100ms → 5s/窗）
     static constexpr int kFreezePct          = 20;  // 每窗暴露水源冻结概率（%）
+    // t495 普通冰融化 tick 节流计数 + 常量：tickIceMelt() 每 100ms 被 WorldClock.ticked 调一次；累积到
+    //   kIceMeltTickInterval 才做一次融化判定（~每 kIceMeltTickInterval×0.1s 一窗）。窗口序号 m_iceMeltIntervalIndex
+    //   每窗 +1，喂 hashVoxel 散布概率 → 不同冰格不同窗错峰融化（非瞬时全融，PLAN §2-K 精神，同 tickIceFreeze）。
+    //   kIceMeltTickInterval=20（2s/窗）+ kIceMeltPct=25（每窗高亮邻候选冰格 25% 融化概率 → 几何分布平均 ~8s/格融化，
+    //   贴近 MC 冰在火把旁数秒融的观感，可见可验收）。
+    //   kIceMeltBlockLight=12：冰格自身方块光 ≥12 才算「高亮照射」（机制等价 MC 冰需 light level ≥12 融化；本工程
+    //   简化为「邻发光源 OR 自身方块光 ≥12」即候选，二者其一即触发）。
+    int m_iceMeltTickCounter = 0;
+    int m_iceMeltIntervalIndex = 0;
+    static constexpr int kIceMeltTickInterval = 20; // tickIceMelt 节流间隔（WorldClock tick 单位 = 100ms → 2s/窗）
+    static constexpr int kIceMeltPct          = 25; // 每窗高亮邻候选冰格的融化概率（%；25% → 平均 ~8s/格融化）
+    static constexpr int kIceMeltBlockLight   = 12; // 冰融化所需自身方块光阈值（/15；机制等价 MC ice light ≥12）
     // t236 小麦作物生长 tick 节流计数 + 常量：tickCropGrowth() 每 100ms 被 WorldClock.ticked 调一次；
     //   累积到 kCropTickInterval 才做一次成长判定（~每 kCropTickInterval×0.1s 一窗）。窗口序号 m_cropIntervalIndex
     //   每窗 +1，喂入 hashVoxel 散布概率 → 不同窗口不同作物错峰升阶段（防全部同步生长的机械感）。
@@ -821,6 +868,17 @@ private:
     static constexpr int kSaplingTickInterval = 50; // tickSaplingGrowth 节流间隔（WorldClock tick 单位 = 100ms → 5s/窗）
     static constexpr int kSaplingMinLight     = 9;  // 生长所需最低天光（/15；机制等价 MC 树苗 light level 9+）
     static constexpr int kSaplingGrowPct      = 10; // 每窗每株长成的散布概率（%；10% → 平均 ~50s 长成）
+    // t514 甜浆果丛生长 tick 节流计数 + 常量：tickSweetBerryBushGrowth() 每 100ms 被 WorldClock.ticked 调一次；
+    //   累积到 kBerryBushTickInterval 才做一次成长判定（~每 kBerryBushTickInterval×0.1s 一窗）。窗口序号
+    //   m_berryBushIntervalIndex 每窗 +1，喂入 hashVoxel 散布概率 → 不同丛错峰升阶段（防全部同步生长的机械感）。
+    //   kBerryBushTickInterval=50（5s/窗）+ kBerryBushGrowPct=15% → 单丛平均 ~33s/阶段、~66s 从 state 0 长到成熟
+    //   （可见、可验收；MC 1.0 浆果丛约 30min 长满，本工程取快便于肉眼 / 测试复核，机制对齐非精确数值复刻）。
+    //   kBerryBushMinLight=9：头顶天光 >=9/15 才长（机制等价 MC 浆果丛 light level 9+；夜间 / 洞穴不长）。
+    int m_berryBushTickCounter = 0;
+    int m_berryBushIntervalIndex = 0;
+    static constexpr int kBerryBushTickInterval = 50; // tickSweetBerryBushGrowth 节流间隔（100ms → 5s/窗）
+    static constexpr int kBerryBushMinLight     = 9;  // 生长所需最低天光（/15；机制等价 MC 浆果丛 light level 9+）
+    static constexpr int kBerryBushGrowPct      = 15; // 每窗每丛升阶段的散布概率（%；15% → 平均 ~33s/阶段）
     // t325 树叶渐进衰减队列 + 节流计数 + 常量：tickLeafDecay() 每 100ms 被 WorldClock.ticked 调一次；
     //   累积到 kLeafDecayTickInterval 才开一个判定窗口（~每 kLeafDecayTickInterval×0.1s 一窗）。窗口序号
     //   m_leafDecayIntervalIndex 每窗 +1，喂入 hashVoxel 散布概率 → 不同叶错峰渐退（非全部同步消失）。
@@ -840,6 +898,11 @@ private:
     //   时配合 m_waterDirty / m_lavaDirty 早退 → 零扫描；活跃流场时扫描量 = 流体格数（远 < 3.28M）。
     std::unordered_set<quint64> m_waterCells;
     std::unordered_set<quint64> m_lavaCells;
+    // t495 perf：普通冰（Ice=45，不含 PackIce/BlueIce —— 那些永不融化）方格位置索引 —— 融化 tick（tickIceMelt）
+    //   遍历此集（O(冰格数)）替代全图扫描（O(W×D×H)=3.28M）。写入路径经 noteIceWrite 增量维护；generate/beginLoad
+    //   清空、finishLoad 全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。稳态（无冰
+    //   写入）时配合融化 tick 早退 → 零扫描；活跃融化时扫描量 = 冰格数（远 < 3.28M）。
+    std::unordered_set<quint64> m_iceCells;
     int m_leafDecayTickCounter = 0;
     int m_leafDecayIntervalIndex = 0;
     static constexpr int kLeafDecayTickInterval = 4; // tickLeafDecay 节流间隔（WorldClock tick 单位 = 100ms → 0.4s/窗）
@@ -889,6 +952,14 @@ private:
     void noteFluidWrite(int x, int y, int z, quint8 oldId, quint8 newId);
     // perf：全图扫描重建流体方格集合（generate / finishLoad 末调一次；运行期由 noteFluidWrite 增量维护）。
     void rebuildFluidCells();
+    // t495 perf：普通冰（Ice=45，不含 PackIce/BlueIce）方格位置索引增量维护 —— 融化 tick（tickIceMelt）遍历此集合
+    //   （O(冰格数)）替代全图扫描（同 noteFluidWrite / noteGrowthWrite 模式）。写入路径（setBlock / setBlockFromEntity /
+    //   setWaterSilent / setVoxelIfAir / clearBlockSilent）在 m_chunks.setBlock 后调本方法（id 变更时按 oldId/newId 是否
+    //   普通冰 Ice 增删集合项；id 不变 → no-op）。generate / finishLoad 末重建一次（worldgen / 存档 blob 直写不经写入路径）。
+    //   键编码复用 packGrowthCell。仅 Ice=45 入集（PackIce/BlueIce 永不融化 → 不入集，免 tick 无谓扫描它们）。
+    void noteIceWrite(int x, int y, int z, quint8 oldId, quint8 newId);
+    // t495 perf：全图扫描重建普通冰方格集合（generate / finishLoad 末调一次；运行期由 noteIceWrite 增量维护）。
+    void rebuildIceCells();
 };
 
 #endif // WORLD_H

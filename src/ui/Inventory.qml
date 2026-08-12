@@ -56,11 +56,11 @@ Item {
     //   护甲→creativeArmor），食物段从 creativeMaterials 里挑可食用子集（JS 端按 RecipeRegistry 材料段 id 常量
     //   过滤 —— 这些常量未单独 Q_INVOKABLE 暴露，故在 QML 端镜像一份 id 表）。root.hotbar 由 null→对象 时重求值。
     // t511 去掉「扩展空槽」（旧版尾巴 [0,0,...]）：分类 tabs 下每页内容已天然较短，空槽只会撑出滚动空白，删。
-    // currentTab==5（箱子）= 切生存背包，由 tab 按钮直接发 switchToSurvivalRequested 信号（不走调色板渲染）。
+    // currentTab==5（箱子）= 保持创造的综合页（材料+护甲，filteredPalette case 5 合并显示；见下）。
     readonly property var paletteModel: root.hotbar ? root.filteredPalette() : []
 
-    // t511 分类 tabs 当前页索引：0 方块 / 1 工具 / 2 材料 / 3 护甲 / 4 食物。（5 = 箱子，点击即切生存背包，
-    //   不停留本页，故不入 currentTab 有效取值域 —— 按钮点击直接发信号后不赋值给 currentTab。）
+    // t511 分类 tabs 当前页索引：0 方块 / 1 工具 / 2 材料 / 3 护甲 / 4 食物 / 5 箱子（综合页：材料+护甲，
+    //   保持创造模式，便于创造直接拿起护甲穿上；不复用生存背包）。
     property int currentTab: 0
 
     // t511 食物段 id 表（从 creativeMaterials 里挑可食用子集；镜像 RecipeRegistry 材料段 id 常量，
@@ -84,17 +84,29 @@ Item {
         0x23C  // 蘑菇汤
     ]
 
+    // t508 船物品 id 表（spec「船归工具 tab，非材料 tab」）：OakBoatId=0x234 / SpruceBoatId=0x235。原入材料段
+    //   （creativeMaterials），用户报「创造背包船归材料 tab，应放工具 tab」→ 改入工具段。下文 filteredPalette：
+    //   工具 tab（currentTab===1）末尾追加；材料 tab（currentTab===2）显式排除（防双显）。id 与 hotbar.cpp /
+    //   RecipeRegistry::OakBoatId/SpruceBoatId 同源（材料段 0x200+，非方块）。
+    readonly property var boatIds: [0x234, 0x235]
+
     // t511 据 currentTab 过滤调色板 id 列表。食物段 = creativeMaterials 与 foodIds 的交集（保 materials 内顺序）。
     function filteredPalette() {
         if (!root.hotbar) return []
         if (root.currentTab === 0) return root.hotbar.creativeBlocks()
-        if (root.currentTab === 1) return root.hotbar.creativeTools()
+        if (root.currentTab === 1) {
+            // t508 工具段末尾追加船（spec「船归工具 tab」）。船非工具类（ToolRegistry 枚举外）但语义上属
+            //   「功能性载具」（同弓 / 剪刀 / 钓鱼竿 —— 右键使用、非放置），归工具段更合理。
+            const tools = root.hotbar.creativeTools().slice()
+            for (let i = 0; i < root.boatIds.length; ++i) tools.push(root.boatIds[i])
+            return tools
+        }
         if (root.currentTab === 2) {
-            // 材料段 = creativeMaterials 去掉已划进食物段的项（避免食物在两页重复）。
+            // 材料段 = creativeMaterials 去掉已划进食物段的项 + t508 去掉船（船已移到工具段，防双显）。
             const mats = root.hotbar.creativeMaterials()
             const out = []
             for (let i = 0; i < mats.length; ++i) {
-                if (root.foodIds.indexOf(mats[i]) === -1) out.push(mats[i])
+                if (root.foodIds.indexOf(mats[i]) === -1 && root.boatIds.indexOf(mats[i]) === -1) out.push(mats[i])
             }
             return out
         }
@@ -108,13 +120,17 @@ Item {
             }
             return out
         }
+        if (root.currentTab === 5) {
+            // t511 箱子 tab（综合页）：保持创造模式，合并显示材料 + 护甲（便于玩家在创造模式直接拿起护甲穿上，
+            //   而非旧版切到生存模式）。用户复盘「点箱子 tab 竟切到生存模式，应保持创造但显示物品/护甲」。
+            //   顺序 = 先材料（含食物）后护甲，与既有 tab2/3 口径一致；护甲来自 creativeArmor()。
+            const out = root.hotbar.creativeMaterials().slice() // 含食物的材料全集
+            const armor = root.hotbar.creativeArmor()
+            for (let i = 0; i < armor.length; ++i) out.push(armor[i])
+            return out
+        }
         return []
     }
-
-    // t511 请求宿主切到生存背包（箱子 tab 点击）：宿主 Main.qml 把 player 切 Survival 模式 →
-    //   SurvivalInventory 面板（visible 绑 player.mode===Survival）显出，玩家可放/取物品 + 操作护甲槽。
-    //   分层（PLAN §2）：本面板只发意图信号，模式切换由宿主定（player.setMode）。
-    signal switchToSurvivalRequested()
 
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
     property string hoveredName: ""
@@ -282,8 +298,8 @@ Item {
             spacing: 8
 
             // t511 分类 tabs（MC 1.0 式创造背包分类）：方块 / 工具 / 材料 / 护甲 / 食物 / 箱子。
-            //   前 5 项切 currentTab（调色板只显该类，filteredPalette 过滤）；箱子 tab 点击发 switchToSurvivalRequested
-            //   → 宿主切 Survival → SurvivalInventory 面板显出（可放取物品 + 操作护甲槽）。
+            //   前 5 项切 currentTab（调色板只显该类，filteredPalette 过滤）；箱子 tab → currentTab=5 综合页
+            //   （材料+护甲合并显示，保持创造模式 —— 不复用生存背包，t511 复盘「点箱子竟切生存」已改）。
             //   选中态：白底深字 + 下沉边；未选：暗底亮字。自绘原创（§9 override (a)，无 MC GUI PNG）。
             //   去掉旧「创造物品栏」标题 + 「[E]/[Esc] 关闭」提示（用户嫌啰嗦；关闭键提示已在 HUD/暂停叠层）。
             Row {
@@ -304,27 +320,30 @@ Item {
                     delegate: Rectangle {
                         width: Math.floor((parent.width - (6 - 1) * 2) / 6)
                         height: 26
-                        color: (modelData.tab === -1)
-                               ? "#3a2a14"                                       // 箱子 tab 暗黄底（区别于分类）
-                               : (root.currentTab === modelData.tab ? "#5a8a4a" : "#262b30") // 选中绿底 / 未选暗底
-                        border.color: root.currentTab === modelData.tab ? "#7fe57f" : "#3a444f"
+                        // t511：箱子 tab（tab:-1）现在映射到 currentTab=5（综合页，保持创造模式），故选中态判据
+                        //   = (tab===-1 ? currentTab===5 : currentTab===tab)，选中绿底 / 未选暗底。
+                        property bool isSelected: (modelData.tab === -1)
+                                                  ? (root.currentTab === 5)
+                                                  : (root.currentTab === modelData.tab)
+                        color: isSelected ? "#5a8a4a" : "#262b30" // 选中绿底 / 未选暗底（t511 箱子 tab 不再特殊暗黄底）
+                        border.color: isSelected ? "#7fe57f" : "#3a444f"
                         border.width: 1
                         radius: 3
                         Text {
                             anchors.centerIn: parent
                             text: modelData.label
-                            color: (modelData.tab === -1)
-                                   ? "#e8c878"                                   // 箱子 tab 暗黄字
-                                   : (root.currentTab === modelData.tab ? "#ffffff" : "#9fb0c0")
+                            color: isSelected ? "#ffffff" : "#9fb0c0"
                             font.pixelSize: 12
-                            font.bold: root.currentTab === modelData.tab
+                            font.bold: isSelected
                         }
                         HoverHandler { cursorShape: Qt.PointingHandCursor }
                         TapHandler {
                             onTapped: {
                                 if (modelData.tab === -1) {
-                                    // 箱子 tab → 切生存背包（宿主 Main.qml 接 setMode(Survival)）。
-                                    root.switchToSurvivalRequested()
+                                    // t511 箱子 tab → 保持创造模式，切到综合页（currentTab=5 = 材料+护甲，
+                                    //   filteredPalette case 5 合并显示）。旧版发 switchToSurvivalRequested 切生存，
+                                    //   用户复盘「点箱子 tab 竟切生存，应保持创造但显示物品/护甲便于穿上」。
+                                    root.currentTab = 5
                                 } else {
                                     root.currentTab = modelData.tab
                                 }

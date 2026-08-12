@@ -53,6 +53,7 @@ bool isWolfMeatItem(int itemId)
 //   面包（BreadId）= kBreadHungerAmount(5)、甜浆果（SweetBerryId）= kSweetBerryHungerAmount(2)、
 //   蘑菇汤（MushroomStewId）= kMushroomStewHungerAmount(10)。
 //   t513 胡萝卜（CarrotId）= 3、土豆（PotatoId）= 1（机制等价 MC 1.0 胡萝卜 +3 / 生土豆 +1 hunger）。
+//   t513 生/熟肉：生猪排/生牛肉 +3、生鸡肉/生鱼 +2、熟猪排/熟牛肉 +8、熟鸡肉/熟羊肉 +6（机制等价 MC 1.0 各肉类）。
 //   机制等价 MC 1.0 各食物恢复不同饥饿。新增食物只改本方法一处（避免各处硬编码）。
 int PlayerController::foodHungerAmount(int itemId)
 {
@@ -63,6 +64,18 @@ int PlayerController::foodHungerAmount(int itemId)
     //   本工程无烤土豆物品故土豆取生食量 1。新增可食作物只在此追加一行（单一权威）。
     if (itemId == RecipeRegistry::CarrotId)       return 3; // 胡萝卜 +3 饥饿（机制等价 MC 1.0 carrot）
     if (itemId == RecipeRegistry::PotatoId)       return 1; // 生土豆 +1 饥饿（机制等价 MC 1.0 raw potato）
+    // t513 生/熟肉（机制等价 MC 1.0 各肉类恢复量；spec「生猪肉/生牛肉/熟肉都吃不了」修）。数值与 MC 1.0 一致：
+    //   生肉低（猪/牛 +3、鸡 +2、鱼 +2），熟肉高（猪/牛 +8、鸡/羊 +6）。生鸡肉 MC 另带 30% 食物中毒 ——
+    //   本工程无 status-effect 系统故仅取饥饿值（中毒暂未实现，待后续任务加状态系统时补）。
+    //   熟羊肉（CookedMuttonId）仅熟变体（羊燃烧致死掉落，无生羊肉物品）。生鱼（RawFishId）= MC 1.0 raw fish +2。
+    if (itemId == RecipeRegistry::RawPorkchopId)  return 3; // 生猪排 +3 hunger（MC 1.0 raw porkchop）
+    if (itemId == RecipeRegistry::RawBeefId)      return 3; // 生牛肉 +3 hunger（MC 1.0 raw beef）
+    if (itemId == RecipeRegistry::RawChickenId)   return 2; // 生鸡肉 +2 hunger（MC raw chicken；未实现 30% 中毒）
+    if (itemId == RecipeRegistry::RawFishId)      return 2; // 生鱼 +2 hunger（MC 1.0 raw fish）
+    if (itemId == RecipeRegistry::CookedPorkchopId) return 8; // 熟猪排 +8 hunger（MC 1.0 cooked porkchop）
+    if (itemId == RecipeRegistry::CookedBeefId)     return 8; // 熟牛肉 +8 hunger（MC 1.0 cooked beef / steak）
+    if (itemId == RecipeRegistry::CookedMuttonId)   return 6; // 熟羊肉 +6 hunger（MC cooked mutton）
+    if (itemId == RecipeRegistry::CookedChickenId)  return 6; // 熟鸡肉 +6 hunger（MC 1.0 cooked chicken）
     return 0;
 }
 
@@ -691,7 +704,12 @@ void PlayerController::updateRaycast()
     //   修正 t157「射线永远穿透火把」致火把不可直挖之缺陷（用户原意「火把可选可挖、空气可穿」）。
     //   Water 仍穿过（保 t165 水下可选中 / 挖实体）；相机距离（updateCameraDistance）走 Default（火把 /
     //   水均穿过，non-solid 不拉近视距），故本处显式传 HitTorch 仅作用于选体。
-    const RayHit h = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitTorch);
+    // t501：同时纳入 Ladder（HitLadder）—— 机制同火把：木梯默认穿（玩家爬梯时准星瞄后方 / 邻格方块应
+    //   选中方块本体，spec「爬梯时挖掘优先选中梯子 → 应像火把不优先选中、可透视穿过」）；仅当准星完全
+    //   落在木梯视觉面（贴墙薄 quad 的精确 sub-AABB）时才命中木梯本身（可拆梯）。两标志位独立，故火把 / 木梯
+    //   均在选体模式下「可选中、空气穿过」，与相机距离 / 桶射线的 Default / HitWater 互不干扰。
+    const RayHit h = raycastVoxel(*m_world, position(), lookDirection(), kReach,
+                                  RayFilter::HitTorch | RayFilter::HitLadder);
 
     // t212 命中点 Y（供 slab 上/下半放置 + 互补半合并判定，placeBlock 读）。lookDirection 已归一、dist 为起点
     //   到命中面欧氏距离（见 raycast.h）→ 命中点 = 眼位 + 视线*dist。**每帧刷新**（不随下方 changed 早退）：
@@ -1034,6 +1052,14 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             //   本分支按 state 精确放大 count 覆盖通用 dropId/dropCount（同 WheatCrop/TallGrass 按 state 掉落模式）。
             const int layers = std::min(int(brokenState) + 1, int(BlockRegistry::SnowLayerStageMax) + 1); // clamp 1..8
             emit spawnItem(x, y, z, RecipeRegistry::SnowballId, layers);
+        } else if (brokenId == BlockRegistry::Snow) {
+            // t505 雪块铲挖掉 2-3 雪球（spec「雪块被铲子挖掉应掉 2-3 个雪球」；机制简化对标 MC 1.0 雪块掉 4 雪球 ——
+            //   用户报告要求 2-3 故取随机 2..3）。空手不掉落由 canHarvest requiresTool=true 守卫（到 drop=true 路径
+            //   即已持铲）。Snow.dropId=SnowballId / dropCount=4 表兜底，本分支按随机 2..3 覆盖通用 dropCount
+            //   （同 SnowLayer 按 state 覆盖模式）。走 spawnItem 一次 emit count 件（1 实体携多雪球，拾取 addStack
+            //   一次入多件）。
+            const int snowballCount = 2 + int(QRandomGenerator::global()->bounded(2)); // 随机 2..3（bounded(2) → 0..1）
+            emit spawnItem(x, y, z, RecipeRegistry::SnowballId, snowballCount);
         } else if ((brokenState & BlockRegistry::DoubleSlabMarkerBit)
                    && BlockRegistry::fullBlockSlabDrop(brokenId) != 0) {
             // t215/t412 双半砖（合并态）破块掉 2× 对应半砖为**2 个独立物品实体**（非 1 个 count=2 栈）：
@@ -2164,6 +2190,32 @@ void PlayerController::placeBlock()
         }
         return; // 空桶（舀水 / 舀岩浆成功与否）不再走放置路径
     }
+    // t505 雪球抛掷（spec「雪球可丢弃发射：右键发射（仿箭实体），砸到怪物不扣血但红色受击动画 + 少量击退」；
+    //   机制对标 MC 1.0 玩家抛雪球）：手持雪球（SnowballId，材料段）右键 → spawnSnowball 从眼位沿视线方向以
+    //   kSnowballSpeed 抛出（抛物弹丸，机制对标箭但更简单 —— 无蓄力，右键即抛）。**玩家雪球 damage=0**（机制
+    //   对标 MC 1.0 玩家雪球打 mob 0 伤害，只触发红闪 + 击退，由 spawnSnowball 的 damage 参数传入；雪傀儡雪球
+    //   仍走 fireSnowball 传 kSnowballDamage 保留敌对伤害）。
+    //   **不要求 m_hasHit**（瞄准的是抛物弹道非方块命中格）；雪球非方块（材料段）→ selectedBlock 归 Air，须在
+    //   `m_selectedBlock == Air` 守卫之前分流（同桶 / 蛋 / 剪刀 / 食物分支模式）。spectator 已被入口 canPlace() 守卫
+    //   拦截；Creative / Survival 均可抛。生存消耗 1 雪球 / 创造不耗（无限抛）。分层：抛掷属 Game/Physics（读视线 +
+    //   调 EntityManager），不改栅格语义。
+    if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::SnowballId) {
+        // origin = 眼位 + 视线前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同 spawnArrowPlayer 模式）。
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        const QVector3D origin = eye + look * 0.5f;
+        // vel = 视线方向 × kPlayerSnowballSpeed（水平 + 略向上弧线，机制对标 MC 雪球抛物）。速度取 12（略快于
+        //   雪傀儡的 10，玩家主动抛掷更有力；机制对标非精确复刻）。EntityManager::kSnowballSpeed 是 private 不能
+        //   跨层读，故本层自定常量（同 spawnArrowPlayer 自定箭速模式）。
+        constexpr float kPlayerSnowballSpeed = 12.0f; // 玩家抛雪球速度（blocks/s）
+        const QVector3D vel = look * kPlayerSnowballSpeed;
+        m_entityManager->spawnSnowball(origin, vel, 0); // 玩家雪球 damage=0（红闪 + 击退，无血量伤害）
+        if (m_mode != Creative)
+            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 雪球（创造不耗）
+        m_lastPlaceMs = now;
+        emit swingArm(); // 抛雪球也是一次「使用」动作 → 挥手（t29）
+        return; // 雪球（抛出成功）不再走方块放置路径
+    }
     // t400 繁殖喂食 useBlock（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding）：
     //   手持繁殖食物（小麦 WheatId / 胡萝卜 CarrotId / 马铃薯 PotatoId / 种子 SeedId）右键 → 在主选体射线之外
     //   **独立**跑一条「mob 命中射线」（findMobHit，同剪刀剪羊 / 攻击路径）；命中可繁殖 mob 且食物匹配该物种
@@ -2612,15 +2664,17 @@ void PlayerController::placeBlock()
     //   spectator 已被入口 canPlace() 拦截；Creative / Survival 均可。分层：船交互属 Game/Physics（读射线 + 调
     //   BoatManager），不改栅格语义（setBlock 入口）。
     if (m_boatManager) {
-        // (a) 骑乘：未骑乘 + 命中船 → 上车（即便手持船物品也不另放，机制等价 MC 右键船优先上车）。
-        if (m_boatManager->ridingIndex() < 0
-            && m_boatManager->tryMount(position(), lookDirection(), kReach)) {
+        // (a) 骑乘 / 换船：命中船 → 上车（即便手持船物品也不另放，机制等价 MC 右键船优先上车）。
+        //   t508 换船：已骑乘时命中**另一艘**船 → tryMount 内部切到新船（旧船释放骑乘态自然浮水，spec
+        //   「骑船时右键另一艘船来坐上去」）；命中当前骑的船 / 未命中 → 返 false（落回放船路径）。
+        //   tryMount 现允许在 ridingIndex>=0 时调（换船），故去掉了旧「ridingIndex() < 0」守卫。
+        if (m_boatManager->tryMount(position(), lookDirection(), kReach)) {
             m_lastPlaceMs = now;
             emit swingArm();
             return;
         }
-        // (b) 放船：手持船物品 + 命中 → 放船。
-        if (m_hotbar && m_hasHit
+        // (b) 放船：手持船物品 + 命中 + **未骑乘**（骑乘中右键既没命中船换船 → 不另放船，防骑船时凭空造船）。
+        if (m_boatManager->ridingIndex() < 0 && m_hotbar && m_hasHit
             && (heldItemId == RecipeRegistry::OakBoatId || heldItemId == RecipeRegistry::SpruceBoatId)) {
             // 目标格定位（t508 修「船下沉」根因之一）：主选体射线**不挡水**（t165 / lessons-learned：Water 在
             //   blocksRay 排除清单），故瞄水面时射线穿水命中**水底实块**（m_hitBy = 水底格 ≠ 水面格）。
@@ -2828,13 +2882,19 @@ void PlayerController::placeBlock()
     }
     const bool isDoor = BlockRegistry::isDoor(m_selectedBlock); // t466 统一经 isDoor 谓词覆盖 WoodDoor + SpruceDoor
     const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
-    // t428 床双格（head+foot 横置，如门但水平相邻）：foot 落命中面相邻格 (tx,ty,tz)，head 落 foot 的「玩家
-    //   朝向反向」水平邻格。state 编码 bit[1:0]=朝向、bit3=head(1)/foot(0)（同 door 复用 bit3 标半格）。
-    //   bedPartnerOffset(footState=bedFacing, bit3=0) 返回 head 相对 foot 的偏移 = 玩家前向反向。
+    // t428/t496 床双格（head+foot 横置，如门但水平相邻）：foot 落命中面相邻格 (tx,ty,tz)，head 落 foot 的「玩家
+    //   朝向同向」水平邻格（spec t496：床脚落在放置处、床头朝远离玩家 —— 区别于熔炉 / 箱子「前面朝玩家」语义，
+    //   床的 head 在玩家前方、foot 在玩家脚下）。state 编码 bit[1:0]=head→foot 方向、bit3=head(1)/foot(0)（同 door
+    //   复用 bit3 标半格）。bedPartnerOffset 解码约定：stored bit[1:0] = head→foot 方向（foot 所在侧）。故放置时存
+    //   bedFacing = horizontalFacing ^ 1（玩家前向的反向 = 玩家脚下指向身后 = head→foot 方向），则 foot→head = -front
+    //   = 玩家前向 → head 落在玩家前方（远离玩家），符合 spec。
+    //   （旧版存 bedFacing = horizontalFacing 未取反 → head→foot = 玩家前向 → head 落玩家身后 = 床头朝向玩家脚侧，
+    //   即用户复盘「朝 +X 放时床头指向玩家脚侧」的根因。修：放床时 state 取 horizontalFacing ^ 1，同 chest/furnace
+    //   放置 state 取 ^ 1 的同源手法，但语义不同 —— 那里是「前面朝玩家」，这里是「head 远离玩家」。）
     const bool isBed = BlockRegistry::isBed(idByte);
-    const quint8 bedFacing = quint8(horizontalFacing() & 3);
+    const quint8 bedFacing = quint8((horizontalFacing() & 3) ^ 1); // head→foot 方向（玩家前向反向）
     int hdx = 0, hdz = 0;
-    BlockRegistry::bedPartnerOffset(bedFacing, hdx, hdz); // foot → 配对 head 偏移
+    BlockRegistry::bedPartnerOffset(bedFacing, hdx, hdz); // foot → 配对 head 偏移（= -front = 玩家前向）
     // 与玩家重叠 → 不放（防自埋 / 卡死）。t146：按「将放置方块的实际形状 sub-AABB」判 —— 不完整方块可能
     //   只占半格，玩家在另半格内仍可放；air/torch 无 sub-AABB → 不挡（允许放入玩家格，机制等价 MC）。
     //   door 占两格 → 上下格都查；bed 占两格 → foot + head 两格都查（bed ShapeFull 与 state 无关，state 任意）。
@@ -2976,13 +3036,23 @@ void PlayerController::placeBlock()
     //   而原检测**静默失败**（不命中无任何反馈）→ 用户「摆了不生成」无法定位。修法：加诊断 qInfo 让运行期可观测
     //   （lessons「先 run + 加诊断确认当前态，禁照旧报告打补丁」）—— ① 南瓜下方命中铁柱但底排不全 → 打底排
     //   4 邻格 id + rowX/rowZ；② 南瓜下方非铁柱/雪柱 → 打 below1/below2 id；用户跑一次 logs/voxelsandbox.log
-    //   即可精确定位是「南瓜放偏 / 底排不全 / 还是别的」。生成逻辑（rowX||rowZ → 移除 5 块 + spawn）不变。
-    if (idByte == BlockRegistry::Pumpkin && m_world && m_entityManager && ty >= 2
-        && ty - 2 < m_world->height()) {
+    //   生成逻辑（rowX||rowZ → 移除 5 块 + spawn）不变。
+    //   t509r 运行时根因排查：上轮诊断加完后，所有捕获的 logs/voxelsandbox.log **无任何 golem 行**——说明玩家
+    //   放南瓜时 placeBlock 根本没到本段（旧外层守卫 ty>=2 静默跳过 + 命中前 return）。修法：① 入口无条件打
+    //   「pumpkin placed」一行（确认 placeBlock 真到达 + 记录南瓜落点 tx/ty/tz + 玩家位）——只要玩家成功放南瓜
+    //   就必有此行，缺则证明放南瓜本身被拒（overlaps / 选中非南瓜 / 模式门控）；② 去掉 ty>=2 外层静默守卫
+    //   （blockAt 越界安全返 Air，ty-1/ty-2 越界当作「非雪/铁」自然 miss，不再整段跳过）；③ miss 分支打全 3×3
+    //   邻域（ty-1 与 ty-2 两层）+ 玩家朝向，用户跑一次即可看清算「南瓜放偏 / 底排朝向偏 / 少一块」。
+    if (idByte == BlockRegistry::Pumpkin && m_world && m_entityManager) {
+        // t509r ① 无条件入口日志：南瓜放置事件本身（含落点 + 玩家水平朝向 horizontalFacing）。用户日志若缺本行
+        //   → 南瓜放置被拒（placeBlock 早 return：overlapsPlayerAABB / 选中槽非南瓜 / canPlace 观察者门控）。
+        qInfo("pumpkin placed at %d %d %d (facing=%d, playerY=%.2f)",
+              tx, ty, tz, int(horizontalFacing() & 3), double(m_pos.y()));
+        const quint8 below1 = (ty - 1 >= 0) ? m_world->blockAt(tx, ty - 1, tz) : quint8(BlockRegistry::Air);
+        const quint8 below2 = (ty - 2 >= 0) ? m_world->blockAt(tx, ty - 2, tz) : quint8(BlockRegistry::Air);
         // (a) 雪傀儡：南瓜下方两格均为雪块（南瓜 + 雪块×2 竖直）→ 生成 MobSnowGolem + 移除 3 块。
         //     生成位置 feet = 南瓜下方两格（雪块底）；spawnMobTyped 把 pos 设为 (x+0.5, feet + halfH, z+0.5)。
-        if (m_world->blockAt(tx, ty - 1, tz) == BlockRegistry::Snow
-            && m_world->blockAt(tx, ty - 2, tz) == BlockRegistry::Snow) {
+        if (below1 == BlockRegistry::Snow && below2 == BlockRegistry::Snow) {
             m_world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0);     // 南瓜（刚放）
             m_world->setWaterSilent(tx, ty - 1, tz, BlockRegistry::Air, 0); // 雪块 1
             m_world->setWaterSilent(tx, ty - 2, tz, BlockRegistry::Air, 0); // 雪块 2
@@ -2992,8 +3062,7 @@ void PlayerController::placeBlock()
         }
         // (b) 铁傀儡：南瓜下方第一格铁块（T 顶）+ 第二格铁块（T 中）+ 第二格水平左右各一铁块（T 底排）→
         //     生成 MobIronGolem + 移除 5 块（南瓜 + 4 铁块）。底排支持 X 向（±X）或 Z 向（±Z）双向。
-        else if (m_world->blockAt(tx, ty - 1, tz) == BlockRegistry::IronBlock
-                 && m_world->blockAt(tx, ty - 2, tz) == BlockRegistry::IronBlock) {
+        else if (below1 == BlockRegistry::IronBlock && below2 == BlockRegistry::IronBlock) {
             const bool rowX = (m_world->blockAt(tx - 1, ty - 2, tz) == BlockRegistry::IronBlock
                                && m_world->blockAt(tx + 1, ty - 2, tz) == BlockRegistry::IronBlock);
             const bool rowZ = (m_world->blockAt(tx, ty - 2, tz - 1) == BlockRegistry::IronBlock
@@ -3018,12 +3087,18 @@ void PlayerController::placeBlock()
                 qInfo("iron golem built at %d %d %d", tx, ty, tz);
             }
         }
-        // t509 诊断：南瓜放置但下方非雪块竖柱 / 非铁块竖柱 → 记录下方 2 格 id，定位「南瓜放偏 / 竖柱不全」。
-        //   （仅当两柱都没命中才打，避免与上面命中分支重复。下方 1 格是关键：是 Snow→雪傀儡缺 1 雪块 / 是
-        //   IronBlock→铁傀儡缺中柱顶 / 是其它→南瓜放错了位置。）
+        // t509r ③ miss 全邻域诊断：南瓜放好但下方非雪柱 / 非铁柱 → 打下方两层 + 底排 4 邻 id + 玩家朝向，
+        //   精确定位「南瓜放偏一格（below1 非 iron = 瞄了 stem 侧面落旁格）/ 底排朝向偏 / 少一块铁」。
+        //   （仅当两柱都没命中才打，避免与上面命中分支重复。）
         else {
-            qInfo("golem build miss at %d %d %d: below1=%d below2=%d (need Snow/Snow or IronBlock/IronBlock column)",
-                  tx, ty, tz, int(m_world->blockAt(tx, ty - 1, tz)), int(m_world->blockAt(tx, ty - 2, tz)));
+            qInfo("golem build miss at %d %d %d: below1=%d below2=%d | row@-2: -X=%d +X=%d -Z=%d +Z=%d | facing=%d"
+                  " (need IronBlock/IronBlock column + 2-wide row, OR Snow/Snow)",
+                  tx, ty, tz, int(below1), int(below2),
+                  int(m_world->blockAt(tx - 1, ty - 2, tz)),
+                  int(m_world->blockAt(tx + 1, ty - 2, tz)),
+                  int(m_world->blockAt(tx, ty - 2, tz - 1)),
+                  int(m_world->blockAt(tx, ty - 2, tz + 1)),
+                  int(horizontalFacing() & 3));
         }
     }
     m_lastPlaceMs = now; // 放置成功 → 刷新 CD 计时（t128；now 为入口时间戳，同帧无意义漂移）

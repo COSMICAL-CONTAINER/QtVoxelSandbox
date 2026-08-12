@@ -91,10 +91,12 @@ int BoatManager::findBoatHit(const QVector3D &origin, const QVector3D &dir, floa
 
 bool BoatManager::tryMount(const QVector3D &origin, const QVector3D &dir, float maxDist)
 {
-    if (m_riderBoat >= 0) return false; // 已骑乘 → 不重复上
+    // t508 已骑乘时允许换船（spec「骑船时右键另一艘船来坐上去」）：命中**另一艘**船（idx != m_riderBoat）
+    //   → 直接把 m_riderBoat 切到新船（旧船释放骑乘态，自然浮水）。命中当前骑的船 → no-op（不重复上）。
     float dist = 0.0f;
     const int idx = findBoatHit(origin, dir, maxDist, &dist);
     if (idx < 0) return false;
+    if (idx == m_riderBoat) return false; // 命中当前骑的船 → no-op（不重复上）
     m_riderBoat = idx;
     notifyChanged();
     return true;
@@ -107,18 +109,23 @@ bool BoatManager::dismount(World *world, QVector3D &outPlayerFeet)
     m_riderBoat = -1;
     if (idx < 0 || idx >= int(m_boats.size()) || !m_boats[size_t(idx)].alive) { notifyChanged(); return true; }
     const QVector3D bp = m_boats[size_t(idx)].pos;
-    // 玩家下船摆船侧（+X 侧 1 格）安全位：脚底 Y = 船中心 Y（水面附近，下个 tick 重力让其落到支撑面）。
+    // t508 下船 Y 防沉底：船 Y 在过渡期（冰→水 / 深水 lerp 中途）可能短暂低于真水面 → 直接用 bp.y 摆玩家
+    //   会让玩家脚底沉到水面下深处，下一帧重力 + 水中减速不足以快速上浮 → 用户报「沉底按 shift 下不来」。
+    //   取「船 Y」与「该列真水面 Y」的较高者作下船脚底：保证玩家落在水面或之上（下一帧要么站冰 / 地面、
+    //   要么入水游泳上浮，绝不卡水底）。水面 Y 由 waterSurfaceY 查（无水返 fallback = bp.y，等同旧行为）。
+    const float placeY = world ? std::max(bp.y(), waterSurfaceY(world, bp.x(), bp.z(), bp.y())) : bp.y();
+    // 玩家下船摆船侧（+X 侧 1 格）安全位：脚底 Y = placeY（水面附近，下个 tick 重力让其落到支撑面）。
     //   优先 +X 侧；若 +X 侧堵（可碰撞方块）则试 -X / +Z / -Z，取首个非堵方向。
-    outPlayerFeet = QVector3D(bp.x() + 1.0f, bp.y(), bp.z());
+    outPlayerFeet = QVector3D(bp.x() + 1.0f, placeY, bp.z());
     if (world) {
         const float candidates[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         for (const auto &c : candidates) {
             const float tx = bp.x() + c[0], tz = bp.z() + c[1];
             const int cx = int(std::floor(tx)), cz = int(std::floor(tz));
-            const int cy = int(std::floor(bp.y()));
+            const int cy = int(std::floor(placeY));
             // 该列脚位 + 头位格都非可碰撞 → 可站（防下船即卡墙）。
             if (!world->isCollidable(cx, cy, cz) && !world->isCollidable(cx, cy + 1, cz)) {
-                outPlayerFeet = QVector3D(tx, bp.y(), tz);
+                outPlayerFeet = QVector3D(tx, placeY, tz);
                 break;
             }
         }
@@ -157,10 +164,22 @@ float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbac
         if (world->blockAt(cx, y, cz) == BlockRegistry::Water) topWaterY = y;
         else if (topWaterY >= 0) break; // 已过水面（水 → 非水），停在最顶水格
     }
-    // 起点格本身或其下也可能是水（船略没入）→ 向下补扫 4 格覆盖「船中心在水面下较深」。
+    // 起点格本身或其下也可能是水（船略没入 / 船在高处如冰面边缘向水面过渡）→ 向下补扫找水柱。
+    //   t508：向下扫描深度从 4 格扩到 16 格 —— 旧版仅扫 startY-1..startY-4，船从冰面（高位）骑到水面（水面
+    //     比冰面低 5+ 格）时向下 4 格够不到水面 → topWaterY 恒 -1 → 返 fallbackY（高位）→ tickRiddenBoat 把船
+    //     Y 钉在高位悬空 / 或玩家下马后船被重力拽下穿过水柱沉底（用户报「船从冰上走下水直接沉底」真因）。
+    //   向下扫到首个水格后，再向上爬到该水柱的最顶水格（= 真水面）：首个水格可能是水柱中段，必须爬顶。
     if (topWaterY < 0) {
-        for (int y = startY - 1; y >= 0 && y >= startY - 4; --y) {
-            if (world->blockAt(cx, y, cz) == BlockRegistry::Water) { topWaterY = y; break; }
+        int firstWaterY = -1;
+        for (int y = startY - 1; y >= 0 && y >= startY - 16; --y) {
+            if (world->blockAt(cx, y, cz) == BlockRegistry::Water) { firstWaterY = y; break; }
+        }
+        if (firstWaterY >= 0) {
+            topWaterY = firstWaterY;
+            for (int y = firstWaterY + 1; y < 256; ++y) {
+                if (world->blockAt(cx, y, cz) == BlockRegistry::Water) topWaterY = y;
+                else break; // 水柱顶（水 → 非水）
+            }
         }
     }
     if (topWaterY < 0) return fallbackY;

@@ -769,10 +769,12 @@ bool BlockRegistry::isWool(quint8 blockId)
         || (blockId >= FirstWoolVariant && blockId <= LastWoolVariant);
 }
 
-// t428 床配对格偏移（state 解码 → 配对另一半相对本格的水平 (dx,dz)）。bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z
-//   （与 horizontalFacing / chestFrontFace 同源）；bit3=head(1)/foot(0)。玩家放置时 head 落 foot 的「朝向反向」
-//   邻格 → 本格为 foot(bit3=0) 时配对(head)在 -front；本格为 head(bit3=1) 时配对(foot)在 +front。y 同层（dy=0）。
-//   纯 state 解码（单一权威，同 chestFrontFace 模式）；playercontroller 放置 / 破坏联动读此，不各处自写朝向。
+// t428 床配对格偏移（state 解码 → 配对另一半相对本格的水平 (dx,dz)）。bit[1:0]=head→foot 方向 0=+X 1=-X 2=+Z 3=-Z
+//   （值域与 horizontalFacing / chestFrontFace 同源；语义 = head 半指向 foot 半的轴向）；bit3=head(1)/foot(0)。
+//   t496：玩家放置时 head 落 foot 的「玩家朝向同向」邻格（bedFacing = horizontalFacing ^ 1 = head→foot 方向）。
+//   本格为 foot(bit3=0) 时配对(head)在 -front（= 玩家前向，远离玩家）；本格为 head(bit3=1) 时配对(foot)在 +front。
+//   y 同层（dy=0）。纯 state 解码（单一权威，同 chestFrontFace 模式）；playercontroller 放置 / 破坏联动读此，
+//   不各处自写朝向。
 void BlockRegistry::bedPartnerOffset(quint8 state, int &dx, int &dz)
 {
     static constexpr int kFrontX[4] = { 1, -1, 0, 0 };
@@ -1177,6 +1179,16 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
     }
 }
 
+// t494 状态感知自发光（见头注释）：非状态相关方块（火把/岩浆/末地传送门）委托单参版（state=0 等价）；
+//   熔炉按 lit bit2 翻转：燃烧中 → 13（MC 1.0 熔炉光 level 13），熄灭 → 0。World 光照 flood 种子用此版
+//   读 cell 真实 state 区分燃/熄。
+quint8 BlockRegistry::lightEmission(quint8 blockId, quint8 state)
+{
+    // t494：燃烧中的熔炉自发光 13（机制等价 MC 1.0 熔炉冶炼进行时正面发光 level 13）。state bit2 = lit flag。
+    if (blockId == Furnace && (state & FurnaceStateLitFlag)) return 13;
+    return lightEmission(blockId); // 其余（含熄灭熔炉）按 id-only 表（火把/岩浆/末地传送门等，与 state 无关）
+}
+
 // t360 列顶实面 Y 偏移（见头注释）：PCF 软影用本值替代「heightmap+1.0 整格」假设，按方块真实模型高度判遮挡。
 //   与 shapeBoxes 的 maxY 同源（单一权威：改形状只改一处），但免建 vector —— PCF 热路径每顶点 16 次查询。
 float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
@@ -1211,6 +1223,28 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
             //   格角落 / 顶部以上空气穿过 → 修「挖火把背后的方块却撸掉火把」。朝向由邻居定（呈现层持），
             //   此处保守中央区覆盖所有朝向焰 + 立柱中段（瞄焰/柄命中、瞄角落穿）。
             return {BlockAABB{0.3f, 0.0f, 0.3f, 0.7f, 0.85f, 0.7f}};
+        if (blockId == Ladder) {
+            // t501 木梯精确 sub-AABB（spec「应像火把：不优先选中梯子、可透视穿过，只有指针完全对准梯子才选中」）。
+            //   mesher（partialblockgeometry Ladder case）画**单片贴墙 quad**：state[1:0] 决定贴墙方向（=支撑墙所在的
+            //   水平方向），quad 贴该面 cell 边内缩 1/16、覆盖另两轴全 [0,1]。这里给一个**贴该面的薄板**（垂直墙法线
+            //   方向 3/16 厚、贴 cell 边 1/16 嵌墙余量侧），让准星完全落在木梯视觉面时才命中、瞄格中空气部分穿过
+            //   命中后方块（修「爬梯时挖掘优先选中梯子、挖不了旁边方块」）。木梯无碰撞 → 玩家穿入梯格属正常，
+            //   起点退化分支（startPartial）会判眼位在 sub-AABB 外 → 不退化、继续命中后方（与火把贴脸同源）。
+            //   朝向（state[1:0]）：0=+X 1=-X 2=+Z 3=-Z（与 ladderSupportOffset / partialblockgeometry 同编码）。
+            constexpr float kWall = 1.0f / 16.0f;  // 视觉 quad 贴 cell 边内缩量（与 mesher kInset 同源）
+            constexpr float kDepth = 3.0f / 16.0f; // 薄板沿墙法线厚度（视觉 quad 是 0 厚，加 3/16 容差使准星微偏亦命中）
+            const int face = state & 3;
+            switch (face) {
+            case 0:  // 支撑墙 +X：quad 贴 x=1-kWall → 薄板 [1-kWall-kDepth, 1-kWall]
+                return {BlockAABB{1.0f - kWall - kDepth, 0.0f, 0.0f, 1.0f - kWall, 1.0f, 1.0f}};
+            case 1:  // 支撑墙 -X：quad 贴 x=kWall → 薄板 [kWall, kWall+kDepth]
+                return {BlockAABB{kWall, 0.0f, 0.0f, kWall + kDepth, 1.0f, 1.0f}};
+            case 2:  // 支撑墙 +Z：quad 贴 z=1-kWall → 薄板 [1-kWall-kDepth, 1-kWall]
+                return {BlockAABB{0.0f, 0.0f, 1.0f - kWall - kDepth, 1.0f, 1.0f, 1.0f - kWall}};
+            default: // case 3：支撑墙 -Z：quad 贴 z=kWall → 薄板 [kWall, kWall+kDepth]
+                return {BlockAABB{0.0f, 0.0f, kWall, 1.0f, 1.0f, kWall + kDepth}};
+            }
+        }
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // air / water → 整格（air 不进本路径兜底；water 整格舀水）
     }
     // 不完整方块段（ShapeSlab/...）→ 同 selectionAABBs（实体 sub 形状；空气部分穿过命中后方块）。

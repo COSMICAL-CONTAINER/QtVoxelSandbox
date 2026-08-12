@@ -357,6 +357,23 @@
     不在水里 / 湖底 / 草地」）；`tickSugarcaneGrowth` 旧版只查柱基邻水、不查柱基沙地支撑 → 补 `blockAt(by-1)==Sand`
     门，关闭「玩家误放 / 旧世界残留的草地甘蔗柱长高」残留路径，与 worldgen 放置谓词同源。
 
+- **「幽灵实现」——注释 / 文档里以函数名引用某个机制，但该函数从未定义 / 从未接线（挂着「will be done」语义但
+  代码库里查无此物）**：跨多个文件、多任务的注释互相引用一个名字（如「生长由 `tickXxxGrowth` 推进」「玩家采摘后
+  回阶段 0 由 `tickXxxGrowth` 重新长」），形成一张**自洽的注释网**，读任一条都觉得「机制已实现、在别处」—— 但
+  `grep` 函数定义（`void World::tickXxxGrowth`）零命中、调用点（QML WorldClock tick 桥接列表、C++ 调用）也零命中。
+  外部表现：玩家可**放置**该方块（放置逻辑在 Game 层独立实现）、worldgen 会**散布**它、mesher 会**渲染**它，但
+  「随时间推进状态」的动态机制完全不发生（种下永远停在初态）。**判别信号**：用户报「X 可放置但不会 Y（生长 / 蔓延 /
+  转化）」+ 注释里反复出现某个 `tickY` / `updateZ` 名字 → **立刻 grep 定义 + 调用点**，若任一为零即幽灵实现。**自检门槛**
+  （审「某方块 / 实体的动态机制」时必跑）：对注释声称负责该机制的每个函数名，断言「定义存在 ∧ 调用点存在」—— 二者
+  缺一即未实现。**元教训**：注释网会自我强化「已实现」错觉（A 引用 B、B 引用 A），静态阅读任一文件都查不出 → 唯有
+  「函数名 → 定义 / 调用点」的机械 grep 能戳破。新任务开工 grep 机制名时，看到「只有注释命中、无定义 / 无调用」要警觉。
+  - 证据：t514——`tickSweetBerryBushGrowth` 在 `world.cpp:2933`（worldgen 注释）、`blockregistry.h:922`（方块段注释）、
+    `recipe.h`（物品段注释）三处以已实现口吻引用，但 `world.h` / `world.cpp` 无定义、`Main.qml` WorldClock tick 桥接
+    列表无调用 → 浆果丛种下永不升阶段（玩家种植落地 state=0 停滞、采后回 0 不再长）。补定义（world.cpp 仿 tickCropGrowth
+    增量索引模式）+ 接线（Main.qml `theWorld.tickSweetBerryBushGrowth()`）+ `isGrowthBlock` 加 SweetBerryBush 入
+    `m_growthCells` 索引后机制方闭环。配套的采摘 / 接触伤害 / 阶段贴图三路是**真已实现**（playercontroller 有实体分支），
+    唯生长这一路是幽灵。
+
 - **归一函数里「结构体默认值」与「显式哨兵」不可混同 —— 把默认值当退化态会静默腐蚀新实例（"一次性物品"陷阱）**：
   当一个值类型字段（如 `ItemStack::durability`）的**结构体默认值**是 0，而业务上另用 **-1 作"缺省/自动"哨兵**时，归一函数
   若把 `==0` 单独判成某种退化态（如"只剩 1 次耐久"），则**任何未显式赋值的新实例**（聚合初始化漏字段、迁移 / 旧存档
@@ -541,5 +558,85 @@
   - **证据**：t490fix——ItemEntityManager 掉落物合并查 Core `BlockRegistry::maxStackSize(int)`（新加），不 include
     Hotbar；mob 掉落物（骨头/腐肉/箭/火药/羽毛/线/皮革/墨囊/蛋/肉/铁锭/花/雪球，均材料段 64）合并正确；工具（弓 0x10F）
     maxStack=1 不合并（独立耐久，正确）；桶/汤/护甲按 64（偏差，但掉落物中不存在，无害）。
+
+---
+
+## 「QML NOTIFY 依赖用语句块 `{ rev; return f() }` 形式在静态构建节点上会漏注册」的绑定形式陷阱（t498 验证）
+
+> 元原则：**QML 属性绑定依赖 NOTIFY 属性时，语句块形式 `property T x: { vm.someRevision; return vm.someAt(i) }`
+> （NOTIFY 属性作为「裸表达式语句」读取）与表达式形式 `property T x: vm.someRevision >= 0 ? vm.someAt(i) : fallback`
+> （NOTIFY 属性**参与值计算**）并不等价：前者在某些上下文（本工程实测：**静态构建的 QQuick3D Node 子树内的 Model 上**）
+> 会**静默漏注册**该 NOTIFY 依赖 —— 信号照常发、甚至能被同级 `Connections` 收到，但绑定体不重算，属性恒为初值。后者把
+> NOTIFY 属性写进三元/算术/逻辑表达式，依赖被可靠注册。**
+
+- **判别信号**（如何认出这类 bug，而非死磕数值）：
+  - 同一个 VM 的 NOTIFY 信号**已经到达**目标对象的父 Node（用 `Connections { function onXxxChanged() {...} }` 能打 log 证明），
+    但目标对象上「读该 NOTIFY 属性 + 调 Q_INVOKABLE accessor」的自定义属性**恒为初值、Changed 信号从不触发**。
+  - 把绑定从语句块 `{ rev; return f() }` 改成表达式 `rev >= 0 ? f() : fallback` 后，Changed 信号立刻触发、值更新 → 确诊。
+  - **强对照**：Repeater delegate（item/mob/经验球/船，全用语句块形式）工作正常 —— 因为它们是**动态创建**（Loader/Repeater 实例化）
+    且 NOTIFY 信号高频（`revision` 每帧随实体移动触发）。静态构建 + 低频 NOTIFY 的组合才暴露漏注册。mob 护甲（t377）也用语句块形式
+    却「看似工作」纯属侥幸 —— `entityManager.revision` 高频触发顺带重算；一旦把同样形式搬到 player 护甲（`armorRevision` 仅装备时变、
+    且 Model 在静态 playerModel 子树内），漏注册立刻致命。
+  - **「修了好几次还不好，但每次都只在调数值（scale/凸出量/opacity）」是这类 bug 的典型指纹**：根因在依赖没建立 → 属性恒初值 →
+    `visible` 恒 false → Model 根本不进渲染；调再多几何尺寸都没用，因为像素从没被产出过。
+- **通用形态与防御**：
+  - 任何「`{ vm.revision; return vm.xxxAt(i) }`」写在**静态构建**的 QQuick3D Model/Node 上时，**改写成表达式形式**
+    （`vm.revision >= 0 ? vm.xxxAt(i) : fallback`，或在算术/逻辑/三元里读它）。Repeater delegate 内可保留语句块形式（动态 + 高频双保险），
+    但新写的静态节点绑定一律用表达式形式以绝后患。
+  - **诊断套路**：怀疑某属性绑定不更新时，加 (1) 同级 `Connections.onXxxChanged` log（证明信号到达）+ (2) 一个**简单绑定** `property int probe: vm.revision`
+    + `onProbeChanged` log（证明该 NOTIFY 属性本身可被订阅）+ (3) 目标属性的 `onXxxChanged` log。三者交叉：信号到 + probe 变 + 目标不变 = 漏注册。
+- **证据**：t498（玩家 F5 装甲修 3-4 次仍不显示，mob 装甲正常）。player 护甲 8 个 Model 的 `property int armId: { hotbarVM.armorRevision; return hotbarVM.armorBlockIdAt(slot) }`
+  装备后 armId 恒 0、visible 恒 false；`Connections.onArmorSlotsChanged` 收到信号、同级 `probeArmorRev`（简单绑定）正确变 1→2→3→4，唯独 armId 不重算。
+  改 `hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(slot) : 0` 后，8 件全部 `onArmIdChanged→772/773/774/775` + `visible→true`（log 实测）。
+  前 3-4 次只调 z scale（0.46→0.56）等凸出量无效 —— 因为护甲 Model 压根没渲染（visible 恒 false），不是被身体遮挡。
+
+---
+
+## 「受击 helper 带 amount<=0 早退守卫」与「0 伤害但仍需受击反馈」的语义错配（t505 验证）
+
+> 元原则：**「扣血 helper」（damageEntity）通常带 `amount <= 0` 早退守卫防误用（负伤害 / 零误调）。
+> 当某机制需要「0 伤害但触发完整受击反馈链（红闪 + 击退 + 减速）」时（典型：玩家抛雪球打 mob —— 机制对标
+> MC 1.0 玩家雪球 0 HP 伤害但有红闪 + 击退反馈），直接调 `damageEntity(idx, 0)` 会被守卫静默吞掉 →
+> 红闪不闪、击退不发，用户报「砸到怪物没反应」。这不是「数值没传对」，是「helper 的守卫语义」与
+> 「调用方的意图」错配。**
+
+- **判别信号**：某投射物 / 攻击机制 spec 要「0 伤害但红闪 + 击退」，代码写 `damageEntity(idx, 0)` 或
+  `damageEntity(idx, computedAmount)`（computedAmount 在某分支算到 0）→ 用户报「砸中没反应 / 无红闪 / 无击退」，
+  但 grep `damageEntity` 调用确实在执行 → 高度怀疑 helper 的 `amount<=0` 早退守卫吞掉了调用。**诊断**：
+  读 damageEntity 主体前几行，见 `if (... || amount <= 0) return;` → 即此坑。
+- **修法（不要削弱守卫）**：守卫本身是对的（防负伤害误用），不要删它。而是**按伤害值分流**：
+  - `amount > 0` → 走 damageEntity（扣血 + 设 hurtFlash 红闪 + 归零死亡链，复用完整受击链）；
+  - `amount == 0` → **手动设 `e.hurtFlash = kHurtFlashTime`**（绕过 damageEntity 的扣血，但仍触发红闪）+
+    独立调 knockback 击退 + 独立设 slowTimer 减速（这些副作用在 damageEntity 外单独应用）。
+  - bump revision 让 QML 红闪绑定刷新（damageEntity 内部本会 bump，0 伤害路径须手动补）。
+- **通用形态**：凡「受击 helper 带 `amount<=0` / `target.dead` / `target.invulnerable` 早退守卫」，而某机制需要
+  「不扣血但仍触发受击反馈」（红闪 / 击退 / 减速 / 命中音），**不能依赖 helper 副作用**——须在 helper 外独立应用
+  那些「非扣血的受击反馈」。自检：审每个「0 伤害 / 无伤但 spec 要反馈」的机制，问「我调的 helper 在 amount=0 时
+  会早退吗？早退后红闪 / 击退谁负责？」——若没人负责，手动补。机制对标 MC 1.0 的典型场景：玩家雪球 / 雪球打
+  非火焰系 mob / 末影珍珠投掷命中（无伤有反馈）。
+- **证据**：t505——玩家抛雪球 spec「砸到怪物不扣血但红色受击动画 + 少量击退」。旧 `damageEntity(mi, kSnowballDamage)`
+  对所有雪球统一伤害；改 per-snowball `snowballDamage` 字段（玩家抛=0 / 雪傀儡抛=kSnowballDamage）后，玩家雪球
+  `damageEntity(mi, 0)` 被 `amount<=0` 守卫吞掉 → 无红闪无击退。修：snowball 命中分支 `if (e.snowballDamage > 0)
+  damageEntity(...); else { tm.hurtFlash = kHurtFlashTime; ++m_revision; }` 后接独立 `knockback(...)` +
+  `slowTimer = kSnowSlowDuration`（二者对 0 伤害 / 正伤害都应用，golem 雪球也叠加小幅击退）。
+
+---
+
+## 「同一实体类的不同发射者需不同伤害语义」用 per-entity 字段而非全局常量（t505 验证）
+
+> 元原则：**当同一类投射物实体（雪球 / 箭 / 火球）由不同发射者（玩家 vs mob）发射时需不同伤害（典型：雪傀儡
+> 雪球伤敌对 / 玩家雪球 0 伤只击退），伤害值必须是**实体字段**（spawn 入口写入），而非命中分支读全局常量。
+> 否则「同一类实体两种语义」无法区分 —— 命中分支只看实体自身，不知道是谁发的。**
+
+- **判别信号**：某投射物实体的命中分支写 `damageEntity(target, kXxxDamage)`（读全局常量），而 spec 要求「玩家发的
+  与 mob 发的不同伤害」→ 必然有一方语义错（玩家雪球也扣血，或 mob 雪球也无伤）。
+- **修法**：给实体加 per-instance 伤害字段（如 `snowballDamage`），spawn 入口收 damage 参数由 caller 决定
+  （mob 发射路径传 `kXxxDamage`、玩家发射路径传 0 或蓄力值）。命中分支读实体字段而非全局常量。
+- **对照先例**：本工程箭实体早有此模式 —— `arrowDamage` 字段（骷髅箭 spawnArrow 写 `kArrowDamage=2`、玩家箭
+  spawnArrowPlayer 写蓄力 1..6），命中分支读 `e.arrowDamage`。雪球应同构（旧版漏了，t505 补 `snowballDamage`）。
+- **证据**：t505——雪球 spawnSnowball 旧签名 `(origin, vel)` 命中分支硬读 `kSnowballDamage`；改 `(origin, vel, damage)`
+  + Entity.snowballDamage 字段，fireSnowball（雪傀儡）传 kSnowballDamage、playercontroller 玩家抛传 0。命中分支
+  按 `e.snowballDamage > 0` 分流扣血 vs 纯红闪（结合上一条「0 伤害仍需反馈」语义）。
+
 
 
