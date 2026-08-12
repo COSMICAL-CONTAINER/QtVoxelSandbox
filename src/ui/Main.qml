@@ -430,6 +430,10 @@ Window {
         //   整体替换内存（先清后填）—— 无存档 chests 表 → 空列表 → 清空，杜绝上一世界箱子残留串入新世界。
         //   存档 chests 由 saveAndExitToWorldList 经 saveAll(name, chestStore.allChests()) 落盘。
         chestStore.loadAll(worldStore.loadChests())
+        // t177 二轮复盘 熔炉按世界持久化 + 修跨世界泄漏：furnaceStore 跨世界长驻（同 hotbarVM / chestStore），
+        //   进世界前 loadAll 整体替换内存（先清后填）—— 无存档 furnaces 表 → 空列表 → 清空，杜绝上一世界熔炉
+        //   残留串入新世界。存档 furnaces 由 saveAndExitToWorldList 经 saveAll(name, chests, furnaces) 落盘。
+        furnaceStore.loadAll(worldStore.loadFurnaces())
         // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
@@ -541,7 +545,8 @@ Window {
         if (hasOpen) {
             worldStore.savePlayerData(gatherPlayerState())
             // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
-            worldStore.saveAll(currentWorldName, chestStore.allChests())
+            // t177 二轮复盘：熔炉内容同事务落盘（saveAll 第 3 参 = FurnaceStore::allFurnaces() 产物）。
+            worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces())
         }
         coverGrabPending = true   // 标记退出进行中（防 onGrabbed + 兜底定时器双调 finish）
         // 截封面：仅在 playing（View3D 抓得到画面）+ 有世界文件名（saveCover 据此写 sidecar PNG）时抓。
@@ -1514,6 +1519,11 @@ Window {
     //   纯 Game/ViewModel 层，不依赖 World/Renderer；物品栈语义同 Hotbar（id=0=空）。ChestUI 经 chestX/Y/Z
     //   寻址当前所开箱子；多只箱子各自独立 27 槽，跨 UI 开关持久。
     ChestStore { id: chestStore }
+    // t177 二轮复盘 熔炉内容存储 VM（按方块世界坐标键控的 in/fuel/out 3 槽 + 冶炼进度；FurnaceUI 读写 +
+    //   onBlockBroken(Furnace) 清孤儿 + 掉内容）。纯 Game/ViewModel 层，不依赖 World/Renderer；物品栈语义同
+    //   Hotbar（id=0=空）。FurnaceUI 经 furnaceX/Y/Z 寻址当前所开熔炉；多只熔炉各自独立内容 + 进度，跨 UI 开关
+    //   持久（修旧 bug：旧 FurnaceUI 把 in/fuel/out 存 QML 本地属性 → 全世界熔炉共享一个物品栏）。
+    FurnaceStore { id: furnaceStore }
 
     // 玩家状态（生命/饥饿，t22）：满血满饥初值。心/饥饿条读其 health/hunger；掉落伤害经
     // 下面的 Connections 路由到 takeDamage（呈现层只读，绝不反向写数值；PLAN §2 分层）。
@@ -6555,6 +6565,20 @@ Window {
             //   spec「破箱掉落内容」属 Phase 1.1+，本轮直接弃内容）。id=22=BlockRegistry::Chest（与
             //   blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 / sand=8 既有模式）。
             if (id === 22) chestStore.clearChest(x, y, z)
+            // t177 二轮复盘：熔炉被破 → 把 in/fuel/out 内容 spawnItem 掉落世界（机制等价 MC 1.0 破熔炉掉落
+            //   内容，修用户报「打掉熔炉内部物品不掉」），再 furnaceStore.clearFurnace 清孤儿条目。id=10=
+            //   BlockRegistry::Furnace（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
+            //   chest=22 既有模式）。逐槽 spawnItem（每槽独立实体，便于玩家走回拾取；itemEntities.spawnItem
+            //   内置就近合并，同 id 自动合）。
+            if (id === 10) {
+                for (let fi = 0; fi < 3; ++fi) {
+                    const fid = furnaceStore.slotIdAt(x, y, z, fi)
+                    const fcount = furnaceStore.slotCountAt(x, y, z, fi)
+                    if (fid !== 0 && fcount > 0)
+                        itemEntities.spawnItem(x, y, z, fid, fcount)
+                }
+                furnaceStore.clearFurnace(x, y, z)
+            }
             // t117：被破格上方若为沙 → 失支撑塌落（maybeTrigger 内部 setBlock(air) 递归触发更上方沙链）。
             maybeTriggerFallingBlock(x, y + 1, z)
         }
@@ -8231,6 +8255,8 @@ Window {
         furnaceX: window.furnaceX
         furnaceY: window.furnaceY
         furnaceZ: window.furnaceZ
+        // t177 二轮复盘 注入 FurnaceStore（按 furnaceX/Y/Z 寻址的 per-block 内容 + 冶炼进度）。
+        furnaceStore: furnaceStore
         visible: window.appState === "playing" && window.furnaceOpen
         z: 150
         onClosed: window.closeFurnace()

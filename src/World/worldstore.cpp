@@ -134,6 +134,19 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create chests failed:" << q.lastError().text();
         return false;
     }
+    // t177 二轮复盘 熔炉内容表：同 chests 模式 —— 每只熔炉（按方块世界坐标键控）一行，data 列存整个
+    //   {slots, burn, smelt} 的 JSON 文本（同 player_state 自描述）。纯加表 —— 旧库 IF NOT EXISTS 幂等补建，
+    //   无数据迁移负担；schema 版本不 bump（IF NOT EXISTS 纯加表对老库向前兼容，见 worldstore.h kSchemaVersion 注释）。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS furnaces ("
+            "  x INTEGER NOT NULL,"
+            "  y INTEGER NOT NULL,"
+            "  z INTEGER NOT NULL,"
+            "  data TEXT NOT NULL,"
+            "  PRIMARY KEY (x, y, z))"))) {
+        qCCritical(lcSave) << "create furnaces failed:" << q.lastError().text();
+        return false;
+    }
     // 写 user_version（新库 0→kSchemaVersion；旧库同版本幂等；无 harm）。
     q.exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
     return true;
@@ -369,7 +382,7 @@ void WorldStore::closeWorld()
     m_openFile.clear();
 }
 
-bool WorldStore::saveAll(const QString &name, const QVariantList &chests)
+bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "saveAll: no open db or world";
@@ -433,6 +446,11 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests)
     }
     // t188 箱子内容同事务落盘（chests 表 DELETE 全量 + INSERT；与 chunks / meta 原子提交）。
     if (!writeChests(chests)) {
+        db.rollback();
+        return false;
+    }
+    // t177 二轮复盘 熔炉内容同事务落盘（furnaces 表 DELETE 全量 + INSERT；与 chunks / meta / chests 原子提交）。
+    if (!writeFurnaces(furnaces)) {
         db.rollback();
         return false;
     }
@@ -605,6 +623,65 @@ QVariantList WorldStore::loadChests() const
         const QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toString().toUtf8());
         cm.insert(QStringLiteral("slots"), doc.toVariant());
         out.append(cm);
+    }
+    return out;
+}
+
+// t177 二轮复盘 熔炉落盘：DELETE 全量 + INSERT 每只熔炉（坐标列 + data JSON 文本）。调用方（saveAll）已开
+//   事务，本方法不 BEGIN/COMMIT（同事务原子）。furnaces 形状 = FurnaceStore::allFurnaces() 产物：每项
+//   {x,y,z,slots:[{id,count}×3], burn, smelt}。整个 QVariantMap（含 slots + burn + smelt）序列化为 JSON 文本
+//   存 data 列（同 chests 自描述、跨版本可读）。坐标缺 / 非法 → 跳过该熔炉（不写残条目）。
+bool WorldStore::writeFurnaces(const QVariantList &furnaces)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM furnaces"))) {
+        qCCritical(lcSave) << "saveAll: furnaces delete failed:" << del.lastError().text();
+        return false;
+    }
+    QSqlQuery iq(db);
+    iq.prepare(QStringLiteral("INSERT INTO furnaces (x, y, z, data) VALUES (?, ?, ?, ?)"));
+    for (const QVariant &v : furnaces) {
+        const QVariantMap fm = v.toMap();
+        bool okx = false, oky = false, okz = false;
+        const int x = fm.value(QStringLiteral("x")).toInt(&okx);
+        const int y = fm.value(QStringLiteral("y")).toInt(&oky);
+        const int z = fm.value(QStringLiteral("z")).toInt(&okz);
+        if (!okx || !oky || !okz) continue; // 缺坐标 → 跳过（不写残条目）
+        // 整个熔炉条目（slots + burn + smelt）序列化为 JSON 文本（同 chests / player_state 自描述、跨版本可读）。
+        const QJsonDocument doc = QJsonDocument::fromVariant(fm);
+        iq.addBindValue(x);
+        iq.addBindValue(y);
+        iq.addBindValue(z);
+        iq.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+        if (!iq.exec()) {
+            qCCritical(lcSave) << "saveAll: furnace insert failed at" << x << y << z
+                               << ":" << iq.lastError().text();
+            return false;
+        }
+    }
+    return true;
+}
+
+// t177 二轮复盘 读 furnaces 表为 QVariantList（形状同 writeFurnaces 入参）。未打开 → 空列表。caller
+//   （Main.qml.enterWorld）转交 furnaceStore.loadAll 整体替换内存（清旧世界残留 + 填本世界熔炉）。
+QVariantList WorldStore::loadFurnaces() const
+{
+    QVariantList out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT x, y, z, data FROM furnaces"))) {
+        qCWarning(lcSave) << "loadFurnaces: select failed:" << q.lastError().text();
+        return out;
+    }
+    while (q.next()) {
+        const QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toString().toUtf8());
+        QVariantMap fm = doc.toVariant().toMap();
+        // data 列存的是整个 {x,y,z,slots,burn,smelt} → JSON；坐标用表的列（权威），JSON 内坐标仅冗余。
+        fm.insert(QStringLiteral("x"), q.value(0).toInt());
+        fm.insert(QStringLiteral("y"), q.value(1).toInt());
+        fm.insert(QStringLiteral("z"), q.value(2).toInt());
+        out.append(fm);
     }
     return out;
 }

@@ -146,6 +146,12 @@ qt_add_executable(voxelsandbox
     #   运行期「is not a type」→ 箱子右键无 UI；t179 补注册。
     src/Game/cheststore.cpp
     src/Game/cheststore.h
+    # t177 二轮复盘 熔炉内容存储 VM（Game 层）：按方块世界坐标键控的 in/fuel/out 3 槽 + 冶炼 tick 进度
+    #   （burnRemain/smeltProgress）；FurnaceUI 读写 + 破熔炉清孤儿 + 掉内容。修旧 bug：FurnaceUI 旧把
+    #   in/fuel/out 存 QML 本地属性 → 全世界熔炉共享一个物品栏（打开任何熔炉都是同一内容）。本类把内容
+    #   下沉到 C++ VM 层、按坐标寻址，结构对齐已 per-block 的 ChestStore。纯存储类（无光 / 无 World 依赖）。
+    src/Game/furnacestore.cpp
+    src/Game/furnacestore.h
     # t393 战利品表（Game 层）：纯静态数据 + 纯函数（条目池 + 加权抽取）；地牢箱 + 渔获共用。
     #   无 Q_OBJECT / 无实例；item id 引用 recipe.h 材料段常量。ChestStore::populateDungeonLoot 调它填箱。
     src/Game/loottable.cpp

@@ -28,10 +28,14 @@
 //   - 玩家态：savePlayerData(QVariantMap) / loadPlayerData() → 玩家位姿 / 模式 / 血饥 / 背包（hotbar 9 +
 //     main 27）以 JSON 文本存 player_state 表（自描述、跨版本可读；裸原语由 QML 编排，WorldStore 不解析
 //     Game 层语义，只存 / 取整块 JSON）。
-//   - 箱子内容（t188）：saveAll(name, chests) 把 ChestStore 的箱子（坐标键控的 27 槽物品）落盘到 chests
+//   - 箱子内容（t188）：saveAll(name, chests, furnaces) 把 ChestStore 的箱子（坐标键控的 27 槽物品）落盘到 chests
 //     表（与 chunks / meta 同一事务，原子写）；loadChests() 读回。cheststore 在 Game 层 → WorldStore **不**
 //     include 它（向上违铁律），箱子数据经 Q_INVOKABLE 裸 QVariantList 边界传入 / 取出（同 player_state
 //     模式：每项 {x,y,z,slots:[{id,count}×27]}，WorldStore 不解析 Game 层语义，只存 / 取）。
+//   - 熔炉内容（t177 二轮复盘）：同 chests 模式 —— saveAll 第 3 参 furnaces 把 FurnaceStore 的熔炉（坐标
+//     键控的 3 槽 + 冶炼进度）落盘到 furnaces 表（同事务原子）；loadFurnaces() 读回。furnacestore 在 Game 层
+//     → 同样不 include，熔炉数据经裸 QVariantList 边界传入 / 取出（每项 {x,y,z,slots:[{id,count}×3],
+//     burn, smelt}，WorldStore 不解析语义，只存 / 取）。
 //   - 迁移注册表：PRAGMA user_version 烘 kSchemaVersion；新建库写版本、打开库校验版本。版本高于本程序
 //     支持 → 拒绝打开 + 大声告警（PLAN §2-E「存档损坏 → 停机」；用户应降版本 / 手动迁移）。
 //
@@ -87,13 +91,17 @@ public:
     Q_INVOKABLE bool isOpen() const { return m_open; }
 
     // 保存当前 World 的全部 chunk blob + 刷 meta（name/seed/dims/playedAt）。须先 openWorld。
-    //   事务性写入（一次 COMMIT）：chunks + meta + chests 同事务原子落盘（t188）。chests 为
-    //   ChestStore::allChests() 产物（每项 {x,y,z,slots:[{id,count}×27]}；空列表 → 清空 chests 表）。
+    //   事务性写入（一次 COMMIT）：chunks + meta + chests + furnaces 同事务原子落盘（t188 chests / t177 furnaces）。
+    //   chests 为 ChestStore::allChests() 产物（每项 {x,y,z,slots:[{id,count}×27]}；空列表 → 清空 chests 表）。
+    //   furnaces 为 FurnaceStore::allFurnaces() 产物（每项 {x,y,z,slots:[{id,count}×3], burn, smelt}；空 → 清空）。
     //   返回是否成功（无 world / 未打开 / SQL 失败 → false + qWarning）。
-    Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {});
+    Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {});
     // 读当前库的 chests 表为 QVariantList（同 saveAll 的 chests 形状）。未打开 → 空列表。
     //   caller（Main.qml.enterWorld）转交 chestStore.loadAll 整体替换内存（清旧世界残留 + 填本世界箱子）。
     Q_INVOKABLE QVariantList loadChests() const;
+    // t177 二轮复盘 读当前库的 furnaces 表为 QVariantList（同 saveAll 的 furnaces 形状）。未打开 → 空列表。
+    //   caller（Main.qml.enterWorld）转交 furnaceStore.loadAll 整体替换内存（清旧世界残留 + 填本世界熔炉）。
+    Q_INVOKABLE QVariantList loadFurnaces() const;
     // 读当前库的 meta（name/seed/width/height/depth/playedAt）。未打开 → 空 Map。
     Q_INVOKABLE QVariantMap loadMeta() const;
     // 把当前库的 chunk blob 回填进 World（World 须已 beginLoad 零填充网格）。返回读到的 chunk 数；
@@ -129,6 +137,10 @@ private:
     QString m_openFile;        // 当前打开库的相对文件名（saveAll 刷 meta 用）
 
     // PRAGMA user_version；schema 变更时 +1 并写迁移。v2（t188）= 新增 chests 表（纯加表，旧库 IF NOT EXISTS 幂等补建）。
+    //   t177 二轮复盘 新增 furnaces 表：同 chests 模式（纯加表，IF NOT EXISTS 幂等补建），**不** bump schema 版本
+    //   （user_version 仍 2）—— 因 initSchema 用「CREATE TABLE IF NOT EXISTS」幂等补建，旧库（v2 已开过 chests）
+    //   再开时 furnaces 自动补建、无数据迁移负担；新库两条 CREATE 顺序跑。版本号管表结构演进（加表 / 加列），
+    //   IF NOT EXISTS 的纯加表对老库向前兼容、无需迁移步。
     static constexpr int kSchemaVersion = 2;
     // t382 world_version：**数据语义**版本（方块 id 映射演进），存 world_meta 'world_version' 键。
     //   与 PRAGMA user_version（SQL schema 版本）刻意分离 —— schema 版本管表结构（加表 / 加列），
@@ -140,6 +152,10 @@ private:
     // 把箱子 QVariantList 落盘进 chests 表（DELETE 全量 + INSERT；用 kConn 连接，caller 已开事务）。
     //   失败 → false（caller rollback）。
     bool writeChests(const QVariantList &chests);
+    // t177 二轮复盘 把熔炉 QVariantList 落盘进 furnaces 表（DELETE 全量 + INSERT；同 writeChests 模式）。
+    //   furnaces 形状 = FurnaceStore::allFurnaces() 产物：每项 {x,y,z,slots:[{id,count}×3], burn, smelt}。
+    //   data 列存整个 QVariantMap（含 slots + burn + smelt）的 JSON 文本（同 chests 自描述、跨版本可读）。
+    bool writeFurnaces(const QVariantList &furnaces);
 
     // ── t382 迁移注册表（world_version → kWorldVersion 的数据迁移；详见类头注释 + migrations()）──
     // 单条迁移：把存档数据从 (targetVersion-1) 推进到 targetVersion。apply 对一个 chunk 的三段 blob
