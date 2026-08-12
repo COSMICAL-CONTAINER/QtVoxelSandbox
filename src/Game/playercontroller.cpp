@@ -3060,31 +3060,62 @@ void PlayerController::placeBlock()
                                            QStringLiteral("#f0f4f8"), 4);
             qInfo("snow golem built at %d %d %d", tx, ty, tz);
         }
-        // (b) 铁傀儡：南瓜下方第一格铁块（T 顶）+ 第二格铁块（T 中）+ 第二格水平左右各一铁块（T 底排）→
-        //     生成 MobIronGolem + 移除 5 块（南瓜 + 4 铁块）。底排支持 X 向（±X）或 Z 向（±Z）双向。
+        // (b) 铁傀儡：南瓜下方两层中柱为铁块（stem 铁柱），且其中**一层**为 3 块横梁 T（crossbar：中柱 + 水平
+        //     两端各 1 铁块，X 向或 Z 向双向）→ 生成 MobIronGolem + 移除 5 块（南瓜 + 4 铁块）。
+        //
+        // t509 二轮复盘：**接受两种 T 形朝向**。日志实锤玩家实际摆法是「crossbar 在上(stem 下)、stem 立柱在下」，
+        //   而原 probe 只认「stem 在上 / crossbar 在下」单种 → 玩家合法摆法永不匹配、铁傀儡不生成。根因不是逻辑
+        //   错而是「检测假设锁死单一朝向」。MC 标准约定 crossbar 在地面、stem 在上、南瓜顶；但用户验收要求其摆法
+        //   （stem 下 / crossbar 上）也能生成，故放宽为**两种朝向任一命中即生成**（南瓜正下方两格中柱都为铁块是
+        //   共同前提，区别只是「哪一层是 3 块横梁、哪一层是单 stem 块」）。两朝向消耗结构相同（南瓜 + 2 中柱铁块
+        //   + 2 横梁端铁块 = 5 块），生成位置同取最底层（ty-2）为脚格（spawnMobTyped 内置 pos=脚+halfH）。
+        //   - 朝向 A（stem 上 / crossbar 下，原 MC 标准）：crossbar 在 y-2（中柱 + 两端），stem 在 y-1（仅中柱）。
+        //   - 朝向 B（stem 下 / crossbar 上，玩家实际）：crossbar 在 y-1（中柱 + 两端），stem 在 y-2（仅中柱）。
         else if (below1 == BlockRegistry::IronBlock && below2 == BlockRegistry::IronBlock) {
-            const bool rowX = (m_world->blockAt(tx - 1, ty - 2, tz) == BlockRegistry::IronBlock
-                               && m_world->blockAt(tx + 1, ty - 2, tz) == BlockRegistry::IronBlock);
-            const bool rowZ = (m_world->blockAt(tx, ty - 2, tz - 1) == BlockRegistry::IronBlock
-                               && m_world->blockAt(tx, ty - 2, tz + 1) == BlockRegistry::IronBlock);
-            // t509 诊断：竖柱已对（南瓜下方 2 铁块），记录底排 4 邻格 id + rowX/rowZ，定位「底排不全」失效。
-            qInfo("iron golem probe at %d %d %d: rowX=%d rowZ=%d | -X=%d +X=%d -Z=%d +Z=%d",
-                  tx, ty, tz, int(rowX), int(rowZ),
-                  int(m_world->blockAt(tx - 1, ty - 2, tz)),
-                  int(m_world->blockAt(tx + 1, ty - 2, tz)),
-                  int(m_world->blockAt(tx, ty - 2, tz - 1)),
-                  int(m_world->blockAt(tx, ty - 2, tz + 1)));
-            if (rowX || rowZ) {
-                m_world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0);     // 南瓜
-                m_world->setWaterSilent(tx, ty - 1, tz, BlockRegistry::Air, 0); // T 顶铁块
-                m_world->setWaterSilent(tx, ty - 2, tz, BlockRegistry::Air, 0); // T 中铁块
-                m_world->setWaterSilent(tx - 1, ty - 2, tz, BlockRegistry::Air, 0); // X 向左
-                m_world->setWaterSilent(tx + 1, ty - 2, tz, BlockRegistry::Air, 0); // X 向右
-                m_world->setWaterSilent(tx, ty - 2, tz - 1, BlockRegistry::Air, 0); // Z 向前
-                m_world->setWaterSilent(tx, ty - 2, tz + 1, BlockRegistry::Air, 0); // Z 向后
+            // crossbarAt(y): 该层是否为 3 块横梁 T（中柱已知铁块 + 水平任一向两端各 1 铁块）。返回方向 outX
+            //   （true=X 向横梁 / false=Z 向横梁）；若两端都不全则返回 false 且 *hit=false。
+            auto crossbarAt = [&](int y, bool *hit, bool *outX) {
+                const bool rx = (m_world->blockAt(tx - 1, y, tz) == BlockRegistry::IronBlock
+                                 && m_world->blockAt(tx + 1, y, tz) == BlockRegistry::IronBlock);
+                const bool rz = (m_world->blockAt(tx, y, tz - 1) == BlockRegistry::IronBlock
+                                 && m_world->blockAt(tx, y, tz + 1) == BlockRegistry::IronBlock);
+                *hit = (rx || rz);
+                *outX = rx;
+            };
+            bool crossTopHit = false, crossTopX = false;     // crossbar 在 y-1（朝向 B）
+            crossbarAt(ty - 1, &crossTopHit, &crossTopX);
+            bool crossBotHit = false, crossBotX = false;     // crossbar 在 y-2（朝向 A，原行为）
+            crossbarAt(ty - 2, &crossBotHit, &crossBotX);
+            // t509 诊断：记录两层各自的横梁命中态 + 4 邻格 id，定位「横梁端缺一块 / 摆成单列非 T」。
+            qInfo("iron golem probe at %d %d %d: cross@-1=%d(X=%d) cross@-2=%d(X=%d) |"
+                  " @-1 -X=%d +X=%d -Z=%d +Z=%d | @-2 -X=%d +X=%d -Z=%d +Z=%d",
+                  tx, ty, tz, int(crossTopHit), int(crossTopX), int(crossBotHit), int(crossBotX),
+                  int(m_world->blockAt(tx - 1, ty - 1, tz)), int(m_world->blockAt(tx + 1, ty - 1, tz)),
+                  int(m_world->blockAt(tx, ty - 1, tz - 1)), int(m_world->blockAt(tx, ty - 1, tz + 1)),
+                  int(m_world->blockAt(tx - 1, ty - 2, tz)), int(m_world->blockAt(tx + 1, ty - 2, tz)),
+                  int(m_world->blockAt(tx, ty - 2, tz - 1)), int(m_world->blockAt(tx, ty - 2, tz + 1)));
+            if (crossBotHit || crossTopHit) {
+                // 选定命中朝向：优先朝向 A（crossbar 在 y-2，原 MC 标准），否则朝向 B（crossbar 在 y-1）。
+                const bool orientB = !crossBotHit;            // true=朝向 B（crossbar 在 y-1）
+                const int crossY = orientB ? (ty - 1) : (ty - 2);
+                const bool rowX = orientB ? crossTopX : crossBotX;
+                m_world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0);        // 南瓜
+                m_world->setWaterSilent(tx, ty - 1, tz, BlockRegistry::Air, 0);    // 中柱铁块（stem 顶 / crossbar 顶）
+                m_world->setWaterSilent(tx, ty - 2, tz, BlockRegistry::Air, 0);    // 中柱铁块（stem 底 / crossbar 底）
+                // crossbar 横梁两端（仅 crossY 层；另一层是单 stem 中柱，两端为空气，移除中柱已含）。
+                if (rowX) {
+                    m_world->setWaterSilent(tx - 1, crossY, tz, BlockRegistry::Air, 0);
+                    m_world->setWaterSilent(tx + 1, crossY, tz, BlockRegistry::Air, 0);
+                } else {
+                    m_world->setWaterSilent(tx, crossY, tz - 1, BlockRegistry::Air, 0);
+                    m_world->setWaterSilent(tx, crossY, tz + 1, BlockRegistry::Air, 0);
+                }
+                // 生成铁傀儡：脚格取结构最底层（ty-2），spawnMobTyped 内置 pos=(x+0.5, 脚+halfH, z+0.5)。
+                //   朝向由 mob AI 自动定向（spawnMobTyped 无朝向参数；既有造物生成同此路径），符合 spec「合适朝向」。
                 m_entityManager->spawnMobTyped(tx, ty - 2, tz, EntityManager::MobIronGolem,
                                                QStringLiteral("#c8c8d0"), 100);
-                qInfo("iron golem built at %d %d %d", tx, ty, tz);
+                qInfo("iron golem built at %d %d %d (orient=%s, crossY=%d, rowX=%d)",
+                      tx, ty, tz, orientB ? "B(cross@-1)" : "A(cross@-2)", crossY, int(rowX));
             }
         }
         // t509r ③ miss 全邻域诊断：南瓜放好但下方非雪柱 / 非铁柱 → 打下方两层 + 底排 4 邻 id + 玩家朝向，
