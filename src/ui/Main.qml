@@ -1779,7 +1779,10 @@ Window {
             //   未 beginBatch → endBatch 守卫 no-op）。先于音 / 视反馈，保证 delegate 当帧就位。
             if (itemEntities.batchActive()) itemEntities.endBatch()
             audio.playExplosion()
-            if (particleLoader.item) particleLoader.item.burstExplosion(x, y, z)
+            if (particleLoader.item) {
+                particleLoader.item.burstExplosion(x, y, z)
+                particleLoader.item.burstExplosionSmoke(x, y, z)   // t494：爆炸后灰烟上飘慢慢消散
+            }
         }
         // t304 玩家箭命中 mob（spec「抛物+伤害 mobs」）：damageEntity 已扣血 + 红闪（delegate 绑 hurtFlashAt）+
         //   归零 mobDied；本信号驱动命中音（同近战 attackMob→onMobAttacked→playMobHurt 模式）。
@@ -4648,6 +4651,9 @@ Window {
                         //   独立 NumberAnimation（target/property 显式）+ onEntPrimedChanged 显式 start() + loops:Infinite
                         //   （duration 每循环重设即可变频率），不再依赖 running 绑定自启。
                         property real tntFlashPhase: 0.0
+                        // t494 白闪亮端判定：sin(phase·π) > 0.5（相位近峰 0.5 邻域）→ 亮端（纯白，贴图 null）。
+                        //   绑定 tntFlashPhase（动画推 phase → 本属性随之重算 → baseColorMap/baseColor 绑定切纯白）。
+                        property bool entFlashBright: Math.sin(tntFlashPhase * Math.PI) > 0.5
                         // 循环动画推 phase 0→1；duration 随 fuseProgress 变（progress 1=刚点燃 800ms 慢周期 /
                         //   progress 0=即将引爆 120ms 快周期）。loops:Infinite + onFinished 每轮重设 duration（据当前
                         //   entFuseProg）→ 频率随 fuse 减少平滑加快。onEntPrimedChanged 显式 start/stop（primed 入→启、
@@ -4698,21 +4704,18 @@ Window {
                         }
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColorMap: voxelAtlas
-                            // t490 primed → 白闪脉冲；非 primed → 原 terrainLight 昼夜灰阶（t257）。
-                            //   t494 修「变亮一点但无白闪」：旧公式 `tl·(1-pulse)+white·pulse` 在白天 tl≈1.0（近白）
-                            //   → lerp 到白几乎不可见（用户实测只有轻微变亮）。改 pulse 在**暗底(0.25)**与**纯白(1.0)**
-                            //   间往复（不掺 tl）→ 任何光照下都明显闪烁白（机制等价 MC TNT 引燃态白闪原色↔白）。
-                            //   primed 时取消 vertexColorsEnabled（顶点色光场会让白闪暗化，pulse 视觉不纯）。
+                            // t494 白闪：primed 且近脉冲峰值（entFlashBright）→ baseColorMap=null + baseColor 纯白 →
+                            //   **整格纯白**（遮掉 TNT 贴图，机制等价 MC primed TNT 闪白）；非峰期 → 图集 + 暗底 →
+                            //   暗 TNT 贴图可见。暗↔白往复 = 白闪脉冲（明显闪烁，任何光照下都可见）。
+                            baseColorMap: (fallingBlockModel.entPrimed && fallingBlockModel.entFlashBright) ? null : voxelAtlas
+                            // 非 primed → 原 terrainLight 昼夜灰阶（t257）。primed 时取消 vertexColorsEnabled（顶点色
+                            //   光场会让白闪暗化，pulse 视觉不纯）。
                             baseColor: {
                                 entityManager.revision
                                 const tl = terrainLight(worldClock.skyLight)
                                 if (!fallingBlockModel.entPrimed) return tl
-                                // 脉冲强度 = sin(phase·π)：phase 0/1 = 0（暗底 0.25）、0.5 = 1（纯白）。暗底不掺 tl →
-                                //   无论昼夜都看到「暗→白→暗」往复闪（tl 仅非 primed 用）。
-                                const pulse = Math.sin(fallingBlockModel.tntFlashPhase * Math.PI)
-                                const k = 0.25 + 0.75 * pulse   // 0.25（暗底）↔ 1.0（纯白）
-                                return Qt.rgba(k, k, k, 1.0)
+                                if (fallingBlockModel.entFlashBright) return Qt.rgba(1.0, 1.0, 1.0, 1.0) // 纯白（贴图已 null）
+                                return Qt.rgba(0.25, 0.25, 0.25, 1.0) // 暗底（图集暗 TNT 贴图）
                             }
                             vertexColorsEnabled: !fallingBlockModel.entPrimed  // primed 白闪不叠顶点色光场
                         }

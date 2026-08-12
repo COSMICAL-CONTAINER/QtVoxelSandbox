@@ -55,6 +55,12 @@ Node {
     function burstExplosion(x, y, z) {
         burst(x, y, z, 20, "#d8d8d8", 0.08, 4.5, 2.5, 3.0, 0.9)
     }
+    // t494 爆炸烟雾（机制等价 MC 爆炸后灰烟上飘慢慢消散）：深灰烟 + **轻浮力（gravity<0 → 持续上飘）** +
+    //   长寿命（~2s）渐隐 = 「烟雾慢慢消散」观感。量少（8）慢飘（低 vYBase）区别于迸发碎屑的横向炸开。
+    //   同 burstExplosion 一样以方块中心为原点；复用 burstFloat 浮力烟雾路径（同 deathSmoke 的 -1.5 浮力）。
+    function burstExplosionSmoke(x, y, z) {
+        burstFloat(x + 0.5, y + 0.5, z + 0.5, 8, "#6a6a6a", 0.10, 0.8, 1.0, 0.6, 2.0, -1.2)
+    }
     // t449 mob 死亡白烟（机制等价 MC 1.0 mob 倒地消散的白烟 puff；delegate 检测 deadAt 翻 true 时调）。
     //   白色 + 上飘 + **轻浮力（gravity<0 → 持续上飘而非回落）** + 较长寿命渐隐 = 消散感。数量适中（10）
     //   覆盖 mob 体。重力 -1.5（向上浮力；区别碎屑 / 爆炸的下落 14 / 横飞 14）。

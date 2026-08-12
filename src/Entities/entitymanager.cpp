@@ -2436,6 +2436,15 @@ void EntityManager::detonateStalker(int idx, Entity &e, World *world, const QVec
         //   在该格生成掉落实体（机制等价 MC 爆炸把被毁方块弹成物品）。dropId<=0（如 leaves 默认 0 / 矿石须冶炼类）
         //   → 不掉。用 QRandomGenerator（玩家交互掉落的随机性，非 worldgen 确定性范畴 §2-K）。
         for (const World::DestroyedVoxel &d : destroyed) {
+            // t494 爬行者爆炸引燃 TNT（用户「爬行者爆炸也可以点燃 TNT，链式反应一个原理」）：destroyed 内
+            //   oldId==TntBlock → spawnPrimedTnt（短引信 kChainFuseSec，同 TNT 链式口径）→ 连锁传播。**不**走爆炸
+            //   掉落（TNT 被炸引燃而非掉成物品，同 TNT detonateTntSphere 语义）。机制等价 MC 苦力怕爆炸引燃邻接 TNT。
+            if (d.oldId == BlockRegistry::TntBlock) {
+                const float jit = kPrimedTntFuseJitterSec > 0.0f
+                                  ? float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * kPrimedTntFuseJitterSec : 0.0f;
+                spawnPrimedTnt(d.x, d.y, d.z, kChainFuseSec + jit); // 短引信（快连锁）
+                continue; // 引燃完毕，跳过掉落（TNT 不掉物品）
+            }
             const int dropItemId = BlockRegistry::dropId(d.oldId);
             if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
                 emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
@@ -2500,15 +2509,27 @@ void EntityManager::detonateTntBlock(int x, int y, int z, World *world, const QV
 //   ④ 距离衰减伤玩家 + 击退；⑤ emit explosion（音/视单一入口）。
 void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, const QVector3D &playerPos)
 {
-    // (a) 球形破坏方块：destroySphereSilent 一次收口（跳过 Air / Bedrock / Water / Obsidian，同 Stalker t320）。
-    //   返回被破坏块（坐标 + 原 id），caller 据原 id 派生掉落物 + 链式引燃。
+    // t494 水中爆炸守卫（用户「水下 TNT 不破坏方块但能引燃」；机制等价 MC 爆炸射线遇液体即灭 → 不毁地形，同 Stalker
+    //   originInWater）：爆炸中心（TNT 格）在液体（Water / Lava）中 → **跳过地形破坏**（不 destroySphereSilent），但
+    //   **链式引燃仍生效**（扫球内 TNT 方块 → spawnPrimedTnt，水下 TNT 照常连锁）。玩家伤害 / 音 / 视反馈照发
+    //   （水中爆炸仍伤玩家 / 有声光）。origin 判定：查 TNT 所在格 blockAt == Water/Lava（primed TNT 落水后中心在
+    //   水格内 → 命中；也覆盖铁桶倒水淹 TNT 后引爆的方块路径）。
+    bool originInWater = false;
+    if (world && cx >= 0 && cz >= 0 && cx < world->width() && cz < world->depth() && cy >= 0 && cy < world->height()) {
+        const quint8 o = world->blockAt(cx, cy, cz);
+        originInWater = (o == BlockRegistry::Water || o == BlockRegistry::Lava);
+    }
+
+    // (a) 球形破坏方块（仅陆地）：destroySphereSilent 一次收口（跳过 Air / Bedrock / Water / Obsidian，同 Stalker t320）。
+    //   返回被破坏块（坐标 + 原 id），caller 据原 id 派生掉落物 + 链式引燃。水中 → 跳过（不毁地形）。
     std::vector<World::DestroyedVoxel> destroyed;
-    if (world) destroyed = world->destroySphereSilent(cx, cy, cz, kExplosionRadius);
+    if (world && !originInWater) destroyed = world->destroySphereSilent(cx, cy, cz, kExplosionRadius);
 
     // (b) 爆炸掉落（~50% / 破坏块，同 Stalker）：取 BlockRegistry::dropId → 概率门控 → emit explosionDroppedItem。
     //   **链式引燃**（spec t490 验收核心）：destroyed 内 oldId==TntBlock 的格子 → spawnPrimedTnt（fuse=Jitter 随机
     //   错峰）→ 各 PrimedTnt fuse 到 0 再次 detonatePrimedTnt 引爆其球内 TNT，递归连锁引爆全部。
     //   顺序：先掉落 / 引燃（据 destroyed 列表，TNT 方块已被 destroySphereSilent 清为 Air 故不重复破坏），再伤玩家 + 音视。
+    //   水中：destroyed 空 → 需**另扫球内 TNT** 完成链式引燃（水下 TNT 连锁不断）。
     for (const World::DestroyedVoxel &d : destroyed) {
         // t493 恢复爆炸**链式引燃**（用户明确要链式传递）：爆炸破坏的 TNT 方块 → spawnPrimedTnt（引燃态实体，
         //   fuse=短引信 kChainFuseSec + jitter 随机错峰 → 快速连锁推进）→ 各 PrimedTnt fuse 到 0 再次引爆 → 递归
@@ -2523,6 +2544,25 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
         const int dropItemId = BlockRegistry::dropId(d.oldId);
         if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
             emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
+    }
+    // 水中链式：destroyed 空（未破坏地形）→ 扫球内 TNT 方块单独引燃（水下 TNT 连锁不断，机制等价 MC 水中 TNT
+    //   连锁；不破坏其它方块 / 无掉落）。立方盒 [cx±R, cy±R, cz±R] 逐格距中心 ≤ R 判，同 destroySphereSilent 口径。
+    if (originInWater && world) {
+        const int r = int(std::ceil(kExplosionRadius));
+        for (int dx = -r; dx <= r; ++dx)
+            for (int dy = -r; dy <= r; ++dy)
+                for (int dz = -r; dz <= r; ++dz) {
+                    const int x = cx + dx, y = cy + dy, z = cz + dz;
+                    if (x < 0 || y < 0 || z < 0 || x >= world->width() || y >= world->height() || z >= world->depth())
+                        continue;
+                    const float d2 = float(dx * dx + dy * dy + dz * dz);
+                    if (d2 > kExplosionRadius * kExplosionRadius) continue; // 距中心 > 半径 → 跳过
+                    if (world->blockAt(x, y, z) != BlockRegistry::TntBlock) continue;
+                    const float jit = kPrimedTntFuseJitterSec > 0.0f
+                                      ? float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * kPrimedTntFuseJitterSec : 0.0f;
+                    world->clearBlockSilent(x, y, z); // 移除 TNT 方块（水中爆炸不毁地形，但 TNT 被引燃转实体）
+                    spawnPrimedTnt(x, y, z, kChainFuseSec + jit); // 短引信（水下快连锁）
+                }
     }
 
     // (c) 距离衰减伤害玩家（同 Stalker：身体中心到爆炸中心 3D 距离 → dmg=round(max·(1−dist/radius))，至少 1）。
@@ -3061,21 +3101,27 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             const int topCell = qFloor(e.pos.y()) - 1; // 模型底面正下方的格（支撑判定起点；TNT 占 pos.y±0.5）
             int botCell = qFloor(newY) - 1;            // 下落目标底面下方的格
             if (botCell > topCell) botCell = topCell; // 防浮点噪声致 botCell>topCell
-            int supportCellY = -1; // 首个完整立方支撑（primed TNT 停在其顶面 cy+1，不放置方块）
+            int supportCellY = -1; // 首个支撑方块（primed TNT 停在其顶面，不放置方块）
+            quint8 supportId = 0;  // 支撑方块 id（据它算顶面高度 topOffset；全立方 1.0 / 下半砖 0.5 等）
             for (int cy = topCell; cy >= botCell; --cy) {
                 if (cy < 0) break; // 越界下方=空气 → 不视作地面
                 const quint8 b = world->blockAt(cx, cy, cz);
                 if (b == BlockRegistry::Air || b == BlockRegistry::Water) continue; // 穿透（同沙子）
-                if (BlockRegistry::isFullCube(b)) { supportCellY = cy; break; } // 完整立方 → 着地支撑（不放置方块）
-                supportCellY = cy; break; // 不完整方块也作支撑（primed TNT 落其上停住，机制等价 MC primed TNT 落火把上停住）
+                // 任一实体方块都作支撑（完整立方 / 半砖 / 压力板 / 火把…），据其碰撞 AABB 顶面算落点
+                //   （机制等价 MC primed TNT 落半砖上坐半砖顶、落火把上停火把顶）。
+                supportCellY = cy; supportId = b; break;
             }
             if (supportCellY >= 0) {
-                // 着地：停在支撑方块上方一格的 **cell 中心**（pos.y = supportCellY + 1 + 0.5 = supportCellY+1.5）。
-                //   halfH=0（primed 实体可穿透），但渲染的 BlockCube 立方几何原点在中心、高 1.0 → 模型中心须落在
-                //   「TNT 应占格」(supportCellY+1) 的中心 (supportCellY+1.5)，模型才正确填满该格、底贴支撑顶面
-                //   （机制等价 MC primed TNT 坐在地面而非半埋 / 悬空）。与 spawnPrimedTnt 初始 pos=(x+0.5,y+0.5,z+0.5)
-                //   的「cell 中心」约定一致 → 下落 / 着地视觉连贯。不放置方块（保持引燃态可穿透）。
-                const float restY = float(supportCellY + 1) + 0.5f; // cell 中心（= 支撑顶面 + 0.5）
+                // 着地：停在支撑方块**顶面**上方半格（TNT 视觉高 1.0 → 中心 = 支撑顶面 + 0.5）。
+                //   t494 修「落半砖悬空」：旧 restY = supportCellY+1.5 恒按**完整立方顶面**（=cy+1.0）算 → 落
+                //   下半砖（顶面 cy+0.5）时中心停在 cy+1.5 = 悬空半格空气。改据支撑方块的碰撞 AABB 顶面
+                //   topOffset（cell-local 最大 maxY：全立方 1.0 / 下半砖 0.5 / 压力板 ~0.0625）→ restY =
+                //   supportCellY + topOffset + 0.5（TNT 底面贴支撑顶面）。halfH=0 可穿透 + 不放置方块（引燃态）。
+                float topOffset = 1.0f; // 兜底：默认完整立方顶面（旧行为）
+                const auto aabbs = BlockRegistry::collisionAABBs(supportId, world->stateAt(cx, supportCellY, cz));
+                for (const BlockRegistry::BlockAABB &bb : aabbs)
+                    if (bb.maxY > topOffset) topOffset = bb.maxY; // 取最大顶面（stairs 多盒取最高）
+                const float restY = float(supportCellY) + topOffset + 0.5f; // 支撑顶面 + TNT 半高
                 if (e.pos.y() != restY) { e.pos.setY(restY); e.vy = 0.0f; dirty = true; }
             } else if (newY <= 0.0f) {
                 // 全列无支撑且已跌出世界底部 → 静默移除（防永久下落；正常世界 y=0 有石头层不触发）。
