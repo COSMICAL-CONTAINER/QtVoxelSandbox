@@ -3534,6 +3534,19 @@ Window {
                         scale: Qt.vector3d(0.25, 0.5, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
                     }
+                    // t498 二轮复盘：左臂胸甲袖（装备槽 1 胸甲覆盖手臂；机制等价 MC 1.0 chestplate 覆盖躯干+双臂）。
+                    //   作 leftArmPivot 子节点 → 随左臂行走摆动。略大于袖段（X/Z 探 0.02 包裹袖）。
+                    //   visible 绑装备槽 1 是否有护甲（armId 表达式形式，同胸甲 playerArmorChest）。
+                    //   红线：NoLighting（同现有护甲 Model 不变量 §2）。
+                    Model {
+                        id: playerArmorSleeveL
+                        property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(1) : 0
+                        visible: armId !== 0
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.25, 0)
+                        scale: Qt.vector3d(0.30, 0.52, 0.30)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorSleeveL.armId); opacity: playerModel.bodyOpacity }
+                    }
                     // 手（肤色 #caa472；臂末端 y 0.6→0.8 = 肩下 0.5..0.7）
                     Model {
                         geometry: UnitCube {}
@@ -3558,6 +3571,16 @@ Window {
                         position: Qt.vector3d(0, -0.25, 0)
                         scale: Qt.vector3d(0.25, 0.5, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
+                    }
+                    // t498 二轮复盘：右臂胸甲袖（同左臂 playerArmorSleeveL，镜像；覆盖右袖，随右臂行走/挖掘挥动）。
+                    Model {
+                        id: playerArmorSleeveR
+                        property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(1) : 0
+                        visible: armId !== 0
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.25, 0)
+                        scale: Qt.vector3d(0.30, 0.52, 0.30)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.armorMatColor(playerArmorSleeveR.armId); opacity: playerModel.bodyOpacity }
                     }
                     Model {
                         geometry: UnitCube {}

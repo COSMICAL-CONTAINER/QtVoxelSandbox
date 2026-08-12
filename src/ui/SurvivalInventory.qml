@@ -551,9 +551,16 @@ Item {
                         model: root.hotbar.armorCount
                         delegate: Item {
                             // 装备槽栈 id / 数量 / 耐久（触碰 armorRevision → 装备 / 脱下 / 破损后重算；air=0 空）。
-                            property int armId: { root.hotbar.armorRevision; return root.hotbar.armorBlockIdAt(index) }
-                            property int armDur: { root.hotbar.armorRevision; return root.hotbar.armorDurabilityAt(index) }
-                            property var armEnch: { root.hotbar.armorRevision; return root.hotbar.armorEnchantsAt(index) } // t475 附魔
+                            // t498 二轮复盘：改表达式形式 `armorRevision >= 0 ? xxxAt(index) : 0`（原语句块形式
+                            //   `{ armorRevision; return xxxAt(index) }` 在低频 NOTIFY（armorRevision 仅装备/脱下/破损
+                            //   时变）+ 静稳态下不可靠注册 NOTIFY 依赖 → 装备/脱下后 armId/armDur/armEnch 恒旧值。
+                            //   后果：装备路径读 oldId=armId 读到旧值（脱下前的护甲 id，非空）→ 把「幻影旧件」写回
+                            //   光标（heldBlock=oldId）→ 槽位已装备新件 + 光标也持有旧件 = 护甲复制。改表达式形式后
+                            //   NOTIFY 属性参与值计算、依赖被可靠注册，装备/脱下后 armId 正确刷新（同 Main.qml
+                            //   player 护甲 8 Model 的 t498 一轮修法，lessons-learned 钉死此模式）。
+                            property int armId: root.hotbar.armorRevision >= 0 ? root.hotbar.armorBlockIdAt(index) : 0
+                            property int armDur: root.hotbar.armorRevision >= 0 ? root.hotbar.armorDurabilityAt(index) : 0
+                            property var armEnch: root.hotbar.armorRevision >= 0 ? root.hotbar.armorEnchantsAt(index) : [0,0,0,0]
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent; wellColor: "#262b30" }
                             // t497 空槽部位占位图：pack 启用且包内 item 目录有 empty_armor_slot_<piece>.png 时
@@ -613,21 +620,36 @@ Item {
                                 visible: armId !== 0
                                 materialId: armId
                             }
-                            // 装备耐久（仅 < max 时显，提示损耗；机制等价 MC 装备耐久条——此处用数字简化）。
-                            // t452 装备耐久条（同 hotbar 工具耐久条模式，t315）：槽底薄条，宽 ∝ remaining/max，
-                            //   色 绿(>50%)/黄(20–50%)/红(<20%)；满耐久隐。原数字（cur/max）改入 tooltip（同工具套路：
-                            //   槽内显条、悬停显数）。触碰 armorRevision → 受击损耗后重算（armorDurabilityAt /
-                            //   armorMaxDurability 是 Q_INVOKABLE，靠版本号触发）。
+                            // t498 二轮复盘：装备槽内显「cur/max」耐久数字（小字，耐久条上方）。
+                            //   用户报「进背包无耐久显示、只在 hover tooltip 显」→ 槽内常显数字（进背包即见），
+                            //   不依赖 hover。满耐久也显（与耐久条常显一致）。触碰 armorRevision 损耗后重算。
+                            Text {
+                                visible: armId !== 0
+                                text: { root.hotbar.armorRevision
+                                    return root.hotbar.armorDurabilityAt(index) + "/" + root.hotbar.armorMaxDurability(armId) }
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.bottom: armorDurBar.top
+                                anchors.bottomMargin: 0
+                                color: "#dfe6df"; style: Text.Outline; styleColor: "#000000"
+                                font.pixelSize: 9; font.bold: true
+                            }
+                            // 装备耐久条（t452 起；t498 二轮复盘改常显 + 表达式形式绑定）。
+                            //   t498 修：① 用户报「进背包无进度条、耐久只在 hover tooltip 显」——根因是 visible 要求
+                            //     curDur<maxDur（满耐久隐），新装备护甲恒满耐久 → 条永不显。改「常显」（仅 armId!==0
+                            //     即显，满耐久也显绿条），与 MC 1.0 装备槽耐久条一致（MC 装备槽耐久条满耐久也显）。
+                            //     ② 原 curDur/maxDur 用语句块形式绑 armDur（同 armId stale 根因）→ 受击损耗后条不刷新；
+                            //     改表达式形式直接读 armorDurabilityAt（Q_INVOKABLE，恒最新）。
+                            //   色 绿(>50%)/黄(20–50%)/红(<20%)；满耐久显满绿条。触碰 armorRevision → 损耗后重算。
                             Item {
                                 id: armorDurBar
-                                property int curDur: { root.hotbar.armorRevision; return armDur }
-                                property int maxDur: { root.hotbar.armorRevision; return root.hotbar.armorMaxDurability(armId) }
+                                property int curDur: root.hotbar.armorRevision >= 0 ? root.hotbar.armorDurabilityAt(index) : 0
+                                property int maxDur: root.hotbar.armorRevision >= 0 ? root.hotbar.armorMaxDurability(armId) : 0
                                 property real ratio: maxDur > 0 ? curDur / maxDur : 0.0
                                 anchors.left: parent.left; anchors.right: parent.right
                                 anchors.bottom: parent.bottom
                                 anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
                                 height: 3
-                                visible: armId !== 0 && maxDur > 0 && curDur > 0 && curDur < maxDur
+                                visible: armId !== 0 && maxDur > 0 && curDur > 0
                                 Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.55 }
                                 Rectangle {
                                     anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
@@ -650,14 +672,20 @@ Item {
                                     const heldCnt = root.hotbar.heldCount
                                     const heldDur = root.hotbar.heldDurability
                                     const heldEnch = root.hotbar.heldEnchants()
-                                    const slotHas = armId !== 0
+                                    // t498 二轮复盘：从 VM 直接读装备槽当前态（Q_INVOKABLE 恒最新），不走绑定属性
+                                    //   armId/armDur/armEnch（low-frequency NOTIFY 下可能 stale → oldId 读到旧值 → 幻影
+                                    //   旧件写回光标 = 护甲复制）。armId 绑定已改表达式形式兜底；此处再从 VM 读为纵深防御。
+                                    const slotId = root.hotbar.armorBlockIdAt(index)
+                                    const slotDur = root.hotbar.armorDurabilityAt(index)
+                                    const slotEnch = root.hotbar.armorEnchantsAt(index)
+                                    const slotHas = slotId !== 0
                                     // 持物：须是护甲且部位匹配该槽 → 装备（与槽内旧物互换到光标）；否则 no-op。
                                     if (heldId !== 0) {
                                         if (!root.hotbar.isArmor(heldId)) return
                                         if (root.hotbar.armorPiece(heldId) !== index) return
                                         // 互换：先把槽内旧护甲取到光标，再装备手持护甲（armorSetStack 守部位）。
                                         //   t475 附魔随实例互换（旧物附魔 → 光标；手持附魔 → 装备槽）。
-                                        const oldId = armId, oldDur = armDur, oldEnch = armEnch
+                                        const oldId = slotId, oldDur = slotDur, oldEnch = slotEnch
                                         root.hotbar.armorSetStack(index, 0, 0)        // 先清槽（脱下旧物）
                                         root.hotbar.armorSetStack(index, heldId, 1, heldDur, heldEnch) // 装备手持
                                         // 光标手持 = 旧物（若有），否则空。
@@ -675,10 +703,10 @@ Item {
                                     }
                                     // 空手：槽有护甲 → 脱下到光标。
                                     if (slotHas) {
-                                        root.hotbar.heldBlock = armId
+                                        root.hotbar.heldBlock = slotId
                                         root.hotbar.heldCount = 1
-                                        root.hotbar.heldDurability = armDur
-                                        root.hotbar.setHeldEnchants(armEnch)
+                                        root.hotbar.heldDurability = slotDur
+                                        root.hotbar.setHeldEnchants(slotEnch)
                                         root.hotbar.armorSetStack(index, 0, 0)
                                         root.armorChanged() // t345 脱下音
                                     }
