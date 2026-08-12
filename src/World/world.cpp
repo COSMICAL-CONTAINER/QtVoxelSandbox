@@ -3094,6 +3094,16 @@ void World::tickIceFreeze()
         if (m_chunks.blockAt(x, y, z) != BlockRegistry::Water) continue; // 过期索引项 → 跳过
         if (m_chunks.stateAt(x, y, z) != 0) continue; // 仅水源结冰（流水 state>0 不结，机制等价 MC）
         if (m_chunks.skyLightAt(x, y, z) < 15) continue; // 阴影区不暴露天空 → 不冻（原全图扫的列短路等价）
+        // t495 二轮复盘 表层水面守卫：仅冻「水面顶层」——上方一格非水非冰（即暴露空气 / 实体的水面表面）才冻。
+        //   根因：本工程水 lightOpacity=0（不衰减天光，区别于 MC 1.0 水遮光），故水柱里每个水源格 skyLight 恒 15 →
+        //   旧判定「skyLight>=15 即冻」会把整柱水从海面冻到海底（用户实测「冰填满整柱海水直到沙底」）。机制等价
+        //   MC 1.0「仅水面顶层结冰」：水柱内部（上方还有水 / 已冻冰）不算暴露水面 → 不二次冻结下层。守卫只判 y+1
+        //   一格：连续水柱里只有最顶格的 y+1 是空气（或非水非冰）→ 仅顶格进 toFreeze。ice 在 lightOpacity=0 下同样
+        //   不遮天光，故已冻冰层下方的次格水 y+1 是 ice → 被守卫拦下，不继续向下冻（避免冰盖一旦形成即整柱冻透）。
+        if (y + 1 < m_height) {
+            const quint8 above = m_chunks.blockAt(x, y + 1, z);
+            if (above == BlockRegistry::Water || BlockRegistry::isIce(above)) continue; // 上方有水/冰 → 非水面顶层 → 跳过
+        }
         // 散布概率：seed + 位置 + 窗口序号哈希 → 不同格不同窗错峰冻结（非瞬时全冻，PLAN §2-K）。
         const quint32 h = hashVoxel(mixedSeed, x, y, z);
         if (int(h % 100u) >= kFreezePct) continue; // 散布落空 → 本窗不冻

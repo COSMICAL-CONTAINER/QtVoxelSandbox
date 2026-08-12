@@ -3087,14 +3087,21 @@ Window {
                     chunkInRange: iceModel.chunkInRange // t472：视距门控传给 mesher（远端冰段跳过 sun 重建）
                     iceOnly: true
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: window.skyBaseColor }
-                // t495 冰-水透明度过渡：冰段 baseColor 改用 window.skyBaseColor（与水段 / 地形段同一昼夜亮度曲线），
-                //   取代原固定 Qt.rgba(0.88,0.95,1.0) 浅蓝。原因：水段 baseColor=skyBaseColor（灰阶 × 天光，夜间变暗），
-                //   冰段旧 baseColor 是固定浅蓝（夜间不变暗）→ 冰-水邻接处出现亮度 / 色调跳变（夜间冰仍亮、水变暗），
-                //   肉眼读作「冰不透 / 水透的边界硬跳」。统一到 skyBaseColor 后，冰与水共享同一亮度基底，邻接处仅
-                //   纹理（冰裂纹 vs 水涟漪）不同、无亮度跳变 → 平滑过渡。冰的浅蓝色由其贴图 tile 58 自身提供
-                //   （baseColor 灰阶只调亮度，不染色）。opacity 0.7 与水段一致（水涟漪 vertex.a [0.85,1.0] 致有效
-                //   透射 [0.595,0.7]，冰恒 0.7 —— 差异 < 0.105，肉眼可接受，不强行抹平以免冰失去质感）。
+                // t495 二轮复盘 冰改不透明渲染：去掉 opacity:0.7 + alphaMode:Blend，让冰走**不透明 pass**（深度写 ON）。
+                //   根因：冰贴图（default_ice.png，build_ice.py base() alpha=255 全不透）本无透明像素，旧材质强行 opacity:0.7
+                //   + alphaMode:Blend 把冰塞进**透明 pass**（深度写 OFF、按 Model 排序）。冰-水接触圈：冰面与水面在邻接
+                //   处几何上紧贴 / 微叠（冰格底面贴水格顶面，或冰水相邻格侧壁），两透明面进入同一透明排序桶 →
+                //   QtQuick3D 透明 pass 按 Model 质心距离排序，相机移动 / 转视角时两冰水 Model 的相对深度顺序逐帧翻转 →
+                //   一帧冰盖水面、下一帧水盖冰面 = 用户实测「冰水接触一圈移动时闪烁」（静止排序稳 → 不闪，动则闪；
+                //   教科书透明排序 z-fight）。机制等价 MC 1.0：**冰在 MC 是不透明方块**（不像水半透），故 MC 冰水边界稳
+                //   定不闪。修：冰走不透明 pass 写深度 → 透明排序只余水（单一透明材质，自排序无歧义）→ 冰水边界稳定。
+                //   视觉：冰失去 0.7 半透感（不能再透视冰后方块），换 MC 一致的不透明冰质感（冰裂纹贴图 + 冷青蓝底
+                //   仍显冰质，非损失）。lit 红线：NoLighting（默认 lit 在 D3D11 不出像素，PLAN §2-H）。baseColor 沿用
+                //   skyBaseColor（与水 / 地形同昼夜亮度曲线，t495 一轮统一）。alphaMode 缺省 = Opaque（深度写 ON）。
+                //   不变量：冰不发光（无 emissiveFactors），符合 lighting 铁律。
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: window.skyBaseColor }
+                // t495 一轮 冰-水透明度过渡：baseColor 用 window.skyBaseColor（与水 / 地形同昼夜亮度曲线），冰浅蓝由
+                //   贴图 tile 58 自身提供（baseColor 灰阶只调亮度不染色）。
             }
         }
 
