@@ -25,6 +25,12 @@ constexpr SmeltEntry kSmelt[] = {
     { RecipeRegistry::GoldOreDropId,   RecipeRegistry::GoldIngotId,   "gold"     }, // t308 金原矿 → 金锭
     { int(BlockRegistry::Sand),        RecipeRegistry::GlassId,       "glass"    }, // 沙子 → 玻璃
     { int(BlockRegistry::Log),         RecipeRegistry::CharcoalId,    "charcoal" }, // 原木 → 木炭
+    // t494/t513 二轮复盘：生肉 → 熟肉配方（机制等价 MC 1.0 熔炉烤肉）。原 kSmelt 表只列矿石 / 沙 / 原木，
+    //   缺生肉 → 熟肉链，导致生猪排 / 生牛肉放熔炉 smeltResult 返 0 → 烧不出熟肉（用户实测 t494/t513 报障根因）。
+    //   熟肉此前仅由「mob 燃烧致死」掉落（t344 EntityManager 路径）获得；此处补齐「熔炉烤肉」正途。
+    //   鸡 / 鱼等其余生肉同理可补，本轮按用户报障范围（猪 / 牛）先修这两条，结构已通用（加一行即可扩）。
+    { RecipeRegistry::RawPorkchopId,   RecipeRegistry::CookedPorkchopId, "porkchop" }, // 生猪排 → 熟猪排（机制等价 MC 1.0 raw→cooked porkchop）
+    { RecipeRegistry::RawBeefId,       RecipeRegistry::CookedBeefId,     "beef"     }, // 生牛肉 → 熟牛肉（机制等价 MC 1.0 raw→cooked beef）
 };
 
 constexpr FuelEntry kFuel[] = {
