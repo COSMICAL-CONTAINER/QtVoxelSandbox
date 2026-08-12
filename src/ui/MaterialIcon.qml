@@ -1441,6 +1441,35 @@ Item {
                 R(7, 10, 1, 1, bodyLite)       // 眼上反光
             }
 
+            // t510 雪球（0x23D）：雪傀儡死亡掉落 0-15 个。机制等价 MC 1.0 snowball 图标；纯原创自绘（§9a）。
+            //   MC 风格雪球 = 冷白圆形雪团 + 左上高光 + 散布冰晶亮点（表雪粒反光）+ 边缘冷蓝阴影（表球体积）。
+            //   配色：snow #f0f4f8（冷白主体，同 SnowGolem 配色）/ snowLite #ffffff（左上高光，纯白反光）/
+            //   snowDark #b8c4d4（边缘阴影，冷蓝灰，表球体积）/ speck #c8d4e0（冰晶亮点，半透冷灰）。
+            const drawSnowball = () => {
+                const snow = "#f0f4f8", snowLite = "#ffffff", snowDark = "#b8c4d4", speck = "#c8d4e0"
+                // 球体主体（八边形外轮廓，rows 7..17，cols 6..19；中部最宽 14）
+                R(8, 7, 10, 1, snow)
+                R(6, 8, 14, 1, snow)
+                R(5, 9, 16, 8, snow)            // 主体 rows 9..16
+                R(6, 17, 14, 1, snow)
+                R(8, 18, 10, 1, snow)
+                // 左上高光（受光面，前两行 + 左上角块，表球面反光）
+                R(8, 7, 10, 1, snowLite)
+                R(6, 8, 14, 1, snowLite)
+                R(5, 9, 4, 1, snowLite)
+                R(6, 10, 2, 1, snowLite)
+                // 边缘阴影（右下边 + 底部，表球体积冷蓝灰；与高光对角增强立体感）
+                R(8, 18, 10, 1, snowDark)
+                R(6, 17, 14, 1, snowDark)
+                R(18, 9, 3, 8, snowDark)        // 右暗边
+                // 冰晶亮点（散布雪粒反光，几粒，表雪团颗粒质感）
+                R(9, 11, 1, 1, speck)
+                R(14, 12, 1, 1, speck)
+                R(11, 14, 1, 1, speck)
+                R(8, 13, 1, 1, speck)
+                R(15, 15, 1, 1, speck)
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -1503,6 +1532,7 @@ Item {
             case 0x23A: drawEndEye();             break // t487 末影之眼（要塞宝藏箱战利品；右键末地传送门激活）
             case 0x23B: drawBowl();               break // t507 木碗（3 木板 V 形合成；蘑菇汤原料）
             case 0x23C: drawMushroomStew();       break // t507 蘑菇汤（碗+红蘑菇+白蘑菇合成；右键食 +10 饥饿；食完返空碗）
+            case 0x23D: drawSnowball();           break // t510 雪球（雪傀儡死亡掉落 0-15 个；可堆叠 64）
             default:    drawStick();        break
             }
         }

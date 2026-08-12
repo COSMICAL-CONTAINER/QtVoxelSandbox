@@ -271,6 +271,20 @@ public:
     //   （机制等价 MC 1.0：剪羊毛只对有毛的羊生效，已裸的羊右键无反应）。bump revision → QML 翻羊为裸外观。
     //   Q_INVOKABLE 兼调试 + playercontroller placeBlock shears 分支双入口（playercontroller 是 C++ 直调）。
     Q_INVOKABLE void shearSheep(int i);
+    // t510 第 i 只 mob 是否**雪傀儡且已被剪南瓜头**（snowGolemSheared=true）。仅 mobType==MobSnowGolem 用（其余
+    //   mob 恒 false）。QML delegate 据它切换雪傀儡外观：未剪=南瓜头 + 刻面眼/嘴；已剪=无头 derpy 形态（眼/嘴
+    //   悬浮原头位，机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」）。PlayerController 剪刀分支据它判是否
+    //   可剪（已剪不再可剪，防刷屏）。越界 / 非 SnowGolem → false。revision 在剪南瓜头时 bump 让 QML 绑定刷新
+    //   （同 shearedAt 模式）。
+    Q_INVOKABLE bool snowGolemShearedAt(int i) const;
+    // t510 剪雪傀儡南瓜头（spec「玩家持剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡变无头 derpy 形态」；机制等价 MC 1.0
+    //   剪刀剪雪傀儡南瓜头）。第 i 只**未剪南瓜头的活体 SnowGolem** → 翻 snowGolemSheared=true + emit snowGolemSheared(坐标)
+    //   让呈现层 Connections 转发到 ItemEntityManager.spawnItem 生成南瓜方块掉落实体（BlockRegistry::Pumpkin，
+    //   同 sheepSheared→spawnItem 模式；单向事件流，分层：Entities 层发语义事件、呈现层只消费）。已剪南瓜头 /
+    //   非 SnowGolem / dead / 越界 → 静默早退（机制等价 MC 1.0：剪南瓜头只对戴头的雪傀儡生效，已无头的右键无反应）。
+    //   bump revision → QML 翻雪傀儡为无头 derpy 外观。Q_INVOKABLE 兼调试 + PlayerController 剪刀分支双入口
+    //   （playercontroller 是 C++ 直调）。
+    Q_INVOKABLE void shearSnowGolem(int i);
     // t400 触发求偶期（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding 的 love mode）。
     //   第 i 个**成体**可繁殖 mob（pig/cow/sheep/chicken）+ 非冷却 + 未在求偶 → 进求偶期（loveTimer=kLoveDuration）
     //   + bump revision（QML 显心）+ 返 true。幼崽 / 冷却中 / 已求偶 / 非可繁殖 mob / dead / 越界 → 返 false。
@@ -566,6 +580,12 @@ signals:
     //   据它转发 ItemEntityManager.spawnItem(0x20E=羊毛 ×1)（同 mobDied→spawnItem 模式；单向事件流，PLAN §2 分层：
     //   Entities 层发语义事件、呈现层只消费，绝不反向写栅格）。机制等价 MC 1.0 剪羊毛掉落羊毛物品。
     void sheepSheared(int x, int y, int z);
+    // t510 雪傀儡剪南瓜头（shearSnowGolem 内发，仅未剪南瓜头的活体 SnowGolem 首次翻 snowGolemSheared=true 时发）。
+    //   坐标 = 雪傀儡当前格 floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在它身旁）。
+    //   呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem(100=Pumpkin, 1)（南瓜方块掉落实体；
+    //   同 sheepSheared→spawnItem 模式；单向事件流，PLAN §2 分层：Entities 层发语义事件、呈现层只消费，绝不
+    //   反向写栅格）。机制等价 MC 1.0 剪刀剪雪傀儡南瓜头 → 南瓜掉落 + 雪傀儡变无头 derpy 形态（不死，仅外观变化）。
+    void snowGolemSheared(int x, int y, int z);
     // t398 鸡下蛋（spec「periodically lays an EGG item」）：MobChicken 周期性下蛋 —— eggTimer 倒计时到 0 时
     //   发本信号。坐标 = 鸡当前格 floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在鸡身旁）。
     //   呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem(0x22B=蛋 ×1)（同 mobDied→spawnItem 模式；
@@ -771,6 +791,16 @@ private:
         //   每帧递减（跨 0 时 bump revision → QML isSlowedAt 翻回蓝调）；减速叠加进 speedScale（与水中减速
         //   相乘）。雪傀儡 / 铁傀儡自身不被雪球减速（它们是投掷者 / 免疫）。
         float slowTimer = 0.0f; // 雪球减速剩余秒数（>0 减速；t482）
+        // t510 雪傀儡热伤害累积器（仅 mobType==MobSnowGolem 用；其余 mob 留默认 0 不触发）：
+        //   meltAccum：热群系 / 入水 / 降水时每 tick 累加 aiDt；达 kSnowMeltInterval（~1s）扣 1HP（机制等价
+        //     MC 1.0 雪傀儡在热群系 / 水中 / 雨天持续受热伤害直至融化死亡，**非即死**——慢扣血到 0 才死）。
+        //     修 t482 旧「kSnowMeltDamage=100 一击致死」：用户报「沙漠召唤即死」，spec 要「慢慢扣血到 0 才死」。
+        //   snowGolemSheared：剪刀剪南瓜头后置 true（mechanic-equivalent MC 剪刀剪雪傀儡南瓜头 → derpy 无头
+        //     形态；§9 区隔纯色原创）。sheared=true → QML delegate 隐藏南瓜头（保留眼/嘴贴原头位漂浮，机制等价
+        //     MC 1.0「剪后变无头形态带眼不死的 derpy 版」）。剪后不再可剪（防刷屏）。放 struct 末尾区保聚合
+        //     初始化不错位（同 aiAccum / slowTimer 模式，DMI 兜底）。
+        float meltAccum = 0.0f;       // 雪傀儡热伤害累积器（秒；达 kSnowMeltInterval 扣 1HP；仅 MobSnowGolem）
+        bool  snowGolemSheared = false; // 雪傀儡是否已被剪南瓜头（true=无头 derpy 形态；仅 MobSnowGolem）
         // t482 雪傀儡行走留雪层：跟踪上一脚位格（golem 进入新格时在「刚离开的格」放 SnowLayer，避免放脚下
         //   致嵌入 / 攀爬 —— SnowLayer 是满格整立方，放脚下会让 golem 嵌入后碰撞顶上去 → 无限攀爬阶梯；
         //   放身后则 golem 已离开该格不嵌入，留下平铺雪脚印轨迹）。初值 -1 = 无上一格（首帧只记录不放置）。
@@ -1253,8 +1283,13 @@ private:
     //   - kSnowSlowDuration：雪球减速持续（秒）。取 3.0（明显可感知的减速窗口）。
     //   - kSnowSlowMul：减速水平速度倍数（<1）。取 0.5（一半速度，机制等价 MC 雪球减速）。
     //   - kSnowTrailInterval：行走留雪层节流间隔（秒）。取 1.0（每秒一块雪层 → 走出一串雪脚印，不刷屏）。
-    //   - kSnowMeltDamage：雪傀儡融化单次伤害（HP，> 满血 → 一击致死）。满血取 10（kDefaultMaxHealth）；
-    //     大伤害触发死亡链（死亡粒子 + 移除）。
+    //   - kSnowMeltInterval：热群系 / 入水 / 降水时每扣 1HP 的累积间隔（秒）。t510 改「即死」为「持续慢扣血」：
+    //     取 1.0（每秒扣 1HP，满血 4 HP 雪傀儡 ~4s 死，机制等价 MC 1.0 雪傀儡在热群系 / 水中 / 雨天持续受热
+    //     伤害直至融化死亡，非一击即死）。aiSnowGolem 累加 meltAccum → 达本间隔 → damageEntity(1)。
+    //   - kSnowMeltDamage：单次热伤害扣血量（HP）。t510 自旧值 100（一击致死）降到 1（慢扣血；每 kSnowMeltInterval
+    //     秒扣 1HP）—— 修用户报「沙漠召唤雪傀儡立即死」的诉求：spec 要「慢慢扣血到 0 才死」。
+    //   - kSnowGolemMaxHealth：雪傀儡满血（HP）。spawnMobTyped 在 playercontroller.cpp 用字面量 4（南瓜 + 雪块×2
+    //     结构搭建时 maxHealth=4，机制等价 MC 1.0 雪傀儡 4HP=2 心，软质造物）。4 HP / 1 HP/s 扣血 → ~4s 融化死亡。
     //   - kIronGolemDetectRange：铁傀儡敌对侦测范围（blocks；XZ）。MC 铁傀儡 ~16 格；取 12（近守卫）。
     //   - kIronGolemAttackRange：近战攻击 XZ 距离（blocks）。铁傀儡重拳臂长；取 2.0（略大于敌对近战 1.6，
     //     重拳挥臂范围大）。
@@ -1274,7 +1309,8 @@ private:
     static constexpr float kSnowSlowDuration       = 3.0f;  // 雪球减速持续（秒）
     static constexpr float kSnowSlowMul            = 0.5f;  // 减速水平速度倍数（<1）
     static constexpr float kSnowTrailInterval      = 1.0f;  // 行走留雪层节流间隔（秒）
-    static constexpr int   kSnowMeltDamage         = 100;   // 雪傀儡融化伤害（HP；> 满血一击致死）
+    static constexpr float kSnowMeltInterval       = 1.0f;  // 热群系/入水/降水每扣 1HP 的累积间隔（秒；t510 慢扣血）
+    static constexpr int   kSnowMeltDamage         = 1;     // 单次热伤害扣血量（HP；t510 自 100 降到 1，非即死）
     static constexpr float kIronGolemDetectRange   = 12.0f; // 铁傀儡敌对侦测范围（blocks；XZ）
     static constexpr float kIronGolemAttackRange   = 2.0f;  // 铁傀儡近战攻击 XZ 距离（blocks）
     static constexpr int   kIronGolemAttackDamage  = 8;     // 铁傀儡重拳伤害（HP；高伤害）

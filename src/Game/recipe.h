@@ -269,6 +269,12 @@ public:
     //   无 MC 1.0 mcMaterialId 映射（id 越表界 → -1 → 资源包回退引擎自绘 MaterialIcon）。
     static constexpr int BowlId          = 0x23B; // 木碗：4 木板合成；蘑菇汤配方原料（t507）
     static constexpr int MushroomStewId  = 0x23C; // 蘑菇汤：碗+红蘑菇+白蘑菇合成；右键食 +10 饥饿（t507）
+    // t510 雪球（snowball）：材料段 0x23D。机制等价 MC 1.0 雪球物品——**雪傀儡死亡掉落** 0-15 个（mechanic-
+    //   equivalent MC snow golem death drops 0-15 snowballs；呈现层 onMobDied MobSnowGolem 分支据 Math.random
+    //   0-15 spawnItem 本 id，同被动 mob 多件独立 spawnItem 模式）。可堆叠 64；非方块（材料段）→ 右键不放置。
+    //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘
+    //   MaterialIcon）。图标走 MaterialIcon drawSnowball（程序生成冷白小球，§9 原创）。
+    static constexpr int SnowballId      = 0x23D; // 雪球：雪傀儡死亡掉落 0-15 个（t510）；可堆叠 64
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

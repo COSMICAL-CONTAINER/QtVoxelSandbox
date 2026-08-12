@@ -1695,8 +1695,17 @@ Window {
                 if (Math.random() < 0.33) itemEntities.spawnItem(x, y, z, 0x203, 1)  // ~33% ×5（独立 → 总量 3-5）
                 if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 49, 1)      // 红花（罂粟）~50% ×1
             }
-            // t482 雪傀儡（MobSnowGolem）死亡不掉落（机制等价 MC 雪傀儡无常规掉落，仅融化时无产出）。
-            //   融化（沙漠 / 降水）→ 死亡粒子链（白烟 + 侧倒）→ onMobDied 走本无分支 → 不掉。被杀也不掉（spec 未要求）。
+            // t510 雪傀儡（MobSnowGolem）死亡掉落雪球 0-15 个（spec「死掉雪球」；机制等价 MC 1.0 雪傀儡死亡
+            //   掉落 0-15 雪球）。雪球 id=0x23D（RecipeRegistry::SnowballId；⚠️ QML 不 import C++ 静态类故用字面量，
+            //   同 onMobDied 既有约定）。机制等价 MC 1.0：每只雪傀儡死亡独立掷 0-15 雪球（Math.floor(random*16)，
+            //   0..15 等概率）→ 每件独立 spawnItem 实体（同被动多件掉落模式）。t482 旧版「雪傀儡死亡不掉落」改
+            //   为本分支（spec t510 新增需求「死亡掉雪球」）。融化（沙漠/水/雨）慢扣血致死同样走本分支掉雪球
+            //   （机制等价 MC 雪傀儡无论死因都掉雪球）。
+            else if (mobType === EntityManager.MobSnowGolem) {
+                const snowballCount = Math.floor(Math.random() * 16) // 0-15 雪球（机制等价 MC 雪傀儡 0-15 drops）
+                for (let i = 0; i < snowballCount; ++i)
+                    itemEntities.spawnItem(x, y, z, 0x23D, 1) // 雪球 ×1（每件独立实体，同被动多件掉落）
+            }
             // MobTest（通用测试生物）不掉落 —— 调试生物无游戏内常规产出。Stalker 爆炸破坏方块的掉落由
             //   detonateStalker 的 explosionDroppedItem 单独发（t297）；MobStalker 常规击杀掉火药归本 onMobDied 上方分支（t485）。
         }
@@ -1707,6 +1716,12 @@ Window {
         //   0x20E = RecipeRegistry::WoolId（材料段羊毛物品；⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定）。
         //   单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，同 fallingBlockDropped / mobDied 模式）。
         function onSheepSheared(x, y, z) { itemEntities.spawnItem(x, y, z, 0x20E, 1) }
+        // t510 雪傀儡剪南瓜头掉落（spec「剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡变无头 derpy 形态」）：EntityManager
+        //   shearSnowGolem 内发 snowGolemSheared(x,y,z)（坐标 = golem 当前格 floor(pos)，与 spawnItem 整数格约定一致）
+        //   → 转发到 ItemEntityManager.spawnItem 生成南瓜方块掉落实体（机制等价 MC 1.0 剪刀剪雪傀儡南瓜头 → 南瓜掉落）。
+        //   100 = BlockRegistry::Pumpkin（南瓜方块；⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定；方块 id 即
+        //   物品 id，可放置回）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，同 sheepSheared 模式）。
+        function onSnowGolemSheared(x, y, z) { itemEntities.spawnItem(x, y, z, 100, 1) }
         // t398 鸡下蛋（spec「periodically lays an EGG item」）：EntityManager tick 内 MobChicken eggTimer 周期到 →
         //   发 chickenLaidEgg(x,y,z)（坐标 = 鸡当前格 floor(pos)，与 spawnItem 整数格约定一致）→ 转发到
         //   ItemEntityManager.spawnItem 生成蛋物品掉落实体（机制等价 MC 1.0 鸡 5-10 分钟下一枚蛋）。
@@ -4769,6 +4784,10 @@ Window {
                             Node {
                                 visible: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
+                                // t510 golemSheared = 是否已被剪刀剪掉南瓜头（shearSnowGolem → snowGolemShearedAt=true）。
+                                //   剪后变无头 derpy 形态（机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」）：
+                                //   南瓜头本体隐藏，眼/嘴保留贴原头位漂浮（不死，仅外观变化）。各部件 visible 据它切换。
+                                property bool golemSheared: { entityManager.revision; return entityManager.snowGolemShearedAt(index) }
                                 // tint = 当前调制色（红闪 / 蓝调 / 昼夜灰阶）；tinted(hex) 把部件 base 色按 tint 逐通道相乘。
                                 property color tint: {
                                     entityManager.revision
@@ -4798,7 +4817,9 @@ Window {
                                 //   t499：放大到 ~0.72 宽（顶/底雪块各 0.80 宽 → 头略窄于身，自然头身比；旧 0.65 太小），
                                 //   z 略扁（0.62，南瓜前后扁圆非正方）。色 #e8821e（更亮的橙，旧 #e87a28 在昼夜 tint 下偏褐
                                 //   辨识弱）。local y center +1.21 → 头底 (y=1.21-0.31=0.90) 贴顶雪块顶（y=+0.90），无断脖缝隙。
+                                //   t510：剪南瓜头后（golemSheared）隐藏本体（无头 derpy 形态）；眼/嘴仍悬浮原头位（下方）。
                                 Model {
+                                    visible: !parent.golemSheared // t510 剪后隐藏南瓜头本体（无头形态）
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 1.21, 0)
                                     scale: Qt.vector3d(0.72, 0.62, 0.62)
@@ -4809,6 +4830,9 @@ Window {
                                 //   眼在头前内 0.01 → 被不透明南瓜面整体遮挡（UnitCube NoLighting opaque）。修：眼/嘴 z=-0.34
                                 //   （凸出头前 0.03，非内嵌），刻面深色 (#1a0e04) 必现于头前。眼位 y=1.30（头中心上下，头
                                 //   span [0.90,1.52] → 中心 1.21，眼略上偏 1.30 留嘴位下方）；嘴位 y=1.12（眼下，咧嘴笑）。
+                                //   t510：剪南瓜头后（golemSheared）南瓜头本体隐藏，眼/嘴**仍悬浮在原头位**（visible 恒 true）
+                                //   → 「无头形态带眼」derpy 效果（机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」；
+                                //   不死 = 不改血量 / 行为，仅外观变化；眼/嘴悬浮无南瓜头遮挡更显眼，呆萌 derpy 风）。
                                 Model {
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(-0.15, 1.30, -0.34)

@@ -866,6 +866,36 @@ void EntityManager::shearSheep(int i)
     emit entitiesChanged(); // bump → QML delegate 据 shearedAt 翻羊为裸外观
 }
 
+// t510 雪傀儡剪南瓜头（spec「玩家持剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡变无头 derpy 形态」；机制等价 MC 1.0
+//   剪刀剪雪傀儡南瓜头）。仅 mobType==MobSnowGolem && 未剪南瓜头 && 活体可剪 → 翻 snowGolemSheared=true +
+//   emit snowGolemSheared（坐标 = golem 当前格 floor(pos)）→ 呈现层 spawnItem(100=Pumpkin, 1) 掉南瓜方块。
+//   bump revision → QML delegate 据 snowGolemShearedAt 切换为无头 derpy 形态（隐藏南瓜头 Model，保留眼/嘴贴
+//   原头位漂浮，机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」）。已剪 / 非 SnowGolem / dead / 越界 → 静默。
+bool EntityManager::snowGolemShearedAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobSnowGolem) return false;
+    return e.snowGolemSheared;
+}
+
+void EntityManager::shearSnowGolem(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobSnowGolem) return; // 仅 SnowGolem 可剪南瓜头
+    if (e.dead || !e.alive) return;                         // 尸体 / 空槽不可剪
+    if (e.snowGolemSheared) return;                         // 已无头 → 无反应（不重复掉南瓜）
+    e.snowGolemSheared = true;
+    // 南瓜方块掉落在 golem 当前格（floor(pos)，同 mobDied / sheepSheared 坐标约定）→ 呈现层 spawnItem 在该格
+    //   中心生成掉落实体（item id = BlockRegistry::Pumpkin=100，方块 id 即物品 id，可放置回）。
+    const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
+    qCInfo(lcEnt) << "snow golem sheared at slot" << i << "pos" << e.pos << "-> dropped pumpkin at" << dx << dy << dz;
+    emit snowGolemSheared(dx, dy, dz);
+    ++m_revision;
+    emit entitiesChanged(); // bump → QML delegate 据 snowGolemShearedAt 翻为无头 derpy 外观
+}
+
 // t400 mobType 是否可繁殖被动生物（pig/cow/sheep/chicken 之一；t480 加 MobWolf；t481 加 MobOcelot）。hostile /
 //   MobTest / MobSquid 不可繁殖。feedMob 食物匹配 / 求偶寻偶 / 配对均先据它门控。机制等价 MC 1.0 仅被动 farm
 //   动物可繁殖；狼/猫的「仅驯服可繁殖」门控在 enterLoveMode / feedBaby 内（isBreedableType 是类型级门，
@@ -1815,23 +1845,37 @@ void EntityManager::fireSnowball(int idx, const Entity &shooter, const QVector3D
 }
 
 // t482 雪傀儡 AI（详见头文件 aiSnowGolem 注释）。机制对齐 MC 1.0 雪傀儡：游荡 + 抛雪球打敌对 + 行走留雪 +
-//   热/雨融化。neutral non-hostile（hostile=false → 不参与黑暗刷怪 / 燃烧 / 远距消失）。
+//   热/雨/水融化。neutral non-hostile（hostile=false → 不参与黑暗刷怪 / 燃烧 / 远距消失）。
 //   分层（PLAN §2）：只读 World（blockAt/isSolid/biomeIdAt/isPrecipitatingAt）+ 自身数据；写自身（pos /
 //   attackCooldown / moveSpeed）+ damageEntity（同层）+ 向下静默写 World（setWaterSilent 雪层）。
+//   t510 改融化语义：旧版「热群系/降水 → kSnowMeltDamage=100 一击致死」（用户报「沙漠召唤即死」），spec 要
+//     「慢慢扣血到 0 才死」。改：热群系 / 入水 / 降水 → 累加 meltAccum，达 kSnowMeltInterval 扣 kSnowMeltDamage=1 HP
+//     （每秒 1HP，满血 4 → ~4s 融化死亡，机制等价 MC 1.0 持续热伤害而非即死）。新增「入水扣血」分支（脚位 /
+//     身体格在水 → 同热伤害路径，机制等价 MC 雪傀儡入水融化）。
 bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, float worldW, float worldD,
                                 float speedScale)
 {
     bool dirty = false;
-    // (1) 融化（机制等价 MC 雪傀儡在沙漠 / 雨天融化消失）：所在格群系为**沙漠**（热）或**降水**（雨/雪）→
-    //    damageEntity 大伤害（> 满血一击致死）→ 死亡链（死亡粒子白烟 + 侧倒动画 + 移除；onMobDied 不掉落）。
-    //    只读 World::biomeIdAt / isPrecipitatingAt（向下依赖）。
+    // (1) 热伤害累积（机制等价 MC 雪傀儡在热群系 / 入水 / 雨天持续受热伤害直至融化死亡，**非即死**）：
+    //    所在格群系为**沙漠**（热）或**降水**（雨/雪）或**脚位/身体格在水**（入水融化）→ meltAccum 累加 dt，
+    //    达 kSnowMeltInterval → damageEntity(1 HP) + 重置 meltAccum。只读 World::biomeIdAt / isPrecipitatingAt /
+    //    blockAt（向下依赖）。mobFeetInWater 判脚位水格（同 aiSquid / 通用 mob 水物理）。
+    //    **die 不立即 return**（旧版 damageEntity 大伤害后 return）—— 改慢扣血后 mob 仍存活 N 秒，须继续走
+    //    后续分支（留雪 / 抛雪球 / 游荡）直至血 0 自然死亡（damageEntity 致死时置 dead → tick 死亡态分支接管）。
     if (world) {
         const int gx = qFloor(e.pos.x()), gz = qFloor(e.pos.z());
         const bool hotBiome = (world->biomeIdAt(gx, gz) == 2);        // 2 = Desert（热群系）
         const bool precipitating = world->isPrecipitatingAt(gx, gz);  // 降水（雨/雪）
-        if (hotBiome || precipitating) {
-            damageEntity(idx, kSnowMeltDamage);
-            return true;
+        const bool inWater = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH); // 入水融化
+        if (hotBiome || precipitating || inWater) {
+            e.meltAccum += float(dt);
+            if (e.meltAccum >= kSnowMeltInterval) {
+                e.meltAccum = 0.0f;
+                damageEntity(idx, kSnowMeltDamage); // 慢扣血 1HP（满血 4 → ~4s 融化死亡）
+                dirty = true;
+            }
+        } else {
+            e.meltAccum = 0.0f; // 离开热/水/雨 → 累积清零（防跨段累积，机制等价 MC 离开热源不再受伤）
         }
     }
     // (2) 行走留雪层（机制等价 MC 雪傀儡走过留雪）：golem 进入新脚位格 → 在「刚离开的格」（上一脚位格）放

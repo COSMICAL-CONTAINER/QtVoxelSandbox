@@ -2494,6 +2494,11 @@ void PlayerController::placeBlock()
         const QVector3D look = lookDirection();
         float mobDist = 0.0f;
         const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        // t510 扩展：剪刀剪羊（t300）OR 剪雪傀儡南瓜头（t510；spec「玩家持剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡
+        //   变无头 derpy 形态」；机制等价 MC 1.0 剪刀剪雪傀儡南瓜头）。命中 mob 后据 mobType 分流：
+        //   - MobSheep 且 !shearedAt → shearSheep（翻裸 + 掉羊毛）
+        //   - MobSnowGolem 且 !snowGolemShearedAt → shearSnowGolem（翻无头 + 掉南瓜方块；呈现层 spawnItem Pumpkin=100）
+        //   命中非羊非雪傀儡 / 已剪 / 无命中 → 走原方块放置路径。生存消耗剪刀 1 耐久（创造不耗，同剪羊毛）。
         if (mobIdx >= 0
             && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobSheep
             && !m_entityManager->shearedAt(mobIdx)) {
@@ -2503,8 +2508,16 @@ void PlayerController::placeBlock()
             if (m_mode == Survival) m_hotbar->damageSelectedItem();
             m_lastPlaceMs = now;
             emit swingArm(); // 剪羊毛也是一次「使用」动作 → 挥手（t29）
+        } else if (mobIdx >= 0
+                   && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobSnowGolem
+                   && !m_entityManager->snowGolemShearedAt(mobIdx)) {
+            m_entityManager->shearSnowGolem(mobIdx);
+            // 生存模式消耗剪刀 1 耐久（同剪羊毛，机制等价 MC 剪刀每剪 -1 耐久；创造无限源不耗）。
+            if (m_mode == Survival) m_hotbar->damageSelectedItem();
+            m_lastPlaceMs = now;
+            emit swingArm(); // 剪南瓜头也是一次「使用」动作 → 挥手（t29）
         }
-        return; // 剪刀（剪羊毛成功 / 命中非羊 / 已剪羊毛 / 无命中）均不再走方块放置路径
+        return; // 剪刀（剪羊/剪南瓜头成功 / 命中非羊非雪傀儡 / 已剪 / 无命中）均不再走方块放置路径
     }
     // t469 船交互（spec「右键船→骑乘；持船物品右键水面→放船」；机制等价 MC 1.0 boat）。两分支：
     //   (a) 骑乘（优先于放船）：跑独立 boat 命中射线（tryMount 内 findBoatHit，同剪刀剪羊 / 喂食的实体射线模式），
