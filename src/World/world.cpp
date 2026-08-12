@@ -208,6 +208,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     checkCactusOnEdit(x, y, z, oldId, id); // t445：仙人掌失撑（②）/ 邻接方块（④）整柱坍落复检
     checkDeadBushOnEdit(x, y, z, oldId, id); // t504：枯死灌木失撑（破下方支撑 → 正上方枯灌木掉落）复检
     checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑（破下方支撑 → 正上方花 / 蘑菇掉落）复检
+    checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
     return true;
 }
 
@@ -294,6 +295,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkCactusOnEdit(x, y, z, oldId, id); // t445：仙人掌失撑（②）/ 邻接方块（④）整柱坍落复检
     checkDeadBushOnEdit(x, y, z, oldId, id); // t504：枯死灌木失撑（破下方支撑 → 正上方枯灌木掉落）复检
     checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑（破下方支撑 → 正上方花 / 蘑菇掉落）复检
+    checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
     return true;
 }
 
@@ -332,6 +334,7 @@ bool World::clearBlockSilent(int x, int y, int z)
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 点火是系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     pokeFluidDirty(x, y, z); // t380：邻接流体可能受影响 → 标流体脏（保守；TNT 不属流体通常无影响）
+    checkPressurePlateOnEdit(x, y, z, occ, id); // t494：压力板失撑（TNT 被引燃清 Air → 板上压力板失撑掉落）
     return true;
 }
 
@@ -1563,6 +1566,32 @@ void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 
     emit blockDroppedAsItem(x, by, z, int(above));         // 呈掉落物实体（Main.qml spawnItem；dropId=自身）
     recomputeLightAround(x, by, z, above, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
     emit worldChanged();        // 驱动 mesh 重建（cross 段消失）
+    m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
+// t494 压力板失撑掉落复检（见 world.h 头注释）。机制等价 MC 1.0 压力板失去下方支撑即掉自身。
+//   压力板（Wood/Cobble）是贴地薄板（ShapePlate），下方须有完整支撑方块。本格被破为 Air（破下方支撑）→ 正上方
+//   是压力板 → 失撑 → 静默清 Air + emit 破块反馈 + 掉落物（dropId=自身 → 掉木板 / 圆石压力板）+ 重 flood 光。
+//   玩家直破压力板（oldId==plate → id==Air）走 finishMiningAt 通用 drop 路径（dropId=自身），避免双重掉落。
+//   触发场景（用户报）：① 压力板放 TNT 上，TNT 被引燃（clearBlockSilent 把下方 TNT 清成 Air → 板上压力板失撑）；
+//   ② 挖掘压力板下方的方块（setBlock 破下方支撑 → 板上压力板失撑）。木 / 圆石压力板都掉。
+void World::checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    // 仅本格被破为 Air 且被破块非压力板时，查正上方是否压力板失撑。（被破块本身是压力板时跳过 ——
+    //   玩家直破压力板的掉落由 finishMiningAt 通用 drop 路径负责（dropId=自身），避免双重掉落。）
+    if (id != BlockRegistry::Air || BlockRegistry::isPressurePlate(oldId)) return;
+    const int by = y + 1;
+    if (by < 0 || by >= m_height) return;
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    const quint8 above = m_chunks.blockAt(x, by, z);
+    if (!BlockRegistry::isPressurePlate(above)) return;
+    // 压力板失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落物 + 重 flood 光。
+    m_chunks.setBlock(x, by, z, BlockRegistry::Air);
+    noteGrowthWrite(x, by, z, above, BlockRegistry::Air); // 压力板非生长方块 → no-op，保持一致
+    emit blockBroken(x, by, z, int(above));                 // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
+    emit blockDroppedAsItem(x, by, z, int(above));         // 呈掉落物实体（dropId=自身 → 掉压力板）
+    recomputeLightAround(x, by, z, above, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
+    emit worldChanged();        // 驱动 mesh 重建（薄板消失）
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
 }
 

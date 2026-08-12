@@ -145,7 +145,7 @@ public:
     //   （MobModel 小型虫形：分节躯干 + 前伸小头 + 多对短腿）/ 贴图（程序生成灰白甲壳 + 体节纹）全原创，仅机制
     //   对齐「小虫群涌追击」。要塞 placeStronghold 在传送门房放银鱼刷怪笼（Spawner state 带 SpawnerStateSilverfishFlag）→
     //   tickSpawners 据该 flag 刷 Silverfish（区别于地牢 Shambler/Bones）。Entity hostilesCount / hostileNearby 均含 Silverfish。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14 };
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -1431,6 +1431,14 @@ private:
     static constexpr float kFuseTime            = 1.5f;  // 蓄力到引爆的时长（秒；MC 苦力怕 ~1.5s）
     static constexpr float kExplosionRadius     = 3.0f;  // 球形爆炸半径（blocks）
     static constexpr int   kExplosionDamageMax  = 24;    // 贴脸爆炸伤害（HP；随距离线性衰减到 0）
+    // t494 爆炸推动 primed TNT 实体常量（机制等价 MC TNT 爆炸把邻接 primed TNT 推开飞起）：爆炸中心距 primed TNT
+    //   ≤ kExplosionRadius → 施水平远离冲量（kExplosionPushSpeed × 距离衰减）+ 上抛（kExplosionUpSpeed × 距离衰减）。
+    //   vx/vz 由 primed tick 水平积分 + 摩擦衰减（kExplosionEntityFriction），飞起后自然落地 / 停下（机制等价 MC
+    //   爆炸推开 TNT 的抛物线）。数值量级：爆炸 max 水平 ~6 b/s（≈ 掉落物弹出 kItemPopSpeed 2.0 的 3×，明显飞起但
+    //   受摩擦很快停下）、上抛 ~7 b/s（≈ 玩家跳跃初速，能离地 ~1 格）。
+    static constexpr float kExplosionPushSpeed      = 6.0f; // 爆炸水平冲量上限（blocks/s；距离衰减）
+    static constexpr float kExplosionUpSpeed        = 7.0f; // 爆炸上抛冲量上限（blocks/s；距离衰减）
+    static constexpr float kExplosionEntityFriction = 4.0f; // primed TNT 被推后的水平摩擦衰减率（1/s；exp(-rate·dt)）
     // t297 爆炸掉落：每个被爆炸破坏的方块以此概率掉落其物品实体（机制等价 MC 爆炸弹毁方块掉物；
     //   spec「~50% 成掉落物」）。掉落 id 走 BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落）。
     static constexpr float kExplosionDropChance = 0.25f;  // 破坏块掉落概率（~25%；连锁爆炸掉落物控量，原 50% 致 items 顶满 200 卡顿）
@@ -1440,6 +1448,11 @@ private:
     //   错峰后各 TNT 略延时引爆，机制等价 MC TNT 链式逐个引爆的连锁观感）。
     static constexpr float kPrimedTntFuseSec = 5.0f;      // PrimedTnt 引信总长（秒；spec ~5s）
     static constexpr float kPrimedTntFuseJitterSec = 0.6f; // 链式引爆引信随机错峰（秒；0..Jitter 随机偏移避免同帧全爆）
+    // t494 链式引燃专用短引信（用户「连锁引燃 TNT 太慢，像重新点燃一样；MC 链式引爆会更快」）：爆炸引燃的邻接
+    //   TNT（detonateTntSphere 内 spawnPrimedTnt）用短 fuse（~1.2s，比手点 5s 快）→ 连锁快速推进（机制等价 MC
+    //   TNT 链式逐个快速引爆的观感）。手点 / 机关 / 压力板点燃仍 5s（kPrimedTntFuseSec）。fuseProgressAt 按
+    //   kPrimedTntFuseSec 归一 → 短 fuse 起始 progress 小 → 白闪起始即较快（连锁观感「已在燃」）。
+    static constexpr float kChainFuseSec = 1.2f;          // 链式引燃 TNT 引信（秒；短于手点 5s，快速连锁）
     // t298 怪物受水流影响（spec「怪在水中正常走（错）→减速/浮（同玩家水中物理）」；机制等价玩家水中物理
     //   t174 浮力缓沉 + t159 水下减速 + t211 流水推动 —— mobs 不按空格故无 kSwimUp 上浮，仅被动缓沉）。
     //   数值与玩家同源（PlayerController kUnderwaterSpeedMul/kWaterGravity/kWaterSinkMax/kWaterFlowPush），保世界

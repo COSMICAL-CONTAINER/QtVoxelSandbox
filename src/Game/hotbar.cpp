@@ -1668,6 +1668,7 @@ int Hotbar::armorProtectionFactor(int cause) const
     case 9:  epf += armorEnchantLevelSum(EnchantRegistry::FireProtection) * 2; break; // Fire
     case 6:  epf += armorEnchantLevelSum(EnchantRegistry::ProjectileProt) * 2; break; // Bones = 骷髅箭（弹射物）
     case 8:  epf += armorEnchantLevelSum(EnchantRegistry::FireProtection) * 2; break; // Stalker 爆炸（火焰保护亦减爆炸）
+    case 11: epf += armorEnchantLevelSum(EnchantRegistry::FireProtection) * 2; break; // t494 Tnt 爆炸（同 Stalker：火焰保护亦减爆炸）
     default: break;
     }
     return epf;

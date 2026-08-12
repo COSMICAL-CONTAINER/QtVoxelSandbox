@@ -49,6 +49,7 @@ QString PlayerState::deathCauseText() const
     case Bones:        return QStringLiteral("被骸骨击败");
     case Spider:       return QStringLiteral("被蜘蛛击败");
     case Stalker:      return QStringLiteral("被潜行者炸飞");
+    case Tnt:          return QStringLiteral("被 TNT 炸死"); // t494：TNT 爆炸致死（独立死因，区别于潜行者自爆）
     case Fire:         return QStringLiteral("被烈火吞噬");
     case Cactus:       return QStringLiteral("被仙人掌扎死");
     case Generic:

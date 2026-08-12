@@ -381,6 +381,14 @@ public:
     //   供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
     void checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t494 压力板失撑掉落复检（机制等价 MC 1.0 压力板失去下方支撑即掉自身；同甘蔗 / 仙人掌 / 枯灌木支撑校验族）。
+    //   压力板（Wood / Cobble）是贴地薄板（ShapePlate），下方须有完整支撑方块。本格被破为 Air（破下方支撑，含
+    //   clearBlockSilent 点火路径——TNT 被引燃变实体、下方变 Air → 板上压力板失撑）→ 若正上方是压力板 → 失撑
+    //   → 静默清 Air + emit blockBroken（破块粒子 / 音）+ emit blockDroppedAsItem（呈掉落物实体，dropId=自身 →
+    //   掉木板 / 圆石压力板）+ recomputeLightAround + 1 次 worldChanged + clearAllDirty。压力板恒单格，仅清正上方 1 格。
+    //   供 4/5 参数 setBlock + clearBlockSilent 末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
+    void checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 

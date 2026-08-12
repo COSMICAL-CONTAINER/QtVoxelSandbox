@@ -2511,13 +2511,13 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
     //   顺序：先掉落 / 引燃（据 destroyed 列表，TNT 方块已被 destroySphereSilent 清为 Air 故不重复破坏），再伤玩家 + 音视。
     for (const World::DestroyedVoxel &d : destroyed) {
         // t493 恢复爆炸**链式引燃**（用户明确要链式传递）：爆炸破坏的 TNT 方块 → spawnPrimedTnt（引燃态实体，
-        //   fuse=jitter 随机错峰）→ 各 PrimedTnt fuse 到 0 再次引爆 → 递归连锁传播。机制等价 MC TNT 连锁。
-        //   t492 曾去链式（用户嫌「一堆全爆」），t493 用户改口要链式 → 恢复。**不**走爆炸掉落（TNT 被炸引燃而非
-        //   掉落成物品，避免「TNT 被炸成掉落物」错乱）。
+        //   fuse=短引信 kChainFuseSec + jitter 随机错峰 → 快速连锁推进）→ 各 PrimedTnt fuse 到 0 再次引爆 → 递归
+        //   连锁传播。机制等价 MC TNT 连锁（链式引燃的 TNT 比手点更短引信，快连锁观感）。**不**走爆炸掉落（TNT
+        //   被炸引燃而非掉落成物品，避免「TNT 被炸成掉落物」错乱）。
         if (d.oldId == BlockRegistry::TntBlock) {
             const float jit = kPrimedTntFuseJitterSec > 0.0f
                               ? float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * kPrimedTntFuseJitterSec : 0.0f;
-            spawnPrimedTnt(d.x, d.y, d.z, kPrimedTntFuseSec + jit);
+            spawnPrimedTnt(d.x, d.y, d.z, kChainFuseSec + jit); // 短引信（快连锁）
             continue; // 引燃完毕，跳过掉落（TNT 不掉物品）
         }
         const int dropItemId = BlockRegistry::dropId(d.oldId);
@@ -2546,8 +2546,30 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
             const float phlen = std::sqrt(dxh * dxh + dzh * dzh);
             if (phlen > 1e-3f) { kbX = dxh / phlen; kbZ = dzh / phlen; }
             else { kbX = 1.0f; } // 兜底：水平重合 → 朝 +X 推
-            // mobType 占位传 MobStalker（爆炸型；呈现层仅用作受击音色 / 死因标签，TNT 爆炸用 Stalker 同族音）。
-            emit mobAttackedPlayer(dmg, int(MobStalker), kbX, kbZ);
+            // t494 死因区分：TNT 爆炸传 MobTnt 哨兵（非 MobStalker）→ 呈现层映射 PlayerState::Tnt（「被 TNT 炸死」），
+            //   区别于潜行者自爆（MobStalker → 「被潜行者炸飞」）。受击音色 / 护甲附魔保护族（t476）按死因分派。
+            emit mobAttackedPlayer(dmg, int(MobTnt), kbX, kbZ);
+        }
+    }
+
+    // (c2) t494 爆炸推动 primed TNT 实体（用户「TNT 可爆炸推动点燃的 TNT 飞起」；机制等价 MC 爆炸把邻接 primed
+    //   TNT 推开）：扫描活体 primed TNT，中心距爆炸中心（ex,ey,ez）≤ kExplosionRadius → 施加「远离爆炸中心」的
+    //   水平冲量（强度随距离衰减）+ 上抛 vy。vx/vz 由 primed tick 积分（见 FallingBlock primed 分支水平段）。
+    //   O(n) n≤kCap=64 可忽略。e.resting 解除（primed 无 resting 标志——primed 分支直接积分 vx/vz 无需解 resting）。
+    {
+        const float ex = float(cx) + 0.5f, ey = float(cy) + 0.5f, ez = float(cz) + 0.5f;
+        for (int i = 0; i < int(m_entities.size()); ++i) {
+            Entity &t = m_entities[size_t(i)];
+            if (!t.alive || t.kind != FallingBlock || !t.primed) continue; // 仅活体 primed TNT
+            const float dx = t.pos.x() - ex, dy = t.pos.y() - ey, dz = t.pos.z() - ez;
+            const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist <= 0.001f) continue; // 爆炸中心自身（正在引爆的那个，本 tick 已 releaseSlot）
+            if (dist > kExplosionRadius) continue;
+            const float strength = kExplosionPushSpeed * (1.0f - dist / kExplosionRadius); // 距离衰减冲量
+            t.vx += dx / dist * strength; // 远离爆炸中心水平分量
+            t.vz += dz / dist * strength;
+            t.vy += kExplosionUpSpeed * (1.0f - dist / kExplosionRadius); // 上抛（距离衰减）
+            // vx/vz 非零 → primed tick 水平积分（见 FallingBlock primed 分支）；tick 每帧都跑，下帧自然生效。
         }
     }
 
@@ -3020,6 +3042,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             }
             e.vy -= kGravity * float(dt);
             if (e.vy < -kMaxFall) e.vy = -kMaxFall;
+            // t494 水平积分（爆炸推动 primed TNT）：vx/vz 由 detonateTntSphere 施加速度冲量 → 此处积分 X/Z 位移 +
+            //   摩擦衰减（exp(-rate·dt)）。无冲量（vx=vz=0）→ 无位移无衰减，行为不变。飞起后摩擦停下（机制等价 MC
+            //   爆炸推开 TNT 的抛物线）。不查碰撞（primed halfW=0 可穿透，机制等价 MC primed TNT 被推穿过实体）。
+            if (e.vx != 0.0f || e.vz != 0.0f) {
+                e.pos.setX(e.pos.x() + e.vx * float(dt));
+                e.pos.setZ(e.pos.z() + e.vz * float(dt));
+                const float f = std::exp(-kExplosionEntityFriction * float(dt));
+                e.vx *= f; e.vz *= f;
+                dirty = true; // 位置变 → bump revision（QML 摆位重算）
+            }
             const float newY = e.pos.y() + e.vy * float(dt);
             // t493 修「primed TNT 上下震荡」：旧 topCell=qFloor(pos.y) 扫 TNT 自己所在格（已被 clearBlockSilent 清成
             //   Air，pos.y=10.5 → floor=10 = TNT 已移除的格）→ 永远找不到支撑 → 每帧重力拉下又弹回 restY → 上下抖动。

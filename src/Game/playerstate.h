@@ -73,8 +73,9 @@ public:
     //   PlayerState.Fall 等（同 EntityManager.MobPig 模式）。避免命名 None（Linux CI 下 X11 头 None 宏冲突）。
     //   Generic=未归类（默认 / takeDamage 单参兜底）；Fall=高处坠落；Suffocation=嵌实体方块窒息；
     //   Drowning=气泡归零溺水；Starvation=饥饿归零饿死；Shambler/Bones/Spider/Stalker=被对应敌对生物击败；
-    //   Fire=燃烧致死（t344：触碰岩浆 / 火点燃后火伤扣血到 0）。
-    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus };
+    //   Fire=燃烧致死（t344：触碰岩浆 / 火点燃后火伤扣血到 0）；Tnt=TNT 爆炸致死（t494：detonateTntSphere 传
+    //   MobTnt 哨兵 mobType → QML onMobAttackedPlayer 映射到本死因，文案「被 TNT 炸死」）。
+    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt };
     Q_ENUM(DeathCause)
 
     explicit PlayerState(QObject *parent = nullptr);

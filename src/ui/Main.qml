@@ -1755,6 +1755,7 @@ Window {
                 else if (mobType === EntityManager.MobBones) cause = PlayerState.Bones
                 else if (mobType === EntityManager.MobSpider) cause = PlayerState.Spider
                 else if (mobType === EntityManager.MobStalker) cause = PlayerState.Stalker
+                else if (mobType === EntityManager.MobTnt) cause = PlayerState.Tnt   // t494：TNT 爆炸死因（独立于潜行者自爆）
                 // t345 护甲减伤 + t476 保护族附魔减伤（mob 近战 / 箭 / 爆炸命中也走护甲值 + 附魔 EPF 减伤 + 耐久损耗）。
                 //   护甲值每点 4%（cap 0.80）+ 附魔 EPF 每点 4%（cap 0.80），合计 cap 0.85；至少 1 点穿透。
                 var finalAmt = amount
@@ -4698,21 +4699,20 @@ Window {
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
-                            // t490 primed → 白闪脉冲（baseColor 在原色 ↔ 白色间 lerp by sin(phase·π) 脉冲）；
-                            //   非 primed → 原 terrainLight 昼夜灰阶（t257）。primed 时取消 vertexColorsEnabled（顶点色
-                            //   光场会让白闪暗化，pulse 视觉不纯；改 baseColor 直接脉冲更亮）。
+                            // t490 primed → 白闪脉冲；非 primed → 原 terrainLight 昼夜灰阶（t257）。
+                            //   t494 修「变亮一点但无白闪」：旧公式 `tl·(1-pulse)+white·pulse` 在白天 tl≈1.0（近白）
+                            //   → lerp 到白几乎不可见（用户实测只有轻微变亮）。改 pulse 在**暗底(0.25)**与**纯白(1.0)**
+                            //   间往复（不掺 tl）→ 任何光照下都明显闪烁白（机制等价 MC TNT 引燃态白闪原色↔白）。
+                            //   primed 时取消 vertexColorsEnabled（顶点色光场会让白闪暗化，pulse 视觉不纯）。
                             baseColor: {
                                 entityManager.revision
                                 const tl = terrainLight(worldClock.skyLight)
                                 if (!fallingBlockModel.entPrimed) return tl
-                                // 脉冲强度 = sin(phase·π)：phase 0/1 = 0（原色）、0.5 = 1（全白）。机制等价 MC TNT
-                                //   引燃态白闪（原色 ↔ 白色往复）。白色 lerp 量 = sin(phase·π)·0.85（留 15% 原色免
-                                //   全白丢失 TNT 贴图纹理识别）。
-                                const pulse = Math.sin(fallingBlockModel.tntFlashPhase * Math.PI) * 0.85
-                                const r = tl.r * (1 - pulse) + 1.0 * pulse
-                                const g = tl.g * (1 - pulse) + 1.0 * pulse
-                                const b = tl.b * (1 - pulse) + 1.0 * pulse
-                                return Qt.rgba(r, g, b, 1.0)
+                                // 脉冲强度 = sin(phase·π)：phase 0/1 = 0（暗底 0.25）、0.5 = 1（纯白）。暗底不掺 tl →
+                                //   无论昼夜都看到「暗→白→暗」往复闪（tl 仅非 primed 用）。
+                                const pulse = Math.sin(fallingBlockModel.tntFlashPhase * Math.PI)
+                                const k = 0.25 + 0.75 * pulse   // 0.25（暗底）↔ 1.0（纯白）
+                                return Qt.rgba(k, k, k, 1.0)
                             }
                             vertexColorsEnabled: !fallingBlockModel.entPrimed  // primed 白闪不叠顶点色光场
                         }
@@ -7326,8 +7326,10 @@ Window {
         ListView {
             id: chatListView
             anchors.fill: parent
-            // 从底向顶布局：index 0（最早）在顶、最新（count-1）在底。新消息 append 后滚到底（最新可见）。
-            verticalLayoutDirection: ListView.BottomToTop
+            // t494 修「聊天消息从上往下堆叠」：旧 `verticalLayoutDirection: BottomToTop` 的 QML 语义是 **index 0 在底、
+            //   列表向上长** → 新 append（最高 index）落在**顶部**，用户看到新消息从顶往下叠（与 MC 聊天相反）。
+            //   改回默认 TopToBottom（index 0 在顶、新 append 在底）+ positionViewAtEnd 滚到底 → 最新在底部
+            //   （贴近 input 位置 / 符合 MC 聊天新消息在底部往上堆的观感）。
             interactive: window.chatOpen   // 仅聊天开着时可滚回顾历史；游戏中（捕获态）非交互（防误触）
             clip: true
             model: chatMessages
