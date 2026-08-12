@@ -897,14 +897,22 @@ void World::tickLavaFlow()
         }
     }
 
-    // 3) 扩散 pass：只把波前推 1 格（1 格/tick 缓慢动画）。跳过退场格。下落 + 水平蔓延不互斥（同 tickWaterFlow t272）。
+    // 3) 扩散 pass：只把波前推 1 格（1 格/tick 缓慢动画）。跳过退场格。
+    //    水平蔓延守卫 = bk==1（**仅 grounded 格向水平 air 邻居扩散**），同 tickWaterFlow 的 t350 修法
+    //    （机制等价 MC 流体仅在 solid 支撑上水平扩散；下方为 air 即**只**垂直下落、不外扩）。
+    //    perf 收敛修复（lava-never-settles-bug）：旧守卫 `bk != 2` 让 bk==0（悬空，下方 air）的流岩浆同时
+    //    下落 + 向 4 方水平外扩 → 每个新悬空格再产 4 个悬空格 → 无界平面蔓延（机制同 t350 修前水的
+    //    tsunami bug），cells 单调增长（实测 fresh world 277→462→636→724 writes 35-107 settled 恒 0），
+    //    每 3s tick 28-39ms（lav 桶主源，9 FPS 元凶）。改 bk==1 后悬空格只下落、落到 grounded 格才水平推 7
+    //    格（kMaxLavaFlowLevel）→ 自然收敛稳态（同水 settle=1）。机制与水完全对称（仅常量不同：岩浆 3s/格
+    //    vs 水 0.3s/格、岩浆 maxLevel 3 vs 水 7）。
     for (const LCell &c : cells) {
         if (evapKeys.count(keyOf(c.x, c.y, c.z))) continue; // 退场中的格不扩散
         const int bk = belowKind(c.x, c.y, c.z);
         if (bk == 0) {
             tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1)); // 下落为流岩浆 state=1（非源）
         }
-        if (bk != 2 && c.level < kMaxLavaFlowLevel) {
+        if (bk == 1 && c.level < kMaxLavaFlowLevel) {
             for (const auto &d : hd) {
                 const int nx = c.x + d[0], nz = c.z + d[1];
                 if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
