@@ -675,3 +675,50 @@ FrameProfiler 实测：mesh 稳态 0.5-1.5ms/frame（风暴已灭）；sun 重�
 
 - **验收（待用户实测）**：① F3 mesh reb 的 [s][w] 应~0（水静态、sun 罕见），总 reb << 622；② 水面无流动动画但有空间涟漪（视觉可接受？用户定夺要不要找回动画）；③ 骷髅箭落地/插墙 60s 消失；④ /kill @e 后 F3 entities 归零；⑤ 被怪打后能正常跳（≥1 格）+ 水里跳上一格。
 - **次要点遗留**：夜晚战斗 mob phys 10-14ms（54-43 怪移动的每帧物理，战斗固有）；若仍嫌卡可下轮降 kHostileMobCap 或节流移动物理。
+
+---
+
+## R18s 全轮（t488-t514，27 任务全 ✅，4 批串行 voxel-dev + 终轮 arch review）
+
+> 用户 playtest 反馈 ~27 项（性能残留 + 水动画要回 + TNT 连锁 + 渲染/方块机制/UI 大批量）。4 批串行子 agent（一次一个，R18+ 手动编排模式），每任务主编排读 diff + 构建零警告 + 启动冒烟 + targeted git add/commit。约 6.5h 实际墙钟（跨 2 个 API 限额窗口：t490 agent 连接中断→SendMessage 失败→新 agent 续做；t503 batch agent 429 限额→限额恢复后续做）。
+
+**Code review（voxel-tester-arch）：PASS** — 0 critical（法律红线全守：2236 包 PNG 全 gitignored、零 MC 资产进 git、专名仅注释映射）、0 major（零警告+分层全守）、1 minor（末影中文译名开源前建议区隔，非阻断）。报告 docs/test-reports/r18s-arch-review.md。
+
+### 批 1 A 性能（t488-t490）
+| commit | 任务 | 做了什么 |
+|---|---|---|
+| `42cfb88` | t488 性能残留 | **流体活动盒增量扫描**（fluidActExpand/Reset + tickWaterFlow/LavaFlow 盒过滤，盒空兜底全量；波前级联经 noteFluidWrite 扩下次盒）+ **天光通道细化**（setWaterSilent 批量 sky 按列上方遮挡判定，地下交互跳整列天光 reflood）+ **ignite 批量**（岩浆焚毁木块 N 次 setBlock 折叠 1 次 worldChanged）+ **slot kind 中性化**（releaseSlot 清 kind=Item→空槽 Loader 卸载重子树，/kill 后 main 残留主嫌疑）+ F3 加 residual 桶 + live/slots 利用率探针。本机菜单态 residual≈vsync 正常；用户 TNT+/kill 场景探针就位待实测。 |
+| `f298b87` | t489 水岩浆动画 | **材质级 flipbook**（程序生成 water_strip 32×512=2列×32帧 / lava_strip 16×256=16帧；chunkgeometry 水/岩浆面 UV 改帧 0 区 v∈[0,1/N] 半纹素内缩分母=纹理总高；Main.qml positionV 动画绑定帧 k，Qt 6.11 Texture vOffset→positionV 重命名）。**零 mesh 重建**（F3 [w] 稳态 0）。 |
+| `41f795c` | t490 TNT 连锁 | PrimedTnt 实体（复用 FallingBlock kind + primed/fuse 字段，halfW=0 可穿透/可堆叠）+ detonateTntSphere 公共主体（destroySphereSilent + 链式引燃 destroyed 内 TntBlock→spawnPrimedTnt 错峰）+ fuse tick 倒计引爆（非同步递归，无栈溢出）+ 点火源（scanTntTraps 压力板水平四邻 / Lever=109 WoodButton=110 StoneButton=112 右键 / 右键 TNT 手动）+ 白闪脉冲 delegate（频率随 fuse 加速）。 |
+
+### 批 2 B 渲染（t491-t499）
+| commit | 任务 | 做了什么 |
+|---|---|---|
+| `8890d45` | t491 草粒子绿 | blockColor switch 扩全枚举 1..114（tall_grass=24 落 default 白真因；用户「草」=草丛非草方块）。 |
+| `a381cfa` | t492 工作台/熔炉 icon | build_cube_icons render_front 正面 dimetric（旧顶投影遮炉口/网格→用户读作 2D/普通石块）。dispenser 同。 |
+| `acac3d5` | t493/494/495 | lapis_ore tile 108→包 lapis_ore.png（pack 激活用包 stone 底，矿脉不再一眼可见）；FurnaceStateLitFlag=0x04 + tile 134 furnace_front_on + FurnaceUI 燃烧态驱动 setFurnaceLit；build_ice draw_pack_ice 淡蓝白重做（B>G>R，非白羊毛）。 |
+| `ca159b5+38a37dc` | t496 床重做 | partialblockgeometry ShapeBed 重写（床头/尾板 + 白枕 + 4 腿 + 纯绗缝被面）+ 16 色 default_bed_*/icon_bed_* 重生成。 |
+| `e823288` | t497 物品图标 | resourcepackmanager emptyArmorSlotSource API + EndEye(0x23A)→ender_eye.png 映射 + SurvivalInventory 空盔甲槽 pack 图（金/钻全套工具因项目无物品 id 属系统限制）。 |
+| `3faec95` | t498/499 | 玩家 F5 护甲凸出量（z scale 被身体内嵌遮挡→放大 0.03-0.09）+ 雪傀儡眼/嘴 z 凸出（被南瓜遮挡）+ 头放大 + 刻面嘴 + IronGolem 同修。 |
+
+### 批 3 C 方块机制（t500-t510）
+| commit | 任务 | 做了什么 |
+|---|---|---|
+| `a10a369` | t500 草挖泥土 | Grass dropId Grass→Dirt（silk_touch 附魔 t475 已覆盖掉 Grass 自身，一行修）。 |
+| `f864312` | t501 木梯贴侧 | ladderFaceFromNormal + placeBlock full-cube 侧校验 + partialblockgeometry 单片贴墙 quad（state 朝向）+ 失撑掉落（dropUnsupportedLaddersAround）。 |
+| `4d32637` | t502/504 | FurnaceUI 成品居中 + 进度箭头居间 + burnTotal 燃料进度（火焰收缩+底条）；checkDeadBushOnEdit（破下方→枯灌木掉落）。 |
+| `e382d41` | t503/506/507 | 仙人掌 worldgen 4 邻 isSolid 守卫；Ice 破→生 Water/silk 掉 Ice + PackIce/BlueIce silk 掉自身；BrownMushroom=115 + checkFlowerMushroomOnEdit 失撑 + placeBlock 草/土预检 + 蘑菇汤(碗+红+白)配方 + drawBowl/drawMushroomStew。 |
+| `27b48ff` | t508 船重做 | 水面放置（射线穿水扫最顶水格）+ 32 深浮力 lerp + U 形船体（底+左右舷+头尾翘）+ 挖船→boatBroken→spawnItem + 冰加速 blockBelow off-by-one 修复（向下扫首个 isCollidable）+ 可推动（setPlayerCenter 接触分离+冲量）。 |
+| `fb56fb1` | t509 铁傀儡 | T 形检测静态复核正确 + 加诊断 qInfo（probe rowX/rowZ + miss below1/2，定位静默失效：南瓜放偏/底排不全/overlaps 拒放）。 |
+| `5380afa` | t510 雪傀儡机制 | aiSnowGolem meltAccum 慢扣血（1HP/s 非即死）+ 水扣血 + 死掉 0-15 雪球(SnowballId=0x23D) + 剪刀剪南瓜→snowGolemSheared+derpy 无头形态（眼/嘴悬浮）+ 行走留 SnowLayer(t482)。 |
+| `51a8b04` | t505 雪体系 | ShapeSnowLayer 薄板（state 0-7=(state+1)/8 高，snowLayerHeight 单一权威 mesher+collision+solidTopOffset 三处共用）+ 铲掉雪球（SnowLayer 按 state+1 个/Snow 4 个）+ 4 雪球合雪块配方 + worldgen 3 级随机（hashColumn）+ 堆叠 placeBlock + auto-step 上行。 |
+
+### 批 4 D UI（t511-t514）
+| commit | 任务 | 做了什么 |
+|---|---|---|
+| `94f20ee` | t511 创造 tabs | Inventory.qml 6 tabs（方块/工具/材料/护甲/食物/箱子）+ filteredPalette 按 currentTab 过滤（食物=材料∩foodIds）+ 去标题/选中/销毁提示 4 处冗余文字 + chest tab→switchToSurvivalRequested→setMode(Survival)（共享 hotbar VM 物品持久）。 |
+| `5a9e765` | t512 hover+1-9 | creativeHoveredItemId（调色板 hover 专属，与 hotbar 槽 hover 解耦）+ forceReplaceHotbarFromCreative（setStack 覆盖 maxStackSize）+ keyInput 1-9 分流（背包开优先调色板替换 > hotbar 槽互换）。 |
+| `527db24` | t513/514 | foodHungerAmount 加胡萝卜+3/土豆+1 + foodColor 按食物色屑粒（甜浆果暗红/胡萝卜橙/土豆土黄/蘑菇汤棕，替固定橙占位）+ m_eatCooldown 1s（冷却期手持动画持续）+ placeBlock SweetBerryId 分支右键 Grass/Dirt→SweetBerryBush state 0（eventFilter 种植优先于进食）。 |
+
+- **验收（待用户 playtest，大量 needs-run 视觉/交互项）**：性能（/kill 后 main 残留 + 水岩浆流动动画 + TNT 连锁大坑）；渲染（草粒子绿/工作台熔炉正面 icon/青金矿融石/熔炉燃烧正面/浮冰淡蓝/床像床/物品 pack 图/玩家护甲 F5/雪傀儡南瓜脸）；机制（草挖泥土+精准/木梯贴侧爬/熔炉 UI/仙人掌 4 邻/枯灌木失撑/雪层薄板+铲雪球/冰生水/花蘑菇失撑+白蘑菇+蘑菇汤/船浮水骑乘挖掉/铁傀儡建造日志定位/雪傀儡慢融+剪南瓜）；UI（创造 tabs+chest 切生存/hover 1-9 替换/胡萝卜土豆可吃+粒子色+冷却/浆果种植）。
+- **minor 遗留**：末影/末地传送门中文译名开源前建议区隔（§9 override (d) 强制复核点）；铁傀儡建造 t509 加了诊断日志待用户实测定位真因（结构已验证正确）。
