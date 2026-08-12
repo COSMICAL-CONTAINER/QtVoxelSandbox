@@ -202,6 +202,19 @@ public:
     //   由 FallingBlock 列扫保证为 air/水 —— 沙落水穿透后填堵水格；防御：其余已占用方块不覆盖）。越界 /
     //   非空非水 → false。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
     bool setBlockFromEntity(int x, int y, int z, quint8 id);
+    // t490fix 点火专用静默清方块（绕过 setBlockFromEntity 的 occ 守卫——TNT 是实体方块，occ 守卫会拒）。
+    //   背景：playercontroller 右键机关 / 右键 TNT 本体 / 压力板四邻点燃 TNT 时，原写
+    //   setBlockFromEntity(...,Air) 想「清掉原 TNT 方块再 spawnPrimedTnt」。但 setBlockFromEntity 有 occ 守卫
+    //   （仅 air/水可被实体着地覆盖；沙落用），TNT 是实体方块 → occ 命中守卫 → 静默 return false 不写 →
+    //   原 TNT 方块没清 + spawnPrimedTnt 在同格生成实体 = 1.5 格叠加；爆炸时 detonateTntSphere 球心格还是
+    //   原 TNT 方块 → 连锁递归 + 坑越炸越大。
+    //   语义：跨 chunk 直写 Air（无条件覆盖，**无 occ 守卫**）+ 复用 setBlockFromEntity 的全部写后钩子
+    //   （noteGrowthWrite / noteFluidWrite / recomputeLightAround / pokeFluidDirty）+ emit worldChanged +
+    //   clearAllDirty，**不发** broken/placed（免粒子音 spam，点火是系统事件非玩家破块）。occ 仍读出作
+    //   oldId 传给 note / 光重算（保持生长 / 流体索引正确）。越界 → false。
+    //   ⚠️ **仅供点火路径用**（playercontroller 3 处点燃 TNT 的清原方块）。不要用于破坏 / 沙着地 / 玩家
+    //   放置——那些路径需要 occ 守卫或破块事件。非 Q_INVOKABLE（仅 Game/Physics C++ 调）。
+    bool clearBlockSilent(int x, int y, int z);
     // t174 水流系统静默写入（同 setBlockFromEntity 语义：经 m_chunks.setBlock 直写 + emit worldChanged
     //   重建 mesh，但**不**发 broken/placed —— 水流蔓延是系统模拟非玩家动作，避免触发粒子/音效/拾取噪音）。
     //   与 setBlockFromEntity 的差异：支持 state（水流 state 1..7 编码蔓延距离）；无条件覆盖（水流可改既有

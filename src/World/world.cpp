@@ -316,6 +316,25 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
     return true;
 }
 
+// t490fix 点火专用静默清方块（详见 world.h 头注释）：照搬 setBlockFromEntity 主体（同写后钩子），仅删掉
+//   occ 守卫（无条件覆盖为 Air）。occ 仍读出作 oldId 传给 note / 光重算，保持生长 / 流体索引正确。越界 → false。
+//   仅 playercontroller 3 处点火路径用（右键机关四邻 / 右键 TNT 本体 / 压力板四邻）。
+bool World::clearBlockSilent(int x, int y, int z)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return false; // 越界拒绝
+    const quint8 occ = m_chunks.blockAt(x, y, z); // 旧方块（作 oldId 传给 note / 光重算；不再守卫拒非空）
+    const quint8 id = BlockRegistry::Air;
+    m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏（无条件覆盖为 Air）
+    noteGrowthWrite(x, y, z, occ, id); // t425：维护生长方格索引（TNT 不属生长段 → no-op，但同族写入路径保持一致）
+    noteFluidWrite(x, y, z, occ, id);  // perf：维护流体方格索引（TNT 不属流体 → no-op；保持一致）
+    recomputeLightAround(x, y, z, occ, id); // t154：增量重 flood（oldId=TNT → newId=Air；TNT 遮光 → 移除放天光）
+    emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 点火是系统事件非玩家动作）
+    m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
+    pokeFluidDirty(x, y, z); // t380：邻接流体可能受影响 → 标流体脏（保守；TNT 不属流体通常无影响）
+    return true;
+}
+
 // t174 水流静默写入（同 setBlockFromEntity 语义：直写 + worldChanged，不发 broken/placed）。支持 state
 //   （水流等级 1..7）；无条件覆盖（蒸发时 id=Air state=0，水流改 state 时直接覆盖）。无变化（id+state 均同）
 //   → false（防无谓 worldChanged 重建）。越界 → false。caller（tickWaterFlow）保证 id 合法（Water/Air）。
