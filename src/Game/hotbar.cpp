@@ -628,10 +628,11 @@ QString Hotbar::iconSourceForBlock(int blockId) const
     // （ToolIcon / 材料图标 Canvas，§9a）→ 返空串，调用方据 isTool / isMaterial 切到对应自绘 delegate。
     // 越界先判再 cast，防 quint8 截断别名。
     if (blockId <= 0 || blockId >= int(BlockRegistry::Count)) return QString();
-    // t456 pack item 图标覆盖：pack 启用且该方块在「方块→pack item/前贴图」映射内（现含 LapisOre=93 + 16 色床
-    //   {32..39,78..85}→bed.png；t492 已把 CraftingTable/Furnace 移出 —— 这俩正面有辨识特征，保留 3D 立方体图标
-    //   胜过 pack 2D item 平铺）、包内有 PNG 时，返 pack 的 file:// URL（2D 物品图标改用 pack item 贴图，机制等价
-    //   MC item icon）；pack 关 / 无映射 / 包内缺 → 落下方程序生成 icon_<block>.png。仅 2D 物品图标路径
+    // t456 pack item 图标覆盖：pack 启用且该方块在「方块→pack item/前贴图」映射内（现含 CraftingTable=9 /
+    //   Furnace=10 双候选（item/<name>.png 优先、block/<name>_front.png 兜底，t492 二轮复盘恢复）+ 16 色床
+    //   {32..39,78..85}→bed.png；LapisOre=93 刻意不在映射，与其它矿石一致走 3D 立方体图标，t493 二轮复盘撤销）、
+    //   包内有 PNG 时，返 pack 的 file:// URL（2D 物品图标改用 pack item 贴图，机制等价 MC item icon）；pack 关 /
+    //   无映射 / 包内缺 → 落下方程序生成 icon_<block>.png。仅 2D 物品图标路径
     //   （hotbar/背包/光标）消费；3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径，不调本函数，故不受影响。
     const QString packSrc = ResourcePackManager::blockItemIconSource(blockId);
     if (!packSrc.isEmpty())

@@ -519,22 +519,21 @@ const QList<QPair<int, QString>> &mobEntityMap()
 //   方块段 id（与 BlockRegistry::Id 同源；Core 不依赖 Game 故用字面量 + 注释钉死，同 itemFilenameMap 不引
 //   toolregistry 之例）。blockItemIconSource 逐候选 itemDir→blockDir 探测，首个命中即返；全缺返空（Hotbar 回退
 //   程序生成图标）。
-// t492：CraftingTable(9) / Furnace(10) 已从本映射移除。原因：这俩方块的「正面有辨识特征」（工作台正面网格 / 熔炉
-//   炉口），程序绘制的 icon_crafting_table.png / icon_furnace.png 是「正面为主」dimetric 立方体（build_cube_icons.py
-//   render_front：正面贴 front 贴图 + 顶 / 右深度细带，3D 体积感 + 辨识特征均显）。若留本映射，pack 激活时
-//   blockItemIconSource 会返 pack 的 item/crafting_table.png / item/furnace.png —— pack item 贴图是 2D 平面图，
-//   覆盖 3D 立方体图标后用户只看到无体积感的 2D 图（用户复盘「创造背包工作台 / 熔炉还是 2D 图标」）。故这两方块
-//   特意不进本映射 → iconSourceForBlock 落到 iconFileForBlock → 3D 立方体图标胜出（与 Dispenser 同路径，参照外观）。
+// t492（R18s 复盘二轮，2026-08-12）：恢复 CraftingTable(9) / Furnace(10) 映射。第一轮曾移除以让程序绘制 3D 立方体
+//   图标胜出，用户明确否决（「你把它放回到 item 不行吗」）—— pack 激活时创造背包工作台 / 熔炉要用 pack 的 2D
+//   item / 前贴图图标（机制等价 MC block item icon = 方块正面贴图）。候选列表双兜底：item 目录的 <name>.png 优先
+//   （多数包有），block 目录的 <name>_front.png 兜底（demo 包无 item/crafting_table.png 但有
+//   block/crafting_table_front.png → 落到该前贴图 = 用户要的 2D 平面 icon；与 t456 原始映射一致）。
+// t493（R18s 复盘二轮）：LapisOre(93) 刻意不进本映射 —— 用户要它与其他矿石一致走程序绘制 3D 立方体图标
+//   （第一轮映射到 lapis_ore.png 2D 平铺被否决：「创造背包里矿石都是方块的形式」）。
 //   候选顺序 = 探测优先级：item 目录的 vanilla 风格 item/<name>.png 优先（多数包有），block 目录的 <name>.png 兜底。
 const QList<QPair<int, QStringList>> &blockItemIconMap()
 {
     static const QList<QPair<int, QStringList>> kMap = {
-        // t493：青金石矿（LapisOre=93）。用户复盘「放下 OK（石头背景色对了），但创造背包 item 图标没换」——
-        //   旧版走程序绘制 icon_lapis_ore.png（等距立方体），pack 激活时应改用 pack 的 lapis_ore.png 平铺物品图标
-        //   （机制等价 MC 1.0 矿石 item icon = 矿石正面贴图）。候选顺序：item 目录优先、block 兜底。
-        //   pack 实测 textures/block/lapis_ore.png 存在（item 目录无 lapis_ore.png → 自动落到 block 候选）。
-        //   （区别于工作台 / 熔炉：矿石正面贴图无辨识特征 → 2D 平铺与 3D 立方体观感差异小，用户明确要 pack 平铺。）
-        { 93, { QStringLiteral("lapis_ore.png") } },                                   // BlockRegistry::LapisOre 青金石矿
+        // t492 恢复：工作台 / 熔炉 pack 2D 方块前贴图 icon（第一轮误删，二轮复盘恢复；与 t456 原始映射一致）。
+        { 9,  { QStringLiteral("crafting_table.png"), QStringLiteral("crafting_table_front.png") } }, // BlockRegistry::CraftingTable 工作台
+        { 10, { QStringLiteral("furnace.png"),        QStringLiteral("furnace_front.png") } },         // BlockRegistry::Furnace 熔炉
+        // t493 恢复：青金石矿不再映射 → 回落程序绘制 3D 立方体 icon（与其它矿石一致；第一轮误加，二轮复盘撤销）。
         // t496 床 16 色变体（BedRed=32..BedBlack=39 既存 8 色 + BedWhite=78..BedBrown=85 t455 新增 8 色）。用户复盘
         //   「创造背包床 item 图标没换」—— pack 仅有一张 item/bed.png（红床模板，机制等价 MC 1.0 1.8 前 bed item 图标
         //   单张红色床），故 16 色床全部映射到同一 bed.png（图标色不可知，红床模板，spec 明确「红床为模板」可接受）。
