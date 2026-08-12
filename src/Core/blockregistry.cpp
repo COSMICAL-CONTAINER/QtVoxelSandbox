@@ -944,6 +944,21 @@ int   BlockRegistry::dropId(quint8 blockId)      { return def(blockId).dropId; }
 int   BlockRegistry::dropCount(quint8 blockId)   { return def(blockId).dropCount; }
 int   BlockRegistry::maxStack(quint8 blockId)    { return def(blockId).maxStack; }
 
+// t490fix 全 id 段堆叠上限（掉落物合并用；详见 blockregistry.h 头注释）。Core 层纯函数，不依赖 Game。
+int   BlockRegistry::maxStackSize(int itemId)
+{
+    // air / 非法 → 0（不可堆叠，无意义；掉落物合并时 maxStack<=1 不合并）。
+    if (itemId <= 0) return 0;
+    // 方块段（0..Count-1）：走 BlockDef.maxStack（t42 单一权威；多数 64，门 / 活版门等单件 1）。
+    if (itemId < int(Count)) return def(quint8(itemId)).maxStack;
+    // 工具段 [0x100, 0x200)：独立耐久 → 不可堆叠（机制等价 MC 1.0 工具 maxStack 1）。含镐 / 斧 / 铲 / 剑 / 锄 / 弓 / 剪刀 / 钓竿。
+    if (itemId < 0x200) return 1;
+    // 材料段 ≥ 0x200：可堆叠 64（木棒 / 煤 / 铁锭 / 骨头 / 腐肉 / 箭 / 火药 / 羽毛 / 线 / 皮革 / 墨囊 / 蛋 等 mob 掉落物 + 合成材料）。
+    //   含护甲段（≥0x300）—— 护甲不会作为 mob / 破块掉落物出现（仅玩家 Q 键丢弃），按 64 合并无害（拾取 Hotbar.addStack 按
+    //   真实 maxStack=1 分槽）。桶 / 蘑菇汤（材料段内 maxStack=1 的特例）同理 —— 仅玩家持有 / 丢弃，掉落实体阶段按 64 合并无数据错。
+    return 64;
+}
+
 const char *BlockRegistry::blockName(quint8 blockId)
 {
     if (int(blockId) >= int(Count)) return "unknown"; // 与旧契约一致：越界 → "unknown"（非 air.name）

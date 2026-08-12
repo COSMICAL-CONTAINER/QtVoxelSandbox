@@ -24,6 +24,37 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count)
 {
     if (itemId <= 0) return; // air / 非法：不产出（PlayerController 仅在 drop=true 时发，已过滤）
     if (count < 1) count = 1; // 缺省 / 非法 → 单件（与历史调用兼容）
+
+    // t490fix 就近合并（机制等价 MC 1.0 同 itemId 掉落物在近邻合并为 1 实体）：spawn 前扫现有活体，找同
+    //   itemId 且 pos 距 (x+0.5,y+0.5,z+0.5) ≤ kMergeRadius 的第一个 → count 累加（clamp maxStack）。合并方向
+    //   新 spawn 往已有实体合（不动已有 pos 避免视觉跳变）。count 用 e.count 直接改 + notifyChanged（同
+    //   setCountAt 语义；批内仅标 dirty → t354 爆炸批合并正确生效）。maxStack<=1（工具 / 不可堆叠）→ 跳过合并。
+    //   爆炸场景（t354 beginBatch/endBatch）：第 2 个掉落物 spawn 时能找到第 1 个并合并 → 批内生效。
+    {
+        const int cap = BlockRegistry::maxStackSize(itemId); // Core 层全 id 段堆叠上限（掉落物合并用）
+        if (cap > 1 && !m_entities.empty()) {
+            const QVector3D center(x + 0.5f, y + 0.5f, z + 0.5f);
+            const float r2 = kMergeRadius * kMergeRadius; // 平方距离比较（免 sqrt）
+            for (size_t i = 0; i < m_entities.size(); ++i) {
+                ItemEntity &e = m_entities[i];
+                if (!e.alive || e.itemId != itemId) continue; // 空槽 / 不同物品 → 跳过
+                const QVector3D d = e.pos - center;
+                if (d.x() * d.x() + d.y() * d.y() + d.z() * d.z() > r2) continue; // 超半径 → 跳过
+                // 命中可合并实体：clamp 到 cap，溢出余数走新 spawn（保掉落实体 count 不超 maxStack）。
+                if (e.count < cap) {
+                    const int add = std::min(cap - e.count, count);
+                    e.count += add;
+                    count -= add; // 余数（>0 → 走新 spawn；==0 → 完全合并完，return）
+                    notifyChanged(); // t354：经批量收口（批内仅标 dirty；非批立即 emit）
+                    qCInfo(lcItem) << "merged item entity id=" << itemId << "into slot" << int(i)
+                                   << "count ->" << e.count << "(at" << x << y << z << ")";
+                    if (count <= 0) return; // 完全合并 → 不新 spawn（少一个 delegate = 用户「掉落物太多」的诉求）
+                }
+                break; // 仅合到第一个可合并实体（机制等价 MC 单点合并；余数（>cap）走新 spawn 在同格再合下批）
+            }
+        }
+    }
+
     if (m_liveCount >= kCap) {
         // t320 LRU 驱逐最老活体（min spawnMs = max age）腾位。O(N) 扫，N≤kCap(200) 常数级。
         int oldest = -1; qint64 oldestMs = 0;

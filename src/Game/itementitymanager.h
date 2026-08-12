@@ -66,6 +66,13 @@ public:
     // itemId<=0（air / 非法）拒（caller 应已过滤；双保险）。count 为实体携带数量（t64：整栈
     // 丢弃为 1 实体；缺省 1 = 单件，与历史调用兼容）；count<=0 视作 1，>maxStack 由 caller 分流
     // （本类不查 maxStack —— PlayerController 拾取时把全数交 Hotbar.addStack 自然分流到多槽）。
+    //
+    // t490fix 就近合并（机制等价 MC 1.0 掉落物合并）：spawn 前扫现有活体，找同 itemId 且 pos 距
+    //   (x+0.5,y+0.5,z+0.5) ≤ kMergeRadius 的第一个 → count 累加（clamp BlockRegistry::maxStackSize(itemId)，
+    //   溢出走新 spawn）。合并方向：新 spawn 往已有实体合，不动已有 pos（避免视觉跳变）。count 用
+    //   setCountAt 改（bump revision+emit，批内 notifyChanged 仅标 dirty → t354 批行为保留）。maxStack<=1
+    //   （工具 / 护甲 / 桶 / 蘑菇汤等不可堆叠）→ 跳过合并走新 spawn。性能：每次 O(n)，n≤kCap=200 可接受
+    //   （爆炸批量 spawn 时 each O(200)×50 = 10k blockAt-free 比较，远好于不合并的 50 个新 delegate）。
     Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1);
 
     // t354 批量 spawn 抑制 entitiesChanged（修 Stalker 爆炸「t320 已批 worldChanged 但仍卡」的复发根因）：
@@ -257,6 +264,11 @@ private:
     static constexpr float kItemPopSpeed      = 2.0f;
     static constexpr float kItemGroundFriction = 6.0f;
     static constexpr float kItemIceFriction    = 0.4f;
+    // t490fix 掉落物就近合并（机制等价 MC 1.0 同 itemId 掉落物在近邻合并为 1 实体；用户报告「2 个 TNT 爆炸后掉落物太多」）。
+    //   spawnItem 入口扫现有活体，找同 itemId 且 pos 距 (x+0.5,y+0.5,z+0.5) ≤ kMergeRadius 的第一个 → count 累加（clamp
+    //   maxStack，溢出走新 spawn）。合并方向：新 spawn 往已有实体合，不动已有 pos（避免视觉跳变）。
+    //   kMergeRadius=1.0：可同格多件 + 1 格近邻合并（机制等价 MC 掉落物合并半径 ~0.5-1 格，本工程取宽松 1.0 便于爆炸批量合并）。
+    static constexpr float kMergeRadius = 1.0f;
 };
 
 #endif // ITEMENTITYMANAGER_H

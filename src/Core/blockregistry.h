@@ -1470,7 +1470,18 @@ public:
     static bool requiresTool(quint8 blockId); // t265 掉落是否需要匹配工具（true=石类需镐才掉；false=木土沙空手也掉）
     static int dropId(quint8 blockId);        // 破坏后掉落物品 id（<=0=不掉落）
     static int dropCount(quint8 blockId);     // 掉落数量
-    static int maxStack(quint8 blockId);      // 单栈最大堆叠
+    static int maxStack(quint8 blockId);      // 单栈最大堆叠（仅方块段 0..Count-1）
+
+    // t490fix 全 id 段堆叠上限（Core 层权威查询；机制对齐 Hotbar::maxStackSize 但不依赖 Game 层）。
+    //   覆盖方块段（0..Count-1）+ 非方块物品段：工具段 [0x100,0x200) → 1（独立耐久不可叠）；材料段 ≥0x200 → 64
+    //   （木棒 / 煤 / 骨头 / 腐肉 / 箭 / 火药 / 羽毛 等 mob 掉落物可叠，机制等价 MC 1.0 材料 maxStack 64）；air / 越界 → 0。
+    //   仅供 Entities 层（ItemEntityManager 掉落物就近合并）查堆叠上限 —— Entities 不能 include Game 层 Hotbar，
+    //   故 Core 提供此纯函数（Core 不依赖 Game；与 Hotbar::maxStackSize 的桶 / 蘑菇汤 / 护甲特例（maxStack=1）相比，
+    //   这些物品不会作为 mob / 破块掉落物出现（仅玩家 Q 键丢弃），即便错误地按 64 合并也无害 —— 拾取时 Hotbar.addStack
+    //   会按真实 maxStack=1 自然分槽，掉落实体阶段按 64 合并只是视觉多显一个 count，无数据错）。仅掉落物合并语义。
+    //   ⚠️ **本函数不替代 Hotbar::maxStackSize 作为背包槽的权威上限**（背包仍读 Hotbar 那套含桶 / 汤特例）；本函数
+    //   仅用于「掉落实体阶段就近合并」的近似上限。
+    static int maxStackSize(int itemId);   // 全 id 段堆叠上限（掉落物合并用）
 
     // 内部/调试用方块名（**非**面向用户字串；通用词）。越界/未知 id 返回 "unknown"。
     static const char *blockName(quint8 blockId);
