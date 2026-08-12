@@ -52,12 +52,17 @@ bool isWolfMeatItem(int itemId)
 // t467 食物饥饿恢复量（单一权威）：返回 itemId 作为食物一次恢复的饥饿值；非食物 → 0。
 //   面包（BreadId）= kBreadHungerAmount(5)、甜浆果（SweetBerryId）= kSweetBerryHungerAmount(2)、
 //   蘑菇汤（MushroomStewId）= kMushroomStewHungerAmount(10)。
-//   机制等价 MC 1.0 各食物恢复不同饥饿（面包 5 / 浆果 2 / 蘑菇汤 10）。新增食物只改本方法一处（避免各处硬编码）。
+//   t513 胡萝卜（CarrotId）= 3、土豆（PotatoId）= 1（机制等价 MC 1.0 胡萝卜 +3 / 生土豆 +1 hunger）。
+//   机制等价 MC 1.0 各食物恢复不同饥饿。新增食物只改本方法一处（避免各处硬编码）。
 int PlayerController::foodHungerAmount(int itemId)
 {
     if (itemId == RecipeRegistry::BreadId)        return kBreadHungerAmount;
     if (itemId == RecipeRegistry::SweetBerryId)   return kSweetBerryHungerAmount;
     if (itemId == RecipeRegistry::MushroomStewId) return kMushroomStewHungerAmount; // t507 蘑菇汤 +10 饥饿
+    // t513 胡萝卜 / 土豆（机制等价 MC 1.0 carrot +3 / potato +1 hunger）。数值简化：烤土豆另算 MC +5
+    //   本工程无烤土豆物品故土豆取生食量 1。新增可食作物只在此追加一行（单一权威）。
+    if (itemId == RecipeRegistry::CarrotId)       return 3; // 胡萝卜 +3 饥饿（机制等价 MC 1.0 carrot）
+    if (itemId == RecipeRegistry::PotatoId)       return 1; // 生土豆 +1 饥饿（机制等价 MC 1.0 raw potato）
     return 0;
 }
 
@@ -432,6 +437,18 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
                 //   分支已移除）。其它持物（方块 / 桶 / 锄 / 种子 / 蛋 / 工具）仍走 placeBlock 单击路径。
                 if (me->button() == Qt::RightButton)  {
                     const int heldForEat = m_hotbar ? m_hotbar->selectedItemId() : 0;
+                    // t514 甜浆果种植优先（spec「持甜浆果右键草地 / 泥土 → 种植浆果丛」）：甜浆果既是食物又是种植材料。
+                    //   MC 1.0 「使用方块」优先于「使用物品」—— 右键**命中草地 / 泥土**时走种植（placeBlock 路由到浆果丛
+                    //   种植分支），不进进食；瞄空气 / 非草地泥土（如石头 / 沙）→ 回退进食（持浆果按住右键吃）。判据复用
+                    //   m_hasHit（上一帧 updateRaycast 结果）+ 读命中格 id。种植物品非方块 → placeBlock 内 selectedBlock 归
+                    //   Air，由 SweetBerryId 分流分支落地 SweetBerryBush（不走方块放置主路径）。
+                    if (heldForEat == RecipeRegistry::SweetBerryId && m_world && m_hasHit) {
+                        const quint8 hbId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+                        if (hbId == BlockRegistry::Grass || hbId == BlockRegistry::Dirt) {
+                            placeBlock(); // → SweetBerryId 分支种植 SweetBerryBush state=0
+                            return true;
+                        }
+                    }
                     // t267：手持食物（面包 / 甜浆果）→ 右键**按住**进食（不再单击即食；spec「单击即食→改长按右键」）。
                     //   t467：经 foodHungerAmount 单一权威判「是否食物」，新增食物只改本判定一处（避免各处硬编码 BreadId）。
                     if (foodHungerAmount(heldForEat) > 0) { beginEating(); return true; }
@@ -1478,6 +1495,9 @@ void PlayerController::beginEating()
     if (!m_hotbar || !m_captured) return;
     // t467：经 foodHungerAmount 单一权威判「持物是否食物」（面包 / 甜浆果）；非食物 → 不进（仍记 m_rightDown）。
     if (foodHungerAmount(m_hotbar->selectedItemId()) == 0) return;
+    // t513 吃完冷却：上一件食物食完的冷却期（m_eatCooldown>0）内 → 不进新一轮累积（按住右键不连食）。
+    //   m_rightDown 已记（即便冷却内按下，按钮按下事实成立 → 冷却到 0 后 updateEating 连食分支接手）。
+    if (m_eatCooldown > 0.0f) return;
     m_eating = true;
     m_eatingProgress = 0.0f;
     m_eatBeat = -1; // 首拍 0 立即触发屑粒（进食开始的反馈即时）
@@ -1494,12 +1514,14 @@ void PlayerController::endEating()
 }
 
 // t267 清进食累积态（松开 / 换槽 / 失焦 / 完成）。无变化时静默（不发信号，免抖动 QML 绑定）。
+//   t513：亦清 m_eatCooldown（松开右键即放弃连食 → 冷却态随之作废；下次按下重走完整累积）。
 void PlayerController::cancelEating()
 {
-    if (!m_eating) return;
+    if (!m_eating) { m_eatCooldown = 0.0f; return; }
     m_eating = false;
     m_eatingProgress = 0.0f;
     m_eatBeat = -1;
+    m_eatCooldown = 0.0f; // t513 清冷却（松手 / 换槽即重置连食门）
     emit eatingStateChanged();
     emit eatingProgressChanged();
 }
@@ -1509,7 +1531,9 @@ void PlayerController::cancelEating()
 //   （创造调色板无限源，机制等价 MC 创造食不消耗；同 t238 旧面包分支 + 种子种植创造不耗）。饥饿恢复语义
 //   与 t238 旧面包分支一致（clamp；Survival 真增 / Creative 锁满静默），仅触发方式改：单击 → 长按累积满。
 //   无条件 emit swingArm（进食完成一次「使用」动作的挥手反馈）+ 刷 m_lastPlaceMs（防 placeBlock 入口 200ms CD
-//   与进食完成同帧后立即放块冲突）。cancelEating 清 m_eating；m_rightDown 不动 → updateEating 顶部连食分支接手。
+//   与进食完成同帧后立即放块冲突）。t513：finishEating 末据 m_rightDown 决定 —— 仍按 → 置 m_eatCooldown
+//   + 保持 m_eating=true（冷却期手持动画持续显示，progress 暂停；冷却到 0 后 updateEating 自动恢复累积连食下一件）；
+//   已松 → cancelEating 干净清态（单次进食完成不显示冷却动画）。
 void PlayerController::finishEating()
 {
     if (!m_hotbar) { cancelEating(); return; }
@@ -1527,18 +1551,43 @@ void PlayerController::finishEating()
         m_hotbar->addStack(RecipeRegistry::BowlId, 1);
     m_lastPlaceMs = m_evtClock.elapsed();
     emit swingArm(); // 进食完成挥手（一次「使用」动作）
-    cancelEating();  // 清进食态（m_rightDown 不动 → 连食分支接手）
+    // t513 吃完冷却：置 m_eatCooldown（机制等价 MC 1.0 进食冷却 ~1s）。**不调 cancelEating** —— 保持 m_eating=true
+    //   使进食手持动画（手落下 + 嚼动）在冷却期持续显示（spec「手持动画在冷却期显示」），仅 progress 归 0 暂停累积。
+    //   冷却期 updateEating 顶部递减 + 不累积；冷却到 0 后 progress 重新从 0 累积（连食下一件）。若右键已松开
+    //   （m_rightDown=false）→ updateEating 连食分支不触发（仍持食物但未按）→ m_eating 残留为 true → 顶部持物变更
+    //   检查 / 暂停清。为防此悬挂态，finishEating 末据 m_rightDown 决定：仍按 → 留 m_eating 显示冷却动画；
+    //   已松 → cancelEating 干净清态（吃一件食完即松手 = 单次进食，不显示冷却动画）。
+    m_eatingProgress = 0.0f;
+    m_eatBeat = -1; // 冷却结束新一轮累积时首拍 0 立即触发屑粒
+    if (m_rightDown) {
+        // 仍按住 → 进冷却连食：保持 m_eating=true + 设冷却（updateEating 顶部递减 + 冷却到 0 恢复累积）。
+        m_eatCooldown = kEatCooldown;
+        emit eatingProgressChanged(); // progress 归 0（HUD / beat 判据刷新；eating 态未变不发 eatingStateChanged）
+    } else {
+        // 已松手 → 单次进食完成：cancelEating 干净清态（清 m_eating + 冷却，发 eatingStateChanged 停动画）。
+        cancelEating();
+    }
 }
 
 // t267 持续进食：每 tick 累积进度 / 检持物变更 / 跨节拍发屑粒 / 完成时消耗面包。由 tick() 调（captured 时）。
 //   机制等价 MC 1.0 长按右键食面包：progress 增量 = dt / kEatDuration（~1.6s 满）。
-//   连食（同 t44 连续挖掘族）：finishEating 消耗后 cancelEating 清 m_eating，但右键仍按住（m_rightDown）→
-//   顶部据此 + 仍持面包 → 自动 beginEating 下一件（不松手连食，机制等价 MC 按住右键连食多件面包）。
-//   持物变（切槽 / 面包耗尽后未松手）→ 取消进食（同挖掘目标变更清进度，spec「换槽清零」）。
+//   连食（同 t44 连续挖掘族）：finishEating 消耗后保持 m_eating=true + 设 m_eatCooldown（t513），右键仍按住
+//   （m_rightDown）→ 冷却期 progress 暂停（手持动画持续），冷却到 0 后自动恢复累积连食下一件（不松手连食，
+//   机制等价 MC 按住右键连食多件但件间有 ~1s 冷却）。持物变（切槽 / 面包耗尽后未松手）→ 取消进食（同挖掘
+//   目标变更清进度，spec「换槽清零」）。
+//   t513 冷却期：m_eating=true 但 m_eatCooldown>0 → 不累积 progress、不发屑粒（嚼动暂停视觉化冷却），仅递减冷却。
 void PlayerController::updateEating(float dt)
 {
-    // 连食：右键仍按但当前未进食（刚吃完一件 m_eating 被 cancelEating 清 / 或持面包后按下时 beginEating
-    //   因某早 return 未进）→ 若仍持面包 + 可进食 → 自动 beginEating（progress 归 0）。仅非 spectator。
+    // t513 冷却递减（独立于 m_eating —— 即便暂停 / 失焦后冷却亦应自然走完，避免恢复后卡陈旧冷却值；同 m_attackCooldown）。
+    if (m_eatCooldown > 0.0f) {
+        m_eatCooldown -= dt;
+        if (m_eatCooldown < 0.0f) m_eatCooldown = 0.0f;
+    }
+
+    // 连食：右键仍按但当前未进食（刚吃完一件被 cancelEating 清 / 或持食物后按下时 beginEating 因某早 return
+    //   未进）→ 若仍持食物 + 可进食 + **不在冷却期** → 自动 beginEating（progress 归 0）。仅非 spectator。
+    //   t513：beginEating 内已守 m_eatCooldown>0 早退，故冷却期不会误启；此处条件不变（冷却态 m_eating 保持 true
+    //   不进此分支，仅在 finishEating 走 cancelEating 即单次进食后仍按时此分支接手，且 beginEating 自判冷却挡）。
     if (!m_eating && m_rightDown && canPlace() && m_hotbar
         && foodHungerAmount(m_hotbar->selectedItemId()) > 0) {
         beginEating();
@@ -1549,20 +1598,26 @@ void PlayerController::updateEating(float dt)
     // 持物变（切槽 / 食物耗尽换非食物）→ 取消进食（同挖掘目标变更清进度）。t467 经 foodHungerAmount 单一权威判食物。
     if (foodHungerAmount(m_hotbar->selectedItemId()) == 0) { cancelEating(); return; }
 
+    // t513 冷却期：progress 暂停（不累积、不发屑粒），仅保留 m_eating=true 使手持动画持续显示冷却态。
+    //   冷却到 0 后下一 tick 自然恢复下方累积路径。progress 已在 finishEating 归 0 + eatBeat=-1，冷却结束首轮
+    //   累积使 beat 0 != -1 立即发屑粒（新一轮进食的反馈即时）。
+    if (m_eatCooldown > 0.0f) return;
+
     m_eatingProgress += dt / kEatDuration;
     // 跨节拍屑粒：progress×kEatBeats 跨阶时发 eatingParticle（嘴部 = 玩家眼位 position()）。
     //   beat 从 -1 起 → 首拍 0 在进食开始后首个 tick 立即触发（反馈即时）；之后每 ~0.4s 一拍（kEatBeats=4）。
     //   屑粒不爆量：单拍 burst 少量（BlockParticles.burstEat 内 burst(3,60)），kEatBeats 段封顶总迸发数。
+    //   t513：携当前食物 id → QML 据此按食物取屑粒色（替换旧固定面包色占位）。
     const int beat = std::clamp(int(m_eatingProgress * float(kEatBeats)), 0, kEatBeats);
     if (beat != m_eatBeat) {
         m_eatBeat = beat;
         const QVector3D mouth = position(); // 眼位 ≈ 嘴部（屑粒从嘴迸发）
-        emit eatingParticle(mouth.x(), mouth.y(), mouth.z());
+        emit eatingParticle(mouth.x(), mouth.y(), mouth.z(), m_hotbar->selectedItemId());
     }
     emit eatingProgressChanged();
 
-    // 完成：progress 满 → 消耗 1 面包 + 恢复饥饿。finishEating 内 cancelEating 清 m_eating；
-    //   m_rightDown 不动 → 下方下次 tick 顶部连食分支接手（仍持面包 + 仍按住 → 自动 beginEating 下一件）。
+    // 完成：progress 满 → 消耗 1 食物 + 恢复饥饿。finishEating 设冷却（仍按时）或 cancelEating（已松时）；
+    //   m_rightDown 不动 → 仍按时冷却到 0 后恢复累积（连食下一件）/ 已松即停。
     if (m_eatingProgress >= 1.0f) {
         finishEating();
     }
@@ -2406,6 +2461,33 @@ void PlayerController::placeBlock()
             }
         }
         return; // 树苗（种植成功 / 命中非草地泥土 / 未命中）均不再走方块放置路径
+    }
+    // t514 甜浆果丛种植（spec「甜浆果物品右键草地 / 泥土 → 种植甜浆果丛」）：手持甜浆果物品（SweetBerryId，材料段
+    //   非方块）右键命中草地 / 泥土 → 在命中格正上方空气格种下 SweetBerryBush 方块 state=0（机制等价 MC 1.0 浆果丛种植）。
+    //   甜浆果物品非方块 → selectedBlock 经 hotbar 归 Air，须在下方 `m_selectedBlock == Air` 守卫之前分流（同树苗 /
+    //   作物种子 / 玻璃分支模式）。命中非草地 / 泥土（如石头 / 沙 / 雪层 / 已有方块）→ 不种不挥（机制等价 MC 浆果丛
+    //   只能种在草地 / 泥土等透光地面）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可种。生存消耗
+    //   1 浆果（创造不耗 → 无限种）。**state=0**：与 worldgen placeSweetBerryBushes 散布阶段 1..2 区分 —— 玩家种下的是
+    //   阶段 0 嫩丛（无果、需生长）；生长由 SweetBerryBush 自身 tick（worldgen 丛的生长路径）推进，本处仅落地 state=0 丛。
+    //   分流前置：甜浆果既是食物又是种植材料。eventFilter 已对持甜浆果 + 命中草地 / 泥土的情况优先分流到 placeBlock
+    //   （本分支种植），其余（瞄空气 / 非草地泥土）走 beginEating 进食（机制等价 MC 1.0「使用方块优先于使用物品」：
+    //   右键草地种丛、右键空气 / 非地面吃浆果）。故持甜浆果右键草地 → 此分支落地 SweetBerryBush state=0。
+    if (m_hotbar && m_world && heldItemId == RecipeRegistry::SweetBerryId) {
+        if (m_hasHit) {
+            const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+            if (hitId == BlockRegistry::Grass || hitId == BlockRegistry::Dirt) {
+                const int wx = m_hitBx, wy = m_hitBy + 1, wz = m_hitBz; // 浆果丛种在命中格正上方一格
+                // 目标须在界内 + 为空气（不覆盖实体 / 已有丛 / 草丛 / 水）。越界 setBlock 静默返 false → 提前挡防误耗浆果。
+                if (wy < m_world->height() && m_world->blockAt(wx, wy, wz) == BlockRegistry::Air) {
+                    m_world->setBlock(wx, wy, wz, BlockRegistry::SweetBerryBush, 0); // state=0（玩家种下嫩丛；生长由 tick 推进）
+                    if (m_mode != Creative)
+                        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 浆果（创造不耗）
+                    m_lastPlaceMs = now;
+                    emit swingArm(); // 种植也是一次「放置」动作 → 挥手（t29）
+                }
+            }
+        }
+        return; // 甜浆果（种植成功 / 命中非草地泥土 / 未命中）均不再走方块放置路径
     }
     // t405 玻璃物品放置（spec「沙子冶炼产物玻璃 → 可放置为透明玻璃方块」）：手持玻璃物品（GlassId，材料段非方块）
     //   右键命中实体方块 → 在命中面相邻空气格（或水/岩浆格，替换流体）放置 Glass 方块（透明整立方）。机制等价

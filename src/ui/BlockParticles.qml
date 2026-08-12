@@ -42,10 +42,13 @@ Node {
     function burstPlace(x, y, z, id) {
         burst(x, y, z, 4, blockColor(id), 0.06, 1.8, 1.0, 1.0, 0.45)
     }
-    // 进食屑粒（t267）：面包色，从嘴部（float 世界坐标）迸发；偏上向前（嘴嚼吐出）。
+    // 进食屑粒（t267）：从嘴部（float 世界坐标）迸发；偏上向前（嘴嚼吐出）。
     //   与 burstBreak/burstMine 的差异：原点是 float 世界坐标（玩家眼位）非方块格中心，故不加 +0.5。
-    function burstEat(x, y, z) {
-        burstFloat(x, y, z, 3, "#d8a838", 0.07, 1.5, 0.8, 1.0, 0.5)
+    //   t513：增 foodId（正在吃的食物）参数 → foodColor 取对应食物屑粒色（甜浆果=暗红 / 胡萝卜=橙 / 土豆=土黄 /
+    //     面包=金黄 / 蘑菇汤=棕），替换旧固定面包色 "#d8a838"（spec「吃甜浆果吐橙色方块占位」→ 各食物本色屑粒）。
+    //     foodId 缺省（NaN/越界）→ 回退面包色（向后兼容旧 3 参数调用，虽现仅 4 参数路径调用）。
+    function burstEat(x, y, z, foodId) {
+        burstFloat(x, y, z, 3, foodColor(foodId), 0.07, 1.5, 0.8, 1.0, 0.5)
     }
     // 爆炸迸发（Stalker/苦力怕自爆；EntityManager::explosion → Main.qml 路由）：大迸发 + 横向四散 +
     //   强上抛（爆炸冲击波 → 非碎屑的横向炸开）。色 = 白/灰烟光（呈现层视觉约定色），数量多（20 > 破块 8）。
@@ -341,6 +344,23 @@ Node {
             case 113: return "#6b4f2a" // wood_button（木按钮，棕）
             case 114: return "#8a8a8a" // stone_button（石按钮，灰）
             default: return "#ffffff" // 未来新方块兜底（显白便于察觉缺色并补表）
+        }
+    }
+
+    // t513 食物 → 进食屑粒色（呈现层视觉约定色）。屑粒从嘴部迸发（burstEat），色按食物本体主色，使玩家肉眼可辨
+    //   「正在吃什么」（spec「吃甜浆果吐橙色方块占位」→ 各食物本色屑粒）。⚠️ QML 不 import C++ 静态类
+    //   RecipeRegistry，故 foodId 用字面量（同 Main.qml onMobDied 段约定）：
+    //     0x20A=面包 / 0x233=甜浆果 / 0x23C=蘑菇汤 / 0x22F=胡萝卜 / 0x230=土豆。
+    //   机制等价 MC 1.0 进食屑粒（食物色碎屑从嘴迸发）。新增可食食物只在本表加一行（呈现层单一权威，与 blockColor
+    //   同模式）。foodId 越界 / 未列 → 回退面包色金黄（与旧版固定面包色一致，向后兼容）。
+    function foodColor(foodId) {
+        switch (foodId) {
+            case 0x233: return "#a82020" // sweet_berry（甜浆果，暗红果汁色）
+            case 0x22F: return "#e88a30" // carrot（胡萝卜，橙根色）
+            case 0x230: return "#c8a850" // potato（土豆，土黄皮色）
+            case 0x23C: return "#8a6a3a" // mushroom_stew（蘑菇汤，棕汤色）
+            case 0x20A: return "#d8a838" // bread（面包，金黄面包皮色 —— 旧固定色）
+            default: return "#d8a838"    // 未知食物 → 回退面包色（向后兼容）
         }
     }
 }

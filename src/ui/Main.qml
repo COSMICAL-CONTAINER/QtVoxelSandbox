@@ -1861,10 +1861,12 @@ Window {
             if (particleLoader.item) particleLoader.item.burstMine(x, y, z, id)
         }
         // t267 进食屑粒（持面包按住右键累积进食时每跨一节拍 player 发 eatingParticle，携嘴部世界坐标）：
-        //   转发到 BlockParticles.burstEat（面包色屑粒从嘴部迸发）。机制等价 MC 进食屑粒。
+        //   转发到 BlockParticles.burstEat（屑粒从嘴部迸发）。机制等价 MC 进食屑粒。
         //   x/y/z 为 float 世界坐标（玩家眼位），非方块格 → burstEat 内不加 +0.5（区别 burstBreak/burstMine）。
-        function onEatingParticle(x, y, z) {
-            if (particleLoader.item) particleLoader.item.burstEat(x, y, z)
+        //   t513：携 itemId（正在吃的食物）→ burstEat 据此按食物取屑粒色（甜浆果=暗红 / 胡萝卜=橙 / 土豆=土黄 /
+        //   面包=金黄 / 蘑菇汤=棕），替换旧固定面包色（spec「吃甜浆果吐橙色方块」→ 各食物本色屑粒）。
+        function onEatingParticle(x, y, z, itemId) {
+            if (particleLoader.item) particleLoader.item.burstEat(x, y, z, itemId)
         }
         // t165：挖掘击打音（每节拍一响）—— player 发 miningSound（被挖方块 id），**含不可挖基岩**的
         //   hold-mine 音反馈（spec「生存基岩可持续挖 ... 保持 mining 态挥臂+音」；机制等价 MC 镐撞基岩响）。

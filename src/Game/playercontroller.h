@@ -541,7 +541,9 @@ signals:
     // t267 进食屑粒（持面包按住右键累积进食时每跨一节拍发一次）：携嘴部世界坐标（= 玩家眼位 position()，
     //   float 坐标非方块格 —— 进食屑粒从玩家嘴部迸发而非方块中心）。呈现层 Connections 转发到
     //   BlockParticles.burstEat 迸发少量屑粒（机制等价 MC 进食屑粒）。分层同 miningParticle。
-    void eatingParticle(float x, float y, float z);
+    //   t513：增携 itemId（正在吃的食物）→ QML 据此按食物取屑粒色（甜浆果=暗红 / 胡萝卜=橙 / 土豆=土黄 /
+    //   面包=金黄 / 蘑菇汤=棕），替换旧固定面包色占位（spec「吃甜浆果吐橙色方块」→ 各食物本色屑粒）。
+    void eatingParticle(float x, float y, float z, int itemId);
     // 拾取掉落实体（t118 / t120）：pickupScan 把实体入背包（addToAny 成功入栈，无论全 / 部分）时发；
     // id = 物品 id、count = 本次实际拾取数（have - leftover；spec「拾取后销毁」的「拾取」语义事件）。
     // 全满装不下（leftover == have）不发（无拾取发生）。t118 据此 → AudioManager.playPickup（拾取音）；
@@ -980,6 +982,11 @@ private:
     bool m_eating = false;
     float m_eatingProgress = 0.0f;
     int m_eatBeat = -1;
+    // t513 吃完冷却剩余秒数（>0 时 beginEating 早退，不进新一轮进食累积；updateEating 每帧递减）。
+    //   finishEating 置 kEatCooldown；冷却期 m_eating 保持 true（手持动画持续），仅 progress 暂停 →
+    //   冷却到 0 后 updateEating 自动恢复累积（连食下一件，机制等价 MC 进食冷却不阻断连食本身）。
+    //   松开右键（endEating）→ cancelEating 清 m_eating，冷却亦自然不再计（不按即不冷却）。
+    float m_eatCooldown = 0.0f;
     // t267 物理右键按下态（与 m_eating =「正在累积进食」分离，同 m_leftDown/m_mining 解耦模式）：
     //   finishEating 消耗后 cancelEating 清 m_eating，但右键可能仍按住。m_rightDown 仅由 press 边缘
     //   （beginEating）置 true、release 边缘（endEating）/ 暂停失焦（release）置 false；finishEating /
@@ -1140,6 +1147,12 @@ private:
     //     eatingParticle（嘴部屑粒迸发）+ QML 抖动循环。4 段 ≈ 每 0.4s 一拍（节奏感清晰，屑粒不爆量）。
     static constexpr float kEatDuration = 1.6f;
     static constexpr int kEatBeats = 4;
+    // t513 吃完冷却（机制等价 MC 1.0 进食冷却 item-use cooldown ~1s）：finishEating 消耗一件食物后置
+    //   m_eatCooldown=kEatCooldown；updateEating 顶部递减，冷却期内 beginEating 早退（不进新一轮累积）。
+    //   修「按住右键连续连食」体感（一件食完立刻开始下一件的 ~1.6s 累积 → 按住即无限吃）。冷却期 m_eating
+    //   保持 true → 进食手持动画（手落下 + 嚼动）持续显示，progress 暂停；冷却到 0 才恢复累积（连食下一件）。
+    //   1.0s ≈ MC 1.0 进食冷却量级（机制对齐，非精确数值复刻）。
+    static constexpr float kEatCooldown = 1.0f;
     static constexpr float kHungerIdleRate   = 0.013f; // ~1 饥饿 / 75s ≈ 25min 耗尽（满→空）
     static constexpr float kHungerWalkRate   = 0.067f; // ~1 饥饿 / 15s ≈ 5min 走路耗尽
     static constexpr float kHungerSprintRate = 0.133f; // ~1 饥饿 / 7.5s ≈ 2.5min 疾跑耗尽
