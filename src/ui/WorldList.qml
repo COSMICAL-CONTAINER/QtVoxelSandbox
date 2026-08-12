@@ -69,21 +69,31 @@ Item {
         spacing: 18
 
         // 标题 + 返回。
-        Row {
+        // t493 修「返回按钮跑到窗口外」旧 bug（一直存在，窄窗口触发）：旧 Row 用固定宽弹性间隔
+        //   `Item{width: parent.width-400}`，窗口窄时（parent.width-400 < 0 或不够标题+按钮+边距）间隔先被
+        //   压缩、按钮被推到父容器右侧之外（用户见「返回按钮只剩一半在窗口里」）。改 anchors 布局：标题
+        //   锚左、返回按钮锚右、中间不占宽（标题与按钮重叠风险低——标题短、按钮固定宽 120、边距 40）。
+        //   标题过长时截断（elide）而非溢出挤压按钮。
+        Item {
             width: parent.width
-            spacing: 16
+            height: 40
             Text {
+                id: wlTitle
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
                 text: "单人模式 — 世界列表"
                 color: "#eaf2ea"; font.pixelSize: 32; font.bold: true; font.letterSpacing: 2
                 style: Text.Outline; styleColor: "#000000"
-                anchors.verticalCenter: parent.verticalCenter
+                elide: Text.ElideRight
+                width: parent.width - 200   // 给右侧返回按钮留位（120 按钮 + 余量）
             }
-            Item { width: parent.width - 400; height: 1 } // 弹性间隔
             Rectangle {
+                id: wlBackBtn
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
                 width: 120; height: 36; radius: 8
                 color: backArea.containsMouse ? "#333c47" : "#222a32"
                 border.color: "#3a444f"; border.width: 1
-                anchors.verticalCenter: parent.verticalCenter
                 Text { anchors.centerIn: parent; text: "返回"; color: "#cdd6dd"; font.pixelSize: 14 }
                 MouseArea {
                     id: backArea; anchors.fill: parent; hoverEnabled: true
