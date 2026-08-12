@@ -2094,18 +2094,10 @@ void PlayerController::placeBlock()
         emit swingArm(); // 扳柄 / 按下是一次「使用」动作 → 挥手（t29）
         return; // 机关激活 → 不再走放置路径
     }
-    // t490 玩家手动点燃 TNT（spec「创造放多 TNT + 点燃一个 → 连锁全爆」；机制等价 MC 1.0 空手 / 持物右键 TNT
-    //   方块点燃）：右键命中格为 TNT 方块本身 → 移除 TNT 方块 + spawnPrimedTnt（默认 fuse ~5s）+ 挥手。空手或持物
-    //   均可（点燃是「使用」语义，与手持何物无关，同工作台 / 门）。优先于放置（右键 TNT 即点燃，不另放块）。
-    //   点燃后 PrimedTnt fuse 到 0 → detonateTntSphere 球形破坏 + 链式引燃邻接 TNT → 连锁全爆（spec 验收核心）。
-    //   分层（PLAN §2）：同上（读射线命中 + 写 World + 调 EntityManager.spawnPrimedTnt），向下依赖。
-    if (BlockRegistry::isTnt(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
-        m_world->clearBlockSilent(m_hitBx, m_hitBy, m_hitBz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
-        m_entityManager->spawnPrimedTnt(m_hitBx, m_hitBy, m_hitBz); // 点燃（默认 fuse ~5s）
-        m_lastPlaceMs = now;
-        emit swingArm();
-        return;
-    }
+    // t492 Bug B：删除「右键 TNT 本体直接点燃」分支（原 2097-2108）。spec 要求 TNT 只能经机关点燃：
+    //   ① 右键机关四邻（上方 isManualIgniter 分支）+ ② 踩压力板四邻（scanTntTraps）。右键 TNT 本体不再点燃
+    //   → 走普通放块路径（空手无效应 / 持物在 TNT 旁正常放块）。机制等价 MC 1.0 徒手不能点燃 TNT（本项目无
+    //   打火石，故仅机关可激活）。两处机关点燃路径保留（isManualIgniter 四邻 + scanTntTraps 压力板四邻）。
     } // t174：m_hasHit 局部门控结束（工作台/熔炉/门/活版门需命中；桶分支与放块路径各自处理命中需求）
     // t174 铁桶 useBlock（spec「右键舀水/倒水交互」）：选空桶 / 装水桶时右键走桶交互，不走方块放置路径
     //   （桶非方块；selectedBlock 经 hotbar 已归 Air，下方 Air 守卫会拦，故在此提前分支）。机制等价 MC 1.0

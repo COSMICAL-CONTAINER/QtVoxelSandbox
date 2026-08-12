@@ -4560,7 +4560,13 @@ Window {
                     position: {
                         entityManager.revision
                         const p = entityManager.posAt(index)
-                        return Qt.vector3d(p.x, p.y - mobHalfH * (1.0 - entBabyScale), p.z)
+                        // t492 Bug A：primed TNT（halfHeightAt=0）着地后实体中心 pos.y=支撑顶面（cy+1.0），但 BlockCube
+                        //   几何原点在中心、立方高 1.0 → 模型跨 cy+0.5..cy+1.5，下半格埋入支撑方块。沙子（halfH=0.5）的
+                        //   -0.5 偏移已由 mobHalfH*(1-s) 项给出；primed 实体 mobHalfH=0 故该项归零，需**额外** -0.5 把立方
+                        //   中心从支撑顶面下移半格 → 底面贴支撑顶面（坐在方块上，机制等价 MC primed TNT 坐在地面而非半埋）。
+                        //   非 primed（沙）isPrimedAt=false → 不加额外偏移，沙行为不变。
+                        const primedDrop = entityManager.isPrimedAt(index) ? 0.5 : 0.0
+                        return Qt.vector3d(p.x, p.y - mobHalfH * (1.0 - entBabyScale) - primedDrop, p.z)
                     }
                     scale: Qt.vector3d(entBabyScale, entBabyScale, entBabyScale)
                     property int entKind: { entityManager.revision; return entityManager.kindAt(index) }
@@ -4640,22 +4646,49 @@ Window {
                         property real entFuseProg: { entityManager.revision; return entityManager.fuseProgressAt(index) }
                         scale: entPrimed ? Qt.vector3d(0.98, 0.98, 0.98) : Qt.vector3d(1.0, 1.0, 1.0)
                         // t490 白闪脉冲相位（0..1 循环）。仅 primed 实体跑动画（非 primed 静止 0 不影响 baseColor）。
+                        //   t492 Bug C：原用 `NumberAnimation on tntFlashPhase` + running 绑定 + loops:1 onFinished 重启，
+                        //   该组合在「单循环结束 running 翻 false 而 running:entPrimed 仍 true」的绑定竞争中 + delegate
+                        //   创建/slot 复用瞬间不可靠（primed 进新槽 entPrimed 首读即 true 时 running 绑定未及触发 / slot 复用
+                        //   false→true 转换被吞）→ 动画常不自启 → 白闪不显示。改走本代码库既定模式（同 deathFallAnim）：
+                        //   独立 NumberAnimation（target/property 显式）+ onEntPrimedChanged 显式 start() + loops:Infinite
+                        //   （duration 每循环重设即可变频率），不再依赖 running 绑定自启。
                         property real tntFlashPhase: 0.0
                         // 循环动画推 phase 0→1；duration 随 fuseProgress 变（progress 1=刚点燃 800ms 慢周期 /
-                        //   progress 0=即将引爆 120ms 快周期）。每次循环结束 onFinished 重启 + 重设 duration（据当前
-                        //   entFuseProg）→ 频率随 fuse 减少平滑加快。非 primed running=false（不动）。
-                        NumberAnimation on tntFlashPhase {
+                        //   progress 0=即将引爆 120ms 快周期）。loops:Infinite + onFinished 每轮重设 duration（据当前
+                        //   entFuseProg）→ 频率随 fuse 减少平滑加快。onEntPrimedChanged 显式 start/stop（primed 入→启、
+                        //   slot 复用成非 primed→停），不依赖 running 绑定。
+                        NumberAnimation {
                             id: tntFlashAnim
+                            target: fallingBlockModel
+                            property: "tntFlashPhase"
                             from: 0; to: 1
                             duration: 800
-                            running: fallingBlockModel.entPrimed
-                            loops: 1
+                            loops: Animation.Infinite
                             onFinished: {
-                                // 仅 primed 实体重启（slot 复用成非 primed 时 entPrimed=false → 不重启）。
+                                // 每轮结束据当前 fuseProgress 重设 duration（下次循环生效，频率随 fuse 平滑加快）。
                                 if (fallingBlockModel.entPrimed) {
                                     tntFlashAnim.duration = fallingBlockModel.tntFlashDuration()
-                                    tntFlashAnim.start()
                                 }
+                            }
+                        }
+                        // primed 翻转（spawn 进新槽 / slot 复用）显式启停动画：入 primed→设 duration + start（防御
+                        //   running 绑定在 delegate 创建瞬间未触发）；离 primed（slot 复用成沙）→ stop + 归 0（baseColor
+                        //   回原色，不留残白）。
+                        onEntPrimedChanged: {
+                            if (entPrimed) {
+                                tntFlashAnim.duration = fallingBlockModel.tntFlashDuration()
+                                tntFlashAnim.start()
+                            } else {
+                                tntFlashAnim.stop()
+                                fallingBlockModel.tntFlashPhase = 0.0
+                            }
+                        }
+                        // delegate 创建时若已 primed（count 增 → Repeater 新建 delegate 首读 entPrimed 即 true，无
+                        //   false→true 变化事件）→ Component.onCompleted 显式 start（补 onEntPrimedChanged 覆盖不到的首建场景）。
+                        Component.onCompleted: {
+                            if (entPrimed) {
+                                tntFlashAnim.duration = fallingBlockModel.tntFlashDuration()
+                                tntFlashAnim.start()
                             }
                         }
                         // 据当前 fuseProgress 算脉冲周期（ms）：progress 1 → 800ms（慢，刚点燃）/ progress 0 → 120ms
