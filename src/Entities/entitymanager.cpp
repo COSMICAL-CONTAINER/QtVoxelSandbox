@@ -2510,16 +2510,14 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
     //   错峰）→ 各 PrimedTnt fuse 到 0 再次 detonatePrimedTnt 引爆其球内 TNT，递归连锁引爆全部。
     //   顺序：先掉落 / 引燃（据 destroyed 列表，TNT 方块已被 destroySphereSilent 清为 Air 故不重复破坏），再伤玩家 + 音视。
     for (const World::DestroyedVoxel &d : destroyed) {
+        // t492：TNT 爆炸 **不再链式引燃** 邻接 TNT（用户明确要求：只有机关 / 压力板直接激活的邻接 TNT 被引燃，
+        //   不该「放一堆 TNT 点一个就全爆」）。故 TNT 方块被爆炸破坏时直接消失，**不** spawnPrimedTnt、**不** 掉落
+        //   物品（TNT 被炸应销毁而非变成可拾取物品 / 引燃实体）。机制：本项目 TNT 仅由机关（lever/button 4 水平邻）
+        //   + 压力板（6 邻：4 水平 + 上下）激活，爆炸本身不传播引燃（简化 + 避免连锁性能风暴 + 符合用户心智模型）。
+        if (d.oldId == BlockRegistry::TntBlock) continue; // TNT 被爆炸破坏 → 不掉落、不引燃（直接销毁）
         const int dropItemId = BlockRegistry::dropId(d.oldId);
         if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
             emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
-        // 链式引燃：TNT 方块（oldId==TntBlock）→ 转 PrimedTnt（引燃态实体，延时引爆）。destroySphereSilent 已把该格
-        //   清为 Air，故此处仅 spawn 实体（不重复破块）。fuse 随机错峰（0..Jitter）避免同帧全部引爆 = 错峰连锁。
-        if (d.oldId == BlockRegistry::TntBlock) {
-            const float jit = kPrimedTntFuseJitterSec > 0.0f
-                              ? float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * kPrimedTntFuseJitterSec : 0.0f;
-            spawnPrimedTnt(d.x, d.y, d.z, kPrimedTntFuseSec + jit);
-        }
     }
 
     // (c) 距离衰减伤害玩家（同 Stalker：身体中心到爆炸中心 3D 距离 → dmg=round(max·(1−dist/radius))，至少 1）。
@@ -3030,9 +3028,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 supportCellY = cy; break; // 不完整方块也作支撑（primed TNT 落其上停住，机制等价 MC primed TNT 落火把上停住）
             }
             if (supportCellY >= 0) {
-                // 着地：停在支撑方块顶面（= cy+1，实体中心 pos.y = cy+1+0.5；halfH=0 故贴 cell 底面 = cy+1.0），
-                //   **不放置方块**（保持引燃态非完整方块可穿透；spec）。机制等价 MC primed TNT 着地停止下落但仍是实体。
-                const float restY = float(supportCellY + 1); // halfH=0 → 中心 = 顶面
+                // 着地：停在支撑方块上方一格的 **cell 中心**（pos.y = supportCellY + 1 + 0.5 = supportCellY+1.5）。
+                //   halfH=0（primed 实体可穿透），但渲染的 BlockCube 立方几何原点在中心、高 1.0 → 模型中心须落在
+                //   「TNT 应占格」(supportCellY+1) 的中心 (supportCellY+1.5)，模型才正确填满该格、底贴支撑顶面
+                //   （机制等价 MC primed TNT 坐在地面而非半埋 / 悬空）。与 spawnPrimedTnt 初始 pos=(x+0.5,y+0.5,z+0.5)
+                //   的「cell 中心」约定一致 → 下落 / 着地视觉连贯。不放置方块（保持引燃态可穿透）。
+                const float restY = float(supportCellY + 1) + 0.5f; // cell 中心（= 支撑顶面 + 0.5）
                 if (e.pos.y() != restY) { e.pos.setY(restY); e.vy = 0.0f; dirty = true; }
             } else if (newY <= 0.0f) {
                 // 全列无支撑且已跌出世界底部 → 静默移除（防永久下落；正常世界 y=0 有石头层不触发）。

@@ -4560,13 +4560,7 @@ Window {
                     position: {
                         entityManager.revision
                         const p = entityManager.posAt(index)
-                        // t492 Bug A：primed TNT（halfHeightAt=0）着地后实体中心 pos.y=支撑顶面（cy+1.0），但 BlockCube
-                        //   几何原点在中心、立方高 1.0 → 模型跨 cy+0.5..cy+1.5，下半格埋入支撑方块。沙子（halfH=0.5）的
-                        //   -0.5 偏移已由 mobHalfH*(1-s) 项给出；primed 实体 mobHalfH=0 故该项归零，需**额外** -0.5 把立方
-                        //   中心从支撑顶面下移半格 → 底面贴支撑顶面（坐在方块上，机制等价 MC primed TNT 坐在地面而非半埋）。
-                        //   非 primed（沙）isPrimedAt=false → 不加额外偏移，沙行为不变。
-                        const primedDrop = entityManager.isPrimedAt(index) ? 0.5 : 0.0
-                        return Qt.vector3d(p.x, p.y - mobHalfH * (1.0 - entBabyScale) - primedDrop, p.z)
+                        return Qt.vector3d(p.x, p.y - mobHalfH * (1.0 - entBabyScale), p.z)
                     }
                     scale: Qt.vector3d(entBabyScale, entBabyScale, entBabyScale)
                     property int entKind: { entityManager.revision; return entityManager.kindAt(index) }

@@ -2081,13 +2081,13 @@ void PlayerController::placeBlock()
         const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
         // 翻 state bit0（激活态：lever 扳柄 / button 按下）→ mesher 切亮色高光（机关激活视觉反馈）。
         m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, quint8(st ^ 1));
-        // 点燃水平四邻的 TNT 方块（同 scanTntTraps 压力板四邻点燃模式）。逐邻查 TNT → 移除 + spawnPrimedTnt。
-        static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
-        for (const auto &d : kDirs) {
-            const int tx = m_hitBx + d[0], tz = m_hitBz + d[1];
-            if (BlockRegistry::isTnt(m_world->blockAt(tx, m_hitBy, tz))) {
-                m_world->clearBlockSilent(tx, m_hitBy, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
-                m_entityManager->spawnPrimedTnt(tx, m_hitBy, tz); // 点燃（默认 fuse；引爆时链式引燃邻接 TNT）
+        // t492：点燃机关的 **6 邻**（4 水平 + 上 + 下）的 TNT 方块（同压力板 6 邻模式；用户要求）。逐邻查 TNT → 移除 + spawnPrimedTnt。
+        static constexpr int kDirs6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for (const auto &d : kDirs6) {
+            const int tx = m_hitBx + d[0], ty = m_hitBy + d[1], tz = m_hitBz + d[2];
+            if (BlockRegistry::isTnt(m_world->blockAt(tx, ty, tz))) {
+                m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
+                m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸不链式）
             }
         }
         m_lastPlaceMs = now;
@@ -3302,18 +3302,17 @@ void PlayerController::scanTntTraps()
                 m_entityManager->detonateTntBlock(bx, feetY - 1, bz, m_world, m_pos);
                 return; // return 防同帧多候选多次引爆
             }
-            // (b) t490 新增：压力板水平四邻格有 TNT → 点燃（移除 TNT 方块 + spawnPrimedTnt 延时引爆 + 链式）。
-            //   水平四邻（同 feetY）：上下左右各查一格。命中首个 TNT → 点燃即 return（防同帧点燃多个刷屏；
-            //   链式引爆由 detonateTntSphere 内 spawnPrimedTnt 递归传播，单次点燃足以触发整片连锁）。
-            //   点燃 = 移除 TNT 方块（clearBlockSilent 点火专用静默清 + worldChanged 重建 mesh，不发 broken/placed → 免粒子 /
-            //   音 spam；clearBlockSilent 绕过 setBlockFromEntity 的 occ 守卫——TNT 是实体方块，occ 守卫会拒写）+ spawnPrimedTnt（默认 fuse ~5s）。机制等价 MC 压力板激活邻接 TNT。
-            static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
-            for (const auto &d : kDirs) {
-                const int tx = bx + d[0], tz = bz + d[1];
-                if (BlockRegistry::isTnt(m_world->blockAt(tx, feetY, tz))) {
-                    m_world->clearBlockSilent(tx, feetY, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
-                    m_entityManager->spawnPrimedTnt(tx, feetY, tz); // 点燃（默认 fuse；引爆时链式引燃邻接 TNT）
-                    return; // 单次点燃 → return（链式引爆由 PrimedTnt fuse 到 0 后递归触发）
+            // (b) t490/t492：压力板 **6 邻**（4 水平 + 上 + 下）有 TNT → 点燃（移除 TNT 方块 + spawnPrimedTnt 延时引爆）。
+            //   t492 改 6 邻（用户要求「水平四方向 + 上下两个方向」），不再依赖爆炸链式引燃（detonateTntSphere 已
+            //   去链式 → 只有直接机关 / 压力板激活的 TNT 才引燃，放一堆 TNT 踩板只爆邻接的、不全爆）。
+            //   点燃 = clearBlockSilent 移除 TNT 方块（绕 occ 守卫）+ spawnPrimedTnt（默认 fuse ~5s）。命中首个 → return。
+            static constexpr int kDirs6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+            for (const auto &d : kDirs6) {
+                const int tx = bx + d[0], ty = feetY + d[1], tz = bz + d[2];
+                if (BlockRegistry::isTnt(m_world->blockAt(tx, ty, tz))) {
+                    m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
+                    m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸不链式）
+                    return; // 单次点燃 → return
                 }
             }
         }
