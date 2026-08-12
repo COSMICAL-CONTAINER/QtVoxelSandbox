@@ -7999,6 +7999,15 @@ Window {
         onReturnHeldToVoidRequested: hotbarVM.heldBlock = 0
         // t120：创造拿物品（调色板点击）→ 手弹跳（同生存拾取的手弹反馈，spec「创造拿物品到手也触发」）。
         onItemTaken: handPopAnim.start()
+        // t511 创造背包「箱子」分类 tab → 切生存背包（玩家可放/取物品 + 操作护甲槽）。机制：player.setMode
+        //   (Survival) → SurvivalInventory 面板（visible 绑 player.mode===Survival）显出，与本面板互斥。
+        //   共享同一 hotbar VM（m_slots/m_mainSlots/m_armorSlots）→ 创造拿的物 / 放的护甲在生存背包可见可操作。
+        //   setMode 不清背包（resetForMode 仅重生调用，hotbar.cpp:1281 + playercontroller.cpp:249）→ 物品不丢。
+        onSwitchToSurvivalRequested: {
+            // 若光标手持物先归还虚空（创造无限源语义，避免切模式后浮动图标悬空）。
+            if (hotbarVM.heldBlock !== 0) hotbarVM.heldBlock = 0
+            player.setMode(PlayerController.Survival)
+        }
     }
 
     // 生存背包 1.0（t24）：2×2 合成 + 结果槽 + 4 护甲槽 + 角色预览 + 3×9 主栏 + 9 槽 hotbar 栏。

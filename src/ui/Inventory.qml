@@ -51,19 +51,70 @@ Item {
     //   发，hotbar 槽间搬动 / 互换不算「拿新物」。
     signal itemTaken()
 
-    // ① 调色板数据：可放置方块（creativeBlocks，含工作台 / 熔炉 / 箱子 / 耕地 / 草丛 / 小麦作物 / 6 类木制半方块）
-    // + 工具段（creativeTools：3 档镐 + 3 档锄）+ 材料段（creativeMaterials：木棒 / 煤 / 铁系列 / 玻璃 / 桶 /
-    //   小麦种子 / 小麦 / 面包 / 生物蛋×3 / mob 掉落×4）+ 护甲段（creativeArmor：t345 5 套 × 4 部位 = 20 件）
-    // + 扩展空槽（id=0 → 空占位）。
-    // 一次性求值的绑定（方块 / 工具 / 材料 / 护甲集恒定；root.hotbar 由 null→对象 时重新求值）。
-    // 空槽既是「可滚动」的内容，也占位示意未来 Phase 1.x 的 ~40 方块扩容（MC 1.0 创造页也是多行大网格）。
-    // t244 创造调色板一览补全：cross 广告牌方块（草丛 / 小麦作物）+ 4 mob 掉落物（生猪排 / 生牛肉 / 皮革 / 羊毛）。
-    readonly property var paletteModel: root.hotbar
-        ? root.hotbar.creativeBlocks().concat(root.hotbar.creativeTools())
-                                .concat(root.hotbar.creativeMaterials())
-                                .concat(root.hotbar.creativeArmor()) // t345 护甲段（皮革/铁/铜/金/钻石 × 头/胸/腿/靴）
-                                .concat([0,0,0,0,0,0,0,0,0]) // 扩展空槽（Flickable 滚）
-        : []
+    // ① 调色板数据：t511 改为分类 tabs（MC 1.0 式）。currentTab 决定调色板只显某一类（方块 / 工具 / 材料 /
+    //   护甲 / 食物）。各分类 id 段恒定（方块→creativeBlocks、工具→creativeTools、材料→creativeMaterials、
+    //   护甲→creativeArmor），食物段从 creativeMaterials 里挑可食用子集（JS 端按 RecipeRegistry 材料段 id 常量
+    //   过滤 —— 这些常量未单独 Q_INVOKABLE 暴露，故在 QML 端镜像一份 id 表）。root.hotbar 由 null→对象 时重求值。
+    // t511 去掉「扩展空槽」（旧版尾巴 [0,0,...]）：分类 tabs 下每页内容已天然较短，空槽只会撑出滚动空白，删。
+    // currentTab==5（箱子）= 切生存背包，由 tab 按钮直接发 switchToSurvivalRequested 信号（不走调色板渲染）。
+    readonly property var paletteModel: root.hotbar ? root.filteredPalette() : []
+
+    // t511 分类 tabs 当前页索引：0 方块 / 1 工具 / 2 材料 / 3 护甲 / 4 食物。（5 = 箱子，点击即切生存背包，
+    //   不停留本页，故不入 currentTab 有效取值域 —— 按钮点击直接发信号后不赋值给 currentTab。）
+    property int currentTab: 0
+
+    // t511 食物段 id 表（从 creativeMaterials 里挑可食用子集；镜像 RecipeRegistry 材料段 id 常量，
+    //   因 RecipeRegistry 未 Q_INVOKABLE 暴露给 QML，且全工程「可食用」判定散在 playercontroller 内联，
+    //   无单一权威谓词可查 —— 故本处集中维护创造调色板用的食物 id 列表）。§9 通用词中文名由 nameForBlock 给。
+    //   涵盖：面包 / 生·熟猪牛羊鸡肉 / 胡萝卜 / 马铃薯 / 蘑菇汤 / 苹果(无苹果物品) / 甜浆果 / 生鱼 / 蛋（食）。
+    readonly property var foodIds: [
+        0x20A, // 面包
+        0x20B, // 生猪排
+        0x20C, // 生牛肉
+        0x221, // 熟猪排
+        0x222, // 熟牛肉
+        0x223, // 熟羊肉
+        0x229, // 生鸡肉
+        0x22A, // 熟鸡肉
+        0x22B, // 蛋（可食）
+        0x22F, // 胡萝卜
+        0x230, // 马铃薯
+        0x231, // 生鱼
+        0x233, // 甜浆果
+        0x23C  // 蘑菇汤
+    ]
+
+    // t511 据 currentTab 过滤调色板 id 列表。食物段 = creativeMaterials 与 foodIds 的交集（保 materials 内顺序）。
+    function filteredPalette() {
+        if (!root.hotbar) return []
+        if (root.currentTab === 0) return root.hotbar.creativeBlocks()
+        if (root.currentTab === 1) return root.hotbar.creativeTools()
+        if (root.currentTab === 2) {
+            // 材料段 = creativeMaterials 去掉已划进食物段的项（避免食物在两页重复）。
+            const mats = root.hotbar.creativeMaterials()
+            const out = []
+            for (let i = 0; i < mats.length; ++i) {
+                if (root.foodIds.indexOf(mats[i]) === -1) out.push(mats[i])
+            }
+            return out
+        }
+        if (root.currentTab === 3) return root.hotbar.creativeArmor()
+        if (root.currentTab === 4) {
+            // 食物段：按 foodIds 顺序从 materials 取交集（materials 是权威 id 源；foodIds 仅定「哪些算食物 + 顺序」）。
+            const mats = root.hotbar.creativeMaterials()
+            const out = []
+            for (let i = 0; i < root.foodIds.length; ++i) {
+                if (mats.indexOf(root.foodIds[i]) !== -1) out.push(root.foodIds[i])
+            }
+            return out
+        }
+        return []
+    }
+
+    // t511 请求宿主切到生存背包（箱子 tab 点击）：宿主 Main.qml 把 player 切 Survival 模式 →
+    //   SurvivalInventory 面板（visible 绑 player.mode===Survival）显出，玩家可放/取物品 + 操作护甲槽。
+    //   分层（PLAN §2）：本面板只发意图信号，模式切换由宿主定（player.setMode）。
+    signal switchToSurvivalRequested()
 
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
     property string hoveredName: ""
@@ -228,47 +279,68 @@ Item {
         Column {
             anchors.fill: parent
             anchors.margins: 14
-            spacing: 10
+            spacing: 8
 
-            // 标题行：左标题，右关闭提示。
-            Item {
+            // t511 分类 tabs（MC 1.0 式创造背包分类）：方块 / 工具 / 材料 / 护甲 / 食物 / 箱子。
+            //   前 5 项切 currentTab（调色板只显该类，filteredPalette 过滤）；箱子 tab 点击发 switchToSurvivalRequested
+            //   → 宿主切 Survival → SurvivalInventory 面板显出（可放取物品 + 操作护甲槽）。
+            //   选中态：白底深字 + 下沉边；未选：暗底亮字。自绘原创（§9 override (a)，无 MC GUI PNG）。
+            //   去掉旧「创造物品栏」标题 + 「[E]/[Esc] 关闭」提示（用户嫌啰嗦；关闭键提示已在 HUD/暂停叠层）。
+            Row {
+                id: tabBar
+                spacing: 2
                 width: parent.width
-                height: 24
-                Text {
-                    text: "创造物品栏"
-                    color: "#eaf2ea"
-                    font.pixelSize: 20
-                    font.bold: true
-                    anchors.left: parent.left
-                }
-                Text {
-                    text: "[E] / [Esc] 关闭"
-                    color: "#7fae7f"
-                    font.pixelSize: 11
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
 
-            // 状态行：当前选中槽 + 悬停方块中文名（hoveredName 随 hover 更新）。
-            Text {
-                width: parent.width
-                color: "#9fb0c0"
-                font.pixelSize: 12
-                text: "当前选中：第 " + (root.hotbar ? root.hotbar.selectedSlot + 1 : 1) + " 槽 · "
-                      + (root.hotbar ? root.hotbar.nameAt(root.hotbar.selectedSlot) : "")
-                      + (root.hoveredName !== "" ? "    |    悬停：" + root.hoveredName : "")
+                Repeater {
+                    // [标签, 对应 currentTab（-1=箱子特殊，不进 currentTab）]。
+                    model: [
+                        { label: "方块", tab: 0 },
+                        { label: "工具", tab: 1 },
+                        { label: "材料", tab: 2 },
+                        { label: "护甲", tab: 3 },
+                        { label: "食物", tab: 4 },
+                        { label: "箱子", tab: -1 }
+                    ]
+                    delegate: Rectangle {
+                        width: Math.floor((parent.width - (6 - 1) * 2) / 6)
+                        height: 26
+                        color: (modelData.tab === -1)
+                               ? "#3a2a14"                                       // 箱子 tab 暗黄底（区别于分类）
+                               : (root.currentTab === modelData.tab ? "#5a8a4a" : "#262b30") // 选中绿底 / 未选暗底
+                        border.color: root.currentTab === modelData.tab ? "#7fe57f" : "#3a444f"
+                        border.width: 1
+                        radius: 3
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            color: (modelData.tab === -1)
+                                   ? "#e8c878"                                   // 箱子 tab 暗黄字
+                                   : (root.currentTab === modelData.tab ? "#ffffff" : "#9fb0c0")
+                            font.pixelSize: 12
+                            font.bold: root.currentTab === modelData.tab
+                        }
+                        HoverHandler { cursorShape: Qt.PointingHandCursor }
+                        TapHandler {
+                            onTapped: {
+                                if (modelData.tab === -1) {
+                                    // 箱子 tab → 切生存背包（宿主 Main.qml 接 setMode(Survival)）。
+                                    root.switchToSurvivalRequested()
+                                } else {
+                                    root.currentTab = modelData.tab
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // ① 调色板（Flickable 垂直可滚动 + ScrollBar 指示拖动；t127）。
-            //   t127 根因：原视口仅 cellSize*2+8（2 行）+ 无 ScrollBar → 火把（第 13 项，9 列排第 2 行第 4 格）
-            //   贴在视口边缘、下方工具/材料（第 3-4 行）既滚不出也无指示。修：(a) 视口抬到 cellSize*3+12 容 3 行
-            //   → 火把完整可见且下方留滚动余量；(b) 挂 ScrollBar.vertical(policy AsNeeded) → 内容超视口时显
-            //   拖动条，可拖 / 滚轮滚到第 4 行的工具 / 材料。视口抬升后整列内容 272 ≤ 面板可用高 284，不破布局。
+            //   t511：去掉标题行 / 状态行后腾出纵向空间 → 视口抬到 cellSize*4+16 容 4 行（分类页内容短时一屏全显；
+            //   长（方块页 ~60 项）仍可滚）。ScrollBar.vertical policy=AsNeeded 即不足时不占空间。
             Flickable {
                 id: paletteFlick
                 width: parent.width
-                height: root.cellSize * 3 + 12 // t127：视口容 3 行（火把第 2 行完整可见 + 下方可滚）
+                height: root.cellSize * 4 + 16 // t511：视口容 4 行（去标题/状态行腾出的空间回填到调色板）
                 clip: true
                 contentWidth: paletteGrid.width
                 contentHeight: paletteGrid.height
@@ -387,13 +459,7 @@ Item {
                 }
             }
 
-            // 销毁槽用法提示。
-            Text {
-                width: parent.width
-                color: "#7d8893"
-                font.pixelSize: 11
-                text: "点击右侧销毁槽可丢弃当前手持物"
-            }
+            // t511 去掉「点击右侧销毁槽可丢弃当前手持物」提示 Text（用户嫌啰嗦；销毁槽的垃圾桶图标已自解释）。
 
             // ② 底部 9 槽 hotbar 栏（同步游戏内 hotbar） + ③ 销毁槽。
             Item {
