@@ -491,6 +491,12 @@ Item {
             //   底部 hotbar 行复用面板既有的 ② 栏（见下，与调色板分页共用）。护甲/主栏操作经 hotbar VM +
             //   InventoryOps（readSlot/writeSlot 已支持 main/hotbar/armor 组；护甲走 armorSetStack 守部位）。
             //   全部槽框/角色预览自绘原创（§9 override (a)）；零 MC 专有名词（§9）。
+            // t528 布局对齐：上半 Item 宽度改 = 主栏宽（mainCols*slotSize=360）+ 居中（anchors.
+            //   horizontalCenter），使护甲列(x:0)/合成区不再用 parent.width(442) 坐标系 → 与下方 3 行主栏的
+            //   9 列严丝合缝对齐（修「左上人物/空装备图标比背包物品栏往左突出 1 格」）。合成区按主栏 360 宽
+            //   重排：2×2 → 箭头 → 结果槽（最右对齐第 9 列），修「产物格被挡看不见」（原 2×2 贴 parent 右边
+            //   442、无箭头/结果槽）。底部 hotbar 行（②）改 anchors.horizontalCenter 居中 360 → 与主栏列对齐
+            //   （修「hotbar 比上面 3 行背包往左突出 1 格」）。
             Item {
                 id: survivalView
                 width: parent.width
@@ -503,9 +509,12 @@ Item {
                     spacing: 8
 
                     // ── 上半：护甲 + 角色预览 + 合成（占位） ──
+                    // t528：宽 = 主栏宽（360）+ 居中（同主栏 anchors.horizontalCenter），内部按 360 坐标系布局
+                    //   护甲/合成/预览，与主栏 9 列严丝合缝（修「左上人物/空装备比主栏突出 1 格」）。
                     Item {
-                        width: parent.width
+                        width: root.mainCols * root.slotSize   // 360（= 主栏宽）
                         height: root.slotSize * 4   // 160
+                        anchors.horizontalCenter: parent.horizontalCenter
 
                         // 4 护甲槽（纵列，最左）：index 与 ArmorRegistry::ArmorPiece 同序（0 头 / 1 胸 / 2 腿 / 3 脚）。
                         //   点击：持护甲且部位匹配 → 装备（与槽内旧件互换到光标）；空手点有护甲槽 → 脱下到光标。
@@ -652,10 +661,12 @@ Item {
                             }
                         }
 
-                        // 2×2 合成格（右上，占位：仅显示槽位，不接配方 —— 任务注「合成可占位」）。
-                        //   槽位存在且不崩即满足验收；与主栏/hotbar 的栈操作互不影响。
+                        // 2×2 合成格（占位：仅显示槽位，不接配方 —— 任务注「合成可占位」）。
+                        //   t528 布局对齐（同生存背包 SurvivalInventory 坐标）：2×2 居中于上半 160 高度的右侧，
+                        //   左移给箭头 + 结果槽腾位（修「产物格被挡看不见」——原 2×2 贴右边界、无箭头/结果槽）。
+                        //   parent.width=360：2×2(x=212,80 宽) → 箭头(x=296,24 宽) → 结果槽(x=320,40 宽，对齐第 9 列)。
                         Grid {
-                            x: parent.width - 2 * root.slotSize
+                            x: parent.width - root.slotSize - 24 - 4 - 80
                             y: root.slotSize
                             columns: 2
                             spacing: 0
@@ -670,6 +681,35 @@ Item {
                                     Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
                                 }
                             }
+                        }
+
+                        // t528 合成箭头（指向结果槽，自绘像素图 §9a 原创）：居中于上半 160 高度（y=70）。
+                        //   parent.width=360 → x=296（2×2 右边 292 + 4 间距）。
+                        Canvas {
+                            x: parent.width - root.slotSize - 24; y: 70
+                            width: 24; height: 20
+                            onPaint: {
+                                const ctx = getContext("2d"); ctx.reset()
+                                ctx.imageSmoothingEnabled = false // 像素硬边（1.0 风格）
+                                ctx.fillStyle = "#8a8a8a"
+                                ctx.fillRect(0, 8, 16, 4)                          // 箭杆
+                                ctx.beginPath()                                    // 箭头三角
+                                ctx.moveTo(16, 2); ctx.lineTo(24, 10); ctx.lineTo(16, 18); ctx.closePath()
+                                ctx.fill()
+                            }
+                        }
+
+                        // t528 合成结果槽（最右，占位空槽，不接配方 —— 与任务注「合成可占位」一致）。
+                        //   parent.width=360 → x=320（对齐主栏第 9 列），y=60 居中于 160 高。原版无此槽 → 2×2 贴边、
+                        //   产物格被挡。现补结果槽空框 → 「2×2 → 箭头 → 结果槽」三段可见，对齐生存背包布局。
+                        Item {
+                            x: parent.width - root.slotSize; y: 60
+                            width: root.slotSize; height: root.slotSize
+                            Rectangle { anchors.fill: parent; color: "#262b30" }
+                            Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                            Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                            Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                            Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
                         }
                     }
 
@@ -788,11 +828,13 @@ Item {
                 height: root.slotSize
 
                 // hotbar 栏（左）：凹陷槽 + 选中槽选框（与游戏内 hotbar 视觉一致；点击切换选中、可拖到销毁槽）。
+                //   t528：改 anchors.horizontalCenter 居中（9 槽 360 宽在 442 内居中 → 起始 x=41，与上方 3 行主栏
+                //   列对齐），修「hotbar 比上面 3 行背包往左突出 1 格」（原 anchors.left 贴左边 x=0）。
                 Item {
                     id: hbBar
                     width: 9 * root.slotSize
                     height: root.slotSize
-                    anchors.left: parent.left
+                    anchors.horizontalCenter: parent.horizontalCenter
 
                     Row {
                         id: hbRow

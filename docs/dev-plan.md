@@ -1666,12 +1666,14 @@ t18                        （背包，依赖 hotbar）
 - 用户：「3 格高甘蔗中间打掉，最上面那格没掉；底下沙子打掉也不掉。以前应该写好的，仙人掌写好了，甘蔗没写？」。
 - 查甘蔗支撑判定：cactus 有 neighbor-support drop，sugarcane 漏。worldgen / blockupdate 支撑链。
 
-**B16 创造背包「生存物品栏」UI 错位** → **t528**（R19.1 本轮）
+**B16 创造背包「生存物品栏」UI 错位** → **t528** ✅✅ 已完成（commit 见下） — 纯布局对齐修复（改 anchors 让三处与 3 行背包列对齐）
 - 用户精确描述三处错位：
   1. 左上人物/空装备图标比背包物品栏**往左突出 1 格**。
   2. 右侧 2×2 合成**只看到放东西的地方，产物格被挡看不见**。
   3. 底部 hotbar（手持 1-9）比上面 3 行背包**往左突出 1 格**。3 行背包居中正常。
 - 查 Inventory.qml / SurvivalInventory.qml tab 6 分页布局对齐。
+- ✅ 根因：survivalView（tab 6）上半 Item 用 `width: parent.width`(442) 坐标系，护甲列 `x:0` 贴左、2×2 合成 `x: parent.width-2*slotSize` 贴右（无箭头/结果槽），hotbar 行 `anchors.left: parent.left` 贴左 —— 三处均以 442 宽坐标系布局，而 3 行主栏 `anchors.horizontalCenter` 居中（360 宽在 442 内起 x=41）→ 护甲/hotbar 比 main 突出 41px(≈1 格)、产物槽缺失。
+- ✅ 修：上半 Item 改 `width: mainCols*slotSize`(360) + `anchors.horizontalCenter`（与主栏同宽居中），护甲 `x:0` 即落在 main 第 1 列；2×2 合成按生存背包 SurvivalInventory 坐标重排（2×2 x=212 → 箭头 x=296 → 结果槽 x=320 对齐第 9 列），补绘箭头 + 结果槽空框；底部 hotbar `hbBar` 改 `anchors.horizontalCenter`（360 宽居中起 x=41，销毁槽仍 anchors.right 留右）。三处与主栏 9 列严丝合缝。仅动 Inventory.qml。
 
 **B13 积雪层手持/item 图标仍是整块** → **t525**（R19.2 下轮）
 - 用户：「积雪层拿在手上第一人称 + 背包 item 图标跟雪块一模一样都是完整方块。理论上是 1/8 雪块拿在手上。得标识一下（现在只能靠悬浮确认）」。放下已 OK（半格）。
