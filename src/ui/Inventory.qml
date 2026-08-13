@@ -55,11 +55,9 @@ Item {
     //   发，hotbar 槽间搬动 / 互换不算「拿新物」。
     signal itemTaken()
 
-    // t511 二轮复盘：箱子 tab 点击 → 宿主切生存模式背包。分层（PLAN §2）：本面板只发意图，是否切模式由宿主
-    //   （持 PlayerController）定。宿主 setMode(Survival) + inventoryOpen 保持 true（面板由 player.mode 绑定自动
-    //   换成 SurvivalInventory）；heldBlock 是 hotbar VM 共享光标栈（跨创造/生存同一栈）→ 切模式天然保留，玩家可
-    //   在创造护甲 tab 拿钻石护腿后点箱子 tab 切生存背包直接穿上。第一轮曾改成「保持创造综合页」被用户否决
-    //   （「点箱子竟不切生存」）。
+    // survival-tab 三轮：用户嫌「点生存模式物品栏 tab 就切换成生存模式」→ 本 tab 改为创造背包内的一个分页
+    //   （currentTab===6 显示生存物品栏视图：护甲 + 合成占位 + 角色预览 + 3×9 主栏 + hotbar 行），**不再切
+    //   player.mode**。本信号保留声明仅为兼容旧宿主（Main.qml 已不再接它切模式），本面板已无任何 emit 路径。
     signal switchToSurvivalRequested()
 
     // ① 调色板数据：t511 改为分类 tabs（MC 1.0 式）。currentTab 决定调色板只显某一类（方块 / 工具 / 材料 /
@@ -72,6 +70,8 @@ Item {
 
     // t511 分类 tabs 当前页索引：0 方块 / 1 工具 / 2 材料 / 3 护甲 / 4 食物 / 5 箱子（综合页：材料+护甲，
     //   保持创造模式，便于创造直接拿起护甲穿上；不复用生存背包）。
+    // survival-tab 三轮：6 生存物品栏（创造背包内的分页，调色板区替换为生存背包视图：护甲 + 合成占位 +
+    //   角色预览 + 3×9 主栏 + hotbar 行；**不切 player.mode** —— 取代旧 t511 的 tab:-1 切生存行为）。
     property int currentTab: 0
 
     // t511 食物段 id 表（从 creativeMaterials 里挑可食用子集；镜像 RecipeRegistry 材料段 id 常量，
@@ -104,6 +104,8 @@ Item {
     // t511 据 currentTab 过滤调色板 id 列表。食物段 = creativeMaterials 与 foodIds 的交集（保 materials 内顺序）。
     function filteredPalette() {
         if (!root.hotbar) return []
+        // survival-tab 三轮：生存物品栏分页（tab 6）无调色板 —— 调色板区让位给 survivalView（生存背包视图）。
+        if (root.currentTab === 6) return []
         if (root.currentTab === 0) return root.hotbar.creativeBlocks()
         if (root.currentTab === 1) {
             // t508 工具段末尾追加船（spec「船归工具 tab」）。船非工具类（ToolRegistry 枚举外）但语义上属
@@ -178,6 +180,7 @@ Item {
     readonly property int paletteCols: 9
     readonly property int cellSize: 42       // 调色板单格
     readonly property int slotSize: 40       // hotbar 单格（与游戏内 hotbar 视觉一致）
+    readonly property int mainCols: 9        // survival-tab 三轮：生存物品栏分页主栏列数（3×9，同生存背包）
     readonly property int bevelDark: 0       // 凹陷斜面：顶/左 暗边
     readonly property int bevelLight: 0      // 凹陷斜面：底/右 亮边
 
@@ -279,7 +282,9 @@ Item {
     Rectangle {
         id: panel
         width: 470
-        height: 312
+        // survival-tab 三轮：生存物品栏分页（tab 6）内容更高（护甲纵列 160 + 主栏 120 + 间距 → ~370 内容），
+        //   面板加高到 410 容纳；其它分页维持原 312。
+        height: root.currentTab === 6 ? 410 : 312
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -302,10 +307,10 @@ Item {
             anchors.margins: 14
             spacing: 8
 
-            // t511 分类 tabs（MC 1.0 式创造背包分类）：方块 / 工具 / 材料 / 护甲 / 食物 / 生存模式背包。
-            //   前 5 项切 currentTab（调色板只显该类，filteredPalette 过滤）；生存模式背包 tab（原「箱子」tab，
-            //   t511 二轮复盘改名）→ 发 switchToSurvivalRequested 由宿主切 player.mode=Survival（inventoryOpen 保持
-            //   true，面板由 mode 绑定自动换成 SurvivalInventory；heldBlock 共享光标栈天然保留跨切）。
+            // t511 分类 tabs（MC 1.0 式创造背包分类）：方块 / 工具 / 材料 / 护甲 / 食物 / 生存物品栏。
+            //   前 5 项切 currentTab（调色板只显该类，filteredPalette 过滤）；survival-tab 三轮：第 6 项「生存物品栏」
+            //   → currentTab=6，调色板区替换为生存物品栏视图（护甲 + 合成占位 + 角色预览 + 3×9 主栏 + 底部 hotbar 行），
+            //   在创造背包内分页显示，**不切 player.mode**（取代旧 t511 的 tab:-1 发 switchToSurvivalRequested 切生存）。
             //   选中态：白底深字 + 下沉边；未选：暗底亮字。自绘原创（§9 override (a)，无 MC GUI PNG）。
             //   去掉旧「创造物品栏」标题 + 「[E]/[Esc] 关闭」提示（用户嫌啰嗦；关闭键提示已在 HUD/暂停叠层）。
             Row {
@@ -314,25 +319,21 @@ Item {
                 width: parent.width
 
                 Repeater {
-                    // [标签, 对应 currentTab（-1=生存模式背包特殊，不进 currentTab）]。
+                    // [标签, 对应 currentTab]。survival-tab 三轮：末项改「生存物品栏」tab=6（不再 -1 特殊切模式）。
                     model: [
                         { label: "方块", tab: 0 },
                         { label: "工具", tab: 1 },
                         { label: "材料", tab: 2 },
                         { label: "护甲", tab: 3 },
                         { label: "食物", tab: 4 },
-                        { label: "生存模式背包", tab: -1 }
+                        { label: "生存物品栏", tab: 6 }
                     ]
                     delegate: Rectangle {
                         width: Math.floor((parent.width - (6 - 1) * 2) / 6)
                         height: 26
-                        // t511 二轮复盘：生存模式背包 tab（tab:-1）发 switchToSurvivalRequested 切生存，不再用
-                        //   currentTab=5 综合页。本 Inventory 面板只在 Creative 显（Main.qml 绑定），切到 Survival 后
-                        //   自动隐藏 → 该 tab 永远不会有「选中态」（选中态只在 SurvivalInventory 里体现，那边独立）。
-                        //   故 isSelected 判据保留 (tab===-1 ? false : currentTab===tab)，-1 恒未选（切走即隐）。
-                        property bool isSelected: (modelData.tab === -1)
-                                                  ? false
-                                                  : (root.currentTab === modelData.tab)
+                        // survival-tab 三轮：tab=6 为普通分页（isSelected 与其它 tab 一致：currentTab===6 时选中，
+                        //   生存物品栏视图取代调色板）。不再有 -1 特殊分支。
+                        property bool isSelected: root.currentTab === modelData.tab
                         color: isSelected ? "#5a8a4a" : "#262b30" // 选中绿底 / 未选暗底
                         border.color: isSelected ? "#7fe57f" : "#3a444f"
                         border.width: 1
@@ -347,15 +348,9 @@ Item {
                         HoverHandler { cursorShape: Qt.PointingHandCursor }
                         TapHandler {
                             onTapped: {
-                                if (modelData.tab === -1) {
-                                    // t511 二轮复盘：生存模式背包 tab → 发 switchToSurvivalRequested 由宿主切生存。
-                                    //   heldBlock 是 hotbar VM 共享光标栈（跨创造/生存同一栈）→ 切模式天然保留，
-                                    //   玩家可在护甲 tab 拿钻石护腿后点本 tab 切生存背包穿上。第一轮「保持创造综合页」
-                                    //   被用户否决（「点箱子竟不切生存，应切过去」）。
-                                    root.switchToSurvivalRequested()
-                                } else {
-                                    root.currentTab = modelData.tab
-                                }
+                                // survival-tab 三轮：全部 tab 均切 currentTab（含 6 生存物品栏分页）；
+                                //   不再发 switchToSurvivalRequested 切模式（用户诉求：不切模式）。
+                                root.currentTab = modelData.tab
                             }
                         }
                     }
@@ -368,7 +363,9 @@ Item {
             Flickable {
                 id: paletteFlick
                 width: parent.width
-                height: root.cellSize * 4 + 16 // t511：视口容 4 行（去标题/状态行腾出的空间回填到调色板）
+                // survival-tab 三轮：tab=6 生存物品栏分页时调色板区让位给 survivalView（高度 0 + 隐藏）。
+                height: root.currentTab === 6 ? 0 : root.cellSize * 4 + 16 // t511：视口容 4 行（去标题/状态行腾出的空间回填到调色板）
+                visible: root.currentTab !== 6
                 clip: true
                 contentWidth: paletteGrid.width
                 contentHeight: paletteGrid.height
@@ -480,6 +477,302 @@ Item {
                                     //   钳到 1，但光标浮动图标会短暂显 64）→ 统一走 maxStackSize 修正。
                                     root.hotbar.heldCount = root.hotbar.maxStackSize(modelData)
                                     root.itemTaken()  // t120：创造拿物品 → 宿主弹手（handPopAnim）
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // survival-tab 三轮：生存物品栏分页（currentTab===6）——创造背包内的生存背包视图，**不切模式**。
+            //   上半：4 护甲槽（纵列，读 hotbar.armor* VM，点击装备/脱下到光标）+ 角色预览（自绘剪影）+ 2×2 合成
+            //   （占位：仅显示槽位，不接配方 —— 任务注「合成可占位，优先显示布局 + 护甲/主栏可操作」）。
+            //   下半：3×9=27 主栏（读 hotbar.main* VM，左键整组拾取/放置/合并/互换，右键拿半/放一）。
+            //   底部 hotbar 行复用面板既有的 ② 栏（见下，与调色板分页共用）。护甲/主栏操作经 hotbar VM +
+            //   InventoryOps（readSlot/writeSlot 已支持 main/hotbar/armor 组；护甲走 armorSetStack 守部位）。
+            //   全部槽框/角色预览自绘原创（§9 override (a)）；零 MC 专有名词（§9）。
+            Item {
+                id: survivalView
+                width: parent.width
+                height: root.currentTab === 6 ? 288 : 0
+                visible: root.currentTab === 6
+                clip: true
+
+                Column {
+                    anchors.fill: parent
+                    spacing: 8
+
+                    // ── 上半：护甲 + 角色预览 + 合成（占位） ──
+                    Item {
+                        width: parent.width
+                        height: root.slotSize * 4   // 160
+
+                        // 4 护甲槽（纵列，最左）：index 与 ArmorRegistry::ArmorPiece 同序（0 头 / 1 胸 / 2 腿 / 3 脚）。
+                        //   点击：持护甲且部位匹配 → 装备（与槽内旧件互换到光标）；空手点有护甲槽 → 脱下到光标。
+                        //   部位不符 / 非护甲持物 → no-op（MC 行为：头盔不进胸甲槽）。护甲不可堆叠 → count 恒 1。
+                        Column {
+                            x: 0; y: 0
+                            spacing: 0
+                            Repeater {
+                                model: root.hotbar.armorCount
+                                delegate: Item {
+                                    // qml-touch 三轮：armorRevision 触碰参与返回值（表达式形式，防 AOT 消除裸触碰）。
+                                    property int armId: root.hotbar.armorRevision >= 0 ? root.hotbar.armorBlockIdAt(index) : 0
+                                    property int armDur: root.hotbar.armorRevision >= 0 ? root.hotbar.armorDurabilityAt(index) : 0
+                                    width: root.slotSize; height: root.slotSize
+
+                                    // 凹陷斜面槽框（顶/左 暗、底/右 亮 → 凹陷观感；与调色板/hotbar 行同风格）。
+                                    Rectangle { anchors.fill: parent; color: "#262b30" }
+                                    Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                                    Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                                    Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                                    Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+
+                                    // 空槽部位占位剪影（自绘像素图；§9a 原创，非 MC 资产）。
+                                    Canvas {
+                                        anchors.centerIn: parent
+                                        width: 26; height: 26
+                                        visible: armId === 0
+                                        onPaint: {
+                                            const ctx = getContext("2d"); ctx.reset()
+                                            ctx.imageSmoothingEnabled = false
+                                            const metal = "#9aa0a6", gap = "#262b30"
+                                            ctx.fillStyle = metal
+                                            if (index === 0) {                  // 头盔
+                                                ctx.fillRect(5, 5, 16, 3)
+                                                ctx.fillRect(7, 8, 12, 9)
+                                                ctx.fillStyle = gap
+                                                ctx.fillRect(9, 11, 8, 3)
+                                            } else if (index === 1) {           // 胸甲
+                                                ctx.fillRect(6, 5, 14, 4)
+                                                ctx.fillRect(7, 9, 12, 13)
+                                                ctx.fillStyle = gap
+                                                ctx.fillRect(12, 10, 2, 10)
+                                            } else if (index === 2) {           // 护腿
+                                                ctx.fillRect(7, 5, 12, 4)
+                                                ctx.fillRect(7, 9, 4, 13)
+                                                ctx.fillRect(15, 9, 4, 13)
+                                            } else {                            // 靴
+                                                ctx.fillRect(6, 13, 6, 7)
+                                                ctx.fillRect(14, 13, 6, 7)
+                                                ctx.fillRect(4, 18, 10, 2)
+                                                ctx.fillRect(12, 18, 10, 2)
+                                            }
+                                        }
+                                    }
+
+                                    // 已装备护甲图标（MaterialIcon 护甲段分支；armId!==0 时显）。
+                                    MaterialIcon {
+                                        anchors.centerIn: parent
+                                        width: 30; height: 30
+                                        visible: armId !== 0
+                                        materialId: armId
+                                    }
+
+                                    // 装备 / 脱下（左键单点）。t498 教训：从 VM 直读装备槽当前态（Q_INVOKABLE 恒最新），
+                                    //   不走绑定属性 armId（低频 NOTIFY 下可能 stale → 幻影旧件写回光标 = 护甲复制）。
+                                    TapHandler {
+                                        acceptedButtons: Qt.LeftButton
+                                        onTapped: {
+                                            const heldId = root.hotbar.heldBlock
+                                            const heldDur = root.hotbar.heldDurability
+                                            const heldEnch = root.hotbar.heldEnchants()
+                                            const slotId = root.hotbar.armorBlockIdAt(index)
+                                            const slotDur = root.hotbar.armorDurabilityAt(index)
+                                            const slotEnch = root.hotbar.armorEnchantsAt(index)
+                                            if (heldId !== 0) {
+                                                if (!root.hotbar.isArmor(heldId)) return
+                                                if (root.hotbar.armorPiece(heldId) !== index) return
+                                                // 互换：先清槽（脱下旧物），再装备手持护甲（armorSetStack 守部位）。
+                                                //   附魔随实例互换（旧物附魔 → 光标；手持附魔 → 装备槽）。
+                                                root.hotbar.armorSetStack(index, 0, 0)
+                                                root.hotbar.armorSetStack(index, heldId, 1, heldDur, heldEnch)
+                                                if (slotId !== 0) {
+                                                    root.hotbar.heldBlock = slotId
+                                                    root.hotbar.heldCount = 1
+                                                    root.hotbar.heldDurability = slotDur
+                                                    root.hotbar.setHeldEnchants(slotEnch)
+                                                } else {
+                                                    root.hotbar.heldBlock = 0
+                                                    root.hotbar.heldCount = 0
+                                                }
+                                                return
+                                            }
+                                            // 空手：槽有护甲 → 脱下到光标。
+                                            if (slotId !== 0) {
+                                                root.hotbar.heldBlock = slotId
+                                                root.hotbar.heldCount = 1
+                                                root.hotbar.heldDurability = slotDur
+                                                root.hotbar.setHeldEnchants(slotEnch)
+                                                root.hotbar.armorSetStack(index, 0, 0)
+                                            }
+                                        }
+                                    }
+
+                                    // hover → 物品名 tooltip（复用面板 itemTip；仅非空槽显名）。
+                                    HoverHandler {
+                                        onHoveredChanged: {
+                                            if (hovered && armId !== 0) {
+                                                root.hoveredItemId = armId
+                                                const p = parent.mapToItem(root, parent.width / 2, 0)
+                                                root.hoveredTipPos = Qt.point(p.x, p.y)
+                                            } else if (root.hoveredItemId === armId) {
+                                                root.hoveredItemId = 0
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 角色预览（护甲右侧）：自绘人形剪影占位（同 SurvivalInventory 预览配色；§9a 原创）。
+                        Item {
+                            x: root.slotSize + 6
+                            y: 0
+                            width: 80
+                            height: parent.height
+                            Canvas {
+                                anchors.fill: parent
+                                onPaint: {
+                                    const ctx = getContext("2d"); ctx.reset()
+                                    ctx.imageSmoothingEnabled = false
+                                    const skin = "#caa472"   // 肤色（占位）
+                                    const shirt = "#3a6a9a"  // 衣服（占位）
+                                    const pants = "#3a3a5a"  // 裤（占位）
+                                    ctx.fillStyle = skin
+                                    ctx.fillRect(32, 24, 16, 16)               // 头
+                                    ctx.fillStyle = shirt
+                                    ctx.fillRect(30, 40, 20, 28)               // 躯干
+                                    ctx.fillRect(20, 40, 8, 26)                // 左臂
+                                    ctx.fillRect(52, 40, 8, 26)                // 右臂
+                                    ctx.fillStyle = pants
+                                    ctx.fillRect(30, 68, 8, 32)                // 左腿
+                                    ctx.fillRect(42, 68, 8, 32)                // 右腿
+                                }
+                            }
+                        }
+
+                        // 2×2 合成格（右上，占位：仅显示槽位，不接配方 —— 任务注「合成可占位」）。
+                        //   槽位存在且不崩即满足验收；与主栏/hotbar 的栈操作互不影响。
+                        Grid {
+                            x: parent.width - 2 * root.slotSize
+                            y: root.slotSize
+                            columns: 2
+                            spacing: 0
+                            Repeater {
+                                model: 4
+                                delegate: Item {
+                                    width: root.slotSize; height: root.slotSize
+                                    Rectangle { anchors.fill: parent; color: "#262b30" }
+                                    Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                                    Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                                    Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                                    Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── 下半：3×9 主栏（27 槽，读 hotbar.main* VM；三菜单共享同一主栏） ──
+                    Grid {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: root.mainCols * root.slotSize
+                        height: 3 * root.slotSize
+                        columns: root.mainCols
+                        spacing: 0
+                        Repeater {
+                            // model 用固定整数 mainCount（CONSTANT=27）→ delegate 一次创建永驻；「刷新」靠
+                            //   每绑定显式触碰 mainRevision（NOTIFY=mainSlotsChanged）→ 经 Q_INVOKABLE 取最新栈值
+                            //   （同 hotbar 行 slotRevision 模式，t55/t63 已验证）。
+                            model: root.hotbar.mainCount
+                            delegate: Item {
+                                property int mainId: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainBlockIdAt(index)) : 0 }
+                                property int mainCount: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainCountAt(index)) : 0 }
+                                property int mainDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainDurabilityAt(index)) : 0 } // t263 工具耐久
+                                property var mainEnch: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainEnchantsAt(index)) : 0 } // t475 附魔
+                                width: root.slotSize; height: root.slotSize
+                                Rectangle { anchors.fill: parent; color: "#2f2f2f" } // 井底
+                                // 凹陷斜面：顶/左 暗、底/右 亮
+                                Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                                Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                                Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                                Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+
+                                // 物品图标（方块 Image / 工具 ToolIcon / 材料 MaterialIcon）。
+                                Item {
+                                    anchors.centerIn: parent
+                                    width: 30; height: 30
+                                    visible: mainId !== 0
+                                    Image {
+                                        anchors.fill: parent
+                                        visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (!root.hotbar.isTool(mainId) && !root.hotbar.isMaterial(mainId)) : false }
+                                        source: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.iconSourceForBlock(mainId)) : "" }
+                                        fillMode: Image.PreserveAspectFit; smooth: true
+                                    }
+                                    ToolIcon {
+                                        anchors.fill: parent
+                                        visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.isTool(mainId)) : false }
+                                        tier: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolTier(mainId)) : 0 }
+                                        toolType: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolType(mainId)) : 0 }
+                                    }
+                                    MaterialIcon {
+                                        anchors.fill: parent
+                                        visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.isMaterial(mainId)) : false }
+                                        materialId: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainId) : 0 }
+                                    }
+                                }
+                                // 栈数量（t32）：count>1 时右下角显数字。触碰 mainRevision 刷新（VM NOTIFY 驱动）。
+                                Text {
+                                    anchors.right: parent.right; anchors.bottom: parent.bottom
+                                    anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                    visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount > 1) : false }
+                                    text: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount) : "" }
+                                    color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                                    font.pixelSize: 13; font.bold: true
+                                }
+                                // 左键整组（拾取 / 放置 / 合并 / 互换，resolveClick）；写经 hotbar.mainSetStack（VM 单一权威）。
+                                //   t110：Shift+左键 → main 槽搬运到首个空 hotbar 槽（与生存背包主栏一致）。
+                                TapHandler {
+                                    acceptedButtons: Qt.LeftButton
+                                    onTapped: {
+                                        if (window.shiftHeld) { root.slotShiftLeft("main", index); return }
+                                        const r = root.resolveClick(mainId, mainCount, mainDur, mainEnch)
+                                        if (!r) return
+                                        root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                                        root.hotbar.heldBlock = r.heldId
+                                        root.hotbar.heldCount = r.heldCount
+                                        root.hotbar.heldDurability = r.heldDur
+                                        root.hotbar.setHeldEnchants(r.heldEnch)
+                                    }
+                                }
+                                // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey（同左键 per-slot 模式）。
+                                TapHandler {
+                                    acceptedButtons: Qt.RightButton
+                                    onTapped: {
+                                        const r = root.resolveRightClick(mainId, mainCount, mainDur, mainEnch)
+                                        if (!r) return
+                                        root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                                        root.hotbar.heldBlock = r.heldId
+                                        root.hotbar.heldCount = r.heldCount
+                                        root.hotbar.heldDurability = r.heldDur
+                                        root.hotbar.setHeldEnchants(r.heldEnch)
+                                    }
+                                }
+                                // hover → 物品名 tooltip + hoveredKey（供数字键 1-9 与 hover 槽互换 / Shift 搬运）。
+                                HoverHandler {
+                                    onHoveredChanged: {
+                                        const itemId = mainId
+                                        if (hovered && itemId !== 0) {
+                                            root.hoveredItemId = itemId
+                                            const p = parent.mapToItem(root, parent.width / 2, 0)
+                                            root.hoveredTipPos = Qt.point(p.x, p.y)
+                                        } else if (root.hoveredItemId === itemId) {
+                                            root.hoveredItemId = 0
+                                        }
+                                        const key = root.slotKey("main", index)
+                                        if (hovered) root.hoveredKey = key
+                                        else if (root.hoveredKey === key) root.hoveredKey = ""
+                                    }
                                 }
                             }
                         }

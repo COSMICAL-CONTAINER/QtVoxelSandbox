@@ -8692,11 +8692,11 @@ Window {
         onReturnHeldToVoidRequested: hotbarVM.heldBlock = 0
         // t120：创造拿物品（调色板点击）→ 手弹跳（同生存拾取的手弹反馈，spec「创造拿物品到手也触发」）。
         onItemTaken: handPopAnim.start()
-        // t511 二轮复盘：生存模式背包 tab → 切 player.mode=Survival。inventoryOpen 保持 true（面板由 player.mode
-        //   绑定自动换：Inventory(Creative) 隐、SurvivalInventory(Survival) 显）。heldBlock 是 hotbar VM 共享光标栈
-        //   （跨创造/生存同一栈）→ 切模式天然保留，玩家可在创造护甲 tab 拿钻石护腿后点本 tab 切生存背包穿上。
-        //   第一轮曾改「保持创造综合页」被用户否决（「点箱子竟不切生存，应切过去」）。
-        onSwitchToSurvivalRequested: player.setMode(PlayerController.Survival)
+        // survival-tab 三轮：用户嫌「点生存模式物品栏 tab 就切换成生存模式」→ 该 tab 已改为创造背包内的分页
+        //   （Inventory.qml currentTab===6 生存物品栏视图：护甲 + 合成占位 + 角色预览 + 3×9 主栏 + hotbar 行），
+        //   不再发 switchToSurvivalRequested，宿主不再切模式：创造模式下 E 开背包也能直接看/操作生存背包
+        //   （player.mode 保持不变）。Survival 模式 E 开背包仍走下方 SurvivalInventory（player.mode 绑定分流，
+        //   不受本改动影响）。Inventory.qml 的 switchToSurvivalRequested 信号保留声明但已无 emit 路径，此处不再接。
     }
 
     // 生存背包 1.0（t24）：2×2 合成 + 结果槽 + 4 护甲槽 + 角色预览 + 3×9 主栏 + 9 槽 hotbar 栏。
