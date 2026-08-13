@@ -4529,23 +4529,29 @@ void PlayerController::step(qreal dt)
         //   [cy,cy+1]×[cz+0.1,cz+0.9]；玩家 AABB = m_pos.x()±0.3 / m_pos.z()±0.3 / [m_pos.y, m_pos.y+m_height]。
         //   仅当两 AABB 在三轴都重叠才算接触（机制等价 MC 仙人掌实体 AABB 真接触才伤）。遍历玩家 XZ 覆盖格 ×
         //   Y 覆盖层（footY..ceil(height)），每格 Cactus 做 AABB 测试。浆果丛无碰撞（穿入），保留格判定不动。
-        constexpr float kCactusInset = 0.1f;   // 与 partialblockgeometry kCactusInset 同源（0.8 见方内缩）
+        // misc 三轮 仙人掌无伤害回归修复（二轮 AABB 改矫枉过正）：二轮只遍历玩家 footprint 内格，但玩家被
+        //   仙人掌满格碰撞挡在格边界外 → footprint 不含仙人掌格 → 遍历不到 → 无伤害。修：
+        //   (a) 遍历范围扩到含**正交 4 邻**（fx0-1..fx1+1）—— 玩家撞仙人掌侧面时被挡在邻格边界，须查邻格；
+        //   (b) 仙人掌 AABB 用**满格** [c,c+1]（非内缩 0.1），且 overlap 用**含边界**（>=/<=，非严格 >/<）
+        //       —— 玩家被碰撞挡在格边界（pMaxX ≈ 整数边界 = 仙人掌格 cMinX）时算接触（机制等价 MC 仙人掌触碰即伤）。
+        //   (c) 斜对角仍被 AABB 过滤：玩家挡在 (p+1,0) 边界，其 AABB 不越入 (p+1,p+1) 对角格 → 无重叠 → 不误伤。
         const float pMinX = m_pos.x() - 0.3f, pMaxX = m_pos.x() + 0.3f;
         const float pMinZ = m_pos.z() - 0.3f, pMaxZ = m_pos.z() + 0.3f;
         const float pMinY = m_pos.y(),         pMaxY = m_pos.y() + m_height;
         auto cactusAabbOverlap = [&](int cx, int cy, int cz) -> bool {
-            const float cMinX = cx + kCactusInset, cMaxX = cx + 1.0f - kCactusInset;
-            const float cMinZ = cz + kCactusInset, cMaxZ = cz + 1.0f - kCactusInset;
-            const float cMinY = float(cy),         cMaxY = float(cy) + 1.0f;
-            return pMinX < cMaxX && pMaxX > cMinX
-                   && pMinZ < cMaxZ && pMaxZ > cMinZ
-                   && pMinY < cMaxY && pMaxY > cMinY;
+            const float cMinX = float(cx), cMaxX = float(cx) + 1.0f;   // 满格 AABB（仙人掌实体 0.8 内缩不用于伤害判定；
+            const float cMinZ = float(cz), cMaxZ = float(cz) + 1.0f;   //   触碰伤害用整格接触，避免边界相等漏判）
+            const float cMinY = float(cy), cMaxY = float(cy) + 1.0f;
+            return pMinX <= cMaxX && pMaxX >= cMinX   // 含边界（>=/<=）：玩家挡在格边界 = 接触
+                   && pMinZ <= cMaxZ && pMaxZ >= cMinZ
+                   && pMinY <  cMaxY && pMaxY >  cMinY;  // Y 严格（上下格不因边界相等误判）
         };
         bool touch = false;
         const int yLo = footY, yHi = int(std::floor(pMaxY));   // 玩家 AABB 覆盖的 Y 整数层（脚到头顶）
+        // 遍历 XZ 范围扩到 ±1（含正交邻）：玩家撞仙人掌侧面被挡在邻格边界 → 须查邻格。斜对角靠 AABB 过滤。
         for (int yy = yLo; yy <= yHi && !touch; ++yy) {
-            for (int cx = fx0; cx <= fx1 && !touch; ++cx)
-                for (int cz = fz0; cz <= fz1 && !touch; ++cz) {
+            for (int cx = fx0 - 1; cx <= fx1 + 1 && !touch; ++cx)
+                for (int cz = fz0 - 1; cz <= fz1 + 1 && !touch; ++cz) {
                     if (cactusAt(cx, yy, cz) && cactusAabbOverlap(cx, yy, cz)) { touch = true; break; }
                     // t467 浆果丛穿越：无碰撞 → 玩家自身格即丛格（不查邻、不做 AABB，丛占满格）。
                     if (thornyBushAt(cx, yy, cz)) { touch = true; break; }
