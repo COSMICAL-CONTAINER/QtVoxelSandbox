@@ -7591,6 +7591,8 @@ Window {
         hotbar: hotbarVM
         atlasSource: resourcePack.atlasSource
         packActive: resourcePack.active
+        // 生物图鉴 / 生物蛋 3D 预览：注入整 ResourcePackManager 实例（调 mobTextureSource(mobType) + 读 .active）。
+        resourcePack: resourcePack
         visible: window.appState === "playing" && window.resourceBrowserOpen
         z: 160
         onClosed: window.resourceBrowserOpen = false
