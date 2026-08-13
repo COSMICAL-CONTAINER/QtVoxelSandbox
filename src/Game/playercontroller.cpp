@@ -3159,6 +3159,7 @@ void PlayerController::placeBlock()
     if (m_selectedBlock == BlockRegistry::Torch)
         emit torchPlaced(tx, ty, tz, m_hitNx, m_hitNy, m_hitNz);
     emit swingArm(); // 放块成功 → 第一人称手挥动（t29）
+    emit blockPlaced(); // progress 统计：放置方块 +1
 }
 
 // Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格，count=1）。

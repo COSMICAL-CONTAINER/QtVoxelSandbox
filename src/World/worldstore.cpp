@@ -147,6 +147,15 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create furnaces failed:" << q.lastError().text();
         return false;
     }
+    // progress 表（progress 新系统）：玩家进度（统计 + 成就）单行表，key 固定 'main'，data 存 PlayerProgress::toVariant()
+    //   的 JSON。IF NOT EXISTS 幂等补建（schema 版本不 bump，同 chests/furnaces，纯加表对老库向前兼容）。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS progress ("
+            "  key TEXT PRIMARY KEY,"
+            "  data TEXT NOT NULL)"))) {
+        qCCritical(lcSave) << "create progress failed:" << q.lastError().text();
+        return false;
+    }
     // 写 user_version（新库 0→kSchemaVersion；旧库同版本幂等；无 harm）。
     q.exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
     return true;
@@ -682,6 +691,41 @@ QVariantList WorldStore::loadFurnaces() const
         fm.insert(QStringLiteral("y"), q.value(1).toInt());
         fm.insert(QStringLiteral("z"), q.value(2).toInt());
         out.append(fm);
+    }
+    return out;
+}
+
+// progress 玩家进度（progress 新系统）：写单行表 key='main'，data 存 PlayerProgress::toVariant() 的 JSON。
+//   REPLACE INTO（单行 upsert，无坐标主键）。空 map → 写空 JSON（加载端 loadVariant 兜底重置默认）。
+//   独立事务（caller Main.qml.saveAndExitToWorldList 内调用，与 saveAll 分离；progress 更新频次低，单独写无妨）。
+bool WorldStore::saveProgress(const QVariantMap &progress)
+{
+    if (!m_open) return false;
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO progress (key, data) VALUES ('main', ?)"));
+    const QJsonDocument doc = QJsonDocument::fromVariant(progress);
+    q.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+    if (!q.exec()) {
+        qCCritical(lcSave) << "saveProgress failed:" << q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+// progress 读单行 key='main' → QVariantMap（同 toVariant 形状）。未打开 / 无行 → 空 map（caller 兜底重置默认）。
+QVariantMap WorldStore::loadProgress() const
+{
+    QVariantMap out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT data FROM progress WHERE key='main'"))) {
+        qCWarning(lcSave) << "loadProgress: select failed:" << q.lastError().text();
+        return out;
+    }
+    if (q.next()) {
+        const QJsonDocument doc = QJsonDocument::fromJson(q.value(0).toString().toUtf8());
+        out = doc.toVariant().toMap();
     }
     return out;
 }

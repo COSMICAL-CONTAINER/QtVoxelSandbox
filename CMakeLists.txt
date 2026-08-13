@@ -152,6 +152,10 @@ qt_add_executable(voxelsandbox
     #   下沉到 C++ VM 层、按坐标寻址，结构对齐已 per-block 的 ChestStore。纯存储类（无光 / 无 World 依赖）。
     src/Game/furnacestore.cpp
     src/Game/furnacestore.h
+    # progress 玩家进度系统（Game 层 ViewModel）：统计（时间/挖放/路程/击杀/死亡/合成/拾取）+ 成就解锁。
+    #   跨世界持久化（同 ChestStore/FurnaceStore，存 worldstore progress 表）。各事件源经 QML 桥接调埋点。
+    src/Game/playerprogress.cpp
+    src/Game/playerprogress.h
     # t393 战利品表（Game 层）：纯静态数据 + 纯函数（条目池 + 加权抽取）；地牢箱 + 渔获共用。
     #   无 Q_OBJECT / 无实例；item id 引用 recipe.h 材料段常量。ChestStore::populateDungeonLoot 调它填箱。
     src/Game/loottable.cpp

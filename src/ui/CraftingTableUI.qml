@@ -153,6 +153,7 @@ Item {
         root.hotbar.heldBlock = r.outputId
         root.hotbar.heldCount = (heldId === r.outputId ? heldCount : 0) + r.outputCount
         root.craftRev++
+        if (window.progress) window.progress.onCraft(r.outputId)  // progress 统计合成 + 成就
     }
 
     // 取当前合成格的 id 数组（触碰 craftRev 让 QML 绑定刷新时重算）。

@@ -555,6 +555,9 @@ signals:
     // blockBroken（World 已发）仍触发粒子；本信号额外区分「玩家挖」+「是否掉落」（创造 / 不可采掘
     // 不掉）。坐标 + 原方块 id。
     void playerMined(int x, int y, int z, int blockId, bool drop);
+    // progress 统计：玩家成功放置方块（placeBlock 末尾 emit；含火把/床/船/压力板等所有放块路径）。
+    //   呈现层 Connections → progress.onBlockPlaced()。同 playerMined 单向事件流模式（PLAN §2 分层）。
+    void blockPlaced();
     // 方块掉落实体（t35）：生存破块且 ToolRegistry::canHarvest 判定掉落（drop=true）时发；
     // 创造瞬破（drop=false）/ 不可采掘（canHarvest=false，如空手破石）不发。坐标 = 被破格整数
     // 坐标，id = 原方块 id，count = 掉落数量（走 BlockRegistry::dropCount；t64）。Main.qml Connections

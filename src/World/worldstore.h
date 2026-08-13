@@ -102,6 +102,12 @@ public:
     // t177 二轮复盘 读当前库的 furnaces 表为 QVariantList（同 saveAll 的 furnaces 形状）。未打开 → 空列表。
     //   caller（Main.qml.enterWorld）转交 furnaceStore.loadAll 整体替换内存（清旧世界残留 + 填本世界熔炉）。
     Q_INVOKABLE QVariantList loadFurnaces() const;
+    // progress 新系统 写玩家进度（统计 + 成就）单行表 key='main'。progress = PlayerProgress::toVariant() 产物。
+    //   独立 upsert（INSERT OR REPLACE）。未打开 → false。caller（Main.qml.saveAndExitToWorldList）调。
+    Q_INVOKABLE bool saveProgress(const QVariantMap &progress);
+    // progress 读单行 key='main' → QVariantMap（同 toVariant 形状）。未打开 / 无行 → 空 map。caller（Main.qml.enterWorld）
+    //   转交 progress.loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。
+    Q_INVOKABLE QVariantMap loadProgress() const;
     // 读当前库的 meta（name/seed/width/height/depth/playedAt）。未打开 → 空 Map。
     Q_INVOKABLE QVariantMap loadMeta() const;
     // 把当前库的 chunk blob 回填进 World（World 须已 beginLoad 零填充网格）。返回读到的 chunk 数；

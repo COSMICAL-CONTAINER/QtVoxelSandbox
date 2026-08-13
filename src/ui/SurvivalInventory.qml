@@ -175,6 +175,7 @@ Item {
         root.hotbar.heldBlock = r.outputId
         root.hotbar.heldCount = (heldId === r.outputId ? heldCount : 0) + r.outputCount
         root.craftRev++
+        if (window.progress) window.progress.onCraft(r.outputId)  // progress 统计合成 + 成就
     }
 
     // t49 关包归还合成栏（spec point 6）：面板隐藏（visible→false）时把 craftSlots 内容 addStack 回 hotbar

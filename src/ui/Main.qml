@@ -434,6 +434,9 @@ Window {
         //   进世界前 loadAll 整体替换内存（先清后填）—— 无存档 furnaces 表 → 空列表 → 清空，杜绝上一世界熔炉
         //   残留串入新世界。存档 furnaces 由 saveAndExitToWorldList 经 saveAll(name, chests, furnaces) 落盘。
         furnaceStore.loadAll(worldStore.loadFurnaces())
+        // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
+        //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
+        progress.loadVariant(worldStore.loadProgress())
         // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
@@ -547,6 +550,8 @@ Window {
             // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
             // t177 二轮复盘：熔炉内容同事务落盘（saveAll 第 3 参 = FurnaceStore::allFurnaces() 产物）。
             worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces())
+            // progress 落盘（统计 + 成就，独立 upsert 单行表）。
+            worldStore.saveProgress(progress.toVariant())
         }
         coverGrabPending = true   // 标记退出进行中（防 onGrabbed + 兜底定时器双调 finish）
         // 截封面：仅在 playing（View3D 抓得到画面）+ 有世界文件名（saveCover 据此写 sidecar PNG）时抓。
@@ -837,6 +842,7 @@ Window {
         // 指针捕获/未捕获都走此分流（keyInput 始终持焦点）。
         if (player.mode === PlayerController.Spectator) return
         inventoryOpen = true
+        progress.onInventoryOpened()  // progress 成就：打开背包
         player.release() // 释放指针 → 光标可见（点击/拖拽背包格子）；暂停叠层被 inventoryOpen 抑制
     }
     function closeInventory() {
@@ -854,6 +860,7 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         craftingTableOpen = true
+        progress.onInventoryOpened()  // progress 成就：打开背包（工作台）
         player.release()
     }
     function closeCraftingTable() {
@@ -874,6 +881,7 @@ Window {
         if (anvilOpen) closeAnvil()
         furnaceX = fx; furnaceY = fy; furnaceZ = fz  // t494 记熔炉格坐标（供 FurnaceUI setFurnaceLit）
         furnaceOpen = true
+        progress.onInventoryOpened()  // progress 成就：打开背包（熔炉）
         player.release()
     }
     function closeFurnace() {
@@ -932,6 +940,7 @@ Window {
         //   激活传送门的关键物品，机制等价 MC 1.0 要塞战利品）。同地牢 / 矿井 / 神殿 / 丛林神殿箱机制（一份首开一次性 roll）。
         if (theWorld.isStrongholdChest(x, y, z)) chestStore.populateStrongholdLoot(x, y, z)
         chestOpen = true
+        progress.onInventoryOpened()  // progress 成就：打开背包（箱子）
         // t196：触发盖子翻开动画（chestLidAngle 0→全开，Behavior 平滑过渡）；chestLidPivot 据坐标 + 朝向摆位。
         chestLidAngle = kChestLidOpenAngle
         player.release()
@@ -957,6 +966,7 @@ Window {
         if (anvilOpen) closeAnvil()
         enchantX = x; enchantY = y; enchantZ = z
         enchantingTableOpen = true
+        progress.onInventoryOpened()  // progress 成就：打开背包（附魔台）
         player.release()
     }
     function closeEnchantingTable() {
@@ -979,6 +989,7 @@ Window {
         if (anvilOpen) closeAnvil()
         anvilX = x; anvilY = y; anvilZ = z
         anvilOpen = true
+        progress.onInventoryOpened()  // progress 成就：打开背包（铁砧）
         player.release()
     }
     function closeAnvil() {
@@ -1564,6 +1575,9 @@ Window {
     //   Hotbar（id=0=空）。FurnaceUI 经 furnaceX/Y/Z 寻址当前所开熔炉；多只熔炉各自独立内容 + 进度，跨 UI 开关
     //   持久（修旧 bug：旧 FurnaceUI 把 in/fuel/out 存 QML 本地属性 → 全世界熔炉共享一个物品栏）。
     FurnaceStore { id: furnaceStore }
+    // progress 玩家进度系统 VM（统计 + 成就；跨世界持久化存 worldstore progress 表）。各事件源经 QML 桥接
+    //   调埋点（onBlockMined/onCraft/onMobKilled 等）；成就解锁弹 toast（achievementUnlocked 信号）。
+    PlayerProgress { id: progress }
 
     // 玩家状态（生命/饥饿，t22）：满血满饥初值。心/饥饿条读其 health/hunger；掉落伤害经
     // 下面的 Connections 路由到 takeDamage（呈现层只读，绝不反向写数值；PLAN §2 分层）。
@@ -1647,6 +1661,7 @@ Window {
         //     0x228=羽毛 / 0x229=生鸡肉 / 0x22A=熟鸡肉（RecipeRegistry::FeatherId 等，t398 鸡掉落）。
         //     id 改动须同步 src/Game/recipe.h（单一权威）。
         function onMobDied(x, y, z, mobType, burned, wasBaby) {
+            progress.onMobKilled(mobType)  // progress 统计击杀 + 成就「怪物猎人」（敌对 mob）
             // t479 幼崽死亡不掉落（机制等价 MC 1.0 幼崽不掉落）：幼崽（baby）死亡 → 不掉战利品 + 不掉 XP。
             //   wasBaby = EntityManager 致死瞬间快照（deathBaby）—— 0.5s 死亡动画窗口内 growTimer 可能到 0 长大，
             //   快照保「致死时是幼崽」语义（同 deathBurned 快照模式）。成体（wasBaby=false）走既有掉落流程。
@@ -1944,7 +1959,11 @@ Window {
         // t118：拾取掉落实体 → player 发 itemPickedUp(id, count) → 拾取音（pickup clip，不分材质）。
         // 信号在 pickupScan 实际入栈时（全 / 部分）才发；全满装不下不发（无伪触发）。机制等价 MC
         // 「拾起物品啵一声」。t120：同时启动 handPopAnim（手 Y 弹跳，音 + 手弹双反馈）。
-        function onItemPickedUp(id, count) { audio.playPickup(); handPopAnim.start() }
+        function onItemPickedUp(id, count) { audio.playPickup(); handPopAnim.start(); progress.onItemPicked(id) }
+        // progress 统计：玩家挖掘方块 +1（playerMined 信号；创造瞬破 / 生存累积完成均发）。
+        function onPlayerMined(x, y, z, blockId, drop) { progress.onBlockMined() }
+        // progress 统计：玩家放置方块 +1（blockPlaced 信号；placeBlock 末尾 emit）。
+        function onBlockPlaced() { progress.onBlockPlaced() }
         // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
         function onCraftingTableOpened() { window.openCraftingTable() }
         // t87/t494：右键熔炉 → player 发 furnaceOpened(x,y,z) → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
@@ -6563,6 +6582,7 @@ Window {
         //   玩家随后在死亡界面点「立即重生」→ respawnPlayer → 传回固定出生点（kSpawn，非原地复活）；
         //   掉落物留在死亡点，玩家走回死亡点拾取（机制等价 MC 死亡掉落 + 全局出生点）。
         function onDied() {
+            progress.onDeath()  // progress 统计死亡次数
             if (window.inventoryOpen) window.inventoryOpen = false
             if (window.craftingTableOpen) window.craftingTableOpen = false
             if (window.furnaceOpen) window.furnaceOpen = false
@@ -8375,6 +8395,8 @@ Window {
         target: worldClock
         function onTicked(dt) {
             furnacePanel.tick(dt)
+            progress.onPlayTimeTick(dt)           // progress 统计游戏时间 + 距离 flush
+            progress.setDayCount(worldClock.dayCount)  // progress 统计天数（单调取值）
             // t185 水流蔓延 tick：WorldClock 每 100ms tick → 驱动 World.tickWaterFlow（内部节流到 ~0.3s
             //   把波前推进 1 格 → 1 格/tick 流动动画可见）。纯 QML 桥接（WorldClock 为 Game 层不 include World；
             //   QML 同时持二者向下合法，PLAN §2 分层不破）。tickWaterFlow 内部对 settled 流场（无变化）静默 → 无重建开销。

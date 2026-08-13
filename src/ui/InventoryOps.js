@@ -584,6 +584,8 @@ function slotShiftLeftCraft(root) {
         root.hotbar.heldCount = prevHeldCount + remain
     }
     root.craftRev++
+    // progress 注：批量合成（maxCrafts 次）暂不埋点 onCraft（InventoryOps 无 window 引用；首版仅单次合成
+    //   埋点，覆盖成就触发——成就只需合成一次该产物；批量 craftsCount 会少计，后续如需精确可经面板回调补）。
     return true
 }
 
