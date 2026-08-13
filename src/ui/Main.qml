@@ -2972,6 +2972,13 @@ Window {
         Texture { id: mobStalkerPackTex;  source: resourcePack.active ? resourcePack.mobTextureSource(6) : ""; generateMipmaps: false }
         Texture { id: mobSpiderPackTex;   source: resourcePack.active ? resourcePack.mobTextureSource(7) : ""; generateMipmaps: false }
         Texture { id: mobChickenPackTex;  source: resourcePack.active ? resourcePack.mobTextureSource(8) : ""; generateMipmaps: false }
+        // feat 雪/铁傀儡 pack entity 贴图（机制等价 MC 1.0 雪傀儡 / 铁傀儡，§9 区隔：贴图仅贴雪块身 / 铁块身；
+        //   南瓜头 + 刻面眼/嘴是单独的橙色南瓜 Model，不是贴图的一部分）。pack 命中 → Main.qml 傀儡 delegate 把
+        //   几何切到 MobModel + T 字 UV 展开进该贴图（snow_golem.png 扁平 / iron_golem/iron_golem.png 子目录）；
+        //   pack 关 → source 空 → 回退纯色雪白 / 铁灰（MobModel packTextured=false 全脸 UV，无程序生成贴图）。
+        //   修 dev-plan C「铁傀儡全白」：pack iron_golem.png 铁纹才显铁质（程序纯色铁灰 #7d848c 在用户视角读作「白」）。
+        Texture { id: mobSnowGolemPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(12) : ""; generateMipmaps: false }
+        Texture { id: mobIronGolemPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(13) : ""; generateMipmaps: false }
 
         // t218 火把手持/掉落贴图：火把在世界内是异形（torchHost 木柄+火焰小立方，非 1×1×1 立方体），
         //   但手持/掉落旧路径走 BlockCube（6 面立方贴图集 tile 17）→ 即便 alphaCutoff 丢弃透明底，肉眼仍是
@@ -5073,19 +5080,24 @@ Window {
                                     const b = Qt.color(hex)
                                     return Qt.rgba(b.r * tint.r, b.g * tint.g, b.b * tint.b, 1.0)
                                 }
-                                // 底雪块（雪傀儡身体下块）：local y center -0.45，scale 0.8 → spans y [-0.85, -0.05]，冷白。
+                                // feat 雪块身（雪傀儡身体）：MobModel mobType 12（柱身两雪块上下堆叠，几何内含底/顶雪块，
+                                //   local 原点 = 碰撞中心；mobModelYOff=0 故 Model 在 (0,0,0)）。pack 命中 snow_golem.png →
+                                //   packTextured=true（T 字 UV 展开进贴图）+ baseColorMap = pack 贴图；pack 关 → 全脸 UV +
+                                //   纯色雪白（无程序生成贴图）。baseColor = tinted("#f0f4f8")（受击红闪 / 减速蓝调 / 昼夜灰阶调制
+                                //   pack 贴图或纯色）。NoLighting（红线）。MobModel 作 Node 子节点 → 继承 bodyYaw（雪块身随
+                                //   雪傀儡朝 AI 行走方向 -Z 转，机制上对称看不出，但与猪牛羊同路径一致）。
                                 Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0, -0.45, 0)
-                                    scale: Qt.vector3d(0.80, 0.90, 0.80)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#f0f4f8") }
-                                }
-                                // 顶雪块（雪傀儡身体上块）：local y center +0.45。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 0.45, 0)
-                                    scale: Qt.vector3d(0.80, 0.90, 0.80)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#f0f4f8") }
+                                    geometry: MobModel {
+                                        mobType: 12
+                                        packTextured: mobSnowGolemPackTex.source.toString().length > 0
+                                    }
+                                    position: Qt.vector3d(0, 0, 0) // 碰撞中心（mobModelYOff=0；MobModel 局部原点同碰撞中心）
+                                    scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: parent.tinted("#f0f4f8")
+                                        baseColorMap: mobSnowGolemPackTex.source.toString().length > 0 ? mobSnowGolemPackTex : null
+                                    }
                                 }
                                 // 南瓜头（机制等价 MC 1.0 雪傀儡戴刻面南瓜；§9 区隔纯色原创非照搬 MC）。
                                 //   t499 二轮复盘 ① 南瓜头「消失不见」根治：放大到 ~0.78 宽（顶/底雪块各 0.80 宽 → 头几与
@@ -5152,64 +5164,27 @@ Window {
                                     const b = Qt.color(hex)
                                     return Qt.rgba(b.r * tint.r, b.g * tint.g, b.b * tint.b, 1.0)
                                 }
-                                // 双腿（铁灰）：local y center -0.90，左右 ±0.22。
+                                // feat 铁块身（铁傀儡身体）：MobModel mobType 13（铁块人形：宽躯干 + 双腿 + 双长臂，几何
+                                //   内含 5 铁块盒，local 原点 = 碰撞中心；mobModelYOff=0 故 Model 在 (0,0,0)）。盒比例与原
+                                //   t483 UnitCube 堆叠同（保南瓜头 / 眼 overlay 对齐）。pack 命中 iron_golem.png → packTextured=true
+                                //   （T 字 UV 展开显铁纹）+ baseColorMap = pack 贴图；pack 关 → 全脸 UV + 纯色铁灰 #7d848c。
+                                //   修 dev-plan C「铁傀儡全白」：程序纯色铁灰在用户视角读作「白」，pack iron_golem.png 铁纹才显
+                                //   铁质。原 t483 锈斑 Model（铁灰 + 锈橙斑）在 pack 命中时由 pack 铁纹取代（锈纹已是贴图一部分），
+                                //   pack 关时简化为纯色铁灰（无锈斑，纯色单材质无法表达锈斑）。baseColor = tinted("#7d848c")
+                                //   （受击红闪 / 减速蓝调 / 昼夜灰阶调制 pack 贴图或纯色）。NoLighting（红线）。MobModel 作 Node
+                                //   子节点 → 继承 bodyYaw（铁块身随铁傀儡朝 AI 行走方向 -Z 转）。
                                 Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.22, -0.90, 0)
-                                    scale: Qt.vector3d(0.36, 0.60, 0.36)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.22, -0.90, 0)
-                                    scale: Qt.vector3d(0.36, 0.60, 0.36)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
-                                }
-                                // 躯干（铁灰宽体）：local y center +0.05。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 0.05, 0)
-                                    scale: Qt.vector3d(0.95, 1.05, 0.65)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
-                                }
-                                // t195 三轮 铁锈斑（机制等价 MC 铁傀儡铁质带锈斑；§9 原创纯色）：深铁灰主体 + 锈橙棕
-                                //   #6b4a2f 小斑块贴在前胸 / 腿侧，使铁傀儡读作「生锈铁块」而非「粗雪人」（用户「太白像雪人」）。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.18, 0.30, 0.34)   // 前胸右锈斑
-                                    scale: Qt.vector3d(0.18, 0.16, 0.03)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#6b4a2f") }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.20, -0.05, 0.34)  // 前胸左锈斑（错位）
-                                    scale: Qt.vector3d(0.14, 0.20, 0.03)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#6b4a2f") }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.30, -0.55, 0)     // 右腿侧锈斑
-                                    scale: Qt.vector3d(0.06, 0.22, 0.40)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#6b4a2f") }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.30, -0.70, 0)    // 左腿侧锈斑
-                                    scale: Qt.vector3d(0.06, 0.16, 0.34)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#6b4a2f") }
-                                }
-                                // 双臂（铁灰长臂，机制等价 MC 铁傀儡重拳长臂）：local y center +0.10，左右 ±0.62。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.62, 0.10, 0)
-                                    scale: Qt.vector3d(0.28, 0.78, 0.45)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.62, 0.10, 0)
-                                    scale: Qt.vector3d(0.28, 0.78, 0.45)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
+                                    geometry: MobModel {
+                                        mobType: 13
+                                        packTextured: mobIronGolemPackTex.source.toString().length > 0
+                                    }
+                                    position: Qt.vector3d(0, 0, 0) // 碰撞中心（mobModelYOff=0；MobModel 局部原点同碰撞中心）
+                                    scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: parent.tinted("#7d848c")
+                                        baseColorMap: mobIronGolemPackTex.source.toString().length > 0 ? mobIronGolemPackTex : null
+                                    }
                                 }
                                 // 南瓜头（橙色）：local y center +0.95。
                                 Model {

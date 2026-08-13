@@ -290,10 +290,12 @@ void MobModel::setMobType(int type)
     // 0（测试生物）/ 越界 → 兜底 Pig（保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube，
     //   不进本类，故此处兜底仅防误设）。合法 mobType：1 猪 / 2 牛 / 3 羊 / 4 Shambler(僵尸) /
     //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛) / 8 Chicken(鸡) / 9 Squid(鱿鱼) / 10 Wolf(狼) /
-    //   11 Ocelot(豹猫/猫；t481) / 14 Silverfish(银鱼；t487)。
+    //   11 Ocelot(豹猫/猫；t481) / 12 SnowGolem(雪傀儡；feat) / 13 IronGolem(铁傀儡；feat) / 14 Silverfish(银鱼；t487)。
     //   修：原仅接 1-5 且误标 5=Stalker（实际 enum 5=Bones）。
-    //   注：12 SnowGolem / 13 IronGolem 不走 MobModel（Main.qml UnitCube 堆叠），故不在接受集。
-    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10 && type != 11 && type != 14) type = 1;
+    //   注：12 SnowGolem / 13 IronGolem 此前在 Main.qml 用 UnitCube 堆叠（不走 MobModel）；feat 接入资源包实体
+    //   贴图（snow_golem.png / iron_golem.png）改走 MobModel（T 字 UV 展开进 pack entity 贴图），南瓜头 / 眼 / 嘴
+    //   仍由 Main.qml delegate 补独立 Model（§9 区隔：南瓜头是单独的橙色南瓜模型，非贴图的一部分）。
+    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10 && type != 11 && type != 12 && type != 13 && type != 14) type = 1;
     if (type == m_mobType) return;
     m_mobType = type;
     emit mobTypeChanged();
@@ -477,6 +479,30 @@ void MobModel::rebuild()
         addBox( 0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
         addBox( 0.00f,  0.18f,  0.36f, 0.04f, 0.05f, 0.16f, verts, idx, bMin, bMax); // 长尾（身后 +Z 后伸上翘；随身体同纹）
         addLegs(-0.24f,  0.16f,  0.16f, 0.20f, 0.06f, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿
+    } else if (m_mobType == 12) {
+        // feat SnowGolem（雪傀儡；机制等价 MC 1.0 雪傀儡，§9 区隔原创模型 + pack 贴图）—— **柱身两雪块**上下堆叠。
+        //   局部原点 = 碰撞中心（mobModelYOff=0，区别于猪牛羊「躯干中心」）；腿底本地 y=−0.90 贴 collision 底面
+        //   （halfH=0.90 → mobModelYOff=0.0−0.90... 实际 mobModelYOff=0 因原点已是碰撞中心）。底块心 y=−0.45 半 0.45
+        //   → spans y[−0.90,0.00]；顶块心 y=+0.45 半 0.45 → spans y[0.00,0.90]。两雪块各 0.80 宽（半 0.40）。
+        //   **南瓜头 + 刻面眼/嘴不在本几何** —— 由 Main.qml delegate 补独立橙色南瓜 Model（t499 需求：南瓜头是单独
+        //   的橙色南瓜模型，非贴图的一部分）。pack 命中 snow_golem.png → 6 面 T 字 UV 展开进雪块身；pack 关 → 全脸
+        //   UV + 纯色雪白（无程序生成贴图，回退 baseColor）。shearSnowGolem 剪南瓜头仅隐藏南瓜头 Model（几何不动）。
+        addBox( 0.00f, -0.45f, 0.00f, 0.40f, 0.45f, 0.40f, verts, idx, bMin, bMax); // 底雪块（雪傀儡身体下块）
+        addBox( 0.00f,  0.45f, 0.00f, 0.40f, 0.45f, 0.40f, verts, idx, bMin, bMax); // 顶雪块（雪傀儡身体上块）
+    } else if (m_mobType == 13) {
+        // feat IronGolem（铁傀儡；机制等价 MC 1.0 铁傀儡，§9 区隔原创模型 + pack 贴图）—— **铁块人形**：
+        //   双腿 + 宽躯干 + 双长臂（机制等价 MC 铁傀儡 T 形铁块身）。局部原点 = 碰撞中心（mobModelYOff=0）；
+        //   腿底本地 y=−1.20 贴 collision 底面（halfH=1.20）。盒比例与原 Main.qml UnitCube 堆叠同（保南瓜头 / 眼
+        //   overlay 对齐）：双腿心 y=−0.90 半 (0.18,0.30,0.18)、躯干心 y=+0.05 半 (0.475,0.525,0.325)、双臂心
+        //   y=+0.10 半 (0.14,0.39,0.225)。**南瓜头 + 刻面眼不在本几何**（同 SnowGolem，由 Main.qml delegate 补）。
+        //   pack 命中 iron_golem.png → 6 面 T 字 UV 展开显铁纹（修 dev-plan C「铁傀儡全白」：程序纯色铁灰在用户
+        //   视角读作「白」，pack 铁纹才显铁质）；pack 关 → 全脸 UV + 纯色铁灰 #7d848c（原 t483 锈斑 Model 在 pack
+        //   命中时由 pack 铁纹取代，pack 关时简化为纯色铁灰无锈斑）。
+        addBox( 0.00f,  0.05f, 0.00f, 0.475f, 0.525f, 0.325f, verts, idx, bMin, bMax); // 宽躯干（铁块身）
+        addBox(-0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 左腿（铁块）
+        addBox( 0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 右腿（铁块）
+        addBox(-0.62f,  0.10f, 0.00f, 0.14f,  0.39f,  0.225f, verts, idx, bMin, bMax); // 左长臂（铁块；机制等价 MC 铁傀儡重拳长臂）
+        addBox( 0.62f,  0.10f, 0.00f, 0.14f,  0.39f,  0.225f, verts, idx, bMin, bMax); // 右长臂
     } else if (m_mobType == 14) {
         // t487 Silverfish（银鱼；机制等价 MC 1.0 银鱼，§9 原创模型 + 贴图）—— 小型虫类：分节躯干 + 前伸小头 +
         //   多对短腿（机制等价 MC 1.0 银鱼多足 + 多节体）。腿底本地 y≈−0.15 贴 collision 底面（halfH=0.15 →

@@ -40,6 +40,19 @@
 //     （缩 0.6 幅度，虫类快步频）。hostile → EntityManager AI 默认 aiHostile 近战追击玩家。要塞银鱼刷怪笼
 //     （Spawner state 带 SpawnerStateSilverfishFlag）周期刷出。眼由 Main.qml delegate 补（2 颗黑点）。
 //     mob_silverfish 贴图：灰白甲壳 + 体节横纹（build_mob.py 程序生成原创像素图，§9a 区隔不照搬 MC）。
+//   12 = SnowGolem（雪傀儡；feat）：防御造物——**柱身两雪块**上下堆叠（机制等价 MC 1.0 雪傀儡雪块身）。
+//     几何仅含雪块身（底块心 y=−0.45 / 顶块心 y=+0.45，各半 0.45 → 腿底本地 y=−0.90 贴 collision 底面 halfH=0.90）。
+//     **南瓜头（+ 刻面眼/嘴）不在本几何** —— 由 Main.qml delegate 补独立橙色南瓜 Model（§9 区隔：南瓜头是
+//     单独的橙色南瓜模型，非贴图的一部分；t499 需求）。局部原点 = 碰撞中心（mobModelYOff=0，区别于猪牛羊
+//     的「躯干中心」）。pack 命中 snow_golem.png → 6 面 T 字 UV 展开进雪块身；pack 关 → 全脸 UV + 纯色雪白
+//     （无程序生成贴图）。shearSnowGolem 剪南瓜头后南瓜头 / 眼 / 嘴悬浮原位（无头 derpy 形态，几何不动）。
+//   13 = IronGolem（铁傀儡；feat）：防御造物——**铁块人形**（双腿 + 宽躯干 + 双长臂，机制等价 MC 1.0 铁傀儡
+//     T 形铁块身）。几何含 5 铁块盒：双腿心 y=−0.90 半 (0.18,0.30,0.18)（腿底本地 y=−1.20 贴 collision 底面
+//     halfH=1.20）+ 躯干心 y=+0.05 半 (0.475,0.525,0.325) + 双臂心 y=+0.10 半 (0.14,0.39,0.225)。**南瓜头 +
+//     刻面眼不在本几何**（同 SnowGolem，由 Main.qml delegate 补）。pack 命中 iron_golem.png → 铁纹（修 dev-plan C
+//     「铁傀儡全白」：程序纯色铁灰在用户视角读作「白」，pack 铁纹才显铁质）；pack 关 → 全脸 UV + 纯色铁灰。
+//     局部原点 = 碰撞中心（mobModelYOff=0）。注：原 t483 程序锈斑 Model（深铁灰 + 锈橙斑）在 pack 命中时由
+//     pack 铁纹取代（锈纹已是 iron_golem.png 的一部分）；pack 关时回退纯色铁灰 #7d848c（无锈斑）。
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
 //
 // 顶点格式：pos(3) + uv(2) = 5 float。每盒 6 面 × 4 角 = 24 顶点 / 36 索引；多盒累加。

@@ -63,11 +63,14 @@ Item {
     // ── 生物图鉴（feat）：左「生物」段列 mob，选中 → 右侧 View3D 旋转显示 MobModel 3D 模型（替代大图标平图）；
     //   选中「生物蛋」材料（0x20F..0x216/0x22C/0x22E）同样直接显示对应 mob 模型。机制等价 MC 1.0 mob 形态，
     //   名称 §9 区隔（Shambler↔zombie / Bones↔skeleton / Stalker↔creeper）。雪傀儡/铁傀儡条目 I3 追加——
-    //   本任务仅保结构可扩展（加一行 + mobFallback* 分支 + mobEntityMap 条目即接入）。
+    //   本任务已接入：加 mobType 12/13 两行 + mobPreviewCentY + mobFallbackColor 分支（mobPreviewScale 12/13→0.75
+    //   既存）。pack 命中 snow_golem.png / iron_golem.png → View3D 显带 pack 纹理的雪块身 / 铁块身 MobModel；
+    //   pack 关 → 纯色雪白 / 铁灰（mobFallbackColor）。南瓜头 / 眼不在图鉴预览（MobModel 仅含身体，聚焦 pack 贴图）。
     readonly property var mobModel: [
         { mobType: 1, name: "猪" }, { mobType: 2, name: "牛" }, { mobType: 3, name: "羊" },
         { mobType: 4, name: "蹒跚者" }, { mobType: 5, name: "骸骨" }, { mobType: 6, name: "潜行者" },
-        { mobType: 7, name: "蜘蛛" }, { mobType: 8, name: "鸡" }
+        { mobType: 7, name: "蜘蛛" }, { mobType: 8, name: "鸡" },
+        { mobType: 12, name: "雪傀儡" }, { mobType: 13, name: "铁傀儡" }
     ]
     // 生物段选中（mobType；-1 = 未选）。与物品选中互斥（点物品格清空、点生物格不改 selectedId）。
     property int selectedMobFromSection: -1
@@ -99,6 +102,8 @@ Item {
             case 5: return "#d8d8d0"  // Bones 骨白（与 Main.qml 蛋生成色同源）
             case 6: return "#3a5a3a"  // Stalker 暗绿
             case 7: return "#2a1a1a"  // Spider 暗黑
+            case 12: return "#f0f4f8" // SnowGolem 雪白（与 Main.qml 雪块身纯色同源）
+            case 13: return "#7d848c" // IronGolem 铁灰（与 Main.qml 铁块身纯色同源）
         }
         return "#ffffff"
     }
@@ -118,6 +123,8 @@ Item {
             case 6: return 0.05   // 潜行者 [-0.90, 0.81]
             case 7: return 0.08   // 蜘蛛 [-0.30, 0.13]
             case 8: return 0.01   // 鸡 [-0.40, 0.38]
+            case 12: return 0.0   // 雪傀儡 [-0.90, 0.90]（对称居中，无需上提）
+            case 13: return 0.30 // 铁傀儡 [-1.20, 0.58]（偏 -Y，上提 0.30 居中主体）
         }
         return 0
     }
