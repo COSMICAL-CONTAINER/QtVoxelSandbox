@@ -424,6 +424,20 @@ public:
     //   供 4/5 参数 setBlock + clearBlockSilent 末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
     void checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t524 甘蔗整柱坍落为掉落物（机制等价 MC 1.0 甘蔗失去下方支撑即整柱破坏掉落；同仙人掌支撑校验族）。
+    //   自 (x,y,z) 起向上逐格：凡 Sugarcane → 静默写 Air（m_chunks.setBlock 直写 + 标脏，**不**经 World::setBlock
+    //   → 不递归触发本逻辑 / 不重复发 blockBroken 链）+ emit blockBroken（破块粒子 / 音）+ emit blockDroppedAsItem
+    //   （呈掉落物实体，dropId=自身）+ recomputeLightAround（遮光柱消失重 flood）。末尾若有破坏则 1 次 emit
+    //   worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。供 checkSugarcaneOnEdit 失撑路径调。
+    //   非 Q_INVOKABLE（内部 helper）。分层（PLAN §2）：World 层，只读 / 写 m_chunks + lightField + 发信号；不依赖 Game。
+    void dropSugarcaneColumn(int x, int y, int z);
+    // t524 setBlock 编辑后甘蔗失撑复检。（x,y,z,oldId,id）= 本格刚发生的编辑。
+    //   失撑：本格被破为 Air 且被破块非 Sugarcane → 若正上方是 Sugarcane，则该甘蔗失撑（下方支撑方块没了）→
+    //   dropSugarcaneColumn 整柱坍落。（被破块本身是 Sugarcane 时跳过 —— 玩家直破甘蔗的整柱坍落由 PlayerController
+    //   级联 spawnItem 负责，避免双重掉落；同仙人掌 checkCactusOnEdit 的 oldId 守卫模式。）
+    //   静默 dropSugarcaneColumn 不经 World::setBlock → 不重入本检查。供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。
+    void checkSugarcaneOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 

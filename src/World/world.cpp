@@ -240,6 +240,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     checkDeadBushOnEdit(x, y, z, oldId, id); // t504：枯死灌木失撑（破下方支撑 → 正上方枯灌木掉落）复检
     checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑（破下方支撑 → 正上方花 / 蘑菇掉落）复检
     checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
+    checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     return true;
 }
 
@@ -328,6 +329,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkDeadBushOnEdit(x, y, z, oldId, id); // t504：枯死灌木失撑（破下方支撑 → 正上方枯灌木掉落）复检
     checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑（破下方支撑 → 正上方花 / 蘑菇掉落）复检
     checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
+    checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     return true;
 }
 
@@ -1051,6 +1053,7 @@ void World::tickLavaFlow()
             emit blockBroken(b.x, b.y, b.z, int(oldId));               // 焚毁破块粒子 / 音（机制等价 MC 燃烧破块反馈）
             checkCactusOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // ② 失撑复检（正上方 Cactus 整柱坍落，同 setBlock 路径）
             checkDeadBushOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t504：枯灌木失撑复检（正上方枯灌木掉落，同 setBlock 路径）
+            checkSugarcaneOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t524：甘蔗失撑复检（正上方甘蔗整柱坍落，同 setBlock 路径）
             pokeFluidDirty(b.x, b.y, b.z); // 焚毁邻接流体 → 标脏 + 活动盒扩展（级联焚毁 / 水流入新坑，同旧 setBlock 语义）
         }
         m_batchFluid = false;
@@ -1643,6 +1646,44 @@ void World::checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 i
     recomputeLightAround(x, by, z, above, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
     emit worldChanged();        // 驱动 mesh 重建（薄板消失）
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
+// t524 甘蔗整柱坍落为掉落物（见 world.h 头注释）。机制等价 MC 1.0 甘蔗失去下方支撑即整柱破坏掉落。
+//   自 (x,y,z) 起向上逐格静默清 Sugarcane + 发 blockBroken（粒子 / 音）+ blockDroppedAsItem（掉落物）+ 重 flood 光，
+//   末尾 1 次 worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。静默写不经 World::setBlock
+//   → 不递归触发 checkSugarcaneOnEdit（无重入），也不发额外 blockBroken 链（本方法自发）。空柱（首格非 Sugarcane）→ no-op。
+void World::dropSugarcaneColumn(int x, int y, int z)
+{
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    bool any = false;
+    int cy = y;
+    while (cy >= 0 && cy < m_height && m_chunks.blockAt(x, cy, z) == BlockRegistry::Sugarcane) {
+        m_chunks.setBlock(x, cy, z, BlockRegistry::Air); // 静默直写 + 标脏（含边界邻接）；不经 World::setBlock（无重入）
+        noteGrowthWrite(x, cy, z, BlockRegistry::Sugarcane, BlockRegistry::Air); // 维护生长方格索引（甘蔗属生长块，须清键）
+        emit blockBroken(x, cy, z, int(BlockRegistry::Sugarcane));                // 破块粒子 / 音（机制等价 MC 整柱坍落反馈）
+        emit blockDroppedAsItem(x, cy, z, int(BlockRegistry::Sugarcane));        // 呈掉落物实体（Main.qml spawnItem；dropId=自身）
+        recomputeLightAround(x, cy, z, BlockRegistry::Sugarcane, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
+        any = true;
+        ++cy;
+    }
+    if (any) {
+        emit worldChanged();        // 驱动 mesh 重建（cross 细茎段消失）
+        m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+    }
+}
+
+// t524 setBlock 编辑后甘蔗失撑复检（见 world.h 头注释）。机制等价 MC 1.0 甘蔗失去下方支撑即整柱坍落（同仙人掌 /
+//   枯灌木 / 花 / 蘑菇 / 压力板支撑校验族）。（x,y,z,oldId,id）= 本格刚发生的编辑。
+//   ② 失撑：本格破为 Air 且被破块非 Sugarcane → 正上方甘蔗柱失去下方支撑方块（沙 / 草 / 泥土 / 甘蔗）→ 整柱掉落。
+//   （被破块为 Sugarcane 时跳过 —— 玩家直破甘蔗的整柱坍落由 PlayerController 级联 spawnItem 负责（t418），避免双重掉落；
+//   同仙人掌 checkCactusOnEdit 的 oldId 守卫模式。）静默 dropSugarcaneColumn 不经 World::setBlock → 不重入本检查。
+void World::checkSugarcaneOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    if (id != BlockRegistry::Air || oldId == BlockRegistry::Sugarcane) return;
+    const int by = y + 1;
+    if (by < 0 || by >= m_height) return;
+    if (m_chunks.blockAt(x, by, z) != BlockRegistry::Sugarcane) return;
+    dropSugarcaneColumn(x, by, z);
 }
 
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。
