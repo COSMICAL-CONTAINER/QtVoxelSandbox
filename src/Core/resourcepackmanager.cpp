@@ -536,20 +536,20 @@ const QList<QPair<int, QString>> &mobEntityMap()
 //   方块段 id（与 BlockRegistry::Id 同源；Core 不依赖 Game 故用字面量 + 注释钉死，同 itemFilenameMap 不引
 //   toolregistry 之例）。blockItemIconSource 逐候选 itemDir→blockDir 探测，首个命中即返；全缺返空（Hotbar 回退
 //   程序生成图标）。
-// t492（R18s 复盘二轮，2026-08-12）：恢复 CraftingTable(9) / Furnace(10) 映射。第一轮曾移除以让程序绘制 3D 立方体
-//   图标胜出，用户明确否决（「你把它放回到 item 不行吗」）—— pack 激活时创造背包工作台 / 熔炉要用 pack 的 2D
-//   item / 前贴图图标（机制等价 MC block item icon = 方块正面贴图）。候选列表双兜底：item 目录的 <name>.png 优先
-//   （多数包有），block 目录的 <name>_front.png 兜底（demo 包无 item/crafting_table.png 但有
-//   block/crafting_table_front.png → 落到该前贴图 = 用户要的 2D 平面 icon；与 t456 原始映射一致）。
 // t493（R18s 复盘二轮）：LapisOre(93) 刻意不进本映射 —— 用户要它与其他矿石一致走程序绘制 3D 立方体图标
 //   （第一轮映射到 lapis_ore.png 2D 平铺被否决：「创造背包里矿石都是方块的形式」）。
 //   候选顺序 = 探测优先级：item 目录的 vanilla 风格 item/<name>.png 优先（多数包有），block 目录的 <name>.png 兜底。
+// t518（R19.1 三轮）：再次移除 CraftingTable(9) / Furnace(10) 映射 —— 用户第三次改口且明确坚持：「创造背包工作台
+//   跟熔炉图标还是 2D 的，必须弄成 3D … 草方块那些也有方块数据一样能弄出来」。t492（R18s 二轮）曾把 {9,10} 加回
+//   pack 2D item 图（item/<name>.png 优先、block/<name>_front.png 兜底），用户现要 3D 立方体（与草方块同路径
+//   iconFileForBlock → qrc:/textures/icon_crafting_table.png / icon_furnace.png，已存在并已进 qrc）。
+//   彻底移除映射 → blockItemIconSource 返空 → Hotbar::iconSourceForBlock 落到程序生成 3D 立方体图标（顶 + 两侧明暗），
+//   pack 启用也不再覆盖。机制等价 MC 创造方块栏显示方块的 3D 立体图标（非 2D 平面 item icon）。
 const QList<QPair<int, QStringList>> &blockItemIconMap()
 {
     static const QList<QPair<int, QStringList>> kMap = {
-        // t492 恢复：工作台 / 熔炉 pack 2D 方块前贴图 icon（第一轮误删，二轮复盘恢复；与 t456 原始映射一致）。
-        { 9,  { QStringLiteral("crafting_table.png"), QStringLiteral("crafting_table_front.png") } }, // BlockRegistry::CraftingTable 工作台
-        { 10, { QStringLiteral("furnace.png"),        QStringLiteral("furnace_front.png") } },         // BlockRegistry::Furnace 熔炉
+        // t518（R19.1 三轮）：CraftingTable(9) / Furnace(10) 不在本映射 → 恒走程序生成 3D 立方体图标
+        //   （icon_crafting_table / icon_furnace；t492 二轮曾恢复 pack 2D，用户第三次改口要 3D，再次移除）。
         // t493 恢复：青金石矿不再映射 → 回落程序绘制 3D 立方体 icon（与其它矿石一致；第一轮误加，二轮复盘撤销）。
         // t413 木梯（Ladder=62，cross 形）：pack 启用时 item 图标用 pack 的 ladder.png（2D 梯子图）覆盖程序
         //   icon_ladder.png（cross 方块 iconFileForBlock 走程序 cross 图 → pack 未覆盖）；放下贴图 tile 78 已由
