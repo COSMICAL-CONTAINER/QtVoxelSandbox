@@ -7748,8 +7748,9 @@ Window {
                         spacing: 4
                         Repeater {
                             // 触碰 revision：model 表达式显式读 progress.revision（建依赖），progressChanged →
-                            //   revision 变 → 绑定重算 statsList() 取最新。
-                            model: { const _r = progress.revision; return progress.statsList() }
+                            //   revision 变 → 绑定重算 statsList() 取最新。qml-touch 三轮：`_r` 必须参与返回
+                            //   （`_r >= 0` 恒真守卫）防 qmlcachegen AOT 把裸读当死代码消除（进度面板 model 同坑）。
+                            model: { const _r = progress.revision; return _r >= 0 ? progress.statsList() : [] }
                             delegate: Rectangle {
                                 width: statsListCol.width
                                 height: 28
