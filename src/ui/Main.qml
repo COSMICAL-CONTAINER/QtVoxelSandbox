@@ -157,6 +157,7 @@ Window {
         if (craftingTablePanel.visible) return craftingTablePanel.hoveredKey
         if (furnacePanel.visible)        return furnacePanel.hoveredKey
         if (chestPanel.visible)          return chestPanel.hoveredKey
+        if (enchantingPanel.visible)     return enchantingPanel.hoveredKey
         if (inventoryPanel.visible)      return inventoryPanel.hoveredKey
         if (survivalPanel.visible)       return survivalPanel.hoveredKey
         return ""
@@ -820,6 +821,7 @@ Window {
         if (craftingTablePanel.visible)      craftingTablePanel.swapHoveredWithHotbar(hotbarIdx)
         else if (furnacePanel.visible)       furnacePanel.swapHoveredWithHotbar(hotbarIdx)
         else if (chestPanel.visible)         chestPanel.swapHoveredWithHotbar(hotbarIdx)
+        else if (enchantingPanel.visible)    enchantingPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (inventoryPanel.visible)     inventoryPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (survivalPanel.visible)      survivalPanel.swapHoveredWithHotbar(hotbarIdx)
     }
@@ -845,6 +847,7 @@ Window {
         if (craftingTablePanel.visible)      panel = craftingTablePanel
         else if (furnacePanel.visible)       panel = furnacePanel
         else if (chestPanel.visible)         panel = chestPanel
+        else if (enchantingPanel.visible)    panel = enchantingPanel
         else if (inventoryPanel.visible)     panel = inventoryPanel
         else if (survivalPanel.visible)      panel = survivalPanel
         if (!panel) return
@@ -8795,11 +8798,11 @@ Window {
         onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }
 
-    // t474 附魔台面板：右键附魔台方块打开（player.enchantingTableOpened → openEnchantingTable）。
-    //   仅 playing && enchantingTableOpen 时显（与背包 / 工作台 / 熔炉 / 箱子面板互斥）。
-    //   3 选项槽消耗 XP 等级 + 青金石（点槽 → playerState.spendLevels + hotbar.consumeMaterial）；
-    //   书架加成据 theWorld.countBookshelvesAround(enchantX/Y/Z) 算 → 提升可选档位。
-    //   PERF：选项列表只在 visible → true 或点击附魔后刷新（refreshOptions），永不 per-frame（spec 护栏）。
+    // t515 附魔台面板（工作台蓝本重做）：右键附魔台方块打开（player.enchantingTableOpened → openEnchantingTable）。
+    //   仅 playing && enchantingTableOpen 时显（与背包 / 工作台 / 熔炉 / 箱子 / 铁砧面板互斥）。
+    //   上方占位附魔功能区（消耗 XP/青金石沿用 t474，真附魔效果后补）+ 底部 3×9 主栏 + 9 hotbar 行（能放/取
+    //   背包物品，物品移动经 InventoryOps 单一权威，同 CraftingTableUI / FurnaceUI / ChestUI 全套快捷操作）。
+    //   PERF：所有显示绑定到 slotRevision / mainRevision / levelChanged（低频 NOTIFY），永不 per-frame。
     EnchantingTableUI {
         id: enchantingPanel
         anchors.fill: parent
@@ -8812,6 +8815,8 @@ Window {
         visible: window.appState === "playing" && window.enchantingTableOpen
         z: 150
         onClosed: window.closeEnchantingTable()
+        onDiscardHeldRequested: player.dropHeldCursor()
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }
 
     // t477 铁砧面板：右键铁砧方块打开（player.anvilOpened → openAnvil）。
@@ -8916,7 +8921,7 @@ Window {
     // t50：手持材料 → MaterialIcon 自绘（木棒）。t37：enabled:false 显式声明本 Item 不参与指针事件——
     // z=300 浮在面板(z=150)之上，若参与事件捕获会抢走下方槽位 TapHandler 的点击。纯呈现层。
     Item {
-        visible: (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen) && hotbarVM.heldBlock !== 0
+        visible: (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen || window.enchantingTableOpen) && hotbarVM.heldBlock !== 0
         enabled: false
         z: 300
         x: cursorTracker.point.position.x - 16
