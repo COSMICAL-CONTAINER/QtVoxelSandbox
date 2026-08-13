@@ -584,8 +584,11 @@ function slotShiftLeftCraft(root) {
         root.hotbar.heldCount = prevHeldCount + remain
     }
     root.craftRev++
-    // progress 注：批量合成（maxCrafts 次）暂不埋点 onCraft（InventoryOps 无 window 引用；首版仅单次合成
-    //   埋点，覆盖成就触发——成就只需合成一次该产物；批量 craftsCount 会少计，后续如需精确可经面板回调补）。
+    // progress 统计：批量合成 maxCrafts 次（craftsCount 加 maxCrafts + 成就按产物判一次）。root.progress 由
+    //   面板从 Main.qml 注入（InventoryOps .js 无 QML 全局 id 访问权 → 经 root 传，同 hotbar 注入模式）。
+    if (root.progress) {
+        for (let p = 0; p < maxCrafts; ++p) root.progress.onCraft(r.outputId) // 计 maxCrafts 次合成 + 成就（幂等）
+    }
     return true
 }
 

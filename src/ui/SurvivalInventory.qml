@@ -30,6 +30,9 @@ Item {
     // 宿主注入：hotbar 视图模型（提供 slotList / iconSourceForBlock / nameForBlock /
     // nameAt / selectedSlot / slotRevision）。
     property Hotbar hotbar
+    // progress 玩家进度注入（Main.qml 经 `progress: window.progress` 绑定）：批量合成（InventoryOps
+    //   slotShiftLeftCraft）统计 / 成就埋点用。InventoryOps .js 无 QML 全局 id 访问权 → 经 root 传，同 hotbar 模式。
+    property var progress
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // t49：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区时；宿主接 player.dropHeldCursor）。

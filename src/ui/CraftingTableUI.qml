@@ -29,6 +29,9 @@ Item {
     // 宿主注入：hotbar 视图模型（提供 heldBlock/heldCount/maxStackSize/iconSourceForBlock/
     // nameForBlock/isTool/isMaterial/slotRevision/addStack 等栈操作 + 图标 / 名查询）。
     property Hotbar hotbar
+    // progress 玩家进度注入（Main.qml 经 `progress: window.progress` 绑定）：批量合成（InventoryOps
+    //   slotShiftLeftCraft）统计 / 成就埋点用。InventoryOps .js 无 QML 全局 id 访问权 → 经 root 传，同 hotbar 模式。
+    property var progress
     // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // t49 同 SurvivalInventory：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区）。

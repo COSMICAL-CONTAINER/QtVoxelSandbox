@@ -8635,6 +8635,7 @@ Window {
         id: survivalPanel
         anchors.fill: parent
         hotbar: hotbarVM
+        progress: progress
         visible: window.appState === "playing" && window.inventoryOpen
                  && player.mode === PlayerController.Survival
         z: 150
@@ -8656,6 +8657,7 @@ Window {
         id: craftingTablePanel
         anchors.fill: parent
         hotbar: hotbarVM
+        progress: progress
         visible: window.appState === "playing" && window.craftingTableOpen
         z: 150
         onClosed: window.closeCraftingTable()
