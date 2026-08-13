@@ -6695,10 +6695,21 @@ Window {
             // t170：同步销毁视觉 delegate（木柄+火焰 Model）—— torchPositions 供 TorchSmoke/选中框读，
             //   torchHost.torchObjs 供本场景渲染，二者经同一信号并行增删。
             if (id === 13) { removeTorchAt(x, y, z); torchHost.removeTorchVis(x, y, z) }
-            // t173/t179：箱子被破 → 清 ChestStore 该坐标条目（防孤儿内容；机制等价 MC 破箱清空。
-            //   spec「破箱掉落内容」属 Phase 1.1+，本轮直接弃内容）。id=22=BlockRegistry::Chest（与
-            //   blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 / sand=8 既有模式）。
-            if (id === 22) chestStore.clearChest(x, y, z)
+            // t173/t179/t522：箱子被破 → 先把内部 27 槽内容 spawnItem 掉落世界（机制等价 MC 1.0 破箱掉落
+            //   内容，修用户报「箱子装东西后挖掉不掉」），再 chestStore.clearChest 清孤儿条目。id=22=
+            //   BlockRegistry::Chest（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
+            //   furnace=10 既有模式）。逐非空槽 spawnItem（每槽独立实体，便于玩家走回拾取；itemEntities.spawnItem
+            //   内置就近合并，同 id 自动合）；上界取 chestStore.slotCount（恒 27，与 kSlotsPerChest 同源），
+            //   同 furnace=10 的逐槽掉落模式（3 槽循环用字面量 3，本 27 槽走 VM 暴露的 slotCount 以免 magic number）。
+            if (id === 22) {
+                for (let ci = 0; ci < chestStore.slotCount; ++ci) {
+                    const cid = chestStore.slotIdAt(x, y, z, ci)
+                    const ccount = chestStore.slotCountAt(x, y, z, ci)
+                    if (cid !== 0 && ccount > 0)
+                        itemEntities.spawnItem(x, y, z, cid, ccount)
+                }
+                chestStore.clearChest(x, y, z)
+            }
             // t177 二轮复盘：熔炉被破 → 把 in/fuel/out 内容 spawnItem 掉落世界（机制等价 MC 1.0 破熔炉掉落
             //   内容，修用户报「打掉熔炉内部物品不掉」），再 furnaceStore.clearFurnace 清孤儿条目。id=10=
             //   BlockRegistry::Furnace（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
