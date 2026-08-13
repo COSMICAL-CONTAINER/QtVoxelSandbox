@@ -1352,6 +1352,10 @@ Window {
     //   _updatePlayerChunk 内 _playerCX/_playerCZ 缓存守门：仅在 chunk 坐标真变时才走 O(chunk 数) visibility 重算，
     //   不每 positionChanged 都重算（玩家在同 chunk 内移动 60Hz positionChanged 但零刷新开销）。
     Connections { target: player; function onPositionChanged() { window._updatePlayerChunk() } }
+    // progress 走过路程埋点：player 每帧 emit moved(水平位移增量) → progress.onMove 累加（内部 ~0.5s flush）。
+    //   纯水平 √(dx²+dz²)，不含跳跃 dy；reportHorizSpeed 是 step 各出口唯一位移瓶颈 → 每帧每路径只计一次。
+    //   同 playerMined→onBlockMined / blockPlaced→onBlockPlaced 单向事件流模式（PLAN §2 分层）。
+    Connections { target: player; function onMoved(deltaBlocks) { progress.onMove(deltaBlocks) } }
 
     // t386 闪电击中（雷雨天随机，World::strikeLightning 发）：闪光 + 雷声 + 击中点附近实体伤害的单一入口。
     //   分层（PLAN §2）：World 低层只发 lightningStruck(x,y,z) 语义事件 + 自身焚毁木类方块；呈现层（白闪动画 +

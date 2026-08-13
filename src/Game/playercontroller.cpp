@@ -3783,6 +3783,12 @@ void PlayerController::reportHorizSpeed(const QVector3D &posBefore, qreal dt)
         m_horizSpeed = s;
         emit moveSpeedChanged();
     }
+    // progress 走过路程埋点：纯水平位移增量（√(dx²+dz²)，不含跳跃 dy），由呈现层 Connections 路由到
+    //   progress.onMove。本函数是 step 各出口（船 / 飞 / 走 / 观察者）的唯一位移瓶颈 → 每帧每条移动路径
+    //   只计一次（无重复计数）。delta>0 才发（静止站位不刷信号，免无谓 QML 调用）。progress 内部节流累积
+    //   到 ~0.5s flush（onPlayTimeTick 闸门），非每帧 emit progressChanged 抖 QML 绑定。
+    const float delta = std::sqrt(dx * dx + dz * dz);
+    if (delta > 0.0f) emit moved(delta);
 }
 
 // 切移动态（t51）：同步更新 AABB 高 / 眼位（蹲下变矮、相机随之降低）。无变化静默。

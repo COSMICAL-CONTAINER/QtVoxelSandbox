@@ -471,6 +471,12 @@ signals:
     void xpOrbManagerChanged(); // t402 经验球管理器注入变更
     void boatManagerChanged(); // t469 船管理器注入变更
     void positionChanged();
+    // 每帧水平位移增量（格；reportHorizSpeed 在 step 各出口算 dx/dz 后 emit）。纯水平 √(dx²+dz²)，
+    //   不含跳跃 / 下落的 dy。progress 走过路程埋点：呈现层 Connections → progress.onMove(deltaBlocks) 累加。
+    //   delta>阈值才发（静止站位不刷信号，免每帧无谓 QML 调用；同 reportHorizSpeed dt<=1e-5 早退语义）。
+    //   分层（PLAN §2）：Game/Physics 层算位移发语义事件，progress（ViewModel）经 QML 桥接消费（单向事件流，
+    //   同 playerMined→onBlockMined / blockPlaced→onBlockPlaced 模式）。
+    void moved(float deltaBlocks);
     void yawChanged();
     void pitchChanged();
     void modeChanged();
