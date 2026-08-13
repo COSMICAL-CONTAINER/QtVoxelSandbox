@@ -173,6 +173,11 @@ float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbac
     if (topWaterY < 0) {
         int firstWaterY = -1;
         for (int y = startY - 1; y >= 0 && y >= startY - 16; --y) {
+            // boat 三轮「放冰上掉到冰下面」（用户报②）：向下扫水柱时碰到**可碰撞实体方块**（冰 / 沙 / 岩 /
+            // 玻璃等）→ 该实体把下方水封住，船不可能浮在这封水之上 → 停（无水）。旧版下扫穿过冰面继续找水：
+            //   冰（若架在水上，如冻湖）下方找到水 → 误判浮水 → 浮水 lerp / tickRiddenBoat 把船拽穿冰面沉到
+            //   冰下水里。现遇首个实块即断 → 冰上船返 fallback（无水）→ 走重力落地分支贴冰顶（同陆地）。
+            if (world->isCollidable(cx, y, cz)) break;
             if (world->blockAt(cx, y, cz) == BlockRegistry::Water) { firstWaterY = y; break; }
         }
         if (firstWaterY >= 0) {

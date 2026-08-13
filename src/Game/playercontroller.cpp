@@ -2673,53 +2673,76 @@ void PlayerController::placeBlock()
             emit swingArm();
             return;
         }
-        // (b) 放船：手持船物品 + 命中 + **未骑乘**（骑乘中右键既没命中船换船 → 不另放船，防骑船时凭空造船）。
-        if (m_boatManager->ridingIndex() < 0 && m_hotbar && m_hasHit
+        // (b) 放船：手持船物品 + **未骑乘**（骑乘中右键既没命中船换船 → 不另放船，防骑船时凭空造船）。
+        //   boat 三轮「不能直接放水上」（用户报③）：旧条件含 m_hasHit → 瞄水面时主选体射线穿水命中水底实块
+        //   （m_hasHit=true）但深水（>8 格）向上扫水面被 8 格封顶 → 船放水柱中途；水底超出射程（kReach=5）则
+        //   m_hasHit=false → 放船分支直接不执行 → 两种情形都「不能直接放水上」。修：(a) 命中实块路径向上扫
+        //   水面去 8 格封顶（扫到世界顶，深水一步定位真水面）；(b) 无命中路径跑独立水射线（RayFilter::HitWater，
+        //   同钓竿抛竿模式）找视线首个水格 → 放水面。放陆地 / 冰面行为保持（命中实块路径 t508 兜底）。
+        if (m_boatManager->ridingIndex() < 0 && m_hotbar
             && (heldItemId == RecipeRegistry::OakBoatId || heldItemId == RecipeRegistry::SpruceBoatId)) {
-            // 目标格定位（t508 修「船下沉」根因之一）：主选体射线**不挡水**（t165 / lessons-learned：Water 在
-            //   blocksRay 排除清单），故瞄水面时射线穿水命中**水底实块**（m_hitBy = 水底格 ≠ 水面格）。
-            //   旧逻辑拿「水底格 + 命中面法线」算放船点 → 深水时船被放到水柱中途（远低于水面）→ 浮水 lerp
-            //   速率（kBoatAccel）有限 → 船「慢慢上浮」肉眼读作「船下沉」。修：自命中面相邻格向上扫，
-            //   找水柱的**最顶水格**（连续 Water 段的顶端 = 真水面），把船放到该水面格 → pos.y = 水面 + 1 − 吃水，
-            //   即刻稳定浮在水面。瞄陆地 / 冰面（命中非水、向上无水）→ 用命中面相邻格（陆地 / 冰面放船，
-            //   tick 无水不改 Y 停在放置点）。
             int tx = m_hitBx, ty = m_hitBy, tz = m_hitBz;
-            if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) != BlockRegistry::Water) {
-                // 起点 = 命中面相邻格（瞄岸边 / 冰面时该格常即邻水的 Air / Water 格）。
-                const int sx = m_hitBx + m_hitNx, sz = m_hitBz + m_hitNz;
-                int sy = m_hitBy + m_hitNy;
-                // 向上找**最顶水格**（连续 Water 段的顶端 = 真水面）：扫到非水停，记最后一个 Water 格。
-                //   深水：起点可能落在水柱底部，向上扫到水面 → 取最顶。无水（陆地 / 冰面）→ waterY<0 走兜底。
-                int waterY = -1;
-                for (int y = sy; y < sy + 8 && y < m_world->height(); ++y) {
-                    if (m_world->blockAt(sx, y, sz) == BlockRegistry::Water) waterY = y;
-                    else if (waterY >= 0) break; // 已过水面（水 → 非水），停在最顶水格
+            bool boatTargetReady = false;
+            if (m_hasHit) {
+                // 目标格定位（t508 修「船下沉」根因之一）：主选体射线**不挡水**（t165 / lessons-learned：Water 在
+                //   blocksRay 排除清单），故瞄水面时射线穿水命中**水底实块**（m_hitBy = 水底格 ≠ 水面格）。
+                //   旧逻辑拿「水底格 + 命中面法线」算放船点 → 深水时船被放到水柱中途（远低于水面）→ 浮水 lerp
+                //   速率（kBoatAccel）有限 → 船「慢慢上浮」肉眼读作「船下沉」。修：自命中面相邻格向上扫，
+                //   找水柱的**最顶水格**（连续 Water 段的顶端 = 真水面），把船放到该水面格 → pos.y = 水面 + 1 − 吃水，
+                //   即刻稳定浮在水面。瞄陆地 / 冰面（命中非水、向上无水）→ 用命中面相邻格（陆地 / 冰面放船，
+                //   tick 无水重力落地停放置点）。
+                if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) != BlockRegistry::Water) {
+                    // 起点 = 命中面相邻格（瞄岸边 / 冰面时该格常即邻水的 Air / Water 格）。
+                    const int sx = m_hitBx + m_hitNx, sz = m_hitBz + m_hitNz;
+                    int sy = m_hitBy + m_hitNy;
+                    // 向上找**最顶水格**（连续 Water 段的顶端 = 真水面）：扫到非水停，记最后一个 Water 格。
+                    //   boat 三轮：去掉旧 8 格封顶（深水 >8 格时起点到水面之间全是水 → 8 格内扫不到非水停，
+                    //   记的是水柱中途格 → 船放中途慢慢上浮）→ 扫到世界顶，深水一步定位真水面。无水（陆地 /
+                    //   冰面）→ waterY<0 走兜底。
+                    int waterY = -1;
+                    for (int y = sy; y < m_world->height(); ++y) {
+                        if (m_world->blockAt(sx, y, sz) == BlockRegistry::Water) waterY = y;
+                        else if (waterY >= 0) break; // 已过水面（水 → 非水），停在最顶水格
+                    }
+                    // 起点 (sx,sy) 已在水面之上（sy 是 Air，其下 sy-1 是水）→ waterY = sy-1。
+                    if (waterY < 0 && sy - 1 >= 0 && m_world->blockAt(sx, sy - 1, sz) == BlockRegistry::Water)
+                        waterY = sy - 1;
+                    if (waterY >= 0) {
+                        tx = sx; ty = waterY; tz = sz; // 船放水面格（spawnBoat pos.y = waterY+1 = 水面顶）
+                    } else {
+                        // t508 二轮复盘修「放陆地悬空半格」（用户报③）：旧版 ty=sy（命中面相邻 Air 格），spawnBoat
+                        //   pos.y = sy+1 = 支撑面顶 +1（船悬空 1 格），tick 无重力时永远悬着；即便有重力，spawn 瞬间到
+                        //   落地之间肉眼能见「掉一格」。改：让 ty = 命中实块格（支撑面），spawnBoat pos.y = 实块格+1 =
+                        //   支撑面顶 → spawn 即刻贴地，无悬空 / 无掉落闪烁。仅当命中实块（可踩 / 可碰撞）才这样取；
+                        //   命中非实（如命中空气边缘 —— 罕见，瞄半砖下沿等）回退 sy 旧逻辑。
+                        const bool hitSolid = m_world->isCollidable(m_hitBx, m_hitBy, m_hitBz)
+                                              || BlockRegistry::isSolid(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz));
+                        tx = sx; tz = sz;
+                        ty = hitSolid ? m_hitBy : sy; // 命中实块 → 船中心 = 实块顶（spawnBoat +1）；否则旧 sy 行为
+                    }
                 }
-                // 起点 (sx,sy) 已在水面之上（sy 是 Air，其下 sy-1 是水）→ waterY = sy-1。
-                if (waterY < 0 && sy - 1 >= 0 && m_world->blockAt(sx, sy - 1, sz) == BlockRegistry::Water)
-                    waterY = sy - 1;
-                if (waterY >= 0) {
-                    tx = sx; ty = waterY; tz = sz; // 船放水面格（spawnBoat pos.y = waterY+1 = 水面顶）
-                } else {
-                    // t508 二轮复盘修「放陆地悬空半格」（用户报③）：旧版 ty=sy（命中面相邻 Air 格），spawnBoat
-                    //   pos.y = sy+1 = 支撑面顶 +1（船悬空 1 格），tick 无重力时永远悬着；即便有重力，spawn 瞬间到
-                    //   落地之间肉眼能见「掉一格」。改：让 ty = 命中实块格（支撑面），spawnBoat pos.y = 实块格+1 =
-                    //   支撑面顶 → spawn 即刻贴地，无悬空 / 无掉落闪烁。仅当命中实块（可踩 / 可碰撞）才这样取；
-                    //   命中非实（如命中空气边缘 —— 罕见，瞄半砖下沿等）回退 sy 旧逻辑。
-                    const bool hitSolid = m_world->isCollidable(m_hitBx, m_hitBy, m_hitBz)
-                                          || BlockRegistry::isSolid(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz));
-                    tx = sx; tz = sz;
-                    ty = hitSolid ? m_hitBy : sy; // 命中实块 → 船中心 = 实块顶（spawnBoat +1）；否则旧 sy 行为
+                boatTargetReady = true;
+            } else if (m_world) {
+                // boat 三轮「不能直接放水上」（无命中路径）：瞄水面但水底实块超出射程（深水 / 水面上方视角）
+                //   → 主射线无命中。跑独立水射线（RayFilter::HitWater，同钓竿抛竿 useFishingRod 模式）找视线
+                //   首个水格 → 放该水面格（spawnBoat pos.y = waterY+1 = 水面顶）。命中非水（墙挡前 / 射程内无水）
+                //   → 不放船（落回下方 !m_hasHit return，不放置不挥手）。
+                const RayHit wHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitWater);
+                if (wHit.valid && m_world->blockAt(wHit.bx, wHit.by, wHit.bz) == BlockRegistry::Water) {
+                    tx = wHit.bx; ty = wHit.by; tz = wHit.bz;
+                    boatTargetReady = true;
                 }
             }
-            const int boatType = (heldItemId == RecipeRegistry::SpruceBoatId)
-                ? BoatManager::Spruce : BoatManager::Oak;
-            m_boatManager->spawnBoat(tx, ty, tz, boatType);
-            if (m_mode != Creative)
-                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 船（创造不耗 → 无限放）
-            m_lastPlaceMs = now;
-            emit swingArm();
-            return;
+            if (boatTargetReady) {
+                const int boatType = (heldItemId == RecipeRegistry::SpruceBoatId)
+                    ? BoatManager::Spruce : BoatManager::Oak;
+                m_boatManager->spawnBoat(tx, ty, tz, boatType);
+                if (m_mode != Creative)
+                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 船（创造不耗 → 无限放）
+                m_lastPlaceMs = now;
+                emit swingArm();
+                return;
+            }
         }
     }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）

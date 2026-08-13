@@ -3499,6 +3499,13 @@ Window {
             readonly property real sitBlend: playerModel.isRidingBoat ? 1.0 : 0.0
             readonly property real sitThigh: 85.0 * playerModel.sitBlend      // 坐姿大腿前抬（度；+x = 腿尖前摆 = -Z，近水平）
             readonly property real sitKnee: -85.0 * playerModel.sitBlend      // 坐姿膝盖回折（度；= −sitThigh → 小腿保持竖直下垂）
+            // boat 三轮「坐上去是站着」（用户报①）：旧 sitBlend 只折腿（大腿前抬 + 小腿回折），**上半身不
+            //   下沉** —— 髋仍站在 feet+0.6，躯干在船舷之上直立到 feet+1.8，配 0.45 高小船 → 肉眼读作「站着
+            //   站在船里」。修：坐姿把髋（upperBody + 双腿枢轴）整体下沉 sitDrop（=0.42：髋降到 feet+0.18 ≈
+            //   甲板上方、折腿后脚落甲板）→ 身体「坐进船舱」，只露头 + 半胸在船舷之上（机制等价 MC 船骑乘坐姿）。
+            //   与 crouchDrop 独立（骑乘期 moveState=Walk → crouchBlend 恒 0，两者互斥不叠加；即便叠加也安全，
+            //   只是下沉更多）。下船（dismount bump revision）→ sitBlend=0 → sitDrop=0 → 恢复站姿。
+            readonly property real sitDrop: 0.42 * playerModel.sitBlend
 
             // [t31] 诊断：确认本 Node 已加载、parent=场景节点（非 null 孤儿）、feetPosition 合法、visible 状态。
             // 打印到 voxelsandbox.log。若运行后日志无此行 → Main.qml 未进二进制（stale build）。
@@ -3518,7 +3525,7 @@ Window {
             //   层姿态，只读 moveState，不反向写（同 crouchBlend 模式）。
             Node {
                 id: upperBody
-                position: Qt.vector3d(0, 0.6 - playerModel.crouchDrop, 0)   // 髋枢：与双腿枢轴同高，蹲下随髋下沉
+                position: Qt.vector3d(0, 0.6 - playerModel.crouchDrop - playerModel.sitDrop, 0)   // 髋枢：与双腿枢轴同高，蹲下随髋下沉；boat 三轮骑乘时随坐姿下沉入船
                 eulerRotation: Qt.vector3d(-playerModel.crouchBow, 0, 0)     // t71：前倾鞠躬（-x；+x 会后仰，见上注）
 
                 // 头部枢轴 Node（t66）：头 + 双眼打包成一个子 Node，绕「颈部」俯仰，让第三人称头部跟随视线 pitch。
@@ -3929,7 +3936,7 @@ Window {
             //   静止归零（walkBlend=0）；仅走路模式有 walkPhase 推进（Spectator/飞=0 → 腿不摆）。
             Node {
                 id: leftLegPivot
-                position: Qt.vector3d(-0.125, 0.6 - playerModel.crouchDrop, 0)
+                position: Qt.vector3d(-0.125, 0.6 - playerModel.crouchDrop - playerModel.sitDrop, 0)
                 eulerRotation: {
                     // 行走摆幅（t51 ×swingAmp）+ 蹲下大腿前抬（t65 crouchThigh）+ 坐姿大腿前抬（t508 sitThigh）。
                     const walk = -Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp
@@ -3996,7 +4003,7 @@ Window {
             // 右腿枢轴（t45 / t65）：与左腿对称（右髋 0.125, 0.6, 0），行走与左臂同相（+sin）；蹲下同步下沉+膝盖弯。
             Node {
                 id: rightLegPivot
-                position: Qt.vector3d(0.125, 0.6 - playerModel.crouchDrop, 0)
+                position: Qt.vector3d(0.125, 0.6 - playerModel.crouchDrop - playerModel.sitDrop, 0)
                 eulerRotation: {
                     // 行走摆幅（t51 ×swingAmp；与左腿对称）+ 蹲下大腿前抬（t65 crouchThigh）+ 坐姿大腿前抬（t508 sitThigh）。
                     const walk = Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp
@@ -4660,29 +4667,32 @@ Window {
                     //   1 块封闭底板（船底甲板，沉到水面略下挡水不漏）+ 4 面等高舷壁（前后左右整圈，构成碗沿），
                     //   中间（4 壁之间）凹下成舱 = 「四面凸中间凹」的方碗。
                     //   坐标约定：长轴 Z（船头 = -Z 前，eulerRotation.y=boatYaw 对齐行进方向）、宽轴 X、高 Y。
-                    //   总尺寸：长 1.4（Z）× 宽 0.7（X）× 高 ~0.45（舷顶 0.225 / 舱底 -0.1）。所有块 NoLighting 必备。
+                    //   boat 三轮「船太小坐不下」（用户报④）：旧总尺寸长 1.4 × 宽 0.7 → 船舱内宽 ~0.58 < 玩家
+                    //     半宽 0.3×2=0.6，玩家模型塞不进船。放大：长 1.6 × 宽 1.0 × 高 ~0.65（舷顶 0.25 / 舱底
+                    //     -0.15）→ 船舱内宽 0.8（足容 0.6 宽玩家 + 坐姿折腿 0.3 前伸），与 kBoatHalfW=0.8 /
+                    //     kBoatHullBottom=0.2 对齐（甲板底面 -0.2 = 船底支撑偏移）。所有块 NoLighting 必备。
                     //   贴图：BlockCube 按木方面查图集 → Planks(6) 橡木 / SprucePlanks(86) 云杉；baseColorMap = voxelAtlas
                     //   （item entity / 手持方块同源；半纹素内缩防渗色）。无 world → BlockCube 顶点色恒白（全亮，
                     //   船不被地形光场调制，与天光无关 —— 船是实体非地形块）。vertexColorsEnabled 不开（恒白顶点色
                     //   × baseColor × 贴图 = 贴图本色 × baseColor；baseColor 取白色免二次调制）。
                     //
-                    // 船底甲板（封闭整底）：宽 0.7 × 高 0.1 × 长 1.4，沉到水面略下（吃水 -0.1）。船的「碗底」：
+                    // 船底甲板（封闭整底）：宽 1.0 × 高 0.1 × 长 1.6，沉到水面略下（吃水 -0.1）。船的「碗底」：
                     //   封闭整面挡住下方水，水不从船舱中间漏上来（spec「船中间不要显示水」）。同时是骑乘玩家的「甲板」。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
                         position: Qt.vector3d(0, -0.15, 0)
-                        scale: Qt.vector3d(0.7, 0.1, 1.4)
+                        scale: Qt.vector3d(1.0, 0.1, 1.6)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             baseColor: "#ffffff"
                         }
                     }
-                    // 左舷壁（-X 纵长壁）：宽 0.06 × 高 0.35 × 长 1.4，贴 -X 边。等高于前后舷 → 碗沿连续。
+                    // 左舷壁（-X 纵长壁）：宽 0.1 × 高 0.4 × 长 1.6，贴 -X 边。等高于前后舷 → 碗沿连续。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
-                        position: Qt.vector3d(-0.32, 0.05, 0)
-                        scale: Qt.vector3d(0.06, 0.35, 1.4)
+                        position: Qt.vector3d(-0.45, 0.05, 0)
+                        scale: Qt.vector3d(0.1, 0.4, 1.6)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
@@ -4692,8 +4702,8 @@ Window {
                     // 右舷壁（+X 纵长壁）：贴 +X 边（与左舷对称）。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
-                        position: Qt.vector3d(0.32, 0.05, 0)
-                        scale: Qt.vector3d(0.06, 0.35, 1.4)
+                        position: Qt.vector3d(0.45, 0.05, 0)
+                        scale: Qt.vector3d(0.1, 0.4, 1.6)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
@@ -4703,8 +4713,8 @@ Window {
                     // 船头舷壁（-Z 端横壁）：跨满宽（连两舷），等高于左右舷 → 碗沿四角闭合。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
-                        position: Qt.vector3d(0, 0.05, -0.62)
-                        scale: Qt.vector3d(0.7, 0.35, 0.16)
+                        position: Qt.vector3d(0, 0.05, -0.7)
+                        scale: Qt.vector3d(1.0, 0.4, 0.2)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
@@ -4714,22 +4724,23 @@ Window {
                     // 船尾舷壁（+Z 端横壁；与船头对称）。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
-                        position: Qt.vector3d(0, 0.05, 0.62)
-                        scale: Qt.vector3d(0.7, 0.35, 0.16)
+                        position: Qt.vector3d(0, 0.05, 0.7)
+                        scale: Qt.vector3d(1.0, 0.4, 0.2)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             baseColor: "#ffffff"
                         }
                     }
-                    // t508 二轮复盘修「F3+B 船没有碰撞箱」（用户报⑤）：船是实体（BoatManager 命中盒 kBoatHalfW=0.6 /
-                    //   kBoatHalfH=0.5），但旧版 F3+B hitbox 只画玩家 / mob / 掉落物（Main.qml 各自 delegate），boatHost
-                    //   Repeater 内未加 → 用户报「船不是实体」。补船 hitbox（WireCube ±0.5 居中 → scale = (2·0.6, 2·0.5, 2·0.6)）
+                    // t508 二轮复盘修「F3+B 船没有碰撞箱」（用户报⑤）：船是实体（BoatManager 命中盒 kBoatHalfW /
+                    //   kBoatHalfH），但旧版 F3+B hitbox 只画玩家 / mob / 掉落物（Main.qml 各自 delegate），boatHost
+                    //   Repeater 内未加 → 用户报「船不是实体」。补船 hitbox（WireCube ±0.5 居中 → scale = (2·半W, 2·半H, 2·半W)）
                     //   + 朝向棒（船头 -Z 方向，boatYaw 已在 boatRoot Node 继承）。同 mob hitbox 模式（PLAN §2-F F3 调试叠层）。
+                    //   boat 三轮：kBoatHalfW=0.8 / kBoatHalfH=0.55 → scale=(1.61, 1.11, 1.61) 对齐新碰撞盒。
                     Model {
                         visible: window.showHitboxes
                         geometry: WireCube {}
-                        scale: Qt.vector3d(1.21, 1.01, 1.21) // 2·kBoatHalfW+0.01 / 2·kBoatHalfH+0.01 / 2·kBoatHalfW+0.01（外扩 0.01 避面重叠）
+                        scale: Qt.vector3d(1.61, 1.11, 1.61) // 2·kBoatHalfW+0.01 / 2·kBoatHalfH+0.01 / 2·kBoatHalfW+0.01（外扩 0.01 避面重叠）
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
                     }
                     Model {

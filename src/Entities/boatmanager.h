@@ -198,8 +198,12 @@ private:
 
     static constexpr int kCap = 64;            // 船数上限（防溢出；船相对稀有，cap 取 mob 量级）
     // 船几何 / 物理常量（机制等价 MC 1.0 boat；手感可玩）：
-    static constexpr float kBoatHalfW    = 0.6f;   // 船 footprint 半宽 / 半长（约 1.2×1.2；碰撞 + 命中盒）
-    static constexpr float kBoatHalfH    = 0.5f;   // 船命中盒半高（1.0 高，略大于视觉船舱 0.5；放宽右键骑乘命中）
+    //   boat 三轮「船太小坐不下」（用户报④）：旧 kBoatHalfW=0.6（footprint 1.2×1.2）、视觉船 1.4×0.7，
+    //     船舱内宽 ~0.58 < 玩家半宽 0.3×2=0.6 → 玩家模型塞不进船（肉眼「坐不下」）。放大碰撞盒至 0.8
+    //     （footprint 1.6×1.6，对齐视觉船长 1.6）→ F3+B 盒覆盖整船 + 骑乘命中更宽容。kBoatHalfH 0.5→0.55
+    //     （命中盒 1.1 高，包住 0.4 高船舷 + 坐姿大腿），右键上船仍近身即中。
+    static constexpr float kBoatHalfW    = 0.8f;   // 船 footprint 半宽 / 半长（约 1.6×1.6；碰撞 + 命中盒）
+    static constexpr float kBoatHalfH    = 0.55f;  // 船命中盒半高（1.1 高，略大于视觉船舱 0.65；放宽右键骑乘命中）
     //   t508 二轮复盘修「整个悬浮在水中」（用户报⑦）：旧 kBoatDraft=0.25 → 船中心 Y = 水面顶 - 0.25（船吃水 0.25），
     //     而船舷顶（model +0.225）恰与水面平齐 → 整条船视觉沉在水面下、只露舷沿 =「悬浮在水中」。改为 0.0：
     //     船中心 Y = 水源格 cell 顶（= 水面顶），船底（model -0.2）略入水 0.2、舷顶（+0.225）出水 0.225 →
