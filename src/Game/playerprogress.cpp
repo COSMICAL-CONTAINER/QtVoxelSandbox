@@ -8,17 +8,19 @@
 #include "entitymanager.h"   // MobType（敌对 mob 判「怪物猎人」）
 
 // 成就定义（progress 新系统）。机制等价 MC 1.0 advancement tree 的现阶段可完成子集。
-//   §9：成就名用中文通用词，零 MC 专名。定义序 = QML 列表显示序（从「打开背包」入门 → 装备升级 → 战斗）。
+//   §9：成就名用中文通用词，零 MC 专名。定义序 = 依赖树 DFS 先序（父先于子、同父兄弟相邻）：
+//   两根平铺「打开背包」「获得原木」→「合成台」(←获得原木) →「出击时间」(←合成台) →「怪物猎人」(←出击时间)
+//   →「挖矿时间到」(←合成台) →「获得升级」(←挖矿时间到)。父成就未解锁时子成就不解锁（unlock 前置检查）。
 const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
 {
     static const QList<AchievementDef> kDefs = {
-        { "open_inventory", "打开背包",   "按 E 打开你的背包" },
-        { "get_wood",       "获得原木",   "砍倒一棵树获得原木" },
-        { "crafting_table", "合成台",     "用 4 块木板合成工作台" },
-        { "sword_time",     "出击时间",   "合成一把木剑准备战斗" },
-        { "mining_time",    "挖矿时间到", "合成一把木镐开始挖矿" },
-        { "upgrade",        "获得升级",   "升级到石质工具" },
-        { "monster_hunter", "怪物猎人",   "击杀一只敌对怪物" },
+        { "open_inventory", nullptr,          "打开背包",   "按 E 打开你的背包" },
+        { "get_wood",       nullptr,          "获得原木",   "砍倒一棵树获得原木" },
+        { "crafting_table", "get_wood",       "合成台",     "用 4 块木板合成工作台" },
+        { "sword_time",     "crafting_table", "出击时间",   "合成一把木剑准备战斗" },
+        { "monster_hunter", "sword_time",     "怪物猎人",   "击杀一只敌对怪物" },
+        { "mining_time",    "crafting_table", "挖矿时间到", "合成一把木镐开始挖矿" },
+        { "upgrade",        "mining_time",    "获得升级",   "升级到石质工具" },
     };
     return kDefs;
 }
@@ -32,10 +34,18 @@ void PlayerProgress::bumpAndEmit()
     emit progressChanged();
 }
 
-// 解锁成就（id）。已解锁 → no-op（幂等，防重复弹 toast）；首次解锁 → 标记 + 弹 toast + 列表刷新 + revision bump。
+// 解锁成就（id）。已解锁 → no-op（幂等，防重复弹 toast）；父成就未解锁（前置依赖）→ 忽略本次解锁
+//   （progress-tree 三轮；机制等价 MC 1.0 父成就未达成则子成就解锁不生效，依赖树真实生效）；
+//   首次解锁 → 标记 + 弹 toast + 列表刷新 + revision bump。
 void PlayerProgress::unlock(const QString &id)
 {
     if (m_unlocked.contains(id)) return;
+    // 前置依赖检查：父成就未解锁 → 忽略本次解锁事件。defs 按 DFS 先序（父定义先于子），直接扫表查父。
+    for (const auto &d : achievementDefs()) {
+        if (id == QLatin1String(d.id) && d.parentId
+            && !m_unlocked.contains(QLatin1String(d.parentId)))
+            return;
+    }
     m_unlocked.insert(id);
     // 查成就定义取 name/desc（toast 文案）；未知 id 防御性兜底。
     QString name = id, desc;
@@ -119,16 +129,51 @@ void PlayerProgress::setDayCount(int day)
     if (day > m_daysPlayed) { m_daysPlayed = day; bumpAndEmit(); }
 }
 
-// 全部成就 [{id,name,desc,unlocked}, ...]（定义序）。
+// 全部成就 [{id,name,desc,unlocked,parentId,parentName,depth,locked}, ...]（定义序 = 依赖树 DFS 先序）。
+//   parentName = 父成就中文名（QML 显「需先完成」提示）；depth = 沿 parentId 链上溯层数（0=根成就）；
+//   locked = 未解锁 且 父未解锁（父已解锁但未解锁 → 可解锁，locked=false，QML 显 ○）。
 QVariantList PlayerProgress::achievements() const
 {
+    const auto &defs = achievementDefs();
+    // 查某成就 id 的中文名（父名提示用）；未知 id 防御性返原名。
+    auto findName = [&defs](const QString &pid) {
+        for (const auto &d : defs)
+            if (pid == QLatin1String(d.id)) return QString::fromUtf8(d.name);
+        return pid;
+    };
+    // 沿 parentId 链上溯计深度（defs 父先于子，链长 ≤3；未命中即止，防御性防死循环）。
+    auto depthOf = [&defs](const QString &pid) {
+        int depth = 0;
+        QString cur = pid;
+        while (!cur.isEmpty()) {
+            QString next;
+            for (const auto &d : defs) {
+                if (cur == QLatin1String(d.id)) {
+                    next = d.parentId ? QString::fromUtf8(d.parentId) : QString();
+                    break;
+                }
+            }
+            cur = next;
+            ++depth;
+        }
+        return depth;
+    };
+
     QVariantList out;
-    for (const auto &d : achievementDefs()) {
+    for (const auto &d : defs) {
+        const QString id = QString::fromUtf8(d.id);
+        const QString parentId = d.parentId ? QString::fromUtf8(d.parentId) : QString();
+        const bool unlocked = m_unlocked.contains(id);
+        const bool parentUnlocked = parentId.isEmpty() || m_unlocked.contains(parentId);
         QVariantMap item;
-        item["id"] = QString::fromUtf8(d.id);
+        item["id"] = id;
         item["name"] = QString::fromUtf8(d.name);
         item["desc"] = QString::fromUtf8(d.desc);
-        item["unlocked"] = m_unlocked.contains(QString::fromUtf8(d.id));
+        item["unlocked"] = unlocked;
+        item["parentId"] = parentId;
+        item["parentName"] = parentId.isEmpty() ? QString() : findName(parentId);
+        item["depth"] = parentId.isEmpty() ? 0 : depthOf(parentId);
+        item["locked"] = !unlocked && !parentId.isEmpty() && !parentUnlocked;
         out.append(item);
     }
     return out;

@@ -26,7 +26,9 @@
 //   - onInventoryOpened()：Main.qml.openInventory / openCraftingTable 等开包函数。
 //   - onPlayTimeTick(float dt) / setDayCount(int)：WorldClock.ticked → Main.qml Connections 路由。
 //
-// 成就解锁逻辑在埋点方法内判定（如 onCraft(SwordWood) → unlock("出击时间")）。unlock 时：
+// 成就解锁逻辑在埋点方法内判定（如 onCraft(SwordWood) → unlock("出击时间")）。unlock 时先查前置依赖：
+//   父成就未解锁 → 忽略本次解锁事件（progress-tree 三轮；机制等价 MC 1.0 父成就未达成则子成就解锁不生效）。
+//   unlock 成功时：
 //   - emit achievementUnlocked(id, name, desc)：供 QML 弹 toast 提示。
 //   - emit achievementChanged：供 QML 成就列表刷新。
 //
@@ -34,7 +36,8 @@
 //   - playTimeSecs / daysPlayed / blocksMined / blocksPlaced / distanceTraveled / mobsKilled / deaths /
 //     craftsCount / itemsPicked（统计；NOTIFY=progressChanged）。
 //   - revision（int，任一统计 / 成就变更自增；成就 / 统计列表 delegate 触碰 revision 取最新值）。
-//   - Q_INVOKABLE QVariantList achievements()：[{id,name,desc,unlocked}, ...] 供 QML 列表显示。
+//   - Q_INVOKABLE QVariantList achievements()：[{id,name,desc,unlocked,parentId,parentName,depth,locked}, ...]
+//     供 QML 树形成就列表显示（定义序 = 依赖树 DFS 先序：父先于子、同父兄弟相邻 → 连续连线；locked = 父未解锁）。
 //   - Q_INVOKABLE QVariantList statsList()：[{name, value}, ...] 供 QML 统计面板显示。
 //
 // §4 法律 + §9：零 MC 专有名词（成就名用通用词「打开背包」「获得原木」「出击时间」「挖矿时间到」「获得升级」
@@ -100,7 +103,9 @@ public:
     Q_INVOKABLE void setDayCount(int day);
 
     // ── 列表数据（Q_INVOKABLE；QML delegate 触碰 revision 取最新）──
-    // 全部成就 [{id, name, desc, unlocked}, ...]（按定义序）。供 QML 成就列表显示。
+    // 全部成就 [{id, name, desc, unlocked, parentId, parentName, depth, locked}, ...]（定义序 = 依赖树
+    //   DFS 先序：父先于子、同父兄弟相邻）。供 QML 树形成就列表显示。locked = 未解锁 且 父未解锁
+    //   （父已解锁但未解锁 → 可解锁，locked=false）。
     Q_INVOKABLE QVariantList achievements() const;
     // 统计列表 [{name, value}, ...]（中文名 + 当前值）。供 QML 统计面板显示。
     Q_INVOKABLE QVariantList statsList() const;
@@ -125,16 +130,21 @@ signals:
     void achievementChanged();
 
 private:
-    // 成就定义（id / 中文名 / 描述）。id 用通用词英文标识符（非 MC 专名）。
+    // 成就定义（id / 父成就 id / 中文名 / 描述）。id 用通用词英文标识符（非 MC 专名）。
+    //   parentId：父成就 id（null = 根成就，无前置）。依赖树机制等价 MC 1.0 advancement tree：
+    //   子成就仅在父成就已解锁时可解锁（unlock 前置检查）+ QML 面板 locked 态据此判定。
     struct AchievementDef {
         const char *id;
+        const char *parentId;   // 父成就 id（null = 根成就）
         const char *name;
         const char *desc;
     };
-    // 全部成就定义（定义序 = QML 列表显示序）。 mechanisms 等价 MC 1.0 advancement tree 的现阶段可完成子集。
+    // 全部成就定义（定义序 = 依赖树 DFS 先序：父先于子、同父兄弟相邻 → QML 树形渲染连续连线）。
+    //   mechanisms 等价 MC 1.0 advancement tree 的现阶段可完成子集。
     static const QList<AchievementDef> &achievementDefs();
 
-    // 解锁成就（id = 成就 id）。已解锁 → no-op（幂等）；首次解锁 → 标记 + emit achievementUnlocked +
+    // 解锁成就（id = 成就 id）。已解锁 → no-op（幂等）；父成就未解锁（前置依赖）→ 忽略本次解锁
+    //   （机制等价 MC 1.0 父成就未达成则子成就解锁不生效）；首次解锁 → 标记 + emit achievementUnlocked +
     //   achievementChanged + progressChanged（驱动 revision bump）。
     void unlock(const QString &id);
     // 累加统计并 flush（内部辅助：bump revision + emit progressChanged）。

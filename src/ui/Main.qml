@@ -7584,11 +7584,16 @@ Window {
         z: 160
         onClosed: window.resourceBrowserOpen = false
     }
-    // pause-menu 进度面板（行2「进度」按钮 → progressOpen）：显成就列表（progress.achievements() 返回
-    //   [{id,name,desc,unlocked}] → Repeater delegate 每成就一行：名 + 描述 + 已解锁 ✓ / 未解锁 锁图标）。
-    //   revision 触碰刷新（progress.revision 变 → delegate 重算 achievements()）。同设置面板模式（半透遮罩 +
-    //   居中 Rectangle + 返回按钮 + Esc 关）。仅 playing && progressOpen 显；z=155（高于暂停 100，低于死亡 180）。
-    //   纯呈现（PLAN §2 UI 层），§9 GUI 自绘原创。成就名 / 描述均来自 Game 层 PlayerProgress（不引 MC 专名）。
+    // pause-menu 进度面板（行2「进度」按钮 → progressOpen）：成就依赖树（progress.achievements() 返回
+    //   [{id,name,desc,unlocked,parentId,parentName,depth,locked}] → Repeater delegate 每成就一行）。
+    //   progress-tree 三轮：树形显示——根成就（depth=0）顶格平铺；子成就按 depth 缩进 + 左缘竖脊线 +
+    //   横接 tick（父→子依赖连线，机制等价 MC 1.0 advancement tree 的树形进度）。三态图标：
+    //   ✓ 已解锁（绿）/ ○ 可解锁未解锁（灰）/ 🔒 locked 父未解锁（更暗 + 描述附「（需先完成：父名）」）。
+    //   revision 触碰刷新：model 表达式显式读 progress.revision 且 revision 参与返回值（_r>=0 守卫恒真），
+    //   防 qmlcachegen AOT 把裸触碰读当死代码消除 → 面板即时刷新（修复「获得成就却显示未解锁」）。
+    //   同设置面板模式（半透遮罩 + 居中 Rectangle + 返回按钮 + Esc 关）。仅 playing && progressOpen 显；
+    //   z=155（高于暂停 100，低于死亡 180）。纯呈现（PLAN §2 UI 层），§9 GUI 自绘原创。
+    //   成就名 / 描述均来自 Game 层 PlayerProgress（不引 MC 专名）。
     Item {
         id: progressOverlay
         anchors.fill: parent
@@ -7623,41 +7628,67 @@ Window {
                         //   achievements()。QML 绑定 model 触碰 progress.revision（property 读）才会在
                         //   progressChanged 时重算函数调用（纯函数调用不自动建依赖），故 model 表达式显式读 revision。
                         Repeater {
-                            // 触碰 revision：表达式先读 progress.revision（建依赖），再返 achievements() 数组。
-                            // progressChanged → revision 变 → 此绑定重算 → achievements() 取最新。
-                            model: { const _r = progress.revision; return progress.achievements() }
+                            // 触碰 revision：表达式先读 progress.revision（建依赖），且 revision **参与返回值**
+                            //   （_r >= 0 守卫恒真）——防 qmlcachegen AOT 把裸触碰读当死代码消除 → 依赖不注册
+                            //   → revision 变后 model 永不重算、面板停留首值（「获得成就却显示未解锁」根因）。
+                            //   progressChanged → revision 变 → 此绑定重算 → achievements() 取最新（含解锁态）。
+                            model: { const _r = progress.revision; return _r >= 0 ? progress.achievements() : [] }
                             delegate: Rectangle {
                                 width: achList.width
                                 height: achRow.implicitHeight + 16
                                 radius: 6
-                                // 已解锁 → 绿底高亮；未解锁 → 暗底（视觉区分）。
-                                color: modelData.unlocked ? "#1a2a1a" : "#222222"
+                                // 三态底色：已解锁 → 绿底；locked（父未解锁）→ 更暗底；可解锁未解锁 → 暗底。
+                                color: modelData.unlocked ? "#1a2a1a" : (modelData.locked ? "#181818" : "#222222")
                                 border.color: modelData.unlocked ? "#3a6a3a" : "#3a3a3a"; border.width: 1
-                                Row {
-                                    id: achRow
+                                Item {
+                                    id: achBody
                                     anchors.fill: parent; anchors.margins: 8
-                                    spacing: 10
-                                    // 解锁态图标：✓（绿）/ 锁图标 🔒（灰）。
-                                    Text {
-                                        text: modelData.unlocked ? "✓" : "🔒"
-                                        color: modelData.unlocked ? "#7fe57f" : "#888888"
-                                        font.pixelSize: 18; font.bold: true
-                                        anchors.verticalCenter: parent.verticalCenter
+                                    // 依赖树缩进 = depth × 16（根成就 depth=0 顶格；子成就逐级右移）。
+                                    readonly property real indent: modelData.depth * 16
+                                    // 连线层（progress-tree 三轮）：竖脊线 = 同父兄弟连成一根纵线；横接 tick =
+                                    //   父 → 子指向。根成就（depth=0）不画。暗绿线色。
+                                    Rectangle {
+                                        visible: modelData.depth > 0
+                                        x: achBody.indent - 12; y: 0
+                                        width: 2; height: parent.height
+                                        color: "#4a5a4a"
                                     }
-                                    Column {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width - 28
-                                        spacing: 2
+                                    Rectangle {
+                                        visible: modelData.depth > 0
+                                        x: achBody.indent - 12
+                                        y: parent.height / 2 - 1
+                                        width: 12; height: 2
+                                        color: "#4a5a4a"
+                                    }
+                                    Row {
+                                        id: achRow
+                                        anchors.fill: parent
+                                        anchors.leftMargin: achBody.indent
+                                        spacing: 10
+                                        // 三态图标：✓ 已解锁（绿）/ ○ 可解锁未解锁（灰）/ 🔒 locked（父未解锁，暗灰）。
                                         Text {
-                                            text: modelData.name
-                                            color: modelData.unlocked ? "#e0e0e0" : "#999999"
-                                            font.pixelSize: 14; font.bold: true
+                                            text: modelData.unlocked ? "✓" : (modelData.locked ? "🔒" : "○")
+                                            color: modelData.unlocked ? "#7fe57f" : (modelData.locked ? "#666666" : "#8a8a8a")
+                                            font.pixelSize: 18; font.bold: true
+                                            anchors.verticalCenter: parent.verticalCenter
                                         }
-                                        Text {
-                                            text: modelData.desc
-                                            color: modelData.unlocked ? "#bbbbbb" : "#777777"
-                                            font.pixelSize: 11
-                                            wrapMode: Text.WordWrap; width: parent.width
+                                        Column {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: parent.width - 28
+                                            spacing: 2
+                                            Text {
+                                                text: modelData.name
+                                                color: modelData.unlocked ? "#e0e0e0" : (modelData.locked ? "#777777" : "#999999")
+                                                font.pixelSize: 14; font.bold: true
+                                            }
+                                            Text {
+                                                // locked 成就描述追加前置依赖提示（父名），指引玩家先做父成就。
+                                                text: modelData.desc + (modelData.locked && modelData.parentName
+                                                      ? "（需先完成：" + modelData.parentName + "）" : "")
+                                                color: modelData.unlocked ? "#bbbbbb" : (modelData.locked ? "#5a5a5a" : "#777777")
+                                                font.pixelSize: 11
+                                                wrapMode: Text.WordWrap; width: parent.width
+                                            }
                                         }
                                     }
                                 }
