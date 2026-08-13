@@ -41,6 +41,11 @@ struct BuiltState {
     //   每床色首次查询时按目标色重染（retintBedTemplate）落盘 voxelsandbox_rp_bed_<id>.png，后续命中直接返。
     //   apply() 重建时清空（pack 切换 / 重解析）；随 atlasFile 同目录写（AppLocalDataLocation，已 mkpath）。
     QHash<int, QString> bedIconFiles;
+    // R19 B1 皮革护甲 item 图标染色缓存：leatherId(0x300..0x303)→落盘的染色后皮革图标 file:// 路径。
+    //   pack 的 leather_*.png 是白底可染色 base，每件首次查询时按皮革棕梯度重染（retintLeatherTemplate）
+    //   落盘 voxelsandbox_rp_leather_<id>.png，后续命中直接返。apply() 重建时清空（pack 切换/重解析）。
+    //   仅 0x300..0x303 四件（皮革 tier）；铁/金/钻石/铜护甲原样用 pack 图，不染色。
+    QHash<int, QString> leatherIconFiles;
 };
 BuiltState &state()
 {
@@ -680,6 +685,53 @@ void retintBedTemplate(QImage &img, int tgtR, int tgtG, int tgtB)
     }
 }
 
+// R19 B1 皮革护甲 retint：pack 的 leather_helmet/chestplate/leggings/boots.png 是白底「可染色 base」
+//   （MC 皮革染色机制 = 灰白 base 贴图 × 染料颜色；base 本身未叠皮革棕 overlay），图标直接用即显白底。
+//   故把灰白底按亮度映射到皮革棕三色梯度：暗→#5e3d1c / 中→#8a5a2b / 亮→#a87340（与 MaterialIcon.qml
+//   drawArmor 皮革 palettes[0] = ["#8a5a2b","#a87340","#5e3d1c"] 同色板），保留护甲折边/高光/阴影的明暗
+//   层次，仅把灰白色相迁移到皮革棕。机制等价 MC「皮革 base + 默认皮革棕染料」（不同于床按 R 通道比染色，
+//   皮革底是去色灰 → 用 luma 作映射键，单通道即可表征明暗）。
+//   映射：luma L∈[0,255]，L<128 → dark..base（f=L/128）；L≥128 → base..light（f=(L-128)/127），线性插值。
+//   透明像素（alpha=0）不动；img 为 Format_ARGB32_Premultiplied，输出亦保持预乘。
+void retintLeatherTemplate(QImage &img)
+{
+    // 皮革棕三色锚点（与 MaterialIcon.qml palettes[0] leather 同源单一权威）。
+    const int darkR = 0x5e, darkG = 0x3d, darkB = 0x1c; // #5e3d1c 暗（鞍桥/底阴影）
+    const int midR  = 0x8a, midG  = 0x5a, midB  = 0x2b; // #8a5a2b 中（鞍体主色）
+    const int liteR = 0xa8, liteG = 0x73, liteB = 0x40; // #a87340 亮（受光高光）
+    const int w = img.width(), h = img.height();
+    for (int y = 0; y < h; ++y) {
+        QRgb *scan = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const QRgb c = scan[x];
+            const int a = qAlpha(c);
+            if (a == 0) continue; // 透明像素不动（护甲轮廓外 alpha=0）
+            // 反预乘取线性 RGB（保通用正确；demo 包不透明像素近似非预乘，反解值 = 原值）。
+            const int r = qBound(0, qRed(c) * 255 / qMax(1, a), 255);
+            const int g = qBound(0, qGreen(c) * 255 / qMax(1, a), 255);
+            const int b = qBound(0, qBlue(c) * 255 / qMax(1, a), 255);
+            // 亮度（Rec.601 luma）：灰白底的明暗即护甲 3D 层次载体（高光亮 / 折边暗）。
+            const int l = (r * 299 + g * 587 + b * 114) / 1000; // 0..255
+            int nr, ng, nb;
+            if (l < 128) {
+                // dark..base：Q8 分数 f = L*256/128（L=0→0, L=127→~254）；暗像素→皮革暗棕。
+                const int f = (l * 256) / 128;
+                nr = darkR + ((midR - darkR) * f) / 256;
+                ng = darkG + ((midG - darkG) * f) / 256;
+                nb = darkB + ((midB - darkB) * f) / 256;
+            } else {
+                // base..light：Q8 分数 f = (L-128)*256/127（L=128→0, L=255→~256）；亮像素→皮革亮棕。
+                int f = ((l - 128) * 256) / 127;
+                if (f > 256) f = 256; // 饱和到皮革亮棕（最亮高光）
+                nr = midR + ((liteR - midR) * f) / 256;
+                ng = midG + ((liteG - midG) * f) / 256;
+                nb = midB + ((liteB - midB) * f) / 256;
+            }
+            scan[x] = qRgba((nr * a) / 255, (ng * a) / 255, (nb * a) / 255, a);
+        }
+    }
+}
+
 // t422 grass_side 正确合成：dirt 基底 + 顶部绿色 overlay。t416 误把整张 grass_block_side.png
 //   乘叶绿素 → 下方泥土也被染绿（错误）。MC 实际语义 = dirt.png（彩色泥土）打底，
 //   grass_block_side_overlay.png（仅顶部 alpha 绿条的灰度蒙版）乘叶绿素后 SourceOver 叠在
@@ -815,6 +867,7 @@ void ensureBuiltLocked()
     s.waterStripFile.clear(); // t489 reset 流体条带落盘路径（仅当包合法时重填）
     s.lavaStripFile.clear();
     s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
+    s.leatherIconFiles.clear(); // R19 B1 reset 皮革护甲染色图标缓存（pack 切换 / 重解析 → 重染）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -1096,6 +1149,37 @@ QString ResourcePackManager::itemIconSource(int itemId) const
     const QString path = QDir(s.itemDir).absoluteFilePath(filename);
     if (!QFile::exists(path))
         return {}; // 包内无该 item 贴图 → 不覆盖（保留自绘 Canvas）；红线 §9：仅运行期读本地 pack PNG。
+
+    // R19 B1 皮革护甲 retint（同床 retint 机制）：pack 的 leather_helmet/chestplate/leggings/boots.png
+    //   （0x300..0x303，皮革 tier 四件）是白底可染色 base（MC 皮革染色 = 灰白 base × 染料；未叠皮革棕 overlay）
+    //   → 直接用即显白底。命中皮革 tier 时重染成皮革棕梯度（retintLeatherTemplate，与 MaterialIcon drawArmor
+    //   皮革 palettes[0] 同色板）落盘 voxelsandbox_rp_leather_<id>.png，返染色图 file:// 路径 → 皮革护甲图标显皮革棕。
+    //   命中缓存直接返（首次染色后落盘，后续 O(1)）。非皮革 tier（铁/金/钻石/铜）原样返 pack 图，不 retint。
+    if (itemId >= 0x300 && itemId <= 0x303) {
+        // 命中缓存（pack 未重解析期间稳定）→ 直接返。
+        const auto it = s.leatherIconFiles.constFind(itemId);
+        if (it != s.leatherIconFiles.constEnd() && QFile::exists(it.value()))
+            return QStringLiteral("file:///") + it.value();
+        // 加载皮革 base 贴图并重染成皮革棕。解码失败 → 回退返未染色的白底 base（可接受降级，仍能辨识护甲形状）。
+        QImage leather(path);
+        if (leather.isNull())
+            return QStringLiteral("file:///") + path;
+        leather = leather.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        retintLeatherTemplate(leather);
+        // 落盘到 AppLocalDataLocation（与 atlasFile 同目录，ensureBuiltLocked 已 mkpath；此处再保底）。
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        if (dir.isEmpty())
+            return QStringLiteral("file:///") + path; // 无可写目录 → 回退白底（不染色，降级）
+        QDir().mkpath(dir);
+        const QString out = QDir(dir).absoluteFilePath(
+            QStringLiteral("voxelsandbox_rp_leather_%1.png").arg(itemId));
+        if (!leather.save(out, "PNG"))
+            return QStringLiteral("file:///") + path; // 落盘失败 → 回退白底（降级）
+        // 记缓存（mutable：s 是 state() 引用但 leatherIconFiles 需写；stateMutex 已持锁，安全）。
+        state().leatherIconFiles.insert(itemId, out);
+        return QStringLiteral("file:///") + out;
+    }
+
     return QStringLiteral("file:///") + path;
 }
 
