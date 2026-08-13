@@ -588,7 +588,7 @@ Item {
                                 id: armorEmptyPackImg
                                 anchors.centerIn: parent
                                 width: 26; height: 26
-                                visible: armId === 0 && source.length > 0
+                                visible: armId === 0 && source.toString().length > 0
                                 // 触碰 armId/armorRp.active 建立绑定依赖（槽位变 / pack 切换 → 重查源）。
                                 source: { const _r = armorRp.active; return _r >= 0 ? (armId === 0 ? armorRp.emptyArmorSlotSource(index) : "") : "" }
                                 fillMode: Image.PreserveAspectFit

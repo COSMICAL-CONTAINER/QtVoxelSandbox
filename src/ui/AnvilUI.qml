@@ -288,7 +288,7 @@ Item {
                         anchors.centerIn: parent
                         width: 28; height: 28
                         source: root.hotbar ? root.hotbar.iconSourceAt(index) : ""
-                        visible: source.length > 0
+                        visible: source.toString().length > 0
                         fillMode: Image.Pad
                     }
                     Text {

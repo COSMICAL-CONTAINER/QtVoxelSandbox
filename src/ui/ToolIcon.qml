@@ -46,7 +46,7 @@ Item {
     Image {
         id: packImg
         anchors.fill: parent
-        visible: source.length > 0
+        visible: source.toString().length > 0
         // 触碰 tier/toolType/rp.active 建立绑定依赖（任一变 / pack 切换 → 重查 pack 源）。
         source: { const _a = rp.active; const _t = root.tier; const _tt = root.toolType
                   const id = root.itemIdFromTypeTier(root.toolType, root.tier)
@@ -60,8 +60,10 @@ Item {
         anchors.fill: parent
         // t424: pack 关 / 无映射时回退自绘。**不能用 `packImg.source.length === 0`**：Image.source 是 url
         //   类型，空 url 的 .length 在 QML JS 中为 undefined（非 0）→ `=== 0` 恒 false → canvas 永隐 → 所有
-        //   非 pack 工具图标空白（hover 名仍对）。改 `!packImg.visible`：packImg.visible 走 `source.length > 0`，
-        //   空 url 时 undefined > 0 = false（正确隐），取反即 canvas 显——与 packImg 互补且对空 url 稳健。
+        //   非 pack 工具图标空白（hover 名仍对）。改 `!packImg.visible`：packImg.visible 走 `source.toString().length > 0`
+        //   （url 值类型在 QML JS 是 QUrl 对象：.length 对空/非空 url 都恒 undefined，必须 toString() 才得字符串长；
+        //   实证 Qt 6.11：`source.length > 0` 对非空 file:// url 仍为 false → packImg 永隐 → 工具恒自绘，t497 三轮根因）。
+        //   空 url 时 toString().length = 0（正确隐），取反即 canvas 显——与 packImg 互补且对空 url 稳健。
         visible: !packImg.visible
         // 尺寸 / tier / toolType 变化时重绘（Canvas 不自动据外部 property 刷新）。
         onWidthChanged: requestPaint()

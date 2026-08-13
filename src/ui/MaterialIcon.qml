@@ -54,11 +54,14 @@ Item {
     Image {
         id: packImg
         anchors.fill: parent
-        visible: source.length > 0
+        visible: source.toString().length > 0
         // 触碰 materialId/rp.active 建立绑定依赖（id 变 / pack 切换 → 重查 pack 源）。
         // t497 三轮复盘：`{ root.materialId; rp.active; return ... }` 裸语句触碰被 qmlcachegen AOT 死代码消除
         //   （lessons t498/FurnaceUI 三轮同坑）→ pack 激活/切换后依赖不注册、source 永不重查 → 图标恒显自绘
-        //   canvas（用户「护甲/物品图标没替代」真根因）。修：触碰值参与返回（`_a >= 0` 恒真守卫只注册依赖）。
+        //   canvas（用户「护甲/物品图标没替代」真根因之一）。修：触碰值参与返回（`_a >= 0` 恒真守卫只注册依赖）。
+        //   **另一根因**：visible 原写 `source.length > 0` —— url 值类型在 QML JS 是 QUrl 对象，.length 对空 / 非空
+        //   url 都恒 undefined（实证 Qt 6.11：非空 file:// 的 source.length 仍 undefined）→ `> 0` 恒 false → packImg 永隐
+        //   → 材料/护甲恒自绘。必用 `source.toString().length > 0`（toString 得字符串，空 url = 0 正确隐）。
         source: { const _a = rp.active; const _id = root.materialId; return _id >= 0 && _a >= 0 ? rp.itemIconSource(root.materialId) : "" }
         fillMode: Image.PreserveAspectFit
         smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；MC item 图标为像素艺术）

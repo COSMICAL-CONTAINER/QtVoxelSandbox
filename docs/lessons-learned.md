@@ -145,6 +145,9 @@
 - **「用隐藏替代销毁」修 Repeater-3D-delegate 不销毁坑时，delegate 的**稳态常驻数 = 历史最高并发峰值**——任何一次峰值（爆炸 / 大规模刷怪 / 玩法峰值）会把 count 推到高水位，之后即使全部 slot 释放（delegate visible=false 隐藏），那些 delegate（每个含完整子树：BlockCube + Material + 多 Model + 动画）**永久驻留 host 场景图**，重进世界它们仍在（仅隐藏），持续吃场景图遍历 / 绘制 / 绑定重算开销 → 用户报「峰值玩法后退存档再进仍卡、只有重启 exe 才恢复」**：上一条把 clearAll 改成 slot-reuse（释放槽保 count 不降）解决了「跨世界孤儿化」，但留下了它的对偶问题——既然 delegate「永不被销毁」，那么**历史峰值期间创建的所有 delegate 都永久驻留**。cap（kCap=200/64）只钳「最大并发活体数」，不钳「曾经达到过的 delegate 总数」（二者在 slot-reuse 下相等，因为 count 单调不降 = delegate 永不回收 = count 恒等于历史峰值）。判别信号：(1) 用户报某种**峰值玩法**（TNT 连锁爆炸一次产数百掉落物、大规模刷怪、群攻）之后**整个进程**变卡；(2) 退存档再进**同一世界**（甚至新世界）仍卡；(3) 完全关闭 exe 重开才恢复（delegate 随进程死）；(4) C++ 审计干净（slot-reuse 容器有界）；(5) 该实体用了「Repeater int-count + reparent 3D delegate + slot-reuse 保 count 单调」组合 → 即此坑（隐藏≠销毁，高水位 delegate 永驻）。**通用修法（双层）**：(a) **真正重置入口**（world-exit / enterWorld 清旧 / unloadWorld）须提供一个「真清 vector（count→0）」的 `hardReset()`（区别于只标 alive=false 的 `clearAll()`），让 count 真正回落到 0——hardReset 让 Repeater model 变 0，但 reparent 的 3D delegate **仍不被 Repeater 销毁**（t170：跟踪表是 QQuickItem*，3D delegate 不进表），所以 (b) **caller 须配套手动 destroy** reparent 的 delegate：给每个 delegate 加一个**布尔标记 property**（如 `isEntDelegate: true`），world-exit 时扫 `host.children`、对带该标记的子节点调 `.destroy()`（绕过 Repeater 直接销毁 QML 动态对象）。遍历 `host.children` 时**先 `.slice()` 复制**再遍历（destroy 异步但会改 children 列表，原表迭代失效）；Repeater 自身也是 host 的 child 但无该标记（undefined falsy）→ 跳过不误毁。**仅重置路径调 hardReset + destroy**，游玩期的拾取 / 死亡 / 移除仍走 releaseSlot（保 slot-reuse 不变量、防高频抖动重建 delegate）。**关键区分**：`clearAll`（标空保 count 单调）vs `hardReset`（真清 count→0）是**两种语义**——前者用于「游玩期 / 同世界内」的移除（保 delegate 复用、避免抖动重建），后者用于「跨世界 / 跨会话」的真清场（连 delegate 一起销毁、下一世界从 0 起重建）。把二者混用（用 clearAll 做跨世界清场 → delegate 永驻；或用 hardReset 做游玩期移除 → 高频抖动重建 delegate 致卡顿）都是错的。**自测门槛**：必须 run「峰值玩法（让 count 冲到 cap）→ 退存档 → 再进 → 验证不再卡、F3 / 任务管理器内存回落到基线」，仅 build 绿 / 单世界内测不算 PASS——高水位 delegate 是峰值后累积的，静态测试盲。**元教训**：「用隐藏替代销毁」是性能权衡（避免高频销毁/重建抖动），但**任何「永不被销毁」的对象池都有「稳态 = 历史峰值」的代价**——峰值越高、池越大、常驻开销越大；当存在「理应彻底清场」的语义入口（换世界 / 换关卡 / 换会话）时，必须配套「真正销毁」的路径，不能让对象池只增不减。对象池（slot-reuse / tombstone / 隐藏池）设计三问：① 峰值有多大？② 谁负责在「真清场」时排空池？③ 排空路径是否覆盖了 Repeater-3D-delegate 的手动 destroy？（漏任一 → 峰值后永久变卡，重启才恢复）。
   - 证据：t492——TNT 连锁爆炸一次产大量掉落物，itemEntities.count 冲到 kCap(200) → 200 个 item delegate（每个 BlockCube/BillboardQuad + Material + 动画）驻留 itemHost 子树。t437 的 clearAll 只标 alive=false（delegate visible=false 隐藏），保了 count 单调无孤儿，但 200 个 delegate **永驻不销毁**。退存档→再进同一世界：clearAll 释放所有槽（items 0/0、F3 显示归零），但 200 个隐藏 delegate 仍在 itemHost.children → 场景图每帧遍历 / 绘制排序仍扫这 200 棵子树 → 卡顿跨世界保留；完全关 exe 重开 → delegate 随进程死 → 恢复。修法：ItemEntityManager/EntityManager/XpOrbManager 加 `hardReset()`（真 `m_entities.clear()` → count→0）；QML 三个 delegate Node 加 `property bool isEntDelegate: true`；window 级 `clearEntDelegates(host)` 扫 `host.children.slice()` destroy 带 isEntDelegate 的子节点（Repeater 自身无此标记 → 跳过）；三处 world-exit/enterWorld-清旧 段把 `xxx.clearAll()` 改 `xxx.hardReset(); clearEntDelegates(host)`；`/kill @e` 游玩期路径保 clearAll（同世界内 slot-reuse 复用 delegate，不重建）。
 
+- **Repeater `model` 绑定到「返回数组的 Q_INVOKABLE 函数调用」不会自动跟踪该类型的 NOTIFY——纯函数调用不建 QML 依赖，模型数据陈旧且肉眼难察（编译/AOT/启动三测全 PASS）**：当 C++ ViewModel 用 `Q_INVOKABLE QVariantList achievements() const` / `Q_INVOKABLE QVariantList statsList() const` 这类「返数组的方法」（非 Q_PROPERTY）暴露列表数据，并配套一个 `revision` Q_PROPERTY + NOTIFY 驱动刷新（同 ChestStore / Hotbar 的 moc 安全契约）时，QML 侧若写 `Repeater { model: progress.achievements() }`，**该绑定永远不会因 `progressChanged` 而重算**——QML binding 依赖只对「读 Q_PROPERTY」生效，函数调用 `achievements()` 是「一次快照」、不订阅任何 NOTIFY。结果：列表首次渲染正确，但底层 C++ 数据变更（解锁新成就 / 统计累加）后 **delegate 不刷新**（仍显旧数据），而 `revision` 已 bump、`achievements()` 也确实返了新数据——纯 QML 绑定语义盲区。**整套代码读起来全合理**（C++ 有 revision + NOTIFY、QML 调了 achievements()、delegate 也触碰了 progress.revision），qmllint 不报、AOT 编译过、启动 `root objects = 1`、甚至「首次打开面板」肉眼正确——只有「触发数据变更后重看面板」才暴露模型陈旧。**判别信号**：QML Repeater 的 `model` 是 `<vm>.<method>()` 形式（非 ListModel / 非 Q_PROPERTY），且数据源 C++ 类有独立 `revision` Q_PROPERTY + NOTIFY → 几乎必中此坑（model 绑定不会自动随 NOTIFY 重算）。**通用修法**：把 model 绑定写成「**先读 revision 建依赖、再返函数结果**」的表达式——`model: { const _r = progress.revision; return progress.achievements() }`。`_r = progress.revision` 这一步是对 Q_PROPERTY 的读（建 NOTIFY 依赖），progressChanged → revision 变 → 整个绑定表达式失效重算 → 再次调 `achievements()` 取最新。`_r` 本身不被使用（仅触发依赖建立），但**不可省略**（省了就退回纯函数调用的盲区）。**delegate 内勿再重复触碰 revision**（早期修法在 delegate 加 `property int _rev: progress.revision`）——那只让 delegate 属性重算，**不**让 Repeater model 重算（model 长度不变时 delegate 复用旧数据绑定，刷新不可靠）；正确做法是把触碰收敛到 model 表达式一处。**适用范围**：所有「C++ ViewModel 用 Q_INVOKABLE 返列表 + revision NOTIFY」的 QML 列表（成就 / 统计 / 排行榜 / 任何 method-returns-array 模型），都要在 model 绑定显式读 revision 建依赖。同族： delegate 内直接绑 `modelData.xxx` 静态类型推不出（qmllint 报 unqualified / missing-type）也是同根——QML 对动态数组元素的属性访问无静态类型，属正常噪音非 bug。
+  - 证据：pause-menu 进度 / 统计面板——`Repeater { model: progress.achievements() }` 初次打开显当前成就态正确，但游戏中解锁新成就后重开面板 delegate 不刷新（revision 已 bump、achievements() 返新数据，但 model 绑定没建 NOTIFY 依赖没重算）。改 `model: { const _r = progress.revision; return progress.achievements() }` 后 progressChanged → model 重算 → delegate 刷新正确。
+
 - **qmlcachegen AOT 编译通过 ≠ QML 正确**：`qt_add_qml_module` 的 qmlcachegen 把 `.qml` 预编译进二进制，但它**只做词法/语法层**校验，**不**校验「信号处理器名是否存在」「属性能否被赋值」这类语义绑定。一个写错的信号处理器（如 `onHoverChanged`，应为 `onHoveredChanged`——源自 `HoverHandler.hovered` 属性的 `hoveredChanged` 信号）能通过 AOT 编译 + 链接成功 + ninja 报「no work to do」，却在**运行期组件加载**时报「类型 X 不可用 / 无法分配到不存在的属性」→ `objectCreationFailed` / `root objects after load: 0`。**判别信号**：build 绿 但启动日志 `QQmlApplicationEngine failed to load component` + 「不可用」/「不存在」 + `root objects after load: 0` → 即此坑。**通用原则**：改 QML 后的自测门槛**必须**包含「启动 app + 日志 `root objects after load: 1`」，仅「编译通过 / build 绿」**不算** PASS（与 t16「编译通过但粒子不可见」同族：静态/编译期测试漏判运行期问题）。**Handler 信号命名规则**：Pointer Handler（`HoverHandler`/`TapHandler`/`DragHandler`/`DropArea`）的 change 信号严格由属性名推导：`hovered`→`onHoveredChanged`、`active`→`onActiveChanged`、`pressed`→`onPressedChanged`、`containsDrag`→`onContainsDragChanged`，没有简写；DropArea 的事件处理用 `onDropped`/`onEntered`/`onPositionChanged`（是其声明的方法，非属性 change 信号）。
   - 证据：t23——`Inventory.qml` 的 `HoverHandler { onHoverChanged: ... }` 编译通过、build 绿，运行期 `qrc:/VoxelSandbox/Inventory.qml: 类型 Inventory 不可用 ... 无法分配到不存在的属性"onHoverChanged"`，`root objects = 0`；改 `onHoveredChanged` 后 `root objects = 1`。
 
@@ -637,6 +640,129 @@
 - **证据**：t505——雪球 spawnSnowball 旧签名 `(origin, vel)` 命中分支硬读 `kSnowballDamage`；改 `(origin, vel, damage)`
   + Entity.snowballDamage 字段，fireSnowball（雪傀儡）传 kSnowballDamage、playercontroller 玩家抛传 0。命中分支
   按 `e.snowballDamage > 0` 分流扣血 vs 纯红闪（结合上一条「0 伤害仍需反馈」语义）。
+
+---
+
+## 「带朝向特征面（刻面/正脸）的实体模型，朝向错了会读作『缺件』」（t499 验证）
+
+> 元原则：**一个有「前后面不对称」特征的实体模型（刻面南瓜头 / 正脸眼嘴 / 武器只挂一侧），其「特征面可见性」
+> 完全由实体朝向（yaw）决定。模型几何上「件」在（顶点 / 面都齐），但实体背对观察者时，观察者只见对称的背面
+> （无刻面 / 无脸），读作「这部件缺失」。** 反复调几何尺寸（放大 / 位移 / z-凸出）修不好这类「缺失」报告，
+> 因为根因在朝向，不在几何。判别：用户报「X 部件消失」但 grep 几何代码该部件 Model 确在（顶点 / scale / 位置
+> 都合理）+ NoLighting + 进了场景图（Loader onLoaded reparent）→ 高度怀疑朝向问题，去查 yaw 来源。
+
+- **判别信号**：
+  - 用户报某部件（刻面 / 脸 / 单侧装饰）「消失 / 看不见」，但代码里该部件 Model 几何完整（顶点 / scale / 位置
+    合理）+ NoLighting + 已进场景图（无孤儿）+ 受击红闪 / tint 调制都接了 → 部件本身没问题；
+  - 该部件的「特征面」（眼/嘴/刻面）只贴在模型本地 -Z（前面）或 +Z（后面）一侧，**不是全周对称**；
+  - 实体朝向（yawRad / eulerRotation.y）由 AI 随机选向（aiWander）且不面向观察者 → 观察者常看到背面 → 特征面
+    不可见 → 读作「缺件」。
+  - **强对照**：把实体 yaw 强制面向观察者后，特征面立现 → 确诊。
+- **修法（朝向优先，几何次之）**：
+  - 先审「实体朝向由谁决定」—— 若是 AI wander 随机选向且无「面向观察者」逻辑，加一条「观察者在 N 格内 → yaw
+    朝观察者」（atan2(-dx,-dz)，同本工程 yaw 约定 dir=(-sin,-cos) → QML eulerRotation.y=yawDeg 模型 -Z 正对观察者）。
+  - **后置于 wander**：若 AI 既有 wander（随机选向）又有「面向观察者」需求，面向观察者的 yawRad 赋值须放在
+    aiWander **之后** —— aiWander 在 wanderTimer 到期时会覆盖 yawRad 为随机值；后置保「面向观察者」的最终决定权
+    （视觉朝向恒朝观察者）。aiWander 的位移仍用入口 yawRad（上帧设的朝观察者）→ 实体边走边面朝观察者。
+  - 几何尺寸（部件放大 / 凸出）是次要优化（让部件更醒目），但**单靠几何修不好「朝向错」的报告** —— 必须先正朝向。
+- **通用形态**：凡实体模型有「前后面不对称」特征（生物脸 / 刻面南瓜 / 单侧武器 / 胸口徽章 / 背后背包），且实体
+  朝向可被 AI 自主选向（非锁定朝玩家 / 朝目标），都要审「观察者从典型视角（玩家走近）看该实体时，是否能看到
+  特征面」。看不到 → 加「面向观察者」AI 逻辑（同 aiHostile 朝玩家 / aiWolf 朝目标的 yawRad 赋值模式）。
+- **证据**：t499——雪傀儡模型南瓜头 + 刻面眼/嘴（眼/嘴贴 -Z 前面）。t499 一轮放大南瓜头 + 前推眼/嘴 z 仍报「无头
+  无眼」，根因是 aiSnowGolem 不接 playerPos → 只走 aiWander 随机朝向，常背对玩家 → 玩家只见南瓜对称背面（无刻面）
+  误判「纯雪块无头无眼」。二轮修：aiSnowGolem 接 playerPos + 玩家在 kSnowGolemFaceRange 内 → yawRad 朝玩家（后置
+  于 aiWander 保最终决定权）→ 玩家走近时雪傀儡正脸朝玩家，刻面眼/嘴 + 南瓜头都现。
+
+---
+
+## 「AI 既有 wander 又需面向某目标（玩家 / 敌对 / 配偶）时，面向目标的 yaw 赋值须后置于 aiWander」（t499 验证）
+
+> 元原则：**aiWander（随机选向游荡）在 wanderTimer 到期时会覆写 `e.yawRad` 为随机值。若同一 AI 既有 aiWander
+> 又有「面向目标」需求（防御造物面向玩家 / 狼面向配偶 / 守卫面向敌对），「面向目标」的 yawRad 赋值必须放在
+> aiWander 调用**之后** —— 否则 aiWander 在 timer 到期的那一帧会覆盖掉面向目标的 yaw，实体偶发背对目标。**
+
+- **判别信号**：实体「应该面向 X（玩家 / 敌对 / 配偶）」但偶发 / 周期性背对 X（每 wanderTimer 周期一次跳变），
+  且代码里「面向 X」的 yawRad 赋值写在 aiWander **之前** → 即此坑。
+- **修法**：把「面向 X」的 yawRad 赋值移到 aiWander 调用之后（同一 AI 函数末尾，return 之前）。aiWander 的位移
+  仍用入口 yawRad（上一帧设的面向 X）→ 实体边按朝 X 方向走边保持视觉朝向 X。面向条件不满足（目标出范围）→
+  不覆盖，aiWander 的随机 yaw 生效（自由游荡）。
+- **对照先例**：本工程 aiIronGolem 把「朝目标 yawRad」写在 AI 顶部（敌对检测段），但 aiIronGolem **有目标时不调
+  aiWander**（直接 return），故无覆盖冲突。aiSnowGolem 既有「朝玩家」又**总调 aiWander**（造物始终游荡）→ 必须后置。
+  区分：若 AI 在「有目标」分支直接 return 不走 aiWander，朝向赋值在顶部 OK；若 AI 总走 aiWander，朝向赋值须后置。
+- **通用形态**：审每个「既调 aiWander 又在某条件下设 yawRad 朝目标」的 AI 函数，问「aiWander 会在本帧覆盖 yawRad
+  吗（wanderTimer 到期）？覆盖后朝目标还成立吗？」若不成立 → 朝目标赋值后置到 aiWander 之后。
+- **证据**：t499——aiSnowGolem 一轮把「朝玩家 yawRad」写在 aiWander 之前（紧跟热伤害段），aiWander 在 wanderTimer
+  到期时覆盖为随机值 → 雪傀儡周期性背对玩家。二轮改：朝玩家赋值移到 aiWander 之后（函数末尾 return 前），保最终
+  决定权 → 视觉朝向恒朝玩家（玩家在范围内时）。
+
+---
+
+## QML 绑定「裸语句触碰依赖」会被 qmlcachegen AOT 死代码消除 → 绑定永不重算（t177 熔炉三轮）
+
+> 元原则：**QML 绑定 body 里用「裸表达式语句」触碰一个依赖（`{ root.depProp; return root.otherProp }`，
+> `depProp` 的值被丢弃只用其「读」来注册依赖），在 qmlcachegen AOT 编译下可能被死代码消除——读被优化掉 →
+> 依赖不注册 → `depProp` 变后该绑定**永不重算**，读到的永远是首值。**配套的「触碰聚合属性」（如
+> `furnaceCoordRev`）自身却正常刷新**（它的绑定 body 把 revision 用在算术里，值被真正使用）→ 判别信号：
+> 「聚合属性值对、依赖它的槽绑定值旧」的组合——哪怕 60fps 渲染、帧间绑定 flush 正常，槽绑定也恒旧。**
+> 熔炉三轮实测：`furnaceCoordRev`（值用 revision 算术）刷新到 11930，同组件 `inId`（裸语句触碰
+> `furnaceCoordRev`）恒 0，而 store 直读 `slotIdAt` 已是 523。
+
+- **判别信号**：
+  - QML 组件有「revision / coordRev 触碰聚合属性」（C++ store 的 revision Q_PROPERTY + NOTIFY 直连，值被算术使用 →
+    刷新正常）与若干「读槽 / 读态」绑定（仅 `{ root.xxxRev; return store.yyy() }` 裸语句触碰）并存；
+  - 用 C++ 对象（Q_INVOKABLE 方法 + revision NOTIFY）作数据源时，槽绑定在数据变更后**恒旧**（首值）；
+  - **关键对照**：JS 函数里读 store 直取方法（`store.slotIdAt(...)`）返新值、读绑定（`root.inId`）返旧值，且
+    `revision`/`coordRev` 绑定值已刷新 → 即此坑（裸语句触碰被 AOT 优化掉，依赖未注册）。
+- **修法（触碰值必须参与返回值）**：把触碰读放进绑定返回路径，且守卫恒真、只负责注册依赖：
+  `{ const _r = root.furnaceStore ? root.furnaceStore.revision : -1; return root.furnaceStore && _r >= 0 ? root.furnaceStore.slotIdAt(...) : 0 }`。
+  `revision` 恒 ≥0（只 ++）→ `_r >= 0` 守卫恒真，值真正被使用 → AOT 无法消除读 → NOTIFY 直连注册依赖 → 刷新可靠。
+  **不要**用裸 `root.furnaceCoordRev;`（AOT 可消除）；**不要**用「赋给未使用局部」`const _c = root.furnaceCoordRev;`
+  （未使用仍可能被消除，未验证）。
+- **同族风险**：
+  - **按时间推进的 read-modify-write 循环（熔炉 tick 等 10Hz 状态机）绝不要从只读绑定快照**——绑定刷新有 AOT /
+    帧序不确定性，tick 决策必须**直读 store**（`slotIdAt`/`burnProgressAt` 等同步权威），写回用**脏标记**
+    （tick 动了哪字段写哪字段），不用「`local !== binding`」比较（绑定陈旧会误判不写 / 误写回覆盖玩家操作）。
+    玩家点击槽与 tick 均为同步 JS、事件串行不可能交错 → tick 快照即当前权威态，推进写回无竞态。
+  - **裸语句触碰在「Repeater delegate 绑定」里是否也失效未验证**（hotbar `{ vm.slotRevision; return ... }` 正常，
+    FurnaceUI 根属性 `{ root.furnaceCoordRev; return ... }` 失效——差异疑似「读同组件根属性 vs 读外部 C++ 对象属性」，
+    但未深究；凡见 `{ xxxRev; return ... }` 且数据变更后不刷新，一律改成「读参与返回值」最稳）。
+  - **「返数组的 Q_INVOKABLE 当 Repeater model」同族**（见上一条 pause-menu 经验）：模型绑定必须显式读 revision
+    建依赖，model 表达式一处收敛。
+- **自测门槛**：改「读 store 的 QML 绑定」后，必须 run「变更数据 → 读绑定看是否刷新」（JS 直读绑定 + 直读 store
+  对照），仅 build 绿 / 启动过不算 PASS——AOT 优化掉的依赖编译期不可见、qmlcachegen 不报。
+- **证据**：t177 二轮 FurnaceUI.qml——inId/inCount/fuelId/fuelCount/outId/outCount/burnRemain/smeltProgress 八条
+  只读绑定全用 `{ root.furnaceCoordRev; return ... }` 裸语句触碰 → revision 变后全不刷新 → 熔炉「放肉看不见
+  （东西消失）/ 烤不了 / 不显示」，tick 恒读 0。改「读 revision 参与返回值」+ tick 直读 store 后：放肉即显、
+  点燃烧煤、10s 产出熟猪排、取出不被 tick 恢复（不复制）、全流程无崩溃。
+
+---
+
+## QML / QtQuick
+
+- **QML `url` 值类型（`Image.source` / `Texture.source` / 任何 `Q_PROPERTY(QUrl)` 属性）在 QML JS 里是 QUrl 对象，
+  不是字符串——`.length` 对空 url 和有效 url 都恒 `undefined`**：`source.length > 0` 恒 false（即使 source 已是非空
+  file:// URL），`source.length === 0` 恒 false，裸 `source` 布尔（QUrl("") 也是 truthy）也不可用。**正确判法**：
+  `source.toString().length > 0`（toString 得字符串；空 url → "" → 0；有效 → >0），或 `status !== Image.Null`
+  （Image 专用，status 0=Null/1=Loading/2=Ready/3=Error）。**这是「pack 图标覆盖 / 条件显隐 Image」类绑定恒回退、
+  pack 图永不显示、肉眼只见自绘/占位层的隐藏根因**——source 绑定本身正确（返回合法 file:// URL、图片能解码，
+  `sourceSize` 有值），唯独 `visible` 判定恒 false；且**与「AOT 死代码消除裸触碰」完全无关**（`source.length` 是
+  实打实执行了、值就是 undefined），所以上两轮只修 source 绑定依赖仍不显。**判别信号**：(1) QML 里出现
+  `<某url属性>.length > 0 / === 0 / !== 0` 比较 → 直接换成 `.toString().length` 版本；(2) 肉眼现象 = 「功能层
+  （pack 图 / 条件图标）永不切换、恒显回退层」，而该 url 单独 log 出字符串是完整正确的；(3) 同源对照 = 同一
+  数据源的另一条渲染路径（普通 `Image` 无此判定）正常、走「双层 Image+回退」的路径恒回退 → 判据就在 visible 判定。
+  **通用修法**：url 值类型判空一律 `x.toString().length > 0`；`Q_INVOKABLE` 返的 QString（如 `itemIconSource` /
+  `iconSourceForBlock` / `packPath`）是真字符串，`.length` 无妨——**先确认属性是 url 还是 string 再选判式**。
+  Qt 6.11 运行时实证：空 url `.length`=undefined、非空 `file:///E:/...wooden_pickaxe.png` `.length` 仍 undefined、
+  `toString().length`=0/117、`source.length > 0` 的 visible=false / `source.toString().length > 0` 的 visible=true。
+  本工程一次性修掉六处同坑：ToolIcon / MaterialIcon 的 `packImg.visible`、SurvivalInventory 空护甲槽 pack 占位图、
+  AnvilUI 槽位图标、Main.qml 8 个 mob `Texture.source.length` 的 packTextured/baseColorMap 判定（t421 生物贴图
+  覆盖同样从未生效——pack 启用时 mob 恒用程序生成贴图）。
+  - 证据：t497——ToolIcon/MaterialIcon 的 `packImg.visible: source.length > 0`：source 绑定正确返 pack 的
+    `file:///.../wooden_pickaxe.png`，但 visible 恒 false → Canvas 自绘恒显 → 用户「创造背包工具/护甲图标恒自绘、
+    床/梯却显 pack 图」（床/梯是方块走普通 Image、无此判定；工具/护甲走 ToolIcon/MaterialIcon 双层、有此判定）。
+    改 `source.toString().length > 0` 后可见性正确（运行时探针 Bvis=true）。
+
+
 
 
 
