@@ -539,6 +539,10 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
         { 9,  { QStringLiteral("crafting_table.png"), QStringLiteral("crafting_table_front.png") } }, // BlockRegistry::CraftingTable 工作台
         { 10, { QStringLiteral("furnace.png"),        QStringLiteral("furnace_front.png") } },         // BlockRegistry::Furnace 熔炉
         // t493 恢复：青金石矿不再映射 → 回落程序绘制 3D 立方体 icon（与其它矿石一致；第一轮误加，二轮复盘撤销）。
+        // t413 木梯（Ladder=62，cross 形）：pack 启用时 item 图标用 pack 的 ladder.png（2D 梯子图）覆盖程序
+        //   icon_ladder.png（cross 方块 iconFileForBlock 走程序 cross 图 → pack 未覆盖）；放下贴图 tile 78 已由
+        //   tileFilenameMap 覆盖（三轮实测）。pack 关闭 → 回退程序 icon_ladder.png。
+        { 62, { QStringLiteral("ladder.png") } }, // Ladder 木梯（pack item 图标覆盖）
         // t496 床 16 色变体（BedRed=32..BedBlack=39 既存 8 色 + BedWhite=78..BedBrown=85 t455 新增 8 色）。
         //   pack 仅有一张 item/bed.png（红床模板）→ 16 床色全映射到 bed.png；blockItemIconSource 命中床段时按目标
         //   床色重染模板（retintBedTemplate）落盘 voxelsandbox_rp_bed_<id>.png，返染色图路径 → 16 床色 item 图标
