@@ -1494,3 +1494,284 @@ t18                        （背包，依赖 hotbar）
 - **量大（27 任务）→ 4 批 workflow**（用户要求子 agent + workflow 串行）：批1 A 性能（t488-t490）/ 批2 B 渲染（t491-t499）/ 批3 C 方块机制（t500-t510）/ 批4 D UI（t511-t514）。每批内共享文件串行、跨批可并行评估。
 - **法律**：所有 pack PNG 仅本地 gitignored 加载，commit 仅代码 + 程序贴图 + 映射表（元数据可提交）。子 agent 提示词重申。
 - **参考素材路径**（仅读不改/不 add）：`docs/Default HD 128x Demo 1.8.2.2/assets/minecraft/textures/{block,item,entity}/` —— block（furnace_front_on/lava_flow/lava_still/water_flow/water_still/spruce_sapling 等）、item（工具+套装+bed+empty_armor_slot_*）、entity（bed 模型）。
+
+---
+
+## ⚠️⚠️ R18s 复盘二轮（2026-08-12 用户第二轮 playtest，commit e292121 后）
+
+> **背景**：第一轮 19 ⚠️ 已修并提交 `e292121`。用户第二轮 playtest 逐项复查，报 ~30 项新问题（含第一轮修复不达验收的）。**本节是下一轮开发的权威 bug 清单**。用户在 `logs/voxelsandbox.log` 留了 F3 数据（mob 28.7ms/帧 卡顿 + mesh 161ms/323 rebuild）。
+
+### A. 第一轮修复被退回的（用户明说不行）
+- **t492 工作台/熔炉图标** ❌ 反向：用户要的是 **pack 2D item 图标**（「放回到 item 不行吗」），我删掉 9/10 映射后变成程序 3D 立方体反而更丑。→ **恢复 blockItemIconMap 的 {9, crafting_table} {10, furnace} 条目**（2D pack 图标）。
+- **t493 青金石矿图标** ❌ 反向：用户要 **3D 方块形式**（「里面也是方块的形式」，其它矿石都是 3D 立方体），我加的 {93, lapis_ore.png} 让它变 2D PNG。→ **删掉 {93} 条目**恢复程序 3D 立方体 icon。
+- **t499 雪傀儡** ❌ 全没修到：南瓜头仍消失不见、朝向背对玩家（应朝玩家见眼）、剪刀剪不了、左键攻击无受伤变红。→ 模型/朝向/受击/剪刀全要查。
+- **t510 积雪层视觉** ❌ 仍显示**完整方块**（碰撞半格对，但 mesh 盖了整块 → 看起来完整）。partialblockgeometry SnowLayer 薄板没生效/没走对。
+- **t497 物品图标全替代** ❌ **工具+护甲一个都没换**（床图标经 blockItemIconMap 成功了，工具/护甲走 itemFilenameMap→ToolIcon/MaterialIcon 却全没显示 pack PNG）——「就一个一个替代，不要偷懒」。
+  - **二轮深查结论（2026-08-12 23:05 实测）**：代码链 **已正常工作**，非 bug。实证：(a) `itemFilenameMap` 工具段 0x100-0x112 + 护甲段 0x300-0x313 全映射、pack `item/` 目录确含全部 PNG（433 张）；(b) 运行期 `itemIconSource(0x100)` 返回 `file:///.../wooden_pickaxe.png` 且 `fileExists=1`；(c) ToolIcon/MaterialIcon 的 `packImg Image` `onStatusChanged` 实测全部 `status=1 (Ready)`、**无 Error**（wooden/stone/iron_pickaxe、各档锄/斧/铲/剑、diamond_pickaxe、shears/fishing_rod 全 Ready）。→ pack 图标**确在加载并渲染**，packImg.visible=true、canvas 隐藏。**用户报「没换」可能源于：观察的是 pack 关闭态 / 旧 build / 某具体界面（如生存装备槽的空槽占位 `emptyArmorSlotSource` 待查）。保留任务但降级，需用户提供「哪个界面/哪个物品」截图复现，再定位真实不显示处。**
+- **t501 木梯贴图** ❌ 仍没采纳 `textures/block/ladder.png`（ladder tile 78 映射在但没生效）。
+  - **二轮深查结论（2026-08-13 00:00 实测）**：tile 78→ladder.png 映射在（resourcepackmanager.cpp:333）、pack 确含 `block/ladder.png`、Ladder def tile=78、partialblockgeometry Ladder case 用 `tileIndex(Ladder)=78`。运行期临时调试 `RPDBG tile 78 (ladder) overridden with ladder.png` 实锤 **tile 78 确被 pack ladder.png 覆盖进合成图集**（覆盖 86 瓦片含 78）。→ 木梯贴图**已生效**，用户「没采纳」疑旧 build/观察。同 t497 模式，保留待用户复现。
+- **t494/t513 熔炉烧肉** ❌ 生猪排/生牛肉在熔炉里**烧不了**（熟猪排配方断了）→ 检查 smelting recipe。
+- **t508 船** ❌ 大问题（见下）。
+
+### B. 第一轮 OK/部分 OK 但用户补充的
+- **t491 草方块** ✅ 确认修好。
+- **t500 草方块生存挖→泥土** ✅ OK。
+- **t504 枯死灌木** ✅ 挖下方消失修好。
+- **t496 床** 🟡 80 分：位置/朝向/图标替换 OK；但①16 色图标全是红色床没法区分；②第一人称手持拿的是方块立方体（应床 item）；③睡觉视角错（人直接倒地→镜头落到底→黑屏，应镜头在床头格看床尾）。
+- **t498 玩家装甲 F5** 🟡 部分：第三人称能看到穿了；但①胸甲只护胸、手臂无护甲；②颜色粗糙；③**新严重 bug：生存背包左键拖/取护甲会复制一份**（头盔/胸甲/裤子/靴子都复制）；④耐久显示：只在鼠标停在护甲槽附近才显示、进背包就没了、无进度条、没换行（工具槽有耐久进度条，护甲该有）。
+- **t501 木梯** 🟡 爬梯 shift 下不去卡住——用户说「好像 MC 就是这么设计的，保留」→ 不改。
+- **t511 箱子 tab** ❌ 反向：点了显示全物品（currentTab=5 综合页）用户不要。→ 用户要：标签改成「生存模式背包」，点击**切到生存背包**（物品栏+装备栏），可先在护甲 tab 拿钻石护腿再切过去穿上（**保留 held item 跨切**，旧 onSwitchToSurvivalRequested 清了 heldBlock 要改）。
+
+### C. 第二轮全新问题
+- **熔炉全局唯一** ❌ 重大：全世界的熔炉**共享一个界面/物品栏**（打开都是同一内容）；打掉熔炉内部物品不掉落。→ 需**per-block 熔炉物品栏**（BlockRegistry 存 inventory，位置键控）。箱子大概率同样问题 → per-block 箱子物品栏。
+- **t495 冰世界生成** ❌ 冰把整柱海水全填成冰直到沙底（应只顶层 1-2 层薄冰，不填到底）。
+- **t495 冰水过渡闪烁** ❌ 静止看 OK，**移动/转视角时冰水接触一圈闪烁**（不透明度/渲染次序问题）。
+- **t494 熔炉发光** ❌ 仍不发光（晚上开炉看不见亮）——state-aware lightEmission 或 seed 没生效，需查。且用户报「阴影挖这么深才那」疑似光照/天光问题。
+- **t508 船** ❌ 大堆：①橡木/云杉船都是橡木色（贴图没区分）；②放水上直接飞到水下；③放地面悬空半格；④坐上去是站着（应坐姿）；⑤F3+B 船没有碰撞箱（不是实体）；⑥陆地下水立马卡住+沉底；⑦放水上整个悬浮在水中；⑧能开出虚空（世界边缘）；⑨模型是方形（造型先不管）。
+- **t509 铁傀儡** ❌ 仍造不出。用户描述摆法：最下 1 铁块 + 第二层 3 铁块成 T + 顶放南瓜 → 不生成。用户说存档里造了、看日志。→ 查 logs/voxelsandbox.log 的 probe/placement 行 + 摆法坐标核对（可能 T 形上下反）。
+  - **日志实锤（2026-08-12 22:00-22:17 用户存档）**：`pumpkin placed at 152 61 132` → `iron golem probe ... rowX=0 rowZ=0 | -X=0 +X=0 -Z=0 +Z=0`。probe 查的 **crossbar 层 y-2（=59）全是空气** → 用户实际把 3 铁块 T 摆在 **y-1（=60）**、单 stem 铁块在 y-2（=59）→ **代码期望 crossbar 在下（y-2）、stem 在上（y-1），用户摆法相反（crossbar 在上、stem 在下）→ 永不匹配**。同时段 `snow golem built` 多次成功 → placeBlock + probe 流程本身正常，纯 T 形坐标不匹配。**修法：probe 同时接受 crossbar 在 y-1（stem 下）与 y-2（stem 上）两种 T 形**（或按用户实际摆法校正坐标）；MC 标准是 crossbar 在地面，但用户验收需要其摆法能成。
+- **t514 甜浆果** ❌ ①生存碰到**不扣血**（t467/t514 说做了但没生效）；②F6 看不出生长；③挖掉掉浆果（MC 挖掉不掉，只有成熟采摘得）。
+- **性能卡顿** ❌ F3：fps 39 / mob 28.70ms / mesh 161.30ms（323 rebuild，317 同步）/ mob phys 13.47 + hostile 15.23 → mob tick 吃满帧 + mesh 重建风暴。用户「没怎么破坏方块」就卡。
+- **阴影/天光** ❌ 「挖这么深才那」疑似挖到深坑天光照不到 → 需确认是否 bug 还是正常亮度衰减。
+
+---
+
+## ⚠️⚠️ R18s 复盘三轮（2026-08-13 用户第四轮 playtest，commit 9ddf825 后）
+
+> **背景**：三轮修了熔炉崩溃/仙人掌/成就/铁傀儡/木梯/t497 图标/裸语句触碰全局（3e7a498）/成就树/船/生存物品栏分页（dd722d9）。用户第四轮逐项复查 + 新发现。**本节为下一轮权威 bug 清单**。用户明确：先写 devplan（本文件不提交），用户会改/填 PNG 链接，改完再修。
+
+### A. 反复/方向（图标类，用户第三次改口，务必确认后再动）
+- **t492 工作台/熔炉图标** ❌❌ **又要 3D**：用户「创造背包工作台熔炉图标还是 2D，必须想办法弄成 3D 的工作图标」。三轮前用户要 pack 2D（「放回到 item 不行吗」）→ 我恢复 pack 2D；现在又要 3D。**最终需求：像草方块那样 3D 方块图标**（用户「你放下来的是可以的，之前炒方块那些你也是有方块数据，也是一样可以弄出来的」）。→ 参考草方块：`iconFileForBlock` 程序 3D 立方体（icon_crafting_table.png/icon_furnace.png 已存在）→ **从 blockItemIconMap 移除 {9,10} 恢复 3D**（回到二轮前？不，二轮前是 3D，用户当时嫌丑要 2D……现在又要 3D）。**方案：用 build_cube_icons.py 重做更精致的 3D 图标**（正面为主投影，现 icon 可能太简单），而非退回旧 3D。
+- **t497 工具/护甲 item 图标** ❌❌ **仍是老贴图**：用户「创造模式背包工具/护甲贴图依旧是老贴图，催促多少次了」。三轮已修 MaterialIcon/ToolIcon 裸触碰（57ecb16）理论上 pack 激活后刷新。**用户要发固定链接的 PNG**（见下 D1 接口）。→ 用户将提供 PNG 链接，**devplan 留接口**，用户填后按链接取图换。
+- **t511 创造背包「生存物品栏」UI** ❌ 已做（dd722d9）但**布局错位**：①左人物/装备图标比物品栏突左 1 格；②右 2×2 合成**结果槽被挡看不见**；③底部 hotbar 行比主栏 3 行突左 1 格。→ 对齐修复。
+
+### B. 新 bug（本轮全新/回归）
+- **木梯放下形状** ❌ 拿手上已换 pack icon（OK），但**放下形状还是旧粗糙形状**（上下部分太宽）。→ partialblockgeometry Ladder 单片贴墙 quad 比例/贴图查（用户「直接替换」）。
+- **夜间火把/熔炉不发光** ❌ 白天有阴影时熔炉发光 OK，但**晚上连火把也不发光** → 光照系统夜间方块光失效。查：夜间方块光 flood / 天光乘子是否误压方块光 / chunkgeometry 顶点色。
+- **挖掘声音** ❌ 挖草方块/泥土**没声音**，挖树叶/原木有声音。→ 声音系统（草/土音缺失或映射错）。
+- **路程统计恒 0** ❌ 统计数据「走过路程」一直是 0。→ 三轮埋点 onMove 跳过（无信号调用方）→ 补 playercontroller 位移信号 → progress.onMove。
+- **箱子 shift+左键** ❌ 箱子界面 shift+左键物品应**放入箱子**（不是放回背包）。优先级。
+- **破箱不掉落内容** ❌ 箱子打掉内部物品不掉落。→ 破箱清 ChestStore + 掉内容（仿破熔炉）。
+- **功能方块上放方块** ❌ shift+右键蹲下在功能方块（熔炉/箱子/工作台等）上应**放方块**而非开界面。→ shift+右键放置优先于开界面。
+- **附魔台/铁砧/发射器 UI 打不开** ❌❌ 三个功能方块界面没做（很久的老问题）。→ 用户要求：像工作台蓝本（上面功能区 + 下面背包 4 行），**先做界面**（功能后补）。工作台=3×3合成+产物+背包；附魔台/铁砧/发射器同理（界面布局，功能后补）。
+- **甘蔗悬空** ❌ 甘蔗底下方块没了上面的不掉落（中间打掉最上不掉、底下沙子打掉不掉）。→ 回归（仙人掌写过，甘蔗没写？）。查甘蔗支撑判定。
+- **积雪层自然生成** ❌ ①雪原地貌应远离海边（现海边有积雪层）；②积雪层底下应先雪块再泥土（泥→雪块→积雪层），现可能泥上直接积雪层（且不生成草方块）。→ worldgen 雪原调整。
+- **积雪块不能浮空** ❌ 打掉积雪层下方方块应掉落（保留层数）。→ 加积雪层重力/支撑掉落。
+- **进度系统问题** ❌ 进度系统想要原版那种类似于树一样的从根节点出发一直继续后续成就的，可以通过鼠标拖动查看
+
+### C. 雪傀儡/铁傀儡（造型 + 行为）
+- **雪傀儡** ❌ ①**仍无南瓜头**（四轮持续）；②**一直固定朝向玩家**（用户要生成时固定朝，平时随机）；③打了一下**浮空**；④F3+B **碰撞箱很小看不到完整**。→ 造型（南瓜头 Model 明明在，为何不显？）+ 朝向（aiSnowGolem 过度 facePlayer）+ 浮空/碰撞箱，受伤没有红色动画。
+- **铁傀儡** ❌ 还是**全白**（用户「铁块没看到你修改，白的跟雪块做的」）。三轮加了深灰 #7d848c + 锈斑（72df223），用户仍说白。→ 可能 72df223 没生效/被覆盖，或用户看旧 build。**用户要提供生物贴图链接解析**（见 D2）。
+- **生物贴图解析** ❌ 用户问：能否解析 MC 式立方体展开 PNG 贴图到模型。→ 需调研（用户将给链接）。devplan 留接口。
+
+### D. 用户将提供的素材链接（**留接口，用户填**）
+- **D1. 工具/护甲 item PNG 链接**：<repo>\docs\Default HD 128x Demo 1.8.2.2\assets\minecraft\textures\item文件夹下面的 `diamond_helmet.png`+`diamond_chestplate.png`+`diamond_leggings.png`+`diamond_boots.png` 分别=钻石的头/胸/腿/鞋 item 图标，**金/铁/皮革同族**也是xxx_helmet等前缀；当前**全没换**（上轮链接被吞），然后还有生存模式装甲显示的空装甲图标分别是empty_armor_slot_boots.png靴子+empty_armor_slot_leggings.png裤子+empty_armor_slot_chestplate.png胸甲+empty_armor_slot_helmet.png头盔，以及各种工具也是在这个item目录下diamond_axe.png是钻石斧头，diamond_hoe.png是钻石锄头，diamond_pickaxe.png是钻石镐，diamond_shovel.png是钻石铲子，diamond_sword.png是钻石剑，当然还有铁金石头和木头的（用户填固定链接，替换创造背包工具/护甲老贴图，之前床和木梯我都看到成功读取进来了）
+- **D2. 生物（雪傀儡/铁傀儡等）贴图 PNG 链接**：<repo>\docs\Default HD 128x Demo 1.8.2.2\assets\minecraft\textures\entity\snow_golem.png这个是雪傀儡的，<repo>\docs\Default HD 128x Demo 1.8.2.2\assets\minecraft\textures\entity\iron_golem这个文件夹是铁傀儡的（用户填；需解析立方体展开图到模型），但是说实话不如先做一个生物显示大全可以显示他们的3D贴图就好了，就是生物实体图鉴一样的东西，现在不是做了一个材质包里面设置可以看方块的3D贴图吗，继续在里面更新好了，可以直接弄在一起好了，然后怪物蛋的3D模型展示的时候就是直接显示你拼接好的3D模型吧，看看能不能直接做到显示先吧。
+
+### E. 船（继续上轮）
+- shift 下船提示应**~5 秒后自动消失**（现常驻）。
+- 船**太轻**（身体撞就明显动），应更重（碰撞体质量）。
+- 坐姿动画**没做好**（用户「你做的就是人直接卡在地底」；明确坐姿=腿 90°折，非下沉卡地）。
+- 船**内有水**（船凹下去水显示在里面，应没水——船体应不透明阻水视觉）。
+- 船**不能方便上陆地**（碰岸边速度>阈值应损坏）。
+- 船撞坏掉**木板+木棍**（非船本身）；正常攻击挖船才掉完整船。
+- 橡木/云杉船**同模型同色**（需区分贴图）。
+
+### F. 已确认 OK（用户表扬）
+- 熔炉发光（白天）✅、积雪层放下半格 ✅、冰水 ✅、床 ✅、工作台/熔炉 pack 图标切换机制 ✅（仅要 3D）。
+
+---
+
+## ✅ R18s 复盘四轮 Workflow 结果（2026-08-13，HEAD ca0802e）
+
+> Workflow `wf_0d288f6c-b0a`（了解×2 + 实现×4 + 验证×1，7 agent 全成，~1h40m）。本轮聚焦 D1+D2+路程统计。
+
+### 已修复（4 commit）
+- **D1 工具/护甲 item 图标（t497 三轮真根因）** ✅ `455b812` fix(t497)
+  - **真根因（隐藏极深）**：QML `url` 类型属性（Image/Texture.source）在 JS 是 **QUrl 对象**，`.length` 对空/非空 url 都恒 `undefined` → `visible: source.length > 0` 恒 false → packImg 永隐 → 恒显自绘 canvas。前两轮只修了裸语句触碰（AOT），从未碰 visible 判定。
+  - 修：`source.length > 0` → `source.toString().length > 0`，全工程 5 文件（ToolIcon/MaterialIcon/SurvivalInventory/AnvilUI + Main.qml）。
+  - **同一 bug 还造成铁傀儡全白**（t421 的 16 处 mob 贴图 `tex.source.length > 0 ? tex : null` 恒 false → 永纯色）。
+  - U1 探查说「源码+build 都对，用户该是旧 build」——错（只读查结构抓不到运行期 JS 语义）。D1 agent 用 runtime Qt6.11 探针实证才抓到。**教训：`部分工作部分不工作`（床/木梯 OK、工具/护甲不 OK）是 url-guard bug 的诊断信号。**
+- **D2a 生物图鉴（首次尝试加载 entity PNG 拼 3D）** ✅ `cbbca33` feat(ui)
+  - ResourceBrowser.qml 新增「生物」区块：8 mob（猪/牛/羊/蹒跚者/骸骨/潜行者/蜘蛛/鸡）+ 雪傀儡/铁傀儡，选中 → 右侧 View3D 旋转 MobModel 3D + pack entity 贴图。
+  - 生物蛋（0x20F..0x216/0x22C/0x22E）选中 → 自动显对应 mob 3D 模型（mobTypeForEgg 派生绑定）。
+- **D2b 雪傀儡/铁傀儡接 pack 实体贴图 + 修铁傀儡全白** ✅ `625561f` feat(golem)
+  - MobModel 扩 mobType 12（雪傀儡=柱身两雪块）/13（铁傀儡=躯干+双腿+双长臂）；mobEntityMap 加 {12,"snow_golem.png"}(扁平)+{13,"iron_golem/iron_golem.png"}(子目录)。
+  - Main.qml 傀儡 delegate 身体盒改走 MobModel + pack 贴图（T 字 UV 展开）；南瓜头/眼/嘴仍是独立橙色 overlay（t499 需求，不进贴图）。
+  - pack 关 → 纯色雪白/铁灰回退。**「铁傀儡全白」已修**（pack iron_golem.png 铁纹才显铁质；纯色铁灰读作白）。
+- **B1 路程统计恒 0** ✅ `ca0802e` fix(stats)
+  - playerprogress.onMove 早已存在但没接线。playercontroller::reportHorizSpeed（step 各出口唯一位移瓶颈）算 √(dx²+dz²)，delta>0 emit moved(delta) → Main.qml Connections → progress.onMove。
+
+### 验证（voxel-tester-build 全 PASS）
+- 构建零警告（仅 windeployqt dxcompiler 系统噪音）；冒烟 `root objects after load: 1`；红线全守（无 MC 专名进 UI / 全部 Model NoLighting / 无 PNG 进 git）。
+
+### 仍待办（dev-plan 其余，下轮）
+- A: t492 工作台/熔炉图标要 3D（第三次改口，待确认）；创造背包生存物品栏 UI 错位对齐。
+- B: 夜间火把/熔炉不发光（光照系统）；挖草/土没声音；破箱不掉内容；箱子 shift+左键放箱子；功能方块 shift+右键放方块；**附魔台/铁砧/发射器 UI 打不开**（AnvilUI/EnchantingTableUI 已存在，是 playercontroller 右键路由没触发 enchantingTableOpened/anvilOpened）；甘蔗悬空；积雪层生成/雪块不浮空；进度树拖动。
+- C: 雪傀儡（朝向/浮空/碰撞箱/受伤动画）；铁傀儡游戏内 pack 贴图（图鉴已 OK，游戏内 in-world 因 UnitCube pos-only 仍纯色 —— #195 部分残留，需 CrackBox 几何换）。
+- E: 船（shift提示5秒/太轻/坐姿90°/内有水/碰岸坏/掉木板木棍/橡云杉区分）。
+
+---
+
+## ⚠️⚠️ R19 复盘（2026-08-13 用户第 19 轮 playtest，HEAD ca0802e 后）
+
+> **背景**：R18s 四轮 Workflow（455b812/cbbca33/625561f/ca0802e）修了：D1 url-guard（工具/护甲图标）、D2a 生物图鉴、D2b 傀儡贴图、B1 路程统计。用户第 19 轮 playtest 逐项复查 → **部分 R18s 项用户说没生效（可能是旧 build / 可能真没修好），需逐项核验 + 大量新 bug**。
+> **本轮铁律（用户明确）**：先写 dev-plan，修 bug 与新增功能**分开**，先写修 bug；新功能用 **t515** 起的新号；PNG 链接留接口（用户填）。**本节写完不修，等用户改 dev-plan 后再修。**
+> 注：用户报告「工具/护甲仍是老贴图」「铁傀儡仍全白」「路程仍 0」—— R18s 这三项代码层已修（455b812/ca0802e）。**第一优先级：确认用户跑的是 HEAD ca0802e（非旧 build）**。若已是最新 build 仍复现 → 代码层再查（可能还有第二处 url-guard 漏网，或 itemFilenameMap 某 id 漏）。
+
+### 🐛 第 19 轮 — 修 bug（R18s 残留 + 新发现 + 回归）
+
+**B1. 工具/护甲 item 图标** ✅ 工具已 OK + ❌ 皮革护甲白色（待 retint）
+- ✅ **工具 + 金属护甲（铁/金/钻石）已显 pack 贴图**（用户确认「工具护甲是新贴图了」）—— R18s 455b812 url-guard 修复生效。
+- ❌ **皮革护甲显白色**（用户「皮革盔甲颜色有问题，是白色的，我去对照了资源确实是白色的」）。pack `leather_helmet.png`/`leather_chestplate.png`/`leather_leggings.png`/`leather_boots.png` 是**白底**（MC 设计为可染色 base，未叠 `leather_*_overlay.png` 棕色层）。修法**同床 retint**：复用 `retintBedTemplate` 机制，把皮革 4 件 retint 成皮革棕（#8a5a2b 系，与 MaterialIcon 皮革配色一致）后落盘 `voxelsandbox_rp_leather_<id>.png`，返该 file://。皮革 tier 的 4 个 id（0x300-0x303）特殊处理（命中皮革 → retint 棕），其余 tier 原样。
+
+**B2. 铁傀儡贴图不对（含所有生物贴图错位）** ❌❌❌ 见 C3（重写实体 UV）—— **R18s 揭开的老 bug**
+- 用户：「铁傀儡和其他生物都不对，贴图不对」。
+- **根因（非 R18s 引入，是被 R18s 揭开）**：R18s 之前 mob pack 贴图被 url-guard bug 永久屏蔽（`tex.source.length > 0` 恒 false → 永纯色），**从未真正加载过 pack 贴图**。R18s 修 url-guard 后 pack 贴图**第一次真正加载** → 暴露 MobModel 的「T 字格子游标 UV」**根本不是 MC 实体贴图的真实 UV 布局** → 全部生物（猪牛羊蹒跚者骸骨潜行者蜘蛛鸡 + 雪傀儡铁傀儡）采样错位 → 看着不像。
+- 实测 pack 贴图尺寸：pig 256×128 / cow 512×256 / zombie 256×256 / iron_golem 1024×1024 / skeleton 256×128 / creeper 512×256 / snow_golem 512×512（HD 包，MC base 的整数倍缩放）。**UV 分数同 MC base，需按 MC 实体 model JSON 的 box-UV 布局精确对齐**（详见 C3）。
+- → **归入 C3 重写实体 UV**（本轮高优先，因用户明确「铁傀儡和其他生物贴图不对」）。
+
+**B3. 路程统计仍 0** ❓（R18s 说修了 ca0802e，用户仍报）
+- 用户：「走过路程一直都是 0 格」。
+- 查证：build ≥ ca0802e；moved 信号是否真发（reportHorizSpeed 在静止 / 飞行 / 船上是否都过瓶颈）；progress.onMove 路由是否接通。
+
+**B4. 工作台/熔炉图标要 3D（第三次改口）** ❌❌ 用户这次明确坚持要 3D
+- 用户：「创造模式背包工作台跟熔炉，这个图标还是 2D 的，必须给我想办法弄成 3D 的工作图标。你放下来的这个东西它都可以的，而且之前的草方块那些你也是有他们的方块数据，也是一样可以弄出来的」。
+- **最终需求**：像草方块那样 3D 立方体图标（用户明确「你放下来的是可以的」= 放下的工作台/熔炉方块是 3D 的，背包图标也该 3D）。方案：从 blockItemIconMap 移除 {9,10}（当前让它们走 pack 2D item 图），恢复程序生成 3D 立方体图标（icon_crafting_table / icon_furnace）；或用 build_cube_icons.py 重做更精致的 3D 等距投影。
+
+**B5. 木梯放下形状仍粗糙** ❌ 拿手上已换 pack icon（OK），但**放下的形状上下部分太宽**，粗糙。
+- 用户：「放下来的这个形状它还是之前的那个形状……上下的部分都是非常的宽的，能不能直接替换？」
+- 查 partialblockgeometry Ladder：单片贴墙 quad 比例（上下应窄、贴墙薄板）。R18s t501 换了贴图但几何形状没改。
+
+**B6. 夜间火把/熔炉不发光（光照系统 bug）** ❌❌
+- 用户：「熔炉发光现在是修复了（白天有阴影时 OK），但到晚上它就不发光了，只有白天有阴影时才发光，晚上连火把也不发光了」。
+- **光照系统 bug**：夜间方块光（火把/熔炉 flood）失效。查：夜间天光乘子是否误压方块光；chunkgeometry 顶点色；方块光 flood 是否受昼夜乘子影响（不应受 —— 方块光时间不变，PLAN §H）。白天因天光在、有阴影对比看出发光；夜间天光归零、方块光本该撑起照明却没 → 方块光 flood 没写入顶点色 / 或被天光乘子覆盖。
+
+**B7. 挖草方块/泥土没声音** ❌ 挖树叶/橡木原木有声音，挖草/土没声音。
+- 查：声音系统 grass/dirt 挖掘音缺失或 blockId→音效映射错。digSoundFor(blockId) 之类。
+
+**B8. 箱子界面 shift+左键应放入箱子** ❌ 优先级 bug
+- 用户：「箱子打开页面按 shift+左键某物品，应直接放到箱子里面去，而不是放回背包。这种箱子界面得这样做（优先级）」。
+- 查：箱子界面 shift+左键逻辑（InventoryOps.js / ChestUI.qml）—— 现在放回背包，应判「当前在箱子界面 → shift+左键放入箱子」。
+
+**B9. 破箱不掉落内容** ❌ 箱子放东西进去后挖掘掉，内部物品不掉落。
+- 查：破箱时清 ChestStore + 把内部物品作为掉落实体（仿破熔炉 / t177 模式）。当前破箱只移除方块、不 dump 内容。
+
+**B10. 功能方块上 shift+右键应放方块** ❌ 蹲下右键功能方块应放方块而非开界面
+- 用户：「shift（蹲）+右键就可以正常放置东西在他们身上。比如想在熔炉上面放方块，shift+右键直接放方块，而不是右键打开熔炉界面」。
+- 查 playercontroller useBlock 路由：shift（sneak）+右键功能方块（熔炉/箱子/工作台/附魔台/铁砧/发射器）时，**放置优先**（右键放选中方块在该功能方块面上），不触发开界面。
+
+**B11. 附魔台/铁砧/发射器 UI 打不开** ❌❌（老问题，这次重点）
+- 用户：「附魔台铁砧跟发射器根本打不开这三个的 UI 界面，这做的实在是不行，很久之前的问题」。
+- 现状：AnvilUI.qml / EnchantingTableUI.qml 已存在（shell-mode，非工作台蓝本）；DispenserUI.qml **不存在**。
+- 用户要求：**以工作台为蓝本重做**（打开后底下 4 行背包 + 上方功能区）。「附魔台铁砧跟发射器也是一样道理，打开后显示背包物品，否则怎么把背包物品放进去。先做界面，功能后补」。
+- → **新功能 t515/t516/t517**（见下「新增功能」段，因是重做 UI 非纯修 bug，用户说「以工作台蓝本」= 新功能）。附魔台/铁砧现有 shell-mode UI 要改成工作台蓝本（顶部功能区 + 底部背包 4 行）。
+
+**B12. 甘蔗悬空（回归）** ❌ 甘蔗底下没了上面不掉落。
+- 用户：「3 格高甘蔗中间打掉，最上面那格没掉；底下沙子打掉也不掉。以前应该写好的，仙人掌写好了，甘蔗没写？」。
+- 查甘蔗支撑判定（cactus 有 neighbor-support drop，sugarcane 漏）。worldgen / blockupdate 支撑链。
+
+**B13. 积雪层手持/item 图标仍是整块** ❌ 放下已 OK（半格），但**手持第一人称 + 背包 item 图标仍像整雪块**。
+- 用户：「积雪层拿在手上第一人称 + 背包 item 图标跟雪块一模一样都是完整方块。理论上积雪层是 1/8 雪块拿在手上。得标识一下（现在只能靠悬浮确认）」。
+- 查：snow layer item icon / 手持渲染 —— 该用薄板图标（1/8 高）区别于雪块。
+
+**B14. 积雪层自然生成地貌问题** ❌❌
+- 用户三点：
+  1. 雪原应**远离海边/沙滩**（现海边有一撮积雪层）。
+  2. 积雪层底下应**先雪块再泥土**（泥→雪块→积雪层），现可能泥上直接积雪层（且不生成草方块）。
+  3. 雪原地形 = 正常草原底下（泥土，不生成草方块）→ 雪块 → 积雪层。
+- 查 worldgen 雪原 biome 雪层放置逻辑。
+
+**B15. 积雪块不能浮空（支撑掉落 + 保留层数）** ❌❌
+- 用户：「积雪块不能浮空。打掉它下面方块应有掉落效果。原本多少层掉下来还是多少层（8 层掉下来还是 8 层 ≈ 雪块；1-2 层掉下来保留 1-2 层）。需查 MC：满 8 层的打掉是否掉落，还是不掉（MC 雪层无重力，但本工程用户要掉落保留层数 —— 需确认）」。
+- 加积雪层重力/支撑掉落 + 掉落实体携带层数 metadata。
+
+**B16. 创造背包「生存物品栏」UI 错位（对齐修复）** ❌ 用户精确描述三处错位
+- 1. 左上人物/空装备图标比背包物品栏**往左突出 1 格**。
+- 2. 右侧 2×2 合成**只看到放东西的地方，产物格被挡看不见**（被什么挡？）。
+- 3. 底部 hotbar（手持 1-9）比上面 3 行背包**往左突出 1 格**。
+- 3 行背包居中正常。→ 纯布局对齐修复（Inventory.qml / SurvivalInventory.qml tab 6 分页）。
+
+### 🆕 第 19 轮 — 新增功能（t515+，用户要「以工作台蓝本」）
+
+**t515. 附魔台 UI（工作台蓝本重做）** — 现 EnchantingTableUI 是 shell-mode（选中槽操作），改成像工作台：上方附魔功能区（占位，功能后补）+ 底部背包 4 行（能放/取背包物品）。先做界面，功能后补。
+**t516. 铁砧 UI（工作台蓝本重做）** — 现 AnvilUI 是 shell-mode，改工作台蓝本：上方修复/合并/重命名功能区 + 底部背包 4 行。先界面，功能后补。
+**t517. 发射器 UI（新建，工作台蓝本）** — DispenserUI.qml 不存在，新建：上方 9 格发射器物品栏 + 底部背包 4 行（像工作台/熔炉的容器+背包布局）。先界面，功能后补。
+
+### 🐉 第 19 轮 — 雪傀儡/铁傀儡（造型 + 行为，承接 C 段）
+
+**C1. 雪傀儡造型/行为问题** ❌❌（t499 残留）
+- 1. **仍无南瓜头**（四轮持续）—— 南瓜头 Model 明明在，为何不显？查 Main.qml snow golem delegate 南瓜头 overlay 可见性。
+- 2. **一直固定朝向玩家** —— 用户要「生成时固定朝，平时随机」。查 aiSnowGolem 过度 facePlayer（t499 二轮改过头）。
+- 3. **打一下浮空** —— 受击后 y 不归位。查 knockback / 受击位移恢复。
+- 4. **F3+B 碰撞箱很小** —— 看不到完整碰撞箱。查雪傀儡 AABB（应为 2 格高：底雪块 + 顶雪块 + 南瓜头）。
+
+**C2. 铁傀儡仍全白** —— 同 B2（R18s 说修了，用户仍报，先查 build/pack）。
+
+**C3. 生物贴图精确 UV 解析（高优先 —— R18s 揭开的老 bug）** ❌❌❌
+- 用户：「铁傀儡和其他生物都不对，贴图不对」+ 「我给你材质包里生物贴图链接，你能不能网上找资料查怎么解析？它是一张 PNG 类似立方体展开图」。
+- **现状**：MobModel 用「每盒占一个不重叠格子的 T 字游标 UV」（mobmodel.cpp addBox packTextured 分支）—— 这是**粗略格子映射，不是 MC 实体贴图真实 UV**。MC 实体贴图里头/身/四肢在**固定坐标**（由 entity model JSON 的 box-UV 定义），按标准公式展开。当前 UV 与 pack 贴图布局完全不对 → 全部生物采样错位。
+- 实测 pack 贴图尺寸（HD 包，MC base 整数倍）：pig 256×128 / cow 512×256 / zombie 256×256 / iron_golem 1024×1024 / skeleton 256×128 / creeper 512×256 / snow_golem 512×512 / chicken 等。**UV 分数 = MC base 比例**（如 pig 64×32 base → 256×128 = 4× → UV 坐标分数不变，只是像素更细）。
+- **方案（本轮实现）**：
+  1. 调研 MC 1.8 entity model：每个 mob 的 box list（head/body/leg/arm 各自的 size + uv offset in texture），参考 MC wiki "Entity modeling" / 1.8 `assets/minecraft/models/entity/<mob>.json`。
+  2. MobModel 按 mobType 各 box 用**真实 UV 坐标**（替换当前游标格子），pack 贴图按 box 部位正确采样。
+  3. 各 mob box 尺寸要匹配 MC 比例（当前是原创方块化，比例不同 → 即便 UV 对也显怪。**用户要的是 pack 贴图能辨认出那个生物**，box 尺寸需向 MC 靠拢，至少头/身/四肢比例对）。
+- 这是工作量大的项（10+ mob 各自 box-UV），但用户明确要 → 本轮重点。
+- **PNG 链接接口留 D 段（用户填 D2）**。
+
+### ⛵ 第 19 轮 — 船（承接 E 段，继续修）
+
+**E1. 下船 shift 提示应 ~5 秒自动消失**（现常驻）。
+**E2. 船太轻**（身体撞就明显动，应更重，碰撞体质量）。
+**E3. 坐姿动画没做** —— 用户明确：「坐姿 = 腿与身体 90°（shift 更厉害，钝角变直角）。现在是人卡地底」。查 boat sit pose（腿 90° 折，非下沉卡地）。
+**E4. 船内有水**（船凹下去水显示在里面，应没水 —— 船体应不透明阻水视觉）。
+**E5. 船不能方便上陆地**（碰岸边速度>阈值应损坏）。
+**E6. 船撞坏掉木板+木棍**（非船本身；正常攻击挖船才掉完整船）。
+**E7. 橡木/云杉船同模型同色**（需区分贴图）。
+
+### 📎 第 19 轮 — 素材链接接口（用户填）
+
+**D1. 工具/护甲 item PNG 链接（B1 用）：** ____________
+（路径：`<repo>\docs\Default HD 128x Demo 1.8.2.2\assets\minecraft\textures\item\`，文件如 diamond_helmet.png / wooden_pickaxe.png 等，含铁/金/石/木/皮革同族 + empty_armor_slot_*.png 空护甲槽）
+
+**D2. 生物贴图 PNG 链接（C3 调研用）：** ____________
+（路径：`<repo>\docs\Default HD 128x Demo 1.8.2.2\assets\minecraft\textures\entity\`，含 snow_golem.png / iron_golem/ / pig/ cow/ sheep/ zombie/ skeleton/ creeper/ spider/ chicken/ 等子目录。需解析立方体展开图 → 精确 UV）
+
+### ✅ 第 19 轮 — 已确认 OK（用户表扬）
+- 熔炉白天发光 ✅（用户「这点我非常喜欢」）
+- 积雪层放下半格 ✅
+- 冰水 ✅
+- 床 ✅
+
+---
+
+## ✅ R19 Workflow 结果（2026-08-13，HEAD 7f238df）
+
+> Workflow `wf_e9b5c40a-11a`（了解×2 + 实现×3 + 验证×1，6 agent 全成，~1h31m）。聚焦 C3 实体 UV + B1 皮革 + B6 夜间光。
+
+### 已修复（3 commit）
+- **C3 重写实体贴图精确 UV** ✅ `2df04fc` feat(mob)
+  - **真修法**：MobModel 的 `mobFaceQtUV()` 用 MC 标准 ModelRenderer.addBox 6 面 box-UV 公式（Top/Left/Front/Right/Bottom/Back 像素矩形）+ 水平面 180° 轴向 remap（`kMcFace={1,0,2,3,5,4}`，像素实测 creeper 论证）+ v 翻（`mcToQtV=1-py/texH`）。每 mob 设 `g_texW/H`（pig 64×32 / zombie-sheep 64×64... / iron_golem 128×128）。
+  - **数据源（非编造）**：U1 agent WebSearch 查到 MinecraftConsoles（MC Java 1.8 近逐行 C++ 移植）的 ModelPart.addBox 原始值 + MC wiki，交叉确认。10 mob（pig/cow/sheep/shambler/bones/stalker/spider/chicken/snow_golem/iron_golem）全用真实 MC box textureOffset + size。
+  - **视觉「像不像」需人工验证**（GUI 无法自检）。修前是游标格子（全错位），修后按 MC 真实布局。
+- **B1 皮革护甲 retint 棕** ✅ `6239a28` fix(rp)
+  - 复用床 retint 机制：`retintLeatherTemplate` 用 Rec.601 luma 映射到皮革棕三锚点（#5e3d1c/#8a5a2b/#a87340，同 MaterialIcon drawArmor 皮革配色）。皮革 4 件（0x300-0x303）命中 retint，非皮革 tier 原样。
+  - 落盘实证：AppLocalData 有 `voxelsandbox_rp_leather_768/769/770/771.png`，平均 RGB≈(128-141,85-94,42-48) = 棕色（R>G>B，非白底）。
+- **B6 夜间方块光失效（光照系统）** ✅ `7f238df` fix(light)
+  - **根因**：QML `baseColor = terrainLight(skyLight)` 作为**全局**材质乘数，因 `vertexColorsEnabled:true` → final = baseColor × vertexColor × tex，baseColor 把方块光通道也压了。午夜 skyLight=0 → baseColor=0.4 → 火把(block 0.93) 被压到 0.37（违反 PLAN §H 方块光时间不变）。
+  - **修法**：dayMul 从 QML baseColor 移进 C++ 顶点色烘焙的**天空分量**：`vc = max(sky*(1-shadow)*dayMul, block)`（5 处烘焙点：cross/partial/water-变面/greedy/cube）。block 不被 dayMul 压。地形材质 baseColor → 白。配套 sunRebuildDue 量化阈值（dayMul Δ≥0.03 才重建）防光照风暴。
+  - **夜间发光需人工验证**（GUI 无法自检夜间）。
+
+### 验证（voxel-tester-build 全 PASS 6/6）
+构建零警告（强删 obj 重编 4 文件 exit 0）· 冒烟 `root objects after load: 1` · 红线全守（Shambler/Bones/Stalker 区隔名 · NoLighting · 无 PNG 进 git）。C3/B1/B6 三项复查均 PASS + 运行期落盘实证。
+
+### R19 仍待办（dev-plan R19 段其余，下轮）
+- B4 工作台/熔炉图标 3D（第三次改口）；B5 木梯放下几何；B7 挖草/土没声音；B8 箱子 shift+左键放箱子；B9 破箱掉内容；B10 功能方块 shift+右键放方块；B11 附魔台/铁砧/发射器 UI（→ t515-t517 新功能）；B12 甘蔗悬空；B13 积雪层手持图标；B14 积雪层生成地貌；B15 积雪块不浮空；B16 创造生存物品栏 UI 错位。
+- C1 雪傀儡（南瓜头/朝向/浮空/碰撞箱）；C2 铁傀儡游戏内（图鉴 C3 已修，in-world 需 CrackBox 几何换）。
+- E1-E7 船全套。
+- t515-t517 附魔台/铁砧/发射器 UI 工作台蓝本重做。
+
+
+
+
+
