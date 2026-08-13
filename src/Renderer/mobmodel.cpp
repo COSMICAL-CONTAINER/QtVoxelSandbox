@@ -38,53 +38,92 @@ const Sgn kFace[6][4] = {
 // t241 腿摆动幅度（弧度，约 29°）。机制等价 MC 四足 mob 腿摆幅（非精确数值复刻）。
 constexpr float kLegSwingAmp = 0.5f;
 
-// t421 资源包生物贴图（pack entity texture）UV 模式：rebuild 入口设一次，addBox 系列读（GUI 线程内 MobModel
-//   生命周期，无并发）。pack 关 → 全脸 [0,1]²（kFace 原 u,v）；pack 开 → 每盒 6 面按「T 字展开」映射进 entity
-//   贴图一个不重叠小格（游标逐盒前进 + 行回绕）→ 身体各部贴到贴图不同区域。
-bool g_packTextured = false;
-constexpr float kMobUVBox = 0.06f;    // 每盒归一化尺寸（T 字足印宽=2d+2w、高=2d+h；小值使多盒铺进 [0,1]² 不重叠）
-constexpr float kMobUVMargin = 0.02f; // 格间 / 行间留白
-float g_mobCurU = kMobUVMargin, g_mobCurV = kMobUVMargin, g_mobRowH = 0.0f; // 纹理游标（归一化 [0,1] 坐标）
+// R19 C3：pack entity 贴图精确 box-UV（替换旧「T 字格子游标」粗略映射）。
+//   MC ModelRenderer.addBox 自动 UV：对每个 box = (w,h,d)、贴图原点 (u0,v0)（该 ModelPart 的 textureOffset），
+//   从原点起在贴图上按**固定顺序**铺 6 面（v 向下增，MC 贴图惯例；像素矩形来自 Cube.cpp 实测 6 个 _Polygon）：
+//
+//         ┌─────────────┐  v0
+//         │   TOP w×d   │  ← (u0+d, v0) → (u0+d+w, v0+d)
+//    ┌────┼─────────────┼────┐
+//    │LEFT│   FRONT w×h │RIGHT│  ← 侧面 d×h，v 范围 v0+d..v0+d+h
+//    │ d×h│             │ d×h │
+//    └────┼─────────────┼────┘  v0+d+h
+//         │  BOTTOM w×d │  ← (u0+d+w, v0+d) → (u0+d+2w, v0+d)   (底面 v 翻转)
+//         ├─────────────┤
+//         │   BACK w×h  │  ← (u0+d+w+d, v0+d) → (u0+d+w+d+w, v0+d+h)
+//         └─────────────┘
+//
+//   6 面像素矩形（相对 box 原点 u0,v0；[u1,v1,u2,v2]，v 向下增）—— 面序对齐 kFace[6]：
+//     [0] +X Right : [u0+d+w,   v0+d  ] → [u0+d+w+d,     v0+d+h]   (d×h)
+//     [1] -X Left  : [u0,        v0+d ] → [u0+d,          v0+d+h]   (d×h)
+//     [2] +Y Top   : [u0+d,      v0   ] → [u0+d+w,        v0+d  ]   (w×d)
+//     [3] -Y Bot   : [u0+d+w,    v0   ] → [u0+d+w+w,      v0+d  ]   (w×d, v 翻转)
+//     [4] +Z Front : [u0+d,      v0+d ] → [u0+d+w,        v0+d+h]   (w×h)
+//     [5] -Z Back  : [u0+d+w+d,  v0+d ] → [u0+d+w+d+w,    v0+d+h]   (w×h)
+//   本工程 MobModel：+Y 上 / -Z 前 / +X 右，与 MC +X 右 / +Y 上 / +Z 朝后 一致（MC 「头朝 -Z 前」= 本工程前 = MC Back 面 -Z）。
+//   即本工程「脸」（头朝 -Z）采 MC 的 Back 面 UV（kFace[5]）—— MC 贴图 Back 面就是脸，故无需翻转轴。
+//
+// QtQuick3D V 方向（见 lessons qml-uv-flip + Qt 6.11 Texture 段）：默认 flipV=false 时 **图像顶 ↔ v=1**
+//   （与 OpenGL 底纹素原点相反，上传时翻转）。MC 贴图约定 v 向下增（row 0 = 图像顶）。故 MC 像素 (ux,uy)
+//   → Qt UV：u_qt = ux/texW；v_qt = 1 − uy/texH。本工程按此把 6 面 MC 像素矩形转 Qt UV 后插值。
+//
+// 全局 UV 上下文（GUI 线程内 MobModel 生命周期，rebuild 串行设置每盒原点；无并发）：
+bool   g_packTextured = false;       // pack 关 → 全脸 [0,1]²（kFace 原 u,v）；pack 开 → MC box-UV
+float  g_texW = 64.0f, g_texH = 32.0f; // 当前 mob 贴图 base 尺寸（HD 包是 base 整数倍，UV 分数 = MC 像素 / base）
+// 当前盒的 MC textureOffset(u0,v0) + size(w,h,d)（MC 像素；rebuild 在每个 addBox 前调 setMobTex 设）。
+float  g_boxU0 = 0, g_boxV0 = 0, g_boxW = 1, g_boxH = 1, g_boxD = 1;
 
-// 计算某面 T 字展开子区（归一化 [0,1] 纹理坐标）。盒区域原点 (u0,v0)、归一化盒尺寸 (w,h,d)。
-// 面序同 kFace：0=+X 右、1=-X 左、2=+Y 顶、3=-Y 底、4=+Z 前、5=-Z 后。6 面在贴图内无重叠（立方体验证 = 经典 T 字）。
-void mobFaceRect(int face, float u0, float v0, float w, float h, float d,
+// 设当前盒的 MC textureOffset + size（rebuild 在每个 addBox 前 push）。pack 关时 writeMobUV 不读这些。
+inline void setMobTex(float u0, float v0, float w, float h, float d)
+{
+    g_boxU0 = u0; g_boxV0 = v0; g_boxW = w; g_boxH = h; g_boxD = d;
+}
+
+// MC 像素 → Qt UV：u 除以贴图宽、v 取「1 − 像素行/贴图高」（图像顶 ↔ Qt v=1）。
+inline float mcToQtU(float px) { return px / g_texW; }
+inline float mcToQtV(float py) { return 1.0f - py / g_texH; }
+
+// 计算某面 MC box-UV 子区并转 Qt UV。面序同 kFace：0=+X 右、1=-X 左、2=+Y 顶、3=-Y 底、4=+Z、5=-Z（前）。
+//   **轴向换算（R19 C3 关键修正，像素验证）**：本工程是左手系（+X 右 / +Y 上 / -Z 前），MC 是右手系
+//   （+X 东 / +Y 上 / +Z 南=前）。两者在水平面（X、Z）等价于绕 Y 转 180° → 本工程「前 -Z」对应 MC「前 +Z」
+//   （实体贴图的脸在 MC +Z 面，见 creeper head 实测：Front+Z 区(8,8)-(16,16) 有 1570 色=脸，Back-Z 区仅 62 色=后脑），
+//   本工程「右 +X」对应 MC「左 -X」（面朝 +Z 前时，MC 右=−X、本工程右=+X）。故 kFace 面 f 须 remap 到 MC 面：
+//     +X↔-X（0↔1）、+Z↔-Z（4↔5）、±Y 不变（2、3）。
+//   注：U1 §坐标约定注释「本工程前 -Z = MC Back」与像素验证矛盾（MC 脸在 +Z=Front，非 Back），此处以实测为准。
+void mobFaceQtUV(int face, float u0, float v0, float w, float h, float d,
                  float &umin, float &vmin, float &umax, float &vmax)
 {
-    const float sd = v0 + d;      // 侧面行 v 起点
-    const float sh = v0 + d + h;  // 侧面行 v 终点
-    switch (face) {
-    case 0: umin = u0;            vmin = sd; umax = u0 + d;           vmax = sh;             break; // +X 右（d×h）
-    case 1: umin = u0 + d + w;    vmin = sd; umax = u0 + 2 * d + w;   vmax = sh;             break; // -X 左（d×h）
-    case 2: umin = u0 + d;        vmin = v0; umax = u0 + d + w;       vmax = v0 + d;         break; // +Y 顶（w×d）
-    case 3: umin = u0 + d;        vmin = sh; umax = u0 + d + w;       vmax = v0 + 2 * d + h; break; // -Y 底（w×d）
-    case 4: umin = u0 + d;        vmin = sd; umax = u0 + d + w;       vmax = sh;             break; // +Z 前（w×h）
-    case 5: umin = u0 + 2*d + w;  vmin = sd; umax = u0 + 2*d + 2*w;   vmax = sh;             break; // -Z 后（w×h）
-    default: umin = 0.0f; vmin = 0.0f; umax = 1.0f; vmax = 1.0f; break;
+    // 本工程 kFace 面 → MC 面（水平 180° remap：+X↔-X、+Z↔-Z）。
+    static const int kMcFace[6] = { 1, 0, 2, 3, 5, 4 };
+    const int mf = kMcFace[face];
+    const float sd  = v0 + d;           // 侧面行 v 起点（MC 像素）
+    const float sh  = v0 + d + h;       // 侧面行 v 终点
+    float mu0, mv0, mu1, mv1;           // MC 像素矩形（按 MC 面序：0=+X右 1=-X左 2=+Y顶 3=-Y底 4=+Z前 5=-Z后）
+    switch (mf) {
+    case 0: mu0 = u0 + d + w;   mv0 = sd;  mu1 = u0 + 2*d + w;   mv1 = sh;  break; // MC +X 右（d×h）
+    case 1: mu0 = u0;            mv0 = sd;  mu1 = u0 + d;          mv1 = sh;  break; // MC -X 左（d×h）
+    case 2: mu0 = u0 + d;        mv0 = v0;  mu1 = u0 + d + w;      mv1 = v0+d; break; // MC +Y 顶（w×d）
+    case 3: mu0 = u0 + d + w;    mv0 = v0;  mu1 = u0 + d + 2*w;    mv1 = v0+d; break; // MC -Y 底（w×d）
+    case 4: mu0 = u0 + d;        mv0 = sd;  mu1 = u0 + d + w;      mv1 = sh;  break; // MC +Z 前（w×h）= 脸
+    case 5: mu0 = u0 + 2*d + w;  mv0 = sd;  mu1 = u0 + 2*d + 2*w;  mv1 = sh;  break; // MC -Z 后（w×h）
+    default: mu0 = 0; mv0 = 0; mu1 = float(w); mv1 = float(h);     break;
     }
+    // MC 像素 → Qt UV（v 翻：图像顶 ↔ Qt v=1）。注意 vmin/vmax 也随 v 翻转互换大小关系：MC v 大=图像下=Qt v 小。
+    umin = mcToQtU(mu0);
+    umax = mcToQtU(mu1);
+    vmin = mcToQtV(mv1); // MC v 终点（图像更下）→ Qt v 更小
+    vmax = mcToQtV(mv0); // MC v 起点（图像更上）→ Qt v 更大
 }
 
-// 游标推进到下一格（足印宽 = 2d+2w）；行末（下一格足印超出 [0,1]）回绕到下一行（行高 = 2d+h）。
-void mobAdvanceCursor(float w, float d)
-{
-    const float fpW = 2.0f * d + 2.0f * w;
-    g_mobCurU += fpW + kMobUVMargin;
-    if (g_mobCurU + fpW > 1.0f) {
-        g_mobCurU = kMobUVMargin;
-        g_mobCurV += g_mobRowH + kMobUVMargin;
-        g_mobRowH = 0.0f;
-    }
-}
-
-// 写入一角的 UV：pack 关 → kFace 全脸 u,v；pack 开 → T 字子区（本盒原点 bu,bv）插值并 clamp 进 [0,1]。
-inline void writeMobUV(MobVtx &vt, const Sgn &s, int face, bool pack,
-                       float bu, float bv, float bw, float bh, float bd)
+// 写入一角的 UV：pack 关 → kFace 全脸 u,v；pack 开 → MC box-UV 子区（本盒 textureOffset + size）插值。
+//   s.u/s.v ∈ {0,1}² 是面内角点的归一化坐标（kFace 定义），pack 开时把子区 [umin,umax]×[vmin,vmax] 按 s 插值。
+inline void writeMobUV(MobVtx &vt, const Sgn &s, int face, bool pack)
 {
     if (!pack) { vt.u = s.u; vt.v = s.v; return; }
-    float ru0, rv0, ru1, rv1;
-    mobFaceRect(face, bu, bv, bw, bh, bd, ru0, rv0, ru1, rv1);
-    vt.u = std::clamp(ru0 + s.u * (ru1 - ru0), 0.0f, 1.0f);
-    vt.v = std::clamp(rv0 + s.v * (rv1 - rv0), 0.0f, 1.0f);
+    float umin, vmin, umax, vmax;
+    mobFaceQtUV(face, g_boxU0, g_boxV0, g_boxW, g_boxH, g_boxD, umin, vmin, umax, vmax);
+    vt.u = umin + s.u * (umax - umin);
+    vt.v = vmin + s.v * (vmax - vmin);
 }
 
 // 追加一个轴对齐盒（心 cx,cy,cz；半长 hx,hy,hz）到 verts/idx，全脸 UV。每面 4 角 + 2 三角，24 顶点 / 36 索引。
@@ -95,11 +134,7 @@ void addBox(float cx, float cy, float cz, float hx, float hy, float hz,
             QVector3D &bMin, QVector3D &bMax)
 {
     const quint32 base = quint32(verts.size());
-    // t421 本盒纹理区域原点（pack 关时 writeMobUV 不使用）；归一化盒尺寸统一小格（多盒可铺进 [0,1]²）。
-    const float bu = g_mobCurU, bv = g_mobCurV;
-    constexpr float bw = kMobUVBox, bh = kMobUVBox, bd = kMobUVBox;
-    if (g_packTextured)
-        g_mobRowH = std::max(g_mobRowH, 2.0f * bd + bh);
+    // R19 C3：本盒 MC textureOffset/size 由调用方在 addBox 前 setMobTex() 设（pack 关时 writeMobUV 不读）。
     for (int f = 0; f < 6; ++f) {
         for (int c = 0; c < 4; ++c) {
             const Sgn &s = kFace[f][c];
@@ -107,7 +142,7 @@ void addBox(float cx, float cy, float cz, float hx, float hy, float hz,
             vt.x = cx + float(s.sx) * hx;
             vt.y = cy + float(s.sy) * hy;
             vt.z = cz + float(s.sz) * hz;
-            writeMobUV(vt, s, f, g_packTextured, bu, bv, bw, bh, bd);
+            writeMobUV(vt, s, f, g_packTextured);
             verts.push_back(vt);
         }
         const quint32 b = base + quint32(f * 4);
@@ -121,8 +156,6 @@ void addBox(float cx, float cy, float cz, float hx, float hy, float hz,
     bMax.setX(std::max(bMax.x(), cx + hx));
     bMax.setY(std::max(bMax.y(), cy + hy));
     bMax.setZ(std::max(bMax.z(), cz + hz));
-    if (g_packTextured)
-        mobAdvanceCursor(bw, bd);
 }
 
 // t241 追加一个**绕过 (pivY, pivZ) 的 X 轴旋转**的盒（腿摆动 / 头部俯仰用）。X 轴旋转 → x 分量不变
@@ -136,11 +169,7 @@ void addBoxRot(float cx, float cy, float cz, float hx, float hy, float hz,
 {
     const float ca = std::cos(angle), sa = std::sin(angle);
     const quint32 base = quint32(verts.size());
-    // t421 本盒纹理区域原点（同 addBox；pack 关不使用）。
-    const float bu = g_mobCurU, bv = g_mobCurV;
-    constexpr float bw = kMobUVBox, bh = kMobUVBox, bd = kMobUVBox;
-    if (g_packTextured)
-        g_mobRowH = std::max(g_mobRowH, 2.0f * bd + bh);
+    // R19 C3：本盒 MC textureOffset/size 由调用方在 addBoxRot 前 setMobTex() 设（pack 关不读）。
     for (int f = 0; f < 6; ++f) {
         for (int c = 0; c < 4; ++c) {
             const Sgn &s = kFace[f][c];
@@ -152,7 +181,7 @@ void addBoxRot(float cx, float cy, float cz, float hx, float hy, float hz,
             const float dz = lz - pivZ;
             vt.y = pivY + dy * ca - dz * sa;                     // X 轴旋转（右手）：y' = y·cos − z·sin
             vt.z = pivZ + dy * sa + dz * ca;                     //             z' = y·sin + z·cos
-            writeMobUV(vt, s, f, g_packTextured, bu, bv, bw, bh, bd);
+            writeMobUV(vt, s, f, g_packTextured);
             verts.push_back(vt);
             // 旋转后实际范围（逐顶点；解析 AABB 对旋转盒不再适用）。
             bMin.setX(std::min(bMin.x(), vt.x)); bMax.setX(std::max(bMax.x(), vt.x));
@@ -163,8 +192,6 @@ void addBoxRot(float cx, float cy, float cz, float hx, float hy, float hz,
         idx.push_back(b + 0); idx.push_back(b + 1); idx.push_back(b + 2);
         idx.push_back(b + 0); idx.push_back(b + 2); idx.push_back(b + 3);
     }
-    if (g_packTextured)
-        mobAdvanceCursor(bw, bd);
 }
 
 // t302 Z 轴旋转盒（蜘蛛腿步态用；镜像 addBoxRot 的 X 轴旋转，但绕 Z 轴 → z 分量不变，x/y 在 X-Y 平面旋转）。
@@ -179,11 +206,7 @@ void addBoxRotZ(float cx, float cy, float cz, float hx, float hy, float hz,
 {
     const float ca = std::cos(angle), sa = std::sin(angle);
     const quint32 base = quint32(verts.size());
-    // t421 本盒纹理区域原点（同 addBox；pack 关不使用）。
-    const float bu = g_mobCurU, bv = g_mobCurV;
-    constexpr float bw = kMobUVBox, bh = kMobUVBox, bd = kMobUVBox;
-    if (g_packTextured)
-        g_mobRowH = std::max(g_mobRowH, 2.0f * bd + bh);
+    // R19 C3：本盒 MC textureOffset/size 由调用方在 addBoxRotZ 前 setMobTex() 设（pack 关不读）。
     for (int f = 0; f < 6; ++f) {
         for (int c = 0; c < 4; ++c) {
             const Sgn &s = kFace[f][c];
@@ -195,7 +218,7 @@ void addBoxRotZ(float cx, float cy, float cz, float hx, float hy, float hz,
             const float dy = ly - pivY;
             vt.x = pivX + dx * ca - dy * sa;                     // Z 轴旋转（右手）：x' = x·cos − y·sin
             vt.y = pivY + dx * sa + dy * ca;                     //             y' = x·sin + y·cos
-            writeMobUV(vt, s, f, g_packTextured, bu, bv, bw, bh, bd);
+            writeMobUV(vt, s, f, g_packTextured);
             verts.push_back(vt);
             // 旋转后实际范围（逐顶点；解析 AABB 对旋转盒不再适用）。
             bMin.setX(std::min(bMin.x(), vt.x)); bMax.setX(std::max(bMax.x(), vt.x));
@@ -206,8 +229,6 @@ void addBoxRotZ(float cx, float cy, float cz, float hx, float hy, float hz,
         idx.push_back(b + 0); idx.push_back(b + 1); idx.push_back(b + 2);
         idx.push_back(b + 0); idx.push_back(b + 2); idx.push_back(b + 3);
     }
-    if (g_packTextured)
-        mobAdvanceCursor(bw, bd);
 }
 
 // t241 头部盒（+ 牛角等头附肢）：pitch==0 走 addBox 轴对齐快路径（猪 / 牛 / 非吃草态羊，每帧不进旋转），
@@ -229,16 +250,22 @@ void addHeadRot(float cx, float cy, float cz, float hx, float hy, float hz, floa
 //   对角配对（机制等价四足行走）：前左(−X,−Z) + 后右(+X,+Z) 同相 +sw；前右(+X,−Z) + 后左(−X,+Z) 反相 −sw。
 //   sw = kLegSwingAmp·sin(walkPhase)。walkPhase 由 EntityManager 据移动速度推进（moveSpeed>0 时）。
 //   腿盒 pivot.x = 腿盒中心 x（X 轴旋转不依赖 pivot.x，故 addBoxRot 签名无 pivX；这里隐式 = 各腿 cx）。
+//   R19 C3：texU/texV/w/h/d = 腿 MC textureOffset + size（pack 开时 4 腿共用同一 texOffs，MC 四足同框四腿）。
 void addLegs(float legY, float legHy, float legOffX, float legOffZ, float legW,
+             float texU, float texV, float w, float h, float d,
              float walkPhase,
              std::vector<MobVtx> &verts, std::vector<quint32> &idx,
              QVector3D &bMin, QVector3D &bMax)
 {
     const float hipTopY = legY + legHy; // 髋部 = 腿盒顶面 y（摆动轴位置）
     const float sw = kLegSwingAmp * std::sin(walkPhase);
+    setMobTex(texU, texV, w, h, d);
     addBoxRot(-legOffX, legY, -legOffZ, legW, legHy, legW, hipTopY, -legOffZ, +sw, verts, idx, bMin, bMax); // 前左
+    setMobTex(texU, texV, w, h, d);
     addBoxRot( legOffX, legY, -legOffZ, legW, legHy, legW, hipTopY, -legOffZ, -sw, verts, idx, bMin, bMax); // 前右
+    setMobTex(texU, texV, w, h, d);
     addBoxRot(-legOffX, legY,  legOffZ, legW, legHy, legW, hipTopY,  legOffZ, -sw, verts, idx, bMin, bMax); // 后左
+    setMobTex(texU, texV, w, h, d);
     addBoxRot( legOffX, legY,  legOffZ, legW, legHy, legW, hipTopY,  legOffZ, +sw, verts, idx, bMin, bMax); // 后右
 }
 
@@ -249,7 +276,9 @@ void addLegs(float legY, float legHy, float legOffX, float legOffZ, float legW,
 //   t285 原 Spider 简化 4 腿（addLegs 垂直短桩，藏在躯干下不可见 → 用户观感「无腿像蟑螂」）；t302 升级为
 //   8 条明显外伸的腿 + 步态。机制对齐 MC 1.0 蜘蛛 8 腿爬行；标识符 / 几何全原创（§9 区隔）。
 //   legReachPivotY = 躯干侧面髋枢 Y（= 躯干中心 Y）；腿底最远点 ~ −0.30 贴 collision 底面（halfH=0.30）。
+//   R19 C3：texU/texV/w/h/d = 腿 MC textureOffset(18,0) + size(16,2,2)（MC 蜘蛛腿，8 腿共用同框 texOffs）。
 void addSpiderLegs(float bodyHalfX, float pivotY, float walkPhase,
+                   float texU, float texV, float w, float h, float d,
                    std::vector<MobVtx> &verts, std::vector<quint32> &idx,
                    QVector3D &bMin, QVector3D &bMax)
 {
@@ -271,9 +300,11 @@ void addSpiderLegs(float bodyHalfX, float pivotY, float walkPhase,
     for (const LegPair &p : pairs) {
         const float sw = kSpiderLegSwing * std::sin(walkPhase) * p.pairSign;
         // +X（右）腿：base 角 −kBaseDown（外端下倾）；+ sw 抬起（角趋 0 = 外端升高）。髋枢 = 躯干右侧 (+bodyHalfX, pivotY)。
+        setMobTex(texU, texV, w, h, d);
         addBoxRotZ( bodyHalfX + kLegCenterOffX, pivotY, p.z, kLegHalfX, kLegHalfY, kLegHalfZ,
                     bodyHalfX, pivotY, -kBaseDown + sw, verts, idx, bMin, bMax);
         // −X（左）腿：镜像（base 角 +kBaseDown，sw 反号 → 与右腿同对同步抬起 / 落下，左右对称）。
+        setMobTex(texU, texV, w, h, d);
         addBoxRotZ(-(bodyHalfX + kLegCenterOffX), pivotY, p.z, kLegHalfX, kLegHalfY, kLegHalfZ,
                    -bodyHalfX, pivotY, kBaseDown - sw, verts, idx, bMin, bMax);
     }
@@ -326,8 +357,8 @@ void MobModel::setHeadPitch(float pitch)
     rebuild();
 }
 
-// t421 pack entity 贴图开关 setter：值变 → rebuild 把每盒 UV 从全脸切到 T 字展开（pack 开）或反之。
-//   QML 绑定 `packTextured: mobXxxPackTex.source.length > 0`（pack 切换 / 包内命中与否均刷新）。
+// pack entity 贴图开关 setter（R19 C3）：值变 → rebuild 把每盒 UV 从全脸切到 MC box-UV 精确采样（pack 开）或反之。
+//   QML 绑定 `packTextured: mobXxxPackTex.source.toString().length > 0`（pack 切换 / 包内命中与否均刷新）。
 void MobModel::setPackTextured(bool on)
 {
     if (on == m_packTextured) return;
@@ -352,11 +383,12 @@ void MobModel::rebuild()
     idx.reserve(16 * 36);
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
 
-    // t421 设置 UV 模式（pack 关=全脸 / 开=T 字展开进 entity 贴图）+ 重置纹理游标（每盒前进一格）。
+    // R19 C3：设置 UV 模式（pack 关=全脸 / 开=MC box-UV 精确贴图）。g_texW/H 默认 64×32，各 mob 分支按其贴图
+    //   base 尺寸覆写（zombie/snow_golem=64×64、iron_golem=128×128，其余四足/虫=64×32）。pack 关时 writeMobUV
+    //   不读 g_texW/H 或 setMobTex 设的 box texOffs（全脸 [0,1]²，零回归）。
     g_packTextured = m_packTextured;
-    g_mobCurU = kMobUVMargin;
-    g_mobCurV = kMobUVMargin;
-    g_mobRowH = 0.0f;
+    g_texW = 64.0f;
+    g_texH = 32.0f;
 
     if (m_mobType == 4) {
         // t282 Shambler（蹒跚者；机制等价 MC 1.0 僵尸，§9 区隔改名 + 原创模型/贴图）：
@@ -364,13 +396,22 @@ void MobModel::rebuild()
         // 局部原点 = 躯干中心（同猪牛羊约定）；头朝 -Z（前 = AI 行走方向）；腿底本地 y=−0.90 贴 collision 底面。
         // 双臂前伸固定（不走 walkPhase —— 僵尸手臂僵直前举的标志性姿态；腿摆即可传达行走，机制等价 MC 僵尸）。
         // 腿绕髋（腿顶 y=−0.25 = 躯干底）X 轴摆动；左右反相（biped walk cycle，区别于四足 addLegs 的对角配对）。
+        // R19 C3 UV（MC Humanoid base 64×64；U1 §4 zombie）：head(0,0)8×8×8 / body(16,16)8×12×4 / arm(40,16)4×12×4 /
+        //   leg(0,16)4×12×4。几何盒尺寸保持本工程原创比例，UV 按 MC 原 size 采样 → pack 贴图各部对齐。
+        g_texW = 64.0f; g_texH = 64.0f;
+        setMobTex(16, 16, 8, 12, 4);
         addBox( 0.00f,  0.05f,  0.00f, 0.22f, 0.30f, 0.12f, verts, idx, bMin, bMax); // 躯干（心略上移让腿更长）
+        setMobTex(0, 0, 8, 8, 8);
         addBox( 0.00f,  0.57f,  0.00f, 0.22f, 0.22f, 0.22f, verts, idx, bMin, bMax); // 头（躯干顶上方）
+        setMobTex(40, 16, 4, 12, 4);
         addBox(-0.33f,  0.23f, -0.37f, 0.10f, 0.10f, 0.25f, verts, idx, bMin, bMax); // 左臂前伸（-X、-Z 前）
+        setMobTex(40, 16, 4, 12, 4);
         addBox( 0.33f,  0.23f, -0.37f, 0.10f, 0.10f, 0.25f, verts, idx, bMin, bMax); // 右臂前伸（+X、-Z 前）
         const float sw = kLegSwingAmp * std::sin(m_walkPhase);
         const float hipY = -0.25f; // 髋枢 = 腿顶（= 躯干底面 y）
+        setMobTex(0, 16, 4, 12, 4);
         addBoxRot(-0.11f, -0.575f, 0.00f, 0.11f, 0.325f, 0.12f, hipY, 0.00f, +sw, verts, idx, bMin, bMax); // 左腿
+        setMobTex(0, 16, 4, 12, 4);
         addBoxRot( 0.11f, -0.575f, 0.00f, 0.11f, 0.325f, 0.12f, hipY, 0.00f, -sw, verts, idx, bMin, bMax); // 右腿
     } else if (m_mobType == 5) {
         // t287/t301 Bones（骸骨；机制等价 MC 1.0 骷髅，§9 区隔改名）—— 瘦骨嶙峋人形（窄躯干 + 小头骨 + 细骨杆四肢）
@@ -386,28 +427,43 @@ void MobModel::rebuild()
         //   远观读作骷髅（肋缝 / 脊柱透出），非实体白块。四肢仍细骨杆、头骨比例 / 挂点不变（t301）→
         //   Main.qml 肩枢 (0.20,0.28,-0.12) 与眼窝仍对齐。躯干本地范围同原（y∈[-0.25,0.35]、x∈[-0.14,0.14]、
         //   z∈[-0.10,0.10]）。机制等价 MC 1.0 骷髅镂空骨架观感（§9 区隔）。
+        // R19 C3 UV（MC Skeleton base 64×32；U1 §5 bones）：head(0,0)8×8×8 / body(16,16)8×12×4 / arm(40,16)2×12×2 /
+        //   leg(0,16)2×12×2。脊柱=body、胸骨/肋骨=leg 细骨杆 texOffs（贴图全骨白，交叉采样视觉无差）。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(16, 16, 8, 12, 4);
         addBox( 0.00f,  0.05f,  0.04f, 0.035f, 0.28f, 0.035f, verts, idx, bMin, bMax); // 脊柱（垂直主干，略靠背；肋缝透出）
+        setMobTex(0, 16, 2, 12, 2);
         addBox( 0.00f,  0.12f, -0.10f, 0.030f, 0.16f, 0.020f, verts, idx, bMin, bMax); // 胸骨（前中竖骨；肋前端汇集）
         //   肋骨：4 对（左/右各 4 根）沿胸高分布，每根横置细骨杆（半 X 大、半 Y 薄），邻肋 y 间隙 ~0.04
         //     → 远观「栅栏状」肋笼（缝隙 = 镂空，区别实体盒；左右肋中央留缝让脊柱 / 胸骨透出）。
         for (float ribY : { 0.25f, 0.18f, 0.11f, 0.04f }) {
+            setMobTex(0, 16, 2, 12, 2);
             addBox(-0.07f, ribY, -0.03f, 0.05f, 0.016f, 0.06f, verts, idx, bMin, bMax); // 左肋
+            setMobTex(0, 16, 2, 12, 2);
             addBox( 0.07f, ribY, -0.03f, 0.05f, 0.016f, 0.06f, verts, idx, bMin, bMax); // 右肋
         }
+        setMobTex(0, 0, 8, 8, 8);
         addBox( 0.00f,  0.57f,  0.00f, 0.16f, 0.18f, 0.16f, verts, idx, bMin, bMax); // 小头骨（略竖，比 Shambler 头小一圈）
+        setMobTex(40, 16, 2, 12, 2);
         addBox(-0.20f,  0.23f, -0.37f, 0.05f, 0.05f, 0.25f, verts, idx, bMin, bMax); // 左臂（细骨杆前伸）
         // 右臂 + 弓见上 t331 注释（移至 Main.qml 肩枢 Node：木色弓 + 抬臂/拉弓动画）。左臂无动画仍在此。
         const float sw5 = kLegSwingAmp * std::sin(m_walkPhase);
+        setMobTex(0, 16, 2, 12, 2);
         addBoxRot(-0.07f, -0.575f, 0.00f, 0.06f, 0.325f, 0.06f, -0.25f, 0.00f, +sw5, verts, idx, bMin, bMax); // 左腿（细骨杆）
+        setMobTex(0, 16, 2, 12, 2);
         addBoxRot( 0.07f, -0.575f, 0.00f, 0.06f, 0.325f, 0.06f, -0.25f, 0.00f, -sw5, verts, idx, bMin, bMax); // 右腿（细骨杆）
         // t331 弓 + 右臂移至 Main.qml（MobBowGeometry 木色弓 + UnitCube 右臂，肩枢 Node 子节点随 drawAmount 抬起）。
     } else if (m_mobType == 6) {
         // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕，§9 区隔改名）—— 四短粗腿 + 高瘦躯干 + 小头。
         //   修：原误标 mobType 5（与 Bones 冲突），已正为 6（enum MobStalker=6）。腿底本地 y=−0.90 贴 collision 底面。
         //   蓄力膨胀由 QML delegate 据 inflateAt 对整个 Model 做 scale（1.0+inflate·0.5）驱动，几何本身不参与。
+        // R19 C3 UV（MC Creeper base 64×32；U1 §6 stalker）：head(0,0)8×8×8 / body(16,16)8×12×4 / leg(0,16)4×6×4。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(16, 16, 8, 12, 4);
         addBox( 0.00f,  0.08f,  0.00f, 0.18f, 0.42f, 0.16f, verts, idx, bMin, bMax); // 高瘦躯干
+        setMobTex(0, 0, 8, 8, 8);
         addBox( 0.00f,  0.66f,  0.00f, 0.15f, 0.15f, 0.15f, verts, idx, bMin, bMax); // 小头
-        addLegs(-0.62f, 0.28f, 0.12f, 0.09f, 0.09f, m_walkPhase, verts, idx, bMin, bMax); // 四短粗腿
+        addLegs(-0.62f, 0.28f, 0.12f, 0.09f, 0.09f, 0, 16, 4, 6, 4, m_walkPhase, verts, idx, bMin, bMax); // 四短粗腿
     } else if (m_mobType == 7) {
         // t285/t302 Spider（蜘蛛；机制等价 MC 1.0 蜘蛛，§9 区隔）—— 宽矮躯干 + 前伸小头 + **8 腿**（4 对沿躯干
         //   Z 分布，t302 升级自 t285 简化 4 腿）。腿底本地 y ≈ −0.30 贴 collision 底面（EntityManager halfH=0.30）。
@@ -415,21 +471,34 @@ void MobModel::rebuild()
         //   （addSpiderLegs），baseDown 外端下倾 + walkPhase 驱动 tetrapod 交替步态。眼由 Main.qml delegate 补
         //   （4 颗红眼，同猪/牛/羊纯色子 Model 模式）。声音 / 受击音由 AudioManager.playMobAmbient/playMobHurt
         //   据 mobType=7 路由（t294 mob_idle_spider 已就绪，本任务复用）。
+        // R19 C3 UV（MC Spider base 64×32；U1 §7）：head(32,4)8×8×8 / body1(0,12)10×8×12（宽矮躯干=主腹节）/
+        //   leg(18,0)16×2×2。本工程蜘蛛几何 = 1 宽躯干 + 1 前伸头 + 8 腿；躯干采 body1、头采 head、腿采 leg。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(0, 12, 10, 8, 12);
         addBox( 0.00f, -0.05f,  0.00f, 0.40f, 0.18f, 0.30f, verts, idx, bMin, bMax); // 宽矮躯干
+        setMobTex(32, 4, 8, 8, 8);
         addBox( 0.00f, -0.02f, -0.32f, 0.18f, 0.14f, 0.18f, verts, idx, bMin, bMax); // 小头（前伸）
-        addSpiderLegs(0.40f, -0.05f, m_walkPhase, verts, idx, bMin, bMax);           // 8 腿（4 对，Z 轴步态）
+        addSpiderLegs(0.40f, -0.05f, m_walkPhase, 18, 0, 16, 2, 2, verts, idx, bMin, bMax); // 8 腿（4 对，Z 轴步态）
     } else if (m_mobType == 8) {
         // t398 Chicken（鸡；机制等价 MC 1.0 鸡，§9 原创模型 + 贴图）—— 小型鸟：圆胖身躯 + 前伸小头 + 后翘尾 +
         //   **2 细腿**（biped walk cycle，区别于猪/牛/羊的 4 腿；鸡是两足鸟）。腿底本地 y≈−0.40 贴 collision 底面
         //   （EntityManager halfH=0.40 → offset=0，腿底贴地）。喙 / 鸡冠 / 肉垂由 Main.qml delegate 补（纯色子 Model，
         //   同猪眼模式 —— 单材质无法同几何双色，故头饰独立子节点）。机制等价 MC 1.0 鸡形态（小体型 + 两足 + 后翘尾）。
+        // R19 C3 UV（MC Chicken base 64×32；U1 §8）：head(0,0)4×6×3 / body(0,9)6×8×6 / leg(26,0)3×5×3。
+        //   后翘尾无 MC 对应 box → 复用 body texOffs（贴图同区，视觉为身体色）。喙/肉垂由 Main.qml 补。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(0, 9, 6, 8, 6);
         addBox( 0.00f,  0.05f,  0.00f, 0.20f, 0.16f, 0.22f, verts, idx, bMin, bMax); // 圆胖躯干（紧凑小型鸟身）
+        setMobTex(0, 0, 4, 6, 3);
         addHeadRot( 0.00f,  0.26f, -0.18f, 0.11f, 0.12f, 0.11f, m_headPitch, verts, idx, bMin, bMax); // 小头（前伸顶位）
+        setMobTex(0, 9, 6, 8, 6);
         addBox( 0.00f,  0.14f,  0.22f, 0.09f, 0.09f, 0.05f, verts, idx, bMin, bMax); // 后翘尾（+Z 后方上翘小撮）
         // 2 细腿（biped walk cycle，绕髋左右反相摆动 —— 同 Shambler/Bones 双腿模式，区别于四足 addLegs）：
         //   髋枢 hipY=−0.05（躯干底面）；腿盒心 y=−0.225（腿顶 y=−0.05、腿底 y=−0.40）→ 腿底贴 collision 底面。
         const float sw8 = kLegSwingAmp * std::sin(m_walkPhase);
+        setMobTex(26, 0, 3, 5, 3);
         addBoxRot(-0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, +sw8, verts, idx, bMin, bMax); // 左腿（细）
+        setMobTex(26, 0, 3, 5, 3);
         addBoxRot( 0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, -sw8, verts, idx, bMin, bMax); // 右腿（细）
     } else if (m_mobType == 9) {
         // t399 Squid（鱿鱼；机制等价 MC 1.0 squid，§9 原创模型 + 贴图）—— 水生软体：圆胖躯干（mantle）+ 顶端小尖 +
@@ -465,7 +534,8 @@ void MobModel::rebuild()
         addHeadRot( 0.00f,  0.12f, -0.52f, 0.14f, 0.15f, 0.18f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸略尖；鼻吻）
         addBox(-0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（头顶小尖盒）
         addBox( 0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
-        addLegs(-0.26f,  0.16f,  0.18f, 0.24f, 0.08f, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长，比猪腿瘦）
+        // R19 C3：wolf 无 pack 贴图映射（mobEntityMap 不含 10）→ pack 关全脸 UV，texOffs 占位（pack 关不读）。
+        addLegs(-0.26f,  0.16f,  0.18f,  0.24f, 0.08f, 0, 16, 4, 12, 4, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长，比猪腿瘦）
     } else if (m_mobType == 11) {
         // t481 豹猫/猫（Ocelot/Cat；机制等价 MC 1.0 豹猫，§9 原创模型 + 贴图）—— 中型猫科：细长躯干 +
         //   前伸圆头 + 双尖耳 + 长尾（几何内带尾，随身体贴图同纹）+ 4 细腿。未驯服 = 丛林豹猫（斑点橙棕贴图）、
@@ -478,7 +548,8 @@ void MobModel::rebuild()
         addBox(-0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（头顶小三角）
         addBox( 0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
         addBox( 0.00f,  0.18f,  0.36f, 0.04f, 0.05f, 0.16f, verts, idx, bMin, bMax); // 长尾（身后 +Z 后伸上翘；随身体同纹）
-        addLegs(-0.24f,  0.16f,  0.16f, 0.20f, 0.06f, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿
+        // R19 C3：ocelot 无 pack 贴图映射（mobEntityMap 不含 11）→ pack 关全脸 UV，texOffs 占位（pack 关不读）。
+        addLegs(-0.24f,  0.16f,  0.16f,  0.20f, 0.06f, 0, 16, 4, 12, 4, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿
     } else if (m_mobType == 12) {
         // feat SnowGolem（雪傀儡；机制等价 MC 1.0 雪傀儡，§9 区隔原创模型 + pack 贴图）—— **柱身两雪块**上下堆叠。
         //   局部原点 = 碰撞中心（mobModelYOff=0，区别于猪牛羊「躯干中心」）；腿底本地 y=−0.90 贴 collision 底面
@@ -487,7 +558,11 @@ void MobModel::rebuild()
         //   **南瓜头 + 刻面眼/嘴不在本几何** —— 由 Main.qml delegate 补独立橙色南瓜 Model（t499 需求：南瓜头是单独
         //   的橙色南瓜模型，非贴图的一部分）。pack 命中 snow_golem.png → 6 面 T 字 UV 展开进雪块身；pack 关 → 全脸
         //   UV + 纯色雪白（无程序生成贴图，回退 baseColor）。shearSnowGolem 剪南瓜头仅隐藏南瓜头 Model（几何不动）。
+        // R19 C3 UV（MC SnowMan base 64×64；U1 §12）：底雪块=piece2(0,36)12×12×12（大块在下）、顶雪块=piece1(0,16)10×10×10。
+        g_texW = 64.0f; g_texH = 64.0f;
+        setMobTex(0, 36, 12, 12, 12);
         addBox( 0.00f, -0.45f, 0.00f, 0.40f, 0.45f, 0.40f, verts, idx, bMin, bMax); // 底雪块（雪傀儡身体下块）
+        setMobTex(0, 16, 10, 10, 10);
         addBox( 0.00f,  0.45f, 0.00f, 0.40f, 0.45f, 0.40f, verts, idx, bMin, bMax); // 顶雪块（雪傀儡身体上块）
     } else if (m_mobType == 13) {
         // feat IronGolem（铁傀儡；机制等价 MC 1.0 铁傀儡，§9 区隔原创模型 + pack 贴图）—— **铁块人形**：
@@ -498,10 +573,18 @@ void MobModel::rebuild()
         //   pack 命中 iron_golem.png → 6 面 T 字 UV 展开显铁纹（修 dev-plan C「铁傀儡全白」：程序纯色铁灰在用户
         //   视角读作「白」，pack 铁纹才显铁质）；pack 关 → 全脸 UV + 纯色铁灰 #7d848c（原 t483 锈斑 Model 在 pack
         //   命中时由 pack 铁纹取代，pack 关时简化为纯色铁灰无锈斑）。
+        // R19 C3 UV（MC IronGolem base 128×128；U1 §13 [≈]）：body(0,40)18×12×9 / arm(40,40)4×16×4 / leg(0,30)4×12×4。
+        //   头（南瓜）由 Main.qml 补独立 Model，几何不含头。UV 分数分母用 base 128（HD 包整张放大，分数仍按 base）。
+        g_texW = 128.0f; g_texH = 128.0f;
+        setMobTex(0, 40, 18, 12, 9);
         addBox( 0.00f,  0.05f, 0.00f, 0.475f, 0.525f, 0.325f, verts, idx, bMin, bMax); // 宽躯干（铁块身）
+        setMobTex(0, 30, 4, 12, 4);
         addBox(-0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 左腿（铁块）
+        setMobTex(0, 30, 4, 12, 4);
         addBox( 0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 右腿（铁块）
+        setMobTex(40, 40, 4, 16, 4);
         addBox(-0.62f,  0.10f, 0.00f, 0.14f,  0.39f,  0.225f, verts, idx, bMin, bMax); // 左长臂（铁块；机制等价 MC 铁傀儡重拳长臂）
+        setMobTex(40, 40, 4, 16, 4);
         addBox( 0.62f,  0.10f, 0.00f, 0.14f,  0.39f,  0.225f, verts, idx, bMin, bMax); // 右长臂
     } else if (m_mobType == 14) {
         // t487 Silverfish（银鱼；机制等价 MC 1.0 银鱼，§9 原创模型 + 贴图）—— 小型虫类：分节躯干 + 前伸小头 +
@@ -524,22 +607,37 @@ void MobModel::rebuild()
         addBoxRot( 0.20f, -0.075f,  0.12f, 0.06f, 0.075f, 0.04f, 0.00f,  0.12f, -sw, verts, idx, bMin, bMax);
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
+        // R19 C3 UV（MC Cow base 64×32；U1 §2）：body(18,4)12×18×10 / head(0,0)8×8×6 / horn(22,0)1×3×1 / leg(0,16)4×12×4。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(18, 4, 12, 18, 10);
         addBox(0.00f, 0.05f, 0.00f, 0.32f, 0.28f, 0.55f, verts, idx, bMin, bMax); // 躯干（长）
         // 头 + 双角共享颈附着点（cy, cz+hz）→ headPitch 驱动时整组随头俯仰。
+        setMobTex(0, 0, 8, 8, 6);
         addHeadRot(0.00f, 0.15f, -0.60f, 0.20f, 0.22f, 0.20f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸）
+        setMobTex(22, 0, 1, 3, 1);
         addHeadRot(-0.22f, 0.34f, -0.58f, 0.05f, 0.06f, 0.05f, m_headPitch, verts, idx, bMin, bMax); // 左角
+        setMobTex(22, 0, 1, 3, 1);
         addHeadRot( 0.22f, 0.34f, -0.58f, 0.05f, 0.06f, 0.05f, m_headPitch, verts, idx, bMin, bMax); // 右角
-        addLegs(-0.30f, 0.20f, 0.20f, 0.35f, 0.10f, m_walkPhase, verts, idx, bMin, bMax); // 4 长腿
+        addLegs(-0.30f, 0.20f, 0.20f, 0.35f, 0.10f, 0, 16, 4, 12, 4, m_walkPhase, verts, idx, bMin, bMax); // 4 长腿
     } else if (m_mobType == 3) {
         // 羊：圆胖躯干、小头、短腿。机制等价 MC 羊形态（非名词照搬）。
+        // R19 C3 UV（MC Sheep base 64×32；U1 §3）：body(28,8)8×16×6 / head(0,0)6×6×8 / leg(0,16)4×12×4。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(28, 8, 8, 16, 6);
         addBox(0.00f, 0.05f, 0.00f, 0.30f, 0.28f, 0.42f, verts, idx, bMin, bMax); // 躯干（圆胖）
+        setMobTex(0, 0, 6, 6, 8);
         addHeadRot(0.00f, 0.10f, -0.45f, 0.14f, 0.16f, 0.16f, m_headPitch, verts, idx, bMin, bMax); // 小头（吃草时俯仰）
-        addLegs(-0.28f, 0.16f, 0.18f, 0.26f, 0.09f, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
+        addLegs(-0.28f, 0.16f, 0.18f, 0.26f, 0.09f, 0, 16, 4, 12, 4, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
     } else {
         // 猪（默认 / 兜底）：紧凑低矮、短腿、大头。机制等价 MC 猪形态（非名词照搬）。
+        // R19 C3 UV（MC Pig base 64×32；U1 §1）：body(28,8)10×16×8 / head(0,0)8×8×8 / leg(0,16)6×6×5。
+        //   注：猪鼻（Pig 独有 snout(16,16)4×3×1）由 Main.qml delegate 补（独立小盒），几何头用 head texOffs。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(28, 8, 10, 16, 8);
         addBox(0.00f, 0.00f, 0.00f, 0.35f, 0.22f, 0.45f, verts, idx, bMin, bMax); // 躯干（低矮）
+        setMobTex(0, 0, 8, 8, 8);
         addHeadRot(0.00f, 0.05f, -0.50f, 0.22f, 0.22f, 0.18f, m_headPitch, verts, idx, bMin, bMax); // 大头（前伸）
-        addLegs(-0.30f, 0.18f, 0.22f, 0.28f, 0.10f, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
+        addLegs(-0.30f, 0.18f, 0.22f, 0.28f, 0.10f, 0, 16, 6, 6, 5, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
     }
 
     // 写入顺序（lessons-learned）：clear → setVertexData → setIndexData → setStride

@@ -56,14 +56,18 @@
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
 //
 // 顶点格式：pos(3) + uv(2) = 5 float。每盒 6 面 × 4 角 = 24 顶点 / 36 索引；多盒累加。
-// UV（两态，t421）：
+// UV（两态）：
 //   - packTextured=false（默认 / pack 关）：每面铺**整张贴图** [0,1]×[0,1]（同 CrackBox 全脸 UV）→ QML 给每类
 //     mob 一张程序生成独占贴图（mob_pig / mob_cow / mob_sheep / mob_shambler / ...）。零回归。
-//   - packTextured=true（pack 启用且包内命中 entity PNG）：每盒 6 面按「T 字展开」映射进 pack entity 贴图的
-//     一个不重叠小格子（游标逐盒前进 + 行回绕）→ 身体各部贴到贴图不同区域，mob 看上去「贴了皮」而非每面
-//     重复同一整张图。注：本工程 mob 几何为原创方块化、与 MC 实体模型比例不同，故**非** MC 精确 UV 拆皮
-//     （无法逐部位 1:1 对齐 MC 贴图）；目标是「贴图可见且分布合理」。贴图文件由 QML 据
-//     ResourcePackManager.mobTextureSource(mobType) 切换（运行期读本地 gitignored pack PNG，红线 §9）。
+//   - packTextured=true（pack 启用且包内命中 entity PNG）：**R19 C3 实体贴图精确 box-UV** —— 每盒按其 MC 真实
+//     textureOffset(u,v) + size(w,h,d)，用 MC ModelRenderer.addBox 自动 UV 的 6 面公式（右/左/顶/底/前/后 从
+//     (u0,v0) 起在贴图固定位置铺，见 mobmodel.cpp 注释表）算 6 面 UV 子区，归一化用该 mob 贴图 base 尺寸
+//     （64×32 / 64×64 / 128×128；HD 包是 base 整数倍但 UV 分数=MC 像素/base 不变），并把 MC v 向下增 转 Qt
+//     V（图像顶↔v=1，见 lessons qml-uv-flip）。UV 对齐**只依赖 (u0,v0)+size，不依赖几何位置** → 本工程 mob 几何
+//     为原创方块化、尺寸与 MC 比例不同，但 UV 仍按 MC 原 size 采样 → pack entity 贴图各部（头/身/四肢）对齐。
+//     替换旧「T 字格子游标」粗略映射（旧版游标逐盒前进无视 box 真实 texOffs → pack 贴图采样全错位）。
+//     各 mobType 的 MC texOffs/size 数据源：U1 调研报告（MC Java 1.8 ModelRenderer 实测，MinecraftConsoles TU19 移植）。
+//     贴图文件由 QML 据 ResourcePackManager.mobTextureSource(mobType) 切换（运行期读本地 gitignored pack PNG，红线 §9）。
 //
 // 局部坐标约定：原点 = 躯干中心；+Y 上、-Z 前（头朝 -Z，与 EntityManager yawAt 约定「模型本地 -Z 正对
 //   行走方向」一致 → delegate Node eulerRotation.y = yawAt 后头朝行走方向）。bounds 据各盒实际范围算
@@ -92,7 +96,7 @@ class MobModel : public QQuick3DGeometry
     Q_PROPERTY(float walkPhase READ walkPhase WRITE setWalkPhase NOTIFY walkPhaseChanged)
     // t241 头部俯仰（弧度，负=低头吃草）：仅羊绑非零；猪/牛恒 0 → addBox 轴对齐快路径。
     Q_PROPERTY(float headPitch READ headPitch WRITE setHeadPitch NOTIFY headPitchChanged)
-    // t421 是否用 pack entity 贴图（T 字 UV 展开）；pack 关 / 包内无贴图 → false（全脸 UV + 程序生成贴图）。
+    // pack 是否用 pack entity 贴图（MC box-UV 精确采样，R19 C3）；pack 关 / 包内无贴图 → false（全脸 UV + 程序生成贴图）。
     Q_PROPERTY(bool packTextured READ packTextured WRITE setPackTextured NOTIFY packTexturedChanged)
 
 public:
@@ -122,7 +126,7 @@ private:
     int m_mobType = 1;    // 默认猪（合法非空，防未设 mobType 时空几何）
     float m_walkPhase = 0.0f; // 行走相位（弧度）；sin 驱动腿摆
     float m_headPitch = 0.0f; // 头部俯仰（弧度，负=低头）；0 → 头走轴对齐快路径
-    bool m_packTextured = false; // t421 pack entity 贴图（T 字 UV）；false → 全脸 UV（程序生成贴图）
+    bool m_packTextured = false; // pack entity 贴图（MC box-UV 精确采样，R19 C3）；false → 全脸 UV（程序生成贴图）
 };
 
 #endif // MOBMODEL_H
