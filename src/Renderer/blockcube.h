@@ -50,6 +50,10 @@ class BlockCube : public QQuick3DGeometry
     Q_PROPERTY(QVector3D worldPos READ worldPos WRITE setWorldPos NOTIFY worldPosChanged)
     Q_PROPERTY(QVector3D sunDir READ sunDir WRITE setSunDir NOTIFY sunDirChanged)
     Q_PROPERTY(bool shadowsEnabled READ shadowsEnabled WRITE setShadowsEnabled NOTIFY shadowsEnabledChanged)
+    // PLAN §2-H 夜间火把发光修复：昼夜天光乘子（仅乘天光分量；QML 绑 terrainLight(skyLight)）。掉落沙 BlockCube
+    //   设 world 后采 flood-fill 光场（含 block 分量）→ 必须同步 chunkgeometry 把 dayMul 烘进天空分量、保持
+    //   「掉落沙与地形同亮度曲线」成对契约（lessons-learned t257）。block 项保留时间不变 → 掉在火把旁的沙夜间不变暗。
+    Q_PROPERTY(float dayMul READ dayMul WRITE setDayMul NOTIFY dayMulChanged)
 
 public:
     explicit BlockCube(QQuick3DObject *parent = nullptr);
@@ -66,6 +70,9 @@ public:
     void setSunDir(const QVector3D &dir);
     bool shadowsEnabled() const { return m_shadowsEnabled; }
     void setShadowsEnabled(bool on);
+    // PLAN §2-H dayMul（昼夜天光乘子，仅乘天光分量；见 Q_PROPERTY 注释）。
+    float dayMul() const { return m_dayMul; }
+    void setDayMul(float m);
 
 signals:
     void blockIdChanged();
@@ -73,6 +80,7 @@ signals:
     void worldPosChanged();
     void sunDirChanged();
     void shadowsEnabledChanged();
+    void dayMulChanged();
 
 private:
     void rebuild(); // 顶点位置恒定；按 m_blockId 重算每面 UV；据 world+worldPos 烘顶点色后整几何重传。
@@ -82,6 +90,7 @@ private:
     QVector3D m_worldPos;             // t257：方块世界中心（posAt 给的 (x+0.5,y+0.5,z+0.5)；占格 = floor(worldPos)）
     QVector3D m_sunDir{0.f, 1.f, 0.f};// t257：太阳方向单位向量（同 chunkgeometry 默认天顶正午）
     bool m_shadowsEnabled = true;     // t257：PCF 软影开关（false → 跳过软影，仅光场基底）
+    float m_dayMul = 1.0f;            // PLAN §2-H：昼夜天光乘子（仅乘天光分量；默认 1.0=正午全日照）
 };
 
 #endif // BLOCKCUBE_H

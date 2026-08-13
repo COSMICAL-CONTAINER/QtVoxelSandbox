@@ -45,6 +45,16 @@ public:
     //   分层（PLAN §2）：只接收「裸 QVector3D」（不 include worldclock.h、不依赖 Game 层时间源），保持
     //   Renderer→向下 依赖方向。
     Q_PROPERTY(QVector3D sunDir READ sunDir WRITE setSunDir NOTIFY sunInputChanged)
+    // PLAN §2-H 夜间火把发光修复（R19 B6）：昼夜天光乘子 dayMul（QML 端 terrainLight(skyLight) ∈ [minLight,1]）
+    //   **只乘天光分量**、**绝不乘方块光分量**。机制：方块光（火把/熔炉 flood-fill）时间不变；昼夜只应调制
+    //   天光。旧实现把昼夜乘子留在 QML baseColor（baseColor×vertexColor）→ 它会同时压暗 block 通道 →
+    //   夜间（skyLight=0 → dayMul=minLight=0.4）满光火把 0.93 被压到 0.37 = 火把夜间不发光。修复把 dayMul
+    //   注入 mesher，烘进 sky*(1-软影) 项（5 处烘焙点 + BlockCube 同步），block 项保持原样、取 max 后钳制 →
+    //   火把光池任何 dayMul 下都全亮。地形材质 baseColor 改白（不再承担昼夜）。
+    //   分层（PLAN §2）：只接收裸 float（不 include worldclock.h），保持 Renderer→向下。
+    //   性能：dayPhaseChanged（10Hz）会推本属性，但 setDayMul 走 sunRebuildDue 同款量化门（dayMul 累计变超
+    //   kDayMulThresh=0.03 才重建，与 sun-step 门合并），故昼夜过渡按 ~每 12s（最陡段）一步量化、不 10Hz 全量重建。
+    Q_PROPERTY(float dayMul READ dayMul WRITE setDayMul NOTIFY dayMulChanged)
     // t148 水渲染分流：waterOnly=true → 本几何只网格化 Water 方块（独立透明段，Main.qml 用 opacity=0.7
     //   材质渲染）；waterOnly=false（默认）→ 只网格化非水方块（地形 / 异形 / ...，跳过 Water，避免与水段
     //   重复绘制 + 水被当不透明地形误渲）。两段共用同一 culled meshing 主体 + 顶点色光照管线，仅：
@@ -145,6 +155,10 @@ public:
     QVector3D sunDir() const { return m_sunDir; }
     void setSunDir(const QVector3D &dir);
 
+    // PLAN §2-H dayMul（昼夜天光乘子，仅乘天光分量；见 Q_PROPERTY 注释）。
+    float dayMul() const { return m_dayMul; }
+    void setDayMul(float m);
+
     // t148 水渲染分流（见 Q_PROPERTY 注释）：true=只网格化 Water 段。
     bool waterOnly() const { return m_waterOnly; }
     void setWaterOnly(bool on);
@@ -182,6 +196,7 @@ signals:
     void cxChanged();
     void czChanged();
     void sunInputChanged(); // t123：sunDir 变（太阳量化跨步）；驱动呈现层 / 未来光场刷新
+    void dayMulChanged();   // PLAN §2-H：昼夜天光乘子变（仅乘天光分量，方块光时间不变）
     void waterOnlyChanged(); // t148：水段开关变（QML 改 waterOnly → 重建，水段 / 地形段重网格化）
     void cutoutOnlyChanged(); // t326：cutout 段开关变（QML 改 cutoutOnly → 重建，cross 段 / 地形段重网格化）
     void lavaOnlyChanged(); // t343：岩浆段开关变（QML 改 lavaOnly → 重建，岩浆段 / 地形段重网格化）
@@ -205,10 +220,11 @@ private:
     //   mesher 据此把天光分量乘 (1-sh)，火把方光取 max 保留。只读 World::heightmapAt + 裸 sunDir（不依赖
     //   Game 层 WorldClock，保持 Renderer→向下）。
     float sunShadowAt(float wx, float wy, float wz) const;
-    // tXXX sun-step 粗量化门：判定本次 sunDir 变化是否需要重烘顶点色（否则只更新 m_sunDir 不重建）。
-    //   三类事件才重烘：影淡入/淡出带穿越（y 跨 kSunMin/kSunMax）| 仰角/方位角累计变超阈值 | 距上次重烘
-    //   超硬顶。昼夜亮度由 QML baseColor 平滑，方向软影粗更新无亮度跳变（见 .cpp 实现注释）。
-    bool sunRebuildDue(const QVector3D &dir) const;
+    // tXXX sun-step 粗量化门：判定本次 sunDir / dayMul 变化是否需要重烘顶点色（否则只更新值不重建）。
+    //   重烘事件：影淡入/淡出带穿越（y 跨 kSunMin/kSunMax）| 仰角/方位角累计变超阈值 | dayMul 累计变超
+    //   kDayMulThresh | 距上次重烘超硬顶。昼夜天光（dayMul）现烘进顶点色天空分量（PLAN §2-H），故 dayMul 累计
+    //   变化超阈值亦触发重烘（保持昼夜过渡可见、但不 10Hz 全量重建）；block 项不受影响（方块光时间不变）。
+    bool sunRebuildDue(const QVector3D &dir, float dayMul) const;
     Chunk *myChunk() const;           // 本几何负责的 chunk（world/cx/cz 无效 → nullptr）
     // 世界坐标查询（跨 chunk 经 world.blockAt 路由 → 边界面剔除正确）
     quint8 blockAtWorld(int wx, int wy, int wz) const {
@@ -224,6 +240,7 @@ private:
     int m_cx = -1; // -1 = 未赋值（myChunk 返回 nullptr，待 QML 赋 cx/cz 后才建）
     int m_cz = -1;
     QVector3D m_sunDir{0.f, 1.f, 0.f}; // t123 太阳方向（单位向量；默认天顶正午，QML 绑 WorldClock.sunDir）
+    float m_dayMul = 1.0f; // PLAN §2-H：昼夜天光乘子（仅乘天光分量；默认 1.0=正午全日照，QML 绑 terrainLight(skyLight)）
     bool m_waterOnly = false; // t148：true=只网格化 Water 段（透明水）；false=只网格化非水地形段
     bool m_cutoutOnly = false; // t326：true=只网格化 cross 段（草丛/作物/树苗 cutout）；false=不网格化 cross
     bool m_lavaOnly = false; // t343：true=只网格化 Lava 段（满格立方近不透暖色）；false=地形段跳 Lava
@@ -236,6 +253,7 @@ private:
     // tXXX sun-step 粗量化：上次「实际烘进顶点色的太阳方向」与时刻（buildMesh 末尾更新）。setSunDir 据此
     //   判是否值得重烘（方向变太小 / 未穿影带 → 只更新 m_sunDir 不重建；影边 PCF 软 → 粗更新无亮度跳变）。
     QVector3D m_lastBakedSunDir{0.f, 1.f, 0.f};
+    float m_lastBakedDayMul = 1.0f; // PLAN §2-H：上次「实际烘进顶点色的 dayMul」（sunRebuildDue 据此判是否重烘昼夜）
     qint64 m_lastSunBakeNs = 0;
     int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
     int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）

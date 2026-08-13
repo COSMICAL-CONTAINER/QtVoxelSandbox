@@ -192,7 +192,14 @@ Window {
     //   （3000 次/秒 JS 调用 + Qt.rgba QColor 分配 + scenegraph 标脏）。改为单一 window.skyBaseColor 绑定 + 各
     //   material 只读它 → 10Hz 仅 1 次重算，材料绑定从「计算 + QColor 分配」降为「常数属性读取」。
     //   tintBySkyLight（mob tier 色）不在 chunk material 路径，结构不同（mob delegate 数 << 300），保留独立调。
+    // R19 B6（PLAN §2-H 夜间火把发光修复）：地形 / 水 / 玻璃 / 冰 / cutout 材质 baseColor 改**白**
+    //   （昼夜乘子改由 C++ 烘进顶点色的**天光分量**承担，方块光独立时间不变）。skyBaseColor 现仅供**不采光场**的
+    //   呈现路径（mob 体色 / 掉落物无 world 的 BlockCube / 手持图标等 —— 它们顶点色恒白 1.0、baseColor 是唯一昼夜
+    //   调制点）继续用，故保留。新增 skyDayMul 供地形 / 掉落沙 ChunkGeometry / BlockCube 注入 mesher 烘天空分量。
     property color skyBaseColor: terrainLight(worldClock.skyLight)
+    // R19 B6：供地形 ChunkGeometry / 掉落沙 BlockCube 的 dayMul 属性注入（= terrainLight(skyLight) 标量）。
+    //   dayPhaseChanged（10Hz）推本属性；mesher 端量化门控（dayMul 累计变超 0.03 才重建，非 10Hz 全量重建）。
+    property real skyDayMul: terrainLight(worldClock.skyLight).r  // .r = 纯灰阶标量（terrainLight 返 (b,b,b,1)）
 
     // t384 云层漂移累积（单一时间权威 WorldClock.ticked 推进，不在 QML 另起 Timer，PLAN §2）。
     //   云 Model 的 position.x = player.x + (cloudDrift) —— cloudDrift 随时间增长并在「一个 tile 世界宽」
@@ -1559,6 +1566,12 @@ Window {
     //   「昼夜乘子 × 天光遮蔽 × 贴图」：地表昼 = 1.0×1.0×tex、地表夜 = 0.4×1.0×tex、洞穴昼 = 1.0×0.2×tex。
     //   m=skyLight ∈ [0,1]（0=子夜、1=正午）；floor 0.4 ≈ 原 nightTint alpha 0.6 把地形拉暗的等效量级
     //   （夜间仍可辨识地形轮廓，spec t09）。纯灰阶乘子（不偏色）——夜色基调由 sky clearColor 提供。
+    //
+    // R19 B6（PLAN §2-H 夜间火把发光修复）：本函数不再用于**地形 / 水 / 玻璃 / 冰 / cutout / 掉落沙**材质
+    //   的 baseColor（它们的昼夜乘子已改由 C++ mesher 烘进顶点色**天光分量** dayMul，方块光时间不变、夜间火把
+    //   全亮发光）。本函数仍供：(1) skyDayMul 标量（注入 ChunkGeometry/BlockCube dayMul）；(2) 顶点色恒白 1.0 的
+    //   呈现路径（mob 体色 / 不接 world 的 BlockCube 掉落物 / 手持图标 / 箱子方块）作 baseColor 灰阶调制 ——
+    //   这些路径无 flood-fill 方块光可被压暗，baseColor 是唯一昼夜调制点，旧用法正确保留。
     function terrainLight(m) {
         const fl = window.minLight
         const b = fl + (1.0 - fl) * m
@@ -3091,9 +3104,10 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
+                    dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量，方块光时间不变）
                     chunkInRange: terrainModel.chunkInRange // t472：视距门控传给 mesher（远端跳过 sun/water/编辑重建）
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: window.skyBaseColor }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0) }
             }
         }
 
@@ -3117,9 +3131,10 @@ Window {
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
                     chunkInRange: waterModel.chunkInRange // t472：视距门控传给 mesher（远端水段跳过重建）
+                    dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量，方块光时间不变）
                     waterOnly: true
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: waterStripTex; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: window.skyBaseColor }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: waterStripTex; vertexColorsEnabled: true; opacity: 0.7; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0) }
             }
         }
 
@@ -3146,6 +3161,7 @@ Window {
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
                     chunkInRange: lavaModel.chunkInRange // t472：视距门控传给 mesher（远端岩浆段跳过 sun 重建）
+                    dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量；岩浆自发光由 block flood-fill 时间不变）
                     lavaOnly: true
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: lavaStripTex; vertexColorsEnabled: true; opacity: 0.95; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(1.0, 0.82, 0.6, 1.0) }
@@ -3178,6 +3194,7 @@ Window {
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
                     chunkInRange: glassModel.chunkInRange // t472：视距门控传给 mesher（远端玻璃段跳过 sun 重建）
+                    dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量，方块光时间不变）
                     glassOnly: true
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.45; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
@@ -3209,6 +3226,7 @@ Window {
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
                     chunkInRange: iceModel.chunkInRange // t472：视距门控传给 mesher（远端冰段跳过 sun 重建）
+                    dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量，方块光时间不变）
                     iceOnly: true
                 }
                 // t495 二轮复盘 冰改不透明渲染：去掉 opacity:0.7 + alphaMode:Blend，让冰走**不透明 pass**（深度写 ON）。
@@ -3220,12 +3238,11 @@ Window {
                 //   教科书透明排序 z-fight）。机制等价 MC 1.0：**冰在 MC 是不透明方块**（不像水半透），故 MC 冰水边界稳
                 //   定不闪。修：冰走不透明 pass 写深度 → 透明排序只余水（单一透明材质，自排序无歧义）→ 冰水边界稳定。
                 //   视觉：冰失去 0.7 半透感（不能再透视冰后方块），换 MC 一致的不透明冰质感（冰裂纹贴图 + 冷青蓝底
-                //   仍显冰质，非损失）。lit 红线：NoLighting（默认 lit 在 D3D11 不出像素，PLAN §2-H）。baseColor 沿用
-                //   skyBaseColor（与水 / 地形同昼夜亮度曲线，t495 一轮统一）。alphaMode 缺省 = Opaque（深度写 ON）。
-                //   不变量：冰不发光（无 emissiveFactors），符合 lighting 铁律。
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: window.skyBaseColor }
-                // t495 一轮 冰-水透明度过渡：baseColor 用 window.skyBaseColor（与水 / 地形同昼夜亮度曲线），冰浅蓝由
-                //   贴图 tile 58 自身提供（baseColor 灰阶只调亮度不染色）。
+                //   仍显冰质，非损失）。lit 红线：NoLighting（默认 lit 在 D3D11 不出像素，PLAN §2-H）。
+                //   R19 B6：baseColor 改白（昼夜乘子由 C++ 烘进顶点色天空分量 dayMul 承担，方块光时间不变；同地形 / 水段）。
+                //   alphaMode 缺省 = Opaque（深度写 ON）。不变量：冰不发光（无 emissiveFactors），符合 lighting 铁律。
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0) }
+                // t495 一轮 冰-水透明度过渡：冰浅蓝由贴图 tile 58 自身提供（baseColor 白只调亮度，亮度由顶点色 dayMul 承载）。
             }
         }
 
@@ -3260,9 +3277,10 @@ Window {
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
                     chunkInRange: crossModel.chunkInRange // t472：视距门控传给 mesher（远端 cutout 段跳过 sun 重建）
+                    dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量，方块光时间不变）
                     cutoutOnly: true   // t326：仅 cross 方块（草丛/作物/树苗）→ cutout 材质（t439 alphaMode:Mask 不透明 pass）
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: window.skyBaseColor }
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0) }
             }
         }
 
@@ -4875,6 +4893,7 @@ Window {
                             worldPos: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.posAt(index)) : Qt.vector3d(0, 0, 0) }
                             sunDir: worldClock.sunDir
                             shadowsEnabled: window.shadowsEnabled
+                            dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量；掉落沙夜间不压暗火把旁 block 光）
                         }
                         // t490 PrimedTnt 引燃收缩 scale 0.98（机制等价 MC TNT 引燃收缩）；非 primed 保持 1.0。
                         property bool entPrimed: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.isPrimedAt(index)) : false }
@@ -4945,12 +4964,11 @@ Window {
                             //   **整格纯白**（遮掉 TNT 贴图，机制等价 MC primed TNT 闪白）；非峰期 → 图集 + 暗底 →
                             //   暗 TNT 贴图可见。暗↔白往复 = 白闪脉冲（明显闪烁，任何光照下都可见）。
                             baseColorMap: (fallingBlockModel.entPrimed && fallingBlockModel.entFlashBright) ? null : voxelAtlas
-                            // 非 primed → 原 terrainLight 昼夜灰阶（t257）。primed 时取消 vertexColorsEnabled（顶点色
-                            //   光场会让白闪暗化，pulse 视觉不纯）。
+                            // 非 primed → 白（R19 B6：昼夜乘子已由 BlockCube dayMul 烘进顶点色天空分量；方块光时间不变）。
+                            //   primed 时取消 vertexColorsEnabled（顶点色光场会让白闪暗化，pulse 视觉不纯）。
                             baseColor: {
                                 const _r = entityManager.revision
-                                const tl = terrainLight(worldClock.skyLight)
-                                if (_r >= 0 && !fallingBlockModel.entPrimed) return tl
+                                if (_r >= 0 && !fallingBlockModel.entPrimed) return Qt.rgba(1.0, 1.0, 1.0, 1.0)
                                 if (fallingBlockModel.entFlashBright) return Qt.rgba(1.0, 1.0, 1.0, 1.0) // 纯白（贴图已 null）
                                 return Qt.rgba(0.25, 0.25, 0.25, 1.0) // 暗底（图集暗 TNT 贴图）
                             }

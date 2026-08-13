@@ -96,8 +96,24 @@ void ChunkGeometry::setSunDir(const QVector3D &dir)
     emit sunInputChanged();
     if (!m_chunkInRange) return; // t472：远端 chunk 静默跟随值变，不重建
     if (m_vertexCount == 0) return; // 空段无顶点可打光 → 太阳步进零影响，跳过重建
-    if (!sunRebuildDue(dir)) return; // tXXX：方向变太小 / 未穿影带 / 未超硬顶 → 只更新值不重建
+    if (!sunRebuildDue(dir, m_dayMul)) return; // tXXX：方向变太小 / 未穿影带 / 未超硬顶 / dayMul 未累计超阈 → 只更新值不重建
     buildMesh(RebuildReason::Sun);
+}
+
+// PLAN §2-H dayMul setter（昼夜天光乘子，仅乘天光分量）：QML 绑 window.skyDayMul（terrainLight(skyLight)）→
+//   dayPhaseChanged（10Hz）推本属性。10Hz 全量重建太贵（325 段/100ms），故走 sunRebuildDue 同款量化门 ——
+//   dayMul 累计变超 kDayMulThresh=0.03 才重建（最陡段 ~每 12s 一步，与 sun-step 门合并）。值未变早退。
+//   t472 视距门控：远端 chunk 静默更新值，回 true 时 catch-up。
+void ChunkGeometry::setDayMul(float m)
+{
+    if (m < 0.0f) m = 0.0f; else if (m > 1.0f) m = 1.0f; // 钳到合法 [0,1]
+    if (m_dayMul == m) return;
+    m_dayMul = m;
+    emit dayMulChanged();
+    if (!m_chunkInRange) return; // t472：远端 chunk 静默跟随值变，不重建
+    if (m_vertexCount == 0) return; // 空段无顶点可打光 → 跳过重建
+    if (!sunRebuildDue(m_sunDir, m)) return; // dayMul 未累计超阈 / sun 方向未跨门 / 未超硬顶 → 只更新值不重建
+    buildMesh(RebuildReason::Sun); // dayMul 变属于光照层变化，复用 Sun reason（绕 chunk dirty，与 sun-step 同语义）
 }
 
 // tXXX sun-step 粗量化门（性能：mesh 重建风暴根治 #1——sun 步进）。WorldClock 量化 72 步/天（每 ~16.7s
@@ -112,13 +128,18 @@ void ChunkGeometry::setSunDir(const QVector3D &dir)
 //   层：只读裸 sunDir + 单调时钟（FrameProfiler::nowNs），不依赖 Game 层 WorldClock（Renderer→向下）。
 //   debugFast（30s 天）下每步 0.42s，阈值步数不变 → 重烘每 ~1.7s 一次，调试仍见影动；生产 1200s 天每
 //   ~30-70s 一次。m_lastBakedSunDir/m_lastSunBakeNs 在 buildMesh 末尾更新（任何 reason 都烘顶点色）。
-bool ChunkGeometry::sunRebuildDue(const QVector3D &dir) const
+bool ChunkGeometry::sunRebuildDue(const QVector3D &dir, float dayMul) const
 {
     static constexpr float kSunMinY  = VoxelLight::kSunMin;                        // 0.30：影起始门（与 sunShadow 同源）
     static constexpr float kSunMaxY  = VoxelLight::kSunMin + VoxelLight::kSunFade; // 0.40：满影门（淡入带顶）
     static constexpr double kSunElevThresh = 0.12;   // ~6.9° 仰角累计变（影长 / 淡入淡出速率感知）
     static constexpr double kSunAzimThresh  = 0.35;  // ~20° 方位角累计变（日中影缓慢旋转攒够才重烘）
     static constexpr qint64 kSunMaxIntervalNs = 120LL * 1000000000LL; // 120s 硬顶（影绝不冻结超 2 分钟）
+    // PLAN §2-H：昼夜天光（dayMul）量化阈值。dayMul ∈ [minLight(0.2..0.6), 1]，0.03 阈 → 整个昼夜周期
+    //   约 25-33 步重烘（20min 周期 ~每 40s 一步、最陡段 ~每 12s；30s debug ~每 1s）→ 视觉无突变、不全量重建。
+    //   skyLight 在白天/黑夜中段变化最慢（cos 曲线平顶），在黎明/黄昏（phase~0.25/0.75）变化最快 → 量化步进
+    //   自然集中在过渡带（用户视觉最敏感处步进密），日中/夜间稳态几乎不重建。
+    static constexpr float kDayMulThresh = 0.03f;
 
     const QVector3D &last = m_lastBakedSunDir;
     // (a) 影带穿越（上一烘 vs 当前）：带边界任一方向穿越都重烘。
@@ -127,7 +148,9 @@ bool ChunkGeometry::sunRebuildDue(const QVector3D &dir) const
     const bool lastAbove = last.y() >= kSunMaxY;
     const bool curAbove  = dir.y()  >= kSunMaxY;
     if (lastBelow != curBelow || lastAbove != curAbove) return true;
-    if (dir.y() <= kSunMinY) return false; // 夜/低仰角：无影，方位角 / 时间都无需重烘
+    // (d) dayMul 累计变化超阈（昼夜天光重烘，PLAN §2-H）。放在影带穿越之后，与仰角/方位角同级。
+    if (std::fabs(dayMul - m_lastBakedDayMul) >= kDayMulThresh) return true;
+    if (dir.y() <= kSunMinY) return false; // 夜/低仰角：无影，方位角无需重烘（dayMul 变已由 (d) 处理）
     // (b) 方位角累计变化（XZ 投影夹角；太阳近天顶 / 水平分量≈0 时退化不判，同 sunShadow 退化语义）。
     const float lh = std::sqrt(last.x()*last.x() + last.z()*last.z());
     const float ch = std::sqrt(dir.x()*dir.x() + dir.z()*dir.z());
@@ -364,9 +387,9 @@ float ChunkGeometry::farmlandHydrBrightMul(quint8 hydr) const
 //   （非硬二值）。返回 [0,1] 软影因子（0=全亮、1=全影）。
 //
 //   方向基底（不开 lit 红线）：顶点 vc 的天光分量由 t151 flood-fill 光场决定（开敞见天 / 洞穴暗），PCF 在此
-//   基础上把「太阳被邻近高地遮挡」处再压暗；火把方光（blockLight）不受影（mesher 取 max(sky*(1-sh), block)
-//   保留）。昼夜乘子仍由 QML baseColor（terrainLight）承担，故影因子本身时间不变 —— 仅随 sunDir（量化跨步）
-//   变 → 绑 sunChanged 重建（每顶点重算）。
+//   基础上把「太阳被邻近高地遮挡」处再压暗；火把方光（blockLight）不受影（mesher 取 max(sky*(1-sh)*dayMul, block)
+//   保留）。昼夜天光乘子（dayMul）现烘进顶点色**天空分量**（PLAN §2-H 修复：方块光时间不变），故影因子本身
+//   时间不变 —— 仅随 sunDir（量化跨步）变 → 绑 sunChanged 重建（每顶点重算）。
 //
 //   退化情形：太阳低于门 kSunMin（含夜间 sunDir.y<=0）→ 影因子 0（vc 全由光场基底照亮）；太阳近天顶
 //   （水平分量≈0）→ 影无方向感、退化为不投影。门附近按 kSunFade 平滑淡入，防量化跨步时影突变。
@@ -427,12 +450,18 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     //   光场基底 = 邻格（面所朝向的空气格）的 max(sky, block)/15，由 World 的 BFS flood-fill 算出（存 chunk
     //   第三数组），mesher 只读采样。t153 在此基底上叠 PCF 软影：天光分量再乘 (1 - sunShadowAt)，把「太阳
     //   被邻近高地遮挡」处压暗（heightmap 正交深度图沿 sunDir 步进、2×2 PCF 软过渡）；火把方光（block）
-    //   不受影（取 max 保留）。昼夜乘子仍由 QML baseColor 承担（terrainLight 平滑 lerp），故光场本身时间
-    //   不变 —— 影因子仅随 sunDir（量化跨步）变 → 绑 sunChanged 重建（sunShadowAt 见上方）。
+    //   不受影（取 max 保留）。
     //   kVcMin / kVcMax 取自 voxellight.h（VoxelLight::kVcMin/kVcMax）—— mesher 与 BlockCube（t257 掉落沙）
     //   共用同一顶点色钳制曲线，保证「掉落沙与地形同亮度」（修暗处挖底沙变亮根因）。
+    //
+    // PLAN §2-H 夜间火把发光修复（R19 B6）：昼夜天光乘子 dayMul **只乘天光分量**、**绝不乘方块光分量**。
+    //   公式 vc = clamp(max(sky/15 × (1 - 软影) × dayMul, block/15), kVcMin, kVcMax)。机制：方块光（火把/熔炉
+    //   flood-fill）时间不变，昼夜只调制天光；火把光池（block/15≈0.93）在任何 dayMul 下都全亮 → 夜间火把发光
+    //   （修旧版「夜间火把被压到 0.37」根因：旧 dayMul 留在 QML baseColor，会同时压暗 block 通道）。地形材质
+    //   baseColor 改白（不再承担昼夜）；dayMul 由 setDayMul 注入（量化门控重烘，非 10Hz 全量重建）。
     constexpr float kVcMin = VoxelLight::kVcMin; // 暗部地板最低亮度（洞穴/阴影最低，仍远低于火把光池 0.93 保持对比）
     constexpr float kVcMax = VoxelLight::kVcMax;
+    const float dayMul = m_dayMul; // 本帧烘光的昼夜天光乘子（只乘 sky 项，保 block 项时间不变）
 
     if (c && m_world) {
         // ---- PASS 1：不完整方块（异形）合批进同一 chunk mesh（t133 PartialBlockGeometry）----
@@ -478,8 +507,9 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     const quint8 cSky = m_world->skyLightAt(wx, ly, wz);
                     const quint8 cBlock = m_world->blockLightAt(wx, ly, wz);
                     const float cShadow = sunShadowAt(float(wx) + 0.5f, float(ly) + 0.5f, float(wz) + 0.5f);
+                    // PLAN §2-H：dayMul 只乘天光分量（cross 本格光场），block 项保留 → 夜间火把附近 cross 仍亮。
                     const float cellLight = std::clamp(
-                        std::max((cSky / 15.0f) * (1.0f - cShadow), cBlock / 15.0f), kVcMin, kVcMax);
+                        std::max((cSky / 15.0f) * (1.0f - cShadow) * dayMul, cBlock / 15.0f), kVcMin, kVcMax);
                     const quint8 st = stateAtWorld(wx, ly, wz);
                     // t360 异形方块光照：cross 用本格光场（cellLight）；pushBox 各面用「面所朝邻格」flood 光
                     //   （修合活版门/下半砖顶面自影：旧采被本格 lightOpacity 压暗的本格值）。6 向邻格 sky/block
@@ -501,7 +531,8 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         const float nbSkyF = m_world->skyLightAt(nx, ny, nz) / 15.0f;
                         const float nbBlockF = m_world->blockLightAt(nx, ny, nz) / 15.0f;
                         const float sh = sunShadowAt(fs[i].px, fs[i].py, fs[i].pz);
-                        lctx.face[i] = std::clamp(std::max(nbSkyF * (1.0f - sh), nbBlockF), kVcMin, kVcMax);
+                        // PLAN §2-H：dayMul 只乘天光分量（异形盒体各面光场），block 项保留。
+                        lctx.face[i] = std::clamp(std::max(nbSkyF * (1.0f - sh) * dayMul, nbBlockF), kVcMin, kVcMax);
                     }
                     // t408 耕地从 PASS 2 立方面迁到 PASS 1 矮盒（PartialBlockGeometry），原 PASS 2 顶面湿润暗化
                     //   （farmlandHydrBrightMul，darker=wetter）改在此预乘 lctx.face[+Y(=2)]，使矮盒顶面顶点色仍随
@@ -649,7 +680,8 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 // 顶点 Y：水平面四角同高（yHi）；侧面按角点 dy(0/1) 映射到 [yLo,yHi]。
                                 const float yy = (F.dir[1] != 0) ? yHi : (dy ? yHi : yLo);
                                 const float shadow = sunShadowAt(float(wx) + dx, float(ly) + yy, float(wz) + dz);
-                                const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow), nbBlockF),
+                                // PLAN §2-H：dayMul 只乘天光分量（水/岩浆变高面），block 项保留 → 夜间火把照亮的水面仍可见。
+                                const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow) * dayMul, nbBlockF),
                                                             kVcMin, kVcMax);
                                 // UV：同 terrain culled 规则（±X cu=dz,cv=dy；±Z cu=dx,cv=dy；±Y cu=dx,cv=dz）。
                                 //   侧面 cv=dy(0/1) → 贴图垂直方向 0..1 映射到 [yLo,yHi] 区间（部分带/矮水面
@@ -814,7 +846,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 const float shadow = sunShadowAt(float(originX + cl[0]),
                                                                  float(cl[1]),
                                                                  float(originZ + cl[2]));
-                                const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow), nbBlockF),
+                                const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow) * dayMul, nbBlockF),
                                                             kVcMin, kVcMax);
                                 // UV 在合并 quad 上拉伸铺满（cu/cv 取角点分量 0/1，纹理随几何 span 拉伸）。
                                 const float cu = F.c[cc][cuAxis] ? 1.0f : 0.0f;
@@ -886,7 +918,8 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             for (int cc = 0; cc < 4; ++cc) {
                                 const float dx = F.c[cc][0], dy = F.c[cc][1], dz = F.c[cc][2];
                                 const float shadow = sunShadowAt(float(wx) + dx, float(ly) + dy, float(wz) + dz);
-                                const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow), nbBlockF),
+                                // PLAN §2-H：dayMul 只乘天光分量（立方面），block 项保留 → 夜间火把/熔炉光照亮的方块面仍全亮。
+                                const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow) * dayMul, nbBlockF),
                                                             kVcMin, kVcMax);
                                 float cu, cv;
                                 if (f == 0 || f == 1) { cu = dz; cv = dy; }       // ±X
@@ -956,6 +989,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     //   m_sunDir）→ 一律更新，门从「最近一次实际烘光的太阳位」起算（编辑即时重建后，sun 门从编辑时的太阳位
     //   重新累积，不会把编辑前旧方向也计入）。
     m_lastBakedSunDir = m_sunDir;
+    m_lastBakedDayMul = m_dayMul; // PLAN §2-H：记录「本次实际烘进顶点色的 dayMul」，下次 setDayMul 据此判量化门
     m_lastSunBakeNs = FrameProfiler::nowNs();
 
     // 可观测性（dev-spec t03 / t155 验收）：dirty = 编辑 / 初次加载即时重建（同步于 setBlock，破/放后当帧）；

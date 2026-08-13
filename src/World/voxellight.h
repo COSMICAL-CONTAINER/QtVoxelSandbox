@@ -51,7 +51,8 @@ constexpr float kVcMax = 1.0f;
 //
 //   方向基底（不开 lit 红线）：顶点 vc 的天光分量由 t151 flood-fill 光场决定（开敞见天 / 洞穴暗），PCF 在此
 //   基础上把「太阳被邻近高地遮挡」处再压暗；火把方光（blockLight）不受影（调用方取 max(sky*(1-sh), block)
-//   保留）。昼夜乘子仍由 QML baseColor（terrainLight）承担，故影因子本身时间不变 —— 仅随 sunDir（量化跨步）变。
+//   保留）。昼夜乘子（dayMul）现烘进顶点色的**天空分量**（vertexLight 内 sky*(1-sh)*dayMul，PLAN §2-H 修复：
+//   方块光时间不变），故影因子本身时间不变 —— 仅随 sunDir（量化跨步）变。
 //   退化：太阳低于门 kSunMin（含夜间 sunDir.y<=0）→ 0；太阳近天顶（水平分量≈0）→ 退化不投影；门附近按
 //   kSunFade 平滑淡入，防量化跨步时影突变。
 inline float sunShadow(const World *world, const QVector3D &sunDir, bool shadowsEnabled,
@@ -94,18 +95,25 @@ inline float sunShadow(const World *world, const QVector3D &sunDir, bool shadows
 }
 
 // t151/t257 单格光照 → 顶点色值（mesher 立方面与 BlockCube 掉落沙共用同一光照公式 → 渲染一致）。
-//   vc = clamp(max(sky/15 × (1 - 软影), block/15), kVcMin, kVcMax)。
+//   vc = clamp(max(sky/15 × (1 - 软影) × dayMul, block/15), kVcMin, kVcMax)。
 //   sky/block 取自**邻格** (nx,ny,nz)（面所朝向外侧的空气格，同 chunk 立方面约定：面的可见光来自其前方
 //   的光场）；软影采样于**该顶点的世界位** (wx,wy,wz)（per-vertex PCF，影边光栅化平滑）。world==null →
 //   返 1.0（全亮，保 item entity / 手持 / 热栏图标未接 world 时的既有全亮行为，lessons-learned t144）。
+//
+// PLAN §2-H 不变量（夜间火把发光修复）：dayMul（昼夜天光乘子）只乘**天光分量** sky*(1-软影)，**绝不**
+//   乘方块光分量 block。机制：方块光（火把/熔炉 BFS flood-fill）时间不变，昼夜只应调制天光；max 取大者
+//   后钳制 → 火把光池（block/15≈0.93）在任何 dayMul 下都全亮发光，仅天光铺底（地表 / 洞穴顶）随昼夜变。
+//   旧实现把 dayMul 留在 QML baseColor（baseColor×vertexColor），它会同时压暗 block 通道 → 夜间火把只剩
+//   0.37；改把 dayMul 烘进天空分量、地形 baseColor 设白（mesher 与 BlockCube 共用本函数同步），方块光独立。
 inline float vertexLight(const World *world, const QVector3D &sunDir, bool shadowsEnabled,
+                         float dayMul,
                          int nx, int ny, int nz, float wx, float wy, float wz)
 {
     if (!world) return 1.0f;
     const float nbSkyF = world->skyLightAt(nx, ny, nz) / 15.0f;
     const float nbBlockF = world->blockLightAt(nx, ny, nz) / 15.0f;
     const float shadow = sunShadow(world, sunDir, shadowsEnabled, wx, wy, wz);
-    return std::clamp(std::max(nbSkyF * (1.0f - shadow), nbBlockF), kVcMin, kVcMax);
+    return std::clamp(std::max(nbSkyF * (1.0f - shadow) * dayMul, nbBlockF), kVcMin, kVcMax);
 }
 
 } // namespace VoxelLight

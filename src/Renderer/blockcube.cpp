@@ -110,6 +110,17 @@ void BlockCube::setShadowsEnabled(bool on)
     rebuild();
 }
 
+// PLAN §2-H dayMul setter（昼夜天光乘子，仅乘天光分量）：值变 → rebuild 重烘顶点色（掉落沙数量少，
+//   无须 chunkgeometry 那样的量化门，直接随 dayPhaseChanged 10Hz 重建掉落沙 BlockCube 即可）。
+void BlockCube::setDayMul(float m)
+{
+    if (m < 0.0f) m = 0.0f; else if (m > 1.0f) m = 1.0f; // 钳到合法 [0,1]
+    if (m_dayMul == m) return;
+    m_dayMul = m;
+    emit dayMulChanged();
+    rebuild();
+}
+
 // 按 m_blockId 重算每面 UV（顶点位置恒定）+ 据 world/worldPos 烘顶点色。每面查图集瓦片序号 → 该瓦片
 // [u0,u1]×[v0,v1] 子区，4 角按 cu/cv 插值铺面。BlockRegistry::Face 序与本类面序一致（0=+X…5=-Z）。
 // t257 顶点色：每面取外侧邻格 sky/block 光 + 每顶点 PCF 软影（VoxelLight::vertexLight，与 chunkgeometry
@@ -143,8 +154,9 @@ void BlockCube::rebuild()
             v.v = v0 + fc.cv * (v1 - v0);
             if (lightOn) {
                 // 顶点世界位 = 方块中心 + 本地角点（±0.5）；软影据此采样 heightmap 路径。
+                // PLAN §2-H：dayMul 只乘天光分量（block 项保留时间不变）→ 掉落沙夜间不随昼夜变暗、与地形同曲线。
                 const float vc = VoxelLight::vertexLight(
-                    m_world, m_sunDir, m_shadowsEnabled, nx, ny, nz,
+                    m_world, m_sunDir, m_shadowsEnabled, m_dayMul, nx, ny, nz,
                     m_worldPos.x() + fc.x, m_worldPos.y() + fc.y, m_worldPos.z() + fc.z);
                 v.r = vc; v.g = vc; v.b = vc;
             } else {
