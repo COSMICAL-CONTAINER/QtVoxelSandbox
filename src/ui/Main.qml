@@ -1098,8 +1098,48 @@ Window {
         "kill": {
             desc: "/kill [@e[type=类型]] —— 无参自杀；@e 清除所有非玩家实体；@e[type=类型] 按类型清除",
             run: function(rest) { return window.runKill(rest) }
+        },
+        // misc 二轮 `/time` 指令（spec：聊天一键设/加时间）。语义：phase 0=正午 0.25=黄昏 0.5=子夜 0.75=黎明。
+        //   /time set day|night|midnight|<num>[d]  /time add <num>。num 当 MC 0-24000 ticks（0=正午 6000=日落
+        //   12000=子夜 18000=日出）→ phase=num/24000；num+d（如 3d）= 设第几天（月相）。
+        "time": {
+            desc: "/time set <day|night|midnight|数字[d]> | /time add <数字> —— 设/加时间",
+            run: function(rest) { return window.runTime(rest) }
         }
     })
+    // misc 二轮 `/time` 解析（spec）：rest 含前导空格如 " set day"。子命令 set/add。
+    //   phase 语义：0=正午 0.25=黄昏 0.5=子夜 0.75=黎明（与 WorldClock 一致）。
+    //   · set day → phase 0（白天）；set night → 0.5（深夜）；set midnight → 0.5；set <num> → phase=num/24000（MC ticks）；
+    //     set <num>d → 设第 num 天（月相=num%8），phase 不变。
+    //   · add <num> → 当前 phase + num/24000（跨天自动）。
+    //   返系统回显串（如「时间设为白天」）。
+    function runTime(rest)
+    {
+        const args = rest.trim().split(/\s+/)        // ["set","day"] / ["add","1000"] 等
+        if (args.length < 2 || args[0] === "")
+            return "用法: /time set <day|night|midnight|数字[d]> | /time add <数字>"
+        const sub = args[0].toLowerCase()
+        const val = args[1]
+        if (sub === "set") {
+            const v = val.toLowerCase()
+            if (v === "day")       { worldClock.setPhase(0.0);  return "时间设为白天（正午）" }
+            if (v === "night")     { worldClock.setPhase(0.5);  return "时间设为夜晚（子夜）" }
+            if (v === "midnight")  { worldClock.setPhase(0.5);  return "时间设为子夜" }
+            // <num>d → 设第几天（月相）；<num> → phase=num/24000
+            const m = val.match(/^(-?\d+)d$/i)
+            if (m) { worldClock.setDay(parseInt(m[1], 10)); return "设为第 " + m[1] + " 天（月相刷新）" }
+            const n = parseFloat(val)
+            if (!isNaN(n)) { worldClock.setPhase(n / 24000.0); return "时间设为 " + val + " ticks" }
+            return "未知时间值: " + val + "（用 day/night/midnight/数字/数字d）"
+        }
+        if (sub === "add") {
+            const n = parseFloat(val)
+            if (isNaN(n)) return "/time add 需要数字（ticks）"
+            worldClock.addPhase(n / 24000.0)
+            return "时间增加 " + val + " ticks"
+        }
+        return "未知子命令: " + sub + "（用 set 或 add）"
+    }
     // t378 实体类型名 → EntityManager.MobType 枚举 id 的映射（/kill @e[type=...] 用；§9 区隔改名 mob）。
     //   name 命中 → 对应枚举 id；未知 → -1。机制等价 MC 1.0 实体类型选择器（@e[type=pig]）。
     function mobTypeIdFromName(name) {

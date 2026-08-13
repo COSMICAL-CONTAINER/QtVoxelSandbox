@@ -66,6 +66,47 @@ void WorldClock::skipToDawn()
     }
 }
 
+// misc 二轮 `/time` 指令内部统一应用：把目标 phase + day 写进 m_elapsedMs，重派生并 emit 全套信号
+//   （phase / day / moonPhase / 太阳量化步）。由 setPhase/setDay/addPhase 共用。允许任意设/加（含回退）。
+void WorldClock::applyTime(float phase, qint64 day)
+{
+    const float periodMs = periodSecs() * 1000.f;
+    phase = phase - std::floor(phase);            // 归一化到 [0,1)
+    if (day < 0) day = 0;
+    m_elapsedMs = qint64((float(day) + phase) * periodMs);
+    m_phase = phase;
+    m_dayCount = day;
+    emit dayPhaseChanged();
+    emit dayChanged();
+    const int moon = int(((day % 8) + 8) % 8);
+    if (moon != m_moonPhase) { m_moonPhase = moon; emit moonPhaseChanged(); }
+    if (kSunSteps > 0) {
+        int step = int(std::floor(phase * float(kSunSteps)));
+        if (step >= kSunSteps) step = kSunSteps - 1;
+        m_sunStep = step;
+        recomputeSun(float(step) / float(kSunSteps));
+        emit sunChanged();
+    }
+}
+
+// misc 二轮 `/time set <phase>`：设昼夜相位，保当前 dayCount（月相不变）。
+void WorldClock::setPhase(float phase)
+{
+    applyTime(phase, m_dayCount >= 0 ? m_dayCount : 0);
+}
+
+// misc 二轮 `/time set <n>d`：设第几天（影响月相），保当前 phase。
+void WorldClock::setDay(int day)
+{
+    applyTime(m_phase, day);
+}
+
+// misc 二轮 `/time add <n>`：当前 phase 加 delta（可跨天 / 可回退），dayCount 随跨天递增。
+void WorldClock::addPhase(float delta)
+{
+    applyTime(m_phase + delta, m_dayCount >= 0 ? m_dayCount : 0);
+}
+
 // t155 编辑活跃期反馈：呈现层 QML 在 World::worldChanged 时调本方法，把「最近编辑」时间戳记为当前
 //   m_elapsedMs（与 onTick 跨步判定同基准）。onTick 据此判 editingActive() → 编辑活跃期跳过太阳跨步。
 //   仅记时间戳，不改时间本身（无 setTime，PLAN §2 时间单向流逝）。

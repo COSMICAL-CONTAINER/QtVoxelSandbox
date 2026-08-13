@@ -415,6 +415,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_planks.png
         textures/icon_sand.png
         textures/icon_stone.png
+        textures/icon_bedrock.png              # misc 二轮 基岩立方体图标（build_cube_icons.py 程序生成；创造可取 bedrock 物品）
         textures/icon_torch.png
         textures/icon_bed_red.png               # t387 床方块 8 色变体立方体图标（build_cube_icons.py 程序生成）
         textures/icon_bed_orange.png

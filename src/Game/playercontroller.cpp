@@ -2903,10 +2903,19 @@ void PlayerController::placeBlock()
     const quint8 bedFacing = quint8((horizontalFacing() & 3) ^ 1); // head→foot 方向（玩家前向反向）
     int hdx = 0, hdz = 0;
     BlockRegistry::bedPartnerOffset(bedFacing, hdx, hdz); // foot → 配对 head 偏移（= -front = 玩家前向）
+    // misc 二轮 压力板放置放宽（spec「压力板能浮空放在侧边方块」）：压力板允许放在**所点方块的顶面 OR 侧面**
+    //   （贴侧墙浮空），不强制下方实体。机制对齐 MC 压力板可贴墙放。当前命中面：
+    //     · m_hitNy > 0（顶面）→ 落命中方块正上方格（常规，下方=命中方块实体）。
+    //     · m_hitNy == 0（侧面）→ 落命中方块水平邻格（贴墙浮空，下方可能是 Air）。
+    //   侧面放置时放宽 overlapsPlayerAABB（薄板贴 cell 底、几乎不占玩家躯干体积；玩家贴墙站时其 AABB 跨入侧格
+    //   → 严格重叠会拒，但薄板本身不实质阻挡 → 放行贴墙侧放）。仅压力板分支放宽，其它方块放置逻辑不动。
+    const bool isPlate = BlockRegistry::isPressurePlate(m_selectedBlock);
+    const bool plateSidePlace = isPlate && (m_hitNy == 0); // 贴墙侧放（浮空，下方无实体亦允）
     // 与玩家重叠 → 不放（防自埋 / 卡死）。t146：按「将放置方块的实际形状 sub-AABB」判 —— 不完整方块可能
     //   只占半格，玩家在另半格内仍可放；air/torch 无 sub-AABB → 不挡（允许放入玩家格，机制等价 MC）。
     //   door 占两格 → 上下格都查；bed 占两格 → foot + head 两格都查（bed ShapeFull 与 state 无关，state 任意）。
-    if (overlapsPlayerAABB(tx, ty, tz, idByte, isDoor ? doorFacing : placeState)) return;
+    if (overlapsPlayerAABB(tx, ty, tz, idByte, isDoor ? doorFacing : placeState)
+        && !plateSidePlace) return; // misc 二轮：压力板贴墙侧放豁免玩家重叠（薄板不实质阻挡；其它方块仍守）
     if (isDoor && overlapsPlayerAABB(tx, ty + 1, tz, idByte, quint8(doorFacing | 8))) return;
     if (isBed && overlapsPlayerAABB(tx + hdx, ty, tz + hdz, idByte, quint8(bedFacing | 8))) return;
     // t114 火把放置预检：火把需挂到实体邻居（下 / 四侧之一为实体方块），否则拒绝（机制等价 MC「火把
@@ -4513,29 +4522,38 @@ void PlayerController::step(qreal dt)
                    && m_world->blockAt(xx, yy, zz) == BlockRegistry::SweetBerryBush
                    && m_world->stateAt(xx, yy, zz) > 0;
         };
-        constexpr int kCactusNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        // misc 二轮 仙人掌斜对角误伤修复：旧版用整数格 footprint + 水平 4 邻判接触 → footprint 跨格时 4 邻覆盖到
+        //   斜对角格（如玩家在 (5,5)，footprint 含 (6,5)，其 +Z 邻 (6,6) 命中斜对角仙人掌 → 误扣血）。改**精确 AABB
+        //   重叠**判定：仙人掌方块 AABB 内缩 0.1（kCactusInset，partialblockgeometry 同源）= [cx+0.1,cx+0.9]×
+        //   [cy,cy+1]×[cz+0.1,cz+0.9]；玩家 AABB = m_pos.x()±0.3 / m_pos.z()±0.3 / [m_pos.y, m_pos.y+m_height]。
+        //   仅当两 AABB 在三轴都重叠才算接触（机制等价 MC 仙人掌实体 AABB 真接触才伤）。遍历玩家 XZ 覆盖格 ×
+        //   Y 覆盖层（footY..ceil(height)），每格 Cactus 做 AABB 测试。浆果丛无碰撞（穿入），保留格判定不动。
+        constexpr float kCactusInset = 0.1f;   // 与 partialblockgeometry kCactusInset 同源（0.8 见方内缩）
+        const float pMinX = m_pos.x() - 0.3f, pMaxX = m_pos.x() + 0.3f;
+        const float pMinZ = m_pos.z() - 0.3f, pMaxZ = m_pos.z() + 0.3f;
+        const float pMinY = m_pos.y(),         pMaxY = m_pos.y() + m_height;
+        auto cactusAabbOverlap = [&](int cx, int cy, int cz) -> bool {
+            const float cMinX = cx + kCactusInset, cMaxX = cx + 1.0f - kCactusInset;
+            const float cMinZ = cz + kCactusInset, cMaxZ = cz + 1.0f - kCactusInset;
+            const float cMinY = float(cy),         cMaxY = float(cy) + 1.0f;
+            return pMinX < cMaxX && pMaxX > cMinX
+                   && pMinZ < cMaxZ && pMaxZ > cMinZ
+                   && pMinY < cMaxY && pMaxY > cMinY;
+        };
         bool touch = false;
-        // t514 二轮复盘：扫描层加 footY+1。浆果丛为单格高（state>0 即有刺），玩家穿过丛格时其 AABB（脚位→眼位）
-        //   可能在任意 Y 与丛重叠 —— 站雪层薄板（snowLayerHeight 1/8..3/8）时 footY=h、eyeY=h+1 已覆盖；但站更厚
-        //   支撑（满格方块顶）或 AABB 因蹲下 / 着陆瞬时压缩时，footY..eyeY 可能恰好跳过丛所在 h+1 层（footY=h+1、
-        //   蹲下 eyeY 仍 h+1 同层，或着地瞬时脚位压低 → footY=h，eyeY 暂未到 h+1）。补 footY+1 确保「丛在脚位正上方
-        //   一格」的常见落地姿态也命中（脚位格 + 脚位上一格覆盖玩家躯干穿越丛格的几何）。仙人掌 footY+1 无副作用
-        //   （仅判嵌入 / 4 邻，满格支撑时恒 false）。旧版「碰了不扣」根因：worldgen 丛永 state 1 不升 2 + 玩家种丛
-        //   state 0 不长（world.cpp tickSweetBerryBushGrowth 下方 SnowLayer 误判不支撑）→ stage>0 判据常不满足 →
-        //   thornyBushAt 恒 false；本处补层 + world.cpp 修支撑 → 两者合力修通接触扣血。
-        for (int yy : {footY, footY + 1, eyeY}) {
+        const int yLo = footY, yHi = int(std::floor(pMaxY));   // 玩家 AABB 覆盖的 Y 整数层（脚到头顶）
+        for (int yy = yLo; yy <= yHi && !touch; ++yy) {
             for (int cx = fx0; cx <= fx1 && !touch; ++cx)
                 for (int cz = fz0; cz <= fz1 && !touch; ++cz) {
-                    if (cactusAt(cx, yy, cz)) { touch = true; break; }       // 仙人掌嵌入（罕见）
-                    if (thornyBushAt(cx, yy, cz)) { touch = true; break; }   // t467 浆果丛穿越（丛无碰撞，自身格即丛格）
-                    for (const auto &d : kCactusNb)                          // 仙人掌水平 4 邻（撞侧面）
-                        if (cactusAt(cx + d[0], yy, cz + d[1])) { touch = true; break; }
+                    if (cactusAt(cx, yy, cz) && cactusAabbOverlap(cx, yy, cz)) { touch = true; break; }
+                    // t467 浆果丛穿越：无碰撞 → 玩家自身格即丛格（不查邻、不做 AABB，丛占满格）。
+                    if (thornyBushAt(cx, yy, cz)) { touch = true; break; }
                 }
         }
-        if (!touch) { // 站在仙人掌顶（脚下格）
+        if (!touch) { // 站在仙人掌顶（脚下格）—— 仙人掌顶面 AABB 重叠（玩家脚位贴其顶）
             for (int cx = fx0; cx <= fx1 && !touch; ++cx)
                 for (int cz = fz0; cz <= fz1 && !touch; ++cz)
-                    if (cactusAt(cx, footY - 1, cz)) touch = true;
+                    if (cactusAt(cx, footY - 1, cz) && cactusAabbOverlap(cx, footY - 1, cz)) touch = true;
         }
         if (touch) {
             m_cactusDmgTimer += float(dt);

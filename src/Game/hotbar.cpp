@@ -28,6 +28,9 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CoalOre:       return "icon_coal_ore.png";       // t84 煤矿石立方体图标
     case BlockRegistry::IronOre:       return "icon_iron_ore.png";       // t84 铁矿石立方体图标
     case BlockRegistry::DiamondOre:    return "icon_diamond_ore.png";    // t279 钻矿石立方体图标（石头底+青白菱斑晶体）
+    // misc 二轮：基岩立方体图标（深灰粗糙岩石纹理；build_cube_icons.py 程序生成原创贴图）。机制等价 MC 创造可取
+    //   bedrock 物品（生存不可破，创造可放/取）。default_bedrock.png 是方块面贴图（tile 18），各面同 → 立方体顶+两侧明暗。
+    case BlockRegistry::Bedrock:       return "icon_bedrock.png";
     case BlockRegistry::CopperOre:     return "icon_copper_ore.png";     // t308 铜矿石立方体图标（石头底+橙铜斑+孔雀绿锈）
     case BlockRegistry::GoldOre:       return "icon_gold_ore.png";       // t308 金矿石立方体图标（石头底+金黄斑簇）
     case BlockRegistry::LapisOre:      return "icon_lapis_ore.png";      // t471 青金矿石立方体图标（石头底+群青深蓝斑簇+黄铁矿金点）
@@ -540,6 +543,7 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::CopperOre),                                    // t308 铜矿石（散布于 stone 浅中层 y∈[5,45]、需石镐采掘；掉铜原矿→熔炉烧铜锭）
              int(BlockRegistry::GoldOre),                                      // t308 金矿石（散布于 stone 深层 y∈[5,25]、需铁镐采掘；掉金原矿→熔炉烧金锭）
              int(BlockRegistry::LapisOre),                                     // t471 青金矿石（散布于 stone 深层 y∈[5,31]、需石镐采掘；掉青金石物品）
+             int(BlockRegistry::Bedrock),                                      // misc 二轮 基岩（机制等价 MC 创造可取 bedrock 物品；生存不可破 hardness=-1，创造可放置/取用，便于建筑/测试底层封顶）
              int(BlockRegistry::Torch),
              int(BlockRegistry::Chest),                                    // t173 箱子（右键开 27 槽）
              int(BlockRegistry::Farmland),                                 // t234 耕地（持锄右键泥土/草得；干/湿两态）

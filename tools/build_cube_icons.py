@@ -31,6 +31,9 @@ BLOCKS = [
     ("grass",           "default_grass_top", "default_grass_side"),
     ("dirt",            "default_dirt",      "default_dirt"),
     ("stone",           "default_stone",     "default_stone"),
+    # misc 二轮 基岩立方体图标（各面=default_bedrock；深灰粗糙岩石纹理，同 stone 风格但更暗更斑驳）。
+    #   机制等价 MC 创造可取 bedrock 物品（生存不可破；创造可放置/取用），故创造调色板需一图标。
+    ("bedrock",         "default_bedrock",   "default_bedrock"),
     ("cobble",          "default_cobble",    "default_cobble"),
     ("log",             "default_tree_top",  "default_tree"),
     ("planks",          "default_wood",      "default_wood"),

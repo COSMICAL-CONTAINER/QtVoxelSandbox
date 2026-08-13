@@ -108,6 +108,16 @@ public:
     //   phase + 太阳方向并 emit（不等下一 100ms tick），使昼夜亮度 / 顶点光同步跳到清晨。
     Q_INVOKABLE void skipToDawn();
 
+    // misc 二轮 `/time` 指令（spec：聊天 /time set|add 直接改时间）。三个入口均即时重派生 phase + 太阳方向 +
+    //   emit（同 skipToDawn，不等下一 tick）。PLAN §2-H「时间单向」是睡觉机制的不变量（防回退重算光照回归）；
+    //   `/time` 是玩家显式指令（机制等价 MC /time），允许任意设/加（含回退）—— 与睡觉单向不冲突（指令是特权操作）。
+    //   - setPhase(p)：p∈[0,1) 直接设昼夜相位（0=正午、0.25=黄昏、0.5=子夜、0.75=黎明），保持当前 dayCount。
+    //   - setDay(day)：设第几天（影响月相 moonPhase=day%8），保持当前 phase。
+    //   - addPhase(dp)：当前 phase 加 dp（可负=回退，可>1 跨天），dayCount 随跨天递增。
+    Q_INVOKABLE void setPhase(float phase);
+    Q_INVOKABLE void setDay(int day);
+    Q_INVOKABLE void addPhase(float delta);
+
     // t155 编辑活跃期反馈入口（呈现层 QML 经 World::worldChanged 调）：记录「最近一次编辑」时间戳，
     //   供 onTick 判定编辑活跃期（近 kEditCooldownMs 内有编辑）→ 跳过太阳跨步全量重建，避免抢帧。
     //   分层（PLAN §2）：Game 层时间源，不 include / 不依赖 World；编辑信号由 QML 桥接转发（无 C++ 向上依赖）。
@@ -132,6 +142,9 @@ signals:
 
 private:
     void onTick();
+    // misc 二轮 `/time` 内部统一应用：写目标 phase+day 进 m_elapsedMs，重派生并 emit 全套信号
+    //   （phase/day/moonPhase/太阳量化步）。setPhase/setDay/addPhase 共用。
+    void applyTime(float phase, qint64 day);
     // 周期（秒）：默认 ~20 分钟；调试加速切 ~30s（dev-spec 验收要求）。
     float periodSecs() const;
     // t123：由「量化后的相位」算太阳 elev/azim/dir，写进成员。仅跨步时调（onTick 内判定）。
