@@ -108,10 +108,22 @@ Window {
     Behavior on chestLidAngle {
         NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
     }
-    // t139 ESC 设置菜单子态：仅在暂停叠层（playing 且 !captured）下有意义。暂停叠层「设置」按钮置
-    //   true → 显设置面板（手臂调试 ArmSlider 等）覆盖在暂停叠层之上；「返回」按钮置 false 回暂停菜单。
+    // t139 ESC 设置菜单子态（仅在暂停叠层（playing 且 !captured）下有意义）。暂停叠层「选项」按钮置
+    //   true → 显选项面板（手臂调试 ArmSlider 等）覆盖在暂停叠层之上；「返回」按钮置 false 回暂停菜单。
     //   回主菜单 / 点击恢复游戏时一并复位。属纯呈现态，PLAN §2 分层（UI 层）。
+    // pause-menu ESC 关：settingsOpen 为 true 时按 ESC → settingsOpen=false（回暂停菜单，不直接 unpause）。
     property bool settingsOpen: false
+    // pause-menu 暂停菜单「进度」按钮子态（5 行布局行2）：显成就列表（progress.achievements() delegate +
+    //   revision 触碰刷新）。仅暂停叠层有意义（!captured）；Esc / 返回按钮关。纯呈现态，PLAN §2 分层（UI 层）。
+    property bool progressOpen: false
+    // pause-menu 暂停菜单「统计」按钮子态（5 行布局行2）：显统计列表（progress.statsList() delegate +
+    //   revision 触碰刷新）。同 progressOpen 模式（暂停叠层 !captured；Esc / 返回关）。纯呈现态。
+    property bool statsOpen: false
+    // pause-menu 右下角 toast（成就解锁 + 「敬请期待」占位提示通用通道）：单一 string 缓存 + Timer 3 秒后清空。
+    //   触发源：progress.achievementUnlocked 信号（成就解锁，文案「成就解锁：{name}」）/ 占位按钮（showInfoToast）。
+    //   仅 playing 态显（菜单 / worldlist 不显）。纯呈现态，PLAN §2 分层（UI 层）。
+    property string infoToastText: ""
+    property bool infoToastVisible: false
     // t458 资源查看器子态（PLAN §2 UI 层，纯呈现）：设置面板「资源查看器」按钮触发 → 显 JEI 式浏览面板
     //   （全物品网格 + 选中物 3D 旋转 / 大图标预览）。仅在暂停 + 设置态下有意义（!captured）；Esc / 返回按钮关。
     //   不改指针态（设置面板已 release；关闭回设置面板仍 !captured）。属纯呈现态，PLAN §2 分层（UI 层）。
@@ -587,6 +599,8 @@ Window {
         chestOpen = false
         chestLidAngle = 0    // t196：复位盖子角（防 worldlist→再进世界时残留半开盖子；scene 已离场，动画不可见）
         settingsOpen = false
+        progressOpen = false    // pause-menu：退出世界关进度面板（防遗留）
+        statsOpen = false       // pause-menu：退出世界关统计面板（防遗留）
         resourceBrowserOpen = false   // t458：退出世界时关资源查看器（防遗留）
         itemEntities.clearAll()
         entityManager.clearAll()
@@ -606,6 +620,8 @@ Window {
         chatOpen = false                  // t312：回菜单关聊天（防遗留；非死亡流）
         chestLidAngle = 0    // t196：复位盖子角（防回菜单 / 再进世界残留半开盖子）
         settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
+        progressOpen = false           // pause-menu：回菜单关进度面板（防遗留）
+        statsOpen = false              // pause-menu：回菜单关统计面板（防遗留）
         resourceBrowserOpen = false    // t458：回菜单时关资源查看器（防遗留）
         // t312：清聊天历史（不持久化 / 不跨世界；下一局从空起）。
         chatMessages.clear()
@@ -1003,6 +1019,13 @@ Window {
     //   单机 Phase 1.0 无联机，聊天仅为「输入回显 + 系统播报」容器，Phase 3 联机接入时改走 LocalServer/
     //   RemoteServer 协议层收发）。开 → release 指针（光标可见 + TextField 取焦点，同背包面板模式）；关 →
     //   grab + 焦点回键位层。与背包/工作台/熔炉/箱子互斥（开前关其它）。
+    // pause-menu 右下角 toast 显示（成就解锁 + 占位按钮「敬请期待」共用）。仅 playing 态显（菜单态无 toast）。
+    //   3 秒后 infoToastTimer 清空；连点不同源（如连续解锁两成就）→ restart 计时延后 + 文案覆盖最新。
+    function showInfoToast(text) {
+        infoToastText = text
+        infoToastVisible = window.appState === "playing"
+        if (infoToastVisible) infoToastTimer.restart()
+    }
     function openChat() {
         if (appState !== "playing" || chatOpen) return
         // 互斥：先关任何已开背包面板（归还光标手持栈 + grab），随后 release 让聊天接管光标。
@@ -1624,6 +1647,15 @@ Window {
         function onXpPickedUp(amount) {
             playerState.addXp(amount)
             audio.playPickup()
+        }
+    }
+    // pause-menu 成就解锁 toast（progress.achievementUnlocked 信号；机制等价 MC advancement toast）。
+    //   PlayerProgress 在埋点判定成就首次解锁时 emit（id / name / desc），此处路由到右下角 toast 显
+    //   「成就解锁：{name}」（仅 playing 态；菜单 / worldlist 不显）。3 秒后 infoToastTimer 清空。
+    Connections {
+        target: progress
+        function onAchievementUnlocked(id, name, desc) {
+            window.showInfoToast("成就解锁：" + name)
         }
     }
 
@@ -6588,6 +6620,10 @@ Window {
             if (window.furnaceOpen) window.furnaceOpen = false
             if (window.chestOpen) window.chestOpen = false
             if (window.chatOpen) window.chatOpen = false   // t312：死亡关聊天（死亡屏接管光标）
+            // pause-menu：死亡关暂停菜单子面板（设置 / 进度 / 统计；防死亡态遗留，死亡屏 z=180 盖在其上）。
+            if (window.settingsOpen) window.settingsOpen = false
+            if (window.progressOpen) window.progressOpen = false
+            if (window.statsOpen) window.statsOpen = false
             window.returnHeldToHotbar()
             player.dropAllItems()     // t175：死亡掉落整个背包到死亡点 + 清空背包
             // t443 死亡掉部分 XP（spec「死亡地点掉部分 XP，约 1 只怪量」）：在死亡点 spawn 1 个经验球
@@ -6904,6 +6940,19 @@ Window {
             if (e.key === Qt.Key_Escape && window.inventoryOpen) {
                 window.closeInventory(); e.accepted = true; return
             }
+            // pause-menu ESC 关子态面板（settingsOpen / progressOpen / statsOpen）：!captured 时 Esc 落 QML
+            //   → 关回暂停菜单（不直接 unpause / 不抢 grab）。优先级与下方各背包面板并列（子态与背包互斥：
+            //   任一子态开时背包必关，故分支先后无串台）。资源查看器（resourceBrowserOpen）在下方独立分支
+            //   （回设置面板，不回暂停菜单）。
+            if (e.key === Qt.Key_Escape && window.settingsOpen) {
+                window.settingsOpen = false; e.accepted = true; return
+            }
+            if (e.key === Qt.Key_Escape && window.progressOpen) {
+                window.progressOpen = false; e.accepted = true; return
+            }
+            if (e.key === Qt.Key_Escape && window.statsOpen) {
+                window.statsOpen = false; e.accepted = true; return
+            }
             // t458 资源查看器：Esc 关（回设置面板，仍 !captured）。资源查看器在暂停 + 设置态打开（!captured，
             //   Esc 不被 C++ 事件过滤器拦截，落到 QML → 本分支处理）。
             if (e.key === Qt.Key_Escape && window.resourceBrowserOpen) {
@@ -7081,77 +7130,170 @@ Window {
                 }
             }
         }
+        // pause-menu 6 行菜单布局（删原 PAUSED / click to play / 6 行按键帮助文字；用户诉求「重做成按钮列表」）。
+        //   布局（按钮风格沿用现有 Rectangle + MouseArea + hover 模板，§9 GUI 自绘原创，无 MC GUI PNG）：
+        //     行1: [返回游戏] 居中（绿色大按钮 = 点背景 grab 同效，显式按钮更直观）。
+        //     行2: [进度] [统计]  两按钮对半分（中间留较大间隙）。进度=progressOpen 成就面板；统计=statsList 面板。
+        //     行3: [提供反馈] [报告漏洞]  占位无功能（点显「敬请期待」）。
+        //     行4: [选项] [对局域网开放]  选项=打开选项面板（settingsOpen，复用现有设置面板容器）；局域网=占位。
+        //     行5: [Mod]  居中单按钮（占位无功能）。
+        //     行6: [保存并退回到标题屏幕]  居中（= saveAndExitToWorldList，文字改通用词）。
         Rectangle {
-            width: 360; height: 250; radius: 10
+            width: 420; height: 360; radius: 10
             anchors.centerIn: parent
             color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
             Column {
-                anchors.centerIn: parent; spacing: 12
-                Text { text: "PAUSED"; color: "#eeeeee"; font.pixelSize: 26; font.bold: true
-                       anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "click to play"; color: "#bbbbbb"; font.pixelSize: 15
-                       anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[G] cycle mode   [1-9] select block   wheel cycle   [F5] camera"
-                       color: "#999999"; font.pixelSize: 12
-                       anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[Esc] release   WASD move   dbl-tap W sprint   Shift crouch/sneak   Space jump/fly"
-                       color: "#999999"; font.pixelSize: 12
-                       anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[LMB] break block   [RMB] place block   [Q] drop item"
-                       color: "#999999"; font.pixelSize: 12
-                       anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[T] / [Enter] open chat   (Enter send · Esc cancel)"
-                       color: "#999999"; font.pixelSize: 12
-                       anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[F6] toggle fast day/night (" + (worldClock.debugFast ? "ON · ~30s" : "OFF · ~20min") + ")"
-                       color: "#999999"; font.pixelSize: 12
-                       anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "[F3] toggle debug overlay (fps / pos / entities / biome / mesh / time)   [F3+B] toggle hitboxes   [F3+G] toggle chunk bounds"
-                       color: "#999999"; font.pixelSize: 12
-                       anchors.horizontalCenter: parent.horizontalCenter }
-                // 按钮行：t139 设置 + 返回主菜单。Row 居中，两按钮间距 10。
-                Row {
-                    spacing: 10
+                anchors.centerIn: parent; spacing: 10
+                // 行1：返回游戏（绿色大按钮；点击 grab 恢复捕获，同背景点击语义，但更显式）。
+                Rectangle {
+                    width: 360; height: 38; radius: 6
                     anchors.horizontalCenter: parent.horizontalCenter
-                    // 设置（t139）：进入设置面板（手臂调试 ArmSlider 等）。消费点击，不冒泡到背景 grab。
+                    color: resumeArea.containsMouse ? "#2a4a2a" : "#1a3a1a"
+                    border.color: "#3a6a3a"; border.width: 1
+                    Text { anchors.centerIn: parent; text: "返回游戏"
+                           color: "#7fe57f"; font.pixelSize: 15; font.bold: true }
+                    MouseArea {
+                        id: resumeArea
+                        anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: { player.grab(); keyInput.forceActiveFocus() }
+                    }
+                }
+                // 行2：进度 / 统计（两按钮对半分，中间留较大间隙）。子面板 progressOpen / statsOpen 各自打开。
+                Row {
+                    spacing: 24
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    // 进度 → progressOpen 成就列表面板。
                     Rectangle {
-                        width: 110; height: 32; radius: 6
-                        color: settingsBtnArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
+                        width: 168; height: 34; radius: 6
+                        color: progressBtnArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
                         border.color: "#3a5a7a"; border.width: 1
-                        Text { anchors.centerIn: parent; text: "设置"
-                               color: "#7fb0e5"; font.pixelSize: 13 }
+                        Text { anchors.centerIn: parent; text: "进度"
+                               color: "#7fb0e5"; font.pixelSize: 14 }
                         MouseArea {
-                            id: settingsBtnArea
-                            anchors.fill: parent
-                            hoverEnabled: true
+                            id: progressBtnArea
+                            anchors.fill: parent; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.progressOpen = true
+                        }
+                    }
+                    // 统计 → statsOpen 统计列表面板。
+                    Rectangle {
+                        width: 168; height: 34; radius: 6
+                        color: statsBtnArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
+                        border.color: "#3a5a7a"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "统计"
+                               color: "#7fb0e5"; font.pixelSize: 14 }
+                        MouseArea {
+                            id: statsBtnArea
+                            anchors.fill: parent; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.statsOpen = true
+                        }
+                    }
+                }
+                // 行3：提供反馈 / 报告漏洞（占位无功能；点显「敬请期待」toast，复用右下角成就 toast 同一组件，
+                //   避免另起弹窗）。
+                Row {
+                    spacing: 24
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    Rectangle {
+                        width: 168; height: 34; radius: 6
+                        color: feedbackArea.containsMouse ? "#3a3a3a" : "#2a2a2a"
+                        border.color: "#555555"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "提供反馈"
+                               color: "#bbbbbb"; font.pixelSize: 14 }
+                        MouseArea {
+                            id: feedbackArea
+                            anchors.fill: parent; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.showInfoToast("敬请期待")
+                        }
+                    }
+                    Rectangle {
+                        width: 168; height: 34; radius: 6
+                        color: bugArea.containsMouse ? "#3a3a3a" : "#2a2a2a"
+                        border.color: "#555555"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "报告漏洞"
+                               color: "#bbbbbb"; font.pixelSize: 14 }
+                        MouseArea {
+                            id: bugArea
+                            anchors.fill: parent; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.showInfoToast("敬请期待")
+                        }
+                    }
+                }
+                // 行4：选项 / 对局域网开放（选项=打开选项面板 settingsOpen；局域网=占位）。
+                Row {
+                    spacing: 24
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    Rectangle {
+                        width: 168; height: 34; radius: 6
+                        color: optionsArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
+                        border.color: "#3a5a7a"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "选项"
+                               color: "#7fb0e5"; font.pixelSize: 14 }
+                        MouseArea {
+                            id: optionsArea
+                            anchors.fill: parent; hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: window.settingsOpen = true
                         }
                     }
-                    // t176 保存并退出到世界列表（原「Main Menu」：退出即落盘 + 回世界列表，机制等价 MC「保存并退出」）。
-                    //   消费点击，不冒泡到背景 grab。
                     Rectangle {
-                        width: 180; height: 32; radius: 6
-                        color: backMenuArea.containsMouse ? "#2a3a2a" : "#1a2a1a"
-                        border.color: "#3a6a3a"; border.width: 1
-                        Text { anchors.centerIn: parent; text: "保存并退出"
-                               color: "#7fe57f"; font.pixelSize: 13 }
+                        width: 168; height: 34; radius: 6
+                        color: lanArea.containsMouse ? "#3a3a3a" : "#2a2a2a"
+                        border.color: "#555555"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "对局域网开放"
+                               color: "#bbbbbb"; font.pixelSize: 14 }
                         MouseArea {
-                            id: backMenuArea
-                            anchors.fill: parent
-                            hoverEnabled: true
+                            id: lanArea
+                            anchors.fill: parent; hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: window.saveAndExitToWorldList()
+                            onClicked: window.showInfoToast("敬请期待")
                         }
+                    }
+                }
+                // 行5：Mod（居中单按钮；占位无功能）。
+                Rectangle {
+                    width: 360; height: 34; radius: 6
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    color: modArea.containsMouse ? "#3a3a3a" : "#2a2a2a"
+                    border.color: "#555555"; border.width: 1
+                    Text { anchors.centerIn: parent; text: "Mod"
+                           color: "#bbbbbb"; font.pixelSize: 14 }
+                    MouseArea {
+                        id: modArea
+                        anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: window.showInfoToast("敬请期待")
+                    }
+                }
+                // 行6：保存并退回到标题屏幕（绿色；= saveAndExitToWorldList，文字改通用词）。
+                Rectangle {
+                    width: 360; height: 38; radius: 6
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    color: backMenuArea.containsMouse ? "#2a4a2a" : "#1a3a1a"
+                    border.color: "#3a6a3a"; border.width: 1
+                    Text { anchors.centerIn: parent; text: "保存并退回到标题屏幕"
+                           color: "#7fe57f"; font.pixelSize: 14; font.bold: true }
+                    MouseArea {
+                        id: backMenuArea
+                        anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: window.saveAndExitToWorldList()
                     }
                 }
             }
         }
 
-        // t139 设置面板：暂停叠层「设置」按钮触发（settingsOpen）。覆盖在暂停叠层之上（z 同 pauseOverlay
-        //   内更高层），含手臂调试 ArmSlider（从 SurvivalInventory 调试区迁来：baseTilt/posXYZ 实时调）。
-        //   仅 settingsOpen 显；「返回」按钮关回暂停菜单。背景遮罩仅吸收点击（§9 lessons「全屏遮罩 onClicked
-        //   会误关」→ 此处无 close 语义，纯防穿透到背后暂停叠层的恢复 grab）。
+        // pause-menu 选项面板（原「设置」面板，行4「选项」按钮 → settingsOpen）。覆盖在暂停叠层之上
+        //   （z=50，在 pauseOverlay 内暂停内容之上）。pause-menu 重构：原单列所有滑条重组成两组——
+        //   「视频设置」（阴影 / 渲染距离 / 暗度 / 资源包）+ 「操作设置」（手臂位置 4 滑条 + 手持方块位置 3 滑条），
+        //   每组前加粗体彩色分区标题（垂直排列，不切 Tab）。资源查看器入口保留在顶部。内容超面板高 → Flickable
+        //   滚动（面板加高到 820）。仅 settingsOpen 显；Esc / 返回按钮关回暂停菜单。背景遮罩仅吸收点击（§9 lessons
+        //   「全屏遮罩 onClicked 会误关」→ 此处无 close 语义，纯防穿透到背后暂停叠层的恢复 grab）。
         Item {
             anchors.fill: parent
             visible: window.settingsOpen
@@ -7162,12 +7304,12 @@ Window {
                 MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
             }
             Rectangle {
-                width: 440; height: 780; radius: 10
+                width: 460; height: 820; radius: 10
                 anchors.centerIn: parent
                 color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
                 Column {
                     anchors.fill: parent; anchors.margins: 20; spacing: 10
-                    Text { text: "设置"; color: "#eeeeee"; font.pixelSize: 22; font.bold: true
+                    Text { text: "选项"; color: "#eeeeee"; font.pixelSize: 22; font.bold: true
                            anchors.horizontalCenter: parent.horizontalCenter }
                     // t458 资源查看器入口（醒目大按钮）：用户诉求「找不到入口浏览所有方块 / 物品样貌」→
                     //   在设置面板顶部置高对比大按钮，点击显 ResourceBrowser（JEI 式网格 + 3D 旋转预览）。
@@ -7190,40 +7332,10 @@ Window {
                             onClicked: window.resourceBrowserOpen = true
                         }
                     }
-                    // 手臂调试（从生存背包 t129 调试区迁入）：滑动写回 window 级属性 → viewModelHand
-                    //   绑定读取 → 第一人称手臂 baseTilt / position 实时变。
-                    Text { text: "手臂调试（实时）"
-                           color: "#7fae7f"; font.pixelSize: 12 }
-                    ArmSlider {
-                        width: parent.width
-                        label: "baseTilt (°)"
-                        from: -180; to: 180
-                        value: window.handBaseTilt
-                        onValueChanged: window.handBaseTilt = value
-                    }
-                    ArmSlider {
-                        width: parent.width
-                        label: "position.x"
-                        from: -0.5; to: 0.5
-                        value: window.handPosX
-                        onValueChanged: window.handPosX = value
-                    }
-                    ArmSlider {
-                        width: parent.width
-                        label: "position.y"
-                        from: -0.5; to: 0.5
-                        value: window.handPosY
-                        onValueChanged: window.handPosY = value
-                    }
-                    ArmSlider {
-                        width: parent.width
-                        label: "position.z"
-                        from: -0.5; to: 0.5
-                        value: window.handPosZ
-                        onValueChanged: window.handPosZ = value
-                    }
-                    Text { text: "⚠ position.z < -0.3 会穿模（当前 -0.39 为 t156 用户选定）；滑动条仅微调，默认值已固化"
-                           color: "#b08060"; font.pixelSize: 10; wrapMode: Text.WordWrap; width: parent.width }
+                    // pause-menu 视频设置分组标题（§9 GUI 自绘原创：粗体彩色 Text 分隔）。
+                    Text { text: "视频设置"
+                           color: "#e5c07f"; font.pixelSize: 15; font.bold: true
+                           width: parent.width }
                     // t166b 阴影开关（用户「加开关打开关闭阴影，在阴影质量上面」）：关 → 全 chunk 跳过 PCF 软影
                     //   （meshing 提速 / 诊断卡顿是否阴影所致）。自定义开关（Rectangle + 勾），不依赖 CheckBox import。
                     Text { text: "阴影（PCF 软影）"
@@ -7275,30 +7387,6 @@ Window {
                         from: 0.20; to: 0.60
                         value: window.minLight
                         onValueChanged: window.minLight = value
-                    }
-                    // t166c 手持方块位置（用户「加滑动条调第一人称手上方块位置」）：相对 t156 基线的偏移。
-                    Text { text: "手持方块位置（相对手腕前方偏移）"
-                           color: "#7fae7f"; font.pixelSize: 12 }
-                    ArmSlider {
-                        width: parent.width
-                        label: "heldBlock.x"
-                        from: -0.5; to: 0.5
-                        value: window.heldBlockX
-                        onValueChanged: window.heldBlockX = value
-                    }
-                    ArmSlider {
-                        width: parent.width
-                        label: "heldBlock.y"
-                        from: -0.5; to: 0.5
-                        value: window.heldBlockY
-                        onValueChanged: window.heldBlockY = value
-                    }
-                    ArmSlider {
-                        width: parent.width
-                        label: "heldBlock.z"
-                        from: -0.5; to: 0.5
-                        value: window.heldBlockZ
-                        onValueChanged: window.heldBlockZ = value
                     }
                     // t415c 资源包（resource pack）：启用开关 + 目录选择器（FolderDialog）。持久化 settings.json；
                     //   apply() 即时重建合成图集、覆盖落盘 + 刷新 atlasSource（file:// 与 qrc:/ 间切换 → QML
@@ -7369,7 +7457,69 @@ Window {
                             resourcePack.apply()
                         }
                     }
-                    // 返回按钮：关设置面板回暂停菜单。
+                    // pause-menu 操作设置分组标题（手臂位置 + 手持方块位置；第一人称 viewmodel 微调）。
+                    Text { text: "操作设置"
+                           color: "#e5c07f"; font.pixelSize: 15; font.bold: true
+                           width: parent.width; topPadding: 6 }
+                    // 手臂调试（从生存背包 t129 调试区迁入）：滑动写回 window 级属性 → viewModelHand
+                    //   绑定读取 → 第一人称手臂 baseTilt / position 实时变。
+                    Text { text: "手臂位置（实时）"
+                           color: "#7fae7f"; font.pixelSize: 12 }
+                    ArmSlider {
+                        width: parent.width
+                        label: "baseTilt (°)"
+                        from: -180; to: 180
+                        value: window.handBaseTilt
+                        onValueChanged: window.handBaseTilt = value
+                    }
+                    ArmSlider {
+                        width: parent.width
+                        label: "position.x"
+                        from: -0.5; to: 0.5
+                        value: window.handPosX
+                        onValueChanged: window.handPosX = value
+                    }
+                    ArmSlider {
+                        width: parent.width
+                        label: "position.y"
+                        from: -0.5; to: 0.5
+                        value: window.handPosY
+                        onValueChanged: window.handPosY = value
+                    }
+                    ArmSlider {
+                        width: parent.width
+                        label: "position.z"
+                        from: -0.5; to: 0.5
+                        value: window.handPosZ
+                        onValueChanged: window.handPosZ = value
+                    }
+                    Text { text: "⚠ position.z < -0.3 会穿模（当前 -0.39 为 t156 用户选定）；滑动条仅微调，默认值已固化"
+                           color: "#b08060"; font.pixelSize: 10; wrapMode: Text.WordWrap; width: parent.width }
+                    // t166c 手持方块位置（用户「加滑动条调第一人称手上方块位置」）：相对 t156 基线的偏移。
+                    Text { text: "手持方块位置（相对手腕前方偏移）"
+                           color: "#7fae7f"; font.pixelSize: 12 }
+                    ArmSlider {
+                        width: parent.width
+                        label: "heldBlock.x"
+                        from: -0.5; to: 0.5
+                        value: window.heldBlockX
+                        onValueChanged: window.heldBlockX = value
+                    }
+                    ArmSlider {
+                        width: parent.width
+                        label: "heldBlock.y"
+                        from: -0.5; to: 0.5
+                        value: window.heldBlockY
+                        onValueChanged: window.heldBlockY = value
+                    }
+                    ArmSlider {
+                        width: parent.width
+                        label: "heldBlock.z"
+                        from: -0.5; to: 0.5
+                        value: window.heldBlockZ
+                        onValueChanged: window.heldBlockZ = value
+                    }
+                    // 返回按钮：关选项面板回暂停菜单。
                     Rectangle {
                         width: 120; height: 32; radius: 6
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -7403,6 +7553,181 @@ Window {
         visible: window.appState === "playing" && window.resourceBrowserOpen
         z: 160
         onClosed: window.resourceBrowserOpen = false
+    }
+    // pause-menu 进度面板（行2「进度」按钮 → progressOpen）：显成就列表（progress.achievements() 返回
+    //   [{id,name,desc,unlocked}] → Repeater delegate 每成就一行：名 + 描述 + 已解锁 ✓ / 未解锁 锁图标）。
+    //   revision 触碰刷新（progress.revision 变 → delegate 重算 achievements()）。同设置面板模式（半透遮罩 +
+    //   居中 Rectangle + 返回按钮 + Esc 关）。仅 playing && progressOpen 显；z=155（高于暂停 100，低于死亡 180）。
+    //   纯呈现（PLAN §2 UI 层），§9 GUI 自绘原创。成就名 / 描述均来自 Game 层 PlayerProgress（不引 MC 专名）。
+    Item {
+        id: progressOverlay
+        anchors.fill: parent
+        visible: window.appState === "playing" && window.progressOpen
+        z: 155
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.7)
+            MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
+        }
+        Rectangle {
+            width: 460; height: 540; radius: 10
+            anchors.centerIn: parent
+            color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
+            Column {
+                anchors.fill: parent; anchors.margins: 20; spacing: 8
+                Text { text: "进度（成就）"; color: "#eeeeee"; font.pixelSize: 20; font.bold: true
+                       anchors.horizontalCenter: parent.horizontalCenter }
+                // 成就列表（Flickable 容滚动，防成就数多超面板高）。
+                Flickable {
+                    width: parent.width
+                    height: parent.height - 32 /*标题*/ - 50 /*返回*/ - 16 /*间距*/
+                    contentHeight: achList.height
+                    contentWidth: width
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    Column {
+                        id: achList
+                        width: parent.width
+                        spacing: 6
+                        // revision 触碰：progress 任一统计 / 成就变更 → revision bump → 此 Repeater 重算
+                        //   achievements()。QML 绑定 model 触碰 progress.revision（property 读）才会在
+                        //   progressChanged 时重算函数调用（纯函数调用不自动建依赖），故 model 表达式显式读 revision。
+                        Repeater {
+                            // 触碰 revision：表达式先读 progress.revision（建依赖），再返 achievements() 数组。
+                            // progressChanged → revision 变 → 此绑定重算 → achievements() 取最新。
+                            model: { const _r = progress.revision; return progress.achievements() }
+                            delegate: Rectangle {
+                                width: achList.width
+                                height: achRow.implicitHeight + 16
+                                radius: 6
+                                // 已解锁 → 绿底高亮；未解锁 → 暗底（视觉区分）。
+                                color: modelData.unlocked ? "#1a2a1a" : "#222222"
+                                border.color: modelData.unlocked ? "#3a6a3a" : "#3a3a3a"; border.width: 1
+                                Row {
+                                    id: achRow
+                                    anchors.fill: parent; anchors.margins: 8
+                                    spacing: 10
+                                    // 解锁态图标：✓（绿）/ 锁图标 🔒（灰）。
+                                    Text {
+                                        text: modelData.unlocked ? "✓" : "🔒"
+                                        color: modelData.unlocked ? "#7fe57f" : "#888888"
+                                        font.pixelSize: 18; font.bold: true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - 28
+                                        spacing: 2
+                                        Text {
+                                            text: modelData.name
+                                            color: modelData.unlocked ? "#e0e0e0" : "#999999"
+                                            font.pixelSize: 14; font.bold: true
+                                        }
+                                        Text {
+                                            text: modelData.desc
+                                            color: modelData.unlocked ? "#bbbbbb" : "#777777"
+                                            font.pixelSize: 11
+                                            wrapMode: Text.WordWrap; width: parent.width
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // 返回按钮：关进度面板回暂停菜单。
+                Rectangle {
+                    width: 120; height: 32; radius: 6
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    color: backProgressArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
+                    border.color: "#3a5a7a"; border.width: 1
+                    Text { anchors.centerIn: parent; text: "返回"
+                           color: "#7fb0e5"; font.pixelSize: 13 }
+                    MouseArea {
+                        id: backProgressArea
+                        anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: window.progressOpen = false
+                    }
+                }
+            }
+        }
+    }
+    // pause-menu 统计面板（行2「统计」按钮 → statsOpen）：显统计列表（progress.statsList() 返回
+    //   [{name,value}] → Repeater delegate 每行 name: value）。revision 触碰刷新。同进度面板模式。纯呈现。
+    Item {
+        id: statsOverlay
+        anchors.fill: parent
+        visible: window.appState === "playing" && window.statsOpen
+        z: 155
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.7)
+            MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
+        }
+        Rectangle {
+            width: 400; height: 460; radius: 10
+            anchors.centerIn: parent
+            color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
+            Column {
+                anchors.fill: parent; anchors.margins: 20; spacing: 8
+                Text { text: "统计"; color: "#eeeeee"; font.pixelSize: 20; font.bold: true
+                       anchors.horizontalCenter: parent.horizontalCenter }
+                // 统计列表（Flickable 容滚动）。
+                Flickable {
+                    width: parent.width
+                    height: parent.height - 32 /*标题*/ - 50 /*返回*/ - 16 /*间距*/
+                    contentHeight: statsListCol.height
+                    contentWidth: width
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    Column {
+                        id: statsListCol
+                        width: parent.width
+                        spacing: 4
+                        Repeater {
+                            // 触碰 revision：model 表达式显式读 progress.revision（建依赖），progressChanged →
+                            //   revision 变 → 绑定重算 statsList() 取最新。
+                            model: { const _r = progress.revision; return progress.statsList() }
+                            delegate: Rectangle {
+                                width: statsListCol.width
+                                height: 28
+                                radius: 4
+                                color: "#262626"
+                                border.color: "#333333"; border.width: 1
+                                Text {
+                                    anchors.left: parent.left; anchors.leftMargin: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.name + "："
+                                    color: "#bbbbbb"; font.pixelSize: 13
+                                }
+                                Text {
+                                    anchors.right: parent.right; anchors.rightMargin: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.value
+                                    color: "#7fb0e5"; font.pixelSize: 13; font.bold: true
+                                }
+                            }
+                        }
+                    }
+                }
+                // 返回按钮：关统计面板回暂停菜单。
+                Rectangle {
+                    width: 120; height: 32; radius: 6
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    color: backStatsArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
+                    border.color: "#3a5a7a"; border.width: 1
+                    Text { anchors.centerIn: parent; text: "返回"
+                           color: "#7fb0e5"; font.pixelSize: 13 }
+                    MouseArea {
+                        id: backStatsArea
+                        anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: window.statsOpen = false
+                    }
+                }
+            }
+        }
     }
     // t78 死亡界面（仅 Survival 血量 0 触发）：半透黑遮罩 + 「你死了」+ 死因文案 + [立即重生] / [回主菜单]。
     //   触发链：PlayerState.takeDamage 扣血到 ≤0 → dead=true + emit died → 上方 Connections(onDied) 释放指针
@@ -8222,6 +8547,41 @@ Window {
         z: 200
         onPlayRequested: function(file, name) { window.enterWorld(file, name) }
         onBackRequested: window.appState = "menu"
+    }
+
+    // pause-menu 右下角 toast（成就解锁 + 「敬请期待」占位提示通用通道）：单一 string 缓存 infoToastText +
+    //   infoToastVisible + Timer 3 秒清空。仅 playing 态显（菜单 / worldlist 不显）。z=170（高于暂停 / 背包 / 进度
+    //   统计面板，低于死亡 180 / 主菜单 200 → 死亡时不挡死亡屏）。§9 GUI 自绘原创（Rectangle + Text，无 MC PNG）。
+    Item {
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 20
+        anchors.bottomMargin: 80   // 避开 hotbar 底栏
+        visible: window.appState === "playing" && window.infoToastVisible
+        z: 170
+        width: Math.min(360, infoToastLabel.implicitWidth + 32)
+        height: infoToastLabel.implicitHeight + 20
+        Rectangle {
+            anchors.fill: parent
+            radius: 8
+            color: "#2a2a1a"
+            border.color: "#6a5a2a"; border.width: 1
+            opacity: 0.95
+        }
+        Text {
+            id: infoToastLabel
+            anchors.centerIn: parent
+            text: window.infoToastText
+            color: "#e5c07f"; font.pixelSize: 14; font.bold: true
+            wrapMode: Text.WordWrap; width: 340
+            horizontalAlignment: Text.AlignHCenter
+        }
+        // 3 秒后清空（连点不同源 → showInfoToast restart 延后 + 文案覆盖最新）。
+        Timer {
+            id: infoToastTimer
+            interval: 3000
+            onTriggered: window.infoToastVisible = false
+        }
     }
 
     // 创造背包 1.0（t23，t18 升级）：可滚动全方块调色板 + 底部 9 槽 hotbar 栏（同步游戏内）+ 销毁槽。
