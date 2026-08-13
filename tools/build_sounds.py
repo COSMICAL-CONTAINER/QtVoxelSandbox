@@ -227,7 +227,12 @@ MATERIALS = {
 #   挖掘 mining：统一用 impactMining（镐击石，挖掘声与材质音色差异小；统一亦更连贯）。
 STEP_CC0 = {"stone": "step_concrete", "wood": "step_wood", "grass": "step_grass",
             "sand": "step_snow", "leaves": "step_carpet"}
-BREAK_CC0 = {"stone": "impact_plate_heavy", "wood": "impact_wood_med", "grass": "impact_soft_heavy",
+# t520：草/泥土破坏声修正。旧 grass→impact_soft_heavy（软体重击）经 finalize 峰值归一化后频谱重心仅 ~87Hz
+#   （实测 break_grass.wav）—— 几乎纯次低频、扬声器难以重放、人耳近不可闻，故「挖草/泥土没声音」（用户报）。
+#   而同 CC0 库的 step_grass（草地脚步录制）centroid ~254Hz、明显可辨（已作 grass step 用）。故 grass 破坏改用
+#   step_grass 源（真实草地表面音、清晰可闻），与 step 同源但破坏路径 target_peak 更高（0.92 满刻度近前，
+#   破坏是强反馈事件宜响于脚步）。sand/leaves 各用其专属 impact 源（软击 / 板击），音色区分保留。
+BREAK_CC0 = {"stone": "impact_plate_heavy", "wood": "impact_wood_med", "grass": "step_grass",
              "sand": "impact_soft_med", "leaves": "impact_plank_med"}
 
 
@@ -241,6 +246,11 @@ def synth_material(name, kind):
     if kind == "step":
         return load_cc0(STEP_CC0[name], target_peak=0.78)
     if kind == "break":
+        # t520：grass 破坏声用 step_grass 源（centroid ~254Hz 可辨），但 step_grass 内部峰值偏弱（脚步录制）。
+        #   故 grass 破坏提到满刻度 0.95（破坏是强反馈事件、须明显可闻），不再压 MATERIALS["grass"]["energy"]
+        #   （0.70 会把已偏弱的草地声进一步压到难辨）。其余材质仍按 energy 比控相对响度。
+        if name == "grass":
+            return load_cc0(BREAK_CC0[name], target_peak=0.95)
         return load_cc0(BREAK_CC0[name], target_peak=0.90 * MATERIALS[name]["energy"])
     # mining
     return load_cc0("impact_mining", target_peak=0.80)

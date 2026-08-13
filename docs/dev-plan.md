@@ -1548,7 +1548,7 @@ t18                        （背包，依赖 hotbar）
 ### B. 新 bug（本轮全新/回归）
 - **木梯放下形状** ❌ 拿手上已换 pack icon（OK），但**放下形状还是旧粗糙形状**（上下部分太宽）。→ partialblockgeometry Ladder 单片贴墙 quad 比例/贴图查（用户「直接替换」）。
 - **夜间火把/熔炉不发光** ❌ 白天有阴影时熔炉发光 OK，但**晚上连火把也不发光** → 光照系统夜间方块光失效。查：夜间方块光 flood / 天光乘子是否误压方块光 / chunkgeometry 顶点色。
-- **挖掘声音** ❌ 挖草方块/泥土**没声音**，挖树叶/原木有声音。→ 声音系统（草/土音缺失或映射错）。
+- **挖掘声音** ✅ 挖草方块/泥土**没声音**（已修 t520）。根因非映射错/文件缺，是 `break_grass.wav` 频谱重心 ~87Hz 几乎纯次低频扬声器难重放；改 CC0 源 `impact_soft_heavy`→`step_grass`（centroid 254Hz 可辨）+ 提峰值 → 重生 break_grass.wav 可闻。
 - **路程统计恒 0** ❌ 统计数据「走过路程」一直是 0。→ 三轮埋点 onMove 跳过（无信号调用方）→ 补 playercontroller 位移信号 → progress.onMove。
 - **箱子 shift+左键** ❌ 箱子界面 shift+左键物品应**放入箱子**（不是放回背包）。优先级。
 - **破箱不掉落内容** ❌ 箱子打掉内部物品不掉落。→ 破箱清 ChestStore + 掉内容（仿破熔炉）。
@@ -1607,7 +1607,7 @@ t18                        （背包，依赖 hotbar）
 
 ### 仍待办（dev-plan 其余，下轮）
 - A: t492 工作台/熔炉图标要 3D（第三次改口，待确认）；创造背包生存物品栏 UI 错位对齐。
-- B: 夜间火把/熔炉不发光（光照系统）；挖草/土没声音；破箱不掉内容；箱子 shift+左键放箱子；功能方块 shift+右键放方块；**附魔台/铁砧/发射器 UI 打不开**（AnvilUI/EnchantingTableUI 已存在，是 playercontroller 右键路由没触发 enchantingTableOpened/anvilOpened）；甘蔗悬空；积雪层生成/雪块不浮空；进度树拖动。
+- B: 夜间火把/熔炉不发光（光照系统）；~~挖草/土没声音（已修 t520）~~；破箱不掉内容；箱子 shift+左键放箱子；功能方块 shift+右键放方块；**附魔台/铁砧/发射器 UI 打不开**（AnvilUI/EnchantingTableUI 已存在，是 playercontroller 右键路由没触发 enchantingTableOpened/anvilOpened）；甘蔗悬空；积雪层生成/雪块不浮空；进度树拖动。
 - C: 雪傀儡（朝向/浮空/碰撞箱/受伤动画）；铁傀儡游戏内 pack 贴图（图鉴已 OK，游戏内 in-world 因 UnitCube pos-only 仍纯色 —— #195 部分残留，需 CrackBox 几何换）。
 - E: 船（shift提示5秒/太轻/坐姿90°/内有水/碰岸坏/掉木板木棍/橡云杉区分）。
 
@@ -1638,9 +1638,10 @@ t18                        （背包，依赖 hotbar）
 - ✅ 根因：单片贴墙 quad 几何本身即 MC 1.0 ladder 正确做法（薄板贴墙 + cutout 梯级，单面贴图双面可见），问题在贴图比例 —— 旧贴图纵轨居中瓦片中央 8/16 宽（x=4/5,10/11）+ 两侧各 4/16 透明留白 → 整张贴图铺满 face 后梯子只显在格中心半宽、两侧大块透明 → 观感「格中央小梯图标、粗糙上下宽」。
 - ✅ 修：tools/build_ladder.py 改纵轨贴瓦片两侧（x=2/3,12/13）+ 横梯级满铺轨间 + 4 道梯级等距覆盖全高 → 整张贴图「满格读作一把梯子」，铺满 face 后梯子铺满整格宽（机制等价 MC 1.0 ladder 贴图：轨靠边 + rung 满轨间）。重建 atlas.png + icon_ladder.png。几何不变（已是 MC 1.0 正确），同步 partialblockgeometry/hotbar/CMakeLists/build_atlas/build_cube_icons 注释。
 
-**B7 挖草方块/泥土没声音** → **t520**（R19.1 本轮）
+**B7 挖草方块/泥土没声音** → **t520**（R19.1 本轮）✅✅ 已完成（commit 待填）
 - 用户：「挖草方块跟泥土没有声音，挖树叶还有橡木原木都有声音」。
-- 查声音系统：grass/dirt 挖掘音缺失或 blockId→音效映射错（digSoundFor / build_sounds 之类）。
+- ✅ 根因：映射与文件加载都对（Grass=1/Dirt=2 → GroupGrass → grass_*.wav，init 日志 grass 组 break/mining/step 全 true），但 `break_grass.wav` 频谱重心仅 ~87Hz（实测）——几乎纯次低频、扬声器难重放、人耳近不可闻，故听感「没声音」。源是 CC0 `impact_soft_heavy`（软体重击）经 finalize 峰值归一化后能量全沉到次低频。挖树叶(200Hz)/原木(190Hz)/石头(491Hz)重心在可闻带故正常。
+- ✅ 修：`tools/build_sounds.py` 把 `BREAK_CC0["grass"]` 从 `impact_soft_heavy` 改用 `step_grass`（真实草地表面录制、centroid ~254Hz 明显可辨、已作 grass step 用），并 grass break 路径提 target_peak 到 0.95（不再压 energy=0.70，破坏是强反馈事件须响）。重跑 build_sounds.py 重生 break_grass.wav（新 peak 31128 / rms 1128 / centroid 254Hz，与 leaves/wood 同量级可辨）。映射表与 blockregistry materialGroup 不动（本就对）。
 
 **B8 箱子界面 shift+左键应放入箱子** → **t521**（R19.1 本轮）
 - 用户：「箱子打开页面 shift+左键某物品，应直接放到箱子里面去，而不是放回背包。箱子界面得这样做（优先级）」。
@@ -1747,7 +1748,7 @@ t18                        （背包，依赖 hotbar）
 构建零警告（强删 obj 重编 4 文件 exit 0）· 冒烟 `root objects after load: 1` · 红线全守（Shambler/Bones/Stalker 区隔名 · NoLighting · 无 PNG 进 git）。C3/B1/B6 三项复查均 PASS + 运行期落盘实证。
 
 ### R19 仍待办（dev-plan R19 段其余，下轮）
-- B4 工作台/熔炉图标 3D（第三次改口）；B5 木梯放下几何；B7 挖草/土没声音；B8 箱子 shift+左键放箱子；B9 破箱掉内容；B10 功能方块 shift+右键放方块；B11 附魔台/铁砧/发射器 UI（→ t515-t517 新功能）；B12 甘蔗悬空；B13 积雪层手持图标；B14 积雪层生成地貌；B15 积雪块不浮空；B16 创造生存物品栏 UI 错位。
+- B4 工作台/熔炉图标 3D（第三次改口）；B5 木梯放下几何（已修 t501）；~~B7 挖草/土没声音（已修 t520）~~；B8 箱子 shift+左键放箱子；B9 破箱掉内容；B10 功能方块 shift+右键放方块；B11 附魔台/铁砧/发射器 UI（→ t515-t517 新功能）；B12 甘蔗悬空；B13 积雪层手持图标；B14 积雪层生成地貌；B15 积雪块不浮空；B16 创造生存物品栏 UI 错位。
 - C1 雪傀儡（南瓜头/朝向/浮空/碰撞箱）；C2 铁傀儡游戏内（图鉴 C3 已修，in-world 需 CrackBox 几何换）。
 - E1-E7 船全套。
 - t515-t517 附魔台/铁砧/发射器 UI 工作台蓝本重做。
