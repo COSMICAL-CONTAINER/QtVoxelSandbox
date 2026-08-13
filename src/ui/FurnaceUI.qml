@@ -76,13 +76,17 @@ Item {
     //   内容丢、打掉不掉。furnaceStore 未注入（防御）→ 读 0（空槽 / 0 进度，安全降级）。
     // 触碰表达式 furnaceCoordRev：切熔炉（furnaceX/Y/Z 变）或 furnaceStore.revision 变时让所有读熔炉的绑定
     //   重算（单独属性，避免每处重复写表达式；同 ChestUI.chestCoordRev 模式）。
+    // 三轮复盘：`{ root.furnaceCoordRev; return ... }` 的**裸语句触碰**在 qmlcachegen AOT 编译下会被
+    //   死代码消除 → 依赖不注册 → revision 变后绑定永不重算（烤不了/不显示/东西消失根因）。修法：触碰值必须
+    //   **参与返回值**（`const _r = revision; ... _r >= 0`），revision 恒 ≥0 → 守卫恒真、只负责注册依赖。
+    //   各槽绑定直接用 store.revision（C++ Q_PROPERTY，NOTIFY 直连，AOT 下可靠）而非二次间接。
     property int furnaceCoordRev: furnaceStore ? (furnaceStore.revision + furnaceX * 131 + furnaceY * 17 + furnaceZ) : 0
-    property int inId: { root.furnaceCoordRev; return root.furnaceStore ? root.furnaceStore.slotIdAt(root.furnaceX, root.furnaceY, root.furnaceZ, 0) : 0 }
-    property int inCount: { root.furnaceCoordRev; return root.furnaceStore ? root.furnaceStore.slotCountAt(root.furnaceX, root.furnaceY, root.furnaceZ, 0) : 0 }
-    property int fuelId: { root.furnaceCoordRev; return root.furnaceStore ? root.furnaceStore.slotIdAt(root.furnaceX, root.furnaceY, root.furnaceZ, 1) : 0 }
-    property int fuelCount: { root.furnaceCoordRev; return root.furnaceStore ? root.furnaceStore.slotCountAt(root.furnaceX, root.furnaceY, root.furnaceZ, 1) : 0 }
-    property int outId: { root.furnaceCoordRev; return root.furnaceStore ? root.furnaceStore.slotIdAt(root.furnaceX, root.furnaceY, root.furnaceZ, 2) : 0 }
-    property int outCount: { root.furnaceCoordRev; return root.furnaceStore ? root.furnaceStore.slotCountAt(root.furnaceX, root.furnaceY, root.furnaceZ, 2) : 0 }
+    property int inId: { const _r = root.furnaceStore ? root.furnaceStore.revision : -1; return root.furnaceStore && _r >= 0 ? root.furnaceStore.slotIdAt(root.furnaceX, root.furnaceY, root.furnaceZ, 0) : 0 }
+    property int inCount: { const _r = root.furnaceStore ? root.furnaceStore.revision : -1; return root.furnaceStore && _r >= 0 ? root.furnaceStore.slotCountAt(root.furnaceX, root.furnaceY, root.furnaceZ, 0) : 0 }
+    property int fuelId: { const _r = root.furnaceStore ? root.furnaceStore.revision : -1; return root.furnaceStore && _r >= 0 ? root.furnaceStore.slotIdAt(root.furnaceX, root.furnaceY, root.furnaceZ, 1) : 0 }
+    property int fuelCount: { const _r = root.furnaceStore ? root.furnaceStore.revision : -1; return root.furnaceStore && _r >= 0 ? root.furnaceStore.slotCountAt(root.furnaceX, root.furnaceY, root.furnaceZ, 1) : 0 }
+    property int outId: { const _r = root.furnaceStore ? root.furnaceStore.revision : -1; return root.furnaceStore && _r >= 0 ? root.furnaceStore.slotIdAt(root.furnaceX, root.furnaceY, root.furnaceZ, 2) : 0 }
+    property int outCount: { const _r = root.furnaceStore ? root.furnaceStore.revision : -1; return root.furnaceStore && _r >= 0 ? root.furnaceStore.slotCountAt(root.furnaceX, root.furnaceY, root.furnaceZ, 2) : 0 }
     property int slotRev: root.furnaceCoordRev   // 既有读 slotRev 的绑定（图标 / 数量 / 拖拽高亮）经此重算
     // t402 输出槽快照（检测玩家取走产物 → 按 id × 件数产经验球）。每次 slotRev 变与 prevOut 对比：
     //   若同 id 且 outCount 减少 → 差值 × smeltXpReward(outId) = 本次取走 XP → emit xpAwarded。
@@ -94,8 +98,8 @@ Item {
     // 冶炼运行态（读 FurnaceStore）：burnRemain = 当前燃料剩余燃烧秒数（>0 表「正在烧」）；smeltProgress =
     //   当前件累积秒数（0..kSmeltSecs；满则产 1 件、归零或留余）。ticked 驱动推进（见 tick()），tick 末写回
     //   FurnaceStore（跨开关保留冶炼进度，机制等价 MC 关面板仍继续烧）。
-    property real burnRemain: { root.furnaceCoordRev; return root.furnaceStore ? root.furnaceStore.burnProgressAt(root.furnaceX, root.furnaceY, root.furnaceZ) : 0.0 }
-    property real smeltProgress: { root.furnaceCoordRev; return root.furnaceStore ? root.furnaceStore.smeltingProgressAt(root.furnaceX, root.furnaceY, root.furnaceZ) : 0.0 }
+    property real burnRemain: { const _r = root.furnaceStore ? root.furnaceStore.revision : -1; return root.furnaceStore && _r >= 0 ? root.furnaceStore.burnProgressAt(root.furnaceX, root.furnaceY, root.furnaceZ) : 0.0 }
+    property real smeltProgress: { const _r = root.furnaceStore ? root.furnaceStore.revision : -1; return root.furnaceStore && _r >= 0 ? root.furnaceStore.smeltingProgressAt(root.furnaceX, root.furnaceY, root.furnaceZ) : 0.0 }
     // t502 当前燃料件的总燃烧秒数（点燃时随 burnRemain 一起置；逐 tick burnRemain 递减、burnTotal 不变 →
     //   burnRemain/burnTotal = 当前燃料件的剩余燃烧比例，驱动火焰 / 燃料进度条按比例收缩（机制等价 MC 1.0
     //   熔炉火焰指示器随当前燃料件消耗而缩短）。未燃烧时 0；火焰 / 进度条据比例 0..1 绘制。
@@ -172,7 +176,8 @@ Item {
     function localReadSlot(group, index) {
         const si = root.furnaceSlotIndex(group)
         if (si < 0 || !root.furnaceStore) return { id: 0, count: 0 }
-        root.furnaceCoordRev  // 触碰 revision（防御性；inId 等绑定已触碰）
+        // 三轮复盘：同步直读 FurnaceStore（不经只读绑定 → 永远最新；旧「触碰 furnaceCoordRev」是裸语句
+        //   触碰、qmlcachegen AOT 下无效，且本地函数读 store 本就同步权威，无需触碰）。
         return {
             id: root.furnaceStore.slotIdAt(root.furnaceX, root.furnaceY, root.furnaceZ, si),
             count: root.furnaceStore.slotCountAt(root.furnaceX, root.furnaceY, root.furnaceZ, si)
@@ -273,19 +278,28 @@ Item {
 
 
     // ── 冶炼 tick（spec：燃料燃烧→累积热量→输入转输出；WorldClock.ticked 驱动，每 tick dt=0.1s）──
-    // t177 二轮复盘：in/fuel/out + burnRemain/smeltProgress 现存 FurnaceStore（只读绑定读 root.inId 等）→ tick
-    //   不再直接写 root.xxx（只读绑定不可赋值），改为：tick 入口把当前栈 / 进度快照到本地 JS 变量 → 本地推进
-    //   算法（同旧逻辑）→ 末尾把变化的槽 / 进度写回 FurnaceStore（setSlot / setBurn / setSmelting）。FurnaceStore
-    //   写后 emit furnaceChanged → furnaceCoordRev 重算 → 只读绑定刷新（火焰 / 箭头 / 图标重绘）。冶炼进度跨
-    //   开关保留（机制等价 MC 关面板仍继续烧）。查 SmeltingRegistry 经 hotbar VM 透传（无副作用到 C++ 除热栏写入）。
+    // t177 二轮复盘：in/fuel/out + burnRemain/smeltProgress 现存 FurnaceStore → tick 不再直接写 root.xxx
+    //   （只读绑定不可赋值）。三轮复盘：tick 快照**直接读 FurnaceStore**（同步权威，经 furnaceStore.slotIdAt /
+    //   slotCountAt / burnProgressAt / smeltingProgressAt），**不读只读绑定** —— 绑定经 qmlcachegen AOT 编译
+    //   后刷新有延迟（见上方 8 槽绑定注释），tick 决策绝不依赖绑定陈旧值（否则「玩家刚放的肉 tick 看不到 → 不点
+    //   火 / 写回覆盖玩家操作」）。写回用**脏标记**（tick 推进哪个字段置位），值 = tick 最终权威值；不再用
+    //   `local !== binding` 比较（绑定陈旧会误判不写 → 进度不落盘 / 或误写回覆盖）。玩家操作（点击槽）与 tick
+    //   均为同步 JS、事件串行，二者不可能交错 → tick 快照即「当前权威态」，推进后写回无竞态。
     function tick(dt) {
         if (!root.hotbar || !root.furnaceStore) return
 
-        // 快照当前栈 / 进度到本地变量（算法推进用，避免反复读只读绑定）。
-        let inId = root.inId, inCount = root.inCount
-        let fuelId = root.fuelId, fuelCount = root.fuelCount
-        let outId = root.outId, outCount = root.outCount
-        let burnRemain = root.burnRemain, smeltProgress = root.smeltProgress
+        // 快照当前栈 / 进度**直接从 FurnaceStore 读**（同步最新，不经只读绑定）。
+        const fx = root.furnaceX, fy = root.furnaceY, fz = root.furnaceZ
+        let inId = root.furnaceStore.slotIdAt(fx, fy, fz, 0)
+        let inCount = root.furnaceStore.slotCountAt(fx, fy, fz, 0)
+        let fuelId = root.furnaceStore.slotIdAt(fx, fy, fz, 1)
+        let fuelCount = root.furnaceStore.slotCountAt(fx, fy, fz, 1)
+        let outId = root.furnaceStore.slotIdAt(fx, fy, fz, 2)
+        let outCount = root.furnaceStore.slotCountAt(fx, fy, fz, 2)
+        let burnRemain = root.furnaceStore.burnProgressAt(fx, fy, fz)
+        let smeltProgress = root.furnaceStore.smeltingProgressAt(fx, fy, fz)
+        // 脏标记：仅 tick 推进过的字段写回（值 = tick 最终权威值；未动字段不写 → 玩家在 tick 间放入的物不被覆盖）。
+        let dirtyIn = false, dirtyFuel = false, dirtyOut = false, dirtyBurn = false, dirtySmelt = false
 
         // 当前输入的冶炼产物（输入空 / 不可冶炼 → 0）。
         let resultId = inId !== 0 ? root.hotbar.smeltResult(inId) : 0
@@ -308,6 +322,8 @@ Item {
                 fuelCount = fuelCount - 1
                 if (fuelCount <= 0) { fuelId = 0; fuelCount = 0 }
                 burnRemain = burn
+                dirtyFuel = true
+                dirtyBurn = true
                 root.burnTotal = burn   // 本地态（不落盘）；点燃瞬时记，驱动火焰比例
             }
         }
@@ -315,15 +331,19 @@ Item {
         // 燃烧中：燃料时间递减；可冶炼则累积进度；进度满则产 1 件（循环防大 dt 漏产）。
         if (burnRemain > 0) {
             burnRemain = Math.max(0.0, burnRemain - dt)
+            dirtyBurn = true
             if (canSmelt()) {
                 smeltProgress += dt
+                dirtySmelt = true
                 while (smeltProgress >= root.kSmeltSecs && canSmelt()) {
                     // 消耗 1 输入。
                     inCount = inCount - 1
+                    dirtyIn = true
                     if (inCount <= 0) { inId = 0; inCount = 0 }
                     // 产出 1 输出。
                     if (outId === 0) { outId = resultId; outCount = 1 }
                     else { outCount = outCount + 1 }
+                    dirtyOut = true
                     smeltProgress = smeltProgress - root.kSmeltSecs
                     // 输入可能因消耗而空 → 重算产物防御（同槽 id 不变，仅 count 减，重算幂等）。
                     resultId = inId !== 0 ? root.hotbar.smeltResult(inId) : 0
@@ -332,19 +352,14 @@ Item {
             // 燃料烧尽或输入中断时 smeltProgress 保留（MC 行为：部分进度不丢失，仅不再推进）。
         }
 
-        // 末尾把变化的栈 / 进度写回 FurnaceStore（每 setSlot/setBurn/setSmelting 各发一次 furnaceChanged；
-        //   熔炉每 tick 至多 5 写 = 5 次 emit，10Hz × 熔炉数 远非热点；slotRev 绑定触碰重算廉价）。
-        //   只写「变化」项（值不变跳过，省 emit）。空栈归一交给 setSlot 内部（id<=0/count<=0 → 空）。
-        if (inId !== root.inId || inCount !== root.inCount)
-            root.furnaceStore.setSlot(root.furnaceX, root.furnaceY, root.furnaceZ, 0, inId, inCount)
-        if (fuelId !== root.fuelId || fuelCount !== root.fuelCount)
-            root.furnaceStore.setSlot(root.furnaceX, root.furnaceY, root.furnaceZ, 1, fuelId, fuelCount)
-        if (outId !== root.outId || outCount !== root.outCount)
-            root.furnaceStore.setSlot(root.furnaceX, root.furnaceY, root.furnaceZ, 2, outId, outCount)
-        if (burnRemain !== root.burnRemain)
-            root.furnaceStore.setBurn(root.furnaceX, root.furnaceY, root.furnaceZ, burnRemain)
-        if (smeltProgress !== root.smeltProgress)
-            root.furnaceStore.setSmelting(root.furnaceX, root.furnaceY, root.furnaceZ, smeltProgress)
+        // 末尾把「tick 推进过」的栈 / 进度写回 FurnaceStore（脏标记 → 只写本 tick 真正动的字段；每 setSlot/
+        //   setBurn/setSmelting 各发一次 furnaceChanged；熔炉每 tick 至多 5 写 = 5 次 emit，10Hz × 熔炉数
+        //   远非热点；slotRev 绑定触碰重算廉价）。空栈归一交给 setSlot 内部（id<=0/count<=0 → 空）。
+        if (dirtyIn) root.furnaceStore.setSlot(fx, fy, fz, 0, inId, inCount)
+        if (dirtyFuel) root.furnaceStore.setSlot(fx, fy, fz, 1, fuelId, fuelCount)
+        if (dirtyOut) root.furnaceStore.setSlot(fx, fy, fz, 2, outId, outCount)
+        if (dirtyBurn) root.furnaceStore.setBurn(fx, fy, fz, burnRemain)
+        if (dirtySmelt) root.furnaceStore.setSmelting(fx, fy, fz, smeltProgress)
 
         // t494 熔炉燃烧态切换检测：据 burnRemain>0 算「应燃烧态」，与上次 furnaceLit 比对。跨 0 边界
         //   （点燃：0→>0 / 熄火：>0→0）时调 player.setFurnaceLit 翻转熔炉格 state 的燃烧 bit → mesher 切
