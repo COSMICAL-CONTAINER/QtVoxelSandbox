@@ -1,0 +1,679 @@
+import QtQuick
+// t41：迁入 src/ui/ 子目录后需显式 import 自身模块，以解析下方 `property Hotbar hotbar` 等 C++ 类型。
+import VoxelSandbox
+// t168：背包槽操作算法（resolveClick/resolveRightClick/readSlot/writeSlot/redistributeLive/doMergeSameId
+//   等）抽取自共享 JS 库 InventoryOps.js；本面板仅保留 dispenser 本地槽路由 + 薄委托包装（供 QML 信号
+//   处理器经 root.xxx 调用，调用点零改动）。算法单一权威收敛于此库，消除多面板逐字复制。
+import "InventoryOps.js" as InventoryOps
+
+// qml-touch 三轮：本文件所有「触碰 NOTIFY 属性」的绑定统一改表达式形式
+//   `{ const _r = <rev>; return _r >= 0 ? (<expr>) : <fallback> }`（触碰值参与返回值），防 qmlcachegen
+//   AOT 把裸语句触碰 `<rev>;` 当死代码消除 → 依赖不注册 → revision 变后绑定永不重算（机制/返回值不变）。
+
+// 发射器物品栏面板（t517 / 工作台蓝本）：右键发射器方块打开（PlayerController::dispenserOpened → Main.qml
+// Connections → 显本面板 + 释放指针）。Esc / E / 关闭信号关闭（宿主恢复 grab）。
+//
+// 布局贴近 MC 1.0 发射器：上部「3×3=9 槽发射器物品栏」+ 下部「3×9=27 主物品栏 + 9 hotbar 行」（容器 +
+// 背包布局，同工作台 / 熔炉 / 箱子结构）。机制等价 MC 右键发射器开物品栏界面。
+//
+// t517 本任务为「先界面」：9 槽发射器内容暂存面板本地数组（dispSlots/dispCounts/dispRev），面板常驻
+//   （visible 切换、不销毁）→ 跨开关保留（关再开内容仍在）。真容器存储（per-block 跨世界持久 / 触发时
+//   从槽内取物发射）属后续任务（可改 DispenserStore 同 ChestStore 模式）。本地数组无 C++ Store → 关游戏
+//   即丢、多只发射器共享一份；属已知「界面先行」折中，dev-plan t517 明确「容器存储功能后补」。
+//
+// 物品移动（9 槽 / 主栏 / hotbar 间任意搬动）：左键整组 / 右键半份 / 单放 / 左键拖动均分 / 双击拿同类 /
+//   Shift 搬运，与 CraftingTableUI / ChestUI 全套快捷操作同算法（共享 hotbar VM 的 heldBlock / heldCount
+//   光标手持栈）。本面板把 "dispenser" 组经 localReadSlot/localWriteSlot 钩子路由到本地数组。
+//
+// 全部槽框自绘原创（InvSlot 凹陷槽，无外部 MC GUI PNG；§9 override (a)）。零 MC 专有名词（§9）。
+// 宿主负责指针态：打开时 release（光标可见点格子），关闭 → grab。
+
+Item {
+    id: root
+
+    // 宿主注入：hotbar 视图模型（提供 heldBlock/heldCount/maxStackSize/iconSourceForBlock/
+    // nameForBlock/isTool/isMaterial/slotRevision/main*/addStack 等栈操作 + 图标 / 名查询）。
+    property Hotbar hotbar
+    // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
+    signal closed()
+    // t49 同 CraftingTableUI / ChestUI：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区）。
+    signal discardHeldRequested()
+    // t228：请求宿主把光标手持栈**丢 1 件**为实体（右键拖出面板外；宿主接 player.dropHeldCursorOne）。
+    //   左键整栈走 discardHeldRequested，右键逐个走本信号（spec「左键=全丢/右键=逐个」）。
+    signal discardHeldOneRequested()
+
+    // ── 尺寸常量 ──
+    readonly property int slotSize: 40
+    readonly property int gridN: 3
+    // MC 1.0 发射器布局：上部 3×3 容器，下部 3×9 物品栏 + hotbar。
+    readonly property int mainCols: 9
+    readonly property int mainRows: 3
+
+    // 3×3 发射器容器本地栈存储（与 hotbar VM 共享同一光标手持栈 heldBlock/heldCount）。
+    // 数组改写不触发 QML 绑定 → 配 dispRev 版本号让 Image source / count 重算。
+    // t517「界面先行」：内容暂存面板本地，关再开仍在；真 per-block 存储后补（同 ChestStore 模式）。
+    property var dispSlots: [0,0,0, 0,0,0, 0,0,0]
+    property var dispCounts:[0,0,0, 0,0,0, 0,0,0]
+    property int dispRev: 0
+
+    // t97：27 主物品栏自该任务起上移至 hotbar VM（m_mainSlots），与 SurvivalInventory / CraftingTableUI /
+    //   FurnaceUI / ChestUI 多菜单共享同一份 → 主栏同步、returnHeldToHotbar/pickupScan 经 addToAny 能合并
+    //   进主栏。与发射器槽 / hotbar 共享同一 hotbar VM 光标手持栈。
+
+    // t167 左键拖动均分（spec：左键按住拖过 N 格 → 实时均分 floor(count/N)、余数留光标）。手势由 root 级
+    //   DragHandler(LeftButton) 总控：按下不动时 per-slot 左键 TapHandler 抓（单点拾取/放置/合并/互换），一旦
+    //   拖动越阈值 → DragHandler 激活夺抓 → onActiveChanged 驱动 begin/endLeftDrag；逐槽 HoverHandler 在
+    //   leftDragActive 期间收集扫过格子（addDragSlot 即触发 redistributeLive 实时重分）。dragSlots 存「组:下标」
+    //   字符串（去重简单）；dragHeld* 为按下瞬间光标栈快照；dragOriginal/dragWritten 支撑实时重分的撤销机制
+    //   （每滑入新格先撤销上轮写入再重分）。发射器槽 / 主栏 / hotbar 统一支持；右键分半走 per-slot 右键 TapHandler。
+    property bool leftDragActive: false
+    property var dragSlots: []              // "disp:2" / "main:5" / "hotbar:0"
+    property string hoveredKey: ""
+    property int dragHeldId: 0
+    property int dragHeldCount: 0
+    property int dragHeldDurability: 0      // t263 拖动期间手持工具耐久快照（松手回填光标保真）
+    // t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）。dragActive 统一左/右拖动收集门控。
+    property bool rightDragActive: false
+    property var rightDragSlots: []
+    property bool rightDragPlaced: false
+    property bool dragActive: leftDragActive || rightDragActive
+    // t98 实时重分撤销机制：dragOriginal 记每槽 drag 前原始栈（首次 encounter 快照）；dragWritten 记本轮
+    //   已写槽。每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginLeftDrag / endLeftDrag 重置。
+    property var dragOriginal: ({})
+    property var dragWritten: ({})
+    // t98 双击合并：lastTapMs/lastTapKey 记上次左键点击（槽 key）的时间戳与 key；280ms 内同槽二次点击 →
+    //   doMergeSameId（扫 main+hotbar+disp 同 id 累加成满栈、余数留光标）。
+    property real lastTapMs: 0
+    property string lastTapKey: ""
+
+    // t180：dispenser 3×3 参与快捷操作（左键拖动均分 / 双击拿同类 / 右键分半）。声明 dispenser 为可拖拽
+    //   本地组 → InventoryOps.groupIsDraggable 放行（addDragSlot 收集、redistributeLive 分发）、doMergeSameId
+    //   扫 disp 槽。
+    property var localDragGroups: ["dispenser"]
+    // t180：dispenser 组槽位数（doMergeSameId 扫描范围）。dispSlots 长 9（3×3）。
+    function localSlotCount(group) { return group === "dispenser" ? root.dispSlots.length : 0 }
+
+    // ── t168 面板专属槽路由：dispenser 容器格走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
+    //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
+    function localReadSlot(group, index) {
+        if (group === "dispenser") return { id: root.dispSlots[index] || 0, count: root.dispCounts[index] || 0 }
+        return { id: 0, count: 0 }
+    }
+    function localWriteSlot(group, index, id, count) {
+        if (group === "dispenser") { root.dispSlots[index] = id; root.dispCounts[index] = count; root.dispRev++ }
+    }
+    // resolveClick / resolveRightClick（拾取/放置/合并/互换 + 半份）：算法见 InventoryOps（多面板共享）。
+    //   返回 {slotId,slotCount,slotDur,slotEnch,heldId,heldCount,heldDur,heldEnch} 或 null=无操作；
+    //   调用方据返回值写对应槽 + 更新 held。
+    function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
+    function resolveRightClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch) }
+    function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
+    function writeSlot(group, index, id, count) { InventoryOps.writeSlot(root, group, index, id, count) }
+
+    // ── t79/t98/t108/t167 拖动均分 + t110 Shift/数字键搬运 + t98 双击合并：算法见 InventoryOps
+    //   （多面板共享）。本处仅薄委托包装，供 QML 信号处理器 / 绑定经 root.xxx 调用（调用点零改动）。
+    function slotKey(group, index) { return InventoryOps.slotKey(group, index) }
+    function dragHasKey(key) { return InventoryOps.dragHasKey(root, key) }
+    // t228：判定 root 坐标系点 (x,y) 是否落在面板矩形内（拖出丢弃门控；面板内非槽位松手→不丢）。
+    function pointInsidePanel(x, y) { return InventoryOps.pointInsidePanel(root, panel, x, y) }
+    function addDragSlot(key) { InventoryOps.addDragSlot(root, key) }
+    function beginLeftDrag() { InventoryOps.beginLeftDrag(root) }
+    function endLeftDrag() { InventoryOps.endLeftDrag(root) }
+    // t181 右键拖动（每格放 1 个）：薄委托包装。
+    function beginRightDrag() { InventoryOps.beginRightDrag(root) }
+    function endRightDrag() { InventoryOps.endRightDrag(root) }
+    function addRightDragSlot(key) { InventoryOps.addRightDragSlot(root, key) }
+    // t205 右键拖拽绿框高亮：rightDragHasKey 判本格是否在 rightDragSlots（实际放了物的格集）。
+    function rightDragHasKey(key) { return InventoryOps.rightDragHasKey(root, key) }
+    function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
+    function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
+    function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
+
+    // t167 左键拖动均分总控：DragHandler(LeftButton) 在 root 监听。按下不动时 per-slot 左键 TapHandler 抓
+    //   （单点拾取/放置/合并/互换 / Shift 搬运 / 双击合并）；拖动越阈值 → DragHandler 激活夺抓 → onActiveChanged
+    //   驱动 begin/endLeftDrag。逐槽 HoverHandler 在 leftDragActive 期间收集扫过格（addDragSlot 即
+    //   redistributeLive 实时重分）。target:null 防 DragHandler 默认拖动父 Item（面板）。
+    DragHandler {
+        acceptedButtons: Qt.LeftButton
+        target: null
+        onActiveChanged: {
+            if (active) root.beginLeftDrag()
+            else root.endLeftDrag()
+        }
+    }
+    // t181 右键拖动（每格放 1 个）：DragHandler(RightButton) 在 root 监听；拖动越阈值 → begin/endRightDrag。
+    //   按下不动时 per-slot 右键 TapHandler 抓（拿半 / 放一）。target:null 防 DragHandler 拖动父 Item。
+    DragHandler {
+        acceptedButtons: Qt.RightButton
+        target: null
+        onActiveChanged: {
+            if (active) root.beginRightDrag()
+            else root.endRightDrag()
+        }
+    }
+
+    // 半透明遮罩：仅吸收点击（防穿透），不关闭面板（E / Esc / closed 信号才关）。
+    // 手持物时点遮罩区 → 丢弃为实体（同 SurvivalInventory / CraftingTableUI）。t228：左键整栈 / 右键 1 件
+    //   + 面板边界判定（面板内非槽位松手→不丢，修「左键拿物在面板内非槽位松手→直接丢地下」bug）。
+    Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.6)
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: (mouse) => {
+                // 空手仅吸收点击（防穿透），不丢弃。
+                if (!root.hotbar || root.hotbar.heldBlock === 0) return
+                // 面板内非槽位松手 → 不丢（物品留光标）；只有丢出整栏外才丢。
+                if (root.pointInsidePanel(mouse.x, mouse.y)) return
+                if (mouse.button === Qt.RightButton) root.discardHeldOneRequested()   // 右键逐个
+                else                                root.discardHeldRequested()       // 左键整栈
+            }
+        }
+    }
+
+    // 面板：深色圆角，居中。宽度容纳 9 槽行（9×40=360 + 2×16 边距 = 392）；高度 = 标题 + 3×3 发射器容器 +
+    //   3×9 主栏 + 9 hotbar 行 + 间距/边距（同 CraftingTableUI 量级）。
+    Rectangle {
+        id: panel
+        width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
+        height: 372                                  // 标题(22) + 发射器(120) + 主栏(120) + hotbar(40) + 间距/边距
+        anchors.centerIn: parent
+        radius: 14
+        color: "#1b1f24"
+        border.color: "#3a444f"
+        border.width: 1
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 16
+            spacing: 12
+
+            // 标题行：左标题，右关闭提示。
+            Item {
+                width: parent.width
+                height: 22
+                Text {
+                    text: "发射器"
+                    color: "#eaf2ea"; font.pixelSize: 20; font.bold: true
+                    anchors.left: parent.left
+                }
+                Text {
+                    text: "[E] / [Esc] 关闭"
+                    color: "#7fae7f"; font.pixelSize: 11
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+
+            // 发射器 3×3 容器格：整体水平居中（行宽 120 < 行内宽 360 → 居中，无右侧大段空白）。
+            //   读本地数组（dispSlots/dispCounts；dispRev 驱动刷新）；左键整组 / 右键半份 取放
+            //   （与主栏 / hotbar 共享同一 hotbar VM 光标手持栈）。栈写经 localWriteSlot 改本地数组。
+            Item {
+                id: dispRow
+                width: parent.width
+                height: root.gridN * root.slotSize
+
+                Grid {
+                    id: dispGrid
+                    // 3×3(120) 在 360 行宽内居中。
+                    x: (dispRow.width - root.gridN * root.slotSize) / 2; y: 0
+                    columns: root.gridN; spacing: 0
+                    Repeater {
+                        model: root.gridN * root.gridN  // 9
+                        delegate: Item {
+                            width: root.slotSize; height: root.slotSize
+                            InvSlot { anchors.fill: parent; wellColor: "#262b30" }
+                            // 物品图标：方块段→等距立方体 Image；工具段→ToolIcon；材料段（木棒）→MaterialIcon 自绘。
+                            Item {
+                                anchors.centerIn: parent
+                                width: 30; height: 30
+                                visible: { const _r = root.dispRev; return _r >= 0 ? ((root.dispSlots[index] || 0) !== 0) : false }
+                                Image {
+                                    anchors.fill: parent
+                                    visible: {
+                                        const _r = root.dispRev
+                                        return _r >= 0 ? (!root.hotbar.isTool(root.dispSlots[index] || 0)
+                                                          && !root.hotbar.isMaterial(root.dispSlots[index] || 0)) : false
+                                    }
+                                    source: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.iconSourceForBlock(root.dispSlots[index] || 0)) : "" }
+                                    fillMode: Image.PreserveAspectFit; smooth: true
+                                }
+                                ToolIcon {
+                                    anchors.fill: parent
+                                    visible: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.isTool(root.dispSlots[index] || 0)) : false }
+                                    tier: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.toolTier(root.dispSlots[index] || 0)) : 0 }
+                                    toolType: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.toolType(root.dispSlots[index] || 0)) : 0 }
+                                }
+                                // 材料段（木棒）：MaterialIcon 自绘（§9a 原创，非 MC 资产）。
+                                MaterialIcon {
+                                    anchors.fill: parent
+                                    visible: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.isMaterial(root.dispSlots[index] || 0)) : false }
+                                    materialId: { const _r = root.dispRev; return _r >= 0 ? (root.dispSlots[index] || 0) : 0 }
+                                }
+                            }
+                            // 栈数量（count>1 显数字）。
+                            Text {
+                                anchors.right: parent.right; anchors.bottom: parent.bottom
+                                anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                visible: { const _r = root.dispRev; return _r >= 0 ? ((root.dispCounts[index] || 0) > 1) : false }
+                                text: { const _r = root.dispRev; return _r >= 0 ? (root.dispCounts[index] || 0) : "" }
+                                color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                                font.pixelSize: 13; font.bold: true
+                            }
+                            // 左键整组（resolveClick）；右键走 per-slot 右键 TapHandler（resolveRightClick）。
+                            // 左键拖动均分由 root DragHandler + 逐槽 HoverHandler 收集（t167）。
+                            TapHandler {
+                                acceptedButtons: Qt.LeftButton
+                                onTapped: {
+                                    // t110：Shift+左键搬运（dispenser 槽不在 main↔hotbar 范畴，slotShiftLeft 对
+                                    //   dispenser 组无操作；普通左键走 resolveClick）。
+                                    if (window.shiftHeld) { root.slotShiftLeft("dispenser", index); return }
+                                    // t180：双击 disp 槽 → 拿同类（doMergeSameId 扫 main+hotbar+disp 同 id 累加成
+                                    //   满栈、余数留光标；满栈按 main→hotbar→disp 顺序回填，故常把 disp 物品
+                                    //   并入背包、清空容器槽便于重排）。
+                                    const key = root.slotKey("dispenser", index)
+                                    const now = Date.now()
+                                    const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+                                    root.lastTapMs = now
+                                    root.lastTapKey = key
+                                    if (isDouble) { root.doMergeSameId("dispenser", index); return }
+                                    const r = root.resolveClick(root.dispSlots[index] || 0, root.dispCounts[index] || 0, 0)
+                                    if (!r) return
+                                    root.dispSlots[index] = r.slotId
+                                    root.dispCounts[index] = r.slotCount
+                                    root.dispRev++
+                                    root.hotbar.heldBlock = r.heldId
+                                    root.hotbar.heldCount = r.heldCount
+                                    root.hotbar.heldDurability = r.heldDur
+                                }
+                            }
+                            // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey。
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    const r = root.resolveRightClick(root.dispSlots[index] || 0, root.dispCounts[index] || 0, 0)
+                                    if (!r) return
+                                    root.dispSlots[index] = r.slotId
+                                    root.dispCounts[index] = r.slotCount
+                                    root.dispRev++
+                                    root.hotbar.heldBlock = r.heldId
+                                    root.hotbar.heldCount = r.heldCount
+                                    root.hotbar.heldDurability = r.heldDur
+                                }
+                            }
+                            HoverHandler {
+                                // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
+                                //   不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                                property int trackedId: { const _r = root.dispRev; return _r >= 0 ? (root.dispSlots[index] || 0) : 0 }
+                                onTrackedIdChanged: {
+                                    if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                        root.hoveredItemId = 0
+                                }
+                                onHoveredChanged: {
+                                    // t94 tooltip（dispSlots[index] 取当前栈 id；空栈不动 hoveredItemId）。
+                                    const itemId = root.dispSlots[index] || 0
+                                    if (hovered && itemId !== 0) {
+                                        root.hoveredItemId = itemId
+                                        const p = parent.mapToItem(root, parent.width / 2, 0)
+                                        root.hoveredTipPos = Qt.point(p.x, p.y)
+                                    } else if (root.hoveredItemId === itemId) {
+                                        root.hoveredItemId = 0
+                                    }
+                                    const key = root.slotKey("dispenser", index)
+                                    if (hovered) root.hoveredKey = key
+                                    else if (root.hoveredKey === key) root.hoveredKey = ""
+                                    // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                                    if (hovered && root.dragActive) {
+                                        root.addDragSlot(key)
+                                    }
+                                }
+                            }
+                            // t167 均分拖拽高亮。
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "transparent"
+                                border.color: "#7fe57f"; border.width: 2
+                                visible: {
+                                    // qml-touch 三轮：dragSlots/rightDragSlots/revision 触碰入 _ok 守卫（恒真），
+                                    //   防 AOT 死代码消除裸触碰 → 高亮不随拖拽集 / 版本号刷新。
+                                    const _ds = root.dragSlots
+                                    const _rds = root.rightDragSlots
+                                    const _rev = root.dispRev
+                                    const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
+                                    const sid = root.dispSlots[index] || 0
+                                    const key = root.slotKey("dispenser", index)
+                                    if (_ok && root.leftDragActive && root.dragHasKey(key)
+                                        && (sid === 0 || sid === root.dragHeldId)) return true
+                                    return _ok && root.rightDragActive && root.rightDragHasKey(key)
+                                }
+                                z: 10
+                            }
+                        }
+                    }
+                }
+            }
+
+            // t63 / t97 3×9 主物品栏（27 槽）：读 hotbar VM（m_mainSlots，多菜单共享）；左键整组 / 右键半份
+            //   取放（与 SurvivalInventory / CraftingTableUI 主栏同模式）。主栏栈写经 hotbar.mainSetStack；
+            //   与发射器槽 / hotbar 共享同一 hotbar VM 光标手持栈。物品可在 主栏 ↔ 发射器槽 ↔ hotbar 间任意搬动。
+            Grid {
+                width: root.mainCols * root.slotSize
+                height: root.mainRows * root.slotSize
+                columns: root.mainCols; spacing: 0
+                Repeater {
+                    // model 用固定整数 mainCount（VM CONSTANT=27）；刷新靠每绑定触碰 mainRevision
+                    // （Q_PROPERTY，NOTIFY=mainSlotsChanged）→ 经 mainBlockIdAt/mainCountAt 取最新栈值
+                    // （同 hotbar 行 slotRevision 模式）。
+                    model: root.hotbar.mainCount
+                    delegate: Item {
+                        property int mainId: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainBlockIdAt(index)) : 0 }
+                        property int mainCount: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainCountAt(index)) : 0 }
+                        property int mainDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainDurabilityAt(index)) : 0 } // t263 工具耐久
+                        property var mainEnch: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainEnchantsAt(index)) : 0 } // t475 附魔
+                        width: root.slotSize; height: root.slotSize
+                        InvSlot { anchors.fill: parent }
+                        Item {
+                            anchors.centerIn: parent
+                            width: 30; height: 30
+                            visible: mainId !== 0
+                            Image {
+                                anchors.fill: parent
+                                visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (!root.hotbar.isTool(mainId) && !root.hotbar.isMaterial(mainId)) : false }
+                                source: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.iconSourceForBlock(mainId)) : "" }
+                                fillMode: Image.PreserveAspectFit; smooth: true
+                            }
+                            ToolIcon {
+                                anchors.fill: parent
+                                visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.isTool(mainId)) : false }
+                                tier: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolTier(mainId)) : 0 }
+                                toolType: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolType(mainId)) : 0 }
+                            }
+                            MaterialIcon {
+                                anchors.fill: parent
+                                visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.isMaterial(mainId)) : false }
+                                materialId: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainId) : 0 }
+                            }
+                        }
+                        // 栈数量（count>1 显数字）。触碰 mainRevision 刷新（VM NOTIFY 驱动）。
+                        Text {
+                            anchors.right: parent.right; anchors.bottom: parent.bottom
+                            anchors.rightMargin: 3; anchors.bottomMargin: 1
+                            visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount > 1) : false }
+                            text: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount) : "" }
+                            color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                            font.pixelSize: 13; font.bold: true
+                        }
+                        // 左键整组（resolveClick）；右键走 per-slot 右键 TapHandler（resolveRightClick）。
+                        // 左键拖动均分由 root DragHandler + 逐槽 HoverHandler 收集（t167）。
+                        TapHandler {
+                            acceptedButtons: Qt.LeftButton
+                            onTapped: {
+                                // t110：Shift+左键 → main 槽搬运到首个空 hotbar 槽（早于双击合并 / 普通左键）。
+                                if (window.shiftHeld) { root.slotShiftLeft("main", index); return }
+                                // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId（拾起 + 合并）。
+                                const key = root.slotKey("main", index)
+                                const now = Date.now()
+                                const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+                                root.lastTapMs = now
+                                root.lastTapKey = key
+                                if (isDouble) { root.doMergeSameId("main", index); return }
+                                const r = root.resolveClick(mainId, mainCount, mainDur, mainEnch)
+                                if (!r) return
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                                root.hotbar.heldBlock = r.heldId
+                                root.hotbar.heldCount = r.heldCount
+                                root.hotbar.heldDurability = r.heldDur
+                                root.hotbar.setHeldEnchants(r.heldEnch)
+                            }
+                        }
+                        // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey。
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: {
+                                const r = root.resolveRightClick(mainId, mainCount, mainDur, mainEnch)
+                                if (!r) return
+                                root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                                root.hotbar.heldBlock = r.heldId
+                                root.hotbar.heldCount = r.heldCount
+                                root.hotbar.heldDurability = r.heldDur
+                                root.hotbar.setHeldEnchants(r.heldEnch)
+                            }
+                        }
+                        HoverHandler {
+                            // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
+                            //   不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                            property int trackedId: mainId
+                            onTrackedIdChanged: {
+                                if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                    root.hoveredItemId = 0
+                            }
+                            onHoveredChanged: {
+                                // t94 tooltip（mainId 由 delegate 持有；触碰 mainRevision 刷新）。
+                                const itemId = mainId
+                                if (hovered && itemId !== 0) {
+                                    root.hoveredItemId = itemId
+                                    const p = parent.mapToItem(root, parent.width / 2, 0)
+                                    root.hoveredTipPos = Qt.point(p.x, p.y)
+                                } else if (root.hoveredItemId === itemId) {
+                                    root.hoveredItemId = 0
+                                }
+                                const key = root.slotKey("main", index)
+                                if (hovered) root.hoveredKey = key
+                                else if (root.hoveredKey === key) root.hoveredKey = ""
+                                // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                                if (hovered && root.dragActive) {
+                                    root.addDragSlot(key)
+                                }
+                            }
+                        }
+                        // t167 均分拖拽高亮。
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"
+                            border.color: "#7fe57f"; border.width: 2
+                            visible: {
+                                const _ds = root.dragSlots
+                                const _rds = root.rightDragSlots
+                                const _rev = root.hotbar.mainRevision
+                                const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
+                                const key = root.slotKey("main", index)
+                                if (_ok && root.leftDragActive && root.dragHasKey(key)
+                                    && (mainId === 0 || mainId === root.dragHeldId)) return true
+                                return _ok && root.rightDragActive && root.rightDragHasKey(key)
+                            }
+                            z: 10
+                        }
+                    }
+                }
+            }
+
+            // t63 底部 9 槽 hotbar 行（同步游戏内 hotbar）：model 用固定整数 slotCount + delegate 持 slotId
+            //   属性触碰 slotRevision。左键整组 / 右键半份同主栏（hotbar 槽写经 hotbar.setStack；VM 单一权威）。
+            //   不切真实选中（同 SurvivalInventory / CraftingTableUI）。
+            Item {
+                width: root.mainCols * root.slotSize
+                height: root.slotSize
+
+                Row {
+                    spacing: 0
+                    Repeater {
+                        model: root.hotbar.slotCount
+                        delegate: Item {
+                            property int slotId: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.blockIdAt(index)) : 0 }
+                            width: root.slotSize; height: root.slotSize
+                            InvSlot { anchors.fill: parent }
+                            Item {
+                                anchors.centerIn: parent
+                                width: 30; height: 30
+                                visible: slotId !== 0
+                                Image {
+                                    anchors.fill: parent
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (!root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId)) : false }
+                                    source: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.iconSourceForBlock(slotId)) : "" }
+                                    fillMode: Image.PreserveAspectFit; smooth: true
+                                }
+                                ToolIcon {
+                                    anchors.fill: parent
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.isTool(slotId)) : false }
+                                    tier: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolTier(slotId)) : 0 }
+                                    toolType: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolType(slotId)) : 0 }
+                                }
+                                MaterialIcon {
+                                    anchors.fill: parent
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.isMaterial(slotId)) : false }
+                                    materialId: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (slotId) : 0 }
+                                }
+                            }
+                            Text {
+                                anchors.right: parent.right; anchors.bottom: parent.bottom
+                                anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index) > 1) : false }
+                                text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
+                                color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                                font.pixelSize: 13; font.bold: true
+                            }
+                            TapHandler {
+                                acceptedButtons: Qt.LeftButton
+                                onTapped: {
+                                    // t110：Shift+左键 → hotbar 槽搬运到首个空 main 槽（早于双击合并 / 普通左键）。
+                                    if (window.shiftHeld) { root.slotShiftLeft("hotbar", index); return }
+                                    // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId。
+                                    const key = root.slotKey("hotbar", index)
+                                    const now = Date.now()
+                                    const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+                                    root.lastTapMs = now
+                                    root.lastTapKey = key
+                                    if (isDouble) { root.doMergeSameId("hotbar", index); return }
+                                    const r = root.resolveClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index))
+                                    if (r) {
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                                        root.hotbar.heldBlock = r.heldId
+                                        root.hotbar.heldCount = r.heldCount
+                                        root.hotbar.heldDurability = r.heldDur
+                                        root.hotbar.setHeldEnchants(r.heldEnch)
+                                    }
+                                }
+                            }
+                            // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey。
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    const r = root.resolveRightClick(root.hotbar.blockIdAt(index), root.hotbar.countAt(index), root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index))
+                                    if (r) {
+                                        root.hotbar.setStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                                        root.hotbar.heldBlock = r.heldId
+                                        root.hotbar.heldCount = r.heldCount
+                                        root.hotbar.heldDurability = r.heldDur
+                                        root.hotbar.setHeldEnchants(r.heldEnch)
+                                    }
+                                }
+                            }
+                            HoverHandler {
+                                // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
+                                //   不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+                                property int trackedId: slotId
+                                onTrackedIdChanged: {
+                                    if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                        root.hoveredItemId = 0
+                                }
+                                onHoveredChanged: {
+                                    // t94 tooltip（slotId 由 delegate 持有；触碰 slotRevision 刷新）。
+                                    if (hovered && slotId !== 0) {
+                                        root.hoveredItemId = slotId
+                                        const p = parent.mapToItem(root, parent.width / 2, 0)
+                                        root.hoveredTipPos = Qt.point(p.x, p.y)
+                                    } else if (root.hoveredItemId === slotId) {
+                                        root.hoveredItemId = 0
+                                    }
+                                    const key = root.slotKey("hotbar", index)
+                                    if (hovered) root.hoveredKey = key
+                                    else if (root.hoveredKey === key) root.hoveredKey = ""
+                                    // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                                    if (hovered && root.dragActive) {
+                                        root.addDragSlot(key)
+                                    }
+                                }
+                            }
+                            // t167 均分拖拽高亮。
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "transparent"
+                                border.color: "#7fe57f"; border.width: 2
+                                visible: {
+                                    const _ds = root.dragSlots
+                                    const _rds = root.rightDragSlots
+                                    const _rev = root.hotbar.slotRevision
+                                    const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
+                                    const key = root.slotKey("hotbar", index)
+                                    if (_ok && root.leftDragActive && root.dragHasKey(key)
+                                        && (slotId === 0 || slotId === root.dragHeldId)) return true
+                                    return _ok && root.rightDragActive && root.rightDragHasKey(key)
+                                }
+                                z: 10
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // t94 物品名悬停 tooltip（纯 QtQuick 自绘；不引入 QtQuick.Controls —— 项目未链接 Qt6::QuickControls2，
+    //   顶层 import 新模块有「未部署→整文档加载失败」风险，见 lessons-learned）。各槽 HoverHandler 进入时写
+    //   hoveredItemId + hoveredTipPos（槽顶中心在 root 坐标系下）；离开按 id 守卫清除（防相邻槽进出竞态互清）。
+    //   名字走 hotbar.nameForBlock：方块→BlockRegistry::displayName、工具→ToolRegistry::displayName、
+    //   材料段→本地通用名；air/空槽→空串→不显。工具后续将加「+攻击力」等字段，现阶段只名字。
+    property int hoveredItemId: 0
+    property point hoveredTipPos: Qt.point(0, 0)
+    // t263 当前 hover 槽的工具剩余耐久（-1=未跟踪 → tooltip 不显耐久行）。据 hoveredKey 查 hotbar/main。
+    property int hoveredDurability: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hotbar.isTool(root.hoveredItemId)) return -1
+        // qml-touch 三轮：slotRevision/mainRevision 触碰参与返回（_sr>=0 / _mr>=0 恒真守卫），防 AOT 死代码
+        //   消除裸触碰 → 同槽栈改写后 tooltip 耐久不刷新。
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const key = root.hoveredKey
+        if (!key) return -1
+        const parts = key.split(":")
+        if (parts.length !== 2) return -1
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return -1
+        if (parts[0] === "hotbar") return _sr >= 0 ? (root.hotbar.durabilityAt(idx)) : -1
+        if (parts[0] === "main") return _mr >= 0 ? (root.hotbar.mainDurabilityAt(idx)) : -1
+        return -1
+    }
+    Rectangle {
+        id: itemTip
+        visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
+        z: 1000
+        width: tipLabel.implicitWidth + 14
+        height: tipLabel.implicitHeight + 8
+        color: "#101216"
+        opacity: 0.94
+        border.color: "#3a444f"
+        border.width: 1
+        radius: 3
+        x: {
+            let px = root.hoveredTipPos.x - width / 2
+            if (px < 2) px = 2
+            const maxX = root.width - width - 2
+            if (px > maxX) px = maxX
+            return px
+        }
+        y: {
+            let py = root.hoveredTipPos.y - height - 6
+            if (py < 2) py = root.hoveredTipPos.y + 6 // 顶部空间不足 → 翻到槽位下方
+            return py
+        }
+        Text {
+            id: tipLabel
+            anchors.centerIn: parent
+            // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
+            text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
+                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
+                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : "" // t304 弓伤害 tooltip
+            color: "#f2f2f2"
+            font.pixelSize: 12
+        }
+    }
+}

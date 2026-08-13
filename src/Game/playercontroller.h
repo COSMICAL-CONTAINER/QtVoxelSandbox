@@ -618,6 +618,12 @@ signals:
     //   右键铁砧开铁砧界面。同 enchantingTableOpened 模式：Game 层发语义事件（携坐标供 damageAnvil 推进损坏），
     //   呈现层只消费。坐标 = 玩家所点铁砧格的整数世界坐标。
     void anvilOpened(int x, int y, int z);
+    // t517 右键发射器（dispenser）：placeBlock 检测到命中格为发射器（BlockRegistry::Dispenser / isDispenser）
+    //   → 发本信号（不放置；携命中格世界坐标）→ 呈现层 Connections 打开 DispenserUI（释放指针）。机制等价 MC
+    //   右键发射器开物品栏界面（spec「上方 3×3 容器 + 下方背包」）。同 anvilOpened 模式：Game 层发语义事件，
+    //   呈现层只消费（PLAN §2 分层）。坐标 = 玩家所点发射器格的整数世界坐标。注：踩压力板触发的射箭陷阱
+    //   （scanDispenserTraps）与「玩家右键开 UI」是两条互不干扰的路径——前者机关自动触发，后者玩家手动查看。
+    void dispenserOpened(int x, int y, int z);
     // 火把放置（t125 朝向修正）：placeBlock 成功放置 Torch 后发，携带玩家点击面的外法线（指向玩家侧，
     //   = m_hitNx/Ny/Nz）。呈现层（torchHost）据此把火把定向为「柄嵌玩家所点墙面」——替代旧 recomputeOrient
     //   固定优先级（下>-X>+X>-Z>+Z）：旧逻辑在「墙+地并存」（墙插火把下方恰有地面）时误判垂直立柱，

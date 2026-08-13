@@ -82,6 +82,14 @@ Window {
     property int anvilX: 0
     property int anvilY: 0
     property int anvilZ: 0
+    // t517 发射器子态：右键发射器方块 → player.dispenserOpened(x,y,z) → 显 DispenserUI（3×3 发射器容器槽 +
+    //   玩家主栏 + hotbar）+ 释放指针。与 inventoryOpen / craftingTableOpen / furnaceOpen / chestOpen /
+    //   enchantingTableOpen / anvilOpen 互斥；E/Esc 关 → 恢复 grab。dispenserX/Y/Z 记当前所开发射器的方块世界
+    //   坐标（t517 本轮「界面先行」：9 槽内容暂存 QML 本地数组，坐标暂留作后续 DispenserStore per-block 寻址用）。
+    property bool dispenserOpen: false
+    property int dispenserX: 0
+    property int dispenserY: 0
+    property int dispenserZ: 0
     // t225 当前所开箱子的「前面（锁面）」朝向（0=+X 1=-X 2=+Z 3=-Z；与 BlockRegistry::chestFrontFace /
     //   horizontalFacing 同源编码 = 前面所朝方向）。openChest 读 theWorld.stateAt(x,y,z) 设置；驱动盖子
     //   铰链侧（chestLidYaw）→ 放置时锁面朝玩家，开盖铰链在锁面背侧。默认 3（-Z，对齐旧默认 / 兜底）。
@@ -889,6 +897,7 @@ Window {
         if (inventoryOpen) closeInventory()
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
         craftingTableOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（工作台）
         player.release()
@@ -909,6 +918,7 @@ Window {
         if (craftingTableOpen) closeCraftingTable()
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
         furnaceX = fx; furnaceY = fy; furnaceZ = fz  // t494 记熔炉格坐标（供 FurnaceUI setFurnaceLit）
         furnaceOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（熔炉）
@@ -942,6 +952,7 @@ Window {
         if (furnaceOpen) closeFurnace()
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
         chestX = x; chestY = y; chestZ = z
         // t225 读箱子朝向 state（前面所朝方向；placeBlock 写入 = horizontalFacing^1，锁面朝玩家）→
         //   驱动盖子铰链侧（chestLidYaw）。& 3 防御性掩码（与 BlockRegistry::chestFrontFace 的 state&3 同源）。
@@ -994,6 +1005,7 @@ Window {
         if (furnaceOpen) closeFurnace()
         if (chestOpen) closeChest()
         if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
         enchantX = x; enchantY = y; enchantZ = z
         enchantingTableOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（附魔台）
@@ -1017,6 +1029,7 @@ Window {
         if (chestOpen) closeChest()
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
         anvilX = x; anvilY = y; anvilZ = z
         anvilOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（铁砧）
@@ -1025,6 +1038,31 @@ Window {
     function closeAnvil() {
         if (!anvilOpen) return
         anvilOpen = false
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
+    // t517 打开 / 关闭发射器面板。打开 → release（光标可见点发射器 / 主栏槽）；关 → grab + 焦点回键位层。
+    // 与 inventoryOpen / craftingTableOpen / furnaceOpen / chestOpen / enchantingTableOpen / anvilOpen 互斥
+    //   （开发射器前关其它六个，反之同）。x/y/z = 所开发射器的方块世界坐标（player.dispenserOpened 携带；
+    //   t517 本轮坐标暂留作后续 DispenserStore per-block 寻址用）。关包归还光标手持栈（同 closeChest /
+    //   closeFurnace —— DispenserUI 共享 hotbar VM 光标栈，关包须归还有物）。
+    function openDispenser(x, y, z) {
+        if (appState !== "playing" || dispenserOpen) return
+        if (inventoryOpen) closeInventory()
+        if (craftingTableOpen) closeCraftingTable()
+        if (furnaceOpen) closeFurnace()
+        if (chestOpen) closeChest()
+        if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
+        dispenserX = x; dispenserY = y; dispenserZ = z
+        dispenserOpen = true
+        progress.onInventoryOpened()  // progress 成就：打开背包（发射器）
+        player.release()
+    }
+    function closeDispenser() {
+        if (!dispenserOpen) return
+        dispenserOpen = false
+        returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeChest / closeFurnace）
         player.grab()
         keyInput.forceActiveFocus()
     }
@@ -1049,6 +1087,7 @@ Window {
         if (chestOpen) closeChest()
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
         // 死亡态不开聊天（死亡信息已由死亡屏接管；防聊天 input 抢死亡按钮焦点）。
         if (playerState.dead) return
         chatOpen = true
@@ -2034,6 +2073,9 @@ Window {
         // t477：右键铁砧 → player 发 anvilOpened(x,y,z) → 开 AnvilUI（释放指针 / 关包互斥）。
         //   坐标供 UI 调 player.damageAnvil 推进铁砧损坏阶段（每次成功操作 ~1/3 概率损坏 +1）。
         function onAnvilOpened(x, y, z) { window.openAnvil(x, y, z) }
+        // t517：右键发射器 → player 发 dispenserOpened(x,y,z) → 开 DispenserUI（释放指针 / 关包互斥）。
+        //   坐标供后续 DispenserStore per-block 寻址（t517 本轮坐标暂留）。
+        function onDispenserOpened(x, y, z) { window.openDispenser(x, y, z) }
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
@@ -6986,6 +7028,7 @@ Window {
                 else if (window.chestOpen) window.closeChest()
                 else if (window.enchantingTableOpen) window.closeEnchantingTable()
                 else if (window.anvilOpen) window.closeAnvil()
+                else if (window.dispenserOpen) window.closeDispenser()
                 else window.toggleInventory()
                 e.accepted = true; return
             }
@@ -7026,6 +7069,10 @@ Window {
             // t477 铁砧面板：Esc 关（同附魔台 / 工作台 / 熔炉 / 箱子；!captured 时 Esc 落 QML → 本分支）。
             if (e.key === Qt.Key_Escape && window.anvilOpen) {
                 window.closeAnvil(); e.accepted = true; return
+            }
+            // t517 发射器面板：Esc 关（同铁砧 / 附魔台 / 工作台 / 熔炉 / 箱子；!captured 时 Esc 落 QML → 本分支）。
+            if (e.key === Qt.Key_Escape && window.dispenserOpen) {
+                window.closeDispenser(); e.accepted = true; return
             }
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
             //   t143：同时跟踪 f3Held=true（无条件，menu 态也设，与 shiftHeld 同模式），供 B 键修饰判定。
@@ -8836,6 +8883,21 @@ Window {
         visible: window.appState === "playing" && window.anvilOpen
         z: 150
         onClosed: window.closeAnvil()
+    }
+
+    // t517 发射器物品栏面板：右键发射器方块打开（player.dispenserOpened → openDispenser）。仅 playing &&
+    //   dispenserOpen 时显（与背包 / 工作台 / 熔炉 / 箱子 / 附魔台 / 铁砧面板互斥）。E/Esc/关闭信号关 →
+    //   宿主恢复 grab。3×3 发射器容器槽 + 主栏 / hotbar 共享 hotbar VM（t517 本轮内容暂存 QML 本地数组，
+    //   per-block 存储后补）。z 与其它面板一致（150）；光标手持物浮动图标 z=300 仍在其上。
+    DispenserUI {
+        id: dispenserPanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        visible: window.appState === "playing" && window.dispenserOpen
+        z: 150
+        onClosed: window.closeDispenser()
+        onDiscardHeldRequested: player.dropHeldCursor()
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }
 
     // t87 冶炼 tick：WorldClock 每 100ms 发 ticked(0.1) → 转发到 furnacePanel.tick 推进冶炼。

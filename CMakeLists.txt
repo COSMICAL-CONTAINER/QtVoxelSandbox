@@ -208,6 +208,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/ChestUI.qml
         src/ui/EnchantingTableUI.qml
         src/ui/AnvilUI.qml
+        src/ui/DispenserUI.qml
         src/ui/VitalIcon.qml
         src/ui/ToolIcon.qml
         src/ui/MaterialIcon.qml

@@ -2003,6 +2003,14 @@ void PlayerController::placeBlock()
         emit anvilOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
+    // t517：右键发射器 → 打开 DispenserUI 物品栏界面（同工作台 / 熔炉 / 箱子 / 附魔台 / 铁砧模式：优先于放置，
+    //   无论手持何物右键发射器即开）。发 dispenserOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开
+    //   DispenserUI（释放指针）。机制等价 MC 右键发射器开物品栏。空手亦可（开界面是「使用」语义，与手持何物
+    //   无关）。与踩压力板触发的射箭陷阱（scanDispenserTraps）路径互不干扰（后者机关自动触发）。
+    if (!sneakPlace && BlockRegistry::isDispenser(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+        emit dispenserOpened(m_hitBx, m_hitBy, m_hitBz);
+        return;
+    }
     // t387/t388 右键床 → 尝试睡觉（useBlock 语义；优先于放置，同工作台 / 箱子模式：右键已放置的床即睡，不另放块）。
     //   空手亦可（睡是「使用」语义，与手持何物无关）。命中格为任一床色变体（BlockRegistry::isBed）→ trySleepAt：
     //   夜间 + 床周无怪物 → 进 fade 态（完成后跳清晨 + 设重生点）；白天 / 附近有怪物 → emit sleepRefused 文案。
