@@ -1662,7 +1662,7 @@ t18                        （背包，依赖 hotbar）
 - 现状：AnvilUI.qml / EnchantingTableUI.qml 已存在（shell-mode）；DispenserUI.qml 不存在。
 - → 见下方「新增功能」段 t515/t516/t517。
 
-**B12 甘蔗悬空（回归）** → **t524** ✅✅ 已完成（commit 697f3dd）
+**B12 甘蔗悬空（回归）** → **t524** ✅✅ 已完成（commit a9001b8）
 - 用户：「3 格高甘蔗中间打掉，最上面那格没掉；底下沙子打掉也不掉。以前应该写好的，仙人掌写好了，甘蔗没写？」。
 - 查甘蔗支撑判定：cactus 有 neighbor-support drop，sugarcane 漏。worldgen / blockupdate 支撑链。
 
