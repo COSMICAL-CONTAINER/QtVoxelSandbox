@@ -1960,20 +1960,30 @@ void PlayerController::placeBlock()
     // t174：空桶舀水用独立含水射线（见下方桶分支），水下 / 瞄深水时主射线无实体命中（m_hasHit=false）
     //   亦须可舀，故 !m_hasHit 不在此一刀切拦截。下方工作台/熔炉/门/活版门与放块路径仍需命中 → 局部门控。
     if (m_hasHit) {
+    // t523 sneak(shift)+右键功能方块 → 放方块而非开界面（用户「想在熔炉上面放方块，shift+右键直接放
+    //   方块，而不是右键打开熔炉界面」）。机制等价 MC 1.0：按住 shift 右键**容器 / 功能 UI 方块**（工作台 /
+    //   熔炉 / 箱子 / 附魔台 / 铁砧）跳过「打开界面」useBlock，改走放置路径（把选中方块放在该功能方块朝玩家
+    //   的面相邻空格）。判据 = Key_Shift 原始按下态（m_keys，§2-D 单一输入路径），覆盖所有模式（生存蹲 / 创造
+    //   飞态 shift 下降 / 创造走），非 m_moveState==Crouch（后者飞态不进蹲 → 飞态 shift+右键会失效，与 MC 不符）。
+    //   只绕过「开界面」类 useBlock（工作台 / 熔炉 / 箱子 / 附魔台 / 铁砧）；门 / 活版门 / 床 / 机关 / 浆果丛 / 末地门 /
+    //   传送门等其它 useBlock **不绕过**（机制等价 MC shift 右键门仍开门、床仍睡 —— 这些非「容器 UI」语义，
+    //   shift 不改变其交互）。空手 sneak+右键功能方块 → 下方 m_selectedBlock==Air 守卫拦（不放置不挥手），
+    //   机制等价 MC 空手 shift 右键箱子无效应。
+    const bool sneakPlace = m_keys.value(Qt::Key_Shift);
     // t50：右键工作台 → 打开 3×3 合成 UI（优先于放置；spec「右键工作台开 3×3」）。
-    if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
+    if (!sneakPlace && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
         emit craftingTableOpened();
         return;
     }
     // t87：右键熔炉 → 打开 FurnaceUI 冶炼界面（同工作台模式：优先于放置，无论手持何物右键熔炉即开）。
-    if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Furnace) {
+    if (!sneakPlace && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Furnace) {
         emit furnaceOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
     // t173/t179：右键箱子 → 打开 ChestUI 物品栏（同工作台 / 熔炉模式：优先于放置，无论手持何物右键箱子
     //   即开）。发 chestOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开 ChestUI（释放指针 +
     //   盖子开合动画）；ChestStore 据坐标寻址该箱子的 27 槽。机制等价 MC 右键箱子开物品栏。
-    if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Chest) {
+    if (!sneakPlace && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Chest) {
         emit chestOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
@@ -1981,7 +1991,7 @@ void PlayerController::placeBlock()
     //   何物右键附魔台即开）。发 enchantingTableOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开
     //   EnchantingTableUI（释放指针）；UI 据坐标查 World.countBookshelvesAround 算书架加成 → 提升可选
     //   附魔等级上限（机制等价 MC 1.0 附魔台书架 power）。空手亦可（开界面是「使用」语义，与手持何物无关）。
-    if (BlockRegistry::isEnchantingTable(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    if (!sneakPlace && BlockRegistry::isEnchantingTable(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         emit enchantingTableOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
@@ -1989,7 +1999,7 @@ void PlayerController::placeBlock()
     //   何物右键铁砧即开）。发 anvilOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开 AnvilUI（释放
     //   指针）；UI 据坐标调 damageAnvil 推进铁砧损坏阶段。机制等价 MC 右键铁砧开铁砧界面。空手亦可（开界面
     //   是「使用」语义，与手持何物无关）。isAnvil 覆盖完好 / 微损 / 重损三阶段（任一皆可开 UI）。
-    if (BlockRegistry::isAnvil(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    if (!sneakPlace && BlockRegistry::isAnvil(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         emit anvilOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
