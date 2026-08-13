@@ -7,6 +7,10 @@ import QtQuick.Dialogs
 // 显式 import 自身模块以恢复类型解析（Qt6 子目录 QML 文件的标准做法）。行为不变。
 import VoxelSandbox
 
+// qml-touch 三轮：全文件「触碰 NOTIFY 属性」的绑定统一改表达式形式
+//   `{ const _r = <rev>; return _r >= 0 ? (<expr>) : <fallback> }`（触碰值参与返回值），防 qmlcachegen AOT
+//   把裸语句触碰 `<rev>;` 当死代码消除 → 依赖不注册 → revision 变后绑定永不重算（机制/返回值不变）。
+
 Window {
     id: window
     width: 1280
@@ -3303,8 +3307,8 @@ Window {
             // 命中方块的 state（异形方块朝向 / 开合 / 半位）：供 SelectionWireBoxes 几何重建用（stairs 朝向 /
             //   slab 上下半 / door 开合 / trapdoor 开合 等）。读 worldRev 使 worldChanged 后重算 → 选中框棱随之更新。
             readonly property int hitState: {
-                selectionBox.worldRev;
-                return player.hasHit ? theWorld.stateAt(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z) : 0
+                const _r = selectionBox.worldRev;
+                return _r >= 0 ? (player.hasHit ? theWorld.stateAt(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z) : 0) : 0
             }
             position: Qt.vector3d(player.hitBlock.x + 0.5, player.hitBlock.y + 0.5, player.hitBlock.z + 0.5)
             scale: Qt.vector3d(1.005, 1.005, 1.005)
@@ -3332,9 +3336,9 @@ Window {
             // Q_INVOKABLE（isCollidable/blockAt）无自带 QML 绑定依赖 → 显式读 worldRev，使 worldChanged 后
             //   本绑定重算（邻居破/放会改火把有效朝向）。
             readonly property string torchOrient: {
-                selectionBoxTorch.worldRev;
-                return computeTorchOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z,
-                                          findTorchPrefOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z))
+                const _r = selectionBoxTorch.worldRev;
+                return _r >= 0 ? computeTorchOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z,
+                                          findTorchPrefOrient(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z)) : ""
             }
             position: torchHandleWorldPos(player.hitBlock.x, player.hitBlock.y, player.hitBlock.z, torchOrient)
             scale: torchHandleScale(torchOrient)
@@ -3491,7 +3495,7 @@ Window {
             //   ⚠ 绑定依赖：ridingIndex() 是 Q_INVOKABLE 无 NOTIFY → 直接调不随骑乘切重算。显式读 boats.revision
             //   （NOTIFY=entitiesChanged，tryMount/dismount/clearAll 都发）建依赖 → 上 / 下船时 revision bump →
             //   isRidingBoat / sitBlend 重算 → 腿姿切换（同 boats delegate {revision; posAt} 模式）。
-            readonly property bool isRidingBoat: { boats.revision; return player.boatManager ? player.boatManager.ridingIndex() >= 0 : false }
+            readonly property bool isRidingBoat: { const _r = boats.revision; return _r >= 0 ? (player.boatManager ? player.boatManager.ridingIndex() >= 0 : false) : false }
             readonly property real sitBlend: playerModel.isRidingBoat ? 1.0 : 0.0
             readonly property real sitThigh: 85.0 * playerModel.sitBlend      // 坐姿大腿前抬（度；+x = 腿尖前摆 = -Z，近水平）
             readonly property real sitKnee: -85.0 * playerModel.sitBlend      // 坐姿膝盖回折（度；= −sitThigh → 小腿保持竖直下垂）
@@ -4213,15 +4217,15 @@ Window {
                     //   count 单调不降 → 本 Repeater 永不销毁 delegate（修掉落沙衍生掉落物 + 生存挖掘产出的
                     //   spawn/拾取抖动致 delegate 泄漏，同 mobHost 族；lessons-learned t170）。空槽 aliveAt=false
                     //   → visible=false 隐藏；复用时 aliveAt=true + revision bump → 重显重绑。索引稳定。
-                    visible: { itemEntities.revision; return itemEntities.aliveAt(index) }
+                    visible: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.aliveAt(index)) : false }
                     // 基准位置 + 物品 id + count：触碰 itemEntities.revision（Q_PROPERTY NOTIFY=entitiesChanged）
                     // 建立依赖。t36 removeAt 用 releaseSlot（标空，slot 稳定不 shift），revision 自增 → 本绑定
                     // 重算 → delegate[k] 对齐 slot[k] 的 pos/itemId/count。外层 Node 持基准 pos + 绕 Y 旋转。
                     // t64 加 count 触碰：部分拾取后 setCountAt bump revision → 数量重算。
                     id: entRoot
-                    position: { itemEntities.revision; return itemEntities.posAt(index) }
-                    property int entId: { itemEntities.revision; return itemEntities.itemIdAt(index) }
-                    property int entCount: { itemEntities.revision; return itemEntities.countAt(index) }
+                    position: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.posAt(index)) : Qt.vector3d(0, 0, 0) }
+                    property int entId: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.itemIdAt(index)) : 0 }
+                    property int entCount: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.countAt(index)) : 0 }
                     property real rotY: 0       // 绕 Y 旋转角（度）
                     property real bobY: 0       // 上下浮动偏移（格）
                     eulerRotation: Qt.vector3d(0, rotY, 0)
@@ -4575,10 +4579,10 @@ Window {
             Repeater {
                 model: xpOrbs.count
                 delegate: Node {
-                    visible: { xpOrbs.revision; return xpOrbs.aliveAt(index) }
+                    visible: { const _r = xpOrbs.revision; return _r >= 0 ? (xpOrbs.aliveAt(index)) : false }
                     id: orbRoot
-                    position: { xpOrbs.revision; return xpOrbs.posAt(index) }
-                    property int orbAmount: { xpOrbs.revision; return xpOrbs.amountAt(index) }
+                    position: { const _r = xpOrbs.revision; return _r >= 0 ? (xpOrbs.posAt(index)) : Qt.vector3d(0, 0, 0) }
+                    property int orbAmount: { const _r = xpOrbs.revision; return _r >= 0 ? (xpOrbs.amountAt(index)) : 0 }
                     property real bobY: 0
                     property real pulse: 1.0   // 缩放呼吸（0.85..1.15）
 
@@ -4635,16 +4639,16 @@ Window {
             Repeater {
                 model: boats.count
                 delegate: Node {
-                    visible: { boats.revision; return boats.aliveAt(index) }
+                    visible: { const _r = boats.revision; return _r >= 0 ? (boats.aliveAt(index)) : false }
                     id: boatRoot
                     // 船中心位（C++ 浮水 / 骑乘操控写入；呈现层只读）。绕 Y 转船头朝向（yawAt）。
-                    position: { boats.revision; return boats.posAt(index) }
+                    position: { const _r = boats.revision; return _r >= 0 ? (boats.posAt(index)) : Qt.vector3d(0, 0, 0) }
                     // 船头朝向（度；先读进 property，再喂 eulerRotation —— 块表达式不能作函数实参）。
-                    property real boatYaw: { boats.revision; return boats.yawAt(index) }
+                    property real boatYaw: { const _r = boats.revision; return _r >= 0 ? (boats.yawAt(index)) : 0 }
                     eulerRotation: Qt.vector3d(0, boatRoot.boatYaw, 0)
                     // 变体（Oak→Planks 浅木 / Spruce→SprucePlanks 深木；§9a 原创贴图，区别于 MC 资产）。
                     //   btBlockId 给 BlockCube 按方块查图集瓦片序号 → 每面铺整张木纹 tile（半纹素内缩防渗色）。
-                    property int bt: { boats.revision; return boats.boatTypeAt(index) }
+                    property int bt: { const _r = boats.revision; return _r >= 0 ? (boats.boatTypeAt(index)) : 0 }
                     property int btBlockId: boatRoot.bt === boats.Spruce ? 86 /*SprucePlanks*/ : 6 /*Planks*/
 
                     Component.onCompleted: {
@@ -4763,7 +4767,7 @@ Window {
                     //   泄漏：reparent 后的 3D delegate count 减小不销毁，lessons-learned t170）。空槽 aliveAt=false
                     //   → 本 Node visible=false 隐藏整棵子树；slot 被复用时 aliveAt=true + revision bump → 重显
                     //   并重绑新实体数据。索引稳定（release 不 shift）→ delegate[index] 恒对齐 slot[index]。
-                    visible: { entityManager.revision; return entityManager.aliveAt(index) }
+                    visible: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.aliveAt(index)) : false }
                     // 触碰 revision 建立依赖（push 位移 / 重力下落 / t239 AI 行走 / 受击红闪 / 死亡移除
                     //   bump revision → 位置 / 配色 / kind / yaw 重算）。t117 FallingBlock 着地 releaseSlot 后
                     //   revision 自增 → delegate 对齐新 entity 数据（同 itemEntities delegate 模式）。
@@ -4771,24 +4775,24 @@ Window {
                     //   子模型 → 腿底（local y=-halfH）缩到 pos.y - s·halfH，比地面（pos.y - halfH）高 halfH·(1-s)
                     //   → 幼崽悬空。故 position.y 下移 mobHalfH·(1-s) 把腿底拉回地面（mobHalfH 定义于下方，QML 绑定
                     //   按名解析不依赖声明顺序）。revision bump（长大 baby→false）→ entBabyScale 重算 → 重缩 + 重定位。
-                    property real entBabyScale: { entityManager.revision; return entityManager.babyScaleAt(index) }
+                    property real entBabyScale: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.babyScaleAt(index)) : 0 }
                     position: {
-                        entityManager.revision
+                        const _r = entityManager.revision
                         const p = entityManager.posAt(index)
-                        return Qt.vector3d(p.x, p.y - mobHalfH * (1.0 - entBabyScale), p.z)
+                        return _r >= 0 ? Qt.vector3d(p.x, p.y - mobHalfH * (1.0 - entBabyScale), p.z) : Qt.vector3d(0, 0, 0)
                     }
                     scale: Qt.vector3d(entBabyScale, entBabyScale, entBabyScale)
-                    property int entKind: { entityManager.revision; return entityManager.kindAt(index) }
+                    property int entKind: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.kindAt(index)) : 0 }
                     // t239 身体朝向：Mob 按 yawAt 转（模型本地 -Z 正对 AI 行走方向，与 player.yaw 同约定）；
                     //   FallingBlock（沙立方）对称 → 不转（bodyYaw=0）。子节点（Mob Model / F3+B 箭头）随之继承。
-                    property real bodyYaw: { entityManager.revision; return entKind === EntityManager.Mob ? entityManager.yawAt(index) : 0 }
+                    property real bodyYaw: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob ? entityManager.yawAt(index) : 0) : 0 }
                     // t449 死亡过渡：血归零 → dead=true（dying 态，C++ 冻结 AI/重力/攻击，延迟 ~500ms 才掉落 + 移除）。
                     //   本 delegate 据 deadAt 翻 true 的瞬间：① spawn 白烟（消散感）② 播侧倒旋转 ~90°（围绕身体前向
                     //   轴 = local Z，模型本地 -Z 朝行走方向，绕 Z 倒向侧边 = MC 式「侧倒」）。
                     //   deathTilt 由 deathFallAnim 推 0→90；slot 复用（新 mob 进空槽）时 entDead 翻 false → 即时归 0。
                     property real deathTilt: 0.0
                     property bool wasDead: false
-                    property bool entDead: { entityManager.revision; return entKind === EntityManager.Mob && entityManager.deadAt(index) }
+                    property bool entDead: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob && entityManager.deadAt(index)) : false }
                     onEntDeadChanged: {
                         if (entDead && !wasDead) {
                             // 死亡起始：白烟 puff（复用 BlockParticles 的 Model+Timer 池，t465 模式）+ 启动侧倒动画。
@@ -4844,15 +4848,15 @@ Window {
                         id: fallingBlockModel
                         visible: entKind === EntityManager.FallingBlock
                         geometry: BlockCube {
-                            blockId: { entityManager.revision; return entityManager.blockIdAt(index) }
+                            blockId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.blockIdAt(index)) : 0 }
                             world: theWorld
-                            worldPos: { entityManager.revision; return entityManager.posAt(index) }
+                            worldPos: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.posAt(index)) : Qt.vector3d(0, 0, 0) }
                             sunDir: worldClock.sunDir
                             shadowsEnabled: window.shadowsEnabled
                         }
                         // t490 PrimedTnt 引燃收缩 scale 0.98（机制等价 MC TNT 引燃收缩）；非 primed 保持 1.0。
-                        property bool entPrimed: { entityManager.revision; return entityManager.isPrimedAt(index) }
-                        property real entFuseProg: { entityManager.revision; return entityManager.fuseProgressAt(index) }
+                        property bool entPrimed: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.isPrimedAt(index)) : false }
+                        property real entFuseProg: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.fuseProgressAt(index)) : 0 }
                         scale: entPrimed ? Qt.vector3d(0.98, 0.98, 0.98) : Qt.vector3d(1.0, 1.0, 1.0)
                         // t490 白闪脉冲相位（0..1 循环）。仅 primed 实体跑动画（非 primed 静止 0 不影响 baseColor）。
                         //   t492 Bug C：原用 `NumberAnimation on tntFlashPhase` + running 绑定 + loops:1 onFinished 重启，
@@ -4922,9 +4926,9 @@ Window {
                             // 非 primed → 原 terrainLight 昼夜灰阶（t257）。primed 时取消 vertexColorsEnabled（顶点色
                             //   光场会让白闪暗化，pulse 视觉不纯）。
                             baseColor: {
-                                entityManager.revision
+                                const _r = entityManager.revision
                                 const tl = terrainLight(worldClock.skyLight)
-                                if (!fallingBlockModel.entPrimed) return tl
+                                if (_r >= 0 && !fallingBlockModel.entPrimed) return tl
                                 if (fallingBlockModel.entFlashBright) return Qt.rgba(1.0, 1.0, 1.0, 1.0) // 纯白（贴图已 null）
                                 return Qt.rgba(0.25, 0.25, 0.25, 1.0) // 暗底（图集暗 TNT 贴图）
                             }
@@ -4939,12 +4943,12 @@ Window {
                     //   NoLighting（lessons-learned 红线：可见 Model 必须 NoLighting）。受击红闪（hurtFlashAt>0 →
                     //   全红，机制等价 MC mob 受击 10 tick 红闪）：mobType 0 走 baseColor 红；mobType 1/2/3 走
                     //   纯红 Texture（mobCowTex 的内容被红 #ff0000 baseColor 调制 → 视觉全红）。
-                    property int entMobType: { entityManager.revision; return entityManager.mobTypeAt(index) }
+                    property int entMobType: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobTypeAt(index)) : 0 }
                     // t252/t293 碰撞箱尺寸（halfW/halfH）：C++ 按 mobType 设（t293 收紧贴合身体：pig/sheep
                     //   0.40/0.45、cow 0.40/0.50、敌对 0.30/0.90、spider 0.45/0.30、MobTest/FallingBlock 0.5）。
                     //   WireCube hitbox scale + 朝向棒长度读它们（旧版固定 1×1×1）。
-                    property real mobHalfW: { entityManager.revision; return entityManager.radiusAt(index) }
-                    property real mobHalfH: { entityManager.revision; return entityManager.halfHeightAt(index) }
+                    property real mobHalfW: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.radiusAt(index)) : 0 }
+                    property real mobHalfH: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.halfHeightAt(index)) : 0 }
                     // t252 模型 Y 偏移：collision 中心（pos.y）≠ 模型躯干中心（halfH 变后二者分离）→ 模型
                     //   需 Y 偏移使腿底贴 collision 底面（= 地面）。offset = modelLegBottom − halfH
                     //   （modelLegBottom = MobModel 腿底本地 |y|：pig 0.48 / cow 0.50 / sheep 0.44；MobTest
@@ -4979,7 +4983,7 @@ Window {
                     //   45° Z 旋成菱形（近似心形剪影）。位置 = 碰撞顶面上方 ~0.45 格（mobHalfH + 0.45）；缩放 0.18
                     //   （小不挡视线）。仅 Mob + inLove 时 visible。静态（避免与 position 绑定冲突的动画；视觉够辨）。
                     Model {
-                        visible: { entityManager.revision; return entKind === EntityManager.Mob && entityManager.inLoveAt(index) }
+                        visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob && entityManager.inLoveAt(index)) : false }
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, mobHalfH + 0.45, 0) // 头顶上方（local；Node 已在碰撞中心）
                         scale: Qt.vector3d(0.18, 0.18, 0.18)
@@ -5014,11 +5018,11 @@ Window {
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
                                     baseColor: {
-                                        entityManager.revision
-                                        if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        const _r = entityManager.revision
+                                        if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
                                         // t280 燃烧中 → 橙红偏色（与 flame Model 叠加显「着火」），否则走 mob 配色。
-                                        if (entityManager.isBurningAt(index)) return "#ff7a3a"
-                                        return entityManager.colorAt(index)
+                                        if (_r >= 0 && entityManager.isBurningAt(index)) return "#ff7a3a"
+                                        return _r >= 0 ? entityManager.colorAt(index) : "#000000"
                                     }
                                 }
                             }
@@ -5026,7 +5030,7 @@ Window {
                         onLoaded: if (item) item.parent = mobDelegate
                     }
                     Loader {
-                        active: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem }
+                        active: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem) : false }
                         sourceComponent: Component {
                             // t482 雪傀儡（SnowGolem，mobType 12）：防御造物，南瓜头 + 雪块身堆叠（机制等价 MC 1.0 雪傀儡，
                             //   §9 区隔纯色原创非照搬 MC）。delegate 原点 = 碰撞中心（pos.y）；mobModelYOff=0 故组内各块按
@@ -5036,7 +5040,7 @@ Window {
                             //   t498「静态构建 + 低频 NOTIFY 用语句块 { rev; return f() } 会漏注册」的防御性写法（虽 Loader
                             //   动态创建 + revision 高频本应工作，改表达式形式绝后患 + 修 t499 一轮「受击红闪不闪」症状）。
                             Node {
-                                visible: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem }
+                                visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem) : false }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 // t510 golemSheared = 是否已被剪刀剪掉南瓜头（shearSnowGolem → snowGolemShearedAt=true）。
                                 //   剪后变无头 derpy 形态（机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」）：
@@ -5119,17 +5123,17 @@ Window {
                         onLoaded: if (item) item.parent = mobDelegate
                     }
                     Loader {
-                        active: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobIronGolem }
+                        active: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob && entMobType === EntityManager.MobIronGolem) : false }
                         sourceComponent: Component {
                             // t483 铁傀儡（IronGolem，mobType 13）：防御造物，南瓜头 + 铁块身（躯干 + 双腿 + 双臂）堆叠
                             //   （机制等价 MC 1.0 铁傀儡，§9 区隔纯色原创非照搬 MC）。halfH=1.20 → feet local y=-1.20。
                             //   UnitCube + NoLighting（红线）。受击红闪 / 减速蓝调 / 昼夜灰阶经 tinted() 统一驱动。
                             Node {
-                                visible: { entityManager.revision; return entKind === EntityManager.Mob && entMobType === EntityManager.MobIronGolem }
+                                visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob && entMobType === EntityManager.MobIronGolem) : false }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 property color tint: {
-                                    entityManager.revision
-                                    if (entityManager.hurtFlashAt(index) > 0) return Qt.rgba(1.0, 0.0, 0.0, 1.0)
+                                    const _r = entityManager.revision
+                                    if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return Qt.rgba(1.0, 0.0, 0.0, 1.0)
                                     if (entityManager.isSlowedAt(index)) return Qt.rgba(0.60, 0.72, 1.0, 1.0)
                                     return terrainLight(worldClock.skyLight)
                                 }
@@ -5232,7 +5236,7 @@ Window {
                     //   revision 触碰 → 翻入/翻出 burning 时重算 visible。
                     Node {
                         id: mobBurnFlames
-                        visible: { entityManager.revision; return entityManager.isBurningAt(index) }
+                        visible: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.isBurningAt(index)) : false }
                         // 火舌点表：[x, y, z, phaseIdx]，坐标为 delegate 本地框（collision 箱中心 = 原点，
                         //   身体 ±mobHalfW × ±mobHalfH）。phaseIdx 选相位（错开闪烁）。火焰贴身表面分布脚/腰/肩/顶。
                         // perf：非燃烧时 model=[] → 0 delegate（免 64 槽 × 7 = 448 火焰节点常驻 scene-graph 同步
@@ -5296,14 +5300,14 @@ Window {
                                     mobType: 1
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_pig）。
                                     packTextured: mobPigPackTex.source.length > 0
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面（halfH 变后免悬空 / 穿地）
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
                                     // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0 红闪语义）。
-                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_pig。
                                     baseColorMap: mobPigPackTex.source.length > 0 ? mobPigPackTex : mobPigTex
                                 }
@@ -5353,13 +5357,13 @@ Window {
                                     mobType: 2
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_cow）。
                                     packTextured: mobCowPackTex.source.length > 0
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0) // t252 cow halfH=0.70 → offset −0.20 腿底贴地
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_cow。
                                     baseColorMap: mobCowPackTex.source.length > 0 ? mobCowPackTex : mobCowTex
                                 }
@@ -5396,8 +5400,8 @@ Window {
                     }
                     Loader {
                         active: {
-                            entityManager.revision
-                            return entKind === EntityManager.Mob && entMobType === 3
+                            const _r = entityManager.revision
+                            return _r >= 0 && entKind === EntityManager.Mob && entMobType === 3
                                    && !entityManager.shearedAt(index)
                         }
                         sourceComponent: Component {
@@ -5409,22 +5413,22 @@ Window {
                                 //   时切到下方裸肤色 Model（互斥 visible，由 revision 触碰刷新）。机制等价 MC 1.0 剪羊毛后
                                 //   羊裸露皮肤。
                                 visible: {
-                                    entityManager.revision
-                                    return entKind === EntityManager.Mob && entMobType === 3
+                                    const _r = entityManager.revision
+                                    return _r >= 0 && entKind === EntityManager.Mob && entMobType === 3
                                            && !entityManager.shearedAt(index)
                                 }
                                 geometry: MobModel {
                                     mobType: 3
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_sheep）。
                                     packTextured: mobSheepPackTex.source.length > 0
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                                    headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
+                                    headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
                                     baseColorMap: mobSheepPackTex.source.length > 0 ? mobSheepPackTex : mobSheepTex
                                 }
@@ -5437,7 +5441,7 @@ Window {
                                 Node {
                                     position: Qt.vector3d(0, 0.10, -0.29)
                                     // headPitch 用 property 暂存（QML 绑定里 {block} 不能作 Qt.vector3d 内联参数 → 先算成属性）。
-                                    property real headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                                    property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                     eulerRotation: Qt.vector3d(headPitch, 0, 0)
                                     Model {
                                         geometry: UnitCube {}
@@ -5470,8 +5474,8 @@ Window {
                     }
                     Loader {
                         active: {
-                            entityManager.revision
-                            return entKind === EntityManager.Mob && entMobType === 3
+                            const _r = entityManager.revision
+                            return _r >= 0 && entKind === EntityManager.Mob && entMobType === 3
                                    && entityManager.shearedAt(index)
                         }
                         sourceComponent: Component {
@@ -5484,14 +5488,14 @@ Window {
                                 //   walkPhase / headPitch 同步绑定 → 裸羊照常行走 + 吃草低头动画。
                                 //   重长毛（C++ tick 内吃草方块 → sheared=false）→ 上方毛茸 Model 显、本 Model 隐。
                                 visible: {
-                                    entityManager.revision
-                                    return entKind === EntityManager.Mob && entMobType === 3
+                                    const _r = entityManager.revision
+                                    return _r >= 0 && entKind === EntityManager.Mob && entMobType === 3
                                            && entityManager.shearedAt(index)
                                 }
                                 geometry: MobModel {
                                     mobType: 3
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
-                                    headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
+                                    headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面（同毛茸态）
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -5500,13 +5504,13 @@ Window {
                                     // 受击红闪覆盖肤色（同毛茸态红闪语义）；否则肤色 × terrainLight 调昼夜明暗。
                                     // t363 baseColor=肤色 #d6b890（玩家手肤 0.792/0.643/0.447=#caa472 略向白偏，留少量残白羊毛感，
                                     //   非猪粉 #e8b8b8）：剪羊毛后裸露的是肤色调而非纯粉，贴近玩家手肤、带一丝残白。
-                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#d6b890" }
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#d6b890") : "#000000" }
                                     // 无 baseColorMap → PrincipaledMaterial 走纯 baseColor 实色路径（默认即无贴图）。
                                 }
                                 // 裸态眼同步（同毛茸态颈枢 Node 结构；复用 headPitchAt 绑头俯仰）。
                                 Node {
                                     position: Qt.vector3d(0, 0.10, -0.29)
-                                    property real headPitch: { entityManager.revision; return entityManager.headPitchAt(index) }
+                                    property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                     eulerRotation: Qt.vector3d(headPitch, 0, 0)
                                     Model {
                                         geometry: UnitCube {}
@@ -5550,14 +5554,14 @@ Window {
                                     mobType: 4
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_shambler）。
                                     packTextured: mobShamblerPackTex.source.length > 0
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0) // t282 halfH=0.90 → offset 0（腿底贴 collision 底面）
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
                                     // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 mobType 0/1/2/3 红闪语义）。
-                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_shambler。
                                     baseColorMap: mobShamblerPackTex.source.length > 0 ? mobShamblerPackTex : mobShamblerTex
                                 }
@@ -5583,7 +5587,7 @@ Window {
                                 //   tier 色 × terrainLight + 受击红闪（mobArmorColor）；NoLighting（红线）。
                                 Model { // 头盔（piece 0）
                                     id: mobArmorHead
-                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 0) }
+                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 0)) : 0 }
                                     visible: armId !== 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.48, 0.30, 0.48)
@@ -5591,7 +5595,7 @@ Window {
                                 }
                                 Model { // 胸甲（piece 1）
                                     id: mobArmorChest
-                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 1) }
+                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 1)) : 0 }
                                     visible: armId !== 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.48, 0.50, 0.30)
@@ -5599,7 +5603,7 @@ Window {
                                 }
                                 Model { // 护腿（piece 2）
                                     id: mobArmorLegs
-                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 2) }
+                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
                                     visible: armId !== 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.46, 0.40, 0.26)
@@ -5607,7 +5611,7 @@ Window {
                                 }
                                 Model { // 靴子（piece 3）
                                     id: mobArmorBoots
-                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 3) }
+                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
                                     visible: armId !== 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.46, 0.16, 0.26)
@@ -5627,12 +5631,12 @@ Window {
                                 //   蓄力膨胀：inflateAt(i) 驱动 Model scale（1+inflate·0.5，机制等价 MC 苦力怕近距蓄力膨胀）+
                                 //     baseColor 蓄力发白（绿→白 lerp by inflate；机制等价 MC 苦力怕蓄力发白闪烁）。
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobStalker
-                                property real inflate: { entityManager.revision; return entityManager.inflateAt(index) }
+                                property real inflate: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.inflateAt(index)) : 0 }
                                 geometry: MobModel {
                                     mobType: 6
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色）。
                                     packTextured: mobStalkerPackTex.source.length > 0
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0) // t284 halfH=0.90 → offset 0（腿底贴 collision 底面）
                                 // 蓄力膨胀：scale 随 inflate 增长（0 → 1.0、满蓄力 → 1.5；机制等价 MC 苦力怕膨胀）。
@@ -5644,9 +5648,9 @@ Window {
                                     baseColorMap: mobStalkerPackTex.source.length > 0 ? mobStalkerPackTex : null
                                     // 受击红闪优先；否则青绿色（terrainLight 调昼夜暗），蓄力时 lerp 向白（蓄力发白）。
                                     baseColor: {
-                                        entityManager.revision
+                                        const _r = entityManager.revision
                                         const tl = terrainLight(worldClock.skyLight)
-                                        if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
                                         let r = 0.37, g = 0.66, b = 0.23 // Stalker 青绿色（呈现层视觉约定色，原创）
                                         const infl = entityManager.inflateAt(index)
                                         if (infl > 0) {
@@ -5655,7 +5659,7 @@ Window {
                                             g = g * (1 - t) + 1.0 * t
                                             b = b * (1 - t) + 1.0 * t
                                         }
-                                        return Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0)
+                                        return _r >= 0 ? Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0) : "#000000"
                                     }
                                 }
                                 // t284 眼睛：潜行者的深色眼（头部前面，原创纯色 §9a；mob Model 子节点继承 bodyYaw +
@@ -5689,7 +5693,7 @@ Window {
                                     mobType: 5
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色骨白）。
                                     packTextured: mobBonesPackTex.source.length > 0
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -5700,10 +5704,10 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜灰阶）；否则 null（纯色）。
                                     baseColorMap: mobBonesPackTex.source.length > 0 ? mobBonesPackTex : null
                                     baseColor: {
-                                        entityManager.revision
+                                        const _r = entityManager.revision
                                         const tl = terrainLight(worldClock.skyLight)
-                                        if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                        return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 灰白骨色（身体 + 右臂）
+                                        if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        return _r >= 0 ? Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) : "#000000" // 灰白骨色（身体 + 右臂）
                                     }
                                 }
                                 // t301 骷髅黑色眼窝（头骨标志性的空洞眼窝，纯色 NoLighting §9a；mob Model 子节点继承 bodyYaw +
@@ -5728,7 +5732,7 @@ Window {
                                 //   原持弓静态位（与 t301 MobModel 内建位一致）。机制等价 MC 1.0 骷髅停步抬弓瞄准。
                                 Node {
                                     position: Qt.vector3d(0.20, 0.28, -0.12)
-                                    eulerRotation.x: { entityManager.revision; return entityManager.drawAmountAt(index) * 30 } // 度；+draw 前端（-Z）上扬
+                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index) * 30) : 0 } // 度；+draw 前端（-Z）上扬
                                     // 右臂（骨白 UnitCube，共享 boneMat）：臂心相对肩枢 = (0,-0.05,-0.25)；半 (0.05,0.05,0.25)。
                                     Model {
                                         geometry: UnitCube {}
@@ -5739,7 +5743,7 @@ Window {
                                     // 弓（木褐色 MobBowGeometry，独立于骨白体色；弦随 drawAmount 后拉 + 肢增弯）：握把相对肩枢 = (0.02,-0.06,-0.38)。
                                     Model {
                                         geometry: MobBowGeometry {
-                                            drawAmount: { entityManager.revision; return entityManager.drawAmountAt(index) }
+                                            drawAmount: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index)) : 0 }
                                         }
                                         position: Qt.vector3d(0.02, -0.06, -0.38)
                                         materials: PrincipledMaterial {
@@ -5756,7 +5760,7 @@ Window {
                                 //   ids 必须 main.qml 全局唯一 → Bones 段用 bonesArmor* 前缀（Shambler 段仍 mobArmor*）。
                                 Model { // 头盔（piece 0）
                                     id: bonesArmorHead
-                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 0) }
+                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 0)) : 0 }
                                     visible: armId !== 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.36, 0.26, 0.36)
@@ -5764,7 +5768,7 @@ Window {
                                 }
                                 Model { // 胸甲（piece 1）
                                     id: bonesArmorChest
-                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 1) }
+                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 1)) : 0 }
                                     visible: armId !== 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.34, 0.50, 0.24)
@@ -5772,7 +5776,7 @@ Window {
                                 }
                                 Model { // 护腿（piece 2）
                                     id: bonesArmorLegs
-                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 2) }
+                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
                                     visible: armId !== 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.30, 0.40, 0.20)
@@ -5780,7 +5784,7 @@ Window {
                                 }
                                 Model { // 靴子（piece 3）
                                     id: bonesArmorBoots
-                                    property int armId: { entityManager.revision; return entityManager.mobArmorAt(index, 3) }
+                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
                                     visible: armId !== 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.30, 0.16, 0.20)
@@ -5802,7 +5806,7 @@ Window {
                                     mobType: 7
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色暗黑红）。
                                     packTextured: mobSpiderPackTex.source.length > 0
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -5811,10 +5815,10 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜暗）；否则 null（纯色）。
                                     baseColorMap: mobSpiderPackTex.source.length > 0 ? mobSpiderPackTex : null
                                     baseColor: {
-                                        entityManager.revision
+                                        const _r = entityManager.revision
                                         const tl = terrainLight(worldClock.skyLight)
-                                        if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                        return Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) // 暗黑红
+                                        if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        return _r >= 0 ? Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) : "#000000" // 暗黑红
                                     }
                                 }
                                 // t302 蜘蛛眼（4 颗红眼；蜘蛛标志性 8 眼简化为 4 颗醒目红眼，原创纯色 NoLighting §9a）：
@@ -5863,7 +5867,7 @@ Window {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSilverfish
                                 geometry: MobModel {
                                     mobType: 14
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -5871,10 +5875,10 @@ Window {
                                     lighting: PrincipledMaterial.NoLighting
                                     baseColorMap: mobSilverfishTex
                                     baseColor: {
-                                        entityManager.revision
+                                        const _r = entityManager.revision
                                         const tl = terrainLight(worldClock.skyLight)
-                                        if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                        return tl
+                                        if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        return _r >= 0 ? tl : "#000000"
                                     }
                                 }
                                 // 银鱼眼（2 颗黑点；头前侧。MobModel 头心 (0,0.00,-0.24) 半 (0.14,0.11,0.10) → 前面 z=-0.34；
@@ -5909,13 +5913,13 @@ Window {
                                     mobType: 8
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_chicken）。
                                     packTextured: mobChickenPackTex.source.length > 0
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_chicken。
                                     baseColorMap: mobChickenPackTex.source.length > 0 ? mobChickenPackTex : mobChickenTex
                                 }
@@ -5974,13 +5978,13 @@ Window {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSquid
                                 geometry: MobModel {
                                     mobType: 9
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     baseColorMap: mobSquidTex
                                 }
                                 // 眼（2 颗黑点；躯干前侧偏前 z=-0.29、y=0.10、x=±0.10）。同鸡眼纯色子 Model 模式。
@@ -6012,12 +6016,12 @@ Window {
                             //   明显区分）。眼为子节点（纯色 NoLighting，同猪眼模式）。
                             Model {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobWolf
-                                property real wolfSit: { entityManager.revision; return entityManager.wolfSittingAt(index) ? 1 : 0 }
+                                property real wolfSit: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.wolfSittingAt(index) ? 1 : 0) : 0 }
                                 geometry: MobModel {
                                     mobType: 10
                                     // 狼无 pack entity 贴图映射（同 Squid(9)，spec 未列 → 保程序生成 mob_wolf 全脸 UV）。
                                     packTextured: false
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 // t480 坐姿变换：坐 → 垂直压缩（1−0.22=0.78）+ 后倾（-18° 绕 X，鼻略抬）+ 略下沉 0.08 格 →
                                 //   读作「坐地留守」；站 → 原比例 / 无倾 / 原高。wolfSit 绑 revision → toggleWolfSit 翻转即时切姿。
@@ -6026,7 +6030,7 @@ Window {
                                 eulerRotation.x: wolfSit * -18
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     baseColorMap: mobWolfTex
                                 }
                                 // 尾巴枢（身体后上部，绕根旋转）：尾根 = 身体后上 (0, 0.16, 0.38)（MobModel 局部坐标：躯干心
@@ -6036,10 +6040,10 @@ Window {
                                     id: wolfTailPivot
                                     position: Qt.vector3d(0, 0.16, 0.38)
                                     property real tailAngle: {
-                                        entityManager.revision
+                                        const _r = entityManager.revision
                                         const h = entityManager.healthAt(index)
                                         const m = entityManager.maxHealthAt(index)
-                                        return (m > 0) ? (140 - 105 * Math.max(0, Math.min(1, h / m))) : 0
+                                        return _r >= 0 ? ((m > 0) ? (140 - 105 * Math.max(0, Math.min(1, h / m))) : 0) : 0
                                     }
                                     eulerRotation.x: tailAngle
                                     // 尾巴本体（垂直细盒，尾根下方 0.10 中心 → 竖尾时从尾根向上伸出；灰狼毛色 × 昼夜灰阶 +
@@ -6051,10 +6055,10 @@ Window {
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: {
-                                                entityManager.revision
+                                                const _r = entityManager.revision
                                                 const tl = terrainLight(worldClock.skyLight)
-                                                if (entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                                return Qt.rgba(0.55 * tl.r, 0.55 * tl.g, 0.55 * tl.b, 1.0)
+                                                if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                                return _r >= 0 ? Qt.rgba(0.55 * tl.r, 0.55 * tl.g, 0.55 * tl.b, 1.0) : "#000000"
                                             }
                                         }
                                     }
@@ -6089,12 +6093,12 @@ Window {
                             //   读作「坐地留守」）。眼为子节点（纯色 NoLighting，同猪眼模式）。
                             Model {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobOcelot
-                                property real ocatSit: { entityManager.revision; return entityManager.ocelotSittingAt(index) ? 1 : 0 }
+                                property real ocatSit: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.ocelotSittingAt(index) ? 1 : 0) : 0 }
                                 geometry: MobModel {
                                     mobType: 11
                                     // 豹猫/猫无 pack entity 贴图映射（同 Wolf/Squid，spec 未列 → 保程序生成贴图全脸 UV）。
                                     packTextured: false
-                                    walkPhase: { entityManager.revision; return entityManager.walkPhaseAt(index) }
+                                    walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 // t481 坐姿变换：坐 → 垂直压缩（1−0.22=0.78）+ 后倾（-18° 绕 X，鼻略抬）+ 略下沉 0.08 格 →
                                 //   读作「坐地留守」；站 → 原比例 / 无倾 / 原高。ocatSit 绑 revision → toggleOcelotSit 翻转即时切姿。
@@ -6103,18 +6107,18 @@ Window {
                                 eulerRotation.x: ocatSit * -18
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    baseColor: { entityManager.revision; return entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight) }
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     // 驯服 → 据 ocelotVariantAt 选 3 色猫贴图；未驯服 → mob_ocelot 豹猫贴图（几何同，异贴图
                                     //   区分豹猫/猫，机制等价 MC 1.0 同模型异贴图）。
                                     baseColorMap: {
-                                        entityManager.revision
-                                        if (entityManager.ocelotTamedAt(index)) {
+                                        const _r = entityManager.revision
+                                        if (_r >= 0 && entityManager.ocelotTamedAt(index)) {
                                             const v = entityManager.ocelotVariantAt(index)
                                             if (v === 0) return mobCatBlackTex
                                             if (v === 1) return mobCatGingerTex
                                             return mobCatCreamTex
                                         }
-                                        return mobOcelotTex
+                                        return _r >= 0 ? mobOcelotTex : null
                                     }
                                 }
                                 // 眼（2 颗斜挑深色点；头前侧。MobModel 头心 (0,0.12,-0.46) 半 (0.11,0.12,0.14) → 前面 z=-0.60；
@@ -6169,9 +6173,9 @@ Window {
                     //   杆本地 -Z = 飞行方向（同 player/mob 模型 -Z 前）；UnitCube ±0.5 scale (0.05,0.05,0.5) → 细杆长 0.5
                     //   沿 Z；position z=-0.25 让杆从中心向前伸（箭头在前）。箭头 / 箭羽为杆子节点同向继承定向。
                     Node {
-                        visible: { entityManager.revision; return entKind === EntityManager.Arrow }
-                        property real arrYaw: { entityManager.revision; return entityManager.arrowYawAt(index) }
-                        property real arrPitch: { entityManager.revision; return entityManager.arrowPitchAt(index) }
+                        visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Arrow) : false }
+                        property real arrYaw: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.arrowYawAt(index)) : 0 }
+                        property real arrPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.arrowPitchAt(index)) : 0 }
                         eulerRotation: Qt.vector3d(arrPitch, arrYaw, 0)
                         // 箭杆（深棕细长杆）
                         Model {
@@ -6199,7 +6203,7 @@ Window {
                     //   snowball）。delegate Node 已摆 position（雪球世界坐标）+ 不转（雪球对称无需定向）。NoLighting
                     //   （红线：可见 Model 必须 NoLighting）。
                     Node {
-                        visible: { entityManager.revision; return entKind === EntityManager.Snowball }
+                        visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Snowball) : false }
                         // 外层白球（近纯白 + 冷蓝阴影 → 读作「压实雪球」）。
                         Model {
                             geometry: UnitCube {}
@@ -8194,25 +8198,25 @@ Window {
                     Item {
                         anchors.centerIn: parent
                         width: 38; height: 38
-                        visible: { hotbarVM.slotRevision; return hotbarVM.blockIdAt(index) !== 0 }
+                        visible: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.blockIdAt(index) !== 0) : false }
                         Image {
                             anchors.fill: parent
-                            visible: { hotbarVM.slotRevision; const id = hotbarVM.blockIdAt(index)
-                                       return !hotbarVM.isTool(id) && !hotbarVM.isMaterial(id) }
-                            source: { hotbarVM.slotRevision; resourcePack.active; return hotbarVM.iconSourceForBlock(hotbarVM.blockIdAt(index)) }
+                            visible: { const _r = hotbarVM.slotRevision; const id = hotbarVM.blockIdAt(index)
+                                       return _r >= 0 ? (!hotbarVM.isTool(id) && !hotbarVM.isMaterial(id)) : false }
+                            source: { const _sr = hotbarVM.slotRevision; const _pa = resourcePack.active; return _sr >= 0 && _pa >= 0 ? (hotbarVM.iconSourceForBlock(hotbarVM.blockIdAt(index))) : "" }
                             fillMode: Image.PreserveAspectFit
                             smooth: true
                         }
                         ToolIcon {
                             anchors.fill: parent
-                            visible: { hotbarVM.slotRevision; return hotbarVM.isTool(hotbarVM.blockIdAt(index)) }
-                            tier: { hotbarVM.slotRevision; return hotbarVM.toolTier(hotbarVM.blockIdAt(index)) }
-                            toolType: { hotbarVM.slotRevision; return hotbarVM.toolType(hotbarVM.blockIdAt(index)) }
+                            visible: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.isTool(hotbarVM.blockIdAt(index))) : false }
+                            tier: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.toolTier(hotbarVM.blockIdAt(index))) : 0 }
+                            toolType: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.toolType(hotbarVM.blockIdAt(index))) : 0 }
                         }
                         MaterialIcon {
                             anchors.fill: parent
-                            visible: { hotbarVM.slotRevision; return hotbarVM.isMaterial(hotbarVM.blockIdAt(index)) }
-                            materialId: { hotbarVM.slotRevision; return hotbarVM.blockIdAt(index) }
+                            visible: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.isMaterial(hotbarVM.blockIdAt(index))) : false }
+                            materialId: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.blockIdAt(index)) : 0 }
                         }
                     }
                     // 栈数量（t32）：count>1 时右下角显数字（MC 风格：单件不显数）。触碰 slotRevision 刷新
@@ -8222,8 +8226,8 @@ Window {
                         anchors.bottom: parent.bottom
                         anchors.rightMargin: 3
                         anchors.bottomMargin: 1
-                        visible: { hotbarVM.slotRevision; return hotbarVM.countAt(index) > 1 }
-                        text: { hotbarVM.slotRevision; return hotbarVM.countAt(index) }
+                        visible: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.countAt(index) > 1) : false }
+                        text: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.countAt(index)) : "" }
                         color: "#ffffff"
                         style: Text.Outline; styleColor: "#000000"
                         font.pixelSize: 14; font.bold: true
@@ -8237,8 +8241,8 @@ Window {
                     //   t315 漏剪刀）；满耐久（curDur==maxDur）隐条，受损后绿/黄/红同其他工具。
                     Item {
                         id: durabilityBar
-                        property int curDur: { hotbarVM.slotRevision; return hotbarVM.durabilityAt(index) }
-                        property int maxDur: { hotbarVM.slotRevision; return hotbarVM.toolMaxDurability(hotbarVM.blockIdAt(index)) }
+                        property int curDur: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.durabilityAt(index)) : 0 }
+                        property int maxDur: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.toolMaxDurability(hotbarVM.blockIdAt(index))) : 0 }
                         property real ratio: maxDur > 0 ? curDur / maxDur : 0.0
                         anchors.left: parent.left
                         anchors.right: parent.right
@@ -8330,16 +8334,16 @@ Window {
                 anchors.centerIn: parent
                 // 工具槽附「\n\n耐久: cur/max」行（spec 多行格式）；非工具仅显名。触碰 slotRevision 刷新。
                 text: {
-                    hotbarVM.slotRevision
+                    const _r = hotbarVM.slotRevision
                     const id = hotbarBar.hoveredItemId
                     if (id === 0) return ""
                     const name = hotbarVM.nameForBlock(id)
                     // t349：按「有无耐久」（toolMaxDurability>0）判而非 isTool 段 —— 显式含剪刀（maxDur=238）；
                     //   非工具 / 材料段 maxDur=0 → 仅显名（无耐久行）。
-                    if (hotbarVM.toolMaxDurability(id) <= 0) return name
+                    if (hotbarVM.toolMaxDurability(id) <= 0) return _r >= 0 ? name : ""
                     const cur = hotbarBar.hoveredSlot >= 0 ? hotbarVM.durabilityAt(hotbarBar.hoveredSlot) : 0
                     const mx = hotbarVM.toolMaxDurability(id)
-                    return name + "\n\n耐久: " + cur + "/" + mx
+                    return _r >= 0 ? (name + "\n\n耐久: " + cur + "/" + mx) : ""
                 }
                 color: "#f2f2f2"
                 font.pixelSize: 12
@@ -8868,7 +8872,7 @@ Window {
         Image {
             anchors.fill: parent
             visible: !hotbarVM.isTool(hotbarVM.heldBlock) && !hotbarVM.isMaterial(hotbarVM.heldBlock)
-            source: { resourcePack.active; return hotbarVM.iconSourceForBlock(hotbarVM.heldBlock) }
+            source: { const _r = resourcePack.active; return _r >= 0 ? (hotbarVM.iconSourceForBlock(hotbarVM.heldBlock)) : "" }
             fillMode: Image.PreserveAspectFit
             smooth: true
         }

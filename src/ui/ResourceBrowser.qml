@@ -6,6 +6,9 @@ import QtQuick.Controls
 // t41：迁入 src/ui/ 子目录后须显式 import 自身模块以解析下方 C++ 类型（BlockCube 几何 / Hotbar VM）。
 import VoxelSandbox
 
+// qml-touch 三轮：本文件「触碰 packActive」的绑定改表达式形式（触碰值参与返回值），防 qmlcachegen AOT
+//   把裸语句触碰 `packActive;` 当死代码消除 → pack 切换后图标源不刷新（机制/返回值不变）。
+
 // t458 资源查看器 / 方块浏览器（JEI 式 3D 预览面板）。
 //
 // 入口：设置面板（ESC 菜单 → 设置）顶部「资源查看器」按钮触发（host Main.qml resourceBrowserOpen）。
@@ -185,7 +188,7 @@ Item {
                                                 anchors.fill: parent
                                                 visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
                                                 // 触碰 packActive → pack 切换图标刷新（iconSourceForBlock 对 pack 映射内方块返 pack item 贴图；t492 工作台 / 熔炉已移出，恒 3D 立方体）。
-                                                source: { root.packActive; return root.hotbar.iconSourceForBlock(modelData) }
+                                                source: { const _r = root.packActive; return _r >= 0 ? (root.hotbar.iconSourceForBlock(modelData)) : "" }
                                                 fillMode: Image.PreserveAspectFit
                                                 smooth: true
                                             }
@@ -285,7 +288,7 @@ Item {
                                         anchors.centerIn: parent
                                         width: 150; height: 150
                                         visible: root.hotbar && !root.hotbar.isTool(root.selectedId) && !root.hotbar.isMaterial(root.selectedId)
-                                        source: { root.packActive; return root.hotbar ? root.hotbar.iconSourceForBlock(root.selectedId) : "" }
+                                        source: { const _r = root.packActive; return _r >= 0 ? (root.hotbar ? root.hotbar.iconSourceForBlock(root.selectedId) : "") : "" }
                                         fillMode: Image.PreserveAspectFit
                                         smooth: true
                                     }

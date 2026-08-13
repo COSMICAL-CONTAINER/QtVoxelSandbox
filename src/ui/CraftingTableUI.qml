@@ -6,6 +6,10 @@ import VoxelSandbox
 //   经 root.xxx 调用，调用点零改动）。算法单一权威收敛于此库，消除四面板逐字复制。
 import "InventoryOps.js" as InventoryOps
 
+// qml-touch 三轮：本文件所有「触碰 NOTIFY 属性」的绑定统一改表达式形式
+//   `{ const _r = <rev>; return _r >= 0 ? (<expr>) : <fallback> }`（触碰值参与返回值），防 qmlcachegen
+//   AOT 把裸语句触碰 `<rev>;` 当死代码消除 → 依赖不注册 → revision 变后绑定永不重算（机制/返回值不变）。
+
 // 工作台 3×3 合成面板（t50 / t63 完整 UI）：右键工作台方块打开（PlayerController::craftingTableOpened →
 // Main.qml Connections → 显本面板 + 释放指针）。Esc / E / 关闭信号关闭（宿主恢复 grab）。
 //
@@ -291,33 +295,36 @@ Item {
                             Item {
                                 anchors.centerIn: parent
                                 width: 30; height: 30
-                                visible: { root.craftRev; return (root.craftSlots[index] || 0) !== 0 }
+                                visible: { const _r = root.craftRev; return _r >= 0 ? ((root.craftSlots[index] || 0) !== 0) : false }
                                 Image {
                                     anchors.fill: parent
-                                    visible: { root.craftRev; return !root.hotbar.isTool(root.craftSlots[index] || 0)
-                                                              && !root.hotbar.isMaterial(root.craftSlots[index] || 0) }
-                                    source: { root.craftRev; return root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0) }
+                                    visible: {
+                                        const _r = root.craftRev
+                                        return _r >= 0 ? (!root.hotbar.isTool(root.craftSlots[index] || 0)
+                                                          && !root.hotbar.isMaterial(root.craftSlots[index] || 0)) : false
+                                    }
+                                    source: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0)) : "" }
                                     fillMode: Image.PreserveAspectFit; smooth: true
                                 }
                                 ToolIcon {
                                     anchors.fill: parent
-                                    visible: { root.craftRev; return root.hotbar.isTool(root.craftSlots[index] || 0) }
-                                    tier: { root.craftRev; return root.hotbar.toolTier(root.craftSlots[index] || 0) }
-                                    toolType: { root.craftRev; return root.hotbar.toolType(root.craftSlots[index] || 0) }
+                                    visible: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.isTool(root.craftSlots[index] || 0)) : false }
+                                    tier: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.toolTier(root.craftSlots[index] || 0)) : 0 }
+                                    toolType: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.toolType(root.craftSlots[index] || 0)) : 0 }
                                 }
                                 // 材料段（木棒）：MaterialIcon 自绘（§9a 原创，非 MC 资产）。
                                 MaterialIcon {
                                     anchors.fill: parent
-                                    visible: { root.craftRev; return root.hotbar.isMaterial(root.craftSlots[index] || 0) }
-                                    materialId: { root.craftRev; return root.craftSlots[index] || 0 }
+                                    visible: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.isMaterial(root.craftSlots[index] || 0)) : false }
+                                    materialId: { const _r = root.craftRev; return _r >= 0 ? (root.craftSlots[index] || 0) : 0 }
                                 }
                             }
                             // 栈数量（count>1 显数字）。
                             Text {
                                 anchors.right: parent.right; anchors.bottom: parent.bottom
                                 anchors.rightMargin: 3; anchors.bottomMargin: 1
-                                visible: { root.craftRev; return (root.craftCounts[index] || 0) > 1 }
-                                text: { root.craftRev; return root.craftCounts[index] || 0 }
+                                visible: { const _r = root.craftRev; return _r >= 0 ? ((root.craftCounts[index] || 0) > 1) : false }
+                                text: { const _r = root.craftRev; return _r >= 0 ? (root.craftCounts[index] || 0) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
@@ -365,7 +372,7 @@ Item {
                             HoverHandler {
                                 // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
                                 // 不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
-                                property int trackedId: { root.craftRev; return root.craftSlots[index] || 0 }
+                                property int trackedId: { const _r = root.craftRev; return _r >= 0 ? (root.craftSlots[index] || 0) : 0 }
                                 onTrackedIdChanged: {
                                     if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
                                         root.hoveredItemId = 0
@@ -395,13 +402,17 @@ Item {
                                 color: "transparent"
                                 border.color: "#7fe57f"; border.width: 2
                                 visible: {
-                                    root.dragSlots; root.rightDragSlots
-                                    root.leftDragActive; root.rightDragActive; root.craftRev
+                                    // qml-touch 三轮：dragSlots/rightDragSlots/revision 触碰入 _ok 守卫（恒真），
+                                    //   防 AOT 死代码消除裸触碰 → 高亮不随拖拽集 / 版本号刷新。
+                                    const _ds = root.dragSlots
+                                    const _rds = root.rightDragSlots
+                                    const _rev = root.craftRev
+                                    const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
                                     const sid = root.craftSlots[index] || 0
                                     const key = root.slotKey("craft", index)
-                                    if (root.leftDragActive && root.dragHasKey(key)
+                                    if (_ok && root.leftDragActive && root.dragHasKey(key)
                                         && (sid === 0 || sid === root.dragHeldId)) return true
-                                    return root.rightDragActive && root.rightDragHasKey(key)
+                                    return _ok && root.rightDragActive && root.rightDragHasKey(key)
                                 }
                                 z: 10
                             }
@@ -436,8 +447,8 @@ Item {
                         width: 30; height: 30
                         // 产物 id / 数量（0 = 无匹配 → 隐藏）。matchedRecipe 返回 null 或 QVariantMap；
                         // 用 (r && r.field) || 0 防御 undefined（无匹配 / hotbar 未注入时回 0，免 QML 警告）。
-                        property int outId: { root.craftRev; const r = root.matchedRecipe(); return (r && r.outputId) || 0 }
-                        property int outCount: { root.craftRev; const r = root.matchedRecipe(); return (r && r.outputCount) || 0 }
+                        property int outId: { const _r = root.craftRev; const r = root.matchedRecipe(); return _r >= 0 ? ((r && r.outputId) || 0) : 0 }
+                        property int outCount: { const _r = root.craftRev; const r = root.matchedRecipe(); return _r >= 0 ? ((r && r.outputCount) || 0) : 0 }
                         visible: outId !== 0
                         // t94 tooltip：仅在有产物时（visible）悬停显产物名。parent = 本 30×30 图标 Item。
                         HoverHandler {
@@ -517,10 +528,10 @@ Item {
                     // （同 hotbar 行 slotRevision 模式，t55/t63 已验证）。
                     model: root.hotbar.mainCount
                     delegate: Item {
-                        property int mainId: { root.hotbar.mainRevision; return root.hotbar.mainBlockIdAt(index) }
-                        property int mainCount: { root.hotbar.mainRevision; return root.hotbar.mainCountAt(index) }
-                        property int mainDur: { root.hotbar.mainRevision; return root.hotbar.mainDurabilityAt(index) } // t263 工具耐久
-                        property var mainEnch: { root.hotbar.mainRevision; return root.hotbar.mainEnchantsAt(index) } // t475 附魔
+                        property int mainId: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainBlockIdAt(index)) : 0 }
+                        property int mainCount: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainCountAt(index)) : 0 }
+                        property int mainDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainDurabilityAt(index)) : 0 } // t263 工具耐久
+                        property var mainEnch: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainEnchantsAt(index)) : 0 } // t475 附魔
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent }
                         Item {
@@ -529,28 +540,28 @@ Item {
                             visible: mainId !== 0
                             Image {
                                 anchors.fill: parent
-                                visible: { root.hotbar.mainRevision; return !root.hotbar.isTool(mainId) && !root.hotbar.isMaterial(mainId) }
-                                source: { root.hotbar.mainRevision; return root.hotbar.iconSourceForBlock(mainId) }
+                                visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (!root.hotbar.isTool(mainId) && !root.hotbar.isMaterial(mainId)) : false }
+                                source: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.iconSourceForBlock(mainId)) : "" }
                                 fillMode: Image.PreserveAspectFit; smooth: true
                             }
                             ToolIcon {
                                 anchors.fill: parent
-                                visible: { root.hotbar.mainRevision; return root.hotbar.isTool(mainId) }
-                                tier: { root.hotbar.mainRevision; return root.hotbar.toolTier(mainId) }
-                                toolType: { root.hotbar.mainRevision; return root.hotbar.toolType(mainId) }
+                                visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.isTool(mainId)) : false }
+                                tier: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolTier(mainId)) : 0 }
+                                toolType: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolType(mainId)) : 0 }
                             }
                             MaterialIcon {
                                 anchors.fill: parent
-                                visible: { root.hotbar.mainRevision; return root.hotbar.isMaterial(mainId) }
-                                materialId: { root.hotbar.mainRevision; return mainId }
+                                visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.isMaterial(mainId)) : false }
+                                materialId: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainId) : 0 }
                             }
                         }
                         // 栈数量（count>1 显数字）。触碰 mainRevision 刷新（VM NOTIFY 驱动）。
                         Text {
                             anchors.right: parent.right; anchors.bottom: parent.bottom
                             anchors.rightMargin: 3; anchors.bottomMargin: 1
-                            visible: { root.hotbar.mainRevision; return mainCount > 1 }
-                            text: { root.hotbar.mainRevision; return mainCount }
+                            visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount > 1) : false }
+                            text: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount) : "" }
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
@@ -623,12 +634,14 @@ Item {
                             color: "transparent"
                             border.color: "#7fe57f"; border.width: 2
                             visible: {
-                                root.dragSlots; root.rightDragSlots
-                                root.leftDragActive; root.rightDragActive; root.hotbar.mainRevision
+                                const _ds = root.dragSlots
+                                const _rds = root.rightDragSlots
+                                const _rev = root.hotbar.mainRevision
+                                const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
                                 const key = root.slotKey("main", index)
-                                if (root.leftDragActive && root.dragHasKey(key)
+                                if (_ok && root.leftDragActive && root.dragHasKey(key)
                                     && (mainId === 0 || mainId === root.dragHeldId)) return true
-                                return root.rightDragActive && root.rightDragHasKey(key)
+                                return _ok && root.rightDragActive && root.rightDragHasKey(key)
                             }
                             z: 10
                         }
@@ -648,7 +661,7 @@ Item {
                     Repeater {
                         model: root.hotbar.slotCount
                         delegate: Item {
-                            property int slotId: { root.hotbar.slotRevision; return root.hotbar.blockIdAt(index) }
+                            property int slotId: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.blockIdAt(index)) : 0 }
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent }
                             Item {
@@ -657,27 +670,27 @@ Item {
                                 visible: slotId !== 0
                                 Image {
                                     anchors.fill: parent
-                                    visible: { root.hotbar.slotRevision; return !root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId) }
-                                    source: { root.hotbar.slotRevision; return root.hotbar.iconSourceForBlock(slotId) }
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (!root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId)) : false }
+                                    source: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.iconSourceForBlock(slotId)) : "" }
                                     fillMode: Image.PreserveAspectFit; smooth: true
                                 }
                                 ToolIcon {
                                     anchors.fill: parent
-                                    visible: { root.hotbar.slotRevision; return root.hotbar.isTool(slotId) }
-                                    tier: { root.hotbar.slotRevision; return root.hotbar.toolTier(slotId) }
-                                    toolType: { root.hotbar.slotRevision; return root.hotbar.toolType(slotId) }
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.isTool(slotId)) : false }
+                                    tier: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolTier(slotId)) : 0 }
+                                    toolType: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolType(slotId)) : 0 }
                                 }
                                 MaterialIcon {
                                     anchors.fill: parent
-                                    visible: { root.hotbar.slotRevision; return root.hotbar.isMaterial(slotId) }
-                                    materialId: { root.hotbar.slotRevision; return slotId }
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.isMaterial(slotId)) : false }
+                                    materialId: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (slotId) : 0 }
                                 }
                             }
                             Text {
                                 anchors.right: parent.right; anchors.bottom: parent.bottom
                                 anchors.rightMargin: 3; anchors.bottomMargin: 1
-                                visible: { root.hotbar.slotRevision; return root.hotbar.countAt(index) > 1 }
-                                text: { root.hotbar.slotRevision; return root.hotbar.countAt(index) }
+                                visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index) > 1) : false }
+                                text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
@@ -749,12 +762,14 @@ Item {
                                 color: "transparent"
                                 border.color: "#7fe57f"; border.width: 2
                                 visible: {
-                                    root.dragSlots; root.rightDragSlots
-                                    root.leftDragActive; root.rightDragActive; root.hotbar.slotRevision
+                                    const _ds = root.dragSlots
+                                    const _rds = root.rightDragSlots
+                                    const _rev = root.hotbar.slotRevision
+                                    const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
                                     const key = root.slotKey("hotbar", index)
-                                    if (root.leftDragActive && root.dragHasKey(key)
+                                    if (_ok && root.leftDragActive && root.dragHasKey(key)
                                         && (slotId === 0 || slotId === root.dragHeldId)) return true
-                                    return root.rightDragActive && root.rightDragHasKey(key)
+                                    return _ok && root.rightDragActive && root.rightDragHasKey(key)
                                 }
                                 z: 10
                             }
@@ -775,15 +790,18 @@ Item {
     // t263 当前 hover 槽的工具剩余耐久（-1=未跟踪 → tooltip 不显耐久行）。据 hoveredKey 查 hotbar/main。
     property int hoveredDurability: {
         if (!root.hotbar || !root.hoveredItemId || !root.hotbar.isTool(root.hoveredItemId)) return -1
-        root.hotbar.slotRevision; root.hotbar.mainRevision
+        // qml-touch 三轮：slotRevision/mainRevision 触碰参与返回（_sr>=0 / _mr>=0 恒真守卫），防 AOT 死代码
+        //   消除裸触碰 → 同槽栈改写后 tooltip 耐久不刷新。
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
         const key = root.hoveredKey
         if (!key) return -1
         const parts = key.split(":")
         if (parts.length !== 2) return -1
         const idx = parseInt(parts[1], 10)
         if (Number.isNaN(idx)) return -1
-        if (parts[0] === "hotbar") return root.hotbar.durabilityAt(idx)
-        if (parts[0] === "main") return root.hotbar.mainDurabilityAt(idx)
+        if (parts[0] === "hotbar") return _sr >= 0 ? (root.hotbar.durabilityAt(idx)) : -1
+        if (parts[0] === "main") return _mr >= 0 ? (root.hotbar.mainDurabilityAt(idx)) : -1
         return -1
     }
     Rectangle {

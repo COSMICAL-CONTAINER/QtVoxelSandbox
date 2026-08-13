@@ -7,6 +7,10 @@ import VoxelSandbox
 //   收敛于此库，消除四面板逐字复制（箱子与工作台 / 熔炉同模式接入）。
 import "InventoryOps.js" as InventoryOps
 
+// qml-touch 三轮：本文件所有「触碰 NOTIFY 属性」的绑定统一改表达式形式
+//   `{ const _r = <rev>; return _r >= 0 ? (<expr>) : <fallback> }`（触碰值参与返回值），防 qmlcachegen
+//   AOT 把裸语句触碰 `<rev>;` 当死代码消除 → 依赖不注册 → revision 变后绑定永不重算（机制/返回值不变）。
+
 // 箱子物品栏面板（t173 / t179 修复右键无效）：右键箱子方块打开（PlayerController::chestOpened(x,y,z) →
 // Main.qml Connections → 显本面板 + 释放指针）。Esc / E / 关闭信号关闭（宿主恢复 grab）。
 //
@@ -227,8 +231,8 @@ Item {
                 Repeater {
                     model: root.chestSlotCount  // t173 复审：读 chestStore.slotCount（单一权威，恒 27；不再本地 chestRows*chestCols 偶合）
                     delegate: Item {
-                        property int chId: { root.chestCoordRev; return root.chestStore.slotIdAt(root.chestX, root.chestY, root.chestZ, index) }
-                        property int chCount: { root.chestCoordRev; return root.chestStore.slotCountAt(root.chestX, root.chestY, root.chestZ, index) }
+                        property int chId: { const _r = root.chestCoordRev; return _r >= 0 ? (root.chestStore.slotIdAt(root.chestX, root.chestY, root.chestZ, index)) : 0 }
+                        property int chCount: { const _r = root.chestCoordRev; return _r >= 0 ? (root.chestStore.slotCountAt(root.chestX, root.chestY, root.chestZ, index)) : 0 }
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent; wellColor: "#3a2a18" }  // 箱子槽底偏木色（区隔玩家槽）
                         Item {
@@ -237,28 +241,28 @@ Item {
                             visible: chId !== 0
                             Image {
                                 anchors.fill: parent
-                                visible: { root.chestCoordRev; return !root.hotbar.isTool(chId) && !root.hotbar.isMaterial(chId) }
-                                source: { root.chestCoordRev; return root.hotbar.iconSourceForBlock(chId) }
+                                visible: { const _r = root.chestCoordRev; return _r >= 0 ? (!root.hotbar.isTool(chId) && !root.hotbar.isMaterial(chId)) : false }
+                                source: { const _r = root.chestCoordRev; return _r >= 0 ? (root.hotbar.iconSourceForBlock(chId)) : "" }
                                 fillMode: Image.PreserveAspectFit; smooth: true
                             }
                             ToolIcon {
                                 anchors.fill: parent
-                                visible: { root.chestCoordRev; return root.hotbar.isTool(chId) }
-                                tier: { root.chestCoordRev; return root.hotbar.toolTier(chId) }
-                                toolType: { root.chestCoordRev; return root.hotbar.toolType(chId) }
+                                visible: { const _r = root.chestCoordRev; return _r >= 0 ? (root.hotbar.isTool(chId)) : false }
+                                tier: { const _r = root.chestCoordRev; return _r >= 0 ? (root.hotbar.toolTier(chId)) : 0 }
+                                toolType: { const _r = root.chestCoordRev; return _r >= 0 ? (root.hotbar.toolType(chId)) : 0 }
                             }
                             MaterialIcon {
                                 anchors.fill: parent
-                                visible: { root.chestCoordRev; return root.hotbar.isMaterial(chId) }
-                                materialId: { root.chestCoordRev; return chId }
+                                visible: { const _r = root.chestCoordRev; return _r >= 0 ? (root.hotbar.isMaterial(chId)) : false }
+                                materialId: { const _r = root.chestCoordRev; return _r >= 0 ? (chId) : 0 }
                             }
                         }
                         // 栈数量（count>1 显数字）。触碰 chestCoordRev 刷新（ChestStore NOTIFY 驱动）。
                         Text {
                             anchors.right: parent.right; anchors.bottom: parent.bottom
                             anchors.rightMargin: 3; anchors.bottomMargin: 1
-                            visible: { root.chestCoordRev; return chCount > 1 }
-                            text: { root.chestCoordRev; return chCount }
+                            visible: { const _r = root.chestCoordRev; return _r >= 0 ? (chCount > 1) : false }
+                            text: { const _r = root.chestCoordRev; return _r >= 0 ? (chCount) : "" }
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
@@ -325,12 +329,17 @@ Item {
                             color: "transparent"
                             border.color: "#7fe57f"; border.width: 2
                             visible: {
-                                root.dragSlots; root.rightDragSlots
-                                root.leftDragActive; root.rightDragActive; root.chestCoordRev
+                                // qml-touch 三轮：dragSlots/rightDragSlots/reversion 触碰参与 _ok 守卫（恒真），
+                                //   防 AOT 死代码消除裸触碰 → 高亮不随拖拽集 / 版本号刷新。leftDragActive/
+                                //   rightDragActive 在下方条件是 live 读、自带依赖（无需入守卫）。
+                                const _ds = root.dragSlots
+                                const _rds = root.rightDragSlots
+                                const _rev = root.chestCoordRev
+                                const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
                                 const key = root.slotKey("chest", index)
-                                if (root.leftDragActive && root.dragHasKey(key)
+                                if (_ok && root.leftDragActive && root.dragHasKey(key)
                                     && (chId === 0 || chId === root.dragHeldId)) return true
-                                return root.rightDragActive && root.rightDragHasKey(key)
+                                return _ok && root.rightDragActive && root.rightDragHasKey(key)
                             }
                             z: 10
                         }
@@ -347,10 +356,10 @@ Item {
                 Repeater {
                     model: root.hotbar.mainCount
                     delegate: Item {
-                        property int mainId: { root.hotbar.mainRevision; return root.hotbar.mainBlockIdAt(index) }
-                        property int mainCount: { root.hotbar.mainRevision; return root.hotbar.mainCountAt(index) }
-                        property int mainDur: { root.hotbar.mainRevision; return root.hotbar.mainDurabilityAt(index) } // t263 工具耐久
-                        property var mainEnch: { root.hotbar.mainRevision; return root.hotbar.mainEnchantsAt(index) } // t475 附魔
+                        property int mainId: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainBlockIdAt(index)) : 0 }
+                        property int mainCount: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainCountAt(index)) : 0 }
+                        property int mainDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainDurabilityAt(index)) : 0 } // t263 工具耐久
+                        property var mainEnch: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainEnchantsAt(index)) : 0 } // t475 附魔
                         width: root.slotSize; height: root.slotSize
                         InvSlot { anchors.fill: parent }
                         Item {
@@ -359,27 +368,27 @@ Item {
                             visible: mainId !== 0
                             Image {
                                 anchors.fill: parent
-                                visible: { root.hotbar.mainRevision; return !root.hotbar.isTool(mainId) && !root.hotbar.isMaterial(mainId) }
-                                source: { root.hotbar.mainRevision; return root.hotbar.iconSourceForBlock(mainId) }
+                                visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (!root.hotbar.isTool(mainId) && !root.hotbar.isMaterial(mainId)) : false }
+                                source: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.iconSourceForBlock(mainId)) : "" }
                                 fillMode: Image.PreserveAspectFit; smooth: true
                             }
                             ToolIcon {
                                 anchors.fill: parent
-                                visible: { root.hotbar.mainRevision; return root.hotbar.isTool(mainId) }
-                                tier: { root.hotbar.mainRevision; return root.hotbar.toolTier(mainId) }
-                                toolType: { root.hotbar.mainRevision; return root.hotbar.toolType(mainId) }
+                                visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.isTool(mainId)) : false }
+                                tier: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolTier(mainId)) : 0 }
+                                toolType: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolType(mainId)) : 0 }
                             }
                             MaterialIcon {
                                 anchors.fill: parent
-                                visible: { root.hotbar.mainRevision; return root.hotbar.isMaterial(mainId) }
-                                materialId: { root.hotbar.mainRevision; return mainId }
+                                visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.isMaterial(mainId)) : false }
+                                materialId: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainId) : 0 }
                             }
                         }
                         Text {
                             anchors.right: parent.right; anchors.bottom: parent.bottom
                             anchors.rightMargin: 3; anchors.bottomMargin: 1
-                            visible: { root.hotbar.mainRevision; return mainCount > 1 }
-                            text: { root.hotbar.mainRevision; return mainCount }
+                            visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount > 1) : false }
+                            text: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount) : "" }
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
@@ -444,12 +453,14 @@ Item {
                             color: "transparent"
                             border.color: "#7fe57f"; border.width: 2
                             visible: {
-                                root.dragSlots; root.rightDragSlots
-                                root.leftDragActive; root.rightDragActive; root.hotbar.mainRevision
+                                const _ds = root.dragSlots
+                                const _rds = root.rightDragSlots
+                                const _rev = root.hotbar.mainRevision
+                                const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
                                 const key = root.slotKey("main", index)
-                                if (root.leftDragActive && root.dragHasKey(key)
+                                if (_ok && root.leftDragActive && root.dragHasKey(key)
                                     && (mainId === 0 || mainId === root.dragHeldId)) return true
-                                return root.rightDragActive && root.rightDragHasKey(key)
+                                return _ok && root.rightDragActive && root.rightDragHasKey(key)
                             }
                             z: 10
                         }
@@ -468,7 +479,7 @@ Item {
                     Repeater {
                         model: root.hotbar.slotCount
                         delegate: Item {
-                            property int slotId: { root.hotbar.slotRevision; return root.hotbar.blockIdAt(index) }
+                            property int slotId: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.blockIdAt(index)) : 0 }
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent }
                             Item {
@@ -477,27 +488,27 @@ Item {
                                 visible: slotId !== 0
                                 Image {
                                     anchors.fill: parent
-                                    visible: { root.hotbar.slotRevision; return !root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId) }
-                                    source: { root.hotbar.slotRevision; return root.hotbar.iconSourceForBlock(slotId) }
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (!root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId)) : false }
+                                    source: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.iconSourceForBlock(slotId)) : "" }
                                     fillMode: Image.PreserveAspectFit; smooth: true
                                 }
                                 ToolIcon {
                                     anchors.fill: parent
-                                    visible: { root.hotbar.slotRevision; return root.hotbar.isTool(slotId) }
-                                    tier: { root.hotbar.slotRevision; return root.hotbar.toolTier(slotId) }
-                                    toolType: { root.hotbar.slotRevision; return root.hotbar.toolType(slotId) }
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.isTool(slotId)) : false }
+                                    tier: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolTier(slotId)) : 0 }
+                                    toolType: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolType(slotId)) : 0 }
                                 }
                                 MaterialIcon {
                                     anchors.fill: parent
-                                    visible: { root.hotbar.slotRevision; return root.hotbar.isMaterial(slotId) }
-                                    materialId: { root.hotbar.slotRevision; return slotId }
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.isMaterial(slotId)) : false }
+                                    materialId: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (slotId) : 0 }
                                 }
                             }
                             Text {
                                 anchors.right: parent.right; anchors.bottom: parent.bottom
                                 anchors.rightMargin: 3; anchors.bottomMargin: 1
-                                visible: { root.hotbar.slotRevision; return root.hotbar.countAt(index) > 1 }
-                                text: { root.hotbar.slotRevision; return root.hotbar.countAt(index) }
+                                visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index) > 1) : false }
+                                text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
@@ -561,12 +572,14 @@ Item {
                                 color: "transparent"
                                 border.color: "#7fe57f"; border.width: 2
                                 visible: {
-                                    root.dragSlots; root.rightDragSlots
-                                    root.leftDragActive; root.rightDragActive; root.hotbar.slotRevision
+                                    const _ds = root.dragSlots
+                                    const _rds = root.rightDragSlots
+                                    const _rev = root.hotbar.slotRevision
+                                    const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
                                     const key = root.slotKey("hotbar", index)
-                                    if (root.leftDragActive && root.dragHasKey(key)
+                                    if (_ok && root.leftDragActive && root.dragHasKey(key)
                                         && (slotId === 0 || slotId === root.dragHeldId)) return true
-                                    return root.rightDragActive && root.rightDragHasKey(key)
+                                    return _ok && root.rightDragActive && root.rightDragHasKey(key)
                                 }
                                 z: 10
                             }
@@ -584,14 +597,18 @@ Item {
     // t263 当前 hover 槽的工具剩余耐久（-1=未跟踪 → tooltip 不显耐久行）。据 hoveredKey 查 hotbar/main。
     property int hoveredDurability: {
         if (!root.hotbar || !root.hoveredItemId || !root.hotbar.isTool(root.hoveredItemId)) return -1
-        root.hotbar.slotRevision; root.hotbar.mainRevision
+        // qml-touch 三轮：slotRevision/mainRevision 触碰参与返回（_sr>=0 / _mr>=0 恒真守卫），防 AOT 死代码
+        //   消除裸触碰 → 同槽栈改写后 tooltip 耐久不刷新。
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
         const key = root.hoveredKey
         if (!key) return -1
         const parts = key.split(":")
         if (parts.length !== 2) return -1
         const idx = parseInt(parts[1], 10)
         if (Number.isNaN(idx)) return -1
-        if (parts[0] === "hotbar") return root.hotbar.durabilityAt(idx)
+        if (parts[0] === "hotbar") return _sr >= 0 ? (root.hotbar.durabilityAt(idx)) : -1
+        if (parts[0] === "main") return _mr >= 0 ? (root.hotbar.mainDurabilityAt(idx)) : -1
         if (parts[0] === "main") return root.hotbar.mainDurabilityAt(idx)
         return -1
     }
