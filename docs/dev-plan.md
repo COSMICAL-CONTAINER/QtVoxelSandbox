@@ -1550,7 +1550,7 @@ t18                        （背包，依赖 hotbar）
 - **夜间火把/熔炉不发光** ❌ 白天有阴影时熔炉发光 OK，但**晚上连火把也不发光** → 光照系统夜间方块光失效。查：夜间方块光 flood / 天光乘子是否误压方块光 / chunkgeometry 顶点色。
 - **挖掘声音** ✅ 挖草方块/泥土**没声音**（已修 t520）。根因非映射错/文件缺，是 `break_grass.wav` 频谱重心 ~87Hz 几乎纯次低频扬声器难重放；改 CC0 源 `impact_soft_heavy`→`step_grass`（centroid 254Hz 可辨）+ 提峰值 → 重生 break_grass.wav 可闻。
 - **路程统计恒 0** ❌ 统计数据「走过路程」一直是 0。→ 三轮埋点 onMove 跳过（无信号调用方）→ 补 playercontroller 位移信号 → progress.onMove。
-- **箱子 shift+左键** ❌ 箱子界面 shift+左键物品应**放入箱子**（不是放回背包）。优先级。
+- **箱子 shift+左键** ✅✅ 已完成（commit 367cc49）箱子界面 shift+左键物品应**放入箱子**（不是放回背包）。优先级。
 - **破箱不掉落内容** ❌ 箱子打掉内部物品不掉落。→ 破箱清 ChestStore + 掉内容（仿破熔炉）。
 - **功能方块上放方块** ❌ shift+右键蹲下在功能方块（熔炉/箱子/工作台等）上应**放方块**而非开界面。→ shift+右键放置优先于开界面。
 - **附魔台/铁砧/发射器 UI 打不开** ❌❌ 三个功能方块界面没做（很久的老问题）。→ 用户要求：像工作台蓝本（上面功能区 + 下面背包 4 行），**先做界面**（功能后补）。工作台=3×3合成+产物+背包；附魔台/铁砧/发射器同理（界面布局，功能后补）。
@@ -1643,7 +1643,7 @@ t18                        （背包，依赖 hotbar）
 - ✅ 根因：映射与文件加载都对（Grass=1/Dirt=2 → GroupGrass → grass_*.wav，init 日志 grass 组 break/mining/step 全 true），但 `break_grass.wav` 频谱重心仅 ~87Hz（实测）——几乎纯次低频、扬声器难重放、人耳近不可闻，故听感「没声音」。源是 CC0 `impact_soft_heavy`（软体重击）经 finalize 峰值归一化后能量全沉到次低频。挖树叶(200Hz)/原木(190Hz)/石头(491Hz)重心在可闻带故正常。
 - ✅ 修：`tools/build_sounds.py` 把 `BREAK_CC0["grass"]` 从 `impact_soft_heavy` 改用 `step_grass`（真实草地表面录制、centroid ~254Hz 明显可辨、已作 grass step 用），并 grass break 路径提 target_peak 到 0.95（不再压 energy=0.70，破坏是强反馈事件须响）。重跑 build_sounds.py 重生 break_grass.wav（新 peak 31128 / rms 1128 / centroid 254Hz，与 leaves/wood 同量级可辨）。映射表与 blockregistry materialGroup 不动（本就对）。
 
-**B8 箱子界面 shift+左键应放入箱子** → **t521**（R19.1 本轮）
+**B8 箱子界面 shift+左键应放入箱子** → **t521** ✅✅ 已完成（commit 367cc49）
 - 用户：「箱子打开页面 shift+左键某物品，应直接放到箱子里面去，而不是放回背包。箱子界面得这样做（优先级）」。
 - 查箱子界面 shift+左键逻辑（InventoryOps.js / ChestUI.qml）：现在放回背包，应判「当前在箱子界面 → shift+左键放入箱子」。
 
