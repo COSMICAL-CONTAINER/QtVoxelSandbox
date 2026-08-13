@@ -1638,7 +1638,7 @@ t18                        （背包，依赖 hotbar）
 - ✅ 根因：单片贴墙 quad 几何本身即 MC 1.0 ladder 正确做法（薄板贴墙 + cutout 梯级，单面贴图双面可见），问题在贴图比例 —— 旧贴图纵轨居中瓦片中央 8/16 宽（x=4/5,10/11）+ 两侧各 4/16 透明留白 → 整张贴图铺满 face 后梯子只显在格中心半宽、两侧大块透明 → 观感「格中央小梯图标、粗糙上下宽」。
 - ✅ 修：tools/build_ladder.py 改纵轨贴瓦片两侧（x=2/3,12/13）+ 横梯级满铺轨间 + 4 道梯级等距覆盖全高 → 整张贴图「满格读作一把梯子」，铺满 face 后梯子铺满整格宽（机制等价 MC 1.0 ladder 贴图：轨靠边 + rung 满轨间）。重建 atlas.png + icon_ladder.png。几何不变（已是 MC 1.0 正确），同步 partialblockgeometry/hotbar/CMakeLists/build_atlas/build_cube_icons 注释。
 
-**B7 挖草方块/泥土没声音** → **t520**（R19.1 本轮）✅✅ 已完成（commit 待填）
+**B7 挖草方块/泥土没声音** → **t520**（R19.1 本轮）✅✅ 已完成（commit 8e58d49）
 - 用户：「挖草方块跟泥土没有声音，挖树叶还有橡木原木都有声音」。
 - ✅ 根因：映射与文件加载都对（Grass=1/Dirt=2 → GroupGrass → grass_*.wav，init 日志 grass 组 break/mining/step 全 true），但 `break_grass.wav` 频谱重心仅 ~87Hz（实测）——几乎纯次低频、扬声器难重放、人耳近不可闻，故听感「没声音」。源是 CC0 `impact_soft_heavy`（软体重击）经 finalize 峰值归一化后能量全沉到次低频。挖树叶(200Hz)/原木(190Hz)/石头(491Hz)重心在可闻带故正常。
 - ✅ 修：`tools/build_sounds.py` 把 `BREAK_CC0["grass"]` 从 `impact_soft_heavy` 改用 `step_grass`（真实草地表面录制、centroid ~254Hz 明显可辨、已作 grass step 用），并 grass break 路径提 target_peak 到 0.95（不再压 energy=0.70，破坏是强反馈事件须响）。重跑 build_sounds.py 重生 break_grass.wav（新 peak 31128 / rms 1128 / centroid 254Hz，与 leaves/wood 同量级可辨）。映射表与 blockregistry materialGroup 不动（本就对）。
