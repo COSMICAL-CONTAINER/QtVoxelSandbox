@@ -171,9 +171,11 @@ TILES = [
     "default_obsidian",             # 77 obsidian（t411 黑曜石；流水触静岩浆源凝固产物——机制等价 MC 1.0
                                     #    obsidian，名称/贴图原创自绘 §9a；各面同贴图=深紫黑火山玻璃底+紫红纹理嵌点+
                                     #    少量品紫玻璃微反光；tools/build_obsidian.py 程序生成原创像素图）
-    "default_ladder",               # 78 ladder（t413 木梯 cross 贴图；透明底 + 棕色两根纵轨 + 横向梯级；
-                                    #    alphaCutoff cutout；Ladder 各面=本 tile，mesher 走 cross 几何段；
-                                    #    机制等价 MC 1.0 梯子，名称/贴图原创自绘 §9a；tools/build_ladder.py 程序生成原创像素图）
+    "default_ladder",               # 78 ladder（t413/t501/t519 木梯贴墙贴图；透明底 + 棕色两根纵轨（贴瓦片两侧）+
+                                    #    4 道横向梯级满铺轨间；alphaCutoff cutout；Ladder 各面=本 tile，mesher 走贴墙
+                                    #    quad 几何段（t501 单片贴墙 quad，整张贴图铺满 face）；机制等价 MC 1.0 梯子，
+                                    #    名称/贴图原创自绘 §9a；tools/build_ladder.py 程序生成原创像素图；t519 满格版修
+                                    #    「放下形状上下宽粗糙」——纵轨贴瓦片两侧而非居中，整张无大块透明留白）
     # t455 16 色 wool 其余 15 色变体（white 复用 tile 38 default_wool；本段为 orange..black，tile 79..93）。
     #   机制等价 MC 1.0 羊毛 16 色变体；名称/贴图全原创自绘 §9a（build_wool.py 程序生成卷绒纹 + 标准 16 色着色）。
     #   各色羊毛方块各面=本 tile，走 culled 立方面路径（同 white Wool）。每色一个方块 id（WoolOrange=63..WoolBlack=77）。

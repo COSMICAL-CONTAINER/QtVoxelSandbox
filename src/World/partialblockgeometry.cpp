@@ -460,8 +460,8 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::Ladder: {
-        // t413/t501 木梯「单片贴墙 quad」模型（机制等价 MC 1.0 ladder 贴实体方块面）：t501 把 t413 的两片对角
-        //   cross 改为**单片贴墙 quad** —— 据所贴墙面水平方向（state[1:0]，placeBlock 经 ladderFaceFromNormal
+        // t413/t501/t519 木梯「单片贴墙 quad」模型（机制等价 MC 1.0 ladder 贴实体方块面）：t501 把 t413 的两片
+        //   对角 cross 改为**单片贴墙 quad** —— 据所贴墙面水平方向（state[1:0]，placeBlock 经 ladderFaceFromNormal
         //   写入）把 quad 摆到对应面、贴图朝外（朝玩家侧）。须贴**完整立方方块**的侧面（placeBlock placeState
         //   算好后经 isFullCube 守卫；草丛/门/活版门等不完整方块侧拒放）。
         //   state 编码：0=+X 1=-X 2=+Z 3=-Z（=「支撑墙所在的水平方向」）。
@@ -472,6 +472,12 @@ int PartialBlockGeometry::append(
         //   贴图（单一梯瓦片）。tile 由 BlockRegistry::tileIndex(Ladder, PosX) = sideTile = 78 给出。
         //   UV 映射对齐 kBoxFaces 轴面约定（±X 面 cu=z,cv=y；±Z 面 cu=x,cv=y）：角点序 BL→BR→TR→TL 使贴图
         //   纵向（两根纵轨，沿贴图 V/行）映射到 world Y（垂直）→ 梯轨竖立、横级水平（贴图正向不旋转）。
+        //   t519「放下形状上下宽粗糙」修复：几何（单片贴墙 quad 铺满 face [0,1]）本身即 MC 1.0 ladder 正确做法
+        //   （薄板贴墙 + cutout 梯级，单面贴图双面可见），根因在贴图比例 —— 旧贴图纵轨居中瓦片中央 8/16 宽
+        //   （x=4/5,10/11）+ 两侧各 4/16 透明留白 → 整张贴图铺满 face 后梯子只显在格中心半宽、两侧大块透明 →
+        //   观感「格中央小梯图标、粗糙」。t519 改贴图满格（tools/build_ladder.py 纵轨贴瓦片两侧 x=2/3,12/13 +
+        //   横级满铺轨间）→ 整张贴图铺满 face 后梯子铺满整格宽，读作「贴墙的一把梯子」（机制等价 MC 1.0 ladder
+        //   贴图：轨靠边 + rung 满轨间，整张无大块透明留白）。几何不变（已是 MC 1.0 正确），仅同步注释说明。
         constexpr float kInset = 1.0f / 16.0f; // 贴墙内缩（cell 边以内 1/16，留嵌墙余量防 z-fight）
         const int face = state & 3;
         if (face == 0 || face == 1) {

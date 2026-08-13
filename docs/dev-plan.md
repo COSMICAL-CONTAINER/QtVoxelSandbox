@@ -1632,9 +1632,11 @@ t18                        （背包，依赖 hotbar）
 - 用户（第三次改口，明确坚持 3D）：「创造背包工作台跟熔炉图标还是 2D 的，必须弄成 3D 的工作图标。你放下来的这个它都可以的，草方块那些也有方块数据一样能弄出来」。
 - 最终需求：像草方块那样 3D 立方体图标。方案：从 blockItemIconMap 移除 {9,10}（当前让它们走 pack 2D item 图），恢复程序生成 3D 立方体图标（icon_crafting_table / icon_furnace）；或用 build_cube_icons.py 重做更精致的 3D 等距投影。
 
-**B5 木梯放下形状仍粗糙** → **t519**（R19.1 本轮）
+**B5 木梯放下形状仍粗糙** → ✅✅ t519 已完成（commit fix(geom): ladder texture fill —— 满格贴图修「放下形状上下宽粗糙」）
 - 用户：「放下来的形状还是之前的，上下部分非常宽，粗糙，能不能直接替换？」。拿手上 pack icon 已 OK，但放下几何形状没改。
 - 查 partialblockgeometry Ladder：单片贴墙 quad 比例（上下应窄、贴墙薄板）。t501 换了贴图但几何形状没改。
+- ✅ 根因：单片贴墙 quad 几何本身即 MC 1.0 ladder 正确做法（薄板贴墙 + cutout 梯级，单面贴图双面可见），问题在贴图比例 —— 旧贴图纵轨居中瓦片中央 8/16 宽（x=4/5,10/11）+ 两侧各 4/16 透明留白 → 整张贴图铺满 face 后梯子只显在格中心半宽、两侧大块透明 → 观感「格中央小梯图标、粗糙上下宽」。
+- ✅ 修：tools/build_ladder.py 改纵轨贴瓦片两侧（x=2/3,12/13）+ 横梯级满铺轨间 + 4 道梯级等距覆盖全高 → 整张贴图「满格读作一把梯子」，铺满 face 后梯子铺满整格宽（机制等价 MC 1.0 ladder 贴图：轨靠边 + rung 满轨间）。重建 atlas.png + icon_ladder.png。几何不变（已是 MC 1.0 正确），同步 partialblockgeometry/hotbar/CMakeLists/build_atlas/build_cube_icons 注释。
 
 **B7 挖草方块/泥土没声音** → **t520**（R19.1 本轮）
 - 用户：「挖草方块跟泥土没有声音，挖树叶还有橡木原木都有声音」。
