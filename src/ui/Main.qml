@@ -5142,33 +5142,59 @@ Window {
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(-0.22, -0.90, 0)
                                     scale: Qt.vector3d(0.36, 0.60, 0.36)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
                                 }
                                 Model {
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0.22, -0.90, 0)
                                     scale: Qt.vector3d(0.36, 0.60, 0.36)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
                                 }
                                 // 躯干（铁灰宽体）：local y center +0.05。
                                 Model {
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 0.05, 0)
                                     scale: Qt.vector3d(0.95, 1.05, 0.65)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
+                                }
+                                // t195 三轮 铁锈斑（机制等价 MC 铁傀儡铁质带锈斑；§9 原创纯色）：深铁灰主体 + 锈橙棕
+                                //   #6b4a2f 小斑块贴在前胸 / 腿侧，使铁傀儡读作「生锈铁块」而非「粗雪人」（用户「太白像雪人」）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.18, 0.30, 0.34)   // 前胸右锈斑
+                                    scale: Qt.vector3d(0.18, 0.16, 0.03)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#6b4a2f") }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.20, -0.05, 0.34)  // 前胸左锈斑（错位）
+                                    scale: Qt.vector3d(0.14, 0.20, 0.03)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#6b4a2f") }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.30, -0.55, 0)     // 右腿侧锈斑
+                                    scale: Qt.vector3d(0.06, 0.22, 0.40)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#6b4a2f") }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.30, -0.70, 0)    // 左腿侧锈斑
+                                    scale: Qt.vector3d(0.06, 0.16, 0.34)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#6b4a2f") }
                                 }
                                 // 双臂（铁灰长臂，机制等价 MC 铁傀儡重拳长臂）：local y center +0.10，左右 ±0.62。
                                 Model {
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(-0.62, 0.10, 0)
                                     scale: Qt.vector3d(0.28, 0.78, 0.45)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
                                 }
                                 Model {
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0.62, 0.10, 0)
                                     scale: Qt.vector3d(0.28, 0.78, 0.45)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#c8c8d0") }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#7d848c") }
                                 }
                                 // 南瓜头（橙色）：local y center +0.95。
                                 Model {
