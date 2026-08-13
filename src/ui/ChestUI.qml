@@ -138,7 +138,13 @@ Item {
     function addRightDragSlot(key) { InventoryOps.addRightDragSlot(root, key) }
     // t205 右键拖拽绿框高亮：rightDragHasKey 判本格是否在 rightDragSlots（实际放了物的格集）。
     function rightDragHasKey(key) { return InventoryOps.rightDragHasKey(root, key) }
-    function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
+    // t521 箱子 Shift+左键双向语义：先走 slotShiftLeftChest（main/hotbar→放入箱子；chest→归还背包），
+    //   返回 false（未知组；箱子界面不会出现）才回退到通用 slotShiftLeft（main↔hotbar 整理）。仿熔炉 slotLeft
+    //   的 slotShiftLeftFurnace 优先回退模式。
+    function slotShiftLeft(group, index) {
+        if (InventoryOps.slotShiftLeftChest(root, group, index)) return
+        InventoryOps.slotShiftLeft(root, group, index)
+    }
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
     function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
 
@@ -270,6 +276,8 @@ Item {
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
                             onTapped: {
+                                // t521：Shift+左键 → chest 槽整栈归还背包（早于双击合并 / 普通左键）。
+                                if (window.shiftHeld) { root.slotShiftLeft("chest", index); return }
                                 // t98 双击合并：400ms 内同槽二次点击 → doMergeSameId。
                                 const key = root.slotKey("chest", index)
                                 const now = Date.now()

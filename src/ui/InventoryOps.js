@@ -474,6 +474,66 @@ function slotShiftLeft(root, group, index) {
     }
 }
 
+// t521 箱子 Shift+左键双向语义（spec「箱子界面 shift+左键物品应放入箱子；反之从箱子槽移入背包」）。
+//   仿工作台 / 熔炉的 Shift+左键双向语义（slotShiftLeftFurnace 同模式）：仅 ChestUI 调用。
+//   caller（ChestUI.slotShiftLeft）先调本函数，返回 true 表已处理（不回退）、false 表「未知组」→ caller 回退
+//   到通用 slotShiftLeft（main↔hotbar 搬运）。箱子界面 main/hotbar/chest 三组均被本函数处理（总返 true），
+//   故通用版本在箱子界面永不被触达 —— 箱子界面不需要 main↔hotbar 整理（那是普通背包 / 生存背包的功能），
+//   也不应走 slotShiftLeft 的护甲装备分支（箱子界面 shift 护甲应入箱子，非装备；装备是 SurvivalInventory 功能）。
+//   - main/hotbar → 整栈放入箱子（addToChest：同 id 合并 → 空槽开新）；箱子满 → 余数留源槽（防丢物）。
+//   - chest → 整栈归还背包（addToAny：main 同 id 合并 → hotbar 同 id → 空槽）；背包满 → 余数留原槽。
+//   t263/t475 main/hotbar 源槽写回时透传 src.durability/src.enchants（VM 组保真：工具 / 护甲 shift 入箱余数回源
+//   不丢耐久 / 附魔）；chest 本地组不持耐久 / 附魔（同 craft/in/fuel/out）→ 写回不传（localWriteSlot 只取前 4 参）。
+function slotShiftLeftChest(root, group, index) {
+    if (!root.hotbar) return false
+    if (group === "main" || group === "hotbar") {
+        const src = readSlot(root, group, index)
+        if (src.id === 0 || src.count <= 0) return true                  // 空槽：已处理（无操作）
+        const remain = addToChest(root, src.id, src.count)
+        writeSlot(root, group, index, remain > 0 ? src.id : 0, remain,
+                  remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0])
+        return true
+    }
+    if (group === "chest") {
+        const src = readSlot(root, "chest", index)
+        if (src.id === 0 || src.count <= 0) return true
+        const remain = root.hotbar.addToAny(src.id, src.count)            // 归还背包（main→hotbar 智能堆叠）
+        writeSlot(root, "chest", index, remain > 0 ? src.id : 0, remain)
+        return true
+    }
+    return false   // 未知组（ChestUI 无此情形）→ caller 回退
+}
+// addToChest：往当前所开箱子智能堆叠放入（同 id 合并 → 空槽开新）；返回未放入数。箱子满 → 余数留源
+//   （slotShiftLeftChest 写回源槽）。仿 Hotbar::addToAny 的多槽泛化（addToAny 只管 main/hotbar；箱子是独立
+//   27 槽容器，须本处遍历）。槽位数读 root.localSlotCount("chest")（ChestUI 声明 = chestStore.slotCount，恒 27），
+//   真值检测兜底（无钩子面板返 0 → 不放入）。
+//   本地组不持耐久 / 附魔（同 craft/in/fuel/out）→ 写回不传 dur/ench（工具罕见进箱子，可接受边角；与既有
+//   chest 槽左键放置 / 拖拽均分写回一致）。
+function addToChest(root, id, count) {
+    const slotCount = root.localSlotCount ? root.localSlotCount("chest") : 0
+    const cap = root.hotbar.maxStackSize(id)
+    let remaining = count
+    // 1) 合并同 id 未满槽（同 id 堆叠至上限）。
+    for (let i = 0; i < slotCount && remaining > 0; ++i) {
+        const cur = readSlot(root, "chest", i)
+        if (cur.id === id && cur.count < cap) {
+            const move = Math.min(cap - cur.count, remaining)
+            writeSlot(root, "chest", i, id, cur.count + move)
+            remaining -= move
+        }
+    }
+    // 2) 开新空槽（同 id 已无处可并 → 散入空槽）。
+    for (let i = 0; i < slotCount && remaining > 0; ++i) {
+        const cur = readSlot(root, "chest", i)
+        if (cur.id === 0) {
+            const move = Math.min(cap, remaining)
+            writeSlot(root, "chest", i, id, move)
+            remaining -= move
+        }
+    }
+    return remaining
+}
+
 // t230 熔炉 Shift+左键智能入出（spec「熔炉 Shift+点击→智能入（可烧物→上格/燃料→下格）/ 出」）。
 //   仅 FurnaceUI 调用：caller（FurnaceUI.slotLeft）先调本函数，返回 true 表已处理（不回退）、false 表
 //   「非炉料 main/hotbar 或未知组」→ caller 回退到通用 slotShiftLeft（main↔hotbar 搬运）。
