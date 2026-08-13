@@ -56,7 +56,10 @@ Item {
         anchors.fill: parent
         visible: source.length > 0
         // 触碰 materialId/rp.active 建立绑定依赖（id 变 / pack 切换 → 重查 pack 源）。
-        source: { root.materialId; rp.active; return rp.itemIconSource(root.materialId) }
+        // t497 三轮复盘：`{ root.materialId; rp.active; return ... }` 裸语句触碰被 qmlcachegen AOT 死代码消除
+        //   （lessons t498/FurnaceUI 三轮同坑）→ pack 激活/切换后依赖不注册、source 永不重查 → 图标恒显自绘
+        //   canvas（用户「护甲/物品图标没替代」真根因）。修：触碰值参与返回（`_a >= 0` 恒真守卫只注册依赖）。
+        source: { const _a = rp.active; const _id = root.materialId; return _id >= 0 && _a >= 0 ? rp.itemIconSource(root.materialId) : "" }
         fillMode: Image.PreserveAspectFit
         smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；MC item 图标为像素艺术）
     }

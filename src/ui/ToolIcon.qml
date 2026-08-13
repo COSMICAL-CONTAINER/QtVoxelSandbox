@@ -48,9 +48,9 @@ Item {
         anchors.fill: parent
         visible: source.length > 0
         // 触碰 tier/toolType/rp.active 建立绑定依赖（任一变 / pack 切换 → 重查 pack 源）。
-        source: { root.tier; root.toolType; rp.active
+        source: { const _a = rp.active; const _t = root.tier; const _tt = root.toolType
                   const id = root.itemIdFromTypeTier(root.toolType, root.tier)
-                  return id ? rp.itemIconSource(id) : "" }
+                  return id >= 0 && _t >= 0 && _tt >= 0 && _a >= 0 ? rp.itemIconSource(id) : "" }
         fillMode: Image.PreserveAspectFit
         smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；MC item 图标为像素艺术）
     }
