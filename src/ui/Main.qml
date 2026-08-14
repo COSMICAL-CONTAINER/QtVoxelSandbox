@@ -1662,6 +1662,16 @@ Window {
         return Qt.rgba(c[0] * tl.r, c[1] * tl.g, c[2] * tl.b, 1.0)
     }
 
+    // t560 护甲腿摆角度（度）：MobModel 几何腿绕髋枢做 X 轴摆动，sw = kLegSwingAmp(0.5 rad) × sin(walkPhase)，
+    //   且 MobModel::setWalkPhase 量化到 12 腿姿/周期（kStep=2π/12，round 对齐）才 rebuild —— 盔甲枢轴必须用
+    //   **同一量化相位**算摆角，否则与几何腿摆错位（最多差半格腿姿）。返回 eulerRotation.x 度数；
+    //   sign = +1 左腿 / -1 右腿（几何 addBoxRot 左腿 +sw、右腿 −sw；QtQuick3D eulerRotation.x 正 = 同几何正角）。
+    function mobArmorLegSwingDeg(phase, sign) {
+        const step = 2 * Math.PI / 12
+        const q = Math.round(phase / step) * step
+        return sign * 0.5 * Math.sin(q) * 57.2958
+    }
+
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }
     // t173/t179 箱子内容存储 VM（按方块世界坐标键控的 27 槽；ChestUI 读写 + onBlockBroken(Chest) 清孤儿）。
@@ -5424,7 +5434,13 @@ Window {
                         //   + 448 个 loops:Infinite SequentialAnimation 每渲染帧推进 —— QML 动画 visible:false 不暂停，
                         //   revision 节流管不住它）。燃烧是稀有瞬态，toggle 时实例化/销毁 churn 可接受。
                         Repeater {
-                            model: entityManager.isBurningAt(index) ? [
+                            // t561 ② 修「白天着火火焰不显」：model 绑定原为裸 `isBurningAt(index) ? [...] : []` ——
+                            //   纯 Q_INVOKABLE 方法调用不建 QML NOTIFY 依赖（lessons t498：返数组的函数调用当模型
+                            //   不自动跟踪该类型 NOTIFY）→ 只在 delegate 创建瞬间求值一次、之后恒 [] → mob 翻入
+                            //   燃烧后火焰永不出现（用户「火焰粒子不见了」）。修：显式触碰 entityManager.revision
+                            //   （同 mobDelegate 其它绑定模式）→ 翻入/翻出 burning 时 revision bump → model 重算 →
+                            //   火舌数组生成 / 清空。可见性（visible）已有 revision 依赖；model 一并补上才闭环。
+                            model: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.isBurningAt(index) ? [
                                 [0.0,      -mobHalfH * 0.65,  mobHalfW,        0],   // 脚前
                                 [0.0,      -mobHalfH * 0.65, -mobHalfW,        1],   // 脚后
                                 [0.0,       0.0,               mobHalfW,        2],   // 腰前
@@ -5432,7 +5448,7 @@ Window {
                                 [-mobHalfW, 0.0,               0.0,             0],   // 左腰
                                 [0.0,       mobHalfH * 0.65,  -mobHalfW,        1],   // 肩后
                                 [0.0,       mobHalfH * 0.95,   0.0,             2]    // 头顶
-                            ] : []
+                            ] : []) : [] }
                             delegate: Node {
                                 position: Qt.vector3d(modelData[0], modelData[1], modelData[2])
                                 // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
@@ -5678,21 +5694,55 @@ Window {
                                     position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.48, 0.50, 0.30)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorChest.armId) }
                                 }
-                                Model { // 护腿（piece 2）
-                                    id: mobArmorLegs
-                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
-                                    visible: armId !== 0
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.46, 0.40, 0.26)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegs.armId) }
+                                // t560 护腿/靴（piece 2/3）随腿 walkPhase 摆动：旧版是静态整块盒（t377 注释「腿摆动
+                                //   烘焙在几何里 → 护腿/靴为静态盒（近似的视觉提示）」）→ 用户「盔甲像固定没跟腿动画」。
+                                //   修：分左/右两腿各作「髋枢 Node」子节点 —— 枢 y=−0.25 与 mobmodel.cpp mobType 4
+                                //   （Shambler）腿枢 hipY 一致，eulerRotation.x = mobArmorLegSwingDeg(walkPhase, ±1) 与
+                                //   MobModel 几何腿同幅同相（同一量化相位，见 mobArmorLegSwingDeg 注释）。盒位/尺寸沿用
+                                //   旧静态盒（护腿整块 (0,-0.30,0)@(0.46,0.40,0.26) / 靴 (0,-0.82,0)@(0.46,0.16,0.26)）
+                                //   按腿拆半到腿心 ±0.11、半宽 0.10（贴 Shambler 腿几何 half 0.11）。随枢旋转 → 腿摆时
+                                //   盔甲同步摆动（不再固定）。NoLighting（红线）；tier 色×受击红闪同旧。
+                                Node { // 左腿盔甲枢轴（髋 y=−0.25；腿心 x=−0.11）
+                                    id: mobArmorLegPivotL
+                                    property int legArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
+                                    property int bootArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
+                                    property real legSwing: { const _r = entityManager.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), 1)) : 0 }
+                                    visible: legArmId !== 0 || bootArmId !== 0
+                                    position: Qt.vector3d(-0.11, -0.25, 0)
+                                    eulerRotation.x: legSwing
+                                    Model { // 左护腿
+                                        visible: parent.legArmId !== 0
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.20, 0.40, 0.26)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegPivotL.legArmId) }
+                                    }
+                                    Model { // 左靴
+                                        visible: parent.bootArmId !== 0
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.20, 0.16, 0.26)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegPivotL.bootArmId) }
+                                    }
                                 }
-                                Model { // 靴子（piece 3）
-                                    id: mobArmorBoots
-                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
-                                    visible: armId !== 0
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.46, 0.16, 0.26)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorBoots.armId) }
+                                Node { // 右腿盔甲枢轴（镜像；右腿摆角反相）
+                                    id: mobArmorLegPivotR
+                                    property int legArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
+                                    property int bootArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
+                                    property real legSwing: { const _r = entityManager.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), -1)) : 0 }
+                                    visible: legArmId !== 0 || bootArmId !== 0
+                                    position: Qt.vector3d(0.11, -0.25, 0)
+                                    eulerRotation.x: legSwing
+                                    Model { // 右护腿
+                                        visible: parent.legArmId !== 0
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.20, 0.40, 0.26)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegPivotR.legArmId) }
+                                    }
+                                    Model { // 右靴
+                                        visible: parent.bootArmId !== 0
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.20, 0.16, 0.26)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegPivotR.bootArmId) }
+                                    }
                                 }
                             }
                         }
@@ -5823,21 +5873,51 @@ Window {
                                     position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.34, 0.50, 0.24)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorChest.armId) }
                                 }
-                                Model { // 护腿（piece 2）
-                                    id: bonesArmorLegs
-                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
-                                    visible: armId !== 0
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0, -0.30, 0); scale: Qt.vector3d(0.30, 0.40, 0.20)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegs.armId) }
+                                // t560 护腿/靴（piece 2/3）随腿 walkPhase 摆动：同 Shambler 段 —— 分左/右两腿各作
+                                //   髋枢 Node（枢 y=−0.25 = mobmodel.cpp mobType 5 腿枢 hipY），eulerRotation.x =
+                                //   mobArmorLegSwingDeg(walkPhase, ±1) 与几何腿同幅同相。Bones 腿心 ±0.07 / 半宽 0.06
+                                //   （瘦骨杆）→ 护甲盒按腿拆到 ±0.07、scale.x=0.14（旧整块 (0.30,*,0.2x) 拆半贴细腿）。
+                                Node { // 左腿盔甲枢轴
+                                    id: bonesArmorLegPivotL
+                                    property int legArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
+                                    property int bootArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
+                                    property real legSwing: { const _r = entityManager.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), 1)) : 0 }
+                                    visible: legArmId !== 0 || bootArmId !== 0
+                                    position: Qt.vector3d(-0.07, -0.25, 0)
+                                    eulerRotation.x: legSwing
+                                    Model { // 左护腿
+                                        visible: parent.legArmId !== 0
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.14, 0.40, 0.20)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegPivotL.legArmId) }
+                                    }
+                                    Model { // 左靴
+                                        visible: parent.bootArmId !== 0
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.14, 0.16, 0.20)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegPivotL.bootArmId) }
+                                    }
                                 }
-                                Model { // 靴子（piece 3）
-                                    id: bonesArmorBoots
-                                    property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
-                                    visible: armId !== 0
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0, -0.82, 0); scale: Qt.vector3d(0.30, 0.16, 0.20)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorBoots.armId) }
+                                Node { // 右腿盔甲枢轴（镜像；摆角反相）
+                                    id: bonesArmorLegPivotR
+                                    property int legArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
+                                    property int bootArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
+                                    property real legSwing: { const _r = entityManager.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), -1)) : 0 }
+                                    visible: legArmId !== 0 || bootArmId !== 0
+                                    position: Qt.vector3d(0.07, -0.25, 0)
+                                    eulerRotation.x: legSwing
+                                    Model { // 右护腿
+                                        visible: parent.legArmId !== 0
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.14, 0.40, 0.20)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegPivotR.legArmId) }
+                                    }
+                                    Model { // 右靴
+                                        visible: parent.bootArmId !== 0
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.14, 0.16, 0.20)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegPivotR.bootArmId) }
+                                    }
                                 }
                             }
                         }

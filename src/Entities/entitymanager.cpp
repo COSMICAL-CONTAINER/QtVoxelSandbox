@@ -482,9 +482,16 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
         // t385：降水（雨/雪/雷）时露天 mob 不燃烧（机制等价 MC 雨天遮日 → 亡灵不燃）—— 见天 + 所在列降水
         //   即视为「无直射日光」。与 fire-timer 灭火（主 tick）互补：日光 burning 由 rain 门控前置、岩浆 / 火点燃
         //   的 fireTimer 由主 tick 雨浇灭。
+        // t561 ① 水覆盖不烧：mob 脚位或身体中心格是水（水边浅水 / 水里）→ 无直射日光（机制等价 MC 亡灵入水
+        //   不燃）。本引擎 Water lightOpacity=0（透光）→ skyLightAt 仍 15 → 旧逻辑水中照样烧；此处显式查水。
+        //   mobFeetInWater（脚位 = floor(pos.y−halfH)）覆盖「水边浅水 / 水中」；body 中心格覆盖深水悬浮。
+        //   ③ 头盔免疫：mob 随机护甲含头盔（armorHelmet>0）→ 白天不燃烧（机制等价 MC 1.0 任何头盔防日光）。
         const bool rainingHere = exposedToSun && world->isPrecipitatingAt(sx, sz);
+        const bool inWater = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)
+                             || (sy >= 0 && sy < worldH && world->blockAt(sx, sy, sz) == BlockRegistry::Water);
         const bool inDaylight = exposedToSun && (skyBrightness > kBurnSkyBrightness)
-                                 && e.mobType != MobStalker && !rainingHere;
+                                 && e.mobType != MobStalker && !rainingHere
+                                 && !inWater && e.armorHelmet == 0;
         if (inDaylight) {
             if (!e.burning) { e.burning = true; dirty = true; } // 翻入燃烧 → bump（QML 显火焰）
             e.burnTimer += aiDt;

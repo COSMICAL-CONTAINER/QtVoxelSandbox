@@ -212,9 +212,16 @@ void PlayerController::setKey(int key, bool pressed)
     if (key == Qt::Key_Shift) {
         const bool canCrouch = (m_mode == Survival || (m_mode == Creative && !m_flying));
         if (pressed && canCrouch) {
+            m_autoCrouch = false; // t559：主动按下 shift → 回到「用户主动蹲」（清自动蹲标记，保留正常蹲语义）
             if (m_moveState != Crouch) setMoveState(Crouch);
         } else if (!pressed) {
-            if (m_moveState == Crouch) setMoveState(Walk);
+            // t559 松 shift 站起判定：头顶无站起空间（1.5 格通道 / 低天花板）→ 自动保持蹲（补 shift），
+            //   直到头顶有空间才自动站（step 内每 tick 复探）。否则直接站起（旧行为）。修「通道里松 shift
+            //   直接站 + 被挤出/穿墙」：不站就不会把 1.8 AABB 塞进 1.5 通道（不嵌入 → extrudeEmbedded 不推）。
+            if (m_moveState == Crouch) {
+                if (canStandUp()) setMoveState(Walk);
+                else m_autoCrouch = true;
+            }
         }
     } else if (key == Qt::Key_W) {
         const bool canSprint = (m_mode == Survival || (m_mode == Creative && !m_flying));
@@ -3870,6 +3877,9 @@ void PlayerController::setMoveState(MoveState s)
         m_height = kCrouchHeight;
         m_eyeHeight = kCrouchEye;
     } else {
+        // t559：切出 Crouch（站起 / 切模式 / 飞行 / respawn / loadSavedState）→ 清自动蹲标记（不再每 tick 复探）。
+        //   注意：若 s==Crouch 但 m_autoCrouch 仍 true（松 shift 自动蹲持续中），此处不清 —— 保持自动蹲态。
+        m_autoCrouch = false;
         m_height = kHeight;
         m_eyeHeight = kEyeHeight;
     }
@@ -3955,6 +3965,65 @@ bool PlayerController::aabbHitsSolid() const
     // t146：委托 overlapSubAABBs（axis<0 仅判命中）。逐格逐 sub-AABB 测试 → 不完整方块精确碰撞
     //   （下半砖只在 y[0,0.5] 挡玩家，上半空气可穿过）。火把 shape=ShapeNone → 无 sub-AABB → 不挡。
     return overlapSubAABBs(-1, nullptr, nullptr);
+}
+
+// t559 站起可行性：以「站起 AABB（kHeight=1.8，脚底 m_pos.y 起）」在当前位置做实体重叠测试（碰撞皮肤内缩
+//   同 overlapSubAABBs，与真正站起后 aabbHitsSolid 的结果一致）。松 shift 站起判定 + 自动蹲每 tick 复探用它：
+//   头顶（1.8 高度内）有任一实体（含下半砖 / 低顶天花板）→ false（不能站，须保持蹲）；全空 → true（可站）。
+//   只读 World（collisionAABBsAt，向下依赖）；无世界 → true（宽松可站）。
+bool PlayerController::canStandUp() const
+{
+    if (!m_world) return true;
+    const float sk = kCollisionSkin;
+    const float fminx = m_pos.x() - kHalfW, fmaxx = m_pos.x() + kHalfW;
+    const float fminy = m_pos.y(),           fmaxy = m_pos.y() + kHeight;
+    const float fminz = m_pos.z() - kHalfW,  fmaxz = m_pos.z() + kHalfW;
+    const float minx = fminx + sk, maxx = fmaxx - sk;
+    const float miny = fminy + sk, maxy = fmaxy - sk;
+    const float minz = fminz + sk, maxz = fmaxz - sk;
+    const int x0 = int(std::floor(fminx)), x1 = int(std::ceil(fmaxx)) - 1;
+    const int y0 = int(std::floor(fminy)), y1 = int(std::ceil(fmaxy)) - 1;
+    const int z0 = int(std::floor(fminz)), z1 = int(std::ceil(fmaxz)) - 1;
+    for (int y = y0; y <= y1; ++y)
+        for (int z = z0; z <= z1; ++z)
+            for (int x = x0; x <= x1; ++x)
+                for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(x, y, z))
+                    if (minx < b.maxX && maxx > b.minX &&
+                        miny < b.maxY && maxy > b.minY &&
+                        minz < b.maxZ && maxz > b.minZ)
+                        return false; // 3 轴严格重叠（同 overlapSubAABBs 判据）→ 站不下
+    return true;
+}
+
+// t559 自动攀爬抬升量（auto-step lift）：扫描当前 footprint（±kHalfW）在 [脚底, 脚底+kAutoStepMax] 高度带内
+//   的所有方块 sub-AABB，取「最高可迈表面顶」（b.maxY ∈ (脚底, 脚底+kAutoStepMax]，footprint 严格重叠）。
+//   返回 = 该顶 − 脚底（>0 可自动攀爬）；无合格障碍 → 0（不自动爬，交玩家跳）。
+//   与旧固定 0.55 抬升的区别：精确到障碍顶 → 半砖（顶 0.5）抬 0.5、蹲态（1.5 高）在 1.5 通道里恰好贴天花板
+//   （抬 0.5 + 蹲 1.5 = 2.0 与天花板底 2.0 贴平，靠 kCollisionSkin 内缩吸收 eps → 可过；旧 0.55 顶头失败）。
+//   整块（顶 1.0 > 0.6）不在扫描带内 → 返回 0（须跳，机制等价 MC auto-step 只对 ≤0.5 台阶生效）。
+float PlayerController::autoStepLift() const
+{
+    if (!m_world || !m_onGround) return 0.0f;
+    const float baseY = m_pos.y();
+    const float maxY = baseY + kAutoStepMax;
+    const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
+    const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
+    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
+    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
+    const int y0 = int(std::floor(baseY)), y1 = int(std::floor(maxY));
+    float bestTop = 0.0f;
+    bool found = false;
+    for (int y = y0; y <= y1; ++y)
+        for (int z = z0; z <= z1; ++z)
+            for (int x = x0; x <= x1; ++x)
+                for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(x, y, z)) {
+                    const float top = b.maxY;
+                    if (top <= baseY + 1e-3f || top > maxY) continue; // 只取「脚底之上、maxStep 内」的顶面
+                    if (!(minx < b.maxX && maxx > b.minX &&
+                          minz < b.maxZ && maxz > b.minZ)) continue;  // footprint 严格重叠（排除仅贴面）
+                    if (!found || top > bestTop) { bestTop = top; found = true; }
+                }
+    return found ? (bestTop - baseY) : 0.0f;
 }
 
 // 沿单轴移动 amount；碰撞则贴面 + eps + 清该轴速度。无世界则自由移动。
@@ -4416,11 +4485,16 @@ void PlayerController::step(qreal dt)
         moveAxis(0, delta.x());
         if (crouchSafe && delta.x() != 0.0f && !hasGroundBelowAt(m_pos.x(), m_pos.z()))
             m_pos.setX(prevX); // 蹲下边缘安全：X 移动后脚下无支撑 → 回滚该轴位移
-        // t163 auto-step X：被低障碍（≤0.5：下半砖 / 楼梯整步 / 活版门合态）挡住且在地面非蹲 → 试抬升 0.55
-        //   走过去（机制等价 MC 自动上半砖 / 楼梯，无需跳）。抬升后顶头或仍走不通 → 还原 Y（不影响正常碰撞）。
-        if (delta.x() != 0.0f && m_pos.x() == prevX && m_onGround && m_moveState != Crouch) {
+        // t163 auto-step X：被低障碍（≤0.5：下半砖 / 楼梯整步 / 活版门合态）挡住且在地面 → 试抬升走过去
+        //   （机制等价 MC 自动上半砖 / 楼梯，无需跳）。t559：① 抬升量改 autoStepLift() 精确到障碍顶 ——
+        //   蹲态（1.5 高）在「1.5 格通道 + 下半砖」组合下抬 0.5 恰好贴天花板可过（旧固定 0.55 顶头失败）；
+        //   ② 取消 `m_moveState != Crouch` 门 —— 蹲态（含 shift 按住 / 自动蹲）也能自动上半砖楼梯（用户
+        //   「半砖楼梯自动上去不用跳」）。抬升后顶头或仍走不通 → 还原 Y（不影响正常碰撞）。
+        const float stepLiftX = (delta.x() != 0.0f && m_pos.x() == prevX && m_onGround)
+                                ? autoStepLift() : 0.0f;
+        if (stepLiftX > 0.0f) {
             const float baseY = m_pos.y();
-            m_pos.setY(baseY + 0.55f);
+            m_pos.setY(baseY + stepLiftX);
             if (!aabbHitsSolid()) {
                 const float prevXs = m_pos.x();
                 moveAxis(0, delta.x());
@@ -4433,10 +4507,12 @@ void PlayerController::step(qreal dt)
         moveAxis(2, delta.z());
         if (crouchSafe && delta.z() != 0.0f && !hasGroundBelowAt(m_pos.x(), m_pos.z()))
             m_pos.setZ(prevZ); // 蹲下边缘安全：Z 移动后脚下无支撑 → 回滚该轴位移
-        // t163 auto-step Z（同 X）：低障碍 + 地面 + 非蹲 → 抬升 0.55 走过去，失败还原。
-        if (delta.z() != 0.0f && m_pos.z() == prevZ && m_onGround && m_moveState != Crouch) {
+        // t163 auto-step Z（同 X）：低障碍 + 地面 → 抬升 autoStepLift() 走过去，失败还原（t559 同上）。
+        const float stepLiftZ = (delta.z() != 0.0f && m_pos.z() == prevZ && m_onGround)
+                                ? autoStepLift() : 0.0f;
+        if (stepLiftZ > 0.0f) {
             const float baseY = m_pos.y();
-            m_pos.setY(baseY + 0.55f);
+            m_pos.setY(baseY + stepLiftZ);
             if (!aabbHitsSolid()) {
                 const float prevZs = m_pos.z();
                 moveAxis(2, delta.z());
@@ -4449,6 +4525,13 @@ void PlayerController::step(qreal dt)
     // t161 嵌入挤出：逐轴解算后若玩家仍被包裹（下落沙 / 放置方块 materialize 在玩家身上），沿最近开放
     //   水平方向推出（向外 not 向上）。先于地面复探 / 窒息判定 → 挤出成功则该 tick 不误判着地 / 窒息。
     extrudeEmbedded();
+    // t559 自动蹲站起复探：松 shift 后自动保持蹲（m_autoCrouch）期间，每 tick 查头顶 —— 有站起空间
+    //   （canStandUp）即自动站起（清自动蹲 + setMoveState(Walk) 复位 AABB 高 / 眼位）。走位 / 半砖楼梯
+    //   抬升后头顶仍不足 → 保持蹲（不误站、不把 1.8 AABB 塞进低顶 → 不被挤出 / 穿墙）。
+    if (m_autoCrouch && m_moveState == Crouch && canStandUp()) {
+        m_autoCrouch = false;
+        setMoveState(Walk);
+    }
     // 稳健地面复探：脚底下方 0.05 有实体即算着地
     const float oy = m_pos.y();
     m_pos.setY(oy - 0.05f);

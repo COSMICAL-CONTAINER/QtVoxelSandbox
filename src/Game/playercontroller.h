@@ -675,6 +675,15 @@ private:
     QVector3D wishHoriz() const;
     void moveAxis(int axis, float amount);
     bool aabbHitsSolid() const;
+    // t559 站起可行性：当前位置以站高 AABB（kHeight=1.8，碰撞皮肤内缩同 overlapSubAABBs）测试是否有实体
+    //   重叠。松 shift 时与自动蹲每 tick 复探用它 —— 头顶无空间 → 保持蹲（自动补 shift），有空间 → 站起。
+    bool canStandUp() const;
+    // t559 自动攀爬抬升量：水平移动被低障碍挡住时，返回「脚底应抬升的高度」（= 挡路障碍的最高可迈表面顶 −
+    //   当前脚底；障碍顶须 ≤ kAutoStepMax）。返回 0 = 不可自动攀爬（高墙 / 无阻碍）。与旧固定 0.55 抬升的
+    //   区别：精确到障碍顶 → 蹲态（1.5 高）在「1.5 格通道 + 下半砖（0.5）→ 抬升 0.5 恰好贴天花板」组合下可
+    //   过（旧 0.55 顶头失败 → 用户「半砖楼梯自动上不去」）；站态抬 0.5 后头部空间不足同样被 aabbHitsSolid
+    //   拦回（不误爬进低顶）。
+    float autoStepLift() const;
     void setCaptured(bool c);
     QPoint windowCenterGlobal() const;
     QVector3D lookDirection() const;             // 视线方向（与相机 eulerRotation 同源）
@@ -902,6 +911,13 @@ private:
     float m_walkPhase = 0.0f;       // 行走相位（弧度；走时累加、2π 回绕；供 QML sin() 算四肢摆角，t45）
     float m_flySpeedMul = 1.0f;     // 飞行速度倍数（默认 1.0；滚轮 ±档调速；有效 = clamp(kFly*mul,4,20)；t159）
     MoveState m_moveState = Walk;   // 移动态（t51；Walk/Sprint/Crouch；仅走路模式有效，飞/Spectator 恒 Walk）
+    // t559 自动蹲（松 shift 后头顶无站起空间 → 自动保持蹲，直到头顶有空间才站）：true = 处于 Crouch 态但
+    //   shift 未按住（不是用户主动蹲，是「松 shift 时 canStandUp()==false」自动补的蹲）。区别语义：
+    //   - shift 按住（m_autoCrouch=false）：用户主动蹲 —— 蹲下边缘安全（防走下边缘）生效、松 W 不退出。
+    //   - 自动蹲（m_autoCrouch=true）：松 shift 后的残留蹲 —— 每 tick 复探头顶，有空间即自动站起；
+    //     边缘安全仍生效（继承 Crouch 态），自动攀爬（auto-step）同样生效（半砖楼梯不用跳）。
+    //   清零时机：setKey 按下 shift（回到主动蹲）、setMoveState 切出 Crouch（站起 / 切模式 / 飞行 / respawn）。
+    bool m_autoCrouch = false;
     float m_height = kHeight;       // 当前 AABB 高（蹲下变 kCrouchHeight=1.5；默认 kHeight=1.8；t51）
     float m_eyeHeight = kEyeHeight; // 当前眼位（蹲下降低到 kCrouchEye；相机 position 据此 → 蹲下相机降低，t51）
     qint64 m_lastSpaceMs = -100000; // 双击空格检测时间戳
@@ -1057,6 +1073,9 @@ private:
     static constexpr float kEyeHeight = 1.62f;
     static constexpr float kCrouchHeight = 1.5f; // 蹲下 AABB 高（spec t51：1.8→1.5）
     static constexpr float kCrouchEye = 1.35f;   // 蹲下眼位（相机随之降低；≈ MC 蹲/站比例）
+    // t559 自动攀爬最高抬升量（格）：半砖/楼梯整步/活版门合态（顶 ≤0.5）都在此内可自动上；整块（顶 1.0）
+    //   超出 → 不自动爬（须跳，机制等价 MC auto-step 只对 ≤0.5 台阶生效）。0.6 给贴面 snap eps 余量。
+    static constexpr float kAutoStepMax = 0.6f;
     // t259 碰撞皮肤（collision skin）：overlapSubAABBs 逐块重叠判定用「向内缩 skin」的有效 AABB。
     //   落地 / 贴墙 snap 为防抖动留了 eps=1e-4 间隙，使身体实际占据 = surface + eps + height，
     //   于是蹲下（1.5）的头顶会以 eps 量探入「精确 1.5 格」通道的天花板（上半砖 / 整砖+下半砖），
