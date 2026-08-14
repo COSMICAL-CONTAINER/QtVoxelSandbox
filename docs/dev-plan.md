@@ -1874,11 +1874,11 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 查：SurvivalInventory 空装备栏（复原生存版）+ 人物 3D 右移 + 跟玩家动作 + 看鼠标指针。
 - 完成：① 空装备槽回归 t497 生存版占位（SurvivalInventory：pack empty_armor_slot_*.png + Canvas 剪影 + MaterialIcon；Inventory tab6：Canvas + MaterialIcon），ArmorSlot3D 移除；② CharacterPreview3D x 右移 1 格（slotSize+6 → slotSize*2+6，两面板）；③ 3D 人物跟玩家动作（walkPhase 四肢摆动 + moveState 蹲姿 + Timer 采样 feetPosition 积分离地高度 → 跳升/收腿）；④⑤ 看鼠标（面板绑 Main.qml cursorTracker.point.globalPosition → bodyYaw 65% + headYaw 35% + headPitch）。
 
-**t552 雪傀儡二轮** ❌❌（t529 部分）
+**t552 雪傀儡二轮** ✅✅ 已完成（commit 2a522df）（t529 部分）
 - 用户：① 底下两个雪块一样大，下面应大一点（雪堆：下大上小）；② 头还是白色雪头没有南瓜头 + 头悬空；③ 没打他莫名倒下死掉。
 - 查：雪傀儡雪块比例（下 0.8 上 0.6 之类）、南瓜头 overlay 仍不可见/悬空、AI 莫名死亡。
 
-**t553 雪球不击退** ❌
+**t553 雪球不击退** ✅✅ 已完成（commit 2a522df）
 - 用户：「雪球打生物不击退，应该像箭一样击退。」
 - 查：雪球（snowball 弹丸）命中 mob 击退逻辑（对比箭 arrow 击退）。
 
@@ -1898,7 +1898,7 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 用户：「精制（金）工具没加，铜工具也没加。现在只有铁镐→钻石镐。」
 - 查：ToolRegistry 加金（tier 4?）/铜工具档。金 tools 机制等价 MC 1.0（金耐久低挖速快）；铜是本工程已有材料。
 
-**t558 雪傀儡 AI 朝向** ❌
+**t558 雪傀儡 AI 朝向** ✅✅ 已完成（commit 2a522df）
 - 用户：「雪傀儡打僵尸应先面向敌对生物再发雪球（现在往脑门后面发）；F3+B 看不到朝向（红线在脑子里被挡）。」
 - 查：aiSnowGolem 发雪球前 yaw 转向目标 + F3+B 朝向线可见性。
 
