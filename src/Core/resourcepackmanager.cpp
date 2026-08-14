@@ -539,21 +539,24 @@ const QList<QPair<int, QString>> &mobEntityMap()
 // t493（R18s 复盘二轮）：LapisOre(93) 刻意不进本映射 —— 用户要它与其他矿石一致走程序绘制 3D 立方体图标
 //   （第一轮映射到 lapis_ore.png 2D 平铺被否决：「创造背包里矿石都是方块的形式」）。
 //   候选顺序 = 探测优先级：item 目录的 vanilla 风格 item/<name>.png 优先（多数包有），block 目录的 <name>.png 兜底。
-// t518（R19.1 三轮）：再次移除 CraftingTable(9) / Furnace(10) 映射 —— 用户第三次改口且明确坚持：「创造背包工作台
-//   跟熔炉图标还是 2D 的，必须弄成 3D … 草方块那些也有方块数据一样能弄出来」。t492（R18s 二轮）曾把 {9,10} 加回
-//   pack 2D item 图（item/<name>.png 优先、block/<name>_front.png 兜底），用户现要 3D 立方体（与草方块同路径
-//   iconFileForBlock → qrc:/textures/icon_crafting_table.png / icon_furnace.png，已存在并已进 qrc）。
-//   彻底移除映射 → blockItemIconSource 返空 → Hotbar::iconSourceForBlock 落到程序生成 3D 立方体图标（顶 + 两侧明暗），
-//   pack 启用也不再覆盖。机制等价 MC 创造方块栏显示方块的 3D 立体图标（非 2D 平面 item icon）。
+// t537（R19.2 回退，2026-08-14）：恢复 CraftingTable(9) / Furnace(10) 映射 —— 用户否决 t518 的 3D 立方体图标
+//   （「做得一坨」），要求换回 2D pack 图（t492 二轮的状态）。候选列表双兜底：item 目录的 <name>.png 优先（多数
+//   包有；用户后续会提供 item/crafting_table.png / furnace.png 直接替代）、block 目录的 <name>_front.png 兜底
+//   （demo 包 1.8.2.2 实测无 item/crafting_table.png 但有 block/crafting_table_front.png / furnace_front.png → 落到
+//   该前贴图 = 用户要的 2D 平面 icon）。加回映射 → blockItemIconSource 命中返 pack 的 file:// URL →
+//   Hotbar::iconSourceForBlock 优先返 pack 2D 图，pack 启用即覆盖 3D 立方体图标。
+// t493 恢复：青金石矿不再映射 → 回落程序绘制 3D 立方体 icon（与其它矿石一致；第一轮误加，二轮复盘撤销）。
+// t413 木梯（Ladder=62，cross 形）：pack 启用时 item 图标用 pack 的 ladder.png（2D 梯子图）覆盖程序
+//   icon_ladder.png（cross 方块 iconFileForBlock 走程序 cross 图 → pack 未覆盖）；放下贴图 tile 78 已由
+//   tileFilenameMap 覆盖（三轮实测）。pack 关闭 → 回退程序 icon_ladder.png。
 const QList<QPair<int, QStringList>> &blockItemIconMap()
 {
     static const QList<QPair<int, QStringList>> kMap = {
-        // t518（R19.1 三轮）：CraftingTable(9) / Furnace(10) 不在本映射 → 恒走程序生成 3D 立方体图标
-        //   （icon_crafting_table / icon_furnace；t492 二轮曾恢复 pack 2D，用户第三次改口要 3D，再次移除）。
-        // t493 恢复：青金石矿不再映射 → 回落程序绘制 3D 立方体 icon（与其它矿石一致；第一轮误加，二轮复盘撤销）。
-        // t413 木梯（Ladder=62，cross 形）：pack 启用时 item 图标用 pack 的 ladder.png（2D 梯子图）覆盖程序
-        //   icon_ladder.png（cross 方块 iconFileForBlock 走程序 cross 图 → pack 未覆盖）；放下贴图 tile 78 已由
-        //   tileFilenameMap 覆盖（三轮实测）。pack 关闭 → 回退程序 icon_ladder.png。
+        // t537 恢复：工作台 / 熔炉 pack 2D 方块前贴图 icon（t518 三轮撤出映射要 3D，用户否决「一坨」回退到 t492 二轮）。
+        //   item/<name>.png 优先（多数包有 / 用户后续会提供），block/<name>_front.png 兜底（demo 包 1.8.2.2 落到 _front）。
+        { 9,  { QStringLiteral("crafting_table.png"), QStringLiteral("crafting_table_front.png") } }, // BlockRegistry::CraftingTable 工作台
+        { 10, { QStringLiteral("furnace.png"),        QStringLiteral("furnace_front.png") } },         // BlockRegistry::Furnace 熔炉
+        // t413 木梯（Ladder=62，cross 形）：pack 启用时 item 图标用 pack 的 ladder.png（2D 梯子图）覆盖程序 icon_ladder.png。
         { 62, { QStringLiteral("ladder.png") } }, // Ladder 木梯（pack item 图标覆盖）
         // t496 床 16 色变体（BedRed=32..BedBlack=39 既存 8 色 + BedWhite=78..BedBrown=85 t455 新增 8 色）。
         //   pack 仅有一张 item/bed.png（红床模板）→ 16 床色全映射到 bed.png；blockItemIconSource 命中床段时按目标

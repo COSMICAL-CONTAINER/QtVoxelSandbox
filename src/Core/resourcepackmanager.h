@@ -114,11 +114,11 @@ public:
     // 包是否启用且存在（与 active() 同源；ensureBuilt 后稳定）。供 image provider / main 判定。
     static bool packActive();
     // t456 方块 item 图标覆盖（静态，供 Hotbar 等 Game 层无实例调用）：pack 启用且 blockId 在「方块→pack item/
-    //   前贴图文件名」映射内（现 16 色床 / 木梯）、且包内 PNG 存在时（item 目录优先、block 目录兜底），
-    //   返 file:// URL；否则空串 → Hotbar::iconSourceForBlock 回退程序生成 icon_<block>.png。工作台/熔炉此前两轮
-    //   反复（t456 加 → 一轮撤 → t492 恢复），t518 三轮再撤出映射（用户第三次改口要 3D 立方体，与草方块同路径
-    //   icon_crafting_table / icon_furnace），pack 启用也不再覆盖。仅 2D 物品图标路径消费；3D 手持立方 / 掉落物
-    //   走 BlockCube+voxelAtlas 另一路径，不受影响。
+    //   前贴图文件名」映射内（现 CraftingTable/Furnace/16 色床/木梯）、且包内 PNG 存在时（item 目录优先、block 目录兜底），
+    //   返 file:// URL；否则空串 → Hotbar::iconSourceForBlock 回退程序生成 icon_<block>.png。工作台/熔炉此前三轮
+    //   反复（t456 加 → 一轮撤 → t492 恢复 → t518 撤要 3D），t537 回退到 t492 的 2D pack 图（用户否决 3D「一坨」），
+    //   候选 item/<name>.png 优先、block/<name>_front.png 兜底（用户后续提供 item PNG 直接替代）。仅 2D 物品图标
+    //   路径消费；3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径，不受影响。
     //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。active=false / 无映射 / 文件缺 → ""。
     static QString blockItemIconSource(int blockId);
 
