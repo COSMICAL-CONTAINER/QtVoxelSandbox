@@ -155,9 +155,9 @@ public:
     // t239 生物基类统一生成入口（猪/牛/羊 + 后续 mob）：mobType=子类 id（0=通用测试生物；t240 pig/cow/sheep
     //   各自 id；掉落/模型据它分流）；color=渲染配色（QML delegate baseColor）；maxHealth=血量上限（≤0 用默认）。
     //   生成即满血、未死、AI wanderTimer=0（tick 首帧即选第一次向）。达 kCap → 跳过 + 告警（防溢出）。
-    //   返槽索引（t529：caller 可据此立即调 setMobYawRad 设生成时朝向；QML 调用忽略返回值无妨）。达 kCap → -1。
+    //   返槽索引（t529：caller 可据此设生成时朝向，见 spawnMobTypedYaw；QML 调用忽略返回值无妨）。达 kCap → -1。
     Q_INVOKABLE int spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth);
-    // t529 spawnMobTyped 的「带生成时朝向」变体（spec「生成时固定朝」）：spawnMobCore 生成 → setMobYawRad 设
+    // t529 spawnMobTyped 的「带生成时朝向」变体（spec「生成时固定朝」）：spawnMobCore 生成 → 设 yawRad
     //   yawRad（朝 caller 指定方向，典型 atan2(-dx,-dz) 朝玩家）→ 一次 emit（同 spawnMobTyped）。供 playercontroller
     //   build 雪傀儡 / 铁傀儡生成时面朝玩家用（让玩家初次见南瓜脸正脸；之后 aiWander 随机选向）。
     //   返槽索引（同 spawnMobTyped）；达 kCap → -1。
