@@ -61,8 +61,9 @@ int BoatManager::findBoatHit(const QVector3D &origin, const QVector3D &dir, floa
     for (size_t i = 0; i < m_boats.size(); ++i) {
         const Boat &b = m_boats[i];
         if (!b.alive) continue; // 跳过空槽（slot-reuse 残留位）
-        // Slab 法 ray-AABB（同 EntityManager::findMobHit）：X/Z 用 kBoatHalfW、Y 用 kBoatHalfH。
-        const float ext[3] = { kBoatHalfW, kBoatHalfH, kBoatHalfW };
+        // Slab 法 ray-AABB（同 EntityManager::findMobHit）：X 用 kBoatHalfW、Y 用 kBoatHalfH、Z 用 kBoatHalfLen
+        //   （t556 矩形碰撞盒匹配船体：X 宽 1.0 / Z 长 1.4 / 高 0.7）。
+        const float ext[3] = { kBoatHalfW, kBoatHalfH, kBoatHalfLen };
         float tmin = 0.0f, tmax = bestDist;
         bool hit = true;
         const float p[3] = { b.pos.x(), b.pos.y(), b.pos.z() };
@@ -137,10 +138,11 @@ bool BoatManager::dismount(World *world, QVector3D &outPlayerFeet)
 bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float pz) const
 {
     if (!world) return false;
-    // 扫船 footprint（[−half, +half]）覆盖的所有格（X/Z 向 floor(min)..floor(max)），Y 取船中心所在格 +
-    // 其上一格（船舱占两格高，防只查单格漏矮墙）。任一格可碰撞 → 挡船。
+    // 扫船 footprint（X [−kBoatHalfW,+kBoatHalfW] × Z [−kBoatHalfLen,+kBoatHalfLen] 的矩形，t556 匹配船体
+    //   X 宽 1.0 / Z 长 1.4）覆盖的所有格，Y 取船中心所在格 + 其上一格（船舱占两格高，防只查单格漏矮墙）。
+    //   任一格可碰撞 → 挡船。
     const int x0 = int(std::floor(px - kBoatHalfW)), x1 = int(std::floor(px + kBoatHalfW));
-    const int z0 = int(std::floor(pz - kBoatHalfW)), z1 = int(std::floor(pz + kBoatHalfW));
+    const int z0 = int(std::floor(pz - kBoatHalfLen)), z1 = int(std::floor(pz + kBoatHalfLen));
     const int cy = int(std::floor(py));
     for (int x = x0; x <= x1; ++x)
         for (int z = z0; z <= z1; ++z) {
@@ -229,22 +231,25 @@ void BoatManager::tick(qreal dt, World *world)
         if (m_playerValid) {
             const float dpx = b.pos.x() - m_playerCenter.x();
             const float dpz = b.pos.z() - m_playerCenter.z();
-            const float dh2 = dpx * dpx + dpz * dpz;
-            // 玩家半宽 0.3 + 船半宽 kBoatHalfW ≈ 接触阈值；水平重叠（dh < 阈）→ 推。
-            const float contactDist = 0.3f + kBoatHalfW;
-            if (dh2 < contactDist * contactDist && dh2 > 1e-6f) {
-                const float dh = std::sqrt(dh2);
-                // 接触分离量 = 把船推到刚好接触距离之外（防 AABB 持续穿叠）。
-                const float push = (contactDist - dh);
-                const float nx = dpx / dh, nz = dpz / dh;
-                const float nxTry = b.pos.x() + nx * push;
-                const float nzTry = b.pos.z() + nz * push;
+            // t556 矩形碰撞盒：接触判定按轴分开 —— 玩家半宽 0.3 + 船半宽/半长（X: kBoatHalfW / Z: kBoatHalfLen）
+            //   为各轴接触阈值；玩家中心落入「船 AABB 外扩玩家半宽」的矩形 → 重叠 → 推。
+            const float cX = 0.3f + kBoatHalfW;
+            const float cZ = 0.3f + kBoatHalfLen;
+            if (std::fabs(dpx) < cX && std::fabs(dpz) < cZ) {
+                // 接触分离量 = 把船推到该轴「刚好接触距离之外」（防 AABB 持续穿叠）；沿玩家 → 船方向分开。
+                const float pushX = dpx != 0.0f ? (dpx > 0.0f ? (cX - dpx) : (-cX - dpx)) : 0.0f;
+                const float pushZ = dpz != 0.0f ? (dpz > 0.0f ? (cZ - dpz) : (-cZ - dpz)) : 0.0f;
                 // 逐轴试推（撞可碰撞方块则该轴不推，防把船推进墙里）。
-                if (!boatFootprintBlocked(world, nxTry, b.pos.y(), b.pos.z())) b.pos.setX(nxTry);
-                if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nzTry)) b.pos.setZ(nzTry);
-                // 给船一小段水平速度（玩家走开后船继续滑）。
-                b.vx += nx * kBoatPushImpulse;
-                b.vz += nz * kBoatPushImpulse;
+                if (pushX != 0.0f && !boatFootprintBlocked(world, b.pos.x() + pushX, b.pos.y(), b.pos.z()))
+                    b.pos.setX(b.pos.x() + pushX);
+                if (pushZ != 0.0f && !boatFootprintBlocked(world, b.pos.x(), b.pos.y(), b.pos.z() + pushZ))
+                    b.pos.setZ(b.pos.z() + pushZ);
+                // 给船一小段水平速度（玩家走开后船继续滑）。t556：冲量 0.08 + 摩擦 5.0 → 滑行 <0.01 格、肉眼不动。
+                const float nlen = std::sqrt(dpx * dpx + dpz * dpz);
+                if (nlen > 1e-6f) {
+                    b.vx += (dpx / nlen) * kBoatPushImpulse;
+                    b.vz += (dpz / nlen) * kBoatPushImpulse;
+                }
                 changed = true;
             }
         }
@@ -367,11 +372,11 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     const float speed = std::sqrt(b.vx * b.vx + b.vz * b.vz);
     const float dx = b.vx * float(dt);
     const float dz = b.vz * float(dt);
-    // 世界边界（半宽外扩防船头穿出）：无 world → 不限。
+    // 世界边界（半宽外扩防船头穿出）：无 world → 不限。t556：X 用 kBoatHalfW / Z 用 kBoatHalfLen（矩形碰撞盒）。
     const float minX = world ? kBoatHalfW : -1e9f;
     const float maxX = world ? float(world->width()) - kBoatHalfW : 1e9f;
-    const float minZ = world ? kBoatHalfW : -1e9f;
-    const float maxZ = world ? float(world->depth()) - kBoatHalfW : 1e9f;
+    const float minZ = world ? kBoatHalfLen : -1e9f;
+    const float maxZ = world ? float(world->depth()) - kBoatHalfLen : 1e9f;
     // X 轴
     if (dx != 0.0f) {
         float nx = b.pos.x() + dx;

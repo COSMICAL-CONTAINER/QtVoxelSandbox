@@ -343,11 +343,17 @@ QVariantList Hotbar::creativeTools() const
     //   × 3 档（木 / 石 / 铁）= 15 件，机制等价 MC 1.0 工具集。按「同类 3 档」分组排列，肉眼易辨。
     //   t472：镐组追加钻石镐（tier 4，采掘 Obsidian 的唯一工具）—— 钻石档仅镐一类（钻石锄 / 斧 / 铲 / 剑留后续），
     //   故只列在镐组 3 档之后（不另起一组），与「同类按 tier 排列」一致。
+    //   t557：金（tier 5）/ 铜（tier 6）工具五类全加 —— 同类 3 档后追加金 / 铜两档（钻石仅镐有，故铜列于金后）。
     return {int(ToolRegistry::PickaxeWood),  int(ToolRegistry::PickaxeStone),  int(ToolRegistry::PickaxeIron), int(ToolRegistry::PickaxeDiamond),
+            int(ToolRegistry::GoldPickaxe),  int(ToolRegistry::CopperPickaxe),
             int(ToolRegistry::HoeWood),      int(ToolRegistry::HoeStone),      int(ToolRegistry::HoeIron),
+            int(ToolRegistry::GoldHoe),      int(ToolRegistry::CopperHoe),
             int(ToolRegistry::AxeWood),      int(ToolRegistry::AxeStone),      int(ToolRegistry::AxeIron),
+            int(ToolRegistry::GoldAxe),      int(ToolRegistry::CopperAxe),
             int(ToolRegistry::ShovelWood),   int(ToolRegistry::ShovelStone),   int(ToolRegistry::ShovelIron),
+            int(ToolRegistry::GoldShovel),   int(ToolRegistry::CopperShovel),
             int(ToolRegistry::SwordWood),    int(ToolRegistry::SwordStone),    int(ToolRegistry::SwordIron),
+            int(ToolRegistry::GoldSword),    int(ToolRegistry::CopperSword),
             // t304 弓（远程武器）：归工具段（maxStack=1，有耐久 384），故入 creativeTools（非 creativeMaterials）。
             //   拾取即满耐庋新弓；创造射箭不消耗耐久 / 箭（但仍需背包有箭才射得出，spec「需箭在背包」）。
             int(ToolRegistry::Bow),
@@ -1676,6 +1682,8 @@ int Hotbar::anvilRepairMaterial(int itemId) const
             case 2:  return int(BlockRegistry::Cobble);        // 石档 → 圆石
             case 3:  return int(RecipeRegistry::IronIngotId);  // 铁档 → 铁锭
             case 4:  return int(RecipeRegistry::DiamondId);    // 钻石档 → 钻石
+            case 5:  return int(RecipeRegistry::GoldIngotId);  // t557 金档 → 金锭
+            case 6:  return int(RecipeRegistry::CopperIngotId); // t557 铜档 → 铜锭
             default: return 0;
             }
         case BlockRegistry::Bow:          return int(RecipeRegistry::StringId);       // 弓 → 线

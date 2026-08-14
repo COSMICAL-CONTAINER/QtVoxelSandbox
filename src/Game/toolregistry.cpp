@@ -49,10 +49,24 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     //   机制对齐 MC 1.0 钻石镐采掘速度）。maxDurability=1561（MC 1.0 钻石镐耐久，铁 250 之上的最高耐久）。
     //   采掘 Obsidian 的唯一工具（Obsidian.minToolTier=4）。追加在末尾（与 ToolId 枚举同序；不重排保向后兼容）。
     /* PickaxeDiamond */ {int(BlockRegistry::Pickaxe), 4, 8.0f, 1561, "pickaxe_diamond", "钻石镐"},
+    // t557 金工具（机制等价 MC 1.0 gold tools：耐久 32 最脆、speedMul 12.0 最快 —— 「快而脆」；tier 5 > 钻石 4 →
+    //   采掘等级等同 / 高于钻石，机制对齐 MC gold mining level = diamond）。剑 speedMul 1.0（武器不挖掘）；锄 1.0（耕地）。
+    /* GoldPickaxe   */ {int(BlockRegistry::Pickaxe), 5, 12.0f,   32, "pickaxe_gold",   "金镐"},
+    /* GoldAxe       */ {int(BlockRegistry::Axe),     5, 12.0f,   32, "axe_gold",       "金斧"},
+    /* GoldShovel    */ {int(BlockRegistry::Shovel),  5, 12.0f,   32, "shovel_gold",    "金铲"},
+    /* GoldSword     */ {int(BlockRegistry::Sword),   5,  1.0f,   32, "sword_gold",     "金剑"},
+    /* GoldHoe       */ {int(BlockRegistry::Hoe),     5,  1.0f,   32, "hoe_gold",       "金锄"},
+    // t557 铜工具（本工程已有材料 CopperIngot，MC 1.0 无铜工具 → 自定：speedMul 5.0 介石 4 / 铁 6 之间、耐久 180 介
+    //   石 131 / 铁 250 之间 —— 「介于石与铁之间的金属档」；tier 6）。剑 speedMul 1.0（武器）；锄 1.0（耕地）。
+    /* CopperPickaxe */ {int(BlockRegistry::Pickaxe), 6,  5.0f,  180, "pickaxe_copper", "铜镐"},
+    /* CopperAxe     */ {int(BlockRegistry::Axe),     6,  5.0f,  180, "axe_copper",     "铜斧"},
+    /* CopperShovel  */ {int(BlockRegistry::Shovel),  6,  5.0f,  180, "shovel_copper",  "铜铲"},
+    /* CopperSword   */ {int(BlockRegistry::Sword),   6,  1.0f,  180, "sword_copper",   "铜剑"},
+    /* CopperHoe     */ {int(BlockRegistry::Hoe),     6,  1.0f,  180, "hoe_copper",     "铜锄"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
-static_assert(int(ToolRegistry::ToolCount) == 19, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+static_assert(int(ToolRegistry::ToolCount) == 29, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
 
 // t348 引擎工具 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 工具段
 //   「MC 1.0.0」列一致）。行索引 = engineToolId - ToolIdBase（与 kTools 同序）。**不重排枚举**（保存档 / 配方
@@ -65,6 +79,10 @@ constexpr int kMcToolId[int(ToolRegistry::ToolCount)] = {
     /* Shears       */ 359,
     /* FishingRod   */ 346, // t401 钓竿（MC 1.0 fishing rod）
     /* PickaxeDiamond */ 278, // t472 钻石镐（MC 1.0 diamond_pickaxe）
+    // t557 金工具 MC 1.0 对齐（gold_sword 283 / gold_shovel 284 / gold_pickaxe 285 / gold_axe 286 / gold_hoe 294）。
+    /* GoldPickaxe   */ 285, /* GoldAxe */ 286, /* GoldShovel */ 284, /* GoldSword */ 283, /* GoldHoe */ 294,
+    // t557 铜工具：MC 1.0 无铜工具（铜 1.17+）→ -1（资源包回退引擎自绘 ToolIcon）。
+    /* CopperPickaxe */ -1, /* CopperAxe */ -1, /* CopperShovel */ -1, /* CopperSword */ -1, /* CopperHoe */ -1,
 };
 static_assert(sizeof(kMcToolId) / sizeof(kMcToolId[0]) == int(ToolRegistry::ToolCount),
               "kMcToolId 行数须与 ToolRegistry::ToolCount 一致；新工具需补一行 MC 1.0 对齐值");
@@ -143,11 +161,15 @@ int ToolRegistry::attackDamage(int itemId)
     const ToolDef *t = tool(itemId);
     if (!t) return kFistDamage; // 空手 / 非工具 → 徒手伤害
     if (t->type == int(BlockRegistry::Sword)) {
-        // MC 1.0 剑伤害：木 4 / 石 5 / 铁 6（HP；1HP=半心）。每档 +1 留金(未来 12 速度档可更高伤害)/钻石档空间。
+        // MC 1.0 剑伤害：木 4 / 石 5 / 铁 6 / 金 4（同木剑脆弱）/ 钻石 7（HP；1HP=半心）。
+        //   每档 +1 的递增仅木→石→铁；金剑因「快而脆」伤害同木剑（MC 1.0 gold sword = 4）。
         switch (t->tier) {
         case 1: return 4; // 木剑（2 心）
         case 2: return 5; // 石剑（2.5 心）
         case 3: return 6; // 铁剑（3 心）
+        case 4: return 7; // 钻石剑（3.5 心；钻石剑本任务未加，防御 / 未来档）
+        case 5: return 4; // 金剑（2 心；机制等价 MC 1.0 gold sword 同木剑伤害）
+        case 6: return 5; // 铜剑（2.5 心；本工程自定 = 石剑级，介于木 / 铁之间）
         default: return 4; // 防御：未知 tier 兜底木剑
         }
     }

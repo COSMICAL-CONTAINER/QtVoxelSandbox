@@ -418,6 +418,17 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x110, QStringLiteral("shears.png")},          // 剪刀
         {0x111, QStringLiteral("fishing_rod.png")},     // 钓鱼竿
         {0x112, QStringLiteral("diamond_pickaxe.png")}, // t472 钻石镐
+        // t557 金工具（MC 1.0 存在 → 现代命名 golden_*，现网资源包普遍有）；铜工具（1.17+ → copper_*，缺则跳过回退自绘）。
+        {0x113, QStringLiteral("golden_pickaxe.png")},  // 金镐
+        {0x114, QStringLiteral("golden_axe.png")},      // 金斧
+        {0x115, QStringLiteral("golden_shovel.png")},   // 金铲
+        {0x116, QStringLiteral("golden_sword.png")},    // 金剑
+        {0x117, QStringLiteral("golden_hoe.png")},      // 金锄
+        {0x118, QStringLiteral("copper_pickaxe.png")},  // 铜镐（1.17+；缺则跳过）
+        {0x119, QStringLiteral("copper_axe.png")},      // 铜斧（缺则跳过）
+        {0x11A, QStringLiteral("copper_shovel.png")},   // 铜铲（缺则跳过）
+        {0x11B, QStringLiteral("copper_sword.png")},    // 铜剑（缺则跳过）
+        {0x11C, QStringLiteral("copper_hoe.png")},      // 铜锄（缺则跳过）
         // —— 材料段（MaterialId；item-ids.md §3-5）——
         {0x200, QStringLiteral("stick.png")},           // 木棒
         {0x201, QStringLiteral("coal.png")},            // 煤炭

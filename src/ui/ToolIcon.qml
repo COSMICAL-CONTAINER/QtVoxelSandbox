@@ -12,7 +12,8 @@ import VoxelSandbox
 //   - toolType 5（剑 Sword）：纵向长刃 + 护手 + 柄（无对角木柄；刃占主体，攻击武器轮廓）。
 //
 // tier 着色头部材质（把手 / 护手恒木色；剑刃全 tier 色）：
-//   tier 1 = 木（褐铜色头）、tier 2 = 石（中灰头）、tier 3 = 铁（银白头）。
+//   tier 1 = 木（褐铜色头）、tier 2 = 石（中灰头）、tier 3 = 铁（银白头）、tier 4 = 钻石（青绿头，t472）、
+//   tier 5 = 金（金黄头）、tier 6 = 铜（铜橙头，均 t557）。
 // 五类共用同一 tier→色映射（材质按 tier 一致，形状按 toolType 区分）。
 //
 // 消费点：Main.qml 的游戏内 hotbar delegate / 光标手持浮动图标 / 掉落实体、Inventory.qml 创造调色板、
@@ -21,7 +22,7 @@ import VoxelSandbox
 // 调用方须同时传 tier（hotbarVM.toolTier）+ toolType（hotbarVM.toolType），缺省 toolType=1（镐）兜底。
 Item {
     id: root
-    property int tier: 1     // 1=木 2=石 3=铁（0 / 越界 → 兜底木色配色）
+    property int tier: 1     // 1=木 2=石 3=铁 4=钻石 5=金 6=铜（0 / 越界 → 兜底木色配色）
     property int toolType: 1 // 1=镐 Pickaxe（默认）/ 2=锄 Hoe / 3=斧 Axe / 4=铲 Shovel / 5=剑 Sword / 6=剪刀 Shears / 7=弓 Bow（0 / 越界 → 兜底镐形）
 
     // t420 资源包物品图标覆盖：pack 启用且该工具在「引擎工具 id → pack item 文件名」映射内、且包内 PNG 存在
@@ -39,6 +40,11 @@ Item {
         // t472 钻石镐脱离「每类 3 档 contiguous」布局（追加在 ToolId 末尾 0x112 保向后兼容）→ tier 4 特例映射，
         //   否则公式 0x100+(tt-1)*3+(tier-1) 对 (Pickaxe=1, tier=4) 错算成 0x103（HoeWood）→ pack 查询错图标。
         if (tt === 1 && t === 4) return 0x112  // 钻石镐 PickaxeDiamond
+        // t557 金（tier 5）/ 铜（tier 6）工具五类全加（追加在 ToolId 末尾 0x113..0x11C，不重排既有枚举保向后兼容）：
+        //   金 0x113+(type-1) / 铜 0x118+(type-1)（type 1=镐 2=锄 3=斧 4=铲 5=剑）。同钻石镐「脱离每类 3 档 contiguous」
+        //   布局 → 特例映射（tier 5/6 的 type 1-5 各映射到追加段 id），否则公式 0x100+(tt-1)*3+(tier-1) 越界错算。
+        if (t === 5 && tt >= 1 && tt <= 5) return 0x113 + (tt - 1)  // 金镐/金锄/金斧/金铲/金剑
+        if (t === 6 && tt >= 1 && tt <= 5) return 0x118 + (tt - 1)  // 铜镐/铜锄/铜斧/铜铲/铜剑
         if (tt < 1 || tt > 5) return 0
         const tier = (t < 1 || t > 3) ? 1 : t
         return 0x100 + (tt - 1) * 3 + (tier - 1)
@@ -92,16 +98,23 @@ Item {
             }
 
             // tier → 头部材质颜色（把手恒木色：通用工具柄；五类同 tier 同色）。
-            //   t472 tier 4 = 钻石（青绿，机制对齐 MC 钻石工具配色）；目前仅镐有钻石档。
-            const head  = root.tier === 4 ? "#4fd9d2"    // 钻石：青绿
+            //   t472 tier 4 = 钻石（青绿，机制对齐 MC 钻石工具配色）；t557 tier 5 = 金（金黄，MC 金工具配色）/
+            //   tier 6 = 铜（铜橙，本工程自定）。
+            const head  = root.tier === 5 ? "#f2c832"    // 金：金黄（MC 1.0 gold tool 配色）
+                         : root.tier === 6 ? "#c87850"    // 铜：铜橙（本工程自定，同铜护甲 / 铜锭配色）
+                         : root.tier === 4 ? "#4fd9d2"    // 钻石：青绿
                          : root.tier === 2 ? "#9a9a9a"    // 石：中灰
                          : root.tier === 3 ? "#d8d8e6"   // 铁：银白
                          : "#9c6b3c"                      // 木：褐铜（默认 / tier 0 兜底）
-            const headDark = root.tier === 4 ? "#2e9a96"
+            const headDark = root.tier === 5 ? "#c8a020"
+                             : root.tier === 6 ? "#9a5a38"
+                             : root.tier === 4 ? "#2e9a96"
                              : root.tier === 2 ? "#5a5a5a"
                              : root.tier === 3 ? "#8a8a9a"
                              : "#5a3a1c"
-            const headLight = root.tier === 4 ? "#8ff0ea"
+            const headLight = root.tier === 5 ? "#ffe080"
+                              : root.tier === 6 ? "#e8a088"
+                              : root.tier === 4 ? "#8ff0ea"
                               : root.tier === 2 ? "#c4c4c4"
                               : root.tier === 3 ? "#f0f0fa"
                               : "#c48a5a"

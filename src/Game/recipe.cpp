@@ -75,6 +75,70 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                          kStickId,                   0,
         0,                          kStickId,                   0 },
       int(ToolRegistry::PickaxeDiamond), 1, 1, "diamond_pickaxe" },
+    // t557 金 / 铜工具配方（机制等价 MC 1.0 gold tool 配方 + 本工程铜锭原料；每类与既有木/石/铁同形，仅换顶行 / 刃口
+    //   材料为金锭 GoldIngotId（0x21F，金原矿冶炼产物）/ 铜锭 CopperIngotId（0x21D，铜原矿冶炼产物））。产物追加在
+    //   ToolId 末尾（0x113..0x11C，不重排既有枚举保向后兼容）。五类各一条金 + 一条铜 = 10 条；形状与既有同类完全
+    //   相同（镐 T 形 / 锄 2 材 / 斧 L 形 / 铲 1 材 / 剑 2 材），仅原料 id 换金属锭 → shaped 逐格比 id 不会互相冲突。
+    // goldPickaxe：3 金锭顶行 + 中列 2 木棒 → 1 金镐（tier 5，speedMul 12.0 最快 / 耐久 32 最脆）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId,
+        0,                            kStickId,                   0,
+        0,                            kStickId,                   0 },
+      int(ToolRegistry::GoldPickaxe), 1, 1, "gold_pickaxe" },
+    // goldHoe：2 金锭顶行 + 中列 2 木棒 → 1 金锄。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, 0,
+        0,                            kStickId,                   0,
+        0,                            kStickId,                   0 },
+      int(ToolRegistry::GoldHoe), 1, 1, "gold_hoe" },
+    // goldAxe：3 金锭 L 形 + 2 木棒 → 1 金斧。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, 0,
+        RecipeRegistry::GoldIngotId, kStickId,                   0,
+        0,                            kStickId,                  0 },
+      int(ToolRegistry::GoldAxe), 1, 1, "gold_axe" },
+    // goldShovel：1 金锭 + 2 木棒纵列 → 1 金铲。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldIngotId, 0, 0,
+        kStickId,                   0, 0,
+        kStickId,                   0, 0 },
+      int(ToolRegistry::GoldShovel), 1, 1, "gold_shovel" },
+    // goldSword：2 金锭纵列 + 1 木棒底 → 1 金剑。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldIngotId, 0, 0,
+        RecipeRegistry::GoldIngotId, 0, 0,
+        kStickId,                   0, 0 },
+      int(ToolRegistry::GoldSword), 1, 1, "gold_sword" },
+    // copperPickaxe：3 铜锭顶行 + 中列 2 木棒 → 1 铜镐（tier 6，speedMul 5.0 / 耐久 180，介石 / 铁之间）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::CopperIngotId, RecipeRegistry::CopperIngotId, RecipeRegistry::CopperIngotId,
+        0,                              kStickId,                     0,
+        0,                              kStickId,                     0 },
+      int(ToolRegistry::CopperPickaxe), 1, 1, "copper_pickaxe" },
+    // copperHoe：2 铜锭顶行 + 中列 2 木棒 → 1 铜锄。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::CopperIngotId, RecipeRegistry::CopperIngotId, 0,
+        0,                              kStickId,                     0,
+        0,                              kStickId,                     0 },
+      int(ToolRegistry::CopperHoe), 1, 1, "copper_hoe" },
+    // copperAxe：3 铜锭 L 形 + 2 木棒 → 1 铜斧。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::CopperIngotId, RecipeRegistry::CopperIngotId, 0,
+        RecipeRegistry::CopperIngotId, kStickId,                     0,
+        0,                              kStickId,                    0 },
+      int(ToolRegistry::CopperAxe), 1, 1, "copper_axe" },
+    // copperShovel：1 铜锭 + 2 木棒纵列 → 1 铜铲。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::CopperIngotId, 0, 0,
+        kStickId,                     0, 0,
+        kStickId,                     0, 0 },
+      int(ToolRegistry::CopperShovel), 1, 1, "copper_shovel" },
+    // copperSword：2 铜锭纵列 + 1 木棒底 → 1 铜剑。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::CopperIngotId, 0, 0,
+        RecipeRegistry::CopperIngotId, 0, 0,
+        kStickId,                     0, 0 },
+      int(ToolRegistry::CopperSword), 1, 1, "copper_sword" },
     // ── 锄（t233）：顶行 2 材料（左 + 中）+ 中列 2 木棒 → 1 锄（有序 3×3，仅工作台）。机制等价 MC 1.0 锄配方。
     //   与镐 T 形的差异：顶行**2**材料（镐为 3），最小包围盒 2×3 vs 镐 3×3 → shaped 匹配包围盒尺寸不同，
     //   不会与镐配方冲突（输入 2 材料 + 2 木棒 → 包围盒 2×3 命中锄、3 材料 + 2 木棒 → 包围盒 3×3 命中镐）。

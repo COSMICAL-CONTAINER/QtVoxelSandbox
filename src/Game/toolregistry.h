@@ -15,14 +15,15 @@
 //
 // 物品 id 分段（与 Hotbar::ItemStack 的 id 字段一致）：
 //   方块段：0 .. BlockRegistry::Count-1（air / 草 / 土 / 石 / 圆石 / 原木 / 木板 / 树叶 / 沙）。
-//   工具段：id >= ToolIdBase（0x100）；5 类工具（镐 / 斧 / 铲 / 剑 / 锄）× 3 档材质（木 / 石 / 铁）= 15 件。
+//   工具段：id >= ToolIdBase（0x100）；5 类工具（镐 / 斧 / 铲 / 剑 / 锄）× 多档材质（木 / 石 / 铁 / 钻石 / 金 / 铜）
+//   + 功能性工具（弓 / 剪刀 / 钓竿）= 29 件。
 // 工具不可堆叠（Hotbar::maxStackSize(id) 对工具段返回 1，t32 已留段）。
 //
-// 耐久模型（spec t263，机制等价 MC 1.0 工具耐久）：每工具一份 maxDurability（按 tier：木 < 石 < 铁），
+// 耐久模型（spec t263，机制等价 MC 1.0 工具耐久）：每工具一份 maxDurability（按材质：木 < 石 < 铁；金最脆、钻石最耐久），
 //   每次有效使用（生存挖掘完成 / 锄耕地 / 剑攻击 / 斧伐木 / 铲掘土）-1，归零即破损（槽位清空、工具消失）。
 //   创造模式不消耗（无限源）。耐久值随工具实例走（Hotbar::ItemStack.durability 字段，工具 count 恒 1 →
 //   每实例独立耐久；背包内搬运经 setStack 显式传 durability 保真，见 hotbar.h）。
-//   maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 的镐 / 锄 / 剑 / 斧 / 铲共享）。
+//   maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250 / 金 32（MC 1.0 gold 最脆）/ 钻石 1561（同 tier 的镐 / 锄 / 剑 / 斧 / 铲共享）；铜 180（本工程自定，介石 / 铁之间）。
 //
 // 挖掘模型（spec t33 + t265 工具速度效果，机制等价 MC 1.0；硬度 / 工具类型 / 掉落门槛走 BlockRegistry::BlockDef）：
 //   - 挖掘耗时 = hardness / speedMul（秒）。
@@ -100,7 +101,25 @@ public:
         //   tier 4 特例映射到 0x112）。配方 = 3 钻石（RecipeRegistry::DiamondId）+ 2 木棒（仅工作台，机制等价
         //   MC 钻石镐配方）。displayName「钻石镐」（§9 通用词；非 MC 专名）。
         PickaxeDiamond = 0x112, // 钻石镐：type=Pickaxe tier 4，speedMul 8.0；采掘 Obsidian 的唯一工具（t472）
-        ToolCount    = 19,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。
+        // t557 金 / 铜工具（机制等价 MC 1.0 gold tools + 本工程已有材料 copper）：**追加在末尾 0x113..0x11C，不重排既有
+        //   枚举**（保存档 / 配方向后兼容 —— 工具段 id 落 player_state JSON + 配方 outputId，重排会破坏旧存档）。
+        //   tier 5 = 金（机制等价 MC 1.0 金工具：**耐久极低（32，MC 1.0 gold durability）+ 挖掘极快（speedMul 12.0）**
+        //   ——「快而脆」，速度全工具最高、耐久全工具最低；金剑伤害 4 = MC 1.0 gold sword（同木剑，脆弱）。tier 5 >
+        //   钻石 tier 4 → 金工具采掘等级等同 / 高于钻石（机制对齐 MC gold mining level = diamond）。
+        //   tier 6 = 铜（本工程已有材料，MC 1.0 无铜工具 → 自定：speedMul 5.0 介石 4 / 铁 6 之间、耐久 180 介石 131 /
+        //   铁 250 之间 ——「介于石与铁之间的金属档」；铜剑伤害 5 = 石剑级）。铜矿需石镐采掘（minTier2）→ 铜工具
+        //   采矿门槛合理（玩家先石镐挖铜 → 铜工具过渡 → 铁 → 金/钻）。QML 配色据 tier：5=金 / 6=铜（同 2D ToolIcon）。
+        GoldPickaxe   = 0x113, // 金镐：type=Pickaxe tier 5，speedMul 12.0（MC 1.0 gold 最快挖掘）；耐久 32（最脆）
+        GoldAxe       = 0x114, // 金斧：type=Axe tier 5，speedMul 12.0
+        GoldShovel    = 0x115, // 金铲：type=Shovel tier 5，speedMul 12.0
+        GoldSword     = 0x116, // 金剑：type=Sword tier 5，speedMul 1.0（不参与挖掘）；攻击 4（MC 1.0 gold sword 同木剑）
+        GoldHoe       = 0x117, // 金锄：type=Hoe tier 5，speedMul 1.0（不参与挖掘；专用耕地）
+        CopperPickaxe = 0x118, // 铜镐：type=Pickaxe tier 6，speedMul 5.0（介石 4 / 铁 6）；耐久 180（介石 131 / 铁 250）
+        CopperAxe     = 0x119, // 铜斧：type=Axe tier 6，speedMul 5.0
+        CopperShovel  = 0x11A, // 铜铲：type=Shovel tier 6，speedMul 5.0
+        CopperSword   = 0x11B, // 铜剑：type=Sword tier 6，speedMul 1.0；攻击 5（石剑级）
+        CopperHoe     = 0x11C, // 铜锄：type=Hoe tier 6，speedMul 1.0
+        ToolCount    = 29,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。19（原）+ 10（金/铜）。
     };
 
     // 工具定义。表行索引 == itemId - ToolIdBase（连续）；详见 toolregistry.cpp kTools。
@@ -108,9 +127,9 @@ public:
     // 匹配「方块要求的采掘工具类型」，故共用一个枚举（归 Core 层）。
     struct ToolDef {
         int type;            // BlockRegistry::ToolType（Pickaxe / Hoe / NoTool）
-        int tier;            // 等级（1=木 2=石 3=铁）；决定能否采掘高阶方块 + 速度倍率（镐）/ 耕地等级（锄）
-        float speedMul;      // 匹配工具时的挖掘速度倍率（>1 → 加速）；锄恒 1.0（不参与挖掘，仅记账）
-        int maxDurability;   // t263 最大耐久（使用次数上限；木 59 / 石 131 / 铁 250）。归零即破损。
+        int tier;            // 材质等级（1=木 2=石 3=铁 4=钻石 5=金 6=铜）；决定能否采掘高阶方块 + 速度倍率（镐）/ 耕地等级（锄）
+        float speedMul;      // 匹配工具时的挖掘速度倍率（>1 → 加速）；锄 / 剑恒 1.0（不参与挖掘，仅记账）
+        int maxDurability;   // t263 最大耐久（使用次数上限；木 59 / 石 131 / 铁 250 / 金 32 / 铜 180 / 钻石 1561）。归零即破损。
         const char *name;    // 内部 / 调试用名（通用词，英文标识符；非面向用户）
         const char *display; // 用户可见中文显示名（UTF-8；PLAN §9 override (b) 通用描述词）
     };
@@ -138,7 +157,7 @@ public:
     static bool canHarvest(quint8 blockId, int itemId);
 
     // t265 持物品攻击伤害（HP；spec「剑→加攻击伤害」）。机制等价 MC 1.0 武器伤害：
-    //   - 剑（type=Sword）：tier 倍率 —— 木 4 / 石 5 / 铁 6（MC 1.0 sword damage）。
+    //   - 剑（type=Sword）：tier 倍率 —— 木 4 / 石 5 / 铁 6 / 金 4（同木剑，快而脆）/ 铜 5（本工程自定）/ 钻石 7（MC 1.0 sword damage）。
     //   - 其它（空手 / 镐 / 斧 / 铲 / 锄）：kFistDamage=1（MC 1.0 徒手 / 非武器工具伤害，剑是唯一武器）。
     //   暴击（玩家滞空下落挥击）由 caller 按 base*3/2 算（attackMob）；本方法只返基础伤害。
     //   非工具 / 越界 → kFistDamage（空手兜底）。玩家可用工具段 id 查（hotbar.selectedItemId）。
@@ -159,9 +178,9 @@ public:
     // 字面量为 UTF-8，由 fromUtf8 解码（与项目既有中文注释 / BlockRegistry::displayName 同源）。
     static QString displayName(int itemId);
 
-    // t263 工具最大耐久（使用次数上限；MC 1.0 经典值：木 59 / 石 131 / 铁 250，同 tier 共享）。
-    //   非工具 / 越界 → 0（无耐久概念）。Hotbar 据本值初始化新工具实例的耐久 + tooltip 显「cur/max」。
-    //   机制等价 MC 1.0 工具耐久（机制对齐，非名词照搬）；金 / 钻石档留后续任务（扩 tier 时追加）。
+    // t263 工具最大耐久（使用次数上限；MC 1.0 经典值：木 59 / 石 131 / 铁 250 / 金 32 / 钻石 1561，同 tier 共享；
+    //   铜 180 本工程自定）。非工具 / 越界 → 0（无耐久概念）。Hotbar 据本值初始化新工具实例的耐久 + tooltip 显「cur/max」。
+    //   机制等价 MC 1.0 工具耐久（机制对齐，非名词照搬）。
     static int maxDurability(int itemId);
 
     // t348 引擎工具 id → MC Java 1.0.0 物品数字 id 的**对齐映射**（资源包加载前置；与 docs/item-ids.md 工具段

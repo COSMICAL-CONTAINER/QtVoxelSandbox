@@ -4147,15 +4147,12 @@ void PlayerController::step(qreal dt)
     //   高速撞硬墙 → 撞毁（breakRiddenBoat 移除船 + emit boatBroken 掉船物品），玩家摆末位船位（不坠虚空）。
     //   玩家脚底 = 船中心（坐船舱），眼位 / 相机自动跟随 position()。骑乘期禁重力 / 跳跃 / 自身移动（船浮水 Y 钉水面）。
     if (m_boatManager && m_boatManager->ridingIndex() >= 0) {
-        // 走步动画驱动（按 WASD 显划船腿摆，松键停；机制等价 MC 船上无走步，但保留腿摆供第三人称可视）。
-        const bool moving = wish.lengthSquared() > 0.001f;
-        const float walk = moving ? kWalk : 0.0f;
-        if (walk != m_moveSpeed) { m_moveSpeed = walk; emit moveSpeedChanged(); }
-        if (m_moveSpeed > 0.1f) {
-            m_walkPhase += m_moveSpeed * float(dt) * kStrideRate;
-            if (m_walkPhase >= 6.28318530718f) m_walkPhase -= 6.28318530718f;
-            emit walkPhaseChanged();
-        }
+        // t556「坐船不禁走路动画（划船时腿手还在动）」（用户报⑤）：坐船时**禁用走路动画** —— 旧版按 WASD
+        //   （wish 非零）把 m_moveSpeed 设 kWalk + 推进 walkPhase → QML walkBlend=1 → 腿手持续摆（划船还摆动 =
+        //   MC 船骑乘不该有的走步动画）。改：骑乘期强制 m_moveSpeed=0 + 不推进 walkPhase → walkBlend=0 → 四肢
+        //   归中性位；坐姿（sitBlend=1）由 QML 独立驱动（大腿水平前伸 + 小腿竖直下垂 = 坐姿），与行走动画解耦。
+        //   脚步音同理（walkPhase 不动 → 不触发），骑乘无走步声。
+        if (m_moveSpeed != 0.0f) { m_moveSpeed = 0.0f; emit moveSpeedChanged(); }
         if (shiftEdge) {
             // 下船：dismount 清骑乘态 + 玩家摆船侧安全位。
             QVector3D feet;

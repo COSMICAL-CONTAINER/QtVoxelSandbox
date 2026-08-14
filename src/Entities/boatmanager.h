@@ -203,12 +203,15 @@ private:
 
     static constexpr int kCap = 64;            // 船数上限（防溢出；船相对稀有，cap 取 mob 量级）
     // 船几何 / 物理常量（机制等价 MC 1.0 boat；手感可玩）：
-    //   boat 三轮「船太小坐不下」（用户报④）：旧 kBoatHalfW=0.6（footprint 1.2×1.2）、视觉船 1.4×0.7，
-    //     船舱内宽 ~0.58 < 玩家半宽 0.3×2=0.6 → 玩家模型塞不进船（肉眼「坐不下」）。放大碰撞盒至 0.8
-    //     （footprint 1.6×1.6，对齐视觉船长 1.6）→ F3+B 盒覆盖整船 + 骑乘命中更宽容。kBoatHalfH 0.5→0.55
-    //     （命中盒 1.1 高，包住 0.4 高船舷 + 坐姿大腿），右键上船仍近身即中。
-    static constexpr float kBoatHalfW    = 0.8f;   // 船 footprint 半宽 / 半长（约 1.6×1.6；碰撞 + 命中盒）
-    static constexpr float kBoatHalfH    = 0.55f;  // 船命中盒半高（1.1 高，略大于视觉船舱 0.65；放宽右键骑乘命中）
+    //   t556「碰撞箱太大」（用户报③）：旧 kBoatHalfW=0.8（footprint 1.6×1.6，整格还大）+ 视觉船 1.6×1.0×0.65
+    //     → 碰撞盒远超船体（X 向 1.6 宽 vs 船体仅 1.0 宽）。改「矩形碰撞盒匹配船体」：X 半宽 kBoatHalfW=0.5
+    //     （footprint X 1.0，对齐船体左右舷 x∈[-0.5,0.5]）+ Z 半长 kBoatHalfLen=0.7（footprint Z 1.4，对齐船头/尾
+    //     z∈[-0.7,0.7]），半高 kBoatHalfH=0.35（高度 0.7，包住船底甲板 -0.2 ~ 舷顶 +0.25，机制等价 MC 1.0 船
+    //     ~1.4×0.45×1.4 碰撞箱量级）。F3+B hitbox scale 同步（2·半宽 / 2·半高 / 2·半长）。骑乘命中盒随碰撞盒
+    //     变小 → 右键上船需更贴近船舷（近身即中，同 t530 前行为；船舱内宽 0.8 仍足容 0.6 宽玩家，不回归「坐不下」）。
+    static constexpr float kBoatHalfW    = 0.5f;   // 船 footprint 半宽（X；footprint 宽 1.0，对齐船体左右舷）
+    static constexpr float kBoatHalfLen  = 0.7f;   // 船 footprint 半长（Z；footprint 长 1.4，对齐船头 / 尾舷）
+    static constexpr float kBoatHalfH    = 0.35f;  // 船命中盒半高（0.7 高，包住船舱底 -0.2 ~ 舷顶 +0.25）
     //   t508 二轮复盘修「整个悬浮在水中」（用户报⑦）：旧 kBoatDraft=0.25 → 船中心 Y = 水面顶 - 0.25（船吃水 0.25），
     //     而船舷顶（model +0.225）恰与水面平齐 → 整条船视觉沉在水面下、只露舷沿 =「悬浮在水中」。改为 0.0：
     //     船中心 Y = 水源格 cell 顶（= 水面顶），船底（model -0.2）略入水 0.2、舷顶（+0.225）出水 0.225 →
@@ -225,7 +228,9 @@ private:
     //   kBoatTurnRate：船头转向速率（度/s；船头平滑转向意图方向，机制等价 MC 船缓转）。
     static constexpr float kBoatSpeed    = 8.0f;
     static constexpr float kBoatAccel    = 4.0f;
-    static constexpr float kBoatFriction = 3.0f;
+    // t556「船太轻」（用户报②）：空船水平摩擦衰减率 3.0 → 5.0（被推后更快停住，配合 kBoatPushImpulse 0.08
+    //   → 推船滑行 <0.01 格、肉眼不动，机制对齐 MC「船重得像浸水木头」）。
+    static constexpr float kBoatFriction = 5.0f;
     static constexpr float kBoatCrashSpeed = 7.0f;
     static constexpr float kBoatTurnRate = 360.0f;
     // t508 玩家推船给的水平速度冲量（blocks/s；每次接触分离时叠入 vx/vz）。机制等价 MC 1.0 船被实体撞开
@@ -236,7 +241,11 @@ private:
     //     ~0.1s 即停 → 玩家撞船后船几乎不动（仅接触分离的瞬时位移、无明显滑行），机制对齐 MC「撞船几乎推不动」。
     //     注：接触分离本身（push 到接触距离外）仍保留（防船被玩家挤进墙里），只是不再给冲量 → 视觉上船不会被
     //     「打飞」只会被「挤开半步」，符合「船重」直觉。
-    static constexpr float kBoatPushImpulse = 0.3f;
+    //   t556「船还太轻（随便推就走，还能推上岸）」（用户报②）：0.3 仍轻 —— 玩家持续顶着船走（按住 W 贴船）时
+    //     接触分离每帧把船「挤出重叠区」= 每帧推一点点，累积起来肉眼「推着走 / 推上岸」。再降冲量到 0.08 +
+    //     kBoatFriction 提到 5.0（空船水平摩擦衰减更快）→ 单次接触只给 ~0.08 blocks/s 冲量、摩擦 0.2s 内停
+    //     （滑行 <0.01 格，肉眼不动）；持续顶推虽仍每帧挤开一点，但速率大幅下降 → 推船「像推浸水木头」。
+    static constexpr float kBoatPushImpulse = 0.08f;
     // t508 二轮复盘修「陆地悬空 + 卡住沉底」（用户报③⑥）：船在无水格（陆地 / 冰面）应有重力 —— 旧 tick 浮水
     //   段无水时 waterSurfaceY 返 fallback（= 当前 pos.y）→ dy=0，船 Y 永不动 → 放陆地悬在放置点（pos.y = 放置
     //   格顶 + 0.75，悬空半格），且骑乘下船摆位算错。加常速重力让陆地船落到支撑面（boatFootprintBlocked 挡实块

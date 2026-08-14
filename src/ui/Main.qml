@@ -1715,16 +1715,21 @@ Window {
     Connections {
         target: boats
         function onBoatBroken(x, y, z, boatType) {
-            const itemId = (boatType === boats.Spruce) ? 0x235 /*SpruceBoatId*/ : 0x234 /*OakBoatId*/
+            // t556「撞坏掉橡木板 / 放云杉船变橡木样」（用户报①）根因排查：分色 / 掉落按变体（Oak/Spruce）分流时
+            //   用实例作用域枚举 `boats.Spruce` —— 与全工程「类型作用域枚举（EntityManager.MobCow / PlayerController.Sprint）」
+            //   风格不一致、实测不可靠（解析为 undefined → `=== boats.Spruce` 恒 false → 一切走 Oak 分支）。改回类型作用域
+            //   `BoatManager.Spruce`（QML_NAMED_ELEMENT 类型名；同全工程既有枚举引用模式），分色 / 掉落分流可靠生效。
+            const itemId = (boatType === BoatManager.Spruce) ? 0x235 /*SpruceBoatId*/ : 0x234 /*OakBoatId*/
             itemEntities.spawnItem(x, y, z, itemId, 1)
         }
         // t535 船撞坏 → 掉木板 + 木棍（非完整船；机制等价 MC 1.0 船高速撞墙损坏 → 3 木板 + 2 木棍）。
         //   boatWrecked 由 breakRiddenBoat（骑乘期高速撞硬墙 / 撞岸边方块，outCrashed=true）发。
         //   木板按变体（Oak→Planks 6 / Spruce→SprucePlanks 86），木棍固定 0x200（StickId；同橡 / 云杉，无变体区分）。
+        //   t556：BoatManager.Spruce 类型作用域枚举（同 onBoatBroken，实例作用域 boats.Spruce 不可靠 → 撞坏恒掉橡木板）。
         //   两次 spawnItem（木板 ×3、木棍 ×2）→ 各 1 次实体（合并由 ItemEntityManager 近邻合并处理，机制等价 MC
         //   掉落物合并）。同一条 Connections 内多 handler 共享 target（boats），勿拆。
         function onBoatWrecked(x, y, z, boatType) {
-            const plankId = (boatType === boats.Spruce) ? 86 /*SprucePlanks*/ : 6 /*Planks*/
+            const plankId = (boatType === BoatManager.Spruce) ? 86 /*SprucePlanks*/ : 6 /*Planks*/
             itemEntities.spawnItem(x, y, z, plankId, 3)   // 木板 ×3（变体对应）
             itemEntities.spawnItem(x, y, z, 0x200 /*StickId*/, 2)  // 木棍 ×2
         }
@@ -2422,8 +2427,10 @@ Window {
                     position: Qt.vector3d(0.02, 0.10, -0.22)     // t266：y 上移让手握柄下段（正握），镐头朝上前方；z=-0.22 脱离手臂 z 包围
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, 28)       // t369 修 Z 符号：正 Z roll 把几何头（+Y）摆向屏幕左（柄下右/头上左对角，类 MC 手持）；旧 -15 反把头摆向右、与「头上左」注释相悖（手本地 X 轴不受手 baseTilt 的 X 旋转影响 → Z 符号直接定头左右）
-                    // 镐头 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白 / 钻石青绿（同 2D ToolIcon 配色）
-                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // 钻石镐青绿（t472）
+                    // 镐头 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白 / 钻石青绿 / 金黄 / 铜橙（同 2D ToolIcon 配色）
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金镐金黄
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜镐铜橙
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // 钻石镐青绿（t472）
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁镐银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石镐中灰
                                                                                                  : "#8a5a2e"                                                   // 木镐褐（默认 / tier 1）
@@ -2465,8 +2472,10 @@ Window {
                     position: Qt.vector3d(0.02, 0.10, -0.22)       // t369：y 对齐镐（0.04→0.10），握把贴手心、与镐一致
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, 28)        // t369：正 Z roll 把锄刃（+Y）摆向屏幕左（柄下右/头上左对角，同镐）
-                    // 头部 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白（同 2D ToolIcon 配色）
-                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁锄银白
+                    // 头部 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白 / 金黄 / 铜橙（同 2D ToolIcon 配色）
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金锄金黄
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜锄铜橙
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁锄银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石锄中灰
                                                                                                  : "#8a5a2e"                                                   // 木锄褐（默认 / tier 1）
                     // 木柄（竖直）：心 (0,-0.05,0)，半长 0.04×0.40×0.04（同 hoe.cpp 木柄 addBox）→ scale 2×半长
@@ -2500,7 +2509,9 @@ Window {
                     position: Qt.vector3d(0.02, 0.10, -0.22)       // t369：y 对齐镐（0.04→0.10），握把贴手心、与镐一致
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, 28)        // t369：正 Z roll 把斧刃（+Y）摆向屏幕左（柄下右/头上左对角，同镐）
-                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁斧银白
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金斧金黄
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜斧铜橙
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁斧银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石斧中灰
                                                                                                  : "#8a5a2e"                                                   // 木斧褐（默认 / tier 1）
                     // 木柄（竖直）：心 (0,-0.05,0)，半长 0.04×0.40×0.04（同 axe.cpp 木柄 addBox）→ scale 2×半长
@@ -2541,7 +2552,9 @@ Window {
                     position: Qt.vector3d(0.02, 0.10, -0.22)       // t369：y 对齐镐（0.04→0.10），握把贴手心、与镐一致
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, 28)        // t369：正 Z roll 把铲斗（+Y）摆向屏幕左（柄下右/头上左对角，同镐）
-                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁铲银白
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金铲金黄
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜铲铜橙
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁铲银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石铲中灰
                                                                                                  : "#8a5a2e"                                                   // 木铲褐（默认 / tier 1）
                     // 木柄（竖直）：心 (0,-0.05,0)，半长 0.04×0.40×0.04（同 shovel.cpp 木柄 addBox）→ scale 2×半长
@@ -2576,7 +2589,9 @@ Window {
                     position: Qt.vector3d(0.02, 0.04, -0.22)     // t369：y 微抬（0.02→0.04），护手贴手心
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(20, -15, 15)       // t369：正 Z roll 把刃尖（+Y）摆向屏幕左（旧 -10 反摆向右）；剑身竖直略前倾、刃尖朝前上
-                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁剑银白
+                    readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金剑金黄
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜剑铜橙
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁剑银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石剑中灰
                                                                                                  : "#8a5a2e"                                                   // 木剑褐（默认 / tier 1）
                     // 剑刃（纵向长刃，tier 金属色）：心 (0,0.10,0)，半长 0.03×0.34×0.025（同 sword.cpp 剑刃 addBox）→ scale 2×半长
@@ -2628,7 +2643,9 @@ Window {
                     eulerRotation: Qt.vector3d(10, 0, 0)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
-                        baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                        baseColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金弓金黄
+                                 : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜弓铜橙
+                                 : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                  : "#8a5a2e"
                     }
@@ -3596,7 +3613,11 @@ Window {
             //   ⚠ 绑定依赖：ridingIndex() 是 Q_INVOKABLE 无 NOTIFY → 直接调不随骑乘切重算。显式读 boats.revision
             //   （NOTIFY=entitiesChanged，tryMount/dismount/clearAll 都发）建依赖 → 上 / 下船时 revision bump →
             //   isRidingBoat / sitBlend 重算 → 腿姿切换（同 boats delegate {revision; posAt} 模式）。
-            readonly property bool isRidingBoat: { const _r = boats.revision; return _r >= 0 ? (player.boatManager ? player.boatManager.ridingIndex() >= 0 : false) : false }
+            //   t556：语句块形式 → 表达式形式（lessons-learned t498：NOTIFY 属性须参与值计算才可靠注册依赖；
+            //   静态 playerModel 节点上语句块形式有漏注册风险，boat revision 高频掩盖过、但统一表达式形式绝后患）。
+            readonly property bool isRidingBoat: boats.revision >= 0
+                                                 ? (player.boatManager ? player.boatManager.ridingIndex() >= 0 : false)
+                                                 : false
             readonly property real sitBlend: playerModel.isRidingBoat ? 1.0 : 0.0
             // t532「坐姿 = 腿与身 90°，非卡地底」复盘：旧 sitThigh/sitKnee=±85°（钝角非直角）+ sitDrop=0.42
             //   → 髋枢降到 feet+0.18，大腿水平时小腿竖直下垂 0.3 → 脚落 feet−0.12（穿船底 / 穿地 =「人卡地底」用户报）。
@@ -3915,7 +3936,9 @@ Window {
                         eulerRotation: Qt.vector3d(0, 20, -35)   // 柄沿小臂方向、镐头斜上，自然手持
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // t472 钻石镐青绿
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金镐金黄
+                                     : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜镐铜橙
+                                     : hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // t472 钻石镐青绿
                                      : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                      : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                      : "#8a5a2e"
@@ -3932,7 +3955,9 @@ Window {
                         eulerRotation: Qt.vector3d(0, 20, -35)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金工具金黄
+                                     : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜工具铜橙
+                                     : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                      : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                      : "#8a5a2e"
                             opacity: playerModel.bodyOpacity
@@ -3948,7 +3973,9 @@ Window {
                         eulerRotation: Qt.vector3d(0, 20, -35)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金工具金黄
+                                     : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜工具铜橙
+                                     : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                      : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                      : "#8a5a2e"
                             opacity: playerModel.bodyOpacity
@@ -3964,7 +3991,9 @@ Window {
                         eulerRotation: Qt.vector3d(0, 20, -35)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金工具金黄
+                                     : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜工具铜橙
+                                     : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                      : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                      : "#8a5a2e"
                             opacity: playerModel.bodyOpacity
@@ -3980,7 +4009,9 @@ Window {
                         eulerRotation: Qt.vector3d(-10, 20, -25)   // 剑身略竖直、刃尖斜上
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金工具金黄
+                                     : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜工具铜橙
+                                     : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                      : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                      : "#8a5a2e"
                             opacity: playerModel.bodyOpacity
@@ -3997,7 +4028,9 @@ Window {
                         eulerRotation: Qt.vector3d(-10, 200, -25)   // 弓竖直、平面斜对相机（Y 180°+ 略偏）
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
+                            baseColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金工具金黄
+                                     : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜工具铜橙
+                                     : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"
                                      : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"
                                      : "#8a5a2e"
                             opacity: playerModel.bodyOpacity
@@ -4458,7 +4491,9 @@ Window {
                             baseColor: {
                                 const m = worldClock.skyLight
                                 const t = hotbarVM.toolTier(entRoot.entId)
-                                return t === 4 ? tintBySkyLight(79/255, 217/255, 210/255, m)
+                                return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金镐金黄
+                                         : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜镐铜橙
+                                         : t === 4 ? tintBySkyLight(79/255, 217/255, 210/255, m)
                                          : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
@@ -4476,7 +4511,9 @@ Window {
                             baseColor: {
                                 const m = worldClock.skyLight
                                 const t = hotbarVM.toolTier(entRoot.entId)
-                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
+                                         : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
                             }
@@ -4493,7 +4530,9 @@ Window {
                             baseColor: {
                                 const m = worldClock.skyLight
                                 const t = hotbarVM.toolTier(entRoot.entId)
-                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
+                                         : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
                             }
@@ -4510,7 +4549,9 @@ Window {
                             baseColor: {
                                 const m = worldClock.skyLight
                                 const t = hotbarVM.toolTier(entRoot.entId)
-                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
+                                         : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
                             }
@@ -4527,7 +4568,9 @@ Window {
                             baseColor: {
                                 const m = worldClock.skyLight
                                 const t = hotbarVM.toolTier(entRoot.entId)
-                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
+                                         : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
                             }
@@ -4544,7 +4587,9 @@ Window {
                             baseColor: {
                                 const m = worldClock.skyLight
                                 const t = hotbarVM.toolTier(entRoot.entId)
-                                return t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
+                                return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
+                                         : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
                             }
@@ -4756,17 +4801,22 @@ Window {
             Repeater {
                 model: boats.count
                 delegate: Node {
-                    visible: { const _r = boats.revision; return _r >= 0 ? (boats.aliveAt(index)) : false }
+                    // t556：visible/position/boatYaw/bt 从语句块形式 `{ const _r = boats.revision; return ... }` 改
+                    //   **表达式形式** `boats.revision >= 0 ? ... : fallback`（lessons-learned t498：NOTIFY 属性须**参与值
+                    //   计算**才可靠注册依赖；语句块形式在静态构建节点上会静默漏注册 → 属性恒初值。boat delegate 虽是
+                    //   Repeater 动态创建、高频 revision 下旧形式「看似工作」，但分色 bt 属低频敏感量 → 统一改表达式形式
+                    //   绝后患）。`boats.Spruce` 实例作用域枚举同样不可靠（t556 根因之一）→ 改类型作用域 BoatManager.Spruce。
+                    visible: boats.revision >= 0 ? boats.aliveAt(index) : false
                     id: boatRoot
                     // 船中心位（C++ 浮水 / 骑乘操控写入；呈现层只读）。绕 Y 转船头朝向（yawAt）。
-                    position: { const _r = boats.revision; return _r >= 0 ? (boats.posAt(index)) : Qt.vector3d(0, 0, 0) }
+                    position: boats.revision >= 0 ? boats.posAt(index) : Qt.vector3d(0, 0, 0)
                     // 船头朝向（度；先读进 property，再喂 eulerRotation —— 块表达式不能作函数实参）。
-                    property real boatYaw: { const _r = boats.revision; return _r >= 0 ? (boats.yawAt(index)) : 0 }
+                    property real boatYaw: boats.revision >= 0 ? boats.yawAt(index) : 0
                     eulerRotation: Qt.vector3d(0, boatRoot.boatYaw, 0)
                     // 变体（Oak→Planks 浅木 / Spruce→SprucePlanks 深木；§9a 原创贴图，区别于 MC 资产）。
                     //   btBlockId 给 BlockCube 按方块查图集瓦片序号 → 每面铺整张木纹 tile（半纹素内缩防渗色）。
-                    property int bt: { const _r = boats.revision; return _r >= 0 ? (boats.boatTypeAt(index)) : 0 }
-                    property int btBlockId: boatRoot.bt === boats.Spruce ? 86 /*SprucePlanks*/ : 6 /*Planks*/
+                    property int bt: boats.revision >= 0 ? boats.boatTypeAt(index) : 0
+                    property int btBlockId: boatRoot.bt === BoatManager.Spruce ? 86 /*SprucePlanks*/ : 6 /*Planks*/
 
                     Component.onCompleted: {
                         if (parent === null) parent = boatHost
@@ -4777,21 +4827,24 @@ Window {
                     //   1 块封闭底板（船底甲板，沉到水面略下挡水不漏）+ 4 面等高舷壁（前后左右整圈，构成碗沿），
                     //   中间（4 壁之间）凹下成舱 = 「四面凸中间凹」的方碗。
                     //   坐标约定：长轴 Z（船头 = -Z 前，eulerRotation.y=boatYaw 对齐行进方向）、宽轴 X、高 Y。
-                    //   boat 三轮「船太小坐不下」（用户报④）：旧总尺寸长 1.4 × 宽 0.7 → 船舱内宽 ~0.58 < 玩家
-                    //     半宽 0.3×2=0.6，玩家模型塞不进船。放大：长 1.6 × 宽 1.0 × 高 ~0.65（舷顶 0.25 / 舱底
-                    //     -0.15）→ 船舱内宽 0.8（足容 0.6 宽玩家 + 坐姿折腿 0.3 前伸），与 kBoatHalfW=0.8 /
-                    //     kBoatHullBottom=0.2 对齐（甲板底面 -0.2 = 船底支撑偏移）。所有块 NoLighting 必备。
+                    //   t556「碰撞箱太大 / 船 4 角闪烁」（用户报③⑥）：(a) 船体总尺寸从 长 1.6×宽 1.0×高 ~0.65 缩到
+                    //     长 1.4×宽 1.0×高 ~0.5（舷顶 0.25 / 舱底 -0.15）→ 与 kBoatHalfLen=0.7 / kBoatHalfW=0.5 /
+                    //     kBoatHalfH=0.35 对齐（footprint 1.4×1.0，碰撞盒匹配船体，非整格大）。
+                    //     (b) 四角闪烁根因 = 旧版横壁跨满宽（x∈[-0.5,0.5]）+ 舷壁全长 1.6 → 四角（舷壁段 × 横壁段）
+                    //     两块同材质立方体**空间重叠** → 深度测试交替 → 闪烁。改「横壁跨满宽 + 舷壁只嵌中间（长 1.0）」：
+                    //     四角只被横壁覆盖、舷壁端面与横壁内侧背对背共面 → 无重叠无缝隙（各 Model 摆位见下方）。所有块 NoLighting 必备。
                     //   贴图：BlockCube 按木方面查图集 → Planks(6) 橡木 / SprucePlanks(86) 云杉；baseColorMap = voxelAtlas
                     //   （item entity / 手持方块同源；半纹素内缩防渗色）。无 world → BlockCube 顶点色恒白（全亮，
                     //   船不被地形光场调制，与天光无关 —— 船是实体非地形块）。vertexColorsEnabled 不开（恒白顶点色
                     //   × baseColor × 贴图 = 贴图本色 × baseColor；baseColor 取白色免二次调制）。
                     //
-                    // 船底甲板（封闭整底）：宽 1.0 × 高 0.1 × 长 1.6，沉到水面略下（吃水 -0.1）。船的「碗底」：
-                    //   封闭整面挡住下方水，水不从船舱中间漏上来（spec「船中间不要显示水」）。同时是骑乘玩家的「甲板」。
+                    // 船底甲板（封闭整底）：宽 1.0 × 高 0.1 × 长 1.4（t556 长 1.6→1.4 匹配碰撞盒），沉到水面略下
+                    //   （吃水 -0.1）。船的「碗底」：封闭整面挡住下方水，水不从船舱中间漏上来（spec「船中间不要显示水」）。
+                    //   同时是骑乘玩家的「甲板」。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
                         position: Qt.vector3d(0, -0.15, 0)
-                        scale: Qt.vector3d(1.0, 0.1, 1.6)
+                        scale: Qt.vector3d(1.0, 0.1, 1.4)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
@@ -4806,22 +4859,24 @@ Window {
                     //   修：加一块不透明「舱内封底」紧贴水面之上（顶面 +0.03 > 水面 0 → 深度测试遮水面），尺寸略
                     //   小于舱内（X/Z 内缩 0.1 留舷壁厚度，不超出碗沿）→ 从上俯视只见封底木纹、不见水面。机制对齐
                     //   MC 船（船内为封闭甲板、无水可见；MC 用整船模型自遮，本工程用第二块板显式遮水面网格）。
+                    //   t556：长 1.4→1.0（缩到新船头/尾横壁之间 z∈[-0.5,0.5]，端面与横壁内侧齐平 → 无内部重叠）。
                     //   NoLighting + 白 baseColor（同船底甲板：贴图本色、不被地形光场调制）。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
                         position: Qt.vector3d(0, 0.0, 0)        // 中心贴水面：顶面 +0.025（水面之上）遮水面贴图
-                        scale: Qt.vector3d(0.8, 0.05, 1.4)        // 内缩 0.1 留舷壁；薄板 0.05 高
+                        scale: Qt.vector3d(0.8, 0.05, 1.0)        // 内缩 0.1 留舷壁；薄板 0.05 高
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             baseColor: "#ffffff"
                         }
                     }
-                    // 左舷壁（-X 纵长壁）：宽 0.1 × 高 0.4 × 长 1.6，贴 -X 边。等高于前后舷 → 碗沿连续。
+                    // 左舷壁（-X 纵长壁）：宽 0.1 × 高 0.4 × 长 1.0（t556 从 1.6 缩短：舷壁只嵌船头/船尾两横壁之间，
+                    //   z∈[-0.5,0.5]；横壁跨满宽盖住四角 → 角部无重叠无缝隙），贴 -X 边。等高于前后舷 → 碗沿连续。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
                         position: Qt.vector3d(-0.45, 0.05, 0)
-                        scale: Qt.vector3d(0.1, 0.4, 1.6)
+                        scale: Qt.vector3d(0.1, 0.4, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
@@ -4832,17 +4887,20 @@ Window {
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
                         position: Qt.vector3d(0.45, 0.05, 0)
-                        scale: Qt.vector3d(0.1, 0.4, 1.6)
+                        scale: Qt.vector3d(0.1, 0.4, 1.0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             baseColor: "#ffffff"
                         }
                     }
-                    // 船头舷壁（-Z 端横壁）：跨满宽（连两舷），等高于左右舷 → 碗沿四角闭合。
+                    // 船头舷壁（-Z 端横壁，跨满宽 x∈[-0.5,0.5]）：t556 消除四角闪烁（⑥）—— 旧版横壁跨满宽 + 舷壁也
+                    //   全长 1.6 → 四角（x∈[-0.5,-0.4] 或 [0.4,0.5] × z∈[-0.8,-0.6] 或 [0.6,0.8]）两块同材质立方体
+                    //   **空间重叠** → 深度测试交替 → 闪烁。改「横壁跨满宽 + 舷壁只嵌中间（1.0 长）」→ 四角只被横壁
+                    //   覆盖（舷壁端面与横壁内侧共面、背对背 → 无重叠、无缝隙）。等高于左右舷 → 碗沿四角闭合。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
-                        position: Qt.vector3d(0, 0.05, -0.7)
+                        position: Qt.vector3d(0, 0.05, -0.6)
                         scale: Qt.vector3d(1.0, 0.4, 0.2)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
@@ -4853,7 +4911,7 @@ Window {
                     // 船尾舷壁（+Z 端横壁；与船头对称）。
                     Model {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
-                        position: Qt.vector3d(0, 0.05, 0.7)
+                        position: Qt.vector3d(0, 0.05, 0.6)
                         scale: Qt.vector3d(1.0, 0.4, 0.2)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
@@ -4863,13 +4921,13 @@ Window {
                     }
                     // t508 二轮复盘修「F3+B 船没有碰撞箱」（用户报⑤）：船是实体（BoatManager 命中盒 kBoatHalfW /
                     //   kBoatHalfH），但旧版 F3+B hitbox 只画玩家 / mob / 掉落物（Main.qml 各自 delegate），boatHost
-                    //   Repeater 内未加 → 用户报「船不是实体」。补船 hitbox（WireCube ±0.5 居中 → scale = (2·半W, 2·半H, 2·半W)）
+                    //   Repeater 内未加 → 用户报「船不是实体」。补船 hitbox（WireCube ±0.5 居中 → scale = (2·半W, 2·半H, 2·半L)）
                     //   + 朝向棒（船头 -Z 方向，boatYaw 已在 boatRoot Node 继承）。同 mob hitbox 模式（PLAN §2-F F3 调试叠层）。
-                    //   boat 三轮：kBoatHalfW=0.8 / kBoatHalfH=0.55 → scale=(1.61, 1.11, 1.61) 对齐新碰撞盒。
+                    //   t556：kBoatHalfW=0.5 / kBoatHalfH=0.35 / kBoatHalfLen=0.7 → scale=(1.01, 0.71, 1.41) 对齐新碰撞盒。
                     Model {
                         visible: window.showHitboxes
                         geometry: WireCube {}
-                        scale: Qt.vector3d(1.61, 1.11, 1.61) // 2·kBoatHalfW+0.01 / 2·kBoatHalfH+0.01 / 2·kBoatHalfW+0.01（外扩 0.01 避面重叠）
+                        scale: Qt.vector3d(1.01, 0.71, 1.41) // 2·kBoatHalfW+0.01 / 2·kBoatHalfH+0.01 / 2·kBoatHalfLen+0.01（外扩 0.01 避面重叠）
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
                     }
                     Model {
