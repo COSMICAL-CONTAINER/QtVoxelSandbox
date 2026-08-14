@@ -1869,9 +1869,10 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 用户：① A+B=C 两个输入都应在左边（不是左输入/右输入分开）；② 格子上不要「左输入/右输入/产物」文字；③ 去掉下面三行文字（修复/附魔合并/重命名）和按钮；④ 只显示最上面消耗等级 + 改名；⑤ 等级显示在产物格下绿字（放东西能出产物就显所需等级，改名 1 级起）；⑥ 重命名输入框按 Esc 退不出卡死（要修）。
 - 参考 MC 铁砧：左放铁盔甲+右放铁锭→产物修复（3 铁锭修满，1 锭补 1/3 耐久）；修工具同理。
 
-**t551 生存物品栏 3D 复原** ❌❌❌（t546 做反了）
+**t551 生存物品栏 3D 复原** ✅✅ 已完成（commit d893b1b）
 - 用户：「搞反了！要复原之前生存模式的空装备栏。现在把人物 3D 模型弄掉了。」旁边有个人但偏左（右移 1 格）；人物不会动（要跟随玩家实际动作动）；朝向看鼠标指针（会旋转/头转/身转）；背包物品栏那个 3D 模型应看鼠标。
 - 查：SurvivalInventory 空装备栏（复原生存版）+ 人物 3D 右移 + 跟玩家动作 + 看鼠标指针。
+- 完成：① 空装备槽回归 t497 生存版占位（SurvivalInventory：pack empty_armor_slot_*.png + Canvas 剪影 + MaterialIcon；Inventory tab6：Canvas + MaterialIcon），ArmorSlot3D 移除；② CharacterPreview3D x 右移 1 格（slotSize+6 → slotSize*2+6，两面板）；③ 3D 人物跟玩家动作（walkPhase 四肢摆动 + moveState 蹲姿 + Timer 采样 feetPosition 积分离地高度 → 跳升/收腿）；④⑤ 看鼠标（面板绑 Main.qml cursorTracker.point.globalPosition → bodyYaw 65% + headYaw 35% + headPitch）。
 
 **t552 雪傀儡二轮** ❌❌（t529 部分）
 - 用户：① 底下两个雪块一样大，下面应大一点（雪堆：下大上小）；② 头还是白色雪头没有南瓜头 + 头悬空；③ 没打他莫名倒下死掉。
