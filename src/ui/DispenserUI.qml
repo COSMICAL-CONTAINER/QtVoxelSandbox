@@ -141,7 +141,47 @@ Item {
     function addRightDragSlot(key) { InventoryOps.addRightDragSlot(root, key) }
     // t205 右键拖拽绿框高亮：rightDragHasKey 判本格是否在 rightDragSlots（实际放了物的格集）。
     function rightDragHasKey(key) { return InventoryOps.rightDragHasKey(root, key) }
-    function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
+    // t549 发射器 Shift+左键双向语义（spec「shift+左键应把物品直接放进去」；同附魔台 slotShiftLeftEnchant /
+    //   箱子 slotShiftLeftChest 模式）：main/hotbar → 整栈并入发射器 9 槽（同 id 合并 → 空槽开新；满 → 余数
+    //   留源槽）；dispenser 槽 → 整栈归还背包（addToAny）；背包满 → 余数留原槽（防丢物）。
+    function slotShiftLeft(group, index) {
+        if (!root.hotbar) return
+        if (group === "main" || group === "hotbar") {
+            const src = InventoryOps.readSlot(root, group, index)
+            if (src.id === 0 || src.count <= 0) return
+            // 并入发射器 9 槽：先同 id 未满槽合并，再空槽开新（同 addToChest 算法，槽位 = dispSlotCount）。
+            const cap = root.hotbar.maxStackSize(src.id)
+            let remaining = src.count
+            for (let i = 0; i < root.dispSlotCount && remaining > 0; ++i) {
+                const cur = InventoryOps.readSlot(root, "dispenser", i)
+                if (cur.id === src.id && cur.count < cap) {
+                    const move = Math.min(cap - cur.count, remaining)
+                    InventoryOps.writeSlot(root, "dispenser", i, src.id, cur.count + move)
+                    remaining -= move
+                }
+            }
+            for (let i = 0; i < root.dispSlotCount && remaining > 0; ++i) {
+                if (InventoryOps.readSlot(root, "dispenser", i).id === 0) {
+                    const move = Math.min(cap, remaining)
+                    InventoryOps.writeSlot(root, "dispenser", i, src.id, move)
+                    remaining -= move
+                }
+            }
+            if (remaining !== src.count) {
+                InventoryOps.writeSlot(root, group, index, remaining > 0 ? src.id : 0, remaining,
+                                      remaining > 0 ? src.durability : 0, remaining > 0 ? src.enchants : [0,0,0,0])
+            }
+            return
+        }
+        if (group === "dispenser") {
+            const src = InventoryOps.readSlot(root, "dispenser", index)
+            if (src.id === 0 || src.count <= 0) return
+            const remain = root.hotbar.addToAny(src.id, src.count)
+            InventoryOps.writeSlot(root, "dispenser", index, remain > 0 ? src.id : 0, remain)
+            return
+        }
+        InventoryOps.slotShiftLeft(root, group, index)
+    }
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
     function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
 

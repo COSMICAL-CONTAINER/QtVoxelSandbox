@@ -150,10 +150,12 @@ Item {
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
     // t110：slotLeft 入口先查 window.shiftHeld → InventoryOps.slotShiftLeft（Shift+左键搬运 anvil↔main↔hotbar）。
+    //   t549：先走 slotShiftLeftAnvil（铁砧专属双向语义：工具/护甲→左槽 0 / 修复材料·附魔书→右槽 1 / anvil
+    //   槽→归背包；同附魔台 slotShiftLeftEnchant 模式）。
     //   t180：可拖拽组（anvil/main/hotbar）双击 → doMergeSameId（拿同类）。resolveClick/resolveRightClick 算法见
     //   InventoryOps（六面板共享，调用点零改动）。t550 耐久 / 附魔透传（curDur/curEnch 取本地槽保真值）。
     function slotLeft(group, index) {
-        if (window.shiftHeld) { InventoryOps.slotShiftLeft(root, group, index); return }
+        if (window.shiftHeld) { slotShiftLeftAnvil(group, index); return }
         // t180：280ms 内同槽二次点击 + 可拖拽组 → 拿同类（doMergeSameId 扫 anvil+main+hotbar 同 id）。
         const key = group + ":" + index
         const now = Date.now()
@@ -182,6 +184,55 @@ Item {
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
         root.hotbar.setHeldEnchants(r.heldEnch)
+    }
+
+    // t549 铁砧 Shift+左键双向语义（spec「shift+左键应把工具直接放进去」；同附魔台 slotShiftLeftEnchant 模式）：
+    //   - main/hotbar 工具 / 护甲（maxDur > 0）→ 整件入左输入槽 0（耐久 / 附魔随实例保真；槽 0 占用不覆盖）。
+    //   - main/hotbar 修复材料（anvilCanRepairMaterial 对槽 0 物品为真）或附魔书（0x227）→ 并入右输入槽 1。
+    //   - anvil 输入槽（0/1）→ 整件归还背包（addToAny）；背包满 → 余数留原槽（防丢物）。
+    //   - 产物槽（index 2）→ 通用退路（preview 槽无 shift 语义）。
+    //   - 其余物品 → 通用 slotShiftLeft（main↔hotbar 整理）。
+    function slotShiftLeftAnvil(group, index) {
+        if (!root.hotbar) return
+        if (group === "main" || group === "hotbar") {
+            const src = InventoryOps.readSlot(root, group, index)
+            if (src.id === 0 || src.count <= 0) return
+            // 工具 / 护甲（有耐久语义的物品）→ 左输入槽 0。
+            if (root.maxDur(src.id) > 0) {
+                const target = InventoryOps.readSlot(root, "anvil", 0)
+                if (target.id !== 0) return                        // 槽 0 占用 → 不覆盖
+                InventoryOps.writeSlot(root, group, index, 0, 0, 0)
+                InventoryOps.writeSlot(root, "anvil", 0, src.id, 1, src.durability, src.enchants)
+                return
+            }
+            // 修复材料（对槽 0 物品）或附魔书 → 右输入槽 1。
+            const left = InventoryOps.readSlot(root, "anvil", 0)
+            const isBook = src.id === 0x227   // RecipeRegistry::EnchantedBookId（同 canMerge 硬编码）
+            if ((left.id !== 0 && root.hotbar.anvilCanRepairMaterial(left.id, src.id)) || isBook) {
+                const target = InventoryOps.readSlot(root, "anvil", 1)
+                if (target.id !== 0 && target.id !== src.id) return // 异物占位 → 不覆盖
+                const cap = root.hotbar.maxStackSize(src.id)
+                const space = cap - target.count
+                if (space <= 0) return
+                const move = Math.min(space, src.count)
+                InventoryOps.writeSlot(root, "anvil", 1, src.id, target.count + move, 0)
+                const remain = src.count - move
+                InventoryOps.writeSlot(root, group, index, remain > 0 ? src.id : 0, remain, 0)
+                return
+            }
+            // 其余 → 通用 main↔hotbar 搬运。
+            InventoryOps.slotShiftLeft(root, group, index)
+            return
+        }
+        if (group === "anvil" && (index === 0 || index === 1)) {
+            const src = InventoryOps.readSlot(root, "anvil", index)
+            if (src.id === 0 || src.count <= 0) return
+            const remain = root.hotbar.addToAny(src.id, src.count, src.durability, src.enchants)
+            InventoryOps.writeSlot(root, "anvil", index, remain > 0 ? src.id : 0, remain,
+                                  remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0])
+            return
+        }
+        InventoryOps.slotShiftLeft(root, group, index)
     }
 
     // ── t79/t98/t108/t167 拖动均分 + t110 Shift/数字键搬运 + t98 双击合并：算法见 InventoryOps
@@ -936,7 +987,7 @@ Item {
                     if (aslot.slotId !== 0) root.takeProduct()
                     return
                 }
-                if (window.shiftHeld) { InventoryOps.slotShiftLeft(root, aslot.group, aslot.index); return }
+                if (window.shiftHeld) { root.slotShiftLeftAnvil(aslot.group, aslot.index); return }
                 // t180：280ms 内同槽二次点击 → doMergeSameId（拿同类；扫 anvil+main+hotbar 同 id）。
                 const key = root.slotKey(aslot.group, aslot.index)
                 const now = Date.now()

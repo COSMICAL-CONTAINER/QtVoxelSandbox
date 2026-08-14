@@ -16,13 +16,15 @@ import "InventoryOps.js" as InventoryOps
 //
 // t515 用户要求「以工作台为蓝本重做」：现版是 shell-mode 选中槽消耗 UI（无背包），右键能开但用户要的是
 //   工作台式「上方功能区 + 底部背包 4 行」布局。本任务把布局换成 CraftingTableUI 蓝本：
-//   - 上区「附魔功能区」（占位，功能后补）：保留 t474 的 3 档位选项槽 + XP/青金石/书架状态条作为占位
-//     附魔入口（消耗机制沿用 t474，真附魔效果归 t475/t476 后续实装）。spec 明确「先做界面，功能后补」。
+//   - 上区「附魔功能区」（t549 重做：真附魔）：左区两输入槽（0=武器/工具槽 + 1=青金石槽）+ 右侧 3 档位
+//     选项（消耗 XP 等级 + **槽 1 青金石**，附魔来源 = UI 输入槽非背包任意；点击 → selectEnchants 同
+//     seed 写入槽 0 物品附魔元数据，t475/t476 管线）。
 //   - 下区「3×9 主物品栏 + 9 hotbar 行」= 底部背包 4 行（与工作台 / 熔炉 / 箱子同布局），玩家可在此放 / 取
 //     背包物品（左键整组 / 右键半份 / 拖动均分 / Shift 搬运 / 双击拿同类，同 CraftingTableUI 全套快捷操作）。
 //
-// 本任务**不**做真附魔（消耗 + 占位 flash 沿用 t474，作为功能区的占位交互；功能后补）。核心交付 = 工作台
-//   蓝本布局 + 底部 4 行背包能放/取物品（物品移动经 InventoryOps 单一权威，与工作台 / 熔炉 / 箱子共享算法）。
+// t549 三修：① Shift+左键把工具 / 青金石直接放进输入槽（slotShiftLeftEnchant 双向语义）+ 三 UI 开时
+//   Shift 不再透传 player（防蹲，Main.qml bagOpen 扩到三 UI）；② 附魔消耗来源 = UI 槽 1 青金石（非背包）；
+//   ③ 书架检测 bookshelfPower 触碰 worldEditRev（放 / 破方块重算，修「放书架显示还是 0」）。
 //
 // 全部 GUI 自绘原创（Rectangle + Text + Canvas 像素图，无外部 MC GUI PNG；§9 override (a)）。
 // 零 MC 专有名词（§9）。宿主负责指针态：打开时 release（光标可见点槽），关闭 → grab。
@@ -41,6 +43,10 @@ Item {
     property int enchantZ: 0
     // 宿主注入：World（countBookshelvesAround 查书架数）。声明为 var 避免类型解析耦合（World 是 C++ 单例）。
     property var theWorld: null
+    // t549 宿主注入：世界栅格编辑版本号（Main.qml 放 / 破方块自增）。bookshelfPower 绑定触碰它 →
+    //   UI 开着时放 / 破书架也能重算书架数（countBookshelvesAround 是 Q_INVOKABLE 无 NOTIFY，
+    //   不触碰则绑定永不重算 → 用户报「旁边放书架显示还是 0」根因）。
+    property int worldEditRev: 0
     // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // 拖出丢弃：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区；同 CraftingTableUI）。
@@ -91,12 +97,28 @@ Item {
     property real lastTapMs: 0
     property string lastTapKey: ""
 
-    // ── t544 本地 enchant 组存储：左武器/工具槽（index 0）+ 青金石槽（index 1）。与 hotbar VM 共享同一光标
+    // ── t544/t549 本地 enchant 组存储：左武器/工具槽（index 0）+ 青金石槽（index 1）。与 hotbar VM 共享同一光标
     //   手持栈 heldBlock/heldCount；左键整组 / 右键半份同 resolveClick / resolveRightClick（InventoryOps 单一
     //   权威）。面板关闭时 returnEnchantToHotbar 把输入槽内容退回背包（同 CraftingTableUI returnCraftToHotbar 模式）。
+    //   t549：**耐久 / 附魔随实例保真**（同 AnvilUI anvilDur/anvilEnch 模式）—— 工具进槽 0 须保住实例耐久，
+    //   附魔后写入的附魔元数据也存这里（enchantEnch[0]），点产物取出时随实例回光标。
     property var enchantSlots:  [0, 0]
     property var enchantCounts: [0, 0]
+    property var enchantDur:    [0, 0]
+    property var enchantEnch:   [[0,0,0,0], [0,0,0,0]]
     property int enchantRev: 0
+
+    // 取槽附魔元数据（数组未初始化防御 → 4 个 0）。
+    function enchAt(idx) {
+        const e = root.enchantEnch[idx]
+        return (Array.isArray(e) && e.length === 4) ? e : [0, 0, 0, 0]
+    }
+    // 槽 0 物品是否已有附魔（任一 packed 非 0）。
+    function slot0HasEnch() {
+        const e = root.enchAt(0)
+        for (let i = 0; i < 4; ++i) if ((e[i] || 0) !== 0) return true
+        return false
+    }
 
     // t544：enchant 两槽参与快捷操作（左键拖动均分 / 双击拿同类 / 右键分半）。声明 enchant 为可拖拽本地组 →
     //   InventoryOps.groupIsDraggable 放行（addDragSlot 收集、redistributeLive 分发）、doMergeSameId 扫 enchant 槽。
@@ -104,28 +126,42 @@ Item {
     // t544：enchant 组槽位数（doMergeSameId 扫描范围）。enchantSlots 长 2（武器/工具 + 青金石）。
     function localSlotCount(group) { return group === "enchant" ? root.enchantSlots.length : 0 }
 
-    // ── t515 / t544 面板专属槽路由：enchant 两槽走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
+    // ── t515 / t544 / t549 面板专属槽路由：enchant 两槽走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
     //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
+    //   t549：local 槽透传耐久 / 附魔（工具进槽 0 保真；附魔结果写入槽 0 的附魔元数据）。
     function localReadSlot(group, index) {
-        if (group === "enchant") return { id: root.enchantSlots[index] || 0, count: root.enchantCounts[index] || 0 }
-        return { id: 0, count: 0 }
+        if (group === "enchant")
+            return { id: root.enchantSlots[index] || 0, count: root.enchantCounts[index] || 0,
+                     durability: root.enchantDur[index] || 0, enchants: root.enchAt(index) }
+        return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0] }
     }
-    function localWriteSlot(group, index, id, count) {
-        if (group === "enchant") { root.enchantSlots[index] = id; root.enchantCounts[index] = count; root.enchantRev++ }
+    function localWriteSlot(group, index, id, count, durability, enchants) {
+        if (group !== "enchant") return
+        root.enchantSlots[index] = id
+        root.enchantCounts[index] = count
+        root.enchantDur[index] = durability || 0
+        const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
+        const arr = root.enchantEnch
+        arr[index] = e.slice()
+        root.enchantEnch = arr
+        root.enchantRev++
     }
     // 关包归还 enchant 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把两槽内容
-    //   addStack 回 hotbar（MC 行为：关附魔台界面把输入槽物品退回背包）。
+    //   addStack 回 hotbar（MC 行为：关附魔台界面把输入槽物品退回背包）。t549 耐久 / 附魔随实例归还。
     function returnEnchantToHotbar() {
         if (!root.hotbar) return
         for (let i = 0; i < root.enchantSlots.length; ++i) {
             const id = root.enchantSlots[i] || 0
             const n = root.enchantCounts[i] || 0
-            if (id !== 0 && n > 0) root.hotbar.addStack(id, n)
+            if (id !== 0 && n > 0)
+                root.hotbar.addStack(id, n, root.enchantDur[i] || 0, root.enchAt(i))
         }
         for (let i = 0; i < root.enchantSlots.length; ++i) {
             root.enchantSlots[i] = 0
             root.enchantCounts[i] = 0
+            root.enchantDur[i] = 0
         }
+        root.enchantEnch = [[0,0,0,0], [0,0,0,0]]
         root.enchantRev++
     }
     function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
@@ -135,10 +171,12 @@ Item {
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
     // t110：slotLeft 入口先查 window.shiftHeld → InventoryOps.slotShiftLeft（Shift+左键搬运 main↔hotbar）。
+    //   t549：Shift+左键先走 slotShiftLeftEnchant（附魔台专属双向语义：可附魔物→槽 0 / 青金石→槽 1 /
+    //   enchant 槽→归背包；同 ChestUI slotShiftLeftChest / FurnaceUI slotShiftLeftFurnace 模式）。
     //   t180：可拖拽组（main/hotbar）双击 → doMergeSameId（拿同类）。resolveClick/resolveRightClick 算法见
     //   InventoryOps（五面板共享，调用点零改动）。
     function slotLeft(group, index) {
-        if (window.shiftHeld) { InventoryOps.slotShiftLeft(root, group, index); return }
+        if (window.shiftHeld) { slotShiftLeftEnchant(group, index); return }
         // t180：280ms 内同槽二次点击 + 可拖拽组 → 拿同类（doMergeSameId 扫 main+hotbar 同 id）。
         const key = group + ":" + index
         const now = Date.now()
@@ -169,6 +207,64 @@ Item {
         root.hotbar.setHeldEnchants(r.heldEnch)
     }
 
+    // t549 附魔台 Shift+左键双向语义（spec「拿镐子按 shift+左键应把工具直接放进附魔台输入槽」）：
+    //   仿 slotShiftLeftChest / slotShiftLeftFurnace 模式（面板专属 dispatch，全组覆盖不回退）：
+    //   - main/hotbar 可附魔物（itemEnchantCategory != None 且尚未附魔）→ 整件入槽 0（耐久随实例保真；
+    //     已附魔物品 MC 1.0 不允许再进附魔台 → 不入（走下方普通搬运语义退路：直接归包）。
+    //   - main/hotbar 青金石（lapisId）→ 整栈并入槽 1（同 id 合并 → 空槽开新；上限 maxStackSize）。
+    //   - enchant 槽 0/1 → 整栈归还背包（addToAny：main 同 id 合并 → hotbar 同 id → 空槽）；背包满 → 余数留原槽。
+    //   - 非青金石非可附魔物 → 回退通用 slotShiftLeft（main↔hotbar 整理，MC 1.0 附魔台界面同背包整理语义）。
+    //   防丢物：并入目标满 / 异物占位 → 余数留源槽（同 addToChest 模式）。
+    function slotShiftLeftEnchant(group, index) {
+        if (!root.hotbar) return
+        if (group === "main" || group === "hotbar") {
+            const src = InventoryOps.readSlot(root, group, index)
+            if (src.id === 0 || src.count <= 0) return
+            // 青金石 → 槽 1（同 id 合并 → 空槽开新；余数留源槽）。
+            if (src.id === root.lapisId) {
+                const target = InventoryOps.readSlot(root, "enchant", 1)
+                if (target.id !== 0 && target.id !== src.id) return   // 异物占位 → 不覆盖
+                const cap = root.hotbar.maxStackSize(src.id)
+                const space = cap - target.count
+                if (space <= 0) return                                // 目标满 → 无操作
+                const move = Math.min(space, src.count)
+                InventoryOps.writeSlot(root, "enchant", 1, src.id, target.count + move, 0)
+                const remain = src.count - move
+                InventoryOps.writeSlot(root, group, index, remain > 0 ? src.id : 0, remain,
+                                      remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0])
+                return
+            }
+            // 可附魔物（工具 / 武器 / 护甲，类别 != None）且槽 0 有物件的「已附魔拒入」守卫 → 入槽 0。
+            const cat = root.hotbar.itemEnchantCategory(src.id)
+            if (cat !== 0) {
+                const target = InventoryOps.readSlot(root, "enchant", 0)
+                if (target.id !== 0) return                           // 槽 0 占用 → 不覆盖（先取出再放）
+                // MC 1.0：已附魔物品不能再进附魔台。src 来自背包（可带附魔）→ 已附魔不入槽。
+                const se = src.enchants
+                for (let i = 0; i < 4; ++i) {
+                    if (Array.isArray(se) && (se[i] || 0) !== 0) return
+                }
+                InventoryOps.writeSlot(root, group, index, 0, 0, 0)
+                InventoryOps.writeSlot(root, "enchant", 0, src.id, 1, src.durability, src.enchants)
+                return
+            }
+            // 非青金石非可附魔 → 通用 main↔hotbar 搬运（同普通背包整理）。
+            InventoryOps.slotShiftLeft(root, group, index)
+            return
+        }
+        if (group === "enchant") {
+            const src = InventoryOps.readSlot(root, "enchant", index)
+            if (src.id === 0 || src.count <= 0) return
+            // 整栈归还背包（addToAny 智能堆叠；背包满 → 余数留原槽，防丢物）。
+            const remain = root.hotbar.addToAny(src.id, src.count, src.durability, src.enchants)
+            InventoryOps.writeSlot(root, "enchant", index, remain > 0 ? src.id : 0, remain,
+                                  remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0])
+            return
+        }
+        // 其它组（无）→ 通用退路。
+        InventoryOps.slotShiftLeft(root, group, index)
+    }
+
     // ── t79/t98/t108/t167 拖动均分 + t110 Shift/数字键搬运 + t98 双击合并：算法见 InventoryOps
     //   （五面板共享）。本处仅薄委托包装，供 QML 信号处理器 / 绑定经 root.xxx 调用（调用点零改动）。
     function slotKey(group, index) { return InventoryOps.slotKey(group, index) }
@@ -189,10 +285,11 @@ Item {
     //   算法已入 InventoryOps，此处不再持有副本。
 
     // ════════════════════════════════════════════════════════════════════════════
-    // ── 占位附魔功能区（t474 沿用；功能后补）──
-    // 3 档位选项槽消耗 XP 等级 + 青金石（点槽 → playerState.spendLevels + hotbar.consumeMaterial）；
+    // ── t549 附魔功能区重做：附魔来源 = UI 输入槽（非背包任意位置）──
+    // 槽 0 = 待附魔工具 / 武器 / 护甲（须可附魔且未附魔）；槽 1 = 青金石（消耗来源，非背包）。
+    // 3 档位选项消耗：XP 等级（playerState.spendLevels）+ **槽 1 青金石**（不再从背包任意扣）。
+    // 点击 enabled 档位 → selectEnchantsPreview 同 seed 复算 → 写入槽 0 物品附魔元数据（t475 管线）。
     // 书架加成据 theWorld.countBookshelvesAround(enchantX/Y/Z) 算 → 提升可选档位。
-    // 本任务**不做真附魔**（消耗 + 占位 flash 沿用 t474 作占位交互；真附魔效果归 t475/t476 后续实装）。
     // 青金石物品 id（RecipeRegistry::LapisId；Core 不依赖 Game 故 hotbar 无导出常量，硬编码 0x236）。
     readonly property int lapisId: 0x236
     // 3 个档位的固定消耗（XP 等级 + 青金石数）：I = (1, 1) / II = (2, 2) / III = (3, 3)。
@@ -203,19 +300,28 @@ Item {
         "锋利", "保护", "效率", "耐久", "时运", "精准", "击退", "火焰附加"
     ]
     property var optionNames: ["附魔 I", "附魔 II", "附魔 III"]
-    // 书架加成（0..15）→ 可选最高档位（1..3）：floor(bookshelves / 2) + 1，钳 [1, 3]。
+    // t549 书架加成（0..15）：触碰 worldEditRev（放 / 破方块自增）—— countBookshelvesAround 是
+    //   Q_INVOKABLE 无 NOTIFY，不触碰则 UI 开着放书架永不重算（用户报「显示还是 0」根因）。
     readonly property int bookshelfPower: {
         if (!theWorld) return 0
-        return theWorld.countBookshelvesAround(enchantX, enchantY, enchantZ)
+        const _e = worldEditRev
+        return _e >= 0 ? theWorld.countBookshelvesAround(enchantX, enchantY, enchantZ) : 0
     }
     readonly property int maxLevel: Math.min(3, Math.max(1, Math.floor(bookshelfPower / 2) + 1))
-    // 当前青金石持有数（hotbar + 主栏跨槽累计；slotRevision / mainRevision 触碰刷新）。
+    // t549 槽 0 待附魔物（id / 耐久；触碰 enchantRev）。空槽 / 青金石 / 不可附魔 → 0。
+    readonly property int enchantItemId: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantSlots[0] || 0) : 0 }
+    // 槽 0 物品可附魔（类别 != None）且未附魔（MC 1.0 已附魔物品不能进附魔台）。
+    readonly property bool itemReady: {
+        const _r = root.enchantRev
+        if (_r < 0 || !root.hotbar) return false
+        if (root.enchantItemId === 0) return false
+        if (root.hotbar.itemEnchantCategory(root.enchantItemId) === 0) return false
+        return !root.slot0HasEnch()
+    }
+    // t549 当前青金石数 = **槽 1 内容**（附魔消耗来源是 UI 输入槽，非背包；spec ②）。触碰 enchantRev。
     readonly property int lapisCount: {
-        if (!hotbar) return 0
-        // qml-touch：revision 触碰参与返回（_sr>=0 / _mr>=0 恒真守卫），防 AOT 死代码消除裸触碰。
-        const _sr = hotbar.slotRevision
-        const _mr = hotbar.mainRevision
-        return (_sr >= 0 && _mr >= 0) ? hotbar.materialCount(lapisId) : 0
+        const _r = root.enchantRev
+        return _r >= 0 ? (root.enchantSlots[1] === root.lapisId ? (root.enchantCounts[1] || 0) : 0) : 0
     }
     // 当前 XP 等级（绑定 playerState.level NOTIFY levelChanged；低频，升级才发）。
     readonly property int playerLevel: playerState ? playerState.level : 0
@@ -232,7 +338,7 @@ Item {
     onEnchantYChanged: if (visible) refreshOptions()
     onEnchantZChanged: if (visible) refreshOptions()
     function refreshOptions() {
-        var seed = (enchantX * 73856093) ^ (enchantY * 19349663) ^ (enchantZ * 83492791) ^ (playerLevel * 2654435761)
+        var seed = (enchantX * 73856093) ^ (enchantY * 19349663) ^ (enchantZ * 83492791) ^ (playerLevel * 2654435761) ^ (enchantItemId * 40503)
         seed = Math.abs(seed) | 0
         var picked = []
         var pool = placeholderNames.slice()
@@ -243,6 +349,39 @@ Item {
             pool.splice(idx, 1)
         }
         optionNames = picked.length === 3 ? picked : ["附魔 I", "附魔 II", "附魔 III"]
+    }
+    // t549 真附魔执行（点击 enabled 档位）：消耗 XP 等级 + **槽 1 青金石**（非背包）→ 同 seed 复算
+    //   selectEnchantsPreview → 写入槽 0 物品的附魔元数据（t475 管线，预览 = 写入）→ 物品带附魔留槽 0
+    //   （玩家左键取走；紫光晕提示已附魔）→ flash + 重投选项名。
+    function doEnchant(slotIdx) {
+        if (!root.hotbar || !root.playerState) return
+        if (!root.itemReady) return
+        const lvlCost = root.levelCosts[slotIdx] || 1
+        const lapCost = root.lapisCosts[slotIdx] || 1
+        if (root.playerLevel < lvlCost || root.lapisCount < lapCost) return
+        // offeredLevel 映射：档位 I/II/III → 8/15/22（机制等价 MC 提供等级随书架 / 档位升）。
+        const offered = [8, 15, 22][slotIdx] || 8
+        const seed = (enchantX * 73856093) ^ (enchantY * 19349663) ^ (enchantZ * 83492791)
+                    ^ (root.enchantItemId * 40503) ^ (slotIdx * 7919) ^ (Date.now() & 0xffff)
+        // 1) 扣 XP（不足 spendLevels 拒 → 全回滚）。
+        if (!root.playerState.spendLevels(lvlCost)) return
+        // 2) 扣槽 1 青金石（余数写回；不足已被上方 lapisCount 门控拦，此处防御）。
+        const remainLapis = Math.max(0, root.lapisCount - lapCost)
+        if (remainLapis > 0) InventoryOps.writeSlot(root, "enchant", 1, root.lapisId, remainLapis, 0)
+        else                  InventoryOps.writeSlot(root, "enchant", 1, 0, 0, 0)
+        // 3) 同 seed 复算选择 → 写入槽 0 附魔元数据（保留耐久）。
+        const cat = root.hotbar.itemEnchantCategory(root.enchantItemId)
+        const picks = root.hotbar.selectEnchantsPreview(cat, offered, Math.abs(seed) | 0)
+        const newEnch = [0, 0, 0, 0]
+        for (let i = 0; i < picks.length && i < 4; ++i) {
+            const m = picks[i]
+            newEnch[i] = ((m.id << 8) | m.level)
+        }
+        InventoryOps.writeSlot(root, "enchant", 0, root.enchantItemId, 1,
+                               root.enchantDur[0] || 0, newEnch)
+        root.justEnchanted = true
+        enchantFlashTimer.restart()
+        root.refreshOptions()
     }
     // ════════════════════════════════════════════════════════════════════════════
 
@@ -397,10 +536,11 @@ Item {
                                 property int idx: index
                                 property int lvlCost: root.levelCosts[index]
                                 property int lapCost: root.lapisCosts[index]
-                                // enabled 条件：档位序号 < maxLevel（书架解锁）且 XP 等级 + 青金石都够消耗。
+                                // t549 enabled 条件：槽 0 有「可附魔且未附魔」物品（itemReady；附魔来源 =
+                                //   UI 输入槽，非背包）+ 档位序号 < maxLevel（书架解锁）+ XP 等级 + 槽 1 青金石都够。
                                 property bool unlocked: index < root.maxLevel
                                 property bool affordable: root.playerLevel >= lvlCost && root.lapisCount >= lapCost
-                                property bool enabled1: unlocked && affordable
+                                property bool enabled1: root.itemReady && unlocked && affordable
                                 width: 190; height: 36
                                 color: enabled1 ? "#5a4a2a" : "#2a2018"
                                 border.color: enabled1 ? "#ffd87a" : "#0a0604"
@@ -436,15 +576,10 @@ Item {
                                 TapHandler {
                                     enabled: optSlot.enabled1
                                     onTapped: {
-                                        // 占位附魔交互（功能后补）：消耗 XP + 青金石 → flash + 重投选项名。
+                                        // t549 真附魔：门控（槽 0 itemReady + 档位解锁 + XP / 槽 1 青金石足）
+                                        //   → doEnchant（消耗 XP + 槽 1 青金石 → selectEnchants 写入槽 0 物品）。
                                         if (!optSlot.enabled1) return
-                                        if (!root.playerState.spendLevels(optSlot.lvlCost)) return
-                                        if (!root.hotbar.consumeMaterial(root.lapisId, optSlot.lapCost)) {
-                                            console.warn("[enchant] lapis consume failed after XP spend")
-                                        }
-                                        root.justEnchanted = true
-                                        enchantFlashTimer.restart()
-                                        root.refreshOptions()
+                                        root.doEnchant(optSlot.idx)
                                     }
                                 }
                             }
@@ -456,7 +591,7 @@ Item {
                 Text {
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 0
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "在附魔台 2 格内放置书架（每 2 个解锁更高档） · 附魔功能待实装"
+                    text: "左槽放工具 / 武器 · 右槽放青金石（Shift+左键快速放入） · 书架 2 格内每 2 个解锁更高档"
                     color: "#aa9888"; font.pixelSize: 10
                 }
 
@@ -753,6 +888,18 @@ Item {
                 visible: { const _r = root.enchantRev; return _r >= 0 ? (root.hotbar.isMaterial(eslot.slotId)) : false }
                 materialId: { const _r = root.enchantRev; return _r >= 0 ? (eslot.slotId) : 0 }
             }
+            // t549 附魔光晕（槽内物品带附魔时浅紫半透明叠层；机制等价 MC 附魔光泽，同 AnvilUI）。
+            Rectangle {
+                anchors.fill: parent
+                visible: {
+                    const _r = root.enchantRev
+                    if (_r < 0 || eslot.slotId === 0) return false
+                    const e = root.enchAt(eslot.index)
+                    return (e[0] || 0) !== 0
+                }
+                color: Qt.rgba(0.55, 0.25, 0.9, 0.30)
+                radius: 3
+            }
         }
         // 栈数量（count>1 显数字）。
         Text {
@@ -773,7 +920,8 @@ Item {
         TapHandler {
             acceptedButtons: Qt.LeftButton
             onTapped: {
-                if (window.shiftHeld) { InventoryOps.slotShiftLeft(root, eslot.group, eslot.index); return }
+                // t549：Shift+左键 → 面板专属双向语义（可附魔物入槽 0 / 青金石入槽 1 / enchant 槽归包）。
+                if (window.shiftHeld) { root.slotShiftLeftEnchant(eslot.group, eslot.index); return }
                 // t180：280ms 内同槽二次点击 → doMergeSameId（拿同类；扫 enchant+main+hotbar 同 id）。
                 const key = root.slotKey(eslot.group, eslot.index)
                 const now = Date.now()
@@ -781,27 +929,28 @@ Item {
                 root.lastTapMs = now
                 root.lastTapKey = key
                 if (isDouble) { InventoryOps.doMergeSameId(root, eslot.group, eslot.index); return }
-                const r = root.resolveClick(eslot.slotId, eslot.slotCount, 0)
+                // t549：耐久 / 附魔随实例透传（curDur / curEnch 取本地槽保真值）。
+                const cur = InventoryOps.readSlot(root, eslot.group, eslot.index)
+                const r = root.resolveClick(cur.id, cur.count, cur.durability, cur.enchants)
                 if (!r) return
-                root.enchantSlots[eslot.index] = r.slotId
-                root.enchantCounts[eslot.index] = r.slotCount
-                root.enchantRev++
+                InventoryOps.writeSlot(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                 root.hotbar.heldBlock = r.heldId
                 root.hotbar.heldCount = r.heldCount
                 root.hotbar.heldDurability = r.heldDur
+                root.hotbar.setHeldEnchants(r.heldEnch)
             }
         }
         TapHandler {
             acceptedButtons: Qt.RightButton
             onTapped: {
-                const r = root.resolveRightClick(eslot.slotId, eslot.slotCount, 0)
+                const cur = InventoryOps.readSlot(root, eslot.group, eslot.index)
+                const r = root.resolveRightClick(cur.id, cur.count, cur.durability, cur.enchants)
                 if (!r) return
-                root.enchantSlots[eslot.index] = r.slotId
-                root.enchantCounts[eslot.index] = r.slotCount
-                root.enchantRev++
+                InventoryOps.writeSlot(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
                 root.hotbar.heldBlock = r.heldId
                 root.hotbar.heldCount = r.heldCount
                 root.hotbar.heldDurability = r.heldDur
+                root.hotbar.setHeldEnchants(r.heldEnch)
             }
         }
         HoverHandler {

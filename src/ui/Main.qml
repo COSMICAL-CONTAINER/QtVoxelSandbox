@@ -90,6 +90,10 @@ Window {
     property int dispenserX: 0
     property int dispenserY: 0
     property int dispenserZ: 0
+    // t549 世界栅格编辑版本号：每次玩家放 / 破方块自增。附魔台 UI 的 bookshelfPower 绑定触碰它 →
+    //   「UI 开着时放 / 破书架」也能刷新书架计数（countBookshelvesAround 是 Q_INVOKABLE，无 NOTIFY，
+    //   不触碰则绑定永不重算 → 用户报「旁边放书架显示还是 0」根因之一）。低频（每次放 / 破 +1）。
+    property int worldEditRev: 0
     // t225 当前所开箱子的「前面（锁面）」朝向（0=+X 1=-X 2=+Z 3=-Z；与 BlockRegistry::chestFrontFace /
     //   horizontalFacing 同源编码 = 前面所朝方向）。openChest 读 theWorld.stateAt(x,y,z) 设置；驱动盖子
     //   铰链侧（chestLidYaw）→ 放置时锁面朝玩家，开盖铰链在锁面背侧。默认 3（-Z，对齐旧默认 / 兜底）。
@@ -1022,7 +1026,8 @@ Window {
         if (dispenserOpen) closeDispenser()
         enchantX = x; enchantY = y; enchantZ = z
         enchantingTableOpen = true
-        progress.onInventoryOpened()  // progress 成就：打开背包（附魔台）
+        // t548：不再调 progress.onInventoryOpened —— 该调用会把「打开背包」成就解锁当 toast 弹在面板之上
+        //   （z=170 黑色小 UI 盖主 UI 右下角，即用户报「三 UI 底部黑色残留」根因；附魔台非背包，语义亦不符）。
         player.release()
     }
     function closeEnchantingTable() {
@@ -1046,7 +1051,7 @@ Window {
         if (dispenserOpen) closeDispenser()
         anvilX = x; anvilY = y; anvilZ = z
         anvilOpen = true
-        progress.onInventoryOpened()  // progress 成就：打开背包（铁砧）
+        // t548：同附魔台 —— 铁砧非背包，不触发 open_inventory 成就 toast（黑色小 UI 残留根因）。
         player.release()
     }
     function closeAnvil() {
@@ -1070,7 +1075,7 @@ Window {
         if (anvilOpen) closeAnvil()
         dispenserX = x; dispenserY = y; dispenserZ = z
         dispenserOpen = true
-        progress.onInventoryOpened()  // progress 成就：打开背包（发射器）
+        // t548：同附魔台 / 铁砧 —— 发射器非背包，不触发 open_inventory 成就 toast（黑色小 UI 残留根因）。
         player.release()
     }
     function closeDispenser() {
@@ -6787,6 +6792,8 @@ Window {
             if (particleLoader.item) particleLoader.item.burstBreak(x, y, z, id)
             // t89：破块音（按被破方块 id；AudioManager 当前统一一份，id 留分流接口）。
             audio.playBreak(id)
+            // t549：栅格编辑版本号 +1（驱动附魔台 UI bookshelfPower 绑定重算；见 window.worldEditRev 注释）。
+            window.worldEditRev++
             // t88：火把被破 → 从伪光源列表移除（id=13=BlockRegistry::Torch；C++ 侧未把枚举暴露 QML，
             // 此处用字面量 13 + 注释，与 blockregistry.h Id 枚举同源）。
             // t170：同步销毁视觉 delegate（木柄+火焰 Model）—— torchPositions 供 TorchSmoke/选中框读，
@@ -6843,6 +6850,8 @@ Window {
             if (particleLoader.item) particleLoader.item.burstPlace(x, y, z, id)
             // t89：放块音（按新放方块 id）。
             audio.playPlace(id)
+            // t549：栅格编辑版本号 +1（驱动附魔台 UI bookshelfPower 绑定重算；见 window.worldEditRev 注释）。
+            window.worldEditRev++
             // t125：火把伪光源改由下方 player.onTorchPlaced 追加（需携带玩家点击面法线定向）；本通用
             //   放块信号不再处理火把，避免「两处追加」重复。
             // t32：生存放置消耗 1 件（创造=无限源不耗）。worldgen 经 m_chunks.setBlock 直写、不经
@@ -7091,6 +7100,7 @@ Window {
             if ((e.key === Qt.Key_T || e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
                     && window.appState === "playing" && !playerState.dead
                     && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen && !window.chestOpen
+                    && !window.enchantingTableOpen && !window.anvilOpen && !window.dispenserOpen   // t549：三 UI 开时 T 不开聊天（先关面板）
                     && !window.chatOpen) {
                 window.openChat()
                 e.accepted = true; return
@@ -7192,6 +7202,7 @@ Window {
             //   不透传 player.setKey（Q 非移动键）。
             if (e.key === Qt.Key_Q) {
                 const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
+                    || window.enchantingTableOpen || window.anvilOpen || window.dispenserOpen   // t549：三 UI 同背包语义（悬停槽丢弃）
                 const ctrl = (e.modifiers & Qt.ControlModifier) !== 0
                 if (bagOpen && window.hoveredSlotKey !== "") {
                     window.dropFromHoveredSlot(ctrl)        // 背包内悬停槽：Ctrl=整栈 / 否则 1 件
@@ -7206,9 +7217,10 @@ Window {
             //   根因：原代码无差别地把 Shift 与数字键透传给 player —— Shift 进 m_keys → 关包后 release 已清，
             //   但若「关包瞬间 Shift 仍按住」会重新捕获进 m_keys → 蹲下；数字键在背包开时仍改 selectedSlot，
             //   与背包内整理物品的语义冲突（MC 1.0 背包开时数字键 = 与该 hotbar 槽交换 hover 物品，非切选中）。
-            const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
-
+            //   t549：bagOpen 扩到附魔台 / 铁砧 / 发射器 —— 三 UI 打开时 Shift 同样不透传（防玩家蹲下）。
             // Shift：始终追踪 shiftHeld（供背包槽 TapHandler 读做 Shift+左键搬运）；背包开时不透传给 player。
+            const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
+                || window.enchantingTableOpen || window.anvilOpen || window.dispenserOpen   // t549：三 UI 开时 Shift 不透传 player（防蹲）
             //   shiftHeld 不论背包开关都更新 —— 闭包后若用户仍按住 Shift，下一次 TapHandler 读到的 shiftHeld
             //   仍准确（松开时 Keys.onReleased 翻回 false）。
             if (e.key === Qt.Key_Shift) {
@@ -7244,6 +7256,7 @@ Window {
             if (e.key === Qt.Key_Shift) {
                 window.shiftHeld = false
                 const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
+                    || window.enchantingTableOpen || window.anvilOpen || window.dispenserOpen   // t549：与 press 守卫对称
                 if (bagOpen) return
             }
             player.setKey(e.key, false)
@@ -7260,7 +7273,8 @@ Window {
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: (event) => {
-                if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen) return
+                if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
+                    || window.enchantingTableOpen || window.anvilOpen || window.dispenserOpen) return   // t549：三 UI 开时滚轮不切槽
                 if (window.chatOpen) return   // t312：聊天开时不切 hotbar（打字时滚轮误触；聊天 input 顶层已捕获，双重保险）
                 // t210 滚轮行为按模式切换：观察者（spectator）滚轮调 flySpeedMul（有效 4..20 blocks/sec，
                 //   前滚加速 / 后滚减速）；创造 / 生存滚轮恒切 hotbar 槽（无论是否在飞）。即「滚轮语义」由
@@ -7289,6 +7303,7 @@ Window {
         anchors.fill: parent
         visible: window.appState === "playing" && !player.captured
                  && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen && !window.chestOpen
+                 && !window.enchantingTableOpen && !window.anvilOpen && !window.dispenserOpen   // t549：三 UI 开时抑制暂停叠层
                  && !playerState.dead
                  && !window.chatOpen
         z: 100
@@ -8952,6 +8967,8 @@ Window {
         enchantX: window.enchantX
         enchantY: window.enchantY
         enchantZ: window.enchantZ
+        // t549：世界栅格编辑版本号（放 / 破方块自增）—— 触碰它驱动 bookshelfPower 绑定重算（书架检测）。
+        worldEditRev: window.worldEditRev
         visible: window.appState === "playing" && window.enchantingTableOpen
         z: 150
         onClosed: window.closeEnchantingTable()
@@ -9119,82 +9136,4 @@ Window {
     }
     } // t166f overlayRoot close（包裹背包叠层）
 
-    // ===== TEMP DIAGNOSTIC (t548/t549) — REMOVE BEFORE COMMIT =====
-    // 自动进世界 → 放附魔台 + 书架 → 开附魔台 → 截图。
-    property int _diagX: 0
-    property int _diagY: 0
-    property int _diagZ: 0
-    Timer {
-        id: diagTimer
-        interval: 1200
-        running: true
-        onTriggered: window.runDiag()
-    }
-    property int diagStage: 0
-    function runDiag() {
-        if (diagStage === 0) {
-            diagStage = 1
-            const f = worldStore.createWorld("diag_t548", 42)
-            console.info("[diag] created world file:", f)
-            enterWorld(f, "diag_t548")
-            diagTimer.interval = 2500   // 等 worldgen + mesh
-            diagTimer.start()
-            return
-        }
-        if (diagStage === 1) {
-            diagStage = 2
-            // 玩家脚下找地表：用 heightAt 或直接扫 blockAt
-            const px = Math.floor(player.feetPosition.x)
-            const pz = Math.floor(player.feetPosition.z)
-            let gy = 0
-            for (let y = 100; y > 0; --y) {
-                if (theWorld.blockAt(px, y, pz) !== 0) { gy = y + 1; break }
-            }
-            console.info("[diag] ground y=", gy, "player at", px, pz)
-            // 放附魔台 + 周围书架（1 格环 + 2 格环各一）
-            theWorld.setBlock(px, gy, pz, 94)            // 附魔台
-            theWorld.setBlock(px + 1, gy, pz, 95)        // 书架（1 格）
-            theWorld.setBlock(px - 1, gy, pz, 95)
-            theWorld.setBlock(px, gy, pz + 1, 95)
-            theWorld.setBlock(px + 2, gy, pz, 95)        // 书架（2 格）
-            window._diagX = px; window._diagY = gy; window._diagZ = pz
-            console.info("[diag] bookshelves around:", theWorld.countBookshelvesAround(px, gy, pz))
-            diagTimer.interval = 800
-            diagTimer.start()
-            return
-        }
-        if (diagStage === 2) {
-            diagStage = 3
-            openEnchantingTable(window._diagX, window._diagY, window._diagZ)
-            console.info("[diag] enchantingTableOpen =", enchantingTableOpen,
-                         "bookshelfPower =", enchantingPanel.bookshelfPower,
-                         "maxLevel =", enchantingPanel.maxLevel)
-            diagTimer.interval = 2500
-            diagTimer.start()
-            return
-        }
-        // stage 3: 截图
-        screenGrab.grab(window)
-        diagStage = 4
-    }
-    Connections {
-        target: screenGrab
-        function onGrabbed(image) {
-            if (window.diagStage !== 4) return
-            // 保存截图到 build/（诊断用）
-            const img = image
-            console.info("[diag] grabbed, isNull:", img === undefined || img === null)
-            window.diagSaveImage(img)
-        }
-    }
-    function diagSaveImage(img) {
-        // 经 worldStore.saveCover 需要 open 世界 → 用独立路径：直接把 QImage 存盘
-        // 这里借用 grabWindow 的 QImage —— 经临时 Qt.callLater 走 C++ 不行，改为存到 saves 目录
-        // 简化：worldStore.isOpen() 时用 saveCover
-        if (worldStore.isOpen()) {
-            worldStore.saveCover(currentWorldFile, img)
-            console.info("[diag] saved cover to saves/ (check saves/*.png)")
-        }
-    }
-    // ===== END TEMP DIAGNOSTIC =====
 }

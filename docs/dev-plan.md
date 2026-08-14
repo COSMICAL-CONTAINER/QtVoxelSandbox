@@ -1857,13 +1857,13 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 用户：① 只能放两格，放不下第三格；② 打第一格第二格没掉落（直接消失）；③ 能种在水里面（不对）；④ 沙滩生成太频繁。
 - 修：① 叠放邻水门改「沿柱下走到柱基（沙/草/土）再查 baseY/baseY-1 邻水」+ 放置高度上限 3 格（kSugarcanePlaceMaxHeight）；③ 甘蔗目标格须 Air（主射线穿水落水格 → 拒）；② 级联掉落恒发（含创造，破任一甘蔗/仙人掌格 → 该格+其上整柱全掉落实体，同「挖沙」整柱掉落；生存主格 `if(!drop)` 防双掉）；④ worldgen kSugarcanePct 30→10（默认 seed 81→22 块）。
 
-**t548 三功能 UI 底部黑色残留** ❌❌
+**t548 三功能 UI 底部黑色残留** ✅✅ 已完成（见 t549 commit）
 - 用户：「附魔台/铁砧/发射器打开后，除了主 UI 底部还有黑色小 UI，之前没删干净。」
-- 查：EnchantingTableUI/AnvilUI/DispenserUI 或其 host 层有残留的旧 shell UI 元素，删干净。
+- 修：根因 = openEnchantingTable/openAnvil/openDispenser 误调 progress.onInventoryOpened() →「打开背包」成就解锁 toast（z=170 黑色小 UI）弹在面板之上（新世界每次首开必弹）。删三处调用（三功能方块非背包，语义亦不符）。
 
-**t549 附魔台 shift+左键 + 书架检测 + 附魔逻辑** ❌❌❌
+**t549 附魔台 shift+左键 + 书架检测 + 附魔逻辑** ✅✅ 已完成（见 t548 同批 commit）
 - 用户：① 拿稿子按 shift+左键应把工具直接放进去（现在不行 + shift+左键会蹲下）；② 工作台 shift+左键不会蹲下，但附魔台/铁砧/发射器 shift+左键会蹲（视角蹲）+ 工具放不进去；③ 附魔功能做了但「钻石镐+青金石放背包就能附魔」不对（应在 UI 槽里）；④ 书架检测：旁边放书架显示还是 0。
-- 查：EnchantingTableUI 的 shift+左键放入 + 防蹲（UI 打开时 shift 不应触发玩家蹲）+ 附魔来源（须物品在 UI 槽非背包）+ countBookshelvesAround 检测。
+- 修：① Main.qml bagOpen 守卫（Shift press/release/滚轮/T/Q/暂停叠层）扩到 enchantingTableOpen/anvilOpen/dispenserOpen（防蹲）+ 三 UI 各自 Shift+左键双向语义（附魔台：可附魔物→槽0/青金石→槽1/槽→归包；铁砧：工具护甲→左槽/修复材料·附魔书→右槽；发射器：背包↔9槽）；② 附魔消耗来源改 UI 槽 1 青金石（lapisCount 读 enchantSlots[1] 非背包 materialCount）+ 档位门控 itemReady（槽 0 可附魔且未附魔）+ doEnchant 真附魔（selectEnchantsPreview 同 seed 写入槽 0 物品附魔元数据，紫光晕显示）；③ bookshelfPower 触碰新增 worldEditRev（放/破方块自增 → 绑定重算，修 countBookshelvesAround 无 NOTIFY 永不刷新）。
 
 **t550 铁砧二轮重做** ✅✅ 已完成（commit 693037d）
 - 用户：① A+B=C 两个输入都应在左边（不是左输入/右输入分开）；② 格子上不要「左输入/右输入/产物」文字；③ 去掉下面三行文字（修复/附魔合并/重命名）和按钮；④ 只显示最上面消耗等级 + 改名；⑤ 等级显示在产物格下绿字（放东西能出产物就显所需等级，改名 1 级起）；⑥ 重命名输入框按 Esc 退不出卡死（要修）。
