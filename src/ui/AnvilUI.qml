@@ -349,11 +349,17 @@ Item {
         if (_n.length >= 0 && root.canRename) return "rename"
         return ""
     }
-    // 所需 XP 等级（产物格下绿字数值）。修复 = 所需材料数（至少 1）；合并 = 2；改名 = 1；
+    // t550-review 修复实耗材料数 = min(右槽实有, 修满所需)。放 1 锭只修 1/3 耐久、费 1 级（机制等价 MC
+    //   「每材料补 1/3」+ 用户原话「一个铁锭补 1/3 的耐久度」）；不强制凑满 3 个才能修。
+    function repairMatUse() {
+        const have = root.anvilCounts[1] || 0
+        return Math.min(have, repairMatNeeded(root.leftId, root.leftDur))
+    }
+    // 所需 XP 等级（产物格下绿字数值）。修复 = 实耗材料数（至少 1）；合并 = 2；改名 = 1；
     //   改名叠加修复 / 合并 → +1（机制等价 MC「改名在修复费之上另加 1 级」）。
     readonly property int cost: {
         const op = root.activeOp
-        if (op === "repair") return Math.max(1, root.repairMatNeeded(root.leftId, root.leftDur)) + (root.renaming ? 1 : 0)
+        if (op === "repair") return Math.max(1, root.repairMatUse()) + (root.renaming ? 1 : 0)
         if (op === "merge") return 2 + (root.renaming ? 1 : 0)
         if (op === "rename") return 1
         return 0
@@ -386,7 +392,8 @@ Item {
         if (op === "repair") {
             const max = root.maxDur(root.leftId)
             if (max <= 0) return root.leftDur
-            return Math.min(max, root.leftDur + root.repairMatNeeded(root.leftId, root.leftDur) * (max / 3))
+            // t550-review：预览与 takeProduct 同口径 —— 实耗材料数修（1 锭修 1/3）。
+            return Math.min(max, root.leftDur + root.repairMatUse() * (max / 3))
         }
         if (op === "merge" || op === "rename") return root.leftDur
         return 0
@@ -409,13 +416,18 @@ Item {
         if (!root.playerState.spendLevels(root.cost)) return
         let outDur = root.leftDur
         let outEnch = root.enchAt(0)
-        let outName = root.hotbar.customNameAt(root.hotbar.selectedSlot)
+        // t550-review 修：outName 默认空（原取 customNameAt(selectedSlot) = 选中槽 —— 修复后产物落到选中槽
+        //   时会错误继承选中槽原有别物的 customName；左槽物品自身名经 InventoryOps 槽结构无 name 通道不保真，
+        //   记 follow-up 扩槽结构。改名框非空时用新名（下方 renaming 覆盖）。
+        let outName = ""
         if (op === "repair") {
             const max = root.maxDur(root.leftId)
-            outDur = Math.min(max, root.leftDur + root.repairMatNeeded(root.leftId, root.leftDur) * (max / 3))
+            // t550-review 修：按实耗材料数修（use = min(右槽实有, 修满所需)），1 锭修 1/3、费 1 级；
+            //   不再按 repairMatNeeded 满额修（原 bug：右槽只 1 锭免费修满 3/3 还按 3 级收费）。
+            const use = root.repairMatUse()
+            outDur = Math.min(max, root.leftDur + use * (max / 3))
             // 消耗右槽材料：每修 1/3 需 1 件（取到 0 清空）。
-            const need = root.repairMatNeeded(root.leftId, root.leftDur)
-            root.anvilCounts[1] = Math.max(0, (root.anvilCounts[1] || 0) - need)
+            root.anvilCounts[1] = Math.max(0, (root.anvilCounts[1] || 0) - use)
             if (root.anvilCounts[1] <= 0) { root.anvilSlots[1] = 0; root.anvilDur[1] = 0 }
             root.lastResult = "修复完成 +" + root.cost + "级"
         } else if (op === "merge") {
