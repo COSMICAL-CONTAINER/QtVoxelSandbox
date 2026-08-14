@@ -1709,13 +1709,24 @@ Window {
     //   Connections 路由到 itemEntities.spawnItem（单向事件流，PLAN §2 分层）。
     BoatManager { id: boats }
 
-    // t469 船撞坏 → 掉船物品（语义事件路由，同 fallingBlockDropped→spawnItem 模式；PLAN §2 分层）。
-    //   boatType 决定掉哪种船物品（Oak → OakBoatId / Spruce → SpruceBoatId）。机制等价 MC 船撞坏掉船物品。
+    // t508 挖船 → 掉完整船物品（语义事件路由，同 fallingBlockDropped→spawnItem 模式；PLAN §2 分层）。
+    //   boatBroken 由 hitBoatFromRay（攻击 / 挖船）发 → boatType 决定掉哪种船物品（Oak → OakBoatId / Spruce →
+    //   SpruceBoatId）。机制等价 MC 1.0 攻击船 → 船破坏掉完整船物品（区别撞坏掉散件，见 onBoatWrecked）。
     Connections {
         target: boats
         function onBoatBroken(x, y, z, boatType) {
             const itemId = (boatType === boats.Spruce) ? 0x235 /*SpruceBoatId*/ : 0x234 /*OakBoatId*/
             itemEntities.spawnItem(x, y, z, itemId, 1)
+        }
+        // t535 船撞坏 → 掉木板 + 木棍（非完整船；机制等价 MC 1.0 船高速撞墙损坏 → 3 木板 + 2 木棍）。
+        //   boatWrecked 由 breakRiddenBoat（骑乘期高速撞硬墙 / 撞岸边方块，outCrashed=true）发。
+        //   木板按变体（Oak→Planks 6 / Spruce→SprucePlanks 86），木棍固定 0x200（StickId；同橡 / 云杉，无变体区分）。
+        //   两次 spawnItem（木板 ×3、木棍 ×2）→ 各 1 次实体（合并由 ItemEntityManager 近邻合并处理，机制等价 MC
+        //   掉落物合并）。同一条 Connections 内多 handler 共享 target（boats），勿拆。
+        function onBoatWrecked(x, y, z, boatType) {
+            const plankId = (boatType === boats.Spruce) ? 86 /*SprucePlanks*/ : 6 /*Planks*/
+            itemEntities.spawnItem(x, y, z, plankId, 3)   // 木板 ×3（变体对应）
+            itemEntities.spawnItem(x, y, z, 0x200 /*StickId*/, 2)  // 木棍 ×2
         }
     }
 
@@ -3577,8 +3588,8 @@ Window {
 
             // t508 二轮复盘修「坐上去是站着」（用户报④）：骑船时玩家应呈坐姿（大腿前抬近水平 + 小腿竖直下垂），
             //   机制等价 MC 船骑乘坐姿。旧版骑乘期 m_pos 同步到船中心但玩家模型仍走站立姿态（腿笔直竖、与船舱
-            //   不贴合）→ 肉眼读作「站着」。加 sitBlend（=1 骑船 / 0 否则），驱动大腿前抬 sitThigh(85°) +
-            //   小腿回折 sitKnee(-85°) → 大腿水平前伸、小腿竖直下垂 = 坐姿（脚不穿船底，因船底已贴水面 / 地面）。
+            //   不贴合）→ 肉眼读作「站着」。加 sitBlend（=1 骑船 / 0 否则），驱动大腿前抬 sitThigh +
+            //   小腿回折 sitKnee → 大腿水平前伸、小腿竖直下垂 = 坐姿。
             //   sitThigh 与 crouchThigh 叠加（蹲+骑乘不会同时 —— 蹲需走路模式，骑乘禁走路，故二者互斥；为稳
             //   妥两量相加，crouchBlend 骑乘期恒 0 → sitThigh 独占）。坐姿不抬高身体（船中心已是骑乘 m_pos，
             //   body 上半身在 m_pos 之上正常高度，仅腿弯成坐姿）。
@@ -3587,15 +3598,24 @@ Window {
             //   isRidingBoat / sitBlend 重算 → 腿姿切换（同 boats delegate {revision; posAt} 模式）。
             readonly property bool isRidingBoat: { const _r = boats.revision; return _r >= 0 ? (player.boatManager ? player.boatManager.ridingIndex() >= 0 : false) : false }
             readonly property real sitBlend: playerModel.isRidingBoat ? 1.0 : 0.0
-            readonly property real sitThigh: 85.0 * playerModel.sitBlend      // 坐姿大腿前抬（度；+x = 腿尖前摆 = -Z，近水平）
-            readonly property real sitKnee: -85.0 * playerModel.sitBlend      // 坐姿膝盖回折（度；= −sitThigh → 小腿保持竖直下垂）
+            // t532「坐姿 = 腿与身 90°，非卡地底」复盘：旧 sitThigh/sitKnee=±85°（钝角非直角）+ sitDrop=0.42
+            //   → 髋枢降到 feet+0.18，大腿水平时小腿竖直下垂 0.3 → 脚落 feet−0.12（穿船底 / 穿地 =「人卡地底」用户报）。
+            //   几何推导：大腿绕髋 +θ 转，膝（本地 (0,−0.3,0)）→ 世界 (0,−0.3·cosθ, −0.3·sinθ)；θ=90° → 膝同髋高、前伸 0.3。
+            //   小腿绕膝 −θ（sitKnee=−sitThigh）回正 → 复合旋转 0°（竖直），脚 = 膝位 + (0,−0.3,0) → 脚 Y = 髋 Y − 0.3。
+            //   要脚落 feet（Y=0）→ 髋 Y=0.3 → upperBody/腿枢轴 y=0.6−sitDrop=0.3 → sitDrop=0.3。
+            //   修：(a) 角度 ±85→±90（真直角，机制等价 MC 船坐姿「大腿水平、小腿垂直」）；(b) sitDrop 0.42→0.3
+            //   → 脚恰落 feet（甲板 / 水面），身体坐进船舱（头胸露舷上），不穿地 / 不穿船底。区别蹲：crouch=60°（钝角，脚前移落地走）；sit=90°（直角，纯坐）。
+            readonly property real sitThigh: 90.0 * playerModel.sitBlend      // 坐姿大腿前抬（度；+x = 腿尖前摆 = -Z，真水平 90°）
+            readonly property real sitKnee: -90.0 * playerModel.sitBlend      // 坐姿膝盖回折（度；= −sitThigh → 小腿垂直下垂）
             // boat 三轮「坐上去是站着」（用户报①）：旧 sitBlend 只折腿（大腿前抬 + 小腿回折），**上半身不
             //   下沉** —— 髋仍站在 feet+0.6，躯干在船舷之上直立到 feet+1.8，配 0.45 高小船 → 肉眼读作「站着
-            //   站在船里」。修：坐姿把髋（upperBody + 双腿枢轴）整体下沉 sitDrop（=0.42：髋降到 feet+0.18 ≈
-            //   甲板上方、折腿后脚落甲板）→ 身体「坐进船舱」，只露头 + 半胸在船舷之上（机制等价 MC 船骑乘坐姿）。
+            //   站在船里」。修：坐姿把髋（upperBody + 双腿枢轴）整体下沉 sitDrop → 身体「坐进船舱」，只露头 +
+            //   半胸在船舷之上（机制等价 MC 船骑乘坐姿）。
             //   与 crouchDrop 独立（骑乘期 moveState=Walk → crouchBlend 恒 0，两者互斥不叠加；即便叠加也安全，
             //   只是下沉更多）。下船（dismount bump revision）→ sitBlend=0 → sitDrop=0 → 恢复站姿。
-            readonly property real sitDrop: 0.42 * playerModel.sitBlend
+            //   t532：sitDrop=0.3 → 髋枢 feet+0.3，配 sitThigh=90°（大腿水平）+ sitKnee=−90°（小腿垂直下垂 0.3）
+            //     → 脚落回 feet（不穿地 / 不穿船底）。几何推导见 sitThigh 注。
+            readonly property real sitDrop: 0.3 * playerModel.sitBlend
 
             // [t31] 诊断：确认本 Node 已加载、parent=场景节点（非 null 孤儿）、feetPosition 合法、visible 状态。
             // 打印到 voxelsandbox.log。若运行后日志无此行 → Main.qml 未进二进制（stale build）。
@@ -4772,6 +4792,25 @@ Window {
                         geometry: BlockCube { blockId: boatRoot.btBlockId }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(1.0, 0.1, 1.6)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColorMap: voxelAtlas
+                            baseColor: "#ffffff"
+                        }
+                    }
+                    // t533 船舱内封底（spec「船内有水」用户报：船凹下去水显示在里面，应没水 —— 船体不透明阻水）。
+                    //   根因：船中心贴水面顶（kBoatDraft=0 → 船中心 Y = 水面 Y）。水段网格在此 cell 顶部画水面面
+                    //   （Y=船中心），从上俯视船舱开口 → 见到舱内水面贴图（透明 opacity 0.7）从舱底甲板（Y=-0.15，
+                    //   在水面下）上方透出 → 肉眼「船里有水」。船底甲板在水面下挡不住「其上方的水面」（深度测试：
+                    //   水面 Y=0 比甲板顶 Y=-0.10 离相机近 → 水面先入深度缓冲 → 甲板被水面遮，非反之）。
+                    //   修：加一块不透明「舱内封底」紧贴水面之上（顶面 +0.03 > 水面 0 → 深度测试遮水面），尺寸略
+                    //   小于舱内（X/Z 内缩 0.1 留舷壁厚度，不超出碗沿）→ 从上俯视只见封底木纹、不见水面。机制对齐
+                    //   MC 船（船内为封闭甲板、无水可见；MC 用整船模型自遮，本工程用第二块板显式遮水面网格）。
+                    //   NoLighting + 白 baseColor（同船底甲板：贴图本色、不被地形光场调制）。
+                    Model {
+                        geometry: BlockCube { blockId: boatRoot.btBlockId }
+                        position: Qt.vector3d(0, 0.0, 0)        // 中心贴水面：顶面 +0.025（水面之上）遮水面贴图
+                        scale: Qt.vector3d(0.8, 0.05, 1.4)        // 内缩 0.1 留舷壁；薄板 0.05 高
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
@@ -8629,8 +8668,23 @@ Window {
     property bool ridingBoat: boats.revision >= 0
                               ? (player.boatManager ? player.boatManager.ridingIndex() >= 0 : false)
                               : false
+    // t530 下船提示 ~5s 自动消失（机制等价 MC 1.0 骑船提示短暂出现；现常驻改为限时）：首次上船显提示 +
+    //   dismountHintTimer 5s 后把 dismountHintVisible 置 false → 提示自动隐（玩家已知晓按键）。重新上船（ridingBoat
+    //   false→true 边沿）→ restart 计时 + 提示再显 5s。下船（ridingBoat→false）→ 复位 true 备下次上船。
+    //   模式仿 infoToastTimer（showInfoToast restart 延后 + 文案覆盖）；纯 QtQuick Timer + 属性（§9 override (a)）。
+    property bool dismountHintVisible: true
+    onRidingBoatChanged: {
+        if (ridingBoat) { dismountHintVisible = true; dismountHintTimer.restart() }
+        else { dismountHintVisible = true; dismountHintTimer.stop() }
+    }
+    Timer {
+        id: dismountHintTimer
+        interval: 5000
+        repeat: false
+        onTriggered: dismountHintVisible = false
+    }
     Text {
-        visible: window.appState === "playing" && ridingBoat
+        visible: window.appState === "playing" && ridingBoat && window.dismountHintVisible
         anchors.bottom: vitalsBar.top
         anchors.bottomMargin: 8
         anchors.horizontalCenter: parent.horizontalCenter

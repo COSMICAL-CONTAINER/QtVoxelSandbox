@@ -436,8 +436,9 @@ void BoatManager::breakRiddenBoat()
     const QVector3D bp = m_boats[size_t(idx)].pos;
     const int bt = m_boats[size_t(idx)].boatType;
     releaseSlot(idx);
-    // 掉船物品（呈层据信号 spawnItem）：格坐标取船中心所在格。
-    emit boatBroken(int(std::floor(bp.x())), int(std::floor(bp.y())), int(std::floor(bp.z())), bt);
+    // t535 撞坏掉木板 + 木棍（非完整船；机制等价 MC 1.0 船高速撞毁 → 3 木板 + 2 木棍）：发 boatWrecked（区别
+    //   boatBroken = 挖船掉完整船）。格坐标取船中心所在格；boatType 暂不影响（两变体撞坏都掉木板 + 木棍）。
+    emit boatWrecked(int(std::floor(bp.x())), int(std::floor(bp.y())), int(std::floor(bp.z())), bt);
     notifyChanged();
 }
 

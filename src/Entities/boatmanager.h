@@ -126,8 +126,8 @@ public:
     void tickRiddenBoat(qreal dt, World *world, float wishX, float wishZ,
                         QVector3D &outBoatPos, bool &outCrashed);
 
-    // 撞毁被骑的船：移除该船（releaseSlot）+ 清 m_riderBoat + emit boatBroken（呈层掉船物品）。
-    //   由 PlayerController 骑乘期 outCrashed=true 时调。无骑乘 → no-op。
+    // 撞毁被骑的船（t535 高速撞墙损坏）：移除该船（releaseSlot）+ 清 m_riderBoat + emit boatWrecked（呈层掉
+    //   木板 + 木棍，非完整船；机制等价 MC 1.0 船撞毁散件）。由 PlayerController 骑乘期 outCrashed=true 时调。无骑乘 → no-op。
     void breakRiddenBoat();
 
     // t508 玩家位置注入（pushable 用）：PlayerController.tick 每帧 tick 前调一次，写玩家 AABB 中心（脚底 +
@@ -137,7 +137,12 @@ public:
 
 signals:
     void entitiesChanged();                       // spawn / 撞毁 / 浮水 / 骑乘物理触发；驱动 count/revision + QML 绑定刷新
-    void boatBroken(int x, int y, int z, int boatType); // 船撞毁 → 呈现层据它 spawnItem 掉船物品（机制等价 MC 船损坏掉船）
+    void boatBroken(int x, int y, int z, int boatType); // 船被「挖」（攻击 / 破坏）→ 呈层据它 spawnItem 掉**完整船物品**
+    // t535 船撞坏掉木板 + 木棍（非船本身；机制等价 MC 1.0 船高速撞毁 → 掉落 3 木板 + 2 木棍，非完整船）：
+    //   breakRiddenBoat（高速撞墙）发本信号 → 呈层 spawnItem 掉 Planks×3 + Stick×2。区别 boatBroken（挖 → 完整船）：
+    //   MC 1.0 船被「攻击 / 挖」掉完整船物品；被「高速撞墙」撞毁则掉散件（木板 + 木棍）—— 两路径语义不同，故两信号。
+    //   boatType 暂不影响掉落物（两变体撞坏都掉木板 + 木棍；预留变体差异化）。
+    void boatWrecked(int x, int y, int z, int boatType);
 
 private:
     struct Boat {
@@ -224,8 +229,14 @@ private:
     static constexpr float kBoatCrashSpeed = 7.0f;
     static constexpr float kBoatTurnRate = 360.0f;
     // t508 玩家推船给的水平速度冲量（blocks/s；每次接触分离时叠入 vx/vz）。机制等价 MC 1.0 船被实体撞开
-    //   后会滑一小段；取 2.0 使船明显被弹开但摩擦很快停（kBoatFriction=3 → ~0.3s 基本停）。
-    static constexpr float kBoatPushImpulse = 2.0f;
+    //   后会滑一小段。
+    //   t531「船太轻（身体撞就明显动）」复盘：旧值 2.0 → 玩家碰一下船就给 2 blocks/s 初速，肉眼明显被弹开 + 滑行
+    //     （机制不等价 MC —— MC 1.0 船被实体撞只会被「推开」一小段、几乎不动，船重得像浸水木头）。改为 0.3：
+    //     接触分离仍把船推出重叠区（防 AABB 穿叠），但给的水平冲量极小（0.3 blocks/s）→ 摩擦（kBoatFriction=3）
+    //     ~0.1s 即停 → 玩家撞船后船几乎不动（仅接触分离的瞬时位移、无明显滑行），机制对齐 MC「撞船几乎推不动」。
+    //     注：接触分离本身（push 到接触距离外）仍保留（防船被玩家挤进墙里），只是不再给冲量 → 视觉上船不会被
+    //     「打飞」只会被「挤开半步」，符合「船重」直觉。
+    static constexpr float kBoatPushImpulse = 0.3f;
     // t508 二轮复盘修「陆地悬空 + 卡住沉底」（用户报③⑥）：船在无水格（陆地 / 冰面）应有重力 —— 旧 tick 浮水
     //   段无水时 waterSurfaceY 返 fallback（= 当前 pos.y）→ dy=0，船 Y 永不动 → 放陆地悬在放置点（pos.y = 放置
     //   格顶 + 0.75，悬空半格），且骑乘下船摆位算错。加常速重力让陆地船落到支撑面（boatFootprintBlocked 挡实块
