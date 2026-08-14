@@ -399,6 +399,21 @@ int EntityManager::hostileCount() const
     return n;
 }
 
+// t562 区域敌对计数（per-area cap）：活体敌对 mob 中 XZ 水平距离 ≤ radius 的数量。O(n)（n≤kCap 可忽略）。
+//   供黑暗刷怪 / 刷怪笼调度判「玩家周边区域是否已饱和」（达 kHostileLocalCap 停刷）。const 只读。
+int EntityManager::hostileCountNear(const QVector3D &center, float radius) const
+{
+    const float r2 = radius * radius;
+    int n = 0;
+    for (const Entity &e : m_entities) {
+        if (!e.alive || e.kind != Mob || !e.hostile || e.dead) continue;
+        const float dx = e.pos.x() - center.x();
+        const float dz = e.pos.z() - center.z();
+        if (dx * dx + dz * dz <= r2) ++n;
+    }
+    return n;
+}
+
 // t388 床周敌对判定（sleep 机制「附近有怪物拒绝」）：任一活体敌对 mob 在 center 的 radius 球内 → true。
 //   3D 欧氏距离（含 Y，防楼上 / 洞下贴脸的敌对漏判）。const 只读自身数据。
 bool EntityManager::hostileNearby(const QVector3D &center, float radius) const
@@ -529,7 +544,11 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
     m_spawnAccum += float(dt);
     if (m_spawnAccum >= kSpawnInterval) {
         m_spawnAccum = 0.0f;
-        if (hostileCount() < kHostileMobCap && m_liveCount < kCap) {
+        // t562：全局 cap（kHostileMobCap / kCap）+ **区域 cap**（kHostileLocalCap within kHostileAreaRadius）——
+        //   玩家周边敌对已饱和（≥12 只）→ 本周期停刷（「每区块/区域 mob 上限，达上限停刷」）。区域计数在
+        //   releaseSlot 后算（含本 tick 远距消失腾出的槽）。全局 cap 依旧兜底（30 全图）。
+        if (hostileCount() < kHostileMobCap && m_liveCount < kCap
+            && hostileCountNear(playerPos, kHostileAreaRadius) < kHostileLocalCap) {
             auto *rng = QRandomGenerator::global();
             const float pfx = playerPos.x();
             const float pfz = playerPos.z();
@@ -593,8 +612,11 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
     m_spawnAccumSpawner = 0.0f;
 
     // 全局敌对上限（与 tickHostileLife 共享 kHostileMobCap；防刷怪笼 + 黑暗刷怪叠加爆量）。
+    //   t562：再加**区域 cap**（同黑暗刷怪 —— 玩家周边敌对已饱和 → 刷怪笼也停刷，防两路叠加刷屏）。
     const int hostiles = hostileCount();
-    if (hostiles >= kHostileMobCap || m_liveCount >= kCap) return;
+    if (hostiles >= kHostileMobCap || m_liveCount >= kCap
+        || hostileCountNear(playerPos, kHostileAreaRadius) >= kHostileLocalCap)
+        return;
 
     // 扫玩家所在格周围 ±kSpawnerScanRange 立方体（限 Y 到 [0, worldHeight)，防越界）。
     const int pcx = int(std::floor(playerPos.x()));

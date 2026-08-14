@@ -688,7 +688,9 @@ Window {
         //   分布（平原多牛羊、森林多猪；非排斥，仅概率差异）。上方固定 3 只保出生点附近必见三类；本散布群提供
         //   群系化的统计偏移（spec「草原多见牛羊、森林多见猪」）。散布点取整图随机列、地表上方一格；跳水面 /
         //   头顶非空（树干 / 原木）列避免刷进树里或水里。
-        const kScatterCount = 20
+        //   t562：散布数量 20→10（「白天一堆怪」—— 旧散布 + 繁殖（kPassiveMobCap=24）+ 敌对可堆到 60+ 只，
+        //   小世界密度过高）。散布仍是「进世界一次性生成」非持续刷怪；数量收紧到小世界合理密度。
+        const kScatterCount = 10
         const wdim = theWorld.width
         for (let i = 0; i < kScatterCount; ++i) {
             const sx = 4 + Math.floor(Math.random() * (wdim - 8)) // [4, wdim-4)，避世界边
@@ -725,7 +727,7 @@ Window {
         //   命中仅 ~0.5、过半存档 0 鱿鱼（即便修了 heightmap 仍不可靠）。改「刷到目标 kSquidTargetCount 或耗尽
         //   kSquidMaxAttempts 次尝试」：每命中 1 个水柱就 +1，达目标即停（充分采样水柱）；无水世界耗尽尝试刷 0（正确）。
         //   每次尝试仅 2 次 O(1) 读（heightmapAt + blockAt），200 次上限在进世界时一次性开销可忽略。
-        const kSquidTargetCount = 6
+        const kSquidTargetCount = 3
         const kSquidMaxAttempts = 200
         let squidSpawned = 0
         for (let i = 0; i < kSquidMaxAttempts && squidSpawned < kSquidTargetCount; ++i) {
@@ -745,7 +747,7 @@ Window {
         //   非空列）。数量少（kWolfTargetCount=4）免成群威胁 + 繁殖可增（驯服后喂肉繁殖）。col 占位串（MobWolf 走
         //   MobModel + mob_wolf 贴图，不读 color；mobType 0 UnitCube 路径才读，此处不涉）。maxHealth=10（同被动）。
         //   未驯服狼敌对玩家（aiWolf）→ 散布到森林 / 雪原深处（不在出生点平原），玩家探索时偶遇（机制等价 MC 野狼）。
-        const kWolfTargetCount = 4
+        const kWolfTargetCount = 2
         const kWolfMaxAttempts = 160
         let wolfSpawned = 0
         for (let i = 0; i < kWolfMaxAttempts && wolfSpawned < kWolfTargetCount; ++i) {
@@ -770,7 +772,7 @@ Window {
         //   （kOcelotTargetCount=3）免成片聚集 + 繁殖可增（驯服后喂生鱼繁殖）。col 占位串（MobOcelot 走 MobModel
         //   + 贴图，不读 color；mobType 0 UnitCube 路径才读，此处不涉）。maxHealth=10（同被动）。未驯服豹猫被动
         //   游荡（aiOcelot 未驯服分支）→ 散布到丛林深处（不在出生点平原），玩家探索丛林时偶遇（机制等价 MC 野豹猫）。
-        const kOcelotTargetCount = 3
+        const kOcelotTargetCount = 2
         const kOcelotMaxAttempts = 200
         let ocelotSpawned = 0
         for (let i = 0; i < kOcelotMaxAttempts && ocelotSpawned < kOcelotTargetCount; ++i) {

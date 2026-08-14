@@ -13,9 +13,16 @@ kLavaStripFrames 常量；改帧数必须三方同步）：
   - lava_strip.png：16 宽 × 256 高 = 1 列 × 16 行（每帧 16×16）。岩浆鼓泡每帧位移 + 白炽热点脉冲
     → 岩浆面呈「鼓泡翻涌」感（机制等价 MC lava flipbook）。
 
-帧序约定（**帧 0 在图像底部**）：mesher 烘焙面 UV v∈[0,1/N]（帧 0 区，v=0=图像底）；材质 positionV=k/N
-向上采样到帧 k（QtQuick3D Texture.positionV 在 6.11 已替代旧 vOffset，positive positionV 上移采样 → 帧 k
-在 v∈[k/N,(k+1)/N]）。PIL y=0 在顶，故帧 k 占 PIL 行 [H-(k+1)*16, H-k*16-1]（帧 0 在底 16 行）。
+帧序约定（**帧 0 在图像底部、帧内容保持原方向**）：mesher 烘焙面 UV v∈[0,1/N]（帧 0 区，v=0=图像底）；
+材质 positionV=k/N 向上采样到帧 k（QtQuick3D Texture.positionV 在 6.11 已替代旧 vOffset，positive positionV
+上移采样 → 帧 k 在 v∈[k/N,(k+1)/N]）。PIL y=0 在顶，故帧 k 占 PIL 行 [H-(k+1)*16, H-k*16-1]（帧 0 在底 16 行，
+帧内容自上而下 = 原方向）。
+
+> t563 ② 修复：旧版 `grid = np.vstack(rows); grid = np.flipud(grid)` 用 flipud 把帧 0 翻到图像底，但同时把
+> **每帧内容整体上下翻转** → 流水条带在垂直侧面上显示成「水往下流但图案斑点往上走」（方向反，岩浆同病）。
+> 新版改为 `rows.reverse()`（帧 31 排顶、帧 0 排底）后直接 vstack，**不再 flipud** → 帧 0 仍在底、帧内容保持
+> 原方向 → positionV 正向播放时图案沿「下移」方向走（水往下流斑点往下走）。生成物与 chunkgeometry UV 烘焙 +
+> Main.qml positionV 的约定不变（帧 0 区 v∈[0,1/N]）。
 
 动画节拍由 Main.qml Timer 驱动（水 ~150ms/帧、岩浆 ~250ms/帧），纯材质参数变化 → 零 mesh 重建
 （修 t222/t223「水 2s 一次全量重建水段 261 段/次」mesh 重建风暴的回归）。
@@ -112,16 +119,17 @@ def build_water_strip():
     """2 列 × 32 帧（静水 | 流水）。每帧纵向循环位移 1px → 流动感（16 帧一周期）。"""
     still0 = water_base(); draw_water_still(still0)
     flow0 = water_base(); draw_water_flow(flow0)
-    # 帧序：帧 0 在底。组装为 numpy，再按「帧 k 放 PIL 行 [H-(k+1)*16, H-k*16]」翻转。
+    # 帧序：帧 0 在底、帧内容保持原方向（t563 ②：不再 flipud，直接反序排帧 → 保内容方向）。
+    #   旧版 np.flipud 把每帧内容上下翻转 → 图案动画方向反（水往下流斑点却往上走）。
     still_frames = [roll_y(still0, k % TS) for k in range(WATER_FRAMES)]  # k=0..15 下移 k px（周期 16）
     flow_frames = [roll_y(flow0, k % TS) for k in range(WATER_FRAMES)]
-    # 拼成 (WATER_FRAMES 行 × 2 列) 的 numpy，行 0 = 帧 0（待翻转到图像底）。
+    # 拼成 (WATER_FRAMES 行 × 2 列) 的 numpy，行 0 = 帧 31（图像顶）、行 511 = 帧 0（图像底）。
     rows = []
     for k in range(WATER_FRAMES):
         row = np.hstack([still_frames[k], flow_frames[k]])  # (16, 32, 4)
         rows.append(row)
-    grid = np.vstack(rows)            # (512, 32, 4)，行 0 = 帧 0
-    grid = np.flipud(grid)            # 翻转：帧 0 落到图像底（PIL 行 496..511）
+    rows.reverse()                    # 反序：帧 0 落到图像底（PIL 行 496..511），帧 31 在顶
+    grid = np.vstack(rows)            # (512, 32, 4)，行 0 = 帧 31
     img = Image.fromarray(np.clip(grid, 0, 255).astype(np.uint8), "RGBA")
     out = os.path.join(SRC, "water_strip.png")
     img.save(out)
@@ -148,11 +156,11 @@ def draw_lava(c):
 
 
 def build_lava_strip():
-    """1 列 × 16 帧。每帧纵向循环位移 1px → 鼓泡翻涌感。"""
+    """1 列 × 16 帧。每帧纵向循环位移 1px → 鼓泡翻涌感。帧 0 在底、帧内容保持原方向（同水条带 t563 ②）。"""
     lava0 = lava_base(); draw_lava(lava0)
     frames = [roll_y(lava0, k % TS) for k in range(LAVA_FRAMES)]
-    grid = np.vstack(frames)            # (256, 16, 4)，行 0 = 帧 0
-    grid = np.flipud(grid)              # 帧 0 落到图像底
+    frames.reverse()                  # 反序：帧 0 落到图像底（PIL 行 240..255），帧 15 在顶
+    grid = np.vstack(frames)          # (256, 16, 4)，行 0 = 帧 15
     img = Image.fromarray(np.clip(grid, 0, 255).astype(np.uint8), "RGBA")
     out = os.path.join(SRC, "lava_strip.png")
     img.save(out)

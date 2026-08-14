@@ -7,6 +7,7 @@
 #include <QElapsedTimer> // t155c：recomputeLightAround 计时（测每帧编辑光照开销）
 #include <QRandomGenerator> // t385 天气态随机时长转换（运行期模拟；同 EntityManager 火 random extinguish）
 #include <algorithm>
+#include <array> // t564：placeStronghold 候选要塞坐标集（std::array<int,3>）
 #include <cmath>
 #include <queue>   // t151：recomputeLightField 的 BFS flood-fill 队列
 #include <unordered_map> // t185 tickWaterFlow 的 adds 哈希表（key = 体素线性编码 → 新 level，多源取 min）
@@ -804,6 +805,15 @@ void World::tickWaterFlow()
     if (anyChange) {
         emit worldChanged();       // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
         m_chunks.clearAllDirty();  // 两段重建完统一清脏（同逐格路径的 emit→clear 顺序）
+    } else if (actValid) {
+        // t563 ①：本次 tick 走「活动盒过滤快照」（actValid=true）却**零写入** —— 盒只盖「近期活动区域」，
+        //   可能没盖住仍要流动的格（多流场共存 / 玩家在别处编辑 / 峡谷上游瀑布仍在级联）→ 若就此停扫，
+        //   m_waterDirty 已在上方清 false → 下 tick 早退 → 级联中断（用户实测「峡谷水流到一半不流了，
+        //   放方块才续流」—— 放方块 poke 又重扫一次，然后再次停在半路）。修法：保持 dirty → 下 tick
+        //   盒已空（fluidActReset 清掉、零写入不重建）→ 全量快照兜底扫一次，保证级联收敛完整（正确性）。
+        //   代价：每次「盒过滤稳态」后多 1 次全量快照（一次性，可接受；真稳态 → 全量也无写入 → dirty 保持
+        //   false → 停扫，早退优化不受影响）。
+        m_waterDirty = true;
     }
     // t380 perf：活跃水扫描耗时（仅非稳态扫描打：cells=参与计算的水格数、writes=本 tick 实写数、settled=是否收敛停扫）。
     //   t488：box=活动盒是否命中（1=盒过滤快照 / 0=全量兜底）—— 看 cells 数量对比即可知盒收窄了多少扫描范围。
@@ -1009,6 +1019,10 @@ void World::tickLavaFlow()
     if (anyChange) {
         emit worldChanged();      // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
         m_chunks.clearAllDirty(); // 两段重建完统一清脏
+    } else if (actValid) {
+        // t563 ①：同 tickWaterFlow 的盒过滤兜底 —— 盒过滤快照后零写入，但盒外可能仍有岩浆要动（级联中断）→
+        //   保持 dirty → 下 tick 盒空 → 全量快照兜底，保证岩浆流场收敛完整。
+        m_lavaDirty = true;
     }
     // 5) ignite pass（spec「木质方块邻岩浆概率着火焚毁」）：先收集焚毁目标（扫描），日志后再批量应用。
     //    散布确定性（hashVoxel + 窗口序号，PLAN §2-K）→ 同 seed 同窗口同焚毁，错峰非全部同步烧光。setBlock Air
@@ -1704,6 +1718,8 @@ void World::checkSugarcaneOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 //   仅对被破格本身掉雪球；其正上方雪层通过本复检独立坍落（避免中间被破后上方永久浮空）。
 void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
+    Q_UNUSED(oldId); // 无 oldId 守卫 —— 破任一格（含直破雪层）其正上方雪层都失撑（见上方注释）；参数保留供
+    //   checkXxxOnEdit 族签名一致（同 checkCactusOnEdit / checkDeadBushOnEdit）。
     // 仅本格被破为 Air 时查正上方雪层柱失撑（放块 / state 变不触发）。无 oldId 守卫 —— 破任一格（含直破雪层）
     //   其正上方雪层都失撑（finishMiningAt 对被破格本身掉雪球，与正上方柱坍落正交不重复）。
     if (id != BlockRegistry::Air) return;
@@ -4651,6 +4667,129 @@ void World::placeStronghold()
 
     int placed = 0;
     const int strongSeed = m_seed + 26513; // 要塞哈希偏移（与其它 worldgen hashColumn 解耦；纯整数加，确定性）
+
+    // t564：候选要塞坐标集（cx, cy, cz）—— 循环内只收集、不放置；循环后选距出生点最近的一座放置
+    //   （全图至多一个末地传送门）。
+    std::vector<std::array<int, 3>> candidates;
+
+    // 单座要塞放置器（placeAt）：put 捕获 placeAt 的 (cx,cy,cz)（与旧内联版 put 捕获循环变量的语义一致）。
+    auto placeAt = [&](int cx, int cy, int cz) {
+        // 单格写入辅助（越界 / 基岩守卫；与 placeDungeons wallBlock 同模式）。state 可选（默认 0，
+        //   与 4 参数 setBlock 语义一致；Spawner 银鱼 flag / Chest 要塞 flag / 楼梯朝向走 5 参数版）。
+        auto put = [&](int dx, int dy, int dz, quint8 id, quint8 state = 0) {
+            const int px = cx + dx, yy = cy + dy, pz = cz + dz;
+            if (px < 0 || px >= m_width || yy < 0 || yy >= m_height || pz < 0 || pz >= m_depth) return;
+            const quint8 cur = m_chunks.blockAt(px, yy, pz);
+            if (cur == BlockRegistry::Bedrock) return; // 不动基岩
+            if (state == 0)
+                m_chunks.setBlock(px, yy, pz, id);
+            else
+                m_chunks.setBlock(px, yy, pz, id, state);
+        };
+
+        // 1) 地板（dy=0）+ 顶板（dy=4）：全幅 StoneBrick（封闭黑暗）。
+        for (int dx = -kHalf; dx <= kHalf; ++dx) {
+            for (int dz = -kHalf; dz <= kHalf; ++dz) {
+                put(dx, 0, dz, BlockRegistry::StoneBrick);
+                put(dx, kWallH + 1, dz, BlockRegistry::StoneBrick);
+            }
+        }
+
+        // 2) 周界墙（dy 1..3，dx=±6 / dz=±6）：StoneBrick，四壁中央留 2 高门洞（±X 墙 dz=0、±Z 墙 dx=0）。
+        for (int dy = 1; dy <= kWallH; ++dy) {
+            for (int d = -kHalf; d <= kHalf; ++d) {
+                for (int sgn = -1; sgn <= 1; sgn += 2) {
+                    if (d == 0 && dy <= 2) continue; // 中央门洞（2 高）
+                    put(sgn * kHalf, dy, d, BlockRegistry::StoneBrick); // ±X 墙
+                    put(d, dy, sgn * kHalf, BlockRegistry::StoneBrick); // ±Z 墙
+                }
+            }
+        }
+
+        // 3) **中央末地传送门房**（7×7 = dx/dz ∈ [-3,3]）：房间四壁 StoneBrick（dy 1..3，每壁中央留门洞）
+        //    + 房间内部清 Air（dx/dz ∈ [-2,2]，dy 1..2，玩家可走入）+ 地板中央 3×3 EndPortal
+        //    （dx/dz ∈ [-1,1]，dy=1，state=0 未激活）→ 玩家持末影之眼右键激活（末地预热占位）。
+        //    房间墙先于大厅清空（section 4 的 continue 保留墙体，防被 Air 覆盖）。
+        for (int dy = 1; dy <= kWallH; ++dy) {
+            for (int d = -3; d <= 3; ++d) {
+                for (int sgn = -1; sgn <= 1; sgn += 2) {
+                    if (d == 0 && dy <= 2) continue; // 房间门洞（2 高，通往大厅）
+                    put(sgn * 3, dy, d, BlockRegistry::StoneBrick); // ±X 房间墙
+                    put(d, dy, sgn * 3, BlockRegistry::StoneBrick); // ±Z 房间墙
+                }
+            }
+        }
+        for (int dy = 1; dy <= 2; ++dy) {
+            for (int pdx = -2; pdx <= 2; ++pdx) {
+                for (int pdz = -2; pdz <= 2; ++pdz) {
+                    put(pdx, dy, pdz, BlockRegistry::Air); // 房间内部清空（玩家可走入）
+                }
+            }
+        }
+        for (int pdx = -1; pdx <= 1; ++pdx) {
+            for (int pdz = -1; pdz <= 1; ++pdz) {
+                put(pdx, 1, pdz, BlockRegistry::EndPortal); // 3×3 末地传送门（未激活）
+            }
+        }
+
+        // 4) **大厅**（传送门房之外、周界墙之内，dy 1..2）：整体清 Air → 开阔石砖大厅。
+        //    玩家从周界墙门洞走入 → 大厅环绕中央传送门房，可自由走到所有角落设施（图书馆 / 银鱼刷怪笼 /
+        //    战利品箱），迷宫感来自中央传送门房 + 角落楼梯 + 蛛网的错落隔断。
+        //    中央传送门房整区（dx/dz ∈ [-3,3]）保留（墙体 + 门洞 + 3×3 传送门），不参与大厅清空。
+        for (int dy = 1; dy <= 2; ++dy) {
+            for (int dx = -kHalf + 1; dx <= kHalf - 1; ++dx) {
+                for (int dz = -kHalf + 1; dz <= kHalf - 1; ++dz) {
+                    if (dx >= -3 && dx <= 3 && dz >= -3 && dz <= 3) continue; // 传送门房整区保留
+                    put(dx, dy, dz, BlockRegistry::Air);
+                }
+            }
+        }
+
+        // 5) 图书馆内容（NW 角，dx/dz ∈ [-6,-3]）：房间四壁内侧摆 Bookshelf 书架墙（dy 1..2，
+        //    机制等价 MC 1.0 要塞图书馆书架 → 附魔台加成来源，t474）+ 房间中央石砖台阶/楼梯装饰。
+        //    书架墙 = 房间内壁一圈（dx=-5 靠 -X 壁 / dx=-4 靠 +X 壁 / dz=-5 靠 -Z 壁 / dz=-4 靠 +Z 壁）。
+        for (int dy = 1; dy <= 2; ++dy) {
+            for (int d = -5; d <= -4; ++d) {
+                put(-5, dy, d, BlockRegistry::Bookshelf); // 靠 -X 壁（dx=-6）书架列
+                put(-4, dy, d, BlockRegistry::Bookshelf); // 靠 +X 壁（dx=-3）书架列
+                put(d, dy, -5, BlockRegistry::Bookshelf); // 靠 -Z 壁（dz=-6）书架行
+                put(d, dy, -4, BlockRegistry::Bookshelf); // 靠 +Z 壁（dz=-3）书架行
+            }
+        }
+        // 房间中央石砖台阶 / 楼梯装饰（图书馆走道感，踩上可及书架）。
+        put(-5, 1, -4, BlockRegistry::StoneBrickStairs, 0);
+        put(-4, 1, -4, BlockRegistry::StoneBrickSlab);
+
+        // 6) 银鱼刷怪笼（SE 角，dx/dz ∈ [3,6]）：房间中央 Spawner + SpawnerStateSilverfishFlag
+        //    → tickSpawners 据 flag 刷 Silverfish（机制等价 MC 1.0 要塞银鱼刷怪笼）。
+        put(4, 1, 4, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfishFlag);
+
+        // 7) 战利品箱（NE 角，dx ∈ [3,6] / dz ∈ [-6,-3]）：房间靠内角一只 Chest + ChestStateStrongholdFlag
+        //    → 首开填要塞战利品（含末影之眼，激活传送门关键物品）。
+        put(4, 1, -5, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
+
+        // 8) 迷宫装饰：SW 角散布 Cobweb 蛛网（阴暗地下装饰）+ 大厅内确定性散布 StoneBrickStairs 楼梯井
+        //    （hashVoxel 概率 ~20%，仅空气格）。确定性 → 同 seed 同装饰（PLAN §2-K）。
+        //    跳过关键特征格（图书馆书架区 / 银鱼刷怪笼格），防装饰覆盖设施。
+        for (int dy = 1; dy <= 2; ++dy) {
+            for (int d = -kHalf + 2; d <= kHalf - 2; d += 2) {
+                for (int s = -kHalf + 2; s <= kHalf - 2; s += 2) {
+                    const quint32 wh = hashVoxel(strongSeed ^ 0x487, cx + d, cy + dy, cz + s);
+                    const bool inPortal = (d >= -2 && d <= 2) && (s >= -2 && s <= 2); // 传送门房内部跳过
+                    const bool inLibrary = (d >= -5 && d <= -4) && (s >= -5 && s <= -4); // 图书馆书架区跳过
+                    const bool inSpawner  = (d >= 4 && d <= 6) && (s >= 4 && s <= 6); // 银鱼刷怪笼区跳过
+                    const bool inChest   = (d >= 4 && d <= 6) && (s >= -6 && s <= -3); // 战利品箱区跳过
+                    if (inPortal || inLibrary || inSpawner || inChest) continue;
+                    if ((wh % 100u) < 20u) {
+                        // 蛛网为主，楼梯井为辅（hash 高 8 位分流）。
+                        put(d, dy, s, ((wh >> 8) % 100u) < 55u ? BlockRegistry::Cobweb
+                                                               : BlockRegistry::StoneBrickStairs);
+                    }
+                }
+            }
+        }
+    };
+
     for (int bx = kStrongholdGrid / 2; bx < m_width; bx += kStrongholdGrid) {
         for (int bz = kStrongholdGrid / 2; bz < m_depth; bz += kStrongholdGrid) {
             const quint32 r = hashColumn(strongSeed, bx, bz);
@@ -4670,123 +4809,29 @@ void World::placeStronghold()
             const int yRange = yHi - yLo + 1;
             const int cy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 地板（底面）y
 
-            // 单格写入辅助（越界 / 基岩守卫；与 placeDungeons wallBlock 同模式）。state 可选（默认 0，
-            //   与 4 参数 setBlock 语义一致；Spawner 银鱼 flag / Chest 要塞 flag / 楼梯朝向走 5 参数版）。
-            auto put = [&](int dx, int dy, int dz, quint8 id, quint8 state = 0) {
-                const int px = cx + dx, yy = cy + dy, pz = cz + dz;
-                if (px < 0 || px >= m_width || yy < 0 || yy >= m_height || pz < 0 || pz >= m_depth) return;
-                const quint8 cur = m_chunks.blockAt(px, yy, pz);
-                if (cur == BlockRegistry::Bedrock) return; // 不动基岩
-                if (state == 0)
-                    m_chunks.setBlock(px, yy, pz, id);
-                else
-                    m_chunks.setBlock(px, yy, pz, id, state);
-            };
-
-            // 1) 地板（dy=0）+ 顶板（dy=4）：全幅 StoneBrick（封闭黑暗）。
-            for (int dx = -kHalf; dx <= kHalf; ++dx) {
-                for (int dz = -kHalf; dz <= kHalf; ++dz) {
-                    put(dx, 0, dz, BlockRegistry::StoneBrick);
-                    put(dx, kWallH + 1, dz, BlockRegistry::StoneBrick);
-                }
-            }
-
-            // 2) 周界墙（dy 1..3，dx=±6 / dz=±6）：StoneBrick，四壁中央留 2 高门洞（±X 墙 dz=0、±Z 墙 dx=0）。
-            for (int dy = 1; dy <= kWallH; ++dy) {
-                for (int d = -kHalf; d <= kHalf; ++d) {
-                    for (int sgn = -1; sgn <= 1; sgn += 2) {
-                        if (d == 0 && dy <= 2) continue; // 中央门洞（2 高）
-                        put(sgn * kHalf, dy, d, BlockRegistry::StoneBrick); // ±X 墙
-                        put(d, dy, sgn * kHalf, BlockRegistry::StoneBrick); // ±Z 墙
-                    }
-                }
-            }
-
-            // 3) **中央末地传送门房**（7×7 = dx/dz ∈ [-3,3]）：房间四壁 StoneBrick（dy 1..3，每壁中央留门洞）
-            //    + 房间内部清 Air（dx/dz ∈ [-2,2]，dy 1..2，玩家可走入）+ 地板中央 3×3 EndPortal
-            //    （dx/dz ∈ [-1,1]，dy=1，state=0 未激活）→ 玩家持末影之眼右键激活（末地预热占位）。
-            //    房间墙先于大厅清空（section 4 的 continue 保留墙体，防被 Air 覆盖）。
-            for (int dy = 1; dy <= kWallH; ++dy) {
-                for (int d = -3; d <= 3; ++d) {
-                    for (int sgn = -1; sgn <= 1; sgn += 2) {
-                        if (d == 0 && dy <= 2) continue; // 房间门洞（2 高，通往大厅）
-                        put(sgn * 3, dy, d, BlockRegistry::StoneBrick); // ±X 房间墙
-                        put(d, dy, sgn * 3, BlockRegistry::StoneBrick); // ±Z 房间墙
-                    }
-                }
-            }
-            for (int dy = 1; dy <= 2; ++dy) {
-                for (int pdx = -2; pdx <= 2; ++pdx) {
-                    for (int pdz = -2; pdz <= 2; ++pdz) {
-                        put(pdx, dy, pdz, BlockRegistry::Air); // 房间内部清空（玩家可走入）
-                    }
-                }
-            }
-            for (int pdx = -1; pdx <= 1; ++pdx) {
-                for (int pdz = -1; pdz <= 1; ++pdz) {
-                    put(pdx, 1, pdz, BlockRegistry::EndPortal); // 3×3 末地传送门（未激活）
-                }
-            }
-
-            // 4) **大厅**（传送门房之外、周界墙之内，dy 1..2）：整体清 Air → 开阔石砖大厅。
-            //    玩家从周界墙门洞走入 → 大厅环绕中央传送门房，可自由走到所有角落设施（图书馆 / 银鱼刷怪笼 /
-            //    战利品箱），迷宫感来自中央传送门房 + 角落楼梯 + 蛛网的错落隔断。
-            //    中央传送门房整区（dx/dz ∈ [-3,3]）保留（墙体 + 门洞 + 3×3 传送门），不参与大厅清空。
-            for (int dy = 1; dy <= 2; ++dy) {
-                for (int dx = -kHalf + 1; dx <= kHalf - 1; ++dx) {
-                    for (int dz = -kHalf + 1; dz <= kHalf - 1; ++dz) {
-                        if (dx >= -3 && dx <= 3 && dz >= -3 && dz <= 3) continue; // 传送门房整区保留
-                        put(dx, dy, dz, BlockRegistry::Air);
-                    }
-                }
-            }
-
-            // 5) 图书馆内容（NW 角，dx/dz ∈ [-6,-3]）：房间四壁内侧摆 Bookshelf 书架墙（dy 1..2，
-            //    机制等价 MC 1.0 要塞图书馆书架 → 附魔台加成来源，t474）+ 房间中央石砖台阶/楼梯装饰。
-            //    书架墙 = 房间内壁一圈（dx=-5 靠 -X 壁 / dx=-4 靠 +X 壁 / dz=-5 靠 -Z 壁 / dz=-4 靠 +Z 壁）。
-            for (int dy = 1; dy <= 2; ++dy) {
-                for (int d = -5; d <= -4; ++d) {
-                    put(-5, dy, d, BlockRegistry::Bookshelf); // 靠 -X 壁（dx=-6）书架列
-                    put(-4, dy, d, BlockRegistry::Bookshelf); // 靠 +X 壁（dx=-3）书架列
-                    put(d, dy, -5, BlockRegistry::Bookshelf); // 靠 -Z 壁（dz=-6）书架行
-                    put(d, dy, -4, BlockRegistry::Bookshelf); // 靠 +Z 壁（dz=-3）书架行
-                }
-            }
-            // 房间中央石砖台阶 / 楼梯装饰（图书馆走道感，踩上可及书架）。
-            put(-5, 1, -4, BlockRegistry::StoneBrickStairs, 0);
-            put(-4, 1, -4, BlockRegistry::StoneBrickSlab);
-
-            // 6) 银鱼刷怪笼（SE 角，dx/dz ∈ [3,6]）：房间中央 Spawner + SpawnerStateSilverfishFlag
-            //    → tickSpawners 据 flag 刷 Silverfish（机制等价 MC 1.0 要塞银鱼刷怪笼）。
-            put(4, 1, 4, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfishFlag);
-
-            // 7) 战利品箱（NE 角，dx ∈ [3,6] / dz ∈ [-6,-3]）：房间靠内角一只 Chest + ChestStateStrongholdFlag
-            //    → 首开填要塞战利品（含末影之眼，激活传送门关键物品）。
-            put(4, 1, -5, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
-
-            // 8) 迷宫装饰：SW 角散布 Cobweb 蛛网（阴暗地下装饰）+ 大厅内确定性散布 StoneBrickStairs 楼梯井
-            //    （hashVoxel 概率 ~20%，仅空气格）。确定性 → 同 seed 同装饰（PLAN §2-K）。
-            //    跳过关键特征格（图书馆书架区 / 银鱼刷怪笼格），防装饰覆盖设施。
-            for (int dy = 1; dy <= 2; ++dy) {
-                for (int d = -kHalf + 2; d <= kHalf - 2; d += 2) {
-                    for (int s = -kHalf + 2; s <= kHalf - 2; s += 2) {
-                        const quint32 wh = hashVoxel(strongSeed ^ 0x487, cx + d, cy + dy, cz + s);
-                        const bool inPortal = (d >= -2 && d <= 2) && (s >= -2 && s <= 2); // 传送门房内部跳过
-                        const bool inLibrary = (d >= -5 && d <= -4) && (s >= -5 && s <= -4); // 图书馆书架区跳过
-                        const bool inSpawner  = (d >= 4 && d <= 6) && (s >= 4 && s <= 6); // 银鱼刷怪笼区跳过
-                        const bool inChest   = (d >= 4 && d <= 6) && (s >= -6 && s <= -3); // 战利品箱区跳过
-                        if (inPortal || inLibrary || inSpawner || inChest) continue;
-                        if ((wh % 100u) < 20u) {
-                            // 蛛网为主，楼梯井为辅（hash 高 8 位分流）。
-                            put(d, dy, s, ((wh >> 8) % 100u) < 55u ? BlockRegistry::Cobweb
-                                                                   : BlockRegistry::StoneBrickStairs);
-                        }
-                    }
-                }
-            }
-
-            ++placed;
+            // t564：只收集候选（不立即放置）—— 全图至多一座要塞 / 一个末地传送门（用户「同一区块/出生点
+            //   附近生成好几个末地传送门，应至多一个」）。放置延迟到循环后选「距出生点（世界中心）最近」的
+            //   一座执行（见下方 placeAt + bestIdx 段）。
+            candidates.push_back({cx, cy, cz});
         }
+    }
+
+    // t564：从候选里选距世界中心（=出生点，t276 大世界居中）最近的一座放置 → **至多一个末地传送门**。
+    //   旧版每 40 格网格 55% 命中 → 160×160 世界 ~9 座要塞（每座含 3×3 传送门），出生点附近多座 → 用户
+    //   「生成好几个末地传送门」。改为全图至多一座、且落在出生点附近（玩家探索即可寻，机制等价 MC 1.0
+    //   要塞「环出生点分布」的单座近点，本工程小世界取一座）。
+    int bestIdx = -1;
+    double bestDistSq = 1e18;
+    const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        const double dx = double(candidates[i][0]) - centerX;
+        const double dz = double(candidates[i][2]) - centerZ;
+        const double d = dx * dx + dz * dz;
+        if (d < bestDistSq) { bestDistSq = d; bestIdx = int(i); }
+    }
+    if (bestIdx >= 0) {
+        placeAt(candidates[size_t(bestIdx)][0], candidates[size_t(bestIdx)][1], candidates[size_t(bestIdx)][2]);
+        ++placed;
     }
     qInfo() << "worldgen: strongholds =" << placed; // 同 seed → 同计数（确定性核对）
 }

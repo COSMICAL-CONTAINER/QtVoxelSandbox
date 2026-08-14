@@ -174,6 +174,11 @@ public:
     // t280 当前**活体**敌对生物数（hostile=true 且非 dead 的 Mob）。供刷怪调度判总数上限（kHostileMobCap）。
     //   含 Shambler/Bones；不含 passive（pig/cow/sheep/test）与 FallingBlock/Item。
     Q_INVOKABLE int hostileCount() const;
+    // t562 区域敌对上限（per-area cap）：给定中心 center 与半径 radius（blocks），返回**活体敌对 mob**
+    //   （alive && kind==Mob && hostile && !dead）中位于其 XZ 水平距离 ≤ radius 的数量。供刷怪调度判
+    //   「该玩家周边区域是否已饱和」（达 kHostileLocalCap 停刷 —— 「每区块/区域 mob 上限，达上限停刷」）。
+    //   const 只读自身数据。与 hostileCount（全图全局上限）正交：全局钳总人口、区域钳玩家周边密度。
+    int hostileCountNear(const QVector3D &center, float radius) const;
     // t388 睡觉机制「床周有敌对即拒绝」判定：给定中心 center 与半径 radius（blocks），是否任一**活体敌对 mob**
     //   （alive && kind==Mob && hostile && !dead）在其 3D 球内。机制等价 MC 1.0 床周 8 格内有敌对生物即不能睡。
     //   const 只读自身数据；无实体 / 无命中 → false。由 PlayerController::trySleepAt（placeBlock useBlock 床分支）调。
@@ -1203,6 +1208,14 @@ private:
     static constexpr float kSpawnMinDist         = 24.0f; // spawn 环下界（blocks；spec「距玩家>24」）
     static constexpr float kSpawnMaxDist         = 40.0f; // spawn 环上界（blocks）
     static constexpr int   kHostileMobCap        = 30;    // 敌对生物总数上限（不含 passive / FallingBlock / Item）
+    // t562 区域敌对上限（per-area cap）：黑暗刷怪在 spawn 环 [24,40] 内选点，玩家周边会持续堆怪直到全局
+    //   kHostileMobCap（白天洞穴 / 树荫低光处也刷，玩家周边成片「一堆怪」）。加**每区域密度钳**：
+    //   - kHostileAreaRadius：区域半径（blocks；覆盖 spawn 环 [24,40] + 余量，与 kFarDespawn=56 同量级）。
+    //   - kHostileLocalCap：该半径内**活体敌对**数的局部上限 —— 达此 → 本周期停刷（「每区块/区域 mob 上限，
+    //     达上限停刷」；机制等价 MC 1.0 per-player-area spawn cap：mob 只在玩家周边 ~128 格刷、该区人口有上限）。
+    //     30 全图 cap 依旧（全局兜底）；局部 12 = 玩家视野内 ~12 只敌对，够威胁不刷屏。
+    static constexpr float kHostileAreaRadius    = 48.0f; // 区域半径（blocks；覆盖 spawn 环）
+    static constexpr int   kHostileLocalCap      = 12;    // 区域内活体敌对上限（达上限停刷）
     static constexpr float kSpawnLightThreshold  = 7.0f;  // 刷怪有效光上界（< 此才刷；spec「light<7」）
     static constexpr float kBurnSkyBrightness    = 0.55f; // 燃烧所需 skyBrightness 门（白天；>0.55 = 日间）
     static constexpr float kBurnDamageInterval   = 1.0f;  // 燃烧扣血间隔（秒/HP；机制等价 MC 日光燃烧 1HP/s）

@@ -643,6 +643,14 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             const FaceDef &F = kFaces[f];
                             const int nwx = wx + F.dir[0], nwy = ly + F.dir[1], nwz = wz + F.dir[2];
                             const quint8 nb = blockAtWorld(nwx, nwy, nwz);
+                            // t563 ③：邻接**异种流体**（水↔岩浆）→ 剔本面。水/岩浆各占独立透明 mesh 段
+                            //   （水 opacity 0.7 / 岩浆 0.95，均透明 pass），在分界面**同一平面**各画一张侧壁
+                            //   （本段流体朝对方：isSolid(对方)=false 不剔除、≠fluidId 不剔除 → 落 else 画满侧；
+                            //   对方段朝本段同理）→ 两张共面半透明面 → z-fighting 逐帧闪烁（用户「水岩浆混合
+                            //   闪烁」）。剔本面（对方段也不画）→ 分界面无共面 → 不闪烁；两流体体积在分界处
+                            //   相接（交互凝固 obsidian/stone/cobble 由 tick 处理，此处仅解决渲染闪烁）。
+                            const bool nbOtherFluid = (nb == BlockRegistry::Lava || nb == BlockRegistry::Water)
+                                                      && nb != fluidId;
                             // 决定本面是否画 + 画的垂直区间 [yLo, yHi]（cell-local）。
                             //   水平面(±Y)：yLo=yHi（单层）；侧面(±X/±Z)：[yLo,yHi] 可能是部分带。
                             float yLo = 0.0f, yHi = myTop;
@@ -650,6 +658,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 // 顶/底面：邻(上/下)为实体或水 → 剔除；为空气 → 画在水面 / 底。
                                 if (BlockRegistry::isSolid(nb)) continue;
                                 if (nb == fluidId) continue;
+                                if (nbOtherFluid) continue; // t563 ③：异种流体上下邻 → 剔共面（防 z-fight 闪烁）
                                 yLo = yHi = (F.dir[1] > 0) ? myTop : 0.0f; // 顶在 myTop / 底在 0
                             } else {
                                 // 侧面：邻实体剔除；邻空气画满侧 [0,myTop]；邻水按水面差画暴露带。
@@ -664,6 +673,8 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 if (BlockRegistry::isSolid(nb)) {
                                     if (st == 0) continue; // 水源满高：邻实体完全遮挡 → 剔除（原行为）
                                     // 流水降水面：画 [0,myTop] 满侧（yLo=0,yHi=myTop 已是默认）保持贴图可见
+                                } else if (nbOtherFluid) {
+                                    continue; // t563 ③：异种流体水平邻 → 剔共面（防 z-fight 闪烁）
                                 } else if (nb == fluidId) {
                                     const float nbrTop = renderTop(stateAtWorld(nwx, nwy, nwz), nwx, nwy, nwz);
                                     if (nbrTop >= myTop - 1e-4f) continue;      // 邻居水面 >= 本格 → 整面剔除
