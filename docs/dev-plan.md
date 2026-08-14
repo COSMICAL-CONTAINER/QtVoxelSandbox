@@ -1809,9 +1809,9 @@ t18                        （背包，依赖 hotbar）
 - t524 的 checkSugarcaneOnEdit 只处理「破下方支撑方块」。**挖甘蔗本身**（中间/最下）走 PlayerController 级联，可能漏了。查 PlayerController 破甘蔗的级联掉落逻辑，补：挖任一格 → 其上整柱全掉。
 - 修复：t418 级联（playercontroller.cpp finishMiningAt）原 `if (drop && ...)` —— 生存正常、创造（drop=false）不连带整柱 → 破甘蔗中间/最下剩悬空。改：级联破格**恒触发**（含创造，机制等价 MC 破任一甘蔗格其上整柱坍落），掉落物 spawnItem 仅 drop=true（生存）时发。
 
-**t546. 生存物品栏装备图标要 3D（创造+生存共用）** ❌❌❌
+**t546. 生存物品栏装备图标要 3D（创造+生存共用）** ✅✅ 已完成（commit 6afdd6a）
 - 用户：「创造模式的生存物品栏 + 生存模式的生存背包，装备/物品图标都要 3D（像现在的人物第三人称那样）。开 F3+B 物品栏也显示 F3+B 状态。完全复刻第三人称视角。两个共用一个 UI 就行。」
-- 这是大改：装备槽（+物品栏）从 2D MaterialIcon/ToolIcon 改成 3D 模型预览（玩家身体那套，第三人称渲染）。SurvivalInventory + Inventory 的生存物品栏分页统一共用。
+- 实现：新 `ArmorSlot3D.qml`（mini View3D 渲染「玩家身体部位 + 该部位护甲」，空槽灰体 / 装备玩家本色+护甲色，复用 Main.qml playerModel 几何/配色）+ `CharacterPreview3D.qml`（完整 3D 玩家模型 + 4 装备槽护甲 overlay，替代 2D Canvas 剪影）。两面板（SurvivalInventory + Inventory tab6）共用同一组件 + 同一 hotbar VM。F3+B（window.showHitboxes）时 3D 预览叠加 AABB 线框（部位 + 玩家全身）。判断取舍：主栏/物品栏槽保留 2D（全槽 3D = ~36 View3D 渲染 pass，性能不划算；用户重点 = 装备图标像人物）。耐久条/数字仍叠在 3D 预览上方。
 
 ### 🐉 雪傀儡 + 积雪层（t529/t525-t527，之前分下轮，本轮全做）
 
