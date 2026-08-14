@@ -5,11 +5,17 @@
 项目程序生成的原创像素图，**不**拷贝任何 MC 资产。月的位置 / 升落 / 夜间显隐由呈现层（Main.qml
 的月 Model）实现；本脚本只产出 8 帧固定相位的月盘贴图，呈现层据 WorldClock.moonPhase 选其一。
 
-相位光照模型（球面投影）：把月视作面向相机的球，前半球任一像点 (x,y) 对应球面法线
+t570 正方形月亮（用户复盘：「月亮背景灰色 PNG 消不掉 → 改正方形月亮，MC 月亮就是正方形」）：
+  旧版画**圆盘**（半径 0.42 贴图单位）+ 暗部 alpha=0 透明，靠 alphaCutoff 剔除盘外像素 —— 但圆盘
+  抗锯齿软边的半透像素经 alphaCutoff 混合仍呈灰晕背景，多轮消不掉。根因：圆盘 + 透明边在本工程
+  材质管线上先天不稳（半透边缘像素混出夜空色差）。机制等价改法：MC 1.0 的月亮本就是**正方形**
+  贴图（whole texture square），故改为满贴图正方形月（64×64 全画布不透明），相位明暗画在方形
+  边界内 —— 无透明像素、无 alphaCutoff、无灰背景，一步根除。
+
+相位光照模型（球面投影，画在正方形内）：把月视作面向相机的球，前半球任一像点 (x,y) 对应球面法线
 n=(x,y,sqrt(1-x²-y²))。光源在相机-月平面内绕轴转 α=2π·phase（约定 phase=0 满月：光来自相机后方
 L=(0,0,1) → 全前半球亮；phase=0.5 新月：L=(0,0,-1) → 全暗；quarters L=(±1,0,0) → 左 / 右半亮）。
-像点亮的判据 = n·L > 0，L=(sin α, 0, cos α)。亏 / 盈由 α 增大方向自然决定（α∈(0,π) 亮部缩向右 =
-盈→？约定见下）。
+像点亮的判据 = n·L > 0，L=(sin α, 0, cos α)。亏 / 盈由 α 增大方向自然决定。
 
 按 α 递增，8 帧 phase=i/8：
   i=0 α=0    : 满月（全亮）
@@ -21,10 +27,9 @@ L=(0,0,1) → 全前半球亮；phase=0.5 新月：L=(0,0,-1) → 全暗；quart
   i=6 α=3π/2 : 下弦月（左半亮）
   i=7 α=7π/4 : 亏凸月（大部亮，亮缘在左）
 
-视觉意图：读作「夜空中的月」——亮部呈暖白米色（带几颗确定性环形山暗斑），暗部**透明**（融入
-夜空，仅亮部月牙可见；机制等价 MC 1.0 月相贴图暗部透明）。圆盘半径 ~0.42 贴图单位，留出抗锯齿
-软边。注：旧版暗部画暗蓝灰（不透明）致「月亮带灰背景」，用户复盘要求透明 → 改暗部 alpha=0
-（新月 phase 4 全暗→全透看不见，符合真实月相）。
+视觉意图：读作「夜空中的方月」（机制等价 MC 1.0 正方形月亮）——亮部呈暖白米色（带几颗确定性
+环形山暗斑），暗部呈暗蓝灰（略亮于夜空使整盘任何相位都隐约可辨，机制等价 MC 全贴图不透明的
+暗部地面）。全画布不透明 → 呈现层材质无需 alphaCutoff（灰背景根除）。
 
 依赖：仅 numpy/PIL，无外部贴图。
 """
@@ -35,7 +40,6 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
 TS = 64          # 贴图边长（像素；与 sun.png 同尺寸）
-RADIUS = 0.42    # 月盘半径（贴图单位；留抗锯齿软边）
 N_PHASES = 8
 
 # 固定随机种子 → 确定性（同 CI 同图；§9 自绘原创）。
@@ -45,34 +49,28 @@ RNG = np.random.default_rng(20260807)
 CRATERS = []
 for _ in range(7):
     # 在盘内随机（极坐标），半径 0.04..0.09。
-    rr = RNG.random() * (RADIUS - 0.10)
+    rr = RNG.random() * 0.40
     th = RNG.random() * 2.0 * np.pi
     CRATERS.append((rr * np.cos(th), rr * np.sin(th), 0.04 + RNG.random() * 0.05))
 
 
 def moon_frame(phase):
-    """单帧月相：返回 (TS,TS,4) RGBA。phase∈[0,1)：0 满、0.5 新。"""
+    """单帧月相：返回 (TS,TS,4) RGBA（全画布不透明）。phase∈[0,1)：0 满、0.5 新。"""
     alpha = 2.0 * np.pi * phase
     Lx, Lz = np.sin(alpha), np.cos(alpha)
-    # 像素网格，中心化到 [-0.5,0.5]，单位 = 贴图宽。
+    # 像素网格，中心化到 [-0.5,0.5]，单位 = 贴图宽（正方形满画布，无盘半径裁剪）。
     coords = (np.arange(TS) + 0.5) / TS - 0.5
     gx, gy = np.meshgrid(coords, coords, indexing="xy")   # gx 列变化、gy 行变化
     # 注意 PNG 行序：gy 从上到下递增；月无上下之分（光照水平），故无需翻转。
-    dist = np.sqrt(gx * gx + gy * gy)
-    disk = dist <= RADIUS                                # 盘内掩膜
-    # 盘内像点的球面法线（前半球 z>0）；盘外不参与（透明）。
-    nx = gx / RADIUS
-    ny = gy / RADIUS
-    nz2 = 1.0 - nx * nx - ny * ny
-    nz = np.sqrt(np.clip(nz2, 0.0, 1.0))
+    # 正方形内像点的球面法线（前半球 z>0；边缘 |g|=0.5 → nz=0 亮暗由 n·L 临界自然分界）。
+    nx = gx * 2.0
+    ny = gy * 2.0
+    nz2 = 1.0 - np.clip(nx * nx + ny * ny, 0.0, 1.0)
+    nz = np.sqrt(nz2)
     # 亮判据：n·L > 0（L 光源方向）。
     lit = (nx * Lx + nz * Lz) > 0.0
-    lit = np.logical_and(lit, disk)
 
-    # 抗锯齿软边：盘边 ±1px alpha 渐变（避免硬锯齿圆）。
-    edge = np.clip((RADIUS - dist) * TS + 0.5, 0.0, 1.0)
-
-    # 亮部底色（暖白米色），暗部底色（暗蓝灰，略亮于夜空使整盘可见）。
+    # 亮部底色（暖白米色），暗部底色（暗蓝灰，略亮于夜空使整盘可辨 —— 全贴图不透明）。
     lit_col = np.array([245.0, 238.0, 214.0])   # 暖白米
     dark_col = np.array([34.0, 40.0, 60.0])     # 暗蓝灰（夜空 #0b1026≈(11,16,38)，略亮 → 盘可辨）
 
@@ -85,9 +83,7 @@ def moon_frame(phase):
             spot = (d < cr) & lit
             chan = np.where(spot, chan * 0.72, chan)
         rgba[..., c] = chan
-    rgba[..., 3] = np.where(disk, edge * 255.0, 0.0)   # 盘外全透、盘内按软边 alpha
-    # 暗部透明（misc 二轮复盘：旧版暗部画暗蓝灰致月亮灰背景，用户要透明 → 暗部 alpha=0，仅亮部可见）。
-    rgba[..., 3] = np.where(lit, rgba[..., 3], 0.0)
+    rgba[..., 3] = 255.0   # 全画布不透明（t570：正方形月亮，无透明像素 → 无 alphaCutoff / 无灰背景）
     return rgba
 
 

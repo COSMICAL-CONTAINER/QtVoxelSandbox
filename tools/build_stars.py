@@ -63,14 +63,14 @@ def draw_stars():
     for _ in range(N_STARS):
         u = RNG.random()
         v = V_MIN + RNG.random() * (V_MAX - V_MIN)
-        # 半径分布：大多 0.4..0.8（细小），少数 0.9..1.5（亮星）。misc 二轮复盘：旧版 0.6..1.2 / 1.3..2.2
-        #   在 600 格天穹球上每颗星视觉过大（256px 铺 600 格 → 单像素 ~2.3 格弧长 → 2px 星 ~9 格直径）。
-        #   整体缩 ~40% 使星点更细小自然。
+        # 半径分布：大多 0.22..0.45（细小），少数 0.5..0.85（亮星）。t570 二轮复盘：上轮缩 40% 后用户仍报
+        #   「星星比（正方形）月亮大」→ 再缩 ~45%（256px 贴图铺 600 格天穹 → 单像素 ~2.3 格弧长，半径 0.5px
+        #   ≈ 1.2 格 → 星点视觉远小于月盘）。绝大多数是单像素细点，亮星也只 1-2 px。
         if RNG.random() < 0.18:
-            r = 0.9 + RNG.random() * 0.6
+            r = 0.5 + RNG.random() * 0.35
             bri = 0.75 + RNG.random() * 0.25
         else:
-            r = 0.4 + RNG.random() * 0.4
+            r = 0.22 + RNG.random() * 0.23
             bri = 0.45 + RNG.random() * 0.45
         col = STAR_COLORS[int(RNG.random() * len(STAR_COLORS))]
         stamp(u, v, r, col, bri)

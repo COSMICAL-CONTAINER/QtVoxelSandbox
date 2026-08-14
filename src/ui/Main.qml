@@ -2941,6 +2941,9 @@ Window {
         //   sunDir.y>0（昼）隐藏（与上方太阳 visible:sunDir.y>0 互补，二者永不同时显）。月相由
         //   WorldClock.moonPhase(0..7) 选 moon_<phase>.png（满→盈凸→上弦→蛾眉→新月→残月→下弦→亏凸，8 天一轮回）。
         //   billboard 朝相机 + scale 80（与太阳同角尺寸 80/500）、距眼 500（在 SkyDome 600 之前 → 渲于星空之上）。
+        //   **t570 正方形月亮**（用户复盘「月亮背景灰色 PNG 消不掉」→ 机制等价 MC 1.0 月亮本就是正方形贴图）：
+        //   贴图改为满画布不透明正方形月（moon_<phase>.png 64×64 全 alpha=255，相位明暗画在方形边界内）→
+        //   材质删 alphaCutoff（无透明像素可剔）→ 圆盘软边半透像素混夜空色差的灰背景一步根除。
         //   PLAN §2-H「非旋转方向光」仍成立：月是纯呈现层装饰盘，不参与光照。lit 红线：NoLighting（同太阳）。
         //   分层（PLAN §2）：纯呈现层，只读 worldClock.sunDir / moonPhase（Game 层 Q_PROPERTY），绝不反向写。
         Model {
@@ -2956,8 +2959,8 @@ Window {
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 baseColor: "#ffffff"
-                alphaCutoff: 0.5     // 盘外透明像素丢弃（cutout 不透明盘；贴图暗部已为暗蓝灰略亮于夜空，整盘任何相位都隐约可见）
-                // moonPhase 0..7 → 选对应月相贴图（字符串拼 source；moonPhaseChanged 跨天时刷新）。
+                // t570：正方形月亮全贴图不透明（暗部暗蓝灰画在方形内，机制等价 MC 月暗部不透明地面）→
+                //   无 alphaCutoff（灰背景根除）。moonPhase 0..7 → 选对应月相贴图（moonPhaseChanged 刷新）。
                 baseColorMap: Texture { source: "qrc:/textures/moon_" + worldClock.moonPhase + ".png" }
             }
         }
@@ -2968,6 +2971,8 @@ Window {
         //   每条视线交球一次 → 恒作最远天幕（地形 / 云 / 日月皆在 600 之内 → 渲于其前可见；clipFar=1000 容纳）。
         //   opacity 随天光淡入（夜显星 / 昼隐）+ 雷暴雨天抑制（云遮星）。贴图透明底 → 缝透出 sky clearColor、
         //   星点处显白 / 蓝。缓慢自转 eulerRotation.y=dayPhase·360 → 星空随天周期绕极轴转一圈（天球周日视运动）。
+        //   t570：星点再缩 ~45%（tools/build_stars.py 半径分布 0.22..0.45 / 亮星 0.5..0.85 → 绝大多数单像素
+        //   细点）—— 用户报「星星比月亮大」；缩小后星点远小于（正方形）月盘，读作自然细星。
         //   lit 红线：NoLighting（同地形 / 太阳已验证可见路径）。分层（PLAN §2）：纯呈现层，只读 worldClock，绝不反向写。
         Model {
             geometry: SkyDome {}
