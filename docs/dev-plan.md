@@ -1770,8 +1770,9 @@ t18                        （背包，依赖 hotbar）
 - 注：t518 那次「移除映射回 3D」是错的方向，回退。
 - 实现：恢复 t492 双候选（item/<name>.png 优先、block/<name>_front.png 兜底）—— demo 包 1.8.2.2 无 item/crafting_table.png 但有 block/crafting_table_front.png/furnace_front.png，故落到 _front 兜底即用户要的 2D 平面 icon；用户后续给 item PNG 时首候选直接命中。同步更新 .h/hotbar.cpp/ResourceBrowser.qml 注释。
 
-**t538. 木梯放下仍有问题**（用户「感觉没什么变化」）
+**t538. 木梯放下仍有问题**（用户「感觉没什么变化」） ✅✅ 已完成（commit 030c61a）
 - t519 重生贴图（轨贴瓦片两侧）可能没生效，或几何仍有问题。核查 t519 贴图是否真进 atlas + 放下渲染路径，必要时改几何（梯子薄板比例）。
+- 核查结论：t519 贴图**已真进** atlas（tile 78 逐像素一致）+ icon_ladder.png（4× NEAREST 一致）+ 渲染路径（partialblockgeometry Ladder case 用 tile 78，cutout 材质 Mask+alphaCutoff）。用户「感觉没什么变化」根因 = 启用的 demo 资源包（settings.json resourcePackEnabled=true）把 tile 78 覆盖成包内 128px ladder.png 平滑缩小版 → t519 默认贴图在用户会话不可见。改几何：薄板水平内缩到 12/16（两侧各 2/16，满高）→ 放下读作「贴墙窄薄板梯子」非满格宽板；同步 raycastAABBs 内缩。
 
 ### 🆕 R19.2 新 bug（用户本轮新发现）
 
@@ -1803,9 +1804,10 @@ t18                        （背包，依赖 hotbar）
 - 重做 EnchantingTableUI（t515）：左输入槽（武器/工具）+ 青金石槽（空白占位用青金石轮廓图标）+ 右侧三个附魔选项竖排。底部 4 行背包。功能后补，先界面。
 - 修复：EnchantingTableUI 重做为左武器槽 + 青金石槽（空占位 Canvas 青金石轮廓）+ 右侧 1/2/3 选项竖排 + 底部 4 行背包；本地 enchant 组可放取物品。
 
-**t545. 甘蔗中间/最下挖不掉落（t524 只修一半）** ❌❌
+**t545. 甘蔗中间/最下挖不掉落（t524 只修一半）** ✅✅ 已完成（commit 030c61a）
 - 用户：「3 格高甘蔗挖第二格，最上面那格应同时掉落；挖最下面那格，整柱应全掉。现在没掉。」
 - t524 的 checkSugarcaneOnEdit 只处理「破下方支撑方块」。**挖甘蔗本身**（中间/最下）走 PlayerController 级联，可能漏了。查 PlayerController 破甘蔗的级联掉落逻辑，补：挖任一格 → 其上整柱全掉。
+- 修复：t418 级联（playercontroller.cpp finishMiningAt）原 `if (drop && ...)` —— 生存正常、创造（drop=false）不连带整柱 → 破甘蔗中间/最下剩悬空。改：级联破格**恒触发**（含创造，机制等价 MC 破任一甘蔗格其上整柱坍落），掉落物 spawnItem 仅 drop=true（生存）时发。
 
 **t546. 生存物品栏装备图标要 3D（创造+生存共用）** ❌❌❌
 - 用户：「创造模式的生存物品栏 + 生存模式的生存背包，装备/物品图标都要 3D（像现在的人物第三人称那样）。开 F3+B 物品栏也显示 F3+B 状态。完全复刻第三人称视角。两个共用一个 UI 就行。」
