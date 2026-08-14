@@ -732,7 +732,14 @@ private:
     //   Ladder 无碰撞（ShapeNone）→ 玩家穿入梯格占据该格；本方法扫玩家 footprint 各列在脚位 + 身体（脚 +1）两行的
     //   方块，命中 Ladder 即真。step() 据此在走路模式覆写垂直速度：按前（wish 非零）/ 空格 → 爬升、按蹲 → 悬挂、
     //   松手 → 缓降（机制等价 MC 1.0 梯子）。仅读 World::blockAt（向下依赖）；无世界 → false。
+    //   注：本方法不判「面向」，仅判「身在梯格」——悬挂 / 缓降据此生效（贴梯即可托住，不要求面向）。
+    //   爬升（向上意图）须额外过 facingLadder() 方向门控（见下）。
     bool onLadder() const;
+    // t539 面向梯子判定（spec「侧身经过不爬、直接穿过」）：玩家 AABB 覆盖的某梯格，其**支撑墙方向**与玩家
+    //   水平移动意图（wishHoriz）对齐（wish·wallDir > kLadderFaceDot，即玩家在「朝墙方向」走 / 视线朝墙）才算面向。
+    //   机制等价 MC：只有面向梯子（移动方向指向所贴墙面）才向上爬；侧身擦过（wish 与墙向近乎垂直 / 反向）不爬。
+    //   仅用于爬升分支门控；悬挂 / 缓降仍由 onLadder() 触发（贴梯即可托住，与面向无关）。只读 World（向下依赖）。
+    bool facingLadder() const;
     // t134 玩家水平朝向（据 yaw 推 4 向）：前向 = (-sin(yaw), -cos(yaw))（与 wishHoriz/lookDirection 同源）。
     //   返回 0=+X 1=-X 2=+Z 3=-Z（与不完整方块 state 朝向编码一致：stairs/door/trapdoor 均用此编码）。
     //   供 placeBlock 放 stairs/door 时定朝向、useBlock 开 trapdoor 时定开向。
@@ -1080,6 +1087,11 @@ private:
     static constexpr float kLadderClimb   = 3.0f; // 贴梯 + 按前 / 空格的爬升速度（blocks/sec）
     static constexpr float kLadderGravity = 6.0f; // 贴梯等效重力（缓降；同水中 kWaterGravity 量级）
     static constexpr float kLadderSinkMax = 3.0f; // 贴梯最大下沉速度（钳制）
+    // t539 面向梯子门控阈值（spec「侧身经过不爬、直接穿过」）：wish（玩家水平移动意图，归一化世界向）与
+    //   梯格支撑墙方向 (wallDir) 的点积须 > 此值才算「面向梯子」→ 才爬升。0.5 ≈ cos60° → 须在以墙向为轴的
+    //   ±60° 锥内走（主分量朝墙）；侧身擦过（dot≤0.5）不爬。机制等价 MC 须面向梯子才爬。仅门控爬升分支
+    //   （悬挂 / 缓降仍由 onLadder 触发，贴梯即可托住）。
+    static constexpr float kLadderFaceDot = 0.5f; // wish·wallDir > 此 = 面向梯子（≈60° 锥）
     // t223 近流水 proximity 水流声（spec「近流动水一定范围持续水流声 ambience loop」）：
     //   kFlowSoundRadius：扫描盒半径（格）= 水流声可闻范围；玩家到最近流水格距离 ≥ 此 → level=0（无声）。
     //     8 格 ≈ MC 近流水可闻距离量级（机制对齐，非精确数值复刻）。

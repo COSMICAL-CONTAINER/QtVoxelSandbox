@@ -3869,6 +3869,38 @@ bool PlayerController::onLadder() const
     return false;
 }
 
+// t539 面向梯子判定（spec「侧身经过不爬、直接穿过」）：复用 onLadder 的 footprint 扫描，对命中的每格梯子解码
+//   其 state[1:0] 支撑墙方向（BlockRegistry::ladderSupportOffset）→ 单位墙向 (wdx,wdz)；判定玩家水平移动意图
+//   wish 与墙向的点积是否超过 kLadderFaceDot。任一被覆盖的梯格满足「朝墙走」即真（多格覆盖时只要有一面梯子被
+//   面向即可爬）。wish 由 wishHoriz() 算（含 W/S/A/D + 视角 yaw 合成的世界向），非零归一化 → 点积即 cos 夹角。
+//   kLadderFaceDot ≈ 0.5（≈60° 锥）：wish 主分量须朝墙才爬；纯前后 / 侧身擦过（dot≤0.5）判为「不面向」→ 不爬、
+//   直接穿过（仅 onLadder 的悬挂 / 缓降仍生效，托住不掉）。无世界 / 无被覆盖梯格 → false。
+bool PlayerController::facingLadder() const
+{
+    if (!m_world) return false;
+    const QVector3D wish = wishHoriz();                  // 玩家水平移动意图（世界向，归一化；全松键 = 0）
+    // 全松键：无水平移动意图 → 既非「面向」也非「侧身走」，不构成爬升（爬升须有向上意图：按前 / 空格，
+    //   按前已在 wish 中；空格由调用端 facingLadder() 外的 space 短路覆盖 → 此处 wish=0 即返回 false，不爬）。
+    if (wish.lengthSquared() < 0.001f) return false;
+    const int by0 = int(std::floor(m_pos.y()));           // 脚位行
+    const int by1 = by0 + 1;                              // 身体行
+    const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
+    const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
+    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
+    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
+    for (int zz = z0; zz <= z1; ++zz)
+        for (int xx = x0; xx <= x1; ++xx) {
+            for (int yy = by0; yy <= by1; ++yy) {
+                if (m_world->blockAt(xx, yy, zz) != BlockRegistry::Ladder) continue;
+                int wdx = 0, wdz = 0;                     // 该梯格支撑墙所在水平方向（单位向）
+                BlockRegistry::ladderSupportOffset(m_world->stateAt(xx, yy, zz), wdx, wdz);
+                // wish·wallDir > kLadderFaceDot = 朝墙走（面向梯子）→ 可爬。
+                if (wish.x() * float(wdx) + wish.z() * float(wdz) > kLadderFaceDot) return true;
+            }
+        }
+    return false;
+}
+
 bool PlayerController::aabbHitsSolid() const
 {
     // t146：委托 overlapSubAABBs（axis<0 仅判命中）。逐格逐 sub-AABB 测试 → 不完整方块精确碰撞
@@ -4243,10 +4275,14 @@ void PlayerController::step(qreal dt)
         //   按前（wish 非零）/ 空格 → 向上爬（kLadderClimb；spec「入梯 + 按前 → 向上爬」）；按蹲（shift）→ 悬挂静止
         //   （机制等价 MC 梯子按蹲不下滑）；松手 → 缓降（kLadderGravity << kGravity，机制对标 MC 梯子缓慢下滑）。
         //   spaceEdge 跳跃边沿：贴梯 + 着地按空格仍给一次跳跃（从梯顶 / 梯旁地面起跳离梯）。
+        //   t539 爬升方向门控（spec「侧身经过不爬、直接穿过」）：爬升分支额外要求 facingLadder() —— 玩家水平移动
+        //   意图须朝向所贴墙（wish·wallDir>kLadderFaceDot，≈60° 锥）。侧身擦过（wish 与墙向近乎垂直 / 反向，如
+        //   沿通道直走而梯在左右墙）→ facingLadder 假 → 不爬，落入松手缓降分支（贴梯仍托住，不坠）→ 玩家直接
+        //   穿过梯格不被「升起来」。悬挂（shift）/ 缓降不受门控影响（贴梯即可托住，与面向无关，机制对齐 MC）。
         if (shift) {
             m_vel.setY(0.0f); // 蹲 = 悬挂静止（机制等价 MC 梯子按蹲不下滑）
-        } else if (wish.lengthSquared() > 0.001f || space) {
-            m_vel.setY(kLadderClimb); // 按前 / 空格 = 向上意图 → 爬升（spec 验收：入梯 + 按前 → 向上爬）
+        } else if ((wish.lengthSquared() > 0.001f || space) && facingLadder()) {
+            m_vel.setY(kLadderClimb); // 面向梯子 + 按前 / 空格 = 向上意图 → 爬升（spec 验收：入梯 + 按前 → 向上爬）
         } else {
             m_vel.setY(std::max(float(m_vel.y() - kLadderGravity * dt), -kLadderSinkMax)); // 松手缓降（贴梯不下坠）
         }
