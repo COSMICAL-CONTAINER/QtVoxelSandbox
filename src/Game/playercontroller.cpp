@@ -4195,6 +4195,29 @@ void PlayerController::step(qreal dt)
             moveAxis(2, delta.z());
             moveAxis(1, delta.y());
         }
+        // t540 创造飞行长按 shift 触地切步行（spec「飞行时长按 shift，应落地后立即切步行模式，得重新按两下
+        //   空格才能再飞」）。机制等价 MC 1.0 创造飞：按住 shift 下降，触地瞬间自动退出飞态回步行。旧实现只在
+        //   「shift 按下瞬间」处理（setKey 蹲分支 canCrouch 守卫挡了飞态），飞态 shift 永远是「下降」语义 → 玩家
+        //   长按 shift 贴地滑行仍是飞态（m_onGround 还被本块强制 false），只有双击空格才下来，与 spec 不符。
+        //   修：飞态 + 持续按 shift（下降意图）+ 脚底贴地（同走路地面复探：oy-0.05 与实体重叠）→ 退出飞态
+        //   （m_flying=false + emit flyingChanged + 清 m_vel.y 防陈旧下坠）+ 标记 onGround（落地）。退飞后 moveState
+        //   已是 Walk（起飞时 setKey 行 201 清过），故无需再 setMoveState。松 shift / 飞在空中 → 不触发（保持飞态）。
+        //   分层（PLAN §2-D）：判据用 step() 帧内现采的 shift（m_keys 翻译态，单一输入路径）+ 物理层 aabbHitsSolid。
+        if (shift && delta.y() < 0.0f) {
+            const float oy = m_pos.y();
+            m_pos.setY(oy - 0.05f);
+            const bool landed = aabbHitsSolid(); // 脚底下方 0.05 有实体 = 着地（同走路地面复探）
+            m_pos.setY(oy);
+            if (landed) {
+                m_flying = false;
+                m_vel.setY(0); // 清下坠余速，防退飞后走路路径重力叠加穿地
+                if (!m_onGround) { m_onGround = true; emit onGroundChanged(); }
+                emit flyingChanged();
+                reportHorizSpeed(posBefore, dt);
+                emit positionChanged();
+                return; // 退飞 → 后续不再走飞态 early return（本块已是飞态分支末尾），交下帧走路路径
+            }
+        }
         if (m_onGround) { m_onGround = false; emit onGroundChanged(); }
         reportHorizSpeed(posBefore, dt); // t159：speed 属性上报
         emit positionChanged();
