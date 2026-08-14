@@ -456,6 +456,20 @@ public:
     //   岩浆焚毁路径末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
     void checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t565 铁轨连接重算（机制等价 MC 1.0 rail 自动连接 + 转弯）。读 (x,y,z) 的水平 4 邻块 id 经
+    //   BlockRegistry::railConnections（单一权威）算该 Rail 的连接 state；与当前 state 不同 → 静默直写
+    //   新 state（m_chunks.setBlock(id,state) + 标脏，**不经 World::setBlock** → 不重入本检查、不发
+    //   broken/placed）+ 末尾 1 次 worldChanged（批量收口）。非 Rail 格 / state 未变 → no-op。
+    //   供 checkRailOnEdit（编辑复检）与 placeMineshaft（worldgen 铺轨后统一算连接）共用。
+    void recomputeRailConnections(int x, int y, int z, bool &outChanged);
+
+    // t565 setBlock 编辑后铁轨连接复检（机制等价 MC 1.0 rail 放 / 破自动连接 / 断开）。（x,y,z,oldId,id）=
+    //   本格刚发生的编辑。任何方块变化都可能改变邻轨的连接（放 Rail → 本轨 + 4 邻轨互连；破 Rail / 破
+    //   Rail 邻的非轨块 → 无关；破 Rail 本格 → 邻轨断开该向）。重算范围 = 本格 + 水平 4 邻的 Rail 格
+    //   （新轨自身连接 + 邻轨回连 / 断连）。静默直写不重入（recomputeRailConnections 内不经 setBlock）。
+    //   供 4/5 参数 setBlock 末尾各调一次（编辑路径收口，同 checkSugarcaneOnEdit 模式）。
+    void checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 
@@ -677,16 +691,17 @@ private:
     //   查 blockAt != Spawner 自然实现（无 setBlock 钩子）。存档 round-trip：Spawner 是普通方块 id，chunk blob
     //   随存随读，加载后 tickSpawners 仍能扫到（同 Chest 物品存 ChestStore 独立于 chunk，Spawner 无状态）。
     void placeDungeons();
-    // t484 废弃矿井（spec「地下（Y<50）随机生成：木栅栏立柱 + 矿车道（木地板/轨道）+ 蜘蛛网 + 暴露矿石 +
-    //   宝藏箱子」；机制等价 MC 1.0 废弃矿井 mineshaft）。carveCaves / carveCaveEntrances / placeLavaLakes /
-    //   placeDungeons 之后、fillWater 之前，地下深处（y ∈ [kBedrockTop+3, kMineshaftMaxY=48]）确定性散布
-    //   矿井隧道系统：选起点 + 方向（hashColumn + seed 偏移，PLAN §2-K）→ 沿方向逐段 carve 一条 3×3 巷道
-    //   （清空气、铺 Planks 木地板、按间距放 WoodFence 木栅栏立柱支撑、按间距放 Rail 铁轨、间隙散布 Cobweb 蜘蛛网、
-    //   沿巷壁按 hashVoxel 散布矿石暴露、隧道末端 / 分支末端放带 ChestStateMineshaftFlag 标记的 Chest 宝藏箱，
-    //   t393 同族首开填充由 Main.qml.openChest 据本标记触发 mineshaftChestPool）。隧道被周围实体岩天然封闭 →
-    //   内部无天光 → 黑暗（机制等价 MC 1.0 矿井黑暗环境）。与既有洞穴重叠时（carveCaves 已挖空同位）→ 木地板 /
-    //   立柱 / 铁轨仍画出（矿井结构叠加于洞穴）。纯函数于 seed（hashColumn / hashVoxel）→ 同 seed 同矿井分布
-    //   （PLAN §2-K）。**宝藏箱内容**：Chest 物品存 ChestStore（同地牢箱），首开填充由 isMineshaftChest 判定。
+    // t484/t565 废弃矿井（spec「地下（Y<50）随机生成：木栅栏立柱 + 矿车道（地板/轨道）+ 蜘蛛网 + 暴露矿石 +
+    //   宝藏箱子」；机制等价 MC 1.0 废弃矿井 mineshaft；**t565 重做为连通网络**）。carveCaves / carveCaveEntrances /
+    //   placeLavaLakes / placeDungeons 之后、fillWater 之前，地下深处（y ∈ [kBedrockTop+3, kMineshaftMaxY=48]）
+    //   确定性散布矿井系统（hashColumn + seed 偏移，PLAN §2-K）：**中央 7×7×4 交叉洞室（角落洞穴，各巷道端口
+    //   互通 = 连通网络）+ 3..4 条 L 形折线巷道**（主向 lenA 段 + ±90° 转向 lenB 段，3×3 截面；清空气、铺地板
+    //   —— t565 按矿井 hash 选 Planks 或 Stone、按间距放 WoodFence 立柱、立柱顶按概率放 Torch 火把（t565 ③）、
+    //   中线**每段连续**铺 Rail 铁轨（t565 ④）+ 铺后统一算 RailConn 连接 state（直 / 拐角 / 十字形态）、间隙散布
+    //   Cobweb 蜘蛛网、巷壁散布 CoalOre/IronOre 矿石、洞室内放带 ChestStateMineshaftFlag 的 Chest 宝藏箱（首开
+    //   填充由 Main.qml.openChest 据标记触发 mineshaftChestPool））。巷道被周围实体岩封闭 → 黑暗 + 火把点光。
+    //   纯函数于 seed → 同 seed 同矿井分布（PLAN §2-K）。**宝藏箱内容**：Chest 物品存 ChestStore，首开填充由
+    //   isMineshaftChest 判定。
     void placeMineshaft();
     // t485 沙漠神殿（spec「沙漠群系生成：金字塔外形（沙岩/切制沙岩）+ 地下密室 + 4 宝藏箱（钻石/金/青金石/
     //   骨头/腐肉）+ TNT 陷阱（踩压力板引爆）」；机制等价 MC 1.0 沙漠神殿 desert temple）。placeMineshaft 之后、

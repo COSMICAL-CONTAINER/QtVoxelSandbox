@@ -283,6 +283,12 @@ TILES = [
     "default_brown_mushroom",     # 135 brown_mushroom（t507 白蘑菇 / 棕蘑菇 cross 贴图；透明底 + 米色菌柄 + 棕色菌盖
                                   #    浅黄褐斑，alphaCutoff cutout；BrownMushroom 各面=本 tile，mesher 走 cross 几何段；
                                   #    机制等价 MC 1.0 brown mushroom；tools/build_brown_mushroom.py 程序生成原创像素图）
+    # t565 铁轨转弯 / 交叉贴图（机制等价 MC 1.0 rail corner / crossing；不绑定 BlockDef 瓦片字段 —— Rail def
+    #   各面仍 = 121（直轨 NS），corner/cross 由 mesher 据铁轨 state 连接位选贴（同 Water 流水贴图 19/23 的
+    #   「呈现层据 state 选瓦片」模式，非方块属性）；tools/build_rail.py 程序生成原创像素图）。
+    "default_rail_corner",        # 136 rail_corner（铁轨 90° 拐角：双轨自南边进入向左（西）弯出；其余三向由
+                                  #    mesher 换 UV 旋转 / 镜像映射（一张贴图四用））
+    "default_rail_cross",         # 137 rail_cross（铁轨十字交叉：南北 + 东西双轨叠交 + 中央方枕木）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

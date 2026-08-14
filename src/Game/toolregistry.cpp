@@ -117,6 +117,17 @@ float ToolRegistry::miningSpeedMul(quint8 blockId, int itemId)
     const int harvestTool = BlockRegistry::toolType(blockId);
     // 无有效工具的方块（air/leaves/torch/...）：任何手持物均无加成（基准速 1.0）。
     if (harvestTool == BlockRegistry::NoTool) return 1.0f;
+    // t565 剑挖蛛网特例（机制等价 MC 1.0 sword ×15 挖 cobweb 近乎瞬破）：Cobweb.toolType=Sword（本工程
+    //   唯一取 Sword 的方块）。剑表内 speedMul=1.0（剑不参与常规挖掘）→ 持剑挖蛛网若走通用路径无加成
+    //   （4.0s 太慢）。此特例在通用匹配前拦截：持任意剑 + 蛛网 → 返 15.0（miningTime = 4.0/15 ≈ 0.27s，
+    //   近乎瞬破手感对齐 MC）。剪刀亦快速（MC scissors ×15）→ 同样返 15.0。非剑非剪刀 → 落回通用路径
+    //   （无加成，空手 4.0s 极慢 —— canHarvest 已拦掉落）。
+    if (blockId == BlockRegistry::Cobweb) {
+        const ToolDef *sw = tool(itemId);
+        if (sw && (sw->type == int(BlockRegistry::Sword) || sw->type == int(BlockRegistry::Shears)))
+            return 15.0f;
+        return 1.0f;
+    }
     // 查手持物是否匹配类型（斧 / 铲 / 镐）。
     const ToolDef *t = tool(itemId);
     if (!t) return 1.0f;                       // 空手 / 非工具 → 无加成（慢）

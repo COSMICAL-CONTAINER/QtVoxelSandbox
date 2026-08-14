@@ -619,6 +619,14 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::SprucePlanks), 0,                               int(BlockRegistry::SprucePlanks),
         int(BlockRegistry::SprucePlanks), int(BlockRegistry::SprucePlanks), int(BlockRegistry::SprucePlanks) },
       RecipeRegistry::SpruceBoatId, 1, 1, "spruce_boat" },
+    // t565 矿车：5 铁锭 U 形（底行 3 + 中行左右各 1，中空）→ 1 矿车（有序 3×3，仅工作台）。机制等价 MC 1.0
+    //   minecart（5 iron ingot U 形）。与船同形状（最小包围盒 3×2）但原料不同（铁锭 vs 木板）→ 不冲突。
+    //   产物 MinecartId（材料段 0x23E；右键铁轨放置矿车实体 + 骑乘行驶）。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0,                             0,                             0,
+        RecipeRegistry::IronIngotId,   0,                             RecipeRegistry::IronIngotId,
+        RecipeRegistry::IronIngotId,   RecipeRegistry::IronIngotId,   RecipeRegistry::IronIngotId },
+      RecipeRegistry::MinecartId, 1, 1, "minecart" },
     // t473 纸：3 甘蔗横排（任意一行）→ 3 纸（有序 3×3，仅工作台）。机制等价 MC 1.0 paper（3 sugar cane 横排 → 3 paper）。
     //   原料甘蔗 = BlockRegistry::Sugarcane（破甘蔗掉自身方块，可入合成格）。最小包围盒 3×1（一行 3 甘蔗）；
     //   shapedEqual 允许该行在网格内任意纵向平移（顶 / 中 / 底行均可命中）。产物 PaperId（材料段 0x237，可堆叠 64）。
@@ -686,6 +694,15 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
         0,                           0,                           0 },
       int(BlockRegistry::Rail), 16, 1, "rail" },
+    // t565 白羊毛（wool）：4 线（2×2 满铺）→ 1 白羊毛（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0
+    //   配方（4 string → 1 白羊毛；用户报「4 线合成白羊毛（背包 2×2 配方）」）。最小包围盒 2×2（满），
+    //   shapedEqual 收缩后逐格比 → 2×2 背包栏 / 工作台角 2×2 均可合。产物 Wool=27（白色羊毛方块，可放置；
+    //   区别材料段 WoolId=0x20E 物品）。与雪球（无序 2×2）多重集 {String:4} 唯一 → 不冲突。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { RecipeRegistry::StringId, RecipeRegistry::StringId, 0,
+        RecipeRegistry::StringId, RecipeRegistry::StringId, 0,
+        0, 0, 0 },
+      int(BlockRegistry::Wool), 1, 1, "wool" },
     // t485 TNT：5 火药（X 形对角）+ 4 沙（四角）→ 1 TNT（有序 3×3，仅工作台）。机制等价 MC 1.0 TNT 配方
     //   （5 gunpowder + 4 sand，沙填四角 + 中边、火药走对角与中心）。最小包围盒 3×3 满铺，与铁块（9 铁锭满铺）、
     //   TNT 自身的多重集 {火药:5, 沙:4} 唯一 → 不与既有配方冲突（原料组合独一无二）。

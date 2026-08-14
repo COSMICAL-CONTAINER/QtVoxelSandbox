@@ -523,18 +523,57 @@ int PartialBlockGeometry::append(
     }
     case BlockRegistry::Rail: {
         // t484 铁轨「贴地薄板」模型：**一片水平双面 quad 贴 cell 底部**（y≈1/16，刚好浮于地面之上）—— 与睡莲
-        //   横向浮叶（LilyPad）同源几何，区别仅贴图（rail 瓦片 = 透明底 + 棕色枕木 + 灰铁双轨）。机制等价
-        //   MC 1.0 铁轨（rail）。worldgen placeMineshaft 把本方块置于木地板（Planks）上方一格，其 cell 底部
-        //   quad（world y ≈ 地板顶 + 1/16）恰贴地板顶面 → 视觉如铁轨铺地。
-        //   复用 pushCrossQuad（水平 quad 双面可见，从地面上下均见轨 —— 实际玩家视角从上方见轨面为主）。
-        //   四角取 cell 全 footprint（xz [0,1]）+ y=1/16（略高于 cell 底防 z-fight 地板）；UV 满铺整张瓦片
-        //   （枕木 + 双轨由贴图 alpha cutout 表达，几何为整张 quad）。不做邻居剔除（透明 + 薄板，同睡莲；
-        //   Rail solid=false）。材质 alphaCutoff:0.5 丢弃透明底 → 仅轨像素显。tile 由 BlockRegistry::tileIndex
-        //   (Rail, PosX) = sideTile = 121 给出。
-        constexpr float yr = 1.0f / 16.0f; // 铁轨厚度（cell 底以上 1/16，贴地板防 z-fight）
-        pushCrossQuad(verts, idx, lx, ly, lz,
-                      0.f, yr, 0.f,  1.f, yr, 0.f,  1.f, yr, 1.f,  0.f, yr, 1.f, // 水平 quad：BL→BR→TR→TL（xz 全 footprint）
-                      tile, light, tileW, hx, hy, v0, v1);
+        //   横向浮叶（LilyPad）同源几何，区别仅贴图（rail 瓦片 = 透明底 + 棕色枕木 + 灰铁双轨）。
+        //   t565 连接 / 转弯（机制等价 MC 1.0 rail 自动连接 + 拐角）：state 4 位 = 水平 4 向连接
+        //   （RailConnPx/Nx/Pz/Nz；placeBlock / World::checkRailOnEdit 与邻轨互连时写入）。据连接位选形态：
+        //     - NS（默认 / 仅 ±Z 连接 / 0-1 连接且唯一连接向 Z）：整片 quad + tile 121（直轨沿 Z；贴图内
+        //       双轨为纵向线）→ 铺满 cell，UV 标准映射（u→x、v→z）。
+        //     - EW（仅 ±X 连接 / 0-1 连接且唯一连接向 X）：同 tile 121，但角点绕序旋转 90°（u→z、v→x）→
+        //       贴图旋转、双轨沿线 X 向（机制等价 MC rail NS/EW 两种直轨形态，一张贴图两用省瓦片）。
+        //     - 拐角（邻向 2 连接，如 +X+Z）：tile 136（贴图语义 = 轨自南(+Z)进入向左(-X)弯出）。四向
+        //       拐角经「角点绕序旋转 / 镜像」把该贴图映射到四个象限（一张贴图四用）。
+        //     - 十字（3+ 连接）：tile 137（南北 + 东西双轨叠交 + 中央方枕木）。
+        //   0 连接（孤轨）默认 NS（state=0 兜底，旧存档 / 防御）。不做邻居剔除（透明 + 薄板，同睡莲；
+        //   Rail solid=false）。材质 alphaCutoff:0.5 丢弃透明底 → 仅轨像素显。
+        constexpr float yr  = 1.0f / 16.0f;  // 铁轨厚度（cell 底以上 1/16，贴地板防 z-fight）
+        const int railTile = BlockRegistry::tileIndex(BlockRegistry::Rail, BlockRegistry::PosX); // 121
+        const quint8 con = state;
+        const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
+        const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
+        const bool cpz = (con & BlockRegistry::RailConnPz) != 0;
+        const bool cnz = (con & BlockRegistry::RailConnNz) != 0;
+        const int nConn = int(cpx) + int(cnx) + int(cpz) + int(cnz);
+        // 水平 quad 通用：BL→BR→TR→TL 四角（UV (0,0)(1,0)(1,1)(0,1)；pushCrossQuad 内部固定该映射）。
+        //   NS（标准）：u→x、v→z —— (x,z) = (0,0)(1,0)(1,1)(0,1)。
+        //   EW（旋转 90°）：u→z、v→x —— (x,z) = (0,0)(0,1)(1,1)(1,0)。
+        //   拐角镜像：以「南进西出」贴图为基准（v=1 是贴图底行 = 南入口侧），四象限经轴翻转映射。
+        const auto pushRail = [&](float y, int tileIdx,
+                                  float ax0, float az0, float ax1, float az1,
+                                  float ax2, float az2, float ax3, float az3) {
+            pushCrossQuad(verts, idx, lx, ly, lz,
+                          ax0, y, az0,  ax1, y, az1,  ax2, y, az2,  ax3, y, az3,
+                          tileIdx, light, tileW, hx, hy, v0, v1);
+        };
+        if (nConn >= 3) {
+            // 十字：tile 137 整片。
+            pushRail(yr, 137, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
+        } else if (nConn == 2 && ((cpx || cnx) && (cpz || cnz))) {
+            // 拐角（一个 X 向 + 一个 Z 向连接）。贴图基准（tile 136 贴图坐标）：v=1（UV 底行）= 南（+Z）入口侧、
+            //   u=0（UV 左列）= 西（-X）出口侧 → 贴图语义 = 轨自南进入向左（西）弯出 = 基准形态连接 {+Z,-X}。
+            //   四象限经轴翻转映射（BL=(u0,v0) BR=(u1,v0) TR=(u1,v1) TL=(u0,v1)，世界角按翻转后 u/v 轴取）：
+            //     {+Z,-X} 基准 NS 序（u→x、v→z）；{+Z,+X} 东西镜像（u 翻）；{-Z,-X} 南北镜像（v 翻）；
+            //     {-Z,+X} 双翻（180°）。轨两端恰落两个连接向上（镜像不改拓扑，只改贴图朝向）。
+            if (cpz && cnx)       pushRail(yr, 136, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
+            else if (cpz && cpx)  pushRail(yr, 136, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f);
+            else if (cnz && cnx)  pushRail(yr, 136, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f);
+            else                  pushRail(yr, 136, 1.f, 1.f, 0.f, 1.f, 0.f, 0.f, 1.f, 0.f);
+        } else if (nConn == 1 || (nConn == 2 && (cpx || cnx))) {
+            // EW 直轨：仅 X 向连接（1 个或对向 2 个）→ 贴图旋转 90°（u→z、v→x）。
+            pushRail(yr, railTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f);
+        } else {
+            // NS 直轨（默认：0 连接 / 仅 Z 向连接 / 对向 ±Z）。
+            pushRail(yr, railTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
+        }
         break;
     }
     case BlockRegistry::Cactus: {

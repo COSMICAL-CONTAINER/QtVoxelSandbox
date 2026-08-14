@@ -243,6 +243,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
+    checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
     return true;
 }
 
@@ -333,6 +334,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
+    checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
     return true;
 }
 
@@ -1754,6 +1756,40 @@ void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     emit snowLayerFell(x, by, z, totalLayers);
     emit worldChanged();        // 驱动 mesh 重建（雪层薄板段消失）
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
+// t565 铁轨连接重算（见 world.h 头注释）：读 (x,y,z) 水平 4 邻块 id → BlockRegistry::railConnections
+//   （单一权威连接计算）→ 与当前 state 不同则静默直写新 state（m_chunks.setBlock(id,state) 标脏；不经
+//   World::setBlock → 无重入 / 无破放信号 —— 连接变化是系统派生态非玩家动作）。非 Rail 格 / state 未变 → no-op。
+void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return;
+    if (m_chunks.blockAt(x, y, z) != BlockRegistry::Rail) return;
+    const quint8 con = BlockRegistry::railConnections(
+        m_chunks.blockAt(x + 1, y, z), m_chunks.blockAt(x - 1, y, z),
+        m_chunks.blockAt(x, y, z + 1), m_chunks.blockAt(x, y, z - 1));
+    if (con == m_chunks.stateAt(x, y, z)) return; // 连接未变 → 不写（防无谓标脏）
+    m_chunks.setBlock(x, y, z, BlockRegistry::Rail, con); // 静默直写 + 标脏（含边界邻接）
+    // Rail solid=false 不遮光 → 光场无变化，免 recomputeLightAround。
+    outChanged = true;
+}
+
+// t565 setBlock 编辑后铁轨连接复检（见 world.h 头注释；机制等价 MC 1.0 rail 放 / 破自动连接 / 断开）。
+//   任何编辑都可能改变「本格 Rail 自身 + 水平 4 邻 Rail」的连接位（放 Rail → 互连；破 Rail → 邻轨断向）。
+//   重算这 5 格（本格 + 4 邻中的 Rail），有实际 state 写入才 1 次 worldChanged（批量收口）。静默直写不重入。
+void World::checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    Q_UNUSED(oldId); Q_UNUSED(id); // 任何编辑（放 / 破任意方块）都可能改变邻轨连接 → 不筛编辑类型（简单正确）
+    bool changed = false;
+    recomputeRailConnections(x, y, z, changed);          // 本格若是 Rail → 重算自身连接
+    recomputeRailConnections(x + 1, y, z, changed);      // 4 邻 Rail 回连 / 断连
+    recomputeRailConnections(x - 1, y, z, changed);
+    recomputeRailConnections(x, y, z + 1, changed);
+    recomputeRailConnections(x, y, z - 1, changed);
+    if (changed) {
+        emit worldChanged();        // 驱动 mesh 重建（铁轨形态切换）
+        m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+    }
 }
 
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。
@@ -4143,41 +4179,51 @@ void World::placeDungeons()
     qInfo() << "worldgen: underground dungeons =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
-// t484 废弃矿井（见 world.h 头注释）。机制等价 MC 1.0 废弃矿井 mineshaft：地下深处（Y<50）的木支撑巷道系统，
-//   含木栅栏立柱 + 木地板 + 铁轨 + 蜘蛛网 + 暴露矿石 + 宝藏箱子。确定性散布（hashColumn + seed 偏移，PLAN §2-K），
-//   结构与 placeDungeons / placeLavaLakes 同源（网格采样 + 概率筛选 + 抖动 + y 范围派生），但 carve 出的是一条
-//   3×3 水平巷道 + 木地板 + 立柱 + 铁轨 + 蛛网 + 矿石 + 末端宝藏箱。
+// t484/t565 废弃矿井（见 world.h 头注释）。机制等价 MC 1.0 废弃矿井 mineshaft：地下深处（Y<50）的**连通巷道
+//   网络**（t565 重做：旧版单条直线巷道 → 用户报「生成直线，应连通 / 角落生成洞穴」）。含中央交叉洞室（多巷道
+//   汇合处的方形洞穴，t565 ①⑥）+ 木栅栏立柱 + 木板 / 石头地板（t565 ⑤：按矿井 hash 二选一，非恒木板）+ 连续
+//   铁轨（t565 ④：铺后统一算连接 state → 直轨 / 拐角 / 十字自动互连）+ 蜘蛛网 + 暴露矿石 + 立柱火把（t565 ③：
+//   立柱顶确定性散布 Torch，机制等价 MC 矿井昏暗火把照明）+ 宝藏箱子。确定性散布（hashColumn + seed 偏移，
+//   PLAN §2-K），同 seed 同分布。
 //
-//   巷道几何（沿水平方向 (dx,dz) 逐段推进，每段 3 宽 × 3 高内部空气 + 1 层木地板）：
-//     - 轴位置 (ax,az) 沿方向逐段 +1；垂直宽度轴 perp（方向旋转 90°）取 w ∈ {-1,0,+1} → 3 宽截面。
-//     - 木地板：每段 3 宽铺 Planks 于 y=sy（覆盖原 stone/ore/泥土，不动 Bedrock；机制等价 MC 矿井木板地板）。
-//     - 内部空气：每段 3 宽 × 3 高（y=sy+1..sy+3）置 Air（清空原 stone/ore → 干净巷道；不动 Bedrock）。
-//     - 木栅栏立柱：每 kFenceInterval 段（4），在 w=±1 边缘从 y=sy+1 到 y=sy+2 置 WoodFence（支撑柱，机制等价 MC
-//       矿井橡木栅栏立柱；fence 1.5 高碰撞但本处 2 格高视觉立柱）。
-//     - 铁轨：每 kRailInterval 段（2），在 w=0 中线 y=sy+1 置 Rail（贴在木地板上，机制等价 MC 矿井铁轨）。
-//     - 蜘蛛网：按 hashVoxel 概率（~12%）在 w=±1 上角 y=sy+3 置 Cobweb（巷道角落蛛网，机制等价 MC 矿井蛛网）。
-//     - 暴露矿石：按 hashVoxel 概率（~15%）在 w=±2 巷壁（截面外侧）+ y=sy+1..sy+3 置 CoalOre/IronOre（巷壁裸露矿脉）。
-//     - 宝藏箱：巷道末端最后一段 w=0 中线 y=sy+1 置 Chest（带 ChestStateMineshaftFlag bit3 标记 → isMineshaftChest 返
-//       true → Main.qml.openChest 首开填充 mineshaftChestPool 战利品：矿物 / 附魔书 / 铁锭等）。
+//   结构几何（一个矿井 = 中央交叉洞室 + 3..4 条折线巷道）：
+//     - **中央交叉洞室**（t565 ①⑥「角落生成洞穴 / 两边长条连通」）：7×7×4 空气洞穴（地板 y=sy、内部空气
+//       y=sy+1..sy+4），地板同巷道材质（Planks 或 Stone）。四壁保留原岩（不清 → 天然围岩），洞室与各巷道
+//       端口互通（巷道自洞室边缘向外延伸 → 玩家可从任一巷道走进洞室再出去 = 连通网络，修「两条长条互不相通」）。
+//     - **折线巷道**（t565 ①「应转弯」）：每条巷道自洞室边缘出发，先沿主向推进 lenA 段，再**转向 ±90°**
+//       （hash 选左 / 右转）推进 lenB 段 → L 形折线。每段 3 宽 × 3 高内部空气 + 1 层地板；两段共享拐角格
+//       自然衔接（无缝）。巷道数 3..4（hash 选）→ 自洞室向 3..4 个方向辐射。
+//     - **地板**（t565 ⑤「矿坑底可石头非木板」）：按矿井 hash（(r>>20)&1）选 Planks（旧观感）或 Stone（石底
+//       变体），全矿井统一。
+//     - 立柱（每 kFenceInterval 段一对 WoodFence 两格高）/ 蛛网（~12% 上角 Cobweb）/ 矿石（~15% 巷壁
+//       CoalOre/IronOre）：同旧版语义。**立柱顶火把**（t565 ③）：~kTorchPct 概率在立柱正上（y=sy+3）置
+//       Torch state=0（块光 flood14 照亮巷道 + 呈现层 enterWorld 全图扫描建伪光源 delegate；不占巷道行走层
+//       与铁轨线 → 无冲突）。
+//     - **铁轨**（t565 ④「放下应连接 / 能转弯」）：巷道中线（w=0）**每段连续铺**（旧版隔 2 段铺一根 → 断续）
+//       + 洞室中央十字两排。全部铺完后统一经 BlockRegistry::railConnections 算连接 state（直 / 拐角 / 十字
+//       形态自动得出，mesher 据此切贴图；与运行期 checkRailOnEdit 同一权威）。
+//     - 宝藏箱（洞室内偏侧；带 ChestStateMineshaftFlag → isMineshaftChest → 首开填充矿井战利品）。
 //
-//   巷道被周围实体岩天然封闭 → 内部无天光 → 黑暗（机制等价 MC 1.0 矿井黑暗环境）。与既有洞穴重叠时
-//   （carveCaves 已挖空同位）→ 木地板/立柱/铁轨仍画出（矿井结构叠加于洞穴，同 placeDungeons 墙体被洞穴截断）。
+//   巷道被周围实体岩天然封闭 → 内部无天光 → 黑暗 + 火把点光（机制等价 MC 1.0 矿井环境）。与既有洞穴重叠时
+//   （carveCaves 已挖空同位）→ 结构仍画出（矿井叠加于洞穴，同 placeDungeons 墙体被洞穴截断）。
 //   placeDungeons 之后、fillWater 之前（独立于海平面；fillWater 仅填地表低洼 → 地下矿井不被灌水）。
 void World::placeMineshaft()
 {
     constexpr int kMineshaftGrid    = 36;     // 候选网格间距（比地牢 24 更稀 → 矿井更稀有；spec「随机生成」）
-    constexpr unsigned kMinePct     = 40u;    // 候选命中概率（每网格平均 ~0.40 个矿井 → 160×160 世界约 6 个矿井，机制等价 MC「稀疏但存在」）
+    constexpr unsigned kMinePct     = 40u;    // 候选命中概率（每网格平均 ~0.40 个矿井 → 160×160 世界约 6 个矿井）
     constexpr int kBedrockTop       = 4;      // 不动基岩（同 carveCaves / placeDungeons）
     constexpr int kSurfaceFloor     = 6;      // 与地表保留的最小距离（矿井上方至少 6 格石顶 → 不破地表、封闭黑暗）
     constexpr int kMineshaftMaxY    = 48;     // 矿井最高 y（spec「Y<50」；地下深处）
-    constexpr int kTunnelLenMin     = 16;     // 巷道最短长度（段数）
-    constexpr int kTunnelLenMax     = 28;     // 巷道最长长度（段数）
+    constexpr int kTunnelLenMin     = 5;      // 巷道单段最短长度（段数；L 形两段各取 → 总长 10..20）
+    constexpr int kTunnelLenMax     = 10;     // 巷道单段最长长度
     constexpr int kTunnelH          = 3;      // 巷道内部高度（空气层数；y=sy+1..sy+kTunnelH）
+    constexpr int kRoomHalf         = 3;      // 中央交叉洞室半宽（7×7）
+    constexpr int kRoomH            = 4;      // 洞室内部高度（比巷道高 1 → 洞穴感）
     constexpr int kFenceInterval    = 4;      // 木栅栏立柱间隔（每 N 段一对立柱）
-    constexpr int kRailInterval     = 2;      // 铁轨间隔（每 N 段一根铁轨）
     constexpr unsigned kCobwebPct   = 12u;    // 上角蛛网概率（每段每侧 ~12%）
     constexpr unsigned kOrePct      = 15u;    // 巷壁矿石概率（每段每侧 ~15%）
-    constexpr int kMargin           = 4;      // 留边界（巷道长度 + 宽度余量防越界）
+    constexpr unsigned kTorchPct    = 55u;    // 立柱顶火把概率（每对立柱 ~55% → 巷道沿途常见火把）
+    constexpr int kMargin           = 16;     // 留边界（折线巷道两段 + 洞室半径 → 较大余量防越界）
 
     int placed = 0;
     const int mineSeed = m_seed + 15047; // 矿井哈希偏移（与其它 worldgen hashColumn 解耦）
@@ -4189,123 +4235,180 @@ void World::placeMineshaft()
             const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
             const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
             const int cx = bx + jx, cz = bz + jz;
-            // 留 margin 边界（巷道沿方向走 kTunnelLenMax 段 + 宽度 3 → 半径 ≤ kMargin 不越界）。
+            // 留 margin 边界（折线巷道沿两方向走 kTunnelLenMax×2 段 + 洞室半径 → 半径 ≤ kMargin 不越界）。
             if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
                 continue;
             if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠矿井（避免与海水柱冲突）
             const int h = std::min(heightAt(cx, cz), m_height - 1);
             // 矿井 y 范围：基岩之上 ~ kMineshaftMaxY 之下；上方至少留 kSurfaceFloor 格石顶。
             const int yLo = kBedrockTop + 2;
-            const int yHi = std::min(kMineshaftMaxY - kTunnelH - 1, h - kSurfaceFloor - kTunnelH - 1);
+            const int yHi = std::min(kMineshaftMaxY - kRoomH - 1, h - kSurfaceFloor - kRoomH - 1);
             if (yHi <= yLo) continue; // 此列地下空间不足 → 跳过
             const int yRange = yHi - yLo + 1;
-            const int sy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 木地板 y（巷道底面）
+            const int sy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 地板 y（巷道底面 = 洞室地板）
 
-            // 巷道方向（4 水平主向，由 hash 高位选；机制等价 MC 矿井主巷道水平延伸）。
-            const int dirIdx = int((r >> 14) & 3u);
-            int dx = 0, dz = 0;
-            switch (dirIdx) {
-            case 0: dx =  1; dz =  0; break; // +X
-            case 1: dx = -1; dz =  0; break; // -X
-            case 2: dx =  0; dz =  1; break; // +Z
-            case 3: dx =  0; dz = -1; break; // -Z
-            }
-            // 巷道长度（kTunnelLenMin..kTunnelLenMax，由 hash 另一段位选）。
-            const int tunnelLen = kTunnelLenMin
-                + int((r >> 16) & 0xFu) % (kTunnelLenMax - kTunnelLenMin + 1);
+            // t565 ⑤ 地板材质：按矿井 hash 二选一（Planks 旧观感 / Stone 石底变体）。全矿井统一。
+            const quint8 floorBlock = ((r >> 20) & 1u) ? BlockRegistry::Stone : BlockRegistry::Planks;
 
-            // 逐段 carve 巷道。
-            for (int step = 0; step < tunnelLen; ++step) {
-                const int ax = cx + step * dx;
-                const int az = cz + step * dz;
-                // 垂直宽度轴 perp = 方向旋转 90°：(perpX, perpZ) = (-dz, dx)；w ∈ {-1,0,+1} → 3 宽截面。
-                for (int w = -1; w <= 1; ++w) {
-                    const int px = ax + w * (-dz);
-                    const int pz = az + w * dx;
-                    // 木地板（y=sy）：覆盖原 stone/ore/泥土，不动 Bedrock。
-                    const quint8 fb = m_chunks.blockAt(px, sy, pz);
-                    if (fb != BlockRegistry::Bedrock)
-                        m_chunks.setBlock(px, sy, pz, BlockRegistry::Planks);
-                    // 内部空气（y=sy+1..sy+kTunnelH）：清空原 stone/ore，不动 Bedrock。
-                    for (int dy = 1; dy <= kTunnelH; ++dy) {
-                        const int yy = sy + dy;
-                        if (yy >= m_height) break;
-                        const quint8 ib = m_chunks.blockAt(px, yy, pz);
-                        if (ib == BlockRegistry::Bedrock) continue;
-                        m_chunks.setBlock(px, yy, pz, BlockRegistry::Air);
-                    }
+            // t565 ④ 铁轨铺设记录：铺完统一算连接 state（直 / 拐角 / 十字形态）。
+            std::vector<std::array<int, 3>> railCells;
+
+            // 逐格铺地板 + 清空气（px,pz 列，地板 y0、内部空气 y0+1..y0+roomH；不动 Bedrock）。
+            const auto carveCell = [&](int px, int pz, int y0, int roomH) {
+                if (px < 0 || pz < 0 || px >= m_width || pz >= m_depth) return; // 防御（margin 已保证不越界）
+                const quint8 fb0 = m_chunks.blockAt(px, y0, pz);
+                if (fb0 != BlockRegistry::Bedrock)
+                    m_chunks.setBlock(px, y0, pz, floorBlock);
+                for (int dy = 1; dy <= roomH; ++dy) {
+                    const int yy = y0 + dy;
+                    if (yy >= m_height) break;
+                    const quint8 ib = m_chunks.blockAt(px, yy, pz);
+                    if (ib == BlockRegistry::Bedrock) continue;
+                    m_chunks.setBlock(px, yy, pz, BlockRegistry::Air);
                 }
+            };
 
-                // 木栅栏立柱（每 kFenceInterval 段，w=±1 边缘，y=sy+1..sy+2 两格高立柱）。
-                if (step % kFenceInterval == 0) {
-                    for (int w = -1; w <= 1; w += 2) { // w = -1, +1
-                        const int px = ax + w * (-dz);
-                        const int pz = az + w * dx;
-                        for (int dy = 1; dy <= 2; ++dy) {
-                            const int yy = sy + dy;
-                            if (yy >= m_height) break;
-                            const quint8 ib = m_chunks.blockAt(px, yy, pz);
-                            if (ib == BlockRegistry::Bedrock) continue;
-                            m_chunks.setBlock(px, yy, pz, BlockRegistry::WoodFence);
+            // 1) 中央交叉洞室（7×7×kRoomH 空气 + 地板；t565 ①⑥「角落生成洞穴 / 连通」）。
+            for (int dx = -kRoomHalf; dx <= kRoomHalf; ++dx)
+                for (int dz = -kRoomHalf; dz <= kRoomHalf; ++dz)
+                    carveCell(cx + dx, cz + dz, sy, kRoomH);
+            // 洞室中央十字铁轨（两排贯通 → 与四向巷道轨衔接）。
+            {
+                const int yy = sy + 1;
+                if (yy < m_height) {
+                    for (int d = -kRoomHalf; d <= kRoomHalf; ++d) {
+                        if (m_chunks.blockAt(cx + d, yy, cz) == BlockRegistry::Air) {
+                            m_chunks.setBlock(cx + d, yy, cz, BlockRegistry::Rail);
+                            railCells.push_back({cx + d, yy, cz});
+                        }
+                        if (m_chunks.blockAt(cx, yy, cz + d) == BlockRegistry::Air) {
+                            m_chunks.setBlock(cx, yy, cz + d, BlockRegistry::Rail);
+                            railCells.push_back({cx, yy, cz + d});
                         }
                     }
                 }
+            }
+            // 洞室宝藏箱（中心旁两格，机制同旧版末端箱；带 ChestStateMineshaftFlag → 首开填充矿井战利品）。
+            {
+                const int yy = sy + 1;
+                if (yy < m_height) {
+                    const int ox = ((r >> 21) & 1u) ? kRoomHalf - 1 : -(kRoomHalf - 1);
+                    const quint8 ib = m_chunks.blockAt(cx + ox, yy, cz);
+                    if (ib != BlockRegistry::Bedrock && ib != BlockRegistry::Rail) // 不覆盖铁轨（防御）
+                        m_chunks.setBlock(cx + ox, yy, cz, BlockRegistry::Chest,
+                                          BlockRegistry::ChestStateMineshaftFlag);
+                }
+            }
 
-                // 铁轨（每 kRailInterval 段，w=0 中线，y=sy+1 贴在木地板上）。
-                if (step % kRailInterval == 0) {
-                    const int yy = sy + 1;
-                    if (yy < m_height) {
-                        const quint8 ib = m_chunks.blockAt(ax, yy, az);
-                        if (ib == BlockRegistry::Air) // 仅在空气格放（防覆盖已放立柱等）
-                            m_chunks.setBlock(ax, yy, az, BlockRegistry::Rail);
+            // 2) 折线巷道（3..4 条，每条 = 主向 lenA 段 + ±90° 转向 lenB 段；t565 ①⑥「两边长条 + 角落连通」）。
+            const int corridors = 3 + int((r >> 22) & 1u); // 3 或 4 条
+            for (int ci = 0; ci < corridors; ++ci) {
+                // 主向（4 水平主向，由 hash 高位 + 巷道序号混合选；机制等价 MC 矿井巷道多向延伸）。
+                const int dirIdx = int(((r >> (24 + 2 * ci)) ^ (quint32(ci) * 0x9E37u)) & 3u);
+                int dx = 0, dz = 0;
+                switch (dirIdx) {
+                case 0: dx =  1; dz =  0; break; // +X
+                case 1: dx = -1; dz =  0; break; // -X
+                case 2: dx =  0; dz =  1; break; // +Z
+                case 3: dx =  0; dz = -1; break; // -Z
+                }
+                const quint32 rh = hashVoxel(mineSeed ^ (0xDEC0 + quint32(ci)), cx, sy, cz); // 巷道参数 hash
+                const int lenA = kTunnelLenMin + int((rh >> 2) & 0xFu) % (kTunnelLenMax - kTunnelLenMin + 1);
+                const int lenB = kTunnelLenMin + int((rh >> 6) & 0xFu) % (kTunnelLenMax - kTunnelLenMin + 1);
+                const int turnSign = ((rh >> 10) & 1u) ? 1 : -1; // 转向 ±90°（左 / 右转）
+
+                // 两段推进（段 A 主向 lenA 段 → 转向 → 段 B lenB 段）。每段 3 宽 × 3 高 + 地板。
+                int legAx = cx, legAz = cz; // 段 A 末端游标（段 B 续接起点）
+                for (int leg = 0; leg < 2; ++leg) {
+                    const int legLen = (leg == 0) ? lenA : lenB;
+                    if (leg == 1) {
+                        // 转向 ±90°：(dx,dz) → (dz,-dx) × turnSign。
+                        const int ndx = turnSign * dz, ndz = -turnSign * dx;
+                        dx = ndx; dz = ndz;
                     }
-                }
-
-                // 蜘蛛网（按 hashVoxel 概率，w=±1 上角 y=sy+kTunnelH）。
-                for (int w = -1; w <= 1; w += 2) {
-                    const int px = ax + w * (-dz);
-                    const int pz = az + w * dx;
-                    const int yy = sy + kTunnelH;
-                    if (yy >= m_height) continue;
-                    const quint32 wh = hashVoxel(mineSeed ^ 0xC0B, px, yy, pz);
-                    if ((wh % 100u) >= kCobwebPct) continue;
-                    const quint8 ib = m_chunks.blockAt(px, yy, pz);
-                    if (ib != BlockRegistry::Bedrock) // 仅空气格放（防覆盖已放立柱顶端）
-                        m_chunks.setBlock(px, yy, pz, BlockRegistry::Cobweb);
-                }
-
-                // 暴露矿石（按 hashVoxel 概率，w=±2 巷壁 y=sy+1..sy+kTunnelH）。
-                for (int w = -2; w <= 2; w += 4) { // w = -2, +2
-                    const int px = ax + w * (-dz);
-                    const int pz = az + w * dx;
-                    for (int dy = 1; dy <= kTunnelH; ++dy) {
-                        const int yy = sy + dy;
-                        if (yy >= m_height) break;
-                        const quint32 oh = hashVoxel(mineSeed ^ 0xCAFE, px, yy, pz);
-                        if ((oh % 100u) >= kOrePct) continue;
-                        const quint8 ib = m_chunks.blockAt(px, yy, pz);
-                        // 仅在实体石类方块处置矿（不动 Bedrock / Air / 已放结构方块）。
-                        if (ib != BlockRegistry::Stone && ib != BlockRegistry::Dirt) continue;
-                        // 煤矿（常见）/ 铁矿（次常见）按 hash 位选；机制等价 MC 矿井壁裸露矿物。
-                        const quint8 ore = ((oh >> 8) & 1u) ? BlockRegistry::IronOre
-                                                            : BlockRegistry::CoalOre;
-                        m_chunks.setBlock(px, yy, pz, ore);
+                    // 起点：段 0 = 洞室边缘外一格（step0 即 carve 该格）；段 1 = 段 A 末端（先推进再 carve，免重复刻）。
+                    int ax = (leg == 0) ? cx + dx * (kRoomHalf + 1) : legAx;
+                    int az = (leg == 0) ? cz + dz * (kRoomHalf + 1) : legAz;
+                    for (int step = 0; step < legLen; ++step) {
+                        if (leg == 1 || step > 0) { ax += dx; az += dz; }
+                        // 垂直宽度轴 perp = 方向旋转 90°：(perpX, perpZ) = (-dz, dx)；w ∈ {-1,0,+1} → 3 宽截面。
+                        for (int w = -1; w <= 1; ++w)
+                            carveCell(ax + w * (-dz), az + w * dx, sy, kTunnelH);
+                        // 木栅栏立柱（每 kFenceInterval 段，w=±1 边缘，y=sy+1..sy+2 两格高立柱）。
+                        if (step % kFenceInterval == 0) {
+                            for (int w = -1; w <= 1; w += 2) { // w = -1, +1
+                                const int px = ax + w * (-dz);
+                                const int pz = az + w * dx;
+                                for (int dy = 1; dy <= 2; ++dy) {
+                                    const int yy = sy + dy;
+                                    if (yy >= m_height) break;
+                                    const quint8 ib = m_chunks.blockAt(px, yy, pz);
+                                    if (ib == BlockRegistry::Bedrock) continue;
+                                    m_chunks.setBlock(px, yy, pz, BlockRegistry::WoodFence);
+                                }
+                                // t565 ③ 立柱顶火把：~kTorchPct 概率在立柱正上（y=sy+3，立柱顶 sy+2 之上）置
+                                //   Torch state=0（贴地形态立在柱顶；块光 flood14 照亮巷道 + 呈现层 enterWorld
+                                //   扫描建伪光源 delegate）。柱顶在行走层之上、偏离铁轨中线 → 不与轨 / 箱冲突。
+                                const int ty = sy + 3;
+                                if (ty < m_height) {
+                                    const quint32 th = hashVoxel(mineSeed ^ 0x70C4, px, ty, pz);
+                                    if ((th % 100u) < kTorchPct
+                                        && m_chunks.blockAt(px, ty, pz) == BlockRegistry::Air)
+                                        m_chunks.setBlock(px, ty, pz, BlockRegistry::Torch, 0);
+                                }
+                            }
+                        }
+                        // t565 ④ 铁轨：w=0 中线每段连续铺（贴地板；仅空气格放 → 拐角 / 立柱等占用处自然跳过）。
+                        {
+                            const int yy = sy + 1;
+                            if (yy < m_height && m_chunks.blockAt(ax, yy, az) == BlockRegistry::Air) {
+                                m_chunks.setBlock(ax, yy, az, BlockRegistry::Rail);
+                                railCells.push_back({ax, yy, az});
+                            }
+                        }
+                        // 蜘蛛网（按 hashVoxel 概率，w=±1 上角 y=sy+kTunnelH；仅空气格放，防覆盖立柱顶端）。
+                        for (int w = -1; w <= 1; w += 2) {
+                            const int px = ax + w * (-dz);
+                            const int pz = az + w * dx;
+                            const int yy = sy + kTunnelH;
+                            if (yy >= m_height) continue;
+                            const quint32 wh = hashVoxel(mineSeed ^ 0xC0B, px, yy, pz);
+                            if ((wh % 100u) >= kCobwebPct) continue;
+                            const quint8 ib = m_chunks.blockAt(px, yy, pz);
+                            if (ib == BlockRegistry::Bedrock) continue;
+                            m_chunks.setBlock(px, yy, pz, BlockRegistry::Cobweb);
+                        }
+                        // 暴露矿石（按 hashVoxel 概率，w=±2 巷壁 y=sy+1..sy+kTunnelH；仅实体石类格置换）。
+                        for (int w = -2; w <= 2; w += 4) { // w = -2, +2
+                            const int px = ax + w * (-dz);
+                            const int pz = az + w * dx;
+                            for (int dy = 1; dy <= kTunnelH; ++dy) {
+                                const int yy = sy + dy;
+                                if (yy >= m_height) break;
+                                const quint32 oh = hashVoxel(mineSeed ^ 0xCAFE, px, yy, pz);
+                                if ((oh % 100u) >= kOrePct) continue;
+                                const quint8 ib = m_chunks.blockAt(px, yy, pz);
+                                // 仅在实体石类方块处置矿（不动 Bedrock / Air / 已放结构方块）。
+                                if (ib != BlockRegistry::Stone && ib != BlockRegistry::Dirt) continue;
+                                const quint8 ore = ((oh >> 8) & 1u) ? BlockRegistry::IronOre
+                                                                    : BlockRegistry::CoalOre;
+                                m_chunks.setBlock(px, yy, pz, ore);
+                            }
+                        }
+                        if (leg == 0) { legAx = ax; legAz = az; } // 记段 A 末端（段 B 续接）
                     }
                 }
             }
 
-            // 宝藏箱（巷道末端最后一段，w=0 中线，y=sy+1）：带 ChestStateMineshaftFlag 标记 → 首开填充矿井战利品。
-            //   朝向低 2 位 = 0（chestFrontFace 兜底 NegZ；worldgen 不关心箱子朝向）。覆盖末端空气格（安全）。
-            {
-                const int ax = cx + (tunnelLen - 1) * dx;
-                const int az = cz + (tunnelLen - 1) * dz;
-                const int yy = sy + 1;
-                if (yy < m_height) {
-                    const quint8 ib = m_chunks.blockAt(ax, yy, az);
-                    if (ib != BlockRegistry::Bedrock) // 不动基岩（防御）
-                        m_chunks.setBlock(ax, yy, az, BlockRegistry::Chest,
-                                          BlockRegistry::ChestStateMineshaftFlag);
-                }
+            // t565 ④ 铁轨连接统一重算（直 / 拐角 / 十字形态由邻轨互连自动得出；与运行期 checkRailOnEdit
+            //   同一权威 BlockRegistry::railConnections）。worldgen 直写不 emit（generate 末尾统一 worldChanged）。
+            for (const auto &rc : railCells) {
+                const quint8 con = BlockRegistry::railConnections(
+                    m_chunks.blockAt(rc[0] + 1, rc[1], rc[2]),
+                    m_chunks.blockAt(rc[0] - 1, rc[1], rc[2]),
+                    m_chunks.blockAt(rc[0], rc[1], rc[2] + 1),
+                    m_chunks.blockAt(rc[0], rc[1], rc[2] - 1));
+                m_chunks.setBlock(rc[0], rc[1], rc[2], BlockRegistry::Rail, con);
             }
             ++placed;
         }

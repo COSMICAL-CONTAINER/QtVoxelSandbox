@@ -131,6 +131,10 @@ qt_add_executable(voxelsandbox
     #   新实体类型（Boat），slot-reuse 模型（同 EntityManager / ItemEntityManager）。
     src/Entities/boatmanager.cpp
     src/Entities/boatmanager.h
+    # t565 矿车实体管理器（Entities 层）：轨上行驶 + 骑乘 + WASD 前后推 + 拐角自动转弯 + 挖掉矿车物品
+    #   （机制等价 MC 1.0 minecart）。新实体类型（Cart），slot-reuse 模型（同 BoatManager）。
+    src/Entities/minecartmanager.cpp
+    src/Entities/minecartmanager.h
     src/Game/raycast.cpp
     src/Game/raycast.h
     src/Game/recipe.cpp
@@ -264,6 +268,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_pumpkin_top.png         # t482 南瓜顶/底面贴图（build_pumpkin.py；橙色瓜顶+中央短茎+高光；Pumpkin top/bottomTile）
         textures/default_cobweb.png              # t484 蜘蛛网 cross 贴图（build_cobweb.py；透明底+灰白蛛丝放射网纹；alphaCutoff cutout；Cobweb 各面）
         textures/default_rail.png                # t484 铁轨贴地薄板 flat 贴图（build_rail.py；透明底+棕色枕木+灰铁双轨；alphaCutoff cutout；Rail 各面）
+        textures/default_rail_corner.png         # t565 铁轨 90° 拐角贴图（build_rail.py；轨自南进向左弯出；mesher 据轨 state 连接位选）
+        textures/default_rail_cross.png          # t565 铁轨十字交叉贴图（build_rail.py；南北+东西双轨叠交+中央方枕木）
         textures/default_tnt.png                 # t485 TNT 各面贴图（build_tnt.py；深红药柱底+横向深棕捆带+中央亮黄标识+顶部引线点；沙漠神殿陷阱方块）
         textures/default_cut_sandstone.png       # t485 切制砂岩各面贴图（build_cut_sandstone.py；暖沙色平滑底+内陷矩形装饰边框；金字塔外框装饰变体）
         textures/default_mossy_cobble.png        # t486 苔石各面贴图（build_mossy_cobble.py；圆石灰底+散布暗绿苔藓斑簇；丛林神殿主体）

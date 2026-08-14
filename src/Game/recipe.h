@@ -275,6 +275,13 @@ public:
     //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘
     //   MaterialIcon）。图标走 MaterialIcon drawSnowball（程序生成冷白小球，§9 原创）。
     static constexpr int SnowballId      = 0x23D; // 雪球：雪傀儡死亡掉落 0-15 个（t510）；可堆叠 64
+    // t565 矿车（minecart）：材料段 0x23E。机制等价 MC 1.0 minecart——**5 铁锭 U 形合成 → 1 矿车**
+    //   （recipe.cpp minecart 配方，机制等价 MC 1.0 minecraft 配方 5 iron ingot）。右键铁轨放置矿车实体
+    //   （MinecartManager，Entities 层）；矿车沿轨行驶（WASD 驱动 / 上车右键 / Shift 下车）；左键挖矿车 →
+    //   掉矿车物品。可堆叠 1（载具，同船 maxStack 1？—— 船可 64，矿车对齐 MC 1.0 maxStack 1？MC 1.0 矿车
+    //   实际 maxStack 1（非堆叠载具）→ 本工程取 1）。非方块（材料段）→ 右键走矿车交互分支（playercontroller
+    //   placeBlock minecart 段，同船模式）。图标走 MaterialIcon drawMinecart（程序生成矿车斗形，§9 原创）。
+    static constexpr int MinecartId      = 0x23E; // 矿车：5 铁锭合成；右键铁轨放置 + 骑乘行驶（t565）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

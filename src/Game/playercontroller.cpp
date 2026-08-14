@@ -174,6 +174,14 @@ void PlayerController::setBoatManager(BoatManager *m)
     emit boatManagerChanged();
 }
 
+// t565 矿车管理器注入（同 setBoatManager 模式）。
+void PlayerController::setMinecartManager(MinecartManager *m)
+{
+    if (m_minecartManager == m) return;
+    m_minecartManager = m;
+    emit minecartManagerChanged();
+}
+
 void PlayerController::onWindowChanged(QQuickWindow *win)
 {
     if (m_window) m_window->removeEventFilter(this);
@@ -305,6 +313,10 @@ void PlayerController::respawn()
     // t469：重生下船（清骑乘态；玩家离死亡点的船，船保留在世界）。outFeet 不用（重生用 m_spawnPos）。
     if (m_boatManager && m_boatManager->ridingIndex() >= 0) {
         QVector3D dummyFeet; m_boatManager->dismount(m_world, dummyFeet);
+    }
+    // t565：重生下矿车（清骑乘态；矿车保留在世界）。outFeet 不用（重生用 m_spawnPos）。
+    if (m_minecartManager && m_minecartManager->ridingIndex() >= 0) {
+        QVector3D dummyFeet; m_minecartManager->dismount(m_world, dummyFeet);
     }
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
     m_rightDown = false;      // t267：清右键按下态（防 respawn 后 updateEating 误续食）
@@ -892,6 +904,22 @@ void PlayerController::beginMining()
         if (boatIdx >= 0 && boatDist <= m_hitDist) {
             m_boatManager->hitBoatFromRay(eye, look, kReach);
             m_attackCooldown = kAttackCooldown; // 挖船也走攻击冷却（防长按瞬秒多船）
+            emit swingArm();
+            return;
+        }
+    }
+    // t565 挖矿车掉落（机制等价 MC 1.0 攻击矿车 → 矿车破坏掉矿车物品；同挖船 hitBoatFromRay 分流模式）。
+    //   独立跑 cart 命中射线：命中活体矿车且（无方块命中 OR 矿车比方块更近）→ hitCartFromRay 移除矿车 +
+    //   emit cartBroken（→ 呈层 spawnItem 掉矿车物品）+ swingArm，不进破块分支。挖的是被骑的矿车 → 玩家自然
+    //   下车（hitCartFromRay 内清骑乘态）。攻击冷却门控同船（防长按瞬秒多车）。
+    if (m_minecartManager && m_attackCooldown <= 0.0f) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float cartDist = 0.0f;
+        const int cartIdx = m_minecartManager->findCartHit(eye, look, kReach, &cartDist);
+        if (cartIdx >= 0 && cartDist <= m_hitDist) {
+            m_minecartManager->hitCartFromRay(eye, look, kReach);
+            m_attackCooldown = kAttackCooldown; // 挖矿车也走攻击冷却
             emit swingArm();
             return;
         }
@@ -2775,6 +2803,31 @@ void PlayerController::placeBlock()
             }
         }
     }
+    // t565 矿车交互（spec「右键铁轨放矿车 / 右键矿车骑乘 / WASD 沿轨行驶」；机制等价 MC 1.0 minecart）。
+    //   两分支（同船交互模式）：(a) 骑乘（优先）：跑独立矿车命中射线（tryMount 内 findCartHit）命中矿车 →
+    //   上车（不要求 m_hasHit —— 瞄的是实体非方块）。(b) 放矿车：手持矿车物品（MinecartId）+ 命中方块是
+    //   Rail → 在该轨格生成矿车（spawnCart，pos = 格中心轨面上）；生存消耗 1 / 创造不耗。矿车物品非方块
+    //   （材料段）→ selectedBlock 归 Air，须在 m_selectedBlock==Air 守卫之前分流（同船 / 桶 / 蛋模式）。
+    //   命中方块非 Rail → 不放（矿车只能放轨上，机制等价 MC 矿车须置于铁轨）。
+    if (m_minecartManager) {
+        // (a) 骑乘：命中矿车 → 上车（即便手持矿车物品也不另放，机制等价 MC 右键矿车优先上车）。
+        if (m_minecartManager->tryMount(position(), lookDirection(), kReach)) {
+            m_lastPlaceMs = now;
+            emit swingArm();
+            return;
+        }
+        // (b) 放矿车：手持矿车物品 + 未骑乘 + 命中方块为 Rail。
+        if (m_minecartManager->ridingIndex() < 0 && m_hotbar
+            && heldItemId == RecipeRegistry::MinecartId && m_hasHit
+            && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Rail) {
+            m_minecartManager->spawnCart(m_hitBx, m_hitBy, m_hitBz);
+            if (m_mode != Creative)
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 矿车（创造不耗）
+            m_lastPlaceMs = now;
+            emit swingArm();
+            return;
+        }
+    }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, tz = m_hitBz + m_hitNz;
@@ -4248,6 +4301,32 @@ void PlayerController::step(qreal dt)
         }
         // 玩家随船位移（脚底 = 船中心）。
         m_pos = QVector3D(boatPos.x(), boatPos.y(), boatPos.z());
+        m_vel = QVector3D(0, 0, 0);
+        reportHorizSpeed(posBefore, dt);
+        emit positionChanged();
+        return;
+    }
+    // t565 矿车骑乘分支（机制等价 MC 1.0 矿车骑乘；同船骑乘分支模式，优先于走 / 飞 / 观察者分支）。
+    //   骑乘期禁用玩家自身移动（重力 / 跳跃 / 走步动画全停，坐姿由 QML sitBlend 驱动）；WASD 经
+    //   tickRiddenCart 沿轨推进（W 前推 / S 后拉；轨拐角自动转弯；轨尽头停 + 可反向推回）；Shift 按下沿
+    //   下车（dismount，玩家摆矿车侧安全位）。玩家脚底 = 矿车中心 - 车高差（坐车斗内）。
+    if (m_minecartManager && m_minecartManager->ridingIndex() >= 0) {
+        if (m_moveSpeed != 0.0f) { m_moveSpeed = 0.0f; emit moveSpeedChanged(); } // 禁走路动画（同船）
+        if (shiftEdge) {
+            QVector3D feet;
+            m_minecartManager->dismount(m_world, feet);
+            m_pos = feet;
+            m_vel = QVector3D(0, 0, 0);
+            if (m_onGround) { m_onGround = false; emit onGroundChanged(); }
+            reportHorizSpeed(posBefore, dt);
+            emit positionChanged();
+            return;
+        }
+        // WASD 驱动矿车（wish 是据 yaw 的世界系意图向量；tickRiddenCart 在轨约束下投影到行进方向）。
+        QVector3D cartPos;
+        m_minecartManager->tickRiddenCart(dt, m_world, wish.x(), wish.z(), cartPos);
+        // 玩家随矿车位移（脚底 = 矿车中心下移 0.3 —— 坐进车斗；眼位 / 相机自动跟随 position()）。
+        m_pos = QVector3D(cartPos.x(), cartPos.y() - 0.3f, cartPos.z());
         m_vel = QVector3D(0, 0, 0);
         reportHorizSpeed(posBefore, dt);
         emit positionChanged();

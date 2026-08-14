@@ -452,14 +452,21 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* snow         */ {int(BlockRegistry::Snow),             57, 57, 57, 57,  true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::Shovel),   0, true,                            0x23D, 4, 64, "snow",        "雪块"},
     // ── t484 废弃矿井结构方块（机制等价 MC 1.0 废弃矿井 mineshaft 的蛛网 / 铁轨；名称 / 贴图全原创自绘 §9a）。
     //   蜘蛛网（Cobweb）：cross 形蛛网（透明底 + 灰白蛛丝放射网纹，alphaCutoff cutout），与草丛 / 树苗同走 cross
-    //   几何段。solid=false（不挡邻居面剔除）、ShapeNone（无碰撞，玩家穿过）、hardness=0（瞬破）、NoTool（空手可采）、
-    //   dropId=0x219（线材料段 StringId；破蛛网掉线非蛛网方块，机制等价 MC 1.0 破蛛网掉线）、maxStack=64。
+    //   几何段。solid=false（不挡邻居面剔除）、ShapeNone（无碰撞，玩家穿过；t565 蛛网减速系统读它 —— 玩家
+    //   footprint 在蛛网内 → 水平速度 ×0.15 粘滞减速）。t565 重定义采集机制（机制等价 MC 1.0 cobweb）：
+    //   hardness=4.0（空手 / 非剑挖掘极慢 ≈4s）+ toolType=Sword + requiresTool=true + minTier=0（**须持剑挖
+    //   才掉落**，空手 / 其它工具挖破无掉落 —— 同石类 requiresTool 语义；剑挖掘速度由 ToolRegistry
+    //   miningSpeedMul 的剑 ×15 蛛网特例加速 → 近乎瞬破）。dropId=0x219（线材料段 StringId；破蛛网掉线
+    //   非蛛网方块，机制等价 MC 1.0 破蛛网掉线）、maxStack=64。t565 配方：4 线（2×2）→ 1 白羊毛。
     //   各面=cobweb(120)。音色归 GroupGrass。worldgen placeMineshaft 散布；进创造调色板。
-    /* cobweb       */ {int(BlockRegistry::Cobweb),          120,120,120,120, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false, 0x219,                                 1, 64, "cobweb",      "蜘蛛网"},
+    /* cobweb       */ {int(BlockRegistry::Cobweb),          120,120,120,120, false, BlockRegistry::ShapeNone,     4.0f, int(BlockRegistry::Sword),    0, true, 0x219,                                 1, 64, "cobweb",      "蜘蛛网"},
     //   铁轨（Rail）：贴地薄板 flat（透明底 + 棕色枕木 + 灰铁双轨，alphaCutoff cutout），mesher 走 PartialBlockGeometry
-    //   的 Rail 水平 quad case（与睡莲横向浮叶同源）。solid=false、ShapeNone（无碰撞，玩家走过）、hardness=0（瞬破）、
-    //   NoTool（空手可采且掉落）、dropId=自身（破铁轨掉铁轨方块，可放回）、maxStack=64。各面=rail(121)。
-    //   音色归 GroupStone（金属质）。worldgen placeMineshaft 散布；进创造调色板。配方 6 铁锭 + 1 木棒 → 16 铁轨。
+    //   的 Rail 水平 quad case（与睡莲横向浮叶同源）。**t565 连接 state**（RailConnPx/Nx/Pz/Nz 4 位）：放置 /
+    //   破邻时自动重算（与相邻 Rail 互连），mesher 据连接位选直轨（121，EW 时 UV 旋转）/ 拐角（136）/ 十字（137）
+    //   —— 机制等价 MC 1.0 rail 自动连接 + 转弯；矿车沿轨行驶（t565 MinecartManager）。solid=false、ShapeNone
+    //   （无碰撞，玩家走过）、hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身（破铁轨掉铁轨方块，
+    //   可放回）、maxStack=64。各面=rail(121)。音色归 GroupStone（金属质）。worldgen placeMineshaft 散布；
+    //   进创造调色板。配方 6 铁锭 + 1 木棒 → 16 铁轨。
     /* rail         */ {int(BlockRegistry::Rail),            121,121,121,121, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::Rail),           1, 64, "rail",        "铁轨"},
     // ── t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；名称 / 贴图全原创自绘 §9a）。
     //   TNT（TntBlock）：可引爆爆炸物方块。整立方 opaque（solid=true / ShapeFull，与砂岩/箱子同走 culled 立方面
@@ -1315,6 +1322,19 @@ void BlockRegistry::ladderSupportOffset(quint8 state, int &dx, int &dz)
     case 2: dx =  0; dz =  1; return; // 支撑墙在 +Z 邻
     default: dx = 0; dz = -1; return; // 支撑墙在 -Z 邻（含越界高位兜底为 -Z；& 3 后 case 3）
     }
+}
+
+// t565 铁轨连接 state 计算（见头注释 RailConnPx/Nx/Pz/Nz）：4 向水平邻块 id 入参，邻为 Rail → 置对应
+//   连接位。纯函数单一权威 —— placeBlock（放置时算 placeState）/ World::checkRailOnEdit（破邻复检重算）/
+//   placeMineshaft（worldgen 铺轨后统一算）共用，杜绝各处自写连接判定漂移。
+quint8 BlockRegistry::railConnections(quint8 px, quint8 nx, quint8 pz, quint8 nz)
+{
+    quint8 con = 0;
+    if (px == Rail) con |= RailConnPx;
+    if (nx == Rail) con |= RailConnNx;
+    if (pz == Rail) con |= RailConnPz;
+    if (nz == Rail) con |= RailConnNz;
+    return con;
 }
 
 // t225 箱子前面（锁面）所朝 Face（state 低 2 位解码，与 horizontalFacing 同源 0=+X 1=-X 2=+Z 3=-Z）。

@@ -600,21 +600,30 @@ public:
         //   两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。机制等价 MC 1.0 蛛网（cobweb / web）。
         //   worldgen placeMineshaft 在矿井巷道间隙确定性散布（同 seed 同分布，PLAN §2-K）。
         //   solid=false（非实体 → 不挡邻居面剔除，同草丛 / 火把）、shape=ShapeNone（**无碰撞** → 玩家穿过；
-        //   机制简化等价 MC 蛛网减速但本工程不做减速系统，故纯装饰无碰撞）、hardness=0（瞬破，同火把 / 草丛）、
-        //   NoTool（空手可采）、dropId=0x219（**线**材料段 RecipeRegistry::StringId；Core 不依赖 Game 故用字面量 0x219 ——
-        //   破蛛网掉线而非蛛网方块，机制等价 MC 1.0「破蛛网掉线」/ 剪刀掉蛛网方块本工程无剪刀剪取故恒掉线）、
-        //   dropCount=1、maxStack=64。各面贴图=cobweb(120)（透明底 + 灰白蛛丝放射网纹，alphaCutoff cutout）。
-        //   音色归 GroupGrass（软植物音，同草丛）。进创造调色板（玩家可取用 / 放置）。
-        Cobweb          = 102, // 蜘蛛网：cross 形蛛网（机制等价 MC 1.0 cobweb）；矿井散布；无碰撞瞬破掉线
-        //   铁轨（Rail）：**贴地薄板 cross/flat 方块**（mesher 走 PartialBlockGeometry 的 Rail case 画一片水平双面
-        //   quad 贴 cell 底部 → 平铺地面，与 LilyPad 横向浮叶同源几何；alpha 透明底 cutout）—— 非 1×1×1 整立方。
+        //   t565：玩家 footprint（脚位 / 眼位格）在蛛网内 → 水平速度 ×0.15 大幅减速（playercontroller step，
+        //   机制等价 MC 1.0 蛛网粘滞减速））、hardness=4.0（t565：空手挖极慢 —— 机制等价 MC 1.0 cobweb 空手
+        //   ~20s 挖不掉）、toolType=Sword + requiresTool=true + minTier=0（t565：**须持剑挖才掉落**（任何剑
+        //   tier≥0 都可），空手 / 其它工具挖破**无掉落**（同石类 requiresTool 语义；机制等价 MC 1.0 蛛网须
+        //   剑 / 剪刀快速采集，本工程无剪刀剪取故剑为唯一采集工具））、dropId=0x219（**线**材料段
+        //   RecipeRegistry::StringId；Core 不依赖 Game 故用字面量 0x219 —— 破蛛网掉线而非蛛网方块，
+        //   机制等价 MC 1.0「破蛛网掉线」）、dropCount=1、maxStack=64。各面贴图=cobweb(120)（透明底 +
+        //   灰白蛛丝放射网纹，alphaCutoff cutout）。音色归 GroupGrass（软植物音，同草丛）。进创造调色板。
+        //   t565 配方：4 线（2×2 满铺）→ 1 白羊毛（Wool；recipe.cpp）。
+        Cobweb          = 102, // 蜘蛛网：cross 形蛛网（机制等价 MC 1.0 cobweb）；矿井散布；无碰撞；粘人减速；剑挖掉线
+        //   铁轨（Rail）：**贴地薄板 cross/flat 方块**（mesher 走 PartialBlockGeometry 的 Rail case 画一片水平
+        //   双面 quad 贴 cell 底部 → 平铺地面，与 LilyPad 横向浮叶同源几何；alpha 透明底 cutout）—— 非 1×1×1 整立方。
         //   机制等价 MC 1.0 铁轨（rail）。worldgen placeMineshaft 在矿井木地板上确定性散布（同 seed 同分布）。
-        //   solid=false（非实体 → 不挡邻居面剔除，同睡莲）、shape=ShapeNone（**无碰撞** → 玩家走过；本工程无矿车，
-        //   铁轨纯装饰故无碰撞）、hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身（破铁轨掉铁轨方块，
-        //   可放回）、dropCount=1、maxStack=64。各面贴图=rail(121)（透明底 + 棕色枕木 + 灰铁双轨，alphaCutoff cutout）。
-        //   音色归 GroupStone（金属质敲击，最接近 MC 1.0 铁轨 metal SoundType）。进创造调色板（玩家可取用 / 放置）。
-        //   配方：6 铁锭 + 1 木棒（中行）→ 16 铁轨（工作台 3×3 有序，recipe.cpp；机制等价 MC 1.0 铁轨配方）。
-        Rail            = 103, // 铁轨：贴地薄板 flat（机制等价 MC 1.0 rail）；矿井木地板散布；无碰撞瞬破掉自身
+        //   **t565 连接 state**：state 4 位 = 水平 4 向连接位（RailConnPx=1/RailConnNx=2/RailConnPz=4/RailConnNz=8），
+        //   放置 / 邻轨破放时由 World::checkRailOnEdit / placeBlock 自动计算（与相邻 Rail 互连；0/1 连接 → 直轨、
+        //   对向 2 连接 → 直轨、邻向 2 连接 → 90° 拐角、3+ 连接 → 十字），mesher 据连接位选 121（直 NS）/
+        //   UV 旋转（直 EW）/ 136（拐角）/ 137（十字）—— 机制等价 MC 1.0 rail 自动连接 + 转弯。
+        //   solid=false（非实体 → 不挡邻居面剔除，同睡莲）、shape=ShapeNone（**无碰撞** → 玩家走过；矿车沿轨
+        //   行驶（t565 MinecartManager，Entities 层））、hardness=0（瞬破）、NoTool（空手可采且掉落）、
+        //   dropId=自身（破铁轨掉铁轨方块，可放回）、dropCount=1、maxStack=64。各面贴图=rail(121)（透明底 +
+        //   棕色枕木 + 灰铁双轨，alphaCutoff cutout）。音色归 GroupStone（金属质敲击，最接近 MC 1.0 铁轨 metal
+        //   SoundType）。进创造调色板（玩家可取用 / 放置）。配方：6 铁锭 + 1 木棒（中行）→ 16 铁轨（工作台 3×3
+        //   有序，recipe.cpp；机制等价 MC 1.0 铁轨配方）。
+        Rail            = 103, // 铁轨：贴地薄板 flat（机制等价 MC 1.0 rail）；矿井木地板散布；自动连接 + 拐角 + 矿车行驶
         // ── t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；名称 / 贴图全原创自绘 §9a）：
         //   TNT（TntBlock）：可引爆的爆炸物方块（机制等价 MC 1.0 TNT）。整立方 opaque（solid=true / ShapeFull ——
         //   走 mesher 整立方面路径，**非**异形，与砂岩/箱子同族）、hardness=0.0（MC 1.0 TNT 瞬破，无工具要求）、
@@ -1240,7 +1249,11 @@ public:
     //   135=brown_mushroom（t507 白蘑菇 / 棕蘑菇 cross 贴图；透明底 + 米色菌柄 + 棕色菌盖白斑，alphaCutoff cutout；
     //     BrownMushroom 各面=本 tile，mesher 走 cross 几何段；机制等价 MC 1.0 brown mushroom；
     //     tools/build_brown_mushroom.py 程序生成原创像素图）。
-    // 图集由 tools/build_atlas.py 打包全部 136 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
+    //   136=rail_corner（t565 铁轨 90° 拐角贴图：双轨自南边进入向左（西）弯出；透明底 + 棕色枕木 + 灰铁双轨，
+    //     alphaCutoff cutout；不绑定 BlockDef 瓦片字段 —— mesher 据铁轨 state 连接位选 121(直 NS)/UV 旋转(直 EW)/
+    //     136(拐角)/137(十字)，同 Water 流水贴图 19/23 的「呈现层据 state 选瓦片」模式；tools/build_rail.py 生成）。
+    //   137=rail_cross（t565 铁轨十字交叉贴图：南北 + 东西双轨叠交 + 中央方枕木；同上不绑定 BlockDef）。
+    // 图集由 tools/build_atlas.py 打包全部 138 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
@@ -1252,7 +1265,7 @@ public:
     //   111=bookshelf（t474 书架各面贴图；木板边框 + 中央书脊彩色书列（红 / 蓝 / 绿 / 棕书脊），原创自绘
     //      §9a；Bookshelf 各面=本 tile；tools/build_bookshelf.py 程序生成）。
 
-    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 136）。
+    // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 138）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
     //   都读本常量算每瓦片 UV 子区宽 1/AtlasTileCount。消除「mesher 与 BlockCube 各持一份魔数、
     //   加新瓦片后忘记同步一份」的复发 bug 类——历史已踩 3 次（t54: 10→12、t148: 12→20、t173: 20→23
@@ -1260,7 +1273,10 @@ public:
     //   瓦片在 [t/23,(t+1)/23] → 泥土采到半块石头、树叶采到木板，肉眼「不是实际方块」）。
     //   .cpp 内 static_assert 守卫：kDefs 任一 tile 字段 >= AtlasTileCount → 编译失败（防 tile 越界）。
     //   新增瓦片时同步改本常量 + tools/build_atlas.py 的 TILES（两处须一致）。
-    static constexpr int AtlasTileCount = 136;
+    //   t565：136=rail_corner / 137=rail_cross（铁轨拐角 / 十字贴图；不绑定 BlockDef 瓦片字段，mesher
+    //   据铁轨 state 选 121/136/137 —— 同 Water 流水贴图模式）。136..137 尚无 BlockDef 引用故
+    //   static_assert 仍只守到 135，本常量先就位供 mesher 引用。
+    static constexpr int AtlasTileCount = 138;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
@@ -1383,6 +1399,24 @@ public:
         TorchOnNZ  = 3, // 支撑 = -Z 邻：玩家点中 +Z 面放置（QML "pz"，柄伸 +Z 嵌 -Z 墙）
         TorchOnPZ  = 4, // 支撑 = +Z 邻：玩家点中 -Z 面放置（QML "nz"，柄伸 -Z 嵌 +Z 墙）
     };
+
+    // t565 铁轨连接位（存 Rail 方块 chunk state，4 位 = 水平 4 向「与相邻铁轨互连」标记）。放置铁轨 /
+    //   破 / 放任何邻块后由 World::checkRailOnEdit（破邻复检）+ PlayerController::placeBlock（放置时计算）
+    //   重算：连接 = 该水平 4 邻格为 Rail。mesher（PartialBlockGeometry Rail case）据连接位选形态 ——
+    //   0/1 连接 → 直轨（沿唯一连接向 / 默认 NS）、对向 2 连接（±X 或 ±Z）→ 直轨（EW 时 UV 旋转 90°）、
+    //   邻向 2 连接（如 +X+Z）→ 90° 拐角（tile 136 换 UV 旋转 / 镜像映射四向）、3+ 连接 → 十字（tile 137）。
+    //   机制等价 MC 1.0 rail 自动连接 + 转弯（本项目无坡道 / 动力铁轨）。state 经 m_states 落 SQLite
+    //   round-trip 保真；旧存档 / worldgen 铁轨 state 由放置路径重算（placeMineshaft 直写后经同一计算器
+    //   统一算连接，见 World::recomputeRailConnections）。collisionAABBs / selectionAABBs 不读 rail
+    //   state（ShapeNone），复用 state 作连接编码零回归（同 torch attach 编码模式）。
+    static constexpr quint8 RailConnPx = 0x01; // +X 邻为 Rail（轨延伸向 +X）
+    static constexpr quint8 RailConnNx = 0x02; // -X 邻为 Rail
+    static constexpr quint8 RailConnPz = 0x04; // +Z 邻为 Rail
+    static constexpr quint8 RailConnNz = 0x08; // -Z 邻为 Rail
+    // 算 (x,y,z) 处 Rail 的连接 state：4 向水平邻格为 Rail → 置对应位。任一邻 → 非 0。纯函数（邻块
+    //   id 数组入参），供 placeBlock（放置时算 placeState）/ World::checkRailOnEdit（破邻复检）/
+    //   placeMineshaft（worldgen 铺轨后统一算）共用 —— 单一权威，杜绝各处自写连接判定漂移。
+    static quint8 railConnections(quint8 px, quint8 nx, quint8 pz, quint8 nz);
     // 由放置命中面外法线（指向玩家侧）推火把附着方向。torch target = hitBlock + normal，故 normal +X
     //   → 火把在 hitBlock 的 +X 侧 → 其支撑 = 火把的 -X 邻 = hitBlock（TorchOnNX）。ny>0 → TorchFloor。
     //   无法线（不应发生）→ TorchFloor 兜底。placeBlock 据此写 state；与 torchPlaced 信号传出的命中面
