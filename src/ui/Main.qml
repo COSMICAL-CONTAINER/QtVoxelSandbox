@@ -5237,44 +5237,44 @@ Window {
                                     }
                                 }
                                 // 南瓜头（机制等价 MC 1.0 雪傀儡戴刻面南瓜；§9 区隔纯色原创非照搬 MC）。
-                                //   t529 复盘 ① 南瓜头「仍无头」+ ⑤「头在肚子位置」：t499 二轮曾把头 local y center 设 +1.23（头底
-                                //   贴顶雪块顶 0.90 无缝），但用户实测仍判「无头」/「头在肚子位置」—— 根因是 +1.23 紧贴顶雪块顶
-                                //   时，从侧视角头与顶雪块几乎共面（头底 0.90 = 顶雪块顶 0.90）→ 头被读作「顶雪块的延伸」而非
-                                //   「独立的头」，且头身无明显分界 → 用户判「头在肚子位置」（顶雪块 = 身体上部，头与之共面）。
-                                //   t529 修：头 local y center 提到 +1.45（头底 = 1.45-0.36 = 1.09，**高于**顶雪块顶 0.90 共
-                                //   0.19 格 → 头与身之间有清晰「脖颈缝隙」→ 一眼辨「头在顶上」非「与身一体」）；scale 略提到
-                                //   (0.82, 0.72, 0.72)（比顶雪块 0.80 宽稍大 → 头比身略宽更醒目；圆润南瓜非扁块）。色 #ef8c2a
-                                //   高饱和亮橙（昼夜 tint 下辨识强；与雪白身强对比）。眼/嘴 y 同步提到头中心 1.45（眼 1.52 / 嘴 1.35）。
-                                //   t510：剪南瓜头后（golemSheared）隐藏本体（无头 derpy 形态）；眼/嘴仍悬浮原头位（下方）。
+                                //   t552 复盘 ②「头还是白色雪头没有南瓜头 + 头悬空」：t529 把头提到 local y center +1.45
+                                //   （头底 1.09 高于顶雪块顶 0.90，留 0.19「脖颈缝隙」）—— 用户仍判「无头」：缝隙读作「头悬空」，
+                                //   且头（0.82 宽）与顶雪块（0.80 宽）等宽 → 顶雪块被读作「白色雪头」、浮着的橙块读作「悬空
+                                //   装饰」而非「头」。t552 修：**头直接坐在顶雪块顶**（零缝隙 → 不悬空）+ 顶雪块已缩窄到
+                                //   0.60（t552 ① 下大上小）→ 头（x/z 0.66）比顶雪块略宽成「独立的头」+ 高饱和亮橙 #ef8c2a
+                                //   与雪白身强对比 → 一眼辨「南瓜头在顶上」非「身体延伸」。头心 y = 顶雪块顶 0.90 + 半高
+                                //   0.30 = 1.20；**微沉 0.01 到 1.19**（头底 0.89 略入顶雪块顶 0.90 之下）→ 头底与顶雪块
+                                //   顶面不共面（共面会 z-fight 闪烁），视觉仍「坐」在顶上无缝。
+                                //   t510：剪南瓜头后（golemSheared）隐藏本体（无头 derpy 形态）；眼/嘴仍悬浮原头位。
                                 Model {
                                     visible: !parent.golemSheared // t510 剪后隐藏南瓜头本体（无头形态）
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 1.45, 0)
-                                    scale: Qt.vector3d(0.82, 0.72, 0.72)
+                                    position: Qt.vector3d(0, 1.19, 0)
+                                    scale: Qt.vector3d(0.66, 0.60, 0.66)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#ef8c2a") }
                                 }
                                 // 南瓜头刻面双眼 + 嘴（机制等价 MC jack o'lantern 刻面：双眼 + 锯齿嘴）。
-                                //   t499/t529：眼/嘴 z=-0.39（凸出头前 ~0.03；南瓜 z scale 0.72 → 头前面 z=-0.36；眼/嘴在头前
-                                //   非内嵌），刻面深色 (#1a0e04) 必现于头前。眼位 y=1.52（头中心 1.45 上偏留嘴位下方）；
-                                //   嘴位 y=1.35（眼下，咧嘴笑）。
+                                //   t552 眼/嘴随头新位（头心 1.19 / xz 半 0.33 → 头前面 z=-0.33）：眼/嘴 z=-0.36（凸出头前
+                                //   0.03 非内嵌非共面），刻面深色 (#1a0e04) 必现于头前。眼位 y=1.24（头心上偏留嘴位）；
+                                //   嘴位 y=1.12（眼下，咧嘴笑）。
                                 //   t510：剪南瓜头后（golemSheared）南瓜头本体隐藏，眼/嘴**仍悬浮在原头位**（visible 恒 true）
                                 //   → 「无头形态带眼」derpy 效果（机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」）。
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.16, 1.52, -0.39)
-                                    scale: Qt.vector3d(0.12, 0.15, 0.04)
+                                    position: Qt.vector3d(-0.17, 1.24, -0.36)
+                                    scale: Qt.vector3d(0.12, 0.14, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.16, 1.52, -0.39)
-                                    scale: Qt.vector3d(0.12, 0.15, 0.04)
+                                    position: Qt.vector3d(0.17, 1.24, -0.36)
+                                    scale: Qt.vector3d(0.12, 0.14, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                                 // 刻面嘴（横向长条，呈咧嘴笑剪影；机制等价 MC 南瓜嘴刻面）。
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 1.35, -0.39)
+                                    position: Qt.vector3d(0, 1.12, -0.36)
                                     scale: Qt.vector3d(0.32, 0.07, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
@@ -6290,10 +6290,18 @@ Window {
                     Model {
                         visible: window.showHitboxes
                         geometry: UnitCube {}
-                        // 朝向棒：从 collision 中心沿本地 -Z（mob 前 = 头朝向）延伸 mobHalfW+0.05（略超前壁辨识）。
+                        // 朝向棒：从 collision 中心沿本地 -Z（mob 前 = 头朝向）延伸 facingLen（略超前壁辨识）。
                         //   UnitCube ±0.5 scale sz → 棒长 sz；position z = −sz/2 使棒从 z=0 延伸到 z=−sz（前向）。
-                        position: Qt.vector3d(0, 0, -(mobHalfW + 0.05) * 0.5)
-                        scale: Qt.vector3d(0.03, 0.03, mobHalfW + 0.05)
+                        //   t558 雪/铁傀儡是「高大方块身」—— 旧棒长 = mobHalfW+0.05（雪傀儡 0.40 / 铁傀儡 0.65）被
+                        //   不透明的雪块 / 铁块身**完全包在体内**（用户报「F3+B 看不到朝向，红线在脑子里被挡」）。
+                        //   对造物：棒延长到凸出身体前壁（+0.65）+ 抬高到上身（mobHalfH*0.6），棒从块体间伸出可见；
+                        //   其余 mob（体型小 / 头前伸）保持原短棒（原长短够辨，无此问题）。
+                        property real facingLen: (entMobType === EntityManager.MobSnowGolem || entMobType === EntityManager.MobIronGolem)
+                                                 ? (mobHalfW + 0.65) : (mobHalfW + 0.05)
+                        property real facingY: (entMobType === EntityManager.MobSnowGolem || entMobType === EntityManager.MobIronGolem)
+                                               ? (mobHalfH * 0.6) : 0.0
+                        position: Qt.vector3d(0, facingY, -facingLen * 0.5)
+                        scale: Qt.vector3d(0.03, 0.03, facingLen)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
                     // t283 箭矢（Arrow）：骷髅弓箭手远程射出的投射物。细长杆 Model 沿飞行速度定向（yaw + pitch，

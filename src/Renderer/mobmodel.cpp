@@ -554,16 +554,18 @@ void MobModel::rebuild()
         // feat SnowGolem（雪傀儡；机制等价 MC 1.0 雪傀儡，§9 区隔原创模型 + pack 贴图）—— **柱身两雪块**上下堆叠。
         //   局部原点 = 碰撞中心（mobModelYOff=0，区别于猪牛羊「躯干中心」）；腿底本地 y=−0.90 贴 collision 底面
         //   （halfH=0.90 → mobModelYOff=0.0−0.90... 实际 mobModelYOff=0 因原点已是碰撞中心）。底块心 y=−0.45 半 0.45
-        //   → spans y[−0.90,0.00]；顶块心 y=+0.45 半 0.45 → spans y[0.00,0.90]。两雪块各 0.80 宽（半 0.40）。
+        //   → spans y[−0.90,0.00]；顶块心 y=+0.45 半 0.45 → spans y[0.00,0.90]。
+        //   **t552 下大上小**（用户报「底下两个雪块一样大」）：底块宽 0.80（半 0.40，MC 12/16=0.75 同量级）、
+        //   顶块宽 0.60（半 0.30，MC 10/16=0.625 同量级）→ 雪堆下宽上窄读作雪人柱身。
         //   **南瓜头 + 刻面眼/嘴不在本几何** —— 由 Main.qml delegate 补独立橙色南瓜 Model（t499 需求：南瓜头是单独
         //   的橙色南瓜模型，非贴图的一部分）。pack 命中 snow_golem.png → 6 面 T 字 UV 展开进雪块身；pack 关 → 全脸
         //   UV + 纯色雪白（无程序生成贴图，回退 baseColor）。shearSnowGolem 剪南瓜头仅隐藏南瓜头 Model（几何不动）。
         // R19 C3 UV（MC SnowMan base 64×64；U1 §12）：底雪块=piece2(0,36)12×12×12（大块在下）、顶雪块=piece1(0,16)10×10×10。
         g_texW = 64.0f; g_texH = 64.0f;
         setMobTex(0, 36, 12, 12, 12);
-        addBox( 0.00f, -0.45f, 0.00f, 0.40f, 0.45f, 0.40f, verts, idx, bMin, bMax); // 底雪块（雪傀儡身体下块）
+        addBox( 0.00f, -0.45f, 0.00f, 0.40f, 0.45f, 0.40f, verts, idx, bMin, bMax); // 底雪块（雪傀儡身体下块；宽 0.80）
         setMobTex(0, 16, 10, 10, 10);
-        addBox( 0.00f,  0.45f, 0.00f, 0.40f, 0.45f, 0.40f, verts, idx, bMin, bMax); // 顶雪块（雪傀儡身体上块）
+        addBox( 0.00f,  0.45f, 0.00f, 0.30f, 0.45f, 0.30f, verts, idx, bMin, bMax); // 顶雪块（雪傀儡身体上块；宽 0.60，t552 下大上小）
     } else if (m_mobType == 13) {
         // feat IronGolem（铁傀儡；机制等价 MC 1.0 铁傀儡，§9 区隔原创模型 + pack 贴图）—— **铁块人形**：
         //   双腿 + 宽躯干 + 双长臂（机制等价 MC 铁傀儡 T 形铁块身）。局部原点 = 碰撞中心（mobModelYOff=0）；

@@ -325,7 +325,7 @@ void EntityManager::spawnArrowPlayer(const QVector3D &origin, const QVector3D &v
 //   + kind=Snowball + pushable=false + 寿命 + **命中伤害 damage**（按发射者分流，见头文件注释）。halfW/halfH=0.10
 //   （白色小球视觉 + 碰撞最小；命中检测走点-in-AABB 不读 halfW）。bump revision → QML Repeater 追加 delegate
 //   （Snowball 分支白色小球定向 Model）。达 kCap → 跳过 + 告警（防溢出）。返新雪球槽索引（调试用）；达 kCap → -1。
-int EntityManager::spawnSnowball(const QVector3D &origin, const QVector3D &vel, int damage)
+int EntityManager::spawnSnowball(const QVector3D &origin, const QVector3D &vel, int damage, int thrower)
 {
     if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); snowball spawn skipped at" << origin;
@@ -341,7 +341,8 @@ int EntityManager::spawnSnowball(const QVector3D &origin, const QVector3D &vel, 
     e.vy = vel.y();
     e.vz = vel.z();
     e.arrowLife = kSnowballLifetime;
-    e.snowballDamage = damage; // t505 按发射者分流（golem=kSnowballDamage / player=0；命中分支读它）
+    e.snowballDamage = damage;   // t505 按发射者分流（golem=kSnowballDamage / player=0；命中分支读它）
+    e.snowballThrower = thrower; // t553 发射者槽索引（fireSnowball=雪傀儡 idx / 玩家=-1；命中分支排除自身）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -1887,7 +1888,7 @@ void EntityManager::fireSnowball(int idx, const Entity &shooter, const QVector3D
     vx += rnd() * kSnowballSpread;
     vz += rnd() * kSnowballSpread;
     vy += rnd() * kSnowballSpread;
-    spawnSnowball(origin, QVector3D(vx, vy, vz), kSnowballDamage); // t505 golem 雪球保留敌对伤害
+    spawnSnowball(origin, QVector3D(vx, vy, vz), kSnowballDamage, idx); // t505 golem 雪球保留敌对伤害；t553 idx = 发射者（命中排除自身）
 }
 
 // t482 雪傀儡 AI（详见头文件 aiSnowGolem 注释）。机制对齐 MC 1.0 雪傀儡：游荡 + 抛雪球打敌对 + 行走留雪 +
@@ -1903,17 +1904,24 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
 {
     bool dirty = false;
     // (1) 热伤害累积（机制等价 MC 雪傀儡在热群系 / 入水 / 雨天持续受热伤害直至融化死亡，**非即死**）：
-    //    所在格群系为**沙漠**（热）或**降水**（雨/雪）或**脚位/身体格在水**（入水融化）→ meltAccum 累加 dt，
-    //    达 kSnowMeltInterval → damageEntity(1 HP) + 重置 meltAccum。只读 World::biomeIdAt / isPrecipitatingAt /
+    //    所在格群系为**沙漠**（热）或**雨 / 雷雨降水**或**脚位/身体格在水**（入水融化）→ meltAccum 累加 dt，
+    //    达 kSnowMeltInterval → damageEntity(1 HP) + 重置 meltAccum。只读 World::biomeIdAt / weatherStateAt /
     //    blockAt（向下依赖）。mobFeetInWater 判脚位水格（同 aiSquid / 通用 mob 水物理）。
+    //    **t552 雪不融雪傀儡**：旧版用 isPrecipitatingAt（= weatherStateAt != Clear）判降水 —— 雪天气 / 雪原 /
+    //    山地群系的雪也触发融化（用户报「没打他莫名倒下死掉」）。雪傀儡是雪造的，**雪天不受伤**（见下方代码）。
     //    **die 不立即 return**（旧版 damageEntity 大伤害后 return）—— 改慢扣血后 mob 仍存活 N 秒，须继续走
     //    后续分支（留雪 / 抛雪球 / 游荡）直至血 0 自然死亡（damageEntity 致死时置 dead → tick 死亡态分支接管）。
     if (world) {
         const int gx = qFloor(e.pos.x()), gz = qFloor(e.pos.z());
         const bool hotBiome = (world->biomeIdAt(gx, gz) == 2);        // 2 = Desert（热群系）
-        const bool precipitating = world->isPrecipitatingAt(gx, gz);  // 降水（雨/雪）
+        // t552 修「没打他莫名倒下死掉」：旧版用 isPrecipitatingAt（= weatherStateAt != Clear）判降水 —— 它把
+        //   **雪**（Snow weather / 雪原 / 山地群系恒 Snow）也当融化源。机制等价 MC 1.0：雪傀儡是**雪造的**，
+        //   只在**液态水降水（雨 / 雷雨）**/ 入水 / 热群系才融化；**雪天不受伤**（雪原 / 雪天气正是它的主场）。
+        //   改用 weatherStateAt 精确判雨 / 雷雨两类（Weather 编码 1=Rain / 3=Thunder；2=Snow 排除）。
+        const int localWeather = world->weatherStateAt(gx, gz);
+        const bool raining = (localWeather == 1 || localWeather == 3); // 雨 / 雷雨（液态水降水；Snow=2 不融）
         const bool inWater = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH); // 入水融化
-        if (hotBiome || precipitating || inWater) {
+        if (hotBiome || raining || inWater) {
             e.meltAccum += float(dt);
             if (e.meltAccum >= kSnowMeltInterval) {
                 e.meltAccum = 0.0f;
@@ -1953,24 +1961,35 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
             world->setWaterSilent(bx, footY, bz, BlockRegistry::SnowLayer, 0);
         }
     }
-    // (3) 远程雪球攻击（机制等价 MC 雪傀儡抛雪球打怪物）：节流（kSnowGolemThrowInterval）扫最近敌对 mob →
+    // (3) 游荡（同 passive：随机选向 + 时间片）。
+    if (aiWander(e, dt, world, worldW, worldD, speedScale)) dirty = true;
+    // (4) 远程雪球攻击（机制等价 MC 雪傀儡抛雪球打怪物）：节流（kSnowGolemThrowInterval）扫最近敌对 mob →
     //    fireSnowball（抛物弹丸，命中敌对低伤害 1HP + 减速 kSnowSlowDuration）。只打敌对（nearestHostile 守卫）。
+    //    **t558 发球前先面向敌对**：yawRad 朝目标（模型 -Z 正对敌对）再发球 → 修用户报「现在往脑门后面发」
+    //    （旧版此块在 aiWander 之前：aiWander 随机选向后，雪球从身侧/身后方向飞出、与模型朝向无关）。
+    //    **后置于 aiWander**（lessons t499「面向目标的 yaw 赋值须在 aiWander 之后」）—— aiWander 在
+    //    wanderTimer 到期时会把 yawRad 随机化；放其后保「发球帧的视觉朝向 = 目标方向」不被本帧随机选向覆盖。
     e.attackCooldown -= dt;
     if (e.attackCooldown <= 0.0f) {
         const int target = nearestHostile(e.pos, kSnowGolemAttackRange);
         if (target >= 0) {
-            fireSnowball(idx, e, m_entities[size_t(target)].pos);
+            const Entity &te = m_entities[size_t(target)];
+            const float tdx = te.pos.x() - e.pos.x();
+            const float tdz = te.pos.z() - e.pos.z();
+            if (tdx * tdx + tdz * tdz > 1e-6f) {
+                e.yawRad = std::atan2(-tdx, -tdz); // 面向敌对（dir=(-sin,-cos) 约定，模型 -Z 正对目标）
+                dirty = true; // yaw 变 → QML eulerRotation 刷新（发球帧可见转向目标）
+            }
+            fireSnowball(idx, e, te.pos);
             e.attackCooldown = kSnowGolemThrowInterval;
         }
     }
-    // (4) 游荡（同 passive：随机选向 + 时间片）。
-    if (aiWander(e, dt, world, worldW, worldD, speedScale)) dirty = true;
     // t529 复盘 ②「平时随机朝向」：移除 t499 二轮「玩家在 kSnowGolemFaceRange 内 → yawRad 朝玩家」的持续覆盖。
     //   用户反馈「雪傀儡一直固定朝向玩家」（t499 二轮改过头 —— 持续覆盖使造物视觉朝向恒朝玩家，机制不自然）。
     //   spec t529 明确「生成时固定朝，平时 aiWander 随机朝向」：移除持续覆盖后，yawRad 由 aiWander 在 wanderTimer
     //   到期时随机选向（造物自由游荡，机制等价 MC 造物随机朝向）；生成时 yawRad 初值（spawnMobCore 默认 0）即
     //   「生成时固定朝」（首帧固定，aiWander 首次到期才随机改）。南瓜头刻面眼/嘴正脸只在偶发面向玩家时见到
-    //   （机制等价 MC 造物非恒面向玩家）。
+    //   （机制等价 MC 造物非恒面向玩家）。t558 例外：**发球那一帧** yaw 强制朝敌对（见上 (4)），平时仍随机。
     return dirty;
 }
 
@@ -3034,6 +3053,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kArrowHitHalfW
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kArrowHitHalfW) {
                         damageEntity(mi, e.arrowDamage); // 扣血 + 红闪 + 归零 mobDied（内含 dead/越界/amount 守）
+                        // t553 箭命中击退（机制对齐 MC 1.0 箭命中推开生物；用户「雪球应像箭一样击退」的参照 ——
+                        //   本工程箭此前也不击退，一并补上使投射物行为一致）。方向 = 箭水平速度归一化（箭 → mob）；
+                        //   强度 kArrowKnockbackStrength。箭已嵌入 / 贴脸慢速时 vx≈vz≈0 → knockback 内 yaw 兜底。
+                        const float ahx = e.vx, ahz = e.vz;
+                        float alen = std::sqrt(ahx * ahx + ahz * ahz);
+                        if (alen > 1e-3f) knockback(mi, ahx / alen, ahz / alen, kArrowKnockbackStrength);
                         emit arrowHitMob(m.mobType); // t304 命中音（呈现层 playMobHurt，同近战 attackMob→mobAttacked）
                         qCInfo(lcEnt) << "player arrow hit mob" << mi << "for" << e.arrowDamage << "HP";
                         remove = true;
@@ -3070,21 +3095,17 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             bool hitBlock = false; // t505 命中方块 → 破碎粒子（区别寿命到 / 越界，仅方块 / mob 命中迸雪沫）
             // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积）。
             if (e.arrowLife <= 0.0f) remove = true;
-            // 方块命中 → 移除（雪球砸方块即碎，机制等价 MC 雪球撞方块碎裂；不产生方块变化）。
-            if (!remove) {
-                const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
-                if (by >= 0 && world->isSolid(bx, by, bz)) { remove = true; hitBlock = true; }
-            }
-            // 敌对 mob 命中：雪球（点）是否落在任一**敌对** mob 的 AABB（外扩 kSnowballHitHalfW 提升近距命中率）
-            //   内。命中首个 → **按发射者分流伤害**（t505：golem 雪球 damageEntity(kSnowballDamage) 扣血；玩家雪球
-            //   damage=0 → damageEntity 早退不扣血，改设 hurtFlash 直接触发红闪 + knockback 击退，机制对标 MC 1.0
-            //   玩家雪球打 mob 无伤有红闪 + 击退反馈）+ 设目标 mob slowTimer=kSnowSlowDuration（轻微减速；QML
-            //   isSlowedAt 显蓝调）+ 移除雪球。**只打敌对**（passive / golem 自身 / 玩家穿过，机制等价 MC 雪球不伤
-            //   友好生物）。跳过非 alive / 非 Mob / 非 hostile / dead 实体。
+            // mob 命中（t553 **先于方块判定**）：雪球（点）是否落在任一**活体 mob** 的 AABB（外扩 kSnowballHitHalfW
+            //   提升近距命中率）内。命中首个 → **击退所有 mob + 减速**（机制对标 MC 1.0：雪球打任意生物都击退，
+            //   含猪牛羊等被动 —— 旧版「只打敌对」致玩家丢向被动生物毫无反应，用户报「雪球打生物不击退」）+ 伤害
+            //   按发射者分流（t505：golem 雪球 damageEntity(kSnowballDamage) 扣血；玩家雪球 damage=0 → 不扣血但设
+            //   hurtFlash 红闪）+ 移除雪球。**方块判定放后**（先 mob 后方块：贴墙 mob 的命中点同时落入身后墙块时，
+            //   不应被「先撞墙」吞掉 → mob 优先命中；远离墙的飞行路径与旧版一致）。跳过非 alive / 非 Mob / dead。
             if (!remove) {
                 for (int mi = 0; mi < int(m_entities.size()); ++mi) {
                     const Entity &m = m_entities[size_t(mi)];
-                    if (!m.alive || m.kind != Mob || !m.hostile || m.dead) continue; // 仅活体敌对 mob
+                    if (!m.alive || m.kind != Mob || m.dead) continue; // 所有活体 mob（含被动；玩家非 Mob 穿过）
+                    if (mi == e.snowballThrower) continue; // t553 排除发射者自身（防雪球首帧误击自己）
                     const float ex2 = m.pos.x() - m.halfW - kSnowballHitHalfW;
                     const float ey2 = m.pos.y() - m.halfH - kSnowballHitHalfW;
                     const float ez2 = m.pos.z() - m.halfW - kSnowballHitHalfW;
@@ -3093,28 +3114,37 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kSnowballHitHalfW) {
                         // t505 按发射者分流伤害：golem(damage>0) → 扣血走 damageEntity（红闪 + 归零 mobDied 掉落）；
                         //   player(damage==0) → damageEntity 因 amount<=0 早退不扣血，改手动设 hurtFlash 触发红闪。
-                        if (e.snowballDamage > 0) {
-                            damageEntity(mi, e.snowballDamage); // golem 雪球：扣血 + 红闪（复用受击链）
-                        } else {
-                            // 玩家雪球：0 伤害但触发红闪（damageEntity 守 amount<=0 不闪，手动设 hurtFlash）。
+                        //   仅敌对扣血 / 红闪（被动生物 0 伤害 0 红闪，机制对标 MC 雪球不伤友好生物）；击退 / 减速
+                        //   对所有 mob 生效。
+                        if (m.hostile && e.snowballDamage > 0) {
+                            damageEntity(mi, e.snowballDamage); // golem 雪球：敌对扣血 + 红闪（复用受击链）
+                        } else if (m.hostile) {
+                            // 玩家雪球打敌对：0 伤害但触发红闪（damageEntity 守 amount<=0 不闪，手动设 hurtFlash）。
                             Entity &tm = m_entities[size_t(mi)];
                             if (tm.alive && tm.kind == Mob && !tm.dead) {
                                 tm.hurtFlash = kHurtFlashTime; // 红闪（QML hurtFlashAt>0 → baseColor 红）
                                 ++m_revision; // bump → QML 红闪绑定刷新
                             }
                         }
-                        // 击退（t505 玩家雪球机制对标 MC 雪球击退；golem 雪球也叠加小幅击退）：方向 = 雪球水平速度
-                        //   归一化（雪球 → mob），强度 1.0（kKnockbackHoriz 基准小击退）。
+                        // 击退（t553 加大到 kSnowballKnockbackStrength=2.0：追尾敌对 mob 也被明显推开；t505 玩家雪球
+                        //   机制对标 MC 雪球击退；golem 雪球也叠加）—— 方向 = 雪球水平速度归一化（雪球 → mob）。
                         const float hvx = e.vx, hvz = e.vz;
                         float hlen = std::sqrt(hvx * hvx + hvz * hvz);
-                        if (hlen > 1e-3f) knockback(mi, hvx / hlen, hvz / hlen, 1.0f);
+                        if (hlen > 1e-3f) knockback(mi, hvx / hlen, hvz / hlen, kSnowballKnockbackStrength);
                         m_entities[size_t(mi)].slowTimer = kSnowSlowDuration; // 轻微减速（QML isSlowedAt 蓝调）
-                        qCInfo(lcEnt) << "snowball hit hostile mob" << mi << "damage=" << e.snowballDamage
+                        qCInfo(lcEnt) << "snowball hit mob" << mi << "hostile=" << int(m.hostile)
+                                      << "damage=" << e.snowballDamage
                                       << "+slow" << kSnowSlowDuration << "s";
                         remove = true;
                         break; // 命中首个即止（雪球消失，不穿透）
                     }
                 }
+            }
+            // 方块命中 → 移除（雪球砸方块即碎，机制等价 MC 雪球撞方块碎裂；不产生方块变化）。mob 命中已早退，
+            //   贴墙 mob 不会先撞墙。仅未命 mob 的飞行 / 落地雪球走此。
+            if (!remove) {
+                const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
+                if (by >= 0 && world->isSolid(bx, by, bz)) { remove = true; hitBlock = true; }
             }
             // 越界兜底（飞出世界 XZ 边界 / 跌出底部）→ 移除（防永久飞行堆积）。
             if (!remove) {

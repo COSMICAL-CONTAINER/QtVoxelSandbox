@@ -219,14 +219,17 @@ public:
     // t482/t505 雪球投射物（雪傀儡 aiSnowGolem 远程攻击 / t505 玩家右键抛掷）：在 origin 处生成一个携带初速度 vel
     //   （blocks/s，含 vy 抛物）的雪球实体。kind=Snowball、pushable=false（玩家走碰不推）、halfW/halfH=0.10
     //   （白色小球视觉 + 碰撞最小）。tick 内 Snowball 分支：重力改 vy（抛物）+ 速度位移 + 方块碰撞（命中即碎 →
-    //   emit snowballBreak 粒子 + 移除）+ **敌对 mob** AABB 碰撞（命中发 damageEntity(damage) + 设目标 mob
+    //   emit snowballBreak 粒子 + 移除）+ **活体 mob** AABB 碰撞（命中发 damageEntity(damage) + 设目标 mob
     //     slowTimer=kSnowSlowDuration（轻微减速，QML isSlowedAt 显蓝调）+ 击退 + 移除）。
     //   **damage 按发射者分流**（t505 机制对标 MC 1.0：雪傀儡雪球对敌对有伤害 / 玩家雪球对 mob 0 伤害只触发红闪 +
     //     击退）。caller 传：雪傀儡 fireSnowball 传 kSnowballDamage（敌对伤害）；玩家右键抛（playercontroller）
-    //     传 0（0 伤害但 damageEntity 仍发 hurtFlash 红闪 + knockback 击退）。**只打敌对 mob**（passive / 玩家穿过）。
+    //     传 0（0 伤害但 damageEntity 仍发 hurtFlash 红闪 + knockback 击退）。
+    //   **t553 命中所有活体 mob**（含猪牛羊等被动 —— 机制对标 MC 1.0 雪球打任意生物都击退；仅敌对扣血 / 红闪，
+    //   被动 0 伤害 0 红闪）+ 击退强度 kSnowballKnockbackStrength（自 1.0 提至 2.0 修「不击退」）。发射者自身排除
+    //   （thrower 参数 = 雪傀儡槽 idx / 玩家 -1，防首帧误击自己）。玩家（PlayerController）非 Mob 实体穿过。
     //   机制等价 MC 1.0 雪傀儡抛雪球（远程弹丸 + 伤害 + 减速）/ MC 1.0 玩家抛雪球（无伤 + 击退 + 红闪）；
     //   名称 / 视觉全原创（§9 区隔）。达 kCap → 跳过 + 告警（防溢出）。返新雪球槽索引（调试用）；达 kCap → -1。
-    Q_INVOKABLE int spawnSnowball(const QVector3D &origin, const QVector3D &vel, int damage);
+    Q_INVOKABLE int spawnSnowball(const QVector3D &origin, const QVector3D &vel, int damage, int thrower = -1);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
     //   t437：改「释放全部活体槽位」而非「清空 vector」。根因：旧 m_entities.clear() 把 count→0，QML
     //   Repeater count 随之→0；但 reparent 进 mobHost 的 3D delegate（QQuick3DNode，非 QQuickItem）不进
@@ -689,6 +692,13 @@ private:
         //   命中分支读它替代旧硬编码 kSnowballDamage → 同一雪球实体两种伤害语义由 spawn 入口决定。
         //   默认 0（非 Snowball / 未传 → 安全无伤；玩家路径显式传 0 亦无伤）。
         int snowballDamage = 0;  // 雪球命中伤害 HP（仅 kind==Snowball；golem=kSnowballDamage / player=0）
+        // t553 雪球发射者槽索引（仅 kind==Snowball 用）：fireSnowball 传雪傀儡 idx；玩家抛（playercontroller）传
+        //   默认 -1。命中分支跳过 mi==snowballThrower —— 防「发射者自身命中」：雪球 spawn 在发射者中心 +0.5 格
+        //   （fireSnowball origin），而命中盒外扩 kSnowballHitHalfW=0.3 → 发射者 AABB 外扩后距中心 0.65，雪球首帧
+        //   （+0.167/tick）距 0.667 仅差 0.017 勉强逃出 —— 节流 / 步长抖动时可能误击自己（把自己击退 + 雪球消失）。
+        //   t553 扩大命中到「所有 mob」（含被动）后此误击从「不可能」（旧版只打敌对、发射者 non-hostile 天然排除）
+        //   变成「边缘可能」→ 显式排除发射者（机制等价 MC 投射物不命中发射者自身）。默认 -1（无发射者 → 不排除）。
+        int snowballThrower = -1; // 雪球发射者槽索引（仅 kind==Snowball；fireSnowball=雪傀儡 idx / player=-1）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
         int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；t280 Shambler/Bones；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
@@ -1344,6 +1354,11 @@ private:
     static constexpr float kSnowballLifetime       = 5.0f;  // 雪球最长存活（秒；飞行未命中兜底移除，同箭）
     static constexpr float kSnowballHitHalfW       = 0.3f;  // 雪球 vs 敌对 mob 命中盒 XZ/Y 外扩（blocks；雪球是小点）
     static constexpr int   kSnowballDamage         = 1;     // 雪球命中伤害（HP；低伤害）
+    // t553 雪球命中击退强度（倍率；knockback strength 参数）。旧版恒 1.0（= kKnockbackHoriz 4.5 blocks/s，
+    //   推距 ~1.1 格）—— 用户报「雪球打生物不击退」：敌对 mob 追击玩家（~2.8 blocks/s）时，1.1 格后退被追击
+    //   前进抵消 → 净位移≈0 肉眼不可见。提至 2.0（=9 blocks/s，推距 ~2.2 格）→ 追尾 mob 也被明显推开。
+    //   机制对齐 MC 1.0 投射物命中击退（箭 / 雪球都推开生物；本工程箭 t553 一并补同值击退）。
+    static constexpr float kSnowballKnockbackStrength = 2.0f; // 雪球命中击退强度（倍率；t553）
     static constexpr float kSnowSlowDuration       = 3.0f;  // 雪球减速持续（秒）
     static constexpr float kSnowSlowMul            = 0.5f;  // 减速水平速度倍数（<1）
     static constexpr float kSnowTrailInterval      = 1.0f;  // 行走留雪层节流间隔（秒）
@@ -1433,6 +1448,10 @@ private:
     static constexpr float kArrowLifetime    = 5.0f;   // 箭最长存活（秒；兜底移除）
     static constexpr int   kArrowDamage      = 2;      // 命中伤害（HP）
     static constexpr float kArrowHitHalfW    = 0.4f;   // 箭 vs 玩家命中盒 XZ 外扩（blocks）
+    // t553 箭命中 mob 击退强度（倍率；knockback strength 参数）。机制对齐 MC 1.0 箭命中生物被推开（用户「雪球应
+    //   像箭一样击退」的参照物 —— 箭本工程此前不击退，补同族击退使投射物行为一致）。取 1.5（=6.75 blocks/s，
+    //   推距 ~1.7 格，略低于雪球 2.0 —— 箭速高冲量已大，无需更高倍率）。
+    static constexpr float kArrowKnockbackStrength = 1.5f; // 箭命中 mob 击退强度（倍率；t553）
     // t324 玩家自身箭自伤的发射者忽略窗口（spec「玩家自身箭下落伤害」；机制对齐 MC 1.0 箭出膛短时不伤发射者）。
     //   玩家射出的箭（arrowFromPlayer）飞行此秒数后才「武装」可命中玩家自己（防贴脸出膛误伤 —— 箭 spawn 在玩家
     //   外扩命中盒内，未武装前穿过不触发）。取 0.2s：远大于箭飞出玩家命中盒所需（~0.01s @ 14 blocks/s）、远小于
