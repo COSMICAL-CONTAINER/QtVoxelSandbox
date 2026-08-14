@@ -34,6 +34,10 @@ Item {
     // 宿主注入：hotbar 视图模型（提供 slotList / iconSourceForBlock / nameForBlock /
     // nameAt / selectedSlot / slotRevision）。
     property Hotbar hotbar
+    // t551 宿主注入 PlayerController（Main.qml `player: player`，同 FurnaceUI/AnvilUI 模式）。角色预览
+    //   CharacterPreview3D 经 `player: root.player` 传入（不能写 `player: player` —— 裸名会 shadow 成
+    //   CharacterPreview3D 自身的同名属性 → 自引用恒 null，经验：传属性给子组件用 `root.xxx` 显式路径）。
+    property var player: null
     // progress 玩家进度注入（Main.qml 经 `progress: window.progress` 绑定）：批量合成（InventoryOps
     //   slotShiftLeftCraft）统计 / 成就埋点用。InventoryOps .js 无 QML 全局 id 访问权 → 经 root 传，同 hotbar 模式。
     property var progress
@@ -47,6 +51,11 @@ Item {
     // t345 护甲装备 / 脱下发生（装备槽 TapHandler 触发）→ 宿主播装备音（spec「equip/unequip SOUND」；
     //   当前复用 playPlace 作过渡装备音，专用护甲音属后续资产任务）。
     signal armorChanged()
+
+    // t551 看鼠标指针：光标**屏幕坐标**直接绑 Main.qml 的常驻 cursorTracker（overlayRoot 级 HoverHandler，
+    //   point.globalPosition 是 bindable 属性，随光标移动自动刷新；游戏/背包全程有效 → 开包首帧即真位置，
+    //   无「构造期 (0,0) → 人物误转左上角」闪烁）。喂给 CharacterPreview3D → 3D 人物转身/转头/抬头看鼠标。
+    property point previewMouseScene: cursorTracker.point.globalPosition
 
     // ── 尺寸常量（集中一处便于对齐）──
     readonly property int slotSize: 40        // 统一槽尺寸（主栏 / hotbar / 合成 / 护甲同尺寸，贴近 1.0）
@@ -528,9 +537,10 @@ Item {
 
                 // 角色预览（护甲右侧，左半区）：t546 3D 玩家模型预览（第三人称视角，复用 Main.qml playerModel
                 // 几何/配色 + 4 装备槽护甲 overlay），替代 2D Canvas 人形剪影。80 宽 × 160 高。
-                // F3+B（window.showHitboxes）时叠加玩家 AABB 线框。
+                // t551：x 右移 1 格（root.slotSize+6 → root.slotSize*2+6，用户「旁边有个人但偏左」）；注入
+                //   player（跟玩家走/蹲/跳动作）+ mouseScene（看鼠标指针，root 级 HoverHandler 追踪）。
                 Item {
-                    x: root.slotSize + 6
+                    x: root.slotSize * 2 + 6
                     y: 0
                     width: 80
                     height: parent.height
@@ -538,6 +548,8 @@ Item {
                         anchors.fill: parent
                         hotbar: root.hotbar
                         showHitboxes: window.showHitboxes
+                        player: root.player
+                        mouseScene: root.previewMouseScene
                     }
                 }
 
@@ -565,16 +577,63 @@ Item {
                             property var armEnch: root.hotbar.armorRevision >= 0 ? root.hotbar.armorEnchantsAt(index) : [0,0,0,0]
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent; wellColor: "#262b30" }
-                            // t546 装备槽 3D 预览（第三人称视角）：mini View3D 渲染「玩家身体部位 + 该部位护甲」，
-                            //   替代 2D MaterialIcon / Canvas 占位图标。空槽 = 灰体占位（原 Canvas 金属灰语义）；
-                            //   装备 = 玩家本色 + 护甲色 overlay（同 Main.qml playerModel 几何/配色）。
-                            //   F3+B（window.showHitboxes）时叠加部位 AABB 线框（满足「开 F3+B 物品栏显示 F3+B 状态」）。
-                            ArmorSlot3D {
-                                anchors.fill: parent
-                                hotbar: root.hotbar
-                                slotIndex: index
-                                armorId: armId
-                                showHitboxes: window.showHitboxes
+                            // t551 复原生存版空装备栏（用户「t546 做反了」）：t546 把空槽换成了逐格 3D 灰体预览
+                            //   （ArmorSlot3D），用户要求**还原之前生存背包的空护甲槽占位图**（empty_armor_slot_*）。
+                            //   恢复 t497 的 2D 空槽占位：pack 启用且有 empty_armor_slot_<piece>.png → 显 pack PNG
+                            //   （alpha-test 透明底）；pack 关/无映射 → Canvas 自绘金属灰剪影（§9a 原创）；装备 →
+                            //   MaterialIcon 护甲图。3D 人物保留在 CharacterPreview3D（唯一 3D 预览，非逐槽）。
+                            //   piece = index（0 头盔 / 1 胸甲 / 2 护腿 / 3 靴子，与 ArmorRegistry::ArmorPiece 同序）。
+                            ResourcePackManager { id: armorRp }
+                            Image {
+                                id: armorEmptyPackImg
+                                anchors.centerIn: parent
+                                width: 26; height: 26
+                                visible: armId === 0 && source.toString().length > 0
+                                // 触碰 armId/armorRp.active 建立绑定依赖（槽位变 / pack 切换 → 重查源）。
+                                source: { const _r = armorRp.active; return _r >= 0 ? (armId === 0 ? armorRp.emptyArmorSlotSource(index) : "") : "" }
+                                fillMode: Image.PreserveAspectFit
+                                smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；MC 1.0 占位图为像素艺术）
+                            }
+                            // 空槽部位占位剪影（暗灰金属头盔/胸甲/护腿/靴像素图；§9a 原创，非 MC 资产）。
+                            //   仅 armId===0 且 pack 无该空槽图标时显（有装备时让位给 MaterialIcon 护甲图；
+                            //   pack 有空槽图时让位给上方 armorEmptyPackImg）。
+                            Canvas {
+                                anchors.centerIn: parent
+                                width: 26; height: 26
+                                visible: armId === 0 && !armorEmptyPackImg.visible
+                                onPaint: {
+                                    const ctx = getContext("2d"); ctx.reset()
+                                    ctx.imageSmoothingEnabled = false
+                                    const metal = "#9aa0a6", gap = "#262b30"
+                                    ctx.fillStyle = metal
+                                    if (index === 0) {                  // 头盔
+                                        ctx.fillRect(5, 5, 16, 3)
+                                        ctx.fillRect(7, 8, 12, 9)
+                                        ctx.fillStyle = gap
+                                        ctx.fillRect(9, 11, 8, 3)
+                                    } else if (index === 1) {           // 胸甲
+                                        ctx.fillRect(6, 5, 14, 4)
+                                        ctx.fillRect(7, 9, 12, 13)
+                                        ctx.fillStyle = gap
+                                        ctx.fillRect(12, 10, 2, 10)
+                                    } else if (index === 2) {           // 护腿
+                                        ctx.fillRect(7, 5, 12, 4)
+                                        ctx.fillRect(7, 9, 4, 13)
+                                        ctx.fillRect(15, 9, 4, 13)
+                                    } else {                            // 靴
+                                        ctx.fillRect(6, 13, 6, 7)
+                                        ctx.fillRect(14, 13, 6, 7)
+                                        ctx.fillRect(4, 18, 10, 2)
+                                        ctx.fillRect(12, 18, 10, 2)
+                                    }
+                                }
+                            }
+                            // 装备中的护甲图标（走 MaterialIcon 护甲段分支；armId!==0 时显）。
+                            MaterialIcon {
+                                anchors.centerIn: parent
+                                width: 30; height: 30
+                                visible: armId !== 0
+                                materialId: armId
                             }
                             // t498 二轮复盘：装备槽内显「cur/max」耐久数字（小字，耐久条上方）。
                             //   用户报「进背包无耐久显示、只在 hover tooltip 显」→ 槽内常显数字（进背包即见），

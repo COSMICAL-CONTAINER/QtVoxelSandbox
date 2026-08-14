@@ -209,7 +209,6 @@ qt_add_qml_module(voxelsandbox
         src/ui/Inventory.qml
         src/ui/InvSlot.qml
         src/ui/SurvivalInventory.qml
-        src/ui/ArmorSlot3D.qml
         src/ui/CharacterPreview3D.qml
         src/ui/CraftingTableUI.qml
         src/ui/FurnaceUI.qml

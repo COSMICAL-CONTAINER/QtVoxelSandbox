@@ -8851,6 +8851,7 @@ Window {
         id: inventoryPanel
         anchors.fill: parent
         hotbar: hotbarVM
+        player: player
         visible: window.appState === "playing" && window.inventoryOpen
                  && player.mode === PlayerController.Creative
         z: 150
@@ -8885,6 +8886,7 @@ Window {
         anchors.fill: parent
         hotbar: hotbarVM
         progress: progress
+        player: player
         visible: window.appState === "playing" && window.inventoryOpen
                  && player.mode === PlayerController.Survival
         z: 150
@@ -9141,4 +9143,83 @@ Window {
         }
     }
     } // t166f overlayRoot close（包裹背包叠层）
+
+    // ===== TEMP DIAGNOSTIC (t548/t549) — REMOVE BEFORE COMMIT =====
+    // 自动进世界 → 放附魔台 + 书架 → 开附魔台 → 截图。
+    property int _diagX: 0
+    property int _diagY: 0
+    property int _diagZ: 0
+    Timer {
+        id: diagTimer
+        interval: 1200
+        running: true
+        onTriggered: window.runDiag()
+    }
+    property int diagStage: 0
+    function runDiag() {
+        if (diagStage === 0) {
+            diagStage = 1
+            const f = worldStore.createWorld("diag_t548", 42)
+            console.info("[diag] created world file:", f)
+            enterWorld(f, "diag_t548")
+            diagTimer.interval = 2500   // 等 worldgen + mesh
+            diagTimer.start()
+            return
+        }
+        if (diagStage === 1) {
+            diagStage = 2
+            // 玩家脚下找地表：用 heightAt 或直接扫 blockAt
+            const px = Math.floor(player.feetPosition.x)
+            const pz = Math.floor(player.feetPosition.z)
+            let gy = 0
+            for (let y = 100; y > 0; --y) {
+                if (theWorld.blockAt(px, y, pz) !== 0) { gy = y + 1; break }
+            }
+            console.info("[diag] ground y=", gy, "player at", px, pz)
+            // 放附魔台 + 周围书架（1 格环 + 2 格环各一）
+            theWorld.setBlock(px, gy, pz, 94)            // 附魔台
+            theWorld.setBlock(px + 1, gy, pz, 95)        // 书架（1 格）
+            theWorld.setBlock(px - 1, gy, pz, 95)
+            theWorld.setBlock(px, gy, pz + 1, 95)
+            theWorld.setBlock(px + 2, gy, pz, 95)        // 书架（2 格）
+            window._diagX = px; window._diagY = gy; window._diagZ = pz
+            console.info("[diag] bookshelves around:", theWorld.countBookshelvesAround(px, gy, pz))
+            diagTimer.interval = 800
+            diagTimer.start()
+            return
+        }
+        if (diagStage === 2) {
+            diagStage = 3
+            openEnchantingTable(window._diagX, window._diagY, window._diagZ)
+            console.info("[diag] enchantingTableOpen =", enchantingTableOpen,
+                         "bookshelfPower =", enchantingPanel.bookshelfPower,
+                         "maxLevel =", enchantingPanel.maxLevel)
+            diagTimer.interval = 2500
+            diagTimer.start()
+            return
+        }
+        // stage 3: 截图
+        screenGrab.grab(window)
+        diagStage = 4
+    }
+    Connections {
+        target: screenGrab
+        function onGrabbed(image) {
+            if (window.diagStage !== 4) return
+            // 保存截图到 build/（诊断用）
+            const img = image
+            console.info("[diag] grabbed, isNull:", img === undefined || img === null)
+            window.diagSaveImage(img)
+        }
+    }
+    function diagSaveImage(img) {
+        // 经 worldStore.saveCover 需要 open 世界 → 用独立路径：直接把 QImage 存盘
+        // 这里借用 grabWindow 的 QImage —— 经临时 Qt.callLater 走 C++ 不行，改为存到 saves 目录
+        // 简化：worldStore.isOpen() 时用 saveCover
+        if (worldStore.isOpen()) {
+            worldStore.saveCover(currentWorldFile, img)
+            console.info("[diag] saved cover to saves/ (check saves/*.png)")
+        }
+    }
+    // ===== END TEMP DIAGNOSTIC =====
 }

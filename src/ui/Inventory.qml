@@ -35,6 +35,10 @@ Item {
     // 宿主注入：hotbar 视图模型（提供 creativeBlocks / slotList / iconSourceForBlock /
     // nameForBlock / setSlotBlock / selectedSlot / slotRevision）。
     property Hotbar hotbar
+    // t551 宿主注入 PlayerController（Main.qml `player: player`，同 FurnaceUI/AnvilUI 模式）。角色预览
+    //   CharacterPreview3D 经 `player: root.player` 传入（不能写 `player: player` —— 裸名会 shadow 成
+    //   CharacterPreview3D 自身的同名属性 → 自引用恒 null，经验：传属性给子组件用 `root.xxx` 显式路径）。
+    property var player: null
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // t49/t356：请求宿主把光标手持栈「丢出到世界」生成实体（拖出面板外释放 / 点遮罩区时）。宿主一律走
@@ -59,6 +63,11 @@ Item {
     //   （currentTab===6 显示生存物品栏视图：护甲 + 合成占位 + 角色预览 + 3×9 主栏 + hotbar 行），**不再切
     //   player.mode**。本信号保留声明仅为兼容旧宿主（Main.qml 已不再接它切模式），本面板已无任何 emit 路径。
     signal switchToSurvivalRequested()
+
+    // t551 看鼠标指针：光标**屏幕坐标**直接绑 Main.qml 的常驻 cursorTracker（overlayRoot 级 HoverHandler，
+    //   point.globalPosition 是 bindable 属性，随光标移动自动刷新；游戏/背包全程有效 → 开包首帧即真位置，
+    //   无「构造期 (0,0) → 人物误转左上角」闪烁）。喂给 CharacterPreview3D → 3D 人物转身/转头/抬头看鼠标。
+    property point previewMouseScene: cursorTracker.point.globalPosition
 
     // ① 调色板数据：t511 改为分类 tabs（MC 1.0 式）。currentTab 决定调色板只显某一类（方块 / 工具 / 材料 /
     //   护甲 / 食物）。各分类 id 段恒定（方块→creativeBlocks、工具→creativeTools、材料→creativeMaterials、
@@ -537,15 +546,49 @@ Item {
                                     Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                                     Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
 
-                                    // t546 装备槽 3D 预览（第三人称视角）：mini View3D 渲染「玩家身体部位 + 该部位护甲」，
-                                    //   替代 2D MaterialIcon / Canvas 占位图标。空槽 = 灰体占位；装备 = 玩家本色 + 护甲色。
-                                    //   F3+B（window.showHitboxes）时叠加部位 AABB 线框。
-                                    ArmorSlot3D {
-                                        anchors.fill: parent
-                                        hotbar: root.hotbar
-                                        slotIndex: index
-                                        armorId: armId
-                                        showHitboxes: window.showHitboxes
+                                    // t551 复原生存版空装备栏（用户「t546 做反了」）：t546 把空槽换成了逐格 3D 灰体预览
+                                    //   （ArmorSlot3D），用户要求**还原之前生存背包的空护甲槽占位图**。本分页（生存物品栏
+                                    //   tab6）与 SurvivalInventory 同诉求 —— 恢复 t546 前的 2D 空槽占位：空槽 =
+                                    //   Canvas 自绘金属灰剪影（§9a 原创；生存背包另有 pack empty_armor_slot_* PNG 覆盖，
+                                    //   本创造背包分页保持 t497 前行为无 pack 图）；装备 = MaterialIcon 护甲图。
+                                    //   3D 人物保留在 CharacterPreview3D（唯一 3D 预览，非逐槽）。
+                                    Canvas {
+                                        anchors.centerIn: parent
+                                        width: 26; height: 26
+                                        visible: armId === 0
+                                        onPaint: {
+                                            const ctx = getContext("2d"); ctx.reset()
+                                            ctx.imageSmoothingEnabled = false
+                                            const metal = "#9aa0a6", gap = "#262b30"
+                                            ctx.fillStyle = metal
+                                            if (index === 0) {                  // 头盔
+                                                ctx.fillRect(5, 5, 16, 3)
+                                                ctx.fillRect(7, 8, 12, 9)
+                                                ctx.fillStyle = gap
+                                                ctx.fillRect(9, 11, 8, 3)
+                                            } else if (index === 1) {           // 胸甲
+                                                ctx.fillRect(6, 5, 14, 4)
+                                                ctx.fillRect(7, 9, 12, 13)
+                                                ctx.fillStyle = gap
+                                                ctx.fillRect(12, 10, 2, 10)
+                                            } else if (index === 2) {           // 护腿
+                                                ctx.fillRect(7, 5, 12, 4)
+                                                ctx.fillRect(7, 9, 4, 13)
+                                                ctx.fillRect(15, 9, 4, 13)
+                                            } else {                            // 靴
+                                                ctx.fillRect(6, 13, 6, 7)
+                                                ctx.fillRect(14, 13, 6, 7)
+                                                ctx.fillRect(4, 18, 10, 2)
+                                                ctx.fillRect(12, 18, 10, 2)
+                                            }
+                                        }
+                                    }
+                                    // 已装备护甲图标（MaterialIcon 护甲段分支；armId!==0 时显）。
+                                    MaterialIcon {
+                                        anchors.centerIn: parent
+                                        width: 30; height: 30
+                                        visible: armId !== 0
+                                        materialId: armId
                                     }
 
                                     // 装备 / 脱下（左键单点）。t498 教训：从 VM 直读装备槽当前态（Q_INVOKABLE 恒最新），
@@ -606,8 +649,10 @@ Item {
 
                         // 角色预览（护甲右侧）：t546 3D 玩家模型预览（第三人称视角，复用 Main.qml playerModel
                         // 几何/配色 + 4 装备槽护甲 overlay），替代 2D Canvas 人形剪影。F3+B 时叠加玩家 AABB 线框。
+                        // t551：x 右移 1 格（root.slotSize+6 → root.slotSize*2+6，用户「旁边有个人但偏左」）；
+                        //   注入 player（跟玩家动作）+ mouseScene（看鼠标指针，root 级 HoverHandler 追踪）。
                         Item {
-                            x: root.slotSize + 6
+                            x: root.slotSize * 2 + 6
                             y: 0
                             width: 80
                             height: parent.height
@@ -615,6 +660,8 @@ Item {
                                 anchors.fill: parent
                                 hotbar: root.hotbar
                                 showHitboxes: window.showHitboxes
+                                player: root.player
+                                mouseScene: root.previewMouseScene
                             }
                         }
 
