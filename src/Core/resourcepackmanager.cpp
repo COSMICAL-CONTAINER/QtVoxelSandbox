@@ -383,6 +383,10 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {103, QStringLiteral("sweet_berry_bush_stage0.png")}, // sweet_berry_bush_0（阶段 0 无果嫩丛）
         {104, QStringLiteral("sweet_berry_bush_stage1.png")}, // sweet_berry_bush_1（阶段 1 小果）
         {105, QStringLiteral("sweet_berry_bush_stage2.png")}, // sweet_berry_bush_2（阶段 2 成熟红浆果簇）
+        // t569 红石矿石：tile 138 redstone_ore → pack 内 redstone_ore.png（包内 stone 底纹 + 红石斑，与普通
+        //   stone 风格一致，同 t493 lapis_ore 模式）。非 pack 时回落程序生成 default_redstone_ore.png（自绘
+        //   石头底 + 鲜红菱斑矿粒）。包内缺该 PNG 时安全跳过（保留程序生成瓦片）。
+        {138, QStringLiteral("redstone_ore.png")},           // redstone_ore（t569：pack 激活用包内贴图）
     };
     return kMap;
 }

@@ -3385,8 +3385,8 @@ void World::placeBedrock()
     }
 }
 
-// 确定性矿石散布（t84/t279/t308，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 的格填 Stone，沙漠/沙滩表层
-//   除外），按 hashVoxel(seed,x,y,z) 的不同位段做密度筛选 → 替换为煤矿 / 铜矿 / 铁矿 / 金矿 / 钻石矿。
+//   确定性矿石散布（t84/t279/t308/t569，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 的格填 Stone，沙漠/沙滩表层
+//   除外），按 hashVoxel(seed,x,y,z) 的不同位段做密度筛选 → 替换为煤矿 / 铜矿 / 铁矿 / 金矿 / 钻石矿 / 红石矿。
 //   **高度分层**（机制等价 MC 1.0 矿物随深度分层 + spec t308「铜铁金按序更稀少」）：
 //     - 钻石（diamond_ore）：深层 y∈[kDiamondMin=5, kDiamondMax=40]（紧贴基岩 kBedrockTop=4 之上）。
 //       密度最低（稀有，0.4%）。**t308 深度修正**：上界 16→40（用户 research 后定，地表 ~62、洞穴贯穿深层 →
@@ -3395,6 +3395,9 @@ void World::placeBedrock()
 //       金属族中最稀有（spec「铜铁金按序更稀少」→ 金最稀有）。需铁镐（minTier3）。掉金原矿→熔炉烧金锭。
 //     - 青金（lapis_ore，t471）：深层 y∈[kOreMin=5, kLapisMax=31]（机制等价 MC 1.0 青金矿 Y<32 浅深层富集）。
 //       密度中低（稀有，0.6%）。需石镐（minTier2，同 iron/copper 门槛）。掉青金石物品（附魔前置材料，t471）。
+//     - 红 石（redstone_ore，t569）：最深层 y∈[kOreMin=5, kRedstoneMax=16]（机制等价 MC 1.0 红石矿 Y<16
+//       深层富集）。密度与钻石相当（0.4%）。需铁镐（minTier3，同 diamond/gold 门槛）。掉 4 红石粉（指南针 /
+//       钟合成材料）。玩家走过 / 挖掘时点亮微弱红光（playercontroller scanRedstoneOre，机制等价 MC 触发发光）。
 //     - 铁（iron_ore）：中层 y∈[kOreMin=5, kIronMax=30]（机制等价 MC 铁矿中下层富集）。中等密度（0.7%）。
 //       需石镐（minTier2）。掉铁原矿→熔炉烧铁锭。
 //     - 铜（copper_ore）：浅中层 y∈[kOreMin=5, kCopperMax=45]（机制等价 MC 铜矿浅中层富集）。密度次高（0.9%）。
@@ -3402,8 +3405,9 @@ void World::placeBedrock()
 //     - 煤（coal_ore）：浅层 y∈[kCoalMin=8, stoneTop]（机制等价 MC 煤矿靠近地表富集）。最高密度（1.0%）。
 //       木镐可挖（minTier1）。直接掉煤炭（燃料 / 火把原料，无需冶炼）。
 //   判定用两路独立哈希（r = hashVoxel(seed,...) 给钻石/铁/煤沿用旧位段 0/8/16，保旧矿脉分布；r2 = hashVoxel
-//   (seed^黄金比例常量,...) 给金/铜独立流）→ 5 矿各自独立。判定序（重叠区稀有矿优先）：钻石 > 金 > 铁 > 铜 > 煤
-//   （先中者胜、一格至多一矿）。仅替换 Stone；同 seed → 同矿脉分布；禁用任何运行期随机源（QTime/时钟/全局 RNG）。
+//   (seed^黄金比例常量,...) 给金/铜/青金/红石独立流）→ 7 矿各自独立。判定序（重叠区稀有矿优先）：钻石 > 金 >
+//   青金 > 红石 > 铁 > 铜 > 煤（先中者胜、一格至多一矿）。仅替换 Stone；同 seed → 同矿脉分布；禁用任何运行期
+//   随机源（QTime/时钟/全局 RNG）。
 //
 //   **洞穴裸露矿物**（spec 核心）：worldgen 顺序 scatterOres → carveCaves，carveCaves（t278）挖走 stone/ore
 //   暴露矿脉于洞壁。各矿按深度分层 + 洞穴贯穿 → 各层洞壁天然见对应矿脉（spec「洞穴 carve 自然暴露」）。
@@ -3415,21 +3419,24 @@ void World::scatterOres()
     constexpr int kDiamondMax  = 40;  // 钻石上界 y（t308：16→40，用户 research 后定；地表 ~62 深挖更易见）
     constexpr int kGoldMax     = 25;  // 金上界 y（t308；机制等价 MC 金矿深层富集；金属族最深）
     constexpr int kLapisMax    = 31;  // 青金上界 y（t471；机制等价 MC 1.0 青金矿 Y<32 浅深层富集）
+    constexpr int kRedstoneMax = 16;  // 红石上界 y（t569；机制等价 MC 1.0 红石矿 Y<16 最深层富集）
     constexpr int kIronMax     = 30;  // 铁上界 y（机制等价 MC 铁矿中下层富集）
     constexpr int kCopperMax   = 45;  // 铜上界 y（t308；机制等价 MC 铜矿浅中层富集；金属族最浅）
 
-    // 密度（/10000，每体素命中概率）：钻石最稀 < 金 < 青金 < 铁 < 铜 < 煤（最常见）。
+    // 密度（/10000，每体素命中概率）：钻石 / 红石最稀 < 金 < 青金 < 铁 < 铜 < 煤（最常见）。
     //   spec t308「铜铁金按序更稀少」→ 铜(0.9%) > 铁(0.7%) > 金(0.5%)；钻石(0.4%) / 煤(1.0%) 各为两端。
-    //   青金(0.6%) 介于金(0.5%) 与 铁(0.7%) 之间（MC 1.0 青金稀有度近金 / 铁）。洞穴 carve 暴露后矿脉出露更
+    //   青金(0.6%) 介于金(0.5%) 与 铁(0.7%) 之间（MC 1.0 青金稀有度近金 / 铁）。红石(0.4%) 与钻石相当
+    //   （t569；MC 1.0 红石在最深层 Y<16 与钻石共层、稀有度相当）。洞穴 carve 暴露后矿脉出露更
     //   可见（spec「洞穴裸露矿物」）；密度调到「分层肉眼可辨 + 不过密糊洞壁」。
-    constexpr unsigned kDiamondPct = 40;   // /10000 → 0.4%（钻石，需铁镐 minTier3；稀有深层）
-    constexpr unsigned kGoldPct    = 50;   // /10000 → 0.5%（金，需铁镐 minTier3；金属族最稀有，t308）
-    constexpr unsigned kLapisPct   = 60;   // /10000 → 0.6%（青金，需石镐 minTier2；t471 附魔前置材料，深层 Y<32）
-    constexpr unsigned kIronPct    = 70;   // /10000 → 0.7%（铁，需石镐 minTier2；中层）
-    constexpr unsigned kCopperPct  = 90;   // /10000 → 0.9%（铜，需石镐 minTier2；金属族最常见 / 最浅，t308）
-    constexpr unsigned kCoalPct    = 100;  // /10000 → 1.0%（煤，木镐可挖 minTier1；浅层最常见）
+    constexpr unsigned kDiamondPct  = 40;   // /10000 → 0.4%（钻石，需铁镐 minTier3；稀有深层）
+    constexpr unsigned kGoldPct     = 50;   // /10000 → 0.5%（金，需铁镐 minTier3；金属族最稀有，t308）
+    constexpr unsigned kLapisPct    = 60;   // /10000 → 0.6%（青金，需石镐 minTier2；t471 附魔前置材料，深层 Y<32）
+    constexpr unsigned kRedstonePct = 40;   // /10000 → 0.4%（红石，需铁镐 minTier3；t569 最深层 Y<16，稀有度同钻石）
+    constexpr unsigned kIronPct     = 70;   // /10000 → 0.7%（铁，需石镐 minTier2；中层）
+    constexpr unsigned kCopperPct   = 90;   // /10000 → 0.9%（铜，需石镐 minTier2；金属族最常见 / 最浅，t308）
+    constexpr unsigned kCoalPct     = 100;  // /10000 → 1.0%（煤，木镐可挖 minTier1；浅层最常见）
 
-    int coalPlaced = 0, copperPlaced = 0, ironPlaced = 0, goldPlaced = 0, diamondPlaced = 0, lapisPlaced = 0;
+    int coalPlaced = 0, copperPlaced = 0, ironPlaced = 0, goldPlaced = 0, diamondPlaced = 0, lapisPlaced = 0, redstonePlaced = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
@@ -3471,6 +3478,16 @@ void World::scatterOres()
                         continue;
                     }
                 }
+                if (y >= kOreMin && y <= kRedstoneMax) {
+                    // 红石走 r2 >> 24 位段（r2 现用位段 0=金 / 8=铜 / 16=青金，位段 24 空闲）→ 与金 / 铜 /
+                    //   青金独立，不扰旧矿脉分布（t569）。判定序位于青金之后、铁之前（重叠区 Y<16 与钻石 /
+                    //   金 / 青金共层，稀有矿优先；红石与钻石稀有度相当故置于铁 / 铜前）。
+                    if (((r2 >> 24) % 10000u) < kRedstonePct) {
+                        m_chunks.setBlock(x, y, z, BlockRegistry::RedstoneOre);
+                        ++redstonePlaced;
+                        continue;
+                    }
+                }
                 if (y >= kOreMin && y <= kIronMax) {
                     if (((r  >> 8) % 10000u) < kIronPct) {
                         m_chunks.setBlock(x, y, z, BlockRegistry::IronOre);
@@ -3497,7 +3514,8 @@ void World::scatterOres()
     }
     qInfo() << "worldgen: ores placed = coal" << coalPlaced << "copper" << copperPlaced
             << "iron" << ironPlaced << "gold" << goldPlaced
-            << "diamond" << diamondPlaced << "lapis" << lapisPlaced; // 同 seed → 同计数（确定性核对）
+            << "diamond" << diamondPlaced << "lapis" << lapisPlaced
+            << "redstone" << redstonePlaced; // 同 seed → 同计数（确定性核对）
 }
 
 // t278 洞穴隧道生成（PLAN §2-K 确定性；spec「3D Perlin 阈值 / random-worm 隧道 + 分叉路口；内部黑暗；连通性」）。

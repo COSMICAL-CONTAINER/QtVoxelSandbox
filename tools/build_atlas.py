@@ -289,6 +289,9 @@ TILES = [
     "default_rail_corner",        # 136 rail_corner（铁轨 90° 拐角：双轨自南边进入向左（西）弯出；其余三向由
                                   #    mesher 换 UV 旋转 / 镜像映射（一张贴图四用））
     "default_rail_cross",         # 137 rail_cross（铁轨十字交叉：南北 + 东西双轨叠交 + 中央方枕木）
+    "default_redstone_ore",       # 138 redstone_ore（t569 红石矿石；石头底 + 鲜红菱斑矿粒——复制钻石矿斑块布局
+                                  #    改红；RedstoneOre 各面=本 tile；机制等价 MC 1.0 红石矿，走过/挖掘点亮
+                                  #    微弱红光；tools/build_ore.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

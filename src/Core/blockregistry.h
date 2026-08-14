@@ -742,7 +742,19 @@ public:
         //   isMushroom(id) 单一权威谓词覆盖红 / 白两蘑菇（mesher cross 路由 / 失撑掉落 / 放置预检统一读，避免各处
         //   硬编码 2 个 id 判定漂移，同 isBed / isIce 模式）。
         BrownMushroom   = 115, // 白蘑菇 / 棕蘑菇：cross 形蘑菇（机制等价 MC 1.0 brown mushroom）；蘑菇汤原料
-        Count           = 116, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        RedstoneOre    = 116, // 红石矿石（t569）：机制等价 MC 1.0 红石矿（嵌于 stone 最深层 y∈[5,16]、需铁镐采掘、
+                                  //   掉 4 红石粉；走过 / 挖掘时 state bit0 置亮 → 方块光 flood 微弱泛光后自动熄灭，
+                                  //   机制等价 MC「玩家走近 / 触碰红石矿发光」）。整立方 opaque（solid=true / ShapeFull，
+                                  //   与 coal/iron/diamond/copper/gold/lapis 矿石同族）、hardness=3.0（同族量级，需镐）、
+                                  //   toolType=Pickaxe、requiresTool=true、minToolTier=3（需铁镐才掉落，机制等价 MC
+                                  //   红石矿需铁镐；同 diamond/gold 门槛）、dropId=0x224（红石粉材料段
+                                  //   RecipeRegistry::RedstoneId；Core 不依赖 Game 故用字面量 0x224）、dropCount=4
+                                  //   （MC 1.0 红石矿掉 4 粉，时运可放大）、maxStack=64。各面贴图=redstone_ore(138)
+                                  //   （石头底 + 鲜红菱斑矿粒，复制钻石矿斑块布局改红色，原创自绘 §9a）。音色归
+                                  //   GroupStone（石质）。worldgen scatterOres 高度分层散布于**最深层** y∈[5,16]
+                                  //   （金属族中最深，机制等价 MC 1.0 红石 Y<16 深层富集）。洞穴裸露同其它矿石。
+                                  //   进创造调色板。
+        Count           = 117, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -819,6 +831,10 @@ public:
     //   避免各处硬编码 Dispenser id 判定（同 isTnt / isLadder 单 id 模式）。单 id 故裸相等判定，仍提供谓词作
     //   单一权威（未来追加发射器变体时一处同步）。
     static bool isDispenser(quint8 blockId);
+    // t569 红石矿石统一谓词（单一权威）：blockId == RedstoneOre 即红石矿。供 PlayerController 的走过 / 挖掘
+    //   触发点亮判定（scanRedstoneOre footprint 扫描 + updateMining 目标判定）+ World worldgen scatterOres 写入
+    //   读，避免各处硬编码 RedstoneOre id 判定漂移（同 isTnt / isLadder 单 id 模式）。
+    static bool isRedstoneOre(quint8 blockId);
     // t490 手动 TNT 点火机关统一谓词（单一权威）。Lever / WoodButton / StoneButton 三者机制等价 MC 1.0 lever /
     //   wooden button / stone button——右键激活即点燃水平四邻 TNT（本项目无红石，故把「激活脉冲」直接绑在右键动作）。
     //   isLever / isWoodButton / isStoneButton 各单 id 裸相等判定；isManualIgniter（任一机关）供 placeBlock useBlock
@@ -1276,7 +1292,9 @@ public:
     //   t565：136=rail_corner / 137=rail_cross（铁轨拐角 / 十字贴图；不绑定 BlockDef 瓦片字段，mesher
     //   据铁轨 state 选 121/136/137 —— 同 Water 流水贴图模式）。136..137 尚无 BlockDef 引用故
     //   static_assert 仍只守到 135，本常量先就位供 mesher 引用。
-    static constexpr int AtlasTileCount = 138;
+    //   t569：138=redstone_ore（红石矿石贴图；石头底 + 鲜红菱斑矿粒，复制钻石矿斑块布局改红；
+    //   tools/build_ore.py 程序生成；RedstoneOre 各面=本 tile）。
+    static constexpr int AtlasTileCount = 139;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
@@ -1512,6 +1530,18 @@ public:
     //   （同 ChestStateDungeonFlag bit2 / torch marker 同族）。state 经 m_states 落 SQLite round-trip 保真
     //   （旧存档熔炉 state 无 bit2 → 非燃烧态，安全；重新点燃 / 熄火时 FurnaceUI 重写本位）。
     static constexpr quint8 FurnaceStateLitFlag = 0x04;
+    // t569 红石矿石 state bit0（值 1）=「点亮」标记（机制等价 MC 1.0 红石矿被玩家走近 / 触摸时发光数秒后
+    //   熄灭）。PlayerController::scanRedstoneOre（footprint 扫描，同 scanTntTraps 采样）与 updateMining
+    //   （挖掘目标为红石矿）在触发时置本位 + 经 setRedstoneOreLit 走 5 参数 setBlock（id 不变 → 只发
+    //   worldChanged 重建 mesh）；定时器（playercontroller）到时清本位熄灭。光照：lightEmission 状态感知版
+    //   据本位返 9（微弱、阴沉红光 —— 低于火把 14，机制等价 MC 红石矿点亮光 level 9）→ recomputeLightAround
+    //   检出 lightSourceChanged 触发方块光增量重 flood。mesher 不读本位（贴图恒 138，光照由顶点色 block 通道
+    //   呈现泛光，非 MC 式亮贴图切换）；collisionAABBs / selectionAABBs 亦不读 state（ShapeFull 整立方）→
+    //   复用 bit0 作 marker 零回归。state 经 m_states 落 SQLite round-trip 保真（旧存档红石矿 state=0 → 未点亮，安全）。
+    static constexpr quint8 RedstoneOreStateLitFlag = 0x01;
+    // t569 红石矿石点亮时长（秒；机制等价 MC 1.0 红石矿被触碰后亮约 5 秒后自熄）。playercontroller
+    //   置亮时启动定时器，到期清 bit0 熄灭（同 MC 单次触碰一次点亮窗口）。
+    static constexpr float RedstoneOreLitSeconds = 5.0f;
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度

@@ -549,6 +549,21 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   **蘑菇汤配方原料**（recipe.cpp：碗 + 红蘑菇 + 白蘑菇 → 1 蘑菇汤）。§9 区隔：仅机制对齐 MC 1.0 brown mushroom，
     //   名称 / 贴图全原创自绘（§9a，tools/build_brown_mushroom.py）。
     /* brown_mushroom */ {int(BlockRegistry::BrownMushroom),  135,135,135,135, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::BrownMushroom), 1, 64, "brown_mushroom","白蘑菇"},
+    // ── t569 红石矿石（RedstoneOre）：机制等价 MC 1.0 红石矿（嵌于 stone 最深层 y∈[5,16]、需铁镐采掘、
+    //   掉 4 红石粉；玩家走过 / 挖掘触碰时点亮 state bit0 → 方块光 flood 微弱泛光 ~5s 后自熄）。整立方
+    //   opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 coal/iron/diamond/copper/
+    //   gold/lapis 矿石同族）、hardness=3.0（同族量级，需镐）、toolType=Pickaxe、requiresTool=true、
+    //   minToolTier=3（**需铁镐**才掉落 —— 木/石镐挖了不掉落，机制等价 MC 1.0 红石矿需铁镐；同 diamond/gold
+    //   门槛）、dropId=0x224（红石粉材料段，RecipeRegistry::RedstoneId；Core 不依赖 Game 故用字面量 0x224）、
+    //   dropCount=4（MC 1.0 红石矿掉 4 粉；时运附魔可放大）、maxStack=64。各面贴图=redstone_ore(138)（石头底
+    //   + 鲜红菱斑矿粒——复制钻石矿斑块布局改红，原创自绘 §9a；tools/build_ore.py 程序生成）。音色归
+    //   GroupStone（石质，同矿石族）。worldgen scatterOres 高度分层散布于**最深层** y∈[5,16]（金属族中最深，
+    //   机制等价 MC 1.0 红石 Y<16 深层富集；密度与钻石相当）。洞穴裸露：carveCaves 暴露矿脉于洞壁。
+    //   进创造调色板（与其它矿石同走立方体图标）。**点亮机制**：PlayerController::scanRedstoneOre 扫玩家
+    //   footprint 格 ± 邻格 + updateMining 挖掘目标 → 置 RedstoneOreStateLitFlag（bit0）→ lightEmission
+    //   状态感知版返 9（微弱阴沉红光，低于火把 14）→ recomputeLightAround 增量重 flood 泛光；~5s 后清位
+    //   熄灭（RedstoneOreLitSeconds）。
+    /* redstone_ore */ {int(BlockRegistry::RedstoneOre),      138,138,138,138, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,                           0x224, 4, 64, "redstone_ore", "红石矿石"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -668,6 +683,7 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     // t507 白蘑菇 / 棕蘑菇 → MC 1.0 brown mushroom 仅以 item（id 39）或巨型菌盖方块（id 99）存在，无「小蘑菇植物
     //   方块」等价；本工程作 cross 装饰方块故无 1.0 等价（同 red Mushroom=48 取 -1 模式）。
     /* brown_mushroom          */ -1, // t507 白蘑菇 → MC 1.0 无等价（同 red mushroom；本工程作 cross 装饰故无 1.0 等价）
+    /* redstone_ore            */ 73, // t569 红石矿石 → MC 1.0 redstone ore id 73
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -838,6 +854,13 @@ bool BlockRegistry::isTnt(quint8 blockId)
 bool BlockRegistry::isDispenser(quint8 blockId)
 {
     return blockId == Dispenser;
+}
+
+// t569 红石矿石统一谓词（单一权威，见头注释）：blockId == RedstoneOre 即红石矿。供 PlayerController
+//   走过 / 挖掘点亮判定 + worldgen scatterOres 写入读（不各处硬编码 id，同 isTnt 单 id 模式）。
+bool BlockRegistry::isRedstoneOre(quint8 blockId)
+{
+    return blockId == RedstoneOre;
 }
 
 // t490 手动 TNT 点火机关统一谓词（单一权威；见 blockregistry.h 头注释）。Lever / WoodButton / StoneButton 三者
@@ -1202,11 +1225,16 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
 // t494 状态感知自发光（见头注释）：非状态相关方块（火把/岩浆/末地传送门）委托单参版（state=0 等价）；
 //   熔炉按 lit bit2 翻转：燃烧中 → 13（MC 1.0 熔炉光 level 13），熄灭 → 0。World 光照 flood 种子用此版
 //   读 cell 真实 state 区分燃/熄。
+//   t569 红石矿石按 lit bit0 翻转：点亮 → 9（微弱阴沉红光 —— 低于火把 14，机制等价 MC 1.0 红石矿点亮
+//   光 level 9，玩家走近 / 挖掘触碰时短暂发光后自熄），未点亮 → 0。
 quint8 BlockRegistry::lightEmission(quint8 blockId, quint8 state)
 {
     // t494：燃烧中的熔炉自发光 13（机制等价 MC 1.0 熔炉冶炼进行时正面发光 level 13）。state bit2 = lit flag。
     if (blockId == Furnace && (state & FurnaceStateLitFlag)) return 13;
-    return lightEmission(blockId); // 其余（含熄灭熔炉）按 id-only 表（火把/岩浆/末地传送门等，与 state 无关）
+    // t569：点亮中的红石矿石自发光 9（机制等价 MC 1.0 红石矿点亮光 level 9；微弱、阴沉红）。
+    //   state bit0 = RedstoneOreStateLitFlag（PlayerController 走过 / 挖掘触碰置位，~5s 后自熄清位）。
+    if (blockId == RedstoneOre && (state & RedstoneOreStateLitFlag)) return 9;
+    return lightEmission(blockId); // 其余（含熄灭熔炉 / 未点亮红石矿）按 id-only 表（火把/岩浆/末地传送门等，与 state 无关）
 }
 
 // t360 列顶实面 Y 偏移（见头注释）：PCF 软影用本值替代「heightmap+1.0 整格」假设，按方块真实模型高度判遮挡。
@@ -1357,6 +1385,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     switch (blockId) {
     case Stone: case Cobble: case Furnace: case CoalOre: case IronOre: case DiamondOre:
     case CopperOre: case GoldOre: // t308 铜/金矿石 → 石质音色（同 coal/iron/diamond 矿石族）
+    case LapisOre: case RedstoneOre: // t471 青金 / t569 红石矿石 → 石质音色（同矿石族）
     case Spawner: // t392 刷怪笼 → 石质音色（铁笼金属敲击感，最接近 MC 1.0 刷怪笼 metal SoundType）
     case Sandstone: // t394 砂岩 → 石质音色（成岩，同 cobble/stone 族）
     case CutSandstone: // t485 切制砂岩 → 石质音色（同砂岩族）

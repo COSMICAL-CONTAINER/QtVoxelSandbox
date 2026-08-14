@@ -16,7 +16,7 @@
 #include <cmath>
 
 // t476 时运附魔适用方块判定：矿石类（破块掉对应材料物品，掉落数量受时运加成）。机制等价 MC fortune 仅对
-//   矿石 / 部分方块生效。本工程矿石段：煤 / 铁 / 钻 / 铜 / 金 / 青金（破块掉冶炼材料，掉落数 ×时运有意义）。
+//   矿石 / 部分方块生效。本工程矿石段：煤 / 铁 / 钻 / 铜 / 金 / 青金 / 红石（破块掉冶炼材料，掉落数 ×时运有意义）。
 //   非矿石（草 / 石 / 圆石等掉落数恒 1 的方块）时运不放大 —— MC 时运对石 / 圆石无效，避免无限石刷。
 namespace {
 bool isFortuneOre(quint8 blockId)
@@ -28,6 +28,7 @@ bool isFortuneOre(quint8 blockId)
     case BlockRegistry::CopperOre:
     case BlockRegistry::GoldOre:
     case BlockRegistry::LapisOre:
+    case BlockRegistry::RedstoneOre: // t569 红石矿（掉 4 粉，时运放大最有感；机制等价 MC fortune 对红石生效）
         return true;
     default:
         return false;
@@ -104,6 +105,7 @@ void PlayerController::setWorld(World *w)
     if (m_world == w) return;
     m_world = w;
     m_dispenserCooldowns.clear(); // t486：换世界清发射器冷却（防跨世界同坐标串扰；冷却键按世界坐标打包）
+    m_redstoneLitCells.clear();   // t569：换世界清红石矿点亮表（防跨世界同坐标串扰；键按世界坐标打包）
     snapSpawnToGround(); // t137：世界注入后贴地表（构造期 m_pos=kSpawnY 兜底，此处覆盖为真实地表）
     emit worldChanged();
 }
@@ -655,6 +657,9 @@ void PlayerController::tickImpl()
     // t486 发射器陷阱触发（踩压力板 → 邻接发射器射箭）：与 TNT 陷阱同级常开（玩家走入神殿走廊踩板即射箭，
     //   独立于捕获态）。内自检 + 死亡门控；per-dispenser 冷却防每帧刷屏。dt 用于冷却递减。
     scanDispenserTraps(dt);
+    // t569 红石矿石点亮触发（玩家走近红石矿即微弱红光，机制等价 MC 触发发光）：与拾取同级常开（玩家走过
+    //   红石矿旁即触发，独立于捕获态）。内自检 + 死亡门控；点亮表到期自熄。dt 用于倒计时递减。
+    scanRedstoneOre(dt);
     } // /profPickup
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
@@ -1470,6 +1475,17 @@ void PlayerController::updateMining(float dt)
     //   air / 越界 = 已破 / 无目标，取消合理（blockAt 越界返 Air）。
     const quint8 bid = m_world->blockAt(m_mineBx, m_mineBy, m_mineBz);
     if (int(bid) == int(BlockRegistry::Air)) { cancelMining(); return; }
+
+    // t569 红石矿石挖掘触发点亮：正在挖的目标是红石矿 → 置亮（微弱阴沉红光泛出，机制等价 MC「挖掘 /
+    //   触碰红石矿发光」）。每 tick 调（已是亮态时 setRedstoneOreLit 内 no-op，零额外 worldChanged）；走到
+    //   点亮表续时同 scanRedstoneOre（玩家持续挖 → 光不闪断，松手 / 破块后倒计时自熄）。
+    if (BlockRegistry::isRedstoneOre(bid)) {
+        setRedstoneOreLit(m_mineBx, m_mineBy, m_mineBz, true);
+        const quint64 key = (quint64(quint32(m_mineBx + 0x100000) & 0x1FFFFFu))
+                          | (quint64(quint32(m_mineBz + 0x100000) & 0x1FFFFFu) << 21)
+                          | (quint64(quint32(m_mineBy) & 0x3FFu) << 42);
+        m_redstoneLitCells.insert(key, BlockRegistry::RedstoneOreLitSeconds);
+    }
 
     // t57：手持物品 id **直接读 hotbar（单一权威）**，不读 m_selectedItem 副本。m_selectedItem 经
     //   Q_PROPERTY 绑定 hotbarVM.selectedItemId（NOTIFY=selectedSlotChanged）刷新，但 QML 绑定重算
@@ -3643,6 +3659,72 @@ void PlayerController::scanDispenserTraps(float dt)
                 m_dispenserCooldowns.insert(key, kDispenserCooldown); // 写冷却
                 // return 防同帧多发射器刷箭（同 scanTntTraps 单触发）；下帧再处理其余候选。
                 return;
+            }
+        }
+    }
+}
+
+// t569 红石矿石置亮 / 熄（机制等价 MC 1.0 redstone ore 发光翻转；见 playercontroller.h 头注释）。
+//   走 5 参数 setBlock（id 不变只 state 变 → 仅发 worldChanged；World setBlock 内 recomputeLightAround 用
+//   状态感知 lightEmission 检出 0↔9 光变 → 增量重 flood 方块光，微弱阴沉红光泛出）。已是目标态 / 非红石矿 /
+//   越界 → no-op（同 setFurnaceLit 模式，避免无谓 worldChanged 刷重建）。
+void PlayerController::setRedstoneOreLit(int x, int y, int z, bool lit)
+{
+    if (!m_world) return;
+    const quint8 cur = m_world->blockAt(x, y, z);
+    if (!BlockRegistry::isRedstoneOre(cur)) return;  // 非红石矿（已被破 / 替换）→ no-op
+    const quint8 oldState = m_world->stateAt(x, y, z);
+    const quint8 newState = lit ? quint8(oldState | BlockRegistry::RedstoneOreStateLitFlag)
+                                : quint8(oldState & quint8(~BlockRegistry::RedstoneOreStateLitFlag));
+    if (newState == oldState) return;                // 已是目标态 → no-op
+    m_world->setBlock(x, y, z, cur, newState);       // id 不变 → 仅 worldChanged + 光重 flood
+}
+
+// t569 红石矿石点亮触发（见 playercontroller.h 头注释）。扫玩家 footprint 格 ± 水平 4 邻 × 3 行
+//   （feetY-1 / feetY / feetY+1 —— 覆盖走过旁格 / 相邻蹭到 / 站其上 / 头顶邻层），命中 RedstoneOre →
+//   setRedstoneOreLit(true) + 点亮表续时 RedstoneOreLitSeconds（已亮条目续时 → 光不闪断）。
+//   点亮表倒计时递减（dt），到期 setRedstoneOreLit(false) 自熄 + 移除（机制等价 MC 触发发光一次点亮窗口，
+//   ~5s 后熄灭；玩家持续在旁则反复续时）。
+void PlayerController::scanRedstoneOre(float dt)
+{
+    if (!m_world) return;
+    // 点亮表倒计时：每 tick 递减 dt，到期熄灭并移除（先递减再扫描 → 玩家仍在旁时下方扫描会重新续时）。
+    if (!m_redstoneLitCells.isEmpty()) {
+        for (auto it = m_redstoneLitCells.begin(); it != m_redstoneLitCells.end(); ) {
+            it.value() -= dt;
+            if (it.value() <= 0.0f) {
+                // 自熄：解包坐标（x = 低 21 位有符号偏移、z = 中 21 位、y = 高位；打包见下方 cellKey）。
+                const quint64 key = it.key();
+                const int lx = int(quint32(key & 0x1FFFFFu)) - 0x100000;
+                const int lz = int(quint32((key >> 21) & 0x1FFFFFu)) - 0x100000;
+                const int ly = int(quint32(key >> 42)) & 0x3FFu;
+                setRedstoneOreLit(lx, ly, lz, false);
+                it = m_redstoneLitCells.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    if (m_dead) return; // 死亡态不触发新点亮（同 pickupScan / scanTntTraps 门控；已亮的仍倒计时自熄）
+    // 玩家 footprint 格（脚位 cellY + AABB 覆盖的 X/Z 格）± 水平 4 邻 × 3 行（feetY-1..feetY+1）。
+    //   3 行覆盖：走过红石矿旁（同层邻格）/ 站在红石矿上（feetY-1 是脚下矿）/ 头顶邻层矿。同
+    //   scanTntTraps / scanDispenserTraps footprint 采样模式。
+    const int feetY = int(std::floor(m_pos.y()));
+    const int x0 = int(std::floor(m_pos.x() - kHalfW)) - 1;
+    const int x1 = int(std::floor(m_pos.x() + kHalfW)) + 1;
+    const int z0 = int(std::floor(m_pos.z() - kHalfW)) - 1;
+    const int z1 = int(std::floor(m_pos.z() + kHalfW)) + 1;
+    for (int by = feetY - 1; by <= feetY + 1; ++by) {
+        for (int bx = x0; bx <= x1; ++bx) {
+            for (int bz = z0; bz <= z1; ++bz) {
+                if (!BlockRegistry::isRedstoneOre(m_world->blockAt(bx, by, bz))) continue;
+                // 置亮 + 续时（已亮条目覆盖写 → 玩家在旁光不闪断；离开后倒计时自熄）。
+                setRedstoneOreLit(bx, by, bz, true);
+                // 打包坐标键：x/z 各 21 位有符号偏移（±1M 格余量）、y 10 位（0..1023；世界 H≤64 足够）。
+                const quint64 key = (quint64(quint32(bx + 0x100000) & 0x1FFFFFu))
+                                  | (quint64(quint32(bz + 0x100000) & 0x1FFFFFu) << 21)
+                                  | (quint64(quint32(by) & 0x3FFu) << 42);
+                m_redstoneLitCells.insert(key, BlockRegistry::RedstoneOreLitSeconds);
             }
         }
     }

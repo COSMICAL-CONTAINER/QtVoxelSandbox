@@ -872,6 +872,18 @@ private:
     //   满天箭；机制等价 MC 发射器有内含冷却 / 单次触发间隔）。门控：死亡 / 无世界 / 无 entityManager → no-op。
     //   向下依赖 World（blockAt）+ EntityManager（spawnArrow）+ BlockRegistry（isDispenser / isPressurePlate）。
     void scanDispenserTraps(float dt);
+    // t569 红石矿石点亮触发（机制等价 MC 1.0 红石矿被玩家走近 / 触碰时发光数秒后自熄）：扫玩家 footprint
+    //   格 ± 水平 4 邻（feetY 与 feetY±1 共 3 行 —— 玩家走过 / 相邻蹭到 / 站其上都触发），命中 RedstoneOre →
+    //   setRedstoneOreLit(true)（置 state bit0 + 状态感知 lightEmission 9 → recomputeLightAround 增量重 flood
+    //   微弱阴沉红光）+ 记 m_redstoneLitCells 点亮表（QHash 键→剩余秒；每 tick 递减，到期 setRedstoneOreLit(false)
+    //   自熄，机制等价 MC 触发发光 ~5s 后熄灭）。挖掘触发在 updateMining（目标是红石矿即点亮）。门控：死亡 /
+    //   无世界 → no-op。向下依赖 World（blockAt/setBlock）+ BlockRegistry（isRedstoneOre），同 scanTntTraps
+    //   footprint 采样模式。换世界 setWorld 清空点亮表（防跨世界串扰，同 m_dispenserCooldowns）。
+    void scanRedstoneOre(float dt);
+    // t569 红石矿石置亮 / 熄（机制等价 MC 1.0 redstone ore 发光翻转）：走 5 参数 setBlock（id 不变只 state 变
+    //   → 仅发 worldChanged 重建 mesh、不发 broken/placed；lightEmission 状态感知版检出光变触发重 flood）。
+    //   已是目标态 / 非红石矿 / 越界 → no-op（同 setFurnaceLit 模式）。
+    void setRedstoneOreLit(int x, int y, int z, bool lit);
     // t137 出生贴地表：查出生列 (kSpawnX,kSpawnZ) 的 worldgen 地表高度 → 把脚底 Y 设为 h+1（站地表方块
     //   上方）+ 同步 m_peakY 防误判落差。kSpawnY=80 是高于最高地表(~71，t307 后 hills 顶)的兜底初值（防
     //   卡地形），但玩家从 80 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生
@@ -897,6 +909,11 @@ private:
     //   机制等价 MC 发射器触发间隔）。换世界时 clearAllTrapsState() 清空（防跨世界串扰）。无发射器陷阱场景
     //   恒空（零开销）。
     QHash<quint64, float> m_dispenserCooldowns;
+    // t569 红石矿石点亮表：打包坐标键 → 剩余点亮秒。scanRedstoneOre 触发置亮时写 RedstoneOreLitSeconds
+    //   （已有条目则续时）；每 tick 递减 dt，到期 setRedstoneOreLit(false) 自熄并移除。玩家持续在旁 → 每次
+    //   重新续时（光不闪断）；离开 → 倒计时自熄（机制等价 MC 触发发光一次点亮窗口）。换世界清空（同
+    //   m_dispenserCooldowns 模式）。无红石矿场景恒空（零开销）。
+    QHash<quint64, float> m_redstoneLitCells;
     // t178 帧时间切分：累加每 tick 的主线程 CPU 耗时（ns），每 ~60 tick（≈1s@60Hz）算平均写 m_simMs + emit。
     float m_simMs = 0.0f;
     qint64 m_simAccumNs = 0;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成矿石（CoalOre / IronOre / DiamondOre / CopperOre / GoldOre / LapisOre）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
+"""生成矿石（CoalOre / IronOre / DiamondOre / CopperOre / GoldOre / LapisOre / RedstoneOre）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
 
 机制等价 MC 1.0 矿石（嵌于 stone 区段、需镐采掘），但贴图为本项目程序生成的原创像素图，
 **不**拷贝任何 MC 资产。基底取本工程既有石头（default_stone.png）逐像素副本，保证与
@@ -16,6 +16,8 @@
   - 青金矿（lapis_ore，t471）：石头底 + 多簇深群青蓝斑点 + 少量黄铁矿金点（机制等价 MC 1.0
     青金石矿 lapis lazuli ore，名称/贴图原创 §9）。群青深蓝主色 + 黄铁金点副色显「青金石
     特征性金斑」（真实青金石 lazurite 矿物即深蓝底嵌黄铁矿 pyrite 金点），区别于钻石的青白晶体。
+  - 红石矿（redstone_ore，t569）：石头底 + 多簇鲜红菱斑矿粒（机制等价 MC 1.0 红石矿 redstone ore，
+    名称/贴图原创 §9）。复制钻石矿斑块布局改红（石头底不变）；鲜红主色 + 亮红高光显「红石矿粒」。
 
 色块位置固定（无随机源）→ 同输入同输出（确定性，便于 CI 校验 & 与 build_atlas.py 顺序对齐）。
 斑块布局刻意打散、不对称，避免「网格化 / 重复纹理」的人工感。
@@ -27,6 +29,7 @@
   default_copper_ore.png
   default_gold_ore.png
   default_lapis_ore.png
+  default_redstone_ore.png
 
 依赖：本脚本须先有 textures/default_stone.png（既有 CC0/原创资产）。
 """
@@ -139,6 +142,18 @@ def draw_lapis(canvas):
     return canvas
 
 
+def draw_redstone(canvas):
+    """红石矿（redstone_ore，t569）：石头底 + 多簇鲜红菱斑矿粒（散布；亮红高光 + 暗红阴影显「红石矿粒
+    反光」）。机制等价 MC 1.0 红石矿，名称/贴图全原创（§9）。复制钻石矿（draw_diamond）的斑块布局，仅把
+    青白晶体配色改为鲜红矿粒（石头底不变）——「同一份石头里嵌不同颜色的矿」视觉一致（用户要求：复制
+    钻石矿图改红色，石头位置/颜色不变）。"""
+    rs_base = np.array([204.0, 40.0, 40.0])      # 鲜红（红石矿粒外露，饱和阴沉红）
+    rs_hi = np.array([248.0, 120.0, 110.0])      # 高光（矿粒反光，亮红）
+    centers = [(3, 5), (11, 3), (13, 10), (5, 11), (8, 8), (10, 13)]  # 同钻石矿布局（t279）
+    paint_blobs(canvas, centers, radius=1, color=rs_base, highlight=rs_hi)
+    return canvas
+
+
 def save(arr, name):
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA")
     out = os.path.join(SRC, name + ".png")
@@ -153,6 +168,7 @@ def main():
     save(draw_copper(stone_base()), "default_copper_ore")
     save(draw_gold(stone_base()), "default_gold_ore")
     save(draw_lapis(stone_base()), "default_lapis_ore")
+    save(draw_redstone(stone_base()), "default_redstone_ore")
 
 
 if __name__ == "__main__":
