@@ -5198,44 +5198,44 @@ Window {
                                     }
                                 }
                                 // 南瓜头（机制等价 MC 1.0 雪傀儡戴刻面南瓜；§9 区隔纯色原创非照搬 MC）。
-                                //   t499 二轮复盘 ① 南瓜头「消失不见」根治：放大到 ~0.78 宽（顶/底雪块各 0.80 宽 → 头几与
-                                //   身等宽，醒目不被误读为「雪块顶上小红点」），y+0.66 高（圆润南瓜非扁块），z 0.66（前后略
-                                //   扁但非过扁）。色 #ef8c2a 高饱和亮橙（昼夜 tint 下辨识强；旧 #e8821e 在夜/洞穴偏褐）。
-                                //   local y center +1.23 → 头底 (y=1.23-0.33=0.90) 贴顶雪块顶（y=+0.90），无断脖缝隙。
+                                //   t529 复盘 ① 南瓜头「仍无头」+ ⑤「头在肚子位置」：t499 二轮曾把头 local y center 设 +1.23（头底
+                                //   贴顶雪块顶 0.90 无缝），但用户实测仍判「无头」/「头在肚子位置」—— 根因是 +1.23 紧贴顶雪块顶
+                                //   时，从侧视角头与顶雪块几乎共面（头底 0.90 = 顶雪块顶 0.90）→ 头被读作「顶雪块的延伸」而非
+                                //   「独立的头」，且头身无明显分界 → 用户判「头在肚子位置」（顶雪块 = 身体上部，头与之共面）。
+                                //   t529 修：头 local y center 提到 +1.45（头底 = 1.45-0.36 = 1.09，**高于**顶雪块顶 0.90 共
+                                //   0.19 格 → 头与身之间有清晰「脖颈缝隙」→ 一眼辨「头在顶上」非「与身一体」）；scale 略提到
+                                //   (0.82, 0.72, 0.72)（比顶雪块 0.80 宽稍大 → 头比身略宽更醒目；圆润南瓜非扁块）。色 #ef8c2a
+                                //   高饱和亮橙（昼夜 tint 下辨识强；与雪白身强对比）。眼/嘴 y 同步提到头中心 1.45（眼 1.52 / 嘴 1.35）。
                                 //   t510：剪南瓜头后（golemSheared）隐藏本体（无头 derpy 形态）；眼/嘴仍悬浮原头位（下方）。
                                 Model {
                                     visible: !parent.golemSheared // t510 剪后隐藏南瓜头本体（无头形态）
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 1.23, 0)
-                                    scale: Qt.vector3d(0.78, 0.66, 0.66)
+                                    position: Qt.vector3d(0, 1.45, 0)
+                                    scale: Qt.vector3d(0.82, 0.72, 0.72)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#ef8c2a") }
                                 }
                                 // 南瓜头刻面双眼 + 嘴（机制等价 MC jack o'lantern 刻面：双眼 + 锯齿嘴）。
-                                //   t499 真因（用户「纯雪块无头无眼」）：旧眼 z=-0.30，南瓜 z scale 0.65 → 头前面 z=-0.325；
-                                //   眼在头前内 0.01 → 被不透明南瓜面整体遮挡（UnitCube NoLighting opaque）。修：眼/嘴 z=-0.35
-                                //   （凸出头前 ~0.02，南瓜 z scale 0.66 → 头前面 z=-0.33；眼/嘴在头前非内嵌），刻面深色
-                                //   (#1a0e04) 必现于头前。t499 二轮复盘：眼/嘴 z 再前推到 -0.35（一轮 -0.34 仅凸 0.01 在
-                                //   某些视角被南瓜面 z-fight 闪烁），保任何朝向可见。眼位 y=1.30（头中心上下，头
-                                //   span [0.90,1.56] → 中心 1.23，眼略上偏 1.30 留嘴位下方）；嘴位 y=1.13（眼下，咧嘴笑）。
+                                //   t499/t529：眼/嘴 z=-0.39（凸出头前 ~0.03；南瓜 z scale 0.72 → 头前面 z=-0.36；眼/嘴在头前
+                                //   非内嵌），刻面深色 (#1a0e04) 必现于头前。眼位 y=1.52（头中心 1.45 上偏留嘴位下方）；
+                                //   嘴位 y=1.35（眼下，咧嘴笑）。
                                 //   t510：剪南瓜头后（golemSheared）南瓜头本体隐藏，眼/嘴**仍悬浮在原头位**（visible 恒 true）
-                                //   → 「无头形态带眼」derpy 效果（机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」；
-                                //   不死 = 不改血量 / 行为，仅外观变化；眼/嘴悬浮无南瓜头遮挡更显眼，呆萌 derpy 风）。
+                                //   → 「无头形态带眼」derpy 效果（机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」）。
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.16, 1.30, -0.35)
+                                    position: Qt.vector3d(-0.16, 1.52, -0.39)
                                     scale: Qt.vector3d(0.12, 0.15, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.16, 1.30, -0.35)
+                                    position: Qt.vector3d(0.16, 1.52, -0.39)
                                     scale: Qt.vector3d(0.12, 0.15, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                                 // 刻面嘴（横向长条，呈咧嘴笑剪影；机制等价 MC 南瓜嘴刻面）。
                                 Model {
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 1.13, -0.35)
+                                    position: Qt.vector3d(0, 1.35, -0.39)
                                     scale: Qt.vector3d(0.32, 0.07, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
@@ -6239,7 +6239,14 @@ Window {
                         visible: window.showHitboxes
                         geometry: WireCube {}
                         scale: Qt.vector3d(mobHalfW * 2.0 + 0.01, mobHalfH * 2.0 + 0.01, mobHalfW * 2.0 + 0.01)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
+                        // t529：雪傀儡身纯雪白 → 白色 WireCube 框线融进白身不可见（用户报「F3+B 碰撞箱看不到」）。
+                        //   雪傀儡 / 铁傀儡（淡色身）改用青色框线（与白雪 / 铁灰高对比）；其余 mob 保留白框线（对棕 / 粉
+                        //   身本就高对比）。条件读 entMobType（已在 delegate 顶层 property）。
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: (entMobType === EntityManager.MobSnowGolem || entMobType === EntityManager.MobIronGolem)
+                                       ? "#00e5ff" : "#ffffff"
+                        }
                     }
                     Model {
                         visible: window.showHitboxes

@@ -155,7 +155,13 @@ public:
     // t239 生物基类统一生成入口（猪/牛/羊 + 后续 mob）：mobType=子类 id（0=通用测试生物；t240 pig/cow/sheep
     //   各自 id；掉落/模型据它分流）；color=渲染配色（QML delegate baseColor）；maxHealth=血量上限（≤0 用默认）。
     //   生成即满血、未死、AI wanderTimer=0（tick 首帧即选第一次向）。达 kCap → 跳过 + 告警（防溢出）。
-    Q_INVOKABLE void spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth);
+    //   返槽索引（t529：caller 可据此立即调 setMobYawRad 设生成时朝向；QML 调用忽略返回值无妨）。达 kCap → -1。
+    Q_INVOKABLE int spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth);
+    // t529 spawnMobTyped 的「带生成时朝向」变体（spec「生成时固定朝」）：spawnMobCore 生成 → setMobYawRad 设
+    //   yawRad（朝 caller 指定方向，典型 atan2(-dx,-dz) 朝玩家）→ 一次 emit（同 spawnMobTyped）。供 playercontroller
+    //   build 雪傀儡 / 铁傀儡生成时面朝玩家用（让玩家初次见南瓜脸正脸；之后 aiWander 随机选向）。
+    //   返槽索引（同 spawnMobTyped）；达 kCap → -1。
+    Q_INVOKABLE int spawnMobTypedYaw(int x, int y, int z, int mobType, const QString &color, int maxHealth, float yawRad);
     // t280 黑暗刷怪：敌对生物生成入口（Shambler/Bones）。委托 spawnMobTyped（设 hostile=true / 配色 / 血量）
     //   后再翻 Entity.hostile（spawnMobTyped 是通用入口，不知哪些 mobType 是敌对；本入口收口敌对语义）。
     //   达 kCap → 委托内静默跳过。mobType 仅 MobShambler/MobBones 合法（其余当敌对调是非语义，但仍生成不崩）。
@@ -961,21 +967,18 @@ private:
                   float speedScale);
     // t482 雪傀儡 AI（tick Mob 分支 mobType==MobSnowGolem 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐
     //   MC 1.0 雪傀儡（防御造物：游荡 + 抛雪球打敌对 + 行走留雪 + 热/雨融化）：
-    //   (1) 融化：沙漠群系（biomeIdAt==Desert，热）或降水（isPrecipitatingAt，雨/雪）→ damageEntity 大伤害
-    //       → 死亡粒子链 + 移除（机制等价 MC 雪傀儡沙漠 / 雨天融化消失）。
-    //   (2) 行走留雪层：节流（kSnowTrailInterval）在脚下空气格地面放 SnowLayer（setWaterSilent 静默写，
-    //       非玩家破/放不发 broken/placed → 免粒子/音，同羊吃草消耗草丛模式）。
+    //   (1) 融化：沙漠群系（biomeIdAt==Desert，热）或降水（isPrecipitatingAt，雨/雪）或入水 → meltAccum 累加 →
+    //       达 kSnowMeltInterval 扣 kSnowMeltDamage=1 HP（慢扣血，机制等价 MC 持续热伤害而非即死）。
+    //   (2) 行走留雪层：**放身后格**（golem 离开格留雪脚印，t529 改自旧「放脚下」防模型与雪层重叠）。
     //   (3) 远程雪球：节流（kSnowGolemThrowInterval）扫最近敌对 mob（nearestHostile）→ fireSnowball（抛物弹丸，
     //       命中敌对低伤害 1HP + 减速 kSnowSlowDuration）。
-    //   (4) 朝玩家（t499 二轮复盘）：玩家在 kSnowGolemFaceRange 内 → yawRad 朝玩家（atan2(-dx,-dz)，同 yaw 约定
-    //       dir=(-sin,-cos) → QML eulerRotation.y=yawDeg 模型 -Z 正对玩家）。机制等价 MC 造物面向接近的玩家（防御
-    //       造物本就「观察」玩家）；spec t499 明确「雪傀儡应朝玩家（能见正脸/南瓜脸）」。玩家离开范围 → aiWander 自主
-    //       选向（造物自由游荡）。修 t499 旧「背对玩家」：旧 aiSnowGolem 不接 playerPos → 只走 aiWander 随机朝向，
-    //       常背对玩家 → 玩家只见南瓜背（无刻面眼/嘴）误判「无头无眼」。
-    //   (5) 游荡（aiWander；玩家不在范围时走）。返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。
+    //   (4) 游荡（aiWander）：随机选向 + 时间片。**t529**：移除 t499 二轮「玩家在范围内 → yawRad 朝玩家」的持续
+    //       覆盖（spec 改「平时随机朝向」）→ yawRad 由 aiWander 随机选向（机制等价 MC 造物自由游荡朝向）；
+    //       生成时 yawRad 初值（spawnMobCore 默认 0）即「生成时固定朝」，aiWander 首次到期才随机改。
+    //   返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。playerPos 参数保留为 caller 签名兼容，t529 移除
+    //   朝玩家逻辑后函数体内 Q_UNUSED(playerPos) 不再读它。
     //   分层（PLAN §2）：只读 World::blockAt/isSolid/biomeIdAt/isPrecipitatingAt + 自身数据；写自身（pos /
-    //   slowTimer / damageEntity / yawRad）+ 向下静默写 World（setWaterSilent 雪层）。无向上依赖。playerPos 由
-    //   Game 层（PlayerController）传入（同 aiHostile / aiWolf 先例，Game→Entities 向下依赖）。
+    //   slowTimer / damageEntity / yawRad）+ 向下静默写 World（setWaterSilent 雪层）。无向上依赖。
     bool aiSnowGolem(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
                      float worldW, float worldD, float speedScale);
     // t483 铁傀儡 AI（tick Mob 分支 mobType==MobIronGolem 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐
@@ -1332,7 +1335,9 @@ private:
     // t499 二轮复盘：雪傀儡朝玩家的 XZ 距离阈值（blocks）。玩家在此范围内 → yawRad 朝玩家（模型 -Z 正对玩家，
     //   玩家可见南瓜头刻面眼/嘴正脸）；玩家出范围 → aiWander 自主游荡朝向。机制等价 MC 防御造物观察接近的玩家。
     //   取 10（= kSnowGolemAttackRange，造物在「能抛雪球防敌对」的同一感知范围内即面向玩家，无需更近）。
-    static constexpr float kSnowGolemFaceRange     = 10.0f; // 雪傀儡朝玩家的 XZ 距离阈值（blocks；t499 二轮）
+    // t529 LEGACY：雪傀儡朝玩家的 XZ 距离阈值（blocks；t499 二轮）。t529 移除「朝玩家」逻辑后此常量不再被读
+    //   （保留为历史记录，防误删认为「漏接线」；spec 改「平时 aiWander 随机朝向」后造物不再恒面向玩家）。
+    static constexpr float kSnowGolemFaceRange     = 10.0f; // LEGACY（t529 移除朝玩家后不再读）
     static constexpr float kSnowballSpeed          = 10.0f; // 雪球水平速度（blocks/s）
     static constexpr float kSnowballMaxVert        = 14.0f; // 雪球 vy 钳（blocks/s；防极端弧）
     static constexpr float kSnowballSpread         = 1.0f;  // 雪球三轴初速随机抖动（blocks/s）

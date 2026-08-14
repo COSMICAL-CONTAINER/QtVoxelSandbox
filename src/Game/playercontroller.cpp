@@ -3109,13 +3109,18 @@ void PlayerController::placeBlock()
         const quint8 below1 = (ty - 1 >= 0) ? m_world->blockAt(tx, ty - 1, tz) : quint8(BlockRegistry::Air);
         const quint8 below2 = (ty - 2 >= 0) ? m_world->blockAt(tx, ty - 2, tz) : quint8(BlockRegistry::Air);
         // (a) 雪傀儡：南瓜下方两格均为雪块（南瓜 + 雪块×2 竖直）→ 生成 MobSnowGolem + 移除 3 块。
-        //     生成位置 feet = 南瓜下方两格（雪块底）；spawnMobTyped 把 pos 设为 (x+0.5, feet + halfH, z+0.5)。
+        //     生成位置 feet = 南瓜下方两格（雪块底）；spawnMobTypedYaw 把 pos 设为 (x+0.5, feet + halfH, z+0.5)。
+        //     t529 spec「生成时固定朝，平时随机」：生成时 yaw 朝玩家（atan2(-dx,-dz)），让玩家初次见到南瓜脸正脸
+        //       （防御造物刚造出时面朝造主）；之后 aiWander 随机选向（造物自由游荡，不恒面向玩家）。
         if (below1 == BlockRegistry::Snow && below2 == BlockRegistry::Snow) {
             m_world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0);     // 南瓜（刚放）
             m_world->setWaterSilent(tx, ty - 1, tz, BlockRegistry::Air, 0); // 雪块 1
             m_world->setWaterSilent(tx, ty - 2, tz, BlockRegistry::Air, 0); // 雪块 2
-            m_entityManager->spawnMobTyped(tx, ty - 2, tz, EntityManager::MobSnowGolem,
-                                           QStringLiteral("#f0f4f8"), 4);
+            // golem 中心 = feet 格中心 (tx+0.5, tz+0.5)；玩家相对 golem 方向 dx/dz → yaw 使模型 -Z 正对玩家。
+            const float sgDx = m_pos.x() - (float(tx) + 0.5f);
+            const float sgDz = m_pos.z() - (float(tz) + 0.5f);
+            m_entityManager->spawnMobTypedYaw(tx, ty - 2, tz, EntityManager::MobSnowGolem,
+                                              QStringLiteral("#f0f4f8"), 4, std::atan2(-sgDx, -sgDz));
             qInfo("snow golem built at %d %d %d", tx, ty, tz);
         }
         // (b) 铁傀儡：南瓜下方两层中柱为铁块（stem 铁柱），且其中**一层**为 3 块横梁 T（crossbar：中柱 + 水平
@@ -3171,10 +3176,13 @@ void PlayerController::placeBlock()
                     m_world->setWaterSilent(tx, crossY, tz - 1, BlockRegistry::Air, 0);
                     m_world->setWaterSilent(tx, crossY, tz + 1, BlockRegistry::Air, 0);
                 }
-                // 生成铁傀儡：脚格取结构最底层（ty-2），spawnMobTyped 内置 pos=(x+0.5, 脚+halfH, z+0.5)。
-                //   朝向由 mob AI 自动定向（spawnMobTyped 无朝向参数；既有造物生成同此路径），符合 spec「合适朝向」。
-                m_entityManager->spawnMobTyped(tx, ty - 2, tz, EntityManager::MobIronGolem,
-                                               QStringLiteral("#c8c8d0"), 100);
+                // 生成铁傀儡：脚格取结构最底层（ty-2），spawnMobTypedYaw 内置 pos=(x+0.5, 脚+halfH, z+0.5)。
+                //   t529 spec「生成时固定朝，平时随机」：生成时 yaw 朝玩家（atan2(-dx,-dz)），让玩家初次见南瓜脸正脸
+                //   （同雪傀儡路径）；之后 aiWander / aiIronGolem 随机 / 朝敌对定向（造物自由行为）。
+                const float igDx = m_pos.x() - (float(tx) + 0.5f);
+                const float igDz = m_pos.z() - (float(tz) + 0.5f);
+                m_entityManager->spawnMobTypedYaw(tx, ty - 2, tz, EntityManager::MobIronGolem,
+                                                  QStringLiteral("#c8c8d0"), 100, std::atan2(-igDx, -igDz));
                 qInfo("iron golem built at %d %d %d (orient=%s, crossY=%d, rowX=%d)",
                       tx, ty, tz, orientB ? "B(cross@-1)" : "A(cross@-2)", crossY, int(rowX));
             }

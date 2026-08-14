@@ -87,14 +87,28 @@ void EntityManager::spawnMob(int x, int y, int z)
 // t239 生物基类统一生成入口：满血 + 未死 + AI 初值（wanderTimer=0 → tick 首帧即选第一次向）。
 //   达 kCap 跳过 + 告警（防溢出，spec「实体数量有上限」）。bump revision → QML Repeater 追加 delegate。
 //   t400：实体构造 + 入槽抽到 spawnMobCore（便于繁殖产幼崽复用）；本入口仅包一层 acquire 后立即 emit。
-void EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth)
+int EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QString &color, int maxHealth)
 {
     const int slot = spawnMobCore(x, y, z, mobType, color, maxHealth);
-    if (slot < 0) return; // 达 kCap（spawnMobCore 内已告警）
+    if (slot < 0) return -1; // 达 kCap（spawnMobCore 内已告警）
     ++m_revision;
     emit entitiesChanged();
     qCInfo(lcEnt) << "spawned mob type" << mobType << "at" << x << y << z
                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+    return slot;
+}
+
+// t529 spawnMobTyped 的「带生成时朝向」变体（见头文件注释）。
+int EntityManager::spawnMobTypedYaw(int x, int y, int z, int mobType, const QString &color, int maxHealth, float yawRad)
+{
+    const int slot = spawnMobCore(x, y, z, mobType, color, maxHealth);
+    if (slot < 0) return -1; // 达 kCap（spawnMobCore 内已告警）
+    m_entities[size_t(slot)].yawRad = yawRad; // 生成时固定朝向（emit 前设，QML 首帧即读到正确 yaw）
+    ++m_revision;
+    emit entitiesChanged();
+    qCInfo(lcEnt) << "spawned mob type" << mobType << "at" << x << y << z
+                  << "yaw" << yawRad << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+    return slot;
 }
 
 // t239 生物基类统一生成核心（spawnMobTyped 实现主体；t400 抽出便于繁殖产幼崽复用）：构造 Entity（碰撞箱 /
@@ -1910,34 +1924,33 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
             e.meltAccum = 0.0f; // 离开热/水/雨 → 累积清零（防跨段累积，机制等价 MC 离开热源不再受伤）
         }
     }
-    // t499 二轮复盘 ② 朝玩家（spec「雪傀儡应朝玩家」）：玩家在 kSnowGolemFaceRange 内 → yawRad 朝玩家
-    //   （atan2(-dx,-dz)，同 yaw 约定 dir=(-sin,-cos) → QML eulerRotation.y=yawDeg 模型 -Z 正对玩家 → 玩家见
-    //   南瓜头刻面眼/嘴正脸）。修 t499 一轮「背对玩家」根因：旧 aiSnowGolem 不接 playerPos → 只走 aiWander
-    //   随机朝向，常背对玩家 → 玩家只见南瓜背（无眼/嘴）误判「纯雪块无头」。
-    //   **放在 aiWander 之后**（下方 (4)）：aiWander 在 wanderTimer 到期时设随机 yawRad 会覆盖朝玩家，故朝玩家
-    //   须后置保最终决定权（视觉朝向恒朝玩家）。aiWander 的位移用本帧入口的 yawRad（= 上帧设的朝玩家）→ 玩家
-    //   在范围内时雪傀儡边朝玩家走边面朝玩家（防御造物靠近观察对象）；玩家出范围 → 本段不覆盖，aiWander 的
-    //   随机 yaw 生效（造物自由游荡）。distXZ 极小（贴脸）→ 不改（防除零 / 抖动）。
-    // (2) 行走留雪层 + 铲后即时再生（机制等价 MC 雪傀儡走过留雪 + 雪层被铲后立即重生可无限刷雪球）：
-    //    SnowLayer 现为**非实体薄层**（solid=false，collisionAABB 仅底面 1/8..1 高，不挡 mob isSolid 碰撞 + 不
-    //    作支撑格）→ 放在 golem 脚位格不会嵌入 / 攀爬（旧版「放脚下致嵌入阶梯」是 SnowLayer 曾当满格实体时的顾虑，
-    //    t505 改薄层非实体后此顾虑消除）。故改「放脚下」而非旧「放身后」：
-    //    (a) golem 当前脚位格为空气 + 下方实体支撑 → 在脚位格放 SnowLayer state=0（薄层 1/8）。每次 tick 都判
-    //        （仅当脚位格为 air 时写，已有时跳过 → 省写 + dirty）。这让玩家铲掉 golem 脚下雪层后**下一 tick 即重生**
-    //        → 无限刷雪球（铲 → 再生 → 铲）。只在新脚位格或脚下被铲空时写（防每帧重写刷 mesh）。
-    //    (b) 旧版「放身后」轨迹（golem 离开格留雪脚印）现由 (a) 覆盖 —— golem 走到哪脚位格就铺到哪，自然留轨迹
-    //        （走过后脚位格的雪保留，不随离开消失）。setWaterSilent 静默写（非玩家破/放 → 免粒子/音/掉落噪音）。
-    //    节流：仅当脚位格 blockAt==Air 才写（已铺雪 / 已有方块 → 跳过），无每帧开销。
+    // t529 复盘 ②：t499 二轮曾在此（aiWander 之前）+ 之后各放一段「玩家在 kSnowGolemFaceRange 内 → yawRad 朝玩家」
+    //   的持续覆盖（spec 当时「雪傀儡应朝玩家」）。用户反馈「一直固定朝向玩家」不自然（t499 二轮改过头）→ t529
+    //   移除持续覆盖，改「生成时固定朝、平时 aiWander 随机朝向」（见 (4) 后注释）。playerPos 参数保留为 caller
+    //   签名兼容（tick Mob 分支统一传 listener），但本函数体不再读它（Q_UNUSED 标注防 -Wextra 未用参数警告）。
+    Q_UNUSED(playerPos)
+    // (2) 行走留雪层（机制等价 MC 雪傀儡走过留雪脚印 + 雪层被铲后立即重生可无限刷雪球）：
+    //    **放身后格**（golem 离开格留雪脚印），非旧「放脚下」。t529 复盘：旧「放脚下」把 SnowLayer 铺进 golem
+    //    AABB 底面所在格 → golem 底雪块（local y[-0.90,0]）与 SnowLayer（cell 底 1/8）在同一格重叠 → 视觉读作
+    //    「golem 踩在自己刚铺的雪层上 / 模型脚与雪层打架」，用户报「走路飞起来 + 踩的积雪层变整块」（模型底面
+    //    贴 cell 底而雪层在 cell 底 1/8 → 二者共面打架）。改「放身后」：golem 朝 yawRad 方向走，身后格（yaw 反向）
+    //    是 golem 已离开的格 → 在此铺雪，golem 模型（在前方格）与雪层（身后格）永不在同一格 → 无重叠 / 无打架。
+    //    身后格 = floor(pos - dir)，dir = (sin(yaw), -cos(yaw))（同 yaw 约定；golem 前 -Z）→ 身后 = pos - dir。
+    //    身后格为空气 + 下方实体支撑（防悬空铺雪 / 覆盖已有方块）→ 铺 SnowLayer state=0（薄层 1/8）。
+    //    下方支撑用 isSolid（SnowLayer solid=false → 不被当支撑 → 不会在雪层上叠雪层造柱）。
+    //    玩家铲掉身后雪层后 golem 再走一步即在新身后格重生 → 无限刷雪球（铲 → 再生 → 铲）。
+    //    setWaterSilent 静默写（非玩家破/放 → 免粒子/音/掉落噪音，同羊吃草消耗草丛模式）。
+    //    节流：仅当身后格 blockAt==Air 才写（已铺雪 / 已有方块 → 跳过），无每帧开销。
     if (world) {
-        const int fx = qFloor(e.pos.x());
-        const int footY = qFloor(e.pos.y() - e.halfH); // 脚位格（AABB 底面所在格）
-        const int fz = qFloor(e.pos.z());
-        // 脚位格在界内 + 为空气 + 下方实体支撑（防悬空铺雪 / 覆盖已有方块）→ 铺薄雪层（state=0）。
-        //   下方支撑用 isSolid（SnowLayer 自身 solid=false → 不被当支撑 → 不会在雪层上叠雪层造柱）。
+        const float dirX = std::sin(e.yawRad), dirZ = -std::cos(e.yawRad); // golem 前向（同 yaw 约定）
+        const int bx = qFloor(e.pos.x() - dirX);                           // 身后格 X（golem 已离开的格）
+        const int bz = qFloor(e.pos.z() - dirZ);                           // 身后格 Z
+        const int footY = qFloor(e.pos.y() - e.halfH);                     // 脚位格（AABB 底面所在格；身后同高）
+        // 身后格在界内 + 为空气 + 下方实体支撑（防悬空铺雪 / 覆盖已有方块）→ 铺薄雪层（state=0）。
         if (footY >= 0 && footY < world->height()
-            && world->blockAt(fx, footY, fz) == BlockRegistry::Air
-            && BlockRegistry::isSolid(world->blockAt(fx, footY - 1, fz))) {
-            world->setWaterSilent(fx, footY, fz, BlockRegistry::SnowLayer, 0);
+            && world->blockAt(bx, footY, bz) == BlockRegistry::Air
+            && BlockRegistry::isSolid(world->blockAt(bx, footY - 1, bz))) {
+            world->setWaterSilent(bx, footY, bz, BlockRegistry::SnowLayer, 0);
         }
     }
     // (3) 远程雪球攻击（机制等价 MC 雪傀儡抛雪球打怪物）：节流（kSnowGolemThrowInterval）扫最近敌对 mob →
@@ -1952,18 +1965,12 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
     }
     // (4) 游荡（同 passive：随机选向 + 时间片）。
     if (aiWander(e, dt, world, worldW, worldD, speedScale)) dirty = true;
-    // t499 二轮复盘 ② 朝玩家最终决定权：aiWander 后置覆盖 yawRad 朝玩家（玩家在 kSnowGolemFaceRange 内）。
-    //   放 aiWander 之后是因 aiWander 在 wanderTimer 到期时设随机 yawRad 会覆盖朝玩家；后置保视觉朝向恒朝玩家。
-    //   用 aiWander 后的 e.pos 算距离（更精准；aiWander 单步位移 ≤0.15 block 影响微小但取最新位）。
-    //   玩家出范围 → 不覆盖（aiWander 随机 yaw 生效，造物自由游荡）。
-    {
-        const float sgDx = playerPos.x() - e.pos.x();
-        const float sgDz = playerPos.z() - e.pos.z();
-        const float sgDistXZ = std::sqrt(sgDx * sgDx + sgDz * sgDz);
-        if (sgDistXZ <= kSnowGolemFaceRange && sgDistXZ > 1e-4f) {
-            e.yawRad = std::atan2(-sgDx, -sgDz); // 朝玩家（dir=(-sin,-cos) → 模型 -Z 正对玩家 → 玩家见南瓜脸正脸）
-        }
-    }
+    // t529 复盘 ②「平时随机朝向」：移除 t499 二轮「玩家在 kSnowGolemFaceRange 内 → yawRad 朝玩家」的持续覆盖。
+    //   用户反馈「雪傀儡一直固定朝向玩家」（t499 二轮改过头 —— 持续覆盖使造物视觉朝向恒朝玩家，机制不自然）。
+    //   spec t529 明确「生成时固定朝，平时 aiWander 随机朝向」：移除持续覆盖后，yawRad 由 aiWander 在 wanderTimer
+    //   到期时随机选向（造物自由游荡，机制等价 MC 造物随机朝向）；生成时 yawRad 初值（spawnMobCore 默认 0）即
+    //   「生成时固定朝」（首帧固定，aiWander 首次到期才随机改）。南瓜头刻面眼/嘴正脸只在偶发面向玩家时见到
+    //   （机制等价 MC 造物非恒面向玩家）。
     return dirty;
 }
 
@@ -3474,7 +3481,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   t482/t483 防御造物（mobType==MobSnowGolem/MobIronGolem）走各自 AI（抛雪球 / 大力攻击敌对），
                 //     无吃草 / 求偶 / 繁殖语义（造物不可繁殖）→ 进各自分支早退，不落 aiWander + 吃草 / 求偶段。
                 if (e.mobType == MobSnowGolem) {
-                    // t499 二轮复盘：传 listener（玩家脚位）给 aiSnowGolem 使其朝玩家（spec「雪傀儡应朝玩家」）。
+                    // t529：listener（玩家脚位）保留传 aiSnowGolem（caller 签名兼容），但 t529 已移除「朝玩家」逻辑
+                    //   （spec 改「平时 aiWander 随机朝向」），函数体内 Q_UNUSED(playerPos) 不再读它。
                     if (aiSnowGolem(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                     // 雪傀儡融化（damageEntity 大伤害）可能本帧致死 → 本帧不再走后续逻辑（同仙人掌 / 火伤致死守卫）。
                     if (e.dead) continue;
