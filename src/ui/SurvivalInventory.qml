@@ -89,6 +89,11 @@ Item {
     property int dragHeldId: 0
     property int dragHeldCount: 0
     property int dragHeldDurability: 0      // t263 拖动期间手持工具耐久快照（松手回填光标保真）
+    // t566 修「左键均分失效」根因：t475 的 InventoryOps.beginLeftDrag/redistributeLive 读写 root.dragHeldEnchants，
+    //   但本面板（及其它七面板）从未声明该属性 → JS 给 QML Item 不存在的属性赋值抛 TypeError，被 DragHandler
+    //   信号处理器吞掉（lessons t205：QML 信号处理器内 JS 异常静默退化）→ leftDragActive 永远没置 true →
+    //   左键拖动均分全失效（右键路径 beginRightDrag 不碰该属性 → 幸存）。补声明即恢复。
+    property var dragHeldEnchants: []       // t475 拖动期间手持附魔快照（工具 / 护甲不可拆分，松手回填光标保真）
     // t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）。rightDragSlots 存已放格（去重，每格只放
     //   一次）；rightDragPlaced 标全程是否真放置过（空手 / 异 id 已满时为 false → endRightDrag 退化为单格右键）。
     //   dragActive 统一左/右拖动收集门控（HoverHandler 据 dragActive 调 addDragSlot，InventoryOps 内分发）。

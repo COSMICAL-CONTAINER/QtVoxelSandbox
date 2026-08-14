@@ -738,6 +738,22 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::SnowballId, RecipeRegistry::SnowballId, 0,
         0,                           0,                          0 },
       int(BlockRegistry::Snow), 1, 1, "snow_block" },
+    // t567 指南针：4 铁锭十字 + 中心 1 红石 → 1 指南针（有序 3×3，仅工作台）。机制等价 MC 1.0 compass 配方
+    //   （4 iron ingot 十字 + 1 redstone 中心）。最小包围盒 3×3 满铺（四角空 + 四边铁锭 + 中心红石），
+    //   多重集 {铁锭:4, 红石:1} 唯一 → 与既有配方不冲突。产物 CompassId（材料段 0x23F；HUD 指针指向出生点）。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0,                           RecipeRegistry::IronIngotId, 0,
+        RecipeRegistry::IronIngotId, RecipeRegistry::RedstoneId, RecipeRegistry::IronIngotId,
+        0,                           RecipeRegistry::IronIngotId, 0 },
+      RecipeRegistry::CompassId, 1, 1, "compass" },
+    // t568 钟：4 金锭十字 + 中心 1 红石 → 1 钟（有序 3×3，仅工作台）。机制等价 MC 1.0 clock 配方
+    //   （4 gold ingot 十字 + 1 redstone 中心）。最小包围盒 3×3 满铺，与指南针同形但原料不同（金锭 vs 铁锭）
+    //   → shaped 逐格比对区分（不冲突）。产物 ClockId（材料段 0x240；HUD 显示当前昼夜相位）。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0,                           RecipeRegistry::GoldIngotId, 0,
+        RecipeRegistry::GoldIngotId, RecipeRegistry::RedstoneId, RecipeRegistry::GoldIngotId,
+        0,                           RecipeRegistry::GoldIngotId, 0 },
+      RecipeRegistry::ClockId, 1, 1, "clock" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

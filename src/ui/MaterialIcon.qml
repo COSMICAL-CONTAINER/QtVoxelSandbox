@@ -44,7 +44,7 @@ import VoxelSandbox
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）/ 0x21C 铜原矿 / 0x21D 铜锭 / 0x21E 金原矿 / 0x21F 金锭（t308）/ 0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（t344）/ 0x224 红石粉 / 0x225 马鞍 / 0x226 命名牌 / 0x227 附魔书占位（t393 战利品）/ 0x237 纸 / 0x238 书（t473）；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）/ 0x21C 铜原矿 / 0x21D 铜锭 / 0x21E 金原矿 / 0x21F 金锭（t308）/ 0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（t344）/ 0x224 红石粉 / 0x225 马鞍 / 0x226 命名牌 / 0x227 附魔书占位（t393 战利品）/ 0x23D 雪球（t510）/ 0x23F 指南针 / 0x240 钟（t567/t568）；0/未知 → 兜底木棒）
 
     // t420 资源包物品图标覆盖：pack 启用且 materialId 在「引擎物品 id → pack item 文件名」映射内、且包内 PNG
     //   存在时，用 pack 的 item PNG 覆盖自绘 Canvas；pack 关 / 无映射 → packImg.source 空 → Image 隐藏、Canvas
@@ -1476,6 +1476,70 @@ Item {
                 R(15, 15, 1, 1, speck)
             }
 
+            // t567 指南针（0x23F）：4 铁锭 + 1 红石合成；HUD 指针指向出生点。机制等价 MC 1.0 compass 图标；
+            //   纯原创自绘（§9a）。MC 风格指南针 = 圆表盘（钢青底盘 + 亮圈刻度）+ 中心红黑双磁针（红半指北）。
+            //   配色：face #2a3d52（钢青底盘）/ rim #8a97a8（亮圈边框）/ rimDark #4a5568（圈外暗沿）/
+            //   tick #c8d4e0（四向刻度）/ needleRed #d84040（磁针红半）/ needleDark #1a1e26（磁针黑半 + 中心轴点）。
+            const drawCompass = () => {
+                const face = "#2a3d52", rim = "#8a97a8", rimDark = "#4a5568"
+                const tick = "#c8d4e0", needleRed = "#d84040", needleDark = "#1a1e26"
+                // 圆表盘（八边形外轮廓 rows 4..20，cols 4..20；中部最宽 16）
+                R(8, 4, 8, 1, rimDark)
+                R(6, 5, 12, 1, rimDark)
+                R(4, 6, 16, 1, rim)
+                R(4, 7, 16, 10, rim)            // 表圈主体 rows 7..16
+                R(4, 17, 16, 1, rim)
+                R(6, 18, 12, 1, rimDark)
+                R(8, 19, 8, 1, rimDark)
+                // 底盘（圈内收 1 格）
+                R(6, 7, 12, 10, face)
+                R(5, 8, 14, 8, face)
+                // 四向刻度（上下左右各一小条，指明表盘方向）
+                R(11, 6, 2, 2, tick)            // 上（N）
+                R(11, 16, 2, 2, tick)           // 下（S）
+                R(6, 11, 2, 2, tick)            // 左（W）
+                R(16, 11, 2, 2, tick)           // 右（E）
+                // 磁针（红半指上 / 黑半指下，十字交于中心；指北红针是 MC 指南针的视觉身份）
+                R(10, 8, 4, 4, needleRed)       // 红半（指上）
+                R(10, 12, 4, 4, needleDark)     // 黑半（指下）
+                R(11, 7, 2, 1, needleRed)       // 红针尖
+                R(11, 16, 2, 1, needleDark)     // 黑针尖
+                R(11, 11, 2, 2, needleDark)     // 中心轴点
+            }
+
+            // t568 钟（0x240）：4 金锭 + 1 红石合成；HUD 显示当前昼夜相位。机制等价 MC 1.0 clock 图标；
+            //   纯原创自绘（§9a）。MC 风格钟 = 金框圆表盘 + 昼面（上半亮蓝表天 / 下半深蓝表地）+ 中心指针。
+            //   配色：gold #e8b830（金框）/ goldDark #9a7414（框暗沿）/ skyFace #4a90c8（昼面）/ nightFace #1a2a4a
+            //   （夜面）/ tick #f0e8c8（刻度）/ hand #1a1e26（指针）/ hub #e8b830（轴心金点）。
+            const drawClock = () => {
+                const gold = "#e8b830", goldDark = "#9a7414"
+                const skyFace = "#4a90c8", nightFace = "#1a2a4a"
+                const tick = "#f0e8c8", hand = "#1a1e26", hub = "#e8b830"
+                // 金框表盘（八边形外轮廓 rows 4..20）
+                R(8, 4, 8, 1, goldDark)
+                R(6, 5, 12, 1, goldDark)
+                R(4, 6, 16, 1, gold)
+                R(4, 7, 16, 10, gold)           // 金框主体 rows 7..16
+                R(4, 17, 16, 1, gold)
+                R(6, 18, 12, 1, goldDark)
+                R(8, 19, 8, 1, goldDark)
+                // 表面（圈内收 1 格；上半昼面 / 下半夜面 —— 一眼读出「昼夜相位」）
+                R(6, 7, 12, 5, skyFace)         // 昼面（上半）
+                R(5, 8, 14, 4, skyFace)
+                R(6, 12, 12, 5, nightFace)      // 夜面（下半）
+                R(5, 13, 14, 4, nightFace)
+                R(6, 11, 12, 1, tick)           // 昼夜分界线（刻度亮色）
+                // 四向刻度
+                R(11, 6, 2, 1, tick)            // 12 点
+                R(11, 17, 2, 1, tick)           // 6 点
+                R(5, 11, 1, 2, tick)            // 9 点
+                R(18, 11, 1, 2, tick)           // 3 点
+                // 指针（指 10 点方向：短时针向左上 + 长分针向正上）
+                R(9, 9, 2, 2, hand)             // 时针（左上）
+                R(11, 8, 2, 3, hand)            // 分针（正上）
+                R(11, 11, 2, 2, hub)            // 轴心金点
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -1539,6 +1603,8 @@ Item {
             case 0x23B: drawBowl();               break // t507 木碗（3 木板 V 形合成；蘑菇汤原料）
             case 0x23C: drawMushroomStew();       break // t507 蘑菇汤（碗+红蘑菇+白蘑菇合成；右键食 +10 饥饿；食完返空碗）
             case 0x23D: drawSnowball();           break // t510 雪球（雪傀儡死亡掉落 0-15 个；可堆叠 64）
+            case 0x23F: drawCompass();            break // t567 指南针（4 铁锭+1 红石合成；HUD 指针指向出生点）
+            case 0x240: drawClock();              break // t568 钟（4 金锭+1 红石合成；HUD 显示当前昼夜相位）
             default:    drawStick();        break
             }
         }

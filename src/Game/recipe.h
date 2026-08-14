@@ -282,6 +282,19 @@ public:
     //   实际 maxStack 1（非堆叠载具）→ 本工程取 1）。非方块（材料段）→ 右键走矿车交互分支（playercontroller
     //   placeBlock minecart 段，同船模式）。图标走 MaterialIcon drawMinecart（程序生成矿车斗形，§9 原创）。
     static constexpr int MinecartId      = 0x23E; // 矿车：5 铁锭合成；右键铁轨放置 + 骑乘行驶（t565）
+    // t567 指南针（compass）：材料段 0x23F。机制等价 MC 1.0 compass——**4 铁锭十字 + 中心 1 红石合成 → 1 指南针**
+    //   （recipe.cpp compass 配方；机制等价 MC 1.0 compass 配方 4 iron ingot + 1 redstone 十字）。可堆叠 64；
+    //   非方块（材料段）→ 右键不放置。作用：HUD 显示指针指向**出生点**（PlayerController.spawnPoint Q_PROPERTY；
+    //   出生点 = 世界生成第一个区块中心列 kSpawn(80,80)，玩家出生格，非全 0）。指针旋转动画留接口（用户后给）。
+    //   MaterialIcon 自绘指南针图标（圆表盘 + 红黑双磁针，§9 原创）。无 MC 1.0 mcMaterialId 映射（id > 表界
+    //   0x22E → -1 → 资源包回退引擎自绘；机制等价但映射段未扩，同 paper/book/lapis 近期材料段模式）。
+    static constexpr int CompassId       = 0x23F; // 指南针：4 铁锭 + 1 红石合成；HUD 指针指向出生点（t567）
+    // t568 钟（clock）：材料段 0x240。机制等价 MC 1.0 clock——**4 金锭十字 + 中心 1 红石合成 → 1 钟**
+    //   （recipe.cpp clock 配方；机制等价 MC 1.0 clock 配方 4 gold ingot + 1 redstone 十字）。可堆叠 64；
+    //   非方块（材料段）→ 右键不放置。作用：HUD 显示当前昼夜相位（时辰文字 + 昼夜小图；WorldClock.dayPhase
+    //   派生，同 F3 time 行口径）。指针 / 表盘旋转动画留接口（用户后给 PNG 素材，D 接口）。MaterialIcon
+    //   自绘钟图标（金框圆表盘 + 指针，§9 原创）。无 MC 1.0 mcMaterialId 映射（id > 表界 → -1 → 回退自绘）。
+    static constexpr int ClockId         = 0x240; // 钟：4 金锭 + 1 红石合成；HUD 显示当前昼夜相位（t568）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

@@ -491,6 +491,12 @@ QVariantList Hotbar::creativeMaterials() const
         //   （playercontroller placeBlock 雪球段：spawnSnowball 玩家抛雪球，砸敌对 mob 0 伤害 + 红闪 + 击退）。
         //   MaterialIcon 自绘雪球图标（drawSnowball 冷白小球，§9 原创）。
         int(RecipeRegistry::SnowballId)         // 雪球：铲挖雪层/雪块/雪傀儡死亡掉落；右键抛掷（砸 mob 红闪+击退）
+        ,
+        // t567/t568 指南针 + 钟（机制等价 MC 1.0 compass / clock；HUD 信息件：指南针指针指向出生点、钟显示昼夜
+        //   相位）。生存由工作台合成获得（4 铁锭/金锭 + 1 红石），创造调色板补全便于测试。可堆叠 64；非方块
+        //   （材料段）→ 右键不放置。MaterialIcon 自绘图标（圆表盘 + 磁针 / 金框表盘）。
+        int(RecipeRegistry::CompassId),          // 指南针：4 铁锭+1 红石合成；HUD 指针指向出生点（t567）
+        int(RecipeRegistry::ClockId)             // 钟：4 金锭+1 红石合成；HUD 显示当前昼夜相位（t568）
     };
 }
 
@@ -722,6 +728,10 @@ QString Hotbar::nameForBlock(int blockId) const
         // t487 末影之眼（机制等价 MC 1.0 ender eye）：要塞宝藏箱战利品；右键末地传送门激活（末地预热占位）。
         //   名称用通用词「末影之眼」、零 MC 专名（§9 区隔）。
         if (blockId == RecipeRegistry::EndEyeId)      return QStringLiteral("末影之眼"); // 要塞宝藏箱战利品；激活末地传送门
+        // t567 指南针（材料段 0x23F；4 铁锭 + 1 红石合成；HUD 指针指向出生点）。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::CompassId)     return QStringLiteral("指南针"); // 4 铁锭+1 红石合成；HUD 指针指向出生点
+        // t568 钟（材料段 0x240；4 金锭 + 1 红石合成；HUD 显示当前昼夜相位）。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::ClockId)       return QStringLiteral("钟");     // 4 金锭+1 红石合成；HUD 显示当前时间
         // t507 木碗 + 蘑菇汤（机制等价 MC 1.0 bowl / mushroom stew；零 MC 专名 §9）。
         if (blockId == RecipeRegistry::BowlId)         return QStringLiteral("木碗");     // 4 木板合成；蘑菇汤原料
         if (blockId == RecipeRegistry::MushroomStewId) return QStringLiteral("蘑菇汤");   // 碗+红蘑菇+白蘑菇合成；右键食 +10 饥饿（食完返空碗）

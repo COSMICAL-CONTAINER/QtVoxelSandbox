@@ -1848,6 +1848,7 @@ void PlayerController::sleepAdvanceToDawn()
     if (m_worldClock) m_worldClock->skipToDawn();
     // 设重生点 = 床位（床格中心 + 上方 1.0 = 玩家站床顶；respawn 时 snapSpawnToGround 再贴地表兜底）。
     m_spawnPos = QVector3D(float(m_sleepBx) + 0.5f, float(m_sleepBy) + 1.0f, float(m_sleepBz) + 0.5f);
+    emit spawnPointChanged();   // t567 HUD 指南针指针重算（出生点 → 床位）
     m_sleepPhase = kSleepPhaseWaking;
     m_sleepPhaseTimer = 0.0f;
     // 离开 Settled（隐藏起床按钮）；fade/lie 保持满值（Waking 内从 1 渐降到 0）。

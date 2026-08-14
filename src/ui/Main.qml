@@ -8764,6 +8764,146 @@ Window {
         }
     }
 
+    // t567/t568 指南针 + 钟 HUD 信息件：手持（选中槽）指南针 → 右上角显圆表盘 + 红磁针指向**出生点**；
+    //   手持钟 → 右上角显表盘 + 时针分针按当前昼夜相位摆位 + HH:MM 时辰文字。均只在 playing 态且选中槽是
+    //   对应物品时显。机制等价 MC 1.0（compass / clock 是「看着 HUD 即读信息」的随身仪器件）；指针 / 表盘
+    //   **旋转动画留接口**（用户后给素材：当前为即时指位无过渡动画）。§9：全部 Rectangle/Text 自绘原创。
+    //   分层（PLAN §2）：呈现层只读 player.spawnPoint（Game 层出生点，t567 Q_PROPERTY）/ player.feetPosition /
+    //   player.lookVector / worldClock.dayPhase（Game 层时间源），绝不反向写。
+    Item {
+        id: compassHud
+        visible: window.appState === "playing"
+                 && (hotbarVM.selectedItemId === 0x23F /*CompassId t567*/
+                     || hotbarVM.selectedItemId === 0x240 /*ClockId t568*/)
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.rightMargin: 20
+        anchors.topMargin: 56
+        width: 72
+        height: 92
+        // ⚠️ QML 用字面量 0x23F/0x240（QML 不 import C++ 静态类 RecipeRegistry 常量；与 recipe.h CompassId/
+        //   ClockId 同源，改一处须同步 —— 同 onMobDied 掉落 id 字面量约定）。
+
+        // 表盘（圆环 + 深底；指南针钢青 / 钟昼面蓝）。
+        Rectangle {
+            id: compassHudDial
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: 0
+            width: 64; height: 64; radius: 32
+            color: hotbarVM.selectedItemId === 0x240 ? "#4a90c8" : "#2a3d52"        // 钟=昼面蓝 / 指南针=钢青
+            border.color: hotbarVM.selectedItemId === 0x240 ? "#e8b830" : "#8a97a8"  // 钟=金框 / 指南针=亮圈
+            border.width: 3
+
+            // t567 磁针（仅指南针）：红半指向出生点 / 黑半反向。指针角 = 出生点方位角 - 玩家视线方位角
+            //   （世界系 → 屏幕系换算）。旋转动画留接口（当前即时指位）。
+            //   方位角口径：世界 +X 东 / +Z 南 / -Z 北；atan2(x, -z)：0=北、90=东（与 sunAzim 约定同源）。
+            Item {
+                id: compassNeedle
+                visible: hotbarVM.selectedItemId === 0x23F
+                anchors.centerIn: parent
+                width: 64; height: 64
+                rotation: {
+                    // 玩家 → 出生点水平向量（世界系）。玩家恰在出生点上 → 指针指上（0°，中性位）。
+                    const dx = player.spawnPoint.x - player.feetPosition.x
+                    const dz = player.spawnPoint.z - player.feetPosition.z
+                    if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) return 0
+                    const bearing = Math.atan2(dx, -dz) * 180.0 / Math.PI   // 出生点方向世界方位角
+                    const lv = player.lookVector
+                    const facing = Math.atan2(lv.x, -lv.z) * 180.0 / Math.PI // 玩家视线方位角
+                    // 屏幕系：指针 rotation 0 = 指上 = 玩家前方 → 相对角 = bearing - facing。世界角大 = 目标在
+                    //   玩家右侧 → 指针顺时针偏右（QML rotation 正向 = 顺时针），方向正确。
+                    return bearing - facing
+                }
+                // 红半针（指上 = 出生点方向）
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top; anchors.topMargin: 8
+                    width: 4; height: 22
+                    color: "#d84040"
+                }
+                // 黑半针（指下，反向配重）
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom; anchors.bottomMargin: 8
+                    width: 4; height: 22
+                    color: "#1a1e26"
+                }
+                // 中心轴点
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 6; height: 6; radius: 3
+                    color: "#1a1e26"
+                }
+            }
+
+            // t568 时针（仅钟）：短时针 + 长分针按 dayPhase 派生 HH:MM 摆位（一圈 12 时）。旋转动画留接口。
+            Item {
+                id: clockHands
+                visible: hotbarVM.selectedItemId === 0x240
+                anchors.centerIn: parent
+                width: 64; height: 64
+                // dayPhase 0=正午 12:00 / 0.5=子夜 00:00 → 小数小时 = (12 + phase*24) mod 24（同 F3 time 行口径）。
+                //   QML rotation 正向 = 顺时针（从指上起）→ 12 点=0°、3 点=90°，直接可用。
+                property real hours: { const p = worldClock.dayPhase; return (12.0 + p * 24.0) % 24.0 }
+                // 短时针（一圈 12 时）
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: parent.height / 2 - 16
+                    width: 4; height: 16
+                    color: "#1a1e26"
+                    transformOrigin: Item.Bottom
+                    rotation: clockHands.hours / 12.0 * 360.0
+                }
+                // 长分针（一圈 60 分）
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: parent.height / 2 - 22
+                    width: 3; height: 22
+                    color: "#1a1e26"
+                    transformOrigin: Item.Bottom
+                    rotation: (clockHands.hours % 1.0) * 360.0
+                }
+                // 轴心金点
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 6; height: 6; radius: 3
+                    color: "#e8b830"
+                }
+            }
+        }
+
+        // 底部文字（指南针 = 「出生点 · 距离 Nm」；钟 = HH:MM + 昼夜时辰词）。读 selectedItemId / dayPhase /
+        //   spawnPoint / feetPosition（各自 NOTIFY 驱动刷新）。
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: compassHudDial.bottom
+            anchors.topMargin: 6
+            color: "#f2f2f2"
+            style: Text.Outline; styleColor: "#000000"
+            font.pixelSize: 12; font.bold: true
+            text: {
+                const id = hotbarVM.selectedItemId
+                if (id === 0x23F) {
+                    // 指南针：水平距离（格 ↔ 米 1:1；MC 指南针无距离显示，本工程补距离辅助导航）。
+                    const dx = player.spawnPoint.x - player.feetPosition.x
+                    const dz = player.spawnPoint.z - player.feetPosition.z
+                    const dist = Math.round(Math.sqrt(dx * dx + dz * dz))
+                    return "出生点 " + dist + "m"
+                }
+                if (id === 0x240) {
+                    // 钟：HH:MM（同 F3 口径）+ 昼夜时辰词（正午 0 / 午后 / 子夜 0.5 / 黎明 0.75 附近分相）。
+                    const p = worldClock.dayPhase
+                    const totalMin = ((12.0 + p * 24.0) % 24.0) * 60.0
+                    const hh = Math.floor(totalMin / 60.0), mm = Math.floor(totalMin % 60.0)
+                    const timeStr = (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm
+                    const phase = p < 0.125 ? "正午" : p < 0.375 ? "午后" : p < 0.625 ? "子夜" : p < 0.875 ? "黎明" : "上午"
+                    return timeStr + " " + phase
+                }
+                return ""
+            }
+        }
+    }
+
     // 主菜单（t17）：启动首显（appState="menu"）；Start/Quit 信号连到 startGame / Qt.quit。
     // 仅 menu 态可见，z 高于暂停叠层（100）与所有 HUD，全屏覆盖。「退出」→ Qt.quit() 直接退进程。
     // 仅依赖 QtQuick（无特殊模块），直接实例化（非 Loader 隔离）——加载失败即 app 致命，故无需降级。

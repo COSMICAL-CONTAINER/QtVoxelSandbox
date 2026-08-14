@@ -77,6 +77,9 @@ Item {
     property int dragHeldId: 0
     property int dragHeldCount: 0
     property int dragHeldDurability: 0      // t263 拖动期间手持工具耐久快照（松手回填光标保真）
+    // t566 修「左键均分失效」：t475 InventoryOps.beginLeftDrag 写 root.dragHeldEnchants，本面板漏声明 →
+    //   TypeError 被信号处理器吞 → leftDragActive 恒 false。补声明即恢复（详见 SurvivalInventory 同注释）。
+    property var dragHeldEnchants: []       // t475 拖动期间手持附魔快照（松手回填光标保真）
     // t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）。dragActive 统一左/右拖动收集门控。
     property bool rightDragActive: false
     property var rightDragSlots: []

@@ -83,6 +83,10 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(CameraMode cameraMode READ cameraMode NOTIFY cameraModeChanged)
     Q_PROPERTY(QVector3D feetPosition READ feetPosition NOTIFY positionChanged)
     Q_PROPERTY(QVector3D lookVector READ lookVector NOTIFY lookChanged)
+    // t567 指南针目标：出生点 / 重生点（m_spawnPos 只读）。初值 = 世界中心出生列 kSpawn(80,80)（世界生成
+    //   第一个区块中心，玩家出生格，非全 0）；夜间睡床后 = 床位（sleepAdvanceToDawn 写 + emit）。HUD 指南针
+    //   （持指南针物品时显）读它算「玩家 → 出生点」方位角驱动指针。只读暴露（玩家不可反向写出生点）。
+    Q_PROPERTY(QVector3D spawnPoint READ spawnPoint NOTIFY spawnPointChanged)
     // 第三人称相机距离钳制（t40）：每帧从眼位沿相机偏移方向（ThirdPersonBack=−look，Front=+look）
     // DDA 步进（max=kCamMax=3.5），返回首个实体命中距离（留 kCamMargin 余量贴在面前）；无命中=kCamMax。
     // Main.qml 相机 position 用 ±cameraDistance 偏移 → 相机贴墙不穿入。第一人称恒 0（不偏移）。
@@ -265,6 +269,9 @@ public:
     CameraMode cameraMode() const { return m_cameraMode; }
     QVector3D feetPosition() const { return m_pos; }          // 脚底位置（= m_pos；第三人称玩家模型绑它）
     QVector3D lookVector() const { return lookDirection(); }  // 视线方向（第三人称相机沿视线偏移绑它）
+    // t567 出生点 / 重生点（只读；HUD 指南针方位角基准）。值 = m_spawnPos（初值 kSpawn 世界中心出生列；
+    // 睡床后 = 床位）。坐标为脚底中心约定（同 m_pos）。
+    QVector3D spawnPoint() const { return m_spawnPos; }
     float cameraDistance() const { return m_cameraDistance; } // 第三人称相机距离（钳制后；t40）
     bool captured() const { return m_captured; }
     bool onGround() const { return m_onGround; }
@@ -482,6 +489,8 @@ signals:
     void boatManagerChanged(); // t469 船管理器注入变更
     void minecartManagerChanged(); // t565 矿车管理器注入变更
     void positionChanged();
+    // t567 出生点 / 重生点变更（睡床设床位后 emit；初值 kSpawn 常量 → 启动不发）。HUD 指南针据此重算指针。
+    void spawnPointChanged();
     // 每帧水平位移增量（格；reportHorizSpeed 在 step 各出口算 dx/dz 后 emit）。纯水平 √(dx²+dz²)，
     //   不含跳跃 / 下落的 dy。progress 走过路程埋点：呈现层 Connections → progress.onMove(deltaBlocks) 累加。
     //   delta>阈值才发（静止站位不刷信号，免每帧无谓 QML 调用；同 reportHorizSpeed dt<=1e-5 早退语义）。

@@ -138,6 +138,9 @@ Item {
     property int dragHeldId: 0
     property int dragHeldCount: 0
     property int dragHeldDurability: 0      // t263 拖动期间手持工具耐久快照（松手回填光标保真）
+    // t566 修「左键均分失效」：t475 InventoryOps.beginLeftDrag 写 root.dragHeldEnchants，本面板漏声明 →
+    //   TypeError 被信号处理器吞 → leftDragActive 恒 false。补声明即恢复（详见 SurvivalInventory 同注释）。
+    property var dragHeldEnchants: []       // t475 拖动期间手持附魔快照（松手回填光标保真）
     // 实时重分撤销机制：dragOriginal 记每槽 drag 前原始栈（首次 encounter 快照）；dragWritten 记本轮已写槽。
     // 每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginLeftDrag / endLeftDrag 重置。
     property var dragOriginal: ({})
