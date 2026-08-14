@@ -5434,37 +5434,8 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_pig。
                                     baseColorMap: mobPigPackTex.source.toString().length > 0 ? mobPigPackTex : mobPigTex
                                 }
-                                // t251 眼睛：mob 贴图是「全脸」身体纹（铺每盒每面，无五官）→ 头部正面无眼显「怪」。补 2 白眼底
-                                //   (#e8e8e8) + 2 深色瞳 (#1a1a1a) 小方块作 MobModel 子节点（同 t39 玩家眼睛模式：呈现层独立
-                                //   纯色 Model，不进 MobModel 几何 / 不共享 mob 贴图 → 实心眼色不受身体贴图调制）。NoLighting（红线）。
-                                //   眼作 mob Model 子节点 → 继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible（mobType 切换同步隐显）。
-                                //   猪/牛 headPitch 恒 0（EntityManager.headPitchAt 非 sheep 返 0）→ 眼直接定位头前面、无需俯仰 Node。
-                                //   位置 = MobModel 局部坐标（原点躯干中心）：猪头心 (0,0.05,-0.50) 半 (0.22,0.22,0.18) → 前面 z=-0.68，
-                                //   眼在上半 y≈0.13、左右 x=±0.10；z 贴头前面（眼底 z=-0.68、瞳 z=-0.69 略凸出，同 t52 贴脸防 z-fight）。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.10, 0.13, -0.68)
-                                    scale: Qt.vector3d(0.08, 0.10, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.10, 0.13, -0.68)
-                                    scale: Qt.vector3d(0.08, 0.10, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.10, 0.13, -0.69)
-                                    scale: Qt.vector3d(0.04, 0.05, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.10, 0.13, -0.69)
-                                    scale: Qt.vector3d(0.04, 0.05, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
+                                // t555 额外纯色眼已删：pack 贴图自带猪脸五官（pack 命中时贴图眼即显）。原 t251 补的
+                                //   白眼底 + 深瞳子 Model 在 pack 贴图上叠出「双层眼」，删（贴图眼为单一权威）。
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -5490,33 +5461,7 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_cow。
                                     baseColorMap: mobCowPackTex.source.toString().length > 0 ? mobCowPackTex : mobCowTex
                                 }
-                                // t251 眼睛（牛）：同猪眼模式（mob Model 子节点，纯色 NoLighting，继承 bodyYaw + visible）。
-                                //   牛头心 (0,0.15,-0.60) 半 (0.20,0.22,0.20) → 前面 z=-0.80；眼上半 y≈0.22、x=±0.09。
-                                //   牛 headPitch 恒 0 → 直接定位，无俯仰 Node（同猪）。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.09, 0.22, -0.80)
-                                    scale: Qt.vector3d(0.07, 0.09, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.09, 0.22, -0.80)
-                                    scale: Qt.vector3d(0.07, 0.09, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.09, 0.22, -0.81)
-                                    scale: Qt.vector3d(0.035, 0.045, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.09, 0.22, -0.81)
-                                    scale: Qt.vector3d(0.035, 0.045, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
+                                // t555 额外纯色眼已删（同猪：pack 贴图自带牛脸眼，叠补眼成「双层眼」）。
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -5555,42 +5500,8 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
                                     baseColorMap: mobSheepPackTex.source.toString().length > 0 ? mobSheepPackTex : mobSheepTex
                                 }
-                                // t251 眼睛（羊）：同猪/牛模式（mob Model 子节点纯色 NoLighting），但羊吃草时 MobModel 把头绕
-                                //   颈枢俯仰（headPitch<0=低头，几何内部旋转）→ 若眼直接定位则会与俯仰的头脱离（眼悬浮原位、
-                                //   头下沉）。故把眼放进一个「颈枢 Node」：position = MobModel 头部颈附着点 (0, 0.10, -0.29)
-                                //   （= 头心 cy=0.10、cz+hz=-0.45+0.16；MobModel addHeadRot 绕此点 X 轴旋转），eulerRotation.x 绑
-                                //   headPitchAt → 眼随头同步俯仰（QML X 轴旋转与 MobModel addBoxRot 同向，绕同枢 → 视觉一致）。
-                                //   眼位置相对颈枢：头前面 abs z=-0.61 → 相对 -0.32；眼上半 abs y≈0.16 → 相对 0.06；x=±0.055。
-                                Node {
-                                    position: Qt.vector3d(0, 0.10, -0.29)
-                                    // headPitch 用 property 暂存（QML 绑定里 {block} 不能作 Qt.vector3d 内联参数 → 先算成属性）。
-                                    property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
-                                    eulerRotation: Qt.vector3d(headPitch, 0, 0)
-                                    Model {
-                                        geometry: UnitCube {}
-                                        position: Qt.vector3d(-0.055, 0.06, -0.32)
-                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                                    }
-                                    Model {
-                                        geometry: UnitCube {}
-                                        position: Qt.vector3d(0.055, 0.06, -0.32)
-                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                                    }
-                                    Model {
-                                        geometry: UnitCube {}
-                                        position: Qt.vector3d(-0.055, 0.06, -0.33)
-                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                    }
-                                    Model {
-                                        geometry: UnitCube {}
-                                        position: Qt.vector3d(0.055, 0.06, -0.33)
-                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                    }
-                                }
+                                // t555 额外纯色眼已删（同猪/牛：pack 贴图自带羊脸眼）。原颈枢 Node（含 4 眼 Model 随
+                                //   headPitch 俯仰）整段移除 —— 贴图眼烘在几何 UV 上，天然随头俯仰，无需枢 Node 同步。
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -5688,22 +5599,7 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_shambler。
                                     baseColorMap: mobShamblerPackTex.source.toString().length > 0 ? mobShamblerPackTex : mobShamblerTex
                                 }
-                                // t282 眼睛：亡灵红眼（不沿用猪牛羊的白眼底+深瞳 —— 不死亡灵的赤红发光眼更贴「僵尸」语义，
-                                //   且红眼不受身体贴图调制 → 实心红 #b01818 独立 Model，原创纯色 §9a）。mob Model 子节点 →
-                                //   继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible。MobModel 头心 (0,0.57,0) 半 (0.22,0.22,0.22)
-                                //   → 前面 z=-0.22；眼在上半 y≈0.62、x=±0.09；z 贴头前面略凸（-0.23，同 t52 贴脸防 z-fight）。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.09, 0.62, -0.23)
-                                    scale: Qt.vector3d(0.07, 0.08, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.09, 0.62, -0.23)
-                                    scale: Qt.vector3d(0.07, 0.08, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
-                                }
+                                // t555 额外纯色红眼已删（同猪：pack 贴图自带亡灵脸眼，叠补眼成「双层眼」）。
                                 // t377 Shambler 随机护甲（4 部位；mobArmorAt 返护甲 id，0=无 → 隐）。作 mob Model 子节点 →
                                 //   继承 bodyYaw + 父 visible。MobModel 局部坐标（头心 0.57 / 躯干心 0.05 / 腿底 -0.90）。
                                 //   腿摆动烘焙在几何里 → 护腿 / 靴为静态盒（近似的视觉提示，~20% mob 偶遇可接受）。
@@ -5785,20 +5681,7 @@ Window {
                                         return _r >= 0 ? Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0) : "#000000"
                                     }
                                 }
-                                // t284 眼睛：潜行者的深色眼（头部前面，原创纯色 §9a；mob Model 子节点继承 bodyYaw +
-                                //   蓄力 scale）。MobModel 头心 (0,0.66,0) 半 (0.15,0.15,0.15) → 前面 z=-0.15；眼 y≈0.68、x=±0.06。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.06, 0.68, -0.17)
-                                    scale: Qt.vector3d(0.05, 0.06, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.06, 0.68, -0.17)
-                                    scale: Qt.vector3d(0.05, 0.06, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
+                                // t555 额外深色眼已删（同猪：pack 贴图自带脸眼，叠补眼成「双层眼」）。
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -5833,22 +5716,7 @@ Window {
                                         return _r >= 0 ? Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) : "#000000" // 灰白骨色（身体 + 右臂）
                                     }
                                 }
-                                // t301 骷髅黑色眼窝（头骨标志性的空洞眼窝，纯色 NoLighting §9a；mob Model 子节点继承 bodyYaw +
-                                //   父 visible）。区别于 Shambler 的赤红亡灵眼 —— Bones 用纯黑 #1a1a1a 显「空洞眼窝」而非「发光
-                                //   眼」，更贴头骨语义。MobModel 头骨心 (0,0.57,0) 半 (0.16,0.18,0.16) → 前面 z=-0.16；眼贴头
-                                //   前面 z=-0.17（略凸出防 z-fight，同 t52 贴脸）。眼在上半 y≈0.62（头骨上半 = 眼眶位）、x=±0.06。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.06, 0.62, -0.17)
-                                    scale: Qt.vector3d(0.06, 0.07, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.06, 0.62, -0.17)
-                                    scale: Qt.vector3d(0.06, 0.07, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
+                                // t555 额外黑色眼窝已删（同猪：pack 贴图自带头骨眼窝，叠补眼成「双层眼」）。
                                 // t331 右臂 + 弓 肩枢 Node：drawAmount（EntityManager::drawAmountAt，aimTimer 驱动）抬起右臂瞄准。
                                 //   臂与弓同处一 Node 绕肩枢刚体同转 → 抬臂时弓精确随臂移动（免错位）。肩枢 = 右臂根与躯干相接处
                                 //   (0.20,0.28,-0.12)（MobModel 局部坐标；Node 继承 bodyYaw + 父 position）。drawAmount=0 → 臂/弓在
@@ -5944,36 +5812,7 @@ Window {
                                         return _r >= 0 ? Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) : "#000000" // 暗黑红
                                     }
                                 }
-                                // t302 蜘蛛眼（4 颗红眼；蜘蛛标志性 8 眼简化为 4 颗醒目红眼，原创纯色 NoLighting §9a）：
-                                //   mob Model 子节点 → 继承 bodyYaw（眼朝 AI 行走方向 -Z）+ 父 visible。同猪/牛/羊眼模式
-                                //   （呈现层独立纯色 Model，不进 MobModel 几何 / 不共享 mob 贴图 → 实心眼色不受身体色调制）。
-                                //   Spider 头心 (0,-0.02,-0.32) 半 (0.18,0.14,0.18) → 前面 z=-0.50；眼贴头前面 z=-0.51（略凸出
-                                //   防与头部面 z-fight，同 t52 贴脸）。4 颗分上下两对（y=+0.04 / -0.08；x=±0.07），暗体上红眼醒目。
-                                //   受击红闪时身体变 #ff0000 → 红眼暂融色（短暂可接受，非 bug；与猪/牛/羊红闪同理）。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.07, 0.04, -0.51)
-                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.07, 0.04, -0.51)
-                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.07, -0.08, -0.51)
-                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.07, -0.08, -0.51)
-                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
-                                }
+                                // t555 额外 4 红眼已删（同猪：pack 贴图自带蜘蛛眼，叠补眼成「双层眼」）。
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -6072,19 +5911,7 @@ Window {
                                     scale: Qt.vector3d(0.035, 0.035, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
                                 }
-                                // 眼（2 颗黑点；头两侧偏前 z=-0.27、y=0.27、x=±0.08）。同猪/牛眼纯色子 Model 模式。
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.08, 0.27, -0.27)
-                                    scale: Qt.vector3d(0.025, 0.03, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
-                                Model {
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.08, 0.27, -0.27)
-                                    scale: Qt.vector3d(0.025, 0.03, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
+                                // t555 额外黑眼已删（同猪：pack 贴图自带鸡脸眼，叠补眼成「双层眼」）。
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate

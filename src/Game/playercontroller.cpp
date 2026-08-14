@@ -2925,6 +2925,22 @@ void PlayerController::placeBlock()
         }
         // state 已满（7 = 满格高 1.0）→ 不再叠加，落回常规放置（在邻格放新雪层 state=0）。
     }
+    // t554 积雪层放置预检：只能放在**完整方块顶面**（机制等价 MC 1.0 雪层不可贴侧壁 / 悬空放）。
+    //   根因：雪层走通用放置路径（无支撑预检）→ 玩家点树干 / 墙体**侧面**时 target 落水平邻格、其下方
+    //   为空气 → 雪层悬空贴在树侧。修 = 目标格正下方 (tx,ty-1,tz) 须为完整立方（isFullCube）：
+    //     · 顶面放置（ny>0）→ target = 命中方块正上方 → 下方 = 命中方块（完整 → 允）。
+    //     · 侧壁放置（ny==0）→ target = 水平邻格 → 下方通常为 Air → 拒（不挥）。
+    //   满 8 层雪层（state=SnowLayerStageMax，高 1.0 ≈ 满格雪块）亦算有效支撑：堆叠分支满层后回落
+    //   常规放置（点满层雪柱顶 → target 下方即满层雪层），机制等价 MC 8 层雪顶可另起新雪层。
+    //   雪层自身不满层（state<7）不算支撑（isFullCube(SnowLayer)=false → 拒在薄雪层邻格悬空放新层；
+    //   同格叠加走上方堆叠分支，不经本判）。
+    if (m_selectedBlock == BlockRegistry::SnowLayer) {
+        const quint8 below = m_world->blockAt(tx, ty - 1, tz);
+        const bool belowSupport = BlockRegistry::isFullCube(below)
+            || (below == BlockRegistry::SnowLayer
+                && m_world->stateAt(tx, ty - 1, tz) == BlockRegistry::SnowLayerStageMax);
+        if (!belowSupport) return; // 下方非完整立方 / 非满层雪 → 悬空 / 侧放 → 拒（不挥）
+    }
     // t198 水中可放方块（排开水）/ t351 岩浆同理（排开岩浆）：目标格为空气 / 水 / 岩浆均可放置；流体被
     //   方块直接覆盖 → World::setBlock 内 oldId=Water/Lava → newId=实体走「放置」分支（仅发 blockPlaced，
     //   不发 blockBroken → 无破块粒子 / 音；流体静默消失，机制等价 MC「方块填入流体格排开流体」）。已有实体
