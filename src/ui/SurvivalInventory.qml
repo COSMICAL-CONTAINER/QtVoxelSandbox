@@ -526,31 +526,18 @@ Item {
                     }
                 }
 
-                // 角色预览（护甲右侧，左半区）：自绘人形剪影占位（真实 3D 玩家模型属 Phase 1.1）。80 宽 × 160 高；
-                // 内部坐标以左上为原点居中绘制（头 / 躯干 / 双臂 / 双腿）。
+                // 角色预览（护甲右侧，左半区）：t546 3D 玩家模型预览（第三人称视角，复用 Main.qml playerModel
+                // 几何/配色 + 4 装备槽护甲 overlay），替代 2D Canvas 人形剪影。80 宽 × 160 高。
+                // F3+B（window.showHitboxes）时叠加玩家 AABB 线框。
                 Item {
                     x: root.slotSize + 6
                     y: 0
                     width: 80
                     height: parent.height
-                    Canvas {
+                    CharacterPreview3D {
                         anchors.fill: parent
-                        onPaint: {
-                            const ctx = getContext("2d"); ctx.reset()
-                            ctx.imageSmoothingEnabled = false
-                            const skin = "#caa472"   // 肤色（占位）
-                            const shirt = "#3a6a9a"  // 衣服（占位）
-                            const pants = "#3a3a5a"  // 裤（占位）
-                            ctx.fillStyle = skin
-                            ctx.fillRect(32, 24, 16, 16)               // 头
-                            ctx.fillStyle = shirt
-                            ctx.fillRect(30, 40, 20, 28)               // 躯干
-                            ctx.fillRect(20, 40, 8, 26)                // 左臂
-                            ctx.fillRect(52, 40, 8, 26)                // 右臂
-                            ctx.fillStyle = pants
-                            ctx.fillRect(30, 68, 8, 32)                // 左腿
-                            ctx.fillRect(42, 68, 8, 32)                // 右腿
-                        }
+                        hotbar: root.hotbar
+                        showHitboxes: window.showHitboxes
                     }
                 }
 
@@ -578,62 +565,16 @@ Item {
                             property var armEnch: root.hotbar.armorRevision >= 0 ? root.hotbar.armorEnchantsAt(index) : [0,0,0,0]
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent; wellColor: "#262b30" }
-                            // t497 空槽部位占位图：pack 启用且包内 item 目录有 empty_armor_slot_<piece>.png 时
-                            //   （机制等价 MC 1.0 survival 背包空装备槽占位图），用 pack PNG 覆盖自绘剪影（alpha-test
-                            //   透明底）；pack 关 / 无映射 → packImg.source 空 → Image 隐藏、Canvas 自绘（现状不变）。
-                            //   红线 §9：仅运行期读本地 gitignored pack 路径 PNG，不 bake 进 qrc/VCS。
-                            //   piece = index（0 头盔 / 1 胸甲 / 2 护腿 / 3 靴子，与 ArmorRegistry::ArmorPiece 同序）。
-                            ResourcePackManager { id: armorRp }
-                            Image {
-                                id: armorEmptyPackImg
-                                anchors.centerIn: parent
-                                width: 26; height: 26
-                                visible: armId === 0 && source.toString().length > 0
-                                // 触碰 armId/armorRp.active 建立绑定依赖（槽位变 / pack 切换 → 重查源）。
-                                source: { const _r = armorRp.active; return _r >= 0 ? (armId === 0 ? armorRp.emptyArmorSlotSource(index) : "") : "" }
-                                fillMode: Image.PreserveAspectFit
-                                smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；MC 1.0 占位图为像素艺术）
-                            }
-                            // 空槽部位占位剪影（暗灰金属头盔/胸甲/护腿/靴像素图；§9a 原创，非 MC 资产）。
-                            //   仅 armId===0 且 pack 无该空槽图标时显（有装备时让位给 MaterialIcon 护甲图；
-                            //   pack 有空槽图时让位给上方 armorEmptyPackImg）。
-                            Canvas {
-                                anchors.centerIn: parent
-                                width: 26; height: 26
-                                visible: armId === 0 && !armorEmptyPackImg.visible
-                                onPaint: {
-                                    const ctx = getContext("2d"); ctx.reset()
-                                    ctx.imageSmoothingEnabled = false
-                                    const metal = "#9aa0a6", gap = "#262b30"
-                                    ctx.fillStyle = metal
-                                    if (index === 0) {                  // 头盔
-                                        ctx.fillRect(5, 5, 16, 3)
-                                        ctx.fillRect(7, 8, 12, 9)
-                                        ctx.fillStyle = gap
-                                        ctx.fillRect(9, 11, 8, 3)
-                                    } else if (index === 1) {           // 胸甲
-                                        ctx.fillRect(6, 5, 14, 4)
-                                        ctx.fillRect(7, 9, 12, 13)
-                                        ctx.fillStyle = gap
-                                        ctx.fillRect(12, 10, 2, 10)
-                                    } else if (index === 2) {           // 护腿
-                                        ctx.fillRect(7, 5, 12, 4)
-                                        ctx.fillRect(7, 9, 4, 13)
-                                        ctx.fillRect(15, 9, 4, 13)
-                                    } else {                            // 靴
-                                        ctx.fillRect(6, 13, 6, 7)
-                                        ctx.fillRect(14, 13, 6, 7)
-                                        ctx.fillRect(4, 18, 10, 2)
-                                        ctx.fillRect(12, 18, 10, 2)
-                                    }
-                                }
-                            }
-                            // 装备中的护甲图标（走 MaterialIcon 护甲段分支；armId!==0 时显）。
-                            MaterialIcon {
-                                anchors.centerIn: parent
-                                width: 30; height: 30
-                                visible: armId !== 0
-                                materialId: armId
+                            // t546 装备槽 3D 预览（第三人称视角）：mini View3D 渲染「玩家身体部位 + 该部位护甲」，
+                            //   替代 2D MaterialIcon / Canvas 占位图标。空槽 = 灰体占位（原 Canvas 金属灰语义）；
+                            //   装备 = 玩家本色 + 护甲色 overlay（同 Main.qml playerModel 几何/配色）。
+                            //   F3+B（window.showHitboxes）时叠加部位 AABB 线框（满足「开 F3+B 物品栏显示 F3+B 状态」）。
+                            ArmorSlot3D {
+                                anchors.fill: parent
+                                hotbar: root.hotbar
+                                slotIndex: index
+                                armorId: armId
+                                showHitboxes: window.showHitboxes
                             }
                             // t498 二轮复盘：装备槽内显「cur/max」耐久数字（小字，耐久条上方）。
                             //   用户报「进背包无耐久显示、只在 hover tooltip 显」→ 槽内常显数字（进背包即见），

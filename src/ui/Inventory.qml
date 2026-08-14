@@ -537,45 +537,15 @@ Item {
                                     Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                                     Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
 
-                                    // 空槽部位占位剪影（自绘像素图；§9a 原创，非 MC 资产）。
-                                    Canvas {
-                                        anchors.centerIn: parent
-                                        width: 26; height: 26
-                                        visible: armId === 0
-                                        onPaint: {
-                                            const ctx = getContext("2d"); ctx.reset()
-                                            ctx.imageSmoothingEnabled = false
-                                            const metal = "#9aa0a6", gap = "#262b30"
-                                            ctx.fillStyle = metal
-                                            if (index === 0) {                  // 头盔
-                                                ctx.fillRect(5, 5, 16, 3)
-                                                ctx.fillRect(7, 8, 12, 9)
-                                                ctx.fillStyle = gap
-                                                ctx.fillRect(9, 11, 8, 3)
-                                            } else if (index === 1) {           // 胸甲
-                                                ctx.fillRect(6, 5, 14, 4)
-                                                ctx.fillRect(7, 9, 12, 13)
-                                                ctx.fillStyle = gap
-                                                ctx.fillRect(12, 10, 2, 10)
-                                            } else if (index === 2) {           // 护腿
-                                                ctx.fillRect(7, 5, 12, 4)
-                                                ctx.fillRect(7, 9, 4, 13)
-                                                ctx.fillRect(15, 9, 4, 13)
-                                            } else {                            // 靴
-                                                ctx.fillRect(6, 13, 6, 7)
-                                                ctx.fillRect(14, 13, 6, 7)
-                                                ctx.fillRect(4, 18, 10, 2)
-                                                ctx.fillRect(12, 18, 10, 2)
-                                            }
-                                        }
-                                    }
-
-                                    // 已装备护甲图标（MaterialIcon 护甲段分支；armId!==0 时显）。
-                                    MaterialIcon {
-                                        anchors.centerIn: parent
-                                        width: 30; height: 30
-                                        visible: armId !== 0
-                                        materialId: armId
+                                    // t546 装备槽 3D 预览（第三人称视角）：mini View3D 渲染「玩家身体部位 + 该部位护甲」，
+                                    //   替代 2D MaterialIcon / Canvas 占位图标。空槽 = 灰体占位；装备 = 玩家本色 + 护甲色。
+                                    //   F3+B（window.showHitboxes）时叠加部位 AABB 线框。
+                                    ArmorSlot3D {
+                                        anchors.fill: parent
+                                        hotbar: root.hotbar
+                                        slotIndex: index
+                                        armorId: armId
+                                        showHitboxes: window.showHitboxes
                                     }
 
                                     // 装备 / 脱下（左键单点）。t498 教训：从 VM 直读装备槽当前态（Q_INVOKABLE 恒最新），
@@ -634,30 +604,17 @@ Item {
                             }
                         }
 
-                        // 角色预览（护甲右侧）：自绘人形剪影占位（同 SurvivalInventory 预览配色；§9a 原创）。
+                        // 角色预览（护甲右侧）：t546 3D 玩家模型预览（第三人称视角，复用 Main.qml playerModel
+                        // 几何/配色 + 4 装备槽护甲 overlay），替代 2D Canvas 人形剪影。F3+B 时叠加玩家 AABB 线框。
                         Item {
                             x: root.slotSize + 6
                             y: 0
                             width: 80
                             height: parent.height
-                            Canvas {
+                            CharacterPreview3D {
                                 anchors.fill: parent
-                                onPaint: {
-                                    const ctx = getContext("2d"); ctx.reset()
-                                    ctx.imageSmoothingEnabled = false
-                                    const skin = "#caa472"   // 肤色（占位）
-                                    const shirt = "#3a6a9a"  // 衣服（占位）
-                                    const pants = "#3a3a5a"  // 裤（占位）
-                                    ctx.fillStyle = skin
-                                    ctx.fillRect(32, 24, 16, 16)               // 头
-                                    ctx.fillStyle = shirt
-                                    ctx.fillRect(30, 40, 20, 28)               // 躯干
-                                    ctx.fillRect(20, 40, 8, 26)                // 左臂
-                                    ctx.fillRect(52, 40, 8, 26)                // 右臂
-                                    ctx.fillStyle = pants
-                                    ctx.fillRect(30, 68, 8, 32)                // 左腿
-                                    ctx.fillRect(42, 68, 8, 32)                // 右腿
-                                }
+                                hotbar: root.hotbar
+                                showHitboxes: window.showHitboxes
                             }
                         }
 
