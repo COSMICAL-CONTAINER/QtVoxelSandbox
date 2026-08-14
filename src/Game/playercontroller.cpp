@@ -1104,17 +1104,22 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     // t418 垂直植物级联掉落（机制等价 MC 甘蔗 / 仙人掌柱：破任一格 → 其上整柱坍落）：当被破格为 Sugarcane /
     //   Cactus 时，自破格正上一格起向上逐格破同型块（setBlock Air → blockBroken 粒子/音 + worldChanged 重建）。
     //   停于首个异型格；越界 blockAt 返 Air ≠ brokenId → 循环自然终止（无 OOB 风险）。掉落物每格 emit
-    //   spawnItem 一件（用与单格破块相同的 dropId / dropCount），仅 drop=true（生存）时发 —— 创造（drop=false）
-    //   破甘蔗 / 仙人掌仍连带整柱破格（机制等价 MC：破任一格其上整柱坍落；创造坍落不掉落，见 t545）。
-    //   不递归（植物柱仅靠下方支撑，破上方不连累下方）。brokenId 已在 setBlock(Air) 前读（同 t134 时序坑）。
-    //   每格 setBlock Air 各自发 blockBroken + 标脏，无需额外 worldEdited/dirty 串联。Sugarcane/Cactus 非
-    //   Log/Leaves/Torch/Crop → 级联格不走 leaf-decay / torch/crop 失撑分支（本就无副作用）。
+    //   spawnItem 一件（用与单格破块相同的 dropId / dropCount）。**t547：级联格恒掉落（含创造）** —— 与 World 侧
+    //   dropSugarcaneColumn / dropCactusColumn（挖沙 → 整柱坍落为掉落物）行为一致：破任一甘蔗 / 仙人掌格 → 其上
+    //   所有格全掉落实体（t547②「打第一格第二格没掉落（直接消失）」根因：t545 只让创造也连带破格，掉落仍被
+    //   `if (drop)` 门拦 → 创造破甘蔗/仙人掌「直接消失」不掉落；修 = 级联掉落恒发，与「挖沙」整柱掉落同观感）。
+    //   破格本体亦恒掉（`if (!drop)`：生存主格已由上方通用 drop 路径 spawnItem 一次 → 免双重掉落；创造通用路径
+    //   不发 → 本格在此补发，与「挖沙」整柱掉落含破格本身一致）。不递归（植物柱仅靠下方支撑，破上方不连累下方）。
+    //   brokenId 已在 setBlock(Air) 前读（同 t134 时序坑）。每格 setBlock Air 各自发 blockBroken + 标脏，无需额外
+    //   worldEdited/dirty 串联。Sugarcane/Cactus 非 Log/Leaves/Torch/Crop → 级联格不走 leaf-decay / torch/crop
+    //   失撑分支（本就无副作用）。
     if (brokenId == BlockRegistry::Sugarcane || brokenId == BlockRegistry::Cactus) {
         const int cascadeDropId = BlockRegistry::dropId(brokenId);
         const int cascadeDropCount = std::max(1, BlockRegistry::dropCount(brokenId));
+        if (!drop) emit spawnItem(x, y, z, cascadeDropId, cascadeDropCount); // t547：破格本体恒掉（创造补发 / 生存免双）
         for (int cy = y + 1; m_world->blockAt(x, cy, z) == brokenId; ++cy) {
             m_world->setBlock(x, cy, z, BlockRegistry::Air);
-            if (drop) emit spawnItem(x, cy, z, cascadeDropId, cascadeDropCount); // t545：破格恒连柱（含创造），掉落仅生存
+            emit spawnItem(x, cy, z, cascadeDropId, cascadeDropCount); // t547：级联格恒掉落（含创造），同"挖沙"整柱
         }
     }
     // t263 生存挖掘完成 → 持有工具消耗 1 点耐久（机制等价 MC「每破 1 块工具 -1 耐久」）。创造 drop=false
@@ -3019,22 +3024,42 @@ void PlayerController::placeBlock()
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
         if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt) return;
     }
-    // t397/t423 甘蔗放置预检：（1）仅可放在草地 / 泥土 / 沙地 / 甘蔗正上方（机制等价 MC 1.0 sugar cane 须草地 /
-    //   沙地 / 甘蔗支撑）。（2）t423 须邻水：甘蔗的支撑格（ty-1）或其下一层（ty-2）的水平 4 邻任一为 Water 才可放
-    //   （机制等价 MC 甘蔗须直接邻水；双层查水同 worldgen placeSugarcane 的 surfaceY / surfaceY-1 语义 → 玩家可在
-    //   worldgen 生甘蔗的海岸沙顶补种，远水陆地 / 沙漠内陆拒）。水格水平 4 邻走 blockAt（越界安全返回，同火把预检）。
+    // t397/t423/t547 甘蔗放置预检：
+    //   （1）目标格须为**空气** —— 不能种在水里（t547③「能种在水里面不对」根因：主选体射线**不挡水**（t165）→ 瞄
+    //     水面时射线穿水命中水底实块 → 目标格 ty 落**水格**本身，旧判定漏查目标格类型 → 甘蔗种进水；修 = 目标非
+    //     空气即拒，机制等价 MC 甘蔗不可生于水中）。
+    //   （2）仅可放在草地 / 泥土 / 沙地 / 甘蔗正上方（机制等价 MC 1.0 sugar cane 须草地 / 沙地 / 甘蔗支撑）。
+    //   （3）t423 须邻水：**柱基**（叠甘蔗时沿柱下走到首个非甘蔗支撑格 = 沙/草/土基）或其下一层的水平 4 邻任一为
+    //     Water 才可放（t547①「放不下第三格」根因：旧判定只查 ty-1/ty-2，叠到第 3 格时两层都是甘蔗、远离水面 →
+    //     邻水恒假 → 第 3 格永远放不下。修 = 沿柱下走到柱基再查邻水，与 worldgen placeSugarcane 的 surfaceY /
+    //     surfaceY-1 双层查水同语义 → 玩家可在海岸沙顶补种 / 叠高，远水陆地 / 沙漠内陆拒）。
+    //   （4）t547① 放置高度上限：现有柱高 + 1 ≤ 3（机制等价 MC 甘蔗最高 3 格；叠到 3 后第 4 格拒）。
+    //   水格水平 4 邻走 blockAt（越界安全返回，同火把预检）。
     if (m_selectedBlock == BlockRegistry::Sugarcane) {
+        const quint8 tid = m_world->blockAt(tx, ty, tz);
+        if (tid != BlockRegistry::Air) return; // ① 目标须空气（不能种进水 / 岩浆 / 实体）
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
         if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
             && below != BlockRegistry::Sand && below != BlockRegistry::Sugarcane) return;
-        // t423 邻水门：支撑格 ty-1 / 下一层 ty-2 的水平 4 邻任一为 Water → 允；否则拒（机制等价 MC 甘蔗须直接邻水）。
+        // ② 柱基定位 + 高度统计：自 ty-1 沿甘蔗柱向下走到首个非甘蔗格（= 沙/草/土基）。
+        //   columnHeight = 现有甘蔗格数（含 ty-1）；放置后总量 = columnHeight+1，≤3 才允（最高 3 格）。
+        int baseY = ty - 1;
+        int columnHeight = 0;
+        while (baseY >= 0 && m_world->blockAt(tx, baseY, tz) == BlockRegistry::Sugarcane) {
+            ++columnHeight;
+            --baseY;
+        }
+        constexpr int kSugarcanePlaceMaxHeight = 3; // 玩家放置最高 3 格（机制等价 MC 甘蔗 max 3）
+        if (columnHeight >= kSugarcanePlaceMaxHeight) return; // 已达上限 → 拒（不挥）
+        // ③ 邻水门：柱基 baseY / 下一层 baseY-1 的水平 4 邻任一为 Water → 允；否则拒。
+        //   单格直放（below=沙/草/土，baseY=ty-1）→ 等价旧 ty-1/ty-2 双层查水；叠放 → 回落到柱基查水。
         const auto waterAdj = [&](int yy) -> bool {
             return m_world->blockAt(tx + 1, yy, tz)     == BlockRegistry::Water
                 || m_world->blockAt(tx - 1, yy, tz)     == BlockRegistry::Water
                 || m_world->blockAt(tx,     yy, tz + 1) == BlockRegistry::Water
                 || m_world->blockAt(tx,     yy, tz - 1) == BlockRegistry::Water;
         };
-        if (!waterAdj(ty - 1) && !waterAdj(ty - 2)) return; // 支撑两层均不邻水 → 拒（不挥）
+        if (!waterAdj(baseY) && !waterAdj(baseY - 1)) return; // 柱基两层均不邻水 → 拒（不挥）
     }
     // t444 睡莲放置预检（spec「仅静止水面可放 / 地上流水不可 / 不可叠放」）：
     //   放置目标格 ty 经上方 climb（见入口段）已是水面之上首个非水格（air）。机制等价 MC 1.0 lily pad 仅可放于

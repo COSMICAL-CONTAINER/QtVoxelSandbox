@@ -3060,7 +3060,8 @@ void World::placeFlowers()
 //   禁用任何运行期随机源。worldgen 顺序：placeFlowers 之后（花占草顶上方一格优先），甘蔗仅写空气格。
 void World::placeSugarcane()
 {
-    constexpr unsigned kSugarcanePct = 30; // 邻水沙滩列生甘蔗密度（% of 邻水沙顶列；机制等价 MC 水边甘蔗较常见）
+    constexpr unsigned kSugarcanePct = 10; // 邻水沙滩列生甘蔗密度（% of 邻水沙顶列；机制等价 MC 水边甘蔗稀疏散布
+                                          //  t547④：30% → 10%（1/3），「沙滩生成太频繁」——甘蔗成片过长，降密度）
     int placed = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
