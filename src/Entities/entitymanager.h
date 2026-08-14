@@ -189,6 +189,11 @@ public:
     // 放置 blockId 并移除自身。链式塌落由调用方先把沙格置 air（经 World::setBlock → blockBroken →
     // 呈现层 onBlockBroken 递归触发上方沙）实现。达 kCap → 跳过 + 告警（防溢出）。
     Q_INVOKABLE void spawnFallingBlock(int x, int y, int z, int blockId);
+    // t527 携带 state 的下落方块实体（积雪层专用）：与 spawnFallingBlock 同（位置 / halfW / halfH / kind=FallingBlock），
+    //   额外写 e.blockState = state（着地 setBlockFromEntity(...,state) 写回雪层保留层数；呈现层 blockStateAt 据它缩放
+    //   薄板高度）。caller = Main.qml onSnowLayerFell（World.snowLayerFell 信号转）传 blockId=SnowLayer + state=layers-1。
+    //   达 kCap 跳过 + 告警（防溢出，同 spawnFallingBlock）。
+    Q_INVOKABLE void spawnFallingBlockState(int x, int y, int z, int blockId, int state);
     // t283 箭矢投射物（骷髅弓箭手 MobBones 远程攻击）：在 origin 处生成一支携带初速度 vel（blocks/s，含 vy 抛物）
     //   的箭实体。kind=Arrow、pushable=false（玩家走碰不推箭）、halfW/halfH=0.06（细长杆视觉 + 碰撞最小）。
     //   tick 内 Arrow 分支：重力改 vy（抛物）+ 速度位移 + 方块碰撞（命中即移除）+ 玩家 AABB 碰撞（命中发
@@ -248,6 +253,9 @@ public:
     // t117：第 i 个实体携带的方块 id（FallingBlock 着地 setBlock 用；呈现层据它设 BlockCube.blockId
     // 贴图渲染）。非 FallingBlock 实体返回 0。越界返回 0。
     Q_INVOKABLE int blockIdAt(int i) const;
+    // t527：第 i 个实体携带的方块 state（仅 FallingBlock && blockId==SnowLayer 用 = 积雪层层数 metadata）。
+    //   呈现层据它缩放 falling 雪层薄板高度（1/8..1.0；state 0..7）。非 SnowLayer FallingBlock / 越界 → 0。
+    Q_INVOKABLE int blockStateAt(int i) const;
     // t239 mob 朝向 / 行走（呈现层 / t241 腿摆动画读）：
     //   yawAt = 朝向度数（QML delegate Node eulerRotation.y → 模型 -Z 正对行走方向；与 player.yaw 同约定）。
     //   moveSpeedAt = 当前水平速度（blocks/s；行走非零、idle/撞墙/死亡=0；t241 据它驱动腿摆频率）。
@@ -620,6 +628,11 @@ private:
         bool pushable = true;    // 玩家是否可推动（掉落物变体 pushable=false，统一基类预留）
         int kind = Mob;          // 渲染分流（Mob/Item/FallingBlock；Q_ENUM）
         int blockId = 0;         // t117 FallingBlock 携带的方块 id（着地 setBlock 用；其余 kind=0）
+        // t527 FallingBlock 携带的方块 state（积雪层层数 metadata）：仅 kind==FallingBlock && blockId==SnowLayer 用。
+        //   state 0..7 = 1..8 层；着地 setBlockFromEntity(...,state) 写回雪层**保留层数**（机制对标 MC snow layer 8 层）。
+        //   其余 FallingBlock（沙/圆石等）state=0 不读。spawn 入口（spawnFallingBlockState）写入；blockStateAt 暴露给 QML
+        //   delegate 据它缩放薄板高度（雪层 falling 实体按 state 决定板厚，非满格立方）。DMI 兜底聚合初始化缺省（同 alive 模式）。
+        int blockState = 0;      // t527 FallingBlock 携带的方块 state（仅 SnowLayer 用；其余 0）
         // t490 PrimedTnt 引燃态（复用 kind=FallingBlock + blockId=TntBlock 表达「点燃的 TNT 实体」）：
         //   primed=true → 本 FallingBlock 是 PrimedTnt（TNT 方块被引燃 / 链式引爆时由 spawnPrimedTnt 生成）。
         //     tick FallingBlock 分支据 primed 走「fuse 倒计 → 到 0 引爆（detonatePrimedTnt）」而非「着地放置方块」。

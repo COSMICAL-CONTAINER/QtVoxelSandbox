@@ -230,6 +230,30 @@ void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
 }
 
+// t527 携带 state 的下落方块实体（积雪层专用；见 .h 头注释）：照搬 spawnFallingBlock（位置 / halfW / halfH /
+//   kind=FallingBlock / pushable=false），额外写 e.blockState = state（着地 setBlockFromEntity(...,state) 写回雪层
+//   保留层数；呈现层 blockStateAt 缩放薄板高度）。达 kCap 跳过 + 告警（防溢出，同 spawnFallingBlock）。
+void EntityManager::spawnFallingBlockState(int x, int y, int z, int blockId, int state)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); falling block(state) spawn skipped at" << x << y << z;
+        return;
+    }
+    Entity e;
+    e.pos = QVector3D(x + 0.5f, y + 0.5f, z + 0.5f);
+    e.halfW = 0.5f; // FallingBlock = 1×1×1 立方（着地 / 碰撞；同 spawnFallingBlock）
+    e.halfH = 0.5f;
+    e.pushable = false;
+    e.kind = FallingBlock;
+    e.blockId = blockId;
+    e.blockState = state; // t527：携带 state（积雪层层数 metadata；仅 SnowLayer 用）
+    acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    ++m_revision;
+    emit entitiesChanged();
+    qCInfo(lcEnt) << "spawned falling block id=" << blockId << "state=" << state << "at" << x << y << z
+                  << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+}
+
 // t283 生成箭矢投射物：存 origin + 3D 速度 vel（含 vy 抛物）+ kind=Arrow + pushable=false + 寿命。
 //   halfW/halfH=0.06（细长杆视觉 + 碰撞最小；箭命中走 point-in-AABB 不读 halfW）。bump revision → QML
 //   Repeater 追加 delegate（Arrow 分支细长杆定向 Model）。达 kCap 跳过 + 告警（防溢出）。
@@ -684,6 +708,13 @@ int EntityManager::blockIdAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return 0;
     return m_entities[size_t(i)].blockId;
+}
+
+// t527：FallingBlock 携带的方块 state（积雪层层数 metadata；仅 SnowLayer 用，其余 0）。呈现层据它缩放薄板高度。
+int EntityManager::blockStateAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    return m_entities[size_t(i)].blockState;
 }
 
 // t239 mob 朝向度数（QML eulerRotation.y）。与 player.yaw 同约定：dir = (-sin(yaw),0,-cos(yaw))，
@@ -3201,7 +3232,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             }
             if (supportCellY >= 0) {
                 // 着地：在支撑方块上方一格放置 blockId（覆盖空气 / 水；t220 沙落水填堵水格）+ 标记移除。
-                world->setBlockFromEntity(cx, supportCellY + 1, cz, quint8(e.blockId));
+                //   t527：积雪层（blockId==SnowLayer）着地走 5 参数 setBlockFromEntity 带 state（保留层数 metadata）；
+                //   其余 FallingBlock（沙/圆石等）走 4 参数 state=0。
+                if (e.blockId == BlockRegistry::SnowLayer)
+                    world->setBlockFromEntity(cx, supportCellY + 1, cz, quint8(e.blockId), quint8(e.blockState));
+                else
+                    world->setBlockFromEntity(cx, supportCellY + 1, cz, quint8(e.blockId));
                 toRemove.push_back(idx);
                 dirty = true;
             } else if (dropCellY >= 0) {

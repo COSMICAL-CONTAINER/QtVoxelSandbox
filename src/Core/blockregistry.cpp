@@ -689,8 +689,13 @@ BlockRegistry::Shape BlockRegistry::shape(quint8 blockId) { return def(blockId).
 // t412 异形方块 / 半方块族统一谓词（单一权威，段外圆石变体并入，同 isCrossBillboard 段外 cross 模式）。
 //   连续段 [FirstPartial, LastPartial]（6 类木制半方块）+ 段外圆石变体 4 类（CobbleSlab/Stairs/Fence/PressurePlate）。
 //   Farmland 不在此谓词内（矮盒渲染经 chunkgeometry 单独并入 PASS 1，非 partial 子 AABB 形状族）。
+//   t525 积雪层（SnowLayer）并入本谓词：世界内是薄板（ShapeSnowLayer，solid=false，已在 mesher 经显式
+//   b==SnowLayer 路由进 PASS 1），但手持 / 背包 / 物品掉落渲染需走 dimetric 薄板图标（icon_snow_layer.png
+//   1/8 薄板），非 BlockCube 满格立方（用户「积雪层拿手上/背包图标还是整格方块」第三次反馈）。并入本谓词
+//   → QML 三处手持 / 物品掉落 / ResourceBrowser 据 isPartialBlock 切到 billboard 薄板图标，区别于雪块满格。
 bool BlockRegistry::isPartialBlock(quint8 blockId)
 {
+    if (blockId == SnowLayer) return true; // t525 积雪层薄板（段外，同 SpruceSlab / Lever 段外并入模式）
     if (blockId == CobbleSlab || blockId == CobbleStairs
         || blockId == CobbleFence || blockId == CobblePressurePlate) return true; // t412 段外圆石变体
     if (blockId == SpruceSlab || blockId == SpruceFence || blockId == SpruceDoor) return true; // t466 段外云杉木制品（与 WoodSlab/WoodFence/WoodDoor 同几何）

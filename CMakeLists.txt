@@ -477,7 +477,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_sandstone.png                # t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带；build_cube_icons.py）
         textures/icon_cactus.png                   # t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点；build_cube_icons.py）
         textures/icon_dead_bush.png                # t394 枯死的灌木 cross 方块 flat 2D 图标（透明底 + 棕褐干枝；build_cube_icons.py）
-        textures/icon_snow_layer.png               # t395 积雪层立方体图标（各面=冷白冰晶噪点；build_cube_icons.py）
+        textures/icon_snow_layer.png               # t525 积雪层薄板图标（1/8 厚薄板，区别于雪块满格立方；build_cube_icons.py render_partial_3d snow_layer）
         textures/icon_ice.png                      # t395 冰立方体图标（各面=浅蓝反光裂纹；build_cube_icons.py）
         textures/icon_pack_ice.png                 # t468 浮冰立方体图标（各面=实白细裂纹；build_cube_icons.py）
         textures/icon_blue_ice.png                 # t468 蓝冰立方体图标（各面=淡蓝纵向纹路；build_cube_icons.py）

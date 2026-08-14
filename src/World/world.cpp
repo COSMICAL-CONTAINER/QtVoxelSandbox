@@ -241,6 +241,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑（破下方支撑 → 正上方花 / 蘑菇掉落）复检
     checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
+    checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
     return true;
 }
 
@@ -330,6 +331,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑（破下方支撑 → 正上方花 / 蘑菇掉落）复检
     checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
+    checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
     return true;
 }
 
@@ -338,11 +340,18 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
 //   由 FallingBlock 列扫保证为 air/水 —— 沙落水穿透后填堵水格；防御：其余已占用方块不覆盖）。越界 / 非空非水 → false。
 bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
 {
+    return setBlockFromEntity(x, y, z, id, quint8(0)); // 委托 5 参数版（state=0；沙/圆石着地不带 state）
+}
+
+// t527 积雪层下落实体着地专用（5 参数带 state；4 参数版委托）。同 setBlockFromEntity 语义，写带 state 的方块。
+//   state=layers-1 保留层数（state 0..7 = 1..8 层）。occ 守卫同（仅 air/水可被着地覆盖）。越界 / 非空非水 → false。
+bool World::setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state)
+{
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return false; // 越界拒绝
     const quint8 occ = m_chunks.blockAt(x, y, z);
     if (occ != BlockRegistry::Air && occ != BlockRegistry::Water) return false; // 仅空气 / 水可被实体着地覆盖
-    m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏
+    m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
     noteGrowthWrite(x, y, z, occ, id); // t425：维护生长方格索引（沙落覆盖作物 / 耕地时正确移除）
     noteFluidWrite(x, y, z, occ, id);  // perf：维护流体方格索引（沙落覆盖水时正确移除水格）
     noteIceWrite(x, y, z, occ, id);    // t495：维护普通冰方格索引（沙落覆盖冰时正确移除）
@@ -1054,6 +1063,7 @@ void World::tickLavaFlow()
             checkCactusOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // ② 失撑复检（正上方 Cactus 整柱坍落，同 setBlock 路径）
             checkDeadBushOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t504：枯灌木失撑复检（正上方枯灌木掉落，同 setBlock 路径）
             checkSugarcaneOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t524：甘蔗失撑复检（正上方甘蔗整柱坍落，同 setBlock 路径）
+            checkSnowLayerOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t527：积雪层失撑复检（正上方雪层整柱坍落，同 setBlock 路径）
             pokeFluidDirty(b.x, b.y, b.z); // 焚毁邻接流体 → 标脏 + 活动盒扩展（级联焚毁 / 水流入新坑，同旧 setBlock 语义）
         }
         m_batchFluid = false;
@@ -1686,6 +1696,50 @@ void World::checkSugarcaneOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     dropSugarcaneColumn(x, by, z);
 }
 
+// t527 积雪层支撑掉落复检（见 world.h 头注释；机制等价甘蔗 / 仙人掌支撑校验族，区别 MC 雪层无重力 —— 本工程
+//   用户明确要「雪层失撑后掉落保留层数」）。（x,y,z,oldId,id）= 本格刚发生的编辑。
+//   失撑：本格被破为 Air → 若正上方是 SnowLayer，则该雪层柱失撑 → 整柱（自正上方起所有连续 SnowLayer 格）
+//   坍落为一个**携带层数 metadata**的下落方块实体（snowLayerFell 信号）。**保留层数**：整柱各格 (state+1) 层
+//   累加、cap 8（state 7=8 层=满格≈雪块）。**无 oldId 守卫**：玩家直破中间雪层（oldId==SnowLayer）→ finishMiningAt
+//   仅对被破格本身掉雪球；其正上方雪层通过本复检独立坍落（避免中间被破后上方永久浮空）。
+void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    // 仅本格被破为 Air 时查正上方雪层柱失撑（放块 / state 变不触发）。无 oldId 守卫 —— 破任一格（含直破雪层）
+    //   其正上方雪层都失撑（finishMiningAt 对被破格本身掉雪球，与正上方柱坍落正交不重复）。
+    if (id != BlockRegistry::Air) return;
+    const int by = y + 1;
+    if (by < 0 || by >= m_height) return;
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    if (m_chunks.blockAt(x, by, z) != BlockRegistry::SnowLayer) return;
+    // 整柱坍落：自 by 起向上逐格清连续 SnowLayer，累加 (state+1) 层（cap 8；state 7=8 层=满格≈雪块）。
+    //   静默直写（m_chunks.setBlock + 标脏，不经 World::setBlock → 不重入本检查）+ emit blockBroken（破块粒子 / 音）+
+    //   recomputeLightAround（遮光柱消失重 flood）。末尾 1 次 emit snowLayerFell（柱底 + 总层数）+ worldChanged +
+    //   clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。
+    int totalLayers = 0;
+    int cy = by;
+    bool any = false;
+    while (cy >= 0 && cy < m_height && m_chunks.blockAt(x, cy, z) == BlockRegistry::SnowLayer) {
+        const quint8 st = m_chunks.stateAt(x, cy, z);
+        totalLayers += int(st) + 1; // state 0..7 = 1..8 层
+        m_chunks.setBlock(x, cy, z, BlockRegistry::Air); // 静默直写 + 标脏（含边界邻接）；不经 World::setBlock（无重入）
+        noteGrowthWrite(x, cy, z, BlockRegistry::SnowLayer, BlockRegistry::Air); // 雪层非生长方块 → no-op，保持一致
+        noteFluidWrite(x, cy, z, BlockRegistry::SnowLayer, BlockRegistry::Air);  // 雪层非流体 → no-op，保持一致
+        noteIceWrite(x, cy, z, BlockRegistry::SnowLayer, BlockRegistry::Air);    // 雪层非冰 → no-op，保持一致
+        emit blockBroken(x, cy, z, int(BlockRegistry::SnowLayer));               // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
+        recomputeLightAround(x, cy, z, BlockRegistry::SnowLayer, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
+        any = true;
+        ++cy;
+    }
+    if (!any) return;
+    // cap 到 8 层（state 7 = 满格 ≈ 雪块）：整柱多层累加超 8 取 8（罕见多格雪柱坍落；用户「8 层掉 8 层≈雪块」语义）。
+    if (totalLayers > int(BlockRegistry::SnowLayerStageMax) + 1)
+        totalLayers = int(BlockRegistry::SnowLayerStageMax) + 1;
+    // 柱底 by（最早失撑的雪层原位）+ 总层数 → 呈现层转 spawnFallingBlockState（state = totalLayers-1 metadata）。
+    emit snowLayerFell(x, by, z, totalLayers);
+    emit worldChanged();        // 驱动 mesh 重建（雪层薄板段消失）
+    m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。
 //   节流到 ~每 kSaplingTickInterval tick（5s）做一次成长判定窗口；每窗遍历全图树苗格，符合条件者按
 //   确定性散布概率长成 → 清除树苗 + 在原位生成完整橡树（placeTreeAt 主干 + 树叶球冠）。
@@ -2289,19 +2343,36 @@ void World::generate()
                     else if (h - y < desertSandThickness + desertSandstoneThickness) b = BlockRegistry::Sandstone; // 沙下砂岩
                     else                                                b = BlockRegistry::Stone;      // 深石
                 } else {
-                    if (y == h && bio == Biome::Snowy) {
-                        // t395/t505 雪原地表覆雪（机制等价 MC 寒冷群系覆雪）。**t505 改薄层**（SnowLayer 薄板，
-                        //   state 0..2 随机 = 高度 1/8..3/8 真实积雪，区别旧满格整立方）。worldgen 把草顶替换为薄雪
-                        //   层 → 下方 y-1 仍 Dirt 故雪覆土上。state 走 hashColumn 独立位段 (colHash>>4)%3（与沙漠沙
-                        //   厚度位段解耦；同列同 seed 确定 → PLAN §2-K）→ 真实积雪 3 级随机厚度（机制等价 MC 雪原
-                        //   覆雪不均匀）。m_chunks.setBlock 5 参数版写 id+state（worldgen 静默；光场随后 recomputeLightField
-                        //   重算）。云杉树 / 浆果丛据 SnowLayer 守卫仍生于雪顶（spec「云杉生于雪上」）。
-                        const quint32 slHash = hashColumn(m_seed, x, z);
-                        const quint8 snowState = quint8((slHash >> 4) % 3u); // 0..2（独立位段，确定性）
-                        m_chunks.setBlock(x, y, z, BlockRegistry::SnowLayer, snowState);
-                        continue; // 已写 SnowLayer（含 state），跳过下方默认 4 参数 setBlock（其会重置 state=0）
+                    // t526 雪原地表结构（机制等价 MC 寒冷群系覆雪；区别旧版「雪层直接铺在泥土上」）：
+                    //   泥→雪块→积雪层（y==h-1=Snow 整块、y==h=SnowLayer 薄层）→ 不生成草方块（雪原地表改泥土）。
+                    //   ① 远离海边 / 沙滩：海域重塑带（inSeaHeight = 沙海盘 + 过渡带，含沙滩缓坡）的 Snowy 列**不覆雪**
+                    //      （改泥土顶，区别旧版「沙滩边雪层」），仅内陆 Snowy 列才覆雪。
+                    //   ② 雪层下雪块过渡（不直接泥上雪层）：避免雪层塌陷感 + 与「8 层≈雪块」语义一致（雪层下有雪块承托）。
+                    //   t505 旧逻辑（SnowLayer 直接铺在草顶上）已重写为下方 Dirt→Snow→SnowLayer 三层。
+                    const bool isSnowy = (bio == Biome::Snowy);
+                    if (isSnowy && inSeaHeight) {
+                        // t526 海域过渡带：雪原列不覆雪（远离海边 / 沙滩）、不生成草方块 → 泥顶。下 Dirt / Stone。
+                        if (y == h)          b = BlockRegistry::Dirt;   // 过渡带泥顶（雪原列不草不雪）
+                        else if (y >= h - 2) b = BlockRegistry::Dirt;   // 表层下土
+                        else                 b = BlockRegistry::Stone;  // 深石
+                    } else if (isSnowy) {
+                        // t526 内陆雪原：SnowLayer 薄层（state 0..2 = 1/8..3/8 厚真实积雪）→ Snow 整块 → Dirt → Stone。
+                        if (y == h) {
+                            // SnowLayer 薄层（state 0..2 随机；与旧 t505 同 slHash 独立位段派生，确定性）。
+                            //   m_chunks.setBlock 5 参数版写 id+state（worldgen 静默；光场随后 recomputeLightField 重算）。
+                            const quint32 slHash = hashColumn(m_seed, x, z);
+                            const quint8 snowState = quint8((slHash >> 4) % 3u); // 0..2（独立位段，确定性）
+                            m_chunks.setBlock(x, y, z, BlockRegistry::SnowLayer, snowState);
+                            continue; // 已写 SnowLayer（含 state），跳过下方默认 setBlock（其会重置 state=0）
+                        } else if (y == h - 1) {
+                            b = BlockRegistry::Snow; // 雪层下雪块过渡（泥→雪块→积雪层）
+                        } else if (y >= h - 2) {
+                            b = BlockRegistry::Dirt; // 表层下土
+                        } else {
+                            b = BlockRegistry::Stone; // 深石
+                        }
                     } else if (y == h) {
-                        b = BlockRegistry::Grass;      // 草地表层
+                        b = BlockRegistry::Grass;      // 草地表层（非雪原列）
                     } else if (y >= h - 2) {
                         b = BlockRegistry::Dirt;       // 土
                     } else {

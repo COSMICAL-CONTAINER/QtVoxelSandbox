@@ -94,8 +94,10 @@ BLOCKS = [
     # t394 沙漠群系内容：砂岩（沙下成岩整立方）/ 仙人掌（接触伤害整立方）立方体图标（顶+两侧明暗）。
     ("sandstone",       "default_sandstone_top", "default_sandstone_side"),  # t394 砂岩（顶=压实沙面；侧=层理带）
     ("cactus",          "default_cactus_top",    "default_cactus_side"),     # t394 仙人掌（顶=绿截面环纹；侧=棱脊+刺点）
-    # t395 雪原/针叶群系内容：积雪层（地表覆雪）/ 冰（水面冻结）/ 云杉原木（云杉树主干）立方体图标（顶+两侧明暗）。
-    ("snow_layer",      "default_snow",          "default_snow"),            # t395 积雪层（各面=冷白冰晶噪点）
+    # t395 雪原/针叶群系内容：冰（水面冻结）/ 云杉原木（云杉树主干）立方体图标（顶+两侧明暗）。
+    #   注：积雪层（snow_layer）不在 BLOCKS —— t525 改薄板图标（1/8 厚度，区别于雪块满格立方），走
+    #   render_partial_3d 的 snow_layer shape（见 PARTIALS_3D_SNOW / main），iconSourceForBlock 据
+    #   isPartialBlock(SnowLayer)=true 路由到本薄板图标。
     ("ice",             "default_ice",           "default_ice"),             # t395 冰（各面=浅蓝反光裂纹）
     ("pack_ice",        "default_pack_ice",      "default_pack_ice"),        # t468/t495 浮冰（各面=淡蓝白压实冰+细裂纹+反光高光；非白羊毛）
     ("blue_ice",        "default_blue_ice",      "default_blue_ice"),        # t468 蓝冰（各面=淡蓝纵向纹路；最滑冰种）
@@ -431,6 +433,12 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
     if shape == "slab":
         boxes = [(0.0, 1.0, 0.0, 0.5, 0.0, 1.0)]                       # 全 footprint 半高
         y_min, y_max = 0.0, 0.5
+    elif shape == "snow_layer":
+        # t525 积雪层薄板：全 footprint、1/8 厚（y[0, 1/8]）。机制等价 MC 1.0 snow layer 单层 1/8 格厚。
+        #   区别于 slab（半高）—— 更薄 → 手持 / 背包图标一眼辨「这是积雪层薄板」而非雪块满格立方。
+        #   fill = default_snow（冷白冰晶噪点，同 worldgen SnowLayer 各面贴图）。
+        boxes = [(0.0, 1.0, 0.0, 0.125, 0.0, 1.0)]
+        y_min, y_max = 0.0, 0.125
     elif shape == "trapdoor":
         boxes = [(0.0, 1.0, 0.0, 0.1875, 0.0, 1.0)]                    # 合态薄板
         y_min, y_max = 0.0, 0.1875
@@ -614,6 +622,13 @@ def main():
     # t490 手动 TNT 点火机关 3D dimetric 立体图标（pressure_plate shape + 各机关贴图 fill；机制等价木 / 石压力板图标流程）。
     for out_name, fill_top, fill_side in PARTIALS_3D_IGNITER:
         img = render_partial_3d("pressure_plate", fill_top, fill_side)
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t525 积雪层薄板图标（1/8 厚，机制等价 MC snow layer 单层薄板）：fill = default_snow，shape=snow_layer。
+    #   区别于雪块满格立方（icon_snow.png）—— 手持 / 背包 / 掉落实体据 isPartialBlock(SnowLayer)=true 路由到本图标。
+    for out_name, fill_top, fill_side in [("snow_layer", "default_snow", "default_snow")]:
+        img = render_partial_3d("snow_layer", fill_top, fill_side)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)

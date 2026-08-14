@@ -4956,10 +4956,25 @@ Window {
                             shadowsEnabled: window.shadowsEnabled
                             dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量；掉落沙夜间不压暗火把旁 block 光）
                         }
-                        // t490 PrimedTnt 引燃收缩 scale 0.98（机制等价 MC TNT 引燃收缩）；非 primed 保持 1.0。
+                        // t527 falling 雪层薄板渲染：积雪层下落实体（blockId==44=SnowLayer）按 state 缩放薄板高度
+                        //   （1/8..1.0；保留层数 metadata 的可视化），区别于沙/圆石等满格立方。slabH=(state+1)/8
+                        //   （state 0..7 = 1..8 层）；BlockCube geometry ±0.5 居中 → scale.y=slabH、position.y=-0.5+slabH/2
+                        //   使板底贴 cell 底（entity pos = cell 中心，板跨 cell [y, y+slabH]）。满格（state 7）→ slabH=1
+                        //   = 满格立方（机制对标 MC 雪层 8 层 ≈ 雪块）。顶点光 / 贴图复用（BlockCube 内部按 blockId 取
+                        //   SnowLayer tile 57 = 冷白冰晶噪点，与 worldgen / 掉落物贴图一致）。
+                        property int entBlockId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.blockIdAt(index)) : 0 }
+                        property int entBlockState: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.blockStateAt(index)) : 0 }
+                        property bool isSnowFall: entBlockId === 44
+                        property real slabH: isSnowFall ? Math.max(1.0/8.0, Math.min(1.0, (entBlockState + 1) / 8.0)) : 1.0
+                        position: Qt.vector3d(0.0, isSnowFall ? (-0.5 + slabH / 2.0) : 0.0, 0.0) // 薄板底贴 cell 底（非雪 0）
+                        // t490 PrimedTnt 引燃收缩 scale 0.98（机制等价 MC TNT 引燃收缩）；雪层薄板按 slabH 缩放；其余 1.0。
                         property bool entPrimed: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.isPrimedAt(index)) : false }
                         property real entFuseProg: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.fuseProgressAt(index)) : 0 }
-                        scale: entPrimed ? Qt.vector3d(0.98, 0.98, 0.98) : Qt.vector3d(1.0, 1.0, 1.0)
+                        scale: {
+                            if (entPrimed) return Qt.vector3d(0.98, 0.98, 0.98)          // PrimedTnt 引燃收缩
+                            if (isSnowFall) return Qt.vector3d(1.0, slabH, 1.0)           // t527 雪层薄板（按层数缩放）
+                            return Qt.vector3d(1.0, 1.0, 1.0)                              // 沙石等满格立方
+                        }
                         // t490 白闪脉冲相位（0..1 循环）。仅 primed 实体跑动画（非 primed 静止 0 不影响 baseColor）。
                         //   t492 Bug C：原用 `NumberAnimation on tntFlashPhase` + running 绑定 + loops:1 onFinished 重启，
                         //   该组合在「单循环结束 running 翻 false 而 running:entPrimed 仍 true」的绑定竞争中 + delegate
@@ -6824,6 +6839,15 @@ Window {
         //   同 player.onSpawnItem / fallingBlockDropped 模式（单向事件流：World 低层发语义事件、呈现层只消费，
         //   PLAN §2 分层）。id = 方块 id（仙人掌），count = 1（每格一件，整柱坍落 = 多件散落物）。
         function onBlockDroppedAsItem(x, y, z, id) { itemEntities.spawnItem(x, y, z, id, 1) }
+        // t527 积雪层整柱失撑坍落 → 转 entityManager.spawnFallingBlockState 生成携带层数 metadata 的下落实体。
+        //   World 低层（checkSnowLayerOnEdit）发语义事件（柱底坐标 + 总层数 1..8），呈现层只消费（PLAN §2 分层：
+        //   World 不反向依赖 Entities）。layers 1..8 → state=layers-1（0..7）保留层数；blockId=44=SnowLayer（与
+        //   chunkgeometry / hotbar.cpp 字面量 + 注释同源；QML 无 BlockRegistry 枚举访问故字面量）。
+        //   下落实体着地（entitymanager FallingBlock tick）走 setBlockFromEntity 带 state 写回雪层（保留层数）。
+        function onSnowLayerFell(x, y, z, layers) {
+            const clamped = Math.max(1, Math.min(8, layers)) // clamp 1..8（防越界；state 0..7）
+            entityManager.spawnFallingBlockState(x, y, z, 44, clamped - 1)
+        }
         // t88：worldgen 重生（seed 变 / 初始生成）清除旧火把 → 伪光源列表校验清理。worldgen 不发
         // blockBroken（m_chunks.setBlock 直写），故旧火把位置不会经 onBlockBroken 移除；此处扫描
         // torchPositions，把已不再是火把的条目删掉。setBlock 编辑也会触发 worldChanged，但此时

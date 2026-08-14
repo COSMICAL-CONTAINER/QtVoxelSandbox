@@ -202,6 +202,10 @@ public:
     //   由 FallingBlock 列扫保证为 air/水 —— 沙落水穿透后填堵水格；防御：其余已占用方块不覆盖）。越界 /
     //   非空非水 → false。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
     bool setBlockFromEntity(int x, int y, int z, quint8 id);
+    // t527 积雪层下落实体着地专用（5 参数带 state）：同 4 参数 setBlockFromEntity 语义（m_chunks.setBlock 直写 +
+    //   emit worldChanged，不发 blockPlaced），但写**带 state 的方块**（state=layers-1 保留层数）。仅 SnowLayer 着地
+    //   调本重载（其余 FallingBlock 着地仍走 4 参数 state=0）。同 occ 守卫（仅 air/水可被着地覆盖）。越界 / 非空非水 → false。
+    bool setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state);
     // t490fix 点火专用静默清方块（绕过 setBlockFromEntity 的 occ 守卫——TNT 是实体方块，occ 守卫会拒）。
     //   背景：playercontroller 右键机关 / 右键 TNT 本体 / 压力板四邻点燃 TNT 时，原写
     //   setBlockFromEntity(...,Air) 想「清掉原 TNT 方块再 spawnPrimedTnt」。但 setBlockFromEntity 有 occ 守卫
@@ -438,6 +442,20 @@ public:
     //   静默 dropSugarcaneColumn 不经 World::setBlock → 不重入本检查。供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。
     void checkSugarcaneOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t527 积雪层支撑掉落复检（机制等价 MC 1.0 — 本工程用户明确要「雪层无重力但失撑后掉落保留层数」，区别 MC 雪
+    //   层无重力；与甘蔗 / 仙人掌支撑校验族同源）。（x,y,z,oldId,id）= 本格刚发生的编辑。
+    //   失撑：本格被破为 Air → 若正上方是 SnowLayer，则该雪层失撑（下方支撑方块没了）→ 整柱（自正上方起所有
+    //   连续 SnowLayer 格）坍落为一个**携带层数 metadata**的下落方块实体（snowLayerFell 信号 → 呈现层转
+    //   EntityManager.spawnFallingBlockState）。**保留层数**：整柱各格 (state+1) 层累加，cap 8（state 7=8 层=满格≈
+    //   雪块；1-2 层 → 1-2 层）。整柱静默清 Air（m_chunks.setBlock 直写 + 标脏，不经 World::setBlock → 不递归触发）+
+    //   emit blockBroken（破块粒子 / 音）+ recomputeLightAround（遮光柱消失重 flood）+ emit snowLayerFell（柱底坐标 +
+    //   总层数）+ 1 次 worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。
+    //   **无 oldId 守卫**：破下方支撑（oldId 非 SnowLayer）会触发；玩家直破雪层中间 / 底格（oldId==SnowLayer）也
+    //   会触发其正上方雪层柱失撑 —— finishMiningAt 仅对被破格本身掉雪球（dropId），其上方雪层通过本复检独立坍落
+    //   （避免中间雪层被破后上方雪层永久浮空）。静默清不经 World::setBlock → 不重入本检查。供 4/5 参数 setBlock +
+    //   岩浆焚毁路径末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
+    void checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 
@@ -474,6 +492,11 @@ signals:
     //   呈现层（Main.qml）据本信号 spawnItem 生成掉落实体（同 player.spawnItem / fallingBlockDropped 模式：
     //   World 低层只发语义事件，不反向依赖 Game/Entities）。仅仙人掌走此路径（玩家破块走 player.spawnItem）。
     void blockDroppedAsItem(int x, int y, int z, int id);
+    // t527 积雪层整柱失撑坍落为一个**携带层数 metadata**的下落方块实体：携柱底世界坐标 (x,y,z) + 总层数 (1..8)。
+    //   呈现层（Main.qml）据本信号 entityManager.spawnFallingBlockState(x,y,z, SnowLayer, layers-1) 生成下落实体
+    //   （携带 state=layers-1 的 metadata；着地 setBlockFromEntity(...,state) 写回雪层，**保留层数**）。
+    //   分层（PLAN §2）：World 低层只发语义事件，不反向依赖 Entities —— 呈现层只消费（同 blockDroppedAsItem 模式）。
+    void snowLayerFell(int x, int y, int z, int layers);
 
 private:
     void generate();          // 重建置换表 + ChunkManager + 填充地形（静默，不 emit）
