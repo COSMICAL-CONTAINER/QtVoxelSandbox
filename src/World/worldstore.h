@@ -94,14 +94,18 @@ public:
     //   事务性写入（一次 COMMIT）：chunks + meta + chests + furnaces 同事务原子落盘（t188 chests / t177 furnaces）。
     //   chests 为 ChestStore::allChests() 产物（每项 {x,y,z,slots:[{id,count}×27]}；空列表 → 清空 chests 表）。
     //   furnaces 为 FurnaceStore::allFurnaces() 产物（每项 {x,y,z,slots:[{id,count}×3], burn, smelt}；空 → 清空）。
+    //   dispensers 为 DispenserStore::allDispensers() 产物（每项 {x,y,z,slots:[{id,count}×9]}；空 → 清空 dispensers 表）。
     //   返回是否成功（无 world / 未打开 / SQL 失败 → false + qWarning）。
-    Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {});
+    Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {}, const QVariantList &dispensers = {});
     // 读当前库的 chests 表为 QVariantList（同 saveAll 的 chests 形状）。未打开 → 空列表。
     //   caller（Main.qml.enterWorld）转交 chestStore.loadAll 整体替换内存（清旧世界残留 + 填本世界箱子）。
     Q_INVOKABLE QVariantList loadChests() const;
     // t177 二轮复盘 读当前库的 furnaces 表为 QVariantList（同 saveAll 的 furnaces 形状）。未打开 → 空列表。
     //   caller（Main.qml.enterWorld）转交 furnaceStore.loadAll 整体替换内存（清旧世界残留 + 填本世界熔炉）。
     Q_INVOKABLE QVariantList loadFurnaces() const;
+    // t542 读当前库的 dispensers 表为 QVariantList（同 saveAll 的 dispensers 形状）。未打开 → 空列表。
+    //   caller（Main.qml.enterWorld）转交 dispenserStore.loadAll 整体替换内存（清旧世界残留 + 填本世界发射器）。
+    Q_INVOKABLE QVariantList loadDispensers() const;
     // progress 新系统 写玩家进度（统计 + 成就）单行表 key='main'。progress = PlayerProgress::toVariant() 产物。
     //   独立 upsert（INSERT OR REPLACE）。未打开 → false。caller（Main.qml.saveAndExitToWorldList）调。
     Q_INVOKABLE bool saveProgress(const QVariantMap &progress);
@@ -162,6 +166,10 @@ private:
     //   furnaces 形状 = FurnaceStore::allFurnaces() 产物：每项 {x,y,z,slots:[{id,count}×3], burn, smelt}。
     //   data 列存整个 QVariantMap（含 slots + burn + smelt）的 JSON 文本（同 chests 自描述、跨版本可读）。
     bool writeFurnaces(const QVariantList &furnaces);
+    // t542 把发射器 QVariantList 落盘进 dispensers 表（DELETE 全量 + INSERT；同 writeChests / writeFurnaces 模式）。
+    //   dispensers 形状 = DispenserStore::allDispensers() 产物：每项 {x,y,z,slots:[{id,count}×9]}。
+    //   data 列存整个 QVariantMap（含 slots）的 JSON 文本（同 chests / furnaces 自描述、跨版本可读）。
+    bool writeDispensers(const QVariantList &dispensers);
 
     // ── t382 迁移注册表（world_version → kWorldVersion 的数据迁移；详见类头注释 + migrations()）──
     // 单条迁移：把存档数据从 (targetVersion-1) 推进到 targetVersion。apply 对一个 chunk 的三段 blob

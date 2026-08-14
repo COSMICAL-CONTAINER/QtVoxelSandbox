@@ -147,6 +147,19 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create furnaces failed:" << q.lastError().text();
         return false;
     }
+    // t542 发射器内容表：同 chests / furnaces 模式 —— 每只发射器（按方块世界坐标键控）一行，data 列存整个
+    //   {slots} 的 JSON 文本（同 player_state / chests 自描述）。纯加表 —— 旧库 IF NOT EXISTS 幂等补建，
+    //   无数据迁移负担；schema 版本不 bump（IF NOT EXISTS 纯加表对老库向前兼容）。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS dispensers ("
+            "  x INTEGER NOT NULL,"
+            "  y INTEGER NOT NULL,"
+            "  z INTEGER NOT NULL,"
+            "  data TEXT NOT NULL,"
+            "  PRIMARY KEY (x, y, z))"))) {
+        qCCritical(lcSave) << "create dispensers failed:" << q.lastError().text();
+        return false;
+    }
     // progress 表（progress 新系统）：玩家进度（统计 + 成就）单行表，key 固定 'main'，data 存 PlayerProgress::toVariant()
     //   的 JSON。IF NOT EXISTS 幂等补建（schema 版本不 bump，同 chests/furnaces，纯加表对老库向前兼容）。
     if (!q.exec(QStringLiteral(
@@ -391,7 +404,7 @@ void WorldStore::closeWorld()
     m_openFile.clear();
 }
 
-bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces)
+bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces, const QVariantList &dispensers)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "saveAll: no open db or world";
@@ -460,6 +473,11 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
     }
     // t177 二轮复盘 熔炉内容同事务落盘（furnaces 表 DELETE 全量 + INSERT；与 chunks / meta / chests 原子提交）。
     if (!writeFurnaces(furnaces)) {
+        db.rollback();
+        return false;
+    }
+    // t542 发射器内容同事务落盘（dispensers 表 DELETE 全量 + INSERT；与 chunks / meta / chests / furnaces 原子提交）。
+    if (!writeDispensers(dispensers)) {
         db.rollback();
         return false;
     }
@@ -695,7 +713,64 @@ QVariantList WorldStore::loadFurnaces() const
     return out;
 }
 
-// progress 玩家进度（progress 新系统）：写单行表 key='main'，data 存 PlayerProgress::toVariant() 的 JSON。
+// t542 发射器落盘：DELETE 全量 + INSERT 每只发射器（坐标列 + data JSON 文本）。调用方（saveAll）已开事务，
+//   本方法不 BEGIN/COMMIT（同事务原子）。dispensers 形状 = DispenserStore::allDispensers() 产物：每项
+//   {x,y,z,slots:[{id,count}×9]}。整个 QVariantMap（含 slots）序列化为 JSON 文本存 data 列（同 chests /
+//   furnaces 自描述、跨版本可读）。坐标缺 / 非法 → 跳过该发射器（不写残条目）。
+bool WorldStore::writeDispensers(const QVariantList &dispensers)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM dispensers"))) {
+        qCCritical(lcSave) << "saveAll: dispensers delete failed:" << del.lastError().text();
+        return false;
+    }
+    QSqlQuery iq(db);
+    iq.prepare(QStringLiteral("INSERT INTO dispensers (x, y, z, data) VALUES (?, ?, ?, ?)"));
+    for (const QVariant &v : dispensers) {
+        const QVariantMap dm = v.toMap();
+        bool okx = false, oky = false, okz = false;
+        const int x = dm.value(QStringLiteral("x")).toInt(&okx);
+        const int y = dm.value(QStringLiteral("y")).toInt(&oky);
+        const int z = dm.value(QStringLiteral("z")).toInt(&okz);
+        if (!okx || !oky || !okz) continue; // 缺坐标 → 跳过（不写残条目）
+        // 整个发射器条目（slots）序列化为 JSON 文本（同 chests / furnaces / player_state 自描述、跨版本可读）。
+        const QJsonDocument doc = QJsonDocument::fromVariant(dm);
+        iq.addBindValue(x);
+        iq.addBindValue(y);
+        iq.addBindValue(z);
+        iq.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+        if (!iq.exec()) {
+            qCCritical(lcSave) << "saveAll: dispenser insert failed at" << x << y << z
+                               << ":" << iq.lastError().text();
+            return false;
+        }
+    }
+    return true;
+}
+
+// t542 读 dispensers 表为 QVariantList（形状同 writeDispensers 入参）。未打开 → 空列表。caller
+//   （Main.qml.enterWorld）转交 dispenserStore.loadAll 整体替换内存（清旧世界残留 + 填本世界发射器）。
+QVariantList WorldStore::loadDispensers() const
+{
+    QVariantList out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT x, y, z, data FROM dispensers"))) {
+        qCWarning(lcSave) << "loadDispensers: select failed:" << q.lastError().text();
+        return out;
+    }
+    while (q.next()) {
+        const QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toString().toUtf8());
+        QVariantMap dm = doc.toVariant().toMap();
+        // data 列存的是整个 {x,y,z,slots} → JSON；坐标用表的列（权威），JSON 内坐标仅冗余。
+        dm.insert(QStringLiteral("x"), q.value(0).toInt());
+        dm.insert(QStringLiteral("y"), q.value(1).toInt());
+        dm.insert(QStringLiteral("z"), q.value(2).toInt());
+        out.append(dm);
+    }
+    return out;
+}
 //   REPLACE INTO（单行 upsert，无坐标主键）。空 map → 写空 JSON（加载端 loadVariant 兜底重置默认）。
 //   独立事务（caller Main.qml.saveAndExitToWorldList 内调用，与 saveAll 分离；progress 更新频次低，单独写无妨）。
 bool WorldStore::saveProgress(const QVariantMap &progress)

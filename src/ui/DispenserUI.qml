@@ -16,14 +16,13 @@ import "InventoryOps.js" as InventoryOps
 // 布局贴近 MC 1.0 发射器：上部「3×3=9 槽发射器物品栏」+ 下部「3×9=27 主物品栏 + 9 hotbar 行」（容器 +
 // 背包布局，同工作台 / 熔炉 / 箱子结构）。机制等价 MC 右键发射器开物品栏界面。
 //
-// t517 本任务为「先界面」：9 槽发射器内容暂存面板本地数组（dispSlots/dispCounts/dispRev），面板常驻
-//   （visible 切换、不销毁）→ 跨开关保留（关再开内容仍在）。真容器存储（per-block 跨世界持久 / 触发时
-//   从槽内取物发射）属后续任务（可改 DispenserStore 同 ChestStore 模式）。本地数组无 C++ Store → 关游戏
-//   即丢、多只发射器共享一份；属已知「界面先行」折中，dev-plan t517 明确「容器存储功能后补」。
+// t517 本任务为「先界面」：原版 9 槽发射器内容存面板本地数组（dispSlots/dispCounts/dispRev），导致全世界
+//   发射器共享一个物品栏、打掉不掉。**t542 修**：内容下沉到 DispenserStore（C++ VM，按方块坐标键控的 9 槽
+//   3×3，同 ChestStore / FurnaceStore 模式）→ 每只发射器各自独立 9 槽、跨 UI 开关持久、破块掉内容。
 //
 // 物品移动（9 槽 / 主栏 / hotbar 间任意搬动）：左键整组 / 右键半份 / 单放 / 左键拖动均分 / 双击拿同类 /
 //   Shift 搬运，与 CraftingTableUI / ChestUI 全套快捷操作同算法（共享 hotbar VM 的 heldBlock / heldCount
-//   光标手持栈）。本面板把 "dispenser" 组经 localReadSlot/localWriteSlot 钩子路由到本地数组。
+//   光标手持栈）。本面板把 "dispenser" 组经 localReadSlot/localWriteSlot 钩子路由到 DispenserStore（按坐标寻址）。
 //
 // 全部槽框自绘原创（InvSlot 凹陷槽，无外部 MC GUI PNG；§9 override (a)）。零 MC 专有名词（§9）。
 // 宿主负责指针态：打开时 release（光标可见点格子），关闭 → grab。
@@ -34,6 +33,13 @@ Item {
     // 宿主注入：hotbar 视图模型（提供 heldBlock/heldCount/maxStackSize/iconSourceForBlock/
     // nameForBlock/isTool/isMaterial/slotRevision/main*/addStack 等栈操作 + 图标 / 名查询）。
     property Hotbar hotbar
+    // 宿主注入：DispenserStore（按 dispenserX/Y/Z 寻址的 per-block 9 槽 3×3 内容；slotIdAt/slotCountAt/
+    //   setSlot/clearDispenser）。t542：替代旧 QML 本地数组（全世界发射器共享一份的 bug）。
+    property DispenserStore dispenserStore
+    // 宿主注入：当前所开发射器的方块世界坐标（dispenserOpened 携坐标 → Main.qml 存 window.dispenserX/Y/Z）。
+    property int dispenserX: 0
+    property int dispenserY: 0
+    property int dispenserZ: 0
     // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // t49 同 CraftingTableUI / ChestUI：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区）。
@@ -49,12 +55,14 @@ Item {
     readonly property int mainCols: 9
     readonly property int mainRows: 3
 
-    // 3×3 发射器容器本地栈存储（与 hotbar VM 共享同一光标手持栈 heldBlock/heldCount）。
-    // 数组改写不触发 QML 绑定 → 配 dispRev 版本号让 Image source / count 重算。
-    // t517「界面先行」：内容暂存面板本地，关再开仍在；真 per-block 存储后补（同 ChestStore 模式）。
-    property var dispSlots: [0,0,0, 0,0,0, 0,0,0]
-    property var dispCounts:[0,0,0, 0,0,0, 0,0,0]
-    property int dispRev: 0
+    // 3×3 发射器容器 per-block 存储（DispenserStore，按 dispenserX/Y/Z 寻址）；与 hotbar VM 共享同一光标
+    //   手持栈 heldBlock/heldCount。dispSlotCount 读 dispenserStore.slotCount（单一权威，恒 9 = 3×3）。
+    //   t542：替代旧 QML 本地数组（dispSlots/dispCounts/dispRev）—— per-block 按坐标寻址，跨 UI 开关持久、
+    //   破块掉内容（onBlockBroken(Dispenser) dump 9 槽 + clearDispenser）。
+    readonly property int dispSlotCount: dispenserStore ? dispenserStore.slotCount : gridN * gridN
+    // 触碰表达式：切发射器（dispenserX/Y/Z 变）或 DispenserStore.revision 变时，让所有读 disp 槽的绑定重算
+    //   （同 ChestUI chestCoordRev 模式）。单独属性给 delegate 干净触碰点（避免每处裸写坐标 + revision）。
+    property int dispCoordRev: (dispenserStore ? dispenserStore.revision : 0) + dispenserX * 131 + dispenserY * 17 + dispenserZ
 
     // t97：27 主物品栏自该任务起上移至 hotbar VM（m_mainSlots），与 SurvivalInventory / CraftingTableUI /
     //   FurnaceUI / ChestUI 多菜单共享同一份 → 主栏同步、returnHeldToHotbar/pickupScan 经 addToAny 能合并
@@ -90,17 +98,25 @@ Item {
     //   本地组 → InventoryOps.groupIsDraggable 放行（addDragSlot 收集、redistributeLive 分发）、doMergeSameId
     //   扫 disp 槽。
     property var localDragGroups: ["dispenser"]
-    // t180：dispenser 组槽位数（doMergeSameId 扫描范围）。dispSlots 长 9（3×3）。
-    function localSlotCount(group) { return group === "dispenser" ? root.dispSlots.length : 0 }
+    // t180：dispenser 组槽位数（doMergeSameId 扫描范围）= dispSlotCount（单一权威读 dispenserStore.slotCount，
+    //   恒 9 = 3×3 = DispenserStore::kSlotsPerDispenser）。
+    function localSlotCount(group) { return group === "dispenser" ? root.dispSlotCount : 0 }
 
-    // ── t168 面板专属槽路由：dispenser 容器格走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
-    //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
+    // ── t168 / t542 面板专属槽路由：dispenser 容器格走 DispenserStore（按 dispenserX/Y/Z 寻址；main/hotbar
+    //   由 InventoryOps 统一经 VM）。readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处
+    //   localReadSlot/localWriteSlot）。dispCoordRev 触碰 dispenserX/Y/Z（切发射器时坐标变 → delegate 重读）。
     function localReadSlot(group, index) {
-        if (group === "dispenser") return { id: root.dispSlots[index] || 0, count: root.dispCounts[index] || 0 }
+        if (group === "dispenser" && root.dispenserStore) {
+            return {
+                id: root.dispenserStore.slotIdAt(root.dispenserX, root.dispenserY, root.dispenserZ, index),
+                count: root.dispenserStore.slotCountAt(root.dispenserX, root.dispenserY, root.dispenserZ, index)
+            }
+        }
         return { id: 0, count: 0 }
     }
     function localWriteSlot(group, index, id, count) {
-        if (group === "dispenser") { root.dispSlots[index] = id; root.dispCounts[index] = count; root.dispRev++ }
+        if (group === "dispenser" && root.dispenserStore)
+            root.dispenserStore.setSlot(root.dispenserX, root.dispenserY, root.dispenserZ, index, id, count)
     }
     // resolveClick / resolveRightClick（拾取/放置/合并/互换 + 半份）：算法见 InventoryOps（多面板共享）。
     //   返回 {slotId,slotCount,slotDur,slotEnch,heldId,heldCount,heldDur,heldEnch} 或 null=无操作；
@@ -206,8 +222,8 @@ Item {
             }
 
             // 发射器 3×3 容器格：整体水平居中（行宽 120 < 行内宽 360 → 居中，无右侧大段空白）。
-            //   读本地数组（dispSlots/dispCounts；dispRev 驱动刷新）；左键整组 / 右键半份 取放
-            //   （与主栏 / hotbar 共享同一 hotbar VM 光标手持栈）。栈写经 localWriteSlot 改本地数组。
+            //   读 DispenserStore（按 dispenserX/Y/Z 寻址；dispCoordRev 驱动刷新）；左键整组 / 右键半份 取放
+            //   （与主栏 / hotbar 共享同一 hotbar VM 光标手持栈）。栈写经 dispenserStore.setSlot（t542 per-block 存储）。
             Item {
                 id: dispRow
                 width: parent.width
@@ -219,44 +235,42 @@ Item {
                     x: (dispRow.width - root.gridN * root.slotSize) / 2; y: 0
                     columns: root.gridN; spacing: 0
                     Repeater {
-                        model: root.gridN * root.gridN  // 9
+                        model: root.dispSlotCount  // t542：读 dispenserStore.slotCount（单一权威，恒 9 = 3×3）
                         delegate: Item {
+                            property int dId: { const _r = root.dispCoordRev; return _r >= 0 ? (root.dispenserStore.slotIdAt(root.dispenserX, root.dispenserY, root.dispenserZ, index)) : 0 }
+                            property int dCount: { const _r = root.dispCoordRev; return _r >= 0 ? (root.dispenserStore.slotCountAt(root.dispenserX, root.dispenserY, root.dispenserZ, index)) : 0 }
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent; wellColor: "#262b30" }
                             // 物品图标：方块段→等距立方体 Image；工具段→ToolIcon；材料段（木棒）→MaterialIcon 自绘。
                             Item {
                                 anchors.centerIn: parent
                                 width: 30; height: 30
-                                visible: { const _r = root.dispRev; return _r >= 0 ? ((root.dispSlots[index] || 0) !== 0) : false }
+                                visible: dId !== 0
                                 Image {
                                     anchors.fill: parent
-                                    visible: {
-                                        const _r = root.dispRev
-                                        return _r >= 0 ? (!root.hotbar.isTool(root.dispSlots[index] || 0)
-                                                          && !root.hotbar.isMaterial(root.dispSlots[index] || 0)) : false
-                                    }
-                                    source: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.iconSourceForBlock(root.dispSlots[index] || 0)) : "" }
+                                    visible: { const _r = root.dispCoordRev; return _r >= 0 ? (!root.hotbar.isTool(dId) && !root.hotbar.isMaterial(dId)) : false }
+                                    source: { const _r = root.dispCoordRev; return _r >= 0 ? (root.hotbar.iconSourceForBlock(dId)) : "" }
                                     fillMode: Image.PreserveAspectFit; smooth: true
                                 }
                                 ToolIcon {
                                     anchors.fill: parent
-                                    visible: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.isTool(root.dispSlots[index] || 0)) : false }
-                                    tier: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.toolTier(root.dispSlots[index] || 0)) : 0 }
-                                    toolType: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.toolType(root.dispSlots[index] || 0)) : 0 }
+                                    visible: { const _r = root.dispCoordRev; return _r >= 0 ? (root.hotbar.isTool(dId)) : false }
+                                    tier: { const _r = root.dispCoordRev; return _r >= 0 ? (root.hotbar.toolTier(dId)) : 0 }
+                                    toolType: { const _r = root.dispCoordRev; return _r >= 0 ? (root.hotbar.toolType(dId)) : 0 }
                                 }
                                 // 材料段（木棒）：MaterialIcon 自绘（§9a 原创，非 MC 资产）。
                                 MaterialIcon {
                                     anchors.fill: parent
-                                    visible: { const _r = root.dispRev; return _r >= 0 ? (root.hotbar.isMaterial(root.dispSlots[index] || 0)) : false }
-                                    materialId: { const _r = root.dispRev; return _r >= 0 ? (root.dispSlots[index] || 0) : 0 }
+                                    visible: { const _r = root.dispCoordRev; return _r >= 0 ? (root.hotbar.isMaterial(dId)) : false }
+                                    materialId: { const _r = root.dispCoordRev; return _r >= 0 ? (dId) : 0 }
                                 }
                             }
-                            // 栈数量（count>1 显数字）。
+                            // 栈数量（count>1 显数字）。触碰 dispCoordRev 刷新（DispenserStore NOTIFY 驱动）。
                             Text {
                                 anchors.right: parent.right; anchors.bottom: parent.bottom
                                 anchors.rightMargin: 3; anchors.bottomMargin: 1
-                                visible: { const _r = root.dispRev; return _r >= 0 ? ((root.dispCounts[index] || 0) > 1) : false }
-                                text: { const _r = root.dispRev; return _r >= 0 ? (root.dispCounts[index] || 0) : "" }
+                                visible: { const _r = root.dispCoordRev; return _r >= 0 ? (dCount > 1) : false }
+                                text: { const _r = root.dispCoordRev; return _r >= 0 ? (dCount) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
@@ -277,11 +291,9 @@ Item {
                                     root.lastTapMs = now
                                     root.lastTapKey = key
                                     if (isDouble) { root.doMergeSameId("dispenser", index); return }
-                                    const r = root.resolveClick(root.dispSlots[index] || 0, root.dispCounts[index] || 0, 0)
+                                    const r = root.resolveClick(dId, dCount, 0)
                                     if (!r) return
-                                    root.dispSlots[index] = r.slotId
-                                    root.dispCounts[index] = r.slotCount
-                                    root.dispRev++
+                                    root.dispenserStore.setSlot(root.dispenserX, root.dispenserY, root.dispenserZ, index, r.slotId, r.slotCount)
                                     root.hotbar.heldBlock = r.heldId
                                     root.hotbar.heldCount = r.heldCount
                                     root.hotbar.heldDurability = r.heldDur
@@ -291,11 +303,9 @@ Item {
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: {
-                                    const r = root.resolveRightClick(root.dispSlots[index] || 0, root.dispCounts[index] || 0, 0)
+                                    const r = root.resolveRightClick(dId, dCount, 0)
                                     if (!r) return
-                                    root.dispSlots[index] = r.slotId
-                                    root.dispCounts[index] = r.slotCount
-                                    root.dispRev++
+                                    root.dispenserStore.setSlot(root.dispenserX, root.dispenserY, root.dispenserZ, index, r.slotId, r.slotCount)
                                     root.hotbar.heldBlock = r.heldId
                                     root.hotbar.heldCount = r.heldCount
                                     root.hotbar.heldDurability = r.heldDur
@@ -304,14 +314,14 @@ Item {
                             HoverHandler {
                                 // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
                                 //   不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
-                                property int trackedId: { const _r = root.dispRev; return _r >= 0 ? (root.dispSlots[index] || 0) : 0 }
+                                property int trackedId: dId
                                 onTrackedIdChanged: {
                                     if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
                                         root.hoveredItemId = 0
                                 }
                                 onHoveredChanged: {
-                                    // t94 tooltip（dispSlots[index] 取当前栈 id；空栈不动 hoveredItemId）。
-                                    const itemId = root.dispSlots[index] || 0
+                                    // t94 tooltip（dId 由 delegate 持有；触碰 dispCoordRev 刷新）。
+                                    const itemId = dId
                                     if (hovered && itemId !== 0) {
                                         root.hoveredItemId = itemId
                                         const p = parent.mapToItem(root, parent.width / 2, 0)
@@ -338,9 +348,9 @@ Item {
                                     //   防 AOT 死代码消除裸触碰 → 高亮不随拖拽集 / 版本号刷新。
                                     const _ds = root.dragSlots
                                     const _rds = root.rightDragSlots
-                                    const _rev = root.dispRev
+                                    const _rev = root.dispCoordRev
                                     const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
-                                    const sid = root.dispSlots[index] || 0
+                                    const sid = dId
                                     const key = root.slotKey("dispenser", index)
                                     if (_ok && root.leftDragActive && root.dragHasKey(key)
                                         && (sid === 0 || sid === root.dragHeldId)) return true

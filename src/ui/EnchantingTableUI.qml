@@ -91,16 +91,43 @@ Item {
     property real lastTapMs: 0
     property string lastTapKey: ""
 
-    // t515 本面板无本地容器槽（main/hotbar 全经 VM）→ localDragGroups 为空（无 craft / in/fuel/out），
-    //   InventoryOps.groupIsDraggable 对未声明组拒收：拖拽 / 双击合并只走 main+hotbar（同 SurvivalInventory）。
-    property var localDragGroups: []
-    function localSlotCount(group) { return 0 }  // 无本地组槽位（doMergeSameId 扫描范围仅 main+hotbar）
+    // ── t544 本地 enchant 组存储：左武器/工具槽（index 0）+ 青金石槽（index 1）。与 hotbar VM 共享同一光标
+    //   手持栈 heldBlock/heldCount；左键整组 / 右键半份同 resolveClick / resolveRightClick（InventoryOps 单一
+    //   权威）。面板关闭时 returnEnchantToHotbar 把输入槽内容退回背包（同 CraftingTableUI returnCraftToHotbar 模式）。
+    property var enchantSlots:  [0, 0]
+    property var enchantCounts: [0, 0]
+    property int enchantRev: 0
 
-    // ── t515 面板专属槽路由：无本地组（main/hotbar 由 InventoryOps 统一经 VM）。readSlot/writeSlot 薄包装
-    //   委托 InventoryOps（无本地组分发 → localReadSlot/localWriteSlot 返空）。slotLeft/slotRight 统一槽点击
-    //   dispatch（左键整组 / 右键半份 + Shift 搬运 + 双击拿同类），算法见 InventoryOps（五面板共享）。
-    function localReadSlot(group, index) { return { id: 0, count: 0 } }
-    function localWriteSlot(group, index, id, count) { /* 无本地组 */ }
+    // t544：enchant 两槽参与快捷操作（左键拖动均分 / 双击拿同类 / 右键分半）。声明 enchant 为可拖拽本地组 →
+    //   InventoryOps.groupIsDraggable 放行（addDragSlot 收集、redistributeLive 分发）、doMergeSameId 扫 enchant 槽。
+    property var localDragGroups: ["enchant"]
+    // t544：enchant 组槽位数（doMergeSameId 扫描范围）。enchantSlots 长 2（武器/工具 + 青金石）。
+    function localSlotCount(group) { return group === "enchant" ? root.enchantSlots.length : 0 }
+
+    // ── t515 / t544 面板专属槽路由：enchant 两槽走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
+    //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
+    function localReadSlot(group, index) {
+        if (group === "enchant") return { id: root.enchantSlots[index] || 0, count: root.enchantCounts[index] || 0 }
+        return { id: 0, count: 0 }
+    }
+    function localWriteSlot(group, index, id, count) {
+        if (group === "enchant") { root.enchantSlots[index] = id; root.enchantCounts[index] = count; root.enchantRev++ }
+    }
+    // 关包归还 enchant 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把两槽内容
+    //   addStack 回 hotbar（MC 行为：关附魔台界面把输入槽物品退回背包）。
+    function returnEnchantToHotbar() {
+        if (!root.hotbar) return
+        for (let i = 0; i < root.enchantSlots.length; ++i) {
+            const id = root.enchantSlots[i] || 0
+            const n = root.enchantCounts[i] || 0
+            if (id !== 0 && n > 0) root.hotbar.addStack(id, n)
+        }
+        for (let i = 0; i < root.enchantSlots.length; ++i) {
+            root.enchantSlots[i] = 0
+            root.enchantCounts[i] = 0
+        }
+        root.enchantRev++
+    }
     function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
     function resolveRightClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch) }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
@@ -185,8 +212,10 @@ Item {
     // 当前青金石持有数（hotbar + 主栏跨槽累计；slotRevision / mainRevision 触碰刷新）。
     readonly property int lapisCount: {
         if (!hotbar) return 0
-        hotbar.slotRevision; hotbar.mainRevision  // 触碰 NOTIFY（低频：槽写入才发，非 per-frame）
-        return hotbar.materialCount(lapisId)
+        // qml-touch：revision 触碰参与返回（_sr>=0 / _mr>=0 恒真守卫），防 AOT 死代码消除裸触碰。
+        const _sr = hotbar.slotRevision
+        const _mr = hotbar.mainRevision
+        return (_sr >= 0 && _mr >= 0) ? hotbar.materialCount(lapisId) : 0
     }
     // 当前 XP 等级（绑定 playerState.level NOTIFY levelChanged；低频，升级才发）。
     readonly property int playerLevel: playerState ? playerState.level : 0
@@ -194,7 +223,11 @@ Item {
     property bool justEnchanted: false
     // PERF 护栏：选项列表只在「面板显」或「点击附魔后」刷新（refreshOptions），永不 per-frame。
     //   面板从隐藏切到显示时（visible → true）刷一次；书架数 / maxLevel 是只读属性（绑定自动重算）。
-    onVisibleChanged: { if (visible) refreshOptions() }
+    //   t544 关包归还：visible→false 时把 enchant 输入槽内容退回背包（同 CraftingTableUI returnCraftToHotbar 模式）。
+    onVisibleChanged: {
+        if (visible) refreshOptions()
+        else returnEnchantToHotbar()
+    }
     onEnchantXChanged: if (visible) refreshOptions()
     onEnchantYChanged: if (visible) refreshOptions()
     onEnchantZChanged: if (visible) refreshOptions()
@@ -257,11 +290,11 @@ Item {
     }
 
     // 面板：深色圆角，居中。宽度与 CraftingTableUI 一致（392）便于复用主栏布局；
-    // 高度 = 标题(22) + 占位附魔功能区(~132) + 主栏(120) + hotbar(40) + 间距/边距。
+    // 高度 = 标题(22) + 占位附魔功能区(~196) + 主栏(120) + hotbar(40) + 间距/边距。
     Rectangle {
         id: panel
         width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
-        height: 382                                  // 22 + 132 + 120 + 40 (=314) + 3×12 spacing(36) + 2×16 margin(32) = 382
+        height: 446                                  // 22 + 196 + 120 + 40 (=378) + 3×12 spacing(36) + 2×16 margin(32) = 446
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -289,20 +322,21 @@ Item {
                 }
             }
 
-            // ── 占位附魔功能区（t515 spec：上方功能区占位，功能后补）──
-            // 沿用 t474 的 3 档位选项槽 + 状态条作为占位附魔入口（消耗机制保留，真附魔效果后补）。
-            // 布局：状态条（XP/青金石/书架→可选档位）+ 3 档位选项槽横排 + 提示文字。
+            // ── 占位附魔功能区（t544 重做：两槽 + 右侧三选项竖排）──
+            // 布局：状态条（XP/青金石/书架→可选档位）+ 左区两槽（武器/工具槽 + 青金石槽）+ 右区 3 档位选项
+            //   竖排 + 提示文字。青金石槽空占位画青金石轮廓图标（参考 MaterialIcon drawLapis 的青金石形状）。
+            //   真附魔效果后补；选项点击沿用 t474 占位交互（消耗 XP + 青金石 → flash + 重投选项名）。
             Item {
                 id: enchantArea
                 width: parent.width
-                height: 132
+                height: 196
 
                 // 上区状态条：XP 等级 / 青金石数 / 书架加成 → 可选档位。
                 Rectangle {
                     id: statusbar
                     anchors.top: parent.top; anchors.topMargin: 0
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: parent.width; height: 30
+                    width: parent.width; height: 28
                     color: "#241a12"; radius: 3
                     Text {
                         anchors.centerIn: parent
@@ -313,60 +347,105 @@ Item {
                     }
                 }
 
-                // 3 档位选项槽横排（占位附魔入口；消耗 XP + 青金石，点成功 → flash + 重投选项名）。
-                Row {
-                    id: optionRow
+                // 功能区主体：左区两槽（武器/工具 + 青金石）+ 右区三选项竖排。
+                Item {
+                    id: body
                     anchors.top: statusbar.bottom; anchors.topMargin: 10
                     anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: 12
+                    width: parent.width
+                    height: 124
 
-                    Repeater {
-                        model: 3
-                        delegate: Rectangle {
-                            id: optSlot
-                            property int idx: index
-                            property int lvlCost: root.levelCosts[index]
-                            property int lapCost: root.lapisCosts[index]
-                            // enabled 条件：档位序号 < maxLevel（书架解锁）且 XP 等级 + 青金石都够消耗。
-                            property bool unlocked: index < root.maxLevel
-                            property bool affordable: root.playerLevel >= lvlCost && root.lapisCount >= lapCost
-                            property bool enabled1: unlocked && affordable
-                            width: 100; height: 60
-                            color: enabled1 ? "#5a4a2a" : "#2a2018"
-                            border.color: enabled1 ? "#ffd87a" : "#0a0604"
-                            border.width: enabled1 ? 2 : 1
-                            radius: 4
-                            opacity: unlocked ? 1.0 : 0.4  // 未解锁档位半透
+                    // ── 左区：两槽（enchant 组：0=武器/工具槽，1=青金石槽）。本地数组读写（enchantRev 驱动
+                    //   刷新）；左键整组 / 右键半份取放（同主栏 / hotbar，InventoryOps 单一权威）。──
+                    Column {
+                        id: leftSlots
+                        x: 20
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 12
 
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 1
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: ["I", "II", "III"][index] + "  " + (root.optionNames[index] || "附魔")
-                                    color: enabled1 ? "#ffe6a8" : "#665544"
-                                    font.pixelSize: 12; font.bold: true
-                                }
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: lvlCost + "级 / " + lapCost + "青金"
-                                    color: enabled1 ? "#a8d8ff" : "#554433"
-                                    font.pixelSize: 9
-                                }
-                            }
+                        // 武器 / 工具槽（enchant index 0）。
+                        EnchantInputSlot {
+                            width: root.slotSize; height: root.slotSize
+                            group: "enchant"; index: 0
+                            // qml-touch：槽内容读数组 + enchantRev 触碰参与返回（数组写入不触发绑定，需 rev 触碰）。
+                            slotId: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantSlots[0] || 0) : 0 }
+                            slotCount: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantCounts[0] || 0) : 0 }
+                            caption: "武器/工具"
+                        }
+                        // 青金石槽（enchant index 1；空槽画青金石轮廓占位，指示接受青金石）。
+                        EnchantInputSlot {
+                            width: root.slotSize; height: root.slotSize
+                            group: "enchant"; index: 1
+                            slotId: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantSlots[1] || 0) : 0 }
+                            slotCount: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantCounts[1] || 0) : 0 }
+                            caption: ""
+                            showLapisOutline: true   // 空槽占位画青金石轮廓（t544）
+                        }
+                    }
 
-                            TapHandler {
-                                enabled: optSlot.enabled1
-                                onTapped: {
-                                    // 占位附魔交互（功能后补）：消耗 XP + 青金石 → flash + 重投选项名。
-                                    if (!optSlot.enabled1) return
-                                    if (!root.playerState.spendLevels(optSlot.lvlCost)) return
-                                    if (!root.hotbar.consumeMaterial(root.lapisId, optSlot.lapCost)) {
-                                        console.warn("[enchant] lapis consume failed after XP spend")
+                    // ── 右区：3 档位选项竖排（1/2/3；t544 现竖排，修用户「横排」反馈）──
+                    Column {
+                        id: optionCol
+                        x: 120
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 8
+
+                        Repeater {
+                            model: 3
+                            delegate: Rectangle {
+                                id: optSlot
+                                property int idx: index
+                                property int lvlCost: root.levelCosts[index]
+                                property int lapCost: root.lapisCosts[index]
+                                // enabled 条件：档位序号 < maxLevel（书架解锁）且 XP 等级 + 青金石都够消耗。
+                                property bool unlocked: index < root.maxLevel
+                                property bool affordable: root.playerLevel >= lvlCost && root.lapisCount >= lapCost
+                                property bool enabled1: unlocked && affordable
+                                width: 190; height: 36
+                                color: enabled1 ? "#5a4a2a" : "#2a2018"
+                                border.color: enabled1 ? "#ffd87a" : "#0a0604"
+                                border.width: enabled1 ? 2 : 1
+                                radius: 4
+                                opacity: unlocked ? 1.0 : 0.4  // 未解锁档位半透
+
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: 8
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: ["I", "II", "III"][index]
+                                        color: enabled1 ? "#ffe6a8" : "#665544"
+                                        font.pixelSize: 14; font.bold: true
                                     }
-                                    root.justEnchanted = true
-                                    enchantFlashTimer.restart()
-                                    root.refreshOptions()
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 0
+                                        Text {
+                                            text: root.optionNames[index] || "附魔"
+                                            color: enabled1 ? "#ffe6a8" : "#665544"
+                                            font.pixelSize: 11; font.bold: true
+                                        }
+                                        Text {
+                                            text: lvlCost + "级 / " + lapCost + "青金"
+                                            color: enabled1 ? "#a8d8ff" : "#554433"
+                                            font.pixelSize: 9
+                                        }
+                                    }
+                                }
+
+                                TapHandler {
+                                    enabled: optSlot.enabled1
+                                    onTapped: {
+                                        // 占位附魔交互（功能后补）：消耗 XP + 青金石 → flash + 重投选项名。
+                                        if (!optSlot.enabled1) return
+                                        if (!root.playerState.spendLevels(optSlot.lvlCost)) return
+                                        if (!root.hotbar.consumeMaterial(root.lapisId, optSlot.lapCost)) {
+                                            console.warn("[enchant] lapis consume failed after XP spend")
+                                        }
+                                        root.justEnchanted = true
+                                        enchantFlashTimer.restart()
+                                        root.refreshOptions()
+                                    }
                                 }
                             }
                         }
@@ -594,6 +673,180 @@ Item {
         id: enchantFlashTimer
         interval: 600
         onTriggered: root.justEnchanted = false
+    }
+
+    // EnchantInputSlot 组件：左区两槽（武器/工具槽 + 青金石槽）。读本地 enchant 数组（enchantRev 驱动刷新）；
+    //   左键整组 / 右键半份取放（同主栏 / hotbar，InventoryOps 单一权威）。空槽时显 caption 小字；青金石槽
+    //   （showLapisOutline=true）空槽时画青金石轮廓占位（参考 MaterialIcon drawLapis 的青金石八边形形状，
+    //   t544 spec「青金石槽空白占位用青金石轮廓图标」；轮廓 = 暗淡描边 + 半透明底，指示该槽接受青金石）。
+    component EnchantInputSlot : Item {
+        id: eslot
+        property string group: "enchant"
+        property int index: 0
+        property int slotId: 0
+        property int slotCount: 0
+        property string caption: ""
+        property bool showLapisOutline: false
+
+        InvSlot { anchors.fill: parent; wellColor: "#262b30" }
+        // 空槽 + 青金石槽 → 青金石轮廓占位（Canvas 自绘八边形描边；参考 MaterialIcon drawLapis 形状）。
+        Canvas {
+            anchors.centerIn: parent
+            width: 30; height: 30
+            visible: eslot.slotId === 0 && eslot.showLapisOutline
+            onPaint: {
+                const ctx = getContext("2d"); ctx.reset()
+                ctx.imageSmoothingEnabled = false
+                // 青金石八边形轮廓（归一到 24×24 网格，参考 MaterialIcon drawLapis 行 6..17 / 列 5..18）：
+                //   顶点按周长序：顶(8,6)→(16,6)→右斜(18,7)→(19,8)→(19,15)→(18,16)→底(16,17)→(8,17)→
+                //   (6,16)→(5,15)→(5,8)→(6,7)→闭。整体平移到 Canvas 中心并放大到 30×30。
+                const s = 30 / 24.0
+                const ox = (30 - 24 * s) / 2   // = 0
+                const oxx = 0
+                const pts = [[8,6],[16,6],[18,7],[19,8],[19,15],[18,16],[16,17],[8,17],[6,16],[5,15],[5,8],[6,7]]
+                ctx.beginPath()
+                for (let i = 0; i < pts.length; ++i) {
+                    const px = oxx + pts[i][0] * s
+                    const py = ox + pts[i][1] * s
+                    if (i === 0) ctx.moveTo(px, py)
+                    else ctx.lineTo(px, py)
+                }
+                ctx.closePath()
+                // 半透明底（淡蓝，表青金石接受槽）+ 暗淡描边（轮廓）。
+                ctx.fillStyle = "rgba(34, 58, 160, 0.18)"
+                ctx.fill()
+                ctx.strokeStyle = "#4a66b8"
+                ctx.lineWidth = 1.2
+                ctx.stroke()
+                // 顶面高光菱（薄亮线，参考 drawLapis 顶面高光）。
+                ctx.strokeStyle = "#6082dc"
+                ctx.lineWidth = 1.0
+                ctx.beginPath()
+                ctx.moveTo(oxx + 8 * s, ox + 6 * s); ctx.lineTo(oxx + 16 * s, ox + 6 * s)
+                ctx.stroke()
+                // 中心小字「青金」提示（缩到能辨识；槽位 caption 已由调用方省略）。
+                ctx.fillStyle = "#7a8cc8"
+                ctx.font = "bold 6px sans-serif"
+                ctx.textAlign = "center"; ctx.textBaseline = "middle"
+                ctx.fillText("青金", 15, 22)
+            }
+        }
+        // 物品图标：方块段→等距立方体 Image；工具段→ToolIcon；材料段→MaterialIcon 自绘。
+        Item {
+            anchors.centerIn: parent
+            width: 30; height: 30
+            visible: eslot.slotId !== 0
+            Image {
+                anchors.fill: parent
+                visible: { const _r = root.enchantRev; return _r >= 0 ? (!root.hotbar.isTool(eslot.slotId) && !root.hotbar.isMaterial(eslot.slotId)) : false }
+                source: { const _r = root.enchantRev; return _r >= 0 ? (root.hotbar.iconSourceForBlock(eslot.slotId)) : "" }
+                fillMode: Image.PreserveAspectFit; smooth: true
+            }
+            ToolIcon {
+                anchors.fill: parent
+                visible: { const _r = root.enchantRev; return _r >= 0 ? (root.hotbar.isTool(eslot.slotId)) : false }
+                tier: { const _r = root.enchantRev; return _r >= 0 ? (root.hotbar.toolTier(eslot.slotId)) : 0 }
+                toolType: { const _r = root.enchantRev; return _r >= 0 ? (root.hotbar.toolType(eslot.slotId)) : 0 }
+            }
+            MaterialIcon {
+                anchors.fill: parent
+                visible: { const _r = root.enchantRev; return _r >= 0 ? (root.hotbar.isMaterial(eslot.slotId)) : false }
+                materialId: { const _r = root.enchantRev; return _r >= 0 ? (eslot.slotId) : 0 }
+            }
+        }
+        // 栈数量（count>1 显数字）。
+        Text {
+            anchors.right: parent.right; anchors.bottom: parent.bottom
+            anchors.rightMargin: 3; anchors.bottomMargin: 1
+            visible: { const _r = root.enchantRev; return _r >= 0 ? (eslot.slotCount > 1) : false }
+            text: { const _r = root.enchantRev; return _r >= 0 ? (eslot.slotCount) : "" }
+            color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+            font.pixelSize: 13; font.bold: true
+        }
+        // 槽位小字 caption（武器/工具 或 青金石；空槽时显，帮助辨识两槽布局；青金石槽 caption 空 → 用轮廓替代）。
+        Text {
+            anchors.centerIn: parent
+            text: eslot.slotId === 0 ? eslot.caption : ""
+            color: "#6a727a"; font.pixelSize: 9
+            visible: text.toString().length > 0 && eslot.slotId === 0 && !eslot.showLapisOutline
+        }
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: {
+                if (window.shiftHeld) { InventoryOps.slotShiftLeft(root, eslot.group, eslot.index); return }
+                // t180：280ms 内同槽二次点击 → doMergeSameId（拿同类；扫 enchant+main+hotbar 同 id）。
+                const key = root.slotKey(eslot.group, eslot.index)
+                const now = Date.now()
+                const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+                root.lastTapMs = now
+                root.lastTapKey = key
+                if (isDouble) { InventoryOps.doMergeSameId(root, eslot.group, eslot.index); return }
+                const r = root.resolveClick(eslot.slotId, eslot.slotCount, 0)
+                if (!r) return
+                root.enchantSlots[eslot.index] = r.slotId
+                root.enchantCounts[eslot.index] = r.slotCount
+                root.enchantRev++
+                root.hotbar.heldBlock = r.heldId
+                root.hotbar.heldCount = r.heldCount
+                root.hotbar.heldDurability = r.heldDur
+            }
+        }
+        TapHandler {
+            acceptedButtons: Qt.RightButton
+            onTapped: {
+                const r = root.resolveRightClick(eslot.slotId, eslot.slotCount, 0)
+                if (!r) return
+                root.enchantSlots[eslot.index] = r.slotId
+                root.enchantCounts[eslot.index] = r.slotCount
+                root.enchantRev++
+                root.hotbar.heldBlock = r.heldId
+                root.hotbar.heldCount = r.heldCount
+                root.hotbar.heldDurability = r.heldDur
+            }
+        }
+        HoverHandler {
+            // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged 不重发 →
+            // tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+            property int trackedId: eslot.slotId
+            onTrackedIdChanged: {
+                if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                    root.hoveredItemId = 0
+            }
+            onHoveredChanged: {
+                const itemId = eslot.slotId
+                if (hovered && itemId !== 0) {
+                    root.hoveredItemId = itemId
+                    const p = parent.mapToItem(root, parent.width / 2, 0)
+                    root.hoveredTipPos = Qt.point(p.x, p.y)
+                } else if (root.hoveredItemId === itemId) {
+                    root.hoveredItemId = 0
+                }
+                const key = root.slotKey(eslot.group, eslot.index)
+                if (hovered) root.hoveredKey = key
+                else if (root.hoveredKey === key) root.hoveredKey = ""
+                // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                if (hovered && root.dragActive) {
+                    root.addDragSlot(key)
+                }
+            }
+        }
+        // t167 均分拖拽高亮。
+        Rectangle {
+            anchors.fill: parent
+            color: "transparent"
+            border.color: "#7fe57f"; border.width: 2
+            visible: {
+                const _ds = root.dragSlots
+                const _rds = root.rightDragSlots
+                const _rev = root.enchantRev
+                const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
+                const key = root.slotKey(eslot.group, eslot.index)
+                if (_ok && root.leftDragActive && root.dragHasKey(key)
+                    && (eslot.slotId === 0 || eslot.slotId === root.dragHeldId)) return true
+                return _ok && root.rightDragActive && root.rightDragHasKey(key)
+            }
+            z: 10
+        }
     }
 
     // t94 物品名悬停 tooltip（纯 QtQuick 自绘；不引入 QtQuick.Controls —— 项目未链接 Qt6::QuickControls2，

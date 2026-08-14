@@ -166,6 +166,8 @@ Window {
         if (furnacePanel.visible)        return furnacePanel.hoveredKey
         if (chestPanel.visible)          return chestPanel.hoveredKey
         if (enchantingPanel.visible)     return enchantingPanel.hoveredKey
+        if (anvilPanel.visible)          return anvilPanel.hoveredKey
+        if (dispenserPanel.visible)      return dispenserPanel.hoveredKey
         if (inventoryPanel.visible)      return inventoryPanel.hoveredKey
         if (survivalPanel.visible)       return survivalPanel.hoveredKey
         return ""
@@ -466,6 +468,11 @@ Window {
         //   进世界前 loadAll 整体替换内存（先清后填）—— 无存档 furnaces 表 → 空列表 → 清空，杜绝上一世界熔炉
         //   残留串入新世界。存档 furnaces 由 saveAndExitToWorldList 经 saveAll(name, chests, furnaces) 落盘。
         furnaceStore.loadAll(worldStore.loadFurnaces())
+        // t542 发射器按世界持久化 + 修跨世界泄漏：dispenserStore 跨世界长驻（同 hotbarVM / chestStore /
+        //   furnaceStore），进世界前 loadAll 整体替换内存（先清后填）—— 无存档 dispensers 表 → 空列表 → 清空，
+        //   杜绝上一世界发射器残留串入新世界。存档 dispensers 由 saveAndExitToWorldList 经 saveAll(name, ...,
+        //   dispenserStore.allDispensers()) 落盘。
+        dispenserStore.loadAll(worldStore.loadDispensers())
         // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
         //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
         progress.loadVariant(worldStore.loadProgress())
@@ -581,7 +588,8 @@ Window {
             worldStore.savePlayerData(gatherPlayerState())
             // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
             // t177 二轮复盘：熔炉内容同事务落盘（saveAll 第 3 参 = FurnaceStore::allFurnaces() 产物）。
-            worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces())
+            // t542：发射器内容同事务落盘（saveAll 第 4 参 = DispenserStore::allDispensers() 产物）。
+            worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces(), dispenserStore.allDispensers())
             // progress 落盘（统计 + 成就，独立 upsert 单行表）。
             worldStore.saveProgress(progress.toVariant())
         }
@@ -830,6 +838,8 @@ Window {
         else if (furnacePanel.visible)       furnacePanel.swapHoveredWithHotbar(hotbarIdx)
         else if (chestPanel.visible)         chestPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (enchantingPanel.visible)    enchantingPanel.swapHoveredWithHotbar(hotbarIdx)
+        else if (anvilPanel.visible)         anvilPanel.swapHoveredWithHotbar(hotbarIdx)
+        else if (dispenserPanel.visible)     dispenserPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (inventoryPanel.visible)     inventoryPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (survivalPanel.visible)      survivalPanel.swapHoveredWithHotbar(hotbarIdx)
     }
@@ -856,6 +866,8 @@ Window {
         else if (furnacePanel.visible)       panel = furnacePanel
         else if (chestPanel.visible)         panel = chestPanel
         else if (enchantingPanel.visible)    panel = enchantingPanel
+        else if (anvilPanel.visible)         panel = anvilPanel
+        else if (dispenserPanel.visible)     panel = dispenserPanel
         else if (inventoryPanel.visible)     panel = inventoryPanel
         else if (survivalPanel.visible)      panel = survivalPanel
         if (!panel) return
@@ -1661,6 +1673,10 @@ Window {
     //   Hotbar（id=0=空）。FurnaceUI 经 furnaceX/Y/Z 寻址当前所开熔炉；多只熔炉各自独立内容 + 进度，跨 UI 开关
     //   持久（修旧 bug：旧 FurnaceUI 把 in/fuel/out 存 QML 本地属性 → 全世界熔炉共享一个物品栏）。
     FurnaceStore { id: furnaceStore }
+    // t542 发射器内容存储 VM（按方块世界坐标键控的 9 槽 3×3；DispenserUI 读写 + onBlockBroken(Dispenser) 清
+    //   孤儿 + 掉内容）。纯 Game/ViewModel 层，不依赖 World/Renderer；物品栈语义同 Hotbar（id=0=空）。
+    //   修旧 bug（t517 遗留）：DispenserUI 旧把 9 槽存 QML 本地数组 → 全世界发射器共享一个物品栏、打掉不掉。
+    DispenserStore { id: dispenserStore }
     // progress 玩家进度系统 VM（统计 + 成就；跨世界持久化存 worldstore progress 表）。各事件源经 QML 桥接
     //   调埋点（onBlockMined/onCraft/onMobKilled 等）；成就解锁弹 toast（achievementUnlocked 信号）。
     PlayerProgress { id: progress }
@@ -6769,6 +6785,21 @@ Window {
                 }
                 furnaceStore.clearFurnace(x, y, z)
             }
+            // t542：发射器被破 → 把内部 9 槽内容 spawnItem 掉落世界（机制等价 MC 1.0 破发射器掉落内容，
+            //   修用户报「发射器放东西进去挖掉没掉东西」通病），再 dispenserStore.clearDispenser 清孤儿条目。
+            //   id=107=BlockRegistry::Dispenser（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
+            //   chest=22 / furnace=10 既有模式）。逐非空槽 spawnItem（每槽独立实体，便于玩家走回拾取；
+            //   itemEntities.spawnItem 内置就近合并，同 id 自动合）。铁砧（97-99）/ 附魔台（94）当前是 shell-mode
+            //   无容器（功能后补），破掉无内部物品可掉 → 无需 dump（spec「铁砧/附魔台主要是发射器」）。
+            if (id === 107) {
+                for (let di = 0; di < dispenserStore.slotCount; ++di) {
+                    const did = dispenserStore.slotIdAt(x, y, z, di)
+                    const dcount = dispenserStore.slotCountAt(x, y, z, di)
+                    if (did !== 0 && dcount > 0)
+                        itemEntities.spawnItem(x, y, z, did, dcount)
+                }
+                dispenserStore.clearDispenser(x, y, z)
+            }
             // t117：被破格上方若为沙 → 失支撑塌落（maybeTrigger 内部 setBlock(air) 递归触发更上方沙链）。
             maybeTriggerFallingBlock(x, y + 1, z)
         }
@@ -8893,6 +8924,13 @@ Window {
         id: dispenserPanel
         anchors.fill: parent
         hotbar: hotbarVM
+        // t542 注入 DispenserStore（按 dispenserX/Y/Z 寻址的 per-block 9 槽 3×3 内容）+ 发射器方块世界坐标
+        //   （dispenserOpened 携坐标存 window.dispenserX/Y/Z）。修旧 bug（t517）：旧版 9 槽存 QML 本地数组 →
+        //   全世界发射器共享一个物品栏、打掉不掉；现 per-block 按坐标寻址（同 ChestStore / FurnaceStore 模式）。
+        dispenserStore: dispenserStore
+        dispenserX: window.dispenserX
+        dispenserY: window.dispenserY
+        dispenserZ: window.dispenserZ
         visible: window.appState === "playing" && window.dispenserOpen
         z: 150
         onClosed: window.closeDispenser()
@@ -8983,7 +9021,7 @@ Window {
     // t50：手持材料 → MaterialIcon 自绘（木棒）。t37：enabled:false 显式声明本 Item 不参与指针事件——
     // z=300 浮在面板(z=150)之上，若参与事件捕获会抢走下方槽位 TapHandler 的点击。纯呈现层。
     Item {
-        visible: (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen || window.enchantingTableOpen) && hotbarVM.heldBlock !== 0
+        visible: (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen || window.enchantingTableOpen || window.anvilOpen || window.dispenserOpen) && hotbarVM.heldBlock !== 0
         enabled: false
         z: 300
         x: cursorTracker.point.position.x - 16

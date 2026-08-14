@@ -152,6 +152,12 @@ qt_add_executable(voxelsandbox
     #   下沉到 C++ VM 层、按坐标寻址，结构对齐已 per-block 的 ChestStore。纯存储类（无光 / 无 World 依赖）。
     src/Game/furnacestore.cpp
     src/Game/furnacestore.h
+    # t542 发射器内容存储 VM（Game 层）：按方块世界坐标键控的 9 槽（3×3）容器；DispenserUI 读写 +
+    #   破发射器清孤儿 + 掉内容。修旧 bug（t517 遗留）：DispenserUI 旧把 9 槽存 QML 本地数组 → 全世界发射器
+    #   共享一个物品栏（打开任何发射器都是同一内容）、打掉不掉。本类把内容下沉到 C++ VM 层、按坐标寻址，
+    #   结构对齐已 per-block 的 ChestStore（箱子 27 槽）/ FurnaceStore（熔炉 3 槽）。纯存储类（无光 / 无 World 依赖）。
+    src/Game/dispenserstore.cpp
+    src/Game/dispenserstore.h
     # progress 玩家进度系统（Game 层 ViewModel）：统计（时间/挖放/路程/击杀/死亡/合成/拾取）+ 成就解锁。
     #   跨世界持久化（同 ChestStore/FurnaceStore，存 worldstore progress 表）。各事件源经 QML 桥接调埋点。
     src/Game/playerprogress.cpp

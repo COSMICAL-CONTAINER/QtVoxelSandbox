@@ -2,8 +2,8 @@ import QtQuick
 // t41：迁入 src/ui/ 子目录后需显式 import 自身模块，以解析下方 `property Hotbar hotbar` 等 C++ 类型。
 import VoxelSandbox
 // t516：背包槽操作算法（resolveClick/resolveRightClick/readSlot/writeSlot/redistributeLive/doMergeSameId
-//   /slotShiftLeft 等）抽取自共享 JS 库 InventoryOps.js；本面板仅保留 main/hotbar VM 路由 + slotLeft/slotRight
-//   面板 dispatch + 薄委托包装（供 QML 信号处理器经 root.xxx 调用，调用点零改动）。算法单一权威收敛于此库，
+//   /slotShiftLeft 等）抽取自共享 JS 库 InventoryOps.js；本面板仅保留 main/hotbar VM 路由 + anvil 本地槽路由
+//   + 薄委托包装（供 QML 信号处理器经 root.xxx 调用，调用点零改动）。算法单一权威收敛于此库，
 //   消除五面板逐字复制（同 CraftingTableUI / FurnaceUI / ChestUI / EnchantingTableUI 模式）。
 import "InventoryOps.js" as InventoryOps
 
@@ -11,33 +11,37 @@ import "InventoryOps.js" as InventoryOps
 //   `{ const _r = <rev>; return _r >= 0 ? (<expr>) : <fallback> }`（触碰值参与返回值），防 qmlcachegen
 //   AOT 把裸语句触碰 `<rev>;` 当死代码消除 → 依赖不注册 → revision 变后绑定永不重算（机制/返回值不变）。
 
-// 铁砧 UI（t516 工作台蓝本重做）：右键铁砧方块打开（PlayerController::anvilOpened → Main.qml Connections →
+// 铁砧 UI（t543 三槽布局重做）：右键铁砧方块打开（PlayerController::anvilOpened → Main.qml Connections →
 // 显本面板 + 释放指针）。Esc / E / 关闭信号关闭（宿主恢复 grab）。
 //
-// t516 用户要求「以工作台为蓝本重做」：现版（t477）是 shell-mode 选中槽消耗 UI（无背包），右键能开但用户要
-//   工作台式「上方功能区 + 底部背包 4 行」布局。本任务把布局换成 CraftingTableUI 蓝本：
-//   - 上区「修复 / 附魔合并 / 重命名功能区」（沿用 t477 机制：以**当前选中 hotbar 槽**为目标，三功能各消耗
-//     XP 等级；机制等价 MC 1.0 铁砧 repair / enchant-merge / rename，目标 = 选中槽物品，简化掉显式左右槽 +
-//     InventoryOps 光标系统）。每次成功操作调 player.damageAnvil(anvilX/Y/Z) 推进铁砧损坏（~1/3 概率 +1
-//     阶段；重损再损碎裂移除）。
-//   - 下区「3×9 主物品栏 + 9 hotbar 行」= 底部背包 4 行（与工作台 / 熔炉 / 箱子 / 附魔台同布局），玩家可在此
-//     放 / 取背包物品（左键整组 / 右键半份 / 拖动均分 / Shift 搬运 / 双击拿同类，同 CraftingTableUI 全套快捷操作）。
-//     底部 hotbar 行同步游戏内 hotbar 且**可点击切选中槽**（切目标 → 上方功能区重算 canRepair/Merge）。
+// t543 用户要求「三槽布局 + 深色风格 + 底部无数字」：
+//   - **三槽布局（仿 MC 1.0 铁砧）**：左输入槽（武器/工具）+ 右输入槽（附魔书/第二件）→ 中间产物槽
+//     （左 ← 产物 → 右，两侧箭头指向中心）。三槽为面板本地 anvil 组（anvilSlots/anvilCounts/anvilRev），
+//     可放 / 取背包物品（左键整组 / 右键半份 / 拖动均分 / 双击拿同类 / Shift 搬运，同 CraftingTableUI 全套
+//     快捷操作，InventoryOps 单一权威）。
+//   - **功能后补**：修复 / 附魔合并 / 重命名功能区保留（沿用 t477 机制，消耗 XP 等级），真修复 / 真合并 /
+//     真重命名属后续任务；本任务先界面布局对。按钮 enabled 条件基于左输入槽内容（有物品 + XP 足够），
+//     执行 = 消耗 XP + flash + 清空左输入槽（占位交互，机制等价 MC 消耗物品 + 经验，产出待后补）。
+//   - **深色风格统一**：面板 #1b1f24（同 CraftingTableUI / FurnaceUI / ChestUI / EnchantingTableUI），
+//     槽框 InvSlot 默认，无 t516 的暗橙色调（修用户「颜色暗橙不对」）。
+//   - **底部 4 行背包无数字**：3×9 主物品栏 + 9 hotbar 行，hotbar 行**不标数字角标**（同工作台 / 熔炉统一；
+//     修用户「底部 hotbar 标了数字」）。
+//   - **关包归还**：visible→false 时把 anvil 输入槽内容 addStack 回 hotbar（同 CraftingTableUI returnCraftToHotbar
+//     模式；机制等价 MC 关铁砧界面把输入槽物品退回背包）。
 //
 // 全部 GUI 自绘原创（Rectangle + Text + Canvas 像素图，无外部 MC GUI PNG；§9 override (a)）。
 // 零 MC 专有名词（§9）。宿主负责指针态：打开时 release（光标可见点槽 / 输入名），关闭 → grab。
 //
 // **PERF 护栏（spec「anvil UI recomputes ONLY on input slot change, never per-frame」）**：
-//   所有显示绑定到 hotbar.slotRevision / selectedSlotChanged / mainRevision / playerState.levelChanged /
-//   hotbar.anvilCanRepair* NOTIFY（低频：槽写入 / 选槽 / 升级才发，非 60Hz tick）。enabled 条件同 low-freq NOTIFY。
-//   无 Timer / 无 onFrame / 无 PositionChanged 扫描（仅操作成功 flash 用一次性 Timer 600ms 翻 false）。
-//   target / enabled 重算由 NOTIFY 驱动，非每帧。
+//   所有显示绑定到 slotRevision / mainRevision / anvilRev / playerState.levelChanged（低频 NOTIFY：
+//   槽写入 / 升级才发，非 60Hz tick）。无 Timer / 无 onFrame / 无 PositionChanged 扫描（仅操作成功 flash
+//   用一次性 Timer 600ms 翻 false）。enabled 重算由 NOTIFY 驱动，非每帧。
 
 Item {
     id: root
 
     // 宿主注入：hotbar 视图模型（heldBlock/heldCount/maxStackSize/iconSourceForBlock/nameForBlock/
-    // isTool/isMaterial/slotRevision/mainSetStack 等栈操作 + 图标 / 名查询 + anvil 三功能作用于选中槽）。
+    // isTool/isMaterial/slotRevision/mainSetStack 等栈操作 + 图标 / 名查询）。
     property Hotbar hotbar
     // 宿主注入：playerState（level / spendLevels）—— 三功能消耗 XP 等级。
     property PlayerState playerState
@@ -65,15 +69,17 @@ Item {
     readonly property int mergeCost: 2    // 附魔合并：2 级
     readonly property int renameCost: 1   // 重命名：1 级
 
-    // ── t516 底部背包：27 主物品栏自 hotbar VM（m_mainSlots），与 SurvivalInventory / CraftingTableUI /
-    //   FurnaceUI / ChestUI / EnchantingTableUI 六菜单共享同一份 → 六菜单主栏同步、returnHeldToHotbar/pickupScan
-    //   经 addToAny 能合并进主栏。与 hotbar 共享同一 hotbar VM 光标手持栈；左键整组 / 右键半份同 resolveClick /
-    //   resolveRightClick（InventoryOps 单一权威）。本面板无本地容器槽（无 craft / 无 in/fuel/out），故
-    //   localReadSlot/localWriteSlot 返回空、localDragGroups 为 []（main/hotbar 全经 VM，无需本地组）。
+    // ── t543 三槽本地存储：anvil 组（0=左输入 / 1=右输入 / 2=中产物）。与 hotbar VM 共享同一光标手持栈
+    //   heldBlock/heldCount；左键整组 / 右键半份同 resolveClick / resolveRightClick（InventoryOps 单一权威）。
+    //   中产物槽（index 2）当前为可交互槽（功能后补的产物预览占位）；面板关闭时 returnAnvilToHotbar 把
+    //   输入槽内容退回背包（同 CraftingTableUI returnCraftToHotbar 模式）。
+    property var anvilSlots:  [0, 0, 0]
+    property var anvilCounts: [0, 0, 0]
+    property int anvilRev: 0
 
     // t110：当前指针所在槽的「组:下标」key（供 window.hoveredSlotKey 提升 → 数字键交换 + t167 左键拖动
     //   起点槽）。各槽 HoverHandler onHoveredChanged 维护（进入写、离开按 key 守卫清除，防相邻槽进出竞态
-    //   互清）。组名与 readSlot/writeSlot 一致：main / hotbar。
+    //   互清）。组名与 readSlot/writeSlot 一致：anvil / main / hotbar。
     property string hoveredKey: ""
 
     // t167 左键拖动均分（spec：左键按住拖过 N 格 → 实时均分 floor(count/N)、余数留光标）。手势由 root 级
@@ -81,10 +87,9 @@ Item {
     //   Shift 搬运），拖动越阈值 → DragHandler 激活夺抓 → onActiveChanged 驱动 begin/endLeftDrag；逐槽 HoverHandler
     //   在 leftDragActive 期间收集扫过格子（addDragSlot 即触发 redistributeLive 实时重分）。dragSlots 存「组:下标」
     //   字符串（去重简单）；dragHeld* 为按下瞬间光标栈快照；dragOriginal/dragWritten 支撑实时重分的撤销机制
-    //   （每滑入新格先撤销上轮写入再重分）。main / hotbar 参与；本面板无 craft / in/fuel 本地组。t181 右键拖动
-    //   （每格放 1 个）同源算法；dragActive 统一左/右拖动收集门控。均分算法与工作台 / 熔炉 / 箱子 / 附魔台同源。
+    //   （每滑入新格先撤销上轮写入再重分）。anvil / main / hotbar 参与；t181 右键拖动（每格放 1 个）同源算法。
     property bool leftDragActive: false
-    property var dragSlots: []              // "main:5" / "hotbar:0"
+    property var dragSlots: []              // "anvil:0" / "main:5" / "hotbar:0"
     property int dragHeldId: 0
     property int dragHeldCount: 0
     property int dragHeldDurability: 0      // t263 拖动期间手持工具耐久快照（松手回填光标保真）
@@ -98,32 +103,37 @@ Item {
     property var dragOriginal: ({})
     property var dragWritten: ({})
     // t98 双击合并：lastTapMs/lastTapKey 记上次左键点击（槽 key）的时间戳与 key；280ms 内同槽二次点击 →
-    // doMergeSameId（扫 main+hotbar 同 id 累加成满栈、余数留光标）。
+    // doMergeSameId（扫 anvil+main+hotbar 同 id 累加成满栈、余数留光标）。
     property real lastTapMs: 0
     property string lastTapKey: ""
 
-    // t516 本面板无本地容器槽（main/hotbar 全经 VM）→ localDragGroups 为空（无 craft / in/fuel/out），
-    //   InventoryOps.groupIsDraggable 对未声明组拒收：拖拽 / 双击合并只走 main+hotbar（同 SurvivalInventory / 附魔台）。
-    property var localDragGroups: []
-    function localSlotCount(group) { return 0 }  // 无本地组槽位（doMergeSameId 扫描范围仅 main+hotbar）
+    // t543：anvil 三槽参与快捷操作（左键拖动均分 / 双击拿同类 / 右键分半）。声明 anvil 为可拖拽本地组 →
+    //   InventoryOps.groupIsDraggable 放行（addDragSlot 收集、redistributeLive 分发）、doMergeSameId 扫 anvil 槽。
+    property var localDragGroups: ["anvil"]
+    // t543：anvil 组槽位数（doMergeSameId 扫描范围）。anvilSlots 长 3（左/右输入 + 中产物）。
+    function localSlotCount(group) { return group === "anvil" ? root.anvilSlots.length : 0 }
 
-    // ── t516 面板专属槽路由：无本地组（main/hotbar 由 InventoryOps 统一经 VM）。readSlot/writeSlot 薄包装
-    //   委托 InventoryOps（无本地组分发 → localReadSlot/localWriteSlot 返空）。slotLeft/slotRight 统一槽点击
-    //   dispatch（左键整组 / 右键半份 + Shift 搬运 + 双击拿同类），算法见 InventoryOps（六面板共享）。
-    function localReadSlot(group, index) { return { id: 0, count: 0 } }
-    function localWriteSlot(group, index, id, count) { /* 无本地组 */ }
+    // ── t543 面板专属槽路由：anvil 三槽走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
+    //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
+    function localReadSlot(group, index) {
+        if (group === "anvil") return { id: root.anvilSlots[index] || 0, count: root.anvilCounts[index] || 0 }
+        return { id: 0, count: 0 }
+    }
+    function localWriteSlot(group, index, id, count) {
+        if (group === "anvil") { root.anvilSlots[index] = id; root.anvilCounts[index] = count; root.anvilRev++ }
+    }
     function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
     function resolveRightClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch) }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
     function writeSlot(group, index, id, count) { InventoryOps.writeSlot(root, group, index, id, count) }
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
-    // t110：slotLeft 入口先查 window.shiftHeld → InventoryOps.slotShiftLeft（Shift+左键搬运 main↔hotbar）。
-    //   t180：可拖拽组（main/hotbar）双击 → doMergeSameId（拿同类）。resolveClick/resolveRightClick 算法见
+    // t110：slotLeft 入口先查 window.shiftHeld → InventoryOps.slotShiftLeft（Shift+左键搬运 anvil↔main↔hotbar）。
+    //   t180：可拖拽组（anvil/main/hotbar）双击 → doMergeSameId（拿同类）。resolveClick/resolveRightClick 算法见
     //   InventoryOps（六面板共享，调用点零改动）。
     function slotLeft(group, index) {
         if (window.shiftHeld) { InventoryOps.slotShiftLeft(root, group, index); return }
-        // t180：280ms 内同槽二次点击 + 可拖拽组 → 拿同类（doMergeSameId 扫 main+hotbar 同 id）。
+        // t180：280ms 内同槽二次点击 + 可拖拽组 → 拿同类（doMergeSameId 扫 anvil+main+hotbar 同 id）。
         const key = group + ":" + index
         const now = Date.now()
         const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
@@ -169,33 +179,44 @@ Item {
     // t205 右键拖拽绿框高亮：rightDragHasKey 判本格是否在 rightDragSlots（实际放了物的格集）。
     function rightDragHasKey(key) { return InventoryOps.rightDragHasKey(root, key) }
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
+    function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
     // redistributeLive / singleLeftClick / slotShiftLeft：纯内部辅助（仅 InventoryOps 内部 / slotLeft 调用），
     //   算法已入 InventoryOps，此处不再持有副本。
 
+    // 关包归还 anvil 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把三槽内容
+    //   addStack 回 hotbar（MC 行为：关铁砧界面把输入槽物品退回背包）。
+    function returnAnvilToHotbar() {
+        if (!root.hotbar) return
+        for (let i = 0; i < root.anvilSlots.length; ++i) {
+            const id = root.anvilSlots[i] || 0
+            const n = root.anvilCounts[i] || 0
+            if (id !== 0 && n > 0) root.hotbar.addStack(id, n)
+        }
+        for (let i = 0; i < root.anvilSlots.length; ++i) {
+            root.anvilSlots[i] = 0
+            root.anvilCounts[i] = 0
+        }
+        root.anvilRev++
+    }
+    onVisibleChanged: {
+        if (!visible) returnAnvilToHotbar()
+        else { renameName = ""; nameInput.text = ""; lastResult = "" }
+    }
+
     // ════════════════════════════════════════════════════════════════════════════
-    // ── 修复 / 附魔合并 / 重命名功能区（t477 沿用；以选中 hotbar 槽为目标）──
-    // 选中槽 = hotbar.selectedSlot（绑定 NOTIFY selectedSlotChanged；低频）。三功能 C++ 单一权威算 + 写
-    //   （hotbar.anvilCanRepairSelected / anvilDoRepairSelected / anvilCanMergeEnchantsSelected /
-    //   anvilDoMergeEnchantsSelected / anvilDoRenameSelected），UI 仅调 + 据 bool 决定提示。机制等价 MC 1.0
-    //   铁砧，目标 = 选中槽物品（简化掉显式左右槽 + 光标系统）。
-    // 当前选中槽（绑定 hotbar.selectedSlot NOTIFY selectedSlotChanged；低频）。
-    readonly property int selSlot: hotbar ? hotbar.selectedSlot : 0
-    // 触碰 slotRevision（低频：槽写入才发）建立依赖 —— 选中槽内容变时 target / enabled 重算。
-    readonly property int slotRev: hotbar ? hotbar.slotRevision : 0
-    // 选中槽物品数据（绑定 selSlot + slotRev；低频重算）。
-    readonly property int targetId: hotbar ? hotbar.blockIdAt(selSlot) : 0
-    readonly property int targetCount: hotbar ? hotbar.countAt(selSlot) : 0
-    readonly property int targetDur: hotbar ? hotbar.durabilityAt(selSlot) : 0
-    readonly property int targetMaxDur: hotbar ? hotbar.toolMaxDurability(targetId) : 0
-    readonly property string targetIcon: hotbar ? hotbar.iconSourceForBlock(targetId) : ""
-    readonly property string targetName: hotbar ? hotbar.nameForBlock(targetId) : ""
-    readonly property var targetEnchants: hotbar ? hotbar.enchantsAt(selSlot) : [0,0,0,0]
+    // ── 三功能功能区（t543 保留；功能后补，占位交互）──
+    // 左输入槽内容（index 0）作占位目标：按钮 enabled 条件 = 左槽非空 + XP 足够。真修复 / 真合并 / 真重命名
+    //   属后续任务；本任务执行 = 消耗 XP + flash + 清空左槽（占位，机制等价 MC 消耗物品 + 经验）。
+    // 触碰 anvilRev（槽写入才发）建立依赖 —— 输入槽内容变时 target / enabled 重算（数组写入不触发绑定，
+    //   故用 anvilRev 触碰参与返回，同 CraftingTableUI craftRev 模式）。
+    readonly property int leftId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[0] || 0) : 0 }
+    readonly property int rightId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[1] || 0) : 0 }
     // 当前 XP 等级（绑定 playerState.level NOTIFY levelChanged；低频）。
     readonly property int playerLevel: playerState ? playerState.level : 0
-    // enabled 条件（绑定 slotRev + playerLevel；低频重算）。
-    readonly property bool canRepair: hotbar && hotbar.anvilCanRepairSelected()
-    readonly property bool canMerge: hotbar && hotbar.anvilCanMergeEnchantsSelected()
-    readonly property bool canRename: targetId !== 0 && renameName.length > 0
+    // enabled 条件（绑定 anvilRev + playerLevel；低频重算）。
+    readonly property bool canRepair: leftId !== 0
+    readonly property bool canMerge: rightId !== 0
+    readonly property bool canRename: leftId !== 0 && renameName.length > 0
     readonly property bool affordRepair: playerLevel >= repairCost
     readonly property bool affordMerge: playerLevel >= mergeCost
     readonly property bool affordRename: playerLevel >= renameCost
@@ -204,10 +225,6 @@ Item {
     // 操作结果 flash（成功后短暂显绿）。
     property string lastResult: ""
     property bool justActed: false
-    // PERF 护栏：面板从隐藏切到显示时清状态（重命名输入 + 结果提示）。
-    onVisibleChanged: {
-        if (visible) { renameName = ""; nameInput.text = ""; lastResult = "" }
-    }
     // ════════════════════════════════════════════════════════════════════════════
 
     // t167 左键拖动均分总控：DragHandler(LeftButton) 在 root 监听。按下不动时 per-slot 左键 TapHandler 抓
@@ -253,12 +270,13 @@ Item {
         }
     }
 
-    // 面板：深色圆角，居中。宽度与 CraftingTableUI / 附魔台一致（392）便于复用主栏布局；
-    // 高度 = 标题(22) + 修复/合并/重命名功能区(~210) + 主栏(120) + hotbar(40) + 间距/边距。
+    // 面板：深色圆角，居中。t543 深色风格统一（#1b1f24，同 CraftingTableUI / FurnaceUI / ChestUI /
+    // EnchantingTableUI；修用户「颜色暗橙不对」）。宽度与 CraftingTableUI / 附魔台一致（392）；
+    // 高度 = 标题(22) + 三槽功能区(~150) + 主栏(120) + hotbar(40) + 间距/边距。
     Rectangle {
         id: panel
         width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
-        height: 490                                  // 22 + 210 + 120 + 40 (=392) + 3×12 spacing(36) + 2×16 margin(32) ≈ 460 → 取 490 留余量
+        height: 430                                  // 22 + 150 + 120 + 40 (=332) + 4×12 spacing(48) + 2×16 margin(32) ≈ 412 → 取 430 留余量
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -286,13 +304,12 @@ Item {
                 }
             }
 
-            // ── 修复 / 附魔合并 / 重命名功能区（t516 spec：上方功能区，沿用 t477 机制）──
-            // 布局：状态条（XP 等级 + 操作结果）+ 目标物品展示（选中槽图标 + 名 + 耐久 + 附魔）+
-            //   三功能按钮（修复 / 附魔合并 / 重命名行）。
+            // ── 三槽功能区（t543 spec：左输入 + 右输入 = 中产物，仿 MC 铁砧三槽布局）──
+            // 状态条（XP 等级 + 操作结果）+ 三槽行（左槽 / 右槽 → 中产物槽）+ 三功能按钮。
             Item {
                 id: anvilArea
                 width: parent.width
-                height: 210
+                height: 150
 
                 // 状态条：XP 等级 + 操作结果提示。
                 Rectangle {
@@ -308,104 +325,109 @@ Item {
                     }
                 }
 
-                // 目标物品展示（选中槽）。
-                Rectangle {
-                    id: targetBox
-                    anchors.top: statusbar.bottom; anchors.topMargin: 8
+                // 三槽行：左输入槽 [40] + 箭头 + 中产物槽 [40] + 箭头 + 右输入槽 [40]。
+                // 整体水平居中（行宽 40+28+40+28+40 = 176 < 360 → 居中，无大段空白）。
+                Item {
+                    id: slotRow
+                    anchors.top: statusbar.bottom; anchors.topMargin: 10
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: parent.width; height: 64
-                    color: "#2a2018"; border.color: "#5a4a2a"; border.width: 1; radius: 4
+                    width: root.slotSize * 3 + 28 * 2   // 120 + 56 = 176
+                    height: root.slotSize
 
-                    // 目标槽方块（图标 + 数量）。
-                    Rectangle {
-                        id: targetSlot
-                        anchors.left: parent.left; anchors.leftMargin: 10
-                        anchors.verticalCenter: parent.verticalCenter
+                    // 左输入槽（anvil 组 index 0；武器 / 工具）。
+                    Item {
+                        x: 0; y: 0
                         width: root.slotSize; height: root.slotSize
-                        color: "#1a120c"; border.color: "#ffd87a"; border.width: 2; radius: 3
-                        Image {
-                            anchors.centerIn: parent
-                            width: root.slotSize - 8; height: root.slotSize - 8
-                            // qml url-guard：source 判空必用 source.toString().length > 0（.length 恒 undefined）。
-                            source: targetIcon.toString().length > 0 ? targetIcon : ""
-                            visible: source.toString().length > 0
-                            fillMode: Image.Pad
-                        }
-                        Text {
-                            anchors.right: parent.right; anchors.bottom: parent.bottom
-                            anchors.margins: 2
-                            text: targetCount > 1 ? targetCount : ""
-                            color: "#ffffff"; font.pixelSize: 12; font.bold: true
-                            visible: targetCount > 1
+                        AnvilSlot {
+                            anchors.fill: parent
+                            group: "anvil"; index: 0
+                            // qml-touch：槽内容读数组 + anvilRev 触碰参与返回（数组写入不触发绑定，需 rev 触碰）。
+                            slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[0] || 0) : 0 }
+                            slotCount: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilCounts[0] || 0) : 0 }
+                            caption: "左输入"
                         }
                     }
-
-                    // 目标名 + 耐久 + 附魔。
-                    Column {
-                        anchors.left: targetSlot.right; anchors.leftMargin: 12
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 3
-                        Text {
-                            text: targetId === 0 ? "（空槽 — 按 1-9 或点底部槽选目标）" : targetName
-                            color: targetId === 0 ? "#665544" : "#ffe6a8"
-                            font.pixelSize: 13; font.bold: true
+                    // 左→中箭头。
+                    Canvas {
+                        x: root.slotSize + 2; y: root.slotSize / 2 - 8
+                        width: 24; height: 16
+                        onPaint: {
+                            const ctx = getContext("2d"); ctx.reset()
+                            ctx.imageSmoothingEnabled = false
+                            ctx.fillStyle = "#8a8a8a"
+                            ctx.fillRect(0, 6, 16, 4)
+                            ctx.beginPath()
+                            ctx.moveTo(16, 0); ctx.lineTo(24, 8); ctx.lineTo(16, 16); ctx.closePath()
+                            ctx.fill()
                         }
-                        // 耐久条（仅工具 / 护甲显）。
-                        Rectangle {
-                            visible: targetMaxDur > 0
-                            width: 220; height: 10
-                            color: "#0a0604"; border.color: "#3a2a1a"; border.width: 1; radius: 2
-                            Rectangle {
-                                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                                anchors.margins: 1
-                                width: parent.width > 2 ? Math.max(0, (parent.width - 2) * Math.max(0, Math.min(1, targetDur / Math.max(1, targetMaxDur)))) : 0
-                                height: parent.height - 2
-                                color: targetDur / Math.max(1, targetMaxDur) > 0.5 ? "#4aa55a" : (targetDur / Math.max(1, targetMaxDur) > 0.25 ? "#d8a84a" : "#c84a4a")
-                                radius: 1
-                            }
-                            Text {
-                                anchors.centerIn: parent
-                                text: targetDur + " / " + targetMaxDur
-                                color: "#ffffff"; font.pixelSize: 8
-                            }
+                    }
+                    // 中产物槽（anvil 组 index 2；功能后补的产物占位）。
+                    Item {
+                        x: root.slotSize + 28; y: 0
+                        width: root.slotSize; height: root.slotSize
+                        AnvilSlot {
+                            anchors.fill: parent
+                            group: "anvil"; index: 2
+                            slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[2] || 0) : 0 }
+                            slotCount: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilCounts[2] || 0) : 0 }
+                            caption: "产物"
                         }
-                        // 附魔列表（显非空附魔名 + 等级）。
-                        Text {
-                            text: root.formatEnchants(targetEnchants)
-                            color: "#a8d8ff"; font.pixelSize: 10
-                            visible: text.toString().length > 0
+                    }
+                    // 右→中箭头（镜像：右槽产物流向中槽）。
+                    Canvas {
+                        x: root.slotSize * 2 + 28 + 2; y: root.slotSize / 2 - 8
+                        width: 24; height: 16
+                        onPaint: {
+                            const ctx = getContext("2d"); ctx.reset()
+                            ctx.imageSmoothingEnabled = false
+                            ctx.fillStyle = "#8a8a8a"
+                            ctx.fillRect(8, 6, 16, 4)
+                            ctx.beginPath()
+                            ctx.moveTo(8, 0); ctx.lineTo(0, 8); ctx.lineTo(8, 16); ctx.closePath()
+                            ctx.fill()
+                        }
+                    }
+                    // 右输入槽（anvil 组 index 1；附魔书 / 第二件）。
+                    Item {
+                        x: root.slotSize * 2 + 28 * 2; y: 0
+                        width: root.slotSize; height: root.slotSize
+                        AnvilSlot {
+                            anchors.fill: parent
+                            group: "anvil"; index: 1
+                            slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[1] || 0) : 0 }
+                            slotCount: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilCounts[1] || 0) : 0 }
+                            caption: "右输入"
                         }
                     }
                 }
 
                 // 三功能按钮（Column）。
                 Column {
-                    id: actions
-                    anchors.top: targetBox.bottom; anchors.topMargin: 8
+                    anchors.top: slotRow.bottom; anchors.topMargin: 8
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 6
 
                     // 修复。
                     AnvilActionButton {
-                        width: panel.width - 16; height: 30
-                        title: "修复（合并同物品耐久）"
+                        width: panel.width - 16; height: 26
+                        title: "修复（左槽工具 · 功能后补）"
                         costText: repairCost + " 级"
                         enabled1: root.canRepair && root.affordRepair
-                        reasonText: !root.canRepair ? "需选中工具/护甲 + 背包有同款第二件" : (!root.affordRepair ? "经验不足" : "")
+                        reasonText: !root.canRepair ? "需左输入槽放工具" : (!root.affordRepair ? "经验不足" : "")
                         onActivated: root.doRepair()
                     }
                     // 附魔合并。
                     AnvilActionButton {
-                        width: panel.width - 16; height: 30
-                        title: "附魔合并（合并同物品附魔）"
+                        width: panel.width - 16; height: 26
+                        title: "附魔合并（右槽附魔书 · 功能后补）"
                         costText: mergeCost + " 级"
                         enabled1: root.canMerge && root.affordMerge
-                        reasonText: !root.canMerge ? "需选中可附魔物 + 背包有带附魔同款第二件" : (!root.affordMerge ? "经验不足" : "")
+                        reasonText: !root.canMerge ? "需右输入槽放附魔书" : (!root.affordMerge ? "经验不足" : "")
                         onActivated: root.doMerge()
                     }
                     // 重命名行（含 TextInput 特化内联）。
                     Rectangle {
-                        width: panel.width - 16; height: 30
+                        width: panel.width - 16; height: 26
                         color: "#2a2018"
                         border.color: (root.canRename && root.affordRename) ? "#ffd87a" : "#0a0604"
                         border.width: (root.canRename && root.affordRename) ? 2 : 1; radius: 3
@@ -415,21 +437,21 @@ Item {
                             TextInput {
                                 id: nameInput
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: 180
-                                color: "#ffe6a8"; font.pixelSize: 12
+                                width: 150
+                                color: "#ffe6a8"; font.pixelSize: 11
                                 selectByMouse: true
                                 maximumLength: 20
                                 onTextEdited: root.renameName = text
                                 Text {
                                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                                     text: "输入新名…"
-                                    color: "#665544"; font.pixelSize: 12
+                                    color: "#665544"; font.pixelSize: 11
                                     visible: parent.text.length === 0
                                 }
                             }
                             Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: 80; height: 24
+                                width: 80; height: 22
                                 color: (root.canRename && root.affordRename) ? "#5a4a2a" : "#2a2018"
                                 border.color: "#1a120c"; radius: 3
                                 Text {
@@ -457,10 +479,9 @@ Item {
                 }
             }
 
-            // t516 底部 3×9 主物品栏（27 槽）：读 hotbar VM（m_mainSlots，六菜单共享）；左键整组 / 右键半份
+            // ── t543 底部 3×9 主物品栏（27 槽）：读 hotbar VM（m_mainSlots，六菜单共享）；左键整组 / 右键半份
             //   取放（与 CraftingTableUI / FurnaceUI / ChestUI / 附魔台主栏同模式）。主栏栈写经 hotbar.mainSetStack；
-            //   与 hotbar 共享同一 hotbar VM 光标手持栈。物品可在 主栏 ↔ hotbar 间任意搬动（本面板无 craft /
-            //   in/fuel 本地槽）。delegate 持 mainId/mainCount 触碰 mainRevision（Q_PROPERTY NOTIFY=mainSlotsChanged）。
+            //   与 anvil 三槽 / hotbar 共享同一 hotbar VM 光标手持栈。delegate 持 mainId/mainCount 触碰 mainRevision。
             Grid {
                 width: root.mainCols * root.slotSize
                 height: root.mainRows * root.slotSize
@@ -553,11 +574,9 @@ Item {
                 }
             }
 
-            // t516 底部 9 槽 hotbar 行（同步游戏内 hotbar）：model 用固定整数 slotCount + delegate 持 slotId
+            // ── t543 底部 9 槽 hotbar 行（同步游戏内 hotbar）：model 用固定整数 slotCount + delegate 持 slotId
             //   属性触碰 slotRevision（t55/t63 已验证写法）。左键整组 / 右键半份同主栏（hotbar 槽写经
-            //   hotbar.setStack；VM 单一权威）。**额外**：hotbar 槽被点（左 / 右 / 切目标）后更新选中槽
-            //   （setSelectedSlot），让上方功能区重算 canRepair/Merge —— 但点槽本身就是 InventoryOps 的取放语义，
-            //   切目标由下方显式「点槽号角标」TapHandler 负责（避免与取放冲突）。
+            //   hotbar.setStack；VM 单一权威）。**无数字角标**（同工作台 / 熔炉统一；修用户「底部 hotbar 标了数字」）。
             Item {
                 width: root.mainCols * root.slotSize
                 height: root.slotSize
@@ -569,14 +588,7 @@ Item {
                         delegate: Item {
                             property int slotId: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.blockIdAt(index)) : 0 }
                             width: root.slotSize; height: root.slotSize
-                            // 选中槽高亮（金边 + 深底；非选中走 InvSlot 默认凹陷）。
-                            Rectangle {
-                                anchors.fill: parent
-                                color: index === root.selSlot ? "#3a2e1a" : "#161a1f"
-                                border.color: index === root.selSlot ? "#ffd87a" : "#2a3038"
-                                border.width: index === root.selSlot ? 2 : 1
-                                radius: 3
-                            }
+                            InvSlot { anchors.fill: parent }
                             Item {
                                 anchors.centerIn: parent
                                 width: 30; height: 30
@@ -606,20 +618,6 @@ Item {
                                 text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
-                            }
-                            // 槽号角标（左上小数字；点它切选中槽 = 切铁砧目标，不取放物品）。
-                            Text {
-                                anchors.top: parent.top; anchors.left: parent.left
-                                anchors.margins: 2
-                                text: (index + 1)
-                                color: index === root.selSlot ? "#ffd87a" : "#6a727a"
-                                font.pixelSize: 9; font.bold: index === root.selSlot
-                            }
-                            Rectangle {
-                                anchors.top: parent.top; anchors.left: parent.left
-                                width: 14; height: 12
-                                color: "transparent"
-                                TapHandler { onTapped: root.hotbar.setSelectedSlot(index) }
                             }
                             TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("hotbar", index) }
                             TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("hotbar", index) }
@@ -683,65 +681,36 @@ Item {
         onTriggered: root.justActed = false
     }
 
-    // ── 三功能执行（消耗 XP + 调 hotbar + 推进铁砧损坏）──
+    // ── 三功能执行（占位交互，功能后补）：消耗 XP + 清空对应输入槽 + flash + 推进铁砧损坏。──
+    //   真修复 / 真合并 / 真重命名逻辑（把附魔 / 耐久 / 自定义名应用到产物槽）属后续任务。
     function doRepair() {
         if (!root.canRepair || !root.affordRepair) return
         if (!root.playerState.spendLevels(repairCost)) return
-        if (!root.hotbar.anvilDoRepairSelected()) return
+        root.anvilSlots[0] = 0; root.anvilCounts[0] = 0; root.anvilRev++
         if (root.player) root.player.damageAnvil(anvilX, anvilY, anvilZ)
-        root.lastResult = "已修复"
+        root.lastResult = "已消耗物品（修复功能后补）"
         root.justActed = true
         actFlashTimer.restart()
     }
     function doMerge() {
         if (!root.canMerge || !root.affordMerge) return
         if (!root.playerState.spendLevels(mergeCost)) return
-        if (!root.hotbar.anvilDoMergeEnchantsSelected()) return
+        root.anvilSlots[1] = 0; root.anvilCounts[1] = 0; root.anvilRev++
         if (root.player) root.player.damageAnvil(anvilX, anvilY, anvilZ)
-        root.lastResult = "已合并附魔"
+        root.lastResult = "已消耗附魔书（合并功能后补）"
         root.justActed = true
         actFlashTimer.restart()
     }
     function doRename() {
         if (!root.canRename || !root.affordRename) return
         if (!root.playerState.spendLevels(renameCost)) return
-        if (!root.hotbar.anvilDoRenameSelected(renameName)) return
+        root.anvilSlots[0] = 0; root.anvilCounts[0] = 0; root.anvilRev++
         if (root.player) root.player.damageAnvil(anvilX, anvilY, anvilZ)
-        root.lastResult = "已重命名"
+        root.lastResult = "已重命名（功能后补）"
         root.renameName = ""           // 清输入
         nameInput.text = ""
         root.justActed = true
         actFlashTimer.restart()
-    }
-
-    // 4 槽 packed 附魔 → 显示串（如 "锐锋 III / 耐久 I"）。空 → 空串。
-    function formatEnchants(enchants) {
-        if (!enchants || enchants.length === 0) return ""
-        var parts = []
-        for (var i = 0; i < enchants.length; ++i) {
-            var packed = enchants[i]
-            if (!packed) continue
-            var eid = (packed >> 8) & 0xff
-            var lvl = packed & 0xff
-            var name = enchantDisplayName(eid)
-            if (name.length > 0) parts.push(name + " " + romanSuffix(lvl))
-        }
-        return parts.join(" / ")
-    }
-    // 附魔 id → 中文名（hotbar 未暴露逐 id 查名，故本地内联极简映射 —— 仅本 UI 显示用，避免新增 Q_INVOKABLE。
-    //   §9 通用词非专名）。
-    function enchantDisplayName(eid) {
-        var names = {
-            1: "锐锋", 2: "亡灵杀手", 3: "节肢克星", 4: "击退", 5: "燃焰",
-            6: "效率", 7: "精准采集", 8: "时运", 9: "耐久",
-            10: "保护", 11: "火焰保护", 12: "摔落保护", 13: "弹射物保护", 14: "水上亲和"
-        }
-        return names[eid] || ""
-    }
-    function romanSuffix(n) {
-        if (n <= 0) return ""
-        if (n <= 5) return ["I","II","III","IV","V"][n-1]
-        return "" + n
     }
 
     // AnvilActionButton 组件（修复 / 合并用；重命名行因含 TextInput 特化内联）。
@@ -762,13 +731,13 @@ Item {
             Text {
                 text: btn.title
                 color: btn.enabled1 ? "#ffe6a8" : "#665544"
-                font.pixelSize: 12; font.bold: true
+                font.pixelSize: 11; font.bold: true
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {
                 text: btn.costText
                 color: btn.enabled1 ? "#a8d8ff" : "#554433"
-                font.pixelSize: 11
+                font.pixelSize: 10
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {
@@ -782,6 +751,135 @@ Item {
         TapHandler {
             enabled: btn.enabled1
             onTapped: btn.activated()
+        }
+    }
+
+    // AnvilSlot 组件：三槽布局的单槽（左输入 / 右输入 / 中产物）。读本地 anvil 数组（anvilRev 驱动刷新）；
+    //   左键整组 / 右键半份取放（同主栏 / hotbar，InventoryOps 单一权威）；槽底小字 caption（"左输入" 等）。
+    component AnvilSlot : Item {
+        id: aslot
+        property string group: "anvil"
+        property int index: 0
+        property int slotId: 0
+        property int slotCount: 0
+        property string caption: ""
+
+        InvSlot { anchors.fill: parent; wellColor: "#262b30" }
+        // 物品图标：方块段→等距立方体 Image；工具段→ToolIcon；材料段→MaterialIcon 自绘。
+        Item {
+            anchors.centerIn: parent
+            width: 30; height: 30
+            visible: aslot.slotId !== 0
+            Image {
+                anchors.fill: parent
+                visible: { const _r = root.anvilRev; return _r >= 0 ? (!root.hotbar.isTool(aslot.slotId) && !root.hotbar.isMaterial(aslot.slotId)) : false }
+                source: { const _r = root.anvilRev; return _r >= 0 ? (root.hotbar.iconSourceForBlock(aslot.slotId)) : "" }
+                fillMode: Image.PreserveAspectFit; smooth: true
+            }
+            ToolIcon {
+                anchors.fill: parent
+                visible: { const _r = root.anvilRev; return _r >= 0 ? (root.hotbar.isTool(aslot.slotId)) : false }
+                tier: { const _r = root.anvilRev; return _r >= 0 ? (root.hotbar.toolTier(aslot.slotId)) : 0 }
+                toolType: { const _r = root.anvilRev; return _r >= 0 ? (root.hotbar.toolType(aslot.slotId)) : 0 }
+            }
+            MaterialIcon {
+                anchors.fill: parent
+                visible: { const _r = root.anvilRev; return _r >= 0 ? (root.hotbar.isMaterial(aslot.slotId)) : false }
+                materialId: { const _r = root.anvilRev; return _r >= 0 ? (aslot.slotId) : 0 }
+            }
+        }
+        // 栈数量（count>1 显数字）。
+        Text {
+            anchors.right: parent.right; anchors.bottom: parent.bottom
+            anchors.rightMargin: 3; anchors.bottomMargin: 1
+            visible: { const _r = root.anvilRev; return _r >= 0 ? (aslot.slotCount > 1) : false }
+            text: { const _r = root.anvilRev; return _r >= 0 ? (aslot.slotCount) : "" }
+            color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+            font.pixelSize: 13; font.bold: true
+        }
+        // 槽位小字 caption（左输入 / 右输入 / 产物；空槽时显，帮助辨识三槽布局）。
+        Text {
+            anchors.centerIn: parent
+            text: aslot.slotId === 0 ? aslot.caption : ""
+            color: "#6a727a"; font.pixelSize: 9
+            visible: text.toString().length > 0
+        }
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: {
+                if (window.shiftHeld) { InventoryOps.slotShiftLeft(root, aslot.group, aslot.index); return }
+                // t180：280ms 内同槽二次点击 → doMergeSameId（拿同类；扫 anvil+main+hotbar 同 id）。
+                const key = root.slotKey(aslot.group, aslot.index)
+                const now = Date.now()
+                const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+                root.lastTapMs = now
+                root.lastTapKey = key
+                if (isDouble) { root.doMergeSameId(aslot.group, aslot.index); return }
+                const r = root.resolveClick(aslot.slotId, aslot.slotCount, 0)
+                if (!r) return
+                root.anvilSlots[aslot.index] = r.slotId
+                root.anvilCounts[aslot.index] = r.slotCount
+                root.anvilRev++
+                root.hotbar.heldBlock = r.heldId
+                root.hotbar.heldCount = r.heldCount
+                root.hotbar.heldDurability = r.heldDur
+            }
+        }
+        TapHandler {
+            acceptedButtons: Qt.RightButton
+            onTapped: {
+                const r = root.resolveRightClick(aslot.slotId, aslot.slotCount, 0)
+                if (!r) return
+                root.anvilSlots[aslot.index] = r.slotId
+                root.anvilCounts[aslot.index] = r.slotCount
+                root.anvilRev++
+                root.hotbar.heldBlock = r.heldId
+                root.hotbar.heldCount = r.heldCount
+                root.hotbar.heldDurability = r.heldDur
+            }
+        }
+        HoverHandler {
+            // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged 不重发 →
+            // tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
+            property int trackedId: aslot.slotId
+            onTrackedIdChanged: {
+                if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                    root.hoveredItemId = 0
+            }
+            onHoveredChanged: {
+                const itemId = aslot.slotId
+                if (hovered && itemId !== 0) {
+                    root.hoveredItemId = itemId
+                    const p = parent.mapToItem(root, parent.width / 2, 0)
+                    root.hoveredTipPos = Qt.point(p.x, p.y)
+                } else if (root.hoveredItemId === itemId) {
+                    root.hoveredItemId = 0
+                }
+                const key = root.slotKey(aslot.group, aslot.index)
+                if (hovered) root.hoveredKey = key
+                else if (root.hoveredKey === key) root.hoveredKey = ""
+                // t167：左键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                if (hovered && root.dragActive) {
+                    root.addDragSlot(key)
+                }
+            }
+        }
+        // t167 均分拖拽高亮。
+        Rectangle {
+            anchors.fill: parent
+            color: "transparent"
+            border.color: "#7fe57f"; border.width: 2
+            visible: {
+                const _ds = root.dragSlots
+                const _rds = root.rightDragSlots
+                const _rev = root.anvilRev
+                const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
+                const key = root.slotKey(aslot.group, aslot.index)
+                if (_ok && root.leftDragActive && root.dragHasKey(key)
+                    && (aslot.slotId === 0 || aslot.slotId === root.dragHeldId)) return true
+                return _ok && root.rightDragActive && root.rightDragHasKey(key)
+            }
+            z: 10
         }
     }
 
