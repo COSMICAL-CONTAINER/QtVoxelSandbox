@@ -1658,6 +1658,50 @@ bool Hotbar::anvilDoRenameSelected(const QString &name)
     return true;
 }
 
+// ── t550 铁砧二轮重做：修复材料映射（纯查询，QML 判预览 / 消耗；机制等价 MC 1.0 铁砧修复材料）──
+//   木档工具→木板 / 石档→圆石 / 铁档→铁锭 / 钻石档→钻石；弓→线、剪刀→铁锭、钓竿→线（MC 1.0 无剪刀/钓竿
+//   修复 — 本工程给合理映射便于铁砧修复全工具集）；护甲→同材质锭（皮革护甲→皮革 / 铁→铁锭 / 铜→铜锭 /
+//   金→金锭 / 钻→钻石）。不可修复物品（方块 / 材料段 / 弓剪竿以外工具段…）→ 0。
+int Hotbar::anvilRepairMaterial(int itemId) const
+{
+    if (const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId)) {
+        switch (t->type) {
+        case BlockRegistry::Pickaxe:
+        case BlockRegistry::Hoe:
+        case BlockRegistry::Axe:
+        case BlockRegistry::Shovel:
+        case BlockRegistry::Sword:
+            switch (t->tier) {
+            case 1:  return int(BlockRegistry::Planks);        // 木档 → 木板
+            case 2:  return int(BlockRegistry::Cobble);        // 石档 → 圆石
+            case 3:  return int(RecipeRegistry::IronIngotId);  // 铁档 → 铁锭
+            case 4:  return int(RecipeRegistry::DiamondId);    // 钻石档 → 钻石
+            default: return 0;
+            }
+        case BlockRegistry::Bow:          return int(RecipeRegistry::StringId);       // 弓 → 线
+        case BlockRegistry::Shears:       return int(RecipeRegistry::IronIngotId);    // 剪刀 → 铁锭
+        case BlockRegistry::FishingRod:   return int(RecipeRegistry::StringId);       // 钓竿 → 线
+        default:                          return 0;
+        }
+    }
+    if (ArmorRegistry::isArmor(itemId)) {
+        switch (ArmorRegistry::tier(itemId)) {
+        case ArmorRegistry::Leather:  return int(RecipeRegistry::LeatherId);
+        case ArmorRegistry::Iron:     return int(RecipeRegistry::IronIngotId);
+        case ArmorRegistry::Copper:   return int(RecipeRegistry::CopperIngotId);
+        case ArmorRegistry::Gold:     return int(RecipeRegistry::GoldIngotId);
+        case ArmorRegistry::Diamond:  return int(RecipeRegistry::DiamondId);
+        default:                      return 0;
+        }
+    }
+    return 0;
+}
+
+bool Hotbar::anvilCanRepairMaterial(int itemId, int materialId) const
+{
+    return anvilRepairMaterial(itemId) == materialId;
+}
+
 // t476 选中槽物品附魔等级（供 Game 层 attack / mining calc point 直读）。空槽 / 越界 / 非可附魔 → 0。
 int Hotbar::selectedItemEnchantLevel(int enchantId) const
 {

@@ -44,8 +44,9 @@ function resolveClick(root, curId, curCount, curDur, curEnch) {
         if (curId === 0) return null                                       // 空手点空槽：无操作
         // t263 拾取工具：本地槽（craft/chest/in/fuel）不持耐久 → curDur=0/undefined → 视作新工具（满耐久，-1=自动）。
         //   hotbar/main 槽 curDur>0 → 实例耐久保真。非工具 curDur 恒 0（inert）。
-        // t475 附魔同理：本地槽 curEnch 为 4 个 0（无附魔）→ 拾起后无附魔；hotbar/main/armor 槽 curEnch 保真。
-        const pickupDur = root.hotbar.isTool(curId) ? (curDur > 0 ? curDur : -1) : 0
+        // t550 护甲同工具语义（有独立耐久）：main/hotbar/equip 槽护甲 curDur>0 → 实例耐久保真（修「护甲从背包
+        //   拾起即满耐久」——拾起装备过的护甲丢失耐久，铁砧修复无从谈起）；本地槽护甲 curDur=0 → 视作新护甲（满耐久）。
+        const pickupDur = (root.hotbar.isTool(curId) || root.hotbar.isArmor(curId)) ? (curDur > 0 ? curDur : -1) : 0
         return { slotId: 0, slotCount: 0, slotDur: 0, slotEnch: [0,0,0,0],// A 拾取整栈：槽清空（耐久 / 附魔随物品移走）
                  heldId: curId, heldCount: curCount, heldDur: pickupDur, heldEnch: cEnch }
     }
@@ -84,8 +85,9 @@ function resolveRightClick(root, curId, curCount, curDur, curEnch) {
         let half = Math.floor(curCount / 2)
         if (half < 1) half = 1                                           // 单件（工具段）：整件拿起
         // 工具单件 half==curCount → 槽清空（slotDur=0）。t263 拾取工具耐久：本地槽 curDur=0 → 视作新工具（-1=自动满）。
+        // t550 护甲同工具语义（有独立耐久）：curDur>0 → 实例耐久保真（修「护甲拾起即满耐久」）。
         const cleared = (curCount - half) <= 0
-        const pickupDur = root.hotbar.isTool(curId) ? (curDur > 0 ? curDur : -1) : 0
+        const pickupDur = (root.hotbar.isTool(curId) || root.hotbar.isArmor(curId)) ? (curDur > 0 ? curDur : -1) : 0
         return {
             slotId: cleared ? 0 : curId, slotCount: curCount - half, slotDur: cleared ? 0 : curDur,
             slotEnch: cleared ? [0,0,0,0] : cEnch,

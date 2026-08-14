@@ -235,6 +235,14 @@ public:
     Q_INVOKABLE bool anvilCanMergeEnchantsSelected() const;
     Q_INVOKABLE bool anvilDoMergeEnchantsSelected();
     Q_INVOKABLE bool anvilDoRenameSelected(const QString &name);
+    // ── t550 铁砧二轮重做：本地左右槽（非选中槽 shell）的修复材料判定（纯查询，UI 算预览 / 消耗）──
+    //   - anvilRepairMaterial(itemId)：该物品的修复材料 id（铁剑→铁锭 / 木镐→木板 / 石铲→圆石 / 钻石镐→钻石 /
+    //     弓→线 / 剪→铁锭 / 钓竿→线 / 护甲→对应锭或皮革）；不可修复物品 → 0。机制等价 MC 1.0 铁砧修复材料
+    //     （MC：木→木板 / 石→圆石 / 铁→铁锭 / 金→金锭 / 钻→钻石；护甲同材质锭）。
+    //   - anvilCanRepairMaterial(itemId, materialId)：materialId 是否为 itemId 的修复材料（= 二者映射相等）。
+    //     供 QML 在右槽放材料时判「能否触发修复」→ 亮产物槽 + 显等级。纯函数无副作用。
+    Q_INVOKABLE int anvilRepairMaterial(int itemId) const;
+    Q_INVOKABLE bool anvilCanRepairMaterial(int itemId, int materialId) const;
     // ── t476 附魔效果查询（供 Game 层 attack / mining calc point 直读 + 呈现层减伤算 EPF）──
     //   - selectedItemEnchantLevel(enchantId)：选中槽物品该附魔的等级（0=无；空槽 / 非可附魔 → 0）。
     //     PlayerController 在 attackMob（锐锋 / 亡灵 / 节肢 / 击退 / 燃焰）、updateMining（效率）、finishMiningAt
