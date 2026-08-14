@@ -1890,13 +1890,15 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 用户：「生物贴图已有眼睛了，不需要额外补的眼睛（牛的眼睛不用）。」
 - 查：Main.qml mob delegate 补的眼（猪/牛/羊/蜘蛛等纯色子 Model）——贴图有眼则删。
 
-**t556 船二轮重做** ❌❌❌（t530-t536 部分）
+**t556 船二轮重做** ✅✅ 已完成（commit dbdb381）
 - 用户：① 橡木/云杉分色仍错（放云杉变橡木样、撞坏掉橡木板）；② 太轻（随便推就走，还能推上岸）+ 又说走不动（水上）——碰撞/推动调优；③ 碰撞箱太大（应小一点）；④ 轻松上岸（碰到岸边方块应被挡，速度>阈值才坏）；⑤ 坐船不禁走路动画（划船时腿手还在动）；⑥ 船 4 个角闪烁（木板叠一起）。
 - 查：boatmodel 碰撞箱 + 船体材质（角闪=两个木板几何重叠）+ 坐船动画禁用 + 上岸挡停 + 橡/云杉分色。
+- 修：① 根因 = 实例作用域枚举 `boats.Spruce` 在 QML 解析不可靠（undefined → 恒走 Oak 分支）→ 改类型作用域 `BoatManager.Spruce`（boatBroken/boatWrecked/btBlockId 三处）+ boat delegate 语句块绑定改表达式形式（lessons-learned t498 漏注册防护）。② 玩家推船冲量 0.3→0.08 + 空船摩擦 3.0→5.0（推船滑行 <0.01 格、肉眼不动）。③ 碰撞盒改矩形匹配船体：kBoatHalfW 0.8→0.5（X 宽 1.0）/ 新增 kBoatHalfLen 0.7（Z 长 1.4）/ kBoatHalfH 0.55→0.35（高 0.7）；船体视觉缩 1.6→1.4 长对齐；F3+B hitbox 同步。④ footprint 变小 + 船变重 → 岸边方块被 footprint 挡停，仅速度>kBoatCrashSpeed(7) 才撞毁。⑤ 骑乘分支强制 m_moveSpeed=0 + 不推进 walkPhase → walkBlend=0 四肢归中性（坐姿 sitBlend 独立驱动）。⑥ 四角闪烁根因 = 旧横壁跨满宽 + 舷壁全长 → 四角两块同材质立方体重叠 → 深度测试交替闪烁；改「横壁跨满宽 + 舷壁只嵌中间（长 1.0）」→ 角部无重叠无缝隙。
 
-**t557 金工具+铜工具** ❌❌
+**t557 金工具+铜工具** ✅✅ 已完成（commit dbdb381）
 - 用户：「精制（金）工具没加，铜工具也没加。现在只有铁镐→钻石镐。」
 - 查：ToolRegistry 加金（tier 4?）/铜工具档。金 tools 机制等价 MC 1.0（金耐久低挖速快）；铜是本工程已有材料。
+- 修：ToolId 末尾追加不重排（保存档兼容）：金（tier 5：speedMul 12.0 最快 / 耐久 32 最脆 = MC 1.0 gold「快而脆」；金剑伤害 4 同木剑）+ 铜（tier 6：speedMul 5.0 / 耐久 180，介于石 / 铁之间；铜剑 5）五类全加（镐/斧/铲/剑/锄 = 10 件）。toolregistry.cpp kTools/kMcToolId 补行 + attackDamage 加 tier 4/5/6；10 条合成配方（金锭/铜锭 + 木棒）；hotbar creativeTools + anvilRepairMaterial（金→金锭/铜→铜锭）；ToolIcon tier 5/6 配色 + itemIdFromTypeTier 特例映射；Main.qml 手持/第三人称/掉落物 tier 5/6 配色；resourcepackmanager 金/铜工具 PNG 映射；docs/item-ids.md 工具段补表。
 
 **t558 雪傀儡 AI 朝向** ✅✅ 已完成（commit 2a522df）
 - 用户：「雪傀儡打僵尸应先面向敌对生物再发雪球（现在往脑门后面发）；F3+B 看不到朝向（红线在脑子里被挡）。」
