@@ -1765,7 +1765,7 @@ t18                        （背包，依赖 hotbar）
 > **已完成确认**（用户表扬）：挖草/土有声 ✅（t520）、箱子 shift+左键放入 ✅（t521）、破箱掉内容 ✅（t522）、功能方块 shift+右键放方块 ✅（t523）、生存物品栏位置对齐 ✅（t528 位置对）、发射器 9 格 UI 布局对 ✅（t517 布局）。
 
 ### 🔄 R19.1 回退/重做
-**t537. ✅✅ 已完成（commit 63ee60d） 工作台/熔炉图标换回 2D pack**（用户「3D 做的是一坨，换回 2D，后面我给 PNG 直接替代」）
+**t537. ✅✅ 已完成（commit d95c044） 工作台/熔炉图标换回 2D pack**（用户「3D 做的是一坨，换回 2D，后面我给 PNG 直接替代」）
 - 撤销 t518（ce1f180）：blockItemIconMap 加回 {9,10} → crafting_table.png/furnace.png（pack 2D item 图）。等用户后续给 PNG。
 - 注：t518 那次「移除映射回 3D」是错的方向，回退。
 - 实现：恢复 t492 双候选（item/<name>.png 优先、block/<name>_front.png 兜底）—— demo 包 1.8.2.2 无 item/crafting_table.png 但有 block/crafting_table_front.png/furnace_front.png，故落到 _front 兜底即用户要的 2D 平面 icon；用户后续给 item PNG 时首候选直接命中。同步更新 .h/hotbar.cpp/ResourceBrowser.qml 注释。
