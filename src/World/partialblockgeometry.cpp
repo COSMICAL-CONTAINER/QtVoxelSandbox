@@ -478,21 +478,30 @@ int PartialBlockGeometry::append(
         //   观感「格中央小梯图标、粗糙」。t519 改贴图满格（tools/build_ladder.py 纵轨贴瓦片两侧 x=2/3,12/13 +
         //   横级满铺轨间）→ 整张贴图铺满 face 后梯子铺满整格宽，读作「贴墙的一把梯子」（机制等价 MC 1.0 ladder
         //   贴图：轨靠边 + rung 满轨间，整张无大块透明留白）。几何不变（已是 MC 1.0 正确），仅同步注释说明。
+        //   t538（用户复核「放下形状仍显粗糙 / 上下太宽」）：核查确认 t519 贴图**已真进** atlas（tile 78 逐像素
+        //   一致）+ icon_ladder.png + 本渲染路径（tile 78）。用户「感觉没什么变化」的根因 = 启用的 demo 资源包
+        //   （settings.json resourcePackEnabled）把 tile 78 覆盖成包内 128px ladder.png 的平滑缩小版 → t519 默认贴图
+        //   在用户会话不可见。仍按 spec 收窄薄板：水平方向从满格 0..1 收到 12/16（两侧各 2/16 内缩，见 kPlateMargin）
+        //   —— 无论默认 / 包贴图，放下都读作「贴墙的窄薄板梯子」而非满格宽板（贴墙薄板非厚块）。高度保持满高。
         constexpr float kInset = 1.0f / 16.0f; // 贴墙内缩（cell 边以内 1/16，留嵌墙余量防 z-fight）
+        constexpr float kPlateMargin = 2.0f / 16.0f; // t538 薄板水平内缩：两侧各 2/16 → 梯板 12/16 宽（高 16/16，
+                                                     //   读作「贴墙的窄薄板梯子」而非满格宽厚的板）。梯子比例更窄。
         const int face = state & 3;
         if (face == 0 || face == 1) {
-            // 支撑墙 ±X：quad 贴 x 面（face 0=+X 边 1-kInset；face 1=-X 边 kInset），yz 全 footprint。
-            //   U→z（横级水平）、V→y（纵轨竖立）。
+            // 支撑墙 ±X：quad 贴 x 面（face 0=+X 边 1-kInset；face 1=-X 边 kInset），
+            //   y 满高 [0,1]、z 水平内缩 [kPlateMargin, 1-kPlateMargin]（U→z 横级水平、V→y 纵轨竖立）。
             const float xw = (face == 0) ? (1.0f - kInset) : kInset;
+            const float z0 = kPlateMargin, z1 = 1.0f - kPlateMargin;
             pushCrossQuad(verts, idx, lx, ly, lz,
-                          xw, 0.f, 0.f,  xw, 0.f, 1.f,  xw, 1.f, 1.f,  xw, 1.f, 0.f, // BL→BR→TR→TL（U=z,V=y）
+                          xw, 0.f, z0,  xw, 0.f, z1,  xw, 1.f, z1,  xw, 1.f, z0, // BL→BR→TR→TL（U=z,V=y）
                           tile, light, tileW, hx, hy, v0, v1);
         } else {
-            // 支撑墙 ±Z：quad 贴 z 面（face 2=+Z 边 1-kInset；face 3=-Z 边 kInset），xy 全 footprint。
-            //   U→x（横级水平）、V→y（纵轨竖立）。
+            // 支撑墙 ±Z：quad 贴 z 面（face 2=+Z 边 1-kInset；face 3=-Z 边 kInset），
+            //   y 满高 [0,1]、x 水平内缩 [kPlateMargin, 1-kPlateMargin]（U→x 横级水平、V→y 纵轨竖立）。
             const float zw = (face == 2) ? (1.0f - kInset) : kInset;
+            const float x0 = kPlateMargin, x1 = 1.0f - kPlateMargin;
             pushCrossQuad(verts, idx, lx, ly, lz,
-                          0.f, 0.f, zw,  1.f, 0.f, zw,  1.f, 1.f, zw,  0.f, 1.f, zw, // BL→BR→TR→TL（U=x,V=y）
+                          x0, 0.f, zw,  x1, 0.f, zw,  x1, 1.f, zw,  x0, 1.f, zw, // BL→BR→TR→TL（U=x,V=y）
                           tile, light, tileW, hx, hy, v0, v1);
         }
         break;

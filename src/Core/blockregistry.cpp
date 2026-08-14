@@ -1241,16 +1241,17 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
             //   朝向（state[1:0]）：0=+X 1=-X 2=+Z 3=-Z（与 ladderSupportOffset / partialblockgeometry 同编码）。
             constexpr float kWall = 1.0f / 16.0f;  // 视觉 quad 贴 cell 边内缩量（与 mesher kInset 同源）
             constexpr float kDepth = 3.0f / 16.0f; // 薄板沿墙法线厚度（视觉 quad 是 0 厚，加 3/16 容差使准星微偏亦命中）
+            constexpr float kMargin = 2.0f / 16.0f; // t538 薄板水平内缩（与 mesher kPlateMargin 同源：两侧各 2/16 → 12/16 宽）
             const int face = state & 3;
             switch (face) {
-            case 0:  // 支撑墙 +X：quad 贴 x=1-kWall → 薄板 [1-kWall-kDepth, 1-kWall]
-                return {BlockAABB{1.0f - kWall - kDepth, 0.0f, 0.0f, 1.0f - kWall, 1.0f, 1.0f}};
-            case 1:  // 支撑墙 -X：quad 贴 x=kWall → 薄板 [kWall, kWall+kDepth]
-                return {BlockAABB{kWall, 0.0f, 0.0f, kWall + kDepth, 1.0f, 1.0f}};
-            case 2:  // 支撑墙 +Z：quad 贴 z=1-kWall → 薄板 [1-kWall-kDepth, 1-kWall]
-                return {BlockAABB{0.0f, 0.0f, 1.0f - kWall - kDepth, 1.0f, 1.0f, 1.0f - kWall}};
-            default: // case 3：支撑墙 -Z：quad 贴 z=kWall → 薄板 [kWall, kWall+kDepth]
-                return {BlockAABB{0.0f, 0.0f, kWall, 1.0f, 1.0f, kWall + kDepth}};
+            case 0:  // 支撑墙 +X：quad 贴 x=1-kWall → 薄板 [1-kWall-kDepth, 1-kWall]，z 水平 [kMargin,1-kMargin]
+                return {BlockAABB{1.0f - kWall - kDepth, 0.0f, kMargin, 1.0f - kWall, 1.0f, 1.0f - kMargin}};
+            case 1:  // 支撑墙 -X：quad 贴 x=kWall → 薄板 [kWall, kWall+kDepth]，z 水平 [kMargin,1-kMargin]
+                return {BlockAABB{kWall, 0.0f, kMargin, kWall + kDepth, 1.0f, 1.0f - kMargin}};
+            case 2:  // 支撑墙 +Z：quad 贴 z=1-kWall → 薄板 [1-kWall-kDepth, 1-kWall]，x 水平 [kMargin,1-kMargin]
+                return {BlockAABB{kMargin, 0.0f, 1.0f - kWall - kDepth, 1.0f - kMargin, 1.0f, 1.0f - kWall}};
+            default: // case 3：支撑墙 -Z：quad 贴 z=kWall → 薄板 [kWall, kWall+kDepth]，x 水平 [kMargin,1-kMargin]
+                return {BlockAABB{kMargin, 0.0f, kWall, 1.0f - kMargin, 1.0f, kWall + kDepth}};
             }
         }
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // air / water → 整格（air 不进本路径兜底；water 整格舀水）

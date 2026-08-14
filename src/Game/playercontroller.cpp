@@ -1102,19 +1102,19 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         }
     }
     // t418 垂直植物级联掉落（机制等价 MC 甘蔗 / 仙人掌柱：破任一格 → 其上整柱坍落）：当被破格为 Sugarcane /
-    //   Cactus 且 drop=true（生存产出路径）时，自破格正上一格起向上逐格破同型块（setBlock Air → blockBroken
-    //   粒子/音 + worldChanged 重建）+ 每格 emit spawnItem 一件掉落物（用与单格破块相同的 dropId / dropCount）。
-    //   停于首个异型格；越界 blockAt 返 Air ≠ brokenId → 循环自然终止（无 OOB 风险）。仅 drop=true 触发 ——
-    //   创造瞬破本就 drop=false 不掉落，破一格不连带整柱（保 MC 创造手感）。不递归（植物柱仅靠下方支撑，
-    //   破上方不连累下方）。brokenId 已在 setBlock(Air) 前读（同 t134 时序坑）。每格 setBlock Air 各自发
-    //   blockBroken + 标脏，无需额外 worldEdited/dirty 串联。Sugarcane/Cactus 非 Log/Leaves/Torch/Crop → 级联
-    //   格不走 leaf-decay / torch/crop 失撑分支（本就无副作用）。
-    if (drop && (brokenId == BlockRegistry::Sugarcane || brokenId == BlockRegistry::Cactus)) {
+    //   Cactus 时，自破格正上一格起向上逐格破同型块（setBlock Air → blockBroken 粒子/音 + worldChanged 重建）。
+    //   停于首个异型格；越界 blockAt 返 Air ≠ brokenId → 循环自然终止（无 OOB 风险）。掉落物每格 emit
+    //   spawnItem 一件（用与单格破块相同的 dropId / dropCount），仅 drop=true（生存）时发 —— 创造（drop=false）
+    //   破甘蔗 / 仙人掌仍连带整柱破格（机制等价 MC：破任一格其上整柱坍落；创造坍落不掉落，见 t545）。
+    //   不递归（植物柱仅靠下方支撑，破上方不连累下方）。brokenId 已在 setBlock(Air) 前读（同 t134 时序坑）。
+    //   每格 setBlock Air 各自发 blockBroken + 标脏，无需额外 worldEdited/dirty 串联。Sugarcane/Cactus 非
+    //   Log/Leaves/Torch/Crop → 级联格不走 leaf-decay / torch/crop 失撑分支（本就无副作用）。
+    if (brokenId == BlockRegistry::Sugarcane || brokenId == BlockRegistry::Cactus) {
         const int cascadeDropId = BlockRegistry::dropId(brokenId);
         const int cascadeDropCount = std::max(1, BlockRegistry::dropCount(brokenId));
         for (int cy = y + 1; m_world->blockAt(x, cy, z) == brokenId; ++cy) {
             m_world->setBlock(x, cy, z, BlockRegistry::Air);
-            emit spawnItem(x, cy, z, cascadeDropId, cascadeDropCount);
+            if (drop) emit spawnItem(x, cy, z, cascadeDropId, cascadeDropCount); // t545：破格恒连柱（含创造），掉落仅生存
         }
     }
     // t263 生存挖掘完成 → 持有工具消耗 1 点耐久（机制等价 MC「每破 1 块工具 -1 耐久」）。创造 drop=false
