@@ -140,7 +140,10 @@ function writeSlot(root, group, index, id, count, durability, enchants) {
     // t377 装备槽写经 armorSetStack（VM 守部位匹配 + count 钳 1）；slotShiftLeft 护甲装备 / 脱下用。
     //   t475 含 enchants（护甲可附魔；装备 / 脱下搬运保真）。
     if (group === "armor")       { root.hotbar.armorSetStack(index, id, count, dur, ench); return }
-    if (root.localWriteSlot)     root.localWriteSlot(group, index, id, count)
+    // review-2 修：本地组分发透传 dur/ench（原只传 4 参 → anvil/enchant 本地槽丢弃算好的耐久/附魔
+    //   → 放进去再拿出来 = 免费修满 + 附魔清空）。4 参签名的面板（craft/chest 等 localWriteSlot
+    //   只取前 4 形参）多收实参无害。
+    if (root.localWriteSlot)     root.localWriteSlot(group, index, id, count, dur, ench)
 }
 
 // ── 拖动均分辅助（t79/t98/t108/t167）──

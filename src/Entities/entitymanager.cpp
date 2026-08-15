@@ -1979,7 +1979,9 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
     //    setWaterSilent 静默写（非玩家破/放 → 免粒子/音/掉落噪音，同羊吃草消耗草丛模式）。
     //    节流：仅当身后格 blockAt==Air 才写（已铺雪 / 已有方块 → 跳过），无每帧开销。
     if (world) {
-        const float dirX = std::sin(e.yawRad), dirZ = -std::cos(e.yawRad); // golem 前向（同 yaw 约定）
+        // review-7 修：前向 = (-sin, -cos)（全工程 yaw 约定，见 aiSnowGolem 发球面向 / yawAt）。
+        //   原 dirX 漏负号 → ±X 行走时「身后格」算到正前方，雪铺进即将踏入的格（t529 踩雪问题复现）。
+        const float dirX = -std::sin(e.yawRad), dirZ = -std::cos(e.yawRad); // golem 前向（同 yaw 约定）
         const int bx = qFloor(e.pos.x() - dirX);                           // 身后格 X（golem 已离开的格）
         const int bz = qFloor(e.pos.z() - dirZ);                           // 身后格 Z
         const int footY = qFloor(e.pos.y() - e.halfH);                     // 脚位格（AABB 底面所在格；身后同高）

@@ -52,10 +52,11 @@ Item {
     //   当前复用 playPlace 作过渡装备音，专用护甲音属后续资产任务）。
     signal armorChanged()
 
-    // t551 看鼠标指针：光标**屏幕坐标**直接绑 Main.qml 的常驻 cursorTracker（overlayRoot 级 HoverHandler，
-    //   point.globalPosition 是 bindable 属性，随光标移动自动刷新；游戏/背包全程有效 → 开包首帧即真位置，
-    //   无「构造期 (0,0) → 人物误转左上角」闪烁）。喂给 CharacterPreview3D → 3D 人物转身/转头/抬头看鼠标。
-    property point previewMouseScene: cursorTracker.point.globalPosition
+    // t551 看鼠标指针：光标**窗口坐标**直接绑 Main.qml 的常驻 cursorTracker（overlayRoot 级 HoverHandler，
+    //   review-12 修：point.globalPosition 在 Qt 6.11 HandlerPoint 不存在（绑 undefined → 恒 (0,0) 卡死最大
+    //   转头角）；point.position 是窗口坐标且 bindable（同 Main.qml 光标浮动图标已验证用法）。
+    //   喂给 CharacterPreview3D → 3D 人物转身/转头/抬头看鼠标。
+    property point previewMouseScene: cursorTracker.point.position
 
     // ── 尺寸常量（集中一处便于对齐）──
     readonly property int slotSize: 40        // 统一槽尺寸（主栏 / hotbar / 合成 / 护甲同尺寸，贴近 1.0）

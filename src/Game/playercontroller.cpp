@@ -4581,7 +4581,7 @@ void PlayerController::step(qreal dt)
         //   穿过梯格不被「升起来」。悬挂（shift）/ 缓降不受门控影响（贴梯即可托住，与面向无关，机制对齐 MC）。
         if (shift) {
             m_vel.setY(0.0f); // 蹲 = 悬挂静止（机制等价 MC 梯子按蹲不下滑）
-        } else if ((wish.lengthSquared() > 0.001f || space) && facingLadder()) {
+        } else if (space || (wish.lengthSquared() > 0.001f && facingLadder())) {
             m_vel.setY(kLadderClimb); // 面向梯子 + 按前 / 空格 = 向上意图 → 爬升（spec 验收：入梯 + 按前 → 向上爬）
         } else {
             m_vel.setY(std::max(float(m_vel.y() - kLadderGravity * dt), -kLadderSinkMax)); // 松手缓降（贴梯不下坠）

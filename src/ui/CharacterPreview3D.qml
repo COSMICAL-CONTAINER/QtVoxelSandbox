@@ -119,13 +119,15 @@ Item {
     readonly property real jumpTuck: Math.max(0, Math.min(1, root.jumpLift / 0.25)) // 完全离地 → 1
     readonly property real jumpThigh: 35.0 * root.jumpTuck               // 收腿（大腿前抬）
 
-    // ── t551 看鼠标指针：mouseScene（宿主屏幕坐标）→ 预览本地偏移 → 转身 + 转头 + 抬头/低头 ──
-    //   mapFromGlobal 把屏幕坐标映射到本 Item 本地（Qt 6.11 Item 无 mapFromScene，用 mapFromGlobal 兜底）。
+    // ── t551 看鼠标指针：mouseScene（宿主窗口坐标）→ 预览本地偏移 → 转身 + 转头 + 抬头/低头 ──
+    //   review-12 修：mouseScene 现为窗口坐标（point.position；原 globalPosition 不存在绑 undefined）。
+    //   mapFromItem(null, x, y)：item 传 null = 从 scene（窗口 contentItem）坐标映射到本 Item 本地
+    //   （Qt 6.11 Item 无 mapFromScene，mapFromGlobal 已不适配新坐标系）。
     //   鼠标在预览中心右侧（dx>0）→ 人物右转（yaw 取负，dir=(-sin,-cos) 约定）；上方（dy<0）→ 抬头。
     //   全身 yaw 转 65% + 头 yaw 再转 35%（头领转、身随转 = 自然「看」的姿态）；垂直全由头 pitch 承担。
     //   未跟踪（mouseScene 为哨兵）→ 回中性位（lookYaw=0/lookPitch=0）。
     readonly property bool mouseTracked: root.mouseScene.x > -9999
-    readonly property point mouseLocal: root.mapFromGlobal(root.mouseScene)
+    readonly property point mouseLocal: root.mapFromItem(null, root.mouseScene.x, root.mouseScene.y)
     readonly property real mouseDx: root.mouseLocal.x - root.width / 2
     readonly property real mouseDy: root.mouseLocal.y - root.height / 2
     readonly property real lookYaw: root.mouseTracked ? Math.max(-60, Math.min(60, -root.mouseDx * 0.6)) : 0
