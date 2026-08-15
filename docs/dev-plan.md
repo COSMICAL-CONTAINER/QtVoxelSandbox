@@ -2188,9 +2188,10 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
 
 ### 🅹 工具贴图细节（1 项 2 子点）
 
-**t613** 铜工具图标多 1px 边 + 铜护甲套
+**t613** 铜工具图标多 1px 边 + 铜护甲套 ✅✅ 已完成
 - ① 铜工具图标凸出 1 像素（t588 染色落盘时边缘多出）——retintCopperTemplate 输出前裁边/收缩 1px（alpha 阈值收缩）；
 - ② 铜护甲四件（盔/甲/腿/靴）：从铁护甲 pack 贴图染铜色（同 t588 模式），armorId 段（0x300+tier*4+piece）铜 tier 的 pack 映射 + 染色缓存。查现铜 tier 护甲是纯色还是没做。
+- 实修结论：① 像素取证推翻「alpha 边缘多 1px」假设——铁镐 vs 金镐 alpha 蒙版逐像素相同、染色不动 alpha、贴图零半透明像素（0<a<250 = 0），alpha 腐蚀/收缩只会切掉正确像素。真根因 = pack item 贴图惯例「外圈 1px 近黑描边」（铁头外圈 luma≈60、金镐同位 (54,54,32)≈53），旧铜梯度把它映射到 #a75e32（luma≈110 中亮铜橙）→ 亮橙外圈读作「工具胖一圈」。修：retintCopperTemplate 加**描边带**——铁灰阶像素 luma<90 走独立梯度（#3a2212 近黑铜棕 → 带顶衔接主梯度 luma=90 映射值，连续无台阶），外圈读作线而非本体；实测外圈 luma 61→95（旧 110）、本体 170→151，线/体分明且无亮晕。② 铜护甲 0x308..0x30B 入 itemFilenameMap（copper_helmet/chestplate/leggings/boots.png，现代包直用）+ copperIronFallback 加 4 行（iron_* 染铜，铁护甲整张灰白无木柄分区、外圈 luma≈29-35 由描边带保线）；显示端零改动（Inventory/SurvivalInventory 装备槽 + Main.qml 手持/掉落均走 MaterialIcon → itemIconSource，pack 图自动顶替自绘）。铜 tier 3D 身体色（armorBaseColor case 2 #c87850）本就在位不动。缓存文件 voxelsandbox_rp_copper_308..30b.png 实测生成，图标实测铜色 + 描边。
 
 ### 🅺 附魔书全套系统（设计先行，2 项大）
 

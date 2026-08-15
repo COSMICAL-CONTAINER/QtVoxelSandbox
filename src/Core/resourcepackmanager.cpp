@@ -46,11 +46,12 @@ struct BuiltState {
     // R19 B1 皮革护甲 item 图标染色缓存：leatherId(0x300..0x303)→落盘的染色后皮革图标 file:// 路径。
     //   pack 的 leather_*.png 是白底可染色 base，每件首次查询时按皮革棕梯度重染（retintLeatherTemplate）
     //   落盘 voxelsandbox_rp_leather_<id>.png，后续命中直接返。apply() 重建时清空（pack 切换/重解析）。
-    //   仅 0x300..0x303 四件（皮革 tier）；铁/金/钻石/铜护甲原样用 pack 图，不染色。
+    //   仅 0x300..0x303 四件（皮革 tier）；铁/金/钻石原样用 pack 图不染色；铜（t613）走 copperIconFiles
+    //   的 iron_* 染铜回退（同铜工具机制），不经本缓存。
     QHash<int, QString> leatherIconFiles;
-    // t588 铜物品（铜工具 0x118..0x11C / 铜锭 0x21D）染色图标缓存：pack 无 copper_*（1.8 等老包）→ 用
-    //   铁对应贴图染铜橙（retintCopperTemplate）落盘 voxelsandbox_rp_copper_<id>.png，后续命中直接返。
-    //   apply() 重建时清空（pack 切换 / 重解析 → 重染）。
+    // t588/t613 铜物品（铜工具 0x118..0x11C / 铜锭 0x21D / 铜护甲 0x308..0x30B）染色图标缓存：pack 无
+    //   copper_*（1.8 等老包）→ 用铁对应贴图染铜橙（retintCopperTemplate）落盘 voxelsandbox_rp_copper_<id>.png，
+    //   后续命中直接返。apply() 重建时清空（pack 切换 / 重解析 → 重染）。
     QHash<int, QString> copperIconFiles;
     // t585 指南针/钟动画帧序列状态：帧文件 stem（"compass"/"clock"）→（帧数，上次帧 index）。帧数在
     //   ensureBuiltLocked 探测 item 目录实际存在的 <stem>_NN.png 数（demo 包实测 compass 32 / clock 64；
@@ -435,9 +436,9 @@ const QList<QPair<int, QString>> &tileFilenameMap()
 //   iron_ingot / cooked_beef ...），与现网大多数资源包 assets/minecraft/textures/item/ 一致。包内缺该 PNG
 //   时 itemIconSource 安全跳过（回退自绘），故映射可慷慨：唯一要保证的是 id↔文件名配对正确，而非文件名都存在。
 //   工具段 0x100..0x112（镐/锄/斧/铲/剑×木/石/铁 + 弓/剪刀/钓竿 + t472 钻石镐）；材料段 0x200..0x231（合成材料 / 食物 / 桶 /
-//   mob 掉落 / 生物蛋 / 战利品 / 鸡鱿鱼族 / 胡萝卜马铃薯 / 生鱼）；护甲段 0x300..0x313（皮革/铁/金/钻石×4 部位；
-//   铜护甲无 vanilla 贴图 → 不映射，回退自绘）。raw_*（铜/金/铁原矿物品 1.17+）/spawn_egg_*/oak_sapling 等
-//   旧版 / HD 包常缺 → 缺则跳过回退自绘，不崩。
+//   mob 掉落 / 生物蛋 / 战利品 / 鸡鱿鱼族 / 胡萝卜马铃薯 / 生鱼）；护甲段 0x300..0x313（皮革/铁/铜/金/钻石×4 部位；
+//   铜护甲 t613 入映射 copper_*，老包缺 → copperIronFallback 用 iron_* 染铜）。raw_*（铜/金/铁原矿物品 1.17+）/
+//   spawn_egg_*/oak_sapling 等旧版 / HD 包常缺 → 缺则跳过回退自绘，不崩。
 const QList<QPair<int, QString>> &itemFilenameMap()
 {
     static const QList<QPair<int, QString>> kMap = {
@@ -546,7 +547,8 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         //   有帧序列时 animatedItemFrameSource 优先（按状态选帧）。两文件 demo 包实测存在。
         {0x23F, QStringLiteral("compass.png")},          // 指南针静态图（t585 回落）
         {0x240, QStringLiteral("clock.png")},            // 钟静态图（t585 回落）
-        // —— 护甲段（ArmorId；皮革/铁/金/钻石×头盔/胸甲/护腿/靴子。铜护甲无 vanilla 贴图 → 不映射）——
+        // —— 护甲段（ArmorId；皮革/铁/铜/金/钻石×4 部位。铜护甲 t613 入映射：现代包 copper_* 直用；老包
+        //   缺 copper_* → itemIconSource 走 copperIronFallback 用 iron_* 染铜（描边带 + 铜橙梯度））——
         {0x300, QStringLiteral("leather_helmet.png")},
         {0x301, QStringLiteral("leather_chestplate.png")},
         {0x302, QStringLiteral("leather_leggings.png")},
@@ -555,6 +557,12 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x305, QStringLiteral("iron_chestplate.png")},
         {0x306, QStringLiteral("iron_leggings.png")},
         {0x307, QStringLiteral("iron_boots.png")},
+        // t613 铜护甲四件（0x308..0x30B；1.17+ 命名 copper_*。现代包有则直用；demo 包等老包缺 →
+        //   回退 iron_* 染铜，同铜工具 0x118.. 的 t588 机制）。
+        {0x308, QStringLiteral("copper_helmet.png")},
+        {0x309, QStringLiteral("copper_chestplate.png")},
+        {0x30A, QStringLiteral("copper_leggings.png")},
+        {0x30B, QStringLiteral("copper_boots.png")},
         {0x30C, QStringLiteral("golden_helmet.png")},
         {0x30D, QStringLiteral("golden_chestplate.png")},
         {0x30E, QStringLiteral("golden_leggings.png")},
@@ -813,12 +821,29 @@ void retintLeatherTemplate(QImage &img)
 //   - 铁锭（整张灰白）→ 全图映射到铜锭梯度（MaterialIcon drawCopperIngot 同色板）。
 //   透明像素（alpha=0）不动；img 为 Format_ARGB32_Premultiplied，输出亦保持预乘。
 //   判据阈值：铁头灰阶 |r-g|<14 && |g-b|<14（demo 包实测铁头像素精确命中、木柄棕像素排除）。
+// t613 描边带压暗（用户「铜的工具都凸出来了一个像素」）：像素取证（铁镐 vs 金镐 alpha 蒙版逐像素比对
+//   完全一致、染色不动 alpha）→「凸出 1px」非轮廓外扩，而是**贴图最外圈近黑描边被旧梯度染成中亮铜橙**：
+//   铁头外圈描边像素 luma≈60（近黑；金镐同位描边 (54,54,32) 同样近黑——pack 的 item 贴图惯例 = 外圈
+//   1px 近黑描边线），旧梯度映射到 #a75e32（luma≈110）→ 亮橙外圈对比度高，读作「工具本体胖一圈」。
+//   修：luma < kCopperOutlineLuma 的暗像素走**描边带梯度**（#3a2212 近黑铜棕起、带顶衔接主梯度 luma=90
+//   的映射值连续无台阶），描边读作「线」而非本体 → 与金/铁工具同观感。铁护甲外圈描边 luma 均值≈29-35
+//   （更黑）同受此带保护（t613 铜护甲染铜复用本函数）。alpha 腐蚀 / 收缩 1px 不可行——蒙版本无半透明
+//   像素（0<a<250 为 0），腐蚀只会切掉正确的像素，治不了亮橙描边。
 void retintCopperTemplate(QImage &img)
 {
     // 铜橙三色锚点（与 ToolIcon.qml tier 6 head/headDark/headLight 同源单一权威；锭暗锚取铜锭 edge 系）。
     const int darkR = 0x8a, darkG = 0x48, darkB = 0x18; // #8a4818 暗（铜锭 dark）
     const int midR  = 0xc8, midG  = 0x78, midB  = 0x50; // #c87850 中（铜工具头主色）
     const int liteR = 0xe8, liteG = 0xa0, liteB = 0x88; // #e8a088 亮（铜头受光高光）
+    // t613 描边带：luma 阈值（铁镐外圈 mean≈70 / 铁护甲外圈 mean≈29-35 / 本体内部阴影多 ≥96 → 90 取界）
+    //   与描边暗端锚 #3a2212（近黑铜棕——描边是线不是本体，不与铜橙本体争亮）。
+    constexpr int kOutlineLuma = 90;
+    const int outR = 0x3a, outG = 0x22, outB = 0x12; // 描边暗端锚 #3a2212
+    // 带顶 = 主梯度在 luma=kOutlineLuma 处的映射值（预先算死，衔接连续无台阶）。
+    const int topF = (kOutlineLuma * 256) / 128;
+    const int topR = darkR + ((midR - darkR) * topF) / 256;
+    const int topG = darkG + ((midG - darkG) * topF) / 256;
+    const int topB = darkB + ((midB - darkB) * topF) / 256;
     const int w = img.width(), h = img.height();
     for (int y = 0; y < h; ++y) {
         QRgb *scan = reinterpret_cast<QRgb *>(img.scanLine(y));
@@ -830,13 +855,19 @@ void retintCopperTemplate(QImage &img)
             const int r = qBound(0, qRed(c) * 255 / qMax(1, a), 255);
             const int g = qBound(0, qGreen(c) * 255 / qMax(1, a), 255);
             const int b = qBound(0, qBlue(c) * 255 / qMax(1, a), 255);
-            // 铁头判据：灰阶（铁工具头 / 铁锭本体都是 r≈g≈b 的灰白）。棕木柄（r>g>b）不命中 → 原样保留。
+            // 铁头判据：灰阶（铁工具头 / 铁锭本体 / 铁护甲都是 r≈g≈b 的灰白）。棕木柄（r>g>b）不命中 → 原样保留。
             if (qAbs(r - g) >= 14 || qAbs(g - b) >= 14)
                 continue;
             // 亮度（Rec.601 luma）→ 铜橙梯度：暗 → #8a4818、中 → #c87850、亮 → #e8a088（Q8 分数线性插值）。
             const int l = (r * 299 + g * 587 + b * 114) / 1000; // 0..255
             int nr, ng, nb;
-            if (l < 128) {
+            if (l < kOutlineLuma) {
+                // t613 描边带：近黑描边像素 → 近黑铜棕线（0 → #3a2212、kOutlineLuma → 接主梯度），不进中亮铜橙。
+                const int f = (l * 256) / kOutlineLuma;
+                nr = outR + ((topR - outR) * f) / 256;
+                ng = outG + ((topG - outG) * f) / 256;
+                nb = outB + ((topB - outB) * f) / 256;
+            } else if (l < 128) {
                 const int f = (l * 256) / 128;
                 nr = darkR + ((midR - darkR) * f) / 256;
                 ng = darkG + ((midG - darkG) * f) / 256;
@@ -853,19 +884,25 @@ void retintCopperTemplate(QImage &img)
     }
 }
 
-// t588 铜物品「引擎物品 id → 铁对应 pack item 贴图文件名」回退表（copper_* 缺失时用 iron_* 染铜）。
-//   铜工具 0x118..0x11C 五件 + 铜锭 0x21D。铜原矿（0x21C）不进本表 —— pack 无 raw_iron.png 可染，
-//   自绘 MaterialIcon drawCopperOre 本就是铜配色（石头底 + 橙铜斑 + 孔雀绿锈），无「老铁贴图」问题。
-//   铜护甲（0x308..0x30B）同理暂不在表（自绘已是铜色；用户本轮只提物品/工具）。
+// t588/t613 铜物品「引擎物品 id → 铁对应 pack item 贴图文件名」回退表（copper_* 缺失时用 iron_* 染铜）。
+//   铜工具 0x118..0x11C 五件 + 铜锭 0x21D + 铜护甲 0x308..0x30B 四件（t613：用户「护甲里面的铜盔甲
+//   还是没有更换，需要从铁套那边换个颜色弄成铜制的」——铁护甲贴图整张灰白（无木柄两区域问题），
+//   retintCopperTemplate 全图染铜 + 描边带保外圈线，机制同铜工具）。铜原矿（0x21C）不进本表 ——
+//   pack 无 raw_iron.png 可染，自绘 MaterialIcon drawCopperOre 本就是铜配色（石头底 + 橙铜斑 +
+//   孔雀绿锈），无「老铁贴图」问题。
 const char *copperIronFallback(int itemId)
 {
     switch (itemId) {
-    case 0x118: return "iron_pickaxe.png";  // 铜镐 ← 铁镐染铜
-    case 0x119: return "iron_axe.png";      // 铜斧 ← 铁斧
-    case 0x11A: return "iron_shovel.png";   // 铜铲 ← 铁铲
-    case 0x11B: return "iron_sword.png";    // 铜剑 ← 铁剑
-    case 0x11C: return "iron_hoe.png";      // 铜锄 ← 铁锄
-    case 0x21D: return "iron_ingot.png";    // 铜锭 ← 铁锭
+    case 0x118: return "iron_pickaxe.png";     // 铜镐 ← 铁镐染铜
+    case 0x119: return "iron_axe.png";         // 铜斧 ← 铁斧
+    case 0x11A: return "iron_shovel.png";      // 铜铲 ← 铁铲
+    case 0x11B: return "iron_sword.png";       // 铜剑 ← 铁剑
+    case 0x11C: return "iron_hoe.png";         // 铜锄 ← 铁锄
+    case 0x21D: return "iron_ingot.png";       // 铜锭 ← 铁锭
+    case 0x308: return "iron_helmet.png";      // 铜头盔 ← 铁头盔（t613）
+    case 0x309: return "iron_chestplate.png";  // 铜胸甲 ← 铁胸甲（t613）
+    case 0x30A: return "iron_leggings.png";    // 铜护腿 ← 铁护腿（t613）
+    case 0x30B: return "iron_boots.png";       // 铜靴子 ← 铁靴子（t613）
     default:    return nullptr;
     }
 }
@@ -1364,10 +1401,11 @@ QString ResourcePackManager::itemIconSource(int itemId) const
         return {};
     const QString path = QDir(s.itemDir).absoluteFilePath(filename);
     if (!QFile::exists(path)) {
-        // t588 铜物品回退：映射的 copper_* 不存在（1.8 等老包无铜）→ 用铁对应贴图染铜（同皮革 / 床
-        //   retint 机制）。首次命中：加载 iron_* → retintCopperTemplate（铁头灰阶→铜橙梯度、木柄保留）
-        //   → 落盘 voxelsandbox_rp_copper_<id>.png → 记缓存；后续 O(1) 命中缓存直接返。铁贴图也缺 /
-        //   解码 / 落盘失败 → 空串（回退自绘，现状不变）。红线 §9：仅运行期读本地 pack PNG，不进 qrc/VCS。
+        // t588/t613 铜物品回退：映射的 copper_* 不存在（1.8 等老包无铜）→ 用铁对应贴图染铜（同皮革 / 床
+        //   retint 机制；t613 起含铜护甲四件 + 描边带压暗）。首次命中：加载 iron_* → retintCopperTemplate
+        //   （铁头灰阶→铜橙梯度、木柄保留、近黑描边保暗）→ 落盘 voxelsandbox_rp_copper_<id>.png → 记缓存；
+        //   后续 O(1) 命中缓存直接返。铁贴图也缺 / 解码 / 落盘失败 → 空串（回退自绘，现状不变）。
+        //   红线 §9：仅运行期读本地 pack PNG，不进 qrc/VCS。
         const char *ironName = copperIronFallback(itemId);
         if (!ironName)
             return {}; // 包内无该 item 贴图 → 不覆盖（保留自绘 Canvas）；红线 §9：仅运行期读本地 pack PNG。
