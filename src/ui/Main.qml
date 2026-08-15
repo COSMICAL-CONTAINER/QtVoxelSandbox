@@ -6093,19 +6093,19 @@ Window {
                                         return _r >= 0 ? Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0) : "#000000"
                                     }
                                 }
-                                // rv-low-batch1 深色眼恢复（pack 感知 visible）。MobModel 头心 (0,0.66,0) 半
-                                //   (0.15,0.15,0.15) → 前面 z=-0.15；眼 y≈0.68、x=±0.06、z=-0.17（略凸防 z-fight）。
+                                // rv-low-batch1 深色眼恢复（pack 感知 visible）。t595 头改到 (0,0.43,0) 半 0.24 →
+                                //   前面 z=-0.24；眼 y≈0.52（头上部）、x=±0.08、z=-0.27（略凸防 z-fight）。
                                 Model {
                                     visible: mobStalkerPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.06, 0.68, -0.17)
+                                    position: Qt.vector3d(-0.08, 0.52, -0.27)
                                     scale: Qt.vector3d(0.05, 0.06, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
                                     visible: mobStalkerPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.06, 0.68, -0.17)
+                                    position: Qt.vector3d(0.08, 0.52, -0.27)
                                     scale: Qt.vector3d(0.05, 0.06, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }

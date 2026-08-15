@@ -463,16 +463,21 @@ void MobModel::rebuild()
         addBoxRot( 0.07f, -0.575f, 0.00f, 0.06f, 0.325f, 0.06f, -0.25f, 0.00f, -sw5, verts, idx, bMin, bMax); // 右腿（细骨杆）
         // t331 弓移至 Main.qml（MobBowGeometry 木色弓，肩枢 Node 子节点随 drawAmount 抬起）；右臂已在上面本几何。
     } else if (m_mobType == 6) {
-        // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕，§9 区隔改名）—— 四短粗腿 + 高瘦躯干 + 小头。
+        // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕，§9 区隔改名）—— 四短粗腿 + 宽身 + 大头。
         //   修：原误标 mobType 5（与 Bones 冲突），已正为 6（enum MobStalker=6）。腿底本地 y=−0.90 贴 collision 底面。
         //   蓄力膨胀由 QML delegate 据 inflateAt 对整个 Model 做 scale（1.0+inflate·0.5）驱动，几何本身不参与。
+        // t595 修（用户「腿太长缩小 + 头太小 + 身体也小了」）：改到 MC 1.0 creeper 比例（头 8×8×8 = 0.5 格 /
+        //   身 4×12×8 = 0.25×0.75×0.5 / 腿 4×6×4 = 0.25×0.375×0.25），身宽略放（保「身体不小」观感）。
+        //   布局（腿底贴 -0.90）：腿心 y=-0.715 半 0.185（腿 0.37 高，原 0.56 缩 34%）→ 腿顶 -0.53；
+        //   躯干心 y=-0.17 半 (0.16,0.36,0.26)（0.32×0.72×0.52，原 0.36×0.84×0.32 增深/增体积）→ 躯干顶 0.19；
+        //   头心 y=0.43 半 0.24（0.48³，原 0.30³ 增 ~4× 体积）→ 头顶 0.67。腿四角（±0.25,±0.25）MC 站位。
         // R19 C3 UV（MC Creeper base 64×32；U1 §6 stalker）：head(0,0)8×8×8 / body(16,16)8×12×4 / leg(0,16)4×6×4。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(16, 16, 8, 12, 4);
-        addBox( 0.00f,  0.08f,  0.00f, 0.18f, 0.42f, 0.16f, verts, idx, bMin, bMax); // 高瘦躯干
+        addBox( 0.00f, -0.17f,  0.00f, 0.16f, 0.36f, 0.26f, verts, idx, bMin, bMax); // 宽矮躯干（MC 比例，身宽略放）
         setMobTex(0, 0, 8, 8, 8);
-        addBox( 0.00f,  0.66f,  0.00f, 0.15f, 0.15f, 0.15f, verts, idx, bMin, bMax); // 小头
-        addLegs(-0.62f, 0.28f, 0.12f, 0.09f, 0.09f, 0, 16, 4, 6, 4, m_walkPhase, verts, idx, bMin, bMax); // 四短粗腿
+        addBox( 0.00f,  0.43f,  0.00f, 0.24f, 0.24f, 0.24f, verts, idx, bMin, bMax); // 大头（0.48³，MC 半格）
+        addLegs(-0.715f, 0.185f, 0.25f, 0.25f, 0.125f, 0, 16, 4, 6, 4, m_walkPhase, verts, idx, bMin, bMax); // 四短腿（MC 比例）
     } else if (m_mobType == 7) {
         // t285/t302 Spider（蜘蛛；机制等价 MC 1.0 蜘蛛，§9 区隔）—— 宽矮躯干 + 前伸小头 + **8 腿**（4 对沿躯干
         //   Z 分布，t302 升级自 t285 简化 4 腿）。腿底本地 y ≈ −0.30 贴 collision 底面（EntityManager halfH=0.30）。
