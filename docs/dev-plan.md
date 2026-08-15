@@ -2029,9 +2029,10 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 用户：「指南针手持时右上角显示方向——不要这个。给你 pack 动画贴图：compass 34 帧（compass_00..33.png）+ clock 66 帧（clock_00..65.png，另有 .mcmeta）在 `docs/Default HD 128x Demo 1.8.2.2/assets/minecraft/textures/item/`。」
 - 修：① 删 Main.qml `compassHud`（9094-9206 区）；② 手持/掉落物/物品栏图标改**按状态选帧**：指南针帧 = 朝向出生点角度 → 帧 index（34 帧环）；钟帧 = 昼夜相位 → 66 帧环（mcmeta 默认逐帧，读 mcmeta 确认 frametime/顺序）。pack 图标管线（resourcepackmanager）加「动画帧序列」支持——按 (id, 状态值) 返回帧文件路径；状态变化时图标刷新（帧切换节流 ~4Hz）。
 
-**t586** 月亮 PNG 修正
+**t586** 月亮 PNG 修正 ✅（commit 见 git log，t586）
 - 用户：「月亮还是圆的 + 背景灰色偏距（PNG 还没改）。」
 - 查：t570 用了正方形月亮但现仍显示圆形灰底 → 核 sky 渲染月亮贴图路径（moon 阶段 PNG 生成/挂载是否真的接上，可能 qrc 里还是旧圆月）。pack 无 moon.png（environment 只有 clouds/end_sky）→ 自绘方形月亮 PNG（冷色无透明背景问题：PNG 本身不透明方块，避开灰底）。
+- 根因：贴图已是全不透明方形（alpha 全 255），但 build_moon.py 的**球面法线着色**在方形四角 |n_xy|>1 → nz 钳 0 → 四角恒判暗 → 暗蓝灰恰好填满内切圆外四角 = 「灰底上的圆月」。修：改**平面 terminator 模型**（明暗分界=直线 s<d，d=0.5·cosα，满相位恰全亮/新相位恰全暗；四角与中心同规则 → 无内切圆、无灰底），tools/build_moon.py 重生成 textures/moon_0..7.png。
 
 ### 🅹 工具体系（3 项）
 
