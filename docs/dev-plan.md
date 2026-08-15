@@ -2165,10 +2165,11 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
 
 ### 🅶 雪傀儡（1 项）
 
-**t610** 雪傀儡受击红闪 + 南瓜脸贴图
+**t610** 雪傀儡受击红闪 + 南瓜脸贴图 ✅✅ 已完成
 - 用户：「受伤的时候身体不会闪红（其他生物都会）。南瓜头没脸。」
 - 红闪：Main.qml 雪傀儡段 tint 绑定在（~5470 hurtFlashAt>0 → 红），实测不闪——查 damageEntity 对 MobSnowGolem 是否走同一 hurtFlash 路径 / tint 乘 pack 贴图时 baseColor 未变红（pack 贴图在身时 tinted() 只乘 #f0f4f8，红闪时 tint=(1,0,0) 应把贴图乘红——核 baseColor 绑定链路）。
 - 南瓜脸：现头用 BlockCube{blockId:100}（pumpkin_face_off=正面刻脸）应已有脸——用户说没有 → 核 -Z 面是否真采到 face 瓦片（tileFilenameMap 117/118/119 映射与 BlockCube 面序），或 pack 关时 default_pumpkin 正面没脸。**用户后续会给南瓜 PNG 链接**——届时替换。
+- 实修结论：红闪真根因 = 材质里 `parent.tinted(...)` 的 parent 在 PrincipledMaterial 作用域解析到**外层 Model**（非持 tint/tinted 的 Node）→ 运行期 TypeError（log 实锤"Property 'tinted' of object QQuick3DModel is not a function"）→ baseColor undefined → 红闪/蓝调/昼夜灰阶全失效。修：两傀儡 Node 加显式 id（snowGolemRoot/ironGolemRoot），4 处 parent.tinted → id.tinted。南瓜脸根因 = demo 包 pumpkin_face_off.png 与 pumpkin_side.png **逐像素相同**（懒包复用）→ 图集 118 瓦片 == 侧面无刻脸；修：resourcepackmanager 图集合成对 tile 118 检测退化态（face_off == side）→ 回退候选链 carved_pumpkin.png → pumpkin_face_on.png（实测 carved 生效，log 有回退行）；pack 关路径 default_pumpkin_face.png 本带刻脸无需改。
 
 ### 🅷 船（1 项 3 子点）
 

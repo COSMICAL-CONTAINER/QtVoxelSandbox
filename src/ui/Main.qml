@@ -5461,7 +5461,14 @@ Window {
                             //   t499 二轮复盘：golemSheared / tint 绑定改表达式形式（rev>=0 ? f() : fallback），lessons
                             //   t498「静态构建 + 低频 NOTIFY 用语句块 { rev; return f() } 会漏注册」的防御性写法（虽 Loader
                             //   动态创建 + revision 高频本应工作，改表达式形式绝后患 + 修 t499 一轮「受击红闪不闪」症状）。
+                            // t610 修（用户「雪傀儡受伤不闪红」根因）：旧版材质里写 parent.tinted(...) —— QML 的 parent 在
+                            //   PrincipledMaterial 作用域解析到的是**外层 Model**（材质的 3D 父节点，QQuick3DObject.parent），
+                            //   而非本 Node → Model 无 tinted 函数 → 运行期 TypeError（log: "Property 'tinted' of object
+                            //   QQuick3DModel is not a function"）→ baseColor 求值 undefined → 材质退默认色 → 红闪 / 蓝调 /
+                            //   昼夜灰阶全部失效（雪白本体 + pack 贴图恒原亮度）。修：给本 Node 显式 id，材质经 id 调
+                            //   tinted()（作用域链内显式 id 引用不受 parent 重解析影响，同文件既有 id 模式）。铁傀儡段同修。
                             Node {
+                                id: snowGolemRoot
                                 visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob && entMobType === EntityManager.MobSnowGolem) : false }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 // t510 golemSheared = 是否已被剪刀剪掉南瓜头（shearSnowGolem → snowGolemShearedAt=true）。
@@ -5499,7 +5506,7 @@ Window {
                                     scale: Qt.vector3d(1.0, 1.0, 1.0)
                                     materials: PrincipledMaterial {
                                         lighting: PrincipledMaterial.NoLighting
-                                        baseColor: parent.tinted("#f0f4f8")
+                                        baseColor: snowGolemRoot.tinted("#f0f4f8")
                                         baseColorMap: mobSnowGolemPackTex.source.toString().length > 0 ? mobSnowGolemPackTex : null
                                     }
                                 }
@@ -5522,7 +5529,7 @@ Window {
                                     materials: PrincipledMaterial {
                                         lighting: PrincipledMaterial.NoLighting
                                         baseColorMap: voxelAtlas
-                                        baseColor: parent.tinted("#ffffff") // 白=不额外染色，仅受击红闪/减速蓝调/昼夜灰阶调制南瓜瓦片
+                                        baseColor: snowGolemRoot.tinted("#ffffff") // 白=不额外染色，仅受击红闪/减速蓝调/昼夜灰阶调制南瓜瓦片
                                     }
                                 }
                                 // 南瓜头刻面双眼 + 嘴（机制等价 MC jack o'lantern 刻面：双眼 + 锯齿嘴）。
@@ -5563,7 +5570,10 @@ Window {
                             // t483 铁傀儡（IronGolem，mobType 13）：防御造物，南瓜头 + 铁块身（躯干 + 双腿 + 双臂）堆叠
                             //   （机制等价 MC 1.0 铁傀儡，§9 区隔纯色原创非照搬 MC）。halfH=1.20 → feet local y=-1.20。
                             //   UnitCube + NoLighting（红线）。受击红闪 / 减速蓝调 / 昼夜灰阶经 tinted() 统一驱动。
+                            //   t610：显式 id 供材质 tinted() 调用（parent 在材质作用域解析到外层 Model 而非本 Node，
+                            //   旧 parent.tinted → TypeError → 红闪/昼夜灰阶失效，同雪傀儡段修法）。
                             Node {
+                                id: ironGolemRoot
                                 visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob && entMobType === EntityManager.MobIronGolem) : false }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 property color tint: {
@@ -5594,7 +5604,7 @@ Window {
                                     scale: Qt.vector3d(1.0, 1.0, 1.0)
                                     materials: PrincipledMaterial {
                                         lighting: PrincipledMaterial.NoLighting
-                                        baseColor: parent.tinted("#7d848c")
+                                        baseColor: ironGolemRoot.tinted("#7d848c")
                                         baseColorMap: mobIronGolemPackTex.source.toString().length > 0 ? mobIronGolemPackTex : null
                                     }
                                 }
@@ -5603,7 +5613,7 @@ Window {
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 0.95, 0)
                                     scale: Qt.vector3d(0.72, 0.66, 0.72)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#e8821e") }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: ironGolemRoot.tinted("#e8821e") }
                                 }
                                 // 南瓜头刻面双眼（深色小方块贴头前面 -Z）。t499 同 SnowGolem 修：眼 z=-0.38（凸出头前 0.02，
                                 //   头 z scale 0.72 → 头前面 z=-0.36；旧 z=-0.34 在头内 0.02 → 被遮挡不可见）。

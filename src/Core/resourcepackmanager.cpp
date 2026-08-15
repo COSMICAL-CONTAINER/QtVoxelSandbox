@@ -1136,6 +1136,40 @@ void ensureBuiltLocked()
                 qWarning("ResourcePack: 无法解码 %s，跳过。", qPrintable(png));
                 continue;
             }
+            // t610 修「雪傀儡南瓜头没脸」（pack 路径）：部分包（demo 包实测）pumpkin_face_off.png 是**侧面贴图的
+            //   原样拷贝**（与 pumpkin_side.png 逐字节相同 —— 懒包复用文件），采样后 118 瓦片 == 117 侧面 →
+            //   南瓜四面全是瓜棱、无刻面。检测到该退化态时回退候选链 carved_pumpkin.png（经典刻脸）→
+            //   pumpkin_face_on.png（发光刻脸）—— 两者任一存在且与侧面不同即采用。无候选（全缺 / 全退化）→
+            //   保原样跳过（回退程序生成 default_pumpkin_face.png，其自带刻面）。判据「与 side 逐像素相同」而非
+            //   「文件哈希」：包可能重压缩（哈希变）但像素仍复用；且只在 tile 118（face）这一格做，无全局开销。
+            if (m.first == 118) {
+                // 退化判据：face_off 与 side 转同一格式（IgnoreAspectRatio 不缩放 —— 都按原像素比）后逐像素相同。
+                //   QImage::operator== 要求同 size + 同 format 才逐像素比（不同 format 恒 false），双转 ARGB32_Premultiplied。
+                const QImage sideRaw = QImage(blockDir.absoluteFilePath(QStringLiteral("pumpkin_side.png")));
+                const QImage faceRaw = QImage(png);
+                const QImage sideRef = sideRaw.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+                if (!sideRaw.isNull() && !faceRaw.isNull()
+                    && faceRaw.convertToFormat(QImage::Format_ARGB32_Premultiplied) == sideRef) {
+                    const QString fallbacks[2] = {
+                        QStringLiteral("carved_pumpkin.png"),
+                        QStringLiteral("pumpkin_face_on.png"),
+                    };
+                    QImage faceTile;
+                    for (const QString &fb : fallbacks) {
+                        const QString fbPath = blockDir.absoluteFilePath(fb);
+                        if (!QFile::exists(fbPath)) continue;
+                        QImage cand(fbPath);
+                        if (cand.isNull()) continue;
+                        if (cand.convertToFormat(QImage::Format_ARGB32_Premultiplied) == sideRef) continue; // 同样退化 → 试下一个
+                        faceTile = cand;
+                        qInfo("ResourcePack: %s 是侧贴图拷贝（无刻脸），南瓜前面回退 %s。", qPrintable(m.second), qPrintable(fb));
+                        break;
+                    }
+                    if (faceTile.isNull())
+                        continue; // 无可用候选 → 保程序生成刻脸瓦片
+                    tile = faceTile;
+                }
+            }
             tile = tile.convertToFormat(QImage::Format_ARGB32_Premultiplied);
             if (tile.size() != QSize(kTile, kTile))
                 tile = tile.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
