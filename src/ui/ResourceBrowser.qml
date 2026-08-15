@@ -468,8 +468,12 @@ Item {
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             // pack 关且无程序贴图（bones/stalker/spider）→ null + 纯色 baseColor。
+                                            // t597 修：渲染 = baseColorMap × baseColor —— pack 贴图在身时 baseColor 用白
+                                            //   （贴图原色完整透出，同 Main.qml t597 修法）；mobFallbackColor 是 pack 关的
+                                            //   纯色体色（stalker #3a5a3a / spider #2a1a1a 均暗色），乘上 pack 贴图会把
+                                            //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
                                             baseColorMap: root.selectedMobTexSource !== "" ? mobPrevTex : null
-                                            baseColor: root.mobFallbackColor(root.selectedMobType)
+                                            baseColor: root.selectedMobTexSource !== "" ? "#ffffff" : root.mobFallbackColor(root.selectedMobType)
                                         }
                                     }
                                 }

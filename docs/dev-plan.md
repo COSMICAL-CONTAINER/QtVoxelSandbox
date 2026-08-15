@@ -2083,8 +2083,9 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 查：mobEntityMap 蜘蛛映射 → pack entity/spider.png 是否存在/路径大小写；MobModel 蜘蛛 box-UV 是否走了 pack 路径。
 - 结论：映射正确（demo 包实存 entity/spider/spider.png，蜘蛛 head/body/leg 三组 box-UV 六面 100% 不透明）——「无贴图」观感实为 t597 暗色 tint 乘贴图（已修）。
 
-**t597** 苦力怕+蜘蛛颜色暗淡（僵尸/骷髅明亮）
+**t597** 苦力怕+蜘蛛颜色暗淡（僵尸/骷髅明亮）✅（commit 见 git log，t597）
 - 查：两 mob 的 Model 材质 brightness/光照通道 —— 是否没走 `PrincipledMaterial.NoLighting`（违反光照不变量）或贴图 tint 乘了暗色。对照 Shambler/Bones 的材质参数拉平。
+- 根因：PrincipledMaterial 渲染 = baseColorMap × baseColor；Stalker/Spider 把 pack 关时的纯色体色（暗绿 0.37/0.66/0.23、暗黑红 0.16/0.10/0.10）也乘上 pack 贴图 → 压暗到 ~1/3 与 ~1/10。修：pack 贴图在身时 baseColor 近白（同 Shambler terrainLight 白 tint）；ResourceBrowser 图鉴预览同修（mobFallbackColor 仅 pack 关纯色路径用）。
 
 **t598** 鸡腿贴图缺失 + 雪傀儡无头 + 铁傀儡头/腿/肩黑色
 - 查：① 鸡腿 box UV 采样（鸡贴图腿区在特定 uv 区）；② 雪傀儡头（同 t582 图鉴路径）；③ 铁傀儡：腿前黑（front 面贴图采样错位）+ 肩黑色（shoulder box UV 越界）—— box-UV 公式对照 MC 1.8 iron_golem 实际 textureOffset 重算。

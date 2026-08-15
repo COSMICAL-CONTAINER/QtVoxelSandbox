@@ -6077,11 +6077,24 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint 调制贴图：受击红 / 蓄力白）；
                                     //   否则 null（纯色，现状）。pack 关时 baseColor 即体色。
                                     baseColorMap: mobStalkerPackTex.source.toString().length > 0 ? mobStalkerPackTex : null
-                                    // 受击红闪优先；否则青绿色（terrainLight 调昼夜暗），蓄力时 lerp 向白（蓄力发白）。
+                                    // t597 修（用户「潜行者暗淡，不如僵尸/骷髅明亮」）：PrincipledMaterial 渲染 = baseColorMap ×
+                                    //   baseColor —— pack 贴图在身时 baseColor 必须近白（贴图原色透出，同 Shambler 的
+                                    //   terrainLight 白色 tint 模式）；旧版把 pack 关时的纯色体色 (0.37,0.66,0.23) 也乘上
+                                    //   pack 贴图 → 贴图被压暗到 ~1/3 读作「暗淡」。受击红闪仍全路径生效；蓄力发白仅
+                                    //   pack 关（纯色）路径参与（pack 贴图已是满色，再 lerp 向白会洗掉纹理 → 仅 scale 微提亮）。
                                     baseColor: {
                                         const _r = entityManager.revision
                                         const tl = terrainLight(worldClock.skyLight)
                                         if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        if (_r < 0) return "#000000"
+                                        if (mobStalkerPackTex.source.toString().length > 0) {
+                                            // pack 贴图在身：白色 tint × 昼夜灰阶（贴图原色完整保留）；
+                                            //   蓄力时微提亮（infl*0.4 → 满蓄力 1.4 饱和到白，仍见纹理闪白）。
+                                            const infl = Math.min(1, entityManager.inflateAt(index))
+                                            const k = 1.0 + infl * 0.4
+                                            return Qt.rgba(Math.min(1, tl.r * k), Math.min(1, tl.g * k), Math.min(1, tl.b * k), 1.0)
+                                        }
+                                        // pack 关：纯色青绿体色 × 昼夜灰阶；蓄力 lerp 向白（原 t284 行为保留）。
                                         let r = 0.37, g = 0.66, b = 0.23 // Stalker 青绿色（呈现层视觉约定色，原创）
                                         const infl = entityManager.inflateAt(index)
                                         if (infl > 0) {
@@ -6090,7 +6103,7 @@ Window {
                                             g = g * (1 - t) + 1.0 * t
                                             b = b * (1 - t) + 1.0 * t
                                         }
-                                        return _r >= 0 ? Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0) : "#000000"
+                                        return Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0)
                                     }
                                 }
                                 // rv-low-batch1 深色眼恢复（pack 感知 visible）。t595 头改到 (0,0.43,0) 半 0.24 →
@@ -6273,11 +6286,18 @@ Window {
                                     lighting: PrincipledMaterial.NoLighting
                                     // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜暗）；否则 null（纯色）。
                                     baseColorMap: mobSpiderPackTex.source.toString().length > 0 ? mobSpiderPackTex : null
+                                    // t597 修（用户「蜘蛛暗淡 / 像没贴图」）：渲染 = baseColorMap × baseColor —— pack 贴图在身
+                                    //   时 baseColor 近白（贴图原色透出，同 Shambler/Bones 模式）；旧版把 pack 关时的纯色
+                                    //   暗黑红 (0.16,0.10,0.10) 乘上 pack 贴图 → 贴图被压暗到 ~1/10 近乎全黑（用户读作「无贴图」，
+                                    //   即 t596 报障根源）。pack 关时保留暗黑红纯色体色（原创 §9a）。受击红闪全路径生效。
                                     baseColor: {
                                         const _r = entityManager.revision
                                         const tl = terrainLight(worldClock.skyLight)
                                         if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                        return _r >= 0 ? Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) : "#000000" // 暗黑红
+                                        if (_r < 0) return "#000000"
+                                        if (mobSpiderPackTex.source.toString().length > 0)
+                                            return tl // pack 贴图在身：白色 tint × 昼夜灰阶（贴图原色完整保留）
+                                        return Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) // 暗黑红（纯色回退）
                                     }
                                 }
                                 // rv-low-batch1 4 红眼恢复（pack 感知 visible；蜘蛛标志性 8 眼简化为 4 颗醒目红眼，
