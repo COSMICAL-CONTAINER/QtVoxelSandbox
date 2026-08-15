@@ -2109,7 +2109,7 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 
 ### 🅽 统计/成就（1 项）
 
-**t603** 合成工作台成就触发不了 + 统计合成次数恒 0
+**t603** 合成工作台成就触发不了 + 统计合成次数恒 0 ✅（commit 见 git log，t603）
 - 查：`playerprogress` 合成事件接线 —— doCraft 后未调 progress->onCraft(item, count)（或信号没接）→ 成就「合成工作台」+ 统计 itemsCrafted 都不涨。核 Main.qml/InventoryOps craft 路径 → progress 调用点。
 
 ### 🅾 生存射箭消耗语义（1 项）

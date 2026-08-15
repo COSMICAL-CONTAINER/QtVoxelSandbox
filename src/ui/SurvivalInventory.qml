@@ -38,7 +38,7 @@ Item {
     //   CharacterPreview3D 经 `player: root.player` 传入（不能写 `player: player` —— 裸名会 shadow 成
     //   CharacterPreview3D 自身的同名属性 → 自引用恒 null，经验：传属性给子组件用 `root.xxx` 显式路径）。
     property var player: null
-    // progress 玩家进度注入（Main.qml 经 `progress: window.progress` 绑定）：批量合成（InventoryOps
+    // progress 玩家进度注入（Main.qml 经 `progress: progress` 绑定）：批量合成（InventoryOps
     //   slotShiftLeftCraft）统计 / 成就埋点用。InventoryOps .js 无 QML 全局 id 访问权 → 经 root 传，同 hotbar 模式。
     property var progress
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
@@ -197,7 +197,9 @@ Item {
         root.hotbar.heldBlock = r.outputId
         root.hotbar.heldCount = (heldId === r.outputId ? heldCount : 0) + r.outputCount
         root.craftRev++
-        if (window.progress) window.progress.onCraft(r.outputId)  // progress 统计合成 + 成就
+        // t603 修：旧 `window.progress` 恒 undefined（Window 未声明该属性；progress 是 Main.qml 内 id 非
+        //   window 属性）→ 单次合成上报从未发出。改用注入的 root.progress（同 CraftingTableUI t603）。
+        if (root.progress) root.progress.onCraft(r.outputId)  // progress 统计合成 + 成就
     }
 
     // t49 关包归还合成栏（spec point 6）：面板隐藏（visible→false）时把 craftSlots 内容 addStack 回 hotbar

@@ -33,7 +33,7 @@ Item {
     // 宿主注入：hotbar 视图模型（提供 heldBlock/heldCount/maxStackSize/iconSourceForBlock/
     // nameForBlock/isTool/isMaterial/slotRevision/addStack 等栈操作 + 图标 / 名查询）。
     property Hotbar hotbar
-    // progress 玩家进度注入（Main.qml 经 `progress: window.progress` 绑定）：批量合成（InventoryOps
+    // progress 玩家进度注入（Main.qml 经 `progress: progress` 绑定）：批量合成（InventoryOps
     //   slotShiftLeftCraft）统计 / 成就埋点用。InventoryOps .js 无 QML 全局 id 访问权 → 经 root 传，同 hotbar 模式。
     property var progress
     // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
@@ -163,7 +163,11 @@ Item {
         root.hotbar.heldBlock = r.outputId
         root.hotbar.heldCount = (heldId === r.outputId ? heldCount : 0) + r.outputCount
         root.craftRev++
-        if (window.progress) window.progress.onCraft(r.outputId)  // progress 统计合成 + 成就
+        // t603 修：旧代码 `window.progress` —— Main.qml 的 Window **从未声明 progress 属性**（progress 是
+        //   Main.qml 内 id，非 window 属性）→ 恒 undefined → 单次合成的统计 / 成就上报从未发出（用户
+        //   「合成工作台成就触发不了 + 统计合成次数恒 0」）。改用注入的 root.progress（Main.qml
+        //   `progress: progress` 绑定，同 InventoryOps 批量路径 root.progress 模式）。
+        if (root.progress) root.progress.onCraft(r.outputId)  // progress 统计合成 + 成就
     }
 
     // 取当前合成格的 id 数组（触碰 craftRev 让 QML 绑定刷新时重算）。
