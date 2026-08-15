@@ -4260,11 +4260,17 @@ bool PlayerController::canStandUp() const
 }
 
 // t559 自动攀爬抬升量（auto-step lift）：扫描当前 footprint（±kHalfW）在 [脚底, 脚底+kAutoStepMax] 高度带内
-//   的所有方块 sub-AABB，取「最高可迈表面顶」（b.maxY ∈ (脚底, 脚底+kAutoStepMax]，footprint 严格重叠）。
+//   的所有方块 sub-AABB，取「最高可迈表面顶」（b.maxY ∈ (脚底, 脚底+kAutoStepMax]，footprint 重叠）。
 //   返回 = 该顶 − 脚底（>0 可自动攀爬）；无合格障碍 → 0（不自动爬，交玩家跳）。
 //   与旧固定 0.55 抬升的区别：精确到障碍顶 → 半砖（顶 0.5）抬 0.5、蹲态（1.5 高）在 1.5 通道里恰好贴天花板
 //   （抬 0.5 + 蹲 1.5 = 2.0 与天花板底 2.0 贴平，靠 kCollisionSkin 内缩吸收 eps → 可过；旧 0.55 顶头失败）。
 //   整块（顶 1.0 > 0.6）不在扫描带内 → 返回 0（须跳，机制等价 MC auto-step 只对 ≤0.5 台阶生效）。
+// t581 修（t559 回归根因）：footprint 重叠判定改为「外扩 kStepProbe 容差」。t559 版用严格重叠，但本函数的
+//   调用前提恰是玩家已被 moveAxis 贴面 snap（X/Z 定位在障碍面外 eps=1e-4 缝上）→ footprint 与挡路障碍的
+//   严格重叠**恒假** → autoStepLift 恒 0 → 睡莲 / 压力板 / 积雪层 / 下半砖 / 楼梯全部迈不上去（须跳；蹲态在
+//   1.5 通道里跳又顶头 = 完全卡死）。外扩 kStepProbe=0.02（≫ snap eps，≪ kHalfW）把「正贴面被挡」的障碍
+//   纳入候选；容差只放宽候选集，抬升后仍有 aabbHitsSolid（顶头还原）+ moveAxis 复走（高墙还原）两道校验，
+//   不会误上 / 穿墙。侧向 2cm 内的邻近障碍即使被误纳入，bestTop 偏高也只是多抬一点，两道校验兜底。
 float PlayerController::autoStepLift() const
 {
     if (!m_world || !m_onGround) return 0.0f;
@@ -4272,8 +4278,11 @@ float PlayerController::autoStepLift() const
     const float maxY = baseY + kAutoStepMax;
     const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
     const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
-    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
-    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
+    // t581：cell 取样范围同步外扩 kStepProbe —— 下半砖 / 雪层 / 睡莲等满 footprint 薄板的 AABB 从格边界 C
+    //   起，玩家被 snap 在 C-1e-4 → 原 ceil(max)-1=C-1 漏采障碍格 C（只扩重叠判定看不见盒）。两处容差同值。
+    constexpr float kStepProbe = 0.02f;
+    const int x0 = int(std::floor(minx - kStepProbe)), x1 = int(std::ceil(maxx + kStepProbe)) - 1;
+    const int z0 = int(std::floor(minz - kStepProbe)), z1 = int(std::ceil(maxz + kStepProbe)) - 1;
     const int y0 = int(std::floor(baseY)), y1 = int(std::floor(maxY));
     float bestTop = 0.0f;
     bool found = false;
@@ -4283,8 +4292,9 @@ float PlayerController::autoStepLift() const
                 for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(x, y, z)) {
                     const float top = b.maxY;
                     if (top <= baseY + 1e-3f || top > maxY) continue; // 只取「脚底之上、maxStep 内」的顶面
-                    if (!(minx < b.maxX && maxx > b.minX &&
-                          minz < b.maxZ && maxz > b.minZ)) continue;  // footprint 严格重叠（排除仅贴面）
+                    if (!(minx - kStepProbe < b.maxX && maxx + kStepProbe > b.minX &&
+                          minz - kStepProbe < b.maxZ && maxz + kStepProbe > b.minZ))
+                        continue; // footprint 外扩容差重叠（t581：含「正贴面被挡」的障碍；排除仅邻格远障碍）
                     if (!found || top > bestTop) { bestTop = top; found = true; }
                 }
     return found ? (bestTop - baseY) : 0.0f;

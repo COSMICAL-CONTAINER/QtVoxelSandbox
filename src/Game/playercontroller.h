@@ -712,6 +712,8 @@ private:
     //   区别：精确到障碍顶 → 蹲态（1.5 高）在「1.5 格通道 + 下半砖（0.5）→ 抬升 0.5 恰好贴天花板」组合下可
     //   过（旧 0.55 顶头失败 → 用户「半砖楼梯自动上不去」）；站态抬 0.5 后头部空间不足同样被 aabbHitsSolid
     //   拦回（不误爬进低顶）。
+    // t581 修：footprint 重叠判定外扩 kStepProbe(0.02) 容差 —— 调用前提是玩家已被 moveAxis 贴面 snap
+    //   （障碍面外 eps 缝），严格重叠恒假 → t559 版恒返 0（薄障碍全迈不上）。见 .cpp 头注释。
     float autoStepLift() const;
     void setCaptured(bool c);
     QPoint windowCenterGlobal() const;
