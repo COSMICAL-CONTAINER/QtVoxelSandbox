@@ -403,6 +403,11 @@ bool World::clearBlockSilent(int x, int y, int z)
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     pokeFluidDirty(x, y, z); // t380：邻接流体可能受影响 → 标流体脏（保守；TNT 不属流体通常无影响）
     checkPressurePlateOnEdit(x, y, z, occ, id); // t494：压力板失撑（TNT 被引燃清 Air → 板上压力板失撑掉落）
+    // rv-low-batch2 补齐：点火静默清绕过 setBlock 编辑钩子族 → 邻轨连接 / 雪层坍落同样漏复检（机制同 t494
+    //   压力板漏检根因：清成 Air 改变邻轨连接位 / 正上方雪层失撑）。批量路径破坏后统一补调（见
+    //   destroySphereSilent 末尾同族补调注释）。
+    checkRailOnEdit(x, y, z, occ, id);      // t565：邻轨连接重算（清 Air → 邻轨断向 / 形态切换）
+    checkSnowLayerOnEdit(x, y, z, occ, id); // t527：正上方雪层失撑 → 整柱坍落为携带层数的下落实体
     return true;
 }
 
@@ -1558,6 +1563,15 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
         noteIceWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         noteFluidWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         noteGrowthWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
+    }
+    // rv-low-batch2 补齐：爆炸批量直写绕过 setBlock 编辑钩子族 → 邻轨连接 / 雪层坍落漏复检（同 tickLavaFlow
+    //   焚毁路径逐块调 checkXxxOnEdit 的模式）。对每个破坏格补 checkRailOnEdit（球内破坏改变邻轨连接位 →
+    //   直 / 拐角 / 十字形态重算）+ checkSnowLayerOnEdit（破坏格正上方雪层失撑 → 整柱坍落为携带层数的下落
+    //   实体）。两检查自带早退（非 Rail / 正上方非 SnowLayer → no-op 零写入零 emit），球 ≤343 格 O(1) × N，
+    //   爆炸稀有可忽略。各自的 emit worldChanged / snowLayerFell 与下方收口 emit 叠加无害（重建幂等）。
+    for (const DestroyedVoxel &d : destroyed) {
+        checkRailOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
+        checkSnowLayerOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
     }
     emit worldChanged();
     m_chunks.clearAllDirty();

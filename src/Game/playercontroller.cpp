@@ -2743,7 +2743,11 @@ void PlayerController::placeBlock()
         //   t508 换船：已骑乘时命中**另一艘**船 → tryMount 内部切到新船（旧船释放骑乘态自然浮水，spec
         //   「骑船时右键另一艘船来坐上去」）；命中当前骑的船 / 未命中 → 返 false（落回放船路径）。
         //   tryMount 现允许在 ridingIndex>=0 时调（换船），故去掉了旧「ridingIndex() < 0」守卫。
-        if (m_boatManager->tryMount(position(), lookDirection(), kReach)) {
+        //   rv-low-batch2 骑乘互斥：骑矿车时不得再上船（旧版两边 rider 同时置位 → step 船分支先命中 → 矿车
+        //   rider 残留成幽灵骑乘态）。守卫：骑矿车中 → 跳过上船（先 shift 下车才能换乘，机制等价 MC 同一
+        //   时刻只能骑一个载具）。
+        if (!(m_minecartManager && m_minecartManager->ridingIndex() >= 0)
+            && m_boatManager->tryMount(position(), lookDirection(), kReach)) {
             m_lastPlaceMs = now;
             emit swingArm();
             return;
@@ -2828,7 +2832,10 @@ void PlayerController::placeBlock()
     //   命中方块非 Rail → 不放（矿车只能放轨上，机制等价 MC 矿车须置于铁轨）。
     if (m_minecartManager) {
         // (a) 骑乘：命中矿车 → 上车（即便手持矿车物品也不另放，机制等价 MC 右键矿车优先上车）。
-        if (m_minecartManager->tryMount(position(), lookDirection(), kReach)) {
+        //   rv-low-batch2 骑乘互斥：骑船时不得再上矿车（旧版两 rider 同时置位成幽灵骑乘态）。守卫：骑船中
+        //   → 跳过上矿车（先 shift 下船才能换乘，与船侧守卫对称，机制等价 MC 同一时刻只能骑一个载具）。
+        if (!(m_boatManager && m_boatManager->ridingIndex() >= 0)
+            && m_minecartManager->tryMount(position(), lookDirection(), kReach)) {
             m_lastPlaceMs = now;
             emit swingArm();
             return;
@@ -3893,6 +3900,28 @@ bool PlayerController::onIce() const
     return BlockRegistry::isIce(m_world->blockAt(bx, by, bz));
 }
 
+// t565 蛛网粘滞判定（见 .h 头注释；rv-low-batch2 补实现）：玩家 AABB footprint（±kHalfW）各列在脚位 +
+//   身体（脚 +1）两行内任一格 == Cobweb 即真（取样策略同 onLadder / hasGroundBelowAt 的 footprint 全列严格
+//   覆盖；Cobweb 无碰撞 ShapeNone → 玩家穿入网格占据该格，覆盖即粘滞）。step() 走路分支据此把目标水平速度
+//   ×kCobwebSpeedMul（同 waterMul 乘入模式，机制等价 MC 1.0 cobweb 粘滞减速；矿井散布的蛛网从此真粘人）。
+//   只读 World::blockAt（向下依赖，不改栅格）；无世界 → false。
+bool PlayerController::inCobweb() const
+{
+    if (!m_world) return false;
+    const int by0 = int(std::floor(m_pos.y()));           // 脚位行
+    const int by1 = by0 + 1;                              // 身体行（玩家 1.8 高 AABB 上格）
+    const float minx = m_pos.x() - kHalfW, maxx = m_pos.x() + kHalfW;
+    const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
+    const int x0 = int(std::floor(minx)), x1 = int(std::ceil(maxx)) - 1;
+    const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
+    for (int zz = z0; zz <= z1; ++zz)
+        for (int xx = x0; xx <= x1; ++xx) {
+            if (m_world->blockAt(xx, by0, zz) == BlockRegistry::Cobweb) return true;
+            if (m_world->blockAt(xx, by1, zz) == BlockRegistry::Cobweb) return true;
+        }
+    return false;
+}
+
 // t223 flowSoundLevel 属性 READ：返回 m_flowSoundLevel（tickImpl 节流扫描缓存值）。
 float PlayerController::flowSoundLevel() const
 {
@@ -4513,13 +4542,17 @@ void PlayerController::step(qreal dt)
     // t304 拉弓减速（spec「拉弓减速（叠 shift）」）：m_bowDrawing 时水平速度再 ×kBowSlowMul=0.5（与蹲下
     //   ×0.4 叠加 → 蹲拉弓 = 走速×0.4×0.5=0.2，机制等价 MC 1.0 拉弓大幅减速）。仅走路模式（飞态早 return）。
     const float bowMul = m_bowDrawing ? kBowSlowMul : 1.0f;
+    // t565 蛛网粘滞（rv-low-batch2 补实现，见 inCobweb 头注释）：玩家 footprint 在蛛网内 → 目标水平速度再乘
+    //   kCobwebSpeedMul(0.15)，同 waterMul 乘入模式（机制等价 MC 1.0 cobweb 粘滞：进网水平速度大减 → 贴网
+    //   挣扎挪动；蛛网无碰撞 → 玩家低速穿过网格）。仅走路模式生效（飞 / 观察者分支已 early return）。
+    const float webMul = inCobweb() ? kCobwebSpeedMul : 1.0f;
     // t468 冰上滑动（spec「冰面摩擦力极低→玩家移动加速滑；松键后惯性继续滑一段才停」）。机制等价 MC 1.0 冰滑行：
     //   非冰地面 → 瞬时设速（旧手感：松键即停）；冰面 → 水平速度向「目标速度」做指数接近（1 - exp(-rate*dt)），
     //   rate = iceSlipApproach（Ice 中等 / PackIce 更滑 / BlueIce 最滑）。松键时 wish=0 → 目标=0 → 速度按同 rate
     //   衰减 → 冰上明显惯性滑行（BlueIce 滑得最远）。帧率无关（exp(-rate*dt)）。仅走路模式（飞态已 early return）。
     //   水中（feetInWater）不走冰滑行（水中已减速 + 浮力，无冰面；waterMul 仍乘入目标速度）。
-    const float targetVx = wish.x() * kWalk * speedMul() * waterMul * bowMul;
-    const float targetVz = wish.z() * kWalk * speedMul() * waterMul * bowMul;
+    const float targetVx = wish.x() * kWalk * speedMul() * waterMul * bowMul * webMul;
+    const float targetVz = wish.z() * kWalk * speedMul() * waterMul * bowMul * webMul;
     if (onIce() && !feetInWater()) {
         const quint8 iceBlk = m_world->blockAt(int(std::floor(m_pos.x())),
                                                 int(std::floor(m_pos.y())) - 1,

@@ -769,6 +769,11 @@ private:
     //   机制等价 MC：只有面向梯子（移动方向指向所贴墙面）才向上爬；侧身擦过（wish 与墙向近乎垂直 / 反向）不爬。
     //   仅用于爬升分支门控；悬挂 / 缓降仍由 onLadder() 触发（贴梯即可托住，与面向无关）。只读 World（向下依赖）。
     bool facingLadder() const;
+    // t565 蛛网粘滞判定：玩家 AABB footprint 各列在脚位 + 身体两行内任一格 == Cobweb 即真（取样策略同
+    //   onLadder；Cobweb 无碰撞 ShapeNone → 玩家穿入网格占据该格，覆盖即粘滞）。step() 走路分支据此把水平
+    //   目标速度 ×kCobwebSpeedMul（同 waterMul 乘入模式，机制等价 MC 1.0 cobweb 粘滞大幅减速）。只读
+    //   World::blockAt（向下依赖）；无世界 → false。
+    bool inCobweb() const;
     // t134 玩家水平朝向（据 yaw 推 4 向）：前向 = (-sin(yaw), -cos(yaw))（与 wishHoriz/lookDirection 同源）。
     //   返回 0=+X 1=-X 2=+Z 3=-Z（与不完整方块 state 朝向编码一致：stairs/door/trapdoor 均用此编码）。
     //   供 placeBlock 放 stairs/door 时定朝向、useBlock 开 trapdoor 时定开向。
@@ -1149,6 +1154,10 @@ private:
     //   ±60° 锥内走（主分量朝墙）；侧身擦过（dot≤0.5）不爬。机制等价 MC 须面向梯子才爬。仅门控爬升分支
     //   （悬挂 / 缓降仍由 onLadder 触发，贴梯即可托住）。
     static constexpr float kLadderFaceDot = 0.5f; // wish·wallDir > 此 = 面向梯子（≈60° 锥）
+    // t565 蛛网粘滞水平速度倍数（机制等价 MC 1.0 cobweb 粘滞：进网水平速度大减）。乘入走路分支的目标水平
+    //   速度（同 waterMul 模式；蛛网无碰撞 → 玩家以低速穿过网格）。0.15 ≈ 走速 4.3 → 0.65 blocks/sec
+    //   （量级对齐 MC「贴网挣扎挪动」手感；可在本常量调）。仅走路模式（飞 / 观察者 early return 不受影响）。
+    static constexpr float kCobwebSpeedMul = 0.15f;
     // t223 近流水 proximity 水流声（spec「近流动水一定范围持续水流声 ambience loop」）：
     //   kFlowSoundRadius：扫描盒半径（格）= 水流声可闻范围；玩家到最近流水格距离 ≥ 此 → level=0（无声）。
     //     8 格 ≈ MC 近流水可闻距离量级（机制对齐，非精确数值复刻）。

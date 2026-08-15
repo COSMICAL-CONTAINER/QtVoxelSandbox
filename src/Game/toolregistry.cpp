@@ -169,6 +169,12 @@ bool ToolRegistry::canHarvest(quint8 blockId, int itemId)
     const int harvestTool = BlockRegistry::toolType(blockId);
     const ToolDef *t = tool(itemId);
     if (!t) return false;                      // 需工具但空手 → 不掉落（spec：仅 AIR）
+    // t565/rv-low-batch2 剪刀挖蛛网特例：Cobweb.toolType=Sword（须持剑挖才掉线），但剪刀同样能采集蛛网
+    //   （机制等价 MC 1.0 shears 挖 cobweb 掉线 + ×15 速度 —— 速度特例已在上 miningSpeedMul 放行，此处
+    //   掉落判定同步放行，否则「剪得快但零掉落」）。仅 Cobweb 放行 Shears；其余 Shears 块（Wool）走通用路径
+    //   （Wool.requiresTool=false 恒掉落，不经此特例）。
+    if (blockId == BlockRegistry::Cobweb && t->type == int(BlockRegistry::Shears))
+        return true;
     return t->type == harvestTool && t->harvestLevel >= BlockRegistry::minToolTier(blockId); // 类型 + 采掘等级双达标才掉落
 }
 
