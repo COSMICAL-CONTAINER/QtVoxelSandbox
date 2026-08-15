@@ -17,7 +17,7 @@ import VoxelSandbox
 //       收腿（Timer 16ms 采样 feetPosition.y 积分离地高度，着地归零）。
 //   (3) **看鼠标指针**：宿主面板 root 级 HoverHandler 记录光标场景坐标 → mouseScene 注入 → 人物转身
 //       （bodyYaw）+ 转头（headYawLead）+ 抬头/低头（headPitch）朝鼠标方向（MC 角色预览类 UI 交互）。
-//   (4) 3D 人物右移 1 格（宿主面板 x 改 root.slotSize*2+6，用户「旁边有个人但偏左」）。
+//   (4) 3D 人物右移（宿主面板 x，t573 定格 slotSize*2-10；t551 曾移 slotSize*2+6 被用户反馈偏过头）。
 //
 // 全部 UnitCube + NoLighting 纯色（§9a 原创，非 MC 皮肤资产）。坐标以脚底 y=0 为原点（同 Main.qml
 // playerModel / 玩家 AABB 约定）：头心 1.55、躯干 0.95、肩 1.3、髋 0.6、脚 0。
@@ -123,14 +123,16 @@ Item {
     //   review-12 修：mouseScene 现为窗口坐标（point.position；原 globalPosition 不存在绑 undefined）。
     //   mapFromItem(null, x, y)：item 传 null = 从 scene（窗口 contentItem）坐标映射到本 Item 本地
     //   （Qt 6.11 Item 无 mapFromScene，mapFromGlobal 已不适配新坐标系）。
-    //   鼠标在预览中心右侧（dx>0）→ 人物右转（yaw 取负，dir=(-sin,-cos) 约定）；上方（dy<0）→ 抬头。
+    //   鼠标在预览中心左侧（dx<0）→ 人物左转；上方（dy<0）→ 抬头。
     //   全身 yaw 转 65% + 头 yaw 再转 35%（头领转、身随转 = 自然「看」的姿态）；垂直全由头 pitch 承担。
     //   未跟踪（mouseScene 为哨兵）→ 回中性位（lookYaw=0/lookPitch=0）。
+    // t573 修左右反转（用户「鼠标在左边，人物看向右边；上下是对的」）：t551 的 -mouseDx 使 dx<0（鼠标左）
+    //   → lookYaw>0 → +y 旋把脸从 +Z 转向 +X（屏幕右）——看反。取反符号为 +mouseDx（pitch 不动，上下本对）。
     readonly property bool mouseTracked: root.mouseScene.x > -9999
     readonly property point mouseLocal: root.mapFromItem(null, root.mouseScene.x, root.mouseScene.y)
     readonly property real mouseDx: root.mouseLocal.x - root.width / 2
     readonly property real mouseDy: root.mouseLocal.y - root.height / 2
-    readonly property real lookYaw: root.mouseTracked ? Math.max(-60, Math.min(60, -root.mouseDx * 0.6)) : 0
+    readonly property real lookYaw: root.mouseTracked ? Math.max(-60, Math.min(60, root.mouseDx * 0.6)) : 0
     readonly property real lookPitch: root.mouseTracked ? Math.max(-45, Math.min(45, -root.mouseDy * 0.5)) : 0
     readonly property real bodyYaw: 0.65 * root.lookYaw        // 全身转身（身随）
     readonly property real headYawLead: 0.35 * root.lookYaw    // 头再转（头领）

@@ -666,10 +666,11 @@ Item {
 
                         // 角色预览（护甲右侧）：t546 3D 玩家模型预览（第三人称视角，复用 Main.qml playerModel
                         // 几何/配色 + 4 装备槽护甲 overlay），替代 2D Canvas 人形剪影。F3+B 时叠加玩家 AABB 线框。
-                        // t551：x 右移 1 格（root.slotSize+6 → root.slotSize*2+6，用户「旁边有个人但偏左」）；
-                        //   注入 player（跟玩家动作）+ mouseScene（看鼠标指针，root 级 HoverHandler 追踪）。
+                        // t551 注入 player（跟玩家动作）+ mouseScene（看鼠标指针，root 级 HoverHandler 追踪）。
+                        // t573 x 回调（用户「3D 模型太右了，往左一点」）：同 SurvivalInventory，t551 的
+                        //   slotSize*2+6(=86) 过头 → 回调 slotSize*2-10(=70) 居中装备栏与合成区间空位。
                         Item {
-                            x: root.slotSize * 2 + 6
+                            x: root.slotSize * 2 - 10
                             y: 0
                             width: 80
                             height: parent.height

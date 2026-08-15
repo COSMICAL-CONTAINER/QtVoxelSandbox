@@ -1960,11 +1960,11 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 
 ### 🅱 物品栏 3D 人物（2 项）
 
-**t572** 创造模式生存物品栏 tab 空装备栏图标对齐生存版 ✅✅ 已完成（commit 待补）
+**t572** 创造模式生存物品栏 tab 空装备栏图标对齐生存版 ✅✅ 已完成（commit 8b759d0）
 - 用户：「创造模式里的生存物品栏 tab，空白装备栏 4 个图标和生存模式的不一样（生存模式那 4 个是对的）。」
 - 查：`Inventory.qml` tab6（创造里的生存 tab）空装备槽占位 vs `SurvivalInventory.qml` —— 统一为生存版（pack `empty_armor_slot_*.png` + Canvas 剪影 + MaterialIcon，t551 已做过 SurvivalInventory，把同款搬到 Inventory tab6）。
 
-**t573** 3D 人物偏移 + 左右看向反转
+**t573** 3D 人物偏移 + 左右看向反转 ✅✅ 已完成（commit 6f0c2ef）
 - 用户：「两个背包里 3D 模型太靠右，要往左一点；看鼠标左右反了（鼠标在左人物看向右），上下是对的。」
 - 查：`CharacterPreview3D.qml` x 位置回调（t551 移到 slotSize*2+6 过头了，回调一档）+ headYaw/bodyYaw 符号取反（鼠标 x 相对面板中心 dx → yaw 方向）。
 

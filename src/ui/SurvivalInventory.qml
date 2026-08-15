@@ -543,10 +543,11 @@ Item {
 
                 // 角色预览（护甲右侧，左半区）：t546 3D 玩家模型预览（第三人称视角，复用 Main.qml playerModel
                 // 几何/配色 + 4 装备槽护甲 overlay），替代 2D Canvas 人形剪影。80 宽 × 160 高。
-                // t551：x 右移 1 格（root.slotSize+6 → root.slotSize*2+6，用户「旁边有个人但偏左」）；注入
-                //   player（跟玩家走/蹲/跳动作）+ mouseScene（看鼠标指针，root 级 HoverHandler 追踪）。
+                // t551 注入 player（跟玩家走/蹲/跳动作）+ mouseScene（看鼠标指针，root 级 HoverHandler 追踪）。
+                // t573 x 回调（用户「3D 模型太右了，往左一点」）：t551 从 slotSize+6 一口气移到 slotSize*2+6
+                //   (=86) 过头 → 回调到 slotSize*2-10 (=70)，3D 人物目测居中于装备栏与合成区之间的空位。
                 Item {
-                    x: root.slotSize * 2 + 6
+                    x: root.slotSize * 2 - 10
                     y: 0
                     width: 80
                     height: parent.height
