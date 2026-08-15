@@ -4301,8 +4301,9 @@ Window {
         //   scale (0.6, 1.8, 0.6) → 各轴覆盖 ±0.3 / ±0.9 = AABB 实际范围。玩家 AABB 内是人形部件（无立方
         //   表面）→ 无 z-fight，scale 用精确值即可（不似 mob / 掉落物需 1% 外扩避面重叠）。
         //   朝向箭头：眼位高度（feet + 1.62）的细 UnitCube 棒，绕 Y 转 yaw；本地 -Z = 玩家前向（与
-        //   playerModel / camera 同约定：yaw=0 时前向 (0,0,-1)）。棒中心前移 0.3（半长）→ 从眼位延伸到 -0.6
-        //   处（视线方向 0.6 格长的红色指示棒，机制等价 MC 的 eye-line）。
+        //   playerModel / camera 同约定：yaw=0 时前向 (0,0,-1)）。t602 棒长改按 AABB 半对角线 + 0.3
+        //   ≈ sqrt(0.3²+0.9²+0.3²)+0.3 ≈ 1.3（旧 0.6 大半在 AABB 体内被人形模型挡住，视觉「没箭头」，
+        //   同 mob 朝向棒 t602 根治），棒端必凸出框外 ≥0.3。
         //   分层（PLAN §2）：纯呈现层调试叠层，只读 player.feetPosition/yaw（Game 层 Q_PROPERTY），绝不反向写。
         //   t143：第一人称（cameraMode===FirstPerson）看不到自己身体 → 玩家 hitbox 额外加 cameraMode 门控隐藏；
         //   mob / 掉落物 hitbox 无此门控（全视角可见，见各自 delegate）。
@@ -4319,8 +4320,9 @@ Window {
             eulerRotation: Qt.vector3d(0, player.yaw, 0)
             Model {
                 geometry: UnitCube {}
-                position: Qt.vector3d(0, 0, -0.3)
-                scale: Qt.vector3d(0.03, 0.03, 0.6)
+                property real facingLen: Math.sqrt(0.3 * 0.3 + 0.9 * 0.9 + 0.3 * 0.3) + 0.3  // AABB 半对角线 + 0.3（凸出框外）
+                position: Qt.vector3d(0, 0, -facingLen * 0.5)
+                scale: Qt.vector3d(0.05, 0.05, facingLen)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
             }
         }
@@ -4812,8 +4814,11 @@ Window {
                     Model {
                         visible: window.showHitboxes
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, entRoot.bobY, -0.15)     // 棒中心前移 0.15（半长）→ -Z 方向延伸 0.3
-                        scale: Qt.vector3d(0.02, 0.02, 0.3)
+                        // t602 统一半对角线 + 0.3 量长（sqrt(3)·0.155+0.3 ≈ 0.57）→ 棒端凸出 0.31 掉落物
+                        //   AABB 外（旧 0.3 恰在框内被图标挡住）。父已转 rotY → 世界 yaw=rotY，箭头随物品自转指。
+                        property real facingLen: 0.155 * Math.sqrt(3.0) + 0.3
+                        position: Qt.vector3d(0, entRoot.bobY, -facingLen * 0.5)
+                        scale: Qt.vector3d(0.05, 0.05, facingLen)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
                     // 绕 Y 匀速自转（~3s 一圈），loops 无限。
@@ -5037,9 +5042,11 @@ Window {
                     Model {
                         visible: window.showHitboxes
                         geometry: UnitCube {}
-                        // 朝向棒：从船中心沿本地 -Z（船头）延伸 0.65（船头前伸辨识朝向）。
-                        position: Qt.vector3d(0, 0, -0.325)
-                        scale: Qt.vector3d(0.03, 0.03, 0.65)
+                        // 朝向棒：从船中心沿本地 -Z（船头）。t602 统一半对角线 + 0.3 量长（sqrt(0.5²+0.35²+0.7²)+0.3
+                        //   ≈ 1.42 → 棒端凸出船头 AABB 外 ≥0.3，同 mob / 玩家朝向棒根治「框内被挡」）。
+                        property real facingLen: Math.sqrt(0.5 * 0.5 + 0.35 * 0.35 + 0.7 * 0.7) + 0.3
+                        position: Qt.vector3d(0, 0, -facingLen * 0.5)
+                        scale: Qt.vector3d(0.05, 0.05, facingLen)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
                 }
@@ -6649,18 +6656,16 @@ Window {
                     Model {
                         visible: window.showHitboxes
                         geometry: UnitCube {}
-                        // 朝向棒：从 collision 中心沿本地 -Z（mob 前 = 头朝向）延伸 facingLen（略超前壁辨识）。
+                        // 朝向棒：从 collision 中心沿本地 -Z（mob 前 = 头朝向）延伸 facingLen。
                         //   UnitCube ±0.5 scale sz → 棒长 sz；position z = −sz/2 使棒从 z=0 延伸到 z=−sz（前向）。
-                        //   t558 雪/铁傀儡是「高大方块身」—— 旧棒长 = mobHalfW+0.05（雪傀儡 0.40 / 铁傀儡 0.65）被
-                        //   不透明的雪块 / 铁块身**完全包在体内**（用户报「F3+B 看不到朝向，红线在脑子里被挡」）。
-                        //   对造物：棒延长到凸出身体前壁（+0.65）+ 抬高到上身（mobHalfH*0.6），棒从块体间伸出可见；
-                        //   其余 mob（体型小 / 头前伸）保持原短棒（原长短够辨，无此问题）。
-                        property real facingLen: (entMobType === EntityManager.MobSnowGolem || entMobType === EntityManager.MobIronGolem)
-                                                 ? (mobHalfW + 0.65) : (mobHalfW + 0.05)
-                        property real facingY: (entMobType === EntityManager.MobSnowGolem || entMobType === EntityManager.MobIronGolem)
-                                               ? (mobHalfH * 0.6) : 0.0
-                        position: Qt.vector3d(0, facingY, -facingLen * 0.5)
-                        scale: Qt.vector3d(0.03, 0.03, facingLen)
+                        //   t602 统一「凸出框外」长度：旧棒 = mobHalfW+0.05（普通 mob）/ mobHalfW+0.65（造物特判）
+                        //   都沿**水平半宽**量——对高瘦 mob（敌对 0.6×1.8）棒长仅 0.35，棒身大半在 AABB 体内、
+                        //   被 mob 模型 + 白框遮挡，视觉即「只有框没有箭头」（t558 造物同症特判修补，此处根治）。
+                        //   改按 AABB **半对角线** + 0.3 量长 = sqrt(halfW²+halfH²+halfW²)+0.3 → 棒端必在框外
+                        //   ≥0.3（任意朝向 / 任意体型通用，不再逐类特判）；棒加粗 0.05、纯红 #ff3030 保远距可辨。
+                        property real facingLen: Math.sqrt(mobHalfW * mobHalfW + mobHalfH * mobHalfH + mobHalfW * mobHalfW) + 0.3
+                        position: Qt.vector3d(0, 0, -facingLen * 0.5)
+                        scale: Qt.vector3d(0.05, 0.05, facingLen)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
                     // t283 箭矢（Arrow）：骷髅弓箭手远程射出的投射物。细长杆 Model 沿飞行速度定向（yaw + pitch，

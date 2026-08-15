@@ -165,6 +165,20 @@ Item {
                 scale: Qt.vector3d(0.62, 1.82, 0.62)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
             }
+            // t602 F3+B 朝向箭头（用户「看到了实体框，但没看到朝向的箭头」——本组件此前只画 AABB 框、漏画
+            //   朝向线）。红色细棒从身体中心（y=0.9）沿本地 -Z（模型脸/眼所朝 = 玩家前向，眼睛 z=-0.25 同证）
+            //   延伸 facingLen = AABB 半对角线 + 0.3 ≈ sqrt(0.31²+0.91²+0.31²)+0.3 ≈ 1.31 → 无论身朝哪个方向
+            //   棒必凸出框外 ≥0.3（t558 教训：棒长仅略超半宽时被身体/框内空间遮挡，视觉「没箭头」）。
+            //   随 modelRoot 继承 180+22+bodyYaw 旋转 → 箭头反映「看鼠标转身」的实际朝向（同 mob facing line 语义）。
+            //   分层（PLAN §2）：纯呈现层调试叠层，只读 showHitboxes，绝不反向写。
+            Model {
+                visible: root.showHitboxes
+                geometry: UnitCube {}
+                property real facingLen: Math.sqrt(0.31 * 0.31 + 0.91 * 0.91 + 0.31 * 0.31) + 0.3
+                position: Qt.vector3d(0, 0, -facingLen * 0.5)   // 棒从身体中心延伸到 -facingLen（前向）
+                scale: Qt.vector3d(0.05, 0.05, facingLen)
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
+            }
 
             // 上半身枢轴 Node（t71 结构）：包 head/躯干/双臂，枢轴在髋（y=0.6）。蹲下绕髋 pitch 前倾
             //   鞠躬（-crouchBow；+x 会后仰），髋随 crouchDrop 下沉（与双腿枢轴同高 → 无断身缝隙）。
