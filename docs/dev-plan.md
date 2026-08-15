@@ -2002,119 +2002,119 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 
 ### 🅵 步行自动上台阶回归（1 项，高危）
 
-**t581** ✅ 睡莲/压力板/积雪层/下半砖走不上去（须跳）—— t559 autoStepLift 回归
+**t581** ✅✅ 已完成（commit 8c9cb60）
 - 用户：「睡莲、压力板、鸡血块（红石矿?）走不上去要跳；shift 蹲下前面一格下半砖也上不去，跳也进不去。之前都可以！」
 - 查：t559 把固定 0.55 抬升改成 `autoStepLift()` 精确扫描 —— 疑回归点：① `autoStepLift` 要求 `m_onGround` 且障碍 sub-AABB 与 footprint 严格重叠，但睡莲/压力板/雪层(1/8 高)的 AABB 很薄（ maxY-baseY=0.0625~0.06 ），`top <= baseY + 1e-3f` 过滤条件在玩家脚底略高于障碍底时把薄障碍排除；② 蹲态下（t574/575 通道场景）`canStandUp` 干扰抬升。修：薄障碍判定放宽（障碍 AABB 与玩家 footprint 在 XZ 重叠且 top ∈ (baseY-eps, baseY+kAutoStepMax] 即计入——脚底已嵌入薄障碍上沿的边界）；复测：睡莲/压力板/雪层/下半砖/楼梯直走能上 + 蹲态下半砖能上 + 1.5 格通道不穿墙不卡头。
 
 ### 🅶 雪傀儡（2 项）
 
-**t582** ✅ 雪傀儡头修正：南瓜头缺失 + 头比身子大一圈（pack 三南瓜瓦片 + 0.50 头）
+**t582** ✅✅ 已完成（commit edfbceb）
 - 用户：「生成后头还是没有南瓜；头太大，要比中间身子小一截。」
 - 查：t552 已做过一轮（commit 2a522df）用户仍不见南瓜 —— 核 pack 贴图 UV（南瓜头可能映射到了雪块区域）+ 模型头 box 尺寸（现比身子大 → 改小一截，MC 1.0 雪傀儡头 8×8×8 比身子 10×8×10 小）。可参照铁傀儡 pack 接入模式（t199 验证可行）。
 - 修（实测）：① 头 Model 从纯色橙 UnitCube（宽 0.66 > 顶雪块 0.60 → 读作「头比身子大且没南瓜」）改 BlockCube{blockId:100} + 共享图集（-Z 前面=pumpkin_face 刻面瓦片），缩 **0.50**（MC 8×8×8 半格，比顶块 0.60 小一截），头心 y=1.14；② tileFilenameMap 补 117/118/119 → pack block/pumpkin_side/face_off/top.png（pack 激 = HD 南瓜，关 = 程序生成瓦片，两态都真南瓜）；③ snow_golem.png 实测头部区只是雪+derpy 脸（MC 1.8+ 南瓜不在 entity 贴图内 → 南瓜头走 block 瓦片）；④ 眼/嘴 overlay 改仅 golemSheared（无头 derpy）时显示，防与贴图脸双层。
 
-**t583** ✅ 鸡蛋投掷 + 小鸡孵化（顺带：雪球击退调小）
+**t583** ✅✅ 已完成（commit 373686c）
 - 用户：「鸡蛋还不能投掷，应该可以丢出来砸出小鸡。另外雪球击退有点大，改小一点。」
 - 查：① 鸡蛋 item（已有？）→ 右键投掷物实体（同雪球 thrower 模式）+ 命中地面 1/8 概率生成小鸡；② `kSnowballKnockbackStrength` 2.0 → ~1.2 实测手感；③ 鸡蛋进发射器（t580 同批）。
 
 ### 🅷 船物理（1 项大）
 
-**t584** 船地面/水面/冰面速度分档 + 水中碰岸停船 ✅
+**t584** 船地面/水面/冰面速度分档 + 水中碰岸停船 ✅✅ 已完成（commit 0e21aea）
 - 用户：「船上方块速度跟水里一样——不对。三档：陆地最慢、水里第二、冰面最快+冰面驾驶有惯性（难操作才是对的）。最关键：从水里开碰岸边方块（哪怕陆地跟水面同高）要停下来，只有直接放陆地上开才不受阻。检测机制可能要重写。」
 - 查：boatmanager 推进/摩擦参数按脚下介质分三档（land mul 大 / water 中 / ice 小+惯性保留）；「水中开碰岸停」：船 footprint 前方探测实心方块（非水）→ 速度清零（机制等价 MC 1.0 船撞岸受阻——区别于撞毁阈值）。t556 的 crashSpeed 阈值保留（>阈值撞毁）。
 
 ### 🅸 指南针/钟/月亮（2 项）
 
-**t585** 指南针/钟改 pack 动画贴图 + 删手持 HUD 右上角指南针 ✅
+**t585** 指南针/钟改 pack 动画贴图 + 删手持 HUD 右上角指南针 ✅✅ 已完成（commit 7dd8436）
 - 用户：「指南针手持时右上角显示方向——不要这个。给你 pack 动画贴图：compass 34 帧（compass_00..33.png）+ clock 66 帧（clock_00..65.png，另有 .mcmeta）在 `docs/Default HD 128x Demo 1.8.2.2/assets/minecraft/textures/item/`。」
 - 修：① 删 Main.qml `compassHud`（9094-9206 区）；② 手持/掉落物/物品栏图标改**按状态选帧**：指南针帧 = 朝向出生点角度 → 帧 index（34 帧环）；钟帧 = 昼夜相位 → 66 帧环（mcmeta 默认逐帧，读 mcmeta 确认 frametime/顺序）。pack 图标管线（resourcepackmanager）加「动画帧序列」支持——按 (id, 状态值) 返回帧文件路径；状态变化时图标刷新（帧切换节流 ~4Hz）。
 
-**t586** 月亮 PNG 修正 ✅（commit 见 git log，t586）
+**t586** 月亮 PNG 修正 ✅✅ 已完成（commit a0c7e75）
 - 用户：「月亮还是圆的 + 背景灰色偏距（PNG 还没改）。」
 - 查：t570 用了正方形月亮但现仍显示圆形灰底 → 核 sky 渲染月亮贴图路径（moon 阶段 PNG 生成/挂载是否真的接上，可能 qrc 里还是旧圆月）。pack 无 moon.png（environment 只有 clouds/end_sky）→ 自绘方形月亮 PNG（冷色无透明背景问题：PNG 本身不透明方块，避开灰底）。
 - 根因：贴图已是全不透明方形（alpha 全 255），但 build_moon.py 的**球面法线着色**在方形四角 |n_xy|>1 → nz 钳 0 → 四角恒判暗 → 暗蓝灰恰好填满内切圆外四角 = 「灰底上的圆月」。修：改**平面 terminator 模型**（明暗分界=直线 s<d，d=0.5·cosα，满相位恰全亮/新相位恰全暗；四角与中心同规则 → 无内切圆、无灰底），tools/build_moon.py 重生成 textures/moon_0..7.png。
 
 ### 🅹 工具体系（3 项）
 
-**t587** 工具等级排序修正：铜在石头之后 ✅（commit 见 git log，t587）
+**t587** 工具等级排序修正：铜在石头之后 ✅✅ 已完成（commit 09ca45c）
 - 用户：「等级应是 木头→石头→铜→铁→金→钻石；现在铜排在钻石和金后面。」
 - 查：creativeTools / ToolIcon / 合成表 UI 里的工具排序展示序（harvestLevel 已对（t-rv56 木1石2铜2铁3钻4），是**展示/排列顺序**错）。统一按 tier 序：wood→stone→copper→iron→gold→diamond（gold 挖掘等级=木但展示位在铁后，机制等价 MC 1.0 工具栏顺序）。
 - 修：Hotbar::creativeTools()（hotbar.cpp，创造背包工具 tab + ResourceBrowser 消费同源）各组档序改 木→石→铜→铁→金→钻石（铜的挖掘定位介石/铁之间，展示位紧跟石头；tier 数值仅内部记账 speedMul/配色，与展示序解耦）。钻石档暂仅镐（镐组有第六位；t589 补齐后其余各组同序补位）。
 
-**t588** 铜物品贴图：铁贴图染铜色 ✅（commit 见 git log，t588）
+**t588** 铜物品贴图：铁贴图染铜色 ✅✅ 已完成（commit 60b9f63）
 - 用户：「铜的物品没贴图还在用老贴图，能不能用铁的染色成铜的，统一贴图。」
 - 查：铜锭/铜块/铜矿/铜工具 icon —— pack 无铜贴图（1.8.2 无铜）→ 用对应铁 PNG 染铜色（同皮革 retintLeatherTemplate 模式：luma 保持 + 色相偏铜橙）。resourcepackmanager 加铜色 tint 表。
 - 修：resourcepackmanager.cpp 加 retintCopperTemplate（铁头灰阶像素 |r-g|<14&&|g-b|<14 → luma 映射铜橙梯度 #8a4818/#c87850/#e8a088，木柄棕像素保留）+ copperIronFallback 回退表（铜工具 0x118..0x11C → iron_pickaxe/axe/shovel/sword/hoe.png、铜锭 0x21D → iron_ingot.png）。itemIconSource 映射 PNG 缺失时命中回退表 → 染铜落盘 voxelsandbox_rp_copper_<id>.png + 缓存（同皮革 / 床模式）。铜原矿 0x21C 不进表（自绘已是铜配色）。无 pack 时自绘 ToolIcon/MaterialIcon 本就铜色，无需改。
 
-**t589** 钻石工具补全（现在只有镐）✅（commit 见 git log，t589）
+**t589** 钻石工具补全（现在只有镐） ✅✅ 已完成（commit 700fdba）
 - 用户：「钻石的工具只有镐子，其他的呢？」
 - 查：ToolRegistry 钻石档五件（镐/斧/铲/剑/锄）+ 合成配方 + 图标 + hotbar —— t557 金铜加了五件，钻石可能本来就只有镐（早期只加了镐）。补齐斧/铲/剑/锄四件。
 - 修：ToolId 0x11D..0x120 追加（DiamondAxe/Shovel/Sword/Hoe，不重排）；kTools + kMcToolId 补行；recipe.cpp 四配方（钻石+木棒同铁档形状）；creativeTools 各组钻石位补齐；itemFilenameMap → diamond_*.png（demo 包四图全有）；ToolIcon tier4 全类显式表；Main.qml 手持（锄/斧/铲/剑头色）+ 掉落物 tier4 青绿；item-ids.md 同步。
 
 ### 🅺 附魔系统整体完善（1 项大）
 
-**t590** 附魔系统完善（附魔台选档真随机 + 装备附魔显示 + 等级/青金石消耗显示） ✅（commit 见 git log，t590）
+**t590** 附魔系统完善（附魔台选档真随机 + 装备附魔显示 + 等级/青金石消耗显示） ✅✅ 已完成（commit c7aeda4）
 - 用户：「附魔整个系统还没做完善。附魔了但没显示是什么样的附魔情况。」
 - 查（t475/t476/t549 已有底子：EnchantRegistry + ItemStack enchants + 三档选档 UI）：① 选档后**装备上的附魔要可见**——物品栏 tooltip/图标角标显示附魔名+等级（如「锋利 III」紫字），手持/掉落物紫光晕；② 附魔消耗：等级（ExperienceLevel）+ 青金石 1/2/3 —— 现在只扣青金石不扣等级？核 doEnchant 消耗路径补经验等级消耗（附魔台 UI 显示当前等级够不够）；③ 三档随机性：MC 1.0 机制=seed 随机（书架数影响档位池），核现 selectEnchantsPreview 是否真随机 + 书架 power 进档位权重；④ 修复附魔台 UI 槽位放入即显三档预览（现可能要点击才出）。
 - 注：此项工作量大，agent prompt 里写全 EnchantRegistry 现状（src/Game/enchantregistry.* + t475/t476/t549 三个 commit 上下文）。
 
 ### 🅻 生物图鉴（资源查看器）贴图修正（8 项）
 
-**t591** 资源查看器物品区滚动条样式 + 底部物品被滚动条遮挡 ✅（commit 见 git log，t591）
+**t591** 资源查看器物品区滚动条样式 + 底部物品被滚动条遮挡 ✅✅ 已完成（commit 417273c）
 - 用户：「生物这边没被遮挡，下面的物品确实被遮挡住了；滚动条是白色条，不符合 UI 统一风格。」」
 - 查：ResourceBrowser 滚动条改项目统一 ScrollView/自定义样式（暗色细条）；物品 GridView 右/底 padding 补滚动条宽度。
 
-**t592** 猪贴图：腿后跟黑色未覆盖 + 没嘴巴 ✅（commit 见 git log，t592）
+**t592** 猪贴图：腿后跟黑色未覆盖 + 没嘴巴 ✅✅ 已完成（commit d0b40c8）
 - 查：MobModel 猪 UV（腿 box 的 back/bottom 面采样越界到贴图外/邻区 → 显黑）+ 鼻头/嘴面 UV（MC pig 贴图自带鼻子贴图在特定区）。
 
-**t593** 牛贴图核过最正常（无需修，PASS 项）—— 但顺带核羊贴图换成带羊毛版 ✅（commit 见 git log，t593）
+**t593** 牛贴图核过最正常（无需修，PASS 项）—— 但顺带核羊贴图换成带羊毛版 ✅✅ 已完成（commit 2d319e1）
 - 用户：「牛最正常。羊给的贴图是无羊毛版本，怪怪的，应给长满羊毛的生物。」
 - 查：sheep entity 贴图 → pack 带羊毛版（sheep_fleece 或 sheep 贴图叠加 wool 层；1.8.2 entity/sheep.png 是本体+羊毛双色版？核 pack 实际文件）。
 
-**t594** 蹒跚者改名「僵尸」问题 → 保持现名（PLAN §9 红线）；骷髅改名「骷髅弓箭手」+ 右臂贴图 + 脊柱黑色修复 ✅（commit 见 git log，t594）
+**t594** 蹒跚者改名「僵尸」问题 → 保持现名（PLAN §9 红线）；骷髅改名「骷髅弓箭手」+ 右臂贴图 + 脊柱黑色修复 ✅✅ 已完成（commit 548c2e7）
 - 用户：「蹒跚者应该是僵尸才对（改名）」——**PLAN §9：Zombie=Shambler 蹒跚者是法律改名红线，不改回「僵尸」**（代码/UI 字串禁 MC 专有名词；MC 专有名词仅注释「机制等价」说明）。向用户说明。骷髅「骸骨」→「骷髅弓箭手」（「骷髅」是通用词非专有名词，可改）；右臂无贴图（单臂）→ 补双臂 box；脊柱黑色 → 脊柱 box UV 采样越界修。
 - ⚠️ 同理「潜行者→苦力怕」「Creeper」等一律保持原创名（用户提到「潜行者应该就是苦力怕」——不改名，仅调模型）。
 
-**t595** 潜行者（苦力怕）模型比例：腿太长缩小 + 头加大 + 身体加大 ✅（commit 见 git log，t595）
+**t595** 潜行者（苦力怕）模型比例：腿太长缩小 + 头加大 + 身体加大 ✅✅ 已完成（commit 2ee746c）
 - 查：MobModel Stalker box 尺寸（MC 1.0 creeper：头 8×8×8 / 身 4×12×8 / 四腿 4×6×4 —— 腿短身长）。
 
-**t596** 蜘蛛贴图缺失（显示异常）✅（commit 见 git log，t596）
+**t596** 蜘蛛贴图缺失（显示异常） ✅✅ 已完成（commit 52ba36e）
 - 用户：「蜘蛛是不是没找到对应贴图？」
 - 查：mobEntityMap 蜘蛛映射 → pack entity/spider.png 是否存在/路径大小写；MobModel 蜘蛛 box-UV 是否走了 pack 路径。
 - 结论：映射正确（demo 包实存 entity/spider/spider.png，蜘蛛 head/body/leg 三组 box-UV 六面 100% 不透明）——「无贴图」观感实为 t597 暗色 tint 乘贴图（已修）。
 
-**t597** 苦力怕+蜘蛛颜色暗淡（僵尸/骷髅明亮）✅（commit 见 git log，t597）
+**t597** 苦力怕+蜘蛛颜色暗淡（僵尸/骷髅明亮） ✅✅ 已完成（commit c13abea）
 - 查：两 mob 的 Model 材质 brightness/光照通道 —— 是否没走 `PrincipledMaterial.NoLighting`（违反光照不变量）或贴图 tint 乘了暗色。对照 Shambler/Bones 的材质参数拉平。
 - 根因：PrincipledMaterial 渲染 = baseColorMap × baseColor；Stalker/Spider 把 pack 关时的纯色体色（暗绿 0.37/0.66/0.23、暗黑红 0.16/0.10/0.10）也乘上 pack 贴图 → 压暗到 ~1/3 与 ~1/10。修：pack 贴图在身时 baseColor 近白（同 Shambler terrainLight 白 tint）；ResourceBrowser 图鉴预览同修（mobFallbackColor 仅 pack 关纯色路径用）。
 
-**t598** 鸡腿贴图缺失 + 雪傀儡无头 + 铁傀儡头/腿/肩黑色 ✅（commit 见 git log，t598）
+**t598** 鸡腿贴图缺失 + 雪傀儡无头 + 铁傀儡头/腿/肩黑色 ✅✅ 已完成（commit c143a1b）
 - 查：① 鸡腿 box UV 采样（鸡贴图腿区在特定 uv 区）；② 雪傀儡头（同 t582 图鉴路径）；③ 铁傀儡：腿前黑（front 面贴图采样错位）+ 肩黑色（shoulder box UV 越界）—— box-UV 公式对照 MC 1.8 iron_golem 实际 textureOffset 重算。
 - 修：① demo 包 chicken.png 腿区不在 vanilla (26,0) 位（该区是翅膀/喙稀疏像素）→ 两腿与躯干共用 body(0,9,6,8,6)（六面 100% 不透明）。② ResourceBrowser 图鉴预览补 BlockCube{blockId:100} 南瓜头（同 Main.qml t582 方案，雪 y=1.14 宽 0.50 / 铁 y=0.95 宽 0.72）。③ 铁傀儡按包实测重算（包绘画布局与 vanilla 源码不符）：body d=9→11（修 Top 面空边=肩黑）、leg (0,30,4,12,4)→(0,70,9,5,6)、arm (40,40,4,16,4)→(60,58,4,16,6)，全部六面 100% 不透明。
 
-**t599** 资源查看器 3D 模型鼠标拖拽旋转（自动旋转基础上可拖）✅（commit 见 git log，t599）
+**t599** 资源查看器 3D 模型鼠标拖拽旋转（自动旋转基础上可拖） ✅✅ 已完成（commit 70a6ea2）
 - 查：ResourceBrowser 3D 预览 —— autoRotate + 鼠标 DragHandler 叠加（拖时暂停自动转，松手恢复；惯性与现自动旋转融合）。
 - 实现：DragHandler(target:null，只读位移增量)——active 时 previewDragging=true 暂停 spinAngle 自转 NumberAnimation，水平增量×0.6°写 spinAngle（yaw）、垂直增量累计 userPitch（±60° 限幅）；松手 resumePitchAnim(400ms OutCubic) 平滑归零 pitch，yaw 自转从当前角度续转无跳变。方块/生物 3D 预览共用；enabled 限 3D 预览可见（大图标态不抢手势）。底部提示更新。
 
 ### 🅼 方块/图标杂项（3 项）
 
-**t600** 石砖台阶+楼梯背包图标错误（三个都显示石砖整块）✅（commit 见 git log，t600）
+**t600** 石砖台阶+楼梯背包图标错误（三个都显示石砖整块） ✅✅ 已完成（commit dfdb5ed）
 - 查：blockItemIconMap / item icon 路径 —— 石砖台阶、石砖楼梯 icon 应各自独立（现在都映射到 stone_bricks）。3D icon 渲染（cube icon 工具）或 pack 贴图。
 
-**t601** 峡谷生成中间出现单格水源竖直流（worldgen 瑕疵）✅（commit 见 git log，t601）
+**t601** 峡谷生成中间出现单格水源竖直流（worldgen 瑕疵） ✅✅ 已完成（commit abca5a5）
 - 用户：「峡谷生成中间会莫名其妙出现一格水源，然后竖直往下流。」
 - 查：worldgen 峡谷（ravine）路径水填充逻辑 —— 峡谷壁渗水格（本应只在峡谷壁碰水层时出现）→ 加门控：只在峡谷裁剪格 y 对应世界水层且邻接水时才置 Water，孤立置 Air。
 
-**t602** F3+B 实体朝向箭头（现在只看到框看不到箭头）✅（commit 见 git log，t602）
+**t602** F3+B 实体朝向箭头（现在只看到框看不到箭头） ✅✅ 已完成（commit a91a7b3）
 - 查：F3 debug 生物 AABB 线框 + 朝向线（t558 提过红线被挡）——朝向线加长/加粗或从实体中心沿 yaw 前向画出框外。
 
 ### 🅽 统计/成就（1 项）
 
-**t603** 合成工作台成就触发不了 + 统计合成次数恒 0 ✅（commit 见 git log，t603）
+**t603** 合成工作台成就触发不了 + 统计合成次数恒 0 ✅✅ 已完成（commit f676dfd）
 - 查：`playerprogress` 合成事件接线 —— doCraft 后未调 progress->onCraft(item, count)（或信号没接）→ 成就「合成工作台」+ 统计 itemsCrafted 都不涨。核 Main.qml/InventoryOps craft 路径 → progress 调用点。
 
 ### 🅾 生存射箭消耗语义（1 项）
 
-**t604** 弓射箭：射出即消耗箭矢（不等插中方块）✅（commit 见 git log，t604）
+**t604** 弓射箭：射出即消耗箭矢（不等插中方块） ✅✅ 已完成（commit e819f3e）
 - 用户：「只要射出去就消耗箭矢，不管怎样（不是判定插到方块才消耗）。」
 - 查：fireArrow → takeStack(箭,1) 移到发射时刻（现在可能挂在命中/消失回调）。
 - 修后结论：扣减本就在射出瞬间（endBowDraw spawnArrowPlayer 后即 takeStack）；用户观感根因是 arrowPickupScan 无拾取延迟 —— 近距射墙的箭嵌入点在拾取半径内被下一帧秒拾回（扣 1 又 +1）。加 kArrowPickupDelayMs=1000 拾取延迟（arrowAgeMsAt 墙钟门控）。
