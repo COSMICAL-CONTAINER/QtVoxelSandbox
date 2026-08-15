@@ -33,8 +33,11 @@ import "InventoryOps.js" as InventoryOps
 // 修复材料映射（Hotbar::anvilRepairMaterial，C++ 单一权威）：木→木板 / 石→圆石 / 铁→铁锭 / 钻石→钻石 /
 //   弓→线 / 剪刀→铁锭 / 钓竿→线 / 护甲→同材质锭或皮革。每材料修 1/3 满耐久（ceil，3 材料修满 = 用户规格）。
 //
-// 产物输出路由：点产物槽 → 消耗等级 + 材料后，把产物栈写**选中 hotbar 槽**（setStack，耐久/附魔/自定义名随实例
-//   保真；同 t477 铁砧 shell 目标 = 选中槽）。产物占位 = 本地 anvil 组 index 2（preview 只显不可交互）。
+// 产物输出路由（rv11 修「取产物静默销毁」）：点产物槽 → 消耗等级 + 材料后，产物**优先写光标**（held 系统，
+//   同 CraftingTableUI 产物拾取）：光标空 → 产物上光标；光标持同 id 且装得下 → 合并；光标被异物占用 → 经
+//   addToAny 找背包空位（不动光标原物；装不下则不消耗等级 / 材料，无操作）。改名产物须落定即带 customName
+//   （held 光标栈无名通道）→ 找空槽 setStack + setCustomName（hotbar 优先 → main），无空槽 → 无操作。
+//   产物占位 = 本地 anvil 组 index 2（preview 只显不可交互）。
 //
 // 全部 GUI 自绘原创（Rectangle + Text + Canvas 像素图，无外部 MC GUI PNG；§9 override (a)）。
 // 零 MC 专有名词（§9）。宿主负责指针态：打开时 release（光标可见点槽 / 输入名），关闭 → grab。
@@ -408,29 +411,35 @@ Item {
 
     // ── t550 三功能执行（真逻辑；t477 占位交互替换）──
     //   修复：消耗 1 级/材料 + 消耗右槽材料（每材料修 1/3 满耐久）→ 产物 = 左槽修后耐久。合并附魔：消耗 2 级 +
-    //   消耗右槽附魔书（占位无真附魔 → 产物 = 左槽原样）。改名：改名框非空时叠加在修复 / 合并之上（+1 级）或
-    //   单独生效 → 产物即时显新名。产物输出路由 = 选中 hotbar 槽（setStack 保真耐久/附魔/名）；成功后清两输入槽
-    //   + 推进铁砧损坏。
+    //   消耗右槽附魔书 1 本（多本只扣 1 本，rv11 修「合并销毁整摞书」）。改名：改名框非空时叠加在修复 / 合并之上
+    //   （+1 级）或单独生效 → 产物即时显新名。产物输出路由见上「产物输出路由」（rv11：写光标 / addToAny /
+    //   改名找空槽，不再覆盖选中槽）；成功后清左输入槽 + 推进铁砧损坏。
     function takeProduct() {
         if (root.activeOp === "") return
         if (!root.affordCost) return
         const op = root.activeOp
-        if (!root.playerState.spendLevels(root.cost)) return
+        // rv11 修「产物写选中槽静默销毁」：先判产物去向（光标可持 / 背包可收），装不下则**不消耗等级 /
+        //   材料、无操作**（原实现无条件 spendLevels + setStack(selectedSlot) → 选中槽 64 泥土 / 另一把工具
+        //   被直接覆盖销毁）。仿 CraftingTableUI 产物拾取的光标模式（held 系统）：
+        //   - 光标空 / 同 id 且累加不超上限 → 产物落光标（改名产物除外：见下方空槽路径）。
+        //   - 光标被异物占用 → addToAny 找背包空位（不动光标原物；返回未放入数 > 0 = 背包满 → 无操作）。
+        //   - 改名产物（outName 非空）：held 光标栈无 customName 通道 → 须落定即带名，找空槽 setStack +
+        //     setCustomName（hotbar 优先 → main；无空槽 → 无操作）。异物光标 / 满背包均不消耗、不破坏。
+        const outId = root.leftId
+        // 单独改名可作用于可堆叠物品（左槽非工具也能 rename）→ 产物保留整栈数量（机制等价 MC「改名整栈
+        //   保留」；原实现硬编码 1 会销毁 64 泥土的 63 件）。修复 / 合并要求工具 / 护甲（cap=1 恒单件）。
+        const outCount = (op === "rename") ? Math.max(1, root.leftCount) : 1
         let outDur = root.leftDur
         let outEnch = root.enchAt(0)
-        // t550-review 修：outName 默认空（原取 customNameAt(selectedSlot) = 选中槽 —— 修复后产物落到选中槽
-        //   时会错误继承选中槽原有别物的 customName；左槽物品自身名经 InventoryOps 槽结构无 name 通道不保真，
-        //   记 follow-up 扩槽结构。改名框非空时用新名（下方 renaming 覆盖）。
+        // t550-review 修：outName 默认空（不继承选中槽 / 左槽的 customName；槽结构无 name 通道，原物品
+        //   自身名不保真，记 follow-up 扩槽结构）。改名框非空时用新名（下方 renaming 覆盖）。
         let outName = ""
         if (op === "repair") {
-            const max = root.maxDur(root.leftId)
+            const max = root.maxDur(outId)
             // t550-review 修：按实耗材料数修（use = min(右槽实有, 修满所需)），1 锭修 1/3、费 1 级；
             //   不再按 repairMatNeeded 满额修（原 bug：右槽只 1 锭免费修满 3/3 还按 3 级收费）。
             const use = root.repairMatUse()
             outDur = Math.min(max, root.leftDur + use * (max / 3))
-            // 消耗右槽材料：每修 1/3 需 1 件（取到 0 清空）。
-            root.anvilCounts[1] = Math.max(0, (root.anvilCounts[1] || 0) - use)
-            if (root.anvilCounts[1] <= 0) { root.anvilSlots[1] = 0; root.anvilDur[1] = 0 }
             root.lastResult = "修复完成 +" + root.cost + "级"
         } else if (op === "merge") {
             // 右槽附魔书合并到左槽（逐附魔：已有同 id → 取 max 等级；否则写首个空槽 ≤4）。占位书无真附魔
@@ -455,20 +464,78 @@ Item {
                     }
                 }
             }
-            root.anvilSlots[1] = 0; root.anvilCounts[1] = 0; root.anvilDur[1] = 0
             root.lastResult = "合并完成 +2级"
         } else { // rename
             root.lastResult = "已重命名"
         }
         // 改名叠加：改名框非空 → 产物名 = 新名（覆盖原 customName）。
         if (root.renaming) outName = root.renameName.trim()
-        // 产物写选中 hotbar 槽（setStack 保真耐久 / 附魔 / 自定义名；覆盖选中槽 = MC 铁砧取产物占选中位）。
-        root.hotbar.setStack(root.hotbar.selectedSlot, root.leftId, 1, outDur, outEnch)
-        if (outName.length > 0) root.hotbar.setCustomName(root.hotbar.selectedSlot, outName)
+
+        // ── 产物路由（rv11）：先探路（能否落下），落不下 → 无操作（不消耗等级 / 材料 / 输入）──
+        const heldId = root.hotbar.heldBlock
+        const heldCount = root.hotbar.heldCount
+        const cap = root.hotbar.maxStackSize(outId)
+        // 改名产物：找空槽（held 无名通道，须 setStack+setCustomName 落定即带名）。hotbar 优先 → main。
+        let namedSlotGroup = ""
+        let namedSlotIdx = -1
+        if (outName.length > 0) {
+            for (let i = 0; i < root.hotbar.slotCount; ++i) {
+                if (InventoryOps.readSlot(root, "hotbar", i).id === 0) { namedSlotGroup = "hotbar"; namedSlotIdx = i; break }
+            }
+            if (namedSlotIdx < 0) {
+                for (let i = 0; i < root.hotbar.mainCount; ++i) {
+                    if (InventoryOps.readSlot(root, "main", i).id === 0) { namedSlotGroup = "main"; namedSlotIdx = i; break }
+                }
+            }
+            if (namedSlotIdx < 0) return                 // 无空槽 → 改名产物无处落（不消耗、不破坏）
+        } else if (heldId !== 0 && heldId !== outId) {
+            // 异物光标 → 产物经 addToAny 入背包（不动光标原物）；背包满（返回未放入数 > 0）→ 无操作。
+            const remain = root.hotbar.addToAny(outId, outCount, outDur, outEnch)
+            if (remain > 0) return
+        }
+        // 同 id 光标合并容量检查（held 同 id 且累加超上限 → 无操作）。
+        if (outName.length === 0 && heldId === outId && heldCount + outCount > cap) return
+
+        // ── 探路通过 → 真消耗（等级 + 材料 + 输入槽）──
+        if (!root.playerState.spendLevels(root.cost)) return
+        if (op === "repair") {
+            // 消耗右槽材料：每修 1/3 需 1 件（取到 0 清空）。
+            const use = root.repairMatUse()
+            root.anvilCounts[1] = Math.max(0, (root.anvilCounts[1] || 0) - use)
+            if (root.anvilCounts[1] <= 0) { root.anvilSlots[1] = 0; root.anvilDur[1] = 0 }
+        } else if (op === "merge") {
+            // rv11 修「合并销毁整摞书」：合并只消耗 1 本附魔书（MC 语义：一次合并吃 1 本），整摞余本留在
+            //   右槽（count-1；归 0 才清空）。原实现 anvilSlots[1]=0; anvilCounts[1]=0 把整摞书全销毁。
+            const remainBook = (root.anvilCounts[1] || 0) - 1
+            if (remainBook > 0) {
+                root.anvilCounts[1] = remainBook
+            } else {
+                root.anvilSlots[1] = 0; root.anvilCounts[1] = 0; root.anvilDur[1] = 0
+            }
+        }
         // 清左输入槽 + 改名框。
         root.anvilSlots[0] = 0; root.anvilCounts[0] = 0; root.anvilDur[0] = 0
         root.anvilEnch = [[0,0,0,0], [0,0,0,0], [0,0,0,0]]
         root.renameName = ""; nameInput.text = ""
+
+        // ── 产物落定（探路时已确认可落）──
+        if (outName.length > 0) {
+            // 改名产物 → 空槽 setStack + setCustomName（落定即带名；不占光标、不覆盖任何已有栈）。
+            InventoryOps.writeSlot(root, namedSlotGroup, namedSlotIdx, outId, outCount, outDur, outEnch)
+            if (namedSlotGroup === "hotbar") root.hotbar.setCustomName(namedSlotIdx, outName)
+            else                             root.hotbar.mainSetCustomName(namedSlotIdx, outName)
+        } else if (heldId === 0) {
+            // 光标空 → 产物上光标（耐久 / 附魔随实例保真）。
+            root.hotbar.heldBlock = outId
+            root.hotbar.heldCount = outCount
+            root.hotbar.heldDurability = outDur
+            root.hotbar.setHeldEnchants(outEnch)
+        } else if (heldId === outId) {
+            // 光标持同 id → 合并（探路已保证不超上限）。
+            root.hotbar.heldCount = heldCount + outCount
+        }
+        // 异物光标分支：产物已在上方探路段 addToAny 入背包（不消耗光标原物）。
+
         root.anvilRev++
         if (root.player) root.player.damageAnvil(anvilX, anvilY, anvilZ)
         root.justActed = true
