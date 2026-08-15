@@ -2235,10 +2235,11 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
 
 ### 🅼 资源查看器交互（1 项 3 子点）
 
-**t617** 拖拽松手跳变 + hover 悬浮窗 + ESC 关闭顺序
+**t617** 拖拽松手跳变 + hover 悬浮窗 + ESC 关闭顺序 ✅✅ 已完成
 - ① 拖拽松手「跳变」不舒服 → 松手后按当前拖拽姿态缓动回自转（现 pitch 直接弹回/自转角跳变）——松手时 spinAngle 从当前值续转（已做）+ pitch 缓动（已做 400ms）→ 跳变在别处：核松手瞬间 spinAngle NumberAnimation restart 是否 from 当前值；修成 from=当前 spinAngle。
 - ② 删底部提示文字 → 名字用悬浮窗（hover 显示名+描述，同创造背包 tooltip 模式）；
 - ③ ESC 先关后面的设置界面再关资源查看器（顺序反了）→ 核 ResourceBrowser 的 ESC 处理（现按 ESC 关闭 appSettings?）——资源查看器打开时应最先吃掉 ESC（叠层最上层优先）。
+- 实修结论：① 根因 = `NumberAnimation on spinAngle { from: 0 }` running 绑定重启时 from 恒 0 → 拖到任意角松手瞬间跳回 0；改独立 spinAnim（target/property 显式）+ restartSpinIfIdle() 统一入口（previewDragging/visible/selectedIsCube/selectedIsMob 四源共用），start 前 from=当前 spinAngle、to=from+360 同向续转。② 底部提示条删除；hoveredName+hoveredId+hoveredTipPos（格顶中心 mapToItem(panel)）驱动 hoverTip 黑框（名 · 类别简述，hoveredCategory 谓词 / mob 段「生物」，Inventory t94 itemTip 同模式含边界钳制+顶部不足翻下）。③ resourceBrowserOpen 的 Esc 分支上移到 Keys.onPressed 全部分支之前（叠层 z=160 最上层优先；原排在 settingsOpen 后 → 先关设置 = 顺序反）。
 
 ### 🅽 F3+B 朝向线（1 项）
 

@@ -7655,10 +7655,17 @@ Window {
             if (e.key === Qt.Key_Escape && window.inventoryOpen) {
                 window.closeInventory(); e.accepted = true; return
             }
+            // t617 资源查看器：Esc **最先**吃（叠层最上层优先——资源查看器 z=160 盖在设置面板（pauseOverlay 内
+            //   z=50）之上，开着时 Esc 只应关它，不该先关背后的设置面板再要按第二次）。原分支排在
+            //   settingsOpen 之后 → 先关设置 → 用户「按 ESC 居然先把后面的设置界面关了」。上移到所有
+            //   子面板分支之前（resourceBrowserOpen 与各背包/子态互斥性弱——设置开着时才开浏览器，但浏览器
+            //   更上层，先判它）。
+            if (e.key === Qt.Key_Escape && window.resourceBrowserOpen) {
+                window.resourceBrowserOpen = false; e.accepted = true; return
+            }
             // pause-menu ESC 关子态面板（settingsOpen / progressOpen / statsOpen）：!captured 时 Esc 落 QML
             //   → 关回暂停菜单（不直接 unpause / 不抢 grab）。优先级与下方各背包面板并列（子态与背包互斥：
-            //   任一子态开时背包必关，故分支先后无串台）。资源查看器（resourceBrowserOpen）在下方独立分支
-            //   （回设置面板，不回暂停菜单）。
+            //   任一子态开时背包必关，故分支先后无串台）。
             if (e.key === Qt.Key_Escape && window.settingsOpen) {
                 window.settingsOpen = false; e.accepted = true; return
             }
@@ -7668,11 +7675,8 @@ Window {
             if (e.key === Qt.Key_Escape && window.statsOpen) {
                 window.statsOpen = false; e.accepted = true; return
             }
-            // t458 资源查看器：Esc 关（回设置面板，仍 !captured）。资源查看器在暂停 + 设置态打开（!captured，
-            //   Esc 不被 C++ 事件过滤器拦截，落到 QML → 本分支处理）。
-            if (e.key === Qt.Key_Escape && window.resourceBrowserOpen) {
-                window.resourceBrowserOpen = false; e.accepted = true; return
-            }
+            // t458 资源查看器 Esc 分支已上移到本函数顶部（t617：叠层最上层优先；原在此处排在 settingsOpen
+            //   之后 → 先关设置面板 = 关闭顺序反了）。
             if (e.key === Qt.Key_Escape && window.craftingTableOpen) {
                 window.closeCraftingTable(); e.accepted = true; return
             }

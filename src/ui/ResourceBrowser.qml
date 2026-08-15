@@ -156,10 +156,39 @@ Item {
 
     // 当前选中物 id（默认首个；Component.onCompleted 兜底）。
     property int selectedId: 0
-    // 当前悬停物中文名（网格 hover 时更新；§9 override (b) 中文通用词）。
+    // t617 悬浮窗（同创造背包 t94 tooltip 模式）：hover 格写 hoveredName + hoveredTipPos（格顶中心，panel
+    //   坐标系），离开按名守卫清除（防相邻格进出竞态互清）。tooltip 名 + 简述（类别 / mobType）。
     property string hoveredName: ""
+    property point hoveredTipPos: Qt.point(0, 0)
+    // hover 物 id（类别简述反查用；mob 格 = -1 哨兵 → 类别「生物」）。与 hoveredName 同步写 / 清。
+    property int hoveredId: -1
+    // 类别简述（物品 → hoveredCategory 谓词；mob → 生物）。
+    function hoveredSuffix() {
+        if (hoveredId >= 0) {
+            const c = hoveredCategory(hoveredId)
+            return c !== "" ? " · " + c : ""
+        }
+        return hoveredName !== "" && isMobName(hoveredName) ? " · 生物" : ""
+    }
+    // 名字是否 mob 段（hoveredId=-1 时按名反查 mobModel 表）。
+    function isMobName(name) {
+        for (let i = 0; i < root.mobModel.length; ++i)
+            if (root.mobModel[i].name === name) return true
+        return false
+    }
+    // tooltip 简述行：物品 → 类别标签（selectedCategory 同源的类别谓词，hover 物而非选中物）；生物 → 生物段。
+    function hoveredCategory(id) {
+        if (!root.hotbar || id === 0) return ""
+        if (root.hotbar.isTool(id)) return "工具"
+        if (root.hotbar.isMaterial(id)) return "材料 / 护甲"
+        if (root.hotbar.isPartialBlock(id)) return "不完整方块"
+        if (root.hotbar.isCrossBlock(id)) return "植物 / cross"
+        if (id === 13) return "光源"
+        return "方块"
+    }
 
-    // 旋转角度（预览方块绕 Y 自转；仅 selectedIsCube 时跑）。
+    // 旋转角度（预览方块绕 Y 自转；仅 selectedIsCube 时跑）。t617：拖拽写 0..360 取模；自转动画 to=from+360
+    //   可越 360（eulerRotation 角度语义等价）—— 统一不改写（动画运行期 DragHandler 不会同时写）。
     property real spinAngle: 0
     // t599 鼠标拖拽旋转态：dragging = DragHandler 活动中（暂停自转）；userPitch = 拖拽累计俯仰角偏移
     //   （叠加在 -22° 基倾上，Y 拖上/下看顶/底）；松手 resume 动画把 spinAngle lerp 回自转相位（无跳变）。
@@ -197,10 +226,33 @@ Item {
     }
 
     // 预览自转动画：8s 一圈，仅在面板可见且选中整立方 / 生物、且未在拖拽时跑（省 GPU；t599 拖拽时暂停）。
-    NumberAnimation on spinAngle {
+    // t617 修「松手跳变」：旧 `NumberAnimation on spinAngle { from: 0 }` 重启时 from 恒 0 → 拖拽把 spinAngle
+    //   拖到任意角度后松手，running 翻 true 动画从 0 起播 = 视角瞬间跳回 0 再转（跳变根因）。改独立
+    //   NumberAnimation（target/property 显式，不再 `on spinAngle`）：start 前 from 钉当前 spinAngle、to =
+    //   from+360（同向续转无回绕跳变）；onPreviewDraggingChanged 显式 start/stop（t492 教训：running 绑定在
+    //   状态切换瞬间不可靠，显式 start 最稳）。pitch 归零仍走 resumePitchAnim（400ms OutCubic，无跳变）。
+    NumberAnimation {
+        id: spinAnim
+        target: root; property: "spinAngle"
         from: 0; to: 360; duration: 8000; loops: Animation.Infinite
-        running: root.visible && (root.selectedIsCube || root.selectedIsMob) && !root.previewDragging
     }
+    // 自转启停统一入口：不拖拽 + 面板可见 + 3D 预览态 → start（from 钉当前 spinAngle，无跳变）；否则 stop。
+    //   供 previewDragging / visible / selectedIsCube / selectedIsMob 四个变化源共用（提为具名函数，勿把
+    //   signal handler 当函数调 —— onXxxChanged 带函数体后不可再被外部调用，运行期 TypeError）。
+    function restartSpinIfIdle() {
+        if (!previewDragging && visible && (selectedIsCube || selectedIsMob)) {
+            spinAnim.from = spinAngle          // 锚当前拖拽角度（无跳变核心）
+            spinAnim.to = spinAngle + 360      // 同向续转（值域可 >360，eulerRotation 角度语义等价）
+            spinAnim.start()
+        } else {
+            spinAnim.stop()
+        }
+    }
+    onPreviewDraggingChanged: restartSpinIfIdle()
+    // 面板可见 / 选中物变化（cube↔mob↔icon 三态切换停启动画）也走同一「from 锚当前」入口。
+    onVisibleChanged: restartSpinIfIdle()
+    onSelectedIsCubeChanged: restartSpinIfIdle()
+    onSelectedIsMobChanged: restartSpinIfIdle()
     // t599 松手后 pitch 平滑归零（回标准 -22° 3/4 视角；yaw 已由自转从当前角度续转承接）。
     NumberAnimation {
         id: resumePitchAnim
@@ -345,8 +397,16 @@ Item {
                                             HoverHandler {
                                                 id: mobHover
                                                 onHoveredChanged: {
-                                                    if (hovered) root.hoveredName = modelData.name
-                                                    else if (root.hoveredName === modelData.name) root.hoveredName = ""
+                                                    // t617 tooltip：进入写名 + 格顶中心（panel 坐标系）+ mob 哨兵 id；
+                                                    //   离开按名守卫清。
+                                                    if (hovered) {
+                                                        root.hoveredName = modelData.name
+                                                        root.hoveredId = -1
+                                                        const p = parent.mapToItem(panel, parent.width / 2, 0)
+                                                        root.hoveredTipPos = Qt.point(p.x, p.y)
+                                                    } else if (root.hoveredName === modelData.name) {
+                                                        root.hoveredName = ""
+                                                    }
                                                 }
                                             }
                                             TapHandler { onTapped: root.selectedMobFromSection = modelData.mobType }
@@ -407,8 +467,16 @@ Item {
                                             HoverHandler {
                                                 id: cellHover
                                                 onHoveredChanged: {
-                                                    if (hovered) root.hoveredName = root.hotbar.nameForBlock(modelData)
-                                                    else if (root.hoveredName === root.hotbar.nameForBlock(modelData)) root.hoveredName = ""
+                                                    // t617 tooltip：进入写名 + 格顶中心（panel 坐标系）+ 物品 id；
+                                                    //   离开按名守卫清。
+                                                    if (hovered) {
+                                                        root.hoveredName = root.hotbar.nameForBlock(modelData)
+                                                        root.hoveredId = modelData
+                                                        const p = parent.mapToItem(panel, parent.width / 2, 0)
+                                                        root.hoveredTipPos = Qt.point(p.x, p.y)
+                                                    } else if (root.hoveredName === root.hotbar.nameForBlock(modelData)) {
+                                                        root.hoveredName = ""
+                                                    }
                                                 }
                                             }
                                             // 点物品格 → 选中该物品 + 清空生物段选中（互斥；生物蛋 id 经
@@ -645,15 +713,11 @@ Item {
                 }
             }
 
-            // 底部：悬停名提示 + 返回按钮。
+            // 底部：返回按钮（t617：删悬停名提示条——名字改悬浮窗 tooltip（hover 显示名+简述，同创造背包
+            //   t94 模式）；返回按钮保留）。
             Item {
                 id: footerCol
                 width: parent.width; height: 36
-                Text {
-                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    color: "#7d8893"; font.pixelSize: 12
-                    text: root.hoveredName !== "" ? "悬停：" + root.hoveredName : "提示：左侧点击浏览 · 右侧 3D 预览可拖拽旋转"
-                }
                 Rectangle {
                     width: 120; height: 32; radius: 6
                     anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
@@ -667,6 +731,42 @@ Item {
                         onClicked: root.closed()
                     }
                 }
+            }
+        }
+
+        // t617 悬浮窗 tooltip（同 Inventory t94 itemTip 模式；删底部提示条后名字的唯一呈现）：hover 格顶
+        //   上方居中小黑框，显「名字 · 类别简述」；panel 坐标系（hoveredTipPos 由各格 mapToItem(panel)），
+        //   边界钳制（左/右不出 panel，顶不足翻到格下方）。
+        Rectangle {
+            id: hoverTip
+            visible: root.hoveredName !== ""
+            z: 1000
+            width: tipLabel.implicitWidth + 14
+            height: tipLabel.implicitHeight + 8
+            color: "#101216"
+            opacity: 0.94
+            border.color: "#3a444f"; border.width: 1
+            radius: 3
+            x: {
+                let px = root.hoveredTipPos.x - width / 2
+                if (px < 2) px = 2
+                const maxX = panel.width - width - 2
+                if (px > maxX) px = maxX
+                return px
+            }
+            y: {
+                let py = root.hoveredTipPos.y - height - 6
+                if (py < 2) py = root.hoveredTipPos.y + 6 // 顶部不足 → 翻到格下方
+                return py
+            }
+            Text {
+                id: tipLabel
+                anchors.centerIn: parent
+                // 名字 · 类别简述（mob 格类别 = 生物段；物品格 = hoveredCategory 谓词路由；名字对不上物品
+                //   段（mob 格）时类别留空防误配）。名字经 hoveredName 单一来源，类别按 hoveredId 反查。
+                text: root.hoveredName !== "" ? root.hoveredName + root.hoverSuffix() : ""
+                color: "#f2f2f2"
+                font.pixelSize: 12
             }
         }
     }
