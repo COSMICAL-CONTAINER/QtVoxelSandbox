@@ -2031,6 +2031,13 @@ Window {
         function onSnowballBreak(x, y, z) {
             if (particleLoader.item) particleLoader.item.burstSnowball(x, y, z)
         }
+        // t583 鸡蛋命中碎裂（机制等价 MC 1.0 鸡蛋砸任何东西都碎裂）：EntityManager tick 内 Egg 命中（方块 /
+        //   mob）移除时发 eggBreak(x,y,z)（float 命中点世界坐标）→ 转发到 BlockParticles.burstEgg 迸发奶白
+        //   蛋壳碎屑（机制对标 MC 1.0 鸡蛋碎裂）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只
+        //   消费，同 snowballBreak 模式）。孵化小鸡由 Entities 层内部完成（spawnMobCore → entitiesChanged）。
+        function onEggBreak(x, y, z) {
+            if (particleLoader.item) particleLoader.item.burstEgg(x, y, z)
+        }
     }
 
     // t89 / t118 / t177 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 / 门开关 /
@@ -6651,6 +6658,27 @@ Window {
                             position: Qt.vector3d(0.04, 0.04, 0.06)
                             scale: Qt.vector3d(0.10, 0.10, 0.10)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
+                        }
+                    }
+                    // t583 鸡蛋（Egg）：玩家投掷 / 发射器弹出的孵鸡弹丸。奶白卵形（纵向略长的双色壳 + 顶部高光
+                    //   → 读作「鸡蛋」非白方块；机制等价 MC 1.0 egg 投掷物，视觉原创 §9 区隔）。delegate Node
+                    //   已摆 position（鸡蛋世界坐标）+ 不转（卵形对称无需定向）。NoLighting（红线：可见 Model
+                    //   必须 NoLighting）。命中（方块 / mob）碎裂（eggBreak → burstEgg 蛋壳碎屑）+ 1/8 概率
+                    //   在命中处孵 1 只小鸡（Entities 层 Egg tick 分支，机制等价 MC 1.0 鸡蛋砸出小鸡）。
+                    Node {
+                        visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Egg) : false }
+                        // 卵形主体：两颗竖叠小立方（下大上小）读作「纵向略长的蛋壳」。
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, -0.02, 0)
+                            scale: Qt.vector3d(0.16, 0.13, 0.16)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f5efdd" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.06, 0)
+                            scale: Qt.vector3d(0.11, 0.08, 0.11)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#faf5e6" }
                         }
                     }
                 }

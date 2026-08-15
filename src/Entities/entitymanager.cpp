@@ -352,6 +352,31 @@ int EntityManager::spawnSnowball(const QVector3D &origin, const QVector3D &vel, 
     emit entitiesChanged();
     return slot;
 }
+// t583 生成鸡蛋投射物（玩家右键投掷 / 发射器弹射；见头文件注释）：存 origin + 3D 速度 vel（含 vy 抛物）+
+//   kind=Egg + pushable=false + 寿命。halfW/halfH=0.10（卵形小体视觉 + 碰撞最小；命中检测走点-in-AABB）。
+//   bump revision → QML Repeater 追加 delegate（Egg 分支奶白卵形 Model）。达 kCap → 跳过 + 告警（防溢出）。
+//   返新鸡蛋槽索引（调试用）；达 kCap → -1。
+int EntityManager::spawnEgg(const QVector3D &origin, const QVector3D &vel)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); egg spawn skipped at" << origin;
+        return -1;
+    }
+    Entity e;
+    e.pos = origin;
+    e.halfW = 0.10f; // 鸡蛋卵形小体视觉 + 碰撞最小
+    e.halfH = 0.10f;
+    e.pushable = false; // 玩家走碰不推（同箭 / 雪球）
+    e.kind = Egg;
+    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（Egg 不走 Mob 击退衰减分支，无冲突）
+    e.vy = vel.y();
+    e.vz = vel.z();
+    e.arrowLife = kEggLifetime;
+    const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    ++m_revision;
+    emit entitiesChanged();
+    return slot;
+}
 //   spawnMobTyped 内 switch 据 mobType 设 hostile=true（兜底）。spec「黑暗刷怪调度」周期 spawn 调用它。
 //   mobType 非 Shambler/Bones → 仍生成但非敌对语义（防御；正常 caller 只传这两种）。
 void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
@@ -3203,6 +3228,78 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 dirty = true;
             }
             continue; // Snowball 不走 Mob AI / resting / 击退衰减
+        }
+
+        // --- Egg（t583 鸡蛋投掷物）：抛物 + 活体 mob / 方块命中即碎（1/8 孵小鸡）+ 寿命兜底 ---
+        //   机制等价 MC 1.0 egg：0 伤害投掷物（命中 mob 不伤不击退，仅碎裂）+ 命中处 1/8 概率孵 1 只小鸡
+        //   （用户「丢出来可以砸出来小鸡」）。判定序同雪球：先 mob 后方块（贴墙 mob 不被撞墙吞掉）。
+        if (e.kind == Egg) {
+            e.arrowLife -= float(dt); // 复用 arrowLife 作寿命倒计时
+            e.vy -= kGravity * float(dt); // 抛物：重力改 vy（与世界重力同值 → 弧自然）
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
+            bool remove = false;
+            // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积；不碎裂不孵化）。
+            if (e.arrowLife <= 0.0f) remove = true;
+            // mob 命中（先于方块判定，同雪球）：鸡蛋（点）落入任一活体 mob 的 AABB（外扩 kEggHitHalfW）→
+            //   碎裂移除（0 伤害 0 击退 —— 机制等价 MC 蛋打 mob 仅碎，区别于雪球的击退）。
+            if (!remove) {
+                for (int mi = 0; mi < int(m_entities.size()); ++mi) {
+                    const Entity &m = m_entities[size_t(mi)];
+                    if (!m.alive || m.kind != Mob || m.dead) continue; // 所有活体 mob；玩家非 Mob 穿过
+                    const float ex2 = m.pos.x() - m.halfW - kEggHitHalfW;
+                    const float ey2 = m.pos.y() - m.halfH - kEggHitHalfW;
+                    const float ez2 = m.pos.z() - m.halfW - kEggHitHalfW;
+                    if (next.x() >= ex2 && next.x() <= m.pos.x() + m.halfW + kEggHitHalfW
+                        && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kEggHitHalfW
+                        && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kEggHitHalfW) {
+                        remove = true;
+                        break; // 命中首个即止（鸡蛋消失，不穿透）
+                    }
+                }
+            }
+            // 方块命中 → 碎裂移除（机制等价 MC 鸡蛋砸方块碎裂）。mob 命中已早退。
+            if (!remove) {
+                const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
+                if (by >= 0 && world->isSolid(bx, by, bz)) remove = true;
+            }
+            // 越界兜底（飞出世界 XZ 边界 / 跌出底部）→ 移除（防永久飞行堆积；不碎裂不孵化）。
+            if (!remove) {
+                if (next.x() < 0.0f || next.z() < 0.0f
+                    || next.x() > worldW || next.z() > worldD || next.y() < 0.0f) {
+                    remove = true;
+                }
+            }
+            // 命中（mob / 方块）→ emit eggBreak 迸蛋壳碎屑粒子 + 1/8 概率孵化小鸡（机制等价 MC 1.0 egg
+            //   1/8 出鸡；用户核心诉求）。寿命到 / 越界不触发（无命中点）。
+            if (remove && e.arrowLife > 0.0f && next.y() >= 0.0f
+                && next.x() >= 0.0f && next.z() >= 0.0f
+                && next.x() <= worldW && next.z() <= worldD) {
+                emit eggBreak(next.x(), next.y(), next.z());
+                if (float(QRandomGenerator::global()->bounded(int(kEggHatchDenominator) * 1000)) < 1000.0f) {
+                    // 孵化位 = 命中点所在格（floor；spawnMobCore 放格中心 + halfH，重力 tick 贴地表 —— 生成
+                    //   位高于地表时小鸡下落，机制等价 MC 鸡蛋孵鸡落地）。spawnMobCore 不 emit（本 tick 末尾
+                    //   统一 emit）；spawn 可 acquireSlot push_back —— 已脱离本实体循环内的 Entity& 引用使用
+                    //   区间（本分支后续只读局部 next / idx），同 tickBreeding 主循环外 spawn 的安全纪律。
+                    const int slot = spawnMobCore(qFloor(next.x()), qFloor(next.y()), qFloor(next.z()),
+                                                  MobChicken, QStringLiteral("#f5f0e4"), 0);
+                    if (slot >= 0) {
+                        // 幼崽态（复用 t400 繁殖幼崽机制：baby=true → QML babyScaleAt 0.5 缩小 + growTimer
+                        //   到 0 长大成体，机制等价 MC 鸡蛋孵出的是小鸡非成年鸡）。maxHealth 传 0 →
+                        //   spawnMobCore 内部用 kDefaultMaxHealth（同 spawn egg 路径）。
+                        m_entities[size_t(slot)].baby = true;
+                        m_entities[size_t(slot)].growTimer = kBabyGrowTime;
+                        qCInfo(lcEnt) << "egg hatched baby chicken at" << next;
+                    }
+                }
+            }
+            if (remove) {
+                toRemove.push_back(idx);
+                dirty = true;
+            } else {
+                e.pos = next; // 继续飞行
+                dirty = true;
+            }
+            continue; // Egg 不走 Mob AI / resting / 击退衰减
         }
 
         // --- FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）---

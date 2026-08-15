@@ -890,14 +890,14 @@ private:
     //   满天箭；机制等价 MC 发射器有内含冷却 / 单次触发间隔）。门控：死亡 / 无世界 / 无 entityManager → no-op。
     //   向下依赖 World（blockAt）+ EntityManager（spawnArrow）+ BlockRegistry（isDispenser / isPressurePlate）。
     //   **t579 通用化**：发射器有 per-block 库存（DispenserStore 9 槽）时按内容物分派（dispenseFromDispenser：
-    //   箭=弹道实体 / 雪球=投掷物 / 剑=短距弹射带伤害 / 其余=弹出掉落物 + 扣库存）；无库存（神殿陷阱发射器，
+    //   箭=弹道实体 / 雪球=投掷物 / 鸡蛋=投掷物（t583）/ 剑=短距弹射带伤害 / 其余=弹出掉落物 + 扣库存）；无库存（神殿陷阱发射器，
     //   worldgen 填充不进 store）保持旧行为（默认射箭），修用户报「手放发射器放箭踩压力板不发射」。
     void scanDispenserTraps(float dt);
     // t579/t580 从发射器 (x,y,z) 朝 dir（单位向量，发射器排出口朝向）取出首个可用槽内容物并发射 + 扣 1 库存。
     //   分派表（机制等价 MC 1.0 发射器按物品种类分派）：箭（ArrowId）→ spawnArrow 弹道实体（命中玩家，同
     //   神殿陷阱）；雪球（SnowballId）→ spawnSnowball 投掷物（damage=kSnowballDamage 发射器口径：对 mob 有
-    //   实伤 + 减速，机关陷阱语义；非玩家抛掷的 0 伤害）；鸡蛋（EggId）→ 暂走短距弹出掉落物（t583 鸡蛋投掷物
-    //   实现后再切投掷物路径）；剑（ToolRegistry type==Sword）→ 短距弹射掉落物实体 + 发射方向射线命中 mob 时
+    //   实伤 + 减速，机关陷阱语义；非玩家抛掷的 0 伤害）；鸡蛋（EggId）→ spawnEgg 投掷物（t583：命中碎裂 +
+    //   1/8 概率孵小鸡，机制等价 MC 1.0 发射器弹鸡蛋）；剑（ToolRegistry type==Sword）→ 短距弹射掉落物实体 + 发射方向射线命中 mob 时
     //   造成 ToolRegistry::attackDamage 一次（机制等价 MC 1.0 发射器弹射武器）；其余物品 → 短距弹出掉落物
     //   （emit spawnItem，经 QML 转发 ItemEntityManager）。发射方向由发射器 state（chestFrontFace 编码）解出，
     //   与排出口贴图朝向一致（机制等价 MC 发射器朝排出口方向发射）。发射器无库存 / store 空 → 返 false

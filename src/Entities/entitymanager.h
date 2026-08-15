@@ -86,7 +86,7 @@ public:
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
     // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model）/
     // Snowball=雪球投射物（t482 雪傀儡远程攻击，白色小球定向 Model，低伤害 + 减速））。
-    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball };
+    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）
     Q_ENUM(Kind)
 
     // t240 mob 子类 id（与 Entity.mobType 同值；Q_ENUM 供 QML 据 mobTypeAt 选 MobModel 比例 + 贴图）。
@@ -235,6 +235,15 @@ public:
     //   机制等价 MC 1.0 雪傀儡抛雪球（远程弹丸 + 伤害 + 减速）/ MC 1.0 玩家抛雪球（无伤 + 击退 + 红闪）；
     //   名称 / 视觉全原创（§9 区隔）。达 kCap → 跳过 + 告警（防溢出）。返新雪球槽索引（调试用）；达 kCap → -1。
     Q_INVOKABLE int spawnSnowball(const QVector3D &origin, const QVector3D &vel, int damage, int thrower = -1);
+    // t583 鸡蛋投射物（玩家右键投掷 playercontroller / 发射器弹射 dispenseFromDispenser）：在 origin 处生成
+    //   携带初速度 vel（blocks/s，含 vy 抛物）的鸡蛋实体。kind=Egg、pushable=false（玩家走碰不推）、
+    //   halfW/halfH=0.10（卵形小体视觉 + 碰撞最小；命中检测走点-in-AABB 不读 halfW）。tick 内 Egg 分支：
+    //   重力改 vy（抛物）+ 速度位移 + 方块 / 活体 mob 命中即碎（emit eggBreak 迸蛋壳碎屑粒子）+ 移除 +
+    //   **1/8 概率在命中处孵化 1 只小鸡**（spawnMobCore 生成 MobChicken + baby=true + growTimer，机制
+    //   等价 MC 1.0 鸡蛋砸出小鸡 1/8 概率；用户「丢出来可以砸出来小鸡」）。鸡蛋命中**不伤害不击退** mob
+    //   （机制等价 MC 1.0 蛋 0 伤害投掷物；区别于雪球的击退）+ 寿命 / 越界兜底移除（同雪球）。
+    //   QML delegate 据 kindAt==Egg 走奶白卵形 Model。达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）。
+    Q_INVOKABLE int spawnEgg(const QVector3D &origin, const QVector3D &vel);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
     //   t437：改「释放全部活体槽位」而非「清空 vector」。根因：旧 m_entities.clear() 把 count→0，QML
     //   Repeater count 随之→0；但 reparent 进 mobHost 的 3D delegate（QQuick3DNode，非 QQuickItem）不进
@@ -622,6 +631,12 @@ signals:
     //   白色雪沫碎屑（particleLoader.item.burstSnowball，机制对标 MC 1.0 雪球撞方块碎裂成雪沫）。单向事件流
     //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费，同 blockBroken→burstBreak 模式）。
     void snowballBreak(float x, float y, float z);
+    // t583 鸡蛋命中碎裂（方块 / mob 均碎，机制等价 MC 1.0 鸡蛋砸任何东西都碎）：Egg 命中移除时发。坐标 =
+    //   鸡蛋命中点（float 世界坐标，非整数格 —— 鸡蛋是抛物弹丸，命中点在格内任意位置），呈现层据它在命中点
+    //   迸发奶白蛋壳碎屑（particleLoader.item.burstEgg，同 snowballBreak→burstSnowball 模式）。单向事件流
+    //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费）。孵化小鸡是 Entities 层内部行为（spawnMobCore
+    //   → entitiesChanged），不经本信号。
+    void eggBreak(float x, float y, float z);
     // t398 鸡下蛋（spec「periodically lays an EGG item」）：MobChicken 周期性下蛋 —— eggTimer 倒计时到 0 时
     //   发本信号。坐标 = 鸡当前格 floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在鸡身旁）。
     //   呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem(0x22B=蛋 ×1)（同 mobDied→spawnItem 模式；
@@ -1391,13 +1406,19 @@ private:
     // t553 雪球命中击退强度（倍率；knockback strength 参数）。旧版恒 1.0（= kKnockbackHoriz 4.5 blocks/s，
     //   推距 ~1.1 格）—— 用户报「雪球打生物不击退」：敌对 mob 追击玩家（~2.8 blocks/s）时，1.1 格后退被追击
     //   前进抵消 → 净位移≈0 肉眼不可见。提至 2.0（=9 blocks/s，推距 ~2.2 格）→ 追尾 mob 也被明显推开。
-    //   机制对齐 MC 1.0 投射物命中击退（箭 / 雪球都推开生物；本工程箭 t553 一并补同值击退）。
-    static constexpr float kSnowballKnockbackStrength = 2.0f; // 雪球命中击退强度（倍率；t553）
+    //   **t583 回调 1.2**（=5.4 blocks/s，推距 ~1.3 格）：用户反馈 2.0 击退过大（轻弹变重炮）；1.2 在「追尾
+    //   mob 可见被推开」与「不过分」间折中（>1.0 保证净位移仍为正）。
+    //   机制对齐 MC 1.0 投射物命中击退（箭 / 雪球都推开生物；箭 t553 的 kArrowKnockbackStrength 不动）。
+    static constexpr float kSnowballKnockbackStrength = 1.2f; // 雪球命中击退强度（倍率；t553 设 2.0，t583 回调 1.2）
     static constexpr float kSnowSlowDuration       = 3.0f;  // 雪球减速持续（秒）
     static constexpr float kSnowSlowMul            = 0.5f;  // 减速水平速度倍数（<1）
     static constexpr float kSnowTrailInterval      = 1.0f;  // 行走留雪层节流间隔（秒）
     static constexpr float kSnowMeltInterval       = 1.0f;  // 热群系/入水/降水每扣 1HP 的累积间隔（秒；t510 慢扣血）
     static constexpr int   kSnowMeltDamage         = 1;     // 单次热伤害扣血量（HP；t510 自 100 降到 1，非即死）
+    // t583 鸡蛋投射物常量（机制等价 MC 1.0 egg：1/8 孵小鸡 + 0 伤害投掷物；数值取 MC 同值 1/8 概率）。
+    static constexpr float kEggLifetime            = 5.0f;  // 鸡蛋最长存活（秒；同雪球 kSnowballLifetime）
+    static constexpr float kEggHitHalfW            = 0.3f;  // 鸡蛋 vs mob 命中盒 XZ/Y 外扩（blocks；同雪球）
+    static constexpr float kEggHatchDenominator    = 8.0f;  // 孵化概率分母（1/8；机制等价 MC 1.0 鸡蛋 1/8 出鸡）
     static constexpr float kIronGolemDetectRange   = 12.0f; // 铁傀儡敌对侦测范围（blocks；XZ）
     static constexpr float kIronGolemAttackRange   = 2.0f;  // 铁傀儡近战攻击 XZ 距离（blocks）
     static constexpr int   kIronGolemAttackDamage  = 8;     // 铁傀儡重拳伤害（HP；高伤害）

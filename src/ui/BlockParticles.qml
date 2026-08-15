@@ -73,6 +73,12 @@ Node {
     function burstSnowball(px, py, pz) {
         burstFloat(px, py, pz, 6, "#f0f4f8", 0.06, 1.5, 1.0, 1.2, 0.5, 6.0)
     }
+    // t583 鸡蛋命中碎裂（机制等价 MC 1.0 鸡蛋砸任何东西碎裂成蛋壳碎屑）：奶白蛋壳碎屑 + 小幅四散 + 弱重力
+    //   （同雪沫手感）。数量少（6，鸡蛋小）、起跳弱、横向适中。原点 = float 世界坐标（鸡蛋命中点，非方块格
+    //   中心 → 不加 +0.5，同 burstSnowball 模式）。色 #f5efdd 蛋壳奶白。
+    function burstEgg(px, py, pz) {
+        burstFloat(px, py, pz, 6, "#f5efdd", 0.06, 1.5, 1.0, 1.2, 0.5, 6.0)
+    }
 
     // 通用方块中心迸发（坐标先 +0.5 到方块中心）。gravity 缺省 14（碎屑强落；t449 加可选参数供烟雾上飘）。
     function burst(x, y, z, count, color, scale, vYBase, vYVar, hScale, life) {

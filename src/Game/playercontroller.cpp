@@ -2308,6 +2308,31 @@ void PlayerController::placeBlock()
         emit swingArm(); // 抛雪球也是一次「使用」动作 → 挥手（t29）
         return; // 雪球（抛出成功）不再走方块放置路径
     }
+    // t583 鸡蛋投掷（用户「鸡蛋还不能投掷出来，应该可以丢出来然后可以砸出来小鸡」；机制等价 MC 1.0 egg
+    //   投掷）：手持鸡蛋（EggId，材料段）右键 → spawnEgg 从眼位沿视线方向以 kPlayerEggSpeed 抛出（抛物弹丸，
+    //   完全同雪球 t505 模式 —— 无蓄力右键即抛）。命中（方块 / mob）→ 碎裂 + **1/8 概率在命中处孵 1 只小鸡**
+    //   （Egg tick 分支内 spawnMobCore + baby 态，机制等价 MC 1.0 鸡蛋砸出小鸡）。
+    //   **不要求 m_hasHit**（瞄准的是抛物弹道非方块命中格）；鸡蛋非方块（材料段）→ selectedBlock 归 Air，须在
+    //   `m_selectedBlock == Air` 守卫之前分流（同雪球 / 桶 / 生物蛋分支模式）。spectator 已被入口 canPlace()
+    //   守卫拦截；Creative / Survival 均可抛。生存消耗 1 鸡蛋 / 创造不耗（无限抛）。分层：抛掷属 Game/Physics
+    //   （读视线 + 调 EntityManager），不改栅格语义。
+    if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::EggId) {
+        // origin = 眼位 + 视线前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同雪球模式）。
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        const QVector3D origin = eye + look * 0.5f;
+        // vel = 视线方向 × kPlayerEggSpeed。速度取 12（同 kPlayerSnowballSpeed —— 鸡蛋与雪球同为轻抛物弹丸，
+        //   机制等价 MC 1.0 蛋 / 雪球投掷速度一致）。本地常量（同 kPlayerSnowballSpeed 模式，Entities 层速度
+        //   常量不跨层读）。
+        constexpr float kPlayerEggSpeed = 12.0f; // 玩家抛鸡蛋速度（blocks/s）
+        const QVector3D vel = look * kPlayerEggSpeed;
+        m_entityManager->spawnEgg(origin, vel);
+        if (m_mode != Creative)
+            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 鸡蛋（创造不耗）
+        m_lastPlaceMs = now;
+        emit swingArm(); // 抛鸡蛋也是一次「使用」动作 → 挥手（t29）
+        return; // 鸡蛋（抛出成功）不再走方块放置路径
+    }
     // t400 繁殖喂食 useBlock（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding）：
     //   手持繁殖食物（小麦 WheatId / 胡萝卜 CarrotId / 马铃薯 PotatoId / 种子 SeedId）右键 → 在主选体射线之外
     //   **独立**跑一条「mob 命中射线」（findMobHit，同剪刀剪羊 / 攻击路径）；命中可繁殖 mob 且食物匹配该物种
@@ -3704,8 +3729,8 @@ void PlayerController::scanDispenserTraps(float dt)
 //   → 扣 1 库存（setSlot 写回，count-1 归 0 清槽）。发射位 = 发射器格中心 + 朝向前移 0.5（防贴墙 spawn 入墙
 //   即被 tick 判方块命中，同 fireArrow / 神殿箭路径）。剑类（ToolRegistry type==Sword）弹射：掉落物实体弹出
 //   + 发射方向 3 格内命中活体 mob → damageEntity(attackDamage) 一次 + 沿发射方向击退（机制等价 MC 发射器
-//   弹射武器命中伤害；红闪 / 死亡掉落走 damageEntity 内既有链）。鸡蛋（EggId）：t583 鸡蛋投掷物未实现 →
-//   暂走弹出掉落物（分发口已留，实现后切投掷物路径）。
+//   弹射武器命中伤害；红闪 / 死亡掉落走 damageEntity 内既有链）。鸡蛋（EggId）→ t583 已切投掷物路径（上方
+//   分支：命中碎裂 + 1/8 孵小鸡）。
 bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3D &dir)
 {
     if (!m_dispenserStore || !m_entityManager) return false;
@@ -3733,6 +3758,10 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         constexpr int kDispenserSnowballDamage = 1; // 发射器雪球命中伤害（HP；同雪傀儡口径）
         m_entityManager->spawnSnowball(origin, dir * kDispenserSnowballSpeed,
                                        kDispenserSnowballDamage);
+    } else if (itemId == RecipeRegistry::EggId) {
+        // t583 鸡蛋 → 投掷物实体（同玩家手抛口径：0 伤害 + 命中碎裂 + 1/8 概率孵小鸡；机制等价 MC 1.0 发射器
+        //   弹鸡蛋可砸出小鸡 —— 机关「蛋孵化器」玩法）。速度复用发射器雪球速度（同为轻抛物弹丸）。
+        m_entityManager->spawnEgg(origin, dir * kDispenserSnowballSpeed);
     } else {
         const ToolRegistry::ToolDef *td = ToolRegistry::tool(itemId);
         if (td && td->type == BlockRegistry::Sword) {
@@ -3746,7 +3775,7 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
                 m_entityManager->knockback(mobIdx, mobPos.x() - origin.x(), mobPos.z() - origin.z());
             }
         }
-        // 其余物品（含剑本体弹出、鸡蛋 t583 前暂走本路径）→ 短距弹出掉落物（emit spawnItem → QML 转发
+        // 其余物品（含剑本体弹出）→ 短距弹出掉落物（emit spawnItem → QML 转发
         //   ItemEntityManager.spawnItem，内置 0.5s 免拾窗 + t468 弹出水平速度抛物）。
         emit spawnItem(x, y, z, itemId, 1);
     }
