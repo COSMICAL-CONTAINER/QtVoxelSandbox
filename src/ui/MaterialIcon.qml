@@ -62,7 +62,22 @@ Item {
         //   **另一根因**：visible 原写 `source.length > 0` —— url 值类型在 QML JS 是 QUrl 对象，.length 对空 / 非空
         //   url 都恒 undefined（实证 Qt 6.11：非空 file:// 的 source.length 仍 undefined）→ `> 0` 恒 false → packImg 永隐
         //   → 材料/护甲恒自绘。必用 `source.toString().length > 0`（toString 得字符串，空 url = 0 正确隐）。
-        source: { const _a = rp.active; const _id = root.materialId; return _id >= 0 && _a >= 0 ? rp.itemIconSource(root.materialId) : "" }
+        // t585 指南针(0x23F)/钟(0x240)逐帧动画：先查 animatedItemFrameSource(id)——pack 有帧序列时按
+        //   已推送状态（Main.qml 4Hz Timer 算好：指南针=磁针指出生点相对角 / 钟=昼夜相位；帧序零位锚在
+        //   Core anchor01）返回对应帧文件（_rev 触碰 animRevision：帧真变才 ++ → 本绑定重查帧路径，全工程
+        //   图标统一刷帧；`_rev >= 0` 恒真守卫同 AOT 规避，缺它帧永远不换）。无帧序列（pack 关 / 无帧文件）
+        //   → 返空串 → 落回 itemIconSource（静态 compass.png/clock.png 或自绘，不动）。
+        source: {
+            const _a = rp.active
+            const _id = root.materialId
+            const _rev = rp.animRevision
+            if (_id === 0x23F || _id === 0x240) {
+                return _id >= 0 && _a >= 0 && _rev >= 0
+                       ? (rp.animatedItemFrameSource(_id) || rp.itemIconSource(_id))
+                       : ""
+            }
+            return _id >= 0 && _a >= 0 ? rp.itemIconSource(_id) : ""
+        }
         fillMode: Image.PreserveAspectFit
         smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；MC item 图标为像素艺术）
     }

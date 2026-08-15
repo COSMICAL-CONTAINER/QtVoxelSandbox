@@ -1,5 +1,7 @@
 #include "resourcepackmanager.h"
 
+#include <cmath>
+
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
@@ -46,6 +48,23 @@ struct BuiltState {
     //   落盘 voxelsandbox_rp_leather_<id>.png，后续命中直接返。apply() 重建时清空（pack 切换/重解析）。
     //   仅 0x300..0x303 四件（皮革 tier）；铁/金/钻石/铜护甲原样用 pack 图，不染色。
     QHash<int, QString> leatherIconFiles;
+    // t585 指南针/钟动画帧序列状态：帧文件 stem（"compass"/"clock"）→（帧数，上次帧 index）。帧数在
+    //   ensureBuiltLocked 探测 item 目录实际存在的 <stem>_NN.png 数（demo 包实测 compass 32 / clock 64；
+    //   用 QHash 因未来可扩别的逐帧物品）。lastIndex 供 updateAnimatedItemState 检出「帧真变」才递增
+    //   animRevision（无变化零信号开销）。apply() 重建时清空（pack 切换重探测）。
+    struct AnimFrames {
+        QString stem;        // 帧文件名前缀（compass / clock）
+        int count = 0;       // 探测到的帧文件数（0 = 无帧序列，回落静态图）
+        // t585 环值锚点（0..1，加在原始状态值上）：compass 帧 16/32 = 红针尖正上 → 状态 0（出生点在正前）
+        //   对应帧 N/2 → 锚 0.5；clock 帧 32/64 = 全昼（正午）→ dayPhase 0 对应帧 N/2 → 锚 0.5。锚属帧序
+        //   语义（哪个帧是零位），归 Core 单一权威；QML 只推原始状态（相对角/2π、dayPhase）。
+        qreal anchor01 = 0.0;
+        int lastIndex = -1;  // 上次推送的帧 index（-1 = 尚未推过）
+        qreal lastState01 = 0.0; // t585 最近一次 updateAnimatedItemState 推送的原始状态值（查询侧换帧用）
+    };
+    QHash<int, AnimFrames> animItems;   // itemId(0x23F/0x240) → 帧序列态
+    // t585 animRevision 进程级修订号（实例成员 m_animRevision 仅镜像 + 广播）。
+    int animRevision = 0;
 };
 BuiltState &state()
 {
@@ -506,6 +525,11 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         // t505 雪球（snowball）：pack item 目录通常有 snowball.png（demo 包 1.8.2.2 含 textures/item/snowball.png）。
         //   包内缺则安全跳过（保留自绘 MaterialIcon drawSnowball）。机制等价 MC 1.0 snowball item icon。
         {0x23D, QStringLiteral("snowball.png")},         // 雪球（t505：pack 启用用包内贴图，回落 drawSnowball 自绘）
+        // t585 指南针/钟静态回落映射：pack 关闭动画帧序列（无 <stem>_NN.png 帧文件）但 item 目录有静态
+        //   compass.png / clock.png 时，itemIconSource 返静态图（不动，机制等价 MC 无动画时的静态 item 贴图）；
+        //   有帧序列时 animatedItemFrameSource 优先（按状态选帧）。两文件 demo 包实测存在。
+        {0x23F, QStringLiteral("compass.png")},          // 指南针静态图（t585 回落）
+        {0x240, QStringLiteral("clock.png")},            // 钟静态图（t585 回落）
         // —— 护甲段（ArmorId；皮革/铁/金/钻石×头盔/胸甲/护腿/靴子。铜护甲无 vanilla 贴图 → 不映射）——
         {0x300, QStringLiteral("leather_helmet.png")},
         {0x301, QStringLiteral("leather_chestplate.png")},
@@ -879,6 +903,28 @@ QString buildFluidStrip(const QDir &blockDir, const QString &baseStripResource,
     return path;
 }
 
+// t585 指南针/钟逐帧物品动画（机制等价 MC 1.0 compass/clock 每帧 item 贴图）：itemId（QML 字面量 0x23F/
+//   0x240 与 recipe.h CompassId/ClockId 同源，Core 不 include Game 层，同 blockItemIconMap 字面量先例）→
+//   帧文件 stem（compass_00.png .. compass_NN.png 环）。返空串 = 非动画物品。
+QString animItemStem(int itemId)
+{
+    if (itemId == 0x23F) return QStringLiteral("compass");
+    if (itemId == 0x240) return QStringLiteral("clock");
+    return {};
+}
+
+// t585 探测 item 目录内 <stem>_NN.png 帧文件数（从 00 起逐个验存在，中断即止——帧序必须连续，缺号断环）。
+//   demo 包实测：compass 32 帧（00..31）、clock 64 帧（00..63）；.mcmeta 为 {"animation":{}} = 均匀默认
+//   帧序（无自定义 frames 数组 / frametime，逐帧等时长、按 index 线性环）。
+int detectAnimFrameCount(const QString &itemDir, const QString &stem)
+{
+    int n = 0;
+    while (QFile::exists(QDir(itemDir).absoluteFilePath(
+            QStringLiteral("%1_%2.png").arg(stem).arg(n, 2, 10, QLatin1Char('0')))))
+        ++n;
+    return n;
+}
+
 // 合成构建（调用者须已持 stateMutex()）。幂等（built 标志）。运行期经 apply() 置 built=false 强制重建。
 //   config 首次从 settings.json 加载；之后只信 BuiltState 内存值（setter 已持久化保持同步）。
 void ensureBuiltLocked()
@@ -895,6 +941,7 @@ void ensureBuiltLocked()
     s.lavaStripFile.clear();
     s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
     s.leatherIconFiles.clear(); // R19 B1 reset 皮革护甲染色图标缓存（pack 切换 / 重解析 → 重染）
+    s.animItems.clear(); // t585 reset 动画帧序列态（pack 切换 / 重解析 → 重探测帧数）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -968,6 +1015,20 @@ void ensureBuiltLocked()
     s.entityDir = resolveEntityDir(packPath);
     // t456 方块贴图目录（已由 resolveBlockDir 解析为 blockDirPath；缓存供 blockItemIconSource 兜底探测 block/<name>.png）。
     s.blockDir = blockDirPath;
+    // t585 指南针/钟逐帧动画：探测 item 目录帧文件数（compass_00.. / clock_00.. 连续环；demo 包实测 32/64）。
+    //   无 item 目录 / 无帧文件 → count=0 → animatedItemFrameSource 返空 → itemIconSource 回落静态
+    //   compass.png/clock.png（再缺则自绘）。探测在构建期一次完成（构建后帧文件不再增删）。
+    for (int animId : { 0x23F, 0x240 }) {
+        const QString stem = animItemStem(animId);
+        BuiltState::AnimFrames af;
+        af.stem = stem;
+        af.anchor01 = 0.5; // 帧序零位锚（compass_16 = 针指上 / clock_32 = 全昼 = 正午；见 AnimFrames 注释）
+        if (!s.itemDir.isEmpty())
+            af.count = detectAnimFrameCount(s.itemDir, stem);
+        if (af.count > 0)
+            qInfo("ResourcePack: 物品动画帧序列 %s：%d 帧。", qPrintable(stem), af.count);
+        s.animItems.insert(animId, af);
+    }
     QPainter p(&s.atlas);
     int overridden = 0;
     for (const auto &m : tileFilenameMap()) {
@@ -1329,4 +1390,79 @@ QString ResourcePackManager::mobTextureSource(int mobType) const
     if (QFile::exists(flat))
         return QStringLiteral("file:///") + flat;
     return {}; // 包内无该 entity 贴图 → 不覆盖（保留程序生成 / 纯色）；红线 §9：仅运行期读本地 pack PNG。
+}
+
+// t585 帧环 index：frame01（0..1 环值）→ 线性均匀帧序（mcmeta {"animation":{}} 默认均匀帧）的 index。
+//   round 而非 floor：frame01 环回 1.0 时 round(N)=N → mod N = 0 正确归零（floor 在恰 1.0 时也 0，但 round
+//   让帧边界对称居中，视觉上磁针/盘过中点才换帧）。
+int animFrameIndex(qreal frame01, int count)
+{
+    const qreal wrapped = frame01 - std::floor(frame01);      // fmod 归一到 [0,1)（负角输入也安全）
+    const int idx = qRound(wrapped * count) % count;
+    return idx < 0 ? idx + count : idx;
+}
+
+// t585 原始状态值（指南针相对角/2π、钟 dayPhase）+ 帧序零位锚 → 帧 index（锚属帧序语义，Core 单一权威）。
+int animFrameIndexForState(const BuiltState::AnimFrames &af, qreal state01)
+{
+    return animFrameIndex(state01 + af.anchor01, af.count);
+}
+
+QString ResourcePackManager::animatedItemFrameSource(int itemId) const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active || s.itemDir.isEmpty())
+        return {};
+    // 帧序列态（构建期探测；无该物品 / 无帧文件 → 空串）。帧 index 由最近推送的原始状态值 + 帧序锚算出
+    //   （未推过 → 状态 0 = 零位帧：指南针针指上 / 钟正午，随后 4Hz 内校正到真值）。
+    const auto it = s.animItems.constFind(itemId);
+    if (it == s.animItems.constEnd() || it->count <= 0)
+        return {};
+    const int idx = animFrameIndexForState(*it, it->lastState01);
+    const QString path = QDir(s.itemDir).absoluteFilePath(
+            QStringLiteral("%1_%2.png").arg(it->stem).arg(idx, 2, 10, QLatin1Char('0')));
+    if (!QFile::exists(path))
+        return {}; // 防御：探测后帧文件被删（不覆盖，回落 itemIconSource 静态图 / 自绘）
+    return QStringLiteral("file:///") + path;
+}
+
+void ResourcePackManager::updateAnimatedItemState(qreal compassFrame01, qreal clockFrame01)
+{
+    // 锁内算新帧 index 并比较（无变化零开销）；递增 + 广播在锁外（避免持锁 emit 连到再加锁的槽）。
+    bool changed = false;
+    int newRevision = 0;
+    {
+        QMutexLocker lock(&stateMutex());
+        ensureBuiltLocked();
+        BuiltState &s = state();
+        const struct { int id; qreal v; } inputs[] = {
+            { 0x23F, compassFrame01 },
+            { 0x240, clockFrame01 },
+        };
+        for (const auto &in : inputs) {
+            const auto it = s.animItems.find(in.id);
+            if (it == s.animItems.end() || it->count <= 0)
+                continue; // pack 关 / 无帧序列 → 无帧可切（itemIconSource 静态图自会随 activeChanged 刷）
+            const int idx = animFrameIndexForState(*it, in.v);
+            if (idx != it->lastIndex) {
+                it->lastIndex = idx;
+                changed = true;
+            }
+            it->lastState01 = in.v; // 查询侧（animatedItemFrameSource）用最新状态（同帧 index 不变则不广播）
+        }
+        if (changed) {
+            ++s.animRevision;
+            newRevision = s.animRevision;
+        }
+    }
+    if (!changed)
+        return;
+    // 广播到全部实例（同 apply() 的 activeChanged 模式）：同步 m_animRevision + emit animRevisionChanged
+    //   → MaterialIcon packImg.source 绑定触碰 rp.animRevision（AOT 安全守卫 `_r >= 0`）→ 重查帧文件路径。
+    for (ResourcePackManager *inst : rpInstances()) {
+        inst->m_animRevision = newRevision;
+        emit inst->animRevisionChanged();
+    }
 }

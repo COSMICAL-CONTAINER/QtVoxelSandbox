@@ -2025,7 +2025,7 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 
 ### 🅸 指南针/钟/月亮（2 项）
 
-**t585** 指南针/钟改 pack 动画贴图 + 删手持 HUD 右上角指南针
+**t585** 指南针/钟改 pack 动画贴图 + 删手持 HUD 右上角指南针 ✅
 - 用户：「指南针手持时右上角显示方向——不要这个。给你 pack 动画贴图：compass 34 帧（compass_00..33.png）+ clock 66 帧（clock_00..65.png，另有 .mcmeta）在 `docs/Default HD 128x Demo 1.8.2.2/assets/minecraft/textures/item/`。」
 - 修：① 删 Main.qml `compassHud`（9094-9206 区）；② 手持/掉落物/物品栏图标改**按状态选帧**：指南针帧 = 朝向出生点角度 → 帧 index（34 帧环）；钟帧 = 昼夜相位 → 66 帧环（mcmeta 默认逐帧，读 mcmeta 确认 frametime/顺序）。pack 图标管线（resourcepackmanager）加「动画帧序列」支持——按 (id, 状态值) 返回帧文件路径；状态变化时图标刷新（帧切换节流 ~4Hz）。
 

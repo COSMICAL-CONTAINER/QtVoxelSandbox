@@ -63,9 +63,32 @@ class ResourcePackManager : public QObject
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY configChanged)
     // t415 资源包路径（镜像 settings.json resourcePack，空 = 走环境变量/默认探查）。setter 立即持久化。
     Q_PROPERTY(QString packPath READ packPath WRITE setPackPath NOTIFY configChanged)
+    // t585 指南针/钟动画帧修订号：帧切换（updateAnimatedItemState 检出帧环 index 变化）时 ++ 并向全部
+    //   实例广播 → MaterialIcon 的 packImg.source 绑定触碰本值（qmlcachegen AOT 安全守卫 `_r >= 0`）→
+    //   重查 itemIconSource(0x23F/0x240) 拿到新帧文件 → 全工程（hotbar/手持/掉落物/背包槽）图标统一刷帧。
+    //   CONSTANT 不适用（随帧变化）；QML 侧 4Hz Timer 节流推送状态值，本值只在帧真变时递增。
+    Q_PROPERTY(int animRevision READ animRevision NOTIFY animRevisionChanged)
 
 public:
     explicit ResourcePackManager(QObject *parent = nullptr);
+    // t585 指南针/钟动画帧序列查询：pack 启用且 itemId 是指南针(0x23F)/钟(0x240)（QML 字面量同源 recipe.h
+    //   CompassId/ClockId）、包内 item 目录有 <stem>_%1.png 帧文件时，返回 file:///<itemDir>/<stem>_NN.png
+    //   （NN = 按 updateAnimatedItemState 已推送的 0..1 环值选出的帧 index，两位零填充）。帧文件在构建期
+    //   探测实际存在数（compass 32 / clock 64，demo 包实测；用户口述 34/66 系误差——以盘上文件为准，
+    //   帧步长 = 360/实际帧数）。pack 关 / 无帧文件 → 空串（调用方回落 itemIconSource 静态图或自绘）。
+    //   红线 §9：帧 PNG 仅运行期读本地 gitignored pack，不 bake 进 qrc/VCS。
+    // 帧映射（机制等价 MC 1.0 compass/clock 每帧物品贴图）：帧 index = round((原始状态 + anchor01) * N) mod N，
+    //   anchor01 = 帧序零位锚（Core 单一权威，0.5）：
+    //   - 指南针：原始状态 = 磁针指向出生点方向相对玩家视线的顺时针角 / 360（0=正前）。实测帧序：
+    //     compass_16 = 红针尖正上（= 出生点在正前）→ 状态 0 对应帧 N/2。
+    //   - 钟：原始状态 = WorldClock.dayPhase（0=正午 / 0.5=子夜）。实测帧序：clock_32 = 全昼盘（正午）、
+    //     clock_00 = 全夜盘（子夜）→ dayPhase 0 对应帧 N/2。
+    Q_INVOKABLE QString animatedItemFrameSource(int itemId) const;
+    // t585 帧 GUI 线程节流推进（~4Hz）：QML Timer 调用，携带当前指南针/钟状态环值。内部算出新帧 index 与
+    //   当前不同时才 ++animRevision + 广播（无变化零开销）。Core 层不持 Game 层引用（出生点/相位由 QML
+    //   呈现层算好传入 → 不破 PLAN §2 分层）。环值存 BuiltState 供 animatedItemFrameSource 查询。
+    Q_INVOKABLE void updateAnimatedItemState(qreal compassFrame01, qreal clockFrame01);
+
     // t420 注销实例注册表（apply 广播 activeChanged 用）；默认析构即可，显式声明以配套注册表注销。
     ~ResourcePackManager();
 
@@ -81,6 +104,7 @@ public:
     void setEnabled(bool e);
     QString packPath() const;
     void setPackPath(const QString &p);
+    int animRevision() const { return m_animRevision; }
     // t415 应用当前 enabled/packPath：重新解析包 + 重建合成图集 + 刷新 atlasSource（cache-bust）。
     Q_INVOKABLE void apply();
 
@@ -125,9 +149,13 @@ public:
 signals:
     void activeChanged();   // active 或 atlasSource（revision）变（驱动 QML Texture 重载）
     void configChanged();   // enabled / packPath 变（驱动设置 UI 刷新；不立即重建图集）
+    // t585 指南针/钟动画帧切换（updateAnimatedItemState 检出帧 index 变化；4Hz 节流下有效变化 ≤4Hz）。
+    void animRevisionChanged();
 
 private:
     bool m_active = false;
+    // t585 动画帧修订号（进程级态存 BuiltState，实例成员仅镜像 + 广播，同 m_active/apply 模式）。
+    int m_animRevision = 0;
 };
 
 #endif // RESOURCEPACKMANAGER_H
