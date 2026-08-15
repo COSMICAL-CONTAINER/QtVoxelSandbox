@@ -11,8 +11,19 @@ import "InventoryOps.js" as InventoryOps
 //   `{ const _r = <rev>; return _r >= 0 ? (<expr>) : <fallback> }`（触碰值参与返回值），防 qmlcachegen
 //   AOT 把裸语句触碰 `<rev>;` 当死代码消除 → 依赖不注册 → revision 变后绑定永不重算（机制/返回值不变）。
 
-// 铁砧 UI（t550 二轮重做，用户对 t543 不满）：右键铁砧方块打开（PlayerController::anvilOpened → Main.qml
-// Connections → 显本面板 + 释放指针）。Esc / E / 关闭信号关闭（宿主恢复 grab）。
+// 铁砧 UI（t550 二轮重做，用户对 t543 不满；t576/t577/t578 三轮微调）：右键铁砧方块打开（PlayerController::
+//   anvilOpened → Main.qml Connections → 显本面板 + 释放指针）。Esc / E / 关闭信号关闭（宿主恢复 grab）。
+//
+// t576/t577/t578 三轮（用户复核 6 点不满）：
+//   **t576 布局**：A/B 两输入槽中间加「+」号；删「放入物品与材料」提示文字（无产物时等级行静默空白）。
+//   **t577 改名框**：移到产物槽上方（MC 铁砧名栏在顶）；左槽放入物品 → 框内占位显该物品当前名（注册默认名，
+//     本地槽无 customName 通道）；输入 → 产物等级行显新名 + 等级；删「重命名」按钮（产物槽即执行入口）。
+//   **t578 放入规则**（四分支，其余组合产物空）：
+//     1. 左=工具/护甲 + 右=该物修复材料（anvilCanRepairMaterial）→ 修复产物（1 材料 +1/3 满耐久；
+//        原 gate 要求「确有耐久缺失」repairMatNeeded>0 → 满耐久铁镐+铁锭产物空，已删此条件）。
+//     2. 左右同 id（双铁镐/双护甲）→ 合并耐久（min(max, d1+d2+10% max)）+ 附魔并集（机制等价 MC 合并修复）。
+//     3. 右=附魔书（0x227）→ 附魔合并（t550 已有，保持）。
+//     4. 其余 → activeOp="" → 产物空（放不进产物格语义）。
 //
 // t550 用户要求（逐条落实）：
 //   **① A+B=C 两输入都在左边**：仿 MC 1.0 铁砧——左列两槽 = 左输入（待修复/附魔/重命名的工具/护甲）+ 右输入
@@ -205,10 +216,18 @@ Item {
         if (group === "main" || group === "hotbar") {
             const src = InventoryOps.readSlot(root, group, index)
             if (src.id === 0 || src.count <= 0) return
-            // 工具 / 护甲（有耐久语义的物品）→ 左输入槽 0。
+            // 工具 / 护甲（有耐久语义的物品）→ 左输入槽 0。t578：槽 0 已放同 id 物 → 第二件入右槽 1
+            //   （同物合并分支输入）；槽 0 异物占用 → 不覆盖。
             if (root.maxDur(src.id) > 0) {
                 const target = InventoryOps.readSlot(root, "anvil", 0)
-                if (target.id !== 0) return                        // 槽 0 占用 → 不覆盖
+                if (target.id === src.id && target.id !== 0) {
+                    const t1 = InventoryOps.readSlot(root, "anvil", 1)
+                    if (t1.id !== 0) return
+                    InventoryOps.writeSlot(root, group, index, 0, 0, 0)
+                    InventoryOps.writeSlot(root, "anvil", 1, src.id, 1, src.durability, src.enchants)
+                    return
+                }
+                if (target.id !== 0) return                        // 槽 0 异物占用 → 不覆盖
                 InventoryOps.writeSlot(root, group, index, 0, 0, 0)
                 InventoryOps.writeSlot(root, "anvil", 0, src.id, 1, src.durability, src.enchants)
                 return
@@ -318,7 +337,9 @@ Item {
         const n = Math.ceil(miss / per)
         return Math.min(n, 3)
     }
-    // 右槽材料能否触发修复（leftId 是工具/护甲 + 右槽是该物品修复材料 + 确有耐久缺失）。
+    // 右槽材料能否触发修复（t578 修「铁镐+铁锭产物空」）：左=工具/护甲 + 右=该物品修复材料即可合成，
+    //   **不再要求「确有耐久缺失」**——原 gate `repairMatNeeded > 0` 使满耐久工具+材料产物空（MC 语义：
+    //   合法组合恒出产物；满耐久时产物耐久不变、仍按 max(1, 实耗材料数) 计费）。
     readonly property bool canRepair: {
         const _r = root.anvilRev
         if (_r < 0) return false
@@ -326,7 +347,17 @@ Item {
         if (root.leftCount <= 0) return false
         if (root.maxDur(root.leftId) <= 0) return false
         if (!root.hotbar || !root.hotbar.anvilCanRepairMaterial(root.leftId, root.matId)) return false
-        return repairMatNeeded(root.leftId, root.leftDur) > 0
+        return true
+    }
+    // t578 同物合并分支：左右同 id（双铁镐/双护甲）→ 合并耐久 + 附魔并集（机制等价 MC 两件合并修复）。
+    //   仅限有耐久语义的物品（工具/护甲）；可堆叠材料/方块同 id 不合成（落入「其余组合 → 产物空」）。
+    readonly property bool canCombine: {
+        const _r = root.anvilRev
+        if (_r < 0) return false
+        if (root.leftId === 0 || root.matId === 0) return false
+        if (root.leftId !== root.matId) return false
+        if (root.leftCount <= 0 || (root.anvilCounts[1] || 0) <= 0) return false
+        return root.maxDur(root.leftId) > 0
     }
     // 附魔合并前置：左槽可附魔（工具 / 护甲，itemEnchantCategory != 0）+ 右槽附魔书（t393 占位无真附魔
     //   → 合并为空操作，产物 = 左槽原样）。0x227 = RecipeRegistry::EnchantedBookId。
@@ -345,11 +376,13 @@ Item {
     }
     // 改名是否叠加在修复 / 合并之上（产物名即时显新名）。
     readonly property bool renaming: root.canRename
-    // 当前生效操作（修复优先 → 合并 → 改名；改名可叠加修复 / 合并）。返 "repair" / "merge" / "rename" / ""。
+    // 当前生效操作（t578 三分支：修复材料 → 同物合并 → 附魔书 → 改名；改名可叠加前三者）。
+    //   返 "repair" / "combine" / "merge" / "rename" / ""（空 = 不匹配组合 → 产物空，t578）。
     readonly property string activeOp: {
         const _r = root.anvilRev
         const _n = root.renameName
         if (_r >= 0 && root.canRepair) return "repair"
+        if (_r >= 0 && root.canCombine) return "combine"
         if (_r >= 0 && root.canMerge) return "merge"
         if (_n.length >= 0 && root.canRename) return "rename"
         return ""
@@ -360,29 +393,31 @@ Item {
         const have = root.anvilCounts[1] || 0
         return Math.min(have, repairMatNeeded(root.leftId, root.leftDur))
     }
-    // 所需 XP 等级（产物格下绿字数值）。修复 = 实耗材料数（至少 1）；合并 = 2；改名 = 1；
-    //   改名叠加修复 / 合并 → +1（机制等价 MC「改名在修复费之上另加 1 级」）。
+    // 所需 XP 等级（产物格下绿字数值）。修复 = 实耗材料数（至少 1）；同物合并 = 2（机制等价 MC 合并
+    //   修复计费档）；附魔合并 = 2；改名 = 1；改名叠加 → +1。
     readonly property int cost: {
         const op = root.activeOp
         if (op === "repair") return Math.max(1, root.repairMatUse()) + (root.renaming ? 1 : 0)
-        if (op === "merge") return 2 + (root.renaming ? 1 : 0)
+        if (op === "combine" || op === "merge") return 2 + (root.renaming ? 1 : 0)
         if (op === "rename") return 1
         return 0
     }
     readonly property bool affordCost: playerLevel >= cost
-    // 产物槽等级文字（绿字可承担 / 红字经验不足 / 灰字提示）。
+    // 产物槽等级文字（绿字可承担 / 红字经验不足；t576 删「放入物品与材料」灰字提示——无产物时静默空白）。
     readonly property string costText: {
         const op = root.activeOp
         if (op === "repair") return "修复 " + cost + " 级"
+        if (op === "combine") return "合并 " + cost + " 级"
         if (op === "merge") return "合并附魔 " + cost + " 级"
-        if (op === "rename") return "重命名 " + cost + " 级"
-        return "放入物品与材料"
+        if (op === "rename") return root.renameName.trim() + " · " + cost + " 级"
+        return ""
     }
     readonly property string costColor: {
-        if (root.activeOp === "") return "#6a727a"
+        if (root.activeOp === "") return "transparent"
         return root.affordCost ? "#6fe06f" : "#e06f5f"
     }
-    // 产物槽内容（修复 → 修后耐久；合并/改名 → 左槽原样）。id / 耐久 / 附魔（改名产物名走 hoveredProductName）。
+    // 产物槽内容（t578 四分支：修复 → 修后耐久；同物合并 → 合并耐久；附魔书合并/改名 → 左槽原样；
+    //   其余不匹配组合 → 产物空）。id / 耐久 / 附魔（改名产物名走 hoveredProductName / 改名框）。
     readonly property int productId: {
         const _r = root.anvilRev
         if (_r < 0) return 0
@@ -399,6 +434,13 @@ Item {
             if (max <= 0) return root.leftDur
             // t550-review：预览与 takeProduct 同口径 —— 实耗材料数修（1 锭修 1/3）。
             return Math.min(max, root.leftDur + root.repairMatUse() * (max / 3))
+        }
+        if (op === "combine") {
+            // t578 同物合并：产物耐久 = min(max, 左 + 右 + 10% max 附加奖励)（机制等价 MC 两件合并公式
+            //   result = min(max, d1 + d2 + 0.1*max)；两件全满 → 恒满，玩家无收益也不亏）。
+            const max = root.maxDur(root.leftId)
+            const rDur = root.anvilDur[1] || 0
+            return Math.min(max, Math.floor(root.leftDur + rDur + max * 0.1))
         }
         if (op === "merge" || op === "rename") return root.leftDur
         return 0
@@ -438,9 +480,37 @@ Item {
             const max = root.maxDur(outId)
             // t550-review 修：按实耗材料数修（use = min(右槽实有, 修满所需)），1 锭修 1/3、费 1 级；
             //   不再按 repairMatNeeded 满额修（原 bug：右槽只 1 锭免费修满 3/3 还按 3 级收费）。
+            //   t578：满耐久工具+材料（repairMatUse=0）→ 耐久不变（合法组合恒出产物）。
             const use = root.repairMatUse()
             outDur = Math.min(max, root.leftDur + use * (max / 3))
             root.lastResult = "修复完成 +" + root.cost + "级"
+        } else if (op === "combine") {
+            // t578 同物合并（双铁镐/双护甲）：产物耐久 = min(max, d1+d2+10% max)（与 productDur 预览同口径），
+            //   附魔并集（同 id 取 max / 否则填空槽，与附魔书合并同算法）；两件输入均被消耗。
+            const max = root.maxDur(outId)
+            const rDur = root.anvilDur[1] || 0
+            outDur = Math.min(max, Math.floor(root.leftDur + rDur + max * 0.1))
+            const src = root.enchAt(1)
+            for (let i = 0; i < 4; ++i) {
+                const packed = src[i] || 0
+                if (packed === 0) continue
+                const eid = (packed >> 8) & 0xFF
+                const lvl = packed & 0xFF
+                let slot = -1
+                for (let j = 0; j < 4; ++j) {
+                    const p = outEnch[j] || 0
+                    if (p !== 0 && ((p >> 8) & 0xFF) === eid) { slot = j; break }
+                }
+                if (slot >= 0) {
+                    const cur = outEnch[slot] & 0xFF
+                    outEnch[slot] = (eid << 8) | Math.max(cur, lvl)
+                } else {
+                    for (let j = 0; j < 4; ++j) {
+                        if ((outEnch[j] || 0) === 0) { outEnch[j] = packed; break }
+                    }
+                }
+            }
+            root.lastResult = "合并完成 +2级"
         } else if (op === "merge") {
             // 右槽附魔书合并到左槽（逐附魔：已有同 id → 取 max 等级；否则写首个空槽 ≤4）。占位书无真附魔
             //   → 循环空转（产物 = 左槽原样附魔）；真附魔书数据接入后此逻辑即生效。
@@ -468,6 +538,7 @@ Item {
         } else { // rename
             root.lastResult = "已重命名"
         }
+        // 同物合并（combine）的右槽已在上方消耗段清空；merge 的右槽书也在上方扣。
         // 改名叠加：改名框非空 → 产物名 = 新名（覆盖原 customName）。
         if (root.renaming) outName = root.renameName.trim()
 
@@ -499,10 +570,13 @@ Item {
         // ── 探路通过 → 真消耗（等级 + 材料 + 输入槽）──
         if (!root.playerState.spendLevels(root.cost)) return
         if (op === "repair") {
-            // 消耗右槽材料：每修 1/3 需 1 件（取到 0 清空）。
+            // 消耗右槽材料：每修 1/3 需 1 件（取到 0 清空）。满耐久 use=0 → 不耗材料（耐久也无需加）。
             const use = root.repairMatUse()
             root.anvilCounts[1] = Math.max(0, (root.anvilCounts[1] || 0) - use)
             if (root.anvilCounts[1] <= 0) { root.anvilSlots[1] = 0; root.anvilDur[1] = 0 }
+        } else if (op === "combine") {
+            // t578 同物合并消耗**两件输入**（下方通用清左槽段 + 此处清右槽；两件合成一件）。
+            root.anvilSlots[1] = 0; root.anvilCounts[1] = 0; root.anvilDur[1] = 0
         } else if (op === "merge") {
             // rv11 修「合并销毁整摞书」：合并只消耗 1 本附魔书（MC 语义：一次合并吃 1 本），整摞余本留在
             //   右槽（count-1；归 0 才清空）。原实现 anvilSlots[1]=0; anvilCounts[1]=0 把整摞书全销毁。
@@ -591,7 +665,7 @@ Item {
     Rectangle {
         id: panel
         width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
-        height: 430                                  // 22 + 150 + 120 + 40 (=332) + 4×12 spacing(48) + 2×16 margin(32) ≈ 412 → 取 430 留余量
+        height: 400                                  // 22 + 120(操作区, t576/t577 缩) + 120 + 40 + 间距/边距
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -619,21 +693,68 @@ Item {
                 }
             }
 
-            // ── 操作区（t550：A+B=C —— 左列两输入 + 右产物 + 产物下等级 + 改名行）──
-            // 左列：左输入槽（工具/护甲，index 0）在上、右输入槽（材料/附魔书，index 1）在下；
-            // 右列：产物槽（index 2，preview 只显）+ 产物下绿字等级。箭头左→右指向产物。
-            // 行内无任何槽位文字（用户要求②）。行宽 44+44+28+40 = 156 → 居中。
+            // ── 操作区（t576/t577 三轮：改名框在顶（产物上方）+ A + B → 箭头 → C 产物 + 产物下等级）──
+            // t577：改名框移到槽行上方（MC 铁砧：名字栏在最顶、产物在右）。左槽放入物品 → 框内 placeholder
+            //   直接显该物品当前名（默认注册名；t550-review 记的「槽结构无 customName 通道」follow-up 仍开，
+            //   本地槽不保真自定义名 → 显注册默认名）；用户输入 → 显输入预览（产物等级行同步显新名）。
+            //   耐久不进名字栏。无「重命名」按钮（用户要求：产物槽即执行入口）。
+            // t576：A/B 两输入槽中间加「+」符号；删「放入物品与材料」灰字提示。
             Item {
                 id: anvilArea
                 width: parent.width
-                height: 150
+                height: 120
 
-                // A+B=C 三槽行。
-                Item {
-                    id: slotRow
+                // ── 改名框（t577 顶部）── TextInput + 持焦时 Esc 关面板（规格⑥）。
+                Rectangle {
+                    id: renameBox
                     anchors.top: parent.top; anchors.topMargin: 0
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: 156
+                    width: panel.width - 16; height: 26
+                    color: "#2a2018"
+                    border.color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#ffd87a" : "#0a0604"
+                    border.width: (root.renaming && root.affordCost && root.activeOp !== "") ? 2 : 1
+                    radius: 3
+                    TextInput {
+                        id: nameInput
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: "#ffe6a8"; font.pixelSize: 12
+                        selectByMouse: true
+                        maximumLength: 20
+                        clip: true
+                        onTextEdited: root.renameName = text
+                        // 规格⑥：改名框持焦时 Esc 由输入框自己处理 → 关面板（closeAnvil → grab + 焦点回键位层），
+                        //   不吞键（其余按键正常进输入框打字）。仿聊天输入框 Keys 处理（chatInput Keys.onPressed）。
+                        Keys.onPressed: (event) => {
+                            if (event.key === Qt.Key_Escape) {
+                                window.closeAnvil()
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                if (root.activeOp !== "" && root.affordCost) {
+                                    root.takeProduct()
+                                    event.accepted = true
+                                }
+                            }
+                        }
+                        // t577：左槽放入物品 → 框内直接显该物品当前名（占位样式；注册默认名 —— 本地槽无
+                        //   customName 通道，自定义名不保真，显默认名）。用户输入后由输入文本覆盖显示。
+                        //   左槽空 → 不显任何提示文字（t576 删提示文字原则）。
+                        Text {
+                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                            text: { const _r = root.anvilRev; return _r >= 0 && root.leftId !== 0 ? root.hotbar.nameForBlock(root.leftId) : "" }
+                            color: "#8a7a5a"; font.pixelSize: 12
+                            visible: nameInput.text.length === 0 && text.toString().length > 0
+                        }
+                    }
+                }
+
+                // A + B → C 槽行（t576：A/B 间「+」号）。
+                Item {
+                    id: slotRow
+                    anchors.top: renameBox.bottom; anchors.topMargin: 8
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 176
                     height: 40
 
                     // 左输入槽（anvil 组 index 0；武器 / 工具 / 护甲）。
@@ -650,9 +771,18 @@ Item {
                             slotEnch: { const _r = root.anvilRev; return _r >= 0 ? (root.enchAt(0)) : [0, 0, 0, 0] }
                         }
                     }
-                    // 右输入槽（anvil 组 index 1；材料：铁锭等修复材料 / 附魔书）。
+                    // t576「+」号（A + B 两输入合并语义；配色同箭头灰）。
+                    Text {
+                        x: root.slotSize + 2; y: 0
+                        width: 14; height: root.slotSize
+                        text: "+"
+                        color: "#8a8a8a"; font.pixelSize: 20; font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    // 右输入槽（anvil 组 index 1；材料：铁锭等修复材料 / 附魔书 / t578 同物合并第二件）。
                     Item {
-                        x: root.slotSize + 4; y: 0
+                        x: root.slotSize + 16; y: 0
                         width: root.slotSize; height: root.slotSize
                         AnvilSlot {
                             anchors.fill: parent
@@ -664,7 +794,7 @@ Item {
                     }
                     // 左→中箭头（输入流向产物）。
                     Canvas {
-                        x: root.slotSize * 2 + 8; y: root.slotSize / 2 - 8
+                        x: root.slotSize * 2 + 24; y: root.slotSize / 2 - 8
                         width: 24; height: 16
                         onPaint: {
                             const ctx = getContext("2d"); ctx.reset()
@@ -678,7 +808,7 @@ Item {
                     }
                     // 产物槽（anvil 组 index 2；preview 只显产物预览，点它取产物）。绿框提示可出产物。
                     Item {
-                        x: root.slotSize * 2 + 36; y: 0
+                        x: root.slotSize * 2 + 56; y: 0
                         width: root.slotSize; height: root.slotSize
                         AnvilSlot {
                             anchors.fill: parent
@@ -692,76 +822,16 @@ Item {
                     }
                 }
 
-                // 产物槽下等级绿字（规格⑤：等级显示在产物格下绿字；无产物 → 灰字提示）。
+                // 产物槽下等级绿字（规格⑤：等级显示在产物格下绿字；t576 无产物 → 静默空白（删灰字提示）；
+                //   t577 改名 → 行首显改名后产物名）。
                 Text {
                     anchors.top: slotRow.bottom; anchors.topMargin: 2
                     anchors.horizontalCenter: slotRow.horizontalCenter
-                    anchors.horizontalCenterOffset: root.slotSize + 18   // 对准产物槽（槽心 = 行心 + 58）
+                    anchors.horizontalCenterOffset: root.slotSize + 38   // 对准产物槽（槽心 = 行心 + 78）
                     text: root.costText
                     color: root.costColor
                     font.pixelSize: 12; font.bold: true
                     visible: text.toString().length > 0
-                }
-
-                // ── 改名行（规格③④：只留改名功能，无三按钮文字）──
-                // TextInput + 重命名按钮。输入框持焦时 Esc 由本行 Keys 处理关面板（规格⑥修复卡死）。
-                Rectangle {
-                    anchors.top: slotRow.bottom; anchors.topMargin: 38
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: panel.width - 16; height: 28
-                    color: "#2a2018"
-                    border.color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#ffd87a" : "#0a0604"
-                    border.width: (root.renaming && root.affordCost && root.activeOp !== "") ? 2 : 1
-                    radius: 3
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 8
-                        TextInput {
-                            id: nameInput
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 200
-                            color: "#ffe6a8"; font.pixelSize: 12
-                            selectByMouse: true
-                            maximumLength: 20
-                            onTextEdited: root.renameName = text
-                            // 规格⑥：改名框持焦时 Esc 由输入框自己处理 → 关面板（closeAnvil → grab + 焦点回键位层），
-                            //   不吞键（其余按键正常进输入框打字）。仿聊天输入框 Keys 处理（chatInput Keys.onPressed）。
-                            Keys.onPressed: (event) => {
-                                if (event.key === Qt.Key_Escape) {
-                                    window.closeAnvil()
-                                    event.accepted = true
-                                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                    if (root.renaming && root.affordCost && root.activeOp !== "") {
-                                        root.takeProduct()
-                                        event.accepted = true
-                                    }
-                                }
-                            }
-                            Text {
-                                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                                text: "输入新名…"
-                                color: "#665544"; font.pixelSize: 12
-                                visible: parent.text.length === 0
-                            }
-                        }
-                        Rectangle {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 90; height: 22
-                            color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#5a4a2a" : "#2a2018"
-                            border.color: "#1a120c"; radius: 3
-                            Text {
-                                anchors.centerIn: parent
-                                text: "重命名 1级"
-                                color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#ffe6a8" : "#665544"
-                                font.pixelSize: 10; font.bold: true
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-                            TapHandler {
-                                enabled: root.renaming && root.affordCost && root.activeOp !== ""
-                                onTapped: root.takeProduct()
-                            }
-                        }
-                    }
                 }
 
                 // 「操作成功」绿色 flash 叠层（取产物后短暂显，~600ms 淡出）。
