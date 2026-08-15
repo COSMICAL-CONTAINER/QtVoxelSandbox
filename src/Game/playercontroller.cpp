@@ -4489,6 +4489,11 @@ void PlayerController::step(qreal dt)
                 m_flying = false;
                 m_vel.setY(0); // 清下坠余速，防退飞后走路路径重力叠加穿地
                 if (!m_onGround) { m_onGround = true; emit onGroundChanged(); }
+                // rv-low-batch1 修「飞行落地 shift 仍按住却不进蹲」：退飞时 canCrouch 翻 true，但 shift 按下沿
+                //   （setKey 蹲分支）在飞态已被 canCrouch 守卫拦下 → shift 持续按住不再有新按下沿 → moveState 停在
+                //   Walk，玩家须松开重按 shift 才蹲。修：退飞帧等效补一次「shift 仍按住 → 进蹲」（直接设 moveState，
+                //   不走 setKey 免重复写 m_keys；canStandUp 由后续松 shift 的正常路径处理）。同 setKey 蹲分支语义。
+                if (shift && m_moveState == Walk) { m_autoCrouch = false; setMoveState(Crouch); }
                 emit flyingChanged();
                 reportHorizSpeed(posBefore, dt);
                 emit positionChanged();
