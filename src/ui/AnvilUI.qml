@@ -25,6 +25,21 @@ import "InventoryOps.js" as InventoryOps
 //     3. 右=附魔书（0x227）→ 附魔合并（t550 已有，保持）。
 //     4. 其余 → activeOp="" → 产物空（放不进产物格语义）。
 //
+// t606 四轮（R19.5 用户 8 点细节，铁砧 UI 细节批）：
+//   **① 槽行下移**：操作区高 120→150（吸收面板底 ~30px 留白，主栏/hotbar 随之下移贴底），改名框下边距
+//     0→4、槽行上距 8→16 —— A+B→C 槽行整体下移。
+//   **② 自动填名**：左槽放入物品 → 改名框**自动填入**该物品当前名（注册默认名 nameForBlock；本地槽无
+//     customName 通道，自定义名不保真）可直接修改；仅「框空 或 内容仍是上次自动填充值」时覆盖
+//     （lastAutoName 守卫，用户改过则不动，防打字被覆盖）。
+//   **③ 创造免经验**：player.mode === Creative → affordCost 恒真（等级行恒绿可付，不管需几级）+
+//     takeProduct 跳过 spendLevels。材料消耗照旧（保守只免经验；MC 创造材料也免，此处不扩大）。
+//   **④ B 不相关 → C 直接消失**：canRename 收紧 —— B 非空且非修复材料 / 非同 id / 非附魔书（三分支全不
+//     匹配）→ 无任何产物（原 bug：A 工具 + B 泥土仍显改名产物）。B 空 + 名字真改过 → 单独改名合法。
+//   **⑤ 改名框 UI**：宽度对齐槽行（376→176）+ 背景调浅（#2a2018→#3a3226）+ verticalAlignment 真居中
+//     （原 anchors.verticalCenter 与 anchors.fill 叠用无效 → 文字贴顶）。
+//   **⑥ 等级行只显消耗**：改名分支去产物名（「新名 · N 级」→「重命名 N 级」；名字已在框内 + tooltip 有）。
+//   **⑦ 拿回物品清框**：左槽清空 → 改名框清空 + lastAutoName 复位；再放入 → 重新自动填名（②）。
+//
 // t550 用户要求（逐条落实）：
 //   **① A+B=C 两输入都在左边**：仿 MC 1.0 铁砧——左列两槽 = 左输入（待修复/附魔/重命名的工具/护甲）+ 右输入
 //     （材料：铁锭等修复材料 / 附魔书）；右列单槽 = 产物槽（预览修复/合并/重命名结果）。箭头左→右指向产物。
@@ -301,7 +316,7 @@ Item {
     }
     onVisibleChanged: {
         if (!visible) returnAnvilToHotbar()
-        else { renameName = ""; nameInput.text = ""; lastResult = "" }
+        else { renameName = ""; nameInput.text = ""; lastAutoName = ""; lastResult = "" }
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -314,12 +329,41 @@ Item {
     readonly property int leftCount: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilCounts[0] || 0) : 0 }
     // 当前 XP 等级（绑定 playerState.level NOTIFY levelChanged；低频）。
     readonly property int playerLevel: playerState ? playerState.level : 0
+    // t606③ 创造模式免经验：player.mode === Creative → affordCost 恒真 + spendLevels 跳过（机制等价 MC
+    //   创造铁砧免经验；材料消耗照旧——保守只免经验）。player 属性已由宿主注入（Main.qml player: player）。
+    readonly property bool creativeMode: root.player && root.player.mode === PlayerController.Creative
     // 重命名输入文本。
     property string renameName: ""
+    // t606②/⑦ 自动填名守卫：上次自动填入的名字（左槽放入物品时记录）。仅「框空 或 内容 === lastAutoName」
+    //   时新的自动填充才覆盖 → 用户改过（≠lastAutoName）则换物不覆盖，防打字被顶掉。左槽清空时随框一起复位。
+    property string lastAutoName: ""
     // 操作结果 flash（成功后短暂显绿）。
     property string lastResult: ""
     property bool justActed: false
 
+    // t606②/⑦ 自动填名 / 拿回清框：左槽内容变（anvilRev 触碰）→ 有物：框空或内容仍是上次自动填充值
+    //   （=== lastAutoName）→ 填入该物品当前名（nameForBlock 注册默认名；本地槽无 customName 通道）+
+    //   记 lastAutoName；用户已改（≠lastAutoName）→ 不覆盖。左槽空 → 框清空 + lastAutoName 复位（重新
+    //   放物再自动填名）。命令式改 nameInput.text 不触发 onTextEdited（程序赋值不发 textEdited）→
+    //   renameName 需同步手写，避免两者失同步。
+    //   ⚠ 直读 anvilSlots[0] 而非绑定属性 leftId：槽数组是原地元素赋值（不发 var NOTIFY）→ leftId 绑定
+    //   要等 anvilRev 变更后才重求值；本 handler 与该重求值同信号触发、顺序不保证（stale leftId 会在
+    //   takeProduct 清槽后把名字填回框里）。数组直读永远新鲜（Imperative 代码无 AOT 触碰问题）。
+    onAnvilRevChanged: {
+        const lid = root.anvilSlots[0] || 0
+        if (lid !== 0) {
+            const auto = root.hotbar ? root.hotbar.nameForBlock(lid) : ""
+            if (nameInput.text.length === 0 || nameInput.text === root.lastAutoName) {
+                nameInput.text = auto
+                root.renameName = auto
+                root.lastAutoName = auto
+            }
+        } else {
+            nameInput.text = ""
+            root.renameName = ""
+            root.lastAutoName = ""
+        }
+    }
     // 工具 / 护甲最大耐久（修复算 1/3 基准 + 预览耐久上限）。单一权威：Hotbar 透传 Tool/ArmorRegistry。
     function maxDur(id) {
         if (!root.hotbar) return 0
@@ -368,11 +412,20 @@ Item {
         if (!root.hotbar || root.hotbar.itemEnchantCategory(root.leftId) === 0) return false
         return true
     }
-    // 重命名前置：左槽有物 + 改名框非空。改名可与修复 / 合并叠加（MC：改名 + 修复合算等级）。
+    // 重命名前置：左槽有物 + 名字**真改过**（≠自动填充值 lastAutoName；t606② 自动填名后框恒非空，
+    //   改名产物须以用户实际修改为前提——未改名的物品单独放 A 不出产物，机制等价 MC「名字栏与当前名
+    //   相同则无改名操作」）。改名可与修复 / 合并叠加（MC：改名 + 修复合算等级）。
+    //   t606④ 收紧：B 非空且与 A 无任何合法关系（非修复材料 canRepair / 非同 id canCombine / 非附魔书
+    //   canMerge 三分支全不中）→ 改名也不出产物（C 直接消失）——原 bug：A 工具 + B 泥土仍显改名产物。
+    //   B 空 + 改了名 → 单独改名合法（用户规格：「只放 A、B 没东西那就是可以的」）。
     readonly property bool canRename: {
         const _r = root.anvilRev
         const _n = root.renameName
-        return _r >= 0 && root.leftId !== 0 && _n.trim().length > 0
+        if (_r < 0 || root.leftId === 0) return false
+        if (_n.trim().length === 0) return false
+        if (_n.trim() === root.lastAutoName.trim()) return false
+        if (root.matId !== 0 && !root.canRepair && !root.canCombine && !root.canMerge) return false
+        return true
     }
     // 改名是否叠加在修复 / 合并之上（产物名即时显新名）。
     readonly property bool renaming: root.canRename
@@ -402,14 +455,16 @@ Item {
         if (op === "rename") return 1
         return 0
     }
-    readonly property bool affordCost: playerLevel >= cost
-    // 产物槽等级文字（绿字可承担 / 红字经验不足；t576 删「放入物品与材料」灰字提示——无产物时静默空白）。
+    // t606③ 创造模式免经验：affordCost 恒真（不管需几级都绿、可付；材料消耗照旧——保守只免经验）。
+    readonly property bool affordCost: root.creativeMode || playerLevel >= cost
+    // 产物槽等级文字（绿字可承担 / 红字经验不足；t576 删「放入物品与材料」灰字提示——无产物时静默空白；
+    //   t606⑥ 改名分支只显消耗不再带产物名——名字已在输入框内 + 产物 tooltip（hoveredProductName）有）。
     readonly property string costText: {
         const op = root.activeOp
         if (op === "repair") return "修复 " + cost + " 级"
         if (op === "combine") return "合并 " + cost + " 级"
         if (op === "merge") return "合并附魔 " + cost + " 级"
-        if (op === "rename") return root.renameName.trim() + " · " + cost + " 级"
+        if (op === "rename") return "重命名 " + cost + " 级"
         return ""
     }
     readonly property string costColor: {
@@ -568,7 +623,9 @@ Item {
         if (outName.length === 0 && heldId === outId && heldCount + outCount > cap) return
 
         // ── 探路通过 → 真消耗（等级 + 材料 + 输入槽）──
-        if (!root.playerState.spendLevels(root.cost)) return
+        //   t606③ 创造模式免经验：跳过 spendLevels（机制等价 MC 创造铁砧免 XP；材料消耗照旧——保守只免
+        //   经验，MC 创造材料也免但此处不扩大）。
+        if (!root.creativeMode && !root.playerState.spendLevels(root.cost)) return
         if (op === "repair") {
             // 消耗右槽材料：每修 1/3 需 1 件（取到 0 清空）。满耐久 use=0 → 不耗材料（耐久也无需加）。
             const use = root.repairMatUse()
@@ -587,10 +644,11 @@ Item {
                 root.anvilSlots[1] = 0; root.anvilCounts[1] = 0; root.anvilDur[1] = 0
             }
         }
-        // 清左输入槽 + 改名框。
+        // 清左输入槽 + 改名框（lastAutoName 一并复位；下方 anvilRev++ 触发 onAnvilRevChanged 左槽空分支
+        //   同步清框，此处先行保持不变量「renameName 与输入框同步」）。
         root.anvilSlots[0] = 0; root.anvilCounts[0] = 0; root.anvilDur[0] = 0
         root.anvilEnch = [[0,0,0,0], [0,0,0,0], [0,0,0,0]]
-        root.renameName = ""; nameInput.text = ""
+        root.renameName = ""; nameInput.text = ""; root.lastAutoName = ""
 
         // ── 产物落定（探路时已确认可落）──
         if (outName.length > 0) {
@@ -665,7 +723,7 @@ Item {
     Rectangle {
         id: panel
         width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
-        height: 400                                  // 22 + 120(操作区, t576/t577 缩) + 120 + 40 + 间距/边距
+        height: 430                                  // 22 + 150(操作区, t606① 槽行下移扩高) + 120 + 40 + 间距/边距
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -693,33 +751,36 @@ Item {
                 }
             }
 
-            // ── 操作区（t576/t577 三轮：改名框在顶（产物上方）+ A + B → 箭头 → C 产物 + 产物下等级）──
-            // t577：改名框移到槽行上方（MC 铁砧：名字栏在最顶、产物在右）。左槽放入物品 → 框内 placeholder
-            //   直接显该物品当前名（默认注册名；t550-review 记的「槽结构无 customName 通道」follow-up 仍开，
-            //   本地槽不保真自定义名 → 显注册默认名）；用户输入 → 显输入预览（产物等级行同步显新名）。
+            // ── 操作区（t576/t577 三轮 + t606 四轮：改名框在顶（产物上方）+ A + B → 箭头 → C 产物 + 产物下等级）──
+            // t577：改名框移到槽行上方（MC 铁砧：名字栏在最顶、产物在右）。用户输入 → 产物即显新名。
             //   耐久不进名字栏。无「重命名」按钮（用户要求：产物槽即执行入口）。
             // t576：A/B 两输入槽中间加「+」符号；删「放入物品与材料」灰字提示。
+            // t606①：操作区高 120→150 + 槽行上距加大 —— A+B→C 槽行整体下移（原太靠上贴改名框）。
+            // t606②：改名框 placeholder 占位层删（自动填名把真名写进输入框，占位层冗余）。
+            // t606⑤：框宽收窄对齐槽行（376→176）+ 背景调浅（#2a2018 深棕 → #3a3226 浅棕）+ 文字垂直居中
+            //   （TextInput anchors.fill 与 anchors.verticalCenter 叠用无效 → 文字贴顶；改 verticalAlignment）。
             Item {
                 id: anvilArea
                 width: parent.width
-                height: 120
+                height: 150
 
-                // ── 改名框（t577 顶部）── TextInput + 持焦时 Esc 关面板（规格⑥）。
+                // ── 改名框（t577 顶部；t606⑤ 收窄调浅居中）── TextInput + 持焦时 Esc 关面板（规格⑥）。
+                //   t606②：放入物品自动填名（onAnvilRevChanged），框内恒真文本可编辑，无占位层。
                 Rectangle {
                     id: renameBox
-                    anchors.top: parent.top; anchors.topMargin: 0
+                    anchors.top: parent.top; anchors.topMargin: 4
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: panel.width - 16; height: 26
-                    color: "#2a2018"
-                    border.color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#ffd87a" : "#0a0604"
+                    width: 176; height: 26
+                    color: "#3a3226"
+                    border.color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#ffd87a" : "#141008"
                     border.width: (root.renaming && root.affordCost && root.activeOp !== "") ? 2 : 1
                     radius: 3
                     TextInput {
                         id: nameInput
                         anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: 8; anchors.rightMargin: 8
                         color: "#ffe6a8"; font.pixelSize: 12
+                        verticalAlignment: TextInput.AlignVCenter   // t606⑤ 文字垂直居中（原贴顶）
                         selectByMouse: true
                         maximumLength: 20
                         clip: true
@@ -737,22 +798,13 @@ Item {
                                 }
                             }
                         }
-                        // t577：左槽放入物品 → 框内直接显该物品当前名（占位样式；注册默认名 —— 本地槽无
-                        //   customName 通道，自定义名不保真，显默认名）。用户输入后由输入文本覆盖显示。
-                        //   左槽空 → 不显任何提示文字（t576 删提示文字原则）。
-                        Text {
-                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                            text: { const _r = root.anvilRev; return _r >= 0 && root.leftId !== 0 ? root.hotbar.nameForBlock(root.leftId) : "" }
-                            color: "#8a7a5a"; font.pixelSize: 12
-                            visible: nameInput.text.length === 0 && text.toString().length > 0
-                        }
                     }
                 }
 
-                // A + B → C 槽行（t576：A/B 间「+」号）。
+                // A + B → C 槽行（t576：A/B 间「+」号；t606① 上距 8→16 下移）。
                 Item {
                     id: slotRow
-                    anchors.top: renameBox.bottom; anchors.topMargin: 8
+                    anchors.top: renameBox.bottom; anchors.topMargin: 16
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: 176
                     height: 40
@@ -823,7 +875,7 @@ Item {
                 }
 
                 // 产物槽下等级绿字（规格⑤：等级显示在产物格下绿字；t576 无产物 → 静默空白（删灰字提示）；
-                //   t577 改名 → 行首显改名后产物名）。
+                //   t606⑥ 改名不再带产物名——只显消耗「重命名 N 级」，名字在输入框 + 产物 tooltip 已有）。
                 Text {
                     anchors.top: slotRow.bottom; anchors.topMargin: 2
                     anchors.horizontalCenter: slotRow.horizontalCenter
