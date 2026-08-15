@@ -581,6 +581,10 @@ const QList<QPair<int, QString>> &mobEntityMap()
         {4, QStringLiteral("zombie/zombie.png")},   // MobShambler → entity/zombie/zombie.png（机制等价 zombie，§9 改名）
         {5, QStringLiteral("skeleton/skeleton.png")},// MobBones → entity/skeleton/skeleton.png（机制等价 skeleton，§9 改名）
         {6, QStringLiteral("creeper/creeper.png")}, // MobStalker → entity/creeper/creeper.png（机制等价 creeper，§9 改名）
+        // t596 核验（用户「蜘蛛是不是没找到贴图？」）：demo 包实存 entity/spider/spider.png（256×128 = base 64×32 的 4×），
+        //   映射路径 / 大小写均正确；mobmodel.cpp 蜘蛛三组 box-UV（head(32,4)8³ / body1(0,12)10×8×12 / leg(18,0)16×2×2）
+        //   六面像素区逐一实测 100% 不透明 → pack 路径无缺口。用户观感「无贴图」实为 t597：delegate baseColor 暗色
+        //   (0.16,0.10,0.10) 乘 pack 贴图致近乎全黑（修于 Main.qml，非本映射）。
         {7, QStringLiteral("spider/spider.png")},   // MobSpider → entity/spider/spider.png
         {8, QStringLiteral("chicken/chicken.png")}, // MobChicken → entity/chicken/chicken.png
         {12, QStringLiteral("snow_golem.png")},     // MobSnowGolem → entity/snow_golem.png（扁平；demo 包无子目录，mobTextureSource 子目录 miss 后回退扁平命中）

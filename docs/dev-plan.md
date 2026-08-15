@@ -2078,9 +2078,10 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 **t595** 潜行者（苦力怕）模型比例：腿太长缩小 + 头加大 + 身体加大 ✅（commit 见 git log，t595）
 - 查：MobModel Stalker box 尺寸（MC 1.0 creeper：头 8×8×8 / 身 4×12×8 / 四腿 4×6×4 —— 腿短身长）。
 
-**t596** 蜘蛛贴图缺失（显示异常）
+**t596** 蜘蛛贴图缺失（显示异常）✅（commit 见 git log，t596）
 - 用户：「蜘蛛是不是没找到对应贴图？」
 - 查：mobEntityMap 蜘蛛映射 → pack entity/spider.png 是否存在/路径大小写；MobModel 蜘蛛 box-UV 是否走了 pack 路径。
+- 结论：映射正确（demo 包实存 entity/spider/spider.png，蜘蛛 head/body/leg 三组 box-UV 六面 100% 不透明）——「无贴图」观感实为 t597 暗色 tint 乘贴图（已修）。
 
 **t597** 苦力怕+蜘蛛颜色暗淡（僵尸/骷髅明亮）
 - 查：两 mob 的 Model 材质 brightness/光照通道 —— 是否没走 `PrincipledMaterial.NoLighting`（违反光照不变量）或贴图 tint 乘了暗色。对照 Shambler/Bones 的材质参数拉平。
