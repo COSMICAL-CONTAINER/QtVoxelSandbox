@@ -332,26 +332,50 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     Boat &b = m_boats[size_t(m_riderBoat)];
     if (!b.alive) { outBoatPos = QVector3D(); return; }
 
-    // 目标速度 = wish × kBoatSpeed × iceMul（冰面加速，复用 BlockRegistry::isIce + 按类型递增倍率）。
-    //   冰面倍率：Ice 1.5 / PackIce 2.0 / BlueIce 2.5（蓝冰最快，机制等价 MC 蓝冰船速最高）。非冰 → 1.0。
-    float iceMul = 1.0f;
-    if (world) {
-        const quint8 below = blockBelowBoat(world, b.pos);
-        if (below == BlockRegistry::Ice)          iceMul = 1.5f;
-        else if (below == BlockRegistry::PackIce) iceMul = 2.0f;
-        else if (below == BlockRegistry::BlueIce) iceMul = 2.5f;
+    // t584 三档介质检测（重写）：先查船本列水柱（waterSurfaceY 扫柱结论 foundWater —— 船「浮在水中」
+    //   = Water 档，即使水很浅、脚下是水底沙 / 石也是水档：介质档必须与浮水结论同源，否则浅水船读到
+    //   水底实体 = 陆档，档位与浮力自相矛盾）；无水（陆地 / 冰面 / 空中）再看支撑面方块（blockBelowBoat
+    //   首个可踩实体）：冰族（Ice/PackIce/BlueIce，isIce 单一权威）= Ice 档；其余 = Land 档。
+    //   前向介质不单独取样（档位取船中心列即可 —— 介质切换瞬态由 lerp 平滑；「前方是岸」的探测归
+    //   下方水中碰岸停段，由 footprint 前向覆盖）。
+    bool foundWater = false;
+    const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
+    const quint8 below = blockBelowBoat(world, b.pos);
+    const bool onIce = !foundWater && BlockRegistry::isIce(below);
+
+    // 三档推进参数（机制等价 MC 1.0 船：陆地几乎开不动 / 水中常速 / 冰面最快且惯性大——难操作才对）：
+    //   - Water：kBoatSpeed × 1.0（8 blocks/s）+ 接近率 kBoatAccel=4（中等动量）。
+    //   - Ice：  kBoatSpeed × 冰类型倍率（Ice 1.8 / PackIce 2.2 / BlueIce 2.5 → 14.4~20 blocks/s，
+    //     约水面 2~2.5 倍）+ 接近率读 BlockRegistry::iceSlipApproach（冰 8 / 浮冰 4.5 / 蓝冰 2.8 /s，
+    //     单一权威：越小越滑 → 松键后长滑行 = 冰面惯性；转向速率 × kBoatIceTurnMul（迟钝 = 难操作）。
+    //   - Land：kBoatSpeed × kBoatLandSpeedMul 0.3（2.4 blocks/s，最慢 —— 比走路 4.3 还慢但能开，
+    //     用户要求「直接放陆地上开不会停」即陆地非零速）+ 接近率 kBoatLandAccel=10（高响应：
+    //     松手即停、无滑行，贴地挪动手感）。
+    float maxSpeed = kBoatSpeed;
+    float approach = kBoatAccel;
+    float turnRate = kBoatTurnRate;
+    if (foundWater) {
+        // 水档：基础参数
+    } else if (onIce) {
+        if (below == BlockRegistry::Ice)          maxSpeed = kBoatSpeed * 1.8f;
+        else if (below == BlockRegistry::PackIce) maxSpeed = kBoatSpeed * 2.2f;
+        else                                      maxSpeed = kBoatSpeed * 2.5f; // BlueIce（isIce 已保证）
+        approach = BlockRegistry::iceSlipApproach(below); // 冰面惯性（滑度单一权威）
+        turnRate = kBoatTurnRate * kBoatIceTurnMul;       // 转向迟钝（难操作）
+    } else {
+        maxSpeed = kBoatSpeed * kBoatLandSpeedMul;
+        approach = kBoatLandAccel;
     }
-    const float maxSpeed = kBoatSpeed * iceMul;
     const float targetVx = wishX * maxSpeed;
     const float targetVz = wishZ * maxSpeed;
-    // 船速向目标 lerp（动量；kBoatAccel 接近率 → 冰上叠加速时惯性明显，机制等价 MC 船动量）。
+    // 船速向目标 lerp（动量；approach 接近率 → 冰上接近率低 = 加速慢 + 松键滑行远（惯性），机制等价 MC 船动量）。
     {
-        const float alpha = 1.0f - std::exp(-kBoatAccel * float(dt));
+        const float alpha = 1.0f - std::exp(-approach * float(dt));
         b.vx += (targetVx - b.vx) * alpha;
         b.vz += (targetVz - b.vz) * alpha;
     }
 
-    // 船头转向意图方向（wish 非零 → 平滑转向 atan2(wish)，机制等价 MC 船头随操控缓转）。
+    // 船头转向意图方向（wish 非零 → 平滑转向 atan2(wish)，机制等价 MC 船头随操控缓转；冰面 turnRate 打折）。
     {
         const float wlen = std::sqrt(wishX * wishX + wishZ * wishZ);
         if (wlen > 1e-3f) {
@@ -360,16 +384,34 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
             float d = targetYaw - b.yaw;
             while (d > 180.0f) d -= 360.0f;
             while (d < -180.0f) d += 360.0f;
-            const float maxTurn = kBoatTurnRate * float(dt);
+            const float maxTurn = turnRate * float(dt);
             b.yaw += std::clamp(d, -maxTurn, maxTurn);
         }
+    }
+
+    const float speed = std::sqrt(b.vx * b.vx + b.vz * b.vz);
+
+    // t584 水中碰岸停（核心新检测）：船「当前浮在水中」（foundWater = Water 档）→ 探测 footprint 在
+    //   「水面同高格层」（船中心下移 1 格，boatFootprintBlocked 的 cy=水面顶格 / cy+1=船中心格）是否有
+    //   实心非水方块（岸边陆地哪怕与水面同高也在这一层）→ 命中即**双轴速度清零**（整船停住，机制等价
+    //   MC 1.0 船从水里撞岸受阻——区别于撞毁）。速度 ≥ kBoatCrashSpeed 才撞毁（t584 阈值 7→12：水档
+    //   满速 8 碰岸应停非毁；冰档 14~20 撞墙仍毁 = 冰上危险，配合难操作手感）。
+    //   **陆档 / 冰档船不触发本停止**：它们不浮水（foundWater=false），自身已在地面 / 冰面上，靠陆地高
+    //   摩擦自己慢（用户要求「只有直接放陆地上开才不受阻」——陆地船的位移只受常规逐轴碰撞约束，
+    //   无额外整停）。旧版缺失本检测的漏洞：船浮水面时中心格在水面之上的空气格 → 常规 footprint 只查
+    //   中心格层 → 与水面同高的岸边方块在下一层、检测不到 → 船从水里直接「开上」同高岸地不停。
+    if (foundWater && world && boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z())) {
+        if (speed >= kBoatCrashSpeed) {
+            outCrashed = true; // 高速撞岸 → 撞毁（掉散件）
+        }
+        b.vx = 0.0f;
+        b.vz = 0.0f;
     }
 
     // 逐轴（X 后 Z）积分位移 + 碰撞：撞可碰撞方块则该轴不动；高速撞（speed>kBoatCrashSpeed）→ 撞毁。
     //   t508 二轮复盘修「能开出虚空」（用户报⑧）：船 XZ 位移只查 boatFootprintBlocked（世界内实块），
     //     但世界边缘外 blockAt 返 Air → isCollidable=false → 不挡船 → 船可开出世界边界进虚空。加世界边界
     //     clamp：船 footprint（±kBoatHalfW）必须落在 [0,width]×[0,depth] 内（半宽留 1 格缓冲防骑跨边界卡 delegate）。
-    const float speed = std::sqrt(b.vx * b.vx + b.vz * b.vz);
     const float dx = b.vx * float(dt);
     const float dz = b.vz * float(dt);
     // 世界边界（半宽外扩防船头穿出）：无 world → 不限。t556：X 用 kBoatHalfW / Z 用 kBoatHalfLen（矩形碰撞盒）。
@@ -405,9 +447,7 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
 
     // 浮水 / 落地（同 tick 段逻辑；t508 二轮复盘）：有水 → Y 钉水面；无水 → 重力落支撑面。
     //   旧版无脑 b.pos.setY(surfY) 在无水时 surfY=fallback=pos.y → 陆地骑船 Y 恒不变（悬空）。改分支同 tick。
-    //   hasWater 用 waterSurfaceY 的扫柱结论（非船中心格 == Water），避免船浮水面时中心格为空气 → 误判无水。
-    bool foundWater = false;
-    const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
+    //   t584：foundWater / surfY 在函数头部介质检测段已查（同帧复用，不再二次扫柱）。
     if (foundWater) {
         b.pos.setY(surfY);
     } else {

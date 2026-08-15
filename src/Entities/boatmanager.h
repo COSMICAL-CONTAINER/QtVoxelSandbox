@@ -9,9 +9,11 @@
 
 // 船实体管理器（t469；Entities 层）。机制等价 MC 1.0 boat。
 //
-// 船是新实体类型：浮在水面（Water 上方），玩家右键船实体 → 骑乘（steer），WASD 控制方向 + 前进，
-// 水上快速移动（明显快于游泳）；冰面（Ice/PackIce/BlueIce）速度倍增（蓝冰最快，复用 BlockRegistry::isIce
-// 判冰面 + 按冰类型给船速递增倍率）；高速撞硬墙 → 船损坏掉落船物品（可重放）。
+// 船是新实体类型：浮在水面（Water 上方），玩家右键船实体 → 骑乘（steer），WASD 控制方向 + 前进。
+// t584 三档介质速度：陆地最慢（能开但贴地挪）/ 水中第二（明显快于游泳）/ 冰面最快（Ice/PackIce/BlueIce
+// 倍率递增 + iceSlipApproach 低接近率 → 松键长滑行惯性 + 转向迟钝，难操作才是对的）。水中船碰岸边实心
+// 方块（哪怕与水面同高）→ 整船速度清零停住（机制等价 MC 1.0 船撞岸受阻；速度 ≥ 撞毁阈值才毁）；
+// 直接放陆地的船不触发该停止（靠陆地高摩擦自己慢）。高速撞硬墙 → 船损坏掉落散件（可重放）。
 //
 // 数据形态：每个船实体 = {世界坐标 pos（船中心，浮水面）、水平速度 vx/vz（动量 / 冰上惯性）、
 // 朝向 yawDeg（船头方向，呈现层船 Model 据它定向）、变体 boatType（Oak=0 浅色 / Spruce=1 深色）、
@@ -119,10 +121,12 @@ public:
     void tick(qreal dt, World *world);
 
     // 推进被骑船的操控物理（PlayerController.step 骑乘分支调）：wishX/wishZ = 玩家 WASD 据 yaw 算出的水平
-    //   单位意图向量（已含 W 前 / S 后 / A/D 横移）。据船当前格冰类型算目标速度（kBoatSpeed × iceMul），
-    //   船速向目标 lerp（动量）→ 积分水平位移 + 逐轴碰撞。outBoatPos 写新船中心位（PlayerController 据它把
-    //   玩家 m_pos 同步到船座位）。outCrashed=true = 高速撞硬墙（PlayerController 据 it 调 breakRiddenBoat
-    //   掉船物品 + 下船）。无骑乘（m_riderBoat<0）→ no-op（outBoatPos 不变 / outCrashed=false）。
+    //   单位意图向量（已含 W 前 / S 后 / A/D 横移）。t584 三档：先判介质（waterSurfaceY 有水 = Water 档 /
+    //   无水 + 支撑面冰族 = Ice 档 / 其余 = Land 档），按档取速度上限 + lerp 接近率 + 转向速率 → 积分水平
+    //   位移 + 逐轴碰撞 + 水中碰岸整停（Water 档 footprint 前向层探到实心方块 → 双轴速度清零）。
+    //   outBoatPos 写新船中心位（PlayerController 据它把玩家 m_pos 同步到船座位）。outCrashed=true =
+    //   高速撞硬墙（PlayerController 据 it 调 breakRiddenBoat 掉船物品 + 下船）。无骑乘（m_riderBoat<0）→
+    //   no-op（outBoatPos 不变 / outCrashed=false）。
     void tickRiddenBoat(qreal dt, World *world, float wishX, float wishZ,
                         QVector3D &outBoatPos, bool &outCrashed);
 
@@ -199,6 +203,8 @@ private:
     //   （pos.y = surfaceY + 1 − draft → floor = surface 格），「−1」跳过了船实际踩着的表面格 → 永远读到
     //   水底 / 冰下，冰面加速从未生效。改：自船中心格向下扫（含本格）首个可踩实体（isCollidable）→ 船在
     //   冰面格时直接读到 Ice / PackIce / BlueIce。船在水面（水非 collidable）→ 跳过水继续向下到水底实体。
+    //   t584：介质档判定（tickRiddenBoat）先看 waterSurfaceY 的扫柱结论（有水 → Water 档，浅水船读到水底
+    //   沙 / 石不误判陆档），无水才读本返回值判 Ice / Land 档。
     quint8 blockBelowBoat(World *world, const QVector3D &boatPos) const;
 
     static constexpr int kCap = 64;            // 船数上限（防溢出；船相对稀有，cap 取 mob 量级）
@@ -221,8 +227,8 @@ private:
     //   支撑方块顶 + kBoatHullBottom（船底贴支撑顶）。与 boats delegate 船底甲板 Model（position.y=-0.15、
     //   scale.y=0.1 → 底面 -0.2）对齐 —— 改几何时同步改本常量（两处一致才不沉地 / 不悬空）。
     static constexpr float kBoatHullBottom = 0.2f;
-    //   kBoatSpeed：水上基础船速（blocks/s；明显快于游泳 kSwimUp=4.5 / 走 kWalk=4.3，机制等价 MC 船水上快）。
-    //   kBoatAccel：船速向目标 lerp 接近率（1/s；越小越滑有惯性 —— 冰上叠加速时惯性明显）。
+    //   kBoatSpeed：水中基础船速（blocks/s；明显快于游泳 kSwimUp=4.5 / 走 kWalk=4.3，机制等价 MC 船水上快）。
+    //   kBoatAccel：水档船速向目标 lerp 接近率（1/s；中等动量）。
     //   kBoatFriction：空船 / 松键水平摩擦衰减率（1/s）。
     //   kBoatCrashSpeed：撞墙损坏速度阈值（blocks/s；高速撞硬墙才坏，低速轻撞只停）。
     //   kBoatTurnRate：船头转向速率（度/s；船头平滑转向意图方向，机制等价 MC 船缓转）。
@@ -231,8 +237,19 @@ private:
     // t556「船太轻」（用户报②）：空船水平摩擦衰减率 3.0 → 5.0（被推后更快停住，配合 kBoatPushImpulse 0.08
     //   → 推船滑行 <0.01 格、肉眼不动，机制对齐 MC「船重得像浸水木头」）。
     static constexpr float kBoatFriction = 5.0f;
-    static constexpr float kBoatCrashSpeed = 7.0f;
+    // t584 三档速度：水档满速 8 < 旧阈值 7 会「水档常速碰岸即毁」不对 → 提到 12（水档碰岸只停、冰档
+    //   14~20 撞墙仍毁 = 冰上危险）。
+    static constexpr float kBoatCrashSpeed = 12.0f;
     static constexpr float kBoatTurnRate = 360.0f;
+    // t584 三档介质参数（陆地 / 冰面；机制等价 MC 1.0 船：陆地几乎开不动 / 冰面最快 + 惯性大难操作）：
+    //   陆档：kBoatSpeed × kBoatLandSpeedMul（2.4 blocks/s，最慢 —— 比走路还慢但非零：用户要求「直接放
+    //     陆地上开不会停」= 陆地能开只是慢）；kBoatLandAccel 接近率高（松手即停无滑行，贴地挪动手感）。
+    //   冰档：速度倍率按冰类型 1.8 / 2.2 / 2.5（t584：14.4~20 blocks/s ≈ 水面 2~2.5 倍，机制等价 MC 冰面
+    //     船速 ~ 水面 2.5 倍）；接近率读 BlockRegistry::iceSlipApproach（单一权威，越小越滑 → 松键长滑行
+    //     = 冰面惯性）；转向速率 × kBoatIceTurnMul（迟钝 = 难操作才是对的，用户原话）。
+    static constexpr float kBoatLandSpeedMul = 0.3f;
+    static constexpr float kBoatLandAccel    = 10.0f;
+    static constexpr float kBoatIceTurnMul   = 0.45f;
     // t508 玩家推船给的水平速度冲量（blocks/s；每次接触分离时叠入 vx/vz）。机制等价 MC 1.0 船被实体撞开
     //   后会滑一小段。
     //   t531「船太轻（身体撞就明显动）」复盘：旧值 2.0 → 玩家碰一下船就给 2 blocks/s 初速，肉眼明显被弹开 + 滑行
