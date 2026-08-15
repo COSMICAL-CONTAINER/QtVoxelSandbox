@@ -14,10 +14,12 @@
 // 参考：A Fast Voxel Traversal Algorithm for Ray Tracing (1987)。整数格坐标按
 // World 约定（+Y 朝上，越界=空气）；阻挡谓词见 blocksRay（按 filter 切换 Torch / Water）。
 //
-// 同一份 DDA 被多种语义复用（选体 / 相机距离 / 铁桶舀水），它们对「Torch / Water / Ladder 是否挡射线」
-// 需求不同，故用 filter 标志位独立切换（详见 raycast.h RayFilter 注释）：
+// 同一份 DDA 被多种语义复用（选体 / 相机距离 / 铁桶舀水），它们对「Torch / Water / Ladder / 不完整方块
+// 是否挡射线」需求不同，故用 filter 标志位独立切换（详见 raycast.h RayFilter 注释）：
 //   - 选体（HitTorch|HitLadder）：火把 / 木梯挡（t184/t501，可选中 / 直挖）、水穿过（t165 水下可挖实体）。
-//   - 相机距离（Default）：火把 / 水 / 木梯均穿过（皆 non-solid，相机不应被拉近视距，保 t40）。
+//   - 相机距离（HitPartial，t605）：不完整方块按碰撞 sub-AABB 精确命中；火把 / 水 / 木梯穿过（皆 non-solid，
+//     相机不应被拉近视距，保 t40）。起点在不完整方块格的**空气部分**（如 1.5 格通道天花板上半砖的下半格）
+//     时穿过继续命中后方实体（否则退化返 invalid → 相机当「无墙」取满距 kCamMax 直穿，见下方起点分流注释）。
 //   - 铁桶（HitWater）：水挡（命中首个水格舀水）、火把 / 木梯穿过。
 namespace {
 // t213 射线 vs cell-local sub-AABB（世界坐标 = cell + local）精确命中测试。
@@ -169,11 +171,17 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
         const quint8 b = world.blockAt(cx, cy, cz);
         // 选体模式 = 命中方块的精确 sub-AABB 测试生效（火把 / 木梯等 non-solid 方块的「准星完全落在视觉面才命中」
         //   语义）：HitTorch 覆盖火把、HitLadder 覆盖木梯。二者均可经 updateRaycast 同时启用。
-        const bool selectionMode = (filter & (RayFilter::HitTorch | RayFilter::HitLadder)) != 0;
+        // t605 相机模式（HitPartial）：**所有不完整方块**（半砖 / 雪层 / 压力板 / 栅栏 / 楼梯 / 门 / 活版门…）走
+        //   sub-AABB 精确测试 —— 相机距离以「实体 sub-AABB 面」为准（与玩家碰撞 collisionAABBs 同源 shapeBoxes）：
+        //   1.5 格通道（下半砖地 + 上半砖顶）蹲行时相机沿偏移方向的空隙恰是 0.5+1.5+0.5=2.5 格薄缝，整格阻挡会把
+        //   相机无谓钳近（半砖格的空气半格相机实际可通过）；Torch/Water/Ladder 无对应 Hit* 标志仍先穿（non-solid
+        //   不拉近视距，保 t40）。
+        const bool preciseMode = (filter & (RayFilter::HitTorch | RayFilter::HitLadder
+                                            | RayFilter::HitPartial)) != 0;
         // 完整立方 → 整格命中；水（仅 HitWater 模式进此分支）→ 整格命中舀水；岩浆（仅 HitLava 模式）→ 整格命中舀岩浆；
-        //   非选体模式（相机 Default / 桶 HitWater / HitLava）对不完整方块亦整格阻挡（旧行为，防相机穿半砖）。
+        //   非选体·非相机模式（桶 HitWater / HitLava）对不完整方块亦整格阻挡（旧行为，防桶射线行为变）。
         const bool fullCell = BlockRegistry::isFullCube(b) || b == BlockRegistry::Water
-                              || b == BlockRegistry::Lava || !selectionMode;
+                              || b == BlockRegistry::Lava || !preciseMode;
         if (fullCell) {
             h.valid = true;
             h.bx = cx; h.by = cy; h.bz = cz;
@@ -181,7 +189,7 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
             h.dist = tEnterCell; // DDA 进格面距起点欧氏距离（dir 已归一 → t 即距离）；t40 相机钳制复用
             return true;
         }
-        // 选体模式 + 不完整方块 / 火把 / 木梯 → 命中点 vs sub-AABB 精确测试。
+        // 选体 / 相机（t605）模式 + 不完整方块 / 火把 / 木梯 → 命中点 vs sub-AABB 精确测试。
         const std::vector<BlockRegistry::BlockAABB> boxes =
             BlockRegistry::raycastAABBs(b, world.stateAt(cx, cy, cz));
         float subT; int snx, sny, snz;
@@ -203,7 +211,12 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
     //   （射线未跨面进入此格，nx/ny/nz 保持 0；桶舀水只读格坐标不读法线，无碍）。
     //   t213：选体模式下起点在**不完整方块 / 火把 / 木梯**格内 → 不一刀切退化：眼位在空气部分（sub-AABB 外）时
     //   射线应继续命中后方方块（修「贴脸火把/半砖挡选后方块」）；仅眼位在 sub-AABB 内（真嵌入实体）才退化。
-    //   完整立方 / 非选体模式沿用旧「起点嵌阻挡格 → 退化」语义。
+    //   完整立方 / 非选体·非相机模式沿用旧「起点嵌阻挡格 → 退化」语义。
+    //   t605：**相机距离（HitPartial）同样分流**——1.5 格通道蹲行时眼位落在天花板（上半砖/雪层等 sub-AABB 方块）
+    //   格的空气部分，旧版在此退化返 invalid → updateCameraDistance 把 invalid 当「无墙」取满距 3.5 → 相机
+    //   穿墙查看（用户 bug：恰只在 1.5 格通道触发，因仅此场景眼位才会位于 sub-AABB 方块格的空气段）。眼位在
+    //   空气部分 → 穿过继续命中后方实体 / 命中本格 sub-AABB；仅眼位真嵌 sub-AABB（相机已在实体内，无处可退）
+    //   才退化。桶模式（HitWater/HitLava）已在上方整格分支返回，不进此路径，行为不变。
     if (blocksRay(x, y, z)) {
         if ((filter & RayFilter::HitWater) && world.blockAt(x, y, z) == BlockRegistry::Water) {
             h.valid = true;
@@ -217,13 +230,16 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
             return h; // 起点即岩浆格 → 命中该格（dist=0；法线 0）
         }
         const quint8 startB = world.blockAt(x, y, z);
-        const bool startPartial = (filter & (RayFilter::HitTorch | RayFilter::HitLadder)) != 0
+        // t605：起点格「不完整方块（sub-AABB 实体 + 空气部分）」的分流扩到相机模式（HitPartial）：
+        //   选体（HitTorch|HitLadder，t213 贴脸半砖/火把）与相机（HitPartial，t605 1.5 格通道天花板半砖）都须
+        //   眼位在空气部分 → 继续命中（本格 sub-AABB 或后方实体）；仅真嵌入 sub-AABB 才退化。
+        const bool startPartial = (filter & (RayFilter::HitTorch | RayFilter::HitLadder | RayFilter::HitPartial)) != 0
                                   && !BlockRegistry::isFullCube(startB)
                                   && startB != BlockRegistry::Water
                                   && startB != BlockRegistry::Lava;
         if (!startPartial)
-            return h; // 完整立方 / 非选体模式起点嵌阻挡格 → 退化（相机穿模 / 贴脸火把旧语义）
-        // 选体模式 + 起点在不完整方块/火把/木梯格：sub-AABB 测试（段 = 起点格 [0, tExitStartCell]）。
+            return h; // 完整立方 / 非选体·非相机模式起点嵌阻挡格 → 退化（相机穿模 / 贴脸火把旧语义）
+        // 选体 / 相机（t605）模式 + 起点在不完整方块/火把/木梯格：sub-AABB 测试（段 = 起点格 [0, tExitStartCell]）。
         const float tExitStart = std::min(std::min(tMaxX, tMaxY), tMaxZ);
         const std::vector<BlockRegistry::BlockAABB> boxes =
             BlockRegistry::raycastAABBs(startB, world.stateAt(x, y, z));

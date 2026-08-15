@@ -97,7 +97,8 @@ class PlayerController : public QQuickItem
     // DDA 步进（max=kCamMax=3.5），返回首个实体命中距离（留 kCamMargin 余量贴在面前）；无命中=kCamMax。
     // Main.qml 相机 position 用 ±cameraDistance 偏移 → 相机贴墙不穿入。第一人称恒 0（不偏移）。
     // 复用 raycastVoxel（RayHit.dist 已暴露命中距离）。仅值真变时发 cameraDistanceChanged（DDA 对同输入
-    // 确定 → 玩家不动/不转时距离稳定，无抖动）。
+    // 确定 → 玩家不动/不转时距离稳定，无抖动）。t605：filter 用 HitPartial（不完整方块 sub-AABB 精确命中，
+    // 修 1.5 格通道蹲行穿墙——眼位在天花板半砖格空气段时不再退化 invalid）。
     Q_PROPERTY(float cameraDistance READ cameraDistance NOTIFY cameraDistanceChanged)
     Q_PROPERTY(bool captured READ captured NOTIFY capturedChanged)
     Q_PROPERTY(bool onGround READ onGround NOTIFY onGroundChanged)

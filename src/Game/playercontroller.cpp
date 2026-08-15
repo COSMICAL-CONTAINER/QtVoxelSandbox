@@ -799,9 +799,14 @@ void PlayerController::clearHit()
 //   ThirdPersonFront：相机在玩家身前 → 偏移方向 = +look。
 // 复用 raycastVoxel（RayHit.dist = 起点到命中面的欧氏距离）。命中 → dist - kCamMargin（贴面前、防
 // z-fight / 近裁面穿插），floor 到 0（墙贴近眼 → 退到眼位）；无命中（含起点嵌实体的退化）→ kCamMax。
+// t605：filter 由 Default 改 HitPartial —— 不完整方块（半砖 / 雪层 / 楼梯…）按碰撞 sub-AABB 精确命中，
+//   修 1.5 格通道蹲行切第三人称相机穿墙：眼位落在天花板上半砖格的空气段（sub-AABB 外）时，Default 对该格
+//   「进格即挡」→ 起点退化返 invalid → 相机取满距 3.5 穿墙查看。HitPartial 下起点格空气段穿过继续命中（本格
+//   sub-AABB 或后方实体），相机正确钳到通道口外；三轴 3D 向量探测本就覆盖（射线沿偏移方向归一后 x/y/z 同测）。
+//   Torch / Water / Ladder 仍穿（HitPartial 不含其 Hit* 标志，non-solid 不拉近视距，保 t40）。
 // 第一人称恒 0（不偏移，相机贴眼）。仅值真变时发 cameraDistanceChanged——DDA 对同一 (eye,look,世界)
 // 输入确定，玩家不动/不转时距离帧间稳定，无抖动。
-// 分层（PLAN §2）：本层只读 World（blockAt/isSolid），与选体 raycast 同源；相机摆位仍在 QML 呈现层。
+// 分层（PLAN §2）：本层只读 World（blockAt），与选体 raycast 同源；相机摆位仍在 QML 呈现层。
 void PlayerController::updateCameraDistance()
 {
     if (m_cameraMode == FirstPerson) {
@@ -815,7 +820,7 @@ void PlayerController::updateCameraDistance()
     if (m_world) {
         const QVector3D look = lookDirection();
         const QVector3D dir = (m_cameraMode == ThirdPersonBack) ? -look : look;
-        const RayHit h = raycastVoxel(*m_world, position(), dir, kCamMax);
+        const RayHit h = raycastVoxel(*m_world, position(), dir, kCamMax, RayFilter::HitPartial);
         if (h.valid) {
             d = h.dist - kCamMargin;
             if (d < 0.0f) d = 0.0f; // 墙贴近眼位 → 退到眼（极端情形，相机近乎第一人称）
