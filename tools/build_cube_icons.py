@@ -122,10 +122,16 @@ BLOCKS = [
     ("mossy_cobble",    "default_mossy_cobble",  "default_mossy_cobble"),  # t486 苔石（各面同贴图=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
     # dispenser 移到 BLOCKS_FRONT（t492：正面排出口面板是其辨识特征，显正面才可辨）。
     # t487 要塞结构方块立方体图标（build_stone_brick.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
-    #   石砖台阶/楼梯复用石砖贴图（同橡木木制品一族共享一贴图模式），立方体图标显满砖便于创造调色板取用区分。
     ("stone_brick",     "default_stone_brick", "default_stone_brick"),  # t487 石砖（各面同贴图=石质灰底+砖块缝纹网格；要塞墙体主体）
-    ("stone_brick_slab",   "default_stone_brick", "default_stone_brick"),  # t487 石砖台阶（共享石砖贴图；创造调色板取用）
-    ("stone_brick_stairs", "default_stone_brick", "default_stone_brick"),  # t487 石砖楼梯（共享石砖贴图；创造调色板取用）
+    # t600 石砖台阶/楼梯不再走 BLOCKS（满立方体投影）：三个图标渲染成同一张整砖立方 → 背包里与石砖满格无法区分
+    #   （用户「三个都是石砖满一格子的样子」）。改走下方 PARTIALS_3D_STONE_BRICK（slab/stairs 形状投影，砖纹 fill）。
+]
+
+# t600 石砖半方块 3D dimetric 立体图标：slab 半高盒 / stairs L 阶（背墙 + 整步），fill 换 default_stone_brick
+#   （机制等价圆石变体 PARTIALS_3D_COBBLE 流程）。替代 t487 把台阶/楼梯误放 BLOCKS（满立方投影 → 三图标同图）。
+PARTIALS_3D_STONE_BRICK = [
+    ("stone_brick_slab",   "slab"),   # t487/t600 石砖台阶：全 footprint 半高盒（砖纹）
+    ("stone_brick_stairs", "stairs"), # t487/t600 石砖楼梯：整步 + 背墙 L 阶（砖纹）
 ]
 
 # t492 「正面有辨识特征」的方块（正面贴图, 顶面贴图, 侧面贴图）—— 走 render_front（正面为主的 dimetric 投影），
@@ -617,6 +623,12 @@ def main():
     # t466 云杉木制品链 3D dimetric 立体图标：同 shape 几何，fill 换 default_spruce_planks（机制等价木制半方块图标流程）。
     for out_name, shape in PARTIALS_3D_SPRUCE:
         img = render_partial_3d(shape, "default_spruce_planks", "default_spruce_planks")
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t600 石砖台阶/楼梯 3D dimetric 立体图标：slab/stairs shape，fill = default_stone_brick（机制等价圆石变体流程）。
+    for out_name, shape in PARTIALS_3D_STONE_BRICK:
+        img = render_partial_3d(shape, "default_stone_brick", "default_stone_brick")
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)

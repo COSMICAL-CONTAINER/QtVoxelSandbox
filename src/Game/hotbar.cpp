@@ -60,8 +60,9 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::TntBlock:      return "icon_tnt.png";           // t485 TNT 立方体图标（各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
     case BlockRegistry::MossyCobble:   return "icon_mossy_cobble.png";  // t486 苔石立方体图标（各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
     case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486/t492 发射器立方体图标（正面为主投影，显排出口面板；丛林神殿陷阱机关）
-    // t487 要塞结构方块图标：石砖（立方体 3D）/ 石砖台阶（3D 半高盒）/ 石砖楼梯（3D L 阶）。同圆石变体图标流程，
-    //   仅 fill 换 default_stone_brick（砖纹）。tools/build_cube_icons.py 程序生成；与圆石变体形状一致但砖纹不同。
+    // t487 要塞结构方块图标：石砖（立方体 3D）/ 石砖台阶（3D 半高盒）/ 石砖楼梯（3D L 阶）。t600 修正：台阶/楼梯
+    //   原误走 BLOCKS 满立方投影（三图标同图=全显石砖整块，用户「背包三个都是石砖满一格」）→ 改 render_partial_3d
+    //   slab/stairs 形状（同圆石变体流程，fill=default_stone_brick 砖纹）。tools/build_cube_icons.py 程序生成。
     case BlockRegistry::StoneBrick:       return "icon_stone_brick.png";       // 石砖：3D 立方体（顶+两侧砖纹）
     case BlockRegistry::StoneBrickSlab:   return "icon_stone_brick_slab.png";  // 石砖台阶：3D 半高盒（砖纹）
     case BlockRegistry::StoneBrickStairs: return "icon_stone_brick_stairs.png";// 石砖楼梯：3D L 阶（背墙 + 整步，砖纹）
