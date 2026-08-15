@@ -449,7 +449,9 @@ public:
     //   实体事件在 Game 层，槽操作在 VM/UI 层）。这样背包任意组的悬停槽丢弃（Q=1件 / Ctrl+Q=整栈）都走
     //   同一原语，UI 层据组分发读写、算 1/全 栈量后调本方法。不限捕获态（背包打开时未捕获正是此场景）。
     //   id==0 / count<=0 → 不丢。经 QML Connections 转发（同 spawnItem 模式）。
-    Q_INVOKABLE void dropItemAtFront(int itemId, int count);
+    //   t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；缺省空 = 无附魔）。UI 层把
+    //   hovered 槽的物品附魔传入 → 掉落实体携带附魔（拾取回填 + 掉落紫光晕，防「附魔工具丢出再捡变普通」）。
+    Q_INVOKABLE void dropItemAtFront(int itemId, int count, const QVariantList &enchants = {});
     // 拖出背包丢弃（t49）：光标手持栈（hotbar.heldBlock/heldCount）整栈丢弃为实体（玩家前方 1.5 格）。
     // 与 dropHeld 的差异：后者取**选中槽** 1 件且仅捕获时；本方法取**光标手持栈**整栈、**不限捕获态**
     // （背包打开时未捕获正是此场景）。t64：spawnItem 传 heldCount → 1 实体携带整栈数量（修「丢 4 木棒
@@ -598,7 +600,10 @@ signals:
     // 坐标，id = 原方块 id，count = 掉落数量（走 BlockRegistry::dropCount；t64）。Main.qml Connections
     // 转发到 ItemEntityManager.spawnItem 生成实体。分层（PLAN §2）：Game/Physics 层发语义事件，
     // 呈现层 / ViewModel 只消费（同 blockBroken→粒子）。
-    void spawnItem(int x, int y, int z, int blockId, int count);
+    // t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值）。仅玩家丢弃带附魔工具 /
+    //   护甲路径传（dropItemAtFront / dropHeldCursor / dropHeldCursorOne）；其余掉落（破块 / mob / 爆炸）
+    //   不传 → 缺省空（实体无附魔）。缺省参让 20+ emit 点零改动、旧 QML 处理器少参亦可接。
+    void spawnItem(int x, int y, int z, int blockId, int count, const QVariantList &enchants = {});
     // t311 cause=PlayerState::DeathCause 枚举值，区分致死来源（Fall/Suffocation/Drowning/Starvation）供死因记录。
     //   机制同 t22：生存伤害结算，正值才发；呈现层路由到 PlayerState.takeDamage(hp, cause)。
     void fallDamageTaken(int hp, int cause);

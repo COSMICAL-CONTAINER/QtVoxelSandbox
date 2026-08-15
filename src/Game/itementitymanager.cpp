@@ -20,7 +20,9 @@ ItemEntityManager::ItemEntityManager(QObject *parent) : QObject(parent)
 //   驱逐）。爆炸瞬时产数十掉落物 + 已有累积 → 老掉落物让位给新，玩家始终能看到本次破块的产出；被驱逐者
 //   走 releaseSlot（同拾取路径，aliveAt=false → delegate 隐藏 + 槽位可复用）。
 // t64：count 字段支持整栈丢弃为 1 实体（如 4 木棒丢出仍 1 实体 count=4）；count<=0 视作 1。
-void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count)
+// t590：enchants 是 QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；缺省空 = 无附魔）。工具 / 护甲
+//   丢弃时传其实例附魔 → 实体携带 → 拾取回填（防「附魔工具丢出再捡变普通」）。可堆叠物品（合并路径）恒 0。
+void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, const QVariantList &enchants)
 {
     if (itemId <= 0) return; // air / 非法：不产出（PlayerController 仅在 drop=true 时发，已过滤）
     if (count < 1) count = 1; // 缺省 / 非法 → 单件（与历史调用兼容）
@@ -73,6 +75,13 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count)
         }
     }
     const int slot = acquireSlot(ItemEntity{QVector3D(x + 0.5f, y + 0.5f, z + 0.5f), itemId, count, m_clock.elapsed()}); // t256 slot 复用
+    // t590 附魔写入：QVariantList<int> → int[4]（不足按 0 补齐 = 无附魔；越界截断防御）。可堆叠物品（方块 /
+    //   材料段）恒全 0（inert）；工具 / 护甲丢弃保实例附魔（拾取回填用）。
+    {
+        ItemEntity &e = m_entities[size_t(slot)];
+        for (int i = 0; i < 4; ++i)
+            e.enchants[i] = (i < enchants.size()) ? enchants.at(i).toInt() : 0;
+    }
     // t468 初始水平弹出速度（机制等价 MC 破块 / 丢弃物品弹出）：确定性哈希（位置 + itemId）给每件一个固定方向
     //   + 幅值抖动 → 同一掉落可复现。冰面摩擦极低 → 弹出后持续滑动（spec「冰上丢弃物品会一直滑动往前」）；
     //   常规地面摩擦高 → 快速停下。取 acquireSlot 写入的实体引用设 vx/vz。
@@ -139,6 +148,15 @@ int ItemEntityManager::countAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return 0;
     return m_entities[size_t(i)].count;
+}
+
+// t590 实体附魔元数据（QVariantList<int> 4 元素，每 = EnchantRegistry::pack 值；0 = 空槽）。呈现层据它给
+//   掉落物紫光晕（附魔工具落地显光晕）+ PlayerController 拾取回填（防附魔丢失）。越界 / 空槽 → {0,0,0,0}。
+QVariantList ItemEntityManager::enchantsAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return {0, 0, 0, 0};
+    const ItemEntity &e = m_entities[size_t(i)];
+    return { e.enchants[0], e.enchants[1], e.enchants[2], e.enchants[3] };
 }
 
 // t64：拾取装不下时把余数回写、保留 entity（dropHeldCursor 整栈丢弃后部分拾取的回退路径）。

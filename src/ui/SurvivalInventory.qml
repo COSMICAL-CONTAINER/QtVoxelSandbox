@@ -679,6 +679,20 @@ Item {
                                     color: parent.ratio > 0.5 ? "#5fd35f" : (parent.ratio >= 0.2 ? "#e8e85a" : "#e05050")
                                 }
                             }
+                            // t590 附魔光晕（装备槽）：已装备护甲带附魔 → 浅紫半透明叠层（机制等价 MC 附魔光泽，
+                            //   同 EnchantInputSlot / HUD hotbar 光晕配色）。触碰 armorRevision 令附魔写入后重算。
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: {
+                                    const _r = root.hotbar.armorRevision
+                                    if (_r < 0 || armId === 0) return false
+                                    const e = armEnch
+                                    return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                }
+                                color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                radius: 3
+                                z: 3
+                            }
                             // 装备 / 脱下（左键单点）。护甲不可堆叠 → count 恒 1；走 armorSetStack（含部位校验）。
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
@@ -745,10 +759,13 @@ Item {
                                         root.hoveredArmorDurability = armDur
                                         const p = parent.mapToItem(root, parent.width / 2, 0)
                                         root.hoveredTipPos = Qt.point(p.x, p.y)
+                                        // t590：写 hoveredKey（armor:N）→ tooltip 附魔行能读 armorEnchantsAt。
+                                        root.hoveredKey = root.slotKey("armor", index)
                                     } else if (root.hoveredItemId === armId) {
                                         root.hoveredItemId = 0
                                         root.hoveredArmorValue = 0
                                         root.hoveredArmorDurability = 0
+                                        if (root.hoveredKey === root.slotKey("armor", index)) root.hoveredKey = ""
                                     }
                                 }
                             }
@@ -806,6 +823,19 @@ Item {
                             text: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount) : "" }
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
+                        }
+                        // t590 附魔光晕（主栏槽）：槽内物品带附魔 → 浅紫半透明叠层（机制等价 MC 附魔光泽，
+                        //   同 EnchantInputSlot / HUD hotbar 光晕配色）。触碰 mainRevision 令附魔写入后重算。
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: {
+                                const _r = root.hotbar.mainRevision
+                                if (_r < 0 || mainId === 0) return false
+                                return Array.isArray(mainEnch) && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0)
+                            }
+                            color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                            radius: 3
+                            z: 3
                         }
                         // t38 生存左键整组操作（拾取 / 放置 / 合并 / 互换）：统一走 resolveClick。
                         // 主栏槽写经 hotbar.mainSetStack（VM 单一权威；同 id 合并至 maxStack、异 id 互换）。
@@ -919,6 +949,8 @@ Item {
                         delegate: Item {
                             // 槽物品 id（触碰 slotRevision → 拾取/放入后重算 blockIdAt(index)；air=0 空槽）。
                             property int slotId: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.blockIdAt(index)) : 0 }
+                            // t590 槽内附魔（触碰 slotRevision → 附魔写入 / 搬运后重算；供附魔光晕 + tooltip）。
+                            property var slotEnch: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.enchantsAt(index)) : [0,0,0,0] }
                             width: root.slotSize; height: root.slotSize
                             InvSlot { anchors.fill: parent }
                             Item {
@@ -953,6 +985,20 @@ Item {
                                 text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
+                            }
+                            // t590 附魔光晕（hotbar 槽）：槽内物品带附魔 → 浅紫半透明叠层（机制等价 MC 附魔光泽，
+                            //   同 EnchantInputSlot / HUD hotbar 光晕配色）。触碰 slotRevision 令附魔写入后重算。
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: {
+                                    const _r = root.hotbar.slotRevision
+                                    if (_r < 0 || slotId === 0) return false
+                                    const e = slotEnch
+                                    return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                }
+                                color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                radius: 3
+                                z: 3
                             }
                             // tap → t38 生存左键整组操作（拾取 / 放置 / 合并 / 互换）：统一走 resolveClick。
                             // hotbar 槽内容写经 hotbar.setStack（VM 单一权威；同 id 合并至 maxStack、异 id 互换）。
@@ -1092,6 +1138,24 @@ Item {
         if (parts[0] === "main") return _mr >= 0 ? (root.hotbar.mainDurabilityAt(idx)) : -1
         return -1
     }
+    // t590 当前 hover 槽物品的附魔列表文本（tooltip 附魔行）：据 hoveredKey 查 hotbar / main / armor 三组。
+    //   hotbar.enchantListText 把 4 槽 packed int 转「锐锋 III\n效率 II」；无附魔 → 空串 → tooltip 不追加行。
+    //   触碰各 revision（qml-touch 三轮模式）→ 附魔写入 / 搬运后 tooltip 附魔行刷新。
+    property string hoveredEnchantText: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _ar = root.hotbar.armorRevision
+        const key = root.hoveredKey
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.enchantListText(root.hotbar.enchantsAt(idx)) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.enchantListText(root.hotbar.mainEnchantsAt(idx)) : ""
+        if (parts[0] === "armor") return _ar >= 0 ? root.hotbar.enchantListText(root.hotbar.armorEnchantsAt(idx)) : ""
+        return ""
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -1122,11 +1186,13 @@ Item {
             //   t345 护甲槽 tooltip 附「护甲 N」行（spec「hover an armor piece shows its armor value」）。
             //   t452 护甲槽 tooltip 附「耐久 cur/max」行（槽内改耐久条后数字移此，同工具套路）。
             //   t304 弓槽 tooltip 附「攻击 1-N」行。
+            //   t590 附魔行：物品带附魔 → 换行显附魔列表（如「锐锋 III\n效率 II」），无附魔 → 空串不追加。
             text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
                 + (root.hoveredArmorValue > 0 ? "  护甲 " + root.hoveredArmorValue : "")
                 + (root.hoveredArmorDurability > 0 ? "  耐久 " + root.hoveredArmorDurability + "/" + root.hotbar.armorMaxDurability(root.hoveredItemId) : "")
-                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : ""
+                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")
+                + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : ""
             color: "#f2f2f2"
             font.pixelSize: 12
         }

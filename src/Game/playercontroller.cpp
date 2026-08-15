@@ -3391,12 +3391,13 @@ void PlayerController::dropHeld()
     if (!m_hotbar) return;
     const int id = m_hotbar->selectedItemId();
     if (id == 0) return;            // 空手 → 不丢
+    const QVariantList ench = m_hotbar->enchantsAt(m_hotbar->selectedSlot()); // t590 附魔随实体走（先读再 takeStack 清槽）
     const int took = m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
     if (took <= 0) return;          // 取失败（空栈）→ 不丢
     // 眼位前方 1.5 格，floor 到整数格（ItemEntityManager 存格中心 = 整数+0.5）。
     const QVector3D fwd = lookDirection();
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, 1);
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, 1, ench);
 }
 
 // t229 Ctrl+Q 第一人称丢弃整栈（spec「第一人称 Ctrl+Q=丢整栈（手持槽）」）：与 dropHeld（Q=丢 1 件）
@@ -3410,6 +3411,7 @@ void PlayerController::dropHeldStack()
     const int slot = m_hotbar->selectedSlot();
     const int id = m_hotbar->blockIdAt(slot);
     if (id == 0) return;            // 空手 → 不丢
+    const QVariantList ench = m_hotbar->enchantsAt(slot); // t590 附魔随实体走（先读再 takeStack 清槽）
     const int cnt = m_hotbar->countAt(slot);
     if (cnt <= 0) return;
     const int took = m_hotbar->takeStack(slot, cnt); // 取整栈（takeStack 返回实际取走数）
@@ -3417,7 +3419,7 @@ void PlayerController::dropHeldStack()
     // 眼位前方 1.5 格，floor 到整数格（同 dropHeld 位置约定）。
     const QVector3D fwd = lookDirection();
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, took);
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, took, ench);
 }
 
 // t229 背包悬停槽丢弃原语（spec「背包内悬停槽 Q=丢 1 / Ctrl+Q=丢整栈。适用所有背包面板」）：按给定
@@ -3425,12 +3427,13 @@ void PlayerController::dropHeldStack()
 //   readSlot/writeSlot，按 hoveredSlotKey 的组分发）完成，本方法只做实体生成 + 位置（Game/Physics 层语义，
 //   PLAN §2 分层：物理位置/实体事件在 Game 层，槽操作在 VM/UI 层）。id==0 / count<=0 → 不丢。
 //   不限捕获态（背包打开时未捕获正是此场景，同 dropHeldCursor）。位置同 dropHeld：眼位 + 视线 * 1.5 floor。
-void PlayerController::dropItemAtFront(int itemId, int count)
+//   t590 enchants：UI 层把 hovered 槽的物品附魔传入 → 实体携带（拾取回填 + 掉落紫光晕）。
+void PlayerController::dropItemAtFront(int itemId, int count, const QVariantList &enchants)
 {
     if (itemId == 0 || count <= 0) return; // 空手 / 非正数 → 不丢
     const QVector3D fwd = lookDirection();
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), itemId, count);
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), itemId, count, enchants);
 }
 
 // 拖出背包丢弃（t49 / t64）：光标手持栈整栈丢弃为**单个实体携带整栈数量**（玩家前方）。不限捕获态
@@ -3438,16 +3441,18 @@ void PlayerController::dropItemAtFront(int itemId, int count)
 // 捡回只剩 1（用户：「4 木棒丢出去捡起来只剩 1 个」）。现传 heldCount → 1 实体携带整栈 → 捡回原数。
 // 清空 hotbar 光标手持栈（setHeldBlock(0) 同步清 count），再 emit spawnItem。空手 / 无 hotbar → 不丢。
 // 位置同 dropHeld：眼位 + 视线 * 1.5，floor 到格坐标（ItemEntityManager 存格中心 = 整数+0.5）。
+// t590：光标手持附魔随实体走（heldEnchants 读先于 setHeldBlock(0) 清栈）→ 拾取回填 + 掉落紫光晕。
 void PlayerController::dropHeldCursor()
 {
     if (!m_hotbar) return;
     const int id = m_hotbar->heldBlock();
     const int cnt = m_hotbar->heldCount();
     if (id == 0 || cnt <= 0) return; // 空手 → 不丢
+    const QVariantList ench = m_hotbar->heldEnchants(); // t590 附魔随实例走（先读再清栈）
     m_hotbar->setHeldBlock(0);       // 清空光标手持栈（id=0 同步清 count）
     const QVector3D fwd = lookDirection();
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, cnt);
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, cnt, ench);
 }
 
 // t228 右键拖出背包丢弃 1 件（spec「右键=逐个」）：光标手持栈取 1 件 → 发 spawnItem(count=1)，余数留光标。
@@ -3460,11 +3465,13 @@ void PlayerController::dropHeldCursorOne()
     const int cnt = m_hotbar->heldCount();
     if (id == 0 || cnt <= 0) return;        // 空手 → 不丢
     // 取 1 件：余数 >0 则 count-1（id 不变）；归 0 则 setHeldBlock(0) 连 id 一起清（保空栈不变式）。
+    const QVariantList ench = m_hotbar->heldEnchants(); // t590 先读附魔再清栈（setHeldBlock(0) 会清附魔）
     if (cnt <= 1) m_hotbar->setHeldBlock(0);
     else          m_hotbar->setHeldCount(cnt - 1);
     const QVector3D fwd = lookDirection();
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, 1);
+    // t590 附魔随实体走（余数留光标的附魔不变，实体带走 1 件的附魔）。
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, 1, ench);
 }
 
 // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（死亡点
@@ -3489,17 +3496,18 @@ void PlayerController::dropAllItems()
         {0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
     };
     int idx = 0;
-    auto dropStack = [&](int id, int count) {
+    // t590：附魔随死亡掉落实体走（工具 / 护甲丢出再捡保附魔；拾取回填见 pickupScan）。
+    auto dropStack = [&](int id, int count, const QVariantList &ench) {
         if (id == 0 || count <= 0) return;          // 空栈跳过
-        emit spawnItem(cx + kScatter[idx % 9][0], cy, cz + kScatter[idx % 9][1], id, count);
+        emit spawnItem(cx + kScatter[idx % 9][0], cy, cz + kScatter[idx % 9][1], id, count, ench);
         ++idx;
     };
     // hotbar 9 槽 → main 27 槽 → 光标手持栈，逐栈掉落。
     for (int i = 0; i < m_hotbar->slotCount(); ++i)
-        dropStack(m_hotbar->blockIdAt(i), m_hotbar->countAt(i));
+        dropStack(m_hotbar->blockIdAt(i), m_hotbar->countAt(i), m_hotbar->enchantsAt(i));
     for (int i = 0; i < m_hotbar->mainCount(); ++i)
-        dropStack(m_hotbar->mainBlockIdAt(i), m_hotbar->mainCountAt(i));
-    dropStack(m_hotbar->heldBlock(), m_hotbar->heldCount()); // 光标手持栈（onDied 已归还，通常空）
+        dropStack(m_hotbar->mainBlockIdAt(i), m_hotbar->mainCountAt(i), m_hotbar->mainEnchantsAt(i));
+    dropStack(m_hotbar->heldBlock(), m_hotbar->heldCount(), m_hotbar->heldEnchants()); // 光标手持栈（onDied 已归还，通常空）
     // 清空整个背包（hotbar + main + held）+ bump revision → QML 同步。仅 Survival 调（死亡仅在 Survival）。
     m_hotbar->resetForMode(int(Survival));
 }
@@ -3578,7 +3586,7 @@ void PlayerController::pickupScan()
         const int id = m_itemEntities->itemIdAt(i);
         const int have = m_itemEntities->countAt(i);    // t64：实体携带数量（整栈丢弃场景）
         if (have <= 0) { m_itemEntities->removeAt(i); continue; } // 防御：count 已为 0 → 销毁
-        const int leftover = m_hotbar->addToAny(id, have); // t97：跨 main + hotbar 智能堆叠；按 maxStack 分流
+        const int leftover = m_hotbar->addToAny(id, have, -1, m_itemEntities->enchantsAt(i)); // t97：跨 main + hotbar 智能堆叠；按 maxStack 分流。t590：实体附魔随拾取回填（防「附魔工具丢出再捡变普通」）
         if (leftover <= 0) {
             m_itemEntities->removeAt(i);                // 全入 → 销毁实体
             // t118：拾取语义事件（驱动 AudioManager.playPickup 拾取音；t120 亦据此驱动手弹跳动画）。

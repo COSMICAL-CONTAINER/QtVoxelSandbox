@@ -207,6 +207,11 @@ public:
     Q_INVOKABLE int enchantMaxLevel(int enchantId) const;
     Q_INVOKABLE QString enchantLevelText(int level) const;
     Q_INVOKABLE QVariantList selectEnchantsPreview(int category, int offeredLevel, int seed) const;
+    Q_INVOKABLE QString enchantListText(const QVariantList &packed) const;
+    // t590 附魔列表文本（tooltip / 槽位角标显示「物品有什么附魔」）：输入 4 槽 packed int（同
+    //   ItemStack.enchants[4] 布局，即 enchantsAt / mainEnchantsAt / armorEnchantsAt 返回格式），
+    //   逐槽拆包 id/level → 「锐锋 III」「效率 II」… 以换行连接；无附魔 → 空串。供各面板 tooltip
+    //   附魔行显示（PLAN §9：附魔名走注册表原创中文通用词，非 MC 专名）。
     // ── t475 槽位附魔元数据读写（QVariantList<int> 4 元素，每 = EnchantRegistry::pack 值；0 = 空槽）──
     //   供 InventoryOps.readSlot / writeSlot 透传（同 durabilityAt / mainDurabilityAt 模式）：搬运工具 / 护甲时
     //   附魔随实例保真。空槽 / 非可附魔物品 → 4 个 0（inert）。

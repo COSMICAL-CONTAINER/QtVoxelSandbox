@@ -1475,6 +1475,27 @@ QVariantList Hotbar::selectEnchantsPreview(int category, int offeredLevel, int s
     return EnchantRegistry::selectEnchants(category, offeredLevel, seed);
 }
 
+// t590 附魔列表文本（tooltip 显示「物品有什么附魔」）：输入 4 槽 packed int（同 ItemStack.enchants[4] 布局，
+//   即 enchantsAt / mainEnchantsAt / armorEnchantsAt 返回格式）→ 逐槽拆包 id/level → 「锐锋 III」「效率 II」
+//   … 以换行连接；无附魔 / 非附魔 id → 跳过该槽。工具 / 护甲 tooltip 附魔行显示用（PLAN §9：附魔名走注册表
+//   原创中文通用词，非 MC 专名；等级罗马数字由 EnchantRegistry::levelSuffix 出）。
+QString Hotbar::enchantListText(const QVariantList &packed) const
+{
+    QString out;
+    const int n = std::min(int(packed.size()), 4);
+    for (int i = 0; i < n; ++i) {
+        const int p = packed.at(i).toInt();
+        if (p <= 0) continue;
+        const int id = EnchantRegistry::packEnchantId(p);
+        if (!EnchantRegistry::isEnchant(id)) continue;
+        if (!out.isEmpty()) out += QLatin1Char('\n');
+        out += EnchantRegistry::displayName(id);
+        const QString suffix = EnchantRegistry::levelSuffix(EnchantRegistry::packLevel(p));
+        if (!suffix.isEmpty()) out += QLatin1Char(' ') + suffix;
+    }
+    return out;
+}
+
 // 光标手持物附魔（QVariantList<int> 4 元素，每 = pack 值；空手 / 非可附魔 → 4 个 0）。
 QVariantList Hotbar::heldEnchants() const
 {

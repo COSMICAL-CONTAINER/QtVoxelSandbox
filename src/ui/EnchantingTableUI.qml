@@ -300,14 +300,13 @@ Item {
     // 书架加成据 theWorld.countBookshelvesAround(enchantX/Y/Z) 算 → 提升可选档位。
     // 青金石物品 id（RecipeRegistry::LapisId；Core 不依赖 Game 故 hotbar 无导出常量，硬编码 0x236）。
     readonly property int lapisId: 0x236
-    // 3 个档位的固定消耗（XP 等级 + 青金石数）：I = (1, 1) / II = (2, 2) / III = (3, 3)。
-    readonly property var levelCosts: [1, 2, 3]
+    // t590 三档消耗：青金石固定 1/2/3；XP 等级随书架加成升（1 档 1-3 级按书架 power）—— baseLevelCost
+    //   = 1 + floor(power/7)：0-6 书架 → 1、7-13 书架 → 2、14+ 书架 → 3（满书架 1 档也贵到 3 级）。
+    //   三档 = [base, base+1, base+2]（机制等价 MC 1.0 附魔消耗随书架升）。触碰 bookshelfPower（已绑
+    //   worldEditRev）→ 放 / 破书架后重算档位消耗。maxLevel（书架解锁档位数）逻辑不变。
+    readonly property int baseLevelCost: Math.min(3, Math.max(1, 1 + Math.floor(root.bookshelfPower / 7)))
+    readonly property var levelCosts: [root.baseLevelCost, Math.min(5, root.baseLevelCost + 1), Math.min(5, root.baseLevelCost + 2)]
     readonly property var lapisCosts: [1, 2, 3]
-    // 占位附魔名（每次附魔后重投；机制等价 MC 附魔台随机三选项，本任务仅占位文案，§9 通用词非专名）。
-    readonly property var placeholderNames: [
-        "锋利", "保护", "效率", "耐久", "时运", "精准", "击退", "火焰附加"
-    ]
-    property var optionNames: ["附魔 I", "附魔 II", "附魔 III"]
     // t549 书架加成（0..15）：触碰 worldEditRev（放 / 破方块自增）—— countBookshelvesAround 是
     //   Q_INVOKABLE 无 NOTIFY，不触碰则 UI 开着放书架永不重算（用户报「显示还是 0」根因）。
     readonly property int bookshelfPower: {
@@ -335,44 +334,41 @@ Item {
     readonly property int playerLevel: playerState ? playerState.level : 0
     // 「已附魔」flash 状态（点击成功附魔后短暂显绿，~600ms 淡出）。
     property bool justEnchanted: false
-    // PERF 护栏：选项列表只在「面板显」或「点击附魔后」刷新（refreshOptions），永不 per-frame。
-    //   面板从隐藏切到显示时（visible → true）刷一次；书架数 / maxLevel 是只读属性（绑定自动重算）。
+    // PERF 护栏：三档 enabled / 消耗 / 附魔结果全部走绑定（itemReady 绑 enchantRev、playerLevel 绑
+    //   levelChanged、bookshelfPower 绑 worldEditRev、档位消耗绑 bookshelfPower），低频 NOTIFY 自动重算、
+    //   永不 per-frame。无逐帧刷新路径（占位名重投已移除，t590）。
     //   t544 关包归还：visible→false 时把 enchant 输入槽内容退回背包（同 CraftingTableUI returnCraftToHotbar 模式）。
     onVisibleChanged: {
-        if (visible) refreshOptions()
-        else returnEnchantToHotbar()
-    }
-    onEnchantXChanged: if (visible) refreshOptions()
-    onEnchantYChanged: if (visible) refreshOptions()
-    onEnchantZChanged: if (visible) refreshOptions()
-    function refreshOptions() {
-        var seed = (enchantX * 73856093) ^ (enchantY * 19349663) ^ (enchantZ * 83492791) ^ (playerLevel * 2654435761) ^ (enchantItemId * 40503)
-        seed = Math.abs(seed) | 0
-        var picked = []
-        var pool = placeholderNames.slice()
-        for (var i = 0; i < 3 && pool.length > 0; ++i) {
-            seed = (seed * 1103515245 + 12345) & 0x7fffffff
-            var idx = seed % pool.length
-            picked.push(pool[idx])
-            pool.splice(idx, 1)
+        if (visible) {
+            // t590 三档即时预览：槽 0 放入可附魔物 → 档位 enabled 立即刷新（itemReady 绑 enchantRev +
+            //   playerLevel 绑 levelChanged + bookshelfPower 绑 worldEditRev 全自动重算，无需点击）。
+            //   附魔结果保持 MC 语义选后揭晓（档位只显消耗），故无 refreshOptions 重投占位名逻辑。
+        } else {
+            returnEnchantToHotbar()
         }
-        optionNames = picked.length === 3 ? picked : ["附魔 I", "附魔 II", "附魔 III"]
     }
+    // t590：移除原占位附魔名重投（refreshOptions/placeholderNames/optionNames）。MC 语义 = 档位只显等级消耗、
+    //   选中施放后才揭晓结果（显在物品上：槽位紫光晕 + tooltip 附魔列表）；占位名既不随机又不匹配真结果，
+    //   反而误导「这次会附到啥」。
     // t549 真附魔执行（点击 enabled 档位）：消耗 XP 等级 + **槽 1 青金石**（非背包）→ 同 seed 复算
     //   selectEnchantsPreview → 写入槽 0 物品的附魔元数据（t475 管线，预览 = 写入）→ 物品带附魔留槽 0
-    //   （玩家左键取走；紫光晕提示已附魔）→ flash + 重投选项名。
+    //   （玩家左键取走；紫光晕 + tooltip 显示附魔情况）。
     function doEnchant(slotIdx) {
         if (!root.hotbar || !root.playerState) return
         if (!root.itemReady) return
         const lvlCost = root.levelCosts[slotIdx] || 1
         const lapCost = root.lapisCosts[slotIdx] || 1
-        if (root.playerLevel < lvlCost || root.lapisCount < lapCost) return
-        // offeredLevel 映射：档位 I/II/III → 8/15/22（机制等价 MC 提供等级随书架 / 档位升）。
-        const offered = [8, 15, 22][slotIdx] || 8
+        // t590 等级 0 也能玩（MC 1.0 语义「低等级只能 1 档」）：1 档在 playerLevel===0 视为可附（消耗 0 级）；
+        //   其余档位等级不足 → 拒（affordable 已置灰，此处防御）。
+        const lvl0Tier1 = root.playerLevel === 0 && slotIdx === 0
+        if (!lvl0Tier1 && (root.playerLevel < lvlCost || root.lapisCount < lapCost)) return
+        // t590 offeredLevel 映射：档位 I/II/III 基准 8/15/22 + 书架加成 floor(power/2)（书架 power 进档位池；
+        //   15 书架 → 档位 3 offered≈29 近满 30 → 附魔数 3 + 单附魔等级趋 maxLevel）。机制等价 MC「书架提升附魔强度」。
+        const offered = ([8, 15, 22][slotIdx] || 8) + Math.floor(root.bookshelfPower / 2)
         const seed = (enchantX * 73856093) ^ (enchantY * 19349663) ^ (enchantZ * 83492791)
                     ^ (root.enchantItemId * 40503) ^ (slotIdx * 7919) ^ (Date.now() & 0xffff)
-        // 1) 扣 XP（不足 spendLevels 拒 → 全回滚）。
-        if (!root.playerState.spendLevels(lvlCost)) return
+        // 1) 扣 XP（等级 0 + 1 档 → 视为扣 0 级跳过；其余不足 spendLevels 拒 → 全回滚）。
+        if (!lvl0Tier1 && !root.playerState.spendLevels(lvlCost)) return
         // 2) 扣槽 1 青金石（余数写回；不足已被上方 lapisCount 门控拦，此处防御）。
         const remainLapis = Math.max(0, root.lapisCount - lapCost)
         if (remainLapis > 0) InventoryOps.writeSlot(root, "enchant", 1, root.lapisId, remainLapis, 0)
@@ -389,7 +385,6 @@ Item {
                                root.enchantDur[0] || 0, newEnch)
         root.justEnchanted = true
         enchantFlashTimer.restart()
-        root.refreshOptions()
     }
     // ════════════════════════════════════════════════════════════════════════════
 
@@ -547,7 +542,9 @@ Item {
                                 // t549 enabled 条件：槽 0 有「可附魔且未附魔」物品（itemReady；附魔来源 =
                                 //   UI 输入槽，非背包）+ 档位序号 < maxLevel（书架解锁）+ XP 等级 + 槽 1 青金石都够。
                                 property bool unlocked: index < root.maxLevel
-                                property bool affordable: root.playerLevel >= lvlCost && root.lapisCount >= lapCost
+                                // t590 等级不足 → 档位置灰；但 1 档在 playerLevel===0 视为可负担（MC 1.0 语义
+                                //   「低等级只能 1 档」——等级 0 生存玩家也能玩，消耗 0 级）。
+                                property bool affordable: root.lapisCount >= lapCost && (root.playerLevel >= lvlCost || (index === 0 && root.playerLevel === 0))
                                 property bool enabled1: root.itemReady && unlocked && affordable
                                 width: 190; height: 36
                                 color: enabled1 ? "#5a4a2a" : "#2a2018"
@@ -569,12 +566,14 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         spacing: 0
                                         Text {
-                                            text: root.optionNames[index] || "附魔"
+                                            // t590 保持 MC 语义：档位只显等级消耗，附魔结果选中施放后揭晓
+                                            //   （显在物品上：槽位紫光晕 + tooltip 附魔列表）。
+                                            text: "消耗 " + lvlCost + " 级"
                                             color: enabled1 ? "#ffe6a8" : "#665544"
                                             font.pixelSize: 11; font.bold: true
                                         }
                                         Text {
-                                            text: lvlCost + "级 / " + lapCost + "青金"
+                                            text: "青金石 " + lapCost
                                             color: enabled1 ? "#a8d8ff" : "#554433"
                                             font.pixelSize: 9
                                         }
@@ -599,7 +598,7 @@ Item {
                 Text {
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 0
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "左槽放工具 / 武器 · 右槽放青金石（Shift+左键快速放入） · 书架 2 格内每 2 个解锁更高档"
+                    text: "左槽放工具 / 武器 · 右槽放青金石（Shift+左键快速放入） · 书架解锁更高档 · 档位等级消耗随书架升"
                     color: "#aa9888"; font.pixelSize: 10
                 }
 
@@ -1030,6 +1029,25 @@ Item {
         if (parts[0] === "main") return _mr >= 0 ? (root.hotbar.mainDurabilityAt(idx)) : -1
         return -1
     }
+    // t590 当前 hover 槽物品的附魔列表文本（tooltip 附魔行）：据 hoveredKey 查 hotbar / main / enchant 三组。
+    //   hotbar.enchantListText 把 4 槽 packed int 转「锐锋 III\n效率 II」；无附魔 → 空串 → tooltip 不追加行。
+    //   触碰各 revision（qml-touch 三轮模式）→ 附魔写入 / 搬运后 tooltip 附魔行刷新（enchantListText 是
+    //   Q_INVOKABLE，靠版本号触发重算）。
+    property string hoveredEnchantText: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _er = root.enchantRev
+        const key = root.hoveredKey
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.enchantListText(root.hotbar.enchantsAt(idx)) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.enchantListText(root.hotbar.mainEnchantsAt(idx)) : ""
+        if (parts[0] === "enchant") return _er >= 0 ? root.hotbar.enchantListText(root.enchAt(idx)) : ""
+        return ""
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -1057,8 +1075,10 @@ Item {
             id: tipLabel
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
+            // t590 附魔行：物品带附魔 → 换行显附魔列表（如「锐锋 III\n效率 II」），无附魔 → 空串不追加。
             text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
-                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")) : ""
+                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
+                + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : ""
             color: "#f2f2f2"
             font.pixelSize: 12
         }

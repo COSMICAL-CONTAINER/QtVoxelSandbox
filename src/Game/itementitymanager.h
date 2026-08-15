@@ -2,6 +2,7 @@
 #define ITEMENTITYMANAGER_H
 
 #include <QObject>
+#include <QVariantList>
 #include <QVector3D>
 #include <QElapsedTimer>
 #include <QtQml/qqml.h>
@@ -73,7 +74,9 @@ public:
     //   setCountAt 改（bump revision+emit，批内 notifyChanged 仅标 dirty → t354 批行为保留）。maxStack<=1
     //   （工具 / 护甲 / 桶 / 蘑菇汤等不可堆叠）→ 跳过合并走新 spawn。性能：每次 O(n)，n≤kCap=200 可接受
     //   （爆炸批量 spawn 时 each O(200)×50 = 10k blockAt-free 比较，远好于不合并的 50 个新 delegate）。
-    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1);
+    //   t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；缺省空 = 无附魔）。
+    //   工具 / 护甲丢弃传其实例附魔 → 实体携带 → 拾取回填（防数据丢失）；可堆叠物品（合并路径）恒 0。
+    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1, const QVariantList &enchants = {});
 
     // t354 批量 spawn 抑制 entitiesChanged（修 Stalker 爆炸「t320 已批 worldChanged 但仍卡」的复发根因）：
     //   一次爆炸按 kExplosionDropChance(~50%) 对球内每破坏块发 explosionDroppedItem → 呈现层逐个 spawnItem，
@@ -99,6 +102,9 @@ public:
     Q_INVOKABLE int itemIdAt(int i) const;
     // 第 i 个实体的数量（t64：呈现层 count>1 时显数字；PlayerController 拾取按它入背包）。越界返回 0。
     Q_INVOKABLE int countAt(int i) const;
+    // t590 第 i 个实体的附魔元数据（QVariantList<int> 4 元素，每 = EnchantRegistry::pack 值；0 = 空槽）。
+    //   呈现层据它给掉落物紫光晕 + 拾取回填附魔用。越界 / 空槽 → {0,0,0,0}。
+    Q_INVOKABLE QVariantList enchantsAt(int i) const;
     // 把第 i 个实体的数量设为 n（t64：拾取装不下时把余数回写、保留 entity）。n<=0 销毁该实体
     // （余数为 0 = 全拾走）。边界安全（越界静默）。仅 PlayerController::pickupScan 调（拾取路径），
     // 非 QML 调用入口。bump revision 驱动 QML delegate 数量绑定重算。
@@ -176,6 +182,11 @@ private:
         float vx = 0.0f;
         float vz = 0.0f;
         bool resting = false;// t60：是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
+        // t590 附魔元数据（4 槽 × EnchantRegistry::pack 值；0 = 空槽）：随掉落物实例走（同 ItemStack 语义，
+        //   工具 / 护甲丢弃 → 实体携带其附魔 → 拾取回填，防「附魔工具丢出再捡变普通」）。方块 / 材料段掉落
+        //   恒全 0（inert）。放 alive 之前（聚合初始化 {pos,itemId,count,spawnMs} 不显式列 → 取默认全 0，
+        //   tail-default 契约不破坏）。
+        int enchants[4] = {0, 0, 0, 0};
         // t256：槽位占用标志（slot-reuse 模型，同 EntityManager::Entity::alive）。true = 活体；false = 已释放
         //   空槽（待复用）。放末位：spawnItem 的聚合初始化 {pos,itemId,count,spawnMs} 不显式列 alive →
         //   取默认 true（C++ 聚合初始化尾字段缺省即 default member init）。掉落物被拾取（removeAt /

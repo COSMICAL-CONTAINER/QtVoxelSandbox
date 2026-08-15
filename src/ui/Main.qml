@@ -887,7 +887,7 @@ Window {
         //   -1 件路径若只传 (id, count) 会把工具 / 护甲槽清成「新实例」（耐久回满 / 附魔丢失）。
         if (dropAll || st.count <= 1) panel.writeSlot(group, index, 0, 0)            // 清空
         else                          panel.writeSlot(group, index, st.id, st.count - 1, st.durability, st.enchants) // -1 件（保真）
-        player.dropItemAtFront(st.id, n)                          // 玩家前方生成实体（Game 层语义事件）
+        player.dropItemAtFront(st.id, n, st.enchants)             // 玩家前方生成实体（Game 层语义事件；t590 附魔随实体走 → 拾取回填 + 掉落紫光晕）
     }
 
     // 背包开关（t18）：E 键调。开 → release（光标可见点格子）；关 → grab + 焦点回键位层。
@@ -2114,7 +2114,8 @@ Window {
         // 创造 / 不可采掘时 player 不发本信号（无实体产出）。ViewModel 不持有 PlayerController，
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
         // t64：spawnItem 信号带 count 参数（整栈丢弃为 1 实体；破块掉落走 BlockDef.dropCount）。
-        function onSpawnItem(x, y, z, id, count) { itemEntities.spawnItem(x, y, z, id, count) }
+        // t590：玩家丢弃带附魔工具 / 护甲时信号第 6 参携其附魔（破块 / mob / 爆炸掉落不传 → undefined → 转发缺省空）。
+        function onSpawnItem(x, y, z, id, count, enchants) { itemEntities.spawnItem(x, y, z, id, count, enchants) }
         // t401 钓获物（拉起咬钩 → player 发 fishCaught，携获物 id + 数量 + 浮标整数格）→ 转发到 manager 生成
         //   掉落实体（同 spawnItem / mobDied 模式；单向事件流：Game 层发语义事件、呈现层只消费）。
         function onFishCaught(itemId, count, x, y, z) { itemEntities.spawnItem(x, y, z, itemId, count) }
@@ -2819,6 +2820,27 @@ Window {
                                 width: 64; height: 64
                             }
                         }
+                    }
+                }
+                // t590 手持物附魔紫光晕：选中槽物品带附魔（工具 / 武器，方块不可附魔恒不触发）→ 在手持物
+                //   位置加半透明紫色光晕罩（机制等价 MC 附魔光泽；原创纯色半透 UnitCube，零资产；与槽位附魔
+                //   光晕 #8c40e6 同色系）。作 viewModelHand 子节点 → 随挥动同步运动（光晕罩在手中）。
+                //   触碰 slotRevision 令附魔写入 / 换槽后重算（enchantsAt(selectedSlot) 靠版本号刷新）。
+                //   位置取手持工具 / 方块公共区（z=-0.22 手前、y 取二者中间），scale 略大于视觉范围包住物品。
+                Model {
+                    visible: {
+                        const _r = hotbarVM.slotRevision
+                        if (_r < 0) return false
+                        const e = hotbarVM.enchantsAt(hotbarVM.selectedSlot)
+                        return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                    }
+                    geometry: UnitCube {}
+                    position: Qt.vector3d(0.02 + window.heldBlockX, 0.05 + window.heldBlockY, -0.22 + window.heldBlockZ)
+                    scale: Qt.vector3d(0.34, 0.34, 0.34)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: "#8f5fd9"
+                        opacity: 0.30   // <1 走透明通道 → 半透紫光晕罩（不遮住物品本身）
                     }
                 }
                 // [t31] 诊断：确认手 Node 加载 + parent（相机）。
@@ -4445,6 +4467,9 @@ Window {
                     position: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.posAt(index)) : Qt.vector3d(0, 0, 0) }
                     property int entId: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.itemIdAt(index)) : 0 }
                     property int entCount: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.countAt(index)) : 0 }
+                    // t590 实体附魔（触碰 revision → 玩家丢弃带附魔工具 / 护甲后重算；方块 / 材料段掉落恒全 0）。
+                    property var entEnch: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.enchantsAt(index)) : [0,0,0,0] }
+                    property bool entHasEnch: Array.isArray(entEnch) && ((entEnch[0] || 0) !== 0 || (entEnch[1] || 0) !== 0 || (entEnch[2] || 0) !== 0 || (entEnch[3] || 0) !== 0)
                     property real rotY: 0       // 绕 Y 旋转角（度）
                     property real bobY: 0       // 上下浮动偏移（格）
                     eulerRotation: Qt.vector3d(0, rotY, 0)
@@ -4752,13 +4777,18 @@ Window {
                     //   t144：外壳 baseColor 也乘天光乘子（tintBySkyLight）—— 内方块夜间变暗时外壳
                     //   同步变暗，否则夜间「亮光晕裹暗方块」割裂（spec「阴影/夜间变暗」覆盖整掉落物）。
                     //   #b0b0b0 = (176,176,176)；半透 opacity 0.35 与 baseColor 解耦，不变。
+                    //   t590：附魔掉落物（玩家丢弃带附魔工具 / 护甲）→ 外壳转紫（紫光晕，机制等价 MC 附魔
+                    //     光泽；原创纯色，零资产）。紫 = (140,64,230) 与槽位附魔光晕 #8c40e6 同色系；仍乘
+                    //     天光乘子夜间同步变暗（同浅灰壳）。无附魔 → 浅灰半透（原状）。
                     Model {
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
-                            baseColor: tintBySkyLight(176/255, 176/255, 176/255, worldClock.skyLight)
+                            baseColor: entRoot.entHasEnch
+                                       ? tintBySkyLight(140/255, 64/255, 230/255, worldClock.skyLight)
+                                       : tintBySkyLight(176/255, 176/255, 176/255, worldClock.skyLight)
                             opacity: 0.35          // 半透（<1 触发透明混合）
                         }
                     }
@@ -8827,6 +8857,22 @@ Window {
                         }
                     }
 
+                    // t590 附魔光晕：槽内物品带附魔（enchants[4] 任一非 0）→ 浅紫半透明叠层（机制等价 MC
+                    //   附魔光泽；原创纯色半透 Rectangle，零资产；同 EnchantInputSlot / AnvilUI 附魔光晕配色）。
+                    //   触碰 slotRevision 令附魔写入 / 换槽后重算（enchantsAt 是 Q_INVOKABLE，靠版本号触发）。
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: {
+                            const _r = hotbarVM.slotRevision
+                            if (_r < 0) return false
+                            const e = hotbarVM.enchantsAt(index)
+                            return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                        }
+                        color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                        radius: 2
+                        z: 5
+                    }
+
                     // t315 HUD hotbar 悬停 tooltip：进入写 hoveredSlot、离开按 index 守卫清除（防相邻槽进出竞态
                     //   互清，同背包面板 hoveredKey 模式）。指针锁定 FPS 瞄准态不触发（光标居中隐藏）。
                     HoverHandler {
@@ -8892,18 +8938,27 @@ Window {
             Text {
                 id: hudTipLabel
                 anchors.centerIn: parent
-                // 工具槽附「\n\n耐久: cur/max」行（spec 多行格式）；非工具仅显名。触碰 slotRevision 刷新。
+                // 工具槽附「\n\n耐久: cur/max」行（spec 多行格式）；t590 附「\n\n附魔名+等级」列表行（物品带
+                //   附魔时，如「锐锋 III」/「效率 II」）；非工具仅显名。触碰 slotRevision 刷新。
                 text: {
                     const _r = hotbarVM.slotRevision
                     const id = hotbarBar.hoveredItemId
                     if (id === 0) return ""
-                    const name = hotbarVM.nameForBlock(id)
+                    let tip = hotbarVM.nameForBlock(id)
                     // t349：按「有无耐久」（toolMaxDurability>0）判而非 isTool 段 —— 显式含剪刀（maxDur=238）；
                     //   非工具 / 材料段 maxDur=0 → 仅显名（无耐久行）。
-                    if (hotbarVM.toolMaxDurability(id) <= 0) return _r >= 0 ? name : ""
-                    const cur = hotbarBar.hoveredSlot >= 0 ? hotbarVM.durabilityAt(hotbarBar.hoveredSlot) : 0
-                    const mx = hotbarVM.toolMaxDurability(id)
-                    return _r >= 0 ? (name + "\n\n耐久: " + cur + "/" + mx) : ""
+                    if (hotbarVM.toolMaxDurability(id) > 0) {
+                        const cur = hotbarBar.hoveredSlot >= 0 ? hotbarVM.durabilityAt(hotbarBar.hoveredSlot) : 0
+                        const mx = hotbarVM.toolMaxDurability(id)
+                        tip += "\n\n耐久: " + cur + "/" + mx
+                    }
+                    // t590 附魔行：选中槽物品的附魔列表（enchantListText；无附魔 → 空串不追加行）。
+                    //   hotbar 槽位只可能持有可附魔工具 / 武器 / 护甲才有附魔；方块 / 材料段恒 0。
+                    if (hotbarBar.hoveredSlot >= 0) {
+                        const ench = hotbarVM.enchantListText(hotbarVM.enchantsAt(hotbarBar.hoveredSlot))
+                        if (ench.length > 0) tip += "\n\n" + ench
+                    }
+                    return _r >= 0 ? tip : ""
                 }
                 color: "#f2f2f2"
                 font.pixelSize: 12
