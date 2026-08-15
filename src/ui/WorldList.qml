@@ -115,7 +115,7 @@ Item {
                 Flickable {
                     anchors.fill: parent; anchors.margins: 8
                     clip: true; contentHeight: worldsCol.height
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    ScrollBar.vertical: DarkScrollBar {} // t591：暗色细条统一（与背包 / 资源查看器拉平）
                     Column {
                         id: worldsCol
                         width: parent.width

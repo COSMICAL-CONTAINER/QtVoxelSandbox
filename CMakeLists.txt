@@ -225,6 +225,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/MaterialIcon.qml
         src/ui/ArmSlider.qml
         src/ui/ResourceBrowser.qml
+        src/ui/DarkScrollBar.qml # t591 项目统一暗色细条滚动条（背包/世界列表/资源查看器共用）
         src/ui/InventoryOps.js
 )
 

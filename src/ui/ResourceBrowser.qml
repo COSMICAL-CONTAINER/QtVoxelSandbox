@@ -202,7 +202,10 @@ Item {
     }
 
     // ── 尺寸常量 ──
-    readonly property int paletteCols: 9
+    // t591：paletteCols 9 → 8 —— 物品网格 8×42+7×4=364 ≤ 左区视口 398 − 滚动条 6（9 列 410 > 398，
+    //   右列被 clip 截掉 + 滚动条再遮 = 用户「物品被遮挡」根因）。8 列与上方生物段同宽（对齐），
+    //   滚动条 6px 落在网格右侧 28px 空隙（"右 padding 补滚动条宽度"：内容不被遮）。
+    readonly property int paletteCols: 8
     readonly property int cellSize: 42
 
     // 半透遮罩：仅吸收点击（防穿透到背后设置面板），不关闭（只能 Esc / 返回按钮关）。
@@ -264,10 +267,12 @@ Item {
                             anchors.margins: 8
                             clip: true
                             contentWidth: grid.width
-                            contentHeight: mobCol.height
+                            // t591：contentHeight 底部 +8 padding —— 末行物品滚动到底不被 Flickable 底边
+                            //   裁剪（"底 padding 补滚动条宽度"）；滚动条用 DarkScrollBar（暗色细条，UI 统一样式）。
+                            contentHeight: mobCol.height + 8
                             flickableDirection: Flickable.VerticalFlick
                             boundsBehavior: Flickable.StopAtBounds
-                            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                            ScrollBar.vertical: DarkScrollBar {}
 
                             // 「生物」段（图鉴）+「物品」段（原调色板全集）上下排列（Column）。选中互斥：
                             //   点生物格设 selectedMobFromSection（右侧显 3D 模型）；点物品格清空它回物品预览。

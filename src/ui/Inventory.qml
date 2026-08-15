@@ -385,7 +385,8 @@ Item {
                 flickableDirection: Flickable.VerticalFlick
                 boundsBehavior: Flickable.StopAtBounds
                 // t127：内容超出视口（4 行 > 3 行视口）时显垂直拖动条；policy=AsNeeded 即不足时不占空间。
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                // t591：改用 DarkScrollBar（暗色细条，项目统一样式，与资源查看器 / 世界列表拉平）。
+                ScrollBar.vertical: DarkScrollBar {}
 
                 Grid {
                     id: paletteGrid
