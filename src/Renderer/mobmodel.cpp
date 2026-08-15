@@ -430,7 +430,10 @@ void MobModel::rebuild()
         // R19 C3 UV（MC Skeleton base 64×32；U1 §5 bones）：head(0,0)8×8×8 / body(16,16)8×12×4 / arm(40,16)2×12×2 /
         //   leg(0,16)2×12×2。脊柱=body、胸骨/肋骨=leg 细骨杆 texOffs（贴图全骨白，交叉采样视觉无差）。
         g_texW = 64.0f; g_texH = 32.0f;
-        setMobTex(16, 16, 8, 12, 4);
+        // t594 修（用户「脊柱是黑的」）：脊柱原用 body texOffs(16,16,8,12,4)——其 +Y Top 面区
+        //   base(20,16)-(28,20) 全透明（实测 0% 不透明）、±X 侧 41.7%，细脊柱各面把透明区放大成
+        //   「黑脊」。改采 leg texOffs(0,16,2,12,2)（胸骨/肋已用，6 面实测 100% 不透明骨白）→ 脊柱显骨色。
+        setMobTex(0, 16, 2, 12, 2);
         addBox( 0.00f,  0.05f,  0.04f, 0.035f, 0.28f, 0.035f, verts, idx, bMin, bMax); // 脊柱（垂直主干，略靠背；肋缝透出）
         setMobTex(0, 16, 2, 12, 2);
         addBox( 0.00f,  0.12f, -0.10f, 0.030f, 0.16f, 0.020f, verts, idx, bMin, bMax); // 胸骨（前中竖骨；肋前端汇集）
@@ -446,13 +449,19 @@ void MobModel::rebuild()
         addBox( 0.00f,  0.57f,  0.00f, 0.16f, 0.18f, 0.16f, verts, idx, bMin, bMax); // 小头骨（略竖，比 Shambler 头小一圈）
         setMobTex(40, 16, 2, 12, 2);
         addBox(-0.20f,  0.23f, -0.37f, 0.05f, 0.05f, 0.25f, verts, idx, bMin, bMax); // 左臂（细骨杆前伸）
-        // 右臂 + 弓见上 t331 注释（移至 Main.qml 肩枢 Node：木色弓 + 抬臂/拉弓动画）。左臂无动画仍在此。
+        // t594 修（用户「右臂没有贴图，只有单臂」）：t331 曾把右臂移去 Main.qml 肩枢 Node（只留弓）——
+        //   MobModel 只剩左臂 → 资源查看器 3D 预览（只显 MobModel）= 单臂骷髅；且 pack 模式下左臂有
+        //   贴图、右臂 UnitCube 纯骨白（右臂无贴图）。改：右臂 box 补回本几何（镜像左臂，同 texOffs，
+        //   包模式贴图一致）；Main.qml 肩枢 Node 只留弓（删其右臂，防双臂重叠）。
+        setMobTex(40, 16, 2, 12, 2);
+        addBox( 0.20f,  0.23f, -0.37f, 0.05f, 0.05f, 0.25f, verts, idx, bMin, bMax); // 右臂（细骨杆前伸，镜像左臂）
+        // t331 弓 + 抬臂动画移至 Main.qml 肩枢 Node（MobBowGeometry 木色弓 + drawAmount 抬臂），右臂在本几何。
         const float sw5 = kLegSwingAmp * std::sin(m_walkPhase);
         setMobTex(0, 16, 2, 12, 2);
         addBoxRot(-0.07f, -0.575f, 0.00f, 0.06f, 0.325f, 0.06f, -0.25f, 0.00f, +sw5, verts, idx, bMin, bMax); // 左腿（细骨杆）
         setMobTex(0, 16, 2, 12, 2);
         addBoxRot( 0.07f, -0.575f, 0.00f, 0.06f, 0.325f, 0.06f, -0.25f, 0.00f, -sw5, verts, idx, bMin, bMax); // 右腿（细骨杆）
-        // t331 弓 + 右臂移至 Main.qml（MobBowGeometry 木色弓 + UnitCube 右臂，肩枢 Node 子节点随 drawAmount 抬起）。
+        // t331 弓移至 Main.qml（MobBowGeometry 木色弓，肩枢 Node 子节点随 drawAmount 抬起）；右臂已在上面本几何。
     } else if (m_mobType == 6) {
         // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕，§9 区隔改名）—— 四短粗腿 + 高瘦躯干 + 小头。
         //   修：原误标 mobType 5（与 Bones 冲突），已正为 6（enum MobStalker=6）。腿底本地 y=−0.90 贴 collision 底面。

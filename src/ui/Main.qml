@@ -6118,8 +6118,9 @@ Window {
                         sourceComponent: Component {
                             // t287/t301/t331 Bones（骸骨/骷髅；mobType 5）：MobModel 瘦骨人形（窄躯干/细四肢/小头骨）。
                             //   灰白骨色 baseColor（无专属贴图，纯色原创 §9a）。受击红闪。远程射箭由 EntityManager 负责。
-                            //   t331：弓 + 右臂移出 MobModel（单材质无法同几何双色）→ 见下方「肩枢 Node」：木色弓（MobBowGeometry，
-                            //   修「弓误用骨白」）+ 右臂（骨白 UnitCube 共享 boneMat）随 drawAmount（aimTimer）抬起瞄准 + 弦后拉。
+                            //   t331：弓移出 MobModel（单材质无法同几何双色）→ 见下方「肩枢 Node」：木色弓（MobBowGeometry，
+                            //   修「弓误用骨白」）随 drawAmount（aimTimer）抬起瞄准 + 弦后拉。右臂 t594 补回 MobModel
+                            //   （右臂 box 在几何内，包模式贴图与左臂一致；肩枢 Node 只挂弓，防双臂重叠）。
                             Model {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobBones
                                 geometry: MobModel {
@@ -6130,7 +6131,7 @@ Window {
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
-                                // boneMat 带 id：右臂（肩枢 Node 子节点）共享同一材质 → 受击红闪 + 昼夜灰阶与身体完全同步。
+                                // 骨身材质（MobModel body 材质；t594 右臂已回 MobModel 几何，同材质同贴图 → 双臂一致）。
                                 materials: PrincipledMaterial {
                                     id: boneMat
                                     lighting: PrincipledMaterial.NoLighting
@@ -6160,20 +6161,14 @@ Window {
                                     scale: Qt.vector3d(0.06, 0.07, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
-                                // t331 右臂 + 弓 肩枢 Node：drawAmount（EntityManager::drawAmountAt，aimTimer 驱动）抬起右臂瞄准。
-                                //   臂与弓同处一 Node 绕肩枢刚体同转 → 抬臂时弓精确随臂移动（免错位）。肩枢 = 右臂根与躯干相接处
-                                //   (0.20,0.28,-0.12)（MobModel 局部坐标；Node 继承 bodyYaw + 父 position）。drawAmount=0 → 臂/弓在
+                                // t594 弓 肩枢 Node：drawAmount（EntityManager::drawAmountAt，aimTimer 驱动）抬弓瞄准。
+                                //   右臂 t594 已补回 MobModel 几何（见 mobmodel.cpp mobType 5；肩枢 Node 删右臂防双臂重叠）。
+                                //   弓绕肩枢刚体转 → 瞄准时弓随 drawAmount 上扬。肩枢 = 右臂根与躯干相接处
+                                //   (0.20,0.28,-0.12)（MobModel 局部坐标；Node 继承 bodyYaw + 父 position）。drawAmount=0 → 弓在
                                 //   原持弓静态位（与 t301 MobModel 内建位一致）。机制等价 MC 1.0 骷髅停步抬弓瞄准。
                                 Node {
                                     position: Qt.vector3d(0.20, 0.28, -0.12)
                                     eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index) * 30) : 0 } // 度；+draw 前端（-Z）上扬
-                                    // 右臂（骨白 UnitCube，共享 boneMat）：臂心相对肩枢 = (0,-0.05,-0.25)；半 (0.05,0.05,0.25)。
-                                    Model {
-                                        geometry: UnitCube {}
-                                        position: Qt.vector3d(0.0, -0.05, -0.25)
-                                        scale: Qt.vector3d(0.10, 0.10, 0.50)
-                                        materials: boneMat
-                                    }
                                     // 弓（木褐色 MobBowGeometry，独立于骨白体色；弦随 drawAmount 后拉 + 肢增弯）：握把相对肩枢 = (0.02,-0.06,-0.38)。
                                     Model {
                                         geometry: MobBowGeometry {

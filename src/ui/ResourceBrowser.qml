@@ -68,7 +68,7 @@ Item {
     //   pack 关 → 纯色雪白 / 铁灰（mobFallbackColor）。南瓜头 / 眼不在图鉴预览（MobModel 仅含身体，聚焦 pack 贴图）。
     readonly property var mobModel: [
         { mobType: 1, name: "猪" }, { mobType: 2, name: "牛" }, { mobType: 3, name: "羊" },
-        { mobType: 4, name: "蹒跚者" }, { mobType: 5, name: "骸骨" }, { mobType: 6, name: "潜行者" },
+        { mobType: 4, name: "蹒跚者" }, { mobType: 5, name: "骷髅弓箭手" }, { mobType: 6, name: "潜行者" },
         { mobType: 7, name: "蜘蛛" }, { mobType: 8, name: "鸡" },
         { mobType: 12, name: "雪傀儡" }, { mobType: 13, name: "铁傀儡" }
     ]

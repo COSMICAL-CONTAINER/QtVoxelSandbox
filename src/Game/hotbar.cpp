@@ -712,7 +712,7 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggCowId)   return QStringLiteral("生物蛋（牛）");
         if (blockId == RecipeRegistry::SpawnEggSheepId) return QStringLiteral("生物蛋（羊）");
         if (blockId == RecipeRegistry::SpawnEggShamblerId) return QStringLiteral("生物蛋（蹒跚者）");
-        if (blockId == RecipeRegistry::SpawnEggBonesId)    return QStringLiteral("生物蛋（骸骨）");
+        if (blockId == RecipeRegistry::SpawnEggBonesId)    return QStringLiteral("生物蛋（骷髅弓箭手）"); // t594：骸骨→骷髅弓箭手（骷髅是通用词；MobBones 标识符不动）
         if (blockId == RecipeRegistry::SpawnEggStalkerId)  return QStringLiteral("生物蛋（潜行者）");
         if (blockId == RecipeRegistry::SpawnEggSpiderId)   return QStringLiteral("生物蛋（蜘蛛）");
         if (blockId == RecipeRegistry::DiamondId)       return QStringLiteral("钻石"); // t279 钻石矿挖掘掉落

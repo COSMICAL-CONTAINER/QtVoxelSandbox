@@ -46,7 +46,7 @@ QString PlayerState::deathCauseText() const
     case Drowning:     return QStringLiteral("溺水身亡");
     case Starvation:   return QStringLiteral("饥饿而亡");
     case Shambler:     return QStringLiteral("被蹒跚者击败");
-    case Bones:        return QStringLiteral("被骸骨击败");
+    case Bones:        return QStringLiteral("被骷髅弓箭手击败"); // t594：骸骨→骷髅弓箭手（显示字串；MobBones 标识符不动）
     case Spider:       return QStringLiteral("被蜘蛛击败");
     case Stalker:      return QStringLiteral("被潜行者炸飞");
     case Tnt:          return QStringLiteral("被 TNT 炸死"); // t494：TNT 爆炸致死（独立死因，区别于潜行者自爆）
