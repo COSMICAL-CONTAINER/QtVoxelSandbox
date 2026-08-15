@@ -278,6 +278,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_dispenser_top.png       # t486 发射器顶/底面贴图（build_dispenser.py；石质灰底+中央圆形排出口俯视环纹）
         textures/default_dispenser_side.png      # t486 发射器侧面贴图（build_dispenser.py；石质灰底+边框暗带+四角铆钉）
         textures/default_dispenser_front.png     # t486 发射器前面（排出口所朝面）贴图（build_dispenser.py；石质灰底+中央暗腔排出口）
+        textures/default_dropper_front.png       # t609 投掷器前面（排出口所朝面）贴图（build_dropper.py；石质灰底+中央小方形暗孔；顶/底/侧复用熔炉 12/13）
         textures/default_stone_brick.png         # t487 石砖各面贴图（build_stone_brick.py；石质灰底+砖块缝纹网格；要塞墙体主体）
         textures/default_end_portal.png          # t487 末地传送门未激活态贴图（build_end_portal.py；深紫黑星空底+中心暗绿旋涡）
         textures/default_end_portal_active.png   # t487 末地传送门激活态贴图（build_end_portal.py；深紫黑星空底+中心亮绿旋涡+白绿高光）
@@ -420,6 +421,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_cut_sandstone.png          # t485 切制砂岩立方体图标（build_cube_icons.py；各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
         textures/icon_mossy_cobble.png           # t486 苔石立方体图标（build_cube_icons.py；各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
         textures/icon_dispenser.png              # t486/t492 发射器立方体图标（build_cube_icons.py；正面为主投影，显排出口面板；丛林神殿陷阱机关）
+        textures/icon_dropper.png                # t609 投掷器立方体图标（build_cube_icons.py；正面为主投影，显小排出口；顶/侧=熔炉石质）
         textures/icon_stone_brick.png            # t487 石砖立方体图标（build_cube_icons.py；各面=石质灰底+砖块缝纹网格；要塞墙体主体）
         textures/icon_stone_brick_slab.png       # t487 石砖台阶立方体图标（build_cube_icons.py；3D 半高盒，砖纹）
         textures/icon_stone_brick_stairs.png     # t487 石砖楼梯立方体图标（build_cube_icons.py；3D L 阶，砖纹）

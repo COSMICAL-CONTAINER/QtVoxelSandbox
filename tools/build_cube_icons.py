@@ -140,10 +140,13 @@ PARTIALS_3D_STONE_BRICK = [
 #   - furnace：正面=default_furnace_front（带炉口），燃烧态 front_on 见 t494（本任务只关静态 icon front）。
 #   - crafting_table：正面=default_crafting_table_side（含网格；工作台无独立 front 贴图，side 即带网格辨识面）。
 #   - dispenser：正面=default_dispenser_front（暗腔排出口），顶 / 侧同 default_dispenser_top / _side。
+#   - dropper（t609 投掷器）：正面=default_dropper_front（小方形暗孔——轻量出口，只掉物品），顶 / 侧复用
+#     熔炉 default_furnace_top / _side（机关盒家族石质观感）。
 BLOCKS_FRONT = [
     ("furnace",         "default_furnace_front",         "default_furnace_top",         "default_furnace_side"),         # t80/t492 熔炉（正面=炉口）
     ("crafting_table",  "default_crafting_table_side",   "default_crafting_table_top",  "default_crafting_table_side"),  # t50/t492 工作台（正面=网格 side）
     ("dispenser",       "default_dispenser_front",       "default_dispenser_top",       "default_dispenser_side"),       # t486/t492 发射器（正面=排出口面板）
+    ("dropper",         "default_dropper_front",         "default_furnace_top",         "default_furnace_side"),         # t609 投掷器（正面=小排出口；顶/侧=熔炉石质）
 ]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----

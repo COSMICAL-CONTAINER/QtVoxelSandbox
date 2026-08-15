@@ -292,6 +292,11 @@ TILES = [
     "default_redstone_ore",       # 138 redstone_ore（t569 红石矿石；石头底 + 鲜红菱斑矿粒——复制钻石矿斑块布局
                                   #    改红；RedstoneOre 各面=本 tile；机制等价 MC 1.0 红石矿，走过/挖掘点亮
                                   #    微弱红光；tools/build_ore.py 程序生成原创像素图）
+    # t609 投掷器（Dropper）前面贴图（机制等价 MC 1.0 dropper——全部物品弹出掉落物的机关盒）。顶/底/侧复用
+    #   熔炉 12/13（机关盒家族石质观感）；本 tile 仅前面（排出口所朝面，mesher 据 state 选，同发射器分支）。
+    #   tools/build_dropper.py 程序生成原创像素图（石质灰底 + 中央小方形暗孔，区别发射器的大暗腔）。
+    "default_dropper_front",      # 139 dropper_front（投掷器前面（排出口）贴图；石质灰底 + 中央小方形暗孔；
+                                  #    Dropper 前面=本 tile；tools/build_dropper.py 程序生成原创像素图）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

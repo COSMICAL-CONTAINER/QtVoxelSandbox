@@ -40,6 +40,11 @@ Item {
     property int dispenserX: 0
     property int dispenserY: 0
     property int dispenserZ: 0
+    // t609 面板标题（「发射器」/「投掷器」）：本面板被发射器（107）与投掷器（117）共用（同一 DispenserStore
+    //   9 槽 + 同一物品搬动全套操作，仅弹出分派不同——发射器按物品种类弹丸 / 投掷器全部弹掉落物，均在 C++
+    //   dispenseFromDispenser 分派，UI 层零差异）。宿主按所开方块 id 设标题（Main.qml openDispenser 处查
+    //   theWorld.blockAt）；缺省「发射器」（既有行为兜底）。
+    property string titleText: "发射器"
     // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // t49 同 CraftingTableUI / ChestUI：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区）。
@@ -253,7 +258,7 @@ Item {
                 width: parent.width
                 height: 22
                 Text {
-                    text: "发射器"
+                    text: root.titleText // t609 发射器 / 投掷器共用面板（宿主按方块 id 设标题）
                     color: "#eaf2ea"; font.pixelSize: 20; font.bold: true
                     anchors.left: parent.left
                 }

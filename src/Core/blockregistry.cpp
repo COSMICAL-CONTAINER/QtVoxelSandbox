@@ -564,6 +564,18 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   状态感知版返 9（微弱阴沉红光，低于火把 14）→ recomputeLightAround 增量重 flood 泛光；~5s 后清位
     //   熄灭（RedstoneOreLitSeconds）。
     /* redstone_ore */ {int(BlockRegistry::RedstoneOre),      138,138,138,138, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,                           0x224, 4, 64, "redstone_ore", "红石矿石"},
+    // ── t609 投掷器（Dropper）：机制等价 MC 1.0 dropper——与发射器同族的机关盒，差异 = **全部物品**一律以
+    //   掉落物实体从排出口定向弹出（无箭 / 雪球 / 剑弹丸分派，「只投不射」）。整立方 opaque（solid=true /
+    //   ShapeFull，与熔炉 / 发射器同走 culled 立方面路径）、hardness=3.5（同发射器量级）、Pickaxe、
+    //   requiresTool=true、minTier1（木镐可破且掉落）、dropId=自身（破投掷器掉投掷器方块）、dropCount=1、
+    //   maxStack=64。各面贴图：顶/底=furnace_top(12) / 侧=furnace_side(13)（复用熔炉贴图——机关盒家族石质
+    //   观感，pack 侧经既存 tileFilenameMap {12/13→furnace_*.png} 自动覆盖）/ 前面=dropper_front(139)
+    //   （石质灰底 + 中央小方形暗孔；tools/build_dropper.py 原创自绘；pack 侧 {139→dropper_front_horizontal.png}
+    //   留 t620）。state bit[1:0]=朝向（同发射器 chestFrontFace 编码，放置时排出口朝玩家）。音色 GroupStone。
+    //   触发：踩压力板 → scanDispenserTraps 邻接投掷器 → dispenseFromDispenser 投掷器分支全部物品 spawnItemAt
+    //   弹出。库存复用 DispenserStore（9 槽 per-block 共用）。配方 7 圆石（中心 + 下中空）→ 1 投掷器。
+    //   进创造调色板。
+    /* dropper      */ {int(BlockRegistry::Dropper),             12,  12,  13,139, true,  BlockRegistry::ShapeFull,     3.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Dropper),       1, 64, "dropper",     "投掷器"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -854,6 +866,13 @@ bool BlockRegistry::isTnt(quint8 blockId)
 bool BlockRegistry::isDispenser(quint8 blockId)
 {
     return blockId == Dispenser;
+}
+
+// t609 投掷器统一谓词（单一权威）：blockId == Dropper 即投掷器（机制等价 MC 1.0 dropper——全部物品弹出
+//   掉落物的机关盒）。供 PlayerController 触发判定 / 右键开 UI / 放置朝向 / 破块掉内容（同 isDispenser 模式）。
+bool BlockRegistry::isDropper(quint8 blockId)
+{
+    return blockId == Dropper;
 }
 
 // t569 红石矿石统一谓词（单一权威，见头注释）：blockId == RedstoneOre 即红石矿。供 PlayerController
@@ -1396,6 +1415,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Rail: // t484 铁轨 → 石质音色（金属质敲击，最接近 MC 1.0 铁轨 metal SoundType）
     case MossyCobble: // t486 苔石 → 石质音色（长苔圆石，同 cobble 族）
     case Dispenser: // t486 发射器 → 石质音色（石质机关盒，同 furnace 族）
+    case Dropper: // t609 投掷器 → 石质音色（石质机关盒，同发射器 / furnace 族）
     case StoneBrick: // t487 石砖 → 石质音色（石质整立方，同 stone 族）
     case StoneBrickSlab: case StoneBrickStairs: // t487 石砖台阶/楼梯 → 石质音色（同 stone 族）
     case EndPortal: // t487 末地传送门 → 石质兜底音色（不可破，仅创造敲响兜底）

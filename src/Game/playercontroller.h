@@ -434,36 +434,40 @@ public:
     //   只在 burnRemain 跨 0 边界调本方法（机制等价 MC 1.0 熔炉燃烧时正面发光）。坐标 = FurnaceUI 打开时
     //   furnaceOpened 携带的熔炉格世界坐标（存 window.furnaceX/Y/Z）。
     Q_INVOKABLE void setFurnaceLit(int x, int y, int z, bool lit);
-    // Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格）。仅指针捕获时生效
-    // （spec）。空手 / 取失败 → 不丢。spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem
-    // （同破块掉落 t35 路径）；丢弃后实体可被重新拾取（闭环）。
+    // Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 丢出掉落实体（t609：眼位沿视线丢出，见 throwItemInLook）。
+    //   仅指针捕获时生效（spec）。空手 / 取失败 → 不丢。丢弃后实体可被重新拾取（闭环）。
     Q_INVOKABLE void dropHeld();
     // t229 Ctrl+Q 第一人称丢弃整栈：与 dropHeld（Q=丢 1 件）同源（取**选中槽**），差异在**丢整栈**而非 1 件。
     //   仅指针捕获时生效（同 dropHeld；背包打开时未捕获正是此场景，整栈丢弃走背包悬停槽路径）。
-    //   空栈 / 取失败 → 不丢。spawnItem 携整栈数量（1 实体带整栈，同 dropHeldCursor 模式，修「丢 4 木棒
-    //   捡回只剩 1」类 bug）。经 QML Connections 转发（同 dropHeld / dropHeldCursor）。
+    //   空栈 / 取失败 → 不丢。1 实体携整栈数量（同 dropHeldCursor 模式，修「丢 4 木棒捡回只剩 1」类 bug）。
     Q_INVOKABLE void dropHeldStack();
-    // t229 背包悬停槽丢弃原语：通用「在玩家前方 1.5 格丢弃指定 id/count 实体」。与 dropHeld（取选中槽）/
-    //   dropHeldCursor（取光标手持栈）的差异：本方法**不读/改任何槽**，纯粹按给定 id/count 在玩家前方
-    //   spawnItem ——槽位的读改由 UI 层（InventoryOps.readSlot/writeSlot，按组路由 main/hotbar/craft/in/
-    //   fuel/out/chest）完成，本方法只负责实体生成 + 位置（Game/Physics 层语义，PLAN §2 分层：物理位置与
-    //   实体事件在 Game 层，槽操作在 VM/UI 层）。这样背包任意组的悬停槽丢弃（Q=1件 / Ctrl+Q=整栈）都走
-    //   同一原语，UI 层据组分发读写、算 1/全 栈量后调本方法。不限捕获态（背包打开时未捕获正是此场景）。
-    //   id==0 / count<=0 → 不丢。经 QML Connections 转发（同 spawnItem 模式）。
-    //   t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；缺省空 = 无附魔）。UI 层把
-    //   hovered 槽的物品附魔传入 → 掉落实体携带附魔（拾取回填 + 掉落紫光晕，防「附魔工具丢出再捡变普通」）。
+    // t229 背包悬停槽丢弃原语：通用「从眼位沿视线丢出指定 id/count 实体」（t609 起与 dropHeld 同口径，
+    //   见 throwItemInLook）。与 dropHeld（取选中槽）/dropHeldCursor（取光标手持栈）的差异：本方法**不读/改
+    //   任何槽**，纯粹按给定 id/count 生成实体——槽位的读改由 UI 层（InventoryOps.readSlot/writeSlot，按组
+    //   路由 main/hotbar/craft/in/fuel/out/chest/dispenser）完成，本方法只负责实体生成 + 位置（Game/Physics
+    //   层语义，PLAN §2 分层：物理位置与实体事件在 Game 层，槽操作在 VM/UI 层）。这样背包任意组的悬停槽丢弃
+    //   （Q=1件 / Ctrl+Q=整栈）都走同一原语。不限捕获态（背包打开时未捕获正是此场景）。
+    //   id==0 / count<=0 → 不丢。t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；
+    //   缺省空 = 无附魔）。UI 层把 hovered 槽的物品附魔传入 → 掉落实体携带附魔（拾取回填 + 掉落紫光晕）。
     Q_INVOKABLE void dropItemAtFront(int itemId, int count, const QVariantList &enchants = {});
-    // 拖出背包丢弃（t49）：光标手持栈（hotbar.heldBlock/heldCount）整栈丢弃为实体（玩家前方 1.5 格）。
+    // 拖出背包丢弃（t49）：光标手持栈（hotbar.heldBlock/heldCount）整栈丢弃为实体。
     // 与 dropHeld 的差异：后者取**选中槽** 1 件且仅捕获时；本方法取**光标手持栈**整栈、**不限捕获态**
-    // （背包打开时未捕获正是此场景）。t64：spawnItem 传 heldCount → 1 实体携带整栈数量（修「丢 4 木棒
-    // 捡回只剩 1」bug；spec 验收「4 木棒丢出捡回仍 4」）。清空 hotbar 光标手持栈（setHeldBlock(0) 同步清
-    // count）。空手 → 不丢。经 QML Connections 转发（同 dropHeld）。
+    // （背包打开时未捕获正是此场景）。t64：传 heldCount → 1 实体携带整栈数量（修「丢 4 木棒捡回只剩 1」
+    // bug；spec 验收「4 木棒丢出捡回仍 4」）。清空 hotbar 光标手持栈（setHeldBlock(0) 同步清 count）。
+    // 空手 → 不丢。t609：位置 / 初速同 dropHeld（眼位沿视线丢出）。
     Q_INVOKABLE void dropHeldCursor();
-    // t228 右键拖出背包丢弃 1 件：与 dropHeldCursor 同源（光标手持栈 → 玩家前方 1.5 格实体），差异在**只丢 1 件**、
+    // t228 右键拖出背包丢弃 1 件：与 dropHeldCursor 同源（光标手持栈 → 丢出实体），差异在**只丢 1 件**、
     //   余数留光标（右键 = 逐个丢弃，对齐 MC「右键拖出 = 每次丢 1」；左键整栈走 dropHeldCursor）。count 归 0 时连 id
-    //   一起清（保持「id==0 ⟺ count==0」空栈不变式）。空手 / count<=0 → 不丢。spawnItem count=1。不限捕获态
-    //   （背包打开时未捕获正是此场景，同 dropHeldCursor）。经 QML Connections 转发（同 dropHeld / dropHeldCursor）。
+    //   一起清（保持「id==0 ⟺ count==0」空栈不变式）。空手 / count<=0 → 不丢。不限捕获态
+    //   （背包打开时未捕获正是此场景，同 dropHeldCursor）。
     Q_INVOKABLE void dropHeldCursorOne();
+    // t609 主动丢弃统一原语（私有）：从眼位 + 视线 × kDropForwardOffset 生成掉落实体，初速 = 视线 ×
+    //   kDropThrowSpeed（含俯仰分量：仰视上抛 / 俯视下压，无随机左右散布——机制等价 MC 玩家把物品从身体沿
+    //   视线扔出，修用户报「Q 丢直接从准星指向处喷出且左右喷」）。dropHeld / dropHeldStack / dropItemAtFront /
+    //   dropHeldCursor / dropHeldCursorOne 五路径共用；死亡掉落（dropAllItems）不走此（保留 3×3 散布的 MC
+    //   「喷一地」口径）。m_itemEntities 注入时走 spawnItemThrown（C++ 直调）；未注入（异常配置）回退旧
+    //   spawnItem 信号路径（QML 转发，格中心 + 随机弹出）。
+    void throwItemInLook(int itemId, int count, const QVariantList &enchants);
     // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（**死亡点**
     //   = 玩家倒下时的脚底 m_pos，非出生点）+ 清空背包。每非空栈 → 1 实体携带整栈数量（同 dropHeldCursor
     //   模式，经 spawnItem 信号 → Main.qml 转发到 ItemEntityManager.spawnItem，单向事件流）。栈散布到死亡格
@@ -901,6 +905,9 @@ private:
     //   箭=可拾取伤害箭 / 雪球=0 伤击退 / 鸡蛋=投掷物（t583）/ 剑=短距弹射带伤害 / 其余=定向弹出掉落物 +
     //   扣库存）；**t607 修**：库存空（含最后一个投掷物用完清零）踩板无动作（有 store 条目=玩家发射器身份，
     //   陷阱解除）；无条目（神殿陷阱发射器，worldgen 填充不进 store）保持旧行为（默认射玩家友方箭）。
+    //   **t609 扩展**：压力板 4 水平邻格为**发射器或投掷器**均触发（同触发同冷却，机制等价 MC dropper /
+    //   dispenser 同属机关）；投掷器走 dispenseFromDispenser 的 Dropper 分支（全部物品弹出掉落物，无
+    //   fallback 箭——worldgen 不生成投掷器陷阱）。
     void scanDispenserTraps(float dt);
     // t579/t580/t608 从发射器 (x,y,z) 朝 dir（单位向量，**发射器 state 朝向面的外向**，t608 起由 scanDispenserTraps
     //   据 state 解出传入）取出首个可用槽内容物并发射 + 扣 1 库存。发射位（统一排出口）= 发射器格中心 + dir×0.5
@@ -913,10 +920,12 @@ private:
     //   发射方向射线命中 mob 时造成 ToolRegistry::attackDamage 一次（机制等价 MC 1.0 发射器弹射武器）；其余
     //   物品 → spawnItemAt 定点定向弹出掉落物（排出口 + 朝向初速 kDispenserPopSpeed + 0.5s 免拾窗）。发射方向
     //   = 发射器 state（chestFrontFace 编码）解出的朝向外向，与排出口贴图朝向一致（机制等价 MC 发射器朝排出口
-    //   方向发射）。发射器无库存 / store 空 → 返 false（caller 神殿路径 fallback 默认箭）。分层：Game 层读
-    //   DispenserStore（同层 ViewModel）+ 调 EntityManager（Entities 层向下）+ ItemEntityManager（同层直调），
-    //   不写栅格。
-    bool dispenseFromDispenser(int x, int y, int z, const QVector3D &dir);
+    //   方向发射）。发射器无库存 / store 空 → 返 false（caller 神殿路径 fallback 默认箭）。
+    //   **t609 投掷器分支**（blockId == Dropper）：**全部物品**一律 spawnItemAt 弹出掉落物（机制等价 MC 1.0
+    //   dropper「只投不射」——无箭 / 雪球 / 剑弹丸分派，任何物品都以掉落物实体弹出）。投掷器无 caller
+    //   fallback（worldgen 不生成投掷器陷阱，库存空即无动作）。分层：Game 层读 DispenserStore（同层
+    //   ViewModel）+ 调 EntityManager（Entities 层向下）+ ItemEntityManager（同层直调），不写栅格。
+    bool dispenseFromDispenser(int x, int y, int z, const QVector3D &dir, quint8 blockId);
     // t569 红石矿石点亮触发（机制等价 MC 1.0 红石矿被玩家走近 / 触碰时发光数秒后自熄）：扫玩家 footprint
     //   格 ± 水平 4 邻（feetY 与 feetY±1 共 3 行 —— 玩家走过 / 相邻蹭到 / 站其上都触发），命中 RedstoneOre →
     //   setRedstoneOreLit(true)（置 state bit0 + 状态感知 lightEmission 9 → recomputeLightAround 增量重 flood
@@ -1351,6 +1360,17 @@ private:
     static constexpr int   kDispenserArrowDamage    = 2;      // 发射器箭命中 mob 伤害（HP；= EntityManager::kArrowDamage 同值）
     static constexpr float kDispenserPopSpeed       = 5.0f;  // 发射器弹出掉落物速度（blocks/s）
     static constexpr float kDispenserWeaponRange    = 3.0f;  // 发射器弹剑伤害判定射线射程（格）
+    // t609 投掷器弹出掉落物速度（blocks/s）：低于发射器 kDispenserPopSpeed——轻量出口的温和弹出（机制等价
+    //   MC 1.0 dropper 弹出距离短于 dispenser 弹射；只投不射的机关口径）。
+    static constexpr float kDropperPopSpeed         = 4.0f;  // 投掷器弹出掉落物速度（blocks/s）
+    // t609 Q 丢弃方向常量：主动丢弃（dropHeld / dropHeldStack / dropItemAtFront / dropHeldCursor /
+    //   dropHeldCursorOne）从眼位沿视线丢出（用户「应从玩家身体中间/视角摄像头往前丢，而非准星指向处左右喷」）。
+    //   kDropForwardOffset：生成位 = 眼位 + 视线 × 0.3（略出身体表面，防贴脸生成即被拾回 / 撞头）。
+    //   kDropThrowSpeed：初速 = 视线 × 6（沿视线扔出——含俯仰分量：仰视上抛 / 俯视下压；无随机左右散布，
+    //   替换旧「准星指向 1.5 格 + spawnItem 哈希随机全圆弹出」）。死亡掉落（dropAllItems）保留 3×3 散布
+    //   （MC 死亡即喷的口径，不走本公式）。
+    static constexpr float kDropForwardOffset = 0.3f; // Q 丢弃生成位前移（格；眼位 + 视线×0.3）
+    static constexpr float kDropThrowSpeed    = 6.0f; // Q 丢弃初速（blocks/s；视线方向 ×6）
     static constexpr int   kBowMinDamage     = 1;      // 短蓄力箭命中伤害（HP）
     static constexpr int   kBowMaxDamage     = 6;      // 满弓箭命中伤害（HP；Hotbar::bowArrowMaxDamage 同源）
     static constexpr float kBowSlowMul       = 0.5f;   // 拉弓时水平速度倍数（spec「拉弓减速」）

@@ -754,7 +754,27 @@ public:
                                   //   GroupStone（石质）。worldgen scatterOres 高度分层散布于**最深层** y∈[5,16]
                                   //   （金属族中最深，机制等价 MC 1.0 红石 Y<16 深层富集）。洞穴裸露同其它矿石。
                                   //   进创造调色板。
-        Count           = 117, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t609 投掷器（Dropper）：机制等价 MC 1.0 dropper（与发射器同族的机关盒，差异 = **全部物品**一律以
+        //   掉落物实体弹出，无箭 / 雪球 / 剑弹丸分派——「只投不射」）。整立方 opaque（solid=true / ShapeFull，
+        //   与熔炉 / 发射器同走 culled 立方面路径，**非**异形）、hardness=3.5（同发射器 / 熔炉量级，石质偏硬）、
+        //   toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落，同熔炉）、dropId=自身（破投掷器掉
+        //   投掷器方块，可放回）、dropCount=1、maxStack=64。
+        //   各面贴图：顶/底=furnace_top(12)（复用熔炉顶——机关盒家族石质顶面，同 MC 投掷器侧面即熔炉质感的观感；
+        //   pack 侧经既存 tileFilenameMap {12→furnace_top.png} 自动覆盖）/ 侧=furnace_side(13)（复用熔炉侧面，
+        //   同上自动 pack 覆盖）/ 前面（排出口所朝方向）=dropper_front(139)（石质灰底 + 中央**小**方形暗孔——
+        //   比发射器的大暗腔排出口更小更简的「轻量出口」读感，只掉物品不射弹丸；tools/build_dropper.py 程序生成
+        //   原创自绘 §9a；pack 侧 tileFilenameMap {139→dropper_front_horizontal.png} 留 t620 接入）。
+        //   **state 编码朝向**（同发射器 / 熔炉 / 箱子 chestFrontFace 编码）：bit[1:0] = 0=+X 1=-X 2=+Z 3=-Z；
+        //   放置时排出口面朝玩家（同熔炉）；mesher 据 state 选前面贴图（同 furnace / dispenser tileFor 分支）。
+        //   音色归 GroupStone（石质）。**触发路径**（同发射器，PlayerController::scanDispenserTraps 扩展）：
+        //   踩压力板且其 4 水平邻格之一 == Dropper → dispenseFromDispenser 投掷器分支 = **全部物品**走
+        //   spawnItemAt 从排出口定向弹出掉落物（机制等价 MC 1.0 dropper 弹出物品）；per-dispenser 冷却共用。
+        //   **库存**：复用 DispenserStore（9 槽 per-block，按坐标键控——发射器 / 投掷器共用同一 store，key 是
+        //   坐标故不冲突；玩家放置 ensureDispenser 注册 / 右键开同一 DispenserUI（标题显「投掷器」）/ 破块
+        //   掉内容 + 清条目，全走发射器既有链）。配方：7 圆石（上排满 + 中 / 下排左右，中心 + 下中空）→ 1 投掷器
+        //   （recipe.cpp；机制等价 MC 1.0 dropper 7 cobble）。进创造调色板（玩家可取用 / 放置 / 自建机关）。
+        Dropper         = 117, // 投掷器：踩压力板触发的弹掉落物机关方块（机制等价 MC 1.0 dropper）；全部物品弹出
+        Count           = 118, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -831,6 +851,11 @@ public:
     //   避免各处硬编码 Dispenser id 判定（同 isTnt / isLadder 单 id 模式）。单 id 故裸相等判定，仍提供谓词作
     //   单一权威（未来追加发射器变体时一处同步）。
     static bool isDispenser(quint8 blockId);
+    // t609 投掷器统一谓词（单一权威）：blockId == Dropper 即投掷器。供 PlayerController 发射器陷阱触发判定
+    //   （scanDispenserTraps 扫玩家 footprint 格——压力板的 4 水平邻格之一为**发射器或投掷器**即触发；投掷器
+    //   分支 = 全部物品弹出掉落物，无弹丸分派）+ 右键开 UI / 放置朝向 / 破块掉内容判定，避免各处硬编码
+    //   Dropper id 判定（同 isDispenser 单 id 模式）。
+    static bool isDropper(quint8 blockId);
     // t569 红石矿石统一谓词（单一权威）：blockId == RedstoneOre 即红石矿。供 PlayerController 的走过 / 挖掘
     //   触发点亮判定（scanRedstoneOre footprint 扫描 + updateMining 目标判定）+ World worldgen scatterOres 写入
     //   读，避免各处硬编码 RedstoneOre id 判定漂移（同 isTnt / isLadder 单 id 模式）。
@@ -1294,7 +1319,10 @@ public:
     //   static_assert 仍只守到 135，本常量先就位供 mesher 引用。
     //   t569：138=redstone_ore（红石矿石贴图；石头底 + 鲜红菱斑矿粒，复制钻石矿斑块布局改红；
     //   tools/build_ore.py 程序生成；RedstoneOre 各面=本 tile）。
-    static constexpr int AtlasTileCount = 139;
+    //   t609：139=dropper_front（投掷器前面（排出口所朝面）贴图；石质灰底 + 中央小方形暗孔（比发射器的大
+    //   暗腔排出口更小更简的轻量出口读感）；Dropper 前面=本 tile（mesher 据 state 选，同发射器 tileFor 分支）；
+    //   顶/底/侧复用熔炉 12/13；tools/build_dropper.py 程序生成）。
+    static constexpr int AtlasTileCount = 140;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质

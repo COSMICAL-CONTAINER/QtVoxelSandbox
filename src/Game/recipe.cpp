@@ -780,6 +780,19 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::GoldIngotId, RecipeRegistry::RedstoneId, RecipeRegistry::GoldIngotId,
         0,                           RecipeRegistry::GoldIngotId, 0 },
       RecipeRegistry::ClockId, 1, 1, "clock" },
+    // t609 投掷器（dropper）：7 圆石（缺中心 + 上中）→ 1 投掷器（有序 3×3，仅工作台）。机制等价 MC 1.0
+    //   dropper 配方（7 cobblestone——与熔炉 8 圆石围圈同族，差异 = 熔炉缺 [4] 中心 1 格、本缺 [1] 上中 +
+    //   [4] 中心 2 格）。最小包围盒 3×3 满框（顶行两端 + 中行两端 + 底行 3 满占角 → 满框），与熔炉（缺 [4]）/
+    //   护腿（缺 [4,7]）内容不同 → shaped 逐格比对区分（不冲突）。产物 Dropper 方块（踩压力板触发把全部物品
+    //   弹出掉落物的机关盒；DispenserStore 9 槽库存 + 右键开 UI）。
+    //     [0]=cobble [1]=空     [2]=cobble
+    //     [3]=cobble [4]=空     [5]=cobble
+    //     [6]=cobble [7]=cobble [8]=cobble
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), 0,                         int(BlockRegistry::Cobble),
+        int(BlockRegistry::Cobble), 0,                         int(BlockRegistry::Cobble),
+        int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble) },
+      int(BlockRegistry::Dropper), 1, 1, "dropper" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

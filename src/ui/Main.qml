@@ -90,6 +90,9 @@ Window {
     property int dispenserX: 0
     property int dispenserY: 0
     property int dispenserZ: 0
+    // t609 当前所开机关的标题（「发射器」/「投掷器」）：DispenserUI 被发射器（107）/ 投掷器（117）共用，
+    //   openDispenser 按方块 id 设置 → 面板 titleText 绑定。纯呈现层态。
+    property string dispenserTitle: "发射器"
     // t549 世界栅格编辑版本号：每次玩家放 / 破方块自增。附魔台 UI 的 bookshelfPower 绑定触碰它 →
     //   「UI 开着时放 / 破书架」也能刷新书架计数（countBookshelvesAround 是 Q_INVOKABLE，无 NOTIFY，
     //   不触碰则绑定永不重算 → 用户报「旁边放书架显示还是 0」根因之一）。低频（每次放 / 破 +1）。
@@ -1079,6 +1082,9 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         dispenserX = x; dispenserY = y; dispenserZ = z
+        // t609：投掷器（id=117=BlockRegistry::Dropper）共用本面板 / DispenserStore——标题按所开方块 id 设
+        //   （发射器 107 显「发射器」/ 投掷器 117 显「投掷器」；id=117 字面量+注释，同 torch=13 模式）。
+        dispenserTitle = theWorld.blockAt(x, y, z) === 117 ? "投掷器" : "发射器"
         dispenserOpen = true
         // t548：同附魔台 / 铁砧 —— 发射器非背包，不触发 open_inventory 成就 toast（黑色小 UI 残留根因）。
         player.release()
@@ -7251,7 +7257,9 @@ Window {
             //   itemEntities.spawnItem 内置就近合并，同 id 自动合）。铁砧（97-99）/ 附魔台（94）当前是 shell-mode
             //   无容器（功能后补），破掉无内部物品可掉 → 无需 dump（spec「铁砧/附魔台主要是发射器」）。
             //   t571 标注【自然掉落：恒发（含创造）】—— 同 chest=22（内容物掉落与模式无关）。
-            if (id === 107) {
+            //   t609：投掷器（id=117=BlockRegistry::Dropper）同路径——DispenserStore 共用（按坐标键控），
+            //   破投掷器掉自身（BlockDef dropId）+ 内容物 9 槽 dump + 清条目（机制等价 MC 破投掷器掉内容）。
+            if (id === 107 || id === 117) {
                 for (let di = 0; di < dispenserStore.slotCount; ++di) {
                     const did = dispenserStore.slotIdAt(x, y, z, di)
                     const dcount = dispenserStore.slotCountAt(x, y, z, di)
@@ -7286,7 +7294,9 @@ Window {
             //   （worldgen 生成、不写 store）踩板 fallback 默认射箭（t579 神殿行为）。旧版玩家放置不注册 →
             //   空发射器踩板当神殿陷阱射箭（无限箭源）。id=107=BlockRegistry::Dispenser（字面量+注释，
             //   同 torch=13 / chest=22 / furnace=10 既有模式）。ensure 幂等（已有条目 no-op 不发信号）。
-            if (id === 107) dispenserStore.ensureDispenser(x, y, z)
+            //   t609：投掷器（id=117=BlockRegistry::Dropper）同注册——DispenserStore 共用（按坐标键控，
+            //   发射器 / 投掷器不冲突），身份语义同（有条目 = 玩家库存机关；投掷器无 fallback 箭路径）。
+            if (id === 107 || id === 117) dispenserStore.ensureDispenser(x, y, z)
         }
         // t445 世界侧产出的掉落物（仙人掌失撑 / 邻接方块即整柱坍落）→ 转发到 itemEntities.spawnItem 生成掉落实体。
         //   同 player.onSpawnItem / fallingBlockDropped 模式（单向事件流：World 低层发语义事件、呈现层只消费，
@@ -9498,6 +9508,8 @@ Window {
         dispenserX: window.dispenserX
         dispenserY: window.dispenserY
         dispenserZ: window.dispenserZ
+        // t609：标题按所开方块 id（发射器 107「发射器」/ 投掷器 117「投掷器」；openDispenser 设置）。
+        titleText: window.dispenserTitle
         visible: window.appState === "playing" && window.dispenserOpen
         z: 150
         onClosed: window.closeDispenser()

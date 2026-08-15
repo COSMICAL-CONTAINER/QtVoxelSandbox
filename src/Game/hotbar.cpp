@@ -60,6 +60,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::TntBlock:      return "icon_tnt.png";           // t485 TNT 立方体图标（各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
     case BlockRegistry::MossyCobble:   return "icon_mossy_cobble.png";  // t486 苔石立方体图标（各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
     case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486/t492 发射器立方体图标（正面为主投影，显排出口面板；丛林神殿陷阱机关）
+    case BlockRegistry::Dropper:       return "icon_dropper.png";       // t609 投掷器立方体图标（正面为主投影，显小排出口；顶/侧=熔炉石质）
     // t487 要塞结构方块图标：石砖（立方体 3D）/ 石砖台阶（3D 半高盒）/ 石砖楼梯（3D L 阶）。t600 修正：台阶/楼梯
     //   原误走 BLOCKS 满立方投影（三图标同图=全显石砖整块，用户「背包三个都是石砖满一格」）→ 改 render_partial_3d
     //   slab/stairs 形状（同圆石变体流程，fill=default_stone_brick 砖纹）。tools/build_cube_icons.py 程序生成。
@@ -635,6 +636,8 @@ QVariantList Hotbar::creativeBlocks() const
              // t486 丛林神殿结构方块（机制等价 MC 1.0 丛林神殿 jungle temple 的苔石 / 发射器；worldgen 散布 / 创造取用）。
              int(BlockRegistry::MossyCobble),                                // 苔石（长苔圆石变体；丛林神殿主体；可放置）
              int(BlockRegistry::Dispenser),                                  // 发射器（踩压力板触发的射箭机关；丛林神殿陷阱；可放置 / 自建机关）
+             // t609 投掷器（机制等价 MC 1.0 dropper——全部物品弹出掉落物的机关盒；7 圆石合成；DispenserStore 9 槽共用）。
+             int(BlockRegistry::Dropper),                                    // 投掷器（踩压力板触发弹出全部物品；可放置 / 自建机关）
              // t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶 / 石砖楼梯；worldgen 散布 / 创造取用）。
              int(BlockRegistry::StoneBrick),                                 // 石砖（石质整立方 + 砖纹；要塞墙体主体；可放置）
              int(BlockRegistry::StoneBrickSlab),                             // 石砖台阶（半高；复用 ShapeSlab 几何 + 石砖贴图；可放置）

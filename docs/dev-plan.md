@@ -2156,10 +2156,12 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
 - 用户：「发射器射出的箭玩家应能拾取；投掷物都要能砸到生物互动（鸡蛋/雪球和手持一样：无伤害只击退）；方块等物品和投掷物不是同一个口出来的；发射器应规定朝向（像熔炉放下面朝玩家），我发射器后面放压力板它往前发射。」
 - 修：① 箭 → arrowFromPlayer=true 语义（可拾取、命中 mob 伤害）——现在 spawnArrow(false) 命中玩家不对；② 鸡蛋/雪球投掷物统一从**发射口**（state 编码朝向面）出；③ 掉落物弹出也统一口；④ 放置时 state 记朝向（面朝玩家，同熔炉 state 编码 2/3/4/5），发射方向 = 朝向面外向；压力板触发找邻接发射器时读其朝向定发射向（现「发射器→压力板方向」反了：板在发射口侧才对——用户把压力板放发射器后面它朝前发射说明现在取的是板→发射器向量）。
 
-**t609** 投掷器（Dropper）新方块 + Q 丢弃方向修正
+**t609** 投掷器（Dropper）新方块 + Q 丢弃方向修正 ✅✅ 已完成
 - 用户：「做一个投掷器，和发射器一样，只不过对所有物品都是直接投掷出掉落物。」
 - 新方块 Dropper：pack 贴图 `block/dropper_front_horizontal.png` + `dropper_front_vertical.png`（正面）+ 熔炉侧面贴图（四个侧面）；UI 复用发射器 9 槽（DispenserStore 共用或平行 store）；压力板/触发同发射器；行为=全部物品弹掉落物（不做箭/雪球特殊分派）。放置朝向同 t608。合成配方（7 鹅卵石+? 参照 MC：7 圆石）。
+  - 实现：Dropper=117（顶/底=furnace_top(12)、侧=furnace_side(13)、前=dropper_front(139) 新贴图 tools/build_dropper.py；tileFilenameMap {139→dropper_front_horizontal.png} 留 t620）；DispenserStore 共用（同坐标键控）+ DispenserUI 复用（titleText 按方块 id 显「发射器」/「投掷器」）；scanDispenserTraps 扩 isDropper 触发 → dispenseFromDispenser Dropper 分支全部物品 spawnItemAt 弹出（kDropperPopSpeed=4，无 fallback 箭）；配方 7 圆石（缺中心+上中）→ 1 投掷器；破块掉自身+9 槽内容（id===107||117）。
 - 顺带 Q 丢弃修正：用户「按 Q 丢弃直接从鼠标指向处喷出且左右喷，应从玩家身体中间/视角摄像头往前丢」——查 dropHeld/dropHeldCursor 生成位置与初速度（spawnItem 的 spawn 位置应为眼位、速度沿 look 方向，不随机左右）。
+  - 实现：throwItemInLook 统一原语（dropHeld/dropHeldStack/dropItemAtFront/dropHeldCursor/dropHeldCursorOne 五路径共用）= 眼位+视线×0.3 生成 + 初速视线×6（含俯仰 vy，ItemEntityManager::spawnItemThrown 三维定向）；死亡掉落保留 3×3 散布。
 
 ### 🅶 雪傀儡（1 项）
 

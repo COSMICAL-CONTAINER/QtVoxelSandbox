@@ -419,6 +419,12 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {117, QStringLiteral("pumpkin_side.png")},           // pumpkin_side（南瓜侧面瓜棱）
         {118, QStringLiteral("pumpkin_face_off.png")},       // pumpkin_face（南瓜前面刻面双眼+锯齿嘴）
         {119, QStringLiteral("pumpkin_top.png")},            // pumpkin_top（南瓜顶/底瓜顶带茎）
+        // t609 投掷器：tile 139 dropper_front → pack block/dropper_front_horizontal.png（水平朝向正面小排出口）。
+        //   顶/底/侧复用熔炉 tile 12/13（既存 {12→furnace_top.png}/{13→furnace_side.png} 映射自动覆盖）。竖直
+        //   朝向版（dropper_front_vertical.png）待 t620 per-face 朝向接入时补（本工程放置朝向恒水平 4 向 →
+        //   先接 horizontal 一张不白块）。非 pack 时回落程序生成 default_dropper_front.png（tools/build_dropper.py
+        //   原创自绘）。包内缺该 PNG 时安全跳过（保留程序生成瓦片）。
+        {139, QStringLiteral("dropper_front_horizontal.png")}, // dropper_front（投掷器前面排出口；t609）
     };
     return kMap;
 }

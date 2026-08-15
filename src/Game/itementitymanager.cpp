@@ -169,6 +169,76 @@ void ItemEntityManager::spawnItemAt(const QVector3D &pos, int itemId, int count,
                    << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
 }
 
+// t609 带俯仰的定点定向弹出（Q 丢弃修正，见 .h 头注释）：与 spawnItemAt 完全同链（合并 / LRU / 附魔 /
+//   免拾窗 / 重力 + 摩擦），差异仅 ① 初速三维归一化（含 Y 分量：仰视上抛 / 俯视下压）② 日志标签。
+//   机制等价 MC 玩家主动丢弃物品：从眼位沿视线扔出（非哈希随机全圆弹出）。
+void ItemEntityManager::spawnItemThrown(const QVector3D &pos, int itemId, int count,
+                                        float dirX, float dirY, float dirZ, float speed,
+                                        const QVariantList &enchants)
+{
+    if (itemId <= 0) return; // air / 非法：不产出（同 spawnItem 守卫）
+    if (count < 1) count = 1;
+
+    // 就近合并（同 spawnItemAt 语义）：眼位前方已有同 id 掉落物（如连按 Q）→ 合并，少 delegate。
+    {
+        const int cap = BlockRegistry::maxStackSize(itemId);
+        if (cap > 1 && !m_entities.empty()) {
+            const float r2 = kMergeRadius * kMergeRadius;
+            for (size_t i = 0; i < m_entities.size(); ++i) {
+                ItemEntity &e = m_entities[i];
+                if (!e.alive || e.itemId != itemId) continue;
+                const QVector3D d = e.pos - pos;
+                if (d.x() * d.x() + d.y() * d.y() + d.z() * d.z() > r2) continue;
+                if (e.count < cap) {
+                    const int add = std::min(cap - e.count, count);
+                    e.count += add;
+                    count -= add;
+                    notifyChanged();
+                    qCInfo(lcItem) << "merged item entity id=" << itemId << "into slot" << int(i)
+                                   << "count ->" << e.count << "(thrown at" << pos << ")";
+                    if (count <= 0) return;
+                }
+                continue;
+            }
+        }
+    }
+
+    // LRU 驱逐（同 spawnItem）。
+    if (m_liveCount >= kCap) {
+        int oldest = -1; qint64 oldestMs = 0;
+        for (int i = 0; i < int(m_entities.size()); ++i) {
+            if (!m_entities[size_t(i)].alive) continue;
+            if (oldest < 0 || m_entities[size_t(i)].spawnMs < oldestMs) {
+                oldest = i; oldestMs = m_entities[size_t(i)].spawnMs;
+            }
+        }
+        if (oldest >= 0) {
+            releaseSlot(oldest);
+            qCWarning(lcItem) << "item entity cap reached (" << kCap << "); evicted oldest at slot" << oldest;
+        }
+    }
+    const int slot = acquireSlot(ItemEntity{pos, itemId, count, m_clock.elapsed()});
+    {
+        ItemEntity &e = m_entities[size_t(slot)];
+        for (int i = 0; i < 4; ++i)
+            e.enchants[i] = (i < enchants.size()) ? enchants.at(i).toInt() : 0;
+    }
+    // 定向投掷初速（三维）：dir 归一化 × speed（含 Y 分量——仰视上抛 / 俯视下压；重力在 tick 内继续作用成
+    //   抛物线）。退化全 0 → 不设初速（原地落下）。
+    {
+        ItemEntity &e = m_entities[size_t(slot)];
+        const float len = std::sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+        if (len > 1e-4f && speed > 0.0f) {
+            e.vx = (dirX / len) * speed;
+            e.vy = (dirY / len) * speed;
+            e.vz = (dirZ / len) * speed;
+        }
+    }
+    notifyChanged();
+    qCInfo(lcItem) << "spawned item entity (thrown) id=" << itemId << "count=" << count << "at" << pos
+                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
+}
+
 // t354 批量 emit 收口实现（见 .h beginBatch / notifyChanged 注释）。
 void ItemEntityManager::notifyChanged()
 {

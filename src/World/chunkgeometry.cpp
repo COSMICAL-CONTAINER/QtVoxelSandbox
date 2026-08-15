@@ -352,6 +352,18 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
             return d.topTile;                                            // 顶/底 = dispenser_top
         return d.sideTile;                                               // 其余三侧面 = dispenser_side
     }
+    // t609 投掷器朝向（同发射器 / 熔炉编码）：前面（排出口 dropper_front(139)）所朝面由 state bit[1:0] 决定
+    //   （放置时朝玩家，同 chest / furnace / dispenser horizontalFacing 同源编码）；其余三侧面 furnace_side(13)、
+    //   顶/底 furnace_top(12)（复用熔炉贴图——机关盒家族石质观感）。复用 chestFrontFace 解码（0=+X 1=-X 2=+Z
+    //   3=-Z）；投掷器不改箱子 / 熔炉 / 发射器行为（编码同源）。
+    if (block == BlockRegistry::Dropper) {
+        const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
+        const int frontFace = int(BlockRegistry::chestFrontFace(state)); // 前面（排出口）所朝面
+        if (face == frontFace) return d.frontTile;                       // dropper_front（排出口）
+        if (face == int(BlockRegistry::Top) || face == int(BlockRegistry::Bottom))
+            return d.topTile;                                            // 顶/底 = furnace_top（复用）
+        return d.sideTile;                                               // 其余三侧面 = furnace_side（复用）
+    }
     // t234/t406 耕地：顶面（+Y）恒 farmland_dry(26)（topTile）；湿润等级 0..3（state 低 2 位）由顶点色暗化
     //   体现（darker=wetter，见 buildMesh 内 farmlandHydrBrightMul），不再切换 dry/wet 两贴图（4 级靠顶点色
     //   连续暗化实现，无需扩图集 + 2 贴图）。侧/底 = dirt(2)。

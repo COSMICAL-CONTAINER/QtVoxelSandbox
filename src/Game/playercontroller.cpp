@@ -2086,8 +2086,15 @@ void PlayerController::placeBlock()
     //   无论手持何物右键发射器即开）。发 dispenserOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开
     //   DispenserUI（释放指针）。机制等价 MC 右键发射器开物品栏。空手亦可（开界面是「使用」语义，与手持何物
     //   无关）。与踩压力板触发的射箭陷阱（scanDispenserTraps）路径互不干扰（后者机关自动触发）。
+    //   t609：投掷器（Dropper）同开本界面——机制等价 MC 1.0 投掷器 9 槽 UI；内容存复用 DispenserStore（按坐标
+    //   键控，发射器 / 投掷器共用同一 store 不冲突）。isDropperUiBlock = 发射器 ∪ 投掷器（谓词在 QML 侧据
+    //   blockId 判标题；C++ 侧同一信号、同一 UI 路径）。
     if (!sneakPlace && BlockRegistry::isDispenser(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         emit dispenserOpened(m_hitBx, m_hitBy, m_hitBz);
+        return;
+    }
+    if (!sneakPlace && BlockRegistry::isDropper(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+        emit dispenserOpened(m_hitBx, m_hitBy, m_hitBz); // t609 投掷器共用发射器 UI / store（标题由 QML 按 id 判）
         return;
     }
     // t387/t388 右键床 → 尝试睡觉（useBlock 语义；优先于放置，同工作台 / 箱子模式：右键已放置的床即睡，不另放块）。
@@ -2972,6 +2979,11 @@ void PlayerController::placeBlock()
         //   mesher 据 state 把 dispenser_front 贴到对应面；**t608 起 state 是发射方向的唯一源** ——
         //   scanDispenserTraps 触发时据 state（chestFrontFace 解码）算朝向外向发射，压力板方位不参与。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
+    } else if (m_selectedBlock == BlockRegistry::Dropper) {
+        // t609 投掷器前面（排出口 dropper_front）朝玩家侧：state = horizontalFacing ^ 1（同发射器 / 熔炉 / 箱子
+        //   编码；机制等价 MC 1.0 投掷器放置排出口朝玩家）。mesher 据 state 把 dropper_front 贴到对应面；
+        //   scanDispenserTraps 触发时据 state 解出弹出口外向（同发射器 t608 方向语义，单一方向源）。
+        placeState = quint8((horizontalFacing() & 3) ^ 1);
     } else if (m_selectedBlock == BlockRegistry::Leaves) {
         // t305 玩家放置的树叶标 PersistentLeafBit（持久，不参与自然衰减）—— 机制等价 MC 1.0「玩家放置的树叶
         //   不衰减」。worldgen 叶 state=0（衰减候选）；玩家叶 state=本 bit → decayLeavesAround 跳过 → 创造建筑
@@ -3384,13 +3396,17 @@ void PlayerController::placeBlock()
     emit blockPlaced(); // progress 统计：放置方块 +1
 }
 
-// Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 发 spawnItem（玩家前方 1.5 格，count=1）。
-// 仅指针捕获时生效（spec：「Q 键（captured 时）」）。取失败（空栈 / 无 hotbar）→ 不丢。
-// spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem（同破块掉落 t35 路径），
-// 丢弃后实体在前方生成 → 可被重新拾取（闭环）。丢弃位置取眼位 + 视线 * 1.5，floor 到格坐标。
+// Q 键丢弃（t36）：从选中槽 takeStack 1 件 → 生成掉落实体（count=1）。仅指针捕获时生效（spec：「Q 键
+//   （captured 时）」）。取失败（空栈 / 无 hotbar）→ 不丢。
 // t56：选中槽为空时直接早退（id==0）—— 若用户从背包拾取到光标后关包，光标手持栈（heldBlock）
 //   须经 Main.qml::returnHeldToHotbar 在关包时归还进 hotbar（优先选中槽），否则 Q 读空槽不丢。
 // t64：Q 键每次只丢 1 件（dropHeld 的语义不变；整栈丢弃走 dropHeldCursor）。
+// t609 丢弃方向修正：生成位 = 眼位 + 视线 × kDropForwardOffset（0.3 格，略出身体表面），初速 = 视线 ×
+//   kDropThrowSpeed（6 格/s，含俯仰分量：仰视上抛 / 俯视下压），无随机左右散布——走 spawnItemThrown（C++
+//   直调同 dispenseFromDispenser 的 spawnItemAt 模式）。旧版「眼位 + 视线 × 1.5 floor 到格中心 + spawnItem
+//   哈希随机全圆弹出」→ 用户报「直接从鼠标所指向的地方喷出来而且还是左右喷的」（1.5 格已近准星命中点 + 随机
+//   全圆方向 → 左右乱飞）。机制等价 MC 玩家把物品从身体沿视线方向扔出。m_itemEntities 未注入 → 回退旧
+//   spawnItem 信号路径（QML 转发，兼容防御）。
 void PlayerController::dropHeld()
 {
     if (!m_captured) return;        // spec：仅捕获时
@@ -3400,16 +3416,30 @@ void PlayerController::dropHeld()
     const QVariantList ench = m_hotbar->enchantsAt(m_hotbar->selectedSlot()); // t590 附魔随实体走（先读再 takeStack 清槽）
     const int took = m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
     if (took <= 0) return;          // 取失败（空栈）→ 不丢
-    // 眼位前方 1.5 格，floor 到整数格（ItemEntityManager 存格中心 = 整数+0.5）。
+    throwItemInLook(id, 1, ench);   // t609 眼位沿视线丢出
+}
+
+// t609 主动丢弃统一原语：从眼位 + 视线 × kDropForwardOffset 生成掉落实体，初速 = 视线 × kDropThrowSpeed
+//   （含俯仰，无随机散布）。dropHeld / dropHeldStack / dropItemAtFront / dropHeldCursor / dropHeldCursorOne
+//   五个主动丢弃路径共用（死亡掉落 dropAllItems 不走此——死亡散布保留 MC「喷一地」口径）。m_itemEntities
+//   未注入（异常配置）→ 回退旧 spawnItem 信号路径（QML 转发到 itemEntities.spawnItem，格中心 + 随机弹出）。
+void PlayerController::throwItemInLook(int itemId, int count, const QVariantList &enchants)
+{
     const QVector3D fwd = lookDirection();
+    if (m_itemEntities) {
+        const QVector3D p = position() + fwd * kDropForwardOffset;
+        m_itemEntities->spawnItemThrown(p, itemId, count, fwd.x(), fwd.y(), fwd.z(), kDropThrowSpeed, enchants);
+        return;
+    }
+    // 回退：旧信号路径（眼位 + 视线 × 1.5 floor 到整数格；ItemEntityManager 存格中心 = 整数+0.5）。
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, 1, ench);
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), itemId, count, enchants);
 }
 
 // t229 Ctrl+Q 第一人称丢弃整栈（spec「第一人称 Ctrl+Q=丢整栈（手持槽）」）：与 dropHeld（Q=丢 1 件）
 //   同源（取**选中槽**），差异在 takeStack 传「整栈数量」而非 1 —— 1 实体携带整栈数量（同 dropHeldCursor
 //   模式，避免「丢 4 件生 4 实体」爆量）。仅指针捕获时生效（同 dropHeld）。空栈 / 取失败 → 不丢。
-//   spawnItem 经 QML Connections 转发到 ItemEntityManager.spawnItem（同 dropHeld / dropHeldCursor 路径）。
+//   t609：丢弃位置 / 初速同 dropHeld（眼位沿视线丢出，throwItemInLook 统一原语）。
 void PlayerController::dropHeldStack()
 {
     if (!m_captured) return;        // spec：仅捕获时（同 dropHeld）
@@ -3422,32 +3452,28 @@ void PlayerController::dropHeldStack()
     if (cnt <= 0) return;
     const int took = m_hotbar->takeStack(slot, cnt); // 取整栈（takeStack 返回实际取走数）
     if (took <= 0) return;
-    // 眼位前方 1.5 格，floor 到整数格（同 dropHeld 位置约定）。
-    const QVector3D fwd = lookDirection();
-    const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, took, ench);
+    throwItemInLook(id, took, ench); // t609 眼位沿视线丢出（1 实体携整栈）
 }
 
 // t229 背包悬停槽丢弃原语（spec「背包内悬停槽 Q=丢 1 / Ctrl+Q=丢整栈。适用所有背包面板」）：按给定
-//   (itemId, count) 在玩家前方 1.5 格 spawnItem。**不读/改任何槽** —— 槽的读改由 UI 层（InventoryOps
+//   (itemId, count) 生成掉落实体。**不读/改任何槽** —— 槽的读改由 UI 层（InventoryOps
 //   readSlot/writeSlot，按 hoveredSlotKey 的组分发）完成，本方法只做实体生成 + 位置（Game/Physics 层语义，
 //   PLAN §2 分层：物理位置/实体事件在 Game 层，槽操作在 VM/UI 层）。id==0 / count<=0 → 不丢。
-//   不限捕获态（背包打开时未捕获正是此场景，同 dropHeldCursor）。位置同 dropHeld：眼位 + 视线 * 1.5 floor。
+//   不限捕获态（背包打开时未捕获正是此场景，同 dropHeldCursor）。
 //   t590 enchants：UI 层把 hovered 槽的物品附魔传入 → 实体携带（拾取回填 + 掉落紫光晕）。
+//   t609：位置 / 初速同 dropHeld（眼位沿视线丢出，throwItemInLook 统一原语）。
 void PlayerController::dropItemAtFront(int itemId, int count, const QVariantList &enchants)
 {
     if (itemId == 0 || count <= 0) return; // 空手 / 非正数 → 不丢
-    const QVector3D fwd = lookDirection();
-    const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), itemId, count, enchants);
+    throwItemInLook(itemId, count, enchants); // t609 眼位沿视线丢出
 }
 
-// 拖出背包丢弃（t49 / t64）：光标手持栈整栈丢弃为**单个实体携带整栈数量**（玩家前方）。不限捕获态
+// 拖出背包丢弃（t49 / t64）：光标手持栈整栈丢弃为**单个实体携带整栈数量**。不限捕获态
 // （背包打开时正是未捕获）。t64 修复：原 emit 仅传 id（count 走默认 1）→ 4 木棒丢出只生 1 实体 count=1，
 // 捡回只剩 1（用户：「4 木棒丢出去捡起来只剩 1 个」）。现传 heldCount → 1 实体携带整栈 → 捡回原数。
-// 清空 hotbar 光标手持栈（setHeldBlock(0) 同步清 count），再 emit spawnItem。空手 / 无 hotbar → 不丢。
-// 位置同 dropHeld：眼位 + 视线 * 1.5，floor 到格坐标（ItemEntityManager 存格中心 = 整数+0.5）。
+// 清空 hotbar 光标手持栈（setHeldBlock(0) 同步清 count），再生成实体。空手 / 无 hotbar → 不丢。
 // t590：光标手持附魔随实体走（heldEnchants 读先于 setHeldBlock(0) 清栈）→ 拾取回填 + 掉落紫光晕。
+// t609：位置 / 初速同 dropHeld（眼位沿视线丢出，throwItemInLook 统一原语）。
 void PlayerController::dropHeldCursor()
 {
     if (!m_hotbar) return;
@@ -3456,14 +3482,12 @@ void PlayerController::dropHeldCursor()
     if (id == 0 || cnt <= 0) return; // 空手 → 不丢
     const QVariantList ench = m_hotbar->heldEnchants(); // t590 附魔随实例走（先读再清栈）
     m_hotbar->setHeldBlock(0);       // 清空光标手持栈（id=0 同步清 count）
-    const QVector3D fwd = lookDirection();
-    const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, cnt, ench);
+    throwItemInLook(id, cnt, ench);  // t609 眼位沿视线丢出
 }
 
-// t228 右键拖出背包丢弃 1 件（spec「右键=逐个」）：光标手持栈取 1 件 → 发 spawnItem(count=1)，余数留光标。
+// t228 右键拖出背包丢弃 1 件（spec「右键=逐个」）：光标手持栈取 1 件 → 生成掉落实体(count=1)，余数留光标。
 //   与 dropHeldCursor 的差异：后者清空整栈；本方法只 -1 count（count 归 0 时连 id 一起清，保空栈不变式）。
-//   空手 / count<=0 → 不丢。位置同 dropHeldCursor：眼位 + 视线 * 1.5，floor 到格坐标。
+//   空手 / count<=0 → 不丢。t609：位置 / 初速同 dropHeldCursor（眼位沿视线丢出，throwItemInLook 统一原语）。
 void PlayerController::dropHeldCursorOne()
 {
     if (!m_hotbar) return;
@@ -3474,10 +3498,8 @@ void PlayerController::dropHeldCursorOne()
     const QVariantList ench = m_hotbar->heldEnchants(); // t590 先读附魔再清栈（setHeldBlock(0) 会清附魔）
     if (cnt <= 1) m_hotbar->setHeldBlock(0);
     else          m_hotbar->setHeldCount(cnt - 1);
-    const QVector3D fwd = lookDirection();
-    const QVector3D p = position() + fwd * 1.5f;
-    // t590 附魔随实体走（余数留光标的附魔不变，实体带走 1 件的附魔）。
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), id, 1, ench);
+    // t590 附魔随实体走（余数留光标的附魔不变，实体带走 1 件的附魔）。t609 眼位沿视线丢出。
+    throwItemInLook(id, 1, ench);
 }
 
 // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（死亡点
@@ -3712,13 +3734,14 @@ void PlayerController::scanDispenserTraps(float dt)
         for (int bz = z0; bz <= z1; ++bz) {
             const quint8 plate = m_world->blockAt(bx, feetY, bz);
             if (!BlockRegistry::isPressurePlate(plate)) continue; // 本格非压力板 → 跳过
-            // 压力板的 4 水平邻格（同 Y）查 Dispenser（发射器**任意一侧**邻接压力板即触发 —— t608 方向由
-            //   发射器自身 state 决定，与板在哪侧无关；板只是触发器）。
+            // 压力板的 4 水平邻格（同 Y）查发射器 / 投掷器（**任意一侧**邻接压力板即触发 —— t608 方向由
+            //   发射器自身 state 决定，与板在哪侧无关；板只是触发器。t609：投掷器同触发同冷却——机制等价
+            //   MC 1.0 dropper 与 dispenser 同属触发机关，仅内容物出口分派不同）。
             static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
             for (const auto &d : kDirs) {
                 const int dx = bx + d[0], dz = bz + d[1];
                 const quint8 db = m_world->blockAt(dx, feetY, dz);
-                if (!BlockRegistry::isDispenser(db)) continue; // 非发射器 → 跳过
+                if (!BlockRegistry::isDispenser(db) && !BlockRegistry::isDropper(db)) continue; // 非发射器/投掷器 → 跳过
                 // per-dispenser 冷却（按列坐标键 (x,z) 打包）：冷却内不射（防每帧刷屏满天箭）。发射器每柱唯一
                 //   （单格方块，一柱至多一个）故 (x,z) 足以唯一定位发射器格；Y 不进键（防与 x 高位重叠）。
                 const quint64 key = (quint64(quint32(dx)) << 32) | quint64(quint32(dz));
@@ -3739,11 +3762,14 @@ void PlayerController::scanDispenserTraps(float dt)
                 //   （hasDispenser，含全空）= 玩家库存发射器（放置注册 / UI 写入自建 / 存档加载）——库存空
                 //   （含最后一个投掷物用完清零）踩板**无动作**（陷阱解除；旧版空了还 fallback 射箭）；
                 //   无条目 = 神殿陷阱发射器（worldgen 不写 store）→ 保持旧行为 fallback 默认箭。
+                //   t609：投掷器同样走 dispenseFromDispenser（store 共用）——**投掷器分支无 fallback 箭**
+                //   （worldgen 不生成投掷器陷阱，无条目即无内容 → 无动作，机制等价 MC dropper 无红石
+                //   即不弹）。db 传入判定投掷器身份。
                 const bool tracked = m_dispenserStore && m_dispenserStore->hasDispenser(dx, feetY, dz);
                 bool fired = false;
                 if (tracked)
-                    fired = dispenseFromDispenser(dx, feetY, dz, dir);
-                if (!fired && !tracked) {
+                    fired = dispenseFromDispenser(dx, feetY, dz, dir, db);
+                if (!fired && !tracked && BlockRegistry::isDispenser(db)) {
                     // 神殿陷阱路径（无库存）：默认射箭。从发射器格中心 + 朝向外向前移 0.5（出排出口，防贴墙
                     //   spawn 入墙即被 tick 判方块命中，同 fireArrow），水平速度朝 state 朝向，Y 取发射器格
                     //   中心高（feetY+0.5）。vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中）。
@@ -3765,17 +3791,19 @@ void PlayerController::scanDispenserTraps(float dt)
     }
 }
 
-// t579/t580/t608 发射器内容物发射（见 playercontroller.h 头注释）。读 DispenserStore 首个可用槽 → 按物品分派
-//   → 扣 1 库存（setSlot 写回，count-1 归 0 清槽）。发射位（t608 统一排出口）= 发射器格中心 + 朝向外向 ×0.5
+// t579/t580/t608/t609 发射器 / 投掷器内容物弹出（见 playercontroller.h 头注释）。读 DispenserStore 首个可用槽 →
+//   按物品分派 → 扣 1 库存（setSlot 写回，count-1 归 0 清槽）。发射位（t608 统一排出口）= 发射器格中心 + 朝向外向 ×0.5
 //   （出排出口面中心；防贴墙 spawn 入墙即被 tick 判方块命中，同 fireArrow / 神殿箭路径）—— 箭 / 雪球 / 鸡蛋 /
 //   掉落物全部分支用同一 origin（用户「投掷出物品和雪球这些应同一个口出来」）。
-//   分派（t608 口径统一）：箭 → spawnArrowPlayer（arrowFromPlayer=true：命中 mob 伤害 + 嵌入可拾取）；雪球 →
+//   **t609 投掷器分支**（blockId 为 Dropper）：**全部物品**一律 spawnItemAt 定向弹出掉落物（机制等价 MC 1.0
+//   dropper「只投不射」——无箭 / 雪球 / 剑弹丸分派，箭也是普通掉落物实体弹出）。
+//   发射器分派（t608 口径统一）：箭 → spawnArrowPlayer（arrowFromPlayer=true：命中 mob 伤害 + 嵌入可拾取）；雪球 →
 //   spawnSnowball damage=0（与玩家手抛一致：0 伤 + 红闪 + 击退 + 减速）；鸡蛋 → spawnEgg（0 伤 + 命中碎裂 +
 //   1/8 孵小鸡 + 击退）；剑类（ToolRegistry type==Sword）弹射：掉落物实体定向弹出 + 发射方向 3 格内命中活体
 //   mob → damageEntity(attackDamage) 一次 + 沿发射方向击退（机制等价 MC 发射器弹射武器命中伤害；红闪 / 死亡
 //   掉落走 damageEntity 内既有链）；其余物品 → spawnItemAt 定点定向弹出掉落物（排出口 + 朝向初速 + 0.5s 免拾窗
 //   + t468 弹出水平速度抛物）。
-bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3D &dir)
+bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3D &dir, quint8 blockId)
 {
     if (!m_dispenserStore || !m_entityManager) return false;
     // 取首个可用槽（id>0 且 count>0；机制等价 MC 发射器按槽序取首个可用）。
@@ -3785,14 +3813,22 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         const int c = m_dispenserStore->slotCountAt(x, y, z, i);
         if (id > 0 && c > 0) { slot = i; itemId = id; count = c; break; }
     }
-    if (slot < 0) return false; // 库存空 → caller fallback（神殿默认箭）
+    if (slot < 0) return false; // 库存空 → caller fallback（神殿默认箭；投掷器 caller 无 fallback → 无动作）
 
     // 发射位：发射器格中心 + 朝向前移 0.5（出排出口；防 spawn 入墙即命中）。
     const QVector3D origin(float(x) + 0.5f + dir.x() * 0.5f,
                            float(y) + 0.5f,
                            float(z) + 0.5f + dir.z() * 0.5f);
 
-    if (itemId == RecipeRegistry::ArrowId) {
+    if (BlockRegistry::isDropper(blockId)) {
+        // t609 投掷器分支：**全部物品**一律弹出掉落物实体（机制等价 MC 1.0 dropper——只投不射，箭 / 雪球 /
+        //   剑等都不走弹丸 / 伤害分派，一律 spawnItemAt 从排出口沿朝向定向弹出，落地成可拾取掉落物）。
+        //   速度取 kDropperPopSpeed（略低于发射器 kDispenserPopSpeed——轻量出口的温和弹出，机制等价 MC
+        //   dropper 弹出距离短）。附魔经此路径不保真（DispenserStore 槽仅存 (id,count)，既有 store 结构
+        //   限制，同发射器掉落物路径）。
+        if (m_itemEntities)
+            m_itemEntities->spawnItemAt(origin, itemId, 1, dir.x(), dir.z(), kDropperPopSpeed);
+    } else if (itemId == RecipeRegistry::ArrowId) {
         // t608 箭 → **玩家友方箭**（spawnArrowPlayer：arrowFromPlayer=true 语义）：命中 **mob**（damageEntity +
         //   击退 + 红闪，机制等价 MC 1.0 发射器箭可打生物）且嵌入方块后**可被玩家拾取**（arrowPickupScan 只拾
         //   arrowFromPlayer=true 的嵌入箭 → +1 箭物品，机制等价 MC 1.0 发射器箭可拾）。旧版 spawnArrow(false)
