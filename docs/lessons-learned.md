@@ -787,6 +787,46 @@
 
 ## QML / QtQuick
 
+- **QtQuick3D 嵌套结构里材质（PrincipledMaterial 等）作用域的 `parent` 解析到**外层 Model**（材质的 3D 父节点，
+  QQuick3DObject 的 Q_PROPERTY parent），不是 QML 文档里包住它的那个 Node —— 材质里调 `parent.xxx()` 访问 Node
+  上的自定义属性 / 函数必 TypeError（"Property 'xxx' of object QQuick3DModel is not a function"）→ 绑定求值
+  undefined → 该材质通道静默退默认值**：绑定依赖注册、NOTIFY 信号全正常（不是 t498 的漏注册族），唯独值恒错。
+  这是「受击红闪 / 状态 tint / 昼夜灰阶」类「Node 持 color property + function tinted()，材质 baseColor: parent.tinted(...)」
+  模式的必踩坑——代码静态读完全正确（Node 确实有 tinted、Model 确实在 Node 里），只有运行期 log 有 TypeError 行。
+  **判别信号**：(1) 材质属性绑定写 `parent.<自定义属性/函数>` 且该成员声明在**包材质的 Node**（非 Model）上；
+  (2) 用户报「X 状态视觉从不生效（恒默认色）」但同 delegate 其它绑定（position/visible）全正常；
+  (3) 日志 grep `TypeError` 有该行——**任何「3D 材质值恒默认 + 静态审查全对」的报告先 grep 运行 log 的 TypeError**。
+  **通用修法**：给持共享状态（tint / 函数）的 Node 显式 `id:`，材质经 id 引用（`id.tinted(...)`）——作用域链内
+  显式 id 不受 parent 重解析影响。**通用形态**：QtQuick3D 的 `parent` 是 QQuick3DObject 的 3D 场景父（材质→Model→Node），
+  与 QQuick Item 的视觉父一致语义，但**文档嵌套层级 ≠ 3D 父链上的直接父**（材质的直接 3D 父是 Model），凡「材质
+  内引用外层容器的自定义成员」一律用显式 id，禁用 parent。
+  - 证据：t610——雪/铁傀儡两段 `Node { property color tint; function tinted(hex) ... Model { materials:
+    PrincipledMaterial { baseColor: parent.tinted(...) } } }` 运行期恒 TypeError（logs/voxelsandbox.log.preT605 实锤
+    5496/5519 两行）→ 红闪 / 蓝调 / 昼夜灰阶全失效（用户「受伤不闪红」）。改 `id: snowGolemRoot` /
+    `id: ironGolemRoot` + `snowGolemRoot.tinted(...)` 后四调用点全通。
+
+- **「每帧速度清零」型的碰撞闸门会把实体**焊死**在障碍物上——清除必须只砍朝向障碍的分量**：碰撞检测若在
+  位移积分**之前**无条件双轴清零速度（「探到障碍 → v=0」），而检测条件在实体贴障碍时持续为真，则死锁：
+  每帧输入 lerp 刚建起反向速度 → 闸门清零 → 位移为零 → footprint 永不离开障碍 → 下一帧再清。速度永远无法
+  起步，除非外部瞬移。**判别信号**：用户报「撞到 X 后完全不能动了（应能退回来）」且碰撞代码是「检测命中 →
+  全轴清零」而非「检测命中方向 → 清该向分量」。**通用修法**：分向探测（对 ±X/±Z 四向各前探一小步查阻挡），
+  只清「速度在朝障碍方向上的分量」（v·n>0 部分）；背向 / 正交分量保留 → 实体能退离障碍，退出检测范围后
+  自由。对任何「贴墙持续检测 + 速度清除」的物理闸门（船碰岸 / 实体推挤 / 粘性区域）都适用——**闸门只该挡
+  「试图穿入」的速度，不该挡「离开」的速度**。
+  - 证据：t611——t584 船碰岸检测「水面同高层 footprint 触岸 → vx=vz=0」在贴岸后每帧清掉倒退速度（清除在积分
+    前）→ 船焊死在岸边。改四向前探（kShoreProbe=0.15）+ 只清朝岸分量后可倒退；高速撞毁路径保留。
+
+- **资源包「懒拷贝」贴图（A 与 B 逐像素相同的占位复用）会让「按文件名取瓦片」的映射静默取到错误内容——
+  关键特征瓦片（正面 / 刻面 / 状态帧）宜做「退化检测 + 候选链回退」**：部分资源包（demo 包实测
+  pumpkin_face_off.png == pumpkin_side.png）直接把相邻贴图复制改名占位，图集合成按文件名覆盖后「正面瓦片 ==
+  侧面瓦片」→ 用户报「没有脸 / 没有正面」。文件存在性检查全过（不缺文件），纯像素级退化，静态审查 + 加载
+  日志都看不出。**判别信号**：(1) 用户报某面 / 某状态「没有特征」但同名映射确实命中；(2) 对合成后图集做
+  像素级 diff——目标瓦片与它的「无特征基版」（side/top）逐像素相同。**通用修法**：在图集合成处对该瓦片做
+  退化检测（与基版同格式逐像素比较），命中则按候选链回退（如 face_off → carved_pumpkin → face_on）；
+  比较须双转同一 Format（QImage::operator== 不同格式恒 false）。
+  - 证据：t610——pack 图集 tile 118 == tile 117（懒包复用文件）→ 南瓜四面全瓜棱无刻脸。合成处检测退化 →
+    回退 carved_pumpkin.png（log「是侧贴图拷贝（无刻脸），南瓜前面回退」），tile 118 恢复刻脸。
+
 - **QML `url` 值类型（`Image.source` / `Texture.source` / 任何 `Q_PROPERTY(QUrl)` 属性）在 QML JS 里是 QUrl 对象，
   不是字符串——`.length` 对空 url 和有效 url 都恒 `undefined`**：`source.length > 0` 恒 false（即使 source 已是非空
   file:// URL），`source.length === 0` 恒 false，裸 `source` 布尔（QUrl("") 也是 truthy）也不可用。**正确判法**：
