@@ -484,6 +484,7 @@ Window {
         itemEntities.clearAll()
         entityManager.clearAll()
         xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
+        carts.clearAll()    // t565 矿车同族实体（非体素不进存档），切世界必清（清骑乘态 + 空槽复用）
         // t312：清聊天历史（不持久化 / 不跨世界；新世界从空起）。
         chatMessages.clear()
         // t240 进世界生成猪 / 牛 / 羊各一只于出生点附近地表（ EntityManager 已注册 3 类 mobType 1/2/3；
@@ -637,6 +638,7 @@ Window {
         itemEntities.clearAll()
         entityManager.clearAll()
         xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
+        carts.clearAll()    // t565 矿车同族实体，切世界必清
         player.release()
         appState = "worldlist"
         audio.stopAmbient()   // t177 环境音：退出世界停风声床（菜单态无声）
@@ -662,6 +664,7 @@ Window {
         itemEntities.clearAll()        // t176：清实体残留
         entityManager.clearAll()
         xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
+        carts.clearAll()    // t565 矿车同族实体，回主菜单必清
         player.release()
         appState = "menu"
         audio.stopAmbient()   // t177 环境音：回主菜单停风声床
@@ -1292,6 +1295,7 @@ Window {
             entityManager.clearAll()      // mobs + 下落方块 + 箭矢 + 雪球（Entities 全清）
             itemEntities.clearAll()       // 掉落物（修 /kill @e 漏清掉落物 → F3 items 不归零）
             xpOrbs.clearAll()             // 经验球（同族一并清）
+            carts.clearAll()              // t565 矿车（同族一并清）
             // 三类 clearAll 各自 emit 自家 entitiesChanged（mobs/items/orbs）→ 对应 Repeater
             //   delegate 据存活标记 visible=false 隐藏，F3 entities 行 mobs/items/orbs 全归零。
             return "已清除所有非玩家实体"
@@ -1726,6 +1730,12 @@ Window {
     //   Connections 路由到 itemEntities.spawnItem（单向事件流，PLAN §2 分层）。
     BoatManager { id: boats }
 
+    // t565 矿车实体管理器（Entities 层）：轨上骑乘 + WASD 前后推 + 拐角自动转弯（机制等价 MC 1.0 minecart）。
+    //   纯数据持有（pos + 行进向 + yaw + speed），呈现层（下方 cartHost Repeater）只读；轨上推进 / 骑乘操控
+    //   由 PlayerController.step 骑乘分支驱动（持 MinecartManager*）。挖矿车掉矿车物品经 cartBroken 语义
+    //   信号 → 下方 Connections 路由到 itemEntities.spawnItem（单向事件流，PLAN §2 分层；同 boats 模式）。
+    MinecartManager { id: carts }
+
     // t508 挖船 → 掉完整船物品（语义事件路由，同 fallingBlockDropped→spawnItem 模式；PLAN §2 分层）。
     //   boatBroken 由 hitBoatFromRay（攻击 / 挖船）发 → boatType 决定掉哪种船物品（Oak → OakBoatId / Spruce →
     //   SpruceBoatId）。机制等价 MC 1.0 攻击船 → 船破坏掉完整船物品（区别撞坏掉散件，见 onBoatWrecked）。
@@ -1749,6 +1759,16 @@ Window {
             const plankId = (boatType === BoatManager.Spruce) ? 86 /*SprucePlanks*/ : 6 /*Planks*/
             itemEntities.spawnItem(x, y, z, plankId, 3)   // 木板 ×3（变体对应）
             itemEntities.spawnItem(x, y, z, 0x200 /*StickId*/, 2)  // 木棍 ×2
+        }
+    }
+
+    // t565 挖矿车 → 掉矿车物品（语义事件路由，同 onBoatBroken→spawnItem 模式；PLAN §2 分层）。
+    //   cartBroken 由 hitCartFromRay（攻击 / 挖矿车）发 → 呈层据它 spawnItem 掉 MinecartId（可重放）。
+    //   机制等价 MC 1.0 攻击矿车 → 矿车破坏掉完整矿车物品。
+    Connections {
+        target: carts
+        function onCartBroken(x, y, z) {
+            itemEntities.spawnItem(x, y, z, 0x23E /*MinecartId*/, 1)
         }
     }
 
@@ -2036,6 +2056,7 @@ Window {
         worldClock: worldClock
         xpOrbManager: xpOrbs
         boatManager: boats
+        minecartManager: carts
         selectedBlock: hotbarVM.selectedBlockId
         selectedItem: hotbarVM.selectedItemId
     }
@@ -3640,7 +3661,12 @@ Window {
             readonly property bool isRidingBoat: boats.revision >= 0
                                                  ? (player.boatManager ? player.boatManager.ridingIndex() >= 0 : false)
                                                  : false
-            readonly property real sitBlend: playerModel.isRidingBoat ? 1.0 : 0.0
+            // t565 骑矿车同坐姿（机制等价 MC 1.0 矿车骑乘坐姿；feet = 车中心 - 0.3 ≈ 轨面，与船同「坐进斗」
+            //   几何 → 复用同一 sitBlend / sitThigh / sitKnee / sitDrop）。同 isRidingBoat 的 revision 触碰模式。
+            readonly property bool isRidingCart: carts.revision >= 0
+                                                 ? (player.minecartManager ? player.minecartManager.ridingIndex() >= 0 : false)
+                                                 : false
+            readonly property real sitBlend: (playerModel.isRidingBoat || playerModel.isRidingCart) ? 1.0 : 0.0
             // t532「坐姿 = 腿与身 90°，非卡地底」复盘：旧 sitThigh/sitKnee=±85°（钝角非直角）+ sitDrop=0.42
             //   → 髋枢降到 feet+0.18，大腿水平时小腿竖直下垂 0.3 → 脚落 feet−0.12（穿船底 / 穿地 =「人卡地底」用户报）。
             //   几何推导：大腿绕髋 +θ 转，膝（本地 (0,−0.3,0)）→ 世界 (0,−0.3·cosθ, −0.3·sinθ)；θ=90° → 膝同髋高、前伸 0.3。
@@ -4958,6 +4984,98 @@ Window {
                         // 朝向棒：从船中心沿本地 -Z（船头）延伸 0.65（船头前伸辨识朝向）。
                         position: Qt.vector3d(0, 0, -0.325)
                         scale: Qt.vector3d(0.03, 0.03, 0.65)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
+                    }
+                }
+            }
+        }
+
+        // t565 矿车渲染（MinecartManager 的矿车实体；同 boatHost 模式）：Repeater 父节点 = 场景内 3D Node
+        //   （cartHost）→ delegate 被 reparent 进 3D 场景图（同 itemHost / mobHost / boatHost 模式；
+        //   lessons-learned「动态 3D 对象必须挂到场景 Node，否则孤儿不渲染」）。slot-reuse：count 单调不降 →
+        //   空槽 delegate visible=false 隐藏不销毁（同 itemHost 族）。
+        // 触发：carts.count 随 spawnCart 自增（NOTIFY entitiesChanged）→ Repeater 追加 delegate。位置 / 朝向随
+        //   骑乘物理推进 bump revision → {revision; posAt / yawAt} 绑定重算（呈现层只读消费，绝不反向写；PLAN §2）。
+        // 外观（§9a 原创程序几何 UnitCube 拼装，无 MC 资产）：斗形（四面车帮中间凹的敞口车斗）—— 1 块车底板
+        //   （宽 0.8 × 长 0.9）+ 4 面车帮壁（前后左右整圈上凸），整体 ~0.9×0.3×1.0（X 宽 × Y 高 × Z 长，长轴沿
+        //   行进方向 Z；与 kCartHalfW=0.45 / kCartHalfL=0.5 / kCartHalfH=0.45 命中盒 XZ 对齐）。NoLighting 必备
+        //   （可见 Model 红线；lit 材质在本 D3D11 后端不渲染）。车斗常驻铁灰金属色（原创配色）。
+        // t565 接入说明（审查修）：MinecartManager 本体 / PlayerController 矿车分支（放置 / 骑乘 / 行驶 / 下车）
+        //   已存在，但 QML 未实例化 / 未绑 minecartManager 属性 / 无渲染 → m_minecartManager 恒 nullptr，
+        //   所有矿车路径被守卫跳过。本段补齐呈现层接线（实例化 + 属性绑定 + 渲染 Repeater + cartBroken 路由）。
+        Node {
+            id: cartHost
+            Component.onCompleted: {
+                console.info("[t565] cartHost UP parent=" + cartHost.parent + " (须为 3D Node 非 null)")
+            }
+
+            Repeater {
+                model: carts.count
+                delegate: Node {
+                    // lessons-learned t498/t556：NOTIFY 属性须以**表达式形式参与值计算**（`carts.revision >= 0 ? ... : fallback`）
+                    //   才可靠注册依赖；语句块形式在节点上会静默漏注册 → 属性恒初值。统一表达式形式（同 boat delegate）。
+                    visible: carts.revision >= 0 ? carts.aliveAt(index) : false
+                    id: cartRoot
+                    // 矿车中心位（C++ 骑乘物理写入；呈现层只读）。绕 Y 转车头朝向（yawAt；车头 = -Z）。
+                    position: carts.revision >= 0 ? carts.posAt(index) : Qt.vector3d(0, 0, 0)
+                    // 车头朝向（度；先读进 property 再喂 eulerRotation —— 块表达式不能作函数实参）。
+                    property real cartYaw: carts.revision >= 0 ? carts.yawAt(index) : 0
+                    eulerRotation: Qt.vector3d(0, cartRoot.cartYaw, 0)
+
+                    Component.onCompleted: {
+                        if (parent === null) parent = cartHost
+                    }
+
+                    // 车底板（封闭整底）：宽 0.8 × 高 0.06 × 长 0.9，中心下方（车斗底贴轨面 —— 矿车中心已在轨面上
+                    //   kCartRideH=0.3，底板下沿 ~轨面 +0.03 不穿轨）。斗形「底」：封闭整面 + 骑乘玩家的「地板」。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, -0.12, 0)
+                        scale: Qt.vector3d(0.8, 0.06, 0.9)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#9a9a9a" }
+                    }
+                    // 左车帮（-X 纵长壁）：厚 0.08 × 高 0.24 × 长 0.9，贴 -X 边。斗形「帮」：四面整圈上凸中间凹。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(-0.36, 0.03, 0)
+                        scale: Qt.vector3d(0.08, 0.24, 0.9)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a8a8a" }
+                    }
+                    // 右车帮（+X 纵长壁；与左对称）。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0.36, 0.03, 0)
+                        scale: Qt.vector3d(0.08, 0.24, 0.9)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a8a8a" }
+                    }
+                    // 车头帮（-Z 端横壁，跨满宽 x∈[-0.4,0.4]；盖住四角 → 与纵壁端面共面无重叠，同船 t556 消闪烁手法）。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.03, -0.41)
+                        scale: Qt.vector3d(0.8, 0.24, 0.08)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a8a8a" }
+                    }
+                    // 车尾帮（+Z 端横壁；与车头对称）。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0.03, 0.41)
+                        scale: Qt.vector3d(0.8, 0.24, 0.08)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a8a8a" }
+                    }
+                    // F3+B 矿车碰撞箱（同 boat hitbox 模式；PLAN §2-F F3 调试叠层）：
+                    //   kCartHalfW=0.45 / kCartHalfH=0.45 / kCartHalfL=0.5 → scale=(2·半W, 2·半H, 2·半L)+0.01 外扩避面重叠。
+                    Model {
+                        visible: window.showHitboxes
+                        geometry: WireCube {}
+                        scale: Qt.vector3d(0.91, 0.91, 1.01)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
+                    }
+                    // 朝向棒：从矿车中心沿本地 -Z（车头）延伸 0.5（辨识行进朝向）。
+                    Model {
+                        visible: window.showHitboxes
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0, 0, -0.25)
+                        scale: Qt.vector3d(0.03, 0.03, 0.5)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
                 }
@@ -8663,6 +8781,18 @@ Window {
     property bool ridingBoat: boats.revision >= 0
                               ? (player.boatManager ? player.boatManager.ridingIndex() >= 0 : false)
                               : false
+    // t565 骑矿车下车提示（同 ridingBoat 模式；Shift 按下沿 → PlayerController dismount）。
+    //   revision 触碰建可靠 NOTIFY 依赖（ridingIndex 是 Q_INVOKABLE 不被 NOTIFY 自动跟踪；表达式形式铁律）。
+    property bool ridingCart: carts.revision >= 0
+                              ? (player.minecartManager ? player.minecartManager.ridingIndex() >= 0 : false)
+                              : false
+    // t566 复用船的下车提示节拍（5s 自动隐 + 重上重启）：任一骑乘（船 / 矿车）边沿驱动 dismountHintVisible /
+    //   dismountHintTimer；文案统一「按潜行键（Shift）下X」（机制等价 MC 1.0 骑乘提示）。两个 property 的
+    //   onChanged 各自驱动 → 船↔矿车换乘也触发显 / 计时（无缝）。
+    onRidingCartChanged: {
+        if (ridingCart) { dismountHintVisible = true; dismountHintTimer.restart() }
+        else { dismountHintVisible = true; dismountHintTimer.stop() }
+    }
     // t530 下船提示 ~5s 自动消失（机制等价 MC 1.0 骑船提示短暂出现；现常驻改为限时）：首次上船显提示 +
     //   dismountHintTimer 5s 后把 dismountHintVisible 置 false → 提示自动隐（玩家已知晓按键）。重新上船（ridingBoat
     //   false→true 边沿）→ restart 计时 + 提示再显 5s。下船（ridingBoat→false）→ 复位 true 备下次上船。
@@ -8679,11 +8809,11 @@ Window {
         onTriggered: dismountHintVisible = false
     }
     Text {
-        visible: window.appState === "playing" && ridingBoat && window.dismountHintVisible
+        visible: window.appState === "playing" && (ridingBoat || ridingCart) && window.dismountHintVisible
         anchors.bottom: vitalsBar.top
         anchors.bottomMargin: 8
         anchors.horizontalCenter: parent.horizontalCenter
-        text: qsTr("按潜行键（Shift）下船")
+        text: qsTr("按潜行键（Shift）下%1").arg(ridingCart ? "车" : "船")
         color: "#f2f2f2"
         style: Text.Outline
         styleColor: "#202020"
