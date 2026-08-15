@@ -436,7 +436,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RedstoneId),        // 红石粉：地牢战利品（机制等价 MC 1.0 redstone dust）
         int(RecipeRegistry::SaddleId),          // 马鞍：地牢稀有战利品（机制等价 MC 1.0 saddle）
         int(RecipeRegistry::NameTagId),         // 命名牌：地牢稀有战利品（机制等价 MC name tag，1.6+）
-        int(RecipeRegistry::EnchantedBookId),   // 附魔书占位：地牢极稀有战利品（占位无真附魔，1.4+）
+        int(RecipeRegistry::EnchantedBookId),   // t615 附魔书：附魔台附书产 / 地牢极稀有战利品（真附魔，maxStack=1）
         // t398 鸡相关材料（机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉 + 周期下蛋；生存由杀鸡 / 拾鸡蛋获得，
         //   创造调色板补全便于测试 / 装饰）。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘图标。
         int(RecipeRegistry::FeatherId),         // 羽毛：杀鸡掉落

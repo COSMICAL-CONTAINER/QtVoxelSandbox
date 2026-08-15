@@ -232,8 +232,8 @@ Item {
             const src = InventoryOps.readSlot(root, group, index)
             if (src.id === 0 || src.count <= 0) return
             // 工具 / 护甲（有耐久语义的物品）→ 左输入槽 0。t578：槽 0 已放同 id 物 → 第二件入右槽 1
-            //   （同物合并分支输入）；槽 0 异物占用 → 不覆盖。
-            if (root.maxDur(src.id) > 0) {
+            //   （同物合并分支输入）；槽 0 异物占用 → 不覆盖。t615 附魔书（0x227）入左槽（书书合并的 A 端）。
+            if (root.maxDur(src.id) > 0 || src.id === 0x227) {
                 const target = InventoryOps.readSlot(root, "anvil", 0)
                 if (target.id === src.id && target.id !== 0) {
                     const t1 = InventoryOps.readSlot(root, "anvil", 1)
@@ -257,7 +257,10 @@ Item {
                 const space = cap - target.count
                 if (space <= 0) return
                 const move = Math.min(space, src.count)
-                InventoryOps.writeSlot(root, "anvil", 1, src.id, target.count + move, 0)
+                // t615 附魔书（maxStack=1，每本独立附魔列表）→ 整件入槽且**附魔随实例保真**（同工具语义）；
+                //   修复材料（可堆叠、无附魔）→ 惯例 0。
+                InventoryOps.writeSlot(root, "anvil", 1, src.id, target.count + move, 0,
+                                      isBook ? src.enchants : [0,0,0,0])
                 const remain = src.count - move
                 InventoryOps.writeSlot(root, group, index, remain > 0 ? src.id : 0, remain, 0)
                 return
@@ -403,14 +406,84 @@ Item {
         if (root.leftCount <= 0 || (root.anvilCounts[1] || 0) <= 0) return false
         return root.maxDur(root.leftId) > 0
     }
-    // 附魔合并前置：左槽可附魔（工具 / 护甲，itemEnchantCategory != 0）+ 右槽附魔书（t393 占位无真附魔
-    //   → 合并为空操作，产物 = 左槽原样）。0x227 = RecipeRegistry::EnchantedBookId。
+    // 附魔合并前置（t615 真附魔书）：左槽可附魔（工具 / 护甲，itemEnchantCategory != 0）+ 右槽附魔书
+    //   → 书上附魔逐条尝试写入 C（适用过滤 + 冲突组 + 等级合并，见 computeBookMerge）。
+    //   t615 书书合并：左槽 = 附魔书 + 右槽 = 附魔书 → C = 合并书（同合并规则；冲突项以 B 替换 A 生成 C，
+    //   见 computeBookMerge 的 bookMerge 分支）。0x227 = RecipeRegistry::EnchantedBookId。
     readonly property bool canMerge: {
         const _r = root.anvilRev
         if (_r < 0) return false
-        if (root.leftId === 0 || root.matId !== 0x227) return false
-        if (!root.hotbar || root.hotbar.itemEnchantCategory(root.leftId) === 0) return false
-        return true
+        if (root.matId !== 0x227) return false
+        // 分支一：左槽可附魔物（工具 / 武器 / 护甲）+ 右槽附魔书。
+        if (root.leftId !== 0 && root.hotbar && root.hotbar.itemEnchantCategory(root.leftId) !== 0) return true
+        // 分支二：两本附魔书合并（左 = 附魔书 + 右 = 附魔书 → 合并书）。
+        if (root.leftId === 0x227) return true
+        return false
+    }
+    // t615 附魔书合并计算（纯函数；canMerge 真时生效）。把 B 槽书的附魔逐条尝试写入 C（初始 = A 附魔副本）：
+    //   - 适用过滤：enchantApplicableTo（剑类附魔不上镐 / 摔落保护仅靴…）→ 不适用条目不上（灰显提示）。
+    //   - 冲突组：与 C 已有附魔互斥（enchantConflictsWith；锐锋族 / 采集族 / 保护系）→ 不上（红字「冲突」）。
+    //   - 等级合并：C 已有同款 Lc、书 Lb → max(Lc, Lb)；Lc==Lb → Lc+1（封顶 enchantMaxLevel）；C 无 → 直接写 Lb。
+    //   - 4 槽写满后续条目不上（附魔槽上限）。
+    //   返回 { out: 4-int 合并结果, applied: 成功写入条数, conflictNames: 冲突条目中文名表,
+    //          inapplicableNames: 不适用条目中文名表, replaced: 书书合并时 B 顶掉 A 的冲突条数 }。
+    //   书书合并（leftId===0x227）差异：A 也是书 → 目标域判定对「书」恒适用（载体）；同款等级合并同规则；
+    //   **互斥冲突条目按用户口径「B 替换 A」**——A 上与 B 冲突的旧附魔被 B 的新附魔替换（如 A 锐锋 II +
+    //   B 亡灵杀手 III → C 亡灵杀手 III，锐锋被顶掉）。
+    function computeBookMerge() {
+        const out = root.enchAt(0).slice()        // C 初始 = A 全属性（附魔 / 耐久 / 名走各字段）
+        const src = root.enchAt(1)                // B 书附魔
+        const isBookMerge = (root.leftId === 0x227)
+        const conflictNames = []
+        const inapplicableNames = []
+        let applied = 0
+        let replaced = 0
+        for (let i = 0; i < 4; ++i) {
+            const packed = src[i] || 0
+            if (packed === 0) continue
+            const eid = (packed >> 8) & 0xFF
+            const lvl = packed & 0xFF
+            const name = root.hotbar.enchantDisplayName(eid)
+            // 适用过滤：工具 / 护甲目标按 isApplicableForItem 精判；书书合并对「书」恒适用（载体）。
+            if (!isBookMerge && !root.hotbar.enchantApplicableTo(eid, root.leftId)) {
+                inapplicableNames.push(name)
+                continue
+            }
+            // 冲突组：与 C 已有附魔互斥 → 工具目标不上（红字冲突）；书书合并 → B 替换 A（先移除被顶旧条）。
+            let conflictSlot = -1
+            for (let j = 0; j < 4; ++j) {
+                const p = out[j] || 0
+                if (p !== 0 && root.hotbar.enchantConflictsWith((p >> 8) & 0xFF, eid)) { conflictSlot = j; break }
+            }
+            if (conflictSlot >= 0) {
+                if (!isBookMerge) { conflictNames.push(name); continue }
+                out[conflictSlot] = 0            // 书书合并：B 顶掉 A 的冲突旧附魔
+                replaced++
+            }
+            // 等级合并：同款 → max / 相等 +1（封顶）；无 → 首个空槽写入。
+            let slot = -1
+            for (let j = 0; j < 4; ++j) {
+                const p = out[j] || 0
+                if (p !== 0 && ((p >> 8) & 0xFF) === eid) { slot = j; break }
+            }
+            if (slot >= 0) {
+                const cur = out[slot] & 0xFF
+                const cap = root.hotbar.enchantMaxLevel(eid)
+                let merged = (cur === lvl) ? cur + 1 : Math.max(cur, lvl)
+                merged = Math.min(merged, cap)
+                out[slot] = (eid << 8) | merged
+                applied++
+            } else {
+                let freeSlot = -1
+                for (let j = 0; j < 4; ++j) {
+                    if ((out[j] || 0) === 0) { freeSlot = j; break }
+                }
+                if (freeSlot >= 0) { out[freeSlot] = (eid << 8) | Math.min(lvl, root.hotbar.enchantMaxLevel(eid)); applied++ }
+                // 4 槽满 → 不上（静默；附魔槽上限）。
+            }
+        }
+        return { out: out, applied: applied, conflictNames: conflictNames,
+                 inapplicableNames: inapplicableNames, replaced: replaced }
     }
     // 重命名前置：左槽有物 + 名字**真改过**（≠自动填充值 lastAutoName；t606② 自动填名后框恒非空，
     //   改名产物须以用户实际修改为前提——未改名的物品单独放 A 不出产物，机制等价 MC「名字栏与当前名
@@ -446,30 +519,61 @@ Item {
         const have = root.anvilCounts[1] || 0
         return Math.min(have, repairMatNeeded(root.leftId, root.leftDur))
     }
+    // t615 附魔书合并预览（canMerge 时恒新鲜；触碰 anvilRev）。缓存属性（绑定间共享，防 cost / productEnch /
+    //   conflictText 三处各调 computeBookMerge 重复计算）。
+    readonly property var bookMerge: {
+        const _r = root.anvilRev
+        return _r >= 0 && root.canMerge ? root.computeBookMerge() : { out: [0,0,0,0], applied: 0, conflictNames: [], inapplicableNames: [], replaced: 0 }
+    }
+    // t615 附魔合并等级上限（用户口径①：敲附魔书有等级惩罚且「如果超过最大上限将显示过于昂贵」——
+    //   机制等价 MC 铁砧 40 级上限 Too Expensive）。合并消耗 > 上限 → 过于昂贵（不可合，红字）。
+    readonly property int kMergeCostCap: 40
+    readonly property bool mergeTooExpensive: root.canMerge && (2 * root.bookMerge.applied) > root.kMergeCostCap
     // 所需 XP 等级（产物格下绿字数值）。修复 = 实耗材料数（至少 1）；同物合并 = 2（机制等价 MC 合并
-    //   修复计费档）；附魔合并 = 2；改名 = 1；改名叠加 → +1。
+    //   修复计费档）；t615 附魔书合并 = 成功写入条数 × 2（用户口径①「敲附魔书的等级惩罚」；全不适用 /
+    //   全冲突 → 条数 0 → 仍可出产物（只继承 A），消耗照算 0 级 + 书照扣）；改名 = 1；改名叠加 → +1。
     readonly property int cost: {
         const op = root.activeOp
         if (op === "repair") return Math.max(1, root.repairMatUse()) + (root.renaming ? 1 : 0)
-        if (op === "combine" || op === "merge") return 2 + (root.renaming ? 1 : 0)
+        if (op === "combine") return 2 + (root.renaming ? 1 : 0)
+        if (op === "merge") return 2 * root.bookMerge.applied + (root.renaming ? 1 : 0)
         if (op === "rename") return 1
         return 0
     }
     // t606③ 创造模式免经验：affordCost 恒真（不管需几级都绿、可付；材料消耗照旧——保守只免经验）。
-    readonly property bool affordCost: root.creativeMode || playerLevel >= cost
+    //   t615「过于昂贵」不可付：merge 消耗超 40 级上限 → 即使创造也拒（用户口径①的硬上限；MC 创造同拒）。
+    readonly property bool affordCost: root.mergeTooExpensive ? false : (root.creativeMode || playerLevel >= cost)
     // 产物槽等级文字（绿字可承担 / 红字经验不足；t576 删「放入物品与材料」灰字提示——无产物时静默空白；
-    //   t606⑥ 改名分支只显消耗不再带产物名——名字已在输入框内 + 产物 tooltip（hoveredProductName）有）。
+    //   t606⑥ 改名分支只显消耗不再带产物名——名字已在输入框内 + 产物 tooltip（hoveredProductName）有；
+    //   t615 附魔书合并显「附魔 ×N · 消耗 M 级」；超 40 级上限 → 「过于昂贵」（红字，不可合））。
     readonly property string costText: {
         const op = root.activeOp
         if (op === "repair") return "修复 " + cost + " 级"
         if (op === "combine") return "合并 " + cost + " 级"
-        if (op === "merge") return "合并附魔 " + cost + " 级"
+        if (op === "merge") {
+            if (root.mergeTooExpensive) return "过于昂贵"
+            return "附魔 ×" + root.bookMerge.applied + " · 消耗 " + cost + " 级"
+        }
         if (op === "rename") return "重命名 " + cost + " 级"
         return ""
     }
     readonly property string costColor: {
         if (root.activeOp === "") return "transparent"
+        if (root.mergeTooExpensive) return "#e06f5f"   // t615 过于昂贵（恒红，创造也拒）
         return root.affordCost ? "#6fe06f" : "#e06f5f"
+    }
+    // t615 冲突 / 不适用提示行（merge 时等级行下方红字列出未上的附魔；dev-plan §5 UI 呈现）：
+    //   「冲突：锐锋」= 与 C 已有附魔互斥（不上）；「不适用：保护」= 剑类附魔不上镐等（不上）。
+    //   书书合并的 B 替换 A 冲突**可合**（非拒）→ 不列冲突行，改列「替换：锐锋 → 亡灵杀手」省字版（仅计数）。
+    readonly property string mergeConflictText: {
+        const _r = root.anvilRev
+        if (_r < 0 || root.activeOp !== "merge") return ""
+        const bm = root.bookMerge
+        let out = ""
+        if (bm.conflictNames.length > 0) out += "冲突：" + bm.conflictNames.join("、")
+        if (bm.inapplicableNames.length > 0) out += (out.length > 0 ? "　" : "") + "不适用：" + bm.inapplicableNames.join("、")
+        if (root.leftId === 0x227 && bm.replaced > 0) out += (out.length > 0 ? "　" : "") + "替换 ×" + bm.replaced
+        return out
     }
     // 产物槽内容（t578 四分支：修复 → 修后耐久；同物合并 → 合并耐久；附魔书合并/改名 → 左槽原样；
     //   其余不匹配组合 → 产物空）。id / 耐久 / 附魔（改名产物名走 hoveredProductName / 改名框）。
@@ -497,12 +601,18 @@ Item {
             const rDur = root.anvilDur[1] || 0
             return Math.min(max, Math.floor(root.leftDur + rDur + max * 0.1))
         }
-        if (op === "merge" || op === "rename") return root.leftDur
+        if (op === "merge" || op === "rename") {
+            // t615 merge 书书合并（leftId=附魔书）：书无耐久 → 产物耐久 0；工具 / 护甲目标继承左槽耐久。
+            return (op === "merge" && root.leftId === 0x227) ? 0 : root.leftDur
+        }
         return 0
     }
     readonly property var productEnch: {
         const _r = root.anvilRev
-        return _r >= 0 ? root.enchAt(0) : [0, 0, 0, 0]
+        if (_r < 0) return [0, 0, 0, 0]
+        // t615 merge：产物附魔 = computeBookMerge 结果（适用过滤 + 冲突 + 等级合并后的 C）。
+        if (root.activeOp === "merge") return root.bookMerge.out
+        return root.enchAt(0)
     }
     // ════════════════════════════════════════════════════════════════════════════
 
@@ -522,7 +632,8 @@ Item {
         //   - 光标被异物占用 → addToAny 找背包空位（不动光标原物；返回未放入数 > 0 = 背包满 → 无操作）。
         //   - 改名产物（outName 非空）：held 光标栈无 customName 通道 → 须落定即带名，找空槽 setStack +
         //     setCustomName（hotbar 优先 → main；无空槽 → 无操作）。异物光标 / 满背包均不消耗、不破坏。
-        const outId = root.leftId
+        //   t615 merge 书书合并：产物 id 翻附魔书（0x227）→ let（非 const）。
+        let outId = root.leftId
         // 单独改名可作用于可堆叠物品（左槽非工具也能 rename）→ 产物保留整栈数量（机制等价 MC「改名整栈
         //   保留」；原实现硬编码 1 会销毁 64 泥土的 63 件）。修复 / 合并要求工具 / 护甲（cap=1 恒单件）。
         const outCount = (op === "rename") ? Math.max(1, root.leftCount) : 1
@@ -567,29 +678,19 @@ Item {
             }
             root.lastResult = "合并完成 +2级"
         } else if (op === "merge") {
-            // 右槽附魔书合并到左槽（逐附魔：已有同 id → 取 max 等级；否则写首个空槽 ≤4）。占位书无真附魔
-            //   → 循环空转（产物 = 左槽原样附魔）；真附魔书数据接入后此逻辑即生效。
-            const src = root.enchAt(1)
-            for (let i = 0; i < 4; ++i) {
-                const packed = src[i] || 0
-                if (packed === 0) continue
-                const eid = (packed >> 8) & 0xFF
-                const lvl = packed & 0xFF
-                let slot = -1
-                for (let j = 0; j < 4; ++j) {
-                    const p = outEnch[j] || 0
-                    if (p !== 0 && ((p >> 8) & 0xFF) === eid) { slot = j; break }
-                }
-                if (slot >= 0) {
-                    const cur = outEnch[slot] & 0xFF
-                    outEnch[slot] = (eid << 8) | Math.max(cur, lvl)
-                } else {
-                    for (let j = 0; j < 4; ++j) {
-                        if ((outEnch[j] || 0) === 0) { outEnch[j] = packed; break }
-                    }
-                }
+            // t615 真附魔书合并（computeBookMerge：适用过滤 + 冲突组 + 等级合并；预览 = 写入同口径）。
+            //   工具 / 护甲目标：产物 = A 属性 + 书上成功写入条目；书书合并（A=书）：产物 = 合并书
+            //   （B 顶掉 A 冲突项 → id 恒附魔书 0x227，耐久 0）。全不适用 / 全冲突 → 产物仍出（只继承 A，
+            //   红字提示），消耗照算（applied=0 → 0 级）+ 书照扣（B 消耗 1 本）。
+            const bm = root.computeBookMerge()
+            outEnch = bm.out
+            if (root.leftId === 0x227) {
+                outId = 0x227                       // 书书合并 → 产物恒附魔书
+                outDur = 0                          // 书无耐久
             }
-            root.lastResult = "合并完成 +2级"
+            root.lastResult = bm.applied > 0
+                ? "附魔合并 ×" + bm.applied + "（消耗 " + root.cost + "级）"
+                : "无适用附魔（消耗 " + root.cost + "级）"
         } else { // rename
             root.lastResult = "已重命名"
         }
@@ -883,6 +984,19 @@ Item {
                     text: root.costText
                     color: root.costColor
                     font.pixelSize: 12; font.bold: true
+                    visible: text.toString().length > 0
+                }
+
+                // t615 冲突 / 不适用红字提示行（等级行下方；merge 时书上未写入的附魔逐条列出）。
+                Text {
+                    anchors.top: slotRow.bottom; anchors.topMargin: 20
+                    anchors.horizontalCenter: slotRow.horizontalCenter
+                    width: slotRow.width + 60
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WrapAnywhere
+                    text: root.mergeConflictText
+                    color: "#e08a7f"
+                    font.pixelSize: 9
                     visible: text.toString().length > 0
                 }
 
@@ -1306,6 +1420,21 @@ Item {
         if (_ar >= 0 && root.hoveredKey === "anvil:2" && root.renaming) return _n.trim()
         return ""
     }
+    // t615 当前 hover 槽物品的附魔列表文本（tooltip 附魔行；同 EnchantingTableUI / SurvivalInventory 模式）：
+    //   anvil:0/1 = 本地槽实例附魔；anvil:2 = 产物预览附魔（productEnch——修复 / 合并 / 敲附魔书后的结果）。
+    //   附魔书物品（0x227）带附魔 → 列出携带附魔（机制等价 MC enchanted book tooltip）。
+    property string hoveredEnchantText: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _ar = root.anvilRev
+        const key = root.hoveredKey
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] !== "anvil") return ""
+        if (idx === 2) return _ar >= 0 ? root.hotbar.enchantListText(root.productEnch) : ""
+        return _ar >= 0 ? root.hotbar.enchantListText(root.enchAt(idx)) : ""
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -1333,9 +1462,11 @@ Item {
             id: tipLabel
             anchors.centerIn: parent
             // t263 工具/护甲槽 tooltip 附「cur/max」耐久行；无耐久 / 未跟踪 → 仅显名。产物改名 → 显新名。
-            text: root.hotbar ? (root.hoveredProductName.length > 0 ? root.hoveredProductName
+            //   t615 附魔行：物品带附魔 → 换行显附魔列表（同 t590 各面板 tooltip；附魔书列出携带附魔）。
+            text: root.hotbar ? ((root.hoveredProductName.length > 0 ? root.hoveredProductName
                     : root.hotbar.nameForBlock(root.hoveredItemId)
-                        + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.maxDur(root.hoveredItemId) : "")) : ""
+                        + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.maxDur(root.hoveredItemId) : ""))
+                    + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : ""
             color: "#f2f2f2"
             font.pixelSize: 12
         }

@@ -3871,7 +3871,8 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   与箭 / 雪球 / 鸡蛋同一口出来（旧版 emit spawnItem 用发射器格中心 → 与投掷物两个口，用户「投掷出
         //   物品和雪球这些不是一个口出来的」）+ 沿朝向定向弹出初速 kDispenserPopSpeed（旧版哈希随机方向）。
         //   走 spawnItemAt（定点定向弹出，C++ 直调同 pickupScan 的 removeAt 模式；免 QML 信号往返）。
-        //   注意：DispenserStore 槽仅存 (id,count)，经此路径弹出的附魔工具附魔不保真（既有 store 结构限制）。
+        //   注意：DispenserStore 槽仅存 (id,count)，经此路径弹出的附魔工具 / 附魔书（t615）附魔不保真
+        //   （既有 store 结构限制，弹出后为无附魔普通物品；机制近似——发射器内物品本无「实例」语义）。
         if (m_itemEntities)
             m_itemEntities->spawnItemAt(origin, itemId, 1, dir.x(), dir.z(), kDispenserPopSpeed);
     }
