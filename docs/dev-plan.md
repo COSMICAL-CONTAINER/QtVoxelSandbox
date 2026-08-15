@@ -2087,8 +2087,9 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 查：两 mob 的 Model 材质 brightness/光照通道 —— 是否没走 `PrincipledMaterial.NoLighting`（违反光照不变量）或贴图 tint 乘了暗色。对照 Shambler/Bones 的材质参数拉平。
 - 根因：PrincipledMaterial 渲染 = baseColorMap × baseColor；Stalker/Spider 把 pack 关时的纯色体色（暗绿 0.37/0.66/0.23、暗黑红 0.16/0.10/0.10）也乘上 pack 贴图 → 压暗到 ~1/3 与 ~1/10。修：pack 贴图在身时 baseColor 近白（同 Shambler terrainLight 白 tint）；ResourceBrowser 图鉴预览同修（mobFallbackColor 仅 pack 关纯色路径用）。
 
-**t598** 鸡腿贴图缺失 + 雪傀儡无头 + 铁傀儡头/腿/肩黑色
+**t598** 鸡腿贴图缺失 + 雪傀儡无头 + 铁傀儡头/腿/肩黑色 ✅（commit 见 git log，t598）
 - 查：① 鸡腿 box UV 采样（鸡贴图腿区在特定 uv 区）；② 雪傀儡头（同 t582 图鉴路径）；③ 铁傀儡：腿前黑（front 面贴图采样错位）+ 肩黑色（shoulder box UV 越界）—— box-UV 公式对照 MC 1.8 iron_golem 实际 textureOffset 重算。
+- 修：① demo 包 chicken.png 腿区不在 vanilla (26,0) 位（该区是翅膀/喙稀疏像素）→ 两腿与躯干共用 body(0,9,6,8,6)（六面 100% 不透明）。② ResourceBrowser 图鉴预览补 BlockCube{blockId:100} 南瓜头（同 Main.qml t582 方案，雪 y=1.14 宽 0.50 / 铁 y=0.95 宽 0.72）。③ 铁傀儡按包实测重算（包绘画布局与 vanilla 源码不符）：body d=9→11（修 Top 面空边=肩黑）、leg (0,30,4,12,4)→(0,70,9,5,6)、arm (40,40,4,16,4)→(60,58,4,16,6)，全部六面 100% 不透明。
 
 **t599** 资源查看器 3D 模型鼠标拖拽旋转（自动旋转基础上可拖）
 - 查：ResourceBrowser 3D 预览 —— autoRotate + 鼠标 DragHandler 叠加（拖时暂停自动转，松手恢复；惯性与现自动旋转融合）。

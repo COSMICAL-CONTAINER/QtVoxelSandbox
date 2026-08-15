@@ -65,7 +65,8 @@ Item {
     //   名称 §9 区隔（Shambler↔zombie / Bones↔skeleton / Stalker↔creeper）。雪傀儡/铁傀儡条目 I3 追加——
     //   本任务已接入：加 mobType 12/13 两行 + mobPreviewCentY + mobFallbackColor 分支（mobPreviewScale 12/13→0.75
     //   既存）。pack 命中 snow_golem.png / iron_golem.png → View3D 显带 pack 纹理的雪块身 / 铁块身 MobModel；
-    //   pack 关 → 纯色雪白 / 铁灰（mobFallbackColor）。南瓜头 / 眼不在图鉴预览（MobModel 仅含身体，聚焦 pack 贴图）。
+    //   pack 关 → 纯色雪白 / 铁灰（mobFallbackColor）。t598：雪/铁傀儡南瓜头补独立 BlockCube Model（同 Main.qml
+    //   t582 游戏内方案；此前预览漏头 = 雪傀儡「无头」）。眼 overlay 不在图鉴预览（聚焦 pack 贴图）。
     readonly property var mobModel: [
         { mobType: 1, name: "猪" }, { mobType: 2, name: "牛" }, { mobType: 3, name: "羊" },
         { mobType: 4, name: "蹒跚者" }, { mobType: 5, name: "骷髅弓箭手" }, { mobType: 6, name: "潜行者" },
@@ -454,26 +455,49 @@ Item {
                                     //   entity 贴图）+ baseColorMap = pack 贴图；pack 关 → 全脸 UV + 程序生成 mob_*.png /
                                     //   纯色（mobFallback*；bones/stalker/spider 无程序贴图 → baseColorMap:null）。
                                     //   NoLighting（渲染可见性铁律）。scale 1.0（I3 雪/铁傀儡 0.75）+ 垂直居中微调。
-                                    Model {
+                                    // t598 雪/铁傀儡南瓜头：两傀儡 MobModel 几何只含块身（头是独立 Model，同 Main.qml
+                                    //   t582 游戏内方案）—— 图鉴预览此前漏了头 → 雪傀儡「无头」。把游戏内方案带过来：
+                                    //   傀儡 mobType 时在 MobModel 上叠 BlockCube{blockId:100}（南瓜方块）+ 共享图集
+                                    //   （atlasSource，pack 激活即 HD 南瓜瓦片，机制等价 MC 1.0 雪傀儡戴刻面南瓜）。
+                                    //   铁傀儡同补（其游戏内头也是独立 Model）。头随父 Model 同转（自转/拖拽）。
+                                    Node {
                                         visible: root.selectedIsMob
-                                        geometry: MobModel {
-                                            mobType: root.selectedMobType
-                                            packTextured: root.selectedMobPackSrc !== ""
-                                        }
                                         position: Qt.vector3d(0, root.mobPreviewCentY(root.selectedMobType), 0)
                                         scale: Qt.vector3d(root.mobPreviewScale(root.selectedMobType),
                                                           root.mobPreviewScale(root.selectedMobType),
                                                           root.mobPreviewScale(root.selectedMobType))
                                         eulerRotation: Qt.vector3d(-22, root.spinAngle - 35, 0)
-                                        materials: PrincipledMaterial {
-                                            lighting: PrincipledMaterial.NoLighting
-                                            // pack 关且无程序贴图（bones/stalker/spider）→ null + 纯色 baseColor。
-                                            // t597 修：渲染 = baseColorMap × baseColor —— pack 贴图在身时 baseColor 用白
-                                            //   （贴图原色完整透出，同 Main.qml t597 修法）；mobFallbackColor 是 pack 关的
-                                            //   纯色体色（stalker #3a5a3a / spider #2a1a1a 均暗色），乘上 pack 贴图会把
-                                            //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
-                                            baseColorMap: root.selectedMobTexSource !== "" ? mobPrevTex : null
-                                            baseColor: root.selectedMobTexSource !== "" ? "#ffffff" : root.mobFallbackColor(root.selectedMobType)
+                                        Model {
+                                            geometry: MobModel {
+                                                mobType: root.selectedMobType
+                                                packTextured: root.selectedMobPackSrc !== ""
+                                            }
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                // pack 关且无程序贴图（bones/stalker/spider）→ null + 纯色 baseColor。
+                                                // t597 修：渲染 = baseColorMap × baseColor —— pack 贴图在身时 baseColor 用白
+                                                //   （贴图原色完整透出，同 Main.qml t597 修法）；mobFallbackColor 是 pack 关的
+                                                //   纯色体色（stalker #3a5a3a / spider #2a1a1a 均暗色），乘上 pack 贴图会把
+                                                //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
+                                                baseColorMap: root.selectedMobTexSource !== "" ? mobPrevTex : null
+                                                baseColor: root.selectedMobTexSource !== "" ? "#ffffff" : root.mobFallbackColor(root.selectedMobType)
+                                            }
+                                        }
+                                        // t598 傀儡南瓜头（雪傀儡 mobType 12 / 铁傀儡 13；同 Main.qml t582 游戏内头方案：
+                                        //   BlockCube{blockId:100} + 图集瓦片 per-face 采 pumpkin_side/top/face）。
+                                        //   位置/尺寸与 Main.qml 游戏内 delegate 一致（雪：头心 y=1.14 宽 0.50；
+                                        //   铁：头心 y=0.95 宽 0.72 —— 碰撞中心局部坐标，随父 Node scale 缩放）。
+                                        Model {
+                                            visible: root.selectedMobType === 12 || root.selectedMobType === 13
+                                            geometry: BlockCube { blockId: 100 } // 100 = BlockRegistry::Pumpkin（QML 不 import C++ 静态类故字面量，同 Main.qml 约定）
+                                            position: root.selectedMobType === 12 ? Qt.vector3d(0, 1.14, 0) : Qt.vector3d(0, 0.95, 0)
+                                            scale: root.selectedMobType === 12 ? Qt.vector3d(0.50, 0.50, 0.50) : Qt.vector3d(0.72, 0.66, 0.72)
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
+                                                alphaMode: PrincipledMaterial.Mask
+                                                alphaCutoff: 0.5
+                                            }
                                         }
                                     }
                                 }

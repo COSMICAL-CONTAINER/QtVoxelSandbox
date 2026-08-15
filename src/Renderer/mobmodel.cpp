@@ -498,7 +498,12 @@ void MobModel::rebuild()
         //   **2 细腿**（biped walk cycle，区别于猪/牛/羊的 4 腿；鸡是两足鸟）。腿底本地 y≈−0.40 贴 collision 底面
         //   （EntityManager halfH=0.40 → offset=0，腿底贴地）。喙 / 鸡冠 / 肉垂由 Main.qml delegate 补（纯色子 Model，
         //   同猪眼模式 —— 单材质无法同几何双色，故头饰独立子节点）。机制等价 MC 1.0 鸡形态（小体型 + 两足 + 后翘尾）。
-        // R19 C3 UV（MC Chicken base 64×32；U1 §8）：head(0,0)4×6×3 / body(0,9)6×8×6 / leg(26,0)3×5×3。
+        // R19 C3 UV（MC Chicken base 64×32；U1 §8）：head(0,0)4×6×3 / body(0,9)6×8×6。
+        //   t598 修（用户「鸡腿贴图缺失」）：旧腿 texOffs (26,0)3×5×3 在 demo 包实测六面 0-78% 不透明
+        //   （(26,0)-(40,9) 区是翅膀 bill/chin 稀疏像素，非腿）→ 腿面采样透明区读作黑。
+        //   demo 包 chicken.png 全图实测：唯一全覆盖腿区 = body(0,9,6,8,6) 自身（六面 100% 不透明，
+        //   含宽条 (0,19)-(24,23)），本包未按 vanilla (26,0) 布局画独立腿 → 两腿与躯干共用 body texOffs
+        //   （全脸同区采样，视觉为身体色，不再有透明黑腿）。
         //   后翘尾无 MC 对应 box → 复用 body texOffs（贴图同区，视觉为身体色）。喙/肉垂由 Main.qml 补。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(0, 9, 6, 8, 6);
@@ -509,10 +514,11 @@ void MobModel::rebuild()
         addBox( 0.00f,  0.14f,  0.22f, 0.09f, 0.09f, 0.05f, verts, idx, bMin, bMax); // 后翘尾（+Z 后方上翘小撮）
         // 2 细腿（biped walk cycle，绕髋左右反相摆动 —— 同 Shambler/Bones 双腿模式，区别于四足 addLegs）：
         //   髋枢 hipY=−0.05（躯干底面）；腿盒心 y=−0.225（腿顶 y=−0.05、腿底 y=−0.40）→ 腿底贴 collision 底面。
+        //   t598：腿 texOffs 共用 body(0,9,6,8,6)（见上注，demo 包腿区不在 vanilla (26,0) 位）。
         const float sw8 = kLegSwingAmp * std::sin(m_walkPhase);
-        setMobTex(26, 0, 3, 5, 3);
+        setMobTex(0, 9, 6, 8, 6);
         addBoxRot(-0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, +sw8, verts, idx, bMin, bMax); // 左腿（细）
-        setMobTex(26, 0, 3, 5, 3);
+        setMobTex(0, 9, 6, 8, 6);
         addBoxRot( 0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, -sw8, verts, idx, bMin, bMax); // 右腿（细）
     } else if (m_mobType == 9) {
         // t399 Squid（鱿鱼；机制等价 MC 1.0 squid，§9 原创模型 + 贴图）—— 水生软体：圆胖躯干（mantle）+ 顶端小尖 +
@@ -592,18 +598,24 @@ void MobModel::rebuild()
         //   pack 命中 iron_golem.png → 6 面 T 字 UV 展开显铁纹（修 dev-plan C「铁傀儡全白」：程序纯色铁灰在用户
         //   视角读作「白」，pack 铁纹才显铁质）；pack 关 → 全脸 UV + 纯色铁灰 #7d848c（原 t483 锈斑 Model 在 pack
         //   命中时由 pack 铁纹取代，pack 关时简化为纯色铁灰无锈斑）。
-        // R19 C3 UV（MC IronGolem base 128×128；U1 §13 [≈]）：body(0,40)18×12×9 / arm(40,40)4×16×4 / leg(0,30)4×12×4。
+        // R19 C3 UV（MC IronGolem base 128×128）：t598 重算（用户「铁傀儡腿前黑 + 肩黑色」）——
+        //   demo 包 iron_golem.png (1024×1024 = 8×) 全图枚举六面 100% 不透明 box-UV 候选，取各部件实际绘画区
+        //   （本包绘画布局与 vanilla 1.8.2 ModelIronGolem texOffs 不符，按包实测而非源码值）：
+        //   body(0,40)18×12×11 —— 旧 d=9 使 Top 面左移 2px 采到空边 x9..11（= 肩黑色根因）；d=11 六面 100% 不透明。
+        //   arm(60,58)4×16×6 —— 旧 (40,40,4,16,4) 侧面仅 56-89% 不透明（= 臂暗根因）；(60,58) 六面 100%。
+        //   leg(0,70)9×5×6 —— 旧 (0,30,4,12,4) 六面 0-50% 不透明（= 腿前黑根因）；(0,70) 六面 100%
+        //   （Front=(6,76)-(15,81) 正对镜头的面不再采样空区）。
         //   头（南瓜）由 Main.qml 补独立 Model，几何不含头。UV 分数分母用 base 128（HD 包整张放大，分数仍按 base）。
         g_texW = 128.0f; g_texH = 128.0f;
-        setMobTex(0, 40, 18, 12, 9);
+        setMobTex(0, 40, 18, 12, 11);
         addBox( 0.00f,  0.05f, 0.00f, 0.475f, 0.525f, 0.325f, verts, idx, bMin, bMax); // 宽躯干（铁块身）
-        setMobTex(0, 30, 4, 12, 4);
+        setMobTex(0, 70, 9, 5, 6);
         addBox(-0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 左腿（铁块）
-        setMobTex(0, 30, 4, 12, 4);
+        setMobTex(0, 70, 9, 5, 6);
         addBox( 0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 右腿（铁块）
-        setMobTex(40, 40, 4, 16, 4);
+        setMobTex(60, 58, 4, 16, 6);
         addBox(-0.62f,  0.10f, 0.00f, 0.14f,  0.39f,  0.225f, verts, idx, bMin, bMax); // 左长臂（铁块；机制等价 MC 铁傀儡重拳长臂）
-        setMobTex(40, 40, 4, 16, 4);
+        setMobTex(60, 58, 4, 16, 6);
         addBox( 0.62f,  0.10f, 0.00f, 0.14f,  0.39f,  0.225f, verts, idx, bMin, bMax); // 右长臂
     } else if (m_mobType == 14) {
         // t487 Silverfish（银鱼；机制等价 MC 1.0 银鱼，§9 原创模型 + 贴图）—— 小型虫类：分节躯干 + 前伸小头 +
