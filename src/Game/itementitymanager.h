@@ -78,6 +78,16 @@ public:
     //   工具 / 护甲丢弃传其实例附魔 → 实体携带 → 拾取回填（防数据丢失）；可堆叠物品（合并路径）恒 0。
     Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1, const QVariantList &enchants = {});
 
+    // t608 定点定向弹出（发射器排出口统一口径）：在**浮点世界坐标 pos**（发射器格中心 + 朝向外向 ×0.5 =
+    //   排出口面中心）生成掉落物，初始水平速度 = (dirX,dirZ) 归一化 × speed（沿发射器朝向弹出，机制等价
+    //   MC 1.0 发射器 / 投掷器从排出口把物品弹出）。与 spawnItem（格中心 + 哈希随机弹出方向）的唯一差异：
+    //   ① 位置精确到排出口（用户「掉落物和投掷物应同一个口出来」）；② 弹出方向 = 发射朝向（非随机）。
+    //   其余（合并 / LRU / 免拾窗 / 重力 + 摩擦 / maxStack）与 spawnItem 完全同链。dirX/dirZ 全 0（退化）→
+    //   speed 视作 0（原地生成，重力落地）。分层同 spawnItem（Entities 层，无向上依赖）。
+    Q_INVOKABLE void spawnItemAt(const QVector3D &pos, int itemId, int count,
+                                 float dirX, float dirZ, float speed,
+                                 const QVariantList &enchants = {});
+
     // t354 批量 spawn 抑制 entitiesChanged（修 Stalker 爆炸「t320 已批 worldChanged 但仍卡」的复发根因）：
     //   一次爆炸按 kExplosionDropChance(~50%) 对球内每破坏块发 explosionDroppedItem → 呈现层逐个 spawnItem，
     //   而旧 spawnItem **每次** ++revision + emit entitiesChanged → N 个掉落物 = N 次 Repeater model(count) 变更 +

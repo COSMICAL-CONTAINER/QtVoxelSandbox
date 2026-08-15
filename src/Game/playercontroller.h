@@ -890,26 +890,32 @@ private:
     //   EntityManager（detonateTntBlock）+ BlockRegistry（isTnt / isPressurePlate），不写栅格（破坏由 detonate 负责）。
     void scanTntTraps();
     // t486 发射器陷阱触发（spec「踩压力板 → 邻接发射器射箭」）：扫玩家 footprint 格——任一格为压力板
-    //   （Wood/Cobble）且其 4 水平邻格（同 Y）之一 == Dispenser → EntityManager::spawnArrow 从发射器格中心
-    //   朝压力板方向（= 玩家所在）水平射箭（复用既有 Arrow 弹丸 tick：抛物 + 命中伤害，机制等价 MC 1.0 发射器
-    //   射箭；无红石系统故用「踩板直接触发」）。每发射器 per-dispenser 冷却（m_dispenserCooldowns，防每帧刷屏
-    //   满天箭；机制等价 MC 发射器有内含冷却 / 单次触发间隔）。门控：死亡 / 无世界 / 无 entityManager → no-op。
-    //   向下依赖 World（blockAt）+ EntityManager（spawnArrow）+ BlockRegistry（isDispenser / isPressurePlate）。
+    //   （Wood/Cobble）且其 4 水平邻格（同 Y）之一 == Dispenser → 触发该发射器。每发射器 per-dispenser
+    //   冷却（m_dispenserCooldowns，防每帧刷屏满天箭；机制等价 MC 发射器触发间隔）。门控：死亡 / 无世界 /
+    //   无 entityManager → no-op。向下依赖 World（blockAt/stateAt）+ EntityManager（spawnArrowPlayer）+
+    //   BlockRegistry（isDispenser / isPressurePlate / chestFrontFace）。
+    //   **t608 方向语义**：发射方向 = 发射器 state 朝向外向（chestFrontFace 解码；放置时排出口朝玩家，
+    //   同熔炉），压力板仅作触发器（任意一侧邻接均可）、不再参与方向 —— 旧版取「发射器→压力板」向量致板
+    //   在背面也朝前射（用户「应该要规定一个方向」）。旧发射器 state=0 → +X 兜底。
     //   **t579 通用化**：发射器有 per-block 库存（DispenserStore 9 槽）时按内容物分派（dispenseFromDispenser：
-    //   箭=弹道实体 / 雪球=投掷物 / 鸡蛋=投掷物（t583）/ 剑=短距弹射带伤害 / 其余=弹出掉落物 + 扣库存）；
-    //   **t607 修**：库存空（含最后一个投掷物用完清零）踩板无动作（有 store 条目=玩家发射器身份，陷阱解除）；
-    //   无条目（神殿陷阱发射器，worldgen 填充不进 store）保持旧行为（默认射箭）。
+    //   箭=可拾取伤害箭 / 雪球=0 伤击退 / 鸡蛋=投掷物（t583）/ 剑=短距弹射带伤害 / 其余=定向弹出掉落物 +
+    //   扣库存）；**t607 修**：库存空（含最后一个投掷物用完清零）踩板无动作（有 store 条目=玩家发射器身份，
+    //   陷阱解除）；无条目（神殿陷阱发射器，worldgen 填充不进 store）保持旧行为（默认射玩家友方箭）。
     void scanDispenserTraps(float dt);
-    // t579/t580 从发射器 (x,y,z) 朝 dir（单位向量，发射器排出口朝向）取出首个可用槽内容物并发射 + 扣 1 库存。
-    //   分派表（机制等价 MC 1.0 发射器按物品种类分派）：箭（ArrowId）→ spawnArrow 弹道实体（命中玩家，同
-    //   神殿陷阱）；雪球（SnowballId）→ spawnSnowball 投掷物（damage=kSnowballDamage 发射器口径：对 mob 有
-    //   实伤 + 减速，机关陷阱语义；非玩家抛掷的 0 伤害）；鸡蛋（EggId）→ spawnEgg 投掷物（t583：命中碎裂 +
-    //   1/8 概率孵小鸡，机制等价 MC 1.0 发射器弹鸡蛋）；剑（ToolRegistry type==Sword）→ 短距弹射掉落物实体 + 发射方向射线命中 mob 时
-    //   造成 ToolRegistry::attackDamage 一次（机制等价 MC 1.0 发射器弹射武器）；其余物品 → 短距弹出掉落物
-    //   （emit spawnItem，经 QML 转发 ItemEntityManager）。发射方向由发射器 state（chestFrontFace 编码）解出，
-    //   与排出口贴图朝向一致（机制等价 MC 发射器朝排出口方向发射）。发射器无库存 / store 空 → 返 false
-    //   （caller 神殿路径 fallback 默认箭）。分层：Game 层读 DispenserStore（同层 ViewModel）+ 调
-    //   EntityManager（Entities 层向下）+ 发 spawnItem 语义信号（呈现层转发），不写栅格。
+    // t579/t580/t608 从发射器 (x,y,z) 朝 dir（单位向量，**发射器 state 朝向面的外向**，t608 起由 scanDispenserTraps
+    //   据 state 解出传入）取出首个可用槽内容物并发射 + 扣 1 库存。发射位（统一排出口）= 发射器格中心 + dir×0.5
+    //   （箭 / 雪球 / 鸡蛋 / 掉落物同一口）。分派表（机制等价 MC 1.0 发射器按物品种类分派；t608 统一手持口径）：
+    //   箭（ArrowId）→ spawnArrowPlayer 弹道实体（arrowFromPlayer=true：**命中 mob** damageEntity + 击退，嵌入
+    //   方块后 arrowPickupScan 可拾 +1 箭 —— 机制等价 MC 1.0 发射器箭可打生物可拾取；旧版 spawnArrow 命中玩家
+    //   不可拾，t608 修）；雪球（SnowballId）→ spawnSnowball 投掷物（damage=0 与玩家手抛一致：0 伤 + 红闪 +
+    //   击退 + 减速；旧版 1HP 实伤，t608 统一 0）；鸡蛋（EggId）→ spawnEgg 投掷物（t583：命中碎裂 + 1/8 概率
+    //   孵小鸡 + 击退，机制等价 MC 1.0 发射器弹鸡蛋）；剑（ToolRegistry type==Sword）→ 定向弹出掉落物实体 +
+    //   发射方向射线命中 mob 时造成 ToolRegistry::attackDamage 一次（机制等价 MC 1.0 发射器弹射武器）；其余
+    //   物品 → spawnItemAt 定点定向弹出掉落物（排出口 + 朝向初速 kDispenserPopSpeed + 0.5s 免拾窗）。发射方向
+    //   = 发射器 state（chestFrontFace 编码）解出的朝向外向，与排出口贴图朝向一致（机制等价 MC 发射器朝排出口
+    //   方向发射）。发射器无库存 / store 空 → 返 false（caller 神殿路径 fallback 默认箭）。分层：Game 层读
+    //   DispenserStore（同层 ViewModel）+ 调 EntityManager（Entities 层向下）+ ItemEntityManager（同层直调），
+    //   不写栅格。
     bool dispenseFromDispenser(int x, int y, int z, const QVector3D &dir);
     // t569 红石矿石点亮触发（机制等价 MC 1.0 红石矿被玩家走近 / 触碰时发光数秒后自熄）：扫玩家 footprint
     //   格 ± 水平 4 邻（feetY 与 feetY±1 共 3 行 —— 玩家走过 / 相邻蹭到 / 站其上都触发），命中 RedstoneOre →
@@ -1339,6 +1345,10 @@ private:
     //   立即拾回，留 pickup 免拾窗 + 短距可见抛物）；剑弹射伤害射线 kDispenserWeaponRange=3（短距，机制
     //   等价 MC 发射器弹射武器就近命中）。
     static constexpr float kDispenserSnowballSpeed  = 11.0f; // 发射器弹雪球速度（blocks/s）
+    // t608 发射器箭命中伤害（HP）：arrowFromPlayer=true 语义箭命中 mob 时的 damageEntity 值。取 EntityManager::
+    //   kArrowDamage 同值 2（后者 private 不能跨层读，故本工程本地定义 —— 同 kDispenserSnowballSpeed 本地
+    //   常量模式；改骷髅箭伤时此处手对齐）。机制等价 MC 1.0 发射器箭伤害（简单难度量级 1-2）。
+    static constexpr int   kDispenserArrowDamage    = 2;      // 发射器箭命中 mob 伤害（HP；= EntityManager::kArrowDamage 同值）
     static constexpr float kDispenserPopSpeed       = 5.0f;  // 发射器弹出掉落物速度（blocks/s）
     static constexpr float kDispenserWeaponRange    = 3.0f;  // 发射器弹剑伤害判定射线射程（格）
     static constexpr int   kBowMinDamage     = 1;      // 短蓄力箭命中伤害（HP）

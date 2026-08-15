@@ -220,6 +220,9 @@ public:
     //   （呈现层 playMobHurt；同玩家近战 attackMob 路径）。机制等价 MC 1.0 玩家弓箭打怪（敌我判别由发射者定）。
     //   origin = 玩家眼位 + 视线前移 0.5（防贴墙 spawn 入墙即没）；vel = 视线方向 × 蓄力速度（含抛物 vy）。
     //   达 kCap → 跳过 + 告警（防溢出，同 spawnArrow）。
+    //   **t608 发射器复用**：dispenseFromDispenser / scanDispenserTraps 神殿 fallback 也走本入口 ——
+    //   arrowFromPlayer=true 的箭**命中 mob**（伤害 caller 传）且嵌入方块后**可被玩家拾取**（arrowPickupScan
+    //   只拾 arrowFromPlayer=true 的嵌入箭），正是「玩家友方箭」语义（机制等价 MC 1.0 发射器箭可打生物可拾取）。
     Q_INVOKABLE void spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage);
     // t482/t505 雪球投射物（雪傀儡 aiSnowGolem 远程攻击 / t505 玩家右键抛掷）：在 origin 处生成一个携带初速度 vel
     //   （blocks/s，含 vy 抛物）的雪球实体。kind=Snowball、pushable=false（玩家走碰不推）、halfW/halfH=0.10
@@ -240,8 +243,9 @@ public:
     //   halfW/halfH=0.10（卵形小体视觉 + 碰撞最小；命中检测走点-in-AABB 不读 halfW）。tick 内 Egg 分支：
     //   重力改 vy（抛物）+ 速度位移 + 方块 / 活体 mob 命中即碎（emit eggBreak 迸蛋壳碎屑粒子）+ 移除 +
     //   **1/8 概率在命中处孵化 1 只小鸡**（spawnMobCore 生成 MobChicken + baby=true + growTimer，机制
-    //   等价 MC 1.0 鸡蛋砸出小鸡 1/8 概率；用户「丢出来可以砸出来小鸡」）。鸡蛋命中**不伤害不击退** mob
-    //   （机制等价 MC 1.0 蛋 0 伤害投掷物；区别于雪球的击退）+ 寿命 / 越界兜底移除（同雪球）。
+    //   等价 MC 1.0 鸡蛋砸出小鸡 1/8 概率；用户「丢出来可以砸出来小鸡」）。鸡蛋命中 mob **0 伤害但击退**
+    //   （t608 用户口径「和雪球一个逻辑，没有伤害只有击退」：沿投掷方向 knockback 同雪球强度，不扣血不红闪；
+    //   机制等价 MC 1.0 蛋投掷物命中生物仅击退不伤）+ 寿命 / 越界兜底移除（同雪球）。
     //   QML delegate 据 kindAt==Egg 走奶白卵形 Model。达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）。
     Q_INVOKABLE int spawnEgg(const QVector3D &origin, const QVector3D &vel);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。

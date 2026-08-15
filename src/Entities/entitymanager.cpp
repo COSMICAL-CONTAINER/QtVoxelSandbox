@@ -3240,8 +3240,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         }
 
         // --- Egg（t583 鸡蛋投掷物）：抛物 + 活体 mob / 方块命中即碎（1/8 孵小鸡）+ 寿命兜底 ---
-        //   机制等价 MC 1.0 egg：0 伤害投掷物（命中 mob 不伤不击退，仅碎裂）+ 命中处 1/8 概率孵 1 只小鸡
-        //   （用户「丢出来可以砸出来小鸡」）。判定序同雪球：先 mob 后方块（贴墙 mob 不被撞墙吞掉）。
+        //   机制等价 MC 1.0 egg：0 伤害投掷物（命中 mob 不伤只击退，t608 统一手持 / 发射器口径）+ 命中处
+        //   1/8 概率孵 1 只小鸡（用户「丢出来可以砸出来小鸡」）。判定序同雪球：先 mob 后方块（贴墙 mob
+        //   不被撞墙吞掉）。
         if (e.kind == Egg) {
             e.arrowLife -= float(dt); // 复用 arrowLife 作寿命倒计时
             e.vy -= kGravity * float(dt); // 抛物：重力改 vy（与世界重力同值 → 弧自然）
@@ -3250,7 +3251,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积；不碎裂不孵化）。
             if (e.arrowLife <= 0.0f) remove = true;
             // mob 命中（先于方块判定，同雪球）：鸡蛋（点）落入任一活体 mob 的 AABB（外扩 kEggHitHalfW）→
-            //   碎裂移除（0 伤害 0 击退 —— 机制等价 MC 蛋打 mob 仅碎，区别于雪球的击退）。
+            //   碎裂移除 + 0 伤害击退（t608 用户口径「和雪球一个逻辑，没有伤害只有击退」——沿投掷方向
+            //   knockback 同雪球 kSnowballKnockbackStrength，不扣血不红闪不减速；机制等价 MC 1.0 蛋投掷物
+            //   命中生物仅击退不伤）。孵化分支在下方统一命中处理（命中点 = next，含 mob 命中）。
             if (!remove) {
                 for (int mi = 0; mi < int(m_entities.size()); ++mi) {
                     const Entity &m = m_entities[size_t(mi)];
@@ -3261,6 +3264,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (next.x() >= ex2 && next.x() <= m.pos.x() + m.halfW + kEggHitHalfW
                         && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kEggHitHalfW
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kEggHitHalfW) {
+                        // 击退：方向 = 鸡蛋水平速度归一化（鸡蛋 → mob），同雪球命中分支模式（慢速退化由
+                        //   knockback 内 yaw 兜底）。不 damageEntity（0 伤害语义，机制对标 MC 蛋投掷物）。
+                        const float evx = e.vx, evz = e.vz;
+                        float elen = std::sqrt(evx * evx + evz * evz);
+                        if (elen > 1e-3f) knockback(mi, evx / elen, evz / elen, kSnowballKnockbackStrength);
+                        qCInfo(lcEnt) << "egg hit mob" << mi << "(0 damage, knockback only)";
                         remove = true;
                         break; // 命中首个即止（鸡蛋消失，不穿透）
                     }

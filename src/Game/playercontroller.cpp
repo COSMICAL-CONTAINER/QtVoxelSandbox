@@ -2967,9 +2967,10 @@ void PlayerController::placeBlock()
         //   不随玩家朝向。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
     } else if (m_selectedBlock == BlockRegistry::Dispenser) {
-        // t486 发射器前面（排出口 dispenser_front）朝玩家侧：state = horizontalFacing ^ 1（同箱子 / 熔炉编码；
-        //   机制等价 MC 1.0 发射器放置排出口朝玩家）。mesher 据 state 把 dispenser_front 贴到对应面；触发时
-        //   scanDispenserTraps 据发射器→压力板方向射箭（与 state 朝向一致）。
+        // t486/t608 发射器前面（排出口 dispenser_front）朝玩家侧：state = horizontalFacing ^ 1（同箱子 / 熔炉
+        //   编码；机制等价 MC 1.0 发射器放置排出口朝玩家，用户原话「和之前的熔炉一样放下来永远面朝玩家」）。
+        //   mesher 据 state 把 dispenser_front 贴到对应面；**t608 起 state 是发射方向的唯一源** ——
+        //   scanDispenserTraps 触发时据 state（chestFrontFace 解码）算朝向外向发射，压力板方位不参与。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
     } else if (m_selectedBlock == BlockRegistry::Leaves) {
         // t305 玩家放置的树叶标 PersistentLeafBit（持久，不参与自然衰减）—— 机制等价 MC 1.0「玩家放置的树叶
@@ -3675,13 +3676,17 @@ void PlayerController::scanTntTraps()
 }
 
 // t486 发射器陷阱触发（见 playercontroller.h 头注释）。扫玩家 footprint 格——压力板的 4 水平邻格（同 Y）之一
-//   == Dispenser → 朝压力板方向水平发射。per-dispenser 冷却（m_dispenserCooldowns）防每帧刷屏。
-//   机制等价 MC 1.0 发射器陷阱（无红石系统，用「踩板直接触发」简化）。复用既有 Arrow 弹丸 tick（抛物 + 命中
-//   玩家伤害 kArrowDamage，spawnArrow 射出的箭 arrowFromPlayer=false → 命中玩家，同骷髅箭 t283）。
+//   == Dispenser → 触发该发射器。per-dispenser 冷却（m_dispenserCooldowns）防每帧刷屏。
+//   机制等价 MC 1.0 发射器陷阱（无红石系统，用「踩板直接触发」简化）。
+//   **t608 发射方向 = 发射器 state 朝向外向**（同熔炉 / 箱子 chestFrontFace 编码 0=+X 1=-X 2=+Z 3=-Z）：
+//   发射器放置时排出口面朝玩家（placeState = horizontalFacing ^ 1），之后**恒朝该方向发射**，与压力板在
+//   哪一侧无关。旧版取「发射器 → 压力板」向量（即 d：plate→dispenser 轴向）—— 用户把压力板放发射器
+//   **后面**它也朝前（远离板）射，与「发射器应有固定朝向」直觉相悖（用户原话「应该要规定一个方向，和之前
+//   的熔炉一样放下来永远面朝玩家」）。压力板仅作**触发器**（踩板即发射），不再是方向源；方向唯一源 = state。
+//   已放置的旧发射器 state=0 → 朝 +X（chestFrontFace 低 2 位 0=+X 兜底）。
 //   **t579 通用化**：发射器有 per-block 库存（DispenserStore 9 槽，玩家右键 UI 放入）→ 走 dispenseFromDispenser
 //   按内容物分派（箭 / 雪球 / 剑 / 掉落物）+ 扣库存；无库存（神殿陷阱发射器，worldgen 填充不进 store）保持旧行为
-//   （默认射箭）。发射方向 = 发射器 → 压力板方向（玩家所在侧），与排出口贴图朝向约定一致（放置时排出口朝玩家，
-//   压力板在排出口一侧 → 两者同向）。
+//   （默认射箭，t608 起与库存路径统一用 spawnArrowPlayer 玩家友方箭语义：命中 mob + 可拾取）。
 void PlayerController::scanDispenserTraps(float dt)
 {
     if (!m_entityManager || !m_world) return;
@@ -3707,7 +3712,8 @@ void PlayerController::scanDispenserTraps(float dt)
         for (int bz = z0; bz <= z1; ++bz) {
             const quint8 plate = m_world->blockAt(bx, feetY, bz);
             if (!BlockRegistry::isPressurePlate(plate)) continue; // 本格非压力板 → 跳过
-            // 压力板的 4 水平邻格（同 Y）查 Dispenser（发射器嵌在走廊石壁，朝向走廊中央的压力板）。
+            // 压力板的 4 水平邻格（同 Y）查 Dispenser（发射器**任意一侧**邻接压力板即触发 —— t608 方向由
+            //   发射器自身 state 决定，与板在哪侧无关；板只是触发器）。
             static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
             for (const auto &d : kDirs) {
                 const int dx = bx + d[0], dz = bz + d[1];
@@ -3717,8 +3723,18 @@ void PlayerController::scanDispenserTraps(float dt)
                 //   （单格方块，一柱至多一个）故 (x,z) 足以唯一定位发射器格；Y 不进键（防与 x 高位重叠）。
                 const quint64 key = (quint64(quint32(dx)) << 32) | quint64(quint32(dz));
                 if (m_dispenserCooldowns.contains(key)) continue; // 该发射器冷却中 → 跳过
-                // 发射方向 = 发射器 → 压力板（玩家所在侧）水平单位向量。
-                const QVector3D dir(float(d[0]), 0.0f, float(d[1]));
+                // t608 发射方向 = 发射器 state 朝向外向（chestFrontFace 解码 → 轴向单位向量；单一方向源，
+                //   压力板方位不参与 —— 板仅触发，不定向。旧版取「plate→dispenser 轴向 d」致板在发射器背面
+                //   也朝前射，用户要求固定朝向同熔炉）。state=0（旧存档 / 未定向）→ +X 兜底（编码低 2 位 0）。
+                const quint8 dispState = m_world->stateAt(dx, feetY, dz);
+                float fdx = 0.0f, fdz = 0.0f;
+                switch (BlockRegistry::chestFrontFace(dispState)) {
+                case BlockRegistry::PosX: fdx = 1.0f; break;
+                case BlockRegistry::NegX: fdx = -1.0f; break;
+                case BlockRegistry::PosZ: fdz = 1.0f; break;
+                default:                   fdz = -1.0f; break; // NegZ
+                }
+                const QVector3D dir(fdx, 0.0f, fdz);
                 // t579：有 per-block 库存 → 按内容物分派 + 扣库存。**t607 修身份判定**：有 store 条目
                 //   （hasDispenser，含全空）= 玩家库存发射器（放置注册 / UI 写入自建 / 存档加载）——库存空
                 //   （含最后一个投掷物用完清零）踩板**无动作**（陷阱解除；旧版空了还 fallback 射箭）；
@@ -3728,16 +3744,18 @@ void PlayerController::scanDispenserTraps(float dt)
                 if (tracked)
                     fired = dispenseFromDispenser(dx, feetY, dz, dir);
                 if (!fired && !tracked) {
-                    // 神殿陷阱路径（无库存）：默认射箭。从发射器格中心 + 朝压力板方向前移 0.5（防贴墙 spawn 入墙
-                    //   即被 tick 判方块命中，同 fireArrow），水平速度朝压力板方向（= 玩家所在），Y 取发射器格中心高
-                    //   （feetY+0.5 → 命中玩家下半身 AABB）。vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中玩家）。
-                    //   spawnArrow 射出的箭 arrowFromPlayer=false → 命中玩家（同骷髅箭 t283），damage=kArrowDamage。
-                    const QVector3D origin(dx + 0.5f + float(d[0]) * 0.5f,
+                    // 神殿陷阱路径（无库存）：默认射箭。从发射器格中心 + 朝向外向前移 0.5（出排出口，防贴墙
+                    //   spawn 入墙即被 tick 判方块命中，同 fireArrow），水平速度朝 state 朝向，Y 取发射器格
+                    //   中心高（feetY+0.5）。vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中）。
+                    //   **t608 箭语义与库存路径统一**：spawnArrowPlayer（arrowFromPlayer=true → 命中 mob 伤害 +
+                    //   嵌入可被玩家拾取，机制等价 MC 1.0 发射器箭；旧版 spawnArrow 命中玩家 + 不可拾 —— 与
+                    //   库存路径同病同修）。伤害 kDispenserArrowDamage（= 骷髅箭 kArrowDamage 同值 2）。
+                    const QVector3D origin(dx + 0.5f + fdx * 0.5f,
                                            float(feetY) + 0.5f,
-                                           dz + 0.5f + float(d[1]) * 0.5f);
-                    const QVector3D vel(float(d[0]) * kDispenserArrowSpeed, 0.0f,
-                                        float(d[1]) * kDispenserArrowSpeed);
-                    m_entityManager->spawnArrow(origin, vel);
+                                           dz + 0.5f + fdz * 0.5f);
+                    const QVector3D vel(fdx * kDispenserArrowSpeed, 0.0f,
+                                        fdz * kDispenserArrowSpeed);
+                    m_entityManager->spawnArrowPlayer(origin, vel, kDispenserArrowDamage);
                 }
                 m_dispenserCooldowns.insert(key, kDispenserCooldown); // 写冷却
                 // return 防同帧多发射器刷箭（同 scanTntTraps 单触发）；下帧再处理其余候选。
@@ -3747,12 +3765,16 @@ void PlayerController::scanDispenserTraps(float dt)
     }
 }
 
-// t579/t580 发射器内容物发射（见 playercontroller.h 头注释）。读 DispenserStore 首个可用槽 → 按物品分派
-//   → 扣 1 库存（setSlot 写回，count-1 归 0 清槽）。发射位 = 发射器格中心 + 朝向前移 0.5（防贴墙 spawn 入墙
-//   即被 tick 判方块命中，同 fireArrow / 神殿箭路径）。剑类（ToolRegistry type==Sword）弹射：掉落物实体弹出
-//   + 发射方向 3 格内命中活体 mob → damageEntity(attackDamage) 一次 + 沿发射方向击退（机制等价 MC 发射器
-//   弹射武器命中伤害；红闪 / 死亡掉落走 damageEntity 内既有链）。鸡蛋（EggId）→ t583 已切投掷物路径（上方
-//   分支：命中碎裂 + 1/8 孵小鸡）。
+// t579/t580/t608 发射器内容物发射（见 playercontroller.h 头注释）。读 DispenserStore 首个可用槽 → 按物品分派
+//   → 扣 1 库存（setSlot 写回，count-1 归 0 清槽）。发射位（t608 统一排出口）= 发射器格中心 + 朝向外向 ×0.5
+//   （出排出口面中心；防贴墙 spawn 入墙即被 tick 判方块命中，同 fireArrow / 神殿箭路径）—— 箭 / 雪球 / 鸡蛋 /
+//   掉落物全部分支用同一 origin（用户「投掷出物品和雪球这些应同一个口出来」）。
+//   分派（t608 口径统一）：箭 → spawnArrowPlayer（arrowFromPlayer=true：命中 mob 伤害 + 嵌入可拾取）；雪球 →
+//   spawnSnowball damage=0（与玩家手抛一致：0 伤 + 红闪 + 击退 + 减速）；鸡蛋 → spawnEgg（0 伤 + 命中碎裂 +
+//   1/8 孵小鸡 + 击退）；剑类（ToolRegistry type==Sword）弹射：掉落物实体定向弹出 + 发射方向 3 格内命中活体
+//   mob → damageEntity(attackDamage) 一次 + 沿发射方向击退（机制等价 MC 发射器弹射武器命中伤害；红闪 / 死亡
+//   掉落走 damageEntity 内既有链）；其余物品 → spawnItemAt 定点定向弹出掉落物（排出口 + 朝向初速 + 0.5s 免拾窗
+//   + t468 弹出水平速度抛物）。
 bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3D &dir)
 {
     if (!m_dispenserStore || !m_entityManager) return false;
@@ -3771,18 +3793,26 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
                            float(z) + 0.5f + dir.z() * 0.5f);
 
     if (itemId == RecipeRegistry::ArrowId) {
-        // 箭 → 弹道实体（同神殿陷阱 / 骷髅箭：arrowFromPlayer=false → 命中玩家，damage=kArrowDamage）。
-        m_entityManager->spawnArrow(origin, dir * kDispenserArrowSpeed);
+        // t608 箭 → **玩家友方箭**（spawnArrowPlayer：arrowFromPlayer=true 语义）：命中 **mob**（damageEntity +
+        //   击退 + 红闪，机制等价 MC 1.0 发射器箭可打生物）且嵌入方块后**可被玩家拾取**（arrowPickupScan 只拾
+        //   arrowFromPlayer=true 的嵌入箭 → +1 箭物品，机制等价 MC 1.0 发射器箭可拾）。旧版 spawnArrow(false)
+        //   命中**玩家**（骷髅箭语义）+ 不可拾 —— 与用户「发射器箭应可拾取 + 可砸生物」诉求相反。
+        //   伤害取 kDispenserArrowDamage（本地常量 = EntityManager::kArrowDamage 同值 2；后者 private 不能跨层读，
+        //   同 kDispenserSnowballDamage 本地常量模式）。玩家交互：arrowFromPlayer 箭出膛 0.2s（kArrowSelfArmDelay）
+        //   后「武装」，下落砸中玩家也会扣血（t324 既有自伤例外）—— 机制等价 MC 1.0 发射器箭可伤任何生物
+        //   含玩家；水平射出时首帧已飞出踩板玩家命中盒（0.5 排出口偏移）→ 正常不误伤触发者。
+        m_entityManager->spawnArrowPlayer(origin, dir * kDispenserArrowSpeed, kDispenserArrowDamage);
     } else if (itemId == RecipeRegistry::SnowballId) {
-        // t580 雪球 → 投掷物实体（同雪傀儡 fireSnowball 口径：低伤害 + 减速 + 击退，机关陷阱对 mob 有实伤；
-        //   区别于玩家手抛的 0 伤害。thrower=-1 = 无实体发射者，不排除任何 mob。伤害取雪傀儡同值 1（本地
-        //   常量 —— EntityManager::kSnowballDamage 是 private 不能跨层读，同 kPlayerSnowballSpeed 模式）。
-        constexpr int kDispenserSnowballDamage = 1; // 发射器雪球命中伤害（HP；同雪傀儡口径）
-        m_entityManager->spawnSnowball(origin, dir * kDispenserSnowballSpeed,
-                                       kDispenserSnowballDamage);
+        // t608 雪球 → 投掷物实体，**与玩家手抛同口径：damage=0（0 伤害 + 红闪 + 击退 + 减速）**。旧版对 mob 有
+        //   1HP 实伤（kDispenserSnowballDamage，机关陷阱口径）—— 用户口径「和手持这些投掷物一样：没有伤害
+        //   只有击退」→ 统一 0 伤。命中链：damageEntity(0) 被 amount<=0 守卫早退 → 命中分支手动设 hurtFlash
+        //   红闪 + knockback 击退 + slowTimer 减速（t505 0 伤害反馈链，与玩家手抛完全同一代码路径，机制等价
+        //   MC 1.0 发射器雪球与手掷雪球同为无伤击退投掷物）。thrower=-1 = 无实体发射者，不排除任何 mob。
+        m_entityManager->spawnSnowball(origin, dir * kDispenserSnowballSpeed, 0);
     } else if (itemId == RecipeRegistry::EggId) {
         // t583 鸡蛋 → 投掷物实体（同玩家手抛口径：0 伤害 + 命中碎裂 + 1/8 概率孵小鸡；机制等价 MC 1.0 发射器
-        //   弹鸡蛋可砸出小鸡 —— 机关「蛋孵化器」玩法）。速度复用发射器雪球速度（同为轻抛物弹丸）。
+        //   弹鸡蛋可砸出小鸡 —— 机关「蛋孵化器」玩法）。t608 命中 mob 击退（与雪球同逻辑，entitymanager Egg
+        //   分支处理）。速度复用发射器雪球速度（同为轻抛物弹丸）。
         m_entityManager->spawnEgg(origin, dir * kDispenserSnowballSpeed);
     } else {
         const ToolRegistry::ToolDef *td = ToolRegistry::tool(itemId);
@@ -3797,9 +3827,13 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
                 m_entityManager->knockback(mobIdx, mobPos.x() - origin.x(), mobPos.z() - origin.z());
             }
         }
-        // 其余物品（含剑本体弹出）→ 短距弹出掉落物（emit spawnItem → QML 转发
-        //   ItemEntityManager.spawnItem，内置 0.5s 免拾窗 + t468 弹出水平速度抛物）。
-        emit spawnItem(x, y, z, itemId, 1);
+        // 其余物品（含剑本体弹出）→ 掉落物实体。t608 **统一排出口**：origin（发射器格中心 + 朝向外向 ×0.5）
+        //   与箭 / 雪球 / 鸡蛋同一口出来（旧版 emit spawnItem 用发射器格中心 → 与投掷物两个口，用户「投掷出
+        //   物品和雪球这些不是一个口出来的」）+ 沿朝向定向弹出初速 kDispenserPopSpeed（旧版哈希随机方向）。
+        //   走 spawnItemAt（定点定向弹出，C++ 直调同 pickupScan 的 removeAt 模式；免 QML 信号往返）。
+        //   注意：DispenserStore 槽仅存 (id,count)，经此路径弹出的附魔工具附魔不保真（既有 store 结构限制）。
+        if (m_itemEntities)
+            m_itemEntities->spawnItemAt(origin, itemId, 1, dir.x(), dir.z(), kDispenserPopSpeed);
     }
     // 扣 1 库存（count-1；归 0 → setSlot 空栈归一清槽——t607 修：count 归 0 时 id 一并归 0，旧版存
     //   {id>0,count=0} 幽灵栈致「UI 图标残留 / 不再发射 / 拿出物品消失」）。分派表全覆盖（else 兜底）→ 恒扣。
