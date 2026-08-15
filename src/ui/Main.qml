@@ -1800,6 +1800,12 @@ Window {
     Connections {
         target: entityManager
         function onFallingBlockDropped(x, y, z, blockId) { itemEntities.spawnItem(x, y, z, blockId, 1) }
+        // rv-low-batch1 塌落雪层掉雪球（修「塌落雪层落半砖 / 落另一雪层溢出时层数丢失只掉 1 份」）：
+        //   EntityManager FallingBlock(SnowLayer) 着地遇非完整立方支撑 / 叠层溢出时发本信号（itemId=0x23D
+        //   雪球字面量，count=层数，每层 1 雪球同玩家铲挖语义）→ 转发 spawnItem 一次 emit count 件（1 实体携
+        //   多雪球，拾取 addStack 一次入多件，同玩家挖雪层模式）。单向事件流（PLAN §2 分层：Entities 发语义
+        //   事件、呈现层只消费，同 fallingBlockDropped 模式）。
+        function onSnowLayerCollapseDropped(x, y, z, itemId, count) { itemEntities.spawnItem(x, y, z, itemId, count) }
         // t297 爆炸掉落（EntityManager detonateStalker 内 ~50% 概率/破坏块发）：转发到
         //   ItemEntityManager.spawnItem 生成掉落实体（机制等价 MC 爆炸把被毁方块弹成物品）。itemId 已是
         //   BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落）。同 fallingBlockDropped 模式：单向事件流
@@ -5640,8 +5646,41 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_pig。
                                     baseColorMap: mobPigPackTex.source.toString().length > 0 ? mobPigPackTex : mobPigTex
                                 }
-                                // t555 额外纯色眼已删：pack 贴图自带猪脸五官（pack 命中时贴图眼即显）。原 t251 补的
-                                //   白眼底 + 深瞳子 Model 在 pack 贴图上叠出「双层眼」，删（贴图眼为单一权威）。
+                                // rv-low-batch1 眼睛恢复（回退 t555 的整删）：程序生成 mob 贴图是「全脸」身体纹（铺
+                                //   每盒每面，无五官）→ pack 关时猪无眼显「怪」。恢复 t251 补的白眼底 + 深瞳子 Model，
+                                //   但加 pack 感知 visible：pack 命中（mobPigPackTex.source 非空，url-guard 判空铁律）→
+                                //   隐眼（pack 贴图自带猪脸五官，叠眼成「双层眼」）；pack 关 / 包内无映射 → 显眼。
+                                //   NoLighting（红线）。眼作 mob Model 子节点 → 继承 bodyYaw + 父 visible。
+                                //   猪 headPitch 恒 0 → 眼直接定位头前面（无需俯仰 Node）。位置 = MobModel 局部坐标：
+                                //   头心 (0,0.05,-0.50) 半 (0.22,0.22,0.18) → 前面 z=-0.68，眼 y≈0.13、x=±0.10。
+                                Model {
+                                    visible: mobPigPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.10, 0.13, -0.68)
+                                    scale: Qt.vector3d(0.08, 0.10, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                }
+                                Model {
+                                    visible: mobPigPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.10, 0.13, -0.68)
+                                    scale: Qt.vector3d(0.08, 0.10, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                }
+                                Model {
+                                    visible: mobPigPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.10, 0.13, -0.69)
+                                    scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    visible: mobPigPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.10, 0.13, -0.69)
+                                    scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -5667,7 +5706,36 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_cow。
                                     baseColorMap: mobCowPackTex.source.toString().length > 0 ? mobCowPackTex : mobCowTex
                                 }
-                                // t555 额外纯色眼已删（同猪：pack 贴图自带牛脸眼，叠补眼成「双层眼」）。
+                                // rv-low-batch1 眼睛恢复（同猪模式 + pack 感知 visible：pack 命中隐眼 / 关显眼）。
+                                //   牛头心 (0,0.15,-0.60) 半 (0.20,0.22,0.20) → 前面 z=-0.80；眼 y≈0.22、x=±0.09。
+                                Model {
+                                    visible: mobCowPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.09, 0.22, -0.80)
+                                    scale: Qt.vector3d(0.07, 0.09, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                }
+                                Model {
+                                    visible: mobCowPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.09, 0.22, -0.80)
+                                    scale: Qt.vector3d(0.07, 0.09, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                }
+                                Model {
+                                    visible: mobCowPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.09, 0.22, -0.81)
+                                    scale: Qt.vector3d(0.035, 0.045, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    visible: mobCowPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.09, 0.22, -0.81)
+                                    scale: Qt.vector3d(0.035, 0.045, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -5706,8 +5774,39 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
                                     baseColorMap: mobSheepPackTex.source.toString().length > 0 ? mobSheepPackTex : mobSheepTex
                                 }
-                                // t555 额外纯色眼已删（同猪/牛：pack 贴图自带羊脸眼）。原颈枢 Node（含 4 眼 Model 随
-                                //   headPitch 俯仰）整段移除 —— 贴图眼烘在几何 UV 上，天然随头俯仰，无需枢 Node 同步。
+                                // rv-low-batch1 眼睛恢复（同猪/牛模式 + pack 感知 visible）。羊吃草时 MobModel 头绕
+                                //   颈枢俯仰 → 眼放「颈枢 Node」（position=颈附着点 (0,0.10,-0.29)，eulerRotation.x 绑
+                                //   headPitchAt）随头同步俯仰。眼相对颈枢：z=-0.32、y=0.06、x=±0.055（同裸态羊眼）。
+                                Node {
+                                    visible: mobSheepPackTex.source.toString().length === 0
+                                    position: Qt.vector3d(0, 0.10, -0.29)
+                                    property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
+                                    eulerRotation: Qt.vector3d(headPitch, 0, 0)
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(-0.055, 0.06, -0.32)
+                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                    }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0.055, 0.06, -0.32)
+                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                    }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(-0.055, 0.06, -0.33)
+                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                    }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0.055, 0.06, -0.33)
+                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                    }
+                                }
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -5805,7 +5904,23 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_shambler。
                                     baseColorMap: mobShamblerPackTex.source.toString().length > 0 ? mobShamblerPackTex : mobShamblerTex
                                 }
-                                // t555 额外纯色红眼已删（同猪：pack 贴图自带亡灵脸眼，叠补眼成「双层眼」）。
+                                // rv-low-batch1 亡灵红眼恢复（pack 感知 visible：pack 命中隐 / 关显）。不死亡灵的
+                                //   赤红眼（实心红 #b01818 独立 Model，原创纯色 §9a）。MobModel 头心 (0,0.57,0) 半
+                                //   (0.22,0.22,0.22) → 前面 z=-0.22；眼 y≈0.62、x=±0.09、z=-0.23（略凸防 z-fight）。
+                                Model {
+                                    visible: mobShamblerPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.09, 0.62, -0.23)
+                                    scale: Qt.vector3d(0.07, 0.08, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
+                                }
+                                Model {
+                                    visible: mobShamblerPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.09, 0.62, -0.23)
+                                    scale: Qt.vector3d(0.07, 0.08, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
+                                }
                                 // t377 Shambler 随机护甲（4 部位；mobArmorAt 返护甲 id，0=无 → 隐）。作 mob Model 子节点 →
                                 //   继承 bodyYaw + 父 visible。MobModel 局部坐标（头心 0.57 / 躯干心 0.05 / 腿底 -0.90）。
                                 //   腿摆动烘焙在几何里 → 护腿 / 靴为静态盒（近似的视觉提示，~20% mob 偶遇可接受）。
@@ -5921,7 +6036,22 @@ Window {
                                         return _r >= 0 ? Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0) : "#000000"
                                     }
                                 }
-                                // t555 额外深色眼已删（同猪：pack 贴图自带脸眼，叠补眼成「双层眼」）。
+                                // rv-low-batch1 深色眼恢复（pack 感知 visible）。MobModel 头心 (0,0.66,0) 半
+                                //   (0.15,0.15,0.15) → 前面 z=-0.15；眼 y≈0.68、x=±0.06、z=-0.17（略凸防 z-fight）。
+                                Model {
+                                    visible: mobStalkerPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.06, 0.68, -0.17)
+                                    scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    visible: mobStalkerPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.06, 0.68, -0.17)
+                                    scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -5956,7 +6086,23 @@ Window {
                                         return _r >= 0 ? Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) : "#000000" // 灰白骨色（身体 + 右臂）
                                     }
                                 }
-                                // t555 额外黑色眼窝已删（同猪：pack 贴图自带头骨眼窝，叠补眼成「双层眼」）。
+                                // rv-low-batch1 黑色眼窝恢复（pack 感知 visible）。头骨空洞眼窝（纯黑 #1a1a1a，
+                                //   §9a）。头骨心 (0,0.57,0) 半 (0.16,0.18,0.16) → 前面 z=-0.16；眼窝 y≈0.62、
+                                //   x=±0.06、z=-0.17（略凸防 z-fight）。
+                                Model {
+                                    visible: mobBonesPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.06, 0.62, -0.17)
+                                    scale: Qt.vector3d(0.06, 0.07, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    visible: mobBonesPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.06, 0.62, -0.17)
+                                    scale: Qt.vector3d(0.06, 0.07, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
                                 // t331 右臂 + 弓 肩枢 Node：drawAmount（EntityManager::drawAmountAt，aimTimer 驱动）抬起右臂瞄准。
                                 //   臂与弓同处一 Node 绕肩枢刚体同转 → 抬臂时弓精确随臂移动（免错位）。肩枢 = 右臂根与躯干相接处
                                 //   (0.20,0.28,-0.12)（MobModel 局部坐标；Node 继承 bodyYaw + 父 position）。drawAmount=0 → 臂/弓在
@@ -6082,7 +6228,37 @@ Window {
                                         return _r >= 0 ? Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) : "#000000" // 暗黑红
                                     }
                                 }
-                                // t555 额外 4 红眼已删（同猪：pack 贴图自带蜘蛛眼，叠补眼成「双层眼」）。
+                                // rv-low-batch1 4 红眼恢复（pack 感知 visible；蜘蛛标志性 8 眼简化为 4 颗醒目红眼，
+                                //   原创纯色 NoLighting §9a）。Spider 头心 (0,-0.02,-0.32) 半 (0.18,0.14,0.18) →
+                                //   前面 z=-0.50；眼贴 z=-0.51（略凸防 z-fight）。4 颗分上下两对（y=+0.04 / -0.08；x=±0.07）。
+                                Model {
+                                    visible: mobSpiderPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.07, 0.04, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                                Model {
+                                    visible: mobSpiderPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.07, 0.04, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                                Model {
+                                    visible: mobSpiderPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.07, -0.08, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                                Model {
+                                    visible: mobSpiderPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.07, -0.08, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate
@@ -6181,7 +6357,21 @@ Window {
                                     scale: Qt.vector3d(0.035, 0.035, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#c83030" }
                                 }
-                                // t555 额外黑眼已删（同猪：pack 贴图自带鸡脸眼，叠补眼成「双层眼」）。
+                                // rv-low-batch1 黑眼恢复（pack 感知 visible；头两侧偏前 z=-0.27、y=0.27、x=±0.08）。
+                                Model {
+                                    visible: mobChickenPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.08, 0.27, -0.27)
+                                    scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                Model {
+                                    visible: mobChickenPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.08, 0.27, -0.27)
+                                    scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
                             }
                         }
                         onLoaded: if (item) item.parent = mobDelegate

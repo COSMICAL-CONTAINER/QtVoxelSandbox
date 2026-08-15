@@ -365,6 +365,26 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state)
     return true;
 }
 
+// rv-low-batch1 塌落雪层叠层合并专用（详见 world.h 头注释）：塌落 SnowLayer 落在另一 SnowLayer 上 →
+//   合并层数覆盖写回（state=total-1）。仅 EntityManager FallingBlock(SnowLayer) 着地合并调。
+bool World::setSnowLayerMerge(int x, int y, int z, quint8 state)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return false; // 越界拒绝
+    if (m_chunks.blockAt(x, y, z) != BlockRegistry::SnowLayer) return false; // 防御：仅既有雪层可被合并
+    const quint8 occ = BlockRegistry::SnowLayer;
+    m_chunks.setBlock(x, y, z, BlockRegistry::SnowLayer, state); // 覆盖写 id+state + 标脏 + 边界邻接
+    // 写后钩子：id 不变（SnowLayer→SnowLayer）→ 生长 / 流体 / 冰索引与光照均无变化（早退路径），但保持
+    //   同族写入路径一致性（沙着地 / 点火清格均调全套钩子）。
+    noteGrowthWrite(x, y, z, occ, BlockRegistry::SnowLayer);
+    noteFluidWrite(x, y, z, occ, BlockRegistry::SnowLayer);
+    noteIceWrite(x, y, z, occ, BlockRegistry::SnowLayer);
+    recomputeLightAround(x, y, z, occ, BlockRegistry::SnowLayer);
+    emit worldChanged(); // 驱动 mesh 重建（薄板高度随 state 变；不发 placed/broken —— 系统事件）
+    m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
+    return true;
+}
+
 // t490fix 点火专用静默清方块（详见 world.h 头注释）：照搬 setBlockFromEntity 主体（同写后钩子），仅删掉
 //   occ 守卫（无条件覆盖为 Air）。occ 仍读出作 oldId 传给 note / 光重算，保持生长 / 流体索引正确。越界 → false。
 //   仅 playercontroller 3 处点火路径用（右键机关四邻 / 右键 TNT 本体 / 压力板四邻）。

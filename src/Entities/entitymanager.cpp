@@ -343,6 +343,10 @@ int EntityManager::spawnSnowball(const QVector3D &origin, const QVector3D &vel, 
     e.arrowLife = kSnowballLifetime;
     e.snowballDamage = damage;   // t505 按发射者分流（golem=kSnowballDamage / player=0；命中分支读它）
     e.snowballThrower = thrower; // t553 发射者槽索引（fireSnowball=雪傀儡 idx / 玩家=-1；命中分支排除自身）
+    // rv-low-batch1 发射者代际快照（修槽复用误排除）：thrower 槽当前任的 spawnSerial 一并记下 → 命中排除
+    //   同时比对 slot+serial，槽复用换任后不再误排除新生物。越界防御（thrower 无效 / 玩家 -1）→ 0 不影响。
+    if (thrower >= 0 && thrower < int(m_entities.size()))
+        e.snowballThrowerSerial = m_entities[size_t(thrower)].spawnSerial;
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -3136,7 +3140,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 for (int mi = 0; mi < int(m_entities.size()); ++mi) {
                     const Entity &m = m_entities[size_t(mi)];
                     if (!m.alive || m.kind != Mob || m.dead) continue; // 所有活体 mob（含被动；玩家非 Mob 穿过）
-                    if (mi == e.snowballThrower) continue; // t553 排除发射者自身（防雪球首帧误击自己）
+                    if (mi == e.snowballThrower && m_entities[size_t(mi)].spawnSerial == e.snowballThrowerSerial)
+                        continue; // t553 排除发射者自身（防雪球首帧误击自己）。rv-low-batch1 加代际比对：槽复用
+                                  //   换任（新生物进驻同槽）后 serial 不同 → 不再误排除新生物（修「雪球打不到某格生物」）
                     const float ex2 = m.pos.x() - m.halfW - kSnowballHitHalfW;
                     const float ey2 = m.pos.y() - m.halfH - kSnowballHitHalfW;
                     const float ez2 = m.pos.z() - m.halfW - kSnowballHitHalfW;
@@ -3312,9 +3318,44 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 // 沙遇不完整方块失撑 → 变掉落物（掉落点 = 不完整方块上方一格 = 沙应停位）。发信号由呈现层
                 //   转发 ItemEntityManager.spawnItem（同 spawnItem 模式；分层：Entities 层发语义事件，呈现层
                 //   只消费）。不放置方块、不动原不完整方块（仅完整立方可支撑沙，机制等价 MC 沙落火把碎成掉落物）。
-                emit fallingBlockDropped(cx, dropCellY + 1, cz, e.blockId);
-                toRemove.push_back(idx);
-                dirty = true;
+                // rv-low-batch1 修「塌落雪层落半砖 / 落另一雪层上层数丢失」：旧实现 SnowLayer 与沙同走本分支
+                //   emit fallingBlockDropped(...,SnowLayer) → 呈现层 spawnItem(SnowLayer,1) = 只掉 1 份（多层数
+                //   metadata 丢失，且掉的是可放置的 SnowLayer 物品而非雪球）。特判（机制对标 MC 1.0 雪层塌落）：
+                //   - 目标格是**另一雪层**（同为 SnowLayer）→ 不掉落，改为**叠层合并**：新层数 = min(下方层数 +
+                //     携带层数, 8)。下方未满层（合并后 ≤ 8）→ 写回下方格 state（保留层数放置）；溢出部分按层数掉
+                //     雪球（溢出层数 × 1 雪球，同铲挖 state+1 语义）。
+                //   - 其它不完整方块（半砖 / 火把等）→ 按 state+1 掉雪球（同玩家铲挖：每层 1 雪球；空手沙规则不适用
+                //     —— 塌落是系统事件非挖掘，直接给产出）。发 snowLayerCollapseDropped（itemId=SnowballId 字面
+                //     0x23D，count=层数）由呈现层 spawnItem（同 fallingBlockDropped 模式）。
+                if (e.blockId == BlockRegistry::SnowLayer) {
+                    const quint8 below = world->blockAt(cx, dropCellY, cz);
+                    if (below == BlockRegistry::SnowLayer) {
+                        // 叠层合并：下方 state + 携带 state+1 层（state 0..7 = 1..8 层）；clamp 到 8。
+                        const int belowLayers = int(world->stateAt(cx, dropCellY, cz)) + 1;
+                        const int carryLayers = int(e.blockState) + 1;
+                        const int total = std::min(belowLayers + carryLayers,
+                                                   int(BlockRegistry::SnowLayerStageMax) + 1);
+                        // 写回合并层数（-1 回 state 编码）。setBlockFromEntity occ 守卫会拒（下方非 air）→ 用
+                        //   setWaterSilent 语义写入？不行 —— setWaterSilent 是水流系统接口。此处需「覆盖既有
+                        //   SnowLayer 的 state」：走 World 的 5 参数 setBlockFromEntity 不行（occ 拒非空格），
+                        //   故由 World 提供 setSnowLayerMerge（见 world.h；仅 Entities 层塌落合并调）。
+                        world->setSnowLayerMerge(cx, dropCellY, cz, quint8(total - 1));
+                        // 溢出层数（belowLayers + carryLayers > 8）→ 掉雪球（每溢出层 1 个）。
+                        const int overflow = (belowLayers + carryLayers) - (int(BlockRegistry::SnowLayerStageMax) + 1);
+                        if (overflow > 0)
+                            emit snowLayerCollapseDropped(cx, dropCellY + 1, cz, 0x23D, overflow);
+                    } else {
+                        // 其它不完整方块（半砖 / 火把…）→ 全部层数掉雪球（state+1 个，同铲挖语义）。
+                        const int layers = std::min(int(e.blockState) + 1, int(BlockRegistry::SnowLayerStageMax) + 1);
+                        emit snowLayerCollapseDropped(cx, dropCellY + 1, cz, 0x23D, layers);
+                    }
+                    toRemove.push_back(idx);
+                    dirty = true;
+                } else {
+                    emit fallingBlockDropped(cx, dropCellY + 1, cz, e.blockId);
+                    toRemove.push_back(idx);
+                    dirty = true;
+                }
             } else if (newY <= 0.0f) {
                 // 全列无支撑且已跌出世界底部 → 移除（防永久下落；正常世界 y=0 有石头层不触发）。
                 toRemove.push_back(idx);

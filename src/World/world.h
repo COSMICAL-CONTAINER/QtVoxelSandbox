@@ -206,6 +206,12 @@ public:
     //   emit worldChanged，不发 blockPlaced），但写**带 state 的方块**（state=layers-1 保留层数）。仅 SnowLayer 着地
     //   调本重载（其余 FallingBlock 着地仍走 4 参数 state=0）。同 occ 守卫（仅 air/水可被着地覆盖）。越界 / 非空非水 → false。
     bool setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state);
+    // rv-low-batch1 塌落雪层叠层合并专用：塌落 FallingBlock(SnowLayer) 着地遇**另一 SnowLayer**（非完整
+    //   立方 → 普通着地分支不接）→ 合并层数（下方层数 + 携带层数，clamp 8；溢出部分由 caller 发
+    //   snowLayerCollapseDropped 掉雪球）。本方法覆盖写该格 SnowLayer 的 state（setBlockFromEntity 的 occ
+    //   守卫会拒非空格，故独立入口）。复用全部写后钩子（note/光/worldChanged），不发 placed/broken（系统事件）。
+    //   防御：目标格非 SnowLayer → false。越界 → false。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
+    bool setSnowLayerMerge(int x, int y, int z, quint8 state);
     // t490fix 点火专用静默清方块（绕过 setBlockFromEntity 的 occ 守卫——TNT 是实体方块，occ 守卫会拒）。
     //   背景：playercontroller 右键机关 / 右键 TNT 本体 / 压力板四邻点燃 TNT 时，原写
     //   setBlockFromEntity(...,Air) 想「清掉原 TNT 方块再 spawnPrimedTnt」。但 setBlockFromEntity 有 occ 守卫

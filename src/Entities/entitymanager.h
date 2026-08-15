@@ -558,6 +558,12 @@ signals:
     //   呈现层（Main.qml）Connections 转发到 ItemEntityManager.spawnItem 生成掉落实体（同
     //   PlayerController.spawnItem 模式；分层：Entities 层发语义事件，呈现层只消费，绝不反向写栅格）。
     void fallingBlockDropped(int x, int y, int z, int blockId);
+    // rv-low-batch1 塌落雪层遇不完整方块 / 溢出合并 → 掉雪球（修「层数丢失只掉 1 份」）：FallingBlock
+    //   (SnowLayer) 着地遇非完整立方支撑（半砖 / 火把 / 另一雪层溢出）时发。itemId=0x23D（SnowballId；
+    //   Entities 层不 import RecipeRegistry —— Game 层静态类，PLAN §2 分层，故用字面量，同 Main.qml 约定），
+    //   count=层数（每层 1 雪球，同玩家铲挖 state+1 语义）。坐标 = 掉落点（不完整方块上方一格，同
+    //   fallingBlockDropped 约定）。呈现层转发 ItemEntityManager.spawnItem（同 fallingBlockDropped 模式）。
+    void snowLayerCollapseDropped(int x, int y, int z, int itemId, int count);
     // t239 mob 死亡一次性事件。t449：**延迟到 deathTimer 归零**（≈500ms 倒地动画播完）才发，而非 damageEntity
     //   致死瞬间 —— 给「侧倒 + 白烟 → 掉落」的 MC 式过渡（旧实现红闪与掉落同帧太急）。damageEntity 致死时仅
     //   置 dead=true + deathTimer + 快照 deathBurned；tick 死亡态分支 deathTimer≤0 时 emit 本信号 + releaseSlot。
@@ -704,6 +710,10 @@ private:
         //   t553 扩大命中到「所有 mob」（含被动）后此误击从「不可能」（旧版只打敌对、发射者 non-hostile 天然排除）
         //   变成「边缘可能」→ 显式排除发射者（机制等价 MC 投射物不命中发射者自身）。默认 -1（无发射者 → 不排除）。
         int snowballThrower = -1; // 雪球发射者槽索引（仅 kind==Snowball；fireSnowball=雪傀儡 idx / player=-1）
+        // rv-low-batch1 雪球发射者代际快照（修槽复用误排除，见 spawnSerial 注释）：fireSnowball 记发射者
+        //   m_entities[idx].spawnSerial；命中排除**同时**比对 slot+serial —— 槽复用换任后 serial 不同 →
+        //   不再误排除新生物。玩家雪球（thrower=-1）本字段不读。默认 0。
+        quint32 snowballThrowerSerial = 0; // 发射者代际快照（与命中时槽内实体的 spawnSerial 比对）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
         int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；t280 Shambler/Bones；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
@@ -850,8 +860,17 @@ private:
         //     初始化不错位（同 aiAccum / slowTimer 模式，DMI 兜底）。
         float meltAccum = 0.0f;       // 雪傀儡热伤害累积器（秒；达 kSnowMeltInterval 扣 1HP；仅 MobSnowGolem）
         bool  snowGolemSheared = false; // 雪傀儡是否已被剪南瓜头（true=无头 derpy 形态；仅 MobSnowGolem）
+        // rv-low-batch1 槽代际序号（修「snowballThrower 槽复用误排除」）：每次 acquireSlot 复用 / 追加槽位时
+        //   把全局单调计数 m_spawnSerial 写入新实体（槽的「这一任」标识）。投射物记发射者 slot+serial 快照，
+        //   命中排除时同时比对 —— 槽被复用（release → 新实体进驻同 slot）后 serial 不同 → 不再误排除新生物
+        //   （旧 bug：snowballThrower 只存槽索引，槽复用后新生物被当作发射者永久免击）。同类 arrowShooter 的
+        //   「每 tick 校验存活」模式不适用于快照式排除（雪球飞行 ~2s 内发射者可能死亡换任），故加代际。
+        //   quint32 单调（同 m_tickPhase 溢出分析：2.1e9 次 spawn 不回绕）。DMI 兜底默认 0。
+        quint32 spawnSerial = 0; // 本任实体进驻槽位时的全局 spawn 序号（与 snowballThrowerSerial 快照比对）
     };
     std::vector<Entity> m_entities;
+    // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
+    quint32 m_spawnSerialCounter = 0;
     int m_revision = 0;
     // perf：节流 entitiesChanged emit 的「待发」脏标记。mob 每帧 wander 致 dirty 几乎每帧 → emit 每帧触发全体
     //   delegate（count × ~12 revision 绑定）NOTIFY 激活 + MobModel 重建 = mob 卡顿主因。改：dirty 只置 m_pendingEmit，
@@ -907,6 +926,8 @@ private:
             m_entities.push_back(std::move(e));
             slot = int(m_entities.size()) - 1;
         }
+        // rv-low-batch1：写入全局单调 spawn 序号（槽代际；move 之后写 —— 覆盖被 move 的旧实体的默认 0）。
+        m_entities[size_t(slot)].spawnSerial = ++m_spawnSerialCounter;
         ++m_liveCount;
         return slot;
     }
