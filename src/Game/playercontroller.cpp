@@ -225,13 +225,11 @@ void PlayerController::setKey(int key, bool pressed)
             m_autoCrouch = false; // t559：主动按下 shift → 回到「用户主动蹲」（清自动蹲标记，保留正常蹲语义）
             if (m_moveState != Crouch) setMoveState(Crouch);
         } else if (!pressed) {
-            // t559 松 shift 站起判定：头顶无站起空间（1.5 格通道 / 低天花板）→ 自动保持蹲（补 shift），
-            //   直到头顶有空间才自动站（step 内每 tick 复探）。否则直接站起（旧行为）。修「通道里松 shift
-            //   直接站 + 被挤出/穿墙」：不站就不会把 1.8 AABB 塞进 1.5 通道（不嵌入 → extrudeEmbedded 不推）。
-            if (m_moveState == Crouch) {
-                if (canStandUp()) setMoveState(Walk);
-                else m_autoCrouch = true;
-            }
+            // t559/t575 松 shift 站起：统一走 setMoveState 集中站起闸门 —— 头顶有站起空间（canStandUp）
+            //   才真正站起；不足（1.5 格通道 / 低天花板）时闸门拒绝切换并标 m_autoCrouch（自动保持蹲），
+            //   由 step 内每 tick 复探自动站。修「通道里松 shift 直接站 + 被挤出/穿墙」：不站就不会把
+            //   1.8 AABB 塞进 1.5 通道（不嵌入 → extrudeEmbedded 不推）。
+            if (m_moveState == Crouch) setMoveState(Walk);
         }
     } else if (key == Qt::Key_W) {
         const bool canSprint = (m_mode == Survival || (m_mode == Creative && !m_flying));
@@ -342,7 +340,7 @@ void PlayerController::respawn()
     m_knockback = QVector3D(0, 0, 0); // t296：清受击击退冲量（重生不继承死亡点的击退）
     snapSpawnToGround();      // t137：重生贴地表（消除 kSpawnY 兜底落差；设 m_pos.y + m_peakY）
     if (m_flying) { m_flying = false; emit flyingChanged(); }
-    setMoveState(Walk);       // 蹲下 / 疾跑归 Walk（同时复位 AABB 高 / 眼位；无变化静默）
+    setMoveState(Walk, true); // 蹲下 / 疾跑归 Walk（重生强制站：位置已摆出生点，闸门无意义）；同时复位 AABB 高 / 眼位
     emit positionChanged();   // 相机 / 第三人称模型跟随刷新
 }
 
@@ -382,7 +380,7 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     m_fireDmgTimer = 0.0f;
     if (m_burning) { m_burning = false; emit burningChanged(); }
     if (m_flying) { m_flying = false; emit flyingChanged(); }
-    if (m_moveState != Walk) setMoveState(Walk);
+    if (m_moveState != Walk) setMoveState(Walk, true); // t574/t575 存档加载强制站（位姿已灌新位，闸门无意义）
     const Mode target = (mode == int(Survival)) ? Survival
                        : (mode == int(Creative)) ? Creative : Spectator;
     if (target != m_mode) { m_mode = target; emit modeChanged(); }
@@ -406,6 +404,8 @@ void PlayerController::release()
     m_leftDown = false;                       // t44：暂停 / 失焦 → 视同松手（切断续挖）
     m_rightDown = false;                      // t267：暂停 / 失焦 → 视同松手（切断连食）
     // t51：暂停 / 失焦时退出疾跑 / 蹲下（恢复时从 Walk 起；避免遗留蹲态卡低视角 / 疾跑余速）。
+    // t574：蹲态下开背包（release）经 setMoveState 站起闸门 —— 头顶不足（1.5 格通道）时拒绝站起并标
+    //   m_autoCrouch（关包 grab 后仍保持蹲，头不卡方块；走出低顶区才自动站）。暂停叠层同理不破蹲约束。
     // t70：同时清双击窗口脏残留（防暂停恢复后首按 W 被旧戳误判双击 → 误触发疾跑）。
     if (m_moveState != Walk) setMoveState(Walk);
     m_lastWms = -100000;
@@ -4042,9 +4042,24 @@ void PlayerController::reportHorizSpeed(const QVector3D &posBefore, qreal dt)
 //   蹲下：m_height=kCrouchHeight(1.5) / m_eyeHeight=kCrouchEye(1.35)；
 //   站起（Walk/Sprint）：m_height=kHeight(1.8) / m_eyeHeight=kEyeHeight(1.62)。
 //   相机 position 读 m_eyeHeight → 蹲下相机自动降低（无需 QML 额外处理）。
-void PlayerController::setMoveState(MoveState s)
+// t574/t575 集中站起闸门：从 Crouch 切往 Walk/Sprint（= 站起）时，若头顶无站起空间（canStandUp()==false，
+//   1.5 格通道 / 低天花板），一律拒绝切换 —— 无论 shift 是否按住、无论触发源（松 shift / 开关背包 release /
+//   飞行起飞 / 切模式前的态清理）。setMoveState 是所有「切出 Crouch」路径的单一瓶颈（setKey 松 shift、
+//   release、双击空格起飞、setMode、respawn、loadSavedState）→ 在此设闸后任何路径都不会把 1.8 AABB
+//   塞进 1.5 空间（不嵌入 → 头不卡方块、extrudeEmbedded 不推）。拒绝时标 m_autoCrouch：step 内每 tick
+//   复探头顶，有空间即自动站起（走出低顶区 → 自动站）。例外：Spectator / 创造飞行是 noclip（无碰撞嵌入
+//   问题），respawn/loadSavedState 摆到新位置（旧位置头顶判定无意义）→ 这两路径用 force 参数绕过闸门。
+void PlayerController::setMoveState(MoveState s, bool force)
 {
     if (s == m_moveState) return;
+    // t574/t575 站起闸门：当前蹲 + 目标站 + 头顶站不下（且非 noclip 模式 / 非强制重置）→ 拒绝站起，
+    //   转为「自动蹲保持」（清计时语义同 t559：等 step 复探 canStandUp 再站）。
+    if (m_moveState == Crouch && s != Crouch && !force
+        && m_mode != Spectator && !(m_mode == Creative && m_flying)
+        && !canStandUp()) {
+        m_autoCrouch = true;
+        return;
+    }
     m_moveState = s;
     if (s == Crouch) {
         m_height = kCrouchHeight;
@@ -4768,14 +4783,23 @@ void PlayerController::step(qreal dt)
         m_peakY = m_pos.y();
     }
 
-    // t160 窒息（仅 Survival）：眼位（头部）格为实体可碰撞方块（被埋 / 头卡进方块，机制等价 MC 窒息）→
+    // t160 窒息（仅 Survival）：眼位（头部）嵌进实体方块的碰撞体（被埋 / 头卡进方块，机制等价 MC 窒息）→
     //   每 kSuffocationInterval 秒扣 1HP（fallDamageTaken 同路径 → PlayerState.takeDamage）+ 发 suffocationPulse
     //   （呈现层红屏闪 + 视角晃动）。创造 / 观察者无伤。脱困（头部出方块）即停累积。蹲下眼位低随之判定点下移。
+    // t575 判据收紧「眼位格 collidable」→「眼位点落入该格某 sub-AABB 内」：1.5 格通道的天花板（上半砖等
+    //   partial 块）整格 collidable，但蹲态眼位（1.35）只在其下方空气区 —— 旧判据把这种「合法约束蹲姿」
+    //   误判窒息扣血。点在 sub-AABB 内才真嵌（与碰撞同源，partial 块精确）。
     if (m_mode == Survival && m_world) {
-        const int hx = int(std::floor(m_pos.x()));
-        const int hy = int(std::floor(m_pos.y() + m_eyeHeight));
-        const int hz = int(std::floor(m_pos.z()));
-        if (m_world->isCollidable(hx, hy, hz)) {
+        const float ex = m_pos.x(), ey = m_pos.y() + m_eyeHeight, ez = m_pos.z();
+        bool embedded = false;
+        for (const BlockRegistry::BlockAABB &b
+             : m_world->collisionAABBsAt(int(std::floor(ex)), int(std::floor(ey)), int(std::floor(ez)))) {
+            if (ex > b.minX && ex < b.maxX && ey > b.minY && ey < b.maxY && ez > b.minZ && ez < b.maxZ) {
+                embedded = true;
+                break;
+            }
+        }
+        if (embedded) {
             m_suffocationTimer += float(dt);
             if (m_suffocationTimer >= kSuffocationInterval) {
                 m_suffocationTimer -= kSuffocationInterval;

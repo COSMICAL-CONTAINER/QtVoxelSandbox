@@ -752,7 +752,9 @@ private:
     //   moveSpeedChanged（speed 复用此 NOTIFY）。各飞 / 走出口前调一次。dt<=0 → no-op。
     void reportHorizSpeed(const QVector3D &posBefore, qreal dt);
     // 切移动态（t51）：同步更新 AABB 高 / 眼位（蹲下 1.5/相机随之降低；站起 1.8/1.62）。无变化静默。
-    void setMoveState(MoveState s);
+    // t574/t575：force=true 绕过站起闸门（noclip 模式切换 / respawn / loadSavedState 摆位重置用）；
+    //   默认 false —— Crouch→站起须 canStandUp()（头顶 1.8 AABB 无实体），不足时拒绝并标 m_autoCrouch。
+    void setMoveState(MoveState s, bool force = false);
     // 蹲下「边缘安全」（t51）：给定水平位置 (x,z) 在当前脚位下方是否有支撑方块（脚底 0.05 处那一格
     //   在 AABB footprint 内任一列实体即算支撑）。step() 据此判定「蹲下时若水平移动后脚下将无方块
     //   则不水平移动」（防走下方块边缘）。仅读 World（isSolid），与碰撞同层。
@@ -955,11 +957,13 @@ private:
     float m_flySpeedMul = 1.0f;     // 飞行速度倍数（默认 1.0；滚轮 ±档调速；有效 = clamp(kFly*mul,4,20)；t159）
     MoveState m_moveState = Walk;   // 移动态（t51；Walk/Sprint/Crouch；仅走路模式有效，飞/Spectator 恒 Walk）
     // t559 自动蹲（松 shift 后头顶无站起空间 → 自动保持蹲，直到头顶有空间才站）：true = 处于 Crouch 态但
-    //   shift 未按住（不是用户主动蹲，是「松 shift 时 canStandUp()==false」自动补的蹲）。区别语义：
+    //   shift 未按住（不是用户主动蹲，是站起闸门拒绝站起时自动补的蹲）。区别语义：
     //   - shift 按住（m_autoCrouch=false）：用户主动蹲 —— 蹲下边缘安全（防走下边缘）生效、松 W 不退出。
-    //   - 自动蹲（m_autoCrouch=true）：松 shift 后的残留蹲 —— 每 tick 复探头顶，有空间即自动站起；
+    //   - 自动蹲（m_autoCrouch=true）：站起被拒后的约束蹲 —— 每 tick 复探头顶，有空间即自动站起；
     //     边缘安全仍生效（继承 Crouch 态），自动攀爬（auto-step）同样生效（半砖楼梯不用跳）。
-    //   清零时机：setKey 按下 shift（回到主动蹲）、setMoveState 切出 Crouch（站起 / 切模式 / 飞行 / respawn）。
+    //   置位：t574/t575 setMoveState 站起闸门拒绝（canStandUp()==false —— 松 shift / 开关背包 release /
+    //     切模式等一切站起路径的单一瓶颈）。
+    //   清零时机：setKey 按下 shift（回到主动蹲）、setMoveState 真正切出 Crouch（站起 / 切模式 / 飞行 / respawn）。
     bool m_autoCrouch = false;
     float m_height = kHeight;       // 当前 AABB 高（蹲下变 kCrouchHeight=1.5；默认 kHeight=1.8；t51）
     float m_eyeHeight = kEyeHeight; // 当前眼位（蹲下降低到 kCrouchEye；相机 position 据此 → 蹲下相机降低，t51）
