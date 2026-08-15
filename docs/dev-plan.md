@@ -2091,8 +2091,9 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 查：① 鸡腿 box UV 采样（鸡贴图腿区在特定 uv 区）；② 雪傀儡头（同 t582 图鉴路径）；③ 铁傀儡：腿前黑（front 面贴图采样错位）+ 肩黑色（shoulder box UV 越界）—— box-UV 公式对照 MC 1.8 iron_golem 实际 textureOffset 重算。
 - 修：① demo 包 chicken.png 腿区不在 vanilla (26,0) 位（该区是翅膀/喙稀疏像素）→ 两腿与躯干共用 body(0,9,6,8,6)（六面 100% 不透明）。② ResourceBrowser 图鉴预览补 BlockCube{blockId:100} 南瓜头（同 Main.qml t582 方案，雪 y=1.14 宽 0.50 / 铁 y=0.95 宽 0.72）。③ 铁傀儡按包实测重算（包绘画布局与 vanilla 源码不符）：body d=9→11（修 Top 面空边=肩黑）、leg (0,30,4,12,4)→(0,70,9,5,6)、arm (40,40,4,16,4)→(60,58,4,16,6)，全部六面 100% 不透明。
 
-**t599** 资源查看器 3D 模型鼠标拖拽旋转（自动旋转基础上可拖）
+**t599** 资源查看器 3D 模型鼠标拖拽旋转（自动旋转基础上可拖）✅（commit 见 git log，t599）
 - 查：ResourceBrowser 3D 预览 —— autoRotate + 鼠标 DragHandler 叠加（拖时暂停自动转，松手恢复；惯性与现自动旋转融合）。
+- 实现：DragHandler(target:null，只读位移增量)——active 时 previewDragging=true 暂停 spinAngle 自转 NumberAnimation，水平增量×0.6°写 spinAngle（yaw）、垂直增量累计 userPitch（±60° 限幅）；松手 resumePitchAnim(400ms OutCubic) 平滑归零 pitch，yaw 自转从当前角度续转无跳变。方块/生物 3D 预览共用；enabled 限 3D 预览可见（大图标态不抢手势）。底部提示更新。
 
 ### 🅼 方块/图标杂项（3 项）
 

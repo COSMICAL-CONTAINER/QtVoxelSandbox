@@ -161,6 +161,14 @@ Item {
 
     // 旋转角度（预览方块绕 Y 自转；仅 selectedIsCube 时跑）。
     property real spinAngle: 0
+    // t599 鼠标拖拽旋转态：dragging = DragHandler 活动中（暂停自转）；userPitch = 拖拽累计俯仰角偏移
+    //   （叠加在 -22° 基倾上，Y 拖上/下看顶/底）；松手 resume 动画把 spinAngle lerp 回自转相位（无跳变）。
+    //   yaw 由 spinAngle 本身承载（拖拽水平位移直接写入 spinAngle，自转从松手角度继续）。
+    property bool previewDragging: false
+    property real userPitch: 0
+
+    // t599 松手回自转说明：yaw 由 NumberAnimation on spinAngle 重启从当前值续跑（无跳变）；pitch 归零走
+    //   resumePitchAnim（见预览区 DragHandler 处）。
 
     // 选中物是否「整立方方块」（走 View3D 旋转预览）。路由谓词与 Main.qml 掉落实体 / 手持立方同源：
     //   排除 火把(13) / 异形段(isPartialBlock) / cross 段(isCrossBlock) / 工具段(isTool) / 材料·护甲段(isMaterial)。
@@ -188,10 +196,16 @@ Item {
             root.selectedId = root.paletteModel[0]
     }
 
-    // 预览方块自转动画：8s 一圈，仅在面板可见且选中整立方 / 生物时跑（省 GPU）。
+    // 预览自转动画：8s 一圈，仅在面板可见且选中整立方 / 生物、且未在拖拽时跑（省 GPU；t599 拖拽时暂停）。
     NumberAnimation on spinAngle {
         from: 0; to: 360; duration: 8000; loops: Animation.Infinite
-        running: root.visible && (root.selectedIsCube || root.selectedIsMob)
+        running: root.visible && (root.selectedIsCube || root.selectedIsMob) && !root.previewDragging
+    }
+    // t599 松手后 pitch 平滑归零（回标准 -22° 3/4 视角；yaw 已由自转从当前角度续转承接）。
+    NumberAnimation {
+        id: resumePitchAnim
+        target: root; property: "userPitch"; to: 0
+        duration: 400; easing.type: Easing.OutCubic
     }
 
     // 生物预览贴图（MobModel baseColorMap）：source 随选中 mob 切换（pack → pack entity 贴图；否则程序生成
@@ -419,6 +433,42 @@ Item {
                             Item {
                                 width: parent.width; height: 300
 
+                                // t599 3D 预览鼠标拖拽旋转（用户「一直自动旋转，能不能拖拽看」）：在自动旋转基础上
+                                //   加 DragHandler —— 按住拖时暂停自转（previewDragging → NumberAnimation running=false），
+                                //   水平位移增量写 spinAngle（yaw，度；1px = 0.6° 手感系数）、垂直位移增量累计
+                                //   userPitch（pitch，度；上拖看顶 / 下拖看底，限 ±60° 防过翻）；松手 pitch 由
+                                //   resumePitchAnim 平滑归零（400ms OutCubic 回标准 -22° 3/4 视角），yaw 由自转从当前
+                                //   角度无缝续转（NumberAnimation on spinAngle 重启从当前值推进，无跳变）。
+                                //   方块与生物 3D 预览共用（同一 spinAngle/userPitch）；enabled 限定 3D 预览可见时
+                                //   （大图标态不抢手势；左侧网格在其外不受影响）。translation 是只读累计值 →
+                                //   lastX/lastY 记上次值取增量（拖拽结束归零基准，下次拖从 0 差起）。
+                                DragHandler {
+                                    id: previewDrag
+                                    target: null // 不拖动对象本身，只读位移（增量驱动旋转）
+                                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad | PointerDevice.TouchScreen
+                                    enabled: cubeView.visible
+                                    property real lastX: 0
+                                    property real lastY: 0
+                                    onActiveChanged: {
+                                        if (active) {
+                                            root.previewDragging = true
+                                            resumePitchAnim.stop() // 拖拽开始即接管 pitch（防归零动画抢写）
+                                        } else {
+                                            root.previewDragging = false
+                                            lastX = 0; lastY = 0 // 松手归零基准（translation 重新累计）
+                                            resumePitchAnim.restart() // 松手：pitch 平滑归零，yaw 自转续跑
+                                        }
+                                    }
+                                    onTranslationChanged: {
+                                        if (!active) return
+                                        const dx = translation.x - lastX
+                                        const dy = translation.y - lastY
+                                        lastX = translation.x
+                                        lastY = translation.y
+                                        root.spinAngle = (root.spinAngle + dx * 0.6 + 360) % 360
+                                        root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6))
+                                    }
+                                }
                                 // 整立方方块 → 内嵌 View3D 旋转 BlockCube。
                                 // 渲染可见性铁律（lessons-learned）：clipNear≈0.05（默认 10 会剪掉单位立方）+
                                 //   PrincipledMaterial.NoLighting（默认 lit 在本工程不渲染）+ alphaMode Mask（leaves 等带
@@ -439,8 +489,9 @@ Item {
                                         visible: root.selectedIsCube && !root.selectedIsMob
                                         // blockId 绑选中物；不设 world → BlockCube 顶点色恒白（全亮，无天光遮蔽，预览纯净）。
                                         geometry: BlockCube { blockId: root.selectedId }
-                                        // 固定 -22° X 倾（见顶面）+ Y 自转（spinAngle）；-35° 基偏给 3/4 视角。
-                                        eulerRotation: Qt.vector3d(-22, root.spinAngle - 35, 0)
+                                        // 固定 -22° X 基倾（见顶面）+ userPitch 拖拽俯仰（t599）+ Y 自转
+                                        //   （spinAngle，拖拽时由 DragHandler 写入）；-35° 基偏给 3/4 视角。
+                                        eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
@@ -466,7 +517,7 @@ Item {
                                         scale: Qt.vector3d(root.mobPreviewScale(root.selectedMobType),
                                                           root.mobPreviewScale(root.selectedMobType),
                                                           root.mobPreviewScale(root.selectedMobType))
-                                        eulerRotation: Qt.vector3d(-22, root.spinAngle - 35, 0)
+                                        eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
                                         Model {
                                             geometry: MobModel {
                                                 mobType: root.selectedMobType
@@ -567,7 +618,7 @@ Item {
                 Text {
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                     color: "#7d8893"; font.pixelSize: 12
-                    text: root.hoveredName !== "" ? "悬停：" + root.hoveredName : "提示：左侧网格点击任一物品即可预览"
+                    text: root.hoveredName !== "" ? "悬停：" + root.hoveredName : "提示：左侧点击浏览 · 右侧 3D 预览可拖拽旋转"
                 }
                 Rectangle {
                     width: 120; height: 32; radius: 6
