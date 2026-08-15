@@ -42,8 +42,9 @@
 //     mob_silverfish 贴图：灰白甲壳 + 体节横纹（build_mob.py 程序生成原创像素图，§9a 区隔不照搬 MC）。
 //   12 = SnowGolem（雪傀儡；feat）：防御造物——**柱身两雪块**上下堆叠（机制等价 MC 1.0 雪傀儡雪块身）。
 //     几何仅含雪块身（底块心 y=−0.45 / 顶块心 y=+0.45，各半 0.45 → 腿底本地 y=−0.90 贴 collision 底面 halfH=0.90）。
-//     **南瓜头（+ 刻面眼/嘴）不在本几何** —— 由 Main.qml delegate 补独立橙色南瓜 Model（§9 区隔：南瓜头是
-//     单独的橙色南瓜模型，非贴图的一部分；t499 需求）。局部原点 = 碰撞中心（mobModelYOff=0，区别于猪牛羊
+//     **南瓜头（+ 刻面眼/嘴）不在本几何** —— 由 Main.qml delegate 补独立南瓜头 Model（t582 起走 BlockCube{blockId:100}
+//     + 共享图集 pumpkin 瓦片 = 真南瓜贴图头，宽 0.50 比顶雪块 0.60 小一截；旧纯色橙 UnitCube 被用户读作
+//     「没有南瓜的头」）。局部原点 = 碰撞中心（mobModelYOff=0，区别于猪牛羊
 //     的「躯干中心」）。pack 命中 snow_golem.png → 6 面 T 字 UV 展开进雪块身；pack 关 → 全脸 UV + 纯色雪白
 //     （无程序生成贴图）。shearSnowGolem 剪南瓜头后南瓜头 / 眼 / 嘴悬浮原位（无头 derpy 形态，几何不动）。
 //   13 = IronGolem（铁傀儡；feat）：防御造物——**铁块人形**（双腿 + 宽躯干 + 双长臂，机制等价 MC 1.0 铁傀儡

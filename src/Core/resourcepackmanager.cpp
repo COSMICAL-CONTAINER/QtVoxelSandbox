@@ -387,6 +387,15 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         //   stone 风格一致，同 t493 lapis_ore 模式）。非 pack 时回落程序生成 default_redstone_ore.png（自绘
         //   石头底 + 鲜红菱斑矿粒）。包内缺该 PNG 时安全跳过（保留程序生成瓦片）。
         {138, QStringLiteral("redstone_ore.png")},           // redstone_ore（t569：pack 激活用包内贴图）
+        // t582 南瓜三面（机制等价 MC 1.0 刻面南瓜）：tile 117/118/119 → pack block/pumpkin_side.png（侧=瓜棱）/
+        //   pumpkin_face_off.png（前面=刻面双眼+锯齿嘴，未点燃态；_on 是南瓜灯点燃态非本方块）/ pumpkin_top.png
+        //   （顶=瓜顶带茎）。非 pack 时回落程序生成 pumpkin_*.png（tools/build_pumpkin.py 自绘）。snow_golem.png
+        //   实体贴图头部区只是雪 + 深色 derpy 脸（MC 1.8+ 南瓜不是 entity 贴图的一部分）→ 雪傀儡南瓜头 Model 走
+        //   BlockCube{blockId:100} + 共享图集采样本三瓦片（pack 激活即 HD 南瓜头，修「头没有南瓜」）。
+        //   包内缺 PNG 时安全跳过（保留程序生成瓦片）。
+        {117, QStringLiteral("pumpkin_side.png")},           // pumpkin_side（南瓜侧面瓜棱）
+        {118, QStringLiteral("pumpkin_face_off.png")},       // pumpkin_face（南瓜前面刻面双眼+锯齿嘴）
+        {119, QStringLiteral("pumpkin_top.png")},            // pumpkin_top（南瓜顶/底瓜顶带茎）
     };
     return kMap;
 }

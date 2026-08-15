@@ -557,8 +557,11 @@ void MobModel::rebuild()
         //   → spans y[−0.90,0.00]；顶块心 y=+0.45 半 0.45 → spans y[0.00,0.90]。
         //   **t552 下大上小**（用户报「底下两个雪块一样大」）：底块宽 0.80（半 0.40，MC 12/16=0.75 同量级）、
         //   顶块宽 0.60（半 0.30，MC 10/16=0.625 同量级）→ 雪堆下宽上窄读作雪人柱身。
-        //   **南瓜头 + 刻面眼/嘴不在本几何** —— 由 Main.qml delegate 补独立橙色南瓜 Model（t499 需求：南瓜头是单独
-        //   的橙色南瓜模型，非贴图的一部分）。pack 命中 snow_golem.png → 6 面 T 字 UV 展开进雪块身；pack 关 → 全脸
+        //   **南瓜头 + 刻面眼/嘴不在本几何** —— 由 Main.qml delegate 补独立南瓜头 Model（t582 起走
+        //   BlockCube{blockId:100} + 共享图集采 pumpkin_side/top/face 瓦片 = 真南瓜贴图头，宽 0.50 比顶雪块
+        //   0.60 小一截 = MC 8×8×8 头比例）。pack 命中 snow_golem.png → 6 面 T 字 UV 展开进雪块身（注：
+        //   snow_golem.png 头部区只是雪 + 深色 derpy 脸，MC 1.8+ 南瓜不是 entity 贴图的一部分 → 南瓜头走
+        //   block 瓦片，不走本贴图）；pack 关 → 全脸
         //   UV + 纯色雪白（无程序生成贴图，回退 baseColor）。shearSnowGolem 剪南瓜头仅隐藏南瓜头 Model（几何不动）。
         // R19 C3 UV（MC SnowMan base 64×64；U1 §12）：底雪块=piece2(0,36)12×12×12（大块在下）、顶雪块=piece1(0,16)10×10×10。
         g_texW = 64.0f; g_texH = 64.0f;

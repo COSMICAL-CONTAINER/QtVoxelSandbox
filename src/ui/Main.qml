@@ -5445,45 +5445,53 @@ Window {
                                     }
                                 }
                                 // 南瓜头（机制等价 MC 1.0 雪傀儡戴刻面南瓜；§9 区隔纯色原创非照搬 MC）。
-                                //   t552 复盘 ②「头还是白色雪头没有南瓜头 + 头悬空」：t529 把头提到 local y center +1.45
-                                //   （头底 1.09 高于顶雪块顶 0.90，留 0.19「脖颈缝隙」）—— 用户仍判「无头」：缝隙读作「头悬空」，
-                                //   且头（0.82 宽）与顶雪块（0.80 宽）等宽 → 顶雪块被读作「白色雪头」、浮着的橙块读作「悬空
-                                //   装饰」而非「头」。t552 修：**头直接坐在顶雪块顶**（零缝隙 → 不悬空）+ 顶雪块已缩窄到
-                                //   0.60（t552 ① 下大上小）→ 头（x/z 0.66）比顶雪块略宽成「独立的头」+ 高饱和亮橙 #ef8c2a
-                                //   与雪白身强对比 → 一眼辨「南瓜头在顶上」非「身体延伸」。头心 y = 顶雪块顶 0.90 + 半高
-                                //   0.30 = 1.20；**微沉 0.01 到 1.19**（头底 0.89 略入顶雪块顶 0.90 之下）→ 头底与顶雪块
-                                //   顶面不共面（共面会 z-fight 闪烁），视觉仍「坐」在顶上无缝。
+                                //   t582 修（用户「生成后头还是没有南瓜；头太大，要比中间身子小一截」）：
+                                //   ① 头比身子小一截 —— t552 头宽 0.66 反而比顶雪块（0.60）宽，读作「头比身子大」；
+                                //     改 **0.50**（MC 1.0 雪傀儡头 8×8×8 = 半格，比顶块 10px→0.60 小一截）→
+                                //     头心 y = 顶雪块顶 0.90 + 半高 0.25 = 1.15，微沉 0.01 到 1.14（防 z-fight）。
+                                //   ② 真南瓜贴图 —— 原纯色橙 UnitCube 读作「橙方块」非南瓜；改 BlockCube{blockId:100}
+                                //     （南瓜方块）+ 共享图集 voxelAtlas：per-face 采 pumpkin_side/top/face 瓦片（-Z
+                                //     前面 = 刻面双眼+锯齿嘴瓦片，随 bodyYaw 朝行走方向）→ pack 激用包内 HD 南瓜
+                                //     三瓦片（t582 tileFilenameMap 117/118/119 接 pumpkin_side/face_off/top.png），
+                                //     pack 关用程序生成 default_pumpkin_*.png —— 两种模式头都是「真南瓜」。
                                 //   t510：剪南瓜头后（golemSheared）隐藏本体（无头 derpy 形态）；眼/嘴仍悬浮原头位。
                                 Model {
                                     visible: !parent.golemSheared // t510 剪后隐藏南瓜头本体（无头形态）
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 1.19, 0)
-                                    scale: Qt.vector3d(0.66, 0.60, 0.66)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: parent.tinted("#ef8c2a") }
+                                    geometry: BlockCube { blockId: 100 } // 100 = BlockRegistry::Pumpkin（QML 不 import C++ 静态类故字面量，同 onMobDied 约定）
+                                    position: Qt.vector3d(0, 1.14, 0)
+                                    scale: Qt.vector3d(0.50, 0.50, 0.50)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColorMap: voxelAtlas
+                                        baseColor: parent.tinted("#ffffff") // 白=不额外染色，仅受击红闪/减速蓝调/昼夜灰阶调制南瓜瓦片
+                                    }
                                 }
                                 // 南瓜头刻面双眼 + 嘴（机制等价 MC jack o'lantern 刻面：双眼 + 锯齿嘴）。
-                                //   t552 眼/嘴随头新位（头心 1.19 / xz 半 0.33 → 头前面 z=-0.33）：眼/嘴 z=-0.36（凸出头前
-                                //   0.03 非内嵌非共面），刻面深色 (#1a0e04) 必现于头前。眼位 y=1.24（头心上偏留嘴位）；
-                                //   嘴位 y=1.12（眼下，咧嘴笑）。
-                                //   t510：剪南瓜头后（golemSheared）南瓜头本体隐藏，眼/嘴**仍悬浮在原头位**（visible 恒 true）
-                                //   → 「无头形态带眼」derpy 效果（机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」）。
+                                //   t582：南瓜头本体已带刻面贴图（BlockCube -Z 前面 = pumpkin_face 瓦片）→ 头在时
+                                //   本组 overlay 隐藏（防「贴图脸 + 深色 overlay」双层脸）；仅 t510 剪后（golemSheared）
+                                //   「无头 derpy 形态」显示 —— 眼/嘴脱空头位悬浮（机制等价 MC 1.0「剪后变无头形态
+                                //   带眼不死的 derpy 版」）。位随 t582 新头位（头心 1.14 / xz 半 0.25）：z=-0.27 凸出
+                                //   原头前面（原头前 z=-0.25）；眼位 y=1.19（头心上偏留嘴位）、嘴位 y=1.07（眼下）。
                                 Model {
+                                    visible: parent.golemSheared // t582：仅无头 derpy 形态显示（头在时由贴图脸承担）
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.17, 1.24, -0.36)
-                                    scale: Qt.vector3d(0.12, 0.14, 0.04)
+                                    position: Qt.vector3d(-0.13, 1.19, -0.27)
+                                    scale: Qt.vector3d(0.10, 0.11, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                                 Model {
+                                    visible: parent.golemSheared
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.17, 1.24, -0.36)
-                                    scale: Qt.vector3d(0.12, 0.14, 0.04)
+                                    position: Qt.vector3d(0.13, 1.19, -0.27)
+                                    scale: Qt.vector3d(0.10, 0.11, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
-                                // 刻面嘴（横向长条，呈咧嘴笑剪影；机制等价 MC 南瓜嘴刻面）。
+                                // 刻面嘴（横向长条，呈咧嘴笑剪影；机制等价 MC 南瓜嘴刻面）。仅 derpy 形态显示（同上）。
                                 Model {
+                                    visible: parent.golemSheared
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 1.12, -0.36)
-                                    scale: Qt.vector3d(0.32, 0.07, 0.04)
+                                    position: Qt.vector3d(0, 1.07, -0.27)
+                                    scale: Qt.vector3d(0.26, 0.06, 0.04)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                             }
