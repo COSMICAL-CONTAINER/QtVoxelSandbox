@@ -104,10 +104,12 @@ public:
         // t557 金 / 铜工具（机制等价 MC 1.0 gold tools + 本工程已有材料 copper）：**追加在末尾 0x113..0x11C，不重排既有
         //   枚举**（保存档 / 配方向后兼容 —— 工具段 id 落 player_state JSON + 配方 outputId，重排会破坏旧存档）。
         //   tier 5 = 金（机制等价 MC 1.0 金工具：**耐久极低（32，MC 1.0 gold durability）+ 挖掘极快（speedMul 12.0）**
-        //   ——「快而脆」，速度全工具最高、耐久全工具最低；金剑伤害 4 = MC 1.0 gold sword（同木剑，脆弱）。tier 5 >
-        //   钻石 tier 4 → 金工具采掘等级等同 / 高于钻石（机制对齐 MC gold mining level = diamond）。
+        //   ——「快而脆」，速度全工具最高、耐久全工具最低；金剑伤害 4 = MC 1.0 gold sword（同木剑，脆弱）。
+        //   **采掘等级（harvestLevel）与 tier 解耦**（rv56 问题6 修正）：MC 1.0 金工具采掘等级是**木级**（gold
+        //   mining level = wood —— 金镐挖不动铁矿 / 黑曜石，只挖得动木镐能挖的），故金 harvestLevel=1 而非 5；
+        //   tier 5 仍驱动 speedMul 12.0（速度倍率与采掘门槛是两个独立机制，机制对齐 MC「金工具快但采掘等级低」）。
         //   tier 6 = 铜（本工程已有材料，MC 1.0 无铜工具 → 自定：speedMul 5.0 介石 4 / 铁 6 之间、耐久 180 介石 131 /
-        //   铁 250 之间 ——「介于石与铁之间的金属档」；铜剑伤害 5 = 石剑级）。铜矿需石镐采掘（minTier2）→ 铜工具
+        //   铁 250 之间 ——「介于石与铁之间的金属档」，harvestLevel=2 同石级）；铜剑伤害 5 = 石剑级。铜矿需石镐采掘（minTier2）→ 铜工具
         //   采矿门槛合理（玩家先石镐挖铜 → 铜工具过渡 → 铁 → 金/钻）。QML 配色据 tier：5=金 / 6=铜（同 2D ToolIcon）。
         GoldPickaxe   = 0x113, // 金镐：type=Pickaxe tier 5，speedMul 12.0（MC 1.0 gold 最快挖掘）；耐久 32（最脆）
         GoldAxe       = 0x114, // 金斧：type=Axe tier 5，speedMul 12.0
@@ -127,8 +129,11 @@ public:
     // 匹配「方块要求的采掘工具类型」，故共用一个枚举（归 Core 层）。
     struct ToolDef {
         int type;            // BlockRegistry::ToolType（Pickaxe / Hoe / NoTool）
-        int tier;            // 材质等级（1=木 2=石 3=铁 4=钻石 5=金 6=铜）；决定能否采掘高阶方块 + 速度倍率（镐）/ 耕地等级（锄）
-        float speedMul;      // 匹配工具时的挖掘速度倍率（>1 → 加速）；锄 / 剑恒 1.0（不参与挖掘，仅记账）
+        int tier;            // 材质等级（1=木 2=石 3=铁 4=钻石 5=金 6=铜）；决定速度倍率（speedMul）/ 耕地等级（锄）/ QML 配色 / 铁砧修复材料。**不再直接作采掘门槛**（见 harvestLevel）
+        int harvestLevel;    // 采掘等级（canHarvest / miningSpeedMul 的 minToolTier 门槛判定用；rv56 问题6 与 tier 解耦）。
+                             //   木=1 / 石=2 / 铁=3 / 钻石=4 / 金=**1**（MC 1.0 gold mining level = wood，金工具快但采掘等级低）/
+                             //   铜=2（本工程自定同石级）。功能性工具（弓 / 剪刀 / 钓竿）=tier 值（无采掘语义，仅记账兜底）。
+        float speedMul;      // 匹配工具时的挖掘速度倍率（>1 → 加速）；锄 / 剑恒 1.0（不参与挖掘，仅记账）。速度仍按 tier 数值（金 12 最快）
         int maxDurability;   // t263 最大耐久（使用次数上限；木 59 / 石 131 / 铁 250 / 金 32 / 铜 180 / 钻石 1561）。归零即破损。
         const char *name;    // 内部 / 调试用名（通用词，英文标识符；非面向用户）
         const char *display; // 用户可见中文显示名（UTF-8；PLAN §9 override (b) 通用描述词）
@@ -153,7 +158,9 @@ public:
 
     // 是否采掘掉落（破块后是否产出物品实体，供 t35 判定；掉落 id / 数量走 BlockRegistry::BlockDef）。
     //   t265：requiresTool=false（木 / 土 / 沙类）→ 恒 true（空手可采且掉落，速度受工具影响但产物不依赖工具）；
-    //   requiresTool=true（石类）→ 须持匹配类型 AND tier >= minToolTier，否则 false（破后仅 AIR，不掉落）。
+    //   requiresTool=true（石类）→ 须持匹配类型 AND harvestLevel >= minToolTier，否则 false（破后仅 AIR，不掉落）。
+    //   rv56 问题6：门槛读 harvestLevel（金=1 木级，MC gold mining level = wood）而非 tier —— 金镐 tier 5 但
+    //   挖黑曜石（minToolTier=4）不掉落。
     static bool canHarvest(quint8 blockId, int itemId);
 
     // t265 持物品攻击伤害（HP；spec「剑→加攻击伤害」）。机制等价 MC 1.0 武器伤害：

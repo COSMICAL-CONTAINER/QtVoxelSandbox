@@ -40,11 +40,27 @@ Item {
         // t472 钻石镐脱离「每类 3 档 contiguous」布局（追加在 ToolId 末尾 0x112 保向后兼容）→ tier 4 特例映射，
         //   否则公式 0x100+(tt-1)*3+(tier-1) 对 (Pickaxe=1, tier=4) 错算成 0x103（HoeWood）→ pack 查询错图标。
         if (tt === 1 && t === 4) return 0x112  // 钻石镐 PickaxeDiamond
-        // t557 金（tier 5）/ 铜（tier 6）工具五类全加（追加在 ToolId 末尾 0x113..0x11C，不重排既有枚举保向后兼容）：
-        //   金 0x113+(type-1) / 铜 0x118+(type-1)（type 1=镐 2=锄 3=斧 4=铲 5=剑）。同钻石镐「脱离每类 3 档 contiguous」
-        //   布局 → 特例映射（tier 5/6 的 type 1-5 各映射到追加段 id），否则公式 0x100+(tt-1)*3+(tier-1) 越界错算。
-        if (t === 5 && tt >= 1 && tt <= 5) return 0x113 + (tt - 1)  // 金镐/金锄/金斧/金铲/金剑
-        if (t === 6 && tt >= 1 && tt <= 5) return 0x118 + (tt - 1)  // 铜镐/铜锄/铜斧/铜铲/铜剑
+        // t557 金（tier 5）/ 铜（tier 6）工具五类全加（追加在 ToolId 末尾 0x113..0x11C，不重排既有枚举保向后兼容）。
+        //   **rv56 问题5 修正：改显式映射表**——旧版 0x113+(tt-1) 公式假设枚举序「镐/锄/斧/铲/剑」与实际追加序
+        //   「镐/斧/铲/剑/锄」（toolregistry.h ToolId：0x113 GoldPickaxe / 0x114 GoldAxe / 0x115 GoldShovel /
+        //   0x116 GoldSword / 0x117 GoldHoe，铜 0x118..0x11C 同序）不符——除镐外全错（金锄 tt=2 查成 0x114 金斧图等）。
+        //   显式表照实际枚举逐条写（与 C++ kTools / resourcepackmanager itemFilenameMap 同序），勿再猜公式。
+        if (t === 5) {  // 金 tier 5（枚举序：镐 0x113 / 斧 0x114 / 铲 0x115 / 剑 0x116 / 锄 0x117）
+            if (tt === 1) return 0x113  // 金镐
+            if (tt === 2) return 0x117  // 金锄
+            if (tt === 3) return 0x114  // 金斧
+            if (tt === 4) return 0x115  // 金铲
+            if (tt === 5) return 0x116  // 金剑
+            return 0
+        }
+        if (t === 6) {  // 铜 tier 6（枚举序：镐 0x118 / 斧 0x119 / 铲 0x11A / 剑 0x11B / 锄 0x11C）
+            if (tt === 1) return 0x118  // 铜镐
+            if (tt === 2) return 0x11C  // 铜锄
+            if (tt === 3) return 0x119  // 铜斧
+            if (tt === 4) return 0x11A  // 铜铲
+            if (tt === 5) return 0x11B  // 铜剑
+            return 0
+        }
         if (tt < 1 || tt > 5) return 0
         const tier = (t < 1 || t > 3) ? 1 : t
         return 0x100 + (tt - 1) * 3 + (tier - 1)
