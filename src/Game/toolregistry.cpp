@@ -68,10 +68,17 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     /* CopperShovel  */ {int(BlockRegistry::Shovel),  6, 2,  5.0f,  180, "shovel_copper",  "铜铲"},
     /* CopperSword   */ {int(BlockRegistry::Sword),   6, 2,  1.0f,  180, "sword_copper",   "铜剑"},
     /* CopperHoe     */ {int(BlockRegistry::Hoe),     6, 2,  1.0f,  180, "hoe_copper",     "铜锄"},
+    // t589 钻石工具补全（斧 / 铲 / 剑 / 锄）：属性对齐钻石镐（tier 4 / harvestLevel 4 / speedMul 8.0 / 耐久 1561，
+    //   MC 1.0 diamond 同 tier 共享）。剑 speedMul 1.0（武器不挖掘，伤害 7 走 attackDamage tier 4 分支既有）；
+    //   锄 1.0（专用耕地）。追加在末尾（与 ToolId 枚举同序；不重排保向后兼容）。
+    /* DiamondAxe    */ {int(BlockRegistry::Axe),     4, 4,  8.0f, 1561, "axe_diamond",    "钻石斧"},
+    /* DiamondShovel */ {int(BlockRegistry::Shovel),  4, 4,  8.0f, 1561, "shovel_diamond", "钻石铲"},
+    /* DiamondSword  */ {int(BlockRegistry::Sword),   4, 4,  1.0f, 1561, "sword_diamond",  "钻石剑"},
+    /* DiamondHoe    */ {int(BlockRegistry::Hoe),     4, 4,  1.0f, 1561, "hoe_diamond",    "钻石锄"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
-static_assert(int(ToolRegistry::ToolCount) == 29, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+static_assert(int(ToolRegistry::ToolCount) == 33, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
 
 // t348 引擎工具 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 工具段
 //   「MC 1.0.0」列一致）。行索引 = engineToolId - ToolIdBase（与 kTools 同序）。**不重排枚举**（保存档 / 配方
@@ -88,6 +95,8 @@ constexpr int kMcToolId[int(ToolRegistry::ToolCount)] = {
     /* GoldPickaxe   */ 285, /* GoldAxe */ 286, /* GoldShovel */ 284, /* GoldSword */ 283, /* GoldHoe */ 294,
     // t557 铜工具：MC 1.0 无铜工具（铜 1.17+）→ -1（资源包回退引擎自绘 ToolIcon）。
     /* CopperPickaxe */ -1, /* CopperAxe */ -1, /* CopperShovel */ -1, /* CopperSword */ -1, /* CopperHoe */ -1,
+    // t589 钻石补全：MC 1.0 diamond_sword 276 / diamond_shovel 277 / diamond_axe 279 / diamond_hoe 293。
+    /* DiamondAxe    */ 279, /* DiamondShovel */ 277, /* DiamondSword */ 276, /* DiamondHoe */ 293,
 };
 static_assert(sizeof(kMcToolId) / sizeof(kMcToolId[0]) == int(ToolRegistry::ToolCount),
               "kMcToolId 行数须与 ToolRegistry::ToolCount 一致；新工具需补一行 MC 1.0 对齐值");

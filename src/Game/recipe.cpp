@@ -75,6 +75,32 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                          kStickId,                   0,
         0,                          kStickId,                   0 },
       int(ToolRegistry::PickaxeDiamond), 1, 1, "diamond_pickaxe" },
+    // t589 钻石工具补全（斧 / 铲 / 剑 / 锄）：与铁 / 金 / 铜同类同形（仅换原料为钻石 DiamondId），
+    //   机制等价 MC 1.0 diamond tool 配方。产物追加在 ToolId 末尾（0x11D..0x120，不重排保向后兼容）。
+    // diamondAxe：3 钻石 L 形 + 2 木棒 → 1 钻石斧（tier 4，speedMul 8.0 / 耐久 1561）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::DiamondId, RecipeRegistry::DiamondId, 0,
+        RecipeRegistry::DiamondId, kStickId,                  0,
+        0,                         kStickId,                  0 },
+      int(ToolRegistry::DiamondAxe), 1, 1, "diamond_axe" },
+    // diamondShovel：1 钻石 + 2 木棒纵列 → 1 钻石铲。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::DiamondId, 0,        0,
+        kStickId,                  0,        0,
+        kStickId,                  0,        0 },
+      int(ToolRegistry::DiamondShovel), 1, 1, "diamond_shovel" },
+    // diamondSword：2 钻石纵列 + 1 木棒底 → 1 钻石剑（攻击 7，MC 1.0 最高剑伤）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::DiamondId, 0,        0,
+        RecipeRegistry::DiamondId, 0,        0,
+        kStickId,                  0,        0 },
+      int(ToolRegistry::DiamondSword), 1, 1, "diamond_sword" },
+    // diamondHoe：2 钻石顶行 + 中列 2 木棒 → 1 钻石锄。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::DiamondId, RecipeRegistry::DiamondId, 0,
+        0,                         kStickId,                  0,
+        0,                         kStickId,                  0 },
+      int(ToolRegistry::DiamondHoe), 1, 1, "diamond_hoe" },
     // t557 金 / 铜工具配方（机制等价 MC 1.0 gold tool 配方 + 本工程铜锭原料；每类与既有木/石/铁同形，仅换顶行 / 刃口
     //   材料为金锭 GoldIngotId（0x21F，金原矿冶炼产物）/ 铜锭 CopperIngotId（0x21D，铜原矿冶炼产物））。产物追加在
     //   ToolId 末尾（0x113..0x11C，不重排既有枚举保向后兼容）。五类各一条金 + 一条铜 = 10 条；形状与既有同类完全

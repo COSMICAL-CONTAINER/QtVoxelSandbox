@@ -39,7 +39,16 @@ Item {
         if (tt === 8) return 0x111  // 钓鱼竿 FishingRod
         // t472 钻石镐脱离「每类 3 档 contiguous」布局（追加在 ToolId 末尾 0x112 保向后兼容）→ tier 4 特例映射，
         //   否则公式 0x100+(tt-1)*3+(tier-1) 对 (Pickaxe=1, tier=4) 错算成 0x103（HoeWood）→ pack 查询错图标。
-        if (tt === 1 && t === 4) return 0x112  // 钻石镐 PickaxeDiamond
+        // t589 钻石补全：斧 / 铲 / 剑 / 锄追加在末尾 0x11D..0x120（枚举序：斧 / 铲 / 剑 / 锄）→ tier 4 全类
+        //   显式表（同 t557 金铜，勿猜公式）。
+        if (t === 4) {  // 钻石 tier 4（枚举序：镐 0x112（t472 早于金铜追加）/ 斧 0x11D / 铲 0x11E / 剑 0x11F / 锄 0x120）
+            if (tt === 1) return 0x112  // 钻石镐
+            if (tt === 2) return 0x120  // 钻石锄
+            if (tt === 3) return 0x11D  // 钻石斧
+            if (tt === 4) return 0x11E  // 钻石铲
+            if (tt === 5) return 0x11F  // 钻石剑
+            return 0
+        }
         // t557 金（tier 5）/ 铜（tier 6）工具五类全加（追加在 ToolId 末尾 0x113..0x11C，不重排既有枚举保向后兼容）。
         //   **rv56 问题5 修正：改显式映射表**——旧版 0x113+(tt-1) 公式假设枚举序「镐/锄/斧/铲/剑」与实际追加序
         //   「镐/斧/铲/剑/锄」（toolregistry.h ToolId：0x113 GoldPickaxe / 0x114 GoldAxe / 0x115 GoldShovel /

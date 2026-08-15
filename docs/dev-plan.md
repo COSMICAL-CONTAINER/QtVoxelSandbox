@@ -2046,9 +2046,10 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 查：铜锭/铜块/铜矿/铜工具 icon —— pack 无铜贴图（1.8.2 无铜）→ 用对应铁 PNG 染铜色（同皮革 retintLeatherTemplate 模式：luma 保持 + 色相偏铜橙）。resourcepackmanager 加铜色 tint 表。
 - 修：resourcepackmanager.cpp 加 retintCopperTemplate（铁头灰阶像素 |r-g|<14&&|g-b|<14 → luma 映射铜橙梯度 #8a4818/#c87850/#e8a088，木柄棕像素保留）+ copperIronFallback 回退表（铜工具 0x118..0x11C → iron_pickaxe/axe/shovel/sword/hoe.png、铜锭 0x21D → iron_ingot.png）。itemIconSource 映射 PNG 缺失时命中回退表 → 染铜落盘 voxelsandbox_rp_copper_<id>.png + 缓存（同皮革 / 床模式）。铜原矿 0x21C 不进表（自绘已是铜配色）。无 pack 时自绘 ToolIcon/MaterialIcon 本就铜色，无需改。
 
-**t589** 钻石工具补全（现在只有镐）
+**t589** 钻石工具补全（现在只有镐）✅（commit 见 git log，t589）
 - 用户：「钻石的工具只有镐子，其他的呢？」
 - 查：ToolRegistry 钻石档五件（镐/斧/铲/剑/锄）+ 合成配方 + 图标 + hotbar —— t557 金铜加了五件，钻石可能本来就只有镐（早期只加了镐）。补齐斧/铲/剑/锄四件。
+- 修：ToolId 0x11D..0x120 追加（DiamondAxe/Shovel/Sword/Hoe，不重排）；kTools + kMcToolId 补行；recipe.cpp 四配方（钻石+木棒同铁档形状）；creativeTools 各组钻石位补齐；itemFilenameMap → diamond_*.png（demo 包四图全有）；ToolIcon tier4 全类显式表；Main.qml 手持（锄/斧/铲/剑头色）+ 掉落物 tier4 青绿；item-ids.md 同步。
 
 ### 🅺 附魔系统整体完善（1 项大）
 

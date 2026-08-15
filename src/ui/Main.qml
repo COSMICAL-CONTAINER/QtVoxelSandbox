@@ -2482,7 +2482,7 @@ Window {
                     position: Qt.vector3d(0.02, 0.10, -0.22)     // t266：y 上移让手握柄下段（正握），镐头朝上前方；z=-0.22 脱离手臂 z 包围
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, 28)       // t369 修 Z 符号：正 Z roll 把几何头（+Y）摆向屏幕左（柄下右/头上左对角，类 MC 手持）；旧 -15 反把头摆向右、与「头上左」注释相悖（手本地 X 轴不受手 baseTilt 的 X 旋转影响 → Z 符号直接定头左右）
-                    // 镐头 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白 / 钻石青绿 / 金黄 / 铜橙（同 2D ToolIcon 配色）
+                    // 头部 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白 / 钻石青绿 / 金黄 / 铜橙（同 2D ToolIcon 配色）
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金镐金黄
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜镐铜橙
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // 钻石镐青绿（t472）
@@ -2527,9 +2527,10 @@ Window {
                     position: Qt.vector3d(0.02, 0.10, -0.22)       // t369：y 对齐镐（0.04→0.10），握把贴手心、与镐一致
                     scale: Qt.vector3d(0.42, 0.42, 0.42)
                     eulerRotation: Qt.vector3d(15, -20, 28)        // t369：正 Z roll 把锄刃（+Y）摆向屏幕左（柄下右/头上左对角，同镐）
-                    // 头部 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白 / 金黄 / 铜橙（同 2D ToolIcon 配色）
+                    // 头部 tier 配色（柄恒木褐，头随 tier）：木褐 / 石灰 / 铁银白 / 钻石青绿（t589）/ 金黄 / 铜橙（同 2D ToolIcon 配色）
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金锄金黄
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜锄铜橙
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // t589 钻石锄青绿
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁锄银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石锄中灰
                                                                                                  : "#8a5a2e"                                                   // 木锄褐（默认 / tier 1）
@@ -2566,6 +2567,7 @@ Window {
                     eulerRotation: Qt.vector3d(15, -20, 28)        // t369：正 Z roll 把斧刃（+Y）摆向屏幕左（柄下右/头上左对角，同镐）
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金斧金黄
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜斧铜橙
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // t589 钻石斧青绿
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁斧银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石斧中灰
                                                                                                  : "#8a5a2e"                                                   // 木斧褐（默认 / tier 1）
@@ -2609,6 +2611,7 @@ Window {
                     eulerRotation: Qt.vector3d(15, -20, 28)        // t369：正 Z roll 把铲斗（+Y）摆向屏幕左（柄下右/头上左对角，同镐）
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金铲金黄
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜铲铜橙
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // t589 钻石铲青绿
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁铲银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石铲中灰
                                                                                                  : "#8a5a2e"                                                   // 木铲褐（默认 / tier 1）
@@ -2646,6 +2649,7 @@ Window {
                     eulerRotation: Qt.vector3d(20, -15, 15)       // t369：正 Z roll 把刃尖（+Y）摆向屏幕左（旧 -10 反摆向右）；剑身竖直略前倾、刃尖朝前上
                     readonly property color headColor: hotbarVM.toolTier(player.selectedItem) === 5 ? "#f2c832"   // t557 金剑金黄
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 6 ? "#c87850"   // t557 铜剑铜橙
+                                                                                                 : hotbarVM.toolTier(player.selectedItem) === 4 ? "#4fd9d2"   // t589 钻石剑青绿
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 3 ? "#d8d8e6"   // 铁剑银白
                                                                                                  : hotbarVM.toolTier(player.selectedItem) === 2 ? "#9a9a9a"   // 石剑中灰
                                                                                                  : "#8a5a2e"                                                   // 木剑褐（默认 / tier 1）
@@ -4578,6 +4582,7 @@ Window {
                                 const t = hotbarVM.toolTier(entRoot.entId)
                                 return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
                                          : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 4 ? tintBySkyLight(79/255, 217/255, 210/255, m) // t589 钻石青绿
                                          : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
@@ -4597,6 +4602,7 @@ Window {
                                 const t = hotbarVM.toolTier(entRoot.entId)
                                 return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
                                          : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 4 ? tintBySkyLight(79/255, 217/255, 210/255, m) // t589 钻石青绿
                                          : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
@@ -4616,6 +4622,7 @@ Window {
                                 const t = hotbarVM.toolTier(entRoot.entId)
                                 return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
                                          : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 4 ? tintBySkyLight(79/255, 217/255, 210/255, m) // t589 钻石青绿
                                          : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
@@ -4635,6 +4642,7 @@ Window {
                                 const t = hotbarVM.toolTier(entRoot.entId)
                                 return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
                                          : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 4 ? tintBySkyLight(79/255, 217/255, 210/255, m) // t589 钻石青绿
                                          : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)
@@ -4654,6 +4662,7 @@ Window {
                                 const t = hotbarVM.toolTier(entRoot.entId)
                                 return t === 5 ? tintBySkyLight(242/255, 200/255, 50/255, m)  // t557 金工具金黄
                                          : t === 6 ? tintBySkyLight(200/255, 120/255, 80/255, m) // t557 铜工具铜橙
+                                         : t === 4 ? tintBySkyLight(79/255, 217/255, 210/255, m) // t589 钻石青绿
                                          : t === 3 ? tintBySkyLight(216/255, 216/255, 230/255, m)
                                      : t === 2 ? tintBySkyLight(154/255, 154/255, 154/255, m)
                                      : tintBySkyLight(138/255, 90/255, 46/255, m)

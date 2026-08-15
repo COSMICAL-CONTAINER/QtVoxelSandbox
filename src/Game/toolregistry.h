@@ -121,7 +121,17 @@ public:
         CopperShovel  = 0x11A, // 铜铲：type=Shovel tier 6，speedMul 5.0
         CopperSword   = 0x11B, // 铜剑：type=Sword tier 6，speedMul 1.0；攻击 5（石剑级）
         CopperHoe     = 0x11C, // 铜锄：type=Hoe tier 6，speedMul 1.0
-        ToolCount    = 29,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。19（原）+ 10（金/铜）。
+        // t589 钻石工具补全（用户「钻石的工具只有镐子，其他的工具去哪里了？」）：补斧 / 铲 / 剑 / 锄四件，
+        //   **追加在末尾 0x11D..0x120，不重排既有枚举**（保存档 / 配方向后兼容 —— 工具段 id 落 player_state
+        //   JSON + 配方 outputId，重排会破坏旧存档与配方表）。属性对齐既有钻石镐（t472）：tier 4 / harvestLevel 4 /
+        //   speedMul 8.0 / 耐久 1561（MC 1.0 diamond 同 tier 共享）；剑 speedMul 1.0（武器不挖掘）、锄 1.0（耕地），
+        //   钻石剑伤害 7（attackDamage tier 4 分支既有）。配方 = 钻石 + 木棒（同铁档形状，t589 recipe.cpp）。
+        //   MC 1.0 数字 id 对齐：diamond_sword 276 / diamond_shovel 277 / diamond_axe 279 / diamond_hoe 293。
+        DiamondAxe    = 0x11D, // 钻石斧：type=Axe tier 4，speedMul 8.0；伐木最快
+        DiamondShovel = 0x11E, // 钻石铲：type=Shovel tier 4，speedMul 8.0；掘土最快
+        DiamondSword  = 0x11F, // 钻石剑：type=Sword tier 4，speedMul 1.0（不参与挖掘）；攻击 7（MC 1.0 最高剑伤）
+        DiamondHoe    = 0x120, // 钻石锄：type=Hoe tier 4，speedMul 1.0（不参与挖掘；专用耕地）
+        ToolCount    = 33,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。29（金/铜后）+ 4（钻石补全）。
     };
 
     // 工具定义。表行索引 == itemId - ToolIdBase（连续）；详见 toolregistry.cpp kTools。

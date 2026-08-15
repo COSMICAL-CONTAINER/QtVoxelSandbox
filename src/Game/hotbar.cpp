@@ -345,12 +345,12 @@ QVariantList Hotbar::creativeTools() const
     //   t587 展示序修正（用户「等级依次是 木头→石头→铜→铁→金→钻石；铜现在排在钻石和金的后面」）：铜
     //   的挖掘定位是「介石 / 铁之间」（harvestLevel=2 同石级），展示位应紧跟石头；tier 数值（铜 6）只驱动
     //   speedMul / 配色（内部记账），与展示序解耦 —— 与铁砧修复材料 / 合成链的「石→铜→铁」递进一致。
-    //   注：钻石档现仅镐（其余四件待补，t589），故各组钻石位只列镐组；弓 / 剪刀 / 钓竿三功能件仍排末尾。
+    //   t589 钻石补全：斧 / 铲 / 剑 / 锄四件入列（各组钻石位补齐；弓 / 剪刀 / 钓竿三功能件仍排末尾）。
     return {int(ToolRegistry::PickaxeWood),  int(ToolRegistry::PickaxeStone),  int(ToolRegistry::CopperPickaxe), int(ToolRegistry::PickaxeIron), int(ToolRegistry::GoldPickaxe), int(ToolRegistry::PickaxeDiamond),
-            int(ToolRegistry::HoeWood),      int(ToolRegistry::HoeStone),      int(ToolRegistry::CopperHoe),     int(ToolRegistry::HoeIron),     int(ToolRegistry::GoldHoe),
-            int(ToolRegistry::AxeWood),      int(ToolRegistry::AxeStone),      int(ToolRegistry::CopperAxe),     int(ToolRegistry::AxeIron),     int(ToolRegistry::GoldAxe),
-            int(ToolRegistry::ShovelWood),   int(ToolRegistry::ShovelStone),   int(ToolRegistry::CopperShovel),  int(ToolRegistry::ShovelIron),  int(ToolRegistry::GoldShovel),
-            int(ToolRegistry::SwordWood),    int(ToolRegistry::SwordStone),    int(ToolRegistry::CopperSword),   int(ToolRegistry::SwordIron),   int(ToolRegistry::GoldSword),
+            int(ToolRegistry::HoeWood),      int(ToolRegistry::HoeStone),      int(ToolRegistry::CopperHoe),     int(ToolRegistry::HoeIron),     int(ToolRegistry::GoldHoe),     int(ToolRegistry::DiamondHoe),
+            int(ToolRegistry::AxeWood),      int(ToolRegistry::AxeStone),      int(ToolRegistry::CopperAxe),     int(ToolRegistry::AxeIron),     int(ToolRegistry::GoldAxe),     int(ToolRegistry::DiamondAxe),
+            int(ToolRegistry::ShovelWood),   int(ToolRegistry::ShovelStone),   int(ToolRegistry::CopperShovel),  int(ToolRegistry::ShovelIron),  int(ToolRegistry::GoldShovel),  int(ToolRegistry::DiamondShovel),
+            int(ToolRegistry::SwordWood),    int(ToolRegistry::SwordStone),    int(ToolRegistry::CopperSword),   int(ToolRegistry::SwordIron),   int(ToolRegistry::GoldSword),   int(ToolRegistry::DiamondSword),
             // t304 弓（远程武器）：归工具段（maxStack=1，有耐久 384），故入 creativeTools（非 creativeMaterials）。
             //   拾取即满耐庋新弓；创造射箭不消耗耐久 / 箭（但仍需背包有箭才射得出，spec「需箭在背包」）。
             int(ToolRegistry::Bow),

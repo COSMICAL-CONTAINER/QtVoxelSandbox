@@ -465,6 +465,11 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x11A, QStringLiteral("copper_shovel.png")},   // 铜铲（缺则跳过）
         {0x11B, QStringLiteral("copper_sword.png")},    // 铜剑（缺则跳过）
         {0x11C, QStringLiteral("copper_hoe.png")},      // 铜锄（缺则跳过）
+        // t589 钻石工具补全（斧 / 铲 / 剑 / 锄；demo 包 1.8.2.2 item 目录实测四图全有）。
+        {0x11D, QStringLiteral("diamond_axe.png")},     // 钻石斧
+        {0x11E, QStringLiteral("diamond_shovel.png")},  // 钻石铲
+        {0x11F, QStringLiteral("diamond_sword.png")},   // 钻石剑
+        {0x120, QStringLiteral("diamond_hoe.png")},     // 钻石锄
         // —— 材料段（MaterialId；item-ids.md §3-5）——
         {0x200, QStringLiteral("stick.png")},           // 木棒
         {0x201, QStringLiteral("coal.png")},            // 煤炭
