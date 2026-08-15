@@ -66,7 +66,8 @@ class WorldClock : public QObject
     Q_PROPERTY(float sunElevation READ sunElevation NOTIFY sunChanged)
     Q_PROPERTY(float sunAzimuth READ sunAzimuth NOTIFY sunChanged)
     // t389 月相（机制等价 MC 1.0 月相 8 周期）：每完整过一个「天周期」(periodSecs) 月相前进一阶，
-    //   8 天一轮回（满→盈凸→上弦→蛾眉→新月→残月→下弦→亏凸）。纯函数 dayCount → moonPhase：
+    //   8 天一轮回（满→亏凸→下弦→残月→新月→蛾眉→上弦→盈凸，MC wiki 序；「每晚不同相」由此天然成立
+    //   ——MC 同款每天 +1，非每世界随机）。纯函数 dayCount → moonPhase：
     //   dayCount = floor(m_elapsedMs / periodMs)（已过的完整天数），moonPhase = dayCount % 8。
     //   NOTIFY=moonPhaseChanged（仅跨天时发，非每 tick → QML 不无谓刷贴图）。呈现层据本值选
     //   moon_<phase>.png（Main.qml 月 Model）。Game 层时间源派生（只读消费，PLAN §2 分层）。

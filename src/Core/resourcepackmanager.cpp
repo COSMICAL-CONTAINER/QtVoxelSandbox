@@ -59,8 +59,9 @@ struct BuiltState {
     struct AnimFrames {
         QString stem;        // 帧文件名前缀（compass / clock）
         int count = 0;       // 探测到的帧文件数（0 = 无帧序列，回落静态图）
-        // t585 环值锚点（0..1，加在原始状态值上）：compass 帧 16/32 = 红针尖正上 → 状态 0（出生点在正前）
-        //   对应帧 N/2 → 锚 0.5；clock 帧 32/64 = 全昼（正午）→ dayPhase 0 对应帧 N/2 → 锚 0.5。锚属帧序
+        // t585/t612 环值锚点（0..1，加在原始状态值上）：compass 帧 16/32 = 红针尖正上 → 状态 0（出生点
+        //   在正前）对应帧 N/2 → 锚 0.5；clock 帧 0 = 太阳居中（正午）→ dayPhase 0 对应帧 0 → 锚 0.0
+        //   （t612 逐帧像素取证修正 t585 误读：clock_32 是月亮居中 = 子夜非正午）。锚属帧序
         //   语义（哪个帧是零位），归 Core 单一权威；QML 只推原始状态（相对角/2π、dayPhase）。
         qreal anchor01 = 0.0;
         int lastIndex = -1;  // 上次推送的帧 index（-1 = 尚未推过）
@@ -1109,7 +1110,13 @@ void ensureBuiltLocked()
         const QString stem = animItemStem(animId);
         BuiltState::AnimFrames af;
         af.stem = stem;
-        af.anchor01 = 0.5; // 帧序零位锚（compass_16 = 针指上 / clock_32 = 全昼 = 正午；见 AnimFrames 注释）
+        // t612 修「钟动画反了」（用户「设时间 0 显示晚上、设 midnight 显示正午大白天」）：t585 的
+        //   0.5 锚基于「clock_32 = 全昼 = 正午」的误读。逐帧像素取证（demo 包 clock_00..63）：表盘中
+        //   心窗（昼夜符号旋转经过的窗口）clock_00 暖色像素最多（太阳居中 = 正午）、clock_32 蓝色像素
+        //   最多（月亮居中 = 子夜）→ 帧号与 dayPhase 同向同零（dayPhase 0=正午 → 帧 0；0.5=子夜 → 帧
+        //   N/2）。钟锚改 0.0；指南针锚保持 0.5（compass_16/32 = 红针尖正上 = 状态 0，t585 目测无误，
+        //   用户仅报钟反 —— 两物品帧序零位各自独立，不能共用一个锚）。
+        af.anchor01 = (animId == 0x240) ? 0.0 : 0.5;
         if (!s.itemDir.isEmpty())
             af.count = detectAnimFrameCount(s.itemDir, stem);
         if (af.count > 0)

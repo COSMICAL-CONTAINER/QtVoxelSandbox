@@ -78,11 +78,12 @@ public:
     //   帧步长 = 360/实际帧数）。pack 关 / 无帧文件 → 空串（调用方回落 itemIconSource 静态图或自绘）。
     //   红线 §9：帧 PNG 仅运行期读本地 gitignored pack，不 bake 进 qrc/VCS。
     // 帧映射（机制等价 MC 1.0 compass/clock 每帧物品贴图）：帧 index = round((原始状态 + anchor01) * N) mod N，
-    //   anchor01 = 帧序零位锚（Core 单一权威，0.5）：
-    //   - 指南针：原始状态 = 磁针指向出生点方向相对玩家视线的顺时针角 / 360（0=正前）。实测帧序：
+    //   anchor01 = 帧序零位锚（Core 单一权威；两物品各自独立定锚，非共用）：
+    //   - 指南针（锚 0.5）：原始状态 = 磁针指向出生点方向相对玩家视线的顺时针角 / 360（0=正前）。实测帧序：
     //     compass_16 = 红针尖正上（= 出生点在正前）→ 状态 0 对应帧 N/2。
-    //   - 钟：原始状态 = WorldClock.dayPhase（0=正午 / 0.5=子夜）。实测帧序：clock_32 = 全昼盘（正午）、
-    //     clock_00 = 全夜盘（子夜）→ dayPhase 0 对应帧 N/2。
+    //   - 钟（锚 0.0；t612 修正）：原始状态 = WorldClock.dayPhase（0=正午 / 0.5=子夜）。逐帧像素取证
+    //     （demo 包 clock_00..63）：clock_00 = 太阳居中窗（正午）、clock_32 = 月亮居中窗（子夜）→
+    //     帧号与 dayPhase 同向同零。t585 曾误读 clock_32=全昼而设锚 0.5 →「设 0 显晚上」。
     Q_INVOKABLE QString animatedItemFrameSource(int itemId) const;
     // t585 帧 GUI 线程节流推进（~4Hz）：QML Timer 调用，携带当前指南针/钟状态环值。内部算出新帧 index 与
     //   当前不同时才 ++animRevision + 广播（无变化零开销）。Core 层不持 Game 层引用（出生点/相位由 QML
