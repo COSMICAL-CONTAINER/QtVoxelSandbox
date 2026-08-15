@@ -4316,6 +4316,10 @@ Window {
         //   playerModel / camera 同约定：yaw=0 时前向 (0,0,-1)）。t602 棒长改按 AABB 半对角线 + 0.3
         //   ≈ sqrt(0.3²+0.9²+0.3²)+0.3 ≈ 1.3（旧 0.6 大半在 AABB 体内被人形模型挡住，视觉「没箭头」，
         //   同 mob 朝向棒 t602 根治），棒端必凸出框外 ≥0.3。
+        //   t618 核验（用户第三人称「箭头上下颠倒」）：玩家线 yaw-only 旋转 (0,yaw,0) × 本地 -Z =
+        //   (-sin yaw,0,-cos yaw) = PlayerController::lookDirection 在 pitch=0 的水平前向（同源四元数
+        //   Ry(yaw)），且模型身体/头均同 yaw → 箭头与视线水平分量恒同向，无上下颠倒；「颠倒」观感来自
+        //   背包预览（CharacterPreview3D）棒在脚底 y=0 + 相机俯角透视（t618 已提棒到眼高 1.62，见该文件）。
         //   分层（PLAN §2）：纯呈现层调试叠层，只读 player.feetPosition/yaw（Game 层 Q_PROPERTY），绝不反向写。
         //   t143：第一人称（cameraMode===FirstPerson）看不到自己身体 → 玩家 hitbox 额外加 cameraMode 门控隐藏；
         //   mob / 掉落物 hitbox 无此门控（全视角可见，见各自 delegate）。

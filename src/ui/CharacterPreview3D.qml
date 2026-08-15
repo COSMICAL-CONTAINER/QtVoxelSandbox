@@ -166,16 +166,22 @@ Item {
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff" }
             }
             // t602 F3+B 朝向箭头（用户「看到了实体框，但没看到朝向的箭头」——本组件此前只画 AABB 框、漏画
-            //   朝向线）。红色细棒从身体中心（y=0.9）沿本地 -Z（模型脸/眼所朝 = 玩家前向，眼睛 z=-0.25 同证）
-            //   延伸 facingLen = AABB 半对角线 + 0.3 ≈ sqrt(0.31²+0.91²+0.31²)+0.3 ≈ 1.31 → 无论身朝哪个方向
-            //   棒必凸出框外 ≥0.3（t558 教训：棒长仅略超半宽时被身体/框内空间遮挡，视觉「没箭头」）。
-            //   随 modelRoot 继承 180+22+bodyYaw 旋转 → 箭头反映「看鼠标转身」的实际朝向（同 mob facing line 语义）。
+            //   朝向线）。红色细棒沿本地 -Z（模型脸/眼所朝 = 玩家前向，眼睛 z=-0.25 同证）延伸
+            //   facingLen = AABB 半对角线 + 0.3 ≈ 1.31 → 棒必凸出框外 ≥0.3（t558 教训：棒长仅略超半宽时被
+            //   身体/框内空间遮挡，视觉「没箭头」）。随 modelRoot 继承 180+22+bodyYaw 旋转 → 箭头反映「看鼠标
+            //   转身」的实际朝向（同 mob facing line 语义）。
+            // t618 修（用户「朝向线在脚底下，应在头上」）：旧棒 y=0（modelRoot 原点 = 脚底）→ 棒从脚部伸出、
+            //   贴地平走，配合相机俯角透视读作「从脚底往上翻出的颠倒箭头」。提到**眼高 y=1.62**（同 Main.qml
+            //   F3+B 玩家朝向线 = feet+1.62 眼位高度；MC F3+B 实体朝向线即从眼线伸出）→ 棒从头部沿视线水平
+            //   前向伸出框外，二三人称视角观感一致。方向核验：本地 -Z 经 modelRoot (180+22+bodyYaw) 旋转后
+            //   = 玩家水平前向（与 Main.qml 第三人称玩家箭头 yaw-only 同约定），无需取反（「上下颠倒」观感
+            //   实为脚底高度 + 俯角透视的假象，提线到头高即消除）。
             //   分层（PLAN §2）：纯呈现层调试叠层，只读 showHitboxes，绝不反向写。
             Model {
                 visible: root.showHitboxes
                 geometry: UnitCube {}
                 property real facingLen: Math.sqrt(0.31 * 0.31 + 0.91 * 0.91 + 0.31 * 0.31) + 0.3
-                position: Qt.vector3d(0, 0, -facingLen * 0.5)   // 棒从身体中心延伸到 -facingLen（前向）
+                position: Qt.vector3d(0, 1.62, -facingLen * 0.5)   // 棒从眼高（y=1.62）延伸到 -facingLen（前向）
                 scale: Qt.vector3d(0.05, 0.05, facingLen)
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
             }
