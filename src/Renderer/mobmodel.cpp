@@ -635,14 +635,27 @@ void MobModel::rebuild()
         addLegs(-0.28f, 0.16f, 0.18f, 0.26f, 0.09f, 0, 16, 4, 12, 4, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
     } else {
         // 猪（默认 / 兜底）：紧凑低矮、短腿、大头。机制等价 MC 猪形态（非名词照搬）。
-        // R19 C3 UV（MC Pig base 64×32；U1 §1）：body(28,8)10×16×8 / head(0,0)8×8×8 / leg(0,16)6×6×5。
-        //   注：猪鼻（Pig 独有 snout(16,16)4×3×1）由 Main.qml delegate 补（独立小盒），几何头用 head texOffs。
+        // R19 C3 UV（MC Pig base 64×32；U1 §1）：body(28,8)10×16×8 / head(0,0)8×8×8 / leg(0,16)4×6×4。
+        //   t592 修（用户「猪腿后跟都是黑色的 + 没嘴巴」）：
+        //   ① 腿 UV box 原 6×6×5 采样越界——box-UV 公式算出 6 面落在 base (0,16)-(22,27)，
+        //      -Z Back 面 (16,21)-(22,27) 全透明（采样到贴图外）= 四条腿后跟黑（实测 0% 不透明）。
+        //      改回 MC 1.8 pig 腿标准 4×6×4 → 6 面全落在 (0,16)-(16,26) 全不透明（实测 100%）。
+        //   ② 嘴 = 猪鼻（snout）：pack 命中时补独立小盒采样 MC snout(16,16)4×3×1 区（鼻子贴图区，
+        //      正面 (17,17)-(21,20) 有鼻孔黑点；6 面全 100% 不透明）。pack 关无（程序生成贴图全脸
+        //      无鼻子区，Main.qml 眼 Model 已补五官；鼻盒若用全脸 UV 会每面铺整张猪图 = 难看）。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(28, 8, 10, 16, 8);
         addBox(0.00f, 0.00f, 0.00f, 0.35f, 0.22f, 0.45f, verts, idx, bMin, bMax); // 躯干（低矮）
         setMobTex(0, 0, 8, 8, 8);
         addHeadRot(0.00f, 0.05f, -0.50f, 0.22f, 0.22f, 0.18f, m_headPitch, verts, idx, bMin, bMax); // 大头（前伸）
-        addLegs(-0.30f, 0.18f, 0.22f, 0.28f, 0.10f, 0, 16, 6, 6, 5, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
+        // 猪鼻盒（pack 开）：头心 (0,0.05,-0.50) 半 (0.22,0.22,0.18) → 头前面 z=-0.68；鼻心 z=-0.71
+        //   （前 -0.75 凸出 0.07、后 -0.67 缩进头内 0.01 防共面 z-fight），y=-0.05（头面前下沿）。
+        //   猪 headPitch 恒 0（addHeadRot 快路径）→ 鼻固定位置不随俯仰，无需挂头旋转 Node。
+        if (g_packTextured) {
+            setMobTex(16, 16, 4, 3, 1);
+            addBox(0.00f, -0.05f, -0.71f, 0.10f, 0.08f, 0.04f, verts, idx, bMin, bMax); // 猪鼻（嘴巴）
+        }
+        addLegs(-0.30f, 0.18f, 0.22f, 0.28f, 0.10f, 0, 16, 4, 6, 4, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
     }
 
     // 写入顺序（lessons-learned）：clear → setVertexData → setIndexData → setStride
