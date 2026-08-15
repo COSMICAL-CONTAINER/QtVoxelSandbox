@@ -2041,9 +2041,10 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 - 查：creativeTools / ToolIcon / 合成表 UI 里的工具排序展示序（harvestLevel 已对（t-rv56 木1石2铜2铁3钻4），是**展示/排列顺序**错）。统一按 tier 序：wood→stone→copper→iron→gold→diamond（gold 挖掘等级=木但展示位在铁后，机制等价 MC 1.0 工具栏顺序）。
 - 修：Hotbar::creativeTools()（hotbar.cpp，创造背包工具 tab + ResourceBrowser 消费同源）各组档序改 木→石→铜→铁→金→钻石（铜的挖掘定位介石/铁之间，展示位紧跟石头；tier 数值仅内部记账 speedMul/配色，与展示序解耦）。钻石档暂仅镐（镐组有第六位；t589 补齐后其余各组同序补位）。
 
-**t588** 铜物品贴图：铁贴图染铜色
+**t588** 铜物品贴图：铁贴图染铜色 ✅（commit 见 git log，t588）
 - 用户：「铜的物品没贴图还在用老贴图，能不能用铁的染色成铜的，统一贴图。」
 - 查：铜锭/铜块/铜矿/铜工具 icon —— pack 无铜贴图（1.8.2 无铜）→ 用对应铁 PNG 染铜色（同皮革 retintLeatherTemplate 模式：luma 保持 + 色相偏铜橙）。resourcepackmanager 加铜色 tint 表。
+- 修：resourcepackmanager.cpp 加 retintCopperTemplate（铁头灰阶像素 |r-g|<14&&|g-b|<14 → luma 映射铜橙梯度 #8a4818/#c87850/#e8a088，木柄棕像素保留）+ copperIronFallback 回退表（铜工具 0x118..0x11C → iron_pickaxe/axe/shovel/sword/hoe.png、铜锭 0x21D → iron_ingot.png）。itemIconSource 映射 PNG 缺失时命中回退表 → 染铜落盘 voxelsandbox_rp_copper_<id>.png + 缓存（同皮革 / 床模式）。铜原矿 0x21C 不进表（自绘已是铜配色）。无 pack 时自绘 ToolIcon/MaterialIcon 本就铜色，无需改。
 
 **t589** 钻石工具补全（现在只有镐）
 - 用户：「钻石的工具只有镐子，其他的呢？」
