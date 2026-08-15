@@ -121,7 +121,7 @@ Item {
             case 3: return 0.06   // 羊 [-0.44, 0.33]
             case 4: return 0.06   // 蹒跚者 [-0.90, 0.79]
             case 5: return 0.08   // 骸骨 [-0.90, 0.75]
-            case 6: return 0.12   // 潜行者 [-0.90, 0.67]（t595 改 MC 比例后重心更低 → 上提 0.12 居中）
+            case 6: return 0.05   // 潜行者 [-0.90, 0.81]（t616 拉高 ~1.7 格后近对称 → 微上提居中）
             case 7: return 0.08   // 蜘蛛 [-0.30, 0.13]
             case 8: return 0.01   // 鸡 [-0.40, 0.38]
             case 12: return 0.0   // 雪傀儡 [-0.90, 0.90]（对称居中，无需上提）
@@ -219,9 +219,12 @@ Item {
     // ── 尺寸常量 ──
     // t591：paletteCols 9 → 8 —— 物品网格 8×42+7×4=364 ≤ 左区视口 398 − 滚动条 6（9 列 410 > 398，
     //   右列被 clip 截掉 + 滚动条再遮 = 用户「物品被遮挡」根因）。8 列与上方生物段同宽（对齐），
-    //   滚动条 6px 落在网格右侧 28px 空隙（"右 padding 补滚动条宽度"：内容不被遮）。
+    //   滚动条 6px 落在网格右侧空隙（"右 padding 补滚动条宽度"：内容不被遮）。
+    // t616：cellSize 42 → 44 —— t591 留的右侧空隙 ~34px 观感「滚动条和方块间隔太大」；44 后内容
+    //   8×44+7×4=380，滚动条 6px 贴右侧轨道（内容距视口右缘 ~12px）→ 间距收紧且滚动条不遮内容
+    //   （380+6=386 < 视口 398）。生物段 mobGrid 同读 cellSize → 两段同步对齐。
     readonly property int paletteCols: 8
-    readonly property int cellSize: 42
+    readonly property int cellSize: 44
 
     // 半透遮罩：仅吸收点击（防穿透到背后设置面板），不关闭（只能 Esc / 返回按钮关）。
     Rectangle {
@@ -533,6 +536,37 @@ Item {
                                                 baseColorMap: root.selectedMobTexSource !== "" ? mobPrevTex : null
                                                 baseColor: root.selectedMobTexSource !== "" ? "#ffffff" : root.mobFallbackColor(root.selectedMobType)
                                             }
+                                        }
+                                        // t616 骷髅弓箭手持弓（用户「能不能拿上弓箭」；同 t598 傀儡头补法——图鉴预览
+                                        //   此前只显 MobModel，游戏内弓（Main.qml 肩枢 Node）漏显 = 无弓骷髅）：Bones 时在
+                                        //   垂手旁挂 MobBowGeometry（静态持弓位 drawAmount=0，同 Main.qml t616 游戏内方案；
+                                        //   木褐色 #6b4526 独立于骨白体色）。MobBowGeometry 是 Renderer 层已注册 QML 类型
+                                        //   （import VoxelSandbox 解析），NoLighting 红线。
+                                        Model {
+                                            visible: root.selectedMobType === 5
+                                            geometry: MobBowGeometry { drawAmount: 0 }
+                                            position: Qt.vector3d(0.24, -0.37, -0.02)
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                baseColor: "#6b4526" // 木褐色（同 Main.qml 骨骼弓配色）
+                                            }
+                                        }
+                                        // t616 鸡细黄腿（用户「应该是细小的黄色腿」；同 Main.qml 游戏内方案——t598 让
+                                        //   几何腿共用 body texOffs 采到毛绒区 → 腿已从 MobModel 移除，本处补纯色细黄腿
+                                        //   #e8c53a 粗 0.06；图鉴静态（无 walkPhase），双腿直立）。
+                                        Model {
+                                            visible: root.selectedMobType === 8
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.07, -0.225, 0)
+                                            scale: Qt.vector3d(0.06, 0.35, 0.06)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8c53a" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 8
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.07, -0.225, 0)
+                                            scale: Qt.vector3d(0.06, 0.35, 0.06)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8c53a" }
                                         }
                                         // t598 傀儡南瓜头（雪傀儡 mobType 12 / 铁傀儡 13；同 Main.qml t582 游戏内头方案：
                                         //   BlockCube{blockId:100} + 图集瓦片 per-face 采 pumpkin_side/top/face）。

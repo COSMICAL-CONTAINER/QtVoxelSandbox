@@ -447,15 +447,16 @@ void MobModel::rebuild()
         }
         setMobTex(0, 0, 8, 8, 8);
         addBox( 0.00f,  0.57f,  0.00f, 0.16f, 0.18f, 0.16f, verts, idx, bMin, bMax); // 小头骨（略竖，比 Shambler 头小一圈）
+        // t616 双臂自然下垂（用户「骷髅弓箭手这个手还是举着的，不太合适」）：旧双臂前伸（z=-0.37 横置
+        //   骨杆，僵尸姿态）→ 改垂臂——肩 (±0.20, 0.28) 竖直细骨杆，半高 0.325（臂长 0.65 = 腿长同源，
+        //   MC 臂 12px=腿 12px），手端 y=-0.37（略低于髋 -0.25，MC 比例）；z=-0.02 贴躯干侧（肋 ±0.12 之外）。
+        //   持弓由 Main.qml 肩枢 Node 挂 MobBowGeometry（弓移到垂手位，瞄准时 drawAmount 抬起）；图鉴预览
+        //   （ResourceBrowser）另补静态弓 Model（t598 头补法同族）。t594 双臂保留在本几何（贴图一致）。
         setMobTex(40, 16, 2, 12, 2);
-        addBox(-0.20f,  0.23f, -0.37f, 0.05f, 0.05f, 0.25f, verts, idx, bMin, bMax); // 左臂（细骨杆前伸）
-        // t594 修（用户「右臂没有贴图，只有单臂」）：t331 曾把右臂移去 Main.qml 肩枢 Node（只留弓）——
-        //   MobModel 只剩左臂 → 资源查看器 3D 预览（只显 MobModel）= 单臂骷髅；且 pack 模式下左臂有
-        //   贴图、右臂 UnitCube 纯骨白（右臂无贴图）。改：右臂 box 补回本几何（镜像左臂，同 texOffs，
-        //   包模式贴图一致）；Main.qml 肩枢 Node 只留弓（删其右臂，防双臂重叠）。
+        addBox(-0.20f, -0.045f, -0.02f, 0.05f, 0.325f, 0.05f, verts, idx, bMin, bMax); // 左臂（细骨杆垂下）
         setMobTex(40, 16, 2, 12, 2);
-        addBox( 0.20f,  0.23f, -0.37f, 0.05f, 0.05f, 0.25f, verts, idx, bMin, bMax); // 右臂（细骨杆前伸，镜像左臂）
-        // t331 弓 + 抬臂动画移至 Main.qml 肩枢 Node（MobBowGeometry 木色弓 + drawAmount 抬臂），右臂在本几何。
+        addBox( 0.20f, -0.045f, -0.02f, 0.05f, 0.325f, 0.05f, verts, idx, bMin, bMax); // 右臂（细骨杆垂下，持弓手）
+        // t331 弓 + 抬弓动画在 Main.qml 肩枢 Node（MobBowGeometry 木色弓 + drawAmount 抬弓），双臂在本几何。
         const float sw5 = kLegSwingAmp * std::sin(m_walkPhase);
         setMobTex(0, 16, 2, 12, 2);
         addBoxRot(-0.07f, -0.575f, 0.00f, 0.06f, 0.325f, 0.06f, -0.25f, 0.00f, +sw5, verts, idx, bMin, bMax); // 左腿（细骨杆）
@@ -471,13 +472,18 @@ void MobModel::rebuild()
         //   布局（腿底贴 -0.90）：腿心 y=-0.715 半 0.185（腿 0.37 高，原 0.56 缩 34%）→ 腿顶 -0.53；
         //   躯干心 y=-0.17 半 (0.16,0.36,0.26)（0.32×0.72×0.52，原 0.36×0.84×0.32 增深/增体积）→ 躯干顶 0.19；
         //   头心 y=0.43 半 0.24（0.48³，原 0.30³ 增 ~4× 体积）→ 头顶 0.67。腿四角（±0.25,±0.25）MC 站位。
+        // t616 ③ 加高（用户「苦力怕比较矮，应该有两个格子高」）：t595 后总高 ~1.57（-0.90..0.67）读作矮。
+        //   按 MC creeper 比例**整体拉伸**（腿/身/头三段 y 各按 1.9/1.57 ≈ 1.21 缩放、保持 MC 比例观感）：
+        //   腿心 -0.858 半 0.224（腿高 0.447）→ 腿顶 -0.634；躯干心 -0.192 半 (0.17,0.437,0.28)（身 0.87 高）
+        //   → 躯干顶 0.245；头心 0.545 半 0.26（0.52³）→ 头顶 0.805。总高 0.805-(-0.90)=1.705 ≈ 1.7 格
+        //   （MC 1.7 格标准；x/z 微放 1.06 保不瘦削）。腿底仍贴 -0.90（halfH=0.90 不动，Main.qml offset=0 不变）。
         // R19 C3 UV（MC Creeper base 64×32；U1 §6 stalker）：head(0,0)8×8×8 / body(16,16)8×12×4 / leg(0,16)4×6×4。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(16, 16, 8, 12, 4);
-        addBox( 0.00f, -0.17f,  0.00f, 0.16f, 0.36f, 0.26f, verts, idx, bMin, bMax); // 宽矮躯干（MC 比例，身宽略放）
+        addBox( 0.00f, -0.192f,  0.00f, 0.17f, 0.437f, 0.28f, verts, idx, bMin, bMax); // 宽矮躯干（t616 拉高版，MC 比例）
         setMobTex(0, 0, 8, 8, 8);
-        addBox( 0.00f,  0.43f,  0.00f, 0.24f, 0.24f, 0.24f, verts, idx, bMin, bMax); // 大头（0.48³，MC 半格）
-        addLegs(-0.715f, 0.185f, 0.25f, 0.25f, 0.125f, 0, 16, 4, 6, 4, m_walkPhase, verts, idx, bMin, bMax); // 四短腿（MC 比例）
+        addBox( 0.00f,  0.545f,  0.00f, 0.26f, 0.26f, 0.26f, verts, idx, bMin, bMax); // 大头（0.52³，t616 拉高版）
+        addLegs(-0.858f, 0.224f, 0.265f, 0.265f, 0.1325f, 0, 16, 4, 6, 4, m_walkPhase, verts, idx, bMin, bMax); // 四短腿（t616 拉高版）
     } else if (m_mobType == 7) {
         // t285/t302 Spider（蜘蛛；机制等价 MC 1.0 蜘蛛，§9 区隔）—— 宽矮躯干 + 前伸小头 + **8 腿**（4 对沿躯干
         //   Z 分布，t302 升级自 t285 简化 4 腿）。腿底本地 y ≈ −0.30 贴 collision 底面（EntityManager halfH=0.30）。
@@ -505,6 +511,11 @@ void MobModel::rebuild()
         //   含宽条 (0,19)-(24,23)），本包未按 vanilla (26,0) 布局画独立腿 → 两腿与躯干共用 body texOffs
         //   （全脸同区采样，视觉为身体色，不再有透明黑腿）。
         //   后翘尾无 MC 对应 box → 复用 body texOffs（贴图同区，视觉为身体色）。喙/肉垂由 Main.qml 补。
+        // t616 修（用户「鸡的腿为啥是毛绒的，应该是细小的黄色腿」）：t598 让腿共用 body texOffs → 采到
+        //   躯干毛绒贴图区（读作毛绒腿）。细黄腿需独立于身体贴图的纯色 → **腿从本几何移除**（单材质
+        //   无法同几何双色），由 Main.qml delegate 补两条独立纯色细黄腿 Model（#e8c53a，粗 0.06，同
+        //   喙/冠独立子节点模式，绕髋摆动由 walkPhase 驱动 eulerRotation.x）。ResourceBrowser 图鉴预览
+        //   同补（t598 头补法）。腿摆动画（biped walk cycle）随子 Node 走（几何内无腿 → 无 walkPhase 依赖）。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(0, 9, 6, 8, 6);
         addBox( 0.00f,  0.05f,  0.00f, 0.20f, 0.16f, 0.22f, verts, idx, bMin, bMax); // 圆胖躯干（紧凑小型鸟身）
@@ -512,14 +523,8 @@ void MobModel::rebuild()
         addHeadRot( 0.00f,  0.26f, -0.18f, 0.11f, 0.12f, 0.11f, m_headPitch, verts, idx, bMin, bMax); // 小头（前伸顶位）
         setMobTex(0, 9, 6, 8, 6);
         addBox( 0.00f,  0.14f,  0.22f, 0.09f, 0.09f, 0.05f, verts, idx, bMin, bMax); // 后翘尾（+Z 后方上翘小撮）
-        // 2 细腿（biped walk cycle，绕髋左右反相摆动 —— 同 Shambler/Bones 双腿模式，区别于四足 addLegs）：
-        //   髋枢 hipY=−0.05（躯干底面）；腿盒心 y=−0.225（腿顶 y=−0.05、腿底 y=−0.40）→ 腿底贴 collision 底面。
-        //   t598：腿 texOffs 共用 body(0,9,6,8,6)（见上注，demo 包腿区不在 vanilla (26,0) 位）。
-        const float sw8 = kLegSwingAmp * std::sin(m_walkPhase);
-        setMobTex(0, 9, 6, 8, 6);
-        addBoxRot(-0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, +sw8, verts, idx, bMin, bMax); // 左腿（细）
-        setMobTex(0, 9, 6, 8, 6);
-        addBoxRot( 0.07f, -0.225f, 0.00f, 0.035f, 0.175f, 0.035f, -0.05f, 0.00f, -sw8, verts, idx, bMin, bMax); // 右腿（细）
+        // t616：细黄腿移至 Main.qml / ResourceBrowser 独立纯色 Model（本几何不再含腿；腿位参考旧值
+        //   —— 髋枢 hipY=−0.05（躯干底面）、腿盒心 y=−0.225 半高 0.175 → 腿底 −0.40 贴 collision 底面）。
     } else if (m_mobType == 9) {
         // t399 Squid（鱿鱼；机制等价 MC 1.0 squid，§9 原创模型 + 贴图）—— 水生软体：圆胖躯干（mantle）+ 顶端小尖 +
         //   **8 触腕**（环绕身体底沿八向分布，机制等价 MC 1.0 squid 8 触腕）。触腕绕各自顶端枢轴做 X 轴摆动（前后

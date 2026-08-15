@@ -2225,12 +2225,13 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
 
 ### 🅻 图鉴/生物（1 项 5 子点）
 
-**t616** 图鉴细节批
+**t616** 图鉴细节批 ✅✅ 已完成
 - ① 滚动条与方块间距缩小（t591 改 8 列后间距过大）；
 - ② 骷髅弓箭手手举着 → 放下（手臂自然下垂持弓姿：右臂持弓下垂/拉弓姿态只在瞄准时）+ 给他拿上弓（Bow Model 或贴图手臂持弓——最简：主手挂弓形 Model）；
 - ③ 潜行者（苦力怕）矮 → 加高到 2 格视觉（MC creeper 1.7 格高——用户要 2 格观感：头+身+腿总高拉到 ~1.8-2.0）；
 - ④ 苦力怕爆炸前演出升级：不只是放大——像 TNT 白闪一闪一闪 + 体型增长 + 颤抖 + 撕嘶声（fuse 音）——查 aiStalker 蓄力段加闪白（材质 emissive/baseColor 白脉冲）+ 微抖（position 抖动）+ 音效（若音效系统有 fuse 类 SFX 可复用，没有就先视觉两项）；
 - ⑤ 鸡腿应是细黄腿（现毛绒）：chicken 贴图腿区或纯色细黄腿 box（#e8c53a 细 0.08 见方）。
+- 实修结论：① cellSize 42→44（内容 364→380，滚动条不遮且间距 ~34→12px）。② mobmodel Bones 双臂改自然下垂（竖直骨杆臂盒），弓移 Main.qml 垂手位（肩枢 (0.24,-0.30,-0.02)，drawAmount×75° 瞄准抬起）+ 图鉴预览补静态 MobBowGeometry（木褐）。③ Stalker 三段整体 y 拉伸 ~1.21（MC 比例观感）→ 总高 1.57→1.705 ≈ MC 1.7 格，眼位随头上移 0.52→0.64、图鉴 centY 0.12→0.05。④ Stalker delegate 加 t494 PrimedTnt 式白闪脉冲（stalkerFlashPhase 循环动画，duration 随蓄力 500→140ms 加速，亮端 sin>0.5 拉纯白，pack 贴图路径同样拉白 tint）+ position 高频 sin 颤抖 ×inflate（Date.now 驱动双轴异频）+ fuse 点燃嘶声（aiStalker fuseTimer 0→正 沿 emit stalkerFuseLit 一次 → Main.qml 路由 playMobAmbient(6) 复用 mob_idle_stalker 嘶声；音效系统无独立 fuse SFX）。⑤ 鸡腿从 MobModel 几何移除（单材质无法双色，t598 共用 body texOffs 采毛绒区是根因）→ Main.qml 补独立纯色细黄腿 #e8c53a 粗 0.06 绕髋 walkPhase 摆动 + 图鉴预览同补静态双腿。
 
 ### 🅼 资源查看器交互（1 项 3 子点）
 

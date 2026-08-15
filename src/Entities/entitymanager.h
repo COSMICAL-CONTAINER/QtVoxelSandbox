@@ -650,6 +650,13 @@ signals:
     //   单向事件流，PLAN §2 分层：Entities 层发语义事件、呈现层只消费，绝不反向写栅格）。机制等价 MC 1.0 鸡
     //   5-10 分钟下一枚蛋；周期长（kEggLayMin..Max 秒）避免满屏鸡蛋 spam。
     void chickenLaidEgg(int x, int y, int z);
+    // t616 Stalker 蓄力引燃嘶嘶声（机制等价 MC 1.0 苦力怕蓄力 fuse 嘶声）：aiStalker 内 fuseTimer 从 0 翻正
+    //   （进入蓄力区首次点燃）时发**一次**（蓄力期间不重复发；defuse 熄火后再进蓄力区会再发，语义正确）。
+    //   x/z = mob 当前格 floor（备用；呈现层当前按 mobType 路由音色不需要坐标，留同 mobAmbient 演进空间）。
+    //   呈现层（Main.qml）Connections 路由到 AudioManager.playMobAmbient(6)（复用 mob_idle_stalker 嘶声 clip——
+    //   t366 已做音高化「引信哨音」族，非裸噪声，可辨「蓄力」语义；PLAN §2 分层：Entities 发语义事件、
+    //   呈现层只消费）。音效系统无独立 fuse SFX（TNT 蓄力无声），复用 stalker idle 嘶声是既有资产内最优解。
+    void stalkerFuseLit(int x, int z);
 
 private:
     struct Entity {

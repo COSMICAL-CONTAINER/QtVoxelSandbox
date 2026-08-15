@@ -2241,6 +2241,10 @@ Window {
         target: entityManager
         function onMobAmbient(mobType) { audio.playMobAmbient(mobType) }
         function onMobStep(mobType, blockId) { audio.playMobStep(mobType, blockId) }
+        // t616 Stalker 蓄力点燃嘶嘶声（机制等价 MC 苦力怕蓄力 fuse）：aiStalker fuseTimer 0→正 沿发一次
+        //   stalkerFuseLit → 复用 playMobAmbient(6) 的 mob_idle_stalker 嘶声 clip（t366 音高化「引信
+        //   哨音」族，非裸噪声；音效系统无独立 fuse SFX，既有资产内最优）。单向事件流（PLAN §2 分层）。
+        function onStalkerFuseLit(x, z) { audio.playMobAmbient(6) }
     }
 
     View3D {
@@ -6082,19 +6086,73 @@ Window {
                         sourceComponent: Component {
                             Model {
                                 // t284 潜行者（Stalker，mobType 6；机制等价 MC 1.0 苦力怕，§9 改名 + 原创模型/纯色无贴图）：
-                                //   MobModel 四短腿 + 高瘦躯干 + 小头（mobType 5）。近距蓄力 → 爆炸（C++ aiStalker 已就绪）。
+                                //   MobModel 四短腿 + 宽身 + 大头（t616 拉高到 ~1.7 格）。近距蓄力 → 爆炸（C++ aiStalker 已就绪）。
                                 //   walkPhase 绑定驱动四腿对角 walk cycle（EntityManager moveSpeed>0 时推进相位）。
                                 //   蓄力膨胀：inflateAt(i) 驱动 Model scale（1+inflate·0.5，机制等价 MC 苦力怕近距蓄力膨胀）+
                                 //     baseColor 蓄力发白（绿→白 lerp by inflate；机制等价 MC 苦力怕蓄力发白闪烁）。
+                                //   t616 蓄力演出升级（用户「不只是放大——像 TNT 一闪一闪、带颤抖」）：
+                                //     ① 白闪脉冲：stalkerFlashPhase 循环 NumberAnimation（同 t490 PrimedTnt 白闪模式——
+                                //        onInflateChanged 显式 start/stop + loops:Infinite + duration 随蓄力进度加速），
+                                //        亮端 sin(phase·π)>0.5 时 baseColor 拉满纯白（pack 贴图路径同样拉白 tint，
+                                //        机制等价 MC 苦力怕蓄力期快速白闪）；
+                                //     ② 体型增长：既有 inflate scale（1+inflate·0.5，保留）；
+                                //     ③ 颤抖：position x/z 加 sin 高频抖动 × inflate（蓄力越满抖越凶； delegate Node 的
+                                //        position 是实体位置绑定不可动 → 抖动加在本 Model 的 position 偏移上）。
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobStalker
+                                id: stalkerBodyModel
                                 property real inflate: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.inflateAt(index)) : 0 }
+                                // t616 白闪相位（0..1 循环）：仅蓄力期（inflate>0）动画推进；亮端判定 sin(φ·π)>0.5
+                                //   （同 t494 PrimedTnt 白闪亮端判定）。
+                                property real stalkerFlashPhase: 0.0
+                                property bool stalkerFlashBright: Math.sin(stalkerFlashPhase * Math.PI) > 0.5
+                                // 循环动画推 phase 0→1；duration 随蓄力进度加速（progress 0 刚点燃 500ms 慢 /
+                                //   progress 1 将爆 140ms 快）。onInflateChanged 显式 start/stop（t492 Bug C 教训：
+                                //   running 绑定自启在 delegate 创建 / slot 复用瞬间不可靠 → 显式 start）。
+                                NumberAnimation {
+                                    id: stalkerFlashAnim
+                                    target: stalkerBodyModel
+                                    property: "stalkerFlashPhase"
+                                    from: 0; to: 1
+                                    duration: 500
+                                    loops: Animation.Infinite
+                                    onFinished: {
+                                        if (stalkerBodyModel.inflate > 0)
+                                            stalkerFlashAnim.duration = stalkerBodyModel.stalkerFlashDur()
+                                    }
+                                }
+                                onInflateChanged: {
+                                    if (inflate > 0) {
+                                        stalkerFlashAnim.duration = stalkerFlashDur()
+                                        stalkerFlashAnim.start()
+                                    } else {
+                                        stalkerFlashAnim.stop()
+                                        stalkerFlashPhase = 0.0 // 熄火清残白
+                                    }
+                                }
+                                // delegate 首建即已蓄力（无 0→正 变化事件）→ Component.onCompleted 显式 start（t492 教训）。
+                                Component.onCompleted: {
+                                    if (inflate > 0) {
+                                        stalkerFlashAnim.duration = stalkerFlashDur()
+                                        stalkerFlashAnim.start()
+                                    }
+                                }
+                                // 蓄力进度 → 脉冲周期 ms（progress 0 → 500ms / 1 → 140ms 线性插值，clamp 0..1）。
+                                function stalkerFlashDur() {
+                                    const p = Math.max(0.0, Math.min(1.0, inflate))
+                                    return 140 + (500 - 140) * p
+                                }
                                 geometry: MobModel {
                                     mobType: 6
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色）。
                                     packTextured: mobStalkerPackTex.source.toString().length > 0
                                     walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
-                                position: Qt.vector3d(0, mobModelYOff, 0) // t284 halfH=0.90 → offset 0（腿底贴 collision 底面）
+                                // t616 ③ 颤抖：position 加高频 sin 抖动 × inflate（x/z 双轴异频 47/61Hz 避谐；
+                                //   Date.now() 毫秒驱动，蓄力静止期 revision 每帧 bump（aiStalker 蓄力 dirty）→ 绑定重算刷新）。
+                                position: Qt.vector3d(
+                                    mobModelYOff >= -99 ? Math.sin(Date.now() * 0.047) * 0.02 * inflate : 0,
+                                    mobModelYOff,
+                                    Math.sin(Date.now() * 0.061) * 0.02 * inflate)
                                 // 蓄力膨胀：scale 随 inflate 增长（0 → 1.0、满蓄力 → 1.5；机制等价 MC 苦力怕膨胀）。
                                 scale: Qt.vector3d(1.0 + inflate * 0.5, 1.0 + inflate * 0.5, 1.0 + inflate * 0.5)
                                 materials: PrincipledMaterial {
@@ -6107,11 +6165,14 @@ Window {
                                     //   terrainLight 白色 tint 模式）；旧版把 pack 关时的纯色体色 (0.37,0.66,0.23) 也乘上
                                     //   pack 贴图 → 贴图被压暗到 ~1/3 读作「暗淡」。受击红闪仍全路径生效；蓄力发白仅
                                     //   pack 关（纯色）路径参与（pack 贴图已是满色，再 lerp 向白会洗掉纹理 → 仅 scale 微提亮）。
+                                    //   t616 白闪脉冲：蓄力亮端（stalkerFlashBright）时拉满纯白（覆盖下述蓄力 lerp——闪白
+                                    //   是「一闪一闪」的高频脉冲，叠加在缓慢 lerp 之上；pack 贴图路径同样拉白 tint 闪）。
                                     baseColor: {
                                         const _r = entityManager.revision
                                         const tl = terrainLight(worldClock.skyLight)
                                         if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
                                         if (_r < 0) return "#000000"
+                                        if (stalkerBodyModel.stalkerFlashBright && stalkerBodyModel.inflate > 0) return "#ffffff" // t616 白闪亮端
                                         if (mobStalkerPackTex.source.toString().length > 0) {
                                             // pack 贴图在身：白色 tint × 昼夜灰阶（贴图原色完整保留）；
                                             //   蓄力时微提亮（infl*0.4 → 满蓄力 1.4 饱和到白，仍见纹理闪白）。
@@ -6131,20 +6192,20 @@ Window {
                                         return Qt.rgba(r * tl.r, g * tl.g, b * tl.b, 1.0)
                                     }
                                 }
-                                // rv-low-batch1 深色眼恢复（pack 感知 visible）。t595 头改到 (0,0.43,0) 半 0.24 →
-                                //   前面 z=-0.24；眼 y≈0.52（头上部）、x=±0.08、z=-0.27（略凸防 z-fight）。
+                                // rv-low-batch1 深色眼恢复（pack 感知 visible）。t616 头拉高到心 (0,0.545,0) 半 0.26 →
+                                //   前面 z=-0.26；眼 y≈0.64（头上部）、x=±0.09、z=-0.29（略凸防 z-fight）。
                                 Model {
                                     visible: mobStalkerPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.08, 0.52, -0.27)
-                                    scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                    position: Qt.vector3d(-0.09, 0.64, -0.29)
+                                    scale: Qt.vector3d(0.055, 0.065, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
                                     visible: mobStalkerPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.08, 0.52, -0.27)
-                                    scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                    position: Qt.vector3d(0.09, 0.64, -0.29)
+                                    scale: Qt.vector3d(0.055, 0.065, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                             }
@@ -6156,9 +6217,8 @@ Window {
                         sourceComponent: Component {
                             // t287/t301/t331 Bones（骸骨/骷髅；mobType 5）：MobModel 瘦骨人形（窄躯干/细四肢/小头骨）。
                             //   灰白骨色 baseColor（无专属贴图，纯色原创 §9a）。受击红闪。远程射箭由 EntityManager 负责。
-                            //   t331：弓移出 MobModel（单材质无法同几何双色）→ 见下方「肩枢 Node」：木色弓（MobBowGeometry，
-                            //   修「弓误用骨白」）随 drawAmount（aimTimer）抬起瞄准 + 弦后拉。右臂 t594 补回 MobModel
-                            //   （右臂 box 在几何内，包模式贴图与左臂一致；肩枢 Node 只挂弓，防双臂重叠）。
+                            //   t616：双臂改自然下垂（mobmodel.cpp 几何已改，旧前伸举臂观感「手举着不合适」）；
+                            //   弓挂垂手位（肩枢 Node 下移），瞄准时 drawAmount 抬起举弓（拉弓姿态只在瞄准时）。
                             Model {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobBones
                                 geometry: MobModel {
@@ -6199,20 +6259,22 @@ Window {
                                     scale: Qt.vector3d(0.06, 0.07, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
-                                // t594 弓 肩枢 Node：drawAmount（EntityManager::drawAmountAt，aimTimer 驱动）抬弓瞄准。
-                                //   右臂 t594 已补回 MobModel 几何（见 mobmodel.cpp mobType 5；肩枢 Node 删右臂防双臂重叠）。
-                                //   弓绕肩枢刚体转 → 瞄准时弓随 drawAmount 上扬。肩枢 = 右臂根与躯干相接处
-                                //   (0.20,0.28,-0.12)（MobModel 局部坐标；Node 继承 bodyYaw + 父 position）。drawAmount=0 → 弓在
-                                //   原持弓静态位（与 t301 MobModel 内建位一致）。机制等价 MC 1.0 骷髅停步抬弓瞄准。
+                                // t616 弓 肩枢 Node（t331 起抽离 MobModel；本任务改「垂手持弓 + 瞄准抬起」）：
+                                //   右臂 t616 改自然下垂（mobmodel.cpp：臂盒心 (0.20,-0.045,-0.02) 半高 0.325 →
+                                //   手端 y≈-0.37）。弓静态挂垂手旁（肩枢 (0.24,-0.30,-0.02)，略外侧防穿臂），
+                                //   瞄准（drawAmount>0）绕肩枢刚体抬起（eulerRotation.x = drawAmount*75 → 满拉
+                                //   弓随臂抬到前伸瞄准位，机制等价 MC 1.0 骷髅停步举弓）。drawAmount 由
+                                //   EntityManager::drawAmountAt（aimTimer 驱动）供弦后拉 + 肢增弯（MobBowGeometry）。
                                 Node {
-                                    position: Qt.vector3d(0.20, 0.28, -0.12)
-                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index) * 30) : 0 } // 度；+draw 前端（-Z）上扬
-                                    // 弓（木褐色 MobBowGeometry，独立于骨白体色；弦随 drawAmount 后拉 + 肢增弯）：握把相对肩枢 = (0.02,-0.06,-0.38)。
+                                    position: Qt.vector3d(0.24, -0.30, -0.02)
+                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index) * 75) : 0 } // 度；+draw 前端（-Z）上扬
+                                    // 弓（木褐色 MobBowGeometry，独立于骨白体色；弦随 drawAmount 后拉 + 肢增弯）：
+                                    //   握把相对肩枢 = (0,-0.07,-0.08)（垂手侧、弓面朝前 -Z）。
                                     Model {
                                         geometry: MobBowGeometry {
                                             drawAmount: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index)) : 0 }
                                         }
-                                        position: Qt.vector3d(0.02, -0.06, -0.38)
+                                        position: Qt.vector3d(0, -0.07, -0.08)
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: {
@@ -6417,6 +6479,7 @@ Window {
                                 geometry: MobModel {
                                     mobType: 8
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_chicken）。
+                                    //   t616：几何已不含腿（细黄腿独立纯色 Model，见下方两条腿）。
                                     packTextured: mobChickenPackTex.source.toString().length > 0
                                     walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
@@ -6468,6 +6531,32 @@ Window {
                                     position: Qt.vector3d(0.08, 0.27, -0.27)
                                     scale: Qt.vector3d(0.025, 0.03, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                }
+                                // t616 细黄腿（用户「鸡的腿为啥是毛绒的，应该是细小的黄色腿」）：t598 让几何腿共用
+                                //   body texOffs → 采躯干毛绒贴图区。腿已从 MobModel 几何移除（单材质无法同几何双色），
+                                //   本处补两条独立纯色细黄腿（#e8c53a，粗 0.06），绕髋枢（y=-0.05 = 躯干底面）随
+                                //   walkPhase biped 摆动（左右反相同 mobArmorLegSwingDeg 量化相位约定——与旧几何腿
+                                //   同幅 0.5rad）。腿长 0.35（心 y=-0.225 半 0.175 → 腿底 -0.40 贴 collision 底面，
+                                //   同旧几何值）。pack 模式也纯色（贴图无独立腿区，同毛绒问题的根治法）。
+                                Node {
+                                    position: Qt.vector3d(-0.07, -0.05, 0)
+                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), 1) : 0 }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.175, 0)
+                                        scale: Qt.vector3d(0.06, 0.35, 0.06)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8c53a" } // 细黄腿（原创纯色）
+                                    }
+                                }
+                                Node {
+                                    position: Qt.vector3d(0.07, -0.05, 0)
+                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), -1) : 0 }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.175, 0)
+                                        scale: Qt.vector3d(0.06, 0.35, 0.06)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8c53a" }
+                                    }
                                 }
                             }
                         }
