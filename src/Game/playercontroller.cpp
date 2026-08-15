@@ -184,6 +184,15 @@ void PlayerController::setMinecartManager(MinecartManager *m)
     emit minecartManagerChanged();
 }
 
+// t579 发射器内容存储注入（同 setMinecartManager 模式）。踩压力板触发发射器时读 per-block 9 槽
+//   取首个可用槽内容物发射 + 扣库存；null 时发射器触发降级（无内容不发射，神殿陷阱默认箭路径不受影响）。
+void PlayerController::setDispenserStore(DispenserStore *s)
+{
+    if (m_dispenserStore == s) return;
+    m_dispenserStore = s;
+    emit dispenserStoreChanged();
+}
+
 void PlayerController::onWindowChanged(QQuickWindow *win)
 {
     if (m_window) m_window->removeEventFilter(this);
@@ -3623,9 +3632,13 @@ void PlayerController::scanTntTraps()
 }
 
 // t486 发射器陷阱触发（见 playercontroller.h 头注释）。扫玩家 footprint 格——压力板的 4 水平邻格（同 Y）之一
-//   == Dispenser → 朝压力板方向水平射箭。per-dispenser 冷却（m_dispenserCooldowns）防每帧刷屏。
+//   == Dispenser → 朝压力板方向水平发射。per-dispenser 冷却（m_dispenserCooldowns）防每帧刷屏。
 //   机制等价 MC 1.0 发射器陷阱（无红石系统，用「踩板直接触发」简化）。复用既有 Arrow 弹丸 tick（抛物 + 命中
 //   玩家伤害 kArrowDamage，spawnArrow 射出的箭 arrowFromPlayer=false → 命中玩家，同骷髅箭 t283）。
+//   **t579 通用化**：发射器有 per-block 库存（DispenserStore 9 槽，玩家右键 UI 放入）→ 走 dispenseFromDispenser
+//   按内容物分派（箭 / 雪球 / 剑 / 掉落物）+ 扣库存；无库存（神殿陷阱发射器，worldgen 填充不进 store）保持旧行为
+//   （默认射箭）。发射方向 = 发射器 → 压力板方向（玩家所在侧），与排出口贴图朝向约定一致（放置时排出口朝玩家，
+//   压力板在排出口一侧 → 两者同向）。
 void PlayerController::scanDispenserTraps(float dt)
 {
     if (!m_entityManager || !m_world) return;
@@ -3661,22 +3674,85 @@ void PlayerController::scanDispenserTraps(float dt)
                 //   （单格方块，一柱至多一个）故 (x,z) 足以唯一定位发射器格；Y 不进键（防与 x 高位重叠）。
                 const quint64 key = (quint64(quint32(dx)) << 32) | quint64(quint32(dz));
                 if (m_dispenserCooldowns.contains(key)) continue; // 该发射器冷却中 → 跳过
-                // 射箭：从发射器格中心 + 朝压力板方向前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同 fireArrow），
-                //   水平速度朝压力板方向（= 玩家所在），Y 取发射器格中心高（feetY+0.5 → 命中玩家下半身 AABB）。
-                //   vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中玩家）。spawnArrow 射出的箭 arrowFromPlayer
-                //   =false → 命中玩家（同骷髅箭 t283），damage=kArrowDamage。
-                const QVector3D origin(dx + 0.5f + float(d[0]) * 0.5f,
-                                       float(feetY) + 0.5f,
-                                       dz + 0.5f + float(d[1]) * 0.5f);
-                const QVector3D vel(float(d[0]) * kDispenserArrowSpeed, 0.0f,
-                                    float(d[1]) * kDispenserArrowSpeed);
-                m_entityManager->spawnArrow(origin, vel);
+                // 发射方向 = 发射器 → 压力板（玩家所在侧）水平单位向量。
+                const QVector3D dir(float(d[0]), 0.0f, float(d[1]));
+                // t579：有 per-block 库存 → 按内容物分派 + 扣库存；分派失败（库存空）→ 神殿陷阱 fallback 默认箭。
+                bool fired = false;
+                if (m_dispenserStore)
+                    fired = dispenseFromDispenser(dx, feetY, dz, dir);
+                if (!fired) {
+                    // 神殿陷阱路径（无库存）：默认射箭。从发射器格中心 + 朝压力板方向前移 0.5（防贴墙 spawn 入墙
+                    //   即被 tick 判方块命中，同 fireArrow），水平速度朝压力板方向（= 玩家所在），Y 取发射器格中心高
+                    //   （feetY+0.5 → 命中玩家下半身 AABB）。vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中玩家）。
+                    //   spawnArrow 射出的箭 arrowFromPlayer=false → 命中玩家（同骷髅箭 t283），damage=kArrowDamage。
+                    const QVector3D origin(dx + 0.5f + float(d[0]) * 0.5f,
+                                           float(feetY) + 0.5f,
+                                           dz + 0.5f + float(d[1]) * 0.5f);
+                    const QVector3D vel(float(d[0]) * kDispenserArrowSpeed, 0.0f,
+                                        float(d[1]) * kDispenserArrowSpeed);
+                    m_entityManager->spawnArrow(origin, vel);
+                }
                 m_dispenserCooldowns.insert(key, kDispenserCooldown); // 写冷却
                 // return 防同帧多发射器刷箭（同 scanTntTraps 单触发）；下帧再处理其余候选。
                 return;
             }
         }
     }
+}
+
+// t579/t580 发射器内容物发射（见 playercontroller.h 头注释）。读 DispenserStore 首个可用槽 → 按物品分派
+//   → 扣 1 库存（setSlot 写回，count-1 归 0 清槽）。发射位 = 发射器格中心 + 朝向前移 0.5（防贴墙 spawn 入墙
+//   即被 tick 判方块命中，同 fireArrow / 神殿箭路径）。剑类（ToolRegistry type==Sword）弹射：掉落物实体弹出
+//   + 发射方向 3 格内命中活体 mob → damageEntity(attackDamage) 一次 + 沿发射方向击退（机制等价 MC 发射器
+//   弹射武器命中伤害；红闪 / 死亡掉落走 damageEntity 内既有链）。鸡蛋（EggId）：t583 鸡蛋投掷物未实现 →
+//   暂走弹出掉落物（分发口已留，实现后切投掷物路径）。
+bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3D &dir)
+{
+    if (!m_dispenserStore || !m_entityManager) return false;
+    // 取首个可用槽（id>0 且 count>0；机制等价 MC 发射器按槽序取首个可用）。
+    int slot = -1, itemId = 0, count = 0;
+    for (int i = 0; i < DispenserStore::kSlotsPerDispenser; ++i) {
+        const int id = m_dispenserStore->slotIdAt(x, y, z, i);
+        const int c = m_dispenserStore->slotCountAt(x, y, z, i);
+        if (id > 0 && c > 0) { slot = i; itemId = id; count = c; break; }
+    }
+    if (slot < 0) return false; // 库存空 → caller fallback（神殿默认箭）
+
+    // 发射位：发射器格中心 + 朝向前移 0.5（出排出口；防 spawn 入墙即命中）。
+    const QVector3D origin(float(x) + 0.5f + dir.x() * 0.5f,
+                           float(y) + 0.5f,
+                           float(z) + 0.5f + dir.z() * 0.5f);
+
+    if (itemId == RecipeRegistry::ArrowId) {
+        // 箭 → 弹道实体（同神殿陷阱 / 骷髅箭：arrowFromPlayer=false → 命中玩家，damage=kArrowDamage）。
+        m_entityManager->spawnArrow(origin, dir * kDispenserArrowSpeed);
+    } else if (itemId == RecipeRegistry::SnowballId) {
+        // t580 雪球 → 投掷物实体（同雪傀儡 fireSnowball 口径：低伤害 + 减速 + 击退，机关陷阱对 mob 有实伤；
+        //   区别于玩家手抛的 0 伤害。thrower=-1 = 无实体发射者，不排除任何 mob。伤害取雪傀儡同值 1（本地
+        //   常量 —— EntityManager::kSnowballDamage 是 private 不能跨层读，同 kPlayerSnowballSpeed 模式）。
+        constexpr int kDispenserSnowballDamage = 1; // 发射器雪球命中伤害（HP；同雪傀儡口径）
+        m_entityManager->spawnSnowball(origin, dir * kDispenserSnowballSpeed,
+                                       kDispenserSnowballDamage);
+    } else {
+        const ToolRegistry::ToolDef *td = ToolRegistry::tool(itemId);
+        if (td && td->type == BlockRegistry::Sword) {
+            // t580 剑 → 发射方向 kDispenserWeaponRange 格内命中活体 mob → ToolRegistry::attackDamage 一次
+            //   + 沿发射方向击退（发射器弹射武器，机制等价 MC 发射器射武器伤害）；随后剑本体弹出掉落物。
+            const int mobIdx = m_entityManager->findMobHit(origin, dir, kDispenserWeaponRange);
+            if (mobIdx >= 0) {
+                const int dmg = std::max(1, ToolRegistry::attackDamage(itemId));
+                m_entityManager->damageEntity(mobIdx, dmg);
+                const QVector3D mobPos = m_entityManager->posAt(mobIdx);
+                m_entityManager->knockback(mobIdx, mobPos.x() - origin.x(), mobPos.z() - origin.z());
+            }
+        }
+        // 其余物品（含剑本体弹出、鸡蛋 t583 前暂走本路径）→ 短距弹出掉落物（emit spawnItem → QML 转发
+        //   ItemEntityManager.spawnItem，内置 0.5s 免拾窗 + t468 弹出水平速度抛物）。
+        emit spawnItem(x, y, z, itemId, 1);
+    }
+    // 扣 1 库存（count-1；归 0 → setSlot 空栈归一清槽）。分派表全覆盖（else 兜底）→ 恒扣。
+    m_dispenserStore->setSlot(x, y, z, slot, itemId, count - 1);
+    return true;
 }
 
 // t569 红石矿石置亮 / 熄（机制等价 MC 1.0 redstone ore 发光翻转；见 playercontroller.h 头注释）。

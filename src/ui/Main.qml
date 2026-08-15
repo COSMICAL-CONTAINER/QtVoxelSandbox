@@ -2065,6 +2065,8 @@ Window {
         xpOrbManager: xpOrbs
         boatManager: boats
         minecartManager: carts
+        // t579：注入发射器内容存储（踩压力板触发发射器取内容物发射 / 扣库存；同 peer VM 注入模式）。
+        dispenserStore: dispenserStore
         selectedBlock: hotbarVM.selectedBlockId
         selectedItem: hotbarVM.selectedItemId
     }

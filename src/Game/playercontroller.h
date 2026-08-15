@@ -15,6 +15,7 @@
 #include "blockregistry.h"      // 方块 id（默认手持方块 / 破放校验）
 #include "boatmanager.h"        // t469 船实体管理器（骑乘 / WASD 操控 / 冰上加速 / 撞坏掉落）
 #include "minecartmanager.h"    // t565 矿车实体管理器（轨上骑乘 / WASD 前后推 / 拐角自动转弯）
+#include "dispenserstore.h"     // t579 发射器 per-block 9 槽内容（压力板触发取物发射 / 扣库存）
 #include "entitymanager.h"      // 统一实体管理器（t95 测试生物 / 玩家推动）
 #include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
 #include "itementitymanager.h"  // 掉落实体管理器（t36 拾取扫描 / removeAt）
@@ -73,6 +74,11 @@ class PlayerController : public QQuickItem
     //   MinecartManager 属 Entities，经 QML 绑定注入（运行期连接、非编译期反向依赖，同 boatManager 先例）。
     //   null 时跳过矿车交互 / 操控（安全降级）。
     Q_PROPERTY(MinecartManager *minecartManager READ minecartManager WRITE setMinecartManager NOTIFY minecartManagerChanged)
+    // t579 发射器内容存储（同 world/hotbar/.../minecartManager 模式，QML 注入 peer ViewModel）。踩压力板触发
+    //   发射器时读它取首个可用槽内容物 + 发射后扣 1 库存（setSlot 写回）；null 时发射器触发降级为「无内容
+    //   不发射」（神殿陷阱箭路径不受影响——那条路径不读库存，恒有箭）。分层（PLAN §2）：DispenserStore 属
+    //   Game/ViewModel（纯存储），PlayerController 同层直调（同 Hotbar），无向上依赖。
+    Q_PROPERTY(DispenserStore *dispenserStore READ dispenserStore WRITE setDispenserStore NOTIFY dispenserStoreChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -260,6 +266,8 @@ public:
     void setBoatManager(BoatManager *m);
     MinecartManager *minecartManager() const { return m_minecartManager; }
     void setMinecartManager(MinecartManager *m);
+    DispenserStore *dispenserStore() const { return m_dispenserStore; }
+    void setDispenserStore(DispenserStore *s);
 
     QVector3D position() const { return m_pos + QVector3D(0, m_eyeHeight, 0); }
     float yaw() const { return m_yaw; }
@@ -488,6 +496,7 @@ signals:
     void xpOrbManagerChanged(); // t402 经验球管理器注入变更
     void boatManagerChanged(); // t469 船管理器注入变更
     void minecartManagerChanged(); // t565 矿车管理器注入变更
+    void dispenserStoreChanged();  // t579 发射器内容存储注入变更
     void positionChanged();
     // t567 出生点 / 重生点变更（睡床设床位后 emit；初值 kSpawn 常量 → 启动不发）。HUD 指南针据此重算指针。
     void spawnPointChanged();
@@ -878,7 +887,21 @@ private:
     //   射箭；无红石系统故用「踩板直接触发」）。每发射器 per-dispenser 冷却（m_dispenserCooldowns，防每帧刷屏
     //   满天箭；机制等价 MC 发射器有内含冷却 / 单次触发间隔）。门控：死亡 / 无世界 / 无 entityManager → no-op。
     //   向下依赖 World（blockAt）+ EntityManager（spawnArrow）+ BlockRegistry（isDispenser / isPressurePlate）。
+    //   **t579 通用化**：发射器有 per-block 库存（DispenserStore 9 槽）时按内容物分派（dispenseFromDispenser：
+    //   箭=弹道实体 / 雪球=投掷物 / 剑=短距弹射带伤害 / 其余=弹出掉落物 + 扣库存）；无库存（神殿陷阱发射器，
+    //   worldgen 填充不进 store）保持旧行为（默认射箭），修用户报「手放发射器放箭踩压力板不发射」。
     void scanDispenserTraps(float dt);
+    // t579/t580 从发射器 (x,y,z) 朝 dir（单位向量，发射器排出口朝向）取出首个可用槽内容物并发射 + 扣 1 库存。
+    //   分派表（机制等价 MC 1.0 发射器按物品种类分派）：箭（ArrowId）→ spawnArrow 弹道实体（命中玩家，同
+    //   神殿陷阱）；雪球（SnowballId）→ spawnSnowball 投掷物（damage=kSnowballDamage 发射器口径：对 mob 有
+    //   实伤 + 减速，机关陷阱语义；非玩家抛掷的 0 伤害）；鸡蛋（EggId）→ 暂走短距弹出掉落物（t583 鸡蛋投掷物
+    //   实现后再切投掷物路径）；剑（ToolRegistry type==Sword）→ 短距弹射掉落物实体 + 发射方向射线命中 mob 时
+    //   造成 ToolRegistry::attackDamage 一次（机制等价 MC 1.0 发射器弹射武器）；其余物品 → 短距弹出掉落物
+    //   （emit spawnItem，经 QML 转发 ItemEntityManager）。发射方向由发射器 state（chestFrontFace 编码）解出，
+    //   与排出口贴图朝向一致（机制等价 MC 发射器朝排出口方向发射）。发射器无库存 / store 空 → 返 false
+    //   （caller 神殿路径 fallback 默认箭）。分层：Game 层读 DispenserStore（同层 ViewModel）+ 调
+    //   EntityManager（Entities 层向下）+ 发 spawnItem 语义信号（呈现层转发），不写栅格。
+    bool dispenseFromDispenser(int x, int y, int z, const QVector3D &dir);
     // t569 红石矿石点亮触发（机制等价 MC 1.0 红石矿被玩家走近 / 触碰时发光数秒后自熄）：扫玩家 footprint
     //   格 ± 水平 4 邻（feetY 与 feetY±1 共 3 行 —— 玩家走过 / 相邻蹭到 / 站其上都触发），命中 RedstoneOre →
     //   setRedstoneOreLit(true)（置 state bit0 + 状态感知 lightEmission 9 → recomputeLightAround 增量重 flood
@@ -906,6 +929,7 @@ private:
     XpOrbManager *m_xpOrbManager = nullptr;      // t402 经验球：磁吸 + 拾取扫描（Q_PROPERTY 绑定）
     BoatManager *m_boatManager = nullptr;        // t469 船：浮水 tick + 骑乘操控 / 放船 / 下船（Q_PROPERTY 绑定）
     MinecartManager *m_minecartManager = nullptr; // t565 矿车：轨上骑乘操控 / 放车 / 下车（Q_PROPERTY 绑定）
+    DispenserStore *m_dispenserStore = nullptr;   // t579 发射器 per-block 9 槽内容（压力板触发取物发射，Q_PROPERTY 绑定）
     bool m_shiftPrev = false;                    // t469 下船边沿触发（骑乘期 Shift 按下沿 → dismount；长按只下一次）
     QQuickWindow *m_window = nullptr;
     QTimer m_timer;
@@ -1297,6 +1321,13 @@ private:
     //   时间侧身躲避（机制等价 MC 发射器射箭）；playercontroller 不依赖 EntityManager 私有常量，故本工程本地
     //   定义（同 kBowMin/Max 本地定义模式；改骷髅箭速时此处手对齐）。
     static constexpr float kDispenserArrowSpeed = 14.0f; // 发射器射箭水平速度（blocks/s）
+    // t579/t580 发射器内容物发射常量：雪球 / 掉落物弹出速度（blocks/s）与弹射射线射程（格）。
+    //   雪球速度取雪傀儡（10）与玩家抛掷（12）之间 —— 机关弹射比手掷略快；掉落物弹出距离近（防触发者脚下
+    //   立即拾回，留 pickup 免拾窗 + 短距可见抛物）；剑弹射伤害射线 kDispenserWeaponRange=3（短距，机制
+    //   等价 MC 发射器弹射武器就近命中）。
+    static constexpr float kDispenserSnowballSpeed  = 11.0f; // 发射器弹雪球速度（blocks/s）
+    static constexpr float kDispenserPopSpeed       = 5.0f;  // 发射器弹出掉落物速度（blocks/s）
+    static constexpr float kDispenserWeaponRange    = 3.0f;  // 发射器弹剑伤害判定射线射程（格）
     static constexpr int   kBowMinDamage     = 1;      // 短蓄力箭命中伤害（HP）
     static constexpr int   kBowMaxDamage     = 6;      // 满弓箭命中伤害（HP；Hotbar::bowArrowMaxDamage 同源）
     static constexpr float kBowSlowMul       = 0.5f;   // 拉弓时水平速度倍数（spec「拉弓减速」）
