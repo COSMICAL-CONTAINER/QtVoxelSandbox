@@ -238,18 +238,23 @@ private:
     //   → 推船滑行 <0.01 格、肉眼不动，机制对齐 MC「船重得像浸水木头」）。
     static constexpr float kBoatFriction = 5.0f;
     // t584 三档速度：水档满速 8 < 旧阈值 7 会「水档常速碰岸即毁」不对 → 提到 12（水档碰岸只停、冰档
-    //   14~20 撞墙仍毁 = 冰上危险）。
+    //   16~21.6 撞墙仍毁 = 冰上危险）。
     static constexpr float kBoatCrashSpeed = 12.0f;
     static constexpr float kBoatTurnRate = 360.0f;
     // t584 三档介质参数（陆地 / 冰面；机制等价 MC 1.0 船：陆地几乎开不动 / 冰面最快 + 惯性大难操作）：
     //   陆档：kBoatSpeed × kBoatLandSpeedMul（2.4 blocks/s，最慢 —— 比走路还慢但非零：用户要求「直接放
     //     陆地上开不会停」= 陆地能开只是慢）；kBoatLandAccel 接近率高（松手即停无滑行，贴地挪动手感）。
-    //   冰档：速度倍率按冰类型 1.8 / 2.2 / 2.5（t584：14.4~20 blocks/s ≈ 水面 2~2.5 倍，机制等价 MC 冰面
-    //     船速 ~ 水面 2.5 倍）；接近率读 BlockRegistry::iceSlipApproach（单一权威，越小越滑 → 松键长滑行
-    //     = 冰面惯性）；转向速率 × kBoatIceTurnMul（迟钝 = 难操作才是对的，用户原话）。
+    //   冰档：速度倍率按冰类型 2.0 / 2.4 / 2.7（t611 微升自 1.8/2.2/2.5：16~21.6 blocks/s ≈ 水面 2~2.7
+    //     倍，机制等价 MC 冰面船速 ~ 水面 2.5 倍）；接近率读 BlockRegistry::iceSlipApproach（单一权威，
+    //     越小越滑 → 松键长滑行 = 冰面惯性）；转向速率 × kBoatIceTurnMul（迟钝 = 难操作才是对的，用户原话）。
     static constexpr float kBoatLandSpeedMul = 0.3f;
     static constexpr float kBoatLandAccel    = 10.0f;
     static constexpr float kBoatIceTurnMul   = 0.45f;
+    // t611 碰岸方向探测步长（blocks）：tickRiddenBoat 水档碰岸检测对 ±X / ±Z 四向分别前探本距离后查
+    //   footprint 是否被挡 → 只清朝岸方向的速度分量（背向分量保留 → 撞岸后可倒退）。取 0.15：贴岸时
+    //   朝岸侧必命中、背岸侧（水）不命中；过大会把「还离岸半格」误判撞上（提前锁速），过小贴岸瞬间
+    //   探不到（船头已越线）→ 0.15 ≈ 一帧满速位移（8×0.016）+ 裕度，手感与 t584 旧「贴岸即停」等价。
+    static constexpr float kShoreProbe = 0.15f;
     // t508 玩家推船给的水平速度冲量（blocks/s；每次接触分离时叠入 vx/vz）。机制等价 MC 1.0 船被实体撞开
     //   后会滑一小段。
     //   t531「船太轻（身体撞就明显动）」复盘：旧值 2.0 → 玩家碰一下船就给 2 blocks/s 初速，肉眼明显被弹开 + 滑行

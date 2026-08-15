@@ -345,8 +345,8 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
 
     // 三档推进参数（机制等价 MC 1.0 船：陆地几乎开不动 / 水中常速 / 冰面最快且惯性大——难操作才对）：
     //   - Water：kBoatSpeed × 1.0（8 blocks/s）+ 接近率 kBoatAccel=4（中等动量）。
-    //   - Ice：  kBoatSpeed × 冰类型倍率（Ice 1.8 / PackIce 2.2 / BlueIce 2.5 → 14.4~20 blocks/s，
-    //     约水面 2~2.5 倍）+ 接近率读 BlockRegistry::iceSlipApproach（冰 8 / 浮冰 4.5 / 蓝冰 2.8 /s，
+    //   - Ice：  kBoatSpeed × 冰类型倍率（t611：Ice 2.0 / PackIce 2.4 / BlueIce 2.7 → 16~21.6 blocks/s，
+    //     约水面 2~2.7 倍）+ 接近率读 BlockRegistry::iceSlipApproach（t611：冰 6 / 浮冰 3.2 / 蓝冰 1.9 /s，
     //     单一权威：越小越滑 → 松键后长滑行 = 冰面惯性；转向速率 × kBoatIceTurnMul（迟钝 = 难操作）。
     //   - Land：kBoatSpeed × kBoatLandSpeedMul 0.3（2.4 blocks/s，最慢 —— 比走路 4.3 还慢但能开，
     //     用户要求「直接放陆地上开不会停」即陆地非零速）+ 接近率 kBoatLandAccel=10（高响应：
@@ -357,9 +357,11 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     if (foundWater) {
         // 水档：基础参数
     } else if (onIce) {
-        if (below == BlockRegistry::Ice)          maxSpeed = kBoatSpeed * 1.8f;
-        else if (below == BlockRegistry::PackIce) maxSpeed = kBoatSpeed * 2.2f;
-        else                                      maxSpeed = kBoatSpeed * 2.5f; // BlueIce（isIce 已保证）
+        // t611 冰档倍率微升（用户「冰上的惯性再大一点」）：1.8/2.2/2.5 → 2.0/2.4/2.7（16~21.6 blocks/s），
+        //   配合 iceSlipApproach 调小（blockregistry t611）→ 冰上「更快 + 更收不住」。
+        if (below == BlockRegistry::Ice)          maxSpeed = kBoatSpeed * 2.0f;
+        else if (below == BlockRegistry::PackIce) maxSpeed = kBoatSpeed * 2.4f;
+        else                                      maxSpeed = kBoatSpeed * 2.7f; // BlueIce（isIce 已保证）
         approach = BlockRegistry::iceSlipApproach(below); // 冰面惯性（滑度单一权威）
         turnRate = kBoatTurnRate * kBoatIceTurnMul;       // 转向迟钝（难操作）
     } else {
@@ -391,21 +393,32 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
 
     const float speed = std::sqrt(b.vx * b.vx + b.vz * b.vz);
 
-    // t584 水中碰岸停（核心新检测）：船「当前浮在水中」（foundWater = Water 档）→ 探测 footprint 在
-    //   「水面同高格层」（船中心下移 1 格，boatFootprintBlocked 的 cy=水面顶格 / cy+1=船中心格）是否有
-    //   实心非水方块（岸边陆地哪怕与水面同高也在这一层）→ 命中即**双轴速度清零**（整船停住，机制等价
-    //   MC 1.0 船从水里撞岸受阻——区别于撞毁）。速度 ≥ kBoatCrashSpeed 才撞毁（t584 阈值 7→12：水档
-    //   满速 8 碰岸应停非毁；冰档 14~20 撞墙仍毁 = 冰上危险，配合难操作手感）。
-    //   **陆档 / 冰档船不触发本停止**：它们不浮水（foundWater=false），自身已在地面 / 冰面上，靠陆地高
-    //   摩擦自己慢（用户要求「只有直接放陆地上开才不受阻」——陆地船的位移只受常规逐轴碰撞约束，
-    //   无额外整停）。旧版缺失本检测的漏洞：船浮水面时中心格在水面之上的空气格 → 常规 footprint 只查
-    //   中心格层 → 与水面同高的岸边方块在下一层、检测不到 → 船从水里直接「开上」同高岸地不停。
-    if (foundWater && world && boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z())) {
-        if (speed >= kBoatCrashSpeed) {
-            outCrashed = true; // 高速撞岸 → 撞毁（掉散件）
+    // t611 修「撞岸后整船焊死不能动」（用户：撞到岸边应该还能倒退，后面是水）：t584 旧版探到岸（水面同高层
+    //   有实心方块）即**双轴速度无条件清零** → 船贴岸后每帧 lerp 刚建起倒退速度就被清掉（清除在位移积分之前）
+    //   → 船永不位移 → footprint 永不脱离岸块 → 死锁（撞岸 = 焊死）。修：**只挡朝岸分量** —— 对四个水平方向
+    //   （±X / ±Z）分别探「船 footprint 前探一小步（kShoreProbe）后该层是否被挡」，被挡方向 n 的速度分量
+    //   v·n > 0 部分清零（朝岸 → 停）；背向分量保留（倒退 / 侧滑离岸仍有效，机制等价 MC 1.0 船顶岸可倒退）。
+    //   高速撞岸（speed ≥ kBoatCrashSpeed）仍整船撞毁（掉散件）。陆档 / 冰档不触发本检测（同 t584 语义）。
+    if (foundWater && world) {
+        // 四向探测：footprint 中心沿该方向前探 kShoreProbe 后，水面同高层（y-1）是否被挡。
+        //   probe 取 0.15（略小于半宽 0.5 / 半长 0.7 的接触裕度）：贴岸（footprint 已触岸）时朝岸侧必命中，
+        //   背岸侧（后方是水）不命中 → 背向分量永不清除。
+        const bool blockedPosX = boatFootprintBlocked(world, b.pos.x() + kShoreProbe, b.pos.y() - 1.0f, b.pos.z());
+        const bool blockedNegX = boatFootprintBlocked(world, b.pos.x() - kShoreProbe, b.pos.y() - 1.0f, b.pos.z());
+        const bool blockedPosZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() + kShoreProbe);
+        const bool blockedNegZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() - kShoreProbe);
+        const bool hitShore = (blockedPosX && b.vx > 0.0f) || (blockedNegX && b.vx < 0.0f)
+                           || (blockedPosZ && b.vz > 0.0f) || (blockedNegZ && b.vz < 0.0f);
+        if (hitShore) {
+            if (speed >= kBoatCrashSpeed) {
+                outCrashed = true; // 高速撞岸 → 撞毁（掉散件）
+            }
+            // 只清朝岸分量（被挡方向上 v·n>0 的部分）；背向 / 正交分量保留（倒退可走）。
+            if (blockedPosX && b.vx > 0.0f) b.vx = 0.0f;
+            if (blockedNegX && b.vx < 0.0f) b.vx = 0.0f;
+            if (blockedPosZ && b.vz > 0.0f) b.vz = 0.0f;
+            if (blockedNegZ && b.vz < 0.0f) b.vz = 0.0f;
         }
-        b.vx = 0.0f;
-        b.vz = 0.0f;
     }
 
     // 逐轴（X 后 Z）积分位移 + 碰撞：撞可碰撞方块则该轴不动；高速撞（speed>kBoatCrashSpeed）→ 撞毁。

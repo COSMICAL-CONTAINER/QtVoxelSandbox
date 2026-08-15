@@ -2806,13 +2806,17 @@ void PlayerController::placeBlock()
             emit swingArm();
             return;
         }
-        // (b) 放船：手持船物品 + **未骑乘**（骑乘中右键既没命中船换船 → 不另放船，防骑船时凭空造船）。
+        // (b) 放船：手持船物品 → 命中定位水面 / 支撑面 → 放船。
+        //   t611 放行「骑船时放船」（用户：坐船时应还能放船 / 方块）：旧 `ridingIndex() < 0` 守卫使骑乘中持船
+        //   右键凭空 no-op（连挥手臂没有）→ 用户读作「坐船被禁交互」。改放行 —— 骑乘中放船与 MC 1.0 一致
+        //   （坐 A 船放 B 船、转身换骑均可）。防「放到自己脚下即换骑」的边角：放船点离骑乘船 <1.5 格时跳过
+        //   **自动换乘**（放归放、骑归骑，玩家想换可 shift 下船再上；机制等价 MC 放船不自动换骑）。
         //   boat 三轮「不能直接放水上」（用户报③）：旧条件含 m_hasHit → 瞄水面时主选体射线穿水命中水底实块
         //   （m_hasHit=true）但深水（>8 格）向上扫水面被 8 格封顶 → 船放水柱中途；水底超出射程（kReach=5）则
         //   m_hasHit=false → 放船分支直接不执行 → 两种情形都「不能直接放水上」。修：(a) 命中实块路径向上扫
         //   水面去 8 格封顶（扫到世界顶，深水一步定位真水面）；(b) 无命中路径跑独立水射线（RayFilter::HitWater，
         //   同钓竿抛竿模式）找视线首个水格 → 放水面。放陆地 / 冰面行为保持（命中实块路径 t508 兜底）。
-        if (m_boatManager->ridingIndex() < 0 && m_hotbar
+        if (m_hotbar
             && (heldItemId == RecipeRegistry::OakBoatId || heldItemId == RecipeRegistry::SpruceBoatId)) {
             int tx = m_hitBx, ty = m_hitBy, tz = m_hitBz;
             bool boatTargetReady = false;

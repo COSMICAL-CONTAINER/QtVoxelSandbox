@@ -954,12 +954,15 @@ bool BlockRegistry::isIce(quint8 blockId)
 // t468 冰面「滑动接近率」（1/s；越小越滑）—— 玩家水平速度向目标速度的指数接近速率（PlayerController::step
 //   冰分支用 1 - exp(-rate*dt) 做 lerp）。机制等价 MC 1.0 ice < packed_ice < blue_ice 滑度递增：Ice 中等滑 /
 //   PackIce 更滑 / BlueIce 最滑。非冰 → 0（caller 据 0 走常规地面瞬时设速路径，不进冰滑行分支）。单一权威：
-//   玩家与未来船的冰面手感都读它，避免两处魔数漂移。
+//   玩家与船的冰面手感都读它，避免两处魔数漂移。
+//   t611 再调小一档（用户「冰上的惯性再大一点」）：8/4.5/2.8 → 6/3.2/1.9 —— 接近率更小 = 加速更慢 + 松键后
+//   滑行更长（惯性更大）。滑行到 10% 初速的时间：冰 0.38→0.51s / 浮冰 0.68→0.95s / 蓝冰 1.10→1.62s，
+//   配合冰档船速上限微升（boatmanager t611）手感「冰上飞起来收不住」才对（机制等价 MC 1.0 冰面船远超水速）。
 float BlockRegistry::iceSlipApproach(quint8 blockId)
 {
-    if (blockId == Ice)     return 8.0f;  // 冰：中等滑（接近率 8/s；松键后 ~0.4s 明显滑行）
-    if (blockId == PackIce) return 4.5f;  // 浮冰：更滑（接近率 4.5/s；松键后滑得更远）
-    if (blockId == BlueIce) return 2.8f;  // 蓝冰：最滑（接近率 2.8/s；松键后滑得最远）
+    if (blockId == Ice)     return 6.0f;  // 冰：中等滑（t611：接近率 8→6/s；松键后 ~0.5s 明显滑行）
+    if (blockId == PackIce) return 3.2f;  // 浮冰：更滑（t611：接近率 4.5→3.2/s；松键后滑得更远）
+    if (blockId == BlueIce) return 1.9f;  // 蓝冰：最滑（t611：接近率 2.8→1.9/s；松键后滑得最远）
     return 0.0f;                          // 非冰（caller 走常规地面路径）
 }
 
