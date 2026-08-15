@@ -1045,14 +1045,17 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   改读 state 编码的唯一附着邻居：仅当该邻居失撑才掉。掉落走 setBlock(Air) → World 发 blockBroken +
     //   worldChanged → Main.qml 移除伪光源（removeTorchAt / onWorldChanged 兜底）+ mesh 重建。火把非
     //   solid → 不撑他火把 → 单趟 6 邻扫即足够（无级联，破一块不会链式掉一串）。
+    //   t571 标注【自然失撑掉落：恒发（含创造）】—— 破坏支撑方块是因、火把脱落是果，非玩家直破火把本体。
     dropUnsupportedTorchesAround(x, y, z);
     // t501 木梯失支撑立即掉落：破块后扫 6 邻木梯，其**支撑墙**（state 编码）若已非完整立方（含本格刚被置
     //   Air）→ 木梯直接掉落为物品。机制等价 MC「梯子贴墙被移除即脱落」（同火把失撑语义）。木梯非 solid
     //   → 不撑他木梯 → 单趟 6 邻扫即足够（无级联）。
+    //   t571 标注【自然失撑掉落：恒发（含创造）】。
     dropUnsupportedLaddersAround(x, y, z);
     // t247 草丛 / 小麦作物失撑掉落：破块后其正上方的草丛 / 小麦作物（唯一支撑 = 本格，刚被破为 Air）
     //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
     //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
+    //   t571 标注【自然失撑掉落：恒发（含创造）】。
     dropUnsupportedCropsAround(x, y, z);
     // t305/t325 树叶衰减（spec「挖光一棵树所有原木→树叶消失」，t325 渐进化）：玩家破原木 → 触发 World 扫破块点
     //   周围树叶，失撑叶（4 格切比雪夫距离内无原木）**入渐进衰减队列**（非瞬时清）；队列由 tickLeafDecay 每
@@ -1066,6 +1069,10 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     // （先选中槽、再空槽，智能堆叠至 maxStack）。满栈不进背包则实体留地面（spec：全满→不拾取）。
     // drop 由 caller 算（生存走 ToolRegistry::canHarvest；创造瞬破 drop=false 不发）。
     // t64：spawnItem 带 count（= BlockRegistry::dropCount；当前表内全 1，留扩展位对齐方块表）。
+    // ── t571 掉落语义标注【主动破坏掉落：仅生存】：本 if (drop) 块内全部路径（通用 dropId / 作物 / 叶 /
+    //    雪层 / 雪块 / 双半砖 / silk / fortune）都是「被玩家点击破坏的那一格本体」的掉落 → 一律受 drop 标志
+    //    门控（创造 drop=false 全部跳过，零掉落）。与之相对的「自然失撑掉落」（下方方法族 + 末尾甘蔗/仙人掌
+    //    级联上方格）恒发（含创造），见各自标注。
     if (drop) {
         int dropId = BlockRegistry::dropId(brokenId);
         int dropCount = std::max(1, BlockRegistry::dropCount(brokenId));
@@ -1143,23 +1150,24 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     }
     // t418 垂直植物级联掉落（机制等价 MC 甘蔗 / 仙人掌柱：破任一格 → 其上整柱坍落）：当被破格为 Sugarcane /
     //   Cactus 时，自破格正上一格起向上逐格破同型块（setBlock Air → blockBroken 粒子/音 + worldChanged 重建）。
-    //   停于首个异型格；越界 blockAt 返 Air ≠ brokenId → 循环自然终止（无 OOB 风险）。掉落物每格 emit
-    //   spawnItem 一件（用与单格破块相同的 dropId / dropCount）。**t547：级联格恒掉落（含创造）** —— 与 World 侧
-    //   dropSugarcaneColumn / dropCactusColumn（挖沙 → 整柱坍落为掉落物）行为一致：破任一甘蔗 / 仙人掌格 → 其上
-    //   所有格全掉落实体（t547②「打第一格第二格没掉落（直接消失）」根因：t545 只让创造也连带破格，掉落仍被
-    //   `if (drop)` 门拦 → 创造破甘蔗/仙人掌「直接消失」不掉落；修 = 级联掉落恒发，与「挖沙」整柱掉落同观感）。
-    //   破格本体亦恒掉（`if (!drop)`：生存主格已由上方通用 drop 路径 spawnItem 一次 → 免双重掉落；创造通用路径
-    //   不发 → 本格在此补发，与「挖沙」整柱掉落含破格本身一致）。不递归（植物柱仅靠下方支撑，破上方不连累下方）。
-    //   brokenId 已在 setBlock(Air) 前读（同 t134 时序坑）。每格 setBlock Air 各自发 blockBroken + 标脏，无需额外
-    //   worldEdited/dirty 串联。Sugarcane/Cactus 非 Log/Leaves/Torch/Crop → 级联格不走 leaf-decay / torch/crop
-    //   失撑分支（本就无副作用）。
+    //   停于首个异型格；越界 blockAt 返 Air ≠ brokenId → 循环自然终止（无 OOB 风险）。
+    // ── t571 掉落语义二分（主动 vs 自然）：
+    //   ① 主动破坏掉落（被玩家点击破坏的那一格本身的掉落物）：**仅生存**（drop 标志门控，走上方通用 drop 路径
+    //      line ~1141 spawnItem）。创造瞬破 drop=false → 本格零掉落（机制等价 MC 创造破块无掉落；t547 曾让本格
+    //      恒掉（含创造补发），t571 修正 —— 创造打甘蔗/仙人掌任一格，被破坏格本体不掉）。
+    //   ② 自然失撑掉落（破掉支撑后**上方失撑格**的级联掉落）：**恒发（含创造）** —— 本循环逐格 spawnItem。
+    //      机制等价 MC 创造打掉甘蔗中间格：该格不掉，但其上失撑整柱照掉；与 World 侧 dropSugarcaneColumn /
+    //      dropCactusColumn（挖沙 → 整柱坍落为掉落物，模式无关恒掉）同语义 —— t547② 报的「创造破柱直接消失」
+    //      修的是②；t571 报的「创造本格也掉」错在①（本格补发越权）。
+    //   不递归（植物柱仅靠下方支撑，破上方不连累下方）。brokenId 已在 setBlock(Air) 前读（同 t134 时序坑）。
+    //   每格 setBlock Air 各自发 blockBroken + 标脏，无需额外 worldEdited/dirty 串联。Sugarcane/Cactus 非
+    //   Log/Leaves/Torch/Crop → 级联格不走 leaf-decay / torch/crop 失撑分支（本就无副作用）。
     if (brokenId == BlockRegistry::Sugarcane || brokenId == BlockRegistry::Cactus) {
         const int cascadeDropId = BlockRegistry::dropId(brokenId);
         const int cascadeDropCount = std::max(1, BlockRegistry::dropCount(brokenId));
-        if (!drop) emit spawnItem(x, y, z, cascadeDropId, cascadeDropCount); // t547：破格本体恒掉（创造补发 / 生存免双）
         for (int cy = y + 1; m_world->blockAt(x, cy, z) == brokenId; ++cy) {
             m_world->setBlock(x, cy, z, BlockRegistry::Air);
-            emit spawnItem(x, cy, z, cascadeDropId, cascadeDropCount); // t547：级联格恒掉落（含创造），同"挖沙"整柱
+            emit spawnItem(x, cy, z, cascadeDropId, cascadeDropCount); // t571②：上方失撑格级联掉落恒发（含创造）
         }
     }
     // t263 生存挖掘完成 → 持有工具消耗 1 点耐久（机制等价 MC「每破 1 块工具 -1 耐久」）。创造 drop=false

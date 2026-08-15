@@ -1584,6 +1584,7 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
 //   自 (x,y,z) 起向上逐格静默清 Cactus + 发 blockBroken（粒子 / 音）+ blockDroppedAsItem（掉落物）+ 重 flood 光，
 //   末尾 1 次 worldChanged + clearAllDirty（N 写 1 emit，同 destroySphereSilent 批量收口）。静默写不经 World::setBlock
 //   → 不递归触发 ②/④ 检查（无重入），也不发额外 blockBroken 链（本方法自发）。空柱（首格非 Cactus）→ no-op。
+//   t571 标注【自然失撑掉落：恒发（含创造）】—— World 层无 drop 标志概念，失撑坍落是结构后果，模式无关。
 void World::dropCactusColumn(int x, int y, int z)
 {
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
@@ -1630,6 +1631,7 @@ void World::checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 // t504 setBlock 编辑后枯死灌木失撑复检（见 world.h 头注释）。机制等价 MC 1.0 枯灌木失去下方支撑即坍落（同甘蔗 /
 //   仙人掌支撑校验族）；但坍落产物为 **木棒**（材料段 0x200）而非枯灌木自身（机制等价 MC dead bush 掉 0-2 木棒，
 //   不掉自身 —— 与破花掉花 / 破蘑菇掉蘑菇不同：枯灌木 dropId=0 故即便掉自身也无意义，故失撑走木棒）。
+//   t571 标注【自然失撑掉落：恒发（含创造）】。
 //   DeadBush 恒单格（无柱状生长），故仅清正上方 1 格（与 Cactus dropCactusColumn 逐柱不同）。
 //   玩家直破枯灌木（oldId==DeadBush → id==Air）走 finishMiningAt，dropId=0 → 无产物；仅失撑（破下方支撑方块，
 //   oldId 非 DeadBush → 正上方 DeadBush 掉木棒）才发掉落物，避免双重掉落。静默直写不经 World::setBlock → 不递归触发本检查。
@@ -1661,6 +1663,7 @@ void World::checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 //   → 静默清 Air + emit 破块反馈 + 掉落物（dropId=自身）+ 重 flood 光。玩家直破花 / 蘑菇（oldId==flower/mushroom
 //   → id==Air）走 finishMiningAt 通用 drop 路径（dropId=自身方块），避免双重掉落。经 isFlower / isMushroom 单一
 //   权威谓词覆盖花 4 色 + 红 / 白两蘑菇（不各处自写 id 判定，同 isBed / isIce 段不连续并判模式）。
+//   t571 标注【自然失撑掉落：恒发（含创造）】。
 void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
     // 仅本格被破为 Air 且被破块非花 / 蘑菇时，查正上方是否花 / 蘑菇失撑。（被破块本身是花 / 蘑菇时跳过 ——
@@ -1688,6 +1691,7 @@ void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 
 //   玩家直破压力板（oldId==plate → id==Air）走 finishMiningAt 通用 drop 路径（dropId=自身），避免双重掉落。
 //   触发场景（用户报）：① 压力板放 TNT 上，TNT 被引燃（clearBlockSilent 把下方 TNT 清成 Air → 板上压力板失撑）；
 //   ② 挖掘压力板下方的方块（setBlock 破下方支撑 → 板上压力板失撑）。木 / 圆石压力板都掉。
+//   t571 标注【自然失撑掉落：恒发（含创造）】。
 void World::checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
     // 仅本格被破为 Air 且被破块非压力板时，查正上方是否压力板失撑。（被破块本身是压力板时跳过 ——
@@ -1712,6 +1716,7 @@ void World::checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 i
 //   自 (x,y,z) 起向上逐格静默清 Sugarcane + 发 blockBroken（粒子 / 音）+ blockDroppedAsItem（掉落物）+ 重 flood 光，
 //   末尾 1 次 worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。静默写不经 World::setBlock
 //   → 不递归触发 checkSugarcaneOnEdit（无重入），也不发额外 blockBroken 链（本方法自发）。空柱（首格非 Sugarcane）→ no-op。
+//   t571 标注【自然失撑掉落：恒发（含创造）】—— 同 dropCactusColumn；「打掉甘蔗下面的沙子 → 整柱坍落」即走此路径。
 void World::dropSugarcaneColumn(int x, int y, int z)
 {
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;

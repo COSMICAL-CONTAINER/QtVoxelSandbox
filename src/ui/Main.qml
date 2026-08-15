@@ -7120,6 +7120,8 @@ Window {
             //   furnace=10 既有模式）。逐非空槽 spawnItem（每槽独立实体，便于玩家走回拾取；itemEntities.spawnItem
             //   内置就近合并，同 id 自动合）；上界取 chestStore.slotCount（恒 27，与 kSlotsPerChest 同源），
             //   同 furnace=10 的逐槽掉落模式（3 槽循环用字面量 3，本 27 槽走 VM 暴露的 slotCount 以免 magic number）。
+            //   t571 标注【自然掉落：恒发（含创造）】—— 消费 blockBroken（World 语义事件，无 drop 标志）→ 创造
+            //   破箱：箱子本体物品不掉（player.onSpawnItem 由 drop=false 门控）、内容物照掉（本处恒发），正确。
             if (id === 22) {
                 for (let ci = 0; ci < chestStore.slotCount; ++ci) {
                     const cid = chestStore.slotIdAt(x, y, z, ci)
@@ -7134,6 +7136,7 @@ Window {
             //   BlockRegistry::Furnace（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
             //   chest=22 既有模式）。逐槽 spawnItem（每槽独立实体，便于玩家走回拾取；itemEntities.spawnItem
             //   内置就近合并，同 id 自动合）。
+            //   t571 标注【自然掉落：恒发（含创造）】—— 同 chest=22（内容物掉落与模式无关）。
             if (id === 10) {
                 for (let fi = 0; fi < 3; ++fi) {
                     const fid = furnaceStore.slotIdAt(x, y, z, fi)
@@ -7149,6 +7152,7 @@ Window {
             //   chest=22 / furnace=10 既有模式）。逐非空槽 spawnItem（每槽独立实体，便于玩家走回拾取；
             //   itemEntities.spawnItem 内置就近合并，同 id 自动合）。铁砧（97-99）/ 附魔台（94）当前是 shell-mode
             //   无容器（功能后补），破掉无内部物品可掉 → 无需 dump（spec「铁砧/附魔台主要是发射器」）。
+            //   t571 标注【自然掉落：恒发（含创造）】—— 同 chest=22（内容物掉落与模式无关）。
             if (id === 107) {
                 for (let di = 0; di < dispenserStore.slotCount; ++di) {
                     const did = dispenserStore.slotIdAt(x, y, z, di)
