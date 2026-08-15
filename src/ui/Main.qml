@@ -5830,11 +5830,12 @@ Window {
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
                                     baseColorMap: mobSheepPackTex.source.toString().length > 0 ? mobSheepPackTex : mobSheepTex
                                 }
-                                // rv-low-batch1 眼睛恢复（同猪/牛模式 + pack 感知 visible）。羊吃草时 MobModel 头绕
-                                //   颈枢俯仰 → 眼放「颈枢 Node」（position=颈附着点 (0,0.10,-0.29)，eulerRotation.x 绑
-                                //   headPitchAt）随头同步俯仰。眼相对颈枢：z=-0.32、y=0.06、x=±0.055（同裸态羊眼）。
+                                // rv-low-batch1 眼睛恢复（同猪/牛模式）。t593：pack 命中改走 sheep_fur.png 羊毛层
+                                //   （头前是纯白羊毛无脸）→ 眼睛**恒显**（不再 pack 门控：原「pack 贴图自带脸」仅对
+                                //   cow/pig 成立，羊 fur 层无脸）。羊吃草时 MobModel 头绕颈枢俯仰 → 眼放「颈枢 Node」
+                                //   （position=颈附着点 (0,0.10,-0.29)，eulerRotation.x 绑 headPitchAt）随头同步俯仰。
+                                //   眼相对颈枢：z=-0.32、y=0.06、x=±0.055（同裸态羊眼）。
                                 Node {
-                                    visible: mobSheepPackTex.source.toString().length === 0
                                     position: Qt.vector3d(0, 0.10, -0.29)
                                     property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                     eulerRotation: Qt.vector3d(headPitch, 0, 0)

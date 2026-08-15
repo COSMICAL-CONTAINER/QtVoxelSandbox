@@ -577,7 +577,7 @@ const QList<QPair<int, QString>> &mobEntityMap()
     static const QList<QPair<int, QString>> kMap = {
         {1, QStringLiteral("pig/pig.png")},         // MobPig → entity/pig/pig.png
         {2, QStringLiteral("cow/cow.png")},         // MobCow → entity/cow/cow.png
-        {3, QStringLiteral("sheep/sheep.png")},     // MobSheep → entity/sheep/sheep.png（羊毛态；剪羊毛态走程序生成）
+        {3, QStringLiteral("sheep/sheep_fur.png")}, // MobSheep → entity/sheep/sheep_fur.png（t593：羊毛层贴图。sheep.png 本体 = 无毛粉肉身（用户「羊是无羊毛版本，怪怪的，应长满羊毛」）；MC 1.8 羊 = 本体 + 羊毛两层模型，本工程单贴图 MobModel 取毛层即「长满羊毛」。剪羊毛态（shearedAt）走 Main.qml 裸肤色 Model，不走本贴图）
         {4, QStringLiteral("zombie/zombie.png")},   // MobShambler → entity/zombie/zombie.png（机制等价 zombie，§9 改名）
         {5, QStringLiteral("skeleton/skeleton.png")},// MobBones → entity/skeleton/skeleton.png（机制等价 skeleton，§9 改名）
         {6, QStringLiteral("creeper/creeper.png")}, // MobStalker → entity/creeper/creeper.png（机制等价 creeper，§9 改名）
