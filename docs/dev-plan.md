@@ -1960,7 +1960,7 @@ t537-t546（10 项新/回退）+ t529 + t525/t526/t527（雪傀儡+积雪层 4 �
 
 ### 🅱 物品栏 3D 人物（2 项）
 
-**t572** 创造模式生存物品栏 tab 空装备栏图标对齐生存版
+**t572** 创造模式生存物品栏 tab 空装备栏图标对齐生存版 ✅✅ 已完成（commit 待补）
 - 用户：「创造模式里的生存物品栏 tab，空白装备栏 4 个图标和生存模式的不一样（生存模式那 4 个是对的）。」
 - 查：`Inventory.qml` tab6（创造里的生存 tab）空装备槽占位 vs `SurvivalInventory.qml` —— 统一为生存版（pack `empty_armor_slot_*.png` + Canvas 剪影 + MaterialIcon，t551 已做过 SurvivalInventory，把同款搬到 Inventory tab6）。
 

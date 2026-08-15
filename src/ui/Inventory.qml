@@ -550,16 +550,29 @@ Item {
                                     Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                                     Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
 
-                                    // t551 复原生存版空装备栏（用户「t546 做反了」）：t546 把空槽换成了逐格 3D 灰体预览
-                                    //   （ArmorSlot3D），用户要求**还原之前生存背包的空护甲槽占位图**。本分页（生存物品栏
-                                    //   tab6）与 SurvivalInventory 同诉求 —— 恢复 t546 前的 2D 空槽占位：空槽 =
-                                    //   Canvas 自绘金属灰剪影（§9a 原创；生存背包另有 pack empty_armor_slot_* PNG 覆盖，
-                                    //   本创造背包分页保持 t497 前行为无 pack 图）；装备 = MaterialIcon 护甲图。
+                                    // t572 空装备槽图标对齐生存版（用户「创造里的生存 tab 空装备栏 4 个图标和生存
+                                    //   模式不一样」）：与 SurvivalInventory t551 同款三层占位 —— pack 启用且有
+                                    //   empty_armor_slot_<piece>.png → 显 pack PNG（alpha-test 透明底）；pack 关/无
+                                    //   映射 → Canvas 自绘金属灰剪影（§9a 原创）；装备 → MaterialIcon 护甲图。
                                     //   3D 人物保留在 CharacterPreview3D（唯一 3D 预览，非逐槽）。
+                                    ResourcePackManager { id: armorRpTab6 }
+                                    Image {
+                                        id: armorEmptyPackImg
+                                        anchors.centerIn: parent
+                                        width: 26; height: 26
+                                        visible: armId === 0 && source.toString().length > 0
+                                        // 触碰 armId/armorRpTab6.active 建立绑定依赖（槽位变 / pack 切换 → 重查源）。
+                                        source: { const _r = armorRpTab6.active; return _r >= 0 ? (armId === 0 ? armorRpTab6.emptyArmorSlotSource(index) : "") : "" }
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: false // 像素硬边（同 Canvas imageSmoothingEnabled=false；1.0 占位图为像素艺术）
+                                    }
+                                    // 空槽部位占位剪影（暗灰金属头盔/胸甲/护腿/靴像素图；§9a 原创，非 MC 资产）。
+                                    //   仅 armId===0 且 pack 无该空槽图标时显（有装备时让位给 MaterialIcon 护甲图；
+                                    //   pack 有空槽图时让位给上方 armorEmptyPackImg）。
                                     Canvas {
                                         anchors.centerIn: parent
                                         width: 26; height: 26
-                                        visible: armId === 0
+                                        visible: armId === 0 && !armorEmptyPackImg.visible
                                         onPaint: {
                                             const ctx = getContext("2d"); ctx.reset()
                                             ctx.imageSmoothingEnabled = false
