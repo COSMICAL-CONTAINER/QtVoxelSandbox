@@ -25,10 +25,11 @@
 //   安全位。PlayerController.step 骑乘分支调 tickRiddenCart 推进矿车物理（WASD 输入由 PlayerController 算
 //   wish 传入），并据返回的矿车位把玩家 m_pos 同步到车座位（玩家随车位移、骑乘期禁用玩家自身移动）。
 //
-// 物理（tickRiddenCart，被骑的矿车）：据 wish 在矿车行进方向上的投影算目标速度（前进 / 后退），
-//   速度向目标 lerp（动量）→ 沿「轨连接位」逐格推进（advanceAlongTrack：从当前轨格的 4 向连接位中选
-//   与行进方向点积最大的连接向 → 矿车向该邻轨格移动；跨格中心时更新行进方向 = 该连接向（拐角自动转向）；
-//   无连接（轨尽头）→ 停）。矿车 Y 钉轨面（轨格 cell 顶 + kCartRideH）。
+// 物理（tickRiddenCart，被骑的矿车）：停驻（speed==0）且有 WASD 输入时先按 wish 重选行进向（面向死端壁
+//   的输入因无可用连接被拒 → 保持停驻；面向来路的输入选中来路 → 蓄力反推回程，机制等价 MC 尽头轨反向
+//   推回）。据 wish 在矿车行进方向上的投影算目标速度（前进 / 后退），速度向目标 lerp（动量）→ 沿「轨连接
+//   位」逐格推进（跨格时按行进方向选下一连接向 —— 拐角自动转弯，反向连接不选；仅剩来路（死端）→ 停）。
+//   矿车 Y 钉轨面（轨格 cell 顶 + kCartRideH）。
 //
 // 分层（PLAN §2）：本层属 Entities（位于 Game/Physics 之下、World 之上）。向下只读 World
 // （blockAt / stateAt，判轨 / 连接位），不依赖 Renderer / Physics / QtQuick3D。tickRiddenCart /
@@ -147,10 +148,11 @@ private:
     }
     void notifyChanged() { ++m_revision; emit entitiesChanged(); }
 
-    // 从矿车所在轨格出发，沿「与 (wantX,wantZ) 点积最大」的连接向找邻轨格位移 (outDx,outDz)。
-    //   返 false = 无可用连接（轨尽头 / 轨连接位为空）。拐角（如行进 +Z、连接 +X）自动选中 → 矿车转弯。
-    //   排除「来路」（-dir 反向连接点积为负自然排后；完全掉头仅在末端无前进连接时允许 —— 简化：允许，
-    //   MC 矿车在尽头轨可反向推回）。
+    // 从矿车所在轨格出发，沿「与 (wantX,wantZ) 点积最大且 dot ≥ 0」的连接向找邻轨格位移 (outDx,outDz)。
+    //   返 false = 无可用连接（轨尽头 / 仅剩反向来路连接）。拐角（dot=0）自动选中 → 矿车转弯。反向连接
+    //   （dot=-1，来路）不返回：死端轨由此返 false →「轨尽头停」分支接管（防 180° 掉头 + 两端振荡）；
+    //   停下后由 tickRiddenCart 停驻重选向分支按 wish 重选（面向来路输入 → 反推回程，机制等价 MC 尽头
+    //   轨可反向推回）。
     bool pickTrackStep(World *world, const QVector3D &cartPos, float wantX, float wantZ,
                        int &outDx, int &outDz) const;
 

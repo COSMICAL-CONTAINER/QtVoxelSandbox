@@ -4243,8 +4243,9 @@ void World::placeMineshaft()
     constexpr unsigned kTorchPct    = 55u;    // 立柱顶火把概率（每对立柱 ~55% → 巷道沿途常见火把）
     constexpr int kMargin           = 16;     // 留边界（折线巷道两段 + 洞室半径 → 较大余量防越界）
 
-    int placed = 0;
     const int mineSeed = m_seed + 15047; // 矿井哈希偏移（与其它 worldgen hashColumn 解耦）
+    int placed = 0;
+    int chests = 0; // rv9-10：矿井宝箱计数（日志核对 > 0 —— 旧版轨行冲突恒 0 的回归检测）
     for (int bx = kMineshaftGrid / 2; bx < m_width; bx += kMineshaftGrid) {
         for (int bz = kMineshaftGrid / 2; bz < m_depth; bz += kMineshaftGrid) {
             const quint32 r = hashColumn(mineSeed, bx, bz);
@@ -4306,15 +4307,25 @@ void World::placeMineshaft()
                     }
                 }
             }
-            // 洞室宝藏箱（中心旁两格，机制同旧版末端箱；带 ChestStateMineshaftFlag → 首开填充矿井战利品）。
+            // 洞室宝藏箱（机制同旧版末端箱；带 ChestStateMineshaftFlag → 首开填充矿井战利品）。
+            //   旧版放 (cx±kRoomHalf-1, sy+1, cz) 恰在 X 向轨行上 → ib != Rail 守卫恒 false → 宝箱绝迹
+            //   （rv9-10 复盘）。改放十字轨行外的四角落内点 (cx±2, cz±2)（7×7 洞室内、轨行间空区），
+            //   四角按 hash 顺序试放，首个非轨 / 非基岩格落地。
             {
                 const int yy = sy + 1;
                 if (yy < m_height) {
-                    const int ox = ((r >> 21) & 1u) ? kRoomHalf - 1 : -(kRoomHalf - 1);
-                    const quint8 ib = m_chunks.blockAt(cx + ox, yy, cz);
-                    if (ib != BlockRegistry::Bedrock && ib != BlockRegistry::Rail) // 不覆盖铁轨（防御）
-                        m_chunks.setBlock(cx + ox, yy, cz, BlockRegistry::Chest,
-                                          BlockRegistry::ChestStateMineshaftFlag);
+                    const int cornerOff = int((r >> 21) & 3u); // 起始角（0..3）→ 同 seed 确定性
+                    for (int t = 0; t < 4; ++t) {
+                        const int sx2 = (((cornerOff + t) & 1u) != 0u) ? 2 : -2;
+                        const int sz2 = (((cornerOff + t) & 2u) != 0u) ? 2 : -2;
+                        const quint8 ib = m_chunks.blockAt(cx + sx2, yy, cz + sz2);
+                        if (ib != BlockRegistry::Bedrock && ib != BlockRegistry::Rail) {
+                            m_chunks.setBlock(cx + sx2, yy, cz + sz2, BlockRegistry::Chest,
+                                              BlockRegistry::ChestStateMineshaftFlag);
+                            ++chests;
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -4431,7 +4442,8 @@ void World::placeMineshaft()
             ++placed;
         }
     }
-    qInfo() << "worldgen: underground mineshafts =" << placed; // 同 seed → 同计数（确定性核对）
+    qInfo() << "worldgen: underground mineshafts =" << placed
+            << "chests =" << chests; // 同 seed → 同计数（确定性核对；chests>0 = 宝箱轨行冲突已修）
 }
 
 // t485 沙漠神殿（见 world.h 头注释）。机制等价 MC 1.0 沙漠神殿 desert temple：沙漠地表的阶梯金字塔 + 正下方地下

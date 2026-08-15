@@ -128,8 +128,11 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
     const int rz = int(std::floor(cartPos.z()));
     if (world->blockAt(rx, ry, rz) != BlockRegistry::Rail) return false; // 不在轨上（防御）
     const quint8 con = world->stateAt(rx, ry, rz);
-    // 4 向连接位（RailConnPx/Nx/Pz/Nz）→ 位移向量；选与 (wantX,wantZ) 点积最大者（拐角自动选中 —— 行进
-    //   +Z 时拐角连接 +X 的点积 0 > 反向 -Z 的 -1 → 自动转弯）。无连接 → false（轨尽头停）。
+    // 4 向连接位（RailConnPx/Nx/Pz/Nz）→ 位移向量；选与 (wantX,wantZ) 点积最大且**非反向**（dot ≥ 0）者
+    //   （拐角 dot=0 自动选中 —— 行进 +Z 时拐角连接 +X 点积 0 > 反向 -Z 的 -1 → 自动转弯）。反向连接
+    //   （dot=-1，来路）不返回：死端轨若返回来路连接 → 跨格即 180° 掉头、按 W 全速倒退 → 两端永久振荡；
+    //   改为返回 false 让「轨尽头 → 停」分支接管，停下后 tickRiddenCart 末尾的 -dir 重选分支再实现
+    //   「按 W 蓄力反推回」（机制等价 MC 矿车在尽头轨停下后可反向推回）。
     struct Dir { int dx, dz; quint8 bit; };
     static const Dir kDirs[4] = {
         { 1,  0, BlockRegistry::RailConnPx},
@@ -138,20 +141,22 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
         { 0, -1, BlockRegistry::RailConnNz},
     };
     int best = -1;
-    float bestDot = -2.0f;
+    float bestDot = -1.0f; // dot ≥ 0 才候选（0 = 拐角；-1 反向被 dot<0 过滤）
     for (int i = 0; i < 4; ++i) {
         if ((con & kDirs[i].bit) == 0) continue;
         const float dot = float(kDirs[i].dx) * wantX + float(kDirs[i].dz) * wantZ;
+        if (dot < 0.0f) continue; // 反向连接（来路）不选 → 死端轨（仅剩来路）→ false 停
         if (dot > bestDot) { bestDot = dot; best = i; }
     }
-    if (best < 0) return false; // 轨尽头（无任何连接）→ 停
+    if (best < 0) return false; // 无非反向连接（轨尽头 / 仅来路）→ 停
     // 邻格确为 Rail（连接位应与之一致；防御 —— 连接位 stale 时兜底直查）。
     if (world->blockAt(rx + kDirs[best].dx, ry, rz + kDirs[best].dz) != BlockRegistry::Rail) {
-        // 连接位失真：直接按邻格实查重选（首查四邻中与 want 点积最大且为 Rail 者）。
-        int fb = -1; float fDot = -2.0f;
+        // 连接位失真：直接按邻格实查重选（首查四邻中与 want 点积最大、非反向且为 Rail 者）。
+        int fb = -1; float fDot = -1.0f;
         for (int i = 0; i < 4; ++i) {
             if (world->blockAt(rx + kDirs[i].dx, ry, rz + kDirs[i].dz) != BlockRegistry::Rail) continue;
             const float dot = float(kDirs[i].dx) * wantX + float(kDirs[i].dz) * wantZ;
+            if (dot < 0.0f) continue; // 反向连接不选（同上：死端返回 false 走停车分支）
             if (dot > fDot) { fDot = dot; fb = i; }
         }
         if (fb < 0) return false;
@@ -167,6 +172,18 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     if (m_riderCart < 0 || m_riderCart >= int(m_carts.size())) { outCartPos = QVector3D(); return; }
     Cart &c = m_carts[size_t(m_riderCart)];
     if (!c.alive) { outCartPos = QVector3D(); return; }
+
+    // 停驻重选向（speed==0 且有输入）：按 wish 直接从轨连接位选向（pickTrackStep 内滤 dot<0 反向连接
+    //   → 面向死端壁的 wish 无可用连接 → 保持停驻不动，不掉头不振荡）。选出的向与 wish 点积 ≥0 → 下方
+    //   proj ≥0 → 输入即刻沿新向正推。蓄力重推语义：死端轨停稳后面向来路按 W/S → 来路连接 dot=+1 被选中
+    //   → 反推回程（机制等价 MC 矿车在尽头轨停下后可反向推回）。
+    if (c.speed == 0.0f && (std::fabs(wishX) > 1e-3f || std::fabs(wishZ) > 1e-3f)) {
+        int ndx = 0, ndz = 0;
+        if (pickTrackStep(world, c.pos, wishX, wishZ, ndx, ndz)) {
+            c.dirX = float(ndx);
+            c.dirZ = float(ndz);
+        }
+    }
 
     // 目标速度：wish 在当前行进方向上的投影（前推 / 后拉；无输入 → 0 摩擦滑行渐停）。
     const float wishLen = std::sqrt(wishX * wishX + wishZ * wishZ);
@@ -217,15 +234,6 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
                     c.speed = 0.0f; // 轨尽头 → 停（速度清零；W 再推也停 —— 须下车上轨延伸或反推）
                     break;
                 }
-                c.dirX = float(ndx);
-                c.dirZ = float(ndz);
-            }
-        }
-        // 轨尽头回头：speed=0 且玩家仍在按 W（proj>0）→ 用 -dir 重选连接（点积最大者可为来路 = 掉头推回；
-        //   机制等价 MC 矿车在尽头轨可反向推回）。选出的向即新行进向（已按 -dir 视角最顺）。
-        if (c.speed == 0.0f && proj > 0.2f) {
-            int ndx = 0, ndz = 0;
-            if (pickTrackStep(world, c.pos, -c.dirX, -c.dirZ, ndx, ndz)) {
                 c.dirX = float(ndx);
                 c.dirZ = float(ndz);
             }
