@@ -208,6 +208,13 @@ public:
     Q_INVOKABLE QString enchantLevelText(int level) const;
     Q_INVOKABLE QVariantList selectEnchantsPreview(int category, int offeredLevel, int seed) const;
     Q_INVOKABLE QString enchantListText(const QVariantList &packed) const;
+    // t615 附魔适用 / 冲突精判（透传 EnchantRegistry；铁砧敲附魔书逐条过滤用）：
+    //   - enchantApplicableTo(enchantId, itemId)：附魔是否适用**具体物品**（剑类附魔不上镐 / 摔落保护仅靴 /
+    //     水上亲和仅头盔等；dev-plan §3 表逐条）。AnvilUI 把书上附魔逐条试写 C 时判「不适用 → 不上（灰显）」。
+    //   - enchantConflictsWith(a, b)：两附魔是否互斥（同 exclusiveGroup：锐锋族 / 采集族 / 保护系）。
+    //     AnvilUI 判「书上附魔与 C 已有附魔冲突 → 不上（红字冲突）」。
+    Q_INVOKABLE bool enchantApplicableTo(int enchantId, int itemId) const;
+    Q_INVOKABLE bool enchantConflictsWith(int enchantIdA, int enchantIdB) const;
     // t590 附魔列表文本（tooltip / 槽位角标显示「物品有什么附魔」）：输入 4 槽 packed int（同
     //   ItemStack.enchants[4] 布局，即 enchantsAt / mainEnchantsAt / armorEnchantsAt 返回格式），
     //   逐槽拆包 id/level → 「锐锋 III」「效率 II」… 以换行连接；无附魔 → 空串。供各面板 tooltip

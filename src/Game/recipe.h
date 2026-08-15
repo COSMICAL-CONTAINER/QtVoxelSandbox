@@ -164,7 +164,7 @@ public:
     static constexpr int RedstoneId      = 0x224; // 红石粉：地牢战利品（机制等价 MC 1.0 redstone dust）；可堆叠 64
     static constexpr int SaddleId        = 0x225; // 马鞍：地牢稀有战利品（机制等价 MC 1.0 saddle）；可堆叠 64（简化）
     static constexpr int NameTagId       = 0x226; // 命名牌：地牢稀有战利品（机制等价 MC name tag，1.6+）
-    static constexpr int EnchantedBookId = 0x227; // 附魔书占位：地牢极稀有战利品（机制等价 MC enchanted book，1.4+；占位无真附魔）
+    static constexpr int EnchantedBookId = 0x227; // 附魔书：附魔台附书产 + 地牢极稀有战利品（机制等价 MC enchanted book；t615 真附魔——enchants 元数据携带附魔列表，maxStack=1）
     // t398 鸡（chicken）相关材料段物品（0x228..0x22C；机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉 + 周期下蛋）：
     //   杀鸡掉羽毛 + 生鸡肉；鸡燃烧致死 → 生鸡肉替换为熟鸡肉（机制等价 MC 1.0 着火死亡掉熟肉，同猪/牛/羊）。
     //   鸡周期性下蛋（EGG 物品掉落，机制等价 MC 1.0 鸡 5-10 分钟下一枚蛋）。可堆叠 64；非方块（材料段）→ 右键不放置。

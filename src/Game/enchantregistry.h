@@ -37,12 +37,20 @@
 class EnchantRegistry
 {
 public:
-    // 物品类别（决定哪些附魔适用）。用位掩码表达「适用面」（耐久适用多类）。
+    // 物品类别（决定哪些附魔适用）。用位掩码表达「适用面」（耐久适用多类）。t615 细化适用域：
+    //   - Weapon（剑）+ 斧：锐锋族三选一互斥（机制等价 MC「斧可附武器系附魔」）；击退 / 燃焰仅剑。
+    //   - Tool（镐/锄/斧/铲）：效率全适用；精准采集 = 镐·铲·斧；时运 = 镐·铲。
+    //   - Armor：保护/火焰保护/弹射物保护全护甲；摔落保护仅靴；水上亲和仅头盔；保护系四者互斥（组 2/3 见 .cpp）。
+    //   - BookItem（书，t615 附魔台附书载体）：全附魔池随机（机制等价 MC enchanted book 全池）。
+    //   耐久（Unbreaking）适用**全部三类 + 书**（Weapon|Tool|Armor|BookItem）。
     enum Category : int {
         None   = 0,
         Weapon = 1,  // bit0
         Tool   = 2,  // bit1
         Armor  = 4,  // bit2
+        // t615 附魔书载体位（bit3）：itemEnchantCategory(BookId) 返 BookItem；selectEnchants 对它取全附魔池
+        //   （所有 appliesToMask 含 BookItem 的附魔 —— 即全表），机制等价 MC「附魔台附书从全池随机」。
+        BookItem = 8,
     };
 
     // 附魔 id（本表自有小整数段 1..14；0 = 无附魔 / 空槽哨兵）。追加新附魔在末尾续号，不重排（ItemStack.
@@ -89,6 +97,20 @@ public:
 
     // 附魔是否适用给定物品类别（appliesToMask & catMask ≠ 0）。
     static bool isApplicable(int enchantId, int catMask);
+    // t615 附魔是否适用**具体物品**（据 ToolRegistry 类型 / ArmorRegistry 部位精判，非仅大类）：
+    //   - 锐锋族（1/2/3）：剑 + 斧（Axe）。
+    //   - 击退（4）/ 燃焰（5）：仅剑。
+    //   - 效率（6）：镐 / 锄 / 斧 / 铲。
+    //   - 精准采集（7）：镐 / 铲 / 斧。时运（8）：镐 / 铲。
+    //   - 耐久（9）：全部工具 + 全部护甲。
+    //   - 保护（10）/ 火焰保护（11）/ 弹射物保护（13）：全护甲。摔落保护（12）：仅靴。水上亲和（14）：仅头盔。
+    //   dev-plan §附魔设计表逐条核对（t475 只按大类判定 → 本方法为铁砧敲附魔书的**逐条适用过滤**权威）。
+    static bool isApplicableForItem(int enchantId, int itemId);
+    // t615 冲突组查询：两附魔是否互斥（同 exclusiveGroup 非 0 且相同；同 id 不算冲突 —— 等级合并走另路）。
+    //   冲突组（dev-plan §3 表）：组 1 = 锐锋/亡灵杀手/节肢克星（伤害系）；组 2 = 效率/精准采集/时运
+    //   （采集系）；组 3 = 保护/火焰保护/摔落保护/弹射物保护（保护系四互斥）。供铁砧敲附魔判定
+    //   「书上附魔与目标已有附魔互斥 → 不上（红字冲突）」+ 附魔台随机池排除冲突。
+    static bool conflictsWith(int enchantId, int otherEnchantId);
     // 最大等级。非附魔 → 0。
     static int maxLevel(int enchantId);
     // 权重。非附魔 → 0。
@@ -100,8 +122,9 @@ public:
     //   - 护甲段（ArmorRegistry::isArmor）→ Armor。
     //   - 工具段（ToolRegistry::isTool）→ 据 ToolDef.type：Sword→Weapon / Pickaxe·Hoe·Axe·Shovel→Tool /
     //     Bow·Shears·FishingRod → None（本任务不做弓 / 剪刀 / 钓竿专属附魔）。
-    //   - 方块段 / 材料段 / 越界 → None（不可附魔）。
-    // 返回 Category 位值（None / Weapon / Tool / Armor）；非位掩码叠加（单类别）。
+    //   - t615 书（RecipeRegistry::BookId）→ BookItem（附魔台附书载体：全池随机 → 产附魔书）。
+    //   - 方块段 / 材料段（含附魔书物品本身——书不可再附）/ 越界 → None（不可附魔）。
+    // 返回 Category 位值（None / Weapon / Tool / Armor / BookItem）；非位掩码叠加（单类别）。
     static int categoryForItem(int itemId);
 
     // 附魔选择（机制等价 MC 1.0 附魔台）。纯函数：给定物品类别 + 提供等级 + 随机种子 → 返回

@@ -242,7 +242,7 @@ Item {
                                       remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0])
                 return
             }
-            // 可附魔物（工具 / 武器 / 护甲，类别 != None）且槽 0 有物件的「已附魔拒入」守卫 → 入槽 0。
+            // 可附魔物（工具 / 武器 / 护甲 / t615 书，类别 != None）且槽 0 有物件的「已附魔拒入」守卫 → 入槽 0。
             const cat = root.hotbar.itemEnchantCategory(src.id)
             if (cat !== 0) {
                 const target = InventoryOps.readSlot(root, "enchant", 0)
@@ -252,7 +252,12 @@ Item {
                 for (let i = 0; i < 4; ++i) {
                     if (Array.isArray(se) && (se[i] || 0) !== 0) return
                 }
-                InventoryOps.writeSlot(root, group, index, 0, 0, 0)
+                // t615 书可堆叠（maxStack 64）→ 只取 1 本入槽（余数留源槽，防「5 本进槽丢 4 本」）；
+                //   工具 / 护甲 maxStack=1 → 恒整件（src.count===1，写 0 与写余数等价）。
+                InventoryOps.writeSlot(root, group, index, src.count > 1 ? src.id : 0,
+                                      Math.max(0, src.count - 1),
+                                      src.count > 1 ? src.durability : 0,
+                                      src.count > 1 ? src.enchants : [0,0,0,0])
                 InventoryOps.writeSlot(root, "enchant", 0, src.id, 1, src.durability, src.enchants)
                 return
             }
@@ -300,6 +305,9 @@ Item {
     // 书架加成据 theWorld.countBookshelvesAround(enchantX/Y/Z) 算 → 提升可选档位。
     // 青金石物品 id（RecipeRegistry::LapisId；Core 不依赖 Game 故 hotbar 无导出常量，硬编码 0x236）。
     readonly property int lapisId: 0x236
+    // t615 书 / 附魔书物品 id（RecipeRegistry::BookId / EnchantedBookId；附魔台附书载体 → 产附魔书）。
+    readonly property int bookId: 0x238
+    readonly property int enchantedBookId: 0x227
     // t590 三档消耗：青金石固定 1/2/3；XP 等级随书架加成升（1 档 1-3 级按书架 power）—— baseLevelCost
     //   = 1 + floor(power/7)：0-6 书架 → 1、7-13 书架 → 2、14+ 书架 → 3（满书架 1 档也贵到 3 级）。
     //   三档 = [base, base+1, base+2]（机制等价 MC 1.0 附魔消耗随书架升）。触碰 bookshelfPower（已绑
@@ -317,7 +325,8 @@ Item {
     readonly property int maxLevel: Math.min(3, Math.max(1, Math.floor(bookshelfPower / 2) + 1))
     // t549 槽 0 待附魔物（id / 耐久；触碰 enchantRev）。空槽 / 青金石 / 不可附魔 → 0。
     readonly property int enchantItemId: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantSlots[0] || 0) : 0 }
-    // 槽 0 物品可附魔（类别 != None）且未附魔（MC 1.0 已附魔物品不能进附魔台）。
+    // 槽 0 物品可附魔（类别 != None）且未附魔（MC 1.0 已附魔物品不能进附魔台）。t615 书（BookId →
+    //   category=BookItem=8）亦过本门 → 三档附书产附魔书；附魔书自身（category=None）不可再附。
     readonly property bool itemReady: {
         const _r = root.enchantRev
         if (_r < 0 || !root.hotbar) return false
@@ -353,6 +362,9 @@ Item {
     // t549 真附魔执行（点击 enabled 档位）：消耗 XP 等级 + **槽 1 青金石**（非背包）→ 同 seed 复算
     //   selectEnchantsPreview → 写入槽 0 物品的附魔元数据（t475 管线，预览 = 写入）→ 物品带附魔留槽 0
     //   （玩家左键取走；紫光晕 + tooltip 显示附魔情况）。
+    // t615 附书：槽 0 放**书**（BookId，itemEnchantCategory=BookItem=8）→ 附魔后物品 id 翻成**附魔书**
+    //   （EnchantedBookId），随机 1-N 条附魔写进其 enchants（书 = 全池随机，MC 语义）。附魔书 maxStack=1、
+    //   不可再附（再放 → category=None 不进槽 0）。
     function doEnchant(slotIdx) {
         if (!root.hotbar || !root.playerState) return
         if (!root.itemReady) return
@@ -373,7 +385,8 @@ Item {
         const remainLapis = Math.max(0, root.lapisCount - lapCost)
         if (remainLapis > 0) InventoryOps.writeSlot(root, "enchant", 1, root.lapisId, remainLapis, 0)
         else                  InventoryOps.writeSlot(root, "enchant", 1, 0, 0, 0)
-        // 3) 同 seed 复算选择 → 写入槽 0 附魔元数据（保留耐久）。
+        // 3) 同 seed 复算选择 → 写入槽 0 附魔元数据（保留耐久）。t615 书 → id 翻附魔书 + 全池随机
+        //   （itemEnchantCategory(BookId)=BookItem=8 → selectEnchants 全 14 附魔候选）。
         const cat = root.hotbar.itemEnchantCategory(root.enchantItemId)
         const picks = root.hotbar.selectEnchantsPreview(cat, offered, Math.abs(seed) | 0)
         const newEnch = [0, 0, 0, 0]
@@ -381,8 +394,9 @@ Item {
             const m = picks[i]
             newEnch[i] = ((m.id << 8) | m.level)
         }
-        InventoryOps.writeSlot(root, "enchant", 0, root.enchantItemId, 1,
-                               root.enchantDur[0] || 0, newEnch)
+        const outId = (cat === 8) ? root.enchantedBookId : root.enchantItemId   // BookItem=8 → 附魔书
+        InventoryOps.writeSlot(root, "enchant", 0, outId, 1,
+                               (cat === 8) ? 0 : (root.enchantDur[0] || 0), newEnch)
         root.justEnchanted = true
         enchantFlashTimer.restart()
     }
@@ -598,7 +612,7 @@ Item {
                 Text {
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 0
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "左槽放工具 / 武器 · 右槽放青金石（Shift+左键快速放入） · 书架解锁更高档 · 档位等级消耗随书架升"
+                    text: "左槽放工具 / 武器 / 书 · 右槽放青金石（Shift+左键快速放入） · 书架解锁更高档 · 书附魔后成附魔书"
                     color: "#aa9888"; font.pixelSize: 10
                 }
 

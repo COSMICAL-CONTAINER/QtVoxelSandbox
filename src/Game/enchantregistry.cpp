@@ -1,42 +1,58 @@
 #include "enchantregistry.h"
 
+#include "recipe.h" // t615 RecipeRegistry::BookId（categoryForItem 书载体判定；同层 Game，向下依赖 Core）
+
 #include <algorithm> // std::clamp / std::min / std::max
 #include <vector>
 
 // 单一附魔数据表（spec t475）。改附魔属性（maxLevel / weight / 互斥组 / 名）只改这里，全工程生效。
 // 表行索引 == enchantId（连续 1..14；第 0 项是 NoEnchant 占位，使索引与枚举值 1:1 对齐）。
 //
-// 互斥组（exclusiveGroup，机制等价 MC「同组附魔不可共存」）：
+// 互斥组（exclusiveGroup，机制等价 MC「同组附魔不可共存」；t615 按 dev-plan §3 表全接线）：
 //   - 组 1：锐锋 / 亡灵杀手 / 节肢克星（三种伤害类型附魔三选一；MC 1.0 sharpness/Smite/BaneOfArthropods 互斥）。
+//   - 组 2：效率 / 精准采集 / 时运（采集系三选一；MC 1.0 efficiency/silk-touch/fortune 互斥——原表漏，t615 补）。
+//   - 组 3：保护 / 火焰保护 / 摔落保护 / 弹射物保护（保护系四选一；MC 1.0 同件护甲只允许一种保护附魔——
+//     原表注「1.0 实际可共存」有误：MC 1.0 保护族同件互斥（Protection 与 Fire/Feather/Projectile Protection
+//     不可共存，t475 注释按「1.0 之后才加」理解错误），t615 按 dev-plan 定稿表补组 3）。
 //   - 组 0：无互斥（可与其他任意附魔共存）。
-//   注：MC 1.0 保护族（protection/fire-protection/feather-fall/projectile-protection）在 1.0 实际可共存
-//   （1.0 之后才加单件限制），故本表保护族互斥组 = 0（可共存），仅伤害族互斥。
+//
+// 适用域（appliesToMask，t615 按 dev-plan §3 表细化）：
+//   - 锐锋族（1/2/3）= Weapon|Tool（斧亦可，机制等价 MC 斧附武器系）|BookItem（书载体全池）。
+//   - 击退（4）/ 燃焰（5）= Weapon|BookItem（仅剑）。
+//   - 效率（6）= Tool|BookItem；精准采集（7）= Tool|BookItem；时运（8）= Tool|BookItem。
+//     （镐/铲/斧/锄的「精准采集不含锄、时运不含锄/斧」差异走 isApplicableForItem 逐物品精判——mask 是
+//     附魔台大类池门，isApplicableForItem 是铁砧逐条适用权威。）
+//   - 耐久（9）= Weapon|Tool|Armor|BookItem（全适用，机制等价 MC unbreaking 全装备通用）。
+//   - 保护（10）/ 火焰保护（11）/ 弹射物保护（13）= Armor|BookItem（全护甲）。
+//   - 摔落保护（12）= Armor|BookItem（**仅靴**，走 isApplicableForItem 精判）。
+//   - 水上亲和（14）= Armor|BookItem（**仅头盔**，走 isApplicableForItem 精判）。
+//   书（BookItem 位）：附魔台附书时全 14 附魔候选（机制等价 MC「书 = 全池」）。
 //
 // 权重（weight，机制等价 MC 附魔 rarity）：越大越常被选中。MC 1.0 经典值：锐锋/效率/保护 = 10（常见），
 //   精准采集 = 1（极稀有）、时运/燃焰/摔落保护/水上亲和 = 2、其余 = 5。
 namespace {
 constexpr EnchantRegistry::EnchantDef kEnchants[int(EnchantRegistry::EnchantCount)] = {
     /* 0 NoEnchant      */ { 0, 0, 0, 0, 0, "none",            "" },
-    // ── 武器（剑；appliesToMask = Weapon）──
-    /* 1 Sharpness      */ { EnchantRegistry::Sharpness,     EnchantRegistry::Weapon, 5, 10, 1, "sharpness",     "\xe9\x94\x90\xe9\x94\x8b" },       // 锐锋
-    /* 2 UndeadSlay     */ { EnchantRegistry::UndeadSlay,    EnchantRegistry::Weapon, 5,  5, 1, "undead_slay",   "\xe4\xba\xa1\xe7\x81\xb5\xe6\x9d\x80\xe6\x89\x8b" }, // 亡灵杀手
-    /* 3 ArthropodSlay  */ { EnchantRegistry::ArthropodSlay, EnchantRegistry::Weapon, 5,  5, 1, "arthropod_slay","\xe8\x8a\x82\xe8\x82\xa2\xe5\x85\x8b\xe6\x98\x9f" }, // 节肢克星
-    /* 4 Knockback      */ { EnchantRegistry::Knockback,     EnchantRegistry::Weapon, 2,  5, 0, "knockback",     "\xe5\x87\xbb\xe9\x80\x80" },       // 击退
-    /* 5 FireAspect     */ { EnchantRegistry::FireAspect,    EnchantRegistry::Weapon, 2,  2, 0, "fire_aspect",   "\xe7\x87\x83\xe7\x84\xb0" },       // 燃焰
-    // ── 工具（镐/锄/斧/铲；appliesToMask = Tool）──
-    /* 6 Efficiency     */ { EnchantRegistry::Efficiency,    EnchantRegistry::Tool,   5, 10, 0, "efficiency",    "\xe6\x95\x88\xe7\x8e\x87" },       // 效率
-    /* 7 SilkTouch      */ { EnchantRegistry::SilkTouch,     EnchantRegistry::Tool,   1,  1, 0, "silk_touch",    "\xe7\xb2\xbe\xe5\x87\x86\xe9\x87\x87\xe9\x9b\x86" }, // 精准采集
-    /* 8 Fortune        */ { EnchantRegistry::Fortune,       EnchantRegistry::Tool,   3,  2, 0, "fortune",       "\xe6\x97\xb6\xe8\xbf\x90" },       // 时运
-    // ── 通用（武器/工具/护甲；appliesToMask = Weapon|Tool|Armor）──
+    // ── 武器（剑 + 斧（锐锋族）；appliesToMask = Weapon|Tool|BookItem）──
+    /* 1 Sharpness      */ { EnchantRegistry::Sharpness,     EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::BookItem, 5, 10, 1, "sharpness",     "\xe9\x94\x90\xe9\x94\x8b" },       // 锐锋
+    /* 2 UndeadSlay     */ { EnchantRegistry::UndeadSlay,    EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::BookItem, 5,  5, 1, "undead_slay",   "\xe4\xba\xa1\xe7\x81\xb5\xe6\x9d\x80\xe6\x89\x8b" }, // 亡灵杀手
+    /* 3 ArthropodSlay  */ { EnchantRegistry::ArthropodSlay, EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::BookItem, 5,  5, 1, "arthropod_slay","\xe8\x8a\x82\xe8\x82\xa2\xe5\x85\x8b\xe6\x98\x9f" }, // 节肢克星
+    /* 4 Knockback      */ { EnchantRegistry::Knockback,     EnchantRegistry::Weapon | EnchantRegistry::BookItem, 2,  5, 0, "knockback",     "\xe5\x87\xbb\xe9\x80\x80" },       // 击退
+    /* 5 FireAspect     */ { EnchantRegistry::FireAspect,    EnchantRegistry::Weapon | EnchantRegistry::BookItem, 2,  2, 0, "fire_aspect",   "\xe7\x87\x83\xe7\x84\xb0" },       // 燃焰
+    // ── 工具（镐/锄/斧/铲；appliesToMask = Tool|BookItem）──
+    /* 6 Efficiency     */ { EnchantRegistry::Efficiency,    EnchantRegistry::Tool | EnchantRegistry::BookItem,   5, 10, 2, "efficiency",    "\xe6\x95\x88\xe7\x8e\x87" },       // 效率（t615 组 2 采集系互斥）
+    /* 7 SilkTouch      */ { EnchantRegistry::SilkTouch,     EnchantRegistry::Tool | EnchantRegistry::BookItem,   1,  1, 2, "silk_touch",    "\xe7\xb2\xbe\xe5\x87\x86\xe9\x87\x87\xe9\x9b\x86" }, // 精准采集（组 2）
+    /* 8 Fortune        */ { EnchantRegistry::Fortune,       EnchantRegistry::Tool | EnchantRegistry::BookItem,   3,  2, 2, "fortune",       "\xe6\x97\xb6\xe8\xbf\x90" },       // 时运（组 2）
+    // ── 通用（武器/工具/护甲/书；appliesToMask = Weapon|Tool|Armor|BookItem）──
     /* 9 Unbreaking     */ { EnchantRegistry::Unbreaking,
-                             EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::Armor,
+                             EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::Armor | EnchantRegistry::BookItem,
                              3, 5, 0, "unbreaking",    "\xe8\x80\x90\xe4\xb9\x85" },       // 耐久
-    // ── 护甲（头盔/胸甲/护腿/靴子；appliesToMask = Armor）──
-    /*10 Protection     */ { EnchantRegistry::Protection,     EnchantRegistry::Armor, 4, 10, 0, "protection",    "\xe4\xbf\x9d\xe6\x8a\xa4" },       // 保护
-    /*11 FireProtection */ { EnchantRegistry::FireProtection, EnchantRegistry::Armor, 4,  5, 0, "fire_protection","\xe7\x81\xab\xe7\x84\xb0\xe4\xbf\x9d\xe6\x8a\xa4" }, // 火焰保护
-    /*12 FeatherFall    */ { EnchantRegistry::FeatherFall,    EnchantRegistry::Armor, 4,  2, 0, "feather_fall",  "\xe6\x91\x94\xe8\x90\xbd\xe4\xbf\x9d\xe6\x8a\xa4" }, // 摔落保护
-    /*13 ProjectileProt */ { EnchantRegistry::ProjectileProt, EnchantRegistry::Armor, 4,  5, 0, "projectile_prot","\xe5\xbc\xb9\xe5\xb0\x84\xe7\x89\xa9\xe4\xbf\x9d\xe6\x8a\xa4" }, // 弹射物保护
-    /*14 AquaAffinity   */ { EnchantRegistry::AquaAffinity,   EnchantRegistry::Armor, 1,  2, 0, "aqua_affinity", "\xe6\xb0\xb4\xe4\xb8\x8a\xe4\xba\xb2\xe5\x92\x8c" }, // 水上亲和
+    // ── 护甲（appliesToMask = Armor|BookItem；摔落保护仅靴 / 水上亲和仅头盔走 isApplicableForItem 精判）──
+    /*10 Protection     */ { EnchantRegistry::Protection,     EnchantRegistry::Armor | EnchantRegistry::BookItem, 4, 10, 3, "protection",    "\xe4\xbf\x9d\xe6\x8a\xa4" },       // 保护（t615 组 3 保护系互斥）
+    /*11 FireProtection */ { EnchantRegistry::FireProtection, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  5, 3, "fire_protection","\xe7\x81\xab\xe7\x84\xb0\xe4\xbf\x9d\xe6\x8a\xa4" }, // 火焰保护（组 3）
+    /*12 FeatherFall    */ { EnchantRegistry::FeatherFall,    EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  2, 3, "feather_fall",  "\xe6\x91\x94\xe8\x90\xbd\xe4\xbf\x9d\xe6\x8a\xa4" }, // 摔落保护（组 3；仅靴）
+    /*13 ProjectileProt */ { EnchantRegistry::ProjectileProt, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  5, 3, "projectile_prot","\xe5\xbc\xb9\xe5\xb0\x84\xe7\x89\xa9\xe4\xbf\x9d\xe6\x8a\xa4" }, // 弹射物保护（组 3）
+    /*14 AquaAffinity   */ { EnchantRegistry::AquaAffinity,   EnchantRegistry::Armor | EnchantRegistry::BookItem, 1,  2, 0, "aqua_affinity", "\xe6\xb0\xb4\xe4\xb8\x8a\xe4\xba\xb2\xe5\x92\x8c" }, // 水上亲和（仅头盔）
 };
 
 // 编译期表大小守卫：EnchantCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -106,7 +122,69 @@ int EnchantRegistry::categoryForItem(int itemId)
             || t->type == int(BlockRegistry::Axe) || t->type == int(BlockRegistry::Shovel)) return Tool;
         return None; // Bow / Shears / FishingRod
     }
+    // t615 书（BookId=0x238）→ BookItem：附魔台附书载体（全池随机 → 产附魔书 EnchantedBookId）。
+    //   注：附魔书物品（EnchantedBookId=0x227）**不**返回 BookItem（书已附魔不可再附，itemReady 域外）。
+    if (itemId == RecipeRegistry::BookId) return BookItem;
     return None; // 方块段 / 材料段 / 越界：不可附魔
+}
+
+// t615 附魔是否适用**具体物品**（铁砧敲附魔书的逐条适用过滤权威；dev-plan §3 表逐条核对）。
+//   区别于 isApplicable(id, catMask)（大类门）：本方法对「同大类内的工具类型 / 护甲部位」精判：
+//   - 锐锋族（1/2/3）：剑 + 斧（appliesToMask 已含 Weapon|Tool，天然通过；本方法对锄/铲显式拒）。
+//   - 击退（4）/燃焰（5）：仅剑（mask 已限 Weapon；斧落 mask 判定即拒）。
+//   - 精准采集（7）：镐/铲/斧（mask=Tool 含锄 → 此处锄拒）；时运（8）：镐/铲（锄/斧拒）。
+//   - 摔落保护（12）：仅靴（mask=Armor 含四部位 → 此处非靴拒）；水上亲和（14）：仅头盔（非头盔拒）。
+//   - 其余（效率全工具 / 耐久全适用 / 保护三族全护甲）：mask 判定即正确。
+bool EnchantRegistry::isApplicableForItem(int enchantId, int itemId)
+{
+    const EnchantDef *e = defAt(enchantId);
+    if (!e) return false;
+    // 大类先过（None 类物品恒不适用；书载体 mask 已含 BookItem → 天然通过）。
+    if ((e->appliesToMask & categoryForItem(itemId)) == 0) return false;
+    // 同大类内的精判（工具类型 / 护甲部位）。
+    if (const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId)) {
+        const bool isSword = (t->type == int(BlockRegistry::Sword));
+        const bool isAxe = (t->type == int(BlockRegistry::Axe));
+        const bool isPick = (t->type == int(BlockRegistry::Pickaxe));
+        const bool isShovel = (t->type == int(BlockRegistry::Shovel));
+        switch (enchantId) {
+        case Sharpness: case UndeadSlay: case ArthropodSlay:
+            return isSword || isAxe;   // 锐锋族：剑 + 斧（锄 / 铲 / 弓拒）
+        case Knockback: case FireAspect:
+            return isSword;            // 击退 / 燃焰：仅剑
+        case SilkTouch:
+            return isPick || isShovel || isAxe; // 精准采集：镐/铲/斧（锄拒）
+        case Fortune:
+            return isPick || isShovel; // 时运：镐/铲（锄 / 斧拒）
+        default:
+            break; // 效率（全工具）/ 耐久（全适用）等：mask 已过 → 适用
+        }
+        return true;
+    }
+    if (ArmorRegistry::isArmor(itemId)) {
+        const int piece = ArmorRegistry::piece(itemId);
+        switch (enchantId) {
+        case FeatherFall:
+            return piece == ArmorRegistry::Boots;   // 摔落保护：仅靴
+        case AquaAffinity:
+            return piece == ArmorRegistry::Helmet;  // 水上亲和：仅头盔
+        default:
+            break; // 保护 / 火焰保护 / 弹射物保护：全护甲
+        }
+        return true;
+    }
+    // 书载体（BookItem）或其它：mask 已过 → 适用（附魔书上任何附魔对「书」都合法——书是载体非穿戴物）。
+    return true;
+}
+
+// t615 冲突组查询：同组（exclusiveGroup != 0 且相等）即互斥；同 id 不算冲突（等级合并走铁砧 Lc==Lb→+1 路径）。
+bool EnchantRegistry::conflictsWith(int enchantId, int otherEnchantId)
+{
+    if (enchantId == otherEnchantId) return false;
+    const EnchantDef *a = defAt(enchantId);
+    const EnchantDef *b = defAt(otherEnchantId);
+    if (!a || !b) return false;
+    return a->exclusiveGroup != 0 && a->exclusiveGroup == b->exclusiveGroup;
 }
 
 // 附魔选择（机制等价 MC 1.0 附魔台加权随机 + offered-level 量级）。纯函数。

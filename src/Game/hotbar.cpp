@@ -757,7 +757,7 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::RedstoneId)      return QStringLiteral("红石粉"); // 地牢战利品（机制等价 MC 1.0 redstone dust）
         if (blockId == RecipeRegistry::SaddleId)        return QStringLiteral("马鞍");   // 地牢稀有战利品（机制等价 MC 1.0 saddle）
         if (blockId == RecipeRegistry::NameTagId)       return QStringLiteral("命名牌"); // 地牢稀有战利品（机制等价 MC name tag）
-        if (blockId == RecipeRegistry::EnchantedBookId) return QStringLiteral("附魔书"); // 地牢极稀有战利品（占位，无真附魔）
+        if (blockId == RecipeRegistry::EnchantedBookId) return QStringLiteral("附魔书"); // t615 真附魔书：附魔台附书产 + 地牢战利品；enchants 元数据携带附魔列表
         // t398 鸡相关材料（机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉 + 周期下蛋；零 MC 专名 §9）。
         if (blockId == RecipeRegistry::FeatherId)         return QStringLiteral("羽毛");     // 杀鸡掉落
         if (blockId == RecipeRegistry::RawChickenId)      return QStringLiteral("生鸡肉");   // 杀鸡掉落
@@ -1164,6 +1164,10 @@ int Hotbar::maxStackSize(int id) const
     //   才在此分流。与 isMaterial 不冲突（MaterialIcon 仍画桶图标）。
     if (id == RecipeRegistry::BucketEmptyId || id == RecipeRegistry::WaterBucketId
         || id == RecipeRegistry::LavaBucketId) return 1;
+    // t615 附魔书（EnchantedBookId=0x227）：**不可堆叠**（maxStack=1，机制等价 MC 1.0 enchanted book——
+    //   每本携带独立附魔列表（enchants 元数据），两本内容不同不可叠；铁砧「两本合并」走 activeOp=combine
+    //   而非堆叠）。须在通用材料段判定**之前**特判（否则落 64 → 两本不同附魔的书叠一槽会丢一本的附魔）。
+    if (id == RecipeRegistry::EnchantedBookId) return 1;
     // t507 蘑菇汤（MushroomStewId，材料段 0x23C）：不可堆叠（机制等价 MC 1.0 蘑菇汤 maxStack 1 —— 碗装液体
     //   食物不可叠；同铁桶族）。须在通用材料段判定**之前**特判（否则落 64）。食用后返空碗（finishEating 特判）。
     if (id == RecipeRegistry::MushroomStewId) return 1;
@@ -1477,6 +1481,17 @@ QString Hotbar::enchantLevelText(int level) const
 QVariantList Hotbar::selectEnchantsPreview(int category, int offeredLevel, int seed) const
 {
     return EnchantRegistry::selectEnchants(category, offeredLevel, seed);
+}
+
+// t615 附魔适用 / 冲突精判（透传 EnchantRegistry；铁砧敲附魔书逐条过滤，详见 .h 注释）。
+bool Hotbar::enchantApplicableTo(int enchantId, int itemId) const
+{
+    return EnchantRegistry::isApplicableForItem(enchantId, itemId);
+}
+
+bool Hotbar::enchantConflictsWith(int enchantIdA, int enchantIdB) const
+{
+    return EnchantRegistry::conflictsWith(enchantIdA, enchantIdB);
 }
 
 // t590 附魔列表文本（tooltip 显示「物品有什么附魔」）：输入 4 槽 packed int（同 ItemStack.enchants[4] 布局，

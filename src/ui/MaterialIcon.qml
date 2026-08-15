@@ -1264,8 +1264,8 @@ Item {
                 R(8, 14, 6, 1, paperDark)
                 R(8, 16, 7, 1, paperDark)
             }
-            // 附魔书占位（0x227）：一本合上的书 + 紫色附魔光晕（封面 + 书页 + 几道紫色光纹 / 闪点）。
-            //   占位无真附魔（spec「enchanted-book-placeholder」）—— 仅图标表「带附魔光泽的书」。
+            // t615 附魔书（0x227）：一本合上的书 + 紫色附魔光晕（封面 + 书页 + 几道紫色光纹 / 闪点）。
+            //   t615 起为真附魔书（附魔台附书产 + 地牢战利品；enchants 元数据携带附魔列表，tooltip 紫字列出）。
             //   配色：cover #6a3a8a（封面紫）/ coverLight #9a5ab8（受光）/ page #e8e0c8（书页米黄）/ glow #c060e0（附魔紫光）/ spark #ffa0ff（光闪点）。
             const drawEnchantedBook = () => {
                 const cover = "#6a3a8a", coverLight = "#9a5ab8", page = "#e8e0c8", glow = "#c060e0", spark = "#ffa0ff"
@@ -1595,7 +1595,7 @@ Item {
             case 0x224: drawRedstone();       break // t393 红石粉（地牢战利品）
             case 0x225: drawSaddle();         break // t393 马鞍（地牢稀有战利品）
             case 0x226: drawNameTag();        break // t393 命名牌（地牢稀有战利品）
-            case 0x227: drawEnchantedBook();  break // t393 附魔书占位（地牢极稀有战利品）
+            case 0x227: drawEnchantedBook();  break // t615 附魔书（附魔台附书产 / 地牢战利品；真附魔载体）
             case 0x228: drawFeather();        break // t398 羽毛（杀鸡掉落）
             case 0x229: drawRawChicken();     break // t398 生鸡肉（杀鸡掉落）
             case 0x22A: drawCookedChicken();  break // t398 熟鸡肉（鸡燃烧致死掉落）

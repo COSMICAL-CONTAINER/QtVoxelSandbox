@@ -518,7 +518,7 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x224, QStringLiteral("redstone.png")},        // 红石粉
         {0x225, QStringLiteral("saddle.png")},          // 马鞍
         {0x226, QStringLiteral("name_tag.png")},        // 命名牌
-        {0x227, QStringLiteral("enchanted_book.png")},  // 附魔书占位
+        {0x227, QStringLiteral("enchanted_book.png")},  // t615 附魔书（真附魔：附魔台附书产 / 地牢战利品；demo 包实测存在）
         {0x228, QStringLiteral("feather.png")},         // 羽毛
         {0x229, QStringLiteral("chicken.png")},         // 生鸡肉
         {0x22A, QStringLiteral("cooked_chicken.png")},  // 熟鸡肉
