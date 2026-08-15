@@ -3990,17 +3990,38 @@ void World::carveCanyon()
         ++sideCaves;
     }
 
-    // t376 (3) 单点高源瀑布点缀：取路径 ~1/3 处一格水源，高悬于峡心柱（其下全程峡谷空气）。t350 限流下
-    //   仅垂直下落成细瀑 + 落点 grounded 后水平蔓延 ≤kMaxFlowLevel 格 = 小水洼（点缀非泛滥）。span 太小
-    //   （无落差）则跳过。最后放置，避免被排水带 / 侧洞覆盖。
+    // t376 (3) 高源瀑布点缀（t601 重写为门控版）：原实现在路径 ~1/3 处峡心柱**无条件**高悬一格水源
+    //   （其下全程峡谷空气）→ 用户「峡谷生成中间莫名其妙的一格水源，竖直往下流」——孤立水源不邻接任何
+    //   真实水体，观感即 worldgen 瑕疵。t601 改门控：仅当候选格**水平邻格存在真实水体**（海平面水层 /
+    //   未被排水带排干的池水 —— 即「峡壁碰含水层才渗水」的自然语义）才置 Water；孤立内部格保持 Air。
+    //   峡谷路径跳过海域列（carveDisc 内 seaColumnHeight 守卫）+ 排水带已排干带内池水 → 现实里门控基本
+    //   不命中（孤立瀑布不再生成），但若未来峡谷贴近水层仍有真实渗水源（非无中生有）。
     int waterfallY = -1;
     if (!path.empty()) {
         const size_t wi = path.size() / 3;
         const CanyonPt &wp = path[wi];
         if (wp.span >= 6) { // 至少 6 格落差才有「瀑布」观感
             waterfallY = kFloor + (wp.span * 3) / 4; // 高位（距底 3/4 跨度），其下峡谷空气 → 细瀑
-            if (waterfallY < m_height && m_chunks.blockAt(wp.ix, waterfallY, wp.iz) == BlockRegistry::Air)
-                m_chunks.setBlock(wp.ix, waterfallY, wp.iz, BlockRegistry::Water); // 源（state 默认 0）
+            if (waterfallY < m_height && m_chunks.blockAt(wp.ix, waterfallY, wp.iz) == BlockRegistry::Air) {
+                // t601 门控：4 水平邻格里存在真实水体（Water）才允许置源；越界邻格视作无水。
+                static const int kDirs[4][2] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
+                bool adjacentWater = false;
+                for (const auto &d : kDirs) {
+                    const int nx = wp.ix + d[0];
+                    const int nz = wp.iz + d[1];
+                    if (nx < 0 || nx >= m_width || nz < 0 || nz >= m_depth) continue;
+                    if (m_chunks.blockAt(nx, waterfallY, nz) == BlockRegistry::Water) {
+                        adjacentWater = true;
+                        break;
+                    }
+                }
+                if (adjacentWater)
+                    m_chunks.setBlock(wp.ix, waterfallY, wp.iz, BlockRegistry::Water); // 源（state 默认 0）
+                else
+                    waterfallY = -1; // 孤立格：不置水（记 -1 供下方确定性日志核对）
+            } else {
+                waterfallY = -1;
+            }
         }
     }
 
