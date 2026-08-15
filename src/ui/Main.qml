@@ -883,8 +883,10 @@ Window {
         const st = panel.readSlot(group, index)
         if (!st || st.id === 0 || st.count <= 0) return           // 空槽 → 无操作
         const n = dropAll ? st.count : 1
+        // review rv3：写回透传实例耐久 / 附魔（st 由 panel.readSlot 读出，含 durability/enchants）——
+        //   -1 件路径若只传 (id, count) 会把工具 / 护甲槽清成「新实例」（耐久回满 / 附魔丢失）。
         if (dropAll || st.count <= 1) panel.writeSlot(group, index, 0, 0)            // 清空
-        else                          panel.writeSlot(group, index, st.id, st.count - 1) // -1 件
+        else                          panel.writeSlot(group, index, st.id, st.count - 1, st.durability, st.enchants) // -1 件（保真）
         player.dropItemAtFront(st.id, n)                          // 玩家前方生成实体（Game 层语义事件）
     }
 

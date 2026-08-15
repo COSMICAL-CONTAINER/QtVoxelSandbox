@@ -142,7 +142,9 @@ Item {
         if (group !== "enchant") return
         root.enchantSlots[index] = id
         root.enchantCounts[index] = count
-        root.enchantDur[index] = durability || 0
+        // review rv3：durability 缺省经 InventoryOps 归一为 -1（自动）；本地槽只存实例值（>0）或 0，
+        //   防 -1 残留进 enchantDur（returnEnchantToHotbar 的 `-1 || 0` 为真值会透传 -1 → addStack 视作新实例）。
+        root.enchantDur[index] = (durability > 0) ? durability : 0
         const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
         const arr = root.enchantEnch
         arr[index] = e.slice()
@@ -170,7 +172,10 @@ Item {
     function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
     function resolveRightClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch) }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
-    function writeSlot(group, index, id, count) { InventoryOps.writeSlot(root, group, index, id, count) }
+    // review rv3：薄包装签名补 durability / enchants 形参透传（对齐 AnvilUI）—— Main.qml dropFromHoveredSlot
+    //   （Q 丢弃）经此路径写槽，4 参签名会把算好的实例耐久 / 附魔截掉（清槽路径 dur 缺省 -1 还会在
+    //   localWriteSlot 写入残留 -1）。多收实参对 4 参调用点无害（undefined → InventoryOps 缺省语义）。
+    function writeSlot(group, index, id, count, durability, enchants) { InventoryOps.writeSlot(root, group, index, id, count, durability, enchants) }
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
     // t110：slotLeft 入口先查 window.shiftHeld → InventoryOps.slotShiftLeft（Shift+左键搬运 main↔hotbar）。

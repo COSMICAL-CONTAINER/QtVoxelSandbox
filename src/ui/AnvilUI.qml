@@ -139,7 +139,9 @@ Item {
         if (group !== "anvil") return
         root.anvilSlots[index] = id
         root.anvilCounts[index] = count
-        root.anvilDur[index] = durability || 0
+        // review rv3：durability 缺省经 InventoryOps 归一为 -1（自动）；本地槽只存实例值（>0）或 0，
+        //   防 -1 残留进 anvilDur（returnAnvilToHotbar 的 `-1 || 0` 为真值会透传 -1 → addStack 视作新实例）。
+        root.anvilDur[index] = (durability > 0) ? durability : 0
         const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
         const arr = root.anvilEnch
         arr[index] = e.slice()
