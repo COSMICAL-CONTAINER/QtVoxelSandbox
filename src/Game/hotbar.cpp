@@ -341,20 +341,16 @@ int Hotbar::toolType(int itemId) const
 QVariantList Hotbar::creativeTools() const
 {
     // 创造调色板工具（无限源：拾取时 heldCount=1，工具不可堆叠）。t264 完整工具集：5 类（镐 / 锄 / 斧 / 铲 / 剑）
-    //   × 3 档（木 / 石 / 铁）= 15 件，机制等价 MC 1.0 工具集。按「同类 3 档」分组排列，肉眼易辨。
-    //   t472：镐组追加钻石镐（tier 4，采掘 Obsidian 的唯一工具）—— 钻石档仅镐一类（钻石锄 / 斧 / 铲 / 剑留后续），
-    //   故只列在镐组 3 档之后（不另起一组），与「同类按 tier 排列」一致。
-    //   t557：金（tier 5）/ 铜（tier 6）工具五类全加 —— 同类 3 档后追加金 / 铜两档（钻石仅镐有，故铜列于金后）。
-    return {int(ToolRegistry::PickaxeWood),  int(ToolRegistry::PickaxeStone),  int(ToolRegistry::PickaxeIron), int(ToolRegistry::PickaxeDiamond),
-            int(ToolRegistry::GoldPickaxe),  int(ToolRegistry::CopperPickaxe),
-            int(ToolRegistry::HoeWood),      int(ToolRegistry::HoeStone),      int(ToolRegistry::HoeIron),
-            int(ToolRegistry::GoldHoe),      int(ToolRegistry::CopperHoe),
-            int(ToolRegistry::AxeWood),      int(ToolRegistry::AxeStone),      int(ToolRegistry::AxeIron),
-            int(ToolRegistry::GoldAxe),      int(ToolRegistry::CopperAxe),
-            int(ToolRegistry::ShovelWood),   int(ToolRegistry::ShovelStone),   int(ToolRegistry::ShovelIron),
-            int(ToolRegistry::GoldShovel),   int(ToolRegistry::CopperShovel),
-            int(ToolRegistry::SwordWood),    int(ToolRegistry::SwordStone),    int(ToolRegistry::SwordIron),
-            int(ToolRegistry::GoldSword),    int(ToolRegistry::CopperSword),
+    //   × 6 档（木 / 石 / 铜 / 铁 / 金 / 钻石），机制等价 MC 1.0 工具集。按「同类分档」分组排列，肉眼易辨。
+    //   t587 展示序修正（用户「等级依次是 木头→石头→铜→铁→金→钻石；铜现在排在钻石和金的后面」）：铜
+    //   的挖掘定位是「介石 / 铁之间」（harvestLevel=2 同石级），展示位应紧跟石头；tier 数值（铜 6）只驱动
+    //   speedMul / 配色（内部记账），与展示序解耦 —— 与铁砧修复材料 / 合成链的「石→铜→铁」递进一致。
+    //   注：钻石档现仅镐（其余四件待补，t589），故各组钻石位只列镐组；弓 / 剪刀 / 钓竿三功能件仍排末尾。
+    return {int(ToolRegistry::PickaxeWood),  int(ToolRegistry::PickaxeStone),  int(ToolRegistry::CopperPickaxe), int(ToolRegistry::PickaxeIron), int(ToolRegistry::GoldPickaxe), int(ToolRegistry::PickaxeDiamond),
+            int(ToolRegistry::HoeWood),      int(ToolRegistry::HoeStone),      int(ToolRegistry::CopperHoe),     int(ToolRegistry::HoeIron),     int(ToolRegistry::GoldHoe),
+            int(ToolRegistry::AxeWood),      int(ToolRegistry::AxeStone),      int(ToolRegistry::CopperAxe),     int(ToolRegistry::AxeIron),     int(ToolRegistry::GoldAxe),
+            int(ToolRegistry::ShovelWood),   int(ToolRegistry::ShovelStone),   int(ToolRegistry::CopperShovel),  int(ToolRegistry::ShovelIron),  int(ToolRegistry::GoldShovel),
+            int(ToolRegistry::SwordWood),    int(ToolRegistry::SwordStone),    int(ToolRegistry::CopperSword),   int(ToolRegistry::SwordIron),   int(ToolRegistry::GoldSword),
             // t304 弓（远程武器）：归工具段（maxStack=1，有耐久 384），故入 creativeTools（非 creativeMaterials）。
             //   拾取即满耐庋新弓；创造射箭不消耗耐久 / 箭（但仍需背包有箭才射得出，spec「需箭在背包」）。
             int(ToolRegistry::Bow),
