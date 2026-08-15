@@ -3603,6 +3603,10 @@ void PlayerController::pickupScan()
 //   方块」的箭，玩家 AABB 中心 3D 距 ≤ kPickupDist → addToAny(ArrowId,1) 全入则销毁嵌入箭 + emit itemPickedUp
 //   （拾取音 / 手弹跳，复用掉落物拾取语义事件）。骷髅箭（arrowFromPlayer=false）不拾（防刷箭，spec「SKELETON
 //   箭不可拾取」）；飞行中箭（未嵌入）不拾（免误拾）。门控同 pickupScan（无 entityManager/hotbar / 死亡 / 观察者 → 早退）。
+// t604 拾取延迟：箭自 spawn 起 kArrowPickupDelayMs 内**不可拾**（机制等价 MC 1.0 箭拾取延迟）。根因：贴脸 /
+//   近距射墙时箭嵌入点就在拾取半径（1.5 格）内 → 下一帧 scan 即 +1 拾回 → 「射出扣 1、瞬间又回 1」，用户观感
+//   即「不是射出就消耗」（实际扣减在射出瞬间 endBowDraw，被秒拾回吞掉视觉反馈）。加延迟后近距射出的箭在墙上
+//   停 ~1s 才可走近拾回，消耗语义可感知；远距射出本就飞出拾取半径，不受影响。
 void PlayerController::arrowPickupScan()
 {
     if (!m_entityManager || !m_hotbar) return;
@@ -3615,6 +3619,7 @@ void PlayerController::arrowPickupScan()
         if (m_entityManager->kindAt(i) != int(EntityManager::Arrow)) continue; // 仅箭
         if (!m_entityManager->isArrowStuckAt(i)) continue;             // 仅嵌入箭（飞行中不拾）
         if (!m_entityManager->arrowFromPlayerAt(i)) continue;          // 仅玩家箭（骷髅箭防刷不拾）
+        if (m_entityManager->arrowAgeMsAt(i) < kArrowPickupDelayMs) continue; // t604 拾取延迟（刚射出的不秒拾回）
         const QVector3D d = m_entityManager->posAt(i) - center;
         if (d.lengthSquared() > r2) continue;                          // 超阈值 → 跳过
         const int leftover = m_hotbar->addToAny(int(RecipeRegistry::ArrowId), 1);

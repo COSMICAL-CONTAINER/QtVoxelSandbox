@@ -879,6 +879,15 @@ bool EntityManager::arrowFromPlayerAt(int i) const
     return e.kind == Arrow && e.arrowFromPlayer;
 }
 
+// t604 箭已存活墙钟 ms（spawn 起算）。非 Arrow / 非活体 / 越界 → 0（调用方视 0 = 不可拾 / 刚生成）。
+qint64 EntityManager::arrowAgeMsAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    const Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Arrow) return 0;
+    return m_clock.elapsed() - e.arrowSpawnMs;
+}
+
 // t323 释放槽位（PlayerController 拾取嵌入箭全入背包后销毁箭；同 ItemEntityManager.removeAt 拾取销毁语义）。
 //   委托 releaseSlot（标空槽 + 入 free list，保 Repeater count 单调不降，lessons-learned t256）。
 void EntityManager::removeEntityAt(int i)

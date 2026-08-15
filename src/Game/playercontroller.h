@@ -1292,6 +1292,10 @@ private:
     static constexpr float kDeg = 0.017453292519943295f;
     static constexpr float kReach = 5.0f;      // 射线选体射程（格）
     static constexpr float kPickupDist = 1.5f; // 拾取距离阈值（格；玩家 AABB 中心起算，spec ~1.2 量级）
+    // t604 嵌入箭拾取延迟（ms；机制等价 MC 1.0 箭拾取延迟）：箭自 spawn 起此窗口内不可拾 —— 防近距射墙的箭
+    //   嵌入点就在拾取半径内被下一帧 scan 秒拾回，吞掉「射出即消耗」的视觉反馈（扣 1 又瞬间 +1）。取 1000ms：
+    //   足够玩家看清「箭留在墙上」的消耗语义，又不影响事后走近回收。
+    static constexpr qint64 kArrowPickupDelayMs = 1000;
     // t265 玩家攻击伤害改走 ToolRegistry::attackDamage（手持物驱动）。机制等价 MC 1.0：
     //   - 剑（type=Sword）：木 4 / 石 5 / 铁 6 HP（每档 +1）；
     //   - 空手 / 镐 / 斧 / 铲 / 锄：ToolRegistry::kFistDamage=1 HP（MC 1.0 徒手）。

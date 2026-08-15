@@ -456,6 +456,9 @@ public:
     //   removeEntityAt = 释放槽位（拾取全入后销毁嵌入箭；同 ItemEntityManager.removeAt 拾取销毁语义）。
     Q_INVOKABLE bool isArrowStuckAt(int i) const;
     Q_INVOKABLE bool arrowFromPlayerAt(int i) const;
+    // t604 箭已存活墙钟毫秒（spawn 起算，读 arrowSpawnMs 反推；不依赖 dt 累加 → 低帧率也精确）。
+    //   PlayerController::arrowPickupScan 用它做「拾取延迟」门控（非 Arrow / 越界 → 0 = 视作不可拾）。
+    Q_INVOKABLE qint64 arrowAgeMsAt(int i) const;
     Q_INVOKABLE void removeEntityAt(int i);
     // t284 Stalker 蓄力膨胀进度（0..1）：fuseTimer>0（正在蓄力）时返 clamp(fuseTimer/kFuseTime,0,1)，供 QML
     //   delegate 据 it 对 Model 做 scale（1+inflate·0.5）+ baseColor 蓄力发白（机制等价 MC 苦力怕近距蓄力膨胀
