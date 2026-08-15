@@ -27,8 +27,10 @@
 //   - revision（int，任一发射器任一槽写入自增；NOTIFY=dispenserChanged。DispenserUI delegate 触碰 revision 取最新栈值）
 //   - slotIdAt/slotCountAt(x,y,z,index)：某发射器某槽栈数据（id=0=空；越界 / 无此发射器返 0）
 //   - setSlot(x,y,z,index,id,count)：直接写某发射器某槽（DispenserUI 放置 / 互换 / 拖拽均分写回用）
+//   - hasDispenser(x,y,z)：查询有无条目（含全空条目；t607 玩家发射器身份判定）
+//   - ensureDispenser(x,y,z)：确保有条目（玩家放置时注册；已有则 no-op）
 //   - clearDispenser(x,y,z)：移除某发射器条目（破块时 Main.qml.onBlockBroken 调，清孤儿内容）
-//   - allDispensers()：落盘用 QVariantList（Main.qml 传 worldStore 落盘）
+//   - allDispensers()：落盘用 QVariantList（Main.qml 传 worldStore 落盘；全空条目也落——身份语义）
 //   - loadAll(QVariantList)：整体替换内存（Main.qml.enterWorld 调，清旧世界残留 + 填本世界发射器）
 //
 // §4 法律 + §9：零 MC 专有名词（类名 / 字串「发射器」「Dispenser」为通用描述词）。
@@ -52,15 +54,22 @@ public:
     // 某发射器某槽栈数据（id=0=空；index 越界 / 无此发射器条目 → 0）。
     Q_INVOKABLE int slotIdAt(int x, int y, int z, int index) const;
     Q_INVOKABLE int slotCountAt(int x, int y, int z, int index) const;
-    // 直接写某发射器某槽（index 范围校验；id<=0 或 count<=0 → 清空该槽）。自动建发射器条目。
+    // 直接写某发射器某槽（index 范围校验；id<=0 或 count<=0 → 清空该槽。t607：count<=0 时 id 一并归 0——
+    //   count 归一在先，破「最后 1 件扣成 0 存 {id>0,count=0} 幽灵栈」bug）。自动建发射器条目。
     Q_INVOKABLE void setSlot(int x, int y, int z, int index, int id, int count);
+    // t607 查询某坐标有无发射器条目（含 9 槽全空的条目）。身份语义：有条目 = 玩家库存发射器（放置注册 /
+    //   UI 写入自建 / 存档加载）→ 库存空踩板无动作；无条目 = 神殿陷阱（worldgen 不写 store）→ fallback 默认箭。
+    Q_INVOKABLE bool hasDispenser(int x, int y, int z) const;
+    // t607 确保某坐标有发射器条目（无则建空 9 槽 + bump revision；已有则 no-op）。玩家放置发射器时
+    //   Main.qml.onBlockPlaced 调（id==107 分支）。
+    Q_INVOKABLE void ensureDispenser(int x, int y, int z);
     // 移除某发射器条目（破块清孤儿；不存在则 no-op）。spec「破发射器掉内容」由 Main.qml.onBlockBroken 先
     //   spawnItem 掉落 9 槽内容、再调本方法清条目（机制等价 MC 破发射器掉落内容）。
     Q_INVOKABLE void clearDispenser(int x, int y, int z);
     // 清空全部发射器（跨世界切换时 Main.qml.enterWorld 经 loadAll 间接调；亦可直调）。空 → no-op（不无故发信号）。
     Q_INVOKABLE void clearAll();
-    // 收集所有「含 ≥1 非空槽」的发射器为 QVariantList（每项 {x,y,z,slots:[{id,count}×9]}），供 Main.qml 传
-    //   worldStore 落盘。全空发射器跳过（落盘省行；加载后缺失条目 = 空 9 槽，行为等价）。
+    // 收集所有发射器条目（含全空条目——t607：条目存在与否是身份语义，清空的玩家发射器重载后不得退回神殿
+    //   fallback 射箭）为 QVariantList（每项 {x,y,z,slots:[{id,count}×9]}），供 Main.qml 传 worldStore 落盘。
     Q_INVOKABLE QVariantList allDispensers() const;
     // 用存档 QVariantList（同 allDispensers 形状）整体替换内存内容（先清空再填充；单次 emit dispenserChanged）。
     //   Main.qml.enterWorld 调：dispenserStore.loadAll(worldStore.loadDispensers()) —— 替换语义即「清旧世界残留 +

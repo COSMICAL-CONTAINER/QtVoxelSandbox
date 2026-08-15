@@ -3719,11 +3719,15 @@ void PlayerController::scanDispenserTraps(float dt)
                 if (m_dispenserCooldowns.contains(key)) continue; // 该发射器冷却中 → 跳过
                 // 发射方向 = 发射器 → 压力板（玩家所在侧）水平单位向量。
                 const QVector3D dir(float(d[0]), 0.0f, float(d[1]));
-                // t579：有 per-block 库存 → 按内容物分派 + 扣库存；分派失败（库存空）→ 神殿陷阱 fallback 默认箭。
+                // t579：有 per-block 库存 → 按内容物分派 + 扣库存。**t607 修身份判定**：有 store 条目
+                //   （hasDispenser，含全空）= 玩家库存发射器（放置注册 / UI 写入自建 / 存档加载）——库存空
+                //   （含最后一个投掷物用完清零）踩板**无动作**（陷阱解除；旧版空了还 fallback 射箭）；
+                //   无条目 = 神殿陷阱发射器（worldgen 不写 store）→ 保持旧行为 fallback 默认箭。
+                const bool tracked = m_dispenserStore && m_dispenserStore->hasDispenser(dx, feetY, dz);
                 bool fired = false;
-                if (m_dispenserStore)
+                if (tracked)
                     fired = dispenseFromDispenser(dx, feetY, dz, dir);
-                if (!fired) {
+                if (!fired && !tracked) {
                     // 神殿陷阱路径（无库存）：默认射箭。从发射器格中心 + 朝压力板方向前移 0.5（防贴墙 spawn 入墙
                     //   即被 tick 判方块命中，同 fireArrow），水平速度朝压力板方向（= 玩家所在），Y 取发射器格中心高
                     //   （feetY+0.5 → 命中玩家下半身 AABB）。vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中玩家）。
@@ -3797,7 +3801,8 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   ItemEntityManager.spawnItem，内置 0.5s 免拾窗 + t468 弹出水平速度抛物）。
         emit spawnItem(x, y, z, itemId, 1);
     }
-    // 扣 1 库存（count-1；归 0 → setSlot 空栈归一清槽）。分派表全覆盖（else 兜底）→ 恒扣。
+    // 扣 1 库存（count-1；归 0 → setSlot 空栈归一清槽——t607 修：count 归 0 时 id 一并归 0，旧版存
+    //   {id>0,count=0} 幽灵栈致「UI 图标残留 / 不再发射 / 拿出物品消失」）。分派表全覆盖（else 兜底）→ 恒扣。
     m_dispenserStore->setSlot(x, y, z, slot, itemId, count - 1);
     return true;
 }

@@ -49,13 +49,15 @@ int ChestStore::slotCountAt(int x, int y, int z, int index) const
 }
 
 // 直接写某箱子某槽。index 越界忽略；id<=0 或 count<=0 → 清空该槽（保持空栈不变式：id==0 ⟺ count==0）。
-// 自动建箱条目（首次写入某坐标即创建空 27 槽再写）。写入后 bump revision → ChestUI delegate 刷新。
+//   自动建箱条目（首次写入某坐标即创建空 27 槽再写）。写入后 bump revision → ChestUI delegate 刷新。
+//   **t607 同源修**：count 归一在先（count<=0 → id 一并归 0），防「最后 1 件扣成 0」类写回存幽灵栈
+//   {id>0,count=0}（同 DispenserStore 修法的防御性收口——当前 UI 写入端已自行归零，此处兜底层不变式）。
 void ChestStore::setSlot(int x, int y, int z, int index, int id, int count)
 {
     if (index < 0 || index >= kSlotsPerChest) return;
     // 空栈归一：id<=0 或 count<=0 → 清空（id=0, count=0）。
-    const int normId = (id > 0) ? id : 0;
-    const int normCount = (normId > 0 && count > 0) ? count : 0;
+    const int normCount = (id > 0 && count > 0) ? count : 0;
+    const int normId = (normCount > 0) ? id : 0;
     Chest &chest = m_chests[key(x, y, z)]; // 自动建条目（不存在则插入空 27 槽）
     chest[size_t(index)] = Slot{normId, normCount};
     ++m_revision;
@@ -132,7 +134,8 @@ void ChestStore::loadAll(const QVariantList &chests)
             const QVariantMap sm = slotList[i].toMap();
             const int id = sm.value(QStringLiteral("id")).toInt();
             const int count = sm.value(QStringLiteral("count")).toInt();
-            chest[size_t(i)] = Slot{ id > 0 ? id : 0, (id > 0 && count > 0) ? count : 0 };
+            const int normCount = (id > 0 && count > 0) ? count : 0; // t607：count 无效 → 整栈空（清洗幽灵栈）
+            chest[size_t(i)] = Slot{ normCount > 0 ? id : 0, normCount };
         }
         m_chests[key(x, y, z)] = chest;
     }

@@ -51,9 +51,11 @@ int FurnaceStore::slotCountAt(int x, int y, int z, int index) const
 void FurnaceStore::setSlot(int x, int y, int z, int index, int id, int count)
 {
     if (index < 0 || index >= kSlotsPerFurnace) return;
-    // 空栈归一：id<=0 或 count<=0 → 清空（id=0, count=0）。
-    const int normId = (id > 0) ? id : 0;
-    const int normCount = (normId > 0 && count > 0) ? count : 0;
+    // 空栈归一：id<=0 或 count<=0 → 清空（id=0, count=0）。**t607 同源修**：count 归一在先（count<=0 →
+    //   id 一并归 0），防「最后 1 件扣成 0」类写回存幽灵栈 {id>0,count=0}（同 DispenserStore 修法的
+    //   防御性收口——当前 FurnaceUI tick 写入端已自行归零 id，此处兜底层不变式）。
+    const int normCount = (id > 0 && count > 0) ? count : 0;
+    const int normId = (normCount > 0) ? id : 0;
     Furnace &f = m_furnaces[key(x, y, z)]; // 自动建条目（不存在则插入空熔炉）
     f.slotArr[size_t(index)] = Slot{normId, normCount};
     ++m_revision;
@@ -165,7 +167,8 @@ void FurnaceStore::loadAll(const QVariantList &furnaces)
             const QVariantMap sm = slotList[i].toMap();
             const int id = sm.value(QStringLiteral("id")).toInt();
             const int count = sm.value(QStringLiteral("count")).toInt();
-            f.slotArr[size_t(i)] = Slot{ id > 0 ? id : 0, (id > 0 && count > 0) ? count : 0 };
+            const int normCount = (id > 0 && count > 0) ? count : 0; // t607：count 无效 → 整栈空（清洗幽灵栈）
+            f.slotArr[size_t(i)] = Slot{ normCount > 0 ? id : 0, normCount };
         }
         f.burn = fm.value(QStringLiteral("burn")).toDouble();
         f.smelting = fm.value(QStringLiteral("smelt")).toDouble();

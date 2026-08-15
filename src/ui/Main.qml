@@ -7281,6 +7281,12 @@ Window {
                 hotbarVM.takeStack(hotbarVM.selectedSlot, 1)
             // t117：新放的沙若下方空气 → 自身塌落（玩家在半空放沙立即落）。
             if (id === 8) maybeTriggerFallingBlock(x, y, z)
+            // t607：玩家放置发射器 → dispenserStore.ensureDispenser 注册条目（区分「玩家库存发射器」vs
+            //   「神殿陷阱发射器」身份）：有条目（含全空）踩板按库存分派、库存空无动作（陷阱解除）；无条目
+            //   （worldgen 生成、不写 store）踩板 fallback 默认射箭（t579 神殿行为）。旧版玩家放置不注册 →
+            //   空发射器踩板当神殿陷阱射箭（无限箭源）。id=107=BlockRegistry::Dispenser（字面量+注释，
+            //   同 torch=13 / chest=22 / furnace=10 既有模式）。ensure 幂等（已有条目 no-op 不发信号）。
+            if (id === 107) dispenserStore.ensureDispenser(x, y, z)
         }
         // t445 世界侧产出的掉落物（仙人掌失撑 / 邻接方块即整柱坍落）→ 转发到 itemEntities.spawnItem 生成掉落实体。
         //   同 player.onSpawnItem / fallingBlockDropped 模式（单向事件流：World 低层发语义事件、呈现层只消费，

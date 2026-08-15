@@ -2147,9 +2147,10 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
 
 ### 🅴 发射器/投掷器/丢弃（1 大项 3 任务）
 
-**t607** 发射器最后一个投掷物清零 bug
+**t607** 发射器最后一个投掷物清零 bug ✅✅ 已完成
 - 用户：「发射器里只剩一个投掷物时发射后仍显示在里面、再踩压力板不发射；拿出来鸡蛋消失。」
 - 根因已定位：`DispenserStore::setSlot`（dispenserstore.cpp:53-63）空栈归一 `normCount = (normId>0 && count>0) ? count : 0` 逻辑对；问题在 UI 槽刷新链——setSlot 归 0 清槽后 emit dispenserChanged，但 UI 槽显示没刷新（revision 绑定漏）或**箭/鸡蛋分支发射后 setSlot 没走到**（早 return？读 dispenseFromDispenser 确认 EggId 分支后 setSlot 调用 ~3796 是否被跳过）。核对「发射后图标仍在 → 拿出消失」= store 内 count 已 0 但 UI 读的是旧值，取出时按旧 id/count 给物品又被归一清空。修：发射路径统一走 setSlot + UI 绑定 dispenserChanged 刷新。
+- 实修结论：真根因不在 UI（dispCoordRev 触碰 revision 绑定本来正确），在 **setSlot 空栈归一顺序**——旧版 `normId` 只看 id，发射器扣最后 1 件写回 (itemId>0, count-1=0) 存成**幽灵栈 {id>0,count=0}**，破「id==0⟺count==0」不变式：UI 按 id 判空 → 图标残留；发射按 count 判空 → 不再发射；点击拾取拿到 count=0 → 「鸡蛋消失」。修：归一以 count 为先（count<=0 → id 一并归 0），setSlot/loadAll 双处 + ChestStore/FurnaceStore 同源防御收口。另补**玩家发射器身份**：放置时 `ensureDispenser` 注册条目（Main.qml onBlockPlaced id==107）+ `hasDispenser` 门控 fallback——有条目（含空）踩板按库存、空了无动作（陷阱解除）；无条目（worldgen 神殿）才默认射箭（旧版玩家空发射器踩板当神殿陷阱无限射箭）；allDispensers 全空条目也落盘（防重载后退回神殿行为）。
 
 **t608** 发射器投掷物统一化（箭可拾取 + 投掷物打生物 + 发射口朝向）
 - 用户：「发射器射出的箭玩家应能拾取；投掷物都要能砸到生物互动（鸡蛋/雪球和手持一样：无伤害只击退）；方块等物品和投掷物不是同一个口出来的；发射器应规定朝向（像熔炉放下面朝玩家），我发射器后面放压力板它往前发射。」
