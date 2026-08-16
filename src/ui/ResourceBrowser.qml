@@ -610,10 +610,11 @@ Item {
                                         //   垂手旁挂 MobBowGeometry（静态持弓位 drawAmount=0，同 Main.qml t616 游戏内方案；
                                         //   木褐色 #6b4526 独立于骨白体色）。MobBowGeometry 是 Renderer 层已注册 QML 类型
                                         //   （import VoxelSandbox 解析），NoLighting 红线。
+                                        // review L13：z 由 -0.02 对齐游戏内合成位（肩枢+握把 z = -0.10）——旧值弓半埋臂内。
                                         Model {
                                             visible: root.selectedMobType === 5
                                             geometry: MobBowGeometry { drawAmount: 0 }
-                                            position: Qt.vector3d(0.24, -0.37, -0.02)
+                                            position: Qt.vector3d(0.24, -0.37, -0.10)
                                             materials: PrincipledMaterial {
                                                 lighting: PrincipledMaterial.NoLighting
                                                 baseColor: "#6b4526" // 木褐色（同 Main.qml 骨骼弓配色）
