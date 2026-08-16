@@ -3031,13 +3031,29 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积）。
             if (e.arrowLife <= 0.0f) remove = true;
 
-            // 方块命中（t323 嵌入而非移除）：新位置所在格 isSolid → 箭钉入射面（半嵌可见、定向飞行方向），
+            // 方块命中（t323 嵌入而非移除）：新位置所在格命中 → 箭钉入射面（半嵌可见、定向飞行方向），
             //   arrowStuck=true 冻结物理 + arrowLife 重置 kStuckArrowLifetime（~60s despawn）。vx/vy/vz 保留供
-            //   arrowYawAt/arrowPitchAt 定向（嵌入箭仍朝命中飞行方向）。火把 / 半砖等非 solid → 穿透（机制可接受）。
-            //   玩家箭嵌入后可拾（PlayerController::arrowPickupScan）；骷髅箭嵌入不拾（防刷，spec）。
+            //   arrowYawAt/arrowPitchAt 定向（嵌入箭仍朝命中飞行方向）。玩家箭嵌入后可拾
+            //   （PlayerController::arrowPickupScan）；骷髅箭嵌入不拾（防刷，spec）。
+            //   review M7：命中判据由「该格存在方块」（World::isSolid 语义=非 air —— 压力板 / 火把 / 水全算墙。
+            //   丛林神殿陷阱的压力板正对发射器口：箭 origin 在板格界面上、14 格/s 首 tick 穿入板格 0.23 →
+            //   isSolid 见板 → 箭嵌在出膛 0.2 格处，永远到不了玩家）改为「箭尖点实际落入该格某碰撞 sub-AABB
+            //   内」（world->collisionAABBsAt 点在盒内，与玩家碰撞 / t575 窒息判定同源 —— 玩家移动也按 sub-AABB
+            //   精确碰撞，非整格）：压力板（1/16 薄板仅占格底 y[0,0.0625]，箭在格半高飞过）/ 火把（ShapeNone
+            //   无碰撞盒）/ 水（无盒）不再挡箭 —— 陷阱箭越过板命中踩板玩家；箭穿水下沉（机制对齐 MC 箭入水
+            //   不停在水面）。完整立方 / 半砖 / 楼梯 / 栅栏等碰撞盒覆盖通路区域 → 仍正常嵌入（半砖上半飞行的
+            //   箭正确掠过其上沿，比旧整格判更贴形）。
             if (!remove) {
                 const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
-                if (by >= 0 && world->isSolid(bx, by, bz)) {
+                bool hitBlock = false;
+                if (by >= 0) {
+                    for (const BlockRegistry::BlockAABB &b : world->collisionAABBsAt(bx, by, bz)) {
+                        if (next.x() > b.minX && next.x() < b.maxX
+                            && next.y() > b.minY && next.y() < b.maxY
+                            && next.z() > b.minZ && next.z() < b.maxZ) { hitBlock = true; break; }
+                    }
+                }
+                if (hitBlock) {
                     // 入射方向（归一；速度 ~0 退化 → 向下兜底）。沿 dir 把箭尖压入面、杆尾露面外（半嵌）。
                     QVector3D v(e.vx, e.vy, e.vz);
                     const float vlen = v.length();
