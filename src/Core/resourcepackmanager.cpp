@@ -1378,12 +1378,20 @@ void ensureBuiltLocked()
                     tile = faceTile;
                 }
             }
-            tile = tile.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-            if (tile.size() != QSize(kTile, kTile))
-                tile = tile.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-            if (const int *tint = tileTint(m.first))
-                applyTint(tile, tint[0], tint[1], tint[2]); // t416/t444：灰度可着色瓦片乘群系 tint（叶/草顶/草丛 plains 绿；睡莲沼泽水生绿）
         }
+        // review H2：格式归一 + 缩放 kTile×kTile 后移到 if/else 之外 —— 此前仅直映射分支缩放，四条复合
+        //   路径里 110/140（cropTopBlank）与 136（mirror）不缩放：HD 128px 包返回 128×96 / 128×128，
+        //   drawImage 1:1 画入 16px 高图集 → 纵向被裁只显顶部 16 行、横向溢出覆写右侧 7 个瓦片位（附魔台侧 /
+        //   铁砧三态 / 南瓜侧 / 铁轨拐角 / 红石矿 / 发射器前 / 祭坛三面 / 门上半 ≈14 格被污染）。现所有路径
+        //   统一归一：转 ARGB32_Premultiplied + 非 kTile 尺寸缩放拉满 kTile²（IgnoreAspectRatio = 裁后有效
+        //   部分整张拉伸，正是「贴到矮盒侧面」的原始意图；16px 包 16×12 裁剪结果也拉满 → 槽底无残留旧行）。
+        //   已 kTile 的复合（142 overlay / grass_side 内部已缩放）二次归一幂等无害。tint 随之后移：applyTint
+        //   假定预乘格式，须在 convert 之后（tint 仅 0/9/28/61 直映射瓦片，行为不变）。
+        tile = tile.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        if (tile.size() != QSize(kTile, kTile))
+            tile = tile.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        if (const int *tint = tileTint(m.first))
+            applyTint(tile, tint[0], tint[1], tint[2]); // t416/t444：灰度可着色瓦片乘群系 tint（叶/草顶/草丛 plains 绿；睡莲沼泽水生绿）
         p.drawImage(m.first * kTile, 0, tile);
         ++overridden;
     }
