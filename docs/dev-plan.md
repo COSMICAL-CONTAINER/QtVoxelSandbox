@@ -2350,7 +2350,7 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 - 修：InventoryOps readSlot/writeSlot/localWriteSlot 全家加 name 透传（同 dc16ca2 dur/ench 模式）；铁砧产物（takeProduct）带新名写入；附魔台槽 0 取出保名；ItemEntity/spawnItem 加 name 形参（默认空）+ QML 掉落物 tooltip；存档序列化补 name（查存档槽序列化格式——versioned 升级兼容旧档无名=默认）。
 - ⚠️ 用户同时点名的「附魔当子对象」——现 enchants[4] packed int 已是等价实现（数据+查询+效果接线全通），不重构为类（存档兼容 + 风险），在返回中说明。
 
-**t623** 附魔台/铁砧产物属性保真（enchants 取出即丢 bug）
+**t623** 附魔台/铁砧产物属性保真（enchants 取出即丢 bug）✅✅ 已完成（commit 见 git log；根因=setHeldEnchants 未挂 Q_INVOKABLE 致 QML 调用静默 TypeError，t622 一并修复；存档 enchants 落盘在 t622 gatherPlayerState v3 补全）
 - 用户：「附魔台附出锐锋1的附魔书，左键拿出来瞬间就变成普通附魔书；附魔后的工具拿出来也丢附魔。附魔应存进存档。」
 - 现状核实：doEnchant 写槽 0 的 enchants（t549）——但**取出路径**（左键拿取/shift 拿取→背包）经 InventoryOps 或本地槽数组快照，enchants 没透传（同 t622 名字丢失同根因）。修：附魔台/铁砧两 UI 的槽取放全链带 enchants（AnvilUI 已有部分——canMerge 写产物 enchants?核取出路径）；存档：hotbar 槽序列化已含 enchants（t475 做过？核）——补全。
 - 附魔持久视觉：取出后紫光晕随物品走（t590 已做 hotbar/手持——核附魔台/铁砧槽内也显）。

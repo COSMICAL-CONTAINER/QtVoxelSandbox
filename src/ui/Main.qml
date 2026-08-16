@@ -9246,7 +9246,10 @@ Window {
                     const _r = hotbarVM.slotRevision
                     const id = hotbarBar.hoveredItemId
                     if (id === 0) return ""
-                    let tip = hotbarVM.nameForBlock(id)
+                    // t622：优先显实例名（铁砧改名物品 hover HUD hotbar 显其名）；无实例名 → 注册默认名。
+                    let tip = hotbarBar.hoveredSlot >= 0 && hotbarVM.customNameAt(hotbarBar.hoveredSlot).length > 0
+                            ? hotbarVM.customNameAt(hotbarBar.hoveredSlot)
+                            : hotbarVM.nameForBlock(id)
                     // t349：按「有无耐久」（toolMaxDurability>0）判而非 isTool 段 —— 显式含剪刀（maxDur=238）；
                     //   非工具 / 材料段 maxDur=0 → 仅显名（无耐久行）。
                     if (hotbarVM.toolMaxDurability(id) > 0) {

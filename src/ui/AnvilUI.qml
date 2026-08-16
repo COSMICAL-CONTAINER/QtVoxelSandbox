@@ -1529,6 +1529,20 @@ Item {
         if (idx === 2) return _ar >= 0 ? root.hotbar.enchantListText(root.productEnch) : ""
         return _ar >= 0 ? root.hotbar.enchantListText(root.enchAt(idx)) : ""
     }
+    // t622 当前 hover 槽（hotbar/main）物品的实例名（铁砧改名；空串 → tooltip 走注册默认名）。anvil 槽的
+    //   实例名走 hoveredProductName（含产物改名预览）。
+    property string hoveredCustomName: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const parts = root.hoveredKey.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.customNameAt(idx) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.mainCustomNameAt(idx) : ""
+        return ""
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -1557,7 +1571,9 @@ Item {
             anchors.centerIn: parent
             // t263 工具/护甲槽 tooltip 附「cur/max」耐久行；无耐久 / 未跟踪 → 仅显名。产物改名 → 显新名。
             //   t615 附魔行：物品带附魔 → 换行显附魔列表（同 t590 各面板 tooltip；附魔书列出携带附魔）。
+            //   t622：anvil 槽实例名经 hoveredProductName（nameAt）；hotbar/main 槽实例名经 hoveredCustomName。
             text: root.hotbar ? ((root.hoveredProductName.length > 0 ? root.hoveredProductName
+                    : root.hoveredCustomName.length > 0 ? root.hoveredCustomName
                     : root.hotbar.nameForBlock(root.hoveredItemId)
                         + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.maxDur(root.hoveredItemId) : ""))
                     + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : ""

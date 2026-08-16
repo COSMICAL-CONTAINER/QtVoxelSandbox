@@ -1170,6 +1170,23 @@ Item {
         if (parts[0] === "armor") return _ar >= 0 ? root.hotbar.enchantListText(root.hotbar.armorEnchantsAt(idx)) : ""
         return ""
     }
+    // t622 当前 hover 槽物品的实例名（铁砧改名；空串 → tooltip 走注册默认名）。据 hoveredKey 查
+    //   hotbar / main / armor 三组；触碰各 revision → 改名 / 搬运后 tooltip 名行刷新（同 hoveredEnchantText 模式）。
+    property string hoveredCustomName: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _ar = root.hotbar.armorRevision
+        const key = root.hoveredKey
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.customNameAt(idx) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.mainCustomNameAt(idx) : ""
+        if (parts[0] === "armor") return _ar >= 0 ? root.hotbar.armorCustomNameAt(idx) : ""
+        return ""
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -1201,7 +1218,9 @@ Item {
             //   t452 护甲槽 tooltip 附「耐久 cur/max」行（槽内改耐久条后数字移此，同工具套路）。
             //   t304 弓槽 tooltip 附「攻击 1-N」行。
             //   t590 附魔行：物品带附魔 → 换行显附魔列表（如「锐锋 III\n效率 II」），无附魔 → 空串不追加。
-            text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
+            //   t622：hover 槽带实例名（customNameAt）→ 优先显实例名（铁砧改名物品显其名）。
+            text: root.hotbar ? ((typeof root.hoveredCustomName === "string" && root.hoveredCustomName.length > 0
+                    ? root.hoveredCustomName : root.hotbar.nameForBlock(root.hoveredItemId))
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
                 + (root.hoveredArmorValue > 0 ? "  护甲 " + root.hoveredArmorValue : "")
                 + (root.hoveredArmorDurability > 0 ? "  耐久 " + root.hoveredArmorDurability + "/" + root.hotbar.armorMaxDurability(root.hoveredItemId) : "")

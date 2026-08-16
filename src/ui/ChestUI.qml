@@ -652,6 +652,22 @@ Item {
         if (parts[0] === "main") return root.hotbar.mainDurabilityAt(idx)
         return -1
     }
+    // t622 当前 hover 槽物品的实例名（铁砧改名；空串 → tooltip 走注册默认名）。chest 槽查 ChestStore；
+    //   hotbar / main 查 VM；触碰 revision → 改名 / 搬运后刷新（同 hoveredDurability 模式）。
+    property string hoveredCustomName: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const key = root.hoveredKey
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.customNameAt(idx) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.mainCustomNameAt(idx) : ""
+        if (parts[0] === "chest") return root.chestStore.slotNameAt(root.chestX, root.chestY, root.chestZ, idx)
+        return ""
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -679,7 +695,9 @@ Item {
             id: tipLabel
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
-            text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
+            // t622：hover 槽物品带实例名 → 优先显实例名（改名物品 / 箱内改名物显其名）。
+            text: root.hotbar ? ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
+                    : root.hotbar.nameForBlock(root.hoveredItemId))
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
                 + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : "" // t304 弓伤害 tooltip
             color: "#f2f2f2"

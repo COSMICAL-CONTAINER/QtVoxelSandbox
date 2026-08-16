@@ -1110,6 +1110,23 @@ Item {
         if (parts[0] === "enchant") return _er >= 0 ? root.hotbar.enchantListText(root.enchAt(idx)) : ""
         return ""
     }
+    // t622 当前 hover 槽物品的实例名（铁砧改名；空串 → tooltip 走注册默认名）。enchant 槽查本地名数组；
+    //   hotbar / main 查 VM；触碰各 revision → 改名 / 搬运后刷新（同 hoveredEnchantText 模式）。
+    property string hoveredCustomName: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _er = root.enchantRev
+        const key = root.hoveredKey
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.customNameAt(idx) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.mainCustomNameAt(idx) : ""
+        if (parts[0] === "enchant") return _er >= 0 ? root.nameAt(idx) : ""
+        return ""
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -1138,9 +1155,8 @@ Item {
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
             // t590 附魔行：物品带附魔 → 换行显附魔列表（如「锐锋 III\n效率 II」），无附魔 → 空串不追加。
-            // t622：enchant 槽物品带实例名 → 优先显实例名（nameAt——改名工具放附魔台仍显其名）。
-            text: root.hotbar ? ((root.hoveredKey.indexOf("enchant:") === 0 && root.nameAt(parseInt(root.hoveredKey.substring(8), 10)).length > 0
-                    ? root.nameAt(parseInt(root.hoveredKey.substring(8), 10))
+            // t622：hover 槽物品带实例名 → 优先显实例名（hoveredCustomName——改名工具 / 附魔台槽内显其名）。
+            text: root.hotbar ? ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
                     : root.hotbar.nameForBlock(root.hoveredItemId))
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
                 + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : ""
