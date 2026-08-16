@@ -41,6 +41,19 @@ import "InventoryOps.js" as InventoryOps
 //   **⑥ 等级行只显消耗**：改名分支去产物名（「新名 · N 级」→「重命名 N 级」；名字已在框内 + tooltip 有）。
 //   **⑦ 拿回物品清框**：左槽清空 → 改名框清空 + lastAutoName 复位；再放入 → 重新自动填名（②）。
 //
+// t626 五轮（R19.6 用户 6 点细节批）：
+//   **① 高度压缩**：面板 430→370 —— Column 边距 16→12 / 行距 12→10 / 操作区 150→134（t606① 的下移扩高
+//     部分回收；改名框上距 4→2、槽行上距 16→10）。宽度不变（392，用户「宽 OK」）。
+//   **③ 改名框退出输入态**：任何槽交互 / 取产物成功后活动焦点归还键位层（defocusNameBox → window.
+//     refocusKeyInput）——E 关面板 / 数字键切槽不再打进框；再点框才重新聚焦（改名框点按夺焦后焦点不会
+//     自动回 keyInput，且单纯 focus=false 会把焦点丢给 contentItem，键位层 Keys 收不到任何键）。
+//   **④ tooltip 名字行独立配色/位置**：名字（自定义/改名预览名金色加粗）/ 耐久（灰字独立行）/ 附魔（紫字
+//     独立行）三行分列；修「改名物品 tooltip 丢耐久行」（原耐久只拼在默认名分支行尾）。
+//   **⑥ 面板内 main/hotbar 行 tooltip 附附魔行**：hoveredEnchantText 补 hotbar/main 分支（原仅 anvil 三槽
+//     ——附魔书放背包行不显携带附魔+等级；对齐 EnchantingTableUI / SurvivalInventory 模式）。
+//   （② 取产物→光标：t622 已实现（heldCustomName 通道，光标空 → 产物带名上光标）核验不改；⑤ 取后清
+//     A+B 防重复取：rv11/t578/t615 已实现——清空段在所有早退之后无条件执行，本轮核验+注释钉死，不改。）
+//
 // t550 用户要求（逐条落实）：
 //   **① A+B=C 两输入都在左边**：仿 MC 1.0 铁砧——左列两槽 = 左输入（待修复/附魔/重命名的工具/护甲）+ 右输入
 //     （材料：铁锭等修复材料 / 附魔书）；右列单槽 = 产物槽（预览修复/合并/重命名结果）。箭头左→右指向产物。
@@ -60,10 +73,11 @@ import "InventoryOps.js" as InventoryOps
 // 修复材料映射（Hotbar::anvilRepairMaterial，C++ 单一权威）：木→木板 / 石→圆石 / 铁→铁锭 / 钻石→钻石 /
 //   弓→线 / 剪刀→铁锭 / 钓竿→线 / 护甲→同材质锭或皮革。每材料修 1/3 满耐久（ceil，3 材料修满 = 用户规格）。
 //
-// 产物输出路由（rv11 修「取产物静默销毁」）：点产物槽 → 消耗等级 + 材料后，产物**优先写光标**（held 系统，
-//   同 CraftingTableUI 产物拾取）：光标空 → 产物上光标；光标持同 id 且装得下 → 合并；光标被异物占用 → 经
-//   addToAny 找背包空位（不动光标原物；装不下则不消耗等级 / 材料，无操作）。改名产物须落定即带 customName
-//   （held 光标栈无名通道）→ 找空槽 setStack + setCustomName（hotbar 优先 → main），无空槽 → 无操作。
+// 产物输出路由（rv11 修「取产物静默销毁」→ t626② 收敛为恒光标）：点产物槽 → 消耗等级 + 材料后，产物
+//   **写光标**（held 系统）：光标空 → 产物带耐久 / 附魔 / 名上光标（t622 heldCustomName 通道）；光标持
+//   同 id 且装得下 → 合并；光标被异物占用 → **无操作**（不消耗等级 / 材料 / 输入；t626② 删旧「addToAny
+//   入包」退路——那是 shift 语义，且旧实现把入包放在 spendLevels 拒付之前 = 等级不足时产物已入包 →
+//   产物槽可反复点 = 无限复制。机制等价 MC：光标被占时铁砧产物不可取）。
 //   产物占位 = 本地 anvil 组 index 2（preview 只显不可交互）。
 //
 // 全部 GUI 自绘原创（Rectangle + Text + Canvas 像素图，无外部 MC GUI PNG；§9 override (a)）。
@@ -204,8 +218,19 @@ Item {
     //   槽→归背包；同附魔台 slotShiftLeftEnchant 模式）。
     //   t180：可拖拽组（anvil/main/hotbar）双击 → doMergeSameId（拿同类）。resolveClick/resolveRightClick 算法见
     //   InventoryOps（六面板共享，调用点零改动）。t550 耐久 / 附魔透传（curDur/curEnch 取本地槽保真值）。
+    // t626③ 改名框退出输入态：槽交互 / 取产物成功后把活动焦点归还键位层（宿主 window.refocusKeyInput）。
+    //   根因：改名框 TextInput 点按夺焦（activeFocusOnPress）后，点槽不会自动失焦（槽 TapHandler 不抢
+    //   焦点）→ 框持焦期间按 E 关面板 / 数字键切槽全打进框（E 变文本、1-9 变文本且 hotbar 不切）。焦点
+    //   回键位层后 E / Esc / Shift / 数字键恢复面板语义；只有再点改名框才重新聚焦（TextInput 原生行为）。
+    //   单纯 nameInput.focus = false 会把焦点丢给窗口 contentItem（keyInput 的 Keys 收不到键）→ 必须经
+    //   宿主 forceActiveFocus(keyInput)。宿主未注入 refocusKeyInput（旧宿主）→ 真值兜底仅清本地焦点。
+    function defocusNameBox() {
+        if (window.refocusKeyInput) window.refocusKeyInput()
+        else nameInput.focus = false
+    }
+
     function slotLeft(group, index) {
-        if (window.shiftHeld) { slotShiftLeftAnvil(group, index); return }
+        if (window.shiftHeld) { slotShiftLeftAnvil(group, index); root.defocusNameBox(); return }
         // t180：280ms 内同槽二次点击 + 可拖拽组 → 拿同类（doMergeSameId 扫 anvil+main+hotbar 同 id）。
         const key = group + ":" + index
         const now = Date.now()
@@ -218,13 +243,14 @@ Item {
         }
         const cur = InventoryOps.readSlot(root, group, index)
         const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
-        if (!r) return
+        if (!r) { root.defocusNameBox(); return }   // t626③ 无操作也退框（点了槽 = 意图离开输入态）
         InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
         root.hotbar.setHeldEnchants(r.heldEnch)
         root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
+        root.defocusNameBox()                     // t626③ 槽交互后改名框退出输入态（焦点回键位层）
     }
     function slotRight(group, index) {
         const cur = InventoryOps.readSlot(root, group, index)
@@ -236,6 +262,7 @@ Item {
         root.hotbar.heldDurability = r.heldDur
         root.hotbar.setHeldEnchants(r.heldEnch)
         root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
+        root.defocusNameBox()                     // t626③ 槽交互后改名框退出输入态（焦点回键位层）
     }
 
     // t549 铁砧 Shift+左键双向语义（spec「shift+左键应把工具直接放进去」；同附魔台 slotShiftLeftEnchant 模式）：
@@ -370,8 +397,7 @@ Item {
     property string lastResult: ""
     property bool justActed: false
     // t622 改名产物空槽落点（takeProduct 探路段找、落定段用；跨段存属性防块作用域撕裂）。
-    property string namedSlotGroup: ""
-    property int namedSlotIdx: -1
+    //   t626② 已废弃：异物光标改「无操作」（不再退路找空槽入包）→ 两属性无消费者，删除。
 
     // t606②/⑦ 自动填名 / 拿回清框：左槽内容变（anvilRev 触碰）→ 有物：框空或内容仍是上次自动填充值
     //   （=== lastAutoName）→ 填入该物品当前名（nameForBlock 注册默认名；本地槽无 customName 通道）+
@@ -710,8 +736,8 @@ Item {
     // ── t550 三功能执行（真逻辑；t477 占位交互替换）──
     //   修复：消耗 1 级/材料 + 消耗右槽材料（每材料修 1/3 满耐久）→ 产物 = 左槽修后耐久。合并附魔：消耗 2 级 +
     //   消耗右槽附魔书 1 本（多本只扣 1 本，rv11 修「合并销毁整摞书」）。改名：改名框非空时叠加在修复 / 合并之上
-    //   （+1 级）或单独生效 → 产物即时显新名。产物输出路由见上「产物输出路由」（rv11：写光标 / addToAny /
-    //   改名找空槽，不再覆盖选中槽）；成功后清左输入槽 + 推进铁砧损坏。
+    //   （+1 级）或单独生效 → 产物即时显新名。产物输出路由（rv11 → t626② 收敛）：**恒走光标**（空 → 带名上
+    //   光标；同 id → 合并；异物光标 → 无操作不消耗），不再入包。成功后清左输入槽 + 推进铁砧损坏。
     function takeProduct() {
         if (root.activeOp === "") return
         if (!root.affordCost) return
@@ -776,37 +802,25 @@ Item {
         // 改名叠加：改名框非空 → 产物名 = 新名（覆盖原 customName）。
         if (root.renaming) outName = root.renameName.trim()
 
-        // ── 产物路由（rv11）：先探路（能否落下），落不下 → 无操作（不消耗等级 / 材料 / 输入）──
+        // ── 产物路由（rv11 / t622 / t626② 重定）── 探路段改为**纯只读**（t626②/⑤ 根因修复）：
+        //   旧版探路段对「异物光标」当场 addToAny 把产物写进背包——两个后果：(a) 用户点一下产物却直接
+        //   入包（相当于 shift 效果，用户「应到光标」）；(b) 写包发生在 spendLevels 拒付 / 后续无操作 return
+        //   **之前** → 等级不足时产物已入包、输入槽未清 → 产物槽仍显 → 再点再入包 = **无限复制**（A 工具 +
+        //   B 附魔书可无限刷）。t626②：异物光标 → **无操作**（机制等价 MC——光标被占时铁砧产物不可取），
+        //   不写包、不消耗、产物槽保留预览；腾空光标再点即正常到光标。任何副作用（扣等级 / 清槽 / 写入）
+        //   只发生在探路全通过之后的落定段。
         const heldId = root.hotbar.heldBlock
         const heldCount = root.hotbar.heldCount
         const cap = root.hotbar.maxStackSize(outId)
-        // t622 改名产物：held 光标已有 customName 通道（Q_PROPERTY）→ 优先走光标（同普通产物；机制等价
-        //   MC 铁砧产物左键拿到光标）。异物光标占位 → 退路找空槽（setStack 带名写入；探路同旧）。
-        if (outName.length > 0 && heldId !== 0 && heldId !== outId) {
-            // 异物光标 → 找空槽落定（hotbar 优先 → main）；无空槽 → 无操作（不消耗、不破坏）。
-            root.namedSlotGroup = ""
-            root.namedSlotIdx = -1
-            for (let i = 0; i < root.hotbar.slotCount; ++i) {
-                if (InventoryOps.readSlot(root, "hotbar", i).id === 0) { root.namedSlotGroup = "hotbar"; root.namedSlotIdx = i; break }
-            }
-            if (root.namedSlotIdx < 0) {
-                for (let i = 0; i < root.hotbar.mainCount; ++i) {
-                    if (InventoryOps.readSlot(root, "main", i).id === 0) { root.namedSlotGroup = "main"; root.namedSlotIdx = i; break }
-                }
-            }
-            if (root.namedSlotIdx < 0) return               // 无空槽 → 改名产物无处落（不消耗、不破坏）
-        } else if (heldId !== 0 && heldId !== outId) {
-            // 异物光标 → 产物经 addToAny 入背包（不动光标原物；名随实例——addToAny 第 5 参）；背包满
-            //   （返回未放入数 > 0）→ 无操作。
-            const remain = root.hotbar.addToAny(outId, outCount, outDur, outEnch, outName)
-            if (remain > 0) return
-        }
+        // 光标被异物占用 → 无操作（t626②：不再退路入包——「左键取产物」恒指光标通道；入包是 shift 语义）。
+        if (heldId !== 0 && heldId !== outId) return
         // 同 id 光标合并容量检查（held 同 id 且累加超上限 → 无操作）。
         if (heldId === outId && heldCount + outCount > cap) return
 
         // ── 探路通过 → 真消耗（等级 + 材料 + 输入槽）──
         //   t606③ 创造模式免经验：跳过 spendLevels（机制等价 MC 创造铁砧免 XP；材料消耗照旧——保守只免
-        //   经验，MC 创造材料也免但此处不扩大）。
+        //   经验，MC 创造材料也免但此处不扩大）。spendLevels 拒付 → return（此时**零副作用**已发生——
+        //   探路段纯只读，故等级不足不会留半完成态；t626⑤ 与复制 bug 同根，一并根治）。
         if (!root.creativeMode && !root.playerState.spendLevels(root.cost)) return
         if (op === "repair") {
             // 消耗右槽材料：每修 1/3 需 1 件（取到 0 清空）。op==="repair" 时 use 恒 ≥1（canRepair 耐久
@@ -834,24 +848,21 @@ Item {
         root.anvilNames = ["", "", ""]
         root.renameName = ""; nameInput.text = ""; root.lastAutoName = ""
 
-        // ── 产物落定（探路时已确认可落）──
-        if (outName.length > 0 && root.hotbar.heldBlock !== 0 && root.hotbar.heldBlock !== outId) {
-            // 改名产物 + 异物光标 → 空槽落定即带名（探路段已找到 root.namedSlotGroup/namedSlotIdx；不占
-            //   光标、不覆盖任何已有栈）。writeSlot 第 8 参透传名（t622 通道）。
-            InventoryOps.writeSlot(root, root.namedSlotGroup, root.namedSlotIdx, outId, outCount, outDur, outEnch, outName)
-        } else if (heldId === 0) {
+        // ── 产物落定（t626② 简化：探路段已把光标收敛为「空 或 同 id」两态，恒走光标通道）──
+        //   t622：held 光标有 customName 通道（Q_PROPERTY）→ 改名产物同普通产物直接带名上光标
+        //   （机制等价 MC 铁砧产物左键拿到光标）。
+        if (heldId === 0) {
             // 光标空 → 产物上光标（耐久 / 附魔 / 名随实例保真——t622 heldCustomName 通道）。
             root.hotbar.heldBlock = outId
             root.hotbar.heldCount = outCount
             root.hotbar.heldDurability = outDur
             root.hotbar.setHeldEnchants(outEnch)
             root.hotbar.heldCustomName = outName
-        } else if (heldId === outId) {
+        } else {
             // 光标持同 id → 合并（探路已保证不超上限）。t622：改名产物（outName 非空）合并入同 id 光标
             //   栈属罕见边角（同 id 可堆叠物品改名）→ 光标名保持不变（合并不搬实例元数据，同 InventoryOps C 路径）。
             root.hotbar.heldCount = heldCount + outCount
         }
-        // 异物光标分支（outName 空）：产物已在上方探路段 addToAny 入背包（不消耗光标原物）。
 
         root.anvilRev++
         if (root.player) root.player.damageAnvil(anvilX, anvilY, anvilZ)
@@ -860,6 +871,7 @@ Item {
         if (root.progress) root.progress.onAnvilUsed()
         root.justActed = true
         actFlashTimer.restart()
+        root.defocusNameBox()   // t626③ 取产物成功 → 改名框退出输入态（焦点回键位层）
     }
 
     // t167 左键拖动均分总控：DragHandler(LeftButton) 在 root 监听。按下不动时 per-slot 左键 TapHandler 抓
@@ -906,12 +918,13 @@ Item {
     }
 
     // 面板：深色圆角，居中。t543 深色风格统一（#1b1f24，同 CraftingTableUI / FurnaceUI / ChestUI /
-    // EnchantingTableUI）。宽度与 CraftingTableUI / 附魔台一致（392）；高度 = 标题(22) + 操作区(150) +
-    // 主栏(120) + hotbar(40) + 间距/边距。
+    // EnchantingTableUI）。宽度与 CraftingTableUI / 附魔台一致（392）；高度 = 标题(22) + 操作区(134) +
+    // 主栏(120) + hotbar(40) + 间距/边距。t626① 高度压缩：430→370（用户「整个 UI 偏高，宽 OK」）——
+    //   Column 边距 16→12、行距 12→10、操作区 150→134（t606① 的下移扩高部分回收；槽行/标签仍可读）。
     Rectangle {
         id: panel
         width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392
-        height: 430                                  // 22 + 150(操作区, t606① 槽行下移扩高) + 120 + 40 + 间距/边距
+        height: 370                                  // t626① 12+22+134+120+40 + 3×10 spacing + 2×12 margin = 370
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -920,8 +933,8 @@ Item {
 
         Column {
             anchors.fill: parent
-            anchors.margins: 16
-            spacing: 12
+            anchors.margins: 12
+            spacing: 10
 
             // 标题行：左标题，右关闭提示。
             Item {
@@ -939,7 +952,7 @@ Item {
                 }
             }
 
-            // ── 操作区（t576/t577 三轮 + t606 四轮：改名框在顶（产物上方）+ A + B → 箭头 → C 产物 + 产物下等级）──
+            // ── 操作区（t576/t577 三轮 + t606 四轮 + t626① 压高：改名框在顶（产物上方）+ A + B → 箭头 → C 产物 + 产物下等级）──
             // t577：改名框移到槽行上方（MC 铁砧：名字栏在最顶、产物在右）。用户输入 → 产物即显新名。
             //   耐久不进名字栏。无「重命名」按钮（用户要求：产物槽即执行入口）。
             // t576：A/B 两输入槽中间加「+」符号；删「放入物品与材料」灰字提示。
@@ -947,21 +960,24 @@ Item {
             // t606②：改名框 placeholder 占位层删（自动填名把真名写进输入框，占位层冗余）。
             // t606⑤：框宽收窄对齐槽行（376→176）+ 背景调浅（#2a2018 深棕 → #3a3226 浅棕）+ 文字垂直居中
             //   （TextInput anchors.fill 与 anchors.verticalCenter 叠用无效 → 文字贴顶；改 verticalAlignment）。
+            // t626①：操作区 150→134（面板高度压缩批；改名框上距 4→2、槽行上距 16→10）。
             Item {
                 id: anvilArea
                 width: parent.width
-                height: 150
+                height: 134
 
-                // ── 改名框（t577 顶部；t606⑤ 收窄调浅居中）── TextInput + 持焦时 Esc 关面板（规格⑥）。
+                // ── 改名框（t577 顶部；t606⑤ 收窄调浅居中；t626① 上距 2）── TextInput + 持焦时 Esc 关面板（规格⑥）。
                 //   t606②：放入物品自动填名（onAnvilRevChanged），框内恒真文本可编辑，无占位层。
                 Rectangle {
                     id: renameBox
-                    anchors.top: parent.top; anchors.topMargin: 4
+                    anchors.top: parent.top; anchors.topMargin: 2
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: 176; height: 26
                     color: "#3a3226"
-                    border.color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#ffd87a" : "#141008"
-                    border.width: (root.renaming && root.affordCost && root.activeOp !== "") ? 2 : 1
+                    border.color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#ffd87a"
+                                  : nameInput.activeFocus ? "#8a7a5a" : "#141008"
+                    border.width: (root.renaming && root.affordCost && root.activeOp !== "") ? 2
+                                  : nameInput.activeFocus ? 2 : 1
                     radius: 3
                     TextInput {
                         id: nameInput
@@ -989,10 +1005,10 @@ Item {
                     }
                 }
 
-                // A + B → C 槽行（t576：A/B 间「+」号；t606① 上距 8→16 下移）。
+                // A + B → C 槽行（t576：A/B 间「+」号；t606① 上距 8→16 下移；t626① 上距 16→10 压高批微收）。
                 Item {
                     id: slotRow
-                    anchors.top: renameBox.bottom; anchors.topMargin: 16
+                    anchors.top: renameBox.bottom; anchors.topMargin: 10
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: 176
                     height: 40
@@ -1389,6 +1405,8 @@ Item {
         TapHandler {
             acceptedButtons: Qt.LeftButton
             onTapped: {
+                // t626③ 点槽即退出改名框输入态（焦点回键位层）——空手点空槽的无操作路径也退。
+                root.defocusNameBox()
                 // 产物预览槽：点击 = 取产物（执行当前修复/合并/改名并写选中槽 + 清输入）。
                 if (aslot.preview) {
                     if (aslot.slotId !== 0) root.takeProduct()
@@ -1416,6 +1434,7 @@ Item {
         TapHandler {
             acceptedButtons: Qt.RightButton
             onTapped: {
+                root.defocusNameBox()   // t626③ 点槽即退出改名框输入态
                 if (aslot.preview) return   // 产物槽右键无操作
                 const r = root.resolveRightClick(aslot.slotId, aslot.slotCount, aslot.slotDur, aslot.slotEnch,
                                                  root.nameAt(aslot.index))
@@ -1516,15 +1535,21 @@ Item {
     }
     // t615 当前 hover 槽物品的附魔列表文本（tooltip 附魔行；同 EnchantingTableUI / SurvivalInventory 模式）：
     //   anvil:0/1 = 本地槽实例附魔；anvil:2 = 产物预览附魔（productEnch——修复 / 合并 / 敲附魔书后的结果）。
+    //   t626⑥ 补 hotbar/main 分支（原仅 anvil 三槽 → 附魔书 / 附魔工具放背包行 tooltip 不显携带附魔+等级；
+    //   对齐 EnchantingTableUI hoveredEnchantText 的 hotbar/main 路由）。
     //   附魔书物品（0x227）带附魔 → 列出携带附魔（机制等价 MC enchanted book tooltip）。
     property string hoveredEnchantText: {
         if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
         const _ar = root.anvilRev
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
         const key = root.hoveredKey
         const parts = key.split(":")
         if (parts.length !== 2) return ""
         const idx = parseInt(parts[1], 10)
         if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.enchantListText(root.hotbar.enchantsAt(idx)) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.enchantListText(root.hotbar.mainEnchantsAt(idx)) : ""
         if (parts[0] !== "anvil") return ""
         if (idx === 2) return _ar >= 0 ? root.hotbar.enchantListText(root.productEnch) : ""
         return _ar >= 0 ? root.hotbar.enchantListText(root.enchAt(idx)) : ""
@@ -1545,10 +1570,10 @@ Item {
     }
     Rectangle {
         id: itemTip
-        visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
+        visible: root.hotbar && root.hoveredItemId !== 0 && tipName.text !== ""
         z: 1000
-        width: tipLabel.implicitWidth + 14
-        height: tipLabel.implicitHeight + 8
+        width: tipCol.implicitWidth + 14
+        height: tipCol.implicitHeight + 8
         color: "#101216"
         opacity: 0.94
         border.color: "#3a444f"
@@ -1566,19 +1591,44 @@ Item {
             if (py < 2) py = root.hoveredTipPos.y + 6 // 顶部空间不足 → 翻到槽位下方
             return py
         }
-        Text {
-            id: tipLabel
+        // t626④ tooltip 三行分列（名字 / 耐久 / 附魔各自独立配色 + 独立行）：
+        //   - 名字行：实例名 / 改名预览名 → 金色加粗（与改名框强调色同族）；注册默认名 → 常规白。
+        //   - 耐久行：灰字独立行「耐久 cur/max」——修旧 bug：原耐久只拼在默认名分支行尾，改名物品耐久行
+        //     直接丢失（hoveredProductName 命中分支不拼耐久）。
+        //   - 附魔行：紫字独立行（enchantListText 自带多行；附魔书列出携带附魔 + 等级，t626⑥ 背包行同显）。
+        //   分列实现 = Column 三 Text 各自 color（非 richText 拼接——改名文本是任意用户输入，richText 会
+        //   被尖括号注入，逐元素 Text 无需转义）。
+        Column {
+            id: tipCol
             anchors.centerIn: parent
-            // t263 工具/护甲槽 tooltip 附「cur/max」耐久行；无耐久 / 未跟踪 → 仅显名。产物改名 → 显新名。
-            //   t615 附魔行：物品带附魔 → 换行显附魔列表（同 t590 各面板 tooltip；附魔书列出携带附魔）。
-            //   t622：anvil 槽实例名经 hoveredProductName（nameAt）；hotbar/main 槽实例名经 hoveredCustomName。
-            text: root.hotbar ? ((root.hoveredProductName.length > 0 ? root.hoveredProductName
-                    : root.hoveredCustomName.length > 0 ? root.hoveredCustomName
-                    : root.hotbar.nameForBlock(root.hoveredItemId)
-                        + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.maxDur(root.hoveredItemId) : ""))
-                    + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : ""
-            color: "#f2f2f2"
-            font.pixelSize: 12
+            spacing: 3
+            Text {
+                id: tipName
+                property bool customNamed: root.hoveredProductName.length > 0 || root.hoveredCustomName.length > 0
+                text: {
+                    if (!root.hotbar) return ""
+                    if (root.hoveredProductName.length > 0) return root.hoveredProductName
+                    if (root.hoveredCustomName.length > 0) return root.hoveredCustomName
+                    return root.hotbar.nameForBlock(root.hoveredItemId)
+                }
+                color: customNamed ? "#ffd87a" : "#f2f2f2"   // t626④ 自定义名金色（区分注册默认名白）
+                font.pixelSize: 12
+                font.bold: customNamed
+            }
+            Text {
+                visible: root.hoveredDurability >= 0
+                text: root.hoveredDurability >= 0
+                      ? "耐久 " + root.hoveredDurability + "/" + root.maxDur(root.hoveredItemId) : ""
+                color: "#9aa4ae"   // t626④ 耐久灰字（与名字行区分）
+                font.pixelSize: 11
+            }
+            Text {
+                visible: root.hoveredEnchantText.length > 0
+                text: root.hoveredEnchantText
+                color: "#c58af0"   // t626④ 附魔紫字（与附魔光晕同族色）
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+            }
         }
     }
 }

@@ -1082,6 +1082,13 @@ Window {
         // t548：同附魔台 —— 铁砧非背包，不触发 open_inventory 成就 toast（黑色小 UI 残留根因）。
         player.release()
     }
+    // t626③ 铁砧改名框退出输入态：改名框 TextInput 点按夺焦（activeFocusOnPress）后，点槽不会自动失焦
+    //   （槽 TapHandler 不抢焦点）→ 框持焦期间 E / 数字键全打进框。AnvilUI 在槽交互 / 取产物后经本函数把
+    //   活动焦点归还键位层（面板仍开，E / Esc / 数字键恢复面板语义；再点框才重新聚焦）。单纯 focus=false
+    //   会把焦点丢给 contentItem（键位层 Keys 收不到任何键）→ 必须显式 forceActiveFocus。
+    function refocusKeyInput() {
+        keyInput.forceActiveFocus()
+    }
     function closeAnvil() {
         if (!anvilOpen) return
         anvilOpen = false
