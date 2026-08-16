@@ -175,8 +175,50 @@ bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float p
     return false;
 }
 
-float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbackY, bool *outFoundWater) const
+float BoatManager::boatFootprintWaterFraction(World *world, float px, float pz, float probeY) const
 {
+    if (!world) return 0.0f;
+    // t630 footprint 水域覆盖采样（格中心近似：每覆盖格等权 —— footprint X 1.0×Z 1.4 → 通常 2×3=6 格，
+    //   每格 ≈1/6 船身；2/3 阈值 = 至少 4/6 格是水列）。列有水 = 自支撑层参考格 probeY 起向上扫
+    //   kWaterProbeDepth 内有 Water（覆盖浅 1 格水到深水）。越界列（blockAt Air 兜底）算非水。
+    const int x0 = int(std::floor(px - kBoatHalfW)), x1 = int(std::floor(px + kBoatHalfW));
+    const int z0 = int(std::floor(pz - kBoatHalfLen)), z1 = int(std::floor(pz + kBoatHalfLen));
+    const int yStart = int(std::floor(probeY));
+    int total = 0, water = 0;
+    for (int x = x0; x <= x1; ++x)
+        for (int z = z0; z <= z1; ++z) {
+            ++total;
+            for (int y = yStart; y < yStart + kWaterProbeDepth; ++y) {
+                if (world->blockAt(x, y, z) == BlockRegistry::Water) { ++water; break; }
+            }
+        }
+    return total > 0 ? float(water) / float(total) : 0.0f;
+}
+
+// t630 撞碎荷叶（见 boatmanager.h smashLilyPads 注释）：高速船碾过 footprint 内 LilyPad → 清 Air +
+//   emit lilyPadSmashed（呈层掉睡莲物品）。静默写 setWaterSilent（非玩家破块，免粒子/音 spam —— 掉落物由
+//   呈层信号侧 spawnItem；同 EntityManager 留雪 / 羊吃草静默写模式）。两层采样（船中心层 + 下一层）与
+//   boatFootprintBlocked 一致：浮水船中心 Y = 水面顶 → 叶（浮于水面格底 1/16）常在中心层或下一层。
+bool BoatManager::smashLilyPads(World *world, float px, float py, float pz)
+{
+    if (!world) return false;
+    const int x0 = int(std::floor(px - kBoatHalfW)), x1 = int(std::floor(px + kBoatHalfW));
+    const int z0 = int(std::floor(pz - kBoatHalfLen)), z1 = int(std::floor(pz + kBoatHalfLen));
+    const int cy = int(std::floor(py));
+    bool smashed = false;
+    for (int x = x0; x <= x1; ++x)
+        for (int z = z0; z <= z1; ++z)
+            for (int y = cy; y >= cy - 1; --y) {
+                if (world->blockAt(x, y, z) == BlockRegistry::LilyPad) {
+                    world->setWaterSilent(x, y, z, BlockRegistry::Air, 0);
+                    emit lilyPadSmashed(x, y, z);
+                    smashed = true;
+                }
+            }
+    return smashed;
+}
+
+float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbackY, bool *outFoundWater) const{
     if (outFoundWater) *outFoundWater = false;
     if (!world) return fallbackY;
     const int cx = int(std::floor(px)), cz = int(std::floor(pz));
@@ -273,6 +315,26 @@ void BoatManager::tick(qreal dt, World *world)
                     b.vx += (dpx / nlen) * kBoatPushImpulse;
                     b.vz += (dpz / nlen) * kBoatPushImpulse;
                 }
+                // t630 身体推船旋转（用户：人撞船应有旋转效果，不只平移）：推力作用点 = 玩家接触点相对船心
+                //   （−dpx,−dpz = 玩家在船坐标的偏移）。横向偏移（垂直于推开方向）→ 力臂 → 扭矩使船头偏转。
+                //   简化力矩模型：yawRate = (力臂 × 推开速度) 的符号分量 —— 取「玩家偏移 × 推开量」的叉积
+                //   （2D 叉积 z = rx·pz − rz·px，r = 玩家接触点，p = 推开冲量方向）× kBoatPushTurnRate，
+                //   钳 ±kBoatPushTurnMax（度/s）防甩头。玩家正对船心推（偏移近 0）→ 叉积 ≈ 0 不转（对心推 =
+                //   纯平移，机制等价 MC 力矩直觉）；玩家偏侧推 → 船头朝推侧偏转（扭矩感）。yaw 为度（QML
+                //   eulerRotation.y）。
+                if (pushX != 0.0f || pushZ != 0.0f) {
+                    const float rx = -dpx, rz = -dpz;      // 玩家接触点相对船心（力臂）
+                    const float crossZ = rx * pushZ - rz * pushX; // 2D 叉积（力臂 × 推开量）
+                    float yawRate = crossZ * kBoatPushTurnRate;
+                    if (yawRate > kBoatPushTurnMax) yawRate = kBoatPushTurnMax;
+                    if (yawRate < -kBoatPushTurnMax) yawRate = -kBoatPushTurnMax;
+                    if (yawRate != 0.0f) {
+                        b.yaw += yawRate * float(dt);
+                        // 归一到 [0,360)（QML eulerRotation 绑定常规域，防无限增长精度漂移）。
+                        while (b.yaw >= 360.0f) b.yaw -= 360.0f;
+                        while (b.yaw < 0.0f) b.yaw += 360.0f;
+                    }
+                }
                 changed = true;
             }
         }
@@ -282,8 +344,15 @@ void BoatManager::tick(qreal dt, World *world)
         //     修「放陆地悬空半格」（用户报③）+「陆地卡住沉底」（⑥：旧版无水时 Y 不变、卡在放船点；现落地贴
         //     支撑面，骑乘下船摆位才正常）+「放水上飞到水下」（②：旧版 hasWater 用船中心格 == Water 判，但船浮
         //     水面时中心格是水上空气 → 误判无水 → 重力拽船下沉；改用 waterSurfaceY 的扫柱结论判有无水，准）。
+        //   t630「2/3 支撑阈值」：waterSurfaceY 只看**中心列** —— 岸沿驶入时中心格一入水即判「有水」→ Y 钉
+        //     水面把仍压岸的 ≥1/3 船身拽下沉嵌岸块（「一半在水一半卡方块」根因）。改：中心列有水**且**
+        //     footprint 水域覆盖率 ≥ kBoatWaterFraction(2/3) 才走浮水；否则走无水陆档（重力贴支撑面）→
+        //     船身在岸上滑行直到 2/3 过沿才落水（机制等价 MC 船大部分船身离开岸才落水，不卡岸缝）。
         bool foundWater = false;
         const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
+        if (foundWater
+            && boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 1.0f) < kBoatWaterFraction)
+            foundWater = false; // t630：<2/3 船身在水（岸沿 1/3+ 仍压岸）→ 按陆档处理（不掉进水岸夹缝）
         const float dy = surfY - b.pos.y();
         if (foundWater) {
             if (std::fabs(dy) > 1e-3f) {
@@ -320,7 +389,12 @@ void BoatManager::tick(qreal dt, World *world)
             changed = true;
         }
         // 水平速度积分位移 + 逐轴碰撞（空船被推 / 残留惯性滑行；被骑船的操控位移由 tickRiddenBoat 推进）。
+        //   t630 撞碎荷叶：速度 > kBoatLilySmashSpeed 时先碾碎 footprint 内 LilyPad（清 Air + 掉物品），
+        //   再走位移碰撞（叶已清 → 不挡；低速叶仍挡，绕行）。
         if (b.vx != 0.0f || b.vz != 0.0f) {
+            if (std::sqrt(b.vx * b.vx + b.vz * b.vz) > kBoatLilySmashSpeed
+                && smashLilyPads(world, b.pos.x(), b.pos.y(), b.pos.z()))
+                changed = true;
             const float dx = b.vx * float(dt);
             const float dz = b.vz * float(dt);
             if (dx != 0.0f) {
@@ -361,8 +435,14 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     //   首个可踩实体）：冰族（Ice/PackIce/BlueIce，isIce 单一权威）= Ice 档；其余 = Land 档。
     //   前向介质不单独取样（档位取船中心列即可 —— 介质切换瞬态由 lerp 平滑；「前方是岸」的探测归
     //   下方水中碰岸停段，由 footprint 前向覆盖）。
+    //   t630「2/3 支撑阈值」（同 tick 段修法）：中心列有水但 footprint 水域覆盖 < 2/3（岸沿 1/3+ 船身仍
+    //   压岸）→ 判无水（陆档重力贴支撑面），修「岸→水骑乘驶入一半卡水一半卡方块」（旧版中心列一入水
+    //   即钉水面 Y + 水档推进，半船被拽沉嵌岸块）。船滑行到 2/3 船身过沿才切水档落水，平滑不卡。
     bool foundWater = false;
     const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
+    if (foundWater
+        && boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 1.0f) < kBoatWaterFraction)
+        foundWater = false; // t630：<2/3 船身在水 → 陆档（不掉水岸夹缝）
     const quint8 below = blockBelowBoat(world, b.pos);
     const bool onIce = !foundWater && BlockRegistry::isIce(below);
 
@@ -415,6 +495,11 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     }
 
     const float speed = std::sqrt(b.vx * b.vx + b.vz * b.vz);
+
+    // t630 撞碎荷叶（同 tick 段修法）：骑乘船速度 > kBoatLilySmashSpeed 时先碾碎 footprint 内 LilyPad
+    //   （清 Air + emit lilyPadSmashed 掉物品），再走下方碰岸探测 / 位移碰撞（叶已清 → 叶不挡船不「撞岸」停）。
+    //   低速叶仍挡（绕行，机制等价 MC 慢速船被 lily pad 阻挡）。
+    if (world && speed > kBoatLilySmashSpeed) smashLilyPads(world, b.pos.x(), b.pos.y(), b.pos.z());
 
     // t611 修「撞岸后整船焊死不能动」（用户：撞到岸边应该还能倒退，后面是水）：t584 旧版探到岸（水面同高层
     //   有实心方块）即**双轴速度无条件清零** → 船贴岸后每帧 lerp 刚建起倒退速度就被清掉（清除在位移积分之前）

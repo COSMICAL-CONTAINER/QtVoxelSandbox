@@ -1795,6 +1795,12 @@ Window {
             itemEntities.spawnItem(x, y, z, plankId, 3)   // 木板 ×3（变体对应）
             itemEntities.spawnItem(x, y, z, 0x200 /*StickId*/, 2)  // 木棍 ×2
         }
+        // t630 船撞碎荷叶 → 掉睡莲物品（语义事件路由，同 onBoatBroken→spawnItem 模式）。
+        //   lilyPadSmashed 由 BoatManager::smashLilyPads（船速 > 阈值碾过 LilyPad）发。睡莲掉自身方块物品
+        //   （BlockRegistry::LilyPad dropId=自身、dropCount=1；LilyPad id=47 字面量，同 onMobDied 约定）。
+        function onLilyPadSmashed(x, y, z) {
+            itemEntities.spawnItem(x, y, z, 47 /*LilyPad*/, 1)
+        }
     }
 
     // t565 挖矿车 → 掉矿车物品（语义事件路由，同 onBoatBroken→spawnItem 模式；PLAN §2 分层）。

@@ -2393,9 +2393,10 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 
 ### 🅷 船（1 项）
 
-**t630** 船岸沿掉落阈值 2/3 + 撞荷叶 + 身体推船旋转
+**t630** 船岸沿掉落阈值 2/3 + 撞荷叶 + 身体推船旋转 ✅✅ 已完成（commit b224c3a；t643 死亡后船卡水为同一支撑判定 bug，随本修复消解——verified-by-fix）
 - 用户：「船从岸上往水里走下不去（一半卡水里一半卡方块——掉落触发太早）：船身 2/3 过去了再掉，1/3 还在岸上时不掉，就不会被卡住。船应能撞碎荷叶（速度够大撞成掉落物）。人撞船应有旋转效果（不只平移）。」
 - 修：① 船「有支撑」判定从 1/2 支撑改 2/3 支撑才不掉（boatmanager 支撑格采样权重）；② 船 footprint 碰荷叶（LilyPad）且速度>阈值 → 荷叶破掉掉落物（参照冰碎/雪层塌机制）；③ 玩家推船：推力加**扭矩**——推力作用点=碰撞点（玩家相对船心方向），船 yaw += 横向分量×系数（简化：玩家在船侧推 → yaw 偏转）。
+- 实修：① 新 boatFootprintWaterFraction（footprint 覆盖格水柱占比采样）——中心列有水**且**覆盖 ≥ kBoatWaterFraction(0.67) 才判「浮在水里」（tick 空船 + tickRiddenBoat 骑乘两路同门控）；< 2/3 走陆档重力贴支撑面 → 岸沿驶入不落水岸夹缝（旧版 waterSurfaceY 只看中心列 = 根因：中心一入水即钉水面把压岸半船拽沉嵌岸块）。② smashLilyPads：速度 > kBoatLilySmashSpeed(3.0) 时扫 footprint 两层格清 LilyPad（setWaterSilent 静默）+ emit lilyPadSmashed → 呈层 spawnItem 掉睡莲（Main.qml onLilyPadSmashed）；撞碎先于位移碰撞 → 高速碾过不停船、低速叶仍挡（绕行）。③ 推船扭矩：力臂 = 玩家接触点相对船心 (−dpx,−dpz)，2D 叉积（力臂×推开量）× kBoatPushTurnRate(1200) → yawRate，钳 ±kBoatPushTurnMax(25°/s)，yaw 归一 [0,360)；对心推叉积≈0 纯平移不转（力矩物理直觉），偏侧推船头慢偏转。
 
 ### 🅸 月相刷新（1 项小）
 

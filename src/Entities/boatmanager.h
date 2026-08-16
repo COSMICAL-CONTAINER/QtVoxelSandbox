@@ -147,6 +147,10 @@ signals:
     //   MC 1.0 船被「攻击 / 挖」掉完整船物品；被「高速撞墙」撞毁则掉散件（木板 + 木棍）—— 两路径语义不同，故两信号。
     //   boatType 暂不影响掉落物（两变体撞坏都掉木板 + 木棍；预留变体差异化）。
     void boatWrecked(int x, int y, int z, int boatType);
+    // t630 船撞碎荷叶（用户：船应能撞碎荷叶掉落物；机制等价 MC 1.0 船高速碾过 lily pad → 叶碎掉物品）：
+    //   smashLilyPads（tick / tickRiddenBoat 速度 > 阈值时的 footprint 扫）发本信号 → 呈层 spawnItem 掉
+    //   LilyPad 方块物品（同 boatBroken→spawnItem 模式，单向事件流）。坐标 = 被撞碎的睡莲格。
+    void lilyPadSmashed(int x, int y, int z);
 
 private:
     struct Boat {
@@ -195,12 +199,17 @@ private:
     //   review L10：ignoreIce=true（仅水档碰岸探测传）把冰族视作可通行（冰顶与水面同层，船应能滑上冰面；
     //   见 .cpp 实现处注释）；默认 false —— 位移 / 推船 / 支撑等实际碰撞仍把冰当实体。
     bool boatFootprintBlocked(World *world, float px, float py, float pz, bool ignoreIce = false) const;
+    // t630 船 footprint 水域覆盖率（0..1）：footprint 覆盖格中「该列有水柱」的格数占比（列从支撑层
+    //   probeY 向上扫 kWaterProbeDepth 格内有 Water 即算水列 —— 覆盖浅水 / 深水，取覆盖即可）。采样同
+    //   boatFootprintBlocked（floor(±半宽/半长) 格扫）。t630「2/3 支撑阈值」用：覆盖率 ≥ 2/3 才判「船浮
+    //   在水里」（foundWater 置真）；岸沿驶入时 1/3 仍在陆上（覆盖率 < 2/3）→ 走陆档重力贴地（不掉进
+    //   水岸夹缝），机制等价 MC 船大部分船身离开岸才落水。无 world → 返 0。
+    float boatFootprintWaterFraction(World *world, float px, float pz, float probeY) const;
     // 算船当前 XZ 列的水面 Y（找最顶水格 + 1 - kBoatDraft；无水 → 返当前 py 不浮）。用于浮水 lerp 目标。
     //   t508 二轮复盘：outFoundWater（可空）写真是否找到水柱 —— tick 据此判「浮水」vs「无水重力落地」
     //     （旧版用船中心格 == Water 判 hasWater，但船浮水面时中心格常是水上空气格 → 误判无水 → 重力把船拽下水，
     //     用户报②「放水上直接飞到水下」真因）。waterSurfaceY 内已扫水柱，复用其结论更准。
-    float waterSurfaceY(World *world, float px, float pz, float fallbackY, bool *outFoundWater = nullptr) const;
-    // 船当前所在「支撑面」的方块 id（判冰面加速）：从船中心所在格向下找首个**可踩实体方块**（含船中心格本身）。
+    float waterSurfaceY(World *world, float px, float pz, float fallbackY, bool *outFoundWater = nullptr) const;    // 船当前所在「支撑面」的方块 id（判冰面加速）：从船中心所在格向下找首个**可踩实体方块**（含船中心格本身）。
     //   t508 修：旧版固定读 floor(pos.y) − 1（船中心格的下方一格），但船中心本就浮在水面 / 冰面格内
     //   （pos.y = surfaceY + 1 − draft → floor = surface 格），「−1」跳过了船实际踩着的表面格 → 永远读到
     //   水底 / 冰下，冰面加速从未生效。改：自船中心格向下扫（含本格）首个可踩实体（isCollidable）→ 船在
@@ -208,6 +217,13 @@ private:
     //   t584：介质档判定（tickRiddenBoat）先看 waterSurfaceY 的扫柱结论（有水 → Water 档，浅水船读到水底
     //   沙 / 石不误判陆档），无水才读本返回值判 Ice / Land 档。
     quint8 blockBelowBoat(World *world, const QVector3D &boatPos) const;
+    // t630 撞碎荷叶：船速 > kBoatLilySmashSpeed 时扫 footprint 覆盖格（船中心层 + 下一层，匹配
+    //   boatFootprintBlocked 的两层采样），命中 LilyPad → setWaterSilent 清为 Air（静默写：非玩家破块，
+    //   同 EntityManager 留雪路径）+ emit lilyPadSmashed（呈层掉睡莲物品）+ 返 true（caller 标 changed）。
+    //   撞碎**先于**位移碰撞判定（tick / tickRiddenBoat 调用顺序）→ 高速船碾碎叶后本帧可继续前进（叶
+    //   isCollidable=true 若不清会把船挡停在叶前 =「撞不动」）；低速（< 阈值）不碎 → 叶仍挡船（绕行，
+    //   机制等价 MC 慢速船被 lily pad 阻挡、高速碾碎）。无 world / 无命中 → false（零开销早退）。
+    bool smashLilyPads(World *world, float px, float py, float pz);
 
     static constexpr int kCap = 64;            // 船数上限（防溢出；船相对稀有，cap 取 mob 量级）
     // 船几何 / 物理常量（机制等价 MC 1.0 boat；手感可玩）：
@@ -278,6 +294,25 @@ private:
     // review L12 放船点最小间距（blocks）：spawnBoat 拒与既有活体船中心距 < 本值的落点（防两船同格叠加；
     //   取 1.4 = 船身全长，两船中心至少隔一船身不嵌位）。见 spawnBoat 实现处注释。
     static constexpr float kBoatMinSpawnDist = 1.4f;
+    // t630 水域覆盖列向上探测深度（格）：boatFootprintWaterFraction 自支撑层参考格向上扫本深度内有 Water
+    //   即算水列（覆盖浅 1 格水到深水；岸边水底常在水面下 ≥2 格 → 3 格够）。
+    static constexpr int kWaterProbeDepth = 3;
+    // t630「2/3 支撑阈值」（用户：船身 2/3 过去了再掉，1/3 还在岸上时不掉不卡）：footprint 水域覆盖率
+    //   ≥ 本值才判「浮在水里」（foundWater 置真 → Y 钉水面 / 水档推进）；< 本值（≥1/3 船身仍在岸上）→ 走
+    //   无水陆档（重力贴支撑面）。旧版 waterSurfaceY 只看**中心列**（中心格一入水岸沿即判有水 → Y 钉水面
+    //   把仍压岸的半船拽下沉 → 与岸块嵌入互卡 =「一半在水一半卡方块」根因）。0.67 ≈ 4/6 格（footprint 6 格）。
+    static constexpr float kBoatWaterFraction = 0.67f;
+    // t630 船撞碎荷叶速度阈值（blocks/s）：船速 > 本值时碾过 LilyPad → 叶碎掉物品（机制等价 MC 1.0 船
+    //   高速撞碎 lily pad）；低于阈值叶挡船（绕行）。取 3.0（水档满速 8 的 ~1/3：轻推不碎、正常行驶碾碎，
+    //   陆档 2.4 顶速 < 3.0 → 陆上推船不误碎岸边叶）。
+    static constexpr float kBoatLilySmashSpeed = 3.0f;
+    // t630 身体推船旋转参数（用户：人撞船应有旋转效果）：玩家偏侧推船 → 力臂叉积产生 yawRate（度/s）。
+    //   kBoatPushTurnRate：叉积（力臂[格] × 推开量[格]）→ 度/s 的转换系数。接触分离量本身很小（每帧挤出
+    //   重叠区 ~0.01-0.05 格），系数取 1200 使偏侧推持续顶船时 yawRate 到可观值（~5-15 度/s 慢偏转，
+    //   「撞船船头被别转」手感，非甩头）；对心推（力臂≈0）叉积≈0 → 纯平移不转（力矩物理直觉）。
+    //   kBoatPushTurnMax：yawRate 钳制上限（度/s）防深穿叠瞬间（如出生重叠 1.4 内）大叉积甩头。
+    static constexpr float kBoatPushTurnRate = 1200.0f;
+    static constexpr float kBoatPushTurnMax  = 25.0f;
 };
 
 #endif // BOATMANAGER_H
