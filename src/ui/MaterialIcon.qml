@@ -67,11 +67,15 @@ Item {
         //   Core anchor01）返回对应帧文件（_rev 触碰 animRevision：帧真变才 ++ → 本绑定重查帧路径，全工程
         //   图标统一刷帧；`_rev >= 0` 恒真守卫同 AOT 规避，缺它帧永远不换）。无帧序列（pack 关 / 无帧文件）
         //   → 返空串 → 落回 itemIconSource（静态 compass.png/clock.png 或自绘，不动）。
+        //   review-L17：_rev 读移入 compass/clock 分支内 —— 原在 if 外全绑定读 animRevision → 帧推进
+        //   （至多 4Hz）时全工程每个 MaterialIcon 实例都重跑 itemIconSource（互斥锁 + ~170 项映射扫描 +
+        //   QFile::exists），多数与动画无关。QML 绑定依赖按每次求值实际读到的属性注册：非 compass/clock
+        //   分支不读 animRevision → 帧 bump 不再触发其余图标重查（同 Main.qml L3 可见性门模式）。
         source: {
             const _a = rp.active
             const _id = root.materialId
-            const _rev = rp.animRevision
             if (_id === 0x23F || _id === 0x240) {
+                const _rev = rp.animRevision
                 return _id >= 0 && _a >= 0 && _rev >= 0
                        ? (rp.animatedItemFrameSource(_id) || rp.itemIconSource(_id))
                        : ""
