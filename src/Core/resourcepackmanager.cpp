@@ -484,6 +484,13 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         //   default_redstone_lamp_off/on.png（tools/build_mineral_blocks.py 原创自绘）。
         {152, QStringLiteral("redstone_lamp_off.png")},         // redstone_lamp_off（红石灯 off 态灰暗壳；t620）
         {153, QStringLiteral("redstone_lamp_on.png")},          // redstone_lamp_on（红石灯 on 态暖黄亮芯；t620）
+        // t627 压力板家族扩展三 tile：MC 现代命名 stone_pressure_plate / heavy(铁)_weighted_pressure_plate /
+        //   light(金)_weighted_pressure_plate（demo 包 1.8.2.2 实测**无**这三个文件——1.8 的铁/金板是
+        //   weighted_pressure_plate 命名族，demo 包未收录；缺则安全跳过保程序生成瓦片，映射慷慨无害）。
+        //   非 pack 回落 default_*_pressure_plate.png（tools/build_pressure_plates.py 原创自绘）。
+        {154, QStringLiteral("stone_pressure_plate.png")},          // stone_pressure_plate（石压力板；t627）
+        {155, QStringLiteral("heavy_weighted_pressure_plate.png")}, // iron_pressure_plate（铁/重质压力板；t627）
+        {156, QStringLiteral("light_weighted_pressure_plate.png")}, // gold_pressure_plate（金/轻质压力板；t627）
         // t620 仙人掌底面：Cactus def 底面 tile=54（cactus_top 复用——程序贴图时代顶底同图）；pack 内
         //   cactus_bottom.png 与 cactus_top.png 像素实测不同（251/256 像素差，底面更暗、无中央凹陷）。但
         //   本工程仙人掌是 0.8 细柱（PartialBlockGeometry Cactus case）—— pushBox 侧·底统一用 sideTile(55)，

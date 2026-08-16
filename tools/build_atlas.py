@@ -324,6 +324,12 @@ TILES = [
     #   state bit0（右键开关）选 152/153 全六面换；光照由 lightEmission 状态感知版 15/0 承担）。
     "default_redstone_lamp_off",  # 152 redstone_lamp_off（红石灯 off 态：暗黄褐哑壳 + 中央暗红红石芯纹）
     "default_redstone_lamp_on",   # 153 redstone_lamp_on（红石灯 on 态：暖琥珀亮壳 + 中心白热核；光 15）
+    # t627 压力板家族扩展（机制等价 MC 1.0 stone / iron(heavy) / gold(light) pressure plate）。各由
+    #   build_pressure_plates.py 程序生成原创像素图（贴地薄板专用瓦片——边框暗带 + 中央板面，区别于整块族贴图）。
+    #   mesher 走 PartialBlockGeometry 的 plate case（同 WoodPressurePlate 薄板几何；踩下态 state bit0 压半高）。
+    "default_stone_pressure_plate",  # 154 stone_pressure_plate（石压力板：石质灰底 + 边框暗带 + 中央板面微亮内圈）
+    "default_iron_pressure_plate",   # 155 iron_pressure_plate（铁压力板：金属浅灰底 + 四角铆钉——重质，仅玩家/mob 触发）
+    "default_gold_pressure_plate",   # 156 gold_pressure_plate（金压力板：金黄底 + 中央亮金板面——轻质，掉落物即触发）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

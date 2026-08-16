@@ -20,7 +20,8 @@
 //   slab        bit0      = 上半(1)/下半(0)
 //   stairs      bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 / 背墙在对侧） bit2=上下倒置（整步在上、背墙在下）
 //   fence       —         （中心立柱 1.5 高 + 四向横档连邻居；state=0；连接判定读 PartialNeighborCtx，t209）
-//   pressure_plate —      （贴地薄板；state=0）
+//   pressure_plate —      （贴地薄板；state bit0=踩下（t627）→ 板高压半 1/32；机制等价 MC 压力板被压下）
+//   lever/button —        （贴地薄板（同压力板几何）；state bit0=激活态高光）
 //   door        bit[1:0]=朝向(0=+X 1=-X 2=+Z 3=-Z) bit2=开(1)/合(0) bit3=上格(1)/下格(0)
 //   trapdoor    bit0=开(1)/合(0) bit[2:1]=开时朝向(0=+X 1=-X 2=+Z 3=-Z)
 //
@@ -227,10 +228,18 @@ int PartialBlockGeometry::append(
         }
         break;
     }
+    // t627 压力板家族五件（wood/cobble/stone/iron/gold 同 case）+ 踩下视觉：贴地薄板（1/16 厚 + 1/16 边距）；
+    //   踩下态（state bit0 = PressurePlateStatePressedFlag，updatePressurePlates 踩下沿置位 / 离开沿清位）
+    //   把板高压半到 1/32（机制等价 MC 1.0 压力板被压下变矮——「踩下去」的视觉反馈）。踩下不改水平边距/碰撞。
     case BlockRegistry::WoodPressurePlate:
-    case BlockRegistry::CobblePressurePlate: { // t412 圆石压力板（与 WoodPressurePlate 同几何）
-        // 贴地薄板（1/16 厚 + 1/16 边距）。
-        pushBox(verts, idx, lx, ly, lz, 0.0625f, 0.9375f, 0.f, 0.0625f, 0.0625f, 0.9375f,
+    case BlockRegistry::CobblePressurePlate: // t412 圆石压力板（与 WoodPressurePlate 同几何）
+    case BlockRegistry::StonePressurePlate:  // t627 石压力板（家族扩展）
+    case BlockRegistry::IronPressurePlate:   // t627 铁压力板（重质）
+    case BlockRegistry::GoldPressurePlate: { // t627 金压力板（轻质）
+        const float plateTop = (state & BlockRegistry::PressurePlateStatePressedFlag)
+                                   ? (1.0f / 32.0f)   // 踩下：板高压半（1/32）
+                                   : (1.0f / 16.0f);  // 常态：1/16 薄板
+        pushBox(verts, idx, lx, ly, lz, 0.0625f, 0.9375f, 0.f, plateTop, 0.0625f, 0.9375f,
                 tile, light, tileW, hx, hy, v0, v1);
         break;
     }

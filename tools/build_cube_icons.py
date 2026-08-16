@@ -379,6 +379,14 @@ PARTIALS_3D_IGNITER = [
     ("stone_button", "default_stone_button", "default_stone_button"), # 石按钮（石质底座+凸钮）
 ]
 
+# t627 压力板家族扩展图标（stone / iron / gold pressure plate）：pressure_plate shape（同木/圆石压力板流程），
+#   fill = 各自独立瓦片（build_pressure_plates.py：石灰/金属铆钉/亮金板面）。材质色一眼可辨「这是哪种板」。
+PARTIALS_3D_PLATE_FAMILY = [
+    ("stone_pressure_plate", "default_stone_pressure_plate", "default_stone_pressure_plate"),
+    ("iron_pressure_plate",  "default_iron_pressure_plate",  "default_iron_pressure_plate"),
+    ("gold_pressure_plate",  "default_gold_pressure_plate",  "default_gold_pressure_plate"),
+]
+
 
 def project_pt(x, y, z, cy_local, scale=1.0):
     """dimetric 投影 unit cube [0,1]^3 → 画布坐标。复用 render() 的 hw/dv/v/cx 几何；cy 可调以按形状竖直居中。
@@ -652,6 +660,12 @@ def main():
         print("wrote", os.path.relpath(out_path, HERE), img.size)
     # t490 手动 TNT 点火机关 3D dimetric 立体图标（pressure_plate shape + 各机关贴图 fill；机制等价木 / 石压力板图标流程）。
     for out_name, fill_top, fill_side in PARTIALS_3D_IGNITER:
+        img = render_partial_3d("pressure_plate", fill_top, fill_side)
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t627 压力板家族扩展 3D dimetric 立体图标（pressure_plate shape + 各自独立瓦片 fill；机制等价木/圆石压力板图标流程）。
+    for out_name, fill_top, fill_side in PARTIALS_3D_PLATE_FAMILY:
         img = render_partial_3d("pressure_plate", fill_top, fill_side)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)

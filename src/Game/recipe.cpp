@@ -858,6 +858,23 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::Cobble), 0,                         int(BlockRegistry::Cobble),
         int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble) },
       int(BlockRegistry::Dropper), 1, 1, "dropper" },
+    // t627 压力板家族扩展配方（机制等价 MC 1.0 压力板 2 材料横排；同 wood_pressure_plate 的 2×2 背包栏模式——
+    //   cobble_plate 历史误用 Table3x3，本族按 MC/木板口径统一 Inventory2x2）。
+    //   stone_pressure_plate：2 石头横排 → 1（有序 2×2；最小包围盒 2×1）。多重集 {Stone:2} 唯一 → 不冲突。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { int(BlockRegistry::Stone), int(BlockRegistry::Stone), 0,
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::StonePressurePlate), 1, 1, "stone_pressure_plate" },
+    //   iron_pressure_plate：2 铁锭横排 → 1（有序 2×2；重质板——仅玩家/mob 触发）。多重集 {IronIngot:2} 唯一。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, 0,
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::IronPressurePlate), 1, 1, "iron_pressure_plate" },
+    //   gold_pressure_plate：2 金锭横排 → 1（有序 2×2；轻质板——掉落物即触发）。多重集 {GoldIngot:2} 唯一。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, 0,
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::GoldPressurePlate), 1, 1, "gold_pressure_plate" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

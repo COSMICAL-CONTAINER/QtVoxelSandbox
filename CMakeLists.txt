@@ -299,6 +299,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_lever.png               # t490 杠杆贴图（build_lever_button.py；木质底座+竖直扳柄+圆柄头；手动点火机关）
         textures/default_wood_button.png         # t490 木按钮贴图（build_lever_button.py；木质底座+凸起圆钮）
         textures/default_stone_button.png        # t490 石按钮贴图（build_lever_button.py；石质底座+凸起圆钮）
+        textures/default_stone_pressure_plate.png # t627 石压力板贴图（build_pressure_plates.py；石质灰底+边框暗带+中央板面微亮内圈）
+        textures/default_iron_pressure_plate.png  # t627 铁压力板贴图（build_pressure_plates.py；金属浅灰底+四角铆钉；重质板）
+        textures/default_gold_pressure_plate.png  # t627 金压力板贴图（build_pressure_plates.py；金黄底+中央亮金板面；轻质板）
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
@@ -448,6 +451,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_lever.png                  # t490 杠杆立方体图标（build_cube_icons.py；pressure_plate shape+lever 贴图；手动点火机关）
         textures/icon_wood_button.png            # t490 木按钮立方体图标（build_cube_icons.py；pressure_plate shape+wood_button 贴图）
         textures/icon_stone_button.png           # t490 石按钮立方体图标（build_cube_icons.py；pressure_plate shape+stone_button 贴图）
+        textures/icon_stone_pressure_plate.png   # t627 石压力板 3D 薄板图标（build_cube_icons.py；石质灰）
+        textures/icon_iron_pressure_plate.png    # t627 铁压力板 3D 薄板图标（build_cube_icons.py；金属铆钉；重质）
+        textures/icon_gold_pressure_plate.png    # t627 金压力板 3D 薄板图标（build_cube_icons.py；亮金；轻质）
         textures/icon_crafting_table.png         # t50/t492 工作台立方体图标（build_cube_icons.py；正面为主投影，显正面网格）
         textures/icon_dirt.png
         textures/icon_furnace.png                # t80/t492 熔炉立方体图标（build_cube_icons.py；正面为主投影，显炉口）

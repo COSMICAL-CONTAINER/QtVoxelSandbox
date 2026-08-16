@@ -4,6 +4,7 @@
 #include <QCursor>
 #include <QElapsedTimer>
 #include <QHash>
+#include <QSet> // t627 压力板边沿触发集（m_platePressedCells / m_plateJustPressed）
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTimer>
@@ -906,6 +907,20 @@ private:
     //   mobAttackedPlayer 仅 Survival 应用，创造 / 观察者无伤跳过，同 Stalker）。向下依赖 World（blockAt）+
     //   EntityManager（detonateTntBlock）+ BlockRegistry（isTnt / isPressurePlate），不写栅格（破坏由 detonate 负责）。
     void scanTntTraps();
+    // t627 压力板触发态更新（边沿触发的单一权威；见 m_platePressedCells / m_plateJustPressed 注释）。
+    //   每 tick 先跑（在 scanTntTraps / scanDispenserTraps 之前——两者只消费本 tick 算出的踩下沿）：
+    //   (1) 收集当前被压下的压力板格全集——玩家 footprint（非观察者——观察者无碰撞不压板；同 MC spectator
+    //       不触发机关）+ EntityManager 全体活体 mob（feet 格 = floor(pos - halfH)）+ ItemEntityManager 全体
+    //       活体掉落物（feet 格 = floor(pos)），各源经 BlockRegistry::pressurePlateAccepts 权重判定
+    //       （wood/cobble/stone=全触发 / iron=仅玩家+mob / gold=仅掉落物）后并入集合；
+    //   (2) 边沿检测：新进集合 = 本 tick 踩下沿 → 写 m_plateJustPressed + 置该板 state bit0
+    //       （PressurePlateStatePressedFlag，5 参数 setBlock → mesher 薄板压半高）；离开集合 → 清 state bit0；
+    //   (3) m_platePressedCells = 新集合。持续踩着 → 无新沿 → 下游（TNT 点燃 / 发射器）不再触发；
+    //   离开（走开 / mob 走开 / 掉落物被拾走）→ 移出集合，再踩产生新沿 → 再触发（踩一次触发一次）。
+    //   门控：无世界 → 两表清空。开销：每 tick 至多「mob 数 + 掉落物数 + footprint 格数」次 blockAt（与
+    //   arrowPickupScan 同量级）。分层：读 World（blockAt/stateAt/setBlock）+ EntityManager/ItemEntityManager
+    //   （posAt）+ BlockRegistry 谓词，不写栅格外的状态。
+    void updatePressurePlates();
     // t486 发射器陷阱触发（spec「踩压力板 → 邻接发射器射箭」）：扫玩家 footprint 格——任一格为压力板
     //   （Wood/Cobble）且其 4 水平邻格（同 Y）之一 == Dispenser → 触发该发射器。每发射器 per-dispenser
     //   冷却（m_dispenserCooldowns，防每帧刷屏满天箭；机制等价 MC 发射器触发间隔）。门控：死亡 / 无世界 /
@@ -922,6 +937,10 @@ private:
     //   dispenser 同属机关）；投掷器走 dispenseFromDispenser 的 Dropper 分支（全部物品弹出掉落物，无
     //   fallback 箭——worldgen 不生成投掷器陷阱）。
     void scanDispenserTraps(float dt);
+    // t627/t628 发射器 / 投掷器单次触发（见 playercontroller.cpp 头注释）：per-dispenser 冷却闸 + state 朝向
+    //   解码 + 库存分派 / 神殿 fallback 箭 + 写冷却。踩板沿（scanDispenserTraps）与拉杆/按钮右键沿（t628
+    //   isManualIgniter 分支）共用——两条触发路径（自动踩板 / 手动扳机关）汇入同一机器触发语义。
+    bool fireDispenserAt(int dx, int dy, int dz, quint8 db);
     // t579/t580/t608 从发射器 (x,y,z) 朝 dir（单位向量，**发射器 state 朝向面的外向**，t608 起由 scanDispenserTraps
     //   据 state 解出传入）取出首个可用槽内容物并发射 + 扣 1 库存。发射位（统一排出口）= 发射器格中心 + dir×0.5
     //   （箭 / 雪球 / 鸡蛋 / 掉落物同一口）。分派表（机制等价 MC 1.0 发射器按物品种类分派；t608 统一手持口径）：
@@ -982,6 +1001,16 @@ private:
     //   重新续时（光不闪断）；离开 → 倒计时自熄（机制等价 MC 触发发光一次点亮窗口）。换世界清空（同
     //   m_dispenserCooldowns 模式）。无红石矿场景恒空（零开销）。
     QHash<quint64, float> m_redstoneLitCells;
+    // t627 压力板边沿触发态（两表都以「打包格坐标键」为键；扫描见 updatePressurePlates 头注释）：
+    //   m_platePressedCells = 当前 tick 被（玩家/mob/掉落物，按权重）压下的压力板全集。持续踩着恒在表内 →
+    //     下 tick 无新沿 → 不再触发（修「一直踩着往里放东西会一直喷」）；离开（实体移开/被拾取/死亡）→ 移出。
+    //   m_plateJustPressed = 本 tick 新出现的踩下沿（= 本 tick 集合 − 上 tick 集合）。scanTntTraps /
+    //     scanDispenserTraps 只对沿上的板触发（踩一次 fire 一次；走开回位，下次再踩再触发）。每 tick 开头
+    //     由 updatePressurePlates 重建（生命周期一帧）。换世界清空（防跨世界同坐标串扰，同 m_dispenserCooldowns）。
+    //   踩下视觉（state bit0）由 updatePressurePlates 在沿上置位 / 离开沿清位（5 参数 setBlock，id 不变只
+    //   state 变 → 仅 worldChanged 重建 mesh，同门开合模式）。无压力板场景两表恒空（零开销）。
+    QSet<quint64> m_platePressedCells;
+    QSet<quint64> m_plateJustPressed;
     // t178 帧时间切分：累加每 tick 的主线程 CPU 耗时（ns），每 ~60 tick（≈1s@60Hz）算平均写 m_simMs + emit。
     float m_simMs = 0.0f;
     qint64 m_simAccumNs = 0;

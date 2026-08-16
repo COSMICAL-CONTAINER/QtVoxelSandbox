@@ -603,6 +603,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   各面贴图=redstone_lamp_off(152)（def 默认；on 态 tileFor 换 153）。音色归 GroupStone（玻璃质）。
     //   配方：4 红石粉 + 1 玻璃 → 1（recipe.cpp 十字围心；无荧石用玻璃作壳）。
     /* redstone_lamp*/ {int(BlockRegistry::RedstoneLamp),      152,152,152,152, true,  BlockRegistry::ShapeFull,     0.3f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::RedstoneLamp),    1, 64, "redstone_lamp","红石灯"},
+    // ── t627 压力板家族扩展（stone / iron(heavy) / gold(light)；机制等价 MC 1.0 三板）。贴地薄板专用瓦片
+    //   154..156（build_pressure_plates.py：边框暗带 + 中央板面 + 材质底噪）。触发权重：stone=玩家+mob+掉落物
+    //   （同木/圆石板）/ iron=仅玩家+mob（重质）/ gold=仅掉落物（轻质）——pressurePlateAccepts 单一权威。
+    //   踩下沿 fire 一次 + state bit0 压半高视觉（t627 边沿化，见 blockregistry.h 段注释）。
+    /* stone_pressure_plate */ {int(BlockRegistry::StonePressurePlate), 154,154,154,154, false, BlockRegistry::ShapePlate, 0.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::StonePressurePlate), 1, 64, "stone_pressure_plate", "石压力板"},
+    /* iron_pressure_plate  */ {int(BlockRegistry::IronPressurePlate),  155,155,155,155, false, BlockRegistry::ShapePlate, 0.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::IronPressurePlate),  1, 64, "iron_pressure_plate",  "铁压力板"},
+    /* gold_pressure_plate  */ {int(BlockRegistry::GoldPressurePlate),  156,156,156,156, false, BlockRegistry::ShapePlate, 0.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::GoldPressurePlate),  1, 64, "gold_pressure_plate",  "金压力板"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -738,6 +745,12 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* gold_block              */ 41,  // t620 金块 → MC 1.0 gold block id 41
     /* redstone_block          */ 0,   // t620 红石块（MC 1.5+ 才有；1.0 无）
     /* redstone_lamp           */ 0,   // t620 红石灯（MC 1.2+ 才有；1.0 无；on/off 由本项目 state bit0 分）
+    // t627 压力板家族扩展 → MC 1.0 对齐：stone plate id 70 / iron(heavy weighted) plate id 71 / gold(light
+    //   weighted) plate id 72（三者 MC 1.0 均存在——iron/gold 在 MC 是「weighted pressure plate」，本工程按
+    //   材质直呼铁/金压力板，机制对齐重/轻触发权重）。
+    /* stone_pressure_plate    */ 70,  // t627 石压力板 → MC 1.0 stone pressure plate id 70
+    /* iron_pressure_plate     */ 71,  // t627 铁压力板 → MC 1.0 heavy weighted pressure plate id 71
+    /* gold_pressure_plate     */ 72,  // t627 金压力板 → MC 1.0 light weighted pressure plate id 72
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -778,12 +791,32 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
     if (blockId == SpruceSlab || blockId == SpruceFence || blockId == SpruceDoor) return true; // t466 段外云杉木制品（与 WoodSlab/WoodFence/WoodDoor 同几何）
     if (blockId == StoneBrickSlab || blockId == StoneBrickStairs) return true; // t487 段外石砖台阶/楼梯（与 WoodSlab/WoodStairs 同几何）
     if (blockId == Lever || blockId == WoodButton || blockId == StoneButton) return true; // t490 段外手动点火机关（与 WoodPressurePlate 同几何：贴地薄板）
+    if (blockId == StonePressurePlate || blockId == IronPressurePlate
+        || blockId == GoldPressurePlate) return true; // t627 段外压力板家族扩展（与 WoodPressurePlate 同几何：贴地薄板）
     return blockId >= FirstPartial && blockId <= LastPartial;
 }
 bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab || blockId == SpruceSlab || blockId == StoneBrickSlab; }
 bool BlockRegistry::isStairs(quint8 blockId)         { return blockId == WoodStairs || blockId == CobbleStairs || blockId == StoneBrickStairs; }
 bool BlockRegistry::isFence(quint8 blockId)          { return blockId == WoodFence || blockId == CobbleFence || blockId == SpruceFence; }
-bool BlockRegistry::isPressurePlate(quint8 blockId)  { return blockId == WoodPressurePlate || blockId == CobblePressurePlate; }
+// t627 扩展：压力板族五件（wood/cobble/stone/iron/gold——后三件为 t627 家族扩展）。放置放宽 / 失撑掉落 /
+//   mesher plate case / 触发扫描统一读本谓词。
+bool BlockRegistry::isPressurePlate(quint8 blockId)
+{
+    return blockId == WoodPressurePlate || blockId == CobblePressurePlate
+        || blockId == StonePressurePlate || blockId == IronPressurePlate
+        || blockId == GoldPressurePlate;
+}
+
+// t627 压力板触发权重单一权威（见 .h 注释）：wood/cobble/stone=玩家+mob+掉落物全触发；iron=仅玩家+mob
+//   （重质金属板——掉落物太轻不触发）；gold=仅掉落物（轻质金板——dev-plan t627 口径「金=仅掉落物（轻）」，
+//   机制等价 MC 1.0 light weighted plate 的物品级灵敏度本地化）。非压力板 → false。
+bool BlockRegistry::pressurePlateAccepts(quint8 blockId, bool byItem)
+{
+    if (blockId == IronPressurePlate) return !byItem;  // 铁（重）：仅玩家 + mob
+    if (blockId == GoldPressurePlate) return byItem;   // 金（轻）：仅掉落物
+    if (isPressurePlate(blockId))     return true;     // 木/圆石/石：全触发
+    return false;                                      // 非压力板
+}
 
 // t466 门方块统一谓词（单一权威，段外云杉门并入）：blockId == WoodDoor（连续段内）或 SpruceDoor（段外）即门。
 //   供 playercontroller 的门放置 / 右键开合 / 破坏联动统一读，避免各处硬编码 WoodDoor id 判定（同 isFence
@@ -1494,6 +1527,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case CoalBlock: case LapisBlock: case DiamondBlock: // t620 矿物存储块 → 石质音色（金属质，同 iron_block 族）
     case GoldBlock: case RedstoneBlock: // t620 金块 / 红石块 → 石质音色（同 iron_block 族）
     case RedstoneLamp: // t620 红石灯 → 石质音色（玻璃质敲击，同 glass / ice 族）
+    case StonePressurePlate: case IronPressurePlate: case GoldPressurePlate: // t627 压力板族扩展 → 石质音色（石质/金属质薄板）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

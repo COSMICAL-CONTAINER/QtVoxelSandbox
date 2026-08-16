@@ -137,6 +137,11 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CobbleStairs:        return "icon_cobble_stairs.png";        // 圆石楼梯：3D L 阶（背墙 + 整步）
     case BlockRegistry::CobbleFence:         return "icon_cobble_fence.png";         // 圆石墙：3D 立柱 + 横档
     case BlockRegistry::CobblePressurePlate: return "icon_cobble_pressure_plate.png";// 圆石压力板：3D 更薄更小
+    // t627 压力板家族扩展图标（stone/iron/gold）：pressure_plate shape 3D 薄板 + 各自独立瓦片 fill
+    //   （石灰板面 / 金属铆钉 / 亮金板面），材质色一眼可辨「这是哪种板」。tools/build_cube_icons.py 生成。
+    case BlockRegistry::StonePressurePlate:  return "icon_stone_pressure_plate.png"; // 石压力板：3D 薄板（石质灰）
+    case BlockRegistry::IronPressurePlate:   return "icon_iron_pressure_plate.png";  // 铁压力板：3D 薄板（金属铆钉；重质）
+    case BlockRegistry::GoldPressurePlate:   return "icon_gold_pressure_plate.png";  // 金压力板：3D 薄板（亮金；轻质）
     // t466 云杉木制品链图标：云杉木板（立方体 3D）/ 云杉台阶（3D 半高盒）/ 云杉栅栏（3D 立柱+横档）/ 云杉门
     //   （3D 两格高薄板）。同橡木木制品图标流程，仅 fill 换 default_spruce_planks（深色木纹）。tools/build_cube_icons.py
     //   程序生成；与橡木木制品图标形状一致但贴图深色 → 肉眼即可辨「云杉」。
@@ -573,6 +578,10 @@ QVariantList Hotbar::creativeBlocks() const
              // t412 圆石变体（cobble variants）：石质半方块（台阶 / 楼梯 / 墙 / 压力板），复用异形方块系统 + 圆石贴图。
              int(BlockRegistry::CobbleSlab),        int(BlockRegistry::CobbleStairs),
              int(BlockRegistry::CobbleFence),       int(BlockRegistry::CobblePressurePlate),
+             // t627 压力板家族扩展（stone/iron/gold；机关件——紧随圆石压力板排列）。触发权重：石=全触发 /
+             //   铁=仅玩家+mob（重）/ 金=仅掉落物（轻）；踩下沿 fire 一次（边沿触发，走开回位再踩再触发）。
+             int(BlockRegistry::StonePressurePlate), int(BlockRegistry::IronPressurePlate),
+             int(BlockRegistry::GoldPressurePlate),
              int(BlockRegistry::Ladder),                                     // t413 木梯（竖直爬行梯；玩家入格+按前向上爬；可放置）
              // t244 cross 广告牌方块（透明底 cutout；与火把同走非整立方渲染）：
              int(BlockRegistry::TallGrass),                                     // 草丛（worldgen 散布 / 杀草掉种子）

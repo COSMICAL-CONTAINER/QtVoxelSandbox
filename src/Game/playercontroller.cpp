@@ -106,6 +106,8 @@ void PlayerController::setWorld(World *w)
     m_world = w;
     m_dispenserCooldowns.clear(); // t486：换世界清发射器冷却（防跨世界同坐标串扰；冷却键按世界坐标打包）
     m_redstoneLitCells.clear();   // t569：换世界清红石矿点亮表（防跨世界同坐标串扰；键按世界坐标打包）
+    m_platePressedCells.clear();  // t627：换世界清压力板触发态（防跨世界同坐标串扰；键按世界坐标打包）
+    m_plateJustPressed.clear();   // t627：同上（沿表生命周期一帧，但换世界须一并清防陈旧沿触发）
     snapSpawnToGround(); // t137：世界注入后贴地表（构造期 m_pos=kSpawnY 兜底，此处覆盖为真实地表）
     emit worldChanged();
 }
@@ -660,11 +662,15 @@ void PlayerController::tickImpl()
     // t323 嵌入箭近距拾取（与掉落物拾取同级常开：背包开 / 失焦时玩家仍可走近拾嵌入箭）。内自检
     //   m_entityManager/m_hotbar 非空 + 死亡 / 观察者门控，常开安全（同 pickupScan）。
     arrowPickupScan();
-    // t485 TNT 陷阱触发（踩压力板引爆）：与拾取同级常开（玩家走进入密室踩板即触发，独立于捕获态）。
-    //   内自检 m_entityManager/m_world 非空 + 死亡门控，常开安全（同 pickupScan / arrowPickupScan）。
+    // t627 压力板触发态更新（边沿触发单一权威）：先算本 tick 踩下沿集（玩家/mob/掉落物按权重压板 +
+    //   踩下视觉 state bit），再供下方 scanTntTraps / scanDispenserTraps 消费（两者只对沿触发——踩一次
+    //   fire 一次，持续踩着不重复；走开回位再踩再触发）。与拾取同级常开（掉落物落板即触发，独立于
+    //   捕获态）。内自检；无板场景两表恒空（零开销）。
+    updatePressurePlates();
+    // t485 TNT 陷阱触发（踩压力板沿引爆）：只处理 updatePressurePlates 算出的本 tick 踩下沿。
     scanTntTraps();
-    // t486 发射器陷阱触发（踩压力板 → 邻接发射器射箭）：与 TNT 陷阱同级常开（玩家走入神殿走廊踩板即射箭，
-    //   独立于捕获态）。内自检 + 死亡门控；per-dispenser 冷却防每帧刷屏。dt 用于冷却递减。
+    // t486 发射器陷阱触发（踩压力板沿 → 邻接发射器/投掷器 fire 一次）：与 TNT 陷阱同级常开；只处理本
+    //   tick 踩下沿；per-dispenser 冷却防抖。dt 用于冷却递减。
     scanDispenserTraps(dt);
     // t569 红石矿石点亮触发（玩家走近红石矿即微弱红光，机制等价 MC 触发发光）：与拾取同级常开（玩家走过
     //   红石矿旁即触发，独立于捕获态）。内自检 + 死亡门控；点亮表到期自熄。dt 用于倒计时递减。
@@ -3698,54 +3704,132 @@ void PlayerController::arrowPickupScan()
     }
 }
 
-// t485/t490 TNT 陷阱触发（见 playercontroller.h 头注释）。扫玩家 footprint 格：
-//   (a) 旧路径：压力板下垫 TNT（feetY-1）→ 直接引爆（spec 沙漠神殿经典陷阱：板下 TNT 块即引爆）。
-//   (b) t490 新增：玩家踩的压力板，其 **水平四邻格** 有 TntBlock → 点燃（移除 TNT 方块 + spawnPrimedTnt，
-//       引燃态实体延时引爆触发连锁）。机制等价 MC 1.0 压力板经红石点燃邻接 TNT（本项目无红石，故「踩板即点燃
-//       四邻 TNT」直接绑在 footprint 扫描上）。点燃 TNT 块转 PrimedTnt（非直接引爆）→ fuse 倒计 ~5s → 引爆
-//       → detonateTntSphere 内链式引燃邻接 TNT → 连锁全爆（spec「创造放多 TNT + 点燃一个 → 连锁全爆」）。
+// t485/t490 TNT 陷阱触发（见 playercontroller.h 头注释）。**t627 边沿化**：不再扫玩家 footprint——改读
+//   updatePressurePlates 算出的本 tick 踩下沿集（m_plateJustPressed，含玩家/mob/掉落物三类触发源）：沿上
+//   的压力板，其 **6 邻**（4 水平 + 上 + 下）有 TntBlock → 点燃（移除 TNT 方块 + spawnPrimedTnt，引燃态实体
+//   延时引爆触发连锁）。机制等价 MC 1.0 压力板经红石点燃邻接 TNT（本项目无红石，故「踩板即点燃邻 TNT」
+//   直接绑在踩下沿上）。踩一次只点燃一次（持续踩着无新沿 → 不再点燃）；离开再踩 → 新沿 → 再点燃。
+//   点燃 TNT 块转 PrimedTnt（非直接引爆）→ fuse 倒计 ~5s → 引爆 → detonateTntSphere 内链式引燃邻接 TNT
+//   → 连锁全爆。
 void PlayerController::scanTntTraps()
 {
     if (!m_entityManager || !m_world) return;
     if (m_dead) return; // 死亡态不触发（同 pickupScan / arrowPickupScan 门控）
-    // 玩家 footprint 格（脚位 cellY + AABB 覆盖的 X/Z 格）。脚位 cellY = floor(m_pos.y())；玩家立于压力板顶
-    //   (cellY+0.0625) → floor 取 cellY → 该格即压力板格。X/Z 取 AABB 覆盖范围（半宽 kHalfW）。
-    const int feetY = int(std::floor(m_pos.y()));
-    const int x0 = int(std::floor(m_pos.x() - kHalfW));
-    const int x1 = int(std::floor(m_pos.x() + kHalfW));
-    const int z0 = int(std::floor(m_pos.z() - kHalfW));
-    const int z1 = int(std::floor(m_pos.z() + kHalfW));
-    for (int bx = x0; bx <= x1; ++bx) {
-        for (int bz = z0; bz <= z1; ++bz) {
-            const quint8 plate = m_world->blockAt(bx, feetY, bz);
-            if (!BlockRegistry::isPressurePlate(plate)) continue;        // 本格非压力板 → 跳过
-            // (b) t490/t492：压力板 **6 邻**（4 水平 + 上 + 下）有 TNT → 点燃（移除 TNT 方块 + spawnPrimedTnt 延时引爆）。
-            //   t492 改 6 邻（用户要求「水平四方向 + 上下两个方向」）；t493 删旧路径(a)「压力板下垫 TNT 直接引爆」——
-            //   用户实测「压力板放 TNT 上面一踩直接爆」不对：应**点燃**（变白闪 primed 实体、fuse ~5s 后爆）而非瞬爆，
-            //   且下方 TNT 由本 6 邻的向下方向 (0,-1,0) 覆盖。t493 恢复爆炸链式（用户要）→ 点燃后可连锁传播。
-            //   点燃 = clearBlockSilent 移除 TNT 方块（绕 occ 守卫）+ spawnPrimedTnt（默认 fuse ~5s）。命中首个 → return。
-            static constexpr int kDirs6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-            for (const auto &d : kDirs6) {
-                const int tx = bx + d[0], ty = feetY + d[1], tz = bz + d[2];
-                if (BlockRegistry::isTnt(m_world->blockAt(tx, ty, tz))) {
-                    m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
-                    m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸链式传播）
-                    return; // 单次点燃 → return
-                }
+    // t627：只处理本 tick 的踩下沿（边沿触发单一权威表；空表零开销早退——无板场景每 tick 仅一次 QSet 判空）。
+    if (m_plateJustPressed.isEmpty()) return;
+    for (const quint64 key : m_plateJustPressed) {
+        // 解包格坐标（x = 低 21 位有符号偏移、z = 中 21 位、y = 高位；打包见 updatePressurePlates）。
+        const int bx = int(quint32(key & 0x1FFFFFu)) - 0x100000;
+        const int bz = int(quint32((key >> 21) & 0x1FFFFFu)) - 0x100000;
+        const int by = int(quint32(key >> 42)) & 0x3FFu;
+        if (!BlockRegistry::isPressurePlate(m_world->blockAt(bx, by, bz))) continue; // 板已被破（沿表陈旧）→ 跳过
+        // 压力板 **6 邻**（4 水平 + 上 + 下）有 TNT → 点燃（移除 TNT 方块 + spawnPrimedTnt 延时引爆）。
+        //   t492 改 6 邻（用户要求「水平四方向 + 上下两个方向」）；t493 删旧路径(a)「压力板下垫 TNT 直接引爆」
+        //   （应**点燃**非瞬爆）；t493 恢复爆炸链式（用户要）→ 点燃后可连锁传播。命中首个 → return。
+        static constexpr int kDirs6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for (const auto &d : kDirs6) {
+            const int tx = bx + d[0], ty = by + d[1], tz = bz + d[2];
+            if (BlockRegistry::isTnt(m_world->blockAt(tx, ty, tz))) {
+                m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
+                m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸链式传播）
+                return; // 单次点燃 → return
             }
         }
     }
 }
 
-// t486 发射器陷阱触发（见 playercontroller.h 头注释）。扫玩家 footprint 格——压力板的 4 水平邻格（同 Y）之一
-//   == Dispenser → 触发该发射器。per-dispenser 冷却（m_dispenserCooldowns）防每帧刷屏。
-//   机制等价 MC 1.0 发射器陷阱（无红石系统，用「踩板直接触发」简化）。
+// t627 压力板触发态更新（边沿触发单一权威；见 playercontroller.h 头注释）。每 tick 先跑，产出：
+//   m_plateJustPressed（本 tick 踩下沿集）供 scanTntTraps / scanDispenserTraps 消费；
+//   m_platePressedCells（当前被压下的板全集）作下 tick 边沿比较基线；
+//   踩下视觉（state bit0 压半高）沿上置位 / 离开沿清位（5 参数 setBlock，id 不变 → 仅 worldChanged）。
+void PlayerController::updatePressurePlates()
+{
+    m_plateJustPressed.clear();
+    if (!m_world) { m_platePressedCells.clear(); return; }
+    // 打包格坐标键：x/z 各 21 位有符号偏移（±1M 格余量）、y 10 位（0..1023；世界 H≤64 足够）。
+    //   与 scanRedstoneOre 的 cellKey 同编码（两处独立打包子程序——键只在本表内自洽，不跨表比较）。
+    const auto cellKey = [](int x, int y, int z) -> quint64 {
+        return (quint64(quint32(x + 0x100000) & 0x1FFFFFu))
+             | (quint64(quint32(z + 0x100000) & 0x1FFFFFu) << 21)
+             | (quint64(quint32(y) & 0x3FFu) << 42);
+    };
+    // 收集本 tick 被压下的压力板格（触发源：玩家 footprint / mob feet / 掉落物 feet，各经权重判定）。
+    QSet<quint64> triggered;
+    const auto addIfPlate = [&](int x, int y, int z, bool byItem) {
+        const quint8 plate = m_world->blockAt(x, y, z);
+        if (BlockRegistry::pressurePlateAccepts(plate, byItem))
+            triggered.insert(cellKey(x, y, z));
+    };
+    // (1) 玩家 footprint（非观察者——观察者无碰撞不压板，机制等价 MC spectator 不触发机关；死亡态同）。
+    //   采样同旧 scanTntTraps：脚位 cellY + AABB 覆盖 X/Z（半宽 kHalfW）。
+    if (!m_dead && m_mode != Spectator) {
+        const int feetY = int(std::floor(m_pos.y()));
+        const int x0 = int(std::floor(m_pos.x() - kHalfW));
+        const int x1 = int(std::floor(m_pos.x() + kHalfW));
+        const int z0 = int(std::floor(m_pos.z() - kHalfW));
+        const int z1 = int(std::floor(m_pos.z() + kHalfW));
+        for (int bx = x0; bx <= x1; ++bx)
+            for (int bz = z0; bz <= z1; ++bz)
+                addIfPlate(bx, feetY, bz, /*byItem=*/false);
+    }
+    // (2) mob（feet 格 = floor(pos - halfH + 0.01)——pos 是 mob 中心，减半高到脚底；+0.01 吸收落地 snap 的
+    //   -eps 残差防 floor 落低一格（同 lessons「resting 复探 FP 容差」模式）。仅 kind==Mob 活体（箭/雪球/
+    //   下落方块/PrimedTnt 非生物级重量——下落沙落到板上不应触发，机制等价 MC 落沙压板仅在着地成方块后）。
+    if (m_entityManager) {
+        const int n = m_entityManager->count();
+        for (int i = 0; i < n; ++i) {
+            if (!m_entityManager->aliveAt(i)) continue;               // 跳过空槽（slot-reuse）
+            if (m_entityManager->kindAt(i) != int(EntityManager::Mob)) continue; // 仅生物级实体
+            const QVector3D p = m_entityManager->posAt(i);
+            const float halfH = m_entityManager->halfHeightAt(i);
+            addIfPlate(int(std::floor(p.x())), int(std::floor(p.y() - halfH + 0.01f)),
+                       int(std::floor(p.z())), /*byItem=*/false);
+        }
+    }
+    // (3) 掉落物（feet 格 = floor(pos)——ItemEntityManager pos 即实体中心，restY = 支撑顶 + 小偏移 → floor
+    //   落在压力板格）。金板（轻质）仅由此源触发——「丢东西到板上触发机关」的红石前置玩法。
+    if (m_itemEntities) {
+        const int n = m_itemEntities->count();
+        for (int i = 0; i < n; ++i) {
+            if (!m_itemEntities->aliveAt(i)) continue;                 // 跳过空槽（slot-reuse）
+            const QVector3D p = m_itemEntities->posAt(i);
+            addIfPlate(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), /*byItem=*/true);
+        }
+    }
+    // 边沿检测 + 踩下视觉（state bit0）：新进集合 = 踩下沿（m_plateJustPressed + 置位）；移出集合 = 离开沿
+    //   （清位）。置/清位走 5 参数 setBlock（id 不变只 state 变 → 仅 worldChanged 重建 mesh，同门开合），
+    //   已是目标态则 no-op（防无谓 worldChanged 刷重建）。
+    for (const quint64 key : triggered) {
+        if (m_platePressedCells.contains(key)) continue; // 上 tick 已压下 → 非沿
+        m_plateJustPressed.insert(key);
+        const int x = int(quint32(key & 0x1FFFFFu)) - 0x100000;
+        const int z = int(quint32((key >> 21) & 0x1FFFFFu)) - 0x100000;
+        const int y = int(quint32(key >> 42)) & 0x3FFu;
+        const quint8 plate = m_world->blockAt(x, y, z);
+        const quint8 st = m_world->stateAt(x, y, z);
+        if ((st & BlockRegistry::PressurePlateStatePressedFlag) == 0)
+            m_world->setBlock(x, y, z, plate, quint8(st | BlockRegistry::PressurePlateStatePressedFlag));
+    }
+    for (const quint64 key : m_platePressedCells) {
+        if (triggered.contains(key)) continue; // 本 tick 仍压下 → 非离开沿
+        const int x = int(quint32(key & 0x1FFFFFu)) - 0x100000;
+        const int z = int(quint32((key >> 21) & 0x1FFFFFu)) - 0x100000;
+        const int y = int(quint32(key >> 42)) & 0x3FFu;
+        const quint8 plate = m_world->blockAt(x, y, z);
+        const quint8 st = m_world->stateAt(x, y, z);
+        if ((st & BlockRegistry::PressurePlateStatePressedFlag) != 0)
+            m_world->setBlock(x, y, z, plate, quint8(st & quint8(~BlockRegistry::PressurePlateStatePressedFlag)));
+    }
+    m_platePressedCells = triggered;
+}
+// t486 发射器陷阱触发（见 playercontroller.h 头注释）。**t627 边沿化**：不再扫玩家 footprint——改读
+//   updatePressurePlates 算出的本 tick 踩下沿集（m_plateJustPressed，含玩家/mob/掉落物三类触发源）：沿上
+//   的压力板，其 4 水平邻格（同 Y）之一为发射器 / 投掷器 → 触发该机器一次（fireDispenserAt）。
+//   踩一次喷一次；持续踩着无新沿 → 不再喷（修「一直踩着往里放东西会一直喷」）；走开回位再踩 → 再喷。
+//   机制等价 MC 1.0 发射器陷阱（无红石系统，用「踩板沿直接触发」简化）。
 //   **t608 发射方向 = 发射器 state 朝向外向**（同熔炉 / 箱子 chestFrontFace 编码 0=+X 1=-X 2=+Z 3=-Z）：
 //   发射器放置时排出口面朝玩家（placeState = horizontalFacing ^ 1），之后**恒朝该方向发射**，与压力板在
-//   哪一侧无关。旧版取「发射器 → 压力板」向量（即 d：plate→dispenser 轴向）—— 用户把压力板放发射器
-//   **后面**它也朝前（远离板）射，与「发射器应有固定朝向」直觉相悖（用户原话「应该要规定一个方向，和之前
-//   的熔炉一样放下来永远面朝玩家」）。压力板仅作**触发器**（踩板即发射），不再是方向源；方向唯一源 = state。
-//   已放置的旧发射器 state=0 → 朝 +X（chestFrontFace 低 2 位 0=+X 兜底）。
+//   哪一侧无关。压力板仅作**触发器**，不再是方向源；方向唯一源 = state。旧存档 state=0 → 朝 +X 兜底。
 //   **t579 通用化**：发射器有 per-block 库存（DispenserStore 9 槽，玩家右键 UI 放入）→ 走 dispenseFromDispenser
 //   按内容物分派（箭 / 雪球 / 剑 / 掉落物）+ 扣库存；无库存（神殿陷阱发射器，worldgen 填充不进 store）保持旧行为
 //   （默认射箭，t608 起与库存路径统一用 spawnArrowPlayer 玩家友方箭语义：命中 mob + 可拾取）。
@@ -3763,75 +3847,72 @@ void PlayerController::scanDispenserTraps(float dt)
         }
     }
 
-    // 玩家 footprint 格（脚位 cellY + AABB 覆盖的 X/Z 格；同 scanTntTraps 采样）。
-    constexpr float kDispenserCooldown = 2.0f; // 每发射器触发间隔（秒；防每帧刷屏，机制等价 MC 发射器触发间隔）
-    const int feetY = int(std::floor(m_pos.y()));
-    const int x0 = int(std::floor(m_pos.x() - kHalfW));
-    const int x1 = int(std::floor(m_pos.x() + kHalfW));
-    const int z0 = int(std::floor(m_pos.z() - kHalfW));
-    const int z1 = int(std::floor(m_pos.z() + kHalfW));
-    for (int bx = x0; bx <= x1; ++bx) {
-        for (int bz = z0; bz <= z1; ++bz) {
-            const quint8 plate = m_world->blockAt(bx, feetY, bz);
-            if (!BlockRegistry::isPressurePlate(plate)) continue; // 本格非压力板 → 跳过
-            // 压力板的 4 水平邻格（同 Y）查发射器 / 投掷器（**任意一侧**邻接压力板即触发 —— t608 方向由
-            //   发射器自身 state 决定，与板在哪侧无关；板只是触发器。t609：投掷器同触发同冷却——机制等价
-            //   MC 1.0 dropper 与 dispenser 同属触发机关，仅内容物出口分派不同）。
-            static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
-            for (const auto &d : kDirs) {
-                const int dx = bx + d[0], dz = bz + d[1];
-                const quint8 db = m_world->blockAt(dx, feetY, dz);
-                if (!BlockRegistry::isDispenser(db) && !BlockRegistry::isDropper(db)) continue; // 非发射器/投掷器 → 跳过
-                // per-dispenser 冷却（按列坐标键 (x,z) 打包）：冷却内不射（防每帧刷屏满天箭）。发射器每柱唯一
-                //   （单格方块，一柱至多一个）故 (x,z) 足以唯一定位发射器格；Y 不进键（防与 x 高位重叠）。
-                const quint64 key = (quint64(quint32(dx)) << 32) | quint64(quint32(dz));
-                if (m_dispenserCooldowns.contains(key)) continue; // 该发射器冷却中 → 跳过
-                // t608 发射方向 = 发射器 state 朝向外向（chestFrontFace 解码 → 轴向单位向量；单一方向源，
-                //   压力板方位不参与 —— 板仅触发，不定向。旧版取「plate→dispenser 轴向 d」致板在发射器背面
-                //   也朝前射，用户要求固定朝向同熔炉）。state=0（旧存档 / 未定向）→ +X 兜底（编码低 2 位 0）。
-                const quint8 dispState = m_world->stateAt(dx, feetY, dz);
-                float fdx = 0.0f, fdz = 0.0f;
-                switch (BlockRegistry::chestFrontFace(dispState)) {
-                case BlockRegistry::PosX: fdx = 1.0f; break;
-                case BlockRegistry::NegX: fdx = -1.0f; break;
-                case BlockRegistry::PosZ: fdz = 1.0f; break;
-                default:                   fdz = -1.0f; break; // NegZ
-                }
-                const QVector3D dir(fdx, 0.0f, fdz);
-                // t579：有 per-block 库存 → 按内容物分派 + 扣库存。**t607 修身份判定**：有 store 条目
-                //   （hasDispenser，含全空）= 玩家库存发射器（放置注册 / UI 写入自建 / 存档加载）——库存空
-                //   （含最后一个投掷物用完清零）踩板**无动作**（陷阱解除；旧版空了还 fallback 射箭）；
-                //   无条目 = 神殿陷阱发射器（worldgen 不写 store）→ 保持旧行为 fallback 默认箭。
-                //   t609：投掷器同样走 dispenseFromDispenser（store 共用）——**投掷器分支无 fallback 箭**
-                //   （worldgen 不生成投掷器陷阱，无条目即无内容 → 无动作，机制等价 MC dropper 无红石
-                //   即不弹）。db 传入判定投掷器身份。
-                const bool tracked = m_dispenserStore && m_dispenserStore->hasDispenser(dx, feetY, dz);
-                bool fired = false;
-                if (tracked)
-                    fired = dispenseFromDispenser(dx, feetY, dz, dir, db);
-                if (!fired && !tracked && BlockRegistry::isDispenser(db)) {
-                    // 神殿陷阱路径（无库存）：默认射箭。从发射器格中心 + 朝向外向前移 0.5（出排出口，防贴墙
-                    //   spawn 入墙即被 tick 判方块命中，同 fireArrow），水平速度朝 state 朝向，Y 取发射器格
-                    //   中心高（feetY+0.5）。vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中）。
-                    //   **陷阱箭须命中玩家**：spawnArrow（arrowFromPlayer=false）——陷阱语义是伤害踩板玩家，
-                    //   与库存路径（t608 spawnArrowPlayer：命中 mob + 可拾取）**刻意相反**。若用
-                    //   spawnArrowPlayer：t324 自伤武装窗口（0.2s 内不判玩家命中）+ 陷阱-压力板相邻几何
-                    //   （箭 ~0.04-0.1s 到达）→ 箭穿人不伤（陷阱失效）；且嵌入箭可拾 → 每 2s 冷却一踩 =
-                    //   无限箭农场（与 t607 堵掉的无限箭源矛盾）。伤害走 spawnArrow 内部 kArrowDamage（=2，
-                    //   同 kDispenserArrowDamage 值；spawnArrow 是 2 参签名，伤害不外传）。
-                    const QVector3D origin(dx + 0.5f + fdx * 0.5f,
-                                           float(feetY) + 0.5f,
-                                           dz + 0.5f + fdz * 0.5f);
-                    const QVector3D vel(fdx * kDispenserArrowSpeed, 0.0f,
-                                        fdz * kDispenserArrowSpeed);
-                    m_entityManager->spawnArrow(origin, vel);
-                }
-                m_dispenserCooldowns.insert(key, kDispenserCooldown); // 写冷却
-                // return 防同帧多发射器刷箭（同 scanTntTraps 单触发）；下帧再处理其余候选。
-                return;
-            }
+    // t627：只处理本 tick 的踩下沿（边沿触发单一权威表；空表零开销早退）。
+    for (const quint64 pkey : m_plateJustPressed) {
+        // 解包压力板格坐标（x = 低 21 位有符号偏移、z = 中 21 位、y = 高位；打包见 updatePressurePlates）。
+        const int bx = int(quint32(pkey & 0x1FFFFFu)) - 0x100000;
+        const int bz = int(quint32((pkey >> 21) & 0x1FFFFFu)) - 0x100000;
+        const int by = int(quint32(pkey >> 42)) & 0x3FFu;
+        if (!BlockRegistry::isPressurePlate(m_world->blockAt(bx, by, bz))) continue; // 板已被破 → 跳过
+        // 压力板的 4 水平邻格（同 Y）查发射器 / 投掷器（**任意一侧**邻接压力板即触发 —— t608 方向由
+        //   发射器自身 state 决定，与板在哪侧无关；板只是触发器。t609：投掷器同触发同冷却——机制等价
+        //   MC 1.0 dropper 与 dispenser 同属触发机关，仅内容物出口分派不同）。
+        static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        for (const auto &d : kDirs) {
+            const int dx = bx + d[0], dz = bz + d[1];
+            const quint8 db = m_world->blockAt(dx, by, dz);
+            if (!BlockRegistry::isDispenser(db) && !BlockRegistry::isDropper(db)) continue; // 非发射器/投掷器 → 跳过
+            if (fireDispenserAt(dx, by, dz, db))
+                return; // 单次触发即 return（防同帧多机器刷箭，同 scanTntTraps 单触发）；下帧再处理其余候选。
         }
     }
+}
+
+// t627/t628 发射器 / 投掷器单次触发（scanDispenserTraps 踩板沿 + t628 拉杆/按钮右键激活共用）。
+//   (dx,dy,dz) = 机器格坐标、db = 机器方块 id（Dispenser / Dropper）。per-dispenser 冷却（m_dispenserCooldowns，
+//   按列坐标键 (x,z) 打包——发射器每柱唯一故 (x,z) 足以定位；Y 不进键防高位重叠）内 → 返 false 不动作；
+//   触发成功（含神殿陷阱 fallback 射箭）→ 写冷却 + 返 true。方向 = 机器 state 朝向外向（chestFrontFace 解码；
+//   state=0 旧存档 → +X 兜底）。库存路径（t579/t607/t609）与 fallback 语义同旧 scanDispenserTraps 逐字保留。
+bool PlayerController::fireDispenserAt(int dx, int dy, int dz, quint8 db)
+{
+    constexpr float kDispenserCooldown = 2.0f; // 每机器触发间隔（秒；防抖：板沿 + 拉杆沿都过本闸，机制等价 MC 发射器触发间隔）
+    const quint64 key = (quint64(quint32(dx)) << 32) | quint64(quint32(dz));
+    if (m_dispenserCooldowns.contains(key)) return false; // 该机器冷却中 → 不动作
+    // t608 发射方向 = 发射器 state 朝向外向（chestFrontFace 解码 → 轴向单位向量；单一方向源）。
+    const quint8 dispState = m_world->stateAt(dx, dy, dz);
+    float fdx = 0.0f, fdz = 0.0f;
+    switch (BlockRegistry::chestFrontFace(dispState)) {
+    case BlockRegistry::PosX: fdx = 1.0f; break;
+    case BlockRegistry::NegX: fdx = -1.0f; break;
+    case BlockRegistry::PosZ: fdz = 1.0f; break;
+    default:                   fdz = -1.0f; break; // NegZ
+    }
+    const QVector3D dir(fdx, 0.0f, fdz);
+    // t579：有 per-block 库存 → 按内容物分派 + 扣库存。**t607 修身份判定**：有 store 条目
+    //   （hasDispenser，含全空）= 玩家库存发射器（放置注册 / UI 写入自建 / 存档加载）——库存空
+    //   （含最后一个投掷物用完清零）触发**无动作**（陷阱解除）；无条目 = 神殿陷阱发射器（worldgen
+    //   不写 store）→ 保持旧行为 fallback 默认箭。t609：投掷器同走 dispenseFromDispenser（store 共用）
+    //   ——投掷器分支无 fallback 箭（worldgen 不生成投掷器陷阱，无条目即无内容 → 无动作）。
+    const bool tracked = m_dispenserStore && m_dispenserStore->hasDispenser(dx, dy, dz);
+    bool fired = false;
+    if (tracked)
+        fired = dispenseFromDispenser(dx, dy, dz, dir, db);
+    if (!fired && !tracked && BlockRegistry::isDispenser(db)) {
+        // 神殿陷阱路径（无库存）：默认射箭。从发射器格中心 + 朝向外向前移 0.5（出排出口，防贴墙
+        //   spawn 入墙即被 tick 判方块命中，同 fireArrow），水平速度朝 state 朝向，Y 取发射器格
+        //   中心高（dy+0.5）。vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中）。
+        //   **陷阱箭须命中玩家**：spawnArrow（arrowFromPlayer=false）——陷阱语义是伤害踩板玩家，
+        //   与库存路径（t608 spawnArrowPlayer：命中 mob + 可拾取）**刻意相反**（自伤武装窗口 +
+        //   无限箭农场两个理由，见 t607/t608）。伤害走 spawnArrow 内部 kArrowDamage（=2）。
+        const QVector3D origin(dx + 0.5f + fdx * 0.5f,
+                               float(dy) + 0.5f,
+                               dz + 0.5f + fdz * 0.5f);
+        const QVector3D vel(fdx * kDispenserArrowSpeed, 0.0f,
+                            fdz * kDispenserArrowSpeed);
+        m_entityManager->spawnArrow(origin, vel);
+    }
+    m_dispenserCooldowns.insert(key, kDispenserCooldown); // 写冷却
+    return true;
 }
 
 // t579/t580/t608/t609 发射器 / 投掷器内容物弹出（见 playercontroller.h 头注释）。读 DispenserStore 首个可用槽 →
