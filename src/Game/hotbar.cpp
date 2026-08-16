@@ -1183,6 +1183,8 @@ int Hotbar::maxStackSize(int id) const
     // t615 附魔书（EnchantedBookId=0x227）：**不可堆叠**（maxStack=1，机制等价 MC 1.0 enchanted book——
     //   每本携带独立附魔列表（enchants 元数据），两本内容不同不可叠；铁砧「两本合并」走 activeOp=combine
     //   而非堆叠）。须在通用材料段判定**之前**特判（否则落 64 → 两本不同附魔的书叠一槽会丢一本的附魔）。
+    //   review M4：Core 层 BlockRegistry::maxStackSize（掉落物合并用）已对 0x227 同步特判 1 ——
+    //   **两处须保持同步**（见 blockregistry.cpp maxStackSize 注释）。
     if (id == RecipeRegistry::EnchantedBookId) return 1;
     // t507 蘑菇汤（MushroomStewId，材料段 0x23C）：不可堆叠（机制等价 MC 1.0 蘑菇汤 maxStack 1 —— 碗装液体
     //   食物不可叠；同铁桶族）。须在通用材料段判定**之前**特判（否则落 64）。食用后返空碗（finishEating 特判）。

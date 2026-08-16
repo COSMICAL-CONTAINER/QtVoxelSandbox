@@ -1062,9 +1062,17 @@ int   BlockRegistry::maxStackSize(int itemId)
     if (itemId < int(Count)) return def(quint8(itemId)).maxStack;
     // 工具段 [0x100, 0x200)：独立耐久 → 不可堆叠（机制等价 MC 1.0 工具 maxStack 1）。含镐 / 斧 / 铲 / 剑 / 锄 / 弓 / 剪刀 / 钓竿。
     if (itemId < 0x200) return 1;
+    // review M4：附魔书（0x227 = Game 层 RecipeRegistry::EnchantedBookId；Core 不能依赖 Game 故用字面量 +
+    //   同步注释）**不可堆叠**（maxStack=1）。附魔书携带 per-instance 附魔元数据（ItemStack.enchants[4]）——
+    //   掉落物合并路径（itementitymanager 三入口）合入即 return、不写附魔 → 第二本的附魔被静默丢弃；拾取按
+    //   cap 分流又会两本同附魔。Game 层 Hotbar::maxStackSize 对 0x227 已特判 maxStack=1（hotbar.cpp ~L1186），
+    //   **两处须保持同步**（Core 不能 include recipe.h，字面量是分层铁律下的唯一选项；改动 id 段时同步两处）。
+    if (itemId == 0x227) return 1;
     // 材料段 ≥ 0x200：可堆叠 64（木棒 / 煤 / 铁锭 / 骨头 / 腐肉 / 箭 / 火药 / 羽毛 / 线 / 皮革 / 墨囊 / 蛋 等 mob 掉落物 + 合成材料）。
     //   含护甲段（≥0x300）—— 护甲不会作为 mob / 破块掉落物出现（仅玩家 Q 键丢弃），按 64 合并无害（拾取 Hotbar.addStack 按
     //   真实 maxStack=1 分槽）。桶 / 蘑菇汤（材料段内 maxStack=1 的特例）同理 —— 仅玩家持有 / 丢弃，掉落实体阶段按 64 合并无数据错。
+    //   附魔书是例外（上方特判）：它是唯一「携带 per-instance 元数据且会作为箱子战利品掉落」的材料段物品，
+    //   按 64 合并有数据错（丢附魔），故必须挡在通用 64 之前。
     return 64;
 }
 
