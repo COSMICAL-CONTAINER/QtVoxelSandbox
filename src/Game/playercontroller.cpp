@@ -3861,9 +3861,13 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   剑等都不走弹丸 / 伤害分派，一律 spawnItemAt 从排出口沿朝向定向弹出，落地成可拾取掉落物）。
         //   速度取 kDropperPopSpeed（略低于发射器 kDispenserPopSpeed——轻量出口的温和弹出，机制等价 MC
         //   dropper 弹出距离短）。附魔经此路径不保真（DispenserStore 槽仅存 (id,count)，既有 store 结构
-        //   限制，同发射器掉落物路径）。
+        //   限制，同发射器掉落物路径）。m_itemEntities 未注入 → 回退 spawnItem 信号路径（同 throwItemInLook
+        //   回退模式，防「扣了库存却无实体」静默吞物品——review L4）。
         if (m_itemEntities)
             m_itemEntities->spawnItemAt(origin, itemId, 1, dir.x(), dir.z(), kDropperPopSpeed);
+        else
+            emit spawnItem(int(std::floor(origin.x())), int(std::floor(origin.y())),
+                           int(std::floor(origin.z())), itemId, 1);
     } else if (itemId == RecipeRegistry::ArrowId) {
         // t608 箭 → **玩家友方箭**（spawnArrowPlayer：arrowFromPlayer=true 语义）：命中 **mob**（damageEntity +
         //   击退 + 红闪，机制等价 MC 1.0 发射器箭可打生物）且嵌入方块后**可被玩家拾取**（arrowPickupScan 只拾
@@ -3905,8 +3909,13 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   走 spawnItemAt（定点定向弹出，C++ 直调同 pickupScan 的 removeAt 模式；免 QML 信号往返）。
         //   注意：DispenserStore 槽仅存 (id,count)，经此路径弹出的附魔工具 / 附魔书（t615）附魔不保真
         //   （既有 store 结构限制，弹出后为无附魔普通物品；机制近似——发射器内物品本无「实例」语义）。
+        //   m_itemEntities 未注入 → 回退 spawnItem 信号路径（同 throwItemInLook 回退模式，防「扣了库存
+        //   却无实体」静默吞物品——review L4）。
         if (m_itemEntities)
             m_itemEntities->spawnItemAt(origin, itemId, 1, dir.x(), dir.z(), kDispenserPopSpeed);
+        else
+            emit spawnItem(int(std::floor(origin.x())), int(std::floor(origin.y())),
+                           int(std::floor(origin.z())), itemId, 1);
     }
     // 扣 1 库存（count-1；归 0 → setSlot 空栈归一清槽——t607 修：count 归 0 时 id 一并归 0，旧版存
     //   {id>0,count=0} 幽灵栈致「UI 图标残留 / 不再发射 / 拿出物品消失」）。分派表全覆盖（else 兜底）→ 恒扣。
