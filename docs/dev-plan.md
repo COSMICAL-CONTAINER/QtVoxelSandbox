@@ -2361,7 +2361,7 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 - 用户：「创造模式背包的生存物品栏 tab 合成栏用不了；左键批量均分也没了。生存模式切过去一切正常。」
 - 现状核实：Inventory.qml tab6 的 2×2 格是**纯占位**（craftSlots 0 命中，t528 注释「合成可占位」）。修：照 SurvivalInventory 的 craft 模式搬过来（craftSlots 本地组 + matchRecipe 检测 + 结果槽 + shift 批量 + 均分/快捷操作参与——InventoryOps 组参与表加 craft）。创造模式合成消耗照生存逻辑（创造拿调色板物放入合成格也正常运作；产物取出不消耗源?——MC 创造背包合成格也是真合成，按生存同款做，注释说明）。
 
-**t625** 左键拖动均分在创造生存 tab 生效
+**t625** 左键拖动均分在创造生存 tab 生效 ✅✅ 已完成（commit 2107fd5）
 - 同 t624：均分目标组判定（InventoryOps t180 判定表）在 Inventory tab6 面板把 main/hotbar/craft 都纳入。
 
 ### 🅲 铁砧五轮细节（1 项多子点）
