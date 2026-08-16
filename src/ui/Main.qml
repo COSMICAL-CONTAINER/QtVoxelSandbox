@@ -7654,7 +7654,8 @@ Window {
             // 拦截，落到 QML；captured=true 时 Esc 仍走 C++ → release → 暂停叠层，原行为不变）。
             // t50：工作台面板同样 E/Esc 关（与背包互斥）。t87：熔炉面板亦同（E / Esc 关）。
             if (e.key === Qt.Key_E && window.appState === "playing") {
-                if (window.craftingTableOpen) window.closeCraftingTable()
+                if (window.resourceBrowserOpen) window.resourceBrowserOpen = false // review-L16：浏览器盖背包 → E 先关它
+                else if (window.craftingTableOpen) window.closeCraftingTable()
                 else if (window.furnaceOpen) window.closeFurnace()
                 else if (window.chestOpen) window.closeChest()
                 else if (window.enchantingTableOpen) window.closeEnchantingTable()
@@ -7663,16 +7664,14 @@ Window {
                 else window.toggleInventory()
                 e.accepted = true; return
             }
-            if (e.key === Qt.Key_Escape && window.inventoryOpen) {
-                window.closeInventory(); e.accepted = true; return
-            }
-            // t617 资源查看器：Esc **最先**吃（叠层最上层优先——资源查看器 z=160 盖在设置面板（pauseOverlay 内
-            //   z=50）之上，开着时 Esc 只应关它，不该先关背后的设置面板再要按第二次）。原分支排在
-            //   settingsOpen 之后 → 先关设置 → 用户「按 ESC 居然先把后面的设置界面关了」。上移到所有
-            //   子面板分支之前（resourceBrowserOpen 与各背包/子态互斥性弱——设置开着时才开浏览器，但浏览器
-            //   更上层，先判它）。
+            // t617 资源查看器：Esc 最先吃（z=160 最高叠层，先于包括 inventoryOpen 在内的所有面板分支）。
+            //   review-L16：原分支排在 inventoryOpen 之后 → 浏览器+背包同开时 Esc 先关被盖的背包，要按
+            //   两次才关到浏览器；上移（E 分支同理先关浏览器）。
             if (e.key === Qt.Key_Escape && window.resourceBrowserOpen) {
                 window.resourceBrowserOpen = false; e.accepted = true; return
+            }
+            if (e.key === Qt.Key_Escape && window.inventoryOpen) {
+                window.closeInventory(); e.accepted = true; return
             }
             // pause-menu ESC 关子态面板（settingsOpen / progressOpen / statsOpen）：!captured 时 Esc 落 QML
             //   → 关回暂停菜单（不直接 unpause / 不抢 grab）。优先级与下方各背包面板并列（子态与背包互斥：
@@ -7686,8 +7685,8 @@ Window {
             if (e.key === Qt.Key_Escape && window.statsOpen) {
                 window.statsOpen = false; e.accepted = true; return
             }
-            // t458 资源查看器 Esc 分支已上移到本函数顶部（t617：叠层最上层优先；原在此处排在 settingsOpen
-            //   之后 → 先关设置面板 = 关闭顺序反了）。
+            // t458 资源查看器 Esc 分支已上移（t617 首次上移到 settingsOpen 前；review-L16 再上移到
+            //   inventoryOpen 前 —— 叠层最上层优先，浏览器+背包同开时一次 Esc 只关浏览器）。
             if (e.key === Qt.Key_Escape && window.craftingTableOpen) {
                 window.closeCraftingTable(); e.accepted = true; return
             }
