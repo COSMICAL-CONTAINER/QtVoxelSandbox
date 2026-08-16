@@ -2,6 +2,7 @@
 #define LOOTTABLE_H
 
 #include <QtGlobal> // quint32
+#include <QVariant> // QVariantList / QVariantMap（enchantedBookEnchants 返回值 / selectEnchants 结果解码）
 
 #include <array>
 #include <vector>
@@ -98,6 +99,14 @@ public:
     // 按 weight 有放回加权抽 rolls 次，返回最多 rolls 个 Stack。RNG 由 caller 注入（确定性 seed 重载见下）。
     //   pool 为空 / rolls<=0 → 空 vector。weight<=0 的条目跳过（不入总权重）。maxCount<minCount → 取 minCount。
     static std::vector<Stack> roll(const std::vector<Entry> &pool, int rolls, quint32 seed);
+
+    // review L7：给战利品附魔书（EnchantedBookId=0x227）随机生成 1-3 条附魔（机制等价 MC 1.0 战利品附魔书
+    //   「开箱即带随机附魔」，可直接上铁砧）。复用 EnchantRegistry::selectEnchants(BookItem, offeredLevel, seed)
+    //   （同附魔台附书管线：全池加权随机 + 互斥组剔除 + 等级随 offeredLevel 趋 maxLevel）；offeredLevel 在
+    //   [5, 25) 均匀随机（跨 10/20 附魔数阈值 → 1..3 条均可能；低中档强度，机制等价 MC loot enchant level 随机）。
+    //   返回 ItemStack.enchants[4] 同构的 QVariantList<int> 4 元素（每元素 = EnchantRegistry::pack 值；0 = 空槽），
+    //   与 ItemEntity::enchants / Hotbar::addStack 的 packed-enchants 边界格式一致（caller 直传）。纯函数。
+    static QVariantList enchantedBookEnchants(quint32 seed);
 };
 
 #endif // LOOTTABLE_H

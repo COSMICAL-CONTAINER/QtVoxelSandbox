@@ -5,6 +5,8 @@
 #include <QtQml/qqml.h>
 #include <QVariantList>
 
+#include "loottable.h" // LootTable::Stack（lootSlot 参数；同层 Game 静态纯函数）
+
 #include <array>
 #include <unordered_map>
 
@@ -21,7 +23,10 @@
 //   - slotCount（恒 27；Repeater model 用）
 //   - revision（int，任一箱子任一槽写入自增；NOTIFY=chestChanged。ChestUI delegate 触碰 revision 取最新栈值）
 //   - slotIdAt(x,y,z,index) / slotCountAt(x,y,z,index)：某箱子某槽的栈数据（id=0=空槽；越界 / 无此箱返 0）
-//   - setSlot(x,y,z,index,id,count)：直接写某箱子某槽（ChestUI 点击放置 / 互换 / 拖拽均分写回用）
+//   - slotEnchantsAt(x,y,z,index)（review L7）：某箱子某槽的附魔元数据（QVariantList<int> 4 元素，每 =
+//     EnchantRegistry::pack 值；0 = 空槽。战利品附魔书带随机附魔 + 玩家放入的附魔物品随栈存取）
+//   - setSlot(x,y,z,index,id,count[,enchants])：直接写某箱子某槽（ChestUI 点击放置 / 互换 / 拖拽均分写回用；
+//     enchants 缺省空 = 清附魔）
 //   - clearChest(x,y,z)：移除某箱子条目（破块时 Main.qml.onBlockBroken 调，清孤儿内容）
 //
 // §4 法律 + §9：零 MC 专有名词（类名 / 字串「箱子」「Chest」为通用描述词）。
@@ -45,8 +50,14 @@ public:
     // 某箱子某槽栈数据（id=0=空；index 越界 / 无此箱子条目 → 0）。
     Q_INVOKABLE int slotIdAt(int x, int y, int z, int index) const;
     Q_INVOKABLE int slotCountAt(int x, int y, int z, int index) const;
+    // review L7 某箱子某槽附魔元数据（ItemStack.enchants[4] 同构 QVariantList<int> 4 元素 pack 值；空槽 /
+    //   越界 / 无此箱 → {0,0,0,0}）。战利品附魔书首开填充时写入随机附魔；ChestUI 整件搬运路径透传。
+    Q_INVOKABLE QVariantList slotEnchantsAt(int x, int y, int z, int index) const;
     // 直接写某箱子某槽（index 范围 + id 合法性校验；id<=0 或 count<=0 → 清空该槽）。自动建箱条目。
-    Q_INVOKABLE void setSlot(int x, int y, int z, int index, int id, int count);
+    //   enchants（review L7）：ItemStack.enchants[4] 同构 4-int pack 值；缺省 / 空列表 = 清附魔（可堆叠物品
+    //   附魔恒 0 语义不变；仅附魔书 / 工具 / 护甲等 cap=1 物品随实例携带）。
+    Q_INVOKABLE void setSlot(int x, int y, int z, int index, int id, int count,
+                             const QVariantList &enchants = {});
     // 移除某箱子条目（破块清孤儿；不存在则 no-op）。spec「破箱掉落内容」属 Phase 1.1+，本轮直接弃内容。
     Q_INVOKABLE void clearChest(int x, int y, int z);
     // 清空全部箱子（跨世界切换时 Main.qml.enterWorld 经 loadAll 间接调；亦可直调）。空 → no-op（不无故发信号）。
@@ -95,9 +106,13 @@ signals:
 
 private:
     // 单格物品栈（id=0 空栈）。同 Hotbar::ItemStack 语义，但本类自持（Game 层不依赖 Hotbar 的私有结构）。
+    //   review L7 enchants[4]：per-instance 附魔元数据（每元素 = EnchantRegistry::pack 值；0 = 空槽）——
+    //   战利品附魔书带随机附魔、玩家放入的附魔工具 / 护甲随实例存取（附魔书 maxStack=1 → 每槽恒单件，
+    //   附魔与栈一一对应，无堆叠歧义）。
     struct Slot {
         int id = 0;
         int count = 0;
+        int enchants[4] = {0, 0, 0, 0};
     };
     using Chest = std::array<Slot, kSlotsPerChest>;
 
@@ -108,6 +123,10 @@ private:
     static QString key(int x, int y, int z); // "x,y,z"
     // 反解 key() 产物（"x,y,z" → x,y,z；坐标可负）。格式不符 → false。
     static bool parseKey(const QString &k, int &x, int &y, int &z);
+    // review L7 战利品 Stack → Slot 转换（五个 populate*Loot 共用的单一权威）：附魔书（EnchantedBookId）
+    //   额外经 LootTable::enchantedBookEnchants 随机生成 1-3 条附魔（seed = 箱子 seed 混 slot 序号 → 同箱
+    //   同战利品可复现，PLAN §2-K）；其余物品附魔恒 0。
+    static Slot lootSlot(const LootTable::Stack &st, quint32 boxSeed, int slotIndex);
 };
 
 #endif // CHESTSTORE_H

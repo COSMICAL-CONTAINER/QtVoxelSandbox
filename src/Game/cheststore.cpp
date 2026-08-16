@@ -1,6 +1,7 @@
 #include "cheststore.h"
 
-#include "loottable.h" // t393 战利品表（dungeonChestPool / roll）；同层 Game，向下依赖 Core
+#include "loottable.h" // t393 战利品表（dungeonChestPool / roll / enchantedBookEnchants）；同层 Game，向下依赖 Core
+#include "recipe.h"    // RecipeRegistry::EnchantedBookId（战利品书附魔分流判定）；同层 Game
 
 #include <QRandomGenerator>
 #include <QStringList>
@@ -32,6 +33,17 @@ bool ChestStore::parseKey(const QString &k, int &x, int &y, int &z)
     return true;
 }
 
+// review L7 战利品 Stack → Slot（见 .h 头注释）：附魔书带随机附魔，其余物品附魔恒 0。
+ChestStore::Slot ChestStore::lootSlot(const LootTable::Stack &st, quint32 boxSeed, int slotIndex)
+{
+    if (st.itemId != RecipeRegistry::EnchantedBookId) return Slot{st.itemId, st.count};
+    const QVariantList ench = LootTable::enchantedBookEnchants(boxSeed ^ quint32(slotIndex) * 2654435761u);
+    Slot s{st.itemId, st.count};
+    for (int i = 0; i < 4; ++i)
+        s.enchants[i] = (i < ench.size()) ? ench.at(i).toInt() : 0;
+    return s;
+}
+
 int ChestStore::slotIdAt(int x, int y, int z, int index) const
 {
     if (index < 0 || index >= kSlotsPerChest) return 0; // 越界 → 空栈
@@ -48,18 +60,33 @@ int ChestStore::slotCountAt(int x, int y, int z, int index) const
     return it->second.at(size_t(index)).count;
 }
 
+// review L7 某箱子某槽附魔元数据（ItemStack.enchants[4] 同构 pack 值 4-int；空槽 / 越界 / 无此箱 → 全 0）。
+QVariantList ChestStore::slotEnchantsAt(int x, int y, int z, int index) const
+{
+    if (index < 0 || index >= kSlotsPerChest) return {0, 0, 0, 0};
+    const auto it = m_chests.find(key(x, y, z));
+    if (it == m_chests.end()) return {0, 0, 0, 0};
+    const Slot &s = it->second.at(size_t(index));
+    return { s.enchants[0], s.enchants[1], s.enchants[2], s.enchants[3] };
+}
+
 // 直接写某箱子某槽。index 越界忽略；id<=0 或 count<=0 → 清空该槽（保持空栈不变式：id==0 ⟺ count==0）。
 //   自动建箱条目（首次写入某坐标即创建空 27 槽再写）。写入后 bump revision → ChestUI delegate 刷新。
 //   **t607 同源修**：count 归一在先（count<=0 → id 一并归 0），防「最后 1 件扣成 0」类写回存幽灵栈
 //   {id>0,count=0}（同 DispenserStore 修法的防御性收口——当前 UI 写入端已自行归零，此处兜底层不变式）。
-void ChestStore::setSlot(int x, int y, int z, int index, int id, int count)
+//   enchants（review L7）：4-int pack 值随栈写入（空栈恒清附魔）；不足 4 元素按 0 补齐 = 清空语义。
+void ChestStore::setSlot(int x, int y, int z, int index, int id, int count, const QVariantList &enchants)
 {
     if (index < 0 || index >= kSlotsPerChest) return;
     // 空栈归一：id<=0 或 count<=0 → 清空（id=0, count=0）。
     const int normCount = (id > 0 && count > 0) ? count : 0;
     const int normId = (normCount > 0) ? id : 0;
     Chest &chest = m_chests[key(x, y, z)]; // 自动建条目（不存在则插入空 27 槽）
-    chest[size_t(index)] = Slot{normId, normCount};
+    Slot &slot = chest[size_t(index)];
+    slot.id = normId;
+    slot.count = normCount;
+    for (int i = 0; i < 4; ++i)
+        slot.enchants[i] = (normId > 0 && i < enchants.size()) ? enchants.at(i).toInt() : 0;
     ++m_revision;
     emit chestChanged();
 }
@@ -84,7 +111,9 @@ void ChestStore::clearAll()
 }
 
 // t188 收集所有「含 ≥1 非空槽」的箱子为 QVariantList（落盘用）。全空箱子跳过（加载后缺失 = 空箱行为等价）。
-//   形状：[{x,y,z, slots:[{id,count}×27]}, ...]。QString 键经 parseKey 还原为坐标列。
+//   形状：[{x,y,z, slots:[{id,count,enchants:[4]}×27]}, ...]。QString 键经 parseKey 还原为坐标列。
+//   enchants（review L7）：附魔书 / 附魔工具的 per-instance 附魔随槽落盘（老存档无此键 → 读回全 0 = 无附魔，
+//   向后兼容）。
 QVariantList ChestStore::allChests() const
 {
     QVariantList out;
@@ -99,6 +128,10 @@ QVariantList ChestStore::allChests() const
             sm.insert(QStringLiteral("id"), s.id);
             sm.insert(QStringLiteral("count"), s.count);
             if (s.id > 0 && s.count > 0) any = true;
+            QVariantList enchList;
+            enchList.reserve(4);
+            for (int i = 0; i < 4; ++i) enchList.append(s.enchants[i]);
+            sm.insert(QStringLiteral("enchants"), enchList);
             slotList.append(sm);
         }
         if (!any) continue; // 全空箱子不落盘
@@ -128,14 +161,22 @@ void ChestStore::loadAll(const QVariantList &chests)
         const int z = cm.value(QStringLiteral("z")).toInt(&okz);
         if (!okx || !oky || !okz) continue;
         const QVariantList slotList = cm.value(QStringLiteral("slots")).toList();
-        Chest chest; // 默认全空（Slot{id=0,count=0}）
+        Chest chest; // 默认全空（Slot{id=0,count=0,enchants 全 0}）
         const int n = slotList.size();
         for (int i = 0; i < kSlotsPerChest && i < n; ++i) {
             const QVariantMap sm = slotList[i].toMap();
             const int id = sm.value(QStringLiteral("id")).toInt();
             const int count = sm.value(QStringLiteral("count")).toInt();
             const int normCount = (id > 0 && count > 0) ? count : 0; // t607：count 无效 → 整栈空（清洗幽灵栈）
-            chest[size_t(i)] = Slot{ normCount > 0 ? id : 0, normCount };
+            Slot s;                                    // review L7：默认全 0（老存档无 enchants 键 → 无附魔）
+            s.id = normCount > 0 ? id : 0;
+            s.count = normCount;
+            if (s.id > 0) {
+                const QVariantList enchList = sm.value(QStringLiteral("enchants")).toList();
+                for (int e = 0; e < 4; ++e)
+                    s.enchants[e] = (e < enchList.size()) ? enchList.at(e).toInt() : 0;
+            }
+            chest[size_t(i)] = s;
         }
         m_chests[key(x, y, z)] = chest;
     }
@@ -177,7 +218,7 @@ bool ChestStore::populateDungeonLoot(int x, int y, int z)
                 if (chest[size_t(i)].id == 0) { slot = i; break; }
         }
         if (slot < 0) break; // 真填满（roll 数 ≤ 槽数，理论不可达）→ 弃余
-        chest[size_t(slot)] = Slot{ st.itemId, st.count };
+        chest[size_t(slot)] = lootSlot(st, seed, slot); // review L7：附魔书带随机附魔（seed 混 slot 序号）
     }
 
     m_chests[k] = std::move(chest);
@@ -219,7 +260,7 @@ bool ChestStore::populateMineshaftLoot(int x, int y, int z)
                 if (chest[size_t(i)].id == 0) { slot = i; break; }
         }
         if (slot < 0) break;
-        chest[size_t(slot)] = Slot{ st.itemId, st.count };
+        chest[size_t(slot)] = lootSlot(st, seed, slot); // review L7：附魔书带随机附魔（seed 混 slot 序号）
     }
 
     m_chests[k] = std::move(chest);
@@ -263,7 +304,7 @@ bool ChestStore::populatePyramidLoot(int x, int y, int z)
                 if (chest[size_t(i)].id == 0) { slot = i; break; }
         }
         if (slot < 0) break;
-        chest[size_t(slot)] = Slot{ st.itemId, st.count };
+        chest[size_t(slot)] = lootSlot(st, seed, slot); // review L7：附魔书带随机附魔（seed 混 slot 序号）
     }
 
     m_chests[k] = std::move(chest);
@@ -306,7 +347,7 @@ bool ChestStore::populateJungleTempleLoot(int x, int y, int z)
                 if (chest[size_t(i)].id == 0) { slot = i; break; }
         }
         if (slot < 0) break;
-        chest[size_t(slot)] = Slot{ st.itemId, st.count };
+        chest[size_t(slot)] = lootSlot(st, seed, slot); // review L7：附魔书带随机附魔（seed 混 slot 序号）
     }
 
     m_chests[k] = std::move(chest);
@@ -349,7 +390,7 @@ bool ChestStore::populateStrongholdLoot(int x, int y, int z)
                 if (chest[size_t(i)].id == 0) { slot = i; break; }
         }
         if (slot < 0) break;
-        chest[size_t(slot)] = Slot{ st.itemId, st.count };
+        chest[size_t(slot)] = lootSlot(st, seed, slot); // review L7：附魔书带随机附魔（seed 混 slot 序号）
     }
 
     m_chests[k] = std::move(chest);

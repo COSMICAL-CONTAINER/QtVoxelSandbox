@@ -1,5 +1,6 @@
 #include "loottable.h"
 
+#include "enchantregistry.h" // review L7 enchantedBookEnchants：selectEnchants(BookItem,...) 全池随机附魔
 #include "recipe.h" // 材料段 id 常量（CoalId / RedstoneId / ...；同层 Game，向下依赖 Core）
 
 #include <QRandomGenerator>
@@ -163,4 +164,28 @@ std::vector<LootTable::Stack> LootTable::roll(const std::vector<Entry> &pool, in
         out.push_back(Stack{ hit->itemId, count });
     }
     return out;
+}
+
+// review L7 战利品附魔书随机附魔（见 .h 头注释）。两段 RNG：① QRandomGenerator(seed) 抽 offeredLevel
+//   [5,25)（低中档强度——跨 selectEnchants 的 10/20 阈值 → 附魔数 1..3 条均可能，机制等价 MC loot 书
+//   附魔数随机）；② selectEnchants 内部确定性 LCG（同 seed 同结果，PLAN §2-K）。产物打包为
+//   ItemStack.enchants[4] 同构 QVariantList<int>（pack 值；不足 4 条按 0 补齐）。
+QVariantList LootTable::enchantedBookEnchants(quint32 seed)
+{
+    QRandomGenerator rng(seed);
+    const int offered = 5 + int(rng.bounded(20)); // [5, 25)：<10 → 1 条 / 10..19 → 2 条 / >=20 → 3 条
+    const QVariantList picks = EnchantRegistry::selectEnchants(
+        EnchantRegistry::BookItem, offered, int(rng.generate()));
+    QVariantList packed;
+    packed.reserve(4);
+    for (int i = 0; i < 4; ++i) {
+        if (i < picks.size()) {
+            const QVariantMap m = picks.at(i).toMap();
+            packed.append(EnchantRegistry::pack(m.value(QStringLiteral("id")).toInt(),
+                                                m.value(QStringLiteral("level")).toInt()));
+        } else {
+            packed.append(0); // 空槽哨兵（不足 4 条按 0 补齐）
+        }
+    }
+    return packed;
 }

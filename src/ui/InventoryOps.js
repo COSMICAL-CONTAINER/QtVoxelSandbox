@@ -494,7 +494,9 @@ function slotShiftLeftChest(root, group, index) {
     if (group === "main" || group === "hotbar") {
         const src = readSlot(root, group, index)
         if (src.id === 0 || src.count <= 0) return true                  // 空槽：已处理（无操作）
-        const remain = addToChest(root, src.id, src.count)
+        // review L7：透传 durability / enchants → addToChest 空槽开新写入（附魔书 / 附魔工具 shift 入箱
+        //   附魔随实例；durability 经 localWriteSlot 忽略——箱子槽不持耐久的既有边角）。
+        const remain = addToChest(root, src.id, src.count, src.durability, src.enchants)
         writeSlot(root, group, index, remain > 0 ? src.id : 0, remain,
                   remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0])
         return true
@@ -502,8 +504,11 @@ function slotShiftLeftChest(root, group, index) {
     if (group === "chest") {
         const src = readSlot(root, "chest", index)
         if (src.id === 0 || src.count <= 0) return true
-        const remain = root.hotbar.addToAny(src.id, src.count)            // 归还背包（main→hotbar 智能堆叠）
-        writeSlot(root, "chest", index, remain > 0 ? src.id : 0, remain)
+        // review L7：附魔透传归还（src.enchants → addToAny 第 4 参）—— 战利品附魔书 / 附魔工具 Shift+左键
+        //   归还背包不失附魔（同 enchant/armor 槽归还模式）。
+        const remain = root.hotbar.addToAny(src.id, src.count, src.durability, src.enchants)
+        writeSlot(root, "chest", index, remain > 0 ? src.id : 0, remain, 0,
+                  remain > 0 ? src.enchants : [0,0,0,0])
         return true
     }
     return false   // 未知组（ChestUI 无此情形）→ caller 回退
@@ -512,9 +517,10 @@ function slotShiftLeftChest(root, group, index) {
 //   （slotShiftLeftChest 写回源槽）。仿 Hotbar::addToAny 的多槽泛化（addToAny 只管 main/hotbar；箱子是独立
 //   27 槽容器，须本处遍历）。槽位数读 root.localSlotCount("chest")（ChestUI 声明 = chestStore.slotCount，恒 27），
 //   真值检测兜底（无钩子面板返 0 → 不放入）。
-//   本地组不持耐久 / 附魔（同 craft/in/fuel/out）→ 写回不传 dur/ench（工具罕见进箱子，可接受边角；与既有
-//   chest 槽左键放置 / 拖拽均分写回一致）。
-function addToChest(root, id, count) {
+//   durability / enchants（review L7）：durability 恒不传（箱子槽不持耐久——工具罕见进箱，入箱视作新工具，
+//   既有边角语义）；**空槽开新**透传 enchants（附魔书 / 附魔工具 cap=1 恒走空槽开新 → 附魔随实例入箱），
+//   同 id 合并附魔不变（可堆叠物品附魔恒 0）。
+function addToChest(root, id, count, durability, enchants) {
     const slotCount = root.localSlotCount ? root.localSlotCount("chest") : 0
     const cap = root.hotbar.maxStackSize(id)
     let remaining = count
@@ -523,16 +529,16 @@ function addToChest(root, id, count) {
         const cur = readSlot(root, "chest", i)
         if (cur.id === id && cur.count < cap) {
             const move = Math.min(cap - cur.count, remaining)
-            writeSlot(root, "chest", i, id, cur.count + move)
+            writeSlot(root, "chest", i, id, cur.count + move, cur.durability, cur.enchants)
             remaining -= move
         }
     }
-    // 2) 开新空槽（同 id 已无处可并 → 散入空槽）。
+    // 2) 开新空槽（同 id 已无处可并 → 散入空槽；附魔书 / 工具 cap=1 恒走此路 → 附魔随实例写入）。
     for (let i = 0; i < slotCount && remaining > 0; ++i) {
         const cur = readSlot(root, "chest", i)
         if (cur.id === 0) {
             const move = Math.min(cap, remaining)
-            writeSlot(root, "chest", i, id, move)
+            writeSlot(root, "chest", i, id, move, durability, enchants)
             remaining -= move
         }
     }

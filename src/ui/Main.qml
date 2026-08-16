@@ -7341,7 +7341,9 @@ Window {
                     const cid = chestStore.slotIdAt(x, y, z, ci)
                     const ccount = chestStore.slotCountAt(x, y, z, ci)
                     if (cid !== 0 && ccount > 0)
-                        itemEntities.spawnItem(x, y, z, cid, ccount)
+                        // review L7：槽附魔随实体走（战利品附魔书带随机附魔掉落 → 拾取经 addToAny 回填，
+                        //   机制同附魔工具丢弃；enchantsAt 是 QVariantList<int> 4 元素 pack 值）。
+                        itemEntities.spawnItem(x, y, z, cid, ccount, chestStore.slotEnchantsAt(x, y, z, ci))
                 }
                 chestStore.clearChest(x, y, z)
             }
