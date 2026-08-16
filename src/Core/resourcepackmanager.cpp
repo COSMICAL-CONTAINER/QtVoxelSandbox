@@ -1746,15 +1746,31 @@ QString ResourcePackManager::mobTextureSource(int mobType) const
     if (relPath.isEmpty())
         return {};
     const QDir entityDir(s.entityDir);
-    // 1) 子目录布局（entity/<mob>/<mob>.png，现网大多数包）：MC 1.0 标准。
-    const QString sub = entityDir.absoluteFilePath(relPath);
-    if (QFile::exists(sub))
-        return QStringLiteral("file:///") + sub;
-    // 2) 扁平回退（entity/<mob>.png，旧 / HD 包常省略子目录）：取文件名（去子目录）。
-    const QFileInfo fi(relPath);
-    const QString flat = entityDir.absoluteFilePath(fi.fileName());
-    if (QFile::exists(flat))
-        return QStringLiteral("file:///") + flat;
+    // 单候选两级探测：1) 子目录布局（entity/<mob>/<mob>.png，现网大多数包）：MC 1.0 标准；
+    //   2) 扁平回退（entity/<mob>.png，旧 / HD 包常省略子目录）：取文件名（去子目录）。miss 返空串。
+    const auto probe = [&entityDir](const QString &rp) -> QString {
+        const QString sub = entityDir.absoluteFilePath(rp);
+        if (QFile::exists(sub))
+            return QStringLiteral("file:///") + sub;
+        const QFileInfo fi(rp);
+        const QString flat = entityDir.absoluteFilePath(fi.fileName());
+        if (QFile::exists(flat))
+            return QStringLiteral("file:///") + flat;
+        return {};
+    };
+    // review L15：主候选 miss 后的兜底候选 —— 羊。t593 主映射改 sheep/sheep_fur.png（毛层），但扁平布局
+    //   老包只有 entity/sheep.png（本体肉身，无 sheep_fur 也无扁平 sheep_fur.png）→ 主候选两级都 miss
+    //   → 整羊静默回退程序贴图。兜底 sheep/sheep.png 走同款两级探测：老包命中扁平 sheep.png（肉身贴图
+    //   优于无贴图——长毛观感降级但仍显 pack 质感，且剪毛态语义不变）。仅羊有此兜底（其余 mob 的映射
+    //   文件名即唯一候选）；前缀判定随映射同生共死（羊移出映射则兜底自动失效）。
+    QString hit = probe(relPath);
+    if (!hit.isEmpty())
+        return hit;
+    if (relPath.startsWith(QStringLiteral("sheep/"))) {
+        hit = probe(QStringLiteral("sheep/sheep.png"));
+        if (!hit.isEmpty())
+            return hit;
+    }
     return {}; // 包内无该 entity 贴图 → 不覆盖（保留程序生成 / 纯色）；红线 §9：仅运行期读本地 pack PNG。
 }
 
