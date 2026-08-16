@@ -3913,9 +3913,10 @@ void World::carveCanyon()
     };
 
     // ── 推进 worm，逐层 carve V 形剖面 ──
-    //   t376：同时记录路径中心（ix,iz + surfaceY + 朝向 yaw），供 carve 后三个 post-pass 用：
-    //   (1) 排水带 —— 排干峡谷带内残余水（兜底盘外边缘池水渗出）；(2) 邻接侧洞 —— 沿峡壁刻短隧道连既有洞穴；
-    //   (3) 单点高源瀑布 —— 一格水源高悬峡心柱，t350 限流下成细瀑布 + 小水洼（点缀非泛滥）。
+    //   t376：同时记录路径中心（ix,iz + surfaceY + 朝向 yaw），供 carve 后 post-pass 用：
+    //   (1a) 高源瀑布门控检测 —— 排水**前**探测峡壁环带真实含水（review-L9，详下）；(1b) 排水带 —— 排干
+    //   峡谷带内残余水（兜底盘外边缘池水渗出）；(2) 邻接侧洞 —— 沿峡壁刻短隧道连既有洞穴；(1c) 高源瀑布
+    //   置源 —— 门控命中才在峡心柱高悬一格水源，t350 限流下成细瀑布 + 小水洼（点缀非泛滥）。
     struct CanyonPt { int ix, iz, surfaceY, span; double yaw; };
     std::vector<CanyonPt> path;
     path.reserve(kMaxSteps);
@@ -3944,10 +3945,43 @@ void World::carveCanyon()
         ++steps;
     }
 
-    // t376 (1) 排水带：盘外（半径 > 当前盘半径）仍可能有地下水池残水紧贴峡壁 → 暴露后渗出。沿路径中心以
-    //   固定半径（盘上限 + 余量）逐柱排干 [kFloor, surfaceY] 内的水格 → 峡谷带内无水可渗。池水远端（带外）
-    //   仍被实体岩封闭（稳态）。一次 worldgen 开销可接受。
-    constexpr int kDrainRadius = kBaseRadius + kTopExtra + 2; // 盘上限 (~6) + 2 余量 → 8
+    // t376 (1a) 高源瀑布门控检测（review-L9 修复；**必须先于排水带跑**，见下）。排水带固定半径：
+    //   盘上限 (~5) + 2 余量 → 7；检测的壁环外沿即取它（壁环 = carve 盘上限之外、排水带之内的岩壁圈）。
+    constexpr int kDrainRadius = kBaseRadius + kTopExtra + 2;
+    // t601 原门控在候选格 ±1（carve 盘**内**）采样 —— 盘内已被本 pass carve 排空恒 Air；且 worldgen 顺序
+    //   海水由其后的 fillWater 才灌、此刻唯一的天然水（地下水池）尚未被排水带排干 → 门控构造性几乎永不
+    //   命中（t601 commit 自述「现实里门控基本不命中」），瀑布特性形同移除。修（恢复 t601 意图：峡壁切穿
+    //   含水层才渗水成瀑）：在排水带排干**之前**探测**峡壁环带** —— 4 主向 × 距离 [盘上限+1, 排水半径] 的
+    //   壁列 × 全高 [kFloor, topY] 扫 Water（池水此刻仍在壁内）。命中 → 记候选（(1c) 排水后置源）；未命中
+    //   保持干涸峡谷（门控初衷不变：无中生有的孤立水源不生成，频次天然收敛于真实含水层接触）。全程纯函数
+    //   于 seed（路径 + blockAt 均确定，PLAN §2-K）。
+    int waterfallX = -1, waterfallZ = -1, waterfallY = -1;
+    if (!path.empty()) {
+        const size_t wi = path.size() / 3;
+        const CanyonPt &wp = path[wi];
+        if (wp.span >= 6) { // 至少 6 格落差才有「瀑布」观感
+            const int topY = kFloor + (wp.span * 3) / 4; // 高位（距底 3/4 跨度），其下峡谷空气 → 细瀑
+            if (topY < m_height) {
+                static const int kDirs[4][2] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
+                bool wallWater = false;
+                for (const auto &d : kDirs) {
+                    for (int dist = kBaseRadius + kTopExtra + 1; dist <= kDrainRadius && !wallWater; ++dist) {
+                        const int nx = wp.ix + d[0] * dist;
+                        const int nz = wp.iz + d[1] * dist;
+                        if (nx < 0 || nx >= m_width || nz < 0 || nz >= m_depth) continue;
+                        for (int y = kFloor; y <= topY; ++y) { // 全高扫：含水层接触可能在低位
+                            if (m_chunks.blockAt(nx, y, nz) == BlockRegistry::Water) { wallWater = true; break; }
+                        }
+                    }
+                }
+                if (wallWater) { waterfallX = wp.ix; waterfallZ = wp.iz; waterfallY = topY; }
+            }
+        }
+    }
+
+    // t376 (1b) 排水带：盘外（半径 > 当前盘半径）仍可能有地下水池残水紧贴峡壁 → 暴露后渗出。沿路径中心以
+    //   固定半径（kDrainRadius）逐柱排干 [kFloor, surfaceY] 内的水格 → 峡谷带内无水可渗。池水远端（带外）
+    //   仍被实体岩封闭（稳态）。一次 worldgen 开销可接受。（(1a) 检测在其前 —— 壁环水此刻尚未排干。）
     int drainedCells = 0;
     for (const CanyonPt &p : path) {
         const int R2 = kDrainRadius * kDrainRadius;
@@ -3990,39 +4024,16 @@ void World::carveCanyon()
         ++sideCaves;
     }
 
-    // t376 (3) 高源瀑布点缀（t601 重写为门控版）：原实现在路径 ~1/3 处峡心柱**无条件**高悬一格水源
-    //   （其下全程峡谷空气）→ 用户「峡谷生成中间莫名其妙的一格水源，竖直往下流」——孤立水源不邻接任何
-    //   真实水体，观感即 worldgen 瑕疵。t601 改门控：仅当候选格**水平邻格存在真实水体**（海平面水层 /
-    //   未被排水带排干的池水 —— 即「峡壁碰含水层才渗水」的自然语义）才置 Water；孤立内部格保持 Air。
-    //   峡谷路径跳过海域列（carveDisc 内 seaColumnHeight 守卫）+ 排水带已排干带内池水 → 现实里门控基本
-    //   不命中（孤立瀑布不再生成），但若未来峡谷贴近水层仍有真实渗水源（非无中生有）。
-    int waterfallY = -1;
-    if (!path.empty()) {
-        const size_t wi = path.size() / 3;
-        const CanyonPt &wp = path[wi];
-        if (wp.span >= 6) { // 至少 6 格落差才有「瀑布」观感
-            waterfallY = kFloor + (wp.span * 3) / 4; // 高位（距底 3/4 跨度），其下峡谷空气 → 细瀑
-            if (waterfallY < m_height && m_chunks.blockAt(wp.ix, waterfallY, wp.iz) == BlockRegistry::Air) {
-                // t601 门控：4 水平邻格里存在真实水体（Water）才允许置源；越界邻格视作无水。
-                static const int kDirs[4][2] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
-                bool adjacentWater = false;
-                for (const auto &d : kDirs) {
-                    const int nx = wp.ix + d[0];
-                    const int nz = wp.iz + d[1];
-                    if (nx < 0 || nx >= m_width || nz < 0 || nz >= m_depth) continue;
-                    if (m_chunks.blockAt(nx, waterfallY, nz) == BlockRegistry::Water) {
-                        adjacentWater = true;
-                        break;
-                    }
-                }
-                if (adjacentWater)
-                    m_chunks.setBlock(wp.ix, waterfallY, wp.iz, BlockRegistry::Water); // 源（state 默认 0）
-                else
-                    waterfallY = -1; // 孤立格：不置水（记 -1 供下方确定性日志核对）
-            } else {
-                waterfallY = -1;
-            }
-        }
+    // t376 (1c) 高源瀑布置源（review-L9）：(1a) 在排水前已确认峡壁环带存在真实含水（地下水池切壁）→
+    //   此刻（排水带已干、但壁环水源仍被实体岩封在原位）在峡心柱置一格 Water 源——t350 限流下成细瀑布 +
+    //   小水洼（点缀非泛滥；机制语义「峡壁切穿含水层渗出」）。置源格仍须为峡谷空气（carve 已过 → 恒真，
+    //   防御性再判）；未命中门控（waterfallY<0）→ 不置水（无中生有的孤立水源不生成，保持干涸峡谷）。
+    if (waterfallY >= 0
+        && waterfallY < m_height
+        && m_chunks.blockAt(waterfallX, waterfallY, waterfallZ) == BlockRegistry::Air) {
+        m_chunks.setBlock(waterfallX, waterfallY, waterfallZ, BlockRegistry::Water); // 源（state 默认 0）
+    } else {
+        waterfallY = -1; // 记 -1 供下方确定性日志核对
     }
 
     qInfo() << "worldgen: grand canyon carved =" << carvedVoxels
