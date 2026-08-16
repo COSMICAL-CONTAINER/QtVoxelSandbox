@@ -106,8 +106,10 @@ BLOCKS = [
     # t466 云杉木板立方体图标（深色木纹；机制等价橡木木板 icon_planks，仅贴图换 spruce_planks）。
     ("spruce_planks",   "default_spruce_planks", "default_spruce_planks"), # t466 云杉木板（各面同贴图=深色木板）
     ("obsidian",        "default_obsidian", "default_obsidian"),  # t472 黑曜石（各面同贴图=深紫黑火山玻璃；流体交互产物）
-    ("enchanting_table", "default_enchanting_table_top", "default_enchanting_table_side"),  # t474 附魔台（顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点+边缘暗化）
-    ("bookshelf",       "default_bookshelf", "default_bookshelf"),  # t474 书架（各面同贴图=木板边框+彩色书脊书列）
+    # t620 附魔台移出 BLOCKS（满立方投影）→ 下方 one-off 段 render_partial_3d("table")（0.75 矮盒，机制等价
+    #   世界内 PartialBlockGeometry [0,0.75] 盒 + e260b2d BlockDef 12/16 高）。满立方图标与世界内矮盒观感
+    #   不符（背包里显整块、世界里是矮台）→ review L20 重生成。
+    ("bookshelf",       "default_wood", "default_bookshelf"),  # t474 书架（**t620 per-face 改**：顶·底=planks(8) 木板（世界内 BlockDef 顶/底 tile 8）/ 侧=bookshelf(111) 木板边框+书脊书列；图标顶面随之换 default_wood，同 chest/farmland 混面模式；review L20 重生成）
     ("iron_block",      "default_iron_block", "default_iron_block"),  # t477 铁块（各面同贴图=金属灰底+铆钉网格+高光）
     # t620 矿物存储块立方体图标（各面同贴图=对应材质压缩块；机制等价铁块 icon_iron_block 流程）。
     ("coal_block",      "default_coal_block", "default_coal_block"),  # t620 煤炭块（近黑煤层压缩块+高光棱线）
@@ -456,6 +458,12 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
         #   fill = default_snow（冷白冰晶噪点，同 worldgen SnowLayer 各面贴图）。
         boxes = [(0.0, 1.0, 0.0, 0.125, 0.0, 1.0)]
         y_min, y_max = 0.0, 0.125
+    elif shape == "table":
+        # review L20 附魔台矮盒：全 footprint、12/16 高（y[0, 0.75]）。机制等价世界内 PartialBlockGeometry
+        #   [0,0.75] 盒（e260b2d BlockDef 附魔台 12/16 高，机制对齐 MC 1.0）。fill 顶=附魔台顶（黑曜石+
+        #   钻石+立书）/ 侧=附魔台侧（底面 obsidian 不进图标 —— dimetric 顶+两侧投影本就不画底面）。
+        boxes = [(0.0, 1.0, 0.0, 0.75, 0.0, 1.0)]
+        y_min, y_max = 0.0, 0.75
     elif shape == "trapdoor":
         boxes = [(0.0, 1.0, 0.0, 0.1875, 0.0, 1.0)]                    # 合态薄板
         y_min, y_max = 0.0, 0.1875
@@ -652,6 +660,17 @@ def main():
     #   区别于雪块满格立方（icon_snow.png）—— 手持 / 背包 / 掉落实体据 isPartialBlock(SnowLayer)=true 路由到本图标。
     for out_name, fill_top, fill_side in [("snow_layer", "default_snow", "default_snow")]:
         img = render_partial_3d("snow_layer", fill_top, fill_side)
+        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # review L20 附魔台矮盒图标（0.75 高，机制等价世界内 [0,0.75] PartialBlockGeometry 盒）：fill 顶=附魔台顶 /
+    #   侧=附魔台侧。e260b2d 把方块改 12/16 矮盒（原满立方）后本图标未重生成（75c8f02 后一直满立方投影，
+    #   背包/手持与世界内矮台观感不符）→ 本轮补。表 = render_partial_3d table shape（slab 半高家族，
+    #   顶+两侧明暗同 cube icon 家族）。
+    for out_name, fill_top, fill_side in [
+        ("enchanting_table", "default_enchanting_table_top", "default_enchanting_table_side"),
+    ]:
+        img = render_partial_3d("table", fill_top, fill_side)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)
