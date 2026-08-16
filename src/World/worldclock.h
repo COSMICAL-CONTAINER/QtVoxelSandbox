@@ -112,7 +112,8 @@ public:
     // misc 二轮 `/time` 指令（spec：聊天 /time set|add 直接改时间）。三个入口均即时重派生 phase + 太阳方向 +
     //   emit（同 skipToDawn，不等下一 tick）。PLAN §2-H「时间单向」是睡觉机制的不变量（防回退重算光照回归）；
     //   `/time` 是玩家显式指令（机制等价 MC /time），允许任意设/加（含回退）—— 与睡觉单向不冲突（指令是特权操作）。
-    //   - setPhase(p)：p∈[0,1) 直接设昼夜相位（0=正午、0.25=黄昏、0.5=子夜、0.75=黎明），保持当前 dayCount。
+    //   - setPhase(p)：p∈[0,1) 直接设昼夜相位（0=正午、0.25=黄昏、0.5=子夜、0.75=黎明），**dayCount+1**
+    //     （t631：每次 set 视作又过一天 → 月相刷新一阶，方便测试不同月相；连续 set 8 次轮回一整圈）。
     //   - setDay(day)：设第几天（影响月相 moonPhase=day%8），保持当前 phase。
     //   - addPhase(dp)：当前 phase 加 dp（可负=回退，可>1 跨天），dayCount 随跨天递增。
     Q_INVOKABLE void setPhase(float phase);

@@ -2400,9 +2400,10 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 
 ### 🅸 月相刷新（1 项小）
 
-**t631** time set 命令推进月相
+**t631** time set 命令推进月相 ✅✅ 已完成（commit 86dc13b）
 - 用户：「time set midnight 时月亮应刷新月相（相当于又过了一天）——方便测试不同月相。」
 - 修：time set 命令处理器（聊天命令 timeSet）调 WorldClock setTime 时 dayCount+1（或按时间跳变量取整天数）→ 月相跟着走。
+- 实修：WorldClock::setPhase（/time set day|night|midnight|数字 共用入口）内 dayCount+1 后走 applyTime —— dayCount 是月相单一真值源（moonPhase=day%8），跨阶即 emit moonPhaseChanged → QML 月 Model 切 moon_<phase>.png；连续 set 8 次轮回一整圈（测试月相友好）。setDay（数字d）/addPhase 语义不变（setDay 本身直接设天；addPhase 跨天自动推进）。命令回显附「月相刷新」提示。
 
 ### 🅹 附魔书创造调色板分种（1 项）
 

@@ -89,10 +89,13 @@ void WorldClock::applyTime(float phase, qint64 day)
     }
 }
 
-// misc 二轮 `/time set <phase>`：设昼夜相位，保当前 dayCount（月相不变）。
+// misc 二轮 `/time set <phase>`：设昼夜相位 + **dayCount +1**（t631 用户「time set midnight 时月亮应刷新
+//   月相——相当于又过了一天，方便测试不同月相」：每次 set 视作过了一天 → moonPhase = (day+1)%8 跟进，
+//   moonPhaseChanged 即时 emit → QML 月 Model 切贴图）。连续 `time set` 8 次即轮回一整圈月相（测试友好）。
 void WorldClock::setPhase(float phase)
 {
-    applyTime(phase, m_dayCount >= 0 ? m_dayCount : 0);
+    const qint64 day = (m_dayCount >= 0 ? m_dayCount : 0) + 1; // t631：set 推进一天（月相刷新）
+    applyTime(phase, day);
 }
 
 // misc 二轮 `/time set <n>d`：设第几天（影响月相），保当前 phase。

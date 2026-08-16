@@ -1255,6 +1255,8 @@ Window {
     //   phase 语义：0=正午 0.25=黄昏 0.5=子夜 0.75=黎明（与 WorldClock 一致）。
     //   · set day → phase 0（白天）；set night → 0.5（深夜）；set midnight → 0.5；set <num> → phase=num/24000（MC ticks）；
     //     set <num>d → 设第 num 天（月相=num%8），phase 不变。
+    //   · t631：每次 set（day/night/midnight/数字）**dayCount+1** → 月相刷新一阶（用户「time set midnight 应
+    //     刷新月相——相当于又过了一天，方便测试」；连续 set 8 次轮回一整圈月相）。
     //   · add <num> → 当前 phase + num/24000（跨天自动）。
     //   返系统回显串（如「时间设为白天」）。
     function runTime(rest)
@@ -1266,14 +1268,14 @@ Window {
         const val = args[1]
         if (sub === "set") {
             const v = val.toLowerCase()
-            if (v === "day")       { worldClock.setPhase(0.0);  return "时间设为白天（正午）" }
-            if (v === "night")     { worldClock.setPhase(0.5);  return "时间设为夜晚（子夜）" }
-            if (v === "midnight")  { worldClock.setPhase(0.5);  return "时间设为子夜" }
+            if (v === "day")       { worldClock.setPhase(0.0);  return "时间设为白天（正午，月相刷新）" }
+            if (v === "night")     { worldClock.setPhase(0.5);  return "时间设为夜晚（子夜，月相刷新）" }
+            if (v === "midnight")  { worldClock.setPhase(0.5);  return "时间设为子夜（月相刷新）" }
             // <num>d → 设第几天（月相）；<num> → phase=num/24000
             const m = val.match(/^(-?\d+)d$/i)
             if (m) { worldClock.setDay(parseInt(m[1], 10)); return "设为第 " + m[1] + " 天（月相刷新）" }
             const n = parseFloat(val)
-            if (!isNaN(n)) { worldClock.setPhase(n / 24000.0); return "时间设为 " + val + " ticks" }
+            if (!isNaN(n)) { worldClock.setPhase(n / 24000.0); return "时间设为 " + val + " ticks（月相刷新）" }
             return "未知时间值: " + val + "（用 day/night/midnight/数字/数字d）"
         }
         if (sub === "add") {
