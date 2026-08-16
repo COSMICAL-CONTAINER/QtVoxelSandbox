@@ -3797,15 +3797,18 @@ void PlayerController::scanDispenserTraps(float dt)
                     // 神殿陷阱路径（无库存）：默认射箭。从发射器格中心 + 朝向外向前移 0.5（出排出口，防贴墙
                     //   spawn 入墙即被 tick 判方块命中，同 fireArrow），水平速度朝 state 朝向，Y 取发射器格
                     //   中心高（feetY+0.5）。vy=0（近距离水平射；重力会让箭略下沉，走廊内仍命中）。
-                    //   **t608 箭语义与库存路径统一**：spawnArrowPlayer（arrowFromPlayer=true → 命中 mob 伤害 +
-                    //   嵌入可被玩家拾取，机制等价 MC 1.0 发射器箭；旧版 spawnArrow 命中玩家 + 不可拾 —— 与
-                    //   库存路径同病同修）。伤害 kDispenserArrowDamage（= 骷髅箭 kArrowDamage 同值 2）。
+                    //   **陷阱箭须命中玩家**：spawnArrow（arrowFromPlayer=false）——陷阱语义是伤害踩板玩家，
+                    //   与库存路径（t608 spawnArrowPlayer：命中 mob + 可拾取）**刻意相反**。若用
+                    //   spawnArrowPlayer：t324 自伤武装窗口（0.2s 内不判玩家命中）+ 陷阱-压力板相邻几何
+                    //   （箭 ~0.04-0.1s 到达）→ 箭穿人不伤（陷阱失效）；且嵌入箭可拾 → 每 2s 冷却一踩 =
+                    //   无限箭农场（与 t607 堵掉的无限箭源矛盾）。伤害走 spawnArrow 内部 kArrowDamage（=2，
+                    //   同 kDispenserArrowDamage 值；spawnArrow 是 2 参签名，伤害不外传）。
                     const QVector3D origin(dx + 0.5f + fdx * 0.5f,
                                            float(feetY) + 0.5f,
                                            dz + 0.5f + fdz * 0.5f);
                     const QVector3D vel(fdx * kDispenserArrowSpeed, 0.0f,
                                         fdz * kDispenserArrowSpeed);
-                    m_entityManager->spawnArrowPlayer(origin, vel, kDispenserArrowDamage);
+                    m_entityManager->spawnArrow(origin, vel);
                 }
                 m_dispenserCooldowns.insert(key, kDispenserCooldown); // 写冷却
                 // return 防同帧多发射器刷箭（同 scanTntTraps 单触发）；下帧再处理其余候选。

@@ -723,17 +723,20 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* brown_mushroom          */ -1, // t507 白蘑菇 → MC 1.0 无等价（同 red mushroom；本工程作 cross 装饰故无 1.0 等价）
     /* redstone_ore            */ 73, // t569 红石矿石 → MC 1.0 redstone ore id 73
     // t620 补 t609 漏行（Dropper=117 是 kDefs 末位）：行缺 → 聚合初始化零填充 → kMcBlockId[117]=0（=MC air），
-    //   static_assert 因「数组维度 = Count」而非「初始化器条数」不报——潜伏映射错位。dropper id 23
-    //   （MC 1.0 存在；与 dispenser 同族机关盒）。
-    /* dropper                 */ 23, // t609/t620 投掷器 → MC 1.0 dropper id 23
-    // t620 矿物存储块 → MC 1.0 对齐：coal block id 173 / lapis block id 22 / diamond block id 57 /
-    //   gold block id 41 / redstone block id 152（全部 MC 1.0 存在）。
-    /* coal_block              */ 173, // t620 煤炭块 → MC 1.0 block of coal id 173
+    //   static_assert 因「数组维度 = Count」而非「初始化器条数」不报——潜伏映射错位。dropper：MC **1.0 无**独立
+    //   dropper（1.0 dispenser id 23 兼具；独立 dropper 是 1.5+ id 158）——无 1.0 等价 id，取 0（air）语义 =
+    //   「1.0 无此方块」，与无运行期消费者现状一致（迁移文档用途）。
+    /* dropper                 */ 0,
+    // t620 矿物存储块 MC 1.0 对齐勘误（review r195-中2）：coal block **1.0 无**（1.3+ id 173，1.0 用煤无块）；
+    //   redstone block **1.0 无**（1.5+ id 152）；redstone lamp **1.0 无**（1.2+ id 123/124）。三者取 0
+    //   （=「1.0 无此方块」，机制等价实现不受影响——本表仅迁移文档引用，无运行期消费者）。lapis 22 /
+    //   diamond 57 / gold 41 是真实 1.0 id 保留。
+    /* coal_block              */ 0,   // t620 煤炭块（MC 1.3+ 才有块形态；1.0 无）
     /* lapis_block             */ 22,  // t620 青金石块 → MC 1.0 lapis lazuli block id 22
     /* diamond_block           */ 57,  // t620 钻石块 → MC 1.0 diamond block id 57
     /* gold_block              */ 41,  // t620 金块 → MC 1.0 gold block id 41
-    /* redstone_block          */ 152, // t620 红石块 → MC 1.0 block of redstone id 152
-    /* redstone_lamp           */ 123, // t620 红石灯 → MC 1.0 redstone lamp（off）id 123（on 态 id 124 由 state 分，统一取 123）
+    /* redstone_block          */ 0,   // t620 红石块（MC 1.5+ 才有；1.0 无）
+    /* redstone_lamp           */ 0,   // t620 红石灯（MC 1.2+ 才有；1.0 无；on/off 由本项目 state bit0 分）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");

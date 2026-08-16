@@ -220,9 +220,11 @@ public:
     //   （呈现层 playMobHurt；同玩家近战 attackMob 路径）。机制等价 MC 1.0 玩家弓箭打怪（敌我判别由发射者定）。
     //   origin = 玩家眼位 + 视线前移 0.5（防贴墙 spawn 入墙即没）；vel = 视线方向 × 蓄力速度（含抛物 vy）。
     //   达 kCap → 跳过 + 告警（防溢出，同 spawnArrow）。
-    //   **t608 发射器复用**：dispenseFromDispenser / scanDispenserTraps 神殿 fallback 也走本入口 ——
+    //   **t608 发射器复用**：dispenseFromDispenser 库存路径走本入口 ——
     //   arrowFromPlayer=true 的箭**命中 mob**（伤害 caller 传）且嵌入方块后**可被玩家拾取**（arrowPickupScan
     //   只拾 arrowFromPlayer=true 的嵌入箭），正是「玩家友方箭」语义（机制等价 MC 1.0 发射器箭可打生物可拾取）。
+    //   ⚠️ 神殿陷阱 fallback（scanDispenserTraps）**不走本入口**（r195 高危回归修复）：陷阱箭须命中玩家 →
+    //   走 spawnArrow（arrowFromPlayer=false）；走本入口会被 t324 自伤武装窗口（0.2s）放空 + 沦为无限箭农场。
     Q_INVOKABLE void spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage);
     // t482/t505 雪球投射物（雪傀儡 aiSnowGolem 远程攻击 / t505 玩家右键抛掷）：在 origin 处生成一个携带初速度 vel
     //   （blocks/s，含 vy 抛物）的雪球实体。kind=Snowball、pushable=false（玩家走碰不推）、halfW/halfH=0.10
