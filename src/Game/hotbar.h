@@ -170,6 +170,17 @@ public:
     // 由 recipe.h RecipeRegistry::*Id 命名常量定义）。材料段与方块段分离 —— 非方块不可右键放置
     // （与工具段同为非方块调色板项），玩家据需取用到 hotbar 槽（合成 / 冶炼原料 / 装饰）。
     Q_INVOKABLE QVariantList creativeMaterials() const;
+    // t632 创造调色板附魔书分种（14 本，每种附魔一本）：返回 QVariantMap list {ench:int, packed:int,
+    //   name:str, levelSuffix:str} —— ench = EnchantRegistry::EnchantId（1..14）、packed = pack(ench, level)
+    //   （ItemStack.enchants[4] 单槽格式）、name = 「附魔书·<附魔显示名>」、levelSuffix = 罗马数字（如 "I"）。
+    //   调色板条目 id 段（QVariantList<int>）无法携带附魔 → Inventory.qml 用哨兵 id（-kCreativeBookSentinel-ench，
+    //   见 hotbar.cpp 常量）引用本表条目；点击经 takeCreativeEnchantedBook 把带附魔的 0x227 书放到光标。
+    //   等级取 1（test-friendly：铁砧冲突 / 合并测试的低成本起点；与附魔台随机产互不影响）。
+    Q_INVOKABLE QVariantList creativeEnchantedBooks() const;
+    // t632 取一本「附魔书·<ench>」到光标（调色板无限源拿取，机制同点击普通调色板格）：非附魔 id → no-op；
+    //   否则 heldBlock=EnchantedBookId(0x227) + heldCount=1 + setHeldEnchants([pack(ench,1),0,0,0])
+    //   （setHeldBlock 切 id 已清附魔 → 本方法紧接覆盖为预设附魔）。创造取新物语义（无 customName / 满初始态）。
+    Q_INVOKABLE void takeCreativeEnchantedBook(int enchantId);
     // 材料段判定（t50：合成产物木棒等，id >= RecipeRegistry::MaterialIdBase=0x200；**含 t345 护甲段** 0x300..）。
     //   供 QML delegate 据 isMaterial 切到材料图标 Canvas 自绘。isMaterial 在全工程是「非方块非工具 → QML 自绘
     //   MaterialIcon」的渲染路由谓词；护甲同属此类 → 亦走 MaterialIcon。与 isTool 互斥（材料段 > 工具段上界）。

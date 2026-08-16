@@ -115,6 +115,20 @@ Item {
     //   RecipeRegistry::OakBoatId/SpruceBoatId 同源（材料段 0x200+，非方块）。
     readonly property var boatIds: [0x234, 0x235]
 
+    // t632 预设附魔书表（每种附魔一本，hotbar.creativeEnchantedBooks() 权威）：调色板条目是 int id 段
+    //   （QVariantList<int>，无法携带附魔元数据）→ 每本用哨兵 id（-kBookSentinel-enchantId）引用。
+    //   哨兵取 -0x1000（远离全部合法 id 段：方块 1..、工具 0x100+、材料 0x200+、护甲 0x300+，负向无碰撞）。
+    readonly property int bookSentinel: -0x1000
+    readonly property var bookEntries: root.hotbar ? root.hotbar.creativeEnchantedBooks() : []
+    // 哨兵 id → 表条目（{ench, packed, name, levelSuffix}）；非哨兵 → null。
+    function bookInfoFor(id) {
+        if (id > root.bookSentinel || id <= root.bookSentinel - 64) return null
+        const ench = root.bookSentinel - id
+        for (let i = 0; i < root.bookEntries.length; ++i)
+            if (root.bookEntries[i].ench === ench) return root.bookEntries[i]
+        return null
+    }
+
     // t511 据 currentTab 过滤调色板 id 列表。食物段 = creativeMaterials 与 foodIds 的交集（保 materials 内顺序）。
     function filteredPalette() {
         if (!root.hotbar) return []
@@ -129,12 +143,15 @@ Item {
             return tools
         }
         if (root.currentTab === 2) {
-            // 材料段 = creativeMaterials 去掉已划进食物段的项 + t508 去掉船（船已移到工具段，防双显）。
+            // 材料段 = creativeMaterials 去掉已划进食物段的项 + t508 去掉船（船已移到工具段，防双显）
+            //   + t632 末尾追加 14 本预设附魔书（哨兵 id；同 0x227 裸书所在材料段——铁砧测试就近取用）。
             const mats = root.hotbar.creativeMaterials()
             const out = []
             for (let i = 0; i < mats.length; ++i) {
                 if (root.foodIds.indexOf(mats[i]) === -1 && root.boatIds.indexOf(mats[i]) === -1) out.push(mats[i])
             }
+            for (let i = 0; i < root.bookEntries.length; ++i)
+                out.push(root.bookSentinel - root.bookEntries[i].ench)
             return out
         }
         if (root.currentTab === 3) return root.hotbar.creativeArmor()
@@ -329,11 +346,17 @@ Item {
     //   9→槽8）。区别于 swapHoveredWithHotbar（t110 整栈互换、需源槽）：调色板=无限源，无源槽概念 → 直接 setStack
     //   覆盖目标槽（不读原槽、不还光标）。count 走 maxStackSize（方块/材料 64、工具/桶/护甲 1）；durability=-1
     //   （VM normalizeDurability 自动满耐久 = 创造取新物语义）；enchants 空（无附魔，创造取新物语义）。
+    //   t632 预设附魔书（哨兵负 id）：setStack 附预设附魔（书 maxStack=1 单件 + ench=[pack,0,0,0]）。
     //   分层（PLAN §2）：本面板只做槽位改写（经 hotbar VM），宿主 Main.qml 负责按键路由 + hover 态提升。
     function forceReplaceHotbarFromCreative(hotbarIdx) {
         if (!root.hotbar) return
         const id = root.creativeHoveredItemId
         if (id === 0) return
+        const bi = root.bookInfoFor(id)
+        if (bi) {
+            root.hotbar.setStack(hotbarIdx, 0x227, 1, -1, [bi.packed, 0, 0, 0], "")
+            return
+        }
         root.hotbar.setStack(hotbarIdx, id, root.hotbar.maxStackSize(id))
     }
 
@@ -506,13 +529,15 @@ Item {
 
                             // 物品图标：方块段 → 等距立方体 Image；工具段（t33 isTool）→ ToolIcon 自绘镐；
                             // 材料段（t50 isMaterial）→ MaterialIcon 自绘木棒（创造一般不直接取材料，但兼容）。
+                            //   t632 预设附魔书（哨兵负 id）→ MaterialIcon materialId=0x227（附魔书图标 + 紫光）。
                             Item {
                                 anchors.centerIn: parent
                                 width: 30; height: 30
                                 visible: modelData !== 0
+                                property var bookInfo: root.bookInfoFor(modelData) // t632（非哨兵 → null）
                                 Image {
                                     anchors.fill: parent
-                                    visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
+                                    visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData) && !parent.bookInfo
                                     source: root.hotbar.iconSourceForBlock(modelData)
                                     fillMode: Image.PreserveAspectFit
                                     smooth: true
@@ -525,8 +550,8 @@ Item {
                                 }
                                 MaterialIcon {
                                     anchors.fill: parent
-                                    visible: root.hotbar.isMaterial(modelData)
-                                    materialId: modelData
+                                    visible: root.hotbar.isMaterial(modelData) || parent.bookInfo
+                                    materialId: parent.bookInfo ? 0x227 : modelData
                                 }
                             }
                             // hover 高亮边框（仅实体方块）。
@@ -546,8 +571,11 @@ Item {
                                 onHoveredChanged: {
                                     // t94：进入写 hoveredItemId + 槽顶中心位置（root 坐标系）驱动 tooltip；
                                     // 离开按 id 守卫清除（防相邻槽进出竞态互清，见文件末 itemTip 注释）。
+                                    //   t632 预设附魔书（哨兵负 id）：名走 bookInfo.name（nameForBlock 对负 id 返空）
+                                    //   + tooltip 附「附魔名 I」行（enchantListText 据表 packed 显附魔）。
                                     if (hovered) {
-                                        root.hoveredName = root.hotbar.nameForBlock(modelData)
+                                        const bi = root.bookInfoFor(modelData)
+                                        root.hoveredName = bi ? bi.name : root.hotbar.nameForBlock(modelData)
                                         root.hoveredItemId = modelData
                                         root.creativeHoveredItemId = modelData   // t512 调色板 hover（数字键 1-9 强制替换源）
                                         const p = parent.mapToItem(root, parent.width / 2, 0)
@@ -564,6 +592,16 @@ Item {
                                 // 拾取到光标（创造调色板=无限源，不清减调色板）。方块满栈 64；工具不可堆叠 →
                                 // count=1（t33）。setHeldBlock 已对工具段 id 校验合法（isValidItemId 含工具段）。
                                 onTapped: {
+                                    // t632 预设附魔书（哨兵负 id）：走专用拿取（0x227 书 + 预设附魔到光标）。
+                                    //   同格归还判定对书恒不成立（heldBlock 恒 0x227 ≠ 哨兵负 id）→ 每次点击
+                                    //   走换拿（旧物回虚空 + 新书上手），语义同普通格换拿。
+                                    const bi = root.bookInfoFor(modelData)
+                                    if (bi) {
+                                        if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
+                                        root.hotbar.takeCreativeEnchantedBook(bi.ench)
+                                        root.itemTaken()  // t120：创造拿物品 → 宿主弹手（handPopAnim）
+                                        return
+                                    }
                                     // t318：切换式归还（修 t292 遗留「点原格又拿起该格」）。创造调色板=无限源，
                                     //   点「当前手持物同格（原格）」= 放回（heldBlock===modelData → returnHeldToVoidRequested，
                                     //   凭空消失回虚空，创造不丢世界，t292）；再点同格 = 重新拿起。旧版无脑 dismiss+re-pick
@@ -1489,10 +1527,18 @@ Item {
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行（如「铁镐  5/250」）；非工具 / 未跟踪 → 仅显名。
             // t622：hover 槽物品带实例名 → 优先显实例名（hoveredCustomName——改名物品显其名）。
-            text: root.hotbar ? ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
-                    : root.hotbar.nameForBlock(root.hoveredItemId))
-                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
-                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : "" // t304 弓伤害 tooltip
+            // t633 后续可加附魔行（对齐 SurvivalInventory t590）；现阶段 t632 仅预设附魔书（调色板 hover，
+            //   无 hoveredKey）附「附魔名 I」行（bookInfoFor 据 hoveredItemId 反查表 → packed 行）。
+            text: {
+                if (!root.hotbar) return ""
+                const bi = root.bookInfoFor(root.hoveredItemId)
+                return (bi ? bi.name
+                        : ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
+                            : root.hotbar.nameForBlock(root.hoveredItemId))))
+                    + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
+                    + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")
+                    + (bi ? "\n\n" + root.hotbar.enchantListText([bi.packed, 0, 0, 0]) : "")
+            }
             color: "#f2f2f2"
             font.pixelSize: 12
         }

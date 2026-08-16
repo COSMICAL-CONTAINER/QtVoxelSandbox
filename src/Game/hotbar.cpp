@@ -517,6 +517,38 @@ QVariantList Hotbar::creativeMaterials() const
     };
 }
 
+// t632 创造调色板附魔书分种（14 本，每种附魔一本）：见 hotbar.h 注释。等级取 1（test-friendly）。
+//   与 creativeMaterials 内的裸 0x227（附魔台附书产 / 地牢战利品入口）并存 —— 裸 0x227 仍是无附魔空书
+//   （附魔台附书 / anvil combine 的原料），14 本预设书是「测试铁砧冲突 / 合并的成品书」。
+QVariantList Hotbar::creativeEnchantedBooks() const
+{
+    QVariantList list;
+    for (int ench = 1; ench < EnchantRegistry::EnchantCount; ++ench) {
+        const EnchantRegistry::EnchantDef *def = EnchantRegistry::enchant(ench);
+        if (!def) continue; // 防御：表缺行（id 1..14 连续，不应发生）
+        QVariantMap m;
+        m.insert(QStringLiteral("ench"), ench);
+        m.insert(QStringLiteral("packed"), EnchantRegistry::pack(ench, 1));
+        m.insert(QStringLiteral("name"),
+                 QStringLiteral("附魔书·") + EnchantRegistry::displayName(ench));
+        m.insert(QStringLiteral("levelSuffix"), EnchantRegistry::levelSuffix(1));
+        list << m;
+    }
+    return list;
+}
+
+// t632 取一本预设附魔书到光标（调色板无限源拿取；见 hotbar.h 注释）。
+void Hotbar::takeCreativeEnchantedBook(int enchantId)
+{
+    if (!EnchantRegistry::isEnchant(enchantId)) return;
+    setHeldBlock(int(RecipeRegistry::EnchantedBookId));
+    setHeldCount(1); // 附魔书 maxStack=1（maxStackSize 特判）——覆盖可能残留的旧 count
+    setHeldEnchants({ EnchantRegistry::pack(enchantId, 1), 0, 0, 0 });
+    setHeldCustomName(QString()); // 创造取新物语义（附魔经 tooltip 呈现，不写实例名）
+    qInfo().noquote() << "[inv] takeCreativeEnchantedBook ench=" << enchantId
+                      << "(" << EnchantRegistry::displayName(enchantId) << " I)";
+}
+
 int Hotbar::blockIdAt(int slot) const
 {
     if (slot < 0 || slot >= int(m_slots.size())) return int(BlockRegistry::Air);
