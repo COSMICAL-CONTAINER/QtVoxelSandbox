@@ -1086,6 +1086,13 @@ Item {
                                     acceptedButtons: Qt.LeftButton
                                     onTapped: {
                                         if (window.shiftHeld) { root.slotShiftLeft("main", index); return }
+                                        // t625 双击拿同类（280ms 内同槽二次点击 → doMergeSameId，同生存背包主栏）。
+                                        const key = root.slotKey("main", index)
+                                        const now = Date.now()
+                                        const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+                                        root.lastTapMs = now
+                                        root.lastTapKey = key
+                                        if (isDouble) { root.doMergeSameId("main", index); return }
                                         const r = root.resolveClick(mainId, mainCount, mainDur, mainEnch, mainName)
                                         if (!r) return
                                         root.hotbar.mainSetStack(index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
@@ -1111,7 +1118,17 @@ Item {
                                     }
                                 }
                                 // hover → 物品名 tooltip + hoveredKey（供数字键 1-9 与 hover 槽互换 / Shift 搬运）。
+                                // t625：补 hoveredKey 维护 + 拖动期间收集（addDragSlot）——原 handler 只写 tooltip
+                                //   不收集 → 生存 tab 主栏（main 组，groupIsDraggable 恒真）虽在参与表内，但格子
+                                //   永不进 dragSlots → 左键拖动均分在 tab6 主栏失效（用户「左键批量均分也没了」
+                                //   根因；对照底部 hotbar 行同款 handler 已有收集）。同时补双击拿同类（doMergeSameId，
+                                //   同生存背包主栏）与均分/右键拖拽绿框高亮。
                                 HoverHandler {
+                                    property int trackedId: mainId
+                                    onTrackedIdChanged: {
+                                        if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                            root.hoveredItemId = 0
+                                    }
                                     onHoveredChanged: {
                                         const itemId = mainId
                                         if (hovered && itemId !== 0) {
@@ -1124,7 +1141,28 @@ Item {
                                         const key = root.slotKey("main", index)
                                         if (hovered) root.hoveredKey = key
                                         else if (root.hoveredKey === key) root.hoveredKey = ""
+                                        // 左/右键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                                        if (hovered && root.dragActive) {
+                                            root.addDragSlot(key)
+                                        }
                                     }
+                                }
+                                // t625 均分/右键拖拽绿框高亮（扫过且待分发的合格格；leftDragActive 期间才显）。
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "transparent"
+                                    border.color: "#7fe57f"; border.width: 2
+                                    visible: {
+                                        const _ds = root.dragSlots
+                                        const _rds = root.rightDragSlots
+                                        const _rev = root.hotbar.mainRevision
+                                        const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
+                                        const key = root.slotKey("main", index)
+                                        if (_ok && root.leftDragActive && root.dragHasKey(key)
+                                            && (mainId === 0 || mainId === root.dragHeldId)) return true
+                                        return _ok && root.rightDragActive && root.rightDragHasKey(key)
+                                    }
+                                    z: 10
                                 }
                             }
                         }
