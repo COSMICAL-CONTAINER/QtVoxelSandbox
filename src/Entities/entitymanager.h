@@ -312,17 +312,17 @@ public:
     //   Q_INVOKABLE 兼调试 + playercontroller placeBlock shears 分支双入口（playercontroller 是 C++ 直调）。
     Q_INVOKABLE void shearSheep(int i);
     // t510 第 i 只 mob 是否**雪傀儡且已被剪南瓜头**（snowGolemSheared=true）。仅 mobType==MobSnowGolem 用（其余
-    //   mob 恒 false）。QML delegate 据它切换雪傀儡外观：未剪=南瓜头 + 刻面眼/嘴；已剪=无头 derpy 形态（眼/嘴
-    //   悬浮原头位，机制等价 MC 1.0「剪后变无头形态带眼不死的 derpy 版」）。PlayerController 剪刀分支据它判是否
-    //   可剪（已剪不再可剪，防刷屏）。越界 / 非 SnowGolem → false。revision 在剪南瓜头时 bump 让 QML 绑定刷新
-    //   （同 shearedAt 模式）。
+    //   mob 恒 false）。QML delegate 据它切换雪傀儡外观：未剪=南瓜头；已剪=雪块头 + 刻面眼/嘴（t629 修：剪掉
+    //   南瓜头露出里面的**雪头**，非无头 —— 机制等价 MC 1.0 剪雪傀儡 → 雪块头形态）。PlayerController 剪刀分支
+    //   据它判是否可剪（已剪不再可剪，防刷屏）。越界 / 非 SnowGolem → false。revision 在剪南瓜头时 bump 让 QML
+    //   绑定刷新（同 shearedAt 模式）。
     Q_INVOKABLE bool snowGolemShearedAt(int i) const;
-    // t510 剪雪傀儡南瓜头（spec「玩家持剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡变无头 derpy 形态」；机制等价 MC 1.0
+    // t510 剪雪傀儡南瓜头（spec「玩家持剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡变雪头形态」；机制等价 MC 1.0
     //   剪刀剪雪傀儡南瓜头）。第 i 只**未剪南瓜头的活体 SnowGolem** → 翻 snowGolemSheared=true + emit snowGolemSheared(坐标)
     //   让呈现层 Connections 转发到 ItemEntityManager.spawnItem 生成南瓜方块掉落实体（BlockRegistry::Pumpkin，
     //   同 sheepSheared→spawnItem 模式；单向事件流，分层：Entities 层发语义事件、呈现层只消费）。已剪南瓜头 /
-    //   非 SnowGolem / dead / 越界 → 静默早退（机制等价 MC 1.0：剪南瓜头只对戴头的雪傀儡生效，已无头的右键无反应）。
-    //   bump revision → QML 翻雪傀儡为无头 derpy 外观。Q_INVOKABLE 兼调试 + PlayerController 剪刀分支双入口
+    //   非 SnowGolem / dead / 越界 → 静默早退（机制等价 MC 1.0：剪南瓜头只对戴头的雪傀儡生效，已剪的右键无反应）。
+    //   bump revision → QML 翻雪傀儡为雪头外观（t629）。Q_INVOKABLE 兼调试 + PlayerController 剪刀分支双入口
     //   （playercontroller 是 C++ 直调）。
     Q_INVOKABLE void shearSnowGolem(int i);
     // t400 触发求偶期（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding 的 love mode）。

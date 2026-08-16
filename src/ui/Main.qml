@@ -5563,9 +5563,13 @@ Window {
                                 //     前面 = 刻面双眼+锯齿嘴瓦片，随 bodyYaw 朝行走方向）→ pack 激用包内 HD 南瓜
                                 //     三瓦片（t582 tileFilenameMap 117/118/119 接 pumpkin_side/face_off/top.png），
                                 //     pack 关用程序生成 default_pumpkin_*.png —— 两种模式头都是「真南瓜」。
-                                //   t510：剪南瓜头后（golemSheared）隐藏本体（无头 derpy 形态）；眼/嘴仍悬浮原头位。
+                                //   t629 修剪头形态：剪掉南瓜头应**露出里面的雪头**（用户「剪刀剪了南瓜头应露出里面的
+                                //     雪头，不是没头」；机制等价 MC 1.0 剪雪傀儡 → 头变为雪方块 + 眼嘴仍刻面）。
+                                //     旧 t510 直接隐藏头 → 眼/嘴悬浮半空读作「没头」。改：剪后显**雪块头**
+                                //     （BlockCube blockId=101 雪块贴图，同 0.50 尺寸 / 同 1.14 头位）+ 刻面眼嘴
+                                //     overlay 改贴雪头前面（由下方 derpy 眼嘴组承担，仍据 golemSheared 显）。
                                 Model {
-                                    visible: !parent.golemSheared // t510 剪后隐藏南瓜头本体（无头形态）
+                                    visible: !parent.golemSheared // t629 剪后隐藏南瓜头本体（换显雪头，见下方）
                                     geometry: BlockCube { blockId: 100 } // 100 = BlockRegistry::Pumpkin（QML 不 import C++ 静态类故字面量，同 onMobDied 约定）
                                     position: Qt.vector3d(0, 1.14, 0)
                                     scale: Qt.vector3d(0.50, 0.50, 0.50)
@@ -5575,12 +5579,27 @@ Window {
                                         baseColor: snowGolemRoot.tinted("#ffffff") // 白=不额外染色，仅受击红闪/减速蓝调/昼夜灰阶调制南瓜瓦片
                                     }
                                 }
+                                // t629 剪后雪头（雪方块头）：剪掉南瓜头露出里面的雪块头（非无头）。BlockCube
+                                //   blockId=101（雪块 Snow，各面 snow 瓦片）+ 同南瓜头几何（0.50 立方 / 头心
+                                //   1.14 微沉防 z-fight）→ 剪后 golem 仍是「有头雪造物」，眼/嘴刻面由下方 derpy
+                                //   overlay 组贴雪头前显示（机制等价 MC 1.0 剪雪傀儡 → 雪头 + 无刻面简脸）。
+                                Model {
+                                    visible: parent.golemSheared // t629 剪后显示（替代旧「无头」形态）
+                                    geometry: BlockCube { blockId: 101 } // 101 = BlockRegistry::Snow 雪块（字面量约定同上）
+                                    position: Qt.vector3d(0, 1.14, 0)
+                                    scale: Qt.vector3d(0.50, 0.50, 0.50)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColorMap: voxelAtlas
+                                        baseColor: snowGolemRoot.tinted("#ffffff") // 白调（受击红闪/减速蓝调/昼夜灰阶调制雪块瓦片）
+                                    }
+                                }
                                 // 南瓜头刻面双眼 + 嘴（机制等价 MC jack o'lantern 刻面：双眼 + 锯齿嘴）。
                                 //   t582：南瓜头本体已带刻面贴图（BlockCube -Z 前面 = pumpkin_face 瓦片）→ 头在时
-                                //   本组 overlay 隐藏（防「贴图脸 + 深色 overlay」双层脸）；仅 t510 剪后（golemSheared）
-                                //   「无头 derpy 形态」显示 —— 眼/嘴脱空头位悬浮（机制等价 MC 1.0「剪后变无头形态
-                                //   带眼不死的 derpy 版」）。位随 t582 新头位（头心 1.14 / xz 半 0.25）：z=-0.27 凸出
-                                //   原头前面（原头前 z=-0.25）；眼位 y=1.19（头心上偏留嘴位）、嘴位 y=1.07（眼下）。
+                                //   本组 overlay 隐藏（防「贴图脸 + 深色 overlay」双层脸）；t629 后仅剪后
+                                //   （golemSheared）**雪头形态**显示 —— 眼/嘴贴雪头前面（雪头无自带脸，此组即其脸）。
+                                //   位随 t582 头位（头心 1.14 / xz 半 0.25）：z=-0.27 凸出雪头前面（头前 z=-0.25）；
+                                //   眼位 y=1.19（头心上偏留嘴位）、嘴位 y=1.07（眼下）。
                                 Model {
                                     visible: parent.golemSheared // t582：仅无头 derpy 形态显示（头在时由贴图脸承担）
                                     geometry: UnitCube {}

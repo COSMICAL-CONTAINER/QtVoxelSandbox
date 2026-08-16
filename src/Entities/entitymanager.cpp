@@ -35,11 +35,17 @@ bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, f
     const int z0 = int(std::floor(minz)), z1 = int(std::ceil(maxz)) - 1;
     for (int y = y0; y <= y1; ++y)
         for (int z = z0; z <= z1; ++z)
-            for (int x = x0; x <= x1; ++x)
+            for (int x = x0; x <= x1; ++x) {
+                // t629 薄雪层视穿透：SnowLayer 是贴 cell 底的 1/8..1/8×8 薄板（snowLayerHeight 单一权威），
+                //   全格 isSolid 把它当整墙 → mob 无法走进任何含雪层格（雪原 worldgen 雪层会把 mob 围死原地；
+                //   雪傀儡被自己铺的脚印围死）。机制等价 MC mob 跨步薄雪层（玩家侧本就有 auto-step 跨 1/8）→
+                //   水平碰撞豁免；垂直仍由下方落地扫描按层真实高度承接（mobSupportTopY 配套，两处成对）。
+                if (world->blockAt(x, y, z) == BlockRegistry::SnowLayer) continue;
                 // t333 水视穿透（同 t271 掉落物 / t220 水不挡沙）：World::isSolid 语义=「非 air」含 Water，
                 //   会把水当墙 → mob 横向进不了水 + 流水推力被水格自身撤回（t333 根因「怪水上走 + 不被推」）。
                 //   水非实体碰撞 → 排除后 mob 可入水游 / 被流水沿流推动，仍撞石头/泥土等真实体方块。
                 if (world->blockAt(x, y, z) != BlockRegistry::Water && world->isSolid(x, y, z)) return true;
+            }
     return false;
 }
 
@@ -70,6 +76,20 @@ bool mobFootprintHasSupport(World *world, float cx, float cz, int supportY, floa
             if (world->blockAt(x, supportY, z) != BlockRegistry::Water && world->isSolid(x, supportY, z))
                 return true;
     return false;
+}
+// t629 列支撑顶面高度（世界 Y；无效支撑返回 -1）：完整方块 = cell+1；SnowLayer 按 state 走
+//   snowLayerHeight（1/8..1.0，单一权威）取薄层真顶；水 / air（不可立）返回 -1（caller 当无支撑跳过）。
+//   供 mob 落地扫描按真实层高贴面 —— 修「落在 1/8 薄雪层上被整格顶起悬空一格格」（旧 mobSolidY+1 恒按
+//   满格顶承接）。与玩家侧 collisionAABBsAt sub-AABB 精度对齐（t575 模式的 mob 侧落地版）。
+float mobSupportTopY(World *world, int x, int y, int z)
+{
+    if (!world) return -1.0f;
+    const quint8 id = world->blockAt(x, y, z);
+    if (id == BlockRegistry::Water) return -1.0f; // 水非支撑（t333 穿透语义，落地扫描跳过水格）
+    if (id == BlockRegistry::SnowLayer)
+        return float(y) + BlockRegistry::snowLayerHeight(world->stateAt(x, y, z)); // 薄层真顶
+    if (!world->isSolid(x, y, z)) return -1.0f;
+    return float(y) + 1.0f;
 }
 } // namespace
 
@@ -2004,26 +2024,34 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
     //   移除持续覆盖，改「生成时固定朝、平时 aiWander 随机朝向」（见 (4) 后注释）。playerPos 参数保留为 caller
     //   签名兼容（tick Mob 分支统一传 listener），但本函数体不再读它（Q_UNUSED 标注防 -Wextra 未用参数警告）。
     Q_UNUSED(playerPos)
-    // (2) 行走留雪层（机制等价 MC 雪傀儡走过留雪脚印 + 雪层被铲后立即重生可无限刷雪球）：
-    //    **放身后格**（golem 离开格留雪脚印），非旧「放脚下」。t529 复盘：旧「放脚下」把 SnowLayer 铺进 golem
-    //    AABB 底面所在格 → golem 底雪块（local y[-0.90,0]）与 SnowLayer（cell 底 1/8）在同一格重叠 → 视觉读作
-    //    「golem 踩在自己刚铺的雪层上 / 模型脚与雪层打架」，用户报「走路飞起来 + 踩的积雪层变整块」（模型底面
-    //    贴 cell 底而雪层在 cell 底 1/8 → 二者共面打架）。改「放身后」：golem 朝 yawRad 方向走，身后格（yaw 反向）
-    //    是 golem 已离开的格 → 在此铺雪，golem 模型（在前方格）与雪层（身后格）永不在同一格 → 无重叠 / 无打架。
-    //    身后格 = floor(pos - dir)，dir = (sin(yaw), -cos(yaw))（同 yaw 约定；golem 前 -Z）→ 身后 = pos - dir。
-    //    身后格为空气 + 下方实体支撑（防悬空铺雪 / 覆盖已有方块）→ 铺 SnowLayer state=0（薄层 1/8）。
-    //    下方支撑用 isSolid（SnowLayer solid=false → 不被当支撑 → 不会在雪层上叠雪层造柱）。
-    //    玩家铲掉身后雪层后 golem 再走一步即在新身后格重生 → 无限刷雪球（铲 → 再生 → 铲）。
+    // (2) 行走留雪层（机制等价 MC 1.0 雪傀儡走过留雪脚印 + 雪层被铲后立即重生可无限刷雪球）：
+    //    t629 改**放脚下所在格**（golem 正走过 / 正站的格 —— 用户「只在离它最近的一格持续生成」；MC 1.0 雪傀儡
+    //    在其所在格铺薄雪层）。旧「放身后格 floor(pos−dir)」偏移根因：yaw 是模型朝向非位移方向（aiWander 随机
+    //    选向 1-4s 一换，转身瞬间「身后格」跳到从未走过的格）→ 脚印乱偏；且与 AABB 无关联，斜走时算出的格
+    //    既不在足迹上也不在附近。脚下格 = footprint 覆盖格中**离 golem 中心 XZ 最近**的一格（halfW=0.35 →
+    //    通常 1 格，跨格取最近 = 「最近的一格」），铺在其脚位空气格（支撑面上方）。
+    //    **嵌入自洽**：SnowLayer 贴格底 1/8；放置后落地扫描（t629 mobSupportTopY 按 snowLayerHeight 真顶承接）
+    //    自然把 golem 抬到层顶 —— 层顶仅 +1/8，视觉「踩进薄雪」而非旧「悬空一格格 / 整格顶起」。t529 旧
+    //    「放脚下打架」的根因正是落地扫描按满格顶承接（mobSolidY+1 恒满格）→ 真顶修复后脚下铺雪自洽。
+    //    下方支撑用 isSolid（SnowLayer 非 air → isSolid 含它 → 雪层上可再铺层，机制等价 MC 雪层可堆高）。
     //    setWaterSilent 静默写（非玩家破/放 → 免粒子/音/掉落噪音，同羊吃草消耗草丛模式）。
-    //    节流：仅当身后格 blockAt==Air 才写（已铺雪 / 已有方块 → 跳过），无每帧开销。
+    //    节流：仅当脚下格 blockAt==Air 才写（已铺雪 / 已有方块 → 跳过），无每帧开销。
     if (world) {
-        // review-7 修：前向 = (-sin, -cos)（全工程 yaw 约定，见 aiSnowGolem 发球面向 / yawAt）。
-        //   原 dirX 漏负号 → ±X 行走时「身后格」算到正前方，雪铺进即将踏入的格（t529 踩雪问题复现）。
-        const float dirX = -std::sin(e.yawRad), dirZ = -std::cos(e.yawRad); // golem 前向（同 yaw 约定）
-        const int bx = qFloor(e.pos.x() - dirX);                           // 身后格 X（golem 已离开的格）
-        const int bz = qFloor(e.pos.z() - dirZ);                           // 身后格 Z
-        const int footY = qFloor(e.pos.y() - e.halfH);                     // 脚位格（AABB 底面所在格；身后同高）
-        // 身后格在界内 + 为空气 + 下方实体支撑（防悬空铺雪 / 覆盖已有方块）→ 铺薄雪层（state=0）。
+        const int fx0 = qFloor(e.pos.x() - e.halfW), fx1 = qFloor(e.pos.x() + e.halfW);
+        const int fz0 = qFloor(e.pos.z() - e.halfW), fz1 = qFloor(e.pos.z() + e.halfW);
+        const int footY = qFloor(e.pos.y() - e.halfH); // 脚位格（AABB 底面所在格；铺在其空气格里）
+        int bx = qFloor(e.pos.x()), bz = qFloor(e.pos.z());
+        if (fx1 > fx0 || fz1 > fz0) { // 跨格：取离中心最近格
+            float bestD2 = 1e9f;
+            for (int gx = fx0; gx <= fx1; ++gx)
+                for (int gz = fz0; gz <= fz1; ++gz) {
+                    const float ddx = (float(gx) + 0.5f) - e.pos.x();
+                    const float ddz = (float(gz) + 0.5f) - e.pos.z();
+                    const float d2 = ddx * ddx + ddz * ddz;
+                    if (d2 < bestD2) { bestD2 = d2; bx = gx; bz = gz; }
+                }
+        }
+        // 脚下格在界内 + 为空气 + 下方实体支撑（SnowLayer solid → 可叠层；水非 solid → 水面不铺）→ 铺薄雪层（state=0）。
         if (footY >= 0 && footY < world->height()
             && world->blockAt(bx, footY, bz) == BlockRegistry::Air
             && BlockRegistry::isSolid(world->blockAt(bx, footY - 1, bz))) {
@@ -3953,11 +3981,24 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   t500 perf：与火烧 / 仙人掌同走 aiTick 节流 —— 每 mob 每 kAiTickInterval 帧扫一次头部格，
             //   suffocationTimer 用 aiDt 累积 → 平均窒息扣血速率不变（kSuffocationInterval=1s 量级，节流到 15Hz
             //   误差 <100ms 不可察觉）。每帧跑会浪费每 mob 1 isCollidable（60 槽 = 60 次 / 帧）。
+            //   t629 判据收紧「头部格 collidable」→「头部**点**落入该格某 sub-AABB 内」（对齐玩家 t575 眼位
+            //   sub-AABB 精判）：旧判据按整格判，1.9 高 mob 站在薄雪层（cell 底 1/8 板）上时头部点在其所在格的
+            //   空气区（>7/8 高度处），但该格若恰是可碰撞 SnowLayer / 半砖 → 整格判嵌 → 每秒扣 1HP（用户报
+            //   雪傀儡「白天阴凉处也一直扣血」真因 —— 不是太阳，是薄层整格窒息误判）。点在 sub-AABB 内才真嵌
+            //   （与碰撞同源，partial 块精确；同玩家 t575 修法）。
             if (aiTick) {
-                const int sx = qFloor(e.pos.x());
-                const int sz = qFloor(e.pos.z());
-                const int sy = qFloor(e.pos.y() + e.halfH - 1e-3f);
+                const float hx = e.pos.x(), hy = e.pos.y() + e.halfH - 1e-3f, hz = e.pos.z();
+                const int sx = qFloor(hx);
+                const int sz = qFloor(hz);
+                const int sy = qFloor(hy);
+                bool embedded = false;
                 if (sy >= 0 && world->isCollidable(sx, sy, sz)) {
+                    for (const BlockRegistry::BlockAABB &b : world->collisionAABBsAt(sx, sy, sz)) {
+                        if (hx > b.minX && hx < b.maxX && hy > b.minY && hy < b.maxY
+                            && hz > b.minZ && hz < b.maxZ) { embedded = true; break; }
+                    }
+                }
+                if (embedded) {
                     e.suffocationTimer += float(aiDt);
                     if (e.suffocationTimer >= kSuffocationInterval) {
                         e.suffocationTimer -= kSuffocationInterval;
@@ -3999,8 +4040,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   = 周期振荡（每 aiTick 一次重力 + dirty bump + emit，驱动 QML 全 delegate 绑定重算 = 持续卡顿源）。
             //   加 0.01f（>> 1 ULP ~1e-5、<< 1.0 格）把任何向下残差推回整数之上 → supportY 稳定 = mobSolidY。
             //   仅在 resting 复探生效（pos.y 已 snap 到 restY，feet 恒 ≈ 整数）；下落中 mob 不走此分支。
-            const int supportY = qFloor(e.pos.y() - e.halfH + 0.01f) - 1; // 实体底面下方那一格（= 支撑方块 cellY）
-            if (mobFootprintHasSupport(world, e.pos.x(), e.pos.z(), supportY, e.halfW)) continue; // 仍实体 → 保持静止
+            // t629 薄层支撑复探：mob 站在 SnowLayer 顶（restY = cell+1/8+halfH，feet = cell+0.125 非整数）时
+            //   旧「supportY = floor(feet+0.01)−1 = cell−1」查到薄层**下方**的空气格 → 判失支撑 → resting 翻
+            //   false → 重力下落 1 帧 → 落回同位 resting=true → 周期振荡（每 aiTick 一次重力 + emit，卡顿源）。
+            //   改「候选支撑层取 feet 所在格及其下一格」两格复探：任一层有支撑即保 resting（footprint 任一列）。
+            //   两格覆盖：满格地面（feet 整数 → supportY 恒 cell，同旧公式）+ 薄层顶（feet 在层格内 → 层格自身
+            //   命中）。SnowLayer solid=true（isSolid 非 air）→ mobFootprintHasSupport 原样命中，无需改谓词。
+            const int feetCell = qFloor(e.pos.y() - e.halfH + 0.01f);
+            if (mobFootprintHasSupport(world, e.pos.x(), e.pos.z(), feetCell - 1, e.halfW)
+                || mobFootprintHasSupport(world, e.pos.x(), e.pos.z(), feetCell, e.halfW))
+                continue; // 仍实体 → 保持静止
             e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
             dirty = true;
         }
@@ -4028,19 +4077,22 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         const int mobTopCell = qFloor(e.pos.y()); // 当前中心所在格（一般为空气）
         int mobBotCell = qFloor(mobNewY);
         if (mobBotCell > mobTopCell) mobBotCell = mobTopCell; // 防浮点噪声
-        int mobSolidY = -1;
+        // t629：扫列改为记「首个可支撑列的**真顶面 Y**」（mobSupportTopY）——SnowLayer 按 snowLayerHeight
+        //   取薄层真顶（1/8..1.0）、完整方块取 cell+1、水/air 返 -1 跳过（t333 水穿透语义不变）。修「mob 落在
+        //   1/8 薄雪层上被整格顶起悬空一格格」（用户报雪傀儡「卡在空中悬浮在积雪层上一格」）：旧 mobSolidY+1
+        //   恒按满格顶承接，落在薄层上中心被抬到层顶+halfH ≈ 层上方 0.9 格 = 视觉悬空。restTopY<0 = 本段
+        //   无支撑（含只扫到水）→ 自由下落（原 mobSolidY<0 路径）。
+        float restTopY = -1.0f;
         for (int cy = mobTopCell; cy >= mobBotCell; --cy) {
             if (cy < 0) break; // 越界下方=空气（World 约定）→ 不视作地面，实体继续落
-            // t333 水视穿透：水格不计地面 → mob 穿水面入水（落水后转 mobInWater 浮/减速/流水推动分支，
-            //   同 t271 掉落物穿水）。否则水格被 isSolid 当地面 → mob 粘在水面当着地（怪水上走）。
-            if (world->blockAt(cx, cy, cz) != BlockRegistry::Water
-                && world->isSolid(cx, cy, cz)) { mobSolidY = cy; break; }
+            const float top = mobSupportTopY(world, cx, cy, cz);
+            if (top >= 0.0f) { restTopY = top; break; }
         }
 
-        if (mobSolidY >= 0) {
-            // 落地：贴支撑方块顶面 + 静止偏移（底面 = mobSolidY+1 = 支撑方块顶；中心 = 顶 + halfH）。
+        if (restTopY >= 0.0f) {
+            // 落地：贴支撑面真顶 + 静止偏移（底面 = restTopY = 支撑顶；中心 = 顶 + halfH）。
             //   t252：kRestOffset → e.halfH（per-mob 半高；cow halfH=0.70 → 比 1×1 高 0.2，固定 0.5 无法表达）。
-            const float restY = float(mobSolidY + 1) + e.halfH;
+            const float restY = restTopY + e.halfH;
             if (mobNewY <= restY || e.vy < 0.0f) {
                 if (e.pos.y() != restY) { e.pos.setY(restY); dirty = true; }
                 if (e.vy != 0.0f) { e.vy = 0.0f; dirty = true; }
