@@ -2257,7 +2257,7 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
 
 ### 🅿 pack 方块贴图接入批（2 项大，用户已给全部 PNG 路径）
 
-**t620** 功能方块贴图接入（投掷器/发射器/附魔台/末影祭坛/门/书架/南瓜/铁轨族/红石族/仙人掌/耕地/作物/矿物块）**〔第 1 部分完成 ✅✅（功能方块组：发射器/投掷器/附魔台/末影祭坛/门/书架/南瓜/铁轨族；e260b2d+eb23c7e。附魔台改 0.75 矮盒 + 侧贴图裁顶空白；末影祭坛 = EndPortal 方块 endframe 化（eye 态 = top+eye overlay 合成）；门上下半 per-face 新瓦片 143-146 + build_door.py；书架顶底=planks；铁轨直轨/拐角接（拐角右转贴图水平镜像成左转基准）；南瓜六面核实全对（face_on 无点亮机制不接）。红石族/仙人掌/耕地/作物/矿物块留第 2 部分）〕**
+**t620** 功能方块贴图接入（投掷器/发射器/附魔台/末影祭坛/门/书架/南瓜/铁轨族/红石族/仙人掌/耕地/作物/矿物块）**〔全部完成 ✅✅（第 1 部分：功能方块组 e260b2d+eb23c7e——发射器/投掷器/附魔台/末影祭坛/门/书架/南瓜/铁轨族；第 2 部分：矿物块+红石灯+补漏——新增五矿物存储块 CoalBlock=118/LapisBlock=119/DiamondBlock=120/GoldBlock=121/RedstoneBlock=122（9 材料↔1 块双向配方 + 煤炭块燃料 800s + 采掘级对齐对应矿物镐门槛 + 创造调色板 + 程序贴图 default_*_block 147..151 + pack 映射 + 图标）、红石灯 RedstoneLamp=123（右键开关 state bit0：on=redstone_lamp_on 贴图+方块光 15 走 lightEmission 状态感知版重 flood，同 t494 熔炉模式；配方 4 红石+1 玻璃十字围心；贴图 152/153）、iron_block pack 映射漏项补齐（tile 112→iron_block.png，t477 遗漏 grep 实证）、仙人掌底面核实不接（0.8 细柱 pushBox 侧·底统一 sideTile，bottomTile 无消费方；cactus_bottom 与 top 像素实测不同但无渲染路径读它）、红石火把/动力轨/探测轨留注释不接（无红石系统无消费方）。AtlasTileCount 147→154；Count 118→124）〕**
 - pack 路径（docs/Default HD 128x Demo 1.8.2.2/assets/minecraft/textures/block/，只读运行期引用）：
   - 投掷器：`dropper_front_horizontal.png` + `dropper_front_vertical.png`（正面，随放置朝向选横/竖）+ 熔炉侧面（四个侧面）→ **依赖 t609 新方块**
   - 发射器：`dispenser_front_horizontal.png` + `dispenser_front_vertical.png` + 熔炉侧面 → 依赖 t608 朝向 state
@@ -2275,7 +2275,7 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
   - 矿物块：`coal_block/iron_block/gold_block/redstone_block/lapis_block/diamond_block.png`（六面同）——核哪些已接哪些缺
 - 实现：tileFilenameMap / blockTexture 映射逐个接（resourcepackmanager），非整块几何（附魔台 0.75 / 门上下半 / 台阶楼梯已各自有）按几何裁 UV。**本项工作量大，实现时按上面分组拆 3-4 个 commit。**
 
-**t621** 胡萝卜/马铃薯种植体系（若 t620 核出未实现）
+**t621** 胡萝卜/马铃薯种植体系（若 t620 核出未实现）✅✅ 已完成（**早期轮已实现，本轮核验确认**——耕地 Farmland=23（t234 锄头 useBlock + t408 干湿 4 级 state 低 2 位 + tickFarmlandHydration 周期复算 + tiles 26/27→farmland.png/farmland_moist.png pack 映射在位）与胡萝卜/马铃薯作物 CarrotCrop=55/PotatoCrop=56（t407 种植/生长/收割全链 + tiles 69-76→carrots/potatoes_stage_0..3.png pack 映射在位）均已实现；t620 第 2 轮核验（grep playercontroller 锄头分支/tickCropGrowth/tileFilenameMap 映射实证）全在，无缺口）
 - 耕地（farmland）方块 + 锄头右键转耕地 + 邻水湿润 + 干湿贴图切换；胡萝卜/马铃薯种子物品 + 右键种耕地 + stage 0-3 生长 + 成熟收割掉落（胡萝卜/马铃薯物品 + 种子）。查现有小麦体系（WheatCrop 已有）照搬模式。合成/掉落/饥饿值对齐 MC 1.0（胡萝卜+3 饥饿 马铃薯需烤）。
 
 ### 📎 R19.5 范围
