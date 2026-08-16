@@ -421,12 +421,54 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {117, QStringLiteral("pumpkin_side.png")},           // pumpkin_side（南瓜侧面瓜棱）
         {118, QStringLiteral("pumpkin_face_off.png")},       // pumpkin_face（南瓜前面刻面双眼+锯齿嘴）
         {119, QStringLiteral("pumpkin_top.png")},            // pumpkin_top（南瓜顶/底瓜顶带茎）
+        // t620 南瓜核实（blockId 100 六面映射全对：top/bottom=119 / side=117 / front(-Z)=118，t582 已接 +
+        //   t610 已修 face_off 懒拷贝退化链）。pumpkin_face_on.png（点亮态）**不接**——本工程无南瓜灯方块 /
+        //   点亮机制（Pumpkin 无 lit state，雪傀儡头也不发光），接了无消费方；仅作 t610 退化回退链的末位
+        //   候选存在（ensureBuiltLocked 内 tile 118 分支），机制等价 MC jack o'lantern 留后续若加南瓜灯再接。
         // t609 投掷器：tile 139 dropper_front → pack block/dropper_front_horizontal.png（水平朝向正面小排出口）。
         //   顶/底/侧复用熔炉 tile 12/13（既存 {12→furnace_top.png}/{13→furnace_side.png} 映射自动覆盖）。竖直
-        //   朝向版（dropper_front_vertical.png）待 t620 per-face 朝向接入时补（本工程放置朝向恒水平 4 向 →
+        //   朝向版（dropper_front_vertical.png）待投掷器支持上下朝向时接入（本工程放置朝向恒水平 4 向 →
         //   先接 horizontal 一张不白块）。非 pack 时回落程序生成 default_dropper_front.png（tools/build_dropper.py
         //   原创自绘）。包内缺该 PNG 时安全跳过（保留程序生成瓦片）。
         {139, QStringLiteral("dropper_front_horizontal.png")}, // dropper_front（投掷器前面排出口；t609）
+        // t620 发射器三面（tile 125/126/127）：MC 1.0 发射器顶/底=熔炉顶面、侧=熔炉侧面（demo 包无 dispenser_top/
+        //   side 专属文件，vanilla 本就复用 furnace 系）；前面=dispenser_front_horizontal.png（水平朝向大暗腔
+        //   排出口——本工程放置朝向恒水平 4 向，按文件名约定接 horizontal；竖直朝向版
+        //   dispenser_front_vertical.png 待上下朝向支持时接入，留注释）。非 pack 回落程序生成
+        //   default_dispenser_*.png（tools/build_dispenser.py 原创自绘）。
+        {125, QStringLiteral("furnace_top.png")},               // dispenser_top（发射器顶/底=熔炉顶面；MC 复用 furnace_top）
+        {126, QStringLiteral("furnace_side.png")},              // dispenser_side（发射器三侧=熔炉侧面；MC 复用 furnace_side）
+        {127, QStringLiteral("dispenser_front_horizontal.png")}, // dispenser_front（发射器前面大暗腔排出口）
+        // t620 附魔台两 tile：顶=enchanting_table_top.png；侧 tile 110 走专用合成（enchanting_table_side.png 裁掉
+        //   顶部 0.25 空白 → 有效 0.75 部分整张贴 0.75 高侧面，见 ensureBuiltLocked 特判）。底=obsidian(77)（demo
+        //   包实测 enchanting_table_bottom.png 与 obsidian.png 逐像素相同 → 复用既存 {77→obsidian.png} 不另立 tile）。
+        {109, QStringLiteral("enchanting_table_top.png")},      // enchanting_table_top（附魔台顶面；t620）
+        // t620 书架侧面：tile 111 → pack block/bookshelf.png（木板边框 + 中央书脊书列）。顶/底=planks(8)
+        //   经既存 {8→oak_planks.png} 自动覆盖（per-face 见 BlockDef）。非 pack 回落 default_bookshelf.png。
+        {111, QStringLiteral("bookshelf.png")},                 // bookshelf（书架侧/前面；t620 per-face）
+        // t620 末影祭坛三 tile（EndPortal 方块的 endframe 化）：side(140)/top(141) 走专用合成（endframe_side.png
+        //   裁顶部 3/16 空白；eye(142) = endframe_top.png + endframe_eye.png overlay 叠加——MC eye 贴图是中央局部
+        //   图非整面），见 ensureBuiltLocked 特判。此处的直映射仅作「文件名存在性声明」，实际覆盖由特判完成。
+        {140, QStringLiteral("endframe_side.png")},             // endframe_side（祭坛侧/底=灰白细孔框身；t620 裁剪合成）
+        {141, QStringLiteral("endframe_top.png")},              // endframe_top（祭坛顶面（未放之眼）；t620）
+        {142, QStringLiteral("endframe_eye.png")},              // endframe_eye（祭坛顶面（已放之眼）；t620 overlay 合成）
+        // t620 门上下半 per-face 四 tile（PartialBlockGeometry door case 据 state bit3 选；kDefs topTile=upper/
+        //   bottomTile=lower）。demo 包另有 oak_door_top/bottom.png + spruce_door_top/bottom.png（1.13+ flattening
+        //   现代命名）——门类取 door_wood_*（1.8 命名）优先、缺则现代命名兜底须候选链，但 tileFilenameMap 是单值
+        //   映射；实测 demo 包两组都在，取 door_wood_* / door_spruce_*（与任务给定路径一致）。
+        {143, QStringLiteral("door_wood_upper.png")},           // door_wood_upper（橡木门上半：门板+格栅窗；t620）
+        {144, QStringLiteral("door_wood_lower.png")},           // door_wood_lower（橡木门下半：门板+锁孔板；t620）
+        {145, QStringLiteral("door_spruce_upper.png")},         // door_spruce_upper（云杉门上半；t620）
+        {146, QStringLiteral("door_spruce_lower.png")},         // door_spruce_lower（云杉门下半；t620）
+        // t620 铁轨直轨：tile 121 rail → pack block/rail_normal.png（NS 直轨：两根纵轨 + 周期枕木横带；demo 包
+        //   实测两根纵轨在 x 16..31/96..111 带 = 纵向轨条，与程序 default_rail.png 同语义）。EW 直轨由 mesher
+        //   UV 旋转 90° 复用本瓦片（一张两用，不另接 rail_horizontal）。拐角 tile 136 走专用合成（demo 包
+        //   rail_normal_turned.png 是**右转**（南进东出），程序贴图 136 基准是**左转**（南进西出）→ 合成时水平
+        //   镜像后覆盖，mesher 四象限 UV 映射零改动）；十字 tile 137 无 pack 等价（vanilla 交叉轨走模型层叠放
+        //   非独立贴图）→ 不映射保程序生成。动力轨 rail_golden(_powered)/探测轨 rail_detector(_powered) 本工程
+        //   无对应方块（无红石系统）→ 不接，留注释。非 pack 回落 default_rail*.png（tools/build_rail.py）。
+        {121, QStringLiteral("rail_normal.png")},               // rail（直轨 NS；EW 由 mesher UV 旋转复用；t620）
+        {136, QStringLiteral("rail_normal_turned.png")},        // rail_corner（90° 拐角；右转→水平镜像合成，t620）
     };
     return kMap;
 }
@@ -655,6 +697,16 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
         { 83, { QStringLiteral("bed.png") } }, // BedLightGray
         { 84, { QStringLiteral("bed.png") } }, // BedPurple
         { 85, { QStringLiteral("bed.png") } }, // BedBrown
+        // t620 门 / 铁轨 / 机关盒 pack 2D item 图标（t537 工作台/熔炉同模式：item 目录优先、block 目录兜底）。
+        //   门：item/oak_door.png + item/spruce_door.png（demo 包 item 目录实测都在；MC 1.0 门 item 图标即
+        //   2D 门板立绘）。铁轨：item 目录无 rail 图标（demo 包实测）→ block/rail_normal.png 兜底（直轨
+        //   2D 图，机制等价 MC rail item icon）。发射器 / 投掷器：item 目录无专属图 → block/<name>_front_
+        //   horizontal.png 兜底（正面 2D 图，同 t537 熔炉 furnace_front 兜底模式）。
+        { 19,  { QStringLiteral("oak_door.png"),                       QStringLiteral("door_wood_lower.png") } },  // WoodDoor 木板门
+        { 89,  { QStringLiteral("spruce_door.png"),                    QStringLiteral("door_spruce_lower.png") } }, // SpruceDoor 云杉门
+        { 103, { QStringLiteral("rail_normal.png") } },               // Rail 铁轨（block 兜底：item 目录无 rail 图标）
+        { 107, { QStringLiteral("dispenser_front_horizontal.png") } }, // Dispenser 发射器（正面 2D）
+        { 117, { QStringLiteral("dropper_front_horizontal.png") } },   // Dropper 投掷器（正面 2D）
     };
     return kMap;
 }
@@ -944,6 +996,69 @@ QImage composeGrassSide(const QDir &blockDir)
     return side;
 }
 
+// t620 裁掉贴图顶部空白带（MC 矮模型元素的侧贴图自带顶部空白——附魔台 0.25、末影祭坛 0.1875）。
+//   本引擎 pushBox 整张 UV 无子区采样 → 裁掉顶部 blankFrac 比例的行、余下有效部分整张返回（调用方再缩
+//   kTile×kTile）。仅当顶部确实存在「全透明行带」时才裁（防误裁无空白的自定义包：从顶向下找首个不透明
+//   行，若其行号 < blankFrac*height 则从该行起裁到底；否则原样返回不裁）。源空 / 解码失败 → 空 QImage。
+QImage cropTopBlank(const QImage &src, float blankFrac)
+{
+    if (src.isNull() || src.height() <= 0)
+        return {};
+    QImage img = src.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    const int expect = qRound(float(img.height()) * blankFrac); // 预期空白行数
+    // 从顶向下找首个含不透明像素的行（alpha > 0）。
+    int firstOpaque = img.height();
+    for (int y = 0; y < img.height(); ++y) {
+        const QRgb *scan = reinterpret_cast<const QRgb *>(img.constScanLine(y));
+        bool opaque = false;
+        for (int x = 0; x < img.width(); ++x) {
+            if (qAlpha(scan[x]) > 0) { opaque = true; break; }
+        }
+        if (opaque) { firstOpaque = y; break; }
+    }
+    if (firstOpaque >= img.height())
+        return {}; // 全透明 → 无有效内容
+    // 仅当实际空白带 ≈ 预期（允许 ±1/32 误差）才裁；自定义包顶行就有内容（firstOpaque=0）→ 不裁原样用。
+    const int tol = qMax(1, img.height() / 32);
+    const int cropY = (firstOpaque > 0 && qAbs(firstOpaque - expect) <= tol) ? firstOpaque : 0;
+    if (cropY <= 0)
+        return img; // 无空白带 → 原样
+    return img.copy(0, cropY, img.width(), img.height() - cropY);
+}
+
+// t620 末影祭坛之眼 overlay 合成：endframe_top.png（框面基底）+ endframe_eye.png 叠加（SourceOver：眼图
+//   alpha>0 处覆眼、透明处保框面）。MC eye 贴图是中央局部图（非整面）故必须叠基底。返回已缩放 kTile 的
+//   ARGB32_Premultiplied；任一源缺 / 解码失败 → 空 QImage（调用方跳过，保程序生成眼瓦片）。
+QImage overlayEyeOnTop(const QDir &blockDir)
+{
+    QImage top(blockDir.absoluteFilePath(QStringLiteral("endframe_top.png")));
+    QImage eye(blockDir.absoluteFilePath(QStringLiteral("endframe_eye.png")));
+    if (top.isNull() || eye.isNull())
+        return {};
+    top = top.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    eye = eye.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    // 尺寸对齐（同包同分辨率，防御异尺寸包：眼缩放到顶同尺寸再叠）。
+    if (eye.size() != top.size())
+        eye = eye.scaled(top.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    QPainter op(&top);
+    op.drawImage(0, 0, eye);
+    op.end();
+    if (top.size() != QSize(kTile, kTile))
+        top = top.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    return top;
+}
+
+// t620 水平镜像（u 翻转）：demo 包 rail_normal_turned.png 是右转（南进东出），程序贴图 136 基准是左转
+//   （南进西出，mesher 四象限 UV 映射按此编码）→ 镜像后右转变左转，mesher 零改动。返回 ARGB32_Premultiplied；
+//   源空 / 解码失败 → 空 QImage。
+QImage mirrorHorizontally(const QImage &src)
+{
+    if (src.isNull())
+        return {};
+    QImage img = src.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    return img.flipped(Qt::Horizontal); // Qt 6.11：mirrored() 已弃用，flipped 同语义
+}
+
 // t489 从包内动画贴图（water_still / water_flow / lava_still）抽帧：MC 动画贴图是单列竖排 strip ——
 //   宽 = 帧像素边长、高 = 帧数 × 帧边长。抽第 i 帧 = 行 [i*framePx, (i+1)*framePx)。包内帧边长 = image.width
 //   （demo 包 water_still 16 宽 → 16×16 帧；water_flow 32 宽 → 32×32 帧；lava_still 16 宽 → 16×16 帧）。
@@ -1169,6 +1284,30 @@ void ensureBuiltLocked()
         if (m.first == 1) {
             // t422 grass_side 走专用合成（dirt 基底 + 顶部绿 overlay，不整张染绿）；全缺 → 跳过。
             tile = composeGrassSide(blockDir);
+            if (tile.isNull())
+                continue;
+        } else if (m.first == 110 || m.first == 140) {
+            // t620 附魔台侧（110）/ 末影祭坛侧（140）走裁剪合成：MC 侧贴图顶部自带空白（附魔台 4/16、
+            //   祭坛 3/16 —— 模型元素矮于整格、贴图按 16px 满格 UV 绘制故顶部留空）。本引擎 pushBox 是
+            //   整张 UV 无子区采样 → 合成时裁掉顶部空白行、余下有效部分整张缩放 → 贴到矮盒侧面（附魔台
+            //   0.75 / 祭坛满格拉伸）无缝且无黑边（opaque 段透明像素会显黑，裁剪是唯一正解）。源缺 / 全
+            //   空 → 跳过（保程序生成瓦片）。
+            tile = cropTopBlank(QImage(blockDir.absoluteFilePath(m.second)),
+                                m.first == 110 ? 0.25 : 0.1875);
+            if (tile.isNull())
+                continue;
+        } else if (m.first == 142) {
+            // t620 末影祭坛之眼态（142）走 overlay 合成：MC endframe_eye.png 是**中央局部图**（demo 包实测
+            //   仅中央 64×96/128 不透明，非整面贴图）→ 不能直接当顶面。合成 = endframe_top.png（框面基底）
+            //   + endframe_eye.png SourceOver 叠加（眼图 alpha>0 处覆眼、透明处保框面）。任一缺 → 跳过。
+            tile = overlayEyeOnTop(blockDir);
+            if (tile.isNull())
+                continue;
+        } else if (m.first == 136) {
+            // t620 铁轨拐角（136）走镜像合成：demo 包 rail_normal_turned.png 是**右转**（南 v=1 进 → 东 u=1
+            //   出；边缘不透明带实测 bottom+right），而程序贴图 136 基准是**左转**（南进西出）且 mesher 的
+            //   四象限 UV 映射按左转基准编码 → 水平镜像（u 翻转）后右转变左转，与程序贴图同向，mesher 零改动。
+            tile = mirrorHorizontally(QImage(blockDir.absoluteFilePath(m.second)));
             if (tile.isNull())
                 continue;
         } else {
