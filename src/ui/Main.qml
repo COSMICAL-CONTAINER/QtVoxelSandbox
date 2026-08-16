@@ -8325,7 +8325,18 @@ Window {
             anchors.centerIn: parent
             color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
             // ── 树数据快照（触碰 revision；achievements() 携 col/row/iconId 布局字段）──
-            property var achTree: { const _r = progress.revision; return _r >= 0 ? progress.achievements() : [] }
+            //   review-L3 可见性门：面板关闭期间（progressOverlay.visible=false）返空 model —— 原绑定无条件
+            //   触碰 progress.revision，而 playTime 每 ~0.5s flush 必 bump revision → 全天候（含面板关）每
+            //   0.5s 整树重建（节点 + 连线两 Repeater 全量销毁重建，连线 delegate 各 O(n) 父查找）。QML 绑定
+            //   依赖按**每次求值实际读到的属性**注册：关闭分支早退不读 revision → 仅依赖 visible → revision
+            //   bump 不再触发重算；面板开（visible 翻 true）→ 求值读 revision 取最新树（门内保留 _r>=0 恒真
+            //   守卫触碰，防 qmlcachegen AOT 把裸读当死代码消除，qml-touch 铁律）。关闭时 delegate 销毁 →
+            //   脉动动画随之停（本就是省，非退化）。
+            property var achTree: {
+                if (!progressOverlay.visible) return []
+                const _r = progress.revision
+                return _r >= 0 ? progress.achievements() : []
+            }
             // 树边界（最大列 / 行号；连线端点 + Flickable content 尺寸用）。
             readonly property int treeCols: { const _t = achTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].col); return m }
             readonly property int treeRows: { const _t = achTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].row); return m }
