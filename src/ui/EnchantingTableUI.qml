@@ -377,6 +377,18 @@ Item {
         //   其余档位等级不足 → 拒（affordable 已置灰，此处防御）。
         const lvl0Tier1 = root.playerLevel === 0 && slotIdx === 0
         if (!lvl0Tier1 && (root.playerLevel < lvlCost || root.lapisCount < lapCost)) return
+        // review H1 修：普通左键可把整栈书（如 64 本）放进槽 0（resolveClick B 整栈放置；只有 Shift+左键才有
+        //   「只取 1 本」语义），而 doEnchant 产物恒 1 本 → 其余 N-1 本曾被静默销毁。附魔只消耗 1 本：先把余下
+        //   (count-1) 本归还背包（addToAny，同 slotShiftLeftEnchant 归还路径；书无耐久 / 无附魔，dur 传 0）。
+        //   背包满装不下（remain>0）→ 余数留槽 0（同「余数留源槽」防丢物语义）且本轮不附魔（XP / 青金石均
+        //   未扣、书全数保全，玩家腾位后重试）。槽 0 count>1 只可能是书（工具 / 护甲 cap=1 恒单件）。
+        const srcCount0 = root.enchantCounts[0] || 0
+        if (srcCount0 > 1) {
+            const srcId0 = root.enchantSlots[0] || 0
+            const remain = root.hotbar.addToAny(srcId0, srcCount0 - 1, 0)
+            InventoryOps.writeSlot(root, "enchant", 0, srcId0, 1 + remain, 0)
+            if (remain > 0) return
+        }
         // t590 offeredLevel 映射：档位 I/II/III 基准 8/15/22 + 书架加成 floor(power/2)（书架 power 进档位池；
         //   15 书架 → 档位 3 offered≈29 近满 30 → 附魔数 3 + 单附魔等级趋 maxLevel）。机制等价 MC「书架提升附魔强度」。
         const offered = ([8, 15, 22][slotIdx] || 8) + Math.floor(root.bookshelfPower / 2)
