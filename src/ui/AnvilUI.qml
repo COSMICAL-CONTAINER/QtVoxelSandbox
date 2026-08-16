@@ -498,6 +498,51 @@ Item {
         return { out: out, applied: applied, conflictNames: conflictNames,
                  inapplicableNames: inapplicableNames, replaced: replaced }
     }
+    // review M9 同物合并（combine）附魔并集计算（纯函数；canCombine 真时生效）。合并内核与
+    //   computeBookMerge 同规则 —— 两件输入的附魔逐条并集，机制等价 MC 两件合并（规则单一权威）：
+    //   - 冲突组过滤：右件附魔与左件已有附魔互斥（enchantConflictsWith；锐锋族 / 采集族 / 保护系）→ **不上**
+    //     （与敲书路径同口径；原实现无冲突过滤 → 锐锋剑 + 亡灵杀手剑可合出互斥共存，破坏同批建立的不变量）。
+    //   - 等级合并：同款 → max(l, r)；相等 → +1（封顶 enchantMaxLevel；与 computeBookMerge 同口径，原实现
+    //     同款同等级不加级、不封顶）。
+    //   - 无同款 → 首个空槽写入（等级钳 maxLevel；4 槽满 → 静默不上）。
+    //   两件同物 → 适用域天然一致（同 id 物品适用面相同），无需 enchantApplicableTo 再过滤（区别于敲书路径
+    //   书可载任意附魔）。返回 4-int 合并结果。
+    function computeCombineEnch(leftEnch, rightEnch) {
+        const out = leftEnch.slice()               // C 初始 = 左件附魔（副本，勿污染 anvilEnch[0] 原数组）
+        for (let i = 0; i < 4; ++i) {
+            const packed = rightEnch[i] || 0
+            if (packed === 0) continue
+            const eid = (packed >> 8) & 0xFF
+            const lvl = packed & 0xFF
+            // 冲突组：与 C 已有附魔互斥 → 不上（合并路径无「B 替换 A」语义——两件都是真装备，保左件）。
+            let conflict = false
+            for (let j = 0; j < 4; ++j) {
+                const p = out[j] || 0
+                if (p !== 0 && root.hotbar.enchantConflictsWith((p >> 8) & 0xFF, eid)) { conflict = true; break }
+            }
+            if (conflict) continue
+            // 等级合并：同款 → max / 相等 +1（封顶）；无 → 首个空槽写入。
+            let slot = -1
+            for (let j = 0; j < 4; ++j) {
+                const p = out[j] || 0
+                if (p !== 0 && ((p >> 8) & 0xFF) === eid) { slot = j; break }
+            }
+            if (slot >= 0) {
+                const cur = out[slot] & 0xFF
+                const cap = root.hotbar.enchantMaxLevel(eid)
+                let merged = (cur === lvl) ? cur + 1 : Math.max(cur, lvl)
+                out[slot] = (eid << 8) | Math.min(merged, cap)
+            } else {
+                for (let j = 0; j < 4; ++j) {
+                    if ((out[j] || 0) === 0) {
+                        out[j] = (eid << 8) | Math.min(lvl, root.hotbar.enchantMaxLevel(eid))
+                        break
+                    }
+                }
+            }
+        }
+        return out
+    }
     // 重命名前置：左槽有物 + 名字**真改过**（≠自动填充值 lastAutoName；t606② 自动填名后框恒非空，
     //   改名产物须以用户实际修改为前提——未改名的物品单独放 A 不出产物，机制等价 MC「名字栏与当前名
     //   相同则无改名操作」）。改名可与修复 / 合并叠加（MC：改名 + 修复合算等级）。
@@ -625,6 +670,9 @@ Item {
         if (_r < 0) return [0, 0, 0, 0]
         // t615 merge：产物附魔 = computeBookMerge 结果（适用过滤 + 冲突 + 等级合并后的 C）。
         if (root.activeOp === "merge") return root.bookMerge.out
+        // review M9：combine 预览 = computeCombineEnch（冲突过滤 + 等级合并同内核）——与 takeProduct
+        //   实际产物同口径（原预览只显左件附魔，玩家看到的与拿到的不一致）。
+        if (root.activeOp === "combine") return root.computeCombineEnch(root.enchAt(0), root.enchAt(1))
         return root.enchAt(0)
     }
     // ════════════════════════════════════════════════════════════════════════════
@@ -665,30 +713,13 @@ Item {
             root.lastResult = "修复完成 +" + root.cost + "级"
         } else if (op === "combine") {
             // t578 同物合并（双铁镐/双护甲）：产物耐久 = min(max, d1+d2+10% max)（与 productDur 预览同口径），
-            //   附魔并集（同 id 取 max / 否则填空槽，与附魔书合并同算法）；两件输入均被消耗。
+            //   附魔并集走 computeCombineEnch（review M9：冲突过滤 + 同款等级合并 + 封顶，与预览 productEnch
+            //   同一内核；原实现内联并集无冲突过滤 / 无同级 +1 / 无封顶，且原地改 enchAt(0) 返回的活数组——
+            //   产物路由无操作 return 时左槽附魔已被污染）；两件输入均被消耗。
             const max = root.maxDur(outId)
             const rDur = root.anvilDur[1] || 0
             outDur = Math.min(max, Math.floor(root.leftDur + rDur + max * 0.1))
-            const src = root.enchAt(1)
-            for (let i = 0; i < 4; ++i) {
-                const packed = src[i] || 0
-                if (packed === 0) continue
-                const eid = (packed >> 8) & 0xFF
-                const lvl = packed & 0xFF
-                let slot = -1
-                for (let j = 0; j < 4; ++j) {
-                    const p = outEnch[j] || 0
-                    if (p !== 0 && ((p >> 8) & 0xFF) === eid) { slot = j; break }
-                }
-                if (slot >= 0) {
-                    const cur = outEnch[slot] & 0xFF
-                    outEnch[slot] = (eid << 8) | Math.max(cur, lvl)
-                } else {
-                    for (let j = 0; j < 4; ++j) {
-                        if ((outEnch[j] || 0) === 0) { outEnch[j] = packed; break }
-                    }
-                }
-            }
+            outEnch = root.computeCombineEnch(outEnch, root.enchAt(1))
             root.lastResult = "合并完成 +2级"
         } else if (op === "merge") {
             // t615 真附魔书合并（computeBookMerge：适用过滤 + 冲突组 + 等级合并；预览 = 写入同口径）。
