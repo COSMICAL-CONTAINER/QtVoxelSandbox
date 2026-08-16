@@ -131,6 +131,15 @@ public:
     //   无映射 / 文件缺 → ""。子目录缺时自动回退扁平 entity/<mob>.png（兼容旧 / HD 包布局）。
     Q_INVOKABLE QString mobTextureSource(int mobType) const;
 
+    // t633 图鉴生物列表 2D 头像图标：pack 启用且 mobType 有头部 box-UV 区（mobmodel.cpp 同源 texOffs/size 表）
+    //   时，加载 pack entity 贴图、裁「头正面」（MC +Z Front 面 = (u0+d, v0+d)-(u0+d+w, v0+d+h) 像素矩形）
+    //   放大到 64×64 透明底 PNG，落盘 AppLocalData/voxelsandbox_rp_mobhead_<mobType>.png（缓存；apply() 重建时
+    //   随图集重生成）并返回 file:/// 路径。无 pack / 无映射 / 裁剪解码失败 → 空串（调用方回退体色方块）。
+    //   羊特例：主贴图是 sheep_fur.png（毛层，头前是纯白羊毛无脸）→ 头像改裁 sheep/sheep.png 本体层的头区
+    //   （有真脸）。雪傀儡头是南瓜方块（非 entity 贴图）/ 鱿鱼·狼·豹猫·银鱼无映射 → 空串回退。
+    //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
+    Q_INVOKABLE QString mobHeadIconSource(int mobType) const;
+
     // 引擎图集瓦片尺寸（tools/build_atlas.py TILE=16 + chunkgeometry UV 的 N*16 同源；公开供 image provider 复用）。
     static constexpr int kTile = 16;
 

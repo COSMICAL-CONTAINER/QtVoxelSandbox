@@ -158,12 +158,16 @@ Item {
     property int selectedId: 0
     // t617 悬浮窗（同创造背包 t94 tooltip 模式）：hover 格写 hoveredName + hoveredTipPos（格顶中心，panel
     //   坐标系），离开按名守卫清除（防相邻格进出竞态互清）。tooltip 名 + 简述（类别 / mobType）。
+    //   t633 ① 修「hover 名字空白」：①两 HoverHandler 补 hotbar 空守卫（hotbar 注入前 hover → 旧版
+    //   root.hotbar.nameForBlock 抛 TypeError 被信号处理器吞 → hoveredName 恒空 → tooltip 永不出现 = 用户
+    //   观感「名字全空白」的根因路径）；②简述行独立派生属性（旧版 text 只依赖 hoveredName —— 名不变而
+    //   hoveredId 变（同名物品格 ↔ 生物格）时简述不刷新）。
     property string hoveredName: ""
     property point hoveredTipPos: Qt.point(0, 0)
-    // hover 物 id（类别简述反查用；mob 格 = -1 哨兵 → 类别「生物」）。与 hoveredName 同步写 / 清。
+    // hover 物 id（类别简述反查用；mob 格 = -1 哨兵 → 类别「生物」）。与 hoveredName 同步写；离开同步清。
     property int hoveredId: -1
-    // 类别简述（物品 → hoveredCategory 谓词；mob → 生物）。
-    function hoveredSuffix() {
+    // 类别简述（物品 → hoveredCategory 谓词；mob → 生物）。依赖 hoveredId（换格即重算，名相同也刷新）。
+    readonly property string hoveredSuffixText: {
         if (hoveredId >= 0) {
             const c = hoveredCategory(hoveredId)
             return c !== "" ? " · " + c : ""
@@ -374,12 +378,31 @@ Item {
                                             Column {
                                                 anchors.centerIn: parent
                                                 spacing: 2
-                                                // 体色 swatch：pack 关纯色回退的视觉提示（有程序贴图的 mob 用主色近似）。
-                                                Rectangle {
-                                                    width: 22; height: 22; radius: 4
-                                                    color: root.mobFallbackColor(modelData.mobType)
-                                                    border.color: "#4a5a4a"; border.width: 1
+                                                // t633 ② 生物头像：pack 命中 → mobHeadIconSource 裁的头部 2D
+                                                //   PNG（pack 关 / 无该 mob 头区 → 空串 → 回退体色 swatch）。
+                                                //   Image source 触碰 packActive（表达式形式防 AOT 死代码消除）。
+                                                Item {
+                                                    width: 26; height: 26
                                                     anchors.horizontalCenter: parent.horizontalCenter
+                                                    // 头像命中 → 显 Image；否则显体色方块（原 swatch）。
+                                                    property string headSrc: {
+                                                        const _r = root.packActive
+                                                        return (_r && root.resourcePack) ? root.resourcePack.mobHeadIconSource(modelData.mobType) : ""
+                                                    }
+                                                    Image {
+                                                        anchors.fill: parent
+                                                        visible: parent.headSrc !== ""
+                                                        source: parent.headSrc
+                                                        fillMode: Image.PreserveAspectFit
+                                                        smooth: false // 像素锐利（HD 原图缩放）
+                                                    }
+                                                    Rectangle {
+                                                        anchors.fill: parent
+                                                        radius: 4
+                                                        visible: parent.headSrc === ""
+                                                        color: root.mobFallbackColor(modelData.mobType)
+                                                        border.color: "#4a5a4a"; border.width: 1
+                                                    }
                                                 }
                                                 Text {
                                                     text: modelData.name
@@ -398,7 +421,7 @@ Item {
                                                 id: mobHover
                                                 onHoveredChanged: {
                                                     // t617 tooltip：进入写名 + 格顶中心（panel 坐标系）+ mob 哨兵 id；
-                                                    //   离开按名守卫清。
+                                                    //   离开按名守卫清（t633 ①：id 一并清，防陈旧 id 影响后续简述）。
                                                     if (hovered) {
                                                         root.hoveredName = modelData.name
                                                         root.hoveredId = -1
@@ -406,6 +429,7 @@ Item {
                                                         root.hoveredTipPos = Qt.point(p.x, p.y)
                                                     } else if (root.hoveredName === modelData.name) {
                                                         root.hoveredName = ""
+                                                        root.hoveredId = -1
                                                     }
                                                 }
                                             }
@@ -468,14 +492,16 @@ Item {
                                                 id: cellHover
                                                 onHoveredChanged: {
                                                     // t617 tooltip：进入写名 + 格顶中心（panel 坐标系）+ 物品 id；
-                                                    //   离开按名守卫清。
+                                                    //   离开按名守卫清（t633 ①：hotbar 空守卫防注入前 hover 抛错吞掉
+                                                    //   信号 → hoveredName 恒空 = 「名字全空白」根因；id 一并清）。
                                                     if (hovered) {
-                                                        root.hoveredName = root.hotbar.nameForBlock(modelData)
+                                                        root.hoveredName = root.hotbar ? root.hotbar.nameForBlock(modelData) : ""
                                                         root.hoveredId = modelData
                                                         const p = parent.mapToItem(panel, parent.width / 2, 0)
                                                         root.hoveredTipPos = Qt.point(p.x, p.y)
-                                                    } else if (root.hoveredName === root.hotbar.nameForBlock(modelData)) {
+                                                    } else if (root.hoveredName === (root.hotbar ? root.hotbar.nameForBlock(modelData) : "")) {
                                                         root.hoveredName = ""
+                                                        root.hoveredId = -1
                                                     }
                                                 }
                                             }
@@ -791,8 +817,9 @@ Item {
                 id: tipLabel
                 anchors.centerIn: parent
                 // 名字 · 类别简述（mob 格类别 = 生物段；物品格 = hoveredCategory 谓词路由；名字对不上物品
-                //   段（mob 格）时类别留空防误配）。名字经 hoveredName 单一来源，类别按 hoveredId 反查。
-                text: root.hoveredName !== "" ? root.hoveredName + root.hoverSuffix() : ""
+                //   段（mob 格）时类别留空防误配）。名字经 hoveredName 单一来源，简述走 hoveredSuffixText
+                //   （t633 ①：派生属性依赖 hoveredId —— 名不变而格变时简述也刷新）。
+                text: root.hoveredName !== "" ? root.hoveredName + root.hoveredSuffixText : ""
                 color: "#f2f2f2"
                 font.pixelSize: 12
             }

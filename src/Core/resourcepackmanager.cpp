@@ -69,6 +69,9 @@ struct BuiltState {
         qreal lastState01 = 0.0; // t585 最近一次 updateAnimatedItemState 推送的原始状态值（查询侧换帧用）
     };
     QHash<int, AnimFrames> animItems;   // itemId(0x23F/0x240) → 帧序列态
+    // t633 图鉴生物头像缓存：mobType→落盘的头部裁剪图标 file:// 路径（mobHeadIconSource 首次裁剪落盘后记）。
+    //   apply() 重建时清空（pack 切换 / 重解析 → 重裁）。随 atlasFile 同目录写（AppLocalDataLocation，已 mkpath）。
+    QHash<int, QString> mobHeadIconFiles;
     // t585 animRevision 进程级修订号（实例成员 m_animRevision 仅镜像 + 广播）。
     int animRevision = 0;
 };
@@ -1213,6 +1216,7 @@ void ensureBuiltLocked()
     s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
     s.leatherIconFiles.clear(); // R19 B1 reset 皮革护甲染色图标缓存（pack 切换 / 重解析 → 重染）
     s.copperIconFiles.clear();  // t588 reset 铜物品染色图标缓存（pack 切换 / 重解析 → 重染）
+    s.mobHeadIconFiles.clear(); // t633 reset 生物头像裁剪缓存（pack 切换 / 重解析 → 重裁）
     s.animItems.clear(); // t585 reset 动画帧序列态（pack 切换 / 重解析 → 重探测帧数）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
@@ -1779,6 +1783,118 @@ QString ResourcePackManager::mobTextureSource(int mobType) const
             return hit;
     }
     return {}; // 包内无该 entity 贴图 → 不覆盖（保留程序生成 / 纯色）；红线 §9：仅运行期读本地 pack PNG。
+}
+
+// t633 图鉴生物头像：mobType → 头部 box-UV 数据（u0, v0, w, h, d, 贴图 base 宽, 贴图 base 高）。
+//   与 mobmodel.cpp 各 mob 分支的 setMobTex 头部值同源（单一权威在 Renderer；此处 Core 不能 include Renderer，
+//   以注释互指 + 数值镜像——同 mobEntityMap 与 blockItemIconMap 的字面量模式）。裁剪区 = MC +Z Front 面
+//   （u0+d, v0+d)-(u0+d+w, v0+d+h)（脸所在面；mobmodel.cpp mobFaceQtUV case 4 同公式）。
+//   羊条目带 sheepBody=true 标记：主贴图 sheep_fur.png 毛层头前无脸 → 改从 sheep/sheep.png 本体层裁。
+struct MobHeadRegion {
+    int mobType;
+    int u0, v0, w, h, d;
+    int texW, texH;
+    bool sheepBody; // true = 用 sheep/sheep.png（本体层）而非 mobEntityMap 主映射（毛层）
+};
+const QList<MobHeadRegion> &mobHeadRegions()
+{
+    static const QList<MobHeadRegion> kRegions = {
+        //          mob  u0  v0   w   h   d  texW texH body
+        /* 猪     */ {  1,  0,  0,  8,  8,  8,  64,  32, false },
+        /* 牛     */ {  2,  0,  0,  8,  8,  6,  64,  32, false },
+        /* 羊     */ {  3,  0,  0,  6,  6,  8,  64,  32, true  }, // t633：毛层头前无脸 → 本体层（有脸）
+        /* 蹒跚者 */ {  4,  0,  0,  8,  8,  8,  64,  64, false },
+        /* 骸骨   */ {  5,  0,  0,  8,  8,  8,  64,  32, false },
+        /* 潜行者 */ {  6,  0,  0,  8,  8,  8,  64,  32, false },
+        /* 蜘蛛   */ {  7, 32,  4,  8,  8,  8,  64,  32, false },
+        /* 鸡     */ {  8,  0,  0,  4,  6,  3,  64,  32, false },
+        /* 铁傀儡 */ { 13,  0,  0,  8, 10,  8, 128, 128, false },
+        // 雪傀儡（12）：头是南瓜方块非 entity 贴图；鱿鱼（9）/狼（10）/豹猫（11）/银鱼（14）：mobEntityMap
+        //   无映射（或无头部盒语义）→ 不进表（回退体色方块）。
+    };
+    return kRegions;
+}
+
+// t633 图鉴生物头像裁剪（见头文件 mobHeadIconSource 注释）。首次：加载贴图 → 按 base 比例裁 Front 像素区
+//   → 放大 64×64 透明底落盘 + 记缓存；后续 O(1) 命中缓存。任意失败 → 空串（调用方回退体色方块，降级不阻塞）。
+QString ResourcePackManager::mobHeadIconSource(int mobType) const
+{
+    const MobHeadRegion *region = nullptr;
+    for (const MobHeadRegion &r : mobHeadRegions()) {
+        if (r.mobType == mobType) { region = &r; break; }
+    }
+    if (!region)
+        return {}; // 无头部区数据（雪傀儡 / 无映射 mob）→ 回退
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    BuiltState &s = state();
+    if (!s.active || s.entityDir.isEmpty())
+        return {};
+    // 命中缓存（pack 未重解析期间稳定）→ 直接返。
+    const auto cached = s.mobHeadIconFiles.constFind(mobType);
+    if (cached != s.mobHeadIconFiles.constEnd() && QFile::exists(cached.value()))
+        return QStringLiteral("file:///") + cached.value();
+    // 源贴图路径：羊走本体层 sheep/sheep.png；其余走 mobEntityMap 主映射文件（子目录/扁平两级探测）。
+    const QDir entityDir(s.entityDir);
+    QString srcPath;
+    if (region->sheepBody) {
+        const QString sub = entityDir.absoluteFilePath(QStringLiteral("sheep/sheep.png"));
+        const QString flat = entityDir.absoluteFilePath(QStringLiteral("sheep.png"));
+        srcPath = QFile::exists(sub) ? sub : (QFile::exists(flat) ? flat : QString());
+    } else {
+        QString relPath;
+        for (const auto &m : mobEntityMap()) {
+            if (m.first == mobType) { relPath = m.second; break; }
+        }
+        if (relPath.isEmpty())
+            return {};
+        const QString sub = entityDir.absoluteFilePath(relPath);
+        if (QFile::exists(sub)) {
+            srcPath = sub;
+        } else {
+            const QFileInfo fi(relPath);
+            const QString flat = entityDir.absoluteFilePath(fi.fileName());
+            if (QFile::exists(flat)) srcPath = flat;
+        }
+    }
+    if (srcPath.isEmpty())
+        return {};
+    QImage tex(srcPath);
+    if (tex.isNull())
+        return {}; // 解码失败 → 回退
+    // base 像素矩形 → 实际像素（HD 包是 base 整数倍）→ 裁剪（边界内钳防越界读）。
+    const float scale = std::min(float(tex.width()) / float(region->texW),
+                                 float(tex.height()) / float(region->texH));
+    const int fx0 = qRound(float(region->u0 + region->d) * scale);
+    const int fy0 = qRound(float(region->v0 + region->d) * scale);
+    const int fw  = qMax(1, qRound(float(region->w) * scale));
+    const int fh  = qMax(1, qRound(float(region->h) * scale));
+    if (fx0 < 0 || fy0 < 0 || fx0 + fw > tex.width() || fy0 + fh > tex.height())
+        return {}; // 越界（非整数倍贴图 / 数据错）→ 回退（降级）
+    QImage head = tex.copy(fx0, fy0, fw, fh);
+    if (head.isNull())
+        return {};
+    // 放大到 64×64 透明底（FastTransformation 保像素锐利；非 MC 资产——是 pack PNG 的运行期裁剪产物）。
+    QImage icon(64, 64, QImage::Format_ARGB32_Premultiplied);
+    icon.fill(Qt::transparent);
+    const float kAspect = float(head.width()) / float(head.height());
+    QImage scaled = (kAspect >= 1.0f)
+            ? head.scaled(64, qMax(1, qRound(64.0f / kAspect)), Qt::IgnoreAspectRatio, Qt::FastTransformation)
+            : head.scaled(qMax(1, qRound(64.0f * kAspect)), 64, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+    QPainter p(&icon);
+    p.drawImage((64 - scaled.width()) / 2, (64 - scaled.height()) / 2, scaled);
+    p.end();
+    // 落盘缓存（AppLocalDataLocation，同 atlasFile 目录）。
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty())
+        return {}; // 无可写目录 → 回退（降级）
+    QDir().mkpath(dir);
+    const QString out = QDir(dir).absoluteFilePath(
+            QStringLiteral("voxelsandbox_rp_mobhead_%1.png").arg(mobType));
+    if (!icon.save(out, "PNG"))
+        return {}; // 落盘失败 → 回退（降级）
+    s.mobHeadIconFiles.insert(mobType, out);
+    return QStringLiteral("file:///") + out;
 }
 
 // t585 帧环 index：frame01（0..1 环值）→ 线性均匀帧序（mcmeta {"animation":{}} 默认均匀帧）的 index。

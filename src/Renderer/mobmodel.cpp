@@ -501,9 +501,15 @@ void MobModel::rebuild()
         //   collision 底面；腿顶 -0.452 与躯干（底 -0.629）相交 0.18 没入体内（视觉无害）；总高不变。
         //   halfH=0.90 不动（纯视觉修正，AABB 不变），Main.qml offset=0 不变。
         // R19 C3 UV（MC Creeper base 64×32；U1 §6 stalker）：head(0,0)8×8×8 / body(16,16)8×12×4 / leg(0,16)4×6×4。
+        //   t633 ④ 修「潜行者头歪 90°」：t595/t616 注释误读 MC 身体为 4×12×8（窄宽深长）→ 几何 x 半 0.17 < z 半
+        //   0.28（体长轴 ⊥ 脸朝向 -Z）→ 整体轮廓读作「侧身」，头像贴在窄身侧观感即「脸在侧面」。贴图布局反证
+        //   vanilla：若 d=8，身体 box-UV 的面 v 域 16+8+12=36 越出 32px 贴图高（不可能）；vanilla ModelCreeper
+        //   body = 8 宽×12 高×4 深。按 t616 身高（半 0.437 = 12px）换算：宽 8px→0.583（半 0.29）/ 深 4px→0.291
+        //   （半 0.1455）。头（0.52³）比身宽略窄——vanilla creeper 头 8px 与身宽同宽，本工程保 t616 头尺寸
+        //   （用户认可的观感），仅正身宽/深轴。腿位 / 腿径不动（四角站位与 vanilla 同）。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(16, 16, 8, 12, 4);
-        addBox( 0.00f, -0.192f,  0.00f, 0.17f, 0.437f, 0.28f, verts, idx, bMin, bMax); // 宽矮躯干（t616 拉高版，MC 比例）
+        addBox( 0.00f, -0.192f,  0.00f, 0.29f, 0.437f, 0.1455f, verts, idx, bMin, bMax); // 宽板躯干（t633 修正宽>深，vanilla 8×12×4 轴向）
         setMobTex(0, 0, 8, 8, 8);
         addBox( 0.00f,  0.545f,  0.00f, 0.26f, 0.26f, 0.26f, verts, idx, bMin, bMax); // 大头（0.52³，t616 拉高版）
         addLegs(-0.676f, 0.224f, 0.265f, 0.265f, 0.1325f, 0, 16, 4, 6, 4, m_walkPhase, verts, idx, bMin, bMax); // 四短腿（t616 拉高版；review M8 腿底贴 -0.90）

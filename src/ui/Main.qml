@@ -5922,38 +5922,49 @@ Window {
                                     baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
                                     baseColorMap: mobSheepPackTex.source.toString().length > 0 ? mobSheepPackTex : mobSheepTex
+                                    // t633 ③ 羊毛层透明镂空裁剪：sheep_fur.png 头前 / 体侧有挖空（毛层透出下层），
+                                    //   默认 Opaque 把透明像素渲成黑块（用户观感「全白无眼」的一部分——黑脸块盖
+                                    //   在脸上）。Mask+0.5 丢弃透明像素（镂空看穿 = MC 毛层语义）。pack 关的
+                                    //   mob_sheep.png 程序贴图全不透明 → Mask 对它无影响（安全）。
+                                    alphaMode: mobSheepPackTex.source.toString().length > 0 ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
+                                    alphaCutoff: 0.5
                                 }
                                 // rv-low-batch1 眼睛恢复（同猪/牛模式）。t593：pack 命中改走 sheep_fur.png 羊毛层
                                 //   （头前是纯白羊毛无脸）→ 眼睛**恒显**（不再 pack 门控：原「pack 贴图自带脸」仅对
                                 //   cow/pig 成立，羊 fur 层无脸）。羊吃草时 MobModel 头绕颈枢俯仰 → 眼放「颈枢 Node」
                                 //   （position=颈附着点 (0,0.10,-0.29)，eulerRotation.x 绑 headPitchAt）随头同步俯仰。
-                                //   眼相对颈枢：z=-0.32、y=0.06、x=±0.055（同裸态羊眼）。
+                                //   眼相对颈枢：z=-0.35、y=0.06、x=±0.055。
+                                // t633 ③ 修「羊全白无眼」：旧眼 z=-0.32 = 头前面平面（z-fight 半数帧被毛面盖掉）
+                                //   且 y=0.16 落在纯白羊毛区（白眼底 #e8e8e8 融进白毛，仅黑瞳 ~2px 难辨）→ 观感
+                                //   「无眼」。修：① z 前推 -0.35（明确凸出面外 0.04，无 z-fight 恒显）；② 眼位下移
+                                //   y=0.00（毛层头前下 2/3 是透明镂空区，Mask 后看穿 → 白眼底在镂空「脸洞」上高
+                                //   对比可辨，黑瞳居中）；pack 关（程序 mob_sheep 全脸纹无脸）同位兼容。
                                 Node {
                                     position: Qt.vector3d(0, 0.10, -0.29)
                                     property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                     eulerRotation: Qt.vector3d(headPitch, 0, 0)
                                     Model {
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(-0.055, 0.06, -0.32)
-                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        position: Qt.vector3d(-0.055, 0.00, -0.35)
+                                        scale: Qt.vector3d(0.055, 0.055, 0.02)
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                     }
                                     Model {
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(0.055, 0.06, -0.32)
-                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        position: Qt.vector3d(0.055, 0.00, -0.35)
+                                        scale: Qt.vector3d(0.055, 0.055, 0.02)
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                     }
                                     Model {
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(-0.055, 0.06, -0.33)
-                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        position: Qt.vector3d(-0.055, 0.00, -0.36)
+                                        scale: Qt.vector3d(0.028, 0.028, 0.02)
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                     }
                                     Model {
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(0.055, 0.06, -0.33)
-                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        position: Qt.vector3d(0.055, 0.00, -0.36)
+                                        scale: Qt.vector3d(0.028, 0.028, 0.02)
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                     }
                                 }
@@ -5996,33 +6007,34 @@ Window {
                                     baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#d6b890") : "#000000" }
                                     // 无 baseColorMap → PrincipaledMaterial 走纯 baseColor 实色路径（默认即无贴图）。
                                 }
-                                // 裸态眼同步（同毛茸态颈枢 Node 结构；复用 headPitchAt 绑头俯仰）。
+                                // 裸态眼同步（同毛茸态颈枢 Node 结构；复用 headPitchAt 绑头俯仰；t633 ③ 同步
+                                //   眼位/尺寸 —— z=-0.35 凸出面外 + y=0.00 头面下半，恒显不 z-fight）。
                                 Node {
                                     position: Qt.vector3d(0, 0.10, -0.29)
                                     property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                     eulerRotation: Qt.vector3d(headPitch, 0, 0)
                                     Model {
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(-0.055, 0.06, -0.32)
-                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        position: Qt.vector3d(-0.055, 0.00, -0.35)
+                                        scale: Qt.vector3d(0.055, 0.055, 0.02)
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                     }
                                     Model {
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(0.055, 0.06, -0.32)
-                                        scale: Qt.vector3d(0.05, 0.06, 0.02)
+                                        position: Qt.vector3d(0.055, 0.00, -0.35)
+                                        scale: Qt.vector3d(0.055, 0.055, 0.02)
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                     }
                                     Model {
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(-0.055, 0.06, -0.33)
-                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        position: Qt.vector3d(-0.055, 0.00, -0.36)
+                                        scale: Qt.vector3d(0.028, 0.028, 0.02)
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                     }
                                     Model {
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(0.055, 0.06, -0.33)
-                                        scale: Qt.vector3d(0.025, 0.03, 0.02)
+                                        position: Qt.vector3d(0.055, 0.00, -0.36)
+                                        scale: Qt.vector3d(0.028, 0.028, 0.02)
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                     }
                                 }
