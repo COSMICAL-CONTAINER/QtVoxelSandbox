@@ -2257,7 +2257,7 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
 
 ### 🅿 pack 方块贴图接入批（2 项大，用户已给全部 PNG 路径）
 
-**t620** 功能方块贴图接入（投掷器/发射器/附魔台/末影祭坛/门/书架/南瓜/铁轨族/红石族/仙人掌/耕地/作物/矿物块）
+**t620** 功能方块贴图接入（投掷器/发射器/附魔台/末影祭坛/门/书架/南瓜/铁轨族/红石族/仙人掌/耕地/作物/矿物块）**〔第 1 部分完成 ✅✅（功能方块组：发射器/投掷器/附魔台/末影祭坛/门/书架/南瓜/铁轨族；e260b2d+eb23c7e。附魔台改 0.75 矮盒 + 侧贴图裁顶空白；末影祭坛 = EndPortal 方块 endframe 化（eye 态 = top+eye overlay 合成）；门上下半 per-face 新瓦片 143-146 + build_door.py；书架顶底=planks；铁轨直轨/拐角接（拐角右转贴图水平镜像成左转基准）；南瓜六面核实全对（face_on 无点亮机制不接）。红石族/仙人掌/耕地/作物/矿物块留第 2 部分）〕**
 - pack 路径（docs/Default HD 128x Demo 1.8.2.2/assets/minecraft/textures/block/，只读运行期引用）：
   - 投掷器：`dropper_front_horizontal.png` + `dropper_front_vertical.png`（正面，随放置朝向选横/竖）+ 熔炉侧面（四个侧面）→ **依赖 t609 新方块**
   - 发射器：`dispenser_front_horizontal.png` + `dispenser_front_vertical.png` + 熔炉侧面 → 依赖 t608 朝向 state
