@@ -21,7 +21,8 @@
 //   stairs      bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 / 背墙在对侧） bit2=上下倒置（整步在上、背墙在下）
 //   fence       —         （中心立柱 1.5 高 + 四向横档连邻居；state=0；连接判定读 PartialNeighborCtx，t209）
 //   pressure_plate —      （贴地薄板；state bit0=踩下（t627）→ 板高压半 1/32；机制等价 MC 压力板被压下）
-//   lever/button —        （贴地薄板（同压力板几何）；state bit0=激活态高光）
+//   lever/button —        （贴地薄板（同压力板几何）；state bit0=激活态。t628：按钮按下→板高压半 1/32（同压力板
+//                          踩下视觉）；拉杆扳开→板体顶点色高光提亮（激活反馈，贴图不变））
 //   door        bit[1:0]=朝向(0=+X 1=-X 2=+Z 3=-Z) bit2=开(1)/合(0) bit3=上格(1)/下格(0)
 //   trapdoor    bit0=开(1)/合(0) bit[2:1]=开时朝向(0=+X 1=-X 2=+Z 3=-Z)
 //
@@ -246,10 +247,24 @@ int PartialBlockGeometry::append(
     case BlockRegistry::Lever:
     case BlockRegistry::WoodButton:
     case BlockRegistry::StoneButton: { // t490 手动点火机关（与 WoodPressurePlate 同贴地薄板几何）
-        // 贴地薄板（同压力板 1/16 厚 + 1/16 边距）。激活态（state bit0=1）由本面 pushBox 画完后不再额外改 UV
-        //   （激活视觉走 mesher 材质亮度 / 图标层，几何不动）—— 机关方块本体几何不随激活态变形（机制对标 MC
-        //   按钮按下变矮的细节为次要视觉，本项目简化为贴地薄板常形，激活由 state 高光表达）。
-        pushBox(verts, idx, lx, ly, lz, 0.0625f, 0.9375f, 0.f, 0.0625f, 0.0625f, 0.9375f,
+        // t628 激活视觉（此前 state bit0 无任何视觉反馈）：按钮按下（state bit0）→ 板高压半到 1/32（同压力板
+        //   踩下视觉 t627，机制等价 MC 按钮按下凹陷；右键按下 ~1s 后 playercontroller 自动清位弹回 1/16）。
+        //   拉杆扳开（bit0）→ 板体顶点色高光提亮 ×1.3（blockregistry.h 既有「激活态切亮色高光」承诺的兑现；
+        //   拉杆无自动复位——扳开保持直到再右键，高光常亮即「拉开持续激活」的视觉承载）。
+        const bool active = (state & 1) != 0;
+        if (BlockRegistry::isLever(blockId) && active) {
+            // 拉杆 ON：复制光照上下文整体提亮（pushBox 收 const 引用故本地副本；clamp ≤1 防过曝白块）。
+            PartialLightCtx lit = light;
+            lit.light = std::min(lit.light * 1.3f, 1.0f);
+            for (int fi = 0; fi < 6; ++fi) lit.face[fi] = std::min(lit.face[fi] * 1.3f, 1.0f);
+            pushBox(verts, idx, lx, ly, lz, 0.0625f, 0.9375f, 0.f, 0.0625f, 0.0625f, 0.9375f,
+                    tile, lit, tileW, hx, hy, v0, v1);
+            break;
+        }
+        const float top = (active && !BlockRegistry::isLever(blockId))
+                              ? (1.0f / 32.0f)   // 按钮按下：压半（同压力板踩下）
+                              : (1.0f / 16.0f);  // 常态 / 拉杆：1/16 薄板
+        pushBox(verts, idx, lx, ly, lz, 0.0625f, 0.9375f, 0.f, top, 0.0625f, 0.9375f,
                 tile, light, tileW, hx, hy, v0, v1);
         break;
     }

@@ -72,14 +72,33 @@ def stone_base():
     return canvas
 
 
+def cobble_base():
+    """t628 圆石底座（杠杆；机制等价 MC 1.0 lever = cobble + stick）：中灰石质底 + 粗块斑（区别 stone_base
+    的细密噪点——圆石是「碎石块」读感）。与 wood_base/stone_base 同消耗 2 次 _RNG.random（保持全局随机
+    流不变 → 后续按钮贴图逐字节不变）。"""
+    canvas = np.zeros((TS, TS, 4), dtype=np.float64)
+    canvas[..., 0] = 122.0
+    canvas[..., 1] = 122.0
+    canvas[..., 2] = 122.0  # 中灰圆石底
+    canvas[..., 3] = 255.0
+    lite = np.array([148.0, 148.0, 148.0])
+    dark = np.array([92.0, 92.0, 92.0])
+    m1 = _RNG.random((TS, TS)) < 0.22
+    canvas[m1, 0:3] = lite
+    m2 = _RNG.random((TS, TS)) < 0.22
+    canvas[m2, 0:3] = dark
+    return canvas
+
+
 def draw_lever():
-    """杠杆：木质底座 + 中央竖直扳柄 + 顶部圆柄头（杠杆特征）。"""
-    c = wood_base()
-    base_dark = np.array([88.0, 66.0, 36.0])    # 底座边框暗木
-    handle = np.array([60.0, 44.0, 24.0])       # 扳柄深棕（金属 / 木质杆）
-    handle_hi = np.array([120.0, 92.0, 52.0])   # 扳柄高光侧
-    knob = np.array([180.0, 150.0, 80.0])       # 顶部圆柄头（亮木球）
-    knob_hi = np.array([220.0, 195.0, 130.0])   # 圆柄头高光
+    """杠杆：t628 圆石底座 + 中央竖直扳柄 + 顶部圆柄头（杠杆特征）。底座由 t490 的木质底改圆石（机制等价
+    MC 1.0 lever = cobble base + stick；dev-plan t628「原石+木棍」口径）。"""
+    c = cobble_base()
+    base_dark = np.array([74.0, 74.0, 74.0])     # 底座边框暗石
+    handle = np.array([60.0, 44.0, 24.0])        # 扳柄深棕（木棍）
+    handle_hi = np.array([120.0, 92.0, 52.0])    # 扳柄高光侧
+    knob = np.array([180.0, 150.0, 80.0])        # 顶部圆柄头（亮木球）
+    knob_hi = np.array([220.0, 195.0, 130.0])    # 圆柄头高光
     # 底座四周边框暗带（1 px，机关基座感）。
     rect(c, 0, 0, TS - 1, 0, base_dark)
     rect(c, 0, TS - 1, TS - 1, TS - 1, base_dark)

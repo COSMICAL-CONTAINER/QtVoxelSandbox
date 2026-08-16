@@ -937,6 +937,13 @@ private:
     //   dispenser 同属机关）；投掷器走 dispenseFromDispenser 的 Dropper 分支（全部物品弹出掉落物，无
     //   fallback 箭——worldgen 不生成投掷器陷阱）。
     void scanDispenserTraps(float dt);
+    // t628 按钮自动复位（见 m_buttonRecoverCells 头注释）：每 tick 递减按下倒计时，到期该格仍是按钮
+    //   （WoodButton/StoneButton）且 state bit0 置位 → 清 bit0（5 参数 setBlock，id 不变只 state 变 → 仅
+    //   worldChanged 重建 mesh，按钮弹回视觉）+ 移除表项；该格已非按钮（被破 / 被替换）→ 仅移除表项（防陈旧
+    //   键误写新方块）。拉杆不入本表（扳开保持直到再右键）。门控：无世界 → no-op（表由 setWorld 清）。
+    //   与拾取 / 压力板同级常开（菜单 / 暂停时按钮仍按时弹回——世界模拟连续，同掉落物 tick）。
+    //   分层（PLAN §2）：读 World（blockAt/stateAt）+ 写 World setBlock，不涉实体 / 呈现层。
+    void updateButtonRecovery(float dt);
     // t627/t628 发射器 / 投掷器单次触发（见 playercontroller.cpp 头注释）：per-dispenser 冷却闸 + state 朝向
     //   解码 + 库存分派 / 神殿 fallback 箭 + 写冷却。踩板沿（scanDispenserTraps）与拉杆/按钮右键沿（t628
     //   isManualIgniter 分支）共用——两条触发路径（自动踩板 / 手动扳机关）汇入同一机器触发语义。
@@ -1011,6 +1018,12 @@ private:
     //   state 变 → 仅 worldChanged 重建 mesh，同门开合模式）。无压力板场景两表恒空（零开销）。
     QSet<quint64> m_platePressedCells;
     QSet<quint64> m_plateJustPressed;
+    // t628 按钮自动复位表：打包格坐标键 → 剩余按下秒。右键按下 WoodButton/StoneButton（置 state bit0）时写
+    //   kButtonRecoverSeconds（机制等价 MC 1.0 按钮按下 ~1s 后自动弹回——「按钮触发一次自动恢复」）；每 tick
+    //   递减 dt，到期该格仍是同一按钮且 bit0 置位 → 清 bit0（5 参数 setBlock，id 不变只 state 变 → 仅
+    //   worldChanged 重建 mesh）+ 移除。拉杆不入本表（拉杆保持扳动态直到再右键——「拉开持续激活」）。
+    //   换世界清空（同 m_dispenserCooldowns 模式）。无按钮场景恒空（零开销）。
+    QHash<quint64, float> m_buttonRecoverCells;
     // t178 帧时间切分：累加每 tick 的主线程 CPU 耗时（ns），每 ~60 tick（≈1s@60Hz）算平均写 m_simMs + emit。
     float m_simMs = 0.0f;
     qint64 m_simAccumNs = 0;
@@ -1405,6 +1418,11 @@ private:
     // t609 投掷器弹出掉落物速度（blocks/s）：低于发射器 kDispenserPopSpeed——轻量出口的温和弹出（机制等价
     //   MC 1.0 dropper 弹出距离短于 dispenser 弹射；只投不射的机关口径）。
     static constexpr float kDropperPopSpeed         = 4.0f;  // 投掷器弹出掉落物速度（blocks/s）
+    // t628 按钮按下到自动弹回的时长（秒；机制等价 MC 1.0 stone button 按下 ~1s / 20 game ticks 后弹回）。
+    //   placeBlock isManualIgniter 分支右键按下按钮（置 state bit0）时写入 m_buttonRecoverCells；
+    //   updateButtonRecovery 每 tick 递减，到期清 bit0（按钮弹回 + worldChanged 重建 mesh）。拉杆不启用
+    //   （拉杆扳开保持直到再右键——「拉开持续激活」）。
+    static constexpr float kButtonRecoverSeconds     = 1.0f;  // 按钮按下→自动弹回（秒）
     // t609 Q 丢弃方向常量：主动丢弃（dropHeld / dropHeldStack / dropItemAtFront / dropHeldCursor /
     //   dropHeldCursorOne）从眼位沿视线丢出（用户「应从玩家身体中间/视角摄像头往前丢，而非准星指向处左右喷」）。
     //   kDropForwardOffset：生成位 = 眼位 + 视线 × 0.3（略出身体表面，防贴脸生成即被拾回 / 撞头）。

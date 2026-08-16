@@ -543,9 +543,10 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   state bit0）。不进创造调色板（worldgen 专属；玩家经末影之眼激活交互）。
     /* end_portal   */ {int(BlockRegistry::EndPortal),         141,140,140,140, false, BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "end_portal",   "末地传送门"},
     // t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / wooden button / stone button；无红石故右键激活即点燃邻接
-    //   TNT）。三者复用 ShapePlate（贴地薄板，同 WoodPressurePlate 几何）。PartialBlockGeometry 据 state bit0
-    //   （激活态）切亮色高光（非 MC 资产，tools/build_lever_button.py 程序生成）。激活：placeBlock useBlock 分支
-    //   检测命中机关 → 翻 state bit0 + 点燃水平四邻 TNT。
+    //   TNT）。三者复用 ShapePlate（贴地薄板，同 WoodPressurePlate 几何）。PartialBlockGeometry 据 state bit0 切激活
+    //   视觉（t628：按钮按下→板高压半 1/32；拉杆扳开→顶点色高光；tools/build_lever_button.py 程序生成）。
+    //   激活：placeBlock useBlock 分支检测命中机关 → 翻 state bit0（t628 仅激活沿触发）+ 点燃 6 邻 TNT + fire
+    //   6 邻发射器/投掷器（fireDispenserAt）；按钮按下 ~1s 自动弹回（t628 m_buttonRecoverCells），拉杆保持扳开。
     /* lever        */ {int(BlockRegistry::Lever),           131,131,131,131, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Lever),       1, 64, "lever",        "杠杆"},
     /* wood_button  */ {int(BlockRegistry::WoodButton),      132,132,132,132, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::WoodButton),  1, 64, "wood_button",  "木按钮"},
     /* stone_button */ {int(BlockRegistry::StoneButton),     133,133,133,133, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::StoneButton), 1, 64, "stone_button", "石按钮"},

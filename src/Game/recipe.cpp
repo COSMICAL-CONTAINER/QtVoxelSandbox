@@ -875,6 +875,25 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       { RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, 0,
         0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::GoldPressurePlate), 1, 1, "gold_pressure_plate" },
+    // t628 手动点火机关三件配方（机制等价 MC 1.0 lever / wooden button / stone button；此前 t490 只加了方块
+    //   未接配方——机关仅创造调色板可得，生存不可合成，dev-plan t628「配方已有?核」核实为缺，补齐）。
+    //   lever：1 圆石 + 1 木棒纵列（圆石上 / 木棒下）→ 1 杠杆（有序 2×2；最小包围盒 1×2）。机制等价 MC 1.0
+    //     杠杆配方（cobble 上 + stick 下）。包围盒内容 {Cobble,Stick} 与锄（2×3）/ 铲（1×3）不同 → 不冲突。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { int(BlockRegistry::Cobble), 0, 0,
+        kStickId,             0, 0,
+        0, 0, 0 },
+      int(BlockRegistry::Lever), 1, 1, "lever" },
+    //   wood_button：1 木板 → 1 木按钮（无序 2×2；单原料任意格）。机制等价 MC 1.0 按钮单材料配方（木板）。
+    //     多重集 {Planks:1} 唯一（原木→木板是 {Log:1}、床是 {Planks:1,Wool:1}）→ 不冲突。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::Planks), 0, 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoodButton), 1, 1, "wood_button" },
+    //   stone_button：1 石头 → 1 石按钮（无序 2×2；单原料任意格）。石头经熔炉烧圆石产出（smelting）。
+    //     多重集 {Stone:1} 唯一 → 不冲突。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::Stone), 0, 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::StoneButton), 1, 1, "stone_button" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。

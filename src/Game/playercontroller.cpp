@@ -108,6 +108,7 @@ void PlayerController::setWorld(World *w)
     m_redstoneLitCells.clear();   // t569：换世界清红石矿点亮表（防跨世界同坐标串扰；键按世界坐标打包）
     m_platePressedCells.clear();  // t627：换世界清压力板触发态（防跨世界同坐标串扰；键按世界坐标打包）
     m_plateJustPressed.clear();   // t627：同上（沿表生命周期一帧，但换世界须一并清防陈旧沿触发）
+    m_buttonRecoverCells.clear(); // t628：换世界清按钮自动复位表（防跨世界同坐标串扰；键按世界坐标打包，同 m_dispenserCooldowns）
     snapSpawnToGround(); // t137：世界注入后贴地表（构造期 m_pos=kSpawnY 兜底，此处覆盖为真实地表）
     emit worldChanged();
 }
@@ -675,6 +676,9 @@ void PlayerController::tickImpl()
     // t569 红石矿石点亮触发（玩家走近红石矿即微弱红光，机制等价 MC 触发发光）：与拾取同级常开（玩家走过
     //   红石矿旁即触发，独立于捕获态）。内自检 + 死亡门控；点亮表到期自熄。dt 用于倒计时递减。
     scanRedstoneOre(dt);
+    // t628 按钮自动复位（右键按下 ~1s 后弹回）：与拾取 / 红石矿同级常开（菜单 / 暂停时按钮仍按时弹回，
+    //   世界模拟连续）。内自检；无按钮场景表恒空（零开销）。dt 用于倒计时递减。
+    updateButtonRecovery(dt);
     } // /profPickup
     if (!m_captured) {
         cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
@@ -2225,19 +2229,48 @@ void PlayerController::placeBlock()
     //   isManualIgniter 覆盖 Lever / WoodButton / StoneButton 三类机关（单一权威谓词，避免三处硬编码 id 判定漂移）。
     //   点燃 = 移除 TNT 方块（clearBlockSilent 点火专用静默清 + worldChanged 重建 mesh，不发 broken/placed → 免粒子 / 音
     //   spam；clearBlockSilent 绕过 setBlockFromEntity 的 occ 守卫——TNT 是实体方块，occ 守卫会拒写）+ spawnPrimedTnt（默认 fuse ~5s）→ 引爆时链式引燃邻接 TNT。
+    //   **t628 边沿触发语义**（对齐 t627 压力板边沿；用户「按钮触发一次自动恢复；拉杆拉开持续激活——扳上沿
+    //   fire 一次，扳下沿不 fire」）：
+    //   - 仅翻到 **激活沿**（新态 bit0=1）才触发邻接 TNT / 发射器 / 投掷器；扳回下沿只翻视觉不触发。
+    //     拉杆：off→on 沿 fire 一次（之后保持 on——持续激活语义由 state 承载，大红石系统的前置）；on→off
+    //     只翻位不 fire。
+    //   - 按钮（WoodButton/StoneButton）：按下（off→on）即激活沿 → fire 一次 + 写 m_buttonRecoverCells
+    //     （kButtonRecoverSeconds 后 updateButtonRecovery 自动清 bit0 弹回）；**按下期间（bit0=1）再右键无效应**
+    //     （机制等价 MC 按钮弹回前不可再按——否则旧「翻位」会把按钮提前弹起且白触发一次）。
+    //   - t628 发射器 / 投掷器触发：激活沿上扫 **6 邻**（同 TNT 点火同圈）为 Dispenser/Dropper → fireDispenserAt
+    //     一次（per-dispenser 冷却防抖；方向 = 机器 state 朝向，与机关方位无关——t608 单一方向源）。
     //   分层（PLAN §2）：点火属 Game/Physics（读射线命中 + 写 World state + 调 EntityManager.spawnPrimedTnt），向下依赖。
     if (BlockRegistry::isManualIgniter(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
         const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
-        // 翻 state bit0（激活态：lever 扳柄 / button 按下）→ mesher 切亮色高光（机关激活视觉反馈）。
-        m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, quint8(st ^ 1));
-        // t492：点燃机关的 **6 邻**（4 水平 + 上 + 下）的 TNT 方块（同压力板 6 邻模式；用户要求）。逐邻查 TNT → 移除 + spawnPrimedTnt。
-        static constexpr int kDirs6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-        for (const auto &d : kDirs6) {
-            const int tx = m_hitBx + d[0], ty = m_hitBy + d[1], tz = m_hitBz + d[2];
-            if (BlockRegistry::isTnt(m_world->blockAt(tx, ty, tz))) {
-                m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
-                m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸不链式）
+        const bool isButton = BlockRegistry::isWoodButton(hitId) || BlockRegistry::isStoneButton(hitId);
+        // t628 按钮「弹回前不可再按」：bit0=1（仍在按下窗 / 表内）→ 右键无效应（不翻位 / 不触发 / 不挥手）。
+        if (isButton && (st & 1)) return;
+        // 翻 state bit0（激活态：lever 扳柄 / button 按下）→ mesher 切按下视觉（t628：按钮压半高 / 拉杆高光）。
+        const quint8 ns = quint8(st ^ 1);
+        m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, ns);
+        // t628 按钮自动复位：按下沿写 kButtonRecoverSeconds 倒计时（updateButtonRecovery 到期清 bit0 弹回）。
+        //   拉杆不入表（保持扳开直到再右键）。打包键与 updatePressurePlates 的 cellKey 同编码（本表内自洽）。
+        if (isButton) {
+            const quint64 key = (quint64(quint32(m_hitBx + 0x100000) & 0x1FFFFFu))
+                              | (quint64(quint32(m_hitBz + 0x100000) & 0x1FFFFFu) << 21)
+                              | (quint64(quint32(m_hitBy) & 0x3FFu) << 42);
+            m_buttonRecoverCells.insert(key, kButtonRecoverSeconds);
+        }
+        // t628 激活沿（ns bit0=1）才触发；扳回下沿（ns bit0=0）只翻视觉。
+        if ((ns & 1) != 0 && m_entityManager) {
+            // t492：点燃机关的 **6 邻**（4 水平 + 上 + 下）的 TNT 方块（同压力板 6 邻模式；用户要求）。逐邻查 TNT → 移除 + spawnPrimedTnt。
+            //   t628：同一 6 邻圈内 Dispenser/Dropper → fireDispenserAt 一次（踩板沿 / 扳机关沿共用同一机器触发语义）。
+            static constexpr int kDirs6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+            for (const auto &d : kDirs6) {
+                const int tx = m_hitBx + d[0], ty = m_hitBy + d[1], tz = m_hitBz + d[2];
+                const quint8 tb = m_world->blockAt(tx, ty, tz);
+                if (BlockRegistry::isTnt(tb)) {
+                    m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
+                    m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸不链式）
+                } else if (BlockRegistry::isDispenser(tb) || BlockRegistry::isDropper(tb)) {
+                    fireDispenserAt(tx, ty, tz, tb); // t628 发射器/投掷器：per-dispenser 冷却 + state 朝向发射
+                }
             }
         }
         m_lastPlaceMs = now;
@@ -3865,6 +3898,33 @@ void PlayerController::scanDispenserTraps(float dt)
             if (fireDispenserAt(dx, by, dz, db))
                 return; // 单次触发即 return（防同帧多机器刷箭，同 scanTntTraps 单触发）；下帧再处理其余候选。
         }
+    }
+}
+
+// t628 按钮自动复位（见 m_buttonRecoverCells / updateButtonRecovery 头注释）：每 tick 递减按下倒计时；
+//   到期该格仍是按钮（isWoodButton/isStoneButton）且 bit0 置位 → 清 bit0（5 参数 setBlock，id 不变只 state 变
+//   → 仅 worldChanged 重建 mesh，按钮弹回视觉）+ 移除表项；该格已非按钮 / bit0 已清（被破 / 被替换）→ 仅移除
+//   表项（不写——防陈旧键误写新方块，同 scanRedstoneOre 到期自熄的守卫模式）。无世界 → no-op。
+//   门控：常开（独立于捕获态 / 死亡——按钮弹回是世界模拟，不受玩家状态影响，同掉落物 tick）。
+void PlayerController::updateButtonRecovery(float dt)
+{
+    if (!m_world) return;
+    if (m_buttonRecoverCells.isEmpty()) return; // 无按下按钮场景零开销（每 tick 仅一次判空）
+    for (auto it = m_buttonRecoverCells.begin(); it != m_buttonRecoverCells.end(); ) {
+        it.value() -= dt;
+        if (it.value() > 0.0f) { ++it; continue; }
+        // 到期：解包格坐标（x = 低 21 位有符号偏移、z = 中 21 位、y = 高位；打包见 placeBlock isManualIgniter 分支）。
+        const quint64 key = it.key();
+        const int bx = int(quint32(key & 0x1FFFFFu)) - 0x100000;
+        const int bz = int(quint32((key >> 21) & 0x1FFFFFu)) - 0x100000;
+        const int by = int(quint32(key >> 42)) & 0x3FFu;
+        const quint8 b = m_world->blockAt(bx, by, bz);
+        if (BlockRegistry::isWoodButton(b) || BlockRegistry::isStoneButton(b)) {
+            const quint8 st = m_world->stateAt(bx, by, bz);
+            if (st & 1)
+                m_world->setBlock(bx, by, bz, b, quint8(st & quint8(~1))); // 清 bit0 弹回（id 不变 → 仅 worldChanged）
+        }
+        it = m_buttonRecoverCells.erase(it); // 该格已非按钮（被破 / 替换）→ 仅移除表项
     }
 }
 
