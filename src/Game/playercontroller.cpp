@@ -4682,6 +4682,15 @@ void PlayerController::step(qreal dt)
         // 玩家随船位移（脚底 = 船中心）。
         m_pos = QVector3D(boatPos.x(), boatPos.y(), boatPos.z());
         m_vel = QVector3D(0, 0, 0);
+        // review L11：骑船期自动蹲复探（镜像走路分支末尾的同款复探）。低顶区（桥洞 / 悬崖下）蹲上船后松
+        //   shift 被站起闸门拒（dismount 分支外的松 shift 走 setKey 集中闸门 → m_autoCrouch=true），旧版骑乘
+        //   分支早 return 不复探 → 驶入开阔水面仍保持蹲（眼位 1.35）直到下船。骑乘期玩家位置 = 船位（已同步
+        //   到 m_pos），canStandUp 以 m_pos 起算 1.8 AABB 头顶空间 —— 开阔水面恒可站 → 自动站起；桥洞下仍
+        //   不可站 → 保持蹲（不把 1.8 AABB 塞进低顶）。setMoveState(Walk) 复位 AABB 高 / 眼位，同走路分支。
+        if (m_autoCrouch && m_moveState == Crouch && canStandUp()) {
+            m_autoCrouch = false;
+            setMoveState(Walk);
+        }
         reportHorizSpeed(posBefore, dt);
         emit positionChanged();
         return;
