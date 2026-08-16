@@ -4276,15 +4276,21 @@ void PlayerController::reportHorizSpeed(const QVector3D &posBefore, qreal dt)
 //   飞行起飞 / 切模式前的态清理）。setMoveState 是所有「切出 Crouch」路径的单一瓶颈（setKey 松 shift、
 //   release、双击空格起飞、setMode、respawn、loadSavedState）→ 在此设闸后任何路径都不会把 1.8 AABB
 //   塞进 1.5 空间（不嵌入 → 头不卡方块、extrudeEmbedded 不推）。拒绝时标 m_autoCrouch：step 内每 tick
-//   复探头顶，有空间即自动站起（走出低顶区 → 自动站）。例外：Spectator / 创造飞行是 noclip（无碰撞嵌入
-//   问题），respawn/loadSavedState 摆到新位置（旧位置头顶判定无意义）→ 这两路径用 force 参数绕过闸门。
+//   复探头顶，有空间即自动站起（走出低顶区 → 自动站）。例外：Spectator 是真 noclip（位移直加 m_pos 不走
+//   moveAxis，无碰撞嵌入问题），respawn/loadSavedState 摆到新位置（旧位置头顶判定无意义）→ 这两路径用
+//   force 参数绕过闸门。
+//   review M6：旧版豁免还含「Creative + 飞行」（注释称 noclip —— 不实：创造飞行走 moveAxis 子步碰撞，
+//   有嵌入问题）。蹲在 1.5 格通道双击空格起飞 → 闸门被豁免放行 → 1.8 AABB 塞进 1.5 空间嵌入天花板 →
+//   飞行分支早 return（不走 extrudeEmbedded 自救）→ 全向位移被 moveAxis snap 锁死 = 永久卡死。收紧为
+//   仅 Spectator：创造头顶不足时起飞被拒（保持蹲，m_autoCrouch 复探；开阔处起飞不受影响——头顶本就有
+//   站起空间，canStandUp 恒过）。
 void PlayerController::setMoveState(MoveState s, bool force)
 {
     if (s == m_moveState) return;
     // t574/t575 站起闸门：当前蹲 + 目标站 + 头顶站不下（且非 noclip 模式 / 非强制重置）→ 拒绝站起，
     //   转为「自动蹲保持」（清计时语义同 t559：等 step 复探 canStandUp 再站）。
     if (m_moveState == Crouch && s != Crouch && !force
-        && m_mode != Spectator && !(m_mode == Creative && m_flying)
+        && m_mode != Spectator
         && !canStandUp()) {
         m_autoCrouch = true;
         return;
@@ -4763,6 +4769,11 @@ void PlayerController::step(qreal dt)
             moveAxis(2, delta.z());
             moveAxis(1, delta.y());
         }
+        // review M6（belt-and-braces）：飞行与走路同走 moveAxis（有碰撞）→ 也可能被嵌入（下落沙 /
+        //   worldgen / 系统放置 materialize 在玩家身上）。旧版飞行分支无 extrudeEmbedded 自救（早
+        //   return）→ 一旦嵌入（如低顶区起飞 / 飞行中被落沙掩埋）全向位移被 snap 锁死无法脱困。
+        //   同走路分支在逐轴解算后调用（同一 helper、同一模式，正常飞行嵌入 <kEmbedTol 早退零开销）。
+        extrudeEmbedded();
         // t540 创造飞行长按 shift 触地切步行（spec「飞行时长按 shift，应落地后立即切步行模式，得重新按两下
         //   空格才能再飞」）。机制等价 MC 1.0 创造飞：按住 shift 下降，触地瞬间自动退出飞态回步行。旧实现只在
         //   「shift 按下瞬间」处理（setKey 蹲分支 canCrouch 守卫挡了飞态），飞态 shift 永远是「下降」语义 → 玩家
