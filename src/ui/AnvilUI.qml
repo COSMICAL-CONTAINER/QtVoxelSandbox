@@ -235,7 +235,10 @@ Item {
             const src = InventoryOps.readSlot(root, group, index)
             if (src.id === 0 || src.count <= 0) return
             // 工具 / 护甲（有耐久语义的物品）→ 左输入槽 0。t578：槽 0 已放同 id 物 → 第二件入右槽 1
-            //   （同物合并分支输入）；槽 0 异物占用 → 不覆盖。t615 附魔书（0x227）入左槽（书书合并的 A 端）。
+            //   （同物合并分支输入）。t615 附魔书（0x227）入左槽（书书合并的 A 端）。review M2：槽 0 被
+            //   **异物**占用时附魔书不再 no-op —— 落到下方材料分支入右槽 1（A=工具 + Shift 点附魔书 =
+            //   敲书输入；原实现第一分支无条件吞书 → 槽 0 有物即 return，书永远到不了 B 槽、材料分支的
+            //   isBook 附魔保真写入成死码）。
             if (root.maxDur(src.id) > 0 || src.id === 0x227) {
                 const target = InventoryOps.readSlot(root, "anvil", 0)
                 if (target.id === src.id && target.id !== 0) {
@@ -245,10 +248,13 @@ Item {
                     InventoryOps.writeSlot(root, "anvil", 1, src.id, 1, src.durability, src.enchants)
                     return
                 }
-                if (target.id !== 0) return                        // 槽 0 异物占用 → 不覆盖
-                InventoryOps.writeSlot(root, group, index, 0, 0, 0)
-                InventoryOps.writeSlot(root, "anvil", 0, src.id, 1, src.durability, src.enchants)
-                return
+                if (target.id === 0) {
+                    InventoryOps.writeSlot(root, group, index, 0, 0, 0)
+                    InventoryOps.writeSlot(root, "anvil", 0, src.id, 1, src.durability, src.enchants)
+                    return
+                }
+                // 槽 0 异物占用：工具 / 护甲 → 不覆盖（no-op）；附魔书 → 落到下方材料分支（review M2）。
+                if (src.id !== 0x227) return
             }
             // 修复材料（对槽 0 物品）或附魔书 → 右输入槽 1。
             const left = InventoryOps.readSlot(root, "anvil", 0)
