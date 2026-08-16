@@ -2250,9 +2250,10 @@ t571-t604（34 项：修 bug 26 + 系统/贴图/平衡 8）。铁砧三轮（t57
 
 ### 🅾 成就树状图（1 项大）
 
-**t619** 进度界面重做成树状图
+**t619** 进度界面重做成树状图 ✅✅ 已完成
 - 用户：「不满意，想要树状图，从左到右排布，连线横平竖直，界面可上下左右拖动看不同成就连线。」
 - 查现 progress UI（list/grid）→ 重做：成就节点按依赖层级分列（x=层级，y=同层内序），正交折线连线（ elbows）；Flickable 拖动查看；节点状态（未解锁灰/已解锁亮/可进行描边）；新增成就：盘点现有物品/机制再补 8-12 条（如「钻石！」「附魔师」（首次附魔）「船上漂」「发射！」「铁匠」（铁砧修复）「矿工」（挖矿 N 块）「农夫」（收获 N 作物）「狙击手」（箭命中 N 生物）等——实现时按 playerprogress 现有统计字段可支持的来，缺统计的加计数点）。
+- 实修结论：① 树状图 = achievements() 携 col/row/iconId 布局字段（C++ 递归子树布局：叶子占 1 行、父居中子女跨度、多根垂直堆叠，JS 模拟验证零行列冲突）→ QML 节点 x=kPad+col×200、y=kPad+row×110，连线 = 父右中点→列间垂直→子左中点三段正交折线（Repeater+Rectangle 拼段，横平竖直），Flickable 上下左右拖（content = 树边界+边距，760×560 面板容 ~1400×770 画布）；节点三态（已解锁绿框✓ / 可进行黄框脉动○ / locked 暗底🔒）+ iconId 三段路由图标（方块 Image/ToolIcon/MaterialIcon）+ hover tooltip 全文。② 新成就 8 条：钻石!(←获得升级)/附魔师(←钻石!)/书虫(←附魔师)/铁匠(←附魔师)/神射手10箭(←怪物猎人)/农夫10作物(根)/起航骑船(根)/发射!(根)——共 15 条 3 根树。③ 新计数点：arrowsHitMobs（Main.qml onArrowHitMob 路由）、cropsHarvested（player.cropHarvested 信号 ← dropCropDrops 成熟判定单点）、onBoatBoarded（ridingBoat 边沿）、player.dispenserFired 信号（dispenseFromDispenser 库存路径末尾）、onEnchanted/onEnchantedBookObtained（doEnchant 末尾，EnchantingTableUI 注入 progress）、onAnvilUsed（takeProduct 末尾，AnvilUI 注入 progress）；两计数进 toVariant/loadVariant 持久化 + 读档回放阈值判定。④ 统计面板补「箭中生物/收获作物」两行。⑤ 顺带修 playercontroller.cpp 既有 eyeY 未用警告（-Wall -Wextra 口径）。
 
 ### 🅿 pack 方块贴图接入批（2 项大，用户已给全部 PNG 路径）
 

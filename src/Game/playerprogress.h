@@ -25,6 +25,13 @@
 //   - onItemPicked(int itemId)：player.itemPickedUp → Main.qml Connections 路由。
 //   - onInventoryOpened()：Main.qml.openInventory / openCraftingTable 等开包函数。
 //   - onPlayTimeTick(float dt) / setDayCount(int)：WorldClock.ticked → Main.qml Connections 路由。
+//   - t619 新埋点（树状图成就扩展）：
+//   - onArrowHitMob()：entityManager.arrowHitMob → Main.qml Connections 路由（计数 + 「神射手」10 次）。
+//   - onCropHarvested()：player.cropHarvested（成熟作物收割，C++ 信号）→ Main.qml 路由（「农夫」10 次）。
+//   - onBoatBoarded()：Main.qml ridingBoat 属性 false→true 边沿（「起航」）。
+//   - onDispensed()：player.dispenserFired（发射器/投掷器成功弹出，C++ 信号）→ Main.qml 路由（「发射!」）。
+//   - onEnchanted() / onEnchantedBookObtained()：EnchantingTableUI.doEnchant 成功末尾（「附魔师」/「书虫」）。
+//   - onAnvilUsed()：AnvilUI.takeProduct 成功末尾（「铁匠」）。
 //
 // 成就解锁逻辑在埋点方法内判定（如 onCraft(SwordWood) → unlock("出击时间")）。unlock 时先查前置依赖：
 //   父成就未解锁 → 忽略本次解锁事件（progress-tree 三轮；机制等价 MC 1.0 父成就未达成则子成就解锁不生效）。
@@ -34,10 +41,12 @@
 //
 // 暴露给 QML（moc 安全：统计数值走 Q_PROPERTY + NOTIFY；列表数据走 Q_INVOKABLE + revision，同 ChestStore / Hotbar 模式）：
 //   - playTimeSecs / daysPlayed / blocksMined / blocksPlaced / distanceTraveled / mobsKilled / deaths /
-//     craftsCount / itemsPicked（统计；NOTIFY=progressChanged）。
+//     craftsCount / itemsPicked / arrowsHitMobs / cropsHarvested（统计；NOTIFY=progressChanged）。
 //   - revision（int，任一统计 / 成就变更自增；成就 / 统计列表 delegate 触碰 revision 取最新值）。
-//   - Q_INVOKABLE QVariantList achievements()：[{id,name,desc,unlocked,parentId,parentName,depth,locked}, ...]
-//     供 QML 树形成就列表显示（定义序 = 依赖树 DFS 先序：父先于子、同父兄弟相邻 → 连续连线；locked = 父未解锁）。
+//   - Q_INVOKABLE QVariantList achievements()：[{id,name,desc,unlocked,parentId,parentName,depth,locked,col,row,iconId}, ...]
+//     供 QML 树状成就图显示（定义序 = 依赖树 DFS 先序：父先于子、同父兄弟相邻）。col = 依赖层级（root=0），
+//     row = 同列内垂直序（QML 布局用：x=col×列距、y=row×行距）。iconId = 节点图标物品/方块 id（QML 路由
+//     方块 Image / ToolIcon / MaterialIcon）。locked = 父未解锁。
 //   - Q_INVOKABLE QVariantList statsList()：[{name, value}, ...] 供 QML 统计面板显示。
 //
 // §4 法律 + §9：零 MC 专有名词（成就名用通用词「打开背包」「获得原木」「出击时间」「挖矿时间到」「获得升级」
@@ -58,6 +67,9 @@ class PlayerProgress : public QObject
     Q_PROPERTY(int deaths READ deaths NOTIFY progressChanged)
     Q_PROPERTY(int craftsCount READ craftsCount NOTIFY progressChanged)
     Q_PROPERTY(int itemsPicked READ itemsPicked NOTIFY progressChanged)
+    // t619 新统计：箭命中生物次数（arrowHitMob 累计）+ 收获成熟作物次数（cropHarvested 累计）。
+    Q_PROPERTY(int arrowsHitMobs READ arrowsHitMobs NOTIFY progressChanged)
+    Q_PROPERTY(int cropsHarvested READ cropsHarvested NOTIFY progressChanged)
     // 内容版本号（任一统计 / 成就写入自增）。QML 列表 delegate 触碰它取最新 achievements() / statsList()
     //   （同 ChestStore revision / Hotbar slotRevision 模式，moc 安全契约）。
     Q_PROPERTY(int revision READ revision NOTIFY progressChanged)
@@ -75,6 +87,8 @@ public:
     int deaths() const { return m_deaths; }
     int craftsCount() const { return m_craftsCount; }
     int itemsPicked() const { return m_itemsPicked; }
+    int arrowsHitMobs() const { return m_arrowsHitMobs; }
+    int cropsHarvested() const { return m_cropsHarvested; }
     int revision() const { return m_revision; }
 
     // ── 埋点方法（Q_INVOKABLE；各事件源经 QML 桥接调）──
@@ -101,10 +115,28 @@ public:
     Q_INVOKABLE void onPlayTimeTick(float dt);
     // 设当前天数（WorldClock.dayCount）。仅当 > 当前 daysPlayed 时更新（单调递增；跨天推进）。
     Q_INVOKABLE void setDayCount(int day);
+    // ── t619 新埋点（树状图成就扩展；各事件源经 QML 桥接调）──
+    // 玩家箭命中生物一次（entityManager.arrowHitMob → Main.qml 路由）。累加 arrowsHitMobs；达 10 解锁「神射手」。
+    Q_INVOKABLE void onArrowHitMob();
+    // 收获一株成熟作物（player.cropHarvested → Main.qml 路由；小麦/胡萝卜/马铃薯成熟收割）。
+    //   累加 cropsHarvested；达 10 解锁「农夫」。
+    Q_INVOKABLE void onCropHarvested();
+    // 首次骑上船（Main.qml ridingBoat false→true 边沿）。解锁「起航」。
+    Q_INVOKABLE void onBoatBoarded();
+    // 发射器/投掷器成功弹出物品（player.dispenserFired → Main.qml 路由）。解锁「发射!」。
+    Q_INVOKABLE void onDispensed();
+    // 附魔台附魔成功（EnchantingTableUI.doEnchant 末尾）。解锁「附魔师」。
+    Q_INVOKABLE void onEnchanted();
+    // 附魔台附书产出附魔书（doEnchant 内 cat===Book 分支）。解锁「书虫」。
+    Q_INVOKABLE void onEnchantedBookObtained();
+    // 铁砧成功执行一次修复/合并/重命名（AnvilUI.takeProduct 末尾）。解锁「铁匠」。
+    Q_INVOKABLE void onAnvilUsed();
 
     // ── 列表数据（Q_INVOKABLE；QML delegate 触碰 revision 取最新）──
-    // 全部成就 [{id, name, desc, unlocked, parentId, parentName, depth, locked}, ...]（定义序 = 依赖树
-    //   DFS 先序：父先于子、同父兄弟相邻）。供 QML 树形成就列表显示。locked = 未解锁 且 父未解锁
+    // 全部成就 [{id, name, desc, unlocked, parentId, parentName, depth, locked, col, row, iconId}, ...]
+    //   （定义序 = 依赖树 DFS 先序：父先于子、同父兄弟相邻）。供 QML 树状成就图显示。
+    //   col = 依赖层级（root=0，子=父+1）→ QML x=col×列距；row = 同列垂直序 → y=row×行距。
+    //   iconId = 图标物品 id（方块/工具/材料段；QML 据此路由图标）。locked = 未解锁 且 父未解锁
     //   （父已解锁但未解锁 → 可解锁，locked=false）。
     Q_INVOKABLE QVariantList achievements() const;
     // 统计列表 [{name, value}, ...]（中文名 + 当前值）。供 QML 统计面板显示。
@@ -130,14 +162,16 @@ signals:
     void achievementChanged();
 
 private:
-    // 成就定义（id / 父成就 id / 中文名 / 描述）。id 用通用词英文标识符（非 MC 专名）。
+    // 成就定义（id / 父成就 id / 中文名 / 描述 / 图标物品 id）。id 用通用词英文标识符（非 MC 专名）。
     //   parentId：父成就 id（null = 根成就，无前置）。依赖树机制等价 MC 1.0 advancement tree：
     //   子成就仅在父成就已解锁时可解锁（unlock 前置检查）+ QML 面板 locked 态据此判定。
+    //   iconId：节点图标（方块 id / 工具段 0x100+ / 材料段 0x200+；QML 树节点据 isTool/isMaterial 路由）。
     struct AchievementDef {
         const char *id;
         const char *parentId;   // 父成就 id（null = 根成就）
         const char *name;
         const char *desc;
+        int iconId;             // 图标物品 id（BlockRegistry / ToolRegistry / RecipeRegistry 段）
     };
     // 全部成就定义（定义序 = 依赖树 DFS 先序：父先于子、同父兄弟相邻 → QML 树形渲染连续连线）。
     //   mechanisms 等价 MC 1.0 advancement tree 的现阶段可完成子集。
@@ -160,6 +194,8 @@ private:
     int m_deaths = 0;               // 死亡次数
     int m_craftsCount = 0;          // 合成次数
     int m_itemsPicked = 0;          // 拾取物品次数
+    int m_arrowsHitMobs = 0;        // t619 箭命中生物次数（onArrowHitMob 累计）
+    int m_cropsHarvested = 0;       // t619 收获成熟作物次数（onCropHarvested 累计）
 
     // onMove / onPlayTimeTick 节流累积器（免每帧 emit progressChanged 抖 QML 绑定）。
     float m_distanceAccum = 0.0f;   // 距离累积（格；onPlayTimeTick 达 kFlushInterval 时一并并入 distanceTraveled）
@@ -171,6 +207,10 @@ private:
 
     // 节流间隔（秒）：onMove / onPlayTimeTick 累积到此值才 flush emit progressChanged。
     static constexpr float kFlushInterval = 0.5f;
+
+    // t619 计数型成就阈值：箭命中生物次数（神射手）/ 收获成熟作物次数（农夫）。
+    static constexpr int kSniperHits = 10;
+    static constexpr int kFarmerHarvests = 10;
 };
 
 #endif // PLAYERPROGRESS_H

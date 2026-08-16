@@ -1249,6 +1249,12 @@ void PlayerController::dropUnsupportedLaddersAround(int x, int y, int z)
 void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 state)
 {
     if (!m_world) return;
+    // t619 progress 成就埋点：收获**成熟**作物（任一种）→ cropHarvested 语义事件（「农夫」累计）。
+    //   放在分支顶部统一判（三种作物共享阶段上界），单点定义。
+    if ((id == BlockRegistry::WheatCrop || id == BlockRegistry::CarrotCrop
+         || id == BlockRegistry::PotatoCrop)
+        && state >= BlockRegistry::WheatCropStageMax)
+        emit cropHarvested();
     if (id == BlockRegistry::WheatCrop) {
         const bool mature = state >= BlockRegistry::WheatCropStageMax;
         const int wheatCount = mature ? 1 : 0;
@@ -3879,6 +3885,9 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
     // 扣 1 库存（count-1；归 0 → setSlot 空栈归一清槽——t607 修：count 归 0 时 id 一并归 0，旧版存
     //   {id>0,count=0} 幽灵栈致「UI 图标残留 / 不再发射 / 拿出物品消失」）。分派表全覆盖（else 兜底）→ 恒扣。
     m_dispenserStore->setSlot(x, y, z, slot, itemId, count - 1);
+    // t619 progress 成就埋点：玩家库存发射器/投掷器成功弹出物品 → dispenserFired 语义事件（「发射!」）。
+    //   仅此库存路径发（神殿陷阱 fallback 算 worldgen 机关非玩家成就）。
+    emit dispenserFired();
     return true;
 }
 
@@ -5192,7 +5201,6 @@ void PlayerController::step(qreal dt)
         const int fx0 = int(std::floor(m_pos.x() - 0.3f)), fx1 = int(std::floor(m_pos.x() + 0.3f));
         const int fz0 = int(std::floor(m_pos.z() - 0.3f)), fz1 = int(std::floor(m_pos.z() + 0.3f));
         const int footY = int(std::floor(m_pos.y()));
-        const int eyeY  = int(std::floor(m_pos.y() + m_eyeHeight));
         auto cactusAt = [&](int xx, int yy, int zz) -> bool {
             return yy >= 0 && yy < m_world->height()
                    && m_world->blockAt(xx, yy, zz) == BlockRegistry::Cactus;

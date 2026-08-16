@@ -2029,7 +2029,8 @@ Window {
         }
         // t304 玩家箭命中 mob（spec「抛物+伤害 mobs」）：damageEntity 已扣血 + 红闪（delegate 绑 hurtFlashAt）+
         //   归零 mobDied；本信号驱动命中音（同近战 attackMob→onMobAttacked→playMobHurt 模式）。
-        function onArrowHitMob(mobType) { audio.playMobHurt(mobType) }
+        //   t619 progress 成就：箭命中生物累计（「神射手」10 次）。
+        function onArrowHitMob(mobType) { audio.playMobHurt(mobType); progress.onArrowHitMob() }
         // t505 雪球撞方块破碎（spec「砸地面 → 破碎动画消失」）：EntityManager tick 内 Snowball 命中方块时发
         //   snowballBreak(x,y,z)（float 命中点世界坐标）→ 转发到 BlockParticles.burstSnowball 迸发冷白雪沫
         //   （机制对标 MC 1.0 雪球撞方块碎裂）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，
@@ -2153,6 +2154,10 @@ Window {
         function onPlayerMined(x, y, z, blockId, drop) { progress.onBlockMined() }
         // progress 统计：玩家放置方块 +1（blockPlaced 信号；placeBlock 末尾 emit）。
         function onBlockPlaced() { progress.onBlockPlaced() }
+        // t619 progress 成就：收获成熟作物（player.cropHarvested → progress.onCropHarvested「农夫」累计）。
+        function onCropHarvested() { progress.onCropHarvested() }
+        // t619 progress 成就：发射器/投掷器成功弹出物品（player.dispenserFired → progress.onDispensed「发射!」）。
+        function onDispenserFired() { progress.onDispensed() }
         // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
         function onCraftingTableOpened() { window.openCraftingTable() }
         // t87/t494：右键熔炉 → player 发 furnaceOpened(x,y,z) → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
@@ -8288,16 +8293,20 @@ Window {
         z: 160
         onClosed: window.resourceBrowserOpen = false
     }
-    // pause-menu 进度面板（行2「进度」按钮 → progressOpen）：成就依赖树（progress.achievements() 返回
-    //   [{id,name,desc,unlocked,parentId,parentName,depth,locked}] → Repeater delegate 每成就一行）。
-    //   progress-tree 三轮：树形显示——根成就（depth=0）顶格平铺；子成就按 depth 缩进 + 左缘竖脊线 +
-    //   横接 tick（父→子依赖连线，机制等价 MC 1.0 advancement tree 的树形进度）。三态图标：
-    //   ✓ 已解锁（绿）/ ○ 可解锁未解锁（灰）/ 🔒 locked 父未解锁（更暗 + 描述附「（需先完成：父名）」）。
-    //   revision 触碰刷新：model 表达式显式读 progress.revision 且 revision 参与返回值（_r>=0 守卫恒真），
-    //   防 qmlcachegen AOT 把裸触碰读当死代码消除 → 面板即时刷新（修复「获得成就却显示未解锁」）。
-    //   同设置面板模式（半透遮罩 + 居中 Rectangle + 返回按钮 + Esc 关）。仅 playing && progressOpen 显；
-    //   z=155（高于暂停 100，低于死亡 180）。纯呈现（PLAN §2 UI 层），§9 GUI 自绘原创。
-    //   成就名 / 描述均来自 Game 层 PlayerProgress（不引 MC 专名）。
+    // pause-menu 进度面板（行2「进度」按钮 → progressOpen）：**成就树状图**（t619 重做；用户要「从左到右
+    //   排布、连线横平竖直、界面可上下左右拖动看不同成就之间的连线」）。
+    //   布局：progress.achievements() 携 col（依赖层级，root=0）+ row（同列垂直序；C++ 递归子树布局——叶子占
+    //   1 行、父居中于子女跨度、多根垂直堆叠）→ QML 节点 x = kPad + col×kColW(200)、y = kPad + row×kRowH(110)。
+    //   连线：正交折线（父右中点 → 水平出 → 列间垂直转 → 水平入子左中点），Repeater+Rectangle 拼线段（横平竖直
+    //   elbows，纯 QtQuick 无 Canvas）。父已解锁=亮绿线 / 父未解锁=暗灰线。
+    //   节点三态：已解锁=绿框亮底+✓；可进行（父解锁未达成）=黄框脉动描边+○；locked（父未解锁）=暗底+🔒。
+    //   节点内容 = 物品图标（iconId 三段路由：方块 Image / ToolIcon / MaterialIcon，同 Inventory 调色板模式）
+    //   + 名字 + 简述；hover tooltip 显全文（locked 附「需先完成：父名」）。
+    //   拖动：Flickable 上下左右自由拖（contentWidth/Height = 树边界 + 边距；树小于视口则不裁剪）。
+    //   revision 触碰刷新：model / 树数据表达式显式读 progress.revision 且 revision 参与返回值（_r>=0 守卫
+    //   恒真），防 qmlcachegen AOT 把裸触碰读当死代码消除（qml-touch 铁律）。
+    //   仅 playing && progressOpen 显；z=155（高于暂停 100，低于死亡 180）。纯呈现（PLAN §2 UI 层），§9 自绘原创。
+    //   成就名 / 描述 / 图标 id 均来自 Game 层 PlayerProgress（不引 MC 专名）。
     Item {
         id: progressOverlay
         anchors.fill: parent
@@ -8309,90 +8318,196 @@ Window {
             MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
         }
         Rectangle {
-            width: 460; height: 540; radius: 10
+            id: progressPanel
+            width: 760; height: 560; radius: 10
             anchors.centerIn: parent
             color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
+            // ── 树数据快照（触碰 revision；achievements() 携 col/row/iconId 布局字段）──
+            property var achTree: { const _r = progress.revision; return _r >= 0 ? progress.achievements() : [] }
+            // 树边界（最大列 / 行号；连线端点 + Flickable content 尺寸用）。
+            readonly property int treeCols: { const _t = achTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].col); return m }
+            readonly property int treeRows: { const _t = achTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].row); return m }
+            // 已解锁计数（副标题「已解锁 X / Y」）。
+            readonly property int unlockedCount: { const _t = achTree; let c = 0; for (let i = 0; i < _t.length; ++i) if (_t[i].unlocked) ++c; return c }
             Column {
-                anchors.fill: parent; anchors.margins: 20; spacing: 8
-                Text { text: "进度（成就）"; color: "#eeeeee"; font.pixelSize: 20; font.bold: true
+                anchors.fill: parent; anchors.margins: 16; spacing: 6
+                Text { text: "进度（成就树）"; color: "#eeeeee"; font.pixelSize: 20; font.bold: true
                        anchors.horizontalCenter: parent.horizontalCenter }
-                // 成就列表（Flickable 容滚动，防成就数多超面板高）。
+                Text { text: "拖动查看 · 已解锁 " + progressPanel.unlockedCount + " / " + progressPanel.achTree.length
+                       color: "#888888"; font.pixelSize: 11
+                       anchors.horizontalCenter: parent.horizontalCenter }
+                // ── 树画布：Flickable 上下左右拖（contentWidth/Height = 树边界 + 边距）──
                 Flickable {
+                    id: treeFlick
                     width: parent.width
-                    height: parent.height - 32 /*标题*/ - 50 /*返回*/ - 16 /*间距*/
-                    contentHeight: achList.height
-                    contentWidth: width
+                    height: parent.height - 32 /*标题*/ - 18 /*副标题*/ - 50 /*返回*/ - 18 /*间距*/
+                    // 布局常量（列距 / 行距 / 边距 / 节点尺寸；树节点与连线共用同一公式）。
+                    readonly property real kColW: 200
+                    readonly property real kRowH: 110
+                    readonly property real kPad: 40
+                    readonly property real nodeW: 170
+                    readonly property real nodeH: 86
+                    // 树内容尺寸（+ 节点尺寸 + 两侧边距）；小于视口时取视口宽（Flickable 不裁剪、不弹性拖）。
+                    contentWidth: Math.max(width, treeFlick.kPad * 2 + (progressPanel.treeCols + 1) * treeFlick.kColW)
+                    contentHeight: Math.max(height, treeFlick.kPad * 2 + (progressPanel.treeRows + 1) * treeFlick.kRowH)
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
-                    Column {
-                        id: achList
-                        width: parent.width
-                        spacing: 6
-                        // revision 触碰：progress 任一统计 / 成就变更 → revision bump → 此 Repeater 重算
-                        //   achievements()。QML 绑定 model 触碰 progress.revision（property 读）才会在
-                        //   progressChanged 时重算函数调用（纯函数调用不自动建依赖），故 model 表达式显式读 revision。
+                    // 树画布根（全部节点 / 连线的定位父；width/Height 绑 content 令 tooltip 钳制正确）。
+                    Item {
+                        id: treeCanvas
+                        width: treeFlick.contentWidth
+                        height: treeFlick.contentHeight
+                        // ── 连线层（先画，节点覆盖其上）：每条父→子正交折线 = 水平出 + 垂直 + 水平入 三段 ──
                         Repeater {
-                            // 触碰 revision：表达式先读 progress.revision（建依赖），且 revision **参与返回值**
-                            //   （_r >= 0 守卫恒真）——防 qmlcachegen AOT 把裸触碰读当死代码消除 → 依赖不注册
-                            //   → revision 变后 model 永不重算、面板停留首值（「获得成就却显示未解锁」根因）。
-                            //   progressChanged → revision 变 → 此绑定重算 → achievements() 取最新（含解锁态）。
-                            model: { const _r = progress.revision; return _r >= 0 ? progress.achievements() : [] }
+                            model: progressPanel.achTree
+                            delegate: Item {
+                                // 仅子节点（parentId 非空串）画线；根节点 delegate 空占位不渲染。
+                                visible: String(modelData.parentId).length > 0
+                                // 端点（同节点摆位公式）：节点 x = kPad + col*kColW、y = kPad + row*kRowH；
+                                //   连线接节点垂直中点（y + nodeH/2）、父右缘（x + nodeW）/ 子左缘。
+                                readonly property real myX: treeFlick.kPad + modelData.col * treeFlick.kColW
+                                readonly property real myY: treeFlick.kPad + modelData.row * treeFlick.kRowH + treeFlick.nodeH / 2
+                                // 查父节点（必在同表；C++ defs 父先于子）。
+                                readonly property var parentNode: {
+                                    const tree = progressPanel.achTree
+                                    for (let i = 0; i < tree.length; ++i)
+                                        if (tree[i].id === modelData.parentId) return tree[i]
+                                    return null
+                                }
+                                readonly property real parentX: parentNode ? treeFlick.kPad + parentNode.col * treeFlick.kColW + treeFlick.nodeW : 0
+                                readonly property real parentY: parentNode ? treeFlick.kPad + parentNode.row * treeFlick.kRowH + treeFlick.nodeH / 2 : 0
+                                // 垂直段 x = 两列中点（父右缘与子左缘之间）。
+                                readonly property real midX: (parentX + myX) / 2
+                                // 线色：父已解锁（依赖链激活）→ 亮绿；父未解锁 → 暗灰。
+                                readonly property color lineColor: parentNode && parentNode.unlocked ? "#4a8a4a" : "#3a3a3a"
+                                // 水平出段（父右中点 → midX）。
+                                Rectangle {
+                                    x: parent.parentX; y: parent.parentY - 1
+                                    width: Math.max(0, parent.midX - parent.parentX); height: 2
+                                    color: parent.lineColor
+                                }
+                                // 垂直段（midX 处 parentY → myY；同 y（直连）则不显）。
+                                Rectangle {
+                                    visible: Math.abs(parent.myY - parent.parentY) > 0.5
+                                    x: parent.midX - 1
+                                    y: Math.min(parent.parentY, parent.myY)
+                                    width: 2; height: Math.abs(parent.myY - parent.parentY)
+                                    color: parent.lineColor
+                                }
+                                // 水平入段（midX → 子左中点）。
+                                Rectangle {
+                                    x: parent.midX; y: parent.myY - 1
+                                    width: Math.max(0, parent.myX - parent.midX); height: 2
+                                    color: parent.lineColor
+                                }
+                            }
+                        }
+                        // ── 节点层（成就卡片）──
+                        Repeater {
+                            model: progressPanel.achTree
                             delegate: Rectangle {
-                                width: achList.width
-                                height: achRow.implicitHeight + 16
-                                radius: 6
-                                // 三态底色：已解锁 → 绿底；locked（父未解锁）→ 更暗底；可解锁未解锁 → 暗底。
-                                color: modelData.unlocked ? "#1a2a1a" : (modelData.locked ? "#181818" : "#222222")
-                                border.color: modelData.unlocked ? "#3a6a3a" : "#3a3a3a"; border.width: 1
-                                Item {
-                                    id: achBody
+                                x: treeFlick.kPad + modelData.col * treeFlick.kColW
+                                y: treeFlick.kPad + modelData.row * treeFlick.kRowH
+                                width: treeFlick.nodeW; height: treeFlick.nodeH
+                                radius: 8
+                                // 三态底色 + 边框：已解锁=绿亮 / 可进行=黄 / locked=暗。
+                                color: modelData.unlocked ? "#1c2e1c" : (modelData.locked ? "#181818" : "#222222")
+                                border.color: modelData.unlocked ? "#5a9a5a"
+                                              : (modelData.locked ? "#3a3a3a" : "#c8a84a")
+                                border.width: modelData.unlocked ? 2 : (modelData.locked ? 1 : 2)
+                                // 可进行态描边脉动（opacity 慢循环；已解锁 / locked 态不动画 → visible 门控停动画）。
+                                Rectangle {
+                                    id: nodePulse
+                                    anchors.margins: -3; radius: parent.radius + 3
+                                    color: "transparent"
+                                    border.color: "#c8a84a"; border.width: 2
+                                    visible: !modelData.unlocked && !modelData.locked
+                                    opacity: 0.0
+                                    SequentialAnimation on opacity {
+                                        running: visible; loops: Animation.Infinite
+                                        NumberAnimation { from: 0.15; to: 0.85; duration: 1200 }
+                                        NumberAnimation { from: 0.85; to: 0.15; duration: 1200 }
+                                    }
+                                }
+                                Row {
                                     anchors.fill: parent; anchors.margins: 8
-                                    // 依赖树缩进 = depth × 16（根成就 depth=0 顶格；子成就逐级右移）。
-                                    readonly property real indent: modelData.depth * 16
-                                    // 连线层（progress-tree 三轮）：竖脊线 = 同父兄弟连成一根纵线；横接 tick =
-                                    //   父 → 子指向。根成就（depth=0）不画。暗绿线色。
-                                    Rectangle {
-                                        visible: modelData.depth > 0
-                                        x: achBody.indent - 12; y: 0
-                                        width: 2; height: parent.height
-                                        color: "#4a5a4a"
+                                    spacing: 6
+                                    // ── 三态状态角标（✓ / ○ / 🔒）──
+                                    Text {
+                                        text: modelData.unlocked ? "✓" : (modelData.locked ? "🔒" : "○")
+                                        color: modelData.unlocked ? "#7fe57f" : (modelData.locked ? "#666666" : "#c8a84a")
+                                        font.pixelSize: 15; font.bold: true
+                                        anchors.verticalCenter: parent.verticalCenter
                                     }
-                                    Rectangle {
-                                        visible: modelData.depth > 0
-                                        x: achBody.indent - 12
-                                        y: parent.height / 2 - 1
-                                        width: 12; height: 2
-                                        color: "#4a5a4a"
-                                    }
-                                    Row {
-                                        id: achRow
-                                        anchors.fill: parent
-                                        anchors.leftMargin: achBody.indent
-                                        spacing: 10
-                                        // 三态图标：✓ 已解锁（绿）/ ○ 可解锁未解锁（灰）/ 🔒 locked（父未解锁，暗灰）。
-                                        Text {
-                                            text: modelData.unlocked ? "✓" : (modelData.locked ? "🔒" : "○")
-                                            color: modelData.unlocked ? "#7fe57f" : (modelData.locked ? "#666666" : "#8a8a8a")
-                                            font.pixelSize: 18; font.bold: true
-                                            anchors.verticalCenter: parent.verticalCenter
+                                    // ── 物品图标（iconId 三段路由：方块 Image / 工具 ToolIcon / 材料 MaterialIcon；
+                                    //    isTool / isMaterial 判段，同 Inventory 调色板模式）──
+                                    Item {
+                                        width: 28; height: 28
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        Image {
+                                            anchors.fill: parent
+                                            visible: !hotbarVM.isTool(modelData.iconId) && !hotbarVM.isMaterial(modelData.iconId)
+                                            source: hotbarVM.iconSourceForBlock(modelData.iconId)
+                                            fillMode: Image.PreserveAspectFit; smooth: true
                                         }
-                                        Column {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: parent.width - 28
-                                            spacing: 2
-                                            Text {
-                                                text: modelData.name
-                                                color: modelData.unlocked ? "#e0e0e0" : (modelData.locked ? "#777777" : "#999999")
-                                                font.pixelSize: 14; font.bold: true
-                                            }
-                                            Text {
-                                                // locked 成就描述追加前置依赖提示（父名），指引玩家先做父成就。
-                                                text: modelData.desc + (modelData.locked && modelData.parentName
-                                                      ? "（需先完成：" + modelData.parentName + "）" : "")
-                                                color: modelData.unlocked ? "#bbbbbb" : (modelData.locked ? "#5a5a5a" : "#777777")
-                                                font.pixelSize: 11
-                                                wrapMode: Text.WordWrap; width: parent.width
-                                            }
+                                        ToolIcon {
+                                            anchors.fill: parent
+                                            visible: hotbarVM.isTool(modelData.iconId)
+                                            toolType: hotbarVM.toolType(modelData.iconId)
+                                            tier: hotbarVM.toolTier(modelData.iconId)
+                                        }
+                                        MaterialIcon {
+                                            anchors.fill: parent
+                                            visible: hotbarVM.isMaterial(modelData.iconId)
+                                            materialId: modelData.iconId
+                                        }
+                                    }
+                                    // ── 名字 + 简述（两行内截断，全文进 hover tooltip）──
+                                    Column {
+                                        width: parent.width - 16 - 28 - 6 - 6
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 2
+                                        Text {
+                                            text: modelData.name
+                                            color: modelData.unlocked ? "#e8e8e8" : (modelData.locked ? "#707070" : "#b0b0b0")
+                                            font.pixelSize: 13; font.bold: true
+                                            elide: Text.ElideRight; width: parent.width
+                                        }
+                                        Text {
+                                            text: modelData.desc
+                                            color: modelData.unlocked ? "#a0c0a0" : (modelData.locked ? "#5a5a5a" : "#8a8a8a")
+                                            font.pixelSize: 10
+                                            wrapMode: Text.WordWrap; width: parent.width
+                                            maximumLineCount: 2; elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+                                // ── hover tooltip（名字 + 描述全文 + locked 前置提示；同创造背包 tooltip 模式）。
+                                //    摆位：节点上方居中，水平 / 垂直越画布界时钳制（最右列不溢画布右缘 / 首行翻到
+                                //    节点下方）。坐标换算：本 Rectangle x 是节点局部，钳制阈值换回节点局部 =
+                                //    画布绝对 − 节点绝对（kPad + col×kColW）。
+                                HoverHandler { id: nodeHover }
+                                Rectangle {
+                                    visible: nodeHover.hovered
+                                    x: Math.min(Math.max(2, parent.width / 2 - width / 2),
+                                                treeCanvas.width - width - 4 - (treeFlick.kPad + modelData.col * treeFlick.kColW))
+                                    y: (treeFlick.kPad + modelData.row * treeFlick.kRowH - height - 6) < 4
+                                       ? parent.height + 6 : -height - 6
+                                    width: tipCol.implicitWidth + 16; height: tipCol.implicitHeight + 12
+                                    radius: 4; color: "#101410"; border.color: "#5a7a5a"; border.width: 1
+                                    z: 10
+                                    Column {
+                                        id: tipCol
+                                        x: 8; y: 6; spacing: 2
+                                        Text {
+                                            text: modelData.name + (modelData.unlocked ? "（已解锁）" : "")
+                                            color: "#e0f0e0"; font.pixelSize: 12; font.bold: true
+                                        }
+                                        Text {
+                                            text: modelData.desc + (modelData.locked && modelData.parentName
+                                                  ? "（需先完成：" + modelData.parentName + "）" : "")
+                                            color: "#a8c0a8"; font.pixelSize: 11; wrapMode: Text.WordWrap
+                                            width: 190
                                         }
                                     }
                                 }
@@ -9245,6 +9360,9 @@ Window {
     onRidingBoatChanged: {
         if (ridingBoat) { dismountHintVisible = true; dismountHintTimer.restart() }
         else { dismountHintVisible = true; dismountHintTimer.stop() }
+        // t619 progress 成就：首次骑上船（false→true 边沿）→「起航」。onBoatBoarded 内幂等 unlock，
+        //   重复上下船只首次弹 toast。
+        if (ridingBoat) progress.onBoatBoarded()
     }
     Timer {
         id: dismountHintTimer
@@ -9576,6 +9694,8 @@ Window {
         enchantZ: window.enchantZ
         // t549：世界栅格编辑版本号（放 / 破方块自增）—— 触碰它驱动 bookshelfPower 绑定重算（书架检测）。
         worldEditRev: window.worldEditRev
+        // t619：进度 VM 注入（附魔成功埋点 onEnchanted / onEnchantedBookObtained）。
+        progress: progress
         visible: window.appState === "playing" && window.enchantingTableOpen
         z: 150
         onClosed: window.closeEnchantingTable()
@@ -9594,6 +9714,8 @@ Window {
         hotbar: hotbarVM
         playerState: playerState
         player: player
+        // t619：进度 VM 注入（铁砧成功操作埋点 onAnvilUsed →「铁匠」）。
+        progress: progress
         anvilX: window.anvilX
         anvilY: window.anvilY
         anvilZ: window.anvilZ

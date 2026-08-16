@@ -47,6 +47,9 @@ Item {
     //   UI 开着时放 / 破书架也能重算书架数（countBookshelvesAround 是 Q_INVOKABLE 无 NOTIFY，
     //   不触碰则绑定永不重算 → 用户报「旁边放书架显示还是 0」根因）。
     property int worldEditRev: 0
+    // t619 宿主注入：玩家进度 VM（附魔成功埋点 progress.onEnchanted / onEnchantedBookObtained）。
+    //   var 避免类型解析耦合（同 AnvilUI player 模式）。
+    property var progress: null
     // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // 拖出丢弃：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区；同 CraftingTableUI）。
@@ -397,6 +400,12 @@ Item {
         const outId = (cat === 8) ? root.enchantedBookId : root.enchantItemId   // BookItem=8 → 附魔书
         InventoryOps.writeSlot(root, "enchant", 0, outId, 1,
                                (cat === 8) ? 0 : (root.enchantDur[0] || 0), newEnch)
+        // t619 progress 成就埋点：附魔成功 →「附魔师」；附书产附魔书 →「书虫」（CraftingTableUI 同模式：
+        //   UI 成功操作末尾调 progress.onXxx，root.progress 由 Main.qml 注入）。
+        if (root.progress) {
+            root.progress.onEnchanted()
+            if (cat === 8) root.progress.onEnchantedBookObtained()
+        }
         root.justEnchanted = true
         enchantFlashTimer.restart()
     }

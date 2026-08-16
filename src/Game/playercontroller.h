@@ -690,6 +690,14 @@ signals:
     //     spec t295「敌对各:骨头敲击/蜘蛛嘶(近)/僵尸哀嚎/苦力怕爆炸声」。mobType 由 Game/Physics 层（持
     //     EntityManager）取得，向下经语义信号传呈现层，不反查（PLAN §2 分层）。
     void mobAttacked(int mobType, bool crit);
+    // t619 收获成熟作物（progress 成就埋点）：finishMiningAt / dropUnsupportedCropsAround 破坏成熟作物
+    //   （WheatCrop/CarrotCrop/PotatoCrop，state>=WheatCropStageMax）时发。呈现层 Connections →
+    //   progress.onCropHarvested()（「农夫」累计 10 次）。同 blockPlaced 单向事件流模式（PLAN §2 分层）。
+    void cropHarvested();
+    // t619 发射器/投掷器成功弹出物品（progress 成就埋点）：dispenseFromDispenser 返 true（弹出箭 / 投掷物 /
+    //   掉落物任一路径成功）时发。呈现层 Connections → progress.onDispensed()（「发射!」）。仅玩家库存
+    //   发射器路径（神殿陷阱 fallback 箭不算玩家机关成就）。同 cropHarvested 单向事件流模式。
+    void dispenserFired();
 
 protected:
     void componentComplete() override;

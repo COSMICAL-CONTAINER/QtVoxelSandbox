@@ -83,6 +83,9 @@ Item {
     property PlayerState playerState
     // 宿主注入：PlayerController（damageAnvil 推进铁砧损坏）。声明 var 避免类型解析耦合。
     property var player: null
+    // t619 宿主注入：玩家进度 VM（铁砧成功操作埋点 progress.onAnvilUsed →「铁匠」成就）。
+    //   var 避免类型解析耦合（同 player 模式）。
+    property var progress: null
     // 宿主注入：铁砧方块世界坐标（player.damageAnvil 推进损坏）。
     property int anvilX: 0
     property int anvilY: 0
@@ -771,6 +774,9 @@ Item {
 
         root.anvilRev++
         if (root.player) root.player.damageAnvil(anvilX, anvilY, anvilZ)
+        // t619 progress 成就埋点：铁砧成功执行修复/合并/重命名 →「铁匠」（CraftingTableUI 同模式：
+        //   root.progress 由 Main.qml 注入，成功路径末尾单点调用）。
+        if (root.progress) root.progress.onAnvilUsed()
         root.justActed = true
         actFlashTimer.restart()
     }
