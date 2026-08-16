@@ -946,6 +946,32 @@ float EntityManager::drawAmountAt(int i) const
     return p;
 }
 
+// t635 铁傀儡攻击蓄力进度（0..1；见头文件注释）：仅 MobIronGolem 蓄力期返 windup 归一。
+float EntityManager::golemAttackPoseAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobIronGolem || e.golemWindup <= 0.0f) return 0.0f;
+    float p = e.golemWindup / kGolemWindup;
+    if (p < 0.0f) p = 0.0f;
+    if (p > 1.0f) p = 1.0f;
+    return p;
+}
+
+// t635 铁傀儡反击锁定（PlayerController::attackMob 目标是铁傀儡时调；见头文件注释）。
+void EntityManager::setGolemRetaliate(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Mob || e.dead || e.mobType != MobIronGolem) return;
+    if (!e.golemAngry) {
+        e.golemAngry = true;
+        qCInfo(lcEnt) << "iron golem" << i << "retaliating against player";
+    }
+    e.golemAngryTimer = kGolemAngryMemory;
+    e.golemWindup = 0.0f; // 已在蓄力中被再打 → 重蓄（打断当前拳，重新抬臂；反击记忆刷新）
+}
+
 // t239 mob 子类 id（t240 pig/cow/sheep；t242/t243 分流）。越界 → 0。
 int EntityManager::mobTypeAt(int i) const
 {
@@ -2092,13 +2118,81 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
 
 // t483 铁傀儡 AI（详见头文件 aiIronGolem 注释）。机制对齐 MC 1.0 铁傀儡：游荡 + 追击打敌对 + 重拳击退。
 //   neutral non-hostile（hostile=false → 不参与黑暗刷怪 / 燃烧 / 远距消失）。**只打敌对**（nearestHostile）。
-//   分层（PLAN §2）：只读 World::isSolid + 自身数据；攻击敌对走 damageEntity / knockback（同层），无向上依赖。
+//   t635 反击玩家分支（golemAngry）：玩家打了它（setGolemRetaliate）→ 优先级**高于敌对 mob 目标**——追击
+//   玩家（kIronGolemWalkSpeed）→ 近距（kIronGolemAttackRange）蓄力（kGolemWindup 秒抬臂动画，站立不动）
+//   → 蓄满重拳：mobAttackedPlayer(kGolemPlayerDamage) + golemLaunchedPlayer（上抛 ~4.6 格 → 摔落伤害）+
+//   重置攻击冷却。玩家脱离 kIronGolemDetectRange / 反击记忆（kGolemAngryMemory）到期 → 平息回常规逻辑。
+//   分层（PLAN §2）：只读 World::isSolid + 自身数据；攻击敌对走 damageEntity / knockback（同层），攻击玩家
+//   走语义信号 mobAttackedPlayer / golemLaunchedPlayer（呈现层路由 PlayerState / PlayerController）。
 bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, float worldW, float worldD,
-                                float speedScale)
+                                float speedScale, const QVector3D &playerPos, bool playerTargetable)
 {
     Q_UNUSED(idx) // 铁傀儡攻击目标（target）走 damageEntity/knockback，不读自身 idx（区别于 aiSnowGolem 融化用 idx）
     bool dirty = false;
     e.attackCooldown -= dt; // 重拳冷却递减（不论追踪与否；自然走完）
+    // t635 反击记忆倒计时：脱离接触 / 玩家不可锁定（死亡 / 非生存）期间递减，到期平息（golemAngry=false）。
+    if (e.golemAngry) {
+        e.golemAngryTimer -= dt;
+        if (e.golemAngryTimer <= 0.0f) {
+            e.golemAngry = false;
+            e.golemWindup = 0.0f;
+            qCInfo(lcEnt) << "iron golem retaliation expired";
+        }
+    }
+    // ── t635 反击玩家（优先于敌对 mob 目标；玩家打它 → 锁定追击 → 近距蓄力重拳上抛）──
+    if (e.golemAngry && playerTargetable) {
+        const float pdx = playerPos.x() - e.pos.x();
+        const float pdz = playerPos.z() - e.pos.z();
+        const float distXZ = std::sqrt(pdx * pdx + pdz * pdz);
+        if (distXZ > 1e-4f) e.yawRad = std::atan2(-pdx, -pdz); // 朝玩家（同 yaw 约定 dir=(-sin,-cos)）
+        // 脱离侦测范围 → 平息（记忆计继续走，回常规逻辑）。
+        if (distXZ > kIronGolemDetectRange) {
+            e.golemAngry = false;
+            e.golemWindup = 0.0f;
+        } else if (distXZ <= kIronGolemAttackRange) {
+            // 近距：蓄力（站立不动 + 抬臂动画驱动 golemWindup → golemAttackPoseAt）→ 蓄满重拳。
+            e.wanderSpeed = 0.0f;
+            e.moveSpeed = 0.0f;
+            if (e.attackCooldown <= 0.0f) {
+                if (e.golemWindup <= 0.0f) {
+                    e.golemWindup = kGolemWindup; // 起蓄
+                } else {
+                    e.golemWindup += dt;
+                    if (e.golemWindup >= kGolemWindup) {
+                        // 蓄满重拳：大伤害 + 上抛（golemLaunchedPlayer → 玩家 vy=+16 抛起 ~4.6 格摔伤）。
+                        e.golemWindup = 0.0f;
+                        e.attackCooldown = kIronGolemAttackCooldown;
+                        float kbX = 1.0f, kbZ = 0.0f;
+                        if (distXZ > 1e-3f) { kbX = pdx / distXZ; kbZ = pdz / distXZ; }
+                        else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); } // 兜底：朝 golem 面朝方向推
+                        emit golemLaunchedPlayer(kbX, kbZ);
+                        emit mobAttackedPlayer(kGolemPlayerDamage, int(MobIronGolem), kbX, kbZ);
+                        qCInfo(lcEnt) << "iron golem heavy punch hit player (launch)";
+                    }
+                }
+            }
+            return true; // 蓄力期 revision 须 bump（attackPose 动画绑定刷新，即使站立不动）
+        } else {
+            // 追击玩家（同下敌对追击的逐轴 AABB 撤回 + 边界 clamp 模式）。
+            e.wanderSpeed = kIronGolemWalkSpeed;
+            const float spd = kIronGolemWalkSpeed * speedScale;
+            const float ehw = e.halfW, ehh = e.halfH;
+            const float nx = pdx / distXZ, nz = pdz / distXZ;
+            float newX = e.pos.x() + nx * spd * float(dt);
+            if (newX < ehw) newX = ehw;
+            if (newX > worldW - ehw) newX = worldW - ehw;
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+            float newZ = e.pos.z() + nz * spd * float(dt);
+            if (newZ < ehw) newZ = ehw;
+            if (newZ > worldD - ehw) newZ = worldD - ehw;
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+            bool moved = false;
+            if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+            if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+            e.moveSpeed = moved ? spd : 0.0f;
+            return moved;
+        }
+    }
     const int target = nearestHostile(e.pos, kIronGolemDetectRange);
     if (target >= 0) {
         const Entity &t = m_entities[size_t(target)];
@@ -3754,7 +3848,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     // 雪傀儡融化（damageEntity 大伤害）可能本帧致死 → 本帧不再走后续逻辑（同仙人掌 / 火伤致死守卫）。
                     if (e.dead) continue;
                 } else if (e.mobType == MobIronGolem) {
-                    if (aiIronGolem(idx, e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
+                    // t635：透传玩家位置 + 可锁定态（反击玩家分支用；非 angry 时两参不读，行为不变）。
+                    if (aiIronGolem(idx, e, float(aiDt), world, worldW, worldD, speedScale, listener, playerTargetable)) dirty = true;
+                    // t635 蓄力期（golemWindup>0）每帧 bump revision → QML golemAttackPoseAt 绑定刷新（抬臂动画）；
+                    //   蓄力站立不动（moved=false）亦须刷新（同 Bones 拉弓 / Stalker 蓄力膨胀模式）。
+                    if (e.golemWindup > 0.0f) dirty = true;
                 } else if (e.mobType == MobSquid) {
                     if (aiSquid(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
                 } else if (e.mobType == MobWolf) {

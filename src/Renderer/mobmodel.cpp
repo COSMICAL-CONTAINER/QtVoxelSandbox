@@ -368,6 +368,19 @@ void MobModel::setAimPitch(float deg)
     rebuild();
 }
 
+// t635 铁傀儡攻击抬臂 setter（0..1，0=垂臂）：同上早退；仅 IronGolem 攻击蓄力期非零（QML 绑
+//   golemAttackPoseAt(i)——EntityManager 攻击 windup 进度）。量化到 1/12 步进（同 walkPhase 量化模式，
+//   防每帧微变触发 rebuild）；值变 → rebuild 把双臂绕肩枢前抬（−attackPose·120°）。
+void MobModel::setAttackPose(float pose)
+{
+    constexpr float kStep = 1.0f / 12.0f;
+    const float q = std::round(pose / kStep) * kStep;
+    if (q == m_attackPose) return;
+    m_attackPose = q;
+    emit attackPoseChanged();
+    rebuild();
+}
+
 // pack entity 贴图开关 setter（R19 C3）：值变 → rebuild 把每盒 UV 从全脸切到 MC box-UV 精确采样（pack 开）或反之。
 //   QML 绑定 `packTextured: mobXxxPackTex.source.toString().length > 0`（pack 切换 / 包内命中与否均刷新）。
 void MobModel::setPackTextured(bool on)
@@ -639,7 +652,11 @@ void MobModel::rebuild()
         //   arm(60,58)4×16×6 —— 旧 (40,40,4,16,4) 侧面仅 56-89% 不透明（= 臂暗根因）；(60,58) 六面 100%。
         //   leg(0,70)9×5×6 —— 旧 (0,30,4,12,4) 六面 0-50% 不透明（= 腿前黑根因）；(0,70) 六面 100%
         //   （Front=(6,76)-(15,81) 正对镜头的面不再采样空区）。
-        //   头（南瓜）由 Main.qml 补独立 Model，几何不含头。UV 分数分母用 base 128（HD 包整张放大，分数仍按 base）。
+        //   t635 ① 真头（pack 路径）：head(0,0)8×10×8 —— 六面实测 100% 不透明，Front(8,8)-(16,18) 含
+        //   刻面双眼 + 垂藤特征（demo 包像素取证：dark 行 33..63 = 眼 + 藤 + 鼻梁）。头盒进**本几何**（pack 开
+        //   时才加，同猪鼻模式）——Main.qml / ResourceBrowser 的傀儡头 delegate 据 packTextured 切换（pack 开
+        //   → 隐独立橙色头 Model；pack 关 → 显纯橙头 + 刻面眼，现状不变）。几何位与旧橙色 UnitCube 头对齐：
+        //   心 (0,0.95,0) 半 (0.36,0.33,0.36)（0.72×0.66×0.72）。UV 分数分母用 base 128（HD 包整张放大，分数仍按 base）。
         g_texW = 128.0f; g_texH = 128.0f;
         setMobTex(0, 40, 18, 12, 11);
         addBox( 0.00f,  0.05f, 0.00f, 0.475f, 0.525f, 0.325f, verts, idx, bMin, bMax); // 宽躯干（铁块身）
@@ -647,10 +664,27 @@ void MobModel::rebuild()
         addBox(-0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 左腿（铁块）
         setMobTex(0, 70, 9, 5, 6);
         addBox( 0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 右腿（铁块）
+        // t635 ② 攻击抬臂（attackPose 0..1 → 双臂绕肩枢前抬）：attackPose=0 走 addBox 轴对齐快路径
+        //   （垂臂，同旧）；>0 绕肩枢（臂盒顶面心 y=0.10+0.39=0.49）X 轴旋转 −attackPose·120°（负角把垂臂
+        //   向前 −Z 抬起；度 → 弧度）。肩枢在臂盒顶 → 抬臂时臂根贴肩不脱节（同 Bones aimPitch 模式）。
+        const float golemArmLift = qDegreesToRadians(-m_attackPose * 120.0f); // 度 → 弧度（负 = 向前 −Z 抬）
         setMobTex(60, 58, 4, 16, 6);
-        addBox(-0.62f,  0.10f, 0.00f, 0.14f,  0.39f,  0.225f, verts, idx, bMin, bMax); // 左长臂（铁块；机制等价 MC 铁傀儡重拳长臂）
+        if (m_attackPose == 0.0f) {
+            addBox(-0.62f,  0.10f, 0.00f, 0.14f,  0.39f, 0.225f, verts, idx, bMin, bMax); // 左长臂（垂；机制等价 MC 铁傀儡重拳长臂）
+        } else {
+            addBoxRot(-0.62f,  0.10f, 0.00f, 0.14f,  0.39f, 0.225f, 0.49f, 0.00f, golemArmLift, verts, idx, bMin, bMax); // 左长臂（攻击前抬）
+        }
         setMobTex(60, 58, 4, 16, 6);
-        addBox( 0.62f,  0.10f, 0.00f, 0.14f,  0.39f,  0.225f, verts, idx, bMin, bMax); // 右长臂
+        if (m_attackPose == 0.0f) {
+            addBox( 0.62f,  0.10f, 0.00f, 0.14f,  0.39f, 0.225f, verts, idx, bMin, bMax); // 右长臂（垂）
+        } else {
+            addBoxRot( 0.62f,  0.10f, 0.00f, 0.14f,  0.39f, 0.225f, 0.49f, 0.00f, golemArmLift, verts, idx, bMin, bMax); // 右长臂（攻击前抬）
+        }
+        // t635 ① 贴图头（pack 开才加；几何位 = Main.qml 旧橙色头 Model 同位 → 切换零跳变）。
+        if (g_packTextured) {
+            setMobTex(0, 0, 8, 10, 8);
+            addBox( 0.00f,  0.95f, 0.00f, 0.36f, 0.33f, 0.36f, verts, idx, bMin, bMax); // 贴图头（pack iron_golem 头区）
+        }
     } else if (m_mobType == 14) {
         // t487 Silverfish（银鱼；机制等价 MC 1.0 银鱼，§9 原创模型 + 贴图）—— 小型虫类：分节躯干 + 前伸小头 +
         //   多对短腿（机制等价 MC 1.0 银鱼多足 + 多节体）。腿底本地 y≈−0.15 贴 collision 底面（halfH=0.15 →

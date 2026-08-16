@@ -672,6 +672,8 @@ Item {
                                         //   **纯色橙 UnitCube #e8821e + 刻面双眼**（非南瓜方块贴图）——图鉴此前同雪傀儡用
                                         //   BlockCube 南瓜头，与游戏内不一致。镜像游戏内：UnitCube 纯橙 + 双眼（-Z 前面
                                         //   深色小方块，位/尺寸同游戏内 (±0.14,1.00,-0.38) scale (0.09,0.11,0.03)）。
+                                        //   t635：pack 命中 → MobModel 几何已含贴图头（head(0,0)8×10×8 区）→ 本三
+                                        //   Model（橙头 + 双眼）隐藏；pack 关 → 显（现状不变）。与游戏内 delegate 同步。
                                         Model {
                                             visible: root.selectedMobType === 12
                                             geometry: BlockCube { blockId: 100 } // 100 = BlockRegistry::Pumpkin（QML 不 import C++ 静态类故字面量，同 Main.qml 约定）
@@ -684,23 +686,24 @@ Item {
                                                 alphaCutoff: 0.5
                                             }
                                         }
-                                        // 铁傀儡头（纯橙 + 刻面双眼，镜像 Main.qml 游戏内 delegate）。
+                                        // 铁傀儡头（纯橙 + 刻面双眼，镜像 Main.qml 游戏内 delegate；t635 pack 命中隐藏——
+                                        //   MobModel 贴图头接管）。
                                         Model {
-                                            visible: root.selectedMobType === 13
+                                            visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(0, 0.95, 0)
                                             scale: Qt.vector3d(0.72, 0.66, 0.72)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8821e" } // 橙（同游戏内；图鉴预览不调昼夜灰阶）
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 13
+                                            visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(-0.14, 1.00, -0.38)
                                             scale: Qt.vector3d(0.09, 0.11, 0.03)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 13
+                                            visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(0.14, 1.00, -0.38)
                                             scale: Qt.vector3d(0.09, 0.11, 0.03)

@@ -1407,6 +1407,9 @@ void PlayerController::attackMob(int entityIndex)
     // t480 主人攻击 → 驯服狼防御目标 = 本 mob（setWolfTarget 记共享目标：所有驯服且站立的狼追击它，机制等价
     //   MC 1.0 驯服狼攻击主人攻击的怪物）。Game→Entities 向下依赖（同 damageEntity / knockback / ignite 直调）。
     m_entityManager->setWolfTarget(entityIndex);
+    // t635 玩家打铁傀儡 → 反击锁定（setGolemRetaliate：golemAngry=true + 刷新记忆 → aiIronGolem 追击玩家 +
+    //   近距蓄力重拳上抛，机制等价 MC 1.0 铁傀儡被打反击）。非铁傀儡静默 no-op。同 setWolfTarget 向下依赖模式。
+    m_entityManager->setGolemRetaliate(entityIndex);
     emit swingArm();
     // t295 mob 受击音效 + 敌对专属：随 mobAttacked 下传被攻击 mob 的 mobType，供呈现层据它路由到
     //   AudioManager.playMobHurt(mobType) —— 被动走通用 creature yelp、敌对各走专属音（哀嚎/骨头敲击/蜘蛛嘶/嘶嘶）。
@@ -1443,6 +1446,25 @@ void PlayerController::applyHitKnockback(float dirX, float dirZ)
     //   m_vel.y 由 step() 单一重力积分 + 着地归零自然走完弧线（不经 m_knockback.y → 无双重力，见上方注释）。
     m_vel.setY(std::max(m_vel.y(), kHitKnockbackUp));
     qInfo("player hit-knockback dir=(%.3f,%.3f) horiz=%.1f", dirX, dirZ, kHitKnockbackHoriz);
+}
+
+// t635 铁傀儡重拳上抛（见头文件 applyGolemLaunch 注释；机制等价 MC 1.0 铁傀儡把玩家抛上天）。由 Main.qml 的
+//   EntityManager.golemLaunchedPlayer Connections 调（仅 Survival —— mobAttackedPlayer 同帧发的伤害已门控，
+//   上抛与伤害同源同门；Creative / Spectator 无敌不抛）。同 applyHitKnockback 的 m_vel.y 直写模式（无双重力），
+//   但垂直冲量用大值 kGolemLaunchVy（16 → 峰值 ~4.6 格，落地落差 >3 格必触发摔落伤害，用户口径「4 格以上摔伤」）。
+//   防御：归一输入；非 Survival / 死亡 / 未捕获 / 零方向 → 静默早退（同 applyHitKnockback）。
+void PlayerController::applyGolemLaunch(float dirX, float dirZ)
+{
+    if (m_mode != Survival) return;      // 创造 / 观察者无敌（防御；golemLaunchedPlayer 本就 Survival-only）
+    if (m_dead || !m_captured) return;   // 死亡 / 菜单态不弹（防 respawn 后陈旧信号或暂停中被推）
+    float len = std::sqrt(dirX * dirX + dirZ * dirZ);
+    if (!(std::isfinite(len) && len > 1e-3f)) return;
+    dirX /= len;
+    dirZ /= len;
+    m_knockback.setX(dirX * kHitKnockbackHoriz); // 水平分量同受击击退（走开一点再落下，视觉「打飞」）
+    m_knockback.setZ(dirZ * kHitKnockbackHoriz);
+    m_vel.setY(std::max(m_vel.y(), kGolemLaunchVy)); // 大垂直冲量直写 m_vel.y（峰值 16²/(2·28)≈4.6 格）
+    qInfo("player golem-launched dir=(%.3f,%.3f) vy=%.1f", dirX, dirZ, kGolemLaunchVy);
 }
 
 // t477 铁砧损坏推进（AnvilUI 每次成功操作后调）。机制等价 MC 1.0 铁砧 12% 概率损坏 —— 本工程取 ~1/3

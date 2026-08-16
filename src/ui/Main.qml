@@ -2048,6 +2048,12 @@ Window {
             }
             player.wakeUp()  // t388 受击即醒（mob 近战 / 箭 / 爆炸中断睡觉 fade；非 Survival 亦醒，防御）
         }
+        // t635 铁傀儡重拳上抛（aiIronGolem 蓄力满发）：转 PlayerController.applyGolemLaunch（vy=+16 抛起 ~4.6 格
+        //   → 落地摔伤 1-2 HP；伤害另走同帧的 mobAttackedPlayer 已含红闪 / 减伤链）。仅 Survival 生效（方法内
+        //   自守）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费路由）。
+        function onGolemLaunchedPlayer(kbX, kbZ) {
+            player.applyGolemLaunch(kbX, kbZ)
+        }
         // t284 Stalker 爆炸（EntityManager detonateStalker 发）：爆炸的单一音/视反馈入口 —— 播爆炸音
         //   （playExplosion）+ 白色迸发粒子（burstExplosion）。方块破坏走 setWaterSilent 不发 blockBroken
         //   → 免球形内每块破块粒子 spam，故本信号是爆炸音/视的唯一驱动（同 fallDamageTaken→takeDamage 模式；
@@ -5669,6 +5675,9 @@ Window {
                                     geometry: MobModel {
                                         mobType: 13
                                         packTextured: mobIronGolemPackTex.source.toString().length > 0
+                                        // t635 ② 攻击抬臂：蓄力进度 0..1 绑 attackPose（双臂绕肩枢前抬 −120°；
+                                        //   蓄力期 revision 每帧 bump → 绑定刷新，同 drawAmountAt 模式）。
+                                        attackPose: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.golemAttackPoseAt(index)) : 0 }
                                     }
                                     position: Qt.vector3d(0, 0, 0) // 碰撞中心（mobModelYOff=0；MobModel 局部原点同碰撞中心）
                                     scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -5678,8 +5687,10 @@ Window {
                                         baseColorMap: mobIronGolemPackTex.source.toString().length > 0 ? mobIronGolemPackTex : null
                                     }
                                 }
-                                // 南瓜头（橙色）：local y center +0.95。
+                                // t635 ① 真头切换：pack 命中 → MobModel 几何已含贴图头（head(0,0)8×10×8 区，刻面眼 +
+                                //   垂藤）→ 本橙色头 Model 隐藏；pack 关 → 显纯橙头 + 刻面眼（现状不变）。
                                 Model {
+                                    visible: mobIronGolemPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 0.95, 0)
                                     scale: Qt.vector3d(0.72, 0.66, 0.72)
@@ -5687,13 +5698,16 @@ Window {
                                 }
                                 // 南瓜头刻面双眼（深色小方块贴头前面 -Z）。t499 同 SnowGolem 修：眼 z=-0.38（凸出头前 0.02，
                                 //   头 z scale 0.72 → 头前面 z=-0.36；旧 z=-0.34 在头内 0.02 → 被遮挡不可见）。
+                                //   t635：pack 命中时贴图头自带双眼 → 刻面眼隐藏（防四眼）；pack 关才显。
                                 Model {
+                                    visible: mobIronGolemPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(-0.14, 1.00, -0.38)
                                     scale: Qt.vector3d(0.09, 0.11, 0.03)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                                 Model {
+                                    visible: mobIronGolemPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0.14, 1.00, -0.38)
                                     scale: Qt.vector3d(0.09, 0.11, 0.03)

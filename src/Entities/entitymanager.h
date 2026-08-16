@@ -476,6 +476,15 @@ public:
     //   （拉弓期位移减速到停 = SLOWS + pauses to aim，顺带拉低 t321 攻击节奏）。非 Bones / 未瞄准 / 越界 → 0。
     //   revision 在追踪期每帧 bump（tick Mob 分支）让绑定刷新（拉弓期 mob 减速到停 → moved=false 亦须刷新）。
     Q_INVOKABLE float drawAmountAt(int i) const;
+    // t635 铁傀儡攻击蓄力进度（0..1）：仅 mobType==MobIronGolem 且 golemWindup>0（正在蓄力抬臂）时返
+    //   clamp(golemWindup/kGolemWindup,0,1)，供 QML delegate 绑 MobModel.attackPose（双臂绕肩枢前抬 −120°，
+    //   机制等价 MC 1.0 铁傀儡上勾拳双臂前举）。非 IronGolem / 未蓄力 / 越界 → 0。蓄力期 revision 每帧 bump。
+    Q_INVOKABLE float golemAttackPoseAt(int i) const;
+    // t635 铁傀儡反击锁定（PlayerController::attackMob 目标是 MobIronGolem 时调；Game→Entities 向下依赖，
+    //   同 setWolfTarget 模式）：golemAngry=true + 重置记忆 kGolemAngryMemory → aiIronGolem 追击玩家；
+    //   近距蓄力（kGolemWindup 抬臂动画）满 → 重拳（golemLaunchedPlayer 上抛 + mobAttackedPlayer 大伤害）。
+    //   非 MobIronGolem / dead / 越界 → 静默早退。
+    void setGolemRetaliate(int i);
     // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。
     //   仅 Shambler/Bones spawn 时随机分配（~80% 无 / ~20% 一件或一套）；QML delegate 据 it 叠加 tier 色
     //   护甲 Model（material-colored，机制等价 MC 1.0 僵尸/骷髅随机护甲）。越界 → 0。
@@ -608,6 +617,10 @@ signals:
     //   兜底（mob 正上方等退化情形），此处不再归一。mobAttackedPlayer 经 t290 门控仅在玩家可锁定（Survival）时发，
     //   故击退天然只作用于 Survival 玩家。
     void mobAttackedPlayer(int amount, int mobType, float kbX, float kbZ);
+    // t635 铁傀儡重拳上抛玩家（aiIronGolem 蓄力满发；机制等价 MC 1.0 铁傀儡攻击把实体抛上天）：kbX/kbZ = 推开
+    // 玩家的水平单位方向。呈现层 Connections 调 PlayerController.applyGolemLaunch（仅 Survival：写大垂直冲量
+    // vy=+kGolemLaunchVy 抛起 ~4.5 格 → 落地摔伤；伤害另走 mobAttackedPlayer 同帧发）。单向事件流（PLAN §2）。
+    void golemLaunchedPlayer(float kbX, float kbZ);
     // t284 Stalker 爆炸（detonateStalker 内发）：坐标 = 爆炸中心格 floor(pos)。呈现层（Main.qml）Connections
     //   据它路由到 AudioManager.playExplosion（爆炸音）+ BlockParticles.burstExplosion（白色迸发视觉）。
     //   方块破坏走 setWaterSilent（直写 + worldChanged 重建 mesh，**不**发 blockBroken → 免每块破块粒子/音 spam），
@@ -898,6 +911,16 @@ private:
         //   「每 tick 校验存活」模式不适用于快照式排除（雪球飞行 ~2s 内发射者可能死亡换任），故加代际。
         //   quint32 单调（同 m_tickPhase 溢出分析：2.1e9 次 spawn 不回绕）。DMI 兜底默认 0。
         quint32 spawnSerial = 0; // 本任实体进驻槽位时的全局 spawn 序号（与 snowballThrowerSerial 快照比对）
+        // t635 铁傀儡反击态（仅 mobType==MobIronGolem 用；其余 mob 留默认不触发）：
+        //   golemAngry：玩家打了它 → 反击锁定（追击玩家；kGolemAngryMemory 秒脱离 / 死亡自动无效）。
+        //     机制等价 MC 1.0 铁傀儡被打后反击玩家（neutrual → aggro）。setGolemRetaliate 由
+        //     PlayerController::attackMob 目标是铁傀儡时调（Game→Entities 向下依赖，同 setWolfTarget 模式）。
+        //   golemWindup：近距攻击蓄力计时（0..kGolemWindup；蓄满发 golemLaunchedPlayer 重拳上抛）。蓄力期
+        //     attackPose = windup/kGolemWindup 暴露给 QML 驱动双臂前抬动画（同 drawAmountAt 模式）。
+        //   golemAngryTimer：反击记忆倒计时（秒；脱离 / 玩家远离到期回游荡）。
+        bool  golemAngry = false;      // 玩家触发反击（追击玩家目标）
+        float golemWindup = 0.0f;      // 攻击蓄力计时（秒；>0 = 正在蓄力抬臂）
+        float golemAngryTimer = 0.0f;  // 反击记忆倒计时（秒）
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
@@ -1056,7 +1079,8 @@ private:
     //   (2) 无目标 → 游荡（aiWander）。
     //   返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。分层（PLAN §2）：只读 World::isSolid + 自身数据；
     //   攻击敌对走 damageEntity/knockback（同层），无向上依赖。
-    bool aiIronGolem(int idx, Entity &e, float dt, World *world, float worldW, float worldD, float speedScale);
+    bool aiIronGolem(int idx, Entity &e, float dt, World *world, float worldW, float worldD, float speedScale,
+                     const QVector3D &playerPos = QVector3D(), bool playerTargetable = false);
     // t482 朝 target 解抛物初速并抛雪球（aiSnowGolem 远程攻击调）。origin = shooter 中心 + 朝 target 前移 0.5 格
     //   （避免贴墙时雪球 spawn 入墙即被 tick 判方块命中）。水平速度固定 kSnowballSpeed → 飞行时间 t=d/vH；
     //   据 target 高度差反解 vy=(Δy+0.5·g·t²)/t（命中 target 高度的抛物解）；vy 钳到 ±kSnowballMaxVert。
@@ -1441,6 +1465,20 @@ private:
     static constexpr float kIronGolemKnockbackStrength = 1.5f; // 铁傀儡重拳击退强度（倍率）
     static constexpr float kIronGolemAttackCooldown = 1.5f; // 铁傀儡重拳间隔（秒）
     static constexpr float kIronGolemWalkSpeed     = 2.2f;  // 铁傀儡追击行走速度（blocks/s）
+    // t635 反击玩家参数（机制等价 MC 1.0 铁傀儡被打后反击 + 上勾拳把实体抛上天）：
+    //   - kGolemAngryMemory：反击记忆（秒）。玩家打它 → 锁定玩家追击；脱离该时长（或玩家死亡 / 距离超
+    //     kIronGolemDetectRange）→ 平息回游荡。MC 铁傀儡对攻击者的敌意持续较久；取 20s（够追击一轮）。
+    //   - kGolemWindup：重拳蓄力（秒）。近距内开始蓄力 → 抬臂动画（attackPose 0→1）→ 蓄满命中（上抛 + 大伤害）。
+    //     机制等价 MC 铁傀儡攻击前摇；取 0.5s（可见的抬臂动画 + 玩家有反应窗口）。
+    //   - kGolemPlayerDamage：重拳对玩家伤害（HP）。走 mobAttackedPlayer（Survival 才生效 + 护甲减伤）；取 10
+    //     （重于近战 mob 的 3——重型造物重拳；与对敌对 mob 的 kIronGolemAttackDamage=8 同量级偏高）。
+    //   - kGolemLaunchVy：上抛垂直初速（blocks/s）。PlayerController.applyGolemLaunch 写 m_vel.y=16 → 峰值
+    //     16²/(2·28)≈4.6 格 → 落回原位落差 >3 格必触发摔落伤害（4..5 格 → 1..2 HP，机制等价 MC 铁傀儡把
+    //     玩家抛起摔伤）。用户口径「4 格以上摔落伤害」。
+    static constexpr float kGolemAngryMemory = 20.0f; // 反击记忆（秒）
+    static constexpr float kGolemWindup      = 0.5f;  // 重拳蓄力（秒；抬臂动画时长）
+    static constexpr int   kGolemPlayerDamage = 10;   // 重拳对玩家伤害（HP）
+    static constexpr float kGolemLaunchVy    = 16.0f; // 上抛垂直初速（blocks/s；PlayerController 侧消费）
 public:
     // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
     //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。

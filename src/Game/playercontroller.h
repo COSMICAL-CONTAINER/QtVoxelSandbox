@@ -422,6 +422,12 @@ public:
     //   其后跳跃 / 上浮，已根治，见 .cpp applyHitKnockback / step 击退积分注释）。分层（PLAN §2）：
     //   Game/Physics 层持击退态；方向由 Entities 层（mob 位置 / 箭速）经语义信号向下传（Game→Physics 同层）。
     Q_INVOKABLE void applyHitKnockback(float dirX, float dirZ);
+    // t635 铁傀儡重拳上抛（机制等价 MC 1.0 铁傀儡把玩家抛上天 —— 大垂直冲量 + 水平击退，落地摔伤）。
+    //   EntityManager.golemLaunchedPlayer(kbX, kbZ) 携「欲推开玩家的水平单位方向」，Main.qml Connections
+    //   据它调本方法（与 onMobAttackedPlayer 的 applyHitKnockback 平行）。仅 Survival + 非死亡 + 已捕获生效。
+    //   垂直走 kGolemLaunchVy=16（峰值 16²/(2·28)≈4.6 格 > 3 格摔伤线 → 落回原位即 1..2 HP 摔落伤害，
+    //   用户口径「打飞 4 格以上摔伤」）；同 applyHitKnockback 的 m_vel.y 直写模式（无双重力）。
+    Q_INVOKABLE void applyGolemLaunch(float dirX, float dirZ);
     // t477 铁砧损坏推进（AnvilUI 每次成功操作后调）：滚概率（~1/3）损坏铁砧 +1 阶段。据当前阶段经
     //   BlockRegistry::anvilNextStage 推进：完好→微损 / 微损→重损 / 重损→Air（碎裂移除）。重损→碎裂时
     //   发 blockBroken(Anvil) 触发破块粒子 / 音（机制等价 MC 铁砧用坏碎裂）。坐标 = 玩家所点铁砧格世界坐标。
@@ -1313,6 +1319,10 @@ private:
     //   - kHitKnockbackDrag：水平衰减率（1/s）。时间常数 1/drag≈0.22s → ~0.5s 衰到 ~10%、~1s 近停；总位移 ≈ v0/drag。
     static constexpr float kHitKnockbackHoriz = 6.0f;  // 受击水平初速（blocks/s）
     static constexpr float kHitKnockbackUp    = 4.2f;  // 受击小跳垂直初速（blocks/s；applyHitKnockback 直接写 m_vel.y，峰值 v²/(2g)≈0.32 格）
+    // t635 铁傀儡重拳上抛垂直初速（blocks/s）：applyGolemLaunch 直写 m_vel.y。峰值 v²/(2·kGravity)=16²/56≈4.6 格
+    //   → 落回原位落差 >3 格必触发摔落伤害（4..5 格 → 1..2 HP，机制等价 MC 1.0 铁傀儡上勾拳抛起摔伤）。
+    //   数值语义同 EntityManager::kGolemLaunchVy（单一权威在 Entities 的攻击参数区；此处 Physics 侧镜像消费）。
+    static constexpr float kGolemLaunchVy     = 16.0f; // 铁傀儡上抛垂直初速（blocks/s）
     static constexpr float kHitKnockbackDrag  = 4.5f;  // 受击水平衰减率（1/s；~0.5s 基本停下）
     static constexpr float kSuffocationInterval = 1.0f; // t160 窒息扣血间隔（秒；每秒 1HP，机制等价 MC 窒息 1/秒）
     // t202 气泡 + 溺水时序（机制等价 MC 1.0：10 气泡 ≈ 15s 入水耗尽，归零后每秒 1HP）。

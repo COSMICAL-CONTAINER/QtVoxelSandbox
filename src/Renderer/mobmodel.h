@@ -49,9 +49,10 @@
 //     （无程序生成贴图）。shearSnowGolem 剪南瓜头后南瓜头 / 眼 / 嘴悬浮原位（无头 derpy 形态，几何不动）。
 //   13 = IronGolem（铁傀儡；feat）：防御造物——**铁块人形**（双腿 + 宽躯干 + 双长臂，机制等价 MC 1.0 铁傀儡
 //     T 形铁块身）。几何含 5 铁块盒：双腿心 y=−0.90 半 (0.18,0.30,0.18)（腿底本地 y=−1.20 贴 collision 底面
-//     halfH=1.20）+ 躯干心 y=+0.05 半 (0.475,0.525,0.325) + 双臂心 y=+0.10 半 (0.14,0.39,0.225)。**南瓜头 +
-//     刻面眼不在本几何**（同 SnowGolem，由 Main.qml delegate 补）。pack 命中 iron_golem.png → 铁纹（修 dev-plan C
-//     「铁傀儡全白」：程序纯色铁灰在用户视角读作「白」，pack 铁纹才显铁质）；pack 关 → 全脸 UV + 纯色铁灰。
+//     halfH=1.20）+ 躯干心 y=+0.05 半 (0.475,0.525,0.325) + 双臂心 y=+0.10 半 (0.14,0.39,0.225)。pack 命中
+//     iron_golem.png → 铁纹 + **贴图头**（t635：pack 开时几何追加头盒 (0,0.95,0) 半 (0.36,0.33,0.36)，
+//     head(0,0)8×10×8 区——刻面双眼 + 垂藤）；pack 关 → 全脸 UV + 纯色铁灰 + 独立橙色头 Model（Main.qml
+//     delegate，现状）。attackPose（t635，0..1）驱动双臂绕肩枢前抬 −120°（铁傀儡重拳蓄力动画）。
 //     局部原点 = 碰撞中心（mobModelYOff=0）。注：原 t483 程序锈斑 Model（深铁灰 + 锈橙斑）在 pack 命中时由
 //     pack 铁纹取代（锈纹已是 iron_golem.png 的一部分）；pack 关时回退纯色铁灰 #7d848c（无锈斑）。
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
@@ -101,6 +102,10 @@ class MobModel : public QQuick3DGeometry
     //   与 Main.qml 弓肩枢 Node 同枢同角（drawAmount*75，度）→ 臂+弓刚体耦合（修满拉弓浮离手）。
     //   未瞄准 / 图鉴静态 → 0 走 addBox 轴对齐快路径。其余 mobType 不读（几何无臂枢）。
     Q_PROPERTY(float aimPitch READ aimPitch WRITE setAimPitch NOTIFY aimPitchChanged)
+    // t635 铁傀儡攻击抬臂（0..1，0 = 垂臂）：仅 IronGolem(mobType 13) 用——双臂绕肩枢 (±0.62,0.49,0) X 轴旋转
+    //   −attackPose·120°（向前 −Z 抬，机制等价 MC 铁傀儡上勾拳双臂前举）。QML 绑 golemAttackPoseAt(i)
+    //   （EntityManager 攻击蓄力 0..1）。0 → addBox 轴对齐快路径（垂臂）。其余 mobType 不读。
+    Q_PROPERTY(float attackPose READ attackPose WRITE setAttackPose NOTIFY attackPoseChanged)
     // pack 是否用 pack entity 贴图（MC box-UV 精确采样，R19 C3）；pack 关 / 包内无贴图 → false（全脸 UV + 程序生成贴图）。
     Q_PROPERTY(bool packTextured READ packTextured WRITE setPackTextured NOTIFY packTexturedChanged)
 
@@ -119,6 +124,10 @@ public:
     float aimPitch() const { return m_aimPitch; }
     void setAimPitch(float deg);
 
+    // t635 铁傀儡攻击抬臂（0..1，0=垂臂）；仅 IronGolem 用。
+    float attackPose() const { return m_attackPose; }
+    void setAttackPose(float pose);
+
     bool packTextured() const { return m_packTextured; }
     void setPackTextured(bool on);
 
@@ -127,6 +136,7 @@ signals:
     void walkPhaseChanged();
     void headPitchChanged();
     void aimPitchChanged();
+    void attackPoseChanged();
     void packTexturedChanged();
 
 private:
@@ -136,6 +146,7 @@ private:
     float m_walkPhase = 0.0f; // 行走相位（弧度）；sin 驱动腿摆
     float m_headPitch = 0.0f; // 头部俯仰（弧度，负=低头）；0 → 头走轴对齐快路径
     float m_aimPitch = 0.0f;  // 右臂瞄准抬起（度，0=垂手）；仅 Bones 用；0 → 右臂走轴对齐快路径
+    float m_attackPose = 0.0f; // t635 攻击抬臂（0..1，0=垂臂）；仅 IronGolem 用；0 → 双臂走轴对齐快路径
     bool m_packTextured = false; // pack entity 贴图（MC box-UV 精确采样，R19 C3）；false → 全脸 UV（程序生成贴图）
 };
 
