@@ -578,10 +578,11 @@ Item {
                                     //   纯色（mobFallback*；bones/stalker/spider 无程序贴图 → baseColorMap:null）。
                                     //   NoLighting（渲染可见性铁律）。scale 1.0（I3 雪/铁傀儡 0.75）+ 垂直居中微调。
                                     // t598 雪/铁傀儡南瓜头：两傀儡 MobModel 几何只含块身（头是独立 Model，同 Main.qml
-                                    //   t582 游戏内方案）—— 图鉴预览此前漏了头 → 雪傀儡「无头」。把游戏内方案带过来：
-                                    //   傀儡 mobType 时在 MobModel 上叠 BlockCube{blockId:100}（南瓜方块）+ 共享图集
-                                    //   （atlasSource，pack 激活即 HD 南瓜瓦片，机制等价 MC 1.0 雪傀儡戴刻面南瓜）。
-                                    //   铁傀儡同补（其游戏内头也是独立 Model）。头随父 Model 同转（自转/拖拽）。
+                                    //   游戏内方案）—— 图鉴预览此前漏了头 → 雪傀儡「无头」。把游戏内方案带过来：
+                                    //   雪傀儡（12）叠 BlockCube{blockId:100}（南瓜方块）+ 共享图集（atlasSource，
+                                    //   pack 激活即 HD 南瓜瓦片，机制等价 MC 1.0 雪傀儡戴刻面南瓜）。
+                                    //   铁傀儡（13）review L14 改镜像游戏内：纯橙 UnitCube + 刻面双眼（非南瓜贴图）。
+                                    //   头随父 Model 同转（自转/拖拽）。
                                     Node {
                                         visible: root.selectedIsMob
                                         position: Qt.vector3d(0, root.mobPreviewCentY(root.selectedMobType), 0)
@@ -637,21 +638,47 @@ Item {
                                             scale: Qt.vector3d(0.06, 0.35, 0.06)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8c53a" }
                                         }
-                                        // t598 傀儡南瓜头（雪傀儡 mobType 12 / 铁傀儡 13；同 Main.qml t582 游戏内头方案：
+                                        // t598 傀儡南瓜头（雪傀儡 mobType 12；同 Main.qml t582 游戏内头方案：
                                         //   BlockCube{blockId:100} + 图集瓦片 per-face 采 pumpkin_side/top/face）。
-                                        //   位置/尺寸与 Main.qml 游戏内 delegate 一致（雪：头心 y=1.14 宽 0.50；
-                                        //   铁：头心 y=0.95 宽 0.72 —— 碰撞中心局部坐标，随父 Node scale 缩放）。
+                                        //   位置/尺寸与 Main.qml 游戏内 delegate 一致（雪：头心 y=1.14 宽 0.50 ——
+                                        //   碰撞中心局部坐标，随父 Node scale 缩放）。
+                                        // review L14 铁傀儡（13）改对齐游戏内形态：游戏内（Main.qml t483 delegate）头是
+                                        //   **纯色橙 UnitCube #e8821e + 刻面双眼**（非南瓜方块贴图）——图鉴此前同雪傀儡用
+                                        //   BlockCube 南瓜头，与游戏内不一致。镜像游戏内：UnitCube 纯橙 + 双眼（-Z 前面
+                                        //   深色小方块，位/尺寸同游戏内 (±0.14,1.00,-0.38) scale (0.09,0.11,0.03)）。
                                         Model {
-                                            visible: root.selectedMobType === 12 || root.selectedMobType === 13
+                                            visible: root.selectedMobType === 12
                                             geometry: BlockCube { blockId: 100 } // 100 = BlockRegistry::Pumpkin（QML 不 import C++ 静态类故字面量，同 Main.qml 约定）
-                                            position: root.selectedMobType === 12 ? Qt.vector3d(0, 1.14, 0) : Qt.vector3d(0, 0.95, 0)
-                                            scale: root.selectedMobType === 12 ? Qt.vector3d(0.50, 0.50, 0.50) : Qt.vector3d(0.72, 0.66, 0.72)
+                                            position: Qt.vector3d(0, 1.14, 0)
+                                            scale: Qt.vector3d(0.50, 0.50, 0.50)
                                             materials: PrincipledMaterial {
                                                 lighting: PrincipledMaterial.NoLighting
                                                 baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
                                                 alphaMode: PrincipledMaterial.Mask
                                                 alphaCutoff: 0.5
                                             }
+                                        }
+                                        // 铁傀儡头（纯橙 + 刻面双眼，镜像 Main.qml 游戏内 delegate）。
+                                        Model {
+                                            visible: root.selectedMobType === 13
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0, 0.95, 0)
+                                            scale: Qt.vector3d(0.72, 0.66, 0.72)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8821e" } // 橙（同游戏内；图鉴预览不调昼夜灰阶）
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 13
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.14, 1.00, -0.38)
+                                            scale: Qt.vector3d(0.09, 0.11, 0.03)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 13
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.14, 1.00, -0.38)
+                                            scale: Qt.vector3d(0.09, 0.11, 0.03)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                         }
                                     }
                                 }
