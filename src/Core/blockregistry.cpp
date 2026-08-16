@@ -538,8 +538,9 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   可瞄准）、**hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，防创造秒破传送门；同 bedrock/
     //   Water 哨兵语义）、dropId=0 不掉落、dropCount=0、maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，
     //   填 64 与方块族一致）。音色归 GroupStone（石质兜底）。激活：玩家持末影之眼物品右键传送门 → placeBlock
-    //   useBlock 分支翻 state bit0（激活态）+ qInfo 日志（末地预热占位，不实现末地维度）+ lightEmission 10
-    //   星绿泛光。不进创造调色板（worldgen 专属；玩家经末影之眼激活交互）。
+    //   useBlock 分支翻 state bit0（激活态）+ qInfo 日志（末地预热占位，不实现末地维度）。**发光与激活态无关**：
+    //   lightEmission 按 id-only 恒 10（末放置 / 激活两态都星绿泛光，t487 行为；状态感知版委托单参版不读
+    //   state bit0）。不进创造调色板（worldgen 专属；玩家经末影之眼激活交互）。
     /* end_portal   */ {int(BlockRegistry::EndPortal),         141,140,140,140, false, BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "end_portal",   "末地传送门"},
     // t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / wooden button / stone button；无红石故右键激活即点燃邻接
     //   TNT）。三者复用 ShapePlate（贴地薄板，同 WoodPressurePlate 几何）。PartialBlockGeometry 据 state bit0

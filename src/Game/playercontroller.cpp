@@ -735,8 +735,9 @@ void PlayerController::updateRaycast()
     if (!m_world) { clearHit(); return; }
     // t184：选体射线纳入 Torch（HitTorch）—— 准星瞄火把即命中火把（可显示火把边界框 + 左键直挖），
     //   修正 t157「射线永远穿透火把」致火把不可直挖之缺陷（用户原意「火把可选可挖、空气可穿」）。
-    //   Water 仍穿过（保 t165 水下可选中 / 挖实体）；相机距离（updateCameraDistance）走 Default（火把 /
-    //   水均穿过，non-solid 不拉近视距），故本处显式传 HitTorch 仅作用于选体。
+    //   Water 仍穿过（保 t165 水下可选中 / 挖实体）；相机距离（updateCameraDistance）走 HitPartial
+    //   （t605：不完整方块按 sub-AABB 精确命中；火把 / 水均仍穿，non-solid 不拉近视距），故本处显式传
+    //   HitTorch 仅作用于选体。
     // t501：同时纳入 Ladder（HitLadder）—— 机制同火把：木梯默认穿（玩家爬梯时准星瞄后方 / 邻格方块应
     //   选中方块本体，spec「爬梯时挖掘优先选中梯子 → 应像火把不优先选中、可透视穿过」）；仅当准星完全
     //   落在木梯视觉面（贴墙薄 quad 的精确 sub-AABB）时才命中木梯本身（可拆梯）。两标志位独立，故火把 / 木梯

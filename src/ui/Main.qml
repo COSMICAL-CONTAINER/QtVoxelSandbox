@@ -5063,8 +5063,8 @@ Window {
                     Model {
                         visible: window.showHitboxes
                         geometry: UnitCube {}
-                        // 朝向棒：从船中心沿本地 -Z（船头）。t602 统一半对角线 + 0.3 量长（sqrt(0.5²+0.35²+0.7²)+0.3
-                        //   ≈ 1.42 → 棒端凸出船头 AABB 外 ≥0.3，同 mob / 玩家朝向棒根治「框内被挡」）。
+                        // 朝向棒：从船中心沿本地 -Z（船头）。t602 统一半对角线 + 0.3 量长（sqrt(0.5²+0.35²+0.7²)≈0.93
+                        //   +0.3 ≈ 1.23 → 棒端凸出船头 AABB 外 ≥0.3，同 mob / 玩家朝向棒根治「框内被挡」）。
                         property real facingLen: Math.sqrt(0.5 * 0.5 + 0.35 * 0.35 + 0.7 * 0.7) + 0.3
                         position: Qt.vector3d(0, 0, -facingLen * 0.5)
                         scale: Qt.vector3d(0.05, 0.05, facingLen)
