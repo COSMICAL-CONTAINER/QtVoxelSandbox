@@ -423,8 +423,12 @@ Item {
         const _r = root.anvilRev
         if (_r < 0) return false
         if (root.matId !== 0x227) return false
-        // 分支一：左槽可附魔物（工具 / 武器 / 护甲）+ 右槽附魔书。
-        if (root.leftId !== 0 && root.hotbar && root.hotbar.itemEnchantCategory(root.leftId) !== 0) return true
+        // 分支一：左槽可附魔物（工具 / 武器 / 护甲）+ 右槽附魔书。review M3：普通书（0x238）**不是合法铁砧
+        //   目标**——itemEnchantCategory(0x238)=BookItem ≠ 0 会放它进本分支，但 takeProduct 只对 leftId===0x227
+        //   翻附魔书 id → 产物成「带附魔的普通书」（可堆叠 64，与普通书合并即掉附魔 + 进不了附魔台；A 满栈时
+        //   其余 63 本直接销毁）。排除 0x238（书只能经附魔台变成附魔书 0x227，再进铁砧）。
+        if (root.leftId !== 0 && root.leftId !== 0x238
+                && root.hotbar && root.hotbar.itemEnchantCategory(root.leftId) !== 0) return true
         // 分支二：两本附魔书合并（左 = 附魔书 + 右 = 附魔书 → 合并书）。
         if (root.leftId === 0x227) return true
         return false
