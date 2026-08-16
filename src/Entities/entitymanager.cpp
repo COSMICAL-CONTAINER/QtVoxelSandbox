@@ -3313,11 +3313,14 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 && next.x() <= worldW && next.z() <= worldD) {
                 emit eggBreak(next.x(), next.y(), next.z());
                 if (float(QRandomGenerator::global()->bounded(int(kEggHatchDenominator) * 1000)) < 1000.0f) {
-                    // 孵化位 = 命中点所在格（floor；spawnMobCore 放格中心 + halfH，重力 tick 贴地表 —— 生成
-                    //   位高于地表时小鸡下落，机制等价 MC 鸡蛋孵鸡落地）。spawnMobCore 不 emit（本 tick 末尾
-                    //   统一 emit）；spawn 可 acquireSlot push_back —— 已脱离本实体循环内的 Entity& 引用使用
-                    //   区间（本分支后续只读局部 next / idx），同 tickBreeding 主循环外 spawn 的安全纪律。
-                    const int slot = spawnMobCore(qFloor(next.x()), qFloor(next.y()), qFloor(next.z()),
+                    // 孵化位 review L8：旧版取命中点 next 所在格（floor）—— next 已穿入实体格，鸡蛋砸 ≥2 格
+                    //   厚墙时该格在墙**内部** → 小鸡生在墙里（卡死 + 窒息）。改为上一帧位置 e.pos（蛋碎前
+                    //   所在的空气侧格）：贴墙命中 → e.pos 仍在其前面的空气格 → 小鸡生在墙外的地面上，
+                    //   spawnMobCore 放格中心 + halfH，重力 tick 贴地表（地面弹 / 砸地面时 e.pos = 飞行末格，
+                    //   小鸡落在命中面上方，落地行为保持）。spawnMobCore 不 emit（本 tick 末尾统一 emit）；
+                    //   spawn 可 acquireSlot push_back —— 已脱离本实体循环内的 Entity& 引用使用区间（本分支
+                    //   后续只读局部 next / idx），同 tickBreeding 主循环外 spawn 的安全纪律。
+                    const int slot = spawnMobCore(qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()),
                                                   MobChicken, QStringLiteral("#f5f0e4"), 0);
                     if (slot >= 0) {
                         // 幼崽态（复用 t400 繁殖幼崽机制：baby=true → QML babyScaleAt 0.5 缩小 + growTimer
@@ -3325,7 +3328,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         //   spawnMobCore 内部用 kDefaultMaxHealth（同 spawn egg 路径）。
                         m_entities[size_t(slot)].baby = true;
                         m_entities[size_t(slot)].growTimer = kBabyGrowTime;
-                        qCInfo(lcEnt) << "egg hatched baby chicken at" << next;
+                        qCInfo(lcEnt) << "egg hatched baby chicken at" << e.pos;
                     }
                 }
             }
