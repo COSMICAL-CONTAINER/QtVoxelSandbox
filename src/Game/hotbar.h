@@ -100,6 +100,10 @@ class Hotbar : public QObject
     //   QML 边界走 Q_INVOKABLE heldEnchants() 取（QVariantList<int> 4 元素，每 = pack 值；lessons-learned：
     //   moc 拒绝 Q_PROPERTY(QVariantList)）；InventoryOps.readSlot / writeSlot 据此透传。空栈 / 非可附魔 → 4 个 0。
     //   NOTIFY 复用 heldBlockChanged（id / count / dur / enchants 强耦合，同信号驱动）。
+    // t622 光标手持物自定义名（同 heldDurability / heldEnchants 语义：随物品实例走；槽↔光标整件搬运 / 铁砧
+    //   改名产物上光标经本属性保真）。QString 无 QVariantList 的 moc 限制 → 可安全作 Q_PROPERTY，QML 直接
+    //   赋值 `hotbar.heldCustomName = x`（同 heldDurability 模式）。NOTIFY 复用 heldBlockChanged。
+    Q_PROPERTY(QString heldCustomName READ heldCustomName WRITE setHeldCustomName NOTIFY heldBlockChanged)
     // t97 主栏 VM 共享：27 主栏槽（生存背包 / 工作台 / 熔炉三菜单共享同一份）。mainRevision NOTIFY 驱动
     // 三菜单 delegate 触碰刷新（同 hotbar 行 slotRevision 模式）；mainCount CONSTANT=27 供 Repeater model。
     Q_PROPERTY(int mainCount READ mainCount CONSTANT)
@@ -132,8 +136,15 @@ public:
     void setHeldDurability(int d);
     // t475 光标手持物附魔（QVariantList<int> 4 元素，每 = EnchantRegistry::pack 值；空手 / 非可附魔 → 4 个 0）。
     //   setter 供 pickup-from-slot 路径覆盖为槽内实例附魔（保真搬运）；列表不足 4 元素按 0 补齐，越界截断。
+    //   t623：setHeldEnchants 补挂 Q_INVOKABLE —— QVariantList 参数不能走 Q_PROPERTY（moc 限制），而各面板
+    //   槽点击处理器经 `hotbar.setHeldEnchants(...)` 裸调（非 Q_PROPERTY 赋值语法），未挂 Q_INVOKABLE 时该
+    //   调用运行期 TypeError 被信号处理器静默吞 → **取物附魔恒丢**（「附魔台产物取出变普通」的直接根因）。
     Q_INVOKABLE QVariantList heldEnchants() const;
-    void setHeldEnchants(const QVariantList &enchants);
+    Q_INVOKABLE void setHeldEnchants(const QVariantList &enchants);
+    // t622 光标手持物自定义名（空串 = 用注册表默认名；空手恒空）。setter 供 pickup-from-slot / 铁砧改名产物
+    //   路径覆盖（保真搬运）；空栈写入静默归空。经 Q_PROPERTY 暴露（QML 直接赋值）。
+    QString heldCustomName() const { return m_heldStack.customName; }
+    void setHeldCustomName(const QString &name);
 
     // t97 主栏 VM（27 槽，三菜单共享）。mainCount 恒 27；mainRevision 随主栏栈写入自增。
     int mainCount() const { return int(m_mainSlots.size()); }
@@ -291,17 +302,20 @@ public:
     Q_INVOKABLE void scroll(int delta);
 
     // ── 栈操作（t32 基础；t36 拾取/丢弃消费）──
-    // 直接写入栈 (slot, id, count, durability=-1, enchants={})；范围 + id 合法性 + count 上限校验；id==0 或 count<=0 → 清空该槽。
+    // 直接写入栈 (slot, id, count, durability=-1, enchants={}, name="")；范围 + id 合法性 + count 上限校验；id==0 或 count<=0 → 清空该槽。
     //   durability（t263）：-1=自动（工具填 maxDurability=新工具、非工具 0）；>=0=显式（搬运保真，clamp 到 [1,max]）。
     //   enchants（t475）：QVariantList<int> 4 元素（每 = pack 值；缺省空 = 清空附魔）。搬运工具 / 护甲时透传槽内实例附魔保真。
+    //   name（t622）：自定义名（铁砧重命名产物；缺省空 = 清名 = 注册表默认名）。整件搬运（拾取 / 放置 / 互换 /
+    //     回栏 / 存档回填）透传实例名保真；可堆叠物品合并路径不传名（同附魔语义）。
     //   改当前选中槽时补发 selectedSlotChanged（驱动 selectedBlockId → player.selectedBlock 刷新）。
-    Q_INVOKABLE void setStack(int slot, int id, int count, int durability = -1, const QVariantList &enchants = {});
+    Q_INVOKABLE void setStack(int slot, int id, int count, int durability = -1, const QVariantList &enchants = {}, const QString &name = QString());
     // 智能堆叠放入（t36 拾取消费）：先选中槽（空 / 同 id 可入 ——「入手」语义，用户核心诉求
     // 「手持空→入手；手持有(异)物→入背包」），再其它同 id 槽合并，再空槽；返回未放入数（0=全入）。
     // 非法 id 全额退回。改了选中槽内容时补发 selectedSlotChanged。
     //   durability（t263）：-1=自动（工具新实例满耐久，世界拾取 / 合成产物场景）；>=0=显式（掉落物拾取保真）。
     //   enchants（t475）：同 setStack（工具 / 护甲单件入空槽时写其实例附魔；可堆叠物品合并路径附魔恒 0）。
-    Q_INVOKABLE int addStack(int id, int n, int durability = -1, const QVariantList &enchants = {});
+    //   name（t622）：同 enchants（工具 / 护甲 / 附魔书等 cap=1 物品空槽开新时写实例名；合并路径不传）。
+    Q_INVOKABLE int addStack(int id, int n, int durability = -1, const QVariantList &enchants = {}, const QString &name = QString());
     // 从 slot 取最多 n 件（不超过该栈实际持有）；返回实际取走数；栈空则 id 归 0。
     Q_INVOKABLE int takeStack(int slot, int n);
     // 单件最大堆叠：方块段 64、工具段（id>=0x100，t33 预留）1（不可堆叠）。
@@ -374,15 +388,18 @@ public:
     // 直接写入主栏栈（背包点击放置 / 互换 / 拖拽均分写回主栏用）。校验同 setStack；air/非法 id/count<=0 → 清空。
     //   durability（t263）：同 setStack（-1=自动 / >=0=显式保真）。
     //   enchants（t475）：同 setStack。
-    Q_INVOKABLE void mainSetStack(int slot, int id, int count, int durability = -1, const QVariantList &enchants = {});
+    //   name（t622）：同 setStack（整件搬运透传实例名）。
+    Q_INVOKABLE void mainSetStack(int slot, int id, int count, int durability = -1, const QVariantList &enchants = {}, const QString &name = QString());
     // 智能堆叠放入主栏（同 id 合并 → 空槽开新）。返回未放入数。仅主栏范围（hotbar 由 addStack / addToAny 管）。
     //   durability（t263）：同 addStack。
     //   enchants（t475）：同 addStack。
-    Q_INVOKABLE int mainAddStack(int id, int n, int durability = -1, const QVariantList &enchants = {});
+    //   name（t622）：同 addStack。
+    Q_INVOKABLE int mainAddStack(int id, int n, int durability = -1, const QVariantList &enchants = {}, const QString &name = QString());
     // 跨 main + hotbar 的智能堆叠（拾取 / 丢弃回栏合并）。优先序（spec t109）：
     //   durability（t263）：同 addStack（-1=自动 / >=0=显式保真，掉落物拾取场景）。
     //   enchants（t475）：同 addStack。
-    Q_INVOKABLE int addToAny(int id, int n, int durability = -1, const QVariantList &enchants = {});
+    //   name（t622）：同 addStack（掉落物拾取保真——改名物品丢出再捡不丢名）。
+    Q_INVOKABLE int addToAny(int id, int n, int durability = -1, const QVariantList &enchants = {}, const QString &name = QString());
 
     // ── t345 护甲槽 VM（4 槽：头 / 胸 / 腿 / 脚）── 玩家自身装备（非物品流，独立 4 槽）。
     //   - armorBlockIdAt(slot) / armorCountAt(slot) / armorDurabilityAt(slot)：每装备槽栈数据（air=0=空；越界返 0）。
@@ -397,7 +414,12 @@ public:
     Q_INVOKABLE int armorBlockIdAt(int slot) const;
     Q_INVOKABLE int armorCountAt(int slot) const;
     Q_INVOKABLE int armorDurabilityAt(int slot) const;
-    Q_INVOKABLE void armorSetStack(int slot, int id, int count, int durability = -1, const QVariantList &enchants = {});
+    // t622 装备槽自定义名读（同 customNameAt / mainCustomNameAt 模式；越界 / 无名 → 空串）。护甲可被改名
+    //   （铁砧 rename 作用于工具 / 护甲 / 可堆叠物），装备 / 脱下搬运经 InventoryOps 透传保真。
+    Q_INVOKABLE QString armorCustomNameAt(int slot) const;
+    // 直接写装备槽（装备 / 脱下用）。校验：slot 范围 + id 须为护甲段（或 0=清空）+ 部位须匹配该槽 + count 钳 1。
+    //   name（t622）：同 setStack（护甲整件装备 / 脱下透传实例名）。
+    Q_INVOKABLE void armorSetStack(int slot, int id, int count, int durability = -1, const QVariantList &enchants = {}, const QString &name = QString());
     Q_INVOKABLE QVariantList creativeArmor() const;
     Q_INVOKABLE void damageArmor();
     // t475 附魔选中槽物品（附魔台点选项槽 → 写附魔元数据到目标物品）。机制等价 MC 1.0 附魔台点槽即附魔。

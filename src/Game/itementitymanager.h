@@ -76,7 +76,9 @@ public:
     //   （爆炸批量 spawn 时 each O(200)×50 = 10k blockAt-free 比较，远好于不合并的 50 个新 delegate）。
     //   t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；缺省空 = 无附魔）。
     //   工具 / 护甲丢弃传其实例附魔 → 实体携带 → 拾取回填（防数据丢失）；可堆叠物品（合并路径）恒 0。
-    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1, const QVariantList &enchants = {});
+    //   t622 name：自定义名（铁砧重命名产物丢弃传其实例名 → 实体携带 → 拾取回填，防「改名物品丢出再捡
+    //   丢名」；缺省空 = 无名 = 注册表默认名）。可堆叠物品丢弃不传名（同附魔语义）。
+    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1, const QVariantList &enchants = {}, const QString &name = QString());
 
     // t608 定点定向弹出（发射器排出口统一口径）：在**浮点世界坐标 pos**（发射器格中心 + 朝向外向 ×0.5 =
     //   排出口面中心）生成掉落物，初始水平速度 = (dirX,dirZ) 归一化 × speed（沿发射器朝向弹出，机制等价
@@ -84,16 +86,18 @@ public:
     //   ① 位置精确到排出口（用户「掉落物和投掷物应同一个口出来」）；② 弹出方向 = 发射朝向（非随机）。
     //   其余（合并 / LRU / 免拾窗 / 重力 + 摩擦 / maxStack）与 spawnItem 完全同链。dirX/dirZ 全 0（退化）→
     //   speed 视作 0（原地生成，重力落地）。分层同 spawnItem（Entities 层，无向上依赖）。
+    //   t622 name：同 spawnItem（发射器 / 投掷器弹出物品的实例名保真）。
     Q_INVOKABLE void spawnItemAt(const QVector3D &pos, int itemId, int count,
                                  float dirX, float dirZ, float speed,
-                                 const QVariantList &enchants = {});
+                                 const QVariantList &enchants = {}, const QString &name = QString());
     // t609 带俯仰的定点定向弹出（Q 丢弃修正）：在浮点世界坐标 pos（玩家眼位 + 视线 × 0.3）生成掉落物，
     // 初速度 = (dirX,dirY,dirZ) 归一化 × speed（三维视线方向——仰视上抛 / 俯视下压，机制等价 MC 玩家把
     // 物品朝视线方向扔出）。与上方水平版（vy=0）的差异仅在初速含 Y 分量；其余（合并 / LRU / 免拾窗 /
     // 重力 + 摩擦）完全同链。PlayerController 主动丢弃（dropHeld 族）C++ 直调本入口（非 QML，不 Q_INVOKABLE）。
+    //   t622 name：同 spawnItem（玩家主动丢弃的改名物品保真——dropHeld 族传 held/slot 实例名）。
     void spawnItemThrown(const QVector3D &pos, int itemId, int count,
                          float dirX, float dirY, float dirZ, float speed,
-                         const QVariantList &enchants = {});
+                         const QVariantList &enchants = {}, const QString &name = QString());
 
     // t354 批量 spawn 抑制 entitiesChanged（修 Stalker 爆炸「t320 已批 worldChanged 但仍卡」的复发根因）：
     //   一次爆炸按 kExplosionDropChance(~50%) 对球内每破坏块发 explosionDroppedItem → 呈现层逐个 spawnItem，
@@ -122,6 +126,9 @@ public:
     // t590 第 i 个实体的附魔元数据（QVariantList<int> 4 元素，每 = EnchantRegistry::pack 值；0 = 空槽）。
     //   呈现层据它给掉落物紫光晕 + 拾取回填附魔用。越界 / 空槽 → {0,0,0,0}。
     Q_INVOKABLE QVariantList enchantsAt(int i) const;
+    // t622 第 i 个实体的自定义名（铁砧重命名产物丢弃保真；空串 = 注册表默认名）。越界 / 空槽 → 空串。
+    //   PlayerController 拾取（pickupScan）读它回填 Hotbar::addToAny 第 5 参；呈现层掉落物无需显示（无 tooltip UI）。
+    Q_INVOKABLE QString nameAt(int i) const;
     // 把第 i 个实体的数量设为 n（t64：拾取装不下时把余数回写、保留 entity）。n<=0 销毁该实体
     // （余数为 0 = 全拾走）。边界安全（越界静默）。仅 PlayerController::pickupScan 调（拾取路径），
     // 非 QML 调用入口。bump revision 驱动 QML delegate 数量绑定重算。
@@ -204,6 +211,10 @@ private:
         //   恒全 0（inert）。放 alive 之前（聚合初始化 {pos,itemId,count,spawnMs} 不显式列 → 取默认全 0，
         //   tail-default 契约不破坏）。
         int enchants[4] = {0, 0, 0, 0};
+        // t622 自定义名（铁砧重命名产物丢弃保真；空串 = 注册表默认名）。同 enchants 语义随实例走 →
+        //   拾取回填（pickupScan 传 addToAny 第 5 参）。显式默认 QString() 抑制 -Wmissing-field-initializers
+        //   （同 ItemStack.customName 的部分聚合初始化场景）。
+        QString name = QString();
         // t256：槽位占用标志（slot-reuse 模型，同 EntityManager::Entity::alive）。true = 活体；false = 已释放
         //   空槽（待复用）。放末位：spawnItem 的聚合初始化 {pos,itemId,count,spawnMs} 不显式列 alive →
         //   取默认 true（C++ 聚合初始化尾字段缺省即 default member init）。掉落物被拾取（removeAt /

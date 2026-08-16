@@ -2344,7 +2344,7 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 
 ### 🅰 物品数据模型重构（1 大项，本轮核心）
 
-**t622** ItemStack 加 customName 字段 + 全链透传（用户点名的设计）
+**t622** ItemStack 加 customName 字段 + 全链透传（用户点名的设计）✅✅ 已完成（commit 见 git log；含 t623 根因修复 setHeldEnchants 补挂 Q_INVOKABLE）
 - 用户：「重命名完全没有用——改名放回背包还是旧名。每个 item 类应该有个变量存铁砧改的名。Item 是基类，工具类继承它加耐久，附魔当子对象嵌进去，name 在基类。」
 - 现状核实：`Hotbar::ItemStack {id,count,durability,enchants,customName}` —— **customName 在 hotbar 槽已有**（customNameAt/writeCustomName），但：① InventoryOps.js 槽结构 `{id,count,durability,enchants}` **无 name**——本地槽（铁砧/附魔台/craft）经 InventoryOps 搬运时丢名；② 附魔台/铁砧产物写回时没带名；③ 掉落物实体（ItemEntity）无 name 字段——丢出即丢名。
 - 修：InventoryOps readSlot/writeSlot/localWriteSlot 全家加 name 透传（同 dc16ca2 dur/ench 模式）；铁砧产物（takeProduct）带新名写入；附魔台槽 0 取出保名；ItemEntity/spawnItem 加 name 形参（默认空）+ QML 掉落物 tooltip；存档序列化补 name（查存档槽序列化格式——versioned 升级兼容旧档无名=默认）。

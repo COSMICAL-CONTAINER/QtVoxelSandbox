@@ -70,12 +70,22 @@ QVariantList ChestStore::slotEnchantsAt(int x, int y, int z, int index) const
     return { s.enchants[0], s.enchants[1], s.enchants[2], s.enchants[3] };
 }
 
+// t622 某箱子某槽自定义名（铁砧改名物品随栈存取；空槽 / 越界 / 无此箱 → 空串）。
+QString ChestStore::slotNameAt(int x, int y, int z, int index) const
+{
+    if (index < 0 || index >= kSlotsPerChest) return QString();
+    const auto it = m_chests.find(key(x, y, z));
+    if (it == m_chests.end()) return QString();
+    return it->second.at(size_t(index)).name;
+}
+
 // 直接写某箱子某槽。index 越界忽略；id<=0 或 count<=0 → 清空该槽（保持空栈不变式：id==0 ⟺ count==0）。
 //   自动建箱条目（首次写入某坐标即创建空 27 槽再写）。写入后 bump revision → ChestUI delegate 刷新。
 //   **t607 同源修**：count 归一在先（count<=0 → id 一并归 0），防「最后 1 件扣成 0」类写回存幽灵栈
 //   {id>0,count=0}（同 DispenserStore 修法的防御性收口——当前 UI 写入端已自行归零，此处兜底层不变式）。
 //   enchants（review L7）：4-int pack 值随栈写入（空栈恒清附魔）；不足 4 元素按 0 补齐 = 清空语义。
-void ChestStore::setSlot(int x, int y, int z, int index, int id, int count, const QVariantList &enchants)
+//   name（t622）：实例名随栈写入（空栈恒清名；trim 防全空格）。
+void ChestStore::setSlot(int x, int y, int z, int index, int id, int count, const QVariantList &enchants, const QString &name)
 {
     if (index < 0 || index >= kSlotsPerChest) return;
     // 空栈归一：id<=0 或 count<=0 → 清空（id=0, count=0）。
@@ -87,6 +97,7 @@ void ChestStore::setSlot(int x, int y, int z, int index, int id, int count, cons
     slot.count = normCount;
     for (int i = 0; i < 4; ++i)
         slot.enchants[i] = (normId > 0 && i < enchants.size()) ? enchants.at(i).toInt() : 0;
+    slot.name = (normId > 0) ? name.trimmed() : QString();
     ++m_revision;
     emit chestChanged();
 }
@@ -111,9 +122,9 @@ void ChestStore::clearAll()
 }
 
 // t188 收集所有「含 ≥1 非空槽」的箱子为 QVariantList（落盘用）。全空箱子跳过（加载后缺失 = 空箱行为等价）。
-//   形状：[{x,y,z, slots:[{id,count,enchants:[4]}×27]}, ...]。QString 键经 parseKey 还原为坐标列。
+//   形状：[{x,y,z, slots:[{id,count,enchants:[4],name}×27]}, ...]。QString 键经 parseKey 还原为坐标列。
 //   enchants（review L7）：附魔书 / 附魔工具的 per-instance 附魔随槽落盘（老存档无此键 → 读回全 0 = 无附魔，
-//   向后兼容）。
+//   向后兼容）。name（t622）：改名物品实例名随槽落盘（老存档无此键 → 读回空 = 默认名，向后兼容）。
 QVariantList ChestStore::allChests() const
 {
     QVariantList out;
@@ -132,6 +143,7 @@ QVariantList ChestStore::allChests() const
             enchList.reserve(4);
             for (int i = 0; i < 4; ++i) enchList.append(s.enchants[i]);
             sm.insert(QStringLiteral("enchants"), enchList);
+            sm.insert(QStringLiteral("name"), s.name);
             slotList.append(sm);
         }
         if (!any) continue; // 全空箱子不落盘
@@ -161,7 +173,7 @@ void ChestStore::loadAll(const QVariantList &chests)
         const int z = cm.value(QStringLiteral("z")).toInt(&okz);
         if (!okx || !oky || !okz) continue;
         const QVariantList slotList = cm.value(QStringLiteral("slots")).toList();
-        Chest chest; // 默认全空（Slot{id=0,count=0,enchants 全 0}）
+        Chest chest; // 默认全空（Slot{id=0,count=0,enchants 全 0,name 空}）
         const int n = slotList.size();
         for (int i = 0; i < kSlotsPerChest && i < n; ++i) {
             const QVariantMap sm = slotList[i].toMap();
@@ -175,6 +187,7 @@ void ChestStore::loadAll(const QVariantList &chests)
                 const QVariantList enchList = sm.value(QStringLiteral("enchants")).toList();
                 for (int e = 0; e < 4; ++e)
                     s.enchants[e] = (e < enchList.size()) ? enchList.at(e).toInt() : 0;
+                s.name = sm.value(QStringLiteral("name")).toString(); // t622 老存档无 name 键 → 空串
             }
             chest[size_t(i)] = s;
         }

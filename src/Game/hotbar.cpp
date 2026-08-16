@@ -817,7 +817,8 @@ void Hotbar::scroll(int delta)
 // 直接写入栈。air/非法 id/count<=0 → 清空该槽（id=0,count=0）；否则 count 钳到 maxStackSize(id)。
 //   durability（t263）：经 normalizeDurability 归一（-1=自动满 / >=0=保真 clamp）。工具 count 恒 1。
 //   enchants（t475）：经 applyEnchants 写入 target.enchants[4]（列表不足 4 元素按 0 补齐 = 清空）。
-void Hotbar::setStack(int slot, int id, int count, int durability, const QVariantList &enchants)
+//   name（t622）：非空栈写 target.customName（trim；空串 = 清名 = 注册表默认名）；空栈恒清名。
+void Hotbar::setStack(int slot, int id, int count, int durability, const QVariantList &enchants, const QString &name)
 {
     if (slot < 0 || slot >= int(m_slots.size())) return;
     if (!isValidItemId(id)) return;
@@ -826,10 +827,11 @@ void Hotbar::setStack(int slot, int id, int count, int durability, const QVarian
         const int cap = maxStackSize(id);
         target = ItemStack{id, std::min(count, cap), normalizeDurability(id, durability)};
         applyEnchants(target, enchants); // t475 仅非空栈写附魔（空栈全 0）
-    } // else: 空栈（id=0 或 count<=0 → 清空；enchants 全 0）
+        target.customName = name.trimmed(); // t622 实例名随写入（trim 防误输入全空格）
+    } // else: 空栈（id=0 或 count<=0 → 清空；enchants / customName 清空）
     const ItemStack &cur = m_slots[size_t(slot)];
     if (cur.id == target.id && cur.count == target.count && cur.durability == target.durability
-        && enchantsEqual(cur, target)) return; // t475 附魔也进相等判定（防「同 id 同耐久但附魔变」被误跳过）
+        && cur.customName == target.customName && enchantsEqual(cur, target)) return; // t622 名也进相等判定（防「同 id 同耐久但名变」被误跳过）
     m_slots[size_t(slot)] = target;
     qInfo().noquote() << "[inv] setStack slot=" << slot << "id=" << target.id << "count=" << target.count
                       << "dur=" << target.durability;
@@ -854,14 +856,16 @@ void Hotbar::setSlotBlock(int slot, int blockId)
 // t74 根因：旧序把「选中槽空→开新栈」排在「合并同 id 槽」前 → 选中槽空时直接开新栈，
 // 不查别处已有同 id 未满槽。例：第1槽草(未满) + 第2槽(选中,空) 挖草 → 草应进第1槽却进第2槽，
 // 形成同物分散两栈的反直觉结果。新序：合并全程优先于开新，避免「同物分散」。
-int Hotbar::addStack(int id, int n, int durability, const QVariantList &enchants)
+int Hotbar::addStack(int id, int n, int durability, const QVariantList &enchants, const QString &name)
 {
     if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
     const int cap = maxStackSize(id);
     // t263 工具段（cap==1）：不可堆叠 → 同 id 槽合并分支永不命中（已有同 id 槽必 count==1==cap）。
     //   故工具只走「空槽开新栈」分支，写入 normalizeDurability 归一的耐久。方块 / 材料段 durability 恒 0（inert）。
     //   t475 enchants 仅工具 / 护甲（cap==1）有意义：随空槽开新栈的实例写入；可堆叠物品合并路径不写附魔（恒 0）。
+    //   t622 name 同 enchants：cap=1 物品空槽开新时写实例名；可堆叠物品不传名（同物无名语义）。
     const int dur = normalizeDurability(id, durability);
+    const QString trimmedName = name.trimmed();
     int remaining = n;
     bool changed = false;
 
@@ -881,7 +885,7 @@ int Hotbar::addStack(int id, int n, int durability, const QVariantList &enchants
         ItemStack &sel = m_slots[size_t(m_selectedSlot)];
         if (sel.id == 0) {
             const int add = std::min(cap, remaining);
-            sel = ItemStack{id, add, dur}; applyEnchants(sel, enchants); remaining -= add; changed = true;
+            sel = ItemStack{id, add, dur}; applyEnchants(sel, enchants); sel.customName = trimmedName; remaining -= add; changed = true;
         }
     }
     for (size_t i = 0; i < m_slots.size(); ++i) {
@@ -890,7 +894,7 @@ int Hotbar::addStack(int id, int n, int durability, const QVariantList &enchants
         ItemStack &s = m_slots[i];
         if (s.id == 0) {
             const int add = std::min(cap, remaining);
-            s = ItemStack{id, add, dur}; applyEnchants(s, enchants); remaining -= add; changed = true;
+            s = ItemStack{id, add, dur}; applyEnchants(s, enchants); s.customName = trimmedName; remaining -= add; changed = true;
         }
     }
     if (changed) {
@@ -930,7 +934,8 @@ int Hotbar::mainDurabilityAt(int slot) const
 // 主栏槽与 selectedSlot 无关（不驱动 selectedBlockId），故无 selectedSlotChanged 补发。
 //   durability（t263）：同 setStack（normalizeDurability 归一）。
 //   enchants（t475）：同 setStack（applyEnchants 写入；空栈 / 非可附魔 → 全 0）。
-void Hotbar::mainSetStack(int slot, int id, int count, int durability, const QVariantList &enchants)
+//   name（t622）：同 setStack（非空栈写实例名；空栈恒清）。
+void Hotbar::mainSetStack(int slot, int id, int count, int durability, const QVariantList &enchants, const QString &name)
 {
     if (slot < 0 || slot >= int(m_mainSlots.size())) return;
     if (!isValidItemId(id)) return;
@@ -939,10 +944,11 @@ void Hotbar::mainSetStack(int slot, int id, int count, int durability, const QVa
         const int cap = maxStackSize(id);
         target = ItemStack{id, std::min(count, cap), normalizeDurability(id, durability)};
         applyEnchants(target, enchants);
+        target.customName = name.trimmed();
     }
     const ItemStack &cur = m_mainSlots[size_t(slot)];
     if (cur.id == target.id && cur.count == target.count && cur.durability == target.durability
-        && enchantsEqual(cur, target)) return;
+        && cur.customName == target.customName && enchantsEqual(cur, target)) return;
     m_mainSlots[size_t(slot)] = target;
     qInfo().noquote() << "[inv] mainSetStack slot=" << slot << "id=" << target.id << "count=" << target.count
                       << "dur=" << target.durability;
@@ -952,11 +958,13 @@ void Hotbar::mainSetStack(int slot, int id, int count, int durability, const QVa
 // 智能堆叠放入主栏（同 id 合并 → 空槽开新）。返回未放入数。仅主栏范围（hotbar 由 addStack / addToAny 管）。
 //   durability（t263）：同 addStack（工具不可堆叠 → 只走空槽开新，写入归一耐久）。
 //   enchants（t475）：同 addStack（工具 / 护甲空槽开新栈写实例附魔）。
-int Hotbar::mainAddStack(int id, int n, int durability, const QVariantList &enchants)
+//   name（t622）：同 addStack（cap=1 物品空槽开新写实例名）。
+int Hotbar::mainAddStack(int id, int n, int durability, const QVariantList &enchants, const QString &name)
 {
     if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
     const int cap = maxStackSize(id);
     const int dur = normalizeDurability(id, durability);
+    const QString trimmedName = name.trimmed();
     int remaining = n;
     bool changed = false;
     for (size_t i = 0; i < m_mainSlots.size(); ++i) {
@@ -972,7 +980,7 @@ int Hotbar::mainAddStack(int id, int n, int durability, const QVariantList &ench
         ItemStack &s = m_mainSlots[i];
         if (s.id == 0) {
             const int add = std::min(cap, remaining);
-            s = ItemStack{id, add, dur}; applyEnchants(s, enchants); remaining -= add; changed = true;
+            s = ItemStack{id, add, dur}; applyEnchants(s, enchants); s.customName = trimmedName; remaining -= add; changed = true;
         }
     }
     if (changed) bumpMainRevision();
@@ -989,13 +997,15 @@ int Hotbar::mainAddStack(int id, int n, int durability, const QVariantList &ench
 // t109 根因：旧序「main 空 → hotbar 空」让空手拾取先塞主栏空槽，玩家挖块却要翻主栏找 → 违直觉。
 // 拾取应优先落入可直接看见的 hotbar（MC 行为同此），故交换两空槽循环：hotbar 空优先于 main 空。
 // main 同 id 合并仍先于 hotbar 同 id（已存在栈就地补满优于跨栏开新，保持「同物不分散」）。
-int Hotbar::addToAny(int id, int n, int durability, const QVariantList &enchants)
+int Hotbar::addToAny(int id, int n, int durability, const QVariantList &enchants, const QString &name)
 {
     if (!isValidItemId(id) || id == 0 || n <= 0) return std::max(0, n);
     const int cap = maxStackSize(id);
     // t263 工具段（cap==1）：同 id 合并分支永不命中（已有同 id 槽必满）→ 只走空槽开新；dur 归一。
     //   t475 enchants 仅工具 / 护甲（cap==1）有意义：空槽开新栈写其实例附魔；可堆叠物品合并 / 开新附魔恒 0。
+    //   t622 name 同 enchants（cap=1 物品空槽开新写实例名——改名物品拾取 / 回栏保真）。
     const int dur = normalizeDurability(id, durability);
+    const QString trimmedName = name.trimmed();
     int remaining = n;
     bool mainChanged = false, slotChanged = false;
 
@@ -1023,7 +1033,7 @@ int Hotbar::addToAny(int id, int n, int durability, const QVariantList &enchants
         ItemStack &s = m_slots[i];
         if (s.id == 0) {
             const int add = std::min(cap, remaining);
-            s = ItemStack{id, add, dur}; applyEnchants(s, enchants); remaining -= add; slotChanged = true;
+            s = ItemStack{id, add, dur}; applyEnchants(s, enchants); s.customName = trimmedName; remaining -= add; slotChanged = true;
         }
     }
     for (size_t i = 0; i < m_mainSlots.size(); ++i) {
@@ -1031,7 +1041,7 @@ int Hotbar::addToAny(int id, int n, int durability, const QVariantList &enchants
         ItemStack &s = m_mainSlots[i];
         if (s.id == 0) {
             const int add = std::min(cap, remaining);
-            s = ItemStack{id, add, dur}; applyEnchants(s, enchants); remaining -= add; mainChanged = true;
+            s = ItemStack{id, add, dur}; applyEnchants(s, enchants); s.customName = trimmedName; remaining -= add; mainChanged = true;
         }
     }
     if (mainChanged) bumpMainRevision();
@@ -1078,7 +1088,8 @@ int Hotbar::armorDurabilityAt(int slot) const
 //   count 钳 1（护甲不可堆叠）；durability 经 normalizeDurability 归一。非护甲 / 部位不符 → no-op。
 //   id==0 或 count<=0 → 清空该槽（脱下）。部位匹配：slot 索引 == ArmorRegistry::piece(id)。
 //   enchants（t475）：护甲可附魔（保护族 / 耐久 / 水上亲和）；装备 / 脱下搬运时透传实例附魔保真。
-void Hotbar::armorSetStack(int slot, int id, int count, int durability, const QVariantList &enchants)
+//   name（t622）：同 setStack（护甲整件装备 / 脱下透传实例名保真）。
+void Hotbar::armorSetStack(int slot, int id, int count, int durability, const QVariantList &enchants, const QString &name)
 {
     if (slot < 0 || slot >= int(m_armorSlots.size())) return;
     if (id == 0 || count <= 0) {
@@ -1093,6 +1104,7 @@ void Hotbar::armorSetStack(int slot, int id, int count, int durability, const QV
     const int dur = normalizeDurability(id, durability);
     ItemStack ns{id, 1, dur};                           // 护甲不可堆叠 → count 恒 1
     applyEnchants(ns, enchants);                        // t475 写附魔元数据
+    ns.customName = name.trimmed();                     // t622 写实例名
     m_armorSlots[size_t(slot)] = ns;
     bumpArmorRevision();
 }
@@ -1376,6 +1388,8 @@ void Hotbar::setHeldBlock(int id)
         m_heldStack.durability = normalizeDurability(id, -1);
         // t475 切换到新 id → 清空手持附魔（新实例无附魔；caller 显式覆盖走 setHeldEnchants 保真搬运）。
         for (int i = 0; i < 4; ++i) m_heldStack.enchants[i] = 0;
+        // t622 切换到新 id → 清空手持自定义名（新实例无重命名；caller 显式覆盖走 setHeldCustomName 保真）。
+        m_heldStack.customName = QString();
     }
     qInfo().noquote() << "[inv] setHeldBlock -> id=" << id << " count=" << m_heldStack.count
                       << "dur=" << m_heldStack.durability;
@@ -1550,6 +1564,16 @@ void Hotbar::setHeldEnchants(const QVariantList &enchants)
     emit heldBlockChanged();
 }
 
+// t622 手持物自定义名 setter：空栈写入静默归空（防「空光标残留名，下一件物品误继承」）；trim 防全空格。
+//   pickup-from-slot / 铁砧改名产物上光标路径在 setHeldBlock 后覆盖为实例名（保真搬运）。
+void Hotbar::setHeldCustomName(const QString &name)
+{
+    const QString n = m_heldStack.id == 0 ? QString() : name.trimmed();
+    if (n == m_heldStack.customName) return; // 无变化 → 不发信号
+    m_heldStack.customName = n;
+    emit heldBlockChanged();
+}
+
 QVariantList Hotbar::enchantsAt(int slot) const
 {
     if (slot < 0 || slot >= int(m_slots.size())) return {0, 0, 0, 0};
@@ -1566,6 +1590,13 @@ QVariantList Hotbar::armorEnchantsAt(int slot) const
 {
     if (slot < 0 || slot >= int(m_armorSlots.size())) return {0, 0, 0, 0};
     return readEnchants(m_armorSlots[size_t(slot)]);
+}
+
+// t622 装备槽自定义名读（同 customNameAt / mainCustomNameAt 模式；越界 → 空串）。
+QString Hotbar::armorCustomNameAt(int slot) const
+{
+    if (slot < 0 || slot >= int(m_armorSlots.size())) return QString();
+    return m_armorSlots[size_t(slot)].customName;
 }
 
 // ── t477 自定义名读写（铁砧重命名）── 同 durabilityAt 模式（越界 → 空串）。

@@ -89,6 +89,7 @@ Item {
     // t566 修「左键均分失效」：t475 InventoryOps.beginLeftDrag 写 root.dragHeldEnchants，本面板漏声明 →
     //   TypeError 被信号处理器吞 → leftDragActive 恒 false。补声明即恢复（详见 SurvivalInventory 同注释）。
     property var dragHeldEnchants: []       // t475 拖动期间手持附魔快照（松手回填光标保真）
+    property string dragHeldName: ""        // t622 拖动期间手持实例名快照（松手 / 早退回填光标保真）
     // t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）。dragActive 统一左/右拖动收集门控。
     property bool rightDragActive: false
     property var rightDragSlots: []
@@ -108,16 +109,24 @@ Item {
     //   权威）。面板关闭时 returnEnchantToHotbar 把输入槽内容退回背包（同 CraftingTableUI returnCraftToHotbar 模式）。
     //   t549：**耐久 / 附魔随实例保真**（同 AnvilUI anvilDur/anvilEnch 模式）—— 工具进槽 0 须保住实例耐久，
     //   附魔后写入的附魔元数据也存这里（enchantEnch[0]），点产物取出时随实例回光标。
+    //   t622：**实例名随实例保真**（enchantNames[0]）——改名工具进附魔台附魔后取出仍带名（修「改名物品
+    //   进附魔台出来丢名」）。
     property var enchantSlots:  [0, 0]
     property var enchantCounts: [0, 0]
     property var enchantDur:    [0, 0]
     property var enchantEnch:   [[0,0,0,0], [0,0,0,0]]
+    property var enchantNames:  ["", ""]     // t622 本地槽实例名（空串 = 注册表默认名）
     property int enchantRev: 0
 
     // 取槽附魔元数据（数组未初始化防御 → 4 个 0）。
     function enchAt(idx) {
         const e = root.enchantEnch[idx]
         return (Array.isArray(e) && e.length === 4) ? e : [0, 0, 0, 0]
+    }
+    // t622 取槽实例名（数组未初始化防御 → 空串）。
+    function nameAt(idx) {
+        const n = root.enchantNames[idx]
+        return (typeof n === "string") ? n : ""
     }
     // 槽 0 物品是否已有附魔（任一 packed 非 0）。
     function slot0HasEnch() {
@@ -135,13 +144,14 @@ Item {
     // ── t515 / t544 / t549 面板专属槽路由：enchant 两槽走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
     //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
     //   t549：local 槽透传耐久 / 附魔（工具进槽 0 保真；附魔结果写入槽 0 的附魔元数据）。
+    //   t622：local 槽透传实例名（改名工具进附魔台 → 附魔取出仍带名）。
     function localReadSlot(group, index) {
         if (group === "enchant")
             return { id: root.enchantSlots[index] || 0, count: root.enchantCounts[index] || 0,
-                     durability: root.enchantDur[index] || 0, enchants: root.enchAt(index) }
-        return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0] }
+                     durability: root.enchantDur[index] || 0, enchants: root.enchAt(index), name: root.nameAt(index) }
+        return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0], name: "" }
     }
-    function localWriteSlot(group, index, id, count, durability, enchants) {
+    function localWriteSlot(group, index, id, count, durability, enchants, name) {
         if (group !== "enchant") return
         root.enchantSlots[index] = id
         root.enchantCounts[index] = count
@@ -152,17 +162,20 @@ Item {
         const arr = root.enchantEnch
         arr[index] = e.slice()
         root.enchantEnch = arr
+        // t622 实例名随槽写入（undefined 兜底空串）。doEnchant 翻附魔书 id 时名保留（书若被改名仍带名）。
+        root.enchantNames[index] = (typeof name === "string") ? name : ""
         root.enchantRev++
     }
     // 关包归还 enchant 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把两槽内容
     //   addStack 回 hotbar（MC 行为：关附魔台界面把输入槽物品退回背包）。t549 耐久 / 附魔随实例归还。
+    //   t622 名随实例归还（第 5 参透传）。
     function returnEnchantToHotbar() {
         if (!root.hotbar) return
         for (let i = 0; i < root.enchantSlots.length; ++i) {
             const id = root.enchantSlots[i] || 0
             const n = root.enchantCounts[i] || 0
             if (id !== 0 && n > 0)
-                root.hotbar.addStack(id, n, root.enchantDur[i] || 0, root.enchAt(i))
+                root.hotbar.addStack(id, n, root.enchantDur[i] || 0, root.enchAt(i), root.nameAt(i))
         }
         for (let i = 0; i < root.enchantSlots.length; ++i) {
             root.enchantSlots[i] = 0
@@ -170,15 +183,17 @@ Item {
             root.enchantDur[i] = 0
         }
         root.enchantEnch = [[0,0,0,0], [0,0,0,0]]
+        root.enchantNames = ["", ""]
         root.enchantRev++
     }
-    function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
-    function resolveRightClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch) }
+    function resolveClick(curId, curCount, curDur, curEnch, curName) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch, curName) }
+    function resolveRightClick(curId, curCount, curDur, curEnch, curName) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch, curName) }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
     // review rv3：薄包装签名补 durability / enchants 形参透传（对齐 AnvilUI）—— Main.qml dropFromHoveredSlot
     //   （Q 丢弃）经此路径写槽，4 参签名会把算好的实例耐久 / 附魔截掉（清槽路径 dur 缺省 -1 还会在
     //   localWriteSlot 写入残留 -1）。多收实参对 4 参调用点无害（undefined → InventoryOps 缺省语义）。
-    function writeSlot(group, index, id, count, durability, enchants) { InventoryOps.writeSlot(root, group, index, id, count, durability, enchants) }
+    //   t622：+ name 第 7 参同透传。
+    function writeSlot(group, index, id, count, durability, enchants, name) { InventoryOps.writeSlot(root, group, index, id, count, durability, enchants, name) }
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
     // t110：slotLeft 入口先查 window.shiftHeld → InventoryOps.slotShiftLeft（Shift+左键搬运 main↔hotbar）。
@@ -199,23 +214,25 @@ Item {
             return
         }
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants)
+        const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
         root.hotbar.setHeldEnchants(r.heldEnch)
+        root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
     }
     function slotRight(group, index) {
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability, cur.enchants)
+        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
         root.hotbar.setHeldEnchants(r.heldEnch)
+        root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
     }
 
     // t549 附魔台 Shift+左键双向语义（spec「拿镐子按 shift+左键应把工具直接放进附魔台输入槽」）：
@@ -242,7 +259,8 @@ Item {
                 InventoryOps.writeSlot(root, "enchant", 1, src.id, target.count + move, 0)
                 const remain = src.count - move
                 InventoryOps.writeSlot(root, group, index, remain > 0 ? src.id : 0, remain,
-                                      remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0])
+                                      remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0],
+                                      remain > 0 ? src.name : "")
                 return
             }
             // 可附魔物（工具 / 武器 / 护甲 / t615 书，类别 != None）且槽 0 有物件的「已附魔拒入」守卫 → 入槽 0。
@@ -257,11 +275,13 @@ Item {
                 }
                 // t615 书可堆叠（maxStack 64）→ 只取 1 本入槽（余数留源槽，防「5 本进槽丢 4 本」）；
                 //   工具 / 护甲 maxStack=1 → 恒整件（src.count===1，写 0 与写余数等价）。
+                //   t622：实例名随物品入槽（nameAt 透传）。
                 InventoryOps.writeSlot(root, group, index, src.count > 1 ? src.id : 0,
                                       Math.max(0, src.count - 1),
                                       src.count > 1 ? src.durability : 0,
-                                      src.count > 1 ? src.enchants : [0,0,0,0])
-                InventoryOps.writeSlot(root, "enchant", 0, src.id, 1, src.durability, src.enchants)
+                                      src.count > 1 ? src.enchants : [0,0,0,0],
+                                      src.count > 1 ? src.name : "")
+                InventoryOps.writeSlot(root, "enchant", 0, src.id, 1, src.durability, src.enchants, src.name)
                 return
             }
             // 非青金石非可附魔 → 通用 main↔hotbar 搬运（同普通背包整理）。
@@ -271,10 +291,11 @@ Item {
         if (group === "enchant") {
             const src = InventoryOps.readSlot(root, "enchant", index)
             if (src.id === 0 || src.count <= 0) return
-            // 整栈归还背包（addToAny 智能堆叠；背包满 → 余数留原槽，防丢物）。
-            const remain = root.hotbar.addToAny(src.id, src.count, src.durability, src.enchants)
+            // 整栈归还背包（addToAny 智能堆叠；背包满 → 余数留原槽，防丢物）。t622 名透传（第 5 参）。
+            const remain = root.hotbar.addToAny(src.id, src.count, src.durability, src.enchants, src.name)
             InventoryOps.writeSlot(root, "enchant", index, remain > 0 ? src.id : 0, remain,
-                                  remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0])
+                                  remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0],
+                                  remain > 0 ? src.name : "")
             return
         }
         // 其它组（无）→ 通用退路。
@@ -413,8 +434,9 @@ Item {
             newEnch[i] = ((m.id << 8) | m.level)
         }
         const outId = (cat === 8) ? root.enchantedBookId : root.enchantItemId   // BookItem=8 → 附魔书
+        // t622：翻附魔书 id 时实例名保留（书若被改名，附成附魔书仍带名；工具附魔同理不改名）。
         InventoryOps.writeSlot(root, "enchant", 0, outId, 1,
-                               (cat === 8) ? 0 : (root.enchantDur[0] || 0), newEnch)
+                               (cat === 8) ? 0 : (root.enchantDur[0] || 0), newEnch, root.nameAt(0))
         // t619 progress 成就埋点：附魔成功 →「附魔师」；附书产附魔书 →「书虫」（CraftingTableUI 同模式：
         //   UI 成功操作末尾调 progress.onXxx，root.progress 由 Main.qml 注入）。
         if (root.progress) {
@@ -974,28 +996,30 @@ Item {
                 root.lastTapMs = now
                 root.lastTapKey = key
                 if (isDouble) { InventoryOps.doMergeSameId(root, eslot.group, eslot.index); return }
-                // t549：耐久 / 附魔随实例透传（curDur / curEnch 取本地槽保真值）。
+                // t549：耐久 / 附魔 / t622 名随实例透传（curDur / curEnch / cur.name 取本地槽保真值）。
                 const cur = InventoryOps.readSlot(root, eslot.group, eslot.index)
-                const r = root.resolveClick(cur.id, cur.count, cur.durability, cur.enchants)
+                const r = root.resolveClick(cur.id, cur.count, cur.durability, cur.enchants, cur.name)
                 if (!r) return
-                InventoryOps.writeSlot(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                InventoryOps.writeSlot(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                 root.hotbar.heldBlock = r.heldId
                 root.hotbar.heldCount = r.heldCount
                 root.hotbar.heldDurability = r.heldDur
                 root.hotbar.setHeldEnchants(r.heldEnch)
+                root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
             }
         }
         TapHandler {
             acceptedButtons: Qt.RightButton
             onTapped: {
                 const cur = InventoryOps.readSlot(root, eslot.group, eslot.index)
-                const r = root.resolveRightClick(cur.id, cur.count, cur.durability, cur.enchants)
+                const r = root.resolveRightClick(cur.id, cur.count, cur.durability, cur.enchants, cur.name)
                 if (!r) return
-                InventoryOps.writeSlot(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                InventoryOps.writeSlot(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                 root.hotbar.heldBlock = r.heldId
                 root.hotbar.heldCount = r.heldCount
                 root.hotbar.heldDurability = r.heldDur
                 root.hotbar.setHeldEnchants(r.heldEnch)
+                root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
             }
         }
         HoverHandler {
@@ -1114,7 +1138,10 @@ Item {
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
             // t590 附魔行：物品带附魔 → 换行显附魔列表（如「锐锋 III\n效率 II」），无附魔 → 空串不追加。
-            text: root.hotbar ? (root.hotbar.nameForBlock(root.hoveredItemId)
+            // t622：enchant 槽物品带实例名 → 优先显实例名（nameAt——改名工具放附魔台仍显其名）。
+            text: root.hotbar ? ((root.hoveredKey.indexOf("enchant:") === 0 && root.nameAt(parseInt(root.hoveredKey.substring(8), 10)).length > 0
+                    ? root.nameAt(parseInt(root.hoveredKey.substring(8), 10))
+                    : root.hotbar.nameForBlock(root.hoveredItemId))
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
                 + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : ""
             color: "#f2f2f2"

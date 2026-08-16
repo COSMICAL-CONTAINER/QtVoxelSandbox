@@ -449,7 +449,8 @@ public:
     //   （Q=1件 / Ctrl+Q=整栈）都走同一原语。不限捕获态（背包打开时未捕获正是此场景）。
     //   id==0 / count<=0 → 不丢。t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；
     //   缺省空 = 无附魔）。UI 层把 hovered 槽的物品附魔传入 → 掉落实体携带附魔（拾取回填 + 掉落紫光晕）。
-    Q_INVOKABLE void dropItemAtFront(int itemId, int count, const QVariantList &enchants = {});
+    //   t622 name：自定义名（缺省空 = 无名）。UI 层把 hovered 槽的物品实例名传入 → 实体携带 → 拾取回填。
+    Q_INVOKABLE void dropItemAtFront(int itemId, int count, const QVariantList &enchants = {}, const QString &name = QString());
     // 拖出背包丢弃（t49）：光标手持栈（hotbar.heldBlock/heldCount）整栈丢弃为实体。
     // 与 dropHeld 的差异：后者取**选中槽** 1 件且仅捕获时；本方法取**光标手持栈**整栈、**不限捕获态**
     // （背包打开时未捕获正是此场景）。t64：传 heldCount → 1 实体携带整栈数量（修「丢 4 木棒捡回只剩 1」
@@ -467,7 +468,8 @@ public:
     //   dropHeldCursor / dropHeldCursorOne 五路径共用；死亡掉落（dropAllItems）不走此（保留 3×3 散布的 MC
     //   「喷一地」口径）。m_itemEntities 注入时走 spawnItemThrown（C++ 直调）；未注入（异常配置）回退旧
     //   spawnItem 信号路径（QML 转发，格中心 + 随机弹出）。
-    void throwItemInLook(int itemId, int count, const QVariantList &enchants);
+    //   t622 name：自定义名随实体走（改名物品丢弃保真；缺省空 = 无名）。
+    void throwItemInLook(int itemId, int count, const QVariantList &enchants, const QString &name = QString());
     // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（**死亡点**
     //   = 玩家倒下时的脚底 m_pos，非出生点）+ 清空背包。每非空栈 → 1 实体携带整栈数量（同 dropHeldCursor
     //   模式，经 spawnItem 信号 → Main.qml 转发到 ItemEntityManager.spawnItem，单向事件流）。栈散布到死亡格
@@ -608,7 +610,8 @@ signals:
     // t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值）。仅玩家丢弃带附魔工具 /
     //   护甲路径传（dropItemAtFront / dropHeldCursor / dropHeldCursorOne）；其余掉落（破块 / mob / 爆炸）
     //   不传 → 缺省空（实体无附魔）。缺省参让 20+ emit 点零改动、旧 QML 处理器少参亦可接。
-    void spawnItem(int x, int y, int z, int blockId, int count, const QVariantList &enchants = {});
+    // t622 name：自定义名（铁砧重命名实例）。同 enchants 仅玩家丢弃改名物品路径传；缺省空 = 无名。
+    void spawnItem(int x, int y, int z, int blockId, int count, const QVariantList &enchants = {}, const QString &name = QString());
     // t311 cause=PlayerState::DeathCause 枚举值，区分致死来源（Fall/Suffocation/Drowning/Starvation）供死因记录。
     //   机制同 t22：生存伤害结算，正值才发；呈现层路由到 PlayerState.takeDamage(hp, cause)。
     void fallDamageTaken(int hp, int cause);

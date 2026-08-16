@@ -106,18 +106,26 @@ Item {
 
     // t550 本地三槽存储：anvil 组（0=左输入 / 1=右输入材料 / 2=产物预览占位）。与 hotbar VM 共享同一光标
     //   手持栈 heldBlock/heldCount；左键整组 / 右键半份同 resolveClick / resolveRightClick（InventoryOps 单一
-    //   权威）。**耐久 / 附魔随实例保真**（工具 / 护甲进左槽须修 / 合并，须保住实例耐久 + 附魔；数组写入不触发
-    //   绑定 → 显示 / 预览经 anvilRev 触碰驱动）。
+    //   权威）。**耐久 / 附魔 / 名随实例保真**（工具 / 护甲进左槽须修 / 合并，须保住实例耐久 + 附魔 + 铁砧改名；
+    //   数组写入不触发绑定 → 显示 / 预览经 anvilRev 触碰驱动）。
     property var anvilSlots:  [0, 0, 0]
     property var anvilCounts: [0, 0, 0]
     property var anvilDur:    [0, 0, 0]
     property var anvilEnch:   [[0,0,0,0], [0,0,0,0], [0,0,0,0]]
+    // t622 本地槽实例名（空串 = 注册表默认名）。左槽放入改名物品 → 名随实例进槽；takeProduct 产物 / 关包
+    //   归还均透传（修「铁砧改名放回背包还是旧名」根因之一：本地槽无名通道）。
+    property var anvilNames:  ["", "", ""]
     property int anvilRev: 0
 
     // 取槽附魔元数据（数组未初始化防御 → 4 个 0）。InventoryOps 读写经 readSlot/writeSlot 路由用它保真。
     function enchAt(idx) {
         const e = root.anvilEnch[idx]
         return (Array.isArray(e) && e.length === 4) ? e : [0, 0, 0, 0]
+    }
+    // t622 取槽实例名（数组未初始化防御 → 空串）。
+    function nameAt(idx) {
+        const n = root.anvilNames[idx]
+        return (typeof n === "string") ? n : ""
     }
 
     // t110：当前指针所在槽的「组:下标」key（供 window.hoveredSlotKey 提升 → 数字键交换 + t167 左键拖动
@@ -139,6 +147,7 @@ Item {
     // t566 修「左键均分失效」：t475 InventoryOps.beginLeftDrag 写 root.dragHeldEnchants，本面板漏声明 →
     //   TypeError 被信号处理器吞 → leftDragActive 恒 false。补声明即恢复（详见 SurvivalInventory 同注释）。
     property var dragHeldEnchants: []       // t475 拖动期间手持附魔快照（松手回填光标保真）
+    property string dragHeldName: ""        // t622 拖动期间手持实例名快照（松手 / 早退回填光标保真）
     // t181 右键拖动（每格放 1 个；区别于左键 floor(count/N) 均分）。dragActive 统一左/右拖动收集门控。
     property bool rightDragActive: false
     property var rightDragSlots: []
@@ -162,13 +171,14 @@ Item {
     // ── t550 面板专属槽路由：anvil 三槽走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
     //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
     //   t550：local 槽透传耐久 / 附魔（工具 / 护甲进槽保真；材料 / 方块段恒 0 / 4 个 0 inert）。
+    //   t622：local 槽透传实例名（铁砧改名物品进槽保真）。
     function localReadSlot(group, index) {
         if (group === "anvil")
             return { id: root.anvilSlots[index] || 0, count: root.anvilCounts[index] || 0,
-                     durability: root.anvilDur[index] || 0, enchants: root.enchAt(index) }
-        return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0] }
+                     durability: root.anvilDur[index] || 0, enchants: root.enchAt(index), name: root.nameAt(index) }
+        return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0], name: "" }
     }
-    function localWriteSlot(group, index, id, count, durability, enchants) {
+    function localWriteSlot(group, index, id, count, durability, enchants, name) {
         if (group !== "anvil") return
         root.anvilSlots[index] = id
         root.anvilCounts[index] = count
@@ -179,12 +189,14 @@ Item {
         const arr = root.anvilEnch
         arr[index] = e.slice()
         root.anvilEnch = arr
+        // t622 实例名随槽写入（undefined 兜底空串）。
+        root.anvilNames[index] = (typeof name === "string") ? name : ""
         root.anvilRev++
     }
-    function resolveClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch) }
-    function resolveRightClick(curId, curCount, curDur, curEnch) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch) }
+    function resolveClick(curId, curCount, curDur, curEnch, curName) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch, curName) }
+    function resolveRightClick(curId, curCount, curDur, curEnch, curName) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch, curName) }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
-    function writeSlot(group, index, id, count, durability, enchants) { InventoryOps.writeSlot(root, group, index, id, count, durability, enchants) }
+    function writeSlot(group, index, id, count, durability, enchants, name) { InventoryOps.writeSlot(root, group, index, id, count, durability, enchants, name) }
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
     // t110：slotLeft 入口先查 window.shiftHeld → InventoryOps.slotShiftLeft（Shift+左键搬运 anvil↔main↔hotbar）。
@@ -205,23 +217,25 @@ Item {
             return
         }
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants)
+        const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
         root.hotbar.setHeldEnchants(r.heldEnch)
+        root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
     }
     function slotRight(group, index) {
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability, cur.enchants)
+        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
         root.hotbar.setHeldEnchants(r.heldEnch)
+        root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
     }
 
     // t549 铁砧 Shift+左键双向语义（spec「shift+左键应把工具直接放进去」；同附魔台 slotShiftLeftEnchant 模式）：
@@ -246,12 +260,12 @@ Item {
                     const t1 = InventoryOps.readSlot(root, "anvil", 1)
                     if (t1.id !== 0) return
                     InventoryOps.writeSlot(root, group, index, 0, 0, 0)
-                    InventoryOps.writeSlot(root, "anvil", 1, src.id, 1, src.durability, src.enchants)
+                    InventoryOps.writeSlot(root, "anvil", 1, src.id, 1, src.durability, src.enchants, src.name)
                     return
                 }
                 if (target.id === 0) {
                     InventoryOps.writeSlot(root, group, index, 0, 0, 0)
-                    InventoryOps.writeSlot(root, "anvil", 0, src.id, 1, src.durability, src.enchants)
+                    InventoryOps.writeSlot(root, "anvil", 0, src.id, 1, src.durability, src.enchants, src.name)
                     return
                 }
                 // 槽 0 异物占用：工具 / 护甲 → 不覆盖（no-op）；附魔书 → 落到下方材料分支（review M2）。
@@ -282,9 +296,10 @@ Item {
         if (group === "anvil" && (index === 0 || index === 1)) {
             const src = InventoryOps.readSlot(root, "anvil", index)
             if (src.id === 0 || src.count <= 0) return
-            const remain = root.hotbar.addToAny(src.id, src.count, src.durability, src.enchants)
+            const remain = root.hotbar.addToAny(src.id, src.count, src.durability, src.enchants, src.name)
             InventoryOps.writeSlot(root, "anvil", index, remain > 0 ? src.id : 0, remain,
-                                  remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0])
+                                  remain > 0 ? src.durability : 0, remain > 0 ? src.enchants : [0,0,0,0],
+                                  remain > 0 ? src.name : "")
             return
         }
         InventoryOps.slotShiftLeft(root, group, index)
@@ -310,14 +325,14 @@ Item {
 
     // 关包归还 anvil 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把三槽内容
     //   addStack 回 hotbar（MC 行为：关铁砧界面把输入槽物品退回背包）。t550 耐久 / 附魔随实例归还
-    //   （addStack 第 3/4 参透传：工具 / 护甲保真回包）。
+    //   （addStack 第 3/4 参透传：工具 / 护甲保真回包）。t622 名随实例归还（第 5 参透传）。
     function returnAnvilToHotbar() {
         if (!root.hotbar) return
         for (let i = 0; i < root.anvilSlots.length; ++i) {
             const id = root.anvilSlots[i] || 0
             const n = root.anvilCounts[i] || 0
             if (id !== 0 && n > 0)
-                root.hotbar.addStack(id, n, root.anvilDur[i] || 0, root.enchAt(i))
+                root.hotbar.addStack(id, n, root.anvilDur[i] || 0, root.enchAt(i), root.nameAt(i))
         }
         for (let i = 0; i < root.anvilSlots.length; ++i) {
             root.anvilSlots[i] = 0
@@ -325,6 +340,7 @@ Item {
             root.anvilDur[i] = 0
         }
         root.anvilEnch = [[0,0,0,0], [0,0,0,0], [0,0,0,0]]
+        root.anvilNames = ["", "", ""]
         root.anvilRev++
     }
     onVisibleChanged: {
@@ -353,6 +369,9 @@ Item {
     // 操作结果 flash（成功后短暂显绿）。
     property string lastResult: ""
     property bool justActed: false
+    // t622 改名产物空槽落点（takeProduct 探路段找、落定段用；跨段存属性防块作用域撕裂）。
+    property string namedSlotGroup: ""
+    property int namedSlotIdx: -1
 
     // t606②/⑦ 自动填名 / 拿回清框：左槽内容变（anvilRev 触碰）→ 有物：框空或内容仍是上次自动填充值
     //   （=== lastAutoName）→ 填入该物品当前名（nameForBlock 注册默认名；本地槽无 customName 通道）+
@@ -365,7 +384,10 @@ Item {
     onAnvilRevChanged: {
         const lid = root.anvilSlots[0] || 0
         if (lid !== 0) {
-            const auto = root.hotbar ? root.hotbar.nameForBlock(lid) : ""
+            // t622：优先显左槽物品实例名（nameAt(0)——改名物品重新放入铁砧时框内显其当前名而非注册默认名）；
+            //   无实例名 → 注册默认名 nameForBlock。
+            const nm = root.nameAt(0)
+            const auto = nm.length > 0 ? nm : (root.hotbar ? root.hotbar.nameForBlock(lid) : "")
             if (nameInput.text.length === 0 || nameInput.text === root.lastAutoName) {
                 nameInput.text = auto
                 root.renameName = auto
@@ -708,9 +730,9 @@ Item {
         const outCount = (op === "rename") ? Math.max(1, root.leftCount) : 1
         let outDur = root.leftDur
         let outEnch = root.enchAt(0)
-        // t550-review 修：outName 默认空（不继承选中槽 / 左槽的 customName；槽结构无 name 通道，原物品
-        //   自身名不保真，记 follow-up 扩槽结构）。改名框非空时用新名（下方 renaming 覆盖）。
-        let outName = ""
+        // t622 实例名通道打通（held / 槽 / 本地槽全链）：默认继承左槽实例名（改名物品修复 / 合并后仍带
+        //   原名——修「修一下装备名字没了」）；改名框非空时用新名覆盖（下方 renaming 段）。
+        let outName = root.nameAt(0)
         if (op === "repair") {
             const max = root.maxDur(outId)
             // t550-review 修：按实耗材料数修（use = min(右槽实有, 修满所需)），1 锭修 1/3、费 1 级；
@@ -758,26 +780,29 @@ Item {
         const heldId = root.hotbar.heldBlock
         const heldCount = root.hotbar.heldCount
         const cap = root.hotbar.maxStackSize(outId)
-        // 改名产物：找空槽（held 无名通道，须 setStack+setCustomName 落定即带名）。hotbar 优先 → main。
-        let namedSlotGroup = ""
-        let namedSlotIdx = -1
-        if (outName.length > 0) {
+        // t622 改名产物：held 光标已有 customName 通道（Q_PROPERTY）→ 优先走光标（同普通产物；机制等价
+        //   MC 铁砧产物左键拿到光标）。异物光标占位 → 退路找空槽（setStack 带名写入；探路同旧）。
+        if (outName.length > 0 && heldId !== 0 && heldId !== outId) {
+            // 异物光标 → 找空槽落定（hotbar 优先 → main）；无空槽 → 无操作（不消耗、不破坏）。
+            root.namedSlotGroup = ""
+            root.namedSlotIdx = -1
             for (let i = 0; i < root.hotbar.slotCount; ++i) {
-                if (InventoryOps.readSlot(root, "hotbar", i).id === 0) { namedSlotGroup = "hotbar"; namedSlotIdx = i; break }
+                if (InventoryOps.readSlot(root, "hotbar", i).id === 0) { root.namedSlotGroup = "hotbar"; root.namedSlotIdx = i; break }
             }
-            if (namedSlotIdx < 0) {
+            if (root.namedSlotIdx < 0) {
                 for (let i = 0; i < root.hotbar.mainCount; ++i) {
-                    if (InventoryOps.readSlot(root, "main", i).id === 0) { namedSlotGroup = "main"; namedSlotIdx = i; break }
+                    if (InventoryOps.readSlot(root, "main", i).id === 0) { root.namedSlotGroup = "main"; root.namedSlotIdx = i; break }
                 }
             }
-            if (namedSlotIdx < 0) return                 // 无空槽 → 改名产物无处落（不消耗、不破坏）
+            if (root.namedSlotIdx < 0) return               // 无空槽 → 改名产物无处落（不消耗、不破坏）
         } else if (heldId !== 0 && heldId !== outId) {
-            // 异物光标 → 产物经 addToAny 入背包（不动光标原物）；背包满（返回未放入数 > 0）→ 无操作。
-            const remain = root.hotbar.addToAny(outId, outCount, outDur, outEnch)
+            // 异物光标 → 产物经 addToAny 入背包（不动光标原物；名随实例——addToAny 第 5 参）；背包满
+            //   （返回未放入数 > 0）→ 无操作。
+            const remain = root.hotbar.addToAny(outId, outCount, outDur, outEnch, outName)
             if (remain > 0) return
         }
         // 同 id 光标合并容量检查（held 同 id 且累加超上限 → 无操作）。
-        if (outName.length === 0 && heldId === outId && heldCount + outCount > cap) return
+        if (heldId === outId && heldCount + outCount > cap) return
 
         // ── 探路通过 → 真消耗（等级 + 材料 + 输入槽）──
         //   t606③ 创造模式免经验：跳过 spendLevels（机制等价 MC 创造铁砧免 XP；材料消耗照旧——保守只免
@@ -788,10 +813,10 @@ Item {
             //   gate，review L5）；use 归 0 清空槽位防 0 数量残留。
             const use = root.repairMatUse()
             root.anvilCounts[1] = Math.max(0, (root.anvilCounts[1] || 0) - use)
-            if (root.anvilCounts[1] <= 0) { root.anvilSlots[1] = 0; root.anvilDur[1] = 0 }
+            if (root.anvilCounts[1] <= 0) { root.anvilSlots[1] = 0; root.anvilDur[1] = 0; root.anvilNames[1] = "" }
         } else if (op === "combine") {
             // t578 同物合并消耗**两件输入**（下方通用清左槽段 + 此处清右槽；两件合成一件）。
-            root.anvilSlots[1] = 0; root.anvilCounts[1] = 0; root.anvilDur[1] = 0
+            root.anvilSlots[1] = 0; root.anvilCounts[1] = 0; root.anvilDur[1] = 0; root.anvilNames[1] = ""
         } else if (op === "merge") {
             // rv11 修「合并销毁整摞书」：合并只消耗 1 本附魔书（MC 语义：一次合并吃 1 本），整摞余本留在
             //   右槽（count-1；归 0 才清空）。原实现 anvilSlots[1]=0; anvilCounts[1]=0 把整摞书全销毁。
@@ -799,32 +824,34 @@ Item {
             if (remainBook > 0) {
                 root.anvilCounts[1] = remainBook
             } else {
-                root.anvilSlots[1] = 0; root.anvilCounts[1] = 0; root.anvilDur[1] = 0
+                root.anvilSlots[1] = 0; root.anvilCounts[1] = 0; root.anvilDur[1] = 0; root.anvilNames[1] = ""
             }
         }
         // 清左输入槽 + 改名框（lastAutoName 一并复位；下方 anvilRev++ 触发 onAnvilRevChanged 左槽空分支
-        //   同步清框，此处先行保持不变量「renameName 与输入框同步」）。
+        //   同步清框，此处先行保持不变量「renameName 与输入框同步」）。t622：名数组一并清（名已随产物走）。
         root.anvilSlots[0] = 0; root.anvilCounts[0] = 0; root.anvilDur[0] = 0
         root.anvilEnch = [[0,0,0,0], [0,0,0,0], [0,0,0,0]]
+        root.anvilNames = ["", "", ""]
         root.renameName = ""; nameInput.text = ""; root.lastAutoName = ""
 
         // ── 产物落定（探路时已确认可落）──
-        if (outName.length > 0) {
-            // 改名产物 → 空槽 setStack + setCustomName（落定即带名；不占光标、不覆盖任何已有栈）。
-            InventoryOps.writeSlot(root, namedSlotGroup, namedSlotIdx, outId, outCount, outDur, outEnch)
-            if (namedSlotGroup === "hotbar") root.hotbar.setCustomName(namedSlotIdx, outName)
-            else                             root.hotbar.mainSetCustomName(namedSlotIdx, outName)
+        if (outName.length > 0 && root.hotbar.heldBlock !== 0 && root.hotbar.heldBlock !== outId) {
+            // 改名产物 + 异物光标 → 空槽落定即带名（探路段已找到 root.namedSlotGroup/namedSlotIdx；不占
+            //   光标、不覆盖任何已有栈）。writeSlot 第 8 参透传名（t622 通道）。
+            InventoryOps.writeSlot(root, root.namedSlotGroup, root.namedSlotIdx, outId, outCount, outDur, outEnch, outName)
         } else if (heldId === 0) {
-            // 光标空 → 产物上光标（耐久 / 附魔随实例保真）。
+            // 光标空 → 产物上光标（耐久 / 附魔 / 名随实例保真——t622 heldCustomName 通道）。
             root.hotbar.heldBlock = outId
             root.hotbar.heldCount = outCount
             root.hotbar.heldDurability = outDur
             root.hotbar.setHeldEnchants(outEnch)
+            root.hotbar.heldCustomName = outName
         } else if (heldId === outId) {
-            // 光标持同 id → 合并（探路已保证不超上限）。
+            // 光标持同 id → 合并（探路已保证不超上限）。t622：改名产物（outName 非空）合并入同 id 光标
+            //   栈属罕见边角（同 id 可堆叠物品改名）→ 光标名保持不变（合并不搬实例元数据，同 InventoryOps C 路径）。
             root.hotbar.heldCount = heldCount + outCount
         }
-        // 异物光标分支：产物已在上方探路段 addToAny 入背包（不消耗光标原物）。
+        // 异物光标分支（outName 空）：产物已在上方探路段 addToAny 入背包（不消耗光标原物）。
 
         root.anvilRev++
         if (root.player) root.player.damageAnvil(anvilX, anvilY, anvilZ)
@@ -1375,26 +1402,30 @@ Item {
                 root.lastTapMs = now
                 root.lastTapKey = key
                 if (isDouble) { root.doMergeSameId(aslot.group, aslot.index); return }
-                const r = root.resolveClick(aslot.slotId, aslot.slotCount, aslot.slotDur, aslot.slotEnch)
+                const r = root.resolveClick(aslot.slotId, aslot.slotCount, aslot.slotDur, aslot.slotEnch,
+                                            root.nameAt(aslot.index))
                 if (!r) return
-                root.writeSlot(aslot.group, aslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                root.writeSlot(aslot.group, aslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                 root.hotbar.heldBlock = r.heldId
                 root.hotbar.heldCount = r.heldCount
                 root.hotbar.heldDurability = r.heldDur
                 root.hotbar.setHeldEnchants(r.heldEnch)
+                root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
             }
         }
         TapHandler {
             acceptedButtons: Qt.RightButton
             onTapped: {
                 if (aslot.preview) return   // 产物槽右键无操作
-                const r = root.resolveRightClick(aslot.slotId, aslot.slotCount, aslot.slotDur, aslot.slotEnch)
+                const r = root.resolveRightClick(aslot.slotId, aslot.slotCount, aslot.slotDur, aslot.slotEnch,
+                                                 root.nameAt(aslot.index))
                 if (!r) return
-                root.writeSlot(aslot.group, aslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+                root.writeSlot(aslot.group, aslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                 root.hotbar.heldBlock = r.heldId
                 root.hotbar.heldCount = r.heldCount
                 root.hotbar.heldDurability = r.heldDur
                 root.hotbar.setHeldEnchants(r.heldEnch)
+                root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
             }
         }
         HoverHandler {
@@ -1474,10 +1505,13 @@ Item {
         return -1
     }
     // 产物预览槽 tooltip 名（改名叠加 / 单独改名时即时显新名；非改名操作 → 空 = 用注册表默认名）。
+    //   t622：悬停输入槽（anvil:0/1）时优先显槽内实例名（nameAt——改名物品放回铁砧仍显其名）。
     property string hoveredProductName: {
         const _ar = root.anvilRev
         const _n = root.renameName
         if (_ar >= 0 && root.hoveredKey === "anvil:2" && root.renaming) return _n.trim()
+        if (_ar >= 0 && (root.hoveredKey === "anvil:0" || root.hoveredKey === "anvil:1"))
+            return root.nameAt(root.hoveredKey === "anvil:0" ? 0 : 1)
         return ""
     }
     // t615 当前 hover 槽物品的附魔列表文本（tooltip 附魔行；同 EnchantingTableUI / SurvivalInventory 模式）：

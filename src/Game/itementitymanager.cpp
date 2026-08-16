@@ -22,7 +22,8 @@ ItemEntityManager::ItemEntityManager(QObject *parent) : QObject(parent)
 // t64：count 字段支持整栈丢弃为 1 实体（如 4 木棒丢出仍 1 实体 count=4）；count<=0 视作 1。
 // t590：enchants 是 QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；缺省空 = 无附魔）。工具 / 护甲
 //   丢弃时传其实例附魔 → 实体携带 → 拾取回填（防「附魔工具丢出再捡变普通」）。可堆叠物品（合并路径）恒 0。
-void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, const QVariantList &enchants)
+// t622：name 是自定义名（铁砧重命名产物丢弃传其实例名 → 实体携带 → 拾取回填，防「改名物品丢出再捡丢名」）。
+void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, const QVariantList &enchants, const QString &name)
 {
     if (itemId <= 0) return; // air / 非法：不产出（PlayerController 仅在 drop=true 时发，已过滤）
     if (count < 1) count = 1; // 缺省 / 非法 → 单件（与历史调用兼容）
@@ -81,6 +82,7 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, co
         ItemEntity &e = m_entities[size_t(slot)];
         for (int i = 0; i < 4; ++i)
             e.enchants[i] = (i < enchants.size()) ? enchants.at(i).toInt() : 0;
+        e.name = name.trimmed(); // t622 实例名（空串 = 注册表默认名；拾取回填用）
     }
     // t468 初始水平弹出速度（机制等价 MC 破块 / 丢弃物品弹出）：确定性哈希（位置 + itemId）给每件一个固定方向
     //   + 幅值抖动 → 同一掉落可复现。冰面摩擦极低 → 弹出后持续滑动（spec「冰上丢弃物品会一直滑动往前」）；
@@ -105,7 +107,7 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, co
 //   写入初速。机制等价 MC 1.0 发射器把物品从排出口朝朝向弹出。
 void ItemEntityManager::spawnItemAt(const QVector3D &pos, int itemId, int count,
                                     float dirX, float dirZ, float speed,
-                                    const QVariantList &enchants)
+                                    const QVariantList &enchants, const QString &name)
 {
     if (itemId <= 0) return; // air / 非法：不产出（同 spawnItem 守卫）
     if (count < 1) count = 1;
@@ -153,6 +155,7 @@ void ItemEntityManager::spawnItemAt(const QVector3D &pos, int itemId, int count,
         ItemEntity &e = m_entities[size_t(slot)];
         for (int i = 0; i < 4; ++i)
             e.enchants[i] = (i < enchants.size()) ? enchants.at(i).toInt() : 0;
+        e.name = name.trimmed(); // t622 实例名（拾取回填用）
     }
     // 定向弹出初速：dir 归一化 × speed（退化全 0 → 不设初速，原地落地）。vy=0（水平弹出 + 重力抛物，
     //   机制等价 MC 发射器弹物品的短抛物线）。
@@ -174,7 +177,7 @@ void ItemEntityManager::spawnItemAt(const QVector3D &pos, int itemId, int count,
 //   机制等价 MC 玩家主动丢弃物品：从眼位沿视线扔出（非哈希随机全圆弹出）。
 void ItemEntityManager::spawnItemThrown(const QVector3D &pos, int itemId, int count,
                                         float dirX, float dirY, float dirZ, float speed,
-                                        const QVariantList &enchants)
+                                        const QVariantList &enchants, const QString &name)
 {
     if (itemId <= 0) return; // air / 非法：不产出（同 spawnItem 守卫）
     if (count < 1) count = 1;
@@ -222,6 +225,7 @@ void ItemEntityManager::spawnItemThrown(const QVector3D &pos, int itemId, int co
         ItemEntity &e = m_entities[size_t(slot)];
         for (int i = 0; i < 4; ++i)
             e.enchants[i] = (i < enchants.size()) ? enchants.at(i).toInt() : 0;
+        e.name = name.trimmed(); // t622 实例名（拾取回填用）
     }
     // 定向投掷初速（三维）：dir 归一化 × speed（含 Y 分量——仰视上抛 / 俯视下压；重力在 tick 内继续作用成
     //   抛物线）。退化全 0 → 不设初速（原地落下）。
@@ -297,6 +301,13 @@ QVariantList ItemEntityManager::enchantsAt(int i) const
     if (i < 0 || i >= int(m_entities.size())) return {0, 0, 0, 0};
     const ItemEntity &e = m_entities[size_t(i)];
     return { e.enchants[0], e.enchants[1], e.enchants[2], e.enchants[3] };
+}
+
+// t622 实体自定义名（铁砧重命名产物丢弃保真；空串 = 注册表默认名）。越界 / 空槽 → 空串。
+QString ItemEntityManager::nameAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return QString();
+    return m_entities[size_t(i)].name;
 }
 
 // t64：拾取装不下时把余数回写、保留 entity（dropHeldCursor 整栈丢弃后部分拾取的回退路径）。

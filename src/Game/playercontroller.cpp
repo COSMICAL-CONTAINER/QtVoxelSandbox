@@ -3447,26 +3447,28 @@ void PlayerController::dropHeld()
     const int id = m_hotbar->selectedItemId();
     if (id == 0) return;            // 空手 → 不丢
     const QVariantList ench = m_hotbar->enchantsAt(m_hotbar->selectedSlot()); // t590 附魔随实体走（先读再 takeStack 清槽）
+    const QString name = m_hotbar->customNameAt(m_hotbar->selectedSlot());    // t622 实例名随实体走（同先读再清）
     const int took = m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
     if (took <= 0) return;          // 取失败（空栈）→ 不丢
-    throwItemInLook(id, 1, ench);   // t609 眼位沿视线丢出
+    throwItemInLook(id, 1, ench, name);   // t609 眼位沿视线丢出
 }
 
 // t609 主动丢弃统一原语：从眼位 + 视线 × kDropForwardOffset 生成掉落实体，初速 = 视线 × kDropThrowSpeed
 //   （含俯仰，无随机散布）。dropHeld / dropHeldStack / dropItemAtFront / dropHeldCursor / dropHeldCursorOne
 //   五个主动丢弃路径共用（死亡掉落 dropAllItems 不走此——死亡散布保留 MC「喷一地」口径）。m_itemEntities
 //   未注入（异常配置）→ 回退旧 spawnItem 信号路径（QML 转发到 itemEntities.spawnItem，格中心 + 随机弹出）。
-void PlayerController::throwItemInLook(int itemId, int count, const QVariantList &enchants)
+//   t622 name：自定义名随实体走（改名物品丢弃保真；拾取回填见 pickupScan）。
+void PlayerController::throwItemInLook(int itemId, int count, const QVariantList &enchants, const QString &name)
 {
     const QVector3D fwd = lookDirection();
     if (m_itemEntities) {
         const QVector3D p = position() + fwd * kDropForwardOffset;
-        m_itemEntities->spawnItemThrown(p, itemId, count, fwd.x(), fwd.y(), fwd.z(), kDropThrowSpeed, enchants);
+        m_itemEntities->spawnItemThrown(p, itemId, count, fwd.x(), fwd.y(), fwd.z(), kDropThrowSpeed, enchants, name);
         return;
     }
     // 回退：旧信号路径（眼位 + 视线 × 1.5 floor 到整数格；ItemEntityManager 存格中心 = 整数+0.5）。
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), itemId, count, enchants);
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), itemId, count, enchants, name);
 }
 
 // t229 Ctrl+Q 第一人称丢弃整栈（spec「第一人称 Ctrl+Q=丢整栈（手持槽）」）：与 dropHeld（Q=丢 1 件）
@@ -3481,11 +3483,12 @@ void PlayerController::dropHeldStack()
     const int id = m_hotbar->blockIdAt(slot);
     if (id == 0) return;            // 空手 → 不丢
     const QVariantList ench = m_hotbar->enchantsAt(slot); // t590 附魔随实体走（先读再 takeStack 清槽）
+    const QString name = m_hotbar->customNameAt(slot);    // t622 实例名随实体走（同先读再清）
     const int cnt = m_hotbar->countAt(slot);
     if (cnt <= 0) return;
     const int took = m_hotbar->takeStack(slot, cnt); // 取整栈（takeStack 返回实际取走数）
     if (took <= 0) return;
-    throwItemInLook(id, took, ench); // t609 眼位沿视线丢出（1 实体携整栈）
+    throwItemInLook(id, took, ench, name); // t609 眼位沿视线丢出（1 实体携整栈）
 }
 
 // t229 背包悬停槽丢弃原语（spec「背包内悬停槽 Q=丢 1 / Ctrl+Q=丢整栈。适用所有背包面板」）：按给定
@@ -3494,11 +3497,12 @@ void PlayerController::dropHeldStack()
 //   PLAN §2 分层：物理位置/实体事件在 Game 层，槽操作在 VM/UI 层）。id==0 / count<=0 → 不丢。
 //   不限捕获态（背包打开时未捕获正是此场景，同 dropHeldCursor）。
 //   t590 enchants：UI 层把 hovered 槽的物品附魔传入 → 实体携带（拾取回填 + 掉落紫光晕）。
+//   t622 name：UI 层把 hovered 槽的物品实例名传入 → 实体携带（拾取回填，防改名物品丢名）。
 //   t609：位置 / 初速同 dropHeld（眼位沿视线丢出，throwItemInLook 统一原语）。
-void PlayerController::dropItemAtFront(int itemId, int count, const QVariantList &enchants)
+void PlayerController::dropItemAtFront(int itemId, int count, const QVariantList &enchants, const QString &name)
 {
     if (itemId == 0 || count <= 0) return; // 空手 / 非正数 → 不丢
-    throwItemInLook(itemId, count, enchants); // t609 眼位沿视线丢出
+    throwItemInLook(itemId, count, enchants, name); // t609 眼位沿视线丢出
 }
 
 // 拖出背包丢弃（t49 / t64）：光标手持栈整栈丢弃为**单个实体携带整栈数量**。不限捕获态
@@ -3514,8 +3518,9 @@ void PlayerController::dropHeldCursor()
     const int cnt = m_hotbar->heldCount();
     if (id == 0 || cnt <= 0) return; // 空手 → 不丢
     const QVariantList ench = m_hotbar->heldEnchants(); // t590 附魔随实例走（先读再清栈）
+    const QString name = m_hotbar->heldCustomName();    // t622 实例名随实例走（先读再清栈）
     m_hotbar->setHeldBlock(0);       // 清空光标手持栈（id=0 同步清 count）
-    throwItemInLook(id, cnt, ench);  // t609 眼位沿视线丢出
+    throwItemInLook(id, cnt, ench, name);  // t609 眼位沿视线丢出
 }
 
 // t228 右键拖出背包丢弃 1 件（spec「右键=逐个」）：光标手持栈取 1 件 → 生成掉落实体(count=1)，余数留光标。
@@ -3529,10 +3534,11 @@ void PlayerController::dropHeldCursorOne()
     if (id == 0 || cnt <= 0) return;        // 空手 → 不丢
     // 取 1 件：余数 >0 则 count-1（id 不变）；归 0 则 setHeldBlock(0) 连 id 一起清（保空栈不变式）。
     const QVariantList ench = m_hotbar->heldEnchants(); // t590 先读附魔再清栈（setHeldBlock(0) 会清附魔）
+    const QString name = m_hotbar->heldCustomName();    // t622 先读实例名再清栈（setHeldBlock(0) 会清名）
     if (cnt <= 1) m_hotbar->setHeldBlock(0);
     else          m_hotbar->setHeldCount(cnt - 1);
     // t590 附魔随实体走（余数留光标的附魔不变，实体带走 1 件的附魔）。t609 眼位沿视线丢出。
-    throwItemInLook(id, 1, ench);
+    throwItemInLook(id, 1, ench, name);
 }
 
 // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（死亡点
@@ -3558,17 +3564,18 @@ void PlayerController::dropAllItems()
     };
     int idx = 0;
     // t590：附魔随死亡掉落实体走（工具 / 护甲丢出再捡保附魔；拾取回填见 pickupScan）。
-    auto dropStack = [&](int id, int count, const QVariantList &ench) {
+    //   t622：实例名同走（改名物品死亡掉落再捡不丢名）。
+    auto dropStack = [&](int id, int count, const QVariantList &ench, const QString &name) {
         if (id == 0 || count <= 0) return;          // 空栈跳过
-        emit spawnItem(cx + kScatter[idx % 9][0], cy, cz + kScatter[idx % 9][1], id, count, ench);
+        emit spawnItem(cx + kScatter[idx % 9][0], cy, cz + kScatter[idx % 9][1], id, count, ench, name);
         ++idx;
     };
     // hotbar 9 槽 → main 27 槽 → 光标手持栈，逐栈掉落。
     for (int i = 0; i < m_hotbar->slotCount(); ++i)
-        dropStack(m_hotbar->blockIdAt(i), m_hotbar->countAt(i), m_hotbar->enchantsAt(i));
+        dropStack(m_hotbar->blockIdAt(i), m_hotbar->countAt(i), m_hotbar->enchantsAt(i), m_hotbar->customNameAt(i));
     for (int i = 0; i < m_hotbar->mainCount(); ++i)
-        dropStack(m_hotbar->mainBlockIdAt(i), m_hotbar->mainCountAt(i), m_hotbar->mainEnchantsAt(i));
-    dropStack(m_hotbar->heldBlock(), m_hotbar->heldCount(), m_hotbar->heldEnchants()); // 光标手持栈（onDied 已归还，通常空）
+        dropStack(m_hotbar->mainBlockIdAt(i), m_hotbar->mainCountAt(i), m_hotbar->mainEnchantsAt(i), m_hotbar->mainCustomNameAt(i));
+    dropStack(m_hotbar->heldBlock(), m_hotbar->heldCount(), m_hotbar->heldEnchants(), m_hotbar->heldCustomName()); // 光标手持栈（onDied 已归还，通常空）
     // 清空整个背包（hotbar + main + held）+ bump revision → QML 同步。仅 Survival 调（死亡仅在 Survival）。
     m_hotbar->resetForMode(int(Survival));
 }
@@ -3647,7 +3654,7 @@ void PlayerController::pickupScan()
         const int id = m_itemEntities->itemIdAt(i);
         const int have = m_itemEntities->countAt(i);    // t64：实体携带数量（整栈丢弃场景）
         if (have <= 0) { m_itemEntities->removeAt(i); continue; } // 防御：count 已为 0 → 销毁
-        const int leftover = m_hotbar->addToAny(id, have, -1, m_itemEntities->enchantsAt(i)); // t97：跨 main + hotbar 智能堆叠；按 maxStack 分流。t590：实体附魔随拾取回填（防「附魔工具丢出再捡变普通」）
+        const int leftover = m_hotbar->addToAny(id, have, -1, m_itemEntities->enchantsAt(i), m_itemEntities->nameAt(i)); // t97：跨 main + hotbar 智能堆叠；按 maxStack 分流。t590：实体附魔随拾取回填（防「附魔工具丢出再捡变普通」）。t622：实例名同回填（防「改名物品丢出再捡丢名」）
         if (leftover <= 0) {
             m_itemEntities->removeAt(i);                // 全入 → 销毁实体
             // t118：拾取语义事件（驱动 AudioManager.playPickup 拾取音；t120 亦据此驱动手弹跳动画）。

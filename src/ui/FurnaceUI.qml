@@ -141,6 +141,7 @@ Item {
     // t566 修「左键均分失效」：t475 InventoryOps.beginLeftDrag 写 root.dragHeldEnchants，本面板漏声明 →
     //   TypeError 被信号处理器吞 → leftDragActive 恒 false。补声明即恢复（详见 SurvivalInventory 同注释）。
     property var dragHeldEnchants: []       // t475 拖动期间手持附魔快照（松手回填光标保真）
+    property string dragHeldName: ""        // t622 拖动期间手持实例名快照（松手 / 早退回填光标保真）
     // 实时重分撤销机制：dragOriginal 记每槽 drag 前原始栈（首次 encounter 快照）；dragWritten 记本轮已写槽。
     // 每滑入新格 → 先据 dragOriginal 撤销 dragWritten、再按新 N 重分。beginLeftDrag / endLeftDrag 重置。
     property var dragOriginal: ({})
@@ -192,7 +193,9 @@ Item {
         root.furnaceStore.setSlot(root.furnaceX, root.furnaceY, root.furnaceZ, si, id, count)
     }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
-    function writeSlot(group, index, id, count) { InventoryOps.writeSlot(root, group, index, id, count) }
+    // t622：薄包装签名补 durability / enchants / name 形参透传（对齐 AnvilUI / ChestUI）—— main/hotbar 槽
+    //   经此路径写槽时实例元数据不被截断；多收实参对旧 4 参调用点无害（undefined → 缺省语义）。
+    function writeSlot(group, index, id, count, durability, enchants, name) { InventoryOps.writeSlot(root, group, index, id, count, durability, enchants, name) }
 
     // 统一槽点击 dispatch（左键整组 / 右键半份）。由各槽的两个 TapHandler（左 / 右各一）调用。
     // t110：slotLeft 入口先查 window.shiftHeld → InventoryOps.slotShiftLeft（Shift+左键搬运 main↔hotbar；
@@ -218,23 +221,25 @@ Item {
             return
         }
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants)
+        const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
         root.hotbar.setHeldEnchants(r.heldEnch)
+        root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
     }
     function slotRight(group, index) {
         const cur = InventoryOps.readSlot(root, group, index)
-        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability, cur.enchants)
+        const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
         if (!r) return
-        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch)
+        InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
         root.hotbar.heldDurability = r.heldDur
         root.hotbar.setHeldEnchants(r.heldEnch)
+        root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
     }
 
     // ── t79/t98/t108/t167 拖动均分 + t110 数字键交换：算法见 InventoryOps（四面板共享）。本处薄委托包装，

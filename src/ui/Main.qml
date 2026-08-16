@@ -540,18 +540,29 @@ Window {
         // 背包已在上文两路径共用处清空，此处直接按存档写
         //   t382：每栈透传 durability（缺省 -1 = 自动满；存档有值则保真工具磨损）。非工具 durability 经
         //   Hotbar::normalizeDurability 归一为 0（inert），故传 0 对方块栈安全。
+        //   t622：每栈透传 name + enchants（缺省 = 无名 / 无附魔；旧存档无此键 → undefined → 缺省，向后兼容）。
+        //   附魔书 / 附魔工具 / 改名物品 round-trip 保真（修「附魔 / 改名退出重进丢失」）。
         if (data.hotbar) for (let i = 0; i < data.hotbar.length && i < 9; ++i) {
             const s = data.hotbar[i]
-            hotbarVM.setStack(i, s.id, s.count, s.durability !== undefined ? s.durability : -1)
+            hotbarVM.setStack(i, s.id, s.count,
+                              s.durability !== undefined ? s.durability : -1,
+                              s.enchants !== undefined ? s.enchants : [],
+                              s.name !== undefined ? s.name : "")
         }
         if (data.main) for (let i = 0; i < data.main.length && i < 27; ++i) {
             const s = data.main[i]
-            hotbarVM.mainSetStack(i, s.id, s.count, s.durability !== undefined ? s.durability : -1)
+            hotbarVM.mainSetStack(i, s.id, s.count,
+                                  s.durability !== undefined ? s.durability : -1,
+                                  s.enchants !== undefined ? s.enchants : [],
+                                  s.name !== undefined ? s.name : "")
         }
         // t382 护甲 4 槽回填（旧存档无 armor 字段 → data.armor undefined → 跳过，保持上文已清的空装备）。
         if (data.armor) for (let k = 0; k < data.armor.length && k < 4; ++k) {
             const s = data.armor[k]
-            hotbarVM.armorSetStack(k, s.id, s.count, s.durability !== undefined ? s.durability : -1)
+            hotbarVM.armorSetStack(k, s.id, s.count,
+                                   s.durability !== undefined ? s.durability : -1,
+                                   s.enchants !== undefined ? s.enchants : [],
+                                   s.name !== undefined ? s.name : "")
         }
         // 同上：`||` 对 0（第 0 槽）会误兜底，恰好 0==默认值巧合正确，但显式检查更稳健且与上面一致。
         hotbarVM.selectedSlot = data.selectedSlot !== undefined ? data.selectedSlot : 0
@@ -560,18 +571,23 @@ Window {
     //   t382 round-trip 保真补全：每栈多记 durability（旧版只存 id/count → 工具磨损 round-trip 后回满），
     //   并新增 armor 4 槽（旧版完全没存护甲 → 装备退出即丢）。version 2 = +durability +armor（自描述 JSON，
     //   applyPlayerState 对缺字段降级，旧 v1 存档仍可读）。
+    //   t622 version 3 = 每栈再记 enchants（附魔书 / 附魔工具）+ name（铁砧改名）——附魔 / 改名 round-trip
+    //   保真（修「附魔台产物 / 铁砧改名退出重进丢失」）；旧 v2 存档无此键 → 读回缺省（无附魔 / 无名），兼容。
     function gatherPlayerState() {
         const hotbar = []
         for (let i = 0; i < 9; ++i) hotbar.push({
-            id: hotbarVM.blockIdAt(i), count: hotbarVM.countAt(i), durability: hotbarVM.durabilityAt(i) })
+            id: hotbarVM.blockIdAt(i), count: hotbarVM.countAt(i), durability: hotbarVM.durabilityAt(i),
+            enchants: hotbarVM.enchantsAt(i), name: hotbarVM.customNameAt(i) })
         const main = []
         for (let i = 0; i < 27; ++i) main.push({
-            id: hotbarVM.mainBlockIdAt(i), count: hotbarVM.mainCountAt(i), durability: hotbarVM.mainDurabilityAt(i) })
+            id: hotbarVM.mainBlockIdAt(i), count: hotbarVM.mainCountAt(i), durability: hotbarVM.mainDurabilityAt(i),
+            enchants: hotbarVM.mainEnchantsAt(i), name: hotbarVM.mainCustomNameAt(i) })
         const armor = []
         for (let k = 0; k < 4; ++k) armor.push({
-            id: hotbarVM.armorBlockIdAt(k), count: hotbarVM.armorCountAt(k), durability: hotbarVM.armorDurabilityAt(k) })
+            id: hotbarVM.armorBlockIdAt(k), count: hotbarVM.armorCountAt(k), durability: hotbarVM.armorDurabilityAt(k),
+            enchants: hotbarVM.armorEnchantsAt(k), name: hotbarVM.armorCustomNameAt(k) })
         return {
-            version: 2,
+            version: 3,
             px: player.feetPosition.x, py: player.feetPosition.y, pz: player.feetPosition.z,
             yaw: player.yaw, pitch: player.pitch,
             mode: player.mode,
@@ -828,8 +844,11 @@ Window {
     //   再 hotbar 同 id → 再空槽 main→hotbar）→ 关包归还的物品能合并进主栏同 id（修「丢弃回栏不合并」根因）。
     function returnHeldToHotbar() {
         if (!hotbarVM.heldBlock || hotbarVM.heldCount <= 0) return
-        // t263 归还手持工具时保真耐久（addToAny 第 3 参 dur；非工具 dur=0 inert）。
-        const leftover = hotbarVM.addToAny(hotbarVM.heldBlock, hotbarVM.heldCount, hotbarVM.heldDurability)
+        // t263 归还手持工具时保真耐久（addToAny 第 3 参 dur；非工具 dur=0 inert）。t475 附魔 / t622 名
+        //   同透传（第 4/5 参——关包归还附魔 / 改名物品保真）。
+        const leftover = hotbarVM.addToAny(hotbarVM.heldBlock, hotbarVM.heldCount,
+                                           hotbarVM.heldDurability, hotbarVM.heldEnchants(),
+                                           hotbarVM.heldCustomName)
         if (leftover > 0) {
             // 背包满：余量丢弃为实体（先把 heldCount 收到余量再 dropHeldCursor，它清 heldBlock + 发 spawnItem）。
             // 注：heldBlock/heldCount 是 Q_PROPERTY（WRITE setter），不能当函数调（.setHeldBlock(0) 会 TypeError），
@@ -888,9 +907,10 @@ Window {
         const n = dropAll ? st.count : 1
         // review rv3：写回透传实例耐久 / 附魔（st 由 panel.readSlot 读出，含 durability/enchants）——
         //   -1 件路径若只传 (id, count) 会把工具 / 护甲槽清成「新实例」（耐久回满 / 附魔丢失）。
+        //   t622：name 同透传（改名物品 Q 丢 1 件不丢名）。
         if (dropAll || st.count <= 1) panel.writeSlot(group, index, 0, 0)            // 清空
-        else                          panel.writeSlot(group, index, st.id, st.count - 1, st.durability, st.enchants) // -1 件（保真）
-        player.dropItemAtFront(st.id, n, st.enchants)             // 玩家前方生成实体（Game 层语义事件；t590 附魔随实体走 → 拾取回填 + 掉落紫光晕）
+        else                          panel.writeSlot(group, index, st.id, st.count - 1, st.durability, st.enchants, st.name) // -1 件（保真）
+        player.dropItemAtFront(st.id, n, st.enchants, st.name)     // 玩家前方生成实体（Game 层语义事件；t590 附魔 / t622 名随实体走 → 拾取回填 + 掉落紫光晕）
     }
 
     // 背包开关（t18）：E 键调。开 → release（光标可见点格子）；关 → grab + 焦点回键位层。
@@ -2122,7 +2142,8 @@ Window {
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。
         // t64：spawnItem 信号带 count 参数（整栈丢弃为 1 实体；破块掉落走 BlockDef.dropCount）。
         // t590：玩家丢弃带附魔工具 / 护甲时信号第 6 参携其附魔（破块 / mob / 爆炸掉落不传 → undefined → 转发缺省空）。
-        function onSpawnItem(x, y, z, id, count, enchants) { itemEntities.spawnItem(x, y, z, id, count, enchants) }
+        // t622：第 7 参携实例名（铁砧改名物品丢弃；其余掉落不传 → 转发缺省空）。
+        function onSpawnItem(x, y, z, id, count, enchants, name) { itemEntities.spawnItem(x, y, z, id, count, enchants, name) }
         // t401 钓获物（拉起咬钩 → player 发 fishCaught，携获物 id + 数量 + 浮标整数格）→ 转发到 manager 生成
         //   掉落实体（同 spawnItem / mobDied 模式；单向事件流：Game 层发语义事件、呈现层只消费）。
         function onFishCaught(itemId, count, x, y, z) { itemEntities.spawnItem(x, y, z, itemId, count) }
