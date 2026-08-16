@@ -8418,9 +8418,12 @@ Window {
                                               : (modelData.locked ? "#3a3a3a" : "#c8a84a")
                                 border.width: modelData.unlocked ? 2 : (modelData.locked ? 1 : 2)
                                 // 可进行态描边脉动（opacity 慢循环；已解锁 / locked 态不动画 → visible 门控停动画）。
+                                //   review-L1：原仅设 anchors.margins 而无锚定线 → 0×0 不可见（margins 只是在
+                                //   锚定基础上外扩 3px 的偏移量，无 fill/居中锚即无尺寸）。补 anchors.fill: parent
+                                //   （margins:-3 → 比节点大 3px 的外扩描边，脉动边框真实渲染）。
                                 Rectangle {
                                     id: nodePulse
-                                    anchors.margins: -3; radius: parent.radius + 3
+                                    anchors.fill: parent; anchors.margins: -3; radius: parent.radius + 3
                                     color: "transparent"
                                     border.color: "#c8a84a"; border.width: 2
                                     visible: !modelData.unlocked && !modelData.locked
