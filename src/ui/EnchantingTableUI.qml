@@ -375,8 +375,11 @@ Item {
         const lapCost = root.lapisCosts[slotIdx] || 1
         // t590 等级 0 也能玩（MC 1.0 语义「低等级只能 1 档」）：1 档在 playerLevel===0 视为可附（消耗 0 级）；
         //   其余档位等级不足 → 拒（affordable 已置灰，此处防御）。
+        //   review L6 修：青金石校验**恒生效**（不随 lvl0Tier1 短路）——旧条件 `!lvl0Tier1 && (lvl不足 || 青金
+        //   不足)` 在 lvl0Tier1 时连青金石也不校验（防御缺口；UI affordable 置灰常态下遮住，但 doEnchant 可被
+        //   其它路径调到）。等级豁免只针对 XP 档（lvl0Tier1），青金石是硬性材料消耗。
         const lvl0Tier1 = root.playerLevel === 0 && slotIdx === 0
-        if (!lvl0Tier1 && (root.playerLevel < lvlCost || root.lapisCount < lapCost)) return
+        if ((root.playerLevel < lvlCost && !lvl0Tier1) || root.lapisCount < lapCost) return
         // review H1 修：普通左键可把整栈书（如 64 本）放进槽 0（resolveClick B 整栈放置；只有 Shift+左键才有
         //   「只取 1 本」语义），而 doEnchant 产物恒 1 本 → 其余 N-1 本曾被静默销毁。附魔只消耗 1 本：先把余下
         //   (count-1) 本归还背包（addToAny，同 slotShiftLeftEnchant 归还路径；书无耐久 / 无附魔，dur 传 0）。
