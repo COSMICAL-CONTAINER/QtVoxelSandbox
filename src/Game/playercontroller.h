@@ -863,9 +863,11 @@ private:
     // t247 草丛 / 小麦作物掉落产出（玩家破块 / 失撑共用）：把 WheatCrop（按 state 判成熟，t237 收割：
     //   成熟掉 1 小麦物品 + 1-2 种子、未成熟仅 1 种子）/ TallGrass（1/kTallGrassSeedDropDenom 概率掉种，
     //   t246）的 spawnItem 计算收敛到此 → finishMiningAt 与 dropUnsupportedCropsAround 共用，**失撑掉落
-    //   与玩家破块产出同源**，零分支漂移。id 非两者 → no-op（caller 误调防御）。state 须为 setBlock(Air)
-    //   前快照（t134 时序：setBlock 委托 5 参数版以 state=0 写入，之后 stateAt 永返 0 → WheatCrop 成熟
-    //   判定失效，须先读）。分层同 spawnItem（Game/Physics 发语义事件，呈现层 / ViewModel 只消费）。
+    //   与玩家破块产出同源**，零分支漂移。纯掉落计算（t619 cropHarvested 成就埋点不在此发 —— review-L2：
+    //   两调用方应区别计数，见 finishMiningAt drop 分支注释）。id 非两者 → no-op（caller 误调防御）。
+    //   state 须为 setBlock(Air) 前快照（t134 时序：setBlock 委托 5 参数版以 state=0 写入，之后 stateAt
+    //   永返 0 → WheatCrop 成熟判定失效，须先读）。分层同 spawnItem（Game/Physics 发语义事件，呈现层 /
+    //   ViewModel 只消费）。
     void dropCropDrops(int x, int y, int z, quint8 id, quint8 state);
     // t305 树叶掉落产出（玩家破叶专用）：破 Leaves 时按概率掉树苗物品（SaplingItemId）+ 木棒（StickId）。
     //   机制等价 MC 1.0 破叶掉落（5% 树苗 / 2% 木棒；本工程对齐概率）。自然衰减（decayLeavesAround）不掉落

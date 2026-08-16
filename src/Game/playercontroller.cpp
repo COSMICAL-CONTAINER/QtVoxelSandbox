@@ -1097,6 +1097,14 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         //   brokenState 已在 setBlock(Air) 前读（t134 时序：WheatCrop 在 snapshot 条件内，成熟判定可靠）。
         if (brokenId == BlockRegistry::WheatCrop || brokenId == BlockRegistry::TallGrass
             || brokenId == BlockRegistry::CarrotCrop || brokenId == BlockRegistry::PotatoCrop) {
+            // t619 progress 成就埋点（review-L2 上移到此）：**生存玩家直破成熟作物**（任一种）→
+            //   cropHarvested 语义事件（「农夫」累计）。仅在 drop=true（生存 canHarvest 通过）的主动
+            //   破坏路径发：创造瞬破（drop=false）与破支撑块的失撑级联（dropUnsupportedCropsAround）
+            //   不算「收获」—— 否则挖作物下方一格即可刷计数。成熟判定用 setBlock 前快照 brokenState。
+            if ((brokenId == BlockRegistry::WheatCrop || brokenId == BlockRegistry::CarrotCrop
+                 || brokenId == BlockRegistry::PotatoCrop)
+                && brokenState >= BlockRegistry::WheatCropStageMax)
+                emit cropHarvested();
             dropCropDrops(x, y, z, brokenId, brokenState);
         } else if (brokenId == BlockRegistry::Leaves) {
             // t305 玩家破叶 → 概率掉树苗物品 + 木棒（机制等价 MC 1.0 破叶 5% 树苗 / 2% 木棒）。Leaves.dropId=0
@@ -1249,12 +1257,11 @@ void PlayerController::dropUnsupportedLaddersAround(int x, int y, int z)
 void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 state)
 {
     if (!m_world) return;
-    // t619 progress 成就埋点：收获**成熟**作物（任一种）→ cropHarvested 语义事件（「农夫」累计）。
-    //   放在分支顶部统一判（三种作物共享阶段上界），单点定义。
-    if ((id == BlockRegistry::WheatCrop || id == BlockRegistry::CarrotCrop
-         || id == BlockRegistry::PotatoCrop)
-        && state >= BlockRegistry::WheatCropStageMax)
-        emit cropHarvested();
+    // t619 progress 成就埋点已上移到 finishMiningAt 的 drop 分支（review-L2）：原在此分支顶部发
+    //   cropHarvested → 调用方两路（finishMiningAt 主动破坏 + dropUnsupportedCropsAround 失撑级联）
+    //   无差别计数，且创造瞬破（drop=false 路径外的失撑扫描）也计入 → 「挖支撑块刷农夫」。现仅
+    //   **生存模式玩家直破成熟作物**（真正的收割动作）发埋点；失撑级联 / 创造破坏不发（产物照掉，
+    //   但不算「收获」语义事件）。本方法保持纯掉落计算（玩家破块 / 失撑共用同源 spawnItem）。
     if (id == BlockRegistry::WheatCrop) {
         const bool mature = state >= BlockRegistry::WheatCropStageMax;
         const int wheatCount = mature ? 1 : 0;
