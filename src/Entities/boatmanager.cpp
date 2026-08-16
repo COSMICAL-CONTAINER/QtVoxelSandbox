@@ -25,8 +25,21 @@ bool BoatManager::aliveAt(int i) const
 void BoatManager::spawnBoat(int x, int y, int z, int boatType)
 {
     if (m_liveCount >= kCap) { qWarning("vo.entities: BoatManager spawnBoat cap reached (%d)", kCap); return; }
+    // review L12：放船点与既有活体船重叠拒绝（防「骑船时在自己脚下放船 → 两船同格叠死」）。船中心间距
+    //   < kBoatMinSpawnDist（1.4：略大于船长 1.4 → 两船中心距离至少容一船身，不互相嵌位）→ 拒绝生成
+    //   （静默 no-op，caller 照常挥手 / 扣物品 —— 玩家瞄准邻近水面重放即可，机制等价 MC 放船点被占）。
+    //   旧版无此查：骑乘中放船点常落在骑乘船所在格 → 新船与骑乘船同格叠加，二者推离逻辑 d≈0 无力分开。
+    const QVector3D spawnPos(float(x) + 0.5f, float(y) + 1.0f - kBoatDraft, float(z) + 0.5f);
+    for (size_t i = 0; i < m_boats.size(); ++i) {
+        if (!m_boats[i].alive) continue; // 跳过空槽（slot-reuse 残留位）
+        const QVector3D d = m_boats[i].pos - spawnPos;
+        if (d.lengthSquared() < kBoatMinSpawnDist * kBoatMinSpawnDist) {
+            qWarning("vo.entities: spawnBoat rejected - overlaps existing boat at slot %d", int(i));
+            return;
+        }
+    }
     Boat b;
-    b.pos = QVector3D(float(x) + 0.5f, float(y) + 1.0f - kBoatDraft, float(z) + 0.5f); // 格中心 + 浮水面（cell 顶 - 吃水）
+    b.pos = spawnPos; // 格中心 + 浮水面（cell 顶 - 吃水）
     b.boatType = (boatType == Spruce) ? Spruce : Oak;
     b.vx = 0.0f; b.vz = 0.0f; b.yaw = 0.0f;
     acquireSlot(std::move(b));

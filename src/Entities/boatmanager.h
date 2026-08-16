@@ -275,6 +275,9 @@ private:
     //   格顶 + 0.75，悬空半格），且骑乘下船摆位算错。加常速重力让陆地船落到支撑面（boatFootprintBlocked 挡实块
     //   即停），与 MC 船放陆地会落地一致。取值 8.0（blocks/s²，明显但不过猛，落半格 ~0.3s 即贴地）。
     static constexpr float kBoatGravity = 8.0f;
+    // review L12 放船点最小间距（blocks）：spawnBoat 拒与既有活体船中心距 < 本值的落点（防两船同格叠加；
+    //   取 1.4 = 船身全长，两船中心至少隔一船身不嵌位）。见 spawnBoat 实现处注释。
+    static constexpr float kBoatMinSpawnDist = 1.4f;
 };
 
 #endif // BOATMANAGER_H
