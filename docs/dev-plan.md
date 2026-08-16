@@ -2490,8 +2490,26 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 - 修：扩 tools/build_cube_icons.py（已有 dimetric 3D 方块图标渲染器）：新入口 `--from-pack <block> <png>`——用 pack PNG 六面贴图按方块形状（满块/半高/门/台阶）渲染 dimetric 图标（同款投影：顶面亮 1.0/左 0.8/右 0.6），输出 icon png 进 qrc；批量处理本轮新方块（发射器/投掷器/附魔台/末地祭坛/书架/铁轨族/红石灯/矿物块/门）。替代现用 pack front 图/程序图标的混搭，统一为「pack 贴图 3D 渲染图标」。
 - ⚠️ pack PNG 只读不进 git——工具读 pack 生成 icon PNG（程序产物）进 git 合法（同 build_cube_icons 现状）。
 
-### 📎 R19.6 范围
-t622-t644（23 项；t643 并入 t630 验证不计开发项 → 22 开发项）。核心：物品数据模型补 name 透传（t622/t623 多 bug 共根因）、创造合成 tab（t624/t625）、压力板边沿+家族（t627/t628）、耕地种植体系（t639）、图标转换工具（t644）。**红石系统大版本单独下轮规划**（t627/t628 只做前置语义）。全部本轮做完不准拖。
+**t645** itemFilenameMap 遗漏批量补映射（9 条 + blockDir 兜底 + 矿车自绘回退）
+- 用户实测（pack item/ 目录 435 文件全列，与现有映射差集）：以下 9 条**物品已实现但 pack 映射漏了**（pack 启用仍走 MaterialIcon 自绘）：
+  | id | 物品 | pack 文件 | 现回退 |
+  |---|---|---|---|
+  | 0x232 | 骨粉 | bone_meal.png（实测在） | drawBonemeal |
+  | 0x233 | 甜浆果 | sweet_berries.png（在） | drawSweetBerry |
+  | 0x234 | 橡木船 item | oak_boat.png（在） | drawBoat(false) |
+  | 0x235 | 云杉船 item | spruce_boat.png（在） | drawBoat(true) |
+  | 0x236 | 青金石 | lapis_lazuli.png（在） | drawLapis |
+  | 0x237 | 纸 | paper.png（在） | drawPaper |
+  | 0x238 | 书 | book.png（在，**勿与 enchanted_book.png 0x227 混淆——已接**） | drawBook |
+  | 0x239 | 火药 | gunpowder.png（在） | drawGunpowder |
+  | 0x23E | 矿车 | minecart.png（在） | **MaterialIcon 连 case 都没有（0x23E 漏）→ 补映射 + 补自绘回退分支**（pack 关时不空白） |
+- 修：itemFilenameMap 逐条补（机制同既有：包缺文件安全跳过回退自绘不崩）。
+- **「映射已写但永远 miss」3 条**：glass.png(0x204)/white_wool.png(0x20E)/oak_sapling.png(0x21B) 目标文件在包内 **block/ 目录**（demo 包把方块类物品放 block/），而 itemIconSource 只探测 itemDir。修：itemIconSource 补 itemDir→blockDir 双探测兜底（参照 blockItemIconSource ~line 680 已有的双探测机制——**不要**手动拷 PNG 进 item/（pack 只读）；block/ 有残留副本 `oak_sapling (2).png` 别碰）。
+- 可选进阶（本轮做）：**spawn_egg.png + spawn_egg_overlay.png**（生物蛋两层模板：底图+斑点叠层；包内无 pig_spawn_egg.png 等独立文件 → 9 个生物蛋映射全 miss）→ 参照 retintCopperTemplate/retintLeatherTemplate 先例做**生成式蛋图标**：底图染 mob 主色 + overlay 染副色 → 落盘缓存（每 mob 种配色表：猪粉/牛棕/羊白/蹒跚绿/骷髅骨白/潜行者暗绿/蜘蛛黑红/鸡白红/鱿鱼蓝灰）。
+- 暂不做留档：bow_pulling_0/1/2.png（弓拉弓三阶段帧）+ fishing_rod_cast.png（抛竿态）——图标随状态切换属增强，本轮不接。
+
+### 📎 R19.6 范围（更新）
+t622-t645（24 项；t643 并入 t630 验证不计开发项 → 23 开发项）。核心：物品数据模型补 name 透传（t622/t623 多 bug 共根因）、创造合成 tab（t624/t625）、压力板边沿+家族（t627/t628）、耕地种植体系（t639）、图标转换工具+物品映射补全（t644/t645）。**红石系统大版本单独下轮规划**（t627/t628 只做前置语义）。全部本轮做完不准拖。
 
 
 
