@@ -192,7 +192,9 @@ private:
 
     // 船 footprint（half = kBoatHalfW）覆盖的格中是否有「可碰撞方块」（挡船）。y 为船中心所在格。
     //   可碰撞 = World::isCollidable（含实体方块 / 门 / 活版门；不含水 / 火把 / 空气）。
-    bool boatFootprintBlocked(World *world, float px, float py, float pz) const;
+    //   review L10：ignoreIce=true（仅水档碰岸探测传）把冰族视作可通行（冰顶与水面同层，船应能滑上冰面；
+    //   见 .cpp 实现处注释）；默认 false —— 位移 / 推船 / 支撑等实际碰撞仍把冰当实体。
+    bool boatFootprintBlocked(World *world, float px, float py, float pz, bool ignoreIce = false) const;
     // 算船当前 XZ 列的水面 Y（找最顶水格 + 1 - kBoatDraft；无水 → 返当前 py 不浮）。用于浮水 lerp 目标。
     //   t508 二轮复盘：outFoundWater（可空）写真是否找到水柱 —— tick 据此判「浮水」vs「无水重力落地」
     //     （旧版用船中心格 == Water 判 hasWater，但船浮水面时中心格常是水上空气格 → 误判无水 → 重力把船拽下水，

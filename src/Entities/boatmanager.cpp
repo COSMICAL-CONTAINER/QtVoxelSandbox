@@ -135,19 +135,29 @@ bool BoatManager::dismount(World *world, QVector3D &outPlayerFeet)
     return true;
 }
 
-bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float pz) const
+bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float pz, bool ignoreIce) const
 {
     if (!world) return false;
     // 扫船 footprint（X [−kBoatHalfW,+kBoatHalfW] × Z [−kBoatHalfLen,+kBoatHalfLen] 的矩形，t556 匹配船体
     //   X 宽 1.0 / Z 长 1.4）覆盖的所有格，Y 取船中心所在格 + 其上一格（船舱占两格高，防只查单格漏矮墙）。
     //   任一格可碰撞 → 挡船。
+    //   review L10：ignoreIce=true（仅水档碰岸探测传）把冰族（Ice/PackIce/BlueIce，isIce 单一权威）视作
+    //   可通行 —— 冰顶与水面顶同层（船中心 Y = 水面顶 = 冰顶），旧探测把同层冰面当岸 → 朝冰速度分量被
+    //   清零，船停在冰缘前 ~0.15 格永远上不了冰（t611 冰面加速只能把船直接放到冰上才生效）。探测豁免后
+    //   船可从水面滑上同层冰面；实际位移碰撞（下方不传本参的 boatFootprintBlocked 调用）冰仍按实体挡
+    //   （船不嵌冰）；真岸（沙 / 草 / 石岸顶通常高出水面 ≥1 格 → y-1 层 + cy 层仍命中）不受影响，防搁浅
+    //   语义保持。
+    const auto cellBlocked = [world, ignoreIce](int x, int y, int z) {
+        return world->isCollidable(x, y, z)
+            && !(ignoreIce && BlockRegistry::isIce(world->blockAt(x, y, z)));
+    };
     const int x0 = int(std::floor(px - kBoatHalfW)), x1 = int(std::floor(px + kBoatHalfW));
     const int z0 = int(std::floor(pz - kBoatHalfLen)), z1 = int(std::floor(pz + kBoatHalfLen));
     const int cy = int(std::floor(py));
     for (int x = x0; x <= x1; ++x)
         for (int z = z0; z <= z1; ++z) {
-            if (world->isCollidable(x, cy, z)) return true;
-            if (world->isCollidable(x, cy + 1, z)) return true;
+            if (cellBlocked(x, cy, z)) return true;
+            if (cellBlocked(x, cy + 1, z)) return true;
         }
     return false;
 }
@@ -403,10 +413,12 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
         // 四向探测：footprint 中心沿该方向前探 kShoreProbe 后，水面同高层（y-1）是否被挡。
         //   probe 取 0.15（略小于半宽 0.5 / 半长 0.7 的接触裕度）：贴岸（footprint 已触岸）时朝岸侧必命中，
         //   背岸侧（后方是水）不命中 → 背向分量永不清除。
-        const bool blockedPosX = boatFootprintBlocked(world, b.pos.x() + kShoreProbe, b.pos.y() - 1.0f, b.pos.z());
-        const bool blockedNegX = boatFootprintBlocked(world, b.pos.x() - kShoreProbe, b.pos.y() - 1.0f, b.pos.z());
-        const bool blockedPosZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() + kShoreProbe);
-        const bool blockedNegZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() - kShoreProbe);
+        //   review L10：探测传 ignoreIce=true（冰面豁免，见 boatFootprintBlocked 注释）—— 冰顶与水面同层，
+        //   船须能越过冰缘滑上冰面（t611 冰面加速入口）；沙 / 草岸等真岸不豁免（防搁浅语义保持）。
+        const bool blockedPosX = boatFootprintBlocked(world, b.pos.x() + kShoreProbe, b.pos.y() - 1.0f, b.pos.z(), /*ignoreIce*/ true);
+        const bool blockedNegX = boatFootprintBlocked(world, b.pos.x() - kShoreProbe, b.pos.y() - 1.0f, b.pos.z(), /*ignoreIce*/ true);
+        const bool blockedPosZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() + kShoreProbe, /*ignoreIce*/ true);
+        const bool blockedNegZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() - kShoreProbe, /*ignoreIce*/ true);
         const bool hitShore = (blockedPosX && b.vx > 0.0f) || (blockedNegX && b.vx < 0.0f)
                            || (blockedPosZ && b.vz > 0.0f) || (blockedNegZ && b.vz < 0.0f);
         if (hitShore) {
