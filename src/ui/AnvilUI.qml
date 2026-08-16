@@ -20,7 +20,8 @@ import "InventoryOps.js" as InventoryOps
 //     本地槽无 customName 通道）；输入 → 产物等级行显新名 + 等级；删「重命名」按钮（产物槽即执行入口）。
 //   **t578 放入规则**（四分支，其余组合产物空）：
 //     1. 左=工具/护甲 + 右=该物修复材料（anvilCanRepairMaterial）→ 修复产物（1 材料 +1/3 满耐久；
-//        原 gate 要求「确有耐久缺失」repairMatNeeded>0 → 满耐久铁镐+铁锭产物空，已删此条件）。
+//        原 gate 要求「确有耐久缺失」repairMatNeeded>0 → 满耐久铁镐+铁锭产物空，已删此条件。
+//        review L5 复检：满耐久（repairMatUse=0）会静默抽 1 级 → 现满耐久无改名产物空 / 有改名走 rename）。
 //     2. 左右同 id（双铁镐/双护甲）→ 合并耐久（min(max, d1+d2+10% max)）+ 附魔并集（机制等价 MC 合并修复）。
 //     3. 右=附魔书（0x227）→ 附魔合并（t550 已有，保持）。
 //     4. 其余 → activeOp="" → 产物空（放不进产物格语义）。
@@ -393,10 +394,13 @@ Item {
         const n = Math.ceil(miss / per)
         return Math.min(n, 3)
     }
-    // 右槽材料能否触发修复（t578 修「铁镐+铁锭产物空」）：左=工具/护甲 + 右=该物品修复材料即可合成，
-    //   **不再要求「确有耐久缺失」**——原 gate `repairMatNeeded > 0` 使满耐久工具+材料产物空（MC 语义：
-    //   合法组合恒出产物；满耐久时产物耐久不变、仍按 max(1, 实耗材料数) 计费）。
-    readonly property bool canRepair: {
+    // 右槽材料能否触发修复（t578 修「铁镐+铁锭产物空」）：左=工具/护甲 + 右=该物品修复材料即可合成。
+    //   review L5：拆两层——repairPairValid（组合合法：左工具/护甲 + 右匹配材料，不看耐久）+
+    //   canRepair（合法组合**且确有耐久缺失** repairMatNeeded>0）。t578 曾删耐久 gate（「满耐久也出产物」），
+    //   但 repairMatUse()=0 时 cost=Math.max(1,0)=1 级、材料不耗、耐久不变 = **静默抽 1 级**（review L5）。
+    //   现口径：满耐久无改名 → 产物空（不出产物即不收费）；满耐久 + 改名 → 走 rename 分支（只收改名 1 级，
+    //   材料不动——canRename 据 repairPairValid 放行）。
+    readonly property bool repairPairValid: {
         const _r = root.anvilRev
         if (_r < 0) return false
         if (root.leftId === 0 || root.matId === 0) return false
@@ -405,6 +409,7 @@ Item {
         if (!root.hotbar || !root.hotbar.anvilCanRepairMaterial(root.leftId, root.matId)) return false
         return true
     }
+    readonly property bool canRepair: root.repairPairValid && repairMatNeeded(root.leftId, root.leftDur) > 0
     // t578 同物合并分支：左右同 id（双铁镐/双护甲）→ 合并耐久 + 附魔并集（机制等价 MC 两件合并修复）。
     //   仅限有耐久语义的物品（工具/护甲）；可堆叠材料/方块同 id 不合成（落入「其余组合 → 产物空」）。
     readonly property bool canCombine: {
@@ -546,8 +551,10 @@ Item {
     // 重命名前置：左槽有物 + 名字**真改过**（≠自动填充值 lastAutoName；t606② 自动填名后框恒非空，
     //   改名产物须以用户实际修改为前提——未改名的物品单独放 A 不出产物，机制等价 MC「名字栏与当前名
     //   相同则无改名操作」）。改名可与修复 / 合并叠加（MC：改名 + 修复合算等级）。
-    //   t606④ 收紧：B 非空且与 A 无任何合法关系（非修复材料 canRepair / 非同 id canCombine / 非附魔书
+    //   t606④ 收紧：B 非空且与 A 无任何合法关系（非修复材料 repairPairValid / 非同 id canCombine / 非附魔书
     //   canMerge 三分支全不中）→ 改名也不出产物（C 直接消失）——原 bug：A 工具 + B 泥土仍显改名产物。
+    //   review L5：B = 匹配修复材料但满耐久（canRepair 假）→ 据 repairPairValid 放行 rename（只收改名 1 级，
+    //   材料不动）。
     //   B 空 + 改了名 → 单独改名合法（用户规格：「只放 A、B 没东西那就是可以的」）。
     readonly property bool canRename: {
         const _r = root.anvilRev
@@ -555,7 +562,7 @@ Item {
         if (_r < 0 || root.leftId === 0) return false
         if (_n.trim().length === 0) return false
         if (_n.trim() === root.lastAutoName.trim()) return false
-        if (root.matId !== 0 && !root.canRepair && !root.canCombine && !root.canMerge) return false
+        if (root.matId !== 0 && !root.repairPairValid && !root.canCombine && !root.canMerge) return false
         return true
     }
     // 改名是否叠加在修复 / 合并之上（产物名即时显新名）。
@@ -587,9 +594,10 @@ Item {
     //   机制等价 MC 铁砧 40 级上限 Too Expensive）。合并消耗 > 上限 → 过于昂贵（不可合，红字）。
     readonly property int kMergeCostCap: 40
     readonly property bool mergeTooExpensive: root.canMerge && (2 * root.bookMerge.applied) > root.kMergeCostCap
-    // 所需 XP 等级（产物格下绿字数值）。修复 = 实耗材料数（至少 1）；同物合并 = 2（机制等价 MC 合并
-    //   修复计费档）；t615 附魔书合并 = 成功写入条数 × 2（用户口径①「敲附魔书的等级惩罚」；全不适用 /
-    //   全冲突 → 条数 0 → 仍可出产物（只继承 A），消耗照算 0 级 + 书照扣）；改名 = 1；改名叠加 → +1。
+    // 所需 XP 等级（产物格下绿字数值）。修复 = 实耗材料数（至少 1——canRepair 已保证 repairMatNeeded>0
+    //   → repairMatUse ≥1，review L5；原 max(1,·) 兜的是「满耐久静默抽 1 级」已移除）；同物合并 = 2（机制
+    //   等价 MC 合并修复计费档）；t615 附魔书合并 = 成功写入条数 × 2（用户口径①「敲附魔书的等级惩罚」；
+    //   全不适用 / 全冲突 → 条数 0 → 仍可出产物（只继承 A），消耗照算 0 级 + 书照扣）；改名 = 1；改名叠加 → +1。
     readonly property int cost: {
         const op = root.activeOp
         if (op === "repair") return Math.max(1, root.repairMatUse()) + (root.renaming ? 1 : 0)
@@ -707,10 +715,14 @@ Item {
             const max = root.maxDur(outId)
             // t550-review 修：按实耗材料数修（use = min(右槽实有, 修满所需)），1 锭修 1/3、费 1 级；
             //   不再按 repairMatNeeded 满额修（原 bug：右槽只 1 锭免费修满 3/3 还按 3 级收费）。
-            //   t578：满耐久工具+材料（repairMatUse=0）→ 耐久不变（合法组合恒出产物）。
+            //   review L5：满耐久 + 材料不再走本分支（canRepair 耐久 gate）——原路径 use=0 时产物耐久不变
+            //   却收 max(1,0)=1 级 = 静默抽级；现满耐久 + 改名 → rename 分支（只收改名 1 级、材料不动），
+            //   满耐久不改名 → 无产物。
             const use = root.repairMatUse()
             outDur = Math.min(max, root.leftDur + use * (max / 3))
             root.lastResult = "修复完成 +" + root.cost + "级"
+            // review L5：op==="repair" 仅在 repairMatNeeded>0 时可达（canRepair 含耐久缺失 gate）→ use 恒
+            //   ≥1（min(实有, 所需)，所需 ≥1）——原「满耐久 use=0 仍出产物收 1 级」路径已移除。
         } else if (op === "combine") {
             // t578 同物合并（双铁镐/双护甲）：产物耐久 = min(max, d1+d2+10% max)（与 productDur 预览同口径），
             //   附魔并集走 computeCombineEnch（review M9：冲突过滤 + 同款等级合并 + 封顶，与预览 productEnch
@@ -772,7 +784,8 @@ Item {
         //   经验，MC 创造材料也免但此处不扩大）。
         if (!root.creativeMode && !root.playerState.spendLevels(root.cost)) return
         if (op === "repair") {
-            // 消耗右槽材料：每修 1/3 需 1 件（取到 0 清空）。满耐久 use=0 → 不耗材料（耐久也无需加）。
+            // 消耗右槽材料：每修 1/3 需 1 件（取到 0 清空）。op==="repair" 时 use 恒 ≥1（canRepair 耐久
+            //   gate，review L5）；use 归 0 清空槽位防 0 数量残留。
             const use = root.repairMatUse()
             root.anvilCounts[1] = Math.max(0, (root.anvilCounts[1] || 0) - use)
             if (root.anvilCounts[1] <= 0) { root.anvilSlots[1] = 0; root.anvilDur[1] = 0 }
