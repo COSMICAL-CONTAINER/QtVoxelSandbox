@@ -529,12 +529,15 @@ public:
         //   附魔台（EnchantingTable）：右键打开附魔 UI（playercontroller useBlock 分支发 enchantingTableOpened
         //   信号 → Main.qml 显 EnchantingTableUI：3 附魔选项预览槽，每槽消耗 XP 等级 1/2/3 + 对应青金石 1/2/3；
         //   周围书架数（≤15，2 格切比雪夫半径内）提升可选附魔等级上限，机制等价 MC 1.0 书架加成）。
-        //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 crafting_table /
-        //   furnace / chest 同族；MC 1.0 附魔台是异形低盒 + 顶上立书，本工程简化为整立方以复用既有渲染路径，
-        //   机制等价非视觉对齐 §4）、hardness=5.0（同 MC 1.0 附魔台量级，石质偏硬）、toolType=Pickaxe、
+        //   **t620 改 0.75 高矮盒**（机制等价 MC 1.0 附魔台 12/16 高非整块；此前简化为整立方，pack 贴图
+        //   接入时改半高）：mesher 走 PartialBlockGeometry 画 [0,0.75] 矮盒；solid=false（同 Farmland 模式
+        //   —— 不挡邻居面剔除防 x-ray 洞，光照仍满遮）；碰撞矮盒 0.75 / selection·raycast 仍整格
+        //   （ShapeFull，三者解耦同 Farmland）、hardness=5.0（同 MC 1.0 附魔台量级，石质偏硬）、toolType=Pickaxe、
         //   requiresTool=true、minToolTier=1（木镐可破且掉落）、dropId=自身（破块掉附魔台方块，可放回）、
         //   dropCount=1、maxStack=64。各面贴图：顶=enchanting_table_top(109)（黑曜石底+钻石纹+顶部立书轮廓）/
-        //   底·侧·前=enchanting_table_side(110)（黑曜石底+钻石嵌点+边缘暗化）。音色归 GroupStone（石质）。
+        //   底=obsidian(77)（demo 包 enchanting_table_bottom.png 与 obsidian.png 逐像素相同，复用瓦片）/
+        //   侧·前=enchanting_table_side(110)（黑曜石底+钻石嵌点+边缘暗化；pack 合成裁掉顶部 0.25 空白）。
+        //   音色归 GroupStone（石质）。
         //   配方：1 书 + 2 钻石 + 4 黑曜石 → 1 附魔台（工作台 3×3 有序，recipe.cpp）。进创造调色板。
         EnchantingTable = 94, // 附魔台：右键开附魔 UI（3 选项槽，消耗 XP 等级 + 青金石）；书架加成；配方书+钻石+黑曜石
         //   书架（Bookshelf）：纯装饰合成产物（机制等价 MC 1.0 bookshelf —— 仅作为附魔台加成来源；本工程无
@@ -694,12 +697,13 @@ public:
         //   solid=false（非实体 → 不挡邻居面剔除，与地形解耦；机制等价 MC 末地传送门无碰撞可走过）/ ShapeFull
         //   （碰撞 / 选中仍走整格可踩 / 可瞄准）、**hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，
         //   防创造秒破传送门；同 bedrock / Water 哨兵语义）、dropId=0 不掉落、dropCount=0、maxStack=64
-        //   （worldgen 专属 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图=end_portal(129)
-        //   （深紫黑星空底 + 中心亮绿旋涡 + 散布星点，原创自绘 §9a；tools/build_end_portal.py 程序生成）。
+        //   （worldgen 专属 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图=t620 末影祭坛三面（见下 endframe 化段；原创自绘 §9a；tools/build_endframe.py 程序生成）。
         //   音色归 GroupStone（石质兜底）。**激活机制**：玩家持末影之眼物品（EndEyeId）右键传送门 → placeBlock
         //   useBlock 分支检测命中 EndPortal + 持 EndEyeId → 翻 state bit0（激活态）+ emit swingArm + qInfo 日志
         //   （末地预热占位：仅激活效果 + 日志，不实现末地维度，spec「实际传送末地可推迟为占位/告警」）。
-        //   mesher 据 state bit0 切贴图（未激活=end_portal(129) / 激活=end_portal_active(130) 同星空但中心旋涡更亮）。
+        //   **t620 endframe 化**：贴图从程序星空切到末影祭坛三面（侧·底=endframe_side(140) / 顶（未放之眼）=
+        //   endframe_top(141) / 顶（激活态）=endframe_eye(142)（框面+中央之眼亮纹，tileFor per-face+
+        //   state 选；程序星空 129/130 仍留图集但已无引用）。
         //   不进创造调色板（worldgen 专属；玩家经末影之眼激活交互，非放置）。state 经 m_states 落 SQLite round-trip 保真。
         EndPortal       = 111, // 末地传送门：要塞传送门房中央（机制等价 MC 1.0 end portal）；末影之眼右键激活（占位）
         // ── t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / 木按钮 / 石按钮；无红石系统，故用「右键激活 →
@@ -763,7 +767,7 @@ public:
         //   pack 侧经既存 tileFilenameMap {12→furnace_top.png} 自动覆盖）/ 侧=furnace_side(13)（复用熔炉侧面，
         //   同上自动 pack 覆盖）/ 前面（排出口所朝方向）=dropper_front(139)（石质灰底 + 中央**小**方形暗孔——
         //   比发射器的大暗腔排出口更小更简的「轻量出口」读感，只掉物品不射弹丸；tools/build_dropper.py 程序生成
-        //   原创自绘 §9a；pack 侧 tileFilenameMap {139→dropper_front_horizontal.png} 留 t620 接入）。
+        //   原创自绘 §9a；pack 侧 tileFilenameMap {139→dropper_front_horizontal.png} t620 已接）。
         //   **state 编码朝向**（同发射器 / 熔炉 / 箱子 chestFrontFace 编码）：bit[1:0] = 0=+X 1=-X 2=+Z 3=-Z；
         //   放置时排出口面朝玩家（同熔炉）；mesher 据 state 选前面贴图（同 furnace / dispenser tileFor 分支）。
         //   音色归 GroupStone（石质）。**触发路径**（同发射器，PlayerController::scanDispenserTraps 扩展）：
@@ -1299,12 +1303,15 @@ public:
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
-    //   109=enchanting_table_top（t474 附魔台顶面贴图；黑曜石深紫黑底 + 钻石青白菱斑 + 顶部立书轮廓，
-    //      原创自绘 §9a；EnchantingTable 顶面=本 tile；tools/build_enchanting_table.py 程序生成）。
-    //   110=enchanting_table_side（t474 附魔台侧面/底面/前面贴图；黑曜石深紫黑底 + 钻石嵌点 + 边缘暗化，
-    //      原创自绘 §9a；EnchantingTable 底/侧/前=本 tile）。
-    //   111=bookshelf（t474 书架各面贴图；木板边框 + 中央书脊彩色书列（红 / 蓝 / 绿 / 棕书脊），原创自绘
-    //      §9a；Bookshelf 各面=本 tile；tools/build_bookshelf.py 程序生成）。
+    //   109=enchanting_table_top（t474/t620 附魔台顶面贴图；非 pack = 黑曜石深紫黑底 + 钻石青白菱斑 + 顶部立书轮廓，
+    //      原创自绘 §9a；pack = enchanting_table_top.png；EnchantingTable 顶面=本 tile；tools/build_enchanting_table.py）。
+    //   110=enchanting_table_side（t474/t620 附魔台侧面贴图（底面复用 obsidian(77)；非 pack = 黑曜石深紫黑底 +
+    //      钻石嵌点 + 边缘暗化，原创自绘 §9a；pack 合成时裁掉 enchanting_table_side.png 顶部 0.25 空白
+    //      → 有效 0.75 部分整张贴 0.75 高侧面（无缝，机制等价 MC 附魔台 12/16 高侧贴图）；EnchantingTable
+    //      底=obsidian(77)/侧=本 tile；tools/build_enchanting_table.py）。
+    //   111=bookshelf（t474/t620 书架侧面贴图；木板边框 + 中央书脊彩色书列（红 / 蓝 / 绿 / 棕书脊），原创自绘
+    //      §9a；t620 起书架 per-face：侧/前=本 tile、顶/底=planks(8)（机制等价 MC bookshelf 顶底木板）；
+    //      tools/build_bookshelf.py 程序生成）。
 
     // 图集瓦片总数（atlas.png 横排瓦片数 = 最大 tile 序号 + 1；当前 138）。
     //   **单一权威**：mesher(chunkgeometry) 与 BlockCube（第一/第三人称手持 + 掉落/下落实体）
@@ -1322,7 +1329,15 @@ public:
     //   t609：139=dropper_front（投掷器前面（排出口所朝面）贴图；石质灰底 + 中央小方形暗孔（比发射器的大
     //   暗腔排出口更小更简的轻量出口读感）；Dropper 前面=本 tile（mesher 据 state 选，同发射器 tileFor 分支）；
     //   顶/底/侧复用熔炉 12/13；tools/build_dropper.py 程序生成）。
-    static constexpr int AtlasTileCount = 140;
+    //   t620：140..142=末影祭坛三张（EndPortal 方块的 endframe 化视觉：140=endframe_side 侧/底（灰白细孔
+    //   框身）/ 141=endframe_top 顶（未放末影之眼：框面 + 中央暗绿凹槽）/ 142=endframe_eye 顶（已放之眼：
+    //   框面 + 中央之眼亮纹，mesher tileFor 据 EndPortal state bit0 选 141/142）；tools/build_endframe.py
+    //   程序生成原创像素图）。
+    //   t620：143..146=门上下半 per-face 四张（机制等价 MC 1.0 门两格高：143=door_wood_upper（橡木上半
+    //   格栅窗）/ 144=door_wood_lower（橡木下半锁孔板）/ 145=door_spruce_upper / 146=door_spruce_lower（云杉
+    //   深冷棕同布局）；PartialBlockGeometry door case 据 state bit3 选 upper/lower——kDefs 的 WoodDoor/
+    //   SpruceDoor topTile=upper / bottomTile=lower 承载该选择；tools/build_door.py 程序生成）。
+    static constexpr int AtlasTileCount = 147;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质

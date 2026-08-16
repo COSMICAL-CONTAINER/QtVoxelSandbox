@@ -56,7 +56,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* wood_stairs    */ {int(BlockRegistry::WoodStairs),        8,  8, 8,  8, false, BlockRegistry::ShapeStairs,   2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodStairs),        1, 64, "wood_stairs",        "木板楼梯"}, // t265 斧加速；state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z；bit2=上下倒置
     /* wood_fence     */ {int(BlockRegistry::WoodFence),         8,  8, 8,  8, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodFence),         1, 64, "wood_fence",         "木栅栏"}, // t265 斧加速；中心立柱 0.4 见方 × 1.5 高 + 四向横档连邻居（t209）；state=0
     /* wood_pressure_plate */ {int(BlockRegistry::WoodPressurePlate), 8, 8, 8, 8, false, BlockRegistry::ShapePlate, 2.0f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::WoodPressurePlate), 1, 64, "wood_pressure_plate", "木板压力板"}, // t265 斧加速；贴地薄板；state=0
-    /* wood_door      */ {int(BlockRegistry::WoodDoor),          8,  8, 8,  8, false, BlockRegistry::ShapeDoor,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodDoor),          1,  1, "wood_door",          "木板门"}, // t265 斧加速；两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向
+    /* wood_door      */ {int(BlockRegistry::WoodDoor),        143,144,144,144, false, BlockRegistry::ShapeDoor,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodDoor),          1,  1, "wood_door",          "木板门"}, // t265 斧加速；两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向；t620 上下半 per-face（topTile=upper143/bottomTile=lower144，door case 据 bit3 选；手持/掉落 sideTile=lower）
     /* wood_trapdoor  */ {int(BlockRegistry::WoodTrapdoor),      8,  8, 8,  8, false, BlockRegistry::ShapeTrapdoor, 2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodTrapdoor),      1, 64, "wood_trapdoor",      "木活板门"}, // t265 斧加速；state bit0=开/合 bit[2:1]=开时朝向
     // ── t148 水（静水）：机制等价 MC 1.0 静水。solid=false（不挡邻居面剔除 → 相邻地形仍画自己的面）、
     //   shape=ShapeNone（**无碰撞 sub-AABB** → 玩家穿过，spec「物理 v1 穿过」；与 torch 同走 ShapeNone 路径）、
@@ -366,7 +366,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* spruce_planks */ {int(BlockRegistry::SprucePlanks),   102,102,102,102, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SprucePlanks),   1, 64, "spruce_planks", "云杉木板"}, // 整立方 opaque；state 复用 bit0 作双半砖合并 marker（DoubleSlabMarkerBit）
     /* spruce_slab   */ {int(BlockRegistry::SpruceSlab),     102,102,102,102, false, BlockRegistry::ShapeSlab,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceSlab),     1, 64, "spruce_slab",   "云杉台阶"}, // 半高（state bit0=上半(1)/下半(0)；与 WoodSlab 同编码）
     /* spruce_fence  */ {int(BlockRegistry::SpruceFence),    102,102,102,102, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceFence),    1, 64, "spruce_fence",  "云杉栅栏"}, // 中心立柱 + 四向横档连邻居（与 WoodFence 同几何）；state=0
-    /* spruce_door   */ {int(BlockRegistry::SpruceDoor),     102,102,102,102, false, BlockRegistry::ShapeDoor,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceDoor),     1,  1, "spruce_door",   "云杉门"}, // 两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向（与 WoodDoor 同编码）
+    /* spruce_door   */ {int(BlockRegistry::SpruceDoor),     145,146,146,146, false, BlockRegistry::ShapeDoor,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::SpruceDoor),     1,  1, "spruce_door",   "云杉门"}, // 两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向（与 WoodDoor 同编码）；t620 上下半 per-face（145 upper/146 lower，同 WoodDoor 模式）
     // ── t467 雪原浆果灌木丛（SweetBerryBush）：机制等价 MC 1.0 sweet berry bush（雪原 Snowy 群系散布的可采摘
     //   灌木）。**cross 形广告牌方块**（与 TallGrass / Sapling / 作物同走 PartialBlockGeometry 的 cross 几何段，两片
     //   对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。**3 生长阶段存 chunk state**（state = 阶段
@@ -402,24 +402,29 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* lapis_ore    */ {int(BlockRegistry::LapisOre),        108,108,108,108, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 2, true,                           0x236, 1, 64, "lapis_ore",    "青金矿石"},
     // ── t474 附魔链两件方块（机制等价 MC 1.0 enchanting table / bookshelf；名称 / 贴图全原创自绘 §9a）：
     //   附魔台（EnchantingTable）：右键打开附魔 UI（3 选项槽，消耗 XP 等级 1/2/3 + 对应青金石 1/2/3）；
-    //   周围书架数（≤15，2 格切比雪夫半径内）提升可选附魔等级上限。整立方 opaque（solid=true / ShapeFull
-    //   —— 走 mesher 整立方面路径，**非**异形，与 crafting_table / furnace / chest 同族；MC 1.0 附魔台是
-    //   异形低盒 + 顶上立书，本工程简化为整立方以复用既有渲染路径，机制等价非视觉对齐 §4）、
-    //   hardness=5.0（同 MC 1.0 附魔台量级，石质偏硬）、toolType=Pickaxe、requiresTool=true、minTier1
-    //   （木镐可破且掉落）、dropId=自身、dropCount=1、maxStack=64。各面贴图：顶=enchanting_table_top(109)
-    //   （黑曜石深紫黑底 + 钻石青白菱斑 + 顶部立书轮廓）/ 底·侧·前=enchanting_table_side(110)（黑曜石
-    //   深紫黑底 + 钻石嵌点 + 边缘暗化）。音色归 GroupStone（石质）。配方：1 书 + 2 钻石 + 4 黑曜石 → 1
-    //   附魔台（工作台 3×3 有序）。进创造调色板。
-    /* enchanting_table */ {int(BlockRegistry::EnchantingTable), 109, 110, 110, 110, true,  BlockRegistry::ShapeFull,   5.0f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::EnchantingTable), 1, 64, "enchanting_table", "附魔台"},
+    //   周围书架数（≤15，2 格切比雪夫半径内）提升可选附魔等级上限。**t620 改 0.75 高矮盒**（机制等价 MC 1.0
+    //   附魔台 12/16 高非整块——MC 1.0 附魔台是异形低盒 + 顶上立书，本工程此前简化为整立方，t620 pack 贴图
+    //   接入时改半高）：mesher 经 PartialBlockGeometry 画 [0,0.75] 矮盒（顶=enchanting_table_top(109) /
+    //   侧=enchanting_table_side(110) / 底=obsidian(77)），pack 侧贴图自带顶部 0.25 空白 → 合成时裁掉
+    //   → 有效部分整张贴 0.75 高侧面（无缝）。solid=false（同 Farmland 模式：矮盒渲染 → 不挡邻居面剔除 →
+    //   相邻整立方画满高侧壁填住上方 0.25 缺口防 x-ray 洞；光照仍满遮 lightOpacity 特例 15）；碰撞矮盒
+    //   0.75（collisionAABBs 特例，机制等价 MC 附魔台矮 hitbox）；selection/raycast 仍走 ShapeFull 整格
+    //   （三者解耦，同 Farmland）。hardness=5.0（同 MC 1.0 附魔台量级，石质偏硬）、toolType=Pickaxe、
+    //   requiresTool=true、minTier1（木镐可破且掉落）、dropId=自身、dropCount=1、maxStack=64。
+    //   音色归 GroupStone（石质）。配方：1 书 + 2 钻石 + 4 黑曜石 → 1 附魔台（工作台 3×3 有序）。
+    //   进创造调色板。
+    /* enchanting_table */ {int(BlockRegistry::EnchantingTable), 109, 77, 110, 110, false, BlockRegistry::ShapeFull,   5.0f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::EnchantingTable), 1, 64, "enchanting_table", "附魔台"},
     //   书架（Bookshelf）：纯装饰合成产物（机制等价 MC 1.0 bookshelf —— 仅作为附魔台加成来源；本工程无
     //   「书架可放书」物品栏，纯合成 / 放置方块）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整
     //   立方面路径，**非**异形，与 chest / wool 同族）、hardness=1.5（同 MC 1.0 书架量级，木质偏软）、
     //   toolType=Axe（木制；requiresTool=false → 空手也掉落，仅斧给速度加成）、dropId=自身（破书架掉书架
     //   方块，可放回 —— MC 1.0 破书架掉**书**物品，本工程掉书架方块以便玩家回收重放，区别于 MC 留记录）、
-    //   dropCount=1、maxStack=64。各面贴图=bookshelf(111)（木板边框 + 中央书脊彩色书列）。音色归 GroupWood
-    //   （木质）。配方：6 木板 + 3 书 → 1 书架（工作台 3×3 有序：上 / 下两行木板、中间一行 3 书）。进创造
-    //   调色板（玩家可取用 / 放置；附魔台加成测试用）。
-    /* bookshelf    */ {int(BlockRegistry::Bookshelf),       111,111,111,111, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Bookshelf),      1, 64, "bookshelf",    "书架"},
+    //   dropCount=1、maxStack=64。**t620 per-face**：顶·底=planks(8)（机制等价 MC bookshelf 顶底木板，
+    //   pack 侧经既存 {8→oak_planks.png} 自动覆盖）/ 侧·前=bookshelf(111)（木板边框 + 中央书脊彩色书列
+    //   —— pack {111→bookshelf.png}，此前六面同贴图简化）。音色归 GroupWood（木质）。配方：6 木板 + 3 书
+    //   → 1 书架（工作台 3×3 有序：上 / 下两行木板、中间一行 3 书）。进创造调色板（玩家可取用 / 放置；
+    //   附魔台加成测试用）。
+    /* bookshelf    */ {int(BlockRegistry::Bookshelf),       8, 8, 111, 111, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Bookshelf),      1, 64, "bookshelf",    "书架"},
     // ── t477 铁块（IronBlock）：9 铁锭合成的金属存储方块（铁砧配方前置）。整立方 opaque（solid=true /
     //   ShapeFull，与 obsidian/wool 同族走整立方面路径）、hardness=5.0（金属偏硬）、Pickaxe、requiresTool=true、
     //   minTier1（木镐可破且掉落）、dropId=自身、dropCount=1、maxStack=64。各面=iron_block(112)（金属灰底+
@@ -522,16 +527,20 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   同编码）。经 isStairs 谓词并入异形路由（段外）。
     /* stone_brick_stairs */ {int(BlockRegistry::StoneBrickStairs), 128,128,128,128, false, BlockRegistry::ShapeStairs, 1.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::StoneBrickStairs), 1, 64, "stone_brick_stairs", "石砖楼梯"},
     //   末地传送门（EndPortal）：要塞传送门房中央的传送门方块（机制等价 MC 1.0 end portal；§9 区隔：末地为
-    //   通用描述词）。**整立方不透明**——简化为满格整立方（机制等价 MC 末地传送门「传送门平面」外观，本工程
-    //   不做异形框架；激活后由 Main.qml 伪光源 + state 切换显星空黑洞视觉）。solid=false（非实体 → 不挡邻居
-    //   面剔除，与地形解耦；机制等价 MC 末地传送门无碰撞可走过）/ ShapeFull（碰撞/选中仍走整格可踩/可瞄准）、
-    //   **hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，防创造秒破传送门；同 bedrock/Water 哨兵
-    //   语义）、dropId=0 不掉落、dropCount=0、maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，填 64
-    //   与方块族一致）。各面贴图=end_portal(129)（深紫黑星空底 + 中心亮绿旋涡 + 散布星点）。音色归 GroupStone
-    //   （石质兜底）。激活：玩家持末影之眼物品右键传送门 → placeBlock useBlock 分支翻 state bit0（激活态）+
-    //   qInfo 日志（末地预热占位，不实现末地维度）。mesher 据 state bit0 切 end_portal(129)/end_portal_active(130)。
-    //   不进创造调色板（worldgen 专属；玩家经末影之眼激活交互）。
-    /* end_portal   */ {int(BlockRegistry::EndPortal),         129,129,129,129, false, BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "end_portal",   "末地传送门"},
+    //   通用描述词）。**整立方不透明**——简化为满格整立方（机制等价 MC 末地传送门「传送门平面」外观；**t620
+    //   endframe 化**：本工程无独立祭坛框方块（MC end portal frame），传送门方块本体兼作末影祭坛——贴图从
+    //   程序星空（tile 129/130，仍留图集供程序回退）切到祭坛三面：侧·底=endframe_side(140)（灰白细孔框身）/
+    //   顶（未放之眼）=endframe_top(141)（框面 + 中央暗绿凹槽）/ 顶（激活态，state bit0 放末影之眼后）=
+    //   endframe_eye(142)（框面 + 中央之眼亮纹，mesher tileFor 特判 per-face + state 选）；pack 侧合成：
+    //   {140←endframe_side.png 裁顶部 3/16 空白}/{141←endframe_top.png}/{142←endframe_top.png +
+    //   endframe_eye.png overlay 合成}（MC eye 贴图是中央局部图非整面，须叠在 top 上）。solid=false（非实体
+    //   → 不挡邻居面剔除，与地形解耦；机制等价 MC 末地传送门无碰撞可走过）/ ShapeFull（碰撞/选中仍走整格可踩/
+    //   可瞄准）、**hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，防创造秒破传送门；同 bedrock/
+    //   Water 哨兵语义）、dropId=0 不掉落、dropCount=0、maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，
+    //   填 64 与方块族一致）。音色归 GroupStone（石质兜底）。激活：玩家持末影之眼物品右键传送门 → placeBlock
+    //   useBlock 分支翻 state bit0（激活态）+ qInfo 日志（末地预热占位，不实现末地维度）+ lightEmission 10
+    //   星绿泛光。不进创造调色板（worldgen 专属；玩家经末影之眼激活交互）。
+    /* end_portal   */ {int(BlockRegistry::EndPortal),         141,140,140,140, false, BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "end_portal",   "末地传送门"},
     // t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / wooden button / stone button；无红石故右键激活即点燃邻接
     //   TNT）。三者复用 ShapePlate（贴地薄板，同 WoodPressurePlate 几何）。PartialBlockGeometry 据 state bit0
     //   （激活态）切亮色高光（非 MC 资产，tools/build_lever_button.py 程序生成）。激活：placeBlock useBlock 分支
@@ -571,7 +580,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   maxStack=64。各面贴图：顶/底=furnace_top(12) / 侧=furnace_side(13)（复用熔炉贴图——机关盒家族石质
     //   观感，pack 侧经既存 tileFilenameMap {12/13→furnace_*.png} 自动覆盖）/ 前面=dropper_front(139)
     //   （石质灰底 + 中央小方形暗孔；tools/build_dropper.py 原创自绘；pack 侧 {139→dropper_front_horizontal.png}
-    //   留 t620）。state bit[1:0]=朝向（同发射器 chestFrontFace 编码，放置时排出口朝玩家）。音色 GroupStone。
+    //   t620 已接 horizontal 版）。state bit[1:0]=朝向（同发射器 chestFrontFace 编码，放置时排出口朝玩家）。音色 GroupStone。
     //   触发：踩压力板 → scanDispenserTraps 邻接投掷器 → dispenseFromDispenser 投掷器分支全部物品 spawnItemAt
     //   弹出。库存复用 DispenserStore（9 槽 per-block 共用）。配方 7 圆石（中心 + 下中空）→ 1 投掷器。
     //   进创造调色板。
@@ -696,6 +705,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   方块」等价；本工程作 cross 装饰方块故无 1.0 等价（同 red Mushroom=48 取 -1 模式）。
     /* brown_mushroom          */ -1, // t507 白蘑菇 → MC 1.0 无等价（同 red mushroom；本工程作 cross 装饰故无 1.0 等价）
     /* redstone_ore            */ 73, // t569 红石矿石 → MC 1.0 redstone ore id 73
+    // t620 补 t609 漏行（Dropper=117 是 kDefs 末位）：行缺 → 聚合初始化零填充 → kMcBlockId[117]=0（=MC air），
+    //   static_assert 因「数组维度 = Count」而非「初始化器条数」不报——潜伏映射错位。dropper id 23
+    //   （MC 1.0 存在；与 dispenser 同族机关盒）。
+    /* dropper                 */ 23, // t609/t620 投掷器 → MC 1.0 dropper id 23
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1187,6 +1200,11 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 block
     //   同 MC 耕地观感）。与 selectionAABBs 解耦：选中框仍整格（玩家瞄准/破块按整格，无 1/16 误差烦恼）。
     if (blockId == Farmland)
         return {BlockAABB{0, 0, 0, 1, 0.9375f, 1}};
+    // t620 附魔台矮盒 0.75（12/16，机制等价 MC 1.0 附魔台矮 hitbox；渲染走 PartialBlockGeometry
+    //   [0,0.75] 矮盒）。与 Farmland 同模式：碰撞矮、selection 仍整格（ShapeFull 走 shapeBoxes 满格
+    //   选中框，瞄准/破块按整格无 0.25 误差烦恼）、raycast 整格命中（isFullCube=true）—— 三者解耦。
+    if (blockId == EnchantingTable)
+        return {BlockAABB{0, 0, 0, 1, 0.75f, 1}};
     // t359 活版门开态碰撞 = 整高竖直板（同 shapeBoxes，无特例覆盖）。机制等价「半门 / 1 格高 ledge」：
     //   开活板门铰链侧整高 [0,1] 竖直板可站立于顶（y=1.0）+ 蹲行走 → 不再穿透。
     //   t335 曾对此返「铰链侧 3/16 宽 × 3/16 高的唇边」(板身穿过)，但唇边太薄（0.1875 < 玩家 footprint
@@ -1228,6 +1246,7 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     case StoneBrickSlab: return 7;                    // t487 石砖台阶半遮光（同 WoodSlab/CobbleSlab/SpruceSlab，半高占空比 0.5）
     case Farmland:     return 15;                     // t408 耕地 solid=false（矮盒渲染）但仍是 opaque 土块 → 满遮光
     case Cactus:       return 15;                     // t445 仙人掌 solid=false（0.8 细柱渲染）但仍是 opaque 实体植物 → 满遮光
+    case EnchantingTable: return 15;                 // t620 附魔台 solid=false（0.75 矮盒渲染）但仍是 opaque 实体石台 → 满遮光
     default:           return 0;                      // 其余全透（air/torch/water/stairs/fence/plate/door/cross）
     }
 }

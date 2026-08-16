@@ -297,6 +297,20 @@ TILES = [
     #   tools/build_dropper.py 程序生成原创像素图（石质灰底 + 中央小方形暗孔，区别发射器的大暗腔）。
     "default_dropper_front",      # 139 dropper_front（投掷器前面（排出口）贴图；石质灰底 + 中央小方形暗孔；
                                   #    Dropper 前面=本 tile；tools/build_dropper.py 程序生成原创像素图）
+    # t620 末影祭坛（末地传送门框）三张（EndPortal 方块的 endframe 化视觉；机制等价 MC 1.0 end portal frame——
+    #   本工程无独立祭坛框方块，传送门方块本体兼作祭坛：侧=框身石纹 / 顶=框面（放末影之眼前）/ 顶(eye)=
+    #   框面 + 中央暗绿之眼合成图（放末影之眼激活态，mesher tileFor 据 state bit0 选）。tools/build_endframe.py
+    #   程序生成原创像素图（非 pack 回退）。
+    "default_endframe_side",      # 140 endframe_side（祭坛侧/底面贴图；灰白细孔框身石纹）
+    "default_endframe_top",       # 141 endframe_top（祭坛顶面贴图（未放末影之眼）；灰白框面 + 中央暗绿凹槽）
+    "default_endframe_eye",       # 142 endframe_eye（祭坛顶面贴图（已放末影之眼）；框面 + 中央之眼亮纹）
+    # t620 门上下半 per-face 贴图（机制等价 MC 1.0 门两格高：下格门板 / 上格带窗。PartialBlockGeometry door
+    #   case 据 state bit3（上/下格）选 tile；kDefs topTile=upper / bottomTile=lower。tools/build_door.py
+    #   程序生成原创像素图（非 pack 回退）。
+    "default_door_wood_upper",    # 143 door_wood_upper（橡木门上半：门板 + 上部格栅窗）
+    "default_door_wood_lower",    # 144 door_wood_lower（橡木门下半：门板 + 底部横带）
+    "default_door_spruce_upper",  # 145 door_spruce_upper（云杉门上半：深色门板 + 格栅窗）
+    "default_door_spruce_lower",  # 146 door_spruce_lower（云杉门下半：深色门板 + 底部横带）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

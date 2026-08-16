@@ -372,12 +372,16 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
             return BlockRegistry::def(block).topTile;     // farmland_dry(26) —— 湿润由顶点色暗化体现
         return BlockRegistry::def(block).sideTile;        // 侧/底 = dirt(2)
     }
-    // t487 末地传送门激活态：state bit0（EndPortalStateActiveFlag）翻 → 贴图切换 end_portal(129) →
-    //   end_portal_active(130)（激活后中心旋涡更亮 + 白绿高光，玩家放末影之眼后的可见反馈）。
-    //   各面同贴图（整立方不透明简化，机制等价 MC 末地传送门「传送门平面」外观）。玩家持末影之眼右键传送门 →
-    //   placeBlock useBlock 分支翻 state bit0（末地预热占位：仅激活效果 + 日志，不实现末地维度）。
+    // t487/t620 末地传送门「末影祭坛化」per-face + 激活态：本工程无独立祭坛框方块，传送门方块本体兼作
+    //   末影祭坛（endframe 化）。侧·底 = endframe_side(140)（灰白细孔框身）恒定；顶面按 state bit0
+    //   （EndPortalStateActiveFlag，玩家持末影之眼右键翻）切换 endframe_top(141)（未放之眼：框面 +
+    //   中央暗绿凹槽）→ endframe_eye(142)（已放之眼：框面 + 中央之眼亮纹，放之眼后的可见反馈）。
+    //   旧 t487 程序星空贴图（end_portal 129 / end_portal_active 130）仍在图集，但已无 BlockDef/tileFor
+    //   引用（非 pack 程序回退改走 140..142 的 build_endframe.py 程序贴图）。
     if (block == BlockRegistry::EndPortal) {
-        return (state & BlockRegistry::EndPortalStateActiveFlag) != 0 ? 130 : 129;
+        if (face == int(BlockRegistry::Top))
+            return (state & BlockRegistry::EndPortalStateActiveFlag) != 0 ? 142 : 141;
+        return 140; // 侧 / 底 = endframe_side（框身）
     }
     return BlockRegistry::tileIndex(block, BlockRegistry::Face(face));
 }
@@ -504,6 +508,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                             || b == BlockRegistry::Farmland // t408 耕地矮盒经 PartialBlockGeometry 渲染（露 1/16 唇）
                                             || b == BlockRegistry::Cactus   // t445 仙人掌 0.8 细柱经 PartialBlockGeometry 渲染（非满格）
                                             || b == BlockRegistry::SnowLayer // t505 积雪层薄板经 PartialBlockGeometry 渲染（state 高度 1/8..1.0；非满格）
+                                            || b == BlockRegistry::EnchantingTable // t620 附魔台 0.75 矮盒经 PartialBlockGeometry 渲染（非满格）
                                             || BlockRegistry::isBed(b);     // t457 床低 3D 模型经 PartialBlockGeometry 渲染（非整立方）
                     const bool isCrossX   = BlockRegistry::isCrossBillboard(b);
                     // t326 cross cutout 分流：cross 方块（草丛/作物/树苗）贴图带 alpha 透明底 → 进独立 cutout 段
@@ -807,6 +812,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Cactus) continue; // t445 仙人掌 0.8 细柱已在 PASS 1；不进整立方面（否则满格立方覆盖细柱）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::SnowLayer) continue; // t505 积雪层薄板已在 PASS 1；不进整立方面（否则满格立方覆盖薄板）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(blk)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面（否则满格立方覆盖低床）
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::EnchantingTable) continue; // t620 附魔台 0.75 矮盒已在 PASS 1；不进整立方面（否则满格立方覆盖矮盒）
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                             if (BlockRegistry::isSolid(nb)) continue;       // 邻居实体 → 剔除（跨 chunk 路由正确）
                             if (isWater && nb == BlockRegistry::Water) continue; // 水-水面互剔
@@ -918,6 +924,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Cactus) continue; // t445 仙人掌 0.8 细柱已在 PASS 1；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::SnowLayer) continue; // t505/t510 二轮复盘：积雪层薄板已在 PASS 1；不进整立方面（否则满格立方覆盖薄板，雪层显完整方块）
                         if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(b)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::EnchantingTable) continue; // t620 附魔台 0.75 矮盒已在 PASS 1
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);

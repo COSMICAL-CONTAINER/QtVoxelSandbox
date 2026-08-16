@@ -245,9 +245,15 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::WoodDoor:
-    case BlockRegistry::SpruceDoor: { // t466 云杉门（与 WoodDoor 同几何，tile=spruce_planks）
+    case BlockRegistry::SpruceDoor: { // t466 云杉门（与 WoodDoor 同几何；t620 起两族都据 bit3 选上下半贴图）
         // 两格高门：每格各画满高薄板（下格画门下半 / 上格画门上半，几何同 —— 区别仅在 isUpper state，
         //   用于破坏联动 & 朝向同步）。朝向 state[1:0]（0=+X 1=-X 2=+Z 3=-Z）、开合 state bit2。
+        //   t620 per-face：此前上下半共用 planks/spruce_planks 单贴图；现据 state bit3（上/下格）选
+        //   upper/lower 专属贴图（机制等价 MC 1.0 门两格高模型——下格门板 / 上格带窗）。kDefs 的
+        //   topTile=upper / bottomTile=lower 承载该选择（WoodDoor 143/144、SpruceDoor 145/146；
+        //   tileIndex(PosX)=sideTile=lower 是手持 / 掉落物 BlockCube 的门贴图）。
+        const BlockRegistry::BlockDef &doorDef = BlockRegistry::def(blockId);
+        const int doorTile = (state & 8) ? doorDef.topTile : doorDef.bottomTile; // bit3=上格 → upper / 下格 → lower
         //   合：薄板贴在「朝向」边（朝向 +X → 板在 x[0.8125,1]）；开：板旋 90° 贴邻边。
         const int facing = state & 3;
         const bool open = (state & 4) != 0;
@@ -268,7 +274,7 @@ int PartialBlockGeometry::append(
             case 3: bx0 = s0; bx1 = s1; break; // 原 -Z → 旋到 -X 边
             }
         }
-        pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.f, 1.f, bz0, bz1, tile, light, tileW, hx, hy, v0, v1);
+        pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.f, 1.f, bz0, bz1, doorTile, light, tileW, hx, hy, v0, v1);
         break;
     }
     case BlockRegistry::WoodTrapdoor: {
@@ -616,6 +622,22 @@ int PartialBlockGeometry::append(
         pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, kFarmlandTop, 0.f, 1.f,
                 tile, light, tileW, hx, hy, v0, v1,
                 BlockRegistry::def(blockId).topTile); // +Y 顶面 farmland_dry(26)，侧·底用 tile(=sideTile dirt 2)
+        break;
+    }
+    case BlockRegistry::EnchantingTable: {
+        // t620 附魔台 0.75 高矮盒（机制等价 MC 1.0 附魔台 12/16 高非整块；此前 t474 简化为整立方，pack 贴图
+        //   接入时改半高）。全 footprint、y[0, 0.75]：顶面 enchanting_table_top(109)（def.topTile，钻石纹 + 立书
+        //   轮廓；pack 侧=enchanting_table_top.png）、侧·底 enchanting_table_side(110)（tile=sideTile；pack 合成
+        //   时已裁掉 enchanting_table_side.png 顶部 0.25 空白 → 有效 0.75 部分整张贴 0.75 高侧面无缝；非 pack
+        //   程序贴图满 16px 无空白 → 整张竖压 0.75×，同 slab 侧面压扁的可接受降级）。**顶部立书装饰未做**
+        //   （MC 附魔台顶上有一本摊开的书；本工程顶面贴图自带立书轮廓读感，独立小盒留后续——几何简单优先）。
+        //   solid=false（见 BlockDef）→ 相邻整立方不剔面、画满高侧壁填住上方 0.25 缺口（防透视 x-ray 洞，
+        //   同 Farmland / glass 模式）；碰撞矮盒 0.75（collisionAABBs 特例）；selection/raycast 仍整格（ShapeFull）。
+        //   不做邻居剔除（异形小体约定，同 Farmland）。底面压在下方实体上不可见，overdraw 可忽。
+        constexpr float kEnchantTop = 0.75f; // 12/16（与 collisionAABBs 附魔台特例同高）
+        pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, kEnchantTop, 0.f, 1.f,
+                tile, light, tileW, hx, hy, v0, v1,
+                BlockRegistry::def(blockId).topTile); // +Y 顶面 enchanting_table_top(109)；侧·底用 tile(=sideTile 110)
         break;
     }
     case BlockRegistry::BedRed: case BlockRegistry::BedOrange: case BlockRegistry::BedYellow:
