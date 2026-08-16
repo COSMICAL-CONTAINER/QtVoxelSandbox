@@ -3952,31 +3952,30 @@ void World::carveCanyon()
     //   海水由其后的 fillWater 才灌、此刻唯一的天然水（地下水池）尚未被排水带排干 → 门控构造性几乎永不
     //   命中（t601 commit 自述「现实里门控基本不命中」），瀑布特性形同移除。修（恢复 t601 意图：峡壁切穿
     //   含水层才渗水成瀑）：在排水带排干**之前**探测**峡壁环带** —— 4 主向 × 距离 [盘上限+1, 排水半径] 的
-    //   壁列 × 全高 [kFloor, topY] 扫 Water（池水此刻仍在壁内）。命中 → 记候选（(1c) 排水后置源）；未命中
-    //   保持干涸峡谷（门控初衷不变：无中生有的孤立水源不生成，频次天然收敛于真实含水层接触）。全程纯函数
-    //   于 seed（路径 + blockAt 均确定，PLAN §2-K）。
+    //   壁列 × 全高 [kFloor, topY] 扫 Water（池水此刻仍在壁内）。路径点按 kFallEvery 步进采样（瀑布频次
+    //   适度：非每点都试，命中即停取**首个**——一峡谷一瀑）；未命中保持干涸峡谷（门控初衷不变：无中生有
+    //   的孤立水源不生成，频次天然收敛于真实含水层接触）。全程纯函数于 seed（路径 + blockAt 均确定，
+    //   PLAN §2-K）。
+    constexpr size_t kFallEvery = 8; // 检测步进（path ≤280 → 至多 ~35 个候选点）
     int waterfallX = -1, waterfallZ = -1, waterfallY = -1;
-    if (!path.empty()) {
-        const size_t wi = path.size() / 3;
-        const CanyonPt &wp = path[wi];
-        if (wp.span >= 6) { // 至少 6 格落差才有「瀑布」观感
-            const int topY = kFloor + (wp.span * 3) / 4; // 高位（距底 3/4 跨度），其下峡谷空气 → 细瀑
-            if (topY < m_height) {
-                static const int kDirs[4][2] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
-                bool wallWater = false;
-                for (const auto &d : kDirs) {
-                    for (int dist = kBaseRadius + kTopExtra + 1; dist <= kDrainRadius && !wallWater; ++dist) {
-                        const int nx = wp.ix + d[0] * dist;
-                        const int nz = wp.iz + d[1] * dist;
-                        if (nx < 0 || nx >= m_width || nz < 0 || nz >= m_depth) continue;
-                        for (int y = kFloor; y <= topY; ++y) { // 全高扫：含水层接触可能在低位
-                            if (m_chunks.blockAt(nx, y, nz) == BlockRegistry::Water) { wallWater = true; break; }
-                        }
-                    }
+    for (size_t i = 0; i < path.size() && waterfallY < 0; i += kFallEvery) {
+        const CanyonPt &wp = path[i];
+        if (wp.span < 6) continue; // 至少 6 格落差才有「瀑布」观感
+        const int topY = kFloor + (wp.span * 3) / 4; // 高位（距底 3/4 跨度），其下峡谷空气 → 细瀑
+        if (topY >= m_height) continue;
+        static const int kDirs[4][2] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
+        bool wallWater = false;
+        for (const auto &d : kDirs) {
+            for (int dist = kBaseRadius + kTopExtra + 1; dist <= kDrainRadius && !wallWater; ++dist) {
+                const int nx = wp.ix + d[0] * dist;
+                const int nz = wp.iz + d[1] * dist;
+                if (nx < 0 || nx >= m_width || nz < 0 || nz >= m_depth) continue;
+                for (int y = kFloor; y <= topY; ++y) { // 全高扫：含水层接触可能在低位
+                    if (m_chunks.blockAt(nx, y, nz) == BlockRegistry::Water) { wallWater = true; break; }
                 }
-                if (wallWater) { waterfallX = wp.ix; waterfallZ = wp.iz; waterfallY = topY; }
             }
         }
+        if (wallWater) { waterfallX = wp.ix; waterfallZ = wp.iz; waterfallY = topY; }
     }
 
     // t376 (1b) 排水带：盘外（半径 > 当前盘半径）仍可能有地下水池残水紧贴峡壁 → 暴露后渗出。沿路径中心以
