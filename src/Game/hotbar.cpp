@@ -159,6 +159,7 @@ const char *iconFileForBlock(quint8 id)
     // t482/t483 防御造物方块立方体图标（build_cube_icons.py 程序生成原创像素图）。
     case BlockRegistry::Pumpkin:       return "icon_pumpkin.png";     // 南瓜（顶=橙色瓜顶+短茎 / 侧=橙色瓜棱；造物头部方块）
     case BlockRegistry::Snow:          return "icon_snow.png";        // 雪块（各面=冷白冰晶噪点，同积雪层；雪傀儡身体方块）
+    case BlockRegistry::EndPortal:     return "icon_end_portal.png";  // t634 末地传送门（顶=末影祭坛框面+暗绿凹槽 / 侧=灰白细孔框身；进创造调色板配图标）
     // t484 废弃矿井结构方块图标（build_cube_icons.py flat 2D 透明底；程序生成原创像素图）。
     case BlockRegistry::Cobweb:        return "icon_cobweb.png";      // 蜘蛛网（cross 透明底；灰白蛛丝放射网纹；矿井散布）
     case BlockRegistry::Rail:          return "icon_rail.png";        // 铁轨（flat 透明底；棕色枕木 + 灰铁双轨；贴地薄板）
@@ -710,6 +711,12 @@ QVariantList Hotbar::creativeBlocks() const
              // t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶 / 石砖楼梯；worldgen 散布 / 创造取用）。
              int(BlockRegistry::StoneBrick),                                 // 石砖（石质整立方 + 砖纹；要塞墙体主体；可放置）
              int(BlockRegistry::StoneBrickSlab),                             // 石砖台阶（半高；复用 ShapeSlab 几何 + 石砖贴图；可放置）
+             // t634 末地传送门（EndPortal，endframe 化 t620）：进创造调色板（用户「末地传送门的框架在创造背包没找到」
+             //   ——要塞传送门房祭坛可直接取用 / 自建末地祭坛测试）。放置正常（ShapeFull 整格 / setBlock 空气格路径）；
+             //   破坏：创造瞬破（t141 基岩同款，drop=false 无掉落——原方块 dropId=0 本就不掉）；生存不可破
+             //   （hardness=-1，同基岩）。右键交互不变（持末影之眼 → 激活 state bit0；不持 → 无效应）。
+             //   紧随要塞石砖系列（同为要塞结构族）。
+             int(BlockRegistry::EndPortal),                                  // 末地传送门（末影祭坛；末影之眼右键激活；创造可放/瞬破）
              int(BlockRegistry::StoneBrickStairs) };                         // 石砖楼梯（整步+背墙；复用 ShapeStairs 几何 + 石砖贴图；可放置）
 }
 

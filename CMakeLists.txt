@@ -438,6 +438,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_anvil_damaged.png          # t477 重损铁砧立方体图标（build_cube_icons.py；顶=砧台+粗裂纹网+缺角 / 侧=深铁砧身）
         textures/icon_pumpkin.png                # t482 南瓜立方体图标（build_cube_icons.py；顶=橙色瓜顶+短茎 / 侧=橙色瓜棱）
         textures/icon_snow.png                   # t482 雪块立方体图标（build_cube_icons.py；各面=冷白冰晶噪点，同积雪层）
+        textures/icon_end_portal.png             # t634 末地传送门立方体图标（build_cube_icons.py；顶=末影祭坛框面+暗绿凹槽 / 侧=灰白细孔框身）
         textures/icon_cobweb.png                 # t484 蜘蛛网 flat 2D 图标（build_cube_icons.py；透明底+灰白蛛丝放射网纹）
         textures/icon_rail.png                   # t484 铁轨 flat 2D 图标（build_cube_icons.py；透明底+棕色枕木+灰铁双轨）
         textures/icon_tnt.png                    # t485 TNT 立方体图标（build_cube_icons.py；各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）

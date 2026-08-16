@@ -704,7 +704,7 @@ public:
         //   **t620 endframe 化**：贴图从程序星空切到末影祭坛三面（侧·底=endframe_side(140) / 顶（未放之眼）=
         //   endframe_top(141) / 顶（激活态）=endframe_eye(142)（框面+中央之眼亮纹，tileFor per-face+
         //   state 选；程序星空 129/130 仍留图集但已无引用）。
-        //   不进创造调色板（worldgen 专属；玩家经末影之眼激活交互，非放置）。state 经 m_states 落 SQLite round-trip 保真。
+        //   t634 进创造调色板（要塞祭坛可取用 / 自建末地祭坛测试；创造瞬破 drop=0、生存不可破同基岩）。state 经 m_states 落 SQLite round-trip 保真。
         EndPortal       = 111, // 末地传送门：要塞传送门房中央（机制等价 MC 1.0 end portal）；末影之眼右键激活（占位）
         // ── t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / 木按钮 / 石按钮；无红石系统，故用「右键激活 →
         //   点燃水平四邻 TNT」简化为单次脉冲触发，spec「若时间紧，拉杆/按钮可简化为放置即点燃邻接 TNT 或右键触发

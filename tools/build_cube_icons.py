@@ -124,6 +124,9 @@ BLOCKS = [
     # t482/t483 防御造物方块立方体图标（build_pumpkin.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
     ("pumpkin",         "default_pumpkin_top",  "default_pumpkin_side"),  # t482 南瓜（顶=橙色瓜顶+短茎 / 侧=橙色瓜棱；造物头部方块）
     ("snow",            "default_snow",         "default_snow"),          # t482 雪块（各面=冷白冰晶噪点，同积雪层；雪傀儡身体方块）
+    # t634 末地传送门（endframe 化 t620）立方体图标（顶=末影祭坛框面+中央暗绿凹槽 / 侧=灰白细孔框身；要塞传送门房祭坛）。
+    #   入创造调色板（t634）—— 图标显顶+两侧明暗（同铁矿块流程）。
+    ("end_portal",      "default_endframe_top", "default_endframe_side"), # t634 末地传送门（顶=祭坛框面 / 侧=框身）
     # t485 沙漠神殿结构方块立方体图标（build_tnt.py / build_cut_sandstone.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
     ("tnt",             "default_tnt",          "default_tnt"),           # t485 TNT（各面同贴图=深红药柱+横向捆带+亮黄标识；沙漠神殿 TNT 陷阱方块）
     ("cut_sandstone",   "default_cut_sandstone", "default_cut_sandstone"), # t485 切制砂岩（各面同贴图=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
