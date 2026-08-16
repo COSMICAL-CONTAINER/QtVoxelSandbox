@@ -261,6 +261,13 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_enchanting_table_side.png # t474 附魔台侧面/底面/前面贴图（build_enchanting_table.py；黑曜石深紫黑底+钻石四角+边缘暗化）
         textures/default_bookshelf.png           # t474 书架各面贴图（build_bookshelf.py；橡木木板边框+彩色书脊书列）
         textures/default_iron_block.png          # t477 铁块各面贴图（build_anvil.py；金属灰底+铆钉网格+高光；9 铁锭存储方块）
+        textures/default_coal_block.png          # t620 煤炭块各面贴图（build_mineral_blocks.py；近黑煤层压缩块+高光棱线；9 煤↔1 块；燃料 800s）
+        textures/default_lapis_block.png         # t620 青金石块各面贴图（build_mineral_blocks.py；深群青底+黄铁矿金点；9 青金石↔1 块）
+        textures/default_diamond_block.png       # t620 钻石块各面贴图（build_mineral_blocks.py；浅青底+青白菱面镶格；9 钻石↔1 块）
+        textures/default_gold_block.png          # t620 金块各面贴图（build_mineral_blocks.py；金黄底+近白金高光；9 金锭↔1 块）
+        textures/default_redstone_block.png      # t620 红石块各面贴图（build_mineral_blocks.py；鲜红底+亮红矿粒；9 红石粉↔1 块）
+        textures/default_redstone_lamp_off.png   # t620 红石灯 off 态贴图（build_mineral_blocks.py；暗黄褐哑壳+中央暗红红石芯纹；mesher 据 state bit0 选 off/on）
+        textures/default_redstone_lamp_on.png    # t620 红石灯 on 态贴图（build_mineral_blocks.py；暖琥珀亮壳+中心白热核；on 态光 15）
         textures/default_anvil_top.png           # t477 铁砧完好顶面贴图（build_anvil.py；深铁砧台+宽砧面+尖角+边缘暗化）
         textures/default_anvil_base.png          # t477 铁砧侧/底/前面贴图（build_anvil.py；深铁砧身+横向分层暗带；三损坏阶段共享）
         textures/default_anvil_damaged_1_top.png # t477 微损铁砧顶面贴图（build_anvil.py；砧台+一条细裂纹）
@@ -417,6 +424,12 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_enchanting_table.png       # t474 附魔台立方体图标（build_cube_icons.py；顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点+边缘暗化）
         textures/icon_bookshelf.png              # t474 书架立方体图标（build_cube_icons.py；各面=木板边框+彩色书脊书列）
         textures/icon_iron_block.png             # t477 铁块立方体图标（build_cube_icons.py；各面=金属灰底+铆钉网格+高光）
+        textures/icon_coal_block.png             # t620 煤炭块立方体图标（build_cube_icons.py；各面=近黑煤层压缩块+高光棱线）
+        textures/icon_lapis_block.png            # t620 青金石块立方体图标（build_cube_icons.py；各面=深群青底+黄铁矿金点）
+        textures/icon_diamond_block.png          # t620 钻石块立方体图标（build_cube_icons.py；各面=浅青底+青白菱面镶格）
+        textures/icon_gold_block.png             # t620 金块立方体图标（build_cube_icons.py；各面=金黄底+近白金高光）
+        textures/icon_redstone_block.png         # t620 红石块立方体图标（build_cube_icons.py；各面=鲜红底+亮红矿粒镶面）
+        textures/icon_redstone_lamp.png          # t620 红石灯立方体图标（build_cube_icons.py；各面=off 态哑壳+红石芯）
         textures/icon_anvil.png                  # t477 铁砧立方体图标（build_cube_icons.py；顶=砧台+砧面+尖角 / 侧=深铁砧身+横向分层）
         textures/icon_anvil_chipped.png          # t477 微损铁砧立方体图标（build_cube_icons.py；顶=砧台+细裂纹 / 侧=深铁砧身）
         textures/icon_anvil_damaged.png          # t477 重损铁砧立方体图标（build_cube_icons.py；顶=砧台+粗裂纹网+缺角 / 侧=深铁砧身）

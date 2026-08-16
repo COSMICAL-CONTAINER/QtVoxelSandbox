@@ -38,12 +38,12 @@ load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`
 
 | 段 | 范围 | 说明 |
 |---|---|---|
-| 方块段 | `0 .. Count-1`（`0 .. 46`） | 可放置的体素方块（含 air=0）。空气恒不可拾取 / 不可放置。 |
+| 方块段 | `0 .. Count-1`（`0 .. 123`） | 可放置的体素方块（含 air=0）。空气恒不可拾取 / 不可放置。 |
 | 工具段 | `0x100 .. 0x10F`（`256 .. 271`） | 工具 / 武器。单件不可堆叠（`maxStack=1`），带耐久（`maxDurability`）。 |
 | 材料段 | `0x200 .. 0x21F`（`512 .. 543`） | 非方块可堆叠物品（合成材料 / 食物 / 桶 / 树苗物品 / mob 掉落 / 生物蛋）。默认可堆叠 64；铁桶单件。 |
 
 基址常量：`RecipeRegistry::MaterialIdBase = 0x200`，`ToolRegistry::ToolIdBase = 0x100`。
-方块段上界：`BlockRegistry::Count = 47`。
+方块段上界：`BlockRegistry::Count = 124`。
 
 ## `/give` 用法
 
@@ -71,7 +71,7 @@ load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`
 
 ---
 
-## 1. 方块段（id `0 .. 46`）
+## 1. 方块段（id `0 .. 123`；47..117 逐任务追加未逐一补表，见段末注）
 
 | id (hex) | id (dec) | 内部 key | 中文名 | MC 1.0.0 |
 |---|---|---|---|---|
@@ -122,12 +122,22 @@ load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`
 | 0x2C | 44 | `snow_layer` | 积雪层（雪原地表覆雪） | 80 |
 | 0x2D | 45 | `ice` | 冰（水面冻结；不可获得） | 79 |
 | 0x2E | 46 | `spruce_log` | 云杉原木（云杉树主干） | —（1.0.0 仅橡木 log id 17；云杉 1.7+） |
+| 0x76 | 118 | `coal_block` | 煤炭块（9 煤↔1 块；燃料 800s） | 173 |
+| 0x77 | 119 | `lapis_block` | 青金石块（9 青金石↔1 块） | 22 |
+| 0x78 | 120 | `diamond_block` | 钻石块（9 钻石↔1 块） | 57 |
+| 0x79 | 121 | `gold_block` | 金块（9 金锭↔1 块） | 41 |
+| 0x7A | 122 | `redstone_block` | 红石块（9 红石粉↔1 块） | 152 |
+| 0x7B | 123 | `redstone_lamp` | 红石灯（右键开关光源；on 光 15） | 123 / on 124 |
 
 > 注：方块段 `0x2F (47) = Count` 是哨兵上界，不是合法 id。床方块（bed）8 色变体机制等价 MC 1.0 床（bed），
 > 简化为单格整立方（spec t387）；MC 1.0 床颜色由 metadata 分（统一 id 26），本工程用独立 id 表达色变
 > （物品系统 id 驱动，无 place-state）。配方 planks+wool → 红床（默认色）；其余色变体创造调色板取用。
 > t395：积雪层 / 冰 / 云杉原木机制等价 MC 1.0 寒冷群系三件套（snow / ice / spruce log）；冰由 worldgen
 > 冻结水面获得（同 water / lava 属系统获得，不进创造调色板 / 不掉落）。
+> t620 注：47..117（wool 15 色变体 / 床 8 色新变体 / 云杉木制品 / 苔石 / 发射器 / 投掷器 / 石砖族 / 末地
+> 传送门 / 机关 / 红石矿等）逐任务追加，未逐一补表（本表按段头更新 Count；当前上界见
+> `BlockRegistry::Count = 124`）。矿物存储块六件（coal/lapis/diamond/gold/redstone block + 既存 iron_block
+> id 96）机制等价 MC 1.0 9↔1 压缩存储；红石灯右键开关（on = 贴图 redstone_lamp_on + 方块光 15）。
 
 ---
 

@@ -585,6 +585,23 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   弹出。库存复用 DispenserStore（9 槽 per-block 共用）。配方 7 圆石（中心 + 下中空）→ 1 投掷器。
     //   进创造调色板。
     /* dropper      */ {int(BlockRegistry::Dropper),             12,  12,  13,139, true,  BlockRegistry::ShapeFull,     3.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Dropper),       1, 64, "dropper",     "投掷器"},
+    // ── t620 矿物存储块五件（coal/lapis/diamond/gold/redstone block；机制等价 MC 1.0 9↔1 压缩存储方块，
+    //   铁块 IronBlock=96 既存 t477，本段补齐其余五种）。整立方 opaque（solid=true / ShapeFull，与 iron_block /
+    //   obsidian 同族）、Pickaxe + requiresTool=true（需镐才掉落；minTier 对齐对应矿物的镐门槛 —— 机制等价
+    //   MC「块与矿同镐」）、dropId=自身、dropCount=1、maxStack=64。各面贴图=对应 *_block 瓦片（六面同）。
+    //   音色归 GroupStone。配方（recipe.cpp）双向 9↔1；coal_block 另作熔炉燃料 800s（smelting.cpp）。
+    /* coal_block   */ {int(BlockRegistry::CoalBlock),         147,147,147,147, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CoalBlock),       1, 64, "coal_block",   "煤炭块"},
+    /* lapis_block  */ {int(BlockRegistry::LapisBlock),        148,148,148,148, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 2, true,  int(BlockRegistry::LapisBlock),      1, 64, "lapis_block",  "青金石块"},
+    /* diamond_block*/ {int(BlockRegistry::DiamondBlock),      149,149,149,149, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 3, true,  int(BlockRegistry::DiamondBlock),    1, 64, "diamond_block","钻石块"},
+    /* gold_block   */ {int(BlockRegistry::GoldBlock),         150,150,150,150, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,  int(BlockRegistry::GoldBlock),       1, 64, "gold_block",   "金块"},
+    /* redstone_block*/{int(BlockRegistry::RedstoneBlock),     151,151,151,151, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 3, true,  int(BlockRegistry::RedstoneBlock),   1, 64, "redstone_block","红石块"},
+    // ── t620 红石灯（RedstoneLamp）：机制等价 MC 1.0 redstone lamp —— 右键开关的可放置光源（无红石系统，
+    //   简化为右键直接翻 state bit0；on 态 mesher 换 redstone_lamp_on(153) 贴图 + lightEmission 状态感知版
+    //   返 15 重 flood 方块光，同 t494 燃烧熔炉模式）。整立方 opaque、hardness=0.3（玻璃质软）、Pickaxe、
+    //   requiresTool=false（空手可破且掉落，本工程可回收口径）、dropId=自身、dropCount=1、maxStack=64。
+    //   各面贴图=redstone_lamp_off(152)（def 默认；on 态 tileFor 换 153）。音色归 GroupStone（玻璃质）。
+    //   配方：4 红石粉 + 1 玻璃 → 1（recipe.cpp 十字围心；无荧石用玻璃作壳）。
+    /* redstone_lamp*/ {int(BlockRegistry::RedstoneLamp),      152,152,152,152, true,  BlockRegistry::ShapeFull,     0.3f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::RedstoneLamp),    1, 64, "redstone_lamp","红石灯"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -709,6 +726,14 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   static_assert 因「数组维度 = Count」而非「初始化器条数」不报——潜伏映射错位。dropper id 23
     //   （MC 1.0 存在；与 dispenser 同族机关盒）。
     /* dropper                 */ 23, // t609/t620 投掷器 → MC 1.0 dropper id 23
+    // t620 矿物存储块 → MC 1.0 对齐：coal block id 173 / lapis block id 22 / diamond block id 57 /
+    //   gold block id 41 / redstone block id 152（全部 MC 1.0 存在）。
+    /* coal_block              */ 173, // t620 煤炭块 → MC 1.0 block of coal id 173
+    /* lapis_block             */ 22,  // t620 青金石块 → MC 1.0 lapis lazuli block id 22
+    /* diamond_block           */ 57,  // t620 钻石块 → MC 1.0 diamond block id 57
+    /* gold_block              */ 41,  // t620 金块 → MC 1.0 gold block id 41
+    /* redstone_block          */ 152, // t620 红石块 → MC 1.0 block of redstone id 152
+    /* redstone_lamp           */ 123, // t620 红石灯 → MC 1.0 redstone lamp（off）id 123（on 态 id 124 由 state 分，统一取 123）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -893,6 +918,13 @@ bool BlockRegistry::isDropper(quint8 blockId)
 bool BlockRegistry::isRedstoneOre(quint8 blockId)
 {
     return blockId == RedstoneOre;
+}
+
+// t620 红石灯统一谓词（单一权威，见头注释）：blockId == RedstoneLamp 即红石灯。供 PlayerController
+//   placeBlock useBlock 分支「右键翻开关态」判定（不各处硬编码 id，同 isTnt 单 id 模式）。
+bool BlockRegistry::isRedstoneLamp(quint8 blockId)
+{
+    return blockId == RedstoneLamp;
 }
 
 // t490 手动 TNT 点火机关统一谓词（单一权威；见 blockregistry.h 头注释）。Lever / WoodButton / StoneButton 三者
@@ -1268,6 +1300,9 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
 //   读 cell 真实 state 区分燃/熄。
 //   t569 红石矿石按 lit bit0 翻转：点亮 → 9（微弱阴沉红光 —— 低于火把 14，机制等价 MC 1.0 红石矿点亮
 //   光 level 9，玩家走近 / 挖掘触碰时短暂发光后自熄），未点亮 → 0。
+//   t620 红石灯按 on bit0 翻转：点亮 → 15（MC 1.0 红石灯光 level 15，同岩浆档——它是「正式光源方块」
+//   而非矿石的触发泛光，玩家右键开关即全亮 / 全灭，recomputeLightAround 检出 lightSourceChanged 重 flood），
+//   熄灭 → 0。
 quint8 BlockRegistry::lightEmission(quint8 blockId, quint8 state)
 {
     // t494：燃烧中的熔炉自发光 13（机制等价 MC 1.0 熔炉冶炼进行时正面发光 level 13）。state bit2 = lit flag。
@@ -1275,7 +1310,10 @@ quint8 BlockRegistry::lightEmission(quint8 blockId, quint8 state)
     // t569：点亮中的红石矿石自发光 9（机制等价 MC 1.0 红石矿点亮光 level 9；微弱、阴沉红）。
     //   state bit0 = RedstoneOreStateLitFlag（PlayerController 走过 / 挖掘触碰置位，~5s 后自熄清位）。
     if (blockId == RedstoneOre && (state & RedstoneOreStateLitFlag)) return 9;
-    return lightEmission(blockId); // 其余（含熄灭熔炉 / 未点亮红石矿）按 id-only 表（火把/岩浆/末地传送门等，与 state 无关）
+    // t620：点亮中的红石灯自发光 15（机制等价 MC 1.0 红石灯光 level 15；正式光源方块，同岩浆档）。
+    //   state bit0 = RedstoneLampStateOnFlag（玩家右键翻位开 / 关）。
+    if (blockId == RedstoneLamp && (state & RedstoneLampStateOnFlag)) return 15;
+    return lightEmission(blockId); // 其余（含熄灭熔炉 / 未点亮红石矿 / 关态红石灯）按 id-only 表（火把/岩浆/末地传送门等，与 state 无关）
 }
 
 // t360 列顶实面 Y 偏移（见头注释）：PCF 软影用本值替代「heightmap+1.0 整格」假设，按方块真实模型高度判遮挡。
@@ -1441,6 +1479,9 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case StoneBrick: // t487 石砖 → 石质音色（石质整立方，同 stone 族）
     case StoneBrickSlab: case StoneBrickStairs: // t487 石砖台阶/楼梯 → 石质音色（同 stone 族）
     case EndPortal: // t487 末地传送门 → 石质兜底音色（不可破，仅创造敲响兜底）
+    case CoalBlock: case LapisBlock: case DiamondBlock: // t620 矿物存储块 → 石质音色（金属质，同 iron_block 族）
+    case GoldBlock: case RedstoneBlock: // t620 金块 / 红石块 → 石质音色（同 iron_block 族）
+    case RedstoneLamp: // t620 红石灯 → 石质音色（玻璃质敲击，同 glass / ice 族）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

@@ -711,6 +711,71 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                              RecipeRegistry::IronIngotId,  0,
         RecipeRegistry::IronIngotId,    RecipeRegistry::IronIngotId,  RecipeRegistry::IronIngotId },
       int(BlockRegistry::Anvil), 1, 1, "anvil" },
+    // t620 矿物存储块 × 铁块：9 材料 3×3 满铺 ↔ 1 块 双向配方（机制等价 MC 1.0 coal/lapis/diamond/gold/
+    //   redstone/iron block 的 9↔1 无损压缩存储）。正向（材料 → 块）：9 材料 3×3 满铺 → 1 块（有序 3×3，仅
+    //   工作台；同 t477 铁块模式）。反向（块 → 材料）：1 块任意格单放 → 9 材料（无序 Inventory2x2 / 3×3
+    //   均可——单原料 shapeless 在任意合成格可拆，机制等价 MC「单放方块即拆 9 个」）。铁块正向既有（t477），
+    //   本段补铁块反向 + 其余五种双向。冲突检：正向 9 煤满铺多重集 {Coal:9} 唯一；反向单块 {CoalBlock:1} 唯一
+    //   → 与铁砧（{IronBlock:3, IronIngot:4}）/ 指南针（{IronIngot:4, Redstone:1}）等均不冲突。
+    //   coal：9 煤炭 → 1 煤炭块（燃料 800s，smelting.cpp 燃料表）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::CoalId, RecipeRegistry::CoalId, RecipeRegistry::CoalId,
+        RecipeRegistry::CoalId, RecipeRegistry::CoalId, RecipeRegistry::CoalId,
+        RecipeRegistry::CoalId, RecipeRegistry::CoalId, RecipeRegistry::CoalId },
+      int(BlockRegistry::CoalBlock), 1, 1, "coal_block" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::CoalBlock), 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::CoalId, 9, 1, "coal" },
+    //   lapis：9 青金石 ↔ 1 青金石块（附魔材料的压缩存储）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::LapisId, RecipeRegistry::LapisId, RecipeRegistry::LapisId,
+        RecipeRegistry::LapisId, RecipeRegistry::LapisId, RecipeRegistry::LapisId,
+        RecipeRegistry::LapisId, RecipeRegistry::LapisId, RecipeRegistry::LapisId },
+      int(BlockRegistry::LapisBlock), 1, 1, "lapis_block" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::LapisBlock), 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::LapisId, 9, 1, "lapis" },
+    //   diamond：9 钻石 ↔ 1 钻石块。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::DiamondId, RecipeRegistry::DiamondId, RecipeRegistry::DiamondId,
+        RecipeRegistry::DiamondId, RecipeRegistry::DiamondId, RecipeRegistry::DiamondId,
+        RecipeRegistry::DiamondId, RecipeRegistry::DiamondId, RecipeRegistry::DiamondId },
+      int(BlockRegistry::DiamondBlock), 1, 1, "diamond_block" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::DiamondBlock), 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DiamondId, 9, 1, "diamond" },
+    //   gold：9 金锭 ↔ 1 金块。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId,
+        RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId,
+        RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId },
+      int(BlockRegistry::GoldBlock), 1, 1, "gold_block" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::GoldBlock), 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::GoldIngotId, 9, 1, "gold_ingot" },
+    //   redstone：9 红石粉 ↔ 1 红石块。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::RedstoneId, RecipeRegistry::RedstoneId, RecipeRegistry::RedstoneId,
+        RecipeRegistry::RedstoneId, RecipeRegistry::RedstoneId, RecipeRegistry::RedstoneId,
+        RecipeRegistry::RedstoneId, RecipeRegistry::RedstoneId, RecipeRegistry::RedstoneId },
+      int(BlockRegistry::RedstoneBlock), 1, 1, "redstone_block" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::RedstoneBlock), 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::RedstoneId, 9, 1, "redstone" },
+    //   iron 反向（正向 t477 既存）：1 铁块 → 9 铁锭。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::IronBlock), 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::IronIngotId, 9, 1, "iron_ingot" },
+    // t620 红石灯：4 红石粉十字 + 中心 1 玻璃 → 1 红石灯（有序 3×3，仅工作台）。机制对标 MC 1.0 redstone
+    //   lamp（glowstone + 4 redstone）—— 本工程无荧石，用玻璃作壳（玻璃 = 沙子冶炼产物 GlassId 0x204，
+    //   「透光壳内藏红石」语义）。最小包围盒 3×3 满铺（四角空 + 四边红石 + 中心玻璃），与指南针
+    //   （{IronIngot:4, Redstone:1} 十字）/ 钟（{GoldIngot:4, Redstone:1} 十字）同形但原料不同（本为
+    //   {Redstone:4, Glass:1}）→ 多重集唯一不冲突。产物 = RedstoneLamp（右键开关的可放置光源方块）。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0,                         RecipeRegistry::RedstoneId, 0,
+        RecipeRegistry::RedstoneId, RecipeRegistry::GlassId,    RecipeRegistry::RedstoneId,
+        0,                          RecipeRegistry::RedstoneId, 0 },
+      int(BlockRegistry::RedstoneLamp), 1, 1, "redstone_lamp" },
     // t484 铁轨（rail）：6 铁锭（顶行 + 中行两行满铺）→ 16 铁轨（有序 3×3，仅工作台）。
     //   机制等价 MC 1.0 rail 配方（6 iron ingot 满两行 → 16 rail；MC 实际是「6 铁锭纵列」最小包围盒 1×6，
     //   本工作台 3×3 取「顶行 + 中行 = 6 锭」2×3 包围盒，对齐 MC 数量与质材，避开 1×6 在 3×3 内的歧义）。

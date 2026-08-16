@@ -778,7 +778,36 @@ public:
         //   掉内容 + 清条目，全走发射器既有链）。配方：7 圆石（上排满 + 中 / 下排左右，中心 + 下中空）→ 1 投掷器
         //   （recipe.cpp；机制等价 MC 1.0 dropper 7 cobble）。进创造调色板（玩家可取用 / 放置 / 自建机关）。
         Dropper         = 117, // 投掷器：踩压力板触发的弹掉落物机关方块（机制等价 MC 1.0 dropper）；全部物品弹出
-        Count           = 118, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t620 矿物存储块（mineral storage blocks；机制等价 MC 1.0 coal/lapis/diamond/gold/redstone block ——
+        //   9 材料 ↔ 1 块 双向配方的「压缩存储」方块；铁块 IronBlock=96 既存（t477），本段补齐其余五种）。
+        //   全族整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，与 iron_block / obsidian 同族）。
+        //   采掘统一石镐族：Pickaxe + requiresTool=true（掉落依赖镐；机制等价 MC 1.0 存储块需镐）。minTier 按
+        //   对应**矿物**的门槛对齐（与挖矿同镐才配拆块，机制等价 MC「块与矿同镐」）：coal=木镐1 / lapis=石镐2 /
+        //   diamond=铁镐3 / gold=铁镐3 / redstone=铁镐3。dropId=自身（破块掉同种块，可放回；机制等价 MC 1.0
+        //   存储块无精准采集也掉自身）、dropCount=1、maxStack=64。各面贴图=对应 *_block 瓦片（六面同，机制
+        //   等价 MC 1.0 存储块六面同贴图）。音色归 GroupStone（石质 / 金属质，同 iron_block 族）。全部进创造
+        //   调色板。配方（recipe.cpp）双向：9 材料 3×3 满铺 → 1 块；1 块（任意格单放）→ 9 材料（机制等价
+        //   MC 1.0「9↔1」无损拆装）。coal_block 额外可作**熔炉燃料**（smelting.cpp 燃料表 800s=80 件，机制
+        //   等价 MC 1.0 煤块烧 80 件 = 煤×10 的 9 倍效率 +1 件盈余）。
+        CoalBlock       = 118, // 煤炭块：9 煤炭 ↔ 1 块；燃料 800s（80 件）；木镐采掘
+        LapisBlock      = 119, // 青金石块：9 青金石 ↔ 1 块；石镐采掘（附魔材料的压缩存储）
+        DiamondBlock    = 120, // 钻石块：9 钻石 ↔ 1 块；铁镐采掘（财富炫耀 / 压缩存储）
+        GoldBlock       = 121, // 金块：9 金锭 ↔ 1 块；铁镐采掘（同金矿门槛）
+        RedstoneBlock   = 122, // 红石块：9 红石粉 ↔ 1 块；铁镐采掘（红石粉的压缩存储）
+        // ── t620 红石灯（RedstoneLamp）：机制等价 MC 1.0 redstone lamp —— 右键切换 on/off 的**可放置光源**方块
+        //   （本项目无红石系统，故简化为「右键直接开关」取代「红石信号驱动」，spec 简化许可）。放置 = off 态；
+        //   右键翻 state bit0（RedstoneLampStateOnFlag）切 on/off：on 态换 redstone_lamp_on 贴图 + **方块光
+        //   等级 15**（lightEmission 状态感知版据 bit0 返 15 / 0，同 t494 燃烧熔炉 / t569 点亮红石矿的 state
+        //   驱动光照模式 —— recomputeLightAround 检出 lightSourceChanged 即重 flood 方块光，无伪光源）。
+        //   整立方 opaque（solid=true / ShapeFull）、hardness=0.3（同 MC 1.0 红石灯量级，玻璃质软）、
+        //   toolType=Pickaxe（玻璃质敲击族，同 glass / ice）、requiresTool=false（空手可破且掉落——无精准采集
+        //   语义的红石灯走「可回收」口径，同 glass 本工程取舍）、dropId=自身、dropCount=1、maxStack=64。
+        //   各面贴图=redstone_lamp_off(152)（off 态 def 默认）/ on 态 mesher tileFor 据 state bit0 换
+        //   redstone_lamp_on(153)（暖黄亮芯 vs 灰暗壳，机制等价 MC 1.0 两态贴图）。音色归 GroupStone
+        //   （玻璃质，同 glass / ice）。合成：4 红石粉 + 1 玻璃 → 1 红石灯（十字围心；无荧石故用玻璃作壳，
+        //   机制对标 MC glowstone+redstone 的本地化）。进创造调色板。
+        RedstoneLamp    = 123, // 红石灯：右键开关的可放置光源（on=光 15 + 亮贴图；机制等价 MC 1.0 redstone lamp）
+        Count           = 124, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -864,6 +893,10 @@ public:
     //   触发点亮判定（scanRedstoneOre footprint 扫描 + updateMining 目标判定）+ World worldgen scatterOres 写入
     //   读，避免各处硬编码 RedstoneOre id 判定漂移（同 isTnt / isLadder 单 id 模式）。
     static bool isRedstoneOre(quint8 blockId);
+    // t620 红石灯统一谓词（单一权威）：blockId == RedstoneLamp 即红石灯。供 PlayerController placeBlock useBlock
+    //   分支判定「右键命中格是否红石灯 → 翻开关态」（避免各处硬编码 id 判定漂移，同 isTnt / isLadder 单 id
+    //   模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加变体时一处同步）。
+    static bool isRedstoneLamp(quint8 blockId);
     // t490 手动 TNT 点火机关统一谓词（单一权威）。Lever / WoodButton / StoneButton 三者机制等价 MC 1.0 lever /
     //   wooden button / stone button——右键激活即点燃水平四邻 TNT（本项目无红石，故把「激活脉冲」直接绑在右键动作）。
     //   isLever / isWoodButton / isStoneButton 各单 id 裸相等判定；isManualIgniter（任一机关）供 placeBlock useBlock
@@ -1337,7 +1370,11 @@ public:
     //   格栅窗）/ 144=door_wood_lower（橡木下半锁孔板）/ 145=door_spruce_upper / 146=door_spruce_lower（云杉
     //   深冷棕同布局）；PartialBlockGeometry door case 据 state bit3 选 upper/lower——kDefs 的 WoodDoor/
     //   SpruceDoor topTile=upper / bottomTile=lower 承载该选择；tools/build_door.py 程序生成）。
-    static constexpr int AtlasTileCount = 147;
+    //   t620：147..151=矿物存储块五张（coal/lapis/diamond/gold/redstone block 六面同；机制等价 MC 1.0
+    //   9↔1 压缩存储方块。铁块 tile 112 既存 t477）/ 152=redstone_lamp_off（红石灯 off 态灰暗壳）/
+    //   153=redstone_lamp_on（红石灯 on 态暖黄亮芯；mesher tileFor 据 RedstoneLamp state bit0 选 152/153）；
+    //   tools/build_mineral_blocks.py 程序生成原创像素图。
+    static constexpr int AtlasTileCount = 154;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
@@ -1585,6 +1622,16 @@ public:
     // t569 红石矿石点亮时长（秒；机制等价 MC 1.0 红石矿被触碰后亮约 5 秒后自熄）。playercontroller
     //   置亮时启动定时器，到期清 bit0 熄灭（同 MC 单次触碰一次点亮窗口）。
     static constexpr float RedstoneOreLitSeconds = 5.0f;
+    // t620 红石灯 state bit0（值 1）=「点亮」标记（机制等价 MC 1.0 红石灯受红石信号点亮——本项目无红石
+    //   系统，简化为右键直接开关：placeBlock useBlock 分支翻本位）。放置时 state=0（off 态，机制等价 MC
+    //   1.0 红石灯放置即灭）。消费点：① mesher（ChunkGeometry::tileFor）据本位选全六面贴图
+    //   redstone_lamp_off(152) / redstone_lamp_on(153)（六面同换，非 per-face）；② lightEmission 状态感知版
+    //   据本位返 15（MC 1.0 红石灯光 level 15，同岩浆档 —— recomputeLightAround 检出 lightSourceChanged
+    //   即重 flood 方块光）。5 参数 setBlock（id 不变只 state 变 → 仅 worldChanged 重建 mesh，不发
+    //   broken/placed）。collisionAABBs / selectionAABBs 不读 state（ShapeFull 整立方）→ 复用 bit0 作
+    //   开关编码零回归（同 FurnaceStateLitFlag bit2 / RedstoneOreStateLitFlag bit0 模式）。state 经
+    //   m_states 落 SQLite round-trip 保真（存档读回仍带开关态；旧存档无此方块故无迁移）。
+    static constexpr quint8 RedstoneLampStateOnFlag = 0x01;
 
     // 挖掘 / 掉落 / 堆叠属性访问器（t42 集中表查；越界 → air 行默认：hardness=0 / NoTool / 不掉落 / maxStack=0）。
     static float hardness(quint8 blockId);    // 基础硬度

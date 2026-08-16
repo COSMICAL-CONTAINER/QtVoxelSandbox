@@ -469,6 +469,31 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         //   无对应方块（无红石系统）→ 不接，留注释。非 pack 回落 default_rail*.png（tools/build_rail.py）。
         {121, QStringLiteral("rail_normal.png")},               // rail（直轨 NS；EW 由 mesher UV 旋转复用；t620）
         {136, QStringLiteral("rail_normal_turned.png")},        // rail_corner（90° 拐角；右转→水平镜像合成，t620）
+        // t620 矿物存储块六面同贴图（机制等价 MC 1.0 coal/lapis/diamond/gold/redstone block；六面一张图）。
+        //   112 iron_block 是 t477 遗漏（grep 实证 tileFilenameMap 无 112 条目 → pack 激活时铁块仍是程序贴图）；
+        //   t620 补齐六件全量。非 pack 回落 default_*_block.png（tools/build_mineral_blocks.py 原创自绘）。
+        //   包内缺某 PNG 时安全跳过（保留程序生成瓦片）。
+        {112, QStringLiteral("iron_block.png")},                // iron_block（t477 铁块；t620 补 pack 映射漏项）
+        {147, QStringLiteral("coal_block.png")},                // coal_block（煤炭块；六面同；t620）
+        {148, QStringLiteral("lapis_block.png")},               // lapis_block（青金石块；六面同；t620）
+        {149, QStringLiteral("diamond_block.png")},             // diamond_block（钻石块；六面同；t620）
+        {150, QStringLiteral("gold_block.png")},                // gold_block（金块；六面同；t620）
+        {151, QStringLiteral("redstone_block.png")},            // redstone_block（红石块；六面同；t620）
+        // t620 红石灯两态贴图（机制等价 MC 1.0 redstone lamp off/on 两张）：152=off（灰暗壳）/ 153=on（暖黄
+        //   亮芯）。mesher tileFor 据 RedstoneLamp state bit0（右键开关）选 152/153 全六面换。非 pack 回落
+        //   default_redstone_lamp_off/on.png（tools/build_mineral_blocks.py 原创自绘）。
+        {152, QStringLiteral("redstone_lamp_off.png")},         // redstone_lamp_off（红石灯 off 态灰暗壳；t620）
+        {153, QStringLiteral("redstone_lamp_on.png")},          // redstone_lamp_on（红石灯 on 态暖黄亮芯；t620）
+        // t620 仙人掌底面：Cactus def 底面 tile=54（cactus_top 复用——程序贴图时代顶底同图）；pack 内
+        //   cactus_bottom.png 与 cactus_top.png 像素实测不同（251/256 像素差，底面更暗、无中央凹陷）。但
+        //   本工程仙人掌是 0.8 细柱（PartialBlockGeometry Cactus case）—— pushBox 侧·底统一用 sideTile(55)，
+        //   仅 +Y 顶面用 topTile(54)；**底面瓦片无消费方**（mesher 不读 bottomTile、掉落物 BlockCube 走
+        //   tileIndex(Bottom) 但柱底永贴沙 / 下段仙人掌不可见）→ 不接 cactus_bottom 映射（接了无渲染路径
+        //   读它；如未来仙人掌改 per-face 再补）。
+        // t620 红石火把不做：redstone_torch_on/off.png 在包内，但红石火把方块未实现（依赖红石系统的恒亮 /
+        //   熄灭态语义，PLAN 无红石系统）→ 不接映射（无消费方）；留待红石系统任务再接。
+        // t620 铁轨动力 / 探测轨不做：rail_golden(_powered) / rail_detector(_powered) 在包内，但本工程无
+        //   对应方块（无红石系统 → 无激活态语义）→ 不接；同 t620 第 1 部分直轨 / 拐角的注释口径。
     };
     return kMap;
 }

@@ -311,6 +311,19 @@ TILES = [
     "default_door_wood_lower",    # 144 door_wood_lower（橡木门下半：门板 + 底部横带）
     "default_door_spruce_upper",  # 145 door_spruce_upper（云杉门上半：深色门板 + 格栅窗）
     "default_door_spruce_lower",  # 146 door_spruce_lower（云杉门下半：深色门板 + 底部横带）
+    # t620 矿物存储块五张（机制等价 MC 1.0 coal/lapis/diamond/gold/redstone block——9↔1 压缩存储方块；
+    #   铁块 tile 112 既存 t477）。六面同贴图（存储块无 per-face 语义）；主色 = 对应材料本色 + 4×4 镶格
+    #   暗缝 + 左上高光（「切割压缩块」读感）；红石块另撒亮红矿粒（同矿石族斑点语言）。
+    #   tools/build_mineral_blocks.py 程序生成原创像素图（§9 override (a)；零 MC 资产）。
+    "default_coal_block",         # 147 coal_block（煤炭块：近黑煤层压缩块；9 煤↔1 块；燃料 800s）
+    "default_lapis_block",        # 148 lapis_block（青金石块：深群青底 + 黄铁矿金点；9 青金石↔1 块）
+    "default_diamond_block",      # 149 diamond_block（钻石块：浅青底 + 青白菱面镶格；9 钻石↔1 块）
+    "default_gold_block",         # 150 gold_block（金块：金黄底 + 近白金高光；9 金锭↔1 块）
+    "default_redstone_block",     # 151 redstone_block（红石块：鲜红底 + 亮红矿粒；9 红石粉↔1 块）
+    # t620 红石灯两态（机制等价 MC 1.0 redstone lamp off/on 两张贴图；mesher tileFor 据 RedstoneLamp
+    #   state bit0（右键开关）选 152/153 全六面换；光照由 lightEmission 状态感知版 15/0 承担）。
+    "default_redstone_lamp_off",  # 152 redstone_lamp_off（红石灯 off 态：暗黄褐哑壳 + 中央暗红红石芯纹）
+    "default_redstone_lamp_on",   # 153 redstone_lamp_on（红石灯 on 态：暖琥珀亮壳 + 中心白热核；光 15）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

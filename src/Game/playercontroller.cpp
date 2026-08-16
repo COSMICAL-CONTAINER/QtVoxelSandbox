@@ -2234,6 +2234,20 @@ void PlayerController::placeBlock()
     //   ① 右键机关四邻（上方 isManualIgniter 分支）+ ② 踩压力板四邻（scanTntTraps）。右键 TNT 本体不再点燃
     //   → 走普通放块路径（空手无效应 / 持物在 TNT 旁正常放块）。机制等价 MC 1.0 徒手不能点燃 TNT（本项目无
     //   打火石，故仅机关可激活）。两处机关点燃路径保留（isManualIgniter 四邻 + scanTntTraps 压力板四邻）。
+    // t620 红石灯右键开关（useBlock 语义；机制等价 MC 1.0 redstone lamp 受信号点亮——本项目无红石，简化为
+    //   右键直接开关）。右键命中红石灯 → 翻 state bit0（RedstoneLampStateOnFlag）→ mesher 切 on/off 贴图
+    //   （redstone_lamp_on/off 全六面）+ lightEmission 状态感知版 15/0 → setBlock 5 参数版内部
+    //   recomputeLightAround 检出 lightSourceChanged 重 flood 方块光（开灯即亮 / 关灯即暗，无伪光源）。
+    //   空手亦可（开关是「使用」语义，与手持何物无关）。优先于放置（右键已放置的红石灯即开关，不另放块）。
+    //   id 不变只 state 变 → 仅发 worldChanged 重建 mesh（不发 broken/placed），同门开合模式。
+    if (BlockRegistry::isRedstoneLamp(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+        const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+        const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+        m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, quint8(st ^ BlockRegistry::RedstoneLampStateOnFlag));
+        m_lastPlaceMs = now;
+        emit swingArm(); // 开关是一次「使用」动作 → 挥手（t29）
+        return; // 开关成功 → 不再走放置路径
+    }
     } // t174：m_hasHit 局部门控结束（工作台/熔炉/门/活版门需命中；桶分支与放块路径各自处理命中需求）
     // t174 铁桶 useBlock（spec「右键舀水/倒水交互」）：选空桶 / 装水桶时右键走桶交互，不走方块放置路径
     //   （桶非方块；selectedBlock 经 hotbar 已归 Air，下方 Air 守卫会拦，故在此提前分支）。机制等价 MC 1.0

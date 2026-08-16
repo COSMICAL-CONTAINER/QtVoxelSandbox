@@ -109,6 +109,13 @@ BLOCKS = [
     ("enchanting_table", "default_enchanting_table_top", "default_enchanting_table_side"),  # t474 附魔台（顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点+边缘暗化）
     ("bookshelf",       "default_bookshelf", "default_bookshelf"),  # t474 书架（各面同贴图=木板边框+彩色书脊书列）
     ("iron_block",      "default_iron_block", "default_iron_block"),  # t477 铁块（各面同贴图=金属灰底+铆钉网格+高光）
+    # t620 矿物存储块立方体图标（各面同贴图=对应材质压缩块；机制等价铁块 icon_iron_block 流程）。
+    ("coal_block",      "default_coal_block", "default_coal_block"),  # t620 煤炭块（近黑煤层压缩块+高光棱线）
+    ("lapis_block",     "default_lapis_block", "default_lapis_block"),  # t620 青金石块（深群青底+黄铁矿金点）
+    ("diamond_block",   "default_diamond_block", "default_diamond_block"),  # t620 钻石块（浅青底+青白菱面镶格）
+    ("gold_block",      "default_gold_block", "default_gold_block"),  # t620 金块（金黄底+近白金高光）
+    ("redstone_block",  "default_redstone_block", "default_redstone_block"),  # t620 红石块（鲜红底+亮红矿粒镶面）
+    ("redstone_lamp",   "default_redstone_lamp_off", "default_redstone_lamp_off"),  # t620 红石灯（off 态哑壳+红石芯作图标；on 态是点亮视觉非图标）
     ("anvil",           "default_anvil_top", "default_anvil_base"),  # t477 铁砧（顶=砧台+砧面+尖角 / 侧=深铁砧身+横向分层）
     ("anvil_chipped",   "default_anvil_damaged_1_top", "default_anvil_base"),  # t477 微损铁砧（顶=砧台+细裂纹 / 侧=深铁砧身）
     ("anvil_damaged",   "default_anvil_damaged_2_top", "default_anvil_base"),  # t477 重损铁砧（顶=砧台+粗裂纹网+缺角 / 侧=深铁砧身）

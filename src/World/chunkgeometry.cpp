@@ -383,6 +383,14 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
             return (state & BlockRegistry::EndPortalStateActiveFlag) != 0 ? 142 : 141;
         return 140; // 侧 / 底 = endframe_side（框身）
     }
+    // t620 红石灯两态全六面换贴图（机制等价 MC 1.0 redstone lamp off/on 两张贴图）：state bit0
+    //   （RedstoneLampStateOnFlag，玩家右键翻位）→ on 态全六面 redstone_lamp_on(153)（暖黄亮芯）、
+    //   off 态全六面 redstone_lamp_off(152)（灰暗壳，def 默认）。与熔炉 / 传送门不同：红石灯无朝向 /
+    //   per-face 语义（六面同图），仅按 state 二选一 → 不读 BlockDef（def 存 off 态 152 作 BlockCube
+    //   手持 / 掉落物的无 state 兜底），此处直接二值返回。光照（光 15）由 lightEmission 状态感知版
+    //   承担，与贴图切换解耦（同 t494 熔炉 / t569 红石矿的「贴图 + 光照各自读同一 state bit」模式）。
+    if (block == BlockRegistry::RedstoneLamp)
+        return (state & BlockRegistry::RedstoneLampStateOnFlag) != 0 ? 153 : 152;
     return BlockRegistry::tileIndex(block, BlockRegistry::Face(face));
 }
 

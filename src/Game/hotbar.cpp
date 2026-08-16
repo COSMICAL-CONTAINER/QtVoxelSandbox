@@ -77,6 +77,13 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::EnchantingTable: return "icon_enchanting_table.png"; // t474 附魔台立方体图标（顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点）
     case BlockRegistry::Bookshelf:    return "icon_bookshelf.png";      // t474 书架立方体图标（各面=木板边框+彩色书脊书列）
     case BlockRegistry::IronBlock:    return "icon_iron_block.png";     // t477 铁块立方体图标（各面=金属灰底+铆钉网格+高光）
+    // t620 矿物存储块立方体图标（各面=对应材质存储块贴图；build_cube_icons.py 程序生成）。
+    case BlockRegistry::CoalBlock:    return "icon_coal_block.png";     // 煤炭块（各面=近黑煤层压缩块+高光棱线）
+    case BlockRegistry::LapisBlock:   return "icon_lapis_block.png";    // 青金石块（各面=深群青底+金点镶面）
+    case BlockRegistry::DiamondBlock: return "icon_diamond_block.png";  // 钻石块（各面=浅青底+钻石菱面镶格）
+    case BlockRegistry::GoldBlock:    return "icon_gold_block.png";     // 金块（各面=金黄底+镶格高光）
+    case BlockRegistry::RedstoneBlock: return "icon_redstone_block.png"; // 红石块（各面=鲜红底+矿粒镶面）
+    case BlockRegistry::RedstoneLamp: return "icon_redstone_lamp.png";  // 红石灯（各面=灰暗壳+中央红石芯（off 态））
     case BlockRegistry::Anvil:        return "icon_anvil.png";          // t477 铁砧立方体图标（顶=砧台+砧面+尖角 / 侧=深铁砧身）
     case BlockRegistry::AnvilChipped: return "icon_anvil_chipped.png";  // t477 微损铁砧立方体图标（顶=砧台+细裂纹）
     case BlockRegistry::AnvilDamaged: return "icon_anvil_damaged.png";  // t477 重损铁砧立方体图标（顶=砧台+粗裂纹网+缺角）
@@ -638,6 +645,15 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Dispenser),                                  // 发射器（踩压力板触发的射箭机关；丛林神殿陷阱；可放置 / 自建机关）
              // t609 投掷器（机制等价 MC 1.0 dropper——全部物品弹出掉落物的机关盒；7 圆石合成；DispenserStore 9 槽共用）。
              int(BlockRegistry::Dropper),                                    // 投掷器（踩压力板触发弹出全部物品；可放置 / 自建机关）
+             // t620 矿物存储块（机制等价 MC 1.0 coal/lapis/diamond/gold/redstone block；9 材料↔1 块 双向配方。
+             //   铁块 IronBlock 已在上方既存列表；本段补其余五种）。
+             int(BlockRegistry::CoalBlock),                                  // 煤炭块（9 煤↔1 块；燃料 800s=80 件；木镐采掘）
+             int(BlockRegistry::LapisBlock),                                 // 青金石块（9 青金石↔1 块；石镐采掘；附魔材料压缩存储）
+             int(BlockRegistry::DiamondBlock),                               // 钻石块（9 钻石↔1 块；铁镐采掘）
+             int(BlockRegistry::GoldBlock),                                  // 金块（9 金锭↔1 块；铁镐采掘）
+             int(BlockRegistry::RedstoneBlock),                              // 红石块（9 红石粉↔1 块；铁镐采掘）
+             // t620 红石灯（机制等价 MC 1.0 redstone lamp；右键开关的可放置光源方块——on 态光 15 + 亮贴图）。
+             int(BlockRegistry::RedstoneLamp),                               // 红石灯（右键开关光源；配方 4 红石+1 玻璃）
              // t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶 / 石砖楼梯；worldgen 散布 / 创造取用）。
              int(BlockRegistry::StoneBrick),                                 // 石砖（石质整立方 + 砖纹；要塞墙体主体；可放置）
              int(BlockRegistry::StoneBrickSlab),                             // 石砖台阶（半高；复用 ShapeSlab 几何 + 石砖贴图；可放置）

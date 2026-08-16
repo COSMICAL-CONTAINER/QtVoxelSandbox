@@ -40,6 +40,10 @@ constexpr FuelEntry kFuel[] = {
     { int(BlockRegistry::Planks),        15.f, "planks"  }, // 木板 15s（1.5 件）
     { int(BlockRegistry::CraftingTable), 15.f, "crafting_table" }, // 工作台 15s（同木板；t93）
     { RecipeRegistry::StickId,     5.f, "stick"          }, // 木棒 5s（0.5 件；t93）
+    // t620 煤炭块燃料：800s（80 件；机制等价 MC 1.0 block of coal 8000 burn ticks = 400s×2 —— MC 1.0 烧 80 件
+    //   的量级，本工程 1 件冶炼 = 10s → 80 件 = 800s）。9 煤（9×80s=720s）合 1 块烧 800s → 9 块煤的压缩
+    //   盈余 +80s（+8 件），机制等价 MC「块比散煤更划算」的存储 + 燃料双收益。
+    { int(BlockRegistry::CoalBlock),   800.f, "coal_block" }, // 煤炭块 800s（80 件；9 煤压缩 +80s 盈余）
 };
 
 // 编译期断言：冶炼产物 / 燃料 id 均在合法段（材料段 >= 0x200 或方块段 < Count）。
