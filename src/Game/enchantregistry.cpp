@@ -218,10 +218,13 @@ QVariantList EnchantRegistry::selectEnchants(int category, int offeredLevel, int
     if (lvl >= 20) count = 3;
     count = std::min(count, int(candidates.size()));
 
-    // 3) 加权不放回抽样 + 互斥组剔除。
+    // 3) 加权不放回抽样 + 互斥组剔除。review M1 修：互斥组用**位集**（每非 0 组一位）而非单值——旧单值
+    //   pickedExclusiveGroup 会被后选组覆盖（先选组 1 锐锋再遇组 2 效率时组 1 记录丢失 → Sharpness+Smite
+    //   或 Protection+FireProtection 可能同存于产物，自相矛盾：铁砧 conflictsWith 会拒之）。组号 ≤3 →
+    //   quint32 位集足够（组号越界按无互斥处理，防御）。
     uint rs = uint(seed) ^ 0x9e3779b9u; // 种子扰动（避免 seed=0 退化；同槽同 seed 仍确定性）
     if (rs == 0) rs = 1;                // 防 LCG 陷 0
-    int pickedExclusiveGroup = 0;       // 已选附魔的互斥组（0 = 无；非 0 则后续同组附魔被剔）
+    quint32 pickedGroups = 0;           // 已选附魔的互斥组位集（bit(g-1) 置位；0 = 尚无互斥组）
     std::vector<int> pickedIds;
     pickedIds.reserve(size_t(count));
 
@@ -233,7 +236,8 @@ QVariantList EnchantRegistry::selectEnchants(int category, int offeredLevel, int
             bool alreadyPicked = false;
             for (int pid : pickedIds) if (pid == e->id) { alreadyPicked = true; break; }
             if (alreadyPicked) continue;
-            if (pickedExclusiveGroup != 0 && e->exclusiveGroup == pickedExclusiveGroup) continue;
+            if (e->exclusiveGroup > 0 && e->exclusiveGroup < 32
+                && (pickedGroups & (1u << (e->exclusiveGroup - 1))) != 0) continue;
             pool.push_back(e);
         }
         if (pool.empty()) break; // 候选耗尽（互斥剔完）→ 提前结束
@@ -248,7 +252,9 @@ QVariantList EnchantRegistry::selectEnchants(int category, int offeredLevel, int
             r -= uint(std::max(1, e->weight));
         }
         pickedIds.push_back(chosen->id);
-        if (chosen->exclusiveGroup != 0) pickedExclusiveGroup = chosen->exclusiveGroup;
+        // 互斥组位集置位（review M1：多组共存累积，不覆盖既有组）。
+        if (chosen->exclusiveGroup > 0 && chosen->exclusiveGroup < 32)
+            pickedGroups |= (1u << (chosen->exclusiveGroup - 1));
 
         // 4) 等级：基础 = round(maxLevel * lvl / 30)（offered 30 → 满；1 → 1 级）；maxLevel=1 恒 1。
         int eLevel = 1;
