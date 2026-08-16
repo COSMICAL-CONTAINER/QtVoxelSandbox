@@ -2386,21 +2386,21 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 
 ### 🅴 雪傀儡（1 项）
 
-**t629** 雪傀儡三修（积雪层错位/悬空卡方块/易死根因 + 剪头露雪头）✅✅ 已完成（commit e896d0a）
+**t629** 雪傀儡三修（积雪层错位/悬空卡方块/易死根因 + 剪头露雪头）✅✅ 已完成（commit 6334d39）
 - 用户：「积雪层生成有点偏——应只在离它最近的一格持续生成；打它时有概率卡在空中悬浮在积雪层上一格；它特别容易死——白天阴凉处也一直扣血，是被卡死的吗？剪刀剪了南瓜头应露出里面的雪头（不是没头）。」
 - 核实现状：留雪逻辑「放身后格」（entitymanager ~2008）——用户说偏：改「放脚下相邻最近空格」或修正身后向量计算；悬空+易死同根因疑：SnowLayer 铺进 golem 碰撞格 → golem 被托起/卡 → 窒息扣血（mobFeetInWater/窒息判定查 mob 卡方块扣血路径——与玩家 t575 眼位 sub-AABB 判定对齐修 mob 侧）；融化判定（hotBiome/rain/inWater）本身对——「阴凉处扣血」应是卡方块伤害不是太阳。剪头后：golemSheared 态显示**雪块头**（白色方块头替代南瓜头，非无头）。
 - 实修：① 留雪改「放脚下最近格」（footprint 覆盖格中离中心 XZ 最近的一格，跨格取最近 = 用户「最近的一格」）；② mob 落地扫描改 mobSupportTopY 真顶承接（SnowLayer 按 snowLayerHeight 1/8..1.0 取薄层真顶，满格方块取 cell+1）→ 修「悬空在积雪层上一格」（旧恒按满格顶承接）+ resting 复探改 feet 所在格及其下一格两格复探（薄层顶非整数时旧公式查到层下空气格 → 周期振荡）；③ mobAabbHitsSolid 薄雪层视穿透（水平碰撞豁免 SnowLayer，防雪原/自铺脚印把 mob 围死）；④ mob 窒息判据收紧「头部格 collidable」→「头部点落入该格某 sub-AABB」（对齐玩家 t575 修法，薄层整格误判窒息 = 「阴凉处持续扣血」真因）；⑤ 剪头 delegate 显雪块头（BlockCube 101 雪块瓦片，同南瓜头 0.50 几何/1.14 头位）+ 眼嘴刻面贴雪头前，替代旧无头形态。
 
 ### 🅷 船（1 项）
 
-**t630** 船岸沿掉落阈值 2/3 + 撞荷叶 + 身体推船旋转 ✅✅ 已完成（commit b224c3a；t643 死亡后船卡水为同一支撑判定 bug，随本修复消解——verified-by-fix）
+**t630** 船岸沿掉落阈值 2/3 + 撞荷叶 + 身体推船旋转 ✅✅ 已完成（commit 71bfb65；t643 死亡后船卡水为同一支撑判定 bug，随本修复消解——verified-by-fix）
 - 用户：「船从岸上往水里走下不去（一半卡水里一半卡方块——掉落触发太早）：船身 2/3 过去了再掉，1/3 还在岸上时不掉，就不会被卡住。船应能撞碎荷叶（速度够大撞成掉落物）。人撞船应有旋转效果（不只平移）。」
 - 修：① 船「有支撑」判定从 1/2 支撑改 2/3 支撑才不掉（boatmanager 支撑格采样权重）；② 船 footprint 碰荷叶（LilyPad）且速度>阈值 → 荷叶破掉掉落物（参照冰碎/雪层塌机制）；③ 玩家推船：推力加**扭矩**——推力作用点=碰撞点（玩家相对船心方向），船 yaw += 横向分量×系数（简化：玩家在船侧推 → yaw 偏转）。
 - 实修：① 新 boatFootprintWaterFraction（footprint 覆盖格水柱占比采样）——中心列有水**且**覆盖 ≥ kBoatWaterFraction(0.67) 才判「浮在水里」（tick 空船 + tickRiddenBoat 骑乘两路同门控）；< 2/3 走陆档重力贴支撑面 → 岸沿驶入不落水岸夹缝（旧版 waterSurfaceY 只看中心列 = 根因：中心一入水即钉水面把压岸半船拽沉嵌岸块）。② smashLilyPads：速度 > kBoatLilySmashSpeed(3.0) 时扫 footprint 两层格清 LilyPad（setWaterSilent 静默）+ emit lilyPadSmashed → 呈层 spawnItem 掉睡莲（Main.qml onLilyPadSmashed）；撞碎先于位移碰撞 → 高速碾过不停船、低速叶仍挡（绕行）。③ 推船扭矩：力臂 = 玩家接触点相对船心 (−dpx,−dpz)，2D 叉积（力臂×推开量）× kBoatPushTurnRate(1200) → yawRate，钳 ±kBoatPushTurnMax(25°/s)，yaw 归一 [0,360)；对心推叉积≈0 纯平移不转（力矩物理直觉），偏侧推船头慢偏转。
 
 ### 🅸 月相刷新（1 项小）
 
-**t631** time set 命令推进月相 ✅✅ 已完成（commit 86dc13b）
+**t631** time set 命令推进月相 ✅✅ 已完成（commit 38f925f）
 - 用户：「time set midnight 时月亮应刷新月相（相当于又过了一天）——方便测试不同月相。」
 - 修：time set 命令处理器（聊天命令 timeSet）调 WorldClock setTime 时 dayCount+1（或按时间跳变量取整天数）→ 月相跟着走。
 - 实修：WorldClock::setPhase（/time set day|night|midnight|数字 共用入口）内 dayCount+1 后走 applyTime —— dayCount 是月相单一真值源（moonPhase=day%8），跨阶即 emit moonPhaseChanged → QML 月 Model 切 moon_<phase>.png；连续 set 8 次轮回一整圈（测试月相友好）。setDay（数字d）/addPhase 语义不变（setDay 本身直接设天；addPhase 跨天自动推进）。命令回显附「月相刷新」提示。
