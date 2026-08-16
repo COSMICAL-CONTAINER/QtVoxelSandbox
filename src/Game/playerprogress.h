@@ -178,9 +178,10 @@ private:
     static const QList<AchievementDef> &achievementDefs();
 
     // 解锁成就（id = 成就 id）。已解锁 → no-op（幂等）；父成就未解锁（前置依赖）→ 忽略本次解锁
-    //   （机制等价 MC 1.0 父成就未达成则子成就解锁不生效）；首次解锁 → 标记 + emit achievementUnlocked +
-    //   achievementChanged + progressChanged（驱动 revision bump）。
-    void unlock(const QString &id);
+    //   （机制等价 MC 1.0 父成就未达成则子成就解锁不生效）；silent=false 首次解锁 → 标记 + emit
+    //   achievementUnlocked + achievementChanged + progressChanged（驱动 revision bump）；silent=true
+    //   （loadVariant 读档回放用）→ 同父检查但零信号（caller 末尾单次 emit；review-M5 统一回放入口）。
+    void unlock(const QString &id, bool silent = false);
     // 累加统计并 flush（内部辅助：bump revision + emit progressChanged）。
     void bumpAndEmit();
 

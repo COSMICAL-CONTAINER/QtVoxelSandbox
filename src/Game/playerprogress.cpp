@@ -71,8 +71,10 @@ void PlayerProgress::bumpAndEmit()
 
 // 解锁成就（id）。已解锁 → no-op（幂等，防重复弹 toast）；父成就未解锁（前置依赖）→ 忽略本次解锁
 //   （progress-tree 三轮；机制等价 MC 1.0 父成就未达成则子成就解锁不生效，依赖树真实生效）；
-//   首次解锁 → 标记 + 弹 toast + 列表刷新 + revision bump。
-void PlayerProgress::unlock(const QString &id)
+//   首次解锁 → 标记 + 弹 toast + 列表刷新 + revision bump。silent=true（读档回放用）→ 同样走父检查
+//   但不弹 toast / 不逐项 emit（loadVariant 末尾单次 emit，免 toast 风暴；review-M5：回放曾直插
+//   m_unlocked 绕过父检查 → 「射而未杀 10 次」存档回放即子成就解锁而父仍锁，依赖树破相）。
+void PlayerProgress::unlock(const QString &id, bool silent)
 {
     if (m_unlocked.contains(id)) return;
     // 前置依赖检查：父成就未解锁 → 忽略本次解锁事件。defs 按 DFS 先序（父定义先于子），直接扫表查父。
@@ -82,6 +84,7 @@ void PlayerProgress::unlock(const QString &id)
             return;
     }
     m_unlocked.insert(id);
+    if (silent) return; // 读档回放：仅标记，不发信号（caller 统一 emit）
     // 查成就定义取 name/desc（toast 文案）；未知 id 防御性兜底。
     QString name = id, desc;
     for (const auto &d : achievementDefs()) {
@@ -364,9 +367,10 @@ void PlayerProgress::loadVariant(const QVariantMap &data)
         if (it.value().toBool()) m_unlocked.insert(it.key());
 
     // t619：读档后按既有统计回放「计数达阈值」型成就判定（旧档可能已满足但当时无该成就定义）。
-    //   前置依赖检查仍生效（父未解锁则忽略，机制等价 MC 1.0）。
-    if (m_arrowsHitMobs >= kSniperHits) m_unlocked.insert(QStringLiteral("sniper"));
-    if (m_cropsHarvested >= kFarmerHarvests) m_unlocked.insert(QStringLiteral("farmer"));
+    //   走 unlock(silent) 同一条前置依赖检查路径（父未解锁则忽略，机制等价 MC 1.0；review-M5）：
+    //   合法存档（父已解锁）照常恢复；「计数够但父未解锁」的存档回放不再让子成就越级解锁。
+    if (m_arrowsHitMobs >= kSniperHits) unlock(QStringLiteral("sniper"), /*silent=*/true);
+    if (m_cropsHarvested >= kFarmerHarvests) unlock(QStringLiteral("farmer"), /*silent=*/true);
 
     emit achievementChanged();
     bumpAndEmit();
