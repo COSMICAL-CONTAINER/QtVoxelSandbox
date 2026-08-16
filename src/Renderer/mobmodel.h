@@ -97,6 +97,10 @@ class MobModel : public QQuick3DGeometry
     Q_PROPERTY(float walkPhase READ walkPhase WRITE setWalkPhase NOTIFY walkPhaseChanged)
     // t241 头部俯仰（弧度，负=低头吃草）：仅羊绑非零；猪/牛恒 0 → addBox 轴对齐快路径。
     Q_PROPERTY(float headPitch READ headPitch WRITE setHeadPitch NOTIFY headPitchChanged)
+    // review M10 右臂瞄准抬起（度，0 = 垂手）：仅 Bones(mobType 5) 用——右臂绕肩枢 (0.20,0.28,-0.02) X 轴旋转，
+    //   与 Main.qml 弓肩枢 Node 同枢同角（drawAmount*75，度）→ 臂+弓刚体耦合（修满拉弓浮离手）。
+    //   未瞄准 / 图鉴静态 → 0 走 addBox 轴对齐快路径。其余 mobType 不读（几何无臂枢）。
+    Q_PROPERTY(float aimPitch READ aimPitch WRITE setAimPitch NOTIFY aimPitchChanged)
     // pack 是否用 pack entity 贴图（MC box-UV 精确采样，R19 C3）；pack 关 / 包内无贴图 → false（全脸 UV + 程序生成贴图）。
     Q_PROPERTY(bool packTextured READ packTextured WRITE setPackTextured NOTIFY packTexturedChanged)
 
@@ -112,6 +116,9 @@ public:
     float headPitch() const { return m_headPitch; }
     void setHeadPitch(float pitch);
 
+    float aimPitch() const { return m_aimPitch; }
+    void setAimPitch(float deg);
+
     bool packTextured() const { return m_packTextured; }
     void setPackTextured(bool on);
 
@@ -119,6 +126,7 @@ signals:
     void mobTypeChanged();
     void walkPhaseChanged();
     void headPitchChanged();
+    void aimPitchChanged();
     void packTexturedChanged();
 
 private:
@@ -127,6 +135,7 @@ private:
     int m_mobType = 1;    // 默认猪（合法非空，防未设 mobType 时空几何）
     float m_walkPhase = 0.0f; // 行走相位（弧度）；sin 驱动腿摆
     float m_headPitch = 0.0f; // 头部俯仰（弧度，负=低头）；0 → 头走轴对齐快路径
+    float m_aimPitch = 0.0f;  // 右臂瞄准抬起（度，0=垂手）；仅 Bones 用；0 → 右臂走轴对齐快路径
     bool m_packTextured = false; // pack entity 贴图（MC box-UV 精确采样，R19 C3）；false → 全脸 UV（程序生成贴图）
 };
 

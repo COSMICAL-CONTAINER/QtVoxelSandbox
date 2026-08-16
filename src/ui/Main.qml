@@ -6235,6 +6235,9 @@ Window {
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（无贴图，纯色骨白）。
                                     packTextured: mobBonesPackTex.source.toString().length > 0
                                     walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
+                                    // review M10 右臂瞄准抬起（度）：与下方弓肩枢 Node eulerRotation.x 同值同枢
+                                    //   （mobmodel.cpp 右臂绕 (0.20,0.28,-0.02) 旋转）→ 臂+弓刚体耦合不浮离。
+                                    aimPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index) * 75) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -6270,20 +6273,22 @@ Window {
                                 }
                                 // t616 弓 肩枢 Node（t331 起抽离 MobModel；本任务改「垂手持弓 + 瞄准抬起」）：
                                 //   右臂 t616 改自然下垂（mobmodel.cpp：臂盒心 (0.20,-0.045,-0.02) 半高 0.325 →
-                                //   手端 y≈-0.37）。弓静态挂垂手旁（肩枢 (0.24,-0.30,-0.02)，略外侧防穿臂），
-                                //   瞄准（drawAmount>0）绕肩枢刚体抬起（eulerRotation.x = drawAmount*75 → 满拉
-                                //   弓随臂抬到前伸瞄准位，机制等价 MC 1.0 骷髅停步举弓）。drawAmount 由
+                                //   手端 y≈-0.37）。review M10 修「瞄准时弓浮离手」：枢移到**真肩位**（右臂盒顶心
+                                //   (0.20,0.28,-0.02)，mobmodel.cpp 右臂 addBoxRot 同枢同角 aimPitch=drawAmount*75）
+                                //   → 臂+弓同一刚体旋转（t331 原设计恢复），满拉弓随臂抬到前伸瞄准位且握把恒贴手端
+                                //   （机制等价 MC 1.0 骷髅停步举弓）。握把相对肩枢 = (0.04,-0.65,-0.08)（合成静止位
+                                //   (0.24,-0.37,-0.10) = 垂手侧略外、弓面朝前 -Z，不变）。drawAmount 由
                                 //   EntityManager::drawAmountAt（aimTimer 驱动）供弦后拉 + 肢增弯（MobBowGeometry）。
                                 Node {
-                                    position: Qt.vector3d(0.24, -0.30, -0.02)
-                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index) * 75) : 0 } // 度；+draw 前端（-Z）上扬
+                                    position: Qt.vector3d(0.20, 0.28, -0.02)
+                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index) * 75) : 0 } // 度；+draw 前端（-Z）上扬（与 aimPitch 同值 → 刚体）
                                     // 弓（木褐色 MobBowGeometry，独立于骨白体色；弦随 drawAmount 后拉 + 肢增弯）：
-                                    //   握把相对肩枢 = (0,-0.07,-0.08)（垂手侧、弓面朝前 -Z）。
+                                    //   握把相对肩枢 = (0.04,-0.65,-0.08)（垂手侧、弓面朝前 -Z）。
                                     Model {
                                         geometry: MobBowGeometry {
                                             drawAmount: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.drawAmountAt(index)) : 0 }
                                         }
-                                        position: Qt.vector3d(0, -0.07, -0.08)
+                                        position: Qt.vector3d(0.04, -0.65, -0.08)
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: {

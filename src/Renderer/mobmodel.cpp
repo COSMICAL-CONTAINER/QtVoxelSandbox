@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QVector3D>
 #include <QtGlobal> // quint32
+#include <QtMath>   // qDegreesToRadians（aimPitch 度 → 弧度）
 
 #include <algorithm> // std::min/max
 #include <cmath>     // std::sin, std::cos
@@ -357,6 +358,16 @@ void MobModel::setHeadPitch(float pitch)
     rebuild();
 }
 
+// review M10 右臂瞄准抬起 setter（度）：同上早退；仅 Bones 拉弓瞄准期非零（QML 绑 drawAmount*75，
+//   与弓肩枢 Node eulerRotation.x 同值）。值变 → rebuild 把右臂绕肩枢转到新角度（满拉 75° 前伸瞄准）。
+void MobModel::setAimPitch(float deg)
+{
+    if (deg == m_aimPitch) return;
+    m_aimPitch = deg;
+    emit aimPitchChanged();
+    rebuild();
+}
+
 // pack entity 贴图开关 setter（R19 C3）：值变 → rebuild 把每盒 UV 从全脸切到 MC box-UV 精确采样（pack 开）或反之。
 //   QML 绑定 `packTextured: mobXxxPackTex.source.toString().length > 0`（pack 切换 / 包内命中与否均刷新）。
 void MobModel::setPackTextured(bool on)
@@ -454,8 +465,17 @@ void MobModel::rebuild()
         //   （ResourceBrowser）另补静态弓 Model（t598 头补法同族）。t594 双臂保留在本几何（贴图一致）。
         setMobTex(40, 16, 2, 12, 2);
         addBox(-0.20f, -0.045f, -0.02f, 0.05f, 0.325f, 0.05f, verts, idx, bMin, bMax); // 左臂（细骨杆垂下）
+        // review M10 右臂瞄准抬起（t616 后弓绕肩枢 Node 转、右臂静态垂下 → 满拉时弓浮离手）：
+        //   右臂绕肩枢（臂盒顶心 (0.20,0.28,-0.02)）X 轴旋转 aimPitch（度，QML eulerRotation 同单位同值 =
+        //   drawAmount*75），与 Main.qml 弓肩枢 Node 同枢同角 → 刚体耦合（弓握把恒贴手端，t331 原设计恢复）。
+        //   aimPitch=0（未瞄准 / 图鉴静态）→ addBox 轴对齐快路径（同 addHeadRot 模式）。
         setMobTex(40, 16, 2, 12, 2);
-        addBox( 0.20f, -0.045f, -0.02f, 0.05f, 0.325f, 0.05f, verts, idx, bMin, bMax); // 右臂（细骨杆垂下，持弓手）
+        if (m_aimPitch == 0.0f) {
+            addBox( 0.20f, -0.045f, -0.02f, 0.05f, 0.325f, 0.05f, verts, idx, bMin, bMax); // 右臂（细骨杆垂下，持弓手）
+        } else {
+            const float aimRad = qDegreesToRadians(m_aimPitch); // 度 → 弧度（addBoxRot 三角入参）
+            addBoxRot( 0.20f, -0.045f, -0.02f, 0.05f, 0.325f, 0.05f, 0.28f, -0.02f, aimRad, verts, idx, bMin, bMax); // 右臂（瞄准抬起，手端随弓前伸）
+        }
         // t331 弓 + 抬弓动画在 Main.qml 肩枢 Node（MobBowGeometry 木色弓 + drawAmount 抬弓），双臂在本几何。
         const float sw5 = kLegSwingAmp * std::sin(m_walkPhase);
         setMobTex(0, 16, 2, 12, 2);
