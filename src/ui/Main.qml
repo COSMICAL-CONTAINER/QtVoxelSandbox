@@ -9611,6 +9611,9 @@ Window {
         anchors.fill: parent
         hotbar: hotbarVM
         player: player
+        // t624 progress 注入（同 SurvivalInventory）：生存 tab 2×2 合成的统计 / 成就埋点
+        //   （craftOne / 批量合成经 root.progress 调 onCraft）。
+        progress: progress
         visible: window.appState === "playing" && window.inventoryOpen
                  && player.mode === PlayerController.Creative
         z: 150

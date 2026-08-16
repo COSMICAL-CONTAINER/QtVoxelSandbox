@@ -39,6 +39,10 @@ Item {
     //   CharacterPreview3D 经 `player: root.player` 传入（不能写 `player: player` —— 裸名会 shadow 成
     //   CharacterPreview3D 自身的同名属性 → 自引用恒 null，经验：传属性给子组件用 `root.xxx` 显式路径）。
     property var player: null
+    // t624 progress 玩家进度注入（Main.qml `progress: progress`，同 SurvivalInventory 模式）：生存 tab
+    //   2×2 合成的统计 / 成就埋点（craftOne / InventoryOps.slotShiftLeftCraft 经 root.progress 调 onCraft；
+    //   .js 库无 QML 全局 id 访问权 → 经 root 传，同 hotbar 注入模式）。
+    property var progress
     // 请求宿主关闭背包（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // t49/t356：请求宿主把光标手持栈「丢出到世界」生成实体（拖出面板外释放 / 点遮罩区时）。宿主一律走
@@ -190,6 +194,94 @@ Item {
     property real lastTapMs: 0
     property string lastTapKey: ""
 
+    // t624 生存 tab（currentTab===6）2×2 合成格：craftSlots/craftCounts 本地数组 + craftRev 版本号，镜像
+    //   SurvivalInventory 同名三件套（合成态属本面板，关包归还；数组元素改写不触发 QML 绑定 → 配版本号让
+    //   Image source / count 重算，同 SurvivalInventory craft 模式）。
+    property var craftSlots: [0, 0, 0, 0]  // 2×2 合成格（行优先：[0]=TL [1]=TR [2]=BL [3]=BR）
+    property var craftCounts: [0, 0, 0, 0] // 平行数量
+    property int craftRev: 0
+    // t624/t625：craft 组参与快捷操作（左键拖动均分 / 右键拖拽每格放1 / 双击拿同类）→ InventoryOps
+    //   groupIsDraggable 放行（声明见 SurvivalInventory t203 同款：合成格是纯输入槽，左/右拖拽填入是
+    //   标准交互；recipeMatch 据 craftRev 自动重算，均分后布局若变由用户重排）。调色板格**不在此列**
+    //   （无限源不作分发目标，t167 既有语义）。
+    property var localDragGroups: ["craft"]
+    // t624 craft 组槽位数（doMergeSameId 扫描范围）。craftSlots 长 4（2×2）。
+    function localSlotCount(group) { return group === "craft" ? root.craftSlots.length : 0 }
+
+    // ── t624 面板专属槽路由：craft 合成格走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
+    //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
+    //   craft 本地槽不持耐久/附魔/名（合成原料无名语义，同 SurvivalInventory craft；钩子只接前 4 形参，
+    //   writeSlot 多传的 dur/ench/name 实参无害）。
+    function localReadSlot(group, index) {
+        if (group === "craft") return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0 }
+        return { id: 0, count: 0 }
+    }
+    function localWriteSlot(group, index, id, count) {
+        if (group === "craft") { root.craftSlots[index] = id; root.craftCounts[index] = count; root.craftRev++ }
+    }
+
+    // t624 合成检测（镜像 SurvivalInventory.matchedRecipe）：读 2×2 craftSlots（行优先）查
+    //   RecipeRegistry::match（经 hotbar.recipeMatch 透传）。返回匹配配方的 QVariantMap
+    //   （outputId/outputCount/consumeCount）或 null（无匹配）。触碰 craftRev 让绑定刷新时重算。
+    function matchedRecipe() {
+        if (!root.hotbar) return null
+        root.craftRev
+        const m = root.hotbar.recipeMatch(root.craftSlots, 2)
+        return (m && m.outputId !== undefined) ? m : null
+    }
+
+    // t624 点击结果槽 → 单次合成（同 SurvivalInventory.craftOne：消耗每非空原料 1、产出 outputCount 到
+    //   光标；剩余留槽可连点）。创造模式下合成同样真实消耗（MC 1.0 创造背包的 2×2 合成格是真合成 ——
+    //   调色板物放入合成格按生存同款消耗/产出，仅调色板取物本身无限源；本注释记录机制等价 MC 创造背包）。
+    function craftOne() {
+        if (!root.hotbar) return
+        root.craftRev
+        const r = root.matchedRecipe()
+        if (!r) return
+        const heldId = root.hotbar.heldBlock
+        const heldCount = root.hotbar.heldCount
+        const cap = root.hotbar.maxStackSize(r.outputId)
+        if (!root.hotbar.recipeCanTake(r.outputId, r.outputCount, heldId, heldCount, cap)) return
+        // 消耗：每个非空原料格 count-1（归 0 清 id）。原料用量恒 1。
+        for (let i = 0; i < root.craftSlots.length; ++i) {
+            if ((root.craftSlots[i] || 0) !== 0) {
+                root.craftCounts[i] = (root.craftCounts[i] || 0) - 1
+                if ((root.craftCounts[i] || 0) <= 0) {
+                    root.craftSlots[i] = 0
+                    root.craftCounts[i] = 0
+                }
+            }
+        }
+        // 产出：加 outputCount 到光标。
+        root.hotbar.heldBlock = r.outputId
+        root.hotbar.heldCount = (heldId === r.outputId ? heldCount : 0) + r.outputCount
+        root.craftRev++
+        // progress 统计合成 + 成就（root.progress 注入，同 SurvivalInventory t603 修法 —— window.progress
+        //   恒 undefined，勿用）。
+        if (root.progress) root.progress.onCraft(r.outputId)
+    }
+
+    // t624 关包/离开生存 tab 归还合成栏（同 SurvivalInventory.returnCraftToHotbar）：把 craftSlots 内容
+    //   addStack 回背包（合并同类），清空 craftSlots。合成格不持久化，关包即退回玩家背包。初始全 0 →
+    //   构造期遍历为空，无副作用。
+    function returnCraftToHotbar() {
+        if (!root.hotbar) return
+        for (let i = 0; i < root.craftSlots.length; ++i) {
+            const id = root.craftSlots[i] || 0
+            const n = root.craftCounts[i] || 0
+            if (id !== 0 && n > 0) root.hotbar.addStack(id, n)
+        }
+        for (let i = 0; i < root.craftSlots.length; ++i) {
+            root.craftSlots[i] = 0
+            root.craftCounts[i] = 0
+        }
+        root.craftRev++
+    }
+    // t624：①面板隐藏（visible→false）→ 归还；②离开生存 tab（currentTab 6→其它，用户切到调色板分页）
+    //   → 同样归还（合成态不跨 tab 保留 —— 生存背包关包即退回的同款语义；防「切 tab 物品滞留格子」）。
+    onVisibleChanged: if (!visible) returnCraftToHotbar()
+    onCurrentTabChanged: if (root.currentTab !== 6) returnCraftToHotbar()
+
     // ── 尺寸常量（集中一处便于对齐）──
     readonly property int paletteCols: 9
     readonly property int cellSize: 42       // 调色板单格
@@ -209,8 +301,8 @@ Item {
 
     // ── t79/t98/t108/t167 拖动均分 + t110 Shift/数字键搬运 + t98 双击合并：算法见 InventoryOps
     //   （四面板共享）。本处仅薄委托包装，供 QML 信号处理器 / 绑定经 root.xxx 调用（调用点零改动）。
-    //   创造背包仅 hotbar 行作均分目标（调色板=无限源，不作目标）；本面板无 craft 本地组（localReadSlot 缺省
-    //   → InventoryOps 兜底空栈，安全）。
+    //   t624 起：本面板有 craft 本地组（生存 tab 2×2）→ localReadSlot/localWriteSlot 路由（见上）；
+    //   调色板仍为无限源不作均分目标（palette 组不在 localDragGroups，groupIsDraggable 拒收）。
     function slotKey(group, index) { return InventoryOps.slotKey(group, index) }
     function dragHasKey(key) { return InventoryOps.dragHasKey(root, key) }
     // t228：判定 root 坐标系点 (x,y) 是否落在面板矩形内（拖出丢弃门控；面板内非槽位松手→不丢）。
@@ -229,6 +321,8 @@ Item {
     function slotShiftLeft(group, index) { InventoryOps.slotShiftLeft(root, group, index) }
     function swapHoveredWithHotbar(hotbarIdx) { InventoryOps.swapHoveredWithHotbar(root, hotbarIdx) }
     function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
+    // t624 生存 tab 2×2 Shift+左键结果槽 → 批量合成（耗尽最小原料数；产物入背包非光标；同 SurvivalInventory）。
+    function slotShiftLeftCraft() { InventoryOps.slotShiftLeftCraft(root) }
 
     // t512 创造调色板 hover 物品 + 数字键 1-9 → 强制替换对应 hotbar 槽（覆盖原物，不论原槽有无物品）。
     //   机制等价 MC 1.0 创造模式 hotbar：hover 创造物品按 1-9 直接把一组该物品塞进对应 hotbar 槽（1→槽0 ...
@@ -693,7 +787,8 @@ Item {
                             }
                         }
 
-                        // 2×2 合成格（占位：仅显示槽位，不接配方 —— 任务注「合成可占位」）。
+                        // t624 2×2 合成格（真合成：craftSlots 本地组 + matchedRecipe 检测 + 结果槽产出，
+                        //   镜像 SurvivalInventory craft 模式；取代 t528 的纯占位空框）。
                         //   t528 布局对齐（同生存背包 SurvivalInventory 坐标）：2×2 居中于上半 160 高度的右侧，
                         //   左移给箭头 + 结果槽腾位（修「产物格被挡看不见」——原 2×2 贴右边界、无箭头/结果槽）。
                         //   parent.width=360：2×2(x=212,80 宽) → 箭头(x=296,24 宽) → 结果槽(x=320,40 宽，对齐第 9 列)。
@@ -706,11 +801,131 @@ Item {
                                 model: 4
                                 delegate: Item {
                                     width: root.slotSize; height: root.slotSize
+                                    // 凹陷斜面槽框（顶/左 暗、底/右 亮；与主栏/hotbar 行同风格）。
                                     Rectangle { anchors.fill: parent; color: "#262b30" }
                                     Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
                                     Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
                                     Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                                     Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+
+                                    // 物品图标（触碰 craftRev → 拾取/放入后重算；方块 Image / 工具 ToolIcon / 材料 MaterialIcon）。
+                                    Item {
+                                        anchors.centerIn: parent
+                                        width: 30; height: 30
+                                        visible: { const _r = root.craftRev; return _r >= 0 ? ((root.craftSlots[index] || 0) !== 0) : false }
+                                        Image {
+                                            anchors.fill: parent
+                                            visible: { const _r = root.craftRev; return _r >= 0 ? (!root.hotbar.isTool(root.craftSlots[index] || 0)
+                                                                                                  && !root.hotbar.isMaterial(root.craftSlots[index] || 0)) : false }
+                                            source: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0)) : "" }
+                                            fillMode: Image.PreserveAspectFit; smooth: true
+                                        }
+                                        ToolIcon {
+                                            anchors.fill: parent
+                                            visible: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.isTool(root.craftSlots[index] || 0)) : false }
+                                            tier: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.toolTier(root.craftSlots[index] || 0)) : 0 }
+                                            toolType: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.toolType(root.craftSlots[index] || 0)) : 0 }
+                                        }
+                                        MaterialIcon {
+                                            anchors.fill: parent
+                                            visible: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.isMaterial(root.craftSlots[index] || 0)) : false }
+                                            materialId: { const _r = root.craftRev; return _r >= 0 ? (root.craftSlots[index] || 0) : 0 }
+                                        }
+                                    }
+                                    // 栈数量（count>1 时右下角显数字。触碰 craftRev 刷新——数组突变靠版本号触发）。
+                                    Text {
+                                        anchors.right: parent.right; anchors.bottom: parent.bottom
+                                        anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                        visible: { const _r = root.craftRev; return _r >= 0 ? ((root.craftCounts[index] || 0) > 1) : false }
+                                        text: { const _r = root.craftRev; return _r >= 0 ? (root.craftCounts[index] || 0) : "" }
+                                        color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                                        font.pixelSize: 13; font.bold: true
+                                    }
+                                    // t624 左键整组（拾取/放置/合并/互换，resolveClick）+ Shift+左键归包（slotShiftLeft
+                                    //   craft 分支→addToAny）+ 双击拿同类（doMergeSameId 扫 main+hotbar+craft）。
+                                    TapHandler {
+                                        acceptedButtons: Qt.LeftButton
+                                        onTapped: {
+                                            // Shift+左键 → 合成槽整栈归还背包（同 SurvivalInventory t230）。
+                                            if (window.shiftHeld) { root.slotShiftLeft("craft", index); return }
+                                            // 双击拿同类（280ms 内同槽二次点击 → doMergeSameId）。
+                                            const key = root.slotKey("craft", index)
+                                            const now = Date.now()
+                                            const isDouble = (now - root.lastTapMs < 280) && (root.lastTapKey === key)
+                                            root.lastTapMs = now
+                                            root.lastTapKey = key
+                                            if (isDouble) { root.doMergeSameId("craft", index); return }
+                                            // craft 本地槽不持耐久/附魔/名（合成原料无名语义）→ 只传 id/count。
+                                            const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0, 0)
+                                            if (!r) return
+                                            root.craftSlots[index] = r.slotId
+                                            root.craftCounts[index] = r.slotCount
+                                            root.craftRev++
+                                            root.hotbar.heldBlock = r.heldId
+                                            root.hotbar.heldCount = r.heldCount
+                                            root.hotbar.heldDurability = r.heldDur
+                                        }
+                                    }
+                                    // t624 per-slot 右键（拿半/放一，同 SurvivalInventory）：空手→拾取 floor(count/2)
+                                    //   （单件取 1）；持物→放 1（空槽开新栈 / 同 id 未满 +1；异 id / 已满无操作）。
+                                    TapHandler {
+                                        acceptedButtons: Qt.RightButton
+                                        onTapped: {
+                                            const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0, 0)
+                                            if (!r) return
+                                            root.craftSlots[index] = r.slotId
+                                            root.craftCounts[index] = r.slotCount
+                                            root.craftRev++
+                                            root.hotbar.heldBlock = r.heldId
+                                            root.hotbar.heldCount = r.heldCount
+                                            root.hotbar.heldDurability = r.heldDur
+                                        }
+                                    }
+                                    // t624 hover → 物品名 tooltip + hoveredKey（拖动均分起点槽 / tooltip 路由用）
+                                    //   + 拖动期间进入新格 → 收集（craft 在 localDragGroups → 参与均分，t625）。
+                                    HoverHandler {
+                                        property int trackedId: { const _r = root.craftRev; return _r >= 0 ? (root.craftSlots[index] || 0) : 0 }
+                                        onTrackedIdChanged: {
+                                            if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                                root.hoveredItemId = 0
+                                        }
+                                        onHoveredChanged: {
+                                            const itemId = root.craftSlots[index] || 0
+                                            if (hovered && itemId !== 0) {
+                                                root.hoveredItemId = itemId
+                                                const p = parent.mapToItem(root, parent.width / 2, 0)
+                                                root.hoveredTipPos = Qt.point(p.x, p.y)
+                                            } else if (root.hoveredItemId === itemId) {
+                                                root.hoveredItemId = 0
+                                            }
+                                            const key = root.slotKey("craft", index)
+                                            if (hovered) root.hoveredKey = key
+                                            else if (root.hoveredKey === key) root.hoveredKey = ""
+                                            // 左/右键拖动期间进入新格 → 收集（集合只增不减；无 leave-remove 分支）。
+                                            if (hovered && root.dragActive) {
+                                                root.addDragSlot(key)
+                                            }
+                                        }
+                                    }
+                                    // t625 均分/右键拖拽绿框高亮（扫过且待分发的合格格；leftDragActive 期间才显）。
+                                    //   异物槽纵使被扫过也不亮（addDragSlot 已过滤入 dragSlots，双重保险）。
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        color: "transparent"
+                                        border.color: "#7fe57f"; border.width: 2
+                                        visible: {
+                                            const _ds = root.dragSlots
+                                            const _rds = root.rightDragSlots
+                                            const _rev = root.craftRev
+                                            const _ok = _rev >= 0 && _ds.length >= 0 && _rds.length >= 0
+                                            const sid = root.craftSlots[index] || 0
+                                            const key = root.slotKey("craft", index)
+                                            if (_ok && root.leftDragActive && root.dragHasKey(key)
+                                                && (sid === 0 || sid === root.dragHeldId)) return true
+                                            return _ok && root.rightDragActive && root.rightDragHasKey(key)
+                                        }
+                                        z: 10
+                                    }
                                 }
                             }
                         }
@@ -731,9 +946,9 @@ Item {
                             }
                         }
 
-                        // t528 合成结果槽（最右，占位空槽，不接配方 —— 与任务注「合成可占位」一致）。
-                        //   parent.width=360 → x=320（对齐主栏第 9 列），y=60 居中于 160 高。原版无此槽 → 2×2 贴边、
-                        //   产物格被挡。现补结果槽空框 → 「2×2 → 箭头 → 结果槽」三段可见，对齐生存背包布局。
+                        // t624 合成结果槽（真产出：显匹配配方产物图标；点击 → 合成一批。无匹配时空）。
+                        //   parent.width=360 → x=320（对齐主栏第 9 列），y=60 居中于 160 高。
+                        //   左键非 Shift / 右键 → 单次 craftOne；Shift+左键 → 批量合成（slotShiftLeftCraft）。
                         Item {
                             x: parent.width - root.slotSize; y: 60
                             width: root.slotSize; height: root.slotSize
@@ -742,6 +957,68 @@ Item {
                             Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
                             Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
                             Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+                            // 产物图标 + 数量（outId/outCount 据 matchedRecipe（触碰 craftRev）重算）。
+                            Item {
+                                anchors.centerIn: parent
+                                width: 30; height: 30
+                                property int outId: { const _r = root.craftRev; const r = root.matchedRecipe(); return _r >= 0 ? ((r && r.outputId) || 0) : 0 }
+                                property int outCount: { const _r = root.craftRev; const r = root.matchedRecipe(); return _r >= 0 ? ((r && r.outputCount) || 0) : 0 }
+                                visible: outId !== 0
+                                HoverHandler {
+                                    property int trackedId: parent.outId
+                                    onTrackedIdChanged: {
+                                        if (hovered && trackedId === 0 && root.hoveredItemId !== 0)
+                                            root.hoveredItemId = 0
+                                    }
+                                    onHoveredChanged: {
+                                        if (hovered && parent.outId !== 0) {
+                                            root.hoveredItemId = parent.outId
+                                            const p = parent.mapToItem(root, parent.width / 2, 0)
+                                            root.hoveredTipPos = Qt.point(p.x, p.y)
+                                        } else if (root.hoveredItemId === parent.outId) {
+                                            root.hoveredItemId = 0
+                                        }
+                                    }
+                                }
+                                Image {
+                                    anchors.fill: parent
+                                    visible: parent.outId !== 0 && !root.hotbar.isTool(parent.outId) && !root.hotbar.isMaterial(parent.outId)
+                                    source: parent.outId !== 0 ? root.hotbar.iconSourceForBlock(parent.outId) : ""
+                                    fillMode: Image.PreserveAspectFit; smooth: true
+                                }
+                                ToolIcon {
+                                    anchors.fill: parent
+                                    visible: parent.outId !== 0 && root.hotbar.isTool(parent.outId)
+                                    tier: root.hotbar.toolTier(parent.outId)
+                                    toolType: root.hotbar.toolType(parent.outId)
+                                }
+                                MaterialIcon {
+                                    anchors.fill: parent
+                                    visible: parent.outId !== 0 && root.hotbar.isMaterial(parent.outId)
+                                    materialId: parent.outId
+                                }
+                                Text {
+                                    anchors.right: parent.right; anchors.bottom: parent.bottom
+                                    anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                    visible: parent.outCount > 1
+                                    text: parent.outCount
+                                    color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                                    font.pixelSize: 13; font.bold: true
+                                }
+                            }
+                            // 点击结果槽 → 合成：Shift+左键 → 批量（耗尽最小原料、产物入背包）；否则单次
+                            //   （消耗每原料 1、产出 outputCount 到光标，可连点）。
+                            TapHandler {
+                                acceptedButtons: Qt.LeftButton
+                                onTapped: {
+                                    if (window.shiftHeld) { root.slotShiftLeftCraft(); return }
+                                    root.craftOne()
+                                }
+                            }
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: root.craftOne()
+                            }
                         }
                     }
 
