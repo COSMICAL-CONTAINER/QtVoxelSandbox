@@ -2520,7 +2520,7 @@ t622-t645（24 项；t643 并入 t630 验证不计开发项 → 23 开发项）�
 
 ## ⚠️⚠️ R19.7 补映射批（2026-08-17 用户 pack block/ 目录实测审计）
 
-**t646** tileFilenameMap 方块贴图批量补映射（12 条直映射 + TNT per-face + 按钮复用）
+**t646** tileFilenameMap 方块贴图批量补映射（12 条直映射 + TNT per-face + 按钮复用） ✅✅ 已完成（commit 223231c）
 - 用户实测 pack block/ 目录以下贴图全部存在，tileFilenameMap（resourcepackmanager.cpp）未接 → pack 启用时世界贴图仍走程序瓦片。逐条补（机制同既有：包缺文件安全跳过保程序瓦片；接上后创造 3D 图标采共享图集自动吃到 pack 贴图，blockItemIconMap 不动）：
   | tile | pack 文件 | 方块 |
   |---|---|---|
