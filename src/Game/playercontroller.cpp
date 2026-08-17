@@ -3748,25 +3748,48 @@ void PlayerController::dropAllItems()
 // 栅格，但属「凭空获得方块」的选择作弊，故与破/放同走模式门控，不放宽到全模式。
 // t291：优先「切槽」——hotbar 已有同方块时切到该槽（不动栈），仅 hotbar 全无该方块时才 setStack 复制入
 // 当前选中槽（Hotbar 内部校验范围 + id 合法性 + count 上限）。
+// t653②：中键指向 mob 优先于方块 —— 独立跑 mob 命中射线（findMobHit，同攻击路径模式），命中活体 mob
+//   且比方块更近（或无方块命中）→ 取该 mob 的**生物蛋**（mobType→egg id 映射）走同款「切槽/复制」语义
+//   （机制等价 MC 创造中键 pick mob → spawn egg）。无蛋的 mob（狼/傀儡/蠹虫未造蛋物品）→ 落回方块分支。
 void PlayerController::pickBlock()
 {
     if (m_dead) return; // t655 死亡态输入闸门：尸体不中键复制（防御；死亡仅 Survival，创造路径理论不达）
     if (m_mode != Creative) return; // t288：仅创造模式可中键复制方块
-    if (!m_captured || !m_hasHit || !m_world || !m_hotbar) return;
+    if (!m_captured || !m_world || !m_hotbar) return;
+    // t653② mob 优先：独立 mob 命中射线（不依赖 m_hasHit —— 瞄悬空 mob 无方块命中也应可 pick）。
+    //   命中比方块更近（或无方块命中）才走蛋路径；否则 mob 被方块遮挡 → 落回方块分支。
+    if (m_entityManager) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        if (mobIdx >= 0 && (!m_hasHit || mobDist <= m_hitDist)) {
+            const int eggId = mobTypeEggId(m_entityManager->mobTypeAt(mobIdx));
+            if (eggId != 0) {
+                pickIdToHotbar(eggId);
+                return;
+            }
+            // 无蛋 mob（狼/雪傀儡/铁傀儡/蠹虫——蛋物品未造）→ 落回方块分支（中键仍 pick 背后方块）。
+        }
+    }
+    if (!m_hasHit) return;
     const quint8 id = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
     if (id == BlockRegistry::Air) return; // 命中空气 → 无可拾取
-    // t291：创造中键切槽 —— 机制等价 MC 1.0 pick-block：先扫 hotbar 9 槽是否已有同 id 方块，有则切到该槽
-    // （setSelectedSlot，不动栈内容 / 数量 → 不重复占槽、不覆盖既有数量，选中槽即该槽时等值早退 no-op）；
-    // 仅当 hotbar 全无该方块时才落到「复制入背包」（setStack 写满栈，创造源无限）。区别于 t37/t288
-    // 「恒覆盖选中槽」：避免把「已在别槽的方块」又塞一份进选中槽挤掉原内容。
+    pickIdToHotbar(int(id));
+}
+
+// t653② 抽出「切槽 / 复制入槽」主体（方块与生物蛋共用；t291/t453 语义原样迁移）：
+//   hotbar 已有同 id → 切槽（不动栈）；全无 → 复制满栈入空槽优先（当前选中槽空则直写；满背包回退替换）。
+void PlayerController::pickIdToHotbar(int id)
+{
     const int n = m_hotbar->slotCount();
     for (int s = 0; s < n; ++s) {
-        if (m_hotbar->blockIdAt(s) == int(id)) { // blockIdAt 返原始 id；空槽=Air=0，id≠Air 不误匹配
+        if (m_hotbar->blockIdAt(s) == id) { // blockIdAt 返原始 id；空槽=Air=0，id≠Air 不误匹配
             m_hotbar->setSelectedSlot(s);
             return;
         }
     }
-    // t453 复制 → 空槽优先（修「手持有方块中键另一块丢失原手持」）：hotbar 全无该方块时，复制入**空槽**
+    // t453 复制 → 空槽优先（修「手持有方块中键另一块丢失原手持」）：hotbar 全无该 id 时，复制入**空槽**
     //   而非替换当前选中槽。当前选中槽为空 → 直接写入它（无内容损失、无需切槽）；当前选中槽非空（手持有
     //   方块）→ 另找空槽复制 + 切到该槽（手持 = 新方块，原选中槽内容保留，机制等价 MC 1.0 pick-block
     //   「取目标方块到手」不破坏既有栈）；仅满背包（无空槽）才回退替换当前选中槽（不可避免）。创造源无限
@@ -3780,8 +3803,28 @@ void PlayerController::pickBlock()
         }
         if (target < 0) target = m_hotbar->selectedSlot(); // 满背包 → 回退替换当前
     }
-    m_hotbar->setStack(target, int(id), m_hotbar->maxStackSize(int(id)));
+    m_hotbar->setStack(target, id, m_hotbar->maxStackSize(id));
     m_hotbar->setSelectedSlot(target); // 切到复制入的槽（手持 = 新方块；同值时 setSelectedSlot 内部早退）
+}
+
+// t653② mobType → 生物蛋物品 id 映射（机制等价 MC 创造中键 pick mob → 对应 spawn egg；零 MC 专名 §9）。
+//   仅 9 种有蛋物品的 mob 有映射（t243/t287/t285/t398/t399）；狼/雪傀儡/铁傀儡/蠹虫无蛋物品 → 0（caller
+//   落回方块分支）。蛋 id 与 RecipeRegistry 命名常量同源（此处字面量与 playercontroller 生物蛋右键生成
+//   分支的 id 判定同表）。
+int PlayerController::mobTypeEggId(int mobType) const
+{
+    switch (mobType) {
+    case EntityManager::MobPig:      return RecipeRegistry::SpawnEggPigId;
+    case EntityManager::MobCow:      return RecipeRegistry::SpawnEggCowId;
+    case EntityManager::MobSheep:    return RecipeRegistry::SpawnEggSheepId;
+    case EntityManager::MobShambler: return RecipeRegistry::SpawnEggShamblerId;
+    case EntityManager::MobBones:    return RecipeRegistry::SpawnEggBonesId;
+    case EntityManager::MobStalker:  return RecipeRegistry::SpawnEggStalkerId;
+    case EntityManager::MobSpider:   return RecipeRegistry::SpawnEggSpiderId;
+    case EntityManager::MobChicken:  return RecipeRegistry::SpawnEggChickenId;
+    case EntityManager::MobSquid:    return RecipeRegistry::SpawnEggSquidId;
+    default: return 0; // 无蛋物品的 mob（Test/Wolf/Golem/Silverfish/Tnt 哨兵）
+    }
 }
 
 // 拾取扫描（t36 / t64 / t97）：每帧扫附近掉落实体 → Hotbar::addToAny（跨 main + hotbar 智能堆叠，

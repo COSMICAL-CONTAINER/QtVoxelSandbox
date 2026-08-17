@@ -423,6 +423,22 @@ Item {
     // t624 生存 tab 2×2 Shift+左键结果槽 → 批量合成（耗尽最小原料数；产物入背包非光标；同 SurvivalInventory）。
     function slotShiftLeftCraft() { InventoryOps.slotShiftLeftCraft(root) }
 
+    // t653① 中键复制一整组到光标（创造 pick 语义，背包内任意槽位通用）：把槽内容**复制**到光标（源槽不动
+    //   —— 创造凭空复制，机制等价 MC 创造背包中键取整组）；实例元数据（耐久 / 附魔 / 名）随实例复制保真。
+    //   旧光标手持（若有）先归还虚空（创造语义，同调色板换拿 t136/t356）。count 钳 maxStackSize（源槽超
+    //   maxStack 的异常栈不会复制出超限光标栈）。仅创造背包面板有本手势（本面板 visible 已由宿主绑 Creative）。
+    function copyStackToCursor(id, count, durability, enchants, name) {
+        if (!root.hotbar || id === 0 || count <= 0) return
+        if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
+        root.hotbar.heldBlock = id
+        root.hotbar.heldCount = Math.min(count, root.hotbar.maxStackSize(id))
+        root.hotbar.heldDurability = (durability > 0) ? durability : 0
+        const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants.slice() : [0, 0, 0, 0]
+        root.hotbar.setHeldEnchants(e)
+        root.hotbar.heldCustomName = (typeof name === "string") ? name : ""
+        root.itemTaken()
+    }
+
     // t512 创造调色板 hover 物品 + 数字键 1-9 → 强制替换对应 hotbar 槽（覆盖原物，不论原槽有无物品）。
     //   机制等价 MC 1.0 创造模式 hotbar：hover 创造物品按 1-9 直接把一组该物品塞进对应 hotbar 槽（1→槽0 ...
     //   9→槽8）。区别于 swapHoveredWithHotbar（t110 整栈互换、需源槽）：调色板=无限源，无源槽概念 → 直接 setStack
@@ -807,6 +823,26 @@ Item {
                                     root.itemTaken()  // t120：创造拿物品 → 宿主弹手（handPopAnim）
                                 }
                             }
+                            // t653① 中键 = 复制一整组到光标（创造 pick 语义）：与左键同取调色板无限源（满栈
+                            //   maxStackSize），差异仅「不受 t318 原格归还 toggle 影响」（中键恒拿取，MC 中键
+                            //   就是纯复制）。预设附魔书（哨兵）走同款专用拿取。
+                            TapHandler {
+                                acceptedButtons: Qt.MiddleButton
+                                enabled: modelData !== 0
+                                onTapped: {
+                                    const bi = root.bookInfoFor(modelData)
+                                    if (bi) {
+                                        if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
+                                        root.hotbar.takeCreativeEnchantedBook(bi.ench)
+                                        root.itemTaken()
+                                        return
+                                    }
+                                    if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
+                                    root.hotbar.heldBlock = modelData
+                                    root.hotbar.heldCount = root.hotbar.maxStackSize(modelData)
+                                    root.itemTaken()
+                                }
+                            }
                         }
                     }
                 }
@@ -993,6 +1029,15 @@ Item {
                                             }
                                         }
                                     }
+                                    // t653① 中键 = 复制该装备到光标（护甲不可叠 → 恒 1 件；耐久 / 附魔 / 名
+                                    //   随实例保真；装备槽不动 —— 创造凭空复制）。
+                                    TapHandler {
+                                        acceptedButtons: Qt.MiddleButton
+                                        onTapped: root.copyStackToCursor(root.hotbar.armorBlockIdAt(index), 1,
+                                                                           root.hotbar.armorDurabilityAt(index),
+                                                                           root.hotbar.armorEnchantsAt(index),
+                                                                           root.hotbar.armorCustomNameAt(index))
+                                    }
 
                                     // hover → 物品名 tooltip（复用面板 itemTip；仅非空槽显名）。t622 写
                                     //   hoveredKey（armor:N）→ tooltip 实例名行能读 armorCustomNameAt。
@@ -1142,6 +1187,12 @@ Item {
                                             root.hotbar.setHeldEnchants(r.heldEnch)
                                             root.hotbar.heldCustomName = r.heldName
                                         }
+                                    }
+                                    // t653① 中键 = 复制该槽一整组到光标（创造凭空复制，源槽不动；元数据保真）。
+                                    TapHandler {
+                                        acceptedButtons: Qt.MiddleButton
+                                        onTapped: root.copyStackToCursor(root.craftSlots[index] || 0, root.craftCounts[index] || 0,
+                                                                          root.craftDurAt(index), root.craftEnchAt(index), root.craftNameAt(index))
                                     }
                                     // t624 hover → 物品名 tooltip + hoveredKey（拖动均分起点槽 / tooltip 路由用）
                                     //   + 拖动期间进入新格 → 收集（craft 在 localDragGroups → 参与均分，t625）。
@@ -1403,6 +1454,11 @@ Item {
                                         root.hotbar.heldCustomName = r.heldName
                                     }
                                 }
+                                // t653① 中键 = 复制该槽一整组到光标（创造凭空复制，源槽不动；元数据保真）。
+                                TapHandler {
+                                    acceptedButtons: Qt.MiddleButton
+                                    onTapped: root.copyStackToCursor(mainId, mainCount, mainDur, mainEnch, mainName)
+                                }
                                 // hover → 物品名 tooltip + hoveredKey（供数字键 1-9 与 hover 槽互换 / Shift 搬运）。
                                 // t625：补 hoveredKey 维护 + 拖动期间收集（addDragSlot）——原 handler 只写 tooltip
                                 //   不收集 → 生存 tab 主栏（main 组，groupIsDraggable 恒真）虽在参与表内，但格子
@@ -1637,6 +1693,14 @@ Item {
                                             root.hotbar.heldCustomName = r.heldName
                                         }
                                     }
+                                }
+                                // t653① 中键 = 复制该槽一整组到光标（创造凭空复制，源槽不动；元数据保真）。
+                                //   从 VM 直读（Q_INVOKABLE 恒最新，同 t498 模式），不依赖绑定属性快照。
+                                TapHandler {
+                                    acceptedButtons: Qt.MiddleButton
+                                    onTapped: root.copyStackToCursor(root.hotbar.blockIdAt(index), root.hotbar.countAt(index),
+                                                                      root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index),
+                                                                      root.hotbar.customNameAt(index))
                                 }
                                 // t167 均分拖拽高亮（扫过且待分发的合格格绿框；leftDragActive 期间才显）。
                                 // 异物槽纵使被扫过也不亮（addDragSlot 已过滤入 dragSlots，此处显式条件双重保险）。

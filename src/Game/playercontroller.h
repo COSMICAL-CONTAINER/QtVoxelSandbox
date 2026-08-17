@@ -412,6 +412,11 @@ public:
     //   切到该槽（手持 = 新方块，原选中槽内容保留）；当前选中槽本就空 → 直接写入它；仅满背包（无空槽）才
     //   回退替换当前选中槽。取代旧「恒覆盖选中槽」（防丢失原手持）。
     Q_INVOKABLE void pickBlock();
+    // t653② pick-block 抽出的「切槽 / 复制入槽」主体（方块与生物蛋共用）：hotbar 已有同 id → 切槽；
+    //   全无 → 复制满栈入空槽优先（t291/t453 语义原样）。私有，仅 pickBlock 调。
+    void pickIdToHotbar(int id);
+    // t653② mobType → 生物蛋物品 id 映射（9 种有蛋 mob；无蛋 mob（狼/傀儡/蠹虫）→ 0 = 无蛋可 pick）。
+    int mobTypeEggId(int mobType) const;
     // t296 玩家受击击退（机制等价 MC 1.0 玩家被僵尸 / 箭 / 苦力怕爆炸击退 —— 命中后向被攻击方向小弹 + 水平推）。
     //   EntityManager.mobAttackedPlayer(amount, mobType, kbX, kbZ) 携「欲推开玩家的水平单位方向」，Main.qml
     //   Connections 据它调本方法。仅 Survival 生效（Creative/Spectator 无敌不弹；mobAttackedPlayer 经 t290 门控
