@@ -7901,6 +7901,17 @@ Window {
         focus: true
         Keys.onPressed: (e) => {
             if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
+            // t655 死亡态输入闸门（第一道，最先判）：死亡屏期间只接受死亡屏按钮（立即重生 / 回主菜单，
+            //   MouseArea 直达不受键盘层影响）与 Esc（下方各「关面板」分支恒不达——onDied 已关全部面板，
+            //   Esc 落空无副作用）+ 聊天显示（chatDisplay 死亡态 z=185 恒可见，不受键盘层管）。其余一切
+            //   游戏键（E 背包 / 1-9 hotbar / Q 丢弃 / WASD / Shift / G / M / F5）在死亡态全部吞掉。
+            //   根因（用户报告）：死亡屏纯视觉叠加，E 仍能 openInventory（叠在死亡屏下）再关包时
+            //   closeInventory 内 player.grab() 把 captured 抢回来 → 尸体能走 / 能打 / takeDamage 对
+            //   dead 早退 → 无敌。键盘层拦「开不了一点」+ PlayerController.grab 的 m_dead 拒绝（C++ 兜底，
+            //   见 playercontroller.cpp）双保险。
+            if (playerState.dead) {
+                e.accepted = true; return
+            }
             // t312 聊天栏打开：T / Enter（playing 且非死亡态且无背包/工作台/熔炉/箱子面板开）。机制等价
             //   MC 1.0 T 打开聊天。Enter 与 T 同义（spec「T/Enter 打开聊天栏」）；Esc/E 在背包面板作关面板，
             //   故聊天打开键不与 Esc/E 冲突（聊天开着时 Esc 由 chatInput 自己处理关聊天，见下方 TextField）。
@@ -8085,6 +8096,7 @@ Window {
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: (event) => {
+                if (playerState.dead) return  // t655 死亡态输入闸门：死亡屏期间滚轮不切 hotbar / 不调飞速
                 if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
                     || window.enchantingTableOpen || window.anvilOpen || window.dispenserOpen) return   // t549：三 UI 开时滚轮不切槽
                 if (window.progressOpen || window.statsOpen) return   // t637：进度（成就树缩放）/ 统计面板开时滚轮归面板（成就树 WheelHandler 缩放）

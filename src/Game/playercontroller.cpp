@@ -210,6 +210,11 @@ void PlayerController::onWindowChanged(QQuickWindow *win)
 // ---- 输入 ----
 void PlayerController::setKey(int key, bool pressed)
 {
+    // t655 死亡态输入闸门：m_dead 期间拒收一切游戏键（WASD / 跳 / 蹲 / 疾跑双击 / 双击空格切飞全部
+    //   停摆；spec「死亡态锁移动/攻击/背包键，只接受重生按钮与聊天」）。QML keyInput 层有同款守卫（先
+    //   拦），此处 C++ 侧兜底 —— 任何漏网透传路径（未来新增键位 / 面板）都不至于让尸体走动。release
+    //   侧不拦：respawn 已 m_keys.clear 兜底，且正常松键透传无害（值只会被清向 false）。
+    if (m_dead && pressed) return;
     const bool wasDown = m_keys.value(key);
     // 飞行门控（t21）：双击空格切飞仅 Creative（Spectator 常驻 noclip 无需切；Survival canFly()=false，
     // 永不进入此分支 → 双击空格不触发飞行，重力生效）。真实按下（非按住自动重复）→ 双击 ≤300ms 切换。
@@ -263,12 +268,15 @@ void PlayerController::setKey(int key, bool pressed)
     m_keys.insert(key, pressed);
 }
 
-void PlayerController::cycleMode() { setMode(static_cast<Mode>((static_cast<int>(m_mode) + 1) % 3)); }
+// t655 死亡态不切模式（死亡屏下按 G 不该换观察者「逃出」死亡态；死亡闸门族同 grab/setKey/beginMining）。
+void PlayerController::cycleMode() { if (m_dead) return; setMode(static_cast<Mode>((static_cast<int>(m_mode) + 1) % 3)); }
 
 // F5 相机模式循环（t27）：第一人称 → 第三人称-后 → 第三人称-前 → 回第一人称（0→1→2→0）。
 // 仅改标志 + 通知 QML（相机摆位在 Main.qml 据 cameraMode 算 position/eulerRotation）。
+// t655 死亡态不循环（死亡屏下视角固定；同 cycleMode 死亡闸门族）。
 void PlayerController::cycleCamera()
 {
+    if (m_dead) return;
     m_cameraMode = static_cast<CameraMode>((static_cast<int>(m_cameraMode) + 1) % 3);
     emit cameraModeChanged();
 }
@@ -305,6 +313,12 @@ void PlayerController::setMode(Mode m)
 // ---- 指针锁定 ----
 void PlayerController::grab()
 {
+    // t655 死亡态不捕获（单一闸门，最先判）：死亡时 onDied 已 release 交光标给死亡屏按钮；若任何呈现层
+    //   路径（历史 bug：死亡屏下按 E 开背包再关包 → closeInventory 内 grab）在死亡态抢回 captured，
+    //   tickImpl 恢复全路径 = 尸体走动 / 攻击 / 挖掘，且 PlayerState.takeDamage 对 dead 早退 → 永久无敌。
+    //   在此拒绝 = 断根：死亡态下 captured 恒 false，物理 / 攻击 / 挖掘输入整层停摆，重生（respawn 清
+    //   m_dead）后恢复。
+    if (m_dead) return;
     if (m_captured || !m_window) return;
     setCaptured(true);
     QGuiApplication::setOverrideCursor(QCursor(Qt::BlankCursor)); // 全局隐藏光标（最可靠；release 配对 restore）
@@ -333,6 +347,7 @@ void PlayerController::respawn()
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
     m_rightDown = false;      // t267：清右键按下态（防 respawn 后 updateEating 误续食）
     m_dead = false;           // t175：清死亡态镜像 → pickupScan 恢复（重生后玩家已离开死亡点，可正常拾取）
+    m_golemLaunchTimer = 0.0f; // t655 重生清击飞归属窗口（新生命周期不继承死亡前的击飞态）
     // t202：重生回满气泡 + 清三计时器（出生点在水外 → 满气起算；PlayerState::respawn 同步 air 到 maxAir）。
     if (m_air != kMaxAir) { m_air = kMaxAir; emit airUpdated(m_air); }
     m_airTimer = 0.0f;
@@ -368,6 +383,7 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     m_leftDown = false;
     m_rightDown = false; // t267：清右键按下态（防加载后 updateEating 误续食）
     m_dead = false;
+    m_golemLaunchTimer = 0.0f; // t655 存档加载清击飞归属窗口（瞬态值，不跨世界；同 m_knockback 归零语义）
     m_pos = QVector3D(x, y, z);
     m_vel = QVector3D(0, 0, 0);
     m_knockback = QVector3D(0, 0, 0); // t296：清受击击退冲量（瞬态值，存档不持久化；防上一世界残留）
@@ -589,6 +605,12 @@ void PlayerController::tickImpl()
     if (m_attackCooldown > 0.0f) {
         m_attackCooldown -= float(dt);
         if (m_attackCooldown < 0.0f) m_attackCooldown = 0.0f;
+    }
+    // t655 击飞摔死归属窗口递减（独立于捕获态 —— 上抛滞空期间开背包 / 暂停不影响窗口流逝；窗口语义
+    //   =「从上抛起 5s」，非游戏输入态）。钳到 0。
+    if (m_golemLaunchTimer > 0.0f) {
+        m_golemLaunchTimer -= float(dt);
+        if (m_golemLaunchTimer < 0.0f) m_golemLaunchTimer = 0.0f;
     }
     // t201 水下蓝滤镜：每 tick 重算眼位水态，翻转才 emit（避免每帧抖 QML 绑定）。放在 !m_captured
     //   早 return 之前 → 暂停 / 背包开 / 失焦时仍刷新（玩家可能停在水里打开背包，蓝雾应持续显）。
@@ -935,6 +957,11 @@ void PlayerController::setHunger(int value)
 // 兼容：breakBlock()（旧 Q_INVOKABLE）等价调本方法（创造瞬破 / 生存开始累积）。
 void PlayerController::beginMining()
 {
+    // t655 死亡态输入闸门：尸体不攻击 / 不挖（含 mob / 船 / 矿车攻击分流与挥空手反馈）。置于
+    //   m_leftDown 记录之前 —— 死亡态连「按钮按住」这一事实都不留（防 respawn 后 updateMining 据陈旧
+    //   m_leftDown 自动续挖）。正常路径：死亡时 onDied → release 已把 m_leftDown 清 false + 暂停早 return
+    //   里 cancelMining；本闸门是双保险（QML 若在死亡态重 grab 被新闸拦，此处兜攻击入口）。
+    if (m_dead) return;
     // t44 连续挖掘：记录物理左键按下态。置于所有早 return 之前 —— 即便当前不能开始累积
     // （观察者 / 无命中 / 暂停），按钮按下这一事实仍成立，后续 updateMining 据此 + 新命中自动续挖。
     m_leftDown = true;
@@ -1395,6 +1422,7 @@ void PlayerController::dropLeafDrops(int x, int y, int z)
 //     deathTimer 死亡动画原地播放）；存活则两者都生效（扣血 + 弹开 + 小跳）。
 void PlayerController::attackMob(int entityIndex)
 {
+    if (m_dead) return;              // t655 死亡态输入闸门：尸体不攻击（beginMining 已拦，此处兜 Q_INVOKABLE 直调）
     if (!m_entityManager) return;
     if (m_attackCooldown > 0.0f) return; // t248 冷却内不扣血（连击 / 长按续触被吞）
     // t249 暴击判定：滞空（!onGround）且下落（vy<0）→ +50% 伤害。
@@ -1500,6 +1528,10 @@ void PlayerController::applyGolemLaunch(float dirX, float dirZ)
     m_knockback.setX(dirX * kHitKnockbackHoriz); // 水平分量同受击击退（走开一点再落下，视觉「打飞」）
     m_knockback.setZ(dirZ * kHitKnockbackHoriz);
     m_vel.setY(std::max(m_vel.y(), kGolemLaunchVy)); // 大垂直冲量直写 m_vel.y（峰值 16²/(2·28)≈4.6 格）
+    // t655 击飞摔死归属窗口起算（5s，从上抛起算）：窗口内着地摔伤改发 GolemLaunchFall 死因（「被铁傀儡
+    //   击飞摔死」），窗口外 / 普通坠落仍 Fall。落地结算摔伤那一刻清零（见 step 着地分支）—— 一次上抛只
+    //   归属第一次落地，后续弹跳 / 再坠落不误归属。
+    m_golemLaunchTimer = kGolemLaunchAttributionWindow;
     qInfo("player golem-launched dir=(%.3f,%.3f) vy=%.1f", dirX, dirZ, kGolemLaunchVy);
 }
 
@@ -1674,6 +1706,7 @@ void PlayerController::breakBlock()
 //   分层（PLAN §2）：进食属 Game/Physics（读持物 + 推进进度 + 写 Hotbar VM + 发语义事件），不改栅格语义。
 void PlayerController::beginEating()
 {
+    if (m_dead) return; // t655 死亡态输入闸门：尸体不进食（连 m_rightDown 都不记，防 respawn 续食）
     // 记录物理右键按下态（置于所有早 return 之前 —— 同 beginMining 的 m_leftDown 模式：即便当前不能开始
     //   进食（观察者 / 未持面包 / 暂停），按钮按下这一事实仍成立，后续 updateEating 据此 + 持面包自动续食）。
     m_rightDown = true;
@@ -1824,6 +1857,7 @@ float PlayerController::bowDrawProgress() const
 // t322 生存拉弓须背包有箭（机制等价 MC 1.0 生存弓无箭不可拉）；创造射箭免费（不查箭）。
 void PlayerController::beginBowDraw()
 {
+    if (m_dead) return; // t655 死亡态输入闸门：尸体不拉弓
     // 记录物理右键按下态已在 eventFilter（endBowDraw 据松开边缘触发，不依赖此）；m_rightDown 由面包路径管理，
     //   弓与面包持物互斥不复用。置于所有早 return 之前的是 m_rightDown（面包路径），此处弓路径独立。
     if (!canPlace()) return; // 观察者不能拉弓（沿用 placeBlock 入口门控）
@@ -1892,6 +1926,7 @@ void PlayerController::cancelBowDraw()
 //   （咬钩则按 LootTable::fishingPool 抽一件获物落为掉落实体 + 生存钓竿 -1 耐久，否则空收）。
 void PlayerController::useFishingRod()
 {
+    if (m_dead) return; // t655 死亡态输入闸门：尸体不抛竿
     if (m_fishing) {
         // 拉起：快照咬钩态 / 浮标位（cancelFishing 会清），再据咬钩决定获物 / 空收。
         const bool bite = m_hasBite;
@@ -2111,6 +2146,7 @@ PlayerController::ArrowSlot PlayerController::findArrowInInventory() const
 // t87：命中格若为熔炉（Furnace）→ 右键打开 FurnaceUI（不放置；发 furnaceOpened），同工作台模式。
 void PlayerController::placeBlock()
 {
+    if (m_dead) return; // t655 死亡态输入闸门：尸体不放块 / 不进食 / 不开容器（右键全路径拒）
     // t128：放置 CD（200ms = 5 次/秒）防连点放沙等触发多次塌落链溢出。spec「入口 if(now - m_lastPlaceMs
     //   < 200) return」；仅成功放置后刷新 m_lastPlaceMs（下方 setBlock 后）。now 走 m_evtClock（事件
     //   时间戳，与双击检测 m_lastSpaceMs/m_lastWms 同源）。初值 -100000 = 远古 → 首次放置不限。
@@ -3559,6 +3595,7 @@ void PlayerController::placeBlock()
 //   spawnItem 信号路径（QML 转发，兼容防御）。
 void PlayerController::dropHeld()
 {
+    if (m_dead) return;              // t655 死亡态输入闸门：尸体不丢物（背包已被 dropAllItems 清空，防御）
     if (!m_captured) return;        // spec：仅捕获时
     if (!m_hotbar) return;
     const int id = m_hotbar->selectedItemId();
@@ -3596,6 +3633,7 @@ void PlayerController::throwItemInLook(int itemId, int count, const QVariantList
 //   t609：丢弃位置 / 初速同 dropHeld（眼位沿视线丢出，throwItemInLook 统一原语）。
 void PlayerController::dropHeldStack()
 {
+    if (m_dead) return;              // t655 死亡态输入闸门：尸体不丢物（同 dropHeld）
     if (!m_captured) return;        // spec：仅捕获时（同 dropHeld）
     if (!m_hotbar) return;
     const int slot = m_hotbar->selectedSlot();
@@ -3712,6 +3750,7 @@ void PlayerController::dropAllItems()
 // 当前选中槽（Hotbar 内部校验范围 + id 合法性 + count 上限）。
 void PlayerController::pickBlock()
 {
+    if (m_dead) return; // t655 死亡态输入闸门：尸体不中键复制（防御；死亡仅 Survival，创造路径理论不达）
     if (m_mode != Creative) return; // t288：仅创造模式可中键复制方块
     if (!m_captured || !m_hasHit || !m_world || !m_hotbar) return;
     const quint8 id = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
@@ -5325,7 +5364,14 @@ void PlayerController::step(qreal dt)
             //   floor(m_pos.y) 取水格 → 正确判中；无世界 → false 保守不抵消）。
             if (!feetInWater()) {
                 const int dmg = int(std::floor(fall - 3.0f));
-                if (dmg > 0) emit fallDamageTaken(dmg, PlayerState::Fall); // t311 死因=高处坠落
+                // t655 击飞摔死归属：铁傀儡上抛后 5s 窗口内（m_golemLaunchTimer>0，applyGolemLaunch 起算）
+                //   的着地摔伤改发 GolemLaunchFall（死亡播报「被铁傀儡击飞摔死」区别于普通「从高处坠落」）。
+                //   结算即清窗口 —— 一次上抛只归属第一次落地，后续弹跳 / 再坠落归普通 Fall。窗口归零 /
+                //   未被击飞（恒 0）时 m_golemLaunchTimer<=0 → 原行为（Fall）不变。
+                if (dmg > 0 && m_golemLaunchTimer > 0.0f) {
+                    m_golemLaunchTimer = 0.0f;
+                    emit fallDamageTaken(dmg, PlayerState::GolemLaunchFall);
+                } else if (dmg > 0) emit fallDamageTaken(dmg, PlayerState::Fall); // t311 死因=高处坠落
             }
         }
         // t639④ 踩踏耕地（机制等价 MC 1.0：跳跃 / 坠落落到耕地上 → 耕地变泥土 + 上方作物掉落）。

@@ -1156,7 +1156,15 @@ private:
     bool m_sleepSettled = false;     // true=全黑入睡阶段（QML 显起床按钮）
     qint32 m_sleepBx = 0, m_sleepBy = 0, m_sleepBz = 0;
     bool m_dead = false;             // t175 死亡态镜像（dropAllItems 置 true / respawn 置 false）：抑制死亡后
-                                     //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）
+                                     //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）。
+                                     //   t655 死亡态输入闸门同样以此镜像为单一权威：grab / setKey / beginMining /
+                                     //   placeBlock / dropHeld(们) / applyGolemLaunch 均在 m_dead 时拒绝 —— 防呈现层
+                                     //   某条路径（如死亡屏下开背包再关包）把 captured 抢回来让尸体走动 / 攻击 / 无敌。
+    // t655 铁傀儡击飞摔死归属窗口（秒）：applyGolemLaunch 置 kGolemLaunchAttributionWindow（5s，从上抛起
+    //   算，非从摔伤起算 —— 上抛到落地本身 ~1.5s，窗口须盖住「抛起后弹跳 / 缓冲落地」整段），tickImpl 递减。
+    //   窗口内着地摔伤（fallDamageTaken(Fall)）改发 GolemLaunchFall 死因（「被铁傀儡击飞摔死」）；窗口外 /
+    //   普通坠落仍 Fall。落地（结算摔伤那一刻）即清零 —— 一次上抛只归属第一次致命落地，不掉落后续弹跳误归属。
+    float m_golemLaunchTimer = 0.0f;
 
     // 持续挖掘态（t34）：仅 Survival 进入累积（Creative 单击瞬破不进入）；progress 0..1；
     // stage = clamp(progress*6, 0, 5)，-1 = 无累积（裂纹叠层隐藏）。mineBx/y/z = 目标格整数坐标。
@@ -1346,6 +1354,9 @@ private:
     //   → 落回原位落差 >3 格必触发摔落伤害（4..5 格 → 1..2 HP，机制等价 MC 1.0 铁傀儡上勾拳抛起摔伤）。
     //   数值语义同 EntityManager::kGolemLaunchVy（单一权威在 Entities 的攻击参数区；此处 Physics 侧镜像消费）。
     static constexpr float kGolemLaunchVy     = 16.0f; // 铁傀儡上抛垂直初速（blocks/s）
+    // t655 击飞→摔死归属窗口（秒）：applyGolemLaunch 起 5s 内的着地摔伤归因「被铁傀儡击飞摔死」。
+    //   5s 贴 MC 惯例（伤害归属窗口量级），且 > 上抛滞空时长（16/(2·28)·2 ≈ 1.1s 单程来回）充分覆盖。
+    static constexpr float kGolemLaunchAttributionWindow = 5.0f;
     static constexpr float kHitKnockbackDrag  = 4.5f;  // 受击水平衰减率（1/s；~0.5s 基本停下）
     static constexpr float kSuffocationInterval = 1.0f; // t160 窒息扣血间隔（秒；每秒 1HP，机制等价 MC 窒息 1/秒）
     // t202 气泡 + 溺水时序（机制等价 MC 1.0：10 气泡 ≈ 15s 入水耗尽，归零后每秒 1HP）。

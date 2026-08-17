@@ -74,8 +74,11 @@ public:
     //   Generic=未归类（默认 / takeDamage 单参兜底）；Fall=高处坠落；Suffocation=嵌实体方块窒息；
     //   Drowning=气泡归零溺水；Starvation=饥饿归零饿死；Shambler/Bones/Spider/Stalker=被对应敌对生物击败；
     //   Fire=燃烧致死（t344：触碰岩浆 / 火点燃后火伤扣血到 0）；Tnt=TNT 爆炸致死（t494：detonateTntSphere 传
-    //   MobTnt 哨兵 mobType → QML onMobAttackedPlayer 映射到本死因，文案「被 TNT 炸死」）。
-    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt };
+    //   MobTnt 哨兵 mobType → QML onMobAttackedPlayer 映射到本死因，文案「被 TNT 炸死」）；GolemLaunchFall=
+    //   被铁傀儡上抛后摔死（t655：PlayerController 击飞归属窗口内的 Fall 升级死因，文案「被铁傀儡击飞摔死」）。
+    //   t655 序号兼容：GolemLaunchFall **追加在枚举末尾**（=12）—— Hotbar::armorProtectionFactor 按序数
+    //   switch（case 1..11），DeathCause 不进存档（respawn / 加载均复位 Generic），追加不破坏既有映射。
+    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall };
     Q_ENUM(DeathCause)
 
     explicit PlayerState(QObject *parent = nullptr);
