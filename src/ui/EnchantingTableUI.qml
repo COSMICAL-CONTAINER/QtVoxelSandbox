@@ -419,8 +419,12 @@ Item {
         const srcCount0 = root.enchantCounts[0] || 0
         if (srcCount0 > 1) {
             const srcId0 = root.enchantSlots[0] || 0
-            const remain = root.hotbar.addToAny(srcId0, srcCount0 - 1, 0)
-            InventoryOps.writeSlot(root, "enchant", 0, srcId0, 1 + remain, 0)
+            // rev2 修：余书归还要保实例名（t622 后整摞书可改名——铁砧整摞改名后放入附魔台，余书归还若
+            //   丢名 = 花 1 级改的名免费丢）。addToAny 第 5 传 name（同槽 0 当前实例名），writeSlot 回写
+            //   余数同带（书无耐久 / 无附魔，dur/ench 传 0）。
+            const srcName0 = root.enchantNames[0] || ""
+            const remain = root.hotbar.addToAny(srcId0, srcCount0 - 1, 0, [], srcName0)
+            InventoryOps.writeSlot(root, "enchant", 0, srcId0, 1 + remain, 0, [0,0,0,0], srcName0)
             if (remain > 0) return
         }
         // t590 offeredLevel 映射：档位 I/II/III 基准 8/15/22 + 书架加成 floor(power/2)（书架 power 进档位池；
