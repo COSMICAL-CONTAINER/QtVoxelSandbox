@@ -459,7 +459,9 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RedstoneId),        // 红石粉：地牢战利品（机制等价 MC 1.0 redstone dust）
         int(RecipeRegistry::SaddleId),          // 马鞍：地牢稀有战利品（机制等价 MC 1.0 saddle）
         int(RecipeRegistry::NameTagId),         // 命名牌：地牢稀有战利品（机制等价 MC name tag，1.6+）
-        int(RecipeRegistry::EnchantedBookId),   // t615 附魔书：附魔台附书产 / 地牢极稀有战利品（真附魔，maxStack=1）
+        // t654②：裸 0x227 附魔书（无附魔空书）移出创造调色板 —— 用户「每本附魔书必须 ≥1 附魔」；
+        //   14 本预设书（creativeEnchantedBooks，材料 tab 末尾）覆盖全部附魔种类，空白书无取用价值。
+        //   空书仍可由附魔台附书产 / 地牢极稀有战利品获得（生存路径不受影响）。
         // t398 鸡相关材料（机制等价 MC 1.0 鸡掉羽毛 + 生鸡肉 + 周期下蛋；生存由杀鸡 / 拾鸡蛋获得，
         //   创造调色板补全便于测试 / 装饰）。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘图标。
         int(RecipeRegistry::FeatherId),         // 羽毛：杀鸡掉落
@@ -523,8 +525,10 @@ QVariantList Hotbar::creativeMaterials() const
 }
 
 // t632 创造调色板附魔书分种（14 本，每种附魔一本）：见 hotbar.h 注释。等级取 1（test-friendly）。
-//   与 creativeMaterials 内的裸 0x227（附魔台附书产 / 地牢战利品入口）并存 —— 裸 0x227 仍是无附魔空书
-//   （附魔台附书 / anvil combine 的原料），14 本预设书是「测试铁砧冲突 / 合并的成品书」。
+//   t654①：显示名统一只叫「附魔书」（去掉「·<附魔名>」后缀）——附魔明细已由 tooltip 第二行（enchantListText）
+//   呈现，名字后缀与第二行重复（用户点名去掉）。附魔身份仍由每本哨兵 id 引用表条目（ench/packed）携带。
+//   t654②：裸 0x227（无附魔空书）已从 creativeMaterials 移除——每本调色板附魔书必须 ≥1 附魔（14 本预设
+//   覆盖全部附魔种类）；空书仍可由附魔台附书产 / 地牢战利品获得（生存路径不受影响）。
 QVariantList Hotbar::creativeEnchantedBooks() const
 {
     QVariantList list;
@@ -534,8 +538,7 @@ QVariantList Hotbar::creativeEnchantedBooks() const
         QVariantMap m;
         m.insert(QStringLiteral("ench"), ench);
         m.insert(QStringLiteral("packed"), EnchantRegistry::pack(ench, 1));
-        m.insert(QStringLiteral("name"),
-                 QStringLiteral("附魔书·") + EnchantRegistry::displayName(ench));
+        m.insert(QStringLiteral("name"), QStringLiteral("附魔书")); // t654① 统一名（附魔在 tooltip 第二行）
         m.insert(QStringLiteral("levelSuffix"), EnchantRegistry::levelSuffix(1));
         list << m;
     }
@@ -680,8 +683,8 @@ QVariantList Hotbar::creativeBlocks() const
              // t474 附魔链两件方块（机制等价 MC 1.0 enchanting table / bookshelf；右键附魔台开 UI / 书架作加成源）。
              int(BlockRegistry::EnchantingTable),                              // 附魔台（右键开附魔 UI；配方书+钻石+黑曜石）
              int(BlockRegistry::Bookshelf),                                   // 书架（合成产物；附魔台加成来源；配方木板+书）
-             // t477 铁块 + 铁砧（机制等价 MC 1.0 iron block / anvil；右键铁砧开铁砧 UI）。
-             int(BlockRegistry::IronBlock),                                   // 铁块（9 铁锭合成存储方块；铁砧配方前置）
+             // t477 铁砧（机制等价 MC 1.0 anvil；右键铁砧开铁砧 UI）。铁块 t654④ 挪到下方矿物块组
+             //   （与煤/青金/钻石/金/红石块同组——用户「铁块没跟下面的块放一起」）。
              int(BlockRegistry::Anvil),                                       // 铁砧（右键开铁砧 UI 修复/合并/重命名；配方 3 铁块+4 铁锭；微损/重损不进调色板）
              // t482/t483 防御造物方块（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建材料；南瓜放好 + 下方排列 → 造物）。
              int(BlockRegistry::Pumpkin),                                     // 南瓜（造物头部方块；雪傀儡/铁傀儡搭建触发物）
@@ -709,8 +712,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Lever),                                      // 杠杆（右键扳动 → 触发 6 邻 TNT/发射器；配方 1 圆石+1 木棒）
              int(BlockRegistry::WoodButton),                                 // 木按钮（按下触发一次 ~1s 自动弹回；配方 1 木板）
              int(BlockRegistry::StoneButton),                                // 石按钮（按下触发一次 ~1s 自动弹回；配方 1 石头）
-             // t620 矿物存储块（机制等价 MC 1.0 coal/lapis/diamond/gold/redstone block；9 材料↔1 块 双向配方。
-             //   铁块 IronBlock 已在上方既存列表；本段补其余五种）。
+             // t620 矿物存储块（机制等价 MC 1.0 coal/lapis/diamond/gold/redstone block；9 材料↔1 块 双向配方）。
+             //   t654④：铁块（IronBlock，t477 既存）从上方附魔链区挪进本组（用户「铁块没跟下面的块放一起」
+             //   ——与煤/青金/钻石/金/红石块六块同组）。
+             int(BlockRegistry::IronBlock),                                  // 铁块（9 铁锭↔1 块；铁砧配方前置；石镐采掘）
              int(BlockRegistry::CoalBlock),                                  // 煤炭块（9 煤↔1 块；燃料 800s=80 件；木镐采掘）
              int(BlockRegistry::LapisBlock),                                 // 青金石块（9 青金石↔1 块；石镐采掘；附魔材料压缩存储）
              int(BlockRegistry::DiamondBlock),                               // 钻石块（9 钻石↔1 块；铁镐采掘）

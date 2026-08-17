@@ -115,9 +115,10 @@ Item {
 
     // t508 船物品 id 表（spec「船归工具 tab，非材料 tab」）：OakBoatId=0x234 / SpruceBoatId=0x235。原入材料段
     //   （creativeMaterials），用户报「创造背包船归材料 tab，应放工具 tab」→ 改入工具段。下文 filteredPalette：
-    //   工具 tab（currentTab===1）末尾追加；材料 tab（currentTab===2）显式排除（防双显）。id 与 hotbar.cpp /
-    //   RecipeRegistry::OakBoatId/SpruceBoatId 同源（材料段 0x200+，非方块）。
-    readonly property var vehicleIds: [0x234, 0x235]
+    //   工具 tab（currentTab===1）末尾追加；材料 tab（currentTab===2）显式排除（防双显）。
+    // t654③：矿车（MinecartId=0x23E，t565）并入本表 → 工具 tab 末尾追加（用户「全物品栏找不到矿车」——
+    //   t645 只加了名/图标没进调色板）。语义同船：功能性载具（右键铁轨放置 + 骑乘），归工具 tab。
+    readonly property var vehicleIds: [0x234, 0x235, 0x23E]
 
     // t651⑤ 红石 tab 方块 id 表（镜像 BlockRegistry 方块段常量；Q_INVOKABLE 无 id 常量暴露，QML 端集中维护，
     //   同 foodIds 模式）：机关件（5 压力板 / 木·石按钮 / 拉杆）+ 红石系（红石火把 / 红石块 / 红石灯）+
