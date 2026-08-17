@@ -10224,6 +10224,11 @@ Window {
         visible: window.appState === "playing" && window.anvilOpen
         z: 150
         onClosed: window.closeAnvil()
+        // t652：拖出面板外丢弃（面板侧信号 + 遮罩 MouseArea t228 边界判定自 t626 已备，宿主接线漏）——
+        //   与其余六面板（背包 / 工作台 / 熔炉 / 箱子 / 附魔台 / 发射器）同款：左键整栈 dropHeldCursor /
+        //   右键 1 件 dropHeldCursorOne。用户「铁砧界面物品应跟背包一样可拖出丢成掉落物」根因即本缺线。
+        onDiscardHeldRequested: player.dropHeldCursor()
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }
 
     // t517 发射器物品栏面板：右键发射器方块打开（player.dispenserOpened → openDispenser）。仅 playing &&
