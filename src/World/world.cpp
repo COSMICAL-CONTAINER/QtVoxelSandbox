@@ -90,6 +90,9 @@ void World::finishLoad()
             }
         }
     }
+    // r2-B2 读档机关态归一（按钮按下视觉弹起）：须在 emit worldChanged 之前跑 → mesh 一次建对（按下视觉
+    //   不闪现）。见 normalizeLoadedMechanismState 头注释。
+    normalizeLoadedMechanismState();
     emit worldChanged(); // 触发 25 个 ChunkGeometry 重建（terrain+water 两段）
     m_chunks.clearAllDirty();
     // t380：加载存档后置流体脏 —— 存档可能含未稳流场（玩家存档时水正流），首次流体 tick 重扫恢复流动。
@@ -185,6 +188,32 @@ void World::rebuildIceCells()
             for (int y = 0; y < H; ++y)
                 if (m_chunks.blockAt(x, y, z) == BlockRegistry::Ice)
                     m_iceCells.insert(packGrowthCell(x, y, z));
+}
+
+// r2-B2 读档机关态归一：存档 chunk blob 持久化方块 id+state，但机关的**瞬态伴生表**（Game 层内存表，
+//   如按钮按下倒计时 m_buttonRecoverCells）不进存档。存档时按钮正在按下窗（bit0=1 落盘）→ 读档后：
+//   ① 无复位表项 → 永不自动弹回；② playercontroller 右键「bit0=1 拒绝再按」→ 永久卡按下态（只能破块
+//   重放）。机制等价 MC 1.0 按钮是纯瞬态（存档按钮恒弹起）——故读档归一为「弹起」即恢复正确语义。
+//   全图扫一次（同 rebuildGrowthCells / rebuildFluidCells / rebuildIceCells 加载期一次性模式，非每 tick
+//   的流体扫描反模式——成本仅在加载路径，~3.3M 格 blockAt）。**只清 WoodButton/StoneButton 的 bit0**：
+//   其余方块的 bit0 语义各异（红石灯开关态 = 玩家设置的持久态 / 探测铁轨「驶过」态 = 设计上持久 / 门半
+//   朝向编码 / 拉杆扳开 = 持续激活语义）——一律不动，防归一误伤非机关状态。拉杆 / 红石灯不进本归一
+//   （它们无瞬态伴生表，state 即完整语义）。直写 m_chunks.setBlock（id 不变只 state 变；不发信号 / 不
+//   clearAllDirty——本方法在 finishLoad 的 emit worldChanged 之前调，重建与清脏由 finishLoad 统一收口，
+//   同 worldgen 直写约定）。分层（PLAN §2）：World 层只读写 m_chunks + BlockRegistry 谓词，不依赖 Game。
+void World::normalizeLoadedMechanismState()
+{
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y) {
+                const quint8 b = m_chunks.blockAt(x, y, z);
+                if (!BlockRegistry::isWoodButton(b) && !BlockRegistry::isStoneButton(b)) continue;
+                const quint8 st = m_chunks.stateAt(x, y, z);
+                if (st & 1)
+                    m_chunks.setBlock(x, y, z, b, quint8(st & quint8(~1))); // 清 bit0（弹起；id 不变）
+            }
 }
 
 // t176 新世界生成：按 seed 全量 worldgen + emit。generate() 内部 recreate 网格（清上一世界残留），
