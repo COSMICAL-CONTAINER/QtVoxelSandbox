@@ -2516,6 +2516,30 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 ### 📎 R19.6 范围（更新）
 t622-t645（24 项；t643 并入 t630 验证不计开发项 → 23 开发项）。核心：物品数据模型补 name 透传（t622/t623 多 bug 共根因）、创造合成 tab（t624/t625）、压力板边沿+家族（t627/t628）、耕地种植体系（t639）、图标转换工具+物品映射补全（t644/t645）。**红石系统大版本单独下轮规划**（t627/t628 只做前置语义）。全部本轮做完不准拖。
 
+---
+
+## ⚠️⚠️ R19.7 补映射批（2026-08-17 用户 pack block/ 目录实测审计）
+
+**t646** tileFilenameMap 方块贴图批量补映射（12 条直映射 + TNT per-face + 按钮复用）
+- 用户实测 pack block/ 目录以下贴图全部存在，tileFilenameMap（resourcepackmanager.cpp）未接 → pack 启用时世界贴图仍走程序瓦片。逐条补（机制同既有：包缺文件安全跳过保程序瓦片；接上后创造 3D 图标采共享图集自动吃到 pack 贴图，blockItemIconMap 不动）：
+  | tile | pack 文件 | 方块 |
+  |---|---|---|
+  | 102 | spruce_planks.png | 云杉木板/台阶/栅栏共用（包内残留 `spruce_planks (2).png` 是垃圾不碰） |
+  | 106 | packed_ice.png | 浮冰 |
+  | 107 | blue_ice.png | 蓝冰 |
+  | 113 | anvil_top.png + anvil_base.png（顶/底侧 per-face） | 完好铁砧 |
+  | 115 | anvil_top_damaged_1.png | 微损铁砧顶（**勿用** chipped_anvil_top.png = 现代 1.19+ 命名） |
+  | 116 | anvil_top_damaged_2.png | 重损铁砧顶（**勿用** damaged_anvil_top.png） |
+  | 120 | cobweb.png | 蜘蛛网 cross cutout（web.png 是 1.8 旧名同图，取现代名） |
+  | 123 | cut_sandstone.png | 切制砂岩 |
+  | 124 | mossy_cobblestone.png | 苔石（cobblestone_mossy.png 旧命名同图，取现代名） |
+  | 128 | stone_bricks.png | 石砖/台阶/楼梯共用（stonebrick.png 是 1.8 旧名，取现代名） |
+  | 131 | lever.png | 拉杆贴地扳手 |
+  | 135 | brown_mushroom.png | 棕蘑菇 cross cutout（tile 62 红蘑菇已接 red_mushroom.png，不同瓦片勿混） |
+- **TNT per-face（t638 铁轨家族同套流程）**：tnt_side/tnt_top/tnt_bottom 三贴图在包内实测存在。现 TntBlock 四槽全 tile 122（顶底也是侧图）。正路：build_atlas.py TILES 尾追加 default_tnt_top(164)/default_tnt_bottom(165)（AtlasTileCount 164→166 同步）；build_tnt.py 补两张程序回退图；BlockDef TntBlock 改 topTile=164/bottomTile=165/sideTile=frontTile=122；tileFilenameMap 接 122→tnt_side/164→tnt_top/165→tnt_bottom。
+- **可选（做）**：木/石按钮 vanilla 本就复用木板/圆石贴图 → 132→oak_planks.png、133→cobblestone.png 两行即可（机制等价 MC）。
+- **明确不做**：end_portal 瓦片 129/130（包内无 end_portal.png，frame 系 t620 已接）；tile 159 动力轨点亮态（恒断电无消费方，既有注释口径）；压力板 154-156（包内实测无此三文件，t627 已注明保持程序自绘）；**tile 162 附魔台浮书不接**（MC 里那是 entity 模型贴图非 block 目录贴图）——后续若做需换 entity 贴图管线，单列。
+
 
 
 
