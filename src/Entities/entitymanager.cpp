@@ -2198,7 +2198,7 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
             e.moveSpeed = 0.0f;
             if (e.attackCooldown <= 0.0f) {
                 if (e.golemWindup <= 0.0f) {
-                    e.golemWindup = kGolemWindup; // 起蓄
+                    e.golemWindup = dt; // 起蓄（从本帧已流逝 dt 开始累积 0→kGolemWindup）
                 } else {
                     e.golemWindup += dt;
                     if (e.golemWindup >= kGolemWindup) {
