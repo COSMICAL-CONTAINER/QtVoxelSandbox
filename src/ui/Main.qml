@@ -4367,7 +4367,11 @@ Window {
         //   (-sin yaw,0,-cos yaw) = PlayerController::lookDirection 在 pitch=0 的水平前向（同源四元数
         //   Ry(yaw)），且模型身体/头均同 yaw → 箭头与视线水平分量恒同向，无上下颠倒；「颠倒」观感来自
         //   背包预览（CharacterPreview3D）棒在脚底 y=0 + 相机俯角透视（t618 已提棒到眼高 1.62，见该文件）。
-        //   分层（PLAN §2）：纯呈现层调试叠层，只读 player.feetPosition/yaw（Game 层 Q_PROPERTY），绝不反向写。
+        //   t636 修（用户「第三人称玩家线也应跟头 pitch 而不是恒水平」）：旧棒 (0,yaw,0) yaw-only → 恒水平，
+        //   玩家俯视时视线已下压但线仍平伸 → 线与视线脱节。改 (pitch, yaw, 0) —— 与 PlayerController::
+        //   lookDirection 同源欧拉（QQuaternion::fromEulerAngles(pitch,yaw,0) 旋转本地 -Z；相机 / 射线同约定，
+        //   +pitch=抬头 → 棒端上翘）。玩家头模型第三人称本就绑 pitch（headNode 同源）→ 线随视线全姿态一致。
+        //   分层（PLAN §2）：纯呈现层调试叠层，只读 player.feetPosition/yaw/pitch（Game 层 Q_PROPERTY），绝不反向写。
         //   t143：第一人称（cameraMode===FirstPerson）看不到自己身体 → 玩家 hitbox 额外加 cameraMode 门控隐藏；
         //   mob / 掉落物 hitbox 无此门控（全视角可见，见各自 delegate）。
         Model {
@@ -4380,7 +4384,7 @@ Window {
         Node {
             visible: window.showHitboxes && player.cameraMode !== PlayerController.FirstPerson
             position: Qt.vector3d(player.feetPosition.x, player.feetPosition.y + 1.62, player.feetPosition.z)
-            eulerRotation: Qt.vector3d(0, player.yaw, 0)
+            eulerRotation: Qt.vector3d(player.pitch, player.yaw, 0)   // t636：(pitch,yaw,0) 同 lookDirection 欧拉源
             Model {
                 geometry: UnitCube {}
                 property real facingLen: Math.sqrt(0.3 * 0.3 + 0.9 * 0.9 + 0.3 * 0.3) + 0.3  // AABB 半对角线 + 0.3（凸出框外）

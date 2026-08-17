@@ -177,13 +177,22 @@ Item {
             //   = 玩家水平前向（与 Main.qml 第三人称玩家箭头 yaw-only 同约定），无需取反（「上下颠倒」观感
             //   实为脚底高度 + 俯角透视的假象，提线到头高即消除）。
             //   分层（PLAN §2）：纯呈现层调试叠层，只读 showHitboxes，绝不反向写。
-            Model {
+            // t636 修（用户「朝向线应跟鼠标上下移动（垂直于面部）」）：旧棒恒水平（只随 modelRoot yaw 转）→ 鼠标
+            //   上下移动时头（lookPitch）转了、棒不动 → 线与脸不垂直。改：棒挂进**俯仰枢轴 Node**（眼高 y=1.62，
+            //   eulerRotation.x = lookPitch + eulerRotation.y = headYawLead —— 与 headNode 同一姿态角），棒沿枢轴
+            //   本地 -Z 伸出 → 线随头 yaw + pitch 全姿态跟随（+x = 抬头 → 棒端上翘，与 headNode「+pitch=抬头」
+            //   同源约定）；枢轴原点 = 眼位 → pitch 旋转绕眼摆而非绕棒心（棒心旋转会平移出眼高）。
+            Node {
                 visible: root.showHitboxes
-                geometry: UnitCube {}
-                property real facingLen: Math.sqrt(0.31 * 0.31 + 0.91 * 0.91 + 0.31 * 0.31) + 0.3
-                position: Qt.vector3d(0, 1.62, -facingLen * 0.5)   // 棒从眼高（y=1.62）延伸到 -facingLen（前向）
-                scale: Qt.vector3d(0.05, 0.05, facingLen)
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
+                position: Qt.vector3d(0, 1.62, 0)   // 眼位高度（同下方第三人称玩家朝向线 = feet+1.62）
+                eulerRotation: Qt.vector3d(root.lookPitch, root.headYawLead, 0)   // t636：跟头 pitch+yaw 姿态
+                Model {
+                    geometry: UnitCube {}
+                    property real facingLen: Math.sqrt(0.31 * 0.31 + 0.91 * 0.91 + 0.31 * 0.31) + 0.3
+                    position: Qt.vector3d(0, 0, -facingLen * 0.5)   // 棒从枢轴（眼）沿视线延伸到 -facingLen
+                    scale: Qt.vector3d(0.05, 0.05, facingLen)
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
+                }
             }
 
             // 上半身枢轴 Node（t71 结构）：包 head/躯干/双臂，枢轴在髋（y=0.6）。蹲下绕髋 pitch 前倾
