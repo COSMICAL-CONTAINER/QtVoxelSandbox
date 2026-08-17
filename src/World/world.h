@@ -1018,10 +1018,11 @@ private:
     void noteIceWrite(int x, int y, int z, quint8 oldId, quint8 newId);
     // t495 perf：全图扫描重建普通冰方格集合（generate / finishLoad 末调一次；运行期由 noteIceWrite 增量维护）。
     void rebuildIceCells();
-    // r2-B2 读档机关态归一（finishLoad 在 emit worldChanged 前调一次）：全图扫 WoodButton/StoneButton 且
-    //   state bit0=1 → 清 bit0（弹起）。按钮按下是瞬态（伴生 Game 层复位表不进存档），读档归一为弹起即恢复
-    //   「自动弹回 + 可再按」语义，防存档时按下的按钮永久卡住。其余方块的 bit0（红石灯 / 探测铁轨 / 拉杆 /
-    //   门朝向）语义各不相同且均为持久态 → 不动。见 world.cpp 头注释。
+    // r2-B2/B3 读档机关态归一（finishLoad 在 emit worldChanged 前调一次）：全图扫按钮（Wood/Stone）与压力板
+    //   （五件族）且 state bit0=1 → 清 bit0（弹起）。按钮按下 / 压力板被压都是瞬态（伴生 Game 层表 / 实体不进
+    //   存档），读档归一为弹起：按钮恢复「自动弹回 + 可再按」；压力板压下视觉不残留（玩家仍站着 → 首 tick
+    //   updatePressurePlates 置回，B1 基线抑制保证不产沿）。其余方块的 bit0（红石灯 / 探测铁轨 / 拉杆 / 门朝向）
+    //   语义各不相同且均为持久态 → 不动。见 world.cpp 头注释。
     void normalizeLoadedMechanismState();
 };
 

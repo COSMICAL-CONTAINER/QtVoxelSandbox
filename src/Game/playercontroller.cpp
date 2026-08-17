@@ -3932,6 +3932,10 @@ void PlayerController::updatePressurePlates()
         const int z = int(quint32((key >> 21) & 0x1FFFFFu)) - 0x100000;
         const int y = int(quint32(key >> 42)) & 0x3FFu;
         const quint8 plate = m_world->blockAt(x, y, z);
+        // r2-B3(i) 离开沿清位前守卫 id：表键可能与栅格解耦一帧以上（板被破后同格放了**其它用 state bit0
+        //   的方块**——红石灯 / 门半 / 拉杆 / 探测铁轨）。不查 id → 陈旧键把新方块的 bit0 误清（灯灭 / 门半
+        //   编码错乱）。仅该格仍是压力板才清位（同 updateButtonRecovery 到期清位的守卫模式）。
+        if (!BlockRegistry::isPressurePlate(plate)) continue; // 板已被破 / 被替换 → 仅让键自然出表
         const quint8 st = m_world->stateAt(x, y, z);
         if ((st & BlockRegistry::PressurePlateStatePressedFlag) != 0)
             m_world->setBlock(x, y, z, plate, quint8(st & quint8(~BlockRegistry::PressurePlateStatePressedFlag)));

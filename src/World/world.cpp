@@ -190,17 +190,20 @@ void World::rebuildIceCells()
                     m_iceCells.insert(packGrowthCell(x, y, z));
 }
 
-// r2-B2 读档机关态归一：存档 chunk blob 持久化方块 id+state，但机关的**瞬态伴生表**（Game 层内存表，
-//   如按钮按下倒计时 m_buttonRecoverCells）不进存档。存档时按钮正在按下窗（bit0=1 落盘）→ 读档后：
-//   ① 无复位表项 → 永不自动弹回；② playercontroller 右键「bit0=1 拒绝再按」→ 永久卡按下态（只能破块
-//   重放）。机制等价 MC 1.0 按钮是纯瞬态（存档按钮恒弹起）——故读档归一为「弹起」即恢复正确语义。
+// r2-B2/B3 读档机关态归一：存档 chunk blob 持久化方块 id+state，但机关的**瞬态伴生表**（Game 层内存表，
+//   如按钮按下倒计时 m_buttonRecoverCells）不进存档；实体（mob / 掉落物）也不进存档。两类读档陈旧态在此归一：
+//   ① 按钮（r2-B2）：存档时按下窗内（bit0=1 落盘）→ 读档后无复位表项 → 永不自动弹回，且右键「bit0=1 拒绝
+//      再按」→ 永久卡按下态（只能破块重放）。机制等价 MC 1.0 按钮是纯瞬态（存档按钮恒弹起）——归一为弹起。
+//   ② 压力板（r2-B3）：存档时被 mob / 掉落物压着（bit0=1 落盘）→ 读档后实体不复活 → 无人清位 → 压下视觉
+//      永残留（金板唯一触发源是掉落物 → 读档必陈旧）。归一为弹起；玩家 / 新 mob 仍站着 → 读档首 tick
+//      updatePressurePlates 置回 bit0（B1 的基线抑制保证该次置位不产沿、不误触发陷阱）——视觉无感、语义正确。
 //   全图扫一次（同 rebuildGrowthCells / rebuildFluidCells / rebuildIceCells 加载期一次性模式，非每 tick
-//   的流体扫描反模式——成本仅在加载路径，~3.3M 格 blockAt）。**只清 WoodButton/StoneButton 的 bit0**：
-//   其余方块的 bit0 语义各异（红石灯开关态 = 玩家设置的持久态 / 探测铁轨「驶过」态 = 设计上持久 / 门半
-//   朝向编码 / 拉杆扳开 = 持续激活语义）——一律不动，防归一误伤非机关状态。拉杆 / 红石灯不进本归一
-//   （它们无瞬态伴生表，state 即完整语义）。直写 m_chunks.setBlock（id 不变只 state 变；不发信号 / 不
-//   clearAllDirty——本方法在 finishLoad 的 emit worldChanged 之前调，重建与清脏由 finishLoad 统一收口，
-//   同 worldgen 直写约定）。分层（PLAN §2）：World 层只读写 m_chunks + BlockRegistry 谓词，不依赖 Game。
+//   的流体扫描反模式——成本仅在加载路径，~3.3M 格 blockAt）。**只清按钮 / 压力板的 bit0**：其余方块的 bit0
+//   语义各异（红石灯开关态 = 玩家设置的持久态 / 探测铁轨「驶过」态 = 设计上持久 / 门半朝向编码 / 拉杆扳开 =
+//   持续激活语义）——一律不动，防归一误伤非机关状态（两者 state 也只有 bit0 一位在用，清位即归零语义）。
+//   直写 m_chunks.setBlock（id 不变只 state 变；不发信号 / 不 clearAllDirty——本方法在 finishLoad 的 emit
+//   worldChanged 之前调，重建与清脏由 finishLoad 统一收口，同 worldgen 直写约定）。分层（PLAN §2）：World
+//   层只读写 m_chunks + BlockRegistry 谓词，不依赖 Game。
 void World::normalizeLoadedMechanismState()
 {
     const int W = m_width, D = m_depth, H = m_height;
@@ -209,7 +212,9 @@ void World::normalizeLoadedMechanismState()
         for (int z = 0; z < D; ++z)
             for (int y = 0; y < H; ++y) {
                 const quint8 b = m_chunks.blockAt(x, y, z);
-                if (!BlockRegistry::isWoodButton(b) && !BlockRegistry::isStoneButton(b)) continue;
+                const bool staleMech = BlockRegistry::isWoodButton(b) || BlockRegistry::isStoneButton(b)
+                                    || BlockRegistry::isPressurePlate(b);
+                if (!staleMech) continue;
                 const quint8 st = m_chunks.stateAt(x, y, z);
                 if (st & 1)
                     m_chunks.setBlock(x, y, z, b, quint8(st & quint8(~1))); // 清 bit0（弹起；id 不变）
