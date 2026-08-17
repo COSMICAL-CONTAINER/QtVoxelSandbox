@@ -610,6 +610,13 @@ Window {
     //   渲染完（盖住后）再抓 → onGrabbed 收尾（saveCover + finishExit）。兜底定时器防 frameSwapped 不发卡退出。
     function saveAndExitToWorldList() {
         if (coverGrabPending) return   // 防连点退出按钮重复触发（已有一次退出在进行）
+        // t650：退出存档前关附魔台 / 铁砧 / 发射器面板（显式同步归还 A/B 槽 → 背包）——否则面板内物品
+        //   不在背包、gatherPlayerState 存档时**不在快照里**（面板数组是 QML 本地、永不进存档）→ 退出再进
+        //   = 物品永久消失。正常流程 Esc 会先关面板（keyInput 分支），此处是防御纵深（暂停菜单可达路径
+        //   变更 / 未来新增入口时不破）。
+        if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
         returnHeldToHotbar()
         const file = currentWorldFile
         const hasOpen = worldStore.isOpen()
@@ -654,6 +661,12 @@ Window {
         craftingTableOpen = false
         furnaceOpen = false
         chestOpen = false
+        // t650：同 returnToMenu / onDied —— 附魔台 / 铁砧 / 发射器三面板一并显式关（归还光标 + 面板槽；
+        //   走 closeXxx 完整路径而非裸置 false，防任何「面板开」态漏归还——正常路径 saveAndExitToWorldList
+        //   已先关，此处是防御纵深。grab/focus 副作用无害：本函数末尾 player.release() 收尾）。
+        if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
         chestLidAngle = 0    // t196：复位盖子角（防 worldlist→再进世界时残留半开盖子；scene 已离场，动画不可见）
         settingsOpen = false
         progressOpen = false    // pause-menu：退出世界关进度面板（防遗留）
@@ -676,6 +689,13 @@ Window {
         furnaceOpen = false
         chestOpen = false
         chatOpen = false                  // t312：回菜单关聊天（防遗留；非死亡流）
+        // t650：回菜单也关附魔台 / 铁砧 / 发射器（此前只关四旧面板 + 依赖 appState 切换令面板 visible 绑定
+        //   归还——绑定重求值可被引擎推迟，且本函数内 returnHeldToHotbar 在其前同步跑；显式关面板 =
+        //   归还确定性同步，A/B 槽物品先回背包再走后续（虽 returnToMenu 不存档，但保「背包内存含面板物品」
+        //   的一致性，防任何后续消费者读到缺物背包）。
+        if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
         chestLidAngle = 0    // t196：复位盖子角（防回菜单 / 再进世界残留半开盖子）
         settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
         progressOpen = false           // pause-menu：回菜单关进度面板（防遗留）
@@ -1071,6 +1091,11 @@ Window {
     function closeEnchantingTable() {
         if (!enchantingTableOpen) return
         enchantingTableOpen = false
+        // t650：显式同步归还 enchant 两输入槽（面板自身 onVisibleChanged→returnEnchantToHotbar 依赖
+        //   visible 绑定重求值，QML 绑定重求值可被引擎推迟到帧同步——closeEnchantingTable 的后续
+        //   returnHeldToHotbar / 死亡掉落 / gatherPlayerState 等同步消费者会先跑 → 槽内物品「晚到」。
+        //   此处直接调面板归还函数（幂等：槽已清则第二遍零迭代），保证关包路径归还确定性同步）。
+        enchantingPanel.returnEnchantToHotbar()
         // t647：关包归还光标手持栈（同 closeInventory / closeCraftingTable —— 附魔台 / 铁砧两面板此前漏
         //   归还：用户从槽 0 拿出附魔物到光标后按 E 关面板 → heldBlock 残留为隐形孤儿（下次开背包才浮出，
         //   中途死亡 / 换世界即丢）。六类背包语义面板统一归还）。
@@ -1106,6 +1131,10 @@ Window {
     function closeAnvil() {
         if (!anvilOpen) return
         anvilOpen = false
+        // t650：显式同步归还 anvil A/B 输入槽（同 closeEnchantingTable 的确定性修法——面板自身
+        //   onVisibleChanged→returnAnvilToHotbar 依赖 visible 绑定重求值，可能被引擎推迟；此处直调归还
+        //   函数（幂等），后续 returnHeldToHotbar / 死亡掉落 / gatherPlayerState 等同步消费者不再竞态）。
+        anvilPanel.returnAnvilToHotbar()
         // t647：关包归还光标手持栈（同 closeEnchantingTable —— 铁砧面板此前漏归还，光标产物变隐形孤儿）。
         returnHeldToHotbar()
         player.grab()
@@ -7504,6 +7533,14 @@ Window {
             if (window.furnaceOpen) window.furnaceOpen = false
             if (window.chestOpen) window.chestOpen = false
             if (window.chatOpen) window.chatOpen = false   // t312：死亡关聊天（死亡屏接管光标）
+            // t650：死亡也关附魔台 / 铁砧 / 发射器三面板（此前漏关——onDied 只关四旧面板）。归还顺序在
+            //   returnHeldToHotbar / dropAllItems **之前**：closeEnchantingTable / closeAnvil 内的显式同步
+            //   归还（本批加）把 A/B 输入槽物品先收回背包 → dropAllItems 统一死亡掉落（修「铁砧放着东西死亡
+            //   → 物品不随尸体掉落、面板死亡屏下滞留 → 回主菜单换世界即永久消失」漏洞链）。发射器槽内容
+            //   属方块（同箱子，不掉落），仅关面板归还光标。
+            if (window.enchantingTableOpen) window.closeEnchantingTable()
+            if (window.anvilOpen) window.closeAnvil()
+            if (window.dispenserOpen) window.closeDispenser()
             // pause-menu：死亡关暂停菜单子面板（设置 / 进度 / 统计；防死亡态遗留，死亡屏 z=180 盖在其上）。
             if (window.settingsOpen) window.settingsOpen = false
             if (window.progressOpen) window.progressOpen = false

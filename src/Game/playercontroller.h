@@ -457,7 +457,10 @@ public:
     //   id==0 / count<=0 → 不丢。t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；
     //   缺省空 = 无附魔）。UI 层把 hovered 槽的物品附魔传入 → 掉落实体携带附魔（拾取回填 + 掉落紫光晕）。
     //   t622 name：自定义名（缺省空 = 无名）。UI 层把 hovered 槽的物品实例名传入 → 实体携带 → 拾取回填。
-    Q_INVOKABLE void dropItemAtFront(int itemId, int count, const QVariantList &enchants = {}, const QString &name = QString());
+    //   t650 durability：实例耐久（缺省 -1 = 新实例满耐久）。关包归还满包余量路径（AnvilUI /
+    //   EnchantingTableUI returnXxxToHotbar）把槽内磨损工具耐久传入 → 丢实体再捡不复原（t647 dropHeld*
+    //   同批修法补漏；尾参缺省 → 既有 3/4 参调用点零改动）。
+    Q_INVOKABLE void dropItemAtFront(int itemId, int count, const QVariantList &enchants = {}, const QString &name = QString(), int durability = -1);
     // 拖出背包丢弃（t49）：光标手持栈（hotbar.heldBlock/heldCount）整栈丢弃为实体。
     // 与 dropHeld 的差异：后者取**选中槽** 1 件且仅捕获时；本方法取**光标手持栈**整栈、**不限捕获态**
     // （背包打开时未捕获正是此场景）。t64：传 heldCount → 1 实体携带整栈数量（修「丢 4 木棒捡回只剩 1」

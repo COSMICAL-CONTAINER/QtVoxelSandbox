@@ -3618,11 +3618,12 @@ void PlayerController::dropHeldStack()
 //   不限捕获态（背包打开时未捕获正是此场景，同 dropHeldCursor）。
 //   t590 enchants：UI 层把 hovered 槽的物品附魔传入 → 实体携带（拾取回填 + 掉落紫光晕）。
 //   t622 name：UI 层把 hovered 槽的物品实例名传入 → 实体携带（拾取回填，防改名物品丢名）。
-//   t609：位置 / 初速同 dropHeld（眼位沿视线丢出，throwItemInLook 统一原语）。
-void PlayerController::dropItemAtFront(int itemId, int count, const QVariantList &enchants, const QString &name)
+//   t650 durability：实例耐久（缺省 -1 = 新实例满耐久）→ 实体携带（同 dropHeld* t647 批；防磨损工具
+//   关包满包余量丢弃再捡回满耐久）。t609：位置 / 初速同 dropHeld（眼位沿视线丢出，throwItemInLook 统一原语）。
+void PlayerController::dropItemAtFront(int itemId, int count, const QVariantList &enchants, const QString &name, int durability)
 {
     if (itemId == 0 || count <= 0) return; // 空手 / 非正数 → 不丢
-    throwItemInLook(itemId, count, enchants, name); // t609 眼位沿视线丢出
+    throwItemInLook(itemId, count, enchants, name, durability); // t609 眼位沿视线丢出；t650 耐久随实体
 }
 
 // 拖出背包丢弃（t49 / t64）：光标手持栈整栈丢弃为**单个实体携带整栈数量**。不限捕获态

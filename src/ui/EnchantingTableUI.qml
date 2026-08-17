@@ -204,7 +204,7 @@ Item {
             const n = root.enchantCounts[i] || 0
             if (id !== 0 && n > 0) {
                 const leftover = root.hotbar.addToAny(id, n, root.enchantDur[i] || 0, root.enchAt(i), root.nameAt(i))
-                if (leftover > 0 && root.player) root.player.dropItemAtFront(id, leftover, root.enchAt(i), root.nameAt(i))
+                if (leftover > 0 && root.player) root.player.dropItemAtFront(id, leftover, root.enchAt(i), root.nameAt(i), root.enchantDur[i] || 0)
             }
         }
         for (let i = 0; i < root.enchantSlots.length; ++i) {

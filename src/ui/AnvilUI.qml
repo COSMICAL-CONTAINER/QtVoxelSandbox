@@ -366,7 +366,7 @@ Item {
             const n = root.anvilCounts[i] || 0
             if (id !== 0 && n > 0) {
                 const leftover = root.hotbar.addToAny(id, n, root.anvilDur[i] || 0, root.enchAt(i), root.nameAt(i))
-                if (leftover > 0 && root.player) root.player.dropItemAtFront(id, leftover, root.enchAt(i), root.nameAt(i))
+                if (leftover > 0 && root.player) root.player.dropItemAtFront(id, leftover, root.enchAt(i), root.nameAt(i), root.anvilDur[i] || 0)
             }
         }
         for (let i = 0; i < root.anvilSlots.length; ++i) {
