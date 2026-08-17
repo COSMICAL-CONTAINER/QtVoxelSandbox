@@ -495,6 +495,19 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
                             return true;
                         }
                     }
+                    // t639① 胡萝卜/马铃薯种植优先（spec「手持胡萝卜/马铃薯右键耕地 → 种植」）：胡萝卜/马铃薯
+                    //   既是食物又是种植材料（MC 1.0 胡萝卜/马铃薯物品本身即种子）。**在进食拦截之前**分流——
+                    //   右键命中耕地时走种植（placeBlock 路由到 useBlock 的 kCropSeeds 种植分支），不进进食；
+                    //   瞄空气 / 非耕地 → 回退进食（持胡萝卜/马铃薯按住右键吃）。判据复用 m_hasHit（上一帧
+                    //   updateRaycast 结果）+ 读命中格 id == Farmland（同 t514 甜浆果「使用方块优先于使用物品」模式）。
+                    //   种植物品非方块 → placeBlock 内 selectedBlock 归 Air，由 kCropSeeds 分流分支落地
+                    //   CarrotCrop/PotatoCrop（不走方块放置主路径）。
+                    if ((heldForEat == RecipeRegistry::CarrotId || heldForEat == RecipeRegistry::PotatoId)
+                        && m_world && m_hasHit
+                        && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Farmland) {
+                        placeBlock(); // → kCropSeeds 种植分支（胡萝卜 / 马铃薯）
+                        return true;
+                    }
                     // t267：手持食物（面包 / 甜浆果）→ 右键**按住**进食（不再单击即食；spec「单击即食→改长按右键」）。
                     //   t467：经 foodHungerAmount 单一权威判「是否食物」，新增食物只改本判定一处（避免各处硬编码 BreadId）。
                     if (foodHungerAmount(heldForEat) > 0) { beginEating(); return true; }
@@ -5245,6 +5258,32 @@ void PlayerController::step(qreal dt)
             if (!feetInWater()) {
                 const int dmg = int(std::floor(fall - 3.0f));
                 if (dmg > 0) emit fallDamageTaken(dmg, PlayerState::Fall); // t311 死因=高处坠落
+            }
+        }
+        // t639④ 踩踏耕地（机制等价 MC 1.0：跳跃 / 坠落落到耕地上 → 耕地变泥土 + 上方作物掉落）。
+        //   触发条件 = 着地瞬间（本分支即"滞空→着地"沿）+ 下落距离 > 阈值（普通跳跃 ~1.26 / 跨 1 格平
+        //   台下落 ~1.06 均触发；走路并入耕地 / 微步下台阶 < 1.0 不踩坏，机制对齐 MC「非跳跃踩踏不坏」。
+        //   脚位格 = 地面复探同款取样（floor(m_pos.y - 0.05)），精确取落点被踩的耕地格（脚位 0.9375 /
+        //   整块顶 1.0 均映射到支撑格）。踩坏 → setBlock(Dirt)（耕地湿润态一并清）；耕地上有作物 →
+        //   失撑掉落（复用 dropCropDrops 按生长阶段掉产物 = 未成熟掉种子、成熟掉小麦/作物，同失撑级联）。
+        //   仅玩家路径（mob 踩踏留 t642 mob AI 轮）；创造同样踩坏（世界交互非伤害，机制对齐 MC）。分层：
+        //   本处属 Game/Physics（读落点 + 写 World），不改 setBlock 语义。
+        if (fall > kFarmlandTrampleFall && m_world) {
+            const int bx = int(std::floor(m_pos.x()));
+            const int by = int(std::floor(m_pos.y() - 0.05f)); // 脚底下一格（同地面复探 oy-0.05 取样）
+            const int bz = int(std::floor(m_pos.z()));
+            if (m_world->blockAt(bx, by, bz) == BlockRegistry::Farmland) {
+                m_world->setBlock(bx, by, bz, BlockRegistry::Dirt, 0); // 耕地 → 泥土（涟漪：World 发 broken/placed + mesh 重建）
+                const int cy = by + 1;
+                if (cy < m_world->height()) {
+                    const quint8 crop = m_world->blockAt(bx, cy, bz);
+                    if (crop == BlockRegistry::WheatCrop || crop == BlockRegistry::CarrotCrop
+                        || crop == BlockRegistry::PotatoCrop) {
+                        const quint8 cstate = m_world->stateAt(bx, cy, bz);
+                        m_world->setBlock(bx, cy, bz, BlockRegistry::Air, 0); // 清作物（→ broken + mesh 重建）
+                        dropCropDrops(bx, cy, bz, crop, cstate); // 失撑掉落（成熟按 stage 出产物）
+                    }
+                }
             }
         }
         m_peakY = m_pos.y();

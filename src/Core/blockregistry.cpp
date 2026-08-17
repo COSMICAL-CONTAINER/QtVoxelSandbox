@@ -1322,6 +1322,11 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 block
 }
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 blockId, quint8 state)
 {
+    // t639⑦ 耕地选中框贴合 0.9375（spec「耕地选中框应贴 0.9375 高度」）：与碰撞矮盒同源同盒
+    //   （{0,0,0,1,0.9375,1}）→ 瞄准耕地显示 15/16 矮框（不再是满格黑边），选中框 = 实际可交互体形
+    //   （半砖 / 雪层 / 附魔台等 partial 块已有此先例）。渲染不受影响（PartialBlockGeometry 矮盒不变）。
+    if (blockId == Farmland)
+        return {BlockAABB{0, 0, 0, 1, 0.9375f, 1}};
     return shapeBoxes(def(blockId).shape, state);
 }
 
@@ -1416,6 +1421,15 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
 //   火把朝向由邻居定（呈现层持），Core 无 World → 取保守中央区覆盖所有朝向的焰 + 立柱中段（焰恒在格中央偏上）。
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId, quint8 state)
 {
+    // t639⑥ 耕地选体矮板（spec「耕地可透视交互——视线穿过耕地开旁边 / 后方箱子」）：耕地渲染 / 碰撞是
+    //   0.9375 矮盒（15/16），此处给**顶面矮板**（白牌贴地薄板同形 [0,0.9375] + 满格 footprint）—— 射线须
+    //   命中该矮板才算选中耕地（瞄耕地低处侧壁 / 上方空气带的射线穿过命中后方方块；同木梯 t501 / 铁轨
+    //   t638③「透视不优先选中」模式）。单独在 ShapeFull 谓词**之前**分流（耕地 shape=ShapeFull → 先判本
+    //   特例；与 collisionAABBs 耕地特例同源同盒 {0,0,0,1,0.9375,1}）。
+    if (blockId == Farmland) {
+        constexpr float kFarmlandTop = 15.0f / 16.0f; // 0.9375（与 partialblockgeometry 耕地矮盒 / collision 同高）
+        return {BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, kFarmlandTop, 1.0f}};
+    }
     const Shape sh = def(blockId).shape;
     if (sh == ShapeFull)
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // 整格：射线进格即中（等同旧行为）

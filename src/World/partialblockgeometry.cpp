@@ -678,11 +678,15 @@ int PartialBlockGeometry::append(
         //   露出 1/16 唇。全 footprint、y[0, 0.9375]：顶面 farmland_dry(26)（湿润暗化由 mesher 在 lctx.face[+Y] 预乘
         //   farmlandHydrBrightMul 体现，darker=wetter），侧·底 dirt(2)。耕地走 solid=false（见 BlockDef）→ 相邻整立方
         //   不剔面、画满高侧壁填住矮盒上方 1/16 缺口（防透视 x-ray 洞，同 glass 模式）。不做邻居剔除（异形小体约定；
-        //   内/底面被自身或邻实体遮挡，overdraw 可忽）。topTile 取 def.topTile(26) → +Y 顶面贴耕地贴图。
+        //   内/底面被自身或邻实体遮挡，overdraw 可忽）。
+        //   **t639② 湿润贴图切换**：顶面据 state 低 2 位湿润等级选 farmland_dry(26)（干）↔ farmland_wet(27)（湿，
+        //   深色翻耕土 + 犁沟纹）—— 相邻水（经 World::tickFarmlandHydration 复算写 state）后顶面真正换成湿贴图（肉眼
+        //   见变湿，非仅顶点色微暗）；4 级湿润再叠 mesher 顶点色暗化（darker=wetter，同前）。侧·底恒 dirt(2)。
         constexpr float kFarmlandTop = 0.9375f; // 15/16（与 collisionAABBs 耕地特例同高）
+        const int topTile = (state & BlockRegistry::FarmlandHydrationMask) > 0 ? 27 : 26; // 26=farmland_dry / 27=farmland_wet
         pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, kFarmlandTop, 0.f, 1.f,
                 tile, light, tileW, hx, hy, v0, v1,
-                BlockRegistry::def(blockId).topTile); // +Y 顶面 farmland_dry(26)，侧·底用 tile(=sideTile dirt 2)
+                topTile); // +Y 顶面：干 26 / 湿 27（据湿润等级）；侧·底用 tile(=sideTile dirt 2)
         break;
     }
     case BlockRegistry::EnchantingTable: {

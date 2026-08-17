@@ -1310,6 +1310,10 @@ private:
     static constexpr float kGravity = 28.0f;
     static constexpr float kJump = 8.4f;       // 顶点约 1.25 格
     static constexpr float kMaxFall = 78.4f;
+    // t639④ 踩踏耕地触发下落阈值（格）：着地下落距离 > 此值 → 落点耕地被踩坏成泥土。普通跳跃顶点 ~1.25 →
+    //   原地跳跃落地 ~1.25 触发；跨 1 格高平台下落 ~1.06 触发；走路并入（下落≈0）不触发（机制对齐 MC 1.0
+    //   「非跳跃踩踏耕地不坏、跳跃 / 坠落踩坏」）。
+    static constexpr float kFarmlandTrampleFall = 1.0f;
     // t296 玩家受击击退常量（机制对齐 MC 1.0 玩家被击退量级；与 EntityManager mob 击退 kKnockbackHoriz=4.5 /
     //   kKnockbackUp=4.5 / kKnockbackDrag=4.0 同族，玩家侧略强使「被打」反馈明显）：
     //   - kHitKnockbackHoriz：受击水平初速（blocks/s）。略高于玩家走速 4.3 + mob 击退 → 一击把玩家推 ~1.3 格

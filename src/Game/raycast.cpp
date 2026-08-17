@@ -180,7 +180,13 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
                                             | RayFilter::HitPartial)) != 0;
         // 完整立方 → 整格命中；水（仅 HitWater 模式进此分支）→ 整格命中舀水；岩浆（仅 HitLava 模式）→ 整格命中舀岩浆；
         //   非选体·非相机模式（桶 HitWater / HitLava）对不完整方块亦整格阻挡（旧行为，防桶射线行为变）。
-        const bool fullCell = BlockRegistry::isFullCube(b) || b == BlockRegistry::Water
+        // t639⑥ 耕地透视选体：耕地走 ShapeFull 但渲染 / 碰撞是 0.9375 矮盒（15/16）—— 选体 / 相机模式按
+        //   顶面矮板精确命中（raycastAABBs 见 blockregistry.cpp Farmland 分支），射线从耕地盒上方空气带
+        //   （0.9375..1.0）穿过命中后方方块（可透视开耕地旁 / 后方箱子；同木梯 t501 / 铁轨 t638③ 透视模式）。
+        //   仅影响 this 判定；isFullCube(Farmland) 保持 true（entitymanager 支撑 / 雪层放置 / 光照遮挡等仍按
+        //   整块语义，三者解耦同碰撞 / 选中）。
+        const bool fullCell = (BlockRegistry::isFullCube(b) && b != BlockRegistry::Farmland)
+                              || b == BlockRegistry::Water
                               || b == BlockRegistry::Lava || !preciseMode;
         if (fullCell) {
             h.valid = true;

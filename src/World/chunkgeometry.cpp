@@ -678,7 +678,15 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         const int wx = originX + lx, wz = originZ + lz;
                         if (blockAtWorld(wx, ly, wz) != fluidId) continue;
                         const quint8 st = stateAtWorld(wx, ly, wz);
-                        const float myTop = renderTop(st, wx, ly, wz); // t350：上方有水 → 满高（柱连续无缝）
+                        float myTop = renderTop(st, wx, ly, wz); // t350：上方有水 → 满高（柱连续无缝）
+                        // t639⑤ 耕地邻面水面 cap：水源 / 流格水平 4 向邻格 == Farmland（耕地矮盒顶
+                        //   15/16=0.9375）→ 本格液面 cap 到 15/16，消除「满高 1.0 水面邻耕地凸出 1/16」
+                        //   观感破绽（水不漫过耕地顶，接缝齐平）。流水更低液面（<=7/8=0.875）min 后不变。
+                        if (blockAtWorld(wx + 1, ly, wz) == BlockRegistry::Farmland
+                            || blockAtWorld(wx - 1, ly, wz) == BlockRegistry::Farmland
+                            || blockAtWorld(wx, ly, wz + 1) == BlockRegistry::Farmland
+                            || blockAtWorld(wx, ly, wz - 1) == BlockRegistry::Farmland)
+                            myTop = std::min(myTop, 15.0f / 16.0f);
                         // t489：条带 UV（替代图集 tile UV）。水双列：源(st==0)→左列静水、流(st>0)→右列流水；
                         //   岩浆单列。u ∈ 列宽 [colX, colX+0.5/1.0]，v ∈ [0,1/N]（帧 0 区，内缩）。详见上方 t489 注释。
                         const float colL = m_lavaOnly ? 0.0f : ((st == 0) ? 0.0f : 0.5f); // 左列(still) / 右列(flow)
