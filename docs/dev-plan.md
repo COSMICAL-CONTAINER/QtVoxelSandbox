@@ -2454,7 +2454,7 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 
 ### 🅺 耕地/种植体系（1 大项 7 子点）
 
-**t639** 耕地/种植细节批： ✅✅ 已完成（commit d89fe21）
+**t639** 耕地/种植细节批： ✅✅ 已完成（commit eced3e9）
 - ① 胡萝卜/马铃薯右键耕地变成吃（beginEating 拦截在种植分支前——line ~497 `foodHungerAmount>0 → beginEating` 统一拦截）：修——手持胡萝卜/马铃薯/种子且**射线命中耕地**时优先种植分支（种植门控提前），未命中耕地才可吃；
 - ② 耕地邻水应变湿（现状 tickFarmlandHydration 有但用户放水没变湿——核 farmlandHydrationLevel 距离判定/state 写回/贴图切换是否真生效：湿润等级>0 → farmland_moist 贴图（tile 27）mesher 判 state）；
 - ③ 小麦种子/小麦物品从「材料」tab 挪到「食物」tab（creativeItems 分组）；
