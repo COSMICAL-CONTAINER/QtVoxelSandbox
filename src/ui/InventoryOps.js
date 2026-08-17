@@ -81,7 +81,7 @@ function resolveClick(root, curId, curCount, curDur, curEnch, curName) {
 //    t263 工具段（cap=1）右键：空手点工具槽 → 单件特例 half=1 整件拿起（耐久保真）；持工具点空槽 → 放 1（=整件，
 //    耐久保真）；持工具点同 id 槽恒满 → 无操作；持工具点异 id 槽 → 无操作（不互换）。耐久随实例全程透传。
 //    t622 customName：随物品实例走（同 resolveClick——空手拿半 → 持起半份带名（cap=1 单件场景；可堆叠物
-//      无名语义不变）；持物放 1 到空槽 → 名随入槽；同 id 合并不动名）。
+//      无名语义不变）；持物放 1 到空槽 → 名随入槽；同 id 合并不动名（槽保留其名，review rv2-A1 对齐 resolveClick）。
 function resolveRightClick(root, curId, curCount, curDur, curEnch, curName) {
     const heldId = root.hotbar.heldBlock
     const heldCount = root.hotbar.heldCount
@@ -111,8 +111,13 @@ function resolveRightClick(root, curId, curCount, curDur, curEnch, curName) {
     const remain = heldCount - 1
     // 放 1 个到槽：工具段 cap=1 → 放的就是整件（heldDur/heldEnch/heldName → slotDur/slotEnch/slotName 保真）；
     //   光标余 0 → heldDur/heldEnch/heldName 归 0/空。
+    //   review rv2-A1：放 1 到达此处有两态——curId==heldId 同 id 合并 +1 → 槽保留自身实例名 cName（合并不搬
+    //   实例元数据，同 resolveClick 合并分支 / placeOneInSlot 姐妹路径语义）；curId==0 空槽开新栈 → 名随手持
+    //   入槽（heldName）。旧版无条件 slotName: heldName → 持无名同 id 物右键改名栈 = 铁砧花等级+材料买的槽名
+    //   被不可逆清掉（反向则无名手持污染整个槽）。
     return {
-        slotId: heldId, slotCount: curCount + 1, slotDur: heldDur, slotEnch: heldEnch, slotName: heldName,
+        slotId: heldId, slotCount: curCount + 1, slotDur: heldDur, slotEnch: heldEnch,
+        slotName: (curId === heldId) ? cName : heldName,
         heldId: remain > 0 ? heldId : 0, heldCount: remain, heldDur: remain > 0 ? heldDur : 0,
         heldEnch: remain > 0 ? heldEnch : [0,0,0,0], heldName: remain > 0 ? heldName : ""
     }
