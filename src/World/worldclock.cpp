@@ -105,9 +105,16 @@ void WorldClock::setDay(int day)
 }
 
 // misc 二轮 `/time add <n>`：当前 phase 加 delta（可跨天 / 可回退），dayCount 随跨天递增。
+//   review rev2-C3：**整数天进位**须带进 applyTime —— applyTime 内 `phase −= floor(phase)` 只保小数部分，
+//   若不带进位则跨天 delta 被静默丢弃：/time add 24000 成 no-op（phase 原地），/time add 12000 在夜里
+//   等效「回拨到当天早上」（phase+0.5 无 day+1 → 倒退半天而非前进半天）。carry = floor(phase+delta) 进
+//   dayCount → 跨午夜自然推进（t631 setPhase 路径同语义：整进位影响 moonPhase，applyTime 内
+//   moonPhaseChanged 已在 moon 变化时 emit）。
 void WorldClock::addPhase(float delta)
 {
-    applyTime(m_phase + delta, m_dayCount >= 0 ? m_dayCount : 0);
+    const float p = m_phase + delta;
+    const qint64 carry = qint64(std::floor(p)); // 整天进位（负 delta → 负进位，applyTime 内 day<0 钳 0）
+    applyTime(p, (m_dayCount >= 0 ? m_dayCount : 0) + carry);
 }
 
 // t155 编辑活跃期反馈：呈现层 QML 在 World::worldChanged 时调本方法，把「最近编辑」时间戳记为当前
