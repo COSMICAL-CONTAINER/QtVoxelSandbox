@@ -126,7 +126,8 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
     const int rx = int(std::floor(cartPos.x()));
     const int ry = int(std::floor(cartPos.y())) - 1; // 轨格在矿车中心下一格（中心 = 轨顶 + kCartRideH → floor 减 1）
     const int rz = int(std::floor(cartPos.z()));
-    if (world->blockAt(rx, ry, rz) != BlockRegistry::Rail) return false; // 不在轨上（防御）
+    // t638：轨判定扩为 isRail 家族（普通 / 动力 / 探测轨同轨行驶——机制等价 MC 1.0 三种轨均可通行）。
+    if (!BlockRegistry::isRail(world->blockAt(rx, ry, rz))) return false; // 不在轨上（防御）
     const quint8 con = world->stateAt(rx, ry, rz);
     // 4 向连接位（RailConnPx/Nx/Pz/Nz）→ 位移向量；选与 (wantX,wantZ) 点积最大且**非反向**（dot ≥ 0）者
     //   （拐角 dot=0 自动选中 —— 行进 +Z 时拐角连接 +X 点积 0 > 反向 -Z 的 -1 → 自动转弯）。反向连接
@@ -149,12 +150,12 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
         if (dot > bestDot) { bestDot = dot; best = i; }
     }
     if (best < 0) return false; // 无非反向连接（轨尽头 / 仅来路）→ 停
-    // 邻格确为 Rail（连接位应与之一致；防御 —— 连接位 stale 时兜底直查）。
-    if (world->blockAt(rx + kDirs[best].dx, ry, rz + kDirs[best].dz) != BlockRegistry::Rail) {
-        // 连接位失真：直接按邻格实查重选（首查四邻中与 want 点积最大、非反向且为 Rail 者）。
+    // 邻格确为铁轨（连接位应与之一致；防御 —— 连接位 stale 时兜底直查）。t638 家族判定。
+    if (!BlockRegistry::isRail(world->blockAt(rx + kDirs[best].dx, ry, rz + kDirs[best].dz))) {
+        // 连接位失真：直接按邻格实查重选（首查四邻中与 want 点积最大、非反向且为铁轨者）。
         int fb = -1; float fDot = -1.0f;
         for (int i = 0; i < 4; ++i) {
-            if (world->blockAt(rx + kDirs[i].dx, ry, rz + kDirs[i].dz) != BlockRegistry::Rail) continue;
+            if (!BlockRegistry::isRail(world->blockAt(rx + kDirs[i].dx, ry, rz + kDirs[i].dz))) continue;
             const float dot = float(kDirs[i].dx) * wantX + float(kDirs[i].dz) * wantZ;
             if (dot < 0.0f) continue; // 反向连接不选（同上：死端返回 false 走停车分支）
             if (dot > fDot) { fDot = dot; fb = i; }
@@ -191,6 +192,24 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     if (wishLen > 1e-3f) {
         // wish 归一后与 dir 点积 → 前进 / 后退意图 [-1,1]（侧向分量投影 0 → 不侧移，轨约束）。
         proj = (wishX / wishLen) * c.dirX + (wishZ / wishLen) * c.dirZ;
+    }
+    // t638 ⑤ 动力轨加速（spec「动力轨 = 矿车经过提速」，机制等价 MC 1.0 powered rail boost）：矿车当前
+    //   所在轨格为 GoldenRail → 投影改写：(a) 有前进输入 → 上限提升（proj × boost/kCart → 目标速达
+    //   kCartBoostSpeed）；(b) 无输入 → 弹射档 0.35（机制等价 MC 动力轨是「发射器」：停着的矿车驶上
+    //   动力轨即被弹射向前，无需玩家踩 W）；(c) 反踩刹车（proj<0）→ 不改写（玩家减速意图优先，动力
+    //   不反向推）。轨格判定同 pickTrackStep（中心下一格）。
+    {
+        const int gx = int(std::floor(c.pos.x()));
+        const int gz = int(std::floor(c.pos.z()));
+        const int gy = int(std::floor(c.pos.y())) - 1;
+        const quint8 gb = world ? world->blockAt(gx, gy, gz) : quint8(BlockRegistry::Air);
+        if (gb == BlockRegistry::GoldenRail) {
+            if (proj > 1e-3f) {
+                proj = proj * (kCartBoostSpeed / kCartSpeed); // 有输入 → 上限提升（proj≤1 → ≤boost）
+            } else if (proj > -1e-3f) {
+                proj = 0.35f; // 无输入 → 弹射档（机制等价 MC 动力轨弹射停着的矿车）
+            } // proj < -0.001（反踩刹车）→ 不改写：玩家减速意图优先
+        }
     }
     const float targetV = proj * kCartSpeed;
     // 速度 lerp 接近目标（加速 / 摩擦统一：目标 0 时按 kCartFriction 衰减；目标 ±速时按 kCartAccel 接近）。
@@ -239,15 +258,33 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
             }
         }
         // Y 钉轨面：矿车所在列向下找轨格（中心格或下一格）→ pos.y = 轨格 cell 顶 + kCartRideH。
+        //   t638：轨判定扩 isRail 家族（普通 / 动力 / 探测轨同钉轨面）。
         if (world) {
             const int bcx = int(std::floor(c.pos.x()));
             const int bcz = int(std::floor(c.pos.z()));
             const int bcy = int(std::floor(c.pos.y()));
             for (int y = bcy; y >= bcy - 2 && y >= 0; --y) {
-                if (world->blockAt(bcx, y, bcz) == BlockRegistry::Rail) {
+                if (BlockRegistry::isRail(world->blockAt(bcx, y, bcz))) {
                     c.pos.setY(float(y) + 1.0f + kCartRideH);
                     break;
                 }
+            }
+            // t638 ⑤ 探测轨通电视觉（占位反馈；真红石信号输出留红石大轮）：矿车所在列（钉到的轨格）为
+            //   探测轨 → 置 state bit0（DetectorRailStateOnFlag）→ mesher 换 rail_detector_on(160) 亮红贴图
+            //   （机制等价 MC 1.0 detector rail 被矿车压住时通电换贴图 + 输出信号——信号部分本项目无红石，
+            //   只做视觉）。离开不清位（保持「被压过」亮态——MC 是实时通断，本工程简化：轨被压亮后保持，
+            //   玩家破坏重放 / 邻块编辑时 checkRailOnEdit 重算连接 state 会顺带清 bit0（连接重算写 con 全量
+            //   覆盖，bit0 被自然抹掉）——「轨还亮着」的窗口最多到下次邻块编辑，占位语义可接受）。写 state
+            //   走 setWaterSilent（静默：id 不变不发 broken/placed，仅 worldChanged 重建 mesh 切贴图，同
+            //   红石灯开关模式）。节流：仅在 bit0 未置时写（每格每列车最多一次，无每帧写风暴）。
+            for (int y = bcy; y >= bcy - 2 && y >= 0; --y) {
+                if (world->blockAt(bcx, y, bcz) != BlockRegistry::DetectorRail) break; // 列顶非探测轨 → 不查
+                const quint8 ds = world->stateAt(bcx, y, bcz);
+                if ((ds & BlockRegistry::DetectorRailStateOnFlag) == 0) {
+                    world->setWaterSilent(bcx, y, bcz, BlockRegistry::DetectorRail,
+                                          quint8(ds | BlockRegistry::DetectorRailStateOnFlag));
+                }
+                break; // 只查钉到的首个轨格
             }
         }
         // 车头朝向（-Z 前约定：dir=(0,-1) → yaw 0；(1,0) → yaw 90；(0,1) → yaw 180；(-1,0) → yaw 270）。

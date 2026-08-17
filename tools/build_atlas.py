@@ -330,6 +330,16 @@ TILES = [
     "default_stone_pressure_plate",  # 154 stone_pressure_plate（石压力板：石质灰底 + 边框暗带 + 中央板面微亮内圈）
     "default_iron_pressure_plate",   # 155 iron_pressure_plate（铁压力板：金属浅灰底 + 四角铆钉——重质，仅玩家/mob 触发）
     "default_gold_pressure_plate",   # 156 gold_pressure_plate（金压力板：金黄底 + 中央亮金板面——轻质，掉落物即触发）
+    # t638 铁轨家族扩展 + 红石火把 + 附魔台翻页书 + 仙人掌底面（机制等价 MC 1.0 powered rail / detector
+    #   rail / redstone torch / 附魔台顶书；tools/build_rail_family.py / build_book.py / build_cactus.py
+    #   程序生成原创像素图；pack 贴图运行期映射 resourcepackmanager tileFilenameMap）。
+    "default_golden_rail",           # 157 golden_rail（动力铁轨断常态：金轨双线 + 红石连接点暗红；矿车加速）
+    "default_detector_rail",         # 158 detector_rail（探测铁轨断常态：铁轨 + 石枕 + 暗红探测点）
+    "default_rail_golden_on",        # 159 rail_golden_on（动力轨通变态——本工程恒断电不消费，留图集备用）
+    "default_rail_detector_on",      # 160 rail_detector_on（探测轨通电视觉——矿车驶过 state bit4 → mesher 换贴）
+    "default_redstone_torch",        # 161 redstone_torch（红石火把 cross：透明底 + 深棕柄 + 亮红焰头；常亮光 7）
+    "default_enchant_book",          # 162 enchant_book（附魔台顶摊开书页：白纸底 + 灰字线 + 中央书脊；无 pack 等价）
+    "default_cactus_bottom",         # 163 cactus_bottom（仙人掌底面：更暗绿截面 + 外圈皮层暗环；观察者视角可见）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

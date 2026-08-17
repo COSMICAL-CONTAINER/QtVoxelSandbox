@@ -163,6 +163,10 @@ const char *iconFileForBlock(quint8 id)
     // t484 废弃矿井结构方块图标（build_cube_icons.py flat 2D 透明底；程序生成原创像素图）。
     case BlockRegistry::Cobweb:        return "icon_cobweb.png";      // 蜘蛛网（cross 透明底；灰白蛛丝放射网纹；矿井散布）
     case BlockRegistry::Rail:          return "icon_rail.png";        // 铁轨（flat 透明底；棕色枕木 + 灰铁双轨；贴地薄板）
+    // t638 铁轨家族扩展 + 红石火把图标（build_cube_icons.py flat 2D 透明底；程序生成原创像素图）。
+    case BlockRegistry::GoldenRail:    return "icon_golden_rail.png";    // 动力铁轨（flat 透明底；金轨双线 + 红石连接点；矿车加速）
+    case BlockRegistry::DetectorRail:  return "icon_detector_rail.png";  // 探测铁轨（flat 透明底；铁轨 + 亮红探测点；矿车驶过通电视觉）
+    case BlockRegistry::RedstoneTorch: return "icon_redstone_torch.png"; // 红石火把（flat 透明底；深棕柄 + 亮红焰头；常亮装饰光源 光 7）
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
@@ -685,6 +689,12 @@ QVariantList Hotbar::creativeBlocks() const
              // t484 废弃矿井结构方块（机制等价 MC 1.0 废弃矿井 mineshaft 的蛛网 / 铁轨；worldgen 散布 / 创造取用）。
              int(BlockRegistry::Cobweb),                                      // 蜘蛛网（cross 形蛛网；矿井散布；无碰撞瞬破掉线）
              int(BlockRegistry::Rail),                                        // 铁轨（贴地薄板 flat；矿井木地板散布；配方 6 铁锭+1 木棒→16）
+             // t638 铁轨家族扩展 + 红石火把（机制等价 MC 1.0 powered rail / detector rail / redstone torch；
+             //   紧随普通铁轨排列——轨族 + 光源机关件）。动力轨矿车加速 / 探测轨驶过通电视觉 / 红石火把常亮
+             //   装饰光源（光 7）。
+             int(BlockRegistry::GoldenRail),                                  // 动力铁轨（矿车驶过加速 boost；直线连接；配方 6 金锭+棒+红石→6）
+             int(BlockRegistry::DetectorRail),                                // 探测铁轨（矿车驶过通电视觉占位；直线连接；配方 6 铁锭+石压力板+红石→6）
+             int(BlockRegistry::RedstoneTorch),                               // 红石火把（常亮装饰光源 光 7；cross 形；配方 木棒+红石粉→1）
              // t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；worldgen 散布 / 创造取用）。
              int(BlockRegistry::CutSandstone),                                // 切制砂岩（装饰砂岩变体；金字塔外框；可放置）
              int(BlockRegistry::TntBlock),                                   // TNT（可引爆爆炸物；沙漠神殿陷阱；配方 5 火药+4 沙→1）

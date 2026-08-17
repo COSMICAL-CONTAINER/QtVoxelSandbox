@@ -1223,14 +1223,17 @@ void PlayerController::dropUnsupportedTorchesAround(int x, int y, int z)
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (const auto &d : kNb) {
         const int tx = x + d[0], ty = y + d[1], tz = z + d[2];
-        if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Torch) continue;
+        const quint8 tb = m_world->blockAt(tx, ty, tz);
+        // t638 ⑥：红石火把同火把失撑掉落（state 同 torchAttachOffset 编码——placeBlock t638 并入 Torch
+        //   分支写 state，附着语义一致；破支撑邻即掉，机制等价 MC 红石火把附着面移除脱落）。
+        if (tb != BlockRegistry::Torch && tb != BlockRegistry::RedstoneTorch) continue;
         int ax, ay, az;
         BlockRegistry::torchAttachOffset(m_world->stateAt(tx, ty, tz), ax, ay, az);
         const int sx = tx + ax, sy = ty + ay, sz = tz + az;
         if (BlockRegistry::isSolid(m_world->blockAt(sx, sy, sz))) continue; // 附着格仍 solid → 火把保留
         m_world->setBlock(tx, ty, tz, BlockRegistry::Air); // → World 发 blockBroken + worldChanged → 清伪光源 + 重建
-        emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Torch),
-                       std::max(1, BlockRegistry::dropCount(BlockRegistry::Torch)));
+        emit spawnItem(tx, ty, tz, BlockRegistry::dropId(tb),
+                       std::max(1, BlockRegistry::dropCount(tb)));
     }
 }
 
@@ -2988,10 +2991,10 @@ void PlayerController::placeBlock()
             emit swingArm();
             return;
         }
-        // (b) 放矿车：手持矿车物品 + 未骑乘 + 命中方块为 Rail。
+        // (b) 放矿车：手持矿车物品 + 未骑乘 + 命中方块为铁轨（t638 家族——普通 / 动力 / 探测轨均可放车）。
         if (m_minecartManager->ridingIndex() < 0 && m_hotbar
             && heldItemId == RecipeRegistry::MinecartId && m_hasHit
-            && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Rail) {
+            && BlockRegistry::isRail(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
             m_minecartManager->spawnCart(m_hitBx, m_hitBy, m_hitBz);
             if (m_mode != Creative)
                 m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 矿车（创造不耗）
@@ -3042,11 +3045,13 @@ void PlayerController::placeBlock()
         //   命中底面（天花板下方，m_hitNy<0）→ 倒置（整步在上、背墙在下）；否则正置。镜像 slab 的
         //   「ny<0 → 上半」约定，使「点方块下方」在所有半方块（slab/stairs）统一得到「倒挂」变体。
         placeState = quint8(((horizontalFacing() & 3) ^ 1) | (m_hitNy < 0 ? 4 : 0));
-    } else if (m_selectedBlock == BlockRegistry::Torch) {
+    } else if (m_selectedBlock == BlockRegistry::Torch || m_selectedBlock == BlockRegistry::RedstoneTorch) {
         // t214 火把附着方向写入 state（供 finishMiningAt 失撑掉落判定 + 存档 round-trip）。由命中面外法线
         //   推导（同 torchPlaced 信号传出的法线 → QML prefOrient，两路同源 → C++ 附着判定与 QML 渲染朝向
         //   放置时一致）。torch 走 ShapeNone → collisionAABBs/selectionAABBs/mesher 均不读 state，复用 state
         //   作附着编码零回归。
+        // t638 ⑥ 红石火把并入：同 Torch 分支（cross 形网格渲染不读 attach state，但失撑掉落判定
+        //   finishMiningAt 读——破支撑邻即掉，机制等价 MC 红石火把附着语义；torchOrientFromNormal 通用）。
         placeState = quint8(BlockRegistry::torchOrientFromNormal(m_hitNx, m_hitNy, m_hitNz));
     } else if (m_selectedBlock == BlockRegistry::Ladder) {
         // t501 木梯贴墙方向写入 state（供 mesher 单片贴墙 quad 摆位 + finishMiningAt 失撑掉落）。由命中面外
@@ -3077,6 +3082,12 @@ void PlayerController::placeBlock()
         // t609 投掷器前面（排出口 dropper_front）朝玩家侧：state = horizontalFacing ^ 1（同发射器 / 熔炉 / 箱子
         //   编码；机制等价 MC 1.0 投掷器放置排出口朝玩家）。mesher 据 state 把 dropper_front 贴到对应面；
         //   scanDispenserTraps 触发时据 state 解出弹出口外向（同发射器 t608 方向语义，单一方向源）。
+        placeState = quint8((horizontalFacing() & 3) ^ 1);
+    } else if (m_selectedBlock == BlockRegistry::Pumpkin) {
+        // t638 ② 南瓜前面（刻面 pumpkin_face）朝玩家侧：state = horizontalFacing ^ 1（同箱子 / 熔炉 / 发射器
+        //   编码；机制等价 MC 1.0 刻面南瓜放置时脸朝玩家——此前南瓜 placeBlock 未写 state → 恒 state=0
+        //   → 前面恒 +X 固定方向，不随玩家朝向）。mesher（ChunkGeometry::tileFor）据 state 把 pumpkin_face
+        //   贴到对应面（复用 chestFrontFace 解码）。造物（雪傀儡 / 铁傀儡）检测不读南瓜 state → 零影响。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
     } else if (m_selectedBlock == BlockRegistry::Leaves) {
         // t305 玩家放置的树叶标 PersistentLeafBit（持久，不参与自然衰减）—— 机制等价 MC 1.0「玩家放置的树叶
@@ -3221,7 +3232,9 @@ void PlayerController::placeBlock()
     // t114 火把放置预检：火把需挂到实体邻居（下 / 四侧之一为实体方块），否则拒绝（机制等价 MC「火把
     // 需要支撑面」—— 平地或墙面）。判定用 BlockRegistry::isSolid（实体方块语义；不挂到空气 / 另一火把
     // / 工作台等非实体方块）。torchHost 据同样语义在运行期推断朝向（下 solid=垂直 / 侧 solid=横插）。
-    if (m_selectedBlock == BlockRegistry::Torch) {
+    // t638 ⑥ 红石火把并入火把预检（机制等价 MC 红石火把同火把须支撑面；cross 形网格渲染贴图自带火把
+    //   剪影不依赖邻居推断朝向，但支撑语义 / 失撑掉落（finishMiningAt 破支撑邻即掉）与火把一致）。
+    if (m_selectedBlock == BlockRegistry::Torch || m_selectedBlock == BlockRegistry::RedstoneTorch) {
         const bool below = BlockRegistry::isSolid(m_world->blockAt(tx, ty - 1, tz));
         const bool px = BlockRegistry::isSolid(m_world->blockAt(tx + 1, ty, tz));
         const bool nx = BlockRegistry::isSolid(m_world->blockAt(tx - 1, ty, tz));
@@ -3229,6 +3242,13 @@ void PlayerController::placeBlock()
         const bool nz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz - 1));
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
     }
+    // t638 ③ 轨上放轨拒绝（spec「铁轨不能放在铁轨上」）：目标格已是铁轨族（普通 / 动力 / 探测）→ 拒
+    //   （不挥）。常规邻格放置下目标格通常非轨（瞄轨面 → 目标 = 轨上格 / 轨旁格），但 t638 选中框薄板化后
+    //   贴轨平扫的落格可能邻轨、以及流体排开分支的组合下仍可能同格 → 显式拒（机制等价 MC 1.0 轨不可
+    //   叠轨 / 同格互斥）。轨道连接 state 由 World::checkRailOnEdit 在放置后自动重算（家族互连）。
+    if (BlockRegistry::isRail(quint8(m_selectedBlock))
+        && BlockRegistry::isRail(m_world->blockAt(tx, ty, tz)))
+        return;
     // t501 木梯放置预检（spec「须完整方块侧支撑」）：木梯贴**完整立方方块的侧面**（机制等价 MC 1.0 ladder
     //   须贴实体方块面）。两重守卫：
     //   ① 必须侧面贴墙（命中面法线 ny==0）—— 顶/底面非合法贴墙方向，玩家点顶/底放梯 → 拒（不挥）。法线

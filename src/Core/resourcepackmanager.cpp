@@ -502,8 +502,30 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         //   读它；如未来仙人掌改 per-face 再补）。
         // t620 红石火把不做：redstone_torch_on/off.png 在包内，但红石火把方块未实现（依赖红石系统的恒亮 /
         //   熄灭态语义，PLAN 无红石系统）→ 不接映射（无消费方）；留待红石系统任务再接。
+        // t638 翻案：红石火把方块已建（RedstoneTorch，常亮 on 装饰光源 光 7）→ 接 tile 161 映射（on 常亮态；
+        //   off 熄灭态不接——本方块恒亮）。非 pack 回落 default_redstone_torch.png（tools/build_rail_family.py
+        //   原创自绘）。包内缺 PNG 时安全跳过。
+        {161, QStringLiteral("redstone_torch_on.png")},        // redstone_torch（t638 红石火把常亮态；cross cutout）
         // t620 铁轨动力 / 探测轨不做：rail_golden(_powered) / rail_detector(_powered) 在包内，但本工程无
         //   对应方块（无红石系统 → 无激活态语义）→ 不接；同 t620 第 1 部分直轨 / 拐角的注释口径。
+        // t638 翻案：动力 / 探测轨方块已建（GoldenRail / DetectorRail；矿车加速 / 驶过通电视觉）→ 接断常态
+        //   两映射 + 探测轨通电变体。MC 现代命名（1.13+ flattening）demo 包实测：powered_rail.png（断常）/
+        //   detector_rail.png（断常）/ detector_rail_on.png（通电亮红）；另两组老名 rail_golden*.png /
+        //   rail_detector*.png 也在（1.8 命名）——取现代名优先（demo 包两组逐像素等价，取与 vanilla 现行
+        //   一致的命名）。动力轨通电变体 powered_rail_on.png **不接**——本工程无红石信号恒断电（157 断常
+        //   恒用；tile 159 程序贴图留图集备用）。非 pack 回落 default_rail_{golden,detector}*.png
+        //   （tools/build_rail_family.py 原创自绘）。包内缺 PNG 时安全跳过。
+        {157, QStringLiteral("powered_rail.png")},             // golden_rail（t638 动力铁轨断常态；直线连接）
+        {158, QStringLiteral("detector_rail.png")},            // detector_rail（t638 探测铁轨断常态）
+        {160, QStringLiteral("detector_rail_on.png")},         // detector_rail_on（t638 探测轨通电视觉——矿车驶过 bit4）
+        // t638 仙人掌底面翻案（t620「不接」被观察者视角观察推翻）：tile 163 = cactus_bottom.png（包内实测
+        //   与 cactus_top 像素不同——底面更暗、无中央凹陷）。Cactus def bottomTile=163；mesher pushBox
+        //   -Y 底面读 bottomTile（partialblockgeometry t638 加 bottomTile 参数）。非 pack 回落
+        //   default_cactus_bottom.png（tools/build_cactus.py 程序生成）。包内缺 PNG 安全跳过。
+        {163, QStringLiteral("cactus_bottom.png")},            // cactus_bottom（t638 仙人掌底面；观察者视角可见）
+        // t638 附魔台顶摊开书（tile 162=enchant_book）：**无 pack 等价**（MC 的书是独立实体模型非方块贴图；
+        //   包内无 enchant_book.png）→ 不映射，程序贴图恒用（tools/build_book.py：白纸底 + 灰字线 + 中央
+        //   书脊暗线——PartialBlockGeometry EnchantingTable case 顶书页盒专用）。留注释防未来误接。
     };
     return kMap;
 }
@@ -742,6 +764,11 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
         { 103, { QStringLiteral("rail_normal.png") } },               // Rail 铁轨（block 兜底：item 目录无 rail 图标）
         { 107, { QStringLiteral("dispenser_front_horizontal.png") } }, // Dispenser 发射器（正面 2D）
         { 117, { QStringLiteral("dropper_front_horizontal.png") } },   // Dropper 投掷器（正面 2D）
+        // t638 铁轨家族 + 红石火把 pack 2D item 图标（item 目录无 rail 族图标（demo 包实测）→ block 直轨 2D
+        //   图兜底；红石火把 item 目录同样无 → block/redstone_torch_on.png 兜底（常亮态 2D 火把立绘））。
+        { 127, { QStringLiteral("powered_rail.png"),   QStringLiteral("rail_golden.png") } },   // GoldenRail 动力铁轨（现代名优先 / 1.8 名兜底）
+        { 128, { QStringLiteral("detector_rail.png"),  QStringLiteral("rail_detector.png") } }, // DetectorRail 探测铁轨
+        { 129, { QStringLiteral("redstone_torch_on.png") } },                                  // RedstoneTorch 红石火把（常亮态 2D）
     };
     return kMap;
 }

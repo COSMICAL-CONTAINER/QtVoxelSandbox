@@ -785,6 +785,32 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
         0,                           0,                           0 },
       int(BlockRegistry::Rail), 16, 1, "rail" },
+    // t638 动力铁轨（golden/powered rail）：6 金锭（顶两行满）+ 底行中位木棒 + 底行右位红石粉 → 6 动力轨
+    //   （有序 3×3，仅工作台）。机制等价 MC 1.0 配方（6 gold ingot + 1 stick + 1 redstone → 6 powered
+    //   rail）。多重集 {Gold:6, Stick:1, Redstone:1} 唯一 → 与指南针 / 钟的 {X:4, Redstone:1} 十字形和
+    //   TNT 的 X 形均不冲突。最小包围盒 3×3（含底行）→ 与铁块（3×3 满 9 锭）包围盒同尺寸但原料组合唯一。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId,
+        RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId,
+        0,                            RecipeRegistry::StickId,    RecipeRegistry::RedstoneId },
+      int(BlockRegistry::GoldenRail), 6, 1, "golden_rail" },
+    // t638 探测铁轨（detector rail）：6 铁锭（顶两行满）+ 底行中位**石压力板** + 底行右位红石 → 6 探测轨
+    //   （有序 3×3，仅工作台）。机制等价 MC 1.0 配方（6 iron ingot + 1 stone pressure plate + 1 redstone
+    //   → 6 detector rail）。多重集 {Iron:6, StonePlate:1, Redstone:1} 唯一 → 不与普通铁轨 {Iron:6} /
+    //   动力轨冲突（原料组合独一无二）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
+        RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
+        0,                            int(BlockRegistry::StonePressurePlate), RecipeRegistry::RedstoneId },
+      int(BlockRegistry::DetectorRail), 6, 1, "detector_rail" },
+    // t638 红石火把（redstone torch）：木棒上 + 红石粉下（竖列 2 格）→ 1 红石火把（有序 2×2 兼 3×3，
+    //   背包栏 / 工作台均可）。机制等价 MC 1.0 配方（1 stick + 1 redstone → 1 redstone torch on stick）。
+    //   最小包围盒 1×2（竖列），多重集 {Stick:1, Redstone:1} 唯一 → 不冲突（棒 / 红石其余配方均多件或带它料）。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { RecipeRegistry::StickId,    0, 0,
+        RecipeRegistry::RedstoneId, 0, 0,
+        0, 0, 0 },
+      int(BlockRegistry::RedstoneTorch), 1, 1, "redstone_torch" },
     // t565 白羊毛（wool）：4 线（2×2 满铺）→ 1 白羊毛（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0
     //   配方（4 string → 1 白羊毛；用户报「4 线合成白羊毛（背包 2×2 配方）」）。最小包围盒 2×2（满），
     //   shapedEqual 收缩后逐格比 → 2×2 背包栏 / 工作台角 2×2 均可合。产物 Wool=27（白色羊毛方块，可放置；

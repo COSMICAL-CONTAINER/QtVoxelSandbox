@@ -2,8 +2,11 @@
 """生成门上下半 per-face 贴图（16×16 像素，原创自绘，§9 override (a)）。
 
 t620 门贴图 per-face 接入：机制等价 MC 1.0 门两格高模型——下格 = 门板（整板 + 底部横带 + 锁孔板），
-上格 = 门板 + 上部格栅窗（可透视的镂空感用暗色格栅表达，不做真透明——本工程门是满高薄板非镂空）。
-PartialBlockGeometry 的 door case 据 state bit3（上/下格）选 tile：kDefs topTile=upper / bottomTile=lower。
+上格 = 门板 + 上部格栅窗。PartialBlockGeometry 的 door case 据 state bit3（上/下格）选 tile：
+kDefs topTile=upper / bottomTile=lower。
+t638 ① 镂空透视：窗洞改真透明（alpha=0）——门改路由 cutout 段（alphaMode:Mask）后，透明窗洞像素
+被 discard，可透视门后方（机制等价 MC 1.0 门上半窗）。pack 侧 door_wood_upper.png 自带真 alpha 窗
+（t620 已接），程序回退贴图本任务同步对齐。
 名称 / 贴图纯原创自绘（零 MC 资产）；橡木（浅棕）/ 云杉（深冷棕）两族仅色板差异（同 build_spruce.py 模式）。
 
 输出（覆盖写入 textures/）：
@@ -69,29 +72,40 @@ def board_base(pal):
 
 
 def draw_upper(pal):
-    """上半：门板 + 上部格栅窗（4×4 格窗：格条 + 窗洞暗青底）+ 顶部边框。"""
+    """上半：门板 + 上部格栅窗（窗洞真透明——t638 ① 镂空透视：窗洞 alpha=0，mesher 门走 cutout 段
+    alphaMode:Mask 材质 → alpha<0.5 像素 discard，可透视窗后方（机制等价 MC 1.0 门上半窗透明）。
+    旧版窗洞用暗青不透明底表「透视暗感」——t620 当时门走 terrain 不透明段，透明像素会显黑；t638 门
+    改路由 cutout 段后真透明可行）。"""
     c = board_base(pal)
     # 顶部边框。
     for x in range(TS):
         c[0, x, 0:3] = pal["edge"]
-    # 格栅窗区 y[2,9) × x[2,14)（占上半门板的大窗）。
+    # 格栅窗区 y[2,9) × x[2,14)：窗洞 alpha=0（真透明——cutout 材质丢弃）。
     for y in range(2, 9):
         for x in range(2, 14):
             c[y, x, 0:3] = pal["glass"]
-    # 格条：竖条 x=4-5 / 8-9 / 12-13 中取 x∈{5,9,13}，横条 y=3 / y=7（十字格栅）。
+            c[y, x, 3] = 0.0   # t638 窗洞透明（cutout discard → 透视）
+    # 格条：竖条 x∈{5,9,13}，横条 y=3 / y=7（十字格栅；格条不透明，构成窗棂）。
     for y in range(2, 9):
         for gx in (5, 9, 13):
             c[y, gx, 0:3] = pal["grille"]
+            c[y, gx, 3] = 255.0
     for x in range(2, 14):
         c[3, x, 0:3] = pal["grille"]
+        c[3, x, 3] = 255.0
         c[7, x, 0:3] = pal["grille"]
-    # 窗框缘（窗区外圈压条，区别窗洞与门板）。
+        c[7, x, 3] = 255.0
+    # 窗框缘（窗区外圈压条，区别窗洞与门板；不透明）。
     for x in range(2, 14):
         c[2, x, 0:3] = pal["edge"]
+        c[2, x, 3] = 255.0
         c[8, x, 0:3] = pal["edge"]
+        c[8, x, 3] = 255.0
     for y in range(2, 9):
         c[y, 2, 0:3] = pal["edge"]
+        c[y, 2, 3] = 255.0
         c[y, 13, 0:3] = pal["edge"]
+        c[y, 13, 3] = 255.0
     return c
 
 

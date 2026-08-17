@@ -827,7 +827,44 @@ public:
         StonePressurePlate = 124, // 石压力板：玩家+mob+掉落物触发（同木/圆石板）；踩下沿 fire 一次 + 薄板压半
         IronPressurePlate  = 125, // 铁压力板（重）：仅玩家+mob 触发；踩下沿 fire 一次 + 薄板压半
         GoldPressurePlate  = 126, // 金压力板（轻）：仅掉落物触发；踩下沿 fire 一次 + 薄板压半
-        Count           = 127, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t638 铁轨家族扩展 + 红石火把 + 附魔台翻页书（机制等价 MC 1.0 powered rail / detector rail /
+        //   redstone torch / 附魔台顶摊开的书；名称 / 程序贴图全原创自绘 §9a；pack 贴图运行期映射）。
+        //   动力铁轨（GoldenRail；spec 命名 PoweredRail 的本地化——MC 1.0 官方名 powered rail / golden
+        //   rail 均指 id 27）：贴地薄板（与 Rail 同几何——水平双面 quad 贴 cell 底 1/16）；**仅直线连接**
+        //   （无拐角——机制等价 MC 1.0 动力轨不能转弯）；矿车驶过时**加速**（MinecartManager tickRiddenCart
+        //   读脚下格 == GoldenRail → 目标速度提升到动力档，机制等价 MC 1.0 powered rail 给矿车 boost）。
+        //   solid=false / ShapeNone（无碰撞，玩家走过；同 Rail）、hardness=0（瞬破）、NoTool（空手可采且
+        //   掉落）、dropId=自身、dropCount=1、maxStack=64。各面贴图=rail_golden(157)（透明底 + 金轨双线
+        //   + 红石连接点；程序回退 tools/build_rail_family.py）；pack 侧 {157→powered_rail.png}（MC 现代名
+        //   powered_rail = 1.8 名 golden_rail；_powered 变体是通电亮态——本工程无红石信号恒断电，留注释）。
+        //   state 复用 Rail 4 位连接编码（RailConnPx/Nx/Pz/Nz）+ mesher 直线形态（连接位只取对向 → 水平
+        //   quad 沿 X 或 Z 铺，UV 旋转同 Rail 直轨；拐角连接位（邻向 2）按直线取「与上一段行进向对齐」…
+        //   简化：动力轨只看 ±X / ±Z 对向连接，无对向时取任一向，永不画拐角贴图）。音色 GroupStone（金属）。
+        //   配方（MC 1.0）：6 金锭（两行满）+ 中行 木棒+红石粉+木棒（MC 实际 6 gold + stick + redstone
+        //   最小包围盒 2×3；本工程 3×3 有序取上两行金锭满 + 中行 棒-红石-棒）→ 6 动力轨。
+        GoldenRail     = 127, // 动力铁轨：矿车驶过加速（boost）；仅直线连接；配方 6 金锭+棒+红石
+        //   探测铁轨（DetectorRail）：贴地薄板（同 Rail 几何）；**矿车驶上时通电视觉**——state bit0
+        //   （DetectorRailStateOnFlag）置位 → mesher 换 rail_detector_on(160) 亮红贴图（占位反馈；真红石
+        //   信号输出留红石大轮，spec「踩过变 powered 贴图」）。矿车离开不清位（保持「被压过」状态直到
+        //   再编辑——简化：MC 探测轨矿车离开即断，本工程做「驶过闪亮」→ MinecartManager tick 置位 + 定
+        //   时清位走 setWaterSilent state 写。直线连接同动力轨（无拐角）。solid=false / ShapeNone /
+        //   hardness=0 / NoTool / dropId=自身 / maxStack=64。各面=rail_detector(158)（程序回退透明底 +
+        //   石枕 + 亮红探测点）；pack {158→detector_rail.png}（_on 变体 {160→detector_rail_on.png}）。
+        //   音色 GroupStone。配方（MC 1.0）：6 铁锭 + 石压力板 + 红石 → 6 探测轨。
+        DetectorRail  = 128, // 探测铁轨：矿车驶过通电视觉（占位）；仅直线连接；配方 6 铁锭+石压力板+红石
+        //   红石火把（RedstoneTorch）：**常亮 ON 装饰光源**（真红石信号源留红石大轮——本工程无红石系统，
+        //   同 t620 红石灯「右键开关」简化口径的姊妹简化：恒亮不熄）。solid=false / ShapeNone（无碰撞、
+        //   不挡邻居面剔除）、lightEmission=7（MC 1.0 红石火把光 level 7，约为火把 14 的一半——暗红氛围
+        //   光）、hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=自身、dropCount=1、maxStack=64。
+        //   渲染：cross 形广告牌（两片对角双面 quad 贴 redstone_torch(161) 瓦片——透明底 + 深棕柄 + 亮红
+        //   焰头，alphaCutoff cutout；与植物族同走 cutout 段，区别于普通火把的 torchHost QML delegate——
+        //   方块网格路径更省 delegate 且常亮光源走真方块光 flood（lightEmission）非伪光源）。放置预检：
+        //   同火把（需实体邻居支撑——下 / 四侧之一 isSolid，placeBlock Torch 分支扩展）。
+        //   pack {161→redstone_torch_on.png}（on 常亮态；off 熄灭态不接——本方块恒亮）。
+        //   音色 GroupWood（木质柄）。配方：木棒 + 红石粉（竖列 2 格）→ 1 红石火把（机制等价 MC 1.0
+        //   redstone torch on a stick）。
+        RedstoneTorch = 129, // 红石火把：常亮装饰光源（光 7）；cross 形；配方 木棒+红石粉
+        Count           = 130, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1398,7 +1435,18 @@ public:
     //   中央板面，材质色区分「石灰 / 金属铆钉 / 亮金」；StonePressurePlate/IronPressurePlate/
     //   GoldPressurePlate 各面=本族 tile；mesher 走 PartialBlockGeometry plate case，踩下态 state bit0
     //   压半高；tools/build_pressure_plates.py 程序生成原创像素图）。
-    static constexpr int AtlasTileCount = 157;
+    //   t638：157..163=铁轨家族扩展 + 红石火把 + 附魔台翻页书 + 仙人掌底面七张：
+    //   157=rail_golden（动力铁轨断常态：金轨双线 + 石枕；GoldenRail 各面=本 tile；mesher 直线 UV 同 Rail
+    //       直轨；pack {157→powered_rail.png}）、158=rail_detector（探测铁轨断常态：铁轨 + 亮红探测点；
+    //       pack {158→detector_rail.png}）、159/160=两轨**通电视觉**变体（rail_golden_on / rail_detector_on
+    //       ——本工程动力轨恒断电（无红石信号）不消费 159（留图集备用）；探测轨矿车驶过 state bit0 →
+    //       mesher 换 160（pack {160→detector_rail_on.png}））、161=redstone_torch（红石火把 cross 贴图：
+    //       透明底 + 深棕柄 + 亮红焰头；pack {161→redstone_torch_on.png}）、162=enchant_book（附魔台顶摊开
+    //       书两页：白纸底 + 灰字线 + 中央书脊——PartialBlockGeometry EnchantingTable case 顶书盒专用；
+    //       无 pack 等价（MC 书是独立实体模型非方块贴图）→ 程序贴图恒用）、163=cactus_bottom（仙人掌底面：
+    //       更暗绿截面（区别 top 的中央凹陷）；Cactus bottomTile=本 tile——观察者视角可见柱底；pack
+    //       {163→cactus_bottom.png}）。tools/build_rail_family.py / build_book.py / build_cactus.py 程序生成。
+    static constexpr int AtlasTileCount = 164;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
@@ -1522,6 +1570,26 @@ public:
         TorchOnPZ  = 4, // 支撑 = +Z 邻：玩家点中 -Z 面放置（QML "nz"，柄伸 -Z 嵌 +Z 墙）
     };
 
+    // t638 铁轨家族统一谓词（单一权威）：blockId == Rail（普通）/ GoldenRail（动力）/ DetectorRail（探测）
+    //   即铁轨。供 (a) railConnections 连接计算（家族互连——机制等价 MC 1.0 三种轨同轨互连）；(b) mesher
+    //   贴地薄板路由（PartialBlockGeometry Rail case 三 id 共用）；(c) MinecartManager 沿轨行驶（pickTrackStep
+    //   / 钉轨面判据 family）；(d) playercontroller 矿车放置目标判定（== Rail → isRail）。三 id 连续段
+    //   [Rail=103, DetectorRail=128] 不连续（中间夹 20+ 个其它方块）故显式并判（同 isIce / isMushroom 模式）；
+    //   改族时一处同步谓词即可。
+    static bool isRail(quint8 blockId);
+    // t638 探测铁轨 state bit4（值 16）=「矿车驶过」标记（机制等价 MC 1.0 detector rail 被矿车压住时输出
+    //   信号——本工程无红石系统，简化为通电视觉：bit4=1 → mesher 换 rail_detector_on(160) 亮红贴图；
+    //   MinecartManager tick 驶过置位（setWaterSilent state 写，同红石灯开关模式）。**bit4 不与连接位冲突**
+    //   （连接位占 bit0..3 = RailConnPx/Nx/Pz/Nz；此前误用 bit0 会与 +X 连接位相撞——轨连 +X 时恒显亮）。
+    //   离开不清位（保持「被压过」亮态；邻块编辑时 checkRailOnEdit 重算连接写全量 state 会顺带清本位，
+    //   占位语义可接受）。collisionAABBs / selectionAABBs 不读 state（ShapeNone）→ 复用 bit4 零回归。
+    //   state 经 m_states 落 SQLite round-trip 保真。
+    static constexpr quint8 DetectorRailStateOnFlag = 0x10;
+    // t638 木门透光：门上半格栅窗是透光窗格（机制等价 MC 1.0 门上半窗透光）。门 solid=false（不挡邻居面
+    //   剔除）→ lightOpacity 默认 0 已全透；本常量仅作 mesher 立面透光语义锚点（门格光衰减 = 0，无遮），
+    //   防 future「按 solid 满遮」重构回退。消费点：lightOpacity（WoodDoor/SpruceDoor 恒 0）。
+    static constexpr quint8 DoorWindowLightOpacity = 0;
+
     // t565 铁轨连接位（存 Rail 方块 chunk state，4 位 = 水平 4 向「与相邻铁轨互连」标记）。放置铁轨 /
     //   破 / 放任何邻块后由 World::checkRailOnEdit（破邻复检）+ PlayerController::placeBlock（放置时计算）
     //   重算：连接 = 该水平 4 邻格为 Rail。mesher（PartialBlockGeometry Rail case）据连接位选形态 ——
@@ -1531,6 +1599,8 @@ public:
     //   round-trip 保真；旧存档 / worldgen 铁轨 state 由放置路径重算（placeMineshaft 直写后经同一计算器
     //   统一算连接，见 World::recomputeRailConnections）。collisionAABBs / selectionAABBs 不读 rail
     //   state（ShapeNone），复用 state 作连接编码零回归（同 torch attach 编码模式）。
+    //   t638：连接判定扩为 isRail 家族（普通 / 动力 / 探测轨互连）；动力 / 探测轨**不画拐角 / 十字**
+    //   （mesher 直线化——机制等价 MC 1.0 golden/detector rail 无 corner 形态），普通轨拐角 / 十字不变。
     static constexpr quint8 RailConnPx = 0x01; // +X 邻为 Rail（轨延伸向 +X）
     static constexpr quint8 RailConnNx = 0x02; // -X 邻为 Rail
     static constexpr quint8 RailConnPz = 0x04; // +Z 邻为 Rail

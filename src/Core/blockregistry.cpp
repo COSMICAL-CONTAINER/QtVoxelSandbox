@@ -196,7 +196,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   cactus_top(54)（绿截面 + 同心方框环纹）/ 侧=cactus_side(55)（深绿底 + 4 垂直棱脊 + 棱上刺点）。音色归
     //   GroupGrass（植物，软质）。worldgen 在 desert 沙顶散布 1-3 格高柱；放置预检（placeBlock）须 Sand/Cactus 在
     //   下方 + **水平 4 邻无方块**（t445 ④）；失撑 / 邻接方块 → World 把整柱转掉落物（t445 ②/④）。进创造调色板。
-    /* cactus       */ {int(BlockRegistry::Cactus),                     54, 54, 55, 55, false, BlockRegistry::ShapeFull,     0.4f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Cactus),         1, 64, "cactus",       "仙人掌"},
+    /* cactus       */ {int(BlockRegistry::Cactus),                     54, 163, 55, 55, false, BlockRegistry::ShapeFull,     0.4f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Cactus),         1, 64, "cactus",       "仙人掌"}, // t638 bottomTile 改 163=cactus_bottom（观察者视角可见柱底；此前底复用 top 54——t620 结论「不接」翻案）
     //   枯死的灌木（DeadBush）：沙漠干旱地表枯枝装饰。cross 形广告牌方块（与 TallGrass/Sapling 同走 cross 几何段，两片
     //   对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。solid=false（非实体 → 不挡邻居面剔除，同 torch/
     //   草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过）、hardness=0（瞬破）、NoTool（空手可采）、dropId=0（破枯灌木
@@ -612,6 +612,17 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* stone_pressure_plate */ {int(BlockRegistry::StonePressurePlate), 154,154,154,154, false, BlockRegistry::ShapePlate, 0.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::StonePressurePlate), 1, 64, "stone_pressure_plate", "石压力板"},
     /* iron_pressure_plate  */ {int(BlockRegistry::IronPressurePlate),  155,155,155,155, false, BlockRegistry::ShapePlate, 0.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::IronPressurePlate),  1, 64, "iron_pressure_plate",  "铁压力板"},
     /* gold_pressure_plate  */ {int(BlockRegistry::GoldPressurePlate),  156,156,156,156, false, BlockRegistry::ShapePlate, 0.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::GoldPressurePlate),  1, 64, "gold_pressure_plate",  "金压力板"},
+    // ── t638 铁轨家族扩展 + 红石火把（机制等价 MC 1.0 powered rail / detector rail / redstone torch；
+    //   名称 / 程序贴图原创自绘 §9a；pack 贴图运行期映射 resourcepackmanager）。轨道属性族 = Rail：贴地薄板
+    //   （水平双面 quad 贴 cell 底 1/16）、solid=false、ShapeNone（无碰撞）、hardness=0（瞬破）、NoTool（空手
+    //   可采且掉落）、dropId=自身、dropCount=1、maxStack=64。state 复用 4 位连接编码（RailConn*）——动力 /
+    //   探测轨只画直线（无拐角 / 十字）。矿车交互（MinecartManager）：动力轨驶过加速；探测轨驶过通电视觉
+    //   （bit0 → 亮贴图 160）。配方见 recipe.cpp（动力=6 金锭+棒+红石；探测=6 铁锭+石压力板+红石）。
+    /* golden_rail    */ {int(BlockRegistry::GoldenRail),    157,157,157,157, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::GoldenRail),    1, 64, "golden_rail",    "动力铁轨"},
+    /* detector_rail  */ {int(BlockRegistry::DetectorRail),  158,158,158,158, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::DetectorRail),  1, 64, "detector_rail",  "探测铁轨"},
+    // 红石火把：常亮装饰光源（光 7；真红石信号留红石大轮）。cross 形广告牌（cutout 段）；放置预检同火把
+    //   （实体邻居支撑）。dropId=自身、maxStack=64。
+    /* redstone_torch */ {int(BlockRegistry::RedstoneTorch), 161,161,161,161, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::RedstoneTorch), 1, 64, "redstone_torch", "红石火把"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -753,6 +764,11 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* stone_pressure_plate    */ 70,  // t627 石压力板 → MC 1.0 stone pressure plate id 70
     /* iron_pressure_plate     */ 71,  // t627 铁压力板 → MC 1.0 heavy weighted pressure plate id 71
     /* gold_pressure_plate     */ 72,  // t627 金压力板 → MC 1.0 light weighted pressure plate id 72
+    // t638 铁轨家族扩展 / 红石火把 → MC 1.0 对齐：golden(powered) rail id 27（1.0 存在）、detector rail
+    //   id 28（1.0 存在）、redstone torch（lit）id 76（1.0 存在——unlit off 变体 id 75 本工程恒亮不取）。
+    /* golden_rail             */ 27,  // t638 动力铁轨 → MC 1.0 powered rail id 27
+    /* detector_rail           */ 28,  // t638 探测铁轨 → MC 1.0 detector rail id 28
+    /* redstone_torch          */ 76,  // t638 红石火把（常亮 on）→ MC 1.0 redstone torch lit id 76
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -865,6 +881,8 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == SweetBerryBush) return true; // t467 段外 cross（雪原浆果灌木丛，两片对角相交双面 quad 贴 stage 贴图）
     if (blockId == Cobweb) return true; // t484 段外 cross（蜘蛛网，两片对角相交双面 quad 贴蛛网贴图；矿井散布）
     if (blockId == Rail) return true;   // t484 cross 路由的贴地薄板（几何水平 quad 非竖直 cross，但同走 PASS 1 alphaCutoff 路径，见头注释；与睡莲同族）
+    if (blockId == GoldenRail || blockId == DetectorRail) return true; // t638 动力 / 探测铁轨（与 Rail 同几何路由——水平薄板 quad 走 cutout 段 alphaCutoff）
+    if (blockId == RedstoneTorch) return true; // t638 红石火把 cross（竖直两片对角双面 quad，贴 redstone_torch(161)；常亮光源走真方块光 flood，非 torchHost 伪光源）
     if (blockId >= FirstFlower && blockId <= LastFlower) return true; // t397 段外花段（4 色 cross）
     return blockId >= FirstCross && blockId <= LastCross;
 }
@@ -957,6 +975,15 @@ bool BlockRegistry::isDropper(quint8 blockId)
 bool BlockRegistry::isRedstoneOre(quint8 blockId)
 {
     return blockId == RedstoneOre;
+}
+
+// t638 铁轨家族统一谓词（单一权威，见 .h 头注释）：普通 Rail / 动力 GoldenRail / 探测 DetectorRail 三者
+//   即铁轨。三 id 不连续（Rail=103 夹中间段、GoldenRail=127/DetectorRail=128 段末）故显式并判（同 isIce /
+//   isMushroom 模式）。供 railConnections 连接计算 / mesher 贴地薄板路由 / MinecartManager 沿轨行驶 /
+//   playercontroller 矿车放置目标统一读。
+bool BlockRegistry::isRail(quint8 blockId)
+{
+    return blockId == Rail || blockId == GoldenRail || blockId == DetectorRail;
 }
 
 // t620 红石灯统一谓词（单一权威，见头注释）：blockId == RedstoneLamp 即红石灯。供 PlayerController
@@ -1335,6 +1362,7 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
 {
     switch (blockId) {
     case Torch: return 14;  // 既有：火把方块光种子 14（radius14 泛光）
+    case RedstoneTorch: return 7; // t638：红石火把方块光种子 7（MC 1.0 红石火把光 level 7——约为火把一半的暗红氛围光；常亮 on 装饰光源，真红石信号留红石大轮）
     case Lava:  return 15;  // t351：岩浆方块光种子 15（地底发光照亮洞穴；MC 1.0 岩浆光 level 15）
     case EndPortal: return 10; // t487：末地传送门方块光种子 10（地下黑暗要塞中的星绿旋涡泛光，玩家可见传送门；
                                //    机制等价 MC 1.0 末地传送门自发光显眼，非 MC 精确光级，仅照亮自身 + 近旁）
@@ -1420,6 +1448,21 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
                 return {BlockAABB{kMargin, 0.0f, kWall, 1.0f - kMargin, 1.0f, kWall + kDepth}};
             }
         }
+        if (isRail(blockId)) {
+            // t638 铁轨族薄板命中盒（spec「选下一格很难选到——铁轨薄板被选中优先级太高，应像木梯 t501
+            //   透视不优先选中」）：mesher 画水平 quad 贴 cell 底（y=1/16，见 PartialBlockGeometry Rail
+            //   case 的 yr），射线须命中该薄板才算选中铁轨——瞄轨格上方空气（y>1/16）的射线穿过命中后方
+            //   方块（可选中铺轨地面 / 轨后目标；机制对标木梯贴墙薄板模式）。全格 footprint（xz [0,1]）——
+            //   轨横铺整格，只做垂直薄板化（上方穿、贴轨面命中）。防呆带 +1/16 容差（视觉 quad 厚 0，加
+            //   容差使准星贴地平扫微偏亦命中，可拆轨）。
+            constexpr float kRailTop = 2.0f / 16.0f; // 薄板顶（视觉 1/16 + 1/16 容差）
+            return {BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, kRailTop, 1.0f}};
+        }
+        if (blockId == RedstoneTorch)
+            // t638 红石火把：cross 形小立柱（同火把语义——准星瞄柄/焰才命中，格角落空气穿过）。视觉是
+            //   两片对角 cross quad 贴满格（贴图透明底只显中央火把剪影），取中央 0.4 见方 × 0.85 高保守盒
+            //   （覆盖剪影主体；与 Torch 的命中盒同尺寸——同族光源手感一致）。
+            return {BlockAABB{0.3f, 0.0f, 0.3f, 0.7f, 0.85f, 0.7f}};
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // air / water → 整格（air 不进本路径兜底；water 整格舀水）
     }
     // 不完整方块段（ShapeSlab/...）→ 同 selectionAABBs（实体 sub 形状；空气部分穿过命中后方块）。
@@ -1478,16 +1521,18 @@ void BlockRegistry::ladderSupportOffset(quint8 state, int &dx, int &dz)
     }
 }
 
-// t565 铁轨连接 state 计算（见头注释 RailConnPx/Nx/Pz/Nz）：4 向水平邻块 id 入参，邻为 Rail → 置对应
-//   连接位。纯函数单一权威 —— placeBlock（放置时算 placeState）/ World::checkRailOnEdit（破邻复检重算）/
-//   placeMineshaft（worldgen 铺轨后统一算）共用，杜绝各处自写连接判定漂移。
+// t565 铁轨连接 state 计算（见头注释 RailConnPx/Nx/Pz/Nz）：4 向水平邻块 id 入参，邻为铁轨 → 置对应
+//   连接位。t638：连接判定扩为 isRail 家族（普通 / 动力 / 探测轨互连——机制等价 MC 1.0 三种轨同轨互连，
+//   动力轨嵌普通轨线路照样通电加速）。纯函数单一权威 —— placeBlock（放置时算 placeState）/
+//   World::checkRailOnEdit（破邻复检重算）/ placeMineshaft（worldgen 铺轨后统一算）共用，杜绝各处自写
+//   连接判定漂移。
 quint8 BlockRegistry::railConnections(quint8 px, quint8 nx, quint8 pz, quint8 nz)
 {
     quint8 con = 0;
-    if (px == Rail) con |= RailConnPx;
-    if (nx == Rail) con |= RailConnNx;
-    if (pz == Rail) con |= RailConnPz;
-    if (nz == Rail) con |= RailConnNz;
+    if (isRail(px)) con |= RailConnPx;
+    if (isRail(nx)) con |= RailConnNx;
+    if (isRail(pz)) con |= RailConnPz;
+    if (isRail(nz)) con |= RailConnNz;
     return con;
 }
 
@@ -1520,6 +1565,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case EnchantingTable: // t474 附魔台 → 石质音色（黑曜石+钻石基座，石质偏硬，同 obsidian 族）
     case IronBlock: case Anvil: case AnvilChipped: case AnvilDamaged: // t477 铁块/铁砧 → 石质音色（金属质，同 obsidian 族；机制等价 MC 1.0 iron/anvil metal SoundType）
     case Rail: // t484 铁轨 → 石质音色（金属质敲击，最接近 MC 1.0 铁轨 metal SoundType）
+    case GoldenRail: case DetectorRail: // t638 动力 / 探测铁轨 → 石质音色（金属质，同普通铁轨族）
     case MossyCobble: // t486 苔石 → 石质音色（长苔圆石，同 cobble 族）
     case Dispenser: // t486 发射器 → 石质音色（石质机关盒，同 furnace 族）
     case Dropper: // t609 投掷器 → 石质音色（石质机关盒，同发射器 / furnace 族）
@@ -1550,6 +1596,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case SpruceLog: // t395 云杉原木 → 木质音色（同 log / planks 族）
     case SprucePlanks: case SpruceSlab: case SpruceFence: case SpruceDoor: // t466 云杉木制品 → 木质音色（同 planks 族）
     case Ladder: // t413 木梯 → 木质音色（木质梯，同 planks 族）
+    case RedstoneTorch: // t638 红石火把 → 木质音色（木质柄，同火把 / 木梯族；torch 在 default 兜底）
     case Bookshelf: // t474 书架 → 木质音色（木板边框，同 planks 族）
         return GroupWood;
     case Grass: case Dirt:

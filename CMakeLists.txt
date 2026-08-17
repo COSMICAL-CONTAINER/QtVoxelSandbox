@@ -302,6 +302,13 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_stone_pressure_plate.png # t627 石压力板贴图（build_pressure_plates.py；石质灰底+边框暗带+中央板面微亮内圈）
         textures/default_iron_pressure_plate.png  # t627 铁压力板贴图（build_pressure_plates.py；金属浅灰底+四角铆钉；重质板）
         textures/default_gold_pressure_plate.png  # t627 金压力板贴图（build_pressure_plates.py；金黄底+中央亮金板面；轻质板）
+        textures/default_golden_rail.png          # t638 动力铁轨断常态贴图（build_rail_family.py；金轨双线+红石连接点暗红；矿车加速）
+        textures/default_detector_rail.png        # t638 探测铁轨断常态贴图（build_rail_family.py；铁轨+石枕+暗红探测点）
+        textures/default_rail_golden_on.png       # t638 动力轨通变态贴图（恒断电不消费，留图集备用）
+        textures/default_rail_detector_on.png     # t638 探测轨通电视觉贴图（矿车驶过 state bit4 → mesher 换贴）
+        textures/default_redstone_torch.png       # t638 红石火把 cross 贴图（build_rail_family.py；深棕柄+亮红焰头；常亮光 7）
+        textures/default_enchant_book.png         # t638 附魔台顶摊开书页贴图（build_book.py；白纸底+灰字线+中央书脊；无 pack 等价）
+        textures/default_cactus_bottom.png        # t638 仙人掌底面贴图（build_cactus.py；更暗绿截面+外圈皮层暗环；观察者视角可见）
         textures/default_crafting_table_side.png
         textures/default_crafting_table_top.png
         textures/default_dirt.png
@@ -440,7 +447,10 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_snow.png                   # t482 雪块立方体图标（build_cube_icons.py；各面=冷白冰晶噪点，同积雪层）
         textures/icon_end_portal.png             # t634 末地传送门立方体图标（build_cube_icons.py；顶=末影祭坛框面+暗绿凹槽 / 侧=灰白细孔框身）
         textures/icon_cobweb.png                 # t484 蜘蛛网 flat 2D 图标（build_cube_icons.py；透明底+灰白蛛丝放射网纹）
-        textures/icon_rail.png                   # t484 铁轨 flat 2D 图标（build_cube_icons.py；透明底+棕色枕木+灰铁双轨）
+        textures/icon_rail.png                   # t484 铁轨 flat 2D 图标（build_cube_icons.py；透明底+棕色枕木+灰铁双轨；t638 ④ 提质版）
+        textures/icon_golden_rail.png            # t638 动力铁轨 flat 2D 图标（build_cube_icons.py；金轨双线+红石连接点）
+        textures/icon_detector_rail.png          # t638 探测铁轨 flat 2D 图标（build_cube_icons.py；铁轨+石枕+探测点）
+        textures/icon_redstone_torch.png         # t638 红石火把 flat 2D 图标（build_cube_icons.py；深棕柄+亮红焰头；常亮光 7）
         textures/icon_tnt.png                    # t485 TNT 立方体图标（build_cube_icons.py；各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
         textures/icon_cut_sandstone.png          # t485 切制砂岩立方体图标（build_cube_icons.py；各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
         textures/icon_mossy_cobble.png           # t486 苔石立方体图标（build_cube_icons.py；各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）

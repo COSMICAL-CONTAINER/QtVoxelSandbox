@@ -342,7 +342,11 @@ FLAT_2D_CROSS = [
     ("sugarcane",     "default_sugarcane"),     # 甘蔗（绿色节段细茎 + 顶部尖叶）
     ("ladder",        "default_ladder"),        # t413/t519 木梯（透明底 + 棕色两纵轨 + 4 道横梯级；竖直爬行梯；t519 满格贴墙贴图）
     ("cobweb",        "default_cobweb"),        # t484 蜘蛛网 cross（透明底 + 灰白蛛丝放射网纹；矿井散布）
-    ("rail",          "default_rail"),          # t484 铁轨 flat（透明底 + 棕色枕木 + 灰铁双轨；贴地薄板）
+    ("rail",          "default_rail"),          # t484 铁轨 flat（透明底 + 棕色枕木 + 灰铁双轨；贴地薄板；t638 ④ 提质版）
+    # t638 铁轨家族扩展 + 红石火把 flat 2D 图标（透明底保留 alpha；程序生成原创像素图）。
+    ("golden_rail",    "default_golden_rail"),     # 动力铁轨（金轨双线 + 红石连接点；矿车加速）
+    ("detector_rail",  "default_detector_rail"),   # 探测铁轨（铁轨 + 石枕 + 探测点；矿车驶过通电视觉）
+    ("redstone_torch", "default_redstone_torch"),  # 红石火把（深棕柄 + 亮红焰头；常亮装饰光源 光 7）
 ]
 
 PARTIALS_3D = [

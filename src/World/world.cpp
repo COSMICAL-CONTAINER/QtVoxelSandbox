@@ -1799,17 +1799,23 @@ void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 
 // t565 铁轨连接重算（见 world.h 头注释）：读 (x,y,z) 水平 4 邻块 id → BlockRegistry::railConnections
 //   （单一权威连接计算）→ 与当前 state 不同则静默直写新 state（m_chunks.setBlock(id,state) 标脏；不经
-//   World::setBlock → 无重入 / 无破放信号 —— 连接变化是系统派生态非玩家动作）。非 Rail 格 / state 未变 → no-op。
+//   World::setBlock → 无重入 / 无破放信号 —— 连接变化是系统派生态非玩家动作）。非铁轨格 / state 未变 → no-op。
+//   t638：轨判定扩 isRail 家族（普通 / 动力 / 探测轨互连——机制等价 MC 1.0 三种轨同轨互连）；写入保留
+//   探测轨的 bit4 通电视觉位（DetectorRailStateOnFlag——只重算低 4 位连接，不清「被压过」标记）。
 void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return;
-    if (m_chunks.blockAt(x, y, z) != BlockRegistry::Rail) return;
-    const quint8 con = BlockRegistry::railConnections(
+    const quint8 rb = m_chunks.blockAt(x, y, z);
+    if (!BlockRegistry::isRail(rb)) return;
+    quint8 con = BlockRegistry::railConnections(
         m_chunks.blockAt(x + 1, y, z), m_chunks.blockAt(x - 1, y, z),
         m_chunks.blockAt(x, y, z + 1), m_chunks.blockAt(x, y, z - 1));
+    // t638：探测轨 bit4（通电视觉）不参与连接 —— 合并回写（连接重算不清「被压过」亮态标记）。
+    if (rb == BlockRegistry::DetectorRail)
+        con = quint8(con | (m_chunks.stateAt(x, y, z) & BlockRegistry::DetectorRailStateOnFlag));
     if (con == m_chunks.stateAt(x, y, z)) return; // 连接未变 → 不写（防无谓标脏）
-    m_chunks.setBlock(x, y, z, BlockRegistry::Rail, con); // 静默直写 + 标脏（含边界邻接）
-    // Rail solid=false 不遮光 → 光场无变化，免 recomputeLightAround。
+    m_chunks.setBlock(x, y, z, rb, con); // 静默直写 + 标脏（含边界邻接）
+    // 铁轨族 solid=false 不遮光 → 光场无变化，免 recomputeLightAround。
     outChanged = true;
 }
 

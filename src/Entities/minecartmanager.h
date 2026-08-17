@@ -166,6 +166,9 @@ private:
     static constexpr float kCartRideH  = 0.30f;
     // 轨上矿车速度（blocks/s）：明显快于步行 4.3（机制等价 MC 1.0 矿车轨上 8 blocks/s）。
     static constexpr float kCartSpeed  = 8.0f;
+    // t638 ⑤ 动力轨（GoldenRail）boost 档（blocks/s）：矿车驶上动力轨时的目标速度上限（kCartSpeed 的
+    //   1.6×；机制等价 MC 1.0 powered rail 加速——有输入上限提升、无输入弹射 0.35 档向前）。
+    static constexpr float kCartBoostSpeed = 12.8f;
     // 速度 lerp 接近率（1/s；动量感：松键后滑行一段渐停）。
     static constexpr float kCartAccel  = 3.0f;
     // 空车 / 松键摩擦衰减率（1/s）。

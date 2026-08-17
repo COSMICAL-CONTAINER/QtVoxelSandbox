@@ -54,13 +54,15 @@ void pushBox(QVector<Vtx> &verts, QVector<quint32> &idx,
              float x0, float x1, float y0, float y1, float z0, float z1,
              int tile, const PartialLightCtx &L,
              float tileW, float hx, float hy, float v0, float v1,
-             int topTile = -1)
+             int topTile = -1, int bottomTile = -1)
 {
     // topTile >= 0 时 +Y 顶面（fi==2）用 topTile、其余面用 tile（t408 耕地：顶=farmland_dry / 侧·底=dirt）；
-    //   默认 -1 → 全 6 面用 tile（既有 slab/stairs/fence/... 调用不变）。
+    //   bottomTile >= 0 时 -Y 底面（fi==3）用 bottomTile、其余面用 tile（t638 仙人掌：底=cactus_bottom /
+    //   顶=cactus_top / 侧=cactus_side）。默认 -1 → 全 6 面用 tile（既有 slab/stairs/fence/... 调用不变）。
     for (int fi = 0; fi < 6; ++fi) {
         const BoxFace &f = kBoxFaces[fi];
-        const int ftile = (topTile >= 0 && fi == 2) ? topTile : tile;
+        const int ftile = (topTile >= 0 && fi == 2) ? topTile
+                        : (bottomTile >= 0 && fi == 3) ? bottomTile : tile;
         const float u0 = ftile * tileW + hx, u1 = (ftile + 1) * tileW - hx;
         // 单位盒面模板的常数轴（法线轴）填成实际盒体边值（+面=x1/y1/z1，-面=x0/y0/z0）；
         // 面内两轴取模板 0/1 → 映射到该面实际范围（整张瓦片贴图覆盖该面）。
@@ -551,7 +553,9 @@ int PartialBlockGeometry::append(
                       tile, light, tileW, hx, hy, v0, v1);
         break;
     }
-    case BlockRegistry::Rail: {
+    case BlockRegistry::Rail:
+    case BlockRegistry::GoldenRail:   // t638 动力铁轨（与 Rail 同贴地薄板几何；直线 only + 断常/通电变体贴图）
+    case BlockRegistry::DetectorRail: { // t638 探测铁轨（同上；矿车驶过 state bit0 → 通电视觉贴图）
         // t484 铁轨「贴地薄板」模型：**一片水平双面 quad 贴 cell 底部**（y≈1/16，刚好浮于地面之上）—— 与睡莲
         //   横向浮叶（LilyPad）同源几何，区别仅贴图（rail 瓦片 = 透明底 + 棕色枕木 + 灰铁双轨）。
         //   t565 连接 / 转弯（机制等价 MC 1.0 rail 自动连接 + 拐角）：state 4 位 = 水平 4 向连接
@@ -565,8 +569,18 @@ int PartialBlockGeometry::append(
         //     - 十字（3+ 连接）：tile 137（南北 + 东西双轨叠交 + 中央方枕木）。
         //   0 连接（孤轨）默认 NS（state=0 兜底，旧存档 / 防御）。不做邻居剔除（透明 + 薄板，同睡莲；
         //   Rail solid=false）。材质 alphaCutoff:0.5 丢弃透明底 → 仅轨像素显。
+        // t638 动力 / 探测轨差异：(a) 贴图——断常态 GoldenRail=157(rail_golden) / DetectorRail=158
+        //   (rail_detector)（各 def sideTile；tileIndex(PosX) 取本方块瓦片）；探测轨 state bit0
+        //   （DetectorRailStateOnFlag）→ 通电视觉 160(rail_detector_on) 亮红（机制等价 MC 1.0 detector
+        //   rail 矿车压住通电换贴图；真信号输出留红石大轮）。(b) **直线 only**——动力 / 探测轨无拐角 /
+        //   十字形态（机制等价 MC 1.0 golden/detector rail 不能转弯）：拐角 / 十字连接位一律按「X 向优先」
+        //   降级为 EW 直线（矿车经 pickTrackStep 按 wish 在连接位里选向，直线渲染下拐角连接仍可通行——
+        //   视觉为直线交叉叠加，可接受降级；spec「放置/连接同普通轨（无转弯）」）。普通 Rail 拐角 / 十字不变。
         constexpr float yr  = 1.0f / 16.0f;  // 铁轨厚度（cell 底以上 1/16，贴地板防 z-fight）
-        const int railTile = BlockRegistry::tileIndex(BlockRegistry::Rail, BlockRegistry::PosX); // 121
+        int railTile = BlockRegistry::tileIndex(blockId, BlockRegistry::PosX); // 121/157/158（各自 def sideTile）
+        if (blockId == BlockRegistry::DetectorRail && (state & BlockRegistry::DetectorRailStateOnFlag))
+            railTile = 160; // t638 探测轨通电视觉（矿车驶过 bit0 → rail_detector_on 亮红）
+        const bool straightOnly = (blockId != BlockRegistry::Rail); // t638 动力 / 探测轨直线 only（无拐角 / 十字）
         const quint8 con = state;
         const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
         const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
@@ -584,10 +598,10 @@ int PartialBlockGeometry::append(
                           ax0, y, az0,  ax1, y, az1,  ax2, y, az2,  ax3, y, az3,
                           tileIdx, light, tileW, hx, hy, v0, v1);
         };
-        if (nConn >= 3) {
+        if (!straightOnly && nConn >= 3) {
             // 十字：tile 137 整片。
             pushRail(yr, 137, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
-        } else if (nConn == 2 && ((cpx || cnx) && (cpz || cnz))) {
+        } else if (!straightOnly && nConn == 2 && ((cpx || cnx) && (cpz || cnz))) {
             // 拐角（一个 X 向 + 一个 Z 向连接）。贴图基准（tile 136 贴图坐标）：v=1（UV 底行）= 南（+Z）入口侧、
             //   u=0（UV 左列）= 西（-X）出口侧 → 贴图语义 = 轨自南进入向左（西）弯出 = 基准形态连接 {+Z,-X}。
             //   四象限经轴翻转映射（BL=(u0,v0) BR=(u1,v0) TR=(u1,v1) TL=(u0,v1)，世界角按翻转后 u/v 轴取）：
@@ -597,8 +611,11 @@ int PartialBlockGeometry::append(
             else if (cpz && cpx)  pushRail(yr, 136, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f);
             else if (cnz && cnx)  pushRail(yr, 136, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f);
             else                  pushRail(yr, 136, 1.f, 1.f, 0.f, 1.f, 0.f, 0.f, 1.f, 0.f);
-        } else if (nConn == 1 || (nConn == 2 && (cpx || cnx))) {
+        } else if (nConn == 1 || (nConn >= 2 && (cpx || cnx))
+                   || (straightOnly && nConn >= 2)) {
             // EW 直轨：仅 X 向连接（1 个或对向 2 个）→ 贴图旋转 90°（u→z、v→x）。
+            //   t638 straightOnly：动力 / 探测轨的拐角 / 十字连接位也降级走直线（X 向优先——机制等价 MC
+            //   动力轨无转弯；普通轨该条件不触发（上方两分支已吃掉拐角 / 十字））。
             pushRail(yr, railTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f);
         } else {
             // NS 直轨（默认：0 连接 / 仅 Z 向连接 / 对向 ±Z）。
@@ -606,19 +623,39 @@ int PartialBlockGeometry::append(
         }
         break;
     }
+    case BlockRegistry::RedstoneTorch: {
+        // t638 红石火把 cross 模型：与蘑菇 / 枯灌木同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形），
+        //   贴 redstone_torch(161) 瓦片（透明底 + 深棕柄 + 亮红焰头，alphaCutoff cutout → 仅火把剪影显）。
+        //   机制等价 MC 1.0 红石火把**常亮 on 态**装饰光源（光 7 由 lightEmission 真 flood；真红石信号源
+        //   留红石大轮）。区别于普通火把（Torch=13 走 torchHost QML delegate 木柄+焰 Model）——本方块走
+        //   chunk mesh cross 段（更省 delegate；常亮光源用真方块光非伪光源）。**无 state 派生贴图**（恒亮）。
+        //   tile 由 BlockRegistry::tileIndex(RedstoneTorch, PosX) = sideTile = 161 给出。不做邻居剔除
+        //   （cross 透明 + 火把，同 TallGrass；solid=false）。
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::Cactus: {
         // t445 仙人掌细柱：机制对标 MC 1.0 仙人掌 14/16（~0.875）宽的居中柱。本工程取 0.8（X/Z [0.1,0.9]）
         //   居中、Y 满高 [0,1]，整柱贴 cactus 顶 / 侧贴图。**非满格整立方** —— cactus solid=false（同 Farmland /
         //   glass），mesher 路由进 PASS 1（chunkgeometry），不进 PASS 2 立方面（否则满格立方覆盖细柱）。
-        //   全 6 面发（pushBox 不剔面）：+Y 顶面 cactus_top(54)（def.topTile，露出柱顶绿截面环纹）、侧·底
-        //   cactus_side(55)（tile = tileIndex(PosX)=sideTile；底贴侧贴图不可见 —— 柱底压在沙 / 下段仙人掌上）。
+        //   全 6 面发（pushBox 不剔面）：+Y 顶面 cactus_top(54)（def.topTile，露出柱顶绿截面环纹）、-Y 底面
+        //   cactus_bottom(163)（t638 def.bottomTile——观察者视角可见柱底：更暗绿截面（无中央凹陷）区别顶面；
+        //   侧贴图时代的「底复用顶」翻案，t620 结论被用户观察者视角观察推翻）、侧 cactus_side(55)
+        //   （tile = tileIndex(PosX)=sideTile）。
         //   仙人掌柱（worldgen 1-3 格 / 玩家叠放）每格独立走本 case 各画满高 0.8 柱 → 视觉如整根细柱（段间
-        //   顶 / 底面相贴不可见，overdraw 可忽）。不做邻居剔除（异形小体约定，同 Farmland）。topTile 取 def.topTile(54)。
+        //   顶 / 底面相贴不可见，overdraw 可忽）。不做邻居剔除（异形小体约定，同 Farmland）。
         constexpr float kCactusInset = 0.1f; // (1 - 0.8) / 2 = 0.1（X/Z 内缩，居中 0.8 见方）
+        const BlockRegistry::BlockDef &cactusDef = BlockRegistry::def(blockId);
         pushBox(verts, idx, lx, ly, lz,
                 kCactusInset, 1.0f - kCactusInset, 0.f, 1.f, kCactusInset, 1.0f - kCactusInset,
                 tile, light, tileW, hx, hy, v0, v1,
-                BlockRegistry::def(blockId).topTile); // +Y 顶面 cactus_top(54)；侧·底用 tile(=cactus_side 55)
+                cactusDef.topTile,    // +Y 顶面 cactus_top(54)
+                cactusDef.bottomTile); // t638 -Y 底面 cactus_bottom(163)（观察者视角柱底可见）
         break;
     }
     case BlockRegistry::SnowLayer: {
@@ -653,15 +690,37 @@ int PartialBlockGeometry::append(
         //   接入时改半高）。全 footprint、y[0, 0.75]：顶面 enchanting_table_top(109)（def.topTile，钻石纹 + 立书
         //   轮廓；pack 侧=enchanting_table_top.png）、侧·底 enchanting_table_side(110)（tile=sideTile；pack 合成
         //   时已裁掉 enchanting_table_side.png 顶部 0.25 空白 → 有效 0.75 部分整张贴 0.75 高侧面无缝；非 pack
-        //   程序贴图满 16px 无空白 → 整张竖压 0.75×，同 slab 侧面压扁的可接受降级）。**顶部立书装饰未做**
-        //   （MC 附魔台顶上有一本摊开的书；本工程顶面贴图自带立书轮廓读感，独立小盒留后续——几何简单优先）。
+        //   程序贴图满 16px 无空白 → 整张竖压 0.75×，同 slab 侧面压扁的可接受降级）。
         //   solid=false（见 BlockDef）→ 相邻整立方不剔面、画满高侧壁填住上方 0.25 缺口（防透视 x-ray 洞，
         //   同 Farmland / glass 模式）；碰撞矮盒 0.75（collisionAABBs 特例）；selection/raycast 仍整格（ShapeFull）。
         //   不做邻居剔除（异形小体约定，同 Farmland）。底面压在下方实体上不可见，overdraw 可忽。
+        //   t638 ⑧ 顶部摊开书（用户「附魔台顶部立一本打开的书」——机制等价 MC 1.0 附魔台顶上 floating book）：
+        //   矮盒顶 (y=0.75) 中央一本**摊开的两页书** = 两个薄盒页（各 0.34×0.03×0.30，书脊相接、各向外微倾
+        //   ~8° 成 V 形摊开角），贴 enchant_book(162) 程序瓦片（白纸底 + 灰字线 + 中央书脊暗线——无 pack 等
+        //   价（MC 书是独立实体模型非方块贴图）→ 程序贴图恒用）。纯视觉装饰（不进碰撞——collisionAABBs
+        //   仍 0.75 矮盒；机制等价 MC 附魔台书无碰撞）。参照雪层 / 花 cross 的 partial 装饰模式（同一方块格
+        //   内叠加装饰小体，同床枕头 / 床头板先例）。
         constexpr float kEnchantTop = 0.75f; // 12/16（与 collisionAABBs 附魔台特例同高）
         pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, kEnchantTop, 0.f, 1.f,
                 tile, light, tileW, hx, hy, v0, v1,
                 BlockRegistry::def(blockId).topTile); // +Y 顶面 enchanting_table_top(109)；侧·底用 tile(=sideTile 110)
+        // t638 摊开书两页：bookTile=enchant_book(162)。两页薄盒绕书脊（中央 x=0.5）各向外倾 8°——pushBox 是
+        //   轴对齐盒（无旋转），倾角用「外缘略抬高」近似：页盒底 y=0.75、外缘顶 y=0.79 / 书脊侧顶 y=0.75+0.02
+        //   → 阶梯两段薄盒拼出 V 形摊开角（每页拆 2 段；像素风下读作摊开书页足够）。页尺寸 0.34 宽 × 0.30 深
+        //   （居中 z 0.35..0.65），书脊相接于 x=0.5。
+        {
+            const int bookTile = 162;
+            // 左页两段（x 0.16..0.33 / 0.33..0.50；内段近书脊略低）。
+            pushBox(verts, idx, lx, ly, lz, 0.16f, 0.33f, kEnchantTop, kEnchantTop + 0.045f, 0.35f, 0.65f,
+                    bookTile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, 0.33f, 0.50f, kEnchantTop, kEnchantTop + 0.025f, 0.35f, 0.65f,
+                    bookTile, light, tileW, hx, hy, v0, v1);
+            // 右页两段（镜像）。
+            pushBox(verts, idx, lx, ly, lz, 0.50f, 0.67f, kEnchantTop, kEnchantTop + 0.025f, 0.35f, 0.65f,
+                    bookTile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, 0.67f, 0.84f, kEnchantTop, kEnchantTop + 0.045f, 0.35f, 0.65f,
+                    bookTile, light, tileW, hx, hy, v0, v1);
+        }
         break;
     }
     case BlockRegistry::BedRed: case BlockRegistry::BedOrange: case BlockRegistry::BedYellow:

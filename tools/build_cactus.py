@@ -7,13 +7,15 @@ t394 沙漠群系内容：仙人掌是沙漠标志性植物方块（可放置、
 视觉意图：读作「绿色多肉柱状植物」—— 整立方方块，但贴图表达「略收窄的柱 + 棱脊」：
   - cactus_top：顶面绿色 + 同心方框纹（拟截面木质部环 + 中央凹陷），表「仙人掌顶端口」。
   - cactus_side：侧面深绿底 + 垂直棱脊亮带（4 条）+ 棱上小刺点（黄白），表「多肉棱与刺」。
-  - cactus_bottom：底面 = 顶面（截面，少见）。
+  - cactus_bottom（t638）：底面 = 更暗绿截面 + 外圈皮层暗环（无中央凹陷——区别顶面；tile 163，
+    观察者视角可见柱底）。
 
 接触伤害逻辑归 EntityManager / PlayerController（本脚本仅出贴图）。
 
 输出（覆盖写入 textures/）：
-  default_cactus_top.png   （tile 54，仙人掌顶面 / 底面）
+  default_cactus_top.png   （tile 54，仙人掌顶面）
   default_cactus_side.png  （tile 55，仙人掌侧面）
+  default_cactus_bottom.png（tile 163，仙人掌底面——t638）
 
 依赖：仅 PIL/numpy，无外部贴图。与 build_spawner.py / build_ore.py 同风格（程序生成原创像素图）。
 """
@@ -97,6 +99,22 @@ def draw_side():
     return c
 
 
+def draw_bottom():
+    """t638 底面：比顶面更暗的绿截面（无中央凹陷——底面压在沙 / 下段上，观感是「暗截面」区别顶面的
+    「端口凹陷」）。tile 163；观察者视角可见柱底（用户实测推翻 t620「底面无消费方」结论）。"""
+    c = green_base(44, 92, 50)  # 更暗绿（表不受光的底面）
+    dark = np.array([36.0, 76.0, 42.0])
+    mask = _RNG.random((TS, TS)) < 0.25
+    c[mask, 0:3] = dark
+    # 外圈暗环（截面皮层）。
+    ring_dark = np.array([30.0, 64.0, 34.0])
+    for y in range(TS):
+        for x in range(TS):
+            if x in (0, TS - 1) or y in (0, TS - 1):
+                c[y, x, 0:3] = ring_dark
+    return c
+
+
 def save(arr, name):
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA")
     out = os.path.join(SRC, name + ".png")
@@ -107,6 +125,7 @@ def save(arr, name):
 def main():
     save(draw_top(), "default_cactus_top")
     save(draw_side(), "default_cactus_side")
+    save(draw_bottom(), "default_cactus_bottom")  # t638 底面（tile 163；观察者视角可见）
 
 
 if __name__ == "__main__":

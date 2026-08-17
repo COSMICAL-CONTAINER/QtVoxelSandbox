@@ -383,6 +383,19 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
             return (state & BlockRegistry::EndPortalStateActiveFlag) != 0 ? 142 : 141;
         return 140; // 侧 / 底 = endframe_side（框身）
     }
+    // t638 ② 南瓜朝向 per-face（同箱子 / 熔炉 / 发射器模式）：前面（刻面 pumpkin_face）所朝面由 state
+    //   bit[1:0] 决定（放置时朝玩家，placeBlock 写 horizontalFacing^1；此前南瓜未写 state → 前面恒 -Z 固定
+    //   方向）。复用 chestFrontFace 解码（0=+X 1=-X 2=+Z 3=-Z）；其余三侧面 pumpkin_side(117)、顶/底
+    //   pumpkin_top(119)。造物（雪傀儡 / 铁傀儡）检测不读南瓜 state → 零影响。旧存档南瓜 state=0 → 前面
+    //   +X 兜底（朝向变化可接受，南瓜仅玩家放置）。
+    if (block == BlockRegistry::Pumpkin) {
+        const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
+        const int frontFace = int(BlockRegistry::chestFrontFace(state)); // 前面（刻面）所朝面
+        if (face == frontFace) return d.frontTile;                       // pumpkin_face（刻面双眼+锯齿嘴）
+        if (face == int(BlockRegistry::Top) || face == int(BlockRegistry::Bottom))
+            return d.topTile;                                            // 顶/底 = pumpkin_top
+        return d.sideTile;                                               // 其余三侧面 = pumpkin_side
+    }
     // t620 红石灯两态全六面换贴图（机制等价 MC 1.0 redstone lamp off/on 两张贴图）：state bit0
     //   （RedstoneLampStateOnFlag，玩家右键翻位）→ on 态全六面 redstone_lamp_on(153)（暖黄亮芯）、
     //   off 态全六面 redstone_lamp_off(152)（灰暗壳，def 默认）。与熔炉 / 传送门不同：红石灯无朝向 /
@@ -519,14 +532,21 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                             || b == BlockRegistry::EnchantingTable // t620 附魔台 0.75 矮盒经 PartialBlockGeometry 渲染（非满格）
                                             || BlockRegistry::isBed(b);     // t457 床低 3D 模型经 PartialBlockGeometry 渲染（非整立方）
                     const bool isCrossX   = BlockRegistry::isCrossBillboard(b);
+                    // t638 ① 木门镂空窗：门上半格栅窗贴图带 alpha（pack door_wood_upper.png 窗格真透明 /
+                    //   程序贴图 t638 改窗洞 alpha=0）→ 门须走 **cutout 段**（alphaMode:Mask 材质——alpha<0.5
+                    //   像素 discard）才能透视窗后（terrain 段不透明材质会把透明窗画成黑 / 暗色板）。门盒体
+                    //   pushBox 几何不变（非 cross），仅路由到 cutout 段渲染（isDoor 门族全格两半都走 cutout——
+                    //   下半门板不透明贴图 cutout 无副作用（alpha 全 255 不 discard），保同一方块单段渲染）。
+                    const bool isDoorX = BlockRegistry::isDoor(b);
                     // t326 cross cutout 分流：cross 方块（草丛/作物/树苗）贴图带 alpha 透明底 → 进独立 cutout 段
                     //   （半透材质 opacity:0.99 + alphaCutoff:0.5 cutout 透明间隙）；partial 盒体（slab/stairs/...）
                     //   贴图不透明 → 留地形段（不透明材质 opacity=1）。两段互斥：地形段若同时发 cross → opacity=1
                     //   下 alpha 被忽略、透明底当不透明显成实心板（用户「草丛挡视线」根因）。cutout 段只发 cross。
                     if (m_cutoutOnly) {
-                        if (!isCrossX) continue;     // cutout 段：仅 cross（草丛/作物/树苗）
+                        if (!isCrossX && !isDoorX) continue;  // cutout 段：仅 cross + 门（t638 门窗 alpha cutout）
                     } else {
                         if (isCrossX) continue;      // 地形段：cross 走 cutout 段、不在此画（否则显实心板）
+                        if (isDoorX) continue;       // t638 门走 cutout 段（窗格 alpha 透视；terrain 段不画门）
                         if (!isPartialX) continue;   // 地形段：仅 partial 盒体（立方面在 PASS 2）
                     }
                     const quint8 cSky = m_world->skyLightAt(wx, ly, wz);
