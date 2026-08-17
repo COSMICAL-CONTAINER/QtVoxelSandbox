@@ -779,6 +779,13 @@ function doMergeSameId(root, group, index) {
     }
     if (total <= 0) return
 
+    // review rev2-C4：cap=1（不可堆叠：附魔书 / 工具 / 护甲）且 total>1 → **no-op**。下方重打包回填硬编码
+    //   `[0,0,0,0]`（+ 耐久 0 + 空名）—— 不可堆叠物无「合并」语义，每个实例各自带附魔 / 耐久 / 名，重打包
+    //   会把除首件外的实例全部洗成白板（箱子两本战利品附魔书双击 → 另一本变无附魔白书，正是 review-L7
+    //   力图消除的销毁路径）。两件不可堆叠物的语义合并是**铁砧**的职责，双击收集只对可堆叠物有意义。
+    //   cap=1 且 total=1（单件）不受影响：走下方快照路径拾起，实例数据随光标保真（t263/t475/t622）。
+    if (cap <= 1 && total > 1) return
+
     // t263 工具段（cap=1）双击：total=1=单件 → 拾起的就是那把工具，耐久须随实例到光标。在清空前快照首槽
     //   耐久（slots 至少 1 项才会进到此；方块段 durability 恒 0 → 快照值 inert 不影响方块合并语义）。
     const firstSlot = slots.length > 0 ? readSlot(root, slots[0].group, slots[0].index) : null
