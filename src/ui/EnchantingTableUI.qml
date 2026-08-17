@@ -169,6 +169,26 @@ Item {
         root.enchantNames[index] = (typeof name === "string") ? name : ""
         root.enchantRev++
     }
+    // t648 槽 0 放入门禁（InventoryOps.canPlace 查询钩；已附魔物品禁止再进附魔台 —— MC 1.0 不允许对
+    //   已附魔物品重复附魔刷属性）。覆盖：普通左键（singleLeftClick / EnchantInputSlot TapHandler）、右键
+    //   放一（singleRightClick / placeOneInSlot）、左键拖拽均分（redistributeLive eligible 过滤）、数字键
+    //   交换（swapHoveredWithHotbar 双向问）。Shift+左键在 slotShiftLeftEnchant 自带同款守卫（t549）。
+    //   判定（仅 index 0 = 武器/工具槽；index 1 青金石槽不设限）：不可附魔（itemEnchantCategory==None，
+    //   含附魔书 0x227 自身）或已带附魔 → 拒。旧 bug：左键整栈放置走 resolveClick B 无门禁 → 已附魔
+    //   钻石剑可反复进台重附（锐锋1→锐锋2→耐久1 无限刷，t549 的 Shift 守卫只盖 Shift 路径）。
+    //   门禁在写入**前**查询（写后 no-op = caller 已清光标 → 物品凭空丢失）；doEnchant 产物写入与关包
+    //   清槽不经 InventoryOps 放置路径，恒不受门禁影响。
+    function localCanPlace(group, index, id, count, enchants) {
+        if (group !== "enchant" || index !== 0) return true
+        if (id === 0 || count <= 0) return true    // 清空 / 取出恒放行
+        if (!root.hotbar) return true
+        if (root.hotbar.itemEnchantCategory(id) === 0) return false   // 不可附魔物不入槽 0
+        const e = Array.isArray(enchants) ? enchants : []
+        for (let i = 0; i < 4; ++i) {
+            if ((e[i] || 0) !== 0) return false   // 已附魔 → 拒（物品留光标）
+        }
+        return true
+    }
     // 关包归还 enchant 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把两槽内容
     //   退回背包（MC 行为：关附魔台界面把输入槽物品退回背包）。t549 耐久 / 附魔随实例归还。
     //   t622 名随实例归还（第 5 参透传）。
@@ -1041,6 +1061,8 @@ Item {
                 const cur = InventoryOps.readSlot(root, eslot.group, eslot.index)
                 const r = root.resolveClick(cur.id, cur.count, cur.durability, cur.enchants, cur.name)
                 if (!r) return
+                // t648 门禁：放置 / 互换写入前问 localCanPlace（拒 → no-op，光标不动，物品不丢）。
+                if (!InventoryOps.canPlace(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotEnch)) return
                 InventoryOps.writeSlot(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                 root.hotbar.heldBlock = r.heldId
                 root.hotbar.heldCount = r.heldCount
@@ -1055,6 +1077,8 @@ Item {
                 const cur = InventoryOps.readSlot(root, eslot.group, eslot.index)
                 const r = root.resolveRightClick(cur.id, cur.count, cur.durability, cur.enchants, cur.name)
                 if (!r) return
+                // t648 门禁：放置 / 互换写入前问 localCanPlace（拒 → no-op，光标不动）。
+                if (!InventoryOps.canPlace(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotEnch)) return
                 InventoryOps.writeSlot(root, eslot.group, eslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                 root.hotbar.heldBlock = r.heldId
                 root.hotbar.heldCount = r.heldCount

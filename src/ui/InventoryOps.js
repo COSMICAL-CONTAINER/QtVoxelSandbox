@@ -307,7 +307,9 @@ function redistributeLive(root) {
         }
         const orig = root.dragOriginal[key]
         if (orig.id === 0 || (orig.id === heldId && orig.count < cap))
-            eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count, dur: orig.durability, ench: orig.enchants, name: orig.name })
+            // t648 门禁：拖拽分发目标格须过面板门禁（拒 → 不入 eligible，等同异物槽跳过——不写不清）。
+            if (canPlace(root, p[0], parseInt(p[1], 10), heldId, orig.count, heldEnch))
+                eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count, dur: orig.durability, ench: orig.enchants, name: orig.name })
     }
 
     // t108/t204：n>total 截断 eligible 到 total 项（每格至少 1 件；N≤count）。t204 起 dragSlots 收集已在
@@ -359,10 +361,22 @@ function redistributeLive(root) {
 //   TapHandler.onTapped（DragHandler 未激活）；仅当左键越阈值但只扫过起点一格时经此路径补一次单击语义。
 //   t263 耐久随实例透传（readSlot→resolveClick→writeSlot 全程携带 slotDur/heldDur）；t475 附魔同；
 //   t622 名同（slotName/heldName 全程携带——整件搬运保真）。
+// t648 放入门禁钩子（面板可选声明 root.localCanPlace(group, index, id, count, enchants) → bool）：
+//   声明了本钩子的面板，InventoryOps 的**放置 / 互换 / 拖拽分发 / 数字键交换**路径在写入前先问它
+//   （返 false = 拒入 → 该路径 no-op，光标 / 源槽不动 —— 物品绝不因门禁丢失）。未声明（undefined）→ 恒放行
+//   （其余七面板零改动）。现消费者：EnchantingTableUI（槽 0 拒已附魔 / 不可附魔物 —— 已附魔物品不能再进
+//   附魔台）。门禁必须在**写入前**判定（写后拒绝 = 调用方已清光标 → 物品凭空消失），故不是 localWriteSlot
+//   内 no-op（那是「吞物」路径），而是本处调用前查询。
+function canPlace(root, group, index, id, count, enchants) {
+    if (!root.localCanPlace) return true
+    return root.localCanPlace(group, index, id, count, enchants) !== false
+}
 function singleLeftClick(root, group, index) {
     const cur = readSlot(root, group, index)
     const r = resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
     if (!r) return
+    // t648 门禁：放置 / 互换到本地组槽前问面板（拒 → no-op，光标不动）。
+    if (!canPlace(root, group, index, r.slotId, r.slotCount, r.slotEnch)) return
     writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
     root.hotbar.heldBlock = r.heldId
     root.hotbar.heldCount = r.heldCount
@@ -432,6 +446,8 @@ function placeOneInSlot(root, group, index) {
     if (cur.id !== 0 && cur.id !== heldId) return false  // 异 id：跳过（不互换）
     const cap = root.hotbar.maxStackSize(heldId)
     if (cur.id === heldId && cur.count >= cap) return false // 同 id 已满：跳过
+    // t648 门禁：放置前问面板（拒 → 视作未放置，光标不动）。
+    if (!canPlace(root, group, index, heldId, cur.count + 1, heldEnch)) return false
     // 同 id 合并（方块段）耐久 / 附魔 / 名不变（cur.durability / cur.enchants / cur.name）；空槽开新工具（工具段）
     //   写手持耐久 / 附魔 / 名（保真）。t622：cap=1 物品（工具 / 护甲 / 附魔书）右键拖放整件 → 名随入槽。
     const slotDur = (cur.id === heldId) ? cur.durability : heldDur
@@ -453,6 +469,8 @@ function singleRightClick(root, group, index) {
     const cur = readSlot(root, group, index)
     const r = resolveRightClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
     if (!r) return
+    // t648 门禁：放置 / 互换到本地组槽前问面板（拒 → no-op，光标不动）。
+    if (!canPlace(root, group, index, r.slotId, r.slotCount, r.slotEnch)) return
     writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
     root.hotbar.heldBlock = r.heldId
     root.hotbar.heldCount = r.heldCount
@@ -735,6 +753,10 @@ function swapHoveredWithHotbar(root, hotbarIdx) {
     if (group === "armor" && dst.id !== 0
         && (!root.hotbar.isArmor(dst.id) || root.hotbar.armorPiece(dst.id) !== srcIdx)) return
     // t263 双方耐久随各自实例交换（数字键搬运工具保真）。t475 附魔同理随实例交换。t622 名同理。
+    //   t648 门禁：双向各问面板（任一拒 → 整个 no-op，两侧槽都不动 —— 门禁只在写入前判定，写后拒绝
+    //   会留下半交换态：一侧已写、另一侧被 no-op = 物品复制 / 丢失）。
+    if (!canPlace(root, group, srcIdx, dst.id, dst.count, dst.enchants)) return
+    if (!canPlace(root, "hotbar", hotbarIdx, src.id, src.count, src.enchants)) return
     writeSlot(root, group, srcIdx, dst.id, dst.count, dst.durability, dst.enchants, dst.name)
     writeSlot(root, "hotbar", hotbarIdx, src.id, src.count, src.durability, src.enchants, src.name)
 }
