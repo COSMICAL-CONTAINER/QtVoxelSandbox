@@ -357,13 +357,17 @@ void BoatManager::tick(qreal dt, World *world)
         //     水面时中心格是水上空气 → 误判无水 → 重力拽船下沉；改用 waterSurfaceY 的扫柱结论判有无水，准）。
         //   t630「2/3 支撑阈值」：waterSurfaceY 只看**中心列** —— 岸沿驶入时中心格一入水即判「有水」→ Y 钉
         //     水面把仍压岸的 ≥1/3 船身拽下沉嵌岸块（「一半在水一半卡方块」根因）。改：中心列有水**且**
-        //     footprint 水域覆盖率 ≥ kBoatWaterFraction(2/3) 才走浮水；否则走无水陆档（重力贴支撑面）→
+        //     footprint 水域覆盖率过迟滞双阈（浮起 ≥kBoatWaterFractionRise / 落下 <kBoatWaterFractionFall，
+        //     rev2 修：旧单值 0.67 拒 4/6 + 无迟滞抖动）才走浮水；否则走无水陆档（重力贴支撑面）→
         //     船身在岸上滑行直到 2/3 过沿才落水（机制等价 MC 船大部分船身离开岸才落水，不卡岸缝）。
         bool foundWater = false;
         const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
-        if (foundWater
-            && boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 1.0f) < kBoatWaterFraction)
-            foundWater = false; // t630：<2/3 船身在水（岸沿 1/3+ 仍压岸）→ 按陆档处理（不掉进水岸夹缝）
+        if (foundWater) {
+            const float frac = boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 1.0f);
+            if (b.floating ? frac < kBoatWaterFractionFall : frac < kBoatWaterFractionRise)
+                foundWater = false; // 未浮 <浮起阈 / 已浮 <落下阈 → 按陆档处理（不掉进水岸夹缝）
+        }
+        b.floating = foundWater;
         const float dy = surfY - b.pos.y();
         if (foundWater) {
             if (std::fabs(dy) > 1e-3f) {
@@ -456,9 +460,14 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     //   即钉水面 Y + 水档推进，半船被拽沉嵌岸块）。船滑行到 2/3 船身过沿才切水档落水，平滑不卡。
     bool foundWater = false;
     const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
-    if (foundWater
-        && boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 1.0f) < kBoatWaterFraction)
-        foundWater = false; // t630：<2/3 船身在水 → 陆档（不掉水岸夹缝）
+    // rev2 迟滞双阈：浮起 ≥ kBoatWaterFractionRise（4/6=0.6667 过）；已浮态落下须 < kBoatWaterFractionFall
+    //   （3/6 及以下）；带间（0.5~0.66）维持上一档 —— 防覆盖格数 4↔6 跳变处反复切档 Y 抖动。
+    if (foundWater) {
+        const float frac = boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 1.0f);
+        if (b.floating ? frac < kBoatWaterFractionFall : frac < kBoatWaterFractionRise)
+            foundWater = false; // <浮起阈（未浮）/ <落下阈（已浮）→ 陆档（不掉水岸夹缝）
+    }
+    b.floating = foundWater;
     const quint8 below = blockBelowBoat(world, b.pos);
     const bool onIce = !foundWater && BlockRegistry::isIce(below);
 

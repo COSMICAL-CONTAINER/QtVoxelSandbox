@@ -162,6 +162,8 @@ private:
         float vz = 0.0f;     // 水平速度 Z
         float yaw = 0.0f;    // 船头朝向（度；呈现层船 Model eulerRotation.y）
         int boatType = Oak;  // 变体（Oak 浅色 / Spruce 深色）
+        bool floating = false; // rev2 修：吃水迟滞态（当前 tick 是否浮水档；浮起门槛 ≥kBoatWaterFractionRise，
+                             //   落下门槛 <kBoatWaterFractionFall —— 防岸线处 4↔6 格覆盖跳变无迟滞致 Y 抖动）
         bool alive = true;   // slot-reuse 槽位占用标志（放末位：聚合初始化尾字段缺省取 default member init）
     };
     std::vector<Boat> m_boats;
@@ -308,8 +310,12 @@ private:
     // t630「2/3 支撑阈值」（用户：船身 2/3 过去了再掉，1/3 还在岸上时不掉不卡）：footprint 水域覆盖率
     //   ≥ 本值才判「浮在水里」（foundWater 置真 → Y 钉水面 / 水档推进）；< 本值（≥1/3 船身仍在岸上）→ 走
     //   无水陆档（重力贴支撑面）。旧版 waterSurfaceY 只看**中心列**（中心格一入水岸沿即判有水 → Y 钉水面
-    //   把仍压岸的半船拽下沉 → 与岸块嵌入互卡 =「一半在水一半卡方块」根因）。0.67 ≈ 4/6 格（footprint 6 格）。
-    static constexpr float kBoatWaterFraction = 0.67f;
+    //   把仍压岸的半船拽下沉 → 与岸块嵌入互卡 =「一半在水一半卡方块」根因）。
+    //   rev2 修：拆**迟滞双阈**（rev2 旧单值 0.67f 使 4/6=0.6667 被拒——与注释「≈4/6 格应浮」相反，实际
+    //   生效阈值 75%~83%；且覆盖格数 4↔6 跳变处无迟滞 → 岸线 Y 抖动）。浮起阈 0.66（4/6=0.6667 通过，
+    //   3/6=0.5 拒）；落下阈 0.5（3/6 及以下才回陆档）—— 两阈之间维持上一 tick 档位（迟滞带 0.5~0.66）。
+    static constexpr float kBoatWaterFractionRise = 0.66f;
+    static constexpr float kBoatWaterFractionFall = 0.50f;
     // t630 船撞碎荷叶速度阈值（blocks/s）：船速 > 本值时碾过 LilyPad → 叶碎掉物品（机制等价 MC 1.0 船
     //   高速撞碎 lily pad）；低于阈值叶挡船（绕行）。取 3.0（水档满速 8 的 ~1/3：轻推不碎、正常行驶碾碎，
     //   陆档 2.4 顶速 < 3.0 → 陆上推船不误碎岸边叶）。
