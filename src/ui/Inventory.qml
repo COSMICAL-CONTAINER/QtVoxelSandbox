@@ -117,7 +117,27 @@ Item {
     //   （creativeMaterials），用户报「创造背包船归材料 tab，应放工具 tab」→ 改入工具段。下文 filteredPalette：
     //   工具 tab（currentTab===1）末尾追加；材料 tab（currentTab===2）显式排除（防双显）。id 与 hotbar.cpp /
     //   RecipeRegistry::OakBoatId/SpruceBoatId 同源（材料段 0x200+，非方块）。
-    readonly property var boatIds: [0x234, 0x235]
+    readonly property var vehicleIds: [0x234, 0x235]
+
+    // t651⑤ 红石 tab 方块 id 表（镜像 BlockRegistry 方块段常量；Q_INVOKABLE 无 id 常量暴露，QML 端集中维护，
+    //   同 foodIds 模式）：机关件（5 压力板 / 木·石按钮 / 拉杆）+ 红石系（红石火把 / 红石块 / 红石灯）+
+    //   机关轨（动力轨 / 探测轨）。普通铁轨（Rail=103）留方块 tab（轨族本体属交通非红石；用户点名
+    //   「压力板/按钮/拉杆」+ 红石系，未含普通轨）。t656 红石粉方块落地后归本 tab（dev-plan t660）。
+    readonly property var redstoneIds: [
+        18,   // 木压力板（WoodPressurePlate）
+        61,   // 圆石压力板（CobblePressurePlate）
+        124,  // 石压力板（StonePressurePlate，t627）
+        125,  // 铁压力板（IronPressurePlate，t627）
+        126,  // 金压力板（GoldPressurePlate，t627）
+        113,  // 木按钮（WoodButton，t628）
+        114,  // 石按钮（StoneButton，t628）
+        112,  // 拉杆（Lever，t628）
+        129,  // 红石火把（RedstoneTorch，t638）
+        122,  // 红石块（RedstoneBlock，t620）
+        123,  // 红石灯（RedstoneLamp，t620；光源但属红石族归红石 tab）
+        127,  // 动力铁轨（GoldenRail，t638）
+        128   // 探测铁轨（DetectorRail，t638）
+    ]
 
     // t632 预设附魔书表（每种附魔一本，hotbar.creativeEnchantedBooks() 权威）：调色板条目是 int id 段
     //   （QVariantList<int>，无法携带附魔元数据）→ 每本用哨兵 id（-kBookSentinel-enchantId）引用。
@@ -143,21 +163,28 @@ Item {
         if (!root.hotbar) return []
         // survival-tab 三轮：生存物品栏分页（tab 6）无调色板 —— 调色板区让位给 survivalView（生存背包视图）。
         if (root.currentTab === 6) return []
-        if (root.currentTab === 0) return root.hotbar.creativeBlocks()
+        if (root.currentTab === 0) {
+            // t651⑤ 方块 tab：排除已划归「红石」tab 的机关/红石系方块（redstoneIds 表）。
+            const blocks = root.hotbar.creativeBlocks()
+            const out = []
+            for (let i = 0; i < blocks.length; ++i)
+                if (root.redstoneIds.indexOf(blocks[i]) === -1) out.push(blocks[i])
+            return out
+        }
         if (root.currentTab === 1) {
             // t508 工具段末尾追加船（spec「船归工具 tab」）。船非工具类（ToolRegistry 枚举外）但语义上属
             //   「功能性载具」（同弓 / 剪刀 / 钓鱼竿 —— 右键使用、非放置），归工具段更合理。
             const tools = root.hotbar.creativeTools().slice()
-            for (let i = 0; i < root.boatIds.length; ++i) tools.push(root.boatIds[i])
+            for (let i = 0; i < root.vehicleIds.length; ++i) tools.push(root.vehicleIds[i])
             return tools
         }
         if (root.currentTab === 2) {
             // 材料段 = creativeMaterials 去掉已划进食物段的项 + t508 去掉船（船已移到工具段，防双显）
-            //   + t632 末尾追加 14 本预设附魔书（哨兵 id；同 0x227 裸书所在材料段——铁砧测试就近取用）。
+            //   + t632 末尾追加 14 本预设附魔书（哨兵 id）。
             const mats = root.hotbar.creativeMaterials()
             const out = []
             for (let i = 0; i < mats.length; ++i) {
-                if (root.foodIds.indexOf(mats[i]) === -1 && root.boatIds.indexOf(mats[i]) === -1) out.push(mats[i])
+                if (root.foodIds.indexOf(mats[i]) === -1 && root.vehicleIds.indexOf(mats[i]) === -1) out.push(mats[i])
             }
             for (let i = 0; i < root.bookEntries.length; ++i)
                 out.push(root.bookSentinel - root.bookEntries[i].ench)
@@ -173,9 +200,12 @@ Item {
             }
             return out
         }
-        // t511 二轮复盘：箱子 tab 不再用 currentTab=5 综合页（第一轮「保持创造」被否决）—— 点击箱子 tab 直接
-        //   发 switchToSurvivalRequested 切生存背包（宿主 setMode(Survival)，本面板由 player.mode 绑定自动隐藏，
-        //   SurvivalInventory 接管）。故 filteredPalette 无 case 5（currentTab 永不取 5）。
+        // t651⑤ 红石 tab（currentTab===5）：机关件（压力板 / 按钮 / 拉杆）+ 红石系（红石火把 / 红石块 /
+        //   红石灯）+ 机关轨（动力轨 / 探测轨）。普通铁轨（Rail）留方块 tab（轨族本体属交通，非红石件）。
+        //   t656 红石粉方块落地后也归本 tab（dev-plan t660）。id 镜像 BlockRegistry 方块段（redstoneIds 表，
+        //   同 foodIds 模式——Q_INVOKABLE 无 id 常量暴露，QML 端集中维护）。
+        if (root.currentTab === 5) return root.redstoneIds.slice()
+        // 生存物品栏（tab 6）已在函数开头早退。
         return []
     }
 
@@ -340,10 +370,22 @@ Item {
     onCurrentTabChanged: if (root.currentTab !== 6) returnCraftToHotbar()
 
     // ── 尺寸常量（集中一处便于对齐）──
+    // t651③ 尺寸统一：面板宽改用生存背包同款公式（mainCols*slotSize+32=392），高 424（= 生存背包 410 +
+    //   分类 tab 两行占位折算）；**所有分页同一尺寸**（修「切生存 tab 面板突然变宽」）。内容区三类网格
+    //   （调色板 / 主栏 / hotbar）一律 9×40=360 居中于 368 内宽 → 面板内起始 x=16，与生存背包主栏像素对齐
+    //   （生存背包 392 宽 / margins 16 / 主栏 360 → 同 16；一并修「生存物品栏分页左侧空一整列」——
+    //   旧 470 宽面板网格居中 x=55，左侧多出 ≈1 格空列且 hotbar 右缘贴销毁槽，整块视觉右偏一格）。
     readonly property int paletteCols: 9
-    readonly property int cellSize: 42       // 调色板单格
+    // t651① 调色板单格 42→40 且格间距 4→0：网格宽 = 9×40 = 360 与主栏/hotbar 列距严格同拍（旧 42+4 拍与
+    //   40 拍错位 → 分页间列不齐）；网格右缘距 Flickable 右缘仅 4px → 滚动条贴近格子（修「滚动条离格子
+    //   太远」——旧网格 410 居中于 442，右缘到滚动条隔 ~10px）。
+    readonly property int cellSize: 40       // 调色板单格（= slotSize，列距同拍）
     readonly property int slotSize: 40       // hotbar 单格（与游戏内 hotbar 视觉一致）
     readonly property int mainCols: 9        // survival-tab 三轮：生存物品栏分页主栏列数（3×9，同生存背包）
+    // t651③ 内容区高（调色板 Flickable / 生存物品栏分页共用容器 contentArea 的高度）：424 - margins 2×12 -
+    //   tab 区 56（26×2 + 行距 4）- Column 间距 2×8 - hotbar 40 = 288；生存分页 = 上半 160 + 间距 8 + 主栏
+    //   120 = 288 恰好容纳。
+    readonly property int contentH: 288
     readonly property int bevelDark: 0       // 凹陷斜面：顶/左 暗边
     readonly property int bevelLight: 0      // 凹陷斜面：底/右 亮边
 
@@ -450,13 +492,47 @@ Item {
         }
     }
 
+    // t651④ 分类 tab delegate（两行 tab 共用的 Component）：宽由所在 Row 的 tabWidth 属性给定
+    //   （第一行 6 项均分行宽；第二行「生存物品栏」5 字长标签固定宽）；选中绿底 / 未选暗底；
+    //   点击切 currentTab（含 6 生存物品栏分页 / 5 红石分页）。
+    Component {
+        id: tabDelegate
+        Rectangle {
+            width: parent.tabWidth
+            height: 26
+            // tab=6 为普通分页（isSelected 与其它 tab 一致：currentTab===6 时选中，生存物品栏视图取代调色板）。
+            property bool isSelected: root.currentTab === modelData.tab
+            color: isSelected ? "#5a8a4a" : "#262b30" // 选中绿底 / 未选暗底
+            border.color: isSelected ? "#7fe57f" : "#3a444f"
+            border.width: 1
+            radius: 3
+            Text {
+                anchors.centerIn: parent
+                text: modelData.label
+                color: isSelected ? "#ffffff" : "#9fb0c0"
+                font.pixelSize: 12
+                font.bold: isSelected
+            }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+            TapHandler {
+                onTapped: {
+                    // 全部 tab 均切 currentTab（含 6 生存物品栏分页 / 5 红石分页）；
+                    //   不发 switchToSurvivalRequested 切模式（survival-tab 三轮诉求：不切模式）。
+                    root.currentTab = modelData.tab
+                }
+            }
+        }
+    }
+
     // 面板：深色圆角，居中。
+    // t651③ 尺寸统一：宽 392（= 生存背包 SurvivalInventory 同公式 mainCols*slotSize+32）、高 428（两行
+    //   分类 tab 56 + 内容区 288 + hotbar 40 + 边距 28 + 间距 16）—— **所有分页同一尺寸**（修「切到生存
+    //   tab 面板突然变宽」；旧 470 宽 / tab6 特判 410 高）。内容区（调色板 / 生存物品栏分页）统一 360 宽
+    //   网格居中于 364 内宽（x=2）→ 与生存背包主栏几何同拍。
     Rectangle {
         id: panel
-        width: 470
-        // survival-tab 三轮：生存物品栏分页（tab 6）内容更高（护甲纵列 160 + 主栏 120 + 间距 → ~370 内容），
-        //   面板加高到 410 容纳；其它分页维持原 312。
-        height: root.currentTab === 6 ? 410 : 312
+        width: root.mainCols * root.slotSize + 32   // 360 + 32 = 392（同 SurvivalInventory）
+        height: 56 + 8 + root.contentH + 8 + root.slotSize + 28   // 428（tab 区 + 内容区 + hotbar + 边距）
         anchors.centerIn: parent
         radius: 14
         color: "#1b1f24"
@@ -479,50 +555,110 @@ Item {
             anchors.margins: 14
             spacing: 8
 
-            // t511 分类 tabs（MC 1.0 式创造背包分类）：方块 / 工具 / 材料 / 护甲 / 食物 / 生存物品栏。
-            //   前 5 项切 currentTab（调色板只显该类，filteredPalette 过滤）；survival-tab 三轮：第 6 项「生存物品栏」
-            //   → currentTab=6，调色板区替换为生存物品栏视图（护甲 + 合成占位 + 角色预览 + 3×9 主栏 + 底部 hotbar 行），
-            //   在创造背包内分页显示，**不切 player.mode**（取代旧 t511 的 tab:-1 发 switchToSurvivalRequested 切生存）。
+            // t651④⑤ 分类 tabs 改**两行** + 新增「红石」tab：上轮 6 tab 已满一行，本轮红石 tab（t651⑤）
+            //   加入后 7 个标签一行放不下（364 内宽 / 7 ≈ 52px，标签文字挤爆）→ 分两行：第一行 方块/工具/
+            //   材料/护甲/食物/红石（6 个 2 字短标签），第二行 生存物品栏（5 字长标签独占一行宽度）。
             //   选中态：白底深字 + 下沉边；未选：暗底亮字。自绘原创（§9 override (a)，无 MC GUI PNG）。
-            //   去掉旧「创造物品栏」标题 + 「[E]/[Esc] 关闭」提示（用户嫌啰嗦；关闭键提示已在 HUD/暂停叠层）。
-            Row {
-                id: tabBar
-                spacing: 2
+            //   销毁槽（垃圾桶）t651② 从底部 hotbar 行右侧挪到 tab 区右侧（跨两行居中）：旧位紧贴 hotbar
+            //   第 9 列（470 宽面板 360 hotbar 居中后右缘 x=401 ≈ 销毁槽 x=402 → 「连在一起」）；挪出后
+            //   hotbar 行独占 360 宽，与主栏列对齐、与销毁槽天然分离。
+            Item {
+                id: tabBarArea
                 width: parent.width
+                height: 56
 
-                Repeater {
-                    // [标签, 对应 currentTab]。survival-tab 三轮：末项改「生存物品栏」tab=6（不再 -1 特殊切模式）。
-                    model: [
-                        { label: "方块", tab: 0 },
-                        { label: "工具", tab: 1 },
-                        { label: "材料", tab: 2 },
-                        { label: "护甲", tab: 3 },
-                        { label: "食物", tab: 4 },
-                        { label: "生存物品栏", tab: 6 }
-                    ]
-                    delegate: Rectangle {
-                        width: Math.floor((parent.width - (6 - 1) * 2) / 6)
-                        height: 26
-                        // survival-tab 三轮：tab=6 为普通分页（isSelected 与其它 tab 一致：currentTab===6 时选中，
-                        //   生存物品栏视图取代调色板）。不再有 -1 特殊分支。
-                        property bool isSelected: root.currentTab === modelData.tab
-                        color: isSelected ? "#5a8a4a" : "#262b30" // 选中绿底 / 未选暗底
-                        border.color: isSelected ? "#7fe57f" : "#3a444f"
-                        border.width: 1
-                        radius: 3
-                        Text {
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            color: isSelected ? "#ffffff" : "#9fb0c0"
-                            font.pixelSize: 12
-                            font.bold: isSelected
+                // tab 行宽：右侧留销毁槽 40 + 6 间隔 → 364-46 = 318。
+                property real tabRowWidth: parent.width - root.slotSize - 6
+
+                Column {
+                    spacing: 4
+                    // t651④ 行内各项宽：第一行 6 项均分行宽；第二行 5 字长标签固定宽 96。
+                    Row {
+                        spacing: 2
+                        width: tabBarArea.tabRowWidth
+                        property real tabWidth: Math.floor((width - 5 * 2) / 6)
+                        Repeater {
+                            // 第一行 6 个短标签 tab（t651⑤ 红石 tab 插在食物后）。
+                            model: [
+                                { label: "方块", tab: 0 },
+                                { label: "工具", tab: 1 },
+                                { label: "材料", tab: 2 },
+                                { label: "护甲", tab: 3 },
+                                { label: "食物", tab: 4 },
+                                { label: "红石", tab: 5 }
+                            ]
+                            delegate: tabDelegate
                         }
-                        HoverHandler { cursorShape: Qt.PointingHandCursor }
-                        TapHandler {
-                            onTapped: {
-                                // survival-tab 三轮：全部 tab 均切 currentTab（含 6 生存物品栏分页）；
-                                //   不再发 switchToSurvivalRequested 切模式（用户诉求：不切模式）。
-                                root.currentTab = modelData.tab
+                    }
+                    Row {
+                        spacing: 2
+                        width: tabBarArea.tabRowWidth
+                        property real tabWidth: 96
+                        Repeater {
+                            // 第二行：生存物品栏（5 字长标签独占行宽）。
+                            model: [ { label: "生存物品栏", tab: 6 } ]
+                            delegate: tabDelegate
+                        }
+                    }
+                }
+
+                // ③ 销毁槽（点击 → 丢弃当前光标手持栈；setHeldBlock(0) 清 id+count）。
+                // 自绘原创垃圾桶图标（Canvas 像素图，§9 override (a)）；凹陷斜面 + 暗红井底表「销毁」语义。
+                // t138：纯点击（左键），右键全归 root 右键 TapHandler 独占（无 DragHandler 抢右键 grab）。
+                // t651②：从底部 hotbar 行右侧挪到 tab 区右侧（垂直跨两行居中），与 hotbar 行分离。
+                Item {
+                    id: destroyWrap
+                    width: root.slotSize
+                    height: root.slotSize
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Rectangle { anchors.fill: parent; color: "#2a1414" }
+                    Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                    Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                    Rectangle { color: "#7a3a3a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                    Rectangle { color: "#7a3a3a"; width: 1; height: parent.height; anchors.right: parent.right }
+
+                    // 自绘垃圾桶像素图（原创；无外部 PNG）。
+                    Canvas {
+                        anchors.centerIn: parent
+                        width: 22; height: 22
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.reset()
+                            ctx.imageSmoothingEnabled = false // 像素硬边（1.0 风格）
+                            const lit = "#c9c9c9"   // 桶身亮色
+                            const cut = "#2a1414"   // 桶身竖纹镂空（=井底色，形成竖条）
+                            // 顶把手
+                            ctx.fillStyle = lit; ctx.fillRect(8, 1, 6, 2)
+                            // 桶盖
+                            ctx.fillRect(4, 4, 14, 2)
+                            // 桶身（梯形：上宽下窄）
+                            ctx.beginPath()
+                            ctx.moveTo(6, 7); ctx.lineTo(16, 7); ctx.lineTo(14, 19); ctx.lineTo(8, 19); ctx.closePath()
+                            ctx.fillStyle = lit; ctx.fill()
+                            // 桶身竖纹镂空
+                            ctx.fillStyle = cut
+                            ctx.fillRect(9, 9, 1, 8)
+                            ctx.fillRect(12, 9, 1, 8)
+                        }
+                    }
+
+                    // 点击销毁槽 → 丢弃当前光标手持栈（setHeldBlock(0) 一并清 id+count）。
+                    // 仅左键：右键全归 root 右键 TapHandler 独占（t79 拿半/均分手势），避免再抢右键 grab（t138）。
+                    TapHandler {
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: {
+                            if (!root.hotbar || root.hotbar.heldBlock === 0) return
+                            // t653③ 垃圾桶分档：Shift+左键 = 一次清空**整组**；普通左键 = 只丢 1 个（余数留光标）。
+                            //   旧行为无差别整组清空（用户无法只丢 1 个）；机制对齐「shift=批量 / 普通=单个」
+                            //   的既有手势约定（t228 拖出丢弃左键整栈 / 右键 1 件的 shift 对偶）。
+                            if (window.shiftHeld) {
+                                root.hotbar.heldBlock = 0
+                            } else {
+                                const cnt = root.hotbar.heldCount
+                                if (cnt <= 1) root.hotbar.heldBlock = 0
+                                else          root.hotbar.heldCount = cnt - 1
                             }
                         }
                     }
@@ -530,28 +666,32 @@ Item {
             }
 
             // ① 调色板（Flickable 垂直可滚动 + ScrollBar 指示拖动；t127）。
-            //   t511：去掉标题行 / 状态行后腾出纵向空间 → 视口抬到 cellSize*4+16 容 4 行（分类页内容短时一屏全显；
-            //   长（方块页 ~60 项）仍可滚）。ScrollBar.vertical policy=AsNeeded 即不足时不占空间。
+            //   t511：去掉标题行 / 状态行后腾出纵向空间 → 视口容 4 行（分类页内容短时一屏全显；长仍可滚）。
+            //   t651③：高度改统一 contentH（与生存物品栏分页同容器高，面板恒定尺寸）。ScrollBar.vertical
+            //   policy=AsNeeded 即不足时不占空间。
             Flickable {
                 id: paletteFlick
                 width: parent.width
                 // survival-tab 三轮：tab=6 生存物品栏分页时调色板区让位给 survivalView（高度 0 + 隐藏）。
-                height: root.currentTab === 6 ? 0 : root.cellSize * 4 + 16 // t511：视口容 4 行（去标题/状态行腾出的空间回填到调色板）
+                height: root.currentTab === 6 ? 0 : root.contentH
                 visible: root.currentTab !== 6
                 clip: true
                 contentWidth: paletteGrid.width
                 contentHeight: paletteGrid.height
                 flickableDirection: Flickable.VerticalFlick
                 boundsBehavior: Flickable.StopAtBounds
-                // t127：内容超出视口（4 行 > 3 行视口）时显垂直拖动条；policy=AsNeeded 即不足时不占空间。
+                // t127：内容超出视口时显垂直拖动条；policy=AsNeeded 即不足时不占空间。
                 // t591：改用 DarkScrollBar（暗色细条，项目统一样式，与资源查看器 / 世界列表拉平）。
                 ScrollBar.vertical: DarkScrollBar {}
 
                 Grid {
                     id: paletteGrid
                     columns: root.paletteCols
-                    spacing: 4
-                    width: root.paletteCols * root.cellSize + (root.paletteCols - 1) * 4
+                    // t651① 格间距 4→0 + cellSize 42→40：网格宽 = 9×40 = 360 与主栏/hotbar 列拍严格一致
+                    //   （修「分页间列不齐」+「滚动条与格子间距过大」——网格右缘 x=360 距 Flickable 右缘
+                    //   仅 4px，滚动条贴近格子）。
+                    spacing: 0
+                    width: root.paletteCols * root.cellSize
                     anchors.horizontalCenter: parent.horizontalCenter
 
                     Repeater {
@@ -688,7 +828,8 @@ Item {
             Item {
                 id: survivalView
                 width: parent.width
-                height: root.currentTab === 6 ? 288 : 0
+                // t651③：高度统一 contentH（= 调色板分页同高；上半 160 + 间距 8 + 主栏 120 = 288 恰好）。
+                height: root.currentTab === 6 ? root.contentH : 0
                 visible: root.currentTab === 6
                 clip: true
 
@@ -1317,14 +1458,15 @@ Item {
 
             // t511 去掉「点击右侧销毁槽可丢弃当前手持物」提示 Text（用户嫌啰嗦；销毁槽的垃圾桶图标已自解释）。
 
-            // ② 底部 9 槽 hotbar 栏（同步游戏内 hotbar） + ③ 销毁槽。
+            // ② 底部 9 槽 hotbar 栏（同步游戏内 hotbar）。销毁槽（③）t651② 已挪到分类 tab 区右侧——
+            //   本行独占 360 宽，与主栏 9 列 / 调色板列严格同拍（旧 442 内宽下 hotbar 右缘紧贴销毁槽）。
             Item {
                 width: parent.width
                 height: root.slotSize
 
                 // hotbar 栏（左）：凹陷槽 + 选中槽选框（与游戏内 hotbar 视觉一致；点击切换选中、可拖到销毁槽）。
-                //   t528：改 anchors.horizontalCenter 居中（9 槽 360 宽在 442 内居中 → 起始 x=41，与上方 3 行主栏
-                //   列对齐），修「hotbar 比上面 3 行背包往左突出 1 格」（原 anchors.left 贴左边 x=0）。
+                //   t528：anchors.horizontalCenter 居中（9 槽 360 宽 → 与上方 3 行主栏列对齐）。
+                //   t651②：销毁槽挪走后本行 360 居中于 364 → 起始 x=2，与主栏 / 调色板同拍。
                 Item {
                     id: hbBar
                     width: 9 * root.slotSize
@@ -1537,56 +1679,8 @@ Item {
                         Rectangle { color: "#ffffff"; width: 2; height: parent.height; anchors.right: parent.right }
                     }
                 }
-
-                // ③ 销毁槽（点击 → 丢弃当前光标手持栈；setHeldBlock(0) 清 id+count）。
-                // 自绘原创垃圾桶图标（Canvas 像素图，§9 override (a)）；凹陷斜面 + 暗红井底表「销毁」语义。
-                // t138：原 DragHandler(右键)+DropArea「拖入销毁」与 root 右键 TapHandler 抢右键 grab → 右键拿半/均分
-                //   手势失效；删 DragHandler/DropArea，销毁改纯点击（左键），右键全归 root TapHandler 独占。
-                //   销毁能力不丢：点 hotbar 槽拾取到光标 → 点销毁槽丢弃（setHeldBlock(0) 同步清 count）。
-                Item {
-                    id: destroyWrap
-                    width: root.slotSize
-                    height: root.slotSize
-                    anchors.right: parent.right
-
-                    Rectangle { anchors.fill: parent; color: "#2a1414" }
-                    Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
-                    Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
-                    Rectangle { color: "#7a3a3a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
-                    Rectangle { color: "#7a3a3a"; width: 1; height: parent.height; anchors.right: parent.right }
-
-                    // 自绘垃圾桶像素图（原创；无外部 PNG）。
-                    Canvas {
-                        anchors.centerIn: parent
-                        width: 22; height: 22
-                        onPaint: {
-                            const ctx = getContext("2d")
-                            ctx.reset()
-                            ctx.imageSmoothingEnabled = false // 像素硬边（1.0 风格）
-                            const lit = "#c9c9c9"   // 桶身亮色
-                            const cut = "#2a1414"   // 桶身竖纹镂空（=井底色，形成竖条）
-                            // 顶把手
-                            ctx.fillStyle = lit; ctx.fillRect(8, 1, 6, 2)
-                            // 桶盖
-                            ctx.fillRect(4, 4, 14, 2)
-                            // 桶身（梯形：上宽下窄）
-                            ctx.beginPath()
-                            ctx.moveTo(6, 7); ctx.lineTo(16, 7); ctx.lineTo(14, 19); ctx.lineTo(8, 19); ctx.closePath()
-                            ctx.fillStyle = lit; ctx.fill()
-                            // 桶身竖纹镂空
-                            ctx.fillStyle = cut
-                            ctx.fillRect(9, 9, 1, 8)
-                            ctx.fillRect(12, 9, 1, 8)
-                        }
-                    }
-
-                    // 点击销毁槽 → 丢弃当前光标手持栈（setHeldBlock(0) 一并清 id+count）。
-                    // 仅左键：右键全归 root 右键 TapHandler 独占（t79 拿半/均分手势），避免再抢右键 grab（t138）。
-                    TapHandler {
-                        acceptedButtons: Qt.LeftButton
-                        onTapped: root.hotbar.heldBlock = 0
-                    }
-                }
+                // t651②：销毁槽（destroyWrap）已挪到分类 tab 区右侧（见上 tabBarArea）——本行不再放销毁槽，
+                //   hotbar 行独占 360 宽与主栏列同拍、与销毁槽视觉分离（修「hotbar 行与垃圾桶连在一起」）。
             }
         }
     }
