@@ -212,6 +212,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/WorldList.qml
         src/ui/Inventory.qml
         src/ui/InvSlot.qml
+        src/ui/DurabilityBar.qml # t640② 背包 main/hotbar/craft 槽工具·护甲耐久条（HUD hotbar t315 模式推广）
         src/ui/SurvivalInventory.qml
         src/ui/CharacterPreview3D.qml
         src/ui/CraftingTableUI.qml

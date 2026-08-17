@@ -834,6 +834,20 @@ Item {
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
+                        // t640② 主栏工具耐久条（t183 HUD hotbar 耐久条模式推广到背包主栏）：槽底薄条
+                        //   （DurabilityBar 复用组件），宽 ∝ remaining/max、绿/黄/红。满耐久仍显满绿条（背包常显
+                        //   语义同护甲槽 t498；与 HUD hotbar 满耐久隐不同）。触碰 mainRevision → 磨损 / 换槽后重算。
+                        //   非工具 / 空槽 → DurabilityBar 内部 maxDur<=0 / curDur<=0 自隐。
+                        DurabilityBar {
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
+                            height: 3
+                            property int cDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainDurabilityAt(index)) : 0 }
+                            property int mDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolMaxDurability(mainId)) : 0 }
+                            curDur: cDur
+                            maxDur: mDur
+                        }
                         // t590 附魔光晕（主栏槽）：槽内物品带附魔 → 浅紫半透明叠层（机制等价 MC 附魔光泽，
                         //   同 EnchantInputSlot / HUD hotbar 光晕配色）。触碰 mainRevision 令附魔写入后重算。
                         Rectangle {
@@ -997,6 +1011,18 @@ Item {
                                 text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
+                            }
+                            // t640② 背包内 hotbar 行工具耐久条（同主栏 DurabilityBar；HUD hotbar 已有 t315 条，
+                            //   背包面板补齐）。触碰 slotRevision → 磨损 / 换槽后重算。非工具 / 空槽自隐。
+                            DurabilityBar {
+                                anchors.left: parent.left; anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
+                                height: 3
+                                property int cDur: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.durabilityAt(index)) : 0 }
+                                property int mDur: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolMaxDurability(slotId)) : 0 }
+                                curDur: cDur
+                                maxDur: mDur
                             }
                             // t590 附魔光晕（hotbar 槽）：槽内物品带附魔 → 浅紫半透明叠层（机制等价 MC 附魔光泽，
                             //   同 EnchantInputSlot / HUD hotbar 光晕配色）。触碰 slotRevision 令附魔写入后重算。

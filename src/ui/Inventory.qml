@@ -746,6 +746,18 @@ Item {
                                         visible: armId !== 0
                                         materialId: armId
                                     }
+                                    // t640② 装备槽护甲耐久条（DurabilityBar；同 SurvivalInventory armorDurBar 语义：
+                                    //   满耐久也显满绿条，背包常显）。触碰 armorRevision → 受击损耗 / 换装后重算。
+                                    DurabilityBar {
+                                        anchors.left: parent.left; anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                        anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
+                                        height: 3
+                                        property int cDur: root.hotbar.armorRevision >= 0 ? root.hotbar.armorDurabilityAt(index) : 0
+                                        property int mDur: root.hotbar.armorRevision >= 0 ? root.hotbar.armorMaxDurability(armId) : 0
+                                        curDur: cDur
+                                        maxDur: mDur
+                                    }
 
                                     // 装备 / 脱下（左键单点）。t498 教训：从 VM 直读装备槽当前态（Q_INVOKABLE 恒最新），
                                     //   不走绑定属性 armId（低频 NOTIFY 下可能 stale → 幻影旧件写回光标 = 护甲复制）。
@@ -1122,6 +1134,18 @@ Item {
                                     color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                     font.pixelSize: 13; font.bold: true
                                 }
+                                // t640② 生存 tab 主栏工具耐久条（DurabilityBar；同 SurvivalInventory 主栏）。触碰
+                                //   mainRevision → 磨损 / 换槽后重算。非工具 / 空槽自隐。
+                                DurabilityBar {
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
+                                    height: 3
+                                    property int cDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainDurabilityAt(index)) : 0 }
+                                    property int mDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolMaxDurability(mainId)) : 0 }
+                                    curDur: cDur
+                                    maxDur: mDur
+                                }
                                 // 左键整组（拾取 / 放置 / 合并 / 互换，resolveClick）；写经 hotbar.mainSetStack（VM 单一权威）。
                                 //   t110：Shift+左键 → main 槽搬运到首个空 hotbar 槽（与生存背包主栏一致）。
                                 TapHandler {
@@ -1291,6 +1315,19 @@ Item {
                                     color: "#ffffff"
                                     style: Text.Outline; styleColor: "#000000"
                                     font.pixelSize: 13; font.bold: true
+                                }
+
+                                // t640② 生存 tab hotbar 行工具耐久条（DurabilityBar；同主栏）。触碰 slotRevision
+                                //   → 磨损 / 换槽后重算。非工具 / 空槽自隐。
+                                DurabilityBar {
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
+                                    height: 3
+                                    property int cDur: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.durabilityAt(index)) : 0 }
+                                    property int mDur: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolMaxDurability(slotId)) : 0 }
+                                    curDur: cDur
+                                    maxDur: mDur
                                 }
 
                                 // hover → 状态行中文名；tap → t46 与主栏/生存背包统一的栈操作（拾取/放置/合并/互换）。

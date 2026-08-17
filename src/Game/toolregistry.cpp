@@ -14,9 +14,14 @@ namespace {
 // type 字段为 BlockRegistry::ToolType（枚举归 Core；与 BlockDef.toolType 同源）。
 constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     // maxDurability 取 MC 1.0 经典值：木 59 / 石 131 / 铁 250（同 tier 镐 / 锄 / 斧 / 铲 / 剑共享；spec t263「木头耐久度最低以此类推」）。
-    // speedMul：镐 / 斧 / 铲取 MC 1.0 同 tier 倍率（木 2 / 石 4 / 铁 6）—— 匹配方块 toolType 后激活加速。
+    // speedMul：镐 / 斧取 MC 1.0 同 tier 倍率（木 2 / 石 4 / 铁 6）—— 匹配方块 toolType 后激活加速。
     //   t265：铁档（6）有意低于未来金（12）/ 钻石（8）档，留头部空间（spec「铁镐削弱，留金/钻石档空间」）；
     //   锄 / 剑恒 1.0（锄专用耕地不挖、剑是武器不挖，二者无方块的 toolType 取它们 → miningSpeedMul 恒返 1.0 等同空手）。
+    //   **t640③ 铲族速度重标（机制等价 MC 1.0「铲速=镐速同级、tier 递进」，§9 通用词）**：铲 target 方块（土 /
+    //   沙硬度 0.5）天然比镐 target（石硬度 1.5）软 3× —— 旧版铲 speedMul 沿镐表（2/4/6/8/12）→ 铲挖土 = 镐挖石
+    //   ×3 且高 tier 触 miningTime 0.05s 地板（≈瞬破），用户实测「钻石铲太快如效率5」。现全体 ×0.6 重标
+    //   （木 1.2 / 石 2.4 / 铁 3.6 / 铜 3.0 / 钻 4.8 / 金 7.2）→ 各 tier 铲挖土耗时 ≈ 同 tier 镐挖石 ×1.8、tier 递进仍
+    //   完全镜像镐表（等比缩放：铁 = 石 1.5×、钻 = 铁 ≈1.33×、金最快 7.2），钻石铲不再触地板（0.5/4.8≈0.104s）。
     // harvestLevel（rv56 问题6 新列，tier 后第 2 列）：采掘门槛等级，canHarvest / miningSpeedMul 与 BlockDef.minToolTier
     //   比较用此值。木 / 石 / 铁 / 钻石 = tier；金 = 1（MC 1.0 gold mining level = wood）；铜 = 2（自定同石级）。
     /* PickaxeWood  */ {int(BlockRegistry::Pickaxe), 1, 1, 2.0f,   59, "pickaxe_wood",  "木镐"},
@@ -29,9 +34,9 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     /* AxeWood      */ {int(BlockRegistry::Axe),     1, 1, 2.0f,   59, "axe_wood",      "木斧"},
     /* AxeStone     */ {int(BlockRegistry::Axe),     2, 2, 4.0f,  131, "axe_stone",     "石斧"},
     /* AxeIron      */ {int(BlockRegistry::Axe),     3, 3, 6.0f,  250, "axe_iron",      "铁斧"},
-    /* ShovelWood   */ {int(BlockRegistry::Shovel),  1, 1, 2.0f,   59, "shovel_wood",   "木铲"},
-    /* ShovelStone  */ {int(BlockRegistry::Shovel),  2, 2, 4.0f,  131, "shovel_stone",  "石铲"},
-    /* ShovelIron   */ {int(BlockRegistry::Shovel),  3, 3, 6.0f,  250, "shovel_iron",   "铁铲"},
+    /* ShovelWood   */ {int(BlockRegistry::Shovel),  1, 1, 1.2f,   59, "shovel_wood",   "木铲"},
+    /* ShovelStone  */ {int(BlockRegistry::Shovel),  2, 2, 2.4f,  131, "shovel_stone",  "石铲"},
+    /* ShovelIron   */ {int(BlockRegistry::Shovel),  3, 3, 3.6f,  250, "shovel_iron",   "铁铲"},
     /* SwordWood    */ {int(BlockRegistry::Sword),   1, 1, 1.0f,   59, "sword_wood",    "木剑"},
     /* SwordStone   */ {int(BlockRegistry::Sword),   2, 2, 1.0f,  131, "sword_stone",   "石剑"},
     /* SwordIron    */ {int(BlockRegistry::Sword),   3, 3, 1.0f,  250, "sword_iron",    "铁剑"},
@@ -57,7 +62,7 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     //   机制对齐 MC「金工具快而脆且采掘等级木级」）。剑 speedMul 1.0（武器不挖掘）；锄 1.0（耕地）。
     /* GoldPickaxe   */ {int(BlockRegistry::Pickaxe), 5, 1, 12.0f,   32, "pickaxe_gold",   "金镐"},
     /* GoldAxe       */ {int(BlockRegistry::Axe),     5, 1, 12.0f,   32, "axe_gold",       "金斧"},
-    /* GoldShovel    */ {int(BlockRegistry::Shovel),  5, 1, 12.0f,   32, "shovel_gold",    "金铲"},
+    /* GoldShovel    */ {int(BlockRegistry::Shovel),  5, 1,  7.2f,   32, "shovel_gold",    "金铲"},
     /* GoldSword     */ {int(BlockRegistry::Sword),   5, 1,  1.0f,   32, "sword_gold",     "金剑"},
     /* GoldHoe       */ {int(BlockRegistry::Hoe),     5, 1,  1.0f,   32, "hoe_gold",       "金锄"},
     // t557 铜工具（本工程已有材料 CopperIngot，MC 1.0 无铜工具 → 自定：speedMul 5.0 介石 4 / 铁 6 之间、耐久 180 介
@@ -65,14 +70,14 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     //   剑 speedMul 1.0（武器）；锄 1.0（耕地）。
     /* CopperPickaxe */ {int(BlockRegistry::Pickaxe), 6, 2,  5.0f,  180, "pickaxe_copper", "铜镐"},
     /* CopperAxe     */ {int(BlockRegistry::Axe),     6, 2,  5.0f,  180, "axe_copper",     "铜斧"},
-    /* CopperShovel  */ {int(BlockRegistry::Shovel),  6, 2,  5.0f,  180, "shovel_copper",  "铜铲"},
+    /* CopperShovel  */ {int(BlockRegistry::Shovel),  6, 2,  3.0f,  180, "shovel_copper",  "铜铲"},
     /* CopperSword   */ {int(BlockRegistry::Sword),   6, 2,  1.0f,  180, "sword_copper",   "铜剑"},
     /* CopperHoe     */ {int(BlockRegistry::Hoe),     6, 2,  1.0f,  180, "hoe_copper",     "铜锄"},
     // t589 钻石工具补全（斧 / 铲 / 剑 / 锄）：属性对齐钻石镐（tier 4 / harvestLevel 4 / speedMul 8.0 / 耐久 1561，
     //   MC 1.0 diamond 同 tier 共享）。剑 speedMul 1.0（武器不挖掘，伤害 7 走 attackDamage tier 4 分支既有）；
     //   锄 1.0（专用耕地）。追加在末尾（与 ToolId 枚举同序；不重排保向后兼容）。
     /* DiamondAxe    */ {int(BlockRegistry::Axe),     4, 4,  8.0f, 1561, "axe_diamond",    "钻石斧"},
-    /* DiamondShovel */ {int(BlockRegistry::Shovel),  4, 4,  8.0f, 1561, "shovel_diamond", "钻石铲"},
+    /* DiamondShovel */ {int(BlockRegistry::Shovel),  4, 4,  4.8f, 1561, "shovel_diamond", "钻石铲"},
     /* DiamondSword  */ {int(BlockRegistry::Sword),   4, 4,  1.0f, 1561, "sword_diamond",  "钻石剑"},
     /* DiamondHoe    */ {int(BlockRegistry::Hoe),     4, 4,  1.0f, 1561, "hoe_diamond",    "钻石锄"},
 };
@@ -208,7 +213,22 @@ int ToolRegistry::attackDamage(int itemId)
         default: return 4; // 防御：未知 tier 兜底木剑
         }
     }
-    return kFistDamage; // 镐 / 斧 / 铲 / 锄：徒手伤害（非武器，MC 工具攻击伤害低，本工程统一=徒手）
+    // t640⑤ 斧头伤害（spec「斧砍 mob 应 4+ 伤害」；机制等价 MC 1.0 斧伤 = 镐伤 +1 各 tier）：
+    //   MC 1.0 镐伤 木 2 / 石 3 / 铁 4 / 金 2 / 钻 5（HP）→ 斧 = 镐 +1 → 木 3 / 石 4 / 铁 5 / 金 3 / 钻 6；
+    //   铜（本工程自定围石档）：铜镐伤 3 → 铜斧 4。斧 < 剑（4/5/6/7）但 > 镐 / 铲 / 锄（恒 1），
+    //   维持 MC「剑 > 斧 > 镐 = 铲躺 1」武器级序（用户「斧头伤害 1 太弱」根因：旧斧走 kFistDamage 兜底）。
+    if (t->type == int(BlockRegistry::Axe)) {
+        switch (t->tier) {
+        case 1: return 3; // 木斧（1.5 心；MC 1.0 wood axe 3 = wood pick 2 +1）
+        case 2: return 4; // 石斧（2 心；= stone pick 3 +1）
+        case 3: return 5; // 铁斧（2.5 心；= iron pick 4 +1）
+        case 4: return 6; // 钻石斧（3 心；= diamond pick 5 +1）
+        case 5: return 3; // 金斧（1.5 心；MC 1.0 gold axe 同木斧，快而脆）
+        case 6: return 4; // 铜斧（2 心；自定 = 石斧级，介于木 / 铁之间）
+        default: return 3; // 防御：未知 tier 兜底木斧
+        }
+    }
+    return kFistDamage; // 镐 / 铲 / 锄：徒手伤害（非武器，MC 工具攻击伤害低，本工程统一=徒手）
 }
 
 QString ToolRegistry::displayName(int itemId)

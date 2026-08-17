@@ -1296,11 +1296,22 @@ int Hotbar::bowArrowMaxDamage() const
 // t263 消耗选中槽工具 1 点耐久（playercontroller 生存挖掘完成 / 锄耕地调用）。创造由 caller 不调（不消耗）。
 //   非工具 / 空槽 → no-op。耐久 >1 → -1 + bumpRevision（tooltip / HUD 刷新）。归零 → 清空槽（工具破损消失）
 //   + bumpRevision + 补发 selectedSlotChanged（selectedBlockId 可能因栈空而变 Air）。无返回值（caller 不据之分支）。
+//   t640① 耐久异常防御：消耗前把槽内工具的**非法耐久值**归一（<=0 未初始化 / >max 越界 → 满耐久新工具，
+//   同 setStack normalizeDurability 语义）——任何写入路径意外落 0 / 越界时，工具不会被「首次使用即归零
+//   清槽」（用户「所有锄头一锄就废」类报告根因：新锄以 0 耐久进槽）；正常已耗耐久（(0, max]）原样保真。
 void Hotbar::damageSelectedItem()
 {
     if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return;
     ItemStack &s = m_slots[size_t(m_selectedSlot)];
     if (!ToolRegistry::isTool(s.id) || s.count <= 0) return; // 非工具 / 空槽 → no-op
+    // t640① 归一异常耐久（防御纵深：各写入路径已归一，此处兜底任何漏网路径的 0 / 越界值）。
+    const int capDur = ToolRegistry::maxDurability(s.id);
+    if (s.durability <= 0 || s.durability > capDur) {
+        qInfo().noquote() << "[inv] tool dur anomaly slot=" << m_selectedSlot << "id=" << s.id
+                          << "dur=" << s.durability << "-> full(" << capDur << ")";
+        s.durability = capDur; // 未初始化 / 越界 → 满耐久新工具（同 normalizeDurability 语义）
+        bumpRevision();
+    }
     // t476 耐久附魔：每次消耗有 100/(level+1)% 概率被忽略（机制等价 MC unbreaking 减损耗概率；工具 / 武器均适用）。
     const int unb = EnchantRegistry::findLevel(s.enchants, EnchantRegistry::Unbreaking);
     if (unb > 0 && QRandomGenerator::global()->bounded(100) < (100 / (unb + 1)))

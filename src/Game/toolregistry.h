@@ -66,9 +66,9 @@ public:
         AxeWood      = 0x106, // 木斧：type=Axe tier 1，speedMul 2.0（伐木加速；t265 落实方块 toolType→Axe 后激活）
         AxeStone     = 0x107, // 石斧：type=Axe tier 2，speedMul 4.0
         AxeIron      = 0x108, // 铁斧：type=Axe tier 3，speedMul 6.0
-        ShovelWood   = 0x109, // 木铲：type=Shovel tier 1，speedMul 2.0（掘土沙加速；t265 落实方块 toolType→Shovel 后激活）
-        ShovelStone  = 0x10A, // 石铲：type=Shovel tier 2，speedMul 4.0
-        ShovelIron   = 0x10B, // 铁铲：type=Shovel tier 3，speedMul 6.0
+        ShovelWood   = 0x109, // 木铲：type=Shovel tier 1，speedMul 1.2（t640③ 铲族 ×0.6 重标：挖土速 ≈ 镐挖石 ×1.8，tier 递进镜像镐表）
+        ShovelStone  = 0x10A, // 石铲：type=Shovel tier 2，speedMul 2.4
+        ShovelIron   = 0x10B, // 铁铲：type=Shovel tier 3，speedMul 3.6
         SwordWood    = 0x10C, // 木剑：type=Sword tier 1，speedMul 1.0（不参与挖掘；剑攻击伤害归 t265）
         SwordStone   = 0x10D, // 石剑：type=Sword tier 2，speedMul 1.0
         SwordIron    = 0x10E, // 铁剑：type=Sword tier 3，speedMul 1.0
@@ -175,7 +175,8 @@ public:
 
     // t265 持物品攻击伤害（HP；spec「剑→加攻击伤害」）。机制等价 MC 1.0 武器伤害：
     //   - 剑（type=Sword）：tier 倍率 —— 木 4 / 石 5 / 铁 6 / 金 4（同木剑，快而脆）/ 铜 5（本工程自定）/ 钻石 7（MC 1.0 sword damage）。
-    //   - 其它（空手 / 镐 / 斧 / 铲 / 锄）：kFistDamage=1（MC 1.0 徒手 / 非武器工具伤害，剑是唯一武器）。
+    //   - 斧（type=Axe，t640⑤）：tier 倍率 —— 木 3 / 石 4 / 铁 5 / 金 3 / 铜 4 / 钻石 6（MC 1.0 斧伤 = 镐伤+1 各 tier）。
+    //   - 其它（空手 / 镐 / 铲 / 锄）：kFistDamage=1（MC 1.0 徒手 / 非武器工具伤害，剑斧是武器）。
     //   暴击（玩家滞空下落挥击）由 caller 按 base*3/2 算（attackMob）；本方法只返基础伤害。
     //   非工具 / 越界 → kFistDamage（空手兜底）。玩家可用工具段 id 查（hotbar.selectedItemId）。
     static int attackDamage(int itemId);
