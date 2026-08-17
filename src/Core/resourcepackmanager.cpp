@@ -549,6 +549,40 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         // t638 附魔台顶摊开书（tile 162=enchant_book）：**无 pack 等价**（MC 的书是独立实体模型非方块贴图；
         //   包内无 enchant_book.png）→ 不映射，程序贴图恒用（tools/build_book.py：白纸底 + 灰字线 + 中央
         //   书脊暗线——PartialBlockGeometry EnchantingTable case 顶书页盒专用）。留注释防未来误接。
+        // t646 补映射批（2026-08-17 用户 pack block/ 目录实测审计：以下贴图包内全存在但未接 → pack 启用
+        //   时世界贴图仍走程序瓦片）。机制同既有直映射（包缺文件安全跳过保程序瓦片；接上后创造 3D 图标
+        //   采共享图集自动吃到 pack 贴图）。**取现代（1.13+ flattening）命名**——旧名（web.png /
+        //   cobblestone_mossy.png / stonebrick.png / chipped_anvil_top.png / damaged_anvil_top.png）不碰。
+        {102, QStringLiteral("spruce_planks.png")},    // spruce_planks（云杉木板/台阶/栅栏共用 tile 102；包内残留
+                                                       //   `spruce_planks (2).png` 是垃圾文件不引用）
+        {106, QStringLiteral("packed_ice.png")},       // packed_ice（浮冰；程序名 default_pack_ice）
+        {107, QStringLiteral("blue_ice.png")},         // blue_ice（蓝冰）
+        {113, QStringLiteral("anvil_top.png")},        // anvil_top（完好铁砧顶面；Anvil per-face topTile）
+        {114, QStringLiteral("anvil_base.png")},       // anvil_base（铁砧三阶段共享底·侧·前面）
+        {115, QStringLiteral("anvil_top_damaged_1.png")}, // anvil_top_damaged_1（微损铁砧顶；勿用 chipped_anvil_top
+                                                       //   .png = 现代 1.19+ 命名）
+        {116, QStringLiteral("anvil_top_damaged_2.png")}, // anvil_top_damaged_2（重损铁砧顶；勿用 damaged_anvil_top.png）
+        {120, QStringLiteral("cobweb.png")},           // cobweb（蜘蛛网 cross cutout；web.png 是 1.8 旧名同图，取现代名）
+        {123, QStringLiteral("cut_sandstone.png")},    // cut_sandstone（切制砂岩）
+        {124, QStringLiteral("mossy_cobblestone.png")}, // mossy_cobble（苔石；cobblestone_mossy.png 旧命名同图，取现代名）
+        {128, QStringLiteral("stone_bricks.png")},     // stone_brick（石砖/台阶/楼梯共用 tile 128；stonebrick.png 是
+                                                       //   1.8 旧名，取现代名）
+        {131, QStringLiteral("lever.png")},            // lever（拉杆贴地扳手）
+        {135, QStringLiteral("brown_mushroom.png")},   // brown_mushroom（白蘑菇 cross cutout；tile 62 红蘑菇已接
+                                                       //   red_mushroom.png，不同瓦片勿混）
+        // t646 TNT per-face（t638 铁轨家族同套流程）：包内 tnt_side/tnt_top/tnt_bottom 三贴图实测存在。
+        //   TntBlock def t646 改 topTile=164/bottomTile=165/sideTile=frontTile=122（此前四槽全 122 顶底也用
+        //   侧图）→ 此处接 122→tnt_side（侧·前面：捆带+中央标识）/ 164→tnt_top（顶：引线接口俯视）/
+        //   165→tnt_bottom（底：纯药柱底板无标记）。非 pack 回落 tools/build_tnt.py 程序三图（tile 122 与
+        //   t485 版本字节一致）。包内缺 PNG 安全跳过。
+        {122, QStringLiteral("tnt_side.png")},         // tnt（TNT 侧·前面：深红药柱+捆带+中央标识；t646 per-face）
+        {164, QStringLiteral("tnt_top.png")},          // tnt_top（TNT 顶面：药柱截面+中央引线接口俯视；t646）
+        {165, QStringLiteral("tnt_bottom.png")},       // tnt_bottom（TNT 底面：纯药柱底板+暗捆带；t646）
+        // t646 按钮 vanilla 复用（机制等价 MC 1.0 wooden/stone button 本就复用 planks/cobblestone 贴图——
+        //   无独立按钮方块贴图）：tile 132→oak_planks.png / 133→cobblestone.png 两行。非 pack 回落程序
+        //   default_wood_button.png / default_stone_button.png（tools/build_lever_button.py 自绘按钮钮面）。
+        {132, QStringLiteral("oak_planks.png")},       // wood_button（木按钮=木板贴图；MC vanilla 复用 planks）
+        {133, QStringLiteral("cobblestone.png")},      // stone_button（石按钮=圆石贴图；MC vanilla 复用 cobblestone）
     };
     return kMap;
 }

@@ -280,7 +280,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_rail.png                # t484 铁轨贴地薄板 flat 贴图（build_rail.py；透明底+棕色枕木+灰铁双轨；alphaCutoff cutout；Rail 各面）
         textures/default_rail_corner.png         # t565 铁轨 90° 拐角贴图（build_rail.py；轨自南进向左弯出；mesher 据轨 state 连接位选）
         textures/default_rail_cross.png          # t565 铁轨十字交叉贴图（build_rail.py；南北+东西双轨叠交+中央方枕木）
-        textures/default_tnt.png                 # t485 TNT 各面贴图（build_tnt.py；深红药柱底+横向深棕捆带+中央亮黄标识+顶部引线点；沙漠神殿陷阱方块）
+        textures/default_tnt.png                 # t485/t646 TNT 侧·前面贴图（build_tnt.py；深红药柱底+横向深棕捆带+中央亮黄标识；沙漠神殿陷阱方块；t646 起 side/front 专用）
+        textures/default_tnt_top.png             # t646 TNT 顶面贴图（build_tnt.py；药柱截面+捆带俯视压痕+中央亮黄引线接口俯视；TntBlock topTile=164）
+        textures/default_tnt_bottom.png          # t646 TNT 底面贴图（build_tnt.py；纯药柱底板+暗捆带无标记；TntBlock bottomTile=165）
         textures/default_cut_sandstone.png       # t485 切制砂岩各面贴图（build_cut_sandstone.py；暖沙色平滑底+内陷矩形装饰边框；金字塔外框装饰变体）
         textures/default_mossy_cobble.png        # t486 苔石各面贴图（build_mossy_cobble.py；圆石灰底+散布暗绿苔藓斑簇；丛林神殿主体）
         textures/default_dispenser_top.png       # t486 发射器顶/底面贴图（build_dispenser.py；石质灰底+中央圆形排出口俯视环纹）

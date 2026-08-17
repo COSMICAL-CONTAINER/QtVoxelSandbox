@@ -1446,7 +1446,12 @@ public:
     //       无 pack 等价（MC 书是独立实体模型非方块贴图）→ 程序贴图恒用）、163=cactus_bottom（仙人掌底面：
     //       更暗绿截面（区别 top 的中央凹陷）；Cactus bottomTile=本 tile——观察者视角可见柱底；pack
     //       {163→cactus_bottom.png}）。tools/build_rail_family.py / build_book.py / build_cactus.py 程序生成。
-    static constexpr int AtlasTileCount = 164;
+    //   t646：164=tnt_top（TNT 顶面贴图：深红药柱截面 + 3 条捆带俯视压痕 + 中央亮黄引线接口圆点俯视；
+    //       TntBlock topTile=本 tile——per-face 机制等价 MC 1.0 TNT top/bottom/side 三面贴图，此前四槽全
+    //       122 顶底也用侧图；pack {164→tnt_top.png}）、165=tnt_bottom（TNT 底面贴图：纯药柱底板 + 3 条
+    //       暗捆带延续，无引线/标识（贴地面无标记）；TntBlock bottomTile=本 tile；pack {165→tnt_bottom.png}）。
+    //       tools/build_tnt.py 程序生成（default_tnt.png tile 122 与 t485 版本字节一致——side 先取 RNG 流）。
+    static constexpr int AtlasTileCount = 166;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质

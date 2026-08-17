@@ -340,6 +340,12 @@ TILES = [
     "default_redstone_torch",        # 161 redstone_torch（红石火把 cross：透明底 + 深棕柄 + 亮红焰头；常亮光 7）
     "default_enchant_book",          # 162 enchant_book（附魔台顶摊开书页：白纸底 + 灰字线 + 中央书脊；无 pack 等价）
     "default_cactus_bottom",         # 163 cactus_bottom（仙人掌底面：更暗绿截面 + 外圈皮层暗环；观察者视角可见）
+    # t646 TNT per-face 顶/底两张（机制等价 MC 1.0 TNT 三面贴图 top/bottom/side；此前 TntBlock 四槽全 122——
+    #   顶底也用侧图）。侧/前面仍 122（捆带 + 中央标识）；顶 = 引线接口俯视（药柱截面 + 3 条捆带俯视压痕 +
+    #   中央亮黄 fuse dot）；底 = 纯药柱底板（3 条暗捆带延续，无引线/标识，贴地面无标记）。pack 侧
+    #   tileFilenameMap {122→tnt_side / 164→tnt_top / 165→tnt_bottom} 运行期映射。tools/build_tnt.py 生成。
+    "default_tnt_top",               # 164 tnt_top（TNT 顶面：药柱截面 + 中央引线接口亮黄圆点俯视）
+    "default_tnt_bottom",            # 165 tnt_bottom（TNT 底面：纯药柱底板 + 暗捆带，无标记）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

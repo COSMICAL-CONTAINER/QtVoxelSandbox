@@ -476,11 +476,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     // ── t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；名称 / 贴图全原创自绘 §9a）。
     //   TNT（TntBlock）：可引爆爆炸物方块。整立方 opaque（solid=true / ShapeFull，与砂岩/箱子同走 culled 立方面
     //   路径）、hardness=0.0（MC 1.0 TNT 瞬破）、NoTool（空手可采且掉落）、dropId=自身（破 TNT 掉 TNT 方块）、
-    //   dropCount=1、maxStack=64。各面=tnt(122)（深红药柱底+横向深棕捆带+中央亮黄标识+顶部引线点）。音色归
-    //   GroupGrass（软质闷击，机制等价 MC 1.0 TNT 草地音色）。引爆：踩压力板触发（playercontroller 扫 footprint
+    //   dropCount=1、maxStack=64。t646 per-face（机制等价 MC 1.0 TNT top/bottom/side 三面贴图，此前四槽全
+    //   122 顶底也用侧图）：顶=tnt_top(164)（药柱截面 + 捆带俯视压痕 + 中央亮黄引线接口俯视）/ 底=
+    //   tnt_bottom(165)（纯药柱底板 + 暗捆带，无标记）/ 侧·前=tnt(122)（深红药柱底+横向深棕捆带+中央亮黄
+    //   标识）。音色归 GroupGrass（软质闷击，机制等价 MC 1.0 TNT 草地音色）。引爆：踩压力板触发（playercontroller 扫 footprint
     //   压力板下垫 TNT）→ EntityManager::detonateTntBlock（复用 destroySphereSilent 球形破坏 + 距离衰减伤玩家 +
     //   explosion 音/视，同 Stalker t284）。配方 5 火药 + 4 沙 → 1 TNT。进创造调色板。
-    /* tnt          */ {int(BlockRegistry::TntBlock),         122,122,122,122, true,  BlockRegistry::ShapeFull,     0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::TntBlock),       1, 64, "tnt",         "TNT"},
+    /* tnt          */ {int(BlockRegistry::TntBlock),         164,165,122,122, true,  BlockRegistry::ShapeFull,     0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::TntBlock),       1, 64, "tnt",         "TNT"},
     //   切制砂岩（CutSandstone）：装饰砂岩变体（机制等价 MC 1.0 cut sandstone——平滑+切割倒角边框，区别于普通
     //   砂岩层理纹）。整立方 opaque（solid=true / ShapeFull，与砂岩/石头同走 culled 立方面路径）、hardness=0.8
     //   （同砂岩量级，需镐）、Pickaxe、requiresTool=true、minTier1（木镐可破）、dropId=自身（破切制砂岩掉切制

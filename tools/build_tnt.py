@@ -11,7 +11,12 @@ t485 沙漠神殿 TNT 陷阱方块（机制等价 MC 1.0 TNT——可引爆的�
   - 侧面贴一张字面「TNT」风格标识（用原创几何色块，非商标字样）。
 
 输出（覆盖写入 textures/）：
-  default_tnt.png   （tile 122，TNT 各面同贴图）
+  default_tnt.png         （tile 122，TNT 侧/前面：捆带 + 中央标识）
+  default_tnt_top.png     （tile 164，TNT 顶面：药柱截面 + 中央引线接口俯视）
+  default_tnt_bottom.png  （tile 165，TNT 底面：药柱底板 + 暗捆带，无引线/标识）
+
+t646 per-face（机制等价 MC 1.0 TNT 三面贴图 side/top/bottom）：此前四槽全 122（顶底
+也是侧图）；现顶面独立（fuse 圆点俯视）、底面独立（纯药柱底无标记），侧/前面共用侧图。
 
 依赖：仅 PIL/numpy，无外部贴图。与 build_sandstone.py / build_ore.py 同风格（程序生成原创像素图）。
 """
@@ -85,20 +90,58 @@ def draw_side():
 
 
 def draw_top():
-    """顶面：深红药柱截面 + 中央亮黄引燃点（引线接口）+ 四角暗化。"""
+    """顶面（t646 tile 164）：深红药柱截面 + 中央亮黄引燃点（引线接口俯视）+ 四角暗化。
+
+    读作「成捆药柱的俯视截面」——侧面捆带的俯视延续为外圈边框暗带；中央亮黄/白小圆
+    （fuse dot）表引线接口（顶视看引线插入点）。与侧面标识的亮黄同色语言。
+    """
     c = tnt_base()
     speckle(c, _RNG, density=0.25)
-    # 中央引燃点（亮黄小圆 + 暗心），暗示「点燃即爆」。
-    fuse = np.array([232.0, 196.0, 56.0])
-    fuse_core = np.array([60.0, 40.0, 24.0])
-    rect(c, 7, 7, 8, 8, fuse)
-    px(c, 7, 7, fuse_core)
+    # 外圈边框暗带（侧面边缘暗化的俯视延续 + 捆带勒出的外沿）。
+    rim = np.array([140.0, 36.0, 30.0])
+    rect(c, 0, 0, TS - 1, 0, rim)
+    rect(c, 0, TS - 1, TS - 1, TS - 1, rim)
+    rect(c, 0, 0, 0, TS - 1, rim)
+    rect(c, TS - 1, 0, TS - 1, TS - 1, rim)
+    # 捆带俯视压痕：3 条捆带在顶面的勒痕（与侧面 y=3/8/12 对应 → 顶面 x=3/8/12 竖暗线，
+    #   读作「带子绕过顶面」；深棕同侧图捆带色但更暗（顶视受光弱））。
+    band_top = np.array([80.0, 50.0, 28.0])
+    for x in [3, 8, 12]:
+        rect(c, x, 1, x, TS - 2, band_top)
+    # 中央引线接口（fuse dot）：亮黄圆点 + 白热高光心 + 暗色勒圈 —— 顶视看引线插口。
+    fuse_ring = np.array([96.0, 60.0, 32.0])   # 深棕勒圈（捆带同语言）
+    fuse = np.array([232.0, 196.0, 56.0])      # 亮黄引线帽（同侧图标识底色）
+    fuse_hot = np.array([252.0, 240.0, 170.0]) # 白热高光心
+    rect(c, 6, 6, 9, 9, fuse_ring)             # 外勒圈 4×4
+    rect(c, 7, 7, 8, 8, fuse)                  # 亮黄 2×2
+    px(c, 7, 7, fuse_hot)                      # 左上高光像素
     # 四角暗化（表药柱捆扎角落磨损）。
     corner = np.array([140.0, 36.0, 30.0])
-    rect(c, 0, 0, 2, 2, corner)
-    rect(c, TS - 3, 0, TS - 1, 2, corner)
-    rect(c, 0, TS - 3, 2, TS - 1, corner)
-    rect(c, TS - 3, TS - 3, TS - 1, TS - 1, corner)
+    rect(c, 1, 1, 2, 2, corner)
+    rect(c, TS - 3, 1, TS - 2, 2, corner)
+    rect(c, 1, TS - 3, 2, TS - 2, corner)
+    rect(c, TS - 3, TS - 3, TS - 2, TS - 2, corner)
+    return c
+
+
+def draw_bottom():
+    """底面（t646 tile 165）：深红药柱底板 + 暗捆带延续，无引线/无标识。
+
+    读作「炸药包的底板」——捆带绕过底面成横向暗带（与侧面 y=3/8/12 同位）；底面贴地
+    无标记（引线/标识都在顶面与侧面，机制等价 MC TNT 底面纯药柱底）。
+    """
+    c = tnt_base()
+    speckle(c, _RNG, density=0.30)
+    # 3 条横向捆带（与侧面同位 y=3/8/12；底面受光最弱 → 无高光上沿，仅暗带）。
+    band = np.array([88.0, 54.0, 30.0])  # 深棕（比侧图更暗一格，底面不受光）
+    for y in [3, 8, 12]:
+        rect(c, 0, y, TS - 1, y, band)
+    # 整体边缘暗化（贴地磨损；比侧图暗一档）。
+    edge = np.array([112.0, 28.0, 24.0])
+    rect(c, 0, 0, TS - 1, 0, edge)
+    rect(c, 0, TS - 1, TS - 1, TS - 1, edge)
+    rect(c, 0, 0, 0, TS - 1, edge)
+    rect(c, TS - 1, 0, TS - 1, TS - 1, edge)
     return c
 
 
@@ -110,9 +153,12 @@ def save(arr, name):
 
 
 def main():
-    # TNT 各面同贴图（侧/顶/底统一走 draw_side 观感；顶面细节差异不影响立方体读感，
-    # 且 mesher 整立方路径对 TNT 的 6 面统一用 tile 122）。生成 single default_tnt.png。
+    # t646 per-face：侧/前面 = 侧图（捆带 + 中央标识）；顶 = 引线接口俯视；底 = 纯药柱底。
+    #   **先画 side**：default_tnt.png（tile 122）与 t485 版本字节一致（RNG 调用序不变，
+    #   side 先消耗固定次数的随机流，top/bottom 在其后取流 → 已有瓦片不漂移）。
     save(draw_side(), "default_tnt")
+    save(draw_top(), "default_tnt_top")
+    save(draw_bottom(), "default_tnt_bottom")
 
 
 if __name__ == "__main__":
