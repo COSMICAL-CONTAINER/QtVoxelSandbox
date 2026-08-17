@@ -1165,6 +1165,19 @@ Item {
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
+                        // t647 附魔光晕（主栏槽）：同 SurvivalInventory 主栏光晕。触碰 mainRevision 重算。
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: {
+                                const _r = root.hotbar.mainRevision
+                                if (_r < 0 || mainId === 0) return false
+                                const e = root.hotbar.mainEnchantsAt(index)
+                                return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                            }
+                            color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                            radius: 3
+                            z: 3
+                        }
                         TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("main", index) }
                         TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("main", index) }
                         HoverHandler {
@@ -1259,6 +1272,19 @@ Item {
                                 text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
+                            }
+                            // t647 附魔光晕（hotbar 槽）：同 SurvivalInventory hotbar 行光晕。触碰 slotRevision 重算。
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: {
+                                    const _r = root.hotbar.slotRevision
+                                    if (_r < 0 || slotId === 0) return false
+                                    const e = root.hotbar.enchantsAt(index)
+                                    return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                }
+                                color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                radius: 3
+                                z: 3
                             }
                             TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("hotbar", index) }
                             TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("hotbar", index) }
@@ -1402,13 +1428,14 @@ Item {
                 return "#6fe06f"                                               // 其余绿
             }
         }
-        // 该槽是否有附魔（预览产物 / 输入工具附魔光晕判定）。
+        // 该槽是否有附魔（预览产物 / 输入工具附魔光晕判定）。t647：4 槽全查（旧版只查 e[0] —— 合并书 /
+        //   combine 产物附魔可落在 1..3 槽 → 光晕漏显）。
         property bool hasEnch: {
             const _r = root.anvilRev
             if (_r < 0) return false
             if (aslot.slotId === 0) return false
             const e = aslot.slotEnch
-            return Array.isArray(e) && (e[0] || 0) !== 0
+            return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
         }
         TapHandler {
             acceptedButtons: Qt.LeftButton

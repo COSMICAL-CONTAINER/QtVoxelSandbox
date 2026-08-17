@@ -179,18 +179,26 @@ Item {
     }
     function localReadSlot(group, index) {
         const si = root.furnaceSlotIndex(group)
-        if (si < 0 || !root.furnaceStore) return { id: 0, count: 0 }
+        if (si < 0 || !root.furnaceStore) return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0], name: "" }
         // 三轮复盘：同步直读 FurnaceStore（不经只读绑定 → 永远最新；旧「触碰 furnaceCoordRev」是裸语句
         //   触碰、qmlcachegen AOT 下无效，且本地函数读 store 本就同步权威，无需触碰）。
+        //   t647：实例元数据一并读出（耐久 / 附魔 / 名 —— 工具 / 护甲 / 附魔书进熔炉槽保真）。
         return {
             id: root.furnaceStore.slotIdAt(root.furnaceX, root.furnaceY, root.furnaceZ, si),
-            count: root.furnaceStore.slotCountAt(root.furnaceX, root.furnaceY, root.furnaceZ, si)
+            count: root.furnaceStore.slotCountAt(root.furnaceX, root.furnaceY, root.furnaceZ, si),
+            durability: root.furnaceStore.slotDurabilityAt(root.furnaceX, root.furnaceY, root.furnaceZ, si),
+            enchants: root.furnaceStore.slotEnchantsAt(root.furnaceX, root.furnaceY, root.furnaceZ, si),
+            name: root.furnaceStore.slotNameAt(root.furnaceX, root.furnaceY, root.furnaceZ, si)
         }
     }
-    function localWriteSlot(group, index, id, count) {
+    function localWriteSlot(group, index, id, count, durability, enchants, name) {
         const si = root.furnaceSlotIndex(group)
         if (si < 0 || !root.furnaceStore) return
-        root.furnaceStore.setSlot(root.furnaceX, root.furnaceY, root.furnaceZ, si, id, count)
+        // t647：实例元数据透传 FurnaceStore（同 ChestStore 模式；dur 归一只存实例值 >0 或 -1 自动）。
+        root.furnaceStore.setSlot(root.furnaceX, root.furnaceY, root.furnaceZ, si, id, count,
+                                  (Array.isArray(enchants) && enchants.length === 4) ? enchants : [],
+                                  (typeof name === "string") ? name : "",
+                                  (durability > 0) ? durability : -1)
     }
     function readSlot(group, index) { return InventoryOps.readSlot(root, group, index) }
     // t622：薄包装签名补 durability / enchants / name 形参透传（对齐 AnvilUI / ChestUI）—— main/hotbar 槽
@@ -306,6 +314,17 @@ Item {
         let outCount = root.furnaceStore.slotCountAt(fx, fy, fz, 2)
         let burnRemain = root.furnaceStore.burnProgressAt(fx, fy, fz)
         let smeltProgress = root.furnaceStore.smeltingProgressAt(fx, fy, fz)
+        // t647 三槽实例元数据快照（tick 只改 count，写回时元数据原样透传 —— 防 tick 扣燃料 / 产物的
+        //   setSlot 走元数据缺省路径清掉槽内附魔 / 名 / 耐久）。
+        const inEnch = root.furnaceStore.slotEnchantsAt(fx, fy, fz, 0)
+        const inName = root.furnaceStore.slotNameAt(fx, fy, fz, 0)
+        const inDur = root.furnaceStore.slotDurabilityAt(fx, fy, fz, 0)
+        const fuelEnch = root.furnaceStore.slotEnchantsAt(fx, fy, fz, 1)
+        const fuelName = root.furnaceStore.slotNameAt(fx, fy, fz, 1)
+        const fuelDur = root.furnaceStore.slotDurabilityAt(fx, fy, fz, 1)
+        const outEnch = root.furnaceStore.slotEnchantsAt(fx, fy, fz, 2)
+        const outName = root.furnaceStore.slotNameAt(fx, fy, fz, 2)
+        const outDur = root.furnaceStore.slotDurabilityAt(fx, fy, fz, 2)
         // 脏标记：仅 tick 推进过的字段写回（值 = tick 最终权威值；未动字段不写 → 玩家在 tick 间放入的物不被覆盖）。
         let dirtyIn = false, dirtyFuel = false, dirtyOut = false, dirtyBurn = false, dirtySmelt = false
 
@@ -363,9 +382,10 @@ Item {
         // 末尾把「tick 推进过」的栈 / 进度写回 FurnaceStore（脏标记 → 只写本 tick 真正动的字段；每 setSlot/
         //   setBurn/setSmelting 各发一次 furnaceChanged；熔炉每 tick 至多 5 写 = 5 次 emit，10Hz × 熔炉数
         //   远非热点；slotRev 绑定触碰重算廉价）。空栈归一交给 setSlot 内部（id<=0/count<=0 → 空）。
-        if (dirtyIn) root.furnaceStore.setSlot(fx, fy, fz, 0, inId, inCount)
-        if (dirtyFuel) root.furnaceStore.setSlot(fx, fy, fz, 1, fuelId, fuelCount)
-        if (dirtyOut) root.furnaceStore.setSlot(fx, fy, fz, 2, outId, outCount)
+        //   t647：写回透传实例元数据快照（tick 只动 count —— 元数据不变，原样回写防清）。
+        if (dirtyIn) root.furnaceStore.setSlot(fx, fy, fz, 0, inId, inCount, inEnch, inName, inDur)
+        if (dirtyFuel) root.furnaceStore.setSlot(fx, fy, fz, 1, fuelId, fuelCount, fuelEnch, fuelName, fuelDur)
+        if (dirtyOut) root.furnaceStore.setSlot(fx, fy, fz, 2, outId, outCount, outEnch, outName, outDur)
         if (dirtyBurn) root.furnaceStore.setBurn(fx, fy, fz, burnRemain)
         if (dirtySmelt) root.furnaceStore.setSmelting(fx, fy, fz, smeltProgress)
 
@@ -495,6 +515,19 @@ Item {
                         color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                         font.pixelSize: 13; font.bold: true
                     }
+                    // t647 附魔光晕（输入槽）：同主栏光晕配色。触碰 slotRev 重算。
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: {
+                            const _r = root.slotRev
+                            if (_r < 0 || root.inId === 0) return false
+                            const e = root.furnaceStore.slotEnchantsAt(root.furnaceX, root.furnaceY, root.furnaceZ, 0)
+                            return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                        }
+                        color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                        radius: 3
+                        z: 3
+                    }
                     TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("in", 0) }
                     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("in", 0) }
                     // t94 tooltip：悬停显输入物品名（inId 经 slotRev 刷新；空槽不显）。
@@ -565,6 +598,19 @@ Item {
                         text: { root.slotRev; return root.fuelCount }
                         color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                         font.pixelSize: 13; font.bold: true
+                    }
+                    // t647 附魔光晕（燃料槽）：同主栏光晕配色。触碰 slotRev 重算。
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: {
+                            const _r = root.slotRev
+                            if (_r < 0 || root.fuelId === 0) return false
+                            const e = root.furnaceStore.slotEnchantsAt(root.furnaceX, root.furnaceY, root.furnaceZ, 1)
+                            return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                        }
+                        color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                        radius: 3
+                        z: 3
                     }
                     TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("fuel", 0) }
                     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("fuel", 0) }
@@ -726,6 +772,19 @@ Item {
                         color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                         font.pixelSize: 13; font.bold: true
                     }
+                    // t647 附魔光晕（产物槽）：同主栏光晕配色。触碰 slotRev 重算。
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: {
+                            const _r = root.slotRev
+                            if (_r < 0 || root.outId === 0) return false
+                            const e = root.furnaceStore.slotEnchantsAt(root.furnaceX, root.furnaceY, root.furnaceZ, 2)
+                            return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                        }
+                        color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                        radius: 3
+                        z: 3
+                    }
                     TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("out", 0) }
                     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("out", 0) }
                     // t94 tooltip：悬停显产物物品名（outId 经 slotRev 刷新）。
@@ -815,6 +874,19 @@ Item {
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
+                        // t647 附魔光晕（主栏槽）：同主栏光晕配色。触碰 mainRevision 重算。
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: {
+                                const _r = root.hotbar.mainRevision
+                                if (_r < 0 || mainId === 0) return false
+                                const e = root.hotbar.mainEnchantsAt(index)
+                                return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                            }
+                            color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                            radius: 3
+                            z: 3
+                        }
                         TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("main", index) }
                         TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("main", index) }
                         // t94 tooltip：悬停显主栏槽物品名（mainId 由 delegate 持有；触碰 mainRevision 刷新）。
@@ -903,6 +975,19 @@ Item {
                                 text: { root.hotbar.slotRevision; return root.hotbar.countAt(index) }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
+                            }
+                            // t647 附魔光晕（hotbar 槽）：同主栏光晕配色。触碰 slotRevision 重算。
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: {
+                                    const _r = root.hotbar.slotRevision
+                                    if (_r < 0 || slotId === 0) return false
+                                    const e = root.hotbar.enchantsAt(index)
+                                    return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                }
+                                color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                radius: 3
+                                z: 3
                             }
                             TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("hotbar", index) }
                             TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("hotbar", index) }

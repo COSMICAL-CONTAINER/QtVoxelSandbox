@@ -117,7 +117,7 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, co
 //   写入初速。机制等价 MC 1.0 发射器把物品从排出口朝朝向弹出。
 void ItemEntityManager::spawnItemAt(const QVector3D &pos, int itemId, int count,
                                     float dirX, float dirZ, float speed,
-                                    const QVariantList &enchants, const QString &name)
+                                    const QVariantList &enchants, const QString &name, int durability)
 {
     if (itemId <= 0) return; // air / 非法：不产出（同 spawnItem 守卫）
     if (count < 1) count = 1;
@@ -169,6 +169,7 @@ void ItemEntityManager::spawnItemAt(const QVector3D &pos, int itemId, int count,
         for (int i = 0; i < 4; ++i)
             e.enchants[i] = (i < enchants.size()) ? enchants.at(i).toInt() : 0;
         e.name = name.trimmed(); // t622 实例名（拾取回填用）
+        e.durability = durability; // t647 实例耐久（-1 = 未初始化；拾取回填用）
     }
     // 定向弹出初速：dir 归一化 × speed（退化全 0 → 不设初速，原地落地）。vy=0（水平弹出 + 重力抛物，
     //   机制等价 MC 发射器弹物品的短抛物线）。
@@ -190,7 +191,7 @@ void ItemEntityManager::spawnItemAt(const QVector3D &pos, int itemId, int count,
 //   机制等价 MC 玩家主动丢弃物品：从眼位沿视线扔出（非哈希随机全圆弹出）。
 void ItemEntityManager::spawnItemThrown(const QVector3D &pos, int itemId, int count,
                                         float dirX, float dirY, float dirZ, float speed,
-                                        const QVariantList &enchants, const QString &name)
+                                        const QVariantList &enchants, const QString &name, int durability)
 {
     if (itemId <= 0) return; // air / 非法：不产出（同 spawnItem 守卫）
     if (count < 1) count = 1;
@@ -242,6 +243,7 @@ void ItemEntityManager::spawnItemThrown(const QVector3D &pos, int itemId, int co
         for (int i = 0; i < 4; ++i)
             e.enchants[i] = (i < enchants.size()) ? enchants.at(i).toInt() : 0;
         e.name = name.trimmed(); // t622 实例名（拾取回填用）
+        e.durability = durability; // t647 实例耐久（-1 = 未初始化；拾取回填用）
     }
     // 定向投掷初速（三维）：dir 归一化 × speed（含 Y 分量——仰视上抛 / 俯视下压；重力在 tick 内继续作用成
     //   抛物线）。退化全 0 → 不设初速（原地落下）。

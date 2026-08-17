@@ -114,18 +114,26 @@ Item {
     // ── t168 / t542 面板专属槽路由：dispenser 容器格走 DispenserStore（按 dispenserX/Y/Z 寻址；main/hotbar
     //   由 InventoryOps 统一经 VM）。readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处
     //   localReadSlot/localWriteSlot）。dispCoordRev 触碰 dispenserX/Y/Z（切发射器时坐标变 → delegate 重读）。
+    //   t647：实例元数据透传（耐久 / 附魔 / 名 —— 同 ChestStore 模式；修「附魔 / 改名物品放进发射器
+    //   拿出来 / 弹出来变白板」）。
     function localReadSlot(group, index) {
         if (group === "dispenser" && root.dispenserStore) {
             return {
                 id: root.dispenserStore.slotIdAt(root.dispenserX, root.dispenserY, root.dispenserZ, index),
-                count: root.dispenserStore.slotCountAt(root.dispenserX, root.dispenserY, root.dispenserZ, index)
+                count: root.dispenserStore.slotCountAt(root.dispenserX, root.dispenserY, root.dispenserZ, index),
+                durability: root.dispenserStore.slotDurabilityAt(root.dispenserX, root.dispenserY, root.dispenserZ, index),
+                enchants: root.dispenserStore.slotEnchantsAt(root.dispenserX, root.dispenserY, root.dispenserZ, index),
+                name: root.dispenserStore.slotNameAt(root.dispenserX, root.dispenserY, root.dispenserZ, index)
             }
         }
-        return { id: 0, count: 0 }
+        return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0], name: "" }
     }
-    function localWriteSlot(group, index, id, count) {
-        if (group === "dispenser" && root.dispenserStore)
-            root.dispenserStore.setSlot(root.dispenserX, root.dispenserY, root.dispenserZ, index, id, count)
+    function localWriteSlot(group, index, id, count, durability, enchants, name) {
+        if (group !== "dispenser" || !root.dispenserStore) return
+        root.dispenserStore.setSlot(root.dispenserX, root.dispenserY, root.dispenserZ, index, id, count,
+                                    (Array.isArray(enchants) && enchants.length === 4) ? enchants : [],
+                                    (typeof name === "string") ? name : "",
+                                    (durability > 0) ? durability : -1)
     }
     // resolveClick / resolveRightClick（拾取/放置/合并/互换 + 半份）：算法见 InventoryOps（多面板共享）。
     //   返回 {slotId,slotCount,slotDur,slotEnch,heldId,heldCount,heldDur,heldEnch} 或 null=无操作；
@@ -153,6 +161,8 @@ Item {
     // t549 发射器 Shift+左键双向语义（spec「shift+左键应把物品直接放进去」；同附魔台 slotShiftLeftEnchant /
     //   箱子 slotShiftLeftChest 模式）：main/hotbar → 整栈并入发射器 9 槽（同 id 合并 → 空槽开新；满 → 余数
     //   留源槽）；dispenser 槽 → 整栈归还背包（addToAny）；背包满 → 余数留原槽（防丢物）。
+    //   t647：并入 / 归还均透传实例元数据（耐久 / 附魔 / 名 —— 同 InventoryOps.addToChest 模式；空槽开新
+    //   写源栈元数据，同 id 合并不动槽内元数据）。
     function slotShiftLeft(group, index) {
         if (!root.hotbar) return
         if (group === "main" || group === "hotbar") {
@@ -165,28 +175,33 @@ Item {
                 const cur = InventoryOps.readSlot(root, "dispenser", i)
                 if (cur.id === src.id && cur.count < cap) {
                     const move = Math.min(cap - cur.count, remaining)
-                    InventoryOps.writeSlot(root, "dispenser", i, src.id, cur.count + move)
+                    InventoryOps.writeSlot(root, "dispenser", i, src.id, cur.count + move, cur.durability, cur.enchants, cur.name)
                     remaining -= move
                 }
             }
             for (let i = 0; i < root.dispSlotCount && remaining > 0; ++i) {
                 if (InventoryOps.readSlot(root, "dispenser", i).id === 0) {
                     const move = Math.min(cap, remaining)
-                    InventoryOps.writeSlot(root, "dispenser", i, src.id, move)
+                    InventoryOps.writeSlot(root, "dispenser", i, src.id, move, src.durability, src.enchants, src.name)
                     remaining -= move
                 }
             }
             if (remaining !== src.count) {
                 InventoryOps.writeSlot(root, group, index, remaining > 0 ? src.id : 0, remaining,
-                                      remaining > 0 ? src.durability : 0, remaining > 0 ? src.enchants : [0,0,0,0])
+                                      remaining > 0 ? src.durability : 0,
+                                      remaining > 0 ? src.enchants : [0,0,0,0],
+                                      remaining > 0 ? src.name : "")
             }
             return
         }
         if (group === "dispenser") {
             const src = InventoryOps.readSlot(root, "dispenser", index)
             if (src.id === 0 || src.count <= 0) return
-            const remain = root.hotbar.addToAny(src.id, src.count)
-            InventoryOps.writeSlot(root, "dispenser", index, remain > 0 ? src.id : 0, remain)
+            const remain = root.hotbar.addToAny(src.id, src.count, src.durability, src.enchants, src.name)
+            InventoryOps.writeSlot(root, "dispenser", index, remain > 0 ? src.id : 0, remain,
+                                  remain > 0 ? src.durability : 0,
+                                  remain > 0 ? src.enchants : [0,0,0,0],
+                                  remain > 0 ? src.name : "")
             return
         }
         InventoryOps.slotShiftLeft(root, group, index)
@@ -323,6 +338,19 @@ Item {
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
+                            // t647 附魔光晕（发射器 / 投掷器容器槽）：同主栏光晕配色。触碰 dispCoordRev 重算。
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: {
+                                    const _r = root.dispCoordRev
+                                    if (_r < 0 || dId === 0 || !root.dispenserStore) return false
+                                    const e = root.dispenserStore.slotEnchantsAt(root.dispenserX, root.dispenserY, root.dispenserZ, index)
+                                    return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                }
+                                color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                radius: 3
+                                z: 3
+                            }
                             // 左键整组（resolveClick）；右键走 per-slot 右键 TapHandler（resolveRightClick）。
                             // 左键拖动均分由 root DragHandler + 逐槽 HoverHandler 收集（t167）。
                             TapHandler {
@@ -340,28 +368,31 @@ Item {
                                     root.lastTapMs = now
                                     root.lastTapKey = key
                                     if (isDouble) { root.doMergeSameId("dispenser", index); return }
-                                    const r = root.resolveClick(dId, dCount, 0)
+                                    // t647：实例元数据透传（槽现持耐久 / 附魔 / 名）。
+                                    const cur = InventoryOps.readSlot(root, "dispenser", index)
+                                    const r = root.resolveClick(cur.id, cur.count, cur.durability, cur.enchants, cur.name)
                                     if (!r) return
-                                    root.dispenserStore.setSlot(root.dispenserX, root.dispenserY, root.dispenserZ, index, r.slotId, r.slotCount)
+                                    root.localWriteSlot("dispenser", index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                                     root.hotbar.heldBlock = r.heldId
                                     root.hotbar.heldCount = r.heldCount
                                     root.hotbar.heldDurability = r.heldDur
                                     root.hotbar.setHeldEnchants(r.heldEnch)
-                                    root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
+                                    root.hotbar.heldCustomName = r.heldName   // t647 实例名 / 附魔随光标保真
                                 }
                             }
                             // t166d per-slot 右键（拿半/放一），不依赖 hover/hoveredKey。
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: {
-                                    const r = root.resolveRightClick(dId, dCount, 0)
+                                    const cur = InventoryOps.readSlot(root, "dispenser", index)
+                                    const r = root.resolveRightClick(cur.id, cur.count, cur.durability, cur.enchants, cur.name)
                                     if (!r) return
-                                    root.dispenserStore.setSlot(root.dispenserX, root.dispenserY, root.dispenserZ, index, r.slotId, r.slotCount)
+                                    root.localWriteSlot("dispenser", index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                                     root.hotbar.heldBlock = r.heldId
                                     root.hotbar.heldCount = r.heldCount
                                     root.hotbar.heldDurability = r.heldDur
                                     root.hotbar.setHeldEnchants(r.heldEnch)
-                                    root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
+                                    root.hotbar.heldCustomName = r.heldName   // t647 实例名 / 附魔随光标保真
                                 }
                             }
                             HoverHandler {
@@ -466,6 +497,18 @@ Item {
                             text: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainCount) : "" }
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
+                        }
+                        // t647 附魔光晕（主栏槽）：同主栏光晕配色。触碰 mainRevision 重算。
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: {
+                                const _r = root.hotbar.mainRevision
+                                if (_r < 0 || mainId === 0) return false
+                                return Array.isArray(mainEnch) && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0)
+                            }
+                            color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                            radius: 3
+                            z: 3
                         }
                         // 左键整组（resolveClick）；右键走 per-slot 右键 TapHandler（resolveRightClick）。
                         // 左键拖动均分由 root DragHandler + 逐槽 HoverHandler 收集（t167）。
@@ -597,6 +640,19 @@ Item {
                                 text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
+                            }
+                            // t647 附魔光晕（hotbar 槽）：同主栏光晕配色。触碰 slotRevision 重算。
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: {
+                                    const _r = root.hotbar.slotRevision
+                                    if (_r < 0 || slotId === 0) return false
+                                    const e = root.hotbar.enchantsAt(index)
+                                    return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                }
+                                color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                radius: 3
+                                z: 3
                             }
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton

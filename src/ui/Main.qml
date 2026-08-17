@@ -1066,6 +1066,10 @@ Window {
     function closeEnchantingTable() {
         if (!enchantingTableOpen) return
         enchantingTableOpen = false
+        // t647：关包归还光标手持栈（同 closeInventory / closeCraftingTable —— 附魔台 / 铁砧两面板此前漏
+        //   归还：用户从槽 0 拿出附魔物到光标后按 E 关面板 → heldBlock 残留为隐形孤儿（下次开背包才浮出，
+        //   中途死亡 / 换世界即丢）。六类背包语义面板统一归还）。
+        returnHeldToHotbar()
         player.grab()
         keyInput.forceActiveFocus()
     }
@@ -1097,6 +1101,8 @@ Window {
     function closeAnvil() {
         if (!anvilOpen) return
         anvilOpen = false
+        // t647：关包归还光标手持栈（同 closeEnchantingTable —— 铁砧面板此前漏归还，光标产物变隐形孤儿）。
+        returnHeldToHotbar()
         player.grab()
         keyInput.forceActiveFocus()
     }
@@ -2539,6 +2545,16 @@ Window {
                 //   第三人称 / 掉落物仍用 PickaxeGeometry（侧 / 俯视角单色观感可接受，本任务范围 = viewModelHand）。
                 //   正握：position.y 上移（旧 0.04→0.10）使手（手段 y≈0.02）握住柄下段、镐头朝上前方；eulerRotation
                 //   给对角手持（柄下右、镐头上左，类 MC）。作 viewModelHand 子节点 → 随挥动同步运动（工具在手中）。
+                // t647 手持工具附魔光晕判（各工具 Node 的贴身光晕罩 visible 共用；触碰 slotRevision）。
+                //   选中槽是工具且带附魔 → true（工具模型本体照常渲染，另叠一个略大的半透紫盒作边缘泛光，
+                //   修 t590 旧「独立大紫立方盖住工具」——见 viewModelHand 末 t647 注释）。
+                readonly property bool heldToolEnchanted: {
+                    const _r = hotbarVM.slotRevision
+                    if (_r < 0) return false
+                    if (!hotbarVM.isTool(player.selectedItem)) return false
+                    const e = hotbarVM.enchantsAt(hotbarVM.selectedSlot)
+                    return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                }
                 Node {
                     id: heldPickaxeFp
                     visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 1
@@ -2580,6 +2596,18 @@ Window {
                         scale: Qt.vector3d(0.10, 0.14, 0.12)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldPickaxeFp.headColor }
                     }
+                    // t647 附魔贴身光晕罩（镐外形包围盒：柄底 -0.45 到镐头 0.45 → 半长 ~0.5；略放大 1.06×
+                    //   作边缘泛光，不遮工具本体；继承 Node 旋转 → 恒贴住镐形。修旧「独立大紫立方」错位观感）。
+                    Model {
+                        visible: viewModelHand.heldToolEnchanted
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(0.72, 1.06, 0.34)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#8f5fd9"
+                            opacity: 0.22   // 半透紫边缘光
+                        }
+                    }
                 }
                 // t332 锄（type=Hoe）手持木柄修：旧版整把单 baseColor（HoeGeometry pos-only 单色）→ 石 / 铁锄
                 //   木柄也变灰 / 银（应恒木）。改 Node + UnitCube 组合复刻 hoe.cpp 3 盒，各盒独立材质
@@ -2617,6 +2645,17 @@ Window {
                         position: Qt.vector3d(0, 0.34, 0.18)
                         scale: Qt.vector3d(0.56, 0.06, 0.24)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldHoeFp.headColor }
+                    }
+                    // t647 附魔贴身光晕罩（锄外形包围盒；同镐模式）。
+                    Model {
+                        visible: viewModelHand.heldToolEnchanted
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(0.68, 1.06, 0.48)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#8f5fd9"
+                            opacity: 0.22
+                        }
                     }
                 }
                 // t332 斧（type=Axe）手持木柄修：旧版整把单 baseColor（AxeGeometry pos-only 单色）→ 石 / 铁斧
@@ -2662,6 +2701,17 @@ Window {
                         scale: Qt.vector3d(0.08, 0.12, 0.10)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldAxeFp.headColor }
                     }
+                    // t647 附魔贴身光晕罩（斧外形包围盒；同镐模式）。
+                    Model {
+                        visible: viewModelHand.heldToolEnchanted
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(0.78, 1.06, 0.22)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#8f5fd9"
+                            opacity: 0.22
+                        }
+                    }
                 }
                 // t332 铲（type=Shovel）手持木柄修：旧版整把单 baseColor（ShovelGeometry pos-only 单色）→ 石 / 铁铲
                 //   木柄也变灰 / 银（应恒木）。改 Node + UnitCube 组合复刻 shovel.cpp 3 盒，各盒独立材质
@@ -2698,6 +2748,17 @@ Window {
                         position: Qt.vector3d(0, 0.30, 0)
                         scale: Qt.vector3d(0.28, 0.16, 0.10)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: heldShovelFp.headColor }
+                    }
+                    // t647 附魔贴身光晕罩（铲外形包围盒；同镐模式）。
+                    Model {
+                        visible: viewModelHand.heldToolEnchanted
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(0.62, 1.06, 0.22)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#8f5fd9"
+                            opacity: 0.22
+                        }
                     }
                 }
                 // t332 剑（type=Sword）手持木柄修：旧版整把单 baseColor（SwordGeometry pos-only 单色）→ 石 / 铁剑
@@ -2750,6 +2811,17 @@ Window {
                         position: Qt.vector3d(0, -0.42, 0)
                         scale: Qt.vector3d(0.07, 0.06, 0.07)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a5a2e" }   // 木色（与 tier 无关）
+                    }
+                    // t647 附魔贴身光晕罩（剑外形包围盒：刃顶 0.46 到柄首 -0.45 → 半长 ~0.46；细长盒贴剑形）。
+                    Model {
+                        visible: viewModelHand.heldToolEnchanted
+                        geometry: UnitCube {}
+                        scale: Qt.vector3d(0.28, 0.98, 0.18)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: "#8f5fd9"
+                            opacity: 0.22
+                        }
                     }
                 }
                 // t304/t330 弓（type=Bow）：BowGeometry C 形弓身（XY 面清晰 C 弯）+ 子节点 BowStringGeometry
@@ -2884,25 +2956,37 @@ Window {
                         }
                     }
                 }
-                // t590 手持物附魔紫光晕：选中槽物品带附魔（工具 / 武器，方块不可附魔恒不触发）→ 在手持物
-                //   位置加半透明紫色光晕罩（机制等价 MC 附魔光泽；原创纯色半透 UnitCube，零资产；与槽位附魔
-                //   光晕 #8c40e6 同色系）。作 viewModelHand 子节点 → 随挥动同步运动（光晕罩在手中）。
+                // t647 手持物附魔紫光晕重做（修用户实测「第一人称附魔工具渲染成浅紫色流淌方块」）：
+                //   旧 t590 实现是 viewModelHand 直挂一个 scale 0.34 的半透紫 UnitCube —— 它不跟随各工具
+                //   Node 的独立位姿（工具 Node 在 (0.02,0.10,-0.22) + 自转 (15,-20,28) + 缩放 0.42，方块在
+                //   (0,0.02,-0.22) scale 0.12），紫色大立方与工具错位并完全盖住工具本体 → 观感「一坨紫色
+                //   流淌方块」。新实现：光晕不再独立摆位，改为「每个手持分支自带一个贴身光晕罩」——
+                //   - 工具 5 Node（镐/锄/斧/铲/剑）：Node 内加 scale 1.06 的半透紫包围盒（继承 Node 的
+                //     旋转/位置 → 恒贴住工具形状边缘，仅作边缘泛光，不遮本体）。
+                //   - 方块 / billboard 分支：本处一个 scale 0.15 的小罩（贴手持方块位）。
+                //   机制等价 MC 附魔光泽（工具模型正常 + 紫 glint 边缘光）；原创纯色半透，零资产（§9）。
                 //   触碰 slotRevision 令附魔写入 / 换槽后重算（enchantsAt(selectedSlot) 靠版本号刷新）。
-                //   位置取手持工具 / 方块公共区（z=-0.22 手前、y 取二者中间），scale 略大于视觉范围包住物品。
+                // 方块段光晕（贴手持方块；工具段光晕在各工具 Node 内，见 heldPickaxeFp 等）。
                 Model {
                     visible: {
                         const _r = hotbarVM.slotRevision
                         if (_r < 0) return false
-                        const e = hotbarVM.enchantsAt(hotbarVM.selectedSlot)
-                        return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                        if (!hotbarVM.isTool(player.selectedItem)) {
+                            // 方块 / 材料 / 异形段手持：选中槽带附魔才显（方块不可附魔 → 实际恒不触发；
+                            //   防御性保留 —— 若未来出现可附魔非工具物品仍正确）。
+                            const e = hotbarVM.enchantsAt(hotbarVM.selectedSlot)
+                            return player.selectedBlock !== 0
+                                && e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                        }
+                        return false
                     }
                     geometry: UnitCube {}
-                    position: Qt.vector3d(0.02 + window.heldBlockX, 0.05 + window.heldBlockY, -0.22 + window.heldBlockZ)
-                    scale: Qt.vector3d(0.34, 0.34, 0.34)
+                    position: Qt.vector3d(0.0 + window.heldBlockX, 0.02 + window.heldBlockY, -0.22 + window.heldBlockZ)
+                    scale: Qt.vector3d(0.15, 0.15, 0.15)
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColor: "#8f5fd9"
-                        opacity: 0.30   // <1 走透明通道 → 半透紫光晕罩（不遮住物品本身）
+                        opacity: 0.22   // <1 走透明通道 → 半透紫边缘光（不遮手持方块本体）
                     }
                 }
                 // [t31] 诊断：确认手 Node 加载 + parent（相机）。
@@ -7459,7 +7543,10 @@ Window {
                     const fid = furnaceStore.slotIdAt(x, y, z, fi)
                     const fcount = furnaceStore.slotCountAt(x, y, z, fi)
                     if (fid !== 0 && fcount > 0)
-                        itemEntities.spawnItem(x, y, z, fid, fcount)
+                        // t647：实例元数据随实体走（熔炉槽现持耐久 / 附魔 / 名 —— 同破箱 dump 模式）。
+                        itemEntities.spawnItem(x, y, z, fid, fcount, furnaceStore.slotEnchantsAt(x, y, z, fi),
+                                               furnaceStore.slotNameAt(x, y, z, fi),
+                                               furnaceStore.slotDurabilityAt(x, y, z, fi))
                 }
                 furnaceStore.clearFurnace(x, y, z)
             }
@@ -7477,7 +7564,10 @@ Window {
                     const did = dispenserStore.slotIdAt(x, y, z, di)
                     const dcount = dispenserStore.slotCountAt(x, y, z, di)
                     if (did !== 0 && dcount > 0)
-                        itemEntities.spawnItem(x, y, z, did, dcount)
+                        // t647：实例元数据随实体走（发射器槽现持耐久 / 附魔 / 名 —— 同破箱 dump 模式）。
+                        itemEntities.spawnItem(x, y, z, did, dcount, dispenserStore.slotEnchantsAt(x, y, z, di),
+                                               dispenserStore.slotNameAt(x, y, z, di),
+                                               dispenserStore.slotDurabilityAt(x, y, z, di))
                 }
                 dispenserStore.clearDispenser(x, y, z)
             }
@@ -10181,6 +10271,19 @@ Window {
             anchors.fill: parent
             visible: hotbarVM.isMaterial(hotbarVM.heldBlock)
             materialId: hotbarVM.heldBlock
+        }
+        // t647 附魔光晕（光标手持浮动图标）：手持物带附魔 → 浅紫叠层（同背包槽光晕配色；修「附魔物品
+        //   拿到光标无光晕」—— 用户从附魔台取出产物到光标时看不到附魔态）。
+        Rectangle {
+            anchors.fill: parent
+            visible: {
+                const _r = hotbarVM.slotRevision >= 0 ? hotbarVM.slotRevision : 0
+                if (hotbarVM.heldBlock === 0) return false
+                const e = hotbarVM.heldEnchants()
+                return _r >= 0 && e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+            }
+            color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+            radius: 3
         }
         Text {
             anchors.right: parent.right

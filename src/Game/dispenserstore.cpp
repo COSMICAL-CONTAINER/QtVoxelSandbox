@@ -48,19 +48,54 @@ int DispenserStore::slotCountAt(int x, int y, int z, int index) const
     return it->second.at(size_t(index)).count;
 }
 
+// t647 实例元数据读（同 ChestStore 模式；越界 / 无此发射器 → 缺省值）。
+int DispenserStore::slotDurabilityAt(int x, int y, int z, int index) const
+{
+    if (index < 0 || index >= kSlotsPerDispenser) return -1;
+    const auto it = m_dispensers.find(key(x, y, z));
+    if (it == m_dispensers.end()) return -1;
+    return it->second.at(size_t(index)).durability;
+}
+
+QVariantList DispenserStore::slotEnchantsAt(int x, int y, int z, int index) const
+{
+    if (index < 0 || index >= kSlotsPerDispenser) return {0, 0, 0, 0};
+    const auto it = m_dispensers.find(key(x, y, z));
+    if (it == m_dispensers.end()) return {0, 0, 0, 0};
+    const Slot &s = it->second.at(size_t(index));
+    return { s.enchants[0], s.enchants[1], s.enchants[2], s.enchants[3] };
+}
+
+QString DispenserStore::slotNameAt(int x, int y, int z, int index) const
+{
+    if (index < 0 || index >= kSlotsPerDispenser) return QString();
+    const auto it = m_dispensers.find(key(x, y, z));
+    if (it == m_dispensers.end()) return QString();
+    return it->second.at(size_t(index)).name;
+}
+
 // 直接写某发射器某槽。index 越界忽略；id<=0 或 count<=0 → 清空该槽（保持空栈不变式：id==0 ⟺ count==0）。
 // 自动建发射器条目（首次写入某坐标即创建空 9 槽再写）。写入后 bump revision → DispenserUI delegate 刷新。
-void DispenserStore::setSlot(int x, int y, int z, int index, int id, int count)
+//   空栈归一：id<=0 或 count<=0 → 清空（id=0, count=0）。**t607 修**：count 归 0 时 id 必须一并归 0 ——
+//   旧版 normId 只看 id，dispenseFromDispenser 写回「最后 1 件扣成 0」(itemId>0, count=0) 时存成
+//   {id>0, count=0} 幽灵栈，破「id==0 ⟺ count==0」不变式：UI 槽判空按 id → 图标残留；发射取物按
+//   count → 不再发射；点击拾取拿到 count=0 的「消失物品」。归一以 count 为先（count 无效 → 整栈空）。
+//   t647 元数据（enchants / name / durability）随写入：仅非空栈持有；空栈恒清（同 ChestStore.setSlot 模式）。
+void DispenserStore::setSlot(int x, int y, int z, int index, int id, int count,
+                             const QVariantList &enchants, const QString &name, int durability)
 {
     if (index < 0 || index >= kSlotsPerDispenser) return;
-    // 空栈归一：id<=0 或 count<=0 → 清空（id=0, count=0）。**t607 修**：count 归 0 时 id 必须一并归 0 ——
-    //   旧版 normId 只看 id，dispenseFromDispenser 写回「最后 1 件扣成 0」(itemId>0, count=0) 时存成
-    //   {id>0, count=0} 幽灵栈，破「id==0 ⟺ count==0」不变式：UI 槽判空按 id → 图标残留；发射取物按
-    //   count → 不再发射；点击拾取拿到 count=0 的「消失物品」。归一以 count 为先（count 无效 → 整栈空）。
     const int normCount = (id > 0 && count > 0) ? count : 0;
     const int normId = (normCount > 0) ? id : 0;
     Dispenser &d = m_dispensers[key(x, y, z)]; // 自动建条目（不存在则插入空 9 槽）
-    d[size_t(index)] = Slot{normId, normCount};
+    Slot s;
+    s.id = normId;
+    s.count = normCount;
+    for (int i = 0; i < 4; ++i)
+        s.enchants[i] = (normId > 0 && i < enchants.size()) ? enchants.at(i).toInt() : 0;
+    s.name = (normId > 0) ? name.trimmed() : QString();
+    s.durability = (normId > 0) ? durability : -1; // 空栈恒「未初始化」（消费端归一满耐久）
+    d[size_t(index)] = s;
     ++m_revision;
     emit dispenserChanged();
 }
@@ -104,9 +139,10 @@ void DispenserStore::clearAll()
     emit dispenserChanged();
 }
 
-// 收集所有发射器条目为 QVariantList（落盘用）。形状：[{x,y,z, slots:[{id,count}×9]}, ...]。
+// 收集所有发射器条目为 QVariantList（落盘用）。形状：[{x,y,z, slots:[{id,count,enchants:[4],name,durability}×9]}, ...]。
 //   **t607**：全空发射器**也落盘**（去掉旧 `!any → skip`）——条目存在与否是身份语义（hasDispenser：玩家库存
 //   发射器 vs 神殿陷阱 fallback），清空后的玩家发射器若不落盘，重载后条目消失 → 退回神殿默认射箭行为。
+//   t647：实例元数据随槽落盘（老存档无此键 → 读回缺省，向后兼容）。
 //   注：局部变量名禁用 `slots`（Qt 关键字宏，Q_OBJECT 类内会被预处理器抹掉，见 lessons-learned）。
 QVariantList DispenserStore::allDispensers() const
 {
@@ -119,6 +155,12 @@ QVariantList DispenserStore::allDispensers() const
             QVariantMap sm;
             sm.insert(QStringLiteral("id"), s.id);
             sm.insert(QStringLiteral("count"), s.count);
+            QVariantList enchList;
+            enchList.reserve(4);
+            for (int i = 0; i < 4; ++i) enchList.append(s.enchants[i]);
+            sm.insert(QStringLiteral("enchants"), enchList);
+            sm.insert(QStringLiteral("name"), s.name);
+            sm.insert(QStringLiteral("durability"), s.durability);
             slotList.append(sm);
         }
         int x = 0, y = 0, z = 0;
@@ -137,6 +179,7 @@ QVariantList DispenserStore::allDispensers() const
 //   替换语义 = 清旧世界残留 + 填本世界发射器（杜绝跨世界泄漏，同 chestStore.loadAll / furnaceStore.loadAll 模式）。
 //   空列表 → 仅清空。slots 空栈归一同 setSlot（t607：count<=0 → id 一并归 0，旧存档幽灵栈 {id>0,count=0}
 //   加载时被清洗）；index 越界 / 缺坐标 → 跳过该发射器。
+//   t647：实例元数据读回（老存档无键 → 缺省：无附魔 / 无名 / -1 满耐久，向后兼容）。
 void DispenserStore::loadAll(const QVariantList &dispensers)
 {
     m_dispensers.clear();
@@ -155,7 +198,18 @@ void DispenserStore::loadAll(const QVariantList &dispensers)
             const int id = sm.value(QStringLiteral("id")).toInt();
             const int count = sm.value(QStringLiteral("count")).toInt();
             const int normCount = (id > 0 && count > 0) ? count : 0; // t607：count 无效 → 整栈空
-            d[size_t(i)] = Slot{ normCount > 0 ? id : 0, normCount };
+            Slot s;
+            s.id = normCount > 0 ? id : 0;
+            s.count = normCount;
+            if (s.id > 0) {
+                const QVariantList enchList = sm.value(QStringLiteral("enchants")).toList();
+                for (int e = 0; e < 4; ++e)
+                    s.enchants[e] = (e < enchList.size()) ? enchList.at(e).toInt() : 0;
+                s.name = sm.value(QStringLiteral("name")).toString(); // t647 老存档无 name 键 → 空串
+                const int dur = sm.value(QStringLiteral("durability")).toInt();
+                s.durability = sm.contains(QStringLiteral("durability")) ? dur : -1; // 老档无键 → -1（归一满耐久）
+            }
+            d[size_t(i)] = s;
         }
         m_dispensers[key(x, y, z)] = std::move(d);
     }

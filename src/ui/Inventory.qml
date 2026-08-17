@@ -225,7 +225,20 @@ Item {
     //   Image source / count 重算，同 SurvivalInventory craft 模式）。
     property var craftSlots: [0, 0, 0, 0]  // 2×2 合成格（行优先：[0]=TL [1]=TR [2]=BL [3]=BR）
     property var craftCounts: [0, 0, 0, 0] // 平行数量
+    // t647：craftDur / craftEnch / craftName 平行数组 —— 合成格持有实例元数据（耐久 / 附魔 / 名，同
+    //   SurvivalInventory / CraftingTableUI 修法）。旧版只存 (id,count) → 附魔 / 改名物品放进生存 tab
+    //   合成格拿出来变白板。
+    property var craftDur:   [0, 0, 0, 0]
+    property var craftEnch:  [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]]
+    property var craftName:  ["", "", "", ""]
     property int craftRev: 0
+    // t647 取合成槽实例元数据（数组未初始化防御）。
+    function craftDurAt(i) { const d = root.craftDur[i]; return (typeof d === "number" && d > 0) ? d : 0 }
+    function craftEnchAt(i) {
+        const e = root.craftEnch[i]
+        return (Array.isArray(e) && e.length === 4) ? e : [0, 0, 0, 0]
+    }
+    function craftNameAt(i) { const n = root.craftName[i]; return (typeof n === "string") ? n : "" }
     // t624/t625：craft 组参与快捷操作（左键拖动均分 / 右键拖拽每格放1 / 双击拿同类）→ InventoryOps
     //   groupIsDraggable 放行（声明见 SurvivalInventory t203 同款：合成格是纯输入槽，左/右拖拽填入是
     //   标准交互；recipeMatch 据 craftRev 自动重算，均分后布局若变由用户重排）。调色板格**不在此列**
@@ -236,14 +249,25 @@ Item {
 
     // ── t624 面板专属槽路由：craft 合成格走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
     //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
-    //   craft 本地槽不持耐久/附魔/名（合成原料无名语义，同 SurvivalInventory craft；钩子只接前 4 形参，
-    //   writeSlot 多传的 dur/ench/name 实参无害）。
+    //   t647：craft 槽透传实例元数据（durability / enchants / name —— 同 SurvivalInventory 修法，修「附魔 /
+    //   改名物品放进合成格拿出来变白板」；原注释「合成原料无名语义」对整件搬运路径不成立——工具 / 护甲 /
+    //   附魔书是合法合成格访客）。
     function localReadSlot(group, index) {
-        if (group === "craft") return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0 }
-        return { id: 0, count: 0 }
+        if (group === "craft") return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0,
+                                        durability: root.craftDurAt(index), enchants: root.craftEnchAt(index), name: root.craftNameAt(index) }
+        return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0], name: "" }
     }
-    function localWriteSlot(group, index, id, count) {
-        if (group === "craft") { root.craftSlots[index] = id; root.craftCounts[index] = count; root.craftRev++ }
+    function localWriteSlot(group, index, id, count, durability, enchants, name) {
+        if (group !== "craft") return
+        root.craftSlots[index] = id
+        root.craftCounts[index] = count
+        root.craftDur[index] = (durability > 0) ? durability : 0
+        const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
+        const arr = root.craftEnch
+        arr[index] = e.slice()
+        root.craftEnch = arr
+        root.craftName[index] = (typeof name === "string") ? name : ""
+        root.craftRev++
     }
 
     // t624 合成检测（镜像 SurvivalInventory.matchedRecipe）：读 2×2 craftSlots（行优先）查
@@ -299,8 +323,12 @@ Item {
             const id = root.craftSlots[i] || 0
             const n = root.craftCounts[i] || 0
             if (id !== 0 && n > 0) {
-                const remain = root.hotbar.addToAny(id, n)
-                if (remain <= 0) { root.craftSlots[i] = 0; root.craftCounts[i] = 0 }
+                // t647：实例元数据随归还透传（耐久 / 附魔 / 名 —— 同 SurvivalInventory 修法）。
+                const remain = root.hotbar.addToAny(id, n, root.craftDurAt(i), root.craftEnchAt(i), root.craftNameAt(i))
+                if (remain <= 0) {
+                    root.craftSlots[i] = 0; root.craftCounts[i] = 0; root.craftDur[i] = 0
+                    root.craftEnch[i] = [0,0,0,0]; root.craftName[i] = ""
+                }
                 else root.craftCounts[i] = remain // 背包满：余数留本槽
             }
         }
@@ -766,6 +794,20 @@ Item {
                                         curDur: cDur
                                         maxDur: mDur
                                     }
+                                    // t647 附魔光晕（生存 tab 装备槽）：已装备护甲带附魔 → 浅紫叠层（同 SurvivalInventory
+                                    //   装备槽光晕）。触碰 armorRevision 重算。
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        visible: {
+                                            const _r = root.hotbar.armorRevision
+                                            if (_r < 0 || armId === 0) return false
+                                            const e = root.hotbar.armorEnchantsAt(index)
+                                            return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                        }
+                                        color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                        radius: 3
+                                        z: 3
+                                    }
 
                                     // 装备 / 脱下（左键单点）。t498 教训：从 VM 直读装备槽当前态（Q_INVOKABLE 恒最新），
                                     //   不走绑定属性 armId（低频 NOTIFY 下可能 stale → 幻影旧件写回光标 = 护甲复制）。
@@ -903,6 +945,19 @@ Item {
                                         color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                         font.pixelSize: 13; font.bold: true
                                     }
+                                    // t647 附魔光晕（合成槽）：同 SurvivalInventory 光晕配色。触碰 craftRev 重算。
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        visible: {
+                                            const _r = root.craftRev
+                                            if (_r < 0 || (root.craftSlots[index] || 0) === 0) return false
+                                            const e = root.craftEnchAt(index)
+                                            return ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                        }
+                                        color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                        radius: 3
+                                        z: 3
+                                    }
                                     // t624 左键整组（拾取/放置/合并/互换，resolveClick）+ Shift+左键归包（slotShiftLeft
                                     //   craft 分支→addToAny）+ 双击拿同类（doMergeSameId 扫 main+hotbar+craft）。
                                     TapHandler {
@@ -917,15 +972,17 @@ Item {
                                             root.lastTapMs = now
                                             root.lastTapKey = key
                                             if (isDouble) { root.doMergeSameId("craft", index); return }
-                                            // craft 本地槽不持耐久/附魔/名（合成原料无名语义）→ 只传 id/count。
-                                            const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0, 0)
+                                            // t647：实例元数据透传（合成格现持耐久 / 附魔 / 名）。
+                                            const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0,
+                                                                        root.craftDurAt(index), root.craftEnchAt(index), root.craftNameAt(index))
                                             if (!r) return
-                                            root.craftSlots[index] = r.slotId
-                                            root.craftCounts[index] = r.slotCount
+                                            root.localWriteSlot("craft", index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                                             root.craftRev++
                                             root.hotbar.heldBlock = r.heldId
                                             root.hotbar.heldCount = r.heldCount
                                             root.hotbar.heldDurability = r.heldDur
+                                            root.hotbar.setHeldEnchants(r.heldEnch)
+                                            root.hotbar.heldCustomName = r.heldName
                                         }
                                     }
                                     // t624 per-slot 右键（拿半/放一，同 SurvivalInventory）：空手→拾取 floor(count/2)
@@ -933,14 +990,16 @@ Item {
                                     TapHandler {
                                         acceptedButtons: Qt.RightButton
                                         onTapped: {
-                                            const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0, 0)
+                                            const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0,
+                                                                              root.craftDurAt(index), root.craftEnchAt(index), root.craftNameAt(index))
                                             if (!r) return
-                                            root.craftSlots[index] = r.slotId
-                                            root.craftCounts[index] = r.slotCount
+                                            root.localWriteSlot("craft", index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                                             root.craftRev++
                                             root.hotbar.heldBlock = r.heldId
                                             root.hotbar.heldCount = r.heldCount
                                             root.hotbar.heldDurability = r.heldDur
+                                            root.hotbar.setHeldEnchants(r.heldEnch)
+                                            root.hotbar.heldCustomName = r.heldName
                                         }
                                     }
                                     // t624 hover → 物品名 tooltip + hoveredKey（拖动均分起点槽 / tooltip 路由用）
@@ -1154,6 +1213,18 @@ Item {
                                     curDur: cDur
                                     maxDur: mDur
                                 }
+                                // t647 附魔光晕（生存 tab 主栏槽）：同 SurvivalInventory 主栏光晕。触碰 mainRevision 重算。
+                                Rectangle {
+                                    anchors.fill: parent
+                                    visible: {
+                                        const _r = root.hotbar.mainRevision
+                                        if (_r < 0 || mainId === 0) return false
+                                        return Array.isArray(mainEnch) && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0)
+                                    }
+                                    color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                    radius: 3
+                                    z: 3
+                                }
                                 // 左键整组（拾取 / 放置 / 合并 / 互换，resolveClick）；写经 hotbar.mainSetStack（VM 单一权威）。
                                 //   t110：Shift+左键 → main 槽搬运到首个空 hotbar 槽（与生存背包主栏一致）。
                                 TapHandler {
@@ -1336,6 +1407,19 @@ Item {
                                     property int mDur: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolMaxDurability(slotId)) : 0 }
                                     curDur: cDur
                                     maxDur: mDur
+                                }
+                                // t647 附魔光晕（生存 tab hotbar 槽）：同 SurvivalInventory hotbar 行光晕。触碰 slotRevision 重算。
+                                Rectangle {
+                                    anchors.fill: parent
+                                    visible: {
+                                        const _r = root.hotbar.slotRevision
+                                        if (_r < 0 || slotId === 0) return false
+                                        const e = root.hotbar.enchantsAt(index)
+                                        return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                    }
+                                    color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                    radius: 3
+                                    z: 3
                                 }
 
                                 // hover → 状态行中文名；tap → t46 与主栏/生存背包统一的栈操作（拾取/放置/合并/互换）。
@@ -1548,6 +1632,24 @@ Item {
         if (parts[0] === "armor") return _ar >= 0 ? root.hotbar.armorCustomNameAt(idx) : ""
         return ""
     }
+    // t647 当前 hover 槽物品的附魔列表文本（生存 tab 槽位 tooltip 附魔行；对齐 SurvivalInventory t590 模式）：
+    //   据 hoveredKey 查 hotbar / main / armor 三组；合成格合成原料无附魔语义（craftEnch 恒 0）故不设分支。
+    //   触碰各 revision → 附魔写入 / 搬运后刷新。修「生存 tab 背包槽 hover 不显附魔行」（附魔物品在背包
+    //   界面里像普通物品，用户看不到它带着附魔）。
+    property string hoveredEnchantText: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _ar = root.hotbar.armorRevision
+        const parts = root.hoveredKey.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.enchantListText(root.hotbar.enchantsAt(idx)) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.enchantListText(root.hotbar.mainEnchantsAt(idx)) : ""
+        if (parts[0] === "armor") return _ar >= 0 ? root.hotbar.enchantListText(root.hotbar.armorEnchantsAt(idx)) : ""
+        return ""
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -1576,17 +1678,19 @@ Item {
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行（如「铁镐  5/250」）；非工具 / 未跟踪 → 仅显名。
             // t622：hover 槽物品带实例名 → 优先显实例名（hoveredCustomName——改名物品显其名）。
-            // t633 后续可加附魔行（对齐 SurvivalInventory t590）；现阶段 t632 仅预设附魔书（调色板 hover，
-            //   无 hoveredKey）附「附魔名 I」行（bookInfoFor 据 hoveredItemId 反查表 → packed 行）。
+            // t632 预设附魔书（调色板 hover，无 hoveredKey）附「附魔名 I」行（bookInfoFor 反查表 → packed 行）。
+            // t647：真实槽位（hotbar/main/armor）也附附魔行（hoveredEnchantText —— 修「生存 tab 背包槽
+            //   hover 不显附魔」，对齐 SurvivalInventory / 附魔台 tooltip）。
             text: {
                 if (!root.hotbar) return ""
                 const bi = root.bookInfoFor(root.hoveredItemId)
+                const enchRow = bi ? root.hotbar.enchantListText([bi.packed, 0, 0, 0]) : root.hoveredEnchantText
                 return (bi ? bi.name
                         : ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
                             : root.hotbar.nameForBlock(root.hoveredItemId))))
                     + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
                     + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")
-                    + (bi ? "\n\n" + root.hotbar.enchantListText([bi.packed, 0, 0, 0]) : "")
+                    + (enchRow.length > 0 ? "\n\n" + enchRow : "")
             }
             color: "#f2f2f2"
             font.pixelSize: 12

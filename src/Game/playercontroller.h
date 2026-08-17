@@ -476,7 +476,9 @@ public:
     //   「喷一地」口径）。m_itemEntities 注入时走 spawnItemThrown（C++ 直调）；未注入（异常配置）回退旧
     //   spawnItem 信号路径（QML 转发，格中心 + 随机弹出）。
     //   t622 name：自定义名随实体走（改名物品丢弃保真；缺省空 = 无名）。
-    void throwItemInLook(int itemId, int count, const QVariantList &enchants, const QString &name = QString());
+    //   t647 durability：实例耐久随实体走（磨损工具丢弃保真；缺省 -1 = 未初始化 → 拾取端归一满耐久）。
+    void throwItemInLook(int itemId, int count, const QVariantList &enchants, const QString &name = QString(),
+                         int durability = -1);
     // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（**死亡点**
     //   = 玩家倒下时的脚底 m_pos，非出生点）+ 清空背包。每非空栈 → 1 实体携带整栈数量（同 dropHeldCursor
     //   模式，经 spawnItem 信号 → Main.qml 转发到 ItemEntityManager.spawnItem，单向事件流）。栈散布到死亡格
@@ -626,7 +628,7 @@ signals:
     //   护甲路径传（dropItemAtFront / dropHeldCursor / dropHeldCursorOne）；其余掉落（破块 / mob / 爆炸）
     //   不传 → 缺省空（实体无附魔）。缺省参让 20+ emit 点零改动、旧 QML 处理器少参亦可接。
     // t622 name：自定义名（铁砧重命名实例）。同 enchants 仅玩家丢弃改名物品路径传；缺省空 = 无名。
-    void spawnItem(int x, int y, int z, int blockId, int count, const QVariantList &enchants = {}, const QString &name = QString());
+    void spawnItem(int x, int y, int z, int blockId, int count, const QVariantList &enchants = {}, const QString &name = QString(), int durability = -1);
     // t311 cause=PlayerState::DeathCause 枚举值，区分致死来源（Fall/Suffocation/Drowning/Starvation）供死因记录。
     //   机制同 t22：生存伤害结算，正值才发；呈现层路由到 PlayerState.takeDamage(hp, cause)。
     void fallDamageTaken(int hp, int cause);

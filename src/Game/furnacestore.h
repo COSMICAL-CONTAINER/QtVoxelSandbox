@@ -29,7 +29,10 @@
 //   - slotCount（恒 3；in=0 / fuel=1 / out=2；对齐 MC 熔炉 3 槽）
 //   - revision（int，任一熔炉任一槽 / 进度写入自增；NOTIFY=furnaceChanged。FurnaceUI delegate 触碰 revision 取最新值）
 //   - slotIdAt/slotCountAt(x,y,z,index)：某熔炉某槽栈数据（index 越界 / 无此熔炉返 0）
-//   - setSlot(x,y,z,index,id,count)：直接写某熔炉某槽（FurnaceUI 放置 / 互换 / 拖拽均分写回用）
+//   - slotDurabilityAt/slotEnchantsAt/slotNameAt(x,y,z,index)（t647）：实例元数据读（同 ChestStore 模式
+//     —— 工具 / 护甲 / 附魔书进熔炉槽保真；磨损 / 附魔 / 改名随栈存取）
+//   - setSlot(x,y,z,index,id,count[,enchants[,name[,durability]]])：直接写某熔炉某槽（FurnaceUI 放置 / 互换 / 拖拽均分写回用；
+//     元数据缺省 = 清（可堆叠原料语义不变））
 //   - burnProgressAt/smeltingProgressAt(x,y,z)：冶炼 tick 状态（burnRemain / smeltProgress；无此熔炉返 0）
 //   - setBurn/setSmelting(x,y,z,val)：写冶炼 tick 状态（FurnaceUI.tick 末写回，跨开关保留）
 //   - clearFurnace(x,y,z)：移除某熔炉条目（破块时 Main.qml.onBlockBroken 调，清孤儿内容）
@@ -61,8 +64,16 @@ public:
     // 某熔炉某槽栈数据（id=0=空；index 越界 / 无此熔炉条目 → 0）。
     Q_INVOKABLE int slotIdAt(int x, int y, int z, int index) const;
     Q_INVOKABLE int slotCountAt(int x, int y, int z, int index) const;
+    // t647 实例元数据读（同 ChestStore 模式）。durability：-1 = 未初始化（消费端归一满耐久）；
+    //   enchants：QVariantList<int> 4 元素 pack 值（空槽 → 4 个 0）；name：空串 = 注册表默认名。
+    Q_INVOKABLE int slotDurabilityAt(int x, int y, int z, int index) const;
+    Q_INVOKABLE QVariantList slotEnchantsAt(int x, int y, int z, int index) const;
+    Q_INVOKABLE QString slotNameAt(int x, int y, int z, int index) const;
     // 直接写某熔炉某槽（index 范围校验；id<=0 或 count<=0 → 清空该槽）。自动建熔炉条目。
-    Q_INVOKABLE void setSlot(int x, int y, int z, int index, int id, int count);
+    //   t647 元数据缺省 = 清（可堆叠炉料语义不变；FurnaceUI localWriteSlot 透传时保真）。
+    Q_INVOKABLE void setSlot(int x, int y, int z, int index, int id, int count,
+                             const QVariantList &enchants = {}, const QString &name = QString(),
+                             int durability = -1);
     // 冶炼 tick 状态（无此熔炉条目 → 0；FurnaceUI.tick 末读 / 写）。
     Q_INVOKABLE qreal burnProgressAt(int x, int y, int z) const;
     Q_INVOKABLE qreal smeltingProgressAt(int x, int y, int z) const;
@@ -89,10 +100,15 @@ signals:
     void furnaceChanged();
 
 private:
-    // 单格物品栈（id=0 空栈）。同 Hotbar::ItemStack 语义，但本类自持（Game 层不依赖 Hotbar 的私有结构）。
+    // 单格物品栈（id=0 空栈）。同 ChestStore::Slot 语义（t647 起含实例元数据：耐久 / 附魔 / 名 ——
+    //   工具 / 护甲 / 附魔书进熔炉槽保真；炉料（可堆叠）恒 0 / 空，语义不变），本类自持（Game 层不依赖
+    //   Hotbar 的私有结构）。
     struct Slot {
         int id = 0;
         int count = 0;
+        int enchants[4] = {0, 0, 0, 0};
+        QString name = QString();
+        int durability = -1;
     };
     // 单只熔炉内容：3 槽 + 冶炼 tick 状态（burnRemain 燃烧剩余 / smeltProgress 冶炼进度）。
     //   burnTotal 不落盘（点燃时随 burnRemain 一起重置 → 关再开只需 burnRemain 即可恢复视觉，比例条下次

@@ -26,7 +26,8 @@
 //   - slotCount（恒 9；Repeater model 用）
 //   - revision（int，任一发射器任一槽写入自增；NOTIFY=dispenserChanged。DispenserUI delegate 触碰 revision 取最新栈值）
 //   - slotIdAt/slotCountAt(x,y,z,index)：某发射器某槽栈数据（id=0=空；越界 / 无此发射器返 0）
-//   - setSlot(x,y,z,index,id,count)：直接写某发射器某槽（DispenserUI 放置 / 互换 / 拖拽均分写回用）
+//   - slotDurabilityAt/slotEnchantsAt/slotNameAt(x,y,z,index)（t647）：实例元数据读（同 ChestStore 模式）
+//   - setSlot(x,y,z,index,id,count[,enchants[,name[,durability]]])：直接写某发射器某槽（DispenserUI 放置 / 互换 / 拖拽均分写回用）
 //   - hasDispenser(x,y,z)：查询有无条目（含全空条目；t607 玩家发射器身份判定）
 //   - ensureDispenser(x,y,z)：确保有条目（玩家放置时注册；已有则 no-op）
 //   - clearDispenser(x,y,z)：移除某发射器条目（破块时 Main.qml.onBlockBroken 调，清孤儿内容）
@@ -54,9 +55,17 @@ public:
     // 某发射器某槽栈数据（id=0=空；index 越界 / 无此发射器条目 → 0）。
     Q_INVOKABLE int slotIdAt(int x, int y, int z, int index) const;
     Q_INVOKABLE int slotCountAt(int x, int y, int z, int index) const;
+    // t647 实例元数据读（同 ChestStore 模式）。durability：-1 = 未初始化（消费端归一满耐久）；
+    //   enchants：QVariantList<int> 4 元素 pack 值（空槽 → 4 个 0）；name：空串 = 注册表默认名。
+    Q_INVOKABLE int slotDurabilityAt(int x, int y, int z, int index) const;
+    Q_INVOKABLE QVariantList slotEnchantsAt(int x, int y, int z, int index) const;
+    Q_INVOKABLE QString slotNameAt(int x, int y, int z, int index) const;
     // 直接写某发射器某槽（index 范围校验；id<=0 或 count<=0 → 清空该槽。t607：count<=0 时 id 一并归 0——
     //   count 归一在先，破「最后 1 件扣成 0 存 {id>0,count=0} 幽灵栈」bug）。自动建发射器条目。
-    Q_INVOKABLE void setSlot(int x, int y, int z, int index, int id, int count);
+    //   t647 元数据缺省 = 清（可堆叠内容物语义不变；DispenserUI localWriteSlot 透传时保真）。
+    Q_INVOKABLE void setSlot(int x, int y, int z, int index, int id, int count,
+                             const QVariantList &enchants = {}, const QString &name = QString(),
+                             int durability = -1);
     // t607 查询某坐标有无发射器条目（含 9 槽全空的条目）。身份语义：有条目 = 玩家库存发射器（放置注册 /
     //   UI 写入自建 / 存档加载）→ 库存空踩板无动作；无条目 = 神殿陷阱（worldgen 不写 store）→ fallback 默认箭。
     Q_INVOKABLE bool hasDispenser(int x, int y, int z) const;
@@ -81,10 +90,14 @@ signals:
     void dispenserChanged();
 
 private:
-    // 单格物品栈（id=0 空栈）。同 Hotbar::ItemStack 语义，但本类自持（Game 层不依赖 Hotbar 的私有结构）。
+    // 单格物品栈（id=0 空栈）。同 ChestStore::Slot 语义（t647 起含实例元数据：耐久 / 附魔 / 名 ——
+    //   工具 / 护甲 / 附魔书进发射器槽保真；可堆叠内容物恒 0 / 空，语义不变），本类自持。
     struct Slot {
         int id = 0;
         int count = 0;
+        int enchants[4] = {0, 0, 0, 0};
+        QString name = QString();
+        int durability = -1;
     };
     using Dispenser = std::array<Slot, kSlotsPerDispenser>;
 

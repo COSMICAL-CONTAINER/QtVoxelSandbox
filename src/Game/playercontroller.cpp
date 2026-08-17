@@ -3565,9 +3565,10 @@ void PlayerController::dropHeld()
     if (id == 0) return;            // 空手 → 不丢
     const QVariantList ench = m_hotbar->enchantsAt(m_hotbar->selectedSlot()); // t590 附魔随实体走（先读再 takeStack 清槽）
     const QString name = m_hotbar->customNameAt(m_hotbar->selectedSlot());    // t622 实例名随实体走（同先读再清）
+    const int dur = m_hotbar->durabilityAt(m_hotbar->selectedSlot());         // t647 实例耐久随实体走（磨损工具 Q 丢再捡不复原）
     const int took = m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
     if (took <= 0) return;          // 取失败（空栈）→ 不丢
-    throwItemInLook(id, 1, ench, name);   // t609 眼位沿视线丢出
+    throwItemInLook(id, 1, ench, name, dur);   // t609 眼位沿视线丢出
 }
 
 // t609 主动丢弃统一原语：从眼位 + 视线 × kDropForwardOffset 生成掉落实体，初速 = 视线 × kDropThrowSpeed
@@ -3575,17 +3576,18 @@ void PlayerController::dropHeld()
 //   五个主动丢弃路径共用（死亡掉落 dropAllItems 不走此——死亡散布保留 MC「喷一地」口径）。m_itemEntities
 //   未注入（异常配置）→ 回退旧 spawnItem 信号路径（QML 转发到 itemEntities.spawnItem，格中心 + 随机弹出）。
 //   t622 name：自定义名随实体走（改名物品丢弃保真；拾取回填见 pickupScan）。
-void PlayerController::throwItemInLook(int itemId, int count, const QVariantList &enchants, const QString &name)
+//   t647 durability：实例耐久随实体走（磨损工具丢弃保真；-1 = 未初始化 → 拾取端归一满耐久）。
+void PlayerController::throwItemInLook(int itemId, int count, const QVariantList &enchants, const QString &name, int durability)
 {
     const QVector3D fwd = lookDirection();
     if (m_itemEntities) {
         const QVector3D p = position() + fwd * kDropForwardOffset;
-        m_itemEntities->spawnItemThrown(p, itemId, count, fwd.x(), fwd.y(), fwd.z(), kDropThrowSpeed, enchants, name);
+        m_itemEntities->spawnItemThrown(p, itemId, count, fwd.x(), fwd.y(), fwd.z(), kDropThrowSpeed, enchants, name, durability);
         return;
     }
     // 回退：旧信号路径（眼位 + 视线 × 1.5 floor 到整数格；ItemEntityManager 存格中心 = 整数+0.5）。
     const QVector3D p = position() + fwd * 1.5f;
-    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), itemId, count, enchants, name);
+    emit spawnItem(int(std::floor(p.x())), int(std::floor(p.y())), int(std::floor(p.z())), itemId, count, enchants, name, durability);
 }
 
 // t229 Ctrl+Q 第一人称丢弃整栈（spec「第一人称 Ctrl+Q=丢整栈（手持槽）」）：与 dropHeld（Q=丢 1 件）
@@ -3601,11 +3603,12 @@ void PlayerController::dropHeldStack()
     if (id == 0) return;            // 空手 → 不丢
     const QVariantList ench = m_hotbar->enchantsAt(slot); // t590 附魔随实体走（先读再 takeStack 清槽）
     const QString name = m_hotbar->customNameAt(slot);    // t622 实例名随实体走（同先读再清）
+    const int dur = m_hotbar->durabilityAt(slot);         // t647 实例耐久随实体走（磨损工具整栈丢再捡不复原）
     const int cnt = m_hotbar->countAt(slot);
     if (cnt <= 0) return;
     const int took = m_hotbar->takeStack(slot, cnt); // 取整栈（takeStack 返回实际取走数）
     if (took <= 0) return;
-    throwItemInLook(id, took, ench, name); // t609 眼位沿视线丢出（1 实体携整栈）
+    throwItemInLook(id, took, ench, name, dur); // t609 眼位沿视线丢出（1 实体携整栈）
 }
 
 // t229 背包悬停槽丢弃原语（spec「背包内悬停槽 Q=丢 1 / Ctrl+Q=丢整栈。适用所有背包面板」）：按给定
@@ -3636,8 +3639,9 @@ void PlayerController::dropHeldCursor()
     if (id == 0 || cnt <= 0) return; // 空手 → 不丢
     const QVariantList ench = m_hotbar->heldEnchants(); // t590 附魔随实例走（先读再清栈）
     const QString name = m_hotbar->heldCustomName();    // t622 实例名随实例走（先读再清栈）
+    const int dur = m_hotbar->heldDurability();         // t647 实例耐久随实例走（先读再清栈）
     m_hotbar->setHeldBlock(0);       // 清空光标手持栈（id=0 同步清 count）
-    throwItemInLook(id, cnt, ench, name);  // t609 眼位沿视线丢出
+    throwItemInLook(id, cnt, ench, name, dur);  // t609 眼位沿视线丢出
 }
 
 // t228 右键拖出背包丢弃 1 件（spec「右键=逐个」）：光标手持栈取 1 件 → 生成掉落实体(count=1)，余数留光标。
@@ -3652,10 +3656,11 @@ void PlayerController::dropHeldCursorOne()
     // 取 1 件：余数 >0 则 count-1（id 不变）；归 0 则 setHeldBlock(0) 连 id 一起清（保空栈不变式）。
     const QVariantList ench = m_hotbar->heldEnchants(); // t590 先读附魔再清栈（setHeldBlock(0) 会清附魔）
     const QString name = m_hotbar->heldCustomName();    // t622 先读实例名再清栈（setHeldBlock(0) 会清名）
+    const int dur = m_hotbar->heldDurability();         // t647 先读实例耐久再清栈（setHeldBlock(0) 会重置耐久）
     if (cnt <= 1) m_hotbar->setHeldBlock(0);
     else          m_hotbar->setHeldCount(cnt - 1);
     // t590 附魔随实体走（余数留光标的附魔不变，实体带走 1 件的附魔）。t609 眼位沿视线丢出。
-    throwItemInLook(id, 1, ench, name);
+    throwItemInLook(id, 1, ench, name, dur);
 }
 
 // t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（死亡点
@@ -4083,11 +4088,22 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
 {
     if (!m_dispenserStore || !m_entityManager) return false;
     // 取首个可用槽（id>0 且 count>0；机制等价 MC 发射器按槽序取首个可用）。
+    //   t647：一并快照该槽的实例元数据（附魔 / 名 / 耐久）—— 弹出的掉落物携带（拾取回填保真，
+    //   修「附魔工具放进发射器弹出来变普通」；附魔书 / 改名物品经发射器不丢实例数据）。
     int slot = -1, itemId = 0, count = 0;
+    QVariantList slotEnch;
+    QString slotName;
+    int slotDur = -1;
     for (int i = 0; i < DispenserStore::kSlotsPerDispenser; ++i) {
         const int id = m_dispenserStore->slotIdAt(x, y, z, i);
         const int c = m_dispenserStore->slotCountAt(x, y, z, i);
-        if (id > 0 && c > 0) { slot = i; itemId = id; count = c; break; }
+        if (id > 0 && c > 0) {
+            slot = i; itemId = id; count = c;
+            slotEnch = m_dispenserStore->slotEnchantsAt(x, y, z, i);
+            slotName = m_dispenserStore->slotNameAt(x, y, z, i);
+            slotDur = m_dispenserStore->slotDurabilityAt(x, y, z, i);
+            break;
+        }
     }
     if (slot < 0) return false; // 库存空 → caller fallback（神殿默认箭；投掷器 caller 无 fallback → 无动作）
 
@@ -4100,14 +4116,14 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         // t609 投掷器分支：**全部物品**一律弹出掉落物实体（机制等价 MC 1.0 dropper——只投不射，箭 / 雪球 /
         //   剑等都不走弹丸 / 伤害分派，一律 spawnItemAt 从排出口沿朝向定向弹出，落地成可拾取掉落物）。
         //   速度取 kDropperPopSpeed（略低于发射器 kDispenserPopSpeed——轻量出口的温和弹出，机制等价 MC
-        //   dropper 弹出距离短）。附魔经此路径不保真（DispenserStore 槽仅存 (id,count)，既有 store 结构
-        //   限制，同发射器掉落物路径）。m_itemEntities 未注入 → 回退 spawnItem 信号路径（同 throwItemInLook
+        //   dropper 弹出距离短）。t647：实例元数据随实体走（slotEnch / slotName —— 弹出的附魔 / 改名物品
+        //   拾取回填保真；旧版丢元数据）。m_itemEntities 未注入 → 回退 spawnItem 信号路径（同 throwItemInLook
         //   回退模式，防「扣了库存却无实体」静默吞物品——review L4）。
         if (m_itemEntities)
-            m_itemEntities->spawnItemAt(origin, itemId, 1, dir.x(), dir.z(), kDropperPopSpeed);
+            m_itemEntities->spawnItemAt(origin, itemId, 1, dir.x(), dir.z(), kDropperPopSpeed, slotEnch, slotName, slotDur);
         else
             emit spawnItem(int(std::floor(origin.x())), int(std::floor(origin.y())),
-                           int(std::floor(origin.z())), itemId, 1);
+                           int(std::floor(origin.z())), itemId, 1, slotEnch, slotName);
     } else if (itemId == RecipeRegistry::ArrowId) {
         // t608 箭 → **玩家友方箭**（spawnArrowPlayer：arrowFromPlayer=true 语义）：命中 **mob**（damageEntity +
         //   击退 + 红闪，机制等价 MC 1.0 发射器箭可打生物）且嵌入方块后**可被玩家拾取**（arrowPickupScan 只拾
@@ -4147,19 +4163,23 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   与箭 / 雪球 / 鸡蛋同一口出来（旧版 emit spawnItem 用发射器格中心 → 与投掷物两个口，用户「投掷出
         //   物品和雪球这些不是一个口出来的」）+ 沿朝向定向弹出初速 kDispenserPopSpeed（旧版哈希随机方向）。
         //   走 spawnItemAt（定点定向弹出，C++ 直调同 pickupScan 的 removeAt 模式；免 QML 信号往返）。
-        //   注意：DispenserStore 槽仅存 (id,count)，经此路径弹出的附魔工具 / 附魔书（t615）附魔不保真
-        //   （既有 store 结构限制，弹出后为无附魔普通物品；机制近似——发射器内物品本无「实例」语义）。
+        //   t647：实例元数据随实体走（slotEnch / slotName / slotDur —— DispenserStore 槽现持元数据，
+        //   弹出的附魔工具 / 附魔书 / 改名物品拾取回填保真；旧版丢元数据「发射器弹出附魔书变普通书」）。
         //   m_itemEntities 未注入 → 回退 spawnItem 信号路径（同 throwItemInLook 回退模式，防「扣了库存
         //   却无实体」静默吞物品——review L4）。
         if (m_itemEntities)
-            m_itemEntities->spawnItemAt(origin, itemId, 1, dir.x(), dir.z(), kDispenserPopSpeed);
+            m_itemEntities->spawnItemThrown(origin, itemId, 1, dir.x(), 0.0f, dir.z(), kDispenserPopSpeed, slotEnch, slotName, slotDur);
         else
             emit spawnItem(int(std::floor(origin.x())), int(std::floor(origin.y())),
-                           int(std::floor(origin.z())), itemId, 1);
+                           int(std::floor(origin.z())), itemId, 1, slotEnch, slotName);
     }
     // 扣 1 库存（count-1；归 0 → setSlot 空栈归一清槽——t607 修：count 归 0 时 id 一并归 0，旧版存
     //   {id>0,count=0} 幽灵栈致「UI 图标残留 / 不再发射 / 拿出物品消失」）。分派表全覆盖（else 兜底）→ 恒扣。
-    m_dispenserStore->setSlot(x, y, z, slot, itemId, count - 1);
+    //   t647：扣库存走「count-1、元数据保留」的保真写回（count>1 时同槽余件仍带实例元数据；归 0 清槽）。
+    if (count > 1)
+        m_dispenserStore->setSlot(x, y, z, slot, itemId, count - 1, slotEnch, slotName, slotDur);
+    else
+        m_dispenserStore->setSlot(x, y, z, slot, 0, 0);
     // t619 progress 成就埋点：玩家库存发射器/投掷器成功弹出物品 → dispenserFired 语义事件（「发射!」）。
     //   仅此库存路径发（神殿陷阱 fallback 算 worldgen 机关非玩家成就）。
     emit dispenserFired();

@@ -73,7 +73,19 @@ Item {
     // t49：主栏初始全空（spec point 2「空背包起」；VM 构造期 m_mainSlots 全 0）。
     property var craftSlots: [0,0,0,0] // 2×2 合成格（占位；配方解析属 Phase 1.1，结果槽暂不产出）
     property var craftCounts:[0,0,0,0] // 平行数量
+    // t647：craftDur / craftEnch / craftName 平行数组 —— 合成格持有实例元数据（耐久 / 附魔 / 名，同
+    //   CraftingTableUI 修法）。旧版只存 (id,count) → 附魔 / 改名物品放进合成格拿出来变白板。
+    property var craftDur:   [0,0,0,0]
+    property var craftEnch:  [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]]
+    property var craftName:  ["","","",""]
     property int craftRev: 0
+    // t647 取合成槽实例元数据（数组未初始化防御）。
+    function craftDurAt(i) { const d = root.craftDur[i]; return (typeof d === "number" && d > 0) ? d : 0 }
+    function craftEnchAt(i) {
+        const e = root.craftEnch[i]
+        return (Array.isArray(e) && e.length === 4) ? e : [0, 0, 0, 0]
+    }
+    function craftNameAt(i) { const n = root.craftName[i]; return (typeof n === "string") ? n : "" }
 
     // t167 左键拖动均分（spec：左键按住拖过 N 格 → 实时均分 floor(count/N)、余数留光标）。手势由 root 级
     // DragHandler(LeftButton) 总控：按下不动时 per-slot 左键 TapHandler 抓（处理单点拾取/放置/合并/互换），
@@ -124,12 +136,24 @@ Item {
 
     // ── t168 面板专属槽路由：craft 合成格走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
     //   readSlot/writeSlot 薄包装委托 InventoryOps（含本地组分发 → 调本处 localReadSlot/localWriteSlot）。
+    //   t647：craft 槽透传实例元数据（durability / enchants / name —— 同 CraftingTableUI 修法，修「附魔 /
+    //   改名物品放进合成格拿出来变白板」）。
     function localReadSlot(group, index) {
-        if (group === "craft") return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0 }
-        return { id: 0, count: 0 }
+        if (group === "craft") return { id: root.craftSlots[index] || 0, count: root.craftCounts[index] || 0,
+                                        durability: root.craftDurAt(index), enchants: root.craftEnchAt(index), name: root.craftNameAt(index) }
+        return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0], name: "" }
     }
-    function localWriteSlot(group, index, id, count) {
-        if (group === "craft") { root.craftSlots[index] = id; root.craftCounts[index] = count; root.craftRev++ }
+    function localWriteSlot(group, index, id, count, durability, enchants, name) {
+        if (group !== "craft") return
+        root.craftSlots[index] = id
+        root.craftCounts[index] = count
+        root.craftDur[index] = (durability > 0) ? durability : 0
+        const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
+        const arr = root.craftEnch
+        arr[index] = e.slice()
+        root.craftEnch = arr
+        root.craftName[index] = (typeof name === "string") ? name : ""
+        root.craftRev++
     }
     // t38 左键整组（拾取/放置/合并/互换 4 case）+ t49 右键半份：算法见 InventoryOps.resolveClick /
     //   resolveRightClick（四面板共享）。返回 {slotId,slotCount,heldId,heldCount} 或 null=无操作；调用方
@@ -216,8 +240,12 @@ Item {
             const id = root.craftSlots[i] || 0
             const n = root.craftCounts[i] || 0
             if (id !== 0 && n > 0) {
-                const remain = root.hotbar.addToAny(id, n)
-                if (remain <= 0) { root.craftSlots[i] = 0; root.craftCounts[i] = 0 }
+                // t647：实例元数据随归还透传（耐久 / 附魔 / 名 —— 附魔工具 / 改名物品关包归还保真）。
+                const remain = root.hotbar.addToAny(id, n, root.craftDurAt(i), root.craftEnchAt(i), root.craftNameAt(i))
+                if (remain <= 0) {
+                    root.craftSlots[i] = 0; root.craftCounts[i] = 0; root.craftDur[i] = 0
+                    root.craftEnch[i] = [0,0,0,0]; root.craftName[i] = ""
+                }
                 else root.craftCounts[i] = remain // 背包满：余数留本槽
             }
         }
@@ -361,6 +389,19 @@ Item {
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
                             }
+                            // t647 附魔光晕（合成槽）：同主栏光晕配色。触碰 craftRev 令附魔写入 / 搬运后重算。
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: {
+                                    const _r = root.craftRev
+                                    if (_r < 0 || (root.craftSlots[index] || 0) === 0) return false
+                                    const e = root.craftEnchAt(index)
+                                    return ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                }
+                                color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                radius: 3
+                                z: 3
+                            }
                             // t203：craft 2×2 接入完整快捷操作（与主栏/hotbar/工作台 craft 3×3 同）：左键整组
                             //   （resolveClick）+ 双击拿同类（doMergeSameId 扫 main+hotbar+craft）+ 左键拖动均分
                             //   （root DragHandler + 逐槽 HoverHandler 收集，redistributeLive 分发）+ 右键放1/拿半
@@ -380,14 +421,17 @@ Item {
                                     root.lastTapMs = now
                                     root.lastTapKey = key
                                     if (isDouble) { root.doMergeSameId("craft", index); return }
-                                    const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0, 0)
+                                    // t647：实例元数据透传（合成格现持耐久 / 附魔 / 名 —— 同主栏槽语义）。
+                                    const r = root.resolveClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0,
+                                                                root.craftDurAt(index), root.craftEnchAt(index), root.craftNameAt(index))
                                     if (!r) return
-                                    root.craftSlots[index] = r.slotId
-                                    root.craftCounts[index] = r.slotCount
+                                    root.localWriteSlot("craft", index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                                     root.craftRev++
                                     root.hotbar.heldBlock = r.heldId
                                     root.hotbar.heldCount = r.heldCount
                                     root.hotbar.heldDurability = r.heldDur
+                                    root.hotbar.setHeldEnchants(r.heldEnch)
+                                    root.hotbar.heldCustomName = r.heldName
                                 }
                             }
                             // t203 per-slot 右键（拿半/放一），与主栏/hotbar/工作台 craft 3×3 同（不依赖
@@ -396,14 +440,16 @@ Item {
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: {
-                                    const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0, 0)
+                                    const r = root.resolveRightClick(root.craftSlots[index] || 0, root.craftCounts[index] || 0,
+                                                                      root.craftDurAt(index), root.craftEnchAt(index), root.craftNameAt(index))
                                     if (!r) return
-                                    root.craftSlots[index] = r.slotId
-                                    root.craftCounts[index] = r.slotCount
+                                    root.localWriteSlot("craft", index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                                     root.craftRev++
                                     root.hotbar.heldBlock = r.heldId
                                     root.hotbar.heldCount = r.heldCount
                                     root.hotbar.heldDurability = r.heldDur
+                                    root.hotbar.setHeldEnchants(r.heldEnch)
+                                    root.hotbar.heldCustomName = r.heldName
                                 }
                             }
                             HoverHandler {

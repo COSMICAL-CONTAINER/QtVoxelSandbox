@@ -295,6 +295,20 @@ Item {
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
+                        // t647 附魔光晕（箱子槽）：槽内物品带附魔 → 浅紫叠层（同主栏光晕配色；战利品附魔书 /
+                        //   玩家放入的附魔工具入箱可见其附魔态）。触碰 chestCoordRev 重算。
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: {
+                                const _r = root.chestCoordRev
+                                if (_r < 0 || chId === 0) return false
+                                const e = root.chestStore.slotEnchantsAt(root.chestX, root.chestY, root.chestZ, index)
+                                return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                            }
+                            color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                            radius: 3
+                            z: 3
+                        }
                         // 左键整组（resolveClick）；右键走 per-slot 右键 TapHandler（resolveRightClick）。
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
@@ -433,6 +447,18 @@ Item {
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
+                        // t647 附魔光晕（主栏槽）：同主栏光晕配色。触碰 mainRevision 重算。
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: {
+                                const _r = root.hotbar.mainRevision
+                                if (_r < 0 || mainId === 0) return false
+                                return Array.isArray(mainEnch) && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0)
+                            }
+                            color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                            radius: 3
+                            z: 3
+                        }
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
                             onTapped: {
@@ -554,6 +580,19 @@ Item {
                                 text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
+                            }
+                            // t647 附魔光晕（hotbar 槽）：同主栏光晕配色。触碰 slotRevision 重算。
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: {
+                                    const _r = root.hotbar.slotRevision
+                                    if (_r < 0 || slotId === 0) return false
+                                    const e = root.hotbar.enchantsAt(index)
+                                    return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                }
+                                color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                radius: 3
+                                z: 3
                             }
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
@@ -681,6 +720,23 @@ Item {
         }
         return ""
     }
+    // t647 当前 hover 槽物品的附魔列表文本（tooltip 附魔行；同 SurvivalInventory t590 模式）：据 hoveredKey
+    //   查 hotbar / main / chest 三组（战利品附魔书 / 玩家放入的附魔工具 hover 可见其携带附魔）。
+    property string hoveredEnchantText: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _cr = root.chestStore.revision
+        const key = root.hoveredKey
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.enchantListText(root.hotbar.enchantsAt(idx)) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.enchantListText(root.hotbar.mainEnchantsAt(idx)) : ""
+        if (parts[0] === "chest") return _cr >= 0 ? root.hotbar.enchantListText(root.chestStore.slotEnchantsAt(root.chestX, root.chestY, root.chestZ, idx)) : ""
+        return ""
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -709,10 +765,13 @@ Item {
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
             // t622：hover 槽物品带实例名 → 优先显实例名（改名物品 / 箱内改名物显其名）。
+            // t647：附附魔行（hoveredEnchantText —— 战利品附魔书 / 附魔工具 hover 可见携带附魔，对齐
+            //   SurvivalInventory / 附魔台 tooltip）。
             text: root.hotbar ? ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
                     : root.hotbar.nameForBlock(root.hoveredItemId))
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
-                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : "" // t304 弓伤害 tooltip
+                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")
+                + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : "" // t304 弓伤害 tooltip
             color: "#f2f2f2"
             font.pixelSize: 12
         }

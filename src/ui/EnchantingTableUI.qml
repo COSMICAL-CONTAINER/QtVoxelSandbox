@@ -737,6 +737,19 @@ Item {
                             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                             font.pixelSize: 13; font.bold: true
                         }
+                        // t647 附魔光晕（主栏槽）：同 SurvivalInventory 主栏光晕。触碰 mainRevision 重算。
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: {
+                                const _r = root.hotbar.mainRevision
+                                if (_r < 0 || mainId === 0) return false
+                                const e = root.hotbar.mainEnchantsAt(index)
+                                return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                            }
+                            color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                            radius: 3
+                            z: 3
+                        }
                         TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("main", index) }
                         TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("main", index) }
                         HoverHandler {
@@ -831,6 +844,19 @@ Item {
                                 text: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.countAt(index)) : "" }
                                 color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
                                 font.pixelSize: 13; font.bold: true
+                            }
+                            // t647 附魔光晕（hotbar 槽）：同 SurvivalInventory hotbar 行光晕。触碰 slotRevision 重算。
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: {
+                                    const _r = root.hotbar.slotRevision
+                                    if (_r < 0 || slotId === 0) return false
+                                    const e = root.hotbar.enchantsAt(index)
+                                    return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                }
+                                color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                radius: 3
+                                z: 3
                             }
                             TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("hotbar", index) }
                             TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("hotbar", index) }
@@ -970,13 +996,14 @@ Item {
                 materialId: { const _r = root.enchantRev; return _r >= 0 ? (eslot.slotId) : 0 }
             }
             // t549 附魔光晕（槽内物品带附魔时浅紫半透明叠层；机制等价 MC 附魔光泽，同 AnvilUI）。
+            //   t647：4 槽全查（旧版只查 e[0] —— 铁砧合并书产物附魔可落在 1..3 槽 → 光晕漏显）。
             Rectangle {
                 anchors.fill: parent
                 visible: {
                     const _r = root.enchantRev
                     if (_r < 0 || eslot.slotId === 0) return false
                     const e = root.enchAt(eslot.index)
-                    return (e[0] || 0) !== 0
+                    return ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
                 }
                 color: Qt.rgba(0.55, 0.25, 0.9, 0.30)
                 radius: 3

@@ -89,17 +89,22 @@ public:
     //   其余（合并 / LRU / 免拾窗 / 重力 + 摩擦 / maxStack）与 spawnItem 完全同链。dirX/dirZ 全 0（退化）→
     //   speed 视作 0（原地生成，重力落地）。分层同 spawnItem（Entities 层，无向上依赖）。
     //   t622 name：同 spawnItem（发射器 / 投掷器弹出物品的实例名保真）。
+    //   t647 durability：同 spawnItem（发射器弹出的磨损工具耐久保真）。
     Q_INVOKABLE void spawnItemAt(const QVector3D &pos, int itemId, int count,
                                  float dirX, float dirZ, float speed,
-                                 const QVariantList &enchants = {}, const QString &name = QString());
+                                 const QVariantList &enchants = {}, const QString &name = QString(),
+                                 int durability = -1);
     // t609 带俯仰的定点定向弹出（Q 丢弃修正）：在浮点世界坐标 pos（玩家眼位 + 视线 × 0.3）生成掉落物，
     // 初速度 = (dirX,dirY,dirZ) 归一化 × speed（三维视线方向——仰视上抛 / 俯视下压，机制等价 MC 玩家把
     // 物品朝视线方向扔出）。与上方水平版（vy=0）的差异仅在初速含 Y 分量；其余（合并 / LRU / 免拾窗 /
     // 重力 + 摩擦）完全同链。PlayerController 主动丢弃（dropHeld 族）C++ 直调本入口（非 QML，不 Q_INVOKABLE）。
     //   t622 name：同 spawnItem（玩家主动丢弃的改名物品保真——dropHeld 族传 held/slot 实例名）。
+    //   t647 durability：同 spawnItem（丢弃的磨损工具耐久保真；dropHeld 族现未传 → 缺省 -1 归一满，
+    //   发射器弹出路径传槽内实例值）。
     void spawnItemThrown(const QVector3D &pos, int itemId, int count,
                          float dirX, float dirY, float dirZ, float speed,
-                         const QVariantList &enchants = {}, const QString &name = QString());
+                         const QVariantList &enchants = {}, const QString &name = QString(),
+                         int durability = -1);
 
     // t354 批量 spawn 抑制 entitiesChanged（修 Stalker 爆炸「t320 已批 worldChanged 但仍卡」的复发根因）：
     //   一次爆炸按 kExplosionDropChance(~50%) 对球内每破坏块发 explosionDroppedItem → 呈现层逐个 spawnItem，
