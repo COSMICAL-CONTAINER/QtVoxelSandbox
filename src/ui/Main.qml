@@ -7913,6 +7913,7 @@ Window {
             onWheel: (event) => {
                 if (window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
                     || window.enchantingTableOpen || window.anvilOpen || window.dispenserOpen) return   // t549：三 UI 开时滚轮不切槽
+                if (window.progressOpen || window.statsOpen) return   // t637：进度（成就树缩放）/ 统计面板开时滚轮归面板（成就树 WheelHandler 缩放）
                 if (window.chatOpen) return   // t312：聊天开时不切 hotbar（打字时滚轮误触；聊天 input 顶层已捕获，双重保险）
                 // t210 滚轮行为按模式切换：观察者（spectator）滚轮调 flySpeedMul（有效 4..20 blocks/sec，
                 //   前滚加速 / 后滚减速）；创造 / 生存滚轮恒切 hotbar 槽（无论是否在飞）。即「滚轮语义」由
@@ -8393,7 +8394,14 @@ Window {
     //   节点三态：已解锁=绿框亮底+✓；可进行（父解锁未达成）=黄框脉动描边+○；locked（父未解锁）=暗底+🔒。
     //   节点内容 = 物品图标（iconId 三段路由：方块 Image / ToolIcon / MaterialIcon，同 Inventory 调色板模式）
     //   + 名字 + 简述；hover tooltip 显全文（locked 附「需先完成：父名」）。
-    //   拖动：Flickable 上下左右自由拖（contentWidth/Height = 树边界 + 边距；树小于视口则不裁剪）。
+    //   t637 交互重做（用户「能收缩：点分叉按钮把后面一串收起来（思维导图式）；解锁到哪自动展开到下一层
+    //   分叉；鼠标滚轮缩放；移动靠拖拽」）：
+    //   - 收缩/展开：每个有子节点的节点右缘 +/− 圆钮；收起 → 子树整体隐藏 + 布局重排（剩余节点收紧）。
+    //     默认态：从各根出发「沿已解锁边界自动展开一层」——父已解锁的分叉保持展开、未达分叉收起。
+    //   - 滚轮缩放：WheelHandler 调 viewScale 0.5..2.0，缩放中心 = 鼠标位置（内容坐标锚定不变）。
+    //   - 拖拽平移：替代旧 Flickable —— 拖拽改 contentX/Y（本实现 contentX/contentY + scale 双变换）。
+    //   - 布局重排（t637 ④）：C++ defs 已改「打开背包唯一主线根 → 获得原木 → 合成台 → 全族」+ 农夫 / 起航 /
+    //     发射独立根（见 playerprogress.cpp）。
     //   revision 触碰刷新：model / 树数据表达式显式读 progress.revision 且 revision 参与返回值（_r>=0 守卫
     //   恒真），防 qmlcachegen AOT 把裸触碰读当死代码消除（qml-touch 铁律）。
     //   仅 playing && progressOpen 显；z=155（高于暂停 100，低于死亡 180）。纯呈现（PLAN §2 UI 层），§9 自绘原创。
@@ -8426,58 +8434,223 @@ Window {
                 const _r = progress.revision
                 return _r >= 0 ? progress.achievements() : []
             }
-            // 树边界（最大列 / 行号；连线端点 + Flickable content 尺寸用）。
-            readonly property int treeCols: { const _t = achTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].col); return m }
-            readonly property int treeRows: { const _t = achTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].row); return m }
-            // 已解锁计数（副标题「已解锁 X / Y」）。
+            // t637 收缩态：id → bool（true = 该节点的子树收起）。纯 QML 会话态（不入存档——重开面板按解锁
+            //   边界重算默认态，非用户数据）。
+            property var collapsedIds: ({})
+            // t637 解锁集快照（上次默认态重算时的 unlocked 集）。解锁推进（新增解锁 id）→ 对新解锁节点
+            //   自动展开其子树（用户「解锁到哪自动展开到下一层分叉」）；其余保持用户当前态（手动收起不被
+            //   覆盖）。面板重开（树空→有）→ 全量重算默认态。
+            property var lastUnlockedSet: ({})
+            property var lastTreeRef: null
+            onAchTreeChanged: {
+                const tree = progressPanel.achTree
+                if (tree === progressPanel.lastTreeRef) return
+                progressPanel.lastTreeRef = tree
+                if (!tree || tree.length === 0) {
+                    // 面板关闭期（树空）→ 清快照；重开时走「全量重算默认」分支。
+                    progressPanel.lastUnlockedSet = {}
+                    progressPanel.collapsedIds = {}
+                    return
+                }
+                // 计算当前解锁集 + 新解锁项。
+                const wasEmpty = Object.keys(progressPanel.lastUnlockedSet).length === 0
+                const curSet = {}
+                for (let i = 0; i < tree.length; ++i)
+                    if (tree[i].unlocked) curSet[tree[i].id] = true
+                const newlyUnlocked = []
+                for (const k in curSet)
+                    if (!progressPanel.lastUnlockedSet[k]) newlyUnlocked.push(k)
+                progressPanel.lastUnlockedSet = curSet
+                const cl = {}
+                for (const k in progressPanel.collapsedIds) cl[k] = progressPanel.collapsedIds[k]
+                if (wasEmpty && Object.keys(cl).length === 0) {
+                    // 初次 / 面板重开：全量默认 —— 未解锁的分叉点收起（远端子树折叠）、已解锁的展开
+                    //   （「解锁到哪展开到哪」，机制等价 MC 成就页进度折叠读感）。
+                    for (let i = 0; i < tree.length; ++i) {
+                        const n = tree[i]
+                        if (!n.parentId) continue
+                        if (!curSet[n.parentId]) cl[n.parentId] = true
+                    }
+                } else {
+                    // 会话内解锁推进：新解锁的节点自动展开（解除其收起态）；其余不动（保用户手动收起）。
+                    for (let k = 0; k < newlyUnlocked.length; ++k) delete cl[newlyUnlocked[k]]
+                }
+                progressPanel.collapsedIds = cl
+            }
+            // t637 可见树（过滤 collapsedIds 后剩余节点 + 布局重排的 row）：
+            //   「子树收起」= 该节点的全部后代不渲染。可见集 = 从根 DFS，遇 collapsed[id] 跳过其后代。
+            //   row 重排（可见节点垂直收紧）：对每个可见节点，row = 可见序（叶子占 1 行、父居中于可见子女
+            //   —— 复刻 C++ 递归布局但只对可见节点，子树收起处不占行）。
+            readonly property var visibleTree: {
+                const tree = achTree
+                const cl = collapsedIds
+                if (!tree || tree.length === 0) return []
+                // id → children（定义序）
+                const kids = {}
+                const byId = {}
+                for (let i = 0; i < tree.length; ++i) {
+                    const n = tree[i]
+                    byId[n.id] = n
+                    if (n.parentId) {
+                        if (!kids[n.parentId]) kids[n.parentId] = []
+                        kids[n.parentId].push(n.id)
+                    }
+                }
+                // 可见 id 集（根恒可见；collapsed[id] 的后代不可见）
+                const visible = {}
+                const walk = (id) => {
+                    visible[id] = true
+                    if (cl[id]) return           // 收起 → 后代不可见
+                    const ch = kids[id]
+                    if (ch) for (let k = 0; k < ch.length; ++k) walk(ch[k])
+                }
+                for (let i = 0; i < tree.length; ++i)
+                    if (!tree[i].parentId) walk(tree[i].id)
+                // 递归布局：可见叶子 1 行；父 = 可见子女跨度中点；跨根连续堆叠（复刻 C++ 算法）。
+                const rowOf = {}
+                let nextRow = 0
+                const layout = (id) => {
+                    const ch = kids[id]
+                    const visCh = ch ? ch.filter(c => visible[c]) : []
+                    if (!visCh.length) { rowOf[id] = nextRow++; return 1 }
+                    const start = nextRow
+                    let total = 0
+                    for (let k = 0; k < visCh.length; ++k) total += layout(visCh[k])
+                    rowOf[id] = start + (total - 1) / 2
+                    return total
+                }
+                for (let i = 0; i < tree.length; ++i)
+                    if (!tree[i].parentId && visible[tree[i].id]) layout(tree[i].id)
+                // 输出可见节点（原 def 序）+ 重排 row / 是否有子（收缩钮显隐）。
+                const out = []
+                for (let i = 0; i < tree.length; ++i) {
+                    const n = tree[i]
+                    if (!visible[n.id]) continue
+                    const ch = kids[n.id]
+                    const o = {}
+                    const keys = ["id","name","desc","unlocked","parentId","parentName","depth","locked","col","iconId"]
+                    for (let k = 0; k < keys.length; ++k) o[keys[k]] = n[keys[k]]
+                    o.row = rowOf[n.id] !== undefined ? rowOf[n.id] : 0
+                    o.hasKids = ch && ch.length > 0
+                    o.collapsed = cl[n.id] === true
+                    out.push(o)
+                }
+                return out
+            }
+            // 树边界（最大列 / 行号；连线端点 + 画布尺寸用；t637 读重排后的 visibleTree）。
+            readonly property int treeCols: { const _t = visibleTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].col); return m }
+            readonly property int treeRows: { const _t = visibleTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].row); return m }
+            // 已解锁计数（副标题「已解锁 X / Y」；全树口径 —— 收起不改「已解锁 / 总数」）。
             readonly property int unlockedCount: { const _t = achTree; let c = 0; for (let i = 0; i < _t.length; ++i) if (_t[i].unlocked) ++c; return c }
             Column {
                 anchors.fill: parent; anchors.margins: 16; spacing: 6
                 Text { text: "进度（成就树）"; color: "#eeeeee"; font.pixelSize: 20; font.bold: true
                        anchors.horizontalCenter: parent.horizontalCenter }
-                Text { text: "拖动查看 · 已解锁 " + progressPanel.unlockedCount + " / " + progressPanel.achTree.length
+                Text { text: "滚轮缩放 · 拖拽查看 · 点 +/− 收起分叉 · 已解锁 " + progressPanel.unlockedCount + " / " + progressPanel.achTree.length
                        color: "#888888"; font.pixelSize: 11
                        anchors.horizontalCenter: parent.horizontalCenter }
-                // ── 树画布：Flickable 上下左右拖（contentWidth/Height = 树边界 + 边距）──
-                Flickable {
-                    id: treeFlick
+                // ── t637 树视口（拖拽平移 + 滚轮缩放；替代旧 Flickable）──
+                Item {
+                    id: treeViewport
                     width: parent.width
                     height: parent.height - 32 /*标题*/ - 18 /*副标题*/ - 50 /*返回*/ - 18 /*间距*/
+                    clip: true
                     // 布局常量（列距 / 行距 / 边距 / 节点尺寸；树节点与连线共用同一公式）。
                     readonly property real kColW: 200
                     readonly property real kRowH: 110
                     readonly property real kPad: 40
                     readonly property real nodeW: 170
                     readonly property real nodeH: 86
-                    // 树内容尺寸（+ 节点尺寸 + 两侧边距）；小于视口时取视口宽（Flickable 不裁剪、不弹性拖）。
-                    contentWidth: Math.max(width, treeFlick.kPad * 2 + (progressPanel.treeCols + 1) * treeFlick.kColW)
-                    contentHeight: Math.max(height, treeFlick.kPad * 2 + (progressPanel.treeRows + 1) * treeFlick.kRowH)
-                    clip: true
-                    boundsBehavior: Flickable.StopAtBounds
-                    // 树画布根（全部节点 / 连线的定位父；width/Height 绑 content 令 tooltip 钳制正确）。
+                    // 基础内容尺寸（树边界 + 节点尺寸 + 两侧边距）。
+                    readonly property real baseW: kPad * 2 + (progressPanel.treeCols + 1) * kColW
+                    readonly property real baseH: kPad * 2 + (progressPanel.treeRows + 1) * kRowH
+                    // t637 视图变换：contentX/Y（视口内平移，逻辑坐标）+ viewScale 0.5..2.0。
+                    //   treeCanvas transform = 先平移 contentX/Y 再缩放（缩放锚 = 内容原点 + 手动补偿，
+                    //   见 WheelHandler —— 保持鼠标下的内容点不动）。
+                    property real contentX: 0
+                    property real contentY: 0
+                    property real viewScale: 1.0
+                    // 初次打开 / 树尺寸变化：平移钳制（防拖出太空；缩放后 1× 内容小于视口时居中）。
+                    function clampPan() {
+                        const vw = treeViewport.width, vh = treeViewport.height
+                        const cw = baseW * viewScale, ch = baseH * viewScale
+                        if (cw <= vw) contentX = (vw - cw) / 2
+                        else contentX = Math.max(0, Math.min(vw - cw, contentX))
+                        if (ch <= vh) contentY = (vh - ch) / 2
+                        else contentY = Math.max(0, Math.min(vh - ch, contentY))
+                    }
+                    onWidthChanged: clampPan()
+                    onHeightChanged: clampPan()
+                    onViewScaleChanged: clampPan()
+                    onBaseWChanged: clampPan()
+                    onBaseHChanged: clampPan()
+                    // 面板重新打开（achTree 空→有）→ 复位视图（居中起点）。
+                    Connections {
+                        target: progressPanel
+                        function onVisibleTreeChanged() { /* 树重排后钳制（防越界残移） */ treeViewport.clampPan() }
+                    }
+                    // 滚轮缩放（t637 ②）：scale × 1.15^(±1)，钳 0.5..2.0；缩放中心 = 鼠标点 ——
+                    //   contentX' = mouse.x - (mouse.x - contentX) * (s'/s)（保持鼠标下内容点不动）。
+                    WheelHandler {
+                        acceptedModifiers: Qt.NoModifier
+                        onWheel: (event) => {
+                            const oldS = treeViewport.viewScale
+                            let newS = oldS * (event.angleDelta.y > 0 ? 1.15 : 1 / 1.15)
+                            newS = Math.max(0.5, Math.min(2.0, newS))
+                            if (newS === oldS) return
+                            const k = newS / oldS
+                            treeViewport.contentX = event.position.x - (event.position.x - treeViewport.contentX) * k
+                            treeViewport.contentY = event.position.y - (event.position.y - treeViewport.contentY) * k
+                            treeViewport.viewScale = newS   // setter 末 clampPan 钳界
+                        }
+                    }
+                    // 拖拽平移（t637 ③）：按住左键拖（空处 / 节点上均可拖 —— 节点点击 +/− 钮在钮自身
+                    //   MouseArea 内消化，不冒泡）。
+                    MouseArea {
+                        id: treeDragArea
+                        anchors.fill: parent
+                        hoverEnabled: false
+                        property real lastX: 0
+                        property real lastY: 0
+                        onPressed: (mouse) => { lastX = mouse.x; lastY = mouse.y }
+                        onPositionChanged: (mouse) => {
+                            if (!pressed) return
+                            treeViewport.contentX += mouse.x - lastX
+                            treeViewport.contentY += mouse.y - lastY
+                            lastX = mouse.x; lastY = mouse.y
+                            treeViewport.clampPan()
+                        }
+                        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                    }
+                    // 树画布根（全部节点 / 连线的定位父；t637 变换 = 平移 + 缩放）。
                     Item {
                         id: treeCanvas
-                        width: treeFlick.contentWidth
-                        height: treeFlick.contentHeight
+                        transform: [
+                            Translate { x: treeViewport.contentX; y: treeViewport.contentY },
+                            Scale { xScale: treeViewport.viewScale; yScale: treeViewport.viewScale }
+                        ]
+                        width: treeViewport.baseW
+                        height: treeViewport.baseH
                         // ── 连线层（先画，节点覆盖其上）：每条父→子正交折线 = 水平出 + 垂直 + 水平入 三段 ──
+                        //   t637：model 改 visibleTree（收起子树的连线随节点一并隐藏）。
                         Repeater {
-                            model: progressPanel.achTree
+                            model: progressPanel.visibleTree
                             delegate: Item {
                                 // 仅子节点（parentId 非空串）画线；根节点 delegate 空占位不渲染。
                                 visible: String(modelData.parentId).length > 0
                                 // 端点（同节点摆位公式）：节点 x = kPad + col*kColW、y = kPad + row*kRowH；
                                 //   连线接节点垂直中点（y + nodeH/2）、父右缘（x + nodeW）/ 子左缘。
-                                readonly property real myX: treeFlick.kPad + modelData.col * treeFlick.kColW
-                                readonly property real myY: treeFlick.kPad + modelData.row * treeFlick.kRowH + treeFlick.nodeH / 2
-                                // 查父节点（必在同表；C++ defs 父先于子）。
+                                readonly property real myX: treeViewport.kPad + modelData.col * treeViewport.kColW
+                                readonly property real myY: treeViewport.kPad + modelData.row * treeViewport.kRowH + treeViewport.nodeH / 2
+                                // 查父节点（必在同表；C++ defs 父先于子）。收起态下父必可见（父收起则子不可见）。
                                 readonly property var parentNode: {
-                                    const tree = progressPanel.achTree
+                                    const tree = progressPanel.visibleTree
                                     for (let i = 0; i < tree.length; ++i)
                                         if (tree[i].id === modelData.parentId) return tree[i]
                                     return null
                                 }
-                                readonly property real parentX: parentNode ? treeFlick.kPad + parentNode.col * treeFlick.kColW + treeFlick.nodeW : 0
-                                readonly property real parentY: parentNode ? treeFlick.kPad + parentNode.row * treeFlick.kRowH + treeFlick.nodeH / 2 : 0
+                                readonly property real parentX: parentNode ? treeViewport.kPad + parentNode.col * treeViewport.kColW + treeViewport.nodeW : 0
+                                readonly property real parentY: parentNode ? treeViewport.kPad + parentNode.row * treeViewport.kRowH + treeViewport.nodeH / 2 : 0
                                 // 垂直段 x = 两列中点（父右缘与子左缘之间）。
                                 readonly property real midX: (parentX + myX) / 2
                                 // 线色：父已解锁（依赖链激活）→ 亮绿；父未解锁 → 暗灰。
@@ -8505,12 +8678,13 @@ Window {
                             }
                         }
                         // ── 节点层（成就卡片）──
+                        //   t637：model 改 visibleTree（收起子树隐藏）；row 用重排后行号（布局收紧）。
                         Repeater {
-                            model: progressPanel.achTree
+                            model: progressPanel.visibleTree
                             delegate: Rectangle {
-                                x: treeFlick.kPad + modelData.col * treeFlick.kColW
-                                y: treeFlick.kPad + modelData.row * treeFlick.kRowH
-                                width: treeFlick.nodeW; height: treeFlick.nodeH
+                                x: treeViewport.kPad + modelData.col * treeViewport.kColW
+                                y: treeViewport.kPad + modelData.row * treeViewport.kRowH
+                                width: treeViewport.nodeW; height: treeViewport.nodeH
                                 radius: 8
                                 // 三态底色 + 边框：已解锁=绿亮 / 可进行=黄 / locked=暗。
                                 color: modelData.unlocked ? "#1c2e1c" : (modelData.locked ? "#181818" : "#222222")
@@ -8587,6 +8761,36 @@ Window {
                                         }
                                     }
                                 }
+                                // ── t637 收缩钮（有子节点的分叉点）：节点右缘外小圆钮 +/− ──
+                                //   点击翻 collapsedIds[id] → visibleTree 重排（子树隐藏 / 恢复）。钮自身
+                                //   MouseArea 消化点击（不透传 treeDragArea，防拖拽误触）。
+                                Rectangle {
+                                    visible: modelData.hasKids
+                                    x: parent.width + 3; y: parent.height / 2 - 9
+                                    width: 18; height: 18; radius: 9
+                                    color: toggleArea.containsMouse ? "#3a4a3a" : "#263226"
+                                    border.color: modelData.collapsed ? "#c8a84a" : "#5a9a5a"; border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: modelData.collapsed ? "+" : "−"
+                                        color: modelData.collapsed ? "#c8a84a" : "#7fe57f"
+                                        font.pixelSize: 13; font.bold: true
+                                    }
+                                    MouseArea {
+                                        id: toggleArea
+                                        anchors.fill: parent
+                                        anchors.margins: -4   // 命中区略大（18px 钮在小缩放下难点中）
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            const cl = {}
+                                            for (const k in progressPanel.collapsedIds) cl[k] = progressPanel.collapsedIds[k]
+                                            if (cl[modelData.id] === true) delete cl[modelData.id]
+                                            else cl[modelData.id] = true
+                                            progressPanel.collapsedIds = cl   // 触发 visibleTree 重排
+                                        }
+                                    }
+                                }
                                 // ── hover tooltip（名字 + 描述全文 + locked 前置提示；同创造背包 tooltip 模式）。
                                 //    摆位：节点上方居中，水平 / 垂直越画布界时钳制（最右列不溢画布右缘 / 首行翻到
                                 //    节点下方）。坐标换算：本 Rectangle x 是节点局部，钳制阈值换回节点局部 =
@@ -8595,8 +8799,8 @@ Window {
                                 Rectangle {
                                     visible: nodeHover.hovered
                                     x: Math.min(Math.max(2, parent.width / 2 - width / 2),
-                                                treeCanvas.width - width - 4 - (treeFlick.kPad + modelData.col * treeFlick.kColW))
-                                    y: (treeFlick.kPad + modelData.row * treeFlick.kRowH - height - 6) < 4
+                                                treeCanvas.width - width - 4 - (treeViewport.kPad + modelData.col * treeViewport.kColW))
+                                    y: (treeViewport.kPad + modelData.row * treeViewport.kRowH - height - 6) < 4
                                        ? parent.height + 6 : -height - 6
                                     width: tipCol.implicitWidth + 16; height: tipCol.implicitHeight + 12
                                     radius: 4; color: "#101410"; border.color: "#5a7a5a"; border.width: 1

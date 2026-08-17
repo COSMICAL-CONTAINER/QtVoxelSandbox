@@ -14,19 +14,21 @@
 
 // 成就定义（progress 新系统）。机制等价 MC 1.0 advancement tree 的现阶段可完成子集。
 //   §9：成就名用中文通用词，零 MC 专名。定义序 = 依赖树 DFS 先序（父先于子、同父兄弟相邻）：
-//   树 1（生存主线）：「打开背包」→「合成台」(←获得原木→「合成台」) →「出击时间」→「怪物猎人」
-//                    →「神射手」(←怪物猎人)；「挖矿时间到」(←合成台) →「获得升级」→「钻石!」(←获得升级)
-//                    →「附魔师」(←钻石!) →「书虫」(←附魔师)；「铁匠」(←附魔师)。
-//   树 2（农耕线）：「农夫」根（收获 10 作物）→「起航」独立根（骑船）。
-//   树 3（机关线）：「发射!」根（发射器触发）。
+//   主线（t637 布局重排，用户「打开背包最左根 → 获得原木一条线」）：「打开背包」唯一最左根 →
+//   「获得原木」(←打开背包) →「合成台」→「出击时间」→「怪物猎人」→「神射手」(←怪物猎人)；
+//   「挖矿时间到」(←合成台) →「获得升级」→「钻石!」→「附魔师」→「书虫」/「铁匠」(←附魔师)。
+//   独立根线（t637）：「农夫」（收获 10 作物）/「起航」（骑船）/「发射!」（发射器触发）各自独立根。
 //   父成就未解锁时子成就不解锁（unlock 前置检查）。iconId = 节点图标（QML 树节点显示）。
 const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
 {
     static const QList<AchievementDef> kDefs = {
-        // ── 树 1：生存主线（打开背包 → 工具 → 战斗 → 附魔）──
+        // ── 主线：打开背包 → 获得原木 → 合成台 → 工具 / 战斗 / 挖矿 / 附魔 ──
         { "open_inventory", nullptr,          "打开背包",   "按 E 打开你的背包",
           int(BlockRegistry::Chest) },
-        { "get_wood",       nullptr,          "获得原木",   "砍倒一棵树获得原木",
+        // t637：get_wood 由独立根改为挂 open_inventory 下（用户「打开背包→获得原木一条线」——主线单一
+        //   根串成线，机制等价 MC 1.0 "Taking Inventory" 即成就树根）。旧存档已解锁组合不受影响
+        //   （loadVariant 直插 m_unlocked 绕过父检查；仅新解锁事件走父前置）。
+        { "get_wood",       "open_inventory", "获得原木",   "砍倒一棵树获得原木",
           int(BlockRegistry::Log) },
         { "crafting_table", "get_wood",       "合成台",     "用 4 块木板合成工作台",
           int(BlockRegistry::CraftingTable) },
@@ -48,12 +50,11 @@ const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
           int(RecipeRegistry::EnchantedBookId) },
         { "blacksmith",     "enchanter",      "铁匠",       "用铁砧修复或合并物品",
           int(BlockRegistry::Anvil) },
-        // ── 树 2：农耕 / 探索线 ──
+        // ── 独立根线（t637：各自独立根，不挂主线）──
         { "farmer",         nullptr,          "农夫",       "收获 10 株成熟作物",
           int(RecipeRegistry::WheatId) },
         { "set_sail",       nullptr,          "起航",       "坐上船开始航行",
           int(RecipeRegistry::OakBoatId) },
-        // ── 树 3：机关线 ──
         { "dispense",       nullptr,          "发射!",      "让发射器或投掷器弹出物品",
           int(BlockRegistry::Dispenser) },
     };
