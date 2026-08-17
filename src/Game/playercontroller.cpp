@@ -5041,6 +5041,16 @@ void PlayerController::step(qreal dt)
         //   return）→ 一旦嵌入（如低顶区起飞 / 飞行中被落沙掩埋）全向位移被 snap 锁死无法脱困。
         //   同走路分支在逐轴解算后调用（同一 helper、同一模式，正常飞行嵌入 <kEmbedTol 早退零开销）。
         extrudeEmbedded();
+        // review D1-c 低顶区起飞后的自动蹲复探（镜像走路分支末尾 / L11 船骑乘分支的同款复探）：7cd3b6b 收紧
+        //   站起闸门后，蹲在 1.5 格通道双击空格起飞被拒（保持蹲 + m_autoCrouch=true 等复探）。旧版飞行分支
+        //   早 return 不复探 → 飞出通道到开阔区仍蹲着飞（蹲位眼高）直到落地走路才自动站。同走路分支：飞到
+        //   头顶有站起空间处（canStandUp）即自动站起 —— 飞行走 moveAxis 有碰撞，站起不会嵌入（1.8 AABB 放进
+        //   开阔空间安全）；仍在低顶（桥洞 / 洞穴飞行）→ 保持蹲（闸门语义不破）。setMoveState(Walk) 复位 AABB
+        //   高 / 眼位（闸门内已 canStandUp 验证，不会二次拒）。
+        if (m_autoCrouch && m_moveState == Crouch && canStandUp()) {
+            m_autoCrouch = false;
+            setMoveState(Walk);
+        }
         // t540 创造飞行长按 shift 触地切步行（spec「飞行时长按 shift，应落地后立即切步行模式，得重新按两下
         //   空格才能再飞」）。机制等价 MC 1.0 创造飞：按住 shift 下降，触地瞬间自动退出飞态回步行。旧实现只在
         //   「shift 按下瞬间」处理（setKey 蹲分支 canCrouch 守卫挡了飞态），飞态 shift 永远是「下降」语义 → 玩家

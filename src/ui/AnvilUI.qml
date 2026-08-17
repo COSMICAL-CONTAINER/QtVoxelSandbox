@@ -238,6 +238,7 @@ Item {
         root.lastTapMs = now
         root.lastTapKey = key
         if (isDouble && InventoryOps.groupIsDraggable(root, group)) {
+            root.defocusNameBox()   // review D1-d：t626③ 焦点修在此分支漏调（其它交互分支都退框）—— 双击拿同类也是槽交互，改名框须退出输入态（焦点回键位层）
             InventoryOps.doMergeSameId(root, group, index)
             return
         }

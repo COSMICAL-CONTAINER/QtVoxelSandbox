@@ -73,11 +73,17 @@ bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, f
         for (int z = z0; z <= z1; ++z)
             for (int x = x0; x <= x1; ++x) {
                 const quint8 bid = world->blockAt(x, y, z);
-                // t629 薄雪层视穿透：SnowLayer 是贴 cell 底的 1/8..1/8×8 薄板（snowLayerHeight 单一权威），
-                //   全格 isSolid 把它当整墙 → mob 无法走进任何含雪层格（雪原 worldgen 雪层会把 mob 围死原地；
+                // t629 薄雪层视穿透（review D1-a 收紧）：SnowLayer 是贴 cell 底的 1/8..1.0 薄板（snowLayerHeight
+                //   单一权威），全格 isSolid 把它当整墙 → mob 无法走进任何含雪层格（雪原 worldgen 雪层会把 mob 围死原地；
                 //   雪傀儡被自己铺的脚印围死）。机制等价 MC mob 跨步薄雪层（玩家侧本就有 auto-step 跨 1/8）→
                 //   水平碰撞豁免；垂直仍由下方落地扫描按层真实高度承接（mobSupportTopY 配套，两处成对）。
-                if (bid == BlockRegistry::SnowLayer) continue;
+                //   **仅豁免薄层（≤0.5）**：8 级中的高 4 级（5/8..8/8）视觉与碰撞上已是矮墙 / 满格 —— MC 1.0 中
+                //   厚雪层（≥1/2）对实体是真实障碍（mob 跳不上 / 不穿）。旧无条件豁免让 8/8 满格雪层（塌落叠层
+                //   setSnowLayerMerge 可叠出 state=7）被 mob 直线穿墙。垂直落地扫描不受影响（mobSupportTopY
+                //   按层真顶承接，非豁免路径）。
+                if (bid == BlockRegistry::SnowLayer
+                    && BlockRegistry::snowLayerHeight(world->stateAt(x, y, z)) <= 0.5f)
+                    continue;
                 // t642 作物可穿越：cross 形非实体植物（ShapeNone 无碰撞盒），mob 应直接走过（同雪层豁免
                 //   「视穿透」族：World::isSolid 语义=非 air → 作物/草丛类恒当墙，须显式排除）。含掉落沙 /
                 //   击退 / 流水推动等所有 mobAabbHitsSolid 消费路径（沙落作物格穿透到下方耕地，机制等价 MC）。
@@ -4237,8 +4243,28 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   命中）。SnowLayer solid=true（isSolid 非 air）→ mobFootprintHasSupport 原样命中，无需改谓词。
             const int feetCell = qFloor(e.pos.y() - e.halfH + 0.01f);
             if (mobFootprintHasSupport(world, e.pos.x(), e.pos.z(), feetCell - 1, e.halfW)
-                || mobFootprintHasSupport(world, e.pos.x(), e.pos.z(), feetCell, e.halfW))
+                || mobFootprintHasSupport(world, e.pos.x(), e.pos.z(), feetCell, e.halfW)) {
+                // review D1-b 走入薄雪层的贴合：mob 从满格地面（feet=cell+1）走上积雪区（层真顶 cell+1/8）时，
+                //   上面支撑复探命中保 resting（对），但旧版不再贴面 → 脚悬在层顶上方 ~0.9 格（t629 只修了下落
+                //   路径的落地扫描，行走路径不走重力分支贴面）。同「下 1 格台阶」语义：resting 期间对**中心列
+                //   支撑**（走下台阶时 footprint 还压着身后高块，取中心列 = mob 前脚方向）取 mobSupportTopY 真顶，
+                //   当前脚位高于真顶超过容差（1e-3，防 ULP 抖动 / 满格地面恒等早退）→ 下贴真顶（等价自动步下
+                //   1/8 级小台阶，机制同玩家 auto-step 的反向）。只下贴不上抬（支撑变高的情况由失支撑→重力→
+                //   落地扫描路径处理，不在此分支）。footprint 后续列仍高于中心列时 mobAabbHitsSolid 已挡
+                //   （台阶沿卡死由 t362 footprint 保 resting 覆盖 —— 本处仅移 Y 不移 XZ）。
+                float supportTop = -1.0f;
+                for (int cy = feetCell + 1; cy >= feetCell - 1; --cy) {
+                    if (cy < 0) break;
+                    const float top = mobSupportTopY(world, cx, cy, cz);
+                    if (top >= 0.0f && top <= e.pos.y() - e.halfH + 0.01f) { supportTop = top; break; }
+                    // cy 高于脚位的层（top > feet）不算当前支撑（mob 站进它下方 = 嵌入，由窒息 / 挤出兜底）
+                }
+                if (supportTop >= 0.0f) {
+                    const float restY = supportTop + e.halfH;
+                    if (restY < e.pos.y() - 1e-3f) { e.pos.setY(restY); dirty = true; }
+                }
                 continue; // 仍实体 → 保持静止
+            }
             e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
             dirty = true;
         }
