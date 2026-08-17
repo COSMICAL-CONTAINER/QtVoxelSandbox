@@ -365,7 +365,8 @@ Item {
     // t590 三档消耗：青金石固定 1/2/3；XP 等级随书架加成升（1 档 1-3 级按书架 power）—— baseLevelCost
     //   = 1 + floor(power/7)：0-6 书架 → 1、7-13 书架 → 2、14+ 书架 → 3（满书架 1 档也贵到 3 级）。
     //   三档 = [base, base+1, base+2]（机制等价 MC 1.0 附魔消耗随书架升）。触碰 bookshelfPower（已绑
-    //   worldEditRev）→ 放 / 破书架后重算档位消耗。maxLevel（书架解锁档位数）逻辑不变。
+    //   worldEditRev）→ 放 / 破书架后重算档位消耗。t649 档位解锁改 MC 语义（tier2 ≥5 / tier3 ≥10 书架，
+    //   maxLevel 逻辑随之替换——旧 floor(power/2)+1 令 2 书架即全档解锁）。
     readonly property int baseLevelCost: Math.min(3, Math.max(1, 1 + Math.floor(root.bookshelfPower / 7)))
     readonly property var levelCosts: [root.baseLevelCost, Math.min(5, root.baseLevelCost + 1), Math.min(5, root.baseLevelCost + 2)]
     readonly property var lapisCosts: [1, 2, 3]
@@ -376,7 +377,20 @@ Item {
         const _e = worldEditRev
         return _e >= 0 ? theWorld.countBookshelvesAround(enchantX, enchantY, enchantZ) : 0
     }
-    readonly property int maxLevel: Math.min(3, Math.max(1, Math.floor(bookshelfPower / 2) + 1))
+    // t649 档位解锁（MC 1.0 语义）：1 档恒解锁；2 档需 ≥5 书架；3 档需 ≥10 书架（用户口径「10 个左右书架
+    //   才能附 123 级」）。旧版 floor(power/2)+1 令 2 书架即全档解锁（4 书架即顶档的根因之一）。
+    readonly property int maxLevel: (root.bookshelfPower >= 10) ? 3 : (root.bookshelfPower >= 5) ? 2 : 1
+    // t649 档位 offered 等级（附魔强度，进 selectEnchants）：offered(i) = floor(bs*20*i/33) + i，钳 [1,30]。
+    //   校准锚点（机制等价 MC 1.0「top slot = rand(1..8)+floor(power/2)+rand(0..power)，中低档递减」的确定性
+    //   近似——MC 每次点击随机，本实现显示值确定（附魔结果随机性由 selectEnchants 的 seed 承担）：
+    //     (a) 0-1 书架 → 三档 1..4 级（低；2/3 档被 maxLevel 门禁锁）
+    //     (b) 4 书架 → 3 档 = 10（非旧版 24）
+    //     (c) 15 书架 → 3 档 = 30（满书架顶格）、1 档 = 10
+    //   offered 由 doEnchant 同式计算（offeredFor 函数单一权威，防两处漂移）。
+    function offeredFor(slotIdx) {
+        const o = Math.floor(root.bookshelfPower * 20 * (slotIdx + 1) / 33) + (slotIdx + 1)
+        return Math.max(1, Math.min(30, o))
+    }
     // t549 槽 0 待附魔物（id / 耐久；触碰 enchantRev）。空槽 / 青金石 / 不可附魔 → 0。
     readonly property int enchantItemId: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantSlots[0] || 0) : 0 }
     // 槽 0 物品可附魔（类别 != None）且未附魔（MC 1.0 已附魔物品不能进附魔台）。t615 书（BookId →
@@ -447,9 +461,9 @@ Item {
             InventoryOps.writeSlot(root, "enchant", 0, srcId0, 1 + remain, 0, [0,0,0,0], srcName0)
             if (remain > 0) return
         }
-        // t590 offeredLevel 映射：档位 I/II/III 基准 8/15/22 + 书架加成 floor(power/2)（书架 power 进档位池；
-        //   15 书架 → 档位 3 offered≈29 近满 30 → 附魔数 3 + 单附魔等级趋 maxLevel）。机制等价 MC「书架提升附魔强度」。
-        const offered = ([8, 15, 22][slotIdx] || 8) + Math.floor(root.bookshelfPower / 2)
+        // t649 offeredLevel：offeredFor(slotIdx) 单一权威（floor(bs*20*(i+1)/33)+(i+1)，钳 [1,30]——见属性段
+        //   校准注释）。旧版 [8,15,22]+floor(power/2) 固定基底令 4 书架第三档即 24（用户实测偏差）。
+        const offered = root.offeredFor(slotIdx)
         const seed = (enchantX * 73856093) ^ (enchantY * 19349663) ^ (enchantZ * 83492791)
                     ^ (root.enchantItemId * 40503) ^ (slotIdx * 7919) ^ (Date.now() & 0xffff)
         // 1) 扣 XP（等级 0 + 1 档 → 视为扣 0 级跳过；其余不足 spendLevels 拒 → 全回滚）。
@@ -479,6 +493,9 @@ Item {
         }
         root.justEnchanted = true
         enchantFlashTimer.restart()
+        // t649 符文迸发（附魔成功瞬间书架→台 涌动一簇；宿 Main.qml burstEnchantRunes 转发 runeLoader，
+        //   未注入 / 加载失败 → no-op 降级）。
+        if (window.burstEnchantRunes) window.burstEnchantRunes(4)
     }
     // ════════════════════════════════════════════════════════════════════════════
 

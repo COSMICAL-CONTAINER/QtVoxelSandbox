@@ -205,6 +205,7 @@ qt_add_qml_module(voxelsandbox
     QML_FILES
         src/ui/Main.qml
         src/ui/BlockParticles.qml
+        src/ui/EnchantRunes.qml # t649 附魔台符文粒子（书架→台 漂浮字符；Model+Timer 池，无 Particles3D 依赖）
         src/ui/TorchSmoke.qml
         src/ui/WeatherParticles.qml
         src/ui/AmbientParticles.qml

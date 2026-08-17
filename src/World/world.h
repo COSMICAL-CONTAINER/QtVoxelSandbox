@@ -186,12 +186,12 @@ public:
     //   只读 m_chunks.blockAt（向下依赖）；世界空 → 0（干态兜底）。非 Q_INVOKABLE（C++ 调）。
     int farmlandHydrationLevel(int x, int y, int z) const;
 
-    // t474 附魔台书架加成计数（机制等价 MC 1.0 enchanting table bookshelf power：附魔台周围 2 格切比雪夫
-    //   距离内的书架数提升可选附魔等级上限）。给定附魔台方块格 (x,y,z)，扫 (x±2, y±2, z±2) 立方体范围内
-    //   的 Bookshelf 数（共 5×5×5 = 125 格，去除中心附魔台自身），上限钳到 15（spec「count bookshelves
-    //   within 2 blocks (<=15)」）。机制对齐 MC「中间需空气格」本工程简化为纯计数（不查阻隔）。
-    //   呈现层 EnchantingTableUI 据本值算 maxEnchantLevel（书架数 / 2 + 1，钳 [1,3]，机制等价 MC 每两级
-    //   书架解锁更高档）。分层（PLAN §2）：World 层只读 m_chunks.blockAt + BlockRegistry::isBookshelf，
+    // t474/t649 附魔台书架加成计数（机制等价 MC 1.0 enchanting table bookshelf power）。给定附魔台方块格
+    //   (x,y,z)：只数**水平切比雪夫距离 == 2 的 16 格环带** × **y / y+1 两层**的 Bookshelf，且书架半步格
+    //   （书架位向附魔台 1 格、同 y）须为 Air（「中间隔一格空气」的空间要求——贴身书架墙不计）。上限钳到 15。
+    //   t649 前为 5×5×5 立方体纯计数（含对角 / 楼下，无空气通路判定）→ 4 书架即顶满档位（用户实测偏差根因）。
+    //   呈现层 EnchantingTableUI 据本值算档位解锁（tier2 ≥5、tier3 ≥10 书架）与 offered 等级（机制等价 MC
+    //   书架驱动档位）。分层（PLAN §2）：World 层只读 m_chunks.blockAt + BlockRegistry::isBookshelf，
     //   不依赖 Renderer/Game/UI。OOB blockAt 返 Air 安全（不计入）。
     Q_INVOKABLE int countBookshelvesAround(int x, int y, int z) const;
 

@@ -1256,25 +1256,34 @@ int World::farmlandHydrationLevel(int x, int y, int z) const
     return (level > 0) ? level : 0;
 }
 
-// t474 附魔台书架加成计数（见 world.h 头注释）。机制等价 MC 1.0 enchanting table bookshelf power：
-//   附魔台周围 2 格切比雪夫距离（5×5×5 立方体）内的书架数提升可选附魔等级上限，钳到 15。
-//   纯只读（blockAt + BlockRegistry::isBookshelf）；OOB 返 Air 安全（不计入）；世界空 → 0。
+// t474 附魔台书架加成计数（见 world.h 头注释）。t649 对齐 MC 1.0 书架计数规则（机制等价，无专有资产）：
+//   只数**水平切比雪夫距离 == 2 的 16 格环带**（dx/dz 满足 max(|dx|,|dz|)==2；≤1 的贴身格与 ≥3 的远处不计）×
+//   **两层高度**（书架 y 层 = 附魔台 y 层 + 上一层 y+1；楼下 / 楼上两层以外的书架不计）的书架；且**书架与附魔台
+//   之间须有空气通路**——书架格与附魔台之间的半步格（书架位向附魔台方向 1 格、与书架同 y）须为 Air，紧贴书架
+//   堆满整墙（半步格被填）则该书架不计（「中间隔一格空气」的空间要求，t649 前的 5×5×5 立方体计数缺失此判定 →
+//   4 个书架即顶满档位的根因）。上限 15。
+//   忠实简化（相对 MC 的完整 air 检查）：MC 还查「附魔台自身 y 与 y+1 的中间列空气」，本实现只查**书架半步格**
+//   的空气——两者对绝大多数摆法结果一致，差异仅在书架空心塔等罕见构造；以书架半步格为准更直观（每书架独立判定）。
+//   纯只读（blockAt + BlockRegistry::isBookshelf）；OOB 返 Air 安全（不计入 / 半步 OOB 视作不通 → 不计）；世界空 → 0。
 int World::countBookshelvesAround(int x, int y, int z) const
 {
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return 0;
-    constexpr int kRadius = 2;     // MC 1.0 附魔台书架加成半径（2 格切比雪夫距离）
     constexpr int kMaxBookshelves = 15; // spec 上限（>15 仍按 15 算）
     int count = 0;
-    for (int dy = -kRadius; dy <= kRadius; ++dy) {
+    // 16 格环带（水平切比雪夫距离 == 2）× 两层（y / y+1）。半步格 = 书架位向附魔台方向走 1 格（同 y）：
+    //   书架在 (x+2, z) → 半步 (x+1, z)；书架在 (x-2, z+2) 角位 → 半步 (x-1, z+1)（两轴各半步，对角连线中点）。
+    for (int dy = 0; dy <= 1; ++dy) {
         const int yy = y + dy;
-        for (int dx = -kRadius; dx <= kRadius; ++dx) {
-            for (int dz = -kRadius; dz <= kRadius; ++dz) {
-                if (dx == 0 && dy == 0 && dz == 0) continue; // 跳过中心附魔台自身（即使附魔台是书架也不计；防御）
-                if (BlockRegistry::isBookshelf(m_chunks.blockAt(x + dx, yy, z + dz))) {
-                    ++count;
-                    if (count >= kMaxBookshelves) return kMaxBookshelves; // 早退：达上限即返（避免无谓遍历余格）
-                }
+        for (int dx = -2; dx <= 2; ++dx) {
+            for (int dz = -2; dz <= 2; ++dz) {
+                if (std::max(std::abs(dx), std::abs(dz)) != 2) continue; // 只看 ==2 环带（≤1 贴身 / 中间格不计）
+                if (!BlockRegistry::isBookshelf(m_chunks.blockAt(x + dx, yy, z + dz))) continue;
+                // 半步格空气判定（书架与附魔台间通路）：非 Air（被方块填）→ 该书架不计。
+                const quint8 midId = m_chunks.blockAt(x + dx / 2, yy, z + dz / 2);
+                if (midId != quint8(BlockRegistry::Air)) continue;
+                ++count;
+                if (count >= kMaxBookshelves) return kMaxBookshelves; // 早退：达上限即返（避免无谓遍历余格）
             }
         }
     }

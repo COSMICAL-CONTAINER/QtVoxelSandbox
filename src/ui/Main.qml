@@ -1063,6 +1063,11 @@ Window {
         //   （z=170 黑色小 UI 盖主 UI 右下角，即用户报「三 UI 底部黑色残留」根因；附魔台非背包，语义亦不符）。
         player.release()
     }
+    // t649 附魔符文迸发（EnchantingTableUI.doEnchant 成功路径经 window 调；同面板经 window.closeAnvil 模式）。
+    //   runeLoader.item 为 null（加载失败降级）→ no-op（§2-E 静默降级不崩）。
+    function burstEnchantRunes(n) {
+        if (runeLoader.item) runeLoader.item.burstRunes(n)
+    }
     function closeEnchantingTable() {
         if (!enchantingTableOpen) return
         enchantingTableOpen = false
@@ -4510,6 +4515,37 @@ Window {
                     console.info("[t16] BlockParticles Loader status = Ready")
                 else if (status === Loader.Error)
                     console.warn("[t16] BlockParticles Loader status = Error — Particles3D 运行期不可用，粒子已降级关闭（§2-E）")
+            }
+        }
+
+        // t649 附魔台符文粒子：EnchantRunes.qml 经 Loader 动态加载（同 particleLoader 模式；本组件自身
+        //   **不依赖 Particles3D**（Model+Timer 池，BlockParticles t465 同源），Loader 隔离仍保留 —— 与
+        //   其它粒子组件同构，加载失败仅 warn 不拖垮主文档，§2-E）。附魔台 UI 打开（active 绑
+        //   window.enchantingTableOpen）时，参与书架向附魔台漂符文；burstEnchantRunes(n) 供附魔成功迸发。
+        //   分层（PLAN §2）：只读 World.blockAt 查书架位，绝不反向写栅格。
+        Loader {
+            id: runeLoader
+            active: true
+            source: "EnchantRunes.qml"
+            onLoaded: {
+                // 领养进 particlesHost 锚点（t16：否则 3D Node parent=null → 孤儿不渲染）。
+                runeLoader.item.parent = particlesHost
+                runeLoader.item.world = theWorld
+                // 响应式绑定（Qt.binding）：附魔台 UI 开关 / 台坐标切换 / 放破方块 → 符文 active / 书架重扫。
+                runeLoader.item.active = Qt.binding(function() {
+                    return window.appState === "playing" && window.enchantingTableOpen
+                })
+                runeLoader.item.tableX = Qt.binding(function() { return window.enchantX })
+                runeLoader.item.tableY = Qt.binding(function() { return window.enchantY })
+                runeLoader.item.tableZ = Qt.binding(function() { return window.enchantZ })
+                runeLoader.item.editRev = Qt.binding(function() { return window.worldEditRev })
+                console.info("[t649] EnchantRunes adopted into scene graph (parent=Node)")
+            }
+            onStatusChanged: {
+                if (status === Loader.Ready)
+                    console.info("[t649] EnchantRunes Loader status = Ready")
+                else if (status === Loader.Error)
+                    console.warn("[t649] EnchantRunes Loader status = Error — 符文粒子已降级关闭（§2-E）")
             }
         }
 
