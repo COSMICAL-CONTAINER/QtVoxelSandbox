@@ -330,8 +330,11 @@ function redistributeLive(root) {
     // 3) floor(total/N) 入格（cap 钳制防溢出），余数留光标；记 dragWritten 供下轮撤销。
     //   t263 同 id 合并（方块段）耐久不变（e.dur = 槽原始耐久）；工具段不进此分支（cap=1 恒满不进 eligible 合并）。
     //   t475 同 id 合并附魔不变（e.ench = 槽原始附魔；可堆叠物品恒 4 个 0）。
-    //   t622 同 id 合并 / 空槽开新名不变（e.name = 槽原始名 / dragHeldName——工具段不进此分支；可堆叠物
-    //     品均分无名语义，写入槽原始名 = 不变）。
+    //   review rev2-C5（t622 注释落地）：写入名 = 槽原始名**非空则沿用**（同 id 合并不动槽实例名）；槽原始名空
+    //     = 本轮拖动**新开的空槽** → 写 dragHeldName（拖动均分是从手持栈分裂出去，分裂物带手持实例名——
+    //     旧版写 e.name（空槽快照恒 ""）→ 改名整栈左键均分后每格都是无名物品，与 328 行注释「空槽开新
+    //     名 = dragHeldName」矛盾）。后续轮次该槽已带名 → e.name 非空沿用（不丢）。
+    //     铁砧改名整栈（maxStack>1）均分 → 各格保名；无名物品 dragHeldName="" 行为不变。
     const per = Math.floor(total / n)
     let remaining = total
     if (per > 0) {
@@ -339,7 +342,8 @@ function redistributeLive(root) {
             const e = eligible[i]
             const place = Math.min(per, cap - e.base)
             if (place <= 0) continue
-            writeSlot(root, e.group, e.index, heldId, e.base + place, e.dur, e.ench, e.name)
+            const placeName = e.name !== "" ? e.name : root.dragHeldName
+            writeSlot(root, e.group, e.index, heldId, e.base + place, e.dur, e.ench, placeName)
             root.dragWritten[e.key] = true
             remaining -= place
         }

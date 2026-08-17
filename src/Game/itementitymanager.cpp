@@ -33,14 +33,20 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, co
     //   新 spawn 往已有实体合（不动已有 pos 避免视觉跳变）。count 用 e.count 直接改 + notifyChanged（同
     //   setCountAt 语义；批内仅标 dirty → t354 爆炸批合并正确生效）。maxStack<=1（工具 / 不可堆叠）→ 跳过合并。
     //   爆炸场景（t354 beginBatch/endBatch）：第 2 个掉落物 spawn 时能找到第 1 个并合并 → 批内生效。
+    //   review rev2-C5：**带名实体不参与合并**（双向）—— 铁砧可给整栈可堆叠物改名（anvilRename 对 maxStack>1
+    //   物品写 customName），合并会把带名实例吸进无名堆（名静默丢失，正是 t622 要防的）。双向守卫：传入 name
+    //   非空 → 不并入任何已有实体；已有实体带名（e.name 非空）→ 不接收任何并入。带名实体各自独立落体，
+    //   拾取走 addToAny 的带名不合并守卫（见 hotbar.cpp 同批修法）。
     {
         const int cap = BlockRegistry::maxStackSize(itemId); // Core 层全 id 段堆叠上限（掉落物合并用）
-        if (cap > 1 && !m_entities.empty()) {
+        const bool namedDrop = !name.trimmed().isEmpty();     // rev2-C5：带名丢弃（改名产物）不合并
+        if (cap > 1 && !namedDrop && !m_entities.empty()) {
             const QVector3D center(x + 0.5f, y + 0.5f, z + 0.5f);
             const float r2 = kMergeRadius * kMergeRadius; // 平方距离比较（免 sqrt）
             for (size_t i = 0; i < m_entities.size(); ++i) {
                 ItemEntity &e = m_entities[i];
                 if (!e.alive || e.itemId != itemId) continue; // 空槽 / 不同物品 → 跳过
+                if (!e.name.trimmed().isEmpty()) continue;    // rev2-C5：已有实体带名 → 不接收并入
                 const QVector3D d = e.pos - center;
                 if (d.x() * d.x() + d.y() * d.y() + d.z() * d.z() > r2) continue; // 超半径 → 跳过
                 // 命中可合并实体：clamp 到 cap，溢出余数走新 spawn（保掉落实体 count 不超 maxStack）。
@@ -113,13 +119,16 @@ void ItemEntityManager::spawnItemAt(const QVector3D &pos, int itemId, int count,
     if (count < 1) count = 1;
 
     // 就近合并（同 spawnItem 语义）：排出口附近已有同 id 掉落物（如连续踩板弹出多件）→ 合并，少 delegate。
+    //   review rev2-C5：带名（双向）不参与合并（同 spawnItem 段注释——铁砧可给整栈可堆叠物改名，合并丢名）。
     {
         const int cap = BlockRegistry::maxStackSize(itemId);
-        if (cap > 1 && !m_entities.empty()) {
+        const bool namedDrop = !name.trimmed().isEmpty();
+        if (cap > 1 && !namedDrop && !m_entities.empty()) {
             const float r2 = kMergeRadius * kMergeRadius;
             for (size_t i = 0; i < m_entities.size(); ++i) {
                 ItemEntity &e = m_entities[i];
                 if (!e.alive || e.itemId != itemId) continue;
+                if (!e.name.trimmed().isEmpty()) continue;    // rev2-C5：已有实体带名 → 不接收并入
                 const QVector3D d = e.pos - pos;
                 if (d.x() * d.x() + d.y() * d.y() + d.z() * d.z() > r2) continue;
                 if (e.count < cap) {
@@ -183,13 +192,16 @@ void ItemEntityManager::spawnItemThrown(const QVector3D &pos, int itemId, int co
     if (count < 1) count = 1;
 
     // 就近合并（同 spawnItemAt 语义）：眼位前方已有同 id 掉落物（如连按 Q）→ 合并，少 delegate。
+    //   review rev2-C5：带名（双向）不参与合并（同 spawnItem 段注释——铁砧可给整栈可堆叠物改名，合并丢名）。
     {
         const int cap = BlockRegistry::maxStackSize(itemId);
-        if (cap > 1 && !m_entities.empty()) {
+        const bool namedDrop = !name.trimmed().isEmpty();
+        if (cap > 1 && !namedDrop && !m_entities.empty()) {
             const float r2 = kMergeRadius * kMergeRadius;
             for (size_t i = 0; i < m_entities.size(); ++i) {
                 ItemEntity &e = m_entities[i];
                 if (!e.alive || e.itemId != itemId) continue;
+                if (!e.name.trimmed().isEmpty()) continue;    // rev2-C5：已有实体带名 → 不接收并入
                 const QVector3D d = e.pos - pos;
                 if (d.x() * d.x() + d.y() * d.y() + d.z() * d.z() > r2) continue;
                 if (e.count < cap) {

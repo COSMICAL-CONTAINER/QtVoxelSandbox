@@ -10008,6 +10008,7 @@ Window {
         anchors.fill: parent
         hotbar: hotbarVM
         playerState: playerState
+        player: player
         theWorld: theWorld
         enchantX: window.enchantX
         enchantY: window.enchantY

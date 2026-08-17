@@ -50,6 +50,9 @@ Item {
     // t619 宿主注入：玩家进度 VM（附魔成功埋点 progress.onEnchanted / onEnchantedBookObtained）。
     //   var 避免类型解析耦合（同 AnvilUI player 模式）。
     property var progress: null
+    // review rev2-C5 宿主注入：PlayerController（returnEnchantToHotbar 满包余量丢弃 dropItemAtFront 用，
+    //   同 AnvilUI.player 模式）。var 避免类型解析耦合；null 时余量路径 no-op（不崩）。
+    property var player: null
     // 请求宿主关闭面板（恢复指针锁定 + 焦点回键位层）。
     signal closed()
     // 拖出丢弃：请求宿主把光标手持栈丢弃为实体（拖出面板外释放 / 点遮罩区；同 CraftingTableUI）。
@@ -169,13 +172,17 @@ Item {
     // 关包归还 enchant 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把两槽内容
     //   addStack 回 hotbar（MC 行为：关附魔台界面把输入槽物品退回背包）。t549 耐久 / 附魔随实例归还。
     //   t622 名随实例归还（第 5 参透传）。
+    //   review rev2-C5：addStack 带名守卫（带名整栈不并入既有栈 → 背包无空位时返 leftover）→ 余量经
+    //   player.dropItemAtFront 丢实体（同 Main.returnHeldToHotbar 满包丢弃模式，§2-E 不静默吞）。
     function returnEnchantToHotbar() {
         if (!root.hotbar) return
         for (let i = 0; i < root.enchantSlots.length; ++i) {
             const id = root.enchantSlots[i] || 0
             const n = root.enchantCounts[i] || 0
-            if (id !== 0 && n > 0)
-                root.hotbar.addStack(id, n, root.enchantDur[i] || 0, root.enchAt(i), root.nameAt(i))
+            if (id !== 0 && n > 0) {
+                const leftover = root.hotbar.addStack(id, n, root.enchantDur[i] || 0, root.enchAt(i), root.nameAt(i))
+                if (leftover > 0 && root.player) root.player.dropItemAtFront(id, leftover, root.enchAt(i), root.nameAt(i))
+            }
         }
         for (let i = 0; i < root.enchantSlots.length; ++i) {
             root.enchantSlots[i] = 0

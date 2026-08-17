@@ -353,13 +353,17 @@ Item {
     // 关包归还 anvil 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把三槽内容
     //   addStack 回 hotbar（MC 行为：关铁砧界面把输入槽物品退回背包）。t550 耐久 / 附魔随实例归还
     //   （addStack 第 3/4 参透传：工具 / 护甲保真回包）。t622 名随实例归还（第 5 参透传）。
+    //   review rev2-C5：addStack 带名守卫（带名整栈不并入既有栈 → 背包无空位时返 leftover）→ 余量经
+    //   player.dropItemAtFront 丢实体（同 Main.returnHeldToHotbar 满包丢弃模式，§2-E 不静默吞）。
     function returnAnvilToHotbar() {
         if (!root.hotbar) return
         for (let i = 0; i < root.anvilSlots.length; ++i) {
             const id = root.anvilSlots[i] || 0
             const n = root.anvilCounts[i] || 0
-            if (id !== 0 && n > 0)
-                root.hotbar.addStack(id, n, root.anvilDur[i] || 0, root.enchAt(i), root.nameAt(i))
+            if (id !== 0 && n > 0) {
+                const leftover = root.hotbar.addStack(id, n, root.anvilDur[i] || 0, root.enchAt(i), root.nameAt(i))
+                if (leftover > 0 && root.player) root.player.dropItemAtFront(id, leftover, root.enchAt(i), root.nameAt(i))
+            }
         }
         for (let i = 0; i < root.anvilSlots.length; ++i) {
             root.anvilSlots[i] = 0

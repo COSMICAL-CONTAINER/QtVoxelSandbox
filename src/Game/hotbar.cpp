@@ -938,14 +938,18 @@ int Hotbar::addStack(int id, int n, int durability, const QVariantList &enchants
     //   t622 name 同 enchants：cap=1 物品空槽开新时写实例名；可堆叠物品不传名（同物无名语义）。
     const int dur = normalizeDurability(id, durability);
     const QString trimmedName = name.trimmed();
+    const bool named = !trimmedName.isEmpty(); // rev2-C5：带名可堆叠物不并入既有栈（铁砧改名整栈合并会静默丢名 → 视作不可堆叠，只走空槽开新）
     int remaining = n;
     bool changed = false;
 
     // 0) 先扫所有已有同 id 未满槽合并（含选中槽）。合并优先于空槽开新（t74）。
+    //    review rev2-C5：**双向**带名守卫 —— 传入带名（named）或槽内栈带名（!s.customName.isEmpty()）都不并：
+    //      名是实例属性，无名物品并入带名栈 = 白捡名、带名物品并入无名栈 = 丢名。带名侧走「空槽开新」
+    //      （下方 1 段不筛 → 有空槽即入，背包满是自然返余）。
     for (size_t i = 0; i < m_slots.size(); ++i) {
         if (remaining <= 0) break;
         ItemStack &s = m_slots[i];
-        if (s.id == id && s.count < cap) {
+        if (s.id == id && !named && s.customName.isEmpty() && s.count < cap) {
             const int add = std::min(cap - s.count, remaining);
             s.count += add; remaining -= add; changed = true;
         }
@@ -1037,12 +1041,13 @@ int Hotbar::mainAddStack(int id, int n, int durability, const QVariantList &ench
     const int cap = maxStackSize(id);
     const int dur = normalizeDurability(id, durability);
     const QString trimmedName = name.trimmed();
+    const bool named = !trimmedName.isEmpty(); // rev2-C5：带名可堆叠物不并入既有栈（双向守卫，同 addStack 段注释）
     int remaining = n;
     bool changed = false;
     for (size_t i = 0; i < m_mainSlots.size(); ++i) {
         if (remaining <= 0) break;
         ItemStack &s = m_mainSlots[i];
-        if (s.id == id && s.count < cap) {
+        if (s.id == id && !named && s.customName.isEmpty() && s.count < cap) {
             const int add = std::min(cap - s.count, remaining);
             s.count += add; remaining -= add; changed = true;
         }
@@ -1078,23 +1083,24 @@ int Hotbar::addToAny(int id, int n, int durability, const QVariantList &enchants
     //   t622 name 同 enchants（cap=1 物品空槽开新写实例名——改名物品拾取 / 回栏保真）。
     const int dur = normalizeDurability(id, durability);
     const QString trimmedName = name.trimmed();
+    const bool named = !trimmedName.isEmpty(); // rev2-C5：带名可堆叠物不并入既有栈（双向守卫，同 addStack 段注释——铁砧改名整栈拾取 / 回栏合并丢名）
     int remaining = n;
     bool mainChanged = false, slotChanged = false;
 
-    // 0) main 同 id 未满槽合并。
+    // 0) main 同 id 未满槽合并（rev2-C5：双向带名守卫——named 或槽带名都不并，名是实例属性）。
     for (size_t i = 0; i < m_mainSlots.size(); ++i) {
         if (remaining <= 0) break;
         ItemStack &s = m_mainSlots[i];
-        if (s.id == id && s.count < cap) {
+        if (s.id == id && !named && s.customName.isEmpty() && s.count < cap) {
             const int add = std::min(cap - s.count, remaining);
             s.count += add; remaining -= add; mainChanged = true;
         }
     }
-    // 1) hotbar 同 id 未满槽合并。
+    // 1) hotbar 同 id 未满槽合并（同上双向带名守卫）。
     for (size_t i = 0; i < m_slots.size(); ++i) {
         if (remaining <= 0) break;
         ItemStack &s = m_slots[i];
-        if (s.id == id && s.count < cap) {
+        if (s.id == id && !named && s.customName.isEmpty() && s.count < cap) {
             const int add = std::min(cap - s.count, remaining);
             s.count += add; remaining -= add; slotChanged = true;
         }
