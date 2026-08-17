@@ -2474,13 +2474,15 @@ t605-t621（17 项：相机 1 + 铁砧 1 + 发射器/投掷器/丢弃 3 + 雪傀
 
 ### 🅼 杂项（3 项）
 
-**t641** 死亡后经验条不清空 bug
+**t641** 死亡后经验条不清空 bug ✅✅ 已完成（commit 2d047e7）
 - 用户：「我死了复活后经验条没清空。」
 - 核实现状：takeDamage 致死分支清 XP（playerstate.cpp ~26-33 t443）在——但用户见未清：疑 ①死亡路径不经 takeDamage（爆炸/箭直接 setHealth?）或 ②经验条绑定读旧值（xpChanged 发了但 QML 绑定 playerState 实例不对——查 Main.qml xpBar 绑的 playerState 是哪个实例/死亡后 respawn 是否重设）。读代码+日志定位修。
+- 实查根因：两疑点均排除（所有死亡路径都走 takeDamage、xpBar 绑唯一 playerState 实例且 NOTIFY 正常）——真因是 onDied 在死亡点 spawn 的 1-3 XP 经验球被**尸体**瞬间吸走（XpOrbManager::tick 每帧常开且无 m_dead 门控，尸体停死亡点、球磁吸半径 6 内 ~1s 飞到 → addXp 把刚清空的条又填回）。修：playercontroller.cpp xp tick 加 `!m_dead` 门控（同 pickupScan 掉落物尸体不拾取模式）。
 
-**t642** 僵尸 AI：卡方块 + 跳上作物格
+**t642** 僵尸 AI：卡方块 + 跳上作物格 ✅✅ 已完成（commit 55b886e）
 - 用户：「晚上僵尸生成卡在方块里；还会跳起来踩在我农作物上走（农田应视为不可通行/不跳跃——MC 怪在耕地会被减速但不跳踩）。」
 - 修：① 刷怪位置校验（spawn 候选格碰撞检测——生成点必须能容纳 mob AABB，防卡墙内：刷怪扫描已有?核黑暗刷怪候选验证）；② mob 寻路把耕地/作物格视为「减速可走但不跳」（跳跃判定排除目标格是 Farmland/crop——或者直接：作物格 non-solid 但 mob 跳跃分支只在「前方格 solid 且上方空」才跳，作物不 solid 不该跳）。
+- 实查根因：①黑暗刷怪只查目标格 air+下方 solid，敌对 mob 高 1.8 占两格 → 1 格高洞穴气袋/树冠压顶即嵌（刷怪笼本就查双格）→ 加 spawnCellFitsHostile 双格 air 校验；②World::isSolid=「非 air 实存」，作物（cross 形无碰撞盒）恒被当墙 → mobAabbHitsSolid 挡移动 + 三处越障跳当 1 格墙 → 排除作物格（移动可穿越 + isJumpObstacle 不触发跳）+ kCropSlowMul=0.6 作物格减速；③窒息检测（头嵌 collidable）处加 stuck-escape 轻量兜底（每 1.5s 扫邻域移到最近空位，覆盖沙埋/破块/存档残留等运行期嵌入）。
 
 **t643** 死亡后船卡水+复活体验
 - 用户：「我死了复活后发现有条小船卡在水里。」（t630 支撑阈值修后应缓解——本项核复活时船实体状态残留（死亡不清实体——正常），卡水=支撑判定 bug 同 t630，并入验证）。
