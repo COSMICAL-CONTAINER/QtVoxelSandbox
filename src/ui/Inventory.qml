@@ -125,8 +125,13 @@ Item {
     readonly property int bookSentinel: -0x1000
     readonly property var bookEntries: root.hotbar ? root.hotbar.creativeEnchantedBooks() : []
     // 哨兵 id → 表条目（{ench, packed, name, levelSuffix}）；非哨兵 → null。
+    //   review D2-d：右界从表推导（末条目 ench = 表内最大附魔 id —— 构建按 ench 升序插入）—— 旧硬编码 64
+    //   恰好远大于当前附魔种数，表一扩（EnchantCount 增）新条目哨兵 id 会落到 `<= bookSentinel - 64` 之外被
+    //   判非哨兵 → 调色板出现死格（bookEntries 有该本但 bookInfoFor 返 null）。空表（hotbar 未注入）→ 全拒。
     function bookInfoFor(id) {
-        if (id > root.bookSentinel || id <= root.bookSentinel - 64) return null
+        if (root.bookEntries.length === 0) return null
+        const maxEnch = root.bookEntries[root.bookEntries.length - 1].ench
+        if (id > root.bookSentinel || id <= root.bookSentinel - maxEnch) return null
         const ench = root.bookSentinel - id
         for (let i = 0; i < root.bookEntries.length; ++i)
             if (root.bookEntries[i].ench === ench) return root.bookEntries[i]

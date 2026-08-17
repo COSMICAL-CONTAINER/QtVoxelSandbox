@@ -23,7 +23,10 @@ ItemEntityManager::ItemEntityManager(QObject *parent) : QObject(parent)
 // t590：enchants 是 QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；缺省空 = 无附魔）。工具 / 护甲
 //   丢弃时传其实例附魔 → 实体携带 → 拾取回填（防「附魔工具丢出再捡变普通」）。可堆叠物品（合并路径）恒 0。
 // t622：name 是自定义名（铁砧重命名产物丢弃传其实例名 → 实体携带 → 拾取回填，防「改名物品丢出再捡丢名」）。
-void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, const QVariantList &enchants, const QString &name)
+// review D2-c：durability 是实例耐久（破箱掉落的磨损工具经 Main.qml 携 slotDurabilityAt 传入 → 实体携带 →
+//   拾取回填 addToAny 第 3 参，防「破箱捡回满耐久」免费修复；缺省 -1 = 未初始化 → 归一满耐久，20+ 既有
+//   emit / 直调点零改动）。
+void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, const QVariantList &enchants, const QString &name, int durability)
 {
     if (itemId <= 0) return; // air / 非法：不产出（PlayerController 仅在 drop=true 时发，已过滤）
     if (count < 1) count = 1; // 缺省 / 非法 → 单件（与历史调用兼容）
@@ -89,6 +92,7 @@ void ItemEntityManager::spawnItem(int x, int y, int z, int itemId, int count, co
         for (int i = 0; i < 4; ++i)
             e.enchants[i] = (i < enchants.size()) ? enchants.at(i).toInt() : 0;
         e.name = name.trimmed(); // t622 实例名（空串 = 注册表默认名；拾取回填用）
+        e.durability = durability; // review D2-c 实例耐久（-1 = 未初始化；拾取回填用）
     }
     // t468 初始水平弹出速度（机制等价 MC 破块 / 丢弃物品弹出）：确定性哈希（位置 + itemId）给每件一个固定方向
     //   + 幅值抖动 → 同一掉落可复现。冰面摩擦极低 → 弹出后持续滑动（spec「冰上丢弃物品会一直滑动往前」）；
@@ -320,6 +324,14 @@ QString ItemEntityManager::nameAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return QString();
     return m_entities[size_t(i)].name;
+}
+
+// review D2-c 实体实例耐久（-1 = 未初始化 → 拾取端 addToAny 归一满耐久；>0 = 显式保真，破箱掉落的
+//   磨损工具丢出再捡耐久不复原）。越界 / 空槽 → -1（同未初始化语义，拾取端归一满耐久）。
+int ItemEntityManager::durabilityAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return -1;
+    return m_entities[size_t(i)].durability;
 }
 
 // t64：拾取装不下时把余数回写、保留 entity（dropHeldCursor 整栈丢弃后部分拾取的回退路径）。

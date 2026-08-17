@@ -352,17 +352,20 @@ Item {
     function doMergeSameId(group, index) { InventoryOps.doMergeSameId(root, group, index) }
 
     // 关包归还 anvil 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把三槽内容
-    //   addStack 回 hotbar（MC 行为：关铁砧界面把输入槽物品退回背包）。t550 耐久 / 附魔随实例归还
-    //   （addStack 第 3/4 参透传：工具 / 护甲保真回包）。t622 名随实例归还（第 5 参透传）。
-    //   review rev2-C5：addStack 带名守卫（带名整栈不并入既有栈 → 背包无空位时返 leftover）→ 余量经
+    //   退回背包（MC 行为：关铁砧界面把输入槽物品退回背包）。t550 耐久 / 附魔随实例归还
+    //   （第 3/4 参透传：工具 / 护甲保真回包）。t622 名随实例归还（第 5 参透传）。
+    //   review rev2-C5：addToAny 带名守卫（带名整栈不并入既有栈 → 背包无空位时返 leftover）→ 余量经
     //   player.dropItemAtFront 丢实体（同 Main.returnHeldToHotbar 满包丢弃模式，§2-E 不静默吞）。
+    //   review rv2-A3（aecd2b8 同批修法，漏网处）：addStack → addToAny（main 27 + hotbar 9 智能堆叠——旧版
+    //   只填 hotbar 9 槽，主栏有空间仍报满 → 余量被不必要丢弃）。丢实体兜底保留（3dbe0de 注入的 player
+    //   通道；§2-E 满包丢弃是既定模式）。
     function returnAnvilToHotbar() {
         if (!root.hotbar) return
         for (let i = 0; i < root.anvilSlots.length; ++i) {
             const id = root.anvilSlots[i] || 0
             const n = root.anvilCounts[i] || 0
             if (id !== 0 && n > 0) {
-                const leftover = root.hotbar.addStack(id, n, root.anvilDur[i] || 0, root.enchAt(i), root.nameAt(i))
+                const leftover = root.hotbar.addToAny(id, n, root.anvilDur[i] || 0, root.enchAt(i), root.nameAt(i))
                 if (leftover > 0 && root.player) root.player.dropItemAtFront(id, leftover, root.enchAt(i), root.nameAt(i))
             }
         }

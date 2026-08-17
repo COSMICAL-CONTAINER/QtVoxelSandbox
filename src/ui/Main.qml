@@ -7438,7 +7438,13 @@ Window {
                     if (cid !== 0 && ccount > 0)
                         // review L7：槽附魔随实体走（战利品附魔书带随机附魔掉落 → 拾取经 addToAny 回填，
                         //   机制同附魔工具丢弃；enchantsAt 是 QVariantList<int> 4 元素 pack 值）。
-                        itemEntities.spawnItem(x, y, z, cid, ccount, chestStore.slotEnchantsAt(x, y, z, ci))
+                        // review D2-a：实例名随实体走（铁砧改名物品破箱掉落 → 拾取回填，防「砸箱丢名」；
+                        //   slotNameAt 是 t622 既有访问器，此前掉落调用漏传）。
+                        // review D2-c：实例耐久随实体走（磨损工具破箱掉落 → 拾取回填保真，防「砸箱捡回
+                        //   满耐久」免费修复；slotDurabilityAt 本批新增，-1 = 未初始化 → 归一满耐久）。
+                        itemEntities.spawnItem(x, y, z, cid, ccount, chestStore.slotEnchantsAt(x, y, z, ci),
+                                               chestStore.slotNameAt(x, y, z, ci),
+                                               chestStore.slotDurabilityAt(x, y, z, ci))
                 }
                 chestStore.clearChest(x, y, z)
             }

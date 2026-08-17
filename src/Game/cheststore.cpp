@@ -79,13 +79,25 @@ QString ChestStore::slotNameAt(int x, int y, int z, int index) const
     return it->second.at(size_t(index)).name;
 }
 
+// review D2-c 某箱子某槽实例耐久（空槽 / 越界 / 无此箱 → 0；-1 = 未初始化）。
+int ChestStore::slotDurabilityAt(int x, int y, int z, int index) const
+{
+    if (index < 0 || index >= kSlotsPerChest) return 0;
+    const auto it = m_chests.find(key(x, y, z));
+    if (it == m_chests.end()) return 0;
+    return it->second.at(size_t(index)).durability;
+}
+
 // 直接写某箱子某槽。index 越界忽略；id<=0 或 count<=0 → 清空该槽（保持空栈不变式：id==0 ⟺ count==0）。
 //   自动建箱条目（首次写入某坐标即创建空 27 槽再写）。写入后 bump revision → ChestUI delegate 刷新。
 //   **t607 同源修**：count 归一在先（count<=0 → id 一并归 0），防「最后 1 件扣成 0」类写回存幽灵栈
 //   {id>0,count=0}（同 DispenserStore 修法的防御性收口——当前 UI 写入端已自行归零，此处兜底层不变式）。
 //   enchants（review L7）：4-int pack 值随栈写入（空栈恒清附魔）；不足 4 元素按 0 补齐 = 清空语义。
 //   name（t622）：实例名随栈写入（空栈恒清名；trim 防全空格）。
-void ChestStore::setSlot(int x, int y, int z, int index, int id, int count, const QVariantList &enchants, const QString &name)
+//   durability（review D2-c）：实例耐久随栈写入（空栈恒归 -1 = 未初始化；>0 显式保真 —— ChestUI
+//   localWriteSlot 已归一（工具实例值或 0），此处原样存：0 与 -1 在消费端（addToAny 的 normalizeDurability）
+//   同义归满耐久 / 归 0，兜底不改语义）。
+void ChestStore::setSlot(int x, int y, int z, int index, int id, int count, const QVariantList &enchants, const QString &name, int durability)
 {
     if (index < 0 || index >= kSlotsPerChest) return;
     // 空栈归一：id<=0 或 count<=0 → 清空（id=0, count=0）。
@@ -98,6 +110,7 @@ void ChestStore::setSlot(int x, int y, int z, int index, int id, int count, cons
     for (int i = 0; i < 4; ++i)
         slot.enchants[i] = (normId > 0 && i < enchants.size()) ? enchants.at(i).toInt() : 0;
     slot.name = (normId > 0) ? name.trimmed() : QString();
+    slot.durability = (normId > 0) ? durability : -1; // review D2-c：空栈恒「未初始化」（消费端归一满耐久）
     ++m_revision;
     emit chestChanged();
 }
@@ -122,9 +135,11 @@ void ChestStore::clearAll()
 }
 
 // t188 收集所有「含 ≥1 非空槽」的箱子为 QVariantList（落盘用）。全空箱子跳过（加载后缺失 = 空箱行为等价）。
-//   形状：[{x,y,z, slots:[{id,count,enchants:[4],name}×27]}, ...]。QString 键经 parseKey 还原为坐标列。
+//   形状：[{x,y,z, slots:[{id,count,enchants:[4],name,durability}×27]}, ...]。QString 键经 parseKey 还原为坐标列。
 //   enchants（review L7）：附魔书 / 附魔工具的 per-instance 附魔随槽落盘（老存档无此键 → 读回全 0 = 无附魔，
 //   向后兼容）。name（t622）：改名物品实例名随槽落盘（老存档无此键 → 读回空 = 默认名，向后兼容）。
+//   durability（review D2-c）：磨损工具 / 护甲实例耐久随槽落盘（老存档无此键 → 读回 -1 = 未初始化 →
+//   取出端 normalizeDurability 归一满耐久，同旧档工具语义，向后兼容）。
 QVariantList ChestStore::allChests() const
 {
     QVariantList out;
@@ -144,6 +159,7 @@ QVariantList ChestStore::allChests() const
             for (int i = 0; i < 4; ++i) enchList.append(s.enchants[i]);
             sm.insert(QStringLiteral("enchants"), enchList);
             sm.insert(QStringLiteral("name"), s.name);
+            sm.insert(QStringLiteral("durability"), s.durability);
             slotList.append(sm);
         }
         if (!any) continue; // 全空箱子不落盘
@@ -188,6 +204,10 @@ void ChestStore::loadAll(const QVariantList &chests)
                 for (int e = 0; e < 4; ++e)
                     s.enchants[e] = (e < enchList.size()) ? enchList.at(e).toInt() : 0;
                 s.name = sm.value(QStringLiteral("name")).toString(); // t622 老存档无 name 键 → 空串
+                // review D2-c 老存档无 durability 键 → toInt() 缺省 0 → 落 -1（未初始化 = 取出端归一满耐久，
+                //   与旧档「箱子里的工具取出满耐久」行为一致）。新存档原样读回（含 -1 / 实例值）。
+                const int dur = sm.value(QStringLiteral("durability")).toInt();
+                s.durability = sm.contains(QStringLiteral("durability")) ? dur : -1;
             }
             chest[size_t(i)] = s;
         }

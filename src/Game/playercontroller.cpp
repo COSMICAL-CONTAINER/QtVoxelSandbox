@@ -3771,7 +3771,7 @@ void PlayerController::pickupScan()
         const int id = m_itemEntities->itemIdAt(i);
         const int have = m_itemEntities->countAt(i);    // t64：实体携带数量（整栈丢弃场景）
         if (have <= 0) { m_itemEntities->removeAt(i); continue; } // 防御：count 已为 0 → 销毁
-        const int leftover = m_hotbar->addToAny(id, have, -1, m_itemEntities->enchantsAt(i), m_itemEntities->nameAt(i)); // t97：跨 main + hotbar 智能堆叠；按 maxStack 分流。t590：实体附魔随拾取回填（防「附魔工具丢出再捡变普通」）。t622：实例名同回填（防「改名物品丢出再捡丢名」）
+        const int leftover = m_hotbar->addToAny(id, have, m_itemEntities->durabilityAt(i), m_itemEntities->enchantsAt(i), m_itemEntities->nameAt(i)); // t97：跨 main + hotbar 智能堆叠；按 maxStack 分流。t590：实体附魔随拾取回填（防「附魔工具丢出再捡变普通」）。t622：实例名同回填（防「改名物品丢出再捡丢名」）。review D2-c：实例耐久同回填（-1 = 未初始化 → 归一满耐久；>0 = 保真，破箱掉落的磨损工具捡回不复原）
         if (leftover <= 0) {
             m_itemEntities->removeAt(i);                // 全入 → 销毁实体
             // t118：拾取语义事件（驱动 AudioManager.playPickup 拾取音；t120 亦据此驱动手弹跳动画）。

@@ -554,8 +554,10 @@ function slotShiftLeftChest(root, group, index) {
         if (src.id === 0 || src.count <= 0) return true
         // review L7：附魔透传归还（src.enchants → addToAny 第 4 参）—— 战利品附魔书 / 附魔工具 Shift+左键
         //   归还背包不失附魔（同 enchant/armor 槽归还模式）。t622：名同透传（第 5 参）。
+        //   review D2-c：耐久同透传（第 3 参 —— chest 槽现持耐久，磨损工具 shift 归还不复原）。
         const remain = root.hotbar.addToAny(src.id, src.count, src.durability, src.enchants, src.name)
-        writeSlot(root, "chest", index, remain > 0 ? src.id : 0, remain, 0,
+        writeSlot(root, "chest", index, remain > 0 ? src.id : 0, remain,
+                  remain > 0 ? src.durability : 0,
                   remain > 0 ? src.enchants : [0,0,0,0], remain > 0 ? src.name : "")
         return true
     }
@@ -565,11 +567,9 @@ function slotShiftLeftChest(root, group, index) {
 //   （slotShiftLeftChest 写回源槽）。仿 Hotbar::addToAny 的多槽泛化（addToAny 只管 main/hotbar；箱子是独立
 //   27 槽容器，须本处遍历）。槽位数读 root.localSlotCount("chest")（ChestUI 声明 = chestStore.slotCount，恒 27），
 //   真值检测兜底（无钩子面板返 0 → 不放入）。
-//   durability / enchants（review L7）：durability 恒不传（箱子槽不持耐久——工具罕见进箱，入箱视作新工具，
-//   既有边角语义）；**空槽开新**透传 enchants（附魔书 / 附魔工具 cap=1 恒走空槽开新 → 附魔随实例入箱），
-//   同 id 合并附魔不变（可堆叠物品附魔恒 0）。
-//   t622 name：同 enchants——空槽开新透传（ChestUI localWriteSlot 当前只接前 6 参 → 名经 ChestStore 边角
-//   暂不持久；main/hotbar 源槽余数写回仍保真）。可堆叠物品无名语义不变。
+//   durability / enchants / name：同 id 合并（可堆叠物品）不动槽的实例元数据（耐久 / 附魔 / 名恒 0 / 空，
+//   语义不变）；**空槽开新**透传（附魔书 / 工具 / 护甲 cap=1 恒走空槽开新 → 实例元数据随件入箱；review
+//   D2-c 起 chest 槽持耐久——磨损工具 shift 入箱空槽开新时耐久保真写入）。
 function addToChest(root, id, count, durability, enchants, name) {
     const slotCount = root.localSlotCount ? root.localSlotCount("chest") : 0
     const cap = root.hotbar.maxStackSize(id)

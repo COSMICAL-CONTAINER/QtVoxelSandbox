@@ -26,8 +26,10 @@
 //   - slotEnchantsAt(x,y,z,index)（review L7）：某箱子某槽的附魔元数据（QVariantList<int> 4 元素，每 =
 //     EnchantRegistry::pack 值；0 = 空槽。战利品附魔书带随机附魔 + 玩家放入的附魔物品随栈存取）
 //   - slotNameAt(x,y,z,index)（t622）：某箱子某槽的自定义名（铁砧改名物品入箱随栈存取；空串 = 默认名）
-//   - setSlot(x,y,z,index,id,count[,enchants[,name]])：直接写某箱子某槽（ChestUI 点击放置 / 互换 / 拖拽均分写回用；
-//     enchants 缺省空 = 清附魔；name 缺省空 = 清名）
+//   - slotDurabilityAt(x,y,z,index)（review D2-c）：某箱子某槽的实例耐久（工具 / 护甲入箱随栈存取；
+//     0 = 空槽 / 非工具；-1 = 未初始化（旧存档 / 战利品）→ 拾取端 normalizeDurability 归一为满耐久）
+//   - setSlot(x,y,z,index,id,count[,enchants[,name[,durability]]])：直接写某箱子某槽（ChestUI 点击放置 / 互换 / 拖拽均分写回用；
+//     enchants 缺省空 = 清附魔；name 缺省空 = 清名；durability 缺省 -1 = 自动（拾取端归一））
 //   - clearChest(x,y,z)：移除某箱子条目（破块时 Main.qml.onBlockBroken 调，清孤儿内容）
 //
 // §4 法律 + §9：零 MC 专有名词（类名 / 字串「箱子」「Chest」为通用描述词）。
@@ -56,12 +58,19 @@ public:
     Q_INVOKABLE QVariantList slotEnchantsAt(int x, int y, int z, int index) const;
     // t622 某箱子某槽自定义名（铁砧改名物品随栈存取；空槽 / 越界 / 无此箱 → 空串）。
     Q_INVOKABLE QString slotNameAt(int x, int y, int z, int index) const;
+    // review D2-c 某箱子某槽实例耐久（工具 / 护甲随栈存取；空槽 / 越界 / 无此箱 → 0）。存「实例值（>0）或
+    //   -1（未初始化）」：-1 走 Hotbar::addToAny 的 normalizeDurability 自动满耐久（同 ItemStack 缺省语义，
+    //   旧存档 / 战利品箱兼容）；>0 显式保真（磨损工具入箱再取出不复原，修「入箱即满耐久」免费修复）。
+    Q_INVOKABLE int slotDurabilityAt(int x, int y, int z, int index) const;
     // 直接写某箱子某槽（index 范围 + id 合法性校验；id<=0 或 count<=0 → 清空该槽）。自动建箱条目。
     //   enchants（review L7）：ItemStack.enchants[4] 同构 4-int pack 值；缺省 / 空列表 = 清附魔（可堆叠物品
     //   附魔恒 0 语义不变；仅附魔书 / 工具 / 护甲等 cap=1 物品随实例携带）。
     //   name（t622）：自定义名；缺省 / 空串 = 清名（同附魔语义，仅 cap=1 物品随实例携带）。
+    //   durability（review D2-c）：实例耐久；缺省 -1 = 自动（消费端 normalizeDurability 归一满耐久），
+    //   >0 = 显式保真（非工具 id 恒被消费端归 0，inert）。空栈恒归 -1（清槽语义）。
     Q_INVOKABLE void setSlot(int x, int y, int z, int index, int id, int count,
-                             const QVariantList &enchants = {}, const QString &name = QString());
+                             const QVariantList &enchants = {}, const QString &name = QString(),
+                             int durability = -1);
     // 移除某箱子条目（破块清孤儿；不存在则 no-op）。spec「破箱掉落内容」属 Phase 1.1+，本轮直接弃内容。
     Q_INVOKABLE void clearChest(int x, int y, int z);
     // 清空全部箱子（跨世界切换时 Main.qml.enterWorld 经 loadAll 间接调；亦可直调）。空 → no-op（不无故发信号）。
@@ -114,11 +123,15 @@ private:
     //   战利品附魔书带随机附魔、玩家放入的附魔工具 / 护甲随实例存取（附魔书 maxStack=1 → 每槽恒单件，
     //   附魔与栈一一对应，无堆叠歧义）。
     //   t622 name：自定义名（铁砧改名物品入箱随栈存取；空串 = 注册表默认名）。
+    //   review D2-c durability：实例耐久（-1 = 未初始化 → 消费端 normalizeDurability 归一满耐久；>0 = 显式
+    //   保真）。默认 -1 而非 0：与 Hotbar addToAny 第 3 参缺省语义对齐（-1=自动满），且 loadAll 老存档缺键
+    //   时落同值 → 旧档箱子里的工具取出仍是满耐久（向后兼容）。
     struct Slot {
         int id = 0;
         int count = 0;
         int enchants[4] = {0, 0, 0, 0};
         QString name = QString();
+        int durability = -1;
     };
     using Chest = std::array<Slot, kSlotsPerChest>;
 

@@ -78,7 +78,9 @@ public:
     //   工具 / 护甲丢弃传其实例附魔 → 实体携带 → 拾取回填（防数据丢失）；可堆叠物品（合并路径）恒 0。
     //   t622 name：自定义名（铁砧重命名产物丢弃传其实例名 → 实体携带 → 拾取回填，防「改名物品丢出再捡
     //   丢名」；缺省空 = 无名 = 注册表默认名）。可堆叠物品丢弃不传名（同附魔语义）。
-    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1, const QVariantList &enchants = {}, const QString &name = QString());
+    //   review D2-c durability：实例耐久（-1 = 未初始化 → 拾取端 addToAny 归一满耐久；>0 = 显式保真 —— 磨损
+    //   工具经箱子破块掉落（Main.qml 携 slotDurabilityAt）丢出再捡耐久不复原；可堆叠物品恒 -1 inert）。
+    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1, const QVariantList &enchants = {}, const QString &name = QString(), int durability = -1);
 
     // t608 定点定向弹出（发射器排出口统一口径）：在**浮点世界坐标 pos**（发射器格中心 + 朝向外向 ×0.5 =
     //   排出口面中心）生成掉落物，初始水平速度 = (dirX,dirZ) 归一化 × speed（沿发射器朝向弹出，机制等价
@@ -129,6 +131,9 @@ public:
     // t622 第 i 个实体的自定义名（铁砧重命名产物丢弃保真；空串 = 注册表默认名）。越界 / 空槽 → 空串。
     //   PlayerController 拾取（pickupScan）读它回填 Hotbar::addToAny 第 5 参；呈现层掉落物无需显示（无 tooltip UI）。
     Q_INVOKABLE QString nameAt(int i) const;
+    // review D2-c 第 i 个实体的实例耐久（-1 = 未初始化 → 拾取端归一满耐久；>0 = 显式保真）。越界 / 空槽 → -1。
+    //   PlayerController 拾取（pickupScan）读它回填 Hotbar::addToAny 第 3 参（同 enchantsAt / nameAt 回填模式）。
+    Q_INVOKABLE int durabilityAt(int i) const;
     // 把第 i 个实体的数量设为 n（t64：拾取装不下时把余数回写、保留 entity）。n<=0 销毁该实体
     // （余数为 0 = 全拾走）。边界安全（越界静默）。仅 PlayerController::pickupScan 调（拾取路径），
     // 非 QML 调用入口。bump revision 驱动 QML delegate 数量绑定重算。
@@ -215,6 +220,10 @@ private:
         //   拾取回填（pickupScan 传 addToAny 第 5 参）。显式默认 QString() 抑制 -Wmissing-field-initializers
         //   （同 ItemStack.customName 的部分聚合初始化场景）。
         QString name = QString();
+        // review D2-c 实例耐久（同 name/enchants 随实例走：-1 = 未初始化 → 拾取端 addToAny 归一满耐久；
+        //   >0 = 显式保真，破箱掉落的磨损工具丢出再捡耐久不复原）。放 alive 之前（tail-default 契约同
+        //   name）。显式默认 -1 抑制 -Wmissing-field-initializers。
+        int durability = -1;
         // t256：槽位占用标志（slot-reuse 模型，同 EntityManager::Entity::alive）。true = 活体；false = 已释放
         //   空槽（待复用）。放末位：spawnItem 的聚合初始化 {pos,itemId,count,spawnMs} 不显式列 alive →
         //   取默认 true（C++ 聚合初始化尾字段缺省即 default member init）。掉落物被拾取（removeAt /

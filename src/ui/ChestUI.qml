@@ -109,13 +109,16 @@ Item {
     //   review L7：chest 槽透传附魔（durability / enchants 维度）——战利品附魔书（带随机附魔）与玩家放入的
     //   附魔工具 / 护甲经 InventoryOps 整件搬运路径（拾取 / 放置 / 互换 / Shift 归还）保真，不再入箱即失附魔。
     //   t622：chest 槽透传实例名（铁砧改名物品入箱随栈存取——slotNameAt / setSlot 第 8 参）。
+    //   review D2-c：chest 槽透传耐久（工具 / 护甲入箱随栈存取）——slotDurabilityAt / setSlot 第 9 参；
+    //   读出 -1 = 未初始化（老存档 / 战利品）→ InventoryOps 拾取端的「curDur>0 ? curDur : -1」归一满耐久，
+    //   磨损工具入箱再取出耐久不复原（修「入箱即满耐久」免费修复）。
     function localReadSlot(group, index) {
         if (group === "chest") {
             root.chestCoordRev
             return {
                 id: root.chestStore.slotIdAt(root.chestX, root.chestY, root.chestZ, index),
                 count: root.chestStore.slotCountAt(root.chestX, root.chestY, root.chestZ, index),
-                durability: 0,
+                durability: root.chestStore.slotDurabilityAt(root.chestX, root.chestY, root.chestZ, index),
                 enchants: root.chestStore.slotEnchantsAt(root.chestX, root.chestY, root.chestZ, index),
                 name: root.chestStore.slotNameAt(root.chestX, root.chestY, root.chestZ, index)
             }
@@ -124,12 +127,14 @@ Item {
     }
     function localWriteSlot(group, index, id, count, durability, enchants, name) {
         if (group === "chest") {
-            // durability 恒 0（箱子槽不持耐久，同 t263 既有边角：工具罕见进箱 → 入箱视作新工具）；
+            // review D2-c：durability 透传 ChestStore（同 anvil/enchant 本地槽 rv3 模式——只存实例值（>0）或 -1，
+            //   防 0 残留歧义：ChestStore 空栈恒归 -1，非空栈写「>0 显式保真 / 否则 -1 自动」）；
             // enchants（review L7）透传 ChestStore（附魔书 / 附魔工具随实例存取）；
             // name（t622）透传 ChestStore（改名物品随实例存取）。
             root.chestStore.setSlot(root.chestX, root.chestY, root.chestZ, index, id, count,
                                     (Array.isArray(enchants) && enchants.length === 4) ? enchants : [],
-                                    (typeof name === "string") ? name : "")
+                                    (typeof name === "string") ? name : "",
+                                    (durability > 0) ? durability : -1)
         }
     }
     // resolveClick / resolveRightClick（拾取/放置/合并/互换 + 半份）：算法见 InventoryOps（五面板共享）。
@@ -635,12 +640,15 @@ Item {
     property int hoveredItemId: 0
     property point hoveredTipPos: Qt.point(0, 0)
     // t263 当前 hover 槽的工具剩余耐久（-1=未跟踪 → tooltip 不显耐久行）。据 hoveredKey 查 hotbar/main。
+    //   review D2-c：chest 槽补分支（箱子槽现持耐久，-1 = 未初始化 → tooltip 走旧语义不显耐久行 = 满耐久
+    //   新工具观感；磨损工具显真值）。顺手清掉旧版重复的 main 死分支（无行为影响）。
     property int hoveredDurability: {
         if (!root.hotbar || !root.hoveredItemId || !root.hotbar.isTool(root.hoveredItemId)) return -1
         // qml-touch 三轮：slotRevision/mainRevision 触碰参与返回（_sr>=0 / _mr>=0 恒真守卫），防 AOT 死代码
         //   消除裸触碰 → 同槽栈改写后 tooltip 耐久不刷新。
         const _sr = root.hotbar.slotRevision
         const _mr = root.hotbar.mainRevision
+        const _cr = root.chestStore.revision
         const key = root.hoveredKey
         if (!key) return -1
         const parts = key.split(":")
@@ -649,11 +657,13 @@ Item {
         if (Number.isNaN(idx)) return -1
         if (parts[0] === "hotbar") return _sr >= 0 ? (root.hotbar.durabilityAt(idx)) : -1
         if (parts[0] === "main") return _mr >= 0 ? (root.hotbar.mainDurabilityAt(idx)) : -1
-        if (parts[0] === "main") return root.hotbar.mainDurabilityAt(idx)
+        if (parts[0] === "chest") return _cr >= 0 ? (root.chestStore.slotDurabilityAt(root.chestX, root.chestY, root.chestZ, idx)) : -1
         return -1
     }
     // t622 当前 hover 槽物品的实例名（铁砧改名；空串 → tooltip 走注册默认名）。chest 槽查 ChestStore；
     //   hotbar / main 查 VM；触碰 revision → 改名 / 搬运后刷新（同 hoveredDurability 模式）。
+    //   review D2-b：chest 分支此前漏触 chestStore.revision → hover 中该槽被改名 / 换入带名物 → tooltip 名
+    //   不重算（显旧名直到移开再回）。补触碰（表达式形式防 AOT 死代码消除，同文件头 qml-touch 三轮约定）。
     property string hoveredCustomName: {
         if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
         const _sr = root.hotbar.slotRevision
@@ -665,7 +675,10 @@ Item {
         if (Number.isNaN(idx)) return ""
         if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.customNameAt(idx) : ""
         if (parts[0] === "main") return _mr >= 0 ? root.hotbar.mainCustomNameAt(idx) : ""
-        if (parts[0] === "chest") return root.chestStore.slotNameAt(root.chestX, root.chestY, root.chestZ, idx)
+        if (parts[0] === "chest") {
+            const _cr = root.chestStore.revision
+            return _cr >= 0 ? root.chestStore.slotNameAt(root.chestX, root.chestY, root.chestZ, idx) : ""
+        }
         return ""
     }
     Rectangle {
