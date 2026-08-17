@@ -13,8 +13,17 @@ NEAREST 采样源贴图（保像素感），4× 超采样后 LANCZOS 降回目�
 贴图保持清晰、无面间接缝。顶 1.0 / 右 0.80 / 左 0.62 三档明暗（光自右上）。
 
 资产管线（PLAN §2-L）：复用 textures/ 下既有面贴图合成，非 MC 资产。本脚可复现同一图标。
+
+t644 `--from-pack`「放置 3D 贴图 → 背包 item 图标」转换工具：
+  用户反馈「PNG 放下来 3D 是对的，但背包 item 图标跟放下来的方块不一样」——此前多轮图标用
+  程序贴图 / pack front 平面图混搭，而世界内放置态已切 pack 贴图 → 背包与放置观感漂移。
+  修：从 pack（gitignored 只读参考，docs/Default HD 128x Demo 1.8.2.2）**读取**方块面贴图，
+  按方块**放置形状**（满立方 / 矮盒 / 正面为主 / 门 / 薄板 / 贴地薄片）渲染同款 dimetric 图标，
+  **写** icon_*.png 进 textures/（工具产物进 git 合法 —— 与本脚既有程序生成图标同一管线）。
+  法务红线：pack PNG 本体只读不拷贝（§9），仅派生图标 PNG 落盘。
 """
 import os
+import sys
 import numpy as np
 from PIL import Image
 
@@ -623,7 +632,263 @@ def render_partial_2d(shape, fill_name="default_wood"):
     return img.resize((OUT, OUT), Image.LANCZOS)
 
 
+# ── t644 从 pack 贴图渲染「放置态一致」图标 ──────────────────────────────────────
+# pack 目录（gitignored 只读参考；本工程 demo 包实际布局 assets/minecraft/textures/block）。
+PACK_BLOCK = os.path.join(HERE, "..", "docs", "Default HD 128x Demo 1.8.2.2",
+                          "assets", "minecraft", "textures", "block")
+
+
+def load_pack_face(filename, alpha="fill"):
+    """读 pack block 贴图 → FACE_RES² RGBA float（与 load_face 同构）。
+
+    alpha 处理两种策略（放置态语义不同，逐块在 FROM_PACK 表选）：
+      "fill" —— 透明像素用不透明均值填掉、强制不透明（同 load_face；实心立方体面用）。
+      "keep" —— 保留透明（cross / 贴地薄片用；render_flat_pack 直接放大）。
+    """
+    p = os.path.join(PACK_BLOCK, filename)
+    img = Image.open(p).convert("RGBA").resize((FACE_RES, FACE_RES), Image.NEAREST)
+    arr = np.asarray(img, dtype=np.float64)
+    if alpha == "fill":
+        a = arr[..., 3]
+        opaque = a >= 128
+        if not opaque.all():
+            fill = arr[opaque][:, 0:3].mean(axis=0) if opaque.any() \
+                else np.array([90.0, 90.0, 90.0])
+            arr[~opaque, 0:3] = fill
+            arr[..., 3] = 255.0
+    return arr
+
+
+def render_flat_pack(filename):
+    """pack 平面 2D 图标（透明底保留 alpha，同 render_flat_2d；铁轨 / 红石火把 cross 族用）。"""
+    p = os.path.join(PACK_BLOCK, filename)
+    img = Image.open(p).convert("RGBA")
+    return img.resize((OUT, OUT), Image.NEAREST)
+
+
+def render_pack_box(boxes, top, side, front=None, cy_local=None, scale=1.0,
+                    side_v0=0.0, side_v1=1.0):
+    """pack 贴图版形状渲染：boxes 轴对齐子盒列表 + depth buffer（同 render_partial_3d 的几何管线）。
+
+    与 render_partial_3d 的差异（贴合「放置态」）：
+      - 贴图来自 pack（load_pack_face 预载的 float 数组，非 textures/default_*）。
+      - front 非空时 +Z 面贴 front（机关盒族正面辨识特征：炉口 / 排出口），否则贴 side。
+      - side_v0/side_v1 —— 侧面 V 采样窗口 [v0,v1]（MC 矮模型侧面贴图自带顶部空白带：
+        附魔台侧顶 4/16、祭坛侧顶 3/16 空白；引擎放置态 = cropTopBlank 裁空白后整张拉伸。
+        图标同样只采样窗口段 → 侧面观感与放置态逐像素同源）。
+      - 采样行序：ty = floor((1-v)*(h)) —— v=0 盒底 → 采样贴图末行（贴图底部），v=1 盒顶 → 贴图
+        顶部行。即贴图顶行朝上（与引擎 pushBox cv=y、V 轴随 y 增一致 —— 世界 v0 是图集底部）。
+        这与既有 _render_box_d（ty=floor(v*h)，贴图顶行朝下）不同：旧程序贴图多为对称纹理
+        （木板 / 圆石 / 石砖）翻转不可见，而 pack 非对称侧贴图（门锁孔在底 / 祭坛孔带）必须
+        顶行朝上才与放置态一致 —— 故 pack 路径独立实现采样，不动既有已固化图标。
+    """
+    canvas = np.zeros((W, W, 4), dtype=np.float64)
+    depth_buf = np.full((W, W), -np.inf)
+
+    top_face = top
+    side_face = side
+    front_face = side if front is None else front
+
+    def sample_win(face, u, v, w0, w1):
+        """按窗口 [w0,w1] 采样（w 沿贴图行 0=顶 → 末=底）。v=0 盒底 → 窗口底 w1；v=1 盒顶 → 窗口顶 w0。"""
+        t = w0 + (1.0 - v) * (w1 - w0)  # v=1→w0（贴图顶）, v=0→w1（贴图底）
+        ty = np.clip(np.floor(t * FACE_RES).astype(np.int32), 0, FACE_RES - 1)
+        tx = np.clip(np.floor(u * FACE_RES).astype(np.int32), 0, FACE_RES - 1)
+        return face[ty, tx]
+
+    def paint(o_s, uax_s, vax_s, depth_fn, face, shade, w0, w1):
+        u, vv = face_uv(o_s, uax_s, vax_s)
+        m = (u >= 0) & (u <= 1) & (vv >= 0) & (vv <= 1)
+        u_cl = np.clip(u, 0, 1)
+        v_cl = np.clip(vv, 0, 1)
+        depth = depth_fn(u_cl, v_cl)
+        col = sample_win(face, u_cl, v_cl, w0, w1).copy()
+        col[..., 0:3] *= shade
+        draw = m & (depth > depth_buf)
+        canvas[draw] = col[draw]
+        depth_buf[draw] = depth[draw]
+
+    for (x0, x1, y0, y1, z0, z1) in boxes:
+        def face_depth(ox, oy, oz, ux, uy, uz, vx, vy, vz):
+            return lambda u, v: (ox + u * ux + v * vx) + (oy + u * uy + v * vy) + (oz + u * uz + v * vz)
+        # 顶面 y=y1：u→+x，v→+z（同引擎 +Y cu=x cv=z），满窗采样。
+        o_s = project_pt(x0, y1, z0, cy_local, scale)
+        paint(o_s,
+              project_pt(x1, y1, z0, cy_local, scale) - o_s,
+              project_pt(x0, y1, z1, cy_local, scale) - o_s,
+              face_depth(x0, y1, z0, x1 - x0, 0, 0, 0, 0, z1 - z0),
+              top_face, 1.00, 0.0, 1.0)
+        # 右面 x=x1：u→+z，v→+y（引擎 +X cu=z cv=y），侧窗采样。
+        o_s = project_pt(x1, y0, z0, cy_local, scale)
+        paint(o_s,
+              project_pt(x1, y0, z1, cy_local, scale) - o_s,
+              project_pt(x1, y1, z0, cy_local, scale) - o_s,
+              face_depth(x1, y0, z0, 0, 0, z1 - z0, 0, y1 - y0, 0),
+              side_face, 0.80, side_v0, side_v1)
+        # 左面 z=z1：u→+x，v→+y（引擎 +Z cu=x cv=y）—— 机关盒族正面（+Z 朝玩家）贴 front。
+        o_s = project_pt(x0, y0, z1, cy_local, scale)
+        paint(o_s,
+              project_pt(x1, y0, z1, cy_local, scale) - o_s,
+              project_pt(x0, y1, z1, cy_local, scale) - o_s,
+              face_depth(x0, y0, z1, x1 - x0, 0, 0, 0, y1 - y0, 0),
+              front_face, 0.62, side_v0, side_v1)
+
+    img = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGBA")
+    return img.resize((OUT, OUT), Image.LANCZOS)
+
+
+def render_pack_front(front, top, side):
+    """pack 版「正面为主」投影（机关盒族：正面辨识特征不被立体投影遮挡；同 render_front 几何 /
+    明暗 / 深度剪切常数，仅贴图源换 pack）。用于 t644 重生成 dispenser / dropper —— 放置态
+    前面朝玩家，正面为主图标的「所见面 = 放置前面」与放置观感最近。"""
+    canvas = np.zeros((W, W, 4), dtype=np.float64)
+    FBL = np.array([F_LO, F_HI]); FBR = np.array([F_HI, F_HI])
+    FTR = np.array([F_HI, F_LO]); FTL = np.array([F_LO, F_LO])
+    depth = np.array([F_DDX, F_DDY])
+    BBR = FBR + depth; BTR = FTR + depth; BTL = FTL + depth
+
+    def paint(o, uax, vax, face, shade):
+        u, v = face_uv(o, uax, vax)
+        m = (u >= 0) & (u <= 1) & (v >= 0) & (v <= 1)
+        tx = np.clip(np.floor(np.clip(u, 0, 1) * FACE_RES).astype(np.int32), 0, FACE_RES - 1)
+        # v=0 屏幕底 → 贴图末行（贴图顶行朝上，同 render_pack_box 行序 —— 与放置态一致）。
+        ty = np.clip(np.floor((1.0 - np.clip(v, 0, 1)) * FACE_RES).astype(np.int32), 0, FACE_RES - 1)
+        col = face[ty, tx].copy()
+        col[..., 0:3] *= shade
+        canvas[m] = col[m]
+
+    paint(FBR, BBR - FBR, FTR - FBR, side, 0.70)   # 右面（+X）
+    paint(FTL, FTR - FTL, BTL - FTL, top, 0.85)     # 顶面（+Y）
+    paint(FBL, FBR - FBL, FTL - FBL, front, 1.00)   # 正面（+Z，主面）
+    img = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGBA")
+    return img.resize((OUT, OUT), Image.LANCZOS)
+
+
+# t644 转换表：icon 名 → 渲染方案。形状 / 贴图窗口与放置态（partialblockgeometry / chunkgeometry
+#   per-face + tileFilenameMap 的 pack 覆盖）逐项对齐：
+#     cube      — 满立方（顶=top 侧=side，同放置六面 per-face：顶 topTile / 侧 sideTile）。
+#     front     — 正面为主投影（机关盒族：放置态 frontTile 朝玩家）。
+#     table     — 0.75 矮盒（附魔台放置 y[0,0.75]；侧贴图带顶部 4/16 空白 → 侧窗 [0.25,1] = 引擎
+#                 cropTopBlank(0.25) 后整张拉伸的等价采样）。
+#     frame     — 满立方（祭坛放置态整格；侧贴图顶部 3/16 空白 → 侧窗 [0.1875,1] = cropTopBlank(0.1875)）。
+#     door      — 两格高 3/16 薄板（放置态；上盒贴 upper、下盒贴 lower —— per-face bit3）。
+#     plate     — 贴地 1/16 薄板（放置态 ShapePlate pushBox xz[1/16,15/16] y[0,1/16]）。
+#     flat      — 平面 2D 保留 alpha（cross / 贴地薄片：铁轨 / 红石火把 —— 放置态即 2D quad/cross）。
+#   pack 侧贴图空白的行序注意：load_pack_face 不裁剪，靠 side_v0/v1 窗口采样（空白带在贴图顶部）。
+FROM_PACK = [
+    # 机关盒族（正面为主投影；放置态 = pack dispenser_front_horizontal / dropper_front_horizontal +
+    #   熔炉顶 / 侧复用 —— MC 1.0 发射器顶/侧本就复用熔炉系，demo 包无 dispenser_top/side 专属文件）。
+    ("dispenser", "front", dict(front="dispenser_front_horizontal.png",
+                                top="furnace_top.png", side="furnace_side.png")),
+    ("dropper",   "front", dict(front="dropper_front_horizontal.png",
+                                top="furnace_top.png", side="furnace_side.png")),
+    # 附魔台：0.75 矮盒（放置态 y[0,0.75]），顶 = enchanting_table_top，侧 = enchanting_table_side
+    #   顶部 4/16 空白（引擎合成 cropTopBlank(0.25) → 有效 0.75 整张贴 0.75 高侧面）。
+    ("enchanting_table", "table", dict(top="enchanting_table_top.png",
+                                       side="enchanting_table_side.png")),
+    # 末地祭坛（EndPortal 方块 endframe 化）：放置态整格满立方；顶 = endframe_top（未放之眼态），
+    #   侧 = endframe_side 顶部 3/16 空白（cropTopBlank(0.1875)）。
+    ("end_portal", "frame", dict(top="endframe_top.png",
+                                 side="endframe_side.png")),
+    # 书架：满立方；放置态顶/底 = planks(8)→oak_planks、侧 = bookshelf。
+    ("bookshelf", "cube", dict(top="oak_planks.png", side="bookshelf.png")),
+    # 铁轨族：贴地薄片 2D（放置态 = 一片水平双面 quad 贴底 1/16；icon 走 flat 保留 alpha
+    #   —— 与放置观感一致：透明底 + 轨像素）。
+    ("rail",         "flat", "rail_normal.png"),   # 直轨（放置态 tile 121）
+    ("golden_rail",  "flat", "powered_rail.png"),  # 动力轨（放置态断常 tile 157）
+    ("detector_rail","flat", "detector_rail.png"), # 探测轨（放置态断常 tile 158）
+    # 红石火把：cross 2D（放置态两片对角双面 quad，cutout）。
+    ("redstone_torch", "flat", "redstone_torch_on.png"),
+    # 红石灯：满立方 off 态（放置态默认 off；on 是点亮视觉非物品态）。
+    ("redstone_lamp", "cube", dict(top="redstone_lamp_off.png", side="redstone_lamp_off.png")),
+    # 矿物存储块族：满立方（放置态六面同贴图）。
+    ("iron_block",     "cube", dict(top="iron_block.png",     side="iron_block.png")),
+    ("coal_block",     "cube", dict(top="coal_block.png",     side="coal_block.png")),
+    ("lapis_block",    "cube", dict(top="lapis_block.png",    side="lapis_block.png")),
+    ("diamond_block",  "cube", dict(top="diamond_block.png",  side="diamond_block.png")),
+    ("gold_block",     "cube", dict(top="gold_block.png",     side="gold_block.png")),
+    ("redstone_block", "cube", dict(top="redstone_block.png", side="redstone_block.png")),
+    # 门（两格高 3/16 薄板；上盒 upper / 下盒 lower —— 放置态 per-face bit3）。
+    ("wood_door",   "door", dict(upper="door_wood_upper.png",   lower="door_wood_lower.png")),
+    ("spruce_door", "door", dict(upper="door_spruce_upper.png", lower="door_spruce_lower.png")),
+    # 压力板家族（t627 石/铁/金）：贴地 1/16 薄板。demo 包无 plate 专属 PNG（实测缺）→ 用放置
+    #   态语义贴图：石板 = smooth_stone（MC 1.0 石压力板贴图即平滑石面）、铁/金 = 各金属块面
+    #   （MC 1.0 加权压力板贴图 = 金属块面 + 中央孔，无孔面降级仍可辨材质）。
+    ("stone_pressure_plate", "plate", dict(fill="smooth_stone.png")),
+    ("iron_pressure_plate",  "plate", dict(fill="iron_block.png")),
+    ("gold_pressure_plate",  "plate", dict(fill="gold_block.png")),
+]
+
+
+def run_from_pack():
+    """t644 批量转换入口：遍历 FROM_PACK 表，按方案渲染 pack 贴图图标 → textures/icon_<name>.png。
+    单块 pack 文件缺失 → 跳过该块（保留现有图标）并打印 SKIP（不中断整批）。"""
+    for entry in FROM_PACK:
+        name, mode, spec = entry
+        try:
+            if mode == "flat":
+                img = render_flat_pack(spec)
+            elif mode == "front":
+                img = render_pack_front(load_pack_face(spec["front"]),
+                                        load_pack_face(spec["top"]),
+                                        load_pack_face(spec["side"]))
+            elif mode == "cube":
+                img = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)],
+                                      load_pack_face(spec["top"]),
+                                      load_pack_face(spec["side"]),
+                                      cy_local=W / 2.0 - 0.5 * v)
+            elif mode == "table":
+                # 0.75 矮盒（附魔台）；侧窗 [0.25,1]（顶部空白带裁除，= cropTopBlank(0.25)）。
+                img = render_pack_box([(0.0, 1.0, 0.0, 0.75, 0.0, 1.0)],
+                                      load_pack_face(spec["top"]),
+                                      load_pack_face(spec["side"]),
+                                      cy_local=W / 2.0 - 0.625 * v,
+                                      side_v0=0.25, side_v1=1.0)
+            elif mode == "frame":
+                # 满立方（祭坛放置态整格）；侧窗 [0.1875,1]（顶部空白裁除，= cropTopBlank(0.1875)）。
+                img = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)],
+                                      load_pack_face(spec["top"]),
+                                      load_pack_face(spec["side"]),
+                                      cy_local=W / 2.0 - 0.5 * v,
+                                      side_v0=0.1875, side_v1=1.0)
+            elif mode == "door":
+                up = load_pack_face(spec["upper"])
+                lo = load_pack_face(spec["lower"])
+                # 门放置态：两格高 3/16 薄板贴 -Z 边（partialblockgeometry door case 厚 3/16）。
+                #   上半 y[1,2] 贴 upper、下半 y[0,1] 贴 lower（per-face bit3 选图）。分两次渲染
+                #   各自盒再合成（上盒 cy 抬高 1 格；共享 depth 不必要 —— 两盒屏幕不重叠区
+                #   各自采样，直接两次 pass 画在同一画布：先画下半（近），再画上半（远在上）。
+                #   简化：一次 render_pack_box 画下半（side=lower），再画上半（side=upper，
+                #   cy 抬 v*scale）。scale=0.7 同既有 icon_wood_door 几何常数。
+                img_lo = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 3.0 / 16.0)],
+                                         lo, lo, cy_local=W * 0.62, scale=0.7)
+                img_up = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 3.0 / 16.0)],
+                                         up, up, cy_local=W * 0.12, scale=0.7)
+                canvas = Image.new("RGBA", (OUT, OUT), (0, 0, 0, 0))
+                canvas.alpha_composite(img_up)
+                canvas.alpha_composite(img_lo)
+                img = canvas
+            elif mode == "plate":
+                fill = load_pack_face(spec["fill"])
+                img = render_pack_box([(1.0 / 16.0, 15.0 / 16.0, 0.0, 1.0 / 16.0,
+                                        1.0 / 16.0, 15.0 / 16.0)],
+                                      fill, fill, cy_local=W / 2.0 - 0.5 * v * (1.0 / 16.0) * 0.5)
+            else:
+                print("SKIP (unknown mode)", name)
+                continue
+            out_path = os.path.join(SRC, "icon_" + name + ".png")
+            img.save(out_path)
+            print("wrote", os.path.relpath(out_path, HERE), img.size)
+        except FileNotFoundError as e:
+            print("SKIP", name, "-", e.filename, "missing in pack")
+
+
 def main():
+    # t644 `--from-pack` 模式：从 pack 面贴图按放置形状渲染图标（batch 表驱动），不跑程序贴图全量重生成
+    #   （避免无关 icon 被意外重写 —— 全量 main() 会按当前 textures/default_* 重烘全部图标）。
+    if "--from-pack" in sys.argv:
+        run_from_pack()
+        return
     for out_name, top_name, side_name in BLOCKS:
         if out_name == "torch":
             # 火把走平面 2D 路径（透明底保留 alpha），非立方体投影（见 render_flat_2d 注释）。

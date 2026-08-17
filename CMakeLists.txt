@@ -432,40 +432,40 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_lapis_ore.png              # t471 青金矿石立方体图标（build_cube_icons.py；石头底+群青深蓝斑簇+黄铁矿金点）
         textures/icon_redstone_ore.png           # t569 红石矿石立方体图标（build_cube_icons.py；石头底+鲜红菱斑矿粒；走过/挖掘点亮微弱红光）
         textures/icon_obsidian.png               # t472 黑曜石立方体图标（build_cube_icons.py；深紫黑火山玻璃；流体交互产物，钻石镐采掘）
-        textures/icon_enchanting_table.png       # t474 附魔台立方体图标（build_cube_icons.py；顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点+边缘暗化）
-        textures/icon_bookshelf.png              # t474 书架立方体图标（build_cube_icons.py；各面=木板边框+彩色书脊书列）
-        textures/icon_iron_block.png             # t477 铁块立方体图标（build_cube_icons.py；各面=金属灰底+铆钉网格+高光）
-        textures/icon_coal_block.png             # t620 煤炭块立方体图标（build_cube_icons.py；各面=近黑煤层压缩块+高光棱线）
-        textures/icon_lapis_block.png            # t620 青金石块立方体图标（build_cube_icons.py；各面=深群青底+黄铁矿金点）
-        textures/icon_diamond_block.png          # t620 钻石块立方体图标（build_cube_icons.py；各面=浅青底+青白菱面镶格）
-        textures/icon_gold_block.png             # t620 金块立方体图标（build_cube_icons.py；各面=金黄底+近白金高光）
-        textures/icon_redstone_block.png         # t620 红石块立方体图标（build_cube_icons.py；各面=鲜红底+亮红矿粒镶面）
-        textures/icon_redstone_lamp.png          # t620 红石灯立方体图标（build_cube_icons.py；各面=off 态哑壳+红石芯）
+        textures/icon_enchanting_table.png       # t474/t644 附魔台 0.75 矮盒图标（build_cube_icons.py --from-pack：pack 贴图 3D 渲染，与放置态一致）
+        textures/icon_bookshelf.png              # t474/t644 书架立方体图标（--from-pack：顶=oak_planks 侧=bookshelf，与放置态 per-face 一致）
+        textures/icon_iron_block.png             # t477/t644 铁块立方体图标（--from-pack：pack iron_block 贴图 3D 渲染，与放置态一致）
+        textures/icon_coal_block.png             # t620/t644 煤炭块立方体图标（--from-pack：pack 贴图 3D 渲染）
+        textures/icon_lapis_block.png            # t620/t644 青金石块立方体图标（--from-pack：pack 贴图 3D 渲染）
+        textures/icon_diamond_block.png          # t620/t644 钻石块立方体图标（--from-pack：pack 贴图 3D 渲染）
+        textures/icon_gold_block.png             # t620/t644 金块立方体图标（--from-pack：pack 贴图 3D 渲染）
+        textures/icon_redstone_block.png         # t620/t644 红石块立方体图标（--from-pack：pack 贴图 3D 渲染）
+        textures/icon_redstone_lamp.png          # t620/t644 红石灯立方体图标（--from-pack：off 态贴图 3D 渲染，与放置态默认一致）
         textures/icon_anvil.png                  # t477 铁砧立方体图标（build_cube_icons.py；顶=砧台+砧面+尖角 / 侧=深铁砧身+横向分层）
         textures/icon_anvil_chipped.png          # t477 微损铁砧立方体图标（build_cube_icons.py；顶=砧台+细裂纹 / 侧=深铁砧身）
         textures/icon_anvil_damaged.png          # t477 重损铁砧立方体图标（build_cube_icons.py；顶=砧台+粗裂纹网+缺角 / 侧=深铁砧身）
         textures/icon_pumpkin.png                # t482 南瓜立方体图标（build_cube_icons.py；顶=橙色瓜顶+短茎 / 侧=橙色瓜棱）
         textures/icon_snow.png                   # t482 雪块立方体图标（build_cube_icons.py；各面=冷白冰晶噪点，同积雪层）
-        textures/icon_end_portal.png             # t634 末地传送门立方体图标（build_cube_icons.py；顶=末影祭坛框面+暗绿凹槽 / 侧=灰白细孔框身）
+        textures/icon_end_portal.png             # t634/t644 末地传送门立方体图标（--from-pack：endframe_top+side 裁顶空白，与放置态一致）
         textures/icon_cobweb.png                 # t484 蜘蛛网 flat 2D 图标（build_cube_icons.py；透明底+灰白蛛丝放射网纹）
-        textures/icon_rail.png                   # t484 铁轨 flat 2D 图标（build_cube_icons.py；透明底+棕色枕木+灰铁双轨；t638 ④ 提质版）
-        textures/icon_golden_rail.png            # t638 动力铁轨 flat 2D 图标（build_cube_icons.py；金轨双线+红石连接点）
-        textures/icon_detector_rail.png          # t638 探测铁轨 flat 2D 图标（build_cube_icons.py；铁轨+石枕+探测点）
-        textures/icon_redstone_torch.png         # t638 红石火把 flat 2D 图标（build_cube_icons.py；深棕柄+亮红焰头；常亮光 7）
+        textures/icon_rail.png                   # t484/t644 铁轨 flat 2D 图标（--from-pack：pack 直轨贴图，与放置态一致）
+        textures/icon_golden_rail.png            # t638/t644 动力铁轨 flat 2D 图标（--from-pack：pack powered_rail 贴图）
+        textures/icon_detector_rail.png          # t638/t644 探测铁轨 flat 2D 图标（--from-pack：pack detector_rail 贴图）
+        textures/icon_redstone_torch.png         # t638/t644 红石火把 flat 2D 图标（--from-pack：pack 常亮态贴图）
         textures/icon_tnt.png                    # t485 TNT 立方体图标（build_cube_icons.py；各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
         textures/icon_cut_sandstone.png          # t485 切制砂岩立方体图标（build_cube_icons.py；各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
         textures/icon_mossy_cobble.png           # t486 苔石立方体图标（build_cube_icons.py；各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
-        textures/icon_dispenser.png              # t486/t492 发射器立方体图标（build_cube_icons.py；正面为主投影，显排出口面板；丛林神殿陷阱机关）
-        textures/icon_dropper.png                # t609 投掷器立方体图标（build_cube_icons.py；正面为主投影，显小排出口；顶/侧=熔炉石质）
+        textures/icon_dispenser.png              # t486/t644 发射器立方体图标（--from-pack：正面为主投影，pack 贴图，与放置态一致）
+        textures/icon_dropper.png                # t609/t644 投掷器立方体图标（--from-pack：正面为主投影，pack 贴图）
         textures/icon_stone_brick.png            # t487 石砖立方体图标（build_cube_icons.py；各面=石质灰底+砖块缝纹网格；要塞墙体主体）
         textures/icon_stone_brick_slab.png       # t487 石砖台阶立方体图标（build_cube_icons.py；3D 半高盒，砖纹）
         textures/icon_stone_brick_stairs.png     # t487 石砖楼梯立方体图标（build_cube_icons.py；3D L 阶，砖纹）
         textures/icon_lever.png                  # t490 杠杆立方体图标（build_cube_icons.py；pressure_plate shape+lever 贴图；手动点火机关）
         textures/icon_wood_button.png            # t490 木按钮立方体图标（build_cube_icons.py；pressure_plate shape+wood_button 贴图）
         textures/icon_stone_button.png           # t490 石按钮立方体图标（build_cube_icons.py；pressure_plate shape+stone_button 贴图）
-        textures/icon_stone_pressure_plate.png   # t627 石压力板 3D 薄板图标（build_cube_icons.py；石质灰）
-        textures/icon_iron_pressure_plate.png    # t627 铁压力板 3D 薄板图标（build_cube_icons.py；金属铆钉；重质）
-        textures/icon_gold_pressure_plate.png    # t627 金压力板 3D 薄板图标（build_cube_icons.py；亮金；轻质）
+        textures/icon_stone_pressure_plate.png   # t627/t644 石压力板 3D 薄板图标（--from-pack：smooth_stone 贴图）
+        textures/icon_iron_pressure_plate.png    # t627/t644 铁压力板 3D 薄板图标（--from-pack：iron_block 贴图；重质）
+        textures/icon_gold_pressure_plate.png    # t627/t644 金压力板 3D 薄板图标（--from-pack：gold_block 贴图；轻质）
         textures/icon_crafting_table.png         # t50/t492 工作台立方体图标（build_cube_icons.py；正面为主投影，显正面网格）
         textures/icon_dirt.png
         textures/icon_furnace.png                # t80/t492 熔炉立方体图标（build_cube_icons.py；正面为主投影，显炉口）
@@ -515,7 +515,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_wood_slab.png           # t145 不完整方块 flat 2D 区分图标
         textures/icon_wood_stairs.png
         textures/icon_wood_fence.png
-        textures/icon_wood_door.png
+        textures/icon_wood_door.png               # t644 --from-pack：上下半 per-face（upper+lower）3D 两格高薄板，与放置态一致
         textures/icon_wood_trapdoor.png
         textures/icon_wood_pressure_plate.png
         textures/icon_cobble_slab.png             # t412 圆石变体 3D dimetric 立体图标（圆石贴图按形状投影）
@@ -535,7 +535,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_spruce_planks.png            # t466 云杉木板立方体图标（各面=深色木纹；build_cube_icons.py）
         textures/icon_spruce_slab.png              # t466 云杉台阶 3D 立体图标（半高盒深色木纹；build_cube_icons.py）
         textures/icon_spruce_fence.png             # t466 云杉栅栏 3D 立体图标（立柱+横档深色木纹；build_cube_icons.py）
-        textures/icon_spruce_door.png              # t466 云杉门 3D 立体图标（两格高薄板深色木纹；build_cube_icons.py）
+        textures/icon_spruce_door.png              # t466/t644 云杉门 3D 立体图标（--from-pack：upper+lower 贴图，与放置态一致）
         textures/icon_lily_pad.png                 # t396 睡莲 flat 2D 图标（透明底+绿圆叶+V缺口；build_cube_icons.py）
         textures/icon_mushroom.png                 # t396 蘑菇 flat 2D 图标（透明底+米色菌柄+红底白斑菌盖；build_cube_icons.py）
         textures/icon_brown_mushroom.png           # t507 白蘑菇 / 棕蘑菇 flat 2D 图标（透明底+米色菌柄+棕色菌盖浅黄褐斑；build_cube_icons.py；蘑菇汤原料）

@@ -59,8 +59,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CutSandstone:  return "icon_cut_sandstone.png"; // t485 切制砂岩立方体图标（各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
     case BlockRegistry::TntBlock:      return "icon_tnt.png";           // t485 TNT 立方体图标（各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
     case BlockRegistry::MossyCobble:   return "icon_mossy_cobble.png";  // t486 苔石立方体图标（各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
-    case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486/t492 发射器立方体图标（正面为主投影，显排出口面板；丛林神殿陷阱机关）
-    case BlockRegistry::Dropper:       return "icon_dropper.png";       // t609 投掷器立方体图标（正面为主投影，显小排出口；顶/侧=熔炉石质）
+    case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486/t644 发射器图标（--from-pack 正面为主投影，pack 贴图与放置态一致；丛林神殿陷阱机关）
+    case BlockRegistry::Dropper:       return "icon_dropper.png";       // t609/t644 投掷器图标（--from-pack 正面为主投影，pack 贴图与放置态一致）
     // t487 要塞结构方块图标：石砖（立方体 3D）/ 石砖台阶（3D 半高盒）/ 石砖楼梯（3D L 阶）。t600 修正：台阶/楼梯
     //   原误走 BLOCKS 满立方投影（三图标同图=全显石砖整块，用户「背包三个都是石砖满一格」）→ 改 render_partial_3d
     //   slab/stairs 形状（同圆石变体流程，fill=default_stone_brick 砖纹）。tools/build_cube_icons.py 程序生成。
@@ -74,16 +74,16 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::PackIce:      return "icon_pack_ice.png";       // t468 浮冰立方体图标（各面=实白细裂纹）
     case BlockRegistry::BlueIce:      return "icon_blue_ice.png";       // t468 蓝冰立方体图标（各面=淡蓝纵向纹路）
     case BlockRegistry::Obsidian:     return "icon_obsidian.png";       // t472 黑曜石立方体图标（各面=深紫黑火山玻璃；流体交互产物，钻石镐采掘）
-    case BlockRegistry::EnchantingTable: return "icon_enchanting_table.png"; // t474 附魔台立方体图标（顶=黑曜石+钻石+立书 / 侧=黑曜石+钻石嵌点）
-    case BlockRegistry::Bookshelf:    return "icon_bookshelf.png";      // t474 书架立方体图标（各面=木板边框+彩色书脊书列）
-    case BlockRegistry::IronBlock:    return "icon_iron_block.png";     // t477 铁块立方体图标（各面=金属灰底+铆钉网格+高光）
-    // t620 矿物存储块立方体图标（各面=对应材质存储块贴图；build_cube_icons.py 程序生成）。
-    case BlockRegistry::CoalBlock:    return "icon_coal_block.png";     // 煤炭块（各面=近黑煤层压缩块+高光棱线）
-    case BlockRegistry::LapisBlock:   return "icon_lapis_block.png";    // 青金石块（各面=深群青底+金点镶面）
-    case BlockRegistry::DiamondBlock: return "icon_diamond_block.png";  // 钻石块（各面=浅青底+钻石菱面镶格）
-    case BlockRegistry::GoldBlock:    return "icon_gold_block.png";     // 金块（各面=金黄底+镶格高光）
-    case BlockRegistry::RedstoneBlock: return "icon_redstone_block.png"; // 红石块（各面=鲜红底+矿粒镶面）
-    case BlockRegistry::RedstoneLamp: return "icon_redstone_lamp.png";  // 红石灯（各面=灰暗壳+中央红石芯（off 态））
+    case BlockRegistry::EnchantingTable: return "icon_enchanting_table.png"; // t474/t644 附魔台 0.75 矮盒图标（--from-pack：pack 顶/侧贴图，与放置态一致）
+    case BlockRegistry::Bookshelf:    return "icon_bookshelf.png";      // t474/t644 书架立方体图标（--from-pack：顶=planks 侧=书脊书列，与放置态 per-face 一致）
+    case BlockRegistry::IronBlock:    return "icon_iron_block.png";     // t477/t644 铁块图标（--from-pack：pack 贴图 3D 渲染，与放置态一致）
+    // t620/t644 矿物存储块立方体图标（--from-pack：pack 贴图 3D 渲染，与放置态一致）。
+    case BlockRegistry::CoalBlock:    return "icon_coal_block.png";     // 煤炭块（pack 近黑煤层压缩块）
+    case BlockRegistry::LapisBlock:   return "icon_lapis_block.png";    // 青金石块（pack 深群青底+金点）
+    case BlockRegistry::DiamondBlock: return "icon_diamond_block.png";  // 钻石块（pack 浅青底+钻石菱面镶格）
+    case BlockRegistry::GoldBlock:    return "icon_gold_block.png";     // 金块（pack 金黄底+高光）
+    case BlockRegistry::RedstoneBlock: return "icon_redstone_block.png"; // 红石块（pack 鲜红底+矿粒）
+    case BlockRegistry::RedstoneLamp: return "icon_redstone_lamp.png";  // 红石灯（pack off 态贴图，与放置态默认一致）
     // t628 手动点火机关图标（t490 已生成 icon PNG 并注册 qrc，但 iconFileForBlock 漏接 case → 调色板图标空白；
     //   本任务接通 + 补进创造调色板）。pressure_plate shape 3D 薄板 + 各自机关贴图（杠杆=木质底座+竖柄 /
     //   木钮=木质+凸钮 / 石钮=石质+凸钮，肉眼可辨）。tools/build_cube_icons.py 生成。
@@ -135,7 +135,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::WoodSlab:          return "icon_wood_slab.png";          // 木板台阶：3D 半高盒
     case BlockRegistry::WoodStairs:        return "icon_wood_stairs.png";        // 木板楼梯：3D L 阶（背墙 + 整步）
     case BlockRegistry::WoodFence:         return "icon_wood_fence.png";         // 木栅栏：2D 柱档剪影
-    case BlockRegistry::WoodDoor:          return "icon_wood_door.png";          // 木板门：2D 高板剪影
+    case BlockRegistry::WoodDoor:          return "icon_wood_door.png";          // t644 木板门：3D 两格高薄板（--from-pack 上下半贴图，与放置态一致）
     case BlockRegistry::WoodTrapdoor:      return "icon_wood_trapdoor.png";      // 木活板门：3D 薄板
     case BlockRegistry::WoodPressurePlate: return "icon_wood_pressure_plate.png";// 木板压力板：3D 更薄更小
     // t412 圆石变体图标：石质半方块 3D dimetric 立体图标（圆石贴图按实际形状投影，同木制半方块图标流程）。
@@ -143,30 +143,30 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::CobbleStairs:        return "icon_cobble_stairs.png";        // 圆石楼梯：3D L 阶（背墙 + 整步）
     case BlockRegistry::CobbleFence:         return "icon_cobble_fence.png";         // 圆石墙：3D 立柱 + 横档
     case BlockRegistry::CobblePressurePlate: return "icon_cobble_pressure_plate.png";// 圆石压力板：3D 更薄更小
-    // t627 压力板家族扩展图标（stone/iron/gold）：pressure_plate shape 3D 薄板 + 各自独立瓦片 fill
-    //   （石灰板面 / 金属铆钉 / 亮金板面），材质色一眼可辨「这是哪种板」。tools/build_cube_icons.py 生成。
-    case BlockRegistry::StonePressurePlate:  return "icon_stone_pressure_plate.png"; // 石压力板：3D 薄板（石质灰）
-    case BlockRegistry::IronPressurePlate:   return "icon_iron_pressure_plate.png";  // 铁压力板：3D 薄板（金属铆钉；重质）
-    case BlockRegistry::GoldPressurePlate:   return "icon_gold_pressure_plate.png";  // 金压力板：3D 薄板（亮金；轻质）
+    // t627/t644 压力板家族扩展图标（stone/iron/gold）：3D 薄板 + pack 语义贴图（石=smooth_stone /
+    //   铁=iron_block / 金=gold_block 面），与放置态同材质观感。tools/build_cube_icons.py --from-pack 生成。
+    case BlockRegistry::StonePressurePlate:  return "icon_stone_pressure_plate.png"; // 石压力板：3D 薄板（平滑石面）
+    case BlockRegistry::IronPressurePlate:   return "icon_iron_pressure_plate.png";  // 铁压力板：3D 薄板（金属面；重质）
+    case BlockRegistry::GoldPressurePlate:   return "icon_gold_pressure_plate.png";  // 金压力板：3D 薄板（亮金面；轻质）
     // t466 云杉木制品链图标：云杉木板（立方体 3D）/ 云杉台阶（3D 半高盒）/ 云杉栅栏（3D 立柱+横档）/ 云杉门
     //   （3D 两格高薄板）。同橡木木制品图标流程，仅 fill 换 default_spruce_planks（深色木纹）。tools/build_cube_icons.py
     //   程序生成；与橡木木制品图标形状一致但贴图深色 → 肉眼即可辨「云杉」。
     case BlockRegistry::SprucePlanks:        return "icon_spruce_planks.png";        // 云杉木板：3D 立方体（顶+两侧深色木纹）
     case BlockRegistry::SpruceSlab:          return "icon_spruce_slab.png";          // 云杉台阶：3D 半高盒（深色木纹）
     case BlockRegistry::SpruceFence:         return "icon_spruce_fence.png";         // 云杉栅栏：3D 立柱 + 横档（深色木纹）
-    case BlockRegistry::SpruceDoor:          return "icon_spruce_door.png";          // 云杉门：3D 两格高薄板（深色木纹）
+    case BlockRegistry::SpruceDoor:          return "icon_spruce_door.png";          // t644 云杉门：3D 两格高薄板（--from-pack 上下半贴图，与放置态一致）
     case BlockRegistry::Ladder:        return "icon_ladder.png";      // t413/t519 木梯（透明底；两纵轨 + 4 道横梯级；竖直爬行梯；t519 满格版）
     // t482/t483 防御造物方块立方体图标（build_cube_icons.py 程序生成原创像素图）。
     case BlockRegistry::Pumpkin:       return "icon_pumpkin.png";     // 南瓜（顶=橙色瓜顶+短茎 / 侧=橙色瓜棱；造物头部方块）
     case BlockRegistry::Snow:          return "icon_snow.png";        // 雪块（各面=冷白冰晶噪点，同积雪层；雪傀儡身体方块）
-    case BlockRegistry::EndPortal:     return "icon_end_portal.png";  // t634 末地传送门（顶=末影祭坛框面+暗绿凹槽 / 侧=灰白细孔框身；进创造调色板配图标）
+    case BlockRegistry::EndPortal:     return "icon_end_portal.png";  // t634/t644 末地传送门（--from-pack：endframe 顶/侧贴图，与放置态一致）
     // t484 废弃矿井结构方块图标（build_cube_icons.py flat 2D 透明底；程序生成原创像素图）。
     case BlockRegistry::Cobweb:        return "icon_cobweb.png";      // 蜘蛛网（cross 透明底；灰白蛛丝放射网纹；矿井散布）
-    case BlockRegistry::Rail:          return "icon_rail.png";        // 铁轨（flat 透明底；棕色枕木 + 灰铁双轨；贴地薄板）
-    // t638 铁轨家族扩展 + 红石火把图标（build_cube_icons.py flat 2D 透明底；程序生成原创像素图）。
-    case BlockRegistry::GoldenRail:    return "icon_golden_rail.png";    // 动力铁轨（flat 透明底；金轨双线 + 红石连接点；矿车加速）
-    case BlockRegistry::DetectorRail:  return "icon_detector_rail.png";  // 探测铁轨（flat 透明底；铁轨 + 亮红探测点；矿车驶过通电视觉）
-    case BlockRegistry::RedstoneTorch: return "icon_redstone_torch.png"; // 红石火把（flat 透明底；深棕柄 + 亮红焰头；常亮装饰光源 光 7）
+    case BlockRegistry::Rail:          return "icon_rail.png";        // t644 铁轨（--from-pack flat 透明底：pack 直轨贴图，与放置态一致）
+    // t638/t644 铁轨家族扩展 + 红石火把图标（--from-pack flat 2D 透明底：pack 贴图，与放置态一致）。
+    case BlockRegistry::GoldenRail:    return "icon_golden_rail.png";    // 动力铁轨（pack powered_rail；矿车加速）
+    case BlockRegistry::DetectorRail:  return "icon_detector_rail.png";  // 探测铁轨（pack detector_rail；矿车驶过通电视觉）
+    case BlockRegistry::RedstoneTorch: return "icon_redstone_torch.png"; // 红石火把（pack 常亮态贴图；装饰光源 光 7）
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
