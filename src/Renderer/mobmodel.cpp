@@ -370,7 +370,7 @@ void MobModel::setAimPitch(float deg)
 
 // t635 铁傀儡攻击抬臂 setter（0..1，0=垂臂）：同上早退；仅 IronGolem 攻击蓄力期非零（QML 绑
 //   golemAttackPoseAt(i)——EntityManager 攻击 windup 进度）。量化到 1/12 步进（同 walkPhase 量化模式，
-//   防每帧微变触发 rebuild）；值变 → rebuild 把双臂绕肩枢前抬（−attackPose·120°）。
+//   防每帧微变触发 rebuild）；值变 → rebuild 把双臂绕肩枢前抬（+attackPose·120°，rev2-C6 正角向前）。
 void MobModel::setAttackPose(float pose)
 {
     constexpr float kStep = 1.0f / 12.0f;
@@ -665,9 +665,11 @@ void MobModel::rebuild()
         setMobTex(0, 70, 9, 5, 6);
         addBox( 0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 右腿（铁块）
         // t635 ② 攻击抬臂（attackPose 0..1 → 双臂绕肩枢前抬）：attackPose=0 走 addBox 轴对齐快路径
-        //   （垂臂，同旧）；>0 绕肩枢（臂盒顶面心 y=0.10+0.39=0.49）X 轴旋转 −attackPose·120°（负角把垂臂
-        //   向前 −Z 抬起；度 → 弧度）。肩枢在臂盒顶 → 抬臂时臂根贴肩不脱节（同 Bones aimPitch 模式）。
-        const float golemArmLift = qDegreesToRadians(-m_attackPose * 120.0f); // 度 → 弧度（负 = 向前 −Z 抬）
+        //   （垂臂，同旧）；>0 绕肩枢（臂盒顶面心 y=0.10+0.39=0.49）X 轴旋转 +attackPose·120°。肩枢在臂盒顶
+        //   → 抬臂时臂根贴肩不脱节（同 Bones aimPitch 模式）。review rev2-C6：角符号修正 —— addBoxRot 是右手
+        //   X 轴旋转（z' = y·sin + z·cos），下垂臂末端 dy<0 → **正角**把臂端移向 −Z（前方；同骨架瞄准臂
+        //   setAimPitch 的 +75° 前伸，本文件权威参考）；旧 −120° 把双臂甩到身后 +Z（「投降」姿态反向）。
+        const float golemArmLift = qDegreesToRadians(m_attackPose * 120.0f); // 度 → 弧度（正 = 向前 −Z 抬，同骨架瞄准臂）
         setMobTex(60, 58, 4, 16, 6);
         if (m_attackPose == 0.0f) {
             addBox(-0.62f,  0.10f, 0.00f, 0.14f,  0.39f, 0.225f, verts, idx, bMin, bMax); // 左长臂（垂；机制等价 MC 铁傀儡重拳长臂）

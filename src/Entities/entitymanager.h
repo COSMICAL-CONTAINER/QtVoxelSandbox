@@ -477,8 +477,9 @@ public:
     //   revision 在追踪期每帧 bump（tick Mob 分支）让绑定刷新（拉弓期 mob 减速到停 → moved=false 亦须刷新）。
     Q_INVOKABLE float drawAmountAt(int i) const;
     // t635 铁傀儡攻击蓄力进度（0..1）：仅 mobType==MobIronGolem 且 golemWindup>0（正在蓄力抬臂）时返
-    //   clamp(golemWindup/kGolemWindup,0,1)，供 QML delegate 绑 MobModel.attackPose（双臂绕肩枢前抬 −120°，
-    //   机制等价 MC 1.0 铁傀儡上勾拳双臂前举）。非 IronGolem / 未蓄力 / 越界 → 0。蓄力期 revision 每帧 bump。
+    //   clamp(golemWindup/kGolemWindup,0,1)，供 QML delegate 绑 MobModel.attackPose（双臂绕肩枢前抬 +120°，
+    //   机制等价 MC 1.0 铁傀儡上勾拳双臂前举；rev2-C6 正角=向前，同骨架瞄准臂约定）。非 IronGolem / 未蓄
+    //   力 / 越界 → 0。蓄力期 revision 每帧 bump。
     Q_INVOKABLE float golemAttackPoseAt(int i) const;
     // t635 铁傀儡反击锁定（PlayerController::attackMob 目标是 MobIronGolem 时调；Game→Entities 向下依赖，
     //   同 setWolfTarget 模式）：golemAngry=true + 重置记忆 kGolemAngryMemory → aiIronGolem 追击玩家；

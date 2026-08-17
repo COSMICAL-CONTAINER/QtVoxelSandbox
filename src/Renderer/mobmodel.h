@@ -103,8 +103,9 @@ class MobModel : public QQuick3DGeometry
     //   未瞄准 / 图鉴静态 → 0 走 addBox 轴对齐快路径。其余 mobType 不读（几何无臂枢）。
     Q_PROPERTY(float aimPitch READ aimPitch WRITE setAimPitch NOTIFY aimPitchChanged)
     // t635 铁傀儡攻击抬臂（0..1，0 = 垂臂）：仅 IronGolem(mobType 13) 用——双臂绕肩枢 (±0.62,0.49,0) X 轴旋转
-    //   −attackPose·120°（向前 −Z 抬，机制等价 MC 铁傀儡上勾拳双臂前举）。QML 绑 golemAttackPoseAt(i)
-    //   （EntityManager 攻击蓄力 0..1）。0 → addBox 轴对齐快路径（垂臂）。其余 mobType 不读。
+    //   +attackPose·120°（向前 −Z 抬，rev2-C6 正角=前伸同骨架瞄准臂；机制等价 MC 铁傀儡上勾拳双臂前举）。
+    //   QML 绑 golemAttackPoseAt(i)（EntityManager 攻击蓄力 0..1）。0 → addBox 轴对齐快路径（垂臂）。其余
+    //   mobType 不读。
     Q_PROPERTY(float attackPose READ attackPose WRITE setAttackPose NOTIFY attackPoseChanged)
     // pack 是否用 pack entity 贴图（MC box-UV 精确采样，R19 C3）；pack 关 / 包内无贴图 → false（全脸 UV + 程序生成贴图）。
     Q_PROPERTY(bool packTextured READ packTextured WRITE setPackTextured NOTIFY packTexturedChanged)
