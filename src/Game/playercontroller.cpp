@@ -635,7 +635,13 @@ void PlayerController::tickImpl()
     // t402 经验球磁吸 + 拾取（同掉落物 tick 常开 —— 菜单 / 暂停时球仍向玩家飞，世界模拟连续）。
     //   playerCenter = 玩家 AABB 中心（脚底 m_pos + 半高），磁吸 / 拾取都相对此点。无 World 依赖
     //   （经验球是纯磁吸实体）。拾取经 XpOrbManager::xpPickedUp 语义信号 → 呈现层路由 PlayerState.addXp。
-    if (m_xpOrbManager) m_xpOrbManager->tick(dt, m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f));
+    //   t641 死亡门控：死亡态（m_dead=true，dropAllItems 置位，早于 onDied 里 spawnOrb）不 tick →
+    //   onDied 掉在死亡点的经验球不被**尸体**瞬间吸走（尸体停死亡点，球在磁吸半径 6 内 1s 内飞到被吸 →
+    //   addXp 把 t443 致死分支刚清空的 XP 条又填回来 = 用户「死后复活经验条没清空」根因；与
+    //   pickupScan 的 m_dead 门控同族 —— 玩家尸体不自动捡东西）。复生后（respawn 清 m_dead）tick 恢复，
+    //   玩家走回死亡点可回收该球（机制等价 MC 死亡掉经验、走回拾取）。死亡期间球位置冻结（不磁吸 /
+    //   不拾取 / 不老化），复生后 despawnExpired 按墙钟补齐寿命，无累积。
+    if (!m_dead && m_xpOrbManager) m_xpOrbManager->tick(dt, m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f));
     } // /profXp
     { FrameProfiler::Scope s("boat");
     // t469 船浮水 tick（常开，独立于捕获态——菜单 / 暂停时船仍浮水 / 衰减，世界模拟连续，同掉落物 / mob tick）。
