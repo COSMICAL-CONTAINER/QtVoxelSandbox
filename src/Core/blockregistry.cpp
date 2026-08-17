@@ -535,8 +535,9 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   {140←endframe_side.png 裁顶部 3/16 空白}/{141←endframe_top.png}/{142←endframe_top.png +
     //   endframe_eye.png overlay 合成}（MC eye 贴图是中央局部图非整面，须叠在 top 上）。solid=false（非实体
     //   → 不挡邻居面剔除，与地形解耦；机制等价 MC 末地传送门无碰撞可走过）/ ShapeFull（碰撞/选中仍走整格可踩/
-    //   可瞄准）、**hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，防创造秒破传送门；同 bedrock/
-    //   Water 哨兵语义）、dropId=0 不掉落、dropCount=0、maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，
+    //   可瞄准）、**hardness=-1.0**（生存不可挖：canMine=false 仅守生存完成守卫，同 bedrock/ 语义；
+    //   **创造可瞬破**——t141 删创造 canMine 守卫后 hardness<0 不再拦创造路径，瞬破 drop=0 不掉落）、dropId=0
+    //   不掉落、dropCount=0、maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，
     //   填 64 与方块族一致）。音色归 GroupStone（石质兜底）。激活：玩家持末影之眼物品右键传送门 → placeBlock
     //   useBlock 分支翻 state bit0（激活态）+ qInfo 日志（末地预热占位，不实现末地维度）。**发光与激活态无关**：
     //   lightEmission 按 id-only 恒 10（末放置 / 激活两态都星绿泛光，t487 行为；状态感知版委托单参版不读

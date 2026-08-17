@@ -19,6 +19,22 @@
 // 引擎瓦片尺寸（与 build_atlas.py TILE=16 + chunkgeometry UV 同源）。
 constexpr int kTile = ResourcePackManager::kTile;
 
+// t633 图鉴生物头像：mobType → 头部 box-UV 数据（u0, v0, w, h, d, 贴图 base 宽, 贴图 base 高）。
+//   与 mobmodel.cpp 各 mob 分支的 setMobTex 头部值同源（单一权威在 Renderer；此处 Core 不能 include Renderer，
+//   以注释互指 + 数值镜像——同 mobEntityMap 与 blockItemIconMap 的字面量模式）。裁剪区 = MC +Z Front 面
+//   （u0+d, v0+d)-(u0+d+w, v0+d+h)（脸所在面；mobmodel.cpp mobFaceQtUV case 4 同公式）。
+//   羊条目带 sheepBody=true 标记：主贴图 sheep_fur.png 毛层头前无脸 → 改从 sheep/sheep.png 本体层裁。
+//   review D3-b：结构体 + 两函数声明前置到文件顶部 —— ensureBuiltLocked（下方匿名命名空间内）构建期
+//   预生成头像要用（range-for 变量 + 成员访问须完整类型），而其定义在前。数据表与裁剪实现仍在文件后段。
+struct MobHeadRegion {
+    int mobType;
+    int u0, v0, w, h, d;
+    int texW, texH;
+    bool sheepBody; // true = 用 sheep/sheep.png（本体层）而非 mobEntityMap 主映射（毛层）
+};
+const QList<MobHeadRegion> &mobHeadRegions();
+QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &entityDirPath);
+
 namespace {
 
 // 合成结果 + active 态 + t415 运行期可改配置的进程全局缓存（资源包配置是 process-global）。
@@ -1574,6 +1590,20 @@ void ensureBuiltLocked()
             blockDir, QStringLiteral(":/textures/lava_strip.png"),
             1, BlockRegistry::kLavaStripFrames,
             { {0, QStringLiteral("lava_still.png")} });
+
+    // review D3-b 图鉴生物头像预生成（t633 修 GUI 卡顿）：mobHeadIconSource 此前把「PNG 解码 + 裁剪 +
+    //   落盘」留在 QML 绑定求值里（ResourceBrowser 生物格 delegate 的 headSrc 属性 —— GUI 线程同步磁盘
+    //   IO，首次开图鉴时 N 个 mob 头像逐个裁剪 = 可感知卡帧）。构建期（apply / 首查询的 ensureBuiltLocked，
+    //   本就在做整图集合成 + 流体条带落盘的重 IO 段）一次遍历 mobHeadRegions 预生成全部头像 → 查询侧
+    //   恒 O(1) 缓存命中（QFile::exists stat，同床 / 皮革 / 铜染色图标模式）。包缺源贴图 → 该条目跳过
+    //   （查询侧回退体色方块，降级语义不变）。
+    if (!s.entityDir.isEmpty()) {
+        for (const MobHeadRegion &r : mobHeadRegions()) {
+            const QString out = generateMobHeadIconFile(r, s.entityDir);
+            if (!out.isEmpty())
+                s.mobHeadIconFiles.insert(r.mobType, out);
+        }
+    }
 }
 } // namespace
 
@@ -1962,12 +1992,7 @@ QString ResourcePackManager::mobTextureSource(int mobType) const
 //   以注释互指 + 数值镜像——同 mobEntityMap 与 blockItemIconMap 的字面量模式）。裁剪区 = MC +Z Front 面
 //   （u0+d, v0+d)-(u0+d+w, v0+d+h)（脸所在面；mobmodel.cpp mobFaceQtUV case 4 同公式）。
 //   羊条目带 sheepBody=true 标记：主贴图 sheep_fur.png 毛层头前无脸 → 改从 sheep/sheep.png 本体层裁。
-struct MobHeadRegion {
-    int mobType;
-    int u0, v0, w, h, d;
-    int texW, texH;
-    bool sheepBody; // true = 用 sheep/sheep.png（本体层）而非 mobEntityMap 主映射（毛层）
-};
+//   （结构体定义 + 声明已前置到文件顶部 —— 见该处 review D3-b 注释；此处只持数据表 + 实现。）
 const QList<MobHeadRegion> &mobHeadRegions()
 {
     static const QList<MobHeadRegion> kRegions = {
@@ -1987,36 +2012,23 @@ const QList<MobHeadRegion> &mobHeadRegions()
     return kRegions;
 }
 
-// t633 图鉴生物头像裁剪（见头文件 mobHeadIconSource 注释）。首次：加载贴图 → 按 base 比例裁 Front 像素区
-//   → 放大 64×64 透明底落盘 + 记缓存；后续 O(1) 命中缓存。任意失败 → 空串（调用方回退体色方块，降级不阻塞）。
-QString ResourcePackManager::mobHeadIconSource(int mobType) const
+// review D3-b 头像裁剪核心（从 mobHeadIconSource 抽出，供构建期预生成 + 查询期懒生成两路共用）：
+//   给定头部区数据 + entity 目录 → 解析源贴图（羊走本体层 sheep/sheep.png；其余走 mobEntityMap 主映射，
+//   子目录 / 扁平两级探测）→ 按 base 比例裁 Front 像素区 → 放大 64×64 透明底 → 落盘
+//   AppLocalData/voxelsandbox_rp_mobhead_<mobType>.png → 返落盘绝对路径（空串 = 任一步失败，调用方回退）。
+//   纯函数（只读 entityDir + 写落盘文件；不触碰 BuiltState —— 缓存插入由调用方做，锁语义归 caller）。
+QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &entityDirPath)
 {
-    const MobHeadRegion *region = nullptr;
-    for (const MobHeadRegion &r : mobHeadRegions()) {
-        if (r.mobType == mobType) { region = &r; break; }
-    }
-    if (!region)
-        return {}; // 无头部区数据（雪傀儡 / 无映射 mob）→ 回退
-    QMutexLocker lock(&stateMutex());
-    ensureBuiltLocked();
-    BuiltState &s = state();
-    if (!s.active || s.entityDir.isEmpty())
-        return {};
-    // 命中缓存（pack 未重解析期间稳定）→ 直接返。
-    const auto cached = s.mobHeadIconFiles.constFind(mobType);
-    if (cached != s.mobHeadIconFiles.constEnd() && QFile::exists(cached.value()))
-        return QStringLiteral("file:///") + cached.value();
-    // 源贴图路径：羊走本体层 sheep/sheep.png；其余走 mobEntityMap 主映射文件（子目录/扁平两级探测）。
-    const QDir entityDir(s.entityDir);
+    const QDir entityDir(entityDirPath);
     QString srcPath;
-    if (region->sheepBody) {
+    if (region.sheepBody) {
         const QString sub = entityDir.absoluteFilePath(QStringLiteral("sheep/sheep.png"));
         const QString flat = entityDir.absoluteFilePath(QStringLiteral("sheep.png"));
         srcPath = QFile::exists(sub) ? sub : (QFile::exists(flat) ? flat : QString());
     } else {
         QString relPath;
         for (const auto &m : mobEntityMap()) {
-            if (m.first == mobType) { relPath = m.second; break; }
+            if (m.first == region.mobType) { relPath = m.second; break; }
         }
         if (relPath.isEmpty())
             return {};
@@ -2035,12 +2047,12 @@ QString ResourcePackManager::mobHeadIconSource(int mobType) const
     if (tex.isNull())
         return {}; // 解码失败 → 回退
     // base 像素矩形 → 实际像素（HD 包是 base 整数倍）→ 裁剪（边界内钳防越界读）。
-    const float scale = std::min(float(tex.width()) / float(region->texW),
-                                 float(tex.height()) / float(region->texH));
-    const int fx0 = qRound(float(region->u0 + region->d) * scale);
-    const int fy0 = qRound(float(region->v0 + region->d) * scale);
-    const int fw  = qMax(1, qRound(float(region->w) * scale));
-    const int fh  = qMax(1, qRound(float(region->h) * scale));
+    const float scale = std::min(float(tex.width()) / float(region.texW),
+                                 float(tex.height()) / float(region.texH));
+    const int fx0 = qRound(float(region.u0 + region.d) * scale);
+    const int fy0 = qRound(float(region.v0 + region.d) * scale);
+    const int fw  = qMax(1, qRound(float(region.w) * scale));
+    const int fh  = qMax(1, qRound(float(region.h) * scale));
     if (fx0 < 0 || fy0 < 0 || fx0 + fw > tex.width() || fy0 + fh > tex.height())
         return {}; // 越界（非整数倍贴图 / 数据错）→ 回退（降级）
     QImage head = tex.copy(fx0, fy0, fw, fh);
@@ -2062,9 +2074,36 @@ QString ResourcePackManager::mobHeadIconSource(int mobType) const
         return {}; // 无可写目录 → 回退（降级）
     QDir().mkpath(dir);
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_mobhead_%1.png").arg(mobType));
+            QStringLiteral("voxelsandbox_rp_mobhead_%1.png").arg(region.mobType));
     if (!icon.save(out, "PNG"))
         return {}; // 落盘失败 → 回退（降级）
+    return out;
+}
+
+// t633 图鉴生物头像裁剪（见头文件 mobHeadIconSource 注释）。首查缓存（pack 未重解析期间稳定）→ miss 走
+//   generateMobHeadIconFile（裁剪 + 落盘）→ 记缓存返 file:/// 路径。构建期已预生成（ensureBuiltLocked 末尾，
+//   review D3-b）→ 本路径的懒生成仅兜底「构建期失败但运行期文件恢复」等罕见态；常规调用 O(1) 命中缓存。
+//   任意失败 → 空串（调用方回退体色方块，降级不阻塞）。
+QString ResourcePackManager::mobHeadIconSource(int mobType) const
+{
+    const MobHeadRegion *region = nullptr;
+    for (const MobHeadRegion &r : mobHeadRegions()) {
+        if (r.mobType == mobType) { region = &r; break; }
+    }
+    if (!region)
+        return {}; // 无头部区数据（雪傀儡 / 无映射 mob）→ 回退
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    BuiltState &s = state();
+    if (!s.active || s.entityDir.isEmpty())
+        return {};
+    // 命中缓存（pack 未重解析期间稳定）→ 直接返。
+    const auto cached = s.mobHeadIconFiles.constFind(mobType);
+    if (cached != s.mobHeadIconFiles.constEnd() && QFile::exists(cached.value()))
+        return QStringLiteral("file:///") + cached.value();
+    const QString out = generateMobHeadIconFile(*region, s.entityDir);
+    if (out.isEmpty())
+        return {};
     s.mobHeadIconFiles.insert(mobType, out);
     return QStringLiteral("file:///") + out;
 }

@@ -2108,7 +2108,10 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
     //    **嵌入自洽**：SnowLayer 贴格底 1/8；放置后落地扫描（t629 mobSupportTopY 按 snowLayerHeight 真顶承接）
     //    自然把 golem 抬到层顶 —— 层顶仅 +1/8，视觉「踩进薄雪」而非旧「悬空一格格 / 整格顶起」。t529 旧
     //    「放脚下打架」的根因正是落地扫描按满格顶承接（mobSolidY+1 恒满格）→ 真顶修复后脚下铺雪自洽。
-    //    下方支撑用 isSolid（SnowLayer 非 air → isSolid 含它 → 雪层上可再铺层，机制等价 MC 雪层可堆高）。
+    //    下方支撑用 isSolid（SnowLayer 非 air → isSolid 含它 → 雪层顶也算实体支撑，脚印可铺在已有雪层
+    //    旁边的层顶面上；注意**不会叠层**——写入守卫要求脚下格 blockAt==Air，已有雪层（state=0）的格跳过，
+    //    层数增高只发生在塌落合并路径 setSnowLayerMerge（FallingBlock(SnowLayer) 落在既有层上），本 AI 恒铺
+    //    1/8 薄层 state=0）。
     //    setWaterSilent 静默写（非玩家破/放 → 免粒子/音/掉落噪音，同羊吃草消耗草丛模式）。
     //    节流：仅当脚下格 blockAt==Air 才写（已铺雪 / 已有方块 → 跳过），无每帧开销。
     if (world) {
