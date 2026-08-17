@@ -3836,14 +3836,17 @@ void PlayerController::scanTntTraps()
         if (!BlockRegistry::isPressurePlate(m_world->blockAt(bx, by, bz))) continue; // 板已被破（沿表陈旧）→ 跳过
         // 压力板 **6 邻**（4 水平 + 上 + 下）有 TNT → 点燃（移除 TNT 方块 + spawnPrimedTnt 延时引爆）。
         //   t492 改 6 邻（用户要求「水平四方向 + 上下两个方向」）；t493 删旧路径(a)「压力板下垫 TNT 直接引爆」
-        //   （应**点燃**非瞬爆）；t493 恢复爆炸链式（用户要）→ 点燃后可连锁传播。命中首个 → return。
+        //   （应**点燃**非瞬爆）；t493 恢复爆炸链式（用户要）→ 点燃后可连锁传播。命中首个 → break（板级单点
+        //   足矣：引爆时 detonateTntSphere 链式引燃邻接 TNT，多点同燃只改时序不改结果）。
+        //   r2-B4：删旧函数级 return（首板命中即弃本 tick 其余沿 → 同帧踩两块板只触发一块，另一块沿已进
+        //   基线**永久丢失**——须离开重踩才有新沿）。改为每板独立处理：沿表里每块板都点燃各自 6 邻首个 TNT。
         static constexpr int kDirs6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
         for (const auto &d : kDirs6) {
             const int tx = bx + d[0], ty = by + d[1], tz = bz + d[2];
             if (BlockRegistry::isTnt(m_world->blockAt(tx, ty, tz))) {
                 m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
                 m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸链式传播）
-                return; // 单次点燃 → return
+                break; // 本板单点点燃（链式引爆覆盖其余邻 TNT）
             }
         }
     }
@@ -3982,8 +3985,10 @@ void PlayerController::scanDispenserTraps(float dt)
             const int dx = bx + d[0], dz = bz + d[1];
             const quint8 db = m_world->blockAt(dx, by, dz);
             if (!BlockRegistry::isDispenser(db) && !BlockRegistry::isDropper(db)) continue; // 非发射器/投掷器 → 跳过
-            if (fireDispenserAt(dx, by, dz, db))
-                return; // 单次触发即 return（防同帧多机器刷箭，同 scanTntTraps 单触发）；下帧再处理其余候选。
+            // r2-B4：删旧函数级 return（同 scanTntTraps——同帧踩两板只触发一台机器，另一板沿永久丢失）。
+            //   每板独立触发邻接机器；**同一台机器同 tick 被两块板触发**由 fireDispenserAt 的 per-dispenser
+            //   冷却闸挡住（首次触发写冷却 → 第二次调用 contains 命中返 false 不动作，无双重发射）。
+            fireDispenserAt(dx, by, dz, db);
         }
     }
 }
