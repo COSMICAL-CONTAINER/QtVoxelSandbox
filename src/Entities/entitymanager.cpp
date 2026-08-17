@@ -11,6 +11,42 @@
 namespace {
 Q_LOGGING_CATEGORY(lcEnt, "vo.entity") // 模块化日志（PLAN §2-F）；未在 main.cpp 过滤，落 log 可见
 
+// t642 作物格判定（WheatCrop / CarrotCrop / PotatoCrop）：cross 形非实体植物（ShapeNone，无碰撞盒），
+//   mob 应直接穿越（MC 1.0 怪走过作物只减速不跳踩）。World::isSolid 语义 = 「非 air 实存」（world.h 注释：
+//   blockAt != 0），作物 blockAt≠0 恒 true → 若不做显式排除，mob 横向移动把作物当墙（mobAabbHitsSolid）、
+//   跳跃分支把作物当 1 格墙（aiHostile/aiArcher/aiStalker 越障跳）→ 用户「僵尸跳起来踩在作物上走」。
+//   统一在此排除：mobAabbHitsSolid（移动不挡）+ isJumpObstacle（跳跃不触发）。耕地（Farmland）本身仍
+//   是实体方块（t639 isFullCube=true，mob 支撑依赖）—— 仅在作物格被排除；耕地若真高出 1 格仍是跳墙。
+bool isCropBlock(int blockId)
+{
+    return blockId == BlockRegistry::WheatCrop
+        || blockId == BlockRegistry::CarrotCrop
+        || blockId == BlockRegistry::PotatoCrop;
+}
+
+// t642 越障跳判据「前方脚位是墙」：isSolid（非 air 实存）且**非作物格**。作物可穿越 → 不应触发跳跃
+//   （机制等价 MC 怪在耕地/作物上不跳，只是慢走）。水保持原行为（旧 isSolid 恒 true → 照旧跳，非本任务范围）。
+bool isJumpObstacle(World *world, int x, int y, int z)
+{
+    if (!world || y < 0) return false;
+    const quint8 bid = world->blockAt(x, y, z);
+    if (bid == BlockRegistry::Air) return false;
+    return !isCropBlock(bid);
+}
+
+// t642 刷怪 AABB 适配校验（防生成即嵌墙）：敌对 mob（Shambler/Bones/Stalker halfH=0.90，高 1.8）的 AABB
+//   [y, y+1.8] 占 y、y+1 两格。仅查目标格 air 不够 —— 头顶格（y+1）为实体（1 格高洞穴气袋 / 地表树冠压顶 /
+//   岩架下凹）时 mob 生成即嵌进天花板 = 卡死 + 窒息（用户「晚上僵尸生成卡在方块里」根因）。要求 y、y+1
+//   两格均为 air（同刷怪笼候选校验的 here==Air && above==Air 约定）。XZ 半宽 0.30 < 0.5 → 水平 footprint
+//   不出本格，无需查邻列。调用点：tickHostileLife 黑暗刷怪；刷怪笼自带等价双格校验无需换。
+bool spawnCellFitsHostile(World *world, int x, int y, int z)
+{
+    if (!world) return false;
+    if (y < 1 || y + 1 >= world->height()) return false; // 两格须在界内（防越界 blockAt）
+    return world->blockAt(x, y, z) == BlockRegistry::Air
+        && world->blockAt(x, y + 1, z) == BlockRegistry::Air;
+}
+
 // mob AABB footprint 全格扫（t104；仿 player aabbHitsSolid，playercontroller.cpp:761）。
 // 给定实体立方体中心 (cx,cy,cz) 与半径 r，扫其 AABB [cx−r,cx+r]×[cy−r,cy+r]×[cz−r,cz+r]「严格覆盖」
 // 的所有格子，任一实体方块 → true。「严格重叠」取样（ceil(max)−1 排除仅贴面的方块 → 防卡缝 / 不误判
@@ -36,15 +72,20 @@ bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, f
     for (int y = y0; y <= y1; ++y)
         for (int z = z0; z <= z1; ++z)
             for (int x = x0; x <= x1; ++x) {
+                const quint8 bid = world->blockAt(x, y, z);
                 // t629 薄雪层视穿透：SnowLayer 是贴 cell 底的 1/8..1/8×8 薄板（snowLayerHeight 单一权威），
                 //   全格 isSolid 把它当整墙 → mob 无法走进任何含雪层格（雪原 worldgen 雪层会把 mob 围死原地；
                 //   雪傀儡被自己铺的脚印围死）。机制等价 MC mob 跨步薄雪层（玩家侧本就有 auto-step 跨 1/8）→
                 //   水平碰撞豁免；垂直仍由下方落地扫描按层真实高度承接（mobSupportTopY 配套，两处成对）。
-                if (world->blockAt(x, y, z) == BlockRegistry::SnowLayer) continue;
+                if (bid == BlockRegistry::SnowLayer) continue;
+                // t642 作物可穿越：cross 形非实体植物（ShapeNone 无碰撞盒），mob 应直接走过（同雪层豁免
+                //   「视穿透」族：World::isSolid 语义=非 air → 作物/草丛类恒当墙，须显式排除）。含掉落沙 /
+                //   击退 / 流水推动等所有 mobAabbHitsSolid 消费路径（沙落作物格穿透到下方耕地，机制等价 MC）。
+                if (isCropBlock(bid)) continue;
                 // t333 水视穿透（同 t271 掉落物 / t220 水不挡沙）：World::isSolid 语义=「非 air」含 Water，
                 //   会把水当墙 → mob 横向进不了水 + 流水推力被水格自身撤回（t333 根因「怪水上走 + 不被推」）。
                 //   水非实体碰撞 → 排除后 mob 可入水游 / 被流水沿流推动，仍撞石头/泥土等真实体方块。
-                if (world->blockAt(x, y, z) != BlockRegistry::Water && world->isSolid(x, y, z)) return true;
+                if (bid != BlockRegistry::Water && world->isSolid(x, y, z)) return true;
             }
     return false;
 }
@@ -621,8 +662,10 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                     cy = caveMin + rng->bounded(caveMax - caveMin + 1);
                 }
                 if (cy < 1 || cy >= worldH - 1) continue; // 越界 / 顶格
-                // 三条件：目标格 air + 下方 solid（有地板）+ 有效光 < 阈值。
-                if (world->blockAt(cx, cy, cz) != BlockRegistry::Air) continue;
+                // t642 AABB 适配校验：目标格 + 头顶格（敌对 mob 高 1.8 占两格）均须 air。旧版仅查目标格
+                //   air → 1 格高洞穴气袋 / 地表树冠压顶（surfH+2 是树叶）下照样刷 → mob 生成即嵌方块卡死
+                //   （用户「晚上僵尸生成卡在方块里」根因）。spawnCellFitsHostile 内含双格 + 界内校验。
+                if (!spawnCellFitsHostile(world, cx, cy, cz)) continue;
                 if (!world->isSolid(cx, cy - 1, cz)) continue; // 脚下须有支撑（防悬空刷怪）
                 const quint8 skyL = world->skyLightAt(cx, cy, cz);
                 const quint8 blkL = world->blockLightAt(cx, cy, cz);
@@ -2286,6 +2329,7 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     // 越障跳：resting（贴地）+ 前方脚位格是 1 格墙（实体）+ 墙顶两格空气（可落 + 头可容，mob ~1.8 高）→ 跳。
     //   不跳的情况：前方无墙（平地直走）/ 墙 ≥2 格（跳不过，正确不跳避免原地蹦）/ 已在空中（resting=false 跳过）。
     //   fdx/fdz = 朝向单位向量；前方格取脚位 +0.6 格偏移（mob 半宽 0.45 + 余量，确保落在墙格而非自身列）。
+    //   t642 前方格是作物 → 不跳（isJumpObstacle 排除作物：作物可穿越，mob 应慢走穿过农田而非跳踩作物）。
     if (e.resting && world) {
         const float fdx = -std::sin(e.yawRad);
         const float fdz = -std::cos(e.yawRad);
@@ -2293,7 +2337,7 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         const int fx = qFloor(e.pos.x() + fdx * 0.6f);
         const int fz = qFloor(e.pos.z() + fdz * 0.6f);
         if (fy >= 0
-            && world->isSolid(fx, fy, fz)                    // 前方脚位是墙（1 格障碍）
+            && isJumpObstacle(world, fx, fy, fz)             // t642 前方脚位是墙（作物格排除，可穿越不跳）
             && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落（mob 翻上去后脚位）
             && !world->isSolid(fx, fy + 2, fz)) {             // 头位可容（mob ~1.8 高，再上方须空气）
             e.vy = kJumpSpeed;
@@ -2406,12 +2450,13 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
 
     // 越障跳（仅在要水平移动 + 贴地时；同 aiHostile 越障：前方 1 格墙 + 墙顶 2 格空气 → 跳）。
     //   前方格取 moveDir 方向 0.7 格偏移（mob 半宽 0.45 + 余量，落在前方格而非自身列）。
+    //   t642 前方格是作物 → 不跳（isJumpObstacle 排除作物；作物可穿越，同 aiHostile）。
     if (wantMove && e.resting && world) {
         const int fy = qFloor(e.pos.y() - e.halfH);                 // 脚位格
         const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
         const int fz = qFloor(e.pos.z() + moveDirZ * 0.7f);
         if (fy >= 0
-            && world->isSolid(fx, fy, fz)                            // 前方脚位是 1 格墙
+            && isJumpObstacle(world, fx, fy, fz)                    // t642 前方脚位是墙（作物格排除）
             && !world->isSolid(fx, fy + 1, fz)                       // 墙顶可落
             && !world->isSolid(fx, fy + 2, fz)) {                    // 头位可容（mob ~1.8 高）
             e.vy = kJumpSpeed;
@@ -2634,7 +2679,7 @@ bool EntityManager::aiStalker(int idx, Entity &e, float dt, World *world, const 
         const int fx = qFloor(e.pos.x() + fdx * 0.6f);
         const int fz = qFloor(e.pos.z() + fdz * 0.6f);
         if (fy >= 0
-            && world->isSolid(fx, fy, fz)
+            && isJumpObstacle(world, fx, fy, fz)   // t642 前方脚位是墙（作物格排除，可穿越不跳）
             && !world->isSolid(fx, fy + 1, fz)
             && !world->isSolid(fx, fy + 2, fz)) {
             e.vy = kJumpSpeed;
@@ -3676,6 +3721,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 // t482 雪球减速（slowTimer>0）：水平移动 ×kSnowSlowMul（叠加水中减速）。只对被雪球命中的 mob
                 //   生效（雪傀儡 / 铁傀儡自身 slowTimer 恒 0 不触发）。减速期 QML isSlowedAt 显蓝调。
                 if (e.slowTimer > 0.0f) speedScale *= kSnowSlowMul;
+                // t642 作物格减速（脚位格是作物）：水平移动 ×kCropSlowMul（叠加水中/雪球减速）。机制等价
+                //   MC 怪在耕地作物上慢走 —— mob 穿越 / 追击穿越农田时被作物绊慢（玩家有防护性减速观感，
+                //   「踩作物但不白嫖穿行」）。脚位 = floor(pos.y−halfH)（mob AABB 底面格），同 mobFeetInWater 语义。
+                if (world) {
+                    const int cfy = qFloor(e.pos.y() - e.halfH);
+                    if (cfy >= 0
+                        && isCropBlock(world->blockAt(qFloor(e.pos.x()), cfy, qFloor(e.pos.z()))))
+                        speedScale *= kCropSlowMul;
+                }
             // t344 火烧系统（岩浆 / 火点燃；ALL mobs 含 passive；机制等价 MC 1.0 实体触岩浆着火 + 火伤 + 熄灭）。
             //   分两段：
             //   (1) 岩浆接触点燃：mob 脚位格 floor(pos.y−halfH) 或身体中心格 floor(pos.y) 任一 == Lava → 刷新
@@ -4102,6 +4156,43 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         e.suffocationTimer -= kSuffocationInterval;
                         damageEntity(idx, 1); // 复用受击链：扣 1HP + 红闪 + （归零时）死亡掉落（内含 dead/越界/amount 守）
                         dirty = true;
+                    }
+                    // t642 卡方块自恢复（轻量兜底）：mob 头部嵌入可碰撞方块（被沙埋 / 方块压身 / 生成残留）时，
+                    //   尝试把 mob 移到最近空位（AABB 无碰撞 + 下方有支撑）。主修是刷怪 AABB 适配校验
+                    //   （spawnCellFitsHostile 防生成即嵌）；本兜底覆盖「运行期嵌入」—— 沙落下凝固在 mob 身上 /
+                    //   爆炸破块后 mob 卡缝 / 旧存档残留等（这些路径不经过刷怪校验）。机制等价 MC 实体被埋时的
+                    //   推出脱困。节流：每 kStuckEscapeCooldown 秒最多尝试一次（失败静默下周期再试，防反复空扫）。
+                    //   扫描代价：仅真嵌入（罕见态）时 5×5×3 候选 × mobAabbHitsSolid，低频低耗。
+                    if (e.stuckEscapeTimer <= 0.0f) {
+                        e.stuckEscapeTimer = kStuckEscapeCooldown;
+                        const int bx = qFloor(e.pos.x()), by = qFloor(e.pos.y()), bz = qFloor(e.pos.z());
+                        const float ehw = e.halfW, ehh = e.halfH;
+                        bool escaped = false;
+                        // 按 Y 从高到低、水平由近到远扫候选脚格；首个「AABB 无碰撞 + 下方有支撑」→ 移入。
+                        //   Y 优先向上（被埋场景头顶更可能近地表）；水平 ±1 环覆盖侧向洞口（洞穴 / 房间）。
+                        for (int dy = 2; dy >= -2 && !escaped; --dy) {
+                            const int cy = by + dy;
+                            for (int dx = -1; dx <= 1 && !escaped; ++dx) {
+                                for (int dz = -1; dz <= 1 && !escaped; ++dz) {
+                                    if (dx == 0 && dz == 0 && dy == 0) continue; // 当前位已嵌 → 跳过
+                                    const float nx = float(bx + dx) + 0.5f;
+                                    const float nz = float(bz + dz) + 0.5f;
+                                    const float ny = float(cy) + ehh; // 脚位贴候选格底
+                                    if (mobAabbHitsSolid(world, nx, ny, nz, ehw, ehh)) continue;
+                                    if (!mobFootprintHasSupport(world, nx, nz, cy - 1, ehw)) continue;
+                                    e.pos = QVector3D(nx, ny, nz);
+                                    e.vy = 0.0f;
+                                    e.resting = true;
+                                    escaped = true;
+                                    dirty = true;
+                                    qCInfo(lcEnt) << "mob" << idx << "stuck-escape to"
+                                                 << nx << ny << nz;
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        e.stuckEscapeTimer -= float(aiDt);
                     }
                 } else {
                     e.suffocationTimer = 0.0f; // 头部出方块 → 停累积（脱困即停伤）

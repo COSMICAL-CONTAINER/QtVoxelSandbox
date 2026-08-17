@@ -921,6 +921,10 @@ private:
         bool  golemAngry = false;      // 玩家触发反击（追击玩家目标）
         float golemWindup = 0.0f;      // 攻击蓄力计时（秒；>0 = 正在蓄力抬臂）
         float golemAngryTimer = 0.0f;  // 反击记忆倒计时（秒）
+        // t642 卡方块自恢复节流倒计时（秒；所有 Mob 共用字段，非 hostile 专属）：头部嵌可碰撞方块时每
+        //   kStuckEscapeCooldown 秒尝试一次「移到最近空位」逃生（见 tick 窒息分支）；失败倒计时重置再试。
+        //   <=0 = 可立即尝试。DMI 兜底默认 0（新生成 mob 嵌入即当帧可逃生）。
+        float stuckEscapeTimer = 0.0f;
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
@@ -1222,6 +1226,11 @@ private:
     //   （被沙 / 方块埋住）时，每本间隔秒扣 1HP。机制等价 MC 1.0 窒息 1HP/s（每秒半心）；复用 damageEntity 链
     //   （扣血 + hurtFlash 红闪 + 血量归零 mobDied 死亡掉落），同玩家 fallDamageTaken(1)→takeDamage 链。
     static constexpr float kSuffocationInterval = 1.0f; // t254 窒息扣血间隔（秒；每秒 1HP，机制等价 MC 窒息 1/秒，同玩家 t160）
+    // t642 卡方块自恢复重试间隔（秒）：mob 头部嵌可碰撞方块时每本间隔尝试一次「移到最近空位」脱困
+    //   （见 tick 窒息分支 stuckEscape 逻辑）。1.5s 与窒息扣血同量级 —— 扣血 ~1-2 次内即脱困（MC 实体
+    //   被埋通常即刻推出，本工程留 1.5s 观感「挣脱」）。过短则失败场景反复空扫邻域（5×5×3 候选 ×
+    //   mobAabbHitsSolid）浪费；过长则被埋扣血过多。仅 embedded（真嵌入）才消耗扫描，常态零开销。
+    static constexpr float kStuckEscapeCooldown = 1.5f; // t642 卡方块脱困重试间隔（秒）
     // t241 行走动画 / 羊吃草常量：
     static constexpr float kWalkFreq = 6.2831853f; // 行走相位推进系数（=2π → 每 block 行走完成一个完整腿摆周期；
                                                    //   moveSpeed * dt * kWalkFreq；机制等价 MC mob 每步一摆）
@@ -1452,6 +1461,10 @@ private:
     static constexpr float kSnowballKnockbackStrength = 1.2f; // 雪球命中击退强度（倍率；t553 设 2.0，t583 回调 1.2）
     static constexpr float kSnowSlowDuration       = 3.0f;  // 雪球减速持续（秒）
     static constexpr float kSnowSlowMul            = 0.5f;  // 减速水平速度倍数（<1）
+    // t642 作物格减速水平速度倍数（脚位格是 WheatCrop/CarrotCrop/PotatoCrop 时 ×此值）。机制等价 MC 1.0
+    //   怪在耕地作物上慢走（~60% 速度量级）：mob 穿越 / 追击穿越农田被作物绊慢 —— 跳踩已修（isJumpObstacle
+    //   排除作物），本减速补「慢走不白嫖穿行」的手感。叠加进 speedScale（与水中 / 雪球减速相乘，同族模式）。
+    static constexpr float kCropSlowMul            = 0.6f;  // 作物格水平速度倍数（<1；机制等价 MC 作物绊慢）
     static constexpr float kSnowTrailInterval      = 1.0f;  // 行走留雪层节流间隔（秒）
     static constexpr float kSnowMeltInterval       = 1.0f;  // 热群系/入水/降水每扣 1HP 的累积间隔（秒；t510 慢扣血）
     static constexpr int   kSnowMeltDamage         = 1;     // 单次热伤害扣血量（HP；t510 自 100 降到 1，非即死）
