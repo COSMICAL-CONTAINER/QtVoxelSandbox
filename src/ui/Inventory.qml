@@ -283,18 +283,21 @@ Item {
     }
 
     // t624 关包/离开生存 tab 归还合成栏（同 SurvivalInventory.returnCraftToHotbar）：把 craftSlots 内容
-    //   addStack 回背包（合并同类），清空 craftSlots。合成格不持久化，关包即退回玩家背包。初始全 0 →
+    //   归回背包（合并同类），清空 craftSlots。合成格不持久化，关包即退回玩家背包。初始全 0 →
     //   构造期遍历为空，无副作用。
+    //   review rv2-A3：走 addToAny（main 27 + hotbar 9 智能堆叠，全背包归还的原语）+ 只清**完全归还**的槽
+    //   （返回未放入数 > 0 = 背包满 → 余数留 craft 槽，防丢物）。旧版 addStack 只填 hotbar 9 槽 + 忽略返回值
+    //   + 无条件清空 → 背包满时材料凭空消失。
     function returnCraftToHotbar() {
         if (!root.hotbar) return
         for (let i = 0; i < root.craftSlots.length; ++i) {
             const id = root.craftSlots[i] || 0
             const n = root.craftCounts[i] || 0
-            if (id !== 0 && n > 0) root.hotbar.addStack(id, n)
-        }
-        for (let i = 0; i < root.craftSlots.length; ++i) {
-            root.craftSlots[i] = 0
-            root.craftCounts[i] = 0
+            if (id !== 0 && n > 0) {
+                const remain = root.hotbar.addToAny(id, n)
+                if (remain <= 0) { root.craftSlots[i] = 0; root.craftCounts[i] = 0 }
+                else root.craftCounts[i] = remain // 背包满：余数留本槽
+            }
         }
         root.craftRev++
     }
