@@ -2985,11 +2985,14 @@ void PlayerController::placeBlock()
             if (boatTargetReady) {
                 const int boatType = (heldItemId == RecipeRegistry::SpruceBoatId)
                     ? BoatManager::Spruce : BoatManager::Oak;
-                m_boatManager->spawnBoat(tx, ty, tz, boatType);
-                if (m_mode != Creative)
-                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 船（创造不耗 → 无限放）
-                m_lastPlaceMs = now;
-                emit swingArm();
+                // review rv2-A2：仅 spawnBoat 真生成才消耗船物品（被拒 = 落点与既有船重叠 / 达 cap → 物品
+                //   保留，玩家瞄准邻近水面重放）。旧版无条件扣 → 下船后在脚下重放船「物品没了、船也没出」。
+                if (m_boatManager->spawnBoat(tx, ty, tz, boatType)) {
+                    if (m_mode != Creative)
+                        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 船（创造不耗 → 无限放）
+                    m_lastPlaceMs = now;
+                    emit swingArm();
+                }
                 return;
             }
         }

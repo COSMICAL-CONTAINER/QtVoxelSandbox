@@ -69,8 +69,11 @@ public:
     Q_ENUM(BoatType)
 
     // 在方块格 (x,y,z)（整数坐标，水面格）生成一个 boatType 的船实体。位置存该格中心略上（浮在水面）。
-    //   达 kCap → 跳过 + qWarning（防溢出）。
-    Q_INVOKABLE void spawnBoat(int x, int y, int z, int boatType);
+    //   达 kCap → 跳过 + qWarning（防溢出）；落点与既有活体船重叠（< kBoatMinSpawnDist）→ 拒绝。
+    //   review rv2-A2：返 true = 已生成；false = 被拒（cap / 重叠，caller 据此不消耗船物品 —— 旧版静默
+    //   void 返 + caller 无条件扣物品 →「下船后在脚下重放船：船没生成、物品也没了」）。Q_INVOKABLE bool
+    //   对 QML 调用方无害（QML 可读 bool 返回值；当前 QML 无调用点，PlayerController 直调）。
+    Q_INVOKABLE bool spawnBoat(int x, int y, int z, int boatType);
 
     // 玩家当前骑的船索引（-1 = 未骑）。PlayerController.step 据它判骑乘分支。
     Q_INVOKABLE int ridingIndex() const { return m_riderBoat; }
