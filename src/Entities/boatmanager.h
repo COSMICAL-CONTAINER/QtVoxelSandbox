@@ -201,7 +201,12 @@ private:
     //   可碰撞 = World::isCollidable（含实体方块 / 门 / 活版门；不含水 / 火把 / 空气）。
     //   review L10：ignoreIce=true（仅水档碰岸探测传）把冰族视作可通行（冰顶与水面同层，船应能滑上冰面；
     //   见 .cpp 实现处注释）；默认 false —— 位移 / 推船 / 支撑等实际碰撞仍把冰当实体。
-    bool boatFootprintBlocked(World *world, float px, float py, float pz, bool ignoreIce = false) const;
+    //   review rev2-C2：ignoreLilyPad=true（仅水档碰岸探测传）把睡莲视作可通行 —— 探测前探边（0.65）大于
+    //   撞碎扫描边（0.5），睡莲 isCollidable → 先被当「岸」清朝岸速度，速度每帧只重建到 ~0.5 永达不到撞碎
+    //   阈值 3.0 → 船在叶前 ~0.15 格楔死、撞碎永不触发。豁免后船保持速度驶入叶格 → 高速（> 阈值）撞碎清除；
+    //   低速船仍被**位移碰撞**（不传本参的调用）挡在叶前（慢速 = 阻挡绕行，机制等价 MC 慢速船被叶阻）。
+    bool boatFootprintBlocked(World *world, float px, float py, float pz, bool ignoreIce = false,
+                              bool ignoreLilyPad = false) const;
     // t630 船 footprint 水域覆盖率（0..1）：footprint 覆盖格中「该列有水柱」的格数占比（列从支撑层
     //   probeY 向上扫 kWaterProbeDepth 格内有 Water 即算水列 —— 覆盖浅水 / 深水，取覆盖即可）。采样同
     //   boatFootprintBlocked（floor(±半宽/半长) 格扫）。t630「2/3 支撑阈值」用：覆盖率 ≥ 2/3 才判「船浮

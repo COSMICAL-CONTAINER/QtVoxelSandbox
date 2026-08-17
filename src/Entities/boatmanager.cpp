@@ -150,7 +150,8 @@ bool BoatManager::dismount(World *world, QVector3D &outPlayerFeet)
     return true;
 }
 
-bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float pz, bool ignoreIce) const
+bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float pz, bool ignoreIce,
+                                        bool ignoreLilyPad) const
 {
     if (!world) return false;
     // 扫船 footprint（X [−kBoatHalfW,+kBoatHalfW] × Z [−kBoatHalfLen,+kBoatHalfLen] 的矩形，t556 匹配船体
@@ -162,9 +163,17 @@ bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float p
     //   船可从水面滑上同层冰面；实际位移碰撞（下方不传本参的 boatFootprintBlocked 调用）冰仍按实体挡
     //   （船不嵌冰）；真岸（沙 / 草 / 石岸顶通常高出水面 ≥1 格 → y-1 层 + cy 层仍命中）不受影响，防搁浅
     //   语义保持。
-    const auto cellBlocked = [world, ignoreIce](int x, int y, int z) {
-        return world->isCollidable(x, y, z)
-            && !(ignoreIce && BlockRegistry::isIce(world->blockAt(x, y, z)));
+    //   review rev2-C2：ignoreLilyPad=true（仅水档碰岸探测传）同冰豁免逻辑 —— 睡莲浮于水面同层（水面上一格
+    //   cell 底 1/16 quad，船中心 Y 落在叶同格），且探测前探边 0.65 > 撞碎扫描边 0.5 → 叶先于撞碎被当岸，
+    //   速度被清朝向分量后每帧只重建 ~0.5 < 撞碎阈值 3.0 → 船在叶前楔死、撞碎永不触发。豁免后船保速驶入
+    //   叶格 → 高速撞碎（smashLilyPads 在探测前跑）；低速船仍被位移碰撞挡（叶按实体，不传本参）→「快=碎、
+    //   慢=挡」两态成立。
+    const auto cellBlocked = [world, ignoreIce, ignoreLilyPad](int x, int y, int z) {
+        if (!world->isCollidable(x, y, z)) return false;
+        const quint8 id = world->blockAt(x, y, z);
+        if (ignoreIce && BlockRegistry::isIce(id)) return false;
+        if (ignoreLilyPad && id == BlockRegistry::LilyPad) return false;
+        return true;
     };
     const int x0 = int(std::floor(px - kBoatHalfW)), x1 = int(std::floor(px + kBoatHalfW));
     const int z0 = int(std::floor(pz - kBoatHalfLen)), z1 = int(std::floor(pz + kBoatHalfLen));
@@ -393,20 +402,25 @@ void BoatManager::tick(qreal dt, World *world)
         // 水平速度积分位移 + 逐轴碰撞（空船被推 / 残留惯性滑行；被骑船的操控位移由 tickRiddenBoat 推进）。
         //   t630 撞碎荷叶：速度 > kBoatLilySmashSpeed 时先碾碎 footprint 内 LilyPad（清 Air + 掉物品），
         //   再走位移碰撞（叶已清 → 不挡；低速叶仍挡，绕行）。
+        //   review rev2-C2：高速时位移碰撞**同豁免**睡莲（ignoreLilyPad=fast）—— 撞碎扫描只盖**当前**
+        //   footprint，船头要到下一帧才进叶格；若位移碰撞仍把叶当实体，船会被冻在叶格边（速度清零 →
+        //   重建每帧 ~0.5 永达不到撞碎阈值 3.0 → 撞碎扫描永远盖不到叶格）。高速豁免 → 船头进叶格（最多
+        //   重叠 1 帧，最大帧位移 0.35 < footprint 宽 1.0，不会跳过）→ 下一帧撞碎扫描清叶。低速不豁免 →
+        //   叶按实体挡（慢速 = 阻挡绕行，机制等价 MC 慢速船被 lily pad 阻挡）。
         if (b.vx != 0.0f || b.vz != 0.0f) {
-            if (std::sqrt(b.vx * b.vx + b.vz * b.vz) > kBoatLilySmashSpeed
-                && smashLilyPads(world, b.pos.x(), b.pos.y(), b.pos.z()))
+            const bool fastBoat = std::sqrt(b.vx * b.vx + b.vz * b.vz) > kBoatLilySmashSpeed;
+            if (fastBoat && smashLilyPads(world, b.pos.x(), b.pos.y(), b.pos.z()))
                 changed = true;
             const float dx = b.vx * float(dt);
             const float dz = b.vz * float(dt);
             if (dx != 0.0f) {
                 const float nx = b.pos.x() + dx;
-                if (!boatFootprintBlocked(world, nx, b.pos.y(), b.pos.z())) b.pos.setX(nx);
+                if (!boatFootprintBlocked(world, nx, b.pos.y(), b.pos.z(), /*ignoreIce*/ false, /*ignoreLilyPad*/ fastBoat)) b.pos.setX(nx);
                 else b.vx = 0.0f;
             }
             if (dz != 0.0f) {
                 const float nz = b.pos.z() + dz;
-                if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nz)) b.pos.setZ(nz);
+                if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nz, /*ignoreIce*/ false, /*ignoreLilyPad*/ fastBoat)) b.pos.setZ(nz);
                 else b.vz = 0.0f;
             }
             changed = true;
@@ -515,10 +529,14 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
         //   背岸侧（后方是水）不命中 → 背向分量永不清除。
         //   review L10：探测传 ignoreIce=true（冰面豁免，见 boatFootprintBlocked 注释）—— 冰顶与水面同层，
         //   船须能越过冰缘滑上冰面（t611 冰面加速入口）；沙 / 草岸等真岸不豁免（防搁浅语义保持）。
-        const bool blockedPosX = boatFootprintBlocked(world, b.pos.x() + kShoreProbe, b.pos.y() - 1.0f, b.pos.z(), /*ignoreIce*/ true);
-        const bool blockedNegX = boatFootprintBlocked(world, b.pos.x() - kShoreProbe, b.pos.y() - 1.0f, b.pos.z(), /*ignoreIce*/ true);
-        const bool blockedPosZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() + kShoreProbe, /*ignoreIce*/ true);
-        const bool blockedNegZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() - kShoreProbe, /*ignoreIce*/ true);
+        //   review rev2-C2：同传 ignoreLilyPad=true（睡莲豁免）—— 叶浮水面同层且探测边（0.65）大于撞碎扫描
+        //   边（0.5），不豁免则叶先当岸清速 → 速度每帧只重建 ~0.5 永达不到撞碎阈值 3.0 → 船楔死叶前、
+        //   撞碎永不触发。豁免后高速船保速驶入叶格撞碎（smashLilyPads 已在探测前跑）；低速船由位移碰撞
+        //   （不传本参）挡在叶前（慢速 = 阻挡，机制等价 MC 慢速船被叶阻）。
+        const bool blockedPosX = boatFootprintBlocked(world, b.pos.x() + kShoreProbe, b.pos.y() - 1.0f, b.pos.z(), /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
+        const bool blockedNegX = boatFootprintBlocked(world, b.pos.x() - kShoreProbe, b.pos.y() - 1.0f, b.pos.z(), /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
+        const bool blockedPosZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() + kShoreProbe, /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
+        const bool blockedNegZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() - kShoreProbe, /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
         const bool hitShore = (blockedPosX && b.vx > 0.0f) || (blockedNegX && b.vx < 0.0f)
                            || (blockedPosZ && b.vz > 0.0f) || (blockedNegZ && b.vz < 0.0f);
         if (hitShore) {
@@ -537,6 +555,11 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     //   t508 二轮复盘修「能开出虚空」（用户报⑧）：船 XZ 位移只查 boatFootprintBlocked（世界内实块），
     //     但世界边缘外 blockAt 返 Air → isCollidable=false → 不挡船 → 船可开出世界边界进虚空。加世界边界
     //     clamp：船 footprint（±kBoatHalfW）必须落在 [0,width]×[0,depth] 内（半宽留 1 格缓冲防骑跨边界卡 delegate）。
+    //   review rev2-C2：高速（> kBoatLilySmashSpeed）时位移碰撞豁免睡莲（同上方 tick 段修法）—— 撞碎扫描只
+    //     盖当前 footprint，船头下一帧才进叶格；位移碰撞若仍把叶当实体 → 船被冻在叶格边、速度清零后每帧
+    //     只重建 ~0.5 永达不到撞碎阈值 → 撞碎扫描永远盖不到叶（=「撞碎从未触发」根因）。豁免后船头进叶格
+    //     （最大帧位移 ~0.35 < footprint 宽 1.0 不跳格）→ 下一帧撞碎扫描清叶。低速不豁免 → 叶挡（慢 = 阻挡）。
+    const bool fastBoat = speed > kBoatLilySmashSpeed;
     const float dx = b.vx * float(dt);
     const float dz = b.vz * float(dt);
     // 世界边界（半宽外扩防船头穿出）：无 world → 不限。t556：X 用 kBoatHalfW / Z 用 kBoatHalfLen（矩形碰撞盒）。
@@ -549,7 +572,7 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
         float nx = b.pos.x() + dx;
         if (nx < minX) nx = minX;
         if (nx > maxX) nx = maxX;
-        if (!boatFootprintBlocked(world, nx, b.pos.y(), b.pos.z())) {
+        if (!boatFootprintBlocked(world, nx, b.pos.y(), b.pos.z(), /*ignoreIce*/ false, /*ignoreLilyPad*/ fastBoat)) {
             b.pos.setX(nx);
         } else {
             // 撞墙：高速 → 撞毁；低速 → 只停该轴。
@@ -562,7 +585,7 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
         float nz = b.pos.z() + dz;
         if (nz < minZ) nz = minZ;
         if (nz > maxZ) nz = maxZ;
-        if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nz)) {
+        if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nz, /*ignoreIce*/ false, /*ignoreLilyPad*/ fastBoat)) {
             b.pos.setZ(nz);
         } else {
             if (speed >= kBoatCrashSpeed) { outCrashed = true; b.vx = 0.0f; b.vz = 0.0f; }
