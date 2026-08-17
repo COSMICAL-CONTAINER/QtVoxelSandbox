@@ -497,6 +497,14 @@ public:
     //   positionChanged/yawChanged/pitchChanged/modeChanged → 相机 / 第三人称模型绑定刷新。与 respawn 的差异：
     //   respawn 回固定出生点，本方法回存档任意点（玩家上次保存位置）。mode 取 Mode 序数（0/1/2）。
     Q_INVOKABLE void loadSavedState(float x, float y, float z, float yaw, float pitch, int mode);
+    // r2-B1 存档加载机关态收尾（Main.qml enterWorld 在世界加载 + applyPlayerState 后调）。读档路径（含
+    //   换槽位 A→B）**复用同一 theWorld / player 对象**——setWorld 因指针未变不触发，机关瞬态表（压力板
+    //   边沿基线 / 按钮复位 / 发射器冷却 / 红石矿点亮）的旧世界坐标键残留在此统一清（clearAllTrapsState），
+    //   并置一次性「压力板沿抑制」标记：加载后首个 updatePressurePlates tick 只建基线 + 置压下视觉、
+    //   **不产踩下沿**（防「存档时踩着陷阱板 → 读档首 tick 基线为空误判新沿 → 误触发 TNT / 发射器」——
+    //   存档时板已是压下态，沿在存档前已消费过）。另做加载态方块视觉归一（压力板 / 按钮的 bit0 陈旧态，
+    //   r2-B2/B3）。
+    Q_INVOKABLE void finishWorldLoad();
     // t238 设饥饿值（存档加载用；与 PlayerState.setHunger 配对）：clamp 到 [0, kMaxHunger]；同步本类的
     //   Physics 层饥饿累积器 m_hunger + emit hungerUpdated（让 Main.qml 路由到 playerState.setHunger 把
     //   Game 层显值与 Physics 层值对齐——存档只持久化 playerState.hunger，本方法把同一值灌回 Physics 层
@@ -1030,6 +1038,12 @@ private:
     //   worldChanged 重建 mesh）+ 移除。拉杆不入本表（拉杆保持扳动态直到再右键——「拉开持续激活」）。
     //   换世界清空（同 m_dispenserCooldowns 模式）。无按钮场景恒空（零开销）。
     QHash<quint64, float> m_buttonRecoverCells;
+    // r2-B1 压力板沿一次性抑制（finishWorldLoad 置 true；updatePressurePlates 首次运行消费后立即清）：
+    //   读档后首个 tick 的边沿比较基线（m_platePressedCells）已被 finishWorldLoad 清空——玩家若存档时正踩着
+    //   板，首 tick 该板会进 triggered 集且基线无键 → 误判「新踩下沿」→ 误触发 TNT / 发射器。置本标记后
+    //   首 tick 只重建基线 + 置压下视觉（bit0），不产沿（沿在存档前已消费）；次 tick 起恢复正常边沿检测。
+    //   生命周期严格一 tick（消费即清，不留陈旧抑制窗）。
+    bool m_plateBaselineSkipNext = false;
     // t178 帧时间切分：累加每 tick 的主线程 CPU 耗时（ns），每 ~60 tick（≈1s@60Hz）算平均写 m_simMs + emit。
     float m_simMs = 0.0f;
     qint64 m_simAccumNs = 0;

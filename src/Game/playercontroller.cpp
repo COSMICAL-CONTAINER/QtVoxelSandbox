@@ -401,6 +401,20 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     emit pitchChanged();
 }
 
+// r2-B1 存档加载机关态收尾（Main.qml enterWorld 在 applyPlayerState 后调；见头注释）。读档复用同一
+//   theWorld / player 对象 → setWorld 不触发（m_world 指针未变）→ 机关瞬态表按世界坐标打包的键会残留
+//   上一局数据（同坐标串扰）。在此统一清 + 置压力板沿一次性抑制标记（首个 updatePressurePlates tick
+//   只建基线不产沿）。分层（PLAN §2）：只清本类瞬态表 + 置标记，不写栅格。
+void PlayerController::finishWorldLoad()
+{
+    m_dispenserCooldowns.clear();
+    m_redstoneLitCells.clear();
+    m_platePressedCells.clear();
+    m_plateJustPressed.clear();
+    m_buttonRecoverCells.clear();
+    m_plateBaselineSkipNext = true; // 首 tick 建基线不产沿（防读档踩板误触发陷阱）
+}
+
 void PlayerController::release()
 {
     if (!m_captured) return;
@@ -3896,9 +3910,14 @@ void PlayerController::updatePressurePlates()
     // 边沿检测 + 踩下视觉（state bit0）：新进集合 = 踩下沿（m_plateJustPressed + 置位）；移出集合 = 离开沿
     //   （清位）。置/清位走 5 参数 setBlock（id 不变只 state 变 → 仅 worldChanged 重建 mesh，同门开合），
     //   已是目标态则 no-op（防无谓 worldChanged 刷重建）。
+    //   r2-B1 读档后首 tick（m_plateBaselineSkipNext，finishWorldLoad 置）：基线已被清空 → 本 tick 进集合的板
+    //   全是「存档时已压下」的既存态（沿已消费过），只置压下视觉 + 建基线，**不产沿**（防误触发 TNT / 发射器）。
+    //   标记消费即清（严格一 tick，不留抑制窗）。
+    const bool baselineSkip = m_plateBaselineSkipNext;
+    m_plateBaselineSkipNext = false;
     for (const quint64 key : triggered) {
         if (m_platePressedCells.contains(key)) continue; // 上 tick 已压下 → 非沿
-        m_plateJustPressed.insert(key);
+        if (!baselineSkip) m_plateJustPressed.insert(key); // 读档首 tick 不产沿（见上）
         const int x = int(quint32(key & 0x1FFFFFu)) - 0x100000;
         const int z = int(quint32((key >> 21) & 0x1FFFFFu)) - 0x100000;
         const int y = int(quint32(key >> 42)) & 0x3FFu;

@@ -467,6 +467,11 @@ Window {
             theWorld.regenerate(seed)
         }
         applyPlayerState(worldStore.loadPlayerData())
+        // r2-B1 读档机关态收尾：清上一局的机关瞬态表（发射器冷却 / 红石矿点亮 / 压力板边沿基线 / 按钮复位）
+        //   —— 读档复用同一 theWorld/player 对象（setWorld 不触发），不清则旧世界同坐标键串扰；并置压力板沿
+        //   一次性抑制（玩家存档时踩着的陷阱板，读档首 tick 只建基线不误触发 TNT / 发射器）。须在
+        //   applyPlayerState 之后调：抑制标记依赖位姿已灌存档值（首 tick footprint 采样在存档点）。
+        player.finishWorldLoad()
         // t188 箱子按世界持久化 + 修跨世界泄漏：chestStore 跨世界长驻（同 hotbarVM），进世界前 loadAll
         //   整体替换内存（先清后填）—— 无存档 chests 表 → 空列表 → 清空，杜绝上一世界箱子残留串入新世界。
         //   存档 chests 由 saveAndExitToWorldList 经 saveAll(name, chestStore.allChests()) 落盘。
