@@ -865,6 +865,8 @@ QString Hotbar::nameForBlock(int blockId) const
         // t469 船物品（机制等价 MC 1.0 boat；5 木板 U 形合成；右键水面放置 + 骑乘）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::OakBoatId)       return QStringLiteral("橡木船");     // 5 橡木木板合成；右键水面放船 + 骑乘
         if (blockId == RecipeRegistry::SpruceBoatId)    return QStringLiteral("云杉船");     // 5 云杉木板合成；右键水面放船 + 骑乘
+        // t565/t645 矿车（机制等价 MC 1.0 minecart；5 铁锭 U 形合成；右键铁轨放置 + 骑乘行驶）。
+        if (blockId == RecipeRegistry::MinecartId)      return QStringLiteral("矿车");       // 5 铁锭合成；右键铁轨放车 + 骑乘
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

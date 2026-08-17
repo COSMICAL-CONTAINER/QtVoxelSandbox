@@ -72,6 +72,13 @@ struct BuiltState {
     // t633 图鉴生物头像缓存：mobType→落盘的头部裁剪图标 file:// 路径（mobHeadIconSource 首次裁剪落盘后记）。
     //   apply() 重建时清空（pack 切换 / 重解析 → 重裁）。随 atlasFile 同目录写（AppLocalDataLocation，已 mkpath）。
     QHash<int, QString> mobHeadIconFiles;
+    // t645 生成式生物蛋 item 图标缓存：spawnEggId（0x20F..0x216/0x22C/0x22E）→落盘的两层染色蛋图标
+    //   file:// 路径。pack 无 pig_spawn_egg.png 等独立文件（demo 包实测 9 蛋全 miss）→ 生成式路径：
+    //   item/spawn_egg.png（灰度蛋形 base）染 mob 主色 + item/spawn_egg_overlay.png（斑点叠层）染
+    //   mob 副色 → SourceOver 合成 → 落盘 voxelsandbox_rp_egg_<id>.png（retintCopperTemplate 同机制，
+    //   运行期派生缓存非提交资产）。apply() 重建时清空（pack 切换 → 重染）。模板任一缺 → 返空回退
+    //   MaterialIcon drawSpawnEgg 自绘。
+    QHash<int, QString> spawnEggIconFiles;
     // t585 animRevision 进程级修订号（实例成员 m_animRevision 仅镜像 + 广播）。
     int animRevision = 0;
 };
@@ -628,6 +635,17 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x22F, QStringLiteral("carrot.png")},          // 胡萝卜
         {0x230, QStringLiteral("potato.png")},          // 马铃薯
         {0x231, QStringLiteral("cod.png")},             // 生鱼（MC 1.0 raw fish = modern cod）
+        // t645 用户审计补映射（pack item/ 目录 435 文件与既有映射差集；这些物品已实现但映射漏 → pack 启用仍走
+        //   MaterialIcon 自绘）。demo 包实测 9 文件全在；包内缺则安全跳过回退自绘（机制同既有段）。
+        //   0x238 book.png 是普通书（书配方产物 / 附魔台材料）——勿与 0x227 enchanted_book.png 混淆（已接）。
+        {0x232, QStringLiteral("bone_meal.png")},      // 骨粉（t447：骨头合成产物；右键作物催熟）
+        {0x233, QStringLiteral("sweet_berries.png")},  // 甜浆果（t467：雪原浆果丛采摘；可食 +2 饥饿）
+        {0x234, QStringLiteral("oak_boat.png")},       // 橡木船 item（t469：5 橡木木板合成；右键水面放船）
+        {0x235, QStringLiteral("spruce_boat.png")},    // 云杉船 item（t469：5 云杉木板合成）
+        {0x236, QStringLiteral("lapis_lazuli.png")},   // 青金石（t471：青金矿石挖掘掉落；附魔台消耗材料）
+        {0x237, QStringLiteral("paper.png")},          // 纸（t473：3 甘蔗横排合成）
+        {0x238, QStringLiteral("book.png")},           // 书（t473：3 纸 + 1 皮革合成；附魔台/书架材料；非 enchanted_book）
+        {0x239, QStringLiteral("gunpowder.png")},      // 火药（t485：杀潜行者掉落；TNT 合成原料）
         // t497 末影之眼（EndEyeId=0x23A）：机制等价 MC 1.0 ender eye（要塞宝藏箱战利品；右键末地传送门激活）。
         //   t487 引入物品但 itemFilenameMap 漏映射 → pack 启用时仍走自绘 Canvas（drawEndEye）。补映射 → pack 有
         //   ender_eye.png 时改用包内贴图（alpha-test 透明底，机制等价 MC item icon）；包缺 → 安全跳过保自绘。
@@ -641,6 +659,9 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         // t505 雪球（snowball）：pack item 目录通常有 snowball.png（demo 包 1.8.2.2 含 textures/item/snowball.png）。
         //   包内缺则安全跳过（保留自绘 MaterialIcon drawSnowball）。机制等价 MC 1.0 snowball item icon。
         {0x23D, QStringLiteral("snowball.png")},         // 雪球（t505：pack 启用用包内贴图，回落 drawSnowball 自绘）
+        // t645 矿车（MinecartId=0x23E，t565 引入物品但本映射漏 + MaterialIcon 连 case 都没有 → pack 关时空白）。
+        //   补映射（demo 包实测 minecart.png 在）+ MaterialIcon 补 drawMinecart 自绘回退分支（pack 关时不空白）。
+        {0x23E, QStringLiteral("minecart.png")},         // 矿车（t645：5 铁锭合成；右键铁轨放置 + 骑乘）
         // t585 指南针/钟静态回落映射：pack 关闭动画帧序列（无 <stem>_NN.png 帧文件）但 item 目录有静态
         //   compass.png / clock.png 时，itemIconSource 返静态图（不动，机制等价 MC 无动画时的静态 item 贴图）；
         //   有帧序列时 animatedItemFrameSource 优先（按状态选帧）。两文件 demo 包实测存在。
@@ -998,8 +1019,90 @@ void retintCopperTemplate(QImage &img)
     }
 }
 
-// t588/t613 铜物品「引擎物品 id → 铁对应 pack item 贴图文件名」回退表（copper_* 缺失时用 iron_* 染铜）。
-//   铜工具 0x118..0x11C 五件 + 铜锭 0x21D + 铜护甲 0x308..0x30B 四件（t613：用户「护甲里面的铜盔甲
+// t645 生成式生物蛋染色表（单一权威）：spawnEggId →（主色 base / 副色 overlay）。与 playercontroller.cpp
+//   生物蛋→mob 渲染色 + MaterialIcon.qml drawSpawnEgg 各 kind 主色同色板（猪粉 / 牛棕 / 羊白 / 蹒跚者绿 /
+//   骸骨骨白 / 潜行者暗绿 / 蜘蛛黑红 / 鸡白红 / 鱿鱼蓝灰）。pack 无 pig_spawn_egg.png 等独立文件（demo 包
+//   实测 9 蛋全 miss）→ 用两张两层模板（item/spawn_egg.png 灰度蛋形 + item/spawn_egg_overlay.png 斑点层）
+//   各染一色后 SourceOver 合成（机制等价 MC 1.0 spawn egg「base 色 + spot 色」两层模型）。返 nullptr = 非
+//   生物蛋段（生成式路径不介入）。
+struct EggTint { int base[3]; int spot[3]; };
+const EggTint *spawnEggTint(int itemId)
+{
+    static const EggTint kTints[] = {
+        // 0x20F 猪：粉壳 + 深粉斑（drawSpawnEgg pig shell #f0a8b0）
+        { { 0xf0, 0xa8, 0xb0 }, { 0xc8, 0x78, 0x88 } },
+        // 0x210 牛：棕壳 + 白斑（牛皮纹 cow shell #5a4030 / 白花斑 #f0e8d8）
+        { { 0x5a, 0x40, 0x30 }, { 0xf0, 0xe8, 0xd8 } },
+        // 0x211 羊：奶白壳 + 灰卷绒斑（sheep shell #f5f0e8 / curl #c8c0b8）
+        { { 0xf5, 0xf0, 0xe8 }, { 0xc8, 0xc0, 0xb8 } },
+        // 0x212（占位非蛋——id 表按段索引，须保持与蛋 id 对齐：见下方判段，本行不参与）
+        { { 0, 0, 0 }, { 0, 0, 0 } },
+        // 0x213 蹒跚者：暗绿腐肉壳 + 棕褐斑（shambler shell #4a6a3a / rot #6a4a2a）
+        { { 0x4a, 0x6a, 0x3a }, { 0x6a, 0x4a, 0x2a } },
+        // 0x214 骸骨：灰白骨壳 + 暗骨斑（bones shell #d8d8d0 / rib #989890）
+        { { 0xd8, 0xd8, 0xd0 }, { 0x98, 0x98, 0x90 } },
+        // 0x215 潜行者：深绿壳 + 浅绿迷彩斑（stalker shell #3a5a3a / speckle #5a7a4a）
+        { { 0x3a, 0x5a, 0x3a }, { 0x5a, 0x7a, 0x4a } },
+        // 0x216 蜘蛛：近黑壳 + 红眼斑（spider shell #2a1a1a / eye #c81818）
+        { { 0x2a, 0x1a, 0x1a }, { 0xc8, 0x18, 0x18 } },
+    };
+    if (itemId >= 0x20F && itemId <= 0x216 && itemId != 0x212)
+        return &kTints[itemId - 0x20F];
+    if (itemId == 0x22C) { // 鸡：白羽壳 + 红鸡冠斑（chicken shell #f5f0e4 / comb #c83030）
+        static const EggTint kChicken = { { 0xf5, 0xf0, 0xe4 }, { 0xc8, 0x30, 0x30 } };
+        return &kChicken;
+    }
+    if (itemId == 0x22E) { // 鱿鱼：深褐壳 + 暗触腕斑（squid shell #6a4a3a / dark #3a2a1a）
+        static const EggTint kSquid = { { 0x6a, 0x4a, 0x3a }, { 0x3a, 0x2a, 0x1a } };
+        return &kSquid;
+    }
+    return nullptr;
+}
+
+// t645 生成式生物蛋合成：spawn_egg.png（灰度蛋形 base）按亮度映射到主色梯度 + spawn_egg_overlay.png
+//   （灰度斑点层）按亮度映射到副色梯度，SourceOver 叠加（机制等价 MC spawn egg 两层「base + spot」模型；
+//   亮度映射保模板的明暗层次 / 高光 / 阴影，仅迁移色相 —— 同 retintLeatherTemplate 的 luma 键机制）。
+//   两模板 alpha>0 处染色、透明处不动；输出 Format_ARGB32_Premultiplied。任一模板空尺寸不符 → false。
+bool composeSpawnEgg(QImage &base, const QImage &overlayRaw, int br, int bg, int bb,
+                     int sr, int sg, int sb)
+{
+    if (base.isNull() || overlayRaw.isNull() || base.size() != overlayRaw.size())
+        return false;
+    QImage overlay = overlayRaw.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    // 亮度 → 颜色梯度映射（亮→满色、暗→1/2 色；保模板明暗层次）。Q8 分数 f = luma*2（0..255 → 0..510）。
+    const auto mapLuma = [](int l, int c) -> int { return c * (128 + l / 2) / 256; };
+    const int w = base.width(), h = base.height();
+    for (int y = 0; y < h; ++y) {
+        QRgb *bScan = reinterpret_cast<QRgb *>(base.scanLine(y));
+        QRgb *oScan = reinterpret_cast<QRgb *>(overlay.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const int ba = qAlpha(bScan[x]);
+            if (ba != 0) {
+                const int r = qBound(0, qRed(bScan[x]) * 255 / qMax(1, ba), 255);
+                const int g = qBound(0, qGreen(bScan[x]) * 255 / qMax(1, ba), 255);
+                const int b = qBound(0, qBlue(bScan[x]) * 255 / qMax(1, ba), 255);
+                const int l = (r * 299 + g * 587 + b * 114) / 1000;
+                bScan[x] = qRgba((mapLuma(l, br) * ba) / 255, (mapLuma(l, bg) * ba) / 255,
+                                 (mapLuma(l, bb) * ba) / 255, ba);
+            }
+            const int oa = qAlpha(oScan[x]);
+            if (oa != 0) {
+                const int r = qBound(0, qRed(oScan[x]) * 255 / qMax(1, oa), 255);
+                const int g = qBound(0, qGreen(oScan[x]) * 255 / qMax(1, oa), 255);
+                const int b = qBound(0, qBlue(oScan[x]) * 255 / qMax(1, oa), 255);
+                const int l = (r * 299 + g * 587 + b * 114) / 1000;
+                oScan[x] = qRgba((mapLuma(l, sr) * oa) / 255, (mapLuma(l, sg) * oa) / 255,
+                                 (mapLuma(l, sb) * oa) / 255, oa);
+            }
+        }
+    }
+    QPainter op(&base);
+    op.drawImage(0, 0, overlay); // SourceOver：斑点叠在染好的蛋壳上，透明处保蛋壳色
+    op.end();
+    return true;
+}
+
+// t588/t613 铜物品「引擎物品 id → 铁对应 pack item 贴图文件名」回退表（copper_* 缺失时用 iron_* 染铜）。//   铜工具 0x118..0x11C 五件 + 铜锭 0x21D + 铜护甲 0x308..0x30B 四件（t613：用户「护甲里面的铜盔甲
 //   还是没有更换，需要从铁套那边换个颜色弄成铜制的」——铁护甲贴图整张灰白（无木柄两区域问题），
 //   retintCopperTemplate 全图染铜 + 描边带保外圈线，机制同铜工具）。铜原矿（0x21C）不进本表 ——
 //   pack 无 raw_iron.png 可染，自绘 MaterialIcon drawCopperOre 本就是铜配色（石头底 + 橙铜斑 +
@@ -1244,6 +1347,7 @@ void ensureBuiltLocked()
     s.leatherIconFiles.clear(); // R19 B1 reset 皮革护甲染色图标缓存（pack 切换 / 重解析 → 重染）
     s.copperIconFiles.clear();  // t588 reset 铜物品染色图标缓存（pack 切换 / 重解析 → 重染）
     s.mobHeadIconFiles.clear(); // t633 reset 生物头像裁剪缓存（pack 切换 / 重解析 → 重裁）
+    s.spawnEggIconFiles.clear(); // t645 reset 生成式生物蛋图标缓存（pack 切换 / 重解析 → 重染）
     s.animItems.clear(); // t585 reset 动画帧序列态（pack 切换 / 重解析 → 重探测帧数）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
@@ -1609,8 +1713,49 @@ QString ResourcePackManager::itemIconSource(int itemId) const
     }
     if (filename.isEmpty())
         return {};
-    const QString path = QDir(s.itemDir).absoluteFilePath(filename);
-    if (!QFile::exists(path)) {
+    // t645 itemDir→blockDir 双探测（参照 blockItemIconSource 既有双探测机制）：部分映射（glass 0x204 /
+    //   white_wool 0x20E / oak_sapling 0x21B）的目标文件在包内 **block/** 目录（demo 包把方块类物品放
+    //   block/），旧版只探测 itemDir → 恒 miss。item 目录优先（vanilla item icon 布局），block 目录兜底。
+    //   不拷贝 PNG（pack 只读）；block/ 残留副本（如 oak_sapling (2).png）不触碰。
+    QString path;
+    const QString itemPath = QDir(s.itemDir).absoluteFilePath(filename);
+    if (QFile::exists(itemPath)) {
+        path = itemPath;
+    } else if (!s.blockDir.isEmpty()) {
+        const QString blockPath = QDir(s.blockDir).absoluteFilePath(filename);
+        if (QFile::exists(blockPath))
+            path = blockPath;
+    }
+    if (path.isEmpty()) {
+        // t645 生成式生物蛋（在铜回退之前 —— 蛋 id 不在 copperIronFallback 表，插此处语义同层：映射目标
+        //   pack 文件 miss 时的「模板派生」回退）：pack 无 pig_spawn_egg.png 等独立文件（demo 包 9 蛋全
+        //   miss）→ 用两张两层模板合成（item/spawn_egg.png 灰度蛋形染 mob 主色 + spawn_egg_overlay.png
+        //   斑点层染副色 → SourceOver）落盘 voxelsandbox_rp_egg_<id>.png，返 file:// 路径（机制等价 MC
+        //   spawn egg base+spot 两层配色；retintCopperTemplate 同「运行期派生缓存」管线，不进 qrc/VCS）。
+        //   模板任一缺 / 尺寸不符 / 解码 / 落盘失败 → 空串（回退 MaterialIcon drawSpawnEgg 自绘，现状不变）。
+        if (const EggTint *tint = spawnEggTint(itemId)) {
+            const auto cached = s.spawnEggIconFiles.constFind(itemId);
+            if (cached != s.spawnEggIconFiles.constEnd() && QFile::exists(cached.value()))
+                return QStringLiteral("file:///") + cached.value();
+            QImage base(s.itemDir + QStringLiteral("/spawn_egg.png"));
+            QImage overlay(s.itemDir + QStringLiteral("/spawn_egg_overlay.png"));
+            if (base.isNull() || overlay.isNull())
+                return {}; // 模板缺（旧包）→ 回退自绘
+            base = base.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            if (!composeSpawnEgg(base, overlay, tint->base[0], tint->base[1], tint->base[2],
+                                 tint->spot[0], tint->spot[1], tint->spot[2]))
+                return {}; // 尺寸不符等 → 回退自绘
+            const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+            if (dir.isEmpty())
+                return {}; // 无可写目录 → 回退自绘（降级）
+            QDir().mkpath(dir);
+            const QString out = QDir(dir).absoluteFilePath(
+                    QStringLiteral("voxelsandbox_rp_egg_%1.png").arg(itemId, 0, 16));
+            if (!base.save(out, "PNG"))
+                return {}; // 落盘失败 → 回退自绘（降级）
+            state().spawnEggIconFiles.insert(itemId, out); // stateMutex 已持锁，安全
+            return QStringLiteral("file:///") + out;
+        }
         // t588/t613 铜物品回退：映射的 copper_* 不存在（1.8 等老包无铜）→ 用铁对应贴图染铜（同皮革 / 床
         //   retint 机制；t613 起含铜护甲四件 + 描边带压暗）。首次命中：加载 iron_* → retintCopperTemplate
         //   （铁头灰阶→铜橙梯度、木柄保留、近黑描边保暗）→ 落盘 voxelsandbox_rp_copper_<id>.png → 记缓存；
