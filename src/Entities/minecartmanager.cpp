@@ -270,13 +270,13 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
                 }
             }
             // t638 ⑤ 探测轨通电视觉（占位反馈；真红石信号输出留红石大轮）：矿车所在列（钉到的轨格）为
-            //   探测轨 → 置 state bit0（DetectorRailStateOnFlag）→ mesher 换 rail_detector_on(160) 亮红贴图
-            //   （机制等价 MC 1.0 detector rail 被矿车压住时通电换贴图 + 输出信号——信号部分本项目无红石，
-            //   只做视觉）。离开不清位（保持「被压过」亮态——MC 是实时通断，本工程简化：轨被压亮后保持，
-            //   玩家破坏重放 / 邻块编辑时 checkRailOnEdit 重算连接 state 会顺带清 bit0（连接重算写 con 全量
-            //   覆盖，bit0 被自然抹掉）——「轨还亮着」的窗口最多到下次邻块编辑，占位语义可接受）。写 state
+            //   探测轨 → 置 state bit4（DetectorRailStateOnFlag = 0x10，与低 4 位连接位分离）→ mesher 换
+            //   rail_detector_on(160) 亮红贴图（机制等价 MC 1.0 detector rail 被矿车压住时通电换贴图 + 输出
+            //   信号——信号部分本项目无红石，只做视觉）。离开不清位（保持「被压过」亮态——MC 是实时通断，
+            //   本工程简化：轨被压亮后保持；邻块编辑时 recomputeRailConnections 重算连接**保留 bit4**（world.cpp
+            //   显式合并回写），亮态仅随玩家破坏重放 / 轨被拆而消失，占位语义可接受）。写 state
             //   走 setWaterSilent（静默：id 不变不发 broken/placed，仅 worldChanged 重建 mesh 切贴图，同
-            //   红石灯开关模式）。节流：仅在 bit0 未置时写（每格每列车最多一次，无每帧写风暴）。
+            //   红石灯开关模式）。节流：仅在 bit4 未置时写（每格每列车最多一次，无每帧写风暴）。
             for (int y = bcy; y >= bcy - 2 && y >= 0; --y) {
                 if (world->blockAt(bcx, y, bcz) != BlockRegistry::DetectorRail) break; // 列顶非探测轨 → 不查
                 const quint8 ds = world->stateAt(bcx, y, bcz);
