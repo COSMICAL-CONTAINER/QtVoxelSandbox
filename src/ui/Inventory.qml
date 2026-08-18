@@ -94,6 +94,8 @@ Item {
     //   涵盖：面包 / 生·熟猪牛羊鸡肉 / 胡萝卜 / 马铃薯 / 蘑菇汤 / 苹果(无苹果物品) / 甜浆果 / 生鱼 / 蛋（食）。
     //   t639③：小麦种子（0x208）/ 小麦（0x209）并入食物段（用户「种子和小麦应归食物 tab」——作物链起点 +
     //   面包原料，种/收相关物品统一归类；材料段过滤已按 foodIds 排除 → 自动从材料 tab 移出）。
+    //   t701：毒马铃薯（0x241）并入食物段（用户「毒马铃薯 → 食物 tab」——可食（+2 饥饿）带 60% 中毒副作用，
+    //   归类食物；材料段过滤同步排除）。
     readonly property var foodIds: [
         0x208, // 小麦种子（挖草丛掉落；种植 → 小麦作物）
         0x209, // 小麦（收割成熟作物掉落；面包原料）
@@ -108,6 +110,7 @@ Item {
         0x22B, // 蛋（可食）
         0x22F, // 胡萝卜
         0x230, // 马铃薯
+        0x241, // 毒马铃薯（t701 挪食物 tab——可食带中毒副作用，归类食物）
         0x231, // 生鱼
         0x233, // 甜浆果
         0x23C  // 蘑菇汤
@@ -122,10 +125,12 @@ Item {
 
     // t651⑤ 红石 tab 方块 id 表（镜像 BlockRegistry 方块段常量；Q_INVOKABLE 无 id 常量暴露，QML 端集中维护，
     //   同 foodIds 模式）：机关件（5 压力板 / 木·石按钮 / 拉杆）+ 红石系（红石火把 / 红石块 / 红石灯）+
-    //   机关轨（动力轨 / 探测轨）。普通铁轨（Rail=103）留方块 tab（轨族本体属交通非红石；用户点名
-    //   「压力板/按钮/拉杆」+ 红石系，未含普通轨）。t660：红石粉导线（RedstoneDust=130，t656）归本 tab
-    //   （放置形态的粉线；红石粉**物品** 0x224 本就在材料段，放粉用物品右键即可 —— 本条目给的是粉的
-    //   **方块形态**直接取用，机制等价 MC 创造页同时可见 dust 物品与放置形态；方块 tab 过滤同步排除）。
+    //   机关轨（动力轨 / 探测轨）。
+    //   t701 重组（用户「铁轨+TNT 挪红石 tab」）：普通铁轨（Rail=103）从方块 tab 挪入（轨族与动力/探测轨
+    //   同列一页；旧注「轨族本体属交通非红石」口径废弃）；TNT（TntBlock=104）挪入（红石机关的引爆端）。
+    //   t701 粉条目统一：红石粉**物品**（RedstoneId=0x224，材料段 —— MaterialIcon 材料贴图）取代旧的
+    //   粉方块形态条目（RedstoneDust=130，程序方块图标与材料段贴图不一致 —— 用户「两套图标」）。放置粉线
+    //   用物品右键即得（粉的常用获得 / 放置途径本就是物品；材料 tab 的 0x224 同步移进来防双显）。
     readonly property var redstoneIds: [
         18,   // 木压力板（WoodPressurePlate）
         61,   // 圆石压力板（CobblePressurePlate）
@@ -135,12 +140,14 @@ Item {
         113,  // 木按钮（WoodButton，t628）
         114,  // 石按钮（StoneButton，t628）
         112,  // 拉杆（Lever，t628）
-        130,  // 红石粉导线（RedstoneDust，t656/t660——放置形态；物品 0x224 在材料段）
+        0x224,// 红石粉物品（RedstoneId，t701 从方块形态 130 换成材料物品 —— 与材料 tab 同一贴图；材料 tab 不再重复列）
         129,  // 红石火把（RedstoneTorch，t638；t657 起反相器电源）
         122,  // 红石块（RedstoneBlock，t620；t657 起恒电源）
         123,  // 红石灯（RedstoneLamp，t620；t658 起电力驱动）
+        103,  // 铁轨（Rail，t701 挪入 —— 轨族与动力/探测轨同页）
         127,  // 动力铁轨（GoldenRail，t638；t658 起通电才 boost）
-        128   // 探测铁轨（DetectorRail，t638；t658 起输出电力信号）
+        128,  // 探测铁轨（DetectorRail，t638；t658 起输出电力信号）
+        104   // TNT（TntBlock，t701 挪入 —— 红石机关引爆端；与拉杆/按钮/压力板机关同页）
     ]
 
     // t632 预设附魔书表（每种附魔一本，hotbar.creativeEnchantedBooks() 权威）：调色板条目是 int id 段
@@ -172,10 +179,15 @@ Item {
         if (root.currentTab === 6) return []
         if (root.currentTab === 0) {
             // t651⑤ 方块 tab：排除已划归「红石」tab 的机关/红石系方块（redstoneIds 表）。
+            //   t701：红石粉方块形态（RedstoneDust=130）不再随 redstoneIds 排除（本表已换成物品 0x224）——
+            //   但仍须从方块 tab 隐藏（粉条目统一为红石 tab 的物品形态，方块形态不双显）。
             const blocks = root.hotbar.creativeBlocks()
             const out = []
-            for (let i = 0; i < blocks.length; ++i)
-                if (root.redstoneIds.indexOf(blocks[i]) === -1) out.push(blocks[i])
+            for (let i = 0; i < blocks.length; ++i) {
+                if (root.redstoneIds.indexOf(blocks[i]) !== -1) continue
+                if (blocks[i] === 130) continue   // RedstoneDust 方块形态（红石 tab 列物品 0x224，勿双显）
+                out.push(blocks[i])
+            }
             return out
         }
         if (root.currentTab === 1) {
@@ -188,10 +200,12 @@ Item {
         if (root.currentTab === 2) {
             // 材料段 = creativeMaterials 去掉已划进食物段的项 + t508 去掉船（船已移到工具段，防双显）
             //   + t632 末尾追加 14 本预设附魔书（哨兵 id）。
+            //   t701：红石粉物品（0x224）移入红石 tab（粉条目与材料贴图统一，防双显）→ 此处排除。
             const mats = root.hotbar.creativeMaterials()
             const out = []
             for (let i = 0; i < mats.length; ++i) {
-                if (root.foodIds.indexOf(mats[i]) === -1 && root.vehicleIds.indexOf(mats[i]) === -1) out.push(mats[i])
+                if (root.foodIds.indexOf(mats[i]) === -1 && root.vehicleIds.indexOf(mats[i]) === -1
+                        && mats[i] !== 0x224) out.push(mats[i])
             }
             for (let i = 0; i < root.bookEntries.length; ++i)
                 out.push(root.bookSentinel - root.bookEntries[i].ench)
