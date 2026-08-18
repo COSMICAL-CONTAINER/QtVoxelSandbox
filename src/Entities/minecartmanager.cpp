@@ -254,7 +254,11 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
                 { world->blockAt(gx + ndx, gy, gz + ndz),
                   world->blockAt(gx + ndx, gy + 1, gz + ndz),
                   world->blockAt(gx + ndx, gy - 1, gz + ndz) });
-            if (slope < 0) { slopeDownAuto = true; targetV = std::max(targetV, kCartSlopeDownSpeed); }
+            if (slope != INT_MIN && slope < 0) { // t684：INT_MIN（该向无轨 / 死端）必须排除 —— 否则
+                //   停在死端 / 孤轨上的静止车把「无轨」当「下坡」→ slopeDownAuto 放行起步闸门 → 自动
+                //   冲出轨端悬空一格（速度永远非零 + 推进段指向无轨方向）。只有真下坡（邻轨低 1）才溜车。
+                slopeDownAuto = true; targetV = std::max(targetV, kCartSlopeDownSpeed);
+            }
             else if (slope > 0) targetV *= kCartUphillMul; // 上坡减速
         }
     }
