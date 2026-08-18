@@ -1831,12 +1831,41 @@ Item {
         if (parts[0] === "armor") return _ar >= 0 ? root.hotbar.enchantListText(root.hotbar.armorEnchantsAt(idx)) : ""
         return ""
     }
+    // t698 武器伤害行（tooltip 蓝字「+N 攻击」，同 SurvivalInventory hoveredAttackText）：调色板 hover
+    //   （无 hoveredKey / 无附魔）→ 只算 base；真实槽位 hover → 含锐锋加成（据 hoveredKey 查实例附魔）。
+    readonly property string hoveredAttackText: {
+        if (!root.hotbar || !root.hoveredItemId) return ""
+        if (root.hotbar.itemAttackDamage(root.hoveredItemId) <= 1) return ""
+        const base = root.hotbar.itemAttackDamage(root.hoveredItemId)
+        let sharp = 0
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const key = root.hoveredKey
+        if (key) {
+            const parts = key.split(":")
+            if (parts.length === 2) {
+                const idx = parseInt(parts[1], 10)
+                if (!Number.isNaN(idx)) {
+                    let e = null
+                    if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
+                    else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
+                    if (Array.isArray(e)) {
+                        for (let i = 0; i < 4; ++i) {
+                            if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // Sharpness = 1
+                        }
+                    }
+                }
+            }
+        }
+        const total = Math.round(base + 0.5 * sharp)
+        return "+" + total + " 攻击"
+    }
     Rectangle {
         id: itemTip
-        visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
+        visible: root.hotbar && root.hoveredItemId !== 0 && tipName.text !== ""
         z: 1000
-        width: tipLabel.implicitWidth + 14
-        height: tipLabel.implicitHeight + 8
+        width: tipCol.implicitWidth + 14
+        height: tipCol.implicitHeight + 8
         color: "#101216"
         opacity: 0.94
         border.color: "#3a444f"
@@ -1854,27 +1883,49 @@ Item {
             if (py < 2) py = root.hoveredTipPos.y + 6 // 顶部空间不足 → 翻到槽位下方
             return py
         }
-        Text {
-            id: tipLabel
+        // t698 tooltip 分列（同 SurvivalInventory / AnvilUI t626④ 模式）：名行白 / 附魔紫 / 伤害蓝。
+        Column {
+            id: tipCol
             anchors.centerIn: parent
-            // t263 工具槽 tooltip 附「cur/max」耐久行（如「铁镐  5/250」）；非工具 / 未跟踪 → 仅显名。
-            // t622：hover 槽物品带实例名 → 优先显实例名（hoveredCustomName——改名物品显其名）。
-            // t632 预设附魔书（调色板 hover，无 hoveredKey）附「附魔名 I」行（bookInfoFor 反查表 → packed 行）。
-            // t647：真实槽位（hotbar/main/armor）也附附魔行（hoveredEnchantText —— 修「生存 tab 背包槽
-            //   hover 不显附魔」，对齐 SurvivalInventory / 附魔台 tooltip）。
-            text: {
-                if (!root.hotbar) return ""
-                const bi = root.bookInfoFor(root.hoveredItemId)
-                const enchRow = bi ? root.hotbar.enchantListText([bi.packed, 0, 0, 0]) : root.hoveredEnchantText
-                return (bi ? bi.name
-                        : ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
-                            : root.hotbar.nameForBlock(root.hoveredItemId))))
-                    + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
-                    + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")
-                    + (enchRow.length > 0 ? "\n\n" + enchRow : "")
+            spacing: 3
+            Text {
+                id: tipName
+                // t263 工具槽 tooltip 附「cur/max」耐久行（如「铁镐  5/250」）；非工具 / 未跟踪 → 仅显名。
+                // t622：hover 槽物品带实例名 → 优先显实例名（hoveredCustomName——改名物品显其名）。
+                // t632 预设附魔书（调色板 hover，无 hoveredKey）名走 bookInfo.name。
+                text: {
+                    if (!root.hotbar) return ""
+                    const bi = root.bookInfoFor(root.hoveredItemId)
+                    return (bi ? bi.name
+                            : ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
+                                : root.hotbar.nameForBlock(root.hoveredItemId))))
+                        + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
+                        + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")
+                }
+                color: "#f2f2f2"
+                font.pixelSize: 12
             }
-            color: "#f2f2f2"
-            font.pixelSize: 12
+            // t632/t647 附魔行（调色板预设书 = bookInfo 反查表；真实槽位 = hoveredEnchantText）。
+            Text {
+                property string enchRow: {
+                    if (!root.hotbar || root.hoveredItemId === 0) return ""
+                    const bi = root.bookInfoFor(root.hoveredItemId)
+                    return bi ? root.hotbar.enchantListText([bi.packed, 0, 0, 0]) : root.hoveredEnchantText
+                }
+                visible: enchRow.length > 0
+                text: enchRow
+                color: "#c58af0"
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+            }
+            // t698 伤害行（蓝字）。
+            Text {
+                visible: root.hoveredAttackText.length > 0
+                text: root.hoveredAttackText
+                color: "#6fa8ff"
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+            }
         }
     }
 }

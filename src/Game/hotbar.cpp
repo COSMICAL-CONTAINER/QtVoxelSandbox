@@ -1327,6 +1327,13 @@ int Hotbar::bowArrowMaxDamage() const
     return 6; // 满蓄力箭命中 6 HP（3 心）；蓄力 1..6 HP（机制等价 MC 1.0 弓伤害量级）。
 }
 
+// t698 物品基础攻击伤害（透传 ToolRegistry::attackDamage；见头注释）。剑 tier 倍率 / 斧 tier+1 /
+// 其余徒手 1 —— 与 PlayerController::attackMob 的 base 同源（单一权威在 ToolRegistry）。
+int Hotbar::itemAttackDamage(int itemId) const
+{
+    return ToolRegistry::attackDamage(itemId);
+}
+
 // t263 消耗选中槽工具 1 点耐久（playercontroller 生存挖掘完成 / 锄耕地调用）。创造由 caller 不调（不消耗）。
 //   非工具 / 空槽 → no-op。耐久 >1 → -1 + bumpRevision（tooltip / HUD 刷新）。归零 → 清空槽（工具破损消失）
 //   + bumpRevision + 补发 selectedSlotChanged（selectedBlockId 可能因栈空而变 Air）。无返回值（caller 不据之分支）。

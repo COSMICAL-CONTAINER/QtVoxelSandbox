@@ -337,6 +337,10 @@ public:
     //   QML tooltip 据本值显「攻击 1-N」（蓄力 1..N HP）；弓近战走徒手伤害（ToolRegistry::attackDamage 兜底），
     //   远程伤害由蓄力 + 箭命中决定（PlayerController bow fire / EntityManager Arrow）。
     Q_INVOKABLE int bowArrowMaxDamage() const;
+    // t698 物品基础攻击伤害（透传 ToolRegistry::attackDamage；空手 / 非工具 → 1=kFistDamage）。供 tooltip
+    //   「+N 攻击」行计算（N = round(base + 0.5*锐锋级)，与 PlayerController::attackMob 非暴击口径一致——
+    //   亡灵杀手 / 节肢克星是对族加成不进通用显示；暴击 ×1.5 由玩家滞空触发，非物品属性）。
+    Q_INVOKABLE int itemAttackDamage(int itemId) const;
     // t263 消耗选中槽工具 1 点耐久（生存挖掘完成 / 锄耕地调用）。非工具 / 空槽 → no-op；
     //   耐久归零 → 清空槽（工具破损消失）+ emit slotsChanged + emit toolBroken（t315 破损音）。创造模式由
     //   caller 不调本方法（不消耗）。

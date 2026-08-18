@@ -1262,12 +1262,41 @@ Item {
         if (parts[0] === "armor") return _ar >= 0 ? root.hotbar.armorCustomNameAt(idx) : ""
         return ""
     }
+    // t698 武器伤害行（tooltip 蓝字「+N 攻击」）：N = round(base + 0.5*锐锋级)，base 走
+    //   hotbar.itemAttackDamage（ToolRegistry 单一权威；剑 tier 倍率 / 斧 tier+1 / 余徒手 1）。
+    //   仅显有战斗价值的物品（剑 / 斧 = damage > 1；镐铲锄徒手 1 不显）。锐锋级从 hovered 槽实例附魔读
+    //   （据 hoveredKey 查 hotbar/main/armor，同 hoveredEnchantText 模式）→ 附魔等级变后刷新。
+    property string hoveredAttackText: {
+        if (!root.hotbar || !root.hoveredItemId) return ""
+        if (root.hotbar.itemAttackDamage(root.hoveredItemId) <= 1) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _ar = root.hotbar.armorRevision
+        const key = root.hoveredKey
+        if (!key) return ""
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        let e = null
+        if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
+        else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
+        else if (parts[0] === "armor")  e = _ar >= 0 ? root.hotbar.armorEnchantsAt(idx) : null
+        else return ""
+        if (!Array.isArray(e)) return ""
+        let sharp = 0
+        for (let i = 0; i < 4; ++i) {
+            if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // EnchantRegistry::Sharpness = 1
+        }
+        const total = Math.round(root.hotbar.itemAttackDamage(root.hoveredItemId) + 0.5 * sharp)
+        return "+" + total + " 攻击"
+    }
     Rectangle {
         id: itemTip
-        visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
+        visible: root.hotbar && root.hoveredItemId !== 0 && tipName.text !== ""
         z: 1000
-        width: tipLabel.implicitWidth + 14
-        height: tipLabel.implicitHeight + 8
+        width: tipCol.implicitWidth + 14
+        height: tipCol.implicitHeight + 8
         color: "#101216"
         opacity: 0.94
         border.color: "#3a444f"
@@ -1285,24 +1314,44 @@ Item {
             if (py < 2) py = root.hoveredTipPos.y + 6 // 顶部空间不足 → 翻到槽位下方
             return py
         }
-        Text {
-            id: tipLabel
+        // t698 tooltip 分列（同 AnvilUI t626④ 模式）：名 + 属性行合一行白字（原样拼接）、附魔行紫字、
+        //   伤害行蓝字（用户点名蓝字「+N 攻击」—— 单 Text 无法混色，拆 Column 三 Text 各自配色）。
+        Column {
+            id: tipCol
             anchors.centerIn: parent
-            // t263 工具槽 tooltip 附「cur/max」耐久行（如「铁镐  5/250」）；非工具 / 未跟踪 → 仅显名。
-            //   t345 护甲槽 tooltip 附「护甲 N」行（spec「hover an armor piece shows its armor value」）。
-            //   t452 护甲槽 tooltip 附「耐久 cur/max」行（槽内改耐久条后数字移此，同工具套路）。
-            //   t304 弓槽 tooltip 附「攻击 1-N」行。
-            //   t590 附魔行：物品带附魔 → 换行显附魔列表（如「锐锋 III\n效率 II」），无附魔 → 空串不追加。
-            //   t622：hover 槽带实例名（customNameAt）→ 优先显实例名（铁砧改名物品显其名）。
-            text: root.hotbar ? ((typeof root.hoveredCustomName === "string" && root.hoveredCustomName.length > 0
-                    ? root.hoveredCustomName : root.hotbar.nameForBlock(root.hoveredItemId))
-                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
-                + (root.hoveredArmorValue > 0 ? "  护甲 " + root.hoveredArmorValue : "")
-                + (root.hoveredArmorDurability > 0 ? "  耐久 " + root.hoveredArmorDurability + "/" + root.hotbar.armorMaxDurability(root.hoveredItemId) : "")
-                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")
-                + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : ""
-            color: "#f2f2f2"
-            font.pixelSize: 12
+            spacing: 3
+            Text {
+                id: tipName
+                // t263 工具槽 tooltip 附「cur/max」耐久行（如「铁镐  5/250」）；非工具 / 未跟踪 → 仅显名。
+                //   t345 护甲槽 tooltip 附「护甲 N」行（spec「hover an armor piece shows its armor value」）。
+                //   t452 护甲槽 tooltip 附「耐久 cur/max」行（槽内改耐久条后数字移此，同工具套路）。
+                //   t304 弓槽 tooltip 附「攻击 1-N」行。
+                //   t622：hover 槽带实例名（customNameAt）→ 优先显实例名（铁砧改名物品显其名）。
+                text: root.hotbar ? ((typeof root.hoveredCustomName === "string" && root.hoveredCustomName.length > 0
+                        ? root.hoveredCustomName : root.hotbar.nameForBlock(root.hoveredItemId))
+                    + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
+                    + (root.hoveredArmorValue > 0 ? "  护甲 " + root.hoveredArmorValue : "")
+                    + (root.hoveredArmorDurability > 0 ? "  耐久 " + root.hoveredArmorDurability + "/" + root.hotbar.armorMaxDurability(root.hoveredItemId) : "")
+                    + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : ""
+                color: "#f2f2f2"
+                font.pixelSize: 12
+            }
+            // t590 附魔行：物品带附魔 → 显附魔列表（如「锐锋 III\n效率 II」），无附魔 → 不显。
+            Text {
+                visible: root.hoveredEnchantText.length > 0
+                text: root.hoveredEnchantText
+                color: "#c58af0"   // 附魔紫字（同 AnvilUI t626④）
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+            }
+            // t698 伤害行（蓝字「+N 攻击」；剑 / 斧等 damage>1 物品，含锐锋加成）。
+            Text {
+                visible: root.hoveredAttackText.length > 0
+                text: root.hoveredAttackText
+                color: "#6fa8ff"
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+            }
         }
     }
 }

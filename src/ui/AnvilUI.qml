@@ -1613,6 +1613,38 @@ Item {
         if (parts[0] === "main") return _mr >= 0 ? root.hotbar.mainCustomNameAt(idx) : ""
         return ""
     }
+    // t698 武器伤害行（tooltip 蓝字「+N 攻击」，同 SurvivalInventory 模式）：据 hoveredKey 查实例附魔取
+    //   锐锋级（anvil:0/1 输入槽查本地 enchAt；anvil:2 产物查 productEnch 预览——附魔合并后即显新伤害）。
+    property string hoveredAttackText: {
+        if (!root.hotbar || !root.hoveredItemId) return ""
+        if (root.hotbar.itemAttackDamage(root.hoveredItemId) <= 1) return ""
+        const base = root.hotbar.itemAttackDamage(root.hoveredItemId)
+        let sharp = 0
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _ar = root.anvilRev
+        const key = root.hoveredKey
+        if (key) {
+            const parts = key.split(":")
+            if (parts.length === 2) {
+                const idx = parseInt(parts[1], 10)
+                if (!Number.isNaN(idx)) {
+                    let e = null
+                    if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
+                    else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
+                    else if (parts[0] === "anvil")  e = (idx === 2) ? (_ar >= 0 ? root.productEnch : null)
+                                                                    : (_ar >= 0 ? root.enchAt(idx) : null)
+                    if (Array.isArray(e)) {
+                        for (let i = 0; i < 4; ++i) {
+                            if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // Sharpness = 1
+                        }
+                    }
+                }
+            }
+        }
+        const total = Math.round(base + 0.5 * sharp)
+        return "+" + total + " 攻击"
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipName.text !== ""
@@ -1671,6 +1703,14 @@ Item {
                 visible: root.hoveredEnchantText.length > 0
                 text: root.hoveredEnchantText
                 color: "#c58af0"   // t626④ 附魔紫字（与附魔光晕同族色）
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+            }
+            // t698 伤害行（蓝字「+N 攻击」，含锐锋加成；anvil:2 产物槽显合并后预览伤害）。
+            Text {
+                visible: root.hoveredAttackText.length > 0
+                text: root.hoveredAttackText
+                color: "#6fa8ff"
                 font.pixelSize: 11
                 horizontalAlignment: Text.AlignHCenter
             }

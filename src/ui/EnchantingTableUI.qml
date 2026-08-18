@@ -1235,12 +1235,43 @@ Item {
         if (parts[0] === "enchant") return _er >= 0 ? root.nameAt(idx) : ""
         return ""
     }
+    // t698 武器伤害行（tooltip 蓝字「+N 攻击」，同 SurvivalInventory 模式）：据 hoveredKey 查 hotbar /
+    //   main / enchant 三组实例附魔取锐锋级；enchant 槽（槽 0 待附魔物恒无附魔）→ base 原值。
+    property string hoveredAttackText: {
+        if (!root.hotbar || !root.hoveredItemId) return ""
+        if (root.hotbar.itemAttackDamage(root.hoveredItemId) <= 1) return ""
+        const base = root.hotbar.itemAttackDamage(root.hoveredItemId)
+        let sharp = 0
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _er = root.enchantRev
+        const key = root.hoveredKey
+        if (key) {
+            const parts = key.split(":")
+            if (parts.length === 2) {
+                const idx = parseInt(parts[1], 10)
+                if (!Number.isNaN(idx)) {
+                    let e = null
+                    if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
+                    else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
+                    else if (parts[0] === "enchant") e = _er >= 0 ? root.enchAt(idx) : null
+                    if (Array.isArray(e)) {
+                        for (let i = 0; i < 4; ++i) {
+                            if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // Sharpness = 1
+                        }
+                    }
+                }
+            }
+        }
+        const total = Math.round(base + 0.5 * sharp)
+        return "+" + total + " 攻击"
+    }
     Rectangle {
         id: itemTip
-        visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
+        visible: root.hotbar && root.hoveredItemId !== 0 && tipName.text !== ""
         z: 1000
-        width: tipLabel.implicitWidth + 14
-        height: tipLabel.implicitHeight + 8
+        width: tipCol.implicitWidth + 14
+        height: tipCol.implicitHeight + 8
         color: "#101216"
         opacity: 0.94
         border.color: "#3a444f"
@@ -1258,18 +1289,37 @@ Item {
             if (py < 2) py = root.hoveredTipPos.y + 6 // 顶部空间不足 → 翻到槽位下方
             return py
         }
-        Text {
-            id: tipLabel
+        // t698 tooltip 分列（同 SurvivalInventory / AnvilUI 模式）：名行白 / 附魔紫 / 伤害蓝。
+        Column {
+            id: tipCol
             anchors.centerIn: parent
-            // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
-            // t590 附魔行：物品带附魔 → 换行显附魔列表（如「锐锋 III\n效率 II」），无附魔 → 空串不追加。
-            // t622：hover 槽物品带实例名 → 优先显实例名（hoveredCustomName——改名工具 / 附魔台槽内显其名）。
-            text: root.hotbar ? ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
-                    : root.hotbar.nameForBlock(root.hoveredItemId))
-                + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
-                + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : ""
-            color: "#f2f2f2"
-            font.pixelSize: 12
+            spacing: 3
+            Text {
+                id: tipName
+                // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
+                // t622：hover 槽物品带实例名 → 优先显实例名（hoveredCustomName——改名工具 / 附魔台槽内显其名）。
+                text: root.hotbar ? ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
+                        : root.hotbar.nameForBlock(root.hoveredItemId))
+                    + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")) : ""
+                color: "#f2f2f2"
+                font.pixelSize: 12
+            }
+            // t590 附魔行：物品带附魔 → 显附魔列表，无附魔 → 不显。
+            Text {
+                visible: root.hoveredEnchantText.length > 0
+                text: root.hoveredEnchantText
+                color: "#c58af0"
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+            }
+            // t698 伤害行（蓝字「+N 攻击」）。
+            Text {
+                visible: root.hoveredAttackText.length > 0
+                text: root.hoveredAttackText
+                color: "#6fa8ff"
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+            }
         }
     }
 }
