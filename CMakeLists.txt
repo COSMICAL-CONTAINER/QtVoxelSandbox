@@ -316,6 +316,10 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_dust_line_on.png         # t656 红石粉通电线向贴图（build_redstone_dust.py；亮红粉线+白热高光粒）
         textures/default_dust_dot_on.png          # t656 红石粉通电点贴图（build_redstone_dust.py；亮红粉堆+白热心）
         textures/default_redstone_torch_off.png   # t657 红石火把熄灭态贴图（build_redstone_dust.py；暗红熄焰；反相 NOT 门视觉）
+        textures/default_dust_line_lvl1.png      # t692 红石粉弱电线向贴图（build_redstone_dust.py；中暗红+稀疏微亮粒；电力 1-5 档）
+        textures/default_dust_line_lvl2.png      # t692 红石粉半亮线向贴图（build_redstone_dust.py；中亮红+少量暖心粒；电力 6-10 档）
+        textures/default_dust_dot_lvl1.png       # t692 红石粉弱电点贴图（build_redstone_dust.py；中暗红粉堆；电力 1-5 档）
+        textures/default_dust_dot_lvl2.png       # t692 红石粉半亮点贴图（build_redstone_dust.py；中亮红粉堆+暖心粒；电力 6-10 档）
         textures/default_enchant_book.png         # t638 附魔台顶摊开书页贴图（build_book.py；白纸底+灰字线+中央书脊；无 pack 等价）
         textures/default_cactus_bottom.png        # t638 仙人掌底面贴图（build_cactus.py；更暗绿截面+外圈皮层暗环；观察者视角可见）
         textures/default_crafting_table_side.png

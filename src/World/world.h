@@ -1119,8 +1119,9 @@ private:
     // 电力局部重算核心：从脏锚点集 BFS 粉连通域（上界 kPowerFloodCap），重算各粉电力级 + 连接位并静默写
     //   state；随后扫描域内接收器写通电位 / 发触发信号。返回是否有实际写入（caller 据此收口 worldChanged）。
     bool recomputePowerLocal();
-    // BFS 单粉连通域上界（防病态长链失控；15 格衰减 + 6 向传播下实际域 ≤ 数百格，2048 上界余量充足）。
-    static constexpr int kPowerFloodCap = 2048;
+    // BFS 单粉连通域上界（防病态长链失控；15 格衰减 + 6 向传播下实际域 ≤ 数百格）。t692：2048 → 4096
+    //   （多电路共享同一 tick 的域收集时 2048 会截断 —— 波前推进被误判「无更多粉」传播停摆；2× 余量）。
+    static constexpr int kPowerFloodCap = 4096;
 };
 
 #endif // WORLD_H

@@ -705,37 +705,57 @@ int PartialBlockGeometry::append(
         //   state 派生瓦片（呈现层选择，同 Water 流水贴图模式）：
         //     - 高 4 位连接位（**仅水平 4 向**：0x01=+X 0x02=-X 0x04=+Z 0x08=-Z（RedstoneDustConn*，同铁轨
         //       位序）—— review-r19.8 H1 后垂直邻粉连接不落 state（旧 6 向编码的 +Y/-Y 位已废），
-        //       World::recomputePowerLocal 维护）：任一水平连接 → 线向瓦片（166 断 / 168 通）；无水平连接 →
-        //       孤立点瓦片（167 断 / 169 通）。线向按「X 向 / Z 向」旋转 UV（一张两用，同铁轨 EW 模式）；
+        //       World::recomputePowerLocal 维护）：任一水平连接 → 线向瓦片；无任何水平连接（含装置邻接，
+        //       见下）→ 孤立点瓦片。线向按「X 向 / Z 向」旋转 UV（一张两用，同铁轨 EW 模式）；
         //       X+Z 双向连接 → 十字画两片（各沿一向，重叠自然成十字）。
-        //     - 低 4 位电力级（RedstoneDustPowerMask）：>0 → 通电亮红瓦片（168/169）；0 → 断电暗红（166/167）。
-        //       v1 简化：两态（16 级亮度渐变留后续任务），级参与供电计算（World 侧）。
+        //     - 低 4 位电力级（RedstoneDustPowerMask）**t692 亮度渐变**（机制等价 MC 1.0 dust 15 级沿导线
+        //       衰减的视觉）：4 视觉档 —— 0 → off（166/167 暗红）、1-5 → lvl1（171/173 中暗红 + 稀疏微亮粒）、
+        //       6-10 → lvl2（172/174 中亮红 + 少量暖心粒）、11-15 → on（168/169 亮红 + 白热粒）。15 格衰减
+        //       沿线逐档变暗 = 「电流离源越远越弱」读感。
+        //     - t692 装置邻接连线：水平邻格是**电源或接收器**（火把 / 红石块 / 拉杆 / 按钮 / 压力板 / 探测轨 /
+        //       TNT / 红石灯 / 动力轨 / 发射器 / 投掷器）→ 该向画线向（机制等价 MC 粉连到装置画连线而非点；
+        //       修「一格粉邻接火把 + TNT 恒显孤立点」——连接位 state 只存粉-粉，渲染侧独立扩展）。装置
+        //       连接不写 state（渲染呈现层扩展，不回污染电力传播判定）。
         constexpr float yr = 1.0f / 16.0f; // 粉层厚度（cell 底以上 1/16，贴地面防 z-fight，同铁轨）
         const quint8 con = quint8(state >> 4);                      // 高 4 位连接位
-        const bool on = (state & BlockRegistry::RedstoneDustPowerMask) > 0; // 通电（>0 即亮）
+        const int pw = int(state & BlockRegistry::RedstoneDustPowerMask); // 电力级 0..15（亮度档源）
         // review-r19.8 H1 修：连接位 = 高半字节 0x01/0x02/0x04/0x08（RedstoneDustConn*，同铁轨位序）。
         //   旧版把 Z 位读在 0x10/0x20（= writer 的 +Y/-Y 错位）→ Z 向铺粉恒显孤立点（死代码位）。
         const bool cpx = (con & BlockRegistry::RedstoneDustConnPx) != 0; // +X
         const bool cnx = (con & BlockRegistry::RedstoneDustConnNx) != 0; // -X
         const bool cpz = (con & BlockRegistry::RedstoneDustConnPz) != 0; // +Z
         const bool cnz = (con & BlockRegistry::RedstoneDustConnNz) != 0; // -Z
-        const int lineTile = on ? 168 : 166; // 线向：通电 168 / 断电 166
-        const int dotTile  = on ? 169 : 167; // 点：通电 169 / 断电 167
+        // t692 亮度档选瓦：0→off、1-5→lvl1、6-10→lvl2、11-15→on（线 / 点两形态各一瓦）。
+        const int lineTile = (pw == 0) ? 166 : (pw <= 5) ? 171 : (pw <= 10) ? 172 : 168;
+        const int dotTile  = (pw == 0) ? 167 : (pw <= 5) ? 173 : (pw <= 10) ? 174 : 169;
         const auto pushDust = [&](int t, float ax0, float az0, float ax1, float az1,
                                   float ax2, float az2, float ax3, float az3) {
             pushCrossQuad(verts, idx, lx, ly, lz,
                           ax0, yr, az0,  ax1, yr, az1,  ax2, yr, az2,  ax3, yr, az3,
                           t, light, tileW, hx, hy, v0, v1);
         };
-        const bool anyH = cpx || cnx || cpz || cnz; // 有水平连接 → 至少画一线向
+        // t692 装置邻接（电源 / 接收器 → 该向画线向；id 级谓词即可——连线形态与装置开关态无关，同 MC 渲染）。
+        const auto isDustDevice = [](quint8 b) {
+            return b == BlockRegistry::RedstoneTorch || b == BlockRegistry::RedstoneBlock
+                || BlockRegistry::isLever(b) || BlockRegistry::isWoodButton(b) || BlockRegistry::isStoneButton(b)
+                || BlockRegistry::isPressurePlate(b) || b == BlockRegistry::DetectorRail
+                || BlockRegistry::isTnt(b) || b == BlockRegistry::RedstoneLamp
+                || b == BlockRegistry::GoldenRail
+                || BlockRegistry::isDispenser(b) || BlockRegistry::isDropper(b);
+        };
+        const bool dpx = cpx || isDustDevice(nb.posX); // +X（粉连接 ∥ 装置邻接）
+        const bool dnx = cnx || isDustDevice(nb.negX); // -X
+        const bool dpz = cpz || isDustDevice(nb.posZ); // +Z
+        const bool dnz = cnz || isDustDevice(nb.negZ); // -Z
+        const bool anyH = dpx || dnx || dpz || dnz;    // 有水平连接 / 装置邻接 → 至少画一线向
         if (!anyH) {
-            // 孤立点（无任何水平邻粉；垂直邻粉（爬墙）不画线 —— 粉层贴地视角下垂直连接视觉省略，v1 简化）。
+            // 孤立点（无任何水平邻粉 / 装置；垂直邻粉（爬墙）不画线 —— 粉层贴地视角下垂直连接视觉省略，v1 简化）。
             pushDust(dotTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
         } else {
             // 线向：X 向（EW）旋转 90°（u→z、v→x）；Z 向（NS）标准（u→x、v→z）。双向都有 → 两片叠成十字。
-            if (cpx || cnx)
+            if (dpx || dnx)
                 pushDust(lineTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f); // EW（同铁轨旋转序）
-            if (cpz || cnz)
+            if (dpz || dnz)
                 pushDust(lineTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // NS（标准序）
         }
         break;

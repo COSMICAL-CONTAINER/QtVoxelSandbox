@@ -2200,7 +2200,20 @@ bool World::recomputePowerLocal()
     }
 
     bool any = false;                 // 有实际 state 写入 / 触发信号
-    // Phase A2：域内粉重算电力 + 连接位。
+    // t692 Phase A2 双缓冲快照迭代：本 tick 域内所有粉的电力计算全部基于**上一 tick 的电力级**（快照于
+    //   任何写入前拍），传播每 redstone tick（10Hz）恰好推进 1 格——确定性、无「遍历顺序决定传播深度」
+    //   的伪影（旧版本 pass 内边写边读：unordered_set 遍历序早的粉已写新值、晚的读到 → 单 tick 深度
+    //   0..N 格随 hash 序漂移 = 用户实测「火把只亮邻 1 格 / 按钮传播断续」根因）。升沿（放源）与降沿
+    //   （去源）都经「变化格回插 m_powerDirty + 其 6 邻粉入集」驱动下一 tick 继续推进，机制等价 MC 1.0
+    //   红石信号逐格传播（一格 0.1s）。
+    std::unordered_map<quint64, quint8> snap; // 域内粉的旧电力级（写前快照）
+    snap.reserve(region.size() * 2);
+    for (const quint64 k : region) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        snap[k] = quint8(m_chunks.stateAt(x, y, z) & BlockRegistry::RedstoneDustPowerMask);
+    }
+    // Phase A2：域内粉重算电力 + 连接位（全部读快照，不读本 pass 刚写的值）。
     for (const quint64 k : region) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
@@ -2210,8 +2223,8 @@ bool World::recomputePowerLocal()
         for (int di = 0; di < 6; ++di) {
             const int nx = x + kNb[di][0], ny = y + kNb[di][1], nz = z + kNb[di][2];
             const quint8 nb = m_chunks.blockAt(nx, ny, nz);
-            // 邻源直供 15（机制等价 MC 强电）。注意：本算法不把邻粉计入起步（粉-粉逐粉衰减在下方
-            //   “邻粉旧电力-1”读旧值传播——多 tick 定点迭代收敛，等价 MC 传播延迟）。
+            // 邻源直供 15（机制等价 MC 强电）。**源读实时态**（源开关是外部驱动——拉杆扳动 / 火把反相
+            //   已由各自路径写 state / 破坏即改 id → 快照无需涵盖；只有粉-粉传播需要快照隔离）。
             const int src = powerSourceLevel(nx, ny, nz);
             if (src > power) power = src;
             if (BlockRegistry::isRedstoneDust(nb)) {
@@ -2225,8 +2238,10 @@ bool World::recomputePowerLocal()
                 else if (di == 4) conn |= BlockRegistry::RedstoneDustConnPz; // +Z
                 else if (di == 5) conn |= BlockRegistry::RedstoneDustConnNz; // -Z
                 // di 2/3（+Y/-Y 垂直邻粉）：不进连接位（见上）
-                const int np = int(m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask);
-                if (np - 1 > power) power = np - 1; // 邻粉电力 -1（衰减传播）
+                // t692：邻粉电力读**快照**（上一 tick 值）——衰减传播每 tick 恰 1 格。
+                const auto it = snap.find(packGrowthCell(nx, ny, nz));
+                const int np = (it != snap.end()) ? int(it->second) : 0;
+                if (np - 1 > power) power = np - 1; // 邻粉（上 tick）电力 -1（衰减传播）
             }
         }
         const quint8 ns = quint8(conn << 4) | quint8(power & BlockRegistry::RedstoneDustPowerMask);
@@ -2235,6 +2250,14 @@ bool World::recomputePowerLocal()
             // 通电翻转 → 粉微红光 7 增删 → 局部重 flood 方块光（幂等安全；断电时同检出光变）。
             recomputeLightAround(x, y, z, BlockRegistry::RedstoneDust, cur,
                                  BlockRegistry::RedstoneDust, ns);
+            // t692：变化格回插脏集（下 tick 复查本格——级联波前）+ 其 6 邻粉入集（它们的「邻粉电力-1」
+            //   输入变了 → 下 tick 重算 = 波前逐格外推）。稳定后（值不再变）不再入集 → 稳态停。
+            m_powerDirty.insert(k);
+            for (const auto &d : kNb) {
+                const int nx = x + d[0], ny = y + d[1], nz = z + d[2];
+                if (inBounds(nx, ny, nz) && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
+                    m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+            }
             any = true;
         }
     }

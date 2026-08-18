@@ -1511,7 +1511,11 @@ public:
     //   t657：170=redstone_torch_off（红石火把熄灭态 cross：深棕柄 + 暗红熄焰头——附着块被供电反相熄灭的
     //       NOT 门视觉；mesher 据 state 的 RedstoneTorchStateOffFlag 换 161(on)↔170(off)）。
     //       tools/build_rail_family.py 姊妹脚本自绘；pack {170→redstone_torch_off.png}。
-    static constexpr int AtlasTileCount = 171;
+    //   t692：171..174=红石粉电力级亮度渐变两中间档（机制等价 MC 1.0 dust 15 级亮度沿线衰减视觉）：
+    //       171=dust_line_lvl1（弱电线向）、172=dust_line_lvl2（半亮线向）、173=dust_dot_lvl1、174=dust_dot_lvl2。
+    //       mesher 据粉 state 低 4 位电力级选档：0→off(166/167)、1-5→lvl1、6-10→lvl2、11-15→on(168/169)。
+    //       tools/build_redstone_dust.py 程序生成（4 视觉档）。
+    static constexpr int AtlasTileCount = 175;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、

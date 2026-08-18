@@ -361,6 +361,14 @@ TILES = [
     # t657 红石火把熄灭态（机制等价 MC 1.0 redstone torch off 双态贴图）：附着块被供电 → 反相熄灭（NOT 门）。
     #   深棕柄 + 暗红熄焰头（无白热心）。tools/build_rail_family.py 姊妹自绘；mesher 据 state off 位换 161↔170。
     "default_redstone_torch_off",    # 170 redstone_torch_off（熄灭态 cross：暗红熄焰）
+    # t692 红石粉电力级亮度渐变（机制等价 MC 1.0 redstone dust 15 级亮度沿导线衰减视觉）：断（166/167）与
+    #   满亮（168/169）之间补两档中间亮度。mesher 据粉 state 低 4 位电力级选：0 → off、1-5 → lvl1、
+    #   6-10 → lvl2、11-15 → on（4 视觉档 × 衰减 15 格 = 沿线逐格变暗的「电流衰减」读感）。
+    #   tools/build_redstone_dust.py 程序生成（弱电 = 中暗红 + 稀疏微亮粒 / 半亮 = 中亮红 + 少量暖心粒）。
+    "default_dust_line_lvl1",        # 171 dust_line_lvl1（弱电线向：中暗红 + 稀疏微亮粒）
+    "default_dust_line_lvl2",        # 172 dust_line_lvl2（半亮线向：中亮红 + 少量暖心粒）
+    "default_dust_dot_lvl1",         # 173 dust_dot_lvl1（弱电点：中暗红粉堆）
+    "default_dust_dot_lvl2",         # 174 dust_dot_lvl2（半亮点：中亮红粉堆 + 暖心粒）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
