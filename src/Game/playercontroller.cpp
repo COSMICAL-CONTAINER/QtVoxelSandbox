@@ -4078,18 +4078,23 @@ void PlayerController::scanDispenserTraps(float dt)
         const int bz = int(quint32((pkey >> 21) & 0x1FFFFFu)) - 0x100000;
         const int by = int(quint32(pkey >> 42)) & 0x3FFu;
         if (!BlockRegistry::isPressurePlate(m_world->blockAt(bx, by, bz))) continue; // 板已被破 → 跳过
-        // 压力板的 4 水平邻格（同 Y）查发射器 / 投掷器（**任意一侧**邻接压力板即触发 —— t608 方向由
-        //   发射器自身 state 决定，与板在哪侧无关；板只是触发器。t609：投掷器同触发同冷却——机制等价
-        //   MC 1.0 dropper 与 dispenser 同属触发机关，仅内容物出口分派不同）。
-        static constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
-        for (const auto &d : kDirs) {
-            const int dx = bx + d[0], dz = bz + d[1];
-            const quint8 db = m_world->blockAt(dx, by, dz);
+        // t659 压力板的 **6 邻**（4 水平 + 上 + 下）查发射器 / 投掷器（任意一侧邻接压力板即触发 ——
+        //   t608 方向由发射器自身 state 决定，与板在哪侧无关；板只是触发器。t609：投掷器同触发同冷却
+        //   ——机制等价 MC 1.0 dropper 与 dispenser 同属触发机关，仅内容物出口分派不同）。
+        //   **t659 修「板正上方机器触发不了」**：旧版只扫 4 水平邻（同 Y）—— 板**直接放机器顶上**时
+        //   机器在板的 dy=-1（发射器在下 / 板在上），水平邻恒 miss → 用户实测「压力板放在发射器正上方
+        //   触发不了」。改为 6 邻（同 scanTntTraps 的 kDirs6 圈，含上下）→ 板上 / 板下机器均触发。
+        //   （红石电力路径（板 bit0 → tickRedstone → 接收器）同样覆盖此场景 —— 本直接路径是「与既有机关
+        //   触发并存」的直连语义；两路径共用 per-dispenser 冷却闸，无双发。）
+        static constexpr int kDirs6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for (const auto &d : kDirs6) {
+            const int dx = bx + d[0], dy = by + d[1], dz = bz + d[2];
+            const quint8 db = m_world->blockAt(dx, dy, dz);
             if (!BlockRegistry::isDispenser(db) && !BlockRegistry::isDropper(db)) continue; // 非发射器/投掷器 → 跳过
             // r2-B4：删旧函数级 return（同 scanTntTraps——同帧踩两板只触发一台机器，另一板沿永久丢失）。
             //   每板独立触发邻接机器；**同一台机器同 tick 被两块板触发**由 fireDispenserAt 的 per-dispenser
             //   冷却闸挡住（首次触发写冷却 → 第二次调用 contains 命中返 false 不动作，无双重发射）。
-            fireDispenserAt(dx, by, dz, db);
+            fireDispenserAt(dx, dy, dz, db);
         }
     }
 }
