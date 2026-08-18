@@ -1580,9 +1580,15 @@ BlockRegistry::TorchAttach BlockRegistry::torchOrientFromNormal(int nx, int ny, 
 
 // t214 火把支撑邻居相对偏移（state → 附着格相对坐标）。越界 state 值（> TorchOnPZ）→ TorchFloor 兜底
 //   （防读脏 state 崩；旧存档 state=0 即 TorchFloor，行为对齐地面火把）。
+// t681 修：**先掩掉 t657 红石火把熄灭位（bit3）再解附着**——熄灭态 state = attach | 0x08（world.cpp
+//   tickRedstone 反相段写），整值 switch 不匹配任何 case → default 误判地面立柱（支撑=正下方）。后果：
+//   ①稳定供电的贴墙火把熄灭后，下一 tick 附着判定落到脚下空气格 → 误判失撑 → 重亮 → 再反相熄灭 =
+//   每 tick 振荡 + 每次翻转 recomputeLightAround + worldChanged 全量重建（5 次/秒重建风暴）；②
+//   playercontroller dropUnsupportedTorchesAround 对熄灭态贴墙火把解错支撑格 → 拆墙不掉落。位选
+//   0x08 与附着编码（0..4）正交（blockregistry.h 文档已钉死），此处统一掩码后两消费者一并修复。
 void BlockRegistry::torchAttachOffset(quint8 state, int &dx, int &dy, int &dz)
 {
-    switch (state) {
+    switch (quint8(state & quint8(~RedstoneTorchStateOffFlag))) { // t681：掩熄灭位后按附着值匹配
     case TorchFloor: dx =  0; dy = -1; dz =  0; return; // 立柱：支撑 = 下方
     case TorchOnNX:  dx = -1; dy =  0; dz =  0; return; // 柄伸 +X：支撑 = -X 邻
     case TorchOnPX:  dx =  1; dy =  0; dz =  0; return; // 柄伸 -X：支撑 = +X 邻
