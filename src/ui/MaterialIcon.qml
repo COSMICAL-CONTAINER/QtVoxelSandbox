@@ -391,6 +391,35 @@ Item {
                 R(10, 14, 2, 1, eye)
             }
 
+            // 毒马铃薯（0x241，t669）：马铃薯的坏变种（龙葵碱 solanine 致毒，薯皮泛绿）。MC 风格毒马铃薯 =
+            //   **绿皮**椭圆块茎 + 凹凸芽眼 + 几处深绿霉斑（表变质）。机制等价 MC poisonous potato 图标（绿皮）；
+            //   纯原创自绘（§9a，不描摹 MC 像素图）。配色复用普通马铃薯 drawPotato 的造型骨架，仅换绿系：
+            //   skin #8aa04a（绿皮）/ skinLight #a8c068（受光高光）/ skinDark #5a7028（暗边 + 芽眼）/
+            //   sprout #3c5018（深绿霉斑 / 毒芽）。
+            const drawPoisonPotato = () => {
+                const skin = "#8aa04a", skinLight = "#a8c068", skinDark = "#5a7028", sprout = "#3c5018"
+                // 块茎主体（椭圆，rows 6..17，两端收窄表「肾形块茎」，同普通马铃薯造型骨架）
+                R(8, 6, 8, 1, skin)        // 顶行（窄）
+                R(6, 7, 12, 2, skin)       // rows 7..8（宽）
+                R(5, 9, 14, 6, skin)       // 主体 rows 9..14（最宽）
+                R(6, 15, 12, 2, skin)      // rows 15..16（宽）
+                R(8, 17, 8, 1, skinDark)   // 底行（窄 + 暗阴影）
+                // 受光高光（左上亮带，表「椭圆凸面」）
+                R(8, 6, 8, 1, skinLight)
+                R(6, 7, 4, 2, skinLight)
+                R(5, 9, 4, 3, skinLight)
+                // 两端圆收（左 / 右各暗一格，表「圆头收口」）
+                R(5, 10, 1, 4, skinDark)
+                R(18, 10, 1, 4, skinDark)
+                // 芽眼（2 个深色小斑点 + 1 个毒芽「泛芽」——表变质马铃薯发了毒芽）
+                R(9, 10, 2, 1, skinDark)
+                R(13, 12, 2, 1, skinDark)
+                R(10, 14, 2, 1, sprout)
+                // 毒霉斑（2 处不规则深绿斑，表「绿皮薯变质起霉」——与普通马铃薯的关键视觉差异）
+                R(15, 9, 2, 2, sprout)
+                R(7, 13, 2, 1, sprout)
+            }
+
             // 面包（0x20A，t238）：3 小麦合成；右键食 +5 饥饿。MC 风格面包 = 金棕长条（顶弧 + 斜划口 +
             //   两端圆收）。机制等价 MC 面包图标（一块烤面包）；纯原创自绘（§9a）。
             //   配色：crust #c88848（面包皮金棕，主体）/ crustLight #e0a868（顶弧受光高光）/ crustDark
@@ -1634,6 +1663,7 @@ Item {
             case 0x22E: drawSpawnEgg("squid");    break // t399 生物蛋（鱿鱼）
             case 0x22F: drawCarrot();             break // t400 胡萝卜（猪繁殖食物；喂成体猪 → 求偶）
             case 0x230: drawPotato();             break // t400 马铃薯（猪繁殖食物；喂成体猪 → 求偶）
+            case 0x241: drawPoisonPotato();       break // t669 毒马铃薯（绿皮毒薯；食后 60% 中毒）
             case 0x231: drawRawFish();            break // t401 生鱼（钓竿拉起获物；机制等价 MC 1.0 raw fish）
             case 0x232: drawBonemeal();           break // t447 骨粉（骨头合成产物；右键未成熟作物催熟一阶段）
             case 0x233: drawSweetBerry();         break // t467 甜浆果（成熟浆果丛采摘得；可食 +2 饥饿）

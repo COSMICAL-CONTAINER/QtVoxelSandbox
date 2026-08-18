@@ -474,6 +474,9 @@ QVariantList Hotbar::creativeMaterials() const
         //   （喂成体猪触发求偶 → 同种配对产幼崽）。生存由（未来）种植 / 战利品获得；可堆叠 64；非方块 → 右键喂食。
         int(RecipeRegistry::CarrotId),          // 胡萝卜：猪繁殖食物（喂成体猪 → 求偶）
         int(RecipeRegistry::PotatoId),          // 马铃薯：猪繁殖食物（喂成体猪 → 求偶）
+        // t669 毒马铃薯（0x241）：马铃薯的坏变种（薯皮泛绿）。可食（+2 饥饿）但 60% 概率中毒（每秒 -1 饥饿
+        //   -1 HP，8s）。创造调色板补全便于测试（destructive-test 食用链）；获得途径留后续马铃薯作物收割掉落。
+        int(RecipeRegistry::PoisonousPotatoId), // 毒马铃薯：绿皮毒薯；食后 60% 中毒（t669）
         // t399 鱿鱼相关材料（机制等价 MC 1.0 鱿鱼死亡掉墨囊；生存由杀鱿鱼获得，创造调色板补全便于测试 / 装饰）。
         //   可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘图标。
         int(RecipeRegistry::InkSacId),          // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac）
@@ -871,6 +874,8 @@ QString Hotbar::nameForBlock(int blockId) const
         // t400 繁殖食物（机制等价 MC 1.0 胡萝卜 / 马铃薯 —— 猪的繁殖食物）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::CarrotId)          return QStringLiteral("胡萝卜");   // 猪繁殖食物（喂成体猪 → 求偶）
         if (blockId == RecipeRegistry::PotatoId)          return QStringLiteral("马铃薯");   // 猪繁殖食物（喂成体猪 → 求偶）
+        // t669 毒马铃薯（材料段 0x241；机制等价 MC 1.0 poisonous potato）：薯皮泛绿；食后 60% 中毒。
+        if (blockId == RecipeRegistry::PoisonousPotatoId) return QStringLiteral("毒马铃薯"); // 绿皮毒薯；食后概率中毒
         // t399 鱿鱼相关（机制等价 MC 1.0 鱿鱼；§9 区隔改名 + 原创名）。
         if (blockId == RecipeRegistry::InkSacId)        return QStringLiteral("墨囊");       // 杀鱿鱼掉落
         if (blockId == RecipeRegistry::SpawnEggSquidId) return QStringLiteral("生物蛋（鱿鱼）"); // 右键地面 → 生成鱿鱼

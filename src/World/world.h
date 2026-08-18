@@ -234,6 +234,16 @@ public:
     //   t174 舀水（playercontroller 空桶）亦走本方法 —— 舀走水格是水流系统操作（非玩家破块），避免 setBlock
     //   触发 blockBroken(Water) 的破块粒子/音（机制等价 MC 舀水无反馈）。非 Q_INVOKABLE（C++ 调）。
     bool setWaterSilent(int x, int y, int z, quint8 id, quint8 state);
+    // t669 通用静默写（系统/工具交互改非玩家语义方块专用）：跨 chunk 写 id+state + 标脏 + 全部写后钩子
+    //   （note*/recomputeLightAround/worldChanged/clearAllDirty/pokeFluidDirty/check*族/notePowerWrite），
+    //   **不**发 blockPlaced/blockBroken。背景：玩家工具交互（锄耕地）与物理事件（踩踏回土）经 worldChanged
+    //   需重建 mesh，但不应触发 onBlockPlaced 的「生存放置消耗 1 件」误扣选中槽（t669① 锄头被整个扣走 /
+    //   t669② 手持泥土踩踏时泥土凭空消失 = 同一根因：非放置类 setBlock 发 blockPlaced → 呈现层 blanket
+    //   takeStack）。语义：系统事件非玩家破/放（同 setBlockFromEntity/setWaterSilent 既有约定）。
+    //   无条件覆盖（无 occ 守卫；caller 保证覆盖合法——锄把 Dirt/Grass 转 Farmland、踩踏把 Farmland 回
+    //   Dirt，均属玩家对命中/落点格的合法改写）。越界 / 无变化（id+state 均同）→ false。
+    //   非 Q_INVOKABLE（仅 Game/Physics C++ 调）。
+    bool setBlockSilent(int x, int y, int z, quint8 id, quint8 state);
     // t185 水流重做（增量波前扩散；修 t174 全量 BFS 的「瞬间填平 + 闪烁」bug）。由呈现层 Main.qml 经
     //   WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 0.3s 推进波前 1 格）。
     //   机制等价 MC 1.0 流水：水源（state=0）向外**1 格 1 格**水平蔓延出 state 1..7 的流水（最大 7 格扩散

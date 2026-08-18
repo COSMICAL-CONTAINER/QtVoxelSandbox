@@ -691,6 +691,9 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x22E, QStringLiteral("squid_spawn_egg.png")}, // 生物蛋（鱿鱼）
         {0x22F, QStringLiteral("carrot.png")},          // 胡萝卜
         {0x230, QStringLiteral("potato.png")},          // 马铃薯
+        // t669 毒马铃薯（0x241，机制等价 MC 1.0 poisonous potato）：pack item 目录通常有 poisonous_potato.png
+        //   （demo 包 1.8 系含 textures/item/poisonous_potato.png）。包内缺则安全跳过（保留自绘 drawPoisonPotato）。
+        {0x241, QStringLiteral("poisonous_potato.png")}, // 毒马铃薯（t669：绿皮毒薯；食后 60% 中毒）
         {0x231, QStringLiteral("cod.png")},             // 生鱼（MC 1.0 raw fish = modern cod）
         // t645 用户审计补映射（pack item/ 目录 435 文件与既有映射差集；这些物品已实现但映射漏 → pack 启用仍走
         //   MaterialIcon 自绘）。demo 包实测 9 文件全在；包内缺则安全跳过回退自绘（机制同既有段）。

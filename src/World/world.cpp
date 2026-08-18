@@ -526,6 +526,41 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     return true;
 }
 
+// t669 通用静默写（详见 world.h 头注释）：照搬 5 参数 setBlock 主体（全套写后钩子 + worldChanged），仅不发
+//   blockPlaced/blockBroken。背景：锄耕地 / 踩踏回土等「工具/物理交互改写非玩家语义方块」原走 setBlock →
+//   发 blockPlaced → QML onBlockPlaced 的「生存放置消耗 1 件」把选中槽误扣（t669① 锄头 / t669② 泥土——
+//   同一根因），故这些系统事件改走本入口（同 setBlockFromEntity/setWaterSilent 既有「系统写不发放置事件」约定）。
+bool World::setBlockSilent(int x, int y, int z, quint8 id, quint8 state)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+        return false; // 越界拒绝
+    const quint8 oldId = m_chunks.blockAt(x, y, z);
+    const quint8 oldState = m_chunks.stateAt(x, y, z);
+    if (oldId == id && oldState == state) return false; // 无变化（含 id 同 state 同）
+    m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
+    noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（耕地增删 / 覆盖作物正确移除）
+    noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（id 变更时正确增删）
+    noteIceWrite(x, y, z, oldId, id);    // t495：维护普通冰方格索引（id 变更时正确增删）
+    recomputeLightAround(x, y, z, oldId, oldState, id, state); // t154：增量重 flood（透光性变化时重算）
+    emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家破/放）
+    m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
+    if (id == BlockRegistry::Water)
+        m_flowTickCounter = kFlowTickInterval - 1;  // 通用静默写亦支持放水源（同 5 参数 setBlock 的 poke 语义）
+    if (id == BlockRegistry::Lava)
+        m_lavaFlowTickCounter = kLavaFlowTickInterval - 1;
+    pokeFluidDirty(x, y, z); // t380：块编辑可能扰动邻接流体平衡 → 标流体脏
+    checkCactusOnEdit(x, y, z, oldId, id);       // t445：仙人掌失撑（②）/ 邻接方块（④）整柱坍落复检
+    checkDeadBushOnEdit(x, y, z, oldId, id);     // t504：枯死灌木失撑复检
+    checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑复检
+    checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑复检
+    checkSugarcaneOnEdit(x, y, z, oldId, id);    // t524：甘蔗失撑复检
+    checkSnowLayerOnEdit(x, y, z, oldId, id);    // t527：积雪层失撑复检
+    checkRailOnEdit(x, y, z, oldId, id);         // t565：铁轨连接重算
+    checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检
+    notePowerWrite(x, y, z, oldId, id);          // t656：红石电力脏标记
+    return true;
+}
+
 // t380r：收口批量流体写延迟的光照重算（见 setWaterSilent 延迟分支 + world.h m_pendingLightEdits）。
 //   联合盒 = 各延迟编辑的 ±R 盒之并（recomputeLightAround 单编辑盒：x0=ex-R,x1=ex+R,z0=ez-R,z1=ez+R；
 //   sky 编辑 y1=H-1 覆盖整列重 seed 天光，非 sky y1=ey+R）。doSky=任一 sky（超集，正确）。refloodBox

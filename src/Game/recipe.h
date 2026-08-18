@@ -189,6 +189,16 @@ public:
     //   生物的繁殖食物表（EntityManager::feedMob 据 mobType 判食物匹配）。
     static constexpr int CarrotId          = 0x22F; // 胡萝卜：猪繁殖食物（喂成体猪 → 求偶；机制等价 MC 1.0 carrot）
     static constexpr int PotatoId          = 0x230; // 马铃薯：猪繁殖食物（喂成体猪 → 求偶；机制等价 MC 1.0 potato）
+    // t669 毒马铃薯（材料段 0x241）：机制等价 MC 1.0 poisonous potato（1.4.2+ 食物）。**马铃薯的坏变种**——
+    //   薯皮泛绿（未成熟龙葵碱「solanine」致毒，机制等价 MC 毒马铃薯 「wolfsbane」 60% 概率食物中毒）。
+    //   可食：恢复 +kPotatoHunger 饥饿但 **60% 概率中毒**（m_poisonTimer 8s：每秒 -1 饥饿 + -1 HP，
+    //   PlayerController finishEating 掷骰 → tickImpl 推进，机制等价 MC 毒马铃薯食后中毒扣血）。
+    //   获得途径：创造调色板直接取用（t669；destructive-test 用）+ 未来马铃薯作物收割概率掉落可挂 loottable。
+    //   可堆叠 64（材料段默认）；非方块（材料段）→ 右键走「食用」useBlock 分支（同面包 / 甜浆果模式）。
+    //   MaterialIcon 自绘「绿皮毒薯」图标（drawPoisonPotato，薯皮泛绿 + 暗斑，§9a 区隔原创）。
+    //   pack 映射：itemFilenameMap 0x241 → poisonous_potato.png（demo 包有 poisonous_potato.png 则接，缺则自绘）。
+    //   mcMaterialId 无映射越界（>0x240）→ 资源包回退引擎自绘（同 SnowballId 越界模式）。
+    static constexpr int PoisonousPotatoId = 0x241; // 毒马铃薯：薯皮泛绿；食后 60% 中毒（每秒 -1 饥饿 -1 HP，8s）
     // t401 生鱼（钓鱼获物；机制等价 MC 1.0 raw fish / cod）。材料段 0x231。钓竿抛浮标入水 → 等咬钩 → 拉起按
     //   LootTable::fishingPool 抽获，本 id 是「鱼」类获物（高权重）。可堆叠 64；非方块（材料段）→ 右键不放置。
     //   MaterialIcon 自绘鱼形图标（银蓝鱼身 + 尾鳍 + 眼）；创造调色板补全便于测试。名称 / 图标全原创（§9a 区隔）。

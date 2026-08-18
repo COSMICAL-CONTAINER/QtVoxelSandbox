@@ -65,6 +65,9 @@ int PlayerController::foodHungerAmount(int itemId)
     //   本工程无烤土豆物品故土豆取生食量 1。新增可食作物只在此追加一行（单一权威）。
     if (itemId == RecipeRegistry::CarrotId)       return 3; // 胡萝卜 +3 饥饿（机制等价 MC 1.0 carrot）
     if (itemId == RecipeRegistry::PotatoId)       return 1; // 生土豆 +1 饥饿（机制等价 MC 1.0 raw potato）
+    // t669 毒马铃薯：机制等价 MC 1.0 poisonous potato —— 可食 +2 饥饿，但 60% 概率触发食物中毒
+    //   （finishEating 掷骰 → m_poisonTimer 8s：每秒 -1 饥饿 + -1 HP）。只算饥饿值（中毒副作用在进食完成分支）。
+    if (itemId == RecipeRegistry::PoisonousPotatoId) return kPoisonousPotatoHunger; // 毒马铃薯 +2 饥饿（60% 中毒）
     // t513 生/熟肉（机制等价 MC 1.0 各肉类恢复量；spec「生猪肉/生牛肉/熟肉都吃不了」修）。数值与 MC 1.0 一致：
     //   生肉低（猪/牛 +3、鸡 +2、鱼 +2），熟肉高（猪/牛 +8、鸡/羊 +6）。生鸡肉 MC 另带 30% 食物中毒 ——
     //   本工程无 status-effect 系统故仅取饥饿值（中毒暂未实现，待后续任务加状态系统时补）。
@@ -1804,6 +1807,15 @@ void PlayerController::finishEating()
     //   （创造不消耗蘑菇汤但碗仍累积，机制等价 MC 创造喝汤也留碗 —— 创造 maxStack=1 蘑菇汤槽恒单件故不影响主流程）。
     if (eatenId == RecipeRegistry::MushroomStewId)
         m_hotbar->addStack(RecipeRegistry::BowlId, 1);
+    // t669 毒薯食物中毒：食毒马铃薯 60% 概率起效（机制等价 MC 1.0 poisonous potato 60% 中毒；仅 Survival 结算，
+    //   Creative/Spectator 无敌不着毒，同火 / 窒息模式）。起效 → m_poisonTimer=kPoisonDuration（tickImpl 每秒
+    //   -1 饥饿 + -1 HP）；期间再食另一毒薯重置时长（可叠续）。中毒视觉复用既有链（fallDamageTaken → damaged
+    //   红闪 / 视角晃；hungerUpdated → 鼓腿凹）。
+    if (eatenId == RecipeRegistry::PoisonousPotatoId && m_mode == Survival
+        && QRandomGenerator::global()->bounded(100) < kPoisonChancePct) {
+        m_poisonTimer = kPoisonDuration;
+        m_poisonDmgAccum = 0.0f;
+    }
     m_lastPlaceMs = m_evtClock.elapsed();
     emit swingArm(); // 进食完成挥手（一次「使用」动作）
     // t513 吃完冷却：置 m_eatCooldown（机制等价 MC 1.0 进食冷却 ~1s）。**不调 cancelEating** —— 保持 m_eating=true
@@ -3301,6 +3313,9 @@ void PlayerController::placeBlock()
             if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, fullId, 0)) return;
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, fullId,
                               BlockRegistry::DoubleSlabMarkerBit);
+            // t669 放置消耗收口：生存放置由 C++ 侧统一消耗 1 件（原由 QML onBlockPlaced blanket takeStack
+            //   承担，但那会误扣非放置类 setBlock（锄/踩踏）；合并成功 = 一次放置动作 → 消耗 1 半砖）。
+            if (m_mode == Survival) m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
             m_lastPlaceMs = now;
             emit swingArm(); // 合成也是一次「放置」动作 → 挥手（t29）
             return;
@@ -3324,6 +3339,8 @@ void PlayerController::placeBlock()
                 if (overlapsPlayerAABB(tx, ty, tz, fullId, 0)) return; // 合成满砖前查自埋（同 t163b）
                 m_world->setBlock(tx, ty, tz, fullId,
                                   BlockRegistry::DoubleSlabMarkerBit);
+                // t669 放置消耗收口（同 t163(b) 同格合并：合并 = 一次放置动作 → 生存消耗 1 半砖）。
+                if (m_mode == Survival) m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
                 m_lastPlaceMs = now;
                 emit swingArm(); // 合成也是一次「放置」动作 → 挥手（t29）
                 return;
@@ -3375,6 +3392,13 @@ void PlayerController::placeBlock()
         if (tid != BlockRegistry::Air && tid != BlockRegistry::Water
             && tid != BlockRegistry::Lava) return; // 已有实体方块 → 不放
     }
+    // t669③ 耕地上方放方块 → 耕地变泥土（MC 规则：方块落在耕地上 → 耕地无法保持湿润支撑，回土；机制等价
+    //   MC 1.0 在耕地上放方块即回土）。目标格下方 (tx,ty-1,tz) 若为 Farmland → 静默写回 Dirt（setBlockSilent：
+    //   回土是系统变化非玩家破/放 → 不发 blockPlaced/broken，免粒子/音/误扣选中槽；worldChanged 重建 mesh）。
+    //   种子种植走上方 crop 专用分支（种在耕地上方一格、目标格即空气上方，never 到此），不触发回土；
+    //   slab / 压力板 / 火把等非满格方块放置亦回土（机制等价 MC「任何方块放耕地顶 → 回土」）。
+    if (ty - 1 >= 0 && m_world->blockAt(tx, ty - 1, tz) == BlockRegistry::Farmland)
+        m_world->setBlockSilent(tx, ty - 1, tz, BlockRegistry::Dirt, 0);
     const bool isDoor = BlockRegistry::isDoor(m_selectedBlock); // t466 统一经 isDoor 谓词覆盖 WoodDoor + SpruceDoor
     const quint8 doorFacing = quint8(horizontalFacing() & 3); // door 朝向（上下格同 facing；上格 +bit3）
     // t428/t496 床双格（head+foot 横置，如门但水平相邻）：foot 落命中面相邻格 (tx,ty,tz)，head 落 foot 的「玩家
@@ -3558,12 +3582,16 @@ void PlayerController::placeBlock()
         }
         m_world->setBlock(tx, ty, tz, idByte, doorFacing);              // 下格：bit3=0(下格) bit2=0(合) bit[1:0]=朝向
         m_world->setBlock(tx, ty + 1, tz, idByte, quint8(doorFacing | 8)); // 上格：bit3=1
+        // t669 放置消耗收口：生存放置由 C++ 侧统一消耗 1 件（门两格同写只耗 1 扇；原由 QML onBlockPlaced
+        //   blanket takeStack 承担，但那会误扣非放置类 setBlock（锄/踩踏）→ 收口到放置动作本体）。
+        if (m_mode == Survival) m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
     } else if (isBed) {
         // t428 床 head 格须在界内且为 air/water/lava（同 door 上格预检，机制等价 MC 床需两格空位），否则整床
-        //   拒绝（两格都不放，防半截床）。foot 经 setBlock 写（发 blockPlaced → 生存消耗 1 件 + 放置音 / 粒子），
-        //   head 经 setWaterSilent 静默写（重建 mesh + 重光照，但**不**发 blockPlaced → 1 床物体只耗 1 件、只一次
-        //   放置反馈；机制等价 MC「放 1 床 = 1 物品 = 一次动作」）。door 靠 maxStack=1 碰巧避双耗，bed maxStack=64
-        //   故必须用静默写第二格（setWaterSilent 是通用静默 state 写入口，非仅水流）。
+        //   拒绝（两格都不放，防半截床）。foot 经 setBlock 写（发 blockPlaced → 放置音 / 粒子），head 经
+        //   setWaterSilent 静默写（重建 mesh + 重光照，但**不**发 blockPlaced → 1 床物体只耗 1 件、只一次放置
+        //   反馈；机制等价 MC「放 1 床 = 1 物品 = 一次动作」）。door 靠 maxStack=1 碰巧避双耗，bed maxStack=64
+        //   故必须用静默写第二格（setWaterSilent 是通用静默 state 写入口，非仅水流）。t669 放置消耗收口：
+        //   survival 消耗由 C++ 统一处理（foot 之后 1 次，同 door / regular 分支）。
         const int hx = tx + hdx, hz = tz + hdz;
         if (hx < 0 || hx >= m_world->width() || hz < 0 || hz >= m_world->depth()) return; // head 越界 → 整床拒
         const quint8 headOcc = m_world->blockAt(hx, ty, hz);
@@ -3571,9 +3599,13 @@ void PlayerController::placeBlock()
             && headOcc != BlockRegistry::Lava) return; // head 格非空 → 床放不下
         m_world->setBlock(tx, ty, tz, idByte, bedFacing);                  // foot: bit3=0 bit[1:0]=朝向
         m_world->setWaterSilent(hx, ty, hz, idByte, quint8(bedFacing | 8)); // head: bit3=1（静默，免双耗）
+        if (m_mode == Survival) m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // t669 消耗收口
     } else {
         // fence / pressure_plate / trapdoor：placeState=0（trapdoor 默认水平合）。
         m_world->setBlock(tx, ty, tz, idByte, placeState);
+        // t669 放置消耗收口：常规方块放置（泥土 / 木板 / 火把 / 南瓜…）的 survival 消耗由 C++ 统一处理
+        //   （原 QML onBlockPlaced blanket takeStack 承担——但那会误扣锄地/踩踏等非放置类 setBlock）。
+        if (m_mode == Survival) m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
     }
     // t482/t483 防御造物生成（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建）：玩家放置**南瓜**后检测下方排列，
     //   命中 → 生成对应防御造物（spawnMobTyped 计入实体槽 kCap）+ 静默移除结构方块（setWaterSilent —— 非玩家
@@ -5581,14 +5613,20 @@ void PlayerController::step(qreal dt)
             const int by = int(std::floor(m_pos.y() - 0.05f)); // 脚底下一格（同地面复探 oy-0.05 取样）
             const int bz = int(std::floor(m_pos.z()));
             if (m_world->blockAt(bx, by, bz) == BlockRegistry::Farmland) {
-                m_world->setBlock(bx, by, bz, BlockRegistry::Dirt, 0); // 耕地 → 泥土（涟漪：World 发 broken/placed + mesh 重建）
+                // t669② 用 setBlockSilent 静默写回土：踩踏是物理事件（非玩家破/放），原走 setBlock 发
+                //   blockPlaced(Dirt) → QML onBlockPlaced 的「生存放置消耗 1 件」把选中槽误扣（手持泥土踩踏 →
+                //   泥土凭空消失 = 本 bug）。静默写保留 worldChanged 重建 mesh，不发 blockPlaced/broken
+                //   （机制等价 MC 踩踏回土无放置反馈）。踩坏 → setBlock(Dirt)（耕地湿润态一并清）。
+                m_world->setBlockSilent(bx, by, bz, BlockRegistry::Dirt, 0);
                 const int cy = by + 1;
                 if (cy < m_world->height()) {
                     const quint8 crop = m_world->blockAt(bx, cy, bz);
                     if (crop == BlockRegistry::WheatCrop || crop == BlockRegistry::CarrotCrop
                         || crop == BlockRegistry::PotatoCrop) {
                         const quint8 cstate = m_world->stateAt(bx, cy, bz);
-                        m_world->setBlock(bx, cy, bz, BlockRegistry::Air, 0); // 清作物（→ broken + mesh 重建）
+                        // 清作物走既有静默写（失撑级联，非玩家破块 → 无 broken 粒子/音；机制等价 MC 踩踏
+                        //   作物掉落无声效）。setWaterSilent 是通用静默 state 写入口（名字历史遗留 water-first）。
+                        m_world->setWaterSilent(bx, cy, bz, BlockRegistry::Air, 0);
                         dropCropDrops(bx, cy, bz, crop, cstate); // 失撑掉落（成熟按 stage 出产物）
                     }
                 }
@@ -5775,6 +5813,28 @@ void PlayerController::step(qreal dt)
         m_fireTimer = 0.0f;
         m_fireDmgTimer = 0.0f;
         if (m_burning) { m_burning = false; emit burningChanged(); }
+    }
+
+    // t669 毒马铃薯食物中毒推进（机制等价 MC 1.0 poison：中毒期间每秒扣损；无状态系统时简化 = 每秒
+    //   -1 饥饿 + -1 HP）。触发 = finishEating 食毒薯 60% 掷中 → m_poisonTimer=kPoisonDuration（8s）。
+    //   仅 Survival（Creative/Spectator 无敌不清毒也无效——统一复位防切回陈旧串入，同火烧态）。推进：
+    //   每秒（m_poisonDmgAccum 累积到 kPoisonInterval）发 hungerUpdated（-1 饥饿，clamp≥0）+ fallDamageTaken
+    //   （-1 HP → 呈现层 takeDamage → damaged 红闪 / 视角晃，同火 / 窒息链）。死因归 Generic（毒不算死亡原因，
+    //   简化避免新增 DeathCause；与饥饿归零 Starvation 区分）。中毒归零即解毒（时间耗尽）。
+    if (m_mode == Survival) {
+        if (m_poisonTimer > 0.0f) {
+            m_poisonTimer -= float(dt);
+            m_poisonDmgAccum += float(dt);
+            if (m_poisonDmgAccum >= kPoisonInterval) {
+                m_poisonDmgAccum -= kPoisonInterval;
+                if (m_hunger > 0) { --m_hunger; emit hungerUpdated(m_hunger); } // 毒掉饥饿（clamp≥0）
+                emit fallDamageTaken(1, PlayerState::Generic); // 毒掉血（复用 takeDamage 链；Generic 死因兜底）
+            }
+            if (m_poisonTimer <= 0.0f) { m_poisonTimer = 0.0f; m_poisonDmgAccum = 0.0f; } // 定时解毒
+        }
+    } else {
+        m_poisonTimer = 0.0f;      // 非 Survival：无敌不清毒（防切回 Survival 时陈旧 timer 串入）
+        m_poisonDmgAccum = 0.0f;
     }
 
     // t394/t445 玩家仙人掌接触伤害 + t467 雪原浆果灌木丛穿越伤害（spec「contact damages entities that touch it」

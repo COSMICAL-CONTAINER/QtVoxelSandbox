@@ -1160,6 +1160,10 @@ private:
     bool m_burning = false;
     float m_fireTimer = 0.0f;
     float m_fireDmgTimer = 0.0f;
+    // t669 毒马铃薯食物中毒态：m_poisonTimer 中毒剩余秒（>0 中毒；tickImpl 递减，归零解毒），
+    //   m_poisonDmgAccum 扣损累积（每 kPoisonInterval 秒 emit 一次 -1 饥饿 + -1 HP）。仅 Survival。
+    float m_poisonTimer = 0.0f;
+    float m_poisonDmgAccum = 0.0f;
     // t394 仙人掌接触伤害累积（玩家 AABB 接触 Cactus 方块时累加，每 EntityManager::kCactusDamageInterval 扣 1HP；
     //   离开即归零）。机制等价 MC 1.0 仙人掌触碰即伤。仅 Survival（Creative/Spectator 无敌不累）。
     float m_cactusDmgTimer = 0.0f;
@@ -1416,6 +1420,16 @@ private:
     //   保持 true → 进食手持动画（手落下 + 嚼动）持续显示，progress 暂停；冷却到 0 才恢复累积（连食下一件）。
     //   1.0s ≈ MC 1.0 进食冷却量级（机制对齐，非精确数值复刻）。
     static constexpr float kEatCooldown = 1.0f;
+    // t669 毒马铃薯食物中毒（机制等价 MC 1.0 poisonous potato：60% 概率中毒起效，中毒期持续 ~8s、
+    //   每秒 -1 HP —— 无状态系统时的简化：饥饿 + HP 双损，视觉复用 damaged 红闪 / 饥饿鼓腿掉）。
+    //   finishEating 食毒薯掷 60% → m_poisonTimer = kPoisonDuration；tickImpl 每秒（kPoisonInterval 累积）
+    //   emit fallDamageTaken(1, Generic) → 呈现层 takeDamage 链（damaged 红闪）+ hungerUpdated 掉 1 饥饿。
+    //   毒薯兼负 +2 饥饿恢复（foodHungerAmount），6 点净损（8s × 1）由持续掉血体现。仅 Survival 结算
+    //   （Creative/Spectator 无敌：进食不中毒，同火 / 窒息模式）。期间再食另一毒薯重置时长（可叠续）。
+    static constexpr int kPoisonousPotatoHunger = 2;   // 毒薯饥饿恢复（MC 1.0 poisonous potato +2 hunger）
+    static constexpr float kPoisonDuration = 8.0f;     // 中毒持续秒数（MC 1.0 poison ~5s 起；8s ≈ 8 点损）
+    static constexpr float kPoisonInterval = 1.0f;     // 每次中毒扣损的间隔秒数
+    static constexpr int kPoisonChancePct = 60;        // 食毒薯中毒概率（MC 1.0：60%）
     static constexpr float kHungerIdleRate   = 0.013f; // ~1 饥饿 / 75s ≈ 25min 耗尽（满→空）
     static constexpr float kHungerWalkRate   = 0.067f; // ~1 饥饿 / 15s ≈ 5min 走路耗尽
     static constexpr float kHungerSprintRate = 0.133f; // ~1 饥饿 / 7.5s ≈ 2.5min 疾跑耗尽

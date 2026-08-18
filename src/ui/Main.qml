@@ -7662,14 +7662,15 @@ Window {
             window.worldEditRev++
             // t125：火把伪光源改由下方 player.onTorchPlaced 追加（需携带玩家点击面法线定向）；本通用
             //   放块信号不再处理火把，避免「两处追加」重复。
-            // t32：生存放置消耗 1 件（创造=无限源不耗）。worldgen 经 m_chunks.setBlock 直写、不经
-            // World::setBlock → 不会发 blockPlaced；游戏内该信号仅玩家 placeBlock 触发，故此处即
-            // 「玩家放置成功」语义事件。ViewModel 观察 World 事件做栈突变（PLAN §2 分层：VM 只依赖
-            // World/Game 数据，不反向写）。takeStack 取至 0 → 选中栈变 Air → player.selectedBlock
-            // 经 selectedBlockId 绑定变 Air → 右键不再放置（playercontroller 守 Air）。
-            // t117：FallingBlock 着地走 World::setBlockFromEntity（不发 blockPlaced）→ 不会误触本分支。
-            if (player.mode === PlayerController.Survival)
-                hotbarVM.takeStack(hotbarVM.selectedSlot, 1)
+            // t669 放置消耗收口：生存放置由 PlayerController::placeBlock（C++）各放置分支统一 takeStack。
+            //   原 t32 行为是此处 blanket takeStack —— 但 World::blockPlaced 不止由玩家 placeBlock 触发：
+            //   锄耕地（setBlock Farmland）/ 踩踏回土（setBlock Dirt）/ 种植 / 倒流体等都是非放置类
+            //   setBlock → 发 blockPlaced → 此处理 blanket 扣掉选中槽 = t669① 钻石锄首用整个消失 /
+            //   t669② 持泥土踩踏泥土凭空消失 的同一根因（放置语义事件被用在非放置写入上）。收口到
+            //   C++ 放置动作本体（placeBlock 5 处放置分支 + 既有各 useBlock 分支自带 takeStack），本处理器
+            //   只做视觉/音频/统计等呈现层消费。worldgen 经 m_chunks.setBlock 直写、不经 World::setBlock →
+            //   不会发 blockPlaced；游戏内该信号现仅表示「某格 id 被世界改写了」。
+            //   t117：FallingBlock 着地走 World::setBlockFromEntity（不发 blockPlaced）→ 不会误触本分支。
             // t117：新放的沙若下方空气 → 自身塌落（玩家在半空放沙立即落）。
             if (id === 8) maybeTriggerFallingBlock(x, y, z)
             // t607：玩家放置发射器 → dispenserStore.ensureDispenser 注册条目（区分「玩家库存发射器」vs
