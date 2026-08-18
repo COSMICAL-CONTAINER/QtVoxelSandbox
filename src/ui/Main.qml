@@ -7194,6 +7194,145 @@ Window {
             }
         }
 
+        // t679 附魔台悬浮翻页书（t638 静态 C++ 书 → QML 动画书）：
+        //   用户要求书**悬浮**于附魔台格上方 0.25 间隙（矮盒顶 y+0.75 ↔ 格顶 y+1.0，书心 ~y+0.85）而非
+        //   贴台面、有体积的**敞开书**（两页 V 形 + 书脊）、**随机翻页动画**（页片摆动）。C++ 静态 mesh
+        //   无法动画（t638 书在 partialblockgeometry = 静态盒）→ 移除静态书、改本 QML delegate 渲染。
+        //   位置来源：enchantTablePositions ListModel（事件驱动 + worldChanged 兜底，同 torchPositions 模式；
+        //   World 无「按类型枚举方块」廉价 API → 用既有事件流维护表位列表，所有放置的附魔台都渲染——用户
+        //   在任一台旁都看到悬浮翻页书，机制等价 MC 附魔台顶部 floating book）。
+        //   分层（PLAN §2）：纯呈现层，只读 blockAt 校验 + 消费 blockPlaced/broken 语义事件，绝不反向写栅格。
+        //   几何：cell-local 原点 = 台格中心 (cellX+0.5, cellY+0.85, cellZ+0.5)。两页绕书脊（Z 轴）各外倾
+        //   28° 成 V（薄盒 0.38 宽 × 0.46 深，页心 ±0.19 使内缘贴书脊）；书脊 = 底部细深色横条；翻页片 =
+        //   覆在右页上的同尺寸薄片，书脊枢轴绕 Z 从 28°（贴右页）翻越顶部到 332°（落左页）再返回（页片摆动）。
+        //   随机翻页：每 2.5-6s 随机触发一次翻页动画（右页片翻到左页 → 停 250ms → 翻回），整体再叠加
+        //   缓慢浮沉（bob）→ 「悬浮 + 随机翻页」双动效。贴图：无 pack 实体书贴图接入（pack
+        //   enchanting_table_book.png 是 512×256 整本书 UV 展开，与两页盒映射不符）→ 程序白纸页
+        //   （暖白 #f5f1e6 + 书脊深棕 #4a3628），§9 自绘原创（机制等价 MC 书外观，非 MC 资产）。
+        Node {
+            id: bookHost
+            property var bookObjs: ({})
+            // 新增附魔台悬浮书 delegate（去重：同坐标已存在则跳过）。
+            function addBookVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                if (bookObjs[key]) return
+                bookObjs[key] = bookDelegate.createObject(bookHost,
+                    {cellX: x, cellY: y, cellZ: z})
+            }
+            // 移除（.destroy() 可靠回收 Node + 子 Model + 动画）。
+            function removeBookVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                const o = bookObjs[key]
+                if (o) { o.destroy(); delete bookObjs[key] }
+            }
+            // 兜底清孤儿（worldgen 重生 / 读档等系统改写栅格不经 blockBroken）：扫表删 blockAt !=
+            //   EnchantingTable(94) 的条目（与 enchantTablePositions.onWorldChanged 校验并行，各管各的容器）。
+            function cleanupVis() {
+                for (const key in bookObjs) {
+                    const p = key.split(",")
+                    if (theWorld.blockAt(parseInt(p[0]), parseInt(p[1]), parseInt(p[2])) !== 94) {
+                        bookObjs[key].destroy(); delete bookObjs[key]
+                    }
+                }
+            }
+        }
+
+        // t679 悬浮翻页书 delegate 模板：bookHost.addBookVis 经 createObject 实例化（cellX/Y/Z 注入）、
+        //   removeBookVis/cleanupVis 用 .destroy() 回收（同 torchHost 模式 —— Repeater 不销毁 3D delegate
+        //   的既有根因，弃用 Repeater）。
+        Component {
+            id: bookDelegate
+            Node {
+                id: bookRoot
+                property int cellX: 0
+                property int cellY: 0
+                property int cellZ: 0
+                // 悬浮位：台格中心 + 0.25 间隙内（矮盒顶 y+0.75 ↔ 格顶 y+1.0；书心 y+0.82，页尖
+                //   ~y+0.96 收在间隙内不凸到上一格）。
+                position: Qt.vector3d(cellX + 0.5, cellY + 0.82, cellZ + 0.5)
+
+                // 柔浮（整体缓慢上下浮沉，幅度 ~0.07 格；独立 bobNode 承载，不动 position 主锚）。
+                Node {
+                    id: bobNode
+                    property real bob: 0.0
+                    position: Qt.vector3d(0, -0.035 + 0.07 * bob, 0)
+                    // 单段线性 0→1 经 yoyo 自动往返 → 正弦式浮沉（柔和悬浮感）。
+                    SequentialAnimation on bob {
+                        running: true; loops: Animation.Infinite
+                        NumberAnimation { from: 0.0; to: 1.0; duration: 3200 }
+                        NumberAnimation { from: 1.0; to: 0.0; duration: 3200 }
+                    }
+
+                    // 左页：绕书脊（Z 轴）外倾 -22°，页盒心 (-0.19, 0, 0)（内缘贴书脊）。
+                    Node {
+                        rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: -22 }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(-0.19, 0.0, 0.0)
+                            scale: Qt.vector3d(0.38, 0.022, 0.46)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f5f1e6" }
+                        }
+                    }
+                    // 右页：镜像（+22°）。
+                    Node {
+                        rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: 22 }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.19, 0.0, 0.0)
+                            scale: Qt.vector3d(0.38, 0.022, 0.46)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f5f1e6" }
+                        }
+                    }
+                    // 书脊：底部细深棕横条（两页交汇处）。
+                    Model {
+                        geometry: UnitCube {}
+                        position: Qt.vector3d(0.0, -0.02, 0.0)
+                        scale: Qt.vector3d(0.032, 0.03, 0.46)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a3628" }
+                    }
+                    // 翻页片：覆于右页上的同尺寸薄片，枢轴在书脊。baseAngle=22（贴右页）；
+                    //   flipAngle 0→316 → 页片总角 22→338（翻越顶部 ≡ -22° 落左页）；再 316→0 翻回。
+                    //   轴对齐盒无曲率 → 像素风下读作「页片摆动」（机制等价 MC 书页翻动，§9 原创简化）。
+                    Node {
+                        id: flipPivot
+                        property real baseAngle: 22
+                        property real flipAngle: 0.0
+                        rotation: Rotation {
+                            axis: Qt.vector3d(0, 0, 1)
+                            angle: flipPivot.baseAngle + flipPivot.flipAngle
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.19, 0.006, 0.0)
+                            scale: Qt.vector3d(0.38, 0.014, 0.44)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fdfaf1" }
+                        }
+                    }
+                }
+
+                // 随机翻页驱动：每 2.5..6s 随机触发一次（页片翻到左页 → 停 250ms → 翻回）。
+                Timer {
+                    id: pageFlipTimer
+                    interval: 2500
+                    running: true
+                    repeat: true
+                    onTriggered: {
+                        pageFlipAnim.restart()
+                        // 下次翻页随机延迟（2.5..6s）。
+                        pageFlipTimer.interval = 2500 + Math.floor(Math.random() * 3500)
+                    }
+                }
+                // 翻页动画：flipAngle 0→316（总角 22→338，翻越顶部 → 落左页）停 250ms → 316→0（翻回右页）。
+                SequentialAnimation {
+                    id: pageFlipAnim
+                    running: false
+                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 0.0; to: 316.0; duration: 700 }
+                    PauseAnimation { duration: 250 }
+                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 316.0; to: 0.0; duration: 500 }
+                }
+            }
+        }
+
         // t196 / t225 / t441 箱子盖子开合动画（场景内 3D Node，与 torchHost / itemHost 同层）。仅当前所开箱子
         //   （chestX/Y/Z）一处显盖子（一次只开一只箱子，chestOpen 单 bool）。chestLidAngle 由 openChest/
         //   closeChest 驱动（window 级 Behavior 平滑过渡 0↔全开角）。
@@ -7504,6 +7643,11 @@ Window {
 
     // t88 火把位置列表（火把伪光源 Repeater 的 model；blockPlaced/blockBroken/worldChanged 维护）。
     ListModel { id: torchPositions }
+    // t679 附魔台位置列表（悬浮翻页书的 model；同 torchPositions 事件驱动 + worldChanged 兜底校验）。
+    //   放置/破除经 onBlockPlaced/onBlockBroken（id 94 = BlockRegistry::EnchantingTable）同步增删，
+    //   worldgen 直写 / 读档等系统改写栅格不经两信号 → onWorldChanged 扫描校验清理（blockAt != 94 删）。
+    //   bookHost.bookObjs（视觉 delegate 表）与之并行维护（同 torchPositions ↔ torchHost 模式）。
+    ListModel { id: enchantTablePositions }
     // t312 聊天历史（PLAN §2 UI 层呈现态）：{sender, text, isSystem}。玩家消息（openChat 输入）+
     //   系统播报（死亡原因等）共入此列表。单机无联机服务端 → 历史不持久化（回主菜单 / 切世界清空，
     //   见 returnToMenu / enterWorld）。Phase 3 联机接入时改为协议层收发（LocalServer/RemoteServer）。
@@ -7595,6 +7739,10 @@ Window {
             // t170：同步销毁视觉 delegate（木柄+火焰 Model）—— torchPositions 供 TorchSmoke/选中框读，
             //   torchHost.torchObjs 供本场景渲染，二者经同一信号并行增删。
             if (id === 13) { removeTorchAt(x, y, z); torchHost.removeTorchVis(x, y, z) }
+            // t679：附魔台被破 → 从悬浮书位置表移除 + 销毁视觉 delegate（id=94=BlockRegistry::EnchantingTable；
+            //   同 torch=13 字面量 + 注释模式）。enchantTablePositions 供 Repeater/调试读、bookHost.bookObjs
+            //   供本场景渲染，二者经同一信号并行增删。
+            if (id === 94) { removeEnchantTableAt(x, y, z); bookHost.removeBookVis(x, y, z) }
             // t173/t179/t522：箱子被破 → 先把内部 27 槽内容 spawnItem 掉落世界（机制等价 MC 1.0 破箱掉落
             //   内容，修用户报「箱子装东西后挖掉不掉」），再 chestStore.clearChest 清孤儿条目。id=22=
             //   BlockRegistry::Chest（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
@@ -7670,6 +7818,18 @@ Window {
             window.worldEditRev++
             // t125：火把伪光源改由下方 player.onTorchPlaced 追加（需携带玩家点击面法线定向）；本通用
             //   放块信号不再处理火把，避免「两处追加」重复。
+            // t679：附魔台放置 → 追加悬浮书位置 + 视觉 delegate（id=94=BlockRegistry::EnchantingTable）。
+            //   放置路径（玩家 placeBlock / 其它经 World::setBlock 的写入）都会发 blockPlaced → 此处
+            //   统一追加（去重）；破块经上方 onBlockBroken 移除；worldgen 直写 / 读档不经本信号 →
+            //   由 onWorldChanged 校验清理兜底（同 torchPositions 三重维护）。
+            if (id === 94) {
+                for (let i = 0; i < enchantTablePositions.count; ++i) {
+                    const e = enchantTablePositions.get(i)
+                    if (e.x === x && e.y === y && e.z === z) { bookHost.addBookVis(x, y, z); return }
+                }
+                enchantTablePositions.append({x: x, y: y, z: z})
+                bookHost.addBookVis(x, y, z)
+            }
             // t669 放置消耗收口：生存放置由 PlayerController::placeBlock（C++）各放置分支统一 takeStack。
             //   原 t32 行为是此处 blanket takeStack —— 但 World::blockPlaced 不止由玩家 placeBlock 触发：
             //   锄耕地（setBlock Farmland）/ 踩踏回土（setBlock Dirt）/ 种植 / 倒流体等都是非放置类
@@ -7724,8 +7884,17 @@ Window {
                 const e = torchPositions.get(i)
                 if (theWorld.blockAt(e.x, e.y, e.z) !== 13) torchPositions.remove(i)
             }
+            // t679：附魔台悬浮书位置校验（worldgen 重生 / 读档等系统改写栅格不经 blockBroken → 扫描
+            //   enchantTablePositions 把 blockAt != EnchantingTable(94) 的残留条目删掉；与 bookHost 视觉
+            //   delegate 校验并行，各管各的容器）。机制同上方 torchPositions 校验（blockAt 真值单一权威）。
+            for (let i = enchantTablePositions.count - 1; i >= 0; --i) {
+                const e = enchantTablePositions.get(i)
+                if (theWorld.blockAt(e.x, e.y, e.z) !== 94) enchantTablePositions.remove(i)
+            }
             // t170：同步清视觉 delegate 孤儿（与 torchPositions 兜底并行，各管各的容器）。
             torchHost.cleanupVis()
+            // t679：同步清悬浮书视觉 delegate 孤儿（同 torchHost 并行模式）。
+            bookHost.cleanupVis()
         }
     }
 
@@ -7747,6 +7916,15 @@ Window {
         for (let i = torchPositions.count - 1; i >= 0; --i) {
             const e = torchPositions.get(i)
             if (e.x === x && e.y === y && e.z === z) torchPositions.remove(i)
+        }
+    }
+
+    // t679 工具：按坐标移除附魔台悬浮书位置（破块 / 校验清理共用）。同 removeTorchAt 模式 —— 删**所有**
+    //   匹配条目（配合 onBlockPlaced 源头去重 + onWorldChanged 兜底清孤儿，三重保险）。
+    function removeEnchantTableAt(x, y, z) {
+        for (let i = enchantTablePositions.count - 1; i >= 0; --i) {
+            const e = enchantTablePositions.get(i)
+            if (e.x === x && e.y === y && e.z === z) enchantTablePositions.remove(i)
         }
     }
 

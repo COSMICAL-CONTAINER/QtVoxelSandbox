@@ -806,33 +806,15 @@ int PartialBlockGeometry::append(
         //   solid=false（见 BlockDef）→ 相邻整立方不剔面、画满高侧壁填住上方 0.25 缺口（防透视 x-ray 洞，
         //   同 Farmland / glass 模式）；碰撞矮盒 0.75（collisionAABBs 特例）；selection/raycast 仍整格（ShapeFull）。
         //   不做邻居剔除（异形小体约定，同 Farmland）。底面压在下方实体上不可见，overdraw 可忽。
-        //   t638 ⑧ 顶部摊开书（用户「附魔台顶部立一本打开的书」——机制等价 MC 1.0 附魔台顶上 floating book）：
-        //   矮盒顶 (y=0.75) 中央一本**摊开的两页书** = 两个薄盒页（各 0.34×0.03×0.30，书脊相接、各向外微倾
-        //   ~8° 成 V 形摊开角），贴 enchant_book(162) 程序瓦片（白纸底 + 灰字线 + 中央书脊暗线——无 pack 等
-        //   价（MC 书是独立实体模型非方块贴图）→ 程序贴图恒用）。纯视觉装饰（不进碰撞——collisionAABBs
-        //   仍 0.75 矮盒；机制等价 MC 附魔台书无碰撞）。参照雪层 / 花 cross 的 partial 装饰模式（同一方块格
-        //   内叠加装饰小体，同床枕头 / 床头板先例）。
+        //   t638 ⑧ 曾在此画顶部摊开书 → t679 移出（见 case 末注释：静态 mesh 无法翻页动画，改 QML 动画书）。
         constexpr float kEnchantTop = 0.75f; // 12/16（与 collisionAABBs 附魔台特例同高）
         pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, kEnchantTop, 0.f, 1.f,
                 tile, light, tileW, hx, hy, v0, v1,
                 BlockRegistry::def(blockId).topTile); // +Y 顶面 enchanting_table_top(109)；侧·底用 tile(=sideTile 110)
-        // t638 摊开书两页：bookTile=enchant_book(162)。两页薄盒绕书脊（中央 x=0.5）各向外倾 8°——pushBox 是
-        //   轴对齐盒（无旋转），倾角用「外缘略抬高」近似：页盒底 y=0.75、外缘顶 y=0.79 / 书脊侧顶 y=0.75+0.02
-        //   → 阶梯两段薄盒拼出 V 形摊开角（每页拆 2 段；像素风下读作摊开书页足够）。页尺寸 0.34 宽 × 0.30 深
-        //   （居中 z 0.35..0.65），书脊相接于 x=0.5。
-        {
-            const int bookTile = 162;
-            // 左页两段（x 0.16..0.33 / 0.33..0.50；内段近书脊略低）。
-            pushBox(verts, idx, lx, ly, lz, 0.16f, 0.33f, kEnchantTop, kEnchantTop + 0.045f, 0.35f, 0.65f,
-                    bookTile, light, tileW, hx, hy, v0, v1);
-            pushBox(verts, idx, lx, ly, lz, 0.33f, 0.50f, kEnchantTop, kEnchantTop + 0.025f, 0.35f, 0.65f,
-                    bookTile, light, tileW, hx, hy, v0, v1);
-            // 右页两段（镜像）。
-            pushBox(verts, idx, lx, ly, lz, 0.50f, 0.67f, kEnchantTop, kEnchantTop + 0.025f, 0.35f, 0.65f,
-                    bookTile, light, tileW, hx, hy, v0, v1);
-            pushBox(verts, idx, lx, ly, lz, 0.67f, 0.84f, kEnchantTop, kEnchantTop + 0.045f, 0.35f, 0.65f,
-                    bookTile, light, tileW, hx, hy, v0, v1);
-        }
+        // t679 静态书移出（t638 曾在此画摊开书两页）：用户要求书**悬浮**于附魔台格上方 0.25 间隙 +
+        //   **随机翻页动画** —— C++ 静态 mesh 无法动画，改由 Main.qml bookHost 渲染 QML 动画书
+        //   （bookDelegate：两页 V 形 + 页片翻动 + 柔浮）。tile 162（enchant_book）保留在程序贴图 /
+        //   图集（后续书 UI 或其他用途可复用），本 case 不再消费。
         break;
     }
     case BlockRegistry::BedRed: case BlockRegistry::BedOrange: case BlockRegistry::BedYellow:
