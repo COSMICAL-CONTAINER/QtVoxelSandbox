@@ -1660,6 +1660,9 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
         noteIceWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         noteFluidWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         noteGrowthWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
+        notePowerWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t683：同族补齐——爆炸直写绕过 setBlock
+            //   编辑钩子 → 炸掉红石族（粉 / 源 / 接收器）或粉旁石块后 m_powerDirty 不含该格 → 邻粉 / 灯 /
+            //   轨电力不重算（幽灵电：灯恒亮 / 轨恒加速）直到玩家再编辑。逐破坏块 O(1)（同上三 note 口径）。
     }
     // rv-low-batch2 补齐：爆炸批量直写绕过 setBlock 编辑钩子族 → 邻轨连接 / 雪层坍落漏复检（同 tickLavaFlow
     //   焚毁路径逐块调 checkXxxOnEdit 的模式）。对每个破坏格补 checkRailOnEdit（球内破坏改变邻轨连接位 →
