@@ -5,6 +5,7 @@
 #include <QVector3D>
 #include <QtQml/qqml.h>
 
+#include <unordered_set> // t658 探测轨占用边沿表（m_detectorOccupied）
 #include <vector>
 
 // 矿车实体管理器（t565；Entities 层）。机制等价 MC 1.0 minecart。
@@ -106,6 +107,11 @@ public:
     //   无骑乘（m_riderCart<0）→ no-op。
     void tickRiddenCart(qreal dt, World *world, float wishX, float wishZ, QVector3D &outCartPos);
 
+    // t658 探测轨占用边沿收尾（tickRiddenCart 末尾调）：prev（上一帧占用快照）− 本帧占用 = 离开沿 →
+    //   清该探测轨 state bit4（DetectorRailStateOnFlag）断电（机制等价 MC 1.0 矿车离开即断；setWaterSilent
+    //   静默写 → notePowerWrite → 电力重算断开下游接收器）。prev 空 → 零开销早退。
+    void updateDetectorRailEdges(World *world, const std::unordered_set<quint64> &prev);
+
 signals:
     void entitiesChanged();                        // spawn / 挖毁 / 骑乘物理推进触发；驱动 count/revision + QML 绑定刷新
     void cartBroken(int x, int y, int z);          // 矿车被「挖」（攻击）→ 呈层据它 spawnItem 掉 MinecartId 物品
@@ -124,6 +130,10 @@ private:
     int m_riderCart = -1;   // 玩家当前骑的矿车索引（-1 = 未骑）
     std::vector<int> m_freeSlots; // slot-reuse：已释放可复用的槽索引（LIFO）
     int m_liveCount = 0;          // 活体矿车数
+    // t658 探测轨当前占用表（本帧被骑矿车压住的探测轨格；键 = packRailCell 世界坐标打包）。tickRiddenCart
+    //   开头快照为 prev、本帧重建；updateDetectorRailEdges 用 prev − cur 找离开沿清位断电。
+    //   无探测轨场景恒空（零开销）。切世界不显式清（占用表陈旧项的 blockAt 守卫自然跳过；下帧重建覆盖）。
+    std::unordered_set<quint64> m_detectorOccupied;
 
     int acquireSlot(Cart &&c)
     {
