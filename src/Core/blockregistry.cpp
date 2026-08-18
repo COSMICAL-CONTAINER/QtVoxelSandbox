@@ -625,6 +625,8 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* detector_rail  */ {int(BlockRegistry::DetectorRail),  158,158,158,158, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::DetectorRail),  1, 64, "detector_rail",  "探测铁轨"},
     // 红石火把：常亮装饰光源（光 7；真红石信号留红石大轮）。cross 形广告牌（cutout 段）；放置预检同火把
     //   （实体邻居支撑）。dropId=自身、maxStack=64。
+    // 红石火把：t657 起是**亮态电源 + 反相器**（附着块被供电 → 熄灭不发能不发光 = NOT 门，机制等价 MC 1.0
+    //   redstone torch 核心机制）。cross 形广告牌（cutout 段）；放置预检同火把（实体邻居支撑）。dropId=自身。
     /* redstone_torch */ {int(BlockRegistry::RedstoneTorch), 161,161,161,161, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::RedstoneTorch), 1, 64, "redstone_torch", "红石火把"},
     // ── t656 红石粉导线（RedstoneDust；机制等价 MC 1.0 redstone wire）：红石粉物品（0x224）右键实体方块
     //   顶面放置成的贴地薄层导线。solid=false / ShapeNone（无碰撞，同铁轨）、hardness=0（瞬破）、NoTool、

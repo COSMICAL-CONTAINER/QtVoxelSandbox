@@ -2026,7 +2026,6 @@ bool World::recomputePowerLocal()
     }
 
     bool any = false;                 // 有实际 state 写入 / 触发信号
-    std::vector<std::array<int, 3>> litTorchCells;  // 重亮火把（下 tick 须再传播其供能 → 重入脏集）
     // Phase A2：域内粉重算电力 + 连接位。
     for (const quint64 k : region) {
         int x, y, z;
@@ -2076,6 +2075,9 @@ bool World::recomputePowerLocal()
         int x, y, z;
         unpackGrowthCell(a, x, y, z);
         addReceiver(x, y, z);
+        // t657/t658：锚点的 6 邻接收器也入扫描（如：锚点旁放上电源 / 破掉中间粉 → 锚点邻的灯 / 轨 / TNT
+        //   电力翻转，但锚点自身非粉 → 不经粉域邻接覆盖）。
+        for (const auto &d : kNb) addReceiver(x + d[0], y + d[1], z + d[2]);
     }
     for (const quint64 k : receivers) {
         int x, y, z;
@@ -2136,12 +2138,10 @@ bool World::recomputePowerLocal()
         int x, y, z;
         unpackGrowthCell(a, x, y, z);
         addTorch(x, y, z);
-        // 锚点的附着格也查（编辑的是火把的支撑块 → 火把反相状态可能翻转）。
-        if (m_chunks.blockAt(x, y, z) == BlockRegistry::RedstoneTorch) {
-            int ax, ay, az;
-            BlockRegistry::torchAttachOffset(m_chunks.stateAt(x, y, z), ax, ay, az);
-            // （附着格自身的电力变化已由该格的编辑入脏集覆盖；火把已由上方 addTorch(x,y,z) 入集。）
-        }
+        // t657：锚点的 6 邻火把也入扫描——附着格是被编辑块（或其邻）时反相状态须复检。场景：红石火把
+        //   立在块 B 上，玩家在 B 的另一侧放 / 破电源（编辑锚点 = 电源格 ≠ 火把格）→ B 供能翻转 →
+        //   火把（B 的邻格）经本 6 邻扫描捕获。
+        for (const auto &d : kNb) addTorch(x + d[0], y + d[1], z + d[2]);
     }
     for (const quint64 k : torches) {
         int x, y, z;
@@ -2149,7 +2149,23 @@ bool World::recomputePowerLocal()
         const quint8 st = m_chunks.stateAt(x, y, z);
         int ax, ay, az;
         BlockRegistry::torchAttachOffset(st, ax, ay, az);
-        const bool attachPowered = isReceivingPower(x + ax, y + ay, z + az); // 附着块被供电（含粉 / 源）
+        // t657 附着块供电判定 —— **排除火把自身**（机制等价 MC：火把不向其所附着的方块供能 —— 否则
+        //   亮火把给自己的支撑供电 → 反相熄灭 → 失电重亮 → 永久振荡（自反馈）。isReceivingPowerEx 沿
+        //   isReceivingPower 逻辑但跳过火把格 (x,y,z)（该火把自身）。
+        const bool attachPowered = [&]() {
+            static constexpr int kNb2[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+            const int sx = x + ax, sy = y + ay, sz = z + az;
+            for (const auto &d : kNb2) {
+                const int nx = sx + d[0], ny = sy + d[1], nz = sz + d[2];
+                if (nx == x && ny == y && nz == z) continue; // 跳过火把自身（防自反馈振荡）
+                if (powerSourceLevel(nx, ny, nz) > 0) return true;
+                const quint8 nb = m_chunks.blockAt(nx, ny, nz);
+                if (BlockRegistry::isRedstoneDust(nb)
+                    && (m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask) > 0)
+                    return true;
+            }
+            return false;
+        }(); // 附着块被供电（含粉 / 源；不含本火把）
         const bool off = (st & BlockRegistry::RedstoneTorchStateOffFlag) != 0;
         if (attachPowered != off) {
             // 供电 → 置熄灭位；失电 → 清熄灭位重亮。附着位（低 3 位）不动。

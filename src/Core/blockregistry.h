@@ -863,7 +863,7 @@ public:
         //   pack {161→redstone_torch_on.png}（on 常亮态；off 熄灭态不接——本方块恒亮）。
         //   音色 GroupWood（木质柄）。配方：木棒 + 红石粉（竖列 2 格）→ 1 红石火把（机制等价 MC 1.0
         //   redstone torch on a stick）。
-        RedstoneTorch = 129, // 红石火把：常亮装饰光源（光 7）；cross 形；配方 木棒+红石粉
+        RedstoneTorch = 129, // 红石火把：亮态电源（光 7）+ 反相器（附着块被供电 → 熄灭，NOT 门，t657）；cross 形；配方 木棒+红石粉
         // ── t656 红石粉导线（redstone dust wire；机制等价 MC 1.0 redstone wire）：**红石粉物品（RecipeRegistry::
         //   RedstoneId 0x224）右键实体方块顶面放置成的导线方块**（放置耗 1 粉、破坏掉回 1 粉 —— 机制等价 MC
         //   「红石粉物品本身就是导线」，不另立物品 id / 不设合成配方（MC 1.0 红石粉由采矿获得，无配方））。
