@@ -55,15 +55,24 @@ void pushBox(QVector<Vtx> &verts, QVector<quint32> &idx,
              float x0, float x1, float y0, float y1, float z0, float z1,
              int tile, const PartialLightCtx &L,
              float tileW, float hx, float hy, float v0, float v1,
-             int topTile = -1, int bottomTile = -1)
+             int topTile = -1, int bottomTile = -1,
+             int sideTile = -1, int sideLargeAxis = -1)
 {
     // topTile >= 0 时 +Y 顶面（fi==2）用 topTile、其余面用 tile（t408 耕地：顶=farmland_dry / 侧·底=dirt）；
     //   bottomTile >= 0 时 -Y 底面（fi==3）用 bottomTile、其余面用 tile（t638 仙人掌：底=cactus_bottom /
     //   顶=cactus_top / 侧=cactus_side）。默认 -1 → 全 6 面用 tile（既有 slab/stairs/fence/... 调用不变）。
+    // t674 sideTile / sideLargeAxis：sideTile>=0 时「非大面」的薄侧边用 sideTile、两个大面用 tile——
+    //   sideLargeAxis 指定大面法线轴（0=X 1=Y 2=Z；门薄板 3/16 厚：大面 = 板面、薄侧 = 板厚侧边）。修门侧边
+    //   用压缩门贴图（t620 门板 1×1 大面贴门贴图、3/16 薄侧边被同一门贴图压缩成抽象条纹）→ 薄侧边改用
+    //   普通木板瓦片（机制等价 MC 门模型薄边用木板；木/云杉门各自配 planks/spruce_planks）。
     for (int fi = 0; fi < 6; ++fi) {
         const BoxFace &f = kBoxFaces[fi];
+        const bool isLargeFace = (sideLargeAxis == 0) ? (fi == 0 || fi == 1)
+                              : (sideLargeAxis == 1) ? (fi == 2 || fi == 3)
+                              : (fi == 4 || fi == 5);
         const int ftile = (topTile >= 0 && fi == 2) ? topTile
-                        : (bottomTile >= 0 && fi == 3) ? bottomTile : tile;
+                        : (bottomTile >= 0 && fi == 3) ? bottomTile
+                        : (sideTile >= 0 && !isLargeFace) ? sideTile : tile;
         const float u0 = ftile * tileW + hx, u1 = (ftile + 1) * tileW - hx;
         // 单位盒面模板的常数轴（法线轴）填成实际盒体边值（+面=x1/y1/z1，-面=x0/y0/z0）；
         // 面内两轴取模板 0/1 → 映射到该面实际范围（整张瓦片贴图覆盖该面）。
@@ -296,6 +305,13 @@ int PartialBlockGeometry::append(
         //   tileIndex(PosX)=sideTile=lower 是手持 / 掉落物 BlockCube 的门贴图）。
         const BlockRegistry::BlockDef &doorDef = BlockRegistry::def(blockId);
         const int doorTile = (state & 8) ? doorDef.topTile : doorDef.bottomTile; // bit3=上格 → upper / 下格 → lower
+        // t674 薄侧边用普通木板（用户「门薄侧边用压缩门贴图很抽象」）：门板 3/16 厚的侧边（±Y 顶/底 + 垂直于
+        //   板面的两个薄侧，共 4 个薄面）改用**同族木板**瓦片（橡木门 → planks tile / 云杉门 → spruce_planks
+        //   tile；经 BlockRegistry::def 取，免字面量漂移）；两个大面（板面）仍用 doorTile。thinX = 薄轴沿 X
+        //   （合态 facing 0/1 或开态 facing 2/3）→ 大面法线轴 X，反之 Z。
+        const quint8 planksBlock = (blockId == BlockRegistry::SpruceDoor)
+            ? BlockRegistry::SprucePlanks : BlockRegistry::Planks;
+        const int planksTile = BlockRegistry::def(planksBlock).sideTile;
         //   合：薄板贴在「朝向」边（朝向 +X → 板在 x[0.8125,1]）；开：板旋 90° 贴邻边。
         const int facing = state & 3;
         const bool open = (state & 4) != 0;
@@ -316,7 +332,10 @@ int PartialBlockGeometry::append(
             case 3: bx0 = s0; bx1 = s1; break; // 原 -Z → 旋到 -X 边
             }
         }
-        pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.f, 1.f, bz0, bz1, doorTile, light, tileW, hx, hy, v0, v1);
+        const bool thinX = (bx1 - bx0) < 0.5f;
+        const int sideLargeAxis = thinX ? 0 : 2;
+        pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.f, 1.f, bz0, bz1, doorTile, light, tileW, hx, hy, v0, v1,
+                /*topTile*/-1, /*bottomTile*/-1, planksTile, sideLargeAxis); // t674 薄侧边木板贴图
         break;
     }
     case BlockRegistry::WoodTrapdoor: {
