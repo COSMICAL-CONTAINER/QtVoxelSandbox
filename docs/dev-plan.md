@@ -2692,7 +2692,7 @@ t647-t679（33 项）。优先级：**P0 = 🅰 附魔链 t647-t650 + t655 死�
 
 ### 🅰 审查修复批 H 级（3 项，最优先）
 
-**t680** 探测轨供电死代码三修（审查 H1，deef388）
+**t680** 探测轨供电死代码三修（审查 H1，deef388）✅✅ 已完成（commit a493dcf）
 - 矿车 pos.y = 轨格 y+1+rise+0.30 → bcy=floor(pos.y) 恒为轨上方空气格，探测循环首格非轨即 break → detY 恒 -1，DetectorRailStateOnFlag 永不置位。三处同 commit：① 钉轨面循环记 pinnedY，探测判 blockAt(bcx,pinnedY,bcz)；② m_detectorOccupied 补 clear()（防「离开沿」永不触发永久带电）；③ 占用标记移出 speed!=0 闸门（停稳不被误判离开）。
 
 **t681** 侧挂红石火把 NOT 门振荡 + mesh 重建风暴（审查 H2，81d9d02）
