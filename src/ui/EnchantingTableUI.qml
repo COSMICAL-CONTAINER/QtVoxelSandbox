@@ -396,7 +396,11 @@ Item {
     }
     // t649 档位解锁（MC 1.0 语义）：1 档恒解锁；2 档需 ≥5 书架；3 档需 ≥10 书架（用户口径「10 个左右书架
     //   才能附 123 级」）。旧版 floor(power/2)+1 令 2 书架即全档解锁（4 书架即顶档的根因之一）。
-    readonly property int maxLevel: (root.bookshelfPower >= 10) ? 3 : (root.bookshelfPower >= 5) ? 2 : 1
+    //   t694：创造模式全档解锁（tier 门禁放开——机制等价 MC 创造附魔台无视书架限制；用户实测「创造仍
+    //   档位锁」）。
+    readonly property int maxLevel: root.creativeMode ? 3
+                                    : (root.bookshelfPower >= 10) ? 3
+                                    : (root.bookshelfPower >= 5) ? 2 : 1
     // t649 档位 offered 等级（附魔强度，进 selectEnchants）：offered(i) = floor(bs*20*i/33) + i，钳 [1,30]。
     //   校准锚点（机制等价 MC 1.0「top slot = rand(1..8)+floor(power/2)+rand(0..power)，中低档递减」的确定性
     //   近似——MC 每次点击随机，本实现显示值确定（附魔结果随机性由 selectEnchants 的 seed 承担）：
@@ -426,6 +430,10 @@ Item {
     }
     // 当前 XP 等级（绑定 playerState.level NOTIFY levelChanged；低频，升级才发）。
     readonly property int playerLevel: playerState ? playerState.level : 0
+    // t694 创造模式免等级（同 t606③ 铁砧 creativeMode 先例）：player.mode === Creative → 三档全解锁
+    //   （书架 tier 门禁放开）+ XP 消耗全免（doEnchant 跳过 spendLevels；材料消耗照旧——保守只免经验，
+    //   机制等价 MC 创造附魔台免等级）。player 已由宿主注入（Main.qml player: player）。
+    readonly property bool creativeMode: root.player && root.player.mode === PlayerController.Creative
     // 「已附魔」flash 状态（点击成功附魔后短暂显绿，~600ms 淡出）。
     property bool justEnchanted: false
     // PERF 护栏：三档 enabled / 消耗 / 附魔结果全部走绑定（itemReady 绑 enchantRev、playerLevel 绑
@@ -455,13 +463,13 @@ Item {
         if (!root.itemReady) return
         const lvlCost = root.levelCosts[slotIdx] || 1
         const lapCost = root.lapisCosts[slotIdx] || 1
-        // t590 等级 0 也能玩（MC 1.0 语义「低等级只能 1 档」）：1 档在 playerLevel===0 视为可附（消耗 0 级）；
-        //   其余档位等级不足 → 拒（affordable 已置灰，此处防御）。
-        //   review L6 修：青金石校验**恒生效**（不随 lvl0Tier1 短路）——旧条件 `!lvl0Tier1 && (lvl不足 || 青金
-        //   不足)` 在 lvl0Tier1 时连青金石也不校验（防御缺口；UI affordable 置灰常态下遮住，但 doEnchant 可被
-        //   其它路径调到）。等级豁免只针对 XP 档（lvl0Tier1），青金石是硬性材料消耗。
-        const lvl0Tier1 = root.playerLevel === 0 && slotIdx === 0
-        if ((root.playerLevel < lvlCost && !lvl0Tier1) || root.lapisCount < lapCost) return
+        // t694 等级消耗真收口（用户实测「生存 0 级也能附魔」）：删 t590 的 lvl0Tier1 豁免（1 档 0 级视为可附、
+        //   扣 0 级跳过）—— 该豁免令生存 0 XP 玩家免费附魔，与 MC 1.0「附魔须 ≥ 显示的等级消耗」相反。
+        //   现语义：① 创造模式 → 全档免 XP（t606③ 铁砧先例：免等级不免材料，青金石照扣——保守只免经验）；
+        //   ② 生存 → 等级不足**真拒**（前置守卫 + spendLevels 双层；青金石恒校验，同 review L6 修法保留）。
+        const freeXp = root.creativeMode
+        if (!freeXp && root.playerLevel < lvlCost) return
+        if (root.lapisCount < lapCost) return
         // review H1 修：普通左键可把整栈书（如 64 本）放进槽 0（resolveClick B 整栈放置；只有 Shift+左键才有
         //   「只取 1 本」语义），而 doEnchant 产物恒 1 本 → 其余 N-1 本曾被静默销毁。附魔只消耗 1 本：先把余下
         //   (count-1) 本归还背包（addToAny，同 slotShiftLeftEnchant 归还路径；书无耐久 / 无附魔，dur 传 0）。
@@ -483,8 +491,8 @@ Item {
         const offered = root.offeredFor(slotIdx)
         const seed = (enchantX * 73856093) ^ (enchantY * 19349663) ^ (enchantZ * 83492791)
                     ^ (root.enchantItemId * 40503) ^ (slotIdx * 7919) ^ (Date.now() & 0xffff)
-        // 1) 扣 XP（等级 0 + 1 档 → 视为扣 0 级跳过；其余不足 spendLevels 拒 → 全回滚）。
-        if (!lvl0Tier1 && !root.playerState.spendLevels(lvlCost)) return
+        // 1) 扣 XP（t694：创造免等级跳过；生存等级不足已被前置守卫拦，spendLevels 拒付 → 全回滚零副作用）。
+        if (!freeXp && !root.playerState.spendLevels(lvlCost)) return
         // 2) 扣槽 1 青金石（余数写回；不足已被上方 lapisCount 门控拦，此处防御）。
         const remainLapis = Math.max(0, root.lapisCount - lapCost)
         if (remainLapis > 0) InventoryOps.writeSlot(root, "enchant", 1, root.lapisId, remainLapis, 0)
@@ -670,9 +678,9 @@ Item {
                                 // t549 enabled 条件：槽 0 有「可附魔且未附魔」物品（itemReady；附魔来源 =
                                 //   UI 输入槽，非背包）+ 档位序号 < maxLevel（书架解锁）+ XP 等级 + 槽 1 青金石都够。
                                 property bool unlocked: index < root.maxLevel
-                                // t590 等级不足 → 档位置灰；但 1 档在 playerLevel===0 视为可负担（MC 1.0 语义
-                                //   「低等级只能 1 档」——等级 0 生存玩家也能玩，消耗 0 级）。
-                                property bool affordable: root.lapisCount >= lapCost && (root.playerLevel >= lvlCost || (index === 0 && root.playerLevel === 0))
+                                // t694 创造免等级（affordable 全绿）+ 生存真收口（删 lvl0Tier1 豁免——
+                                //   用户实测「生存 0 级也能附」；机制等价 MC 1.0 附魔须足额等级）。
+                                property bool affordable: root.creativeMode || (root.lapisCount >= lapCost && root.playerLevel >= lvlCost)
                                 property bool enabled1: root.itemReady && unlocked && affordable
                                 width: 190; height: 36
                                 color: enabled1 ? "#5a4a2a" : "#2a2018"
@@ -696,7 +704,8 @@ Item {
                                         Text {
                                             // t590 保持 MC 语义：档位只显等级消耗，附魔结果选中施放后揭晓
                                             //   （显在物品上：槽位紫光晕 + tooltip 附魔列表）。
-                                            text: "消耗 " + lvlCost + " 级"
+                                            //   t694 创造模式 → 等级行显「免等级」（消耗免除的直观反馈）。
+                                            text: root.creativeMode ? "免等级" : ("消耗 " + lvlCost + " 级")
                                             color: enabled1 ? "#ffe6a8" : "#665544"
                                             font.pixelSize: 11; font.bold: true
                                         }
