@@ -23,8 +23,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Planks:        return "icon_planks.png";
     case BlockRegistry::Leaves:        return "icon_leaves.png";
     case BlockRegistry::Sand:          return "icon_sand.png";
-    case BlockRegistry::CraftingTable: return "icon_crafting_table.png"; // t50/t492 工作台立方体图标（正面为主投影，显正面网格）
-    case BlockRegistry::Furnace:       return "icon_furnace.png";        // t80/t492 熔炉立方体图标（正面为主投影，显炉口）
+    case BlockRegistry::CraftingTable: return "icon_crafting_table.png"; // t50/t676 工作台 3D 立方体图标（cube per-face：顶=台面网格 / 右=侧图 / 前=前图）
+    case BlockRegistry::Furnace:       return "icon_furnace.png";        // t80/t676 熔炉 3D 立方体图标（cube per-face：顶=炉顶 / 右=炉侧 / 前=炉口）
     case BlockRegistry::CoalOre:       return "icon_coal_ore.png";       // t84 煤矿石立方体图标
     case BlockRegistry::IronOre:       return "icon_iron_ore.png";       // t84 铁矿石立方体图标
     case BlockRegistry::DiamondOre:    return "icon_diamond_ore.png";    // t279 钻矿石立方体图标（石头底+青白菱斑晶体）
@@ -57,10 +57,10 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::WoolBlack:      return "icon_wool_black.png";      // 黑色羊毛
     case BlockRegistry::Sandstone:     return "icon_sandstone.png";      // t394 砂岩立方体图标（顶=压实沙面 / 侧=层理带）
     case BlockRegistry::CutSandstone:  return "icon_cut_sandstone.png"; // t485 切制砂岩立方体图标（各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
-    case BlockRegistry::TntBlock:      return "icon_tnt.png";           // t485 TNT 立方体图标（各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
+    case BlockRegistry::TntBlock:      return "icon_tnt.png";           // t485/t676 TNT 3D 立方体图标（cube per-face：顶=引线接口俯视 / 侧=捆带+标识；沙漠神殿陷阱方块）
     case BlockRegistry::MossyCobble:   return "icon_mossy_cobble.png";  // t486 苔石立方体图标（各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
-    case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486/t644 发射器图标（--from-pack 正面为主投影，pack 贴图与放置态一致；丛林神殿陷阱机关）
-    case BlockRegistry::Dropper:       return "icon_dropper.png";       // t609/t644 投掷器图标（--from-pack 正面为主投影，pack 贴图与放置态一致）
+    case BlockRegistry::Dispenser:     return "icon_dispenser.png";     // t486/t676 发射器 3D 立方体图标（cube per-face：前=大暗腔排出口 / 顶侧=熔炉系；丛林神殿陷阱机关）
+    case BlockRegistry::Dropper:       return "icon_dropper.png";       // t609/t676 投掷器 3D 立方体图标（cube per-face：前=小排出口 / 顶侧=熔炉系）
     // t487 要塞结构方块图标：石砖（立方体 3D）/ 石砖台阶（3D 半高盒）/ 石砖楼梯（3D L 阶）。t600 修正：台阶/楼梯
     //   原误走 BLOCKS 满立方投影（三图标同图=全显石砖整块，用户「背包三个都是石砖满一格」）→ 改 render_partial_3d
     //   slab/stairs 形状（同圆石变体流程，fill=default_stone_brick 砖纹）。tools/build_cube_icons.py 程序生成。
@@ -759,13 +759,11 @@ QString Hotbar::iconSourceForBlock(int blockId) const
     // （ToolIcon / 材料图标 Canvas，§9a）→ 返空串，调用方据 isTool / isMaterial 切到对应自绘 delegate。
     // 越界先判再 cast，防 quint8 截断别名。
     if (blockId <= 0 || blockId >= int(BlockRegistry::Count)) return QString();
-    // t456 pack item 图标覆盖：pack 启用且该方块在「方块→pack item/前贴图」映射内（现含 CraftingTable=9 /
-    //   Furnace=10 双候选（item/<name>.png 优先、block/<name>_front.png 兜底，t537 回退到 t492 二轮的 2D pack 图，
-    //   用户否决 t518 的 3D「一坨」）+ 16 色床 {32..39,78..85}→bed.png + 木梯 Ladder=62→ladder.png；
-    //   LapisOre=93 刻意不在映射，与其它矿石一致走 3D 立方体图标，t493 二轮复盘撤销）、包内有 PNG 时，返 pack
-    //   的 file:// URL（2D 物品图标改用 pack item 贴图，机制等价 MC item icon）；pack 关 / 无映射 / 包内缺 →
-    //   落下方程序生成 icon_<block>.png（含工作台 / 熔炉的 3D 立方体图标）。仅 2D 物品图标路径
-    //   （hotbar/背包/光标）消费；3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径，不调本函数，故不受影响。
+    // t456 pack item 图标覆盖：pack 启用且该方块在「方块→pack item/前贴图」映射内（t676 后剩 16 色床
+    //   {32..39,78..85}→bed.png 染色 + 木梯 Ladder=62→ladder.png + 门 / 铁轨族；工作台 / 熔炉 / 发射器 /
+    //   投掷器已撤出 —— 用户点名升 cube per-face 3D 立方体图标，保留 2D front 覆盖会让 3D 永不显）、
+    //   包内有 PNG 时，返 pack 的 file:// URL；pack 关 / 无映射 / 包内缺 → 落下方程序生成 icon_<block>.png。
+    //   仅 2D 物品图标路径（hotbar/背包/光标）消费；3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径，不调本函数，故不受影响。
     const QString packSrc = ResourcePackManager::blockItemIconSource(blockId);
     if (!packSrc.isEmpty())
         return packSrc;

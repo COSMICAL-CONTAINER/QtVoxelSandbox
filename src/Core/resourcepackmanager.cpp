@@ -808,10 +808,11 @@ const QList<QPair<int, QString>> &mobEntityMap()
 const QList<QPair<int, QStringList>> &blockItemIconMap()
 {
     static const QList<QPair<int, QStringList>> kMap = {
-        // t537 恢复：工作台 / 熔炉 pack 2D 方块前贴图 icon（t518 三轮撤出映射要 3D，用户否决「一坨」回退到 t492 二轮）。
-        //   item/<name>.png 优先（多数包有 / 用户后续会提供），block/<name>_front.png 兜底（demo 包 1.8.2.2 落到 _front）。
-        { 9,  { QStringLiteral("crafting_table.png"), QStringLiteral("crafting_table_front.png") } }, // BlockRegistry::CraftingTable 工作台
-        { 10, { QStringLiteral("furnace.png"),        QStringLiteral("furnace_front.png") } },         // BlockRegistry::Furnace 熔炉
+        // t676 工作台 / 熔炉移出本映射（t537 曾恢复 2D pack front 图、t676 撤出）：用户点名「front 方案太
+        //   扁平，全部升 cube per-face」→ 程序生成 icon_<block>.png 已是满立方 dimetric（顶 + 右侧 + 前面
+        //   三面独立贴图，tools/build_cube_icons.py --from-pack cube_front 方案）。保留本映射会在 pack 激活时
+        //   持续用 2D front 图覆盖 → 3D 立方体图标永不显。删条目 → 命中落空 → Hotbar 回落程序 3D 图标
+        //   （pack 关 / 开都显 3D，观感统一）。
         // t413 木梯（Ladder=62，cross 形）：pack 启用时 item 图标用 pack 的 ladder.png（2D 梯子图）覆盖程序 icon_ladder.png。
         { 62, { QStringLiteral("ladder.png") } }, // Ladder 木梯（pack item 图标覆盖）
         // t496 床 16 色变体（BedRed=32..BedBlack=39 既存 8 色 + BedWhite=78..BedBrown=85 t455 新增 8 色）。
@@ -835,16 +836,15 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
         { 83, { QStringLiteral("bed.png") } }, // BedLightGray
         { 84, { QStringLiteral("bed.png") } }, // BedPurple
         { 85, { QStringLiteral("bed.png") } }, // BedBrown
-        // t620 门 / 铁轨 / 机关盒 pack 2D item 图标（t537 工作台/熔炉同模式：item 目录优先、block 目录兜底）。
+        // t620 门 / 铁轨 pack 2D item 图标（t537 工作台/熔炉同模式：item 目录优先、block 目录兜底）。
         //   门：item/oak_door.png + item/spruce_door.png（demo 包 item 目录实测都在；MC 1.0 门 item 图标即
         //   2D 门板立绘）。铁轨：item 目录无 rail 图标（demo 包实测）→ block/rail_normal.png 兜底（直轨
-        //   2D 图，机制等价 MC rail item icon）。发射器 / 投掷器：item 目录无专属图 → block/<name>_front_
-        //   horizontal.png 兜底（正面 2D 图，同 t537 熔炉 furnace_front 兜底模式）。
+        //   2D 图，机制等价 MC rail item icon）。
+        //   t676 发射器(107) / 投掷器(117) 移出本映射（用户点名升 cube per-face 3D 图标；同上方工作台 /
+        //   熔炉撤出理由 —— 保留 2D front 覆盖会让程序 3D 立方体图标永不显）。
         { 19,  { QStringLiteral("oak_door.png"),                       QStringLiteral("door_wood_lower.png") } },  // WoodDoor 木板门
         { 89,  { QStringLiteral("spruce_door.png"),                    QStringLiteral("door_spruce_lower.png") } }, // SpruceDoor 云杉门
         { 103, { QStringLiteral("rail_normal.png") } },               // Rail 铁轨（block 兜底：item 目录无 rail 图标）
-        { 107, { QStringLiteral("dispenser_front_horizontal.png") } }, // Dispenser 发射器（正面 2D）
-        { 117, { QStringLiteral("dropper_front_horizontal.png") } },   // Dropper 投掷器（正面 2D）
         // t638 铁轨家族 + 红石火把 pack 2D item 图标（item 目录无 rail 族图标（demo 包实测）→ block 直轨 2D
         //   图兜底；红石火把 item 目录同样无 → block/redstone_torch_on.png 兜底（常亮态 2D 火把立绘））。
         { 127, { QStringLiteral("powered_rail.png"),   QStringLiteral("rail_golden.png") } },   // GoldenRail 动力铁轨（现代名优先 / 1.8 名兜底）

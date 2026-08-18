@@ -48,10 +48,8 @@ BLOCKS = [
     ("planks",          "default_wood",      "default_wood"),
     ("leaves",          "default_leaves",    "default_leaves"),
     ("sand",            "default_sand",      "default_sand"),
-    # t492 工作台 / 熔炉 / 发射器移到 BLOCKS_FRONT（正面为主的 dimetric 投影，显炉口 / 网格 / 排出口面板）。
-    #   旧版用 (顶+两侧) 2:1 dimetric 投影，但「正面有辨识特征」的方块（熔炉炉口 / 工作台网格 / 发射器排出口）
-    #   其正面（+Z）被立体投影遮挡 → 图标只显顶 + 无特征侧面 → 肉眼读不出「这是熔炉 / 工作台」（用户「像 2D / 像普通石块」）。
-    #   t492 改 render_front：正面（+Z）为主面贴 front 贴图 + 顶细带（+Y）+ 右细带（+X）→ 一眼看到炉口 / 网格。
+    # t492 工作台 / 熔炉 / 发射器曾移到 BLOCKS_FRONT（正面为主投影）→ t676 再移 FROM_PACK cube_front
+    #   （满立方 dimetric 顶 + 右侧 + 前面三面独立贴图 —— 用户点名「front 方案太扁平」升全立体）。
     ("coal_ore",        "default_coal_ore", "default_coal_ore"),  # t84 煤矿石（各面同贴图）
     ("iron_ore",        "default_iron_ore", "default_iron_ore"),  # t84 铁矿石（各面同贴图）
     ("diamond_ore",     "default_diamond_ore", "default_diamond_ore"),  # t279 钻矿石（各面同贴图）
@@ -143,7 +141,7 @@ BLOCKS = [
     ("cut_sandstone",   "default_cut_sandstone", "default_cut_sandstone"), # t485 切制砂岩（各面同贴图=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
     # t486 丛林神殿结构方块立方体图标（build_mossy_cobble.py / build_dispenser.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
     ("mossy_cobble",    "default_mossy_cobble",  "default_mossy_cobble"),  # t486 苔石（各面同贴图=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
-    # dispenser 移到 BLOCKS_FRONT（t492：正面排出口面板是其辨识特征，显正面才可辨）。
+    # t676：工作台 / 熔炉 / 发射器 / 投掷器 / TNT 图标走 FROM_PACK cube_front（--from-pack 重生成；本表不再管）。
     # t487 要塞结构方块立方体图标（build_stone_brick.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
     ("stone_brick",     "default_stone_brick", "default_stone_brick"),  # t487 石砖（各面同贴图=石质灰底+砖块缝纹网格；要塞墙体主体）
     # t600 石砖台阶/楼梯不再走 BLOCKS（满立方体投影）：三个图标渲染成同一张整砖立方 → 背包里与石砖满格无法区分
@@ -157,20 +155,11 @@ PARTIALS_3D_STONE_BRICK = [
     ("stone_brick_stairs", "stairs"), # t487/t600 石砖楼梯：整步 + 背墙 L 阶（砖纹）
 ]
 
-# t492 「正面有辨识特征」的方块（正面贴图, 顶面贴图, 侧面贴图）—— 走 render_front（正面为主的 dimetric 投影），
-#   让炉口 / 网格 / 排出口面板显在正面（用户一眼可辨），与其它方块的 (顶+两侧) 投影同属 dimetric 立体家族（顶 / 右深带
-#   保 3D 体积感），但正面成主面 → 辨识特征不被立体投影遮挡。
-#   - furnace：正面=default_furnace_front（带炉口），燃烧态 front_on 见 t494（本任务只关静态 icon front）。
-#   - crafting_table：正面=default_crafting_table_side（含网格；工作台无独立 front 贴图，side 即带网格辨识面）。
-#   - dispenser：正面=default_dispenser_front（暗腔排出口），顶 / 侧同 default_dispenser_top / _side。
-#   - dropper（t609 投掷器）：正面=default_dropper_front（小方形暗孔——轻量出口，只掉物品），顶 / 侧复用
-#     熔炉 default_furnace_top / _side（机关盒家族石质观感）。
-BLOCKS_FRONT = [
-    ("furnace",         "default_furnace_front",         "default_furnace_top",         "default_furnace_side"),         # t80/t492 熔炉（正面=炉口）
-    ("crafting_table",  "default_crafting_table_side",   "default_crafting_table_top",  "default_crafting_table_side"),  # t50/t492 工作台（正面=网格 side）
-    ("dispenser",       "default_dispenser_front",       "default_dispenser_top",       "default_dispenser_side"),       # t486/t492 发射器（正面=排出口面板）
-    ("dropper",         "default_dropper_front",         "default_furnace_top",         "default_furnace_side"),         # t609 投掷器（正面=小排出口；顶/侧=熔炉石质）
-]
+# t492 「正面有辨识特征」的方块（正面贴图, 顶面贴图, 侧面贴图）—— 走 render_front（正面为主的 dimetric 投影）。
+#   t676 工作台 / 熔炉 / 发射器 / 投掷器**全部移出**（用户点名「front 方案太扁平」→ 升 cube per-face 满立方
+#   dimetric：顶 + 右侧 + 前面三面独立贴图，见 FROM_PACK cube_front 段）。本表现空 —— 保留表结构 /
+#   render_front（t644 render_pack_front 同族）供后续「正面为主」需求复用。
+BLOCKS_FRONT = []
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----
 hw = 0.46 * W   # 顶菱形水平半对角线（= 立方体水平半宽）
@@ -843,12 +832,31 @@ FROM_PACK = [
     #   front="pumpkin_face" 哨兵 → cube_front 分支走 pick_pumpkin_face 候选链（非固定文件名）。
     ("pumpkin", "cube_front", dict(top="pumpkin_top.png", side="pumpkin_side.png",
                                    front="pumpkin_face")),
-    # 机关盒族（正面为主投影；放置态 = pack dispenser_front_horizontal / dropper_front_horizontal +
-    #   熔炉顶 / 侧复用 —— MC 1.0 发射器顶/侧本就复用熔炉系，demo 包无 dispenser_top/side 专属文件）。
-    ("dispenser", "front", dict(front="dispenser_front_horizontal.png",
-                                top="furnace_top.png", side="furnace_side.png")),
-    ("dropper",   "front", dict(front="dropper_front_horizontal.png",
-                                top="furnace_top.png", side="furnace_side.png")),
+    # t676 机关盒族五件 3D 立方体图标（用户点名「t644 的 front 方案太扁平」→ 全升 cube per-face）：
+    #   满立方 dimetric（顶 + 右侧 + 前面）—— 顶 / 侧 / 前**三面独立贴图**，正面辨识特征（炉口 / 网格 /
+    #   排出口 / TNT 标识）贴在可见 +Z 前面（放置态恒面向玩家，t638 朝向）→ 既有体积感（三面明暗）又有
+    #   正面特征。与 t537 的 2D pack front 图（纯平面）和 t492/t644 render_pack_front（正面为主 + 细带）
+    #   区分 —— 那两版「平」的根因是正面占画面但纵深带太窄 / 纯 2D 无面差。
+    #   furnace：顶/侧=furnace 系（MC 1.0 无独立 furnace_side 正面差，侧同图）/ 前=furnace_front（炉口）。
+    #   crafting_table：顶=crafting_table_top（网格台面）/ 侧=crafting_table_side / 前=crafting_table_front
+    #   （带工具挂件的前图，MC 1.8+ 有独立 front）。dispenser / dropper：顶/侧复用熔炉系（MC 1.0 复用）/
+    #   前=*_front_horizontal（排出口）。tnt：顶=tnt_top（引线接口俯视）/ 侧=tnt_side / 前=tnt_side
+    #   （MC 1.0 TNT 前面与侧面同图 —— 标识在侧向绕行，dimetric 左面即可见）。
+    ("crafting_table", "cube_front", dict(top="crafting_table_top.png",
+                                          side="crafting_table_side.png",
+                                          front="crafting_table_front.png")),
+    ("furnace",        "cube_front", dict(top="furnace_top.png",
+                                          side="furnace_side.png",
+                                          front="furnace_front.png")),
+    ("dispenser",      "cube_front", dict(top="furnace_top.png",
+                                          side="furnace_side.png",
+                                          front="dispenser_front_horizontal.png")),
+    ("dropper",        "cube_front", dict(top="furnace_top.png",
+                                          side="furnace_side.png",
+                                          front="dropper_front_horizontal.png")),
+    ("tnt",            "cube_front", dict(top="tnt_top.png",
+                                          side="tnt_side.png",
+                                          front="tnt_side.png")),
     # 附魔台：0.75 矮盒（放置态 y[0,0.75]），顶 = enchanting_table_top，侧 = enchanting_table_side
     #   顶部 4/16 空白（引擎合成 cropTopBlank(0.25) → 有效 0.75 整张贴 0.75 高侧面）。
     ("enchanting_table", "table", dict(top="enchanting_table_top.png",
@@ -905,8 +913,9 @@ def run_from_pack():
                                       load_pack_face(spec["side"]),
                                       cy_local=W / 2.0 - 0.5 * v)
             elif mode == "cube_front":
-                # t675 满立方 + 前面刻脸（南瓜）：可见 +Z 左面贴 front（pick_pumpkin_face 引擎同源
-                #   退化回退链；全退化 → front=None → render_pack_box 内部回退 side，图标退化纯瓜棱）。
+                # t675/t676 满立方 + 前面（+Z 可见左面）贴独立 front：南瓜（刻脸候选链）+ 机关盒族五件
+                #   （熔炉炉口 / 工作台前图 / 发射器 / 投掷器排出口 / TNT 标识）。front 值 "pumpkin_face"
+                #   哨兵走 pick_pumpkin_face 候选链；否则按字面文件名（缺 → None 回退 side）。
                 front_name = pick_pumpkin_face() if spec.get("front") == "pumpkin_face" else spec.get("front")
                 img = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)],
                                       load_pack_face(spec["top"]),
