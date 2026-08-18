@@ -155,7 +155,10 @@ Item {
     function bookInfoFor(id) {
         if (root.bookEntries.length === 0) return null
         const maxEnch = root.bookEntries[root.bookEntries.length - 1].ench
-        if (id > root.bookSentinel || id <= root.bookSentinel - maxEnch) return null
+        // t687：合法哨兵域 = (sentinel - maxEnch, sentinel]（ench ∈ 1..maxEnch ↔ id = sentinel - ench）。旧
+        //   `<=` 把 id == sentinel - maxEnch（即 ench == maxEnch，表内最大附魔 id 的那本）也拒成非哨兵 →
+        //   最高 id 预设书在调色板成死格（点击 no-op）。右界拒绝条件须为严格小于。
+        if (id > root.bookSentinel || id < root.bookSentinel - maxEnch) return null
         const ench = root.bookSentinel - id
         for (let i = 0; i < root.bookEntries.length; ++i)
             if (root.bookEntries[i].ench === ench) return root.bookEntries[i]
