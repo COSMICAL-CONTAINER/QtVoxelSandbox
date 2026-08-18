@@ -5546,11 +5546,16 @@ void World::placeStronghold()
         // 6) 走廊蛛网 + 楼梯井装饰（机制等价 MC 要塞走廊的残破感）：内部空间内确定性散布
         //    Cobweb（~10%）+ StoneBrickStairs 楼梯（~8%），跳过关键特征格（传送门房 / 图书馆书架 /
         //    银鱼刷怪笼 / 宝箱格）。确定性 → 同 seed 同装饰（PLAN §2-K）。
+        //    t682 修：传送门房跳过区旧 dz∈[-9,-6] 漏了框架环的 z=-10（x=±2 各 1 格）与 z=-11（3 格）——
+        //    12 框架环（32914e0 标准 ±2 方形环，z 覆 -11..-7）恰有 5 格在旧跳过区外，每格 18% 被装饰
+        //    无条件覆盖 → P(环残缺)≈63% → endPortalRingComplete 永恒 false → 生存玩家无法开末地传送门。
+        //    改为「框架 + 平台」精确 bbox：dx∈[-2,2] × dz∈[-11,-7]（框架环 12 格 + 悬空平台 5 格的外包，
+        //    与放框架/平台的环几何严格一致；比 dz∈[-11,-6] 更紧——只排特征格所在带，不吞整间北侧）。
         for (int dy = 1; dy <= 2; ++dy) {
             for (int dx = -kHalf + 1; dx <= kHalf - 1; ++dx) {
                 for (int dz = -kHalf + 1; dz <= kHalf - 1; ++dz) {
                     if (!insideSpace(dx, dz)) continue; // 仅内部空间（走廊 / 房间）装饰
-                    if (dx >= -3 && dx <= 3 && dz >= -9 && dz <= -6) continue;  // 传送门房跳过（框架/平台保留）
+                    if (dx >= -2 && dx <= 2 && dz >= -11 && dz <= -7) continue; // 传送门房框架+平台 bbox（t682；框架/平台保留）
                     if (dx >= -9 && dx <= -7 && dz >= -4 && dz <= 4) continue;  // 图书馆跳过（书架保留）
                     if (dx >= -3 && dx <= 3 && dz >= 7 && dz <= 10) continue;   // 南房跳过（刷怪笼/宝箱保留）
                     const quint32 wh = hashVoxel(strongSeed ^ 0x487, cx + dx, cy + dy, cz + dz);
