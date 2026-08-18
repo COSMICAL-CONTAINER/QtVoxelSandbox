@@ -8622,6 +8622,16 @@ Window {
         anchors.fill: parent
         visible: window.appState === "playing" && window.progressOpen
         z: 155
+        // t678(c) ESC 关闭进度面板（窗口级 Shortcut 兜底）：keyInput 的 Keys.onPressed ESC 分支依赖
+        //   keyInput 持活动焦点（面板打开路径经 MouseArea 点击不转移焦点，理论上可达）——但任何焦点
+        //   抖动（后续新增焦点争夺项 / 平台差异）都会让分支不可达。Shortcut 在窗口级（QShortcutMap）
+        //   处理按键、与 QML 活动焦点无关 → ESC 恒关面板。仅 progressOpen 时启用；E/其它面板 ESC 语义
+        //   不受影响（互斥面板）。C++ 事件过滤器（captured 时吃 ESC）先于窗口级快捷键，无冲突。
+        Shortcut {
+            sequence: "Esc"
+            enabled: window.progressOpen
+            onActivated: window.progressOpen = false
+        }
         Rectangle {
             anchors.fill: parent
             color: Qt.rgba(0, 0, 0, 0.7)
@@ -8674,13 +8684,21 @@ Window {
                 progressPanel.lastUnlockedSet = curSet
                 const cl = {}
                 for (const k in progressPanel.collapsedIds) cl[k] = progressPanel.collapsedIds[k]
+                // t678(d) 默认收起仅限真分叉：先建子女数表，未解锁父节点**有 ≥2 个子女**才默认收起。
+                //   旧版对任意未解锁父都收起 —— 单链父（如 合成台→出击时间 一条线）收起后无 +/− 钮
+                //   可展开 → 其子树永不可达；单链保持展开（线性短链，折叠无收益，用户点名）。
+                const kidCount = {}
+                for (let i = 0; i < tree.length; ++i) {
+                    const p = tree[i].parentId
+                    if (p) kidCount[p] = (kidCount[p] || 0) + 1
+                }
                 if (wasEmpty && Object.keys(cl).length === 0) {
-                    // 初次 / 面板重开：全量默认 —— 未解锁的分叉点收起（远端子树折叠）、已解锁的展开
+                    // 初次 / 面板重开：全量默认 —— 未解锁的**分叉**收起（远端子树折叠）、已解锁的展开
                     //   （「解锁到哪展开到哪」，机制等价 MC 成就页进度折叠读感）。
                     for (let i = 0; i < tree.length; ++i) {
                         const n = tree[i]
                         if (!n.parentId) continue
-                        if (!curSet[n.parentId]) cl[n.parentId] = true
+                        if (!curSet[n.parentId] && (kidCount[n.parentId] || 0) >= 2) cl[n.parentId] = true
                     }
                 } else {
                     // 会话内解锁推进：新解锁的节点自动展开（解除其收起态）；其余不动（保用户手动收起）。
@@ -8742,7 +8760,10 @@ Window {
                     const keys = ["id","name","desc","unlocked","parentId","parentName","depth","locked","col","iconId"]
                     for (let k = 0; k < keys.length; ++k) o[keys[k]] = n[keys[k]]
                     o.row = rowOf[n.id] !== undefined ? rowOf[n.id] : 0
-                    o.hasKids = ch && ch.length > 0
+                    // t678(d) 单链节点（仅 1 个子女的链）不显 +/− 钮：折叠 1 子节点只藏起 1 个节点（视觉
+                    //   无收缩收益）且面板无法从该钮展开子树 —— 只在**真分叉**（≥2 子女）处给钮（用户点名
+                    //   「打开背包→获得原木→合成台 一条线不显 +/− 钮」）。
+                    o.hasKids = ch && ch.length >= 2
                     o.collapsed = cl[n.id] === true
                     out.push(o)
                 }
@@ -8764,7 +8785,11 @@ Window {
                 Item {
                     id: treeViewport
                     width: parent.width
-                    height: parent.height - 32 /*标题*/ - 18 /*副标题*/ - 50 /*返回*/ - 18 /*间距*/
+                    // t678(e) 返回按钮移出 Column（锚定面板底部 margin 8）→ 视口只让位标题/副标题 +
+                    //   按钮区：height = 列高 - 32(标题) - 18(副标题) - 38(按钮区+间距)。旧版把返回按钮留在
+                    //   Column 内 → Column 底部留白 + 面板 margin 16 双叠 → 按钮悬在下边缘 ~43px 处（用户
+                    //   「返回按钮离下边缘过远」）；改后按钮贴底 8px。
+                    height: parent.height - 32 /*标题*/ - 18 /*副标题*/ - 38 /*按钮区+间距*/
                     clip: true
                     // 布局常量（列距 / 行距 / 边距 / 节点尺寸；树节点与连线共用同一公式）。
                     readonly property real kColW: 200
@@ -8781,14 +8806,18 @@ Window {
                     property real contentX: 0
                     property real contentY: 0
                     property real viewScale: 1.0
-                    // 初次打开 / 树尺寸变化：平移钳制（防拖出太空；缩放后 1× 内容小于视口时居中）。
+                    // 初次打开 / 树尺寸变化：平移钳制（防拖出太空；缩放后内容小于视口时居中）。
+                    //   t678(b) 修「拖拽平移冻结（死机感）」：旧版 contentX = max(0, min(vw-cw, contentX))
+                    //   —— 内容大于视口（cw>vw）时钳界 [vw-cw, 0] 全负，max(0, ·) 恒 0 → 拖拽位移被
+                    //   钳回 0，画面纹丝不动。正解：可平移区间 = [vw-cw, 0]（负 = 内容向左/上移），
+                    //   min/max 交换后拖拽才能离开原点；内容小于视口时仍居中（不弹回）。
                     function clampPan() {
                         const vw = treeViewport.width, vh = treeViewport.height
                         const cw = baseW * viewScale, ch = baseH * viewScale
                         if (cw <= vw) contentX = (vw - cw) / 2
-                        else contentX = Math.max(0, Math.min(vw - cw, contentX))
+                        else contentX = Math.max(vw - cw, Math.min(0, contentX))
                         if (ch <= vh) contentY = (vh - ch) / 2
-                        else contentY = Math.max(0, Math.min(vh - ch, contentY))
+                        else contentY = Math.max(vh - ch, Math.min(0, contentY))
                     }
                     onWidthChanged: clampPan()
                     onHeightChanged: clampPan()
@@ -8800,23 +8829,13 @@ Window {
                         target: progressPanel
                         function onVisibleTreeChanged() { /* 树重排后钳制（防越界残移） */ treeViewport.clampPan() }
                     }
-                    // 滚轮缩放（t637 ②）：scale × 1.15^(±1)，钳 0.5..2.0；缩放中心 = 鼠标点 ——
-                    //   contentX' = mouse.x - (mouse.x - contentX) * (s'/s)（保持鼠标下内容点不动）。
-                    WheelHandler {
-                        acceptedModifiers: Qt.NoModifier
-                        onWheel: (event) => {
-                            const oldS = treeViewport.viewScale
-                            let newS = oldS * (event.angleDelta.y > 0 ? 1.15 : 1 / 1.15)
-                            newS = Math.max(0.5, Math.min(2.0, newS))
-                            if (newS === oldS) return
-                            const k = newS / oldS
-                            treeViewport.contentX = event.position.x - (event.position.x - treeViewport.contentX) * k
-                            treeViewport.contentY = event.position.y - (event.position.y - treeViewport.contentY) * k
-                            treeViewport.viewScale = newS   // setter 末 clampPan 钳界
-                        }
-                    }
                     // 拖拽平移（t637 ③）：按住左键拖（空处 / 节点上均可拖 —— 节点点击 +/− 钮在钮自身
                     //   MouseArea 内消化，不冒泡）。
+                    //   t678(a) 修「滚轮缩放失效」：旧版 WheelHandler（兄弟节点）与 treeDragArea MouseArea
+                    //   并存 —— MouseArea 挡在树画布之上、滚轮事件被它截断 / 与全局 hotbar WheelHandler 的
+                    //   传递先后不确定 → 缩放不触发。改把缩放直接并入 treeDragArea 的 onWheel（MouseArea
+                    //   是视口内最顶层全尺寸命中项，onWheel 是 QtQuick 最稳的滚轮路径，与 Flickable 系面板
+                    //   同族），删除 WheelHandler 双通道。
                     MouseArea {
                         id: treeDragArea
                         anchors.fill: parent
@@ -8830,6 +8849,19 @@ Window {
                             treeViewport.contentY += mouse.y - lastY
                             lastX = mouse.x; lastY = mouse.y
                             treeViewport.clampPan()
+                        }
+                        // 滚轮缩放（t637 ② 语义不变）：scale × 1.15^(±1)，钳 0.5..2.0；缩放中心 = 鼠标点
+                        //   —— contentX' = mouse.x - (mouse.x - contentX) * (s'/s)（保持鼠标下内容点不动）。
+                        //   wheel.x/y 是相对本 MouseArea（= 视口）的指针位置，与旧 event.position 同义。
+                        onWheel: (wheel) => {
+                            const oldS = treeViewport.viewScale
+                            let newS = oldS * (wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15)
+                            newS = Math.max(0.5, Math.min(2.0, newS))
+                            if (newS === oldS) return
+                            const k = newS / oldS
+                            treeViewport.contentX = wheel.x - (wheel.x - treeViewport.contentX) * k
+                            treeViewport.contentY = wheel.y - (wheel.y - treeViewport.contentY) * k
+                            treeViewport.viewScale = newS   // setter 末 clampPan 钳界
                         }
                         cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                     }
@@ -9036,9 +9068,13 @@ Window {
                     }
                 }
                 // 返回按钮：关进度面板回暂停菜单。
+                //   t678(e) 移出 Column、锚定 progressPanel 底部（bottomMargin 8）—— 旧版在 Column 内
+                //   被列底部留白 + 面板 margin 16 推到 ~43px 高处（离下边缘过远）；改贴底 8px。
                 Rectangle {
                     width: 120; height: 32; radius: 6
-                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.horizontalCenter: progressPanel.horizontalCenter
+                    anchors.bottom: progressPanel.bottom
+                    anchors.bottomMargin: 8
                     color: backProgressArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
                     border.color: "#3a5a7a"; border.width: 1
                     Text { anchors.centerIn: parent; text: "返回"
