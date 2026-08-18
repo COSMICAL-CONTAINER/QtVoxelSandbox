@@ -54,6 +54,8 @@ android-build/
 _t*.txt
 *_proc.txt
 *_proc.*
+# Agent hook runtime state (Clawd/hook session snapshots + baselines — churn every run; never track)
+.mimosa/
 # Python (sub-agent runs tools/*.py — bytecode cache, never track)
 __pycache__/
 *.pyc
