@@ -2196,7 +2196,16 @@ bool World::recomputePowerLocal()
             const int src = powerSourceLevel(nx, ny, nz);
             if (src > power) power = src;
             if (BlockRegistry::isRedstoneDust(nb)) {
-                conn = quint8(conn | (1u << di)); // 连接位 = 6 邻粉（bit 序同 kNb：0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z）
+                // review-r19.8 H1 修：连接位只存**水平 4 向**（高半字节 0x01/0x02/0x04/0x08，同铁轨
+                //   连接位序）——旧 6 向 conn<<4 使 +Z/-Z（di4/5 的 0x10/0x20）溢出 8 位被截、+Y/-Y
+                //   （di2/3 的 0x04/0x08）错占 Pz/Nz 位 → 沿 Z 铺粉渲染成孤立点。垂直邻粉连接不落 state
+                //   （v1 渲染省略垂直画线，注释见 partialblockgeometry）；电力传播走下方 6 向邻粉衰减，
+                //   与连接位无关，垂直供电不受影响。
+                if (di == 0)      conn |= BlockRegistry::RedstoneDustConnPx; // +X
+                else if (di == 1) conn |= BlockRegistry::RedstoneDustConnNx; // -X
+                else if (di == 4) conn |= BlockRegistry::RedstoneDustConnPz; // +Z
+                else if (di == 5) conn |= BlockRegistry::RedstoneDustConnNz; // -Z
+                // di 2/3（+Y/-Y 垂直邻粉）：不进连接位（见上）
                 const int np = int(m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask);
                 if (np - 1 > power) power = np - 1; // 邻粉电力 -1（衰减传播）
             }
@@ -5445,7 +5454,7 @@ void World::placeStronghold()
             if (dx >= -2 && dx <= 2 && dz >= -2 && dz <= 2) return true;       // 中央大厅（5×5）
             if (dx >= 3 && dx <= 10 && dz >= -1 && dz <= 1) return true;       // 东入口走廊
             if (dx >= -1 && dx <= 1 && dz >= -7 && dz <= -3) return true;      // 北走廊
-            if (dx >= -3 && dx <= 3 && dz >= -9 && dz <= -8) return true;      // 传送门房内部
+            if (dx >= -3 && dx <= 3 && dz >= -11 && dz <= -7) return true;     // 传送门房内部（z -11..-7 5 格深，容 5×5 框架环）
             if (dx >= -1 && dx <= 1 && dz >= 3 && dz <= 6) return true;        // 南走廊
             if (dx >= -3 && dx <= 3 && dz >= 8 && dz <= 9) return true;        // 战利品/银鱼房内部
             if (dx >= -6 && dx <= -3 && dz >= -1 && dz <= 1) return true;      // 西走廊
@@ -5474,22 +5483,24 @@ void World::placeStronghold()
             }
         }
 
-        // 3) **传送门房**（x -3..3, z -9..-8 内部；北墙 z=-10 / 侧墙 x=±4）—— 悬空熔岩台 + 12 框架环
+        // 3) **传送门房**（x -3..3, z -11..-7 内部 7×5；北墙 z=-11 / 侧墙 x=±4）—— 悬空熔岩台 + 12 框架环
         //    （机制等价 MC 1.0 传送门房：熔岩池 + 石砖平台 + 框架环；t664 框架/门面机制接线）：
-        //    a) 熔岩池：房间北部地板（x -3..3, z -9, y=0）灌岩浆（地下深暗 + 平台悬浮其上的观感）；
+        //    a) 熔岩池：房间北部地板（x -3..3, z -10, y=0）灌岩浆（地下深暗 + 平台悬浮其上的观感）；
         //    b) 悬空平台：x -2..2, z -9, y=1 的 StoneBrick（熔岩上方 1 格，玩家可站）；
-        //    c) 12 框架环：中心 (0, 2, -9)，12 格 EndPortal 框架在 y=2 围出 3×3 内圈（z=-10 排嵌北墙 /
-        //       z=-8 排朝走廊，框架离地可钻入环内）。**预置眼睛**：约 10% 框架初始 state 激活
+        //    c) 12 框架环：中心 (0, 2, -9)，**标准 ±2 方形环**（与 endPortalRingComplete / tryOpenEndPortal
+        //       的环几何完全一致 —— review-r19.8 H2 修：旧放 5×3 矩形（z 边在 ±1）使完整性检查恒 false，
+        //       传送门永远无法打开）。环 = 四边各 3 格不含四角：
+        //       x=±2 排 z∈{-10,-9,-8}；z=-11/-7 排 x∈{-1,0,1}。**预置眼睛**：约 10% 框架初始 state 激活
         //       （EndPortalStateActiveFlag，机制等价 MC 1.0 约 10% 框架自带眼睛；确定性 hashVoxel）。
         for (int dx = -3; dx <= 3; ++dx)
-            put(dx, 0, -9, BlockRegistry::Lava);            // 熔岩池（平台下方）
+            put(dx, 0, -10, BlockRegistry::Lava);           // 熔岩池（平台下方，房北侧）
         for (int dx = -2; dx <= 2; ++dx)
             put(dx, 1, -9, BlockRegistry::StoneBrick);      // 悬空熔岩台（平台）
         for (int pdx = -2; pdx <= 2; ++pdx) {
-            for (int pdz = -10; pdz <= -8; ++pdz) {
-                // 环 = 12 格（四边各 3，不含四角）：x=±2 时 z∈{-10,-9,-8}；z=-10/-8 时 x∈{-1,0,1}。
+            for (int pdz = -11; pdz <= -7; ++pdz) {
+                // 方形环 12 格（四边各 3，不含四角）：x=±2 时 z∈{-10,-9,-8}；z=-11/-7 时 x∈{-1,0,1}。
                 const bool onRingExact = (pdx == -2 || pdx == 2) ? (pdz >= -10 && pdz <= -8)
-                                                                 : (pdz == -10 || pdz == -8) && (pdx >= -1 && pdx <= 1);
+                                                                 : (pdz == -11 || pdz == -7) && (pdx >= -1 && pdx <= 1);
                 if (!onRingExact) continue;
                 // 预置眼睛（~10%）：确定性 hash → 该框架初始激活（无需玩家插眼；机制等价 MC 约 1/10 预置）。
                 const quint32 eh = hashVoxel(strongSeed ^ 0x664, cx + pdx, cy + 2, cz + pdz);

@@ -1665,6 +1665,15 @@ public:
     //   selectionAABBs 不读 dust state（ShapeNone）→ 复用零回归。mesher（partialblockgeometry
     //   RedstoneDust case）读全 state：连接位选线向（无连接画 dot）+ 电力位选断 / 通两套瓦片。
     static constexpr quint8 RedstoneDustPowerMask = 0x0F; // 红石粉 state 低 4 位 = 电力级 0..15
+    // t656 红石粉 state 高 4 位水平连接位（**复用 RailConnPx/Nx/Pz/Nz 同值 0x01/0x02/0x04/0x08**，存放于
+    //   state 高半字节 —— 读时 state>>4 得本组常量位序，与铁轨连接位完全同构；文档见上 1661 行注释）。
+    //   review-r19.8 H1 修：writer（World::tickRedstone）旧把 6 向 conn<<4 塞高半字节 → di4/5(+Z/-Z)
+    //   溢出 8 位被截断、且 +Y/-Y 占掉 Pz/Nz 位 → Z 向铺粉渲染成孤立点、mesher 读位错位。现仅存水平
+    //   4 向（垂直邻粉连接**不落 state**，v1 渲染本就省略垂直画线；电力 BFS 走 6 向与 state 无关，不受影响）。
+    static constexpr quint8 RedstoneDustConnPx = 0x01; // 高半字节 bit0 = +X 邻粉
+    static constexpr quint8 RedstoneDustConnNx = 0x02; // 高半字节 bit1 = -X
+    static constexpr quint8 RedstoneDustConnPz = 0x04; // 高半字节 bit2 = +Z
+    static constexpr quint8 RedstoneDustConnNz = 0x08; // 高半字节 bit3 = -Z
     // t656 动力铁轨通电位（bit4，值 16 —— 与探测轨 DetectorRailStateOnFlag 同位不同块互不干扰）：
     //   机制等价 MC 1.0 powered rail 受红石信号激活。World::tickRedstone 电力重算时置 / 清本位
     //   （邻格电力 >0 → 置位 + mesher 换 rail_golden_on(159) 通电贴图 —— t638 留图集备用的瓦片终于有

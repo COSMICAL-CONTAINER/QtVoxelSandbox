@@ -712,8 +712,12 @@ int PartialBlockGeometry::append(
         constexpr float yr = 1.0f / 16.0f; // 粉层厚度（cell 底以上 1/16，贴地面防 z-fight，同铁轨）
         const quint8 con = quint8(state >> 4);                      // 高 4 位连接位
         const bool on = (state & BlockRegistry::RedstoneDustPowerMask) > 0; // 通电（>0 即亮）
-        const bool cpx = (con & 0x01) != 0, cnx = (con & 0x02) != 0; // +X / -X（bit0/1，同 kNb 序）
-        const bool cpz = (con & 0x10) != 0, cnz = (con & 0x20) != 0; // +Z / -Z（bit4/5）
+        // review-r19.8 H1 修：连接位 = 高半字节 0x01/0x02/0x04/0x08（RedstoneDustConn*，同铁轨位序）。
+        //   旧版把 Z 位读在 0x10/0x20（= writer 的 +Y/-Y 错位）→ Z 向铺粉恒显孤立点（死代码位）。
+        const bool cpx = (con & BlockRegistry::RedstoneDustConnPx) != 0; // +X
+        const bool cnx = (con & BlockRegistry::RedstoneDustConnNx) != 0; // -X
+        const bool cpz = (con & BlockRegistry::RedstoneDustConnPz) != 0; // +Z
+        const bool cnz = (con & BlockRegistry::RedstoneDustConnNz) != 0; // -Z
         const int lineTile = on ? 168 : 166; // 线向：通电 168 / 断电 166
         const int dotTile  = on ? 169 : 167; // 点：通电 169 / 断电 167
         const auto pushDust = [&](int t, float ax0, float az0, float ax1, float az1,

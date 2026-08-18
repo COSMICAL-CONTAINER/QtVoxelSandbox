@@ -764,7 +764,8 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* stone_brick             */ 98,  // t487 石砖 → MC 1.0 stone brick id 98
     /* stone_brick_slab        */ 44,  // t487 石砖台阶 → MC 1.0 stone slab id 44（metadata 5 = stone brick；统一取 slab id）
     /* stone_brick_stairs      */ 67,  // t487 石砖楼梯 → MC 1.0 stairs id 67（1.0 楼梯含木/石/cobble/brick 统一 id）
-    /* end_portal              */ 119, // t487 末地传送门 → MC 1.0 end portal id 119
+    /* end_portal              */ 120, // t487/t620/t664 末地传送门框架（t664 更名自「末地祭坛」）→ MC 1.0 end portal frame id 120
+                                        //   （review-r19.8 低危补正：旧映射 119 是 end portal（门面）本体；框架应为 120）
     // t490 手动 TNT 点火机关 → MC 1.0 对齐：lever id 69（1.0 存在）；stone button id 77（1.0 存在）；
     //   wooden button id 143 为 1.5+ 独立 id（1.0 仅石按钮，木按钮 1.5+）→ -1（资源包回退引擎自绘）。
     /* lever                   */ 69,  // t490 杠杆 → MC 1.0 lever id 69
@@ -801,6 +802,9 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* detector_rail           */ 28,  // t638 探测铁轨 → MC 1.0 detector rail id 28
     /* redstone_torch          */ 76,  // t638 红石火把（常亮 on）→ MC 1.0 redstone torch lit id 76
     /* redstone_dust           */ 55,  // t656 红石粉导线 → MC 1.0 redstone wire id 55（放置的导线形态）
+    // t664/t665 末地门面 / 怪物蛋 → MC 1.0 对齐（review-r19.8 低危：缺行静默零填充为 0 = air；两方块均为
+    //   t664/t665 新增、此前无运行期消费者，补真实 1.0 id 供迁移文档引用）。
+    /* end_portal_surface      */ 119, // t664 末地传送门门面（薄黑星平面）→ MC 1.0 end portal id 119（框架 120 已由 EndPortal 行映射）    /* monster_egg             */ 97,  // t665 石砖伪装怪物蛋 → MC 1.0 stone monster egg id 97（要塞银鱼蛋）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
