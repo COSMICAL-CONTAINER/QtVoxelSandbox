@@ -477,10 +477,13 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     //   20=chest_top / 21=chest_side / 22=chest_front（t173；箱子方块各面贴图）
     // 半纹素内缩防渗色（线性采样跨瓦片）。N 读 BlockRegistry::AtlasTileCount（单一权威，
     //   与 BlockCube / build_atlas.py 同源——消除「两处各持魔数、加瓦片漏改一份」回归类，见 t182）。
+    //   t668 HD 图集：半纹素 = 0.5px 折算成归一化 UV = 0.5/(N × kAtlasTilePx)；垂直维同理 0.5/kAtlasTilePx
+    //   （图集高 = 1 瓦片）。旧 16px 时内缩 1/32 瓦片宽，64px 后缩到 1/128（瓦片更密 → 内缩更小才不裁掉
+    //   有效像素；**必须与 kAtlasTilePx 同步**，改一漏一 → 采到跨瓦片渗色或瓦片边缘被裁）。
     constexpr int N = BlockRegistry::AtlasTileCount;
     constexpr float tileW = 1.0f / N;
-    constexpr float hx = 0.5f / (N * 16);
-    constexpr float hy = 0.5f / 16;
+    constexpr float hx = 0.5f / (N * BlockRegistry::kAtlasTilePx);
+    constexpr float hy = 0.5f / BlockRegistry::kAtlasTilePx;
     const float v0 = 0.0f + hy, v1 = 1.0f - hy;
 
     // t151 真光场 + t153 PCF 软影顶点色（PLAN §2-H / §M，替代 t123 方向太阳 faceVc）：

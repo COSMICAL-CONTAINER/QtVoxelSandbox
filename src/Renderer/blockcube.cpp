@@ -58,8 +58,11 @@ const int kFaceNormal[6][3] = {
 // 瓦片序号由 BlockRegistry::tileIndex(blockId, face) 给出（单一权威）。
 constexpr int kAtlasN = BlockRegistry::AtlasTileCount;
 constexpr float kTileW = 1.0f / kAtlasN;
-constexpr float kHx = 0.5f / (kAtlasN * 16); // 半纹素内缩（线性采样防跨瓦片渗色）
-constexpr float kHy = 0.5f / 16;
+// t668 HD 图集：半纹素内缩 = 0.5px 折算归一化 UV（读 kAtlasTilePx **单一权威**；旧 16px 时 1/32 瓦片宽 →
+//   64px 后 1/128，与 chunkgeometry hx/hy 同步 —— 三者任一漏改 → BlockCube 手持/掉落贴图与地形贴图渗色
+//   口径不一致）。图集高 1 瓦片 → kHy = 0.5/kAtlasTilePx。
+constexpr float kHx = 0.5f / (kAtlasN * BlockRegistry::kAtlasTilePx);
+constexpr float kHy = 0.5f / BlockRegistry::kAtlasTilePx;
 } // namespace
 
 BlockCube::BlockCube(QQuick3DObject *parent) : QQuick3DGeometry(parent)

@@ -140,8 +140,12 @@ public:
     //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString mobHeadIconSource(int mobType) const;
 
-    // 引擎图集瓦片尺寸（tools/build_atlas.py TILE=16 + chunkgeometry UV 的 N*16 同源；公开供 image provider 复用）。
-    static constexpr int kTile = 16;
+    // 引擎图集瓦片尺寸（HD 图集 t668：16 → 64）。读 BlockRegistry::kAtlasTilePx **单一权威**（与 build_atlas.py
+    //   TILE / chunkgeometry hx,hy / BlockCube kHx,kHy 四方同源——消除「瓦片尺寸魔数多份、改一处漏一份」回归类；
+    //   blockregistry.h kAtlasTilePx 注释钉死四方）。包内贴图（常 128px）→ 64 降采样平滑；程序 16px → 64 近邻
+    //   上采样无损失感。UV 数学按瓦片数分数（模型 UV 1/AtlasTileCount）不随像素尺寸变；只有半纹素内缩随之变。
+    //   公开供 image provider / main.cpp 复用。
+    static constexpr int kTile = BlockRegistry::kAtlasTilePx;
 
     // 合成图集（程序生成图集 + 包覆盖）。幂等首调构建并缓存；运行期经 apply() 重建。供 image provider 调用。
     static QImage compositeAtlas();

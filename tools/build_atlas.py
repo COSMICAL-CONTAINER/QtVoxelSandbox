@@ -56,7 +56,11 @@
 import os
 from PIL import Image
 
-TILE = 16
+# t668 HD 图集：瓦片像素边长 16 → 64。读 BlockRegistry::kAtlasTilePx **单一权威**（四方：本文件 TILE /
+#   ResourcePackManager::kTile / chunkgeometry hx,hy / BlockCube kHx,kHy 同源 —— 改一漏一 → 半纹素内缩与
+#   实际瓦片尺寸不符 → 跨瓦片渗色或边缘裁切回归类）。程序生成源 16px → 此处 64 近邻（NEAREST）上采样
+#   （像素艺术放大 4× 无插入噪声，无可感知损失）。
+TILE = 64
 TILES = [
     "default_grass_top",            # 0 grass_top
     "default_grass_side",           # 1 grass_side
