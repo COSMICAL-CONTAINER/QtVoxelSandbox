@@ -547,13 +547,15 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   放置正常、创造瞬破 drop=0、生存不可破同基岩）。
     /* end_portal   */ {int(BlockRegistry::EndPortal),         141,140,140,140, false, BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "end_portal",   "末地传送门"},
     // t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / wooden button / stone button；无红石故右键激活即点燃邻接
-    //   TNT）。三者复用 ShapePlate（贴地薄板，同 WoodPressurePlate 几何）。PartialBlockGeometry 据 state bit0 切激活
-    //   视觉（t628：按钮按下→板高压半 1/32；拉杆扳开→顶点色高光；tools/build_lever_button.py 程序生成）。
+    //   TNT）。**t662 几何重做**（用户「跟压力板一模一样，不行」）：按钮 = 贴附着面的小长方体（~0.375×0.125×0.375
+    //   居中凸钮，机制等价 MC 6×2×6px）、拉杆 = 圆石小底座 + 斜插木棍（on/off 两态摆向）；state bit0=激活
+    //   （t628 按下压薄 / 拉杆扳向）、bit[3:1]=附着面（贴地 / 四向贴墙，放置吸附命中面 —— 见头注释 MechAttach*）。
+    //   shape=ShapeNone（**无碰撞**，机制等价 MC 机关无 hitbox 阻挡；raycastAABBs 特例给精确小盒选中）。
     //   激活：placeBlock useBlock 分支检测命中机关 → 翻 state bit0（t628 仅激活沿触发）+ 点燃 6 邻 TNT + fire
     //   6 邻发射器/投掷器（fireDispenserAt）；按钮按下 ~1s 自动弹回（t628 m_buttonRecoverCells），拉杆保持扳开。
-    /* lever        */ {int(BlockRegistry::Lever),           131,131,131,131, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Lever),       1, 64, "lever",        "杠杆"},
-    /* wood_button  */ {int(BlockRegistry::WoodButton),      132,132,132,132, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::WoodButton),  1, 64, "wood_button",  "木按钮"},
-    /* stone_button */ {int(BlockRegistry::StoneButton),     133,133,133,133, false, BlockRegistry::ShapePlate,    0.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::StoneButton), 1, 64, "stone_button", "石按钮"},
+    /* lever        */ {int(BlockRegistry::Lever),           131,131,131,131, false, BlockRegistry::ShapeNone,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Lever),       1, 64, "lever",        "杠杆"},
+    /* wood_button  */ {int(BlockRegistry::WoodButton),      132,132,132,132, false, BlockRegistry::ShapeNone,    0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::WoodButton),  1, 64, "wood_button",  "木按钮"},
+    /* stone_button */ {int(BlockRegistry::StoneButton),     133,133,133,133, false, BlockRegistry::ShapeNone,    0.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::StoneButton), 1, 64, "stone_button", "石按钮"},
     // ── t507 白蘑菇 / 棕蘑菇（BrownMushroom）：机制等价 MC 1.0 brown mushroom（沼泽 / 阴暗草地小蘑菇，与红蘑菇
     //   Mushroom=48 同族，仅配色区别 —— 棕色菌盖 + 米色菌柄）。cross 形广告牌方块（与 Mushroom / Sapling / DeadBush
     //   同走 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。solid=false（非实体 →
@@ -822,7 +824,7 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
         || blockId == CobbleFence || blockId == CobblePressurePlate) return true; // t412 段外圆石变体
     if (blockId == SpruceSlab || blockId == SpruceFence || blockId == SpruceDoor) return true; // t466 段外云杉木制品（与 WoodSlab/WoodFence/WoodDoor 同几何）
     if (blockId == StoneBrickSlab || blockId == StoneBrickStairs) return true; // t487 段外石砖台阶/楼梯（与 WoodSlab/WoodStairs 同几何）
-    if (blockId == Lever || blockId == WoodButton || blockId == StoneButton) return true; // t490 段外手动点火机关（与 WoodPressurePlate 同几何：贴地薄板）
+    if (blockId == Lever || blockId == WoodButton || blockId == StoneButton) return true; // t490 段外手动点火机关（t662 几何重做：贴附着面小钮 / 底座+棍，mechBoxes 单一几何源）
     if (blockId == StonePressurePlate || blockId == IronPressurePlate
         || blockId == GoldPressurePlate) return true; // t627 段外压力板家族扩展（与 WoodPressurePlate 同几何：贴地薄板）
     return blockId >= FirstPartial && blockId <= LastPartial;
@@ -1516,6 +1518,11 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
             //   两片对角 cross quad 贴满格（贴图透明底只显中央火把剪影），取中央 0.4 见方 × 0.85 高保守盒
             //   （覆盖剪影主体；与 Torch 的命中盒同尺寸——同族光源手感一致）。
             return {BlockAABB{0.3f, 0.0f, 0.3f, 0.7f, 0.85f, 0.7f}};
+        // t662 机关方块（Lever / WoodButton / StoneButton）：贴附着面的小钮 / 底座+棍（mechBoxes 单一几何源
+        //   —— 渲染与选中同盒，准星落在钮 / 棍上才命中、格内空气穿过命中后方块，同木梯 t501「透视不优先
+        //   选中」模式）。碰撞为空（ShapeNone）；仅选体走本集。
+        if (blockId == Lever || blockId == WoodButton || blockId == StoneButton)
+            return mechBoxes(blockId, state);
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // air / water → 整格（air 不进本路径兜底；water 整格舀水）
     }
     // 不完整方块段（ShapeSlab/...）→ 同 selectionAABBs（实体 sub 形状；空气部分穿过命中后方块）。
@@ -1563,6 +1570,32 @@ int BlockRegistry::ladderFaceFromNormal(int nx, int ny, int nz)
     return 0;               // 无法线（不应发生）→ +X 兜底
 }
 
+// t662 机关附着面解码（见头注释）：state bit[3:1] → 支撑块相对偏移。越界（>4，不应出现）→ 贴地兜底。
+void BlockRegistry::mechAttachOffset(quint8 state, int &dx, int &dy, int &dz)
+{
+    switch ((state >> MechAttachShift) & 0x07) {
+    case MechAttachOnPX: dx =  1; dy = 0; dz =  0; return; // 支撑在 +X 邻
+    case MechAttachOnNX: dx = -1; dy = 0; dz =  0; return; // 支撑在 -X 邻
+    case MechAttachOnPZ: dx =  0; dy = 0; dz =  1; return; // 支撑在 +Z 邻
+    case MechAttachOnNZ: dx =  0; dy = 0; dz = -1; return; // 支撑在 -Z 邻
+    default:             dx =  0; dy = -1; dz =  0; return; // 贴地（0）+ 越界兜底
+    }
+}
+
+// t662 机关放置附着值：命中面外法线 → 附着编码（同 torchOrientFromNormal / ladderFaceFromNormal 模式）。
+//   语义钉死：MechAttachOnXX = **支撑块在机关格的 XX 方向**。玩家点中命中方块的 +X 面（法线 +X）→ 机关
+//   落命中方块的 +X 邻格 → 命中方块（= 唯一支撑）在机关格的 -X 方向 → 存 MechAttachOnNX。故映射取反码。
+//   点顶面（ny>0）→ 机关立其上（支撑 = 下方）→ 贴地 0；点底面（ny<0，天花板下挂）→ -1 拒（v1 不支持顶挂）。
+int BlockRegistry::mechAttachFromNormal(int nx, int ny, int nz)
+{
+    if (ny > 0) return MechAttachFloor; // 点顶面 → 机关立其上（支撑 = 下方）→ 贴地
+    if (nx > 0) return MechAttachOnNX;  // 点中 +X 面 → 机关在命中方块 +X 侧 → 支撑在其 -X
+    if (nx < 0) return MechAttachOnPX;  // 点中 -X 面 → 机关在命中方块 -X 侧 → 支撑在其 +X
+    if (nz > 0) return MechAttachOnNZ;  // 点中 +Z 面 → 机关在命中方块 +Z 侧 → 支撑在其 -Z
+    if (nz < 0) return MechAttachOnPZ;  // 点中 -Z 面 → 机关在命中方块 -Z 侧 → 支撑在其 +Z
+    return -1;                          // ny<0（天花板下挂）v1 不支持 → 拒（placeBlock 须查此返值）
+}
+
 // t501 木梯支撑墙相对偏移（state 解码）：支撑墙在水平方向（dy 恒 0）。越界 state 值 → +X 兜底。
 void BlockRegistry::ladderSupportOffset(quint8 state, int &dx, int &dz)
 {
@@ -1572,6 +1605,94 @@ void BlockRegistry::ladderSupportOffset(quint8 state, int &dx, int &dz)
     case 2: dx =  0; dz =  1; return; // 支撑墙在 +Z 邻
     default: dx = 0; dz = -1; return; // 支撑墙在 -Z 邻（含越界高位兜底为 -Z；& 3 后 case 3）
     }
+}
+
+// t662 机关方块（Lever/WoodButton/StoneButton）cell-local 子盒集（**渲染与 raycast 同一几何源**：mesher
+//   （partialblockgeometry mech case）逐盒 pushBox，raycastAABBs 直接返回本集 —— 碰撞为空（ShapeNone 无碰撞，
+//   机制等价 MC 机关无 hitbox 阻挡），选中走本集精确小盒）。几何（单位 1/16）：
+//   - 按钮：凸钮单盒 —— 厚 2/16（贴附着面），宽 6/16 居中；按下（bit0）压薄到 1/16（机制等价 MC 6×2×6px
+//     按钮按下 1px 凹陷）。贴地钮 y[0,2/16]；贴墙钮垂直居中 y[7/16,9/16]。
+//   - 拉杆：圆石底座盒（3/16 厚贴面 × 6/16 见方）+ 斜插木棍两段阶梯盒（近似倾角，机制等价 MC lever base+stick；
+//     贴地棍向 ±Z 摆（off=-Z / on=+Z），贴墙棍上（off）/ 下（on）摆）。附着头注释 MechAttach*（bit[3:1]）。
+std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, quint8 state)
+{
+    std::vector<BlockAABB> out;
+    const bool active = (state & MechStateActiveFlag) != 0;
+    const int attach = (state >> MechAttachShift) & 0x07;
+    constexpr float t = 1.0f / 16.0f;
+    if (blockId != Lever) {
+        // 按钮：厚 2/16（按下 1/16），6/16 见方居中。机械三个 id 中非 Lever 即按钮（调用方守卫）。
+        const float th = active ? 1.0f : 2.0f;
+        switch (attach) {
+        case MechAttachOnPX:  out.push_back({0.0f,      7.0f * t, 5.0f * t, th * t,    9.0f * t, 11.0f * t}); break;
+        case MechAttachOnNX:  out.push_back({(16.0f - th) * t, 7.0f * t, 5.0f * t, 1.0f, 9.0f * t, 11.0f * t}); break;
+        case MechAttachOnPZ:  out.push_back({5.0f * t,  7.0f * t, 0.0f,      11.0f * t, 9.0f * t, th * t});    break;
+        case MechAttachOnNZ:  out.push_back({5.0f * t,  7.0f * t, (16.0f - th) * t, 11.0f * t, 9.0f * t, 1.0f}); break;
+        default:              out.push_back({5.0f * t,  0.0f,     5.0f * t, 11.0f * t, th * t,   11.0f * t}); break;
+        }
+        return out;
+    }
+    // 拉杆：底座 + 摆棍（off/on 摆向镜像）。棍两段阶梯盒近似 ~35° 倾角（同附魔台摊开书的阶梯盒先例）。
+    const float u = active ? 1.0f : 0.0f; // 摆向：on=+1（+Z / 墙上向下）/ off=-1（-Z / 墙上向上）
+    switch (attach) {
+    case MechAttachOnPX: { // 底座贴 x=0；棍 ±上/下摆
+        out.push_back({0.0f, 6.0f * t, 5.0f * t, 3.0f * t, 12.0f * t, 11.0f * t});
+        if (!active) { // off：棍向上摆（远端更高）
+            out.push_back({3.0f * t, 9.0f * t,  7.0f * t, 5.0f * t, 12.0f * t, 9.0f * t});
+            out.push_back({5.0f * t, 11.0f * t, 7.0f * t, 7.0f * t, 14.0f * t, 9.0f * t});
+        } else {       // on：棍向下摆
+            out.push_back({3.0f * t, 6.0f * t,  7.0f * t, 5.0f * t, 9.0f * t,  9.0f * t});
+            out.push_back({5.0f * t, 4.0f * t,  7.0f * t, 7.0f * t, 7.0f * t,  9.0f * t});
+        }
+        break;
+    }
+    case MechAttachOnNX: { // 底座贴 x=1；棍 x 镜像 OnPX
+        out.push_back({13.0f * t, 6.0f * t, 5.0f * t, 1.0f, 12.0f * t, 11.0f * t});
+        if (!active) {
+            out.push_back({11.0f * t, 9.0f * t, 7.0f * t, 13.0f * t, 12.0f * t, 9.0f * t});
+            out.push_back({9.0f * t, 11.0f * t, 7.0f * t, 11.0f * t, 14.0f * t, 9.0f * t});
+        } else {
+            out.push_back({11.0f * t, 6.0f * t, 7.0f * t, 13.0f * t, 9.0f * t, 9.0f * t});
+            out.push_back({9.0f * t, 4.0f * t, 7.0f * t, 11.0f * t, 7.0f * t, 9.0f * t});
+        }
+        break;
+    }
+    case MechAttachOnPZ: { // 底座贴 z=0；棍上/下摆
+        out.push_back({5.0f * t, 6.0f * t, 0.0f, 11.0f * t, 12.0f * t, 3.0f * t});
+        if (!active) {
+            out.push_back({7.0f * t, 9.0f * t, 3.0f * t, 9.0f * t, 12.0f * t, 5.0f * t});
+            out.push_back({7.0f * t, 11.0f * t, 5.0f * t, 9.0f * t, 14.0f * t, 7.0f * t});
+        } else {
+            out.push_back({7.0f * t, 6.0f * t, 3.0f * t, 9.0f * t, 9.0f * t, 5.0f * t});
+            out.push_back({7.0f * t, 4.0f * t, 5.0f * t, 9.0f * t, 7.0f * t, 7.0f * t});
+        }
+        break;
+    }
+    case MechAttachOnNZ: { // 底座贴 z=1；棍 z 镜像 OnPZ
+        out.push_back({5.0f * t, 6.0f * t, 13.0f * t, 11.0f * t, 12.0f * t, 1.0f});
+        if (!active) {
+            out.push_back({7.0f * t, 9.0f * t, 11.0f * t, 9.0f * t, 12.0f * t, 13.0f * t});
+            out.push_back({7.0f * t, 11.0f * t, 9.0f * t, 9.0f * t, 14.0f * t, 11.0f * t});
+        } else {
+            out.push_back({7.0f * t, 6.0f * t, 11.0f * t, 9.0f * t, 9.0f * t, 13.0f * t});
+            out.push_back({7.0f * t, 4.0f * t, 9.0f * t, 9.0f * t, 7.0f * t, 11.0f * t});
+        }
+        break;
+    }
+    default: { // 贴地：底座 y[0,3/16]；棍 ±Z 摆
+        Q_UNUSED(u);
+        out.push_back({5.0f * t, 0.0f, 5.0f * t, 11.0f * t, 3.0f * t, 11.0f * t});
+        if (!active) { // off：向 -Z 摆
+            out.push_back({7.0f * t, 2.0f * t, 4.0f * t, 9.0f * t, 5.0f * t, 8.0f * t});
+            out.push_back({7.0f * t, 4.0f * t, 2.0f * t, 9.0f * t, 8.0f * t, 6.0f * t});
+        } else {       // on：向 +Z 摆
+            out.push_back({7.0f * t, 2.0f * t, 8.0f * t, 9.0f * t, 5.0f * t, 12.0f * t});
+            out.push_back({7.0f * t, 4.0f * t, 10.0f * t, 9.0f * t, 8.0f * t, 14.0f * t});
+        }
+        break;
+    }
+    }
+    return out;
 }
 
 // t565 铁轨连接 state 计算（见头注释 RailConnPx/Nx/Pz/Nz）：4 向水平邻块 id 入参，邻为铁轨 → 置对应

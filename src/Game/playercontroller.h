@@ -888,6 +888,10 @@ private:
     //   木梯非 solid → 不撑他木梯 → 单趟扫即足够（无级联）。仅扫 6 邻（破块点周围），不重判贴墙（贴墙由
     //   placeBlock 预检保证，失撑只看 state 记录的那一面支撑墙）。
     void dropUnsupportedLaddersAround(int x, int y, int z);
+    // t662 破块后扫 6 邻机关方块（Lever / WoodButton / StoneButton）：若其**附着格**（state bit[3:1] 编码，
+    //   BlockRegistry::mechAttachOffset）已非完整立方（含本格刚被置 Air）→ 机关直接掉落为物品（同火把 /
+    //   木梯失撑语义，机制等价 MC「按钮 / 拉杆附着面被移除即脱落」）。机关无碰撞不撑他机关 → 单趟扫即足够。
+    void dropUnsupportedMechAround(int x, int y, int z);
     // t247 草丛 / 小麦作物掉落产出（玩家破块 / 失撑共用）：把 WheatCrop（按 state 判成熟，t237 收割：
     //   成熟掉 1 小麦物品 + 1-2 种子、未成熟仅 1 种子）/ TallGrass（1/kTallGrassSeedDropDenom 概率掉种，
     //   t246）的 spawnItem 计算收敛到此 → finishMiningAt 与 dropUnsupportedCropsAround 共用，**失撑掉落

@@ -85,11 +85,11 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::RedstoneBlock: return "icon_redstone_block.png"; // 红石块（pack 鲜红底+矿粒）
     case BlockRegistry::RedstoneLamp: return "icon_redstone_lamp.png";  // 红石灯（pack off 态贴图，与放置态默认一致）
     // t628 手动点火机关图标（t490 已生成 icon PNG 并注册 qrc，但 iconFileForBlock 漏接 case → 调色板图标空白；
-    //   本任务接通 + 补进创造调色板）。pressure_plate shape 3D 薄板 + 各自机关贴图（杠杆=木质底座+竖柄 /
-    //   木钮=木质+凸钮 / 石钮=石质+凸钮，肉眼可辨）。tools/build_cube_icons.py 生成。
-    case BlockRegistry::Lever:        return "icon_lever.png";        // 杠杆：3D 薄板（木质底座+竖直扳柄+圆柄头）
-    case BlockRegistry::WoodButton:   return "icon_wood_button.png";  // 木按钮：3D 薄板（木质底座+凸起圆钮）
-    case BlockRegistry::StoneButton:  return "icon_stone_button.png"; // 石按钮：3D 薄板（石质底座+凸起圆钮）
+    //   本任务接通 + 补进创造调色板）。t662 几何重做：button / lever shape 3D 立体图标（凸钮单盒 / 底座+摆棍，
+    //   与世界内 mechBoxes 放置观感一致）。tools/build_cube_icons.py 生成。
+    case BlockRegistry::Lever:        return "icon_lever.png";        // 杠杆：圆石底座 + 斜插摆棍（t662 重做）
+    case BlockRegistry::WoodButton:   return "icon_wood_button.png";  // 木按钮：凸钮小长方体（t662 重做）
+    case BlockRegistry::StoneButton:  return "icon_stone_button.png"; // 石按钮：凸钮小长方体（t662 重做）
     case BlockRegistry::Anvil:        return "icon_anvil.png";          // t477 铁砧立方体图标（顶=砧台+砧面+尖角 / 侧=深铁砧身）
     case BlockRegistry::AnvilChipped: return "icon_anvil_chipped.png";  // t477 微损铁砧立方体图标（顶=砧台+细裂纹）
     case BlockRegistry::AnvilDamaged: return "icon_anvil_damaged.png";  // t477 重损铁砧立方体图标（顶=砧台+粗裂纹网+缺角）

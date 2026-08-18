@@ -21,8 +21,9 @@
 //   stairs      bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 / 背墙在对侧） bit2=上下倒置（整步在上、背墙在下）
 //   fence       —         （中心立柱 1.5 高 + 四向横档连邻居；state=0；连接判定读 PartialNeighborCtx，t209）
 //   pressure_plate —      （贴地薄板；state bit0=踩下（t627）→ 板高压半 1/32；机制等价 MC 压力板被压下）
-//   lever/button —        （贴地薄板（同压力板几何）；state bit0=激活态。t628：按钮按下→板高压半 1/32（同压力板
-//                          踩下视觉）；拉杆扳开→板体顶点色高光提亮（激活反馈，贴图不变））
+//   lever/button —        （t662 重做：贴附着面小体——按钮凸钮单盒（按下压薄 1/16）/ 拉杆底座+摆棍两段阶梯盒；
+//                          state bit0=激活（t628）、bit[3:1]=附着面 0=贴地 1..4=四向贴墙（blockregistry.h
+//                          MechAttach*）。几何源 = BlockRegistry::mechBoxes（与 raycastAABBs 选中同盒））
 //   door        bit[1:0]=朝向(0=+X 1=-X 2=+Z 3=-Z) bit2=开(1)/合(0) bit3=上格(1)/下格(0)
 //   trapdoor    bit0=开(1)/合(0) bit[2:1]=开时朝向(0=+X 1=-X 2=+Z 3=-Z)
 //
@@ -248,26 +249,41 @@ int PartialBlockGeometry::append(
     }
     case BlockRegistry::Lever:
     case BlockRegistry::WoodButton:
-    case BlockRegistry::StoneButton: { // t490 手动点火机关（与 WoodPressurePlate 同贴地薄板几何）
-        // t628 激活视觉（此前 state bit0 无任何视觉反馈）：按钮按下（state bit0）→ 板高压半到 1/32（同压力板
-        //   踩下视觉 t627，机制等价 MC 按钮按下凹陷；右键按下 ~1s 后 playercontroller 自动清位弹回 1/16）。
-        //   拉杆扳开（bit0）→ 板体顶点色高光提亮 ×1.3（blockregistry.h 既有「激活态切亮色高光」承诺的兑现；
-        //   拉杆无自动复位——扳开保持直到再右键，高光常亮即「拉开持续激活」的视觉承载）。
-        const bool active = (state & 1) != 0;
-        if (BlockRegistry::isLever(blockId) && active) {
-            // 拉杆 ON：复制光照上下文整体提亮（pushBox 收 const 引用故本地副本；clamp ≤1 防过曝白块）。
-            PartialLightCtx lit = light;
-            lit.light = std::min(lit.light * 1.3f, 1.0f);
-            for (int fi = 0; fi < 6; ++fi) lit.face[fi] = std::min(lit.face[fi] * 1.3f, 1.0f);
-            pushBox(verts, idx, lx, ly, lz, 0.0625f, 0.9375f, 0.f, 0.0625f, 0.0625f, 0.9375f,
-                    tile, lit, tileW, hx, hy, v0, v1);
-            break;
+    case BlockRegistry::StoneButton: { // t490 手动点火机关；t662 几何重做（用户「跟压力板一模一样，不行」）
+        // t662：机关 = 贴附着面的小体（非贴地薄板）。**几何源 = BlockRegistry::mechBoxes（与 raycastAABBs
+        //   选中同一盒集，渲染 / 选中同源）**：state bit0=激活（t628：按钮按下压薄 / 拉杆扳向）、bit[3:1]=
+        //   附着面（0=贴地 / 1..4=四向贴墙，放置吸附命中面 —— 见 blockregistry.h MechAttach*）。
+        //   - 按钮（Wood/StoneButton）：凸钮单盒（厚 2/16 → 按下 1/16，宽 6/16 居中；机制等价 MC 6×2×6px），
+        //     贴本方块 tile（132 木 / 133 石）。
+        //   - 拉杆（Lever）：底座盒贴 cobble(5)（圆石底座 —— t662 起不复用 lever(131) 侧视 sprite：那是一张
+        //     平面立绘，贴 3D 小盒会整图拉伸错位；改 cobble 面后 pack 侧自动映射 cobblestone.png，机制等价
+        //     MC lever = cobble base；pack lever.png 映射保留给物品图标专用）+ 摆棍两段阶梯盒贴 planks(8)
+        //     （斜插木棍）。棍在 off/on 两摆向间翻转 —— bit0 翻位即翻摆向，激活视觉由「棍摆过去」本体承载，
+        //     t628 的提亮高光叠加在棍上 ×1.25（扳开常亮的视觉反馈保留）。
+        const bool isLever = (blockId == BlockRegistry::Lever);
+        const bool active = (state & BlockRegistry::MechStateActiveFlag) != 0;
+        const std::vector<BlockRegistry::BlockAABB> boxes = BlockRegistry::mechBoxes(blockId, state);
+        const int planksTile = BlockRegistry::tileIndex(BlockRegistry::Planks, BlockRegistry::PosX); // 木棍贴 planks(8)
+        const int cobbleTile = BlockRegistry::tileIndex(BlockRegistry::Cobble, BlockRegistry::PosX); // 底座贴 cobble(5)
+        for (size_t bi = 0; bi < boxes.size(); ++bi) {
+            const BlockRegistry::BlockAABB &bb = boxes[bi];
+            // 拉杆盒 0 = 底座（cobble tile）；盒 1.. = 摆棍（planks；激活时提亮 ×1.25 同 t628 高光语义）。
+            //   按钮单盒贴本方块 tile（132 木 / 133 石）。
+            int boxTile = tile;
+            PartialLightCtx boxLight = light;
+            if (isLever && bi > 0) {
+                boxTile = planksTile;
+                if (active) {
+                    boxLight.light = std::min(boxLight.light * 1.25f, 1.0f);
+                    for (int fi = 0; fi < 6; ++fi) boxLight.face[fi] = std::min(boxLight.face[fi] * 1.25f, 1.0f);
+                }
+            } else if (isLever) {
+                boxTile = cobbleTile;
+            }
+            pushBox(verts, idx, lx, ly, lz,
+                    bb.minX, bb.maxX, bb.minY, bb.maxY, bb.minZ, bb.maxZ,
+                    boxTile, boxLight, tileW, hx, hy, v0, v1);
         }
-        const float top = (active && !BlockRegistry::isLever(blockId))
-                              ? (1.0f / 32.0f)   // 按钮按下：压半（同压力板踩下）
-                              : (1.0f / 16.0f);  // 常态 / 拉杆：1/16 薄板
-        pushBox(verts, idx, lx, ly, lz, 0.0625f, 0.9375f, 0.f, top, 0.0625f, 0.9375f,
-                tile, light, tileW, hx, hy, v0, v1);
         break;
     }
     case BlockRegistry::WoodDoor:

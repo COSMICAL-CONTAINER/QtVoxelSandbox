@@ -385,15 +385,22 @@ PARTIALS_3D_SPRUCE = [
     ("spruce_door",           "door"),
 ]
 
-# t490 手动 TNT 点火机关图标（lever / wood_button / stone_button）：贴地薄板几何（同 WoodPressurePlate，
-#   render_partial_3d pressure_plate shape），fill 各自机关贴图。木质机关（lever / wood_button）走 wood 系
-#   贴图、石质机关（stone_button）走 stone 系贴图。3D dimetric 立体图标使 hotbar / 创造调色板肉眼可辨
-#   「这是机关方块」（区别于压力板：lever 有竖柄 / button 是凸钮，由源贴图体现）。
+# t490 手动 TNT 点火机关图标；t662 几何重做（用户「跟压力板一模一样，不行」）→ 换 button / lever 形状投影：
+#   - 按钮（wood_button / stone_button）：凸钮单盒（6×2×6 居中，机制等价 MC button）+ 各自底座贴图 fill。
+#   - 杠杆（lever）：圆石底座盒（fill_top=default_cobble，机制等价 MC lever cobble base）+ 斜插摆棍两段
+#     （fill_side=default_wood 木板棍，机制等价 MC lever stick）—— render_partial_3d lever shape 内
+#     盒 0 用 top / 盒 1.. 用 side 贴图。3D dimetric 立体图标使 hotbar / 创造调色板肉眼可辨「按钮 / 拉杆」。
 PARTIALS_3D_IGNITER = [
-    ("lever",        "default_lever",        "default_lever"),        # 杠杆（木质底座+竖柄）
-    ("wood_button",  "default_wood_button",  "default_wood_button"),  # 木按钮（木质底座+凸钮）
-    ("stone_button", "default_stone_button", "default_stone_button"), # 石按钮（石质底座+凸钮）
+    ("lever",        "lever"),        # 杠杆：底座 cobble + 摆棍 planks（shape 内双 fill 分工）
+    ("wood_button",  "button"),       # 木按钮：凸钮单盒（default_wood_button fill，下方 fill 表覆盖）
+    ("stone_button", "button"),       # 石按钮：凸钮单盒（default_stone_button fill）
 ]
+# t662 机关 fill 映射（shape → (fill_top, fill_side)）：lever 底座 cobble / 棍 planks；按钮各自底座贴图。
+MECH_FILL = {
+    "lever":       ("default_cobble", "default_wood"),
+    "wood_button": ("default_wood_button", "default_wood_button"),
+    "stone_button": ("default_stone_button", "default_stone_button"),
+}
 
 # t627 压力板家族扩展图标（stone / iron / gold pressure plate）：pressure_plate shape（同木/圆石压力板流程），
 #   fill = 各自独立瓦片（build_pressure_plates.py：石灰/金属铆钉/亮金板面）。材质色一眼可辨「这是哪种板」。
@@ -495,6 +502,23 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
         boxes = [(1.0 / 16.0, 15.0 / 16.0, 0.0, 1.0 / 16.0,
                   1.0 / 16.0, 15.0 / 16.0)]                            # 贴地薄板 + 边距
         y_min, y_max = 0.0, 1.0 / 16.0
+    elif shape == "button":
+        # t662 按钮凸钮：6×2×6px 量级居中单盒（贴地态 —— 图标取地面放置观感；wall 态几何同款转轴）。
+        #   机制等价 MC button 6/16 见方 × 2/16 厚。区别 pressure_plate（15/16 宽薄条）—— 小钮居中、
+        #   一眼可辨「这是按钮不是压力板」。
+        boxes = [(5.0 / 16.0, 11.0 / 16.0, 0.0, 2.0 / 16.0,
+                  5.0 / 16.0, 11.0 / 16.0)]
+        y_min, y_max = 0.0, 2.0 / 16.0
+    elif shape == "lever":
+        # t662 拉杆：圆石底座（6×3×6）+ 斜插摆棍两段阶梯盒（off 摆向，同世界内 mechBoxes 贴地 off 几何）。
+        #   机制等价 MC lever = cobble base + stick；棍贴木板材质由 caller 传 fill_side 覆盖（fill_top=底座
+        #   cobble / fill_side=棍 planks —— 本 shape 的盒 0 用 top、盒 1.. 用 side 贴图，见下方渲染循环特判）。
+        boxes = [
+            (5.0 / 16.0, 11.0 / 16.0, 0.0, 3.0 / 16.0, 5.0 / 16.0, 11.0 / 16.0),  # 底座
+            (7.0 / 16.0, 9.0 / 16.0, 2.0 / 16.0, 5.0 / 16.0, 4.0 / 16.0, 8.0 / 16.0),  # 棍低段（向 -Z 倾）
+            (7.0 / 16.0, 9.0 / 16.0, 4.0 / 16.0, 8.0 / 16.0, 2.0 / 16.0, 6.0 / 16.0),  # 棍高段（远端更高）
+        ]
+        y_min, y_max = 0.0, 8.0 / 16.0
     elif shape == "stairs":
         # 整步（全 footprint 半高）+ 背墙（背半 footprint 上半）。渲染序无关（depth buffer 解决遮挡）；
         #   背墙 z[0,0.5] = 背半（z 小 = 背，对应 N 角侧），整步 z[0,1] = 全 footprint。
@@ -549,8 +573,13 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
         sy_mid_baseline = (min(sys_baseline) + max(sys_baseline)) / 2.0
         cy_local = W / 2.0 - sy_mid_baseline
 
-    for (x0, x1, y0, y1, z0, z1) in boxes:
-        _render_box_d(canvas, depth_buf, x0, x1, y0, y1, z0, z1, top, side, cy_local, scale)
+    for bi, (x0, x1, y0, y1, z0, z1) in enumerate(boxes):
+        # t662 lever shape：盒 0（底座）贴 fill_top（圆石）、盒 1..（摆棍）贴 fill_side（木板棍）——
+        #   两个 fill 各司其职；其余 shape 恒 top/side 同传（既有图标零回归）。
+        box_top, box_side = top, side
+        if shape == "lever" and bi > 0:
+            box_top, box_side = side, side
+        _render_box_d(canvas, depth_buf, x0, x1, y0, y1, z0, z1, box_top, box_side, cy_local, scale)
 
     img = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGBA")
     return img.resize((OUT, OUT), Image.LANCZOS)
@@ -869,10 +898,15 @@ def run_from_pack():
                 canvas.alpha_composite(img_lo)
                 img = canvas
             elif mode == "plate":
+                # t662 修「石/铁/金压力板图标只显示上半截卡底」：旧 cy_local = W/2 - 0.5*v*(1/16)*0.5 ≈ W/2
+                #   （把薄板投到画布最底缘 → bbox y[48,63] 卡底切半；wood/cobble 走 render_partial_3d 的
+                #   y_mid 居中公式故正常）。改用与 render_partial_3d scale==1 相同的 y_mid 公式：
+                #   cy = W/2 - (1 - y_mid)*v（y_mid = 薄板半高 1/32）→ 薄板投影竖直居中（同 wood 版观感）。
                 fill = load_pack_face(spec["fill"])
                 img = render_pack_box([(1.0 / 16.0, 15.0 / 16.0, 0.0, 1.0 / 16.0,
                                         1.0 / 16.0, 15.0 / 16.0)],
-                                      fill, fill, cy_local=W / 2.0 - 0.5 * v * (1.0 / 16.0) * 0.5)
+                                      fill, fill,
+                                      cy_local=W / 2.0 - (1.0 - 1.0 / 32.0) * v)
             else:
                 print("SKIP (unknown mode)", name)
                 continue
@@ -930,9 +964,11 @@ def main():
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)
-    # t490 手动 TNT 点火机关 3D dimetric 立体图标（pressure_plate shape + 各机关贴图 fill；机制等价木 / 石压力板图标流程）。
-    for out_name, fill_top, fill_side in PARTIALS_3D_IGNITER:
-        img = render_partial_3d("pressure_plate", fill_top, fill_side)
+    # t490/t662 手动 TNT 点火机关 3D dimetric 立体图标（button / lever shape + MECH_FILL 贴图；机制等价
+    #   世界内 mechBoxes 几何 —— t662 重做前是 pressure_plate 薄板，用户「跟压力板一模一样」）。
+    for out_name, shape in PARTIALS_3D_IGNITER:
+        fill_top, fill_side = MECH_FILL[out_name]
+        img = render_partial_3d(shape, fill_top, fill_side)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)

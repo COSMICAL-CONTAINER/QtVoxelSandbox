@@ -1137,6 +1137,10 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   → 不撑他木梯 → 单趟 6 邻扫即足够（无级联）。
     //   t571 标注【自然失撑掉落：恒发（含创造）】。
     dropUnsupportedLaddersAround(x, y, z);
+    // t662 机关方块（拉杆 / 木按钮 / 石按钮）失支撑立即掉落：破块后扫 6 邻机关，其**附着格**（state 编码）
+    //   若已非完整立方（含本格刚被置 Air）→ 机关直接掉落为物品。机制等价 MC「机关附着面被移除即脱落」
+    //   （同火把 / 木梯失撑语义）。t571 标注【自然失撑掉落：恒发（含创造）】。
+    dropUnsupportedMechAround(x, y, z);
     // t247 草丛 / 小麦作物失撑掉落：破块后其正上方的草丛 / 小麦作物（唯一支撑 = 本格，刚被破为 Air）
     //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
     //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
@@ -1317,6 +1321,31 @@ void PlayerController::dropUnsupportedLaddersAround(int x, int y, int z)
         m_world->setBlock(tx, ty, tz, BlockRegistry::Air); // → World 发 blockBroken + worldChanged → mesh 重建
         emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Ladder),
                        std::max(1, BlockRegistry::dropCount(BlockRegistry::Ladder)));
+    }
+}
+
+// t662 破块后扫 (x,y,z) 的 6 邻机关方块（Lever / WoodButton / StoneButton）：解码每机关 state 的附着面
+//   （BlockRegistry::mechAttachOffset）定位其**唯一支撑格**，该格已非完整立方（含刚被置 Air 的本破块）
+//   → 机关直接掉落为物品（setBlock(Air) + spawnItem）。机制等价 MC「按钮 / 拉杆的附着面被移除即脱落，
+//   不重新粘到附近其它可支撑方块」（同火把 t214 / 木梯 t501 失撑语义）。机关无碰撞不撑他机关 → 单趟扫
+//   即足够（无级联）。附着守卫与放置预检同源（放置须 isFullCube 支撑面 → 掉落看同一格是否仍完整立方）。
+//   t571 标注【自然失撑掉落：恒发（含创造）】。
+void PlayerController::dropUnsupportedMechAround(int x, int y, int z)
+{
+    if (!m_world) return;
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &d : kNb) {
+        const int tx = x + d[0], ty = y + d[1], tz = z + d[2];
+        const quint8 tb = m_world->blockAt(tx, ty, tz);
+        if (tb != BlockRegistry::Lever && tb != BlockRegistry::WoodButton
+            && tb != BlockRegistry::StoneButton) continue;
+        int ax, ay, az;
+        BlockRegistry::mechAttachOffset(m_world->stateAt(tx, ty, tz), ax, ay, az);
+        const int sx = tx + ax, sy = ty + ay, sz = tz + az;
+        if (BlockRegistry::isFullCube(m_world->blockAt(sx, sy, sz))) continue; // 支撑仍完整立方 → 机关保留
+        m_world->setBlock(tx, ty, tz, BlockRegistry::Air); // → World 发 blockBroken + worldChanged → mesh 重建
+        emit spawnItem(tx, ty, tz, BlockRegistry::dropId(tb),
+                       std::max(1, BlockRegistry::dropCount(tb)));
     }
 }
 
@@ -3171,6 +3200,16 @@ void PlayerController::placeBlock()
         //   placeState 不变（int→quint8 截断为 0..3 合法值；若预检段判拒则 placeBlock return 不写入）。
         const int lf = BlockRegistry::ladderFaceFromNormal(m_hitNx, m_hitNy, m_hitNz);
         placeState = quint8((lf < 0) ? 0 : lf); // 顶/底面 → 临时 0（预检段会拒）
+    } else if (m_selectedBlock == BlockRegistry::Lever
+               || m_selectedBlock == BlockRegistry::WoodButton
+               || m_selectedBlock == BlockRegistry::StoneButton) {
+        // t662 机关附着面写入 state bit[3:1]（贴地 / 四向贴墙 —— 放置吸附命中面，供 mesher mechBoxes 摆位
+        //   + raycastAABBs 选中 + 失撑掉落解码；bit0 激活态留给 t628 右键翻位，互不干扰）。由命中面外法线
+        //   推导（mechAttachFromNormal；点底面 ny<0 返 -1 = 天花板挂装 v1 不支持）。若 -1 → placeState 临时 0
+        //   （下方机关放置预检段会拒，不写入）。
+        const int ma = BlockRegistry::mechAttachFromNormal(m_hitNx, m_hitNy, m_hitNz);
+        placeState = quint8(((ma < 0) ? BlockRegistry::MechAttachFloor : ma)
+                            << BlockRegistry::MechAttachShift);
     } else if (m_selectedBlock == BlockRegistry::Chest) {
         // t225 箱子前面（锁面）朝玩家侧：state = horizontalFacing ^ 1（玩家朝向的反向 = 箱子前面所朝方向，
         //   机制等价 MC 1.0 箱子放置锁面朝玩家）。编码与 horizontalFacing 同源（0=+X 1=-X 2=+Z 3=-Z）；
@@ -3373,6 +3412,16 @@ void PlayerController::placeBlock()
         if (lf < 0) return; // ① 非侧面（顶/底面）→ 拒
         const quint8 hitBlock = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
         if (!BlockRegistry::isFullCube(hitBlock)) return; // ② 非完整立方支撑 → 拒
+    }
+    // t662 机关方块（Lever / WoodButton / StoneButton）放置预检（机制等价 MC 1.0 lever/button 须贴完整方块面）：
+    //   ① 命中面外法线合法（顶面贴地 / 四向侧面贴墙；底面 ny<0 = 天花板挂装 v1 不支持 → 拒）；
+    //   ② 命中方块（= 唯一支撑）须完整立方（isFullCube，同木梯 t501 守卫——机关贴墙/贴地都须实体面，
+    //     草丛 / 门 / 半砖等不完整方块面拒挂）。附着编码 placeState 已在上方 placeBlock 段算好写入。
+    if (m_selectedBlock == BlockRegistry::Lever
+        || m_selectedBlock == BlockRegistry::WoodButton
+        || m_selectedBlock == BlockRegistry::StoneButton) {
+        if (BlockRegistry::mechAttachFromNormal(m_hitNx, m_hitNy, m_hitNz) < 0) return; // 底面 → 拒
+        if (!BlockRegistry::isFullCube(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) return; // 非完整支撑 → 拒
     }
     // t394/t445 仙人掌放置预检：（1）仅可放在沙子或仙人掌正上方（机制等价 MC 1.0 仙人掌须沙地 / 仙人掌支撑）。
     //   目标格的下方须为 Sand 或 Cactus；否则拒绝放置（不挥）。命中方块顶面放置 → target 下方 = 命中方块

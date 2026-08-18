@@ -710,29 +710,27 @@ public:
         //   点燃水平四邻 TNT」简化为单次脉冲触发，spec「若时间紧，拉杆/按钮可简化为放置即点燃邻接 TNT 或右键触发
         //   单一路径」）。名称 / 贴图全原创自绘 §9a（tools/build_lever_button.py 程序生成）。三者本身是可放置 / 可破的
         //   装饰机关方块（进创造调色板），右键激活时点燃邻接 TNT（机制等价 MC 1.0 红石点火源——本项目无红石，故
-        //   把「激活即点火邻接 TNT」直接绑在右键动作上）。复用既有异形方块系统（ShapePlate 贴地薄板几何 + 单 id
-        //   谓词路由），机制等价 MC 1.0 三类机关（杠杆 lever / 木按钮 wooden button / 石按钮 stone button），仅机制
-        //   对齐非照搬 MC 美术。
-        //   Lever（杠杆）：木质底座 + 竖直 / 拉下两态扳手柄（state bit0=激活态）。solid=false（非整立方 → 不挡
-        //     邻居面剔除，同压力板）、ShapePlate（碰撞/选中贴地薄板，与 WoodPressurePlate 同几何——简化为贴地薄
-        //     板而非墙面附着，本项目放置即贴地，机制对标可接受）、hardness=0.5（木软，徒手可破）、NoTool、
-        //     requiresTool=false（空手掉落）、dropId=自身、dropCount=1、maxStack=64。各面贴图=lever(131)
-        //     （木质底座 + 中央竖直扳柄 + 顶部圆柄头；激活态由 mesher 据 state bit0 切亮色高光，非 MC 资产）。
-        //     音色归 GroupWood（木质）。**激活路径**：PlayerController placeBlock useBlock 分支检测命中 Lever →
-        //     翻 state bit0（扳柄态）+ 点燃水平四邻 TNT（spawnPrimedTnt）+ emit swingArm（机制等价 MC 1.0 杠杆扳动即
-        //     红石脉冲点火 TNT）。进创造调色板（玩家可取用 / 放置 / 自建机关）。
+        //   把「激活即点火邻接 TNT」直接绑在右键动作上）。机制等价 MC 1.0 三类机关（杠杆 lever / 木按钮 wooden
+        //   button / 石按钮 stone button），仅机制对齐非照搬 MC 美术。
+        //   **t662 几何重做**（用户「跟压力板一模一样，不行」）：不复用 ShapePlate 贴地薄板——
+        //   Lever（杠杆）：圆石小底座 + 斜插有体积的木棍（两段阶梯盒近似倾角），右键在两摆向间翻转（bit0）；
+        //     可贴墙 / 贴地放置（吸附命中面，state bit[3:1] 附着面编码见 MechAttach* 注释）。
+        //     solid=false / ShapeNone（**无碰撞**，机制等价 MC 机关无 hitbox；raycastAABBs 走 mechBoxes
+        //     精确小盒选中）、hardness=0.5、NoTool、requiresTool=false、dropId=自身、dropCount=1、maxStack=64。
+        //     各面贴图=lever(131)（圆石底座+竖柄；t662 3D 几何中底座贴 131 / 木棍贴 planks(8)）。音色 GroupWood。
+        //     **激活路径**：placeBlock useBlock 分支检测命中 Lever → 翻 state bit0（扳柄态）+ 点燃 6 邻 TNT +
+        //     fire 发射器/投掷器（t628 沿触发）。**失撑掉落**（t662）：支撑块被破 → 掉落自身（同火把 / 木梯模式）。
         Lever           = 112, // 杠杆：右键扳动 → 点燃水平四邻 TNT（机制等价 MC 1.0 lever；简化无红石）
-        //   WoodButton（木按钮）：木质小按钮（state bit0=激活态，按下后短暂亮起）。solid=false / ShapePlate
-        //     （与 Lever 同几何）、hardness=0.5、NoTool、requiresTool=false、dropId=自身、dropCount=1、maxStack=64。
-        //     各面贴图=button_wood(132)（木质底座 + 中央凸起圆钮；激活态由 mesher 据 state bit0 切亮色高光）。
-        //     音色归 GroupWood。**激活路径**：同 Lever——右键 → 翻 state bit0 + 点燃水平四邻 TNT（机制等价 MC 1.0
-        //     木按钮按下红石脉冲点火 TNT）。进创造调色板。
+        //   WoodButton（木按钮）：贴附着面的凸钮小长方体（6×2×6px 量级，厚 2/16 宽 6/16 居中；按下压薄 1/16）。
+        //     可贴墙 / 贴地放置（吸附命中面）。solid=false / ShapeNone（无碰撞，选中走 mechBoxes）、
+        //     hardness=0.5、NoTool、requiresTool=false、dropId=自身、dropCount=1、maxStack=64。
+        //     各面贴图=button_wood(132)（木质凸钮）。音色 GroupWood。**激活路径**：同 Lever——右键 → 翻
+        //     state bit0（t628 沿触发）+ ~1s 自动弹回（updateButtonRecovery）；失撑掉落同 t662。
         WoodButton      = 113, // 木按钮：右键按下 → 点燃水平四邻 TNT（机制等价 MC 1.0 wooden button；简化无红石）
-        //   StoneButton（石按钮）：石质小按钮（state bit0=激活态，按下后短暂亮起）。solid=false / ShapePlate
-        //     （与 Lever / WoodButton 同几何）、hardness=0.5、Pickaxe（石质）、requiresTool=true、minTier1（木镐可破
-        //     且掉落）、dropId=自身、dropCount=1、maxStack=64。各面贴图=button_stone(133)（石质底座 + 中央凸起圆钮；
-        //     激活态由 mesher 据 state bit0 切亮色高光）。音色归 GroupStone。**激活路径**：同 Lever/WoodButton——
-        //     右键 → 翻 state bit0 + 点燃水平四邻 TNT（机制等价 MC 1.0 石按钮按下红石脉冲点火 TNT）。进创造调色板。
+        //   StoneButton（石按钮）：同 WoodButton 几何（凸钮小长方体 + 贴墙/贴地附着），石质属性。
+        //     solid=false / ShapeNone、hardness=0.5、Pickaxe、requiresTool=true、minTier1（木镐可破且掉落）、
+        //     dropId=自身、dropCount=1、maxStack=64。各面贴图=button_stone(133)（石质凸钮）。音色 GroupStone。
+        //     激活路径同 Lever/WoodButton；失撑掉落同 t662。
         StoneButton     = 114, // 石按钮：右键按下 → 点燃水平四邻 TNT（机制等价 MC 1.0 stone button；简化无红石）
         // ── t507 白蘑菇 / 棕蘑菇（BrownMushroom）：机制等价 MC 1.0 brown mushroom（沼泽 / 阴暗草地小蘑菇，
         //   与红蘑菇 Mushroom=48 同族，仅配色区别 —— 棕色菌盖 + 米色菌柄）。**cross 形广告牌方块**（与 Mushroom /
@@ -1792,6 +1790,35 @@ public:
     //   collisionAABBs / selectionAABBs 不读 plate state（ShapePlate 薄板碰撞恒 1/16，踩下不改碰撞 → 复用
     //   bit0 零回归，同 RedstoneOreStateLitFlag 模式）。state 经 m_states 落 SQLite round-trip 保真。
     static constexpr quint8 PressurePlateStatePressedFlag = 0x01;
+    // t662 机关方块（Lever / WoodButton / StoneButton）state 编码：bit0=激活态（t628 既存 —— 按钮按下 /
+    //   拉杆扳开；placeBlock useBlock 翻位、updateButtonRecovery 清位均只动 bit0，t662 零改动），
+    //   bit[3:1]=附着面（t662 新增 —— 0=贴地、1=支撑在 +X（贴 x=0 面）、2=支撑在 -X（贴 x=1 面）、
+    //   3=支撑在 +Z（贴 z=0 面）、4=支撑在 -Z（贴 z=1 面））。**区别 stairs / door 等低 2 位朝向编码**：
+    //   本族 bit0 已被激活态占用且附着面有 5 值（含地面），故上移到 bit[3:1]（3 bit 容 8 值）——文档钉死，
+    //   partialblockgeometry（渲染）+ raycastAABBs / collisionAABBs（选中 / 碰撞）+ playercontroller
+    //   （放置写入 + 失撑掉落）四处同源解码，改一处须同步。旧存档 state=0/1（t627/t628 时代）→ 附着=0
+    //   贴地（旧观感的地板按钮 / 拉杆，兼容不迁移）。
+    static constexpr quint8 MechStateActiveFlag = 0x01;   // bit0：激活（按钮按下 / 拉杆扳开；t628 既存语义）
+    static constexpr quint8 MechAttachShift    = 1;      // 附着面字段起始 bit
+    static constexpr quint8 MechAttachMask     = 0x0E;   // bit[3:1] 掩码
+    // 附着面取值（state >> MechAttachShift & 3 bit 后的 0..4；**语义 = 支撑块相对机关格的方向**）。
+    static constexpr int MechAttachFloor = 0; // 贴地（支撑在下方）：机关立于所点方块顶面
+    static constexpr int MechAttachOnPX  = 1; // 支撑在 +X 邻（机关贴本格 x=0 面，挂 +X 墙的 -X 侧）
+    static constexpr int MechAttachOnNX  = 2; // 支撑在 -X 邻（机关贴本格 x=1 面）
+    static constexpr int MechAttachOnPZ  = 3; // 支撑在 +Z 邻（机关贴本格 z=0 面）
+    static constexpr int MechAttachOnNZ  = 4; // 支撑在 -Z 邻（机关贴本格 z=1 面）
+    // t662 机关附着面解码：state → 支撑块相对偏移（dx/dy/dz）。越界值（>4）兜底贴地（防御脏 state）。
+    //   playercontroller 失撑掉落（dropUnsupportedMechAround，同 torch/ladder 模式）与放置写入
+    //   （mechAttachFromNormal 命中面法线 → 附着值）共用，单一权威。
+    static void mechAttachOffset(quint8 state, int &dx, int &dy, int &dz);
+    // t662 机关放置附着值：由放置命中面外法线推导（同 torchOrientFromNormal 模式）。ny>0（点顶面）→
+    //   贴地 0；±X / ±Z 面 → 对侧邻支撑编码；ny<0（点底面 / 天花板下）→ 返 -1（v1 不支持天花板挂装，
+    //   placeBlock 拒绝放置，机制对标 MC 1.0 机关不可贴顶）。
+    static int mechAttachFromNormal(int nx, int ny, int nz);
+    // t662 机关方块 cell-local 子盒集（**渲染与 raycast 同一几何源**）：按钮=凸钮单盒（按下压薄）、
+    //   拉杆=底座 + 摆棍两段阶梯盒。mesher（partialblockgeometry mech case）逐盒 pushBox、raycastAABBs
+    //   直接返回本集（碰撞为空 —— ShapeNone 无碰撞，机制等价 MC 机关无 hitbox）。见 .cpp 实现处几何注释。
+    static std::vector<BlockAABB> mechBoxes(quint8 blockId, quint8 state);
     // t627 压力板触发权重单一权威：给定压力板 id + 触发源类型（byItem=true 掉落物 / false 玩家或 mob），
     //   返回该源能否触发此板。wood/cobble/stone=全触发；iron=仅玩家+mob（重质，掉落物不触发）；gold=仅
     //   掉落物（轻质，任何掉落物即触发）。非压力板 → false。供 PlayerController::updatePressurePlates
