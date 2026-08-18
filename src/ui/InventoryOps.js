@@ -803,6 +803,11 @@ function doMergeSameId(root, group, index) {
             }
         }
     }
+    // t685：扫描无任何同 id 槽位 → 该 id 全部数量已在光标手上，无事可做，直接返回。旧版继续走「清空 +
+    //   快照回填」，但 slots 空 → 首槽快照取 null 默认（耐久 0 / 附魔 [0,0,0,0] / 空名）→ 光标实例被
+    //   重打包洗白（免费修复 + 附魔清零 + 名字丢失）。触发链：附魔台 t648 门禁拒首次点击（no-op）后，
+    //   280ms 内第二次点击命中双击判定（判定先于 canPlace 门）→ 手持附魔 / 改名工具直落本函数。
+    if (slots.length === 0) return
     if (total <= 0) return
 
     // review rev2-C4：cap=1（不可堆叠：附魔书 / 工具 / 护甲）且 total>1 → **no-op**。下方重打包回填硬编码
