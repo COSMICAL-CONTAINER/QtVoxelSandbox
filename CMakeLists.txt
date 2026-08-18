@@ -311,6 +311,11 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_rail_golden_on.png       # t638 动力轨通变态贴图（恒断电不消费，留图集备用）
         textures/default_rail_detector_on.png     # t638 探测轨通电视觉贴图（矿车驶过 state bit4 → mesher 换贴）
         textures/default_redstone_torch.png       # t638 红石火把 cross 贴图（build_rail_family.py；深棕柄+亮红焰头；常亮光 7）
+        textures/default_dust_line_off.png        # t656 红石粉断电线向贴图（build_redstone_dust.py；暗红粉线；线/点×断/通四瓦片）
+        textures/default_dust_dot_off.png         # t656 红石粉断电孤立点贴图（build_redstone_dust.py；暗红粉堆）
+        textures/default_dust_line_on.png         # t656 红石粉通电线向贴图（build_redstone_dust.py；亮红粉线+白热高光粒）
+        textures/default_dust_dot_on.png          # t656 红石粉通电点贴图（build_redstone_dust.py；亮红粉堆+白热心）
+        textures/default_redstone_torch_off.png   # t657 红石火把熄灭态贴图（build_redstone_dust.py；暗红熄焰；反相 NOT 门视觉）
         textures/default_enchant_book.png         # t638 附魔台顶摊开书页贴图（build_book.py；白纸底+灰字线+中央书脊；无 pack 等价）
         textures/default_cactus_bottom.png        # t638 仙人掌底面贴图（build_cactus.py；更暗绿截面+外圈皮层暗环；观察者视角可见）
         textures/default_crafting_table_side.png

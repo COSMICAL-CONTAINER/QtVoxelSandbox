@@ -580,6 +580,8 @@ int PartialBlockGeometry::append(
         int railTile = BlockRegistry::tileIndex(blockId, BlockRegistry::PosX); // 121/157/158（各自 def sideTile）
         if (blockId == BlockRegistry::DetectorRail && (state & BlockRegistry::DetectorRailStateOnFlag))
             railTile = 160; // t638 探测轨通电视觉（矿车驶过 bit0 → rail_detector_on 亮红）
+        if (blockId == BlockRegistry::GoldenRail && (state & BlockRegistry::GoldenRailStateOnFlag))
+            railTile = 159; // t658 动力轨通电贴图（电力驱动 bit4 → rail_golden_on 亮金轨 + 亮红连接点；t638 留图集备用瓦片的消费方）
         const bool straightOnly = (blockId != BlockRegistry::Rail); // t638 动力 / 探测轨直线 only（无拐角 / 十字）
         const quint8 con = state;
         const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
@@ -624,19 +626,56 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::RedstoneTorch: {
-        // t638 红石火把 cross 模型：与蘑菇 / 枯灌木同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形），
-        //   贴 redstone_torch(161) 瓦片（透明底 + 深棕柄 + 亮红焰头，alphaCutoff cutout → 仅火把剪影显）。
-        //   机制等价 MC 1.0 红石火把**常亮 on 态**装饰光源（光 7 由 lightEmission 真 flood；真红石信号源
-        //   留红石大轮）。区别于普通火把（Torch=13 走 torchHost QML delegate 木柄+焰 Model）——本方块走
-        //   chunk mesh cross 段（更省 delegate；常亮光源用真方块光非伪光源）。**无 state 派生贴图**（恒亮）。
-        //   tile 由 BlockRegistry::tileIndex(RedstoneTorch, PosX) = sideTile = 161 给出。不做邻居剔除
-        //   （cross 透明 + 火把，同 TallGrass；solid=false）。
+        // t638/t657 红石火把 cross 模型：与蘑菇 / 枯灌木同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
+        //   亮态（默认）贴 redstone_torch(161)（透明底 + 深棕柄 + 亮红焰头）；**熄灭态**（t657 反相器：附着块被
+        //   供电 → state 置 RedstoneTorchStateOffFlag）换 redstone_torch_off(170)（暗红熄焰，无白热心）。
+        //   alphaCutoff cutout → 仅火把剪影显。tile 由 tileIndex 取 sideTile（161 def 默认；off 在此覆写）。
+        int torchTile = tile;
+        if (state & BlockRegistry::RedstoneTorchStateOffFlag)
+            torchTile = 170; // t657 熄灭态（redstone_torch_off）
         pushCrossQuad(verts, idx, lx, ly, lz,
                       0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
-                      tile, light, tileW, hx, hy, v0, v1);
+                      torchTile, light, tileW, hx, hy, v0, v1);
         pushCrossQuad(verts, idx, lx, ly, lz,
                       1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
-                      tile, light, tileW, hx, hy, v0, v1);
+                      torchTile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
+    case BlockRegistry::RedstoneDust: {
+        // t656 红石粉导线贴地薄层（与铁轨族同源几何 —— 水平双面 quad 贴 cell 底 1/16；与睡莲 / 铁轨同走
+        //   cutout 段 alphaCutoff 透明底）。**非竖直 cross** —— 几何为水平 quad（俯视才见粉线 / 粉点），
+        //   但同走 isCrossBillboard 路由（PASS 1 + cutout 段，同 Rail 段外并入模式）。
+        //   state 派生瓦片（呈现层选择，同 Water 流水贴图模式）：
+        //     - 高 4 位连接位（6 邻粉，bit 序 0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z —— World::recomputePowerLocal
+        //       维护）：水平向（+X/-X/+Z/-Z）任一连接 → 线向瓦片（166 断 / 168 通）；仅垂直连接或无连接 →
+        //       孤立点瓦片（167 断 / 169 通）。线向按「X 向 / Z 向」旋转 UV（一张两用，同铁轨 EW 模式）；
+        //       X+Z 双向连接 → 十字画两片（各沿一向，重叠自然成十字）。
+        //     - 低 4 位电力级（RedstoneDustPowerMask）：>0 → 通电亮红瓦片（168/169）；0 → 断电暗红（166/167）。
+        //       v1 简化：两态（16 级亮度渐变留后续任务），级参与供电计算（World 侧）。
+        constexpr float yr = 1.0f / 16.0f; // 粉层厚度（cell 底以上 1/16，贴地面防 z-fight，同铁轨）
+        const quint8 con = quint8(state >> 4);                      // 高 4 位连接位
+        const bool on = (state & BlockRegistry::RedstoneDustPowerMask) > 0; // 通电（>0 即亮）
+        const bool cpx = (con & 0x01) != 0, cnx = (con & 0x02) != 0; // +X / -X（bit0/1，同 kNb 序）
+        const bool cpz = (con & 0x10) != 0, cnz = (con & 0x20) != 0; // +Z / -Z（bit4/5）
+        const int lineTile = on ? 168 : 166; // 线向：通电 168 / 断电 166
+        const int dotTile  = on ? 169 : 167; // 点：通电 169 / 断电 167
+        const auto pushDust = [&](int t, float ax0, float az0, float ax1, float az1,
+                                  float ax2, float az2, float ax3, float az3) {
+            pushCrossQuad(verts, idx, lx, ly, lz,
+                          ax0, yr, az0,  ax1, yr, az1,  ax2, yr, az2,  ax3, yr, az3,
+                          t, light, tileW, hx, hy, v0, v1);
+        };
+        const bool anyH = cpx || cnx || cpz || cnz; // 有水平连接 → 至少画一线向
+        if (!anyH) {
+            // 孤立点（无任何水平邻粉；垂直邻粉（爬墙）不画线 —— 粉层贴地视角下垂直连接视觉省略，v1 简化）。
+            pushDust(dotTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
+        } else {
+            // 线向：X 向（EW）旋转 90°（u→z、v→x）；Z 向（NS）标准（u→x、v→z）。双向都有 → 两片叠成十字。
+            if (cpx || cnx)
+                pushDust(lineTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f); // EW（同铁轨旋转序）
+            if (cpz || cnz)
+                pushDust(lineTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // NS（标准序）
+        }
         break;
     }
     case BlockRegistry::Cactus: {

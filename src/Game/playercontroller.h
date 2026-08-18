@@ -961,6 +961,16 @@ private:
     //   dispenser 同属机关）；投掷器走 dispenseFromDispenser 的 Dropper 分支（全部物品弹出掉落物，无
     //   fallback 箭——worldgen 不生成投掷器陷阱）。
     void scanDispenserTraps(float dt);
+    // t656/t658 红石电力触发的 QML 入口（World 层 tickRedstone 检出通电上升沿发 powerTntTriggered /
+    //   powerDispenserTriggered 信号 → Main.qml 转发到本组）。World 不反向依赖 Game（PLAN §2）→ 呈现层
+    //   桥接转发；机制上与既有「踩板 / 右键机关」两条触发路径并存，共用同一实体 / 冷却链。
+    // firePowerTnt：清 TNT 方块（clearBlockSilent 静默清，绕 occ 守卫——机制同 t490 机关点火）+
+    //   entityManager.spawnPrimedTnt 生引燃态实体（默认 fuse；爆炸链式传播）。该格已非 TNT → no-op
+    //   （信号与栅格解耦一帧以上时防御）。
+    Q_INVOKABLE void firePowerTnt(int x, int y, int z);
+    // fireDispenserAtQml：该格仍是发射器 / 投掷器 → fireDispenserAt（per-dispenser 冷却 / state 朝向 /
+    //   库存分派全复用）。非机器格 → no-op。
+    Q_INVOKABLE void fireDispenserAtQml(int x, int y, int z);
     // t628 按钮自动复位（见 m_buttonRecoverCells 头注释）：每 tick 递减按下倒计时，到期该格仍是按钮
     //   （WoodButton/StoneButton）且 state bit0 置位 → 清 bit0（5 参数 setBlock，id 不变只 state 变 → 仅
     //   worldChanged 重建 mesh，按钮弹回视觉）+ 移除表项；该格已非按钮（被破 / 被替换）→ 仅移除表项（防陈旧

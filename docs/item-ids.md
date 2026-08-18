@@ -127,10 +127,11 @@ load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`
 | 0x78 | 120 | `diamond_block` | 钻石块（9 钻石↔1 块） | 57 |
 | 0x79 | 121 | `gold_block` | 金块（9 金锭↔1 块） | 41 |
 | 0x7A | 122 | `redstone_block` | 红石块（9 红石粉↔1 块） | 152 |
-| 0x7B | 123 | `redstone_lamp` | 红石灯（右键开关光源；on 光 15） | 123 / on 124 |
-| 0x7F | 127 | `golden_rail` | 动力铁轨（矿车加速 boost；直线连接） | 27 |
-| 0x80 | 128 | `detector_rail` | 探测铁轨（矿车驶过通电视觉占位） | 28 |
-| 0x81 | 129 | `redstone_torch` | 红石火把（常亮装饰光源 光 7） | 76（lit） |
+| 0x7B | 123 | `redstone_lamp` | 红石灯（电力驱动光源；on 光 15） | 123 / on 124 |
+| 0x7F | 127 | `golden_rail` | 动力铁轨（通电矿车加速 boost；直线连接） | 27 |
+| 0x80 | 128 | `detector_rail` | 探测铁轨（矿车驶过输出电力信号） | 28 |
+| 0x81 | 129 | `redstone_torch` | 红石火把（亮态电源 光 7；附着块被供电反相熄灭 = NOT 门） | 76（lit）/ off 75 |
+| 0x82 | 130 | `redstone_dust` | 红石粉导线（红石粉物品 0x224 放置成；15 级衰减导电） | 55 |
 
 > 注：方块段 `0x2F (47) = Count` 是哨兵上界，不是合法 id。床方块（bed）8 色变体机制等价 MC 1.0 床（bed），
 > 简化为单格整立方（spec t387）；MC 1.0 床颜色由 metadata 分（统一 id 26），本工程用独立 id 表达色变
@@ -139,10 +140,13 @@ load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`
 > 冻结水面获得（同 water / lava 属系统获得，不进创造调色板 / 不掉落）。
 > t620 注：47..117（wool 15 色变体 / 床 8 色新变体 / 云杉木制品 / 苔石 / 发射器 / 投掷器 / 石砖族 / 末地
 > 传送门 / 机关 / 红石矿等）逐任务追加，未逐一补表（本表按段头更新 Count；当前上界见
-> `BlockRegistry::Count = 130`）。矿物存储块六件（coal/lapis/diamond/gold/redstone block + 既存 iron_block
-> id 96）机制等价 MC 1.0 9↔1 压缩存储；红石灯右键开关（on = 贴图 redstone_lamp_on + 方块光 15）。
+> `BlockRegistry::Count = 131`）。矿物存储块六件（coal/lapis/diamond/gold/redstone block + 既存 iron_block
+> id 96）机制等价 MC 1.0 9↔1 压缩存储；红石灯电力驱动（on = 贴图 redstone_lamp_on + 方块光 15）。
 > t638 注：118..126（压力板家族等）与 127..129（铁轨家族扩展 / 红石火把）已补表；动力轨 boost /
 > 探测轨通电视觉（state bit4）机制见 blockregistry.h。
+> t656-t658 注：红石电力系统 v1 落地——红石粉导线（130，红石粉物品 0x224 右键放置成，无配方（采矿获得））、
+> 红石火把反相（NOT 门）、红石块恒源、动力轨 / 探测轨 / 红石灯 / TNT / 发射器 / 投掷器全部接入电力
+> （拉杆 / 按钮 / 压力板 / 火把 / 红石块 / 探测轨 → 粉 15 格衰减 → 接收器）。红石灯右键开关已移除（电力唯一驱动）。
 
 ---
 

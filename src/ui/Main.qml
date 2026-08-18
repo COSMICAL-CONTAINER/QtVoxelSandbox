@@ -7678,6 +7678,15 @@ Window {
         //   同 player.onSpawnItem / fallingBlockDropped 模式（单向事件流：World 低层发语义事件、呈现层只消费，
         //   PLAN §2 分层）。id = 方块 id（仙人掌），count = 1（每格一件，整柱坍落 = 多件散落物）。
         function onBlockDroppedAsItem(x, y, z, id) { itemEntities.spawnItem(x, y, z, id, 1) }
+        // t656/t658 TNT 被红石电力点燃（通电上升沿；World 层只发坐标语义事件，机制等价 MC 红石点 TNT）→
+        //   转发 player.firePowerTnt（PlayerController 暴露的 QML 入口：clearBlockSilent 清 TNT 方块 +
+        //   entityManager.spawnPrimedTnt 生引燃态实体 —— 复用既有「踩板 / 右键机关」点火链，机制同源：
+        //   先清方块再生实体防 1.5 格叠加）。单向事件流（PLAN §2 分层，同 onBlockDroppedAsItem 模式）。
+        function onPowerTntTriggered(x, y, z) { player.firePowerTnt(x, y, z) }
+        // t658 发射器 / 投掷器被红石电力触发（通电上升沿）→ 转发 player.fireDispenserAtQml（QML 入口 →
+        //   fireDispenserAt：per-dispenser 冷却 / state 朝向 / 库存分派全复用既有机关触发链——「与既有机关
+        //   触发并存」的收口点）。方向 = 机器 state 朝向（t608 单一方向源，压力板 / 电力方位不参与）。
+        function onPowerDispenserTriggered(x, y, z) { player.fireDispenserAtQml(x, y, z) }
         // t527 积雪层整柱失撑坍落 → 转 entityManager.spawnFallingBlockState 生成携带层数 metadata 的下落实体。
         //   World 低层（checkSnowLayerOnEdit）发语义事件（柱底坐标 + 总层数 1..8），呈现层只消费（PLAN §2 分层：
         //   World 不反向依赖 Entities）。layers 1..8 → state=layers-1（0..7）保留层数；blockId=44=SnowLayer（与
@@ -10304,6 +10313,11 @@ Window {
             //   仅普通冰 Ice，浮冰 / 蓝冰永不融）。纯 QML 桥接（同 tickIceFreeze 模式，PLAN §2 分层不破）。
             //   稳态（无冰 / 无高亮邻 / 本窗散布落空）静默 → 无开销。
             theWorld.tickIceMelt()
+            // t656 红石电力 tick：WorldClock 每 100ms tick → 驱动 World.tickRedstone（事件驱动局部重算：编辑
+            //   脏集空 → 零开销早退；非空 → 从脏锚点 BFS 粉连通域重算电力级 / 连接位 + 接收器通电位，一次
+            //   worldChanged 收口）。传播跨多 tick 定点迭代稳定（一格 100ms，恰同 MC redstone tick 量级）。
+            //   纯 QML 桥接（同 tickWaterFlow 模式，PLAN §2 分层不破）。稳态（无红石电路 / 电路已收敛）零开销。
+            theWorld.tickRedstone()
             // t325 树叶渐进消退 tick：WorldClock 每 100ms tick → 驱动 World.tickLeafDecay（内部节流到 ~每 0.4s
             //   开一窗，队列内每叶按散布概率 1%/窗独立判定是否消失 → 几何分布散布 ~30-90s 渐退，非瞬时全消；
             //   t379 在 t325 基础上放慢约 2.5×）。

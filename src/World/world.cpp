@@ -72,6 +72,7 @@ void World::beginLoad(int seed)
     m_waterCells.clear();    // perf：网格重置 → 流体方格索引作废（finishLoad 写完 blob 后 rebuildFluidCells 全图重建）
     m_lavaCells.clear();
     m_iceCells.clear();      // t495：网格重置 → 普通冰方格索引作废（finishLoad 写完 blob 后 rebuildIceCells 全图重建）
+    m_powerDirty.clear();    // t656：网格重置 → 红石电力脏集作废（finishLoad 末全量重建红石族脏集）
     fluidActReset();         // t488：网格重置 → 活动盒作废（旧世界坐标不指向新栅格；finishLoad 置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
     emit seedChanged();
@@ -107,6 +108,17 @@ void World::finishLoad()
     // t495：同上 —— 存档 blob 直写不经写入路径 → noteIceWrite 不会捕获 → 全图重建普通冰方格索引一次，
     //   使后续融化 tick（tickIceMelt）走 O(冰格数) 遍历而非全图扫描。
     rebuildIceCells();
+    // t656：存档可能含红石电路（拉杆扳开 / 红石块 / 粉连线）→ 全图扫红石族格入电力脏集一次（一次性
+    //   3.3M 扫描在加载期可接受），下一 tickRedstone 局部重算恢复电路态（灯亮 / 轨通电等）。稳态后
+    //   脏集由编辑路径增量维护。
+    {
+        const int W2 = m_width, D2 = m_depth, H2 = m_height;
+        for (int x = 0; x < W2; ++x)
+            for (int z = 0; z < D2; ++z)
+                for (int y = 0; y < H2; ++y)
+                    if (isPowerFamilyBlock(m_chunks.blockAt(x, y, z)))
+                        m_powerDirty.insert(packGrowthCell(x, y, z));
+    }
 }
 
 // t425 perf：生长方格索引增量维护。写入路径（setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）在
@@ -278,6 +290,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
+    notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队）
     return true;
 }
 
@@ -369,6 +382,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
+    notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队；state-only 写亦触发——拉杆 / 按钮翻位即此路径）
     return true;
 }
 
@@ -396,6 +410,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state)
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     pokeFluidDirty(x, y, z); // t380：沙着地可能覆盖水 / 邻接流体 → 标流体脏（驱动流体 tick 重扫）
+    notePowerWrite(x, y, z, occ, id); // t656：红石电力脏标记（落体着地改变粉路通断 → 邻粉重算；红石族外 no-op）
     return true;
 }
 
@@ -442,6 +457,7 @@ bool World::clearBlockSilent(int x, int y, int z)
     //   destroySphereSilent 末尾同族补调注释）。
     checkRailOnEdit(x, y, z, occ, id);      // t565：邻轨连接重算（清 Air → 邻轨断向 / 形态切换）
     checkSnowLayerOnEdit(x, y, z, occ, id); // t527：正上方雪层失撑 → 整柱坍落为携带层数的下落实体
+    notePowerWrite(x, y, z, occ, id);       // t656：红石电力脏标记（TNT 被点火清 Air → 邻粉 / 邻接收器重算）
     return true;
 }
 
@@ -501,6 +517,7 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     if (id == BlockRegistry::Water || id == BlockRegistry::Lava
         || lightOldId == BlockRegistry::Water || lightOldId == BlockRegistry::Lava)
         fluidActExpand(x, y, z);
+    notePowerWrite(x, y, z, lightOldId, id); // t656：红石电力脏标记（机关 state 静默写——压力板压下 / 探测轨有车标记经本入口；红石族外 no-op 零开销）
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -1880,6 +1897,288 @@ void World::checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     }
 }
 
+// ── t656/t657/t658 红石电力系统 v1（见 world.h notePowerWrite / tickRedstone 头注释）──
+
+// 红石族判定（粉 / 全部电源 / 全部接收器 —— notePowerWrite 触发筛选 + tickRedstone 接收器扫描共用）。
+bool World::isPowerFamilyBlock(quint8 id)
+{
+    using BR = BlockRegistry;
+    return BR::isRedstoneDust(id)                        // 导线（t656）
+        || id == BR::RedstoneBlock                       // 恒电源（t657）
+        || id == BR::RedstoneTorch                       // 反相电源（t657）
+        || id == BR::RedstoneLamp                        // 接收器：灯（t658）
+        || id == BR::GoldenRail                          // 接收器：动力轨（t658）
+        || BR::isTnt(id)                                 // 接收器：TNT（t658）
+        || BR::isDispenser(id) || BR::isDropper(id)      // 接收器：发射器 / 投掷器（t658）
+        || BR::isLever(id) || BR::isWoodButton(id) || BR::isStoneButton(id) // 源：拉杆 / 按钮（state bit0）
+        || BR::isPressurePlate(id)                       // 源：压力板（state bit0）
+        || id == BR::DetectorRail;                       // 源：探测轨有车标记（state bit4）
+}
+
+// 电源对邻格的强电值（机制等价 MC 1.0 各电源直供 15）：红石块恒 15；红石火把亮态 15（熄灭态 0）；
+// 拉杆 / 按钮按下态（state bit0）15；压力板压下态（state bit0）15；探测轨「有车」标记（state bit4）15。
+// 其余 → 0。只读 m_chunks + state。
+int World::powerSourceLevel(int x, int y, int z) const
+{
+    const quint8 b = m_chunks.blockAt(x, y, z);
+    const quint8 st = m_chunks.stateAt(x, y, z);
+    if (b == BlockRegistry::RedstoneBlock) return 15;                 // t657 恒电源
+    if (b == BlockRegistry::RedstoneTorch)
+        return (st & BlockRegistry::RedstoneTorchStateOffFlag) ? 0 : 15; // t657 亮态供能 / 熄灭（反相）不供
+    if (BlockRegistry::isLever(b) || BlockRegistry::isWoodButton(b)
+        || BlockRegistry::isStoneButton(b) || BlockRegistry::isPressurePlate(b))
+        return (st & 1) ? 15 : 0;                                     // 拉杆 / 按钮按下 / 压力板压下（state bit0）
+    if (b == BlockRegistry::DetectorRail)
+        return (st & BlockRegistry::DetectorRailStateOnFlag) ? 15 : 0; // t658 探测轨有车（bit4）
+    return 0;
+}
+
+// isPowerSource 的谓词版（对外只读查询：该格是否为「当前正供能的有效电源」）。
+bool World::isPowerSource(int x, int y, int z) const
+{
+    return powerSourceLevel(x, y, z) > 0;
+}
+
+// (x,y,z) 接收器是否被邻格供电（邻源激活 → 15；或邻粉电力级 >0）。v1 简化：全向 6 正交邻读
+// （机制等价 MC 接收器 any 邻信号；无前后向输入面语义 —— MC 的 directional 接收器留后续任务）。
+bool World::isReceivingPower(int x, int y, int z) const
+{
+    static constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &d : kNb) {
+        const int nx = x + d[0], ny = y + d[1], nz = z + d[2];
+        if (powerSourceLevel(nx, ny, nz) > 0) return true; // 邻源直供
+        const quint8 nb = m_chunks.blockAt(nx, ny, nz);
+        if (BlockRegistry::isRedstoneDust(nb)
+            && (m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask) > 0)
+            return true; // 邻粉通电
+    }
+    return false;
+}
+
+// 编辑路径电力脏标记（挂 4/5 参数 setBlock / setWaterSilent / clearBlockSilent 末尾，同 checkRailOnEdit
+// 收口模式）：本格属红石族（粉 / 源 / 接收器）→ 本格入脏集；本格或其 6 邻有粉 → 编辑格 + 6 邻中的粉格
+// 也入脏集（粉连通域的 BFS 从这些锚点展开）。非红石族编辑且邻无粉 → no-op（普通地形编辑零开销）。
+void World::notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId)
+{
+    if (!isPowerFamilyBlock(oldId) && !isPowerFamilyBlock(newId)) {
+        // 快路径：本格前后都非红石族 → 只有邻粉连通性可能受影响（如破掉粉与粉之间的石块）。查 6 邻有粉
+        //   才继续（无粉 → 本次编辑与电力无关，no-op）。
+        static constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        bool anyDust = false;
+        for (const auto &d : kNb)
+            if (BlockRegistry::isRedstoneDust(m_chunks.blockAt(x + d[0], y + d[1], z + d[2]))) { anyDust = true; break; }
+        if (!anyDust) return;
+    }
+    m_powerDirty.insert(packGrowthCell(x, y, z)); // 编辑格入脏集（tickRedstone 从此锚点展开）
+    // 6 邻中的粉格也入脏集（邻粉电力可能因本编辑变化——源被放 / 破、粉被断路等）。
+    static constexpr int kNb2[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &d : kNb2) {
+        const int nx = x + d[0], ny = y + d[1], nz = z + d[2];
+        if (BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
+            m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+    }
+}
+
+// 电力局部重算核心（tickRedstone 消费 m_powerDirty）：两阶段定点迭代——
+//   Phase A（粉传播）：从脏锚点 BFS 收集连通粉域（上界 kPowerFloodCap）。对域内每粉：电力级 = max over
+//     6 邻（邻源直供 15、邻粉旧电力-1）；旧值兜底（多 tick 收敛：本 tick 用上 tick 的粉电力，新放 /
+//     断路的粉首 tick 从 0 / 邻源起）。连接位 = 6 邻为粉即置（6 向含上下爬墙——v1 简化，MC 需台阶引导）。
+//     state 变化才静默写（防无谓 worldChanged）。
+//   Phase B（接收器 + 反相火把）：扫域内粉的 6 邻接收器 + 脏锚点自身接收器：通电态翻转（红石灯 bit0 /
+//     动力轨 bit4）；TNT / 发射器 / 投掷器通电上升沿 → 发触发信号（信号由呈现层消费，本层不 spawn）。
+//     红石火把反相（t657）：扫域内火把，其附着格（torchAttachOffset 解码）被供电（isReceivingPower）→
+//     置熄灭位；附着格失电 → 清熄灭位重亮（经 m_powerDirty 再入集让下 tick 传播其供能变化——定点迭代）。
+// 返回是否有 state 写入 / 信号（caller 收口 1 次 worldChanged + clearAllDirty）。
+bool World::recomputePowerLocal()
+{
+    if (m_powerDirty.empty()) return false;
+    // 快照脏锚点（BFS 展开中可能再入集 —— 火把重亮 / 粉电力变化级联；快照后清集，新入集留下一 tick）。
+    std::vector<quint64> anchors(m_powerDirty.begin(), m_powerDirty.end());
+    m_powerDirty.clear();
+
+    static constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    const int W = m_width, H = m_height, D = m_depth;
+
+    // Phase A：BFS 收集连通粉域（从各锚点出发；锚点自身或 6 邻可达的粉全部入域）。
+    std::unordered_set<quint64> region;   // 粉连通域（含锚点粉 + 其传播可达的全部粉）
+    std::vector<quint64> frontier;        // BFS 队列
+    const auto inBounds = [&](int x, int y, int z) { return x >= 0 && x < W && y >= 0 && y < H && z >= 0 && z < D; };
+    const auto seedDust = [&](int x, int y, int z) {
+        if (!inBounds(x, y, z)) return;
+        if (!BlockRegistry::isRedstoneDust(m_chunks.blockAt(x, y, z))) return;
+        const quint64 k = packGrowthCell(x, y, z);
+        if (region.insert(k).second) frontier.push_back(k);
+    };
+    for (const quint64 a : anchors) {
+        int ax, ay, az;
+        unpackGrowthCell(a, ax, ay, az);
+        seedDust(ax, ay, az); // 锚点自身是粉
+        for (const auto &d : kNb) seedDust(ax + d[0], ay + d[1], az + d[2]); // 锚点邻粉（源旁粉 / 断路边粉）
+    }
+    // BFS 展开（粉 6 向互连）。
+    for (size_t qi = 0; qi < frontier.size() && int(region.size()) < kPowerFloodCap; ++qi) {
+        int fx, fy, fz;
+        unpackGrowthCell(frontier[qi], fx, fy, fz);
+        for (const auto &d : kNb) {
+            if (int(region.size()) >= kPowerFloodCap) break;
+            seedDust(fx + d[0], fy + d[1], fz + d[2]);
+        }
+    }
+
+    bool any = false;                 // 有实际 state 写入 / 触发信号
+    std::vector<std::array<int, 3>> litTorchCells;  // 重亮火把（下 tick 须再传播其供能 → 重入脏集）
+    // Phase A2：域内粉重算电力 + 连接位。
+    for (const quint64 k : region) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        const quint8 cur = m_chunks.stateAt(x, y, z);
+        int power = 0;
+        quint8 conn = 0;
+        for (int di = 0; di < 6; ++di) {
+            const int nx = x + kNb[di][0], ny = y + kNb[di][1], nz = z + kNb[di][2];
+            const quint8 nb = m_chunks.blockAt(nx, ny, nz);
+            // 邻源直供 15（机制等价 MC 强电）。注意：本算法不把邻粉计入起步（粉-粉逐粉衰减在下方
+            //   “邻粉旧电力-1”读旧值传播——多 tick 定点迭代收敛，等价 MC 传播延迟）。
+            const int src = powerSourceLevel(nx, ny, nz);
+            if (src > power) power = src;
+            if (BlockRegistry::isRedstoneDust(nb)) {
+                conn = quint8(conn | (1u << di)); // 连接位 = 6 邻粉（bit 序同 kNb：0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z）
+                const int np = int(m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask);
+                if (np - 1 > power) power = np - 1; // 邻粉电力 -1（衰减传播）
+            }
+        }
+        const quint8 ns = quint8(conn << 4) | quint8(power & BlockRegistry::RedstoneDustPowerMask);
+        if (ns != cur) {
+            m_chunks.setBlock(x, y, z, BlockRegistry::RedstoneDust, ns); // 静默直写 + 标脏（同 recomputeRailConnections 模式）
+            // 通电翻转 → 粉微红光 7 增删 → 局部重 flood 方块光（幂等安全；断电时同检出光变）。
+            recomputeLightAround(x, y, z, BlockRegistry::RedstoneDust, cur,
+                                 BlockRegistry::RedstoneDust, ns);
+            any = true;
+        }
+    }
+
+    // Phase B：接收器通电位 + 触发信号 + 红石火把反相。扫描域 = 粉域的 6 邻 + 脏锚点自身。
+    //   去重集（一接收器可能被多粉邻接 / 既是锚点又是粉邻）。
+    std::unordered_set<quint64> receivers;
+    const auto addReceiver = [&](int x, int y, int z) {
+        if (!inBounds(x, y, z)) return;
+        const quint8 b = m_chunks.blockAt(x, y, z);
+        if (BlockRegistry::isTnt(b) || BlockRegistry::isRedstoneLamp(b) || b == BlockRegistry::GoldenRail
+            || BlockRegistry::isDispenser(b) || BlockRegistry::isDropper(b))
+            receivers.insert(packGrowthCell(x, y, z));
+    };
+    for (const quint64 k : region) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        for (const auto &d : kNb) addReceiver(x + d[0], y + d[1], z + d[2]);
+    }
+    for (const quint64 a : anchors) {
+        int x, y, z;
+        unpackGrowthCell(a, x, y, z);
+        addReceiver(x, y, z);
+    }
+    for (const quint64 k : receivers) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        const quint8 b = m_chunks.blockAt(x, y, z);
+        const quint8 st = m_chunks.stateAt(x, y, z);
+        const bool powered = isReceivingPower(x, y, z);
+        if (b == BlockRegistry::RedstoneLamp) {
+            // t658 红石灯：电力驱动亮灭（state bit0 复用既有 RedstoneLampStateOnFlag —— mesher 贴图 /
+            //   lightEmission 15 光照链全复用）。右键手动开关已移除（电力是唯一驱动源，机制等价 MC）。
+            const bool on = (st & BlockRegistry::RedstoneLampStateOnFlag) != 0;
+            if (on != powered) {
+                m_chunks.setBlock(x, y, z, b, quint8(powered ? (st | BlockRegistry::RedstoneLampStateOnFlag)
+                                                             : (st & quint8(~BlockRegistry::RedstoneLampStateOnFlag))));
+                recomputeLightAround(x, y, z, b, st, b,
+                                     quint8(powered ? (st | BlockRegistry::RedstoneLampStateOnFlag)
+                                                    : (st & quint8(~BlockRegistry::RedstoneLampStateOnFlag))));
+                any = true;
+            }
+        } else if (b == BlockRegistry::GoldenRail) {
+            // t658 动力轨：通电位 bit4（GoldenRailStateOnFlag）—— mesher 换 rail_golden_on(159) 通电贴图
+            //   + MinecartManager boost 读此位（通电才加速）。连接位（低 4 位）保留不动。
+            const bool on = (st & BlockRegistry::GoldenRailStateOnFlag) != 0;
+            if (on != powered) {
+                m_chunks.setBlock(x, y, z, b, quint8(powered ? (st | BlockRegistry::GoldenRailStateOnFlag)
+                                                             : (st & quint8(~BlockRegistry::GoldenRailStateOnFlag))));
+                any = true;
+            }
+        } else if (BlockRegistry::isTnt(b)) {
+            // t658 TNT：通电**上升沿**触发一次（点燃后清 Air 由信号消费端做——同一链路防双触发）。
+            if (powered) {
+                emit powerTntTriggered(x, y, z); // 呈现层：clearBlockSilent + spawnPrimedTnt（同机关点火链）
+                any = true;
+            }
+        } else if (BlockRegistry::isDispenser(b) || BlockRegistry::isDropper(b)) {
+            // t658 发射器 / 投掷器：通电上升沿触发一次（per-dispenser 冷却在消费端 fireDispenserAt 内）。
+            if (powered) {
+                emit powerDispenserTriggered(x, y, z); // 呈现层：fireDispenserAtQml（冷却 / 朝向 / 库存复用）
+                any = true;
+            }
+        }
+    }
+
+    // Phase B2：红石火把反相（t657 NOT 门）—— 扫脏锚点自身 + 粉域 6 邻的火把：附着格被供电 → 熄灭；
+    //   失电 → 重亮（重亮后其供能变化须再传播 → 火把格入脏集，下一 tick 定点迭代收尾）。
+    std::unordered_set<quint64> torches;
+    const auto addTorch = [&](int x, int y, int z) {
+        if (!inBounds(x, y, z)) return;
+        if (m_chunks.blockAt(x, y, z) == BlockRegistry::RedstoneTorch)
+            torches.insert(packGrowthCell(x, y, z));
+    };
+    for (const quint64 k : region) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        for (const auto &d : kNb) addTorch(x + d[0], y + d[1], z + d[2]);
+    }
+    for (const quint64 a : anchors) {
+        int x, y, z;
+        unpackGrowthCell(a, x, y, z);
+        addTorch(x, y, z);
+        // 锚点的附着格也查（编辑的是火把的支撑块 → 火把反相状态可能翻转）。
+        if (m_chunks.blockAt(x, y, z) == BlockRegistry::RedstoneTorch) {
+            int ax, ay, az;
+            BlockRegistry::torchAttachOffset(m_chunks.stateAt(x, y, z), ax, ay, az);
+            // （附着格自身的电力变化已由该格的编辑入脏集覆盖；火把已由上方 addTorch(x,y,z) 入集。）
+        }
+    }
+    for (const quint64 k : torches) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        const quint8 st = m_chunks.stateAt(x, y, z);
+        int ax, ay, az;
+        BlockRegistry::torchAttachOffset(st, ax, ay, az);
+        const bool attachPowered = isReceivingPower(x + ax, y + ay, z + az); // 附着块被供电（含粉 / 源）
+        const bool off = (st & BlockRegistry::RedstoneTorchStateOffFlag) != 0;
+        if (attachPowered != off) {
+            // 供电 → 置熄灭位；失电 → 清熄灭位重亮。附着位（低 3 位）不动。
+            const quint8 ns = quint8(attachPowered ? (st | BlockRegistry::RedstoneTorchStateOffFlag)
+                                                   : (st & quint8(~BlockRegistry::RedstoneTorchStateOffFlag)));
+            m_chunks.setBlock(x, y, z, BlockRegistry::RedstoneTorch, ns);
+            recomputeLightAround(x, y, z, BlockRegistry::RedstoneTorch, st, BlockRegistry::RedstoneTorch, ns);
+            // 火把供能变化（15↔0）→ 其 6 邻粉须重算 → 火把格重入脏集（下一 tick 传播；定点迭代）。
+            m_powerDirty.insert(k);
+            any = true;
+        }
+    }
+    return any;
+}
+
+// t656 电力 tick（WorldClock 10Hz 桥接，同 tickWaterFlow 模式）：脏集空 → 零开销早退（稳态；普通世界 /
+//   无红石电路时每 tick 仅一次判空）。脏集非空 → recomputePowerLocal 局部重算，有写入才 1 次
+//   worldChanged + clearAllDirty 收口（批量收口，防每粉一次重建风暴）。传播跨多 tick 稳定（机制等价
+//   MC 红石的多 tick 传播延迟；一格 100ms —— 比真实的 1 redstone tick（0.1s）恰同量级）。
+void World::tickRedstone()
+{
+    if (m_powerDirty.empty()) return; // 稳态零开销（lessons perf-fluid-scan：无红石场景不扫描）
+    FrameProfiler::Scope prof("wRed"); // perf：红石重算计时进 w* 桶
+    if (recomputePowerLocal()) {
+        emit worldChanged();        // 驱动 mesh 重建（粉通断 / 灯亮灭 / 轨通电贴图切换）
+        m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+    }
+}
+
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。
 //   节流到 ~每 kSaplingTickInterval tick（5s）做一次成长判定窗口；每窗遍历全图树苗格，符合条件者按
 //   确定性散布概率长成 → 清除树苗 + 在原位生成完整橡树（placeTreeAt 主干 + 树叶球冠）。
@@ -2425,6 +2724,7 @@ void World::generate()
     m_waterCells.clear();    // perf：全新世界 → 清流体方格索引（worldgen 直写 chunk 不经写入路径 → 末尾 rebuildFluidCells 全图重建）
     m_lavaCells.clear();
     m_iceCells.clear();      // t495：全新世界 → 清普通冰方格索引（worldgen freezeSurfaceWater 直写 chunk → 末尾 rebuildIceCells 全图重建）
+    m_powerDirty.clear();    // t656：全新世界 → 清红石电力脏集（worldgen 无红石电路 → 稳态空集零开销）
     fluidActReset();         // t488：全新世界 → 活动盒作废（generate 末置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）
 

@@ -864,7 +864,31 @@ public:
         //   音色 GroupWood（木质柄）。配方：木棒 + 红石粉（竖列 2 格）→ 1 红石火把（机制等价 MC 1.0
         //   redstone torch on a stick）。
         RedstoneTorch = 129, // 红石火把：常亮装饰光源（光 7）；cross 形；配方 木棒+红石粉
-        Count           = 130, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t656 红石粉导线（redstone dust wire；机制等价 MC 1.0 redstone wire）：**红石粉物品（RecipeRegistry::
+        //   RedstoneId 0x224）右键实体方块顶面放置成的导线方块**（放置耗 1 粉、破坏掉回 1 粉 —— 机制等价 MC
+        //   「红石粉物品本身就是导线」，不另立物品 id / 不设合成配方（MC 1.0 红石粉由采矿获得，无配方））。
+        //   贴地薄层（与铁轨族同几何 —— 水平双面 quad 贴 cell 底 1/16，走 cutout 段 alphaCutoff；经
+        //   isCrossBillboard 并入 PASS 1 路由，同 Rail 段外并入模式）。solid=false / ShapeNone（无碰撞、玩家
+        //   穿过、不挡邻居面剔除，同铁轨）、hardness=0（瞬破）、NoTool（空手可采且掉落）、dropId=0x224
+        //   （破粉尘掉红石粉**物品** —— 与放置来源一致，形成「放置↔破坏」无损循环；Core 不依赖 Game 故用
+        //   字面量 0x224，同 RedstoneOre dropId 模式）、dropCount=1、maxStack=64（物品段才是可携带形态，
+        //   方块段经物品放置产生）。各面贴图基底 = dust_line_off(166)（mesher 据连接位 / 电力位实际选
+        //   166..169 线 / 点 × 断 / 通四瓦片，呈现层选择非 BlockDef 属性，同 Water 流水贴图模式）。
+        //   **state 编码**（复用 chunk m_states，存档 round-trip 保真）：
+        //     低 4 位（RedstoneDustPowerMask）= 电力级 0..15（源邻粉 = 15，逐粉 -1 衰减；0 = 断电暗红）。
+        //       v1 简化（对标 MC 16 级）：级已存储但**视觉只做断 / 通两态**（on/off 两套贴图；16 级亮度渐变
+        //       留后续任务），级本身参与供电计算（接收器 any >0 激活）。
+        //     高 4 位 = 水平 4 向连接位（RedstoneDustConnPx/Nx/Pz/Nz，与邻粉互连 —— 由 World 电力重算时
+        //       一并维护，机制等价 MC 粉尘自动连线；无连接 = 孤立点画 dot 贴图）。
+        //   **电力模型 v1**（World::tickRedstone 局部重算，见 world.h 头注释）：电源（拉杆 on / 按钮按下窗 /
+        //   压力板压下 / 红石火把亮 / 红石块 / 探测轨有车标记）→ 邻粉 15 起步逐粉 -1 → 接收器（TNT / 红石灯 /
+        //   动力轨 / 发射器 / 投掷器）任一邻格电力 >0 或邻源激活。v1 简化（区别于 MC 的前 / 后向语义）：
+        //   接收器**全向**读邻（无朝向输入面概念）、粉尘 6 向互连（含上下爬墙，MC 需台阶引导）。光照：
+        //   lightEmission 状态感知版 —— 通电粉（power>0）微红光 7（机制等价 MC 红石粉通电发光）。
+        //   音色归 GroupStone（石粉质感）。**不进创造方块段调色板**（粉尘经红石粉物品放置获得 —— 红石 tab
+        //   t660 取物品 0x224，同玻璃物品模式）。
+        RedstoneDust    = 130, // 红石粉导线：红石粉物品放置成（贴地薄层）；15 级衰减导电；破坏掉回红石粉
+        Count           = 131, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1451,7 +1475,14 @@ public:
     //       122 顶底也用侧图；pack {164→tnt_top.png}）、165=tnt_bottom（TNT 底面贴图：纯药柱底板 + 3 条
     //       暗捆带延续，无引线/标识（贴地面无标记）；TntBlock bottomTile=本 tile；pack {165→tnt_bottom.png}）。
     //       tools/build_tnt.py 程序生成（default_tnt.png tile 122 与 t485 版本字节一致——side 先取 RNG 流）。
-    static constexpr int AtlasTileCount = 166;
+    //   t656：166..169=红石粉导线四瓦片（机制等价 MC 1.0 redstone dust 线 / 点两形态 × 断常暗红 / 通电亮红
+    //       两态；mesher 据 dust state 连接位选线向 / 点、电力位选断 / 通 —— 呈现层选择，同 Water 流水模式）。
+    //       166=dust_line_off（断电线向：暗红粉线）、167=dust_dot_off（断电孤立点）、168=dust_line_on
+    //       （通电亮红线）、169=dust_dot_on（通电亮红点）。tools/build_redstone_dust.py 程序生成原创像素图。
+    //   t657：170=redstone_torch_off（红石火把熄灭态 cross：深棕柄 + 暗红熄焰头——附着块被供电反相熄灭的
+    //       NOT 门视觉；mesher 据 state 的 RedstoneTorchStateOffFlag 换 161(on)↔170(off)）。
+    //       tools/build_rail_family.py 姊妹脚本自绘；pack {170→redstone_torch_off.png}。
+    static constexpr int AtlasTileCount = 171;
 
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
@@ -1582,6 +1613,10 @@ public:
     //   [Rail=103, DetectorRail=128] 不连续（中间夹 20+ 个其它方块）故显式并判（同 isIce / isMushroom 模式）；
     //   改族时一处同步谓词即可。
     static bool isRail(quint8 blockId);
+    // t656 红石粉导线统一谓词（单一权威）：blockId == RedstoneDust 即红石粉导线。供 World 电力重算
+    //   （导线 BFS 传播 / 连接位维护）、放置预检（红石粉物品放置）与 mesher 路由（贴地薄层 cutout 段，
+    //   经 isCrossBillboard 并入）统一判定，避免各处硬编码 id（同 isLadder 单 id 模式）。
+    static bool isRedstoneDust(quint8 blockId);
     // t638 探测铁轨 state bit4（值 16）=「矿车驶过」标记（机制等价 MC 1.0 detector rail 被矿车压住时输出
     //   信号——本工程无红石系统，简化为通电视觉：bit4=1 → mesher 换 rail_detector_on(160) 亮红贴图；
     //   MinecartManager tick 驶过置位（setWaterSilent state 写，同红石灯开关模式）。**bit4 不与连接位冲突**
@@ -1590,7 +1625,25 @@ public:
     //   占位语义可接受）。collisionAABBs / selectionAABBs 不读 state（ShapeNone）→ 复用 bit4 零回归。
     //   state 经 m_states 落 SQLite round-trip 保真。
     static constexpr quint8 DetectorRailStateOnFlag = 0x10;
-    // t638 木门透光：门上半格栅窗是透光窗格（机制等价 MC 1.0 门上半窗透光）。门 solid=false（不挡邻居面
+    // t656 红石粉导线 state 编码（复用 chunk m_states，同铁轨连接位 / 探测轨 bit4 的段外复用模式）：
+    //   低 4 位 = 电力级 0..15（RedstoneDustPowerMask；0 = 断电）。高 4 位 = 水平 4 向连接位
+    //   （与 RailConnPx/Nx/Pz/Nz 同值 0x01/0x02/0x04/0x08，共享那组常量 —— 连接语义同源：邻粉即连线，
+    //   由 World::tickRedstone 局部重算一并维护 + 存档 round-trip 保真）。collisionAABBs /
+    //   selectionAABBs 不读 dust state（ShapeNone）→ 复用零回归。mesher（partialblockgeometry
+    //   RedstoneDust case）读全 state：连接位选线向（无连接画 dot）+ 电力位选断 / 通两套瓦片。
+    static constexpr quint8 RedstoneDustPowerMask = 0x0F; // 红石粉 state 低 4 位 = 电力级 0..15
+    // t656 动力铁轨通电位（bit4，值 16 —— 与探测轨 DetectorRailStateOnFlag 同位不同块互不干扰）：
+    //   机制等价 MC 1.0 powered rail 受红石信号激活。World::tickRedstone 电力重算时置 / 清本位
+    //   （邻格电力 >0 → 置位 + mesher 换 rail_golden_on(159) 通电贴图 —— t638 留图集备用的瓦片终于有
+    //   消费方）；MinecartManager boost 判定读本位（恒 boost 的旧行为改为通电才 boost）。不与铁轨连接
+    //   位冲突（连接位占低 4 位）。collision / selection 不读（ShapeNone）→ 零回归。
+    static constexpr quint8 GoldenRailStateOnFlag = 0x10;
+    // t657 红石火把熄灭位（bit3，值 8）：附着方块被供电 → 火把反相熄灭（机制等价 MC 1.0 redstone torch
+    //   的 NOT 门核心机制）。**位选 8 避开低 3 位附着编码**（TorchAttach 0..4 占 bit0..2，placeBlock t638
+    //   并入 Torch 分支写入）—— 熄灭位与附着方向正交，存档 round-trip 双方保真（重亮 / 重新熄灭只翻
+    //   本位不动附着位）。lightEmission 状态感知版：本位置位 → 0（不发光）；清位（亮）→ id-only 表 7。
+    //   mesher（partialblockgeometry RedstoneTorch case）读本位换 off 贴图（暗红熄焰）。
+    static constexpr quint8 RedstoneTorchStateOffFlag = 0x08;    // t638 木门透光：门上半格栅窗是透光窗格（机制等价 MC 1.0 门上半窗透光）。门 solid=false（不挡邻居面
     //   剔除）→ lightOpacity 默认 0 已全透；本常量仅作 mesher 立面透光语义锚点（门格光衰减 = 0，无遮），
     //   防 future「按 solid 满遮」重构回退。消费点：lightOpacity（WoodDoor/SpruceDoor 恒 0）。
     static constexpr quint8 DoorWindowLightOpacity = 0;

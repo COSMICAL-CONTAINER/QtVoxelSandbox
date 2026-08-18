@@ -476,6 +476,39 @@ public:
     //   供 4/5 参数 setBlock 末尾各调一次（编辑路径收口，同 checkSugarcaneOnEdit 模式）。
     void checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // ── t656/t657/t658 红石电力系统 v1（机制等价 MC 1.0 redstone 的纵切简化；World 层局部重算）──
+    //
+    // 模型（事件驱动局部重算，非全图扫描 —— lessons perf-fluid-scan 反模式教训）：
+    //   电源（拉杆 on / 按钮按下窗 / 压力板压下 / 红石火把亮态 / 红石块 / 探测轨「有车」标记）向 6 正交邻
+    //   格供**强电 15**；红石粉导线（RedstoneDust）邻源起步 15、每经一粉 -1（15→1 共 15 格，机制等价 MC
+    //   红石粉 15 格衰减；v1 简化：粉 6 向互连含上下爬墙，接收器全向读邻无前后向语义）。接收器
+    //   （TntBlock / RedstoneLamp / GoldenRail / Dispenser / Dropper）任一邻格电力 >0 或邻源激活 → 通电。
+    //
+    // 重算触发（notePowerWrite，挂 setBlock / setWaterSilent / clearBlockSilent 编辑路径，同 checkRailOnEdit
+    //   收口模式）：编辑格属红石族（粉 / 源 / 接收器）或其 6 邻含红石族 → 编辑格 + 受影响的粉连通域入
+    //   m_powerDirty 脏集；tickRedstone（WorldClock 10Hz 桥接）处理脏集 —— 从各脏锚点 BFS 局部重算
+    //   （上界 kPowerFloodCap 格防失控），写粉 state（连接位 + 电力级）+ 接收器通电位，一次 worldChanged
+    //   收口。传播经多 tick 定点迭代稳定（源先算 → 粉逐层降级 → 接收器终态；等价 MC 红石的多 tick 传播
+    //   延迟，非递归防重入）。稳态（脏集空）每 tick 零开销早退。
+    //
+    // 接收器动作（World 层只发语义事件，不反向依赖 Game/Entities —— PLAN §2）：
+    //   TNT 通电上升沿 → powerTntTriggered(x,y,z) 信号（Main.qml 转发 entityManager.spawnPrimedTnt，
+    //   复用既有机关点火链）；发射器/投掷器通电上升沿 → powerDispenserTriggered(x,y,z)（转发
+    //   player.fireDispenserAtQml → fireDispenserAt 同一冷却路径）；红石灯 / 动力轨只写 state（视觉 + 光照）
+    //   由 mesher / MinecartManager 消费。红石火把反相（t657）：附着格被供电（含粉 / 强源 / 其它接收器
+    //   通电态）→ 火把熄灭（state 置 RedstoneTorchStateOffFlag + lightEmission 0 → 光照重 flood + off 贴图）。
+    // 分层（PLAN §2）：本组只读 / 写 m_chunks + BlockRegistry 谓词 + 发信号；不依赖 Game / Entities。
+    void notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId);
+    // t656 电力脏集消费（WorldClock 10Hz 桥接；见上方系统头注释）。Q_INVOKABLE 同 tickWaterFlow 模式。
+    Q_INVOKABLE void tickRedstone();
+    // t656/t658 查询：(x,y,z) 处接收器是否被邻格供电（邻源激活或邻粉电力 >0）。供 MinecartManager
+    //   boost 判定 / 调试。只读，不改栅格。
+    bool isReceivingPower(int x, int y, int z) const;
+    // t657 查询：(x,y,z) 处方块是否为「有效电源」（对 6 邻供强电 15）。含：红石块恒源；红石火把亮态
+    //   （未熄灭）；拉杆 / 按钮按下态（state bit0）；压力板压下态（state bit0）；探测轨有车标记
+    //   （state bit4）。只读。
+    bool isPowerSource(int x, int y, int z) const;
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 
@@ -517,6 +550,16 @@ signals:
     //   （携带 state=layers-1 的 metadata；着地 setBlockFromEntity(...,state) 写回雪层，**保留层数**）。
     //   分层（PLAN §2）：World 低层只发语义事件，不反向依赖 Entities —— 呈现层只消费（同 blockDroppedAsItem 模式）。
     void snowLayerFell(int x, int y, int z, int layers);
+    // t656/t658 TNT 被**红石电力**点燃（通电上升沿，区别于既有「踩板 / 右键机关」直接触发路径——电力是
+    //   第三条统一触发源，三条路径共用 spawnPrimedTnt 实体链）。World 低层只发语义事件（坐标），呈现层
+    //   （Main.qml）转发 player.firePowerTnt（PlayerController 暴露的 QML 入口 → clearBlockSilent +
+    //   entityManager.spawnPrimedTnt，复用既有机关点火链——机制同 t490 右键机关：先清 TNT 方块再生
+    //   引燃态实体，防 1.5 格叠加）。分层（PLAN §2）：同 blockDroppedAsItem 模式。
+    void powerTntTriggered(int x, int y, int z);
+    // t658 发射器 / 投掷器被红石电力触发（通电上升沿）。呈现层（Main.qml）转发 player.fireDispenserAtQml
+    //   （PlayerController 暴露的 QML 入口 → fireDispenserAt，per-dispenser 冷却 / state 朝向 / 库存分派
+    //   全复用既有机关触发链——「与既有机关触发并存」的收口点）。方向 = 机器 state 朝向（单一方向源 t608）。
+    void powerDispenserTriggered(int x, int y, int z);
 
 private:
     void generate();          // 重建置换表 + ChunkManager + 填充地形（静默，不 emit）
@@ -950,6 +993,11 @@ private:
     //   （setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）经 noteGrowthWrite 增量维护；
     //   generate/beginLoad 清空、finishLoad 全图重建（存档 blob 直写不经写入路径）。
     std::unordered_set<quint64> m_growthCells;
+    // t656 红石电力脏集（事件驱动局部重算，见 notePowerWrite / tickRedstone 头注释）：存「须重算电力」的
+    //   锚点格（红石族编辑格 + 6 邻红石族格）。编辑路径增量入集；tickRedstone 消费（局部 BFS 重算后清）。
+    //   稳态空集 → 每 tick 零开销（同 m_growthCells 位置索引模式；**非**全图每 tick 扫描——lessons
+    //   perf-fluid-scan 反模式）。generate / beginLoad 清空（网格重置坐标作废）。键编码复用 packGrowthCell。
+    std::unordered_set<quint64> m_powerDirty;
     // perf：流体方格位置索引（Water / Lava 各一集）—— 流体 tick 遍历此集（O(流体格数)）替代全图扫描
     //   （O(W×D×H)=3.28M）。写入路径经 noteFluidWrite 增量维护；generate/beginLoad 清空、finishLoad
     //   全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。稳态（无流体写入）
@@ -1024,6 +1072,17 @@ private:
     //   updatePressurePlates 置回，B1 基线抑制保证不产沿）。其余方块的 bit0（红石灯 / 探测铁轨 / 拉杆 / 门朝向）
     //   语义各不相同且均为持久态 → 不动。见 world.cpp 头注释。
     void normalizeLoadedMechanismState();
+    // ── t656 红石电力私有实现（见 notePowerWrite / tickRedstone 公有头注释）──
+    // 编辑格是否属红石族（粉 / 源 / 接收器 —— notePowerWrite 判定 + tickRedstone 邻接收器扫描共用）。
+    static bool isPowerFamilyBlock(quint8 id);
+    // (x,y,z) 处电源对邻格的强电值（红石块 / 亮火把 / 拉杆 on / 按钮按下 / 压力板压下 / 探测轨有车 → 15；
+    //   非源 → 0）。isPowerSource 的值版（同判定取值）。
+    int powerSourceLevel(int x, int y, int z) const;
+    // 电力局部重算核心：从脏锚点集 BFS 粉连通域（上界 kPowerFloodCap），重算各粉电力级 + 连接位并静默写
+    //   state；随后扫描域内接收器写通电位 / 发触发信号。返回是否有实际写入（caller 据此收口 worldChanged）。
+    bool recomputePowerLocal();
+    // BFS 单粉连通域上界（防病态长链失控；15 格衰减 + 6 向传播下实际域 ≤ 数百格，2048 上界余量充足）。
+    static constexpr int kPowerFloodCap = 2048;
 };
 
 #endif // WORLD_H

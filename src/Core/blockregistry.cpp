@@ -626,6 +626,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     // 红石火把：常亮装饰光源（光 7；真红石信号留红石大轮）。cross 形广告牌（cutout 段）；放置预检同火把
     //   （实体邻居支撑）。dropId=自身、maxStack=64。
     /* redstone_torch */ {int(BlockRegistry::RedstoneTorch), 161,161,161,161, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false, int(BlockRegistry::RedstoneTorch), 1, 64, "redstone_torch", "红石火把"},
+    // ── t656 红石粉导线（RedstoneDust；机制等价 MC 1.0 redstone wire）：红石粉物品（0x224）右键实体方块
+    //   顶面放置成的贴地薄层导线。solid=false / ShapeNone（无碰撞，同铁轨）、hardness=0（瞬破）、NoTool、
+    //   dropId=0x224（破粉掉红石粉物品，Core 不依赖 Game 故字面量）、dropCount=1、maxStack=64。各面基底
+    //   tile=166（dust_line_off；mesher 据连接位 / 电力位实际选 166..169 线 / 点 × 断 / 通）。state 编码
+    //   见 blockregistry.h（低 4 位电力级 0..15 + 高 4 位水平连接位）。光照：lightEmission 状态感知版 ——
+    //   通电粉（power>0）微红光 7（recomputeLightAround 检出光变重 flood）。音色 GroupStone（石粉质感）。
+    //   不进创造方块调色板（红石 tab t660 取红石粉物品 0x224，同玻璃物品模式）。
+    /* redstone_dust  */ {int(BlockRegistry::RedstoneDust),    166,166,166,166, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false,                           0x224, 1, 64, "redstone_dust", "红石粉"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -772,6 +780,7 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* golden_rail             */ 27,  // t638 动力铁轨 → MC 1.0 powered rail id 27
     /* detector_rail           */ 28,  // t638 探测铁轨 → MC 1.0 detector rail id 28
     /* redstone_torch          */ 76,  // t638 红石火把（常亮 on）→ MC 1.0 redstone torch lit id 76
+    /* redstone_dust           */ 55,  // t656 红石粉导线 → MC 1.0 redstone wire id 55（放置的导线形态）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -886,6 +895,7 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == Rail) return true;   // t484 cross 路由的贴地薄板（几何水平 quad 非竖直 cross，但同走 PASS 1 alphaCutoff 路径，见头注释；与睡莲同族）
     if (blockId == GoldenRail || blockId == DetectorRail) return true; // t638 动力 / 探测铁轨（与 Rail 同几何路由——水平薄板 quad 走 cutout 段 alphaCutoff）
     if (blockId == RedstoneTorch) return true; // t638 红石火把 cross（竖直两片对角双面 quad，贴 redstone_torch(161)；常亮光源走真方块光 flood，非 torchHost 伪光源）
+    if (blockId == RedstoneDust) return true; // t656 红石粉导线（与铁轨族同几何路由——水平薄板 quad 走 cutout 段 alphaCutoff；partialblockgeometry RedstoneDust case 据连接位 / 电力位选瓦片）
     if (blockId >= FirstFlower && blockId <= LastFlower) return true; // t397 段外花段（4 色 cross）
     return blockId >= FirstCross && blockId <= LastCross;
 }
@@ -987,6 +997,13 @@ bool BlockRegistry::isRedstoneOre(quint8 blockId)
 bool BlockRegistry::isRail(quint8 blockId)
 {
     return blockId == Rail || blockId == GoldenRail || blockId == DetectorRail;
+}
+
+// t656 红石粉导线统一谓词（单一权威，见头注释）：blockId == RedstoneDust 即红石粉导线。供 World 电力
+//   重算 / 红石粉物品放置预检 / mesher 路由统一判定（同 isLadder 单 id 模式）。
+bool BlockRegistry::isRedstoneDust(quint8 blockId)
+{
+    return blockId == RedstoneDust;
 }
 
 // t620 红石灯统一谓词（单一权威，见头注释）：blockId == RedstoneLamp 即红石灯。供 PlayerController
@@ -1396,6 +1413,12 @@ quint8 BlockRegistry::lightEmission(quint8 blockId, quint8 state)
     // t620：点亮中的红石灯自发光 15（机制等价 MC 1.0 红石灯光 level 15；正式光源方块，同岩浆档）。
     //   state bit0 = RedstoneLampStateOnFlag（玩家右键翻位开 / 关）。
     if (blockId == RedstoneLamp && (state & RedstoneLampStateOnFlag)) return 15;
+    // t656：通电中的红石粉导线微红光 7（机制等价 MC 1.0 红石粉通电发光 level 7 —— 弱于火把 14 的暗红
+    //   输电线观感；断电粉不发光）。state 低 4 位 = RedstoneDustPowerMask（>0 即通电）。
+    if (blockId == RedstoneDust && (state & RedstoneDustPowerMask) > 0) return 7;
+    // t657：红石火把熄灭态（state bit0 = RedstoneTorchStateOffFlag 置位 = 附着块被供电 → 反相熄灭）
+    //   不发光；亮态（bit0=0，含旧存档 state<5 的附着编码）走 id-only 表 7。
+    if (blockId == RedstoneTorch && (state & RedstoneTorchStateOffFlag)) return 0;
     return lightEmission(blockId); // 其余（含熄灭熔炉 / 未点亮红石矿 / 关态红石灯）按 id-only 表（火把/岩浆/末地传送门等，与 state 无关）
 }
 
@@ -1475,6 +1498,10 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
             constexpr float kRailTop = 2.0f / 16.0f; // 薄板顶（视觉 1/16 + 1/16 容差）
             return {BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, kRailTop, 1.0f}};
         }
+        if (blockId == RedstoneDust)
+            // t656 红石粉导线薄板命中盒（同铁轨族模式——贴地薄层，上方空气穿过命中后方方块；+1/16 容差
+            //   使准星贴地平扫微偏亦命中，可清粉）。
+            return {BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, 2.0f / 16.0f, 1.0f}};
         if (blockId == RedstoneTorch)
             // t638 红石火把：cross 形小立柱（同火把语义——准星瞄柄/焰才命中，格角落空气穿过）。视觉是
             //   两片对角 cross quad 贴满格（贴图透明底只显中央火把剪影），取中央 0.4 见方 × 0.85 高保守盒

@@ -2375,20 +2375,9 @@ void PlayerController::placeBlock()
     //   ① 右键机关四邻（上方 isManualIgniter 分支）+ ② 踩压力板四邻（scanTntTraps）。右键 TNT 本体不再点燃
     //   → 走普通放块路径（空手无效应 / 持物在 TNT 旁正常放块）。机制等价 MC 1.0 徒手不能点燃 TNT（本项目无
     //   打火石，故仅机关可激活）。两处机关点燃路径保留（isManualIgniter 四邻 + scanTntTraps 压力板四邻）。
-    // t620 红石灯右键开关（useBlock 语义；机制等价 MC 1.0 redstone lamp 受信号点亮——本项目无红石，简化为
-    //   右键直接开关）。右键命中红石灯 → 翻 state bit0（RedstoneLampStateOnFlag）→ mesher 切 on/off 贴图
-    //   （redstone_lamp_on/off 全六面）+ lightEmission 状态感知版 15/0 → setBlock 5 参数版内部
-    //   recomputeLightAround 检出 lightSourceChanged 重 flood 方块光（开灯即亮 / 关灯即暗，无伪光源）。
-    //   空手亦可（开关是「使用」语义，与手持何物无关）。优先于放置（右键已放置的红石灯即开关，不另放块）。
-    //   id 不变只 state 变 → 仅发 worldChanged 重建 mesh（不发 broken/placed），同门开合模式。
-    if (BlockRegistry::isRedstoneLamp(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
-        const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
-        const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
-        m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, quint8(st ^ BlockRegistry::RedstoneLampStateOnFlag));
-        m_lastPlaceMs = now;
-        emit swingArm(); // 开关是一次「使用」动作 → 挥手（t29）
-        return; // 开关成功 → 不再走放置路径
-    }
+    //   **t658 变更**：原「红石灯右键直接开关」分支（t620 无红石时代的简化）已删除 —— 红石电力系统 v1 落地
+    //   后红石灯由**电力驱动亮灭**（World::tickRedstone 检出通断翻 state bit0，机制等价 MC 1.0 redstone
+    //   lamp 受信号驱动；MC 红石灯不可右键交互）。右键红石灯无效应（fall-through 到放置 / 空手无动作）。
     } // t174：m_hasHit 局部门控结束（工作台/熔炉/门/活版门需命中；桶分支与放块路径各自处理命中需求）
     // t174 铁桶 useBlock（spec「右键舀水/倒水交互」）：选空桶 / 装水桶时右键走桶交互，不走方块放置路径
     //   （桶非方块；selectedBlock 经 hotbar 已归 Air，下方 Air 守卫会拦，故在此提前分支）。机制等价 MC 1.0
@@ -2454,6 +2443,30 @@ void PlayerController::placeBlock()
             emit swingArm();
         }
         return; // 空桶（舀水 / 舀岩浆成功与否）不再走放置路径
+    }
+    // t656 红石粉导线放置（机制等价 MC 1.0 redstone dust：**红石粉物品本身就是导线** —— 右键放置成
+    //   RedstoneDust 方块，不另立物品 id / 不设合成配方（MC 1.0 红石粉由采矿获得；本工程 RedstoneOre
+    //   掉 4 粉 + 地牢战利品 t393））。手持红石粉（RedstoneId 0x224）右键命中**实体方块的顶面**
+    //   （ny>0，机制等价 MC 粉尘只能铺在方块顶面——贴侧 / 悬空拒）→ 命中面相邻格若是空气 / 水则铺粉
+    //   （RedstoneDust state=0 断电态；World notePowerWrite 首次重算即点亮）。生存消耗 1 粉 / 创造不耗。
+    //   破坏粉尘掉回 1 粉（BlockDef dropId=0x224）→ 「放置↔破坏」无损循环。红石粉非方块 → selectedBlock
+    //   归 Air，须在 `m_selectedBlock == Air` 守卫之前分流（同桶 / 玻璃分支模式）。分层（PLAN §2）：
+    //   放置属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM）。
+    if (m_hotbar && m_world && heldItemId == RecipeRegistry::RedstoneId) {
+        if (m_hasHit && m_hitNy > 0) { // 仅顶面（贴侧 / 悬空拒，机制等价 MC 粉尘铺面）
+            const int tx = m_hitBx, ty = m_hitBy + 1, tz = m_hitBz; // 粉铺在命中方块正上方一格
+            if (ty < m_world->height()) {
+                const quint8 tgt = m_world->blockAt(tx, ty, tz);
+                if (tgt == BlockRegistry::Air || tgt == BlockRegistry::Water) {
+                    m_world->setBlock(tx, ty, tz, BlockRegistry::RedstoneDust, 0); // state=0（断电；World 首次重算点亮）
+                    if (m_mode != Creative)
+                        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 粉（创造不耗）
+                    m_lastPlaceMs = now;
+                    emit swingArm(); // 铺粉也是一次「放置」动作 → 挥手（t29）
+                }
+            }
+        }
+        return; // 红石粉（铺粉成功 / 命中非顶面 / 未命中）均不再走方块放置路径
     }
     // t505 雪球抛掷（spec「雪球可丢弃发射：右键发射（仿箭实体），砸到怪物不扣血但红色受击动画 + 少量击退」；
     //   机制对标 MC 1.0 玩家抛雪球）：手持雪球（SnowballId，材料段）右键 → spawnSnowball 从眼位沿视线方向以
@@ -4153,6 +4166,29 @@ bool PlayerController::fireDispenserAt(int dx, int dy, int dz, quint8 db)
     }
     m_dispenserCooldowns.insert(key, kDispenserCooldown); // 写冷却
     return true;
+}
+
+// t656/t658 红石电力触发 TNT（World::tickRedstone 通电上升沿 → powerTntTriggered → Main.qml 转发到本
+//   入口；见 playercontroller.h 头注释）。机制同 t490 右键机关点火：clearBlockSilent 静默清 TNT 方块
+//   （不发 broken/placed 免粒子音 spam；绕过 setBlockFromEntity 的 occ 守卫——TNT 是实体方块）+
+//   spawnPrimedTnt 生引燃态实体（默认 fuse ~5s；引爆时 detonateTntSphere 链式引燃邻接 TNT）。
+//   该格已非 TNT（信号与栅格解耦一帧以上——同 tick 内既有路径已清）→ no-op。
+void PlayerController::firePowerTnt(int x, int y, int z)
+{
+    if (!m_world || !m_entityManager) return;
+    if (!BlockRegistry::isTnt(m_world->blockAt(x, y, z))) return; // 已非 TNT → no-op（防双触发）
+    m_world->clearBlockSilent(x, y, z);             // 移除 TNT 方块（点火专用静默清）
+    m_entityManager->spawnPrimedTnt(x, y, z);       // 点燃（默认 fuse；爆炸链式传播）
+}
+
+// t658 红石电力触发发射器 / 投掷器（powerDispenserTriggered → Main.qml 转发；见头注释）。该格仍是
+//   发射器 / 投掷器 → fireDispenserAt（per-dispenser 冷却 / state 朝向 / 库存分派全复用既有机关触发链）。
+void PlayerController::fireDispenserAtQml(int x, int y, int z)
+{
+    if (!m_world) return;
+    const quint8 b = m_world->blockAt(x, y, z);
+    if (!BlockRegistry::isDispenser(b) && !BlockRegistry::isDropper(b)) return; // 已非机器 → no-op
+    fireDispenserAt(x, y, z, b); // per-dispenser 冷却闸（同机器同 tick 双路径触发只 fire 一次）
 }
 
 // t579/t580/t608/t609 发射器 / 投掷器内容物弹出（见 playercontroller.h 头注释）。读 DispenserStore 首个可用槽 →

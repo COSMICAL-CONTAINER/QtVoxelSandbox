@@ -346,6 +346,17 @@ TILES = [
     #   tileFilenameMap {122→tnt_side / 164→tnt_top / 165→tnt_bottom} 运行期映射。tools/build_tnt.py 生成。
     "default_tnt_top",               # 164 tnt_top（TNT 顶面：药柱截面 + 中央引线接口亮黄圆点俯视）
     "default_tnt_bottom",            # 165 tnt_bottom（TNT 底面：纯药柱底板 + 暗捆带，无标记）
+    # t656 红石粉导线四瓦片（机制等价 MC 1.0 redstone dust 线 / 点两形态 × 断常暗红 / 通电亮红两态；
+    #   mesher 据粉尘 state 连接位选线向 / 点、电力位选断 / 通 —— 呈现层选择，同 Water 流水贴图模式）。
+    #   线向瓦片沿 Z 轴延伸，X 向连线由 mesher UV 旋转复用（一张两用，同铁轨 121 模式）。
+    #   tools/build_redstone_dust.py 程序生成原创像素图（§9 override (a)）。
+    "default_dust_line_off",         # 166 dust_line_off（断电线向：暗红粉线）
+    "default_dust_dot_off",          # 167 dust_dot_off（断电孤立点：暗红粉堆）
+    "default_dust_line_on",          # 168 dust_line_on（通电线向：亮红粉线 + 白热高光粒）
+    "default_dust_dot_on",           # 169 dust_dot_on（通电点：亮红粉堆 + 白热心）
+    # t657 红石火把熄灭态（机制等价 MC 1.0 redstone torch off 双态贴图）：附着块被供电 → 反相熄灭（NOT 门）。
+    #   深棕柄 + 暗红熄焰头（无白热心）。tools/build_rail_family.py 姊妹自绘；mesher 据 state off 位换 161↔170。
+    "default_redstone_torch_off",    # 170 redstone_torch_off（熄灭态 cross：暗红熄焰）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

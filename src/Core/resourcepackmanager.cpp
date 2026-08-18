@@ -583,6 +583,13 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         //   default_wood_button.png / default_stone_button.png（tools/build_lever_button.py 自绘按钮钮面）。
         {132, QStringLiteral("oak_planks.png")},       // wood_button（木按钮=木板贴图；MC vanilla 复用 planks）
         {133, QStringLiteral("cobblestone.png")},      // stone_button（石按钮=圆石贴图；MC vanilla 复用 cobblestone）
+        // t656 红石粉导线不接 pack：vanilla redstone_dust_line.png 是**灰度可着色**瓦片（非红粉色，需 tint
+        //   合成才显红）——直接接上会渲染成灰白粉线（同睡莲 t444「现灰」根因）。断 / 通四瓦片（166..169）
+        //   暂走程序红粉观感；pack tint 合成留后续任务（tileTint 睡莲模式），留注释防未来误接。
+        // t657 红石火把熄灭态：mesher 据 state 的 RedstoneTorchStateOffFlag 换 tile 170（redstone_torch_off，
+        //   机制等价 MC 1.0 redstone torch off 双态贴图；on 态恒 tile 161 已接）。非 pack 回落
+        //   default_redstone_torch_off.png（tools/build_rail_family.py 姊妹脚本自绘）。包内缺 PNG 安全跳过。
+        {170, QStringLiteral("redstone_torch_off.png")}, // redstone_torch_off（t657 熄灭态；反相器 NOT 门视觉）
     };
     return kMap;
 }
