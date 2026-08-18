@@ -133,6 +133,10 @@ public:
     //   + levelChanged（HUD 等级数降）。分层（PLAN §2）：Game 层持显值 + 派生，呈现层（EnchantingTableUI）
     //   只读消费（点附魔槽 → 调本方法 → 据 bool 决定是否扣 lapis / 提示）。
     Q_INVOKABLE bool spendLevels(int amount);
+    // t695 加 N 级（/xp <N>L 命令用；机制等价 MC 1.0 /xp L 语义）：把总 xp 直设「升至 (level+N) 所需」
+    //   （xpTotalForLevel(level+N)，级内进度一并清零——升级语义非累点）。amount<=0 忽略；无信号复用
+    //   setXp 路径（xpChanged / levelChanged 按「真变才发」纪律）。
+    Q_INVOKABLE void addLevels(int amount);
 
 signals:
     void healthChanged();

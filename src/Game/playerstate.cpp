@@ -150,6 +150,15 @@ bool PlayerState::spendLevels(int amount)
     return true;
 }
 
+// t695 加 N 级（/xp <N>L 命令用；见头注释）：直接把 m_xp 设到「恰好升至 (m_level+amount) 所需」总量
+//   （级内进度清零 = 整级跨越语义，机制等价 MC /xp <N>L）。走 setXp 复用「无变化静默 + recomputeLevel +
+//   emit xpChanged」全套纪律。
+void PlayerState::addLevels(int amount)
+{
+    if (amount <= 0) return;
+    setXp(xpTotalForLevel(m_level + amount));
+}
+
 // t403 MC 1.0 风格递增曲线（机制等价 MC，三段斜率；need 单调递增 → 每级比上一级要更多 XP）。
 int PlayerState::xpNeedForLevel(int level)
 {

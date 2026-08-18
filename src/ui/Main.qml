@@ -1315,8 +1315,33 @@ Window {
         "time": {
             desc: "/time set <day|night|midnight|数字[d]> | /time add <数字> —— 设/加时间",
             run: function(rest) { return window.runTime(rest) }
+        },
+        // t695 /xp 命令（用户点名）：`/xp N` 纯数字 = 加 N 经验点（playerState.addXp）；`/xp NL`（L 后缀，
+        //   大小写不敏感）= 加 N 级（逐级补足所需 XP —— addXp 跨曲线阈值自动连升，t403 recomputeLevel）。
+        //   机制等价 MC 1.0 /xp（数字=经验点；L 后缀=等级）。负值不支持（addXp 拒绝非正数；扣经验走
+        //   附魔 / 铁砧自然消耗）。
+        "xp": {
+            desc: "/xp <数字> 或 /xp <数字>L —— 加经验点 / 加等级",
+            run: function(rest) { return window.runXp(rest) }
         }
     })
+    // t695 /xp 解析（spec 见 commandRegistry.xp 注释）：rest 含前导空格如 " 100" / " 3L"。
+    //   L 后缀大小写不敏感；非法（空 / 非数字 / ≤0）→ 用法回显。加级走 PlayerState::addLevels（整级跨越，
+    //   级内进度清零——与 MC /xp L 语义一致）；加点走 addXp（跨阈值自然升级）。
+    function runXp(rest) {
+        const arg = rest.trim()
+        if (arg.length === 0) return "用法: /xp <数字>（经验点） | /xp <数字>L（等级）"
+        const m = arg.match(/^(\d+)[lL]$/)
+        if (m) {
+            const lvls = parseInt(m[1], 10)
+            playerState.addLevels(lvls)
+            return "+" + lvls + " 级（当前 " + playerState.level + " 级）"
+        }
+        const n = parseInt(arg, 10)
+        if (isNaN(n) || n <= 0) return "/xp 需要正整数（L 后缀=等级）"
+        playerState.addXp(n)
+        return "+" + n + " 经验（当前 " + playerState.level + " 级）"
+    }
     // misc 二轮 `/time` 解析（spec）：rest 含前导空格如 " set day"。子命令 set/add。
     //   phase 语义：0=正午 0.25=黄昏 0.5=子夜 0.75=黎明（与 WorldClock 一致）。
     //   · set day → phase 0（白天）；set night → 0.5（深夜）；set midnight → 0.5；set <num> → phase=num/24000（MC ticks）；
