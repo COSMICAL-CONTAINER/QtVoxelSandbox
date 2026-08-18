@@ -290,6 +290,9 @@ function redistributeLive(root) {
     const total = root.dragHeldCount
     const heldDur = root.dragHeldDurability                       // t263 工具耐久快照（拖动期间不变）
     const heldEnch = root.dragHeldEnchants                        // t475 附魔快照（同耐久：工具 / 护甲拖动期间不变）
+    // t688：名归一（旧面板缺 dragHeldName 属性时 undefined 兜底空串，同 243 行注释约定）。
+    const heldName = (root.dragHeldName === undefined || root.dragHeldName === null) ? "" : root.dragHeldName
+    const heldNamed = heldName !== ""
     const cap = root.hotbar.maxStackSize(heldId)
 
     // 2) 重建合格清单；首次 encounter 的槽拍原始栈快照（此后该槽读到的是本轮写入值，须靠快照还原）。
@@ -306,7 +309,11 @@ function redistributeLive(root) {
             root.dragOriginal[key] = { id: cur.id, count: cur.count, durability: cur.durability, enchants: cur.enchants, name: cur.name }
         }
         const orig = root.dragOriginal[key]
-        if (orig.id === 0 || (orig.id === heldId && orig.count < cap))
+        // t688 带名守卫（对齐 C++ Hotbar::addStack 的「named = 不合并」双向守卫）：既有同 id 槽**带名** → 不并入
+        //   （无名手持滑过带名栈 → 白捡名 / 稀释带名栈）；**手持带名** → 只允许分进空槽，不并入任何既有同 id
+        //   未名栈（旧版 placeName 兜底 dragHeldName → 光标的名污染全部被滑过的未名同 id 栈）。空槽不受限
+        //   （改名整栈均分到空槽仍各格保名，t622 行为保留）。
+        if (orig.id === 0 || (orig.id === heldId && orig.count < cap && orig.name === "" && !heldNamed))
             // t648 门禁：拖拽分发目标格须过面板门禁（拒 → 不入 eligible，等同异物槽跳过——不写不清）。
             if (canPlace(root, p[0], parseInt(p[1], 10), heldId, orig.count, heldEnch))
                 eligible.push({ group: p[0], index: parseInt(p[1], 10), key: key, base: orig.count, dur: orig.durability, ench: orig.enchants, name: orig.name })
@@ -325,18 +332,18 @@ function redistributeLive(root) {
         root.hotbar.heldCount = total
         root.hotbar.heldDurability = heldDur
         root.hotbar.setHeldEnchants(heldEnch)
-        root.hotbar.heldCustomName = root.dragHeldName               // t622 名随光标（拖动期间不变，回填保真）
+        root.hotbar.heldCustomName = heldName                        // t622 名随光标（拖动期间不变，回填保真；t688 归一变量）
         return
     }
 
     // 3) floor(total/N) 入格（cap 钳制防溢出），余数留光标；记 dragWritten 供下轮撤销。
     //   t263 同 id 合并（方块段）耐久不变（e.dur = 槽原始耐久）；工具段不进此分支（cap=1 恒满不进 eligible 合并）。
     //   t475 同 id 合并附魔不变（e.ench = 槽原始附魔；可堆叠物品恒 4 个 0）。
-    //   review rev2-C5（t622 注释落地）：写入名 = 槽原始名**非空则沿用**（同 id 合并不动槽实例名）；槽原始名空
-    //     = 本轮拖动**新开的空槽** → 写 dragHeldName（拖动均分是从手持栈分裂出去，分裂物带手持实例名——
-    //     旧版写 e.name（空槽快照恒 ""）→ 改名整栈左键均分后每格都是无名物品，与 328 行注释「空槽开新
-    //     名 = dragHeldName」矛盾）。后续轮次该槽已带名 → e.name 非空沿用（不丢）。
-    //     铁砧改名整栈（maxStack>1）均分 → 各格保名；无名物品 dragHeldName="" 行为不变。
+    //   review rev2-C5（t622 注释落地）+ t688 收紧：eligible 已在 2) 段用带名守卫过滤——既有槽全未名（e.name
+    //     恒 ""），带名手持不并入任何既有槽（只进空槽）。故此处写入名 = 槽原始名非空沿用（空槽快照 ""），
+    //     空槽 = 本轮新开 → 写 heldName（分裂物带手持实例名——铁砧改名整栈均分到空槽各格保名，t622 行为
+    //     保留）；未名手持 dragHeldName="" 时空槽仍写 ""，行为不变。旧版 `e.name !== "" ? e.name :
+    //     dragHeldName` 在带名手持滑过未名既有栈时把光标名写上（污染），t688 由 eligible 过滤根治。
     const per = Math.floor(total / n)
     let remaining = total
     if (per > 0) {
@@ -344,7 +351,7 @@ function redistributeLive(root) {
             const e = eligible[i]
             const place = Math.min(per, cap - e.base)
             if (place <= 0) continue
-            const placeName = e.name !== "" ? e.name : root.dragHeldName
+            const placeName = e.name !== "" ? e.name : heldName
             writeSlot(root, e.group, e.index, heldId, e.base + place, e.dur, e.ench, placeName)
             root.dragWritten[e.key] = true
             remaining -= place
@@ -354,7 +361,7 @@ function redistributeLive(root) {
     root.hotbar.heldCount = remaining
     root.hotbar.heldDurability = remaining > 0 ? heldDur : 0
     root.hotbar.setHeldEnchants(remaining > 0 ? heldEnch : [0,0,0,0])
-    root.hotbar.heldCustomName = remaining > 0 ? root.dragHeldName : ""
+    root.hotbar.heldCustomName = remaining > 0 ? heldName : ""        // t688 归一变量（undefined 面板兜底空串）
 }
 
 // 单格左键（N===1 微拖退路 = resolveClick：空手拾取 / 持物放置 / 合并 / 互换）。正常单击走 per-slot
@@ -808,6 +815,15 @@ function doMergeSameId(root, group, index) {
     //   重打包洗白（免费修复 + 附魔清零 + 名字丢失）。触发链：附魔台 t648 门禁拒首次点击（no-op）后，
     //   280ms 内第二次点击命中双击判定（判定先于 canPlace 门）→ 手持附魔 / 改名工具直落本函数。
     if (slots.length === 0) return
+    // t688：收集段遇**任何带名实例**（槽内带名 / 光标带名）→ 整个 no-op。下方重打包回填硬编码无名
+    //   （writeSlot(…, [0,0,0,0]) 且不传名）→ 带名栈被双击合并后丢名（铁砧改名整栈双击 = 名静默蒸发）。
+    //   与 C++ Hotbar::addStack「named = 不合并」守卫同一语义：名是实例属性，重打包不搬实例元数据，
+    //   故带名实例不参与「收集 → 重打包」路径（带名整栈本就常在光标 / 单槽，无合并收益）。
+    if ((root.hotbar.heldBlock === targetId && (root.hotbar.heldCustomName || "") !== "")) return
+    for (let i = 0; i < slots.length; ++i) {
+        const s2 = readSlot(root, slots[i].group, slots[i].index)
+        if ((s2.name || "") !== "") return
+    }
     if (total <= 0) return
 
     // review rev2-C4：cap=1（不可堆叠：附魔书 / 工具 / 护甲）且 total>1 → **no-op**。下方重打包回填硬编码
