@@ -617,6 +617,13 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
+        // t690(c)：合成格同款显式同步归还（三个持有者：工作台 3×3 / 生存背包 2×2 / 创造背包生存 tab 2×2）。
+        //   仅设 craftingTableOpen=false / inventoryOpen=false 依赖面板 visible 绑定重求值（可被引擎推迟），
+        //   其 onVisibleChanged→returnCraftToHotbar 会晚于下方 gatherPlayerState（§t650 同竞态）→ 合成材料
+        //   不进存档。直调归还是幂等的（槽已清则零迭代）；面板未开时槽恒空 = 空循环无副作用。
+        craftingTablePanel.returnCraftToHotbar()
+        survivalPanel.returnCraftToHotbar()
+        inventoryPanel.returnCraftToHotbar()
         returnHeldToHotbar()
         const file = currentWorldFile
         const hasOpen = worldStore.isOpen()
@@ -2193,6 +2200,13 @@ Window {
             }
             playerState.takeDamage(finalDmg, cause) // t311 透传致死来源（Fall/Suffocation/Drowning/Starvation/Fire）
             player.wakeUp()  // t388 受击即醒（坠落/窒息/溺水/饥饿/燃烧中断睡觉 fade）
+        }
+        // t690 毒伤独立路由：毒（毒马铃薯食物中毒）不吃护甲减伤、不磨护甲耐久（机制等价 MC 1.0 poison
+        //   属魔法系伤害绕过盔甲公式）。直走 takeDamage（damaged 红闪 / 视角晃照旧）+ 中断睡觉。旧版毒
+        //   复用 fallDamageTaken → 上方处理器的无条件 damageArmor() 使 8s 毒 = 8 次免费护甲损耗。
+        function onPoisonDamageTaken(hp) {
+            playerState.takeDamage(hp, PlayerState.Generic)
+            player.wakeUp()
         }
         // t238 饥饿回血 → PlayerState.heal（饱腹态每 4s 回 1HP；同 fallDamageTaken→takeDamage 反向配对）。
         function onHealed(hp) { playerState.heal(hp) }
@@ -7701,6 +7715,13 @@ Window {
             if (window.enchantingTableOpen) window.closeEnchantingTable()
             if (window.anvilOpen) window.closeAnvil()
             if (window.dispenserOpen) window.closeDispenser()
+            // t690(c)：合成格显式同步归还（同上方 saveAndExitToWorldList 的修法 + t650 模式）。上方仅设
+            //   craftingTableOpen / inventoryOpen = false —— 面板 onVisibleChanged→returnCraftToHotbar 依赖
+            //   visible 绑定重求值（可被引擎推迟），会晚于本处 returnHeldToHotbar / dropAllItems → 材料
+            //   不随尸体掉落、掉进已重置的空背包（正是 t650 要杀的竞态）。直调幂等（槽空零迭代）。
+            window.craftingTablePanel.returnCraftToHotbar()
+            window.survivalPanel.returnCraftToHotbar()
+            window.inventoryPanel.returnCraftToHotbar()
             // pause-menu：死亡关暂停菜单子面板（设置 / 进度 / 统计；防死亡态遗留，死亡屏 z=180 盖在其上）。
             if (window.settingsOpen) window.settingsOpen = false
             if (window.progressOpen) window.progressOpen = false

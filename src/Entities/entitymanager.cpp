@@ -49,9 +49,13 @@ bool findShadeTarget(World *world, int sx, int sy, int sz, int radius, int kThre
             const int x = sx + dx, z = sz + dz;
             if (x < 0 || z < 0 || x >= world->width() || z >= world->depth()) continue;
             for (int y = sy - 1; y <= sy + 2; ++y) {
-                if (y < 1 || y + 1 >= h) continue; // 身体格 y+1 需在界内（且脚位 y>=1 防 y=0 下方越界）
+                if (y < 1 || y + 2 >= h) continue; // 身体两格 y+1/y+2 需在界内（t690：1.8 高 mob 占两格 ——
+                                                     //   旧版只界检 y+1 → y+2 越界读贴边缓存 / 头顶格无校验）
                 if (!world->isSolid(x, y, z)) continue;               // 下方支撑（脚位层实体，可站立）
                 if (world->blockAt(x, y + 1, z) != BlockRegistry::Air) continue; // 身体格空气（可容身）
+                if (world->blockAt(x, y + 2, z) != BlockRegistry::Air) continue; // t690：头部格净空（旧版漏检 ——
+                                                     //   1 格高气袋内 mob 楔入天花板卡死；1.8 高须两格净空，同
+                                                     //   spawnCellFitsHostile 双格校验口径）
                 if (world->skyLightAt(x, y + 1, z) >= kThresh) continue;          // 遮荫（无直射日光）
                 const int dd = dx * dx + dz * dz;
                 if (bestX < 0 || dd < bestD2) { bestX = x; bestZ = z; bestD2 = dd; }
@@ -2432,8 +2436,14 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         if (e.seekingShade) {
             const float sx = (float(e.shadeTx) + 0.5f) - e.pos.x();
             const float sz = (float(e.shadeTz) + 0.5f) - e.pos.z();
-            if (sx * sx + sz * sz < 0.81f) {
-                // 已到阴凉目标格：自身中心格遮荫 → 原地停驻（等不烧 / 玩家靠近再追；mx=mz=0 停止移动）
+            // t690：停驻前验证**自身中心格**确已遮荫（skyLight < kShadeSkyLight）。旧版只查「距目标格 <0.9」
+            //   —— 卡在 0.81~0.9 距离（碰撞 / 拥挤挡住最后一步）时距离条件已满足但自身仍在日光里 → 停驻
+            //   原地烧死（注释自称「own cell shaded」但从未验证）；3s 重扫又选同一目标 → 永卡。修：未遮荫则
+            //   继续朝目标格**中心**走（0.81 内小步逼近格心，XZ 位移由 3) 段正常走速承担），进了阴影才停。
+            const int myX = qFloor(e.pos.x()), myY = qFloor(e.pos.y()), myZ = qFloor(e.pos.z());
+            const bool ownShaded = world && world->skyLightAt(myX, myY, myZ) < kShadeSkyLight;
+            if (sx * sx + sz * sz < 0.81f && ownShaded) {
+                // 已到阴凉目标格且自身中心格遮荫 → 原地停驻（等不烧 / 玩家靠近再追；mx=mz=0 停止移动）
                 mx = 0.0f; mz = 0.0f; mdist = 0.0f;
             } else { mx = sx; mz = sz; mdist = std::sqrt(sx * sx + sz * sz); }
         }

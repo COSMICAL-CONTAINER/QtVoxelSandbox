@@ -640,6 +640,11 @@ signals:
     // t311 cause=PlayerState::DeathCause 枚举值，区分致死来源（Fall/Suffocation/Drowning/Starvation）供死因记录。
     //   机制同 t22：生存伤害结算，正值才发；呈现层路由到 PlayerState.takeDamage(hp, cause)。
     void fallDamageTaken(int hp, int cause);
+    // t690 毒伤独立信号（区别于 fallDamageTaken 的「受击走护甲」链）：毒（毒马铃薯食物中毒）不磨护甲、
+    //   不吃护甲减伤（机制等价 MC 1.0 poison 属魔法系伤害 —— 绕过盔甲公式）。呈现层路由直走
+    //   PlayerState.takeDamage(hp, Generic)（红闪 / 视角晃照旧经 damaged）。复用 fallDamageTaken 会被
+    //   Main.qml 的「任意伤害 → damageArmor()」无条件磨甲（8s 毒 = 8 次免费护甲损耗）。
+    void poisonDamageTaken(int hp);
     // t238 饥饿回血（仅 Survival，饱腹态）：饥饿充足（>= kRegenHungerThreshold）且未满血时，每
     //   kHungerRegenInterval 秒发本信号携 1HP → 呈现层 Connections 路由到 PlayerState.heal（与 fallDamageTaken
     //   → takeDamage 反向配对：扣血走 fallDamageTaken、回血走 healed；同 airUpdated→setAir 模式）。

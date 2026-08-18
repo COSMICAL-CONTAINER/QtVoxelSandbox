@@ -366,6 +366,10 @@ void PlayerController::respawn()
     m_fireTimer = 0.0f;
     m_fireDmgTimer = 0.0f;
     if (m_burning) { m_burning = false; emit burningChanged(); }
+    // t690：重生清毒态（同火烧 —— 机制等价 MC 死亡 / 重生清除全部状态效果；漏清则死亡前的 8s 毒跨
+    //   重生继续每秒扣饥饿 / 扣血，「满血重生后不明掉血」）。
+    m_poisonTimer = 0.0f;
+    m_poisonDmgAccum = 0.0f;
     m_pos = m_spawnPos; // t388：回当前重生点（初值=kSpawn；睡床后=床位）。Y 由 snapSpawnToGround 贴地表。
     m_vel = QVector3D(0, 0, 0);
     m_knockback = QVector3D(0, 0, 0); // t296：清受击击退冲量（重生不继承死亡点的击退）
@@ -411,6 +415,9 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     m_fireTimer = 0.0f;
     m_fireDmgTimer = 0.0f;
     if (m_burning) { m_burning = false; emit burningChanged(); }
+    // t690：存档加载清毒态（同火烧瞬态语义 —— 中毒不持久化，防上一世界残留毒跨世界每秒扣饥饿 / 扣血）。
+    m_poisonTimer = 0.0f;
+    m_poisonDmgAccum = 0.0f;
     if (m_flying) { m_flying = false; emit flyingChanged(); }
     if (m_moveState != Walk) setMoveState(Walk, true); // t574/t575 存档加载强制站（位姿已灌新位，闸门无意义）
     const Mode target = (mode == int(Survival)) ? Survival
@@ -5605,10 +5612,10 @@ void PlayerController::step(qreal dt)
                 const int dmg = int(std::floor(fall - 3.0f));
                 // t655 击飞摔死归属：铁傀儡上抛后 5s 窗口内（m_golemLaunchTimer>0，applyGolemLaunch 起算）
                 //   的着地摔伤改发 GolemLaunchFall（死亡播报「被铁傀儡击飞摔死」区别于普通「从高处坠落」）。
-                //   结算即清窗口 —— 一次上抛只归属第一次落地，后续弹跳 / 再坠落归普通 Fall。窗口归零 /
-                //   未被击飞（恒 0）时 m_golemLaunchTimer<=0 → 原行为（Fall）不变。
+                //   **t690：着地沿无条件清窗口** —— 一次上抛只归属第一次落地。旧版只在 dmg>0 分支清 →
+                //   无伤落地（落水抵消 / ≤3 格落差 / dmg==0）窗口滞留 → 5s 内随后的普通坠落摔死被误播报
+                //   「被铁傀儡击飞摔死」。清窗统一挪到本分支末尾（任何着地沿），伤害判定读清窗前的值。
                 if (dmg > 0 && m_golemLaunchTimer > 0.0f) {
-                    m_golemLaunchTimer = 0.0f;
                     emit fallDamageTaken(dmg, PlayerState::GolemLaunchFall);
                 } else if (dmg > 0) emit fallDamageTaken(dmg, PlayerState::Fall); // t311 死因=高处坠落
             }
@@ -5645,6 +5652,9 @@ void PlayerController::step(qreal dt)
                 }
             }
         }
+        // t690：着地沿无条件清击飞归属窗口（含无伤落地：落水抵消 / ≤3 格 / dmg==0 / 非生存模式）。
+        //   归属只认「上抛后的第一次落地」——无论那次落地是否造成伤害，窗口使命即终。
+        m_golemLaunchTimer = 0.0f;
         m_peakY = m_pos.y();
     }
 
@@ -5831,9 +5841,10 @@ void PlayerController::step(qreal dt)
     // t669 毒马铃薯食物中毒推进（机制等价 MC 1.0 poison：中毒期间每秒扣损；无状态系统时简化 = 每秒
     //   -1 饥饿 + -1 HP）。触发 = finishEating 食毒薯 60% 掷中 → m_poisonTimer=kPoisonDuration（8s）。
     //   仅 Survival（Creative/Spectator 无敌不清毒也无效——统一复位防切回陈旧串入，同火烧态）。推进：
-    //   每秒（m_poisonDmgAccum 累积到 kPoisonInterval）发 hungerUpdated（-1 饥饿，clamp≥0）+ fallDamageTaken
-    //   （-1 HP → 呈现层 takeDamage → damaged 红闪 / 视角晃，同火 / 窒息链）。死因归 Generic（毒不算死亡原因，
-    //   简化避免新增 DeathCause；与饥饿归零 Starvation 区分）。中毒归零即解毒（时间耗尽）。
+    //   每秒（m_poisonDmgAccum 累积到 kPoisonInterval）发 hungerUpdated（-1 饥饿，clamp≥0）+ poisonDamageTaken
+    //   （t690 独立信号：毒不走 fallDamageTaken → 不吃护甲减伤 / 不磨护甲耐久，机制等价 MC poison 绕过
+    //   盔甲；死因归 Generic（毒不算死亡原因，简化避免新增 DeathCause；与饥饿归零 Starvation 区分））。
+    //   中毒归零即解毒（时间耗尽）。
     if (m_mode == Survival) {
         if (m_poisonTimer > 0.0f) {
             m_poisonTimer -= float(dt);
@@ -5841,7 +5852,7 @@ void PlayerController::step(qreal dt)
             if (m_poisonDmgAccum >= kPoisonInterval) {
                 m_poisonDmgAccum -= kPoisonInterval;
                 if (m_hunger > 0) { --m_hunger; emit hungerUpdated(m_hunger); } // 毒掉饥饿（clamp≥0）
-                emit fallDamageTaken(1, PlayerState::Generic); // 毒掉血（复用 takeDamage 链；Generic 死因兜底）
+                emit poisonDamageTaken(1); // 毒掉血（t690 独立链：绕护甲，直走 takeDamage→damaged 红闪）
             }
             if (m_poisonTimer <= 0.0f) { m_poisonTimer = 0.0f; m_poisonDmgAccum = 0.0f; } // 定时解毒
         }
