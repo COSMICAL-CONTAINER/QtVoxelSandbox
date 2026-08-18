@@ -3257,6 +3257,14 @@ void PlayerController::placeBlock()
         //   → 前面恒 +X 固定方向，不随玩家朝向）。mesher（ChunkGeometry::tileFor）据 state 把 pumpkin_face
         //   贴到对应面（复用 chestFrontFace 解码）。造物（雪傀儡 / 铁傀儡）检测不读南瓜 state → 零影响。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
+    } else if (BlockRegistry::isRail(quint8(m_selectedBlock))) {
+        // t666 铁轨放置轴向 = 玩家面向方位轴（spec：「面向 ±Z → NS 直轨；±X → EW 直轨」；MC 实际按放置
+        //   上下文定轴，面向简化是接受的近似，见 blockregistry.h RailConn* 头注释）。无邻轨孤轨据此定轴
+        //   （state bit5 RailAxisEWFlag：置=EW / 清=NS；0 连接时 mesher 读本位选直轨方向）。有邻轨的新轨
+        //   连接（沿轴扩展 / 拐角）由 World::checkRailOnEdit 在放置后按 t666 规则集重算覆盖低 4 位（bit5
+        //   随轴守恒写回）—— 故此处只需写初始轴偏好，无需预读邻居。
+        const int hf = horizontalFacing() & 3; // 0=+X 1=-X 2=+Z 3=-Z（同 door/stairs 朝向编码）
+        placeState = (hf < 2) ? BlockRegistry::RailAxisEWFlag : quint8(0);
     } else if (m_selectedBlock == BlockRegistry::Leaves) {
         // t305 玩家放置的树叶标 PersistentLeafBit（持久，不参与自然衰减）—— 机制等价 MC 1.0「玩家放置的树叶
         //   不衰减」。worldgen 叶 state=0（衰减候选）；玩家叶 state=本 bit → decayLeavesAround 跳过 → 创造建筑
@@ -3410,13 +3418,22 @@ void PlayerController::placeBlock()
         const bool nz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz - 1));
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
     }
-    // t638 ③ 轨上放轨拒绝（spec「铁轨不能放在铁轨上」）：目标格已是铁轨族（普通 / 动力 / 探测）→ 拒
-    //   （不挥）。常规邻格放置下目标格通常非轨（瞄轨面 → 目标 = 轨上格 / 轨旁格），但 t638 选中框薄板化后
-    //   贴轨平扫的落格可能邻轨、以及流体排开分支的组合下仍可能同格 → 显式拒（机制等价 MC 1.0 轨不可
-    //   叠轨 / 同格互斥）。轨道连接 state 由 World::checkRailOnEdit 在放置后自动重算（家族互连）。
-    if (BlockRegistry::isRail(quint8(m_selectedBlock))
-        && BlockRegistry::isRail(m_world->blockAt(tx, ty, tz)))
-        return;
+    // t638 ③ 轨上放轨拒绝（spec「铁轨不能放在铁轨上」）+ t667 完整立方顶面支撑：
+    //   铁轨只能放在**完整方块顶面**（机制等价 MC rails 须全支撑块）。两重守卫（覆盖全部放置路径）：
+    //   ① 目标格已是铁轨族（普通 / 动力 / 探测）→ 拒（不挥）。常规邻格放置下目标格通常非轨（瞄轨面 →
+    //     目标 = 轨上格 / 轨旁格），但 t638 选中框薄板化后贴轨平扫的落格可能邻轨、以及流体排开分支的组
+    //     合下仍可能同格 → 显式拒（机制等价 MC 1.0 轨不可叠轨 / 同格互斥）。轨道连接 state 由
+    //     World::checkRailOnEdit 在放置后自动重算（家族互连）。
+    //   ② 目标格正下方 (tx,ty-1,tz) 须完整立方（isFullCube，同雪层 t554 支撑判定）→ 以下路径全被覆盖：
+    //     · 瞄铁轨顶面放轨（目标 = 轨上方 air 格、下方 = 轨）→ 拒 —— 修 t638 拒绝漏洞「轨上放轨仍可行」；
+    //     · 悬空 / 侧壁放轨（下方 Air / 非完整）→ 拒（不挥）；
+    //     · 耕地（0.9375 ≠ 满立方）→ 拒；薄雪层 / 半砖 / 楼梯等非完整立方顶面 → 拒。
+    //     （简化：「完整立方顶面 only」；MC 允许 rails 放 top-half slab 顶 —— 本工程统一不收，文档化。）
+    if (BlockRegistry::isRail(quint8(m_selectedBlock))) {
+        if (BlockRegistry::isRail(m_world->blockAt(tx, ty, tz))) return; // ① 同格已有轨 → 拒
+        const quint8 below = m_world->blockAt(tx, ty - 1, tz);
+        if (!BlockRegistry::isFullCube(below)) return; // ② 下方非完整立方支撑 → 拒（不挥）
+    }
     // t501 木梯放置预检（spec「须完整方块侧支撑」）：木梯贴**完整立方方块的侧面**（机制等价 MC 1.0 ladder
     //   须贴实体方块面）。两重守卫：
     //   ① 必须侧面贴墙（命中面法线 ny==0）—— 顶/底面非合法贴墙方向，玩家点顶/底放梯 → 拒（不挥）。法线

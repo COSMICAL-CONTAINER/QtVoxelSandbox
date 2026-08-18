@@ -39,8 +39,16 @@ struct PartialLightCtx {
 //   仅 fence 用（栅栏横档是否画取决于邻格是否为栅栏 / 实体方块）；其余异形方块忽略本结构。
 //   纯数据 POD；越界邻居（chunk 边界外）由 chunkgeometry 经 world.blockAt 跨 chunk 路由取真值（同面剔除
 //   邻居查询路径），故栅栏连接跨 chunk 边界亦正确（边界格破/放已标邻 chunk 脏，触发邻居栅栏重网格化）。
+//   t667 铁轨坡度：追加 4 向「邻轨高度差」（+1 = 邻轨在本格上方 1 格 / 0 = 同层 / -1 = 下方 1 格 /
+//   INT_MIN = 该向无轨（铁轨族缺省仅填本结构）。PartialBlockGeometry Rail case 直轨段据此把 quad 的
+//   对应端抬高到 1+yr（爬坡斜段）；同层端保持 yr。邻轨在下方（-1）时本格不拉低 → 斜段由**低端**轨自己
+//   抬（一粒一画，低轨画爬坡、高轨平铺，避免双重几何）。仅在 blockId 为铁轨族时由 chunkgeometry 填。
 struct PartialNeighborCtx {
     quint8 posX, negX, posZ, negZ;  // +X / -X / +Z / -Z 水平邻居方块 id（air=0；越界=0=空气）
+    int railDeltaPx = INT_MIN;      // t667 +X 邻轨高度差（+1 上 / 0 同 / -1 下 / INT_MIN 无轨）
+    int railDeltaNx = INT_MIN;      // t667 -X
+    int railDeltaPz = INT_MIN;      // t667 +Z
+    int railDeltaNz = INT_MIN;      // t667 -Z
 };
 
 // 不完整方块异形几何（t133 基础设施）：为 slab/stairs/fence/door/trapdoor/pressure plate 等「非

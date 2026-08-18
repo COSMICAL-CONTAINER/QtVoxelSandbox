@@ -1727,19 +1727,124 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, q
     return out;
 }
 
-// t565 铁轨连接 state 计算（见头注释 RailConnPx/Nx/Pz/Nz）：4 向水平邻块 id 入参，邻为铁轨 → 置对应
-//   连接位。t638：连接判定扩为 isRail 家族（普通 / 动力 / 探测轨互连——机制等价 MC 1.0 三种轨同轨互连，
-//   动力轨嵌普通轨线路照样通电加速）。纯函数单一权威 —— placeBlock（放置时算 placeState）/
-//   World::checkRailOnEdit（破邻复检重算）/ placeMineshaft（worldgen 铺轨后统一算）共用，杜绝各处自写
-//   连接判定漂移。
-quint8 BlockRegistry::railConnections(quint8 px, quint8 nx, quint8 pz, quint8 nz)
+// t565 铁轨连接 state 计算（见头注释 RailConnPx/Nx/Pz/Nz + t666 连接规则集）：自格 id（普通/动力/探测
+//   判定）+ 当前 state（轴偏好） + 4 向三高探针（同层 / 上 / 下 —— 坡度邻轨存在性，t667）→ 新连接位。
+//   纯函数单一权威 —— World::checkRailOnEdit（破邻复检重算）/ placeMineshaft（worldgen 铺轨后统一算）
+//   共用，杜绝各处自写连接判定漂移。
+//
+// t666 规则集实现（与头注释逐条对应）：
+//   ① 拐角形成（普通轨 only，唯一允许的重新定向）：恰好 2 个同层普通轨（id==Rail）在互相垂直的两向、
+//      且各自反向同层±上下均无轨 → 返那两向（拐角 2 位）。动力 / 探测轨永远不拐角（含与普通轨垂直配对）。
+//   ② 非普通轨（动力 / 探测）：直线投影 —— 优先「对向贯穿轴」；否则保持既有轴偏好向的单端连接；
+//      否则任取单端；均无 → 0。绝不产生垂直 2 位 / 十字。
+//   ③ 普通轨：贯穿轴优先（保持既有轴偏好：既有对向双连接 / 既有单向 / 轴偏好位 bit5）；
+//      对轴仅在**两端都有轨**时并入（十字）；单端对轴 stub 永不并入（真 MC：直轨侧旁垂直轨不互连成 T）。
+//   ④ 0 连接 → 0（轴偏好位由调用方按 curState 守恒写回 —— 孤轨轴向保活）。
+quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
+                                      const RailProbe &px, const RailProbe &nx,
+                                      const RailProbe &pz, const RailProbe &nz)
 {
-    quint8 con = 0;
-    if (isRail(px)) con |= RailConnPx;
-    if (isRail(nx)) con |= RailConnNx;
-    if (isRail(pz)) con |= RailConnPz;
-    if (isRail(nz)) con |= RailConnNz;
-    return con;
+    // 存在性：三高任一为铁轨族 → 该方向有轨（坡度邻居也算）。普通轨存在性：仅同层 id==Rail
+    // （拐角配对限定同层普通轨，机制等价 MC 拐角不爬坡）。
+    const auto anyRail = [](const RailProbe &p) {
+        return isRail(p.same) || isRail(p.up) || isRail(p.down);
+    };
+    const bool hasPX = anyRail(px), hasNX = anyRail(nx);
+    const bool hasPZ = anyRail(pz), hasNZ = anyRail(nz);
+    const bool nPX = (px.same == Rail), nNX = (nx.same == Rail);
+    const bool nPZ = (pz.same == Rail), nNZ = (nz.same == Rail);
+    const int nNormal = int(nPX) + int(nNX) + int(nPZ) + int(nNZ);
+
+    quint8 n = 0;
+    if (hasPX) n |= RailConnPx;
+    if (hasNX) n |= RailConnNx;
+    if (hasPZ) n |= RailConnPz;
+    if (hasNZ) n |= RailConnNz;
+    const bool noNeighbors = (n == 0);
+    if (noNeighbors) return 0; // 无任何邻轨 → 0 连接（轴偏好 bit5 由调用方守恒写回）
+
+    const bool isNormal = (selfId == Rail);
+
+    // ① 拐角：普通轨 && 恰好 2 同层普通轨 && 垂直两向 && 各自反向无轨（三高都无）。
+    if (isNormal && nNormal == 2) {
+        if (nPX && nPZ && !hasNX && !hasNZ) return quint8(RailConnPx | RailConnPz);
+        if (nPX && nNZ && !hasNX && !hasPZ) return quint8(RailConnPx | RailConnNz);
+        if (nNX && nPZ && !hasPX && !hasNZ) return quint8(RailConnNx | RailConnPz);
+        if (nNX && nNZ && !hasPX && !hasPZ) return quint8(RailConnNx | RailConnNz);
+    }
+
+    // 轴偏好（直轨优先保持）：既有对向 X 连接 → EW；对向 Z → NS；单 X 位 → EW；单 Z 位 → NS；
+    // 无连接 → bit5 轴偏好位（孤轨放置轴向）。
+    const quint8 c = curState & 0x0F;
+    bool ewPref;
+    if ((c & (RailConnPx | RailConnNx)) == (RailConnPx | RailConnNx)) ewPref = true;
+    else if ((c & (RailConnPz | RailConnNz)) == (RailConnPz | RailConnNz)) ewPref = false;
+    else if (c & (RailConnPx | RailConnNx)) ewPref = true;
+    else if (c & (RailConnPz | RailConnNz)) ewPref = false;
+    else ewPref = (curState & RailAxisEWFlag) != 0;
+
+    // ② 非普通轨（动力 / 探测）：直线投影（永不拐角 / 十字）。
+    if (!isNormal) {
+        const bool bothX = hasPX && hasNX, bothZ = hasPZ && hasNZ;
+        if (bothX) return quint8(RailConnPx | RailConnNx);         // 对向双 X → EW 直线
+        if (bothZ) return quint8(RailConnPz | RailConnNz);         // 对向双 Z → NS 直线
+        if (ewPref && (hasPX || hasNX)) return hasPX ? quint8(RailConnPx) : quint8(RailConnNx);
+        if (!ewPref && (hasPZ || hasNZ)) return hasPZ ? quint8(RailConnPz) : quint8(RailConnNz);
+        if (hasPX) return quint8(RailConnPx);
+        if (hasNX) return quint8(RailConnNx);
+        if (hasPZ) return quint8(RailConnPz);
+        if (hasNZ) return quint8(RailConnNz);
+        return 0;
+    }
+
+    // ③ 普通轨非拐角：贯穿轴 + 对轴成双并入。
+    const bool bothX = hasPX && hasNX, bothZ = hasPZ && hasNZ;
+    bool throughX;
+    if (bothX && bothZ) return quint8(RailConnPx | RailConnNx | RailConnPz | RailConnNz); // 十字
+    if (bothX) throughX = true;
+    else if (bothZ) throughX = false;
+    else if (ewPref && (hasPX || hasNX)) throughX = true;  // 单向 X（含既有轴偏）
+    else if (!ewPref && (hasPZ || hasNZ)) throughX = false; // 单向 Z
+    else throughX = bothX; // 防御（不可达：n != 0）
+
+    quint8 r = 0;
+    if (throughX) {
+        if (hasPX) r |= RailConnPx;
+        if (hasNX) r |= RailConnNx;
+    } else {
+        if (hasPZ) r |= RailConnPz;
+        if (hasNZ) r |= RailConnNz;
+    }
+    // 对轴并入条件：**两端都有轨**（背靠背 → 十字贯穿）。单端对轴 stub 不并 —— 既有直轨不被
+    // 垂直单邻带歪（用户实测「拐角/旁放轨把直轨带歪」的根因修复）。
+    if (throughX) {
+        if (hasPZ && hasNZ) { r |= RailConnPz; r |= RailConnNz; }
+    } else {
+        if (hasPX && hasNX) { r |= RailConnPx; r |= RailConnNx; }
+    }
+    // ④ 兜底：贯穿轴为空（fresh 轨旁只垂直单 stub 且轴偏相反）→ 若轴偏好向有空邻则取该向单端，
+    //   否则取任一单端（垂直 stub 也要能视觉/物理接上：场中新放轨没理由拒绝唯一邻居）。
+    if (r == 0) {
+        if (ewPref && (hasPX || hasNX))
+            r = hasPX ? quint8(RailConnPx) : quint8(RailConnNx);
+        else if (!ewPref && (hasPZ || hasNZ))
+            r = hasPZ ? quint8(RailConnPz) : quint8(RailConnNz);
+        else if (hasPX) r = RailConnPx;
+        else if (hasNX) r = RailConnNx;
+        else if (hasPZ) r = RailConnPz;
+        else if (hasNZ) r = RailConnNz;
+    }
+    return r;
+}
+
+// t667 该向邻轨高度差（实现见头注释）：同层轨 → 0（平面连接优先）；同层无上层有 → +1；上 / 同层皆无下层有 →
+//   -1；三者皆无 → INT_MIN。mesher（chunkgeometry 填 railDelta*) / 矿车（MinecartManager 钉轨面重推）共用。
+int BlockRegistry::railProbeDelta(const RailProbe &p)
+{
+    if (isRail(p.same)) return 0;
+    if (isRail(p.up)) return 1;
+    if (isRail(p.down)) return -1;
+    return INT_MIN;
 }
 
 // t225 箱子前面（锁面）所朝 Face（state 低 2 位解码，与 horizontalFacing 同源 0=+X 1=-X 2=+Z 3=-Z）。

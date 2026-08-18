@@ -574,70 +574,92 @@ int PartialBlockGeometry::append(
     case BlockRegistry::DetectorRail: { // t638 探测铁轨（同上；矿车驶过 state bit0 → 通电视觉贴图）
         // t484 铁轨「贴地薄板」模型：**一片水平双面 quad 贴 cell 底部**（y≈1/16，刚好浮于地面之上）—— 与睡莲
         //   横向浮叶（LilyPad）同源几何，区别仅贴图（rail 瓦片 = 透明底 + 棕色枕木 + 灰铁双轨）。
-        //   t565 连接 / 转弯（机制等价 MC 1.0 rail 自动连接 + 拐角）：state 4 位 = 水平 4 向连接
-        //   （RailConnPx/Nx/Pz/Nz；placeBlock / World::checkRailOnEdit 与邻轨互连时写入）。据连接位选形态：
-        //     - NS（默认 / 仅 ±Z 连接 / 0-1 连接且唯一连接向 Z）：整片 quad + tile 121（直轨沿 Z；贴图内
-        //       双轨为纵向线）→ 铺满 cell，UV 标准映射（u→x、v→z）。
-        //     - EW（仅 ±X 连接 / 0-1 连接且唯一连接向 X）：同 tile 121，但角点绕序旋转 90°（u→z、v→x）→
-        //       贴图旋转、双轨沿线 X 向（机制等价 MC rail NS/EW 两种直轨形态，一张贴图两用省瓦片）。
-        //     - 拐角（邻向 2 连接，如 +X+Z）：tile 136（贴图语义 = 轨自南(+Z)进入向左(-X)弯出）。四向
-        //       拐角经「角点绕序旋转 / 镜像」把该贴图映射到四个象限（一张贴图四用）。
-        //     - 十字（3+ 连接）：tile 137（南北 + 东西双轨叠交 + 中央方枕木）。
-        //   0 连接（孤轨）默认 NS（state=0 兜底，旧存档 / 防御）。不做邻居剔除（透明 + 薄板，同睡莲；
-        //   Rail solid=false）。材质 alphaCutoff:0.5 丢弃透明底 → 仅轨像素显。
-        // t638 动力 / 探测轨差异：(a) 贴图——断常态 GoldenRail=157(rail_golden) / DetectorRail=158
-        //   (rail_detector)（各 def sideTile；tileIndex(PosX) 取本方块瓦片）；探测轨 state bit0
-        //   （DetectorRailStateOnFlag）→ 通电视觉 160(rail_detector_on) 亮红（机制等价 MC 1.0 detector
-        //   rail 矿车压住通电换贴图；真信号输出留红石大轮）。(b) **直线 only**——动力 / 探测轨无拐角 /
-        //   十字形态（机制等价 MC 1.0 golden/detector rail 不能转弯）：拐角 / 十字连接位一律按「X 向优先」
-        //   降级为 EW 直线（矿车经 pickTrackStep 按 wish 在连接位里选向，直线渲染下拐角连接仍可通行——
-        //   视觉为直线交叉叠加，可接受降级；spec「放置/连接同普通轨（无转弯）」）。普通 Rail 拐角 / 十字不变。
+        //  t666 形状重写（规则集见 blockregistry.h RailConn* 头注释；落地用户实测症状群 ①②③④）：
+        //     → 0 连接：直轨沿「轴偏好位」RailAxisEWFlag（bit5，放置时按玩家面向写：EW → 贴图旋转 90°、
+        //       NS → 标准）——修症状①「放置朝向与玩家面向无关（恒 Z 轴）」。旧存档 state=0 → NS 兜底。
+        //     → 1 连接 / 对向 2（±X 或 ±Z）：直轨（EW 时贴图旋转 90°，tile 121 一张两用，机制等价 MC rail
+        //       NS/EW 两种直轨形态）。
+        //     → 邻向 2 连接（恰好 1 X + 1 Z）：**普通轨（id==Rail）only** → tile 136 拐角（四象限 UV 变换，
+        //       验证见下）；动力 / 探测轨永不拐角 / 十字（straightOnly，机制等价 MC golden/detector rail 无
+        //       转弯形态）→ 降级 X 向直线。t666 规则集②已保证这类连接位对非普通轨不产生，此直落仅防御。修症状④。
+        //     → 3/4 连接：普通轨 → tile 137 十字 / T（T 以十字瓦片近似，机制等价 MC rail crossing）。
+        //   t667 坡度（机制等价 MC 1.0 铁轨爬坡；渲染约定「低端画坡、高端平铺」）：
+        //   直轨读本 cell 的 nb.railDelta*（chunkgeometry 按三高探针填的邻轨高度差）——quad 对应端边抬高 1 格
+        //   成斜段（如 +X 邻轨升 1 → quad 的 +X 端 y = yr+1），同层端保持 yr（斜坡跨整 cell 由低端轨一格画完）；
+        //   高端轨 delta=-1 → max(δ,0)=0 不掏低 → 平铺（防边界双重几何：斜段已在低端轨画过）。拐角 / 十字 /
+        //   0 连接无坡（MC 拐角不爬坡）。矿车 Y 沿同公式重推（MinecartManager 钉轨面读同一 railProbeDelta），
+        //   渲染几何与矿车高度严格一致。材质 alphaCutoff:0.5 丢弃透明底 → 仅轨像素显（Rail solid=false）。
         constexpr float yr  = 1.0f / 16.0f;  // 铁轨厚度（cell 底以上 1/16，贴地板防 z-fight）
         int railTile = BlockRegistry::tileIndex(blockId, BlockRegistry::PosX); // 121/157/158（各自 def sideTile）
         if (blockId == BlockRegistry::DetectorRail && (state & BlockRegistry::DetectorRailStateOnFlag))
             railTile = 160; // t638 探测轨通电视觉（矿车驶过 bit0 → rail_detector_on 亮红）
         if (blockId == BlockRegistry::GoldenRail && (state & BlockRegistry::GoldenRailStateOnFlag))
             railTile = 159; // t658 动力轨通电贴图（电力驱动 bit4 → rail_golden_on 亮金轨 + 亮红连接点；t638 留图集备用瓦片的消费方）
-        const bool straightOnly = (blockId != BlockRegistry::Rail); // t638 动力 / 探测轨直线 only（无拐角 / 十字）
-        const quint8 con = state;
+        const bool straightOnly = (blockId != BlockRegistry::Rail); // 动力 / 探测轨直线 only（无拐角 / 十字）
+        const quint8 con = quint8(state & 0x0F); // 形状只看低 4 位连接（bit5 轴偏好 / bit4 通电不参与）
         const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
         const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
         const bool cpz = (con & BlockRegistry::RailConnPz) != 0;
         const bool cnz = (con & BlockRegistry::RailConnNz) != 0;
         const int nConn = int(cpx) + int(cnx) + int(cpz) + int(cnz);
+        // 坡高（直轨专用）：把 nb 里该向的邻轨高度差折算成 quad 端边抬高量（只抬 δ>0 不掏 δ≤0 —— 高端平铺）。
+        //   fx/fz ∈ [0,1] 表示端边在该轴上的位置（+X 端 fx=1 / -X 端 fx=0；+Z 端 fz=1 / -Z 端 fz=0）。
+        const auto riseAtX = [&](float fx) {
+            float r = 0.0f;
+            if (nb.railDeltaPx > 0) r += float(nb.railDeltaPx) * fx;
+            if (nb.railDeltaNx > 0) r += float(nb.railDeltaNx) * (1.0f - fx);
+            return r;
+        };
+        const auto riseAtZ = [&](float fz) {
+            float r = 0.0f;
+            if (nb.railDeltaPz > 0) r += float(nb.railDeltaPz) * fz;
+            if (nb.railDeltaNz > 0) r += float(nb.railDeltaNz) * (1.0f - fz);
+            return r;
+        };
         // 水平 quad 通用：BL→BR→TR→TL 四角（UV (0,0)(1,0)(1,1)(0,1)；pushCrossQuad 内部固定该映射）。
         //   NS（标准）：u→x、v→z —— (x,z) = (0,0)(1,0)(1,1)(0,1)。
         //   EW（旋转 90°）：u→z、v→x —— (x,z) = (0,0)(0,1)(1,1)(1,0)。
-        //   拐角镜像：以「南进西出」贴图为基准（v=1 是贴图底行 = 南入口侧），四象限经轴翻转映射。
-        const auto pushRail = [&](float y, int tileIdx,
-                                  float ax0, float az0, float ax1, float az1,
-                                  float ax2, float az2, float ax3, float az3) {
+        //   拐角镜像：以「南进西出」贴图为基准（tile 136 绘制语义：v=1 贴图底行 = 南入口侧、u=0 左列 = 西出口
+        //   侧；t620 已把 pack 右转弯贴图镜像成左转基准）。四象限经轴翻转映射，轨两端恰落两个连接向上。
+        const auto pushRailQuad = [&](float y0y, float y1y, float y2y, float y3y, int tileIdx,
+                                      float ax0, float az0, float ax1, float az1,
+                                      float ax2, float az2, float ax3, float az3) {
             pushCrossQuad(verts, idx, lx, ly, lz,
-                          ax0, y, az0,  ax1, y, az1,  ax2, y, az2,  ax3, y, az3,
+                          ax0, y0y, az0,  ax1, y1y, az1,  ax2, y2y, az2,  ax3, y3y, az3,
                           tileIdx, light, tileW, hx, hy, v0, v1);
         };
+        const auto pushRailFlat = [&](int tileIdx, float ax0, float az0, float ax1, float az1,
+                                      float ax2, float az2, float ax3, float az3) {
+            pushRailQuad(yr, yr, yr, yr, tileIdx, ax0, az0, ax1, az1, ax2, az2, ax3, az3);
+        };
         if (!straightOnly && nConn >= 3) {
-            // 十字：tile 137 整片。
-            pushRail(yr, 137, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
+            // 十字 / T（3+ 连接）：tile 137 整片（T 以十字瓦片近似）。无坡。
+            pushRailFlat(137, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
         } else if (!straightOnly && nConn == 2 && ((cpx || cnx) && (cpz || cnz))) {
-            // 拐角（一个 X 向 + 一个 Z 向连接）。贴图基准（tile 136 贴图坐标）：v=1（UV 底行）= 南（+Z）入口侧、
-            //   u=0（UV 左列）= 西（-X）出口侧 → 贴图语义 = 轨自南进入向左（西）弯出 = 基准形态连接 {+Z,-X}。
-            //   四象限经轴翻转映射（BL=(u0,v0) BR=(u1,v0) TR=(u1,v1) TL=(u0,v1)，世界角按翻转后 u/v 轴取）：
-            //     {+Z,-X} 基准 NS 序（u→x、v→z）；{+Z,+X} 东西镜像（u 翻）；{-Z,-X} 南北镜像（v 翻）；
-            //     {-Z,+X} 双翻（180°）。轨两端恰落两个连接向上（镜像不改拓扑，只改贴图朝向）。
-            if (cpz && cnx)       pushRail(yr, 136, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
-            else if (cpz && cpx)  pushRail(yr, 136, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f);
-            else if (cnz && cnx)  pushRail(yr, 136, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f);
-            else                  pushRail(yr, 136, 1.f, 1.f, 0.f, 1.f, 0.f, 0.f, 1.f, 0.f);
-        } else if (nConn == 1 || (nConn >= 2 && (cpx || cnx))
-                   || (straightOnly && nConn >= 2)) {
-            // EW 直轨：仅 X 向连接（1 个或对向 2 个）→ 贴图旋转 90°（u→z、v→x）。
-            //   t638 straightOnly：动力 / 探测轨的拐角 / 十字连接位也降级走直线（X 向优先——机制等价 MC
-            //   动力轨无转弯；普通轨该条件不触发（上方两分支已吃掉拐角 / 十字））。
-            pushRail(yr, railTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f);
+            // 拐角（恰好 1 X + 1 Z 连接，仅普通轨）。tile 136 四象限映射（基准确认：tile 136 = 轨自南(+Z)进、
+            //   向西(-X)弯出；u 翻 = 东西镜像、v 翻 = 南北镜像、双翻 = 180°。验证表见 t666 commit 报告：
+            //     {+Z,-X}（南进→西出）基准无翻；{+Z,+X}（南进→东出）u 翻；{-Z,-X}（北进→西出）v 翻；
+            //     {-Z,+X}（北进→东出）双翻 —— 与既有 t565（已目测）四象限映射同构，t666 只重写形状选择）。
+            if (cpz && cnx)       pushRailFlat(136, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // 南→西
+            else if (cpz && cpx)  pushRailFlat(136, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f); // 南→东
+            else if (cnz && cnx)  pushRailFlat(136, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f); // 北→西
+            else                  pushRailFlat(136, 1.f, 1.f, 0.f, 1.f, 0.f, 0.f, 1.f, 0.f); // 北→东
         } else {
-            // NS 直轨（默认：0 连接 / 仅 Z 向连接 / 对向 ±Z）。
-            pushRail(yr, railTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
+            // 直轨：EW（X 向连接，或 0 连接 + 轴偏好位 → 贴图旋转 90° u→z、v→x）；NS（Z 向连接 / 0 连接默认
+            //   → 标准）。straightOnly 的拐角 / 十字连接位降级走「X 向优先」（t666 规则集②下不会产生，防御）。
+            const bool ew = (cpx || cnx) || (nConn == 0 && (state & BlockRegistry::RailAxisEWFlag) != 0);
+            if (ew) {
+                // EW 直轨：quad 角 BL(0,0) BR(0,1) TR(1,1) TL(1,0)——x-local：p0/p1=0（-X 端）、p2/p3=1（+X 端）。
+                //   t667 坡：+X 端抬高 riseAtX(1)、-X 端 riseAtX(0)。
+                pushRailQuad(yr + riseAtX(0.f), yr + riseAtX(0.f),
+                             yr + riseAtX(1.f), yr + riseAtX(1.f),
+                             railTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f);
+            } else {
+                // NS 直轨：quad 角 BL(0,0) BR(1,0) TR(1,1) TL(0,1)——z-local：p0/p1=0（-Z 端）、p2/p3=1（+Z 端）。
+                pushRailQuad(yr + riseAtZ(0.f), yr + riseAtZ(0.f),
+                             yr + riseAtZ(1.f), yr + riseAtZ(1.f),
+                             railTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
+            }
         }
         break;
     }

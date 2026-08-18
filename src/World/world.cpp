@@ -1859,40 +1859,73 @@ void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
 }
 
-// t565 铁轨连接重算（见 world.h 头注释）：读 (x,y,z) 水平 4 邻块 id → BlockRegistry::railConnections
-//   （单一权威连接计算）→ 与当前 state 不同则静默直写新 state（m_chunks.setBlock(id,state) 标脏；不经
-//   World::setBlock → 无重入 / 无破放信号 —— 连接变化是系统派生态非玩家动作）。非铁轨格 / state 未变 → no-op。
+// t565 铁轨连接重算（见 world.h 头注释）：读 (x,y,z) 的 4 向 × 3 高（同层 / 上 / 下 —— 坡度邻轨存在性，
+//   t667）邻块 id → BlockRegistry::railConnections（单一权威，t666 规则集）→ 与当前 state 不同则静默直写
+//   新 state（m_chunks.setBlock(id,state) 标脏；不经 World::setBlock → 无重入 / 无破放信号 —— 连接变化是
+//   系统派生态非玩家动作）。非铁轨格 / state 未变 → no-op。
 //   t638：轨判定扩 isRail 家族（普通 / 动力 / 探测轨互连——机制等价 MC 1.0 三种轨同轨互连）；写入保留
-//   探测轨的 bit4 通电视觉位（DetectorRailStateOnFlag——只重算低 4 位连接，不清「被压过」标记）。
+//   探测轨 / 动力轨的 bit4 通电视觉位（DetectorRailStateOnFlag / GoldenRailStateOnFlag——只重算低 4 位连接，
+//   不清「被压过」标记）。t666：轴偏好位 bit5（RailAxisEWFlag）随当前轴守恒写回（0 连接保孤轨轴向；
+//   有连接时镜像当前轴 —— 见 railConnections 头注释规则）。
 void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return;
     const quint8 rb = m_chunks.blockAt(x, y, z);
     if (!BlockRegistry::isRail(rb)) return;
-    quint8 con = BlockRegistry::railConnections(
-        m_chunks.blockAt(x + 1, y, z), m_chunks.blockAt(x - 1, y, z),
-        m_chunks.blockAt(x, y, z + 1), m_chunks.blockAt(x, y, z - 1));
-    // t638：探测轨 bit4（通电视觉）不参与连接 —— 合并回写（连接重算不清「被压过」亮态标记）。
-    if (rb == BlockRegistry::DetectorRail)
-        con = quint8(con | (m_chunks.stateAt(x, y, z) & BlockRegistry::DetectorRailStateOnFlag));
-    if (con == m_chunks.stateAt(x, y, z)) return; // 连接未变 → 不写（防无谓标脏）
+    const auto probe = [&](int dx, int dz) -> BlockRegistry::RailProbe {
+        return { m_chunks.blockAt(x + dx, y, z + dz),
+                 m_chunks.blockAt(x + dx, y + 1, z + dz),
+                 m_chunks.blockAt(x + dx, y - 1, z + dz) };
+    };
+    const quint8 curState = m_chunks.stateAt(x, y, z);
+    quint8 con = BlockRegistry::railConnections(rb, curState,
+                                                probe(1, 0), probe(-1, 0),
+                                                probe(0, 1), probe(0, -1));
+    // t638：探测轨 bit4（通电视觉）/ t658 动力轨 bit4（通电贴图）不参与连接 —— 合并回写（连接重算不清
+    //   「被压过」/「通电」亮态标记）。t666：轴偏好位 bit5 守恒写回（孤轨轴向保活）。
+    const quint8 preserved = quint8(curState
+        & (BlockRegistry::RailAxisEWFlag
+           | (rb == BlockRegistry::DetectorRail ? BlockRegistry::DetectorRailStateOnFlag : 0)
+           | (rb == BlockRegistry::GoldenRail ? BlockRegistry::GoldenRailStateOnFlag : 0)));
+    con = quint8(con | preserved);
+    // t666 轴偏好位镜像当前轴（有连接时）：直轨最后形态 = 孤轨形态（MC 轨断连后保留 metadata 语义）。
+    //   拐角（2 垂直位）不算轴 → 保持现有偏好位不变。
+    if ((con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) ==
+        (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx))
+        con = quint8(con | BlockRegistry::RailAxisEWFlag);      // 贯穿 X → EW 偏好
+    else if ((con & (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz)) ==
+             (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz))
+        con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // 贯穿 Z → NS 偏好
+    if (con == curState) return; // 连接未变 → 不写（防无谓标脏）
     m_chunks.setBlock(x, y, z, rb, con); // 静默直写 + 标脏（含边界邻接）
     // 铁轨族 solid=false 不遮光 → 光场无变化，免 recomputeLightAround。
     outChanged = true;
 }
 
 // t565 setBlock 编辑后铁轨连接复检（见 world.h 头注释；机制等价 MC 1.0 rail 放 / 破自动连接 / 断开）。
-//   任何编辑都可能改变「本格 Rail 自身 + 水平 4 邻 Rail」的连接位（放 Rail → 互连；破 Rail → 邻轨断向）。
-//   重算这 5 格（本格 + 4 邻中的 Rail），有实际 state 写入才 1 次 worldChanged（批量收口）。静默直写不重入。
+//   任何编辑都可能改变「本格 Rail 自身 + 邻域 Rail」的连接位（放 Rail → 互连；破 Rail → 邻轨断向）。
+//   重算范围 = 本格 + 四向各 3 高（同层 / 上 / 下）—— t667 坡度引入后，置 / 破轨会改变邻列 ±1 高轨的
+//   连接（新轨低 1 格 → 上方台阶轨新增下坡连接位，反之亦然），故 13 格（本格 + 4 向 × 3 高）都要复检。
+//   有实际 state 写入才 1 次 worldChanged（批量收口）。静默直写不重入。
 void World::checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
     Q_UNUSED(oldId); Q_UNUSED(id); // 任何编辑（放 / 破任意方块）都可能改变邻轨连接 → 不筛编辑类型（简单正确）
     bool changed = false;
-    recomputeRailConnections(x, y, z, changed);          // 本格若是 Rail → 重算自身连接
-    recomputeRailConnections(x + 1, y, z, changed);      // 4 邻 Rail 回连 / 断连
-    recomputeRailConnections(x - 1, y, z, changed);
-    recomputeRailConnections(x, y, z + 1, changed);
-    recomputeRailConnections(x, y, z - 1, changed);
+    #define VO_RECOMPUTE_RC(XX, YY, ZZ) recomputeRailConnections(XX, YY, ZZ, changed)
+    VO_RECOMPUTE_RC(x, y, z);            // 本格若是 Rail → 重算自身连接
+    VO_RECOMPUTE_RC(x + 1, y, z);        // +X 列（同 / 上 / 下 3 高）Rail 回连 / 断连
+    VO_RECOMPUTE_RC(x + 1, y + 1, z);
+    VO_RECOMPUTE_RC(x + 1, y - 1, z);
+    VO_RECOMPUTE_RC(x - 1, y, z);        // -X 列
+    VO_RECOMPUTE_RC(x - 1, y + 1, z);
+    VO_RECOMPUTE_RC(x - 1, y - 1, z);
+    VO_RECOMPUTE_RC(x, y, z + 1);        // +Z 列
+    VO_RECOMPUTE_RC(x, y + 1, z + 1);
+    VO_RECOMPUTE_RC(x, y - 1, z + 1);
+    VO_RECOMPUTE_RC(x, y, z - 1);        // -Z 列
+    VO_RECOMPUTE_RC(x, y + 1, z - 1);
+    VO_RECOMPUTE_RC(x, y - 1, z - 1);
+    #undef VO_RECOMPUTE_RC
     if (changed) {
         emit worldChanged();        // 驱动 mesh 重建（铁轨形态切换）
         m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
@@ -4959,13 +4992,19 @@ void World::placeMineshaft()
 
             // t565 ④ 铁轨连接统一重算（直 / 拐角 / 十字形态由邻轨互连自动得出；与运行期 checkRailOnEdit
             //   同一权威 BlockRegistry::railConnections）。worldgen 直写不 emit（generate 末尾统一 worldChanged）。
+            //   t666/t667：连接计算器改三高探针签名 —— worldgen 矿井轨全同层（无坡度）→ 上 / 下置 Air；
+            //   curState 传 0（worldgen 新铺轨无既有轴偏好）；返回值只留低 4 位连接（无 bit4/bit5 语义）。
             for (const auto &rc : railCells) {
+                const int rx = rc[0], ry = rc[1], rz = rc[2];
+                const auto probe = [&](int dx, int dz) -> BlockRegistry::RailProbe {
+                    return { m_chunks.blockAt(rx + dx, ry, rz + dz),
+                             m_chunks.blockAt(rx + dx, ry + 1, rz + dz),
+                             m_chunks.blockAt(rx + dx, ry - 1, rz + dz) };
+                };
                 const quint8 con = BlockRegistry::railConnections(
-                    m_chunks.blockAt(rc[0] + 1, rc[1], rc[2]),
-                    m_chunks.blockAt(rc[0] - 1, rc[1], rc[2]),
-                    m_chunks.blockAt(rc[0], rc[1], rc[2] + 1),
-                    m_chunks.blockAt(rc[0], rc[1], rc[2] - 1));
-                m_chunks.setBlock(rc[0], rc[1], rc[2], BlockRegistry::Rail, con);
+                    BlockRegistry::Rail, 0,
+                    probe(1, 0), probe(-1, 0), probe(0, 1), probe(0, -1));
+                m_chunks.setBlock(rx, ry, rz, BlockRegistry::Rail, quint8(con & 0x0F));
             }
             ++placed;
         }

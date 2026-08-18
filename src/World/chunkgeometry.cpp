@@ -587,12 +587,27 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     // t209 栅栏连接：查 4 向水平邻居 id（跨 chunk 经 blockAtWorld 路由，边界邻居正确）。
                     //   仅 fence 读本上下文；其余异形方块忽略。边界格破/放已标邻 chunk 脏（ChunkManager::setBlock
                     //   在 lx/lz 贴边时标邻接脏）→ 跨 chunk 栅栏连接随邻居重网格化自动更新。
-                    const PartialNeighborCtx nctx{
+                    //   t667 铁轨族（普通 / 动力 / 探测）：追加填 4 向三高（同 / 上 / 下）邻轨高度差
+                    //   （railProbeDelta 单一权威，同 World::recomputeRailConnections 的探针形态）→
+                    //   PartialBlockGeometry Rail case 直轨段据此把 quad 端边抬高画坡度（低端画坡高端平铺）。
+                    PartialNeighborCtx nctx{
                         blockAtWorld(wx + 1, ly, wz),
                         blockAtWorld(wx - 1, ly, wz),
                         blockAtWorld(wx, ly, wz + 1),
                         blockAtWorld(wx, ly, wz - 1),
                     };
+                    if (BlockRegistry::isRail(b)) {
+                        const auto dprobe = [&](int dx, int dz) {
+                            return BlockRegistry::railProbeDelta(
+                                { blockAtWorld(wx + dx, ly, wz + dz),
+                                  blockAtWorld(wx + dx, ly + 1, wz + dz),
+                                  blockAtWorld(wx + dx, ly - 1, wz + dz) });
+                        };
+                        nctx.railDeltaPx = dprobe(1, 0);
+                        nctx.railDeltaNx = dprobe(-1, 0);
+                        nctx.railDeltaPz = dprobe(0, 1);
+                        nctx.railDeltaNz = dprobe(0, -1);
+                    }
                     PartialBlockGeometry::append(verts, idx, lx, ly, lz, b, st,
                                                  lctx, nctx, tileW, hx, hy, v0, v1);
                 }

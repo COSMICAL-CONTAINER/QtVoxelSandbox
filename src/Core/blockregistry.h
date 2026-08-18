@@ -1509,6 +1509,14 @@ public:
     //       tools/build_rail_family.py 姊妹脚本自绘；pack {170→redstone_torch_off.png}。
     static constexpr int AtlasTileCount = 171;
 
+    // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
+    //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、
+    //   blockcube kHx/kHy 的 0.5px 折算）四方同读本常量 —— 消除历史上「瓦片尺寸魔数多份、改一处漏一份」
+    //   的回归类（同 AtlasTileCount 单一权威的既有教训）。UV 数学按瓦片数分数（1/AtlasTileCount）不随
+    //   像素尺寸变；只有半纹素内缩（0.5px → 1/图集总像素）随 kAtlasTilePx 变。流体条带帧像素独立
+    //   （kFluidStripFramePx=16 不动 —— 条带是独立纹理，非共享图集）。
+    static constexpr int kAtlasTilePx = 64;
+
     // t489 流体条带动画（材质级 flipbook，替代 t222/t223 重建式水动画）——水/岩浆段改采样**独立条带纹理**
     //   （不走共享图集 voxelAtlas），面 UV 烘焙为「单帧区域」v∈[0,1/N]（帧 0 区），帧切换由材质
     //   positionV 动画（QtQuick3D Texture 在 6.11 已把 vOffset 更名 positionV）驱动——**mesh 一次性构建、
@@ -1675,23 +1683,62 @@ public:
 
     // t565 铁轨连接位（存 Rail 方块 chunk state，4 位 = 水平 4 向「与相邻铁轨互连」标记）。放置铁轨 /
     //   破 / 放任何邻块后由 World::checkRailOnEdit（破邻复检）+ PlayerController::placeBlock（放置时计算）
-    //   重算：连接 = 该水平 4 邻格为 Rail。mesher（PartialBlockGeometry Rail case）据连接位选形态 ——
-    //   0/1 连接 → 直轨（沿唯一连接向 / 默认 NS）、对向 2 连接（±X 或 ±Z）→ 直轨（EW 时 UV 旋转 90°）、
-    //   邻向 2 连接（如 +X+Z）→ 90° 拐角（tile 136 换 UV 旋转 / 镜像映射四向）、3+ 连接 → 十字（tile 137）。
-    //   机制等价 MC 1.0 rail 自动连接 + 转弯（本项目无坡道 / 动力铁轨）。state 经 m_states 落 SQLite
-    //   round-trip 保真；旧存档 / worldgen 铁轨 state 由放置路径重算（placeMineshaft 直写后经同一计算器
-    //   统一算连接，见 World::recomputeRailConnections）。collisionAABBs / selectionAABBs 不读 rail
+    //   重算。mesher（PartialBlockGeometry Rail case）据连接位选形态 ——
+    //   0 连接 → 直轨（沿放置轴向，t666 起 axis 由 bit5 表达）、1 连接 → 直轨（沿唯一连接向）、
+    //   对向 2 连接（±X 或 ±Z）→ 直轨（EW 时 UV 旋转 90°）、邻向 2 连接（如 +X+Z）→ 90° 拐角
+    //   （tile 136 换 UV 旋转 / 镜像映射四向，仅普通轨）、3+ 连接 → 十字 / T（tile 137，仅普通轨）。
+    //   机制等价 MC 1.0 rail 自动连接 + 转弯。state 经 m_states 落 SQLite round-trip 保真；旧存档 /
+    //   worldgen 铁轨 state 由放置路径重算（placeMineshaft 直写后经同一计算器统一算连接，见
+    //   World::recomputeRailConnections）。collisionAABBs / selectionAABBs 不读 rail
     //   state（ShapeNone），复用 state 作连接编码零回归（同 torch attach 编码模式）。
-    //   t638：连接判定扩为 isRail 家族（普通 / 动力 / 探测轨互连）；动力 / 探测轨**不画拐角 / 十字**
-    //   （mesher 直线化——机制等价 MC 1.0 golden/detector rail 无 corner 形态），普通轨拐角 / 十字不变。
+    //
+    //   **t666 连接规则集（铁轨方向 / 连接 / 拐角重写；机制等价 MC 1.0 + 用户可预期性修正）**：
+    //   1) 放置轴向：无任何邻轨时，直轨轴 = 玩家面向（面向 ±Z → NS / state=0；面向 ±X → EW /
+    //      bit5 置位）。MC 实际按放置上下文定轴，面向简化是接受的近似（spec 显式批准 + 文档化）。
+    //   2) 连接 = 邻轨存在性（含坡度邻轨：同一水平向的 y / y+1 / y-1 任一有轨都计连接）——
+    //      但**已有直轨不被重新定向**，只有两种合法变化：
+    //      · 沿轴扩展：新邻轨在既有轴的延长线 → 现有轨保持轴、新轨取同轴（新增连接位）。
+    //      · 拐角形成（唯一允许的重新定向）：恰好 2 个**同层普通轨**（id==Rail）邻于**互相垂直**的两
+    //        向、且各自反向无轨 → 现有轨变拐角（垂直 2 位）。单邻垂直轨 / 3 联 T / 十字都**不**改
+    //        既有轴（垂直单邻 = 死端 stub 不连线 —— 真 MC 行为：直轨旁垂直放轨不互连成 T）。
+    //   3) 非普通轨（动力 / 探测）：直线投影最优先 —— 只保留「对向贯穿轴」或单端直连位，永不拐角 /
+    //      十字；普通轨与其垂直邻的**非普通**轨也不拐角（邻直轨旁垂直放动力轨 → 普通轨轴不变，
+    //      动力轨变成指向它的直线 stub）。
+    //   4) 3+ 连接的普通轨 = T / 十字：贯穿轴保持 + 对轴两端都有连接才并入另一轴（单端对轴 stub 不并，
+    //      防「拐角旁边直轨被带歪」，用户实测症状③）。拐角收到「第三邻成直线贯通」→ 重直化（贯穿轴）。
+    //   t638：连接判定扩为 isRail 家族（普通 / 动力 / 探测轨互连）；普通轨拐角 / 十字不变。
+    //   t667 坡度：连接位不存坡度方向（无新 state 位）—— 同层 +y±1 三高探针只是**存在性**，坡向由
+    //   mesher / 矿车按运行时世界数据重推（stateless，spec 首选方案）。
     static constexpr quint8 RailConnPx = 0x01; // +X 邻为 Rail（轨延伸向 +X）
     static constexpr quint8 RailConnNx = 0x02; // -X 邻为 Rail
     static constexpr quint8 RailConnPz = 0x04; // +Z 邻为 Rail
     static constexpr quint8 RailConnNz = 0x08; // -Z 邻为 Rail
-    // 算 (x,y,z) 处 Rail 的连接 state：4 向水平邻格为 Rail → 置对应位。任一邻 → 非 0。纯函数（邻块
-    //   id 数组入参），供 placeBlock（放置时算 placeState）/ World::checkRailOnEdit（破邻复检）/
-    //   placeMineshaft（worldgen 铺轨后统一算）共用 —— 单一权威，杜绝各处自写连接判定漂移。
-    static quint8 railConnections(quint8 px, quint8 nx, quint8 pz, quint8 nz);
+    // t666 孤轨轴偏好位（bit5）：state 低 4 位全是连接位、bit4 被动力/探测轨通电位（GoldenRailStateOnFlag /
+    //   DetectorRailStateOnFlag = 0x10）占用 → 位 5 空闲，作「无连接时直轨轴向」编码：置位 = EW（X 轴）、
+    //   清 = NS（Z 轴）。放置时按玩家面向写；重算时守恒（0 连接保持；有连接时镜像当前轴，让孤轨展示
+    //   最后形态，机制等价 MC 跌落轨保留 metadata）。mesher 在 0 连接时读本位选直轨方向。
+    static constexpr quint8 RailAxisEWFlag = 0x20;
+    // 三高探针：每个水平方向（±X / ±Z）的邻格在上/中/下三层的方块 id（0 = 空气 / 非轨）。
+    //   坡度（t667）存在性判定即查 up / down 层（邻居轨坐在 1 格高台阶上 / 邻居轨低 1 格）。
+    struct RailProbe {
+        quint8 same;   // 同层 (x±1, y, z±1)
+        quint8 up;     // 上层 (x±1, y+1, z±1)
+        quint8 down;   // 下层 (x±1, y-1, z±1)
+    };
+    // 算 (x,y,z) 处 Rail 的连接 state（t666 规则集见上述头注释）：自格 id + 当前 state（轴偏好读它）
+    // + 4 向三高探针 → 新连接位（0..0x0F）。纯函数（邻块 id 数组入参），供 World::recomputeRailConnections
+    // （破邻复检）/ placeMineshaft（worldgen 铺轨后统一算）共用 —— 单一权威，杜绝各处自写连接判定漂移。
+    //   返回值只含低 4 位连接位；bit5（轴偏好）/ bit4（通电位）由调用方按族语义回合并写。
+    static quint8 railConnections(quint8 selfId, quint8 curState,
+                                  const RailProbe &px, const RailProbe &nx,
+                                  const RailProbe &pz, const RailProbe &nz);
+    // t667 该向邻轨高度差（坡度渲染 / 矿车 Y 跟随共用 —— 单一权威）：三高探针中同层有轨 → 0（平面连接优先）；
+    //   同层无而上层有 → +1（邻轨在 1 格高台阶上）；上 / 同层皆无而下层有 → -1（邻轨低 1 格）；三者皆无 →
+    //   INT_MIN（该向无轨）。mesher（chunkgeometry 填 PartialNeighborCtx.railDelta*）/ 矿车（MinecartManager
+    //   钉轨面重推）同读本函数 → 渲染几何与矿车高度严格一致（粒级自洽，防「贴图坡了车没坡」）。
+    //   注：**只抬不掏**（渲染约定）——本格 quad 端边抬高量 = max(delta,0)×权重，delta≤0 不拉低（坡由低端
+    //   轨自己画，高端平铺，避免边界双重几何；见 partialblockgeometry.h RailDelta 注释）。
+    static int railProbeDelta(const RailProbe &p);
     // 由放置命中面外法线（指向玩家侧）推火把附着方向。torch target = hitBlock + normal，故 normal +X
     //   → 火把在 hitBlock 的 +X 侧 → 其支撑 = 火把的 -X 邻 = hitBlock（TorchOnNX）。ny>0 → TorchFloor。
     //   无法线（不应发生）→ TorchFloor 兜底。placeBlock 据此写 state；与 torchPlaced 信号传出的命中面
