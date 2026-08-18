@@ -179,6 +179,11 @@ private:
     // t638 ⑤ 动力轨（GoldenRail）boost 档（blocks/s）：矿车驶上动力轨时的目标速度上限（kCartSpeed 的
     //   1.6×；机制等价 MC 1.0 powered rail 加速——有输入上限提升、无输入弹射 0.35 档向前）。
     static constexpr float kCartBoostSpeed = 12.8f;
+    // t667 坡道重力（机制等价 MC 1.0 矿车下坡自加速 / 上坡减速）：
+    //   下坡滑行档（blocks/s）：无输入也往这个目标速度溜（略高于平道巡航 8；动力轨 boost 12.8 仍更高）。
+    static constexpr float kCartSlopeDownSpeed = 10.0f;
+    //   上坡目标速度乘子（<1）：爬上坡时目标速度收窄到该比例（须玩家输入推力才能爬；无输入退化为停）。
+    static constexpr float kCartUphillMul = 0.6f;
     // 速度 lerp 接近率（1/s；动量感：松键后滑行一段渐停）。
     static constexpr float kCartAccel  = 3.0f;
     // 空车 / 松键摩擦衰减率（1/s）。

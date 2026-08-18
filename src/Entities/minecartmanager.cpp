@@ -234,7 +234,29 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
             } // proj < -0.001（反踩刹车）→ 不改写：玩家减速意图优先
         }
     }
-    const float targetV = proj * kCartSpeed;
+    // t667 坡道重力（机制等价 MC 矿车上坡减速 / 下坡自加速、静止车在下坡上溜车）：
+    //   以「行进方向上的邻轨高度差」（railProbeDelta：+1 上坡 / -1 下坡 / 0 平 / INT_MIN 无轨）修正目标
+    //   速度 —— 下坡（δ<0）→ 目标抬高到 kCartSlopeDownSpeed（无输入也溜车）；上坡（δ>0）→ 目标按
+    //   kCartUphillMul 收窄（须玩家输入推力才能爬）。行进侧按 speed 符号取（负速 = 朝 -dir 走：反向推进、
+    //   倒行下坡同样加速倒溜）。静止车在下坡上 → 下坡标志放行下方 movement 闸门起步溜。渲染几何的坡面
+    //   高度与矿车 Y 同读 railProbeDelta（钉轨面段），两者粒度一致。
+    float targetV = proj * kCartSpeed;
+    bool slopeDownAuto = false; // 静止车下坡起步溜的闸门标志（speed==0 且行进侧下坡 → 允许移动）
+    if (world) {
+        const int gx = int(std::floor(c.pos.x()));
+        const int gz = int(std::floor(c.pos.z()));
+        const int gy = int(std::floor(c.pos.y())) - 1;
+        if (BlockRegistry::isRail(world->blockAt(gx, gy, gz))) {
+            const int gs = (c.speed >= 0.0f) ? 1 : -1;
+            const int ndx = int(c.dirX) * gs, ndz = int(c.dirZ) * gs;
+            const int slope = BlockRegistry::railProbeDelta(
+                { world->blockAt(gx + ndx, gy, gz + ndz),
+                  world->blockAt(gx + ndx, gy + 1, gz + ndz),
+                  world->blockAt(gx + ndx, gy - 1, gz + ndz) });
+            if (slope < 0) { slopeDownAuto = true; targetV = std::max(targetV, kCartSlopeDownSpeed); }
+            else if (slope > 0) targetV *= kCartUphillMul; // 上坡减速
+        }
+    }
     // 速度 lerp 接近目标（加速 / 摩擦统一：目标 0 时按 kCartFriction 衰减；目标 ±速时按 kCartAccel 接近）。
     {
         const float rate = (std::fabs(targetV) > 1e-3f) ? kCartAccel : kCartFriction;
@@ -245,7 +267,10 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
 
     // 沿轨推进：以「格中心到格中心」的插值段推进（跨格时重选连接向 → 拐角自动转弯）。
     //   段 = 当前格中心 → 沿 dirX/dirZ 的下一轨格中心；到段末（进入新格中心）时重选下一连接向。
-    if (c.speed != 0.0f) {
+    //   t667：下坡起步（speed==0 且行进侧下坡）也进本闸门 —— 静止车在坡上受力溜车，无需玩家输入。
+    if (c.speed != 0.0f || slopeDownAuto) {
+        // 静停下坡起步：补一个初始化速度（direct target = kCartSlopeDownSpeed；不给 0 起步死区吃掉）。
+        if (c.speed == 0.0f) c.speed = kCartSlopeDownSpeed * 0.05f;
         const float step = c.speed * float(dt);
         float remain = step;
         int guard = 0;
@@ -280,15 +305,31 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
                 c.dirZ = float(ndz);
             }
         }
-        // Y 钉轨面：矿车所在列向下找轨格（中心格或下一格）→ pos.y = 轨格 cell 顶 + kCartRideH。
-        //   t638：轨判定扩 isRail 家族（普通 / 动力 / 探测轨同钉轨面）。
+        // Y 钉轨面（t667 坡道感知）：矿车所在列向下找轨格（中心格或下一格）→ pos.y = 轨格 cell 顶 + **坡面高** +
+        //   kCartRideH。坡面高 = cell 内横向位置上的邻轨抬升叠加（只抬 δ>0 —— 高端平铺、低端画坡；与
+        //   PartialBlockGeometry Rail case 的 riseAtX/riseAtZ 同公式同语义、同读 railProbeDelta → 渲染坡面
+        //   与矿车高度严格一致，无「贴图坡了车没坡」）。跨格推进期间按像素级横向位置连续升降（下坡顺滑 /
+        //   上坡爬升），不再跨格跳变。t638：轨判定扩 isRail 家族（普通 / 动力 / 探测轨同钉轨面）。
         if (world) {
             const int bcx = int(std::floor(c.pos.x()));
             const int bcz = int(std::floor(c.pos.z()));
             const int bcy = int(std::floor(c.pos.y()));
             for (int y = bcy; y >= bcy - 2 && y >= 0; --y) {
                 if (BlockRegistry::isRail(world->blockAt(bcx, y, bcz))) {
-                    c.pos.setY(float(y) + 1.0f + kCartRideH);
+                    const float fx = c.pos.x() - float(bcx); // [0,1) cell 内横向位置
+                    const float fz = c.pos.z() - float(bcz);
+                    const auto dlt = [&](int dx, int dz) {
+                        return BlockRegistry::railProbeDelta(
+                            { world->blockAt(bcx + dx, y, bcz + dz),
+                              world->blockAt(bcx + dx, y + 1, bcz + dz),
+                              world->blockAt(bcx + dx, y - 1, bcz + dz) });
+                    };
+                    float rise = 0.0f;
+                    const int dpx = dlt(1, 0);  if (dpx > 0) rise += float(dpx) * fx;
+                    const int dnx = dlt(-1, 0); if (dnx > 0) rise += float(dnx) * (1.0f - fx);
+                    const int dpz = dlt(0, 1);  if (dpz > 0) rise += float(dpz) * fz;
+                    const int dnz = dlt(0, -1); if (dnz > 0) rise += float(dnz) * (1.0f - fz);
+                    c.pos.setY(float(y) + 1.0f + rise + kCartRideH);
                     break;
                 }
             }
