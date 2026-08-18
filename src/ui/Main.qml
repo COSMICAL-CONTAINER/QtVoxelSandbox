@@ -6415,7 +6415,12 @@ Window {
                                     lighting: PrincipledMaterial.NoLighting
                                     // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint 调制贴图：受击红 / 蓄力白）；
                                     //   否则 null（纯色，现状）。pack 关时 baseColor 即体色。
-                                    baseColorMap: mobStalkerPackTex.source.toString().length > 0 ? mobStalkerPackTex : null
+                                    // t671 白闪 null 贴图（与 TNT t490 同款）：蓄力亮端（stalkerFlashBright）时置 null
+                                    //   baseColorMap → 白闪 = 纯白（不见贴图），暗端恢复贴图/纯色 —— 机制等价 MC 苦力怕
+                                    //   蓄力期纯白闪（非贴图调白），与 TNT 引信白闪同视觉语言。
+                                    baseColorMap: (stalkerBodyModel.stalkerFlashBright && stalkerBodyModel.inflate > 0)
+                                                  ? null
+                                                  : (mobStalkerPackTex.source.toString().length > 0 ? mobStalkerPackTex : null)
                                     // t597 修（用户「潜行者暗淡，不如僵尸/骷髅明亮」）：PrincipledMaterial 渲染 = baseColorMap ×
                                     //   baseColor —— pack 贴图在身时 baseColor 必须近白（贴图原色透出，同 Shambler 的
                                     //   terrainLight 白色 tint 模式）；旧版把 pack 关时的纯色体色 (0.37,0.66,0.23) 也乘上
@@ -6450,17 +6455,19 @@ Window {
                                 }
                                 // rv-low-batch1 深色眼恢复（pack 感知 visible）。t616 头拉高到心 (0,0.545,0) 半 0.26 →
                                 //   前面 z=-0.26；眼 y≈0.64（头上部）、x=±0.09、z=-0.29（略凸防 z-fight）。
+                                // t671 头再拉高（心 0.710 半 0.290，[0.420,1.0]）→ 眼 y 按相对头上部等比上移
+                                //   0.64 + (0.710-0.545) ≈ 0.805（新头内上部，x/z 不变）。
                                 Model {
                                     visible: mobStalkerPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.09, 0.64, -0.29)
+                                    position: Qt.vector3d(-0.09, 0.805, -0.29)
                                     scale: Qt.vector3d(0.055, 0.065, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
                                     visible: mobStalkerPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.09, 0.64, -0.29)
+                                    position: Qt.vector3d(0.09, 0.805, -0.29)
                                     scale: Qt.vector3d(0.055, 0.065, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
