@@ -2210,7 +2210,8 @@ Window {
         // t64：spawnItem 信号带 count 参数（整栈丢弃为 1 实体；破块掉落走 BlockDef.dropCount）。
         // t590：玩家丢弃带附魔工具 / 护甲时信号第 6 参携其附魔（破块 / mob / 爆炸掉落不传 → undefined → 转发缺省空）。
         // t622：第 7 参携实例名（铁砧改名物品丢弃；其余掉落不传 → 转发缺省空）。
-        function onSpawnItem(x, y, z, id, count, enchants, name) { itemEntities.spawnItem(x, y, z, id, count, enchants, name) }
+        // t686：第 8 参携实例耐久（死亡掉落磨损工具；其余掉落不传 → undefined → 转发缺省 -1 → 拾取归满耐久）。
+        function onSpawnItem(x, y, z, id, count, enchants, name, durability) { itemEntities.spawnItem(x, y, z, id, count, enchants, name, durability) }
         // t401 钓获物（拉起咬钩 → player 发 fishCaught，携获物 id + 数量 + 浮标整数格）→ 转发到 manager 生成
         //   掉落实体（同 spawnItem / mobDied 模式；单向事件流：Game 层发语义事件、呈现层只消费）。
         function onFishCaught(itemId, count, x, y, z) { itemEntities.spawnItem(x, y, z, itemId, count) }

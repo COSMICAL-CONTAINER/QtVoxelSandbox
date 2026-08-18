@@ -3881,17 +3881,19 @@ void PlayerController::dropAllItems()
     int idx = 0;
     // t590：附魔随死亡掉落实体走（工具 / 护甲丢出再捡保附魔；拾取回填见 pickupScan）。
     //   t622：实例名同走（改名物品死亡掉落再捡不丢名）。
-    auto dropStack = [&](int id, int count, const QVariantList &ench, const QString &name) {
+    //   t686：实例耐久同走（磨损工具死亡掉落再捡不再「免费回满」——旧版漏传第 8 参 → 实体
+    //   durability=-1 → 拾取 normalizeDurability 按缺省归满耐久；破箱掉落路径已带耐久，本处对齐）。
+    auto dropStack = [&](int id, int count, const QVariantList &ench, const QString &name, int dur) {
         if (id == 0 || count <= 0) return;          // 空栈跳过
-        emit spawnItem(cx + kScatter[idx % 9][0], cy, cz + kScatter[idx % 9][1], id, count, ench, name);
+        emit spawnItem(cx + kScatter[idx % 9][0], cy, cz + kScatter[idx % 9][1], id, count, ench, name, dur);
         ++idx;
     };
     // hotbar 9 槽 → main 27 槽 → 光标手持栈，逐栈掉落。
     for (int i = 0; i < m_hotbar->slotCount(); ++i)
-        dropStack(m_hotbar->blockIdAt(i), m_hotbar->countAt(i), m_hotbar->enchantsAt(i), m_hotbar->customNameAt(i));
+        dropStack(m_hotbar->blockIdAt(i), m_hotbar->countAt(i), m_hotbar->enchantsAt(i), m_hotbar->customNameAt(i), m_hotbar->durabilityAt(i));
     for (int i = 0; i < m_hotbar->mainCount(); ++i)
-        dropStack(m_hotbar->mainBlockIdAt(i), m_hotbar->mainCountAt(i), m_hotbar->mainEnchantsAt(i), m_hotbar->mainCustomNameAt(i));
-    dropStack(m_hotbar->heldBlock(), m_hotbar->heldCount(), m_hotbar->heldEnchants(), m_hotbar->heldCustomName()); // 光标手持栈（onDied 已归还，通常空）
+        dropStack(m_hotbar->mainBlockIdAt(i), m_hotbar->mainCountAt(i), m_hotbar->mainEnchantsAt(i), m_hotbar->mainCustomNameAt(i), m_hotbar->mainDurabilityAt(i));
+    dropStack(m_hotbar->heldBlock(), m_hotbar->heldCount(), m_hotbar->heldEnchants(), m_hotbar->heldCustomName(), m_hotbar->heldDurability()); // 光标手持栈（onDied 已归还，通常空）
     // 清空整个背包（hotbar + main + held）+ bump revision → QML 同步。仅 Survival 调（死亡仅在 Survival）。
     m_hotbar->resetForMode(int(Survival));
 }
