@@ -1313,14 +1313,15 @@ Window {
         const val = args[1]
         if (sub === "set") {
             const v = val.toLowerCase()
-            if (v === "day")       { worldClock.setPhase(0.0);  return "时间设为白天（正午，月相刷新）" }
-            if (v === "night")     { worldClock.setPhase(0.5);  return "时间设为夜晚（子夜，月相刷新）" }
-            if (v === "midnight")  { worldClock.setPhase(0.5);  return "时间设为子夜（月相刷新）" }
+            // t672 聊天回显去掉「月相刷新」字样（用户点名不要这行）；dayCount+1 推进月相的机制保留（t631）。
+            if (v === "day")       { worldClock.setPhase(0.0);  return "时间设为白天（正午）" }
+            if (v === "night")     { worldClock.setPhase(0.5);  return "时间设为夜晚（子夜）" }
+            if (v === "midnight")  { worldClock.setPhase(0.5);  return "时间设为子夜" }
             // <num>d → 设第几天（月相）；<num> → phase=num/24000
             const m = val.match(/^(-?\d+)d$/i)
-            if (m) { worldClock.setDay(parseInt(m[1], 10)); return "设为第 " + m[1] + " 天（月相刷新）" }
+            if (m) { worldClock.setDay(parseInt(m[1], 10)); return "设为第 " + m[1] + " 天" }
             const n = parseFloat(val)
-            if (!isNaN(n)) { worldClock.setPhase(n / 24000.0); return "时间设为 " + val + " ticks（月相刷新）" }
+            if (!isNaN(n)) { worldClock.setPhase(n / 24000.0); return "时间设为 " + val + " ticks" }
             return "未知时间值: " + val + "（用 day/night/midnight/数字/数字d）"
         }
         if (sub === "add") {

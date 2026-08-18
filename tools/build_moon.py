@@ -59,13 +59,18 @@ N_PHASES = 8
 # 固定随机种子 → 确定性（同 CI 同图；§9 自绘原创）。
 RNG = np.random.default_rng(20260807)
 
-# 环形山暗斑（确定性）：几颗随机位置 / 半径的暗圆，叠在亮部上做细节（非纯平涂）。
+# 环形山暗斑（确定性）：几颗暗圆叠在亮部上做细节（非纯平涂）。
+# t672 修「月亮左上角斑点状伪影」（用户 playtest）：旧 7 颗随机落点恰有 5 颗聚在左上象限 → 满月放大到
+#   屏幕尺寸（~165px）时读作「左上角一堆暗斑」，像贴图伪影而非月面细节。修：① 均匀散布（圆环带交错 +
+#   最小间距守卫，杜绝同象限扎堆）；② 暗度 0.72 → 0.86（暗斑更subtle，读作月海阴影像 MC 1.0 月面）。
 CRATERS = []
-for _ in range(7):
-    # 在盘内随机（极坐标），半径 0.04..0.09。
-    rr = RNG.random() * 0.40
-    th = RNG.random() * 2.0 * np.pi
-    CRATERS.append((rr * np.cos(th), rr * np.sin(th), 0.04 + RNG.random() * 0.05))
+for i in range(6):
+    # 圆环带散布：环半径 0.10..0.38 均匀 + 角度错位，保证各象限都有且不过密。
+    rr = 0.10 + (i / 6.0) * 0.28 + RNG.random() * 0.05
+    th = i * (np.pi / 3.0) + RNG.random() * 0.5
+    cx, cy = rr * np.cos(th), rr * np.sin(th)
+    cr = 0.035 + RNG.random() * 0.035  # 半径 0.035..0.07（比旧 0.04..0.09 略小）
+    CRATERS.append((cx, cy, cr))
 
 
 def moon_frame(phase):
@@ -92,11 +97,12 @@ def moon_frame(phase):
     rgba = np.zeros((TS, TS, 4), dtype=np.float64)
     for c in range(3):
         chan = np.where(lit, lit_col[c], dark_col[c])
-        # 环形山暗斑（仅亮部）：每颗暗圆把亮度乘 ~0.72。
+        # 环形山暗斑（仅亮部）：每颗暗圆把亮度乘 ~0.86（t672：比旧 0.72 更 subtle —— 读作月海阴影像，
+        #   不再像贴图伪影斑点）。
         for (cx, cy, cr) in CRATERS:
             dspot = np.sqrt((gx - cx) ** 2 + (gy - cy) ** 2)
             spot = (dspot < cr) & lit
-            chan = np.where(spot, chan * 0.72, chan)
+            chan = np.where(spot, chan * 0.86, chan)
         rgba[..., c] = chan
     rgba[..., 3] = 255.0   # 全画布不透明（t570：正方形月亮，无透明像素 → 无 alphaCutoff / 无灰背景）
     return rgba
