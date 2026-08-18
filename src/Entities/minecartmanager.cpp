@@ -192,6 +192,7 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
 
     // t658 探测轨占用边沿基线快照（本帧重建 m_detectorOccupied 后，prev − cur = 离开沿 → 清位断电）。
     const std::unordered_set<quint64> detectorPrev = m_detectorOccupied;
+    m_detectorOccupied.clear(); // t680 ②：重建前清空（漏清则集合只增不减 →「离开沿」永不触发 → 一次通电永久带电）
 
     // 停驻重选向（speed==0 且有输入）：按 wish 直接从轨连接位选向（pickTrackStep 内滤 dot<0 反向连接
     //   → 面向死端壁的 wish 无可用连接 → 保持停驻不动，不掉头不振荡）。选出的向与 wish 点积 ≥0 → 下方
@@ -314,6 +315,7 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
             const int bcx = int(std::floor(c.pos.x()));
             const int bcz = int(std::floor(c.pos.z()));
             const int bcy = int(std::floor(c.pos.y()));
+            int pinnedY = -1; // t680 ①：钉轨面循环钉到的轨格 Y（探测轨判定用；-1 = 列内未找到轨）
             for (int y = bcy; y >= bcy - 2 && y >= 0; --y) {
                 if (BlockRegistry::isRail(world->blockAt(bcx, y, bcz))) {
                     const float fx = c.pos.x() - float(bcx); // [0,1) cell 内横向位置
@@ -330,6 +332,7 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
                     const int dpz = dlt(0, 1);  if (dpz > 0) rise += float(dpz) * fz;
                     const int dnz = dlt(0, -1); if (dnz > 0) rise += float(dnz) * (1.0f - fz);
                     c.pos.setY(float(y) + 1.0f + rise + kCartRideH);
+                    pinnedY = y;
                     break;
                 }
             }
@@ -341,26 +344,39 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
             //   （m_detectorOccupied 表记录上一帧占用的探测轨格，本帧不在 → 清位；同压力板
             //   updatePressurePlates 的边沿基线模式）。写走 setWaterSilent（静默 + notePowerWrite）。
             //   节流：位置未变（格坐标同）→ 跳过写。
-            {
-                int detY = -1;
-                for (int y = bcy; y >= bcy - 2 && y >= 0; --y) {
-                    if (world->blockAt(bcx, y, bcz) != BlockRegistry::DetectorRail) break; // 列顶非探测轨 → 不查
-                    detY = y;
-                    break; // 只查钉到的首个轨格
+            // t680 ①：判定改读钉轨面循环记下的 pinnedY（旧版从 bcy=floor(pos.y) 起向下扫、首行
+            //   `!= DetectorRail 即 break` —— 但钉轨后 pos.y = 轨Y+1+rise+0.30 → bcy 是轨上方空气格
+            //   → 首行恒 break → detY 恒 -1 → DetectorRailStateOnFlag 永不置位（t658 探测轨供电死代码）。
+            if (pinnedY >= 0 && world->blockAt(bcx, pinnedY, bcz) == BlockRegistry::DetectorRail) {
+                const quint8 ds = world->stateAt(bcx, pinnedY, bcz);
+                if ((ds & BlockRegistry::DetectorRailStateOnFlag) == 0) {
+                    world->setWaterSilent(bcx, pinnedY, bcz, BlockRegistry::DetectorRail,
+                                          quint8(ds | BlockRegistry::DetectorRailStateOnFlag));
                 }
-                if (detY >= 0) {
-                    const quint8 ds = world->stateAt(bcx, detY, bcz);
-                    if ((ds & BlockRegistry::DetectorRailStateOnFlag) == 0) {
-                        world->setWaterSilent(bcx, detY, bcz, BlockRegistry::DetectorRail,
-                                              quint8(ds | BlockRegistry::DetectorRailStateOnFlag));
-                    }
-                    m_detectorOccupied.insert(packRailCell(bcx, detY, bcz)); // 本帧占用（下帧边沿比较基线）
-                }
+                m_detectorOccupied.insert(packRailCell(bcx, pinnedY, bcz)); // 本帧占用（下帧边沿比较基线）
             }
         }
         // 车头朝向（-Z 前约定：dir=(0,-1) → yaw 0；(1,0) → yaw 90；(0,1) → yaw 180；(-1,0) → yaw 270）。
         c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f;
         while (c.yaw < 0.0f) c.yaw += 360.0f;
+    } else if (world) {
+        // t680 ③：停稳（speed==0 且非下坡起步）的矿车仍持续标记探测轨占用 —— 占用是「位置」语义而非
+        //   「移动」语义（机制等价 MC 探测轨上静止矿车恒供电）。若只随 speed!=0 闸门标记，停稳帧集合
+        //   为空 → updateDetectorRailEdges 把「上一帧还占用」误判为离开沿 → 清位断电 → 车一停轨就断电。
+        const int bcx = int(std::floor(c.pos.x()));
+        const int bcz = int(std::floor(c.pos.z()));
+        for (int y = int(std::floor(c.pos.y())); y >= int(std::floor(c.pos.y())) - 2 && y >= 0; --y) {
+            if (!BlockRegistry::isRail(world->blockAt(bcx, y, bcz))) continue;
+            if (world->blockAt(bcx, y, bcz) == BlockRegistry::DetectorRail) {
+                const quint8 ds = world->stateAt(bcx, y, bcz);
+                if ((ds & BlockRegistry::DetectorRailStateOnFlag) == 0) {
+                    world->setWaterSilent(bcx, y, bcz, BlockRegistry::DetectorRail,
+                                          quint8(ds | BlockRegistry::DetectorRailStateOnFlag));
+                }
+                m_detectorOccupied.insert(packRailCell(bcx, y, bcz)); // 停稳仍占用（持续供电）
+            }
+            break; // 只取列内首个轨格（同钉轨面循环的「最近一轨」语义）
+        }
     }
 
     outCartPos = c.pos;
