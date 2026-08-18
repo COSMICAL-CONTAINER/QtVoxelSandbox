@@ -2323,12 +2323,14 @@ void PlayerController::placeBlock()
             return; // 采摘成功 → 不再走放置路径
         }
     }
-    // t487 末影之眼激活末地传送门（spec「末影之眼放满激活传送门」；机制等价 MC 1.0 持末影之眼右键末地传送门
-    //   激活）。右键命中格为末地传送门（EndPortal）+ 手持末影之眼物品（EndEyeId）→ 翻 state bit0
-    //   （EndPortalStateActiveFlag）→ mesher 切激活贴图（end_portal_active 中心旋涡更亮）+ qInfo 日志（末地预热
-    //   占位：仅激活效果 + 日志，不实现末地维度，spec「实际传送末地可推迟为占位/告警」）。生存消耗 1 末影之眼
-    //   （创造不耗，同桶 / 食物 / 种子模式）。优先于放置（右键传送门即激活，不另放块）。
-    //   分层（PLAN §2）：激活属 Game/Physics（读射线命中 + 写 World state + 写 Hotbar VM），不改 setBlock 语义。
+    // t487/t664 末影之眼激活末地传送门（t664 正确形态：12 格**末地传送门框架**（EndPortal=111）环 +
+    //   t664 门面（EndPortalSurface=131）薄星平面；机制等价 MC 1.0 持末影之眼右键各框架放眼激活）。
+    //   右键命中格为末地传送门框架 + 手持末影之眼物品（EndEyeId）→ 翻 state bit0（EndPortalStateActiveFlag，
+    //   mesher 切激活贴图 endframe_eye）+ qInfo 日志。激活后检查该框架所属环：12 框架**全部激活** →
+    //   World::tryOpenEndPortal 在 3×3 内圈生成门面（薄黑色星平面，光 15，通往另一宇宙观感；末地维度仍
+    //   留占位）。生存消耗 1 末影之眼（创造不耗，同桶 / 食物 / 种子模式）。优先于放置（右键框架即激活，
+    //   不另放块）。
+    //   分层（PLAN §2）：激活属 Game/Physics（读射线命中 + 写 World state + 调 World 打开门面 + 写 Hotbar VM）。
     if (BlockRegistry::isEndPortal(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))
         && m_hotbar && m_hotbar->selectedItemId() == RecipeRegistry::EndEyeId) {
         const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
@@ -2337,12 +2339,22 @@ void PlayerController::placeBlock()
                               quint8(st | BlockRegistry::EndPortalStateActiveFlag));
             if (m_mode == Survival)
                 m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 末影之眼（创造不耗 → 无限激活）
+            // t664 开环：激活的框架属于哪个环（环中心 ∈ 本格 ±2 水平，3×3 内圈中心与框架相距 ≤2）。
+            //   对每个候选中心尝试打开 —— tryOpenEndPortal 内部验 12 框架全激活才开，未满则 no-op。
+            for (int cx = m_hitBx - 2; cx <= m_hitBx + 2; ++cx) {
+                for (int cz = m_hitBz - 2; cz <= m_hitBz + 2; ++cz) {
+                    if (m_world->tryOpenEndPortal(cx, m_hitBy, cz)) {
+                        qInfo() << "end portal opened at" << cx << m_hitBy << cz
+                                << "(end dimension deferred - placeholder)"; // 末地预热占位（门面已开，维度留后续）
+                    }
+                }
+            }
             m_lastPlaceMs = now;
             emit swingArm();
-            qInfo() << "end portal activated at" << m_hitBx << m_hitBy << m_hitBz
+            qInfo() << "end portal frame activated at" << m_hitBx << m_hitBy << m_hitBz
                     << "(end dimension deferred - placeholder)"; // 末地预热占位（日志，不实现末地维度）
         }
-        return; // 已是激活态 → 右键无效应（不重复消耗 / 不放置），机制等价 MC 已激活传送门无法再插眼
+        return; // 已是激活态 → 右键无效应（不重复消耗 / 不放置），机制等价 MC 已激活框架无法再插眼
     }
     // t490 手动 TNT 点火机关（spec「右键 lever / 木按钮 / 石按钮 → 点燃水平四邻 TNT」；机制等价 MC 1.0 lever /
     //   button 红石点火源——本项目无红石，故把「激活脉冲」直接绑在右键动作）。右键命中的机关方块（Lever /

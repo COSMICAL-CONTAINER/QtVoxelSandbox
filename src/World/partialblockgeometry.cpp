@@ -694,6 +694,18 @@ int PartialBlockGeometry::append(
         }
         break;
     }
+    case BlockRegistry::EndPortalSurface: {
+        // t664 末地传送门「门面」（薄黑色星平面）：水平双面 quad **贴 cell 顶下方**（y = 1−1/16 —— 悬空
+        //   平面挂于框架环顶沿下方，机制等价 MC 1.0 门面浮在框架顶平；区别于铁轨 / 红石粉的贴地薄层）。
+        //   tile = 129（end_portal 程序星空：深紫黑星空底 + 中心暗绿旋涡；t620 endframe 化后该瓦片无消费方，
+        //   t664 复用为门面）。无碰撞（ShapeNone → 玩家穿过）；光 15 由 lightEmission 承担。材质 alphaCutoff
+        //   cutout（星空贴图不透明 → 视觉为实面平面）。不做邻居剔除（solid=false，同铁轨 / 睡莲）。
+        constexpr float yr = 1.0f - 1.0f / 16.0f; // 平面 y = 15/16（贴 cell 顶下方，悬空）
+        pushCrossQuad(verts, idx, lx, ly, lz,
+                      0.f, yr, 0.f,  1.f, yr, 0.f,  1.f, yr, 1.f,  0.f, yr, 1.f, // BL→BR→TR→TL（水平；UV 标准 u→x,v→z）
+                      tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::Cactus: {
         // t445 仙人掌细柱：机制对标 MC 1.0 仙人掌 14/16（~0.875）宽的居中柱。本工程取 0.8（X/Z [0.1,0.9]）
         //   居中、Y 满高 [0,1]，整柱贴 cactus 顶 / 侧贴图。**非满格整立方** —— cactus solid=false（同 Farmland /

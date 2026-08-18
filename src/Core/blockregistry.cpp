@@ -545,7 +545,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   lightEmission 按 id-only 恒 10（末放置 / 激活两态都星绿泛光，t487 行为；状态感知版委托单参版不读
     //   state bit0）。t634 进创造调色板（用户「框架在创造背包没找到」—— 要塞祭坛可取用 / 自建末地祭坛测试；
     //   放置正常、创造瞬破 drop=0、生存不可破同基岩）。
-    /* end_portal   */ {int(BlockRegistry::EndPortal),         141,140,140,140, false, BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "end_portal",   "末地传送门"},
+    /* end_portal   */ {int(BlockRegistry::EndPortal),         141,140,140,140, false, BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false,                            0, 0, 64, "end_portal",   "末地传送门框架"},
     // t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / wooden button / stone button；无红石故右键激活即点燃邻接
     //   TNT）。**t662 几何重做**（用户「跟压力板一模一样，不行」）：按钮 = 贴附着面的小长方体（~0.375×0.125×0.375
     //   居中凸钮，机制等价 MC 6×2×6px）、拉杆 = 圆石小底座 + 斜插木棍（on/off 两态摆向）；state bit0=激活
@@ -638,6 +638,15 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   通电粉（power>0）微红光 7（recomputeLightAround 检出光变重 flood）。音色 GroupStone（石粉质感）。
     //   不进创造方块调色板（红石 tab t660 取红石粉物品 0x224，同玻璃物品模式）。
     /* redstone_dust  */ {int(BlockRegistry::RedstoneDust),    166,166,166,166, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false,                           0x224, 1, 64, "redstone_dust", "红石粉"},
+    // ── t664 末地传送门「门面」（EndPortalSurface；机制等价 MC 1.0 end portal 薄黑色星平面）：12 框架
+    //   （EndPortal=111，t664 更名「末地传送门框架」）全激活后由 PlayerController 在 3×3 内圈生成的薄水平
+    //   星平面。贴图 = tile 129（end_portal 程序星空——t620 endframe 化后无消费方，t664 复用，零新增瓦片）；
+    //   几何 = 水平双面 quad 贴 cell 顶下方 y=1-1/16（悬空平面；PartialBlockGeometry case + isCrossBillboard
+    //   PASS 1 cutout 路由）。solid=false / ShapeNone（无碰撞、玩家穿过）、hardness=0（瞬破）、NoTool、
+    //   dropId=0 不掉落（激活派生方块非采集物）、dropCount=0、maxStack=64。光照 lightEmission=15（机制等价
+    //   MC 1.0 门面发光 15）。完整性：World::checkEndPortalIntegrity（邻框架破 → 门面消失）。音色 GroupStone。
+    //   不进创造调色板（框架已进；门面是激活派生方块）。
+    /* end_portal_surface */ {int(BlockRegistry::EndPortalSurface), 129,129,129,129, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false,                               0, 0, 64, "end_portal_surface", "末地传送门面"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -900,6 +909,7 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == GoldenRail || blockId == DetectorRail) return true; // t638 动力 / 探测铁轨（与 Rail 同几何路由——水平薄板 quad 走 cutout 段 alphaCutoff）
     if (blockId == RedstoneTorch) return true; // t638 红石火把 cross（竖直两片对角双面 quad，贴 redstone_torch(161)；常亮光源走真方块光 flood，非 torchHost 伪光源）
     if (blockId == RedstoneDust) return true; // t656 红石粉导线（与铁轨族同几何路由——水平薄板 quad 走 cutout 段 alphaCutoff；partialblockgeometry RedstoneDust case 据连接位 / 电力位选瓦片）
+    if (blockId == EndPortalSurface) return true; // t664 末地传送门门面（水平薄板 quad **贴 cell 顶下方**悬空平面；partialblockgeometry EndPortalSurface case；同铁轨族 cutout 路由）
     if (blockId >= FirstFlower && blockId <= LastFlower) return true; // t397 段外花段（4 色 cross）
     return blockId >= FirstCross && blockId <= LastCross;
 }
@@ -1034,6 +1044,13 @@ bool BlockRegistry::isManualIgniter(quint8 blockId)
 bool BlockRegistry::isEndPortal(quint8 blockId)
 {
     return blockId == EndPortal;
+}
+
+// t664 末地传送门「门面」统一谓词（单一权威）：blockId == EndPortalSurface 即激活后的薄星平面（光 15、
+//   无碰撞瞬破；框架破 → World 完整性复检消失）。供 mesher 路由 + World::checkEndPortalIntegrity。
+bool BlockRegistry::isEndPortalSurface(quint8 blockId)
+{
+    return blockId == EndPortalSurface;
 }
 
 // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台加成
@@ -1400,8 +1417,9 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
     case RedstoneTorch: return 7; // t638：红石火把方块光种子 7（MC 1.0 红石火把光 level 7——约为火把一半的暗红氛围光；常亮 on 装饰光源，真红石信号留红石大轮）
     case RedstoneBlock: return 5; // t660：红石块微发光（光 level 5 —— 用户「红石块应微发光」；MC 1.5+ 红石块实际不发光，本工程按用户点名取微光，低于红石火把 7 的哑红感）
     case Lava:  return 15;  // t351：岩浆方块光种子 15（地底发光照亮洞穴；MC 1.0 岩浆光 level 15）
-    case EndPortal: return 10; // t487：末地传送门方块光种子 10（地下黑暗要塞中的星绿旋涡泛光，玩家可见传送门；
-                               //    机制等价 MC 1.0 末地传送门自发光显眼，非 MC 精确光级，仅照亮自身 + 近旁）
+    case EndPortal: return 10; // t487：末地传送门框架光种子 10（框架放眼亮纹微泛光；t664 框架化语义不变）
+    case EndPortalSurface: return 15; // t664：门面（薄星平面）光 15（机制等价 MC 1.0 end portal 发光 15——要塞
+                                      //    黑暗中一片亮星平面即「通往另一宇宙」的观感）
     default:    return 0;   // 其余不自发光
     }
 }
@@ -1745,7 +1763,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Dropper: // t609 投掷器 → 石质音色（石质机关盒，同发射器 / furnace 族）
     case StoneBrick: // t487 石砖 → 石质音色（石质整立方，同 stone 族）
     case StoneBrickSlab: case StoneBrickStairs: // t487 石砖台阶/楼梯 → 石质音色（同 stone 族）
-    case EndPortal: // t487 末地传送门 → 石质兜底音色（不可破，仅创造敲响兜底）
+    case EndPortal: // t487 末地传送门框架 → 石质兜底音色（不可破，仅创造敲响兜底）
+    case EndPortalSurface: // t664 门面 → 石质兜底音色（瞬破薄平面轻响）
     case CoalBlock: case LapisBlock: case DiamondBlock: // t620 矿物存储块 → 石质音色（金属质，同 iron_block 族）
     case GoldBlock: case RedstoneBlock: // t620 金块 / 红石块 → 石质音色（同 iron_block 族）
     case RedstoneLamp: // t620 红石灯 → 石质音色（玻璃质敲击，同 glass / ice 族）

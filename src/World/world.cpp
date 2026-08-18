@@ -290,6 +290,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
+    checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检（框架破 → 门面消失）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队）
     return true;
 }
@@ -382,6 +383,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
+    checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检（框架破 → 门面消失）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队；state-only 写亦触发——拉杆 / 按钮翻位即此路径）
     return true;
 }
@@ -1894,6 +1896,91 @@ void World::checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     if (changed) {
         emit worldChanged();        // 驱动 mesh 重建（铁轨形态切换）
         m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+    }
+}
+
+// t664 末地传送门框架环完整性检查（纯读；见 world.h 头注释）。环 = 12 框架格围绕 3×3 内圈中心 (cx,cy,cz)：
+//   ±2 环上不含四角 —— {(cx±2, y, cz-1..cz+1)} ∪ {(cx-1..cx+1, y, cz±2)}。全部为 EndPortal 框架且
+//   state bit0 激活（EndPortalStateActiveFlag）→ 环完整。任一缺失 / 未激活 / 越界 → false。
+bool World::endPortalRingComplete(int cx, int cy, int cz) const
+{
+    // 环 12 格：每条边 3 个（x = cx±2 时 z ∈ {cz-1,cz,cz+1}；z = cz±2 时 x ∈ {cx-1,cx,cx+1}）。
+    for (int i = -1; i <= 1; ++i) {
+        const int ring[4][2] = {
+            {cx + 2, cz + i}, {cx - 2, cz + i},
+            {cx + i, cz + 2}, {cx + i, cz - 2},
+        };
+        for (const auto &p : ring) {
+            if (p[0] < 0 || p[0] >= m_width || p[1] < 0 || p[1] >= m_depth) return false;
+            if (cy < 0 || cy >= m_height) return false;
+            const quint8 b = m_chunks.blockAt(p[0], cy, p[1]);
+            if (b != BlockRegistry::EndPortal) return false; // 非框架格 → 环断裂
+            if ((m_chunks.stateAt(p[0], cy, p[1]) & BlockRegistry::EndPortalStateActiveFlag) == 0)
+                return false; // 框架未放眼激活 → 环未就绪
+        }
+    }
+    return true;
+}
+
+// t664 尝试打开末地传送门（见 world.h 头注释）：环完整 → 3×3 内圈 (cx±1, cy, cz±1) 各格写门面
+//   （EndPortalSurface=131 薄星平面）。门面格若已存在同 id → 跳过（防重复写）。静默直写 m_chunks
+//   （不经 World::setBlock → 不重入完整性复检 / 不逐格发 broken/placed）+ 末尾 1 次 worldChanged
+//   （N 写 1 emit，同 dropCactusColumn 批量收口模式）+ clearAllDirty。门面是普通方块 → 存档持久化。
+bool World::tryOpenEndPortal(int cx, int cy, int cz)
+{
+    if (!endPortalRingComplete(cx, cy, cz)) return false; // 环未就绪 → 不开
+    bool changed = false;
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dz = -1; dz <= 1; ++dz) {
+            const int px = cx + dx, pz = cz + dz;
+            if (px < 0 || px >= m_width || pz < 0 || pz >= m_depth || cy < 0 || cy >= m_height) continue;
+            if (m_chunks.blockAt(px, cy, pz) == BlockRegistry::EndPortalSurface) continue; // 已开 → 跳过
+            m_chunks.setBlock(px, cy, pz, BlockRegistry::EndPortalSurface); // 静默直写 + 标脏
+            changed = true;
+        }
+    }
+    if (changed) {
+        emit worldChanged();
+        m_chunks.clearAllDirty();
+    }
+    return true;
+}
+
+// t664 编辑后末地传送门完整性复检（见 world.h 头注释；同 checkRailOnEdit 模式）。任何编辑都可能让环失效
+//   （框架被破 → 门面应全消失）。复检范围 = 本格周围 ±3 立方体内的 EndPortalSurface 门面格；对每块门面
+//   反查其环中心（门面在内圈 3×3，中心 ∈ {px-1..px+1} × {pz-1..pz+1} 九候选），环不完整 → 静默清门面。
+//   静默直写不经 setBlock → 不重入本检查；末尾 1 次 worldChanged 批量收口。
+void World::checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    Q_UNUSED(oldId); Q_UNUSED(id); // 任何编辑都可能影响门面（框架被破 / 门面自身被瞬破）→ 不筛编辑类型
+    // 快速筛：本编辑若与环完全无关（非框架 / 非门面 / 非环邻）→ 周围扫不到门面则 no-op（扫描代价可接受：
+    //   每编辑 ±3 立方体 ~7³=343 格块读，仅含门面时继续；世界内门面极少）。
+    bool changed = false;
+    const int x0 = std::max(0, x - 3), x1 = std::min(m_width - 1, x + 3);
+    const int y0 = std::max(0, y - 3), y1 = std::min(m_height - 1, y + 3);
+    const int z0 = std::max(0, z - 3), z1 = std::min(m_depth - 1, z + 3);
+    for (int sy = y0; sy <= y1; ++sy) {
+        for (int sz = z0; sz <= z1; ++sz) {
+            for (int sx = x0; sx <= x1; ++sx) {
+                if (m_chunks.blockAt(sx, sy, sz) != BlockRegistry::EndPortalSurface) continue;
+                // 门面格 (sx,sy,sz)：反查环中心候选（门面在内圈 3×3 → 中心 ∈ sx±1 / sz±1 九候选）。
+                bool keep = false;
+                for (int cx = sx - 1; cx <= sx + 1 && !keep; ++cx) {
+                    for (int cz = sz - 1; cz <= sz + 1; ++cz) {
+                        if (endPortalRingComplete(cx, sy, cz)) { keep = true; break; }
+                    }
+                }
+                if (!keep) {
+                    // 环不完整 → 门面消失（静默清 Air + 标脏，防门面悬浮在半开环里）。
+                    m_chunks.setBlock(sx, sy, sz, BlockRegistry::Air);
+                    changed = true;
+                }
+            }
+        }
+    }
+    if (changed) {
+        emit worldChanged();
+        m_chunks.clearAllDirty();
     }
 }
 
@@ -5281,8 +5368,10 @@ void World::placeStronghold()
         }
 
         // 3) **中央末地传送门房**（7×7 = dx/dz ∈ [-3,3]）：房间四壁 StoneBrick（dy 1..3，每壁中央留门洞）
-        //    + 房间内部清 Air（dx/dz ∈ [-2,2]，dy 1..2，玩家可走入）+ 地板中央 3×3 EndPortal
-        //    （dx/dz ∈ [-1,1]，dy=1，state=0 未激活）→ 玩家持末影之眼右键激活（末地预热占位）。
+        //    + 房间内部清 Air（dx/dz ∈ [-2,2]，dy 1..2，玩家可走入）+ **12 格末地传送门框架环**
+        //    （EndPortal=111，t664 更名「末地传送门框架」；dy=1，围绕 3×3 内圈每边 3 个、不含四角）→
+        //    玩家持末影之眼右键各框架放眼激活 → 全部 12 格激活 → 3×3 内圈生成末地传送门面
+        //    （EndPortalSurface=131 薄星平面；PlayerController useBlock 分支 + World 完整性复检共同维护）。
         //    房间墙先于大厅清空（section 4 的 continue 保留墙体，防被 Air 覆盖）。
         for (int dy = 1; dy <= kWallH; ++dy) {
             for (int d = -3; d <= 3; ++d) {
@@ -5300,9 +5389,14 @@ void World::placeStronghold()
                 }
             }
         }
-        for (int pdx = -1; pdx <= 1; ++pdx) {
-            for (int pdz = -1; pdz <= 1; ++pdz) {
-                put(pdx, 1, pdz, BlockRegistry::EndPortal); // 3×3 末地传送门（未激活）
+        // t664 框架环：内圈 3×3 = |dx|≤1 && |dz|≤1（后续激活生成门面）；框架在 |dx|=2 或 |dz|=2 的
+        //   ±2 环上但**不含四角 (±2,±2)**（四角保持空气，机制等价 MC 1.0 门框架 = 12 格四边各 3）。
+        for (int pdx = -2; pdx <= 2; ++pdx) {
+            for (int pdz = -2; pdz <= 2; ++pdz) {
+                const bool onRing = (pdx == -2 || pdx == 2) ? (pdz >= -1 && pdz <= 1)
+                                                            : (pdz == -2 || pdz == 2) && (pdx >= -1 && pdx <= 1);
+                if (onRing)
+                    put(pdx, 1, pdz, BlockRegistry::EndPortal); // 末地传送门框架（state=0 未放眼）
             }
         }
 

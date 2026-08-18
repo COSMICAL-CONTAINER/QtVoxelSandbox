@@ -476,6 +476,27 @@ public:
     //   供 4/5 参数 setBlock 末尾各调一次（编辑路径收口，同 checkSugarcaneOnEdit 模式）。
     void checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t664 末地传送门完整性复检（机制等价 MC「传送门开启后拆任一框架 → 门面全消失」；同 checkRailOnEdit
+    //   模式）。（x,y,z,oldId,id）= 本格刚发生的编辑。任何方块变化都可能影响末地传送门环：本格是框架
+    //   （EndPortal）被破坏 / 本格是门面（EndPortalSurface）被瞬破 / 本格邻接环任意位置 → 扫本格周围
+    //   ±3 立方体内的 EndPortalSurface 门面格，对每块门面反查其环中心（3×3 内圈中心），环 12 框架任一
+    //   缺失 / 未激活 → 该门面格静默清 Air（m_chunks.setBlock 直写，不经 World::setBlock → 不重入本检查）+
+    //   1 次 worldChanged 批量收口。供 4/5 参数 setBlock 末尾各调一次（编辑路径收口，同 checkRailOnEdit）。
+    void checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id);
+
+    // t664 末地传送门框架环完整性检查（纯读）：给定候选环中心（3×3 内圈中心 cx,cz,cy），环 = 12 框架格
+    //   {(cx±2,cy,cz-1..cz+1)} ∪ {(cx-1..cx+1,cy,cz±2)}（不含四角）。全部为 EndPortal **且** state bit0
+    //   激活 → 返 true（环可开）。中心格非 3×3 内圈实际门面位（不检查中心格自身）→ 供 tryOpenEndPortal
+    //   （激活最后一框后开环）+ checkEndPortalIntegrity（拆框架后验环失效）共用。纯读 m_chunks。
+    bool endPortalRingComplete(int cx, int cy, int cz) const;
+
+    // t664 尝试打开末地传送门（12 框架全部激活 → 3×3 内圈填 EndPortalSurface 薄星平面）。调用方 = 玩家
+    //   激活最后一框后的 PlayerController useBlock 分支。环不完整 → no-op（return false）。打开成功：
+    //   3×3 内圈各格写 EndPortalSurface（m_chunks 直写 + 标脏，静默不经 setBlock → 不重入完整性复检）+
+    //   1 次 worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。返是否打开。
+    //   门面方块是普通方块 → 随存档正常持久化（spec「portal fills 应保存」）。
+    bool tryOpenEndPortal(int cx, int cy, int cz);
+
     // ── t656/t657/t658 红石电力系统 v1（机制等价 MC 1.0 redstone 的纵切简化；World 层局部重算）──
     //
     // 模型（事件驱动局部重算，非全图扫描 —— lessons perf-fluid-scan 反模式教训）：

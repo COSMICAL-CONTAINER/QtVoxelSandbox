@@ -886,7 +886,19 @@ public:
         //   音色归 GroupStone（石粉质感）。**不进创造方块段调色板**（粉尘经红石粉物品放置获得 —— 红石 tab
         //   t660 取物品 0x224，同玻璃物品模式）。
         RedstoneDust    = 130, // 红石粉导线：红石粉物品放置成（贴地薄层）；15 级衰减导电；破坏掉回红石粉
-        Count           = 131, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t664 末地传送门「门面」方块（机制等价 MC 1.0 end portal 的薄黑色星平面）：框架环（EndPortal=111，
+        //   t664 更名「末地传送门框架」）12 格全激活后由 PlayerController 在 3×3 内圈生成的**薄水平星平面**。
+        //   贴图 = tile 129（end_portal 程序星空：深紫黑星空底 + 中心暗绿旋涡 —— t620 endframe 化后该瓦片
+        //   无消费方，t664 复用为门面，零新增瓦片）；几何 = 与铁轨族同款水平双面 quad 但**贴 cell 顶下方**
+        //   （y = 1-1/16，悬空平面非贴地——机制等价 MC 门面悬于框架顶平；经 isCrossBillboard 并入 PASS 1
+        //   cutout 路由，PartialBlockGeometry EndPortalSurface case）。solid=false / ShapeNone（无碰撞、玩家
+        //   穿过、不挡邻居面剔除）、hardness=0（瞬破）、NoTool、dropId=0 不掉落（worldgen 派生方块非采集物）、
+        //   dropCount=0、maxStack=64。**光照**：lightEmission 恒 15（机制等价 MC 1.0 门面发光 15；要塞黑暗中
+        //   一片亮星平面即「通往另一宇宙」的观感）。**完整性**（World::checkEndPortalIntegrity，同
+        //   checkRailOnEdit 模式）：任一邻格框架被破 → 本格门面自动消失（静默清 Air；玩家拆门反馈）。
+        //   音色归 GroupStone。**不进创造调色板**（框架（EndPortal=111）已进；门面是激活派生方块）。
+        EndPortalSurface= 131, // 末地传送门面：12 框架全激活 → 3×3 内圈生成薄黑色星平面（光 15；框架破则消失）
+        Count           = 132, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -989,6 +1001,10 @@ public:
     //   useBlock 分支判定「右键命中格是否末地传送门 → 持末影之眼激活」（避免各处硬编码 id 判定漂移，同 isLadder
     //   单 id 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来追加变体时一处同步）。
     static bool isEndPortal(quint8 blockId);
+    // t664 末地传送门「门面」统一谓词（单一权威）：blockId == EndPortalSurface 即激活后的薄星平面
+    //   （12 框架全激活 → 3×3 内圈生成；光 15 无碰撞；框架破 → World 完整性复检自动消失）。
+    //   供 World 完整性复检 + mesher 路由。单 id 裸相等。
+    static bool isEndPortalSurface(quint8 blockId);
     // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台
     //   加成计算：扫切比雪夫半径 2 内书架数 ≤15）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移
     //   （同 isLadder 单 id 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加书架变体时一处同步）。
