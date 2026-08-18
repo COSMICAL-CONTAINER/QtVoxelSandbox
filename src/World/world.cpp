@@ -2138,10 +2138,16 @@ bool World::recomputePowerLocal()
         int x, y, z;
         unpackGrowthCell(a, x, y, z);
         addTorch(x, y, z);
-        // t657：锚点的 6 邻火把也入扫描——附着格是被编辑块（或其邻）时反相状态须复检。场景：红石火把
-        //   立在块 B 上，玩家在 B 的另一侧放 / 破电源（编辑锚点 = 电源格 ≠ 火把格）→ B 供能翻转 →
-        //   火把（B 的邻格）经本 6 邻扫描捕获。
-        for (const auto &d : kNb) addTorch(x + d[0], y + d[1], z + d[2]);
+        // t657：锚点 6 邻火把入扫描（附着格是被编辑块时反相复检）+ **二跳火把**（附着格是锚点的邻块时——
+        //   场景：红石火把立在 B 上，拉杆 / 电源贴在 B 的另一**侧面**（拉杆格与火把格曼哈顿距 2，经 B 中转：
+        //   拉杆→B→火把）。只扫一跳会漏（火把非锚点也非锚点邻格）→ 火把永不反相。二跳 = 锚点 6 邻的 6 邻
+        //   （≤36 格查表，编辑路径低成本）。attachPowered 判据（附着块被供电）天然正确覆盖——本处只解决
+        //   「火把进入复检集」的可达性。
+        for (const auto &d : kNb) {
+            const int nx = x + d[0], ny = y + d[1], nz = z + d[2];
+            addTorch(nx, ny, nz);
+            for (const auto &d2 : kNb) addTorch(nx + d2[0], ny + d2[1], nz + d2[2]);
+        }
     }
     for (const quint64 k : torches) {
         int x, y, z;
