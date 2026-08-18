@@ -531,16 +531,20 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {161, QStringLiteral("redstone_torch_on.png")},        // redstone_torch（t638 红石火把常亮态；cross cutout）
         // t620 铁轨动力 / 探测轨不做：rail_golden(_powered) / rail_detector(_powered) 在包内，但本工程无
         //   对应方块（无红石系统 → 无激活态语义）→ 不接；同 t620 第 1 部分直轨 / 拐角的注释口径。
-        // t638 翻案：动力 / 探测轨方块已建（GoldenRail / DetectorRail；矿车加速 / 驶过通电视觉）→ 接断常态
-        //   两映射 + 探测轨通电变体。MC 现代命名（1.13+ flattening）demo 包实测：powered_rail.png（断常）/
-        //   detector_rail.png（断常）/ detector_rail_on.png（通电亮红）；另两组老名 rail_golden*.png /
-        //   rail_detector*.png 也在（1.8 命名）——取现代名优先（demo 包两组逐像素等价，取与 vanilla 现行
-        //   一致的命名）。动力轨通电变体 powered_rail_on.png **不接**——本工程无红石信号恒断电（157 断常
-        //   恒用；tile 159 程序贴图留图集备用）。非 pack 回落 default_rail_{golden,detector}*.png
-        //   （tools/build_rail_family.py 原创自绘）。包内缺 PNG 时安全跳过。
-        {157, QStringLiteral("powered_rail.png")},             // golden_rail（t638 动力铁轨断常态；直线连接）
-        {158, QStringLiteral("detector_rail.png")},            // detector_rail（t638 探测铁轨断常态）
-        {160, QStringLiteral("detector_rail_on.png")},         // detector_rail_on（t638 探测轨通电视觉——矿车驶过 bit4）
+        // t638 翻案：动力 / 探测轨方块已建（GoldenRail / DetectorRail）→ 接断常态两映射 + 探测轨通电变体。
+        // t703 修「动力 / 探测轨贴图模糊」：demo 包内**现代命名**（powered_rail.png / detector_rail.png /
+        //   detector_rail_on.png / powered_rail_on.png）实测全是 16×16 缩略副本，而**老命名**（rail_golden.png
+        //   / rail_golden_powered.png / rail_detector.png / rail_detector_powered.png）才是 128×128 HD 原图
+        //   （与普通轨 rail_normal.png 同级）。t638 注释「两组逐像素等价」只在降采样后成立——原生尺寸不等价。
+        //   旧映射取现代名 → 16px 被 SmoothTransformation 拉到 64px = 糊；tile 121 普通轨恰好映射老名
+        //   rail_normal.png（128px）所以清晰（用户实测对照）。修 = 四瓦片全改老命名 HD 图。
+        //   另补 159（动力轨通变态）映射：t658 起 GoldenRailStateOnFlag 已消费 tile 159（电力驱动换贴图），
+        //   不映射则通电金轨仍是程序 16→64 贴图（与断常 HD 瓦片混排突兀）。非 pack 回落
+        //   default_rail_{golden,detector}*.png（tools/build_rail_family.py 原创自绘）。包内缺 PNG 安全跳过。
+        {157, QStringLiteral("rail_golden.png")},           // golden_rail（t638 动力铁轨断常态；t703 老名 HD 128px）
+        {158, QStringLiteral("rail_detector.png")},         // detector_rail（t638 探测铁轨断常态；t703 老名 HD 128px）
+        {159, QStringLiteral("rail_golden_powered.png")},   // rail_golden_on（t703 动力轨通变态——老名 HD；t658 电力驱动消费）
+        {160, QStringLiteral("rail_detector_powered.png")}, // detector_rail_on（t638 探测轨通电视觉；t703 老名 HD）
         // t638 仙人掌底面翻案（t620「不接」被观察者视角观察推翻）：tile 163 = cactus_bottom.png（包内实测
         //   与 cactus_top 像素不同——底面更暗、无中央凹陷）。Cactus def bottomTile=163；mesher pushBox
         //   -Y 底面读 bottomTile（partialblockgeometry t638 加 bottomTile 参数）。非 pack 回落
@@ -847,8 +851,10 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
         { 103, { QStringLiteral("rail_normal.png") } },               // Rail 铁轨（block 兜底：item 目录无 rail 图标）
         // t638 铁轨家族 + 红石火把 pack 2D item 图标（item 目录无 rail 族图标（demo 包实测）→ block 直轨 2D
         //   图兜底；红石火把 item 目录同样无 → block/redstone_torch_on.png 兜底（常亮态 2D 火把立绘））。
-        { 127, { QStringLiteral("powered_rail.png"),   QStringLiteral("rail_golden.png") } },   // GoldenRail 动力铁轨（现代名优先 / 1.8 名兜底）
-        { 128, { QStringLiteral("detector_rail.png"),  QStringLiteral("rail_detector.png") } }, // DetectorRail 探测铁轨
+        //   t703：动力 / 探测轨候选序反转——老名（rail_golden / rail_detector）是 128px HD、现代名是 16px
+        //   缩略副本（tileFilenameMap 157-160 同因已改老名），图标同取 HD 版免糊。
+        { 127, { QStringLiteral("rail_golden.png"),   QStringLiteral("powered_rail.png") } },   // GoldenRail 动力铁轨（t703 老名 HD 优先）
+        { 128, { QStringLiteral("rail_detector.png"), QStringLiteral("detector_rail.png") } }, // DetectorRail 探测铁轨（t703 老名 HD 优先）
         { 129, { QStringLiteral("redstone_torch_on.png") } },                                  // RedstoneTorch 红石火把（常亮态 2D）
     };
     return kMap;
