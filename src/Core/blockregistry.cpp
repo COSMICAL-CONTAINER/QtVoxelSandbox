@@ -647,6 +647,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   MC 1.0 门面发光 15）。完整性：World::checkEndPortalIntegrity（邻框架破 → 门面消失）。音色 GroupStone。
     //   不进创造调色板（框架已进；门面是激活派生方块）。
     /* end_portal_surface */ {int(BlockRegistry::EndPortalSurface), 129,129,129,129, false, BlockRegistry::ShapeNone, 0.0f, int(BlockRegistry::NoTool),   0, false,                               0, 0, 64, "end_portal_surface", "末地传送门面"},
+    // ── t665 怪物蛋（MonsterEgg；机制等价 MC 1.0 silverfish stone / monster egg）：**外表与石砖完全
+    //   相同**（各面贴图=stone_brick(128)，六面同；识别仅靠破坏行为——挖破出 Silverfish 敌对 mob，
+    //   PlayerController::finishMiningAt 特判，dropId=0 不掉方块）。solid=true / ShapeFull（完整方块，
+    //   同石砖碰撞 / 高度图）、hardness=0（瞬破）、NoTool（空手可采）、dropId=0 / dropCount=0（破坏无
+    //   掉落——生成虫替代，机制等价 MC「怪物蛋没有掉落，只有蠹虫」）、maxStack=64。音色 GroupStone。
+    //   worldgen placeStronghold 确定性散布（hashVoxel，同 seed 同分布）。进创造调色板。
+    /* monster_egg    */ {int(BlockRegistry::MonsterEgg),       128,128,128,128, true,  BlockRegistry::ShapeFull,     0.0f, int(BlockRegistry::NoTool),   0, false,                               0, 0, 64, "monster_egg",  "怪物蛋"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -1051,6 +1058,13 @@ bool BlockRegistry::isEndPortal(quint8 blockId)
 bool BlockRegistry::isEndPortalSurface(quint8 blockId)
 {
     return blockId == EndPortalSurface;
+}
+
+// t665 怪物蛋统一谓词（单一权威）：blockId == MonsterEgg 即怪物蛋（石砖形；外表同石砖、瞬破出虫）。
+//   供 PlayerController::finishMiningAt 破坏特判（生成 Silverfish 替代掉落）。
+bool BlockRegistry::isMonsterEgg(quint8 blockId)
+{
+    return blockId == MonsterEgg;
 }
 
 // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台加成
@@ -1765,6 +1779,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case StoneBrickSlab: case StoneBrickStairs: // t487 石砖台阶/楼梯 → 石质音色（同 stone 族）
     case EndPortal: // t487 末地传送门框架 → 石质兜底音色（不可破，仅创造敲响兜底）
     case EndPortalSurface: // t664 门面 → 石质兜底音色（瞬破薄平面轻响）
+    case MonsterEgg: // t665 怪物蛋（石砖形）→ 石质音色（同 stone_brick 敲击感；外表即石砖）
     case CoalBlock: case LapisBlock: case DiamondBlock: // t620 矿物存储块 → 石质音色（金属质，同 iron_block 族）
     case GoldBlock: case RedstoneBlock: // t620 金块 / 红石块 → 石质音色（同 iron_block 族）
     case RedstoneLamp: // t620 红石灯 → 石质音色（玻璃质敲击，同 glass / ice 族）

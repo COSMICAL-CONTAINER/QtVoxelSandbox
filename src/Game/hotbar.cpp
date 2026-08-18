@@ -65,6 +65,7 @@ const char *iconFileForBlock(quint8 id)
     //   原误走 BLOCKS 满立方投影（三图标同图=全显石砖整块，用户「背包三个都是石砖满一格」）→ 改 render_partial_3d
     //   slab/stairs 形状（同圆石变体流程，fill=default_stone_brick 砖纹）。tools/build_cube_icons.py 程序生成。
     case BlockRegistry::StoneBrick:       return "icon_stone_brick.png";       // 石砖：3D 立方体（顶+两侧砖纹）
+    case BlockRegistry::MonsterEgg:       return "icon_stone_brick.png";       // t665 怪物蛋：外表与石砖完全相同（复用石砖图标；瞬破出虫）
     case BlockRegistry::StoneBrickSlab:   return "icon_stone_brick_slab.png";  // 石砖台阶：3D 半高盒（砖纹）
     case BlockRegistry::StoneBrickStairs: return "icon_stone_brick_stairs.png";// 石砖楼梯：3D L 阶（背墙 + 整步，砖纹）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
@@ -731,6 +732,10 @@ QVariantList Hotbar::creativeBlocks() const
              // t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶 / 石砖楼梯；worldgen 散布 / 创造取用）。
              int(BlockRegistry::StoneBrick),                                 // 石砖（石质整立方 + 砖纹；要塞墙体主体；可放置）
              int(BlockRegistry::StoneBrickSlab),                             // 石砖台阶（半高；复用 ShapeSlab 几何 + 石砖贴图；可放置）
+             // t665 怪物蛋（MonsterEgg）：外表与石砖完全相同，瞬破生成 Silverfish 敌对 mob（机制等价 MC 1.0
+             //   silverfish stone / monster egg）。要塞书房散布；创造取用可自建「看似石砖实为虫巢」陷阱。
+             //   紧随石砖系列（外表同族，破坏行为异）。
+             int(BlockRegistry::MonsterEgg),                                 // 怪物蛋（石砖形；瞬破出蠹虫）
              // t634 末地传送门（EndPortal，endframe 化 t620）：进创造调色板（用户「末地传送门的框架在创造背包没找到」
              //   ——要塞传送门房祭坛可直接取用 / 自建末地祭坛测试）。放置正常（ShapeFull 整格 / setBlock 空气格路径）；
              //   破坏：创造瞬破（t141 基岩同款，drop=false 无掉落——原方块 dropId=0 本就不掉）；生存不可破

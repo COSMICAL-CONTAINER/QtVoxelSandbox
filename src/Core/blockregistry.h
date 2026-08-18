@@ -691,21 +691,21 @@ public:
         //   同编码）。经 isStairs 谓词并入异形路由（段外，同 CobbleStairs 模式）。音色归 GroupStone。
         //   worldgen placeStronghold 楼梯井；进创造调色板。
         StoneBrickStairs= 110, // 石砖楼梯：整步+背墙（机制等价 MC 1.0 stone brick stairs）；复用 ShapeStairs 几何
-        //   末地传送门（EndPortal）：要塞传送门房中央的传送门方块（机制等价 MC 1.0 end portal；§9 区隔：末地为
-        //   通用描述词，机制对齐非 MC 专名照搬）。**整立方不透明**——简化为满格整立方（机制等价 MC 1.0 末地传送门
-        //   的「传送门平面」外观，本工程不做异形框架；激活后由 Main.qml 伪光源 + state 切换显星空黑洞视觉）。
-        //   solid=false（非实体 → 不挡邻居面剔除，与地形解耦；机制等价 MC 末地传送门无碰撞可走过）/ ShapeFull
-        //   （碰撞 / 选中仍走整格可踩 / 可瞄准）、**hardness=-1.0**（不可挖掘：canMine=false，任何模式/工具不破，
-        //   防创造秒破传送门；同 bedrock / Water 哨兵语义）、dropId=0 不掉落、dropCount=0、maxStack=64
-        //   （worldgen 专属 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图=t620 末影祭坛三面（见下 endframe 化段；原创自绘 §9a；tools/build_endframe.py 程序生成）。
-        //   音色归 GroupStone（石质兜底）。**激活机制**：玩家持末影之眼物品（EndEyeId）右键传送门 → placeBlock
-        //   useBlock 分支检测命中 EndPortal + 持 EndEyeId → 翻 state bit0（激活态）+ emit swingArm + qInfo 日志
-        //   （末地预热占位：仅激活效果 + 日志，不实现末地维度，spec「实际传送末地可推迟为占位/告警」）。
-        //   **t620 endframe 化**：贴图从程序星空切到末影祭坛三面（侧·底=endframe_side(140) / 顶（未放之眼）=
-        //   endframe_top(141) / 顶（激活态）=endframe_eye(142)（框面+中央之眼亮纹，tileFor per-face+
-        //   state 选；程序星空 129/130 仍留图集但已无引用）。
-        //   t634 进创造调色板（要塞祭坛可取用 / 自建末地祭坛测试；创造瞬破 drop=0、生存不可破同基岩）。state 经 m_states 落 SQLite round-trip 保真。
-        EndPortal       = 111, // 末地传送门：要塞传送门房中央（机制等价 MC 1.0 end portal）；末影之眼右键激活（占位）
+        //   末地传送门框架（EndPortal；t664 更名，原「末地祭坛/末地传送门」）：要塞传送门房 12 格框架环方块
+        //   （机制等价 MC 1.0 end portal frame；§9 区隔：末地为通用描述词，机制对齐非 MC 专名照搬）。
+        //   **整立方**（框架盒身；t664 起本方块是**框架**——激活后的薄门面是独立方块 EndPortalSurface=131）。
+        //   solid=false（非实体 → 不挡邻居面剔除，与地形解耦）/ ShapeFull（碰撞 / 选中仍走整格可踩 / 可瞄准）、
+        //   **hardness=-1.0**（生存不可挖掘：canMine=false；**创造可瞬破** drop=0 不掉落，同 bedrock 语义 ——
+        //   t664 完整性：破任一框架 → 3×3 门面全消失，World::checkEndPortalIntegrity 维护）、dropId=0 不掉落、
+        //   dropCount=0、maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图
+        //   =t620 末影祭坛三面（侧·底=endframe_side(140) / 顶（未放之眼）=endframe_top(141) / 顶（已放眼）=
+        //   endframe_eye(142)（框面+中央之眼亮纹，tileFor per-face + state 选；程序星空 129 由 EndPortalSurface
+        //   复用为门面）。
+        //   音色归 GroupStone（石质兜底）。**激活机制**（t664 正确形态）：玩家持末影之眼物品（EndEyeId）右键
+        //   各框架 → placeBlock useBlock 分支翻 state bit0（放眼态）+ 摇 candidate 环中心调 World::tryOpenEndPortal
+        //   —— 12 框架**全部激活** → 3×3 内圈生成 EndPortalSurface 薄星平面（末地维度仍占位不实现）。
+        //   t634 进创造调色板（自建末地传送门测试）。state 经 m_states 落 SQLite round-trip 保真。
+        EndPortal       = 111, // 末地传送门框架：12 格环围 3×3 内圈（机制等价 MC 1.0 end portal frame）；末影之眼右键放眼激活
         // ── t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / 木按钮 / 石按钮；无红石系统，故用「右键激活 →
         //   点燃水平四邻 TNT」简化为单次脉冲触发，spec「若时间紧，拉杆/按钮可简化为放置即点燃邻接 TNT 或右键触发
         //   单一路径」）。名称 / 贴图全原创自绘 §9a（tools/build_lever_button.py 程序生成）。三者本身是可放置 / 可破的
@@ -898,7 +898,15 @@ public:
         //   checkRailOnEdit 模式）：任一邻格框架被破 → 本格门面自动消失（静默清 Air；玩家拆门反馈）。
         //   音色归 GroupStone。**不进创造调色板**（框架（EndPortal=111）已进；门面是激活派生方块）。
         EndPortalSurface= 131, // 末地传送门面：12 框架全激活 → 3×3 内圈生成薄黑色星平面（光 15；框架破则消失）
-        Count           = 132, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t665 怪物蛋（MonsterEgg；机制等价 MC 1.0 silverfish stone / monster egg）：**外表与石砖完全
+        //   相同**（各面贴图=stone_brick(128)）、硬度 0（瞬破）、NoTool（空手可采）、**dropId=0 不掉落
+        //   方块** —— 破坏时由 PlayerController::finishMiningAt 特判生成一只 Silverfish 敌对 mob
+        //   （spawnMobTyped MobSilverfish，机制等价 MC「挖怪物蛋必出蠹虫」）。solid=true / ShapeFull
+        //   （完整方块，同石砖碰撞）。maxStack=64（worldgen 散布 / 创造取用）。音色 GroupStone。
+        //   worldgen placeStronghold 散布于图书馆书架区 / 传送门房走廊（hashVoxel 确定性，同 seed 同分布）。
+        //   进创造调色板（玩家可自建「看似石砖实为虫巢」的陷阱建筑；破坏即出虫）。
+        MonsterEgg      = 132, // 怪物蛋（石砖形）：外表同石砖；瞬破生成蠹虫敌对 mob（机制等价 MC silverfish stone）
+        Count           = 133, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1005,6 +1013,9 @@ public:
     //   （12 框架全激活 → 3×3 内圈生成；光 15 无碰撞；框架破 → World 完整性复检自动消失）。
     //   供 World 完整性复检 + mesher 路由。单 id 裸相等。
     static bool isEndPortalSurface(quint8 blockId);
+    // t665 怪物蛋统一谓词（单一权威）：blockId == MonsterEgg 即怪物蛋（石砖形；外表同石砖、瞬破出虫）。
+    //   供 PlayerController::finishMiningAt 破坏特判（生成 Silverfish 替代掉落）。单 id 裸相等。
+    static bool isMonsterEgg(quint8 blockId);
     // t474 书架统一谓词（单一权威）：blockId == Bookshelf 即书架。供 World::countBookshelvesAround（附魔台
     //   加成计算：扫切比雪夫半径 2 内书架数 ≤15）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移
     //   （同 isLadder 单 id 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加书架变体时一处同步）。

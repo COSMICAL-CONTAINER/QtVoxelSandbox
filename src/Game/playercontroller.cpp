@@ -1104,6 +1104,13 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     const quint8 replaceId = (brokenId == BlockRegistry::Ice && !iceSilkTouch)
                              ? BlockRegistry::Water : BlockRegistry::Air;
     m_world->setBlock(x, y, z, replaceId, quint8(0)); // → World 发 blockBroken（粒子触发）+ worldChanged（mesh 重建）
+    // t665 怪物蛋（石砖形；机制等价 MC 1.0 silverfish stone）破坏 → **生成 Silverfish 敌对 mob 替代掉落**
+    //   （MC「挖怪物蛋必出蠹虫」；dropId=0 不掉方块）。生存 + 创造均触发（机制等价 MC：创造挖怪物蛋同样
+    //   出虫——方块属性而非掉落）。生成位 = 破格中心（同生物蛋 useBlock 语义：spawnMobTyped 以格坐标 +0.5
+    //   存中心；重力 tick 贴地）。mobType = EntityManager::MobSilverfish（14，敌对小虫）。
+    //   分层（PLAN §2）：生成属 Game/Physics（调 EntityManager），不写栅格（setBlock 已破）。
+    if (m_entityManager && brokenId == BlockRegistry::MonsterEgg)
+        m_entityManager->spawnMobTyped(x, y, z, EntityManager::MobSilverfish, QStringLiteral("#c8c2b8"), 0);
     // t134/t466 门两格破坏联动（统一经 isDoor 谓词覆盖 WoodDoor + SpruceDoor）：破任一格 → 同步清配对格
     //   （另一格），防留半截悬空门。配对格据本格 state bit3（isUpper）判上 / 下：本格上格 → 配对 y-1；
     //   本格下格 → 配对 y+1。仅当配对格**同为门**（isDoor）才清（防御：state 不一致时不误清异格；不同材质门

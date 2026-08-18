@@ -5294,25 +5294,26 @@ void World::placeJungleTemple()
     qInfo() << "worldgen: jungle temples =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
-// t487 要塞（见 world.h 头注释）。机制等价 MC 1.0 要塞 stronghold：地下深处（Y<30）的石砖迷宫 + 末地传送门房
-//   （末地传送门方块）+ 图书馆（书架墙）+ 银鱼刷怪笼。确定性散布（hashColumn + seed 偏移，PLAN §2-K），
-//   结构与 placeDungeons / placeJungleTemple 同源（网格采样 + 概率筛选 + 抖动 + y 范围派生），但生成的是
-//   一个 13×13×5 的石砖地下建筑（地板 / 顶板 / 周界墙 + 内部房间 / 走廊）。
+// t487/t665 要塞（见 world.h 头注释）。机制等价 MC 1.0 要塞 stronghold：地下深处（Y<30）的石砖**走廊 +
+//   房间 piece 拼接**结构 + 末地传送门房（悬空熔岩台 + 12 框架环）+ 图书馆（书架墙 + 蛛网 + 怪物蛋）+ 银鱼
+//   刷怪笼。确定性散布（hashColumn + seed 偏移，PLAN §2-K），结构与 placeDungeons / placeJungleTemple 同源
+//   （网格采样 + 概率筛选 + 抖动 + y 范围派生），但生成的是一个 21×21×5 的石砖地下建筑。
 //
-//   布局（13×13 水平 footprint，dx/dz ∈ [-6,6]；竖直 dy ∈ [0,4]）：
+//   布局（t665 重做；21×21 水平 footprint，dx/dz ∈ [-10,10]；竖直 dy ∈ [0,4]）：
 //     - 地板（dy=0）与顶板（dy=4）：全幅 StoneBrick（封闭黑暗，机制等价 MC 1.0 要塞石砖地牢氛围）。
-//     - 周界墙（dy 1..3，dx=±6 / dz=±6）：StoneBrick，四壁中央留 2 高门洞（玩家可走入）。
-//     - **中央末地传送门房**（7×7 房间，dx/dz ∈ [-3,3]）：房间四壁 StoneBrick（dy 1..3，每壁中央留门洞），
-//       地板中央 3×3 EndPortal（dx/dz ∈ [-1,1]，dy=1，state=0 未激活）→ 玩家持末影之眼右键激活（末地预热占位）。
-//     - **大厅**（传送门房之外、周界墙之内，dy 1..2）：整体清 Air → 开阔石砖大厅（玩家可自由走入所有房间 /
-//       角落，迷宫感来自中央传送门房 + 角落石砖台阶/楼梯 + 蛛网的隔断错落）。
-//     - **图书馆**（NW 角，dx/dz ∈ [-6,-3]）：房间四壁内侧摆 Bookshelf（dy=1..2 书架墙，机制等价 MC 1.0
-//       要塞图书馆书架 → 附魔台加成来源）+ 房间中央石砖台阶（StoneBrickSlab）/ 楼梯（StoneBrickStairs）装饰。
-//     - **银鱼刷怪笼**（SE 角，dx/dz ∈ [3,6]）：房间中央 Spawner + SpawnerStateSilverfishFlag state 标记 →
-//       tickSpawners 据 flag 刷 Silverfish（机制等价 MC 1.0 要塞银鱼刷怪笼）。
-//     - **战利品箱**（NE 角，dx ∈ [3,6] / dz ∈ [-6,-3]）：一只 Chest + ChestStateStrongholdFlag state 标记 →
-//       首开填要塞战利品（含末影之眼，激活传送门关键物品）。
-//     - **迷宫装饰**：SW 角散布 Cobweb 蛛网 + 大厅内确定性散布石砖台阶/楼梯（StoneBrickStairs 楼梯井感）+ 蛛网。
+//     - **内部空间**（走廊 / 房间内部，dy 1..3）：清 Air 玩家可走；其余非内部格 = 石砖墙（hash 变体：
+//       ~10% MossyCobble 苔石 / ~8% MonsterEgg 怪物蛋嵌墙 —— 机制等价 MC 要塞石砖墙混嵌银鱼怪物蛋）。
+//     - **中央大厅**（5×5，dx/dz ∈ [-2,2]）：四向走廊交汇点。
+//     - **东入口走廊**（3 宽×8 深，x 3..10, z -1..1）：玩家从东侧周界墙门洞走入。
+//     - **北走廊**（3 宽，x -1..1, z -7..-3）→ **传送门房**（x -4..4, z -10..-8）：熔岩池（房间北地板）
+//       + 悬空石砖平台（熔岩上方 1 格）+ **12 框架环**（EndPortal=111 框架，y=2 围出 3×3 内圈；~10% 预置
+//       末影之眼 state 激活，机制等价 MC 1.0 框架预置眼睛；t664 激活/完整性机制接线）。
+//     - **西走廊**（3 宽，x -6..-3）→ **图书馆**（x -10..-7, z -4..4）：四壁 Bookshelf 书架墙（附魔台加成
+//       来源 t474）+ 中央蛛网 + 石砖台阶/楼梯装饰。
+//     - **南走廊**（3 宽，z 3..6）→ **战利品/银鱼房**（x -4..4, z 7..10）：银鱼刷怪笼（Spawner +
+//       SpawnerStateSilverfishFlag → tickSpawners 刷 Silverfish）+ 战利品箱（Chest + ChestStateStrongholdFlag
+//       → 首开填要塞战利品含末影之眼）。
+//     - **走廊装饰**：内部空间确定性散布 Cobweb 蛛网（~10%）+ StoneBrickStairs 楼梯井（~8%；跳过设施房）。
 //   placeJungleTemple 之后、fillWater 之前（独立于海平面；fillWater 仅填地表低洼 → 地下要塞不被灌水）。
 //   纯函数于 seed（hashColumn / hashVoxel）→ 同 seed 同要塞分布（PLAN §2-K）。仅扫候选格 → 不全图扫描。
 void World::placeStronghold()
@@ -5322,8 +5323,8 @@ void World::placeStronghold()
     constexpr int kBedrockTop      = 4;     // 不动基岩顶（同 placeDungeons / placeMineshaft / placeJungleTemple）
     constexpr int kStrongholdMaxY  = 30;    // 要塞最高 y（spec「Y<30 地下深」；避开近地表 / 仅地下深处）
     constexpr int kSurfaceGap      = 5;     // 与地表保留的最小距离（要塞上方至少 5 格石顶 → 不破地表、封闭黑暗）
-    constexpr int kHalf            = 6;     // 建筑外圈半边（13×13 = (2*6+1)² 外圈）
-    constexpr int kMargin          = kHalf + 1; // 留边界（外圈半边 6 + 抖动余量 → 半径 ≤ 7 不越界）
+    constexpr int kHalf            = 10;    // 建筑外圈半边（21×21 = (2*10+1)² 外圈；t665 重做为走廊+房间布局）
+    constexpr int kMargin          = kHalf + 1; // 留边界（外圈半边 10 + 抖动余量 → 半径 ≤ 11 不越界）
     constexpr int kWallH           = 3;     // 墙体高度层数（dy 1..3；地板 dy=0 / 顶板 dy=4）
 
     int placed = 0;
@@ -5348,6 +5349,15 @@ void World::placeStronghold()
                 m_chunks.setBlock(px, yy, pz, id, state);
         };
 
+        // ── t665 要塞结构重做（机制等价 MC 1.0 要塞 piece 拼接式布局；「非常简陋、房间非常小」重做）──
+        //   布局（21×21 = dx/dz ∈ [-10,10] 水平足迹；竖直 dy ∈ [0,4] 地板/墙/顶板）：
+        //     中央大厅（5×5）← 东入口走廊（3 宽×8 深）┐
+        //                           ← 西走廊（3 宽×4 深）→ 图书馆（2×7 房间：书架墙 + 怪物蛋）
+        //                           ← 北走廊（3 宽×5 深）→ 传送门房（悬空熔岩台 + 12 框架环 + 预置眼睛）
+        //                           ← 南走廊（3 宽×4 深）→ 战利品/银鱼房（宝箱 + 银鱼刷怪笼 + 怪物蛋）
+        //   房间 / 走廊 = 内部空间（y 1..3 清 Air，玩家可走）；其余 = StoneBrick 墙（hash 变体：
+        //   ~10% MossyCobble 苔石砖观感 / ~8% MonsterEgg 怪物蛋嵌墙）。确定性（hashVoxel + strongSeed，
+        //   同 seed 同结构同散布，PLAN §2-K）。
         // 1) 地板（dy=0）+ 顶板（dy=4）：全幅 StoneBrick（封闭黑暗）。
         for (int dx = -kHalf; dx <= kHalf; ++dx) {
             for (int dz = -kHalf; dz <= kHalf; ++dz) {
@@ -5356,103 +5366,113 @@ void World::placeStronghold()
             }
         }
 
-        // 2) 周界墙（dy 1..3，dx=±6 / dz=±6）：StoneBrick，四壁中央留 2 高门洞（±X 墙 dz=0、±Z 墙 dx=0）。
+        // 内部空间谓词（走廊 / 房间内部 → 清 Air；非内部 → 墙）。中央大厅 + 四向走廊 + 四角设施房。
+        auto insideSpace = [](int dx, int dz) {
+            if (dx >= -2 && dx <= 2 && dz >= -2 && dz <= 2) return true;       // 中央大厅（5×5）
+            if (dx >= 3 && dx <= 10 && dz >= -1 && dz <= 1) return true;       // 东入口走廊
+            if (dx >= -1 && dx <= 1 && dz >= -7 && dz <= -3) return true;      // 北走廊
+            if (dx >= -3 && dx <= 3 && dz >= -9 && dz <= -8) return true;      // 传送门房内部
+            if (dx >= -1 && dx <= 1 && dz >= 3 && dz <= 6) return true;        // 南走廊
+            if (dx >= -3 && dx <= 3 && dz >= 8 && dz <= 9) return true;        // 战利品/银鱼房内部
+            if (dx >= -6 && dx <= -3 && dz >= -1 && dz <= 1) return true;      // 西走廊
+            if (dx >= -9 && dx <= -8 && dz >= -3 && dz <= 3) return true;      // 图书馆内部
+            return false;
+        };
+
+        // 2) 墙体 + 内部空间（y 1..3）：非内部格 = 石砖（hash 变体 MossyCobble 苔石 / MonsterEgg 怪物蛋嵌墙，
+        //    机制等价 MC 要塞石砖墙混嵌怪物蛋；确定性 → 同 seed 同墙同蛋）；内部格 = 清 Air（玩家可走入）。
         for (int dy = 1; dy <= kWallH; ++dy) {
-            for (int d = -kHalf; d <= kHalf; ++d) {
-                for (int sgn = -1; sgn <= 1; sgn += 2) {
-                    if (d == 0 && dy <= 2) continue; // 中央门洞（2 高）
-                    put(sgn * kHalf, dy, d, BlockRegistry::StoneBrick); // ±X 墙
-                    put(d, dy, sgn * kHalf, BlockRegistry::StoneBrick); // ±Z 墙
+            for (int dx = -kHalf; dx <= kHalf; ++dx) {
+                for (int dz = -kHalf; dz <= kHalf; ++dz) {
+                    if (insideSpace(dx, dz)) {
+                        put(dx, dy, dz, BlockRegistry::Air); // 走廊 / 房间内部
+                        continue;
+                    }
+                    // 墙格：确定性变体（hashVoxel 高 8 位分流 —— 苔石砖 ~10% / 怪物蛋 ~8% / 石砖余下）。
+                    const quint32 wh = hashVoxel(strongSeed ^ 0x665, cx + dx, cy + dy, cz + dz);
+                    if ((wh % 100u) < 8u)
+                        put(dx, dy, dz, BlockRegistry::MonsterEgg);    // 怪物蛋嵌墙（瞬破出蠹虫）
+                    else if ((wh % 100u) < 18u)
+                        put(dx, dy, dz, BlockRegistry::MossyCobble);   // 苔石砖变体（石砖同族观感）
+                    else
+                        put(dx, dy, dz, BlockRegistry::StoneBrick);
                 }
             }
         }
 
-        // 3) **中央末地传送门房**（7×7 = dx/dz ∈ [-3,3]）：房间四壁 StoneBrick（dy 1..3，每壁中央留门洞）
-        //    + 房间内部清 Air（dx/dz ∈ [-2,2]，dy 1..2，玩家可走入）+ **12 格末地传送门框架环**
-        //    （EndPortal=111，t664 更名「末地传送门框架」；dy=1，围绕 3×3 内圈每边 3 个、不含四角）→
-        //    玩家持末影之眼右键各框架放眼激活 → 全部 12 格激活 → 3×3 内圈生成末地传送门面
-        //    （EndPortalSurface=131 薄星平面；PlayerController useBlock 分支 + World 完整性复检共同维护）。
-        //    房间墙先于大厅清空（section 4 的 continue 保留墙体，防被 Air 覆盖）。
-        for (int dy = 1; dy <= kWallH; ++dy) {
-            for (int d = -3; d <= 3; ++d) {
-                for (int sgn = -1; sgn <= 1; sgn += 2) {
-                    if (d == 0 && dy <= 2) continue; // 房间门洞（2 高，通往大厅）
-                    put(sgn * 3, dy, d, BlockRegistry::StoneBrick); // ±X 房间墙
-                    put(d, dy, sgn * 3, BlockRegistry::StoneBrick); // ±Z 房间墙
-                }
-            }
-        }
-        for (int dy = 1; dy <= 2; ++dy) {
-            for (int pdx = -2; pdx <= 2; ++pdx) {
-                for (int pdz = -2; pdz <= 2; ++pdz) {
-                    put(pdx, dy, pdz, BlockRegistry::Air); // 房间内部清空（玩家可走入）
-                }
-            }
-        }
-        // t664 框架环：内圈 3×3 = |dx|≤1 && |dz|≤1（后续激活生成门面）；框架在 |dx|=2 或 |dz|=2 的
-        //   ±2 环上但**不含四角 (±2,±2)**（四角保持空气，机制等价 MC 1.0 门框架 = 12 格四边各 3）。
+        // 3) **传送门房**（x -3..3, z -9..-8 内部；北墙 z=-10 / 侧墙 x=±4）—— 悬空熔岩台 + 12 框架环
+        //    （机制等价 MC 1.0 传送门房：熔岩池 + 石砖平台 + 框架环；t664 框架/门面机制接线）：
+        //    a) 熔岩池：房间北部地板（x -3..3, z -9, y=0）灌岩浆（地下深暗 + 平台悬浮其上的观感）；
+        //    b) 悬空平台：x -2..2, z -9, y=1 的 StoneBrick（熔岩上方 1 格，玩家可站）；
+        //    c) 12 框架环：中心 (0, 2, -9)，12 格 EndPortal 框架在 y=2 围出 3×3 内圈（z=-10 排嵌北墙 /
+        //       z=-8 排朝走廊，框架离地可钻入环内）。**预置眼睛**：约 10% 框架初始 state 激活
+        //       （EndPortalStateActiveFlag，机制等价 MC 1.0 约 10% 框架自带眼睛；确定性 hashVoxel）。
+        for (int dx = -3; dx <= 3; ++dx)
+            put(dx, 0, -9, BlockRegistry::Lava);            // 熔岩池（平台下方）
+        for (int dx = -2; dx <= 2; ++dx)
+            put(dx, 1, -9, BlockRegistry::StoneBrick);      // 悬空熔岩台（平台）
         for (int pdx = -2; pdx <= 2; ++pdx) {
-            for (int pdz = -2; pdz <= 2; ++pdz) {
-                const bool onRing = (pdx == -2 || pdx == 2) ? (pdz >= -1 && pdz <= 1)
-                                                            : (pdz == -2 || pdz == 2) && (pdx >= -1 && pdx <= 1);
-                if (onRing)
-                    put(pdx, 1, pdz, BlockRegistry::EndPortal); // 末地传送门框架（state=0 未放眼）
+            for (int pdz = -10; pdz <= -8; ++pdz) {
+                // 环 = 12 格（四边各 3，不含四角）：x=±2 时 z∈{-10,-9,-8}；z=-10/-8 时 x∈{-1,0,1}。
+                const bool onRingExact = (pdx == -2 || pdx == 2) ? (pdz >= -10 && pdz <= -8)
+                                                                 : (pdz == -10 || pdz == -8) && (pdx >= -1 && pdx <= 1);
+                if (!onRingExact) continue;
+                // 预置眼睛（~10%）：确定性 hash → 该框架初始激活（无需玩家插眼；机制等价 MC 约 1/10 预置）。
+                const quint32 eh = hashVoxel(strongSeed ^ 0x664, cx + pdx, cy + 2, cz + pdz);
+                const quint8 st = (eh % 100u) < 10u ? BlockRegistry::EndPortalStateActiveFlag : 0u;
+                put(pdx, 2, pdz, BlockRegistry::EndPortal, st); // 末地传送门框架（state 0=未放 / bit0=已放眼）
             }
         }
 
-        // 4) **大厅**（传送门房之外、周界墙之内，dy 1..2）：整体清 Air → 开阔石砖大厅。
-        //    玩家从周界墙门洞走入 → 大厅环绕中央传送门房，可自由走到所有角落设施（图书馆 / 银鱼刷怪笼 /
-        //    战利品箱），迷宫感来自中央传送门房 + 角落楼梯 + 蛛网的错落隔断。
-        //    中央传送门房整区（dx/dz ∈ [-3,3]）保留（墙体 + 门洞 + 3×3 传送门），不参与大厅清空。
+        // 4) 图书馆（x -10..-7, z -4..4 房间；内部 2×7）—— 书架墙（机制等价 MC 1.0 要塞图书馆：
+        //    书架贴墙排布，附魔台加成来源 t474）+ 蛛网装饰。书架替换房间内壁（x=-7 东墙内壁 +
+        //    z=±4 南北墙内壁，dy 1..2），中央留 2 宽走道。
+        for (int dy = 1; dy <= 2; ++dy) {
+            for (int d = -3; d <= 3; ++d) {
+                put(-7, dy, d, BlockRegistry::Bookshelf);    // 东墙内壁书架列（面向房间）
+                put(-9, dy, d, BlockRegistry::Bookshelf);    // 西墙内壁书架列（x=-10 墙内侧一排）
+            }
+            for (int d = -9; d <= -8; ++d) {
+                put(d, dy, -4, BlockRegistry::Bookshelf);    // 南墙内壁书架行
+                put(d, dy, 4, BlockRegistry::Bookshelf);     // 北墙内壁书架行
+            }
+        }
+        // 图书馆中央蛛网 + 阶梯装饰（确定性；同 seed 同分布）。
+        {
+            const quint32 wh = hashVoxel(strongSeed ^ 0x665, cx - 8, cy + 1, cz - 1);
+            if ((wh % 100u) < 50u)
+                put(-8, 1, -1, BlockRegistry::Cobweb);
+            put(-8, 1, 0, BlockRegistry::StoneBrickSlab);
+            put(-8, 1, 1, BlockRegistry::StoneBrickStairs, 0);
+        }
+
+        // 5) 银鱼刷怪笼 + 战利品箱（南房，x -3..3, z 8..9）：刷怪笼中央（tickSpawners 据 flag 刷
+        //    Silverfish，机制等价 MC 1.0 要塞银鱼刷怪笼）+ 宝箱靠角（ChestStateStrongholdFlag → 首开填
+        //    要塞战利品含末影之眼，激活传送门关键物品）。
+        put(0, 1, 8, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfishFlag);
+        put(2, 1, 9, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
+        // 南房中央蛛网（阴湿地牢氛围；确定性）。
+        {
+            const quint32 wh = hashVoxel(strongSeed ^ 0x665, cx + 0, cy + 1, cz + 9);
+            if ((wh % 100u) < 50u)
+                put(-1, 1, 9, BlockRegistry::Cobweb);
+        }
+
+        // 6) 走廊蛛网 + 楼梯井装饰（机制等价 MC 要塞走廊的残破感）：内部空间内确定性散布
+        //    Cobweb（~10%）+ StoneBrickStairs 楼梯（~8%），跳过关键特征格（传送门房 / 图书馆书架 /
+        //    银鱼刷怪笼 / 宝箱格）。确定性 → 同 seed 同装饰（PLAN §2-K）。
         for (int dy = 1; dy <= 2; ++dy) {
             for (int dx = -kHalf + 1; dx <= kHalf - 1; ++dx) {
                 for (int dz = -kHalf + 1; dz <= kHalf - 1; ++dz) {
-                    if (dx >= -3 && dx <= 3 && dz >= -3 && dz <= 3) continue; // 传送门房整区保留
-                    put(dx, dy, dz, BlockRegistry::Air);
-                }
-            }
-        }
-
-        // 5) 图书馆内容（NW 角，dx/dz ∈ [-6,-3]）：房间四壁内侧摆 Bookshelf 书架墙（dy 1..2，
-        //    机制等价 MC 1.0 要塞图书馆书架 → 附魔台加成来源，t474）+ 房间中央石砖台阶/楼梯装饰。
-        //    书架墙 = 房间内壁一圈（dx=-5 靠 -X 壁 / dx=-4 靠 +X 壁 / dz=-5 靠 -Z 壁 / dz=-4 靠 +Z 壁）。
-        for (int dy = 1; dy <= 2; ++dy) {
-            for (int d = -5; d <= -4; ++d) {
-                put(-5, dy, d, BlockRegistry::Bookshelf); // 靠 -X 壁（dx=-6）书架列
-                put(-4, dy, d, BlockRegistry::Bookshelf); // 靠 +X 壁（dx=-3）书架列
-                put(d, dy, -5, BlockRegistry::Bookshelf); // 靠 -Z 壁（dz=-6）书架行
-                put(d, dy, -4, BlockRegistry::Bookshelf); // 靠 +Z 壁（dz=-3）书架行
-            }
-        }
-        // 房间中央石砖台阶 / 楼梯装饰（图书馆走道感，踩上可及书架）。
-        put(-5, 1, -4, BlockRegistry::StoneBrickStairs, 0);
-        put(-4, 1, -4, BlockRegistry::StoneBrickSlab);
-
-        // 6) 银鱼刷怪笼（SE 角，dx/dz ∈ [3,6]）：房间中央 Spawner + SpawnerStateSilverfishFlag
-        //    → tickSpawners 据 flag 刷 Silverfish（机制等价 MC 1.0 要塞银鱼刷怪笼）。
-        put(4, 1, 4, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfishFlag);
-
-        // 7) 战利品箱（NE 角，dx ∈ [3,6] / dz ∈ [-6,-3]）：房间靠内角一只 Chest + ChestStateStrongholdFlag
-        //    → 首开填要塞战利品（含末影之眼，激活传送门关键物品）。
-        put(4, 1, -5, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
-
-        // 8) 迷宫装饰：SW 角散布 Cobweb 蛛网（阴暗地下装饰）+ 大厅内确定性散布 StoneBrickStairs 楼梯井
-        //    （hashVoxel 概率 ~20%，仅空气格）。确定性 → 同 seed 同装饰（PLAN §2-K）。
-        //    跳过关键特征格（图书馆书架区 / 银鱼刷怪笼格），防装饰覆盖设施。
-        for (int dy = 1; dy <= 2; ++dy) {
-            for (int d = -kHalf + 2; d <= kHalf - 2; d += 2) {
-                for (int s = -kHalf + 2; s <= kHalf - 2; s += 2) {
-                    const quint32 wh = hashVoxel(strongSeed ^ 0x487, cx + d, cy + dy, cz + s);
-                    const bool inPortal = (d >= -2 && d <= 2) && (s >= -2 && s <= 2); // 传送门房内部跳过
-                    const bool inLibrary = (d >= -5 && d <= -4) && (s >= -5 && s <= -4); // 图书馆书架区跳过
-                    const bool inSpawner  = (d >= 4 && d <= 6) && (s >= 4 && s <= 6); // 银鱼刷怪笼区跳过
-                    const bool inChest   = (d >= 4 && d <= 6) && (s >= -6 && s <= -3); // 战利品箱区跳过
-                    if (inPortal || inLibrary || inSpawner || inChest) continue;
-                    if ((wh % 100u) < 20u) {
-                        // 蛛网为主，楼梯井为辅（hash 高 8 位分流）。
-                        put(d, dy, s, ((wh >> 8) % 100u) < 55u ? BlockRegistry::Cobweb
-                                                               : BlockRegistry::StoneBrickStairs);
-                    }
+                    if (!insideSpace(dx, dz)) continue; // 仅内部空间（走廊 / 房间）装饰
+                    if (dx >= -3 && dx <= 3 && dz >= -9 && dz <= -6) continue;  // 传送门房跳过（框架/平台保留）
+                    if (dx >= -9 && dx <= -7 && dz >= -4 && dz <= 4) continue;  // 图书馆跳过（书架保留）
+                    if (dx >= -3 && dx <= 3 && dz >= 7 && dz <= 10) continue;   // 南房跳过（刷怪笼/宝箱保留）
+                    const quint32 wh = hashVoxel(strongSeed ^ 0x487, cx + dx, cy + dy, cz + dz);
+                    if ((wh % 100u) < 10u)
+                        put(dx, dy, dz, BlockRegistry::Cobweb);        // 蛛网（走廊残破感）
+                    else if ((wh % 100u) < 18u)
+                        put(dx, dy, dz, BlockRegistry::StoneBrickStairs); // 楼梯井装饰
                 }
             }
         }
