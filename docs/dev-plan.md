@@ -2703,21 +2703,21 @@ t647-t679（33 项）。优先级：**P0 = 🅰 附魔链 t647-t650 + t655 死�
 
 ### 🅱 审查修复批 M 级（8 项）
 
-**t683** 爆炸路径漏 notePowerWrite（M1）：TNT/苦力怕炸红石 → 幽灵电。爆炸收尾循环补 notePowerWrite(d.x,d.y,d.z,oldId,Air)。
-**t684** 轨道死端当坡冲出悬空（M2）：minecartmanager.cpp:256 slope<0 不排 INT_MIN → 静止矿车自动出轨。修 slope != INT_MIN && slope < 0。
-**t685** t648 门禁 no-op 双击洗白光标（M3）：双击判定先于 canPlace + doMergeSameId 空扫描取默认值 → 耐久回满附魔清零。修：doMergeSameId 开头 slots.length===0 return。
-**t686** 死亡掉落漏 durability（M4）：dropStack 读 durabilityAt + emit 第 8 参；Main.qml onSpawnItem 形参补。
-**t687** 附魔书哨兵 off-by-one（M5）：Inventory.qml:158 id <= bookSentinel - maxEnch 把最大附魔 id 的书判死格。改 <。
-**t688** 改名栈均分污染 + 双击丢名（M6）：redistributeLive eligible 加 orig.name===""；doMergeSameId 遇带名实例 no-op。
-**t689** 发射器无真上升沿（M7）：稳定通电时每 2s 连发。消费端维护「上 tick 已通电」集，仅真沿放行。
-**t690** 僵尸寻荫烧死（M8）+ 击飞窗口残留（M9）+ 合成格死亡丢失（M10）+ 毒马铃薯磨甲（M11）四合一：
+**t683** 爆炸路径漏 notePowerWrite（M1）：TNT/苦力怕炸红石 → 幽灵电。爆炸收尾循环补 notePowerWrite(d.x,d.y,d.z,oldId,Air)。✅✅ 已完成（commit e7565ff）
+**t684** 轨道死端当坡冲出悬空（M2）：minecartmanager.cpp:256 slope<0 不排 INT_MIN → 静止矿车自动出轨。修 slope != INT_MIN && slope < 0。✅✅ 已完成（commit 1ba06a8）
+**t685** t648 门禁 no-op 双击洗白光标（M3）：双击判定先于 canPlace + doMergeSameId 空扫描取默认值 → 耐久回满附魔清零。修：doMergeSameId 开头 slots.length===0 return。✅✅ 已完成（commit c70d0ec）
+**t686** 死亡掉落漏 durability（M4）：dropStack 读 durabilityAt + emit 第 8 参；Main.qml onSpawnItem 形参补。✅✅ 已完成（commit 79de5d5）
+**t687** 附魔书哨兵 off-by-one（M5）：Inventory.qml:158 id <= bookSentinel - maxEnch 把最大附魔 id 的书判死格。改 <。✅✅ 已完成（commit d8320b6）
+**t688** 改名栈均分污染 + 双击丢名（M6）：redistributeLive eligible 加 orig.name===""；doMergeSameId 遇带名实例 no-op。✅✅ 已完成（commit c30b045）
+**t689** 发射器无真上升沿（M7）：稳定通电时每 2s 连发。消费端维护「上 tick 已通电」集，仅真沿放行。✅✅ 已完成（commit 624eda6）
+**t690** 僵尸寻荫烧死（M8）+ 击飞窗口残留（M9）+ 合成格死亡丢失（M10）+ 毒马铃薯磨甲（M11）四合一：✅✅ 已完成（commit dac18d3）
 - 寻荫：停驻前验证自身格 skyLight < 阈值；findShadeTarget 加 y+2 净空；
 - 击飞：着地沿无条件清窗口（含水抵消分支）；
 - 合成格：gatherPlayerState / dropAllItems 前显式同步 returnCraftToHotbar()（t650 同款，工作台面板漏覆盖）；
 - 毒伤：独立信号或豁免 cause 不走 damageArmor；respawn/loadSavedState 补清 m_poisonTimer。
 
-**t691** 审查 L 级随批（选摘 8 条）：kMcBlockId monster_egg 行被注释吞掉（拆行）；矿车 rise 四向全叠 vs mesher 只叠本轴（垂直邻线跳变+坡后 30% 错层）；死亡键盘闸门吞 T/Enter/Esc（聊天/暂停不可用）；铁傀儡越障跳漏水平滑流 + golemWindup 目标消失不清；附魔台书读档不重建；冰滑参数玩家/船共用（分离）；四处注释错乱（blockregistry.h:1688 拼接事故 / .cpp:1466 bit0→bit3 / pbg.cpp:593/706 旧编码描述）。
-**t692** 红石传播 v1.1 模型对齐 MC（审查 L + 实测综合）：用户实测「火把只亮邻 1 格、打掉火把残留亮、一格粉恒点状、按钮传播断续」= Phase A2 边写边读单 tick 深度不确定 + BFS 2048 截断 + 传播延迟体感乱。修：A2 改双缓冲快照迭代（本 tick 全域基于上 tick 值）；粉亮度按级渐变渲染（16 级至少分 4 档视觉）；单点粉邻接 TNT/火把时画连线形态。
+**t691** 审查 L 级随批（选摘 8 条）：kMcBlockId monster_egg 行被注释吞掉（拆行）；矿车 rise 四向全叠 vs mesher 只叠本轴（垂直邻线跳变+坡后 30% 错层）；死亡键盘闸门吞 T/Enter/Esc（聊天/暂停不可用）；铁傀儡越障跳漏水平滑流 + golemWindup 目标消失不清；附魔台书读档不重建；冰滑参数玩家/船共用（分离）；四处注释错乱（blockregistry.h:1688 拼接事故 / .cpp:1466 bit0→bit3 / pbg.cpp:593/706 旧编码描述）。✅✅ 已完成（commit ffbd971）
+**t692** 红石传播 v1.1 模型对齐 MC（审查 L + 实测综合）：用户实测「火把只亮邻 1 格、打掉火把残留亮、一格粉恒点状、按钮传播断续」= Phase A2 边写边读单 tick 深度不确定 + BFS 2048 截断 + 传播延迟体感乱。修：A2 改双缓冲快照迭代（本 tick 全域基于上 tick 值）；粉亮度按级渐变渲染（16 级至少分 4 档视觉）；单点粉邻接 TNT/火把时画连线形态。✅✅ 已完成（commit 4f9e919）
 
 ### 🅲 附魔/创造批（实测）
 
