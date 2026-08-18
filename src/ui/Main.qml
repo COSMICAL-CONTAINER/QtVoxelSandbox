@@ -466,6 +466,20 @@ Window {
             // 新世界（仅 meta 无 chunk blob）→ 按 seed 全量 worldgen（recreate 网格 + 地形 + 光场）
             theWorld.regenerate(seed)
         }
+        // t691：读档 / worldgen 直写栅格不经 blockPlaced 信号 → 事件驱动的位置表（附魔台悬浮书）读档后
+        //   恒空（onWorldChanged 只**清孤儿**不重建 → 存档里的附魔台读档后无书，直到玩家再编辑）。进世界
+        //   后一次性块扫描重建（C++ collectBlocksOfId 全图扫 ~19ms 一次性；表清空 + 视觉 delegate 清空
+        //   防上一世界残留，再按本世界真值重建——torchPositions 无 per-voxel 视觉依赖光源列表另由
+        //   onWorldChanged 校验，不在此列）。
+        {
+            enchantTablePositions.clear()
+            const books = theWorld.collectBlocksOfId(94) // 94 = EnchantingTable（字面量+注释，同 id===94 判定）
+            for (let bi = 0; bi + 2 < books.length; bi += 3) {
+                enchantTablePositions.append({x: books[bi], y: books[bi + 1], z: books[bi + 2]})
+                bookHost.addBookVis(books[bi], books[bi + 1], books[bi + 2])
+            }
+            console.info("[t691] enchant-table book rebuild on load: " + (books.length / 3) + " tables")
+        }
         applyPlayerState(worldStore.loadPlayerData())
         // r2-B1 读档机关态收尾：清上一局的机关瞬态表（发射器冷却 / 红石矿点亮 / 压力板边沿基线 / 按钮复位）
         //   —— 读档复用同一 theWorld/player 对象（setWorld 不触发），不清则旧世界同坐标键串扰；并置压力板沿
@@ -8127,23 +8141,26 @@ Window {
         Keys.onPressed: (e) => {
             if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
             // t655 死亡态输入闸门（第一道，最先判）：死亡屏期间只接受死亡屏按钮（立即重生 / 回主菜单，
-            //   MouseArea 直达不受键盘层影响）与 Esc（下方各「关面板」分支恒不达——onDied 已关全部面板，
-            //   Esc 落空无副作用）+ 聊天显示（chatDisplay 死亡态 z=185 恒可见，不受键盘层管）。其余一切
-            //   游戏键（E 背包 / 1-9 hotbar / Q 丢弃 / WASD / Shift / G / M / F5）在死亡态全部吞掉。
+            //   MouseArea 直达不受键盘层影响）+ 聊天显示（chatDisplay 死亡态 z=185 恒可见，不受键盘层管）
+            //   + **t691 放行 T / Enter（开聊天，机制等价 MC 死亡界面可看 / 发聊天）与 Esc（开暂停叠层，
+            //   死亡态暂停可见 —— 下方 chatOpen 分支的 !dead 条件同步放开）**。其余一切游戏键（E 背包 /
+            //   1-9 hotbar / Q 丢弃 / WASD / Shift / G / M / F5）在死亡态全部吞掉。
             //   根因（用户报告）：死亡屏纯视觉叠加，E 仍能 openInventory（叠在死亡屏下）再关包时
             //   closeInventory 内 player.grab() 把 captured 抢回来 → 尸体能走 / 能打 / takeDamage 对
             //   dead 早退 → 无敌。键盘层拦「开不了一点」+ PlayerController.grab 的 m_dead 拒绝（C++ 兜底，
             //   见 playercontroller.cpp）双保险。
-            if (playerState.dead) {
+            if (playerState.dead && e.key !== Qt.Key_T && e.key !== Qt.Key_Return
+                    && e.key !== Qt.Key_Enter && e.key !== Qt.Key_Escape) {
                 e.accepted = true; return
             }
             // t312 聊天栏打开：T / Enter（playing 且非死亡态且无背包/工作台/熔炉/箱子面板开）。机制等价
             //   MC 1.0 T 打开聊天。Enter 与 T 同义（spec「T/Enter 打开聊天栏」）；Esc/E 在背包面板作关面板，
             //   故聊天打开键不与 Esc/E 冲突（聊天开着时 Esc 由 chatInput 自己处理关聊天，见下方 TextField）。
             //   聊天开期间 keyInput 不持焦点（chatInput 持焦）→ movement 键不透传 player（无需额外守卫，
-            //   与背包面板同模式）。
+            //   与背包面板同模式）。**t691：死亡态放行**（开聊天看 / 发遗言；chatInput 独立持焦，运动键
+            //   不透传——死亡尸体不受聊天焦点影响）。
             if ((e.key === Qt.Key_T || e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
-                    && window.appState === "playing" && !playerState.dead
+                    && window.appState === "playing"
                     && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen && !window.chestOpen
                     && !window.enchantingTableOpen && !window.anvilOpen && !window.dispenserOpen   // t549：三 UI 开时 T 不开聊天（先关面板）
                     && !window.chatOpen) {

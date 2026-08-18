@@ -2278,6 +2278,11 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
                     && !world->isSolid(fx, fy + 3, fz)) {
                     e.vy = kJumpSpeed;
                     e.resting = false;
+                    // t691：跳起置水平滑流（同 t670 aiHostile 越障跳）——AI 移动节流（每 kAiTickInterval 帧
+                    //   一次），翻墙水平前进只有「身体高过墙顶 + 恰逢 AI 帧」才发生 → golem 仍卡台阶下只蹦
+                    //   不上；滑流让跳起后每帧朝玩家漂移，高过墙顶即爬升越障。
+                    e.jumpGX = (distXZ > 1e-4f ? pdx / distXZ : -std::sin(e.yawRad)) * spd;
+                    e.jumpGZ = (distXZ > 1e-4f ? pdz / distXZ : -std::cos(e.yawRad)) * spd;
                 }
             }
             const float ehw = e.halfW, ehh = e.halfH;
@@ -2298,6 +2303,12 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
         }
     }
     const int target = nearestHostile(e.pos, kIronGolemDetectRange);
+    if (target < 0 && e.golemWindup > 0.0f) {
+        // t691：目标消失（死亡 / 消失 / 被移除）→ 清蓄力。否则 golemWindup 残留部分累积值 → 下次刷出
+        //   敌对目标的**第一拳**从陈旧蓄力直接蓄满（无前摇瞬发，观感「隔空秒锤」）。golemAngry 分支在
+        //   平息两处已各自清（上方），本处覆盖敌对目标路径的目标消失沿。
+        e.golemWindup = 0.0f;
+    }
     if (target >= 0) {
         const Entity &t = m_entities[size_t(target)];
         const float tdx = t.pos.x() - e.pos.x();
@@ -2354,6 +2365,9 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
                     && !world->isSolid(fx, fy + 3, fz)) {
                     e.vy = kJumpSpeed;
                     e.resting = false; // 解除静止 → 重力分支处理上跳（同 aiHostile 越障跳）
+                    // t691：水平滑流（同上反击玩家分支 / t670 aiHostile）——节流 AI 帧外不前进 → 卡台阶下。
+                    e.jumpGX = (distXZ > 1e-4f ? tdx / distXZ : -std::sin(e.yawRad)) * spd;
+                    e.jumpGZ = (distXZ > 1e-4f ? tdz / distXZ : -std::cos(e.yawRad)) * spd;
                 }
             }
             const float ehw = e.halfW, ehh = e.halfH;

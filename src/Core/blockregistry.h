@@ -1042,8 +1042,12 @@ public:
     static bool isIce(quint8 blockId);
     // t468 冰面「滑动接近率」（1/s；越小越滑）：玩家水平速度向目标速度的指数接近速率。Ice 中等滑 / PackIce
     //   更滑 / BlueIce 最滑（机制等价 MC 1.0 ice < packed_ice < blue_ice 滑度递增）。非冰 → 0（caller 据此走
-    //   瞬时设速的常规地面路径）。单一权威：玩家与（未来）船的冰面手感都读它，避免两处魔数漂移。
+    //   瞬时设速的常规地面路径）。**玩家手感单一权威**（t691 与船分离：t661 为调船把 6/3.2/1.9 → 4/2.2/1.3
+    //   连带改了玩家行走冰感 —— 玩家保持 t611 校准值 6/3.2/1.9 不变，船专用 boatIceSlipApproach）。
     static float iceSlipApproach(quint8 blockId);
+    // t691 船专用冰面接近率（boatmanager 冰面惯性）：保 t661 校准（4/2.2/1.3 —— 顶速略降更可控 + 松键
+    //   长滑行），与玩家行走冰感（上者，t611 值）分离，各自独立调校不再互相牵连。非冰 → 0。
+    static float boatIceSlipApproach(quint8 blockId);
 
     // t188 perf：流体类格子判定（Air / Water / Lava）。供 ChunkManager::setBlock 把 chunk 标「流体专用脏」
     //   （fluidOnlyDirty）—— 当一次写操作 oldId/newId **均**属流体类时，terrain/cross/glass/ice 段顶点不变
@@ -1685,9 +1689,11 @@ public:
     //   并入 Torch 分支写入）—— 熄灭位与附着方向正交，存档 round-trip 双方保真（重亮 / 重新熄灭只翻
     //   本位不动附着位）。lightEmission 状态感知版：本位置位 → 0（不发光）；清位（亮）→ id-only 表 7。
     //   mesher（partialblockgeometry RedstoneTorch case）读本位换 off 贴图（暗红熄焰）。
-    static constexpr quint8 RedstoneTorchStateOffFlag = 0x08;    // t638 木门透光：门上半格栅窗是透光窗格（机制等价 MC 1.0 门上半窗透光）。门 solid=false（不挡邻居面
+    static constexpr quint8 RedstoneTorchStateOffFlag = 0x08;
+    // t638 木门透光：门上半格栅窗是透光窗格（机制等价 MC 1.0 门上半窗透光）。门 solid=false（不挡邻居面
     //   剔除）→ lightOpacity 默认 0 已全透；本常量仅作 mesher 立面透光语义锚点（门格光衰减 = 0，无遮），
     //   防 future「按 solid 满遮」重构回退。消费点：lightOpacity（WoodDoor/SpruceDoor 恒 0）。
+    //   t691 注释修复：本段原误拼在上方 RedstoneTorchStateOffFlag 行尾（32914e0 编辑事故），拆回独立段。
     static constexpr quint8 DoorWindowLightOpacity = 0;
 
     // t565 铁轨连接位（存 Rail 方块 chunk state，4 位 = 水平 4 向「与相邻铁轨互连」标记）。放置铁轨 /

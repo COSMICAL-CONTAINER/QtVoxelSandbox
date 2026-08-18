@@ -804,7 +804,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* redstone_dust           */ 55,  // t656 红石粉导线 → MC 1.0 redstone wire id 55（放置的导线形态）
     // t664/t665 末地门面 / 怪物蛋 → MC 1.0 对齐（review-r19.8 低危：缺行静默零填充为 0 = air；两方块均为
     //   t664/t665 新增、此前无运行期消费者，补真实 1.0 id 供迁移文档引用）。
-    /* end_portal_surface      */ 119, // t664 末地传送门门面（薄黑星平面）→ MC 1.0 end portal id 119（框架 120 已由 EndPortal 行映射）    /* monster_egg             */ 97,  // t665 石砖伪装怪物蛋 → MC 1.0 stone monster egg id 97（要塞银鱼蛋）
+    /* end_portal_surface      */ 119, // t664 末地传送门门面（薄黑星平面）→ MC 1.0 end portal id 119（框架 120 已由 EndPortal 行映射）
+    /* monster_egg             */ 97,  // t665 石砖伪装怪物蛋 → MC 1.0 stone monster egg id 97（要塞银鱼蛋）。t691：本行
+                                       //   原与上行尾注释同线（写在 `//` 之后）→ 初始化器条目被注释吞掉、数组项静默零填充
+                                       //   为 0（= air）——static_assert 只核维度不核条数，不报。拆行成真实条目。
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1123,18 +1126,26 @@ bool BlockRegistry::isIce(quint8 blockId)
 
 // t468 冰面「滑动接近率」（1/s；越小越滑）—— 玩家水平速度向目标速度的指数接近速率（PlayerController::step
 //   冰分支用 1 - exp(-rate*dt) 做 lerp）。机制等价 MC 1.0 ice < packed_ice < blue_ice 滑度递增：Ice 中等滑 /
-//   PackIce 更滑 / BlueIce 最滑。非冰 → 0（caller 据 0 走常规地面瞬时设速路径，不进冰滑行分支）。单一权威：
-//   玩家与船的冰面手感都读它，避免两处魔数漂移。
+//   PackIce 更滑 / BlueIce 最滑。非冰 → 0（caller 据 0 走常规地面瞬时设速路径，不进冰滑行分支）。
 //   t611 调小一档（用户「冰上的惯性再大一点」）：8/4.5/2.8 → 6/3.2/1.9。
-//   t661 四轮再调（用户「冰上太快、惯性太小」）：6/3.2/1.9 → 4/2.2/1.3（船侧同步降速 boatmanager t661
-//     1.4/1.7/2.0 倍率）→「顶速略降（更可控）+ 松键滑行更长（惯性大）」。滑行到 10% 初速的时间：
-//     冰 0.58s / 浮冰 1.05s / 蓝冰 1.77s（t611 值 0.51/0.95/1.62 → 全线更滑）。
+//   t661 曾把本值再调 6/3.2/1.9 → 4/2.2/1.3（船体感导向）→ **连带改变玩家行走冰感**。t691 拆分：玩家保持
+//   t611 校准（6/3.2/1.9），船读 boatIceSlipApproach（t661 值 4/2.2/1.3）—— 两类载具 / 步行手感独立调校。
 float BlockRegistry::iceSlipApproach(quint8 blockId)
 {
-    if (blockId == Ice)     return 4.0f;  // 冰：中等滑（t661：6→4/s；松键后 ~0.6s 明显滑行）
-    if (blockId == PackIce) return 2.2f;  // 浮冰：更滑（t661：3.2→2.2/s；松键后滑行 ~1s）
-    if (blockId == BlueIce) return 1.3f;  // 蓝冰：最滑（t661：1.9→1.3/s；松键后滑得最远 ~1.8s）
+    if (blockId == Ice)     return 6.0f;  // 冰：中等滑（t611 玩家校准；松键后 ~0.5s 明显滑行）
+    if (blockId == PackIce) return 3.2f;  // 浮冰：更滑（t611 玩家校准；松键后滑行 ~0.95s）
+    if (blockId == BlueIce) return 1.9f;  // 蓝冰：最滑（t611 玩家校准；松键后滑得最远 ~1.6s）
     return 0.0f;                          // 非冰（caller 走常规地面路径）
+}
+
+// t691 船专用冰面接近率（见 .h 头注释）：t661 船体感校准原值 —— 顶速略降更可控 + 松键长滑行惯性 +
+// 转向迟钝（难操作才是冰上开船的正确体感，见 boatmanager.h）。与玩家行走冰感分离（各自独立调校）。
+float BlockRegistry::boatIceSlipApproach(quint8 blockId)
+{
+    if (blockId == Ice)     return 4.0f;  // 冰（t661：6→4/s；松键后 ~0.6s 明显滑行）
+    if (blockId == PackIce) return 2.2f;  // 浮冰（t661：3.2→2.2/s；松键后滑行 ~1s）
+    if (blockId == BlueIce) return 1.3f;  // 蓝冰（t661：1.9→1.3/s；松键后滑得最远 ~1.8s）
+    return 0.0f;                          // 非冰（caller 走常规水面路径）
 }
 
 // t505 积雪层 state → 薄板高度（cell-local [0,1]；state 0..7 → 1/8..1.0；机制等价 MC 1.0 snow layer 8 层）。
@@ -1463,8 +1474,10 @@ quint8 BlockRegistry::lightEmission(quint8 blockId, quint8 state)
     // t656：通电中的红石粉导线微红光 7（机制等价 MC 1.0 红石粉通电发光 level 7 —— 弱于火把 14 的暗红
     //   输电线观感；断电粉不发光）。state 低 4 位 = RedstoneDustPowerMask（>0 即通电）。
     if (blockId == RedstoneDust && (state & RedstoneDustPowerMask) > 0) return 7;
-    // t657：红石火把熄灭态（state bit0 = RedstoneTorchStateOffFlag 置位 = 附着块被供电 → 反相熄灭）
-    //   不发光；亮态（bit0=0，含旧存档 state<5 的附着编码）走 id-only 表 7。
+    // t657：红石火把熄灭态（state bit3 = RedstoneTorchStateOffFlag 置位 = 附着块被供电 → 反相熄灭）
+    //   不发光；亮态（bit3=0，含旧存档 state<5 的附着编码）走 id-only 表 7。
+    //   t691 注释修复：本行原写「bit0」（32914e0 编辑事故）——OffFlag 实为 bit3（0x08，避开低 3 位附着
+    //   编码，见 blockregistry.h 常量头注释），代码读位一直正确、仅注释错。
     if (blockId == RedstoneTorch && (state & RedstoneTorchStateOffFlag)) return 0;
     return lightEmission(blockId); // 其余（含熄灭熔炉 / 未点亮红石矿 / 关态红石灯）按 id-only 表（火把/岩浆/末地传送门等，与 state 无关）
 }

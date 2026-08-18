@@ -590,7 +590,7 @@ int PartialBlockGeometry::append(
     }
     case BlockRegistry::Rail:
     case BlockRegistry::GoldenRail:   // t638 动力铁轨（与 Rail 同贴地薄板几何；直线 only + 断常/通电变体贴图）
-    case BlockRegistry::DetectorRail: { // t638 探测铁轨（同上；矿车驶过 state bit0 → 通电视觉贴图）
+    case BlockRegistry::DetectorRail: { // t638 探测铁轨（同上；矿车驶过 state bit4 = DetectorRailStateOnFlag → 通电视觉贴图；t691 注释修复：原写 bit0 旧编码）
         // t484 铁轨「贴地薄板」模型：**一片水平双面 quad 贴 cell 底部**（y≈1/16，刚好浮于地面之上）—— 与睡莲
         //   横向浮叶（LilyPad）同源几何，区别仅贴图（rail 瓦片 = 透明底 + 棕色枕木 + 灰铁双轨）。
         //  t666 形状重写（规则集见 blockregistry.h RailConn* 头注释；落地用户实测症状群 ①②③④）：
@@ -703,8 +703,9 @@ int PartialBlockGeometry::append(
         //   cutout 段 alphaCutoff 透明底）。**非竖直 cross** —— 几何为水平 quad（俯视才见粉线 / 粉点），
         //   但同走 isCrossBillboard 路由（PASS 1 + cutout 段，同 Rail 段外并入模式）。
         //   state 派生瓦片（呈现层选择，同 Water 流水贴图模式）：
-        //     - 高 4 位连接位（6 邻粉，bit 序 0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z —— World::recomputePowerLocal
-        //       维护）：水平向（+X/-X/+Z/-Z）任一连接 → 线向瓦片（166 断 / 168 通）；仅垂直连接或无连接 →
+        //     - 高 4 位连接位（**仅水平 4 向**：0x01=+X 0x02=-X 0x04=+Z 0x08=-Z（RedstoneDustConn*，同铁轨
+        //       位序）—— review-r19.8 H1 后垂直邻粉连接不落 state（旧 6 向编码的 +Y/-Y 位已废），
+        //       World::recomputePowerLocal 维护）：任一水平连接 → 线向瓦片（166 断 / 168 通）；无水平连接 →
         //       孤立点瓦片（167 断 / 169 通）。线向按「X 向 / Z 向」旋转 UV（一张两用，同铁轨 EW 模式）；
         //       X+Z 双向连接 → 十字画两片（各沿一向，重叠自然成十字）。
         //     - 低 4 位电力级（RedstoneDustPowerMask）：>0 → 通电亮红瓦片（168/169）；0 → 断电暗红（166/167）。

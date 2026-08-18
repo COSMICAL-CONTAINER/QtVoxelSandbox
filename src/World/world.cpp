@@ -1344,6 +1344,22 @@ int World::countBookshelvesAround(int x, int y, int z) const
     return count;
 }
 
+// t691 全图收集指定 id 方块坐标（见 world.h 头注释）：三层 for 直扫 m_chunks.blockAt（C++ 侧一次性
+//   O(体积)，非 QML 逐格 Q_INVOKABLE 往返——后者 3.28M 次调用开销不可接受）。读档 / worldgen 直写
+//   不发 blockPlaced → 呈现层事件驱动位置表（如附魔台悬浮书）读档后恒空，本方法供其一次性重建。
+QVariantList World::collectBlocksOfId(quint8 blockId) const
+{
+    QVariantList out;
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return out;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y)
+                if (m_chunks.blockAt(x, y, z) == blockId)
+                    out << x << y << z; // 平铺 [x,y,z,...]
+    return out;
+}
+
 // t406 甘蔗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 sugar cane random-tick 生长。
 void World::tickSugarcaneGrowth()
 {

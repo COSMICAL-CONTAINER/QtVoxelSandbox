@@ -195,6 +195,13 @@ public:
     //   不依赖 Renderer/Game/UI。OOB blockAt 返 Air 安全（不计入）。
     Q_INVOKABLE int countBookshelvesAround(int x, int y, int z) const;
 
+    // t691 全图收集指定 id 的方块坐标（读档重建位置表用——如附魔台悬浮书：读档 blob 直写不经
+    //   blockPlaced 信号 → QML 事件驱动表恒空 → 书不重建）。QVariantList 每 3 元一坐标
+    //   [x1,y1,z1, x2,y2,z2, ...]（平铺省 QVariantMap 分配）。世界空 / 无命中 → 空列表。
+    //   一次性全图扫（C++ 侧 O(体积)，160×160×128 ≈ 19ms；只在进世界时调，非每 tick）。
+    //   分层（PLAN §2）：World 层只读 m_chunks.blockAt，不依赖 Renderer/Game/UI。
+    Q_INVOKABLE QVariantList collectBlocksOfId(quint8 blockId) const;
+
     // t117/t220 FallingBlock 着地专用：经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + 边界邻接，同 setBlock
     //   的写入路径）+ emit worldChanged（驱动 mesh 重建），但**不**发 blockPlaced（与玩家放置语义分离）。
     //   沿用 worldgen 经 m_chunks.setBlock 直写不触发 blockPlaced 的既有约定——避免 onBlockPlaced 的 survival

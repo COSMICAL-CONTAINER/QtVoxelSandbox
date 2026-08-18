@@ -525,7 +525,9 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
         if (below == BlockRegistry::Ice)          maxSpeed = kBoatSpeed * 1.4f;
         else if (below == BlockRegistry::PackIce) maxSpeed = kBoatSpeed * 1.7f;
         else                                      maxSpeed = kBoatSpeed * 2.0f; // BlueIce（isIce 已保证）
-        approach = BlockRegistry::iceSlipApproach(below); // 冰面惯性（滑度单一权威）
+        // t691：approach 改读 boatIceSlipApproach（船专用，t661 校准 4/2.2/1.3）—— t661 曾借玩家表
+        //   iceSlipApproach 调船，连带改变玩家行走冰感；两表分离后各自独立调校不再牵连。
+        approach = BlockRegistry::boatIceSlipApproach(below); // 冰面惯性（船专用滑度权威）
         turnRate = kBoatTurnRate * kBoatIceTurnMul;       // 转向迟钝（难操作）
     } else {
         maxSpeed = kBoatSpeed * kBoatLandSpeedMul;
