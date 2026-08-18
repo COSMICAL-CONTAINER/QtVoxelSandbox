@@ -162,7 +162,7 @@ Item {
         //   防 -1 残留进 enchantDur（returnEnchantToHotbar 的 `-1 || 0` 为真值会透传 -1 → addStack 视作新实例）。
         root.enchantDur[index] = (durability > 0) ? durability : 0
         const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
-        const arr = root.enchantEnch
+        const arr = root.enchantEnch.slice()   // t699：新外层引用保 var NOTIFY（同引用重赋不发信号）
         arr[index] = e.slice()
         root.enchantEnch = arr
         // t622 实例名随槽写入（undefined 兜底空串）。doEnchant 翻附魔书 id 时名保留（书若被改名仍带名）。
@@ -178,15 +178,32 @@ Item {
     //   钻石剑可反复进台重附（锐锋1→锐锋2→耐久1 无限刷，t549 的 Shift 守卫只盖 Shift 路径）。
     //   门禁在写入**前**查询（写后 no-op = caller 已清光标 → 物品凭空丢失）；doEnchant 产物写入与关包
     //   清槽不经 InventoryOps 放置路径，恒不受门禁影响。
+    //   t693 附魔来源补强：t648 实测漏拦「已附魔工具进槽」（用户把附魔钻石镐放进附魔台、取回附魔蒸发）。
+    //     根因：门禁只查 caller 传入的 enchants 形参 —— 部分路径（canPlace 各调用点 / 面板内联判定）传参
+    //     不齐（undefined / 空数组）时 4 槽循环恒过 → 已附魔物照进槽 0。修：**双重来源**——形参先查，形参
+    //     非数组 / 全零时回退查 hotbar VM 光标手持附魔（heldEnchants()，物品来自光标的所有放置路径的
+    //     单一权威）；两来源任一非零 → 拒。形参路径保留（swapHovered / redistribute 传的槽实例附魔，
+    //     非光标来源）。
     function localCanPlace(group, index, id, count, enchants) {
         if (group !== "enchant" || index !== 0) return true
         if (id === 0 || count <= 0) return true    // 清空 / 取出恒放行
         if (!root.hotbar) return true
         if (root.hotbar.itemEnchantCategory(id) === 0) return false   // 不可附魔物不入槽 0
+        let hasEnch = false
         const e = Array.isArray(enchants) ? enchants : []
         for (let i = 0; i < 4; ++i) {
-            if ((e[i] || 0) !== 0) return false   // 已附魔 → 拒（物品留光标）
+            if ((e[i] || 0) !== 0) { hasEnch = true; break }
         }
+        // t693：形参无附魔且物品 == 当前光标手持物 → 查 VM 光标附魔（caller 传参缺附魔的兜底权威）。
+        if (!hasEnch && root.hotbar.heldBlock === id) {
+            const he = root.hotbar.heldEnchants()
+            if (Array.isArray(he)) {
+                for (let i = 0; i < 4; ++i) {
+                    if ((he[i] || 0) !== 0) { hasEnch = true; break }
+                }
+            }
+        }
+        if (hasEnch) return false   // 已附魔 → 拒（物品留光标）
         return true
     }
     // 关包归还 enchant 输入槽（spec 同 CraftingTableUI returnCraftToHotbar）：visible→false 时把两槽内容

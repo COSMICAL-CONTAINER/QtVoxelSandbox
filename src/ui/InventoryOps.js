@@ -815,6 +815,20 @@ function doMergeSameId(root, group, index) {
     //   重打包洗白（免费修复 + 附魔清零 + 名字丢失）。触发链：附魔台 t648 门禁拒首次点击（no-op）后，
     //   280ms 内第二次点击命中双击判定（判定先于 canPlace 门）→ 手持附魔 / 改名工具直落本函数。
     if (slots.length === 0) return
+    // t693：门禁面板的本地组槽（如附魔台槽 0）不参与「收集 → 重打包」——回填段硬编码 writeSlot(…, cap, 0,
+    //   [0,0,0,0]) 绕过 canPlace 门禁（重打包视为「可堆叠合并」，把已附魔 / 改名实例洗成白板回写进 gated
+    //   槽 = 放置路径 + 数据销毁二合一）。声明 localCanPlace 的面板 → 本地组槽从收集表剔除（main/hotbar
+    //   无门禁语义不受影响；未声明门禁的面板行为不变）。
+    if (root.localCanPlace) {
+        const filtered = []
+        for (let i = 0; i < slots.length; ++i) {
+            if (slots[i].group === "main" || slots[i].group === "hotbar") { filtered.push(slots[i]); continue }
+            if (canPlace(root, slots[i].group, slots[i].index, targetId, 1, [0,0,0,0])) filtered.push(slots[i])
+        }
+        slots.length = 0
+        for (let i = 0; i < filtered.length; ++i) slots.push(filtered[i])
+        if (slots.length === 0) return
+    }
     // t688：收集段遇**任何带名实例**（槽内带名 / 光标带名）→ 整个 no-op。下方重打包回填硬编码无名
     //   （writeSlot(…, [0,0,0,0]) 且不传名）→ 带名栈被双击合并后丢名（铁砧改名整栈双击 = 名静默蒸发）。
     //   与 C++ Hotbar::addStack「named = 不合并」守卫同一语义：名是实例属性，重打包不搬实例元数据，
