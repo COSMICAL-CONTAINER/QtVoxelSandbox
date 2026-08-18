@@ -131,7 +131,9 @@ BLOCKS = [
     ("anvil_chipped",   "default_anvil_damaged_1_top", "default_anvil_base"),  # t477 微损铁砧（顶=砧台+细裂纹 / 侧=深铁砧身）
     ("anvil_damaged",   "default_anvil_damaged_2_top", "default_anvil_base"),  # t477 重损铁砧（顶=砧台+粗裂纹网+缺角 / 侧=深铁砧身）
     # t482/t483 防御造物方块立方体图标（build_pumpkin.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
-    ("pumpkin",         "default_pumpkin_top",  "default_pumpkin_side"),  # t482 南瓜（顶=橙色瓜顶+短茎 / 侧=橙色瓜棱；造物头部方块）
+    #   t675 南瓜移出 BLOCKS（程序贴图 顶+两侧）→ 下方 FROM_PACK 段 cube_front 方案（pack 拼方块：顶 + 刻脸 +
+    #   瓜棱，与放置态 per-face 同源）。
+    # ("pumpkin",      "default_pumpkin_top",  "default_pumpkin_side"),  # t675 移至 FROM_PACK cube_front（--from-pack 重生成）
     ("snow",            "default_snow",         "default_snow"),          # t482 雪块（各面=冷白冰晶噪点，同积雪层；雪傀儡身体方块）
     # t634 末地传送门（endframe 化 t620）立方体图标（顶=末影祭坛框面+中央暗绿凹槽 / 侧=灰白细孔框身；要塞传送门房祭坛）。
     #   入创造调色板（t634）—— 图标显顶+两侧明暗（同铁矿块流程）。
@@ -766,6 +768,33 @@ def render_pack_box(boxes, top, side, front=None, cy_local=None, scale=1.0,
     return img.resize((OUT, OUT), Image.LANCZOS)
 
 
+def load_pack_face_or_none(filename):
+    """pack 贴图探测加载（缺文件返 None 供候选链降级；t675 南瓜刻面前贴图用）。"""
+    p = os.path.join(PACK_BLOCK, filename)
+    if not os.path.exists(p):
+        return None
+    return load_pack_face(filename)
+
+
+def pick_pumpkin_face():
+    """t675 南瓜前面刻脸贴图选择 —— 复刻 resourcepackmanager tile 118 退化回退链（单一权威）。
+
+    demo 包实测 pumpkin_face_off.png 是 pumpkin_side.png 的逐字节拷贝（懒包复用文件）→ 直接用会在
+    图标里画成「三面瓜棱无刻脸」。回退链与引擎运行期一致：face_off 先查退化（与 side 同像素）→
+    carved_pumpkin.png（经典刻脸）→ pumpkin_face_on.png（发光刻脸）→ 全退化则 None（图标退化为
+    三面同 side 的纯瓜棱立方，与运行期无候选分支语义一致）。
+    """
+    side = load_pack_face("pumpkin_side.png")
+    face = load_pack_face_or_none("pumpkin_face_off.png")
+    if face is not None and side is not None and not np.array_equal(face, side):
+        return "pumpkin_face_off.png"
+    for cand in ("carved_pumpkin.png", "pumpkin_face_on.png"):
+        c = load_pack_face_or_none(cand)
+        if c is not None and side is not None and not np.array_equal(c, side):
+            return cand
+    return None
+
+
 def render_pack_front(front, top, side):
     """pack 版「正面为主」投影（机关盒族：正面辨识特征不被立体投影遮挡；同 render_front 几何 /
     明暗 / 深度剪切常数，仅贴图源换 pack）。用于 t644 重生成 dispenser / dropper —— 放置态
@@ -796,6 +825,8 @@ def render_pack_front(front, top, side):
 # t644 转换表：icon 名 → 渲染方案。形状 / 贴图窗口与放置态（partialblockgeometry / chunkgeometry
 #   per-face + tileFilenameMap 的 pack 覆盖）逐项对齐：
 #     cube      — 满立方（顶=top 侧=side，同放置六面 per-face：顶 topTile / 侧 sideTile）。
+#     cube_front— 满立方 + 可见面（+Z 左面）贴 front（t675 南瓜：顶=瓜顶带茎 / 右=瓜棱 / 左（+Z 前方）=
+#                 刻脸 —— 放置态恒面向玩家（t638 放置朝向），图标「顶 + 刻脸 + 瓜棱」同款经典读感）。
 #     front     — 正面为主投影（机关盒族：放置态 frontTile 朝玩家）。
 #     table     — 0.75 矮盒（附魔台放置 y[0,0.75]；侧贴图带顶部 4/16 空白 → 侧窗 [0.25,1] = 引擎
 #                 cropTopBlank(0.25) 后整张拉伸的等价采样）。
@@ -805,6 +836,13 @@ def render_pack_front(front, top, side):
 #     flat      — 平面 2D 保留 alpha（cross / 贴地薄片：铁轨 / 红石火把 —— 放置态即 2D quad/cross）。
 #   pack 侧贴图空白的行序注意：load_pack_face 不裁剪，靠 side_v0/v1 窗口采样（空白带在贴图顶部）。
 FROM_PACK = [
+    # t675 南瓜 3D 图标重做（拼方块 cube per-face）：满立方 + 前面（+Z 左面）贴刻脸。顶=pumpkin_top
+    #   （瓜顶带茎）/ 右=pumpkin_side（瓜棱）/ 左=刻脸（pick_pumpkin_face 复刻引擎 tile 118 退化回退链
+    #   —— face_off 是 side 拷贝时退 carved → face_on）。放置态 t638 恒面向玩家 → 图标三面与放置观感
+    #   同源（顶 + 刻脸 + 瓜棱），与 t482 旧版「顶 + 两侧瓜棱」（无刻脸、读不出南瓜）区分。
+    #   front="pumpkin_face" 哨兵 → cube_front 分支走 pick_pumpkin_face 候选链（非固定文件名）。
+    ("pumpkin", "cube_front", dict(top="pumpkin_top.png", side="pumpkin_side.png",
+                                   front="pumpkin_face")),
     # 机关盒族（正面为主投影；放置态 = pack dispenser_front_horizontal / dropper_front_horizontal +
     #   熔炉顶 / 侧复用 —— MC 1.0 发射器顶/侧本就复用熔炉系，demo 包无 dispenser_top/side 专属文件）。
     ("dispenser", "front", dict(front="dispenser_front_horizontal.png",
@@ -865,6 +903,15 @@ def run_from_pack():
                 img = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)],
                                       load_pack_face(spec["top"]),
                                       load_pack_face(spec["side"]),
+                                      cy_local=W / 2.0 - 0.5 * v)
+            elif mode == "cube_front":
+                # t675 满立方 + 前面刻脸（南瓜）：可见 +Z 左面贴 front（pick_pumpkin_face 引擎同源
+                #   退化回退链；全退化 → front=None → render_pack_box 内部回退 side，图标退化纯瓜棱）。
+                front_name = pick_pumpkin_face() if spec.get("front") == "pumpkin_face" else spec.get("front")
+                img = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)],
+                                      load_pack_face(spec["top"]),
+                                      load_pack_face(spec["side"]),
+                                      front=load_pack_face(front_name) if front_name else None,
                                       cy_local=W / 2.0 - 0.5 * v)
             elif mode == "table":
                 # 0.75 矮盒（附魔台）；侧窗 [0.25,1]（顶部空白带裁除，= cropTopBlank(0.25)）。

@@ -158,7 +158,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::SpruceDoor:          return "icon_spruce_door.png";          // t644 云杉门：3D 两格高薄板（--from-pack 上下半贴图，与放置态一致）
     case BlockRegistry::Ladder:        return "icon_ladder.png";      // t413/t519 木梯（透明底；两纵轨 + 4 道横梯级；竖直爬行梯；t519 满格版）
     // t482/t483 防御造物方块立方体图标（build_cube_icons.py 程序生成原创像素图）。
-    case BlockRegistry::Pumpkin:       return "icon_pumpkin.png";     // 南瓜（顶=橙色瓜顶+短茎 / 侧=橙色瓜棱；造物头部方块）
+    case BlockRegistry::Pumpkin:       return "icon_pumpkin.png";     // t482/t675 南瓜（t644 --from-pack 拼方块：顶=瓜顶+短茎 / 右=瓜棱 / 左=刻脸；放置态恒面向玩家，同款经典读感）
     case BlockRegistry::Snow:          return "icon_snow.png";        // 雪块（各面=冷白冰晶噪点，同积雪层；雪傀儡身体方块）
     case BlockRegistry::EndPortal:     return "icon_end_portal.png";  // t634/t644 末地传送门（--from-pack：endframe 顶/侧贴图，与放置态一致）
     // t484 废弃矿井结构方块图标（build_cube_icons.py flat 2D 透明底；程序生成原创像素图）。
