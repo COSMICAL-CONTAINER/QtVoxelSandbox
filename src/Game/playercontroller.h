@@ -1041,6 +1041,11 @@ private:
     //   机制等价 MC 发射器触发间隔）。换世界时 clearAllTrapsState() 清空（防跨世界串扰）。无发射器陷阱场景
     //   恒空（零开销）。
     QHash<quint64, float> m_dispenserCooldowns;
+    // t689 发射器 / 投掷器电力基线集：上一 tick 已通电的机器（打包坐标键，同 m_dispenserCooldowns 的
+    //   x<<32|z 编码）。fireDispenserAtQml 收到 World 的「电力复算触达」信号时读 isReceivingPower 与本集
+    //   比较——仅 unpowered→powered 真上升沿才 fire（稳定通电不连发；断电触达清基线）。换世界清空（防跨
+    //   世界同坐标串扰，同 m_dispenserCooldowns 模式）。无机器场景恒空（零开销）。
+    QSet<quint64> m_dispenserPoweredCells;
     // t569 红石矿石点亮表：打包坐标键 → 剩余点亮秒。scanRedstoneOre 触发置亮时写 RedstoneOreLitSeconds
     //   （已有条目则续时）；每 tick 递减 dt，到期 setRedstoneOreLit(false) 自熄并移除。玩家持续在旁 → 每次
     //   重新续时（光不闪断）；离开 → 倒计时自熄（机制等价 MC 触发发光一次点亮窗口）。换世界清空（同

@@ -112,6 +112,7 @@ void PlayerController::setWorld(World *w)
     m_platePressedCells.clear();  // t627：换世界清压力板触发态（防跨世界同坐标串扰；键按世界坐标打包）
     m_plateJustPressed.clear();   // t627：同上（沿表生命周期一帧，但换世界须一并清防陈旧沿触发）
     m_buttonRecoverCells.clear(); // t628：换世界清按钮自动复位表（防跨世界同坐标串扰；键按世界坐标打包，同 m_dispenserCooldowns）
+    m_dispenserPoweredCells.clear(); // t689：换世界清机器电力基线集（防跨世界同坐标串扰；键同冷却编码）
     snapSpawnToGround(); // t137：世界注入后贴地表（构造期 m_pos=kSpawnY 兜底，此处覆盖为真实地表）
     emit worldChanged();
 }
@@ -427,6 +428,7 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
 void PlayerController::finishWorldLoad()
 {
     m_dispenserCooldowns.clear();
+    m_dispenserPoweredCells.clear(); // t689：机器电力基线集同清（读档残留基线会吞掉通电沿——存档通电机器首沿不触发）
     m_redstoneLitCells.clear();
     m_platePressedCells.clear();
     m_plateJustPressed.clear();
@@ -4332,11 +4334,20 @@ void PlayerController::firePowerTnt(int x, int y, int z)
 
 // t658 红石电力触发发射器 / 投掷器（powerDispenserTriggered → Main.qml 转发；见头注释）。该格仍是
 //   发射器 / 投掷器 → fireDispenserAt（per-dispenser 冷却 / state 朝向 / 库存分派全复用既有机关触发链）。
+//   **t689 真上升沿门控**：信号 = 「本机器电力态被复算触达」（稳定通电下每电力活动 tick 都会发——World
+//   侧不再判沿）。本端维护 m_dispenserPoweredCells 基线集：isReceivingPower 现读 + 上基线比较，仅
+//   unpowered→powered 转换才 fire（机制等价 MC 发射器通电沿触发一次；稳定通电不连发，修「拉杆保持扳开
+//   每 2s（冷却）连发到库存空」）。断电触达（降沿）→ 仅清基线（下次再通电才触发）。
 void PlayerController::fireDispenserAtQml(int x, int y, int z)
 {
     if (!m_world) return;
     const quint8 b = m_world->blockAt(x, y, z);
     if (!BlockRegistry::isDispenser(b) && !BlockRegistry::isDropper(b)) return; // 已非机器 → no-op
+    const quint64 key = (quint64(quint32(x)) << 32) | quint64(quint32(z)); // 同 fireDispenserAt 冷却键编码（x<<32|z）
+    const bool powered = m_world->isReceivingPower(x, y, z); // 现读电力态（信号不携态，消费端自查）
+    if (!powered) { m_dispenserPoweredCells.remove(key); return; } // 降沿：只清基线，不 fire
+    if (m_dispenserPoweredCells.contains(key)) return;             // 稳定通电（基线已有）→ 非沿，不 fire
+    m_dispenserPoweredCells.insert(key);                           // 记上升沿基线
     fireDispenserAt(x, y, z, b); // per-dispenser 冷却闸（同机器同 tick 双路径触发只 fire 一次）
 }
 

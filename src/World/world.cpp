@@ -2280,11 +2280,13 @@ bool World::recomputePowerLocal()
                 any = true;
             }
         } else if (BlockRegistry::isDispenser(b) || BlockRegistry::isDropper(b)) {
-            // t658 发射器 / 投掷器：通电上升沿触发一次（per-dispenser 冷却在消费端 fireDispenserAt 内）。
-            if (powered) {
-                emit powerDispenserTriggered(x, y, z); // 呈现层：fireDispenserAtQml（冷却 / 朝向 / 库存复用）
-                any = true;
-            }
+            // t658 发射器 / 投掷器：电力复算触达本机器 → 发信号让消费端复检（fireDispenserAtQml 内做
+            //   **真上升沿**门控——t689 修「持续通电每 2s（消费端冷却）连发」：稳定通电（如拉杆保持扳开）
+            //   时本分支每个电力活动 tick 都会命中，旧 `if (powered) emit` 使信号每 tick 发 → 消费端只剩
+            //   2s 冷却节流 = 连发到库存空。现信号 = 「本机器电力态可能变了」（升 / 降沿都会触达），沿检测
+            //   归消费端（读 isReceivingPower 与上 tick 基线集比较，仅 unpowered→powered 转换才 fire）。
+            emit powerDispenserTriggered(x, y, z); // 呈现层：fireDispenserAtQml（沿检测 + 冷却 / 朝向 / 库存复用）
+            any = true;
         }
     }
 
