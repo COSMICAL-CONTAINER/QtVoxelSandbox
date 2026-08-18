@@ -756,6 +756,23 @@ Item {
                                     visible: root.hotbar.isMaterial(modelData) || parent.bookInfo
                                     materialId: parent.bookInfo ? 0x227 : modelData
                                 }
+                                // t696 附魔紫晕（图标内裁剪）：预设附魔书格 → 30×30 图标区半透紫叠层 + 缓慢
+                                //   呼吸（shimmer，~1.6s 循环）。用户「调色板附魔书没紫晕、hotbar 里有」——
+                                //   MaterialIcon 自绘紫纹太弱；叠层与 hotbar 槽紫晕同配色（#8c40e6 族）。
+                                //   **只罩图标 rect 不糊整格**（用户口径：紫纹只作用图标；anchors.fill 本
+                                //   30×30 图标容器，非外层 40 格 cell）。
+                                Rectangle {
+                                    id: paletteBookGlint
+                                    anchors.fill: parent
+                                    visible: parent.bookInfo !== null
+                                    color: Qt.rgba(0.55, 0.25, 0.9, 0.30)
+                                    radius: 3
+                                    SequentialAnimation on opacity {
+                                        loops: Animation.Infinite
+                                        NumberAnimation { from: 0.7; to: 1.0; duration: 800; easing.type: Easing.InOutSine }
+                                        NumberAnimation { from: 1.0; to: 0.7; duration: 800; easing.type: Easing.InOutSine }
+                                    }
+                                }
                             }
                             // hover 高亮边框（仅实体方块）。
                             Rectangle {
@@ -1370,6 +1387,7 @@ Item {
 
                                 // 物品图标（方块 Image / 工具 ToolIcon / 材料 MaterialIcon）。
                                 Item {
+                                    id: mainIconBox
                                     anchors.centerIn: parent
                                     width: 30; height: 30
                                     visible: mainId !== 0
@@ -1389,6 +1407,13 @@ Item {
                                         anchors.fill: parent
                                         visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.isMaterial(mainId)) : false }
                                         materialId: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (mainId) : 0 }
+                                    }
+                                    // t696：紫晕只罩图标 rect（见 hotbar 行同注释）。
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        visible: Array.isArray(mainEnch) && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0)
+                                        color: Qt.rgba(0.55, 0.25, 0.9, 0.30)
+                                        radius: 3
                                     }
                                 }
                                 // 栈数量（t32）：count>1 时右下角显数字。触碰 mainRevision 刷新（VM NOTIFY 驱动）。
@@ -1412,18 +1437,7 @@ Item {
                                     curDur: cDur
                                     maxDur: mDur
                                 }
-                                // t647 附魔光晕（生存 tab 主栏槽）：同 SurvivalInventory 主栏光晕。触碰 mainRevision 重算。
-                                Rectangle {
-                                    anchors.fill: parent
-                                    visible: {
-                                        const _r = root.hotbar.mainRevision
-                                        if (_r < 0 || mainId === 0) return false
-                                        return Array.isArray(mainEnch) && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0)
-                                    }
-                                    color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
-                                    radius: 3
-                                    z: 3
-                                }
+                                // t647 附魔光晕已移入图标容器（t696 图标内裁剪，见 mainIconBox 内 Rectangle）。
                                 // 左键整组（拾取 / 放置 / 合并 / 互换，resolveClick）；写经 hotbar.mainSetStack（VM 单一权威）。
                                 //   t110：Shift+左键 → main 槽搬运到首个空 hotbar 槽（与生存背包主栏一致）。
                                 TapHandler {
@@ -1614,15 +1628,17 @@ Item {
                                     maxDur: mDur
                                 }
                                 // t647 附魔光晕（生存 tab hotbar 槽）：同 SurvivalInventory hotbar 行光晕。触碰 slotRevision 重算。
+                                //   t696：紫晕**只罩 30×30 图标 rect**（用户口径「紫纹应只作用图标不糊整格」）
+                                //   —— 从外层 40 格 cell 移入图标容器（dragIcon），不再冲刷槽位井底 / 斜面框。
                                 Rectangle {
-                                    anchors.fill: parent
+                                    anchors.fill: dragIcon
                                     visible: {
                                         const _r = root.hotbar.slotRevision
                                         if (_r < 0 || slotId === 0) return false
                                         const e = root.hotbar.enchantsAt(index)
                                         return e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
                                     }
-                                    color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
+                                    color: Qt.rgba(0.55, 0.25, 0.9, 0.30)
                                     radius: 3
                                     z: 3
                                 }

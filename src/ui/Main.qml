@@ -2687,14 +2687,23 @@ Window {
                     }
                     // t647 附魔贴身光晕罩（镐外形包围盒：柄底 -0.45 到镐头 0.45 → 半长 ~0.5；略放大 1.06×
                     //   作边缘泛光，不遮工具本体；继承 Node 旋转 → 恒贴住镐形。修旧「独立大紫立方」错位观感）。
+                    //   t696：opacity 呼吸（0.15↔0.32，~1.5s）—— 静态壳观感弱（用户实测「第一人称无紫晕」
+                    //   实为不显眼）；shimmer 令附魔态一眼可辨（机制等价 MC glint 流动光）。
                     Model {
                         visible: viewModelHand.heldToolEnchanted
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.72, 1.06, 0.34)
                         materials: PrincipledMaterial {
+                            id: pickGlintMat
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#8f5fd9"
                             opacity: 0.22   // 半透紫边缘光
+                        }
+                        SequentialAnimation {
+                            running: viewModelHand.heldToolEnchanted
+                            loops: Animation.Infinite
+                            NumberAnimation { target: pickGlintMat; property: "opacity"; from: 0.15; to: 0.32; duration: 750; easing.type: Easing.InOutSine }
+                            NumberAnimation { target: pickGlintMat; property: "opacity"; from: 0.32; to: 0.15; duration: 750; easing.type: Easing.InOutSine }
                         }
                     }
                 }
@@ -2741,9 +2750,17 @@ Window {
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.68, 1.06, 0.48)
                         materials: PrincipledMaterial {
+                            id: hoeGlintMat
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#8f5fd9"
                             opacity: 0.22
+                        }
+                        // t696 glint shimmer（同镐壳呼吸，见 heldPickaxeFp 注释）。
+                        SequentialAnimation {
+                            running: viewModelHand.heldToolEnchanted
+                            loops: Animation.Infinite
+                            NumberAnimation { target: hoeGlintMat; property: "opacity"; from: 0.15; to: 0.32; duration: 750; easing.type: Easing.InOutSine }
+                            NumberAnimation { target: hoeGlintMat; property: "opacity"; from: 0.32; to: 0.15; duration: 750; easing.type: Easing.InOutSine }
                         }
                     }
                 }
@@ -2796,9 +2813,17 @@ Window {
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.78, 1.06, 0.22)
                         materials: PrincipledMaterial {
+                            id: axeGlintMat
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#8f5fd9"
                             opacity: 0.22
+                        }
+                        // t696 glint shimmer（同镐壳呼吸，见 heldPickaxeFp 注释）。
+                        SequentialAnimation {
+                            running: viewModelHand.heldToolEnchanted
+                            loops: Animation.Infinite
+                            NumberAnimation { target: axeGlintMat; property: "opacity"; from: 0.15; to: 0.32; duration: 750; easing.type: Easing.InOutSine }
+                            NumberAnimation { target: axeGlintMat; property: "opacity"; from: 0.32; to: 0.15; duration: 750; easing.type: Easing.InOutSine }
                         }
                     }
                 }
@@ -2844,9 +2869,17 @@ Window {
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.62, 1.06, 0.22)
                         materials: PrincipledMaterial {
+                            id: shovelGlintMat
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#8f5fd9"
                             opacity: 0.22
+                        }
+                        // t696 glint shimmer（同镐壳呼吸，见 heldPickaxeFp 注释）。
+                        SequentialAnimation {
+                            running: viewModelHand.heldToolEnchanted
+                            loops: Animation.Infinite
+                            NumberAnimation { target: shovelGlintMat; property: "opacity"; from: 0.15; to: 0.32; duration: 750; easing.type: Easing.InOutSine }
+                            NumberAnimation { target: shovelGlintMat; property: "opacity"; from: 0.32; to: 0.15; duration: 750; easing.type: Easing.InOutSine }
                         }
                     }
                 }
@@ -2907,9 +2940,17 @@ Window {
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.28, 0.98, 0.18)
                         materials: PrincipledMaterial {
+                            id: swordGlintMat
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: "#8f5fd9"
                             opacity: 0.22
+                        }
+                        // t696 glint shimmer（同镐壳呼吸，见 heldPickaxeFp 注释）。
+                        SequentialAnimation {
+                            running: viewModelHand.heldToolEnchanted
+                            loops: Animation.Infinite
+                            NumberAnimation { target: swordGlintMat; property: "opacity"; from: 0.15; to: 0.32; duration: 750; easing.type: Easing.InOutSine }
+                            NumberAnimation { target: swordGlintMat; property: "opacity"; from: 0.32; to: 0.15; duration: 750; easing.type: Easing.InOutSine }
                         }
                     }
                 }
@@ -5058,7 +5099,10 @@ Window {
                     //   t590：附魔掉落物（玩家丢弃带附魔工具 / 护甲）→ 外壳转紫（紫光晕，机制等价 MC 附魔
                     //     光泽；原创纯色，零资产）。紫 = (140,64,230) 与槽位附魔光晕 #8c40e6 同色系；仍乘
                     //     天光乘子夜间同步变暗（同浅灰壳）。无附魔 → 浅灰半透（原状）。
+                    //   t696：紫晕加缓慢呼吸（opacity 0.28↔0.45，~1.6s 循环）—— 静态半透壳观感弱（用户实测
+                    //     「掉落无紫晕」实为不显眼）；shimmer 让附魔态一眼可辨（机制等价 MC glint 流动光）。
                     Model {
+                        id: entShell
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -5068,6 +5112,13 @@ Window {
                                        ? tintBySkyLight(140/255, 64/255, 230/255, worldClock.skyLight)
                                        : tintBySkyLight(176/255, 176/255, 176/255, worldClock.skyLight)
                             opacity: 0.35          // 半透（<1 触发透明混合）
+                        }
+                        // t696 附魔呼吸（仅带附魔实体播放；普通掉落物静态灰壳不动画）。
+                        SequentialAnimation on opacity {
+                            running: entRoot.entHasEnch
+                            loops: Animation.Infinite
+                            NumberAnimation { from: 0.28; to: 0.45; duration: 800; easing.type: Easing.InOutSine }
+                            NumberAnimation { from: 0.45; to: 0.28; duration: 800; easing.type: Easing.InOutSine }
                         }
                     }
                     // t116 F3+B 掉落物碰撞箱（spec「掉落物 0.3」+ 朝向箭头）：掉落物 AABB = 0.3 立方（与图标
