@@ -34,6 +34,35 @@ bool isJumpObstacle(World *world, int x, int y, int z)
     return !isCropBlock(bid);
 }
 
+// t670 白天寻阴凉（机制等价 MC 亡灵日间主动找树荫/洞口躲避日光）：在世界里找 (sx,sy,sz) 周围半径 kRadius 内
+//   最近（XZ 距离取小）的「遮荫可站列」。(x, z) 列候选：某脚位层 y（±1 内）下方实体（站得住）+ 身体格空气
+//   （mob 1.8 高占两格）+ 身体格 skyLight < kThresh（遮荫，燃烧判定是 skyLightAt>=15，14 留边缘余量）。
+//   返 true 并输出列坐标（bestX/bestZ）。扫描盒子含垂直三/四层，覆盖树叶下 / 屋檐 / 洞口等常见阴凉。
+//   无任何遮荫格 → false（caller 保持追踪玩家，白昼照烧，MC 僵尸无遮荫即烧死）。
+bool findShadeTarget(World *world, int sx, int sy, int sz, int radius, int kThresh, int *outX, int *outZ)
+{
+    if (!world) return false;
+    int bestX = -1, bestZ = -1, bestD2 = INT_MAX;
+    const int h = world->height();
+    for (int dz = -radius; dz <= radius; ++dz) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+            const int x = sx + dx, z = sz + dz;
+            if (x < 0 || z < 0 || x >= world->width() || z >= world->depth()) continue;
+            for (int y = sy - 1; y <= sy + 2; ++y) {
+                if (y < 1 || y + 1 >= h) continue; // 身体格 y+1 需在界内（且脚位 y>=1 防 y=0 下方越界）
+                if (!world->isSolid(x, y, z)) continue;               // 下方支撑（脚位层实体，可站立）
+                if (world->blockAt(x, y + 1, z) != BlockRegistry::Air) continue; // 身体格空气（可容身）
+                if (world->skyLightAt(x, y + 1, z) >= kThresh) continue;          // 遮荫（无直射日光）
+                const int dd = dx * dx + dz * dz;
+                if (bestX < 0 || dd < bestD2) { bestX = x; bestZ = z; bestD2 = dd; }
+                break; // 该列有任一可站遮荫层即算候选（同列其它层不更近）
+            }
+        }
+    }
+    if (bestX >= 0) { *outX = bestX; *outZ = bestZ; return true; }
+    return false;
+}
+
 // t642 刷怪 AABB 适配校验（防生成即嵌墙）：敌对 mob（Shambler/Bones/Stalker halfH=0.90，高 1.8）的 AABB
 //   [y, y+1.8] 占 y、y+1 两格。仅查目标格 air 不够 —— 头顶格（y+1）为实体（1 格高洞穴气袋 / 地表树冠压顶 /
 //   岩架下凹）时 mob 生成即嵌进天花板 = 卡死 + 窒息（用户「晚上僵尸生成卡在方块里」根因）。要求 y、y+1
@@ -2365,10 +2394,10 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     const float dx = playerPos.x() - e.pos.x();
     const float dz = playerPos.z() - e.pos.z();
     const float dy = playerPos.y() - e.pos.y();
-    const float distXZ = std::sqrt(dx * dx + dz * dz);
+    const float distPlayer = std::sqrt(dx * dx + dz * dz);
 
     // (1) detect：XZ 距离 <= kDetectRange → 进入 / 刷新追踪（chaseTimer 重置记忆期）。脱离则记忆期内续追，过期放弃。
-    if (distXZ <= kDetectRange) {
+    if (distPlayer <= kDetectRange) {
         e.chasing = true;
         e.chaseTimer = kChaseMemory;
     } else if (e.chasing) {
@@ -2381,10 +2410,41 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         return aiWander(e, dt, world, worldW, worldD, speedScale); // t298 透传水中减速
     }
 
-    // (3) 追踪：朝玩家走 + 越障跳。yaw 朝玩家（与 aiWander / player 同 yaw 约定：dir = (-sin,0,-cos)，
-    //   使 QML eulerRotation.y=yawDeg 模型 -Z 正对玩家）→ yawRad = atan2(-dx, -dz)。
-    if (distXZ > 1e-4f) {
-        e.yawRad = std::atan2(-dx, -dz);
+    // (2b) t670 白天燃烧寻阴凉（机制等价 MC 亡灵日间主动找树荫躲避；tickHostileLife 同节拍算 e.burning）：
+    //   燃烧中 → 移动目标从玩家改「最近的遮荫格」—— 走到遮荫（自身中心格 skyLight<kShadeSkyLight）即停驻
+    //   等不烧（出阴凉重新追玩家）；寻阴凉途中玩家贴身仍攻击（近战本能）。找不到遮荫格 → 维持追玩家，
+    //   白昼无遮荫烧死即 MC 语义。目标缓存 + kShadeRescanInterval 节流重扫（重扫也兜底目标失效 / 已到阴凉）。
+    float mx = dx, mz = dz; // 移动目标向量（默认朝玩家）
+    float mdist = distPlayer;
+    if (e.burning) {
+        e.shadeRescanTimer -= dt;
+        if (!e.seekingShade || e.shadeRescanTimer <= 0.0f) {
+            int tx = -1, tz = -1;
+            if (findShadeTarget(world, qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()),
+                                kShadeScanRadius, kShadeSkyLight, &tx, &tz)) {
+                e.seekingShade = true;
+                e.shadeTx = tx; e.shadeTz = tz;
+            } else {
+                e.seekingShade = false; // 没搜到遮荫 → 维持追玩家（白昼照烧，MC 语义）
+            }
+            e.shadeRescanTimer = kShadeRescanInterval;
+        }
+        if (e.seekingShade) {
+            const float sx = (float(e.shadeTx) + 0.5f) - e.pos.x();
+            const float sz = (float(e.shadeTz) + 0.5f) - e.pos.z();
+            if (sx * sx + sz * sz < 0.81f) {
+                // 已到阴凉目标格：自身中心格遮荫 → 原地停驻（等不烧 / 玩家靠近再追；mx=mz=0 停止移动）
+                mx = 0.0f; mz = 0.0f; mdist = 0.0f;
+            } else { mx = sx; mz = sz; mdist = std::sqrt(sx * sx + sz * sz); }
+        }
+    } else {
+        e.seekingShade = false; // 不燃烧 → 清阴凉目标（回追玩家）
+    }
+
+    // (3) 追踪：朝移动目标（阴凉方向 / 玩家方向）走 + 越障跳。yaw 朝目标（与 aiWander / player 同 yaw 约定：
+    //   dir = (-sin,0,-cos)，使 QML eulerRotation.y=yawDeg 模型 -Z 正对目标）→ yawRad = atan2(-mx, -mz)。
+    if (mdist > 1e-4f) {
+        e.yawRad = std::atan2(-mx, -mz);
     }
     e.wanderSpeed = kChaseSpeed; // 供 walkPhase 动画频率 + 语义（行走态；raw 值，水中减速不写入此字段避免下游二次缩放）
     // t298 水中减速：chaseSpd = kChaseSpeed × speedScale（位移 + moveSpeed 用 it；wanderSpeed 保 raw）。
@@ -2394,7 +2454,10 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     //   不跳的情况：前方无墙（平地直走）/ 墙 ≥2 格（跳不过，正确不跳避免原地蹦）/ 已在空中（resting=false 跳过）。
     //   fdx/fdz = 朝向单位向量；前方格取脚位 +0.6 格偏移（mob 半宽 0.45 + 余量，确保落在墙格而非自身列）。
     //   t642 前方格是作物 → 不跳（isJumpObstacle 排除作物：作物可穿越，mob 应慢走穿过农田而非跳踩作物）。
-    if (e.resting && world) {
+    //   t670 跳起同时置水平滑流（jumpGX/jumpGZ = 目标方向 × 追击速度）：AI 移动是节流的（每 kAiTickInterval 帧
+    //   一次），翻墙的水平前进只有「身体高过墙顶 + 恰逢 AI 帧」才发生 → 玩家高一格时僵尸常被卡墙下（只蹦不上）；
+    //   滑流让 mob 跳起后每帧向前漂移，身体一高过墙顶即持续爬升越障 → 落到墙顶（机制等价 MC 跳 1 格台阶）。
+    if (e.resting && world && mdist > 1e-4f) {
         const float fdx = -std::sin(e.yawRad);
         const float fdz = -std::cos(e.yawRad);
         const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
@@ -2406,16 +2469,18 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
             && !world->isSolid(fx, fy + 2, fz)) {             // 头位可容（mob ~1.8 高，再上方须空气）
             e.vy = kJumpSpeed;
             e.resting = false; // 解除静止 → 本 tick 后段重力分支处理上跳（vy 正）→ 减速 → 下落 → 着地
+            e.jumpGX = (mx / mdist) * chaseSpd; // t670 越障跳水平滑流（朝目标方向持续漂移）
+            e.jumpGZ = (mz / mdist) * chaseSpd;
         }
     }
 
-    // 水平移动（朝玩家，逐轴 AABB 碰撞撤回；复用 aiWander 的边界 clamp + mobAabbHitsSolid 全格扫模式 → 贴墙滑动不穿入）。
+    // 水平移动（朝移动目标，逐轴 AABB 碰撞撤回；复用 aiWander 的边界 clamp + mobAabbHitsSolid 全格扫模式 → 贴墙滑动不穿入）。
     bool moved = false;
-    if (distXZ > 1e-4f) {
+    if (mdist > 1e-4f) {
         const float ehw = e.halfW; // t252 XZ 半宽（边界 clamp + 碰撞）
         const float ehh = e.halfH; // t252 Y 半高（footprint 格扫）
-        const float nx = dx / distXZ;
-        const float nz = dz / distXZ;
+        const float nx = mx / mdist;
+        const float nz = mz / mdist;
         // X 轴：世界边界 clamp + 方块碰撞撤回。
         float newX = e.pos.x() + nx * chaseSpd * dt;
         if (newX < ehw) newX = ehw;
@@ -2435,14 +2500,14 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     //   emit mobAttackedPlayer + 重置两者。垂直门控防跨层隔空打（玩家在 mob 头顶 / 脚下不命中）。emit 走语义信号，
     //   呈现层据 Survival 门控应用伤害。t321 节流门控防多 mob 围攻同帧齐抽（详见 kPlayerHitThrottle 注释）——
     //   m_playerHitCooldown>0（其它 mob 刚命中过）→ 本次 attack 不触发（mob 视觉仍挥击但无伤害），等节流过。
-    //   t296 击退方向 = (玩家 − mob) XZ 归一（把玩家推开 mob）；distXZ 极小（贴脸重合）→ 朝 mob 朝向兜底（yaw 约定
-    //     dir=(-sin,-cos)），防零向量。dx/dz/distXZ 已在 (1) 前算好。
-    if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange
+    //   t296 击退方向 = (玩家 − mob) XZ 归一（把玩家推开 mob）；distPlayer 极小（贴脸重合）→ 朝 mob 朝向兜底（yaw 约定
+    //     dir=(-sin,-cos)），防零向量。dx/dz/distPlayer 已在 (1) 前算好。t670 寻阴凉停驻时玩家贴身仍攻击（近战本能）。
+    if (distPlayer <= kAttackRange && std::abs(dy) <= kAttackVertRange
         && e.attackCooldown <= 0.0f && m_playerHitCooldown <= 0.0f) {
         e.attackCooldown = kAttackCooldown;
         m_playerHitCooldown = kPlayerHitThrottle; // t321 串行化玩家受击（围攻 mob 轮替出手）
         float kbX, kbZ;
-        if (distXZ > 1e-3f) { kbX = dx / distXZ; kbZ = dz / distXZ; }
+        if (distPlayer > 1e-3f) { kbX = dx / distPlayer; kbZ = dz / distPlayer; }
         else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); } // 兜底：朝 mob 面朝方向（= 推开）
         // t480 主人受击 → 驯服狼攻击本敌对（防御目标 = 咬伤主人的 mob；机制等价 MC 驯服狼报复攻击者）。
         m_wolfTarget = idx;
@@ -2515,6 +2580,7 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
     // 越障跳（仅在要水平移动 + 贴地时；同 aiHostile 越障：前方 1 格墙 + 墙顶 2 格空气 → 跳）。
     //   前方格取 moveDir 方向 0.7 格偏移（mob 半宽 0.45 + 余量，落在前方格而非自身列）。
     //   t642 前方格是作物 → 不跳（isJumpObstacle 排除作物；作物可穿越，同 aiHostile）。
+    //   t670 跳起同时置水平滑流（同 aiHostile：翻 1 格墙时持续向前漂移，身体高过墙顶即爬升越障）。
     if (wantMove && e.resting && world) {
         const int fy = qFloor(e.pos.y() - e.halfH);                 // 脚位格
         const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
@@ -2525,6 +2591,8 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
             && !world->isSolid(fx, fy + 2, fz)) {                    // 头位可容（mob ~1.8 高）
             e.vy = kJumpSpeed;
             e.resting = false;
+            e.jumpGX = moveDirX * chaseSpd; // t670 越障跳水平滑流（朝移动方向）
+            e.jumpGZ = moveDirZ * chaseSpd;
         }
     }
 
@@ -2748,6 +2816,14 @@ bool EntityManager::aiStalker(int idx, Entity &e, float dt, World *world, const 
             && !world->isSolid(fx, fy + 2, fz)) {
             e.vy = kJumpSpeed;
             e.resting = false;
+            // t670 越障跳水平滑流（同 aiHostile / aiArcher：翻 1 格墙时持续向前漂移爬升越障）。
+            if (distXZ > 1e-4f) {
+                e.jumpGX = (dx / distXZ) * stalkerSpd;
+                e.jumpGZ = (dz / distXZ) * stalkerSpd;
+            } else {
+                e.jumpGX = fdx * stalkerSpd;
+                e.jumpGZ = fdz * stalkerSpd;
+            }
         }
     }
     bool moved = false;
@@ -4185,6 +4261,26 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (std::abs(e.vz) < 0.05f) e.vz = 0.0f;
             }
 
+            // t670 越障跳水平滑流应用（jumpGX/jumpGZ；aiHostile/aiArcher/aiStalker 跳起时置，着地清零）：
+            //   每帧把滑流转位移（同击退路径：逐轴 mobAabbHitsSolid 撤回 + 世界边界 clamp）。滑流让 mob 跳起后
+            //   持续向前漂移 —— 低空时被墙顶碰撞撤回（身体还压在墙里），身体一高过墙顶即漂移通过 → 爬到墙顶，
+            //   修「玩家高一格僵尸被卡在台阶下只蹦不上」（t670）。着地（resting 恢复）在下方 resting 分支清零。
+            //   与击退（vx/vz）独立叠加（跳起瞬间被击退 → 两段位移相加，同 AI 移动 + 击退共存语义）。
+            if (std::abs(e.jumpGX) > 1e-4f || std::abs(e.jumpGZ) > 1e-4f) {
+                const float ehw = e.halfW;
+                const float ehh = e.halfH;
+                float newX = e.pos.x() + e.jumpGX * float(dt);
+                if (newX < ehw) newX = ehw;
+                if (newX > worldW - ehw) newX = worldW - ehw;
+                if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+                float newZ = e.pos.z() + e.jumpGZ * float(dt);
+                if (newZ < ehw) newZ = ehw;
+                if (newZ > worldD - ehw) newZ = worldD - ehw;
+                if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+                if (newX != e.pos.x()) { e.pos.setX(newX); dirty = true; }
+                if (newZ != e.pos.z()) { e.pos.setZ(newZ); dirty = true; }
+            }
+
             // t254 窒息（机制同玩家 t160 的「眼位嵌实体方块 → 每 1s 扣 1HP」）：mob 头部（AABB 顶格）嵌入实体
             //   可碰撞方块（被沙 / 方块埋住）→ 累加 suffocationTimer，每 kSuffocationInterval 秒扣 1HP（复用
             //   damageEntity → hurtFlash 红闪 / mobDied 死亡掉落链，同玩家 fallDamageTaken(1)→takeDamage）。
@@ -4278,6 +4374,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                                && ((m_tickPhase + quint32(idx)) % quint32(kAiTickInterval)) == 0;
         if (e.resting) {
             if (!mobAiTick) continue; // 非 aiTick：信上次复探结果，保 resting，跳过重力 + mobInWater（省 blockAt）
+            // t670 越障跳滑流着地兜底清（防某条路径漏清后 resting mob 持续漂移）。
+            e.jumpGX = 0.0f;
+            e.jumpGZ = 0.0f;
             // aiTick：复探支撑。
             // t362 改「footprint 任一列有支撑」（旧版仅中心列 cx/cz）：mob 走下 1 格台阶时，中心先越过台阶沿、
             //   但后半 footprint 仍压在更高支撑块上。旧版即判失支撑 → 重力把整格 snap 下沉到低地 → 此时 trailing
@@ -4370,6 +4469,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (e.pos.y() != restY) { e.pos.setY(restY); dirty = true; }
                 if (e.vy != 0.0f) { e.vy = 0.0f; dirty = true; }
                 e.resting = true;
+                e.jumpGX = 0.0f; // t670 越障跳滑流着地即停（防落地后继续漂移 / 推入墙）
+                e.jumpGZ = 0.0f;
             }
         } else if (mobNewY != e.pos.y()) {
             e.pos.setY(mobNewY); // 自由下落（无命中）

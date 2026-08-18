@@ -926,6 +926,21 @@ private:
         //   kStuckEscapeCooldown 秒尝试一次「移到最近空位」逃生（见 tick 窒息分支）；失败倒计时重置再试。
         //   <=0 = 可立即尝试。DMI 兜底默认 0（新生成 mob 嵌入即当帧可逃生）。
         float stuckEscapeTimer = 0.0f;
+        // t670 越障跳水平滑流（vx/vz 之外的独立字段）：aiHostile/aiArcher/aiStalker 越障跳（翻 1 格墙）时置为
+        //   「朝目标方向 × 追击速度」的水平速度；物理段每帧按它位移（同击退路径逐轴碰撞撤回）。因 AI 移动是节流的
+        //   （每 kAiTickInterval 帧一次），跳跃上升期撞墙被挡 → 下一 AI 帧前进时身体已高于墙顶、碰撞已过 → 本应
+        //   自然越过；但上升期的水平前进被节流拖慢 → 玩家高一格时僵尸迟迟翻不上平台（t670 实测「卡死不跳」）。
+        //   连续滑流让 mob 在跳起后每帧向前漂移，身体一高过墙顶即持续爬升越障（机制等价 MC 跳上 1 格台阶）。
+        //   着地（resting 恢复）即清零；击退 / 水流推动互不干扰（独立字段）。
+        float jumpGX = 0.0f;
+        float jumpGZ = 0.0f;
+        // t670 白天燃烧时寻阴凉（机制等价 MC 亡灵日间主动找树荫躲避）：e.burning（日光燃烧）时 hostile AI 改寻
+        //   阴影目标（shadeTx/Tz = 目标格坐标；seekingShade=true），走到该格即停燃。shadeRescanTimer 节流重扫
+        //   （每 kShadeRescanInterval 秒重新搜最近遮荫格；搜不到 → 维持旧目标 / 清空回追玩家）。
+        bool seekingShade = false;
+        int shadeTx = -1;
+        int shadeTz = -1;
+        float shadeRescanTimer = 0.0f;
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
@@ -1305,6 +1320,14 @@ private:
     static constexpr float kSpawnLightThreshold  = 7.0f;  // 刷怪有效光上界（< 此才刷；spec「light<7」）
     static constexpr float kBurnSkyBrightness    = 0.55f; // 燃烧所需 skyBrightness 门（白天；>0.55 = 日间）
     static constexpr float kBurnDamageInterval   = 1.0f;  // 燃烧扣血间隔（秒/HP；机制等价 MC 日光燃烧 1HP/s）
+    // t670 白天寻阴凉（机制等价 MC 亡灵日间逃避日光）：燃烧中的 hostile 在周围小半径内找「遮荫格」走过去。
+    //   kShadeSkyLight = 遮荫判定门槛（skyLight < 此值即算遮荫；燃烧判定是 skyLightAt>=15，取 14 留边缘余量，
+    //   叶缝 / 屋檐边不差一档反复闪燃）。kShadeScanRadius = 搜索半径（XZ 格；小半径够用，远跑不如原地找棵树下
+    //   或洞口）。kShadeRescanInterval = 目标失效后重扫间隔（秒；节流扫描开销）。到达目标（XZ 距离 <0.9 且自身
+    //   中心格 skyLight<kShadeSkyLight）→ 停燃清目标回追玩家。
+    static constexpr int kShadeSkyLight        = 14;    // 遮荫门槛（skyLight < 此值 = 遮荫）
+    static constexpr int kShadeScanRadius      = 6;     // 寻阴凉扫描半径（XZ 格）
+    static constexpr float kShadeRescanInterval = 3.0f; // 目标失效后重扫间隔（秒）
     static constexpr float kFarDespawn           = 56.0f; // 敌对远距消失半径（blocks）
     static constexpr int   kHostileDefaultHealth = 20;    // Shambler/Bones 满血（机制等价 MC 1.0 僵尸 / 骷髅 20HP）
     // t392 刷怪笼周期刷怪常量（spec「periodically spawns ONE hostile mob while a player is within range;
