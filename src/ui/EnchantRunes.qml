@@ -59,6 +59,8 @@ Node {
 
     // 重扫参与书架位（World::countBookshelvesAround 同规则：切比雪夫 ==2 环带 × y/y+1 两层 + 半步格 Air）。
     //   editRev 变（放 / 破书架）或 active 翻真时重算；world 空 / 无书架 → 空表（无粒子，静默）。
+    //   t697：active 语义改「playing 常驻」（非「面板开」）—— 粒子流只要旁有书架就常驻循环（用户
+    //   「非仅放入物品时」）；spawnTimer 自据 shelfCells 空表停摆，无书架零开销。
     function rescanShelves() {
         root.shelfCells = []
         if (!root.world || !root.active) return
@@ -82,15 +84,16 @@ Node {
     onTableYChanged:       rescanShelves()
     onTableZChanged:       rescanShelves()
 
-    // 常驻漂浮 Timer：active 且有书架 → 每 500ms spawn 1-2 颗（随机书架位）。停摆条件在 onTriggered 内
-    //   早退（restart 语义简单：active=false 后不再 spawn，在飞符文仍由 tickTimer 推进至寿终）。
+    // 常驻漂浮 Timer：t697 改「active && 有书架」即流（active = playing 常驻，宿主绑 window.appState）——
+    //   只要有参与书架，符文从书架向台持续飘（用户「粒子应常驻循环，非仅放入物品时」）。面板开 / 关
+    //   不再门控（关面板旁有书架也飘，机制等价 MC 附魔台常驻符文）；无书架（shelfCells 空）spawnTimer
+    //   停摆（running 绑 length > 0），在飞符文仍由 tickTimer 推进至寿终。
     Timer {
         id: spawnTimer
         interval: 500
         repeat: true
-        running: root.active
+        running: root.active && root.shelfCells.length > 0
         onTriggered: {
-            if (root.shelfCells.length === 0) return
             const n = 1 + Math.floor(Math.random() * 2)
             for (let i = 0; i < n; ++i) root.spawnRune()
         }

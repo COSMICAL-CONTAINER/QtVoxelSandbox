@@ -70,6 +70,10 @@ qt_add_executable(voxelsandbox
     src/Renderer/selectionwireboxes.h
     src/Renderer/unitcube.cpp
     src/Renderer/unitcube.h
+    # t697 符文字迹几何（附魔台悬浮书页面细节）：8 条错落扁盒条组成的「字行」，压在书页纸面上读作
+    # 手写符文（程序生成，§9 原创）。Main.qml 悬浮书左右页各绑一片。
+    src/Renderer/glyphlines.cpp
+    src/Renderer/glyphlines.h
     src/Renderer/crackbox.cpp
     src/Renderer/crackbox.h
     src/Renderer/blockcube.cpp

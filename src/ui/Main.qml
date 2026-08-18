@@ -4656,9 +4656,10 @@ Window {
                 // 领养进 particlesHost 锚点（t16：否则 3D Node parent=null → 孤儿不渲染）。
                 runeLoader.item.parent = particlesHost
                 runeLoader.item.world = theWorld
-                // 响应式绑定（Qt.binding）：附魔台 UI 开关 / 台坐标切换 / 放破方块 → 符文 active / 书架重扫。
+                // 响应式绑定（Qt.binding）：t697 改「playing 常驻」—— 粒子流只要旁有书架就持续（非仅
+                //   附魔台 UI 开时；用户「粒子应常驻循环」）。台坐标 / 放破方块 → 书架重扫。
                 runeLoader.item.active = Qt.binding(function() {
-                    return window.appState === "playing" && window.enchantingTableOpen
+                    return window.appState === "playing"
                 })
                 runeLoader.item.tableX = Qt.binding(function() { return window.enchantX })
                 runeLoader.item.tableY = Qt.binding(function() { return window.enchantY })
@@ -7356,6 +7357,11 @@ Window {
                 //   ~y+0.96 收在间隙内不凸到上一格）。
                 position: Qt.vector3d(cellX + 0.5, cellY + 0.82, cellZ + 0.5)
 
+                // t697 前倾 ~20° 朝玩家（讲台观感，用户「书太平」）：整书绕 X 轴前倾 20° —— 页面从水平
+                //   变为斜向朝上对玩家（站立俯视时页面正对视线，机制等价 MC 附魔台书略立起的观感）。
+                //   前倾方向：-X 旋转把页远端抬向玩家（eulerRotation.x 负 = 前倾，Qt 3D 右手系 +X 轴）。
+                eulerRotation: Qt.vector3d(-20, 0, 0)
+
                 // 柔浮（整体缓慢上下浮沉，幅度 ~0.07 格；独立 bobNode 承载，不动 position 主锚）。
                 Node {
                     id: bobNode
@@ -7369,6 +7375,9 @@ Window {
                     }
 
                     // 左页：绕书脊（Z 轴）外倾 -22°，页盒心 (-0.19, 0, 0)（内缘贴书脊）。
+                    //   t697 页面细节：页盒上叠「符文字迹」薄片（暗色短横条 ×3 行，程序生成 —— 用户
+                    //   「字太少 / 太白」；暗条压在暖白纸面上读作符文行，不再是一整块白）。单页共用
+                    //   glyphComponent（行位置随 X 偏移分散，两页不同排布避免镜像雷同）。
                     Node {
                         rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: -22 }
                         Model {
@@ -7376,6 +7385,13 @@ Window {
                             position: Qt.vector3d(-0.19, 0.0, 0.0)
                             scale: Qt.vector3d(0.38, 0.022, 0.46)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f5f1e6" }
+                        }
+                        // 左页符文字迹（y +0.013 略高于页面上表面，避 z-fight）：6 道暗横条两列排布。
+                        Model {
+                            geometry: GlyphLines {}
+                            position: Qt.vector3d(-0.19, 0.013, 0.0)
+                            scale: Qt.vector3d(0.30, 1.0, 0.38)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a4034" }
                         }
                     }
                     // 右页：镜像（+22°）。
@@ -7386,6 +7402,13 @@ Window {
                             position: Qt.vector3d(0.19, 0.0, 0.0)
                             scale: Qt.vector3d(0.38, 0.022, 0.46)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f5f1e6" }
+                        }
+                        // 右页符文字迹（同左页几何，符号条错位排布由几何内顶点位置决定）。
+                        Model {
+                            geometry: GlyphLines {}
+                            position: Qt.vector3d(0.19, 0.013, 0.0)
+                            scale: Qt.vector3d(0.30, 1.0, 0.38)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a4034" }
                         }
                     }
                     // 书脊：底部细深棕横条（两页交汇处）。
@@ -7415,25 +7438,29 @@ Window {
                     }
                 }
 
-                // 随机翻页驱动：每 2.5..6s 随机触发一次（页片翻到左页 → 停 250ms → 翻回）。
+                // t697 翻页循环（风翻页感，用户「翻页应循环」）：页片翻到左页 → 停 600ms → 翻回 → 停
+                //   900ms → 下一轮。每轮间隔 1.4-3.2s 随机（风不定时吹动；旧 2.5-6s 间隔稀疏，读作
+                //   「偶尔动一下」非循环风感）。Timer 驱动（repeat 恒真，interval 每轮随机重设）。
                 Timer {
                     id: pageFlipTimer
-                    interval: 2500
+                    interval: 1600
                     running: true
                     repeat: true
                     onTriggered: {
                         pageFlipAnim.restart()
-                        // 下次翻页随机延迟（2.5..6s）。
-                        pageFlipTimer.interval = 2500 + Math.floor(Math.random() * 3500)
+                        // 下次翻页随机延迟（1.4..3.2s —— 更密的循环节奏）。
+                        pageFlipTimer.interval = 1400 + Math.floor(Math.random() * 1800)
                     }
                 }
-                // 翻页动画：flipAngle 0→316（总角 22→338，翻越顶部 → 落左页）停 250ms → 316→0（翻回右页）。
+                // 翻页动画：flipAngle 0→316（总角 22→338，翻越顶部 → 落左页）停 600ms → 316→0（翻回右页）
+                //   → 停 900ms（歇一拍再起下一轮，风翻页的「吹—落—歇」节奏）。
                 SequentialAnimation {
                     id: pageFlipAnim
                     running: false
-                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 0.0; to: 316.0; duration: 700 }
-                    PauseAnimation { duration: 250 }
-                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 316.0; to: 0.0; duration: 500 }
+                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 0.0; to: 316.0; duration: 700; easing.type: Easing.InOutQuad }
+                    PauseAnimation { duration: 600 }
+                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 316.0; to: 0.0; duration: 500; easing.type: Easing.InOutQuad }
+                    PauseAnimation { duration: 900 }
                 }
             }
         }
