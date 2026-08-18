@@ -2698,7 +2698,7 @@ t647-t679（33 项）。优先级：**P0 = 🅰 附魔链 t647-t650 + t655 死�
 **t681** 侧挂红石火把 NOT 门振荡 + mesh 重建风暴（审查 H2，81d9d02）✅✅ 已完成（commit 0ea1b56）
 - torchAttachOffset switch(state) 整值匹配，熄灭态 state=attach|0x08 不匹配 → 误判失撑重亮→每 tick 翻转 + 每秒 5 次全量重建。修：switch(state & ~RedstoneTorchStateOffFlag) 掩掉 0x08 再解附着（playercontroller.cpp:1305 失撑同修）。
 
-**t682** 要塞装饰覆盖传送门框架（审查 H3，f4327bd）
+**t682** 要塞装饰覆盖传送门框架（审查 H3，f4327bd）✅✅ 已完成（commit ecf902e）
 - 装饰跳过区 dz∈[-9,-6] 但框架环含 z=-10/-11，每格 18% 被 Cobweb/Stairs 覆盖 → 63% 要塞门环残缺永不能激活。修：跳过区改 dz∈[-11,-6]（或精确排除框架+平台 bbox）。
 
 ### 🅱 审查修复批 M 级（8 项）
