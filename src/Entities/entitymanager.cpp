@@ -2176,6 +2176,9 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
 //   重置攻击冷却。玩家脱离 kIronGolemDetectRange / 反击记忆（kGolemAngryMemory）到期 → 平息回常规逻辑。
 //   分层（PLAN §2）：只读 World::isSolid + 自身数据；攻击敌对走 damageEntity / knockback（同层），攻击玩家
 //   走语义信号 mobAttackedPlayer / golemLaunchedPlayer（呈现层路由 PlayerState / PlayerController）。
+//   t663 三修：① 双腿 walkPhase 摆动（MobModel golem 几何 addBoxRot 化）；② 追击（敌对 mob + 反击玩家两
+//   分支）加越障跳（前方 1 格墙 + 上方空气 → kJumpSpeed，同 aiHostile；golem 2.4 高 → 查 3 格上）；③ 对
+//   mob 重拳改**蓄力 windup**（kGolemWindup 抬臂动画）→ 蓄满命中（对齐反击玩家的攻击节奏 + 动画可见）。
 bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, float worldW, float worldD,
                                 float speedScale, const QVector3D &playerPos, bool playerTargetable)
 {
@@ -2228,6 +2231,22 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
             // 追击玩家（同下敌对追击的逐轴 AABB 撤回 + 边界 clamp 模式）。
             e.wanderSpeed = kIronGolemWalkSpeed;
             const float spd = kIronGolemWalkSpeed * speedScale;
+            // t663 ② 越障跳（同下敌对追击分支；玩家跳 1 格台阶 → golem 也跳，防卡死在台阶下空挥）。
+            if (e.resting && world) {
+                const float fdx = -std::sin(e.yawRad);
+                const float fdz = -std::cos(e.yawRad);
+                const int fy = qFloor(e.pos.y() - e.halfH);
+                const int fx = qFloor(e.pos.x() + fdx * 0.66f);
+                const int fz = qFloor(e.pos.z() + fdz * 0.66f);
+                if (fy >= 0
+                    && isJumpObstacle(world, fx, fy, fz)
+                    && !world->isSolid(fx, fy + 1, fz)
+                    && !world->isSolid(fx, fy + 2, fz)
+                    && !world->isSolid(fx, fy + 3, fz)) {
+                    e.vy = kJumpSpeed;
+                    e.resting = false;
+                }
+            }
             const float ehw = e.halfW, ehh = e.halfH;
             const float nx = pdx / distXZ, nz = pdz / distXZ;
             float newX = e.pos.x() + nx * spd * float(dt);
@@ -2253,21 +2272,57 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
         const float distXZ = std::sqrt(tdx * tdx + tdz * tdz);
         if (distXZ > 1e-4f) e.yawRad = std::atan2(-tdx, -tdz); // 朝目标（同 yaw 约定 dir=(-sin,-cos)）
         if (distXZ <= kIronGolemAttackRange) {
-            // 近距重拳：高伤害 + 击退（沿 golem→mob 方向，机制等价 MC 铁傀儡重拳 + 击退）。
-            if (e.attackCooldown <= 0.0f) {
-                float kx = 1.0f, kz = 0.0f;
-                if (distXZ > 1e-3f) { kx = tdx / distXZ; kz = tdz / distXZ; }
-                damageEntity(target, kIronGolemAttackDamage);
-                knockback(target, kx, kz, kIronGolemKnockbackStrength);
-                e.attackCooldown = kIronGolemAttackCooldown;
-                dirty = true;
-            }
+            // t663 ③ 对 mob 重拳也走蓄力抬臂（与 t635 反击玩家分支同款 windup → attackPose 动画）：
+            //   近距站立蓄力 kGolemWindup 秒（golemWindup 累积 → golemAttackPoseAt 驱动 QML 抬臂）→ 蓄满
+            //   重拳命中（高伤害 + 击退，机制等价 MC 铁傀儡对怪上勾拳前摇）。此前直接瞬发伤害 → 用户观感
+            //   「打怪没有动画」。冷却未到 → 站立等待（站立不动，不重复起蓄防动画抖动）。
             e.wanderSpeed = 0.0f;
             e.moveSpeed = 0.0f; // 攻击时站立（重拳沉步）
+            if (e.attackCooldown <= 0.0f) {
+                if (e.golemWindup <= 0.0f) {
+                    e.golemWindup = dt; // 起蓄（本帧已流逝 dt 起步累积 0→kGolemWindup）
+                } else {
+                    e.golemWindup += dt;
+                    if (e.golemWindup >= kGolemWindup) {
+                        // 蓄满重拳：高伤害 + 击退（沿 golem→mob 方向，机制等价 MC 铁傀儡重拳 + 击退）。
+                        e.golemWindup = 0.0f;
+                        e.attackCooldown = kIronGolemAttackCooldown;
+                        // 目标可能蓄力期间死亡 / 被移除 → 重读槽位校验（idx 越界 / 非 Mob / dead → 放弃本拳）。
+                        if (target < int(m_entities.size())) {
+                            const Entity &t2 = m_entities[size_t(target)];
+                            float kx = 1.0f, kz = 0.0f;
+                            if (distXZ > 1e-3f) { kx = tdx / distXZ; kz = tdz / distXZ; }
+                            else { kx = -std::sin(e.yawRad); kz = -std::cos(e.yawRad); } // 兜底：朝 golem 面朝方向
+                            damageEntity(target, kIronGolemAttackDamage);
+                            knockback(target, kx, kz, kIronGolemKnockbackStrength);
+                            qCInfo(lcEnt) << "iron golem heavy punch hit mob" << target;
+                        }
+                    }
+                }
+            }
+            return true; // 蓄力期 revision 须 bump（attackPose 动画绑定刷新，即使站立不动）
         } else {
             // 追击：朝目标走（kIronGolemWalkSpeed，缓慢；逐轴 AABB 撤回 + 边界 clamp，同 aiHostile 追踪移动）。
             e.wanderSpeed = kIronGolemWalkSpeed;
             const float spd = kIronGolemWalkSpeed * speedScale; // t298 水中减速透传
+            // t663 ② 越障跳（机制等价 aiHostile：前方脚位是 1 格墙 + 墙顶两格空气 → 跳；台阶卡死根因）。
+            //   前方格取脚位 +0.66 偏移（golem 半宽 0.60 + 余量，落在墙格而非自身列）；头位查 3 格上
+            //   （golem 2.4 高，翻 1 格墙需上两格皆空气）。多查一层（fy+3）防 2 格身位嵌顶。
+            if (e.resting && world) {
+                const float fdx = -std::sin(e.yawRad);
+                const float fdz = -std::cos(e.yawRad);
+                const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
+                const int fx = qFloor(e.pos.x() + fdx * 0.66f);
+                const int fz = qFloor(e.pos.z() + fdz * 0.66f);
+                if (fy >= 0
+                    && isJumpObstacle(world, fx, fy, fz)             // 前方脚位是墙（作物格排除，可穿越不跳）
+                    && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落（翻上去后脚位）
+                    && !world->isSolid(fx, fy + 2, fz)                // 头位可容（golem 2.4 高 → 再上方两格须空气）
+                    && !world->isSolid(fx, fy + 3, fz)) {
+                    e.vy = kJumpSpeed;
+                    e.resting = false; // 解除静止 → 重力分支处理上跳（同 aiHostile 越障跳）
+                }
+            }
             const float ehw = e.halfW, ehh = e.halfH;
             const float nx = tdx / distXZ, nz = tdz / distXZ;
             float newX = e.pos.x() + nx * spd * float(dt);

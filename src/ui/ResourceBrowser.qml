@@ -70,11 +70,19 @@ Item {
     readonly property var mobModel: [
         { mobType: 1, name: "猪" }, { mobType: 2, name: "牛" }, { mobType: 3, name: "羊" },
         { mobType: 4, name: "蹒跚者" }, { mobType: 5, name: "骷髅弓箭手" }, { mobType: 6, name: "潜行者" },
-        { mobType: 7, name: "蜘蛛" }, { mobType: 8, name: "鸡" },
-        { mobType: 12, name: "雪傀儡" }, { mobType: 13, name: "铁傀儡" }
+        { mobType: 7, name: "蜘蛛" }, { mobType: 8, name: "鸡" }, { mobType: 9, name: "鱿鱼" },
+        { mobType: 10, name: "狼" }, { mobType: 11, name: "豹猫" },
+        { mobType: 12, name: "雪傀儡" }, { mobType: 13, name: "铁傀儡" }, { mobType: 14, name: "蠹虫" },
+        // t663 ⑥ 剪毛变体条目（同 mobType 异外观）：选中 → 右侧预览显对应剪后形态（shearedAt=true 的游戏内
+        //   外观镜像——羊 = 裸肤色 #d6b890、雪傀儡 = 纯雪头（无南瓜））。「所有做好的生物形态都在图鉴里」。
+        { mobType: 3, name: "羊（剪毛后）", sheared: true },
+        { mobType: 12, name: "雪傀儡（剪头后）", sheared: true }
     ]
     // 生物段选中（mobType；-1 = 未选）。与物品选中互斥（点物品格清空、点生物格不改 selectedId）。
+    //   t663 ⑥：selectedMobName 伴选（剪毛变体条目同 mobType 3/12 → 仅 mobType 不可区分；名字作
+    //   sheared 判据，selectedMobSheared 派生供预览切换裸羊 / 纯雪头形态）。
     property int selectedMobFromSection: -1
+    property string selectedMobName: ""
     // 生物蛋材料 id → mobType（与 PlayerController::placeBlock 生物蛋分流同源；entitymanager.h MobType 同值）。
     //   pig=1/cow=2/sheep=3/shambler=4/bones=5/stalker=6/spider=7/chicken=8/squid=9。非蛋 id → -1（无映射）。
     function mobTypeForEgg(id) {
@@ -95,6 +103,9 @@ Item {
             case 4: return "qrc:/textures/mob_shambler.png"
             case 8: return "qrc:/textures/mob_chicken.png"
             case 9: return "qrc:/textures/mob_squid.png"
+            case 10: return "qrc:/textures/mob_wolf.png"
+            case 11: return "qrc:/textures/mob_ocelot.png"
+            case 14: return "qrc:/textures/mob_silverfish.png"
         }
         return ""
     }
@@ -108,9 +119,10 @@ Item {
         }
         return "#ffffff"
     }
-    // 预览模型缩放：本任务 8 种 mob 均 1.0；I3 雪/铁傀儡（几何高 1.2-1.4，撑满 3.2 镜头）需 0.75。
+    // 预览模型缩放：多数 mob 1.0；傀儡（几何高 1.2-1.4，撑满 3.2 镜头）0.75；蠹虫（0.44×0.30 小虫）1.6 放大可辨。
     function mobPreviewScale(t) {
         if (t === 12 || t === 13) return 0.75
+        if (t === 14) return 1.6
         return 1.0
     }
     // 预览模型垂直居中微调：几何局部原点 = 碰撞中心，mob 身体偏向 -Y → 上提让主体在镜头居中。
@@ -124,8 +136,12 @@ Item {
             case 6: return 0.05   // 潜行者 [-0.90, 0.81]（t616 拉高 ~1.7 格后近对称 → 微上提居中）
             case 7: return 0.08   // 蜘蛛 [-0.30, 0.13]
             case 8: return 0.01   // 鸡 [-0.40, 0.38]
+            case 9: return 0.0    // 鱿鱼 [-0.46, 0.58]（mantle 对称居中）
+            case 10: return 0.05  // 狼 [-0.42, 0.37]
+            case 11: return 0.05  // 豹猫 [-0.40, 0.33]
             case 12: return 0.0   // 雪傀儡 [-0.90, 0.90]（对称居中，无需上提）
             case 13: return 0.30 // 铁傀儡 [-1.20, 0.58]（偏 -Y，上提 0.30 居中主体）
+            case 14: return -0.30 // 蠹虫 [-0.15, 0.11]（小虫贴地 → 下压 0.30 进镜头中心）
         }
         return 0
     }
@@ -141,11 +157,27 @@ Item {
     // 最终贴图源：pack 命中 → pack；否则程序生成 mob_*.png（无 → 空串走纯色）。
     readonly property string selectedMobTexSource: root.selectedMobPackSrc !== "" ? root.selectedMobPackSrc
         : root.mobFallbackTexture(root.selectedMobType)
-    readonly property string selectedMobName: {
+    // 选中 mob 显示名：生物段选中 → selectedMobName（伴选态；剪毛变体带「（剪毛后）」后缀）；否则按
+    //   mobType 反查 mobModel 表（生物蛋路径，首条命中 = 常规形态名）。t663 ⑥ 同 mobType 双条目可区分。
+    readonly property string selectedMobDisplay: root.selectedMobFromSection >= 0 && root.selectedMobName !== ""
+        ? root.selectedMobName
+        : mobNameForType(root.selectedMobType)
+    // mobType → mobModel 表首条命中名（同 mobType 双条目时常规形态在前，剪毛变体在后 → 生物蛋路径
+    //   反查恒得常规形态名）。t663 ⑥。
+    function mobNameForType(t) {
         for (let i = 0; i < root.mobModel.length; ++i)
-            if (root.mobModel[i].mobType === root.selectedMobType)
+            if (root.mobModel[i].mobType === t)
                 return root.mobModel[i].name
         return ""
+    }
+    // t663 ⑥ 剪毛变体态（选中条目带 sheared 标记——羊裸肤色 / 雪傀儡纯雪头；生物蛋路径恒 false）。
+    readonly property bool selectedMobSheared: {
+        if (root.selectedMobFromSection < 0) return false
+        for (let i = 0; i < root.mobModel.length; ++i)
+            if (root.mobModel[i].mobType === root.selectedMobFromSection
+                && root.mobModel[i].name === root.selectedMobName)
+                return root.mobModel[i].sheared === true
+        return false
     }
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
@@ -167,12 +199,11 @@ Item {
     // hover 物 id（类别简述反查用；mob 格 = -1 哨兵 → 类别「生物」）。与 hoveredName 同步写；离开同步清。
     property int hoveredId: -1
     // 类别简述（物品 → hoveredCategory 谓词；mob → 生物）。依赖 hoveredId（换格即重算，名相同也刷新）。
+    //   t663 拆分「材料 / 护甲」混串：isMaterial 是渲染路由谓词（含护甲段），类别标签须先判 isArmor 再判
+    //   isMaterial —— 护甲显示「护甲」、纯材料显示「材料」（此前玻璃/种子/床全标「材料 / 护甲」根因）。
     readonly property string hoveredSuffixText: {
-        if (hoveredId >= 0) {
-            const c = hoveredCategory(hoveredId)
-            return c !== "" ? " · " + c : ""
-        }
-        return hoveredName !== "" && isMobName(hoveredName) ? " · 生物" : ""
+        // t677/t663 hover 名去后缀（用户点名「煤矿石」而非「煤矿石·方块」）：物品 / mob 段均恒空。
+        return ""
     }
     // 名字是否 mob 段（hoveredId=-1 时按名反查 mobModel 表）。
     function isMobName(name) {
@@ -180,15 +211,10 @@ Item {
             if (root.mobModel[i].name === name) return true
         return false
     }
-    // tooltip 简述行：物品 → 类别标签（selectedCategory 同源的类别谓词，hover 物而非选中物）；生物 → 生物段。
+    // tooltip 简述行：t677/t663 hover 名**不带类别后缀**（用户点名「煤矿石」而非「煤矿石·方块」）→ 恒空串
+    //   （保留函数防 hoveredSuffixText 绑定链断裂）。
     function hoveredCategory(id) {
-        if (!root.hotbar || id === 0) return ""
-        if (root.hotbar.isTool(id)) return "工具"
-        if (root.hotbar.isMaterial(id)) return "材料 / 护甲"
-        if (root.hotbar.isPartialBlock(id)) return "不完整方块"
-        if (root.hotbar.isCrossBlock(id)) return "植物 / cross"
-        if (id === 13) return "光源"
-        return "方块"
+        return ""
     }
 
     // 旋转角度（预览方块绕 Y 自转；仅 selectedIsCube 时跑）。t617：拖拽写 0..360 取模；自转动画 to=from+360
@@ -212,11 +238,14 @@ Item {
         && !root.hotbar.isTool(root.selectedId)
         && !root.hotbar.isMaterial(root.selectedId)
 
-    // 选中物类别标签（§9 通用词；§2 分层：谓词经 Hotbar VM）。
+    // 选中物类别标签（§9 通用词；§2 分层：谓词经 Hotbar VM）。t663 拆分「材料 / 护甲」混串：isMaterial 是
+    //   渲染路由谓词（含护甲段 0x300..），类别标签须先判 isArmor → 护甲显「护甲」、纯材料显「材料」
+    //   （此前玻璃 / 小麦种子 / 床全被 isMaterial 吞进「材料 / 护甲」混标，用户点名拆开）。
     readonly property string selectedCategory: {
         if (!root.hotbar || root.selectedId === 0) return ""
         if (root.hotbar.isTool(root.selectedId)) return "工具"
-        if (root.hotbar.isMaterial(root.selectedId)) return "材料 / 护甲"
+        if (root.hotbar.isArmor(root.selectedId)) return "护甲"
+        if (root.hotbar.isMaterial(root.selectedId)) return "材料"
         if (root.hotbar.isPartialBlock(root.selectedId)) return "不完整方块"
         if (root.hotbar.isCrossBlock(root.selectedId)) return "植物 / cross"
         if (root.selectedId === 13) return "光源"
@@ -433,7 +462,8 @@ Item {
                                                     }
                                                 }
                                             }
-                                            TapHandler { onTapped: root.selectedMobFromSection = modelData.mobType }
+                                            // t663 ⑥：伴选名字（同 mobType 的剪毛变体条目靠名字区分）。
+                                            TapHandler { onTapped: { root.selectedMobFromSection = modelData.mobType; root.selectedMobName = modelData.name } }
                                         }
                                     }
                                 }
@@ -507,7 +537,7 @@ Item {
                                             }
                                             // 点物品格 → 选中该物品 + 清空生物段选中（互斥；生物蛋 id 经
                                             //   mobTypeForEgg 映射回 mob → 右侧仍显 3D 模型，但类别标签走「生物蛋」）。
-                                            TapHandler { onTapped: { root.selectedId = modelData; root.selectedMobFromSection = -1 } }
+                                            TapHandler { onTapped: { root.selectedId = modelData; root.selectedMobFromSection = -1; root.selectedMobName = "" } }
                                         }
                                     }
                                 }
@@ -628,9 +658,66 @@ Item {
                                                 //   （贴图原色完整透出，同 Main.qml t597 修法）；mobFallbackColor 是 pack 关的
                                                 //   纯色体色（stalker #3a5a3a / spider #2a1a1a 均暗色），乘上 pack 贴图会把
                                                 //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
-                                                baseColorMap: root.selectedMobTexSource !== "" ? mobPrevTex : null
-                                                baseColor: root.selectedMobTexSource !== "" ? "#ffffff" : root.mobFallbackColor(root.selectedMobType)
+                                                // t663 ⑥ 剪毛羊变体：选「羊（剪毛后）」→ 去贴图改裸肤色 #d6b890
+                                                //   （同 Main.qml 裸羊 delegate；pack 贴图是毛层，裸羊不走它）。
+                                                // t663 ⑥ 羊毛层 Mask（图鉴羊「不对」回归修复）：sheep_fur.png 头前/体侧
+                                                //   有透明镂空（毛层透出下层），Main.qml t633 ③ 已加 Mask + 0.5 但图鉴预览
+                                                //   漏带 → pack 开时图鉴羊透明区渲成黑块（= 用户「羊模型 wrong now」根因）。
+                                                //   仅 pack 命中时 Mask（程序 mob_sheep.png 全不透明，Mask 对它无影响）。
+                                                baseColorMap: root.selectedMobTexSource !== "" && !root.selectedMobSheared ? mobPrevTex : null
+                                                baseColor: root.selectedMobSheared && root.selectedMobType === 3 ? "#d6b890"
+                                                    : (root.selectedMobTexSource !== "" ? "#ffffff" : root.mobFallbackColor(root.selectedMobType))
+                                                alphaMode: root.selectedMobType === 3 && root.selectedMobPackSrc !== "" && !root.selectedMobSheared
+                                                           ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
+                                                alphaCutoff: 0.5
                                             }
+                                        }
+                                        // t663 ⑥ 羊眼 overlay（镜像 Main.qml t633 ③：sheep_fur.png 毛层头前无脸 →
+                                        //   眼恒显；颈枢 Node 绑 headPitch（图鉴静态 0 → 直立即可，直接定位））。
+                                        //   裸羊变体同显（裸肤色无脸）。
+                                        Model {
+                                            visible: root.selectedMobType === 3
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.055, 0.10, -0.35)
+                                            scale: Qt.vector3d(0.055, 0.055, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 3
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.055, 0.10, -0.35)
+                                            scale: Qt.vector3d(0.055, 0.055, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 3
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.055, 0.10, -0.36)
+                                            scale: Qt.vector3d(0.028, 0.028, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 3
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.055, 0.10, -0.36)
+                                            scale: Qt.vector3d(0.028, 0.028, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                        }
+                                        // t663 ⑤ 蠹虫眼（2 颗黑点贴头前；镜像 Main.qml t487 delegate 位
+                                        //   (±0.05,0.00,-0.35) scale 0.03——头心 (0,0,-0.24) 半 (0.14,0.11,0.10)）。
+                                        Model {
+                                            visible: root.selectedMobType === 14
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.05, 0.00, -0.35)
+                                            scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 14
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.05, 0.00, -0.35)
+                                            scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
                                         }
                                         // t616 骷髅弓箭手持弓（用户「能不能拿上弓箭」；同 t598 傀儡头补法——图鉴预览
                                         //   此前只显 MobModel，游戏内弓（Main.qml 肩枢 Node）漏显 = 无弓骷髅）：Bones 时在
@@ -668,14 +755,9 @@ Item {
                                         //   BlockCube{blockId:100} + 图集瓦片 per-face 采 pumpkin_side/top/face）。
                                         //   位置/尺寸与 Main.qml 游戏内 delegate 一致（雪：头心 y=1.14 宽 0.50 ——
                                         //   碰撞中心局部坐标，随父 Node scale 缩放）。
-                                        // review L14 铁傀儡（13）改对齐游戏内形态：游戏内（Main.qml t483 delegate）头是
-                                        //   **纯色橙 UnitCube #e8821e + 刻面双眼**（非南瓜方块贴图）——图鉴此前同雪傀儡用
-                                        //   BlockCube 南瓜头，与游戏内不一致。镜像游戏内：UnitCube 纯橙 + 双眼（-Z 前面
-                                        //   深色小方块，位/尺寸同游戏内 (±0.14,1.00,-0.38) scale (0.09,0.11,0.03)）。
-                                        //   t635：pack 命中 → MobModel 几何已含贴图头（head(0,0)8×10×8 区）→ 本三
-                                        //   Model（橙头 + 双眼）隐藏；pack 关 → 显（现状不变）。与游戏内 delegate 同步。
+                                        //   t663 ⑥：剪头变体（selectedMobSheared）→ 南瓜头隐藏、下方纯雪头接管。
                                         Model {
-                                            visible: root.selectedMobType === 12
+                                            visible: root.selectedMobType === 12 && !root.selectedMobSheared
                                             geometry: BlockCube { blockId: 100 } // 100 = BlockRegistry::Pumpkin（QML 不 import C++ 静态类故字面量，同 Main.qml 约定）
                                             position: Qt.vector3d(0, 1.14, 0)
                                             scale: Qt.vector3d(0.50, 0.50, 0.50)
@@ -686,26 +768,56 @@ Item {
                                                 alphaCutoff: 0.5
                                             }
                                         }
+                                        // t663 ⑥/⑦ 剪头后纯雪头 + 柔灰刻面眼嘴（镜像 Main.qml t663 ⑦ 游戏内形态：
+                                        //   纯色雪白 #f0f4f8 同身体 + #4a5568 柔灰刻面五官——非近黑「骷髅」刻痕）。
+                                        Model {
+                                            visible: root.selectedMobType === 12 && root.selectedMobSheared
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0, 1.14, 0)
+                                            scale: Qt.vector3d(0.50, 0.50, 0.50)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f0f4f8" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 12 && root.selectedMobSheared
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.13, 1.19, -0.27)
+                                            scale: Qt.vector3d(0.10, 0.11, 0.04)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 12 && root.selectedMobSheared
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.13, 1.19, -0.27)
+                                            scale: Qt.vector3d(0.10, 0.11, 0.04)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 12 && root.selectedMobSheared
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0, 1.07, -0.27)
+                                            scale: Qt.vector3d(0.26, 0.06, 0.04)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
+                                        }
                                         // 铁傀儡头（纯橙 + 刻面双眼，镜像 Main.qml 游戏内 delegate；t635 pack 命中隐藏——
-                                        //   MobModel 贴图头接管）。
+                                        //   MobModel 贴图头接管。t663 ④ 头心 0.95→0.905 / 眼 1.00→0.955 消头-身缝）。
                                         Model {
                                             visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0, 0.95, 0)
+                                            position: Qt.vector3d(0, 0.905, 0)
                                             scale: Qt.vector3d(0.72, 0.66, 0.72)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8821e" } // 橙（同游戏内；图鉴预览不调昼夜灰阶）
                                         }
                                         Model {
                                             visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.14, 1.00, -0.38)
+                                            position: Qt.vector3d(-0.14, 0.955, -0.38)
                                             scale: Qt.vector3d(0.09, 0.11, 0.03)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                         }
                                         Model {
                                             visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0.14, 1.00, -0.38)
+                                            position: Qt.vector3d(0.14, 0.955, -0.38)
                                             scale: Qt.vector3d(0.09, 0.11, 0.03)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                         }
@@ -754,7 +866,7 @@ Item {
                                 width: parent.width
                                 horizontalAlignment: Text.AlignHCenter
                                 color: "#f2f2f2"; font.pixelSize: 18; font.bold: true
-                                text: root.selectedIsMob && root.selectedMobName !== "" ? root.selectedMobName
+                                text: root.selectedIsMob && root.selectedMobDisplay !== "" ? root.selectedMobDisplay
                                     : (root.hotbar && root.selectedId !== 0 ? root.hotbar.nameForBlock(root.selectedId) : "—")
                             }
                             Text {

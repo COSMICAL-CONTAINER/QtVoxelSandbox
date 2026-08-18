@@ -828,6 +828,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::EndEyeId)      return QStringLiteral("末影之眼"); // 要塞宝藏箱战利品；激活末地传送门
         // t567 指南针（材料段 0x23F；4 铁锭 + 1 红石合成；HUD 指针指向出生点）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::CompassId)     return QStringLiteral("指南针"); // 4 铁锭+1 红石合成；HUD 指针指向出生点
+        // t663 雪球名（用户「雪球无名字」——nameForBlock 漏返 → 图鉴 / tooltip 空串）：铲挖雪层 / 雪块 /
+        //   雪傀儡死亡掉落的可抛掷物品（材料段 0x23D，t510）。
+        if (blockId == RecipeRegistry::SnowballId)    return QStringLiteral("雪球");
         // t568 钟（材料段 0x240；4 金锭 + 1 红石合成；HUD 显示当前昼夜相位）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::ClockId)       return QStringLiteral("钟");     // 4 金锭+1 红石合成；HUD 显示当前时间
         // t507 木碗 + 蘑菇汤（机制等价 MC 1.0 bowl / mushroom stew；零 MC 专名 §9）。

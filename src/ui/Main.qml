@@ -5751,19 +5751,20 @@ Window {
                                         baseColor: snowGolemRoot.tinted("#ffffff") // 白=不额外染色，仅受击红闪/减速蓝调/昼夜灰阶调制南瓜瓦片
                                     }
                                 }
-                                // t629 剪后雪头（雪方块头）：剪掉南瓜头露出里面的雪块头（非无头）。BlockCube
-                                //   blockId=101（雪块 Snow，各面 snow 瓦片）+ 同南瓜头几何（0.50 立方 / 头心
-                                //   1.14 微沉防 z-fight）→ 剪后 golem 仍是「有头雪造物」，眼/嘴刻面由下方 derpy
-                                //   overlay 组贴雪头前显示（机制等价 MC 1.0 剪雪傀儡 → 雪头 + 无刻面简脸）。
+                                // t629 剪后雪头（t663 ⑦ 重做：用户「像骷髅头，应雪白与身体统一」——旧 BlockCube
+                                //   snow 瓦片带冰晶噪点纹路，深色刻面眼/嘴叠上读作「骷髅」。改**纯色雪白
+                                //   UnitCube #f0f4f8**（与 pack 关的 MobModel 身体纯色**同值同源**→ 头身无缝
+                                //   同色；机制等价 MC 1.8+ 剪后雪傀儡头 = 纯雪方块）+ 眼/嘴刻面 overlay 改贴
+                                //   雪头前面（下方 derpy 组，色 #4a5568 柔和深灰——刻面五官可辨但不读作骷髅
+                                //   黑洞）。头位/尺寸不变（0.50 立方 / 头心 1.14 微沉防 z-fight）。
                                 Model {
-                                    visible: parent.golemSheared // t629 剪后显示（替代旧「无头」形态）
-                                    geometry: BlockCube { blockId: 101 } // 101 = BlockRegistry::Snow 雪块（字面量约定同上）
+                                    visible: parent.golemSheared // t629 剪后显示（t663 ⑦ 纯雪白版）
+                                    geometry: UnitCube {} // 纯色雪头（#f0f4f8 同身体；字面量约定同上）
                                     position: Qt.vector3d(0, 1.14, 0)
                                     scale: Qt.vector3d(0.50, 0.50, 0.50)
                                     materials: PrincipledMaterial {
                                         lighting: PrincipledMaterial.NoLighting
-                                        baseColorMap: voxelAtlas
-                                        baseColor: snowGolemRoot.tinted("#ffffff") // 白调（受击红闪/减速蓝调/昼夜灰阶调制雪块瓦片）
+                                        baseColor: snowGolemRoot.tinted("#f0f4f8") // 雪白（与 MobModel 身体纯色同源；受击红闪/减速蓝调/昼夜灰阶调制）
                                     }
                                 }
                                 // 南瓜头刻面双眼 + 嘴（机制等价 MC jack o'lantern 刻面：双眼 + 锯齿嘴）。
@@ -5772,19 +5773,21 @@ Window {
                                 //   （golemSheared）**雪头形态**显示 —— 眼/嘴贴雪头前面（雪头无自带脸，此组即其脸）。
                                 //   位随 t582 头位（头心 1.14 / xz 半 0.25）：z=-0.27 凸出雪头前面（头前 z=-0.25）；
                                 //   眼位 y=1.19（头心上偏留嘴位）、嘴位 y=1.07（眼下）。
+                                //   t663 ⑦ 刻面色改柔和深灰 #4a5568（旧 #1a0e04 近黑 → 雪头上读作「骷髅黑洞」；
+                                //   柔灰刻面五官可辨但整体读作雪头，用户「剪头应雪白非骷髅」）。
                                 Model {
                                     visible: parent.golemSheared // t582：仅无头 derpy 形态显示（头在时由贴图脸承担）
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(-0.13, 1.19, -0.27)
                                     scale: Qt.vector3d(0.10, 0.11, 0.04)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
                                 }
                                 Model {
                                     visible: parent.golemSheared
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0.13, 1.19, -0.27)
                                     scale: Qt.vector3d(0.10, 0.11, 0.04)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
                                 }
                                 // 刻面嘴（横向长条，呈咧嘴笑剪影；机制等价 MC 南瓜嘴刻面）。仅 derpy 形态显示（同上）。
                                 Model {
@@ -5792,7 +5795,7 @@ Window {
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0, 1.07, -0.27)
                                     scale: Qt.vector3d(0.26, 0.06, 0.04)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
                                 }
                             }
                         }
@@ -5836,6 +5839,9 @@ Window {
                                         // t635 ② 攻击抬臂：蓄力进度 0..1 绑 attackPose（双臂绕肩枢前抬 −120°；
                                         //   蓄力期 revision 每帧 bump → 绑定刷新，同 drawAmountAt 模式）。
                                         attackPose: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.golemAttackPoseAt(index)) : 0 }
+                                        // t663 ① 行走动画：walkPhase 绑定驱动双腿绕髋对摆（此前漏绑 → 几何
+                                        //   虽按相位摆腿但相位恒 0 → 行走腿不动 = 用户「平移」观感）。
+                                        walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                     }
                                     position: Qt.vector3d(0, 0, 0) // 碰撞中心（mobModelYOff=0；MobModel 局部原点同碰撞中心）
                                     scale: Qt.vector3d(1.0, 1.0, 1.0)
@@ -5847,10 +5853,11 @@ Window {
                                 }
                                 // t635 ① 真头切换：pack 命中 → MobModel 几何已含贴图头（head(0,0)8×10×8 区，刻面眼 +
                                 //   垂藤）→ 本橙色头 Model 隐藏；pack 关 → 显纯橙头 + 刻面眼（现状不变）。
+                                //   t663 ④ 头心 0.95→0.905 下移（头底恰接躯干顶 0.575 消头-身缝；眼同步 1.00→0.955）。
                                 Model {
                                     visible: mobIronGolemPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0, 0.95, 0)
+                                    position: Qt.vector3d(0, 0.905, 0)
                                     scale: Qt.vector3d(0.72, 0.66, 0.72)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: ironGolemRoot.tinted("#e8821e") }
                                 }
@@ -5860,14 +5867,14 @@ Window {
                                 Model {
                                     visible: mobIronGolemPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.14, 1.00, -0.38)
+                                    position: Qt.vector3d(-0.14, 0.955, -0.38)
                                     scale: Qt.vector3d(0.09, 0.11, 0.03)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }
                                 Model {
                                     visible: mobIronGolemPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.14, 1.00, -0.38)
+                                    position: Qt.vector3d(0.14, 0.955, -0.38)
                                     scale: Qt.vector3d(0.09, 0.11, 0.03)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
                                 }

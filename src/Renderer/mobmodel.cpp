@@ -658,12 +658,24 @@ void MobModel::rebuild()
         //   → 隐独立橙色头 Model；pack 关 → 显纯橙头 + 刻面眼，现状不变）。几何位与旧橙色 UnitCube 头对齐：
         //   心 (0,0.95,0) 半 (0.36,0.33,0.36)（0.72×0.66×0.72）。UV 分数分母用 base 128（HD 包整张放大，分数仍按 base）。
         g_texW = 128.0f; g_texH = 128.0f;
+        // t663 ④ 拼接缝隙修复（用户「脚-身体断开大缝隙、头-身体断开」）：旧盒位腿顶 -0.60 与躯干底 -0.475
+        //   之间悬空 0.125（= 脚-身断缝根因）；头底 0.62 与躯干顶 0.575 之间悬空 0.045（= 头-身断缝根因）。
+        //   改：腿加长 halfH 0.30→0.3625、心上移 -0.90→-0.8375 → 腿 span [-1.20,-0.475] 下贴 collision 底
+        //   / 上接躯干底；头（pack 贴图头 + Main.qml/ResourceBrowser 橙色 fallback 头）心 0.95→0.905 → 头
+        //   span [0.575,1.235] 底面恰接躯干顶。
+        // t663 ① 行走动画：双腿绕髋枢（= 躯干底 -0.475）X 轴对摆（biped walk cycle，同 Shambler 双腿模式；
+        //   walkPhase 驱动，摆幅 ×0.6 —— 重型造物沉步小摆）。此前腿是 addBox 固定 → 行走腿不动（用户「平移」
+        //   观感根因）；QML delegate 须绑 walkPhase（Main.qml t663 同步补）。
         setMobTex(0, 40, 18, 12, 11);
-        addBox( 0.00f,  0.05f, 0.00f, 0.475f, 0.525f, 0.325f, verts, idx, bMin, bMax); // 宽躯干（铁块身）
+        addBox( 0.00f,  0.05f, 0.00f, 0.475f, 0.525f, 0.325f, verts, idx, bMin, bMax); // 宽躯干（铁块身；span [-0.475,0.575]）
+        const float golemSw = kLegSwingAmp * 0.6f * std::sin(m_walkPhase); // 重型造物沉步（0.6× 摆幅）
+        constexpr float kGolemHipY  = -0.475f;  // 髋枢 = 腿顶（= 躯干底面 y，摆动轴在此消脚-身缝）
+        constexpr float kGolemLegCy = -0.8375f; // 腿心（span [-1.20,-0.475]：下贴 collision 底 / 上接躯干）
+        constexpr float kGolemLegHy = 0.3625f;  // 腿半高（(1.20-0.475)/2；加长版腿消脚-身缝隙）
         setMobTex(0, 70, 9, 5, 6);
-        addBox(-0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 左腿（铁块）
+        addBoxRot(-0.22f, kGolemLegCy, 0.00f, 0.18f, kGolemLegHy, 0.18f, kGolemHipY, 0.00f, +golemSw, verts, idx, bMin, bMax); // 左腿（绕髋摆动）
         setMobTex(0, 70, 9, 5, 6);
-        addBox( 0.22f, -0.90f, 0.00f, 0.18f,  0.30f,  0.18f,  verts, idx, bMin, bMax); // 右腿（铁块）
+        addBoxRot( 0.22f, kGolemLegCy, 0.00f, 0.18f, kGolemLegHy, 0.18f, kGolemHipY, 0.00f, -golemSw, verts, idx, bMin, bMax); // 右腿（反相摆动）
         // t635 ② 攻击抬臂（attackPose 0..1 → 双臂绕肩枢前抬）：attackPose=0 走 addBox 轴对齐快路径
         //   （垂臂，同旧）；>0 绕肩枢（臂盒顶面心 y=0.10+0.39=0.49）X 轴旋转 +attackPose·120°。肩枢在臂盒顶
         //   → 抬臂时臂根贴肩不脱节（同 Bones aimPitch 模式）。review rev2-C6：角符号修正 —— addBoxRot 是右手
@@ -682,10 +694,11 @@ void MobModel::rebuild()
         } else {
             addBoxRot( 0.62f,  0.10f, 0.00f, 0.14f,  0.39f, 0.225f, 0.49f, 0.00f, golemArmLift, verts, idx, bMin, bMax); // 右长臂（攻击前抬）
         }
-        // t635 ① 贴图头（pack 开才加；几何位 = Main.qml 旧橙色头 Model 同位 → 切换零跳变）。
+        // t635 ① 贴图头（pack 开才加；t663 ④ 头心 0.95→0.905 下移 —— 头底恰接躯干顶 0.575 消头-身缝，
+        //   Main.qml / ResourceBrowser 橙色 fallback 头同位对齐）。
         if (g_packTextured) {
             setMobTex(0, 0, 8, 10, 8);
-            addBox( 0.00f,  0.95f, 0.00f, 0.36f, 0.33f, 0.36f, verts, idx, bMin, bMax); // 贴图头（pack iron_golem 头区）
+            addBox( 0.00f,  0.905f, 0.00f, 0.36f, 0.33f, 0.36f, verts, idx, bMin, bMax); // 贴图头（pack iron_golem 头区）
         }
     } else if (m_mobType == 14) {
         // t487 Silverfish（银鱼；机制等价 MC 1.0 银鱼，§9 原创模型 + 贴图）—— 小型虫类：分节躯干 + 前伸小头 +
