@@ -149,7 +149,7 @@ Item {
         root.craftCounts[index] = count
         root.craftDur[index] = (durability > 0) ? durability : 0
         const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
-        const arr = root.craftEnch
+        const arr = root.craftEnch.slice()     // t699：新外层引用保 var NOTIFY（同引用重赋不发信号）
         arr[index] = e.slice()
         root.craftEnch = arr
         root.craftName[index] = (typeof name === "string") ? name : ""

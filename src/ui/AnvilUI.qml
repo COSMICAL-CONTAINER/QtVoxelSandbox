@@ -200,7 +200,11 @@ Item {
         //   防 -1 残留进 anvilDur（returnAnvilToHotbar 的 `-1 || 0` 为真值会透传 -1 → addStack 视作新实例）。
         root.anvilDur[index] = (durability > 0) ? durability : 0
         const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
-        const arr = root.anvilEnch
+        // t699：var 属性 NOTIFY 可靠性 —— 旧版 `const arr = root.anvilEnch; arr[index] = ...; root.anvilEnch = arr`
+        //   把**同一数组引用**重新赋回（QVariant 值比较相等 → anvilEnchChanged 不发 → 只依赖 anvilEnch、不触
+        //   anvilRev 的绑定永不重算，读到陈旧内层）。改为**新外层引用**（[...slice] 保序复制后替换 index 元素）
+        //   → 引用不等 → NOTIFY 必发（同 takeProduct 清槽 `root.anvilEnch = [[0,0,0,0],...]` 全新引用模式）。
+        const arr = root.anvilEnch.slice()
         arr[index] = e.slice()
         root.anvilEnch = arr
         // t622 实例名随槽写入（undefined 兜底空串）。
@@ -1455,8 +1459,13 @@ Item {
                 root.lastTapMs = now
                 root.lastTapKey = key
                 if (isDouble) { root.doMergeSameId(aslot.group, aslot.index); return }
-                const r = root.resolveClick(aslot.slotId, aslot.slotCount, aslot.slotDur, aslot.slotEnch,
-                                            root.nameAt(aslot.index))
+                // t699：读槽改 InventoryOps.readSlot 直读本地数组（同 EnchantingTableUI EnchantInputSlot 模式）。
+                //   旧版读 aslot.slotEnch / slotDur 等**绑定属性** —— QML 绑定惰性求值在同信号级联内可能 stale
+                //   （前一次写入 bump anvilRev 后绑定标脏但未重算 → 点击读到旧值），用户实测「附魔钻石剑放进
+                //   铁砧取回附魔消失」：读 slotEnch 拿到旧 [0,0,0,0] → resolveClick A 拾取 heldEnch=空 → 取出
+                //   白板剑。readSlot 经 localReadSlot 读 anvilEnch 原数组，永远新鲜（Imperative 代码无 AOT 问题）。
+                const cur = InventoryOps.readSlot(root, aslot.group, aslot.index)
+                const r = root.resolveClick(cur.id, cur.count, cur.durability, cur.enchants, cur.name)
                 if (!r) return
                 root.writeSlot(aslot.group, aslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                 root.hotbar.heldBlock = r.heldId
@@ -1471,8 +1480,9 @@ Item {
             onTapped: {
                 root.defocusNameBox()   // t626③ 点槽即退出改名框输入态
                 if (aslot.preview) return   // 产物槽右键无操作
-                const r = root.resolveRightClick(aslot.slotId, aslot.slotCount, aslot.slotDur, aslot.slotEnch,
-                                                 root.nameAt(aslot.index))
+                // t699：同左键 —— InventoryOps.readSlot 直读（防绑定 stale；见上注释）。
+                const cur = InventoryOps.readSlot(root, aslot.group, aslot.index)
+                const r = root.resolveRightClick(cur.id, cur.count, cur.durability, cur.enchants, cur.name)
                 if (!r) return
                 root.writeSlot(aslot.group, aslot.index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
                 root.hotbar.heldBlock = r.heldId
