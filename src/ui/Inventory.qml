@@ -123,7 +123,9 @@ Item {
     // t651⑤ 红石 tab 方块 id 表（镜像 BlockRegistry 方块段常量；Q_INVOKABLE 无 id 常量暴露，QML 端集中维护，
     //   同 foodIds 模式）：机关件（5 压力板 / 木·石按钮 / 拉杆）+ 红石系（红石火把 / 红石块 / 红石灯）+
     //   机关轨（动力轨 / 探测轨）。普通铁轨（Rail=103）留方块 tab（轨族本体属交通非红石；用户点名
-    //   「压力板/按钮/拉杆」+ 红石系，未含普通轨）。t656 红石粉方块落地后归本 tab（dev-plan t660）。
+    //   「压力板/按钮/拉杆」+ 红石系，未含普通轨）。t660：红石粉导线（RedstoneDust=130，t656）归本 tab
+    //   （放置形态的粉线；红石粉**物品** 0x224 本就在材料段，放粉用物品右键即可 —— 本条目给的是粉的
+    //   **方块形态**直接取用，机制等价 MC 创造页同时可见 dust 物品与放置形态；方块 tab 过滤同步排除）。
     readonly property var redstoneIds: [
         18,   // 木压力板（WoodPressurePlate）
         61,   // 圆石压力板（CobblePressurePlate）
@@ -133,11 +135,12 @@ Item {
         113,  // 木按钮（WoodButton，t628）
         114,  // 石按钮（StoneButton，t628）
         112,  // 拉杆（Lever，t628）
-        129,  // 红石火把（RedstoneTorch，t638）
-        122,  // 红石块（RedstoneBlock，t620）
-        123,  // 红石灯（RedstoneLamp，t620；光源但属红石族归红石 tab）
-        127,  // 动力铁轨（GoldenRail，t638）
-        128   // 探测铁轨（DetectorRail，t638）
+        130,  // 红石粉导线（RedstoneDust，t656/t660——放置形态；物品 0x224 在材料段）
+        129,  // 红石火把（RedstoneTorch，t638；t657 起反相器电源）
+        122,  // 红石块（RedstoneBlock，t620；t657 起恒电源）
+        123,  // 红石灯（RedstoneLamp，t620；t658 起电力驱动）
+        127,  // 动力铁轨（GoldenRail，t638；t658 起通电才 boost）
+        128   // 探测铁轨（DetectorRail，t638；t658 起输出电力信号）
     ]
 
     // t632 预设附魔书表（每种附魔一本，hotbar.creativeEnchantedBooks() 权威）：调色板条目是 int id 段

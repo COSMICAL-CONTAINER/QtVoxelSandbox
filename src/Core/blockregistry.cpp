@@ -1390,6 +1390,7 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
     switch (blockId) {
     case Torch: return 14;  // 既有：火把方块光种子 14（radius14 泛光）
     case RedstoneTorch: return 7; // t638：红石火把方块光种子 7（MC 1.0 红石火把光 level 7——约为火把一半的暗红氛围光；常亮 on 装饰光源，真红石信号留红石大轮）
+    case RedstoneBlock: return 5; // t660：红石块微发光（光 level 5 —— 用户「红石块应微发光」；MC 1.5+ 红石块实际不发光，本工程按用户点名取微光，低于红石火把 7 的哑红感）
     case Lava:  return 15;  // t351：岩浆方块光种子 15（地底发光照亮洞穴；MC 1.0 岩浆光 level 15）
     case EndPortal: return 10; // t487：末地传送门方块光种子 10（地下黑暗要塞中的星绿旋涡泛光，玩家可见传送门；
                                //    机制等价 MC 1.0 末地传送门自发光显眼，非 MC 精确光级，仅照亮自身 + 近旁）

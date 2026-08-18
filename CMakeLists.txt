@@ -460,6 +460,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_golden_rail.png            # t638/t644 动力铁轨 flat 2D 图标（--from-pack：pack powered_rail 贴图）
         textures/icon_detector_rail.png          # t638/t644 探测铁轨 flat 2D 图标（--from-pack：pack detector_rail 贴图）
         textures/icon_redstone_torch.png         # t638/t644 红石火把 flat 2D 图标（--from-pack：pack 常亮态贴图）
+        textures/icon_redstone_dust.png          # t660 红石粉导线 flat 2D 图标（断电线向贴图放大；红石 tab 方块形态条目）
         textures/icon_tnt.png                    # t485 TNT 立方体图标（build_cube_icons.py；各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
         textures/icon_cut_sandstone.png          # t485 切制砂岩立方体图标（build_cube_icons.py；各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
         textures/icon_mossy_cobble.png           # t486 苔石立方体图标（build_cube_icons.py；各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）

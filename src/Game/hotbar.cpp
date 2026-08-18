@@ -167,6 +167,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::GoldenRail:    return "icon_golden_rail.png";    // 动力铁轨（pack powered_rail；矿车加速）
     case BlockRegistry::DetectorRail:  return "icon_detector_rail.png";  // 探测铁轨（pack detector_rail；矿车驶过通电视觉）
     case BlockRegistry::RedstoneTorch: return "icon_redstone_torch.png"; // 红石火把（pack 常亮态贴图；装饰光源 光 7）
+    case BlockRegistry::RedstoneDust:  return "icon_redstone_dust.png";  // t660 红石粉导线（flat 2D 断电线向贴图；红石 tab 方块形态条目）
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
@@ -698,6 +699,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::GoldenRail),                                  // 动力铁轨（矿车驶过加速 boost；直线连接；配方 6 金锭+棒+红石→6）
              int(BlockRegistry::DetectorRail),                                // 探测铁轨（矿车驶过通电视觉占位；直线连接；配方 6 铁锭+石压力板+红石→6）
              int(BlockRegistry::RedstoneTorch),                               // 红石火把（常亮装饰光源 光 7；cross 形；配方 木棒+红石粉→1）
+             // t660 红石粉导线（t656）：进创造调色板方块段（红石 tab 从本表取显示 —— Inventory.qml
+             //   redstoneIds 含 130；资源浏览器 ResourceBrowser 直接遍历本表）。粉的常用获得途径是
+             //   红石粉物品（材料段 0x224）右键放置；方块形态条目供直接取用（机制等价 MC 创造页两形态皆可见）。
+             int(BlockRegistry::RedstoneDust),                                // 红石粉导线（红石粉物品放置成；15 级衰减导电）
              // t485 沙漠神殿结构方块（机制等价 MC 1.0 沙漠神殿 desert temple 的 TNT / 切制砂岩；worldgen 散布 / 创造取用）。
              int(BlockRegistry::CutSandstone),                                // 切制砂岩（装饰砂岩变体；金字塔外框；可放置）
              int(BlockRegistry::TntBlock),                                   // TNT（可引爆爆炸物；沙漠神殿陷阱；配方 5 火药+4 沙→1）
