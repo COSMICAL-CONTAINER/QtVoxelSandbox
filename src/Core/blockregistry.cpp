@@ -1088,14 +1088,15 @@ bool BlockRegistry::isIce(quint8 blockId)
 //   冰分支用 1 - exp(-rate*dt) 做 lerp）。机制等价 MC 1.0 ice < packed_ice < blue_ice 滑度递增：Ice 中等滑 /
 //   PackIce 更滑 / BlueIce 最滑。非冰 → 0（caller 据 0 走常规地面瞬时设速路径，不进冰滑行分支）。单一权威：
 //   玩家与船的冰面手感都读它，避免两处魔数漂移。
-//   t611 再调小一档（用户「冰上的惯性再大一点」）：8/4.5/2.8 → 6/3.2/1.9 —— 接近率更小 = 加速更慢 + 松键后
-//   滑行更长（惯性更大）。滑行到 10% 初速的时间：冰 0.38→0.51s / 浮冰 0.68→0.95s / 蓝冰 1.10→1.62s，
-//   配合冰档船速上限微升（boatmanager t611）手感「冰上飞起来收不住」才对（机制等价 MC 1.0 冰面船远超水速）。
+//   t611 调小一档（用户「冰上的惯性再大一点」）：8/4.5/2.8 → 6/3.2/1.9。
+//   t661 四轮再调（用户「冰上太快、惯性太小」）：6/3.2/1.9 → 4/2.2/1.3（船侧同步降速 boatmanager t661
+//     1.4/1.7/2.0 倍率）→「顶速略降（更可控）+ 松键滑行更长（惯性大）」。滑行到 10% 初速的时间：
+//     冰 0.58s / 浮冰 1.05s / 蓝冰 1.77s（t611 值 0.51/0.95/1.62 → 全线更滑）。
 float BlockRegistry::iceSlipApproach(quint8 blockId)
 {
-    if (blockId == Ice)     return 6.0f;  // 冰：中等滑（t611：接近率 8→6/s；松键后 ~0.5s 明显滑行）
-    if (blockId == PackIce) return 3.2f;  // 浮冰：更滑（t611：接近率 4.5→3.2/s；松键后滑得更远）
-    if (blockId == BlueIce) return 1.9f;  // 蓝冰：最滑（t611：接近率 2.8→1.9/s；松键后滑得最远）
+    if (blockId == Ice)     return 4.0f;  // 冰：中等滑（t661：6→4/s；松键后 ~0.6s 明显滑行）
+    if (blockId == PackIce) return 2.2f;  // 浮冰：更滑（t661：3.2→2.2/s；松键后滑行 ~1s）
+    if (blockId == BlueIce) return 1.3f;  // 蓝冰：最滑（t661：1.9→1.3/s；松键后滑得最远 ~1.8s）
     return 0.0f;                          // 非冰（caller 走常规地面路径）
 }
 
@@ -1153,6 +1154,11 @@ int   BlockRegistry::maxStackSize(int itemId)
     //   cap 分流又会两本同附魔。Game 层 Hotbar::maxStackSize 对 0x227 已特判 maxStack=1（hotbar.cpp ~L1186），
     //   **两处须保持同步**（Core 不能 include recipe.h，字面量是分层铁律下的唯一选项；改动 id 段时同步两处）。
     if (itemId == 0x227) return 1;
+    // t661 船物品（0x234 = Game 层 RecipeRegistry::OakBoatId / 0x235 = SpruceBoatId；Core 不能依赖 Game
+    //   故用字面量 + 同步注释）**不可堆叠**（机制等价 MC 1.0 船 maxStack 1——载具实体单件）。Game 层
+    //   Hotbar::maxStackSize 对 0x234/0x235 已特判 maxStack=1，**两处须保持同步**（掉落物合并路径按 1
+    //   跳过合并 → 两船各为独立实体；拾取按真实 cap 分槽）。
+    if (itemId == 0x234 || itemId == 0x235) return 1;
     // 材料段 ≥ 0x200：可堆叠 64（木棒 / 煤 / 铁锭 / 骨头 / 腐肉 / 箭 / 火药 / 羽毛 / 线 / 皮革 / 墨囊 / 蛋 等 mob 掉落物 + 合成材料）。
     //   含护甲段（≥0x300）—— 护甲不会作为 mob / 破块掉落物出现（仅玩家 Q 键丢弃），按 64 合并无害（拾取 Hotbar.addStack 按
     //   真实 maxStack=1 分槽）。桶 / 蘑菇汤（材料段内 maxStack=1 的特例）同理 —— 仅玩家持有 / 丢弃，掉落实体阶段按 64 合并无数据错。

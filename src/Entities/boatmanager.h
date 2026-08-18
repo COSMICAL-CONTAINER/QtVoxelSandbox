@@ -164,6 +164,10 @@ private:
         int boatType = Oak;  // 变体（Oak 浅色 / Spruce 深色）
         bool floating = false; // rev2 修：吃水迟滞态（当前 tick 是否浮水档；浮起门槛 ≥kBoatWaterFractionRise，
                              //   落下门槛 <kBoatWaterFractionFall —— 防岸线处 4↔6 格覆盖跳变无迟滞致 Y 抖动）
+        float beachTimer = 0.0f; // t661 四轮「上滩冲量」：高速（≥kBoatBeachSpeed）撞岸 / 撞台阶时写入的登岸
+                             //   倒计时（秒）；>0 且前方是「 hull 层挡 / 抬高一格通」的可登台阶 → 限速爬升
+                             //   （kBoatBeachClimbRate/s）。低速撞岸不写 → 船被满高岸块挡停（机制等价 MC 1.0
+                             //   船撞岸停住 / 有速度才勉强上滩）。仅登岸爬升期间递减，无台阶即清零。
         bool alive = true;   // slot-reuse 槽位占用标志（放末位：聚合初始化尾字段缺省取 default member init）
     };
     std::vector<Boat> m_boats;
@@ -209,6 +213,17 @@ private:
     //   低速船仍被**位移碰撞**（不传本参的调用）挡在叶前（慢速 = 阻挡绕行，机制等价 MC 慢速船被叶阻）。
     bool boatFootprintBlocked(World *world, float px, float py, float pz, bool ignoreIce = false,
                               bool ignoreLilyPad = false) const;
+    // t661 四轮「footprint 支撑顶」（单一权威，tick / tickRiddenBoat 无水重力段共用）：扫船 footprint 覆盖的
+    //   所有列、自船中心层向下 kBoatSupportScanDepth 格内的首个可踩实体，取**所有列中的最高支撑顶**
+    //   （= 支撑格 cellY + 1）。返 -1 = 无支撑（自由落体）。
+    //   旧版只扫**中心列**（两处各写一份），两类用户实测 bug 都由它派生：
+    //   ①「高处掉到低处走不了」：船中心列恰在坑 / 沟上方（中心列 3 格无实体）→ 判无支撑自由落体 → 船
+    //     下坠进 footprint 侧翼实体层 → 水平位移碰撞（boatFootprintBlocked 查中心层 + 上一层）被侧翼块挡
+    //     → 船卡死坑里走不了。改取全列最高 → 侧翼任何实体都算支撑（船像履带，跨小坑不断撑）。
+    //   ②「到海边直接掉下去」：岸沿水→陆切换时中心列仍在水上 → 支撑 = 水底沙（低于水面 2+ 格）→ restY
+    //     远低于船 Y → 重力把贴岸的船拽下沉嵌岸缝。改取全列最高 → 岸块（与水面同层或高 1）是最高支撑
+    //     → 船贴岸沿搁浅而非坠海。
+    float boatFootprintSupportTop(World *world, float px, float py, float pz) const;
     // t630 船 footprint 水域覆盖率（0..1）：footprint 覆盖格中「该列有水柱」的格数占比（列从支撑层
     //   probeY 向上扫 kWaterProbeDepth 格内有 Water 即算水列 —— 覆盖浅水 / 深水，取覆盖即可）。采样同
     //   boatFootprintBlocked（floor(±半宽/半长) 格扫）。t630「2/3 支撑阈值」用：覆盖率 ≥ 2/3 才判「船浮
@@ -301,6 +316,12 @@ private:
     //   格顶 + 0.75，悬空半格），且骑乘下船摆位算错。加常速重力让陆地船落到支撑面（boatFootprintBlocked 挡实块
     //   即停），与 MC 船放陆地会落地一致。取值 8.0（blocks/s²，明显但不过猛，落半格 ~0.3s 即贴地）。
     static constexpr float kBoatGravity = 8.0f;
+    // t661 四轮「高处落下后走不了」修复配套：无水陆档支撑扫描深度从 3 扩到 4。高处（≥3 格）坠落到斜坡 /
+    //   台地边缘时，船中心 Y 可能先落进**空腔**（下方 3 格无实体、第 4 格才是地面）→ 旧扫深 3 找不到支撑 →
+    //   走「无支撑自由落体」分支 → 下一 tick floor(pos.y) 已下移 → 支撑格在被跳过的更深处来回漏检 → 船
+    //   悬在半空贴不到地（骑乘时陆档 maxSpeed 虽非零但脚下无 restY 稳态 → Y 反复抖动抵消位移 =「走不了」）。
+    //   扫深 4 覆盖「船中心 + 其下 3 格」，配合重力 8/s、单帧最大位移 0.4 格不会跳过支撑面。
+    static constexpr int kBoatSupportScanDepth = 4;
     // review L12 放船点最小间距（blocks）：spawnBoat 拒与既有活体船中心距 < 本值的落点（防两船同格叠加；
     //   取 1.4 = 船身全长，两船中心至少隔一船身不嵌位）。见 spawnBoat 实现处注释。
     static constexpr float kBoatMinSpawnDist = 1.4f;
@@ -314,8 +335,11 @@ private:
     //   rev2 修：拆**迟滞双阈**（rev2 旧单值 0.67f 使 4/6=0.6667 被拒——与注释「≈4/6 格应浮」相反，实际
     //   生效阈值 75%~83%；且覆盖格数 4↔6 跳变处无迟滞 → 岸线 Y 抖动）。浮起阈 0.66（4/6=0.6667 通过，
     //   3/6=0.5 拒）；落下阈 0.5（3/6 及以下才回陆档）—— 两阈之间维持上一 tick 档位（迟滞带 0.5~0.66）。
+    //   t661 四轮再修「到海边直接掉下去 / 从海里直接开上岸」：迟滞带已存在但**只管 Y 档切换不管台阶**——
+    //   落下阈降到 0.34（2/6 及以下才回陆档 = ≥2/3 船身在岸上才算上岸）：水→岸驶入时船可贴着岸沿滑更长
+    //   距离（4/6→3/6 仍浮水贴水面 = 平滑上岸沿），不提前掉进岸缝；岸→水方向浮起阈保持 0.66 不变。
     static constexpr float kBoatWaterFractionRise = 0.66f;
-    static constexpr float kBoatWaterFractionFall = 0.50f;
+    static constexpr float kBoatWaterFractionFall = 0.34f;
     // t630 船撞碎荷叶速度阈值（blocks/s）：船速 > 本值时碾过 LilyPad → 叶碎掉物品（机制等价 MC 1.0 船
     //   高速撞碎 lily pad）；低于阈值叶挡船（绕行）。取 3.0（水档满速 8 的 ~1/3：轻推不碎、正常行驶碾碎，
     //   陆档 2.4 顶速 < 3.0 → 陆上推船不误碎岸边叶）。
@@ -327,6 +351,21 @@ private:
     //   kBoatPushTurnMax：yawRate 钳制上限（度/s）防深穿叠瞬间（如出生重叠 1.4 内）大叉积甩头。
     static constexpr float kBoatPushTurnRate = 1200.0f;
     static constexpr float kBoatPushTurnMax  = 25.0f;
+    // t661 四轮「从海里直接开上岸太容易」：MC 1.0 船低速撞岸 = 停住（满高岸块挡），仅带速度的船能勉强
+    //   冲上 1 格高的岸（沙滩 / 码头沿）。本组常量实现「上滩冲量」：
+    //   - kBoatBeachSpeed：触发登岸冲量的最低速度（blocks/s）。取 5.0 ≈ 水档满速 8 的 62%——轻推 / 慢速
+    //     漂到岸边不登岸（被挡停，机制等价 MC 慢船顶岸）；中高速冲岸才爬。
+    //   - kBoatBeachClimbRate：登岸爬升速率（格/s）。取 1.2——爬 1 格高差 ~0.8s，肉眼可见「船头搭上岸沿
+    //     缓缓拖上来」，非瞬移。
+    //   - kBoatBeachTimerMax：冲量持续上限（秒）。取 2.0——冲岸后 ≤2s 内仍在爬（速度衰减中），超时没爬
+    //   上去（岸太高 / 中途松键）→ 冲量耗尽回普通挡停。
+    static constexpr float kBoatBeachSpeed = 5.0f;
+    static constexpr float kBoatBeachClimbRate = 1.2f;
+    static constexpr float kBoatBeachTimerMax = 2.0f;
+    // t661 四轮支撑贴稳态的小高差容差（格）：restY 高出船 Y ≤ 本值 → 直接贴稳态（同层岸 / 半格内落差，
+    //   防每帧抖动）；> 本值（≥半格 = 1 格高岸沿）→ 不瞬移（须冲量登岸爬升，机制等价 MC 船不瞬间跳上岸）。
+    //   取 0.5（半格）：同层岸沿 0.2 高差瞬贴（平滑上岸）；冰→水 / 岸沿落差 1.2 须爬。
+    static constexpr float kBoatBeachSnap = 0.5f;
 };
 
 #endif // BOATMANAGER_H

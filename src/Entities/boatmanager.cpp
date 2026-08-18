@@ -1,6 +1,7 @@
 #include "boatmanager.h"
 
 #include <QtMath>
+#include <QRandomGenerator>
 #include <cmath>
 #include <algorithm>
 
@@ -184,6 +185,30 @@ bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float p
             if (cellBlocked(x, cy + 1, z)) return true;
         }
     return false;
+}
+
+// t661 四轮 footprint 支撑顶（见 boatmanager.h 注释）：扫 footprint 全部覆盖列（自船中心层向下
+//   kBoatSupportScanDepth 格的首个可踩实体），返回**最高**支撑顶（cellY+1）。无支撑 → -1。
+//   与 boatFootprintBlocked 同款 footprint 格扫（floor(±半宽/半长)）；水 / 空气非 collidable 自然跳过
+//   （船在水面时不进本函数 —— foundWater 走浮水分支；仅无水陆档调用）。
+float BoatManager::boatFootprintSupportTop(World *world, float px, float py, float pz) const
+{
+    if (!world) return -1.0f;
+    const int x0 = int(std::floor(px - kBoatHalfW)), x1 = int(std::floor(px + kBoatHalfW));
+    const int z0 = int(std::floor(pz - kBoatHalfLen)), z1 = int(std::floor(pz + kBoatHalfLen));
+    const int cyBase = int(std::floor(py));
+    float topY = -1.0f;
+    for (int x = x0; x <= x1; ++x)
+        for (int z = z0; z <= z1; ++z) {
+            for (int y = cyBase; y >= 0 && y >= cyBase - kBoatSupportScanDepth; --y) {
+                if (world->isCollidable(x, y, z)) {
+                    const float cellTop = float(y) + 1.0f;
+                    if (cellTop > topY) topY = cellTop; // 取全列最高（船搁浅在最高支撑上，不坠缝 / 不卡坑）
+                    break; // 该列首个（最高）实体已记，向下不再看
+                }
+            }
+        }
+    return topY;
 }
 
 float BoatManager::boatFootprintWaterFraction(World *world, float px, float pz, float probeY) const
@@ -377,22 +402,27 @@ void BoatManager::tick(qreal dt, World *world)
                 changed = true;
             }
         } else {
-            // 无水重力（t508 二轮复盘）：找船 footprint 下方首个可碰撞方块作支撑面（其顶 = cy+1）。
+            // 无水重力（t508 二轮复盘；t661 四轮重写支撑段）：footprint 全列最高支撑顶作支撑面（旧版只查
+            //   中心列 3 格 —— 中心列在坑上 → 误判无支撑自由落体卡坑「高处落下走不了」；中心列在水上 →
+            //   支撑=水底 → restY 远低 → 贴岸的船被拽沉「到海边直接掉下去」。见 boatFootprintSupportTop 注释）。
             //   船底低于中心 kBoatHullBottom（0.2），稳态船中心 Y = 支撑顶 + 0.2（船底贴顶）。
-            //   - 船中心 < 稳态 Y（已穿 / 接触支撑顶）→ 直接贴稳态 Y（防下落穿过 + 防落地后每帧抖动：旧版
-            //     「落进实块格 → 贴格顶」因 dt 步进使船在「格顶」与「下一格」间反复横跳 0.2+ → 可见抖动）。
-            //   - 船中心 > 稳态 Y → 匀加速下落（但本帧下落不穿稳态 Y，钳到稳态 Y）。
-            //   扫描深度 3 格（船底 + 其下 2 格，防只查紧邻格漏台阶级差）。
-            const int bcx = int(std::floor(b.pos.x())), bcz = int(std::floor(b.pos.z()));
-            int supportCell = -1;
-            for (int y = int(std::floor(b.pos.y())); y >= 0 && y >= int(std::floor(b.pos.y())) - 3; --y) {
-                if (world->isCollidable(bcx, y, bcz)) { supportCell = y; break; }
-            }
-            if (supportCell >= 0) {
-                // 有支撑：稳态 Y = 支撑顶 + 船底偏移；落不穿。
-                const float restY = float(supportCell) + 1.0f + kBoatHullBottom;
+            //   - 船中心 ≤ 稳态 Y（已贴 / 已穿）且高差 ≤ 半格（kBoatBeachSnap）→ 直接贴稳态（防抖动）。
+            //   - 稳态比船中心高 0.5~1.25 格（1 格高岸沿）→ 仅 beachTimer>0（冲量登岸，tickRiddenBoat 高速
+            //     撞岸时写入）时以 kBoatBeachClimbRate 限速爬升；空船 / 无冲量 → Y 不动（贴岸壁停住，机制
+            //     等价 MC 船低速顶岸 = 停）。
+            //   - 船中心 > 稳态 Y → 匀速下落（本帧不穿稳态）。
+            const float supportTop = boatFootprintSupportTop(world, b.pos.x(), b.pos.y(), b.pos.z());
+            if (supportTop >= 0.0f) {
+                const float restY = supportTop + kBoatHullBottom;
                 if (b.pos.y() <= restY) {
-                    b.pos.setY(restY); // 贴稳态（防抖动）
+                    if (restY - b.pos.y() <= kBoatBeachSnap) {
+                        b.pos.setY(restY); // 小高差贴稳态（防抖动；同高 / 略穿）
+                    } else if (b.beachTimer > 0.0f) {
+                        // t661 冲量登岸：限速爬上 1 格岸沿（机制等价 MC 1.0 带速的船勉强冲上滩）。
+                        b.pos.setY(b.pos.y() + kBoatBeachClimbRate * float(dt));
+                        b.beachTimer = std::max(0.0f, b.beachTimer - float(dt)); // 爬升消耗冲量
+                    }
+                    // else：稳态高出 >kBoatBeachSnap 且无冲量 → 不瞬移不爬（贴岸壁停住）
                 } else {
                     const float gy = b.pos.y() - kBoatGravity * float(dt);
                     b.pos.setY(std::max(gy, restY)); // 下落但钳到不穿支撑
@@ -473,9 +503,13 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
 
     // 三档推进参数（机制等价 MC 1.0 船：陆地几乎开不动 / 水中常速 / 冰面最快且惯性大——难操作才对）：
     //   - Water：kBoatSpeed × 1.0（8 blocks/s）+ 接近率 kBoatAccel=4（中等动量）。
-    //   - Ice：  kBoatSpeed × 冰类型倍率（t611：Ice 2.0 / PackIce 2.4 / BlueIce 2.7 → 16~21.6 blocks/s，
-    //     约水面 2~2.7 倍）+ 接近率读 BlockRegistry::iceSlipApproach（t611：冰 6 / 浮冰 3.2 / 蓝冰 1.9 /s，
-    //     单一权威：越小越滑 → 松键后长滑行 = 冰面惯性；转向速率 × kBoatIceTurnMul（迟钝 = 难操作）。
+    //   - Ice：  kBoatSpeed × 冰类型倍率（t661 四轮：1.4 / 1.7 / 2.0 → 11.2~16 blocks/s，约水面 1.4~2 倍）
+    //     + 接近率读 BlockRegistry::iceSlipApproach（t661：冰 4 / 浮冰 2.2 / 蓝冰 1.3 /s，单一权威：越小
+    //     越滑 → 松键后长滑行 = 冰面惯性）+ 转向速率 × kBoatIceTurnMul（迟钝 = 难操作）。
+    //     t661 四轮调校（用户「冰上速度太快 + 惯性太小」）：旧 2.0/2.4/2.7（16~21.6，过快难控）→ 降速
+    //     1.4/1.7/2.0；同时 blockregistry iceSlipApproach 6/3.2/1.9 → 4/2.2/1.3（接近率更小 = 松键滑行
+    //     更长，滑行到 10% 初速时间冰 0.58s→0.58s/浮冰 0.72→1.05s/蓝冰 1.21→1.77s）→「快但收得住 +
+    //     松手长滑」手感（机制等价 MC 1.0 冰面船：明显快于水 + 大惯性）。
     //   - Land：kBoatSpeed × kBoatLandSpeedMul 0.3（2.4 blocks/s，最慢 —— 比走路 4.3 还慢但能开，
     //     用户要求「直接放陆地上开不会停」即陆地非零速）+ 接近率 kBoatLandAccel=10（高响应：
     //     松手即停、无滑行，贴地挪动手感）。
@@ -485,11 +519,12 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     if (foundWater) {
         // 水档：基础参数
     } else if (onIce) {
-        // t611 冰档倍率微升（用户「冰上的惯性再大一点」）：1.8/2.2/2.5 → 2.0/2.4/2.7（16~21.6 blocks/s），
-        //   配合 iceSlipApproach 调小（blockregistry t611）→ 冰上「更快 + 更收不住」。
-        if (below == BlockRegistry::Ice)          maxSpeed = kBoatSpeed * 2.0f;
-        else if (below == BlockRegistry::PackIce) maxSpeed = kBoatSpeed * 2.4f;
-        else                                      maxSpeed = kBoatSpeed * 2.7f; // BlueIce（isIce 已保证）
+        // t661 四轮冰档倍率下调（用户「冰上速度太快」）：1.4/1.7/2.0（11.2~16 blocks/s，约水面 1.4~2 倍，
+        //   机制等价 MC 1.0 冰面船速 ~ 水面 2 倍），配合 iceSlipApproach 调小（blockregistry t661）→ 松键
+        //   后长滑行（惯性更大，用户「惯性太小」）。「快但可控 + 松手长滑」的冰面手感。
+        if (below == BlockRegistry::Ice)          maxSpeed = kBoatSpeed * 1.4f;
+        else if (below == BlockRegistry::PackIce) maxSpeed = kBoatSpeed * 1.7f;
+        else                                      maxSpeed = kBoatSpeed * 2.0f; // BlueIce（isIce 已保证）
         approach = BlockRegistry::iceSlipApproach(below); // 冰面惯性（滑度单一权威）
         turnRate = kBoatTurnRate * kBoatIceTurnMul;       // 转向迟钝（难操作）
     } else {
@@ -532,6 +567,8 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     //   （±X / ±Z）分别探「船 footprint 前探一小步（kShoreProbe）后该层是否被挡」，被挡方向 n 的速度分量
     //   v·n > 0 部分清零（朝岸 → 停）；背向分量保留（倒退 / 侧滑离岸仍有效，机制等价 MC 1.0 船顶岸可倒退）。
     //   高速撞岸（speed ≥ kBoatCrashSpeed）仍整船撞毁（掉散件）。陆档 / 冰档不触发本检测（同 t584 语义）。
+    //   t661 四轮「上滩冲量」：高速（≥ kBoatBeachSpeed，未达撞毁）撞岸 → 写 beachTimer（无水重力段据此
+    //   限速爬上 ≤1 格高的岸沿，机制等价 MC 1.0 带速的船能冲上滩 / 低速撞岸只停住）。每次撞岸沿刷新计时。
     if (foundWater && world) {
         // 四向探测：footprint 中心沿该方向前探 kShoreProbe 后，水面同高层（y-1）是否被挡。
         //   probe 取 0.15（略小于半宽 0.5 / 半长 0.7 的接触裕度）：贴岸（footprint 已触岸）时朝岸侧必命中，
@@ -551,6 +588,10 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
         if (hitShore) {
             if (speed >= kBoatCrashSpeed) {
                 outCrashed = true; // 高速撞岸 → 撞毁（掉散件）
+            } else if (speed >= kBoatBeachSpeed) {
+                // t661 中高速撞岸（未达撞毁）→ 写冲量（后续 fraction 跌破落下阈转陆档时限速爬上 ≤1 格岸沿）。
+                //   低速撞岸不写 → 船贴岸壁停住（用户要求「上岸应难 / 需速度」，机制等价 MC 1.0）。
+                b.beachTimer = kBoatBeachTimerMax;
             }
             // 只清朝岸分量（被挡方向上 v·n>0 的部分）；背向 / 正交分量保留（倒退可走）。
             if (blockedPosX && b.vx > 0.0f) b.vx = 0.0f;
@@ -605,23 +646,52 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     // 浮水 / 落地（同 tick 段逻辑；t508 二轮复盘）：有水 → Y 钉水面；无水 → 重力落支撑面。
     //   旧版无脑 b.pos.setY(surfY) 在无水时 surfY=fallback=pos.y → 陆地骑船 Y 恒不变（悬空）。改分支同 tick。
     //   t584：foundWater / surfY 在函数头部介质检测段已查（同帧复用，不再二次扫柱）。
+    //   t661 四轮：支撑段重写为 footprint 全列最高支撑顶 + 冲量登岸爬升（同 tick 段修法；「从海里直接开上
+    //   上岸」= 旧版中心列支撑 + 无条件贴 restY → 岸下瞬间上吸 1.2 格上岸。现高差 >kBoatBeachSnap 须
+    //   beachTimer 冲量 + 限速爬升，低速顶岸只停住）。
     if (foundWater) {
-        b.pos.setY(surfY);
-    } else {
-        // 无水重力落地（同 tick 段：扫支撑面 → 贴稳态 restY 防抖动）。
-        const int bcx = int(std::floor(b.pos.x())), bcz = int(std::floor(b.pos.z()));
-        int supportCell = -1;
-        if (world) {
-            for (int y = int(std::floor(b.pos.y())); y >= 0 && y >= int(std::floor(b.pos.y())) - 3; --y) {
-                if (world->isCollidable(bcx, y, bcz)) { supportCell = y; break; }
+        // t661 四轮「冲量登岸」（用户「从海里直接开上岸太容易 / 上岸应需速度」）：高速撞岸写了 beachTimer
+        //   的船，若 footprint 支撑顶高出水面 ~1 格（1 格高岸沿），限速把 Y 爬向岸顶稳态（而非钉水面）——
+        //   爬过岸顶（Y ≥ 岸块 cellY+1）后位移碰撞所在层为岸上方空气层 → 船滑上滩。低速撞岸无冲量 →
+        //   Y 恒钉水面、被岸壁挡停（机制等价 MC 1.0 慢速顶岸停住）。仅 beachTimer>0 时多扫一次支撑（热路径
+        //   零开销）；上岸后 fraction 跌破落下阈自然转陆档（下方 else 分支接管贴稳态）。
+        bool climbing = false;
+        if (b.beachTimer > 0.0f && world) {
+            const float supportTop = boatFootprintSupportTop(world, b.pos.x(), b.pos.y(), b.pos.z());
+            const float restY = supportTop + kBoatHullBottom;
+            if (supportTop >= 0.0f && restY > b.pos.y() + kBoatBeachSnap
+                && restY - b.pos.y() <= 1.25f) { // 仅 ≤1 格高岸沿可爬（更高 = 墙，不爬）
+                b.pos.setY(std::min(b.pos.y() + kBoatBeachClimbRate * float(dt), restY));
+                b.beachTimer = std::max(0.0f, b.beachTimer - float(dt));
+                // 爬升中清朝岸残余速度（岸壁挡着，保速无意义；爬上后 wish 重建）。
+                b.vx = 0.0f;
+                b.vz = 0.0f;
+                climbing = true;
+            } else {
+                // 支撑不构成可登台阶（同层岸 / 深墙）→ 冲量无意义，清零（水面照常钉 surfY）。
+                b.beachTimer = 0.0f;
             }
         }
-        if (supportCell >= 0) {
-            const float restY = float(supportCell) + 1.0f + kBoatHullBottom;
-            if (b.pos.y() <= restY) b.pos.setY(restY);
-            else b.pos.setY(std::max(b.pos.y() - kBoatGravity * float(dt), restY));
+        if (!climbing) b.pos.setY(surfY); // 常规浮水：Y 钉水面（爬升期 Y 已高于 surfY，不回钉）
+    } else {
+        // 无水重力落地（同 tick 段：footprint 支撑顶 → 贴稳态 / 冲量爬岸 / 下落钳不穿）。
+        const float supportTop = world ? boatFootprintSupportTop(world, b.pos.x(), b.pos.y(), b.pos.z()) : -1.0f;
+        if (supportTop >= 0.0f) {
+            const float restY = supportTop + kBoatHullBottom;
+            if (b.pos.y() <= restY) {
+                if (restY - b.pos.y() <= kBoatBeachSnap) {
+                    b.pos.setY(restY); // 小高差贴稳态（同层岸沿平滑上岸，防抖动）
+                } else if (b.beachTimer > 0.0f) {
+                    // t661 冲量登岸：限速爬上 1 格岸沿（爬升期间船 Y 越过岸块顶后 moveAxis 不再被挡 →
+                    //   玩家继续 W 船滑上滩；冲量耗尽 / 中途松键 → 停在岸壁 = 上岸须带速度）。
+                    b.pos.setY(b.pos.y() + kBoatBeachClimbRate * float(dt));
+                    b.beachTimer = std::max(0.0f, b.beachTimer - float(dt));
+                }
+            } else {
+                b.pos.setY(std::max(b.pos.y() - kBoatGravity * float(dt), restY)); // 下落钳到不穿支撑
+            }
         } else {
-            b.pos.setY(b.pos.y() - kBoatGravity * float(dt));
+            b.pos.setY(b.pos.y() - kBoatGravity * float(dt)); // 无支撑 → 自由下落
         }
     }
 
@@ -655,7 +725,20 @@ bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, 
     const int bt = m_boats[size_t(idx)].boatType;
     if (idx == m_riderBoat) m_riderBoat = -1; // 挖骑乘中的船 → 玩家自然下马
     releaseSlot(idx);
-    emit boatBroken(int(std::floor(bp.x())), int(std::floor(bp.y())), int(std::floor(bp.z())), bt);
+    // t661 四轮「创造攻击船不掉落船物品」：掉落格从「船中心格」改为「船侧首个非实体水平邻格」（同双半砖
+    //   掉落散布模式）。根因非「创造跳过掉落」（hitBoatFromRay / onBoatBroken 全模式同路径）——而是掉落
+    //   物生成在船中心格 = 常与**攻击者本人所在格重合**（玩家站船上 / 骑乘中攻击自己脚下的船：骑乘者
+    //   m_pos = 船位），0.5s 免拾窗一过 pickupScan 立即吸回 → 用户全程看不到掉落物 =「不掉落」。邻格散布
+    //   后实体落在船侧（玩家拾取半径边缘外 / 水面漂浮），肉眼可见可拾取，机制等价 MC 船被攻击掉落在船旁。
+    int dropX = int(std::floor(bp.x())), dropZ = int(std::floor(bp.z()));
+    const int dropY = int(std::floor(bp.y()));
+    // World 指针 tick 内不可得（本方法无 world 参）→ 用固定 4 邻序散布（+X,-X,+Z,-Z；不查世界——boatBroken
+    //   的消费端 spawnItem 对落点格无实体校验需求，掉落物自身 tick 有碰撞落地；偏移 1 格已足与玩家错位）。
+    static constexpr int kDropNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    const int nb = QRandomGenerator::global()->bounded(4);
+    dropX += kDropNb[nb][0];
+    dropZ += kDropNb[nb][1];
+    emit boatBroken(dropX, dropY, dropZ, bt);
     notifyChanged();
     return true;
 }

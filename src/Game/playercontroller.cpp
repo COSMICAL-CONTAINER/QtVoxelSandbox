@@ -3088,6 +3088,31 @@ void PlayerController::placeBlock()
             return;
         }
     }
+    // t661 睡莲深水放置（dev-plan t661「只能放浅水（鼠标须指到水下方块）」修）：瞄深水（水底实块超出射程 /
+    //    高俯角只见水面）时主选体射线无命中（m_hasHit=false）→ 旧版在此直接 return 睡莲永远放不了。补：
+    //    持睡莲 + 无命中 → 跑独立水射线（RayFilter::HitWater，同桶舀水 / 放船无命中路径模式）找视线首个
+    //    水格 → 从该格向上爬到水面之上首个非水格（同下方命中路径的睡莲 climb）→ 直接落位（跳过下方需要
+    //    m_hasHit 的 tx/ty/tz 推导，写守卫复用下方 LilyPad 预检同款：下方须静水源 + 目标非睡莲）。
+    //    分层（PLAN §2）：睡莲放置属 Game/Physics（读射线 + 写 World），不改栅格语义。
+    if (!m_hasHit && m_world && m_hotbar && m_selectedBlock == BlockRegistry::LilyPad) {
+        const RayHit wHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitWater);
+        if (wHit.valid && m_world->blockAt(wHit.bx, wHit.by, wHit.bz) == BlockRegistry::Water) {
+            int lilyY = wHit.by;
+            while (lilyY < m_world->height() && m_world->blockAt(wHit.bx, lilyY + 1, wHit.bz) == BlockRegistry::Water)
+                ++lilyY; // 自首个水格爬到最顶水格（其上一格 = 水面 air 格 = 放置目标）
+            const int tyAbove = lilyY + 1;
+            if (tyAbove < m_world->height()
+                && m_world->blockAt(wHit.bx, tyAbove, wHit.bz) == BlockRegistry::Air
+                && m_world->stateAt(wHit.bx, lilyY, wHit.bz) == 0) { // 下方须静水源（流水面上不放，同 ④ 守卫）
+                m_world->setBlock(wHit.bx, tyAbove, wHit.bz, BlockRegistry::LilyPad, 0);
+                if (m_mode != Creative)
+                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 睡莲（创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm();
+            }
+        }
+        return; // 睡莲（放置成功 / 水未中 / 非静水）均不再走方块放置路径
+    }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, tz = m_hitBz + m_hitNz;
