@@ -3159,7 +3159,7 @@ void PlayerController::placeBlock()
         if (m_minecartManager->ridingIndex() < 0 && m_hotbar
             && heldItemId == RecipeRegistry::MinecartId && m_hasHit
             && BlockRegistry::isRail(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
-            m_minecartManager->spawnCart(m_hitBx, m_hitBy, m_hitBz);
+            m_minecartManager->spawnCart(m_hitBx, m_hitBy, m_hitBz, m_world);
             if (m_mode != Creative)
                 m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 矿车（创造不耗）
             m_lastPlaceMs = now;
@@ -5297,6 +5297,14 @@ void PlayerController::step(qreal dt)
         reportHorizSpeed(posBefore, dt);
         emit positionChanged();
         return;
+    }
+    // t708 ③④ 空矿车滑行 / 被推（骑乘分支之外全局推进）：每帧推进未被骑的空矿车滑行（pushEmptyCart 推动
+    //   / 下坡顺坡溜 → 磨擦渐停 / 出轨死端停）；走路 / 飞行 / 观察者期间玩家脚底与静止空车重叠 + wish 沿
+    //   轨轴 → 把车推走（车无碰撞盒，推走即让出，不阻断玩家行走）。骑乘分支已早 return（被骑的走
+    //   tickRiddenCart，其它空车此刻暂不滑 —— t708 范围外：骑乘态空车停驻可接受）。
+    if (m_minecartManager) {
+        m_minecartManager->tickPushedCarts(dt, m_world);
+        m_minecartManager->pushEmptyCart(m_world, m_pos, wish.x(), wish.z());
     }
     // t159 水下速度倍数：眼位在水格 → 水平（及飞垂直）速度 ×kUnderwaterSpeedMul（~0.4）。所有模式统一适用
     //   （走 / 飞 / 观察者进水都变慢，机制等价 MC 水中减速）。每 tick 查一次（blockAt 单查，廉价）。

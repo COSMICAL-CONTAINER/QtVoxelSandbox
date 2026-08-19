@@ -35,8 +35,8 @@
 // 分层（PLAN §2）：本层属 Entities（位于 Game/Physics 之下、World 之上）。向下只读 World
 // （blockAt / stateAt，判轨 / 连接位），不依赖 Renderer / Physics / QtQuick3D。tickRiddenCart /
 // tryMount / dismount / hitCartFromRay 由 PlayerController（Game/Physics 层）每帧 / 右键 / 左键时调
-// （C++ 直调，非 Q_INVOKABLE —— 同 BoatManager / ItemEntityManager 先例）。spawnCart 兼 Q_INVOKABLE
-// 供 QML / PlayerController placeBlock 双入口。
+// （C++ 直调，非 Q_INVOKABLE —— 同 BoatManager / ItemEntityManager 先例）。spawnCart 现带 World* 参数，
+// 亦非 Q_INVOKABLE（t708：避 moc 对 World* 前向类型的 metatype 处理）—— 由 PlayerController placeBlock 单入口调。
 class World; // 前向声明（tickRiddenCart 只读 World；完整定义在 .cpp include）
 class MinecartManager : public QObject
 {
@@ -61,8 +61,16 @@ public:
     Q_INVOKABLE bool aliveAt(int i) const;
 
     // 在铁轨格 (x,y,z)（整数坐标，Rail 方块格）生成一个矿车实体。位置 = 该格中心、轨面上 kCartRideH。
+    //   t708 ①：贴轨面 —— 放置格中心（fx=fz=0.5）的坡面高按 mesher / tickRiddenCart 钉轨面同公式叠加
+    //   （railProbeDelta 本轴抬升），坡格放置不悬空；拐角 / 十字无坡（mesher 同判）。
+    //   t708 ②：初始朝向沿轨延伸 —— 据连接位定轴（X 连接 → 沿 X；否则 Z），单端连接取该延伸向、
+    //   对向 / 无连接取 +X / +Z；车头由下方 tick / 玩家进入后按 wish 重定向（S 反推见 tick 负速倒行）。
     //   目标格非 Rail → 不生成（防御；placeBlock 已守）。达 kCap → 跳过 + qWarning（防溢出）。
-    Q_INVOKABLE void spawnCart(int x, int y, int z);
+    //   world 可空（QML 兜底入口缺世界时退避平贴 + 默认 +Z 朝向）。t708：本方法带 World* 参数 ——
+    //   **非 Q_INVOKABLE**（同 tryMount / dismount 的 C++ 直调约定；Q_INVOKABLE 会让 moc 对 World* 前向
+    //   类型做 QMetaType 注册 → 「Meta Types must be fully defined」编译错）。仅 PlayerController placeBlock
+    //   调（QML 无调用点 —— Main.qml 只读 count/revision/posAt/yawAt）。
+    void spawnCart(int x, int y, int z, World *world = nullptr);
 
     // 玩家当前骑的矿车索引（-1 = 未骑）。PlayerController.step 据它判骑乘分支。
     Q_INVOKABLE int ridingIndex() const { return m_riderCart; }
@@ -106,6 +114,18 @@ public:
     //   outCartPos 写新矿车中心位（PlayerController 据它把玩家 m_pos 同步到车座位）。
     //   无骑乘（m_riderCart<0）→ no-op。
     void tickRiddenCart(qreal dt, World *world, float wishX, float wishZ, QVector3D &outCartPos);
+
+    // t708 ④/③ 空矿车被推后的滑行（PlayerController.step 每帧调，全模式统一推进）：扫全部未被骑的活体矿车，
+    //   有速度（被 pushEmptyCart 推动 / 下坡自然溜）→ 松手摩擦渐停 / 下坡顺坡滑 → 沿轨推进（共享
+    //   stepCartAlongRail —— 出轨 / 死端自动停：无轨不前进）→ 钉轨面（坡面贴地）。静止空车不自动起步。
+    //   空车不吃动力轨 boost / 探测轨道标（t708 范围外；被骑路径语义不变）。
+    void tickPushedCarts(qreal dt, World *world);
+
+    // t708 ④ 空车被玩家推动：玩家水平 AABB（脚底 ±kPlayerHalfW）与静止空矿车 footprint 重叠 + wish 沿
+    //   轨轴有分量 → 把矿车沿轨道推进（按 wish 与该轨格连接向点积最大者定朝向与速度；车无碰撞盒，
+    //   推走即让出，不阻断玩家行走）。无世界 / 无输入 / 无重叠 / 已滑行的车 → no-op。返 false = 未推动。
+    //   由 PlayerController.step 走路分支调（wish = 玩家世界向移动意图）。
+    bool pushEmptyCart(World *world, const QVector3D &playerFeet, float wishX, float wishZ);
 
     // t658 探测轨占用边沿收尾（tickRiddenCart 末尾调）：prev（上一帧占用快照）− 本帧占用 = 离开沿 →
     //   清该探测轨 state bit4（DetectorRailStateOnFlag）断电（机制等价 MC 1.0 矿车离开即断；setWaterSilent
@@ -166,6 +186,20 @@ private:
     bool pickTrackStep(World *world, const QVector3D &cartPos, float wantX, float wantZ,
                        int &outDx, int &outDz) const;
 
+    // t708 沿轨推进（共享：被骑 / 空车被推同一物理）：把矿车沿当前行进 dir 推进 speed×dt（支持负速倒行
+    //   —— S 反向推力的减速 → 负速退行），正行跨格时重选连接向（拐角自动转弯；轨尽头 / 出轨停）；
+    //   倒行不翻转 dir（车头保持朝向），跨格前先验目的格列内确有轨（防倒退出轨落空悬停）。无轨列 → 清零停。
+    void stepCartAlongRail(Cart &c, World *world, float dt);
+
+    // t708 钉轨面（共享：被骑 tickRiddenCart / 空车 tickPushedCarts 同一 Y 钉定）：把矿车 Y 钉到所在列向下
+    //   扫到的最近轨格 cell 顶 + 坡面高 + kCartRideH。坡面高 = cell 内横向位置上的邻轨抬升叠加（只抬 δ>0 ——
+    //   高端平铺、低端画坡；与 PartialBlockGeometry Rail case 的 riseAtX/riseAtZ 同公式同语义、同读
+    //   railProbeDelta → 渲染坡面与矿车高度严格一致）。**rise 只叠本轴**（t691：mesher 对直轨只读行进轴的
+    //   riseAtX（EW）或 riseAtZ（NS）；轴取法 = 连接位（cpx||cnx → X 轴；0 连接读 RailAxisEWFlag）。拐角 /
+    //   十字无坡。返钉到的轨格 Y（-1 = 列内无轨 —— caller 走防御 / 停）。t680 ①：探测轨判定读此返回 Y
+    //   （防 floor(pos.y)-1 在坡顶 rise≥0.7 时错层读空气）。
+    int pinCartY(Cart &c, World *world);
+
     static constexpr int kCap = 64;             // 矿车数上限（防溢出；同船 cap 量级）
     // 矿车几何 / 物理常量（机制等价 MC 1.0 minecart；手感可玩）：
     //   矿车斗形外观 ~0.9×0.5×1.0（长轴沿行进方向 Z）；碰撞盒半宽 0.45 / 半长 0.5 / 半高 0.45。
@@ -184,6 +218,12 @@ private:
     static constexpr float kCartSlopeDownSpeed = 10.0f;
     //   上坡目标速度乘子（<1）：爬上坡时目标速度收窄到该比例（须玩家输入推力才能爬；无输入退化为停）。
     static constexpr float kCartUphillMul = 0.6f;
+    // t708 ④ 玩家推动空车的初始速度（blocks/s）：走路撞上静止空车 → 沿轨以该速推走（≈步行速 4.3 同级，
+    //   friction 渐停；下坡顺坡溜）。MC 1.0 空车被推速≈行走速量级。
+    static constexpr float kCartPushSpeed = 4.0f;
+    // t708 ④ 推车判定重叠半径：玩家脚底中心与静止空矿车中心的水平距离 ≤ 0.8 视为「贴住可推」
+    //   （≈ 玩家碰撞盒半宽 0.3 + 矿车 footprint 半宽 0.45 + 0.05 容差；同量级玩家站立占格半径 0.5）。
+    static constexpr float kCartPushReach = 0.8f;
     // 速度 lerp 接近率（1/s；动量感：松键后滑行一段渐停）。
     static constexpr float kCartAccel  = 3.0f;
     // 空车 / 松键摩擦衰减率（1/s）。

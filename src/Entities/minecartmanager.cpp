@@ -31,16 +31,55 @@ bool MinecartManager::aliveAt(int i) const
     return m_carts[size_t(i)].alive;
 }
 
-void MinecartManager::spawnCart(int x, int y, int z)
+void MinecartManager::spawnCart(int x, int y, int z, World *world)
 {
     if (m_liveCount >= kCap) { qWarning("vo.entities: MinecartManager spawnCart cap reached (%d)", kCap); return; }
     Cart c;
     // 矿车中心 = 轨格中心、轨面上 kCartRideH（轨格 cell 顶 = y+1；轨薄板 y=1/16 之上 → 车底贴轨面）。
     c.pos = QVector3D(float(x) + 0.5f, float(y) + 1.0f + kCartRideH, float(z) + 0.5f);
-    // 初始行进方向默认 +Z（视觉初值；首次 tickRiddenCart 据 wish + 轨连接位重选向，未骑的矿车不动）。
-    c.dirX = 0.0f; c.dirZ = 1.0f;
+    // t708 ② 初始朝向沿轨延伸（不再固定 +Z）：据目标轨格连接位定轴 —— X 轴连接 → 沿 X（单端取该延伸向、
+    //   对向取 +X）；仅 Z 连接 → 沿 Z（单端取该向、对向取 +Z）；孤轨（0 连接）→ 默认 +Z（旧行为兜底）。
+    //   车头由 tick 停驻重选向 / 玩家 S 反推（负速倒行）按 wish 重定向 —— 「双方向」由推 / 倒行机制承担。
+    if (world) {
+        const quint8 st = world->stateAt(x, y, z);
+        const quint8 con = quint8(st & 0x0F);
+        const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
+        const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
+        const bool cpz = (con & BlockRegistry::RailConnPz) != 0;
+        const bool cnz = (con & BlockRegistry::RailConnNz) != 0;
+        if (cpx || cnx) { c.dirX = (cnx && !cpx) ? -1.0f : 1.0f; c.dirZ = 0.0f; } // 单端向该延伸；对向 +X
+        else if (cpz || cnz) { c.dirX = 0.0f; c.dirZ = (cnz && !cpz) ? -1.0f : 1.0f; } // 单端向该向；对向 +Z
+        const int nConn = int(cpx) + int(cnx) + int(cpz) + int(cnz);
+        const bool isCorner = (nConn == 2 && ((cpx || cnx) && (cpz || cnz)));
+        // t708 ① 贴轨面（放置不悬空）：放置格中心（fx=fz=0.5）的坡面高 = 本轴两种向的 +1 坡抬升折半
+        //   （同 mesher riseAtX/riseAtZ 与 tickRiddenCart 钉轨面公式 → 帧 0 即贴轨面；拐角 / 十字无坡）。
+        if (!isCorner && nConn < 3) {
+            const bool ew = (cpx || cnx) || (nConn == 0 && (st & BlockRegistry::RailAxisEWFlag) != 0);
+            const auto dlt = [&](int dx, int dz) {
+                return BlockRegistry::railProbeDelta(
+                    { world->blockAt(x + dx, y, z + dz),
+                      world->blockAt(x + dx, y + 1, z + dz),
+                      world->blockAt(x + dx, y - 1, z + dz) });
+            };
+            float rise = 0.0f;
+            if (ew) {
+                const int dpx = dlt(1, 0);  if (dpx > 0) rise += float(dpx) * 0.5f;
+                const int dnx = dlt(-1, 0); if (dnx > 0) rise += float(dnx) * 0.5f;
+            } else {
+                const int dpz = dlt(0, 1);  if (dpz > 0) rise += float(dpz) * 0.5f;
+                const int dnz = dlt(0, -1); if (dnz > 0) rise += float(dnz) * 0.5f;
+            }
+            c.pos.setY(float(y) + 1.0f + rise + kCartRideH);
+        }
+        // 朝向 yaw 与 dir 同一公式（-Z 前 = 0 约定；见 tickRiddenCart yaw 更新注释）。
+        c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f;
+        while (c.yaw < 0.0f) c.yaw += 360.0f;
+    } else {
+        // 无世界（QML 兜底入口）：默认 +Z 初始行进方向（视觉初值；首 tick 据 wish 重选向）。
+        c.dirX = 0.0f; c.dirZ = 1.0f;
+        c.yaw = 180.0f; // +Z 行进的车头朝向（-Z 前约定下 yaw=180）
+    }
     c.speed = 0.0f;
-    c.yaw = 180.0f; // +Z 行进的车头朝向（-Z 前约定下 yaw=180）
     acquireSlot(std::move(c));
     notifyChanged();
 }
@@ -138,12 +177,18 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
                                     int &outDx, int &outDz) const
 {
     if (!world) return false;
-    // 矿车所在轨格（pos 为格中心 → floor 得格坐标）。
+    // 矿车所在轨格 = 所在列向下扫的最近轨格（t708：不再用 floor(pos.y)-1 —— 坡格顶 rise≥0.7 时
+    //   pos.y = 轨Y+1+rise+0.30 → floor(pos.y)-1 = 轨**上方**空气层 → isRail 判不在轨上 → 拐角重选向 /
+    //   S 倒行 / 推空车在坡顶 30% 段全部失联。与 tickRiddenCart 钉轨面 / t691 前置钉定同「列内向下扫、
+    //   容差 2」语义 → 坡顶 / 坡脚 / 平轨一律解析到真轨格）。轨判定 isRail 家族（普通 / 动力 / 探测）。
     const int rx = int(std::floor(cartPos.x()));
-    const int ry = int(std::floor(cartPos.y())) - 1; // 轨格在矿车中心下一格（中心 = 轨顶 + kCartRideH → floor 减 1）
     const int rz = int(std::floor(cartPos.z()));
-    // t638：轨判定扩为 isRail 家族（普通 / 动力 / 探测轨同轨行驶——机制等价 MC 1.0 三种轨均可通行）。
-    if (!BlockRegistry::isRail(world->blockAt(rx, ry, rz))) return false; // 不在轨上（防御）
+    int ry = -1;
+    const int scanTop = int(std::floor(cartPos.y()));
+    for (int y = scanTop; y >= scanTop - 2 && y >= 0; --y) {
+        if (BlockRegistry::isRail(world->blockAt(rx, y, rz))) { ry = y; break; }
+    }
+    if (ry < 0) return false; // 不在轨上（防御）
     const quint8 con = world->stateAt(rx, ry, rz);
     // 4 向连接位（RailConnPx/Nx/Pz/Nz）→ 位移向量；选与 (wantX,wantZ) 点积最大且**非反向**（dot ≥ 0）者
     //   （拐角 dot=0 自动选中 —— 行进 +Z 时拐角连接 +X 点积 0 > 反向 -Z 的 -1 → 自动转弯）。反向连接
@@ -182,6 +227,172 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
     outDx = kDirs[best].dx;
     outDz = kDirs[best].dz;
     return true;
+}
+
+// t708 钉轨面（共享 helper；实现见头注释）：矿车所在列向下扫最近轨格 → Y = cell 顶 + 坡面高 + kCartRideH。
+//   返钉到的轨格 Y（-1 = 列内无轨）。
+int MinecartManager::pinCartY(Cart &c, World *world)
+{
+    if (!world) return -1;
+    const int bcx = int(std::floor(c.pos.x()));
+    const int bcz = int(std::floor(c.pos.z()));
+    const int bcy = int(std::floor(c.pos.y()));
+    for (int y = bcy; y >= bcy - 2 && y >= 0; --y) {
+        if (!BlockRegistry::isRail(world->blockAt(bcx, y, bcz))) continue;
+        const float fx = c.pos.x() - float(bcx); // [0,1) cell 内横向位置
+        const float fz = c.pos.z() - float(bcz);
+        const auto dlt = [&](int dx, int dz) {
+            return BlockRegistry::railProbeDelta(
+                { world->blockAt(bcx + dx, y, bcz + dz),
+                  world->blockAt(bcx + dx, y + 1, bcz + dz),
+                  world->blockAt(bcx + dx, y - 1, bcz + dz) });
+        };
+        // t691 轴判定（mesher 同源）：连接位低 4 位定行进轴；EW（±X 连接）→ riseAtX、NS → riseAtZ；
+        //   0 连接读 RailAxisEWFlag（bit5 轴偏好）。拐角 / 十字无坡（mesher 同判）。
+        const quint8 rst = world->stateAt(bcx, y, bcz);
+        const quint8 con = quint8(rst & 0x0F);
+        const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
+        const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
+        const bool cpz = (con & BlockRegistry::RailConnPz) != 0;
+        const bool cnz = (con & BlockRegistry::RailConnNz) != 0;
+        const int nConn = int(cpx) + int(cnx) + int(cpz) + int(cnz);
+        const bool isCorner = (nConn == 2 && ((cpx || cnx) && (cpz || cnz)));
+        const bool ew = (cpx || cnx) || (nConn == 0 && (rst & BlockRegistry::RailAxisEWFlag) != 0);
+        float rise = 0.0f;
+        if (!isCorner && nConn < 3) { // 直轨才有坡（拐角 / 十字无坡，mesher 同判）
+            if (ew) {
+                const int dpx = dlt(1, 0);  if (dpx > 0) rise += float(dpx) * fx;
+                const int dnx = dlt(-1, 0); if (dnx > 0) rise += float(dnx) * (1.0f - fx);
+            } else {
+                const int dpz = dlt(0, 1);  if (dpz > 0) rise += float(dpz) * fz;
+                const int dnz = dlt(0, -1); if (dnz > 0) rise += float(dnz) * (1.0f - fz);
+            }
+        }
+        c.pos.setY(float(y) + 1.0f + rise + kCartRideH);
+        return y;
+    }
+    return -1;
+}
+
+// t708 沿轨推进（共享：被骑 / 空车被推同一物理；实现见头注释）。负速 = 倒行（沿 -dir，车头保持原朝向）。
+void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
+{
+    if (!world) { c.speed = 0.0f; return; }
+    const float step = c.speed * float(dt);
+    if (std::fabs(step) < 1e-5f) return;
+    // 带符号行进单位向量：正行（speed>0）沿 +dir；倒行（speed<0）沿 -dir（车头 dir 不翻转 —— 保持朝向
+    //   车底退行；跨格重选向只影响行进方向，正行转弯才更新 dir）。
+    const int sgn = (step > 0.0f) ? 1 : -1;
+    float tx = c.dirX * float(sgn);
+    float tz = c.dirZ * float(sgn);
+    float remain = std::fabs(step);
+    int guard = 0;
+    while (remain > 1e-5f && guard++ < 8) { // 子步循环（单帧跨多格；8 子步上限防死循环）
+        // 当前段终点 = 当前所在格中心 + 行进 tx/tz（沿行进向的下一格中心边界）。
+        const int cxc = int(std::floor(c.pos.x()));
+        const int czc = int(std::floor(c.pos.z()));
+        const float nextCx = float(cxc) + 0.5f + tx;
+        const float nextCz = float(czc) + 0.5f + tz;
+        const float ddx = nextCx - c.pos.x();
+        const float ddz = nextCz - c.pos.z();
+        const float segLen = std::fabs(ddx) + std::fabs(ddz); // 轴向 → 曼哈顿 = 欧氏
+        if (segLen <= 1e-5f) { c.speed = 0.0f; break; }       // 已在格中心（理论不达，防御）
+        if (remain < segLen) {
+            // 段内推进：沿行进 tx/tz 归一位移（带符号 dir）。
+            c.pos.setX(c.pos.x() + tx * remain);
+            c.pos.setZ(c.pos.z() + tz * remain);
+            remain = 0.0f;
+        } else {
+            // 跨到下一格中心：先落位，再重选下一连接向（拐角在此转弯）。pickTrackStep 内滤 dot<0 反向
+            //   （仅剩来路 / 无轨 = 轨尽头 → 返 false → 停：出轨不前进、倒行撞死端停）。t708：轨格解析
+            //   已改列内下扫（pickTrackStep 内部），坡顶 rise≥0.7 不再错层。
+            c.pos.setX(nextCx);
+            c.pos.setZ(nextCz);
+            remain -= segLen;
+            int ndx = 0, ndz = 0;
+            if (!pickTrackStep(world, c.pos, tx, tz, ndx, ndz)) {
+                c.speed = 0.0f; // 轨尽头 → 停（速度清零；正行 W 再推也停，须反推 / 上轨延伸）
+                break;
+            }
+            if (sgn > 0) { c.dirX = float(ndx); c.dirZ = float(ndz); } // 正行跨格 → 车头同步新连接向（转弯）
+            tx = float(ndx); tz = float(ndz); // 行进方向继续（倒行沿新连接向退行 —— 拐角倒车自动过弯）
+        }
+    }
+}
+
+// t708 ③ 空矿车被推后的滑行（PlayerController.step 每帧调，骑乘分支之外）：扫全部未被骑的活体矿车，
+//   静置（speed≈0）不动（无被骑路径的 slopeDownAuto 起步闸门 —— 空车不自动溜坡，机制保守）；有速度
+//   （pushEmptyCart 推动 / 推入下坡段顺坡溜）→ 下坡不衰减（重力抵消摩擦 → 顺坡滑）、平 / 上坡磨擦渐停
+//   → 共享 stepCartAlongRail 沿轨推进（出轨 / 死端自动停：无轨不前进）→ 钉轨面（坡面贴地）。空车不吃
+//   动力轨 boost / 探测轨道标（t708 范围外；被骑路径语义不变 —— tickRiddenCart 才处理 boost / detector 沿）。
+//   任一车本帧水平位移 → 发一次 entitiesChanged（revision 触碰驱动 QML 位置刷新；无位移不发防每帧空转）。
+void MinecartManager::tickPushedCarts(qreal dt, World *world)
+{
+    if (!world || dt <= 0.0) return;
+    if (m_carts.empty()) return; // 无矿车 → 零开销（非骑乘帧常见路径）
+    bool moved = false;
+    for (size_t i = 0; i < m_carts.size(); ++i) {
+        Cart &c = m_carts[i];
+        if (!c.alive) continue;
+        if (int(i) == m_riderCart) continue; // 被骑的走 tickRiddenCart 专属物理（boost / 探测轨沿 / 停驻重选向）
+        if (std::fabs(c.speed) < 1e-3f) continue; // 静置空车不自动起步
+        // 滑行物理：行进侧邻轨高度差判定（同 tickRiddenCart 坡道重力公式；空车无输入 → 只做滑行不抬速）。
+        //   下坡（δ=-1）→ 重力抵摩擦 → 本帧不衰减（顺坡滑）；平 / 上坡 / 无轨（INT_MIN）→ 磨擦渐停。
+        const float bx = c.pos.x(), bz = c.pos.z(); // 水平位移检测基准
+        const int ry = pinCartY(c, world);
+        if (ry < 0) { c.speed = 0.0f; continue; } // 无轨列 → 防御停
+        const int gs = (c.speed >= 0.0f) ? 1 : -1;
+        const int cx = int(std::floor(c.pos.x()));
+        const int cz = int(std::floor(c.pos.z()));
+        const int ndx = int(c.dirX) * gs, ndz = int(c.dirZ) * gs;
+        const int slope = BlockRegistry::railProbeDelta(
+            { world->blockAt(cx + ndx, ry, cz + ndz),
+              world->blockAt(cx + ndx, ry + 1, cz + ndz),
+              world->blockAt(cx + ndx, ry - 1, cz + ndz) });
+        if (slope == INT_MIN || slope >= 0) { // 平 / 上坡：摩擦衰减（帧率无关 exp 衰减）
+            const float alpha = 1.0f - std::exp(-kCartFriction * float(dt));
+            c.speed -= c.speed * alpha;
+            if (std::fabs(c.speed) < 0.02f) { c.speed = 0.0f; continue; } // 磨擦停稳（死区）
+        } // 下坡（slope<0）→ 不衰减（顺坡滑）
+        stepCartAlongRail(c, world, float(dt));
+        pinCartY(c, world); // step 不碰 Y → 给新格重新钉坡面（下坡贴地滑 / 平轨贴面）
+        const float dx = c.pos.x() - bx, dz = c.pos.z() - bz;
+        if (dx * dx + dz * dz > 1e-6f) moved = true;
+    }
+    if (moved) notifyChanged();
+}
+
+// t708 ④ 空车被玩家推动（PlayerController.step 走路 / 飞 / 观察者分支统一调；实现见头注释）：玩家脚底
+//   水平 AABB（±kCartPushReach）与静止空矿车重叠 + wish 沿轨轴有分量 → 把矿车沿「与 wish 点积最大的轨
+//   连接向」推走（speed = kCartPushSpeed，车头转向该连接向 → 之后 tickPushedCarts 磨擦渐停 / 下坡顺坡滑）。
+//   已滑行的车（speed≠0）不二次推（防静止站位无限叠速）；被骑的车不推。pickTrackStep 滤 dot<0 / 无轨 →
+//   纯反向或无沿 wish 的可走连接 → 不推（wish 垂直于轨轴推不动 —— 机制等价 MC 推静止矿车须沿轨轴）。
+bool MinecartManager::pushEmptyCart(World *world, const QVector3D &playerFeet, float wishX, float wishZ)
+{
+    if (!world) return false;
+    const float wishLen = std::sqrt(wishX * wishX + wishZ * wishZ);
+    if (wishLen < 1e-3f) return false; // 无输入 → 不推
+    const float nwx = wishX / wishLen, nwz = wishZ / wishLen;
+    bool pushed = false;
+    for (size_t i = 0; i < m_carts.size(); ++i) {
+        Cart &c = m_carts[i];
+        if (!c.alive) continue;
+        if (int(i) == m_riderCart) continue;      // 被骑的车不推（骑乘语义专属）
+        if (std::fabs(c.speed) > 1e-3f) continue; // 已滑行的车不二次推（防静止站位无限叠速）
+        const float dx = std::fabs(playerFeet.x() - c.pos.x());
+        const float dz = std::fabs(playerFeet.z() - c.pos.z());
+        if (dx > kCartPushReach || dz > kCartPushReach) continue; // 玩家未实际贴住车
+        int ndx = 0, ndz = 0;
+        if (!pickTrackStep(world, c.pos, nwx, nwz, ndx, ndz)) continue; // 无沿 wish 的可走连接 → 推不动
+        c.dirX = float(ndx);
+        c.dirZ = float(ndz);
+        c.speed = kCartPushSpeed;
+        c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f; // 车头转向推入向（-Z 前约定，同 tickRiddenCart）
+        while (c.yaw < 0.0f) c.yaw += 360.0f;
+        pushed = true;
+    }
+    if (pushed) notifyChanged(); // 推动即发；后续滑行帧由 tickPushedCarts 持续发位置刷新
+    return pushed;
 }
 
 void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float wishZ, QVector3D &outCartPos)
@@ -264,9 +475,13 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         if (slope != INT_MIN && slope < 0) { // t684：INT_MIN（该向无轨 / 死端）必须排除 —— 否则
             //   停在死端 / 孤轨上的静止车把「无轨」当「下坡」→ slopeDownAuto 放行起步闸门 → 自动
             //   冲出轨端悬空一格（速度永远非零 + 推进段指向无轨方向）。只有真下坡（邻轨低 1）才溜车。
-            slopeDownAuto = true; targetV = std::max(targetV, kCartSlopeDownSpeed);
+            //   t708 ⑤ 负速倒行对称：行进侧下坡（gs<0 = 倒在下坡上）→ 目标往 **-kCartSlopeDownSpeed**
+            //   方向抬（倒溜加速），不把倒退意图掰成正向（旧版 max 会把「倒行下坡」改成正推）。
+            slopeDownAuto = true;
+            targetV = (gs > 0) ? std::max(targetV, kCartSlopeDownSpeed)
+                               : std::min(targetV, -kCartSlopeDownSpeed);
         }
-        else if (slope > 0) targetV *= kCartUphillMul; // 上坡减速
+        else if (slope > 0) targetV *= kCartUphillMul; // 上坡减速（正倒行同款收窄）
     }
     // 速度 lerp 接近目标（加速 / 摩擦统一：目标 0 时按 kCartFriction 衰减；目标 ±速时按 kCartAccel 接近）。
     {
@@ -279,43 +494,13 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     // 沿轨推进：以「格中心到格中心」的插值段推进（跨格时重选连接向 → 拐角自动转弯）。
     //   段 = 当前格中心 → 沿 dirX/dirZ 的下一轨格中心；到段末（进入新格中心）时重选下一连接向。
     //   t667：下坡起步（speed==0 且行进侧下坡）也进本闸门 —— 静止车在坡上受力溜车，无需玩家输入。
+    //   t708 ⑤：S 后退 —— proj<0 → 目标速负 → lerp 出负速 → stepCartAlongRail 负速段沿 -dir 倒行
+    //   （旧版推进循环只看正 remain，负速不进循环 = S 只减速不后退，须转身向 W 才动 —— 实测症状根因）。
     if (c.speed != 0.0f || slopeDownAuto) {
         // 静停下坡起步：补一个初始化速度（direct target = kCartSlopeDownSpeed；不给 0 起步死区吃掉）。
         if (c.speed == 0.0f) c.speed = kCartSlopeDownSpeed * 0.05f;
-        const float step = c.speed * float(dt);
-        float remain = step;
-        int guard = 0;
-        while (remain > 1e-5f && guard++ < 8) { // 子步循环（单帧跨多格；8 子步上限防死循环）
-            // 当前段终点 = 当前所在格中心 + dir（沿行进向的下一格中心边界）。简化推进模型：
-            //   目标格中心 = floor(pos) + 0.5 + dir*1.0（沿 dir 的邻格中心）。
-            const int cxc = int(std::floor(c.pos.x()));
-            const int czc = int(std::floor(c.pos.z()));
-            const float nextCx = float(cxc) + 0.5f + c.dirX;
-            const float nextCz = float(czc) + 0.5f + c.dirZ;
-            const float ddx = nextCx - c.pos.x();
-            const float ddz = nextCz - c.pos.z();
-            const float segLen = std::fabs(ddx) + std::fabs(ddz); // 轴向 → 曼哈顿 = 欧氏
-            if (segLen <= 1e-5f) { c.speed = 0.0f; break; }      // 已在格中心（理论不达，防御）
-            if (remain < segLen) {
-                // 段内推进：沿 dir 归一位移（ddx/ddz 恒轴对齐 → 归一 = dir）。
-                c.pos.setX(c.pos.x() + c.dirX * remain);
-                c.pos.setZ(c.pos.z() + c.dirZ * remain);
-                remain = 0.0f;
-            } else {
-                // 跨到下一格中心：先落位，再重选下一连接向（拐角在此转弯 —— 新 dir = 与当前 dir 点积
-                //   最大的连接向；反向连接点积 -1 仅在末端无前进连接时选中 = 允许推回）。
-                c.pos.setX(nextCx);
-                c.pos.setZ(nextCz);
-                remain -= segLen;
-                int ndx = 0, ndz = 0;
-                if (!pickTrackStep(world, c.pos, c.dirX, c.dirZ, ndx, ndz)) {
-                    c.speed = 0.0f; // 轨尽头 → 停（速度清零；W 再推也停 —— 须下车上轨延伸或反推）
-                    break;
-                }
-                c.dirX = float(ndx);
-                c.dirZ = float(ndz);
-            }
-        }
+        // 共享沿轨推进（正行跨格重选连接向 / 负速倒行 / 出轨停）。
+        stepCartAlongRail(c, world, float(dt));
         // Y 钉轨面（t667 坡道感知）：矿车所在列向下找轨格（中心格或下一格）→ pos.y = 轨格 cell 顶 + **坡面高** +
         //   kCartRideH。坡面高 = cell 内横向位置上的邻轨抬升叠加（只抬 δ>0 —— 高端平铺、低端画坡；与
         //   PartialBlockGeometry Rail case 的 riseAtX/riseAtZ 同公式同语义、同读 railProbeDelta → 渲染坡面
@@ -328,44 +513,9 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         if (world) {
             const int bcx = int(std::floor(c.pos.x()));
             const int bcz = int(std::floor(c.pos.z()));
-            const int bcy = int(std::floor(c.pos.y()));
-            int pinnedY = -1; // t680 ①：钉轨面循环钉到的轨格 Y（探测轨判定用；-1 = 列内未找到轨）
-            for (int y = bcy; y >= bcy - 2 && y >= 0; --y) {
-                if (BlockRegistry::isRail(world->blockAt(bcx, y, bcz))) {
-                    const float fx = c.pos.x() - float(bcx); // [0,1) cell 内横向位置
-                    const float fz = c.pos.z() - float(bcz);
-                    const auto dlt = [&](int dx, int dz) {
-                        return BlockRegistry::railProbeDelta(
-                            { world->blockAt(bcx + dx, y, bcz + dz),
-                              world->blockAt(bcx + dx, y + 1, bcz + dz),
-                              world->blockAt(bcx + dx, y - 1, bcz + dz) });
-                    };
-                    // t691 轴判定（mesher 同源）：连接位低 4 位定行进轴；EW（±X 连接）→ riseAtX、NS →
-                    //   riseAtZ；0 连接读 RailAxisEWFlag（bit5 轴偏好）。拐角 / 十字无坡（mesher 同判）。
-                    const quint8 rst = world->stateAt(bcx, y, bcz);
-                    const quint8 con = quint8(rst & 0x0F);
-                    const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
-                    const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
-                    const bool cpz = (con & BlockRegistry::RailConnPz) != 0;
-                    const bool cnz = (con & BlockRegistry::RailConnNz) != 0;
-                    const int nConn = int(cpx) + int(cnx) + int(cpz) + int(cnz);
-                    const bool isCorner = (nConn == 2 && ((cpx || cnx) && (cpz || cnz)));
-                    const bool ew = (cpx || cnx) || (nConn == 0 && (rst & BlockRegistry::RailAxisEWFlag) != 0);
-                    float rise = 0.0f;
-                    if (!isCorner && nConn < 3) { // 直轨才有坡（拐角 / 十字无坡，mesher 同判）
-                        if (ew) {
-                            const int dpx = dlt(1, 0);  if (dpx > 0) rise += float(dpx) * fx;
-                            const int dnx = dlt(-1, 0); if (dnx > 0) rise += float(dnx) * (1.0f - fx);
-                        } else {
-                            const int dpz = dlt(0, 1);  if (dpz > 0) rise += float(dpz) * fz;
-                            const int dnz = dlt(0, -1); if (dnz > 0) rise += float(dnz) * (1.0f - fz);
-                        }
-                    }
-                    c.pos.setY(float(y) + 1.0f + rise + kCartRideH);
-                    pinnedY = y;
-                    break;
-                }
-            }
+            // t708：钉轨面提取为共享 helper pinCartY（空车被推 tickPushedCarts 同一 Y 钉定；探测轨判定
+            //   读返回的 pinnedY —— 同 t680 ①「钉轨面循环钉到的轨格 Y」语义，防 floor(pos.y)-1 坡顶错层）。
+            const int pinnedY = pinCartY(c, world);
             // t638/t658 ⑤ 探测轨信号输出（**边沿化**——t658 起探测轨是红石电源，机制等价 MC 1.0 detector
             //   rail 被矿车压住时**实时通电 / 离开断电**；t638 的「压过后保持亮」占位语义被电力系统取代）：
             //   矿车所在列（钉到的轨格）为探测轨 → 置 state bit4（DetectorRailStateOnFlag = 0x10）→ 经
@@ -386,7 +536,10 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
                 m_detectorOccupied.insert(packRailCell(bcx, pinnedY, bcz)); // 本帧占用（下帧边沿比较基线）
             }
         }
-        // 车头朝向（-Z 前约定：dir=(0,-1) → yaw 0；(1,0) → yaw 90；(0,1) → yaw 180；(-1,0) → yaw 270）。
+        // 车头朝向（-Z 前约定，同 PlayerController horizontalFacing / 相机 yaw）：yaw = atan2(-dirX,-dirZ)
+        //   → dir=(0,-1) → 0°；(0,1) → 180°；(-1,0) → 90°；(1,0) → 270°（车头本地 -Z 经 R_y(yaw) 旋转后
+        //   指向 dir；与 QML cartRoot eulerRotation.y 直连，dir 与渲染朝向严格一致）。负速倒行时 dir 不变
+        //   → 车头保持原朝向（车底朝后退行），跨格重选向（正行转弯）才更新。
         c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f;
         while (c.yaw < 0.0f) c.yaw += 360.0f;
     } else if (world) {
