@@ -2050,6 +2050,24 @@ int EntityManager::nearestHostile(const QVector3D &pos, float range) const
     return best;
 }
 
+// t712 批「敌对 mob 主动攻击铁傀儡」：最近活体铁傀儡查找（见头文件注释；同 nearestHostile 模式，
+//   谓词换 mobType==MobIronGolem）。
+int EntityManager::nearestIronGolem(const QVector3D &pos, float range) const
+{
+    int best = -1;
+    float bestD2 = range * range;
+    for (int i = 0; i < int(m_entities.size()); ++i) {
+        const Entity &m = m_entities[size_t(i)];
+        if (!m.alive || m.kind != Mob || m.dead || m.mobType != MobIronGolem) continue; // 仅活体铁傀儡
+        const float dx = m.pos.x() - pos.x();
+        const float dy = m.pos.y() - pos.y();
+        const float dz = m.pos.z() - pos.z();
+        const float d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < bestD2) { bestD2 = d2; best = i; }
+    }
+    return best;
+}
+
 // t482 朝 target 解抛物初速并抛雪球（aiSnowGolem 远程攻击调；详见头文件 fireSnowball 注释）。
 //   与 fireArrow（骷髅射箭）同数学：origin = shooter 中心 + 朝 target 前移 0.5 格（防贴墙 spawn 入墙即没）；
 //   水平速度固定 kSnowballSpeed → 飞行时间 t=d/vH；据 target 高度差反解 vy；三轴 ±kSnowballSpread 抖动。
@@ -2408,6 +2426,80 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         if (e.attackCooldown < 0.0f) e.attackCooldown = 0.0f;
     }
 
+    // t712 批「敌对 mob 主动攻击铁傀儡」（机制等价 MC 1.0 僵尸 / 蜘蛛见铁傀儡即转火攻击防御造物）：
+    //   侦测范围内有活体铁傀儡 → **优先锁定它**（高于玩家目标；MC 敌对近战对造物天然敌意）。走同款
+    //   detect→chase→attack 流程但目标换 mob：朝 golem 走（kChaseSpeed）+ 近距（kAttackRange）冷却到 →
+    //   damageEntity + knockback（复用受击链，红闪 / 归零 mobDied 掉落照常）。golem 不在范围（死亡 / 远离）
+    //   → 落回下方常规玩家目标路径（chasing 记忆自然衔接）。
+    //   注：本分支对 Shambler（蹒跚者）/ Spider（蜘蛛）生效 —— MC 1.0 两族都攻击铁傀儡；Stalker（潜行者）
+    //   走独立 aiStalker（只锁玩家，不对造物自爆，spec 明确）；Bones（骷髅弓箭手）走 aiArcher 独立分流。
+    const int golemIdx = nearestIronGolem(e.pos, kDetectRange);
+    if (golemIdx >= 0) {
+        const Entity &g = m_entities[size_t(golemIdx)];
+        const float gdx = g.pos.x() - e.pos.x();
+        const float gdz = g.pos.z() - e.pos.z();
+        const float gdy = g.pos.y() - e.pos.y();
+        const float gDist = std::sqrt(gdx * gdx + gdz * gdz);
+        // 朝 golem（同 yaw 约定 dir=(-sin,0,-cos)）。
+        if (gDist > 1e-4f) e.yawRad = std::atan2(-gdx, -gdz);
+        // 近距攻击（垂直同层门控同玩家路径；冷却到）：damageEntity + knockback（朝 golem 推开）。
+        if (gDist <= kAttackRange && std::abs(gdy) <= kAttackVertRange && e.attackCooldown <= 0.0f) {
+            // 蓄力期间目标可能死亡 / 被移除 → 重读槽位校验（同 aiIronGolem 对 mob 重拳模式）。
+            if (golemIdx < int(m_entities.size())) {
+                const Entity &g2 = m_entities[size_t(golemIdx)];
+                if (g2.alive && g2.kind == Mob && !g2.dead && g2.mobType == MobIronGolem) {
+                    e.attackCooldown = kAttackCooldown;
+                    float kx = 1.0f, kz = 0.0f;
+                    if (gDist > 1e-3f) { kx = gdx / gDist; kz = gdz / gDist; }
+                    else { kx = -std::sin(e.yawRad); kz = -std::cos(e.yawRad); }
+                    damageEntity(golemIdx, kAttackDamage);
+                    knockback(golemIdx, kx, kz, 1.0f);
+                    qCInfo(lcEnt) << "hostile mob" << e.mobType << "attacked iron golem" << golemIdx;
+                }
+            }
+        }
+        if (gDist > kAttackRange) {
+            // 追击 golem：越障跳 + 水平移动（复用 aiHostile 追玩家同款逐轴 AABB 撤回 + 边界 clamp）。
+            e.wanderSpeed = kChaseSpeed;
+            const float chaseSpd = kChaseSpeed * speedScale;
+            if (e.resting && world && gDist > 1e-4f) {
+                const float fdx = -std::sin(e.yawRad);
+                const float fdz = -std::cos(e.yawRad);
+                const int fy = qFloor(e.pos.y() - e.halfH);
+                const int fx = qFloor(e.pos.x() + fdx * 0.6f);
+                const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+                if (fy >= 0
+                    && isJumpObstacle(world, fx, fy, fz)
+                    && !world->isSolid(fx, fy + 1, fz)
+                    && !world->isSolid(fx, fy + 2, fz)) {
+                    e.vy = kJumpSpeed;
+                    e.resting = false;
+                    e.jumpGX = (gdx / gDist) * chaseSpd; // t670 越障跳水平滑流（朝 golem 方向）
+                    e.jumpGZ = (gdz / gDist) * chaseSpd;
+                }
+            }
+            const float ehw = e.halfW, ehh = e.halfH;
+            const float nx = gdx / gDist, nz = gdz / gDist;
+            float newX = e.pos.x() + nx * chaseSpd * dt;
+            if (newX < ehw) newX = ehw;
+            if (newX > worldW - ehw) newX = worldW - ehw;
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+            float newZ = e.pos.z() + nz * chaseSpd * dt;
+            if (newZ < ehw) newZ = ehw;
+            if (newZ > worldD - ehw) newZ = worldD - ehw;
+            if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+            bool moved = false;
+            if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+            if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+            e.moveSpeed = moved ? chaseSpd : 0.0f;
+            return moved;
+        }
+        // 已贴身：站立攻击（腿停）。
+        e.wanderSpeed = 0.0f;
+        e.moveSpeed = 0.0f;
+        return false;
+    }
+
     // 玩家相对位置（XZ 距离 + 垂直差）。playerPos = 玩家脚位；e.pos = mob 中心。
     const float dx = playerPos.x() - e.pos.x();
     const float dz = playerPos.z() - e.pos.z();
@@ -2553,6 +2645,87 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
     if (e.attackCooldown > 0.0f) {
         e.attackCooldown -= dt;
         if (e.attackCooldown < 0.0f) e.attackCooldown = 0.0f;
+    }
+
+    // t712 批「敌对 mob 主动攻击铁傀儡」（骷髅弓箭手分支；机制等价 MC 1.0 骷髅见铁傀儡转火射它）：
+    //   侦测范围内有活体铁傀儡 → 优先锁定：保持距离（kArcherKeepMin/Max）+ 拉弓瞄准（kAimWindup）→
+    //   fireArrow 射 golem 上身。箭命中 mob 由 tick Arrow 分支的骷髅箭 mob 命中（t712 同批加）结算。
+    //   golem 不在范围 → 落回下方常规玩家路径。视线清查（lineOfSightClear）同玩家射箭路径复用。
+    {
+        const int golemIdx = nearestIronGolem(e.pos, kDetectRange);
+        if (golemIdx >= 0 && golemIdx < int(m_entities.size())) {
+            const Entity &g = m_entities[size_t(golemIdx)];
+            const float gdx = g.pos.x() - e.pos.x();
+            const float gdz = g.pos.z() - e.pos.z();
+            const float gdy = g.pos.y() - e.pos.y();
+            const float gDist = std::sqrt(gdx * gdx + gdz * gdz);
+            if (gDist > 1e-4f) e.yawRad = std::atan2(-gdx, -gdz); // 朝 golem
+            e.wanderSpeed = kChaseSpeed;
+            float draw = e.aimTimer > 0.0f ? e.aimTimer / kAimWindup : 0.0f;
+            if (draw > 1.0f) draw = 1.0f;
+            const float chaseSpd = kChaseSpeed * speedScale * (1.0f - draw);
+            // 保持距离（同玩家路径：近退远进）。
+            float moveDirX = 0.0f, moveDirZ = 0.0f;
+            bool wantMove = false;
+            if (gDist > 1e-4f) {
+                if (gDist < kArcherKeepMin) { moveDirX = -gdx / gDist; moveDirZ = -gdz / gDist; wantMove = true; }
+                else if (gDist > kArcherKeepMax) { moveDirX = gdx / gDist; moveDirZ = gdz / gDist; wantMove = true; }
+            }
+            // 越障跳（同玩家路径模式，朝移动方向）。
+            if (wantMove && e.resting && world) {
+                const int fy = qFloor(e.pos.y() - e.halfH);
+                const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
+                const int fz = qFloor(e.pos.z() + moveDirZ * 0.7f);
+                if (fy >= 0
+                    && isJumpObstacle(world, fx, fy, fz)
+                    && !world->isSolid(fx, fy + 1, fz)
+                    && !world->isSolid(fx, fy + 2, fz)) {
+                    e.vy = kJumpSpeed;
+                    e.resting = false;
+                    e.jumpGX = moveDirX * chaseSpd;
+                    e.jumpGZ = moveDirZ * chaseSpd;
+                }
+            }
+            bool moved = false;
+            if (wantMove) {
+                const float ehw = e.halfW, ehh = e.halfH;
+                float newX = e.pos.x() + moveDirX * chaseSpd * dt;
+                if (newX < ehw) newX = ehw;
+                if (newX > worldW - ehw) newX = worldW - ehw;
+                if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+                float newZ = e.pos.z() + moveDirZ * chaseSpd * dt;
+                if (newZ < ehw) newZ = ehw;
+                if (newZ > worldD - ehw) newZ = worldD - ehw;
+                if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+                if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+                if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+            }
+            e.moveSpeed = moved ? chaseSpd : 0.0f;
+            // 射箭（同玩家路径：射程 + 垂直同层 + 冷却到 + 视线清 → 拉弓 kAimWindup 满 → fireArrow）。
+            if (gDist <= kArcherShootRange && std::abs(gdy) <= kShootVertRange && e.attackCooldown <= 0.0f) {
+                const QVector3D origin(e.pos.x(), e.pos.y() + e.halfH * 0.5f, e.pos.z());
+                const QVector3D target(g.pos.x(), g.pos.y() + g.halfH * 0.6f, g.pos.z()); // golem 上身（2.4 高）
+                e.losCacheTimer -= float(dt);
+                if (e.losCacheTimer <= 0.0f) {
+                    e.losClear = lineOfSightClear(world, origin, target);
+                    e.losCacheTimer = kLosCacheInterval;
+                }
+                if (e.losClear) {
+                    e.aimTimer += float(dt);
+                    if (e.aimTimer >= kAimWindup) {
+                        fireArrow(idx, e, target);
+                        e.attackCooldown = kShootCooldown;
+                        e.aimTimer = 0.0f;
+                        qCInfo(lcEnt) << "archer (Bones) fired arrow at iron golem" << golemIdx << "dist=" << gDist;
+                    }
+                } else {
+                    e.aimTimer = 0.0f;
+                }
+            } else {
+                e.aimTimer = 0.0f;
+            }
+            return moved;
+        }
     }
 
     const float dx = playerPos.x() - e.pos.x();
@@ -3482,6 +3655,30 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         qCInfo(lcEnt) << "player arrow hit mob" << mi << "for" << e.arrowDamage << "HP";
                         remove = true;
                         break; // 命中首个即止（箭消失，不穿透）
+                    }
+                }
+            }
+            // t712 批「敌对 mob 主动攻击铁傀儡」配套：骷髅箭（arrowFromPlayer=false）命中**铁傀儡**（aiArcher
+            //   golem 分支射出的目标）→ damageEntity(kArrowDamage) + 击退 + 移除箭。仅铁傀儡（骷髅不会朝其它
+            //   mob 射箭 —— aiArcher golem 分支只在 nearestIronGolem 命中时开火；范围限定防骷髅误伤羊群 /
+            //   队友改变既有生态）。AABB 外扩同玩家箭（kArrowHitHalfW）；伤害固定 kArrowDamage（同命中玩家）。
+            if (!remove && !e.arrowFromPlayer) {
+                for (int mi = 0; mi < int(m_entities.size()); ++mi) {
+                    const Entity &m = m_entities[size_t(mi)];
+                    if (!m.alive || m.kind != Mob || m.dead || m.mobType != MobIronGolem) continue; // 仅活体铁傀儡
+                    const float ex2 = m.pos.x() - m.halfW - kArrowHitHalfW;
+                    const float ey2 = m.pos.y() - m.halfH - kArrowHitHalfW;
+                    const float ez2 = m.pos.z() - m.halfW - kArrowHitHalfW;
+                    if (next.x() >= ex2 && next.x() <= m.pos.x() + m.halfW + kArrowHitHalfW
+                        && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kArrowHitHalfW
+                        && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kArrowHitHalfW) {
+                        damageEntity(mi, kArrowDamage);
+                        const float ahx = e.vx, ahz = e.vz;
+                        float alen = std::sqrt(ahx * ahx + ahz * ahz);
+                        if (alen > 1e-3f) knockback(mi, ahx / alen, ahz / alen, kArrowKnockbackStrength);
+                        qCInfo(lcEnt) << "skeleton arrow hit iron golem" << mi << "for" << kArrowDamage << "HP";
+                        remove = true;
+                        break;
                     }
                 }
             }

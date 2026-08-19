@@ -2126,6 +2126,7 @@ Window {
                 else if (mobType === EntityManager.MobSpider) cause = PlayerState.Spider
                 else if (mobType === EntityManager.MobStalker) cause = PlayerState.Stalker
                 else if (mobType === EntityManager.MobTnt) cause = PlayerState.Tnt   // t494：TNT 爆炸死因（独立于潜行者自爆）
+                else if (mobType === EntityManager.MobIronGolem) cause = PlayerState.GolemSlain // t712：重拳直接击杀（旧落 Generic「不明原因」；摔落路径另走 GolemLaunchFall）
                 // t345 护甲减伤 + t476 保护族附魔减伤（mob 近战 / 箭 / 爆炸命中也走护甲值 + 附魔 EPF 减伤 + 耐久损耗）。
                 //   护甲值每点 4%（cap 0.80）+ 附魔 EPF 每点 4%（cap 0.80），合计 cap 0.85；至少 1 点穿透。
                 var finalAmt = amount
@@ -5954,7 +5955,14 @@ Window {
                                     scale: Qt.vector3d(1.0, 1.0, 1.0)
                                     materials: PrincipledMaterial {
                                         lighting: PrincipledMaterial.NoLighting
-                                        baseColor: ironGolemRoot.tinted("#7d848c")
+                                        // t712 批修「贴图偏暗」：pack 命中（baseColorMap 有贴图）时 baseColor **不乘
+                                        //   铁灰 #7d848c** —— 旧版恒 tinted("#7d848c") = 铁灰(~0.49,0.52,0.55) × 天光 ×
+                                        //   贴图，把 pack 贴图整体压暗 ~50%（猪 / 牛等 pack mob baseColor 是纯 tint 白，
+                                        //   昼夜才调制）→ 用户观感「贴图偏暗」。pack 命中 → 纯 tint（昼夜 / 红闪 / 蓝调）
+                                        //   调制贴图本色；pack 关（纯色路径）保留铁灰 × tint（纯色本体色，无贴图可压）。
+                                        baseColor: mobIronGolemPackTex.source.toString().length > 0
+                                                   ? Qt.rgba(ironGolemRoot.tint.r, ironGolemRoot.tint.g, ironGolemRoot.tint.b, 1.0)
+                                                   : ironGolemRoot.tinted("#7d848c")
                                         baseColorMap: mobIronGolemPackTex.source.toString().length > 0 ? mobIronGolemPackTex : null
                                     }
                                 }

@@ -1111,6 +1111,11 @@ private:
     //   **只打敌对**（passive / golem 自身 / 造物不攻击玩家，机制等价 MC 防御造物只打怪物）。O(n) 每 golem 每
     //   AI tick，n≤kCap=64 可忽略。const 只读自身数据。
     int nearestHostile(const QVector3D &pos, float range) const;
+    // t712 批「敌对 mob 主动攻击铁傀儡」：最近**活体铁傀儡**查找（aiHostile / aiArcher 目标选择调）——返距
+    //   pos 在 range 内最近一只 alive && !dead && kind==Mob && mobType==MobIronGolem 的索引；无 → -1。
+    //   机制等价 MC 1.0 僵尸 / 骷髅见铁傀儡即转火攻击（防御造物天然吸怪）；Stalker（潜行者）不调用本查
+    //   （MC 苦力怕只锁定玩家，不对造物自爆）。O(n) 同 nearestHostile。const 只读。
+    int nearestIronGolem(const QVector3D &pos, float range) const;
     // t281 敌对生物 AI（detect→pathfind→attack 三段；tick 内 hostile Mob 分支调，替代 aiWander）。
     //   spec t281「敌对生物基类（AI/寻路）：detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）
     //   + attack」。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI；标识符 / 美术全原创（§9 区隔）。
@@ -1507,14 +1512,16 @@ private:
     //     kIronGolemDetectRange）→ 平息回游荡。MC 铁傀儡对攻击者的敌意持续较久；取 20s（够追击一轮）。
     //   - kGolemWindup：重拳蓄力（秒）。近距内开始蓄力 → 抬臂动画（attackPose 0→1）→ 蓄满命中（上抛 + 大伤害）。
     //     机制等价 MC 铁傀儡攻击前摇；取 0.5s（可见的抬臂动画 + 玩家有反应窗口）。
-    //   - kGolemPlayerDamage：重拳对玩家伤害（HP）。走 mobAttackedPlayer（Survival 才生效 + 护甲减伤）；取 10
-    //     （重于近战 mob 的 3——重型造物重拳；与对敌对 mob 的 kIronGolemAttackDamage=8 同量级偏高）。
+    //   - kGolemPlayerDamage：重拳对玩家伤害（HP）。走 mobAttackedPlayer（Survival 才生效 + 护甲减伤）。
+    //     t712 批修「伤害 10 → 回调（两锤秒怪偏高）」：10 → 7，取 MC 1.0 铁傀儡伤害 7-21 区间的中低档
+    //     （普通难度基础 7-16 的低端）—— 旧 10 = 20HP 满血玩家两锤即死（10×2=20，「两锤秒杀」偏高），
+    //     7 后需 3 锤（7×3=21>20），仍明显重于近战 mob 的 3（重型造物重拳量级保持）。
     //   - kGolemLaunchVy：上抛垂直初速（blocks/s）。PlayerController.applyGolemLaunch 写 m_vel.y=16 → 峰值
     //     16²/(2·28)≈4.6 格 → 落回原位落差 >3 格必触发摔落伤害（4..5 格 → 1..2 HP，机制等价 MC 铁傀儡把
     //     玩家抛起摔伤）。用户口径「4 格以上摔落伤害」。
     static constexpr float kGolemAngryMemory = 20.0f; // 反击记忆（秒）
     static constexpr float kGolemWindup      = 0.5f;  // 重拳蓄力（秒；抬臂动画时长）
-    static constexpr int   kGolemPlayerDamage = 10;   // 重拳对玩家伤害（HP）
+    static constexpr int   kGolemPlayerDamage = 7;    // 重拳对玩家伤害（HP；t712：10→7，MC 7-21 中低档）
     static constexpr float kGolemLaunchVy    = 16.0f; // 上抛垂直初速（blocks/s；PlayerController 侧消费）
 public:
     // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、

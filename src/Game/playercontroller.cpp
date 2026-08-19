@@ -5210,6 +5210,45 @@ void PlayerController::extrudeEmbedded()
         m_pos.setZ(bestDir > 0 ? (bz + 1) + kHalfW + eps : bz - kHalfW - eps);
 }
 
+// t712 批「被击飞插沙」修复（见头文件注释）：击飞窗口内嵌入 → 向上排出。判据与 extrudeEmbedded 同源
+//   （中心列 kEmbedTol 内缩真重叠）；嵌入块 = 重叠的那格，目标位 = 该格顶面（cellY+1）——上方须能容玩家
+//   全高（AABB at 顶面 无碰撞）才抬（塞不进就不抬，保持既有挖出脱困路径）。抬升后 vy 清零（防残余下坠
+//   速度立刻再嵌一格）。
+void PlayerController::launchUnburyUpward()
+{
+    if (m_golemLaunchTimer <= 0.0f) return; // 仅击飞窗口内（t258 常规被埋语义不破坏）
+    if (!m_world) return;
+    const float px = m_pos.x(), pz = m_pos.z();
+    const int bx = int(std::floor(px));
+    const int bz = int(std::floor(pz));
+    const int y0 = int(std::floor(m_pos.y()));
+    const int y1 = int(std::floor(m_pos.y() + m_height));
+    const float minx = px - kHalfW, maxx = px + kHalfW;
+    const float miny = m_pos.y(),        maxy = m_pos.y() + m_height;
+    const float minz = pz - kHalfW, maxz = pz + kHalfW;
+    constexpr float kEmbedTol = 0.1f; // 与 extrudeEmbedded / isLockedBuried 同值（边界 FP 阈一致，改须三处同步）
+    // 找中心列嵌入块（同 extrudeEmbedded 步骤 1）。
+    int embY = -1;
+    for (int y = y0; y <= y1 && embY < 0; ++y) {
+        for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, y, bz)) {
+            if (minx + kEmbedTol < b.maxX && maxx - kEmbedTol > b.minX &&
+                miny + kEmbedTol < b.maxY && maxy - kEmbedTol > b.minY &&
+                minz + kEmbedTol < b.maxZ && maxz - kEmbedTol > b.minZ) { embY = y; break; }
+        }
+    }
+    if (embY < 0) return; // 无显著嵌入 → 不干预
+    // 嵌入块顶面（完整格顶 = embY+1；partial 块取其 sub-AABB 最高 maxY，落沙 / 沙块为整格）。
+    float topY = float(embY) + 1.0f;
+    for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, embY, bz))
+        if (b.maxY > topY) topY = b.maxY;
+    // 顶面上方须容得下玩家全高（抬过去不顶头 / 不再嵌）才抬。
+    const float savedY = m_pos.y();
+    m_pos.setY(topY + 1e-3f);
+    if (aabbHitsSolid()) { m_pos.setY(savedY); return; } // 头顶容不下 → 不抬（保持既有水平挤出 / 挖出路径）
+    m_vel.setY(0.0f); // 清残余下坠速度（防下一 tick 立刻再嵌）
+    qInfo("player golem-launch unburied upward to y=%.2f (embedded cell y=%d)", topY, embY);
+}
+
 void PlayerController::step(qreal dt)
 {
     const QVector3D posBefore = m_pos; // t159：出口算实际水平速度（speed 属性）的位移基准
@@ -5602,6 +5641,9 @@ void PlayerController::step(qreal dt)
     // t161 嵌入挤出：逐轴解算后若玩家仍被包裹（下落沙 / 放置方块 materialize 在玩家身上），沿最近开放
     //   水平方向推出（向外 not 向上）。先于地面复探 / 窒息判定 → 挤出成功则该 tick 不误判着地 / 窒息。
     extrudeEmbedded();
+    // t712 批「被击飞插沙」：击飞窗口内的嵌入走向上排出（水平挤出无出路 / 未触发的兜底；沙坑四壁围堵
+    //   时垂直是唯一生路。仅窗口内启用，常规被埋语义不变）。见 launchUnburyUpward。
+    launchUnburyUpward();
     // t559 自动蹲站起复探：松 shift 后自动保持蹲（m_autoCrouch）期间，每 tick 查头顶 —— 有站起空间
     //   （canStandUp）即自动站起（清自动蹲 + setMoveState(Walk) 复位 AABB 高 / 眼位）。走位 / 半砖楼梯
     //   抬升后头顶仍不足 → 保持蹲（不误站、不把 1.8 AABB 塞进低顶 → 不被挤出 / 穿墙）。

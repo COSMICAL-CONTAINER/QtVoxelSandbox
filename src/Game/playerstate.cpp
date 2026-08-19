@@ -53,6 +53,7 @@ QString PlayerState::deathCauseText() const
     case Fire:         return QStringLiteral("被烈火吞噬");
     case Cactus:       return QStringLiteral("被仙人掌扎死");
     case GolemLaunchFall: return QStringLiteral("被铁傀儡击飞摔死"); // t655 归属窗口内的摔落（普通坠落仍「从高处坠落」）
+    case GolemSlain:      return QStringLiteral("被铁傀儡击杀"); // t712：近距重拳直接击杀（非摔落路径）
     case Generic:
     default:           return QStringLiteral("不明原因");
     }
