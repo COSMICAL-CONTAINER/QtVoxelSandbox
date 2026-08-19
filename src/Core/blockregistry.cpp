@@ -1779,9 +1779,6 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
     };
     const bool hasPX = anyRail(px), hasNX = anyRail(nx);
     const bool hasPZ = anyRail(pz), hasNZ = anyRail(nz);
-    const bool nPX = (px.same == Rail), nNX = (nx.same == Rail);
-    const bool nPZ = (pz.same == Rail), nNZ = (nz.same == Rail);
-    const int nNormal = int(nPX) + int(nNX) + int(nPZ) + int(nNZ);
 
     quint8 n = 0;
     if (hasPX) n |= RailConnPx;
@@ -1793,12 +1790,27 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
 
     const bool isNormal = (selfId == Rail);
 
-    // ① 拐角：普通轨 && 恰好 2 同层普通轨 && 垂直两向 && 各自反向无轨（三高都无）。
-    if (isNormal && nNormal == 2) {
-        if (nPX && nPZ && !hasNX && !hasNZ) return quint8(RailConnPx | RailConnPz);
-        if (nPX && nNZ && !hasNX && !hasPZ) return quint8(RailConnPx | RailConnNz);
-        if (nNX && nPZ && !hasPX && !hasNZ) return quint8(RailConnNx | RailConnPz);
-        if (nNX && nNZ && !hasPX && !hasPZ) return quint8(RailConnNx | RailConnNz);
+    // ① 拐角：普通轨 && 恰好 1 X 臂 + 1 Z 臂 && 两臂均为普通轨（id==Rail；动力 / 探测轨不拐角）&&
+    //   各自反向无轨（三高都无）。t709：臂高放宽 —— 同层 / 上 / 下一格的普通轨均可配对（机制等价
+    //   MC 1.0 坡底拐弯：下坡轨降到交界格再转弯，旧版要求两臂同层 → 坡臂不配对 → 规则③/④把坡臂整个
+    //   丢弃、交界格只渲染单臂 stub —— 用户实测「拐角处方向相反 / 轨道断头」根因）。臂方向判定用 hasP*
+    //   （三高任一轨），配对臂限定普通轨（armRail：same/up/down 任一为 Rail —— 动力 / 探测轨臂不构成拐角，
+    //   落规则③直线投影）。两 X 臂（含 V 形凹谷双上臂）/ 两 Z 臂 → 不构成拐角 → bothX/bothZ 直线优先
+    //   （t710「单格凹谷不允许直化」由本优先序保证：凹谷双上臂恒走 EW/NS 直线 + 双端画坡，永不被垂直
+    //   邻带歪成拐角）。
+    const auto armRail = [](const RailProbe &p) {
+        return p.same == Rail || p.up == Rail || p.down == Rail;
+    };
+    if (isNormal) {
+        const bool aPX = hasPX && armRail(px), aNX = hasNX && armRail(nx);
+        const bool aPZ = hasPZ && armRail(pz), aNZ = hasNZ && armRail(nz);
+        const int nArm = int(aPX) + int(aNX) + int(aPZ) + int(aNZ);
+        if (nArm == 2 && ((aPX || aNX) && (aPZ || aNZ))) {
+            if (aPX && aPZ && !hasNX && !hasNZ) return quint8(RailConnPx | RailConnPz);
+            if (aPX && aNZ && !hasNX && !hasPZ) return quint8(RailConnPx | RailConnNz);
+            if (aNX && aPZ && !hasPX && !hasNZ) return quint8(RailConnNx | RailConnPz);
+            if (aNX && aNZ && !hasPX && !hasPZ) return quint8(RailConnNx | RailConnNz);
+        }
     }
 
     // 轴偏好（直轨优先保持）：既有对向 X 连接 → EW；对向 Z → NS；单 X 位 → EW；单 Z 位 → NS；

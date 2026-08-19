@@ -259,13 +259,30 @@ int MinecartManager::pinCartY(Cart &c, World *world)
         const bool isCorner = (nConn == 2 && ((cpx || cnx) && (cpz || cnz)));
         const bool ew = (cpx || cnx) || (nConn == 0 && (rst & BlockRegistry::RailAxisEWFlag) != 0);
         float rise = 0.0f;
-        if (!isCorner && nConn < 3) { // 直轨才有坡（拐角 / 十字无坡，mesher 同判）
+        if (isCorner) {
+            // t709 坡臂拐角：mesher 拐角 quad 沿臂侧整边抬升（armLift）→ 矿车在格中心取四角抬升的
+            //   双线性中心（坡底拐弯曲面过弯不跳变；平地拐角四角全 0 → rise 0 语义不变）。
+            const int dpx = dlt(1, 0), dnx = dlt(-1, 0), dpz = dlt(0, 1), dnz = dlt(0, -1);
+            const float eE = dpx > 0 ? float(dpx) : 0.0f, eW = dnx > 0 ? float(dnx) : 0.0f;
+            const float eS = dpz > 0 ? float(dpz) : 0.0f, eN = dnz > 0 ? float(dnz) : 0.0f;
+            rise = 0.25f * (eW + eE + eN + eS);
+        } else if (nConn < 3) { // 直轨才有坡（拐角 / 十字无坡，mesher 同判）
             if (ew) {
-                const int dpx = dlt(1, 0);  if (dpx > 0) rise += float(dpx) * fx;
-                const int dnx = dlt(-1, 0); if (dnx > 0) rise += float(dnx) * (1.0f - fx);
+                const int dpx = dlt(1, 0);
+                const int dnx = dlt(-1, 0);
+                if (dpx > 0 && dnx > 0) rise += 2.0f * std::fabs(fx - 0.5f); // t710 V 形凹谷：两端 +1、谷心 0（与 mesher 两半 quad 同曲面；railProbe 只回 ±1 → 无多档）
+                else {
+                    if (dpx > 0) rise += float(dpx) * fx;
+                    if (dnx > 0) rise += float(dnx) * (1.0f - fx);
+                }
             } else {
-                const int dpz = dlt(0, 1);  if (dpz > 0) rise += float(dpz) * fz;
-                const int dnz = dlt(0, -1); if (dnz > 0) rise += float(dnz) * (1.0f - fz);
+                const int dpz = dlt(0, 1);
+                const int dnz = dlt(0, -1);
+                if (dpz > 0 && dnz > 0) rise += 2.0f * std::fabs(fz - 0.5f); // t710 V 形凹谷（Z 向）
+                else {
+                    if (dpz > 0) rise += float(dpz) * fz;
+                    if (dnz > 0) rise += float(dnz) * (1.0f - fz);
+                }
             }
         }
         c.pos.setY(float(y) + 1.0f + rise + kCartRideH);

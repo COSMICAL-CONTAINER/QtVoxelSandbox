@@ -659,15 +659,48 @@ int PartialBlockGeometry::append(
             //   向西(-X)弯出；u 翻 = 东西镜像、v 翻 = 南北镜像、双翻 = 180°。验证表见 t666 commit 报告：
             //     {+Z,-X}（南进→西出）基准无翻；{+Z,+X}（南进→东出）u 翻；{-Z,-X}（北进→西出）v 翻；
             //     {-Z,+X}（北进→东出）双翻 —— 与既有 t565（已目测）四象限映射同构，t666 只重写形状选择）。
-            if (cpz && cnx)       pushRailFlat(136, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // 南→西
-            else if (cpz && cpx)  pushRailFlat(136, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f); // 南→东
-            else if (cnz && cnx)  pushRailFlat(136, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f); // 北→西
-            else                  pushRailFlat(136, 1.f, 1.f, 0.f, 1.f, 0.f, 0.f, 1.f, 0.f); // 北→东
+            //   t709 坡臂拐角（t666 拐角规则放宽后新增形态：下坡轨降到交界格再拐弯）：拐角 quad 沿**臂侧**
+            //   抬升 —— 臂方向邻轨高 1（railProbeDelta +1）时该边整边抬高 1（同直轨 rise 约定「低格画坡」，
+            //   高臂侧的臂轨不画坡 → 由本拐角格补齐连接高度，坡底拐弯轨面连续不悬空）。四角高度 = 该角触及的
+            //   两侧臂抬升之和（反侧必空 3 高 → 恒 0；双臂齐抬的峰角取和）。拐角 tile 美术（轨居臂两侧）不变，
+            //   仅 quad 角点 y 加抬升 —— pushRailQuad 天然支持 4 角独立高度。
+            const float eW = nb.railDeltaNx > 0 ? float(nb.railDeltaNx) : 0.0f;
+            const float eE = nb.railDeltaPx > 0 ? float(nb.railDeltaPx) : 0.0f;
+            const float eN = nb.railDeltaNz > 0 ? float(nb.railDeltaNz) : 0.0f;
+            const float eS = nb.railDeltaPz > 0 ? float(nb.railDeltaPz) : 0.0f;
+            const auto armLift = [eW, eE, eN, eS](float ax, float az) {
+                float l = 0.0f;
+                if (ax == 0.0f) l += eW; // 本角贴西边（-X 臂侧）
+                if (ax == 1.0f) l += eE; // 东边（+X 臂侧）
+                if (az == 0.0f) l += eN; // 北边（-Z 臂侧）
+                if (az == 1.0f) l += eS; // 南边（+Z 臂侧）
+                return l;
+            };
+            if (cpz && cnx)       pushRailQuad(yr + armLift(0.f, 0.f), yr + armLift(1.f, 0.f), yr + armLift(1.f, 1.f), yr + armLift(0.f, 1.f), 136, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // 南→西
+            else if (cpz && cpx)  pushRailQuad(yr + armLift(1.f, 0.f), yr + armLift(0.f, 0.f), yr + armLift(0.f, 1.f), yr + armLift(1.f, 1.f), 136, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f); // 南→东
+            else if (cnz && cnx)  pushRailQuad(yr + armLift(0.f, 1.f), yr + armLift(1.f, 1.f), yr + armLift(1.f, 0.f), yr + armLift(0.f, 0.f), 136, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f); // 北→西
+            else                  pushRailQuad(yr + armLift(1.f, 1.f), yr + armLift(0.f, 1.f), yr + armLift(0.f, 0.f), yr + armLift(1.f, 0.f), 136, 1.f, 1.f, 0.f, 1.f, 0.f, 0.f, 1.f, 0.f); // 北→东
         } else {
             // 直轨：EW（X 向连接，或 0 连接 + 轴偏好位 → 贴图旋转 90° u→z、v→x）；NS（Z 向连接 / 0 连接默认
             //   → 标准）。straightOnly 的拐角 / 十字连接位降级走「X 向优先」（t666 规则集②下不会产生，防御）。
             const bool ew = (cpx || cnx) || (nConn == 0 && (state & BlockRegistry::RailAxisEWFlag) != 0);
-            if (ew) {
+            // t710 V 形凹谷（本轴两端 δ 均 +1：单格凹地两侧都是高 1 的轨）：**坡形优先保持** —— 旧版单 quad
+            //   两端各 +1 → 线性插值恒 1 = 平板悬空在凹地上方（用户实测「捋直悬空」）。改画两半格 quad：
+            //   前半 -X 端 +1 → 中 0、后半中 0 → +X 端 +1 = V 形下凹贴谷底，坡形贯通（机制等价 MC 凹谷轨
+            //   沿坡下行再爬升；railProbe 只回 ±1 → 两端 δ>0 恒为 1，无多档插值需求）。
+            const bool valleyEw = ew && nb.railDeltaPx > 0 && nb.railDeltaNx > 0;
+            const bool valleyNs = !ew && nb.railDeltaPz > 0 && nb.railDeltaNz > 0;
+            if (valleyEw) {
+                // 左半（x 0..0.5）：-X 端 +1 → 中 0。
+                pushRailQuad(yr + 1.f, yr + 1.f, yr, yr, railTile, 0.f, 0.f, 0.f, 1.f, 0.5f, 1.f, 0.5f, 0.f);
+                // 右半（x 0.5..1）：中 0 → +X 端 +1。
+                pushRailQuad(yr, yr, yr + 1.f, yr + 1.f, railTile, 0.5f, 0.f, 0.5f, 1.f, 1.f, 1.f, 1.f, 0.f);
+            } else if (valleyNs) {
+                // 前半（z 0..0.5）：-Z 端 +1 → 中 0。
+                pushRailQuad(yr + 1.f, yr + 1.f, yr, yr, railTile, 0.f, 0.f, 1.f, 0.f, 1.f, 0.5f, 0.f, 0.5f);
+                // 后半（z 0.5..1）：中 0 → +Z 端 +1。
+                pushRailQuad(yr, yr, yr + 1.f, yr + 1.f, railTile, 0.f, 0.5f, 1.f, 0.5f, 1.f, 1.f, 0.f, 1.f);
+            } else if (ew) {
                 // EW 直轨：quad 角 BL(0,0) BR(0,1) TR(1,1) TL(1,0)——x-local：p0/p1=0（-X 端）、p2/p3=1（+X 端）。
                 //   t667 坡：+X 端抬高 riseAtX(1)、-X 端 riseAtX(0)。
                 pushRailQuad(yr + riseAtX(0.f), yr + riseAtX(0.f),
