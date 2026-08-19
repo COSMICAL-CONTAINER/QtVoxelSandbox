@@ -59,3 +59,5 @@ _t*.txt
 # Python (sub-agent runs tools/*.py — bytecode cache, never track)
 __pycache__/
 *.pyc
+# Orphan resume helper (never tracked, tool artifact)
+tools/resume-*.bat
