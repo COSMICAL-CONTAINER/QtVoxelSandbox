@@ -398,6 +398,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_spruce_log_side.png      # t395 云杉原木侧面贴图（build_spruce.py；深棕垂直树皮条带）
         textures/default_spruce_planks.png        # t466 云杉木板贴图（build_spruce.py；深色木纹；SprucePlanks/Slab/Fence/Door 共享 tile 102）
         textures/default_spruce_leaves.png        # t714 云杉树叶贴图（build_spruce.py；深蓝绿针叶+透明孔；SpruceLeaves tile 175）
+        textures/default_door_iron_upper.png      # t717 铁门上半贴图（build_doors_iron.py；门板+下部 2×2 格栅窗；tile 176；t722 IronDoor 接入）
+        textures/default_door_iron_lower.png      # t717 铁门下半贴图（build_doors_iron.py；门板+锁孔板+底部横带；tile 177；t722 IronDoor 接入）
+        textures/default_iron_trapdoor.png        # t717 铁活板门贴图（build_doors_iron.py；格子板+栅格孔；tile 178；t723 IronTrapdoor 接入）
         textures/default_lily_pad.png             # t396 睡莲浮叶贴图（build_lily_pad.py；透明底+绿圆叶+V缺口；alphaCutoff cutout）
         textures/default_mushroom.png             # t396 蘑菇 cross 贴图（build_mushroom.py；透明底+米色菌柄+红底白斑菌盖；alphaCutoff cutout）
         textures/default_brown_mushroom.png       # t507 白蘑菇 / 棕蘑菇 cross 贴图（build_brown_mushroom.py；透明底+米色菌柄+棕色菌盖浅黄褐斑；alphaCutoff cutout；蘑菇汤原料）
@@ -441,6 +444,51 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/mob_cat_ginger.png         # t481 猫变体 1 姜黄虎斑（驯服豹猫随机毛色；build_mob.py）
         textures/mob_cat_cream.png          # t481 猫变体 2 奶油暹罗（驯服豹猫随机毛色；build_mob.py）
         textures/mob_silverfish.png         # t487 银鱼（Silverfish；机制等价 MC 1.0 银鱼，§9 原创）灰白甲壳+体节横纹贴图（build_mob.py）
+        textures/entity_nightwalker.png     # t717 夜行者（Nightwalker；机制等价 MC enderman，§9 改名）64×32 实体 UV 贴图（build_entities_pack.py；黑曜石黑体+微紫缀点；t727 接入）
+        textures/entity_nightwalker_eyes.png # t717 夜行者眼睛发光层（全透明+头前两粒紫光眼；机制等价 MC enderman_eyes；t727 接入）
+        textures/entity_emberling.png       # t717 燃烬者（Emberling；机制等价 MC blaze，§9 改名）64×32 贴图（黄焰头+白热核+烟灰棒；t728 接入）
+        textures/entity_squid.png           # t717 鱿鱼 64×32 实体 UV 贴图（深蓝头+浅肚+触腕条；t730 自拼 3D 接入）
+        textures/entity_minecart.png        # t717 矿车 64×32 贴图（铁灰壁+铆钉+木底板；t732 矿车斗重贴图）
+        textures/entity_enchant_book.png    # t717 附魔书 64×32 贴图（棕封金边+白纸页；t732 悬浮书重贴图）
+        textures/entity_skin_default.png    # t717 玩家默认皮肤 64×32（蓝裤+棕发+肤色脸；机制等价 MC steve 皮肤布局，§9 程序自绘；t731 接入）
+        textures/entity_skin_alex.png       # t717 皮肤变体 64×32（橙发+绿衣；机制等价 MC alex 变体；t731 接入）
+        textures/armor_leather_layer_1.png  # t717 皮革盔甲 layer_1（头盔+胸甲+护腿；64×32 MC 盔甲 UV；t718 盔甲 3D 接入）
+        textures/armor_leather_layer_2.png  # t717 皮革盔甲 layer_2（靴）
+        textures/armor_iron_layer_1.png     # t717 铁盔甲 layer_1（浅灰+铆钉）
+        textures/armor_iron_layer_2.png     # t717 铁盔甲 layer_2（靴）
+        textures/armor_gold_layer_1.png     # t717 金盔甲 layer_1（金黄）
+        textures/armor_gold_layer_2.png     # t717 金盔甲 layer_2（靴）
+        textures/armor_diamond_layer_1.png  # t717 钻石盔甲 layer_1（青）
+        textures/armor_diamond_layer_2.png  # t717 钻石盔甲 layer_2（靴）
+        textures/armor_chainmail_layer_1.png # t717 链甲 layer_1（深灰+网眼孔）
+        textures/armor_chainmail_layer_2.png # t717 链甲 layer_2（靴）
+        textures/default_painting_kebab.png    # t717 画作 27 张（build_paintings.py 程序自绘抽象像素画；§9 原创画面；t720 Painting 方块接入）
+        textures/default_painting_aztec.png
+        textures/default_painting_aztec2.png
+        textures/default_painting_bomb.png
+        textures/default_painting_plant.png
+        textures/default_painting_wasteland.png
+        textures/default_painting_back.png
+        textures/default_painting_alban.png
+        textures/default_painting_courbet.png
+        textures/default_painting_sea.png
+        textures/default_painting_creebet.png
+        textures/default_painting_sunset.png
+        textures/default_painting_pool.png
+        textures/default_painting_graham.png
+        textures/default_painting_wanderer.png
+        textures/default_painting_match.png
+        textures/default_painting_skull_and_roses.png
+        textures/default_painting_stage.png
+        textures/default_painting_void.png
+        textures/default_painting_bust.png
+        textures/default_painting_wither.png
+        textures/default_painting_donkey_kong.png
+        textures/default_painting_skeleton.png
+        textures/default_painting_burning_skull.png
+        textures/default_painting_pigscene.png
+        textures/default_painting_pointer.png
+        textures/default_painting_fighters.png
         textures/icon_cobble.png
         textures/icon_coal_ore.png
         textures/icon_copper_ore.png             # t308 铜矿石立方体图标（build_cube_icons.py；石头底+橙铜斑+孔雀绿锈）

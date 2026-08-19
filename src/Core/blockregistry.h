@@ -1528,7 +1528,13 @@ public:
     //   t714：175=spruce_leaves（云杉树叶各面贴图；SpruceLeaves(133) 各面=本 tile）。深蓝绿针叶底 + 噪点 +
     //       针簇放射纹 + 部分透明孔（cutout 观感同 oak leaves(9)，色调更深冷蓝绿区别亮绿阔叶）；
     //       tools/build_spruce.py 程序生成（§9 override (a)；零 MC 资产）。pack {175→spruce_leaves.png}。
-    static constexpr int AtlasTileCount = 176;
+    //   t717：176..178=铁门 / 铁活板门三张（R19.10 t722/t723 贴图前置；IronDoor/IronTrapdoor 方块后建）：
+    //       176=door_iron_upper（铁门上半：门板 + 下部 2×2 格栅窗真透明 + 铆钉列）、177=door_iron_lower
+    //       （铁门下半：门板 + 锁孔板 + 底部横带）、178=iron_trapdoor（铁活板门：格子板 + 两列栅格孔真透明 +
+    //       四角铆钉）。tools/build_doors_iron.py 程序生成（§9 override (a)）。pack {176→door_iron_upper.png /
+    //       177→door_iron_lower.png / 178→iron_trapdoor.png}。本批无 BlockDef 引用（t722/t723 建 IronDoor/
+    //       IronTrapdoor 时接 topTile/bottomTile/sideTile），static_assert 守卫随既有 kDefs 不变。
+    static constexpr int AtlasTileCount = 179;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、

@@ -1,6 +1,7 @@
 #include "resourcepackmanager.h"
 
 #include <cmath>
+#include <functional>
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -53,6 +54,8 @@ struct BuiltState {
     QString entityDir;            // t421 包内生物贴图目录（assets/minecraft/textures/entity）绝对路径；空 = 无 entity 覆盖
     QString blockDir;             // t456 包内方块贴图目录（assets/minecraft/textures/block）绝对路径；blockItemIconSource 兜底探测（pack 把前贴图放 block/ 时）
     QString effectDir;            // t715 包内状态效果图标目录（assets/minecraft/textures/mob_effect）绝对路径；effectIconSource 探测（HUD 效果栏 pack 覆盖）
+    QString paintingDir;          // t717 包内画作目录（assets/minecraft/textures/painting）绝对路径；paintingSource 逐 index 探测（t720 画作方块 pack 覆盖）
+    QString armorDir;             // t717 包内盔甲 layer 目录（assets/minecraft/textures/models/armor）绝对路径；armorLayerSource 探测（t718 盔甲 3D 显示 pack 覆盖）
     // t489 流体条带落盘路径（active 时 file:///）；waterStrip = 2 列×32 帧（静水|流水），lavaStrip = 1 列×16 帧。
     QString waterStripFile;
     QString lavaStripFile;
@@ -184,6 +187,48 @@ QString resolveItemDir(const QString &absPath)
 QString resolveEntityDir(const QString &absPath)
 {
     return resolveTexturesSubDir(absPath, QStringLiteral("entity"));
+}
+
+// t717 画作贴图目录（leaf="painting"；MC 1.0 布局 assets/minecraft/textures/painting/<name>.png 扁平）。
+QString resolvePaintingDir(const QString &absPath)
+{
+    return resolveTexturesSubDir(absPath, QStringLiteral("painting"));
+}
+
+// t717 盔甲 layer 贴图目录（leaf="models/armor"——armor 贴图在 textures/models/armor/ 子树，两层级；
+//   与其它 leaf 不同，须递归到 models/armor 两层。用 bounded DFS 的 leaf 参数带相对段）。
+QString resolveArmorDir(const QString &absPath)
+{
+    if (absPath.isEmpty())
+        return {};
+    // 直接命中（pack 根标准布局 assets/minecraft/textures/models/armor）。
+    const QDir root(absPath);
+    if (!root.exists())
+        return {};
+    const QString direct = root.filePath(QStringLiteral("assets/minecraft/textures/models/armor"));
+    if (QFileInfo(direct).isDir())
+        return QDir::cleanPath(direct);
+    // packPath 即 armor 目录自身 / 中间层：有界 DFS 找以 models/armor 结尾的目录。
+    std::function<QString(const QDir &, int, int)> dfs =
+            [&dfs](const QDir &dir, int depth, int maxDepth) -> QString {
+        if (depth > maxDepth)
+            return {};
+        if (dir.dirName() == QStringLiteral("armor")) {
+            const QString path = QDir::cleanPath(dir.absolutePath());
+            if (path.endsWith(QStringLiteral("/models/armor"))
+                    || path == QStringLiteral("models/armor"))
+                return path;
+        }
+        const QStringList subs =
+                dir.entryList(QDir::Dirs | QDir::NoSymLinks | QDir::NoDotAndDotDot);
+        for (const QString &sub : subs) {
+            const QString r = dfs(QDir(dir.filePath(sub)), depth + 1, maxDepth);
+            if (!r.isEmpty())
+                return r;
+        }
+        return {};
+    };
+    return dfs(root, 0, 6);
 }
 
 // 合法包判定：能在 packPath（任意层级）上定位到 block 贴图目录（spec t419）。
@@ -604,6 +649,15 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         //   程序生成 default_spruce_leaves.png（tools/build_spruce.py 自绘深蓝绿针叶 + 透明孔）。包内缺 PNG
         //   时安全跳过（保留程序生成瓦片）。
         {175, QStringLiteral("spruce_leaves.png")},   // spruce_leaves（t714 云杉树叶；灰度 + tint 合成）
+        // t717 铁门 / 铁活板门三 tile（R19.10 t722/t723 贴图前置；IronDoor/IronTrapdoor 方块后建）。
+        //   与木门 143..146 同族直映射（demo 包 block/ 实测 door_iron_upper.png / door_iron_lower.png
+        //   （HD 128px，1.8 老命名）与 iron_trapdoor.png 都在；iron_door_top/bottom.png 是 16px 缩略
+        //   副本，取老命名 HD 版，同 t703 铁轨老名优先先例）。门上半退化检测（143/145 纯板无窗跳过）
+        //   不覆盖 176 —— 铁门窗语义由 t722 接几何时按需加。非 pack 回落 default_door_iron_* /
+        //   default_iron_trapdoor.png（tools/build_doors_iron.py 原创自绘）。包内缺 PNG 安全跳过。
+        {176, QStringLiteral("door_iron_upper.png")},  // door_iron_upper（t717 铁门上半：门板+格栅窗）
+        {177, QStringLiteral("door_iron_lower.png")},  // door_iron_lower（t717 铁门下半：门板+锁孔板）
+        {178, QStringLiteral("iron_trapdoor.png")},    // iron_trapdoor（t717 铁活板门：格子板+栅格孔）
     };
     return kMap;
 }
@@ -815,6 +869,95 @@ QStringList effectIconFiles(int effectType)
     case 3: return { QStringLiteral("fire.png") };      // EffectFire 着火（多数包无此文件 → 回退自绘）
     default: return {};
     }
+}
+
+// t717「引擎画作 index → pack painting 文件名」表（27 张，demo 包 painting/ 目录逐名镜像；功能性元数据，
+//   红线 §9 可随代码提交；贴图文件本身不进仓库）。name 是内部 key（非 UI 专名——玩家可见面只显画）。
+//   index 与 tools/build_paintings.py PAINTINGS 表序一致（单一权威在生成器；Core 不依赖 tools 故注释互指
+//   + 字面量镜像，同 itemFilenameMap 模式）。paintingSource 逐 index 探测 paintingDir/<name>.png，
+//   miss 回退 qrc 程序贴图 default_painting_<name>.png。表顺序变更会致 index↔名字错位（存档 state 编码
+//   index）→ 加条目只允许 push_back 到尾部。
+const QStringList &paintingNames()
+{
+    static const QStringList kNames = {
+        QStringLiteral("kebab"),            // 0  16×16
+        QStringLiteral("aztec"),            // 1  16×16
+        QStringLiteral("aztec2"),           // 2  16×16
+        QStringLiteral("bomb"),             // 3  16×16
+        QStringLiteral("plant"),            // 4  16×16
+        QStringLiteral("wasteland"),        // 5  16×16
+        QStringLiteral("back"),             // 6  16×16
+        QStringLiteral("alban"),            // 7  16×16
+        QStringLiteral("courbet"),          // 8  32×16
+        QStringLiteral("sea"),              // 9  32×16
+        QStringLiteral("creebet"),          // 10 32×16
+        QStringLiteral("sunset"),           // 11 32×16
+        QStringLiteral("pool"),             // 12 32×16
+        QStringLiteral("graham"),           // 13 16×32
+        QStringLiteral("wanderer"),         // 14 16×32
+        QStringLiteral("match"),            // 15 32×32
+        QStringLiteral("skull_and_roses"),  // 16 32×32
+        QStringLiteral("stage"),            // 17 32×32
+        QStringLiteral("void"),             // 18 32×32
+        QStringLiteral("bust"),             // 19 32×32
+        QStringLiteral("wither"),           // 20 32×32
+        QStringLiteral("donkey_kong"),      // 21 64×48
+        QStringLiteral("skeleton"),         // 22 64×48
+        QStringLiteral("burning_skull"),    // 23 64×64
+        QStringLiteral("pigscene"),         // 24 64×64
+        QStringLiteral("pointer"),          // 25 64×64
+        QStringLiteral("fighters"),         // 26 64×32
+    };
+    return kNames;
+}
+
+// t717「实体贴图 kind →（pack entity 相对路径候选， 程序回退 qrc 文件名）」表（R19.10 夜行者 / 燃烬者 /
+//   鱿鱼 / 矿车 / 附魔书 / 玩家皮肤 t727/t728/t730/t731/t732 接入前置）。kind 取值经 entitySource(kind)
+//   字符串参数传入（QML 字面量，非枚举——实体贴图消费方分散在 Main.qml 各 delegate / bookHost / cartHost，
+//   字符串 key 同 effectIconSource(effectType int) 的解耦思路但更贴呈现层既有惯例）。两级候选：子目录布局
+//   （entity/enderman/enderman.png）优先、扁平（entity/enderman.png）兜底（mobTextureSource probe 同机制）。
+//   miss / 非 active 回退 qrc 程序贴图（tools/build_entities_pack.py 原创自绘；§9 改名：Enderman→夜行者
+//   Nightwalker、Blaze→燃烬者 Emberling——程序文件名用原创名，pack 文件名用 MC 名（映射元数据红线 §9 允许））。
+struct EntityTexEntry {
+    const char *kind;      // 呈现层字符串 key
+    const char *packPath;  // entity/ 下相对路径（子目录布局；扁平回退由探测取 fileName）
+    const char *fallback;  // qrc 程序贴图文件名（textures/ 下；空 = 无程序回退）
+};
+const QList<EntityTexEntry> &entityKindMap()
+{
+    static const QList<EntityTexEntry> kMap = {
+        { "nightwalker",      "enderman/enderman.png",   "entity_nightwalker" },      // t727 夜行者（末影人）
+        { "nightwalker_eyes", "enderman/enderman_eyes.png", "entity_nightwalker_eyes" }, // t727 眼睛发光层
+        { "emberling",        "blaze.png",               "entity_emberling" },        // t728 燃烬者（烈焰人）
+        { "squid",            "squid.png",               "entity_squid" },            // t730 鱿鱼
+        { "minecart",         "minecart.png",            "entity_minecart" },         // t732 矿车
+        { "enchant_book",     "enchanting_table_book.png", "entity_enchant_book" },   // t732 附魔台悬浮书
+        { "skin_default",     "steve.png",               "entity_skin_default" },     // t731 玩家默认皮肤
+        { "skin_alex",        "alex.png",                "entity_skin_alex" },        // t731 皮肤变体
+    };
+    return kMap;
+}
+
+// t717「盔甲 tier → pack models/armor 文件名前缀」表（t718/t719 盔甲 3D 显示 pack 覆盖前置）。
+//   tier 序与 Hotbar::armorTier / playerModel.armorBaseColor 同源（0 皮革 / 1 铁 / 2 铜 / 3 金 / 4 钻石；
+//   铜（t613 本工程自创档）无 pack 等价 → 不进本表，armorLayerSource miss 回退程序贴图时由 t718 呈现层
+//   从铁层染铜（同 copperIronFallback 思路，届时定）。layer = 1（头盔+胸甲+护腿）/ 2（靴）。
+//   皮革 pack 层是灰白可染色 base → 皮革命中走 retintLeatherTemplate 同族染棕（本任务先原样返回，
+//   t718 接 3D 时若显白再接 retint——留 TODO 注释于 armorLayerSource）。
+QString armorLayerPackName(int tier, int layer)
+{
+    const char *prefix = nullptr;
+    switch (tier) {
+    case 0: prefix = "leather"; break;    // 皮革棕
+    case 1: prefix = "iron"; break;       // 浅灰
+    case 3: prefix = "gold"; break;       // 金黄
+    case 4: prefix = "diamond"; break;    // 钻石青
+    case 5: prefix = "chainmail"; break;  // 链甲深灰（tier 5 = 本工程链甲档（若建）；miss 无害）
+    default: return {};                   // tier 2 铜：无 pack 等价（1.17 前无铜甲）→ 空 → 回退程序层
+    }
+    if (layer != 1 && layer != 2)
+        return {};
+    return QStringLiteral("%1_layer_%2.png").arg(QString::fromLatin1(prefix)).arg(layer);
 }
 
 // t456「引擎方块 id → pack item/前贴图文件名候选」映射（功能性元数据，红线 §9 可随代码提交；贴图文件不进仓库）。
@@ -1484,6 +1627,8 @@ void ensureBuiltLocked()
     s.entityDir.clear(); // t421 reset 生物贴图目录（仅当包合法时重填）
     s.blockDir.clear(); // t456 reset 方块贴图目录（仅当包合法时重填）
     s.effectDir.clear(); // t715 reset 状态效果图标目录（仅当包合法时重填）
+    s.paintingDir.clear(); // t717 reset 画作目录（仅当包合法时重填）
+    s.armorDir.clear(); // t717 reset 盔甲 layer 目录（仅当包合法时重填）
     s.waterStripFile.clear(); // t489 reset 流体条带落盘路径（仅当包合法时重填）
     s.lavaStripFile.clear();
     s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
@@ -1570,6 +1715,12 @@ void ensureBuiltLocked()
     //   目录时为空 → effectIconSource 恒返空串 → HUD 效果栏回退 qrc 程序自绘 icon_effect_*.png（不阻塞图集合成）。
     //   MC 1.0 无 mob_effect 目录（1.6 前状态无图标 / 1.9 才引入该目录），老包 miss 属预期常态。
     s.effectDir = resolveTexturesSubDir(packPath, QStringLiteral("mob_effect"));
+    // t717 画作目录（assets/minecraft/textures/painting；同 packPath 并列解析）。包内无 painting 目录时为空
+    //   → paintingSource 恒返空串 → t720 画作方块回退 qrc 程序贴图 default_painting_*.png（不阻塞图集合成）。
+    s.paintingDir = resolvePaintingDir(packPath);
+    // t717 盔甲 layer 目录（assets/minecraft/textures/models/armor；两层子树）。包内无该目录时为空 →
+    //   armorLayerSource 恒返空串 → t718 盔甲 3D 回退程序层贴图 armor_*_layer_*.png（不阻塞图集合成）。
+    s.armorDir = resolveArmorDir(packPath);
     // t585 指南针/钟逐帧动画：探测 item 目录帧文件数（compass_00.. / clock_00.. 连续环；demo 包实测 32/64）。
     //   无 item 目录 / 无帧文件 → count=0 → animatedItemFrameSource 返空 → itemIconSource 回落静态
     //   compass.png/clock.png（再缺则自绘）。探测在构建期一次完成（构建后帧文件不再增删）。
@@ -2140,6 +2291,96 @@ QString ResourcePackManager::effectIconSource(int effectType) const
             return QStringLiteral("file:///") + p;
     }
     return {};
+}
+
+// t717 画作贴图源（t720 Painting 方块 pack 覆盖前置）：index（0..26，与 paintingNames 表序一致）→
+//   pack 启用且 paintingDir 有 <name>.png 时返 file:///<paintingDir>/<name>.png；否则空串 → 调用方回退
+//   qrc:/textures/default_painting_<name>.png 程序自绘。不走 tileFilenameMap（27 张太多且画作是独立 Texture
+//   非图集瓦片；effectIconSource 批量解析先例）。索引越界返空（防御存档异常 state）。
+//   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
+QString ResourcePackManager::paintingSource(int index) const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active || s.paintingDir.isEmpty())
+        return {};
+    const QStringList &names = paintingNames();
+    if (index < 0 || index >= names.size())
+        return {};
+    const QString p = QDir(s.paintingDir).absoluteFilePath(names.at(index) + QStringLiteral(".png"));
+    if (!QFile::exists(p))
+        return {};
+    return QStringLiteral("file:///") + p;
+}
+
+// t717 画作程序回退贴图名（index → default_painting_<name>.png；与 paintingNames 单一权威同表）。
+//   t720 呈现层用本函数拿 qrc 程序贴图名（非 pack 态 / pack miss 时），免呈现层自持名字表副本。
+//   索引越界返空（调用方回退纯色占位）。
+QString ResourcePackManager::paintingFallbackName(int index) const
+{
+    const QStringList &names = paintingNames();
+    if (index < 0 || index >= names.size())
+        return {};
+    return QStringLiteral("default_painting_") + names.at(index);
+}
+
+// t717 实体贴图源（t727/t728/t730/t731/t732 实体批 pack 覆盖前置）：kind（字符串 key，entityKindMap 表）
+//   → pack 启用且 entityDir 命中（子目录布局 entity/<sub>/<name>.png 优先、扁平 entity/<name>.png 兜底，
+//   同 mobTextureSource probe 两级探测）时返 file:/// URL；否则空串 → 调用方回退 qrc:/textures/<fallback>.png
+//   程序自绘（tools/build_entities_pack.py；§9 改名夜行者 / 燃烬者）。无映射 kind 返空。
+//   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
+QString ResourcePackManager::entitySource(const QString &kind) const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active || s.entityDir.isEmpty())
+        return {};
+    QString relPath;
+    for (const EntityTexEntry &e : entityKindMap()) {
+        if (kind == QLatin1String(e.kind)) {
+            relPath = QString::fromLatin1(e.packPath);
+            break;
+        }
+    }
+    if (relPath.isEmpty())
+        return {};
+    const QDir entityDir(s.entityDir);
+    const auto probe = [&entityDir](const QString &rp) -> QString {
+        const QString sub = entityDir.absoluteFilePath(rp);
+        if (QFile::exists(sub))
+            return QStringLiteral("file:///") + sub;
+        const QFileInfo fi(rp);
+        const QString flat = entityDir.absoluteFilePath(fi.fileName());
+        if (QFile::exists(flat))
+            return QStringLiteral("file:///") + flat;
+        return {};
+    };
+    return probe(relPath); // 两级探测（子目录 → 扁平）；miss 返空回退程序贴图
+}
+
+// t717 盔甲 layer 贴图源（t718/t719 盔甲 3D 显示 pack 覆盖前置）：tier（0 皮/1 铁/2 铜/3 金/4 钻/5 链）+
+//   layer（1=头盔+胸甲+护腿 / 2=靴）→ pack 启用且 armorDir（models/armor）有 <prefix>_layer_<n>.png 时返
+//   file:/// URL；否则空串 → 调用方回退 qrc:/textures/armor_<tier>_layer_<n>.png 程序层（tier 2 铜无 pack
+//   等价恒走回退，t718 呈现层届时可从铁层染铜）。TODO(t718)：皮革 pack 层是灰白可染色 base，若 3D 显示
+//   显白可在此接 retintLeatherTemplate 染棕落盘（同 leatherIconFiles 机制）——先原样返回（demo 包 leather
+//   层自带棕 overlay 实测，多数场景不白）。
+//   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
+QString ResourcePackManager::armorLayerSource(int tier, int layer) const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active || s.armorDir.isEmpty())
+        return {};
+    const QString name = armorLayerPackName(tier, layer);
+    if (name.isEmpty())
+        return {};
+    const QString p = QDir(s.armorDir).absoluteFilePath(name);
+    if (!QFile::exists(p))
+        return {};
+    return QStringLiteral("file:///") + p;
 }
 
 QString ResourcePackManager::mobTextureSource(int mobType) const

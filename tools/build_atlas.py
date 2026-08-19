@@ -373,6 +373,15 @@ TILES = [
     #   深蓝绿针叶底 + 噪点 + 针簇放射纹 + 部分透明孔（cutout 观感同 oak leaves(9)，色调更深冷蓝绿）；
     #   tools/build_spruce.py 程序生成（§9 override (a)；零 MC 资产）。pack {175→spruce_leaves.png}。
     "default_spruce_leaves",         # 175 spruce_leaves（云杉树叶；深蓝绿针叶 + 透明孔）
+    # t717 铁门 / 铁活板门三张（R19.10 t722/t723 贴图前置；机制等价 MC 1.0 iron door 上下两格 per-face +
+    #   iron trapdoor）。与木门（143..146）同构图语言：上半 = 铁灰门板 + 下部 2×2 格栅窗（真透明 cutout）+
+    #   铆钉列；下半 = 门板 + 锁孔板 + 底部横带；活板门 = 铁灰格子板（边框 + 十字格条 + 两列栅格孔真透明 +
+    #   四角铆钉）。tools/build_doors_iron.py 程序生成原创像素图（§9 override (a)）。pack {176→
+    #   door_iron_upper.png / 177→door_iron_lower.png / 178→iron_trapdoor.png}（demo 包实测 door_iron_*
+    #   HD 128px 与 iron_trapdoor.png 都在）。IronDoor/IronTrapdoor 方块 t722/t723 建（本批只产贴图 + 图集位）。
+    "default_door_iron_upper",       # 176 door_iron_upper（铁门上半：门板 + 下部 2×2 格栅窗；t717）
+    "default_door_iron_lower",       # 177 door_iron_lower（铁门下半：门板 + 锁孔板 + 底部横带；t717）
+    "default_iron_trapdoor",         # 178 iron_trapdoor（铁活板门：格子板 + 栅格孔；t717）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

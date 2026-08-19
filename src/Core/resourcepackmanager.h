@@ -129,6 +129,36 @@ public:
     //   gitignored pack PNG，不 bake 进 qrc/VCS。active=false / 无目录 / 无映射 / 文件缺 → ""。
     Q_INVOKABLE QString effectIconSource(int effectType) const;
 
+    // t717 画作贴图覆盖（t720 Painting 方块的 pack 映射前置）：index（0..26，与 tools/build_paintings.py
+    //   PAINTINGS 表序一致——paintingNames() 字面量镜像单一权威）→ pack 启用且包内 painting 目录
+    //   （assets/minecraft/textures/painting）有 <name>.png 时返 file:///<paintingDir>/<name>.png 供
+    //   QtQuick3D Texture 直接加载；否则空串 → 调用方回退 qrc:/textures/default_painting_<name>.png 程序
+    //   自绘（paintingFallbackName(index) 拿名字）。27 张不走 tileFilenameMap（画作是独立 Texture 非图集
+    //   瓦片；effectIconSource 批量解析先例）。索引越界 / active=false / 无目录 / 文件缺 → ""。
+    //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
+    Q_INVOKABLE QString paintingSource(int index) const;
+    // t717 画作程序回退贴图名（index → "default_painting_<name>"，不含扩展名 / qrc 前缀——呈现层拼
+    //   "qrc:/textures/" + name + ".png"）。与 paintingNames 单一权威同表；越界返空。
+    Q_INVOKABLE QString paintingFallbackName(int index) const;
+
+    // t717 实体贴图覆盖（t727 夜行者 / t728 燃烬者 / t730 鱿鱼 / t731 皮肤 / t732 矿车·书的 pack 映射
+    //   前置）：kind 字符串 key（"nightwalker"/"nightwalker_eyes"/"emberling"/"squid"/"minecart"/
+    //   "enchant_book"/"skin_default"/"skin_alex"，entityKindMap 表）→ pack 启用且包内 entity 目录命中
+    //   （子目录布局优先、扁平兜底，同 mobTextureSource 两级探测）时返 file:/// URL 供 QtQuick3D Texture
+    //   加载；否则空串 → 调用方回退 qrc:/textures/entity_<kind>.png 程序自绘（tools/build_entities_pack.py；
+    //   §9 改名：Enderman→Nightwalker 夜行者、Blaze→Emberling 燃烬者）。无映射 kind / active=false /
+    //   无目录 / 文件缺 → ""。红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
+    Q_INVOKABLE QString entitySource(const QString &kind) const;
+
+    // t717 盔甲 layer 贴图覆盖（t718/t719 盔甲 3D 显示的 pack 映射前置）：tier（0 皮革/1 铁/2 铜/3 金/
+    //   4 钻石/5 链甲——与 Hotbar::armorTier 同源序）+ layer（1=头盔+胸甲+护腿 / 2=靴，MC armor 两层）→
+    //   pack 启用且包内 models/armor 目录有 <prefix>_layer_<n>.png 时返 file:/// URL；否则空串 → 调用方
+    //   回退 qrc:/textures/armor_<kind>_layer_<n>.png 程序层（tools/build_armor_layers.py；tier 2 铜无
+    //   pack 等价恒回退）。TODO(t718)：皮革 pack 层灰白可染色 base 若 3D 显白，接 retintLeatherTemplate。
+    //   无映射 tier / layer 越界 / active=false / 无目录 / 文件缺 → ""。红线 §9：仅运行期读本地
+    //   gitignored pack PNG，不 bake 进 qrc/VCS。
+    Q_INVOKABLE QString armorLayerSource(int tier, int layer) const;
+
     // t421 生物模型贴图覆盖：pack 启用且 mobType 在「引擎 mob id → pack entity 子目录/文件名」映射内、且包内
     //   对应 PNG 存在时，返回 file:///<entityDir>/<mob>/<mob>.png 供 QtQuick3D Texture 直接加载（MobModel 据
     //   packTextured 把几何 UV 按 T 字展开进该贴图）；否则返空串 → Main.qml 各 mob delegate 回退程序生成
