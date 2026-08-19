@@ -106,7 +106,13 @@ public:
     //   若命中的是被骑的船（idx == m_riderBoat）→ 同步清 m_riderBoat（船没了玩家自然没骑）。
     //   由 PlayerController.beginMining 调（左键瞄船 → 挖船，优先于破块 / 挥空手路径，同 mob 攻击分流模式）。
     //   返 true = 命中并移除（caller 据此发 swingArm + 不再走破块）；false = 未命中（caller 落回破块路径）。
-    bool hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist);
+    //   t711 五修「创造打船不掉落」：加 world 参（caller PlayerController 持 m_world）选**非实心邻格**作掉落
+    //   格 —— 旧版固定 4 邻随机散布（t661 加），但船贴岸 / 冰上时 4 邻常含实心格（岸壁 / 冰面下的岸块）→
+    //   掉落物 spawn 进实心格内 → ItemEntityManager tick 重力也无从穿出（isCollidable 挡落）→ 实体被埋在
+    //   方块里永远不可见 = 用户观感「打船不掉落」（创造常在岸 / 冰边测船、生存多在开阔水面测 → 差异观感）。
+    //   掉落路径本身全模式同链（hitBoatFromRay / onBoatBroken 无模式分流）—— 根因是落点选格，非创造门控。
+    //   world null（防御）→ 退回旧 4 邻随机（无世界可查）。
+    bool hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist, World *world = nullptr);
 
     // 尝试骑乘：跑 findBoatHit 命中船 → 设 m_riderBoat + 返 true；未命中 → false（不改态）。由 PlayerController
     //   placeBlock 船段调（右键瞄船 → 上船）。t508 换船：已骑乘时命中**另一艘**船（idx != m_riderBoat）→ 直接切到
@@ -207,15 +213,24 @@ private:
     //   可碰撞 = World::isCollidable（含实体方块 / 门 / 活版门；不含水 / 火把 / 空气）。
     //   review L10：ignoreIce=true（仅水档碰岸探测传）把冰族视作可通行（冰顶与水面同层，船应能滑上冰面；
     //   见 .cpp 实现处注释）；默认 false —— 位移 / 推船 / 支撑等实际碰撞仍把冰当实体。
+    //   t711 五修：ignoreIce 的豁免从「仅冰族」扩为「冰族 + 与水面同高的任何固体」（同层湿沙滩与冰同为
+    //   船可行驶表面，行为一致；高出水面的真岸仍挡，登岸须 beachTimer 冲量。见 .cpp 实现处注释）。
     //   review rev2-C2：ignoreLilyPad=true（仅水档碰岸探测传）把睡莲视作可通行 —— 探测前探边（0.65）大于
     //   撞碎扫描边（0.5），睡莲 isCollidable → 先被当「岸」清朝岸速度，速度每帧只重建到 ~0.5 永达不到撞碎
     //   阈值 3.0 → 船在叶前 ~0.15 格楔死、撞碎永不触发。豁免后船保持速度驶入叶格 → 高速（> 阈值）撞碎清除；
     //   低速船仍被**位移碰撞**（不传本参的调用）挡在叶前（慢速 = 阻挡绕行，机制等价 MC 慢速船被叶阻）。
     bool boatFootprintBlocked(World *world, float px, float py, float pz, bool ignoreIce = false,
                               bool ignoreLilyPad = false) const;
-    // t661 四轮「footprint 支撑顶」（单一权威，tick / tickRiddenBoat 无水重力段共用）：扫船 footprint 覆盖的
+    // t661 四轮 footprint 支撑顶（单一权威，tick / tickRiddenBoat 无水重力段共用）：扫船 footprint 覆盖的
     //   所有列、自船中心层向下 kBoatSupportScanDepth 格内的首个可踩实体，取**所有列中的最高支撑顶**
     //   （= 支撑格 cellY + 1）。返 -1 = 无支撑（自由落体）。
+    //   t711 五修「睡莲顶飞」：扫到 LilyPad 的列**跳过**（该列无支撑）—— 睡莲是浮于水面的 1/16 薄叶
+    //   （collisionAABB 顶 = cellY+1/16），非可承载船身的支撑面；且船中心 Y = 水面顶恰落叶同格 → 旧版把
+    //   叶整格顶（cellY+1）当支撑顶，footprint 水覆盖跌破迟滞阈（叶格非 Water → 覆盖率掉）转陆档的瞬间
+    //   restY = 叶格+1+0.2 高出船 Y ~1.2 格，kBoatBeachSnap 直接把船**瞬抬一整格** =「船碰睡莲被顶飞」
+    //   概率 bug（叶格在 footprint 侧翼时才触发 → 概率性）。跳过后叶列无支撑 → 船仍由其余水列 / 岸列
+    //   支撑或走无支撑下坠分支（下一帧水覆盖回升浮水），叶不再顶船。高速驶过仍撞碎（smashLilyPads
+    //   不受影响）、慢速仍被位移碰撞挡（叶 isCollidable），两态保持。
     //   旧版只扫**中心列**（两处各写一份），两类用户实测 bug 都由它派生：
     //   ①「高处掉到低处走不了」：船中心列恰在坑 / 沟上方（中心列 3 格无实体）→ 判无支撑自由落体 → 船
     //     下坠进 footprint 侧翼实体层 → 水平位移碰撞（boatFootprintBlocked 查中心层 + 上一层）被侧翼块挡
@@ -229,6 +244,9 @@ private:
     //   boatFootprintBlocked（floor(±半宽/半长) 格扫）。t630「2/3 支撑阈值」用：覆盖率 ≥ 2/3 才判「船浮
     //   在水里」（foundWater 置真）；岸沿驶入时 1/3 仍在陆上（覆盖率 < 2/3）→ 走陆档重力贴地（不掉进
     //   水岸夹缝），机制等价 MC 船大部分船身离开岸才落水。无 world → 返 0。
+    //   t711 五修「2/3 判定偏严」：采样从「覆盖格整格等权」（格数随船贴格边界在 6/8/9 间跳变 → 8 格覆盖
+    //   时浮起需 6/8=0.75 严一整档）改为**固定 2×3 几何采样点**（X ±0.25 / Z −0.45,0,0.45，恒 6 点等权）
+    //   → 2/3 = 4/6 稳定成立（见 .cpp 实现注释）。
     float boatFootprintWaterFraction(World *world, float px, float pz, float probeY) const;
     // 算船当前 XZ 列的水面 Y（找最顶水格 + 1 - kBoatDraft；无水 → 返当前 py 不浮）。用于浮水 lerp 目标。
     //   t508 二轮复盘：outFoundWater（可空）写真是否找到水柱 —— tick 据此判「浮水」vs「无水重力落地」
@@ -282,7 +300,12 @@ private:
     static constexpr float kBoatFriction = 5.0f;
     // t584 三档速度：水档满速 8 < 旧阈值 7 会「水档常速碰岸即毁」不对 → 提到 12（水档碰岸只停、冰档
     //   16~21.6 撞墙仍毁 = 冰上危险）。
-    static constexpr float kBoatCrashSpeed = 12.0f;
+    //   t711 五修「撞毁难度回升」：12 → 14。t661 四轮把冰档倍率降到 1.4/1.7/2.0（满速 11.2/13.6/16）后
+    //   12 的阈值使普通冰（11.2）撞墙永不毁、浮冰（13.6）偶尔毁、蓝冰（16.0）常毁 —— 档间差异过大且
+    //   浮冰 13.6 贴阈值撞墙频繁毁（用户「太容易撞毁」）。14 的新格局：水 8 / 普通冰 11.2 / 浮冰 13.6
+    //   撞墙全安全（只有轻微顶停），蓝冰 16 满速撞墙毁（高速才毁），水档撞世界边界（t711 起边界命中
+    //   同走撞毁判定）8 < 14 亦安全 —— 「高速撞毁、中低速只停」的 MC 1.0 量级语义。
+    static constexpr float kBoatCrashSpeed = 14.0f;
     static constexpr float kBoatTurnRate = 360.0f;
     // t584 三档介质参数（陆地 / 冰面；机制等价 MC 1.0 船：陆地几乎开不动 / 冰面最快 + 惯性大难操作）：
     //   陆档：kBoatSpeed × kBoatLandSpeedMul（2.4 blocks/s，最慢 —— 比走路还慢但非零：用户要求「直接放

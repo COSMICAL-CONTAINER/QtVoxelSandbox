@@ -169,10 +169,18 @@ bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float p
     //   速度被清朝向分量后每帧只重建 ~0.5 < 撞碎阈值 3.0 → 船在叶前楔死、撞碎永不触发。豁免后船保速驶入
     //   叶格 → 高速撞碎（smashLilyPads 在探测前跑）；低速船仍被位移碰撞挡（叶按实体，不传本参）→「快=碎、
     //   慢=挡」两态成立。
-    const auto cellBlocked = [world, ignoreIce, ignoreLilyPad](int x, int y, int z) {
+    //   t711 五修「冰面可上 / 沙滩不可上不一致」：ignoreIce 同步豁免**与水面同高的任何固体方块**（不止冰）
+    //     —— 旧版只豁免冰族：与水面齐平的湿沙滩（沙格顶 == 水面顶）被当岸清速 → 船上不了同层沙滩，而同层
+    //     冰面能上（行为不一致）。判据 = 方块格顶 (y+1) ≤ 船中心 Y（探测传 py=船中心−1 → 该层格顶 == 船
+    //     中心所在水面顶）→ 与冰同语义「同层可行驶表面」；高出水面的真岸（顶 > 船中心）不豁免（须
+    //     beachTimer 冲量爬升登岸，t661「上岸应需速度」语义保持）。机制等价 MC 1.0 船可在与水面齐平的
+    //     湿沙滩 / 冰面上行驶（同为船可行驶表面，行为一致）。
+    const auto cellBlocked = [world, ignoreIce, ignoreLilyPad, py](int x, int y, int z) {
         if (!world->isCollidable(x, y, z)) return false;
         const quint8 id = world->blockAt(x, y, z);
-        if (ignoreIce && BlockRegistry::isIce(id)) return false;
+        // t711 同层可行驶表面豁免：ignoreIce 探测（py=船中心−1）时格顶 ≤ py+1（= 船中心水面顶）的同层
+        //   固体（冰 + 同高沙滩）视作可通行；位移碰撞（ignoreIce=false / py=船中心）恒 y+1 > py 不豁免。
+        if (ignoreIce && (BlockRegistry::isIce(id) || float(y) + 1.0f <= py + 1.0f + 1e-3f)) return false;
         if (ignoreLilyPad && id == BlockRegistry::LilyPad) return false;
         return true;
     };
@@ -191,6 +199,8 @@ bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float p
 //   kBoatSupportScanDepth 格的首个可踩实体），返回**最高**支撑顶（cellY+1）。无支撑 → -1。
 //   与 boatFootprintBlocked 同款 footprint 格扫（floor(±半宽/半长)）；水 / 空气非 collidable 自然跳过
 //   （船在水面时不进本函数 —— foundWater 走浮水分支；仅无水陆档调用）。
+//   t711 五修「睡莲顶飞」：LilyPad 列跳过（无支撑，见 .h 注释）—— 睡莲是水面薄叶非承载面，且其整格
+//   顶（cellY+1）被旧版当支撑顶会把碰叶的船瞬抬一整格。
 float BoatManager::boatFootprintSupportTop(World *world, float px, float py, float pz) const
 {
     if (!world) return -1.0f;
@@ -202,6 +212,8 @@ float BoatManager::boatFootprintSupportTop(World *world, float px, float py, flo
         for (int z = z0; z <= z1; ++z) {
             for (int y = cyBase; y >= 0 && y >= cyBase - kBoatSupportScanDepth; --y) {
                 if (world->isCollidable(x, y, z)) {
+                    if (world->blockAt(x, y, z) == BlockRegistry::LilyPad)
+                        break; // t711：睡莲薄叶非支撑（该列无支撑；防整格顶顶飞船）
                     const float cellTop = float(y) + 1.0f;
                     if (cellTop > topY) topY = cellTop; // 取全列最高（船搁浅在最高支撑上，不坠缝 / 不卡坑）
                     break; // 该列首个（最高）实体已记，向下不再看
@@ -214,15 +226,24 @@ float BoatManager::boatFootprintSupportTop(World *world, float px, float py, flo
 float BoatManager::boatFootprintWaterFraction(World *world, float px, float pz, float probeY) const
 {
     if (!world) return 0.0f;
-    // t630 footprint 水域覆盖采样（格中心近似：每覆盖格等权 —— footprint X 1.0×Z 1.4 → 通常 2×3=6 格，
-    //   每格 ≈1/6 船身；2/3 阈值 = 至少 4/6 格是水列）。列有水 = 自支撑层参考格 probeY 起向上扫
-    //   kWaterProbeDepth 内有 Water（覆盖浅 1 格水到深水）。越界列（blockAt Air 兜底）算非水。
-    const int x0 = int(std::floor(px - kBoatHalfW)), x1 = int(std::floor(px + kBoatHalfW));
-    const int z0 = int(std::floor(pz - kBoatHalfLen)), z1 = int(std::floor(pz + kBoatHalfLen));
+    // t630 footprint 水域覆盖采样 + t711 五修「2/3 判定偏严」：
+    //   旧版按「覆盖格整格等权」（格数比）：footprint X 1.0×Z 1.4，船中心接近格边界时覆盖格数在 2×3=6 /
+    //   2×4=8 / 3×3=9 间跳变 —— 8 格覆盖时浮起需 ≥0.66 → 要 6/8（0.75）格是水，比 2/3 严一整档；9 格时
+    //   要 6/9（0.6667）恰好。用户实测「船身 2/3 已在方块（岸）外仍不下水」正是 8 格覆盖态（5/8=0.625 <
+    //   0.66 被拒）。改**固定几何采样点**：footprint 内 2(X)×3(Z) = 6 个等分点（X 取 ±0.25、Z 取
+    //   -0.45/0/0.45，均在 X±0.5 / Z±0.7 框内）→ 覆盖率恒为 6 点等权，不随船贴格边界跳格数，2/3 = 4/6
+    //   稳定成立。列有水 = 自支撑层参考格 probeY 起向上扫 kWaterProbeDepth 内有 Water（覆盖浅 1 格水到
+    //   深水）。越界列（blockAt Air 兜底）算非水。
+    // t711 边界侧翼：船贴世界边缘（中心被 clamp 到 width-0.5）时部分采样点落界外 → blockAt 返 Air 算
+    //   非水 → 覆盖率 < 阈转陆档（防边界处误浮水）；正常开阔水面不受影响。
     const int yStart = int(std::floor(probeY));
+    constexpr float kSampX[2] = {-0.25f, 0.25f};
+    constexpr float kSampZ[3] = {-0.45f, 0.0f, 0.45f};
     int total = 0, water = 0;
-    for (int x = x0; x <= x1; ++x)
-        for (int z = z0; z <= z1; ++z) {
+    for (const float ox : kSampX)
+        for (const float oz : kSampZ) {
+            const int x = int(std::floor(px + ox));
+            const int z = int(std::floor(pz + oz));
             ++total;
             for (int y = yStart; y < yStart + kWaterProbeDepth; ++y) {
                 if (world->blockAt(x, y, z) == BlockRegistry::Water) { ++water; break; }
@@ -615,6 +636,14 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     const float dx = b.vx * float(dt);
     const float dz = b.vz * float(dt);
     // 世界边界（半宽外扩防船头穿出）：无 world → 不限。t556：X 用 kBoatHalfW / Z 用 kBoatHalfLen（矩形碰撞盒）。
+    //   t711 五修「撞边界沉底后松键恢复海面」：边界 clamp 从「无损贴边滑停」改**视同撞墙** —— 旧版只把
+    //   nx 钳到 minX/maxX，速度不清零（顶边蠕动），且边缘列 footprint 半数落界外（Air 非水）→ 水覆盖跌破
+    //   迟滞阈转陆档 → 支撑顶扫到水底 → 船被重力拽沉到海底（「撞边界沉底」）；沉底后全列皆水、覆盖回升
+    //   ≥ 浮起阈又转浮水档 → 船慢慢浮回海面（「松键恢复海面」假象，实为档位来回翻）。现边界命中即按撞墙
+    //   处理：高速（≥ kBoatCrashSpeed）→ outCrashed=true（掉散件下船，机制等价 MC 船高速撞硬物损坏 ——
+    //   世界边界对船就是一堵硬墙）；低速 → 清该轴速度（贴边停住不蠕动）。修后撞边要么撞毁要么贴边悬浮在
+    //   水面（Y 仍走浮水段 —— 覆盖采样点界外算非水，6 点中界内侧 3 点水 + 界外 3 点非水 = 0.5：已浮态
+    //   0.5 ≥ 落下阈 0.34 维持浮水，不坠底）。
     const float minX = world ? kBoatHalfW : -1e9f;
     const float maxX = world ? float(world->width()) - kBoatHalfW : 1e9f;
     const float minZ = world ? kBoatHalfLen : -1e9f;
@@ -622,9 +651,14 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     // X 轴
     if (dx != 0.0f) {
         float nx = b.pos.x() + dx;
-        if (nx < minX) nx = minX;
-        if (nx > maxX) nx = maxX;
-        if (!boatFootprintBlocked(world, nx, b.pos.y(), b.pos.z(), /*ignoreIce*/ false, /*ignoreLilyPad*/ fastBoat)) {
+        bool edgeHit = false;
+        if (nx < minX) { nx = minX; edgeHit = true; }
+        if (nx > maxX) { nx = maxX; edgeHit = true; }
+        if (edgeHit) {
+            // t711：撞世界边界 = 撞墙（高速撞毁 / 低速停该轴；见上方注释块）。
+            if (speed >= kBoatCrashSpeed) { outCrashed = true; b.vx = 0.0f; b.vz = 0.0f; }
+            else b.vx = 0.0f;
+        } else if (!boatFootprintBlocked(world, nx, b.pos.y(), b.pos.z(), /*ignoreIce*/ false, /*ignoreLilyPad*/ fastBoat)) {
             b.pos.setX(nx);
         } else {
             // 撞墙：高速 → 撞毁；低速 → 只停该轴。
@@ -635,9 +669,14 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     // Z 轴
     if (dz != 0.0f && !outCrashed) {
         float nz = b.pos.z() + dz;
-        if (nz < minZ) nz = minZ;
-        if (nz > maxZ) nz = maxZ;
-        if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nz, /*ignoreIce*/ false, /*ignoreLilyPad*/ fastBoat)) {
+        bool edgeHit = false;
+        if (nz < minZ) { nz = minZ; edgeHit = true; }
+        if (nz > maxZ) { nz = maxZ; edgeHit = true; }
+        if (edgeHit) {
+            // t711：撞世界边界 = 撞墙（同 X 轴）。
+            if (speed >= kBoatCrashSpeed) { outCrashed = true; b.vx = 0.0f; b.vz = 0.0f; }
+            else b.vz = 0.0f;
+        } else if (!boatFootprintBlocked(world, b.pos.x(), b.pos.y(), nz, /*ignoreIce*/ false, /*ignoreLilyPad*/ fastBoat)) {
             b.pos.setZ(nz);
         } else {
             if (speed >= kBoatCrashSpeed) { outCrashed = true; b.vx = 0.0f; b.vz = 0.0f; }
@@ -716,7 +755,7 @@ void BoatManager::breakRiddenBoat()
     notifyChanged();
 }
 
-bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist)
+bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist, World *world)
 {
     float dist = 0.0f;
     const int idx = findBoatHit(origin, dir, maxDist, &dist);
@@ -732,14 +771,35 @@ bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, 
     //   物生成在船中心格 = 常与**攻击者本人所在格重合**（玩家站船上 / 骑乘中攻击自己脚下的船：骑乘者
     //   m_pos = 船位），0.5s 免拾窗一过 pickupScan 立即吸回 → 用户全程看不到掉落物 =「不掉落」。邻格散布
     //   后实体落在船侧（玩家拾取半径边缘外 / 水面漂浮），肉眼可见可拾取，机制等价 MC 船被攻击掉落在船旁。
+    // t711 五修：邻格筛选升级 —— 旧版固定 4 邻**随机**取，船贴岸 / 冰时 4 邻常含实心格 → 掉落物埋进方块里
+    //   不可见（观感「不掉落」，创造多在岸边测、生存多在水面测故显模式差异）。现带 world 参优先取**非
+    //   collidable** 的邻格（空气 / 水面均落得下）作掉落格；4 邻全实心（船嵌在窄缝）→ 退回船中心格上
+    //   一格（y+1，掉落物自重落顶）。world null（防御）→ 旧 4 邻随机行为。
     int dropX = int(std::floor(bp.x())), dropZ = int(std::floor(bp.z()));
-    const int dropY = int(std::floor(bp.y()));
-    // World 指针 tick 内不可得（本方法无 world 参）→ 用固定 4 邻序散布（+X,-X,+Z,-Z；不查世界——boatBroken
-    //   的消费端 spawnItem 对落点格无实体校验需求，掉落物自身 tick 有碰撞落地；偏移 1 格已足与玩家错位）。
-    static constexpr int kDropNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
-    const int nb = QRandomGenerator::global()->bounded(4);
-    dropX += kDropNb[nb][0];
-    dropZ += kDropNb[nb][1];
+    int dropY = int(std::floor(bp.y()));
+    static constexpr int kDropNb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    if (world) {
+        // 非实心邻格中随机取一（保散布随机观感）；同时要求邻格「上方一格也非实心」防掉进 1 格深坑壁内。
+        int cand[4] = {-1, -1, -1, -1};
+        int nCand = 0;
+        for (int n = 0; n < 4; ++n) {
+            const int nx = dropX + kDropNb[n][0], nz = dropZ + kDropNb[n][1];
+            if (!world->isCollidable(nx, dropY, nz) && !world->isCollidable(nx, dropY + 1, nz))
+                cand[nCand++] = n;
+        }
+        if (nCand > 0) {
+            const int nb = cand[QRandomGenerator::global()->bounded(nCand)];
+            dropX += kDropNb[nb][0];
+            dropZ += kDropNb[nb][1];
+        } else {
+            dropY += 1; // 4 邻全实心（窄缝嵌船）→ 掉头顶上一格（自重落顶，不埋）
+        }
+    } else {
+        // 无世界可查（防御路径，当前 caller 恒传 world）：退回旧 4 邻随机（不查实体）。
+        const int nb = QRandomGenerator::global()->bounded(4);
+        dropX += kDropNb[nb][0];
+        dropZ += kDropNb[nb][1];
+    }
     emit boatBroken(dropX, dropY, dropZ, bt);
     notifyChanged();
     return true;
