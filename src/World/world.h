@@ -817,19 +817,23 @@ private:
     void placeJungleTemple();
     // t487 要塞（spec「地下深（Y<30）生成：石砖迷宫 + 末地传送门房（末地传送门方块 + 12 末影之眼激活 → 末地
     //   预热，末地本身可推迟）+ 图书馆（书架，附魔加成）+ 银鱼刷怪笼」；机制等价 MC 1.0 要塞 stronghold）。
+    //   t713 扩建 ~4.5×（45×45×7：中央大厅 + 四向走廊 + 图书馆 + 传送门房 + 战利品房 + 两储藏龛；墙高 5）。
     //   placeJungleTemple 之后、fillWater 之前，地下深处（y ∈ [kBedrockTop+4, kStrongholdMaxY=30]，spec「Y<30」）
     //   确定性散布（grid 40，比矿井 36 略稀 → 要塞稀有；PLAN §2-K，仅扫候选格 → 不全图扫描）：选要塞中心点
-    //   （hashColumn + seed 偏移）→ 生成一个 13×13×5 石砖地下迷宫：
+    //   （hashColumn + seed 偏移）→ 生成一个 45×45×7 石砖地下建筑：
     //     - 外圈石砖墙（StoneBrick 整立方围合）+ 地板 / 顶板（StoneBrick）→ 封闭黑暗（机制等价 MC 1.0 要塞石砖
     //       地牢氛围）；
-    //     - 内部迷宫走廊（Air，石砖墙隔出十字形走道）+ 角落房间；
-    //     - **图书馆**（一间 5×3×5 房间）：四壁内侧摆 Bookshelf（t474 书架，附魔台加成来源）+ 中央石砖台阶 /
-    //       石砖楼梯（楼梯井装饰）→ 探索者可在附魔台旁补书架加成（机制等价 MC 1.0 要塞图书馆书架墙）；
-    //     - **末地传送门房**（中央 7×7×3 房间）：地板中央 3×3 EndPortal（末地传送门方块，未激活 state=0）+
-    //       周界 StoneBrick 墙 + 角落一只 ChestStateStrongholdFlag 标记的战利品箱（t487 首开填要塞战利品含末影之眼）；
-    //     - **银鱼刷怪笼**（传送门房墙内 / 走廊）：Spawner + SpawnerStateSilverfishFlag state 标记 → tickSpawners
-    //       据 flag 刷 Silverfish（机制等价 MC 1.0 要塞银鱼刷怪笼）；
-    //     - 走廊交叉处散布 Cobweb 蜘蛛网（阴暗地下装饰，复用 t484 矿井蛛网机制）。
+    //     - 内部走廊 / 房间（Air，石砖墙隔出；大厅四角承重柱 + 东入口走廊 + 东北 / 东南储藏龛）；
+    //     - **图书馆**（10×17×5 大房）：四壁 Bookshelf 书架墙（t474 书架，附魔台加成来源）+ 中央书架岛 +
+    //       蛛网装饰（机制等价 MC 1.0 要塞图书馆书架墙）；
+    //     - **末地传送门房**（25×10×5 房间）：北侧环沟岩浆河（dy=0，静态封闭不流）+ 石砖高台（13×6，顶面
+    //       可站立）+ 中轴 3 级石砖楼梯（每步 Δ0.5 ≤ auto-step，通向门框；台下实心不悬浮）+ 3×3 岩浆盆
+    //       （门面正下方一格）+ 12 EndPortal 框架环（中心 (0,4,-18) 标准 ±2 方形环；~10% 预置末影之眼；
+    //       t664 激活/完整性机制接线）+ 环中心上方银鱼刷怪笼（机制等价 MC 1.0 要塞传送门房上方 spawner）；
+    //     - **战利品/银鱼房**（17×11×5 房间）：双银鱼刷怪笼（Spawner + SpawnerStateSilverfishFlag →
+    //       tickSpawners 刷 Silverfish）+ 双战利品箱（Chest + ChestStateStrongholdFlag → 首开填要塞战利品
+    //       含末影之眼）；
+    //     - 走廊散布 Cobweb 蛛网（仅 dy=1 贴地不悬空；设施房整房跳过 —— t682 装饰覆盖框架的教训）。
     //   纯函数于 seed（hashColumn / hashVoxel）→ 同 seed 同要塞分布（PLAN §2-K）。**宝藏箱内容**：Chest 物品存
     //   ChestStore，首开填充由 isStrongholdChest 判定 → strongholdChestPool（含末影之眼，激活传送门关键物品）。
     void placeStronghold();
