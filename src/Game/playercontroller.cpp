@@ -11,6 +11,7 @@
 #include <QMouseEvent>
 #include <QQuaternion>
 #include <QRandomGenerator> // t237 收割种子随机量（1-2）；玩家交互掉落的随机性，非 worldgen 确定性范畴
+#include <QVariantMap>       // t715 状态效果快照（activeEffectsChanged 逐项 map 组装）
 
 #include <algorithm>
 #include <cmath>
@@ -370,6 +371,10 @@ void PlayerController::respawn()
     //   重生继续每秒扣饥饿 / 扣血，「满血重生后不明掉血」）。
     m_poisonTimer = 0.0f;
     m_poisonDmgAccum = 0.0f;
+    // t715：重生清缓慢态 + 效果快照缓存（下一 tick 广播空列表 → PlayerState 容器同步清空，效果栏隐）。
+    m_slowTimer = 0.0f;
+    m_slowLevel = 0;
+    m_lastEffectSigCache.clear();
     m_pos = m_spawnPos; // t388：回当前重生点（初值=kSpawn；睡床后=床位）。Y 由 snapSpawnToGround 贴地表。
     m_vel = QVector3D(0, 0, 0);
     m_knockback = QVector3D(0, 0, 0); // t296：清受击击退冲量（重生不继承死亡点的击退）
@@ -418,6 +423,10 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     // t690：存档加载清毒态（同火烧瞬态语义 —— 中毒不持久化，防上一世界残留毒跨世界每秒扣饥饿 / 扣血）。
     m_poisonTimer = 0.0f;
     m_poisonDmgAccum = 0.0f;
+    // t715：存档加载清缓慢态 + 效果快照缓存（效果不持久化；下一 tick 广播空列表清 PlayerState 容器）。
+    m_slowTimer = 0.0f;
+    m_slowLevel = 0;
+    m_lastEffectSigCache.clear();
     if (m_flying) { m_flying = false; emit flyingChanged(); }
     if (m_moveState != Walk) setMoveState(Walk, true); // t574/t575 存档加载强制站（位姿已灌新位，闸门无意义）
     const Mode target = (mode == int(Survival)) ? Survival
@@ -2175,6 +2184,82 @@ void PlayerController::wakeUpFromBed()
     m_sleepPhaseTimer = 0.0f;
     if (m_sleepSettled) { m_sleepSettled = false; emit sleepSettledChanged(); }
     // fade/lie 保持满值（Waking 内从 1 渐降到 0）；不调 skipToDawn / 不设 spawn（区别于 sleepAdvanceToDawn）。
+}
+
+// t715 施加状态效果（/effect 命令入口；机制见头注释）：转交对应时序源，tickImpl 统一推进 + 快照广播。
+//   seconds<=0 → 清该效果（同一入口双语义，机制等价 MC /effect <type> 0 清除）。仅 Survival 生效（无敌模式
+//   不吃效果，同火 / 中毒门控；非 Survival 调用静默丢弃 —— 命令回显由 QML 侧照常输出）。
+void PlayerController::applyStatusEffect(int effect, float seconds, int level)
+{
+    if (m_mode != Survival) return;
+    const float secs = seconds < 0.0f ? 0.0f : seconds;
+    const int lvl = level < 1 ? 1 : level;
+    switch (effect) {
+    case PlayerState::EffectPoison:
+        // 中毒：复用 m_poisonTimer（毒马铃薯同源；伤害周期 / 递减全走既有 tickImpl 分支，保持行为不回归）。
+        //   伤害累积器同步重置（新一次中毒起算）。
+        m_poisonTimer = secs;
+        m_poisonDmgAccum = 0.0f;
+        break;
+    case PlayerState::EffectSlowness:
+        // 缓慢：m_slowTimer（t715 新时序源；step() 走路分支 ×kSlowSpeedMul）。
+        m_slowTimer = secs;
+        m_slowLevel = (secs > 0.0f) ? lvl : 0;
+        break;
+    case PlayerState::EffectFire:
+        // 着火：复用 m_fireTimer（岩浆 / 火点燃同源；火烧伤害 / 随机熄灭 / burningChanged 全走既有分支）。
+        //   m_fireDmgTimer 不动（t351：泡岩浆伤害稳定语义 —— 外部施加只刷 fireTimer）。
+        m_fireTimer = secs;
+        if (secs <= 0.0f) m_fireDmgTimer = 0.0f;
+        break;
+    default:
+        break; // EffectNone / 未知 → 忽略
+    }
+}
+
+// t715 清全部状态效果（/effect clear；重生 / 存档加载同源调内部字段清，见各处注释）。
+void PlayerController::clearStatusEffects()
+{
+    m_poisonTimer = 0.0f;
+    m_poisonDmgAccum = 0.0f;
+    m_slowTimer = 0.0f;
+    m_slowLevel = 0;
+    m_fireTimer = 0.0f;
+    m_fireDmgTimer = 0.0f;
+    if (m_burning) { m_burning = false; emit burningChanged(); } // t344 火焰叠层同步隐
+}
+
+// t715 组装当前活跃效果列表（固定序 Poison / Slowness / Fire；每项 {type, seconds, level}，seconds 取
+//   ceil（剩余整秒，向上取整：HUD 显「还剩 N 秒」在 N.0..N.9 期间显 N+1 直到真正跨过整秒边界））。
+//   快照在 tickImpl 末与 m_lastEffectSigCache 深比较，真变才 emit activeEffectsChanged（呈现层路由
+//   PlayerState.setActiveEffects）—— 每效果每秒最多 1 次 emit，无每帧抖动。
+QVariantList PlayerController::buildActiveEffects() const
+{
+    QVariantList list;
+    if (m_mode == Survival) {
+        if (m_poisonTimer > 0.0f) {
+            QVariantMap m;
+            m.insert(QStringLiteral("type"), int(PlayerState::EffectPoison));
+            m.insert(QStringLiteral("seconds"), int(std::ceil(m_poisonTimer)));
+            m.insert(QStringLiteral("level"), 1);
+            list.append(m);
+        }
+        if (m_slowTimer > 0.0f) {
+            QVariantMap m;
+            m.insert(QStringLiteral("type"), int(PlayerState::EffectSlowness));
+            m.insert(QStringLiteral("seconds"), int(std::ceil(m_slowTimer)));
+            m.insert(QStringLiteral("level"), m_slowLevel > 0 ? m_slowLevel : 1);
+            list.append(m);
+        }
+        if (m_fireTimer > 0.0f) {
+            QVariantMap m;
+            m.insert(QStringLiteral("type"), int(PlayerState::EffectFire));
+            m.insert(QStringLiteral("seconds"), int(std::ceil(m_fireTimer)));
+            m.insert(QStringLiteral("level"), 1);
+            list.append(m);
+        }
+    }
+    return list;
 }
 
 // t304 在背包（hotbar 9 + main 27）查首格含箭（ArrowId）。优先 hotbar（入手语义同拾取），再 main。
@@ -5463,13 +5548,17 @@ void PlayerController::step(qreal dt)
     //   kCobwebSpeedMul(0.15)，同 waterMul 乘入模式（机制等价 MC 1.0 cobweb 粘滞：进网水平速度大减 → 贴网
     //   挣扎挪动；蛛网无碰撞 → 玩家低速穿过网格）。仅走路模式生效（飞 / 观察者分支已 early return）。
     const float webMul = inCobweb() ? kCobwebSpeedMul : 1.0f;
+    // t715 缓慢效果减速（StatusEffect::EffectSlowness，机制等价 MC 1.0 slowness 按等级降移速；v1 等级 1
+    //   ×kSlowSpeedMul=0.85）：m_slowTimer>0 时水平速度再乘此倍数（与蹲 / 水下 / 拉弓 / 蛛网同乘入模式叠加）。
+    //   仅 Survival 有缓慢（applyStatusEffect 门控）；飞 / 观察者分支已 early return 不受影响。
+    const float slowMul = (m_slowTimer > 0.0f) ? kSlowSpeedMul : 1.0f;
     // t468 冰上滑动（spec「冰面摩擦力极低→玩家移动加速滑；松键后惯性继续滑一段才停」）。机制等价 MC 1.0 冰滑行：
     //   非冰地面 → 瞬时设速（旧手感：松键即停）；冰面 → 水平速度向「目标速度」做指数接近（1 - exp(-rate*dt)），
     //   rate = iceSlipApproach（Ice 中等 / PackIce 更滑 / BlueIce 最滑）。松键时 wish=0 → 目标=0 → 速度按同 rate
     //   衰减 → 冰上明显惯性滑行（BlueIce 滑得最远）。帧率无关（exp(-rate*dt)）。仅走路模式（飞态已 early return）。
     //   水中（feetInWater）不走冰滑行（水中已减速 + 浮力，无冰面；waterMul 仍乘入目标速度）。
-    const float targetVx = wish.x() * kWalk * speedMul() * waterMul * bowMul * webMul;
-    const float targetVz = wish.z() * kWalk * speedMul() * waterMul * bowMul * webMul;
+    const float targetVx = wish.x() * kWalk * speedMul() * waterMul * bowMul * webMul * slowMul;
+    const float targetVz = wish.z() * kWalk * speedMul() * waterMul * bowMul * webMul * slowMul;
     if (onIce() && !feetInWater()) {
         const quint8 iceBlk = m_world->blockAt(int(std::floor(m_pos.x())),
                                                 int(std::floor(m_pos.y())) - 1,
@@ -5902,12 +5991,16 @@ void PlayerController::step(qreal dt)
         if (m_burning) { m_burning = false; emit burningChanged(); }
     }
 
-    // t669 毒马铃薯食物中毒推进（机制等价 MC 1.0 poison：中毒期间每秒扣损；无状态系统时简化 = 每秒
-    //   -1 饥饿 + -1 HP）。触发 = finishEating 食毒薯 60% 掷中 → m_poisonTimer=kPoisonDuration（8s）。
-    //   仅 Survival（Creative/Spectator 无敌不清毒也无效——统一复位防切回陈旧串入，同火烧态）。推进：
-    //   每秒（m_poisonDmgAccum 累积到 kPoisonInterval）发 hungerUpdated（-1 饥饿，clamp≥0）+ poisonDamageTaken
-    //   （t690 独立信号：毒不走 fallDamageTaken → 不吃护甲减伤 / 不磨护甲耐久，机制等价 MC poison 绕过
-    //   盔甲；死因归 Generic（毒不算死亡原因，简化避免新增 DeathCause；与饥饿归零 Starvation 区分））。
+    // t669 毒马铃薯食物中毒推进（机制等价 MC 1.0 poison）。触发 = finishEating 食毒薯 60% 掷中 →
+    //   m_poisonTimer=kPoisonDuration（8s）。t715 状态效果系统 v1 收编语义（对齐 MC 1.0 poison 规范）：
+    //   (a) 伤害周期改 **1.25s 扣 1 HP**（kPoisonInterval=1.25，MC 1.0 poison 每 25 tick 扣 1；旧 t669 无状态
+    //       系统时简化为每秒 1 次）；
+    //   (b) **等级 1 不致死** —— 扣到剩 1 HP 停（不致死亡；下限在呈现层 onPoisonDamageTaken 路由处守，
+    //       见 Main.qml t715 注释——Physics 层不持 PlayerState.health，经信号解耦同 t690 设计）；
+    //   (c) 饥饿损耗保留（-1/周期；t669 既有行为，防回归）。
+    //   仅 Survival（Creative/Spectator 无敌不清毒也无效——统一复位防切回陈旧串入，同火烧态）。
+    //   poisonDamageTaken（t690 独立信号：毒不走 fallDamageTaken → 不吃护甲减伤 / 不磨护甲耐久，机制等价
+    //   MC poison 绕过盔甲；死因归 Generic——等级 1 本就不致死，死因分支实际不可达，保留兜底）。
     //   中毒归零即解毒（时间耗尽）。
     if (m_mode == Survival) {
         if (m_poisonTimer > 0.0f) {
@@ -5916,7 +6009,7 @@ void PlayerController::step(qreal dt)
             if (m_poisonDmgAccum >= kPoisonInterval) {
                 m_poisonDmgAccum -= kPoisonInterval;
                 if (m_hunger > 0) { --m_hunger; emit hungerUpdated(m_hunger); } // 毒掉饥饿（clamp≥0）
-                emit poisonDamageTaken(1); // 毒掉血（t690 独立链：绕护甲，直走 takeDamage→damaged 红闪）
+                emit poisonDamageTaken(1); // 毒掉血（t690 独立链：绕护甲；不致死下限在呈现层路由守）
             }
             if (m_poisonTimer <= 0.0f) { m_poisonTimer = 0.0f; m_poisonDmgAccum = 0.0f; } // 定时解毒
         }
@@ -6001,6 +6094,43 @@ void PlayerController::step(qreal dt)
         }
     } else {
         m_cactusDmgTimer = 0.0f; // 非 Survival：无敌不累（防切回 Survival 时陈旧累积串入）
+    }
+
+    // t715 缓慢效果推进（StatusEffect::EffectSlowness 时序源；来源 = applyStatusEffect /effect 命令）。
+    //   仅 Survival 生效（无敌模式无效果，同火 / 中毒门控）；归零解除 + 等级清位（防切回 Survival 陈旧串入）。
+    //   减速的应用不在本段 —— step() 走路分支读 m_slowTimer 乘 kSlowSpeedMul（见该处注释）。
+    if (m_mode == Survival) {
+        if (m_slowTimer > 0.0f) {
+            m_slowTimer -= float(dt);
+            if (m_slowTimer <= 0.0f) { m_slowTimer = 0.0f; m_slowLevel = 0; } // 定时解除
+        }
+    } else {
+        m_slowTimer = 0.0f;
+        m_slowLevel = 0;
+    }
+
+    // t715 状态效果快照广播（效果框架 v1 收编口）：组装当前活跃效果（中毒 m_poisonTimer / 缓慢 m_slowTimer /
+    //   着火 m_fireTimer），与上一帧缓存深比较（逐项 type/整秒/level）真变才 emit activeEffectsChanged →
+    //   呈现层 Connections 路由 PlayerState.setActiveEffects（Game 层持显值）。seconds 用 ceil 整秒 →
+    //   每 effect 每秒最多 1 次 emit，无每帧抖动（同 burningChanged 翻转才发纪律）。
+    {
+        const QVariantList snapshot = buildActiveEffects();
+        const bool changed = (snapshot.size() != m_lastEffectSigCache.size())
+            || [&]() {
+                   for (int i = 0; i < snapshot.size(); ++i) {
+                       const QVariantMap &a = snapshot.at(i).toMap();
+                       const QVariantMap &b = m_lastEffectSigCache.at(i).toMap();
+                       if (a.value(QStringLiteral("type")).toInt() != b.value(QStringLiteral("type")).toInt()
+                           || a.value(QStringLiteral("seconds")).toInt() != b.value(QStringLiteral("seconds")).toInt()
+                           || a.value(QStringLiteral("level")).toInt() != b.value(QStringLiteral("level")).toInt())
+                           return true;
+                   }
+                   return false;
+               }();
+        if (changed) {
+            m_lastEffectSigCache = snapshot;
+            emit activeEffectsChanged(snapshot);
+        }
     }
 
     if (wasGround != m_onGround) emit onGroundChanged();

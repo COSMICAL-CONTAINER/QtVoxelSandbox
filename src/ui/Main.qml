@@ -1323,8 +1323,41 @@ Window {
         "xp": {
             desc: "/xp <数字> 或 /xp <数字>L —— 加经验点 / 加等级",
             run: function(rest) { return window.runXp(rest) }
+        },
+        // t715 /effect 命令（状态效果系统 v1 测试入口）：/effect <poison|slowness|slow|fire|clear> [秒] [等级]。
+        //   机制等价 MC 1.0 /effect（施加 / 清除状态效果）；seconds 缺省 15、level 缺省 1（v1 数值固定 1 级，
+        //   参数保留供扩展）。仅 Survival 生效（PlayerController.applyStatusEffect 门控；其它模式调用静默丢弃，
+        //   回显照常）。
+        "effect": {
+            desc: "/effect <poison|slowness|fire|clear> [秒] —— 施加/清除状态效果",
+            run: function(rest) { return window.runEffect(rest) }
         }
     })
+    // t715 /effect 解析：rest 含前导空格如 " poison 30"。类型词 → PlayerState.StatusEffect 枚举值
+    //   （Q_ENUM 类型作用域，同 BoatManager.Spruce 模式）；clear → 清全部。秒缺省 kSlowDefaultDuration(15)、
+    //   等级缺省 1。非法 → 用法回显。
+    function runEffect(rest) {
+        const args = rest.trim().split(/\s+/)
+        if (args.length < 1 || args[0] === "")
+            return "用法: /effect <poison|slowness|fire|clear> [秒]"
+        const word = args[0].toLowerCase()
+        if (word === "clear") {
+            player.clearStatusEffects()
+            return "已清除全部状态效果"
+        }
+        const secs = args.length > 1 ? parseFloat(args[1]) : 15
+        const lvl = args.length > 2 ? parseInt(args[2], 10) : 1
+        if (isNaN(secs) || secs < 0) return "/effect 秒数需为 ≥0 数字（0=清除）"
+        let name = ""
+        let eff = -1
+        if (word === "poison" || word === "中毒")    { eff = PlayerState.EffectPoison;    name = "中毒" }
+        else if (word === "slowness" || word === "slow" || word === "缓慢") { eff = PlayerState.EffectSlowness; name = "缓慢" }
+        else if (word === "fire" || word === "着火")  { eff = PlayerState.EffectFire;     name = "着火" }
+        else return "未知效果: " + args[0] + "（用 poison/slowness/fire/clear）"
+        player.applyStatusEffect(eff, secs, isNaN(lvl) || lvl < 1 ? 1 : lvl)
+        return secs <= 0 ? ("已清除「" + name + "」效果")
+                         : ("已施加「" + name + "」" + Math.ceil(secs) + " 秒（等级 " + (isNaN(lvl) || lvl < 1 ? 1 : lvl) + "）")
+    }
     // t695 /xp 解析（spec 见 commandRegistry.xp 注释）：rest 含前导空格如 " 100" / " 3L"。
     //   L 后缀大小写不敏感；非法（空 / 非数字 / ≤0）→ 用法回显。加级走 PlayerState::addLevels（整级跨越，
     //   级内进度清零——与 MC /xp L 语义一致）；加点走 addXp（跨阈值自然升级）。
@@ -2244,8 +2277,12 @@ Window {
         // t690 毒伤独立路由：毒（毒马铃薯食物中毒）不吃护甲减伤、不磨护甲耐久（机制等价 MC 1.0 poison
         //   属魔法系伤害绕过盔甲公式）。直走 takeDamage（damaged 红闪 / 视角晃照旧）+ 中断睡觉。旧版毒
         //   复用 fallDamageTaken → 上方处理器的无条件 damageArmor() 使 8s 毒 = 8 次免费护甲损耗。
+        //   t715 等级 1 不致死下限（MC 1.0 poison：扣到剩 1 血停，不致死亡）：health <= 1 时不再扣（仅保
+        //   红闪 / 中断睡觉反馈）。下限守在此路由处 —— PlayerController 不持 PlayerState.health（分层：
+        //   经信号解耦，同 t690 设计）。
         function onPoisonDamageTaken(hp) {
-            playerState.takeDamage(hp, PlayerState.Generic)
+            if (playerState.health > 1)
+                playerState.takeDamage(hp, PlayerState.Generic)
             player.wakeUp()
         }
         // t238 饥饿回血 → PlayerState.heal（饱腹态每 4s 回 1HP；同 fallDamageTaken→takeDamage 反向配对）。
@@ -2256,6 +2293,9 @@ Window {
         // t238 饥饿值更新 → PlayerState.setHunger（Physics 层 m_hunger 推进 / 食用恢复时发；同 airUpdated→
         //   setAir 模式）。饥饿归零扣血复用 onFallDamageTaken（→ takeDamage → damaged 红闪 / 视角晃）。
         function onHungerUpdated(hunger) { playerState.setHunger(hunger) }
+        // t715 状态效果快照 → PlayerState.setActiveEffects（Physics 层 tickImpl 组装活跃效果列表、真变才发；
+        //   Game 层持显值，同 airUpdated→setAir 模式。HUD 右上角效果栏读 playerState.effectList 渲染）。
+        function onActiveEffectsChanged(effects) { playerState.setActiveEffects(effects) }
         // t388 睡觉被拒（白天 / 附近有怪物）→ 系统播报中文文案（同死亡播报 appendChatMessage 模式）。
         function onSleepRefused(reason) { window.appendChatMessage("", reason, true) }
         // t35：生存破可掉落方块（drop=true）→ player 发 spawnItem → 转发到 manager 生成实体。
@@ -10343,6 +10383,79 @@ Window {
                 delegate: VitalIcon {
                     kind: "armor"
                     level: armorBar.levelForArmor(hotbarVM.totalArmorPoints, index)
+                }
+            }
+        }
+    }
+
+    // t715 状态效果栏（用户点名「获得相应效果时右上角会显示状态还有持续时间」）：屏幕右上角纵向排列活跃
+    //   效果图标 + 剩余秒数字（不足 1 分钟显秒数，超过显 m:ss；机制等价 MC 1.0 HUD 右上角状态效果列）。
+    //   数据源 = PlayerState 效果容器（effectRevision + effectList，t715 moc 安全契约：Repeater model 触碰
+    //   revision 建依赖 + 调列表方法取值，且 revision 参与表达式（lessons「静态节点绑定用表达式形式」铁律））。
+    //   图标 = icon_effect_*.png（tools/build_effect_icons.py 程序自绘原创，§9 红线非 MC 资产）；pack 启用且包内
+    //   mob_effect 目录有对应 PNG 时优先用 pack 图（resourcePack.effectIconSource 运行期映射，t715）。
+    //   仅 Survival 显（效果仅 Survival 生效）；非 playing / 无效果时整体隐藏。位置在生命/饥饿条右上更外侧
+    //   （不遮 vitalsBar / airBar / armorBar —— 那些居中，本栏锚窗口右缘）。
+    Item {
+        id: effectBar
+        // visible 触碰 effectRevision（守卫 _r >= 0 恒真，lessons「静态节点绑定用表达式形式」铁律）：
+        //   effectList() 是 Q_INVOKABLE 函数调用、不建 NOTIFY 依赖 → 效果增删时 revision 变但本绑定若不读
+        //   revision 就永不重算（空列表 → 恒隐藏）。Repeater model 同理（下方）。
+        visible: window.appState === "playing"
+                 && player.mode === PlayerController.Survival
+                 && playerState.effectRevision >= 0
+                 && playerState.effectList().length > 0
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 10
+        anchors.rightMargin: 10
+        width: 150
+        height: effectColumn.childrenRect.height
+
+        // 剩余秒格式化：不足 1 分钟显整数秒；超过显 m:ss（分:秒两位零填充）。
+        function formatSeconds(s) {
+            if (s < 60) return String(s)
+            const m = Math.floor(s / 60)
+            const ss = s % 60
+            return m + ":" + (ss < 10 ? "0" : "") + ss
+        }
+
+        Column {
+            id: effectColumn
+            anchors.top: parent.top
+            anchors.right: parent.right
+            spacing: 4
+            // Repeater model：effectRevision 参与（守卫恒真 `_r >= 0`）建 NOTIFY 依赖，revision 变 → model
+            //   重算调 effectList() 取新数组（t715 效果容器契约，同 achievements 模式）。
+            Repeater {
+                model: {
+                    const _r = playerState.effectRevision
+                    return _r >= 0 ? playerState.effectList() : []
+                }
+                delegate: Row {
+                    spacing: 4
+                    // pack 效果图标优先（pack 启用 + mob_effect 目录有同名 PNG）；否则 qrc 程序自绘。
+                    //   url 判空用 toString().length（lessons：QML url .length 恒 undefined）。
+                    Image {
+                        width: 20; height: 20
+                        fillMode: Image.PreserveAspectFit
+                        source: {
+                            const packSrc = resourcePack.effectIconSource(modelData.type)
+                            return (packSrc && packSrc.toString().length > 0) ? packSrc
+                                : (modelData.type === PlayerState.EffectPoison ? "qrc:/textures/icon_effect_poison.png"
+                                : modelData.type === PlayerState.EffectSlowness ? "qrc:/textures/icon_effect_slowness.png"
+                                : "qrc:/textures/icon_effect_fire.png")
+                        }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: effectBar.formatSeconds(modelData.seconds)
+                        color: "#e8e8e8"
+                        style: Text.Outline
+                        styleColor: "#202020"
+                        font.pixelSize: 13
+                        font.bold: true
+                    }
                 }
             }
         }

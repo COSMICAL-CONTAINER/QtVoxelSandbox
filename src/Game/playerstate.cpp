@@ -1,5 +1,6 @@
 #include "playerstate.h"
 
+#include <QVariantMap>
 #include <algorithm> // std::clamp/std::max/std::min
 
 PlayerState::PlayerState(QObject *parent) : QObject(parent) {}
@@ -86,6 +87,13 @@ void PlayerState::setHealth(int value)
     if (nv > 0 && m_dead) { m_dead = false; emit deadChanged(); } // 防陈旧死亡态残留显死亡界面
     // t311：存档加载的玩家非死亡态 → 死因复位 Generic（防上一局死因残留到本局死亡屏 / 聊天播报）。
     if (nv > 0 && m_deathCause != Generic) { m_deathCause = Generic; emit deathCauseChanged(); }
+    // t715：存档加载清状态效果容器（效果不持久化 —— PlayerController::loadSavedState 同步清 m_poisonTimer/
+    //   m_fireTimer 时序源，同火烧瞬态语义；此处清容器防上一世界效果跨世界残留显陈旧图标）。
+    if (!m_effects.isEmpty()) {
+        m_effects.clear();
+        ++m_effectRevision;
+        emit effectsChanged();
+    }
 }
 
 // t202 设气泡值：clamp 到 [0, maxAir]；无变化静默。由 PlayerController 经 airUpdated 信号驱动（眼位入水
@@ -105,9 +113,46 @@ void PlayerState::respawn()
     if (m_health != kMaxHealth) { m_health = kMaxHealth; emit healthChanged(); }
     if (m_hunger != kMaxHunger) { m_hunger = kMaxHunger; emit hungerChanged(); }
     if (m_air != kMaxAir) { m_air = kMaxAir; emit airChanged(); } // t202 重生回满气泡
+    // t715 重生清状态效果（机制等价 MC 1.0 死亡/重生清除全部状态；PlayerController::respawn 同步清
+    //   m_poisonTimer/m_fireTimer 等时序源，本容器随之在下一 tick 收到空列表 —— 此处再显式清防「重生后
+    //   最后一帧残留图标」，同火烧 m_burning 清态模式）。
+    if (!m_effects.isEmpty()) {
+        m_effects.clear();
+        ++m_effectRevision;
+        emit effectsChanged();
+    }
     // t311 重生复位死因（死亡屏 / 聊天文案随之清空；m_lastCause 同步复位，防下次死亡前陈旧来源）。
     if (m_deathCause != Generic) { m_deathCause = Generic; emit deathCauseChanged(); }
     m_lastCause = Generic;
+}
+
+// t715 设活跃效果列表（PlayerController 经信号 → 呈现层路由调；见头注释）。深比较：逐项 type/seconds/level
+//   全同（含长度）视为无变化静默 —— PlayerController 只在真变化（增删 / 剩余秒跨整秒）时发信号，本处比较是
+//   防御性二次校验（同 setAir「无变化不发信号」纪律）。变化 → 覆盖 + ++m_effectRevision + emit effectsChanged。
+void PlayerState::setActiveEffects(const QVariantList &list)
+{
+    const bool same = (list.size() == m_effects.size())
+        && [&]() {
+               for (int i = 0; i < list.size(); ++i) {
+                   const QVariantMap &a = list.at(i).toMap();
+                   const QVariantMap &b = m_effects.at(i).toMap();
+                   if (a.value(QStringLiteral("type")).toInt() != b.value(QStringLiteral("type")).toInt()
+                       || a.value(QStringLiteral("seconds")).toInt() != b.value(QStringLiteral("seconds")).toInt()
+                       || a.value(QStringLiteral("level")).toInt() != b.value(QStringLiteral("level")).toInt())
+                       return false;
+               }
+               return true;
+           }();
+    if (same) return;
+    m_effects = list;
+    ++m_effectRevision;
+    emit effectsChanged();
+}
+
+// t715 当前活跃效果列表（直接返容器；QML Repeater model = { effectRevision 参与表达式 + effectList() } 模式）。
+QVariantList PlayerState::effectList() const
+{
+    return m_effects;
 }
 
 // t402 累积经验值：加 amount（吸收经验球时调；amount<=0 忽略）。累积 m_xp（总）+ 派生 level（t403，

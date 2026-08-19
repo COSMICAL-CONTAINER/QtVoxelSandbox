@@ -2,9 +2,20 @@
 #define PLAYERSTATE_H
 
 #include <QObject>
+#include <QVariantList>
 #include <QtQml/qqml.h>
 
 // 玩家状态视图模型（Game/Entities 层）：生命/饥饿/气泡的数值持有 + 受伤/恢复钩子。
+//
+// t715 状态效果系统 v1：本类新增「状态效果容器」（活跃效果列表：{效果类型, 剩余秒, 等级}）。
+//   v1 三类：Poison 中毒 / Slowness 缓慢 / Fire 着火。既有散落的玩家效果（PlayerController 的
+//   m_poisonTimer 食物中毒、m_fireTimer 火烧）**机制保持原位**（tick 驱动 / 伤害路由不变，防回归），
+//   本容器作为「呈现层单一权威视图」——PlayerController 每 tick 用「效果快照信号」
+//   activeEffectsChanged(QVariantList) 把当前生效效果（类型/剩余秒/等级）推给本类（经呈现层
+//   Connections 路由 setActiveEffects，同 fallDamageTaken→takeDamage 模式：Physics 层算时序、
+//   Game 层持显值、呈现层只消费）。QML HUD 右上角效果栏（图标 + 剩余秒）读本容器渲染。
+//   分层（PLAN §2）：PlayerState（Game 层）不 include PlayerController（同层不互持指针、
+//   经信号解耦，同 health/hunger 镜像模式）。
 //
 // 暴露给 QML（呈现层只读）：
 //   - health   当前生命 0..maxHealth（每心 2 HP；满 = 20 = 10 心）
@@ -67,8 +78,17 @@ class PlayerState : public QObject
     //   必发 xpChanged；level 仅在 addXp/setXp 内随 xp 同步变 → xpChanged 覆盖所有「条可能变」的时机，
     //   见 lessons-learned「Q_PROPERTY NOTIFY 只能挂一个信号」：挂主、补发副，此处无需补发）。
     Q_PROPERTY(qreal xpBarFraction READ xpBarFraction NOTIFY xpChanged)
+    // t715 状态效果容器版本号：PlayerController 每 tick 检出「活跃效果列表」变化（增 / 删 / 剩余秒跨整秒）
+    //   时 bump。QML 效果栏 Repeater 用「先读 revision 建依赖、再调 effectList()」取最新列表
+    //   （moc 拒绝 Q_PROPERTY(QVariantList)，见 lessons-learned；Q_INVOKABLE 返列表 + revision 是标准契约）。
+    Q_PROPERTY(int effectRevision READ effectRevision NOTIFY effectsChanged)
 
 public:
+    // t715 状态效果类型枚举（v1：中毒 / 缓慢 / 着火；§9 零 MC 专名，命名与 DeathCause 同风格）。
+    //   Q_ENUM 暴露给 QML（PlayerState.EffectPoison 等）；序号即效果图标路由键（QML 按此选 icon_effect_*.png）。
+    //   **追加在末尾**（既有消费者按序 switch，追加不破坏；同 DeathCause 纪律）。
+    enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire };
+    Q_ENUM(StatusEffect)
     // t311 死亡原因枚举（机制等价 MC 1.0 各来源死因，§9 改名为通用词）。Q_ENUM 暴露给 QML：
     //   PlayerState.Fall 等（同 EntityManager.MobPig 模式）。避免命名 None（Linux CI 下 X11 头 None 宏冲突）。
     //   Generic=未归类（默认 / takeDamage 单参兜底）；Fall=高处坠落；Suffocation=嵌实体方块窒息；
@@ -99,6 +119,12 @@ public:
     int level() const { return m_level; }             // t403 当前等级（由总 xp 经曲线派生）
     int xpToNextLevel() const;                         // t403 升下一级所需 XP（曲线）
     qreal xpBarFraction() const;                       // t403 经验条填充比 [0,1]
+    int effectRevision() const { return m_effectRevision; } // t715 效果容器版本号（++ 驱动 QML 列表刷新）
+
+    // t715 当前活跃效果列表（每项 QVariantMap{type, seconds, level}，按固定序 Poison/Slowness/Fire）。
+    //   Q_INVOKABLE 返 QVariantList（moc 拒绝 Q_PROPERTY(QVariantList)，lessons-learned）→ QML Repeater
+    //   model 用「先读 effectRevision 建依赖、再调本方法」模式（同 achievements/achievements() 契约）。
+    Q_INVOKABLE QVariantList effectList() const;
 
     // 受伤钩子（Game/Physics 调用）：扣 amount HP，clamp 到 0；扣到 0 → 置 dead + emit died（且此后不再继续扣，
     // spec t78）。amount<=0 忽略（无治疗语义）。dead 期间早退（不再扣血、不再发 damaged）。
@@ -140,6 +166,11 @@ public:
     //   （xpTotalForLevel(level+N)，级内进度一并清零——升级语义非累点）。amount<=0 忽略；无信号复用
     //   setXp 路径（xpChanged / levelChanged 按「真变才发」纪律）。
     Q_INVOKABLE void addLevels(int amount);
+    // t715 设活跃效果列表（PlayerController 每 tick 检出变化时经 activeEffectsChanged 信号 → 呈现层
+    //   Connections 路由调本入口，同 airUpdated→setAir 模式）。list 每项 QVariantMap{type, seconds, level}。
+    //   深比较（逐项 type/seconds/level 相同）无变化 → 静默（不发信号）；变化 → 覆盖 + ++m_effectRevision +
+    //   emit effectsChanged。Q_INVOKABLE：QML Connections 处理器以函数调用语法调（lessons-learned：裸调必须挂）。
+    Q_INVOKABLE void setActiveEffects(const QVariantList &list);
 
 signals:
     void healthChanged();
@@ -155,6 +186,8 @@ signals:
     void xpChanged();
     // t403 等级变更（addXp 跨越曲线阈值时；setXp 读档重建时）。驱动 HUD 等级数 / 经验条分母刷新。
     void levelChanged();
+    // t715 状态效果容器变更（setActiveEffects 检出真变化时；驱动 effectRevision + effectList 绑定刷新）。
+    void effectsChanged();
     // 受伤闪烁触发（t51）：takeDamage 实扣 HP 时发；呈现层（Main.qml）Connections 据此启动
     // 红色半透全屏叠层的 alpha 0.4→0 淡出动画（~600ms）。amount = 本次请求扣血量（不计 clamp 截断）。
     // 与 healthChanged 分离：healthChanged 驱动心条数值刷新（每半心切态），damaged 驱动一次性的视觉闪烁
@@ -175,6 +208,10 @@ private:
     int m_xp = 0;              // t402 经验值累积（吸收经验球累加；初值 0）
     int m_level = 0;           // t403 当前等级（由 m_xp 经曲线派生；初值 0）
     int m_intoLevel = 0;       // t403 当前级内已累积 XP（m_xp − xpTotalForLevel(m_level)；初值 0）
+    // t715 活跃状态效果容器（呈现层单一权威视图；时序权威在 PlayerController tick，经 activeEffectsChanged
+    //   → setActiveEffects 推入）。每项 {type, seconds, level}；固定序 Poison/Slowness/Fire。初值空。
+    QVariantList m_effects;
+    int m_effectRevision = 0;  // t715 效果容器版本号（真变化 ++；QML 列表绑定依赖）
 
     // t403 MC 1.0 风格递增曲线（机制等价 MC，三段斜率；need 单调递增）：从 level 升到 level+1 所需 XP。
     //   低级（0..14）2L+7、中级（15..29）5L−38、高级（30+）9L−158。level<0 → 0（防御）。

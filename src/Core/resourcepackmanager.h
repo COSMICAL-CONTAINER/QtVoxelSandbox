@@ -122,6 +122,13 @@ public:
     //   运行期读本地 gitignored pack PNG（红线 §9：PNG 不进 qrc/VCS）。active=false / 无 item 目录 / 文件缺 → ""。
     Q_INVOKABLE QString emptyArmorSlotSource(int armorPiece) const;
 
+    // t715 状态效果 HUD 图标覆盖：pack 启用且包内 mob_effect 目录（assets/minecraft/textures/mob_effect）有
+    //   对应效果枚举（PlayerState::StatusEffect 序：1=Poison/2=Slowness/3=Fire）的 PNG（poison.png 等）时，
+    //   返 file:///<effectDir>/<name>.png 供 QtQuick Image 加载；否则空串 → Main.qml 效果栏回退 qrc 程序自绘
+    //   icon_effect_*.png。MC 1.0 无 mob_effect 目录（老包 miss 属常态，安全跳过）。红线 §9：仅运行期读本地
+    //   gitignored pack PNG，不 bake 进 qrc/VCS。active=false / 无目录 / 无映射 / 文件缺 → ""。
+    Q_INVOKABLE QString effectIconSource(int effectType) const;
+
     // t421 生物模型贴图覆盖：pack 启用且 mobType 在「引擎 mob id → pack entity 子目录/文件名」映射内、且包内
     //   对应 PNG 存在时，返回 file:///<entityDir>/<mob>/<mob>.png 供 QtQuick3D Texture 直接加载（MobModel 据
     //   packTextured 把几何 UV 按 T 字展开进该贴图）；否则返空串 → Main.qml 各 mob delegate 回退程序生成

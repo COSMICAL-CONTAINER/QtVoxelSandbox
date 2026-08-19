@@ -52,6 +52,7 @@ struct BuiltState {
     QString itemDir;              // t420 包内物品图标目录（assets/minecraft/textures/item）绝对路径；空 = 无 item 覆盖
     QString entityDir;            // t421 包内生物贴图目录（assets/minecraft/textures/entity）绝对路径；空 = 无 entity 覆盖
     QString blockDir;             // t456 包内方块贴图目录（assets/minecraft/textures/block）绝对路径；blockItemIconSource 兜底探测（pack 把前贴图放 block/ 时）
+    QString effectDir;            // t715 包内状态效果图标目录（assets/minecraft/textures/mob_effect）绝对路径；effectIconSource 探测（HUD 效果栏 pack 覆盖）
     // t489 流体条带落盘路径（active 时 file:///）；waterStrip = 2 列×32 帧（静水|流水），lavaStrip = 1 列×16 帧。
     QString waterStripFile;
     QString lavaStripFile;
@@ -801,6 +802,21 @@ const QList<QPair<int, QString>> &mobEntityMap()
     return kMap;
 }
 
+// t715「引擎状态效果枚举（PlayerState::StatusEffect 序：1=Poison/2=Slowness/3=Fire）→ pack mob_effect 文件名」
+//   映射（功能性元数据，红线 §9 可随代码提交；贴图文件本身不进仓库）。effectIconSource 逐枚举探测
+//   <effectDir>/<name>.png，命中返 file:// URL；全缺返空（Main.qml 效果栏回退 qrc icon_effect_*.png 自绘）。
+//   v1 三效果：poison / slowness / fire（mob_effect 标准文件名；fire 在 mob_effect 目录无独立文件（MC 用 HUD
+//   火焰而非图标）→ miss 回退自绘属预期）。Core 不依赖 Game 故用字面量 + 注释钉死序号（同 itemFilenameMap 例）。
+QStringList effectIconFiles(int effectType)
+{
+    switch (effectType) {
+    case 1: return { QStringLiteral("poison.png") };    // EffectPoison 中毒
+    case 2: return { QStringLiteral("slowness.png") };  // EffectSlowness 缓慢
+    case 3: return { QStringLiteral("fire.png") };      // EffectFire 着火（多数包无此文件 → 回退自绘）
+    default: return {};
+    }
+}
+
 // t456「引擎方块 id → pack item/前贴图文件名候选」映射（功能性元数据，红线 §9 可随代码提交；贴图文件不进仓库）。
 //   方块段 id（与 BlockRegistry::Id 同源；Core 不依赖 Game 故用字面量 + 注释钉死，同 itemFilenameMap 不引
 //   toolregistry 之例）。blockItemIconSource 逐候选 itemDir→blockDir 探测，首个命中即返；全缺返空（Hotbar 回退
@@ -1467,6 +1483,7 @@ void ensureBuiltLocked()
     s.itemDir.clear(); // t420 reset 物品图标目录（仅当包合法时重填）
     s.entityDir.clear(); // t421 reset 生物贴图目录（仅当包合法时重填）
     s.blockDir.clear(); // t456 reset 方块贴图目录（仅当包合法时重填）
+    s.effectDir.clear(); // t715 reset 状态效果图标目录（仅当包合法时重填）
     s.waterStripFile.clear(); // t489 reset 流体条带落盘路径（仅当包合法时重填）
     s.lavaStripFile.clear();
     s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
@@ -1549,6 +1566,10 @@ void ensureBuiltLocked()
     s.entityDir = resolveEntityDir(packPath);
     // t456 方块贴图目录（已由 resolveBlockDir 解析为 blockDirPath；缓存供 blockItemIconSource 兜底探测 block/<name>.png）。
     s.blockDir = blockDirPath;
+    // t715 状态效果图标目录（assets/minecraft/textures/mob_effect；同 packPath 并列解析）。包内无 mob_effect
+    //   目录时为空 → effectIconSource 恒返空串 → HUD 效果栏回退 qrc 程序自绘 icon_effect_*.png（不阻塞图集合成）。
+    //   MC 1.0 无 mob_effect 目录（1.6 前状态无图标 / 1.9 才引入该目录），老包 miss 属预期常态。
+    s.effectDir = resolveTexturesSubDir(packPath, QStringLiteral("mob_effect"));
     // t585 指南针/钟逐帧动画：探测 item 目录帧文件数（compass_00.. / clock_00.. 连续环；demo 包实测 32/64）。
     //   无 item 目录 / 无帧文件 → count=0 → animatedItemFrameSource 返空 → itemIconSource 回落静态
     //   compass.png/clock.png（再缺则自绘）。探测在构建期一次完成（构建后帧文件不再增删）。
@@ -2077,9 +2098,28 @@ QString ResourcePackManager::blockItemIconSource(int blockId)
     return QStringLiteral("file:///") + foundPath;
 }
 
-QString ResourcePackManager::mobTextureSource(int mobType) const
+// t715 状态效果 HUD 图标覆盖（实例 Q_INVOKABLE；Main.qml effectBar delegate 调）：pack 启用且 effectDir
+//   （assets/minecraft/textures/mob_effect）有对应枚举的 PNG 时，返 file:///<effectDir>/<name>.png；否则空串
+//   → 调用方回退 qrc:/textures/icon_effect_*.png 程序自绘。红线 §9：仅运行期读本地 gitignored pack PNG，
+//   不 bake 进 qrc/VCS。active=false / 无 mob_effect 目录 / 无映射 / 文件缺 → ""。
+QString ResourcePackManager::effectIconSource(int effectType) const
 {
     QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active || s.effectDir.isEmpty())
+        return {};
+    const QStringList names = effectIconFiles(effectType);
+    for (const QString &name : names) {
+        const QString p = QDir(s.effectDir).absoluteFilePath(name);
+        if (QFile::exists(p))
+            return QStringLiteral("file:///") + p;
+    }
+    return {};
+}
+
+QString ResourcePackManager::mobTextureSource(int mobType) const
+{    QMutexLocker lock(&stateMutex());
     ensureBuiltLocked();
     const BuiltState &s = state();
     if (!s.active || s.entityDir.isEmpty())

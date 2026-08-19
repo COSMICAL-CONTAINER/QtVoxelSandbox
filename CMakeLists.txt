@@ -462,6 +462,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_anvil_chipped.png          # t477 微损铁砧立方体图标（build_cube_icons.py；顶=砧台+细裂纹 / 侧=深铁砧身）
         textures/icon_anvil_damaged.png          # t477 重损铁砧立方体图标（build_cube_icons.py；顶=砧台+粗裂纹网+缺角 / 侧=深铁砧身）
         textures/icon_pumpkin.png                # t482 南瓜立方体图标（build_cube_icons.py；顶=橙色瓜顶+短茎 / 侧=橙色瓜棱）
+        textures/icon_effect_poison.png          # t715 中毒效果图标（build_effect_icons.py 程序自绘原创；绿色药水瓶剪影）
+        textures/icon_effect_slowness.png        # t715 缓慢效果图标（build_effect_icons.py 程序自绘原创；深灰蓝厚重靴剪影）
+        textures/icon_effect_fire.png            # t715 着火效果图标（build_effect_icons.py 程序自绘原创；黄芯火苗剪影）
         textures/icon_snow.png                   # t482 雪块立方体图标（build_cube_icons.py；各面=冷白冰晶噪点，同积雪层）
         textures/icon_end_portal.png             # t634/t644 末地传送门立方体图标（--from-pack：endframe_top+side 裁顶空白，与放置态一致）
         textures/icon_cobweb.png                 # t484 蜘蛛网 flat 2D 图标（build_cube_icons.py；透明底+灰白蛛丝放射网纹）

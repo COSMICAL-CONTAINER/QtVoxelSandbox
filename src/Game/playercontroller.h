@@ -365,6 +365,15 @@ public:
     //   不跳清晨（玩家选择立即醒 = 仍处夜晚）。非 Settled 阶段调无效（防重入）。spec「按则立即醒」。
     Q_INVOKABLE void wakeUpFromBed();
 
+    // t715 施加状态效果（/effect 命令入口；后续中毒来源 / 药水等复用）。effect = PlayerState::StatusEffect
+    //   枚举值（QML 传 PlayerState.EffectPoison 等）；seconds<=0 → 清除该效果；level 恒 ≥1（v1 中毒/缓慢均
+    //   固定 1，参数保留供扩展）。仅 Survival 生效（Creative/Spectator 无敌不吃效果，同火 / 中毒模式）。
+    //   命中效果类型转交对应时序源（Poison→m_poisonTimer / Slowness→m_slowTimer / Fire→m_fireTimer），
+    //   tickImpl 统一推进 + 快照广播（activeEffectsChanged），效果机制本身不在此实现。
+    Q_INVOKABLE void applyStatusEffect(int effect, float seconds, int level);
+    // t715 清全部状态效果（/effect clear；重生 / 存档加载内部亦同源清）。
+    Q_INVOKABLE void clearStatusEffects();
+
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
     Q_INVOKABLE void setMode(Mode m);
@@ -555,6 +564,11 @@ signals:
     void flowSoundLevelChanged(); // t223 近流水 proximity 强度变（驱动 AudioManager 水流声 start/stop/setLevel）
     void lavaSoundLevelChanged(); // t343 近岩浆 proximity 强度变（驱动 AudioManager 岩浆声 start/stop/setLevel）
     void burningChanged(); // t344 玩家火烧态翻转（驱动底部火焰叠层显隐；值真变才发，免每帧抖 QML 绑定）
+    // t715 活跃状态效果快照（QVariantList<{type, seconds, level}>，PlayerState::StatusEffect 序）：PlayerController
+    //   tickImpl 每帧组装（中毒 / 缓慢 / 着火 三效果 v1），与上一帧快照深比较（逐项 type/整秒/level）真变才发。
+    //   呈现层 Connections 路由到 PlayerState.setActiveEffects（Game 层持显值，同 fallDamageTaken→takeDamage 模式）。
+    //   值约每秒最多发一次（剩余秒跨整秒才变），无每帧抖动。
+    void activeEffectsChanged(const QVariantList &effects);
     // t388/t457 睡觉态翻转（开始 / 结束睡觉）：驱动 QML 全屏 fade 叠层显隐（同 miningStateChanged 模式）。
     void sleepingChanged();
     // t457 睡觉 fade / 躺下量连续变化（0..1，阶段派生）：高频独立信号（同 miningProgressChanged），驱动 QML
@@ -885,6 +899,9 @@ private:
     ArrowSlot findArrowInInventory() const;
     // t267 完成（progress 满）：消耗 1 面包 + 恢复饥饿（kBreadHungerAmount）+ 清态。Survival 消耗 / Creative 不耗。
     void finishEating();
+    // t715 组装当前活跃状态效果快照（QVariantList<{type, seconds, level}>，固定序 Poison/Slowness/Fire；
+    //   seconds=ceil 整秒）。tickImpl 末与 m_lastEffectSigCache 深比较，真变才 emit activeEffectsChanged。
+    QVariantList buildActiveEffects() const;
     // t467 食物饥饿恢复量查询（单一权威）：返回物品作为食物一次恢复的饥饿值（面包=kBreadHungerAmount、甜浆果=
     //   kSweetBerryHungerAmount），非食物 → 0。供 eventFilter / beginEating / updateEating / finishEating 统一判
     //   「是否食物」与「恢复多少」，避免各处硬编码 BreadId 判定（新增食物只改本方法一处）。纯函数于 itemId。
@@ -1181,6 +1198,13 @@ private:
     //   m_poisonDmgAccum 扣损累积（每 kPoisonInterval 秒 emit 一次 -1 饥饿 + -1 HP）。仅 Survival。
     float m_poisonTimer = 0.0f;
     float m_poisonDmgAccum = 0.0f;
+    // t715 缓慢效果态（StatusEffect::EffectSlowness 的时序源）：m_slowTimer 缓慢剩余秒（>0 缓慢；tickImpl
+    //   递减，归零解除）。缓慢降移速（step() 走路分支水平速度 ×kSlowSpeedMul，机制等价 MC 1.0 slowness
+    //   按等级降移速；v1 固定等级 1）。v1 来源：/effect 命令（测试入口）。m_lastEffectSigCache 上一帧效果
+    //   快照（activeEffectsChanged 深比较缓存，真变才发信号，免每帧 emit）。
+    float m_slowTimer = 0.0f;
+    int m_slowLevel = 0;
+    QVariantList m_lastEffectSigCache; // t715 上一帧活跃效果快照（发信号去抖缓存）
     // t394 仙人掌接触伤害累积（玩家 AABB 接触 Cactus 方块时累加，每 EntityManager::kCactusDamageInterval 扣 1HP；
     //   离开即归零）。机制等价 MC 1.0 仙人掌触碰即伤。仅 Survival（Creative/Spectator 无敌不累）。
     float m_cactusDmgTimer = 0.0f;
@@ -1437,16 +1461,19 @@ private:
     //   保持 true → 进食手持动画（手落下 + 嚼动）持续显示，progress 暂停；冷却到 0 才恢复累积（连食下一件）。
     //   1.0s ≈ MC 1.0 进食冷却量级（机制对齐，非精确数值复刻）。
     static constexpr float kEatCooldown = 1.0f;
-    // t669 毒马铃薯食物中毒（机制等价 MC 1.0 poisonous potato：60% 概率中毒起效，中毒期持续 ~8s、
-    //   每秒 -1 HP —— 无状态系统时的简化：饥饿 + HP 双损，视觉复用 damaged 红闪 / 饥饿鼓腿掉）。
-    //   finishEating 食毒薯掷 60% → m_poisonTimer = kPoisonDuration；tickImpl 每秒（kPoisonInterval 累积）
-    //   emit fallDamageTaken(1, Generic) → 呈现层 takeDamage 链（damaged 红闪）+ hungerUpdated 掉 1 饥饿。
-    //   毒薯兼负 +2 饥饿恢复（foodHungerAmount），6 点净损（8s × 1）由持续掉血体现。仅 Survival 结算
-    //   （Creative/Spectator 无敌：进食不中毒，同火 / 窒息模式）。期间再食另一毒薯重置时长（可叠续）。
+    // t669 毒马铃薯食物中毒（机制等价 MC 1.0 poisonous potato：60% 概率中毒起效，中毒期持续 ~8s）。
+    //   finishEating 食毒薯掷 60% → m_poisonTimer = kPoisonDuration；tickImpl 推进（t715 状态效果系统 v1
+    //   收编语义：每 kPoisonInterval=1.25s -1 饥饿 + -1 HP，等级 1 不致死（扣到剩 1 血停）—— 详见 .cpp 注释）。
+    //   毒薯兼负 +2 饥饿恢复（foodHungerAmount）。仅 Survival 结算（Creative/Spectator 无敌：进食不中毒，
+    //   同火 / 窒息模式）。期间再食另一毒薯重置时长（可叠续）。
     static constexpr int kPoisonousPotatoHunger = 2;   // 毒薯饥饿恢复（MC 1.0 poisonous potato +2 hunger）
-    static constexpr float kPoisonDuration = 8.0f;     // 中毒持续秒数（MC 1.0 poison ~5s 起；8s ≈ 8 点损）
-    static constexpr float kPoisonInterval = 1.0f;     // 每次中毒扣损的间隔秒数
+    static constexpr float kPoisonDuration = 8.0f;     // 中毒持续秒数（MC 1.0 poison ~5s 起；8s ≈ 6 点损）
+    static constexpr float kPoisonInterval = 1.25f;    // 每次中毒扣损的间隔秒数（t715 对齐 MC 1.0 poison 每 25 tick 扣 1）
     static constexpr int kPoisonChancePct = 60;        // 食毒薯中毒概率（MC 1.0：60%）
+    // t715 缓慢效果常量（机制等价 MC 1.0 slowness）：等级 1 移速 ×0.85（每级再 -15% 的简化单级实现）。
+    //   kSlowDuration 仅 /effect 命令默认时长用（测试入口）；显式秒数走 applyStatusEffect 参数。
+    static constexpr float kSlowSpeedMul = 0.85f;      // 缓慢时水平速度倍数（等级 1）
+    static constexpr float kSlowDefaultDuration = 15.0f; // /effect slow 缺省持续秒
     static constexpr float kHungerIdleRate   = 0.013f; // ~1 饥饿 / 75s ≈ 25min 耗尽（满→空）
     static constexpr float kHungerWalkRate   = 0.067f; // ~1 饥饿 / 15s ≈ 5min 走路耗尽
     static constexpr float kHungerSprintRate = 0.133f; // ~1 饥饿 / 7.5s ≈ 2.5min 疾跑耗尽
