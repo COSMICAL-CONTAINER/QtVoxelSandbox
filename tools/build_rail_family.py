@@ -169,13 +169,15 @@ def draw_detector(on_state):
 
 def draw_redstone_torch():
     """红石火把（tile 161，cross 贴图）：透明底 + 深棕木柄（中央竖条 x 7..8，y 6..15）+ 亮红焰头
-    （柄顶方块 x 6..9 × y 2..6——外暗红 / 内亮红 / 心白热）。机制等价 MC 1.0 红石火把常亮 on 态。"""
+    （柄顶方块 x 6..9 × y 2..6——外暗红 / 内亮红 / 心白热）。机制等价 MC 1.0 红石火把常亮 on 态。
+    t706 红罩：焰心白热 (255,216,200) → 暖红热 (255,150,130)，焰头整体更红——用户实测「火把光太白」；
+    顶点色光是单通道（voxellight 灰度 flood），红色感只能由贴图自身承载。"""
     img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
     px = img.load()
     handle = (0x5e, 0x42, 0x24, 255)      # 深棕木柄（同 torchHandle #6b4f24 近似族）
-    head_out = (0xd8, 0x30, 0x20, 255)    # 焰头外层（暗红）
-    head_mid = (0xff, 0x50, 0x38, 255)    # 焰头中层（亮红）
-    head_core = (0xff, 0xd8, 0xc8, 255)   # 焰心（白热）
+    head_out = (0xc0, 0x20, 0x14, 255)    # 焰头外层（深红）
+    head_mid = (0xff, 0x38, 0x20, 255)    # 焰头中层（炽红）
+    head_core = (0xff, 0x96, 0x78, 255)   # 焰心（红热——t706 自白热改红调）
     # 木柄（y 6..15，2px 宽居中）。
     for y in range(6, TS):
         put(px, 7, y, handle)

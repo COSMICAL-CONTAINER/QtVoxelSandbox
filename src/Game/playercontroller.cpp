@@ -4524,6 +4524,9 @@ void PlayerController::scanRedstoneOre(float dt)
         }
     }
     if (m_dead) return; // 死亡态不触发新点亮（同 pickupScan / scanTntTraps 门控；已亮的仍倒计时自熄）
+    // t706 观察者门控（机制等价 MC spectator 不触发方块交互）：观察者穿行红石矿不应点亮（同压力板
+    //   updatePressurePlates 的 m_mode != Spectator 采样门）。已亮的仍倒计时自熄（世界模拟连续）。
+    if (m_mode == Spectator) return;
     // 玩家 footprint 格（脚位 cellY + AABB 覆盖的 X/Z 格）± 水平 4 邻 × 3 行（feetY-1..feetY+1）。
     //   3 行覆盖：走过红石矿旁（同层邻格）/ 站在红石矿上（feetY-1 是脚下矿）/ 头顶邻层矿。同
     //   scanTntTraps / scanDispenserTraps footprint 采样模式。

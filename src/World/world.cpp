@@ -2130,18 +2130,20 @@ bool World::isReceivingPower(int x, int y, int z) const
 }
 
 // 编辑路径电力脏标记（挂 4/5 参数 setBlock / setWaterSilent / clearBlockSilent 末尾，同 checkRailOnEdit
-// 收口模式）：本格属红石族（粉 / 源 / 接收器）→ 本格入脏集；本格或其 6 邻有粉 → 编辑格 + 6 邻中的粉格
-// 也入脏集（粉连通域的 BFS 从这些锚点展开）。非红石族编辑且邻无粉 → no-op（普通地形编辑零开销）。
+// 收口模式）：本格属红石族（粉 / 源 / 接收器）→ 本格入脏集；否则查 6 邻**任意红石族格**（t706：旧版只查
+// 邻粉——破掉「源 | 石 | TNT」中间的石块这类无粉场景不入脏集 → 邻源 / 邻接收器电力永不复算 = 用户实测
+// 「红石块 / 火把点不着 TNT」的可达性缺口之一；扩到全红石族后惰性块编辑也能唤醒两侧电路），命中才继续
+// （全无 → 本次编辑与电力无关，no-op）。
 void World::notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId)
 {
     if (!isPowerFamilyBlock(oldId) && !isPowerFamilyBlock(newId)) {
-        // 快路径：本格前后都非红石族 → 只有邻粉连通性可能受影响（如破掉粉与粉之间的石块）。查 6 邻有粉
-        //   才继续（无粉 → 本次编辑与电力无关，no-op）。
+        // 快路径：本格前后都非红石族 → 只有邻格红石连通性可能受影响（如破掉源与接收器之间的石块）。查
+        //   6 邻任意红石族格（粉 / 源 / 接收器）才继续（全无 → no-op）。
         static constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-        bool anyDust = false;
+        bool anyPower = false;
         for (const auto &d : kNb)
-            if (BlockRegistry::isRedstoneDust(m_chunks.blockAt(x + d[0], y + d[1], z + d[2]))) { anyDust = true; break; }
-        if (!anyDust) return;
+            if (isPowerFamilyBlock(m_chunks.blockAt(x + d[0], y + d[1], z + d[2]))) { anyPower = true; break; }
+        if (!anyPower) return;
     }
     m_powerDirty.insert(packGrowthCell(x, y, z)); // 编辑格入脏集（tickRedstone 从此锚点展开）
     // 6 邻中的粉格也入脏集（邻粉电力可能因本编辑变化——源被放 / 破、粉被断路等）。
@@ -2408,6 +2410,9 @@ bool World::recomputePowerLocal()
         } else if (BlockRegistry::isTnt(b)) {
             // t658 TNT：通电**上升沿**触发一次（点燃后清 Air 由信号消费端做——同一链路防双触发）。
             if (powered) {
+                // t706 可观测性：用户实测「火把 / 红石块 / 粉都点不着 TNT」——链路静态核对完整（锚点邻扫 +
+                //   isReceivingPower 直供），本行让每次电力点火进日志可核（缺本行 = 脏集未及 / 信号断）。
+                qInfo("vo.red: power TNT at %d,%d,%d", x, y, z);
                 emit powerTntTriggered(x, y, z); // 呈现层：clearBlockSilent + spawnPrimedTnt（同机关点火链）
                 any = true;
             }
