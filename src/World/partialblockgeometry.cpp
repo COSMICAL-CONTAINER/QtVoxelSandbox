@@ -687,14 +687,30 @@ int PartialBlockGeometry::append(
         //   亮态（默认）贴 redstone_torch(161)（透明底 + 深棕柄 + 亮红焰头）；**熄灭态**（t657 反相器：附着块被
         //   供电 → state 置 RedstoneTorchStateOffFlag）换 redstone_torch_off(170)（暗红熄焰，无白热心）。
         //   alphaCutoff cutout → 仅火把剪影显。tile 由 tileIndex 取 sideTile（161 def 默认；off 在此覆写）。
+        //   **t705 贴墙渲染**（修「红石火把只能插地、插墙后仍显示为居中立柱」）：state 低 3 位附着编码
+        //   （torchAttachOffset 同源——placeBlock t638 并入 Torch 分支写入，floor=0 / 1..4=四向贴墙）驱动
+        //   墙态摆位 —— 柄根沉入支撑面（沿附着反向偏移 4/16），quad 平面向 45° 十字随同平移，视觉读作
+        //   「斜插在墙上的火把」（机制等价 MC 1.0 墙红石火把倾柄形态；cross quad 自身不旋转——贴图剪影
+        //   居中，平移后焰头在柄自由端观感成立）。贴地（floor）保持满格居中（原观感）。
         int torchTile = tile;
         if (state & BlockRegistry::RedstoneTorchStateOffFlag)
             torchTile = 170; // t657 熄灭态（redstone_torch_off）
+        // t705 墙态偏移：附着向支撑（torchAttachOffset 语义 = 支撑格方向）→ 火把体沉向支撑面 4/16。
+        int ax = 0, ay = 0, az = 0;
+        BlockRegistry::torchAttachOffset(state, ax, ay, az);
+        constexpr float kWallSink = 4.0f / 16.0f; // 柄根嵌支撑深度（cross 剪影中心偏到墙侧）
+        const float ox = -ax * kWallSink, oy = -ay * kWallSink, oz = -az * kWallSink;
         pushCrossQuad(verts, idx, lx, ly, lz,
-                      0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                      ox + 0.f, oy + 0.f, oz + 0.f,
+                      ox + 1.f, oy + 0.f, oz + 1.f,
+                      ox + 1.f, oy + 1.f, oz + 1.f,
+                      ox + 0.f, oy + 1.f, oz + 0.f, // Plane A: BL→BR→TR→TL
                       torchTile, light, tileW, hx, hy, v0, v1);
         pushCrossQuad(verts, idx, lx, ly, lz,
-                      1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                      ox + 1.f, oy + 0.f, oz + 0.f,
+                      ox + 0.f, oy + 0.f, oz + 1.f,
+                      ox + 0.f, oy + 1.f, oz + 1.f,
+                      ox + 1.f, oy + 1.f, oz + 0.f, // Plane B: BL→BR→TR→TL
                       torchTile, light, tileW, hx, hy, v0, v1);
         break;
     }

@@ -1666,9 +1666,11 @@ void BlockRegistry::ladderSupportOffset(quint8 state, int &dx, int &dz)
 //   （partialblockgeometry mech case）逐盒 pushBox，raycastAABBs 直接返回本集 —— 碰撞为空（ShapeNone 无碰撞，
 //   机制等价 MC 机关无 hitbox 阻挡），选中走本集精确小盒）。几何（单位 1/16）：
 //   - 按钮：凸钮单盒 —— 厚 2/16（贴附着面），宽 6/16 居中；按下（bit0）压薄到 1/16（机制等价 MC 6×2×6px
-//     按钮按下 1px 凹陷）。贴地钮 y[0,2/16]；贴墙钮垂直居中 y[7/16,9/16]。
+//     按钮按下 1px 凹陷）。贴地钮 y[0,2/16]；贴墙钮垂直居中 y[7/16,9/16]。t705 修：四向厚边贴**支撑面**
+//     （旧版镜像到对侧格边 = 用户实测「贴墙出现在墙背面悬空」）。
 //   - 拉杆：圆石底座盒（3/16 厚贴面 × 6/16 见方）+ 斜插木棍两段阶梯盒（近似倾角，机制等价 MC lever base+stick；
-//     贴地棍向 ±Z 摆（off=-Z / on=+Z），贴墙棍上（off）/ 下（on）摆）。附着头注释 MechAttach*（bit[3:1]）。
+//     贴地棍向 ±Z 摆（off=-Z / on=+Z），贴墙棍上（off）/ 下（on）摆）。t705 修：底座同样贴支撑面。
+//     附着头注释 MechAttach*（bit[3:1]）。
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, quint8 state)
 {
     std::vector<BlockAABB> out;
@@ -1677,12 +1679,15 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, q
     constexpr float t = 1.0f / 16.0f;
     if (blockId != Lever) {
         // 按钮：厚 2/16（按下 1/16），6/16 见方居中。机械三个 id 中非 Lever 即按钮（调用方守卫）。
+        //   t705 修：厚边贴**支撑面**（MechAttachOnXX = 支撑块方向 → 钮体贴该向格边）——旧版四向全镜像
+        //   （钮画在远离支撑的对侧格边 → 用户实测「贴墙出现在墙背面悬空」）。6×2×6 比例核对无误
+        //   （用户「有点正方形」= 悬空镜像使 6×6 大面朝玩家；贴墙后 2/16 厚度读出按钮感）。
         const float th = active ? 1.0f : 2.0f;
         switch (attach) {
-        case MechAttachOnPX:  out.push_back({0.0f,      7.0f * t, 5.0f * t, th * t,    9.0f * t, 11.0f * t}); break;
-        case MechAttachOnNX:  out.push_back({(16.0f - th) * t, 7.0f * t, 5.0f * t, 1.0f, 9.0f * t, 11.0f * t}); break;
-        case MechAttachOnPZ:  out.push_back({5.0f * t,  7.0f * t, 0.0f,      11.0f * t, 9.0f * t, th * t});    break;
-        case MechAttachOnNZ:  out.push_back({5.0f * t,  7.0f * t, (16.0f - th) * t, 11.0f * t, 9.0f * t, 1.0f}); break;
+        case MechAttachOnPX:  out.push_back({(16.0f - th) * t, 7.0f * t, 5.0f * t, 1.0f, 9.0f * t, 11.0f * t}); break;
+        case MechAttachOnNX:  out.push_back({0.0f,      7.0f * t, 5.0f * t, th * t,    9.0f * t, 11.0f * t}); break;
+        case MechAttachOnPZ:  out.push_back({5.0f * t,  7.0f * t, (16.0f - th) * t, 11.0f * t, 9.0f * t, 1.0f}); break;
+        case MechAttachOnNZ:  out.push_back({5.0f * t,  7.0f * t, 0.0f,      11.0f * t, 9.0f * t, th * t}); break;
         default:              out.push_back({5.0f * t,  0.0f,     5.0f * t, 11.0f * t, th * t,   11.0f * t}); break;
         }
         return out;
@@ -1690,40 +1695,29 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, q
     // 拉杆：底座 + 摆棍（off/on 摆向镜像）。棍两段阶梯盒近似 ~35° 倾角（同附魔台摊开书的阶梯盒先例）。
     const float u = active ? 1.0f : 0.0f; // 摆向：on=+1（+Z / 墙上向下）/ off=-1（-Z / 墙上向上）
     switch (attach) {
-    case MechAttachOnPX: { // 底座贴 x=0；棍 ±上/下摆
-        out.push_back({0.0f, 6.0f * t, 5.0f * t, 3.0f * t, 12.0f * t, 11.0f * t});
+    case MechAttachOnPX: { // 底座贴 x=1（支撑 +X 侧）；棍 ±上/下摆
+        out.push_back({13.0f * t, 6.0f * t, 5.0f * t, 1.0f, 12.0f * t, 11.0f * t});
         if (!active) { // off：棍向上摆（远端更高）
+            out.push_back({11.0f * t, 9.0f * t,  7.0f * t, 13.0f * t, 12.0f * t, 9.0f * t});
+            out.push_back({9.0f * t, 11.0f * t, 7.0f * t, 11.0f * t, 14.0f * t, 9.0f * t});
+        } else {       // on：棍向下摆
+            out.push_back({11.0f * t, 6.0f * t,  7.0f * t, 13.0f * t, 9.0f * t,  9.0f * t});
+            out.push_back({9.0f * t, 4.0f * t,  7.0f * t, 11.0f * t, 7.0f * t,  9.0f * t});
+        }
+        break;
+    }
+    case MechAttachOnNX: { // 底座贴 x=0（支撑 -X 侧）；棍 x 镜像 OnPX
+        out.push_back({0.0f, 6.0f * t, 5.0f * t, 3.0f * t, 12.0f * t, 11.0f * t});
+        if (!active) {
             out.push_back({3.0f * t, 9.0f * t,  7.0f * t, 5.0f * t, 12.0f * t, 9.0f * t});
             out.push_back({5.0f * t, 11.0f * t, 7.0f * t, 7.0f * t, 14.0f * t, 9.0f * t});
-        } else {       // on：棍向下摆
+        } else {
             out.push_back({3.0f * t, 6.0f * t,  7.0f * t, 5.0f * t, 9.0f * t,  9.0f * t});
             out.push_back({5.0f * t, 4.0f * t,  7.0f * t, 7.0f * t, 7.0f * t,  9.0f * t});
         }
         break;
     }
-    case MechAttachOnNX: { // 底座贴 x=1；棍 x 镜像 OnPX
-        out.push_back({13.0f * t, 6.0f * t, 5.0f * t, 1.0f, 12.0f * t, 11.0f * t});
-        if (!active) {
-            out.push_back({11.0f * t, 9.0f * t, 7.0f * t, 13.0f * t, 12.0f * t, 9.0f * t});
-            out.push_back({9.0f * t, 11.0f * t, 7.0f * t, 11.0f * t, 14.0f * t, 9.0f * t});
-        } else {
-            out.push_back({11.0f * t, 6.0f * t, 7.0f * t, 13.0f * t, 9.0f * t, 9.0f * t});
-            out.push_back({9.0f * t, 4.0f * t, 7.0f * t, 11.0f * t, 7.0f * t, 9.0f * t});
-        }
-        break;
-    }
-    case MechAttachOnPZ: { // 底座贴 z=0；棍上/下摆
-        out.push_back({5.0f * t, 6.0f * t, 0.0f, 11.0f * t, 12.0f * t, 3.0f * t});
-        if (!active) {
-            out.push_back({7.0f * t, 9.0f * t, 3.0f * t, 9.0f * t, 12.0f * t, 5.0f * t});
-            out.push_back({7.0f * t, 11.0f * t, 5.0f * t, 9.0f * t, 14.0f * t, 7.0f * t});
-        } else {
-            out.push_back({7.0f * t, 6.0f * t, 3.0f * t, 9.0f * t, 9.0f * t, 5.0f * t});
-            out.push_back({7.0f * t, 4.0f * t, 5.0f * t, 9.0f * t, 7.0f * t, 7.0f * t});
-        }
-        break;
-    }
-    case MechAttachOnNZ: { // 底座贴 z=1；棍 z 镜像 OnPZ
+    case MechAttachOnPZ: { // 底座贴 z=1（支撑 +Z 侧）；棍上/下摆
         out.push_back({5.0f * t, 6.0f * t, 13.0f * t, 11.0f * t, 12.0f * t, 1.0f});
         if (!active) {
             out.push_back({7.0f * t, 9.0f * t, 11.0f * t, 9.0f * t, 12.0f * t, 13.0f * t});
@@ -1731,6 +1725,17 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, q
         } else {
             out.push_back({7.0f * t, 6.0f * t, 11.0f * t, 9.0f * t, 9.0f * t, 13.0f * t});
             out.push_back({7.0f * t, 4.0f * t, 9.0f * t, 9.0f * t, 7.0f * t, 11.0f * t});
+        }
+        break;
+    }
+    case MechAttachOnNZ: { // 底座贴 z=0（支撑 -Z 侧）；棍 z 镜像 OnPZ
+        out.push_back({5.0f * t, 6.0f * t, 0.0f, 11.0f * t, 12.0f * t, 3.0f * t});
+        if (!active) {
+            out.push_back({7.0f * t, 9.0f * t, 3.0f * t, 9.0f * t, 12.0f * t, 5.0f * t});
+            out.push_back({7.0f * t, 11.0f * t, 5.0f * t, 9.0f * t, 14.0f * t, 7.0f * t});
+        } else {
+            out.push_back({7.0f * t, 6.0f * t, 3.0f * t, 9.0f * t, 9.0f * t, 5.0f * t});
+            out.push_back({7.0f * t, 4.0f * t, 5.0f * t, 9.0f * t, 7.0f * t, 7.0f * t});
         }
         break;
     }
