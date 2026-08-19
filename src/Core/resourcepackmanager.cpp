@@ -940,10 +940,9 @@ const QList<EntityTexEntry> &entityKindMap()
 
 // t717「盔甲 tier → pack models/armor 文件名前缀」表（t718/t719 盔甲 3D 显示 pack 覆盖前置）。
 //   tier 序与 Hotbar::armorTier / playerModel.armorBaseColor 同源（0 皮革 / 1 铁 / 2 铜 / 3 金 / 4 钻石；
-//   铜（t613 本工程自创档）无 pack 等价 → 不进本表，armorLayerSource miss 回退程序贴图时由 t718 呈现层
-//   从铁层染铜（同 copperIronFallback 思路，届时定）。layer = 1（头盔+胸甲+护腿）/ 2（靴）。
-//   皮革 pack 层是灰白可染色 base → 皮革命中走 retintLeatherTemplate 同族染棕（本任务先原样返回，
-//   t718 接 3D 时若显白再接 retint——留 TODO 注释于 armorLayerSource）。
+//   铜（t613 本工程自创档）无 pack 等价 → 不进本表，armorLayerSource miss 回退程序贴图（t718 已产程序
+//   铜层 armor_copper_layer_*.png，不再需铁层染铜）。layer = 1（头盔+胸甲+护腿）/ 2（靴）。
+//   皮革 pack 层是灰白可染色 base → armorLayerSource 皮革命中走 retintLeatherTemplate 同族染棕（t718 接）。
 QString armorLayerPackName(int tier, int layer)
 {
     const char *prefix = nullptr;
@@ -2360,18 +2359,20 @@ QString ResourcePackManager::entitySource(const QString &kind) const
     return probe(relPath); // 两级探测（子目录 → 扁平）；miss 返空回退程序贴图
 }
 
-// t717 盔甲 layer 贴图源（t718/t719 盔甲 3D 显示 pack 覆盖前置）：tier（0 皮/1 铁/2 铜/3 金/4 钻/5 链）+
+// t717/t718 盔甲 layer 贴图源（玩家 + 人形 mob 护甲 3D 显示的 pack 覆盖）：tier（0 皮/1 铁/2 铜/3 金/4 钻/5 链）+
 //   layer（1=头盔+胸甲+护腿 / 2=靴）→ pack 启用且 armorDir（models/armor）有 <prefix>_layer_<n>.png 时返
-//   file:/// URL；否则空串 → 调用方回退 qrc:/textures/armor_<tier>_layer_<n>.png 程序层（tier 2 铜无 pack
-//   等价恒走回退，t718 呈现层届时可从铁层染铜）。TODO(t718)：皮革 pack 层是灰白可染色 base，若 3D 显示
-//   显白可在此接 retintLeatherTemplate 染棕落盘（同 leatherIconFiles 机制）——先原样返回（demo 包 leather
-//   层自带棕 overlay 实测，多数场景不白）。
+//   file:/// URL；否则空串 → 调用方回退 qrc:/textures/armor_<kind>_layer_<n>.png 程序层（tier 2 铜无 pack
+//   等价恒走回退，t718 已产程序铜层 armor_copper_*）。
+//   t718 接 TODO：皮革 pack 层是灰白可染色 base（demo 包实测 leather_layer_*.png 主体 (202,202,202) 灰白，
+//   1.8.2 包未叠棕 overlay）→ 3D 直接用即显白。命中皮革 tier（0）时按 retintLeatherTemplate 染皮革棕梯度
+//   （同 itemIconSource 皮革图标路径 R19 B1），落盘 voxelsandbox_rp_leather_layer_<n>.png 缓存（apply() 重建时
+//   随 leatherIconFiles 一并清空重染）。解码/落盘失败 → 回退原样返回白底 base（可辨识护甲形状的降级）。
 //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
 QString ResourcePackManager::armorLayerSource(int tier, int layer) const
 {
     QMutexLocker lock(&stateMutex());
     ensureBuiltLocked();
-    const BuiltState &s = state();
+    BuiltState &s = state();
     if (!s.active || s.armorDir.isEmpty())
         return {};
     const QString name = armorLayerPackName(tier, layer);
@@ -2380,7 +2381,29 @@ QString ResourcePackManager::armorLayerSource(int tier, int layer) const
     const QString p = QDir(s.armorDir).absoluteFilePath(name);
     if (!QFile::exists(p))
         return {};
-    return QStringLiteral("file:///") + p;
+    // 非皮革（铁/金/钻/链）→ pack 层自带满色，原样返回。
+    if (tier != 0)
+        return QStringLiteral("file:///") + p;
+    // 皮革：灰白 base 染棕。缓存键 = tier*10+layer（0x0 段；与 leatherIconFiles 的 0x300..0x303 段不冲突）。
+    const int key = tier * 10 + layer;
+    const auto cached = s.leatherIconFiles.constFind(key);
+    if (cached != s.leatherIconFiles.constEnd() && QFile::exists(cached.value()))
+        return QStringLiteral("file:///") + cached.value();
+    QImage leather(p);
+    if (leather.isNull())
+        return QStringLiteral("file:///") + p; // 解码失败 → 回退白底（降级）
+    leather = leather.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    retintLeatherTemplate(leather);
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty())
+        return QStringLiteral("file:///") + p; // 无可写目录 → 回退白底（降级）
+    QDir().mkpath(dir);
+    const QString out = QDir(dir).absoluteFilePath(
+            QStringLiteral("voxelsandbox_rp_leather_layer_%1.png").arg(layer));
+    if (!leather.save(out, "PNG"))
+        return QStringLiteral("file:///") + p; // 落盘失败 → 回退白底（降级）
+    s.leatherIconFiles.insert(key, out); // stateMutex 已持锁，安全
+    return QStringLiteral("file:///") + out;
 }
 
 QString ResourcePackManager::mobTextureSource(int mobType) const

@@ -150,13 +150,13 @@ public:
     //   无目录 / 文件缺 → ""。红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString entitySource(const QString &kind) const;
 
-    // t717 盔甲 layer 贴图覆盖（t718/t719 盔甲 3D 显示的 pack 映射前置）：tier（0 皮革/1 铁/2 铜/3 金/
+    // t717/t718 盔甲 layer 贴图覆盖（玩家 + 人形 mob 护甲 3D 显示的 pack 映射）：tier（0 皮革/1 铁/2 铜/3 金/
     //   4 钻石/5 链甲——与 Hotbar::armorTier 同源序）+ layer（1=头盔+胸甲+护腿 / 2=靴，MC armor 两层）→
-    //   pack 启用且包内 models/armor 目录有 <prefix>_layer_<n>.png 时返 file:/// URL；否则空串 → 调用方
-    //   回退 qrc:/textures/armor_<kind>_layer_<n>.png 程序层（tools/build_armor_layers.py；tier 2 铜无
-    //   pack 等价恒回退）。TODO(t718)：皮革 pack 层灰白可染色 base 若 3D 显白，接 retintLeatherTemplate。
-    //   无映射 tier / layer 越界 / active=false / 无目录 / 文件缺 → ""。红线 §9：仅运行期读本地
-    //   gitignored pack PNG，不 bake 进 qrc/VCS。
+    //   pack 启用且包内 models/armor 目录有 <prefix>_layer_<n>.png 时返 file:/// URL（皮革 tier 命中时按
+    //   retintLeatherTemplate 染棕后落盘返回——pack 皮革层是灰白可染色 base，t718 接）；否则空串 → 调用方
+    //   回退 qrc:/textures/armor_<kind>_layer_<n>.png 程序层（tools/build_armor_layers.py 六档含铜（t718 补，
+    //   铜无 pack 等价恒回退））。无映射 tier / layer 越界 / active=false / 无目录 / 文件缺 → ""。
+    //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString armorLayerSource(int tier, int layer) const;
 
     // t421 生物模型贴图覆盖：pack 启用且 mobType 在「引擎 mob id → pack entity 子目录/文件名」映射内、且包内

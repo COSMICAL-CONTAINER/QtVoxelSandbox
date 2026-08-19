@@ -18,13 +18,15 @@ UV 布局（base 64×32，与 mobmodel.cpp 人形 setMobTex texOffs 同族——
     bootL  (16,16)4×12×4 —— 侧带 (16,20)-(32,32)
   盒区六面明暗：顶亮 / 前中 / 侧中暗 / 背最暗 / 底暗（方向光读感，原创）。
 
-五档配色（与 playerModel.armorBaseColor / MaterialIcon 护甲配色同族色板）：
-  leather（皮革棕）/ iron（浅灰）/ gold（金黄）/ diamond（青）/ chainmail（深灰点孔——链环纹 +
-  规则透明孔，读作「链甲网眼」）。
+六档配色（与 playerModel.armorBaseColor / MaterialIcon 护甲配色同族色板）：
+  leather（皮革棕）/ iron（浅灰）/ copper（铜橙，t718 补——本工程自创档，MC 1.0 无铜甲 → 无 pack
+  等价，armorLayerSource 恒 miss 恒走本程序层；与 ToolIcon 铜工具头 #c87850 同族色板）/ gold（金黄）/
+  diamond（青）/ chainmail（深灰点孔——链环纹 + 规则透明孔，读作「链甲网眼」）。
 
 输出（覆盖写入 textures/，全部透明底 + 盒区不透明；**不进图集**——实体层贴图走独立 Texture）：
   armor_leather_layer_1.png / armor_leather_layer_2.png
   armor_iron_layer_1.png    / armor_iron_layer_2.png
+  armor_copper_layer_1.png  / armor_copper_layer_2.png  # t718 铜档
   armor_gold_layer_1.png    / armor_gold_layer_2.png
   armor_diamond_layer_1.png / armor_diamond_layer_2.png
   armor_chainmail_layer_1.png / armor_chainmail_layer_2.png
@@ -90,6 +92,13 @@ TIERS = {
         "front": (216, 216, 216, 255), "side": (196, 196, 198, 255),
         "back": (154, 154, 158, 255), "top": (240, 240, 242, 255), "bot": (154, 154, 158, 255),
         "stitch": (250, 250, 250, 255),
+    },
+    # 铜橙（t718 补，本工程自创档）：与 ToolIcon 铜工具头 #c87850 / MaterialIcon 铜锭同族色板
+    #   （暗 #8a4818 / 中 #c87850 / 亮 #e8a088，与 retintCopperTemplate 锚点同源）。
+    "copper": {
+        "front": (200, 120, 80, 255), "side": (180, 104, 68, 255),
+        "back": (138, 72, 24, 255), "top": (232, 160, 136, 255), "bot": (138, 72, 24, 255),
+        "stitch": (240, 180, 152, 255),
     },
     # 金金黄：与金轨 GOLD_MID #e8b830 同族。
     "gold": {
@@ -180,7 +189,7 @@ def save(img, name):
 
 
 def main():
-    for kind in ("leather", "iron", "gold", "diamond", "chainmail"):
+    for kind in ("leather", "iron", "copper", "gold", "diamond", "chainmail"):
         save(draw_layer_1(kind), "armor_%s_layer_1" % kind)
         save(draw_layer_2(kind), "armor_%s_layer_2" % kind)
 

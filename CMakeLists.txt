@@ -103,6 +103,11 @@ qt_add_executable(voxelsandbox
     #   mobType / 血量 / 名称在 Entities 层，贴图在呈现层（Main.qml Texture）—— 依赖只向下。
     src/Renderer/mobmodel.cpp
     src/Renderer/mobmodel.h
+    # t718 盔甲 layer 薄壳盒几何（Renderer 层）：玩家 + 人形 mob 护甲叠加壳的共享「通用 layer 渲染器」。
+    #   ±0.5 单位盒 + MC armor layer box-UV 六面子区（同 MobModel R19 C3 公式）→ 从 layer_1/2 贴图
+    #   （程序层 / pack 运行期映射）按部位采样。贴图选择在呈现层（Main.qml），本类只产出几何 + UV。
+    src/Renderer/armorlayerbox.cpp
+    src/Renderer/armorlayerbox.h
     # t331 骸骨持用弓几何（独立于 MobModel —— 弓需木褐色材质 + 拉弓动画；QML 独立 Model 消费）。
     #   drawAmount Q_PROPERTY 驱动弦后拉 + 肢增弯；EntityManager::drawAmountAt 设值（aimTimer 驱动）。
     src/Renderer/mobbow.cpp
@@ -456,6 +461,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/armor_leather_layer_2.png  # t717 皮革盔甲 layer_2（靴）
         textures/armor_iron_layer_1.png     # t717 铁盔甲 layer_1（浅灰+铆钉）
         textures/armor_iron_layer_2.png     # t717 铁盔甲 layer_2（靴）
+        textures/armor_copper_layer_1.png   # t718 铜盔甲 layer_1（铜橙；本工程自创档无 pack 等价，恒程序层）
+        textures/armor_copper_layer_2.png   # t718 铜盔甲 layer_2（靴）
         textures/armor_gold_layer_1.png     # t717 金盔甲 layer_1（金黄）
         textures/armor_gold_layer_2.png     # t717 金盔甲 layer_2（靴）
         textures/armor_diamond_layer_1.png  # t717 钻石盔甲 layer_1（青）
