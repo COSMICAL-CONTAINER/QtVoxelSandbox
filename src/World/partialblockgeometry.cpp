@@ -705,22 +705,26 @@ int PartialBlockGeometry::append(
         //   state 派生瓦片（呈现层选择，同 Water 流水贴图模式）：
         //     - 高 4 位连接位（**仅水平 4 向**：0x01=+X 0x02=-X 0x04=+Z 0x08=-Z（RedstoneDustConn*，同铁轨
         //       位序）—— review-r19.8 H1 后垂直邻粉连接不落 state（旧 6 向编码的 +Y/-Y 位已废），
-        //       World::recomputePowerLocal 维护）：任一水平连接 → 线向瓦片；无任何水平连接（含装置邻接，
-        //       见下）→ 孤立点瓦片。线向按「X 向 / Z 向」旋转 UV（一张两用，同铁轨 EW 模式）；
-        //       X+Z 双向连接 → 十字画两片（各沿一向，重叠自然成十字）。
-        //     - 低 4 位电力级（RedstoneDustPowerMask）**t692 亮度渐变**（机制等价 MC 1.0 dust 15 级沿导线
-        //       衰减的视觉）：4 视觉档 —— 0 → off（166/167 暗红）、1-5 → lvl1（171/173 中暗红 + 稀疏微亮粒）、
-        //       6-10 → lvl2（172/174 中亮红 + 少量暖心粒）、11-15 → on（168/169 亮红 + 白热粒）。15 格衰减
-        //       沿线逐档变暗 = 「电流离源越远越弱」读感。
-        //     - t692 装置邻接连线：水平邻格是**电源或接收器**（火把 / 红石块 / 拉杆 / 按钮 / 压力板 / 探测轨 /
-        //       TNT / 红石灯 / 动力轨 / 发射器 / 投掷器）→ 该向画线向（机制等价 MC 粉连到装置画连线而非点；
-        //       修「一格粉邻接火把 + TNT 恒显孤立点」——连接位 state 只存粉-粉，渲染侧独立扩展）。装置
-        //       连接不写 state（渲染呈现层扩展，不回污染电力传播判定）。
+        //       World::recomputePowerLocal 维护；t702 起爬墙连接（水平邻的 y±1 有粉）也置对应水平位）。
+        //     - 低 4 位电力级（RedstoneDustPowerMask）**t692 亮度渐变**：4 视觉档 —— 0 → off（166/167 暗红）、
+        //       1-5 → lvl1（171/173）、6-10 → lvl2（172/174）、11-15 → on（168/169）。15 格衰减沿线逐档
+        //       变暗 = 「电流离源越远越弱」读感。
+        //   t692 装置邻接连线：水平邻格是**电源或接收器** → 该向画线向（机制等价 MC 粉连到装置画连线而非
+        //   点）。装置连接不写 state（渲染呈现层扩展，不回污染电力传播判定）。
+        //   t702 形状规则（机制等价 MC 1.0 dust 形态，修用户「拐角画成一条龙十字」）：
+        //     - 0 连接 → 孤立点瓦片（dot）。
+        //     - 1 连接 → 单臂（中心向该向半段）。
+        //     - 对向 2（±X 或 ±Z）→ 贯穿直线（整片线向瓦片）。
+        //     - 邻向 2（1 X + 1 Z）→ L 拐角（两段半臂，中心相连向两个连接向弯——非「一条龙」十字）。
+        //     - 3 连接 → T（三段半臂）。
+        //     - 4 连接 → 十字（两片整线叠成 +）。
+        //     半臂 = 线向瓦片的中心半段 quad（UV 取瓦片内半区 → 粉线宽度 / 端头收口观感与整线一致）。
+        //   t702 爬墙（机制等价 MC 1.0 粉沿 1 格台阶上爬，用户「粉能跟铁轨一样上墙」）：nb.dustClimbPx*
+        //   （chunkgeometry 填的三高探针）>0 时该向半臂外沿抬高 1 格成斜段（同铁轨 t667 坡「低端画坡、
+        //   高端平铺」约定——低处粉画斜段，高处粉平铺）。
         constexpr float yr = 1.0f / 16.0f; // 粉层厚度（cell 底以上 1/16，贴地面防 z-fight，同铁轨）
         const quint8 con = quint8(state >> 4);                      // 高 4 位连接位
         const int pw = int(state & BlockRegistry::RedstoneDustPowerMask); // 电力级 0..15（亮度档源）
-        // review-r19.8 H1 修：连接位 = 高半字节 0x01/0x02/0x04/0x08（RedstoneDustConn*，同铁轨位序）。
-        //   旧版把 Z 位读在 0x10/0x20（= writer 的 +Y/-Y 错位）→ Z 向铺粉恒显孤立点（死代码位）。
         const bool cpx = (con & BlockRegistry::RedstoneDustConnPx) != 0; // +X
         const bool cnx = (con & BlockRegistry::RedstoneDustConnNx) != 0; // -X
         const bool cpz = (con & BlockRegistry::RedstoneDustConnPz) != 0; // +Z
@@ -728,11 +732,17 @@ int PartialBlockGeometry::append(
         // t692 亮度档选瓦：0→off、1-5→lvl1、6-10→lvl2、11-15→on（线 / 点两形态各一瓦）。
         const int lineTile = (pw == 0) ? 166 : (pw <= 5) ? 171 : (pw <= 10) ? 172 : 168;
         const int dotTile  = (pw == 0) ? 167 : (pw <= 5) ? 173 : (pw <= 10) ? 174 : 169;
+        // 通用 quad：四角各自 y（t702 爬墙斜段——端边外沿抬 1，同 pushRailQuad 模式）。
+        const auto pushDustY = [&](int t,
+                                   float ax0, float ay0, float az0,  float ax1, float ay1, float az1,
+                                   float ax2, float ay2, float az2,  float ax3, float ay3, float az3) {
+            pushCrossQuad(verts, idx, lx, ly, lz,
+                          ax0, ay0, az0,  ax1, ay1, az1,  ax2, ay2, az2,  ax3, ay3, az3,
+                          t, light, tileW, hx, hy, v0, v1);
+        };
         const auto pushDust = [&](int t, float ax0, float az0, float ax1, float az1,
                                   float ax2, float az2, float ax3, float az3) {
-            pushCrossQuad(verts, idx, lx, ly, lz,
-                          ax0, yr, az0,  ax1, yr, az1,  ax2, yr, az2,  ax3, yr, az3,
-                          t, light, tileW, hx, hy, v0, v1);
+            pushDustY(t, ax0, yr, az0, ax1, yr, az1, ax2, yr, az2, ax3, yr, az3);
         };
         // t692 装置邻接（电源 / 接收器 → 该向画线向；id 级谓词即可——连线形态与装置开关态无关，同 MC 渲染）。
         const auto isDustDevice = [](quint8 b) {
@@ -747,16 +757,47 @@ int PartialBlockGeometry::append(
         const bool dnx = cnx || isDustDevice(nb.negX); // -X
         const bool dpz = cpz || isDustDevice(nb.posZ); // +Z
         const bool dnz = cnz || isDustDevice(nb.negZ); // -Z
-        const bool anyH = dpx || dnx || dpz || dnz;    // 有水平连接 / 装置邻接 → 至少画一线向
-        if (!anyH) {
-            // 孤立点（无任何水平邻粉 / 装置；垂直邻粉（爬墙）不画线 —— 粉层贴地视角下垂直连接视觉省略，v1 简化）。
+        // t702 爬墙抬升（该向水平邻的**上 / 下一格**有粉 → 线臂画斜段：外沿 y=1+yr、内沿 yr）。只抬
+        //   dustClimb>0（邻上格有粉 = 本粉在墙脚，画上坡）；邻下格有粉（本粉在墙顶）→ 对端粉画坡、本格平铺
+        //   （「低端画坡、高端平铺」同铁轨 t667，防双重斜面）。dustClimb* 由 chunkgeometry 三高探针填
+        //   （PartialNeighborCtx，1=上格有粉 / -1=下格有粉 / 0=无）。
+        const float rpx = (nb.dustClimbPx > 0) ? 1.0f : 0.0f; // +X 外沿抬高量
+        const float rnx = (nb.dustClimbNx > 0) ? 1.0f : 0.0f; // -X
+        const float rpz = (nb.dustClimbPz > 0) ? 1.0f : 0.0f; // +Z
+        const float rnz = (nb.dustClimbNz > 0) ? 1.0f : 0.0f; // -Z
+        // ── 形状选择（t702）──
+        const int nConn = int(dpx) + int(dnx) + int(dpz) + int(dnz);
+        if (nConn == 0) {
+            // 孤立点（无任何水平邻粉 / 装置）。
             pushDust(dotTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
+        } else if (nConn == 4) {
+            // 十字（4 向全连；两片整线各沿一向）。
+            pushDust(lineTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f); // X 向整线（EW 旋转序）
+            pushDust(lineTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // Z 向整线（标准序）
+        } else if (nConn == 2 && ((dpx && dnx) || (dpz && dnz))) {
+            // 对向贯穿直线（±X 成对或 ±Z 成对，另一轴无连接）→ 整片线向（含爬墙抬升：两端各自抬高）。
+            if (dpx && dnx) {
+                // X 贯穿：+X 外沿抬 rpx、-X 外沿抬 rnx（BL/BR = -X 端，TR/TL = +X 端，EW 角序 (0,0)(0,1)(1,1)(1,0)）。
+                pushDustY(lineTile, 0.f, yr + rnx, 0.f,  0.f, yr + rnx, 1.f,
+                                   1.f, yr + rpx, 1.f,  1.f, yr + rpx, 0.f);
+            } else {
+                // Z 贯穿：+Z 外沿抬 rpz、-Z 外沿抬 rnz（NS 角序 (0,0)(1,0)(1,1)(0,1)：p0/p1 = -Z 端）。
+                pushDustY(lineTile, 0.f, yr + rnz, 0.f,  1.f, yr + rnz, 0.f,
+                                   1.f, yr + rpz, 1.f,  0.f, yr + rpz, 1.f);
+            }
         } else {
-            // 线向：X 向（EW）旋转 90°（u→z、v→x）；Z 向（NS）标准（u→x、v→z）。双向都有 → 两片叠成十字。
-            if (dpx || dnx)
-                pushDust(lineTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f); // EW（同铁轨旋转序）
-            if (dpz || dnz)
-                pushDust(lineTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // NS（标准序）
+            // 半臂集合（1 连接 / 邻向 L（1X+1Z）/ 3 连接 T）：每个连接向画一段「中心 → 该向边」的半臂 quad
+            //   （UV 由 pushCrossQuad 固定整瓦映射——半臂用整张瓦片铺半段，粉线宽度观感随几何半长加倍宽
+            //   （16px 瓦的 2px 线在半臂上呈 4px），可接受的近似；中心处各臂在 cell 中心相接成 L/T 形）。
+            //   爬墙：该臂外沿抬 1。
+            if (dpx) // +X 半臂：x 0.5→1、z 0→1（外沿 = +X 边抬 rpx）
+                pushDustY(lineTile, 0.5f, yr, 0.f,  0.5f, yr, 1.f,  1.f, yr + rpx, 1.f,  1.f, yr + rpx, 0.f);
+            if (dnx) // -X 半臂：x 0→0.5（外沿 = -X 边抬 rnx）
+                pushDustY(lineTile, 0.f, yr + rnx, 0.f,  0.f, yr + rnx, 1.f,  0.5f, yr, 1.f,  0.5f, yr, 0.f);
+            if (dpz) // +Z 半臂：z 0.5→1（外沿 = +Z 边抬 rpz）
+                pushDustY(lineTile, 0.f, yr, 0.5f,  1.f, yr, 0.5f,  1.f, yr + rpz, 1.f,  0.f, yr + rpz, 1.f);
+            if (dnz) // -Z 半臂：z 0→0.5（外沿 = -Z 边抬 rnz）
+                pushDustY(lineTile, 0.f, yr + rnz, 0.f,  1.f, yr + rnz, 0.f,  1.f, yr, 0.5f,  0.f, yr, 0.5f);
         }
         break;
     }

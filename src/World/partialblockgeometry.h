@@ -49,6 +49,13 @@ struct PartialNeighborCtx {
     int railDeltaNx = INT_MIN;      // t667 -X
     int railDeltaPz = INT_MIN;      // t667 +Z
     int railDeltaNz = INT_MIN;      // t667 -Z
+    // t702 红石粉爬墙探针（+1 = 该向水平邻的**上一格**有粉（本粉在墙脚 → 渲染画上坡斜臂）；
+    //   -1 = 下一格有粉（本粉在墙顶 → 对端粉画坡、本格平铺）；0 = 该向无爬墙粉）。仅 blockId ==
+    //   RedstoneDust 时由 chunkgeometry 填（三高探针同族，语义取「上格有粉」为正向——渲染只读 >0）。
+    int dustClimbPx = 0;
+    int dustClimbNx = 0;
+    int dustClimbPz = 0;
+    int dustClimbNz = 0;
 };
 
 // 不完整方块异形几何（t133 基础设施）：为 slab/stairs/fence/door/trapdoor/pressure plate 等「非

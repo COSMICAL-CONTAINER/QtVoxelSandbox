@@ -611,6 +611,19 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         nctx.railDeltaPz = dprobe(0, 1);
                         nctx.railDeltaNz = dprobe(0, -1);
                     }
+                    // t702 红石粉爬墙探针：该向水平邻的上 / 下一格是粉 → +1 / -1（World 连接位 /
+                    //   电力互通同判据，渲染据 >0 把该向线臂画成上坡斜段；同铁轨 dprobe 三高探针模式）。
+                    if (b == BlockRegistry::RedstoneDust) {
+                        const auto dclimb = [&](int dx, int dz) {
+                            if (BlockRegistry::isRedstoneDust(blockAtWorld(wx + dx, ly + 1, wz + dz))) return 1;
+                            if (BlockRegistry::isRedstoneDust(blockAtWorld(wx + dx, ly - 1, wz + dz))) return -1;
+                            return 0;
+                        };
+                        nctx.dustClimbPx = dclimb(1, 0);
+                        nctx.dustClimbNx = dclimb(-1, 0);
+                        nctx.dustClimbPz = dclimb(0, 1);
+                        nctx.dustClimbNz = dclimb(0, -1);
+                    }
                     PartialBlockGeometry::append(verts, idx, lx, ly, lz, b, st,
                                                  lctx, nctx, tileW, hx, hy, v0, v1);
                 }

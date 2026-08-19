@@ -2189,13 +2189,20 @@ bool World::recomputePowerLocal()
         seedDust(ax, ay, az); // 锚点自身是粉
         for (const auto &d : kNb) seedDust(ax + d[0], ay + d[1], az + d[2]); // 锚点邻粉（源旁粉 / 断路边粉）
     }
-    // BFS 展开（粉 6 向互连）。
+    // BFS 展开（粉 6 向互连 + t702 爬墙斜角互连：水平邻的 y±1 有粉 = 1 格台阶爬墙连接，连接位 /
+    //   电力互通都视该对为邻 → BFS 亦沿斜角展开，粉域覆盖爬墙链整体）。
+    static constexpr int kHDir2[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
     for (size_t qi = 0; qi < frontier.size() && int(region.size()) < kPowerFloodCap; ++qi) {
         int fx, fy, fz;
         unpackGrowthCell(frontier[qi], fx, fy, fz);
         for (const auto &d : kNb) {
             if (int(region.size()) >= kPowerFloodCap) break;
             seedDust(fx + d[0], fy + d[1], fz + d[2]);
+        }
+        for (const auto &h : kHDir2) {
+            if (int(region.size()) >= kPowerFloodCap) break;
+            seedDust(fx + h[0], fy + 1, fz + h[1]); // 爬墙斜角（上 / 下一格）
+            seedDust(fx + h[0], fy - 1, fz + h[1]);
         }
     }
 
@@ -2244,6 +2251,31 @@ bool World::recomputePowerLocal()
                 if (np - 1 > power) power = np - 1; // 邻粉（上 tick）电力 -1（衰减传播）
             }
         }
+        // t702 上墙连接位（机制等价 MC 1.0 粉沿 1 格台阶爬墙）：水平 4 向的**上 / 下一格**有粉 → 该向也
+        //   置连接位（渲染画向该向的爬坡斜线，同铁轨 t667 坡向语义；电力传播 6 向邻粉衰减已天然覆盖
+        //   「上/下一格的粉」（di2/3 的 ny=y±1 只查了正上/正下——不对：爬墙粉在 (x±1,y+1,z) 斜角，
+        //   不属 6 正交邻 → 下方补传播）。斜角粉不在 snap（region BFS 只走 6 正交邻）→ 电力需经
+        //   「本格 ↔ 斜角粉」直达：此处对爬墙向邻粉直接读**实时** state 电力（不进快照——斜角粉与
+        //   本格距离 1，机制等价 MC 台阶粉互传；实时读使爬墙链同样每 tick 1 格推进：斜角粉自身的
+        //   重算会把它算出的电力写回 state，下一 tick 本格读到 → 级联成立）。
+        static constexpr int kHDir[4][3] = {{1,0,0},{-1,0,0},{0,0,1},{0,0,-1}};
+        static constexpr quint8 kHConnBit[4] = {
+            BlockRegistry::RedstoneDustConnPx, BlockRegistry::RedstoneDustConnNx,
+            BlockRegistry::RedstoneDustConnPz, BlockRegistry::RedstoneDustConnNz};
+        for (int h = 0; h < 4; ++h) {
+            const int nx = x + kHDir[h][0], nz = z + kHDir[h][2];
+            for (const int dy : { 1, -1 }) {
+                const int ny = y + dy;
+                if (!inBounds(nx, ny, nz)) continue;
+                if (!BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz))) continue;
+                conn |= kHConnBit[h]; // 该向有爬墙粉 → 连线（渲染画斜段）
+                // 电力互通：斜角粉实时电力 -1（爬墙一格 = 传播一格衰减，机制等价 MC 台阶粉）。
+                //   注：双向都写——低位粉读高位粉、高位粉也读低位粉（对角互传；各自 Phase A2 pass
+                //   都会跑到，state 写入后下一 tick 对侧读到 → 双向级联收敛）。
+                const int np = int(m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask);
+                if (np - 1 > power) power = np - 1;
+            }
+        }
         const quint8 ns = quint8(conn << 4) | quint8(power & BlockRegistry::RedstoneDustPowerMask);
         if (ns != cur) {
             m_chunks.setBlock(x, y, z, BlockRegistry::RedstoneDust, ns); // 静默直写 + 标脏（同 recomputeRailConnections 模式）
@@ -2252,11 +2284,20 @@ bool World::recomputePowerLocal()
                                  BlockRegistry::RedstoneDust, ns);
             // t692：变化格回插脏集（下 tick 复查本格——级联波前）+ 其 6 邻粉入集（它们的「邻粉电力-1」
             //   输入变了 → 下 tick 重算 = 波前逐格外推）。稳定后（值不再变）不再入集 → 稳态停。
+            //   t702：爬墙斜角粉（水平邻 y±1）一并入集——爬墙链的波前推进同样逐格（斜角互传读实时态，
+            //   变化格对侧下一 tick 才读到新值 → 每 tick 1 格斜向步进，与平面传播同节拍）。
             m_powerDirty.insert(k);
             for (const auto &d : kNb) {
                 const int nx = x + d[0], ny = y + d[1], nz = z + d[2];
                 if (inBounds(nx, ny, nz) && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
                     m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+            }
+            for (const auto &h : kHDir2) {
+                for (const int dy : { 1, -1 }) {
+                    const int nx = x + h[0], ny = y + dy, nz = z + h[1];
+                    if (inBounds(nx, ny, nz) && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
+                        m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+                }
             }
             any = true;
         }
@@ -2285,6 +2326,46 @@ bool World::recomputePowerLocal()
         //   电力翻转，但锚点自身非粉 → 不经粉域邻接覆盖）。
         for (const auto &d : kNb) addReceiver(x + d[0], y + d[1], z + d[2]);
     }
+    // t704 动力轨链式激活预计算（机制等价 MC 1.0 powered rail 信号沿同向链传播，链最长 8 根）：被红石块 /
+    //   火把 / 粉等直接供电的轨把信号传给**同轴向**（沿轨延伸方向）相邻的动力轨，链上每根依次接力——块直接
+    //   激活 1 根 → 该根向同向链传播共 ≤8 根（用户实测「红石块只激活贴邻 1 根」→ 本链补全）。实现：种子 =
+    //   receivers 内 isReceivingPower 的动力轨（直供轨），沿轴向 4 邻（x±1 / z±1 同 y 动力轨）分层 BFS，
+    //   深度 < kGoldenRailChainMax；可达轨 chainPowered。期望位 = direct ∪ chain——下方 receivers 循环
+    //   统一按本表写位（升 / 降沿对称：去源 → direct 消失 → chain 收缩 → 远端轨熄灭）。
+    //   同 pass 同步展开（不走跨 tick 级联）：金轨通电位是渲染 / boost 语义位（powerSourceLevel 不读它
+    //   → 无自反馈 / 无双缓冲快照隔离需求），BFS 定深即结果确定。
+    //   链轨不互供**电力**（只传通电位）——MC 语义：动力轨链是「信号延伸器」不是电源，链轨旁的 TNT / 灯
+    //   不因此点亮（powerSourceLevel 无 GoldenRail 条目，正确）。
+    std::unordered_set<quint64> goldenPowered; // 动力轨格（packGrowthCell）→ 应通电（直供 ∪ 链传）
+    std::unordered_set<quint64> goldenSeenAll; // 本 pass 见到的全部动力轨（含链外扩的；降沿清位用）
+    {
+        struct GCell { int x, y, z; };
+        std::vector<GCell> frontierG;
+        for (const quint64 k : receivers) {
+            int x, y, z;
+            unpackGrowthCell(k, x, y, z);
+            if (m_chunks.blockAt(x, y, z) != BlockRegistry::GoldenRail) continue;
+            goldenSeenAll.insert(k);
+            if (!isReceivingPower(x, y, z)) continue; // 非直供轨：等链扩散到达
+            if (goldenPowered.insert(k).second) frontierG.push_back({x, y, z});
+        }
+        constexpr int kGoldenRailChainMax = 8; // 链最长 8 根（MC 1.0 块供电轨链上限；种子自身 1 根 + 向外扩 7 根）
+        static constexpr int kAxial[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        for (int depth = 1; depth < kGoldenRailChainMax && !frontierG.empty(); ++depth) {
+            std::vector<GCell> nextG;
+            for (const GCell &c : frontierG) {
+                for (const auto &a : kAxial) {
+                    const int nx = c.x + a[0], ny = c.y, nz = c.z + a[1]; // 同 y 轴向邻（信号不爬坡）
+                    if (!inBounds(nx, ny, nz)) continue;
+                    if (m_chunks.blockAt(nx, ny, nz) != BlockRegistry::GoldenRail) continue;
+                    goldenSeenAll.insert(packGrowthCell(nx, ny, nz)); // 链外轨也记（降沿复查）
+                    const quint64 nk = packGrowthCell(nx, ny, nz);
+                    if (goldenPowered.insert(nk).second) nextG.push_back({nx, ny, nz});
+                }
+            }
+            frontierG = std::move(nextG);
+        }
+    }
     for (const quint64 k : receivers) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
@@ -2306,10 +2387,22 @@ bool World::recomputePowerLocal()
         } else if (b == BlockRegistry::GoldenRail) {
             // t658 动力轨：通电位 bit4（GoldenRailStateOnFlag）—— mesher 换 rail_golden_on(159) 通电贴图
             //   + MinecartManager boost 读此位（通电才加速）。连接位（低 4 位）保留不动。
+            //   t704：通电位 = 直供（isReceivingPower）∪ 链传（goldenPowered 预计算——同轴向邻接的已通电
+            //   动力轨接力传导，链 ≤8 根）。降沿对称：goldenPowered 不含本轨且非直供 → 熄灭。
+            const bool wantOn = powered || goldenPowered.count(k) > 0;
             const bool on = (st & BlockRegistry::GoldenRailStateOnFlag) != 0;
-            if (on != powered) {
-                m_chunks.setBlock(x, y, z, b, quint8(powered ? (st | BlockRegistry::GoldenRailStateOnFlag)
+            if (on != wantOn) {
+                m_chunks.setBlock(x, y, z, b, quint8(wantOn ? (st | BlockRegistry::GoldenRailStateOnFlag)
                                                              : (st & quint8(~BlockRegistry::GoldenRailStateOnFlag))));
+                // t704 链波前推进：本轨位翻转 → 同轴向邻的动力轨通电位可能因此变（升：链外扩一步；
+                //   降：熄灭收缩一步）→ 轴向邻轨入脏集，下一 tick 复查（同粉变化格回插模式；m_chunks
+                //   .setBlock 静默写不经 notePowerWrite → 手动补）。稳定后不再翻转 → 不再入集 → 稳态停。
+                static constexpr int kAx2[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+                for (const auto &a : kAx2) {
+                    const int nx = x + a[0], nz = z + a[1];
+                    if (inBounds(nx, y, nz) && m_chunks.blockAt(nx, y, nz) == BlockRegistry::GoldenRail)
+                        m_powerDirty.insert(packGrowthCell(nx, y, nz));
+                }
                 any = true;
             }
         } else if (BlockRegistry::isTnt(b)) {
@@ -2325,6 +2418,33 @@ bool World::recomputePowerLocal()
             //   2s 冷却节流 = 连发到库存空。现信号 = 「本机器电力态可能变了」（升 / 降沿都会触达），沿检测
             //   归消费端（读 isReceivingPower 与上 tick 基线集比较，仅 unpowered→powered 转换才 fire）。
             emit powerDispenserTriggered(x, y, z); // 呈现层：fireDispenserAtQml（沿检测 + 冷却 / 朝向 / 库存复用）
+            any = true;
+        }
+    }
+    // t704 链传补写：链上动力轨可能不在 receivers 集（链可伸出脏域 ≤8 格）——goldenPowered 内未在
+    //   receivers 出现的轨在此按同一语义写位。熄灭（降沿）路径：链外轨一旦不满足（direct ∪ chain），
+    //   其**锚点侧轨**的位翻转经 m_chunks.setBlock 写入 → 但链外轨不在 receivers → 不会自动复查。
+    //   处理：BFS 同时收集「本 pass 见过的全部动力轨」（含链外）——熄灭时它们若仍带通电位而 goldenPowered
+    //   已不含 → 清位。见下方 goldenSeenAll。
+    for (const quint64 k : goldenSeenAll) {
+        if (receivers.count(k)) continue; // receivers 循环已处理（同一逻辑，勿双写）
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        if (m_chunks.blockAt(x, y, z) != BlockRegistry::GoldenRail) continue;
+        const quint8 st = m_chunks.stateAt(x, y, z);
+        const bool wantOn = isReceivingPower(x, y, z) || goldenPowered.count(k) > 0;
+        const bool on = (st & BlockRegistry::GoldenRailStateOnFlag) != 0;
+        if (on != wantOn) {
+            m_chunks.setBlock(x, y, z, BlockRegistry::GoldenRail,
+                              quint8(wantOn ? (st | BlockRegistry::GoldenRailStateOnFlag)
+                                            : (st & quint8(~BlockRegistry::GoldenRailStateOnFlag))));
+            // t704 链波前推进（同上 receivers 循环分支——位翻转 → 轴向邻轨入脏集下 tick 复查）。
+            static constexpr int kAx3[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+            for (const auto &a : kAx3) {
+                const int nx = x + a[0], nz = z + a[1];
+                if (inBounds(nx, y, nz) && m_chunks.blockAt(nx, y, nz) == BlockRegistry::GoldenRail)
+                    m_powerDirty.insert(packGrowthCell(nx, y, nz));
+            }
             any = true;
         }
     }

@@ -2526,7 +2526,17 @@ void PlayerController::placeBlock()
             const int tx = m_hitBx, ty = m_hitBy + 1, tz = m_hitBz; // 粉铺在命中方块正上方一格
             if (ty < m_world->height()) {
                 const quint8 tgt = m_world->blockAt(tx, ty, tz);
-                if (tgt == BlockRegistry::Air || tgt == BlockRegistry::Water) {
+                // t702 放置守卫（镜像 t666 铁轨守卫）：粉只能铺在**完整立方顶面**——
+                //   ① 目标格已是粉 → 拒（机制等价 MC 粉不可叠粉；旧版 tgt 允许 Water/Air，但命中「粉的顶面」
+                //      时射线把粉当实体命中（raycastAABBs 粉薄板命中盒）→ ty = 粉格 +1 且下方是粉 → 旧守卫
+                //      拦不住「粉上放粉」的悬空二层粉（用户实测「红石粉可以在红石粉上面放」）。
+                //   ② 目标格正下方须 isFullCube（粉贴地薄层须满顶面支撑——同铁轨 / 雪层 t554 支撑语义；
+                //      耕地 / 半砖 / 楼梯顶不铺，粉上也不满足 → ② 同时兜死 ① 的漏网路径）。
+                const bool belowFull = ty - 1 >= 0
+                    && BlockRegistry::isFullCube(m_world->blockAt(tx, ty - 1, tz));
+                if (!BlockRegistry::isRedstoneDust(tgt)
+                    && (tgt == BlockRegistry::Air || tgt == BlockRegistry::Water)
+                    && belowFull) {
                     m_world->setBlock(tx, ty, tz, BlockRegistry::RedstoneDust, 0); // state=0（断电；World 首次重算点亮）
                     if (m_mode != Creative)
                         m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 粉（创造不耗）
