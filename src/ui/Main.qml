@@ -1331,6 +1331,14 @@ Window {
         "effect": {
             desc: "/effect <poison|slowness|fire|clear> [秒] —— 施加/清除状态效果",
             run: function(rest) { return window.runEffect(rest) }
+        },
+        // t719 /mobarmor 命令（mob 穿甲调试入口；dev-plan t719 降级路径——mob 拾取装备 AI 未实现，
+        //   通用 layer 渲染器用命令驱动，不強做拾取）：/mobarmor <tier> 给**最近的人形 mob**（蹒跚者 /
+        //   骸骨）穿整套 tier 护甲（0 皮革 / 1 铁 / 2 铜 / 3 金 / 4 钻石）；tier 越界（如 -1）→ 脱甲。
+        //   setMobArmorSet bump revision → 护甲壳（ArmorLayerBox + layer 贴图）即时显隐。
+        "mobarmor": {
+            desc: "/mobarmor <tier> —— 最近的人形 mob（蹒跚者/骸骨）穿整套护甲；越界 tier 脱甲",
+            run: function(rest) { return window.runMobArmor(rest) }
         }
     })
     // t715 /effect 解析：rest 含前导空格如 " poison 30"。类型词 → PlayerState.StatusEffect 枚举值
@@ -1374,6 +1382,37 @@ Window {
         if (isNaN(n) || n <= 0) return "/xp 需要正整数（L 后缀=等级）"
         playerState.addXp(n)
         return "+" + n + " 经验（当前 " + playerState.level + " 级）"
+    }
+    // t719 /mobarmor 解析（spec 见 commandRegistry.mobarmor 注释）：rest 含前导空格如 " 2"。tier 0..4 =
+    //   皮革/铁/铜/金/钻石；越界（含 -1）→ 脱甲（setMobArmorSet 清四部位）。目标 = 距玩家水平最近的人形
+    //   mob（蹒跚者/骸骨；距离同平方比较，slot-reuse 下空槽 aliveAt=false 跳过）。找不到 → 提示回显。
+    //   纯呈现层命令胶水（只读 entityManager 槽数据找目标 + 调 setMobArmorSet；穿甲逻辑在 Entities 层）。
+    function runMobArmor(rest) {
+        const arg = rest.trim()
+        if (arg.length === 0) return "用法: /mobarmor <tier 0皮/1铁/2铜/3金/4钻>（越界=脱甲）"
+        const tier = parseInt(arg, 10)
+        if (isNaN(tier)) return "/mobarmor 需要整数 tier（0-4；越界=脱甲）"
+        // 最近人形 mob 扫描（count 全槽；aliveAt 过滤空槽）。
+        let best = -1, bestD2 = 1e30
+        const pp = player.position
+        for (let i = 0; i < entityManager.count; ++i) {
+            if (!entityManager.aliveAt(i)) continue
+            if (entityManager.kindAt(i) !== EntityManager.Mob) continue
+            const mt = entityManager.mobTypeAt(i)
+            if (mt !== EntityManager.MobShambler && mt !== EntityManager.MobBones) continue
+            const p = entityManager.posAt(i)
+            const dx = p.x - pp.x, dz = p.z - pp.z
+            const d2 = dx * dx + dz * dz
+            if (d2 < bestD2) { bestD2 = d2; best = i }
+        }
+        if (best < 0) return "附近没有蹒跚者/骸骨（人形 mob）"
+        const names = ["皮革", "铁", "铜", "金", "钻石"]
+        if (entityManager.setMobArmorSet(best, tier)) {
+            return (tier >= 0 && tier <= 4)
+                ? ("最近的 mob 已穿上整套" + names[tier] + "护甲")
+                : "最近的 mob 已脱甲"
+        }
+        return "穿甲失败（目标非人形或已死亡）"
     }
     // misc 二轮 `/time` 解析（spec）：rest 含前导空格如 " set day"。子命令 set/add。
     //   phase 语义：0=正午 0.25=黄昏 0.5=子夜 0.75=黎明（与 WorldClock 一致）。
@@ -1816,23 +1855,17 @@ Window {
         return Qt.rgba(r * k, g * k, b * k, 1.0)
     }
 
-    // t377 mob 护甲 Model 的 baseColor：tier 色（与玩家 / MaterialIcon 护甲配色同源）× 昼夜 terrainLight，
-    //   受击红闪（hurtFlashAt>0 → #ff0000，同 mob 体色红闪）。armorId = 0x300 + tier*4 + piece → tier = (id-0x300)/4。
-    //   spec t377「mobs spawn with RANDOM armor ... material-colored」。
-    function mobArmorColor(entIdx, armorId) {
+    // t377 mob 护甲 tier 色（t719 起 UnitCube+tier 色路径退役——ArmorLayerBox + layer 贴图接管 mob 穿甲
+    //   显示；tier 色板移入层贴图（t717 六档程序层 / pack 原色），tint 走 mobArmorTintT 近白保红闪）。
+
+    // t719 mob 护甲 layer 壳的 tint（ArmorLayerBox 材质 baseColor）：层贴图自带 tier 配色（程序层六档 /
+    //   pack 层原色，皮革 Core 侧已染棕）→ 近白 tint 仅承载 hurtFlash 受击红闪（mob 红闪语义同旧 mobArmorColor，
+    //   但 tier 色/昼夜乘法退役防二次染色——t597 同理：贴图在身 baseColor 必须近白）。护甲壳与 mob 本体
+    //   （贴图路径白 tint）同步不压暗，观感一致。
+    function mobArmorTintT(entIdx) {
         entityManager.revision
-        if (entityManager.hurtFlashAt(entIdx) > 0) return "#ff0000"
-        const tier = Math.floor((armorId - 0x300) / 4)
-        const cols = [
-            [0.541, 0.353, 0.169], // 皮革
-            [0.847, 0.847, 0.847], // 铁
-            [0.784, 0.471, 0.314], // 铜
-            [0.980, 0.847, 0.251], // 金
-            [0.306, 0.878, 0.784], // 钻石
-        ]
-        const c = cols[tier] || cols[1]
-        const tl = terrainLight(worldClock.skyLight)
-        return Qt.rgba(c[0] * tl.r, c[1] * tl.g, c[2] * tl.b, 1.0)
+        if (entIdx >= 0 && entityManager.hurtFlashAt(entIdx) > 0) return "#ff0000"
+        return Qt.rgba(1.0, 1.0, 1.0, 1.0)
     }
 
     // t560 护甲腿摆角度（度）：MobModel 几何腿绕髋枢做 X 轴摆动，sw = kLegSwingAmp(0.5 rad) × sin(walkPhase)，
@@ -4000,34 +4033,13 @@ Window {
                 return Qt.rgba(r + (1.0 - r) * hurt, g * (1.0 - hurt), b * (1.0 - hurt), 1.0)
             }
 
-            // t377 护甲 tier → 基础色 (r,g,b) 浮点（与 MaterialIcon 护甲配色同源：皮革棕 / 铁银 / 铜橙 / 金黄 /
-            //   钻石青）。3rd-person 装备护甲 Model 据此着色（material-colored，spec t377「THIRD-PERSON player model
-            //   shows equipped armor (per piece, material-colored)」）。armorId 非护甲 → 兜底铁银灰。
-            function armorBaseColor(armorId) {
-                const tier = hotbarVM.armorTier(armorId)
-                switch (tier) {
-                case 0: return [0.541, 0.353, 0.169] // 皮革 #8a5a2b
-                case 1: return [0.847, 0.847, 0.847] // 铁 #d8d8d8
-                case 2: return [0.784, 0.471, 0.314] // 铜 #c87850
-                case 3: return [0.980, 0.847, 0.251] // 金 #fad840
-                case 4: return [0.306, 0.878, 0.784] // 钻石 #4ee0c8
-                default: return [0.847, 0.847, 0.847]
-                }
-            }
-            // t718 护甲 layer 壳的 tint（armorTintT 辅助）：层贴图自带 tier 配色（程序层 t717 五档 /
-            //   pack 层各 tier 原色；皮革 pack 层 Core 侧已染棕）→ baseColor 不再乘 tier 色（会二次染色），
-            //   改近白 tint 仅承载 hurt 红闪 + bodyOpacity。hurt=0 返回白（贴图原色透出，同 t597 mob pack
-            //   贴图白 tint 模式）；hurt>0 lerp 向红（盔甲壳跟本体一起变红，t718 spec「hurt 时盔甲壳跟随
-            //   本体 tint」）。
+            // t718 护甲 layer 壳的 tint（ArmorLayerBox 材质 baseColor）：层贴图自带 tier 配色（程序层 t717 六档 /
+            //   pack 层各 tier 原色；皮革 pack 层 Core 侧已染棕）→ baseColor 不再乘 tier 色（t377 旧 armorBaseColor /
+            //   armorMatColor 的 tier 色路径随 t718 layer 贴图接管退役，防二次染色），改近白 tint 仅承载 hurt 红闪。
+            //   hurt=0 返回白（贴图原色透出，同 t597 mob pack 贴图白 tint 模式）；hurt>0 G/B 压向 0（盔甲壳跟
+            //   本体一起变红，t718 spec「hurt 时盔甲壳跟随本体 tint」）。
             function armorTintT(hurt) {
                 return Qt.rgba(1.0, 1.0 - hurt, 1.0 - hurt, 1.0)
-            }
-
-            // t377 护甲 Model 的 baseColor = tier 色 lerp 向红（受伤变红，同身体 hurtTint）+ bodyOpacity。
-            //   与身体部件统一走 hurtTint（不叠 terrainLight —— 玩家身体本身不随昼夜变暗，护甲一致）。
-            function armorMatColor(armorId) {
-                const c = playerModel.armorBaseColor(armorId)
-                return playerModel.hurtTint(playerModel.hurt, c[0], c[1], c[2])
             }
 
             // 行走动画混合系数（t45）：moveSpeed>0.1 → 1（四肢摆动），否则 0（中性位）。QML 据此缩放
@@ -6542,25 +6554,41 @@ Window {
                                     scale: Qt.vector3d(0.07, 0.08, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
                                 }
-                                // t377 Shambler 随机护甲（4 部位；mobArmorAt 返护甲 id，0=无 → 隐）。作 mob Model 子节点 →
+                                // t377/t560/t719 Shambler 随机护甲（4 部位；mobArmorAt 返护甲 id，0=无 → 隐）。作 mob Model 子节点 →
                                 //   继承 bodyYaw + 父 visible。MobModel 局部坐标（头心 0.57 / 躯干心 0.05 / 腿底 -0.90）。
                                 //   腿摆动烘焙在几何里 → 护腿 / 靴为静态盒（近似的视觉提示，~20% mob 偶遇可接受）。
-                                //   tier 色 × terrainLight + 受击红闪（mobArmorColor）；NoLighting（红线）。
+                                //   t719 升级通用 layer 渲染器（与玩家 t718 共用 ArmorLayerBox + armorLayerTex）：
+                                //   几何换 ArmorLayerBox{piece}（MC armor layer box-UV）+ baseColorMap = tier 对应
+                                //   layer 贴图（pack 命中 / 程序层）+ alphaCutoff 0.5（开脸窗 / 链甲孔）。tint 走
+                                //   mobArmorTintT（近白 tint 仅保 hurtFlash 红闪——层贴图自带 tier 色，mobArmorColor
+                                //   的 tier 色乘法退役防二次染色）。NoLighting（红线）。
                                 Model { // 头盔（piece 0）
                                     id: mobArmorHead
                                     property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 0)) : 0 }
                                     visible: armId !== 0
-                                    geometry: UnitCube {}
+                                    geometry: ArmorLayerBox { piece: 0 }
                                     position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.48, 0.30, 0.48)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorHead.armId) }
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: mobArmorTintT(index)
+                                        baseColorMap: window.armorLayerTex(mobArmorHead.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
                                 }
                                 Model { // 胸甲（piece 1）
                                     id: mobArmorChest
                                     property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 1)) : 0 }
                                     visible: armId !== 0
-                                    geometry: UnitCube {}
+                                    geometry: ArmorLayerBox { piece: 1 }
                                     position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.48, 0.50, 0.30)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorChest.armId) }
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: mobArmorTintT(index)
+                                        baseColorMap: window.armorLayerTex(mobArmorChest.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
                                 }
                                 // t560 护腿/靴（piece 2/3）随腿 walkPhase 摆动：旧版是静态整块盒（t377 注释「腿摆动
                                 //   烘焙在几何里 → 护腿/靴为静态盒（近似的视觉提示）」）→ 用户「盔甲像固定没跟腿动画」。
@@ -6569,7 +6597,8 @@ Window {
                                 //   MobModel 几何腿同幅同相（同一量化相位，见 mobArmorLegSwingDeg 注释）。盒位/尺寸沿用
                                 //   旧静态盒（护腿整块 (0,-0.30,0)@(0.46,0.40,0.26) / 靴 (0,-0.82,0)@(0.46,0.16,0.26)）
                                 //   按腿拆半到腿心 ±0.11、半宽 0.10（贴 Shambler 腿几何 half 0.11）。随枢旋转 → 腿摆时
-                                //   盔甲同步摆动（不再固定）。NoLighting（红线）；tier 色×受击红闪同旧。
+                                //   盔甲同步摆动（不再固定）。NoLighting（红线）；t719 几何换 ArmorLayerBox{piece:3/4/5}
+                                //   + layer 贴图（护腿 layer_1 腿区、靴 layer_2 右/左靴区——MC 靴独立层）。
                                 Node { // 左腿盔甲枢轴（髋 y=−0.25；腿心 x=−0.11）
                                     id: mobArmorLegPivotL
                                     property int legArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
@@ -6580,15 +6609,27 @@ Window {
                                     eulerRotation.x: legSwing
                                     Model { // 左护腿
                                         visible: parent.legArmId !== 0
-                                        geometry: UnitCube {}
+                                        geometry: ArmorLayerBox { piece: 3 }
                                         position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.20, 0.40, 0.26)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegPivotL.legArmId) }
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: mobArmorTintT(index)
+                                            baseColorMap: window.armorLayerTex(parent.legArmId, 1)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
                                     }
                                     Model { // 左靴
                                         visible: parent.bootArmId !== 0
-                                        geometry: UnitCube {}
+                                        geometry: ArmorLayerBox { piece: 5 }
                                         position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.20, 0.16, 0.26)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegPivotL.bootArmId) }
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: mobArmorTintT(index)
+                                            baseColorMap: window.armorLayerTex(parent.bootArmId, 2)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
                                     }
                                 }
                                 Node { // 右腿盔甲枢轴（镜像；右腿摆角反相）
@@ -6601,15 +6642,27 @@ Window {
                                     eulerRotation.x: legSwing
                                     Model { // 右护腿
                                         visible: parent.legArmId !== 0
-                                        geometry: UnitCube {}
+                                        geometry: ArmorLayerBox { piece: 3 }
                                         position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.20, 0.40, 0.26)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegPivotR.legArmId) }
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: mobArmorTintT(index)
+                                            baseColorMap: window.armorLayerTex(parent.legArmId, 1)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
                                     }
                                     Model { // 右靴
                                         visible: parent.bootArmId !== 0
-                                        geometry: UnitCube {}
+                                        geometry: ArmorLayerBox { piece: 4 }
                                         position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.20, 0.16, 0.26)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, mobArmorLegPivotR.bootArmId) }
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: mobArmorTintT(index)
+                                            baseColorMap: window.armorLayerTex(parent.bootArmId, 2)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
                                     }
                                 }
                             }
@@ -6831,29 +6884,43 @@ Window {
                                         }
                                     }
                                 }
-                                // t377 Bones 随机护甲（4 部位；同 Shambler，但 Bones 身形瘦 → 护甲盒按比例缩窄，贴骨身）。
+                                // t377/t719 Bones 随机护甲（4 部位；同 Shambler，但 Bones 身形瘦 → 护甲盒按比例缩窄，贴骨身）。
                                 //   作 mob Model 子节点继承 bodyYaw + 父 visible；MobModel 局部坐标（瘦躯干 half 0.14 / 细腿 0.06）。
                                 //   ids 必须 main.qml 全局唯一 → Bones 段用 bonesArmor* 前缀（Shambler 段仍 mobArmor*）。
+                                //   t719 几何换 ArmorLayerBox + layer 贴图（同 Shambler 段；tint = mobArmorTintT 近白保红闪）。
                                 Model { // 头盔（piece 0）
                                     id: bonesArmorHead
                                     property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 0)) : 0 }
                                     visible: armId !== 0
-                                    geometry: UnitCube {}
+                                    geometry: ArmorLayerBox { piece: 0 }
                                     position: Qt.vector3d(0, 0.66, 0); scale: Qt.vector3d(0.36, 0.26, 0.36)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorHead.armId) }
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: mobArmorTintT(index)
+                                        baseColorMap: window.armorLayerTex(bonesArmorHead.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
                                 }
                                 Model { // 胸甲（piece 1）
                                     id: bonesArmorChest
                                     property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 1)) : 0 }
                                     visible: armId !== 0
-                                    geometry: UnitCube {}
+                                    geometry: ArmorLayerBox { piece: 1 }
                                     position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.34, 0.50, 0.24)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorChest.armId) }
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: mobArmorTintT(index)
+                                        baseColorMap: window.armorLayerTex(bonesArmorChest.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
                                 }
                                 // t560 护腿/靴（piece 2/3）随腿 walkPhase 摆动：同 Shambler 段 —— 分左/右两腿各作
                                 //   髋枢 Node（枢 y=−0.25 = mobmodel.cpp mobType 5 腿枢 hipY），eulerRotation.x =
                                 //   mobArmorLegSwingDeg(walkPhase, ±1) 与几何腿同幅同相。Bones 腿心 ±0.07 / 半宽 0.06
                                 //   （瘦骨杆）→ 护甲盒按腿拆到 ±0.07、scale.x=0.14（旧整块 (0.30,*,0.2x) 拆半贴细腿）。
+                                //   t719 几何换 ArmorLayerBox{piece:3/4/5} + layer 贴图（同 Shambler 段）。
                                 Node { // 左腿盔甲枢轴
                                     id: bonesArmorLegPivotL
                                     property int legArmId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
@@ -6864,15 +6931,27 @@ Window {
                                     eulerRotation.x: legSwing
                                     Model { // 左护腿
                                         visible: parent.legArmId !== 0
-                                        geometry: UnitCube {}
+                                        geometry: ArmorLayerBox { piece: 3 }
                                         position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.14, 0.40, 0.20)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegPivotL.legArmId) }
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: mobArmorTintT(index)
+                                            baseColorMap: window.armorLayerTex(parent.legArmId, 1)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
                                     }
                                     Model { // 左靴
                                         visible: parent.bootArmId !== 0
-                                        geometry: UnitCube {}
+                                        geometry: ArmorLayerBox { piece: 5 }
                                         position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.14, 0.16, 0.20)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegPivotL.bootArmId) }
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: mobArmorTintT(index)
+                                            baseColorMap: window.armorLayerTex(parent.bootArmId, 2)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
                                     }
                                 }
                                 Node { // 右腿盔甲枢轴（镜像；摆角反相）
@@ -6885,15 +6964,27 @@ Window {
                                     eulerRotation.x: legSwing
                                     Model { // 右护腿
                                         visible: parent.legArmId !== 0
-                                        geometry: UnitCube {}
+                                        geometry: ArmorLayerBox { piece: 3 }
                                         position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.14, 0.40, 0.20)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegPivotR.legArmId) }
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: mobArmorTintT(index)
+                                            baseColorMap: window.armorLayerTex(parent.legArmId, 1)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
                                     }
                                     Model { // 右靴
                                         visible: parent.bootArmId !== 0
-                                        geometry: UnitCube {}
+                                        geometry: ArmorLayerBox { piece: 4 }
                                         position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.14, 0.16, 0.20)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: mobArmorColor(index, bonesArmorLegPivotR.bootArmId) }
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: mobArmorTintT(index)
+                                            baseColorMap: window.armorLayerTex(parent.bootArmId, 2)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
                                     }
                                 }
                             }

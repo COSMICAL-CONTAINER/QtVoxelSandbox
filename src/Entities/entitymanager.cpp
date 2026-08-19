@@ -1062,7 +1062,7 @@ int EntityManager::mobTypeAt(int i) const
 }
 
 // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。越界 → 0。
-//   仅 Shambler/Bones spawn 时随机分配；QML delegate 据 it 叠 tier 色护甲 Model。
+//   仅 Shambler/Bones spawn 时随机分配；QML delegate 据 it 叠 layer 贴图护甲壳（t719 ArmorLayerBox）。
 int EntityManager::mobArmorAt(int i, int piece) const
 {
     if (i < 0 || i >= int(m_entities.size())) return 0;
@@ -1074,6 +1074,32 @@ int EntityManager::mobArmorAt(int i, int piece) const
     case 3: return e.armorBoots;
     default: return 0;
     }
+}
+
+// t719 人形 mob 穿甲调试入口（见头文件注释；dev-plan t719 降级路径——mob 拾取装备 AI 未实现，用
+//   /mobarmor 命令驱动通用 layer 渲染器，不強做拾取）。armorId 段与 spawn 随机护甲同源本地常量
+//   （Entities 层不向上 include Game/recipe.h，PLAN §2）。
+bool EntityManager::setMobArmorSet(int i, int tier)
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.dead) return false;
+    // 仅人形 mob（Shambler/Bones——delegate 有 ArmorLayerBox 护甲壳的两种）；其余静默早退。
+    if (e.mobType != MobShambler && e.mobType != MobBones) return false;
+    if (tier < 0 || tier > 4) {
+        // 越界 → 清空四部位（脱甲）。
+        e.armorHelmet = e.armorChest = e.armorLegs = e.armorBoots = 0;
+    } else {
+        constexpr int kArmorBase = 0x300; // ArmorRegistry::ArmorIdBase（同源常量）
+        const int base = kArmorBase + tier * 4;
+        e.armorHelmet = base + 0;
+        e.armorChest  = base + 1;
+        e.armorLegs   = base + 2;
+        e.armorBoots  = base + 3;
+    }
+    ++m_revision;
+    emit entitiesChanged(); // QML 护甲壳 armId 绑定刷新
+    return true;
 }
 
 // t300 第 i 只 mob 是否已被剪羊毛（仅 MobSheep 用；其余 mob 永远 false）。越界 → false。

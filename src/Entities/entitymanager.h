@@ -487,9 +487,15 @@ public:
     //   非 MobIronGolem / dead / 越界 → 静默早退。
     void setGolemRetaliate(int i);
     // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。
-    //   仅 Shambler/Bones spawn 时随机分配（~80% 无 / ~20% 一件或一套）；QML delegate 据 it 叠加 tier 色
-    //   护甲 Model（material-colored，机制等价 MC 1.0 僵尸/骷髅随机护甲）。越界 → 0。
+    //   仅 Shambler/Bones spawn 时随机分配（~80% 无 / ~20% 一件或一套）；QML delegate 据 it 叠加 layer
+    //   贴图护甲壳（t719 ArmorLayerBox，机制等价 MC 1.0 僵尸/骷髅随机护甲）。越界 → 0。
     Q_INVOKABLE int mobArmorAt(int i, int piece) const;
+    // t719 人形 mob 穿甲调试入口（dev-plan t719 降级路径：mob 拾取装备 AI 未实现 → 通用 layer 渲染器 +
+    //   /mobarmor 调试命令驱动，不強做拾取）：把第 i 个 mob（须 Shambler/Bones 人形）四部位护甲设为
+    //   tier 套装（armorId = 0x300 + tier*4 + piece，与 ArmorRegistry id 段同源常量——本地字面量避免跨层
+    //   include Game/recipe.h，同 spawn 随机护甲先例）。tier 越界（<0 或 >4）→ 清空四部位（脱甲）。
+    //   非 Mob / 非人形 / dead / 越界 → 静默早退（返 false）。bump revision → QML 护甲壳绑定刷新。
+    Q_INVOKABLE bool setMobArmorSet(int i, int tier);
     // t249 受击击退（spec「受击往攻击方向小跳击退」；C++ 直调，PlayerController::attackMob 命中后调）：
     //   给第 i 个 mob 一个水平方向 (dirX,dirZ) 的击退冲量（vx/vz=kKnockbackHoriz 沿方向）+ 小跳垂直速度
     //   （vy=kKnockbackUp 向上）；解除 resting 让 tick 重力分支处理上跳→减速→下落→着地（小弹起观感）。
