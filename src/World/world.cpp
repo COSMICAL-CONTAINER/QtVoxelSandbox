@@ -2155,15 +2155,18 @@ void World::notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId)
     }
 }
 
-// 电力局部重算核心（tickRedstone 消费 m_powerDirty）：两阶段定点迭代——
-//   Phase A（粉传播）：从脏锚点 BFS 收集连通粉域（上界 kPowerFloodCap）。对域内每粉：电力级 = max over
-//     6 邻（邻源直供 15、邻粉旧电力-1）；旧值兜底（多 tick 收敛：本 tick 用上 tick 的粉电力，新放 /
-//     断路的粉首 tick 从 0 / 邻源起）。连接位 = 6 邻为粉即置（6 向含上下爬墙——v1 简化，MC 需台阶引导）。
-//     state 变化才静默写（防无谓 worldChanged）。
+// 电力局部重算核心（tickRedstone 消费 m_powerDirty）：两阶段——
+//   Phase A（粉传播）：从脏锚点 BFS 收集连通粉域（上界 kPowerFloodCap）。域内每粉电力 = 16 - 距最近
+//     **活跃源**的线距（t707 源连通距离 BFS：6 正交邻粉 + t702 爬墙斜角粉各算一跳，源直供邻格 15，
+//     每经一粉 -1，距 >15 视为不达 → 0）。连接位 = 水平 4 向邻粉 + 爬墙斜角即置（6 向含上下爬墙——
+//     v1 简化，MC 需台阶引导）。state 变化才静默写（防无谓 worldChanged）。
+//     t707 修正：旧 t692 双缓冲快照（读邻粉 snap-1）在去源时产生回声振荡（邻源格读到远端陈旧高值
+//     回喂 → 整条线 ~3s 才全暗且逐格闪烁，即用户实测「压力板松开延迟灭 / 断续」）；BFS 距离精确解
+//     升 / 降沿均一次收敛，无回声 / 无振荡（机制等价 MC 导线通断即时贯通）。
 //   Phase B（接收器 + 反相火把）：扫域内粉的 6 邻接收器 + 脏锚点自身接收器：通电态翻转（红石灯 bit0 /
 //     动力轨 bit4）；TNT / 发射器 / 投掷器通电上升沿 → 发触发信号（信号由呈现层消费，本层不 spawn）。
 //     红石火把反相（t657）：扫域内火把，其附着格（torchAttachOffset 解码）被供电（isReceivingPower）→
-//     置熄灭位；附着格失电 → 清熄灭位重亮（经 m_powerDirty 再入集让下 tick 传播其供能变化——定点迭代）。
+//     置熄灭位；附着格失电 → 清熄灭位重亮（经 m_powerDirty 再入集让下 tick 传播其供能变化）。
 // 返回是否有 state 写入 / 信号（caller 收口 1 次 worldChanged + clearAllDirty）。
 bool World::recomputePowerLocal()
 {
@@ -2209,57 +2212,73 @@ bool World::recomputePowerLocal()
     }
 
     bool any = false;                 // 有实际 state 写入 / 触发信号
-    // t692 Phase A2 双缓冲快照迭代：本 tick 域内所有粉的电力计算全部基于**上一 tick 的电力级**（快照于
-    //   任何写入前拍），传播每 redstone tick（10Hz）恰好推进 1 格——确定性、无「遍历顺序决定传播深度」
-    //   的伪影（旧版本 pass 内边写边读：unordered_set 遍历序早的粉已写新值、晚的读到 → 单 tick 深度
-    //   0..N 格随 hash 序漂移 = 用户实测「火把只亮邻 1 格 / 按钮传播断续」根因）。升沿（放源）与降沿
-    //   （去源）都经「变化格回插 m_powerDirty + 其 6 邻粉入集」驱动下一 tick 继续推进，机制等价 MC 1.0
-    //   红石信号逐格传播（一格 0.1s）。
-    std::unordered_map<quint64, quint8> snap; // 域内粉的旧电力级（写前快照）
-    snap.reserve(region.size() * 2);
+    // t707 电力模型改为「源连通距离 BFS」（替代 t692 双缓冲快照「读邻粉 snap-1」）。去源（OFF）根因：
+    //   相位 A 已把整条连通粉路全量入域，release 后邻源格仍读到远端邻粉的**陈旧 snap** → 15 降到 13 而非 0；
+    //   相邻格交错回喂（回声）→ 整条线每 ~2 tick 才降 1 级、最长 ~3s 才全暗且逐格闪烁 = 用户实测「压力板
+    //   松开红石延迟灭 / 断续」。BFS 距离模型无递归依赖：电力 = 16 - 距最近**活跃源**的线距（源直供邻格 15、
+    //   每经一粉 -1、爬墙斜角同样算一跳），升 / 降沿均一次 BFS 算定整域——去源 → 无活跃源 → 全域瞬时 0
+    //   （无回声 / 无振荡；机制等价 MC 导线通断即时贯通）。传播语义不变（15 格衰减 / 爬墙 / 源直供 15），
+    //   仅把「迭代收敛」换成「图距离精确解」。稳态（无写入）不再入脏集 → 零开销。
+    std::unordered_map<quint64, int> dist; // 域内粉 → 距最近活跃源的线距（1..15；缺省 = 不达 → 电力 0）
+    dist.reserve(region.size() * 2);
+    std::vector<quint64> bfsq;            // 距离 BFS 队列
+    // 播种：域内粉的 6 正交邻有活跃源（源开关是外部驱动——写 state / 改 id 已落地，实时读无需快照）→ 距 1。
+    //   源经斜角不供能（同 isReceivingPower / 旧读法只查 6 正交邻）。
     for (const quint64 k : region) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
-        snap[k] = quint8(m_chunks.stateAt(x, y, z) & BlockRegistry::RedstoneDustPowerMask);
+        for (const auto &d : kNb) {
+            if (powerSourceLevel(x + d[0], y + d[1], z + d[2]) > 0) {
+                dist[k] = 1;
+                bfsq.push_back(k);
+                break;
+            }
+        }
     }
-    // Phase A2：域内粉重算电力 + 连接位（全部读快照，不读本 pass 刚写的值）。
+    // 外扩：每 hop +1，沿 6 正交邻粉 + 爬墙斜角粉（t702 爬墙 = 1 格台阶，同样算一跳衰减）；距 >15 视为不达。
+    static constexpr int kPowerMaxDist = 15; // 15 格衰减上限（power = 16 - dist；dist=15 → 电力 1）
+    for (size_t qi = 0; qi < bfsq.size(); ++qi) {
+        int x, y, z;
+        unpackGrowthCell(bfsq[qi], x, y, z);
+        const int nd = dist[bfsq[qi]] + 1;
+        if (nd > kPowerMaxDist) continue;
+        const auto tryReach = [&](int nx, int ny, int nz) {
+            const quint64 nk = packGrowthCell(nx, ny, nz);
+            if (!region.count(nk) || dist.count(nk)) return;
+            if (!BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz))) return;
+            dist[nk] = nd;
+            bfsq.push_back(nk);
+        };
+        for (const auto &d : kNb) tryReach(x + d[0], y + d[1], z + d[2]); // 6 正交邻粉
+        for (const auto &h : kHDir2) {                                    // 爬墙斜角粉（上 / 下一格）
+            tryReach(x + h[0], y + 1, z + h[1]);
+            tryReach(x + h[0], y - 1, z + h[1]);
+        }
+    }
+    // Phase A2：域内粉重算电力（距离精确解）+ 连接位（水平 4 向邻粉 + 爬墙斜角），静默写 state。
     for (const quint64 k : region) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
         const quint8 cur = m_chunks.stateAt(x, y, z);
-        int power = 0;
         quint8 conn = 0;
         for (int di = 0; di < 6; ++di) {
             const int nx = x + kNb[di][0], ny = y + kNb[di][1], nz = z + kNb[di][2];
             const quint8 nb = m_chunks.blockAt(nx, ny, nz);
-            // 邻源直供 15（机制等价 MC 强电）。**源读实时态**（源开关是外部驱动——拉杆扳动 / 火把反相
-            //   已由各自路径写 state / 破坏即改 id → 快照无需涵盖；只有粉-粉传播需要快照隔离）。
-            const int src = powerSourceLevel(nx, ny, nz);
-            if (src > power) power = src;
             if (BlockRegistry::isRedstoneDust(nb)) {
                 // review-r19.8 H1 修：连接位只存**水平 4 向**（高半字节 0x01/0x02/0x04/0x08，同铁轨
                 //   连接位序）——旧 6 向 conn<<4 使 +Z/-Z（di4/5 的 0x10/0x20）溢出 8 位被截、+Y/-Y
                 //   （di2/3 的 0x04/0x08）错占 Pz/Nz 位 → 沿 Z 铺粉渲染成孤立点。垂直邻粉连接不落 state
-                //   （v1 渲染省略垂直画线，注释见 partialblockgeometry）；电力传播走下方 6 向邻粉衰减，
-                //   与连接位无关，垂直供电不受影响。
+                //   （v1 渲染省略垂直画线，注释见 partialblockgeometry）；电力传播走 BFS 距离（含垂直 hop，
+                //   与连接位无关，垂直供电不受影响）。
                 if (di == 0)      conn |= BlockRegistry::RedstoneDustConnPx; // +X
                 else if (di == 1) conn |= BlockRegistry::RedstoneDustConnNx; // -X
                 else if (di == 4) conn |= BlockRegistry::RedstoneDustConnPz; // +Z
                 else if (di == 5) conn |= BlockRegistry::RedstoneDustConnNz; // -Z
                 // di 2/3（+Y/-Y 垂直邻粉）：不进连接位（见上）
-                // t692：邻粉电力读**快照**（上一 tick 值）——衰减传播每 tick 恰 1 格。
-                const auto it = snap.find(packGrowthCell(nx, ny, nz));
-                const int np = (it != snap.end()) ? int(it->second) : 0;
-                if (np - 1 > power) power = np - 1; // 邻粉（上 tick）电力 -1（衰减传播）
             }
         }
         // t702 上墙连接位（机制等价 MC 1.0 粉沿 1 格台阶爬墙）：水平 4 向的**上 / 下一格**有粉 → 该向也
-        //   置连接位（渲染画向该向的爬坡斜线，同铁轨 t667 坡向语义；电力传播 6 向邻粉衰减已天然覆盖
-        //   「上/下一格的粉」（di2/3 的 ny=y±1 只查了正上/正下——不对：爬墙粉在 (x±1,y+1,z) 斜角，
-        //   不属 6 正交邻 → 下方补传播）。斜角粉不在 snap（region BFS 只走 6 正交邻）→ 电力需经
-        //   「本格 ↔ 斜角粉」直达：此处对爬墙向邻粉直接读**实时** state 电力（不进快照——斜角粉与
-        //   本格距离 1，机制等价 MC 台阶粉互传；实时读使爬墙链同样每 tick 1 格推进：斜角粉自身的
-        //   重算会把它算出的电力写回 state，下一 tick 本格读到 → 级联成立）。
+        //   置连接位（渲染画向该向的爬坡斜线，同铁轨 t667 坡向语义）。
         static constexpr int kHDir[4][3] = {{1,0,0},{-1,0,0},{0,0,1},{0,0,-1}};
         static constexpr quint8 kHConnBit[4] = {
             BlockRegistry::RedstoneDustConnPx, BlockRegistry::RedstoneDustConnNx,
@@ -2269,25 +2288,20 @@ bool World::recomputePowerLocal()
             for (const int dy : { 1, -1 }) {
                 const int ny = y + dy;
                 if (!inBounds(nx, ny, nz)) continue;
-                if (!BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz))) continue;
-                conn |= kHConnBit[h]; // 该向有爬墙粉 → 连线（渲染画斜段）
-                // 电力互通：斜角粉实时电力 -1（爬墙一格 = 传播一格衰减，机制等价 MC 台阶粉）。
-                //   注：双向都写——低位粉读高位粉、高位粉也读低位粉（对角互传；各自 Phase A2 pass
-                //   都会跑到，state 写入后下一 tick 对侧读到 → 双向级联收敛）。
-                const int np = int(m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask);
-                if (np - 1 > power) power = np - 1;
+                if (BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
+                    conn |= kHConnBit[h]; // 该向有爬墙粉 → 连线（渲染画斜段）
             }
         }
+        const auto it = dist.find(k);
+        const int power = (it != dist.end()) ? (16 - it->second) : 0; // 距最近源 d → 16-d（d=1 → 邻源 15）
         const quint8 ns = quint8(conn << 4) | quint8(power & BlockRegistry::RedstoneDustPowerMask);
         if (ns != cur) {
             m_chunks.setBlock(x, y, z, BlockRegistry::RedstoneDust, ns); // 静默直写 + 标脏（同 recomputeRailConnections 模式）
             // 通电翻转 → 粉微红光 7 增删 → 局部重 flood 方块光（幂等安全；断电时同检出光变）。
             recomputeLightAround(x, y, z, BlockRegistry::RedstoneDust, cur,
                                  BlockRegistry::RedstoneDust, ns);
-            // t692：变化格回插脏集（下 tick 复查本格——级联波前）+ 其 6 邻粉入集（它们的「邻粉电力-1」
-            //   输入变了 → 下 tick 重算 = 波前逐格外推）。稳定后（值不再变）不再入集 → 稳态停。
-            //   t702：爬墙斜角粉（水平邻 y±1）一并入集——爬墙链的波前推进同样逐格（斜角互传读实时态，
-            //   变化格对侧下一 tick 才读到新值 → 每 tick 1 格斜向步进，与平面传播同节拍）。
+            // 变化格回插脏集（下 tick 复查——域被 kPowerFloodCap 截断时续扩 / 火把反相级联复查）+ 其
+            //   6 邻粉 + 爬墙斜角粉入集。BFS 模型下整域一次收敛，稳态不再入集 → 零开销。
             m_powerDirty.insert(k);
             for (const auto &d : kNb) {
                 const int nx = x + d[0], ny = y + d[1], nz = z + d[2];

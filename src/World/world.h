@@ -524,10 +524,12 @@ public:
     //
     // 重算触发（notePowerWrite，挂 setBlock / setWaterSilent / clearBlockSilent 编辑路径，同 checkRailOnEdit
     //   收口模式）：编辑格属红石族（粉 / 源 / 接收器）或其 6 邻含红石族 → 编辑格 + 受影响的粉连通域入
-    //   m_powerDirty 脏集；tickRedstone（WorldClock 10Hz 桥接）处理脏集 —— 从各脏锚点 BFS 局部重算
-    //   （上界 kPowerFloodCap 格防失控），写粉 state（连接位 + 电力级）+ 接收器通电位，一次 worldChanged
-    //   收口。传播经多 tick 定点迭代稳定（源先算 → 粉逐层降级 → 接收器终态；等价 MC 红石的多 tick 传播
-    //   延迟，非递归防重入）。稳态（脏集空）每 tick 零开销早退。
+    //   m_powerDirty 脏集；tickRedstone（WorldClock 10Hz 桥接）处理脏集 —— 从各脏锚点 BFS 收集连通粉域
+    //   （上界 kPowerFloodCap 格防失控），域内每粉电力 = 16 - 距最近活跃源的线距（t707 源连通距离 BFS；
+    //   源直供邻格 15、每经一粉 -1、爬墙斜角算一跳，距 >15 不达 → 0），写粉 state（连接位 + 电力级）+
+    //   接收器通电位，一次 worldChanged 收口。t707 修正：旧 t692 双缓冲快照在去源时回声振荡（邻源格读
+    //   到远端陈旧高值回喂 → 整条线 ~3s 才全暗且逐格闪烁 = 压力板松开延迟灭 / 断续）；BFS 距离精确解
+    //   升 / 降沿均一次收敛，无回声（机制等价 MC 导线通断即时贯通；稳态脏集空每 tick 零开销早退）。
     //
     // 接收器动作（World 层只发语义事件，不反向依赖 Game/Entities —— PLAN §2）：
     //   TNT 通电上升沿 → powerTntTriggered(x,y,z) 信号（Main.qml 转发 entityManager.spawnPrimedTnt，
