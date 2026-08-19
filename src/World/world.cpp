@@ -2078,6 +2078,8 @@ void World::checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id
 // ── t656/t657/t658 红石电力系统 v1（见 world.h notePowerWrite / tickRedstone 头注释）──
 
 // 红石族判定（粉 / 全部电源 / 全部接收器 —— notePowerWrite 触发筛选 + tickRedstone 接收器扫描共用）。
+//   t722：IronDoor 并入接收器族（门两格——任一格被供电即整门开；state bit2 写入见 recomputePowerLocal
+//   Phase B 分支）。
 bool World::isPowerFamilyBlock(quint8 id)
 {
     using BR = BlockRegistry;
@@ -2088,6 +2090,7 @@ bool World::isPowerFamilyBlock(quint8 id)
         || id == BR::GoldenRail                          // 接收器：动力轨（t658）
         || BR::isTnt(id)                                 // 接收器：TNT（t658）
         || BR::isDispenser(id) || BR::isDropper(id)      // 接收器：发射器 / 投掷器（t658）
+        || id == BR::IronDoor                            // 接收器：铁门（t722，仅红石驱动开合）
         || BR::isLever(id) || BR::isWoodButton(id) || BR::isStoneButton(id) // 源：拉杆 / 按钮（state bit0）
         || BR::isPressurePlate(id)                       // 源：压力板（state bit0）
         || id == BR::DetectorRail;                       // 源：探测轨有车标记（state bit4）
@@ -2330,7 +2333,8 @@ bool World::recomputePowerLocal()
         if (!inBounds(x, y, z)) return;
         const quint8 b = m_chunks.blockAt(x, y, z);
         if (BlockRegistry::isTnt(b) || BlockRegistry::isRedstoneLamp(b) || b == BlockRegistry::GoldenRail
-            || BlockRegistry::isDispenser(b) || BlockRegistry::isDropper(b))
+            || BlockRegistry::isDispenser(b) || BlockRegistry::isDropper(b)
+            || b == BlockRegistry::IronDoor) // t722 铁门（仅红石驱动开合；上下两格各自入集，接收器分支内同翻）
             receivers.insert(packGrowthCell(x, y, z));
     };
     for (const quint64 k : region) {
@@ -2422,6 +2426,29 @@ bool World::recomputePowerLocal()
                     const int nx = x + a[0], nz = z + a[1];
                     if (inBounds(nx, y, nz) && m_chunks.blockAt(nx, y, nz) == BlockRegistry::GoldenRail)
                         m_powerDirty.insert(packGrowthCell(nx, y, nz));
+                }
+                any = true;
+            }
+        } else if (b == BlockRegistry::IronDoor) {
+            // t722 铁门：电力驱动开合（state bit2，同门族开合编码——渲染 / 碰撞经 ShapeDoor 解码，开 = 板
+            //   旋 90° 贴铰链边）。上升沿开 / 下降沿关（机制等价 MC 1.0 铁门 only-redstone；徒手不开——
+            //   playercontroller 门开合分支已排除 IronDoor）。**两格同翻**：本格与配对格（bit3 判上/下，
+            //   上格 y-1 / 下格 y+1）都写同一开合位（配对格自身也常在 receivers 集内——粉 / 源邻接任一格
+            //   都会入集，两侧写互相幂等；配对格不在集（仅本格被供）时经本分支同步翻，保两格 state 一致
+            //   ——破坏联动 / 渲染读 bit3+bit2 的契约不破）。朝向位（bit[1:0]）/ 上下位（bit3）原样保留。
+            //   静默写 m_chunks.setBlock（同粉 / 轨模式：标脏 + worldChanged 收口在 tickRedstone 末尾，
+            //   不逐门 emit）；门开合改变 lightOpacity 吗？门恒 DoorWindowLightOpacity=0（开合都透光）→
+            //   无需 recomputeLightAround。
+            const bool on = (st & 4) != 0;
+            if (on != powered) {
+                const quint8 ns = quint8(powered ? (st | 4) : (st & quint8(~4)));
+                m_chunks.setBlock(x, y, z, b, ns);
+                const int py = ((st & 8) != 0) ? y - 1 : y + 1; // 配对格（上格配下 y-1 / 下格配上 y+1）
+                if (inBounds(x, py, z) && m_chunks.blockAt(x, py, z) == BlockRegistry::IronDoor) {
+                    const quint8 pst = m_chunks.stateAt(x, py, z);
+                    // 配对格同步写本格的开合结果（其上下位 / 朝向位是自己的，只覆写 bit2）
+                    m_chunks.setBlock(x, py, z, BlockRegistry::IronDoor,
+                                      quint8(powered ? (pst | 4) : (pst & quint8(~4))));
                 }
                 any = true;
             }

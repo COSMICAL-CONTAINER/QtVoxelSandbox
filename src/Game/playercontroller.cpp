@@ -2538,7 +2538,10 @@ void PlayerController::placeBlock()
         // t134/t466 右键门翻 state 开合（统一经 isDoor 谓词覆盖 WoodDoor + SpruceDoor）。门两格同翻（找配对格：
         //   据本格 state bit3 判上 / 下；配对格须同为门 isDoor）。配对格写入用其自身 id（配对格 id 与本格一致 ——
         //   门放置仅产生同 id 配对），故读配对格 blockAt 而非硬编码 WoodDoor。
-        if (BlockRegistry::isDoor(hitId)) {
+        // t722 铁门除外：**徒手不开**（机制等价 MC 1.0 铁门右键无效应——开 / 关仅红石驱动，state bit2 由
+        //   World::recomputePowerLocal 接收器分支写）。本分支对铁门不消费右键（return 掉会吞掉后续放置路径
+        //   的语义），直接 fall-through——右键铁门 = 无动作（不挥臂、不放置、不开合）。
+        if (BlockRegistry::isDoor(hitId) && hitId != BlockRegistry::IronDoor) {
             const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
             const quint8 flipped = quint8((st & ~4) | (((st & 4) == 0) ? 4 : 0)); // 翻 bit2（开合）
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, flipped);

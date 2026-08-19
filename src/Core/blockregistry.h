@@ -937,7 +937,24 @@ public:
         //   锚格（bit7）读 index → 掉 1 件 + 清全部；渲染侧锚格 index → paintingSize 查 w×h 摆 quad。
         //   state 经 m_states 落 SQLite round-trip 保真（存档读回仍带 index/朝向/锚标记）。
         Painting       = 134, // 画作：贴墙薄板（w×h 多格，锚格 state 带 index+朝向；QML 渲染；无碰撞）
-        Count           = 135, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t722 铁门（IronDoor；机制等价 MC 1.0 iron door）：两格高门（下/上格同 id，state 编码与
+        //   WoodDoor 同源：bit3=上格(1)/下格(0)、bit2=开(1)/合(0)、bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z）。
+        //   放置 / 上下半破坏联动 / 碰撞形状（ShapeDoor 满高薄板，开=旋 90° 贴铰链边）全部经 isDoor 谓词
+        //   并入既有门族逻辑（t466 云杉门同模式）。**唯一差异：右键无效应**（playercontroller 门开合分支
+        //   排除铁门——机制等价 MC 铁门徒手不开），开 / 关仅由红石电力驱动（World::recomputePowerLocal
+        //   Phase B 接收器分支：isReceivingPower 上升沿开 bit2 / 下降沿关；两格同翻经配对格写入）。
+        //   solid=false（薄板不挡邻居面剔除；碰撞走 shapeBoxes 子 AABB）、hardness=5.0（金属，同铁块量级）、
+        //   toolType=Pickaxe + requiresTool=false（机制等价 MC 1.0 铁门镐加速但空手慢挖仍掉——MC 铁门
+        //   无采掘工具门槛）、dropId=自身（破任一格掉整门 1 件，配对格静默清）、dropCount=1、maxStack=1
+        //   （单件，同木门）。**per-face**：topTile=door_iron_upper(176) / bottomTile=sideTile=
+        //   door_iron_lower(177)（partialblockgeometry door case 据 state bit3 选上/下半贴图，同 WoodDoor
+        //   t620 模式；手持/掉落物 BlockCube 用 sideTile=lower）；薄侧边（3/16 厚的 4 个窄面）用铁块贴图
+        //   iron_block(112)（t674 木门薄边用木板先例的铁质对应——铁门侧边即铁皮包边）。走 cutout 段渲染
+        //   （isDoor 门族全格两半都走 cutout——上半格栅窗真透明须 alpha discard；同 WoodDoor t638①）。
+        //   音色归 GroupStone（金属质，同 IronBlock / Rail 族）。**进红石 tab 创造调色板**（铁门是红石
+        //   机关件——仅红石驱动开合；同压力板 / 拉杆归类）。配方：6 铁锭 2×3 满铺 → 1 铁门（工作台）。
+        IronDoor       = 135, // 铁门：两格高（仅红石驱动开合；右键无效应）；铁皮贴图 + 铁块薄边
+        Count           = 136, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1137,9 +1154,12 @@ public:
     static bool isPressurePlate(quint8 blockId);
 
     // t466 门方块统一谓词（单一权威，段外云杉门并入，同 isBed / isCrossBillboard 段外模式）：
-    //   blockId == WoodDoor（连续段内单一 id）或 SpruceDoor（段外）即门。供 playercontroller 的门放置
-    //   （两格预检 + 双格写入）、右键开合（state 翻 bit2 + 配对格同翻）、破坏联动（破任一格清配对格）
-    //   统一读「是否门」，避免各处硬编码 WoodDoor id 判定（同 isFence 把段外圆石墙 / 云杉栅栏并入的模式）。
+    //   blockId == WoodDoor（连续段内单一 id）或 SpruceDoor / IronDoor（段外）即门。供 playercontroller 的门放置
+    //   （两格预检 + 双格写入）、右键开合（state 翻 bit2 + 配对格同翻；**t722 铁门除外**——徒手不开，仅红石
+    //   驱动，排除点在 playercontroller 门开合分支）、破坏联动（破任一格清配对格）统一读「是否门」，
+    //   避免各处硬编码 WoodDoor id 判定（同 isFence 把段外圆石墙 / 云杉栅栏并入的模式）。
+    //   t722：铁门并入（放置 / 破坏联动 / 渲染（cutout + partialblockgeometry door case）/ 碰撞形状与木门
+    //   同机制；仅右键开合被排除——铁门的开合由 World 电力接收器分支写 state bit2）。
     //   单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加新材质门时一处同步）。
     static bool isDoor(quint8 blockId);
 

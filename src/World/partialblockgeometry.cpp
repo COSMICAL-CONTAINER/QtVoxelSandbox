@@ -296,21 +296,27 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::WoodDoor:
-    case BlockRegistry::SpruceDoor: { // t466 云杉门（与 WoodDoor 同几何；t620 起两族都据 bit3 选上下半贴图）
+    case BlockRegistry::SpruceDoor: // t466 云杉门（与 WoodDoor 同几何；t620 起两族都据 bit3 选上下半贴图）
+    case BlockRegistry::IronDoor: { // t722 铁门（与 WoodDoor 同几何 + bit3 上下半；薄侧边用铁块贴图）
         // 两格高门：每格各画满高薄板（下格画门下半 / 上格画门上半，几何同 —— 区别仅在 isUpper state，
         //   用于破坏联动 & 朝向同步）。朝向 state[1:0]（0=+X 1=-X 2=+Z 3=-Z）、开合 state bit2。
         //   t620 per-face：此前上下半共用 planks/spruce_planks 单贴图；现据 state bit3（上/下格）选
         //   upper/lower 专属贴图（机制等价 MC 1.0 门两格高模型——下格门板 / 上格带窗）。kDefs 的
-        //   topTile=upper / bottomTile=lower 承载该选择（WoodDoor 143/144、SpruceDoor 145/146；
+        //   topTile=upper / bottomTile=lower 承载该选择（WoodDoor 143/144、SpruceDoor 145/146、t722 IronDoor
+        //   176/177；
         //   tileIndex(PosX)=sideTile=lower 是手持 / 掉落物 BlockCube 的门贴图）。
         const BlockRegistry::BlockDef &doorDef = BlockRegistry::def(blockId);
         const int doorTile = (state & 8) ? doorDef.topTile : doorDef.bottomTile; // bit3=上格 → upper / 下格 → lower
-        // t674 薄侧边用普通木板（用户「门薄侧边用压缩门贴图很抽象」）：门板 3/16 厚的侧边（±Y 顶/底 + 垂直于
-        //   板面的两个薄侧，共 4 个薄面）改用**同族木板**瓦片（橡木门 → planks tile / 云杉门 → spruce_planks
-        //   tile；经 BlockRegistry::def 取，免字面量漂移）；两个大面（板面）仍用 doorTile。thinX = 薄轴沿 X
-        //   （合态 facing 0/1 或开态 facing 2/3）→ 大面法线轴 X，反之 Z。
+        // t674 薄侧边用同族平贴图（用户「门薄侧边用压缩门贴图很抽象」）：门板 3/16 厚的侧边（±Y 顶/底 +
+        //   垂直于板面的两个薄侧，共 4 个薄面）改用**同族基材**瓦片（橡木门 → planks / 云杉门 →
+        //   spruce_planks / t722 铁门 → iron_block——铁门薄边即铁皮包边，经 BlockRegistry::def 取免字面量
+        //   漂移）；两个大面（板面）仍用 doorTile。thinX = 薄轴沿 X（合态 facing 0/1 或开态 facing 2/3）
+        //   → 大面法线轴 X，反之 Z。
         const quint8 planksBlock = (blockId == BlockRegistry::SpruceDoor)
-            ? BlockRegistry::SprucePlanks : BlockRegistry::Planks;
+            ? BlockRegistry::SprucePlanks
+            : (blockId == BlockRegistry::IronDoor)
+                ? BlockRegistry::IronBlock   // t722 铁门薄侧边 = 铁块贴图（iron_block 112）
+                : BlockRegistry::Planks;
         const int planksTile = BlockRegistry::def(planksBlock).sideTile;
         //   合：薄板贴在「朝向」边（朝向 +X → 板在 x[0.8125,1]）；开：板旋 90° 贴邻边。
         const int facing = state & 3;

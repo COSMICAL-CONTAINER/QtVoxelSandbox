@@ -889,6 +889,8 @@ FROM_PACK = [
     # 门（两格高 3/16 薄板；上盒 upper / 下盒 lower —— 放置态 per-face bit3）。
     ("wood_door",   "door", dict(upper="door_wood_upper.png",   lower="door_wood_lower.png")),
     ("spruce_door", "door", dict(upper="door_spruce_upper.png", lower="door_spruce_lower.png")),
+    # t722 铁门：pack door_iron_upper/lower（HD 128px，1.8 老命名）两格高 3/16 薄板，与放置态一致。
+    ("iron_door",   "door", dict(upper="door_iron_upper.png",   lower="door_iron_lower.png")),
     # t714 ④木半方块老图标重做（用户「木台阶/栅栏/楼梯等放置贴图对但图标旧」）：wood_slab / wood_stairs /
     #   wood_fence 旧图标是 t163/t169 程序 default_wood（16px 木板）烘的 dimetric——pack 激活时世界放置走
     #   HD oak_planks 而背包还是低清程序木纹 → 观感漂移。本段 partial 模式：pack oak_planks / spruce_planks

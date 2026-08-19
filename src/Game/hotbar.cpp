@@ -157,6 +157,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::SpruceSlab:          return "icon_spruce_slab.png";          // 云杉台阶：3D 半高盒（深色木纹）
     case BlockRegistry::SpruceFence:         return "icon_spruce_fence.png";         // 云杉栅栏：3D 立柱 + 横档（深色木纹）
     case BlockRegistry::SpruceDoor:          return "icon_spruce_door.png";          // t644 云杉门：3D 两格高薄板（--from-pack 上下半贴图，与放置态一致）
+    case BlockRegistry::IronDoor:            return "icon_iron_door.png";            // t722 铁门：3D 两格高薄板（--from-pack door_iron 上下半，与放置态一致；红石 tab 条目）
     case BlockRegistry::Ladder:        return "icon_ladder.png";      // t413/t519 木梯（透明底；两纵轨 + 4 道横梯级；竖直爬行梯；t519 满格版）
     // t482/t483 防御造物方块立方体图标（build_cube_icons.py 程序生成原创像素图）。
     case BlockRegistry::Pumpkin:       return "icon_pumpkin.png";     // t482/t675 南瓜（t644 --from-pack 拼方块：顶=瓜顶+短茎 / 右=瓜棱 / 左=刻脸；放置态恒面向玩家，同款经典读感）
@@ -739,6 +740,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::RedstoneBlock),                              // 红石块（9 红石粉↔1 块；铁镐采掘）
              // t620 红石灯（机制等价 MC 1.0 redstone lamp；右键开关的可放置光源方块——on 态光 15 + 亮贴图）。
              int(BlockRegistry::RedstoneLamp),                               // 红石灯（右键开关光源；配方 4 红石+1 玻璃）
+             // t722 铁门（机制等价 MC 1.0 iron door；仅红石驱动开合——右键无效应）。两格高薄板同木门
+             //   机制（放置 / 破坏联动 / ShapeDoor 碰撞）；配方 6 铁锭竖摆 2×3。归红石 tab（Inventory.qml
+             //   redstoneIds 含 135 → 方块 tab 自动隐藏，机关件同页压力板 / 拉杆 / 红石块）。
+             int(BlockRegistry::IronDoor),                                   // 铁门（红石开合；两格高；6 铁锭合成）
              // t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶 / 石砖楼梯；worldgen 散布 / 创造取用）。
              int(BlockRegistry::StoneBrick),                                 // 石砖（石质整立方 + 砖纹；要塞墙体主体；可放置）
              int(BlockRegistry::StoneBrickSlab),                             // 石砖台阶（半高；复用 ShapeSlab 几何 + 石砖贴图；可放置）

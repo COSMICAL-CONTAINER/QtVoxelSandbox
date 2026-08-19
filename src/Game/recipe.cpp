@@ -785,6 +785,16 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
         0,                           0,                           0 },
       int(BlockRegistry::Rail), 16, 1, "rail" },
+    // t722 铁门（iron door）：6 铁锭**竖摆**（左两列 × 三行满）→ 1 铁门（有序 3×3，仅工作台）。
+    //   机制等价 MC 1.0 iron door 配方（6 iron ingot 摆 2 宽 × 3 高竖排 → 1 iron door）。最小包围盒
+    //   2×3（竖），与铁轨（{Iron:6} 横排 3×2 包围盒）**形状不同** → 有序匹配不冲突（shapedEqual 比
+    //   包围盒尺寸 + 逐格——同多重集 {IronIngot:6} 但横竖摆位不同，MC 同此区分）。outputCount=1
+    //   （门 maxStack=1，canTake 一次取不满 3，同 wood_door / spruce_door 口径）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, 0,
+        RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, 0,
+        RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, 0 },
+      int(BlockRegistry::IronDoor), 1, 1, "iron_door" },
     // t638 动力铁轨（golden/powered rail）：6 金锭（顶两行满）+ 底行中位木棒 + 底行右位红石粉 → 6 动力轨
     //   （有序 3×3，仅工作台）。机制等价 MC 1.0 配方（6 gold ingot + 1 stick + 1 redstone → 6 powered
     //   rail）。多重集 {Gold:6, Stick:1, Redstone:1} 唯一 → 与指南针 / 钟的 {X:4, Redstone:1} 十字形和
