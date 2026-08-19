@@ -2773,7 +2773,7 @@ t680-t716（37 项）。**严格顺序：t680-t692 审查修复（H 先）→ t6
 > 命名映射（PLAN §9，代码/UI 用左侧原创名，本文件可注 MC 等价名）：末影人=**夜行者 Nightwalker**（MobNightwalker=16）、烈焰人=**燃烬者 Emberling**（MobEmberling=17）、末影珍珠=**暗渊珠**、末影之眼=**暗渊之眼**、烈焰粉=**燃烬粉**、下界传送门=**余烬门**、末地要塞=暗渊要塞（沿用 Stronghold）。
 
 ### 🅰 贴图补缺（先行，其余任务依赖）
-**t717** 生成器批：tools/build_armor_layers.py（armor layer_1/2 三方五档参考构图原创自绘：皮/铁/金/钻/链）+ build_paintings.py（27 张程序自绘，尺寸 16/32/64 系列）+ build_doors_iron.py（铁门上/下 + 铁活板门自绘）+ build_entity_*.py（夜行者体/眼、燃烬者、鱿鱼、矿车、书、皮肤 steve/alex 程序贴图）。全部产 textures/*.png + build_atlas.py 清单登记（AtlasTileCount 右移）。pack 运行期映射 tileFilenameMap 登记（armor/painting/entity 路径，pack 启用时覆盖）。
+**t717** 生成器批：tools/build_armor_layers.py（armor layer_1/2 三方五档参考构图原创自绘：皮/铁/金/钻/链）+ build_paintings.py（27 张程序自绘，尺寸 16/32/64 系列）+ build_doors_iron.py（铁门上/下 + 铁活板门自绘）+ build_entity_*.py（夜行者体/眼、燃烬者、鱿鱼、矿车、书、皮肤 steve/alex 程序贴图）。全部产 textures/*.png + build_atlas.py 清单登记（AtlasTileCount 右移）。pack 运行期映射 tileFilenameMap 登记（armor/painting/entity 路径，pack 启用时覆盖）。 ✅✅ 已完成（commit 4f317d1：四生成器 + 45 张程序贴图；atlas 176→179（door_iron_upper/lower + iron_trapdoor 三瓦片）；ResourcePackManager 新增 tileFilenameMap{176..178} + paintingSource/paintingFallbackName/entitySource/armorLayerSource 运行期映射（miss 回退程序贴图）；烟测 pack 实际覆盖 141→144 瓦片实证生效）
 
 ### 🅱 装备 3D（armor layer 渲染）
 **t718** 盔甲穿戴 3D 显示：玩家模型（Main.qml playerModel）+ 生物模型（MobModel）按已穿护甲件叠加 layer_1（身/腿）+ layer_2（靴/头盔）薄壳盒体（partial 风格盒子几何，UV 按 layer 贴图布局自
