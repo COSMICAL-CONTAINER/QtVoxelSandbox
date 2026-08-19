@@ -1668,6 +1668,20 @@ void ensureBuiltLocked()
                     tile = faceTile;
                 }
             }
+            // t716 ② 云杉门上半退化检测（demo 包实测 door_spruce_upper.png 是**无窗纯板**——懒包把上半也
+            //   填成实心门板，与 MC 门上半必有格栅窗不符；现代命名 spruce_door_top.png 同病，无候选可回退）。
+            //   oak_door（door_wood_upper 有真 4 孔窗）正常覆盖。判据：门上半瓦片（143/145）预乘后**无任何
+            //   透明像素**（alpha<8）→ 退化 → 跳过覆盖（保程序生成 4 孔窗贴图；pack 高清换正确性，观感降级
+            //   但门窗语义正确——机制等价 MC 门上半带窗）。同 t610 南瓜懒拷贝检测模式（判据 = 像素级退化态）。
+            if (m.first == 143 || m.first == 145) {
+                bool anyTransparent = false;
+                const int tw = tile.width(), th = tile.height();
+                for (int y = 0; y < th && !anyTransparent; ++y)
+                    for (int x = 0; x < tw; ++x)
+                        if (qAlpha(tile.pixel(x, y)) < 8) { anyTransparent = true; break; }
+                if (!anyTransparent)
+                    continue; // 纯板无窗（懒包退化）→ 不覆盖，保程序 4 孔窗
+            }
         }
         // review H2：格式归一 + 缩放 kTile×kTile 后移到 if/else 之外 —— 此前仅直映射分支缩放，四条复合
         //   路径里 110/140（cropTopBlank）与 136（mirror）不缩放：HD 128px 包返回 128×96 / 128×128，
@@ -1682,7 +1696,17 @@ void ensureBuiltLocked()
             tile = tile.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         if (const int *tint = tileTint(m.first))
             applyTint(tile, tint[0], tint[1], tint[2]); // t416/t444：灰度可着色瓦片乘群系 tint（叶/草顶/草丛 plains 绿；睡莲沼泽水生绿）
+        // t716 ② 门窗 4 孔回归（橡木门只剩上 2 孔）根因修复：drawImage 默认 SourceOver 把瓦片**叠**在程序
+        //   生成底图上 —— pack 瓦片的透明窗洞像素叠在底图上**露出底图门板/窗棂**而非真透明（机制：SourceOver
+        //   透明源像素 = 保留目标）。实测：door_wood_upper 两窗带中带 1 恰落在底图程序窗洞 1 上（透出 → 显 2 孔）、
+        //   带 2 落在底图门板区（被盖 → 不透）→ 橡木门上半只见 2 孔（用户复盘「4 孔只剩上 2 孔」）。修：
+        //   合成模式改 **CompositionMode_Source**（替换语义：目标像素整体被源替换，含 alpha —— pack 瓦片
+        //   透明处把底图一并擦成透明）。不透明瓦片（石头 / 木板 / …绝大多数）替换 == 叠加，零行为差；唯
+        //   带 alpha 的瓦片（门窗 / cross）才显出差别 —— 而「pack 透明窗洞应真透」本就是正确语义（机制等价
+        //   MC pack 门/草丛贴图 alpha 通道替换式应用）。
+        p.setCompositionMode(QPainter::CompositionMode_Source);
         p.drawImage(m.first * kTile, 0, tile);
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver); // 复位（防影响后续非瓦片绘制）
         ++overridden;
     }
     p.end();

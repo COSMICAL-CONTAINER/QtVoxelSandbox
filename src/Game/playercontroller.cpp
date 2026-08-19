@@ -6078,10 +6078,23 @@ void PlayerController::step(qreal dt)
                     if (thornyBushAt(cx, yy, cz)) { touch = true; break; }
                 }
         }
-        if (!touch) { // 站在仙人掌顶（脚下格）—— 仙人掌顶面 AABB 重叠（玩家脚位贴其顶）
+        // t716 ① 站仙人掌顶伤害回归修复（t190 修过、后续三轮 AABB 改后回归）：主循环 / 下方复探的 Y 判定用
+        //   **严格** `pMinY < cMaxY` —— 玩家站仙人掌顶（碰撞 snap 使 m_pos.y == 仙人掌格顶 cMaxY，脚位无
+        //   穿入）时该式为 false → 站顶接触漏判 → **站上仙人掌不扣血**（近靠侧面仍扣，唯站顶失效）。修：脚下
+        //   复探分支单独用**含边界** Y 判定（pMinY <= cMaxY）—— 该分支只查 footY-1 一层（玩家正站其上的
+        //   支撑格），语义即「贴顶 = 接触」，无斜对角 / 上下层误伤面（XZ 仍受满格 AABB 含边界过滤，同主循环）。
+        //   主循环保持严格 Y（侧撞判定不变，防头顶擦过下方格误伤）。
+        if (!touch) { // 站在仙人掌顶（脚下格）—— 脚位贴其顶 = 接触（含边界 Y）
             for (int cx = fx0; cx <= fx1 && !touch; ++cx)
                 for (int cz = fz0; cz <= fz1 && !touch; ++cz)
-                    if (cactusAt(cx, footY - 1, cz) && cactusAabbOverlap(cx, footY - 1, cz)) touch = true;
+                    if (cactusAt(cx, footY - 1, cz)) {
+                        const float cMinX = float(cx), cMaxX = float(cx) + 1.0f;
+                        const float cMinZ = float(cz), cMaxZ = float(cz) + 1.0f;
+                        const float cMaxY = float(footY - 1) + 1.0f; // 脚下仙人掌格顶 = footY
+                        if (pMinX <= cMaxX && pMaxX >= cMinX
+                            && pMinZ <= cMaxZ && pMaxZ >= cMinZ
+                            && pMinY <= cMaxY) touch = true;
+                    }
         }
         if (touch) {
             m_cactusDmgTimer += float(dt);

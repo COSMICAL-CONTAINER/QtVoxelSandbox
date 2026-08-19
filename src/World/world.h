@@ -758,6 +758,14 @@ private:
     //   （清除地表草/土 → 天光直入）；不动基岩底层 / air / 水；跳过海域列（陆地地貌）。纯函数于 seed
     //   （hashColumn + noise2 / fbm）→ 同 seed 同峡谷（PLAN §2-K）。单条 worm → 每图约 1 条贯穿峡谷。
     void carveCanyon();
+    // t716 ③ 雪层支撑守卫（雪原细雪悬浮峡谷/洞口上方）：carveCanyon / carveCaveEntrances 等 carve 类 pass
+    //   之后、fillWater / 树草散布之前跑一次全图清扫——SnowLayer 正下方非实体（air / 水 / 无碰撞类）→ 该雪层
+    //   失撑，移除（直删，无掉落——worldgen 语义「生成期不该存在的悬浮雪」；对比游玩期 checkSnowLayerOnEdit
+    //   的「失撑坍落为实体」，此处是**生成期修正**：峡谷盘 / 洞口 3×3 开口在比中心高一格的邻列恰好挖掉雪层
+    //   支撑格、留下表面 SnowLayer 悬空（surfaceY 取 worm 中心高度，邻列地形 +1 时 carve 顶 = 邻列表面-1）。
+    //   只扫 SnowLayer（t716 范围；草方块同病但 MC 峡壁露土本就自然，不在本任务范围）。纯查询 + 直删，
+    //   不发信号（worldgen 既有约定）。幂等：重复跑零变化。
+    void pruneFloatingSnowLayers();
     // t309 地下水池（封闭洞穴静止水层；spec「地下水池（封闭洞穴静止水层）」）：carveCaves / carveCaveEntrances
     //   之后，地下深处确定性散布小型封闭水洼——carve 一个小椭球空腔（air 气室）+ 底层铺一层水源（state=0），
     //   形成「封闭洞穴静止水层」。空腔被周围实体岩石天然封闭 → 水源无水平 air 邻居可蔓延 → 稳态

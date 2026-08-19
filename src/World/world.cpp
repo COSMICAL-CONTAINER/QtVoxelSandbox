@@ -3221,6 +3221,8 @@ void World::generate()
     placeStronghold(); // t487：要塞（placeJungleTemple 之后 → 要塞独立；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 地下石砖迷宫放于完整地下）。
     carveCanyon(); // t342：大峡谷（caves/ores 之后 → 峡壁既有矿石层被 carve 暴露；先于填水 → 内陆干涸峡谷，
                    //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
+    pruneFloatingSnowLayers(); // t716 ③：carve 类 pass 之后清扫悬浮雪层（峡谷盘 / 洞口开口挖掉支撑格留下的
+                               //   悬空 SnowLayer → 直删；先于填水 / 树草 → 后续特征据「雪顶」守卫不再误判）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     freezeSurfaceWater(); // t395：Snowy 群系海/湖表层水冻结为冰（fillWater 之后水已就位；先于树 / 草）
     placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
@@ -4773,6 +4775,33 @@ void World::carveCanyon()
     qInfo() << "worldgen: canyon drained =" << drainedCells
             << "side caves =" << sideCaves
             << "waterfall y =" << waterfallY; // t376 确定性核对
+}
+
+// t716 ③ 雪层支撑守卫（见 world.h 头注释）：全图扫 SnowLayer，正下方非实体（air / 水）→ 直删该雪层。
+//   成因链：carveCanyon 盘顶 / carveCaveEntrances 3×3 开口顶取「中心列 surfaceY」，比中心高一格的邻列其
+//   表面 SnowLayer 恰在 carve 顶之上 1 格、支撑格恰被挖 → 悬空细雪浮在峡谷 / 洞口上方（用户复盘「雪原
+//   细雪悬浮峡谷上」）。守卫在所有 carve 类 pass 之后一次跑（generate 内 carveCanyon 后调用；也覆盖洞口 /
+//   地下水池空腔等一切「雪层下方被挖空」的来源）。判定「非实体」用 !isSolid（air / 水 / cross / 雪层自身
+//   等均非 solid——雪层下叠雪层是合法堆叠态（state 高度叠加），但 worldgen 不产叠层（surfaceY 单层），
+//   叠层堆积只发生在游玩期塌落合并 → 下方 SnowLayer 仍会被本守卫误删？——不会：本函数仅在 worldgen 期
+//   跑一次，游玩期塌落堆叠发生在其后（checkSnowLayerOnEdit 管游玩期失撑坍落，与本守卫分工不重叠）。
+//   幂等：删除后重扫无变化；纯查询 + 直删（m_chunks.setBlock，不发 blockBroken——worldgen 约定）。
+void World::pruneFloatingSnowLayers()
+{
+    int pruned = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            for (int y = 1; y < m_height; ++y) { // y=0 下方无格（基岩域），从 1 起
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::SnowLayer) continue;
+                if (!BlockRegistry::isSolid(m_chunks.blockAt(x, y - 1, z))) {
+                    m_chunks.setBlock(x, y, z, BlockRegistry::Air);
+                    ++pruned;
+                }
+            }
+        }
+    }
+    if (pruned > 0)
+        qInfo() << "worldgen: pruned floating snow layers =" << pruned; // 同 seed → 同计数（确定性核对）
 }
 
 // t309 地下水池（见 world.h 头注释）。机制等价 MC 1.0 地下水湖 / 封闭水洼：地下深处小型封闭空腔 + 底层水源。
