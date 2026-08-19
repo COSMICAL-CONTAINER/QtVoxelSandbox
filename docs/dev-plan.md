@@ -2785,7 +2785,7 @@ t680-t716（37 项）。**严格顺序：t680-t692 审查修复（H 先）→ t6
 **t721** 画作破坏与掉落：挖画掉 PaintingId 掉落物；画下墙破/支撑墙破 → 画掉落（挂 blockBroken 链）。多方块画（2×2 以上）存档 state 编码 (index, w, h, 朝向)。 ✅✅ 已完成（commit c7e07cd：finishMiningAt 画特判——破任一格按 state face flood-fill 同面连通域（±u/±Y，尺寸不进 state 由连通域承载）+ setWaterSilent 静默清余格（防 N 格粒子/音风暴）+ **整张只掉 1 件** PaintingId（drop 标志门控：直挖生存掉/创造不掉）；dropUnsupportedPaintingsAround 挂 blockBroken 链——破墙扫 4 水平邻画解 state 支撑墙 == 破格 → 整画掉落（恒发含创造，t571 自然失撑语义）；画格被实体方块覆盖放置被既有 occ 守卫拒绝（画格非 Air/水/岩浆）；存档 state round-trip（m_states 保真 index/朝向/锚标记，读档 collectBlocksOfId(134) 重建 paintingHost））
 
 ### 🅳 铁门与铁活板门
-**t722** 铁门：IronDoor 方块（上/下两格放置同木门先例 t674/t620；pack 贴图 door_iron_upper/lower 运行期映射；侧边用铁块贴图同木门用木板先例）；**不能徒手开门**（右键无反应），仅红石信号开（邻格通电 → 开；断电 → 关）。配方：6 铁锭 → 铁门。
+**t722** 铁门：IronDoor 方块（上/下两格放置同木门先例 t674/t620；pack 贴图 door_iron_upper/lower 运行期映射；侧边用铁块贴图同木门用木板先例）；**不能徒手开门**（右键无反应），仅红石信号开（邻格通电 → 开；断电 → 关）。配方：6 铁锭 → 铁门。 ✅✅ 已完成（commit defa12e：IronDoor=135 并入 isDoor 谓词（放置/破坏联动/ShapeDoor 碰撞/cutout 渲染全复用木门机制）；kDefs per-face topTile=176/bottomTile=sideTile=177 + 薄侧边 iron_block(112)（partialblockgeometry door case t674 模式）；右键开合分支显式排除 IronDoor（徒手无效应）；红石挂点=World isPowerFamilyBlock + recomputePowerLocal Phase B 接收器分支（isReceivingPower 上升沿开/下降沿关 bit2 + 配对格同翻幂等静默写）；配方 6 铁锭**竖摆** 2×3→1（与铁轨 3×2 横排包围盒形状区分不冲突）；创造归红石 tab（redstoneIds 135 + creativeBlocks 自动隐藏方块 tab）；icon_iron_door --from-pack；GroupStone 金属音色）
 **t723** 铁活板门：IronTrapdoor 方块（同 WoodTrapdoor 几何先例；iron_trapdoor.png 映射）；仅红石驱动开/关。配方：6 铁锭 → 铁活板门（? 核 MC 1.0=6 铁锭 摆 3×2）。
 
 ### 🅴 火焰与下界门（余烬门）
