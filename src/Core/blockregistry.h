@@ -954,7 +954,23 @@ public:
         //   音色归 GroupStone（金属质，同 IronBlock / Rail 族）。**进红石 tab 创造调色板**（铁门是红石
         //   机关件——仅红石驱动开合；同压力板 / 拉杆归类）。配方：6 铁锭 2×3 满铺 → 1 铁门（工作台）。
         IronDoor       = 135, // 铁门：两格高（仅红石驱动开合；右键无效应）；铁皮贴图 + 铁块薄边
-        Count           = 136, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t723 铁活板门（IronTrapdoor；机制等价 MC 1.0 iron trapdoor）：合=水平薄板贴地（y[0,3/16] 全
+        //   footprint）/ 开=竖直薄板贴边，几何与 WoodTrapdoor 完全同源（ShapeTrapdoor + state 编码 bit0=
+        //   开(1)/合(0)、bit[2:1]=开时贴边朝向 0=+X 1=-X 2=+Z 3=-Z）。**仅红石驱动开合**（右键无效应——
+        //   playercontroller 活板门分支只认 WoodTrapdoor，IronTrapdoor 天然不进该分支；开/关由 World
+        //   电力接收器写 state bit0：isReceivingPower 上升沿开 / 下降沿关，机制等价 MC iron trapdoor）。
+        //   朝向位（bit[2:1]）放置时恒 0（+X 贴边）且红石开合不写它（开门侧 = +X 边；机制等价 MC 1.0 铁活板
+        //   门无手开路径 → 朝向不交互变化，开门方向固定）。solid=false（薄板不挡邻居面剔除；碰撞走
+        //   shapeBoxes 子 AABB：合=顶站 3/16 / 开=竖直板挡人）、hardness=5.0（金属，同铁块量级）、
+        //   toolType=Pickaxe + requiresTool=false（镐加速、空手慢挖仍掉；机制等价 MC 铁活板门无采掘门槛）、
+        //   dropId=自身、dropCount=1、maxStack=64。各面贴图=iron_trapdoor(178)（格子板 + 两列栅格孔真透明
+        //   —— 走 cutout 段渲染须 alpha discard 透视，同门族 t638① 模式）。lightOpacity 同 WoodTrapdoor：
+        //   合=满遮 15 / 开=全透 0（lightOpacity 特例行）。音色 GroupStone（金属质，同 IronDoor 族）。
+        //   **进红石 tab 创造调色板**（铁活板门是红石机关件——仅红石驱动开合）。配方：6 铁锭 2×3 横摆
+        //   （同铁轨形状?? → 冲突！用 MC 1.0 实际配方 6 铁锭 2×3 → **1** 个，横摆 3×2 与铁轨同形 → 本工程
+        //   取**竖摆 2×3**与铁门一致避开铁轨冲突，dev-plan 注明）。破坏掉落自身 1 件。
+        IronTrapdoor   = 136, // 铁活板门：水平/竖直薄板（仅红石驱动开合；右键无效应）；格子板贴图
+        Count           = 137, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段

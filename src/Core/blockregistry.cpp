@@ -676,6 +676,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   先例的铁质对应）。走 cutout 段渲染（上半格栅窗真透明，isDoor 门族全格 cutout——t638①）。音色
     //   GroupStone（金属质）。配方：6 铁锭 2×3 → 1（工作台）。进红石 tab 创造调色板。
     /* iron_door      */ {int(BlockRegistry::IronDoor),         176,177,177,177, false, BlockRegistry::ShapeDoor,     5.0f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::IronDoor),       1,  1, "iron_door",    "铁门"},
+    // ── t723 铁活板门（IronTrapdoor；机制等价 MC 1.0 iron trapdoor，属性注释见 blockregistry.h Id 枚举行）：
+    //   合=水平薄板 / 开=竖直薄板（ShapeTrapdoor，同 WoodTrapdoor 几何 + state 编码）；仅红石驱动开合
+    //   （右键无效应）。solid=false / hardness=5.0（金属）、Pickaxe、requiresTool=false（镐加速、空手慢挖
+    //   仍掉）；dropId=自身、maxStack=64。各面=iron_trapdoor(178)（格子板 + 两列栅格孔真透明；走 cutout
+    //   段渲染须 alpha discard——mesher 路由见 chunkgeometry t723 追加）。音色 GroupStone。配方：6 铁锭
+    //   竖摆 2×3 → 1（工作台；同铁门形状——MC 1.0 实际横摆 3×2 与铁轨冲突，取竖摆避开，dev-plan 注明）。
+    /* iron_trapdoor  */ {int(BlockRegistry::IronTrapdoor),     178,178,178,178, false, BlockRegistry::ShapeTrapdoor, 5.0f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::IronTrapdoor),     1, 64, "iron_trapdoor","铁活板门"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -837,6 +844,9 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* painting               */ -1,
     // t722 铁门 → MC 1.0 iron door id 71（1.0 存在；物品 id 330）。仅红石驱动开合（右键无效应）。
     /* iron_door              */ 71,
+    // t723 铁活板门 → MC **1.0 无**独立 id（iron trapdoor id 167 为 1.4+；1.0 仅木活板门 96）→ 0
+    //   （=「1.0 无此方块」；机制等价实现不受影响——本表仅迁移文档引用，无运行期消费者）。
+    /* iron_trapdoor          */ 0,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -876,6 +886,7 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
         || blockId == CobbleFence || blockId == CobblePressurePlate) return true; // t412 段外圆石变体
     if (blockId == SpruceSlab || blockId == SpruceFence || blockId == SpruceDoor) return true; // t466 段外云杉木制品（与 WoodSlab/WoodFence/WoodDoor 同几何）
     if (blockId == IronDoor) return true; // t722 段外铁门（与 WoodDoor 同几何：ShapeDoor 满高薄板 + state 开合朝向）
+    if (blockId == IronTrapdoor) return true; // t723 段外铁活板门（与 WoodTrapdoor 同几何：ShapeTrapdoor 水平/竖直薄板）
     if (blockId == StoneBrickSlab || blockId == StoneBrickStairs) return true; // t487 段外石砖台阶/楼梯（与 WoodSlab/WoodStairs 同几何）
     if (blockId == Lever || blockId == WoodButton || blockId == StoneButton) return true; // t490 段外手动点火机关（t662 几何重做：贴附着面小钮 / 底座+棍，mechBoxes 单一几何源）
     if (blockId == StonePressurePlate || blockId == IronPressurePlate
@@ -1519,7 +1530,11 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     if (isSolid(blockId)) return 15;                  // 全实体方块：满遮光（保旧 isSolid 光照语义）
     if (isBed(blockId)) return 15;                    // t457 床 solid=false（低 3D 渲染）但仍是 opaque 实体木床 → 满遮光（同 Farmland/Cactus）
     switch (blockId) {
-    case WoodTrapdoor: return (state & 1) ? 0 : 15;   // 合=满遮（修「合活版门透光」）/ 开=全透
+    case WoodTrapdoor: // 合=满遮（修「合活版门透光」）/ 开=全透
+    case IronTrapdoor: // t723 铁活板门同语义（合=水平满遮 / 开=竖直全透；仅红石开合——state 变化经电力 tick
+                       //   的 m_chunks.setBlock 静默写不触发 recomputeLightAround，开合透光差由下一次邻格
+                       //   光编辑自然收敛；机制等价优先，光照微滞后可接受）
+        return (state & 1) ? 0 : 15;
     case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
     case CobbleSlab:   return 7;                      // t412 圆石台阶半遮光（同 WoodSlab，半高占空比 0.5）
     case SpruceSlab:   return 7;                      // t466 云杉台阶半遮光（同 WoodSlab/CobbleSlab，半高占空比 0.5）
@@ -2041,6 +2056,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case RedstoneLamp: // t620 红石灯 → 石质音色（玻璃质敲击，同 glass / ice 族）
     case StonePressurePlate: case IronPressurePlate: case GoldPressurePlate: // t627 压力板族扩展 → 石质音色（石质/金属质薄板）
     case IronDoor: // t722 铁门 → 石质音色（金属质，同 IronBlock / Rail 族；机制等价 MC iron door metal SoundType）
+    case IronTrapdoor: // t723 铁活板门 → 石质音色（金属质，同铁门族）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

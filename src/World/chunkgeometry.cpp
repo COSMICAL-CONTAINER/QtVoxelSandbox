@@ -542,15 +542,21 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     //   pushBox 几何不变（非 cross），仅路由到 cutout 段渲染（isDoor 门族全格两半都走 cutout——
                     //   下半门板不透明贴图 cutout 无副作用（alpha 全 255 不 discard），保同一方块单段渲染）。
                     const bool isDoorX = BlockRegistry::isDoor(b);
+                    // t723 铁活板门栅格孔：iron_trapdoor(178) 贴图两列栅格孔真透明（同门窗 t638① 语义）→
+                    //   走 cutout 段（alphaMode:Mask）透视孔后。木活板门贴图不透明留 terrain 段（分族渲染：
+                    //   同 shape 不同段，互不影响——WoodTrapdoor 无 alpha 通道像素，cutout 反而无害，但保守
+                    //   只把带透明的铁活板门挪走，木活板门零回归）。
+                    const bool isCutoutTrapX = (b == BlockRegistry::IronTrapdoor);
                     // t326 cross cutout 分流：cross 方块（草丛/作物/树苗）贴图带 alpha 透明底 → 进独立 cutout 段
                     //   （半透材质 opacity:0.99 + alphaCutoff:0.5 cutout 透明间隙）；partial 盒体（slab/stairs/...）
                     //   贴图不透明 → 留地形段（不透明材质 opacity=1）。两段互斥：地形段若同时发 cross → opacity=1
                     //   下 alpha 被忽略、透明底当不透明显成实心板（用户「草丛挡视线」根因）。cutout 段只发 cross。
                     if (m_cutoutOnly) {
-                        if (!isCrossX && !isDoorX) continue;  // cutout 段：仅 cross + 门（t638 门窗 alpha cutout）
+                        if (!isCrossX && !isDoorX && !isCutoutTrapX) continue;  // cutout 段：仅 cross + 门 + 铁活板门（alpha cutout 透视）
                     } else {
                         if (isCrossX) continue;      // 地形段：cross 走 cutout 段、不在此画（否则显实心板）
                         if (isDoorX) continue;       // t638 门走 cutout 段（窗格 alpha 透视；terrain 段不画门）
+                        if (isCutoutTrapX) continue; // t723 铁活板门走 cutout 段（栅格孔 alpha 透视）
                         if (!isPartialX) continue;   // 地形段：仅 partial 盒体（立方面在 PASS 2）
                     }
                     const quint8 cSky = m_world->skyLightAt(wx, ly, wz);

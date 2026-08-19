@@ -776,15 +776,25 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::RedstoneId, RecipeRegistry::GlassId,    RecipeRegistry::RedstoneId,
         0,                          RecipeRegistry::RedstoneId, 0 },
       int(BlockRegistry::RedstoneLamp), 1, 1, "redstone_lamp" },
-    // t484 铁轨（rail）：6 铁锭（顶行 + 中行两行满铺）→ 16 铁轨（有序 3×3，仅工作台）。
-    //   机制等价 MC 1.0 rail 配方（6 iron ingot 满两行 → 16 rail；MC 实际是「6 铁锭纵列」最小包围盒 1×6，
-    //   本工作台 3×3 取「顶行 + 中行 = 6 锭」2×3 包围盒，对齐 MC 数量与质材，避开 1×6 在 3×3 内的歧义）。
-    //   最小包围盒 3×2（顶 + 中两行铁锭满），与铁块（3×3 满铺）包围盒尺寸不同 → 不冲突。
+    // t484 铁轨（rail）：6 铁锭 + 1 木棒（顶行 3 锭 + 中行 锭-棒-锭）→ 16 铁轨（有序 3×3，仅工作台）。
+    //   机制等价 MC 1.0 rail 配方（6 iron ingot + 1 stick → 16 rail；MC 布局即两行「III / ISI」）。
+    //   t723 勘误：旧版省略木棒取「顶 + 中两行满锭」纯 {Iron:6}——与 t723 铁活板门（MC 1.0 同为 6 锭
+    //   3×2 横摆 → 1）**完全同形冲突**（shapedEqual 最小包围盒 + 逐格比无法区分）→ 活板门永不可合。
+    //   本工程对齐 MC 1.0 补回木棒（多重集 {Iron:6, Stick:1} 唯一 → 与铁活板门 {Iron:6} / 铁门 {Iron:6}
+    //   竖摆 / 探测轨 {Iron:6, Plate:1, Redstone:1} / 动力轨 {Gold:6,...} 均不冲突）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
+        RecipeRegistry::IronIngotId, RecipeRegistry::StickId,     RecipeRegistry::IronIngotId,
+        0,                           0,                           0 },
+      int(BlockRegistry::Rail), 16, 1, "rail" },
+    // t723 铁活板门（iron trapdoor）：6 铁锭横摆（顶行 + 中行两行满）→ 1 铁活板门（有序 3×3，仅工作台）。
+    //   机制等价 MC 1.0 iron trapdoor 配方（6 iron ingot 3×2 横排 → 1；MC 1.0 产出即 1）。最小包围盒
+    //   3×2（横）——铁门是 2×3（竖）、铁轨 t723 起含木棒（多重集异）→ 三者互不冲突。
     { int(RecipeRegistry::Table3x3), false,
       { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
         RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
         0,                           0,                           0 },
-      int(BlockRegistry::Rail), 16, 1, "rail" },
+      int(BlockRegistry::IronTrapdoor), 1, 1, "iron_trapdoor" },
     // t722 铁门（iron door）：6 铁锭**竖摆**（左两列 × 三行满）→ 1 铁门（有序 3×3，仅工作台）。
     //   机制等价 MC 1.0 iron door 配方（6 iron ingot 摆 2 宽 × 3 高竖排 → 1 iron door）。最小包围盒
     //   2×3（竖），与铁轨（{Iron:6} 横排 3×2 包围盒）**形状不同** → 有序匹配不冲突（shapedEqual 比

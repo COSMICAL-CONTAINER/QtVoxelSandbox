@@ -139,6 +139,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::WoodFence:         return "icon_wood_fence.png";         // 木栅栏：2D 柱档剪影
     case BlockRegistry::WoodDoor:          return "icon_wood_door.png";          // t644 木板门：3D 两格高薄板（--from-pack 上下半贴图，与放置态一致）
     case BlockRegistry::WoodTrapdoor:      return "icon_wood_trapdoor.png";      // 木活板门：3D 薄板
+    case BlockRegistry::IronTrapdoor:      return "icon_iron_trapdoor.png";      // t723 铁活板门：3D 薄板（--from-pack iron_trapdoor 格子板；红石 tab 条目）
     case BlockRegistry::WoodPressurePlate: return "icon_wood_pressure_plate.png";// 木板压力板：3D 更薄更小
     // t412 圆石变体图标：石质半方块 3D dimetric 立体图标（圆石贴图按实际形状投影，同木制半方块图标流程）。
     case BlockRegistry::CobbleSlab:          return "icon_cobble_slab.png";          // 圆石台阶：3D 半高盒
@@ -744,6 +745,10 @@ QVariantList Hotbar::creativeBlocks() const
              //   机制（放置 / 破坏联动 / ShapeDoor 碰撞）；配方 6 铁锭竖摆 2×3。归红石 tab（Inventory.qml
              //   redstoneIds 含 135 → 方块 tab 自动隐藏，机关件同页压力板 / 拉杆 / 红石块）。
              int(BlockRegistry::IronDoor),                                   // 铁门（红石开合；两格高；6 铁锭合成）
+             // t723 铁活板门（机制等价 MC 1.0 iron trapdoor；仅红石驱动开合——右键无效应）。合=水平薄板 /
+             //   开=竖直贴边（ShapeTrapdoor 同 WoodTrapdoor 几何）；配方 6 铁锭横摆 3×2 → 1。归红石 tab
+             //   （redstoneIds 含 136 → 方块 tab 自动隐藏，与铁门同页）。
+             int(BlockRegistry::IronTrapdoor),                               // 铁活板门（红石开合；6 铁锭合成）
              // t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶 / 石砖楼梯；worldgen 散布 / 创造取用）。
              int(BlockRegistry::StoneBrick),                                 // 石砖（石质整立方 + 砖纹；要塞墙体主体；可放置）
              int(BlockRegistry::StoneBrickSlab),                             // 石砖台阶（半高；复用 ShapeSlab 几何 + 石砖贴图；可放置）

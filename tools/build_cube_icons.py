@@ -891,6 +891,9 @@ FROM_PACK = [
     ("spruce_door", "door", dict(upper="door_spruce_upper.png", lower="door_spruce_lower.png")),
     # t722 铁门：pack door_iron_upper/lower（HD 128px，1.8 老命名）两格高 3/16 薄板，与放置态一致。
     ("iron_door",   "door", dict(upper="door_iron_upper.png",   lower="door_iron_lower.png")),
+    # t723 铁活板门：合态薄板（全 footprint y[0,3/16]，同 wood_trapdoor 图标形状）；fill=pack iron_trapdoor
+    #   （格子板；栅格孔透明像素 fill 填均色——图标观感为薄板实体，放置态 cutout 透视孔更细）。
+    ("iron_trapdoor", "partial", dict(fill="iron_trapdoor.png", shape="trapdoor")),
     # t714 ④木半方块老图标重做（用户「木台阶/栅栏/楼梯等放置贴图对但图标旧」）：wood_slab / wood_stairs /
     #   wood_fence 旧图标是 t163/t169 程序 default_wood（16px 木板）烘的 dimetric——pack 激活时世界放置走
     #   HD oak_planks 而背包还是低清程序木纹 → 观感漂移。本段 partial 模式：pack oak_planks / spruce_planks
@@ -922,6 +925,9 @@ def _partial_shape_boxes(shape):
         return [(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)]
     if shape == "slab":
         return [(0.0, 1.0, 0.0, 0.5, 0.0, 1.0)]
+    if shape == "trapdoor":
+        # t723 铁活板门：合态薄板（全 footprint，y[0, 3/16]；与 render_partial_3d trapdoor 同款盒）。
+        return [(0.0, 1.0, 0.0, 0.1875, 0.0, 1.0)]
     if shape == "stairs":
         return [(0.0, 1.0, 0.5, 1.0, 0.0, 0.5),   # 背墙
                 (0.0, 1.0, 0.0, 0.5, 0.0, 1.0)]  # 整步
@@ -938,6 +944,8 @@ def _partial_y_mid(shape):
         return 0.5
     if shape == "slab":
         return 0.25
+    if shape == "trapdoor":
+        return 0.1875 / 2.0  # t723 薄板半高（竖直居中同 slab 公式）
     return 0.5  # stairs / fence（多盒取整体包络中点，同 render_partial_3d）
 
 

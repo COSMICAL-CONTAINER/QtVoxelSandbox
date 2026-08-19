@@ -2079,7 +2079,7 @@ void World::checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id
 
 // 红石族判定（粉 / 全部电源 / 全部接收器 —— notePowerWrite 触发筛选 + tickRedstone 接收器扫描共用）。
 //   t722：IronDoor 并入接收器族（门两格——任一格被供电即整门开；state bit2 写入见 recomputePowerLocal
-//   Phase B 分支）。
+//   Phase B 分支）。t723：IronTrapdoor 同并入（state bit0 开合，见同处分支）。
 bool World::isPowerFamilyBlock(quint8 id)
 {
     using BR = BlockRegistry;
@@ -2091,6 +2091,7 @@ bool World::isPowerFamilyBlock(quint8 id)
         || BR::isTnt(id)                                 // 接收器：TNT（t658）
         || BR::isDispenser(id) || BR::isDropper(id)      // 接收器：发射器 / 投掷器（t658）
         || id == BR::IronDoor                            // 接收器：铁门（t722，仅红石驱动开合）
+        || id == BR::IronTrapdoor                        // 接收器：铁活板门（t723，仅红石驱动开合）
         || BR::isLever(id) || BR::isWoodButton(id) || BR::isStoneButton(id) // 源：拉杆 / 按钮（state bit0）
         || BR::isPressurePlate(id)                       // 源：压力板（state bit0）
         || id == BR::DetectorRail;                       // 源：探测轨有车标记（state bit4）
@@ -2334,7 +2335,8 @@ bool World::recomputePowerLocal()
         const quint8 b = m_chunks.blockAt(x, y, z);
         if (BlockRegistry::isTnt(b) || BlockRegistry::isRedstoneLamp(b) || b == BlockRegistry::GoldenRail
             || BlockRegistry::isDispenser(b) || BlockRegistry::isDropper(b)
-            || b == BlockRegistry::IronDoor) // t722 铁门（仅红石驱动开合；上下两格各自入集，接收器分支内同翻）
+            || b == BlockRegistry::IronDoor            // t722 铁门（仅红石驱动开合；上下两格各自入集，接收器分支内同翻）
+            || b == BlockRegistry::IronTrapdoor)       // t723 铁活板门（仅红石驱动开合；单格）
             receivers.insert(packGrowthCell(x, y, z));
     };
     for (const quint64 k : region) {
@@ -2450,6 +2452,19 @@ bool World::recomputePowerLocal()
                     m_chunks.setBlock(x, py, z, BlockRegistry::IronDoor,
                                       quint8(powered ? (pst | 4) : (pst & quint8(~4))));
                 }
+                any = true;
+            }
+        } else if (b == BlockRegistry::IronTrapdoor) {
+            // t723 铁活板门：电力驱动开合（state bit0，同活板门族编码——合=0 水平薄板 / 开=1 竖直贴边）。
+            //   上升沿开 / 下降沿关（机制等价 MC 1.0 iron trapdoor only-redstone；徒手不开——playercontroller
+            //   活板门右键分支只认 WoodTrapdoor，IronTrapdoor 天然不进该分支）。朝向位（bit[2:1]）不写
+            //   （放置恒 0 → 开门侧固定 +X 边；无手开路径朝向永不交互变化，机制等价 MC 铁活板门开门方向
+            //   固定）。静默写 m_chunks.setBlock（同铁门模式：标脏 + tickRedstone 末尾 1 次 worldChanged）。
+            //   lightOpacity 合 15 / 开 0 的翻转不走 recomputeLightAround（见 lightOpacity 注释——开合透光
+            //   差由后续邻格光编辑自然收敛）。
+            const bool on = (st & 1) != 0;
+            if (on != powered) {
+                m_chunks.setBlock(x, y, z, b, quint8(powered ? (st | 1) : (st & quint8(~1))));
                 any = true;
             }
         } else if (BlockRegistry::isTnt(b)) {

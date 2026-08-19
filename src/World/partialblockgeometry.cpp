@@ -344,8 +344,11 @@ int PartialBlockGeometry::append(
                 /*topTile*/-1, /*bottomTile*/-1, planksTile, sideLargeAxis); // t674 薄侧边木板贴图
         break;
     }
-    case BlockRegistry::WoodTrapdoor: {
+    case BlockRegistry::WoodTrapdoor:
+    case BlockRegistry::IronTrapdoor: { // t723 铁活板门（与 WoodTrapdoor 同几何；tile=iron_trapdoor 178 各面同贴图）
         // 合：水平薄板贴地（y[0,0.1875]，全 footprint）。开：竖直薄板贴边（朝向 state[2:1]，0=+X 1=-X 2=+Z 3=-Z）。
+        //   t723：铁活板门仅红石开合（bit0 由 World 电力接收器写），朝向位恒放置值 0（+X 贴边，右键无手开
+        //   路径不更新朝向——机制等价 MC 1.0 铁活板门开门方向固定）。
         const bool open = (state & 1) != 0;
         if (!open) {
             pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, 0.1875f, 0.f, 1.f,

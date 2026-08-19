@@ -593,6 +593,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_wood_fence.png
         textures/icon_wood_door.png               # t644 --from-pack：上下半 per-face（upper+lower）3D 两格高薄板，与放置态一致
         textures/icon_iron_door.png               # t722 --from-pack：pack door_iron 上下半 3D 两格高薄板，与放置态一致（红石 tab）
+        textures/icon_iron_trapdoor.png           # t723 --from-pack：pack iron_trapdoor 格子板 3D 合态薄板（红石 tab）
         textures/icon_wood_trapdoor.png
         textures/icon_wood_pressure_plate.png
         textures/icon_cobble_slab.png             # t412 圆石变体 3D dimetric 立体图标（圆石贴图按形状投影）
