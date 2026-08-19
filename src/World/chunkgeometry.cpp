@@ -518,6 +518,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     if (b == BlockRegistry::Water) continue;       // 水走 PASS 2 立方面（水段）
                     if (b == BlockRegistry::Lava) continue;        // t343 岩浆走 PASS 2 立方面（岩浆段，独立材质）
                     if (b == BlockRegistry::Torch) continue;       // 火把走 torchHost（QML Model）
+                    if (b == BlockRegistry::Painting) continue;    // t720 画作走 paintingHost（QML delegate，贴图不进图集）——非 partial 非 cross，双 PASS 均跳过
                     // t194：必须闭区间 [FirstPartial, LastPartial]。段后整立方（Chest=22）虽 id 更大但非异形
                     //   （ShapeFull，走 PASS 2 立方面）。旧单边 `b >= FirstPartial` 把 Chest 误路由进 PartialBlockGeometry
                     //   （switch 无 case → 0 顶点 → 放置后透明透视格子）。Water/Torch 在上方已显式 continue。
@@ -880,6 +881,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::SnowLayer) continue; // t505 积雪层薄板已在 PASS 1；不进整立方面（否则满格立方覆盖薄板）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(blk)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面（否则满格立方覆盖低床）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::EnchantingTable) continue; // t620 附魔台 0.75 矮盒已在 PASS 1；不进整立方面（否则满格立方覆盖矮盒）
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；立方面路径会把画格画成 tile 0 草顶立方
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                             if (BlockRegistry::isSolid(nb)) continue;       // 邻居实体 → 剔除（跨 chunk 路由正确）
                             if (isWater && nb == BlockRegistry::Water) continue; // 水-水面互剔
@@ -992,6 +994,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::SnowLayer) continue; // t505/t510 二轮复盘：积雪层薄板已在 PASS 1；不进整立方面（否则满格立方覆盖薄板，雪层显完整方块）
                         if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(b)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::EnchantingTable) continue; // t620 附魔台 0.75 矮盒已在 PASS 1
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；不进整立方面
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);

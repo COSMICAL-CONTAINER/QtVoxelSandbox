@@ -140,6 +140,11 @@ public:
     // t717 画作程序回退贴图名（index → "default_painting_<name>"，不含扩展名 / qrc 前缀——呈现层拼
     //   "qrc:/textures/" + name + ".png"）。与 paintingNames 单一权威同表；越界返空。
     Q_INVOKABLE QString paintingFallbackName(int index) const;
+    // t720 画作格尺寸查询（呈现层 paintingHost delegate 摆 w×h quad 用）：index（0..26）→ BlockRegistry::
+    //   paintingSize 单一权威（paintingNames 表序同源）。越界 → 1（QML 兜底 1×1）。CONSTANT 语义
+    //   （纯静态表）——函数式查询不设 NOTIFY。
+    Q_INVOKABLE int paintingWidth(int index) const;
+    Q_INVOKABLE int paintingHeight(int index) const;
 
     // t717 实体贴图覆盖（t727 夜行者 / t728 燃烬者 / t730 鱿鱼 / t731 皮肤 / t732 矿车·书的 pack 映射
     //   前置）：kind 字符串 key（"nightwalker"/"nightwalker_eyes"/"emberling"/"squid"/"minecart"/

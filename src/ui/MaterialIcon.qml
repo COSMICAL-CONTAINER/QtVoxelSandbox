@@ -44,7 +44,7 @@ import VoxelSandbox
 // 的槽位用本组件替代方块 Image / ToolIcon。新增材料在此 switch 加一分支即可全工程生效。
 Item {
     id: root
-    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）/ 0x21C 铜原矿 / 0x21D 铜锭 / 0x21E 金原矿 / 0x21F 金锭（t308）/ 0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（t344）/ 0x224 红石粉 / 0x225 马鞍 / 0x226 命名牌 / 0x227 附魔书占位（t393 战利品）/ 0x23D 雪球（t510）/ 0x23E 矿车（t565/t645）/ 0x23F 指南针 / 0x240 钟（t567/t568）；0/未知 → 兜底木棒）
+    property int materialId: 0 // 材料段 id（0x200 木棒 / 0x201 煤 / 0x202 铁原矿 / 0x203 铁锭 / 0x204 玻璃 / 0x205 木炭 / 0x206 铁桶 / 0x207 装水铁桶 / 0x208 小麦种子 / 0x209 小麦物品 / 0x20A 面包 / 0x20B 生猪排 / 0x20C 生牛肉 / 0x20D 皮革 / 0x20E 羊毛 / 0x20F 生物蛋（猪）/ 0x210 生物蛋（牛）/ 0x211 生物蛋（羊）/ 0x213 生物蛋（蹒跚者）/ 0x214 生物蛋（骸骨）/ 0x215 生物蛋（潜行者）/ 0x216 生物蛋（蜘蛛）/ 0x212 钻石 / 0x217 骨头 / 0x218 腐肉 / 0x219 线 / 0x21A 箭（t304）/ 0x21B 树苗物品（t305）/ 0x21C 铜原矿 / 0x21D 铜锭 / 0x21E 金原矿 / 0x21F 金锭（t308）/ 0x221 熟猪排 / 0x222 熟牛肉 / 0x223 熟羊肉（t344）/ 0x224 红石粉 / 0x225 马鞍 / 0x226 命名牌 / 0x227 附魔书占位（t393 战利品）/ 0x23D 雪球（t510）/ 0x23E 矿车（t565/t645）/ 0x23F 指南针 / 0x240 钟（t567/t568）/ 0x242 画作（t720）；0/未知 → 兜底木棒）
 
     // t420 资源包物品图标覆盖：pack 启用且 materialId 在「引擎物品 id → pack item 文件名」映射内、且包内 PNG
     //   存在时，用 pack 的 item PNG 覆盖自绘 Canvas；pack 关 / 无映射 → packImg.source 空 → Image 隐藏、Canvas
@@ -1613,6 +1613,34 @@ Item {
                 R(11, 11, 2, 2, hub)            // 轴心金点
             }
 
+            // t720 画作（0x242）：8 木棒 + 1 羊毛合成；右键墙侧面贴画（尺寸检测随机选 27 张之一）。
+            //   机制等价 MC 1.0 painting 图标；纯原创自绘（§9a）。MC 风格画 = 深木外框 + 内衬亮沿 + 迷你
+            //   画面（抽象风景：上半天色 + 一轮日月 + 下半地面色带），一眼读出「挂在墙上的画」。
+            //   配色：frame #6a4a26（深木框）/ frameLite #8f6a3a（框受光沿）/ frameDark #4a3016（框暗沿）/
+            //   canvasSky #7a9ec2（画面天色）/ canvasSun #f0d080（日月）/ canvasGround #5e7a4a（地面色带）。
+            const drawPainting = () => {
+                const frame = "#6a4a26", frameLite = "#8f6a3a", frameDark = "#4a3016"
+                const canvasSky = "#7a9ec2", canvasSun = "#f0d080", canvasGround = "#5e7a4a"
+                // 外框（整幅矩形 rows 4..20，cols 5..19 —— 竖幅画比例）
+                R(5, 4, 14, 17, frame)
+                R(5, 4, 14, 1, frameLite)       // 顶沿受光
+                R(5, 4, 1, 17, frameLite)        // 左沿受光
+                R(5, 20, 14, 1, frameDark)       // 底沿阴影
+                R(18, 4, 1, 17, frameDark)       // 右沿阴影
+                // 画面（框内收 2 格；抽象风景：上 2/3 天色 + 下 1/3 地面）
+                R(7, 6, 10, 9, canvasSky)        // 天色（上半）
+                R(7, 15, 10, 3, canvasGround)    // 地面色带（下半）
+                R(7, 14, 10, 1, frameDark)       // 地平线（暗一档分界）
+                // 日月（天色右上一轮亮盘 + 缺口，表「挂着的风景画」主体）
+                R(13, 7, 3, 3, canvasSun)
+                R(12, 8, 1, 2, canvasSun)
+                R(14, 8, 2, 1, canvasSky)        // 月牙缺口（右下挖一弧）
+                R(14, 9, 1, 1, canvasSky)
+                // 地面点缀（两粒深色块，表远景树石）
+                R(9, 16, 2, 2, frameDark)
+                R(14, 17, 2, 1, frameDark)
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -1680,6 +1708,7 @@ Item {
             case 0x23E: drawMinecart();           break // t645 矿车（5 铁锭合成；右键铁轨放置 + 骑乘；pack 关时自绘回退）
             case 0x23F: drawCompass();            break // t567 指南针（4 铁锭+1 红石合成；HUD 指针指向出生点）
             case 0x240: drawClock();              break // t568 钟（4 金锭+1 红石合成；HUD 显示当前昼夜相位）
+            case 0x242: drawPainting();           break // t720 画作（8 木棒+1 羊毛合成；右键墙贴画）
             default:    drawStick();        break
             }
         }

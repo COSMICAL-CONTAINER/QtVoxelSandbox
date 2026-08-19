@@ -305,6 +305,16 @@ public:
     //   派生，同 F3 time 行口径）。指针 / 表盘旋转动画留接口（用户后给 PNG 素材，D 接口）。MaterialIcon
     //   自绘钟图标（金框圆表盘 + 指针，§9 原创）。无 MC 1.0 mcMaterialId 映射（id > 表界 → -1 → 回退自绘）。
     static constexpr int ClockId         = 0x240; // 钟：4 金锭 + 1 红石合成；HUD 显示当前昼夜相位（t568）
+    // t720 画作（painting）：材料段 0x242。机制等价 MC 1.0 painting（物品 id 321）——**8 木棒围 1 羊毛
+    //   合成**（工作台 3×3 有序，机制等价 MC 1.0 painting 配方）。右键墙侧面 → 对该面测最大可用矩形、
+    //   随机选一张尺寸放得下的 27 张画作之一贴墙放置（playercontroller placeBlock 画分支 + Painting
+    //   方块 134 + state 编码 index/朝向/锚标记，见 blockregistry.h）。**maxStack=1**（放置型实体物品
+    //   单件，机制等价 MC 画不可堆叠；Hotbar::maxStackSize 特判）。非方块（材料段）→ 右键不走通用放置，
+    //   走画放置分支（同船 / 矿车模式）。图标：MaterialIcon 自绘画框 + 迷你画面（drawPainting，§9 原创）；
+    //   pack 映射 itemFilenameMap 0x242 → painting.png。名称 / 画面全原创（§9 区隔）。
+    //   无 MC 1.0 mcMaterialId 映射（id > kMcMaterialId 表界 0x22E → -1 → 回退自绘；painting 物品 321
+    //   经 itemFilenameMap 单独接，不走材料段 MC 表）。
+    static constexpr int PaintingId      = 0x242; // 画作：8 木棒+1 羊毛合成；右键墙贴画（t720/t721）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

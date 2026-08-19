@@ -660,6 +660,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   分流、maxStack=64），仅贴图换 tile 175（深蓝绿针叶，区别橡树叶亮绿）。衰减（decayLeavesAround 同认
     //   Log/SpruceLog 支撑）/ 玩家放置持久位（PersistentLeafBit）/ 焚毁（isWoodLike）均同 Leaves。
     /* spruce_leaves  */ {int(BlockRegistry::SpruceLeaves),     175,175,175,175, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::NoTool),   0, false,                               0, 0, 64, "spruce_leaves", "云杉树叶"},
+    // ── t720 画作（Painting；机制等价 MC 1.0 painting，方块建模 + QML delegate 渲染，详见 blockregistry.h
+    //   Id 枚举 Painting 行头注释 + state 编码）。tile 全 0（占位无消费方 —— 渲染走 paintingHost 独立
+    //   Texture paintingSource(index)，不进图集）；solid=false / ShapeNone（无碰撞、不挡邻居面剔除）；
+    //   hardness=0 瞬破、NoTool、dropId=0x242（RecipeRegistry::PaintingId；破坏经 finishMiningAt 连通域
+    //   特判整画只掉 1 件，本表 dropId 仅作兜底）、**maxStack=0**（方块形态不可进背包 —— 中键 pick /
+    //   放置都走物品 0x242）。音色 GroupWood（见 materialGroup）。
+    /* painting       */ {int(BlockRegistry::Painting),           0,  0, 0,  0, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false,                             0x242, 1,  0, "painting",     "画作"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -816,6 +823,9 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
                                        //   为 0（= air）——static_assert 只核维度不核条数，不报。拆行成真实条目。
     /* spruce_leaves           */ -1,  // t714 云杉树叶 → MC 1.0 无独立 id（1.0 仅橡木 leaves id 18，云杉叶 1.7+ 以
                                        //   log/leaves metadata 分变种；本工程独立 id 故无 1.0 等价，同 spruce_log 行）
+    // t720 画作 → MC 1.0 无等价**方块**（painting 是实体 + 物品 id 321，无方块形态）→ -1（资源包侧画作
+    //   走 painting/ 目录独立映射 paintingSource，不经本表）。
+    /* painting               */ -1,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -890,6 +900,59 @@ bool BlockRegistry::isDoor(quint8 blockId)
 {
     return blockId == WoodDoor || blockId == SpruceDoor;
 }
+
+// t720 画作统一谓词（单一权威，见 blockregistry.h 注释）：单 id 裸相等。mesher 双 PASS 跳过 /
+// playercontroller 放置·破坏·失撑判定 / raycast 薄盒路由均读本谓词。
+bool BlockRegistry::isPainting(quint8 blockId)
+{
+    return blockId == Painting;
+}
+
+// t720 画作 index → 格尺寸 (w,h)。与 resourcepackmanager paintingNames() 表 + tools/build_paintings.py
+//   PAINTINGS 表**同序镜像**（Core 不依赖两者，字面量钉死；改画作表须同步本表）。像素 → /16 折格：
+//   16×16×8 张 = 1×1；32×16×5 = 2×1；16×32×2 = 1×2；32×32×6 = 2×2；64×48×2 = 4×3；64×64×3 = 4×4；
+//   64×32×1（fighters）= 4×2。越界 → 1×1 兜底（防御脏 state / 未来扩表漏同步）。
+void BlockRegistry::paintingSize(int index, int &w, int &h)
+{
+    // w,h（格）。行序与 paintingNames 严格一致（index 0..26）。
+    static constexpr struct { int w, h; } kSizes[PaintingCount] = {
+        {1,1},{1,1},{1,1},{1,1},{1,1},{1,1},{1,1},{1,1},            // 0..7  kebab..alban（16×16）
+        {2,1},{2,1},{2,1},{2,1},{2,1},                               // 8..12 courbet..pool（32×16）
+        {1,2},{1,2},                                                 // 13..14 graham..wanderer（16×32）
+        {2,2},{2,2},{2,2},{2,2},{2,2},{2,2},                         // 15..20 match..wither（32×32）
+        {4,3},{4,3},                                                 // 21..22 donkey_kong..skeleton（64×48）
+        {4,4},{4,4},{4,4},                                           // 23..25 burning_skull..pointer（64×64）
+        {4,2},                                                       // 26 fighters（64×32）
+    };
+    if (index < 0 || index >= PaintingCount) { w = 1; h = 1; return; }
+    w = kSizes[index].w;
+    h = kSizes[index].h;
+}
+
+// t720 朝向 face → 画格所贴墙格相对偏移（= -法线；face 编码 0=+X 1=-X 2=+Z 3=-Z 是**墙面外法线**，
+//   故墙在法线反向）。越界 face → f0 兜底。
+void BlockRegistry::paintingWallOffset(int face, int &dx, int &dz)
+{
+    switch (face & 3) {
+    case 0:  dx = -1; dz =  0; return; // 法线 +X → 墙在 -X 邻
+    case 1:  dx =  1; dz =  0; return; // 法线 -X → 墙在 +X 邻
+    case 2:  dx =  0; dz = -1; return; // 法线 +Z → 墙在 -Z 邻
+    default: dx =  0; dz =  1; return; // 法线 -Z → 墙在 +Z 邻
+    }
+}
+
+// t720 朝向 face → 画面「右」向（观察者面对画、上=+Y 时的右手边；u×Y=n 保证贴图不镜像——渲染
+//   BillboardQuad 局部 +X 对 u、+Y 对上、+Z 对法线成右手系）。越界 face → f0 兜底。
+void BlockRegistry::paintingRightOffset(int face, int &dx, int &dz)
+{
+    switch (face & 3) {
+    case 0:  dx =  0; dz = -1; return; // 法线 +X（面朝 +X 看 -X）→ 右 = -Z
+    case 1:  dx =  0; dz =  1; return; // 法线 -X → 右 = +Z
+    case 2:  dx =  1; dz =  0; return; // 法线 +Z → 右 = +X
+    default: dx = -1; dz =  0; return; // 法线 -Z → 右 = -X
+    }
+}
+
 
 // t412/t466 双半砖合并映射（木 / 石 / 云杉三族共用一套合并与掉落逻辑）：半砖 → 其满格整立方（合并写入目标）；
 //   满格整立方 → 其半砖（破坏掉落）。非半砖 / 非双砖源 → Air / 0（兜底）。
@@ -1215,6 +1278,10 @@ int   BlockRegistry::maxStackSize(int itemId)
     //   Hotbar::maxStackSize 对 0x234/0x235 已特判 maxStack=1，**两处须保持同步**（掉落物合并路径按 1
     //   跳过合并 → 两船各为独立实体；拾取按真实 cap 分槽）。
     if (itemId == 0x234 || itemId == 0x235) return 1;
+    // t720 画作物品（0x242 = Game 层 RecipeRegistry::PaintingId；Core 不能依赖 Game 故字面量 + 同步注释）
+    //   **不可堆叠**（机制等价 MC 1.0 画 maxStack 1 —— 放置型实体物品单件）。Game 层 Hotbar::maxStackSize
+    //   对 0x242 同步特判 maxStack=1，**两处须保持同步**（同船模式）。
+    if (itemId == 0x242) return 1;
     // 材料段 ≥ 0x200：可堆叠 64（木棒 / 煤 / 铁锭 / 骨头 / 腐肉 / 箭 / 火药 / 羽毛 / 线 / 皮革 / 墨囊 / 蛋 等 mob 掉落物 + 合成材料）。
     //   含护甲段（≥0x300）—— 护甲不会作为 mob / 破块掉落物出现（仅玩家 Q 键丢弃），按 64 合并无害（拾取 Hotbar.addStack 按
     //   真实 maxStack=1 分槽）。桶 / 蘑菇汤（材料段内 maxStack=1 的特例）同理 —— 仅玩家持有 / 丢弃，掉落实体阶段按 64 合并无数据错。
@@ -1411,6 +1478,10 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 block
     //   （半砖 / 雪层 / 附魔台等 partial 块已有此先例）。渲染不受影响（PartialBlockGeometry 矮盒不变）。
     if (blockId == Farmland)
         return {BlockAABB{0, 0, 0, 1, 0.9375f, 1}};
+    // t720 画作选中框：贴墙薄板（与 raycastAABBs Painting 分支同盒——瞄准画显示贴墙薄框而非满格黑边，
+    //   机制等价 MC 画选中框贴画面）。ShapeNone → shapeBoxes 空，此处特例给形状。
+    if (blockId == Painting)
+        return raycastAABBs(blockId, state);
     return shapeBoxes(def(blockId).shape, state);
 }
 
@@ -1580,6 +1651,24 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
         //   选中」模式）。碰撞为空（ShapeNone）；仅选体走本集。
         if (blockId == Lever || blockId == WoodButton || blockId == StoneButton)
             return mechBoxes(blockId, state);
+        // t720 画作：贴墙薄板命中盒（同木梯 t501 模式——画面 quad 贴墙 1/16，薄板沿墙法线 4/16 厚容差
+        //   使准星贴面平扫微偏亦命中、格内空气穿过命中后方块）。朝向 state[6:5]（=墙面外法线）→ 薄板
+        //   摆在墙法线**反侧**格边（画面贴的那面）；水平另轴满 [0,1]（画铺满整格）。挖画可瞄准；瞄画格
+        //   上方 / 侧面空气命中后方块（画薄、不优先选中）。
+        if (blockId == Painting) {
+            constexpr float kPWall = 1.0f / 16.0f;  // 画面距墙面（与 paintingHost delegate quad 偏移同源）
+            constexpr float kPDepth = 4.0f / 16.0f; // 薄板厚（视觉 quad 0 厚 + 容差）
+            switch ((state & PaintingStateFaceMask) >> PaintingStateFaceShift) {
+            case 0:  // 法线 +X → 墙在 -X 边 → 薄板 [kPWall, kPWall+kPDepth]
+                return {BlockAABB{kPWall, 0.0f, 0.0f, kPWall + kPDepth, 1.0f, 1.0f}};
+            case 1:  // 法线 -X → 墙在 +X 边
+                return {BlockAABB{1.0f - kPWall - kPDepth, 0.0f, 0.0f, 1.0f - kPWall, 1.0f, 1.0f}};
+            case 2:  // 法线 +Z → 墙在 -Z 边
+                return {BlockAABB{0.0f, 0.0f, kPWall, 1.0f, 1.0f, kPWall + kPDepth}};
+            default: // 法线 -Z → 墙在 +Z 边
+                return {BlockAABB{0.0f, 0.0f, 1.0f - kPWall - kPDepth, 1.0f, 1.0f, 1.0f - kPWall}};
+            }
+        }
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // air / water → 整格（air 不进本路径兜底；water 整格舀水）
     }
     // 不完整方块段（ShapeSlab/...）→ 同 selectionAABBs（实体 sub 形状；空气部分穿过命中后方块）。
@@ -1959,6 +2048,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Ladder: // t413 木梯 → 木质音色（木质梯，同 planks 族）
     case RedstoneTorch: // t638 红石火把 → 木质音色（木质柄，同火把 / 木梯族；torch 在 default 兜底）
     case Bookshelf: // t474 书架 → 木质音色（木板边框，同 planks 族）
+    case Painting: // t720 画作 → 木质音色（木质画框）
         return GroupWood;
     case Grass: case Dirt:
     case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）

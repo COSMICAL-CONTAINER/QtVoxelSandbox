@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector> // t720/t721 画作：连通域 BFS 收集（std::vector<Cell>）
 
 // t476 时运附魔适用方块判定：矿石类（破块掉对应材料物品，掉落数量受时运加成）。机制等价 MC fortune 仅对
 //   矿石 / 部分方块生效。本工程矿石段：煤 / 铁 / 钻 / 铜 / 金 / 青金 / 红石（破块掉冶炼材料，掉落数 ×时运有意义）。
@@ -1455,6 +1456,147 @@ void PlayerController::dropLeafDrops(int x, int y, int z)
     // 木棒（8%）：独立判定（可与树苗同时掉）；落到散布邻格做视觉分离。
     if (QRandomGenerator::global()->bounded(100) < kLeafStickDropPct)
         emit spawnItem(sx, y, sz, RecipeRegistry::StickId, 1);
+}
+
+// t720 画作放置主体（见 playercontroller.h 头注释；placeBlock 画物品分支调）。机制等价 MC 1.0 painting：
+// 命中墙面 → 锚格（左上）起测最大可用矩形 → 等权随机一张放得下的画 → 多格写入（锚格带 index 全信息）。
+bool PlayerController::tryPlacePainting(int face)
+{
+    if (!m_world) return false;
+    // 墙面外法线（face 编码 = horizontalFacing 同源 4 向：0=+X 1=-X 2=+Z 3=-Z）与观察者右向 u。
+    int nx = 0, nz = 0, ux = 0, uz = 0;
+    switch (face & 3) {
+    case 0: nx =  1; nz =  0; ux =  0; uz = -1; break;
+    case 1: nx = -1; nz =  0; ux =  0; uz =  1; break;
+    case 2: nx =  0; nz =  1; ux =  1; uz =  0; break;
+    default: nx = 0; nz = -1; ux = -1; uz =  0; break;
+    }
+    // 墙格 = 命中格；锚格 = 墙格 + 法线（画层 = 墙外侧一格）。锚格即「左上角」（向下 = -Y，向右 = u）。
+    const int ax = m_hitBx + nx, ay = m_hitBy, az = m_hitBz + nz;
+    // 锚格越界守卫（y 越界 blockAt 亦返 Air，但下方 wall 探测统一走 isSolid 越界安全；提前挡防写越界）。
+    if (ay < 0 || ay >= m_world->height()) return false;
+    // 画层格合法性：本格 Air 且其正后方墙格（-法线）solid（贴墙格逐格独立判支撑 —— 墙面缺口 / 窗上不放）。
+    const auto cellOk = [&](int px, int py, int pz) -> bool {
+        if (py < 0 || py >= m_world->height()) return false;
+        if (m_world->blockAt(px, py, pz) != BlockRegistry::Air) return false;
+        return BlockRegistry::isSolid(m_world->blockAt(px - nx, py, pz - nz));
+    };
+    if (!cellOk(ax, ay, az)) return false; // 锚格被占 / 墙非实体 → 放不下
+    // ① 向右（u 向）贪心扩宽：连续 cellOk 的格数即 maxW（上限 4 = 最大画宽 4×4 格）。
+    int maxW = 1;
+    while (maxW < 4 && cellOk(ax + ux * maxW, ay, az + uz * maxW)) ++maxW;
+    // ② 向下（-Y）逐行扩高：每行须整行 maxW 列全部 cellOk（更窄画的列集是子集 → 子集行亦成立）。
+    int maxH = 1;
+    while (maxH < 4) {
+        const int ry = ay - maxH;
+        bool rowOk = true;
+        for (int k = 0; k < maxW; ++k) {
+            if (!cellOk(ax + ux * k, ry, az + uz * k)) { rowOk = false; break; }
+        }
+        if (!rowOk) break;
+        ++maxH;
+    }
+    // ③ 等权随机选一张 w≤maxW && h≤maxH 的画（简化 MC「先随机尺寸再随机该尺寸画」为全部合格画等权）。
+    int candidates[BlockRegistry::PaintingCount];
+    int nCand = 0;
+    for (int i = 0; i < BlockRegistry::PaintingCount; ++i) {
+        int w = 1, h = 1;
+        BlockRegistry::paintingSize(i, w, h);
+        if (w <= maxW && h <= maxH) candidates[nCand++] = i;
+    }
+    if (nCand == 0) return false; // 无合格画（maxW≥1 && maxH≥1 恒有 1×1，理论到不了；防御）
+    const int index = candidates[int(QRandomGenerator::global()->bounded(quint32(nCand)))];
+    // ④ 多格写入：锚格 setBlock（发 blockPlaced → 呈现层 paintingHost 加 delegate）；其余格 setWaterSilent
+    //   （静默：一画只一次放置反馈 / 一次音，机制等价 MC「放 1 画 = 1 物品 = 一次动作」，同床 head 静默写模式）。
+    int w = 1, h = 1;
+    BlockRegistry::paintingSize(index, w, h);
+    const quint8 faceBits = quint8((face & 3) << BlockRegistry::PaintingStateFaceShift);
+    for (int dy = 0; dy < h; ++dy) {
+        for (int dx = 0; dx < w; ++dx) {
+            const int px = ax + ux * dx, py = ay - dy, pz = az + uz * dx;
+            if (dx == 0 && dy == 0) {
+                // 锚格（左上）：bit7=锚 + face + index（完整信息；破坏 / 渲染都从锚格读）。
+                m_world->setBlock(px, py, pz, BlockRegistry::Painting,
+                                  quint8(BlockRegistry::PaintingStateAnchorFlag | faceBits
+                                         | quint8(index & BlockRegistry::PaintingStateIndexMask)));
+            } else {
+                // 非锚格：仅 face（bit7=0）—— 身份由锚格连通域承载。
+                m_world->setWaterSilent(px, py, pz, BlockRegistry::Painting, faceBits);
+            }
+        }
+    }
+    return true;
+}
+
+// t721 画作移除主体（见 playercontroller.h 头注释；直挖 + 失撑共用）。flood-fill 同 face 的 Painting
+// 连通域（±u 水平 / ±Y 垂直 —— 画恒占一个垂直于法线的格子平面，u = 观察者右向）= 整张画的格子集。
+void PlayerController::removePaintingAt(int px, int py, int pz, int face, bool drop)
+{
+    if (!m_world) return;
+    int ux = 0, uz = 0;
+    BlockRegistry::paintingRightOffset(face, ux, uz);
+    const quint8 faceBits = quint8((face & 3) << BlockRegistry::PaintingStateFaceShift);
+    // BFS 收集连通域（种子 (px,py,pz) 允许已被清 Air —— 直挖路径主破坏格先走 setBlock；邻格侧种子恒是画）。
+    struct Cell { int x, y, z; };
+    std::vector<Cell> cells;
+    std::vector<Cell> frontier{{px, py, pz}};
+    int anchorIndex = -1;
+    while (!frontier.empty()) {
+        const Cell c = frontier.back();
+        frontier.pop_back();
+        bool seen = false;
+        for (const Cell &s : cells) {
+            if (s.x == c.x && s.y == c.y && s.z == c.z) { seen = true; break; }
+        }
+        if (seen) continue;
+        const quint8 bid = m_world->blockAt(c.x, c.y, c.z);
+        const bool isSeed = (c.x == px && c.y == py && c.z == pz);
+        if (bid != BlockRegistry::Painting && !isSeed) continue;        // 非画格 → 不入域
+        if (bid == BlockRegistry::Painting
+            && quint8(m_world->stateAt(c.x, c.y, c.z) & BlockRegistry::PaintingStateFaceMask) != faceBits)
+            continue;                                                    // 异面画（共格平面对墙）→ 不连
+        cells.push_back(c);
+        if (bid == BlockRegistry::Painting
+            && (m_world->stateAt(c.x, c.y, c.z) & BlockRegistry::PaintingStateAnchorFlag)) {
+            anchorIndex = m_world->stateAt(c.x, c.y, c.z) & BlockRegistry::PaintingStateIndexMask;
+        }
+        // 4 向扩展（画面平面内：±u 水平 + ±Y 垂直）。
+        frontier.push_back({c.x + ux, c.y, c.z + uz});
+        frontier.push_back({c.x - ux, c.y, c.z - uz});
+        frontier.push_back({c.x, c.y + 1, c.z});
+        frontier.push_back({c.x, c.y - 1, c.z});
+    }
+    // 掉落：整张画只 1 件 PaintingId（机制等价 MC 破画掉 1 个 painting item）。落点 = 种子格（玩家瞄的格）。
+    if (drop)
+        emit spawnItem(px, py, pz, RecipeRegistry::PaintingId, 1);
+    // 清域：setWaterSilent 静默清（不发 blockBroken —— 多格画的逐格粒子/音会刷成风暴；主破坏格由 caller
+    //   finishMiningAt 顶部的 setBlock 已清 + 已发一次事件；失撑路径种子格也在此静默清，同火把失撑模式）。
+    //   worldChanged 仍逐格发 → mesh / 呈现层 paintingHost 清孤儿（onWorldChanged 校验）。
+    for (const Cell &c : cells) {
+        if (c.x == px && c.y == py && c.z == pz && m_world->blockAt(c.x, c.y, c.z) != BlockRegistry::Painting)
+            continue; // 种子已被 caller 清（防御双清）
+        m_world->setWaterSilent(c.x, c.y, c.z, BlockRegistry::Air, 0);
+    }
+}
+
+// t721 画作支撑墙失撑掉落（见 playercontroller.h 头注释；finishMiningAt 破块后扫 4 水平邻）。
+//   画格的支撑墙 = 画格 - 法线（paintingWallOffset）—— 墙格被破（刚置 Air / Water）→ 该画整张掉落。
+//   drop=true 恒发（含创造；t571 自然失撑掉落语义）。
+void PlayerController::dropUnsupportedPaintingsAround(int x, int y, int z)
+{
+    if (!m_world) return;
+    constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    for (const auto &o : kHoriz) {
+        const int px = x + o[0], py = y, pz = z + o[1];
+        if (m_world->blockAt(px, py, pz) != BlockRegistry::Painting) continue;
+        const quint8 st = m_world->stateAt(px, py, pz);
+        const int face = (st & BlockRegistry::PaintingStateFaceMask) >> BlockRegistry::PaintingStateFaceShift;
+        int wx = 0, wz = 0;
+        BlockRegistry::paintingWallOffset(face, wx, wz);
+        // 支撑墙格 == 刚破的格（blockAt 已非 solid —— 直接比坐标，破格可能已置 Air/水等）→ 失撑掉落。
+        if (px + wx == x && pz + wz == z)
+            removePaintingAt(px, py, pz, face, /*drop=*/true);
+    }
 }
 
 // t242 攻击 mob（spec「玩家左键攻击生物→受伤音效 + 身体红闪 + 扣血」）：damageEntity 扣血 + 设
@@ -3026,6 +3168,31 @@ void PlayerController::placeBlock()
     //   beginEating（长按累积进食进度，~1.6s 满后 finishEating 消耗 + 恢复饥饿）。spec「单击即食→改长按右键」。
     //   旧单次右键食一件的分支已删（避免与长按路径并存导致单击仍即食）。饥饿恢复 + Survival 消耗 / Creative
     //   不耗的语义见 finishEating（同 t238 旧分支语义，仅触发方式改：单击 → 长按累积满）。
+    // t720 画作放置（机制等价 MC 1.0 painting）：手持画作物品（PaintingId，材料段 0x242）右键**墙侧面**
+    //   （命中面法线水平 ny==0）→ 对该面测最大可用矩形（锚格=命中面相邻格，向「观察者右」u 向贪心扩宽 /
+    //   向下逐行扫，每格须 Air 且墙格 solid），随机选一张 w≤maxW && h≤maxH 的画作（27 张等权，简化 MC
+    //   「先随机尺寸再随机画」）→ 锚格 setBlock(Painting, 0x80|face<<5|index) + 其余格 setWaterSilent
+    //   (Painting, face<<5)（静默写免多次 blockPlaced / 音；state 编码见 blockregistry.h Painting 行）。
+    //   **放不下（非侧面 / 无合格画 / 锚格被占）→ no-op 物品不消耗**（spec：挥臂但不消耗，机制等价 MC
+    //   右键使用物品恒挥手）。生存放置成功消耗 1 画 / 创造不耗。画物品非方块（材料段）→ selectedBlock 归
+    //   Air，须在 `m_selectedBlock == Air` 守卫之前分流（同桶 / 船 / 玻璃模式）。spectator 已被入口
+    //   canPlace() 守卫拦截。分层（PLAN §2）：放置属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM），
+    //   不改栅格语义（setBlock 入口）。渲染走呈现层 paintingHost（Main.qml，贴图不进图集）。
+    if (m_hotbar && m_world && heldItemId == RecipeRegistry::PaintingId) {
+        bool placed = false;
+        if (m_hasHit && m_hitNy == 0 && m_hitNx != 0) {
+            // 命中 ±X 侧面：法线 (±1,0,0) → face 0=+X / 1=-X（horizontalFacing 同源编码）。
+            placed = tryPlacePainting((m_hitNx > 0) ? 0 : 1);
+        } else if (m_hasHit && m_hitNy == 0 && m_hitNz != 0) {
+            // 命中 ±Z 侧面：face 2=+Z / 3=-Z。
+            placed = tryPlacePainting((m_hitNz > 0) ? 2 : 3);
+        }
+        if (placed && m_mode != Creative)
+            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 画（创造不耗）
+        m_lastPlaceMs = now;
+        emit swingArm(); // 使用画作是一次「使用」动作 → 挥手（放不下也挥，机制等价 MC 使用物品；不消耗）
+        return; // 画作（放置成功 / 非侧面 / 放不下 / 未命中）均不再走方块放置路径
+    }
     // t243 生物蛋 useBlock（spec「右键地面→生成对应生物」）：手持生物蛋（猪 / 牛 / 羊，材料段 0x20F..0x211）
     //   右键命中实体方块 → 在命中面相邻格生成对应 mob（EntityManager::spawnMobTyped）。机制等价 MC 1.0 spawn
     //   egg（机制对齐，非名词照搬）。蛋非方块（材料段）→ selectedBlock 经 hotbar 归 Air，须在下方

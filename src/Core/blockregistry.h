@@ -916,7 +916,28 @@ public:
         //   （PersistentLeafBit state bit0）同 Leaves。**焚毁**：isWoodLike（邻岩浆/雷击）同 Leaves 归木质。
         //   音色归 GroupLeaves（同橡树叶）。进创造调色板（云杉树建筑取用；玩家放置自动带持久位）。
         SpruceLeaves   = 133, // 云杉树叶：雪原云杉树冠针叶（深蓝绿）；同 Leaves 机制（衰减/掉落/持久位）
-        Count           = 134, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t720 画作（Painting；机制等价 MC 1.0 painting —— MC 中画是**实体**（id 321 物品 + entity），
+        //   本工程按体素方块建模：一张画 = w×h 个 Painting 格（锚格 + 非锚格），贴墙薄板）。**渲染不走
+        //   chunk mesh / 图集**（画作贴图 27 张非 64 方形、不进图集，t717 约定）→ 呈现层 Main.qml
+        //   paintingHost delegate（BillboardQuad + paintingSource(index) 独立 Texture，同矿车/船实体贴图
+        //   模式）；mesher 双 PASS 均显式跳过本方块（否则按 tile 0 画成草顶立方）。solid=false /
+        //   ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC 画无 hitbox；不挡邻居面剔除）、hardness=0
+        //   （瞬破）、NoTool（空手可采）、requiresTool=false、dropId=0x242（PaintingId 材料段；破坏走
+        //   finishMiningAt 连通域特判 —— 整张画只掉 1 件，非逐格掉）、dropCount=1、**maxStack=0**（方块
+        //   形态不可拾取 / 不可进背包 —— 中键 pick 与放置都走**物品** 0x242；方块形态 state 裸格无法表达
+        //   整画 → 恒 0 阻断进背包）。各面 tile=0（占位，无消费方）。音色归 GroupWood（木质画框）。
+        //   **state 编码（t720 实际方案，8 位）**：
+        //     bit7   = PaintingStateAnchorFlag（1=锚格=左上格 / 0=非锚格）
+        //     bit6:5 = 朝向 face（PaintingStateFaceMask；0=+X 1=-X 2=+Z 3=-Z = **墙面外法线方向**
+        //              —— 画格在墙格的法线侧，画面朝外朝玩家。与 horizontalFacing 同源 4 向编码）
+        //     bit4:0 = 画作 index（PaintingStateIndexMask；0..26 = paintingNames 表序，仅锚格有意义；
+        //              27 < 32 够 5 位）
+        //   非锚格 state = face<<5（bit7=0，低 5 位 0）。**尺寸不进 state**：破坏时按 face 从破坏格
+        //   4 向（±u 水平 / ±Y 垂直）flood-fill 同 face 的 Painting 连通域（= 整张画的格子集），
+        //   锚格（bit7）读 index → 掉 1 件 + 清全部；渲染侧锚格 index → paintingSize 查 w×h 摆 quad。
+        //   state 经 m_states 落 SQLite round-trip 保真（存档读回仍带 index/朝向/锚标记）。
+        Painting       = 134, // 画作：贴墙薄板（w×h 多格，锚格 state 带 index+朝向；QML 渲染；无碰撞）
+        Count           = 135, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1044,6 +1065,32 @@ public:
     // t477 铁砧损坏 +1 后的目标方块 id：完好→微损 / 微损→重损 / 重损→Air（碎裂移除）。非铁砧 → 原 id。
     //   playercontroller damageAnvil 据本单一权威推进阶段（不各处自写 id 推进，同 bedPartnerOffset 模式）。
     static quint8 anvilNextStage(quint8 blockId);
+
+    // t720 画作统一谓词（单一权威）：blockId == Painting 即画。供 mesher 双 PASS 跳过（渲染走 QML
+    //   paintingHost）、raycast / 破坏连通域判定、放置预检读，避免各处硬编码 id（同 isLadder 单 id 模式）。
+    static bool isPainting(quint8 blockId);
+    // t720 画作 state 编码（见 Id 枚举 Painting 行头注释）：bit7=锚格 / bit[6:5]=朝向（墙面外法线
+    //   0=+X 1=-X 2=+Z 3=-Z）/ bit[4:0]=画作 index（0..26，仅锚格有意义）。放置（锚/非锚 state 组装）、
+    //   破坏连通域（face 过滤 + 锚格识别）、渲染 delegate（face→yaw / index→贴图与尺寸）三方同源解码。
+    static constexpr quint8 PaintingStateAnchorFlag = 0x80;
+    static constexpr quint8 PaintingStateFaceShift   = 5;
+    static constexpr quint8 PaintingStateFaceMask    = 0x60;
+    static constexpr quint8 PaintingStateIndexMask   = 0x1F;
+    // t720 画作张数（与 resourcepackmanager paintingNames() 表长同源 —— Core 不依赖其内部表，此处
+    //   常量作 index 合法上界；两边都是 27，改动须同步）。
+    static constexpr int PaintingCount = 27;
+    // t720 画作 index → 格尺寸 (w,h)（1..4 格；27 张按 paintingNames 表序：16×16×8 / 32×16×5 /
+    //   16×32×2 / 32×32×6 / 64×48×2 / 64×64×3 / 64×32×1 像素 → /16 折格）。供放置（墙面矩形扫描上界 +
+    //   合格画筛选）与渲染（quad w×h 缩放）同读 —— 单一权威，改画作表须同步本表（.cpp 字面量）。
+    //   越界 index → 1×1 兜底（防御脏 state）。
+    static void paintingSize(int index, int &w, int &h);
+    // t720 朝向 face → 画格所贴墙格相对本格的水平偏移 (dx,dz)（= -法线；face 0=+X → 墙在 -X …）。
+    //   放置（墙面支撑判定）/ 破坏（支撑墙失撑判定）/ raycast 薄盒摆位共用，单一权威。
+    static void paintingWallOffset(int face, int &dx, int &dz);
+    // t720 朝向 face → 画面水平「右」向（观察者面对画时右手边）偏移 (dx,dz)：f0(+X 法线)→-Z、
+    //   f1(-X)→+Z、f2(+Z)→+X、f3(-Z)→-X（观察者正对画面、上=+Y 时的右手系，u×Y=n）。
+    //   放置矩形扫描（锚格向右贪心扩宽）与破坏 flood-fill（±u 水平邻）共用。
+    static void paintingRightOffset(int face, int &dx, int &dz);
 
     // t468 冰族统一谓词（单一权威，机制等价 MC 1.0 ice / packed ice / blue ice）：blockId == Ice / PackIce /
     //   BlueIce 即冰。供 PlayerController 冰滑行物理 + ItemEntityManager 物品冰摩擦 + mesher iceOnly 段路由

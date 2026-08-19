@@ -526,7 +526,12 @@ QVariantList Hotbar::creativeMaterials() const
         //   相位）。生存由工作台合成获得（4 铁锭/金锭 + 1 红石），创造调色板补全便于测试。可堆叠 64；非方块
         //   （材料段）→ 右键不放置。MaterialIcon 自绘图标（圆表盘 + 磁针 / 金框表盘）。
         int(RecipeRegistry::CompassId),          // 指南针：4 铁锭+1 红石合成；HUD 指针指向出生点（t567）
-        int(RecipeRegistry::ClockId)             // 钟：4 金锭+1 红石合成；HUD 显示当前昼夜相位（t568）
+        int(RecipeRegistry::ClockId),            // 钟：4 金锭+1 红石合成；HUD 显示当前昼夜相位（t568）
+        // t720 画作（机制等价 MC 1.0 painting；8 木棒+1 羊毛合成；右键墙侧面 → 尺寸检测随机贴画）。
+        //   maxStack=1（放置型物品单件，同船；Hotbar::maxStackSize 特判）。可堆叠性：不可叠。
+        //   非方块（材料段）→ 右键不走通用放置，走画放置分支（playercontroller placeBlock 画段）。
+        //   MaterialIcon 自绘画框 + 迷你画面（drawPainting，§9 原创）；pack painting.png 映射。
+        int(RecipeRegistry::PaintingId)          // 画作：8 木棒+1 羊毛合成；右键墙贴画（t720/t721）
     };
 }
 
@@ -890,6 +895,8 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpruceBoatId)    return QStringLiteral("云杉船");     // 5 云杉木板合成；右键水面放船 + 骑乘
         // t565/t645 矿车（机制等价 MC 1.0 minecart；5 铁锭 U 形合成；右键铁轨放置 + 骑乘行驶）。
         if (blockId == RecipeRegistry::MinecartId)      return QStringLiteral("矿车");       // 5 铁锭合成；右键铁轨放车 + 骑乘
+        // t720 画作（机制等价 MC 1.0 painting；8 木棒+1 羊毛合成；右键墙侧面贴画）。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::PaintingId)      return QStringLiteral("画作");       // 8 木棒+1 羊毛合成；右键墙贴画
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
@@ -1307,6 +1314,10 @@ int Hotbar::maxStackSize(int id) const
     // t507 蘑菇汤（MushroomStewId，材料段 0x23C）：不可堆叠（机制等价 MC 1.0 蘑菇汤 maxStack 1 —— 碗装液体
     //   食物不可叠；同铁桶族）。须在通用材料段判定**之前**特判（否则落 64）。食用后返空碗（finishEating 特判）。
     if (id == RecipeRegistry::MushroomStewId) return 1;
+    // t720 画作（PaintingId=0x242，材料段）：不可堆叠（机制等价 MC 1.0 画 maxStack 1 —— 放置型实体物品
+    //   单件，同船 / 桶族）。须在通用材料段判定**之前**特判（否则落 64）。Core 层 BlockRegistry::
+    //   maxStackSize（掉落物合并用）已对 0x242 同步特判 1 —— 两处保持同步（见 blockregistry.cpp 注释）。
+    if (id == RecipeRegistry::PaintingId) return 1;
     // t345 护甲段（>= ArmorIdBase）：不可堆叠（每件独立耐久，同工具段语义）。
     if (ArmorRegistry::isArmor(id)) return 1;
     if (id >= kMaterialIdBase) return 64; // 材料段（t50 木棒等）：可堆叠 64（MC 标准）

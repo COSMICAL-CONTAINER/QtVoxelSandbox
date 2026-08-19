@@ -943,6 +943,25 @@ private:
     //   链）；TallGrass / WheatCrop 非 solid 且不作他物支撑 → 单趟向上扫即足够（无级联，破一块不会链式
     //   掉一串）。掉落产出与玩家破块同源（dropCropDrops 共用，成熟小麦失撑仍掉小麦 + 种子）。
     void dropUnsupportedCropsAround(int x, int y, int z);
+    // t720 画作放置主体（placeBlock 画物品分支调；机制等价 MC 1.0 painting 放置）：face = 墙面外法线
+    //   （0=+X 1=-X 2=+Z 3=-Z，horizontalFacing 同源编码）。流程：锚格 = 命中格 + 法线（左上角）；
+    //   对该面测最大可用矩形（向「观察者右」u 向贪心扩宽 maxW、向下逐行扫 maxH，每格须 Air 且其墙格
+    //   solid，上界 4×4）；随机选一张 w≤maxW && h≤maxH 的画（27 张等权）→ 锚格 setBlock(Painting,
+    //   anchor|face|index) + 其余格 setWaterSilent。无合格画 / 锚格被占 → false（caller 不消耗物品）。
+    //   纯 Game/Physics（读射线 + 写 World），不改栅格语义。
+    bool tryPlacePainting(int face);
+    // t721 画作破坏主体（finishMiningAt 直挖 + dropUnsupportedPaintingsAround 失撑共用）：从 (px,py,pz)
+    //   （画格之一，可能已被清 Air）按 face flood-fill 收集整张画的格子集（±u 水平 / ±Y 垂直同 face 的
+    //   Painting 格），锚格读 index → drop 时 spawnItem 1× PaintingId（整张画只掉 1 件）→ 全部格子
+    //   setWaterSilent 清 Air（静默：避免 N 格 blockBroken 粒子/音风暴；主破坏格由 caller 走 setBlock
+    //   已清 + 已发一次事件）。drop 标志区分：直挖 = 生存才掉（主动破坏），失撑 = 恒掉（含创造，t571
+    //   自然掉落语义）。
+    void removePaintingAt(int px, int py, int pz, int face, bool drop);
+    // t721 画作支撑墙失撑掉落：破块后扫 4 水平邻的 Painting，解码其 state 朝向定位支撑墙格
+    //   （paintingWallOffset），若支撑 == 刚破的格 → removePaintingAt（drop=true 恒掉，含创造）。
+    //   机制等价 MC「画后面的墙被挖 → 画掉落」。同 dropUnsupportedTorchesAround 模式（仅扫 4 水平
+    //   邻——画的支撑墙恒在水平向；画不撑他画 → 单趟扫足够无级联）。
+    void dropUnsupportedPaintingsAround(int x, int y, int z);
     // t242 攻击 mob（spec「玩家左键攻击生物」）：damageEntity(entityIndex, dmg) + swingArm +
     //   emit mobAttacked。t265 伤害改走 ToolRegistry::attackDamage(手持物)（剑木4/石5/铁6、空手/工具=1 HP）。
     //   由 beginMining 在 mob 优先于方块时调。mob 由 caller 选定（findMobHit 已返最近活体索引）。

@@ -871,6 +871,15 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::GoldIngotId, RecipeRegistry::RedstoneId, RecipeRegistry::GoldIngotId,
         0,                           RecipeRegistry::GoldIngotId, 0 },
       RecipeRegistry::ClockId, 1, 1, "clock" },
+    // t720 画作（painting）：8 木棒围 1 羊毛（中空环）→ 1 画作（有序 3×3，仅工作台）。机制等价 MC 1.0
+    //   painting 配方（8 sticks + any wool）。最小包围盒 3×3 满框（四边木棒 + 中心羊毛），多重集
+    //   {木棒:8, 羊毛:1} 唯一 → 不与既有配方冲突。产物 PaintingId（材料段 0x242，maxStack=1 放置型
+    //   物品；右键墙侧面 → 尺寸检测随机贴画，t720）。
+    { int(RecipeRegistry::Table3x3), false,
+      { kStickId,                    int(BlockRegistry::Wool),  kStickId,
+        int(BlockRegistry::Wool),    0,                         int(BlockRegistry::Wool),
+        kStickId,                    int(BlockRegistry::Wool),  kStickId },
+      RecipeRegistry::PaintingId, 1, 1, "painting" },
     // t609 投掷器（dropper）：7 圆石（缺中心 + 上中）→ 1 投掷器（有序 3×3，仅工作台）。机制等价 MC 1.0
     //   dropper 配方（7 cobblestone——与熔炉 8 圆石围圈同族，差异 = 熔炉缺 [4] 中心 1 格、本缺 [1] 上中 +
     //   [4] 中心 2 格）。最小包围盒 3×3 满框（顶行两端 + 中行两端 + 底行 3 满占角 → 满框），与熔炉（缺 [4]）/

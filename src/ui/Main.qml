@@ -480,6 +480,19 @@ Window {
             }
             console.info("[t691] enchant-table book rebuild on load: " + (books.length / 3) + " tables")
         }
+        // t720 画作读档重建（同 t691 附魔台书模式）：读档 blob 直写不经 blockPlaced → 事件驱动的
+        //   paintingHost 读档后恒空；先清上一世界残留 delegate 再按本世界真值重建（仅锚格 state bit7=1
+        //   建 delegate；非锚格无视觉）。
+        {
+            for (const key in paintingHost.paintingObjs) {
+                paintingHost.paintingObjs[key].destroy()
+                delete paintingHost.paintingObjs[key]
+            }
+            const cells = theWorld.collectBlocksOfId(134) // 134 = BlockRegistry::Painting（字面量+注释）
+            for (let ci = 0; ci + 2 < cells.length; ci += 3)
+                paintingHost.addPaintingVis(cells[ci], cells[ci + 1], cells[ci + 2])
+            console.info("[t720] painting rebuild on load: " + (cells.length / 3) + " cells")
+        }
         applyPlayerState(worldStore.loadPlayerData())
         // r2-B1 读档机关态收尾：清上一局的机关瞬态表（发射器冷却 / 红石矿点亮 / 压力板边沿基线 / 按钮复位）
         //   —— 读档复用同一 theWorld/player 对象（setWorld 不触发），不清则旧世界同坐标键串扰；并置压力板沿
@@ -7729,6 +7742,100 @@ Window {
             }
         }
 
+        // t720 画作渲染 host（机制等价 MC 1.0 painting；同 torchHost / bookHost 的 createObject delegate 模式）：
+        //   Painting 方块（134）的贴图是 27 张非 64 方形画作（t717 约定**不进图集**）→ 渲染不走 chunk mesh，
+        //   每张画一个 delegate = BillboardQuad（XY 平面 ±0.5、UV 0..1）+ 独立 Texture（pack paintingSource
+        //   命中 file:/// 包贴图；miss 回退 qrc:/textures/default_painting_<name>.png 程序自绘）。
+        //   只为**锚格**（state bit7=1，携 index/朝向）建 delegate：position = 锚格中心，yaw 把局部 +Z 转到
+        //   墙面外法线（画面朝外朝玩家、+X 对观察者右向 → 贴图不镜像），scale = (w,h,1)（paintingWidth/
+        //   Height 查 BlockRegistry::paintingSize 单一权威），quad 平面距墙面 1/16（局部 z = 1/16-0.5），
+        //   中心自锚格沿 -u（左）(w-1)/2、-Y（下）(h-1)/2 偏移（锚格=左上角）。
+        //   维护三重（同 torch / 附魔台书模式）：onBlockPlaced(134 锚) 加 / onBlockBroken(134 锚) 删 /
+        //   onWorldChanged 兜底清孤儿（blockAt != 134 或非锚格的条目销毁）；enterWorld 用
+        //   collectBlocksOfId(134) 过滤锚格重建（读档 blob 直写不经 blockPlaced）。
+        //   分层（PLAN §2）：纯呈现层，只读 blockAt/stateAt + 消费语义事件，绝不反向写栅格。
+        Node {
+            id: paintingHost
+            property var paintingObjs: ({})
+            function addPaintingVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                if (paintingObjs[key]) return
+                const st = theWorld.stateAt(x, y, z)
+                if ((st & 0x80) === 0) return           // 仅锚格建 delegate（bit7 = PaintingStateAnchorFlag）
+                paintingObjs[key] = paintingDelegate.createObject(paintingHost,
+                    {cellX: x, cellY: y, cellZ: z})
+            }
+            function removePaintingVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                const o = paintingObjs[key]
+                if (o) { o.destroy(); delete paintingObjs[key] }
+            }
+            // 兜底清孤儿（爆炸 / 系统改写 / 残锚）：blockAt != Painting(134) 或已非锚格的条目销毁
+            //   （blockBroken 之外的清除路径由此收口，同 torchHost.cleanupVis）。
+            function cleanupVis() {
+                for (const key in paintingObjs) {
+                    const p = key.split(",")
+                    const x = parseInt(p[0]), y = parseInt(p[1]), z = parseInt(p[2])
+                    if (theWorld.blockAt(x, y, z) !== 134 || (theWorld.stateAt(x, y, z) & 0x80) === 0) {
+                        paintingObjs[key].destroy(); delete paintingObjs[key]
+                    }
+                }
+            }
+        }
+
+        // t720 画作 delegate 模板：paintingHost.addPaintingVis 经 createObject 实例化（cellX/Y/Z 注入）、
+        //   removePaintingVis/cleanupVis 用 .destroy() 回收（同 bookDelegate 模式）。
+        Component {
+            id: paintingDelegate
+            Node {
+                id: paintingRoot
+                property int cellX: 0
+                property int cellY: 0
+                property int cellZ: 0
+                // 锚格中心（世界坐标）。yaw 把局部 +Z（BillboardQuad 法线）转到墙面外法线：face 0=+X→90° /
+                //   1=-X→270° /                2=+Z→0° / 3=-Z→180°（此时局部 +X 恰对「观察者右向」u，右手系不镜像）。
+                position: Qt.vector3d(cellX + 0.5, cellY + 0.5, cellZ + 0.5)
+                // 朝向 / index / 尺寸：从锚格 state 解码（bit[6:5]=face、bit[4:0]=index；w/h 查 Core 单一权威）。
+                readonly property int cellState: theWorld.stateAt(cellX, cellY, cellZ)
+                readonly property int face: (cellState & 0x60) >> 5
+                readonly property int artIndex: cellState & 0x1F
+                readonly property int artW: Math.max(1, resourcePack.paintingWidth(artIndex))
+                readonly property int artH: Math.max(1, resourcePack.paintingHeight(artIndex))
+                eulerRotation: Qt.vector3d(0, face === 0 ? 90 : face === 1 ? 270 : face === 2 ? 0 : 180, 0)
+
+                // 画面 quad：BillboardQuad（XY ±0.5）scale (w,h,1)；中心自锚格中心沿局部 -X（左）(w-1)/2、
+                //   -Y（下）(h-1)/2、-Z（朝墙）0.5-1/16 偏移 → 平面贴墙面外 1/16（防 z-fight 墙面）。
+                Model {
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(-(paintingRoot.artW - 1) / 2,
+                                          -(paintingRoot.artH - 1) / 2,
+                                          1.0 / 16.0 - 0.5)
+                    scale: Qt.vector3d(paintingRoot.artW, paintingRoot.artH, 1.0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        // 贴图：pack 命中 → file:/// painting/<name>.png；miss / pack 关 → qrc 程序自绘
+                        //   default_painting_<name>.png（paintingFallbackName 拿名，免 QML 自持名字表副本）。
+                        //   url 判空必用 toString().length（lessons t497：url .length 恒 undefined）。
+                        baseColorMap: Texture {
+                            source: {
+                                const _a = resourcePack.active
+                                const _i = paintingRoot.artIndex
+                                if (_a >= 0 && _i >= 0) {
+                                    const src = resourcePack.paintingSource(_i)
+                                    return src.toString().length > 0
+                                           ? src
+                                           : ("qrc:/textures/" + resourcePack.paintingFallbackName(_i) + ".png")
+                                }
+                                return ""
+                            }
+                            generateMipmaps: false
+                        }
+                    }
+                }
+                // 画框视觉：贴图自带 2px 内框（build_paintings.py FRAME）→ 不另画框边，零额外 Model。
+            }
+        }
+
         // t196 / t225 / t441 箱子盖子开合动画（场景内 3D Node，与 torchHost / itemHost 同层）。仅当前所开箱子
         //   （chestX/Y/Z）一处显盖子（一次只开一只箱子，chestOpen 单 bool）。chestLidAngle 由 openChest/
         //   closeChest 驱动（window 级 Behavior 平滑过渡 0↔全开角）。
@@ -8146,6 +8253,10 @@ Window {
             //   同 torch=13 字面量 + 注释模式）。enchantTablePositions 供 Repeater/调试读、bookHost.bookObjs
             //   供本场景渲染，二者经同一信号并行增删。
             if (id === 94) { removeEnchantTableAt(x, y, z); bookHost.removeBookVis(x, y, z) }
+            // t720/t721：画作被破 → 销毁视觉 delegate（id=134=BlockRegistry::Painting；仅锚格有 delegate，
+            //   非锚格破坏无 delegate 可删——onWorldChanged cleanupVis 兜底清孤儿）。整画移除掉落在
+            //   C++ finishMiningAt 连通域完成（t721），本处只管呈现。
+            if (id === 134) paintingHost.removePaintingVis(x, y, z)
             // t173/t179/t522：箱子被破 → 先把内部 27 槽内容 spawnItem 掉落世界（机制等价 MC 1.0 破箱掉落
             //   内容，修用户报「箱子装东西后挖掉不掉」），再 chestStore.clearChest 清孤儿条目。id=22=
             //   BlockRegistry::Chest（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
@@ -8233,6 +8344,9 @@ Window {
                 enchantTablePositions.append({x: x, y: y, z: z})
                 bookHost.addBookVis(x, y, z)
             }
+            // t720：画作锚格放置（playercontroller 画分支 setBlock 锚格 → 本信号；非锚格走 setWaterSilent
+            //   静默不发）→ 加视觉 delegate（id=134=BlockRegistry::Painting；addPaintingVis 内查 bit7 只认锚格）。
+            if (id === 134) paintingHost.addPaintingVis(x, y, z)
             // t669 放置消耗收口：生存放置由 PlayerController::placeBlock（C++）各放置分支统一 takeStack。
             //   原 t32 行为是此处 blanket takeStack —— 但 World::blockPlaced 不止由玩家 placeBlock 触发：
             //   锄耕地（setBlock Farmland）/ 踩踏回土（setBlock Dirt）/ 种植 / 倒流体等都是非放置类
@@ -8298,6 +8412,8 @@ Window {
             torchHost.cleanupVis()
             // t679：同步清悬浮书视觉 delegate 孤儿（同 torchHost 并行模式）。
             bookHost.cleanupVis()
+            // t720：同步清画作视觉 delegate 孤儿（爆炸 / 系统改写 / 非锚格破坏路径收口；同 torchHost 模式）。
+            paintingHost.cleanupVis()
         }
     }
 

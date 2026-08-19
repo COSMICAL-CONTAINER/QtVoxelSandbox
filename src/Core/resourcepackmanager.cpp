@@ -795,6 +795,10 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         //   有帧序列时 animatedItemFrameSource 优先（按状态选帧）。两文件 demo 包实测存在。
         {0x23F, QStringLiteral("compass.png")},          // 指南针静态图（t585 回落）
         {0x240, QStringLiteral("clock.png")},            // 钟静态图（t585 回落）
+        // t720 画作（PaintingId=0x242；机制等价 MC 1.0 painting item 321）：pack item 目录通常有 painting.png
+        //   （MC 1.8 系实测 textures/item/painting.png 是空 item 贴图——MC 画作实体画面在 painting/ 目录；
+        //   此处接 item 图标映射，包内缺则安全跳过回退 MaterialIcon drawPainting 自绘）。
+        {0x242, QStringLiteral("painting.png")},         // 画作（t720：8 木棒+1 羊毛合成；右键墙贴画）
         // —— 护甲段（ArmorId；皮革/铁/铜/金/钻石×4 部位。铜护甲 t613 入映射：现代包 copper_* 直用；老包
         //   缺 copper_* → itemIconSource 走 copperIronFallback 用 iron_* 染铜（描边带 + 铜橙梯度））——
         {0x300, QStringLiteral("leather_helmet.png")},
@@ -2322,6 +2326,21 @@ QString ResourcePackManager::paintingFallbackName(int index) const
     if (index < 0 || index >= names.size())
         return {};
     return QStringLiteral("default_painting_") + names.at(index);
+}
+
+// t720 画作格尺寸（呈现层 paintingHost delegate 摆 quad 用）：委托 BlockRegistry::paintingSize 单一
+//   权威（与 paintingNames 表序同源；越界 → 1 兜底）。
+int ResourcePackManager::paintingWidth(int index) const
+{
+    int w = 1, h = 1;
+    BlockRegistry::paintingSize(index, w, h);
+    return w;
+}
+int ResourcePackManager::paintingHeight(int index) const
+{
+    int w = 1, h = 1;
+    BlockRegistry::paintingSize(index, w, h);
+    return h;
 }
 
 // t717 实体贴图源（t727/t728/t730/t731/t732 实体批 pack 覆盖前置）：kind（字符串 key，entityKindMap 表）
