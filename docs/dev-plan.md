@@ -2777,8 +2777,8 @@ t680-t716（37 项）。**严格顺序：t680-t692 审查修复（H 先）→ t6
 
 ### 🅱 装备 3D（armor layer 渲染）
 **t718** 盔甲穿戴 3D 显示：玩家模型（Main.qml playerModel）+ 生物模型（MobModel）按已穿护甲件叠加 layer_1（身/腿）+ layer_2（靴/头盔）薄壳盒体（partial 风格盒子几何，UV 按 layer 贴图布局自
-拼——与生物贴图同“自拼装”模式）。护甲段图标/背包已有（0x300 段），只做 3D 显示层。
-**t719** 生物穿甲同步（mob 穿戴显示）：MobModel 支持按 entity armor 字段叠加同款 layer 盒体（先接 Zombie/Shambler 可穿拾取的甲——若 mob 拾取装备体系未实现则本项降级为「玩家+人形 mob 通用 layer 渲染器」+ TODO 注释）。
+拼——与生物贴图同“自拼装”模式）。护甲段图标/背包已有（0x300 段），只做 3D 显示层。 ✅✅ 已完成（commit 45ace1e：新增 Renderer ArmorLayerBox 几何——±0.5 单位盒 + MC armor layer box-UV 六面子区（piece 0-5：头/胸/袖/腿采 layer_1、右/左靴采 layer_2，同 MobModel R19 C3 公式）；playerModel 全部 9 个护甲 Model 换 ArmorLayerBox + armorLayerTex(armId, layer)（10 张静态 Texture 实例 = 5 tier × 2 layer，pack 命中 armorLayerSource / 否则程序层 armor_*_layer_*.png；alphaCutoff 0.5 开脸窗/链甲孔）；tint 改 armorTintT 近白（层贴图自带 tier 色，仅保 hurt 红闪——防二次染色）；armorLayerSource 皮革命中接 retintLeatherTemplate 染棕落盘（t717 TODO 兑现）；build_armor_layers.py 补 copper 档（自创档无 pack 等价恒程序层））
+**t719** 生物穿甲同步（mob 穿戴显示）：MobModel 支持按 entity armor 字段叠加同款 layer 盒体（先接 Zombie/Shambler 可穿拾取的甲——若 mob 拾取装备体系未实现则本项降级为「玩家+人形 mob 通用 layer 渲染器」+ TODO 注释）。 ✅✅ 已完成（commit 2ccdc56：Shambler/Bones delegate 护甲 Model 全部换 ArmorLayerBox + armorLayerTex（与玩家共用同一通用 layer 渲染器）；mobArmorTintT 近白 tint 保 hurtFlash 红闪（tier 色乘法退役防二次染色，t597 同理）；**降级路径已注明**——mob 拾取装备 AI 未实现 → EntityManager::setMobArmorSet(i, tier) Q_INVOKABLE + /mobarmor <tier> 聊天命令（最近人形 mob 穿/脱整套 tier 护甲，调试驱动；拾取 AI 留后续）；铁傀儡铁灰贴图不动）
 
 ### 🅲 画作系统
 **t720** 画作物品 + 墙面尺寸检测放置：PaintingId（item 段）；右键墙：对命中墙面测最大可用矩形（横竖逐行/列扫空墙面），随机选一张尺寸 ≤ 可用矩形的画作，放不下则 no-op（物品不消耗）。画作为新 partial 方块（Painting，薄板贴墙，state 编码画 index + 朝向）；27 张贴图 pack 运行期映射（pack 挂 painting/ 目录逐张映射，miss 回退程序图）。
