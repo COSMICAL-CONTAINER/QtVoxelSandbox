@@ -1113,7 +1113,8 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
                                 || brokenId == BlockRegistry::WheatCrop
                                 || brokenId == BlockRegistry::CarrotCrop
                                 || brokenId == BlockRegistry::PotatoCrop
-                                || brokenId == BlockRegistry::SnowLayer) // t505 雪层按 state 掉 (state+1) 雪球
+                                || brokenId == BlockRegistry::SnowLayer // t505 雪层按 state 掉 (state+1) 雪球
+                                || brokenId == BlockRegistry::Painting) // t721 画：state 带 face/index（连通域移除用）
         ? m_world->stateAt(x, y, z) : quint8(0);
     // t506 冰（Ice）生存挖掘 → 生成水方块（机制等价 MC 1.0 冰破成水）：精准采集（SilkTouch）→ 走通用 silk 分支
     //   掉 Ice 自身（line ~1007），不在此处理；非精准采集 → 破冰格置水源（Water state=0）而非 Air。PackIce /
@@ -1133,6 +1134,24 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   分层（PLAN §2）：生成属 Game/Physics（调 EntityManager），不写栅格（setBlock 已破）。
     if (m_entityManager && brokenId == BlockRegistry::MonsterEgg)
         m_entityManager->spawnMobTyped(x, y, z, EntityManager::MobSilverfish, QStringLiteral("#c8c2b8"), 0);
+    // t721 画作连通域移除（机制等价 MC 1.0 破画：整张画消失 + 只掉 1 个 painting 物品，非逐格掉）：
+    //   破坏任一画格 → removePaintingAt 按 brokenState 的 face flood-fill 同面 Painting 连通域（本格已被
+    //   上方 setBlock 清 Air；余格 BFS 收集后 setWaterSilent 静默清 —— 多格画逐格 blockBroken 会刷成
+    //   粒子/音风暴）。掉落受 drop 标志门控（主动破坏仅生存掉，t571①语义）；锚格 index 由连通域内读出
+    //   （破坏中间格时锚格仍在域内）。之后**不再进通用掉落链**（drop 分支的通用 dropId 路径会再掉一件
+    //   → return 前拦截；本格 setBlock 已发一次 blockBroken 粒子/音）。
+    if (brokenId == BlockRegistry::Painting) {
+        const int face = (brokenState & BlockRegistry::PaintingStateFaceMask)
+                         >> BlockRegistry::PaintingStateFaceShift;
+        removePaintingAt(x, y, z, face, /*drop=*/drop);
+        // 画作无支撑依赖其它画（画格连通域已随 removePaintingAt 全清）→ 无需再扫邻；但破的画格本身
+        // 背后的墙仍在（画破不动墙），跳过 dropUnsupportedPaintingsAround（无意义扫描）。
+        emit playerMined(x, y, z, int(brokenId), drop);
+        if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem(); // 同通用路径：生存破块工具 -1 耐久
+        emit swingArm();
+        cancelMining();
+        return; // 画特判收口：不走通用掉落 / 级联链
+    }
     // t134/t466 门两格破坏联动（统一经 isDoor 谓词覆盖 WoodDoor + SpruceDoor）：破任一格 → 同步清配对格
     //   （另一格），防留半截悬空门。配对格据本格 state bit3（isUpper）判上 / 下：本格上格 → 配对 y-1；
     //   本格下格 → 配对 y+1。仅当配对格**同为门**（isDoor）才清（防御：state 不一致时不误清异格；不同材质门
@@ -1170,6 +1189,10 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   若已非完整立方（含本格刚被置 Air）→ 机关直接掉落为物品。机制等价 MC「机关附着面被移除即脱落」
     //   （同火把 / 木梯失撑语义）。t571 标注【自然失撑掉落：恒发（含创造）】。
     dropUnsupportedMechAround(x, y, z);
+    // t721 画作支撑墙失撑掉落：破块后扫 4 水平邻的画，其支撑墙格 == 本破块格 → 整张画掉落 1 件
+    //   （removePaintingAt 连通域移除，drop=true 恒发含创造）。机制等价 MC「画后面的墙被挖 → 画掉落」
+    //   （同火把 / 木梯失撑语义）。t571 标注【自然失撑掉落：恒发（含创造）】。
+    dropUnsupportedPaintingsAround(x, y, z);
     // t247 草丛 / 小麦作物失撑掉落：破块后其正上方的草丛 / 小麦作物（唯一支撑 = 本格，刚被破为 Air）
     //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
     //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
