@@ -69,6 +69,10 @@ struct BuiltState {
     //   copper_*（1.8 等老包）→ 用铁对应贴图染铜橙（retintCopperTemplate）落盘 voxelsandbox_rp_copper_<id>.png，
     //   后续命中直接返。apply() 重建时清空（pack 切换 / 重解析 → 重染）。
     QHash<int, QString> copperIconFiles;
+    // t714 叶子 item 图标染色缓存：leafId（Leaves=7 / SpruceLeaves=133）→落盘的染色后叶图标 file:// 路径。
+    //   pack 叶贴图（oak_leaves / spruce_leaves）是灰度可染色 base，首次查询按叶 tint 重染（同床 retint 模式）
+    //   落盘 voxelsandbox_rp_leaf_<id>.png，后续命中直接返。apply() 重建时清空（pack 切换 / 重解析 → 重染）。
+    QHash<int, QString> leafIconFiles;
     // t585 指南针/钟动画帧序列状态：帧文件 stem（"compass"/"clock"）→（帧数，上次帧 index）。帧数在
     //   ensureBuiltLocked 探测 item 目录实际存在的 <stem>_NN.png 数（demo 包实测 compass 32 / clock 64；
     //   用 QHash 因未来可扩别的逐帧物品）。lastIndex 供 updateAnimatedItemState 检出「帧真变」才递增
@@ -594,6 +598,11 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         //   机制等价 MC 1.0 redstone torch off 双态贴图；on 态恒 tile 161 已接）。非 pack 回落
         //   default_redstone_torch_off.png（tools/build_rail_family.py 姊妹脚本自绘）。包内缺 PNG 安全跳过。
         {170, QStringLiteral("redstone_torch_off.png")}, // redstone_torch_off（t657 熄灭态；反相器 NOT 门视觉）
+        // t714 云杉树叶：tile 175 spruce_leaves → pack 内 spruce_leaves.png（demo 包实存；**灰度可着色**瓦片
+        //   —— 实测三通道均 130 灰，需乘 tint 合成才显深蓝绿针叶，同 oak_leaves t416 模式）。非 pack 回落
+        //   程序生成 default_spruce_leaves.png（tools/build_spruce.py 自绘深蓝绿针叶 + 透明孔）。包内缺 PNG
+        //   时安全跳过（保留程序生成瓦片）。
+        {175, QStringLiteral("spruce_leaves.png")},   // spruce_leaves（t714 云杉树叶；灰度 + tint 合成）
     };
     return kMap;
 }
@@ -856,11 +865,18 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
         { 127, { QStringLiteral("rail_golden.png"),   QStringLiteral("powered_rail.png") } },   // GoldenRail 动力铁轨（t703 老名 HD 优先）
         { 128, { QStringLiteral("rail_detector.png"), QStringLiteral("detector_rail.png") } }, // DetectorRail 探测铁轨（t703 老名 HD 优先）
         { 129, { QStringLiteral("redstone_torch_on.png") } },                                  // RedstoneTorch 红石火把（常亮态 2D）
+        // t714 ③叶子背包 item 图标同步（用户「叶子背包图标跟放置贴图不一致」）：Leaves / SpruceLeaves 命中 →
+        //   blockItemIconSource 的叶 tint 重染路径（leafTintForBlock，同床 retint 模式）——pack 叶贴图是灰度可
+        //   着色瓦片（demo 包实测 oak 150/150/150 灰、spruce 130 灰），直接用 2D 原图会显灰白；乘叶 tint 后
+        //   落盘 voxelsandbox_rp_leaf_<id>.png。tint 值与 tileTint 单一权威同源（oak=plains 叶绿素 / spruce=
+        //   深蓝绿）→ 背包图标色调与世界放置观感一致。pack 关 / 包内缺 → 回退程序 icon_leaves / icon_spruce_leaves。
+        { 7,   { QStringLiteral("oak_leaves.png") } },    // Leaves 橡树树叶（灰度 + plains 叶绿素 tint）
+        { 133, { QStringLiteral("spruce_leaves.png") } }, // SpruceLeaves 云杉树叶（灰度 + 云杉深蓝绿 tint；t714）
     };
     return kMap;
 }
 
-// t416/t444 MC「灰度可着色」瓦片 → 着色 tint 查表（单一权威）。这些 tile 的包内贴图本体是灰度（机制等价 MC
+// t416/t444/t714 MC「灰度可着色」瓦片 → 着色 tint 查表（单一权威）。这些 tile 的包内贴图本体是灰度（机制等价 MC
 //   foliageColor/grassColor / lily pad fixed tint），loader 直接用包内灰度原色会渲染成苔石色 / 灰白（用户「睡莲
 //   现灰」），故合成时乘上对应群系 tint。非着色瓦片（stone/dirt/...）原样，不受影响（返 nullptr）。
 //   注：grass_side 不在此列——它 = dirt 基底 + 顶部绿 overlay（仅顶部绿条着色），整张乘绿会把下方泥土也染绿
@@ -869,12 +885,16 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
 //   - lily_pad(61)（t444）：沼泽水生绿 #4aa852。MC lily_pad.png 是灰度可着色贴图（demo pack 实测灰 133,133,133），
 //     MC 用硬编码水生绿着色；本引擎无 BlockColors → 合成时固定乘本 tint（机制等价 MC lily pad fixed tint）。
 //     不着色则 pack 睡莲渲染成灰白方块（用户「现灰」）。
+//   - spruce_leaves(175)（t714）：MC 云杉叶固定深蓝绿（spruce foliage 不随群系变化，机制等价 MC spruce leaves
+//     常量色 #489087 量级；demo pack spruce_leaves.png 实测灰 130,130,130 需 tint）。不着色则 pack 云杉冠灰白。
 const int *tileTint(int tileIndex)
 {
-    static constexpr int kFoliage[3] = {0x5a, 0x8a, 0x3a}; // plains 叶绿素 #5a8a3a
-    static constexpr int kLily[3]    = {0x4a, 0xa8, 0x52}; // t444 睡莲沼泽水生绿 #4aa852
+    static constexpr int kFoliage[3]  = {0x5a, 0x8a, 0x3a}; // plains 叶绿素 #5a8a3a
+    static constexpr int kLily[3]     = {0x4a, 0xa8, 0x52}; // t444 睡莲沼泽水生绿 #4aa852
+    static constexpr int kSpruce[3]   = {0x3a, 0x6e, 0x55}; // t714 云杉针叶深蓝绿 #3a6e55
     if (tileIndex == 0 || tileIndex == 9 || tileIndex == 28) return kFoliage; // grass_top / oak_leaves / tall_grass
     if (tileIndex == 61) return kLily;                                       // lily_pad
+    if (tileIndex == 175) return kSpruce;                                    // spruce_leaves（t714）
     return nullptr;
 }
 
@@ -1080,6 +1100,46 @@ void retintCopperTemplate(QImage &img)
                 ng = midG + ((liteG - midG) * f) / 256;
                 nb = midB + ((liteB - midB) * f) / 256;
             }
+            scan[x] = qRgba((nr * a) / 255, (ng * a) / 255, (nb * a) / 255, a);
+        }
+    }
+}
+
+// t714 叶子 item 图标 tint 查表：leafId → 叶 tint（与 tileTint 单一权威同源：oak=plains 叶绿素 #5a8a3a /
+//   spruce=深蓝绿 #3a6e55）。返 nullptr = 非叶段。pack 叶贴图（oak_leaves / spruce_leaves）是灰度可染色
+//   base（demo 包实测 150 / 130 灰）→ blockItemIconSource 命中叶段时乘本 tint 落盘染色图标（同床 / 皮革 /
+//   铜 retint 模式），背包图标色调与世界放置观感（tileTint 合成图集）一致。
+struct LeafTint { int r, g, b; };
+const LeafTint *leafTintForBlock(int blockId)
+{
+    static constexpr LeafTint kOak    = {0x5a, 0x8a, 0x3a}; // plains 叶绿素（同 tileTint kFoliage）
+    static constexpr LeafTint kSpruce = {0x3a, 0x6e, 0x55}; // 云杉深蓝绿（同 tileTint kSpruce）
+    if (blockId == 7) return &kOak;      // Leaves 橡树树叶
+    if (blockId == 133) return &kSpruce; // SpruceLeaves 云杉树叶（t714）
+    return nullptr;
+}
+
+// t714 叶贴图 retint：灰度叶贴图 × 叶 tint（机制等价 MC foliageColor 着色）。灰度亮度保留明暗层次
+// （叶脉亮 / 叶隙暗），仅色相迁到目标绿；半透明像素（叶贴图自带 alpha 渐变边）按 alpha 预乘染色。
+// img 为 Format_ARGB32_Premultiplied；输出亦保持预乘。透明像素（alpha=0）不动。
+void retintLeafTemplate(QImage &img, int tgtR, int tgtG, int tgtB)
+{
+    const int w = img.width(), h = img.height();
+    for (int y = 0; y < h; ++y) {
+        QRgb *scan = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const QRgb c = scan[x];
+            const int a = qAlpha(c);
+            if (a == 0) continue; // 透明像素不动
+            // 反预乘取线性 RGB（灰度叶贴图 r≈g≈b，取 luma 代表亮度）。
+            const int r = qBound(0, qRed(c) * 255 / qMax(1, a), 255);
+            const int g = qBound(0, qGreen(c) * 255 / qMax(1, a), 255);
+            const int b = qBound(0, qBlue(c) * 255 / qMax(1, a), 255);
+            const int l = (r * 299 + g * 587 + b * 114) / 1000; // 0..255 灰度亮度
+            // 灰度×tint（Q8 分数：l/255）→ 保留明暗层次仅换色相（同 tileTint applyTint 合成数学）。
+            const int nr = (tgtR * l) / 255;
+            const int ng = (tgtG * l) / 255;
+            const int nb = (tgtB * l) / 255;
             scan[x] = qRgba((nr * a) / 255, (ng * a) / 255, (nb * a) / 255, a);
         }
     }
@@ -1412,6 +1472,7 @@ void ensureBuiltLocked()
     s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
     s.leatherIconFiles.clear(); // R19 B1 reset 皮革护甲染色图标缓存（pack 切换 / 重解析 → 重染）
     s.copperIconFiles.clear();  // t588 reset 铜物品染色图标缓存（pack 切换 / 重解析 → 重染）
+    s.leafIconFiles.clear();    // t714 reset 叶子染色图标缓存（pack 切换 / 重解析 → 重染）
     s.mobHeadIconFiles.clear(); // t633 reset 生物头像裁剪缓存（pack 切换 / 重解析 → 重裁）
     s.spawnEggIconFiles.clear(); // t645 reset 生成式生物蛋图标缓存（pack 切换 / 重解析 → 重染）
     s.animItems.clear(); // t585 reset 动画帧序列态（pack 切换 / 重解析 → 重探测帧数）
@@ -1985,6 +2046,31 @@ QString ResourcePackManager::blockItemIconSource(int blockId)
             return QStringLiteral("file:///") + foundPath; // 落盘失败 → 回退红床（降级）
         // 记缓存（mutable：s 是 state() 引用但 bedIconFiles 需写；stateMutex 已持锁，安全）。
         state().bedIconFiles.insert(blockId, out);
+        return QStringLiteral("file:///") + out;
+    }
+
+    // t714 ③叶子图标同步（用户「叶子背包图标跟放置贴图不一致」）：叶段命中 → 灰度叶贴图乘叶 tint 重染
+    //   （retintLeafTemplate，同床 retint 模式）落盘 voxelsandbox_rp_leaf_<id>.png，背包图标色调与世界
+    //   放置观感（tileTint 合成图集）一致。命中缓存直接返（首次染色后落盘，后续 O(1)）。非叶段直接返
+    //   foundPath（原样用 pack 2D 图标，不染色）。
+    if (const LeafTint *lt = leafTintForBlock(blockId)) {
+        const auto it = s.leafIconFiles.constFind(blockId);
+        if (it != s.leafIconFiles.constEnd() && QFile::exists(it.value()))
+            return QStringLiteral("file:///") + it.value();
+        QImage leaf(foundPath);
+        if (leaf.isNull())
+            return QStringLiteral("file:///") + foundPath; // 解码失败 → 回退未染色灰度（可接受降级）
+        leaf = leaf.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        retintLeafTemplate(leaf, lt->r, lt->g, lt->b);
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        if (dir.isEmpty())
+            return QStringLiteral("file:///") + foundPath; // 无可写目录 → 回退灰度（降级）
+        QDir().mkpath(dir);
+        const QString out = QDir(dir).absoluteFilePath(
+            QStringLiteral("voxelsandbox_rp_leaf_%1.png").arg(blockId));
+        if (!leaf.save(out, "PNG"))
+            return QStringLiteral("file:///") + foundPath; // 落盘失败 → 回退灰度（降级）
+        state().leafIconFiles.insert(blockId, out);
         return QStringLiteral("file:///") + out;
     }
 

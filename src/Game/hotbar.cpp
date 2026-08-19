@@ -22,6 +22,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Log:           return "icon_log.png";
     case BlockRegistry::Planks:        return "icon_planks.png";
     case BlockRegistry::Leaves:        return "icon_leaves.png";
+    case BlockRegistry::SpruceLeaves:  return "icon_spruce_leaves.png"; // t714 云杉树叶（深蓝绿针叶立方体图标）
     case BlockRegistry::Sand:          return "icon_sand.png";
     case BlockRegistry::CraftingTable: return "icon_crafting_table.png"; // t50/t676 工作台 3D 立方体图标（cube per-face：顶=台面网格 / 右=侧图 / 前=前图）
     case BlockRegistry::Furnace:       return "icon_furnace.png";        // t80/t676 熔炉 3D 立方体图标（cube per-face：顶=炉顶 / 右=炉侧 / 前=炉口）
@@ -654,6 +655,7 @@ QVariantList Hotbar::creativeBlocks() const
              //   属系统获得），不进创造调色板。
              int(BlockRegistry::SnowLayer),                                  // 积雪层（雪原地表覆雪；铲加速；可放置）
              int(BlockRegistry::SpruceLog),                                  // 云杉原木（云杉树主干；斧加速；可放置）
+             int(BlockRegistry::SpruceLeaves),                               // t714 云杉树叶（深蓝绿针叶；玩家放置带持久位；可放置）
              // t468 冰族（Ice / PackIce / BlueIce）：透明整立方（iceOnly 段 Blend 半透）+ 冰上低摩擦滑动。Ice 由 worldgen
              //   冻结水面 / tickIceFreeze 获得，PackIce/BlueIce 创造调色板取用测试 / 装饰（滑动速度递增 Ice<PackIce<BlueIce）。
              int(BlockRegistry::Ice),                                        // 冰（雪原水面冻结；半透；冰上滑行）

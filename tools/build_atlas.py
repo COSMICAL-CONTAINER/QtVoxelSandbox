@@ -369,6 +369,10 @@ TILES = [
     "default_dust_line_lvl2",        # 172 dust_line_lvl2（半亮线向：中亮红 + 少量暖心粒）
     "default_dust_dot_lvl1",         # 173 dust_dot_lvl1（弱电点：中暗红粉堆）
     "default_dust_dot_lvl2",         # 174 dust_dot_lvl2（半亮点：中亮红粉堆 + 暖心粒）
+    # t714 云杉树叶（SpruceLeaves=133 各面=本 tile；机制等价 MC 1.0 spruce leaves，雪原云杉树冠针叶）。
+    #   深蓝绿针叶底 + 噪点 + 针簇放射纹 + 部分透明孔（cutout 观感同 oak leaves(9)，色调更深冷蓝绿）；
+    #   tools/build_spruce.py 程序生成（§9 override (a)；零 MC 资产）。pack {175→spruce_leaves.png}。
+    "default_spruce_leaves",         # 175 spruce_leaves（云杉树叶；深蓝绿针叶 + 透明孔）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

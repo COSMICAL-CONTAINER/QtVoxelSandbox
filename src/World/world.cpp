@@ -1151,6 +1151,7 @@ void World::tickLavaFlow()
     auto isWoodLike = [](quint8 id) -> bool {
         using BR = BlockRegistry;
         return id == BR::Log || id == BR::SpruceLog || id == BR::Planks || id == BR::CraftingTable || id == BR::Leaves
+            || id == BR::SpruceLeaves // t714 云杉树叶（木质可燃，同橡树叶）
             || id == BR::WoodSlab || id == BR::WoodStairs || id == BR::WoodFence
             || id == BR::WoodPressurePlate || id == BR::WoodDoor || id == BR::WoodTrapdoor || id == BR::Chest
             || id == BR::SprucePlanks || id == BR::SpruceSlab || id == BR::SpruceFence || id == BR::SpruceDoor; // t466 云杉木制品（木质，邻岩浆焚毁）
@@ -1530,7 +1531,9 @@ void World::decayLeavesAround(int x, int y, int z)
             for (int dz = -kScanRadius; dz <= kScanRadius; ++dz) {
                 const int lx = x + dx, ly = y + dy, lz = z + dz;
                 if (lx < 0 || ly < 0 || lz < 0 || lx >= W || ly >= H || lz >= D) continue;
-                if (m_chunks.blockAt(lx, ly, lz) != BlockRegistry::Leaves) continue;
+                // t714：云杉叶（SpruceLeaves）与橡树叶同入衰减候选（同族叶机制；持久位 state bit0 同语义）。
+                const quint8 leafId = m_chunks.blockAt(lx, ly, lz);
+                if (leafId != BlockRegistry::Leaves && leafId != BlockRegistry::SpruceLeaves) continue;
                 if ((m_chunks.stateAt(lx, ly, lz) & BlockRegistry::PersistentLeafBit) != 0)
                     continue; // t305 玩家放置叶（持久）不衰
                 // 查 kDecayRadius 切比雪夫距离内有无原木（任一命中即保留 —— 仍有原木支撑）。
@@ -1571,15 +1574,16 @@ void World::tickLeafDecay()
     // 散布种子混入窗口序号（每窗一新种子 → 每叶每窗一新伪随机滚，渐进渐退；全 int 运算避符号转换告警）。
     const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_leafDecayIntervalIndex) * 0x9E3779B9u));
 
-    // 逐叶判定：队列项可能已被他途清除（玩家破叶 / 爆炸 / 重置）→ 块非 Leaves 即视为已消失，出队（不再衰减）。
-    //   命中叶先记坐标（decayed）+ 累计受影响 AABB，末尾批量写 + 一次 reflood + worldChanged。
+    // 逐叶判定：队列项可能已被他途清除（玩家破叶 / 爆炸 / 重置）→ 块非叶（Leaves / SpruceLeaves）即视为已消失，
+    //   出队（不再衰减）。命中叶先记坐标（decayed）+ 累计受影响 AABB，末尾批量写 + 一次 reflood + worldChanged。
     std::vector<quint64> decayed;
     int minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
     bool any = false;
     for (auto it = m_decayingLeaves.begin(); it != m_decayingLeaves.end(); ) {
         int lx, ly, lz;
         unpackLeafCell(*it, lx, ly, lz);
-        if (m_chunks.blockAt(lx, ly, lz) != BlockRegistry::Leaves) {
+        const quint8 qid = m_chunks.blockAt(lx, ly, lz);
+        if (qid != BlockRegistry::Leaves && qid != BlockRegistry::SpruceLeaves) {
             it = m_decayingLeaves.erase(it); // 已被他途清除 → 出队
             continue;
         }
@@ -2996,6 +3000,7 @@ void World::strikeLightning()
     auto isWoodLike = [](quint8 bid) -> bool {
         using BR = BlockRegistry;
         return bid == BR::Log || bid == BR::SpruceLog || bid == BR::Planks || bid == BR::CraftingTable || bid == BR::Leaves
+            || bid == BR::SpruceLeaves // t714 云杉树叶（木质可燃，同橡树叶）
             || bid == BR::WoodSlab || bid == BR::WoodStairs || bid == BR::WoodFence
             || bid == BR::WoodPressurePlate || bid == BR::WoodDoor || bid == BR::WoodTrapdoor || bid == BR::Chest
             || bid == BR::SprucePlanks || bid == BR::SpruceSlab || bid == BR::SpruceFence || bid == BR::SpruceDoor; // t466 云杉木制品（木质，雷击焚毁）
@@ -3345,9 +3350,10 @@ void World::placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand
 }
 
 // t395 单棵云杉（变种树，机制等价 MC 1.0 spruce）：surfaceY=雪顶 y；主干 trunkH 格云杉原木（id SpruceLog）
-//   从 surfaceY+1 起；顶部窄锥形树冠（普通树叶 id Leaves —— 不引独立 SpruceLeaves，复用 Leaves；变种由深色
-//   SpruceLog 主干 + 高窄锥形树冠形状区分）。树冠呈「底宽顶尖」锥形（贴近 MC 云杉针叶树冠）：自 trunkBase+1 起
-//   逐层向上，底层半径 2 渐收到顶尖半径 0；半径 2 的层四角按 leafRand 各位决定有无 → 每棵锥冠轮廓各异。
+//   从 surfaceY+1 起；顶部窄锥形树冠（**t714 起云杉针叶 id SpruceLeaves**（133，深蓝绿贴图 tile 175）——
+//   t714 前复用橡树叶 Leaves（用户「雪原树冠现在还是橡树叶」）；机制属性同 Leaves，衰减支撑同认 Log/
+//   SpruceLog）。树冠呈「底宽顶尖」锥形（贴近 MC 云杉针叶树冠）：自 trunkBase+1 起逐层向上，底层半径 2
+//   渐收到顶尖半径 0；半径 2 的层四角按 leafRand 各位决定有无 → 每棵锥冠轮廓各异。
 //   主干先置、树冠后置且仅写空气格 → 树冠绝不覆盖主干。纯由 seed 派生（leafRand，确定性 PLAN §2-K）。
 void World::placeSpruceTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand)
 {
@@ -3369,7 +3375,7 @@ void World::placeSpruceTreeAt(int x, int surfaceY, int z, int trunkH, quint32 le
         int radius;
         if (y == canopyTop) {
             // 顶尖单叶（锥顶）。
-            setVoxelIfAir(x, y, z, BlockRegistry::Leaves);
+            setVoxelIfAir(x, y, z, BlockRegistry::SpruceLeaves);
             continue;
         }
         // 上半径 1（锥上半收窄）、下半径 2（锥下半宽）。canopyH<=0 时统一半径 1（极矮云杉兜底）。
@@ -3383,7 +3389,7 @@ void World::placeSpruceTreeAt(int x, int surfaceY, int z, int trunkH, quint32 le
                     const unsigned bit = (dx > 0 ? 1u : 0u) + (dz > 0 ? 2u : 0u); // 0..3 → 四角各一位
                     if (!((leafRand >> bit) & 1u)) continue; // 该角本轮不生叶
                 }
-                setVoxelIfAir(x + dx, y, z + dz, BlockRegistry::Leaves);
+                setVoxelIfAir(x + dx, y, z + dz, BlockRegistry::SpruceLeaves);
             }
         }
     }
@@ -3523,6 +3529,15 @@ void World::placeTrees()
             //   皆被本守卫拦截。t395：Snowy 群系地表为 SnowLayer（覆雪）→ 云杉生于雪上（机制等价 MC 寒冷群系针叶树）。
             const quint8 surf = m_chunks.blockAt(x, surfaceY, z);
             if (surf != BlockRegistry::Grass && surf != BlockRegistry::SnowLayer) continue;
+            // t714 ①云杉树底须接泥土（用户「雪原云杉树底现悬空 / 长在细雪上」）：Snowy 列的 t526 地表结构为
+            //   Dirt(h-2)→Snow(h-1)→SnowLayer(h)——雪层只是薄覆雪非土壤。加「支撑块须实体」守卫：SnowLayer
+            //   顶列须其下一格（surfaceY-1）是 Snow（雪块过渡层）或 Dirt（过渡带泥顶）→ 雪层坐在实体上、树根
+            //   扎入真实地面。非此结构（洞口 / 峡谷边缘雪层下空气、湖缘浮雪）→ 不种（机制等价 MC 树需实体土壤）。
+            //   Grass 顶列（非雪原）本就坐在 Dirt 上 → 不查（守卫只对 Snowy 覆雪列生效）。
+            if (surf == BlockRegistry::SnowLayer) {
+                const quint8 under1 = surfaceY >= 1 ? m_chunks.blockAt(x, surfaceY - 1, z) : quint8(BlockRegistry::Air);
+                if (under1 != BlockRegistry::Snow && under1 != BlockRegistry::Dirt) continue; // 雪层悬空 → 不种（t714 ①）
+            }
 
             // t306/t395 群系分流密度：forest 密闭 / plains 稀疏 / hills 零星 / snowy 针叶林密植。
             const unsigned densityPct = (bio == Biome::Forest) ? unsigned(kForestTreePct)

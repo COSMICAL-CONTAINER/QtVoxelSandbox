@@ -1200,11 +1200,11 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
                 && brokenState >= BlockRegistry::WheatCropStageMax)
                 emit cropHarvested();
             dropCropDrops(x, y, z, brokenId, brokenState);
-        } else if (brokenId == BlockRegistry::Leaves) {
+        } else if (brokenId == BlockRegistry::Leaves || brokenId == BlockRegistry::SpruceLeaves) {
             // t305 玩家破叶 → 概率掉树苗物品 + 木棒（机制等价 MC 1.0 破叶 5% 树苗 / 2% 木棒）。Leaves.dropId=0
             //   （表兜底无自掉），本特例分支覆盖通用 drop 路径（同 WheatCrop/TallGrass/双半砖模式）。自然衰减
             //   （decayLeavesAround）不走此（无掉落）。brokenState 不影响叶掉落（无 state 派生 —— PersistentLeafBit
-            //   仅控衰减，破叶掉落同）。
+            //   仅控衰减，破叶掉落同）。t714：云杉叶同分流（同族叶机制，掉同一橡树树苗——本工程树苗仅橡树一种）。
             dropLeafDrops(x, y, z);
         } else if (brokenId == BlockRegistry::SnowLayer) {
             // t505 雪层铲挖掉雪球（机制等价 MC 1.0 snow layer 铲挖掉 (layer+1) 雪球；空手不掉落由 canHarvest
@@ -3296,10 +3296,11 @@ void PlayerController::placeBlock()
         //   随轴守恒写回）—— 故此处只需写初始轴偏好，无需预读邻居。
         const int hf = horizontalFacing() & 3; // 0=+X 1=-X 2=+Z 3=-Z（同 door/stairs 朝向编码）
         placeState = (hf < 2) ? BlockRegistry::RailAxisEWFlag : quint8(0);
-    } else if (m_selectedBlock == BlockRegistry::Leaves) {
+    } else if (m_selectedBlock == BlockRegistry::Leaves || m_selectedBlock == BlockRegistry::SpruceLeaves) {
         // t305 玩家放置的树叶标 PersistentLeafBit（持久，不参与自然衰减）—— 机制等价 MC 1.0「玩家放置的树叶
         //   不衰减」。worldgen 叶 state=0（衰减候选）；玩家叶 state=本 bit → decayLeavesAround 跳过 → 创造建筑
         //   用的悬空叶不被清。mesher / collision / 选中均不读 leaves state（ShapeFull + culled 立方面）→ 零回归。
+        //   t714：云杉叶同语义（同族叶机制）。
         placeState = BlockRegistry::PersistentLeafBit;
     }
     // t163(b) 同格双半砖合整（spec「同格下半砖上再放下半砖→合并为完整方块阻挡行走」）：

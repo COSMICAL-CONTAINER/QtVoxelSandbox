@@ -110,6 +110,9 @@ BLOCKS = [
     ("pack_ice",        "default_pack_ice",      "default_pack_ice"),        # t468/t495 浮冰（各面=淡蓝白压实冰+细裂纹+反光高光；非白羊毛）
     ("blue_ice",        "default_blue_ice",      "default_blue_ice"),        # t468 蓝冰（各面=淡蓝纵向纹路；最滑冰种）
     ("spruce_log",      "default_spruce_log_top", "default_spruce_log_side"), # t395 云杉原木（顶=年轮截面；侧=深棕树皮）
+    # t714 云杉树叶立方体图标：源 default_spruce_leaves（程序深蓝绿针叶 + 透明孔；load_face 填孔保证实心立方）。
+    #   机制等价 oak leaves icon_leaves 流程（顶 + 两侧明暗），色调深蓝绿 → 与橡树叶图标肉眼可辨。
+    ("spruce_leaves",   "default_spruce_leaves", "default_spruce_leaves"), # t714 云杉树叶（深蓝绿针叶）
     # t466 云杉木板立方体图标（深色木纹；机制等价橡木木板 icon_planks，仅贴图换 spruce_planks）。
     ("spruce_planks",   "default_spruce_planks", "default_spruce_planks"), # t466 云杉木板（各面同贴图=深色木板）
     ("obsidian",        "default_obsidian", "default_obsidian"),  # t472 黑曜石（各面同贴图=深紫黑火山玻璃；流体交互产物）
@@ -886,6 +889,21 @@ FROM_PACK = [
     # 门（两格高 3/16 薄板；上盒 upper / 下盒 lower —— 放置态 per-face bit3）。
     ("wood_door",   "door", dict(upper="door_wood_upper.png",   lower="door_wood_lower.png")),
     ("spruce_door", "door", dict(upper="door_spruce_upper.png", lower="door_spruce_lower.png")),
+    # t714 ④木半方块老图标重做（用户「木台阶/栅栏/楼梯等放置贴图对但图标旧」）：wood_slab / wood_stairs /
+    #   wood_fence 旧图标是 t163/t169 程序 default_wood（16px 木板）烘的 dimetric——pack 激活时世界放置走
+    #   HD oak_planks 而背包还是低清程序木纹 → 观感漂移。本段 partial 模式：pack oak_planks / spruce_planks
+    #   按 slab/stairs/fence 真实形状（render_partial_3d 同款子盒 + depth buffer）重烘 → 图标与放置贴图同源。
+    #   云杉门（spruce_door）上文已有 door 模式；云杉台阶/栅栏（spruce_slab/spruce_fence）同段接上。
+    ("wood_slab",     "partial", dict(fill="oak_planks.png",     shape="slab")),
+    ("wood_stairs",   "partial", dict(fill="oak_planks.png",     shape="stairs")),
+    ("wood_fence",    "partial", dict(fill="oak_planks.png",     shape="fence")),
+    ("spruce_slab",   "partial", dict(fill="spruce_planks.png",  shape="slab")),
+    ("spruce_fence",  "partial", dict(fill="spruce_planks.png",  shape="fence")),
+    # t714 ③叶图标同步（程序路径）：icon_leaves 旧版是 7/26 烘的旧绿立方；用当前 default_leaves /
+    #   default_spruce_leaves（透明孔被 fill 填实心）重烘 → 顶 + 两侧明暗色调与放置贴图一致（pack 激活时
+    #   进一步被 blockItemIconSource 的叶 tint 染色 2D 图覆盖）。
+    ("leaves",        "partial", dict(fill="oak_leaves.png",     shape="cube")),
+    ("spruce_leaves", "partial", dict(fill="spruce_leaves.png",  shape="cube")),
     # 压力板家族（t627 石/铁/金）：贴地 1/16 薄板。demo 包无 plate 专属 PNG（实测缺）→ 用放置
     #   态语义贴图：石板 = smooth_stone（MC 1.0 石压力板贴图即平滑石面）、铁/金 = 各金属块面
     #   （MC 1.0 加权压力板贴图 = 金属块面 + 中央孔，无孔面降级仍可辨材质）。
@@ -893,6 +911,32 @@ FROM_PACK = [
     ("iron_pressure_plate",  "plate", dict(fill="iron_block.png")),
     ("gold_pressure_plate",  "plate", dict(fill="gold_block.png")),
 ]
+
+
+def _partial_shape_boxes(shape):
+    """t714 partial 模式：shape 名 → 轴对齐子盒列表（与 render_partial_3d 同款形状定义，fill 换 pack 贴图）。
+    cube = 满立方（叶子图标路径：pack 灰度叶由 caller 乘 tint 后投影）。"""
+    if shape == "cube":
+        return [(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)]
+    if shape == "slab":
+        return [(0.0, 1.0, 0.0, 0.5, 0.0, 1.0)]
+    if shape == "stairs":
+        return [(0.0, 1.0, 0.5, 1.0, 0.0, 0.5),   # 背墙
+                (0.0, 1.0, 0.0, 0.5, 0.0, 1.0)]  # 整步
+    if shape == "fence":
+        return [(6.0 / 16.0, 10.0 / 16.0, 0.0, 1.0, 6.0 / 16.0, 10.0 / 16.0),  # 立柱
+                (0.0, 1.0, 12.0 / 16.0, 15.0 / 16.0, 6.0 / 16.0, 10.0 / 16.0),  # 上横档
+                (0.0, 1.0,  5.0 / 16.0,  8.0 / 16.0, 6.0 / 16.0, 10.0 / 16.0)]  # 下横档
+    raise ValueError(f"unknown partial shape {shape}")
+
+
+def _partial_y_mid(shape):
+    """partial 模式竖直居中的 y_mid（与 render_partial_3d scale==1 同式；单盒形状直接 (y0+y1)/2）。"""
+    if shape == "cube":
+        return 0.5
+    if shape == "slab":
+        return 0.25
+    return 0.5  # stairs / fence（多盒取整体包络中点，同 render_partial_3d）
 
 
 def run_from_pack():
@@ -963,6 +1007,24 @@ def run_from_pack():
                                         1.0 / 16.0, 15.0 / 16.0)],
                                       fill, fill,
                                       cy_local=W / 2.0 - (1.0 - 1.0 / 32.0) * v)
+            elif mode == "partial":
+                # t714 ④/③ 木半方块 + 叶图标重做：pack fill 贴图按 slab/stairs/fence/cube 真实形状投影
+                #   （render_pack_box 子盒 + depth buffer，同 render_partial_3d 几何但贴图源换 pack）。
+                #   竖直居中：y_mid 公式（cube y_mid=0.5 / slab 0.25 / stairs 0.5 / fence 0.5 —— 与
+                #   render_partial_3d scale==1 同式）。灰度叶贴图（oak/spruce_leaves）乘叶 tint（与
+                #   resourcepackmanager tileTint 同色板）→ 图标色调 = pack 激活时的放置观感。
+                boxes = _partial_shape_boxes(spec["shape"])
+                fill = load_pack_face(spec["fill"])
+                tint = None
+                if spec["fill"] in ("oak_leaves.png", "spruce_leaves.png"):
+                    tint = ((0x5a, 0x8a, 0x3a) if spec["fill"] == "oak_leaves.png"
+                            else (0x3a, 0x6e, 0x55))  # 叶 tint（plains / 云杉深蓝绿；同 tileTint）
+                if tint is not None:
+                    t = np.array(tint, dtype=np.float64) / 255.0
+                    fill[..., 0:3] = (fill[..., 0:3] * t).clip(0, 255)  # 灰度 × tint（alpha 不动）
+                y_mid = _partial_y_mid(spec["shape"])
+                img = render_pack_box(boxes, fill, fill,
+                                      cy_local=W / 2.0 - (1.0 - y_mid) * v)
             else:
                 print("SKIP (unknown mode)", name)
                 continue

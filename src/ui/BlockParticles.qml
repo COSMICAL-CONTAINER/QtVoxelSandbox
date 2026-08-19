@@ -364,6 +364,29 @@ Node {
             case 112: return "#6b4f2a" // lever（杠杆，木质底座棕）
             case 113: return "#6b4f2a" // wood_button（木按钮，棕）
             case 114: return "#8a8a8a" // stone_button（石按钮，灰）
+            // ── 红石族 + 末地门面/怪物蛋（id 115..132）──（115 棕蘑菇 / 116 红石矿 / 117 投掷器 / 118..120
+            //   煤·青金·钻石存储块 / 122 红石块 / 123 红石灯 / 124..126 石·铁·金压力板 / 127/128 金·探测轨 /
+            //   129 红石火把 / 130 红石粉 / 131 门面 / 132 怪物蛋）
+            case 115: return "#a8845a" // brown_mushroom（棕蘑菇，棕菌盖）
+            case 116: return "#a83838" // redstone_ore（红石矿石，红石斑）
+            case 117: return "#8a8a8a" // dropper（投掷器，石灰）
+            case 118: return "#2a2a2a" // coal_block（煤炭块，近黑）
+            case 119: return "#2a4ac0" // lapis_block（青金石块，群青蓝）
+            case 120: return "#5ad8d8" // diamond_block（钻石块，青白）
+            case 121: return "#e8c84a" // gold_block（金块，金黄）
+            case 122: return "#8a3030" // redstone_block（红石块，暗红）
+            case 123: return "#d8b878" // redstone_lamp（红石灯 off，暗黄褐）
+            case 124: return "#8a8a8a" // stone_pressure_plate（石压力板，石灰）
+            case 125: return "#c8c8c8" // iron_pressure_plate（铁压力板，金属浅灰）
+            case 126: return "#e8c84a" // gold_pressure_plate（金压力板，金黄）
+            case 127: return "#d8b048" // golden_rail（动力铁轨，金轨）
+            case 128: return "#8a8a8a" // detector_rail（探测铁轨，铁灰）
+            case 129: return "#a83838" // redstone_torch（红石火把，红焰头）
+            case 130: return "#a83838" // redstone_dust（红石粉导线，红粉）
+            case 131: return "#1a0a2a" // end_portal_surface（末地门面，深紫黑星空）
+            case 132: return "#7a7a7a" // monster_egg（怪物蛋，石砖灰；外表即石砖）
+            // ── 云杉树叶（id 133）── t714 雪原云杉树冠针叶（深蓝绿）
+            case 133: return "#3a6e55" // spruce_leaves（云杉树叶，深蓝绿针叶）
             default: return "#ffffff" // 未来新方块兜底（显白便于察觉缺色并补表）
         }
     }

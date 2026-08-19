@@ -654,6 +654,12 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   掉落——生成虫替代，机制等价 MC「怪物蛋没有掉落，只有蠹虫」）、maxStack=64。音色 GroupStone。
     //   worldgen placeStronghold 确定性散布（hashVoxel，同 seed 同分布）。进创造调色板。
     /* monster_egg    */ {int(BlockRegistry::MonsterEgg),       128,128,128,128, true,  BlockRegistry::ShapeFull,     0.0f, int(BlockRegistry::NoTool),   0, false,                               0, 0, 64, "monster_egg",  "怪物蛋"},
+    // ── t714 云杉树叶（SpruceLeaves；机制等价 MC 1.0 spruce leaves，1.0 以 log metadata 分变种、本工程独立
+    //   id 与 SpruceLog(46) 同族）：雪原/针叶群系云杉树冠针叶。属性全同 Leaves(7)（solid=true / ShapeFull
+    //   整立方 culled 立方面路径、hardness=0.2、NoTool、dropId=0 —— 破叶掉树苗/木棒由 dropLeafDrops 概率
+    //   分流、maxStack=64），仅贴图换 tile 175（深蓝绿针叶，区别橡树叶亮绿）。衰减（decayLeavesAround 同认
+    //   Log/SpruceLog 支撑）/ 玩家放置持久位（PersistentLeafBit）/ 焚毁（isWoodLike）均同 Leaves。
+    /* spruce_leaves  */ {int(BlockRegistry::SpruceLeaves),     175,175,175,175, true,  BlockRegistry::ShapeFull,     0.2f, int(BlockRegistry::NoTool),   0, false,                               0, 0, 64, "spruce_leaves", "云杉树叶"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -808,6 +814,8 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* monster_egg             */ 97,  // t665 石砖伪装怪物蛋 → MC 1.0 stone monster egg id 97（要塞银鱼蛋）。t691：本行
                                        //   原与上行尾注释同线（写在 `//` 之后）→ 初始化器条目被注释吞掉、数组项静默零填充
                                        //   为 0（= air）——static_assert 只核维度不核条数，不报。拆行成真实条目。
+    /* spruce_leaves           */ -1,  // t714 云杉树叶 → MC 1.0 无独立 id（1.0 仅橡木 leaves id 18，云杉叶 1.7+ 以
+                                       //   log/leaves metadata 分变种；本工程独立 id 故无 1.0 等价，同 spruce_log 行）
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1975,6 +1983,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Snow: // t482 雪块 → 颗粒雪响（同积雪层；雪傀儡身体材质）
         return GroupSand;
     case Leaves:
+    case SpruceLeaves: // t714 云杉树叶 → 叶音色（同橡树叶）
         return GroupLeaves;
     default:
         return GroupDefault; // air / torch / water / 越界 / 未知 → 兜底（AudioManager 复用 Stone 音色）

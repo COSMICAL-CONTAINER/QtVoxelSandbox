@@ -20,6 +20,7 @@ t466 云杉木制品链：在原木基础上延伸出云杉木板（SprucePlanks
   default_spruce_log_top.png   （tile 59，云杉原木顶面 / 底面）
   default_spruce_log_side.png  （tile 60，云杉原木侧面）
   default_spruce_planks.png    （tile 102，云杉木板 / 台阶 / 栅栏 / 门 共享贴图）
+  default_spruce_leaves.png    （tile 175，云杉树叶各面；t714 雪原云杉树冠针叶）
 
 依赖：仅 PIL/numpy，无外部贴图。与 build_sandstone.py / build_cactus.py 同风格（程序生成原创像素图）。
 """
@@ -127,6 +128,50 @@ def draw_planks():
     return c
 
 
+def draw_leaves():
+    """t714 云杉树叶：深蓝绿针叶底 + 噪点 + 针簇放射短线 + 部分透明孔（cutout 观感）。
+
+    结构对标 default_leaves.png（oak 48×48：深绿底 + 噪点 + ~22% 透明簇孔 → mesher cutout 半镂空叶冠），
+    但色调换「深冷蓝绿」（云杉针叶特征 —— MC spruce leaves 相对 oak 更暗更蓝），加斜向针簇短线（针叶
+    读感，区别阔叶的团状）。透明孔 ~20%（略少于 oak 的 22% → 云杉冠观感更密实，贴合针叶树密冠）。
+    """
+    TS2 = 48  # 与 oak leaves 同分辨率（default_leaves.png 是 48×48）
+    c = np.zeros((TS2, TS2, 4), dtype=np.float64)
+    # 深蓝绿针叶底（区别 oak 的亮绿 #069040 量级；云杉 = 更暗更蓝的 #0e4f3c 量级）。
+    base = np.array([14.0, 74.0, 56.0])
+    c[..., 0] = base[0]
+    c[..., 1] = base[1]
+    c[..., 2] = base[2]
+    c[..., 3] = 255.0
+    # 细密噪点（叶簇明暗颗粒；两档：暗针影 + 亮针高光）。
+    rng2 = np.random.RandomState(7141)
+    dark = np.array([8.0, 52.0, 38.0])
+    lite = np.array([26.0, 104.0, 76.0])
+    m_d = rng2.random((TS2, TS2)) < 0.24
+    c[m_d, 0:3] = dark
+    m_l = rng2.random((TS2, TS2)) < 0.12
+    c[m_l, 0:3] = lite
+    # 斜向针簇短线（~45° 短笔触 → 针叶放射读感；区别 oak 团状纹理）。每条线 4-6 像素、沿 (+1,-1) 方向。
+    for _ in range(130):
+        x0 = int(rng2.randint(0, TS2 - 8))
+        y0 = int(rng2.randint(4, TS2))
+        ln = int(rng2.randint(4, 7))
+        shade = lite if rng2.random() < 0.45 else dark
+        for t in range(ln):
+            x = x0 + t
+            y = y0 - t
+            if 0 <= x < TS2 and 0 <= y < TS2:
+                c[y, x, 0:3] = shade
+    # 透明孔（簇状 ~20%）：随机种子点 + 2×2 / 3×2 小簇 → cutout 半镂空叶冠（同 oak leaves 语义）。
+    for _ in range(58):
+        x0 = int(rng2.randint(0, TS2 - 3))
+        y0 = int(rng2.randint(0, TS2 - 3))
+        w = 2 + int(rng2.randint(0, 2))
+        h = 2
+        c[y0:y0 + h, x0:x0 + w, 3] = 0.0
+    return c
+
+
 def save(arr, name):
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA")
     out = os.path.join(SRC, name + ".png")
@@ -138,6 +183,7 @@ def main():
     save(draw_top(), "default_spruce_log_top")
     save(draw_side(), "default_spruce_log_side")
     save(draw_planks(), "default_spruce_planks")  # t466 云杉木板（一族木制品共享 tile 102）
+    save(draw_leaves(), "default_spruce_leaves")  # t714 云杉树叶（tile 175，雪原云杉树冠针叶）
 
 
 if __name__ == "__main__":

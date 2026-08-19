@@ -397,6 +397,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_spruce_log_top.png       # t395 云杉原木顶/底面贴图（build_spruce.py；深棕同心年轮截面）
         textures/default_spruce_log_side.png      # t395 云杉原木侧面贴图（build_spruce.py；深棕垂直树皮条带）
         textures/default_spruce_planks.png        # t466 云杉木板贴图（build_spruce.py；深色木纹；SprucePlanks/Slab/Fence/Door 共享 tile 102）
+        textures/default_spruce_leaves.png        # t714 云杉树叶贴图（build_spruce.py；深蓝绿针叶+透明孔；SpruceLeaves tile 175）
         textures/default_lily_pad.png             # t396 睡莲浮叶贴图（build_lily_pad.py；透明底+绿圆叶+V缺口；alphaCutoff cutout）
         textures/default_mushroom.png             # t396 蘑菇 cross 贴图（build_mushroom.py；透明底+米色菌柄+红底白斑菌盖；alphaCutoff cutout）
         textures/default_brown_mushroom.png       # t507 白蘑菇 / 棕蘑菇 cross 贴图（build_brown_mushroom.py；透明底+米色菌柄+棕色菌盖浅黄褐斑；alphaCutoff cutout；蘑菇汤原料）
@@ -549,6 +550,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_pack_ice.png                 # t468 浮冰立方体图标（各面=实白细裂纹；build_cube_icons.py）
         textures/icon_blue_ice.png                 # t468 蓝冰立方体图标（各面=淡蓝纵向纹路；build_cube_icons.py）
         textures/icon_spruce_log.png               # t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮；build_cube_icons.py）
+        textures/icon_spruce_leaves.png            # t714 云杉树叶立方体图标（--from-pack：pack spruce_leaves × 云杉深蓝绿 tint）
         textures/icon_spruce_planks.png            # t466 云杉木板立方体图标（各面=深色木纹；build_cube_icons.py）
         textures/icon_spruce_slab.png              # t466 云杉台阶 3D 立体图标（半高盒深色木纹；build_cube_icons.py）
         textures/icon_spruce_fence.png             # t466 云杉栅栏 3D 立体图标（立柱+横档深色木纹；build_cube_icons.py）

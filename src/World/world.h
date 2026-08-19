@@ -651,9 +651,12 @@ private:
     // 单棵树：主干 trunkH 格 + 树冠。leafRand = 该列哈希的高位，驱动树冠四角叶的有无 → 每棵树冠轮廓
     // 各异（贴近 MC 橡树自然参差）。纯由 seed 派生（确定性，PLAN §2-K）。
     void placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
-    // t395 单棵云杉（变种树）：主干 trunkH 格云杉原木（id SpruceLog）+ 顶部窄锥形树冠（普通树叶 id Leaves）。
+    // t395 单棵云杉（变种树）：主干 trunkH 格云杉原木（id SpruceLog）+ 顶部窄锥形树冠（**t714 起云杉针叶
+    //   id SpruceLeaves(133)**，深蓝绿贴图 tile 175 —— 此前复用橡树叶 Leaves；机制属性同 Leaves：衰减支撑
+    //   同认 Log/SpruceLog、玩家放置持久位、破坏掉树苗/木棒）。
     //   机制等价 MC 1.0 云杉（spruce）—— 比 oak 更高更窄、树冠呈收尖锥形（底层半径 2 渐收到顶尖半径 0）。
-    //   worldgen placeTrees 在 Snowy 群系改种本变种（区别于橡树：深色云杉主干 + 高窄锥形树冠）。仅写空气格
+    //   worldgen placeTrees 在 Snowy 群系改种本变种（区别于橡树：深色云杉主干 + 高窄锥形树冠；t714 ①加
+    //   「雪层下须实体支撑」守卫——SnowLayer 下须 Snow/Dirt，洞口/峡谷边缘悬空雪上不种）。仅写空气格
     //   （setVoxelIfAir）→ 不覆盖主干 / 地形。纯由 seed 派生（leafRand 驱动锥层四角叶有无，确定性 PLAN §2-K）。
     void placeSpruceTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
     // t481/t486 前置 丛林树散布（PLAN §2-K 确定性）：遍历 Jungle 群系列，按 hashColumn(seed,x,z) 密度筛选 +

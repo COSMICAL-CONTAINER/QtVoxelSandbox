@@ -906,7 +906,17 @@ public:
         //   worldgen placeStronghold 散布于图书馆书架区 / 传送门房走廊（hashVoxel 确定性，同 seed 同分布）。
         //   进创造调色板（玩家可自建「看似石砖实为虫巢」的陷阱建筑；破坏即出虫）。
         MonsterEgg      = 132, // 怪物蛋（石砖形）：外表同石砖；瞬破生成蠹虫敌对 mob（机制等价 MC silverfish stone）
-        Count           = 133, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t714 云杉树叶（SpruceLeaves；机制等价 MC 1.0 spruce leaves —— 1.0 以 metadata 分变种，本工程独立
+        //   id 与 SpruceLog(46)/SprucePlanks(86) 同族）：雪原/针叶群系云杉树的树冠叶（worldgen
+        //   placeSpruceTreeAt 在 Snowy 群系种的锥形树冠用本 id，t714 前误用橡树叶 Leaves）。与 Leaves(7)
+        //   同机制同属性（solid=true / ShapeFull 整立方走 culled 立方面路径、hardness=0.2、NoTool、
+        //   dropId=0 —— 破叶掉树苗/木棒由 playercontroller dropLeafDrops 概率分流、maxStack=64），
+        //   仅贴图换深蓝绿针叶（tile 175 spruce_leaves，区别橡树叶的亮绿阔叶）。**衰减**：decayLeavesAround /
+        //   tickLeafDecay 的原木支撑判定同认 Log 与 SpruceLog（叶距任一原木 ≤4 格不衰）；玩家放置持久位
+        //   （PersistentLeafBit state bit0）同 Leaves。**焚毁**：isWoodLike（邻岩浆/雷击）同 Leaves 归木质。
+        //   音色归 GroupLeaves（同橡树叶）。进创造调色板（云杉树建筑取用；玩家放置自动带持久位）。
+        SpruceLeaves   = 133, // 云杉树叶：雪原云杉树冠针叶（深蓝绿）；同 Leaves 机制（衰减/掉落/持久位）
+        Count           = 134, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1515,7 +1525,10 @@ public:
     //       171=dust_line_lvl1（弱电线向）、172=dust_line_lvl2（半亮线向）、173=dust_dot_lvl1、174=dust_dot_lvl2。
     //       mesher 据粉 state 低 4 位电力级选档：0→off(166/167)、1-5→lvl1、6-10→lvl2、11-15→on(168/169)。
     //       tools/build_redstone_dust.py 程序生成（4 视觉档）。
-    static constexpr int AtlasTileCount = 175;
+    //   t714：175=spruce_leaves（云杉树叶各面贴图；SpruceLeaves(133) 各面=本 tile）。深蓝绿针叶底 + 噪点 +
+    //       针簇放射纹 + 部分透明孔（cutout 观感同 oak leaves(9)，色调更深冷蓝绿区别亮绿阔叶）；
+    //       tools/build_spruce.py 程序生成（§9 override (a)；零 MC 资产）。pack {175→spruce_leaves.png}。
+    static constexpr int AtlasTileCount = 176;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、
