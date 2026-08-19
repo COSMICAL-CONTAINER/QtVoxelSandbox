@@ -2764,3 +2764,44 @@ t680-t716（37 项）。**严格顺序：t680-t692 审查修复（H 先）→ t6
 
 
 
+
+---
+
+# R19.10（实体大扩充批：盔甲 3D / 画作 / 铁门铁活板门 / 末影之眼与末影人 / 烈焰人 / 火焰与下界门 / 鱿鱼与皮肤贴图）
+
+> 背景：R19.9 全 37 项完成后用户跳过 review 直接追加新一批。素材均为 docs/Default HD 128x Demo 1.8.2.2/（本地只读参考，红线不变：**禁止拷贝 PNG 进 git/qrc/build**；一切新贴图走 tools/build_*.py 程序自绘，pack 运行期映射除外）。
+> 命名映射（PLAN §9，代码/UI 用左侧原创名，本文件可注 MC 等价名）：末影人=**夜行者 Nightwalker**（MobNightwalker=16）、烈焰人=**燃烬者 Emberling**（MobEmberling=17）、末影珍珠=**暗渊珠**、末影之眼=**暗渊之眼**、烈焰粉=**燃烬粉**、下界传送门=**余烬门**、末地要塞=暗渊要塞（沿用 Stronghold）。
+
+### 🅰 贴图补缺（先行，其余任务依赖）
+**t717** 生成器批：tools/build_armor_layers.py（armor layer_1/2 三方五档参考构图原创自绘：皮/铁/金/钻/链）+ build_paintings.py（27 张程序自绘，尺寸 16/32/64 系列）+ build_doors_iron.py（铁门上/下 + 铁活板门自绘）+ build_entity_*.py（夜行者体/眼、燃烬者、鱿鱼、矿车、书、皮肤 steve/alex 程序贴图）。全部产 textures/*.png + build_atlas.py 清单登记（AtlasTileCount 右移）。pack 运行期映射 tileFilenameMap 登记（armor/painting/entity 路径，pack 启用时覆盖）。
+
+### 🅱 装备 3D（armor layer 渲染）
+**t718** 盔甲穿戴 3D 显示：玩家模型（Main.qml playerModel）+ 生物模型（MobModel）按已穿护甲件叠加 layer_1（身/腿）+ layer_2（靴/头盔）薄壳盒体（partial 风格盒子几何，UV 按 layer 贴图布局自
+拼——与生物贴图同“自拼装”模式）。护甲段图标/背包已有（0x300 段），只做 3D 显示层。
+**t719** 生物穿甲同步（mob 穿戴显示）：MobModel 支持按 entity armor 字段叠加同款 layer 盒体（先接 Zombie/Shambler 可穿拾取的甲——若 mob 拾取装备体系未实现则本项降级为「玩家+人形 mob 通用 layer 渲染器」+ TODO 注释）。
+
+### 🅲 画作系统
+**t720** 画作物品 + 墙面尺寸检测放置：PaintingId（item 段）；右键墙：对命中墙面测最大可用矩形（横竖逐行/列扫空墙面），随机选一张尺寸 ≤ 可用矩形的画作，放不下则 no-op（物品不消耗）。画作为新 partial 方块（Painting，薄板贴墙，state 编码画 index + 朝向）；27 张贴图 pack 运行期映射（pack 挂 painting/ 目录逐张映射，miss 回退程序图）。
+**t721** 画作破坏与掉落：挖画掉 PaintingId 掉落物；画下墙破/支撑墙破 → 画掉落（挂 blockBroken 链）。多方块画（2×2 以上）存档 state 编码 (index, w, h, 朝向)。
+
+### 🅳 铁门与铁活板门
+**t722** 铁门：IronDoor 方块（上/下两格放置同木门先例 t674/t620；pack 贴图 door_iron_upper/lower 运行期映射；侧边用铁块贴图同木门用木板先例）；**不能徒手开门**（右键无反应），仅红石信号开（邻格通电 → 开；断电 → 关）。配方：6 铁锭 → 铁门。
+**t723** 铁活板门：IronTrapdoor 方块（同 WoodTrapdoor 几何先例；iron_trapdoor.png 映射）；仅红石驱动开/关。配方：6 铁锭 → 铁活板门（? 核 MC 1.0=6 铁锭 摆 3×2）。
+
+### 🅴 火焰与下界门（余烬门）
+**t724** 火焰方块系统 v1：解析 fire_0/1 + fire_layer_0/1 strip（16px 帧 ×32，mcmeta frames 数组已实测 [16..23] 段与 [8..15,0..7] 段）→ 运行期抽帧动画（复用水/岩浆 strip 抽帧管线 extractAnimFrames 先例）；Fire 方块（cross 几何 + cutout + 动画贴图）；打火石点燃：FlintAndSteelId（item，pack flint_and_steel.png 映射，配方燧石+铁锭——本工程燧石=打火石矿? 无则配方=圆石+铁锭 本地化，dev-plan 注明）；点燃：对方块顶/侧面放火。燃烧蔓延：木头制品持续燃烧（相邻木方块随机概率起火→烧毁消失）；烧掉落物/经验球；生物进火格 → 着火效果扣血（接 t715 效果框架 Fire）；**羊/猪/牛着火状态死去掉熟食**（熟猪排/熟羊排/熟牛排——查 loottable 已有 cooked 变体则直接换，没有则加）。
+**t725** 余烬门（下界传送门）：黑曜石框（最小 2 宽×3 高内圈）+ 打火石点燃内底 → 门方块（NetherPortal，动画贴图 nether_portal.png strip 映射，无程序回退则自绘紫漩涡）+ mcmeta 解析；点燃判定：黑曜石框内圈检测（X 或 Z 向平面，内圈 2×3）；门内持续燃烧不熄（不依赖火）；破坏任一框石 → 门碎。进门的玩家传送（v1 可 stub 为挡+灼伤，dev-plan 注明降级——MC 1.0 下界维度不在本期）。
+
+### 🅵 末影之眼链（暗渊之眼）
+**t726** 暗渊珠 + 燃烬粉 + 暗渊之眼物品与配方：暗渊珠（夜行者掉落，见 t727）+ 燃烬粉（燃烬者掉落燃烬棒 ×4 粉，见 t728）合成暗渊之眼（珠+粉 无序? MC=珠+粉 shapeless）。item 贴图 pack 映射（ender_pearl/blaze_powder/ender_eye）+ 程序回退。
+**t727** 夜行者实体（MobNightwalker=16）：三格高（halfH≈1.4）、夜间生成（黑暗刷怪规则同 shambler、地表生成）、贴图 enderman.png+eyes 自拼模型（长臂长腿人形，眼睛独立发光层）；**怕水**：碰水扣血+瞬移逃离；**瞪视激怒**：玩家视线与夜行者面向对视数秒 → 激怒（头嘴张开+头/身体颤抖动画 QML）；激怒后瞬移到玩家背后等 0.5s 攻击；**弹射物免疫**（鸡蛋/雪球/箭/鱼钩命中前瞬移闪避——投射物命中检测跳过本实体+瞬移特效）；近战命中有概率触发瞬移；掉暗渊珠。怪物蛋 + 资源查看器图标（spawn_egg 程序色变体，同既有 mob 蛋先例）。
+**t728** 燃烬者实体（MobEmberling=17）：单头+竖棒环绕旋转（QML 动画旋转棒组）；发射火球投射物（fire_charge 贴图，抛射物砸玩家 → 伤害+着火）；夜间/下界? 本期仅夜间地表生成概率较低；掉燃烬棒。怪物蛋 + 资源查看器图标。
+**t729** 暗渊之眼实体：右键扔出 → 实体飞向最近 Stronghold 传送门（placeStronghold 位置已知）方向，飞行若干秒后：80% 变掉落物、20% 碎掉（碎裂粒子无掉落物）。实体贴图同 item（自绘/映射）。指引半径限制（飞离玩家 ~24 格后判定）。
+
+### 🅶 鱿鱼、皮肤、杂项贴图
+**t730** 鱿鱼贴图接入：MobSquid=9 已有 AI（t399 喷水推进）但贴图占位——squid.png 自拼 3D 模型（头+8 触腕盒体组）+ 怪物蛋 + 资源查看器图标。
+**t731** 玩家皮肤：steve.png/alex.png 运行期映射（playerModel 第三人称贴图，程序回退=现纯色）；皮肤选择（设置或 /skin 命令 v1）。
+**t732** 矿车 + 附魔书 3D 贴图接入：minecart.png（矿车斗形重贴图，替换程序纯色）+ enchanting_table_book.png（附魔台悬浮书重贴图，替换 t679 程序书模型贴图）。
+
+### 📎 R19.10 范围与顺序
+t717-t732（16 项）。**严格顺序：t717 贴图批 → t718-t719 盔甲 3D → t720-t721 画作 → t722-t723 铁门/活板门 → t724-t725 火焰/余烬门 → t726-t729 暗渊链 → t730-t732 贴图收尾**。每项独立 commit + dev-plan ✅✅。全部完成后 code review + 统计报告。
