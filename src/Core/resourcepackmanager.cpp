@@ -57,10 +57,11 @@ struct BuiltState {
     QString paintingDir;          // t717 包内画作目录（assets/minecraft/textures/painting）绝对路径；paintingSource 逐 index 探测（t720 画作方块 pack 覆盖）
     QString armorDir;             // t717 包内盔甲 layer 目录（assets/minecraft/textures/models/armor）绝对路径；armorLayerSource 探测（t718 盔甲 3D 显示 pack 覆盖）
     // t489 流体条带落盘路径（active 时 file:///）；waterStrip = 2 列×32 帧（静水|流水），lavaStrip = 1 列×16 帧，
-    //   fireStrip = 1 列×32 帧（t724 火焰翻书）。
+    //   fireStrip = 1 列×32 帧（t724 火焰翻书），portalStrip = 1 列×32 帧（t725 余烬门翻书）。
     QString waterStripFile;
     QString lavaStripFile;
     QString fireStripFile;
+    QString portalStripFile;
     // t496 二轮复盘 床 16 色 item 图标染色缓存：bedId→落盘的染色后 bed 图标 file:// 路径。bed.png 是红床模板，
     //   每床色首次查询时按目标色重染（retintBedTemplate）落盘 voxelsandbox_rp_bed_<id>.png，后续命中直接返。
     //   apply() 重建时清空（pack 切换 / 重解析）；随 atlasFile 同目录写（AppLocalDataLocation，已 mkpath）。
@@ -1639,6 +1640,7 @@ void ensureBuiltLocked()
     s.waterStripFile.clear(); // t489 reset 流体条带落盘路径（仅当包合法时重填）
     s.lavaStripFile.clear();
     s.fireStripFile.clear(); // t724 reset 火焰条带落盘路径（仅当包合法时重填）
+    s.portalStripFile.clear(); // t725 reset 余烬门条带落盘路径（仅当包合法时重填）
     s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
     s.leatherIconFiles.clear(); // R19 B1 reset 皮革护甲染色图标缓存（pack 切换 / 重解析 → 重染）
     s.copperIconFiles.clear();  // t588 reset 铜物品染色图标缓存（pack 切换 / 重解析 → 重染）
@@ -1915,6 +1917,13 @@ void ensureBuiltLocked()
             1, BlockRegistry::kFireStripFrames,
             { {0, QStringLiteral("fire_0.png")} },
             QStringLiteral("voxelsandbox_fire_strip.png"));
+    // t725 余烬门条带：包内 nether_portal.png（MC 动画贴图单列竖排 strip；demo 包实测 16×512 = 32 帧现成）→
+    //   以 qrc 程序生成余烬门条带为底、包内帧覆盖 → 落盘 voxelsandbox_portal_strip.png。
+    s.portalStripFile = buildFluidStrip(
+            blockDir, QStringLiteral(":/textures/portal_strip.png"),
+            1, BlockRegistry::kNetherPortalStripFrames,
+            { {0, QStringLiteral("nether_portal.png")} },
+            QStringLiteral("voxelsandbox_portal_strip.png"));
 
     // review D3-b 图鉴生物头像预生成（t633 修 GUI 卡顿）：mobHeadIconSource 此前把「PNG 解码 + 裁剪 +
     //   落盘」留在 QML 绑定求值里（ResourceBrowser 生物格 delegate 的 headSrc 属性 —— GUI 线程同步磁盘
@@ -2046,6 +2055,18 @@ QString ResourcePackManager::fireStripSource() const
     QMutexLocker lock(&stateMutex());
     const QString &f = state().fireStripFile;
     return f.isEmpty() ? QStringLiteral("qrc:/textures/fire_strip.png")
+                       : QStringLiteral("file:///") + f;
+}
+
+// t725 余烬门条带贴图源（同 fire 模式）：portalHost delegate 的竖直平面 quad 共享此 Texture 做
+//   scaleV/positionV 翻书。active 且落盘成功 → file:///；否则 qrc 程序生成条带。
+QString ResourcePackManager::portalStripSource() const
+{
+    if (!m_active)
+        return QStringLiteral("qrc:/textures/portal_strip.png");
+    QMutexLocker lock(&stateMutex());
+    const QString &f = state().portalStripFile;
+    return f.isEmpty() ? QStringLiteral("qrc:/textures/portal_strip.png")
                        : QStringLiteral("file:///") + f;
 }
 

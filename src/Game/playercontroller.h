@@ -962,6 +962,25 @@ private:
     //   机制等价 MC「画后面的墙被挖 → 画掉落」。同 dropUnsupportedTorchesAround 模式（仅扫 4 水平
     //   邻——画的支撑墙恒在水平向；画不撑他画 → 单趟扫足够无级联）。
     void dropUnsupportedPaintingsAround(int x, int y, int z);
+    // t725 余烬门点燃检测（placeBlock 打火石分支调；机制等价 MC 1.0 nether portal frame 检测，v1 仅
+    //   支持**最小 2×3 门**）：从点燃格 (ix,iy,iz)（黑曜石门框内腔空气格）出发，X 平面 / Z 平面各试一次：
+    //   ① 自点燃格向下走（≤2 步）找黑曜石底梁；② 门内腔 2 宽——两根内柱（点燃列 + 其 ±u 邻列，先试 +u
+    //   再试 -u）底梁上连续 3 格须全 Air；③ 两内柱顶上方须黑曜石顶梁；④ 两内柱外侧各 1 根黑曜石边柱
+    //   高 3（内腔两翼）。全命中 → 6 格 setBlock(NetherPortal, axis)（axis=0 X 平面 / 1 Z 平面，即门面
+    //   展开轴），返回 true；任一不中 → false（caller 回退普通 Fire 点燃）。纯 Game/Physics（读 World +
+    //   写 World），不改栅格语义。
+    bool tryIgniteNetherPortal(int ix, int iy, int iz);
+    // t725 余烬门连通域熄灭（finishMiningAt 直挖门格 + 破门框黑曜石连锁共用）：从 (px,py,pz)（门格之一，
+    //   可能已被清 Air）按 axis flood-fill 收集整扇门的格子集（±u 门展开轴水平 / ±Y 垂直同 axis 的
+    //   NetherPortal 格）→ 全部 setWaterSilent 清 Air（静默：同 removePaintingAt 模式——多格逐格
+    //   blockBroken 会刷粒子/音风暴；主破坏格由 caller 走 setBlock 已清 + 已发一次事件）。门无物品
+    //   形态（dropId=0）→ 无掉落。
+    void removeNetherPortalAt(int px, int py, int pz, int axis);
+    // t725 余烬门门框失撑熄灭：破块后扫 6 邻的 NetherPortal，各自经连通域熄灭整扇门。机制等价 MC「黑曜
+    //   石门框任一格被破坏 → 传送门失效消失」。门格只与门框格（黑曜石）和门格（NetherPortal）相邻 →
+    //   破任一门框格即断结构；恒熄（含创造，结构后果非掉落，同叶衰 drop 无关语义）。removeNetherPortalAt
+    //   内部对已清格有 blockAt 守卫 → 多邻门格重复触发幂等（第二次 BFS 空域直接返回）。
+    void breakNetherPortalsAround(int x, int y, int z);
     // t242 攻击 mob（spec「玩家左键攻击生物」）：damageEntity(entityIndex, dmg) + swingArm +
     //   emit mobAttacked。t265 伤害改走 ToolRegistry::attackDamage(手持物)（剑木4/石5/铁6、空手/工具=1 HP）。
     //   由 beginMining 在 mob 优先于方块时调。mob 由 caller 选定（findMobHit 已返最近活体索引）。
@@ -1213,6 +1232,10 @@ private:
     bool m_burning = false;
     float m_fireTimer = 0.0f;
     float m_fireDmgTimer = 0.0f;
+    // t725 余烬门站入灼烧累积（独立于 m_fireDmgTimer——那是 t344 随机熄灭路径；门伤须稳定 1HP/s 不掺
+    //   随机熄灭，同 t351「稳定扣血」教训）：脚位 / 眼位格任一 == NetherPortal 时累 dt，每满 1s 扣 1HP；
+    //   离开门格归零。仅 Survival（非 Survival 清零，同火段 else 分支）。
+    float m_portalBurnTimer = 0.0f;
     // t669 毒马铃薯食物中毒态：m_poisonTimer 中毒剩余秒（>0 中毒；tickImpl 递减，归零解毒），
     //   m_poisonDmgAccum 扣损累积（每 kPoisonInterval 秒 emit 一次 -1 饥饿 + -1 HP）。仅 Survival。
     float m_poisonTimer = 0.0f;

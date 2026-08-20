@@ -982,7 +982,24 @@ public:
         //   火上窜）。燃烧伤害：mob / 玩家点火复用 t344 岩浆链（entitymanager / playercontroller 的 Lava 接触
         //   判定并入 Fire）。音色 GroupGrass（软质燃烧物）。不进创造调色板（maxStack=0 不可拾取/放置）。
         Fire           = 137, // 火焰：非实体光源格（光 15）；两片对角交叉双面 quad + 32 帧翻书动画；点燃 / 蔓延 / 自熄
-        Count           = 138, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t725 余烬门（NetherPortal；机制等价 MC 1.0 nether portal id 90，无对应物品形态）：黑曜石门框
+        //   （最小 4×5 外框、2×3 内腔）内以打火石点燃生成的**非实体传送门面片**格。lightEmission=11（机制
+        //   等价 MC 下界传送门微光），渲染**不进 chunk mesh**（mesher 双 PASS 跳过，同 Fire t724 模式）→
+        //   Main.qml portalHost 逐格 delegate 渲染：**竖直平面 quad**（非 fire 的交叉对角——门是平面），
+        //   X 平面门（portal 沿 X 轴展开 / 面朝 ±Z）quad 不旋转，Z 平面门 quad 绕 Y 旋 90°；state=朝向
+        //   （0=X 平面 / 1=Z 平面，点燃检测时写定）；NoCulling 双面可见 + **Blend 半透明**（贴图 alpha
+        //   155-232 软渐变，非 fire 的 0/255 cutout Mask）+ NoLighting（自发光）。贴 portal_strip 翻书条带
+        //   （32 帧 ×150ms 紫色漩涡，帧区采 UV 全 [0,1] + Texture scaleV=1/N，同 fireStripTex 模式）。
+        //   solid=false / ShapeNone（无碰撞可穿入、不挡邻居面剔除、不可选体）、hardness=0（瞬破）、NoTool、
+        //   requiresTool=false、dropId=0（破 = 门熄灭无掉落，spawnItem 对 id<=0 已守卫不产出）、maxStack=0
+        //   （不可进背包——只能打火石点燃产生，无物品形态）。**门完整性**：任一门格或其黑曜石门框格被破坏 →
+        //   同朝向连通域整门熄灭（playercontroller finishMiningAt 连锁，同 t721 画 flood-fill 先例）。
+        //   **站立伤害 v1**（dev-plan 明确允许降级）：玩家处于门格内持续灼烧 1 伤害/秒（复用 Fire 掉落类别），
+        //   **无下界维度**（本工程单维度，不做传送）。音色 GroupGrass（同 fire，软质熄灭）。不进创造调色板
+        //   （maxStack=0 不可拾取/放置）。tickFire 生态**零交互**：flammable() 表不含本格（火不蔓延进门 /
+        //   门不助燃——门格非 air，flint 分支亦不覆写）。
+        NetherPortal   = 138, // 余烬门：黑曜石门框内点燃的传送门面片（光 11）；竖直平面 quad + 32 帧紫色漩涡；站入灼烧
+        Count           = 139, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1667,6 +1684,12 @@ public:
     //   不随 pack 切换变）。消费方：Main.qml fireStripTex（delegate quad UV 全 [0,1] → Texture scaleV=1/N
     //   + positionV=k/N 翻书；与 chunk-mesh 流体路（UV 烘焙 1/N）不同源，火不进 chunk mesh）。
     static constexpr int kFireStripFrames = 32;
+    // t725 余烬门条带 32 帧（单列）。MC 1.0 下界传送门 flipbook 为 nether_portal.png 单条 32 帧（demo 包
+    //   实测 16×512 = 32 帧现成 strip）；程序回退条带（tools/build_portal.py）同为 16×512/32 帧紫色漩涡 →
+    //   包内 / 程序两侧帧数天然对齐（portalStripFrames CONSTANT 不随 pack 切换变）。消费方：Main.qml
+    //   portalStripTex（delegate quad UV 全 [0,1] → Texture scaleV=1/N + positionV=k/N 翻书；门不进 chunk
+    //   mesh，与火同为 delegate 渲染路）。
+    static constexpr int kNetherPortalStripFrames = 32;
     static constexpr int kFluidStripFramePx = 16;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；

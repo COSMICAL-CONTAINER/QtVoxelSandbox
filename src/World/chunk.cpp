@@ -48,13 +48,16 @@ void Chunk::setBlock(int lx, int ly, int lz, quint8 id, quint8 state)
     //   放置不抬升 hm、回扫跳过。
     //   t724：Fire（非实体光焰格，ShapeNone）同 Torch 语义 —— 火焰不遮天光 / 不投整格影
     //   （火的照明走方块光 lightEmission=15 flood，非天光通道），放置不抬升 hm、回扫跳过。
+    //   t725：NetherPortal（余烬门面片，ShapeNone）同 Torch 语义 —— 门面不遮天光 / 不投整格影
+    //   （门的照明走方块光 lightEmission=11 flood，非天光通道），放置不抬升 hm、回扫跳过。
     int &hm = m_heightmap[lx + kSize * lz];
     if (id == 0) {
         if (ly == hm) recomputeColumnHeightmap(lx, lz); // 破顶块 → 重扫找新顶
-    } else if (id != BlockRegistry::Torch && id != BlockRegistry::Painting && id != BlockRegistry::Fire) {
-        if (ly > hm) hm = ly; // 放置非 Torch/Painting/Fire 实体 → 抬升
+    } else if (id != BlockRegistry::Torch && id != BlockRegistry::Painting && id != BlockRegistry::Fire
+               && id != BlockRegistry::NetherPortal) {
+        if (ly > hm) hm = ly; // 放置非 Torch/Painting/Fire/NetherPortal 实体 → 抬升
     }
-    // 放置 Torch / Painting / Fire：不计入 heightmap（透明于天光 / 阴影），hm 不变
+    // 放置 Torch / Painting / Fire / NetherPortal：不计入 heightmap（透明于天光 / 阴影），hm 不变
 }
 
 // t133：读取本格 state（朝向 / 开合）。越界 / 常规方块 → 0。mesher 据此为异形方块选朝向变体。
@@ -117,12 +120,13 @@ void Chunk::recomputeAllHeightmaps()
 //   当作列顶（否则火把上方地块 / 邻列阴影会受其影响）。
 //   t720：Painting 同跳过（贴墙薄板不遮天光，见 setBlock 注释）。
 //   t724：Fire 同跳过（非实体光焰格不遮天光，见 setBlock 注释）。
+//   t725：NetherPortal 同跳过（门面片不遮天光，见 setBlock 注释）。
 void Chunk::recomputeColumnHeightmap(int lx, int lz)
 {
     for (int y = m_height - 1; y >= 0; --y) {
         const quint8 v = m_voxels[size_t(lx + kSize * (lz + kSize * y))];
         if (v != 0 && v != BlockRegistry::Torch && v != BlockRegistry::Painting
-            && v != BlockRegistry::Fire) {
+            && v != BlockRegistry::Fire && v != BlockRegistry::NetherPortal) {
             m_heightmap[lx + kSize * lz] = y;
             return;
         }

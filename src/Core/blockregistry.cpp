@@ -690,6 +690,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   **maxStack=0**（不可进背包 —— 无物品形态，只能打火石点燃 / tickFire 蔓延产生）。
     //   lightEmission 特例行返 15（见 lightEmission switch）。
     /* fire           */ {int(BlockRegistry::Fire),               0,  0, 0,  0, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false,                             0, 0,  0, "fire",         "火焰"},
+    // ── t725 余烬门（NetherPortal；机制等价 MC 1.0 nether portal id 90，属性注释见 blockregistry.h Id 枚举
+    //   NetherPortal 行）：黑曜石门框（最小 4×5 外框 / 2×3 内腔）内点燃的非实体传送门面片格。tile 全 0
+    //   （占位无消费方——渲染走 portalHost 独立 Texture portalStripSource 翻书条带，不进图集 / chunk mesh，
+    //   mesher 双 PASS 跳过同 Fire t724 模式）；solid=false / ShapeNone（无碰撞可穿入、不挡邻居面剔除、
+    //   不可选体）；hardness=0 瞬破（破任一门格 = 整门熄灭，连锁见 playercontroller finishMiningAt）、
+    //   dropId=0 无掉落、NoTool、**maxStack=0**（不可进背包——无物品形态，只能打火石点燃产生）。
+    //   lightEmission 特例行返 11（见 lightEmission switch）。state=朝向（0=X 平面 / 1=Z 平面，点燃检测写定）。
+    /* nether_portal  */ {int(BlockRegistry::NetherPortal),        0,  0, 0,  0, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false,                             0, 0,  0, "nether_portal","余烬门"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -856,6 +864,9 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* iron_trapdoor          */ 0,
     // t724 火焰 → MC 1.0 fire id 51（1.0 存在；点燃 / 蔓延 / 自熄机制等价实现）。
     /* fire                   */ 51,
+    // t725 余烬门 → MC 1.0 nether portal id 90（1.0 存在；黑曜石框内打火石点燃、破框整门熄灭机制等价实现；
+    //   无物品形态、无下界维度——本工程单维度 v1 站入灼烧降级）。
+    /* nether_portal          */ 90,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1591,6 +1602,8 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
     case EndPortal: return 10; // t487：末地传送门框架光种子 10（框架放眼亮纹微泛光；t664 框架化语义不变）
     case EndPortalSurface: return 15; // t664：门面（薄星平面）光 15（机制等价 MC 1.0 end portal 发光 15——要塞
                                       //    黑暗中一片亮星平面即「通往另一宇宙」的观感）
+    case NetherPortal: return 11; // t725：余烬门光种子 11（机制等价 MC 1.0 下界传送门光 level 11——低于火把 14
+                                   //    的幽紫微光，门面即发光体照亮门框周遭）
     default:    return 0;   // 其余不自发光
     }
 }
@@ -2132,6 +2145,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Pumpkin: // t482 南瓜 → 软草音色（瓜类植物，同草丛；机制等价 MC pumpkin SoundType = wood 取软草近似）
     case Cobweb: // t484 蜘蛛网 → 软草音色（蛛丝软质，同草丛；机制等价 MC cobweb SoundType = grass）
     case TntBlock: // t485 TNT → 软草音色（火药捆软质闷击；机制等价 MC 1.0 TNT SoundType = grass）
+    case Fire: // t724 火焰 → 软草音色（软质燃烧物瞬破轻响）
+    case NetherPortal: // t725 余烬门 → 软草音色（门面瞬破轻响，同 fire 档软质熄灭）
         return GroupGrass;
     case Sand:
     case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）

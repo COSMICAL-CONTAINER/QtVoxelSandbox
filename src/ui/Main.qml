@@ -307,6 +307,9 @@ Window {
     // t724 火焰材质级动画帧（火焰条带 flipbook；delegate 路与水/岩浆不同源——fireStripTex 全 [0,1] UV
     //   quad + scaleV=1/N + positionV=frame/N）。由 fireAnimTimer 推进；帧切换纯材质参数。
     property int fireAnimFrame: 0    // 0..(fireStripFrames-1)，循环
+    // t725 余烬门材质级动画帧（门条带 flipbook；同 fire 模式——portalStripTex 全 [0,1] UV quad +
+    //   scaleV=1/N + positionV=frame/N）。由 portalAnimTimer 推进；帧切换纯材质参数。
+    property int portalAnimFrame: 0  // 0..(portalStripFrames-1)，循环
     // 全幅顶点 / 三角面汇总（遍历 terrainGeos 求和 → 写标量属性）。由每个地形段 ChunkGeometry 的 meshRebuilt
     //   信号经 Connections 触发（buildChunkModels 末也调一次取初值）。在普通函数里读 var 数组不创建绑定依赖，
     //   故不触发 binding loop（与在 text 绑定里读 var 数组相反）。
@@ -508,6 +511,18 @@ Window {
             for (let fi = 0; fi + 2 < fcells.length; fi += 3)
                 fireHost.addFireVis(fcells[fi], fcells[fi + 1], fcells[fi + 2])
             console.info("[t724] fire rebuild on load: " + (fcells.length / 3) + " cells")
+        }
+        // t725 余烬门读档重建（同 t724 火焰模式）：读档 blob 直写不经 blockPlaced → 事件驱动的 portalHost
+        //   读档后恒空；先清上一世界残留 delegate 再按本世界真值重建（门 delegate 朝向读格 state，重建即对）。
+        {
+            for (const key in portalHost.portalObjs) {
+                portalHost.portalObjs[key].destroy()
+                delete portalHost.portalObjs[key]
+            }
+            const pcells = theWorld.collectBlocksOfId(138) // 138 = BlockRegistry::NetherPortal（字面量+注释）
+            for (let pi = 0; pi + 2 < pcells.length; pi += 3)
+                portalHost.addPortalVis(pcells[pi], pcells[pi + 1], pcells[pi + 2])
+            console.info("[t725] portal rebuild on load: " + (pcells.length / 3) + " cells")
         }
         applyPlayerState(worldStore.loadPlayerData())
         // r2-B1 读档机关态收尾：清上一局的机关瞬态表（发射器冷却 / 红石矿点亮 / 压力板边沿基线 / 按钮复位）
@@ -1752,6 +1767,15 @@ Window {
         repeat: true
         running: true
         onTriggered: window.fireAnimFrame = (window.fireAnimFrame + 1) % resourcePack.fireStripFrames
+    }
+    // t725 余烬门 flipbook：32 帧 × ~150ms（同火节拍——门面紫焰漩涡与火同为翻书观感）。帧切换纯材质参数
+    //   （portalStripTex.positionV），零 mesh 重建。
+    Timer {
+        id: portalAnimTimer
+        interval: 150
+        repeat: true
+        running: true
+        onTriggered: window.portalAnimFrame = (window.portalAnimFrame + 1) % resourcePack.portalStripFrames
     }
     // perf-t520 进 playing 立即刷新（避免 hudPosText 首帧空白），F3 切换 on 时立即刷一次。
     //   本 two-phase Connections 与 10Hz Timer 并行（Timer 100ms 后接管），用 QML 内置信号无需 triggeredOnStartup。
@@ -3551,6 +3575,19 @@ Window {
             tilingModeVertical: Texture.Repeat
             scaleV: 1.0 / resourcePack.fireStripFrames
             positionV: window.fireAnimFrame / resourcePack.fireStripFrames
+        }
+        // t725 余烬门条带纹理（portalHost delegate 材质级 flipbook）：同 fireStripTex 模式（source 走
+        //   resourcePack.portalStripSource，active → file:/// 落盘合成条带、否则 qrc 程序生成条带；门 quad
+        //   几何 UV 全 [0,1] → scaleV=1/N 压采样窗到单帧 + positionV=k/N 平移）。帧数 N=32 与
+        //   BlockRegistry::kNetherPortalStripFrames 同源单一权威（portalStripFrames CONSTANT）。
+        Texture {
+            id: portalStripTex
+            source: resourcePack.portalStripSource
+            generateMipmaps: false
+            tilingModeHorizontal: Texture.Repeat
+            tilingModeVertical: Texture.Repeat
+            scaleV: 1.0 / resourcePack.portalStripFrames
+            positionV: window.portalAnimFrame / resourcePack.portalStripFrames
         }
 
         // t240 猪牛羊贴图：三种 passive mob 各一张「全脸」贴图（build_mob.py 程序生成原创像素图，§9a 区隔
@@ -7949,6 +7986,70 @@ Window {
             }
         }
 
+        // t725 余烬门渲染 host（同 fireHost / paintingHost 的 createObject delegate 模式）：NetherPortal
+        //   方块（138）的贴图是 32 帧条带 flipbook + 软半透明紫面（非图集瓦片）→ 渲染不走 chunk mesh
+        //   （chunkgeometry 三处 PASS 已 skip），每格门面一个 delegate = **单片竖直平面 quad**（BillboardQuad
+        //   XY ±0.5，按门朝向绕 Y 旋转：X 平面门（state=0，门沿 X 展开 / 面朝 ±Z）不旋转；Z 平面门（state=1，
+        //   沿 Z 展开 / 面朝 ±X）转 90°——门是平面非火的「×」交叉）。同条带同帧相邻格接缝不可见（同
+        //   portalStripTex 同 positionV → 像素连续）。共享 portalStripTex（scaleV=1/N + positionV=k/N 材质
+        //   级翻书）。双面：cullMode NoCulling（门两面进出均可见）；**alphaMode Blend**（门贴图 alpha
+        //   155-232 软渐变半透明，非火的 0/255 cutout → Mask 会把全部门面像素裁光，必须 Blend）。光照：
+        //   NoLighting（门自发光，lightEmission=11 的呈现面）。维护三重（同 fire 模式）：onBlockPlaced(138)
+        //   加 / onBlockBroken(138) 删 / onWorldChanged 兜底清孤儿；enterWorld 用 collectBlocksOfId(138)
+        //   重建（读档 blob 直写不经 blockPlaced）。分层（PLAN §2）：纯呈现层，只消费语义事件，绝不反向写栅格。
+        Node {
+            id: portalHost
+            property var portalObjs: ({})
+            function addPortalVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                if (portalObjs[key]) return
+                if (theWorld.blockAt(x, y, z) !== 138) return  // 真值校验（防陈旧信号挂假 delegate）
+                portalObjs[key] = portalDelegate.createObject(portalHost, {cellX: x, cellY: y, cellZ: z})
+            }
+            function removePortalVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                const o = portalObjs[key]
+                if (o) { o.destroy(); delete portalObjs[key] }
+            }
+            // 兜底清孤儿（连通域静默清 / 系统改写）：blockAt != NetherPortal(138) 的条目销毁（blockBroken
+            //   之外的清除路径收口——removeNetherPortalAt 的 setWaterSilent 不发 blockBroken，靠 onWorldChanged）。
+            function cleanupVis() {
+                for (const key in portalObjs) {
+                    const p = key.split(",")
+                    const x = parseInt(p[0]), y = parseInt(p[1]), z = parseInt(p[2])
+                    if (theWorld.blockAt(x, y, z) !== 138) {
+                        portalObjs[key].destroy(); delete portalObjs[key]
+                    }
+                }
+            }
+        }
+
+        // t725 余烬门 delegate 模板：portalHost.addPortalVis 经 createObject 实例化（cellX/Y/Z 注入）、
+        //   removePortalVis/cleanupVis 用 .destroy() 回收（同 fireDelegate 模式）。朝向由格 state bit0 实时
+        //   读（stateAt）：0=X 平面门（面朝 ±Z，quad 不旋转）/ 1=Z 平面门（面朝 ±X，绕 Y 转 90°）。
+        Component {
+            id: portalDelegate
+            Node {
+                id: portalRoot
+                property int cellX: 0
+                property int cellY: 0
+                property int cellZ: 0
+                // 格中心（世界坐标）；单片竖直 quad 按 state 朝向定面。
+                position: Qt.vector3d(cellX + 0.5, cellY + 0.5, cellZ + 0.5)
+                Model {
+                    geometry: BillboardQuad {}
+                    // state bit0：0=X 平面（quad 默认面法线 ±Z）→ 不旋转；1=Z 平面 → 绕 Y 90°（面法线 ±X）。
+                    eulerRotation: Qt.vector3d(0, (theWorld.stateAt(cellX, cellY, cellZ) & 1) ? 90 : 0, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting   // 自发光（lightEmission=11 呈现面）
+                        cullMode: Material.NoCulling              // 双面（进出门两侧均可见）
+                        alphaMode: PrincipledMaterial.Blend       // 软半透明（门贴图 alpha 155-232 渐变，非 cutout）
+                        baseColorMap: portalStripTex              // 共享条带（scaleV/positionV 材质级翻书）
+                    }
+                }
+            }
+        }
+
         // t196 / t225 / t441 箱子盖子开合动画（场景内 3D Node，与 torchHost / itemHost 同层）。仅当前所开箱子
         //   （chestX/Y/Z）一处显盖子（一次只开一只箱子，chestOpen 单 bool）。chestLidAngle 由 openChest/
         //   closeChest 驱动（window 级 Behavior 平滑过渡 0↔全开角）。
@@ -8373,6 +8474,10 @@ Window {
             // t724：火焰熄灭 / 被挖（挖火 = 扑灭）→ 销毁视觉 delegate（id=137=BlockRegistry::Fire；World::tickFire
             //   自熄 setBlock Air 也走本信号 → delegate 挂卸自动跟随 C++ 索引）。挖火无掉落（dropId=0，C++ 侧）。
             if (id === 137) fireHost.removeFireVis(x, y, z)
+            // t725：余烬门熄灭 → 销毁视觉 delegate（id=138=BlockRegistry::NetherPortal；直挖门格走 setBlock
+            //   发本信号，连通域其余格走 setWaterSilent 静默不发——由 onWorldChanged portalHost.cleanupVis
+            //   兜底清）。挖门无掉落（dropId=0，C++ 侧）。
+            if (id === 138) portalHost.removePortalVis(x, y, z)
             // t173/t179/t522：箱子被破 → 先把内部 27 槽内容 spawnItem 掉落世界（机制等价 MC 1.0 破箱掉落
             //   内容，修用户报「箱子装东西后挖掉不掉」），再 chestStore.clearChest 清孤儿条目。id=22=
             //   BlockRegistry::Chest（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
@@ -8466,6 +8571,9 @@ Window {
             // t724：火焰点燃（玩家打火石右击 / tickFire 蔓延上窜 setBlock Fire）→ 挂视觉 delegate（id=137=
             //   BlockRegistry::Fire）。addFireVis 内 blockAt 真值校验（防陈旧信号挂假 delegate）。
             if (id === 137) fireHost.addFireVis(x, y, z)
+            // t725：余烬门生成（打火石点燃门框 → tryIgniteNetherPortal 逐格 setBlock NetherPortal）→ 挂视觉
+            //   delegate（id=138=BlockRegistry::NetherPortal）。addPortalVis 内 blockAt 真值校验（同火模式）。
+            if (id === 138) portalHost.addPortalVis(x, y, z)
             // t669 放置消耗收口：生存放置由 PlayerController::placeBlock（C++）各放置分支统一 takeStack。
             //   原 t32 行为是此处 blanket takeStack —— 但 World::blockPlaced 不止由玩家 placeBlock 触发：
             //   锄耕地（setBlock Farmland）/ 踩踏回土（setBlock Dirt）/ 种植 / 倒流体等都是非放置类
@@ -8535,6 +8643,9 @@ Window {
             paintingHost.cleanupVis()
             // t724：同步清火焰视觉 delegate 孤儿（爆炸 / 系统改写栅格不经 blockBroken 的路径收口；同 paintingHost）。
             fireHost.cleanupVis()
+            // t725：同步清余烬门视觉 delegate 孤儿（门框破坏连锁 / 连通域静默清不经 blockBroken 的路径
+            //   收口；removeNetherPortalAt 的 setWaterSilent 只发 worldChanged → 此处兜底）。
+            portalHost.cleanupVis()
         }
     }
 
