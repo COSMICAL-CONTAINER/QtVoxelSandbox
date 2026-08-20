@@ -865,6 +865,16 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                       0,                            0,
         0,                       0,                            0 },
       RecipeRegistry::MushroomStewId, 1, 1, "mushroom_stew" },
+    // t726 暗渊之眼（ender_eye）：暗渊珠 + 燃烬粉 → 1 暗渊之眼（无序 2×2，背包栏 / 工作台均可）。
+    //   机制等价 MC 1.0 ender eye 配方（ender pearl + blaze powder 任意摆放）。2 原料各 1 件、多重集
+    //   {EnderPearl:1, BlazePowder:1} 唯一 → shapeless 不与既有配方冲突。产物 = EndEyeId（材料段 0x23A，
+    //   既有末影之眼 id，t487——机制等价 MC ender eye，暗渊之眼即其同源产物；右键末地传送门激活
+    //   placeBlock EndPortal 分支）。原料暗渊珠（t727 夜行者掉落）/ 燃烬粉（燃烬棒冶炼，t726 同批）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::EnderPearlId, RecipeRegistry::BlazePowderId, 0,
+        0,                            0,                             0,
+        0,                            0,                             0 },
+      RecipeRegistry::EndEyeId, 1, 1, "ender_eye" },
     // t505 雪块（snow block）：4 雪球 2×2 方阵 → 1 雪块（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0
     //   雪块配方（4 snowballs → 1 snow block）。最小包围盒 2×2（满），与 craftingTable（2×2 满铺木板）包围盒
     //   尺寸同但原料不同（本为雪球 / 工作台为木板）→ shaped 逐格比对区分（不冲突）。原料 SnowballId（材料段

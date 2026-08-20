@@ -803,6 +803,15 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         //   （MC 1.8 系实测 textures/item/painting.png 是空 item 贴图——MC 画作实体画面在 painting/ 目录；
         //   此处接 item 图标映射，包内缺则安全跳过回退 MaterialIcon drawPainting 自绘）。
         {0x242, QStringLiteral("painting.png")},         // 画作（t720：8 木棒+1 羊毛合成；右键墙贴画）
+        // t726 暗渊链路（机制等价 MC 1.0 ender pearl / blaze powder / blaze rod；结成暗渊之眼端剂）：
+        //   pack item 目录有 ender_pearl.png / blaze_powder.png / blaze_rod.png 则接（alpha-test 透明底，
+        //   机制等价 MC item icon）；包缺 → 安全跳过保自绘（drawEnderPearl / drawBlazePowder / drawBlazeRod）。
+        //   生物蛋（夜行者）无独立 pack 贴图（走引擎 MaterialIcon drawSpawnEgg 自绘；夜行者本体贴图经
+        //   entityKindMap "nightwalker" 单独映射到 enderman/enderman.png，见 entitySource —— 生物蛋 items
+        //   不占 itemFileNameMap）。
+        {0x243, QStringLiteral("ender_pearl.png")},      // 暗渊珠（t726：杀夜行者掉落；暗渊之眼原料）
+        {0x244, QStringLiteral("blaze_powder.png")},     // 燃烬粉（t726：燃烬棒冶炼产物；暗渊之眼原料）
+        {0x245, QStringLiteral("blaze_rod.png")},        // 燃烬棒（t726：怒焰人死亡掉落；烧燃烬粉）
         // —— 护甲段（ArmorId；皮革/铁/铜/金/钻石×4 部位。铜护甲 t613 入映射：现代包 copper_* 直用；老包
         //   缺 copper_* → itemIconSource 走 copperIronFallback 用 iron_* 染铜（描边带 + 铜橙梯度））——
         {0x300, QStringLiteral("leather_helmet.png")},

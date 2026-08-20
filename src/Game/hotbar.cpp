@@ -537,7 +537,18 @@ QVariantList Hotbar::creativeMaterials() const
         //   maxStack=1（放置型物品单件，同船；Hotbar::maxStackSize 特判）。可堆叠性：不可叠。
         //   非方块（材料段）→ 右键不走通用放置，走画放置分支（playercontroller placeBlock 画段）。
         //   MaterialIcon 自绘画框 + 迷你画面（drawPainting，§9 原创）；pack painting.png 映射。
-        int(RecipeRegistry::PaintingId)          // 画作：8 木棒+1 羊毛合成；右键墙贴画（t720/t721）
+        int(RecipeRegistry::PaintingId),         // 画作：8 木棒+1 羊毛合成；右键墙贴画（t720/t721）
+        // t726 暗渊链路（机制等价 MC 1.0 ender pearl / blaze powder / blaze rod / ender eye passive）：
+        //   夜行者死亡掉暗渊珠（t727）→ 燃烬棒（怒焰人掉落，未来实体）冶炼成燃烬粉 → 暗渊珠 + 燃烬粉
+        //   合成暗渊之眼（复用 EndEyeId 0x23A：见 t487 末影之眼——同一机制的被动/暗渊眼即其同源产物）。
+        //   创造调色板补全便于测试整条合成链（destructive-test 直接取原料合眼）。可堆叠 64（走材料段默认）；
+        //   非方块 → 右键不放置。MaterialIcon 自绘图标（珠=深青绿圆珠 粉=橙黄火粉堆 棒=橙黄火棒）。
+        int(RecipeRegistry::EnderPearlId),       // 暗渊珠：杀夜行者掉落；与燃烬粉合成暗渊之眼（t726/t727）
+        int(RecipeRegistry::BlazePowderId),      // 燃烬粉：燃烬棒冶炼产物；与暗渊珠合成暗渊之眼（t726）
+        int(RecipeRegistry::BlazeRodId),         // 燃烬棒：怒焰人死亡掉落；熔炉冶炼为燃烬粉（t726）
+        // t727 生物蛋（夜行者）：创造模式物品，右键地面 → 生成夜行者（MobNightwalker，末影人同源敌对潜行
+        //   者；3 格高、怕水、瞪视激怒、弹射物免疫）。机制等价 MC 1.0 enderman spawn egg；§9 改名。
+        int(RecipeRegistry::SpawnEggNightwalkerId) // 生物蛋（夜行者）：右键 → 生成夜行者（t727）
     };
 }
 
@@ -911,6 +922,12 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::MinecartId)      return QStringLiteral("矿车");       // 5 铁锭合成；右键铁轨放车 + 骑乘
         // t720 画作（机制等价 MC 1.0 painting；8 木棒+1 羊毛合成；右键墙侧面贴画）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::PaintingId)      return QStringLiteral("画作");       // 8 木棒+1 羊毛合成；右键墙贴画
+        // t726 暗渊链路（机制等价 MC 1.0 ender pearl / blaze powder / blaze rod）。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::EnderPearlId)    return QStringLiteral("暗渊珠");     // 杀夜行者掉落；暗渊之眼原料
+        if (blockId == RecipeRegistry::BlazePowderId)   return QStringLiteral("燃烬粉");     // 燃烬棒冶炼产物；暗渊之眼原料
+        if (blockId == RecipeRegistry::BlazeRodId)      return QStringLiteral("燃烬棒");     // 怒焰人死亡掉落；烧燃烬粉
+        // t727 生物蛋（夜行者）：末影人同源敌对潜行者的生成蛋。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::SpawnEggNightwalkerId) return QStringLiteral("生物蛋（夜行者）"); // 右键 → 生成夜行者
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

@@ -315,6 +315,30 @@ public:
     //   无 MC 1.0 mcMaterialId 映射（id > kMcMaterialId 表界 0x22E → -1 → 回退自绘；painting 物品 321
     //   经 itemFilenameMap 单独接，不走材料段 MC 表）。
     static constexpr int PaintingId      = 0x242; // 画作：8 木棒+1 羊毛合成；右键墙贴画（t720/t721）
+    // t726 暗渊珠（ender_pearl：材料段 0x243）：机制等价 MC 1.0 ender pearl —— 杀夜行者（MobNightwalker，
+    //   t727）掉落 0-1 颗；弹射物瞬移（t727 夜行者被弹射物砸中即瞬移闪避，暗渊珠为其同源瞬移物）预留。
+    //   可堆叠 64（走材料段默认）；非方块（材料段）→ 右键不放置。图标：MaterialIcon 自绘深青绿圆珠 +
+    //   高光（drawEnderPearl，§9 原创）；pack 映射 itemFilenameMap 0x243 → ender_pearl.png。
+    //   无 MC 1.0 mcMaterialId 映射（id > 0x22E 越 kMcMaterialId 表界 → -1 → 回退自绘；MC 名经
+    //   itemFilenameMap 单独接）。暗渊珠 + 燃烬粉 → 暗渊之眼（shapeless 配方，见 recipe.cpp）。
+    static constexpr int EnderPearlId    = 0x243; // 暗渊珠：杀夜行者掉落；与燃烬粉合成暗渊之眼（t726）
+    // t726 燃烬粉（blaze_powder：材料段 0x244）：机制等价 MC 1.0 blaze powder —— 燃烬棒（BlazeRodId）
+    //   在熔炉冶炼的产物（t726；机制等价 MC「blaze rod 烧成 blaze powder」）；亦可由（未来）燃烬人
+    //   （Blaze→Emberling，机制等价 MC 怒焰人）击杀掉落。可堆叠 64（走材料段默认）；非方块 → 右键不放置。
+    //   图标：MaterialIcon 自绘橙黄火粉堆（drawBlazePowder，§9 原创）；pack 映射 0x244 → blaze_powder.png。
+    //   暗渊珠 + 燃烬粉 → 暗渊之眼（shapeless 配方，见 recipe.cpp）。
+    static constexpr int BlazePowderId   = 0x244; // 燃烬粉：燃烬棒冶炼产物；与暗渊珠合成暗渊之眼（t726）
+    // t726 燃烬棒（blaze_rod：材料段 0x245）：机制等价 MC 1.0 blaze rod —— 怒焰人（Blaze→Emberling）
+    //   死亡掉落（未来实体任务）；在熔炉冶炼成燃烬粉（BlazePowderId，机制等价 MC「blaze rod → blaze
+    //   powder」熔炉配方）。可堆叠 64（走材料段默认）；非方块（材料段）→ 右键不放置（可作临时火把燃料）。
+    //   图标：MaterialIcon 自绘燃烬棒（橙黄棒身 + 端节，drawBlazeRod，§9 原创）；pack 映射 0x245 →
+    //   blaze_rod.png。暗渊珠 + 燃烬粉 → 暗渊之眼：燃烬粉由此棒冶炼得，构成「夜行者掉落 → 珠 / 组眼」链。
+    static constexpr int BlazeRodId      = 0x245; // 燃烬棒：怒焰人死亡掉落；熔炉冶炼为燃烬粉（t726）
+    // t726/t727 生物蛋（夜行者，SpawnEggNightwalkerId=0x246）：机制等价 MC 1.0 enderman spawn egg。
+    //   创造模式物品，右键地面 → EntityManager::spawnMobTyped 生成 MobNightwalker（t727 夜行者实体）。
+    //   可堆叠 64（走材料段默认，同其他生物蛋）。图标：MaterialIcon 自绘蛋形 + 夜行者黑紫配色斑点
+    //   （drawSpawnEgg("nightwalker")，§9 原创）。
+    static constexpr int SpawnEggNightwalkerId = 0x246; // 生物蛋（夜行者）：右键地面 → 生成夜行者（MobNightwalker）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。
