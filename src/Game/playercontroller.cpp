@@ -3012,6 +3012,42 @@ void PlayerController::placeBlock()
         emit swingArm(); // 抛鸡蛋也是一次「使用」动作 → 挥手（t29）
         return; // 鸡蛋（抛出成功）不再走方块放置路径
     }
+    // t729 暗渊之眼掷出（用户「直接右键的话是可以放出来生成他的实体，一样的贴图，并且会飞向最近的地下要塞结构的
+    //   地方，就是那个3×3的传送门的地方移动一定的距离之后...重新变化为掉落物，或者直接碎掉」；机制等价 MC 1.0
+    //   末影之眼 ender eye）：手持 EndEyeId（0x23A，t726 合成产物）右键 → 从眼位朝**最近要塞末地传送门**直线掷出
+    //   暗渊之眼（EntityManager::spawnEnderEye），速度 ~kEnderEyeUseSpeed=4（EntityManager::kEnderEyeSpeed 是 private
+    //   不能跨层读，故本层自定同值常量，同箭/雪球本地常量模式）。朝向 = player眼位 → world.strongholdPortal* 中心格
+    //   的水平方向 + 略向上偏置（机制等价 MC 末影之眼飞行略升）→ 归一化 × 速度。World::hasStronghold() 无要塞（世界
+    //   未建 / 空）→ 任意方向坠落（兜底不崩）。眼睛飞行 kEnderEyeDist 后 80% 变掉落物（可捡回）/ 20% 碎裂无掉落；
+    //   玩家朝要塞方向走多次使用可逐步逼近（本工程单要塞）。**不要求 m_hasHit**（瞄准的是传送门方向非方块命中格）；
+    //   眼睛非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流（同雪球/蛋/生物蛋
+    //   分支模式）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可掷。生存消耗 1 暗渊之眼 / 创造
+    //   不耗。分层：掷出属 Game/Physics（读视线 + 查 World::strongholdPortal* + 调 EntityManager），不改栅格语义。
+    if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::EndEyeId) {
+        constexpr float kPlayerEyeUseSpeed = 4.0f; // 玩家掷暗渊之眼速度（blocks/s；同 EntityManager::kEnderEyeSpeed）
+        const QVector3D eye = position();
+        // 目标 = 最近要塞末地传送门中心格（player脚位高度居中 + 中心格 → 朝其中心飞）。
+        QVector3D target;
+        if (m_world->hasStronghold())
+            target = QVector3D(float(m_world->strongholdPortalX()) + 0.5f,
+                               float(m_world->strongholdPortalY()),
+                               float(m_world->strongholdPortalZ()) + 0.5f);
+        else
+            target = eye + lookDirection(); // 无要塞（世界未建 / 空）→ 任意方向（兜底不崩）
+        QVector3D dir = target - eye;
+        const float dlen = dir.length();
+        if (dlen > 1e-3f) {
+            dir = dir / dlen;
+            dir.setY(dir.y() + 0.25f); // 飞行略升（机制等价 MC 末影之眼飞距略升；EntityManager tick 亦加 kEnderEyeRiseOff）
+            const QVector3D vel = dir.normalized() * kPlayerEyeUseSpeed;
+            m_entityManager->spawnEnderEye(eye + lookDirection() * 0.5f, vel); // origin = 眼位 + 视前移 0.5（防贴墙入墙）
+            if (m_mode != Creative)
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 暗渊之眼（创造不耗）
+            m_lastPlaceMs = now;
+            emit swingArm(); // 掷眼也是一次「使用」动作 → 挥手（t29）
+        }
+        return; // 暗渊之眼（抛出成功 / 已回退）不再走方块放置路径
+    }
     // t400 繁殖喂食 useBlock（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding）：
     //   手持繁殖食物（小麦 WheatId / 胡萝卜 CarrotId / 马铃薯 PotatoId / 种子 SeedId）右键 → 在主选体射线之外
     //   **独立**跑一条「mob 命中射线」（findMobHit，同剪刀剪羊 / 攻击路径）；命中可繁殖 mob 且食物匹配该物种

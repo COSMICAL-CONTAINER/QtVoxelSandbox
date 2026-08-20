@@ -457,6 +457,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/entity_nightwalker_eyes.png # t717 夜行者眼睛发光层（全透明+头前两粒紫光眼；机制等价 MC enderman_eyes；t727 接入）
         textures/entity_emberling.png       # t717 燃烬者（Emberling；机制等价 MC blaze，§9 改名）64×32 贴图（黄焰头+白热核+烟灰棒；t728 接入）
         textures/mob_fireball.png           # t728 燃烬者火球程序生成贴图（build_mob.py；16×16 橙黄自发光火球，与 Main.qml 火球 delegate 配色同源）
+        textures/entity_endereye.png        # t729 暗渊之眼实体贴图（build_mob.py；16×16 小绿瞳珠：深绿珠身+暗绿竖瞳+白高光，EndEyeId 0x23A 寻路要塞）
         textures/entity_squid.png           # t717 鱿鱼 64×32 实体 UV 贴图（深蓝头+浅肚+触腕条；t730 自拼 3D 接入）
         textures/entity_minecart.png        # t717 矿车 64×32 贴图（铁灰壁+铆钉+木底板；t732 矿车斗重贴图）
         textures/entity_enchant_book.png    # t717 附魔书 64×32 贴图（棕封金边+白纸页；t732 悬浮书重贴图）

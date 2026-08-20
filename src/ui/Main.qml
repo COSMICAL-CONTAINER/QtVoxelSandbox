@@ -2276,6 +2276,12 @@ Window {
         //   0x22B = RecipeRegistry::EggId（材料段蛋物品；⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定）。
         //   单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，同 sheepSheared / mobDied 模式）。
         function onChickenLaidEgg(x, y, z) { itemEntities.spawnItem(x, y, z, 0x22B, 1) }
+        // t729 暗渊之眼飞行判定「变掉落物」（EntityManager EnderEye tick 飞距结算 80% 分支发）：转发到
+        //   ItemEntityManager.spawnItem 生成**掉落物实体**（EndEyeId 0x23A 暗渊之眼 ×1）—— 玩家走近可捡回，反复
+        //   使用逐步逼近要塞（机制等价 MC 末影之眼落地变掉落物可回收）。0x23A = RecipeRegistry::EndEyeId（⚠️ QML
+        //   不 import C++ 静态类故用字面量，同 onMobDied 既有约定）。坐标 = 眼睛落点货架 floor(pos)（与 spawnItem
+        //   整数格约定一致）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费路由到 Game 层 item 管理）。
+        function onEnderEyeBecameItem(x, y, z) { itemEntities.spawnItem(x, y, z, 0x23A, 1) }
         // t281 敌对 mob 近战攻击 / t283 骷髅箭 / t284 Stalker 爆炸命中玩家（spec「attack」）：EntityManager 发
         //   mobAttackedPlayer(amount, mobType, kbX, kbZ) → 仅 Survival 应用伤害（Creative/Spectator 无伤跳过，机制
         //   等价 MC 创造/观察者无敌）。复用 PlayerState.takeDamage → damaged 红闪 / 视角晃 / 受伤音链（同
@@ -3652,6 +3658,14 @@ Window {
         //   build_entities_pack.py 程序生成 entity_emberling.png，§9a 区隔不照搬 MC）。MobModel 单头盒每面铺整张
         //   （pack 关全脸 [0,1]²；pack 开 blazing blaze.png 走 T 字 UV）。独立环绕竖棒由 delegate 补（纯色烟灰橙棒）。
         Texture { id: mobEmberlingTex; source: "qrc:/textures/entity_emberling.png"; generateMipmaps: false }
+        // t729 暗渊之眼（EnderEye）：小绿瞳珠实体贴图（build_mob.py 程序生成 16×16 entity_endereye.png —— 深绿珠身 +
+        //   暗绿竖瞳 + 白高光，对齐 EndEyeId 0x23A 材料段图标观感，§9a 原创不照搬 MC）。EnderEye 小珠 delegate 全脸
+        //   [0,1]² 铺整张。pack 命中 ender_eye.png 时切包内 item 贴图（endereyePackTex）；pack 关 → 本程序图。
+        Texture { id: endereyeTex; source: "qrc:/textures/entity_endereye.png"; generateMipmaps: false }
+        // t729 暗渊之眼 pack 实体贴图（item/ender_eye.png）：pack 启用且 resourcePack.itemIconSource(0x23A) 命中包内
+        //   ender_eye item 图 → source 为 file:/// URL（alpha-test 透明底小眼珠，机制等价 MC 末影之眼观感）；pack 关 /
+        //   包缺 → source 空 → delegate 回退 endereyeTex（程序生成小绿瞳珠）。同其他 pack 实体贴图两级探测语义。
+        Texture { id: endereyePackTex; source: resourcePack.active ? resourcePack.itemIconSource(0x23A) : ""; generateMipmaps: false }
         // t727 夜行者眼睛发光层：透明底 + 亮紫白竖眼（build_mob.py 程序生成）。QML 顶层小盒铺这张（MobModel 头
         //   前上层）—— 机制等价末影人魅眼（§9 原创配色）。pack 命中 enderman_eyes 时切 pack 贴图（见下）。
         Texture { id: mobNightwalkerEyesTex; source: "qrc:/textures/mob_nightwalker_eyes.png"; generateMipmaps: false }
@@ -7792,6 +7806,63 @@ Window {
                             position: Qt.vector3d(0.05, 0.05, 0.07)
                             scale: Qt.vector3d(0.07, 0.07, 0.07)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fff4c4" }
+                        }
+                    }
+                    // t729 暗渊之眼（EnderEye；机制等价 MC 1.0 末影之眼 ender eye —— 玩家右键 EndEyeId 掷出寻路要塞，
+                    //   §9 改名 + 原创模型/贴图）：小绿瞳珠（~0.28 立方铺 entity_endereye 小绿瞳珠贴图 / pack 命中时
+                    //   item ender_eye.png）+ 飞行自旋（秒珠绕 Y 慢转）。飞距判结（C++ tick 位移 + 结算）：80% 变掉落物
+                    //   （enderEyeBecameItem → 掉落物实体可捡回）→ 移除；20% 碎裂 —— 本 delegate 据 shatteringAt(index)
+                    //   翻 true 播 burstGlassShatter 玻璃碎屑 + 缩小 (shatterScale→0) + 淡出 (opacity→0)，归零后 C++
+                    //   释放槽（配合 kEnderEyeShatterTime 延迟移除让动画可见）。slot 复用（新眼 / 空槽）→ entShatter
+                    //   翻 false → 复位珠体（shatterScale/Fade 回 1.0），同 mob deathTilt/wasDead 复位模式。飞行略升由
+                    //   C++ 位移驱动（本 delegate 只做自旋 + 碎裂动画）。NoLighting（红线：可见 Model 必须 NoLighting）。
+                    Node {
+                        id: endereyeNode
+                        visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.EnderEye) : false }
+                        // 碎裂淡出（QtQuick3D Node opacity 影响整棵子树）；珠体展示时恒 1.0。
+                        property real shatterFade: 1.0
+                        property real shatterScale: 1.0
+                        opacity: endereyeNode.shatterFade
+                        property bool entShatter: { const _r = entityManager.revision; return _r >= 0 ? entityManager.shatteringAt(index) : false }
+                        property bool wasShatter: false
+                        // 碎裂起始（20% 分支）：玻璃碎屑 + 缩小淡出动画；slot 复用（新眼进入）→ 复位珠体。
+                        onEntShatterChanged: {
+                            if (endereyeNode.entShatter && !endereyeNode.wasShatter) {
+                                endereyeNode.wasShatter = true
+                                if (particleLoader.item) {
+                                    const sp = entityManager.posAt(index)
+                                    particleLoader.item.burstGlassShatter(sp.x, sp.y, sp.z)
+                                }
+                                shatterAnim.restart()
+                            } else if (!endereyeNode.entShatter) {
+                                endereyeNode.wasShatter = false // slot 复用 / 释放：复位（新眼或空槽 → 珠体恢复 1.0）
+                                endereyeNode.shatterScale = 1.0
+                                endereyeNode.shatterFade = 1.0
+                            }
+                        }
+                        SequentialAnimation {
+                            id: shatterAnim
+                            running: false
+                            ParallelAnimation {
+                                NumberAnimation { target: endereyeNode; property: "shatterScale"; to: 0.0; duration: 500; easing.type: Easing.InQuad }
+                                NumberAnimation { target: endereyeNode; property: "shatterFade"; to: 0.0; duration: 400; easing.type: Easing.InQuad }
+                            }
+                        }
+                        // 飞行自旋（秒珠绕 Y 慢转，读作「滚动的小珠」）；碎裂窗口由缩放淡出覆盖视觉。
+                        property real spin: 0
+                        NumberAnimation on spin { from: 0; to: 360; duration: 1500; loops: Animation.Infinite }
+                        Node { // 珠体承载层（自旋 + 碎裂缩放协同作用）
+                            eulerRotation.y: endereyeNode.spin
+                            scale: Qt.vector3d(endereyeNode.shatterScale, endereyeNode.shatterScale, endereyeNode.shatterScale)
+                            Model {
+                                geometry: UnitCube {}
+                                scale: Qt.vector3d(0.28, 0.28, 0.28)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    // t729 pack 命中 → item ender_eye 贴图；pack 关 → entity_endereye 小绿瞳珠。
+                                    baseColorMap: endereyePackTex.source.toString().length > 0 ? endereyePackTex : endereyeTex
+                                }
+                            }
                         }
                     }
                 }

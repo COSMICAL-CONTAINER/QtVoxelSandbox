@@ -6062,7 +6062,15 @@ void World::placeStronghold()
     }
     if (bestIdx >= 0) {
         placeAt(candidates[size_t(bestIdx)][0], candidates[size_t(bestIdx)][1], candidates[size_t(bestIdx)][2]);
+        // t729 记录要塞末地传送门中心格（供暗渊之眼右击寻路目标；见 world.h m_strongholdPortal* 头注释）。
+        //   传送门房中心 = 环中心 (x), 门面 dy=4 (y), 房内 dz 中心 -18 (z)；全图唯一。重置先于判定（无候选 → 清）。
+        m_hasStronghold = true;
+        m_strongholdPortalX = candidates[size_t(bestIdx)][0];
+        m_strongholdPortalY = candidates[size_t(bestIdx)][1] + 4;
+        m_strongholdPortalZ = candidates[size_t(bestIdx)][2] - 18;
         ++placed;
+    } else {
+        m_hasStronghold = false; // 无候选要塞 → 清目标（世界重建 / 新种子时防陈旧坐标）
     }
     qInfo() << "worldgen: strongholds =" << placed; // 同 seed → 同计数（确定性核对）
 }

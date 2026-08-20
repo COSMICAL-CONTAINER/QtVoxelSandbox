@@ -79,6 +79,13 @@ Node {
     function burstEgg(px, py, pz) {
         burstFloat(px, py, pz, 6, "#f5efdd", 0.06, 1.5, 1.0, 1.2, 0.5, 6.0)
     }
+    // t729 暗渊之眼碎裂（机制等价 MC 末影之眼破裂无回收）：浅珠绿玻璃碎屑 + 小幅四散 + 弱重力（同雪沫碎裂
+    //   手感）。原点 = float 世界坐标（眼睛碎裂点，非方块格中心 → 不加 +0.5，同 burstSnowball 模式）。色为珠绿
+    //   玻璃（对齐 entity_endereye 珠身绿；用户「直接碎掉的动画」→ 玻璃碎裂粒子 + delegate 缩小淡出双呈现）。
+    //   数量少（8，小珠）。t729 delegate 检测 shatteringAt(index) 翻 true 时调。
+    function burstGlassShatter(px, py, pz) {
+        burstFloat(px, py, pz, 8, "#6fce9c", 0.07, 1.8, 1.2, 1.6, 0.6, 6.0)
+    }
 
     // 通用方块中心迸发（坐标先 +0.5 到方块中心）。gravity 缺省 14（碎屑强落；t449 加可选参数供烟雾上飘）。
     function burst(x, y, z, count, color, scale, vYBase, vYVar, hScale, life) {

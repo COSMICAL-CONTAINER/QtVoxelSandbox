@@ -116,6 +116,16 @@ public:
         return blockAt(x, y, z) == BlockRegistry::Chest
             && (stateAt(x, y, z) & BlockRegistry::ChestStateStrongholdFlag) != 0;
     }
+    // t729 最近要塞（末地传送门）坐标 getter（placeStronghold 记录；详见 m_strongholdPortal* 字段头注释）。
+    //   暗渊之眼（EnderEye）右键掷出的**飞行目标**：Game/Physics 层（PlayerController）据玩家眼位 → 本传送门
+    //   中心方向计算飞行初速，把眼睛导向要塞（机制等价 MC 1.0 末影之眼寻路要塞）。玩家朝要塞方向走多次使用
+    //   可逐步逼近（本工程单要塞，方向恒指向它）。分层（PLAN §2）：纯只读查询（无世界创建则恒 false），
+    //   Q_INVOKABLE 兼 F3 调试 / 未来 HUD 展示；Game 层 C++ 亦直调。坐标 = 传送门房 12 框架环中心格
+    //   （(cx, cy+4, cz-18)，全图唯一）。
+    Q_INVOKABLE bool hasStronghold() const { return m_hasStronghold; }
+    Q_INVOKABLE int strongholdPortalX() const { return m_strongholdPortalX; }
+    Q_INVOKABLE int strongholdPortalY() const { return m_strongholdPortalY; }
+    Q_INVOKABLE int strongholdPortalZ() const { return m_strongholdPortalZ; }
     // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
     //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/
     //   trapdoor，state 解码同 partialblockgeometry）。玩家碰撞迭代玩家 AABB 覆盖的所有格，逐 sub-AABB
@@ -914,6 +924,13 @@ private:
 
     std::vector<int> m_perm;  // 512 置换表（Perlin）
     int m_width = 16, m_depth = 16, m_height = 16, m_seed = 1337;
+    // t729 最近要塞末地传送门中心格坐标（worldgen placeStronghold 放置处记录；全图至多一座要塞 / 一个传送门，
+    //   t564「全图至多一个末地传送门」）。m_hasStronghold=false → 无要塞（世界未生成 / 空）→ 暗渊之眼掷出兜底
+    //   不寻路。坐标语义 = 传送门房 12 框架环中心格：x=placeAt 的 cx（环 x 中心）、y=cy+4（地板 cy 之上门面 dy=4）、
+    //   z=cz-18（传送门房内部 dz∈[-21,-12] 中心 -18）。玩家眼位 → 该点方向 = 末影之眼飞行目标（EntityManager 掷出
+    //   + Game 层算方向，分层只向下的只读源）。regenerate / beginLoad 重建世界时由 placeStronghold 重写。
+    bool m_hasStronghold = false;
+    int m_strongholdPortalX = 0, m_strongholdPortalY = 0, m_strongholdPortalZ = 0;
     ChunkManager m_chunks;    // 多 chunk 存储 + 跨 chunk 路由（World 层；默认空，generate 重建）
     // t185 水流 tick 节流计数：tickWaterFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFlowTickInterval
     //   才把波前推进 1 格（~0.3s 一格 → 1 格/tick 流动动画可见）。MC 自身约 0.25s/格，本工程取 3（0.3s）平衡

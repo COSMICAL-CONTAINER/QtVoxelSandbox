@@ -514,6 +514,35 @@ int EntityManager::spawnFireball(const QVector3D &origin, const QVector3D &vel)
     emit entitiesChanged();
     return slot;
 }
+// t729 生成暗渊之眼投射物（玩家右键 EndEyeId 掷出；见头文件注释）：存 origin + 3D 速度 vel（blocks/s，直线弹道
+//   朝要塞传送门）+ kind=EnderEye + pushable=false + halfW/halfH=0.16（小绿瞳珠小体视觉 + 碰撞最小；命中检测走
+//   距离判定不读 halfW）。entity.enderEyeDistLeft = 随机 [kEnderEyeDistMin,Max]（10..16）剩余飞行距离 → tick 递减
+//   归零结算；enderEyeShatter=0（飞行态）。vx/vy/vz 复用 3D 速度（如 spawnFireball）。bump revision → QML Repeater
+//   追加 delegate（EnderEye 分支小绿瞳珠 Model）。达 kCap → 跳过 + 告警（防溢出）。返新槽索引（调试用）；达 kCap → -1。
+int EntityManager::spawnEnderEye(const QVector3D &origin, const QVector3D &vel)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); ender eye spawn skipped at" << origin;
+        return -1;
+    }
+    Entity e;
+    e.pos = origin;
+    e.halfW = kEnderEyeHalfDim; // 小绿瞳珠小体视觉 + 碰撞最小
+    e.halfH = kEnderEyeHalfDim;
+    e.pushable = false; // 玩家走碰不推（同箭 / 雪球 / 火球）
+    e.kind = EnderEye;
+    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（EnderEye 不走 Mob 击退衰减分支，无冲突）
+    e.vy = vel.y();
+    e.vz = vel.z();
+    // 判定飞行距离随机带（机制等价 MC 末影之眼飞行一段后落地/碎裂；玩家据此逐步逼近要塞）。
+    e.enderEyeDistLeft = kEnderEyeDistMin
+        + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kEnderEyeDistMax - kEnderEyeDistMin);
+    e.enderEyeShatter = 0.0f; // 飞行态（非碎裂）
+    const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    ++m_revision;
+    emit entitiesChanged();
+    return slot;
+}
 //   spawnMobTyped 内 switch 据 mobType 设 hostile=true（兜底）。spec「黑暗刷怪调度」周期 spawn 调用它。
 //   mobType 非 Shambler/Bones → 仍生成但非敌对语义（防御；正常 caller 只传这两种）。
 void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
@@ -622,6 +651,15 @@ bool EntityManager::isSlowedAt(int i) const
     if (i < 0 || i >= int(m_entities.size())) return false;
     const Entity &e = m_entities[size_t(i)];
     return e.alive && e.kind == Mob && e.slowTimer > 0.0f;
+}
+
+// t729 第 i 个实体是否「暗渊之眼碎裂态」（enderEyeShatter>0）。QML EnderEye delegate 据它翻 to 缩小 + 淡出 +
+//   玻璃碎裂粒子动画（shatteringAt=true 的窗口内）。越界 / 非 EnderEye / 非碎裂 → false（同 aliveAt 越界安全）。
+bool EntityManager::shatteringAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    return e.alive && e.kind == EnderEye && e.enderEyeShatter > 0.0f;
 }
 
 // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见头文件方法注释）。三职责一方法收口敌对生命周期。
@@ -4452,6 +4490,49 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 dirty = true;
             }
             continue; // Fireball 不走 Mob AI / resting / 击退衰减
+        }
+
+        // --- EnderEye（t729 暗渊之眼投射物）：直线朝要塞飞行 + 略升 + 飞距结算（变掉落物 / 碎裂无掉落）---
+        //   机制等价 MC 1.0 末影之眼 ender eye：右键掷出 → 直线寻路要塞（速度 ~kEnderEyeSpeed=4，玩家可侧身看它
+        //   飞）→ 飞行一段后判定：80% 变**掉落物实体**（emit enderEyeBecameItem，可捡回）、20% 碎裂（缩小淡出 +
+        //   玻璃碎裂粒子，无掉落）。本分支两态：飞行态（enderEyeShatter==0，直线位移 + 略升 + distLeft 递减）/
+        //   碎裂态（enderEyeShatter>0，仅倒计，QML delegate 播动画；归零释放槽无掉落）。无重力（非抛物）、无方块
+        //   碰撞（短跳穿破空气，机制等价 MC 末影之眼透过地形感应要塞；豆腐脑如穿墙亦可接受，距离短）。
+        if (e.kind == EnderEye) {
+            if (e.enderEyeShatter > 0.0f) {
+                // 碎裂态：倒计时（QML delegate 据 shatteringAt 播缩小淡出 + 玻璃碎裂粒子动画），归零 → 释放槽
+                //   （无掉落物，机制等价 MC 末影之眼破裂无回收）。
+                e.enderEyeShatter -= float(dt);
+                dirty = true;
+                if (e.enderEyeShatter <= 0.0f) {
+                    toRemove.push_back(idx);
+                    dirty = true;
+                }
+                continue; // 碎裂态不走飞行 / Mob AI / resting
+            }
+            // 飞行态：直线位移（速度恒定 ~kEnderEyeSpeed）+ **略升**（kEnderEyeRiseOff 向上偏置，机制等价 MC 末影
+            //   之眼飞行时微微抬升）+ 剩余距离递减（按速度长度，非仅水平）。
+            const float spd = std::sqrt(e.vx * e.vx + e.vy * e.vy + e.vz * e.vz);
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz + 0.0f) * float(dt)
+                                   + QVector3D(0.0f, kEnderEyeRiseOff, 0.0f) * float(dt);
+            e.pos = next;
+            if (spd > 1e-4f) e.enderEyeDistLeft -= spd * float(dt);
+            dirty = true;
+            // 判定结算：剩余飞行距离归零 → 掷判定（80% 掉落物 / 20% 碎裂）。
+            if (e.enderEyeDistLeft <= 0.0f) {
+                if (QRandomGenerator::global()->bounded(100) < kEnderEyeDropChance) {
+                    // 80% → 变**掉落物实体**（机制等价 MC 末影之眼落地变掉落物可回收；emit 语义事件，呈现层转发
+                    //   ItemEntityManager.spawnItem 生成 item 实体，玩家走近可捡回 —— 反复使用逐步逼近要塞）。
+                    emit enderEyeBecameItem(qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()));
+                    toRemove.push_back(idx);
+                    dirty = true;
+                } else {
+                    // 20% → 碎裂：进入碎裂态（QML delegate 播缩小淡出 + 玻璃碎裂粒子，无掉落物）。
+                    e.enderEyeShatter = kEnderEyeShatterTime;
+                    dirty = true;
+                }
+            }
+            continue; // EnderEye 不走 Mob AI / resting / 击退衰减
         }
 
         // --- FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）---
