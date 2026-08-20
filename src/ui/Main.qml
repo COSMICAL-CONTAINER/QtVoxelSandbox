@@ -2149,6 +2149,7 @@ Window {
             xpForMob[EntityManager.MobSnowGolem] = 1 + Math.floor(Math.random() * 3) // t482 雪傀儡：1-3 XP
             xpForMob[EntityManager.MobIronGolem] = 5 // t483 铁傀儡：5 XP（重型防御造物）
             xpForMob[EntityManager.MobSilverfish] = 5 // t487 银鱼：5 XP（敌对近战小虫，同敌对量级；无常规掉落）
+            xpForMob[EntityManager.MobNightwalker] = 5 // t727 夜行者：5 XP（敌对瘦长暗影，同敌对量级；掉暗渊珠）
             const xpAmt = xpForMob[mobType]
             if (xpAmt && xpAmt > 0) xpOrbs.spawnOrb(x, y, z, xpAmt)
             // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
@@ -2226,6 +2227,13 @@ Window {
                 if (Math.random() < 0.66) itemEntities.spawnItem(x, y, z, 0x203, 1)  // ~66% ×4
                 if (Math.random() < 0.33) itemEntities.spawnItem(x, y, z, 0x203, 1)  // ~33% ×5（独立 → 总量 3-5）
                 if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 49, 1)      // 红花（罂粟）~50% ×1
+            } else if (mobType === EntityManager.MobNightwalker) {
+                // t727 夜行者掉落：暗渊珠 ×0-1（mechanic-equivalent MC 1.0 enderman 掉 ender pearl；spec「死亡掉落
+                //   0-1 暗渊珠」，机制等价 MC 末影人 50% 掉 1 颗珍珠）。0x243 = RecipeRegistry::EnderPearlId（暗渊珠，
+                //   §9 改名：机制等价 MC ender pearl —— 抛掷传送；t726 材料段）。⚠️ QML 不 import C++ 静态类故用字面量，
+                //   同 onMobDied 既有约定。恒 50% 单件（0 或 1，机制等价 MC 末影人 0-1 pearl；t726 已建配方锚定掉落源）。
+                //   暗渊珠可作「闪避传送」交互道具（t726 投掷即传）→ 非战斗资源，让玩家见到夜行者即知「打它有传送珠」。
+                if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x243, 1)   // 暗渊珠 ~50%（0-1）
             }
             // t510 雪傀儡（MobSnowGolem）死亡掉落雪球 0-15 个（spec「死掉雪球」；机制等价 MC 1.0 雪傀儡死亡
             //   掉落 0-15 雪球）。雪球 id=0x23D（RecipeRegistry::SnowballId；⚠️ QML 不 import C++ 静态类故用字面量，
@@ -2281,6 +2289,7 @@ Window {
                 else if (mobType === EntityManager.MobStalker) cause = PlayerState.Stalker
                 else if (mobType === EntityManager.MobTnt) cause = PlayerState.Tnt   // t494：TNT 爆炸死因（独立于潜行者自爆）
                 else if (mobType === EntityManager.MobIronGolem) cause = PlayerState.GolemSlain // t712：重拳直接击杀（旧落 Generic「不明原因」；摔落路径另走 GolemLaunchFall）
+                else if (mobType === EntityManager.MobNightwalker) cause = PlayerState.Nightwalker // t727 夜行者重拳（蓄力背后近战大伤害）
                 // t345 护甲减伤 + t476 保护族附魔减伤（mob 近战 / 箭 / 爆炸命中也走护甲值 + 附魔 EPF 减伤 + 耐久损耗）。
                 //   护甲值每点 4%（cap 0.80）+ 附魔 EPF 每点 4%（cap 0.80），合计 cap 0.85；至少 1 点穿透。
                 var finalAmt = amount
@@ -3617,6 +3626,14 @@ Window {
         // t487 银鱼（Silverfish；机制等价 MC 1.0 银鱼，§9 原创）：灰白甲壳底 + 深灰体节横纹 + 暗头斑（build_mob.py
         //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 小型虫几何（分节躯干 + 前伸小头 + 多对短腿）每面铺整张贴图。
         Texture { id: mobSilverfishTex; source: "qrc:/textures/mob_silverfish.png"; generateMipmaps: false }
+        // t727 夜行者（Nightwalker；机制等价 MC 1.0 末影人，§9 改名 + 原创）：暗紫黑细长黑影贴图（build_mob.py 程序
+        //   生成原创像素图，§9a 区隔不照搬 MC）。MobModel 细长人形几何每面铺整张贴图；眼睛是独立发光层（见下方
+        //   nightwalkerEyesTex，顶层小盒铺透明底紫白竖眼）。
+        Texture { id: mobNightwalkerTex; source: "qrc:/textures/mob_nightwalker.png"; generateMipmaps: false }
+        // t727 夜行者眼睛发光层：透明底 + 亮紫白竖眼（build_mob.py 程序生成）。QML 顶层小盒铺这张（MobModel 头
+        //   前上层）—— 机制等价末影人魅眼（§9 原创配色）。pack 命中 enderman_eyes 时切 pack 贴图（见下）。
+        Texture { id: mobNightwalkerEyesTex; source: "qrc:/textures/mob_nightwalker_eyes.png"; generateMipmaps: false }
+        Texture { id: nightwalkerEyesPackTex; source: resourcePack.active ? resourcePack.entitySource("nightwalker_eyes") : ""; generateMipmaps: false }
         // t421 资源包生物贴图（pack entity texture）：pack 启用且 resourcePack.mobTextureSource(mobType) 命中包内
         //   entity PNG 时，source 为 file:///<entityDir>/<mob>/<mob>.png → 各 mob delegate 把 baseColorMap 切到本
         //   Texture + MobModel.packTextured=true（几何按 T 字 UV 展开进贴图）。pack 关 / 包内无该贴图 → source 空 →
@@ -3639,6 +3656,9 @@ Window {
         //   修 dev-plan C「铁傀儡全白」：pack iron_golem.png 铁纹才显铁质（程序纯色铁灰 #7d848c 在用户视角读作「白」）。
         Texture { id: mobSnowGolemPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(12) : ""; generateMipmaps: false }
         Texture { id: mobIronGolemPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(13) : ""; generateMipmaps: false }
+        // t727 夜行者 pack 身体贴图（entity/enderman/enderman.png）：pack 命中 → MobModel T 字 UV 展开进该贴图 +
+        //   packTextured=true；pack 关 → source 空 → 回退 mobNightwalkerTex（程序生成暗紫黑影 + 独立眼层）。
+        Texture { id: mobNightwalkerPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(16) : ""; generateMipmaps: false }
 
         // t718 盔甲 layer 贴图（玩家 + 人形 mob 护甲壳共用；ArmorLayerBox 几何按 MC box-UV 从中采样）：
         //   5 tier × 2 layer = 10 张**静态** Texture 实例（tier/layer 各一——玩家与多个 mob 可同时穿不同
@@ -5980,6 +6000,7 @@ Window {
                         if (entMobType === EntityManager.MobWolf) return 0.42 - mobHalfH // t480 Wolf 犬科（腿底 0.42）
                         if (entMobType === EntityManager.MobOcelot) return 0.40 - mobHalfH // t481 Ocelot/Cat 猫科（腿底 0.40）
                         if (entMobType === EntityManager.MobSilverfish) return 0.15 - mobHalfH // t487 Silverfish 银鱼（腿底 0.15）
+                        if (entMobType === EntityManager.MobNightwalker) return 1.40 - mobHalfH // t727 Nightwalker（细长人形：MobModel 腿底本地 |y|=1.40，halfH=1.40 → offset=0 腿底贴地）
                         // t482/t483 防御造物：方块身 + 南瓜头堆叠 Model（不走 MobModel；局部原点 = 碰撞中心），
                         //   底部方块（腿/底雪块）底面须贴 collision 底面（= 地面）。底部方块 local y center = -halfH + 0.45
                         //   （0.45 = 底块半高）；mobModelYOff 把整组 Model 下移（halfH-0.45），使底块底面（-halfH-0.45...）
@@ -6752,6 +6773,84 @@ Window {
                                             baseColorMap: window.armorLayerTex(parent.bootArmId, 2)
                                             alphaCutoff: 0.5
                                             opacity: 0.99
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobNightwalker
+                        sourceComponent: Component {
+                            Node {
+                                id: nwBody
+                                // t727 夜行者（Nightwalker，mobType 16；机制等价 MC 1.0 末影人，§9 改名 + 原创
+                                //   模型/贴图）：MobModel 细长人形几何（窄躯干 + 小竖头 + 长细臂垂到近膝大摆 +
+                                //   长细腿）+ mob_nightwalker 暗紫黑影贴图。独立眼睛发光层（头前小盒铺透明底
+                                //   紫白竖眼，pack 命中 enderman_eyes 切贴图）。激怒动画（spec「瞪视激怒」）：
+                                //   身体 yaw 微抖（±3°）+ 头部（眼/嘴层）上下颤抖 + 嘴随怒气渐张 —— 由 nwRage
+                                //   （enragedAt）/rageProg（nightwalkerRageProgressAt）驱动；非激怒静止（继承父
+                                //   delegate yaw，无额外抖动）。
+                                property real nwRage: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.enragedAt(index) ? 1 : 0) : 0 }
+                                // 抖动相位钟（恒跑 0→1 / 0.16s 锯齿；ScalarAnimation 而非 vector 子属性——后者 QML
+                                //   不支持。值源动画不可控 running（8363 先例是 false+手动 restart，不适合绑定驱动）
+                                //   → 恒跑相位钟 + 幅度乘 nwRage 门控（非激怒 = 0 幅度静止）。delegate 稀少，零成本）。
+                                property real shakePhase: 0
+                                SequentialAnimation on shakePhase {
+                                    loops: Animation.Infinite
+                                    NumberAnimation { from: 0; to: 1; duration: 160 }
+                                }
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobNightwalker
+                                position: Qt.vector3d(0, mobModelYOff, 0) // t727 halfH=1.40 → offset 0（MobModel 腿底贴 collision 底面）
+                                // 激怒身体 yaw 微抖（±3°，spec「身体左颤抖」）；非激怒 0（静止继承父 yaw）。
+                                eulerRotation: Qt.vector3d(0, nwRage > 0 ? Math.sin(shakePhase * 6.2832) * 3 : 0, 0)
+                                Model {
+                                    geometry: MobModel {
+                                        mobType: 16
+                                        // t727 pack 命中 enderman → T 字 UV 展开；否则全脸 UV（程序生成 mob_nightwalker）。
+                                        packTextured: mobNightwalkerPackTex.source.toString().length > 0
+                                        walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
+                                    }
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        // 受击红闪（同 Shambler 语义）+ 天光调制。
+                                        baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
+                                        // t727 pack 命中 → pack enderman 身体贴图；否则程序生成 mob_nightwalker。
+                                        baseColorMap: mobNightwalkerPackTex.source.toString().length > 0 ? mobNightwalkerPackTex : mobNightwalkerTex
+                                    }
+                                }
+                                // 头部独立层：眼睛发光层 + 嘴（spec「脑袋沿嘴巴张开上下颤抖」——激怒时整层上下抖 +
+                                //   嘴随怒气进度渐张下翻，读作张嘴嘶吼）。层 Node 头心本地 (0,0.95,0)（MobModel 头几何）。
+                                Node {
+                                    id: nwHead
+                                    // 激怒头部上下颤抖（±0.07 格，0.16s loop；相位与身体微抖错开 90° → 上下+左右
+                                    //   双向抖的「发狂」观感）；非激怒 0（眼/嘴贴正位）。
+                                    property real headBob: nwBody.nwRage > 0 ? Math.sin(nwBody.shakePhase * 6.2832 + 1.5708) * 0.07 : 0
+                                    position: Qt.vector3d(0, headBob, 0)
+                                    Model { // 眼睛发光层（头前脸中位略凸防 z-fight；恒显——末影人标志性魅眼）
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, 0.95, -0.21); scale: Qt.vector3d(0.30, 0.12, 0.03)
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: "#e8dcff" // 紫白魅眼底色（NoLighting 恒亮——夜里也醒目）
+                                            // pack 命中 enderman_eyes → 贴图竖眼；否则程序生成 mob_nightwalker_eyes。
+                                            baseColorMap: nightwalkerEyesPackTex.source.toString().length > 0 ? nightwalkerEyesPackTex : mobNightwalkerEyesTex
+                                            alphaMode: PrincipledMaterial.Mask // 透明底 → 只显紫白竖眼（裁掉透明）
+                                            alphaCutoff: 0.5
+                                        }
+                                    }
+                                    Model { // 嘴（下颚条；激怒时下翻张开 = 张嘴威吓，非激怒半隐似抿嘴暗唇）
+                                        id: nwMouth
+                                        property real rageProg: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.nightwalkerRageProgressAt(index)) : 0 }
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, 0.78, -0.20); scale: Qt.vector3d(0.16, 0.05, 0.03)
+                                        // 下翻角：怒气进度 0→1 映射 20°→45°（渐张；瞬移时刻最张）。
+                                        eulerRotation: Qt.vector3d(nwBody.nwRage > 0 ? -(20 + rageProg * 25) : 0, 0, 0)
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            opacity: nwBody.nwRage > 0 ? 1.0 : 0.15 // 非激怒淡显（暗唇）；激怒全显
+                                            baseColor: "#140f18" // 近黑紫（嘴缝/口腔）
                                         }
                                     }
                                 }

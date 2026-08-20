@@ -509,6 +509,70 @@ def make_silverfish():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_nightwalker():
+    """夜行者（Nightwalker；机制等价 MC 1.0 末影人 Enderman，§9 改名 + 原创贴图）：暗紫黑细长人形体色。
+    暗紫黑底 #2a1f2a（与 EntityManager Nightwalker colorAt 同色）+ 深紫灰斑 + 近黑纵向「黑雾」条纹 + 几处
+    暗荧光紫点（读作「暗黑瘦长黑影」—— 末影人观感，原创配色非照搬 MC 皮肤）。每面铺同图（同全脸 UV 方案）；
+    配 MobModel 细长人形比例 + 独立发光眼层（Main.qml 补）→ 肉眼读作「神秘暗影夜行者」。"""
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0x2a, 0x1f, 0x2a, 255)   # 暗紫黑主色 #2a1f2a（与 EntityManager colorAt 同色）
+    fill(img, base)
+    # 深紫灰斑（暗影皮肤上的暗淡色块，散布固定坐标）
+    patch = (0x1e, 0x16, 0x22, 255)  # 深紫灰 #1e1622
+    blot(img, [
+        (2, 2), (3, 2), (2, 3),
+        (7, 4), (8, 4), (8, 5),
+        (12, 2), (13, 2), (13, 3),
+        (4, 8), (5, 8), (4, 9),
+        (10, 7), (11, 7), (11, 8),
+        (3, 12), (4, 12), (5, 12),
+        (11, 11), (12, 11), (12, 12),
+        (14, 5), (1, 6),
+    ], patch)
+    # 近黑纵向「黑雾」条纹（末影人黑雾散逸观感；少量纵向线免乱）
+    soot = (0x14, 0x0f, 0x18, 255)   # 近黑紫 #140f18
+    blot(img, [
+        (8, 1), (8, 2), (8, 3), (8, 4), (8, 6), (8, 7),
+        (3, 5), (3, 6), (3, 7), (3, 9),
+        (12, 8), (12, 9), (12, 10), (12, 13),
+    ], soot)
+    # 暗荧光紫点（残影微光点缀，暗示神秘的暗影生物）
+    glow = (0x6a, 0x4a, 0x8a, 255)  # 暗紫荧光 #6a4a8a
+    blot(img, [
+        (6, 6), (9, 11), (14, 14), (1, 13),
+    ], glow)
+    out = os.path.join(SRC, "mob_nightwalker.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def make_nightwalker_eyes():
+    """夜行者眼睛发光层（t727 独立眼贴图）：透明底 + 两枚亮紫白平行四边形眼（QML 顶层自发光小盒铺这张，
+    读作「竖瞳紫白魅眼」—— 末影人眼睛观感，原创配色非照搬）。透明底 → 叠加在 body 上只显眼；无 alpha 裁
+    切（Main.qml eye Model 用小盒 UV 全脸铺这张，仅眼睛区着紫白、其余透明不遮脸）。"""
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))  # 全透明底
+    eye = (0xe8, 0xdc, 0xff, 255)  # 亮紫白 #e8dcff（发光眼）
+    # 两枚竖眼（末影人特征竖瞳）：左（x 4-6）、右（x 9-11），y 5-10 微斜
+    blot(img, [
+        (4, 5), (5, 5), (6, 5),
+        (3, 6), (4, 6), (5, 6), (6, 6), (7, 6),
+        (4, 7), (5, 7), (6, 7),
+        (4, 8), (5, 8), (6, 8),
+        (3, 9), (4, 9), (5, 9), (6, 9), (7, 9),
+        (4, 10), (5, 10), (6, 10),
+        # 右眼（镜像）
+        (12, 5), (11, 5), (10, 5),
+        (13, 6), (12, 6), (11, 6), (10, 6), (9, 6),
+        (12, 7), (11, 7), (10, 7),
+        (12, 8), (11, 8), (10, 8),
+        (13, 9), (12, 9), (11, 9), (10, 9), (9, 9),
+        (12, 10), (11, 10), (10, 10),
+    ], eye)
+    out = os.path.join(SRC, "mob_nightwalker_eyes.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def main():
     make_pig()
     make_cow()
@@ -522,6 +586,8 @@ def main():
     make_cat_ginger()
     make_cat_cream()
     make_silverfish()
+    make_nightwalker()
+    make_nightwalker_eyes()
 
 
 if __name__ == "__main__":

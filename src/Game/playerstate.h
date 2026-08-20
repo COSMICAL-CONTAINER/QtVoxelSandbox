@@ -100,8 +100,9 @@ public:
     //   携 MobIronGolem → QML 映射到本死因（旧版 MobIronGolem 不在映射表 → 落 Generic「不明原因」）。
     //   t655/t712 序号兼容：GolemLaunchFall=12 / GolemSlain **均追加在枚举末尾** —— Hotbar::
     //   armorProtectionFactor 按序数 switch（case 1..11，default 兜底），DeathCause 不进存档（respawn /
-    //   加载均复位 Generic），追加不破坏既有映射。
-    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain };
+    //   加载均复位 Generic），追加不破坏既有映射。t727 再追 1：Nightwalker=被夜行者重拳击杀（末影人，§9 改名；
+    //   aiNightwalker 蓄力重拳 mobAttackedPlayer 携 MobNightwalker → QML 映射本死因，文案「被夜行者重拳击杀」）。
+    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain, Nightwalker };
     Q_ENUM(DeathCause)
 
     explicit PlayerState(QObject *parent = nullptr);

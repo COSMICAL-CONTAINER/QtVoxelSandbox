@@ -249,6 +249,7 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
         case MobSnowGolem: e.halfW = 0.35f; e.halfH = 0.90f; break; // 0.7×1.8 雪傀儡（柱身 2 雪块 + 南瓜头；t482）
         case MobIronGolem: e.halfW = 0.60f; e.halfH = 1.20f; break; // 1.2×2.4 铁傀儡（T 形铁块 + 南瓜头；t483）
         case MobSilverfish: e.halfW = 0.22f; e.halfH = 0.15f; e.hostile = true; break; // 0.44×0.30 小型虫（机制等价 MC 1.0 银鱼 0.43×0.18 宽矮；要塞刷怪笼刷出，t487）
+        case MobNightwalker: e.halfW = 0.35f; e.halfH = 1.40f; e.hostile = true; break; // 0.7×2.9 三格高细长人形（机制等价 MC 1.0 末影人 3 格高；怕水/瞪视激怒/弹射免疫/近战传送，t727）
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
@@ -489,9 +490,11 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
         color = QStringLiteral("#5fa83a"); // Stalker：青绿色（机制等价 MC 苦力怕；原创配色非照搬）
     } else if (mobType == MobSilverfish) {
         color = QStringLiteral("#c8c2b8"); // Silverfish：灰白甲壳色（机制等价 MC 银鱼；原创配色，t487）
+    } else if (mobType == MobNightwalker) {
+        color = QStringLiteral("#2a1f2a"); // Nightwalker：暗紫黑体色（机制等价 MC 末影人暗黑体型；原创配色，t727）
     } else {
         color = QStringLiteral("#4a6a3a"); // Shambler：暗绿腐肉色（机制等价 MC 僵尸；原创配色）
-        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones/Stalker/Silverfish 一律按 Shambler
+        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones/Stalker/Silverfish/Nightwalker 一律按 Shambler
     }
     spawnMobTyped(x, y, z, mobType, color, health);
     // spawnMobTyped 内 switch 已对 Shambler/Bones/Stalker/Silverfish 设 hostile=true；spawnHostileMob 仅收口语义入口。
@@ -711,10 +714,13 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                 const float effSkyL = float(skyL) * skyBrightness; // 天光乘昼夜（夜间→0、白天→原值）
                 const float effLight = std::max(effSkyL, float(blkL));
                 if (effLight >= kSpawnLightThreshold) continue; // spec「light<阈值(7)」
-                // 合格点：spawn 一个敌对（Shambler / Bones / Stalker 等概率；t284 加 Stalker）。spawnMobTyped 内
-                //   kCap 守卫；达 cap 静默跳过。机制等价 MC 1.0 黑暗刷怪池（僵尸 / 骷髅 / 苦力怕）。
-                const int pickMob = rng->bounded(3);
-                const int spawnType = (pickMob == 0) ? MobShambler : (pickMob == 1) ? MobBones : MobStalker;
+                // 合格点：spawn 一个敌对（Shambler / Bones / Stalker / Nightwalker 等概率；t284 加 Stalker；
+                //   t727 加 Nightwalker 夜行者 —— 同 shambler 夜间黑暗生成）。spawnMobTyped 内 kCap 守卫；达 cap
+                //   静默跳过。机制等价 MC 1.0 黑暗刷怪池（僵尸 / 骷髅 / 苦力怕 / 末影人）。
+                const int pickMob = rng->bounded(4);
+                const int spawnType = (pickMob == 0) ? MobShambler
+                                    : (pickMob == 1) ? MobBones
+                                    : (pickMob == 2) ? MobStalker : MobNightwalker;
                 spawnHostileMob(cx, cy, cz, spawnType);
                 qCInfo(lcEnt) << "hostile spawned type" << spawnType
                              << "at" << cx << cy << cz << "effLight=" << effLight
@@ -1038,6 +1044,41 @@ float EntityManager::golemAttackPoseAt(int i) const
     if (p < 0.0f) p = 0.0f;
     if (p > 1.0f) p = 1.0f;
     return p;
+}
+
+// t727 夜行者激怒态（enraged=true）：QML delegate 据 it 播张嘴 + 上下颤抖动画 + 身体微抖。仅 MobNightwalker
+//   且已激怒返 true；非 Nightwalker / 未激怒 / 越界 → false。
+bool EntityManager::enragedAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    return e.kind == Mob && e.mobType == MobNightwalker && e.enraged;
+}
+
+// t727 夜行者激怒后「瞬移到玩家背后」进度（0..1；见头文件注释）：enraged 后 rageTimer/NightwalkerRageTeleportDelay。
+float EntityManager::nightwalkerRageProgressAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobNightwalker || !e.enraged) return 0.0f;
+    float p = e.rageTimer / kNightwalkerRageTeleportDelay;
+    if (p < 0.0f) p = 0.0f;
+    if (p > 1.0f) p = 1.0f;
+    return p;
+}
+
+// t727 玩家视线状态注入（PlayerController 每 tick 调）：存眼睛位置 + 归一视线方向供夜行者瞪视激怒判定。
+void EntityManager::setPlayerSight(const QVector3D &eyePos, const QVector3D &lookDir)
+{
+    m_playerEye = eyePos;
+    const float len = lookDir.length();
+    if (len > 1e-5f) {
+        m_playerLook = lookDir / len; // 归一（点积对方向敏感，非归一会错判眼对眼）
+        m_playerSightValid = true;
+    } else {
+        m_playerLook = QVector3D(0, 0, -1); // 退化零向量 → 默认 -Z 并标无效（不误判瞪视）
+        m_playerSightValid = false;
+    }
 }
 
 // t635 铁傀儡反击锁定（PlayerController::attackMob 目标是铁傀儡时调；见头文件注释）。
@@ -3070,6 +3111,271 @@ bool EntityManager::aiStalker(int idx, Entity &e, float dt, World *world, const 
     return moved;
 }
 
+// t727 夜行者 AI（tick 内 hostile mob == MobNightwalker 分支调；详见头文件注释）。机制等价 MC 1.0 末影人。
+//   分层同 aiHostile：只读 World::blockAt/isSolid + 自身数据；伤害走 damageEntity / mobAttackedPlayer 语义信号；
+//   瞬移只改自身数据（world 只读找落点），无向下写栅格。§9 区隔，零 MC 专名。
+bool EntityManager::aiNightwalker(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
+                                  float worldW, float worldD, float speedScale)
+{
+    // 计时器递减（不论状态）
+    if (e.teleportCooldown > 0.0f) {
+        e.teleportCooldown -= dt;
+        if (e.teleportCooldown < 0.0f) e.teleportCooldown = 0.0f;
+    }
+    if (e.attackCooldown > 0.0f) {
+        e.attackCooldown -= dt;
+        if (e.attackCooldown < 0.0f) e.attackCooldown = 0.0f;
+    }
+
+    bool moved = false;
+
+    // ---- (1) 怕水（机制等价 MC 末影人怕水）：身体中心格 / 脚位格 == Water → 每秒扣 1HP + 瞬移逃离 ----
+    //   body 中心格（深水悬浮）+ 脚位格（浅水站立齐腰）任一水 → 判定「碰到水」。timeSlice dt（AI 节流帧传
+    //   累积 aiDt）→ 平均每秒扣 1HP（同火烧 burning 模式）。
+    const int fx = qFloor(e.pos.x()), fz = qFloor(e.pos.z());
+    const int bodyY = qFloor(e.pos.y());                 // mob 中心格（头身中段）
+    const int feetY = qFloor(e.pos.y() - e.halfH);       // 脚位格（AABB 底面）
+    const bool inWater = (bodyY >= 0 && world->blockAt(fx, bodyY, fz) == BlockRegistry::Water)
+                      || (feetY >= 0 && world->blockAt(fx, feetY, fz) == BlockRegistry::Water);
+    if (inWater) {
+        e.waterDamageAccum += dt;
+        if (e.waterDamageAccum >= kNightwalkerWaterDamageTick) {
+            e.waterDamageAccum = 0.0f;
+            damageEntity(idx, 1); // 每秒 1HP（红闪 + 归零 mobDied；复用受击链）
+            if (e.dead) return false; // 水伤致死 → 本帧不再动（尸体走死亡动画）
+        }
+        if (e.teleportCooldown <= 0.0f
+            && teleportEntity(idx, e, world, kNightwalkerTeleportMin, kNightwalkerTeleportMax)) {
+            moved = true; // teleportEntity 内已置 cooldown + 清 enraged（逃离打断激怒）
+        }
+    } else {
+        e.waterDamageAccum = 0.0f;
+    }
+
+    // ---- (3) 激怒时序（enraged=true）：原地发怒 → 满 delay 瞬移到玩家背后 → 蓄力重拳 ----
+    if (e.enraged) {
+        e.rageTimer += dt;
+        if (e.rageTimer >= kNightwalkerRageTeleportDelay) {
+            if (teleportBehindPlayer(idx, e, world, m_playerEye, m_playerLook)) {
+                // 瞬移背后成功：清激怒 → 进蓄力段。windupTimer 置极小正触发值（>0 才进入段 (4)；0 会被段 (4)
+                //   的 `windupTimer > 0` 守卫跳过 → 永不蓄力出拳的死分支）。段 (4) 首帧 += aiDt 从触发值起累。
+                e.enraged = false;
+                e.rageTimer = 0.0f;
+                e.windupTimer = 1e-6f;
+                e.attackCooldown = 0.0f; // 确保蓄力满即可出拳（不被陈旧冷却卡住）
+                return true;
+            } else {
+                // 背后无安全落点（被围 / 贴墙）：放弃本次瞬移，退回 idling（不清 rageTimer 但清 enraged）；
+                //   teleportBehindPlayer 内部已清 enraged（防卡在激怒态白吼）。
+                e.enraged = false;
+                e.rageTimer = 0.0f;
+            }
+        }
+        // 激怒早期（未到瞬移时刻）或瞬移失败：原地发怒不动（QML 据 enragedAt/rageProgressAt 播张嘴+颤抖动画）
+        e.wanderSpeed = 0.0f;
+        e.moveSpeed = 0.0f;
+        return false;
+    }
+
+    // ---- (4) 蓄力段（windupTimer>0）：瞬移背后后等 kNightwalkerWindup 0.5s 出重拳 ----
+    if (e.windupTimer > 0.0f) {
+        e.windupTimer += dt;
+        if (e.windupTimer >= kNightwalkerWindup) {
+            e.windupTimer = 0.0f;
+            // 重拳（heavy punch）：近战攻击玩家，伤害 kNightwalkerAttackDamage（spec「重拳 5-6」→ 6 HP）。
+            //   复用 aiHostile attack 段：XZ <= kAttackRange + 垂直同层 + 全局节流（t321 串行化，防多 mob 齐抽）。
+            const float dx = playerPos.x() - e.pos.x();
+            const float dz = playerPos.z() - e.pos.z();
+            const float dy = playerPos.y() - e.pos.y();
+            const float dist = std::sqrt(dx * dx + dz * dz);
+            if (dist <= kAttackRange && std::abs(dy) <= kAttackVertRange && m_playerHitCooldown <= 0.0f) {
+                e.attackCooldown = kAttackCooldown;
+                m_playerHitCooldown = kPlayerHitThrottle;
+                float kbX, kbZ;
+                if (dist > 1e-3f) { kbX = dx / dist; kbZ = dz / dist; }
+                else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); }
+                m_wolfTarget = idx; // 重拳伤玩家 → 驯服狼反击本夜行者（同 aiHostile 模式）
+                emit mobAttackedPlayer(kNightwalkerAttackDamage, e.mobType, kbX, kbZ);
+                qCInfo(lcEnt) << "nightwalker" << idx << "heavy punch player for"
+                              << kNightwalkerAttackDamage << "HP";
+            }
+        }
+        // 蓄力期站立不动（等待出拳；windupTimer 未到 0 前原地）
+        e.wanderSpeed = 0.0f;
+        e.moveSpeed = 0.0f;
+        return false;
+    }
+
+    // ---- (2) 瞪视激怒（enraged=false）：玩家视线眼对眼 + 距 < 32 + 它面朝玩家，持续 2s → 激怒 ----
+    //   仅最近一只可激怒（nearestEnragableNightwalker 守卫，防多只齐怒 —— 只能凝视最近那只）。
+    if (!e.enraged && m_playerSightValid) {
+        const int nearest = nearestEnragableNightwalker(m_playerEye, kNightwalkerStareRange);
+        if (nearest == idx) {
+            // 玩家视线朝夜行者（头顶点）的点积（眼对眼）：>0.99 = 准星大致正中头颅。
+            const QVector3D head = QVector3D(e.pos.x(), e.pos.y() + e.halfH * 0.72f, e.pos.z());
+            const QVector3D toHead = head - m_playerEye;
+            const float hl = toHead.length();
+            float dot = 0.0f;
+            if (hl > 1e-4f) {
+                const QVector3D u = toHead / hl;
+                dot = QVector3D::dotProduct(m_playerLook, u);
+            }
+            // 水平距离（stare range 用 XZ）：
+            const float pdx = e.pos.x() - m_playerEye.x();
+            const float pdz = e.pos.z() - m_playerEye.z();
+            const float hDist = std::sqrt(pdx * pdx + pdz * pdz);
+            // 它面朝玩家（近似：玩家在 mob 前半球，前方锥 dot>0.3；机制等价 MC「对视」需正脸朝向）：
+            const float fwdX = -std::sin(e.yawRad), fwdZ = -std::cos(e.yawRad); // mob 前向 dir=(-sin,-cos)
+            float mobDot = 0.0f;
+            const float toP = hl > 1e-4f ? hl : 1.0f;
+            mobDot = (fwdX * (e.pos.x() - m_playerEye.x()) + fwdZ * (e.pos.z() - m_playerEye.z())) / toP;
+            if (dot > 0.99f && hDist < kNightwalkerStareRange && mobDot > 0.3f) {
+                e.enrageTimer += dt; // 持续瞪视累积
+            } else {
+                e.enrageTimer = 0.0f; // 视线移开 / 转脸 → 归零
+            }
+            if (e.enrageTimer >= kNightwalkerStareTime) {
+                e.enraged = true;
+                e.rageTimer = 0.0f;
+                e.windupTimer = 0.0f;
+                qCInfo(lcEnt) << "nightwalker" << idx << "ENRAGED by player stare";
+            }
+        } else {
+            e.enrageTimer = 0.0f; // 非最近 / 已有更近的可激怒者 → 不累积
+        }
+    }
+
+    // ---- idling（非激怒 / 非蓄力 / 不在水）：游荡（aiWander，机制等价 MC 末影人平时中性游荡，不主动追玩家；
+    //   瞪视是挑衅入口。速度含 speedScale 水中减速但 Nightwalker 怕水不入水，纯兜底）。----
+    return aiWander(e, dt, world, worldW, worldD, speedScale);
+}
+
+// t727 最近「可被激怒」的夜行者查找（瞪视激怒守卫；见头文件注释）。只读自身数据，const。
+int EntityManager::nearestEnragableNightwalker(const QVector3D &playerEye, float range) const
+{
+    int best = -1;
+    float bestD = range * range;
+    for (size_t mi = 0; mi < m_entities.size(); ++mi) {
+        const Entity &m = m_entities[mi];
+        if (!m.alive || m.kind != Mob || m.dead || m.mobType != MobNightwalker || m.enraged) continue;
+        const float dx = m.pos.x() - playerEye.x();
+        const float dz = m.pos.z() - playerEye.z();
+        const float d2 = dx * dx + dz * dz;
+        if (d2 < bestD) { bestD = d2; best = int(mi); }
+    }
+    return best;
+}
+
+// t727 落点是否被夜行者占用（瞬移「非实体」守卫；见头文件注释）。排除 self。const 只读。
+bool EntityManager::nightwalkerSpotFree(World *world, float cx, float cy, float cz, float halfW, float halfH,
+                                        int selfIdx) const
+{
+    Q_UNUSED(world);
+    for (size_t mi = 0; mi < m_entities.size(); ++mi) {
+        if (int(mi) == selfIdx) continue;
+        const Entity &m = m_entities[mi];
+        if (!m.alive || m.kind != Mob || m.dead) continue;
+        if (std::abs(m.pos.x() - cx) < (m.halfW + halfW)
+            && std::abs(m.pos.z() - cz) < (m.halfW + halfW)
+            && std::abs(m.pos.y() - cy) < (m.halfH + halfH)) {
+            return false; // 与其它活体 mob AABB 重叠 → 占位
+        }
+    }
+    return true;
+}
+
+// t727 通用瞬移（怕水 / 弹射物 / 近战 dodge 逃逸共用；见头文件注释）。随机 [minDist,maxDist] 水平距离 + 随机
+//   方向，迭代找「落点格非水 + 下方 solid 支撑 + AABB 非实体占用」空位。找到 → 移动 + 置 cooldown + 清 enraged。
+bool EntityManager::teleportEntity(int idx, Entity &e, World *world, float minDist, float maxDist)
+{
+    if (!world) return false;
+    auto *rng = QRandomGenerator::global();
+    const float wW = float(world->width()), wD = float(world->depth());
+    const float loX = e.halfW, hiX = wW - e.halfW, loZ = e.halfW, hiZ = wD - e.halfW;
+    for (int attempt = 0; attempt < kNightwalkerTeleportAttempts; ++attempt) {
+        const float dist = minDist + rng->bounded(maxDist - minDist); // [min,max)
+        const float ang = float(rng->bounded(6283)) / 1000.0f;        // [0, 6.283) rad
+        const float nx = std::cos(ang), nz = std::sin(ang);
+        const float txF = e.pos.x() + nx * dist;
+        const float tzF = e.pos.z() + nz * dist;
+        if (txF < loX || txF > hiX || tzF < loZ || tzF > hiZ) continue; // 越界重试
+        const int tx = qFloor(txF), tz = qFloor(tzF);
+        // 找下方 solid 支撑（从当前高度稍上往下扫，跳进低洼 / 上平台自适应）
+        const int startY = qFloor(e.pos.y()) + 1;
+        int groundY = -1;
+        for (int y = startY; y >= 0; --y) {
+            if (world->isSolid(tx, y, tz)) { groundY = y; break; }
+        }
+        if (groundY < 0) continue; // 悬空（深坑）→ 重试
+        // 落点立位（feet 在 groundY+1）：mob 中心 y = groundY+1 + halfH
+        const float cy = float(groundY + 1) + e.halfH;
+        const int bodyY = qFloor(cy);
+        if (bodyY < 0) continue;
+        if (world->blockAt(tx, bodyY, tz) == BlockRegistry::Water) continue;     // 身体中段水 → 重试（怕水）
+        if (world->blockAt(tx, qFloor(cy - e.halfH), tz) == BlockRegistry::Water) continue; // 脚位水
+        if (world->isSolid(tx, bodyY, tz) || world->isSolid(tx, bodyY + 1, tz)) continue; // 立位 / 头位被占
+        if (!nightwalkerSpotFree(world, txF, cy, tzF, e.halfW, e.halfH, idx)) continue;    // 撞 mob
+        // 落定
+        e.pos = QVector3D(txF, cy, tzF);
+        e.resting = true;
+        e.vy = 0.0f; e.vx = 0.0f; e.vz = 0.0f;
+        e.teleportCooldown = kNightwalkerTeleportCooldown;
+        e.enraged = false; e.rageTimer = 0.0f; e.windupTimer = 0.0f;
+        return true;
+    }
+    return false; // 全试失败（被围困 / 地形不允许）→ 原地（不移动）
+}
+
+// t727 瞬移到玩家背后（激怒满 rageTimer 后调；见头文件注释）。落点 = 玩家眼睛 − 玩家 lookDir×1.6，往下扫贴
+//   地支撑；占位 / 水 → 近距随机兜底。
+bool EntityManager::teleportBehindPlayer(int idx, Entity &e, World *world, const QVector3D &playerEye,
+                                         const QVector3D &playerLook)
+{
+    if (!world) return false;
+    const QVector3D behind = playerEye - playerLook * 1.6f;
+    const int tx = qFloor(behind.x()), tz = qFloor(behind.z());
+    if (tx < 0 || tz < 0 || tx >= world->width() || tz >= world->depth())
+        return teleportEntity(idx, e, world, 1.0f, 6.0f); // 越界 → 近距随机兜底
+    const int startY = qFloor(playerEye.y()) + 2;
+    int groundY = -1;
+    for (int y = startY; y >= 0; --y) {
+        if (world->isSolid(tx, y, tz)) { groundY = y; break; }
+    }
+    if (groundY < 0) return teleportEntity(idx, e, world, 1.0f, 6.0f); // 背后悬空 → 兜底
+    const float cy = float(groundY + 1) + e.halfH;
+    const int bodyY = qFloor(cy);
+    if (world->blockAt(tx, bodyY, tz) == BlockRegistry::Water) return teleportEntity(idx, e, world, 1.0f, 6.0f);
+    if (world->isSolid(tx, bodyY, tz) || world->isSolid(tx, bodyY + 1, tz))
+        return teleportEntity(idx, e, world, 1.0f, 6.0f);
+    if (!nightwalkerSpotFree(world, behind.x(), cy, behind.z(), e.halfW, e.halfH, idx))
+        return teleportEntity(idx, e, world, 1.0f, 6.0f);
+    // 落定 + 面朝玩家
+    e.pos = QVector3D(behind.x(), cy, behind.z());
+    const float pdx = playerEye.x() - e.pos.x();
+    const float pdz = playerEye.z() - e.pos.z();
+    e.yawRad = std::atan2(-pdx, -pdz);
+    e.resting = true;
+    e.vy = 0.0f; e.vx = 0.0f; e.vz = 0.0f;
+    e.teleportCooldown = kNightwalkerTeleportCooldown;
+    e.enraged = false; e.rageTimer = 0.0f; e.windupTimer = 0.0f;
+    return true;
+}
+
+// t727 夜行者近战命中瞬移躲避（PlayerController::attackMob 调；见头文件注释）。调用即躲（30% 概率由 caller 掷）。
+bool EntityManager::nightwalkerDodge(int i, World *world)
+{
+    if (!world) return false;
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Mob || e.dead || e.mobType != MobNightwalker) return false;
+    if (e.teleportCooldown > 0.0f) return false; // 冷却内不连躲（防 spam）
+    if (teleportEntity(i, e, world, kNightwalkerTeleportMin, kNightwalkerTeleportMax)) {
+        qCInfo(lcEnt) << "nightwalker" << i << "dodged melee via teleport";
+        return true;
+    }
+    return false;
+}
+
 // t284 Stalker 爆炸（aiStalker fuse 满时调；详见头文件 detonateStalker 注释）。机制等价 MC 苦力怕球形爆炸。
 //   分层（PLAN §2）：向下写 World（setWaterSilent 破坏方块 + worldChanged 重建 mesh）+ 发语义信号
 //   （explosion 音/视反馈、mobAttackedPlayer 伤害玩家）；只读 World::blockAt 判定破坏目标。无向上依赖。
@@ -3670,6 +3976,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (next.x() >= ex2 && next.x() <= m.pos.x() + m.halfW + kArrowHitHalfW
                         && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kArrowHitHalfW
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kArrowHitHalfW) {
+                        // t727 夜行者弹射物免疫（spec「弓箭…攻击不到会瞬移」；机制等价 MC 末影人远程免疫）：命中的
+                        //   是夜行者 → 不扣血 / 不击退 / 不落定（箭穿过），夜行者瞬移躲避（dodge，若冷却到）。arrow 不
+                        //   remove → 继续飞行（穿过夜行者原站位，机制等价「射不中会瞬移逃开的怪」）。
+                        if (m.mobType == MobNightwalker) {
+                            nightwalkerDodge(mi, world);
+                            break; // 穿过（不落定）；夜行者已瞬移走，本帧不再判定其它 mob（箭继续飞行）
+                        }
                         damageEntity(mi, e.arrowDamage); // 扣血 + 红闪 + 归零 mobDied（内含 dead/越界/amount 守）
                         // t553 箭命中击退（机制对齐 MC 1.0 箭命中推开生物；用户「雪球应像箭一样击退」的参照 ——
                         //   本工程箭此前也不击退，一并补上使投射物行为一致）。方向 = 箭水平速度归一化（箭 → mob）；
@@ -3756,6 +4069,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (next.x() >= ex2 && next.x() <= m.pos.x() + m.halfW + kSnowballHitHalfW
                         && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kSnowballHitHalfW
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kSnowballHitHalfW) {
+                        // t727 夜行者弹射物免疫（spec「雪球…攻击不到会瞬移」）：命中夜行者 → 不击退 / 不减速 / 不落定
+                        //   （雪球穿过），夜行者瞬移躲避。仅夜行者免疫（其余 mob 走下方既有击退 / 减速 / 伤害分流）。
+                        if (m.mobType == MobNightwalker) {
+                            nightwalkerDodge(mi, world);
+                            break; // 穿过（不落定），本帧不再判定其它 mob（夜行者已跳走）
+                        }
                         // t505 按发射者分流伤害：golem(damage>0) → 扣血走 damageEntity（红闪 + 归零 mobDied 掉落）；
                         //   player(damage==0) → damageEntity 因 amount<=0 早退不扣血，改手动设 hurtFlash 触发红闪。
                         //   仅敌对扣血 / 红闪（被动生物 0 伤害 0 红闪，机制对标 MC 雪球不伤友好生物）；击退 / 减速
@@ -3837,6 +4156,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (next.x() >= ex2 && next.x() <= m.pos.x() + m.halfW + kEggHitHalfW
                         && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kEggHitHalfW
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kEggHitHalfW) {
+                        // t727 夜行者弹射物免疫（spec「鸡蛋…攻击不到会瞬移」）：命中夜行者 → 不击退 / 不落定（蛋穿
+                        //   过），夜行者瞬移躲避。仅夜行者免疫（其余 mob 走下方既有击退）。
+                        if (m.mobType == MobNightwalker) {
+                            nightwalkerDodge(mi, world);
+                            break; // 穿过（不落定），本帧不再判定其它 mob（夜行者已跳走）
+                        }
                         // 击退：方向 = 鸡蛋水平速度归一化（鸡蛋 → mob），同雪球命中分支模式（慢速退化由
                         //   knockback 内 yaw 兜底）。不 damageEntity（0 伤害语义，机制对标 MC 蛋投掷物）。
                         const float evx = e.vx, evz = e.vz;
@@ -4275,6 +4600,14 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (e.chasing) dirty = true;
                     // 引爆当帧移除：detonateStalker 置 exploded=true → 跳过后续重力 / resting（尸体即除）。
                     if (e.exploded) { toRemove.push_back(idx); continue; }
+                } else if (e.mobType == MobNightwalker) {
+                    // t727 Nightwalker（夜行者；机制等价 MC 1.0 末影人）：独立 AI —— 平时近战追击（类 aiHostile），
+                    //   叠加瞪视激怒（enraged）+ 瞬移背后重拳 + 怕水扣血瞬移。aiNightwalker 内部据 enraged 分时序。
+                    if (aiNightwalker(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    // 激怒时序（rageTimer/windupTimer/enrageTimer）+ 怕水水伤累积在 aiNightwalker 内推进；与 Bones 拉弓 /
+                    //   Stalker 蓄力同模式 —— 即使未移动（激怒原地发抖 / 蓄力站立），状态仍在变 → 每帧 bump 让 QML
+                    //   激怒动画绑定刷新。
+                    if (e.mobType == MobNightwalker && (e.enraged || e.enrageTimer > 0.0f)) dirty = true;
                 } else {
                     if (aiHostile(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                 }

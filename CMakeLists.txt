@@ -451,6 +451,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/mob_cat_ginger.png         # t481 猫变体 1 姜黄虎斑（驯服豹猫随机毛色；build_mob.py）
         textures/mob_cat_cream.png          # t481 猫变体 2 奶油暹罗（驯服豹猫随机毛色；build_mob.py）
         textures/mob_silverfish.png         # t487 银鱼（Silverfish；机制等价 MC 1.0 银鱼，§9 原创）灰白甲壳+体节横纹贴图（build_mob.py）
+        textures/mob_nightwalker.png        # t727 夜行者（Nightwalker；机制等价 MC 1.0 末影人，§9 原创）暗紫黑细长黑影贴图（build_mob.py）
+        textures/mob_nightwalker_eyes.png   # t727 夜行者独立眼睛发光层（透明底 + 亮紫白竖眼；QML 顶层小盒铺，pack 关同 pack 命中并存
         textures/entity_nightwalker.png     # t717 夜行者（Nightwalker；机制等价 MC enderman，§9 改名）64×32 实体 UV 贴图（build_entities_pack.py；黑曜石黑体+微紫缀点；t727 接入）
         textures/entity_nightwalker_eyes.png # t717 夜行者眼睛发光层（全透明+头前两粒紫光眼；机制等价 MC enderman_eyes；t727 接入）
         textures/entity_emberling.png       # t717 燃烬者（Emberling；机制等价 MC blaze，§9 改名）64×32 贴图（黄焰头+白热核+烟灰棒；t728 接入）

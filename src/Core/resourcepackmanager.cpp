@@ -869,6 +869,7 @@ const QList<QPair<int, QString>> &mobEntityMap()
         {8, QStringLiteral("chicken/chicken.png")}, // MobChicken → entity/chicken/chicken.png
         {12, QStringLiteral("snow_golem.png")},     // MobSnowGolem → entity/snow_golem.png（扁平；demo 包无子目录，mobTextureSource 子目录 miss 后回退扁平命中）
         {13, QStringLiteral("iron_golem/iron_golem.png")}, // MobIronGolem → entity/iron_golem/iron_golem.png（子目录；mobTextureSource 命中子目录）
+        {16, QStringLiteral("enderman/enderman.png")}, // MobNightwalker → entity/enderman/enderman.png（t727 夜行者，机制等价 MC enderman，§9 改名；眼睛发光层走 entitySource("nightwalker_eyes") 独立取，不占本 body 表项）
     };
     return kMap;
 }

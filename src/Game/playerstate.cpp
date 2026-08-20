@@ -55,6 +55,7 @@ QString PlayerState::deathCauseText() const
     case Cactus:       return QStringLiteral("被仙人掌扎死");
     case GolemLaunchFall: return QStringLiteral("被铁傀儡击飞摔死"); // t655 归属窗口内的摔落（普通坠落仍「从高处坠落」）
     case GolemSlain:      return QStringLiteral("被铁傀儡击杀"); // t712：近距重拳直接击杀（非摔落路径）
+    case Nightwalker:     return QStringLiteral("被夜行者重拳击杀"); // t727 近距蓄力重拳（末影人，§9 改名）
     case Generic:
     default:           return QStringLiteral("不明原因");
     }

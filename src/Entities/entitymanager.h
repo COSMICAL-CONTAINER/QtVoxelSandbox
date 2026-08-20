@@ -145,7 +145,19 @@ public:
     //   （MobModel 小型虫形：分节躯干 + 前伸小头 + 多对短腿）/ 贴图（程序生成灰白甲壳 + 体节纹）全原创，仅机制
     //   对齐「小虫群涌追击」。要塞 placeStronghold 在传送门房放银鱼刷怪笼（Spawner state 带 SpawnerStateSilverfishFlag）→
     //   tickSpawners 据该 flag 刷 Silverfish（区别于地牢 Shambler/Bones）。Entity hostilesCount / hostileNearby 均含 Silverfish。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）
+    //   t727 夜行者（Nightwalker）= MobNightwalker(16)：机制等价 MC 1.0 末影人（Enderman）—— 3 格高（halfH=1.40 =
+    //   2.9 高）细长人形敌对生物。hostile=true → 走 tickHostileLife（白天暴晒燃烧 / 远距消失 + 黑暗刷怪调度，
+    //   同 Shambler/Bones/Stalker）。独特机制（PLAN §9 区隔，零 MC 专名）：
+    //     - 怕水：身体 / 脚位格 == Water → 每秒扣 1HP（damageEntity）+ 瞬移逃离（teleportEntity 随机 8-16 格水平
+    //       收敛，找非实体 / 非水落点）。
+    //     - 瞪视激怒：玩家视线点积朝它 >0.99 眼对眼 + 距 <32 + 它面朝玩家，持续 >2s → enraged=true（仅激怒最近
+    //       一只防多只齐怒）。激怒后 ~1s 瞬移到玩家背后（玩家 pos − 玩家 lookDir×1.6 贴地）→ 停顿 0.5s → 近战
+    //       重拳（kNightwalkerAttackDamage 5-6 HP，mobAttackedPlayer 链）。
+    //     - 弹射物免疫：箭 / 雪球 / 蛋命中的目标是 Nightwalker → 不落定（projectile dodge，瞬移躲避）。
+    //     - 近战命中概率传送：玩家近战打中它 → 30% 概率瞬移躲避。
+    //   tick Mob 分支据 mobType==MobNightwalker 路由到 aiNightwalker（替代 aiHostile）。§9 原创：名称 / 模型
+    //   （MobModel 细长人形 + 独立眼睛发光层）/ 贴图（程序生成暗紫黑 + 眼白层）全原创，仅机制对齐。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -481,11 +493,24 @@ public:
     //   机制等价 MC 1.0 铁傀儡上勾拳双臂前举；rev2-C6 正角=向前，同骨架瞄准臂约定）。非 IronGolem / 未蓄
     //   力 / 越界 → 0。蓄力期 revision 每帧 bump。
     Q_INVOKABLE float golemAttackPoseAt(int i) const;
+    // t727 第 i 个 mob 是否夜行者激怒态（enraged=true；瞪视激怒触发，QML delegate 据 it 播「张嘴 + 上下颤抖」
+    //   激怒动画 + 身体微抖）。非 Nightwalker / 未激怒 / 越界 → false。revision 在激怒时序每帧 bump 让绑定刷新。
+    Q_INVOKABLE bool enragedAt(int i) const;
+    // t727 夜行者激怒后「瞬移到玩家背后」进度（0..1）：enraged 后 rageTimer/kNightwalkerRageTeleportDelay → 达 1
+    //   即瞬移背后进入蓄力。供 QML 激怒动画强度（张嘴幅度 / 颤抖频率随进度加剧）。非 Nightwalker / 未激怒 → 0。
+    Q_INVOKABLE float nightwalkerRageProgressAt(int i) const;
     // t635 铁傀儡反击锁定（PlayerController::attackMob 目标是 MobIronGolem 时调；Game→Entities 向下依赖，
     //   同 setWolfTarget 模式）：golemAngry=true + 重置记忆 kGolemAngryMemory → aiIronGolem 追击玩家；
     //   近距蓄力（kGolemWindup 抬臂动画）满 → 重拳（golemLaunchedPlayer 上抛 + mobAttackedPlayer 大伤害）。
     //   非 MobIronGolem / dead / 越界 → 静默早退。
     void setGolemRetaliate(int i);
+    // t727 夜行者近战命中瞬移躲避（PlayerController::attackMob 命中 MobNightwalker 后调；Game→Entities 向下依赖，
+    //   同 setWolfTarget / setGolemRetaliate 模式）。仅 mobType==MobNightwalker && alive && !dead && 瞬移冷却到 →
+    //   teleportEntity 随机 8-16 格躲避（返 true）；否则静默返 false。若本次攻击已将 mob 致死（dead=true）不触发
+    //   （掉落 / 死亡正常走）—— 机制等价 MC 1.0 末影人被打中概率瞬移闪避（命中落空感）。概率 30% 由 caller
+    //   （PlayerController attackMob）掷骰决定是否调用（本方法只负责「调用即躲」）。world = caller 的只读世界
+    //   （瞬移找落点 / 支撑用；null → 不躲）。非 Nightwalker → false no-op。
+    bool nightwalkerDodge(int i, World *world);
     // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。
     //   仅 Shambler/Bones spawn 时随机分配（~80% 无 / ~20% 一件或一套）；QML delegate 据 it 叠加 layer
     //   贴图护甲壳（t719 ArmorLayerBox，机制等价 MC 1.0 僵尸/骷髅随机护甲）。越界 → 0。
@@ -572,6 +597,16 @@ public:
     //   分层（PLAN §2）：Entities 层（同 tickHostileLife）只读 World（blockAt/isSolid）+ 自身实体数据；写
     //   EntityManager 自身（spawnHostileMob）。playerPos 由 Game 层（PlayerController）传入。无向上依赖。world==null → 早 return。
     void tickSpawners(qreal dt, World *world, const QVector3D &playerPos);
+    // t727 玩家视线状态注入（Game/Physics 层 PlayerController 每 tick 调；Game→Entities 向下依赖，同 listener/
+    //   playerPos 先例）。存玩家眼睛位置 + 归一化视线方向，供夜行者瞪视激怒判定（眼对眼 = 视线点积朝它 >0.99）。
+    //   lookDir 非归一 → 内部归一（三角精度对点积影响敏感，须归一）。Entities 层不反查玩家模式 / 视线（不反向
+    //   依赖 Game）。viewportYaw/pitch 输入可为 0（本版本无需）；仅 <pos, lookDir> 被 Nightwalker AI 读取。
+    void setPlayerSight(const QVector3D &eyePos, const QVector3D &lookDir);
+    // t727 玩家当前视线（eyePos + 归一 lookDir；为 null 时 Nightwalker 无法做瞪视激怒判定 → 视作不在瞪视）。
+    //   仅 m_playerSightValid=true 且 Nightwalker AI 用它；其余 mob 不读。
+    QVector3D m_playerEye = QVector3D(0, 0, 0);
+    QVector3D m_playerLook = QVector3D(0, 0, -1); // 默认 -Z（无输入时防零向量点积）
+    bool m_playerSightValid = false;
 
 signals:
     void entitiesChanged(); // spawn / 推动位移 / 重力下落 / AI 行走 / 受击红闪 / 死亡移除 触发；驱动 count/revision + QML 绑定刷新
@@ -947,6 +982,20 @@ private:
         int shadeTx = -1;
         int shadeTz = -1;
         float shadeRescanTimer = 0.0f;
+        // t727 夜行者（Nightwalker）激怒 / 瞬移态（仅 mobType==MobNightwalker 用；其余 mob 留默认不触发）。
+        //   瞪视激怒（stare enrage）：enraged=false 时 aiNightwalker 每 AI tick 判「玩家视线点积朝它 >0.99（眼对
+        //   眼）+ 距 <kNightwalkerStareRange + 它面朝玩家」→ enrageTimer 累加 dt（达标 kNightwalkerStareTime ~2s）→
+        //   enraged=true（仅激怒最近一只防多只齐怒，aiNightwalker 内 nearestEnragableNightwalker 守卫）。
+        //   激怒后时序（enraged=true 驱动）：rageTimer 累加；早期段（<kNightwalkerRageTeleportDelay ~1s）原地发怒
+        //   （QML 据 enragedAt 播「张嘴 + 上下颤抖」动画）；满 → 瞬移到玩家背后（teleportBehindPlayer）+ 进入
+        //   蓄力段 windupTimer 累加；满 kNightwalkerWindup ~0.5s → 近战重拳 attack（mobAttackedPlayer 大伤害）。
+        //   teleportCooldown 通用瞬移冷却（怕水 / 弹射物 / 近战命中的 dodge 共用，防瞬移 spam）。
+        bool  enraged = false;        // 是否已激怒（瞪视触发；QML 据 enragedAt 播激怒动画）
+        float enrageTimer = 0.0f;     // 持续瞪视累积（秒；达 kNightwalkerStareTime 激怒）
+        float rageTimer = 0.0f;       // 激怒后经过时间（秒；驱动瞬移+蓄力时序）
+        float windupTimer = 0.0f;     // 瞬移背后后的攻击蓄力（秒；达 kNightwalkerWindup 出重拳）
+        float teleportCooldown = 0.0f;// 瞬移冷却（秒；>0 不可 dodge，防 spam）
+        float waterDamageAccum = 0.0f;// 怕水扣血累积（秒；接触水时累加，每 kNightwalkerWaterDamageTick 扣 1HP）
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
@@ -1196,6 +1245,44 @@ private:
     //   格 isSolid → 视线被挡返 false。0.5 格步进足以抓 1 格墙（箭速 ~14 blocks/s、每帧 0.22 格，墙厚 ≥1）。
     //   分层：只读 World::isSolid（同 tick / aiHostile 越障查），不向下加依赖。
     bool lineOfSightClear(World *world, const QVector3D &from, const QVector3D &to) const;
+    // t727 夜行者 AI（tick 内 hostile mob 且 mobType==MobNightwalker 分支调，替代 aiHostile）。机制等价 MC 1.0
+    //   末影人；§9 区隔改名 + 原创模型。分层同 aiHostile（只读 World + 自身数据 + 语义信号 + setWaterSilent 静默写）：
+    //   (1) 怕水：身体 / 脚位格 == Water → 水伤累积（每 kNightwalkerWaterDamageTick 秒扣 1HP）+ 冷却到 →
+    //       teleportEntity 随机 8-16 格瞬移逃离（找非水体 / 非实体落点）。
+    //   (2) 瞪视激怒（enraged=false）：m_playerSightValid && 玩家视线点积朝 mob >0.99（眼对眼）+ XZ 距
+    //       <kNightwalkerStareRange(32) + mob 面朝玩家（近似：玩家在 mob 前方锥内）→ enrageTimer 累加 dt；达标
+    //       kNightwalkerStareTime(2s) → enraged=true。仅最近一只可激怒（nearestEnragableNightwalker 守卫，防多只
+    //       齐怒 —— 玩家只能「凝视」最近那只，机制等价 MC 末影人只会被盯的那只激怒）。
+    //   (3) 激怒时序（enraged=true）：rageTimer 累加；早期段（<kNightwalkerRageTeleportDelay 1s）原地发怒不动
+    //       （QML 据 enragedAt/nightwalkerRageProgressAt 播张嘴+颤抖动画 + 身体微抖）；满 → 瞬移到玩家背后
+    //       （teleportBehindPlayer：玩家 pos − 玩家 lookDir×1.6 贴地，找非实体落点）→ 清 enraged + 进入蓄力段
+    //       windupTimer 累加（原地不动）；满 kNightwalkerWindup(0.5s) → 近战重拳 damageEntity 链 send 玩家伤害
+    //       （mobAttackedPlayer 重拳又走呈现层 Survival 门控），再回 idling 态。蓄力后 enraged 复位可再瞪视激怒。
+    //   (4) 非激怒非锁定 → 平时近战追击 aiHostile 同款（detect→chase→melee attack；玩家贴身仍打，机制等价 MC
+    //       末影人静止玩家也正面攻击；只是不受「近战命中必传送」外的传送待遇）。
+    //   return 是否真位移。idx = 本 mob 槽索引（瞬移落点查非实体时排除自身 / 邻近 mob）。
+    bool aiNightwalker(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW,
+                       float worldD, float speedScale = 1.0f);
+    // t727 通用瞬移（夜行者怕水 / 弹射物 / 近战 dodge 逃逸共用；机制等价 MC 末影人瞬移）：以 e 为中心随机选
+    //   [minDist, maxDist] 水平距离 + 随机方向，迭代 kTeleportAttempts 次找「落点格非水 + 下方有 solid 支撑 + 该
+    //   处 AABB 不与其他活体 mob 重叠」的空位（targetX/targetZ = 既存生成位用；绝大多数为简单地面随机瞬移）。
+    //   找到 → 设 e.pos（水平 + 支撑面贴地 resting）+ 解除休息 + teleportCooldown 设 kNightwalkerTeleportCooldown +
+    //   置 enraged=false（瞬移打断激怒时序）+ 返 true；找不到（全试失败，如被围困 / 地形不允许）→ 不移动返 false。
+    //   目标：安全落点非水 / 非实体 —— 找到即返（不做有向收敛；MC 末影人瞬移本就无向随机）。
+    bool teleportEntity(int idx, Entity &e, World *world, float minDist, float maxDist);
+    // t727 瞬移到玩家背后（激怒满 rageTimer 后调）：落点 = 玩家眼睛 − 玩家 lookDir × 1.6，XZ 取该水平 + 往下扫
+    //   （qFloor 下方 solid 支撑的贴地格），Y = 支撑面 + halfH。若落点被占（非空位 / 水）→ teleportEntity(1,6)
+    //   随机近距兜底。成功返 true（置 teleportCooldown + 清 enraged 进蓄力段）。仅夜行者用。
+    bool teleportBehindPlayer(int idx, Entity &e, World *world, const QVector3D &playerEye, const QVector3D &playerLook);
+    // t727 最近「可被激怒」的夜行者查找（瞪视激怒守卫）：返距玩家眼睛 range 内最近一只 alive && !dead &&
+    //   mobType==MobNightwalker && !enraged 的索引；无 → -1。玩家视线一次只能「凝视」最近那只（防多只同时被
+    //   激怒 —— 机制等价 MC 末影人单只对视）。O(n) 每 Nightwalker 每 AI tick，n≤64 可忽略。const 只读。
+    int nearestEnragableNightwalker(const QVector3D &playerEye, float range) const;
+    // t727 落点是否被夜行者占用（瞬移落点「非实体」守卫）：该 AABB（半宽/半高 = 目标夜行者）是否与任一其它活体
+    //   mob AABB 重叠。排除 self。防瞬移进另一 mob 体内（重叠 = 换位置）。O(n) n≤64 可忽略。const 只读。
+    bool nightwalkerSpotFree(World *world, float cx, float cy, float cz, float halfW, float halfH, int selfIdx) const;
+    // t727 夜行者瞬移尝试次数（私有静态；找不到安全落点时放弃本次瞬移）。
+    static constexpr int kNightwalkerTeleportAttempts = 20;
 
     // t241 羊吃草：检测/消耗 entity 前方一格草丛。consume=false 仅检测（决定是否进入吃草周期）；
     //   consume=true 则写入（草丛→空气 + 其下草方块→泥土，走 World::setWaterSilent 静默写，非玩家破块
@@ -1570,6 +1657,27 @@ private:
     //   + 近战伤害 4→3。单只 mob 不受影响（其 1s 冷却 >= 节流，节流不延后单 mob 节奏）；多只围攻时受击频率上限 = 1/1.0
     //   = 1 次/s（与只数无关）→ DPS 封顶 1×kAttackDamage = 3HP/s → 满血 10HP 至少 3.3s 反应窗口（走速 4.3 → 可移动 ~14 格脱离）。
     static constexpr float kPlayerHitThrottle = 1.0f; // 玩家受击全局节流（秒；防多 mob 围攻秒杀；t353 自 0.5 提到 1.0）
+    // t727 夜行者（Nightwalker；机制等价 MC 1.0 末影人，§9 区隔）专属常量。数值为本工程小世界量身调，
+    //   非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）：
+    //   - kNightwalkerStareTime：玩家持续瞪视激怒时长（秒；spec「盯着眼睛几秒」）。眼对眼判定 = 视线点积朝它
+    //     >0.99 + 距 <kNightwalkerStareRange(32)；达标即 enraged=true（仅最近一只可激怒）。
+    //   - kNightwalkerRageTeleportDelay：激怒后到瞬移背后的延迟（秒；spec「激怒后 ~1s 瞬移」）。期间播发怒动画。
+    //   - kNightwalkerWindup：瞬移背后后的近战蓄力（秒；spec「瞬移到背后等 0.5s 攻击」）。
+    //   - kNightwalkerAttackDamage：背后重拳伤害（HP；spec「重拳 5-6」）。取 6 ≤ 玩家满血 10 可抗一击，配
+    //     kPlayerHitThrottle 串行节流（激怒攻击 DPS 封顶 6HP/s，有反应窗口）。
+    //   - kNightwalkerTeleportMin/Max：怕水 / 弹射 / 近战 dodge 瞬移的水平距离带（blocks）；随机 8-16 格收敛。
+    //   - kNightwalkerTeleportCooldown：瞬移冷却（秒；防连续 dodge spam，弹射多次命中逐次冷却）。
+    //   - kNightwalkerDodgeChance：玩家近战命中后瞬移躲避概率（0.30 = spec「有概率触发传送」30%）。
+    static constexpr float kNightwalkerStareTime        = 2.0f;   // 持续瞪视激怒时长（秒）
+    static constexpr float kNightwalkerStareRange       = 32.0f;  // 瞪视激怒距离（blocks）
+    static constexpr float kNightwalkerRageTeleportDelay= 1.0f;   // 激怒后到瞬移背后的延迟（秒）
+    static constexpr float kNightwalkerWindup           = 0.5f;   // 瞬移背后后的攻击蓄力（秒）
+    static constexpr int   kNightwalkerAttackDamage     = 6;      // 背后重拳伤害（HP）
+    static constexpr float kNightwalkerTeleportMin      = 8.0f;   // dodge 瞬移距离下界（blocks）
+    static constexpr float kNightwalkerTeleportMax      = 16.0f;  // dodge 瞬移距离上界（blocks）
+    static constexpr float kNightwalkerTeleportCooldown = 0.6f;   // 瞬移冷却（秒）
+    static constexpr float kNightwalkerDodgeChance      = 0.30f;  // 近战命中瞬移躲避概率
+    static constexpr float kNightwalkerWaterDamageTick  = 1.0f;   // 怕水每秒扣血间隔（秒；每 tick 扣 1HP）
     static constexpr float kJumpSpeed       = 8.4f;  // 越障跳跃初速（blocks/s；同 player jump，翻 1 格墙）
     // t283 骷髅弓箭手远程 AI 常量（spec「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」；机制对齐
     //   MC 1.0 骷髅射手：远距 + 抛物箭 + 保持距离 + 命中伤害；数值为本工程小世界量身调，非 MC 精确复刻 ——

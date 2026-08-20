@@ -720,8 +720,16 @@ void PlayerController::tickImpl()
     //   据它判箭命中玩家 AABB（蹲下命中盒正确收缩）。
     //   t290 观察者交互门控：传 playerTargetable = (m_mode == Survival) → 敌对 Mob 仅仇生存玩家（创造/观察者
     //   不被 detect/chase/attack/shoot；箭亦不命中）。Game 层持玩家模式并据此派生 bool 向下传（PLAN §2 向下依赖）。
-    if (m_entityManager && m_world)
+    // t727 喂夜行者「玩家视线」：瞪视激怒（stare enrage）判据读目光射向头顶（dot>0.99 持续 2s）。玩家目光由
+    //   Game 层玩家权威持有，向下注入 Entities 层（Game→Entities 向下依赖，setWolfTarget/distal 同模式）；
+    //   position()=眼位、lookDirection()=目光单位向（findMobHit 同源，视线一致）。m_playerSightValid 由各
+    //   NE 分支复合（模式/死亡/暂停在 aiNightwalker 内另据 m_playerSightValid 复合判据，见 entitymanager.h）。
+    if (m_entityManager && m_world) {
+        // 逐帧喂目光（常开：菜单/暂停时玩家仍“在”场景，夜行者瞪视计时不受捕获态门控 —— 眼位/目光
+        //   position()/lookDirection() 只读世界定位，无写副作用，常开安全，同 playerPos 下发 tick 语义）。
+        m_entityManager->setPlayerSight(position(), lookDirection());
         m_entityManager->tick(dt, m_world, m_pos, kHalfW, m_height, m_mode == Survival);
+    }
     // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见 EntityManager::tickHostileLife 头注释）。独立于玩家
     //   捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续；同 entityManager.tick）。
     //   skyLight 取自 m_worldClock（Q_PROPERTY 注入；[0,1] 昼夜乘子）。m_worldClock=null → 跳过（无昼夜 → 无 spawn）。
@@ -1830,6 +1838,15 @@ void PlayerController::attackMob(int entityIndex)
     const float kbStrength = 1.0f + 0.5f * float(kbLvl);
     m_entityManager->damageEntity(entityIndex, dmgInt);
     m_entityManager->knockback(entityIndex, kbx, kbz, kbStrength);
+    // t727 夜行者近战命中概率瞬移（spec「攻击到有概率触发传送」；机制等价 MC 1.0 末影人被打中概率瞬移闪避）。
+    //   仅打成夜行者（mobType==MobNightwalker）→ 30% 概率 nightwalkerDodge 随机 8-16 格瞬移躲开（命中落空感）。
+    //   概率 kNightwalkerDodgeChance 由调用侧掷骰（Game 层拥有随机性决策，Entities 只执行「调用即躲」，同
+    //   setGolemRetaliate 单向向下依赖）。nightwalkerDodge 内部守卫 dead（若本击已致死 → 静默 no-op 正常掉落）。
+    if (mobType == int(EntityManager::MobNightwalker)
+        && m_entityManager->mobTypeAt(entityIndex) == int(EntityManager::MobNightwalker)
+        && QRandomGenerator::global()->bounded(100) < 30) {
+        m_entityManager->nightwalkerDodge(entityIndex, m_world);
+    }
     // t476 燃焰附魔：命中即点燃 mob（机制等价 MC fire-aspect ignite on hit）。fireTimer = level*4s；tick 火烧分支扣血 +
     //   致死掉熟肉。先 damageEntity 再 ignite：若本次击杀（health→0→dead），ignite 内 dead 守卫早退（尸体不燃）。
     const int fireLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::FireAspect) : 0;
@@ -3409,7 +3426,8 @@ void PlayerController::placeBlock()
             || heldItemId == RecipeRegistry::SpawnEggStalkerId
             || heldItemId == RecipeRegistry::SpawnEggSpiderId
             || heldItemId == RecipeRegistry::SpawnEggChickenId
-            || heldItemId == RecipeRegistry::SpawnEggSquidId)) {
+            || heldItemId == RecipeRegistry::SpawnEggSquidId
+            || heldItemId == RecipeRegistry::SpawnEggNightwalkerId)) {
         if (m_hasHit) {
             int mobType = 0;
             QString color; // 占位串（pig/cow/sheep 走 MobModel + 贴图，不读 color）
@@ -3429,6 +3447,8 @@ void PlayerController::placeBlock()
                 mobType = EntityManager::MobChicken;  color = QStringLiteral("#f5f0e4"); // t398 鸡：白羽（机制等价鸡；走 MobModel + 贴图）
             } else if (heldItemId == RecipeRegistry::SpawnEggSquidId) {
                 mobType = EntityManager::MobSquid;    color = QStringLiteral("#6a4a3a"); // t399 鱿鱼：深褐橘斑（机制等价 squid；走 MobModel + 贴图）
+            } else if (heldItemId == RecipeRegistry::SpawnEggNightwalkerId) {
+                mobType = EntityManager::MobNightwalker; color = QStringLiteral("#2a1f2a"); // t727 夜行者：暗紫黑（机制等价末影人；走 MobModel + 贴图 + 瞪视激怒）
             } else { // SpawnEggSpiderId
                 mobType = EntityManager::MobSpider;   color = QStringLiteral("#2a1a1a"); // t285 敌对：暗黑（机制等价蜘蛛）
             }

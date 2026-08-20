@@ -724,6 +724,35 @@ void MobModel::rebuild()
         // 后对（z=+0.12，后段躯干）：同相于前对。
         addBoxRot(-0.20f, -0.075f,  0.12f, 0.06f, 0.075f, 0.04f, 0.00f,  0.12f, +sw, verts, idx, bMin, bMax);
         addBoxRot( 0.20f, -0.075f,  0.12f, 0.06f, 0.075f, 0.04f, 0.00f,  0.12f, -sw, verts, idx, bMin, bMax);
+    } else if (m_mobType == 16) {
+        // t727 夜行者（Nightwalker；机制等价 MC 1.0 末影人 Enderman，§9 区隔 + 原创模型/贴图）：三格高（halfH=1.40
+        //   → 碰撞 2.9 高）细长人形 —— 窄躯干 + 小竖头 + 长细手臂垂到近膝（大幅摆动）+ 长细腿。局部原点 = 碰撞中心
+        //   （躯干中心）；腿底本地 |y|=1.40 贴 collision 底面（Main.qml mobModelYOff = 1.40 − halfH = 0 → 腿底贴地）。
+        //   头朝 -Z（前）。几何背脊纤细（末影人观感：暗黑瘦长黑影）。身体微颤（激怒动画）由 Main.qml delegate 对
+        //   整体 Model 做 ±3° yaw 抖动（QML 动画，几何不动）。眼睛发光层由 Main.qml delegate 独立 Model 补（纯色
+        //   紫白自发光 + pack 命中 enderman_eyes 贴图层，§9 原创）。
+        // R19 C3 UV（MC Enderman base 64×64；U1 无 enderman —— 采用 Humanoid 主骨架近似，pack 命中 enderman.png
+        //   时头/身/臂/腿按该布局粗对齐；pack 关走全脸 mob_nightwalker 程序生成贴图 [0,1]²，UV 不读）。
+        g_texW = 64.0f; g_texH = 64.0f;
+        // 躯干（细长柱）：y∈[-0.45, 0.45]，胸围窄（末影人瘦长）
+        setMobTex(16, 16, 8, 12, 4);
+        addBox( 0.00f,  0.00f,  0.00f, 0.13f, 0.45f, 0.11f, verts, idx, bMin, bMax);
+        // 头（小竖头，顶端塞在碰撞顶内）：y∈[0.73, 1.17]
+        setMobTex(0, 0, 8, 8, 8);
+        addBox( 0.00f,  0.95f,  0.00f, 0.19f, 0.22f, 0.19f, verts, idx, bMin, bMax);
+        // 长细臂（垂到近膝，大幅摆动 —— 臂随 walkPhase 绕肩枢 X 轴反相摆动，长臂扫摆）：肩枢 y=+0.35（胸侧），
+        //   臂长 1.25 → 手端 y≈−0.90（近膝）。X 偏移 ±0.28（窄肩外侧）。
+        const float armSw = kLegSwingAmp * 0.85f * std::sin(m_walkPhase); // 长臂大摆幅（walkPhase 驱动）
+        setMobTex(40, 16, 4, 12, 4);
+        addBoxRot(-0.28f, -0.275f,  0.00f, 0.05f, 0.63f, 0.05f,  0.35f,  0.00f, -armSw, verts, idx, bMin, bMax); // 左臂
+        setMobTex(40, 16, 4, 12, 4);
+        addBoxRot( 0.28f, -0.275f,  0.00f, 0.05f, 0.63f, 0.05f,  0.35f,  0.00f, +armSw, verts, idx, bMin, bMax); // 右臂
+        // 长细腿（2 条，绕髋 X 轴左右反相 biped walk cycle）：髋枢 y=−0.45（躯干底），腿长 0.95 → 腿底 −1.40 贴地。
+        const float legSw = kLegSwingAmp * std::sin(m_walkPhase);
+        setMobTex(0, 16, 4, 12, 4);
+        addBoxRot(-0.09f, -0.925f,  0.00f, 0.06f, 0.475f, 0.06f, -0.45f,  0.00f, +legSw, verts, idx, bMin, bMax); // 左腿
+        setMobTex(0, 16, 4, 12, 4);
+        addBoxRot( 0.09f, -0.925f,  0.00f, 0.06f, 0.475f, 0.06f, -0.45f,  0.00f, -legSw, verts, idx, bMin, bMax); // 右腿
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         // R19 C3 UV（MC Cow base 64×32；U1 §2）：body(18,4)12×18×10 / head(0,0)8×8×6 / horn(22,0)1×3×1 / leg(0,16)4×12×4。

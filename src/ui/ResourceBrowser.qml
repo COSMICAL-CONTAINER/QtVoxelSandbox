@@ -73,6 +73,7 @@ Item {
         { mobType: 7, name: "蜘蛛" }, { mobType: 8, name: "鸡" }, { mobType: 9, name: "鱿鱼" },
         { mobType: 10, name: "狼" }, { mobType: 11, name: "豹猫" },
         { mobType: 12, name: "雪傀儡" }, { mobType: 13, name: "铁傀儡" }, { mobType: 14, name: "蠹虫" },
+        { mobType: 16, name: "夜行者" }, // t727 末影人→夜行者（§9 改名；生物图鉴条目 + 生物蛋 0x246 映射）
         // t663 ⑥ 剪毛变体条目（同 mobType 异外观）：选中 → 右侧预览显对应剪后形态（shearedAt=true 的游戏内
         //   外观镜像——羊 = 裸肤色 #d6b890、雪傀儡 = 纯雪头（无南瓜））。「所有做好的生物形态都在图鉴里」。
         { mobType: 3, name: "羊（剪毛后）", sheared: true },
@@ -90,6 +91,7 @@ Item {
             case 0x20F: return 1; case 0x210: return 2; case 0x211: return 3;
             case 0x213: return 4; case 0x214: return 5; case 0x215: return 6;
             case 0x216: return 7; case 0x22C: return 8; case 0x22E: return 9;
+            case 0x246: return 16; // t727 夜行者生物蛋（SpawnEggNightwalkerId；与 PlayerController placeBlock 同源）
         }
         return -1
     }
@@ -106,6 +108,7 @@ Item {
             case 10: return "qrc:/textures/mob_wolf.png"
             case 11: return "qrc:/textures/mob_ocelot.png"
             case 14: return "qrc:/textures/mob_silverfish.png"
+            case 16: return "qrc:/textures/mob_nightwalker.png" // t727 夜行者程序生成暗紫黑影贴图（§9 原创）
         }
         return ""
     }
@@ -116,6 +119,7 @@ Item {
             case 7: return "#2a1a1a"  // Spider 暗黑
             case 12: return "#f0f4f8" // SnowGolem 雪白（与 Main.qml 雪块身纯色同源）
             case 13: return "#7d848c" // IronGolem 铁灰（与 Main.qml 铁块身纯色同源）
+            case 16: return "#2a1f2a" // Nightwalker 暗紫黑（与 Main.qml 蛋生成色 / 程序贴图同源；t727）
         }
         return "#ffffff"
     }
@@ -123,6 +127,7 @@ Item {
     function mobPreviewScale(t) {
         if (t === 12 || t === 13) return 0.75
         if (t === 14) return 1.6
+        if (t === 16) return 0.55 // t727 夜行者细长人形高 ~2.6（[-1.40,1.17]）→ 缩到镜头内全身可见
         return 1.0
     }
     // 预览模型垂直居中微调：几何局部原点 = 碰撞中心，mob 身体偏向 -Y → 上提让主体在镜头居中。
@@ -142,6 +147,7 @@ Item {
             case 12: return 0.0   // 雪傀儡 [-0.90, 0.90]（对称居中，无需上提）
             case 13: return 0.30 // 铁傀儡 [-1.20, 0.58]（偏 -Y，上提 0.30 居中主体）
             case 14: return -0.30 // 蠹虫 [-0.15, 0.11]（小虫贴地 → 下压 0.30 进镜头中心）
+            case 16: return 0.13 // t727 夜行者 [-1.40, 1.17]（偏 -Y 0.12；×0.55 缩后上提居中主体）
         }
         return 0
     }
