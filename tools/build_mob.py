@@ -26,7 +26,8 @@
 
 输出（覆盖写入 textures/）：
   mob_pig.png / mob_cow.png / mob_sheep.png / mob_shambler.png / mob_chicken.png / mob_squid.png / mob_wolf.png /
-  mob_ocelot.png / mob_cat_black.png / mob_cat_ginger.png / mob_cat_cream.png / mob_silverfish.png
+  mob_ocelot.png / mob_cat_black.png / mob_cat_ginger.png / mob_cat_cream.png / mob_silverfish.png \
+  mob_nightwalker.png / mob_nightwalker_eyes.png / mob_fireball.png
 
 依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
 生成原创像素图，§9 override (a)）。
@@ -573,6 +574,37 @@ def make_nightwalker_eyes():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_fireball():
+    """燃烬者火球贴图（t728；机制等价 MC 1.0 烈焰人火球 blaze fireball）：16×16 橙黄自发光火球 ——
+    外圈深橙焰 + 中圈亮橙黄焰 + 中心白热核（读作「跳动燃烧的火球」；与 Main.qml 火球 delegate 的三层
+    配色外橙 #ff8a1a / 中黄 #ffd23c / 白核 #fff4c4 同源，原创程序自绘非照搬 MC 资产）。透明四角 → 圆润
+    球感而非方形贴片。走全脸 UV（每面铺同图）；无随机源、确定性散布（同其它 make_* 风格）。"""
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))  # 透明底（圆润火球，四角透空）
+    blaze = (0xff, 0x8a, 0x1a, 255)   # 外圈深橙 #ff8a1a
+    glow = (0xff, 0xd2, 0x3c, 255)    # 中圈亮橙黄 #ffd23c
+    core = (0xff, 0xf4, 0xc4, 255)    # 白热核 #fff4c4
+    # 中心白热核（3×2 亮心）
+    blot(img, [
+        (7, 8), (8, 8), (6, 8), (9, 8),
+        (7, 7), (8, 7), (7, 9), (8, 9),
+    ], core)
+    # 中圈橙黄焰（围绕白核一圈，略外扩）
+    blot(img, [
+        (7, 6), (8, 6), (5, 7), (10, 7), (5, 8), (10, 8), (5, 9), (10, 9),
+        (7, 10), (8, 10), (6, 6), (9, 6), (6, 10), (9, 10),
+    ], glow)
+    # 外圈深橙焰（再外扩一层环形边缘，读作「火球外焰」）
+    blot(img, [
+        (4, 7), (11, 7), (4, 8), (11, 8), (4, 9), (11, 9),
+        (5, 5), (6, 5), (9, 5), (10, 5),
+        (5, 11), (6, 11), (9, 11), (10, 11),
+        (7, 5), (8, 5), (7, 11), (8, 11),
+    ], blaze)
+    out = os.path.join(SRC, "mob_fireball.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def main():
     make_pig()
     make_cow()
@@ -588,6 +620,7 @@ def main():
     make_silverfish()
     make_nightwalker()
     make_nightwalker_eyes()
+    make_fireball()
 
 
 if __name__ == "__main__":

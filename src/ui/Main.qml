@@ -2150,6 +2150,7 @@ Window {
             xpForMob[EntityManager.MobIronGolem] = 5 // t483 铁傀儡：5 XP（重型防御造物）
             xpForMob[EntityManager.MobSilverfish] = 5 // t487 银鱼：5 XP（敌对近战小虫，同敌对量级；无常规掉落）
             xpForMob[EntityManager.MobNightwalker] = 5 // t727 夜行者：5 XP（敌对瘦长暗影，同敌对量级；掉暗渊珠）
+            xpForMob[EntityManager.MobEmberling] = 3 // t728 燃烬者：3 XP（敌对悬浮远程；掉燃烬棒）
             const xpAmt = xpForMob[mobType]
             if (xpAmt && xpAmt > 0) xpOrbs.spawnOrb(x, y, z, xpAmt)
             // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
@@ -2234,6 +2235,13 @@ Window {
                 //   同 onMobDied 既有约定。恒 50% 单件（0 或 1，机制等价 MC 末影人 0-1 pearl；t726 已建配方锚定掉落源）。
                 //   暗渊珠可作「闪避传送」交互道具（t726 投掷即传）→ 非战斗资源，让玩家见到夜行者即知「打它有传送珠」。
                 if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x243, 1)   // 暗渊珠 ~50%（0-1）
+            } else if (mobType === EntityManager.MobEmberling) {
+                // t728 燃烬者掉落：燃烬棒 ×0-1（mechanic-equivalent MC 1.0 blaze 掉 blaze rod；spec「死亡掉落 0-1
+                //   燃烬棒」）。0x245 = RecipeRegistry::BlazeRodId（燃烬棒，§9 改名：机制等价 MC blaze rod —— 熔炉
+                //   冶炼燃烬粉，t726 材料段）。⚠️ QML 不 import C++ 静态类故用字面量，同 onMobDied 既有约定。50% 单件
+                //   （0 或 1，机制等价 MC 1.0 blaze 50% 掉 1 根 blaze rod；t726 已建配方锚定掉落源）。燃烬棒 → 熔炉
+                //   冶炼燃烬粉 → 配暗渊珠 = 暗渊之眼：让玩家见到燃烬者即知「打它有燃烬棒」。
+                if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x245, 1)   // 燃烬棒 ~50%（0-1）
             }
             // t510 雪傀儡（MobSnowGolem）死亡掉落雪球 0-15 个（spec「死掉雪球」；机制等价 MC 1.0 雪傀儡死亡
             //   掉落 0-15 雪球）。雪球 id=0x23D（RecipeRegistry::SnowballId；⚠️ QML 不 import C++ 静态类故用字面量，
@@ -2290,6 +2298,7 @@ Window {
                 else if (mobType === EntityManager.MobTnt) cause = PlayerState.Tnt   // t494：TNT 爆炸死因（独立于潜行者自爆）
                 else if (mobType === EntityManager.MobIronGolem) cause = PlayerState.GolemSlain // t712：重拳直接击杀（旧落 Generic「不明原因」；摔落路径另走 GolemLaunchFall）
                 else if (mobType === EntityManager.MobNightwalker) cause = PlayerState.Nightwalker // t727 夜行者重拳（蓄力背后近战大伤害）
+                else if (mobType === EntityManager.MobEmberling) cause = PlayerState.Emberling // t728 燃烬者火球命中（Fireball tick mobAttackedPlayer 携 MobEmberling → 「被燃烬者的火球焚杀」）
                 // t345 护甲减伤 + t476 保护族附魔减伤（mob 近战 / 箭 / 爆炸命中也走护甲值 + 附魔 EPF 减伤 + 耐久损耗）。
                 //   护甲值每点 4%（cap 0.80）+ 附魔 EPF 每点 4%（cap 0.80），合计 cap 0.85；至少 1 点穿透。
                 var finalAmt = amount
@@ -2309,6 +2318,15 @@ Window {
         //   自守）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费路由）。
         function onGolemLaunchedPlayer(kbX, kbZ) {
             player.applyGolemLaunch(kbX, kbZ)
+        }
+        // t728 燃烬者火球点燃玩家（EntityManager Fireball tick 命中玩家发 emberFireballHitPlayer）：火球的
+        //   直接伤害另走同帧的 mobAttackedPlayer(5, MobEmberling)（onMobAttackedPlayer 红闪 / 护甲减伤 / 死因链），
+        //   本信号是「点燃」的补充驱动（机制等价 MC 1.0 blaze fireball 命中点燃目标 5 秒）。复用
+        //   applyStatusEffect(EffectFire) → m_fireTimer 续燃 5s（岩浆 / 火点燃同源，火烧扣血 / 随机熄灭 /
+        //   burningChanged 火焰叠层全走既有分支）。仅 Survival 生效（applyStatusEffect 内门控）。单向事件流
+        //   （PLAN §2 分层：Entities 发语义事件、呈现层只消费路由）。
+        function onEmberFireballHitPlayer() {
+            player.applyStatusEffect(PlayerState.EffectFire, 5.0, 1)
         }
         // t284 Stalker 爆炸（EntityManager detonateStalker 发）：爆炸的单一音/视反馈入口 —— 播爆炸音
         //   （playExplosion）+ 白色迸发粒子（burstExplosion）。方块破坏走 setWaterSilent 不发 blockBroken
@@ -3630,6 +3648,10 @@ Window {
         //   生成原创像素图，§9a 区隔不照搬 MC）。MobModel 细长人形几何每面铺整张贴图；眼睛是独立发光层（见下方
         //   nightwalkerEyesTex，顶层小盒铺透明底紫白竖眼）。
         Texture { id: mobNightwalkerTex; source: "qrc:/textures/mob_nightwalker.png"; generateMipmaps: false }
+        // t728 燃烬者（Emberling；机制等价 MC 1.0 烈焰人，§9 改名 + 原创）：黄焰头白热核烟灰棒贴图（t717
+        //   build_entities_pack.py 程序生成 entity_emberling.png，§9a 区隔不照搬 MC）。MobModel 单头盒每面铺整张
+        //   （pack 关全脸 [0,1]²；pack 开 blazing blaze.png 走 T 字 UV）。独立环绕竖棒由 delegate 补（纯色烟灰橙棒）。
+        Texture { id: mobEmberlingTex; source: "qrc:/textures/entity_emberling.png"; generateMipmaps: false }
         // t727 夜行者眼睛发光层：透明底 + 亮紫白竖眼（build_mob.py 程序生成）。QML 顶层小盒铺这张（MobModel 头
         //   前上层）—— 机制等价末影人魅眼（§9 原创配色）。pack 命中 enderman_eyes 时切 pack 贴图（见下）。
         Texture { id: mobNightwalkerEyesTex; source: "qrc:/textures/mob_nightwalker_eyes.png"; generateMipmaps: false }
@@ -3659,6 +3681,9 @@ Window {
         // t727 夜行者 pack 身体贴图（entity/enderman/enderman.png）：pack 命中 → MobModel T 字 UV 展开进该贴图 +
         //   packTextured=true；pack 关 → source 空 → 回退 mobNightwalkerTex（程序生成暗紫黑影 + 独立眼层）。
         Texture { id: mobNightwalkerPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(16) : ""; generateMipmaps: false }
+        // t728 燃烬者 pack 身体贴图（entity/blaze/blaze.png）：pack 命中 → MobModel T 字 UV 展开进该贴图 +
+        //   packTextured=true；pack 关 → source 空 → 回退 mobEmberlingTex（entity_emberling 程序生成黄焰头）。
+        Texture { id: mobEmberlingPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(17) : ""; generateMipmaps: false }
 
         // t718 盔甲 layer 贴图（玩家 + 人形 mob 护甲壳共用；ArmorLayerBox 几何按 MC box-UV 从中采样）：
         //   5 tier × 2 layer = 10 张**静态** Texture 实例（tier/layer 各一——玩家与多个 mob 可同时穿不同
@@ -6001,6 +6026,7 @@ Window {
                         if (entMobType === EntityManager.MobOcelot) return 0.40 - mobHalfH // t481 Ocelot/Cat 猫科（腿底 0.40）
                         if (entMobType === EntityManager.MobSilverfish) return 0.15 - mobHalfH // t487 Silverfish 银鱼（腿底 0.15）
                         if (entMobType === EntityManager.MobNightwalker) return 1.40 - mobHalfH // t727 Nightwalker（细长人形：MobModel 腿底本地 |y|=1.40，halfH=1.40 → offset=0 腿底贴地）
+                        if (entMobType === EntityManager.MobEmberling) return 0.0 // t728 Emberling（悬浮单头：MobModel 头盒中心=origin，halfH=0.6 → offset=0 头盒居中在碰撞盒内；整体悬浮由 hover 升空）
                         // t482/t483 防御造物：方块身 + 南瓜头堆叠 Model（不走 MobModel；局部原点 = 碰撞中心），
                         //   底部方块（腿/底雪块）底面须贴 collision 底面（= 地面）。底部方块 local y center = -halfH + 0.45
                         //   （0.45 = 底块半高）；mobModelYOff 把整组 Model 下移（halfH-0.45），使底块底面（-halfH-0.45...）
@@ -6859,6 +6885,71 @@ Window {
                         onLoaded: if (item) item.parent = mobDelegate
                     }
                     Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobEmberling
+                        sourceComponent: Component {
+                            Node {
+                                id: emberNode
+                                // t728 燃烬者（Emberling，mobType 17；机制等价 MC 1.0 烈焰人，§9 改名 + 原创模型/贴图）：
+                                //   MobModel 单头盒（~0.9×0.9 悬浮，entity_emberling 黄焰贴图）+ 4 根竖直烟灰橙棒环绕
+                                //   头 Y 轴匀速旋转（用户原话「好几根竖直的棒子围绕它旋转」；机制等价 MC 烈焰人下摆
+                                //   旋转棒）。悬浮上下 sin 浮动（hover bob）：AI 只在 C++ 设水平漂移，竖直由本 delegate
+                                //   sin 动画驱动（机制等价 MC 烈焰人悬浮飘动）。
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobEmberling
+                                position: Qt.vector3d(0, mobModelYOff, 0) // t728 halfH=0.6 → offset=0（头盒居中碰撞盒）
+                                // 悬浮 bob 相位钟（恒跑 0→1→0 锯齿；程序化非受控动画，delegate 稀少零成本）。
+                                property real hoverPhase: 0
+                                SequentialAnimation on hoverPhase {
+                                    loops: Animation.Infinite
+                                    NumberAnimation { from: 0; to: 1; duration: 900; easing.type: Easing.InOutSine }
+                                    NumberAnimation { from: 1; to: 0; duration: 900; easing.type: Easing.InOutSine }
+                                }
+                                // 悬浮 sin 浮动竖直偏移（±0.14 格）。
+                                property real hoverOff: Math.sin(emberNode.hoverPhase * 3.14159) * 0.14
+                                Node { // hover 浮动承载层（头 + 环绕棒整体上下浮动）
+                                    position: Qt.vector3d(0, emberNode.hoverOff, 0)
+                                    Model { // 中心头盒（mobType 17；单头盒几何，无四肢）
+                                        geometry: MobModel {
+                                            mobType: 17
+                                            // t728 pack 命中 blaze → T 字 UV 展开；否则全脸 UV（entity_emberling）。
+                                            packTextured: mobEmberlingPackTex.source.toString().length > 0
+                                            walkPhase: 0 // 无四肢不摆
+                                        }
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            // 受击红闪 + 天光调制（同 Shambler 语义）。
+                                            baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
+                                            // t728 pack 命中 → pack blaze 身体贴图；否则 entity_emberling 黄焰头。
+                                            baseColorMap: mobEmberlingPackTex.source.toString().length > 0 ? mobEmberlingPackTex : mobEmberlingTex
+                                        }
+                                    }
+                                    Node { // 环绕旋转竖棒组（绕头 Y 轴匀速旋转；用户「好几根竖直的棒子围绕它旋转」）
+                                        id: emberRods
+                                        property real spin: 0
+                                        NumberAnimation on spin {
+                                            from: 0; to: 360; duration: 2200; loops: Animation.Infinite
+                                        }
+                                        eulerRotation.y: emberRods.spin
+                                        Repeater { // 4 根竖直烟灰橙棒（半径 ~0.52、各 90° 相位）
+                                            model: 4
+                                            Model {
+                                                geometry: UnitCube {}
+                                                property real ang: index * 90
+                                                position: Qt.vector3d(Math.cos(ang * 0.0174533) * 0.52, 0,
+                                                                      Math.sin(ang * 0.0174533) * 0.52)
+                                                scale: Qt.vector3d(0.09, 1.15, 0.09) // 竖直细棒（伸过碰撞盒上下）
+                                                materials: PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    baseColor: "#e8b030" // 烟灰橙黄（同蛋生成色 / 程序贴图主色）
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
                         active: entKind === EntityManager.Mob && entMobType === EntityManager.MobStalker
                         sourceComponent: Component {
                             Model {
@@ -7673,6 +7764,34 @@ Window {
                             position: Qt.vector3d(0, 0.06, 0)
                             scale: Qt.vector3d(0.11, 0.08, 0.11)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#faf5e6" }
+                        }
+                    }
+                    // t728 燃烬者火球（Fireball）：燃烬者 aiEmberling 喷射的远程弹丸（直线弹道 + 命中点燃；机制等价
+                    //   MC 1.0 烈焰人火球）。橙黄自发光火球（外橙 #ff8a1a + 中黄 #ffd23c + 白核 #fff4c4，读作「跳动的
+                    //   火球」非纯色块）。delegate Node 已摆 position（火球世界坐标）+ 不转（球对称无需定向）。NoLighting
+                    //   （红线：可见 Model 必须 NoLighting）。命中方块 ~20% 点燃（t724 火系统）、命中玩家/mob 伤 5 +
+                    //   着火（Fireball tick 分支）。
+                    Node {
+                        visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Fireball) : false }
+                        // 外层橙火球（自发光橙黄）
+                        Model {
+                            geometry: UnitCube {}
+                            scale: Qt.vector3d(0.22, 0.22, 0.22)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff8a1a" }
+                        }
+                        // 中层橙黄（燃烧外焰）
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.03, 0.03, 0.04)
+                            scale: Qt.vector3d(0.14, 0.14, 0.14)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffd23c" }
+                        }
+                        // 内层亮白核（高亮焰心）
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.05, 0.05, 0.07)
+                            scale: Qt.vector3d(0.07, 0.07, 0.07)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fff4c4" }
                         }
                     }
                 }

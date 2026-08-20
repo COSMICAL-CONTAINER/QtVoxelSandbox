@@ -86,7 +86,7 @@ public:
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
     // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model）/
     // Snowball=雪球投射物（t482 雪傀儡远程攻击，白色小球定向 Model，低伤害 + 减速））。
-    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）
+    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg, Fireball }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）；t728 加 Fireball（燃烬者火球，直线弹道 + 点燃，QML 橙黄火球 Model 分流）
     Q_ENUM(Kind)
 
     // t240 mob 子类 id（与 Entity.mobType 同值；Q_ENUM 供 QML 据 mobTypeAt 选 MobModel 比例 + 贴图）。
@@ -157,7 +157,22 @@ public:
     //     - 近战命中概率传送：玩家近战打中它 → 30% 概率瞬移躲避。
     //   tick Mob 分支据 mobType==MobNightwalker 路由到 aiNightwalker（替代 aiHostile）。§9 原创：名称 / 模型
     //   （MobModel 细长人形 + 独立眼睛发光层）/ 贴图（程序生成暗紫黑 + 眼白层）全原创，仅机制对齐。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）
+    //   t728 燃烬者（Emberling）= MobEmberling(17)：机制等价 MC 1.0 烈焰人（Blaze）—— 悬浮单头怒焰怨灵，下界
+    //   （Nether）敌对生物简化到主世界夜间黑暗刷怪。hostile=true → 走 tickHostileLife（白天暴晒燃烧 / 远距消失 +
+    //   黑暗刷怪调度，同 Shambler/Bones/Stalker/Nightwalker；刷怪池份额较低 ~1/6）。独特机制（PLAN §9 区隔，
+    //   零 MC 专名）：
+    //     - 火力免疫：tick 火烧分支跳过（fireTimer 不点燃 / 岩浆 / 火不伤，机制等价 MC 烈焰人免疫火伤）。
+    //     - 悬浮漂移（aiEmberling）：中心头盒悬空 ~0.4 格缓慢漂向玩家（~1.5 blocks/s 慢速，sin 上下浮动）；
+    //       距 6-16 格 → 每 2.5-4s 喷一发火球（kind=Fireball，直线朝玩家当前位置 ~8 blocks/s）；距 <3 格 →
+    //       后退（怕近战，机制等价 MC 烈焰人远程保持距离）。
+    //     - 火球（Fireball 投射物：接现有箭 / 雪球 / 蛋体系）：直线弹道 + 重力 0 或小；命中方块 → 消失
+    //       （~20% 概率若邻格可燃 → setBlock Fire 点燃，接 t724 火系统）；命中玩家 → 伤害 5 + 着火（m_fireTimer
+    //       刷新，t724 点燃判据先例）；命中 mob → 伤害 5 + 着火（fireTimer）。v1 无玩家近战偏转。
+    //   tick Mob 分支据 mobType==MobEmberling 路由到 aiEmberling（替代 aiHostile）；Fireball kind 走独立 tick
+    //   分支（同 Arrow）。死亡掉 0-1 燃烬棒（BlazeRodId 0x245，t726）+ 3 XP（呈现层 onMobDied 分流）。死因
+    //   DeathCause::Emberling「被燃烬者的火球焚杀」（t727 Nightwalker 先例）。§9 原创：名称 / 模型（MobModel
+    //   中心头盒 + QML 环绕旋转竖棒）/ 贴图（t717 已建 entity_emberling 程序贴图 + pack blaze.png）全原创。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16, MobEmberling = 17 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -262,6 +277,15 @@ public:
     //   机制等价 MC 1.0 蛋投掷物命中生物仅击退不伤）+ 寿命 / 越界兜底移除（同雪球）。
     //   QML delegate 据 kindAt==Egg 走奶白卵形 Model。达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）。
     Q_INVOKABLE int spawnEgg(const QVector3D &origin, const QVector3D &vel);
+    // t728 火球投射物（燃烬者 aiEmberling 远程攻击）：在 origin 处生成携带初速度 vel（blocks/s，直线弹道，
+    //   重力 ~0）的火球实体。kind=Fireball、pushable=false（玩家走碰不推）、halfW/halfH=0.15（橙黄火球小体
+    //   + 碰撞最小；命中检测走点-in-AABB 不读 halfW）。tick 内 Fireball 分支：直线位移 + 方块命中（消失 +
+    //   ~20% 概率若命中格 / 邻格可燃 → setBlock Fire 点燃，接 t724 火系统）+ **玩家命中**（伤害 kEmberlingFireballDamage=5
+    //   → emit mobAttackedPlayer(5, MobEmberling) + emit emberFireballHitPlayer() 让呈现层 ignite 玩家）+
+    //   **mob 命中**（damageEntity(5) 扣血 + 设 fireTimer 着火）+ 寿命 / 越界兜底移除（同雪球）。
+    //   QML delegate 据 kindAt==Fireball 走橙黄火球自发光 Model。机制等价 MC 1.0 烈焰人火球；名称 / 视觉全原创
+    //   （§9 区隔）。达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
+    Q_INVOKABLE int spawnFireball(const QVector3D &origin, const QVector3D &vel);
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
     //   t437：改「释放全部活体槽位」而非「清空 vector」。根因：旧 m_entities.clear() 把 count→0，QML
     //   Repeater count 随之→0；但 reparent 进 mobHost 的 3D delegate（QQuick3DNode，非 QQuickItem）不进
@@ -701,6 +725,11 @@ signals:
     //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费）。孵化小鸡是 Entities 层内部行为（spawnMobCore
     //   → entitiesChanged），不经本信号。
     void eggBreak(float x, float y, float z);
+    // t728 燃烬者火球命中玩家着火（机制等价 MC 1.0 烈焰人火球点燃玩家）：Fireball tick 命中玩家时发 —— 伤害
+    //   5 走 mobAttackedPlayer（见上，死因 Emberling），着火由本信号另行驱动（呈现层 Main.qml 路由到
+    //   player.applyStatusEffect(EffectFire, 秒数, 1)，刷新 m_fireTimer）。单次命中两者成对发（QML 均消费）；
+    //   单向事件流（PLAN §2 分层：Entities 层发语义事件、呈现层只消费路由到 Game 层方法）。
+    void emberFireballHitPlayer();
     // t398 鸡下蛋（spec「periodically lays an EGG item」）：MobChicken 周期性下蛋 —— eggTimer 倒计时到 0 时
     //   发本信号。坐标 = 鸡当前格 floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在鸡身旁）。
     //   呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem(0x22B=蛋 ×1)（同 mobDied→spawnItem 模式；
@@ -830,6 +859,9 @@ private:
         //   带 burned = (fireTimer>0)（着火态死亡的 mob 掉熟肉，见 Main.qml onMobDied）。
         float fireTimer       = 0.0f; // 火烧剩余秒数（>0 着火；岩浆 / 火点燃；每 tick 递减，归零熄灭）
         float fireDamageTimer = 0.0f; // 火伤累积（秒；fireTimer>0 时累加，每 kFireDamageInterval 扣 1HP + 掷随机熄灭）
+        // t728 燃烬者（Emberling）喷火球冷却（仅 mobType==MobEmberling 用；其余 mob 留默认 0 不触发）：
+        //   aiEmberling 倒减（射程 6-16 区间返 0 → 喷一发火球 + 重置随机 [kEmberlingFireIntervalMin,Max]）。
+        float fireCooldown = 0.0f;   // 到下次喷火球倒计时（秒；仅 MobEmberling 用）
         float suffocationTimer = 0.0f; // t254 窒息累积计时（头部嵌实体方块时累加，每 kSuffocationInterval 秒扣 1HP；机制同玩家 t160）
         float cactusDamageTimer = 0.0f; // t394 仙人掌接触伤害累积（mob AABB 接触 Cactus 时累加，每 kCactusDamageInterval 扣 1HP；离开归零）
         // t281 敌对 AI 态（仅 hostile=true 的 Mob 用；passive / FallingBlock 留默认不触发）：
@@ -1263,6 +1295,19 @@ private:
     //   return 是否真位移。idx = 本 mob 槽索引（瞬移落点查非实体时排除自身 / 邻近 mob）。
     bool aiNightwalker(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW,
                        float worldD, float speedScale = 1.0f);
+    // t728 燃烬者 AI（tick 内 hostile mob 且 mobType==MobEmberling 分支调，替代 aiHostile）。机制等价 MC 1.0
+    //   烈焰人（Blaze）；§9 区隔改名 + 原创模型/贴图。分层同 aiHostile（只读 World + 自身数据 + 语义信号）：
+    //   悬浮单头游走 + 远程火球，无近战（怕贴脸）。行为分三段（按 XZ 水平距 distXZ = |player − e|）：
+    //   (1) 距 > kEmberlingBackoffDist(3) 且 ≤ kEmberlingAttackMax(16)：缓慢漂向玩家（hover 慢速 ~1.5 blocks/s，
+    //       sin 上下浮动由 QML 动画驱动，本 AI 只设水平漂移）+ 周期性喷火球 —— fireCooldown 倒减，归零且在
+    //       [kEmberlingAttackMin(6), max(16)] 区间 → 朝玩家当前位置直线喷发（fireEmberlingFireball，~8 blocks/s，
+    //       命中判定在 Fireball tick 分支）；喷完随机 2.5-4s 冷却（kEmberlingFireIntervalMin/Max）。
+    //   (2) 距 ≤ kEmberlingBackoffDist(3)：玩家贴脸（怕近战）→ 后退背离玩家漂移。
+    //   (3) 距 > kEmberlingAttackMax(16)（或玩家不可锁定）：不追击，轻微 idle 漂移（hover 原地缓慢随机向）。
+    //   return 是否真位移（驱动 dirty → QML 位置绑定）。idx = 本 mob 槽索引（命中排除 / 驯服狼防御目标用）。
+    //   火热免疫在 tick 火烧分支另判（不在这里）。
+    bool aiEmberling(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW,
+                     float worldD, float speedScale = 1.0f);
     // t727 通用瞬移（夜行者怕水 / 弹射物 / 近战 dodge 逃逸共用；机制等价 MC 末影人瞬移）：以 e 为中心随机选
     //   [minDist, maxDist] 水平距离 + 随机方向，迭代 kTeleportAttempts 次找「落点格非水 + 下方有 solid 支撑 + 该
     //   处 AABB 不与其他活体 mob 重叠」的空位（targetX/targetZ = 既存生成位用；绝大多数为简单地面随机瞬移）。
@@ -1594,6 +1639,13 @@ private:
     static constexpr float kEggLifetime            = 5.0f;  // 鸡蛋最长存活（秒；同雪球 kSnowballLifetime）
     static constexpr float kEggHitHalfW            = 0.3f;  // 鸡蛋 vs mob 命中盒 XZ/Y 外扩（blocks；同雪球）
     static constexpr float kEggHatchDenominator    = 8.0f;  // 孵化概率分母（1/8；机制等价 MC 1.0 鸡蛋 1/8 出鸡）
+    // t728 燃烬者火球投射物常量（机制等价 MC 1.0 烈焰人火球：直线弹道 + 命中点燃 + 消失）。
+    //   - kFireballLifetime：火球最长存活（秒；直线飞行未命中兜底移除，防永久滞留堆积，同箭/雪球）。
+    //   - kFireballHitHalfW：火球 vs 玩家/mob 命中盒 XZ/Y 外扩（blocks；火球是小点，AABB 外扩做命中盒同箭）。
+    //   - kFireballIgniteChance：命中方块后点燃概率（20% = 机制等价 MC 火球落地点燃方块的概率感；接 t724 火系统）。
+    static constexpr float kFireballLifetime      = 4.0f;  // 火球最长存活（秒；直线飞行兜底移除）
+    static constexpr float kFireballHitHalfW      = 0.3f;  // 火球 vs 玩家/mob 命中盒 XZ/Y 外扩（blocks）
+    static constexpr int   kFireballIgniteChance  = 20;    // 方块命中点燃概率（%）
     static constexpr float kIronGolemDetectRange   = 12.0f; // 铁傀儡敌对侦测范围（blocks；XZ）
     static constexpr float kIronGolemAttackRange   = 2.0f;  // 铁傀儡近战攻击 XZ 距离（blocks）
     static constexpr int   kIronGolemAttackDamage  = 8;     // 铁傀儡重拳伤害（HP；高伤害）
@@ -1678,6 +1730,29 @@ private:
     static constexpr float kNightwalkerTeleportCooldown = 0.6f;   // 瞬移冷却（秒）
     static constexpr float kNightwalkerDodgeChance      = 0.30f;  // 近战命中瞬移躲避概率
     static constexpr float kNightwalkerWaterDamageTick  = 1.0f;   // 怕水每秒扣血间隔（秒；每 tick 扣 1HP）
+    // t728 燃烬者（Emberling；机制等价 MC 1.0 烈焰人，§9 区隔）专属常量。数值为本工程小世界量身调，
+    //   非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）：
+    //   - kEmberlingSpeed：悬浮漂移水平速度（blocks/s；慢速 hover，比地面 mob 慢，怕近战远程保持距离）。
+    //   - kEmberlingAttackMin / kEmberlingAttackMax：开火 XZ 距离带（blocks；[min,max] 区间才喷火球）。
+    //     近于 min → 进入后退段；远于 max → 不追击仅 idle 漂移（同弓手保持距离节律）。
+    //   - kEmberlingBackoffDist：玩家贴脸后退触发距离（blocks；XZ；机制等价 MC 烈焰人怕近战后退）。
+    //   - kEmberlingFireIntervalMin / Max：喷火球冷却随机带（秒；喷完随机 2.5-4s 下一发）。
+    //   - kEmberlingFireballSpeed：火球水平初速（blocks/s；直线弹道向玩家当前位置，玩家可侧身躲避）。
+    //   - kEmberlingFireballDamage：火球命中伤害（HP；走 mobAttackedPlayer(5, MobEmberling)，死因尾追 Emberling）。
+    //   - kEmberlingFireResistImmunity：火力免疫开关（true = tick 火烧分支跳过，不点燃 / 岩浆 / 火不伤，
+    //     机制等价 MC 烈焰人免疫火伤）。
+    //   - kEmberlingHoverOffset：悬浮高度（中心下底面到支撑面顶的抬升，blocks；机制等价 MC 烈焰人飞浮。落地 /
+    //     resting 复探 Y 恢复时加它 → 恒悬空不贴地；上下 sin 浮动由 QML 动画驱动（呈现层，逻辑中心 Y 固定）。
+    static constexpr float kEmberlingSpeed             = 1.5f;  // 悬浮漂移水平速度（blocks/s）
+    static constexpr float kEmberlingAttackMin         = 6.0f;  // 开火 XZ 距离下界（blocks）
+    static constexpr float kEmberlingAttackMax         = 16.0f; // 开火 XZ 距离上界（blocks）
+    static constexpr float kEmberlingBackoffDist       = 3.0f;  // 玩家贴脸后退触发距离（blocks）
+    static constexpr float kEmberlingFireIntervalMin   = 2.5f;  // 喷火球冷却随机带下界（秒）
+    static constexpr float kEmberlingFireIntervalMax   = 4.0f;  // 喷火球冷却随机带上界（秒）
+    static constexpr float kEmberlingFireballSpeed     = 8.0f;  // 火球水平初速（blocks/s）
+    static constexpr int   kEmberlingFireballDamage    = 5;     // 火球命中伤害（HP）
+    static constexpr bool  kEmberlingFireResistImmunity = true; // 火力免疫（火 / 岩浆不伤）
+    static constexpr float kEmberlingHoverOffset       = 0.4f;  // 悬浮抬升（中心下底面到支撑顶；blocks）
     static constexpr float kJumpSpeed       = 8.4f;  // 越障跳跃初速（blocks/s；同 player jump，翻 1 格墙）
     // t283 骷髅弓箭手远程 AI 常量（spec「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」；机制对齐
     //   MC 1.0 骷髅射手：远距 + 抛物箭 + 保持距离 + 命中伤害；数值为本工程小世界量身调，非 MC 精确复刻 ——

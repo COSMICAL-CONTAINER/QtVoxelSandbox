@@ -102,7 +102,9 @@ public:
     //   armorProtectionFactor 按序数 switch（case 1..11，default 兜底），DeathCause 不进存档（respawn /
     //   加载均复位 Generic），追加不破坏既有映射。t727 再追 1：Nightwalker=被夜行者重拳击杀（末影人，§9 改名；
     //   aiNightwalker 蓄力重拳 mobAttackedPlayer 携 MobNightwalker → QML 映射本死因，文案「被夜行者重拳击杀」）。
-    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain, Nightwalker };
+    //   t728 再追 1：Emberling=被燃烬者的火球焚杀（烈焰人，§9 改名；Fireball tick 命中玩家 mobAttackedPlayer 携
+    //   MobEmberling → QML 映射本死因，文案「被燃烬者的火球焚杀」）。
+    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain, Nightwalker, Emberling };
     Q_ENUM(DeathCause)
 
     explicit PlayerState(QObject *parent = nullptr);

@@ -753,6 +753,16 @@ void MobModel::rebuild()
         addBoxRot(-0.09f, -0.925f,  0.00f, 0.06f, 0.475f, 0.06f, -0.45f,  0.00f, +legSw, verts, idx, bMin, bMax); // 左腿
         setMobTex(0, 16, 4, 12, 4);
         addBoxRot( 0.09f, -0.925f,  0.00f, 0.06f, 0.475f, 0.06f, -0.45f,  0.00f, -legSw, verts, idx, bMin, bMax); // 右腿
+    } else if (m_mobType == 17) {
+        // t728 燃烬者（Emberling；机制等价 MC 1.0 烈焰人 Blaze，§9 区隔 + 原创模型/贴图）：悬浮单头怒焰怨灵
+        //   —— 单一中心大圆头盒（~0.9 宽 ×0.9 高悬浮），无四肢（下端烟灰混合观感由 Main.qml delegate 环绕旋转
+        //   竖棒补视觉）。局部原点 = 碰撞中心（halfW=0.5/halfH=0.6 → 碰撞 1.0×1.2）；头盒中心在 origin →
+        //   Main.qml mobModelYOff = 0。hover 上下 sin 浮动由 Main.qml delegate 整体 Model 动画驱动（几何不动）。
+        //   R19 C3 UV（MC Blaze base 64×64）：烈焰人头 head(0,0)8×8×8 —— 单盒竣工整张；pack 命中 blaze.png 时头盒
+        //   按该布局粗对齐；pack 关走全脸 entity_emberling 程序生成贴图 [0,1]²，UV 不读。
+        g_texW = 64.0f; g_texH = 64.0f;
+        setMobTex(0, 0, 8, 8, 8);
+        addBox( 0.00f,  0.00f,  0.00f, 0.45f, 0.45f, 0.45f, verts, idx, bMin, bMax);
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         // R19 C3 UV（MC Cow base 64×32；U1 §2）：body(18,4)12×18×10 / head(0,0)8×8×6 / horn(22,0)1×3×1 / leg(0,16)4×12×4。

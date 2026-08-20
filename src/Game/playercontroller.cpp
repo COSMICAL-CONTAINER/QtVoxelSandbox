@@ -3427,7 +3427,8 @@ void PlayerController::placeBlock()
             || heldItemId == RecipeRegistry::SpawnEggSpiderId
             || heldItemId == RecipeRegistry::SpawnEggChickenId
             || heldItemId == RecipeRegistry::SpawnEggSquidId
-            || heldItemId == RecipeRegistry::SpawnEggNightwalkerId)) {
+            || heldItemId == RecipeRegistry::SpawnEggNightwalkerId
+            || heldItemId == RecipeRegistry::SpawnEggEmberlingId)) {
         if (m_hasHit) {
             int mobType = 0;
             QString color; // 占位串（pig/cow/sheep 走 MobModel + 贴图，不读 color）
@@ -3449,6 +3450,8 @@ void PlayerController::placeBlock()
                 mobType = EntityManager::MobSquid;    color = QStringLiteral("#6a4a3a"); // t399 鱿鱼：深褐橘斑（机制等价 squid；走 MobModel + 贴图）
             } else if (heldItemId == RecipeRegistry::SpawnEggNightwalkerId) {
                 mobType = EntityManager::MobNightwalker; color = QStringLiteral("#2a1f2a"); // t727 夜行者：暗紫黑（机制等价末影人；走 MobModel + 贴图 + 瞪视激怒）
+            } else if (heldItemId == RecipeRegistry::SpawnEggEmberlingId) {
+                mobType = EntityManager::MobEmberling; color = QStringLiteral("#e8b030"); // t728 燃烬者：橙黄焰色（机制等价烈焰人；走 MobModel + 贴图 + 远程火球悬浮）
             } else { // SpawnEggSpiderId
                 mobType = EntityManager::MobSpider;   color = QStringLiteral("#2a1a1a"); // t285 敌对：暗黑（机制等价蜘蛛）
             }

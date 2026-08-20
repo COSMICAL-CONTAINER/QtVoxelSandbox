@@ -250,11 +250,13 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
         case MobIronGolem: e.halfW = 0.60f; e.halfH = 1.20f; break; // 1.2×2.4 铁傀儡（T 形铁块 + 南瓜头；t483）
         case MobSilverfish: e.halfW = 0.22f; e.halfH = 0.15f; e.hostile = true; break; // 0.44×0.30 小型虫（机制等价 MC 1.0 银鱼 0.43×0.18 宽矮；要塞刷怪笼刷出，t487）
         case MobNightwalker: e.halfW = 0.35f; e.halfH = 1.40f; e.hostile = true; break; // 0.7×2.9 三格高细长人形（机制等价 MC 1.0 末影人 3 格高；怕水/瞪视激怒/弹射免疫/近战传送，t727）
+        case MobEmberling: e.halfW = 0.50f; e.halfH = 0.60f; e.hostile = true; break; // 1.0×1.2 悬浮单头（机制等价 MC 1.0 烈焰人；浮空漂移 + 远程火球 + 火免疫，t728）
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
     //   免首帧 collision 底面嵌入地面再 snap（cow halfH=0.70 时旧 +0.5 会嵌 0.2 进支撑方块）。
-    e.pos = QVector3D(x + 0.5f, y + e.halfH, z + 0.5f);
+    //   t728 燃烬者（Emberling）：+kEmberlingHoverOffset 抬升 → spawn 即悬空 ~0.4 格（机制等价 MC 烈焰人飞浮）。
+    e.pos = QVector3D(x + 0.5f, y + e.halfH + (mobType == MobEmberling ? kEmberlingHoverOffset : 0.0f), z + 0.5f);
     e.pushable = true;
     e.kind = Mob;
     e.color = color.isEmpty() ? QStringLiteral("#ff5555") : color;
@@ -289,6 +291,12 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
                   ? (kSquidSwimIntervalMin
                      + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kSquidSwimIntervalMax - kSquidSwimIntervalMin))
                   : 0.0f;
+    // t728 燃烬者喷火球冷却初值：随机化（[kEmberlingFireIntervalMin,Max)）防批量 spawn 的燃烬者同步喷火（同
+    //   ambientTimer 错峰模式）。非 MobEmberling 的 mob 保留 0 不触发（tick Mob 分支仅 mobType==MobEmberling 推进）。
+    e.fireCooldown = (mobType == MobEmberling)
+                     ? (kEmberlingFireIntervalMin
+                        + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kEmberlingFireIntervalMax - kEmberlingFireIntervalMin))
+                     : 0.0f;
     e.ambientTimer = kAmbientMin
                      + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
     // t377 mob 随机护甲（仅 Shambler/Bones；spec「~80% no armor, ~20% a random piece/set」）。机制等价 MC 1.0
@@ -478,6 +486,34 @@ int EntityManager::spawnEgg(const QVector3D &origin, const QVector3D &vel)
     emit entitiesChanged();
     return slot;
 }
+
+// t728 生成火球投射物（燃烬者 aiEmberling 远程攻击；见头文件注释）：存 origin + 3D 速度 vel（blocks/s，直线弹道，
+//   重力 ~0）+ kind=Fireball + pushable=false + 寿命。halfW/halfH=0.15（橙黄火球小体视觉 + 碰撞最小；命中检测走
+//   点-in-AABB 不读 halfW）。entity.mobType 设 MobEmberling（火球命中玩家时 mobAttackedPlayer 携它在 QML 映射死因
+//   尾追 Emberling）。bump revision → QML Repeater 追加 delegate（Fireball 分支橙黄自发光小球 Model）。达 kCap →
+//   跳过 + 告警（防溢出）。返新火球槽索引（调试用）；达 kCap → -1。
+int EntityManager::spawnFireball(const QVector3D &origin, const QVector3D &vel)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); fireball spawn skipped at" << origin;
+        return -1;
+    }
+    Entity e;
+    e.pos = origin;
+    e.halfW = 0.15f; // 橙黄火球小体视觉 + 碰撞最小
+    e.halfH = 0.15f;
+    e.pushable = false; // 玩家走碰不推（同箭 / 雪球）
+    e.kind = Fireball;
+    e.mobType = MobEmberling; // 命中玩家 mobAttackedPlayer 携它 → QML 映射死因 Emberling
+    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（Fireball 不走 Mob 击退衰减分支，无冲突）
+    e.vy = vel.y();
+    e.vz = vel.z();
+    e.arrowLife = kFireballLifetime;
+    const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    ++m_revision;
+    emit entitiesChanged();
+    return slot;
+}
 //   spawnMobTyped 内 switch 据 mobType 设 hostile=true（兜底）。spec「黑暗刷怪调度」周期 spawn 调用它。
 //   mobType 非 Shambler/Bones → 仍生成但非敌对语义（防御；正常 caller 只传这两种）。
 void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
@@ -492,9 +528,11 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
         color = QStringLiteral("#c8c2b8"); // Silverfish：灰白甲壳色（机制等价 MC 银鱼；原创配色，t487）
     } else if (mobType == MobNightwalker) {
         color = QStringLiteral("#2a1f2a"); // Nightwalker：暗紫黑体色（机制等价 MC 末影人暗黑体型；原创配色，t727）
+    } else if (mobType == MobEmberling) {
+        color = QStringLiteral("#e8b030"); // Emberling：橙黄焰色（机制等价 MC 烈焰人黄色焰体；原创配色，t728）
     } else {
         color = QStringLiteral("#4a6a3a"); // Shambler：暗绿腐肉色（机制等价 MC 僵尸；原创配色）
-        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones/Stalker/Silverfish/Nightwalker 一律按 Shambler
+        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones/Stalker/Silverfish/Nightwalker/Emberling 一律按 Shambler
     }
     spawnMobTyped(x, y, z, mobType, color, health);
     // spawnMobTyped 内 switch 已对 Shambler/Bones/Stalker/Silverfish 设 hostile=true；spawnHostileMob 仅收口语义入口。
@@ -714,13 +752,15 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                 const float effSkyL = float(skyL) * skyBrightness; // 天光乘昼夜（夜间→0、白天→原值）
                 const float effLight = std::max(effSkyL, float(blkL));
                 if (effLight >= kSpawnLightThreshold) continue; // spec「light<阈值(7)」
-                // 合格点：spawn 一个敌对（Shambler / Bones / Stalker / Nightwalker 等概率；t284 加 Stalker；
-                //   t727 加 Nightwalker 夜行者 —— 同 shambler 夜间黑暗生成）。spawnMobTyped 内 kCap 守卫；达 cap
-                //   静默跳过。机制等价 MC 1.0 黑暗刷怪池（僵尸 / 骷髅 / 苦力怕 / 末影人）。
-                const int pickMob = rng->bounded(4);
-                const int spawnType = (pickMob == 0) ? MobShambler
-                                    : (pickMob == 1) ? MobBones
-                                    : (pickMob == 2) ? MobStalker : MobNightwalker;
+                // 合格点：spawn 一个敌对（Shambler / Bones / Stalker / Nightwalker / Emberling；t284 加 Stalker；
+                //   t727 加 Nightwalker 夜行者；t728 加 Emberling 燃烬者 —— 低份额 ~1/6、其余既有敌对摊余）。
+                //   spawnMobTyped 内 kCap 守卫；达 cap 静默跳过。机制等价 MC 1.0 黑暗刷怪池（僵尸 / 骷髅 / 苦力怕 /
+                //   末影人 / 烈焰人）。
+                const int pickMob = rng->bounded(6); // 6 份：Emberling 1/6、Shambler 2/6、其余各 1/6
+                const int spawnType = (pickMob == 5) ? MobEmberling
+                                    : (pickMob == 0 || pickMob == 1) ? MobShambler
+                                    : (pickMob == 2) ? MobBones
+                                    : (pickMob == 3) ? MobStalker : MobNightwalker;
                 spawnHostileMob(cx, cy, cz, spawnType);
                 qCInfo(lcEnt) << "hostile spawned type" << spawnType
                              << "at" << cx << cy << cz << "effLight=" << effLight
@@ -3376,6 +3416,98 @@ bool EntityManager::nightwalkerDodge(int i, World *world)
     return false;
 }
 
+// t728 燃烬者 AI（tick 内 hostile mob 且 mobType==MobEmberling 分支调，替代 aiHostile）。机制等价 MC 1.0
+//   烈焰人（Blaze）；§9 区隔改名 + 原创模型/贴图。分层同 aiHostile（只读 World + 自身数据 + 语义信号）：
+//   悬浮单头游走 + 远程火球，无近战（怕贴脸）。行为按 XZ 水平距 distXZ 分三段：
+//   (1) 距 > kEmberlingBackoffDist(3) 且 <= kEmberlingAttackMax(16)：缓慢漂向玩家（hover 慢速 ~1.5 blocks/s，
+//       sin 上下浮动由 QML 动画驱动，本 AI 只设水平漂移）+ 周期性喷火球 —— fireCooldown 倒减，归零且在
+//       [kEmberlingAttackMin(6), max(16)] 区间 → 朝玩家当前位置直线喷发（spawnFireball，~8 blocks/s）；喷完
+//       随机 2.5-4s 冷却。
+//   (2) 距 <= kEmberlingBackoffDist(3)：玩家贴脸（怕近战）→ 后退背离玩家漂移。
+//   (3) 距 > kEmberlingAttackMax(16)：不追击，轻微 idle 漂移（hover 原地缓慢随机向）。
+//   return 是否真位移（驱动 dirty → QML 位置绑定）。idx = 本 mob 槽索引（命中排除 / 驯服狼防御目标用）。
+//   火力免疫在 tick 火烧分支另判（不在这里）。
+bool EntityManager::aiEmberling(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
+                                float worldW, float worldD, float speedScale)
+{
+    // 喷火球冷却递减（不论状态；自然走完，复喷不卡陈旧值）。钳到 0。
+    if (e.fireCooldown > 0.0f) {
+        e.fireCooldown -= dt;
+        if (e.fireCooldown < 0.0f) e.fireCooldown = 0.0f;
+    }
+
+    // 玩家相对位置（XZ 水平距）。
+    const float dx = playerPos.x() - e.pos.x();
+    const float dz = playerPos.z() - e.pos.z();
+    const float distXZ = std::sqrt(dx * dx + dz * dz);
+
+    // ---- 水平漂移方向（按距分三段）----
+    float mvX = 0.0f, mvZ = 0.0f; // 归一化水平移动单位向量
+    bool moving = false;
+    if (distXZ > kEmberlingAttackMax) {
+        // 段 (3) 远距：不追击 → idle 缓慢随机向漂移（hover 原地游走感）。wanderTimer 到 → 换随机向。
+        e.wanderTimer -= dt;
+        if (e.wanderTimer <= 0.0f) {
+            e.wanderTimer = 1.5f + float(QRandomGenerator::global()->bounded(2000)) / 1000.0f; // 1.5-3.5s
+            e.yawRad = float(QRandomGenerator::global()->bounded(6283)) / 1000.0f; // [0, 2π) 随机向
+        }
+        mvX = -std::sin(e.yawRad); // 沿 yaw 前进（dir=(-sin,0,-cos) 约定）
+        mvZ = -std::cos(e.yawRad);
+        moving = true;
+    } else if (distXZ <= kEmberlingBackoffDist && distXZ > 1e-3f) {
+        // 段 (2) 贴脸：后退背离玩家漂移（怕近战；机制等价 MC 烈焰人近战保持距离后退）。
+        mvX = -dx / distXZ;
+        mvZ = -dz / distXZ;
+        moving = true;
+    } else if (distXZ > kEmberlingBackoffDist) {
+        // 段 (1) 射程（3 < distXZ <= 16）：漂向玩家 + 面朝玩家。
+        mvX = dx / distXZ;
+        mvZ = dz / distXZ;
+        moving = true;
+        if (distXZ > 1e-4f) e.yawRad = std::atan2(-mvX, -mvZ);
+        // 周期喷火球（仅 [kEmberlingAttackMin, max] 射程区间；fireCooldown 归零触发；喷完随机 [2.5,4]s 冷却）。
+        if (e.fireCooldown <= 0.0f && distXZ >= kEmberlingAttackMin) {
+            const QVector3D origin(e.pos.x(), e.pos.y(), e.pos.z());
+            const QVector3D to(playerPos.x() - origin.x(), playerPos.y() + 0.9f - origin.y(),
+                               playerPos.z() - origin.z()); // 朝玩家中心高度（脚位 + 0.9）
+            const float tl = to.length();
+            if (tl > 1e-3f) {
+                const QVector3D vel = to / tl * kEmberlingFireballSpeed;
+                spawnFireball(origin, vel); // 直线弹道火球（Fireball tick 分支结算命中 / 点燃）
+                qCInfo(lcEnt) << "emberling" << idx << "spit fireball at player dist=" << distXZ;
+            }
+            e.fireCooldown = kEmberlingFireIntervalMin
+                + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f
+                * (kEmberlingFireIntervalMax - kEmberlingFireIntervalMin);
+        }
+    }
+    // distXZ 在 (0, 3] 与 (16, ...] 之外（含 3<distXZ<=6 段）已覆盖；玩家同格（distXZ≈0）→ 不水平移动。
+
+    // ---- 水平漂移应用（逐轴 AABB 碰撞撤回 + 边界 clamp，同 aiHostile 追击模式）----
+    bool moved = false;
+    if (moving) {
+        const float hoverSpd = kEmberlingSpeed * speedScale;
+        const float ehw = e.halfW, ehh = e.halfH;
+        float newX = e.pos.x() + mvX * hoverSpd * dt;
+        if (newX < ehw) newX = ehw;
+        if (newX > worldW - ehw) newX = worldW - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+        float newZ = e.pos.z() + mvZ * hoverSpd * dt;
+        if (newZ < ehw) newZ = ehw;
+        if (newZ > worldD - ehw) newZ = worldD - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+        if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+        if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+        e.moveSpeed = moved ? hoverSpd : 0.0f;
+    } else {
+        e.moveSpeed = 0.0f;
+    }
+    e.wanderSpeed = moving ? kEmberlingSpeed : 0.0f;
+    // 悬浮垂直（hover）保持：Emberling 不落回地表 —— 垂直悬浮由 tick resting / 落地段 kEmberlingHoverOffset
+    //   保持（见那里），本 AI 只设水平漂移；上下 sin 浮动由 QML 动画驱动（呈现层）。
+    return moved;
+}
+
 // t284 Stalker 爆炸（aiStalker fuse 满时调；详见头文件 detonateStalker 注释）。机制等价 MC 苦力怕球形爆炸。
 //   分层（PLAN §2）：向下写 World（setWaterSilent 破坏方块 + worldChanged 重建 mesh）+ 发语义信号
 //   （explosion 音/视反馈、mobAttackedPlayer 伤害玩家）；只读 World::blockAt 判定破坏目标。无向上依赖。
@@ -4221,6 +4353,107 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             continue; // Egg 不走 Mob AI / resting / 击退衰减
         }
 
+        // --- Fireball（t728 燃烬者火球）：直线弹道（重力 0）+ 方块命中（消失 + 20% 点燃邻可燃）+ 玩家命中
+        //   （伤害 5 + 着火）+ mob 命中（伤害 5 + 着火）+ 寿命 / 越界兜底 ---
+        //   机制等价 MC 1.0 烈焰人火球：直线飞行（无重力）、命中生物扣血 + 点燃、命中方块消失。判定序同箭 /
+        //   雪球：先 mob / 玩家后方块（贴墙目标不被先撞墙吞掉，但玩家判定在 mob 前 —— 火球朝玩家飞，命中玩家
+        //   优先于命中玩家身后 mob）。
+        if (e.kind == Fireball) {
+            e.arrowLife -= float(dt); // 复用 arrowLife 作寿命倒计时
+            // 直线弹道：重力 0（火球不抛物，机制等价 MC 烈焰人火球直线惯性飞行）；速度恒定不变。
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
+            bool remove = false;
+            bool hitBlock = false;
+            // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积；不引爆不点燃）。
+            if (e.arrowLife <= 0.0f) remove = true;
+            // **玩家命中**（先于方块 / mob 判定：火球朝玩家飞，命中点优先归玩家）：火球（点）落点是否在玩家
+            //   AABB（外扩 kFireballHitHalfW；玩家半宽/半高用 tick 传入的 listenerHalfW/listenerHeight + listener
+            //   （玩家脚位）近似）内。命中 → 伤害 kEmberlingFireballDamage=5（mobAttackedPlayer 携 MobEmberling →
+            //   死因尾追 Emberling）+ emit emberFireballHitPlayer()（呈现层 ignite 玩家）+ 移除火球。受击全局节流
+            //   （m_playerHitCooldown）串行化（同箭命中玩家模式，防连发灼烧叠加瞬死）。
+            if (!remove && playerTargetable && m_playerHitCooldown <= 0.0f) {
+                const float px = listener.x(), py = listener.y(), pz = listener.z();
+                const float pEx = px - listenerHalfW - kFireballHitHalfW;
+                const float pEy = py - kFireballHitHalfW;
+                const float pEz = pz - listenerHalfW - kFireballHitHalfW;
+                if (next.x() >= pEx && next.x() <= px + listenerHalfW + kFireballHitHalfW
+                    && next.y() >= pEy && next.y() <= py + listenerHeight + kFireballHitHalfW
+                    && next.z() >= pEz && next.z() <= pz + listenerHalfW + kFireballHitHalfW) {
+                    m_playerHitCooldown = kPlayerHitThrottle;
+                    float kbX, kbZ;
+                    if (e.vx * e.vx + e.vz * e.vz > 1e-3f) {
+                        const float hl = std::sqrt(e.vx * e.vx + e.vz * e.vz);
+                        kbX = e.vx / hl; kbZ = e.vz / hl;
+                    } else { kbX = 0.0f; kbZ = 1.0f; }
+                    emit mobAttackedPlayer(kEmberlingFireballDamage, e.mobType, kbX, kbZ); // 自身 mobType=MobEmberling
+                    emit emberFireballHitPlayer(); // 着火呈现（Main.qml → 点燃玩家）
+                    qCInfo(lcEnt) << "emberling fireball hit player for" << kEmberlingFireballDamage << "HP";
+                    remove = true;
+                }
+            }
+            // **mob 命中**（未命玩家且未 remove）：火球（点）落入任一活体 mob 的 AABB（外扩 kFireballHitHalfW）
+            //   → damageEntity(kEmberlingFireballDamage) 扣血 + 设 fireTimer 着火（t724 点燃判据先例）+ 移除火球。
+            //   跳过非 alive / 非 Mob / dead。命中首个即止（火球消失，不穿透）。
+            if (!remove) {
+                for (int mi = 0; mi < int(m_entities.size()); ++mi) {
+                    const Entity &m = m_entities[size_t(mi)];
+                    if (!m.alive || m.kind != Mob || m.dead) continue;
+                    const float ex2 = m.pos.x() - m.halfW - kFireballHitHalfW;
+                    const float ey2 = m.pos.y() - m.halfH - kFireballHitHalfW;
+                    const float ez2 = m.pos.z() - m.halfW - kFireballHitHalfW;
+                    if (next.x() >= ex2 && next.x() <= m.pos.x() + m.halfW + kFireballHitHalfW
+                        && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kFireballHitHalfW
+                        && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kFireballHitHalfW) {
+                        damageEntity(mi, kEmberlingFireballDamage); // 扣血 + 红闪 + 归零 mobDied（复用受击链）
+                        // t453 点燃目标（火伤）：fireTimer 刷新到 kFireDuration（t724 点燃判据先例；若目标自身火
+                        //   免疫如另一燃烬者无实际火伤，但仍设 fireTimer —— 免疫由火烧分支跳过不伤）。
+                        Entity &tm = m_entities[size_t(mi)];
+                        if (tm.alive && tm.kind == Mob && !tm.dead)
+                            tm.fireTimer = std::max(tm.fireTimer, kFireDuration);
+                        qCInfo(lcEnt) << "emberling fireball hit mob" << mi << "for"
+                                      << kEmberlingFireballDamage << "HP";
+                        remove = true;
+                        break;
+                    }
+                }
+            }
+            // 方块命中 → 消失 + ~20% 概率点燃（机制等价 MC 1.0 火球命中方块消失；若命中格 / 邻格可燃 → 点燃，接
+            //   t724 火系统）。mob / 玩家命中已早退，贴墙目标不会先撞墙。仅未命目标的飞行火球走此。
+            if (!remove) {
+                const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
+                if (by >= 0 && world->isSolid(bx, by, bz)) {
+                    remove = true;
+                    hitBlock = true;
+                    // ~20% 点燃（机制等价 MC 火球落地引燃邻近方块）：命中格 / 水平 4 邻 / 上或下格任一为实体方块
+                    //   （可燃度近似「实体方块即可延烧」）→ 在「命中格正上方空位」置 Fire（t724 火系统；选顶面延烧，
+                    //   确定性落点避免乱放火）。若上方被占（命中格上方非 air）→ 放弃点燃（无安全落火面）。
+                    if (QRandomGenerator::global()->bounded(100) < kFireballIgniteChance) {
+                        const int tx = qFloor(next.x()), ty = qFloor(next.y()) + 1, tz = qFloor(next.z());
+                        if (ty < world->height() && !world->isSolid(tx, ty, tz)) {
+                            // 命中块正上方是空位 → 落火（命中块顶面是实体 → 延烧成立；t724 火系统承接）。
+                            world->setWaterSilent(tx, ty, tz, BlockRegistry::Fire, 0);
+                            qCInfo(lcEnt) << "emberling fireball ignited at" << tx << ty << tz;
+                        }
+                    }
+                }
+            }
+            // 越界兜底（飞出世界 XZ 边界 / 跌出底部）→ 移除（防永久飞行堆积）。
+            if (!remove) {
+                if (next.x() < 0.0f || next.z() < 0.0f
+                    || next.x() > worldW || next.z() > worldD || next.y() < 0.0f) {
+                    remove = true;
+                }
+            }
+            if (remove) {
+                toRemove.push_back(idx);
+                dirty = true;
+            } else {
+                e.pos = next; // 继续直线飞行
+                dirty = true;
+            }
+            continue; // Fireball 不走 Mob AI / resting / 击退衰减
+        }
+
         // --- FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）---
         //   t490 PrimedTnt（引燃态 TNT）：复用 FallingBlock kind 但 primed=true → 不走着地放置路径，改走 fuse
         //   倒计（dt 递减）→ 到 0 调 detonatePrimedTnt（球形破坏 + 链式引燃 + 伤玩家 + 音视）+ 移除。仍受重力
@@ -4451,7 +4684,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //       扣血 + 红闪 + 归零 mobDied 带 burned=true → 熟肉掉落）+ 掷随机提前熄灭（kFireExtinguishChance）。
             //       fireTimer 自然归零即熄（定时双保险）。passive 与敌对均走本段（日光 burning 仍由 tickHostileLife
             //       独立管，二者在 isBurningAt 合取显火焰）。只读 World::blockAt（向下依赖）。
-            {
+            //   t728 火力免疫（Emberling；机制等价 MC 1.0 烈焰人免疫火伤）：燃烬者跳过整段火烧系统 —— 岩浆 / 火
+            //   格不点燃、已有 fireTimer 不推进扣血（惰性 → 不伤），且不受外部 ignite（fire 点燃）影响。火免疫
+            //   故段内全部逻辑对其 no-op（不点燃 / 不扣火伤 / 岩浆不点燃），isBurningAt 亦不显火焰（fireTimer 恒 0）。
+            if (e.mobType != MobEmberling) {
                 const int fx = qFloor(e.pos.x());
                 const int fz = qFloor(e.pos.z());
                 const int footY = qFloor(e.pos.y() - e.halfH); // 脚位（AABB 底面）格
@@ -4504,7 +4740,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         dirty = true;
                     }
                 }
-            }
+            } // /t728 火免疫：非 Emberling 走火烧系统；Emberling 跳过（不点燃不扣火伤）
             // 火伤可能本帧致死（damageEntity 置 dead）→ 本帧不再走 AI / 重力（同上方 dead 分支语义，防死尸位移）。
             if (e.dead) continue;
 
@@ -4608,6 +4844,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   Stalker 蓄力同模式 —— 即使未移动（激怒原地发抖 / 蓄力站立），状态仍在变 → 每帧 bump 让 QML
                     //   激怒动画绑定刷新。
                     if (e.mobType == MobNightwalker && (e.enraged || e.enrageTimer > 0.0f)) dirty = true;
+                } else if (e.mobType == MobEmberling) {
+                    // t728 Emberling（燃烬者；机制等价 MC 1.0 烈焰人）：独立悬浮 AI —— 漂向玩家 + 远程喷火球 +
+                    //   贴脸后退。aiEmberling 内部推进 fireCooldown（喷发节律）+ 水平漂移；hover 上下浮动由 QML
+                    //   sin 动画驱动（本 AI 只设水平漂移）。火力免疫在火烧分支已跳过（不在此）。
+                    if (aiEmberling(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    // 火球冷却 / 漂移状态在 aiEmberling 内推进；无独立每帧显示态需 bump（浮动画由 QML Animation
+                    //   驱动非 revision 绑定，无需 term）。悬浮移动已由 dirty=true 覆盖（revision → QML position 绑定）。
                 } else {
                     if (aiHostile(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                 }
@@ -5002,7 +5245,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     // cy 高于脚位的层（top > feet）不算当前支撑（mob 站进它下方 = 嵌入，由窒息 / 挤出兜底）
                 }
                 if (supportTop >= 0.0f) {
-                    const float restY = supportTop + e.halfH;
+                    // t728 燃烬者悬浮：restY 加 kEmberlingHoverOffset 抬升（不断回退到贴地）。悬浮 mob 中心底
+                    //   面距支撑面恒悬空 ~0.4 格（视觉，机制等价 MC 烈焰人飞浮）；上下 sin 浮动由 QML 动画驱动。
+                    const float restY = supportTop + e.halfH
+                                        + (e.mobType == MobEmberling ? kEmberlingHoverOffset : 0.0f);
                     if (restY < e.pos.y() - 1e-3f) { e.pos.setY(restY); dirty = true; }
                 }
                 continue; // 仍实体 → 保持静止
@@ -5049,7 +5295,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         if (restTopY >= 0.0f) {
             // 落地：贴支撑面真顶 + 静止偏移（底面 = restTopY = 支撑顶；中心 = 顶 + halfH）。
             //   t252：kRestOffset → e.halfH（per-mob 半高；cow halfH=0.70 → 比 1×1 高 0.2，固定 0.5 无法表达）。
-            const float restY = restTopY + e.halfH;
+            //   t728 燃烬者：+kEmberlingHoverOffset 抬升 → 落地也停悬浮高度（不贴地，机制等价 MC 烈焰人飞浮）。
+            const float restY = restTopY + e.halfH
+                                + (e.mobType == MobEmberling ? kEmberlingHoverOffset : 0.0f);
             if (mobNewY <= restY || e.vy < 0.0f) {
                 if (e.pos.y() != restY) { e.pos.setY(restY); dirty = true; }
                 if (e.vy != 0.0f) { e.vy = 0.0f; dirty = true; }

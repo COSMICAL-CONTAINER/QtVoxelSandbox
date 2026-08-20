@@ -339,6 +339,10 @@ public:
     //   可堆叠 64（走材料段默认，同其他生物蛋）。图标：MaterialIcon 自绘蛋形 + 夜行者黑紫配色斑点
     //   （drawSpawnEgg("nightwalker")，§9 原创）。
     static constexpr int SpawnEggNightwalkerId = 0x246; // 生物蛋（夜行者）：右键地面 → 生成夜行者（MobNightwalker）
+    // t728 生物蛋（燃烬者，SpawnEggEmberlingId=0x247）：机制等价 MC 1.0 blaze spawn egg。创造模式物品，右键
+    //   地面 → EntityManager::spawnMobTyped 生成 MobEmberling（t728 燃烬者实体）。可堆叠 64（走材料段默认，
+    //   同其他生物蛋）。图标：MaterialIcon 自绘蛋形 + 燃烬者橙黄焰色斑点（drawSpawnEgg("emberling")，§9 原创）。
+    static constexpr int SpawnEggEmberlingId = 0x247; // 生物蛋（燃烬者）：右键地面 → 生成燃烬者（MobEmberling）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。
