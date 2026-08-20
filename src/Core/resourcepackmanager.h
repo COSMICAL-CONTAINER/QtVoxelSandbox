@@ -54,10 +54,15 @@ class ResourcePackManager : public QObject
     //   独立材质 baseColorMap 指向此条带（不走共享图集 voxelAtlas）→ 动画 positionV 只动水/岩浆，不动其它方块。
     Q_PROPERTY(QString waterStripSource READ waterStripSource NOTIFY activeChanged)
     Q_PROPERTY(QString lavaStripSource READ lavaStripSource NOTIFY activeChanged)
+    // t724 火焰条带贴图源（fireHost delegate 翻书；同 water/lava 模式）：active → file:/// 落盘合成条带
+    //   （qrc 程序生成底 + 包内 fire_0.png 帧覆盖）；否则 qrc:/textures/fire_strip.png。
+    Q_PROPERTY(QString fireStripSource READ fireStripSource NOTIFY activeChanged)
     // t489 条带帧数（与 BlockRegistry::kWaterStripFrames / kLavaStripFrames 同源单一权威；QML positionV 动画
     //   步长 = k/N 用此值，mesher UV 子区高 1/N 用 blockregistry 常量）。CONSTANT：值不随运行期变。
     Q_PROPERTY(int waterStripFrames READ waterStripFrames CONSTANT)
     Q_PROPERTY(int lavaStripFrames READ lavaStripFrames CONSTANT)
+    // t724 火焰条带帧数（同源 BlockRegistry::kFireStripFrames；CONSTANT）。
+    Q_PROPERTY(int fireStripFrames READ fireStripFrames CONSTANT)
     // t415 资源包总开关（镜像 settings.json resourcePackEnabled，缺省 false：避免无感知切换贴图）。
     //   setter 立即持久化；配合 apply() 即时重建图集（也可仅持久化等下次重启生效）。
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY configChanged)
@@ -100,6 +105,9 @@ public:
     QString lavaStripSource() const;
     int waterStripFrames() const { return BlockRegistry::kWaterStripFrames; }
     int lavaStripFrames() const { return BlockRegistry::kLavaStripFrames; }
+    // t724 火焰条带贴图源 + 帧数（同 water/lava 模式）。
+    QString fireStripSource() const;
+    int fireStripFrames() const { return BlockRegistry::kFireStripFrames; }
 
     bool enabled() const;
     void setEnabled(bool e);

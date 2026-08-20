@@ -970,7 +970,19 @@ public:
         //   （同铁轨形状?? → 冲突！用 MC 1.0 实际配方 6 铁锭 2×3 → **1** 个，横摆 3×2 与铁轨同形 → 本工程
         //   取**竖摆 2×3**与铁门一致避开铁轨冲突，dev-plan 注明）。破坏掉落自身 1 件。
         IronTrapdoor   = 136, // 铁活板门：水平/竖直薄板（仅红石驱动开合；右键无效应）；格子板贴图
-        Count           = 137, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t724 火焰方块（Fire；机制等价 MC 1.0 fire id 51）：非实体光源格（lightEmission=15，同岩浆档），
+        //   渲染**不进 chunk mesh**（mesher 双 PASS 跳过，同 Painting t720 模式）→ Main.qml fireHost 逐格
+        //   delegate 渲染：两片对角交叉双面 quad（Y 45°/135°，cullingMode NoCulling 双面可见）贴 fire_strip
+        //   翻书条带（32 帧 ×150ms 逐帧，同水/岩浆材质级 flipbook；帧区采 UV 全 [0,1] + Texture scaleV=1/N
+        //   —— delegate 路 path 与 chunk-mesh 路（UV 烘焙 1/N）不同源，见 Main.qml fireStripTex）。solid=false /
+        //   ShapeNone（无碰撞、不挡邻居面剔除、不可选体）、hardness=0（瞬破 = 扑灭）、NoTool、requiresTool=false、
+        //   dropId=0（破 = 熄灭无掉落，spawnItem 对 id<=0 已守卫不产出）、maxStack=0（不可进背包 —— 只能打火石
+        //   点燃 / tick 蔓延产生，无物品形态）。**可燃生态**：BlockRegistry::flammable() 单一权威可燃表
+        //   （木类 / 叶 / 书架 / 树苗 / 草丛等），World::tickFire 据它蔓延（邻可燃概率点燃 / 无燃料概率自熄 /
+        //   火上窜）。燃烧伤害：mob / 玩家点火复用 t344 岩浆链（entitymanager / playercontroller 的 Lava 接触
+        //   判定并入 Fire）。音色 GroupGrass（软质燃烧物）。不进创造调色板（maxStack=0 不可拾取/放置）。
+        Fire           = 137, // 火焰：非实体光源格（光 15）；两片对角交叉双面 quad + 32 帧翻书动画；点燃 / 蔓延 / 自熄
+        Count           = 138, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1334,6 +1346,12 @@ public:
                      //   恒 1.0（等同空手）。机制等价 MC 1.0「钓竿不影响挖掘」。仅用作 ToolRegistry::ToolDef.type 标识，
                      //   供 ToolIcon / tooltip 据 toolType===FishingRod 分流到钓竿图标渲染。获物 / 时序由 PlayerController
                      //   抛竿 / 拉起驱动（不走 attackDamage，钓竿近战 = 徒手）。
+        FlintSteel = 9, // 打火石（t724）：右键命中方块面 → 面外空气格点燃 Fire 方块（机制等价 MC 1.0 flint
+                     //   and steel 点火）。**不参与挖掘速度**——本工程无任何方块的 BlockDef.toolType 取
+                     //   FlintSteel（点火是右键使用语义、走 placeBlock 工具物品分流，非「采掘所需工具」），
+                     //   miningSpeedMul 恒返 1.0（等同空手）。仅用作 ToolRegistry::ToolDef.type 标识，供 ToolIcon
+                     //   据 toolType===FlintSteel 分流到打火石图标渲染（弯钢击片 + 燧石 + 火花）。近战 = 徒手
+                     //   （attackDamage 返 kFistDamage）。
     };
 
     // 音效材质分组（t118）：决定破 / 挖 / 走音色按方块材质分流（石 / 木 / 草 / 沙 / 叶 5 组 +
@@ -1643,12 +1661,25 @@ public:
     //   - kFluidStripFramePx=16：条带帧像素边长（与图集瓦片 kTile=16 同源；包内帧 >16 缩放到 16）。
     static constexpr int kWaterStripFrames = 32;
     static constexpr int kLavaStripFrames = 16;
+    // t724 火焰条带 32 帧（单列）。MC 1.0 火 flipbook 为 fire_0/fire_1 两张逐层图 + fire_layer_0/1 各
+    //   若干层，解析拼合天然 32 帧（demo 包 fire_0.png 实测 16×512 = 32 帧现成 strip）；程序回退条带
+    //   （tools/build_fire.py）同为 16×512/32 帧 → 包内 / 程序两侧帧数天然对齐（fireStripFrames CONSTANT
+    //   不随 pack 切换变）。消费方：Main.qml fireStripTex（delegate quad UV 全 [0,1] → Texture scaleV=1/N
+    //   + positionV=k/N 翻书；与 chunk-mesh 流体路（UV 烘焙 1/N）不同源，火不进 chunk mesh）。
+    static constexpr int kFireStripFrames = 32;
     static constexpr int kFluidStripFramePx = 16;
 
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
     //   切勿在渲染层另写 `!= 0`（会把 torch 当 solid → 误剔邻居面 → 透明 bug，见 t130）。
     static bool isSolid(quint8 blockId);
+    // t724 可燃方块单一权威谓词（fire spread 生态）：World::tickFire 的蔓延判定（邻可燃概率点燃）与
+    //   寿命判定（无任何可燃邻居 → 概率自熄）都读本谓词，避免各处自写「木类判定」漂移（同 isSolid 单一
+    //   权威先例）。表 = 木类族（Log/SpruceLog/Planks/SprucePlanks/门/活版门/书架/栅栏/台阶/楼梯/工作台/
+    //   箱）+ 叶（Leaves/SpruceLeaves）+ 树苗 + 草丛（机制等价 MC 1.0 fire spread 的可燃方块集，superset
+    //   对齐 tickLavaFlow isWoodLike + 叶 / 树苗 / 草丛扩展）。**TNT 不入表**（t724 v1 排除：TNT 被点燃
+    //   走既有雷击 / 压力板引燃链，火焰蔓延直接引爆不在本任务范围）。越界 / 非 air → false。
+    static bool flammable(quint8 blockId);
     // t146 方块碰撞/选中形状（BlockDef.shape；越界 → air 行 = ShapeNone）。
     static Shape shape(quint8 blockId);
     // 方块是否「有碰撞 sub-AABB」（考虑开合态）：决定 collisionAABBs 是否非空 + World::isCollidable

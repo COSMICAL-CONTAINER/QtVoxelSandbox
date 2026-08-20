@@ -72,6 +72,7 @@ void World::beginLoad(int seed)
     m_waterCells.clear();    // perf：网格重置 → 流体方格索引作废（finishLoad 写完 blob 后 rebuildFluidCells 全图重建）
     m_lavaCells.clear();
     m_iceCells.clear();      // t495：网格重置 → 普通冰方格索引作废（finishLoad 写完 blob 后 rebuildIceCells 全图重建）
+    m_fireCells.clear();     // t724：网格重置 → 火焰方格索引作废（finishLoad 写完 blob 后 rebuildFireCells 全图重建）
     m_powerDirty.clear();    // t656：网格重置 → 红石电力脏集作废（finishLoad 末全量重建红石族脏集）
     fluidActReset();         // t488：网格重置 → 活动盒作废（旧世界坐标不指向新栅格；finishLoad 置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
@@ -108,6 +109,8 @@ void World::finishLoad()
     // t495：同上 —— 存档 blob 直写不经写入路径 → noteIceWrite 不会捕获 → 全图重建普通冰方格索引一次，
     //   使后续融化 tick（tickIceMelt）走 O(冰格数) 遍历而非全图扫描。
     rebuildIceCells();
+    // t724：同上 —— 全图重建火焰方格索引一次，使后续 tickFire 走 O(火格数) 遍历而非全图扫描。
+    rebuildFireCells();
     // t656：存档可能含红石电路（拉杆扳开 / 红石块 / 粉连线）→ 全图扫红石族格入电力脏集一次（一次性
     //   3.3M 扫描在加载期可接受），下一 tickRedstone 局部重算恢复电路态（灯亮 / 轨通电等）。稳态后
     //   脏集由编辑路径增量维护。
@@ -202,6 +205,31 @@ void World::rebuildIceCells()
                     m_iceCells.insert(packGrowthCell(x, y, z));
 }
 
+// t724 perf：火焰方格集合增量维护（同 noteIceWrite 模式，见 world.h 头注释）。id 不变 → no-op；
+//   id 变更 → 按 oldId/newId 是否 Fire 增删集合项。O(1) 哈希操作，换得 tickFire 从 O(全图 3.28M)
+//   降到 O(火格数)。
+void World::noteFireWrite(int x, int y, int z, quint8 oldId, quint8 newId)
+{
+    if (oldId == newId) return; // id 不变 → 成员资格不变
+    const quint64 k = packGrowthCell(x, y, z); // 复用同一坐标打包
+    if (oldId == BlockRegistry::Fire) m_fireCells.erase(k);
+    if (newId == BlockRegistry::Fire) m_fireCells.insert(k);
+}
+
+// t724 perf：全图扫描重建火焰方格集合（generate / finishLoad 末调一次；运行期由 noteFireWrite 维护）。
+//   一次性 3.3M 扫描在生成 / 加载期可接受（非每 tick）。
+void World::rebuildFireCells()
+{
+    m_fireCells.clear();
+    const int W = m_width, D = m_depth, H = m_height;
+    if (W <= 0 || D <= 0 || H <= 0) return;
+    for (int x = 0; x < W; ++x)
+        for (int z = 0; z < D; ++z)
+            for (int y = 0; y < H; ++y)
+                if (m_chunks.blockAt(x, y, z) == BlockRegistry::Fire)
+                    m_fireCells.insert(packGrowthCell(x, y, z));
+}
+
 // r2-B2/B3 读档机关态归一：存档 chunk blob 持久化方块 id+state，但机关的**瞬态伴生表**（Game 层内存表，
 //   如按钮按下倒计时 m_buttonRecoverCells）不进存档；实体（mob / 掉落物）也不进存档。两类读档陈旧态在此归一：
 //   ① 按钮（r2-B2）：存档时按下窗内（bit0=1 落盘）→ 读档后无复位表项 → 永不自动弹回，且右键「bit0=1 拒绝
@@ -268,6 +296,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
     noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（流体 tick 据它遍历，免全图扫描）
     noteIceWrite(x, y, z, oldId, id);    // t495：维护普通冰方格索引（融化 tick 据它遍历，免全图扫描）
+    noteFireWrite(x, y, z, oldId, id);   // t724：维护火焰方格索引（tickFire 据它遍历，免全图扫描）
     qInfo("vo.edit: setBlock %d,%d,%d  %d->%d", x, y, z, int(oldId), int(id)); // t155f 诊断：编辑时序
     if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
         emit blockBroken(x, y, z, int(oldId)); // 破：带原方块 id（粒子/音效按它取色/取声）
@@ -353,6 +382,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
     noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（流体 tick 据它遍历，免全图扫描）
     noteIceWrite(x, y, z, oldId, id);    // t495：维护普通冰方格索引（融化 tick 据它遍历，免全图扫描）
+    noteFireWrite(x, y, z, oldId, id);   // t724：维护火焰方格索引（tickFire 据它遍历，免全图扫描）
     if (oldId != id) {
         // id 变化 → 发 broken/placed（同 4 参数语义：破带原 id、放带新 id）；id 不变只 state 变（门开合）不发。
         if (oldId != BlockRegistry::Air && id == BlockRegistry::Air)
@@ -408,6 +438,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state)
     noteGrowthWrite(x, y, z, occ, id); // t425：维护生长方格索引（沙落覆盖作物 / 耕地时正确移除）
     noteFluidWrite(x, y, z, occ, id);  // perf：维护流体方格索引（沙落覆盖水时正确移除水格）
     noteIceWrite(x, y, z, occ, id);    // t495：维护普通冰方格索引（沙落覆盖冰时正确移除）
+    noteFireWrite(x, y, z, occ, id);   // t724：维护火焰方格索引（沙落灭火时正确移除）
     recomputeLightAround(x, y, z, occ, id); // t154：增量重 flood（oldId=被覆盖的 air/水 → newId=id）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -430,6 +461,7 @@ bool World::setSnowLayerMerge(int x, int y, int z, quint8 state)
     noteGrowthWrite(x, y, z, occ, BlockRegistry::SnowLayer);
     noteFluidWrite(x, y, z, occ, BlockRegistry::SnowLayer);
     noteIceWrite(x, y, z, occ, BlockRegistry::SnowLayer);
+    noteFireWrite(x, y, z, occ, BlockRegistry::SnowLayer);
     recomputeLightAround(x, y, z, occ, BlockRegistry::SnowLayer);
     emit worldChanged(); // 驱动 mesh 重建（薄板高度随 state 变；不发 placed/broken —— 系统事件）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -449,6 +481,7 @@ bool World::clearBlockSilent(int x, int y, int z)
     noteGrowthWrite(x, y, z, occ, id); // t425：维护生长方格索引（TNT 不属生长段 → no-op，但同族写入路径保持一致）
     noteFluidWrite(x, y, z, occ, id);  // perf：维护流体方格索引（TNT 不属流体 → no-op；保持一致）
     noteIceWrite(x, y, z, occ, id);    // t495：维护普通冰方格索引（TNT 不属冰 → no-op；保持一致）
+    noteFireWrite(x, y, z, occ, id);   // t724：维护火焰方格索引（点火清格若碰巧清到 Fire → 正确移除）
     recomputeLightAround(x, y, z, occ, id); // t154：增量重 flood（oldId=TNT → newId=Air；TNT 遮光 → 移除放天光）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 点火是系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -478,6 +511,7 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     noteGrowthWrite(x, y, z, lightOldId, id); // t425：维护生长方格索引（作物升阶段 id 不变 → no-op；甘蔗生长 / 耕地增删正确）
     noteFluidWrite(x, y, z, lightOldId, id);  // perf：维护流体方格索引（水/岩浆增删 / level 变 id 不变 → 流体格增删正确）
     noteIceWrite(x, y, z, lightOldId, id);    // t495：维护普通冰方格索引（冰↔水融化/冻结经 setWaterSilent → 索引正确增删）
+    noteFireWrite(x, y, z, lightOldId, id);   // t724：维护火焰方格索引（可燃物点燃 / 火熄成水经此入口 → 索引正确增删）
     // t380r perf：批量流体 tick 延迟光照重算（N 次 per-write recomputeLightAround → 末尾联合盒 1 次
     //   refloodBox；同 destroySphereSilent t383 批量收口模式）。判据与 recomputeLightAround 早退一致：
     //   t334 遮光翻转（lightOpacity 变）+ t351 发光增删（岩浆）。t494 改用状态感知版 lightEmission
@@ -541,6 +575,7 @@ bool World::setBlockSilent(int x, int y, int z, quint8 id, quint8 state)
     noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（耕地增删 / 覆盖作物正确移除）
     noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（id 变更时正确增删）
     noteIceWrite(x, y, z, oldId, id);    // t495：维护普通冰方格索引（id 变更时正确增删）
+    noteFireWrite(x, y, z, oldId, id);   // t724：维护火焰方格索引（id 变更时正确增删）
     recomputeLightAround(x, y, z, oldId, oldState, id, state); // t154：增量重 flood（透光性变化时重算）
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 系统事件非玩家破/放）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -1188,6 +1223,7 @@ void World::tickLavaFlow()
             noteGrowthWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t425：木类非生长方块 → no-op，保持一致
             noteFluidWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air);  // perf：木类非流体 → no-op，保持一致
             noteIceWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air);    // t495：木类非冰 → no-op，保持一致
+            noteFireWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air);  // t724：木类非火 → no-op，保持一致（若焚毁邻火格上木则由本 tick 侧 guard 兜底）
             m_pendingLightEdits.push_back({b.x, b.y, b.z, true});      // 木→air 天光通（遮光块消失，sky），延迟联合 reflood
             emit blockBroken(b.x, b.y, b.z, int(oldId));               // 焚毁破块粒子 / 音（机制等价 MC 燃烧破块反馈）
             checkCactusOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // ② 失撑复检（正上方 Cactus 整柱坍落，同 setBlock 路径）
@@ -1200,6 +1236,75 @@ void World::tickLavaFlow()
         flushPendingLightEdits(); // 延迟光照重算 → 联合盒一次 refloodBox（无编辑则 no-op）
         emit worldChanged();       // 一次重建（terrain/water 两段各检各的 dirty → 仅脏 chunk 重建）
         m_chunks.clearAllDirty();  // 两段重建完统一清脏（同逐格路径 emit→clear 顺序）
+    }
+}
+
+// t724 火焰方块系统 tick（见 world.h 头注释）。机制等价 MC 1.0 fire：每窗对活跃火格做寿命 / 蔓延 / 上窜
+//   三判定，散布确定性哈希（PLAN §2-K，同 tickLavaFlow ignite pass）。遍历 m_fireCells 位置索引（O(火格数)，
+//   lessons perf-fluid-scan：绝不全图扫描）。写入走 4 参数 setBlock（火格写入低频 —— 每窗至多每格 1 写，
+//   无需 lava 式批量收口；setBlock 发 blockBroken/blockPlaced → 破块粒子/音 + Main.qml fireHost delegate
+//   挂卸自动跟随）。
+//   快照校验：迭代中 setBlock 会增删 m_fireCells（重入 noteFireWrite）→ 先拷贝键集再遍历；blockAt != Fire
+//   的陈旧项（防御：批量直写路径漏 note 时不崩）直接跳过不误判。
+void World::tickFire()
+{
+    if (++m_fireTickCounter < kFireTickInterval) return; // 节流：0.5s/窗
+    m_fireTickCounter = 0;
+    ++m_fireIntervalIndex; // 窗口序号（喂 hashVoxel 散布概率 → 不同窗不同火格错峰判定）
+    if (m_fireCells.empty()) return;
+
+    const int W = m_width, D = m_depth, H = m_height;
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    // 先拷贝快照再遍历：本 tick 的 setBlock 会增删 m_fireCells（重入 noteFireWrite），直接迭代集合
+    //   是 UB（迭代器失效）。快照内陈旧项（blockAt != Fire）跳过。
+    std::vector<quint64> snapshot(m_fireCells.begin(), m_fireCells.end());
+
+    for (const quint64 k : snapshot) {
+        int x, y, z;
+        unpackGrowthCell(k, x, y, z);
+        if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) continue; // 越界防御
+        if (m_chunks.blockAt(x, y, z) != BlockRegistry::Fire) continue;     // 陈旧项跳过
+
+        // (a) 寿命：6 邻 + 下方均无可燃方块 → 火无燃料，按概率自熄（setBlock Air → blockBroken 粒子/音 +
+        //     QML fireHost 收 delegate + noteFireWrite 移除索引）。机制等价 MC 无燃料火渐熄。
+        bool hasFuel = false;
+        for (const auto &n : kNb) {
+            const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
+            if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            if (BlockRegistry::flammable(m_chunks.blockAt(nx, ny, nz))) { hasFuel = true; break; }
+        }
+        if (!hasFuel) {
+            const quint32 hv = hashVoxel(m_seed ^ 0xF177, x, y, z) ^ (quint32(m_fireIntervalIndex) * 2654435761u);
+            if ((hv % 100u) < unsigned(kFireExtinguishPct))
+                setBlock(x, y, z, BlockRegistry::Air);
+            continue; // 无燃料火本窗不做蔓延 / 上窜（燃料都不在，谈不上烧过去）
+        }
+
+        // 安全阀：活跃火格超 cap → 本窗不再新增（既有火照常走 (a) 熄灭收敛；防链式大火烧穿重建预算）。
+        if (int(m_fireCells.size()) > kFireCellCap) continue;
+
+        // (b) 蔓延：5% 随机选一 6 邻格，为可燃方块 → 点燃（setBlock Fire → blockPlaced + QML delegate 挂载 +
+        //     noteFireWrite 入索引，下窗作为新火格继续判定 → 链式烧穿木屋）。可燃物本体被火替换（机制等价
+        //     MC 火吞可燃物；非「可燃物旁生火」——蔓延即燃烧，木块变火格）。
+        {
+            const quint32 hv = hashVoxel(m_seed ^ 0xF179, x, y, z) ^ (quint32(m_fireIntervalIndex) * 2654435761u);
+            if ((hv % 100u) < unsigned(kFireSpreadPct)) {
+                const auto &n = kNb[hv % 6u];
+                const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
+                if (nx >= 0 && ny >= 0 && nz >= 0 && nx < W && ny < H && nz < D
+                    && BlockRegistry::flammable(m_chunks.blockAt(nx, ny, nz)))
+                    setBlock(nx, ny, nz, BlockRegistry::Fire);
+            }
+        }
+
+        // (c) 上窜：下方格 == Fire（火柱）且上方为空气 → 概率上方生火（火焰柱向上舔；机制等价 MC 火向
+        //     上方空气格蔓延）。上方已非空气（已烧到 / 已熄）→ no-op。
+        if (y > 0 && m_chunks.blockAt(x, y - 1, z) == BlockRegistry::Fire
+            && y + 1 < H && m_chunks.blockAt(x, y + 1, z) == BlockRegistry::Air) {
+            const quint32 hv = hashVoxel(m_seed ^ 0xF17B, x, y, z) ^ (quint32(m_fireIntervalIndex) * 2654435761u);
+            if ((hv % 100u) < unsigned(kFireRisePct))
+                setBlock(x, y + 1, z, BlockRegistry::Fire);
+        }
     }
 }
 
@@ -1678,6 +1783,7 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
     //   爆炸稀有 → 逐破坏块 O(1) note 维护（同 dropCactusColumn / clearBlockSilent 口径），索引保持精确。
     for (const DestroyedVoxel &d : destroyed) {
         noteIceWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
+        noteFireWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t724：同族补齐——爆炸直写绕过 setBlock 编辑钩子
         noteFluidWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         noteGrowthWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         notePowerWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t683：同族补齐——爆炸直写绕过 setBlock
@@ -1902,6 +2008,7 @@ void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
         noteGrowthWrite(x, cy, z, BlockRegistry::SnowLayer, BlockRegistry::Air); // 雪层非生长方块 → no-op，保持一致
         noteFluidWrite(x, cy, z, BlockRegistry::SnowLayer, BlockRegistry::Air);  // 雪层非流体 → no-op，保持一致
         noteIceWrite(x, cy, z, BlockRegistry::SnowLayer, BlockRegistry::Air);    // 雪层非冰 → no-op，保持一致
+        noteFireWrite(x, cy, z, BlockRegistry::SnowLayer, BlockRegistry::Air);  // 雪层非火 → no-op，保持一致
         emit blockBroken(x, cy, z, int(BlockRegistry::SnowLayer));               // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
         recomputeLightAround(x, cy, z, BlockRegistry::SnowLayer, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
         any = true;
@@ -3140,6 +3247,7 @@ void World::generate()
     m_waterCells.clear();    // perf：全新世界 → 清流体方格索引（worldgen 直写 chunk 不经写入路径 → 末尾 rebuildFluidCells 全图重建）
     m_lavaCells.clear();
     m_iceCells.clear();      // t495：全新世界 → 清普通冰方格索引（worldgen freezeSurfaceWater 直写 chunk → 末尾 rebuildIceCells 全图重建）
+    m_fireCells.clear();     // t724：全新世界 → 清火焰方格索引（worldgen 无火 → 稳态空集零开销；玩家点燃经 noteFireWrite 增量维护）
     m_powerDirty.clear();    // t656：全新世界 → 清红石电力脏集（worldgen 无红石电路 → 稳态空集零开销）
     fluidActReset();         // t488：全新世界 → 活动盒作废（generate 末置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）
@@ -3347,6 +3455,7 @@ void World::setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state)
     noteGrowthWrite(x, y, z, BlockRegistry::Air, id); // t425：worldgen placeSugarcane 经此 → 甘蔗入索引
     noteFluidWrite(x, y, z, BlockRegistry::Air, id);  // perf：worldgen 填水若经此 → 水格入索引（防御性，主要靠 generate 末 rebuildFluidCells）
     noteIceWrite(x, y, z, BlockRegistry::Air, id);    // t495：worldgen 冻结水若经此 → 冰格入索引（防御性，主要靠 generate 末 rebuildIceCells）
+    noteFireWrite(x, y, z, BlockRegistry::Air, id);   // t724：worldgen 若经此写 Fire → 火格入索引（防御性，主要靠 generate / finishLoad 末 rebuildFireCells）
 }
 
 // 单棵橡树：surfaceY=草顶 y；主干 trunkH 格原木(id5)从 surfaceY+1 起；顶部树叶(id7)树冠。

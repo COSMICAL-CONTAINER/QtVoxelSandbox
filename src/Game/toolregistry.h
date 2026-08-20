@@ -131,7 +131,16 @@ public:
         DiamondShovel = 0x11E, // 钻石铲：type=Shovel tier 4，speedMul 8.0；掘土最快
         DiamondSword  = 0x11F, // 钻石剑：type=Sword tier 4，speedMul 1.0（不参与挖掘）；攻击 7（MC 1.0 最高剑伤）
         DiamondHoe    = 0x120, // 钻石锄：type=Hoe tier 4，speedMul 1.0（不参与挖掘；专用耕地）
-        ToolCount    = 33,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。29（金/铜后）+ 4（钻石补全）。
+        // t724 打火石（功能性工具；机制等价 MC 1.0 flint and steel）：type=FlintSteel（BlockRegistry 新
+        //   ToolType 值 9；不参与挖掘速度 → miningSpeedMul 恒 1.0 等同空手）。右键命中方块面 → 面外空气格
+        //   点燃 Fire 方块（playercontroller placeBlock 工具物品分流分支）。maxDurability=64（机制等价
+        //   MC 1.0 打火石耐久 64；生存每次点燃 -1，创造不耗）。近战 = 徒手。**追加在末尾 0x121，不重排
+        //   既有枚举**（保存档 / 配方向后兼容——工具段 id 落 player_state JSON + 配方 outputId）。配方 =
+        //   铁锭上 + 圆石下竖摆（MC 1.0 原配方铁锭+燧石；本工程无燧石材料 → 圆石本地化，dev-plan t724 注明）。
+        //   图标：pack 覆盖 flint_and_steel.png（itemFilenameMap 0x121）；程序回退 ToolIcon toolType===9 自绘
+        //   （弯钢击片 + 燧石 + 火花）。displayName「打火石」（§9 通用词；非 MC 专名）。
+        FlintAndSteel = 0x121, // 打火石：右键点火（面外空气格生 Fire）；耐久 64；不参与挖掘
+        ToolCount    = 34,    // 哨兵：已定义工具数（也是合法工具 id 相对 ToolIdBase 的上界）。33（钻石补全后）+ 1（打火石）。
     };
 
     // 工具定义。表行索引 == itemId - ToolIdBase（连续）；详见 toolregistry.cpp kTools。

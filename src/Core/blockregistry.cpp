@@ -683,6 +683,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   段渲染须 alpha discard——mesher 路由见 chunkgeometry t723 追加）。音色 GroupStone。配方：6 铁锭
     //   竖摆 2×3 → 1（工作台；同铁门形状——MC 1.0 实际横摆 3×2 与铁轨冲突，取竖摆避开，dev-plan 注明）。
     /* iron_trapdoor  */ {int(BlockRegistry::IronTrapdoor),     178,178,178,178, false, BlockRegistry::ShapeTrapdoor, 5.0f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::IronTrapdoor),     1, 64, "iron_trapdoor","铁活板门"},
+    // ── t724 火焰（Fire；机制等价 MC 1.0 fire，属性注释见 blockregistry.h Id 枚举 Fire 行）：非实体光源格。
+    //   tile 全 0（占位无消费方 —— 渲染走 fireHost 独立 Texture fireStripSource 翻书条带，不进图集 / chunk
+    //   mesh，mesher 双 PASS 跳过同 Painting t720 模式）；solid=false / ShapeNone（无碰撞、不挡邻居面剔除、
+    //   不可选体）；hardness=0 瞬破（破 = 扑灭，dropId=0 无掉落 —— spawnItem 对 id<=0 守卫不产出）、NoTool、
+    //   **maxStack=0**（不可进背包 —— 无物品形态，只能打火石点燃 / tickFire 蔓延产生）。
+    //   lightEmission 特例行返 15（见 lightEmission switch）。
+    /* fire           */ {int(BlockRegistry::Fire),               0,  0, 0,  0, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false,                             0, 0,  0, "fire",         "火焰"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -847,6 +854,8 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     // t723 铁活板门 → MC **1.0 无**独立 id（iron trapdoor id 167 为 1.4+；1.0 仅木活板门 96）→ 0
     //   （=「1.0 无此方块」；机制等价实现不受影响——本表仅迁移文档引用，无运行期消费者）。
     /* iron_trapdoor          */ 0,
+    // t724 火焰 → MC 1.0 fire id 51（1.0 存在；点燃 / 蔓延 / 自熄机制等价实现）。
+    /* fire                   */ 51,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -871,6 +880,30 @@ int BlockRegistry::tileIndex(quint8 blockId, Face face)
 
 bool BlockRegistry::isSolid(quint8 blockId)      { return def(blockId).solid; }
 BlockRegistry::Shape BlockRegistry::shape(quint8 blockId) { return def(blockId).shape; }
+
+// t724 可燃方块单一权威谓词（见 .h 注释）：World::tickFire 蔓延 / 寿命判定共用。表 = 木类族（与
+//   tickLavaFlow isWoodLike 对齐 + Bookshelf 扩展）+ 叶两族 + 树苗 + 草丛（机制等价 MC 1.0 fire spread
+//   可燃方块集）。TNT 不入表（t724 v1 排除：火焰蔓延直接引爆不在范围，TNT 点燃走既有引燃链）。
+bool BlockRegistry::flammable(quint8 blockId)
+{
+    using BR = BlockRegistry;
+    switch (blockId) {
+    case BR::Log: case BR::SpruceLog:
+    case BR::Planks: case BR::SprucePlanks:
+    case BR::WoodDoor: case BR::SpruceDoor:
+    case BR::WoodTrapdoor:
+    case BR::Bookshelf:
+    case BR::Leaves: case BR::SpruceLeaves:
+    case BR::WoodFence: case BR::SpruceFence:
+    case BR::WoodSlab: case BR::SpruceSlab:
+    case BR::WoodStairs:
+    case BR::CraftingTable: case BR::Chest:
+    case BR::Sapling: case BR::TallGrass:
+        return true;
+    default:
+        return false;
+    }
+}
 
 // t412 异形方块 / 半方块族统一谓词（单一权威，段外圆石变体并入，同 isCrossBillboard 段外 cross 模式）。
 //   连续段 [FirstPartial, LastPartial]（6 类木制半方块）+ 段外圆石变体 4 类（CobbleSlab/Stairs/Fence/PressurePlate）。
@@ -1554,6 +1587,7 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
     case RedstoneTorch: return 7; // t638：红石火把方块光种子 7（MC 1.0 红石火把光 level 7——约为火把一半的暗红氛围光；常亮 on 装饰光源，真红石信号留红石大轮）
     case RedstoneBlock: return 5; // t660：红石块微发光（光 level 5 —— 用户「红石块应微发光」；MC 1.5+ 红石块实际不发光，本工程按用户点名取微光，低于红石火把 7 的哑红感）
     case Lava:  return 15;  // t351：岩浆方块光种子 15（地底发光照亮洞穴；MC 1.0 岩浆光 level 15）
+    case Fire:  return 15;  // t724：火焰方块光种子 15（MC 1.0 火光 level 15，同岩浆档——点燃即照亮周遭）
     case EndPortal: return 10; // t487：末地传送门框架光种子 10（框架放眼亮纹微泛光；t664 框架化语义不变）
     case EndPortalSurface: return 15; // t664：门面（薄星平面）光 15（机制等价 MC 1.0 end portal 发光 15——要塞
                                       //    黑暗中一片亮星平面即「通往另一宇宙」的观感）

@@ -304,6 +304,9 @@ Window {
     //   （修 t222/t223「水 2s 全量重建水段 261 段/次」回归；F3 [w]/[s] reb 不回升）。
     property int waterAnimFrame: 0   // 0..(waterStripFrames-1)，循环
     property int lavaAnimFrame: 0    // 0..(lavaStripFrames-1)，循环
+    // t724 火焰材质级动画帧（火焰条带 flipbook；delegate 路与水/岩浆不同源——fireStripTex 全 [0,1] UV
+    //   quad + scaleV=1/N + positionV=frame/N）。由 fireAnimTimer 推进；帧切换纯材质参数。
+    property int fireAnimFrame: 0    // 0..(fireStripFrames-1)，循环
     // 全幅顶点 / 三角面汇总（遍历 terrainGeos 求和 → 写标量属性）。由每个地形段 ChunkGeometry 的 meshRebuilt
     //   信号经 Connections 触发（buildChunkModels 末也调一次取初值）。在普通函数里读 var 数组不创建绑定依赖，
     //   故不触发 binding loop（与在 text 绑定里读 var 数组相反）。
@@ -492,6 +495,19 @@ Window {
             for (let ci = 0; ci + 2 < cells.length; ci += 3)
                 paintingHost.addPaintingVis(cells[ci], cells[ci + 1], cells[ci + 2])
             console.info("[t720] painting rebuild on load: " + (cells.length / 3) + " cells")
+        }
+        // t724 火焰读档重建（同 t720 画作模式）：读档 blob 直写不经 blockPlaced → 事件驱动的 fireHost 读档
+        //   后恒空；先清上一世界残留 delegate 再按本世界真值重建（C++ 侧 finishLoad 已 rebuildFireCells，
+        //   QML delegate 与 C++ tick 索引各管各的容器）。
+        {
+            for (const key in fireHost.fireObjs) {
+                fireHost.fireObjs[key].destroy()
+                delete fireHost.fireObjs[key]
+            }
+            const fcells = theWorld.collectBlocksOfId(137) // 137 = BlockRegistry::Fire（字面量+注释）
+            for (let fi = 0; fi + 2 < fcells.length; fi += 3)
+                fireHost.addFireVis(fcells[fi], fcells[fi + 1], fcells[fi + 2])
+            console.info("[t724] fire rebuild on load: " + (fcells.length / 3) + " cells")
         }
         applyPlayerState(worldStore.loadPlayerData())
         // r2-B1 读档机关态收尾：清上一局的机关瞬态表（发射器冷却 / 红石矿点亮 / 压力板边沿基线 / 按钮复位）
@@ -1727,6 +1743,15 @@ Window {
         repeat: true
         running: true
         onTriggered: window.lavaAnimFrame = (window.lavaAnimFrame + 1) % resourcePack.lavaStripFrames
+    }
+    // t724 火焰 flipbook：32 帧 × ~150ms ≈ 4.8s/圈（对齐水节拍；MC fire frametime=1 tick=50ms 偏快刺眼，
+    //   本引擎取水同节拍保观感）。同水/岩浆：帧切换纯材质参数（fireStripTex.positionV），零 mesh 重建。
+    Timer {
+        id: fireAnimTimer
+        interval: 150
+        repeat: true
+        running: true
+        onTriggered: window.fireAnimFrame = (window.fireAnimFrame + 1) % resourcePack.fireStripFrames
     }
     // perf-t520 进 playing 立即刷新（避免 hudPosText 首帧空白），F3 切换 on 时立即刷一次。
     //   本 two-phase Connections 与 10Hz Timer 并行（Timer 100ms 后接管），用 QML 内置信号无需 triggeredOnStartup。
@@ -3511,6 +3536,21 @@ Window {
             tilingModeHorizontal: Texture.Repeat
             tilingModeVertical: Texture.Repeat
             positionV: window.lavaAnimFrame / resourcePack.lavaStripFrames
+        }
+        // t724 火焰条带纹理（fireHost delegate 材质级 flipbook）：与水/岩浆条带同源模式（source 走
+        //   resourcePack.fireStripSource，active → file:/// 落盘合成条带、否则 qrc 程序生成条带）。
+        //   差异：火焰 quad 的几何 UV 是全 [0,1]（QQuick3D 内建 QuadGeometry / 自建双面交叉 quad，非
+        //   chunk-mesh 烘焙子区）→ 必须 scaleV=1/N 把采样窗压到单帧高 + positionV=k/N 平移到帧 k。
+        //   （水/岩浆 delegate 不存在——它们的 quad UV 已在 mesher 里烘焙为 v∈[0,1/N]，故只 positionV。）
+        //   帧数 N=32 与 BlockRegistry::kFireStripFrames 同源单一权威（fireStripFrames CONSTANT）。
+        Texture {
+            id: fireStripTex
+            source: resourcePack.fireStripSource
+            generateMipmaps: false
+            tilingModeHorizontal: Texture.Repeat
+            tilingModeVertical: Texture.Repeat
+            scaleV: 1.0 / resourcePack.fireStripFrames
+            positionV: window.fireAnimFrame / resourcePack.fireStripFrames
         }
 
         // t240 猪牛羊贴图：三种 passive mob 各一张「全脸」贴图（build_mob.py 程序生成原创像素图，§9a 区隔
@@ -7836,6 +7876,79 @@ Window {
             }
         }
 
+        // t724 火焰渲染 host（同 paintingHost / torchHost 的 createObject delegate 模式）：Fire 方块（137）
+        //   的贴图是 32 帧条带 flipbook + 透明底 cutout（非图集瓦片）→ 渲染不走 chunk mesh（chunkgeometry 三
+        //   处 PASS 已 skip），每格火一个 delegate = 两片对角交叉双面 quad（BillboardQuad XY ±0.5，绕 Y 各转
+        //   45°/135°——「×」形交叉，机制等价 MC fire_layer_0/1 双层十字面片）+ 共享 fireStripTex（scaleV=1/N +
+        //   positionV=k/N 材质级翻书）。双面：cullMode NoCulling（两片各正反可见，任意观察向都见火）；
+        //   透明底 alphaMode Mask（硬边 cutout，火焰像素 alpha 0/255 无渐变，同 cross 段契约——不用 Blend
+        //   免进透明 pass 深度排序抖动）。光照：NoLighting（火焰自发光，lightEmission=15 的呈现面）。
+        //   维护三重（同 torch / painting 模式）：onBlockPlaced(137) 加 / onBlockBroken(137) 删 /
+        //   onWorldChanged 兜底清孤儿；enterWorld 用 collectBlocksOfId(137) 重建（读档 blob 直写不经
+        //   blockPlaced）。分层（PLAN §2）：纯呈现层，只消费语义事件，绝不反向写栅格。
+        Node {
+            id: fireHost
+            property var fireObjs: ({})
+            function addFireVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                if (fireObjs[key]) return
+                if (theWorld.blockAt(x, y, z) !== 137) return  // 真值校验（防陈旧信号挂假 delegate）
+                fireObjs[key] = fireDelegate.createObject(fireHost, {cellX: x, cellY: y, cellZ: z})
+            }
+            function removeFireVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                const o = fireObjs[key]
+                if (o) { o.destroy(); delete fireObjs[key] }
+            }
+            // 兜底清孤儿（爆炸 / 系统改写）：blockAt != Fire(137) 的条目销毁（blockBroken 之外的清除路径收口）。
+            function cleanupVis() {
+                for (const key in fireObjs) {
+                    const p = key.split(",")
+                    const x = parseInt(p[0]), y = parseInt(p[1]), z = parseInt(p[2])
+                    if (theWorld.blockAt(x, y, z) !== 137) {
+                        fireObjs[key].destroy(); delete fireObjs[key]
+                    }
+                }
+            }
+        }
+
+        // t724 火焰 delegate 模板：fireHost.addFireVis 经 createObject 实例化（cellX/Y/Z 注入）、
+        //   removeFireVis/cleanupVis 用 .destroy() 回收（同 paintingDelegate 模式）。
+        Component {
+            id: fireDelegate
+            Node {
+                id: fireRoot
+                property int cellX: 0
+                property int cellY: 0
+                property int cellZ: 0
+                // 格中心（世界坐标）；两片 quad 自中心绕 Y 交叉。
+                position: Qt.vector3d(cellX + 0.5, cellY + 0.5, cellZ + 0.5)
+                // 片 1：绕 Y 45°（对角「\」向）；片 2：绕 Y 135°（对角「/」向）→ 组成「×」交叉。
+                Model {
+                    geometry: BillboardQuad {}
+                    eulerRotation: Qt.vector3d(0, 45, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting   // 自发光（lightEmission=15 呈现面）
+                        cullMode: Material.NoCulling              // 双面（任意观察向可见；同手持火把/图标模式）
+                        alphaMode: PrincipledMaterial.Mask        // cutout：透明底硬边丢弃（同 cross 段契约）
+                        alphaCutoff: 0.1
+                        baseColorMap: fireStripTex               // 共享条带（scaleV/positionV 材质级翻书）
+                    }
+                }
+                Model {
+                    geometry: BillboardQuad {}
+                    eulerRotation: Qt.vector3d(0, 135, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        cullMode: Material.NoCulling
+                        alphaMode: PrincipledMaterial.Mask
+                        alphaCutoff: 0.1
+                        baseColorMap: fireStripTex
+                    }
+                }
+            }
+        }
+
         // t196 / t225 / t441 箱子盖子开合动画（场景内 3D Node，与 torchHost / itemHost 同层）。仅当前所开箱子
         //   （chestX/Y/Z）一处显盖子（一次只开一只箱子，chestOpen 单 bool）。chestLidAngle 由 openChest/
         //   closeChest 驱动（window 级 Behavior 平滑过渡 0↔全开角）。
@@ -8257,6 +8370,9 @@ Window {
             //   非锚格破坏无 delegate 可删——onWorldChanged cleanupVis 兜底清孤儿）。整画移除掉落在
             //   C++ finishMiningAt 连通域完成（t721），本处只管呈现。
             if (id === 134) paintingHost.removePaintingVis(x, y, z)
+            // t724：火焰熄灭 / 被挖（挖火 = 扑灭）→ 销毁视觉 delegate（id=137=BlockRegistry::Fire；World::tickFire
+            //   自熄 setBlock Air 也走本信号 → delegate 挂卸自动跟随 C++ 索引）。挖火无掉落（dropId=0，C++ 侧）。
+            if (id === 137) fireHost.removeFireVis(x, y, z)
             // t173/t179/t522：箱子被破 → 先把内部 27 槽内容 spawnItem 掉落世界（机制等价 MC 1.0 破箱掉落
             //   内容，修用户报「箱子装东西后挖掉不掉」），再 chestStore.clearChest 清孤儿条目。id=22=
             //   BlockRegistry::Chest（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
@@ -8347,6 +8463,9 @@ Window {
             // t720：画作锚格放置（playercontroller 画分支 setBlock 锚格 → 本信号；非锚格走 setWaterSilent
             //   静默不发）→ 加视觉 delegate（id=134=BlockRegistry::Painting；addPaintingVis 内查 bit7 只认锚格）。
             if (id === 134) paintingHost.addPaintingVis(x, y, z)
+            // t724：火焰点燃（玩家打火石右击 / tickFire 蔓延上窜 setBlock Fire）→ 挂视觉 delegate（id=137=
+            //   BlockRegistry::Fire）。addFireVis 内 blockAt 真值校验（防陈旧信号挂假 delegate）。
+            if (id === 137) fireHost.addFireVis(x, y, z)
             // t669 放置消耗收口：生存放置由 PlayerController::placeBlock（C++）各放置分支统一 takeStack。
             //   原 t32 行为是此处 blanket takeStack —— 但 World::blockPlaced 不止由玩家 placeBlock 触发：
             //   锄耕地（setBlock Farmland）/ 踩踏回土（setBlock Dirt）/ 种植 / 倒流体等都是非放置类
@@ -8414,6 +8533,8 @@ Window {
             bookHost.cleanupVis()
             // t720：同步清画作视觉 delegate 孤儿（爆炸 / 系统改写 / 非锚格破坏路径收口；同 torchHost 模式）。
             paintingHost.cleanupVis()
+            // t724：同步清火焰视觉 delegate 孤儿（爆炸 / 系统改写栅格不经 blockBroken 的路径收口；同 paintingHost）。
+            fireHost.cleanupVis()
         }
     }
 
@@ -11106,6 +11227,10 @@ Window {
             //   → 岩浆比水慢 ~30 倍的可见缓慢流动；更短扩散距离 3 格；无源再生）。末尾 ignite pass 焚毁邻岩浆木类。
             //   纯 QML 桥接（同 tickWaterFlow 模式）。稳态（worldgen 全源岩浆湖）静默 → 无重建开销。
             theWorld.tickLavaFlow()
+            // t724 火焰 tick：WorldClock 每 100ms tick → 驱动 World.tickFire（内部节流到 0.5s/窗：寿命判定 /
+            //   蔓延 / 上窜）。纯 QML 桥接（同 tickLavaFlow 模式，PLAN §2 分层不破）。稳态（无火格）空集合
+            //   早退 → 零开销；火格写入走 setBlock 发 blockBroken/blockPlaced → fireHost delegate 挂卸自动跟随。
+            theWorld.tickFire()
             // t236 小麦作物生长 tick：WorldClock 每 100ms tick → 驱动 World.tickCropGrowth（内部节流到 ~每 2.5s
             //   做一次成长判定，作物据光强 + 耕地支撑 + 散布概率逐步升生长阶段）。纯 QML 桥接（WorldClock 为
             //   Game 层不 include World；QML 同时持二者向下合法，PLAN §2 分层不破）。tickCropGrowth 内部对稳态

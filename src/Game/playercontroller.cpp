@@ -699,7 +699,8 @@ void PlayerController::tickImpl()
     //   pickupScan 的 m_dead 门控同族 —— 玩家尸体不自动捡东西）。复生后（respawn 清 m_dead）tick 恢复，
     //   玩家走回死亡点可回收该球（机制等价 MC 死亡掉经验、走回拾取）。死亡期间球位置冻结（不磁吸 /
     //   不拾取 / 不老化），复生后 despawnExpired 按墙钟补齐寿命，无累积。
-    if (!m_dead && m_xpOrbManager) m_xpOrbManager->tick(dt, m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f));
+    if (!m_dead && m_xpOrbManager)
+        m_xpOrbManager->tick(dt, m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f), m_world); // t724：带 World 做火焰焚毁判定
     } // /profXp
     { FrameProfiler::Scope s("boat");
     // t469 船浮水 tick（常开，独立于捕获态——菜单 / 暂停时船仍浮水 / 衰减，世界模拟连续，同掉落物 / mob tick）。
@@ -3189,6 +3190,27 @@ void PlayerController::placeBlock()
             }
         }
         return; // 玻璃物品（放置成功 / 未命中 / 目标被占）均不再走方块放置路径
+    }
+    // t724 打火石点火（spec「点燃：对方块面使用打火石→火方块」；机制等价 MC 1.0 flint and steel）：
+    //   手持打火石（ToolRegistry::FlintAndSteel，工具段 0x121）右键命中方块 → 命中面外法线相邻格为空气
+    //   → setBlock Fire 点燃（火格 tickFire 接管：蔓延 / 自熄 / 上窜；mob / 玩家触碰点燃走 t344 链）。
+    //   目标非空气（已有方块 / 越界）→ no-op 不消耗（机制等价 MC 打火石只在可放置位生火）。生存每次点燃
+    //   -1 耐久（damageSelectedItem；机制等价 MC 打火石 64 耐久；创造不耗）。**须命中**（须目标面定位点火格）。
+    //   打火石非方块（工具段 id>=0x100）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流
+    //   （同桶 / 剪刀 / 玻璃模式）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可点火。
+    //   分层（PLAN §2）：点火属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM），不改 setBlock 语义。
+    if (m_hotbar && m_world && heldItemId == int(ToolRegistry::FlintAndSteel)) {
+        if (m_hasHit) {
+            const int fx = m_hitBx + m_hitNx, fy = m_hitBy + m_hitNy, fz = m_hitBz + m_hitNz;
+            if (fy >= 0 && fy < m_world->height()
+                && m_world->blockAt(fx, fy, fz) == BlockRegistry::Air) {
+                m_world->setBlock(fx, fy, fz, BlockRegistry::Fire, 0); // state=0（火无 state 语义）
+                if (m_mode == Survival) m_hotbar->damageSelectedItem(); // 生存 -1 耐久（创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm(); // 点火也是一次「使用」动作 → 挥手（t29）
+            }
+        }
+        return; // 打火石（点燃成功 / 未命中 / 目标被占）均不再走方块放置路径
     }
     // t267：面包已从 placeBlock 移除 —— 改由 eventFilter RightButton press 据持物 == BreadId 分流到
     //   beginEating（长按累积进食进度，~1.6s 满后 finishEating 消耗 + 恢复饥饿）。spec「单击即食→改长按右键」。
@@ -6154,8 +6176,13 @@ void PlayerController::step(qreal dt)
         const int footY = int(std::floor(m_pos.y()));            // 脚位格
         const int eyeY = int(std::floor(m_pos.y() + m_eyeHeight)); // 眼位格（潜没时）
         bool touchingLava = false;
+        // t724：火焰格（Fire）并入点燃判定 —— 玩家脚位 / 眼位格 == Fire 同样持续点燃（机制等价 MC 1.0
+        //   站火 / 穿火着火；与岩浆共用 t344 火烧推进链：余焰扣血 / 随机熄灭 / 燃烧屏叠层）。
         if (footY >= 0 && m_world->blockAt(fx, footY, fz) == BlockRegistry::Lava) touchingLava = true;
         if (!touchingLava && eyeY >= 0 && m_world->blockAt(fx, eyeY, fz) == BlockRegistry::Lava)
+            touchingLava = true;
+        if (footY >= 0 && m_world->blockAt(fx, footY, fz) == BlockRegistry::Fire) touchingLava = true;
+        if (!touchingLava && eyeY >= 0 && m_world->blockAt(fx, eyeY, fz) == BlockRegistry::Fire)
             touchingLava = true;
         if (touchingLava) {
             m_fireTimer = EntityManager::kFireDuration; // 持续重燃（离开前 fireTimer 不衰减）；不动 m_fireDmgTimer（t351）

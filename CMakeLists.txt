@@ -356,6 +356,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_lava.png                # t343 岩浆贴图（build_lava.py 程序生成原创像素图；深红橙底+亮黄橙鼓泡+白炽热点）
         textures/water_strip.png                 # t489 水条带 flipbook（build_fluid_strips.py；2 列×32 帧：静水|流水；材质级 positionV 动画，零 mesh 重建）
         textures/lava_strip.png                  # t489 岩浆条带 flipbook（build_fluid_strips.py；1 列×16 帧；材质级 positionV 动画）
+        textures/fire_strip.png                  # t724 火焰条带 flipbook（build_fire.py；1 列×32 帧；fireHost delegate scaleV/positionV 动画）
         textures/default_obsidian.png            # t411/t472 黑曜石贴图（build_obsidian.py 程序生成原创像素图；深紫黑火山玻璃底+紫红纹理嵌点+品紫微反光；流体交互产物）
         textures/default_bed_red.png             # t387 床方块 8 色变体贴图（build_bed.py 程序生成原创像素图；彩色被面+枕垫亮带+绗缝针脚）
         textures/default_bed_orange.png

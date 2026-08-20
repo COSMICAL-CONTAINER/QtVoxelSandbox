@@ -280,6 +280,22 @@ public:
     //   hashVoxel + 窗口序号 点燃焚毁（setBlock Air，发 blockBroken 触发破块粒子 / 音）。t344 完整着火系统（玩家扣血 /
     //   屏覆盖 / 熟肉掉落）留后续；本任务仅「邻岩浆木类概率焚毁」。
     Q_INVOKABLE void tickLavaFlow();
+    // t724 火焰方块系统 tick（机制等价 MC 1.0 fire：点燃 / 蔓延 / 自熄 / 上窜）：由呈现层 Main.qml 经
+    //   WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kFireTickInterval×0.1s = 0.5s 一窗）。
+    //   遍历火焰方格位置索引 m_fireCells（O(火格数)，noteFireWrite 增量维护 + finishLoad 全图重建，同
+    //   m_waterCells / m_iceCells 模式——lessons perf-fluid-scan：绝不全图扫描）。快照校验（blockAt != Fire
+    //   的陈旧项剔除）后每窗三 pass（散布确定性哈希 hashVoxel(seed^salt, x,y,z) ^ 窗口序号，PLAN §2-K，
+    //   同 tickLavaFlow ignite pass —— 不同火格错峰判定）：
+    //   (a) 寿命：火格 6 邻 + 下方均**无可燃方块**（BlockRegistry::flammable 单一权威）→ 按 kFireExtinguishPct
+    //       自熄（setBlock Air → blockBroken 粒子/音 + QML fireHost 收 delegate）。机制等价 MC 无燃料火渐熄。
+    //   (b) 蔓延：5% 随机选一 6 邻格，若为可燃方块 → 点燃为 Fire（setBlock Fire → blockPlaced → QML delegate
+    //       挂载）。机制等价 MC 火向相邻可燃物概率蔓延（烧穿木屋的链式感）。
+    //   (c) 上窜：下方格 == Fire（火柱）且上方为空气 → 按 kFireRisePct 在上方生成火（火焰柱向上舔）。
+    //   安全阀：m_fireCells > kFireCellCap（256）→ 本窗跳过 (b)/(c) 新增（防森林大火无限链烧穿 chunk mesh
+    //   重建预算；既有火照常熄灭收敛）。写入走 4 参数 setBlock（发 blockBroken/blockPlaced → 粒子/音 +
+    //   QML fireHost delegate 挂卸；火格写入量低频，无需 tickLavaFlow 式批量收口）。分层（PLAN §2）：
+    //   World 层只读 m_chunks + BlockRegistry::flammable + 写栅格 + 发信号，不依赖 Renderer/Physics/Game。
+    Q_INVOKABLE void tickFire();
     // t236 小麦作物生长 tick（spec「WorldClock tick 推进成长 随机/timed」）：由呈现层 Main.qml 经
     //   WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kCropTickInterval×0.1s 做一次成长判定）。
     //   机制等价 MC 1.0 小麦生长：作物在耕地方块上、头顶光照足（skyLight ≥ kCropMinLight）时按**确定性散布概率**
@@ -956,6 +972,21 @@ private:
     static constexpr int kMaxLavaFlowLevel    = 3;   // 岩浆流最大蔓延等级（state 1..3；MC 1.0 主世界岩浆 3 格扩散）
     static constexpr int kLavaIgnitePct       = 8;   // 邻岩浆木类每窗焚毁概率（%；8% → 平均 ~37s 焚毁，可见可验收）
     static constexpr int kLavaLakeMaxY        = 30;  // 岩浆湖最高 y（spec「Y<30」；仅地下深处）
+    // t724 火焰 tick 节流计数 + 常量：tickFire() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFireTickInterval
+    //   才开一个判定窗（~每 kFireTickInterval×0.1s = 0.5s/窗）。窗口序号 m_fireIntervalIndex 每窗 +1 喂入
+    //   hashVoxel 散布概率 → 不同火格不同窗错峰判定（非全部同步烧穿 / 熄灭，PLAN §2-K 精神，同 lava ignite）。
+    //   kFireExtinguishPct=5：无燃料火每窗自熄概率（5% → 平均 ~10s 熄，可见可验收）。
+    //   kFireSpreadPct=5：每火格每窗向随机 6 邻可燃格蔓延概率（5% → 平均 ~10s/格，烧穿木屋的链式节奏）。
+    //   kFireRisePct=3：火柱上窜概率（下方燃烧 + 上方空气 → 3% 概率上方生火，舔焰柱观感）。
+    //   kFireCellCap=256：安全阀 —— 活跃火格超此数本窗不再**新增**（既有火照常熄灭收敛；防链式大火烧穿
+    //   mesh 重建预算 / delegate 上限）。
+    int m_fireTickCounter = 0;
+    int m_fireIntervalIndex = 0;
+    static constexpr int kFireTickInterval  = 5;   // tickFire 节流间隔（WorldClock tick 单位 = 100ms → 0.5s/窗）
+    static constexpr int kFireExtinguishPct = 5;   // 无燃料火每窗自熄概率（%）
+    static constexpr int kFireSpreadPct     = 5;   // 每火格每窗向随机 6 邻可燃格蔓延概率（%）
+    static constexpr int kFireRisePct       = 3;   // 火柱上窜概率（下方 Fire + 上方 Air → 上方生火，%）
+    static constexpr int kFireCellCap       = 256; // 活跃火格安全阀（超出本窗不再新增蔓延 / 上窜火）
     // t468 结冰 tick 节流计数 + 常量：tickIceFreeze() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFreezeTickInterval
     //   才做一次冻结判定（~每 kFreezeTickInterval×0.1s = 5s 一窗）。窗口序号 m_freezeIntervalIndex 每窗 +1，喂入
     //   hashVoxel 散布概率 → 不同格不同窗错峰冻结（非瞬时全冻，PLAN §2-K 精神）。kFreezePct=20（每窗 20% 暴露水源
@@ -1059,6 +1090,10 @@ private:
     //   时配合 m_waterDirty / m_lavaDirty 早退 → 零扫描；活跃流场时扫描量 = 流体格数（远 < 3.28M）。
     std::unordered_set<quint64> m_waterCells;
     std::unordered_set<quint64> m_lavaCells;
+    // t724 perf：火焰方格位置索引 —— tickFire 遍历此集（O(火格数)）替代全图扫描（同 m_waterCells /
+    //   m_iceCells 模式，lessons perf-fluid-scan）。写入路径经 noteFireWrite 增量维护；generate/beginLoad
+    //   清空、finishLoad 全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。
+    std::unordered_set<quint64> m_fireCells;
     // t495 perf：普通冰（Ice=45，不含 PackIce/BlueIce —— 那些永不融化）方格位置索引 —— 融化 tick（tickIceMelt）
     //   遍历此集（O(冰格数)）替代全图扫描（O(W×D×H)=3.28M）。写入路径经 noteIceWrite 增量维护；generate/beginLoad
     //   清空、finishLoad 全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。稳态（无冰
@@ -1121,6 +1156,12 @@ private:
     void noteIceWrite(int x, int y, int z, quint8 oldId, quint8 newId);
     // t495 perf：全图扫描重建普通冰方格集合（generate / finishLoad 末调一次；运行期由 noteIceWrite 增量维护）。
     void rebuildIceCells();
+    // t724 perf：火焰方格集合增量维护（同 noteIceWrite 模式）。id 不变 → no-op；id 变更 → 按 oldId/newId
+    //   是否 Fire 增删集合项。写入路径（setBlock / setBlockFromEntity / setWaterSilent / setBlockSilent /
+    //   setVoxelIfAir / clearBlockSilent）在 m_chunks.setBlock 后调本方法。
+    void noteFireWrite(int x, int y, int z, quint8 oldId, quint8 newId);
+    // t724 perf：全图扫描重建火焰方格集合（generate / finishLoad 末调一次；运行期由 noteFireWrite 维护）。
+    void rebuildFireCells();
     // r2-B2/B3 读档机关态归一（finishLoad 在 emit worldChanged 前调一次）：全图扫按钮（Wood/Stone）与压力板
     //   （五件族）且 state bit0=1 → 清 bit0（弹起）。按钮按下 / 压力板被压都是瞬态（伴生 Game 层表 / 实体不进
     //   存档），读档归一为弹起：按钮恢复「自动弹回 + 可再按」；压力板压下视觉不残留（玩家仍站着 → 首 tick

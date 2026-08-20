@@ -8,6 +8,8 @@
 
 #include <vector>
 
+class World; // 前置声明（t724 火焰焚毁判定读 World::blockAt；仅 .cpp include，头文件不引入依赖）
+
 // 经验球（XP orb）实体管理器（t402；Entities 层）。
 //
 // 机制等价 MC 1.0 经验球：杀怪 / 冶炼产出 → 在该位置 spawn 一个发光小球实体 →
@@ -92,7 +94,10 @@ public:
     //   经验球磁吸）；否则静止悬浮（呈现层自发上下浮动动画）。任一球 pos 变 / 销毁 → 末尾
     //   bump revision + emit entitiesChanged（驱动 QML 位置绑定重算）。
     //   寿命到期驱逐先于磁吸（同 ItemEntityManager despawnExpired：漏拾的球 5min 后消失，防累积）。
-    void tick(qreal dt, const QVector3D &playerCenter);
+    //   t724：新增可选 World*（caller 传 m_world，nullptr = 无世界上下文）做**火焰焚毁**判定 —— 球中心格
+    //   == Fire → 摧毁释放该槽（机制等价 MC 1.0 掉落物 / 经验球接触火即消失，同 ItemEntityManager 岩浆 /
+    //   火分支语义）。磁吸仍只向玩家中心飞（World 仅用于逐格 blockAt 焚毁查询，不引入物理依赖）。
+    void tick(qreal dt, const QVector3D &playerCenter, World *world = nullptr);
 
 signals:
     void entitiesChanged(); // spawn / 拾取 / 磁吸位移 触发；驱动 count/revision + QML 绑定刷新

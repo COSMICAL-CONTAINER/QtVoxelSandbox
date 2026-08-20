@@ -389,7 +389,11 @@ QVariantList Hotbar::creativeTools() const
             int(ToolRegistry::Shears),
             // t401 钓鱼竿（功能性工具）：归工具段（maxStack=1，耐久 64），故入 creativeTools。拾取即满耐久新钓竿；
             //   创造钓鱼不消耗耐久（同弓 / 剪刀 创造无限源）。ToolIcon 据 toolType===FishingRod 自绘钓竿图标。
-            int(ToolRegistry::FishingRod)};
+            int(ToolRegistry::FishingRod),
+            // t724 打火石（功能性工具）：归工具段（maxStack=1，耐久 64），故入 creativeTools。拾取即满耐久新打火石；
+            //   创造点火不消耗耐久（同弓 / 剪刀 / 钓竿 创造无限源）。ToolIcon 据 toolType===FlintSteel 自绘打火石
+            //   图标（弯钢击片 + 燧石 + 火花）；pack 覆盖 flint_and_steel.png（itemFilenameMap 0x121）。
+            int(ToolRegistry::FlintAndSteel)};
 }
 
 // 创造调色板材料段（t114）：木棒 / 煤炭 / 木炭 / 铁原矿 / 铁锭 / 玻璃（材料段 id >= 0x200，

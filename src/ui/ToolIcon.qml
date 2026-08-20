@@ -23,7 +23,7 @@ import VoxelSandbox
 Item {
     id: root
     property int tier: 1     // 1=木 2=石 3=铁 4=钻石 5=金 6=铜（0 / 越界 → 兜底木色配色）
-    property int toolType: 1 // 1=镐 Pickaxe（默认）/ 2=锄 Hoe / 3=斧 Axe / 4=铲 Shovel / 5=剑 Sword / 6=剪刀 Shears / 7=弓 Bow（0 / 越界 → 兜底镐形）
+    property int toolType: 1 // 1=镐 Pickaxe（默认）/ 2=锄 Hoe / 3=斧 Axe / 4=铲 Shovel / 5=剑 Sword / 6=剪刀 Shears / 7=弓 Bow / 8=钓鱼竿 FishingRod / 9=打火石 FlintSteel（0 / 越界 → 兜底镐形）
 
     // t420 资源包物品图标覆盖：pack 启用且该工具在「引擎工具 id → pack item 文件名」映射内、且包内 PNG 存在
     //   时，用 pack 的 item PNG 覆盖自绘 Canvas（缩到图标尺寸）；pack 关 / 无映射 → packImg.source 空 → Image
@@ -37,6 +37,7 @@ Item {
         if (tt === 6) return 0x110  // 剪刀 Shears
         if (tt === 7) return 0x10F  // 弓 Bow
         if (tt === 8) return 0x111  // 钓鱼竿 FishingRod
+        if (tt === 9) return 0x121  // 打火石 FlintAndSteel（t724：单一工具无 tier 变体）
         // t472 钻石镐脱离「每类 3 档 contiguous」布局（追加在 ToolId 末尾 0x112 保向后兼容）→ tier 4 特例映射，
         //   否则公式 0x100+(tt-1)*3+(tier-1) 对 (Pickaxe=1, tier=4) 错算成 0x103（HoeWood）→ pack 查询错图标。
         // t589 钻石补全：斧 / 铲 / 剑 / 锄追加在末尾 0x11D..0x120（枚举序：斧 / 铲 / 剑 / 锄）→ tier 4 全类
@@ -244,6 +245,47 @@ Item {
                 R(19, 17, 1, 3, bobberDark)        // 左描边
                 R(23, 17, 1, 3, bobberDark)        // 右描边
                 return // 钓竿绘制完成（跳过下方工具柄 / 头）
+            }
+            // t724 打火石（toolType===9 / ToolRegistry::FlintAndSteel）：弯月形钢击打器（左下弧）+ 燧石块
+            //   （右下深灰棱石）+ 击打火花（上部黄白星点）。早 return 跳过下方对角木柄 / 镐头默认（打火石自成
+            //   器+石+火组合，不套用镐 / 锄等头部）。配色：击打器 = 恒铁色（机制等价 MC 打火石单一铁件，
+            //   ToolRegistry tier=1 仅记账不影响任何挖掘门槛 / 速度）；燧石 = 深灰棱面；火花 = 焰黄 + 白炽。
+            //   用途：手持对实体面右击 → 面外侧格 == Air 时点燃 Fire 方块（Survival 耗 1 耐久）。
+            if (root.toolType === 9) {
+                const steel = "#d8d8e6"        // 铁银白（= tier 3 head 色，同剪刀恒铁策略）
+                const steelDark = "#8a8a9a"    // 铁阴影
+                const steelLight = "#f0f0fa"   // 铁高光
+                const flint = "#4a4a5a"        // 燧石灰（深冷灰）
+                const flintDark = "#2e2e3a"    // 燧石暗面
+                const flintLight = "#8a8a9a"   // 燧石受光棱面
+                const spark = "#ffd83a"        // 火花焰黄
+                const sparkWhite = "#fff6d0"   // 白炽火星
+                // 弯月形钢击打器（左下，竖握的 C 弧铁片；逐段阶梯拼弧，凸侧朝右 / 凹侧朝左）
+                R(6, 8, 2, 2, steel)            // 上臂根（接顶弯曲段）
+                R(5, 10, 2, 2, steel)           // 上臂外展
+                R(4, 12, 2, 4, steel)           // 背弧中段（左侧凸弧）
+                R(4, 12, 1, 4, steelDark)       // 弧背阴影
+                R(5, 16, 2, 2, steel)           // 下臂外展
+                R(6, 18, 2, 2, steel)           // 下臂根（接底弯曲段）
+                R(7, 9, 1, 1, steelLight)       // 上臂内棱受光
+                R(7, 19, 1, 1, steelLight)      // 下臂内棱受光
+                R(6, 10, 1, 1, steelLight)      // 弧顶受光
+                // 击打缘（弯月凹侧朝燧石的一列短齿，铁深色 = 摩擦面）
+                R(7, 12, 1, 4, steelDark)
+                // 燧石块（右下，多面棱石：主体 + 暗底 + 两条受光棱）
+                R(13, 13, 6, 6, flint)          // 主体
+                R(13, 18, 6, 1, flintDark)      // 底暗面
+                R(18, 13, 1, 6, flintDark)      // 右暗面
+                R(14, 14, 3, 1, flintLight)     // 上受光棱
+                R(14, 15, 1, 2, flintLight)     // 左受光棱
+                // 击打火花（燧石上方 / 钢器凹侧间，黄白星点：焰黄主体 + 白炽尖）
+                R(10, 6, 2, 2, spark)           // 主火花
+                R(12, 5, 1, 1, spark)           // 右上溅点
+                R(9, 4, 1, 1, spark)            // 左上溅点
+                R(11, 4, 1, 1, sparkWhite)      // 白炽尖
+                R(13, 7, 1, 1, sparkWhite)      // 右下白点
+                R(8, 7, 1, 1, sparkWhite)       // 左下白点
+                return // 打火石绘制完成（跳过下方工具柄 / 头）
             }
 
             // 剑无对角木柄（整把纵向），其余四类共用对角木柄（从左下到右上）。

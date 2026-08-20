@@ -1,5 +1,8 @@
 #include "xporbmanager.h"
 
+#include "blockregistry.h" // BlockRegistry::Fire（火焰焚毁判定）
+#include "world.h"         // World::blockAt（球中心格查询）
+
 #include <QLoggingCategory>
 #include <cmath> // std::sqrt
 
@@ -54,9 +57,10 @@ int XpOrbManager::amountAt(int i) const
     return m_orbs[size_t(i)].amount;
 }
 
-// 磁吸 + 拾取（见 .h 头注）。无 World 依赖：经验球是纯磁吸实体，只向玩家中心飞。
+// 磁吸 + 拾取（见 .h 头注）。t724 前仅玩家中心驱动磁吸；现带可选 World* 做火焰焚毁判定（球中心格 ==
+//   Fire → 摧毁，机制等价 MC 掉落物 / 经验球触火消失，同 ItemEntityManager 火 / 岩浆分支语义）。
 // 单帧最大位移 = kMaxSpeed*0.05 ≈ 0.45 格（dt 钳 50ms）→ 不会穿玩家；拾取判据用 3D 距离。
-void XpOrbManager::tick(qreal dt, const QVector3D &playerCenter)
+void XpOrbManager::tick(qreal dt, const QVector3D &playerCenter, World *world)
 {
     // 寿命到期驱逐先于磁吸（独立于玩家位 —— 菜单 / 暂停时球照常老化消失）。
     despawnExpired();
@@ -65,6 +69,21 @@ void XpOrbManager::tick(qreal dt, const QVector3D &playerCenter)
     for (int i = 0; i < int(m_orbs.size()); ++i) {
         if (!m_orbs[size_t(i)].alive) continue; // 跳过已释放空槽
         Orb &o = m_orbs[size_t(i)];
+        // t724 火焰焚毁：球中心格 == Fire → 摧毁释放槽（无拾取、无音；机制等价 MC 火吞掉落物）。
+        //   releaseSlot 标 alive=false（slot-reuse，同拾取路径）；dirty → 末尾 notifyChanged 隐藏 delegate。
+        if (world) {
+            const int fx = int(std::floor(o.pos.x()));
+            const int fy = int(std::floor(o.pos.y()));
+            const int fz = int(std::floor(o.pos.z()));
+            if (fx >= 0 && fy >= 0 && fz >= 0
+                && world->blockAt(fx, fy, fz) == BlockRegistry::Fire) {
+                releaseSlot(i);
+                dirty = true;
+                qCInfo(lcXp) << "xp orb at index" << i << "burned in fire"
+                             << "(live" << m_liveCount << "slots" << m_orbs.size() << ")";
+                continue;
+            }
+        }
         const QVector3D toPlayer = playerCenter - o.pos;
         const float dist = std::sqrt(toPlayer.lengthSquared());
 

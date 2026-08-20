@@ -4132,8 +4132,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 const int footY = qFloor(e.pos.y() - e.halfH); // 脚位（AABB 底面）格
                 const int bodyY = qFloor(e.pos.y());           // 身体中心格
                 bool touchingLava = false;
+                // t724：火焰格（Fire）并入点燃判定 —— mob 脚位 / 身体格 == Fire 同样持续点燃（机制等价
+                //   MC 1.0 实体站火 / 穿火着火；与岩浆共用 t344 火烧推进链：余焰扣血 / 随机熄灭 / 熟肉掉落）。
                 if (footY >= 0 && world->blockAt(fx, footY, fz) == BlockRegistry::Lava) touchingLava = true;
                 if (!touchingLava && bodyY >= 0 && world->blockAt(fx, bodyY, fz) == BlockRegistry::Lava)
+                    touchingLava = true;
+                if (footY >= 0 && world->blockAt(fx, footY, fz) == BlockRegistry::Fire) touchingLava = true;
+                if (!touchingLava && bodyY >= 0 && world->blockAt(fx, bodyY, fz) == BlockRegistry::Fire)
                     touchingLava = true;
                 if (touchingLava) {
                     if (e.fireTimer < kFireDuration) { e.fireTimer = kFireDuration; dirty = true; } // 翻入着火 → bump（QML 显火焰）

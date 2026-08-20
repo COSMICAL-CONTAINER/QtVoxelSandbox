@@ -80,10 +80,15 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     /* DiamondShovel */ {int(BlockRegistry::Shovel),  4, 4,  4.8f, 1561, "shovel_diamond", "钻石铲"},
     /* DiamondSword  */ {int(BlockRegistry::Sword),   4, 4,  1.0f, 1561, "sword_diamond",  "钻石剑"},
     /* DiamondHoe    */ {int(BlockRegistry::Hoe),     4, 4,  1.0f, 1561, "hoe_diamond",    "钻石锄"},
+    // t724 打火石（type=FlintSteel=9；功能性工具）：不参与挖掘 → miningSpeedMul 恒 1.0 等同空手。真正的用途是
+    //   右键点火（playercontroller placeBlock 分流：命中面外空气格 setBlock Fire）。maxDurability=64（机制等价
+    //   MC 1.0 打火石耐久；生存每次点燃 -1，创造不耗）。tier/speedMul 仅记账（语义同弓 / 剪刀 / 钓竿：无对应
+    //   采掘方块）。displayName「打火石」（§9 通用词；非 MC 专名）。
+    /* FlintAndSteel */ {int(BlockRegistry::FlintSteel), 1, 1, 1.0f, 64, "flint_and_steel", "打火石"},
 };
 
 // 编译期表大小守卫：ToolCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
-static_assert(int(ToolRegistry::ToolCount) == 33, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
+static_assert(int(ToolRegistry::ToolCount) == 34, "kTools 表大小须与 ToolRegistry::ToolCount 一致；新工具需补行");
 
 // t348 引擎工具 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 工具段
 //   「MC 1.0.0」列一致）。行索引 = engineToolId - ToolIdBase（与 kTools 同序）。**不重排枚举**（保存档 / 配方
@@ -102,6 +107,7 @@ constexpr int kMcToolId[int(ToolRegistry::ToolCount)] = {
     /* CopperPickaxe */ -1, /* CopperAxe */ -1, /* CopperShovel */ -1, /* CopperSword */ -1, /* CopperHoe */ -1,
     // t589 钻石补全：MC 1.0 diamond_sword 276 / diamond_shovel 277 / diamond_axe 279 / diamond_hoe 293。
     /* DiamondAxe    */ 279, /* DiamondShovel */ 277, /* DiamondSword */ 276, /* DiamondHoe */ 293,
+    /* FlintAndSteel */ 259, // t724 打火石（MC 1.0 flint and steel）
 };
 static_assert(sizeof(kMcToolId) / sizeof(kMcToolId[0]) == int(ToolRegistry::ToolCount),
               "kMcToolId 行数须与 ToolRegistry::ToolCount 一致；新工具需补一行 MC 1.0 对齐值");

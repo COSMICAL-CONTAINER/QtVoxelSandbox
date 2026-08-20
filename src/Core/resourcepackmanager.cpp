@@ -56,9 +56,11 @@ struct BuiltState {
     QString effectDir;            // t715 包内状态效果图标目录（assets/minecraft/textures/mob_effect）绝对路径；effectIconSource 探测（HUD 效果栏 pack 覆盖）
     QString paintingDir;          // t717 包内画作目录（assets/minecraft/textures/painting）绝对路径；paintingSource 逐 index 探测（t720 画作方块 pack 覆盖）
     QString armorDir;             // t717 包内盔甲 layer 目录（assets/minecraft/textures/models/armor）绝对路径；armorLayerSource 探测（t718 盔甲 3D 显示 pack 覆盖）
-    // t489 流体条带落盘路径（active 时 file:///）；waterStrip = 2 列×32 帧（静水|流水），lavaStrip = 1 列×16 帧。
+    // t489 流体条带落盘路径（active 时 file:///）；waterStrip = 2 列×32 帧（静水|流水），lavaStrip = 1 列×16 帧，
+    //   fireStrip = 1 列×32 帧（t724 火焰翻书）。
     QString waterStripFile;
     QString lavaStripFile;
+    QString fireStripFile;
     // t496 二轮复盘 床 16 色 item 图标染色缓存：bedId→落盘的染色后 bed 图标 file:// 路径。bed.png 是红床模板，
     //   每床色首次查询时按目标色重染（retintBedTemplate）落盘 voxelsandbox_rp_bed_<id>.png，后续命中直接返。
     //   apply() 重建时清空（pack 切换 / 重解析）；随 atlasFile 同目录写（AppLocalDataLocation，已 mkpath）。
@@ -709,6 +711,7 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x11E, QStringLiteral("diamond_shovel.png")},  // 钻石铲
         {0x11F, QStringLiteral("diamond_sword.png")},   // 钻石剑
         {0x120, QStringLiteral("diamond_hoe.png")},     // 钻石锄
+        {0x121, QStringLiteral("flint_and_steel.png")}, // t724 打火石（MC 1.0 flint and steel）
         // —— 材料段（MaterialId；item-ids.md §3-5）——
         {0x200, QStringLiteral("stick.png")},           // 木棒
         {0x201, QStringLiteral("coal.png")},            // 煤炭
@@ -1559,8 +1562,11 @@ void paintColumnFrames(QImage &strip, int col, int /*cols*/, int framePx, int fr
 //   返回落盘绝对路径（file:/// 前缀由调用方加）；构建失败返空串（调用方回退 qrc）。
 //   - 水条带（cols=2）：左列 = water_still 帧、右列 = water_flow 帧。两列各 32 帧（kWaterStripFrames）。
 //   - 岩浆条带（cols=1）：单列 = lava_still 帧，16 帧（kLavaStripFrames）。
+//   t724：落盘文件名改为显式参数 outName（旧版按 cols 推断——水 2 列 / 其余当岩浆，cols=1 的火条带会
+//   覆盖岩浆落盘文件）。三条带（水 / 岩浆 / 火）各自独立命名。
 QString buildFluidStrip(const QDir &blockDir, const QString &baseStripResource,
-                        int cols, int frameCount, const QList<QPair<int, QString>> &sourceFiles)
+                        int cols, int frameCount, const QList<QPair<int, QString>> &sourceFiles,
+                        const QString &outName)
 {
     QImage strip(baseStripResource);
     if (strip.isNull()) {
@@ -1585,9 +1591,7 @@ QString buildFluidStrip(const QDir &blockDir, const QString &baseStripResource,
         return {};
     }
     QDir().mkpath(dir);
-    const QString name = (cols == 2) ? QStringLiteral("voxelsandbox_water_strip.png")
-                                     : QStringLiteral("voxelsandbox_lava_strip.png");
-    const QString path = QDir(dir).absoluteFilePath(name);
+    const QString path = QDir(dir).absoluteFilePath(outName);
     if (!strip.save(path, "PNG")) {
         qWarning("ResourcePack: 无法写入流体条带 %s；回退程序生成条带。", qPrintable(path));
         return {};
@@ -1634,6 +1638,7 @@ void ensureBuiltLocked()
     s.armorDir.clear(); // t717 reset 盔甲 layer 目录（仅当包合法时重填）
     s.waterStripFile.clear(); // t489 reset 流体条带落盘路径（仅当包合法时重填）
     s.lavaStripFile.clear();
+    s.fireStripFile.clear(); // t724 reset 火焰条带落盘路径（仅当包合法时重填）
     s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
     s.leatherIconFiles.clear(); // R19 B1 reset 皮革护甲染色图标缓存（pack 切换 / 重解析 → 重染）
     s.copperIconFiles.clear();  // t588 reset 铜物品染色图标缓存（pack 切换 / 重解析 → 重染）
@@ -1890,16 +1895,26 @@ void ensureBuiltLocked()
 
     // t489 流体条带（材质级 flipbook）：以 qrc 程序生成条带为底，包内帧覆盖对应列/行 → 落盘。
     //   水条带 2 列（water_still | water_flow）× kWaterStripFrames 帧；岩浆条带 1 列（lava_still）×
-    //   kLavaStripFrames 帧。构建失败（落盘目录不可写 / 底图缺）→ 路径留空 → QML 回退 qrc 程序生成条带
-    //   （仍动画，只是无包内高清帧）。包缺某源文件 → 该列保留程序生成底（不覆盖），条带仍 N 帧（动画不破）。
+    //   kLavaStripFrames 帧；火焰条带 1 列（fire_0）× kFireStripFrames 帧（t724）。构建失败（落盘目录不可写 /
+    //   底图缺）→ 路径留空 → QML 回退 qrc 程序生成条带（仍动画，只是无包内高清帧）。包缺某源文件 → 该列
+    //   保留程序生成底（不覆盖），条带仍 N 帧（动画不破）。落盘名显式传参（t724：旧 cols 推断会让火覆盖岩浆）。
     s.waterStripFile = buildFluidStrip(
             blockDir, QStringLiteral(":/textures/water_strip.png"),
             2, BlockRegistry::kWaterStripFrames,
-            { {0, QStringLiteral("water_still.png")}, {1, QStringLiteral("water_flow.png")} });
+            { {0, QStringLiteral("water_still.png")}, {1, QStringLiteral("water_flow.png")} },
+            QStringLiteral("voxelsandbox_water_strip.png"));
     s.lavaStripFile = buildFluidStrip(
             blockDir, QStringLiteral(":/textures/lava_strip.png"),
             1, BlockRegistry::kLavaStripFrames,
-            { {0, QStringLiteral("lava_still.png")} });
+            { {0, QStringLiteral("lava_still.png")} },
+            QStringLiteral("voxelsandbox_lava_strip.png"));
+    // t724 火焰条带：包内 fire_0.png（MC 动画贴图单列竖排 strip；demo 包实测 16×512 = 32 帧现成）→
+    //   以 qrc 程序生成火焰条带为底、包内帧覆盖 → 落盘 voxelsandbox_fire_strip.png。
+    s.fireStripFile = buildFluidStrip(
+            blockDir, QStringLiteral(":/textures/fire_strip.png"),
+            1, BlockRegistry::kFireStripFrames,
+            { {0, QStringLiteral("fire_0.png")} },
+            QStringLiteral("voxelsandbox_fire_strip.png"));
 
     // review D3-b 图鉴生物头像预生成（t633 修 GUI 卡顿）：mobHeadIconSource 此前把「PNG 解码 + 裁剪 +
     //   落盘」留在 QML 绑定求值里（ResourceBrowser 生物格 delegate 的 headSrc 属性 —— GUI 线程同步磁盘
@@ -2019,6 +2034,18 @@ QString ResourcePackManager::lavaStripSource() const
     QMutexLocker lock(&stateMutex());
     const QString &f = state().lavaStripFile;
     return f.isEmpty() ? QStringLiteral("qrc:/textures/lava_strip.png")
+                       : QStringLiteral("file:///") + f;
+}
+
+// t724 火焰条带贴图源（同 water/lava 模式）：fireHost delegate 的两片交叉 quad 共享此 Texture 做
+//   scaleV/positionV 翻书。active 且落盘成功 → file:///；否则 qrc 程序生成条带。
+QString ResourcePackManager::fireStripSource() const
+{
+    if (!m_active)
+        return QStringLiteral("qrc:/textures/fire_strip.png");
+    QMutexLocker lock(&stateMutex());
+    const QString &f = state().fireStripFile;
+    return f.isEmpty() ? QStringLiteral("qrc:/textures/fire_strip.png")
                        : QStringLiteral("file:///") + f;
 }
 
