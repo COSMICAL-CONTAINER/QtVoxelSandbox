@@ -14,6 +14,7 @@
 
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
+#include "hotbar.h"       // t763 附魔数值生效链探针（EPF 路由 / 耐久消耗概率 / 攻击伤 tooltip 源）
 #include "world.h"
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
@@ -919,6 +920,67 @@ int main(int argc, char *argv[])
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| obsidian mining rule: diamond pick 96/8=12.0s + drop; wood/stone/iron/gold/"
                              "copper pick no bonus (1.0x) and NO drop (t762)";
+    }
+
+    // ── t763 附魔数值生效链探针（纯 Game 层表 + Hotbar 实例，无 World/QML）：① 锐锋→攻击伤害输入链
+    //    （钻石剑基础 7 + 锐锋 III ×0.5 = 8.5，attackMob 同公式；tooltip 文本源 enchantListText 出「锐锋 III」）；
+    //    ② 保护族 EPF 路由（含本任务补的 Emberling=15 → 火焰保护 / EnderPearlTp=16 → 摔落保护两条新路由，
+    //    修前二者漏专项加成）；③ 耐久附魔消耗概率（控制组无附魔必损；耐久 III 400 次受击损耗 ≈300，
+    //    75% 损 / 25% 跳过，容差 ±40≈4.6σ 防偶发 FAIL）。
+    {
+        Hotbar hb;
+        // ① 锐锋伤害输入链：基础伤 + 0.5*级 与 attackMob（playercontroller t476 链）同式。
+        const int sharp3 = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3);
+        const int enchSharp[4] = {sharp3, 0, 0, 0};
+        const int diaSword = int(ToolRegistry::DiamondSword);
+        const float expectAtk = float(ToolRegistry::attackDamage(diaSword)) + 0.5f * 3.0f;
+        bool ok = ToolRegistry::attackDamage(diaSword) == 7
+                  && EnchantRegistry::findLevel(enchSharp, int(EnchantRegistry::Sharpness)) == 3
+                  && std::abs(expectAtk - 8.5f) < 1e-4f
+                  && hb.itemAttackDamage(diaSword) == 7
+                  && hb.enchantListText(QVariantList{sharp3, 0, 0, 0})
+                         == QString::fromUtf8("锐锋 III");
+        // ② 保护族 EPF 路由：钻石胸甲火焰保护 III（唯一护甲）→ Fire(9)/Emberling(15) 均 6；无通用保护
+        //    → Fall(1)/Starvation(4) 均 0。护甲 id = ArmorIdBase + tier*4 + piece（钻石 tier=4）。
+        const int fireProt3 = EnchantRegistry::pack(int(EnchantRegistry::FireProtection), 3);
+        const int feather2  = EnchantRegistry::pack(int(EnchantRegistry::FeatherFall), 2);
+        const int prot2     = EnchantRegistry::pack(int(EnchantRegistry::Protection), 2);
+        const int diaChest  = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 1; // 钻石胸甲
+        const int diaHelm   = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 0; // 钻石头盔
+        const int diaBoots  = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 3; // 钻石靴
+        hb.armorSetStack(1, diaChest, 1, 100, QVariantList{fireProt3, 0, 0, 0}, QString());
+        ok = ok && hb.armorProtectionFactor(9) == 6      // Fire：火焰保护 3 级 ×2 EPF
+                  && hb.armorProtectionFactor(15) == 6   // Emberling 火球（t728）：t763 补路由（修前 0）
+                  && hb.armorProtectionFactor(1) == 0    // Fall：无摔落保护
+                  && hb.armorProtectionFactor(4) == 0;   // Starvation：无通用保护
+        // 加靴子摔落保护 II + 头盔通用保护 II：Fall(1)/EnderPearlTp(16) = 2+4 = 6；Fire(9) = 2+6 = 8；Starvation = 2。
+        hb.armorSetStack(3, diaBoots, 1, 100, QVariantList{feather2, 0, 0, 0}, QString());
+        hb.armorSetStack(0, diaHelm, 1, 100, QVariantList{prot2, 0, 0, 0}, QString());
+        ok = ok && hb.armorProtectionFactor(1) == 6
+                  && hb.armorProtectionFactor(16) == 6   // 暗渊珠传送自伤（t758）：t763 补路由（修前 2）
+                  && hb.armorProtectionFactor(9) == 8
+                  && hb.armorProtectionFactor(4) == 2;
+        // ③ 耐久消耗概率：控制组皮革头盔无附魔 50 次受击必损 50；钻石胸甲耐久 III 400 次受击损耗
+        //    ∈ [260, 340]（期望 300；每次 25% 概率跳过）。走 damageArmor（对全部装备槽生效 → 先清场）。
+        hb.armorSetStack(0, 0, 0, 0, QVariantList{}, QString());
+        hb.armorSetStack(1, 0, 0, 0, QVariantList{}, QString());
+        hb.armorSetStack(3, 0, 0, 0, QVariantList{}, QString());
+        const int leatherHelm = int(RecipeRegistry::ArmorIdBase); // 皮革头盔（tier0 头）
+        hb.armorSetStack(0, leatherHelm, 1, 55, QVariantList{}, QString());
+        for (int i = 0; i < 50; ++i) hb.damageArmor();
+        ok = ok && hb.armorDurabilityAt(0) == 5;
+        hb.armorSetStack(0, 0, 0, 0, QVariantList{}, QString());
+        const int unb3 = EnchantRegistry::pack(int(EnchantRegistry::Unbreaking), 3);
+        hb.armorSetStack(1, diaChest, 1, 500, QVariantList{unb3, 0, 0, 0}, QString());
+        const int durStart = hb.armorDurabilityAt(1);
+        for (int i = 0; i < 400; ++i) hb.damageArmor();
+        const int lost = durStart - hb.armorDurabilityAt(1);
+        ok = ok && lost >= 260 && lost <= 340;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| enchant effect chain: sharpness 7+1.5=8.5 + tooltip text source; EPF routing "
+                             "fire/emberling/pearl-tp/feather/protection; unbreaking-III wear over 400 hits in "
+                             "[260,340], no-enchant control exact 50 (t763)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

@@ -753,11 +753,19 @@ endif()
 #   Entities 层 MinecartManager（矿车绕圈；两者向下只依赖 Core+World，不引入 Game/QML）。
 #   t762 黑曜石挖掘规则探针附加：Game 层 ToolRegistry（miningTime/canHarvest 纯表查询——只向下依赖
 #   Core 的 BlockRegistry，不引入 PlayerController/QML）。
+#   t763 附魔数值生效链探针附加：Game 层 Hotbar（EPF 路由 / 耐久消耗概率 / 攻击伤 tooltip 源；随附
+#   enchantregistry/armor/recipe/smelting 表 + Core resourcepackmanager —— Hotbar 向下仅依赖这些纯表）。
 add_executable(redstone_matrix_test
     tools/redstone_matrix_test.cpp
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
+    src/Core/resourcepackmanager.cpp
     src/Game/toolregistry.cpp
+    src/Game/enchantregistry.cpp
+    src/Game/armor.cpp
+    src/Game/recipe.cpp
+    src/Game/smelting.cpp
+    src/Game/hotbar.cpp
     src/World/chunk.cpp
     src/World/chunkmanager.cpp
     src/World/world.cpp

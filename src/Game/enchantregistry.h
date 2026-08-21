@@ -62,7 +62,7 @@ public:
     //     弹射物保护(projectile-protection) / 水上亲和(aqua-affinity)。
     enum EnchantId : int {
         NoEnchant       = 0,
-        Sharpness       = 1,  // 锐锋：剑伤害 +0.5*level（呈现层 attackDamage 叠加；max 5）
+        Sharpness       = 1,  // 锐锋：剑伤害 +0.5*level（Game 层 attackMob 命中时叠加，暴击后乘 1.5；max 5；t476 链 t763 复核）
         UndeadSlay      = 2,  // 亡灵杀手：对亡灵类 mob 伤害 +（机制等价 MC Smite；max 5）
         ArthropodSlay   = 3,  // 节肢克星：对节肢类 mob 伤害 +（机制等价 MC arthropod-slayer；max 5）
         Knockback       = 4,  // 击退：命中 mob 击退距离 +（机制等价 MC knockback；max 2）
@@ -75,7 +75,7 @@ public:
         FireProtection  = 11, // 火焰保护：火焰伤害减免（机制等价 MC fire-protection；max 4）
         FeatherFall     = 12, // 摔落保护：摔落伤害减免（机制等价 MC feather-fall；max 4）
         ProjectileProt  = 13, // 弹射物保护：弹射物伤害减免（机制等价 MC projectile-protection；max 4）
-        AquaAffinity    = 14, // 水上亲和：水下挖掘速度（机制等价 MC aqua-affinity；max 1）
+        AquaAffinity    = 14, // 水上亲和：水下挖掘免除 ×5 耗时惩罚（生效点 playercontroller updateMining；t763 补）
         EnchantCount    = 15, // 哨兵：合法附魔 id 上界（1..14；0 = 无附魔）。
     };
 

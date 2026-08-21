@@ -741,6 +741,34 @@ Item {
         if (parts[0] === "chest") return _cr >= 0 ? root.hotbar.enchantListText(root.chestStore.slotEnchantsAt(root.chestX, root.chestY, root.chestZ, idx)) : ""
         return ""
     }
+    // t763 武器伤害行（附魔数值可见性；同 SurvivalInventory t698 模式 + chest 分支）：N =
+    //   round(base + 0.5*锐锋级)，base 走 hotbar.itemAttackDamage（ToolRegistry 单一权威）。仅剑 / 斧
+    //   （damage > 1）显 —— 锐锋加成数值 hover 可见（用户反馈「附了锐锋攻击力不见」）。
+    property string hoveredAttackText: {
+        if (!root.hotbar || !root.hoveredItemId) return ""
+        if (root.hotbar.itemAttackDamage(root.hoveredItemId) <= 1) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const _cr = root.chestStore.revision
+        const key = root.hoveredKey
+        if (!key) return ""
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        let e = null
+        if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
+        else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
+        else if (parts[0] === "chest")  e = _cr >= 0 ? root.chestStore.slotEnchantsAt(root.chestX, root.chestY, root.chestZ, idx) : null
+        else return ""
+        if (!Array.isArray(e)) return ""
+        let sharp = 0
+        for (let i = 0; i < 4; ++i) {
+            if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // EnchantRegistry::Sharpness = 1
+        }
+        const total = Math.round(root.hotbar.itemAttackDamage(root.hoveredItemId) + 0.5 * sharp)
+        return "+" + total + " 攻击" + (sharp > 0 ? "（锐锋 +" + (0.5 * sharp) + "）" : "")
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -771,11 +799,13 @@ Item {
             // t622：hover 槽物品带实例名 → 优先显实例名（改名物品 / 箱内改名物显其名）。
             // t647：附附魔行（hoveredEnchantText —— 战利品附魔书 / 附魔工具 hover 可见携带附魔，对齐
             //   SurvivalInventory / 附魔台 tooltip）。
+            // t763：附攻击行（hoveredAttackText —— 剑 / 斧含锐锋加成的总攻击数值）。
             text: root.hotbar ? ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
                     : root.hotbar.nameForBlock(root.hoveredItemId))
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
                 + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")
-                + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")) : "" // t304 弓伤害 tooltip
+                + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")
+                + (root.hoveredAttackText.length > 0 ? "\n\n" + root.hoveredAttackText : "")) : "" // t304 弓伤害 tooltip
             color: "#f2f2f2"
             font.pixelSize: 12
         }

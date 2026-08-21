@@ -919,6 +919,45 @@ Item {
         if (parts[0] === "main") return _mr >= 0 ? root.hotbar.mainCustomNameAt(idx) : ""
         return ""
     }
+    // t763 当前 hover 槽物品的附魔列表文本（附魔数值可见性；同 ChestUI t647 模式，无 craft 分支——
+    //   工作台格不持附魔元数据）。
+    property string hoveredEnchantText: {
+        if (!root.hotbar || !root.hoveredItemId || !root.hoveredKey) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const parts = root.hoveredKey.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        if (parts[0] === "hotbar") return _sr >= 0 ? root.hotbar.enchantListText(root.hotbar.enchantsAt(idx)) : ""
+        if (parts[0] === "main") return _mr >= 0 ? root.hotbar.enchantListText(root.hotbar.mainEnchantsAt(idx)) : ""
+        return ""
+    }
+    // t763 武器伤害行（附魔数值可见性；同 SurvivalInventory t698 模式）：N = round(base + 0.5*锐锋级)，
+    //   base 走 hotbar.itemAttackDamage（ToolRegistry 单一权威）。仅剑 / 斧（damage > 1）显。
+    property string hoveredAttackText: {
+        if (!root.hotbar || !root.hoveredItemId) return ""
+        if (root.hotbar.itemAttackDamage(root.hoveredItemId) <= 1) return ""
+        const _sr = root.hotbar.slotRevision
+        const _mr = root.hotbar.mainRevision
+        const key = root.hoveredKey
+        if (!key) return ""
+        const parts = key.split(":")
+        if (parts.length !== 2) return ""
+        const idx = parseInt(parts[1], 10)
+        if (Number.isNaN(idx)) return ""
+        let e = null
+        if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
+        else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
+        else return ""
+        if (!Array.isArray(e)) return ""
+        let sharp = 0
+        for (let i = 0; i < 4; ++i) {
+            if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // EnchantRegistry::Sharpness = 1
+        }
+        const total = Math.round(root.hotbar.itemAttackDamage(root.hoveredItemId) + 0.5 * sharp)
+        return "+" + total + " 攻击" + (sharp > 0 ? "（锐锋 +" + (0.5 * sharp) + "）" : "")
+    }
     Rectangle {
         id: itemTip
         visible: root.hotbar && root.hoveredItemId !== 0 && tipLabel.text !== ""
@@ -947,10 +986,13 @@ Item {
             anchors.centerIn: parent
             // t263 工具槽 tooltip 附「cur/max」耐久行；非工具 / 未跟踪 → 仅显名。
             // t622：hover 槽物品带实例名 → 优先显实例名（hoveredCustomName——改名物品显其名）。
+            // t763：附附魔行 + 攻击行（附魔数值可见性——附了锐锋 / 耐久的武器在工作台面板 hover 可见明细）。
             text: root.hotbar ? ((root.hoveredCustomName.length > 0 ? root.hoveredCustomName
                     : root.hotbar.nameForBlock(root.hoveredItemId))
                 + (root.hoveredDurability >= 0 ? "  " + root.hoveredDurability + "/" + root.hotbar.toolMaxDurability(root.hoveredItemId) : "")
-                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")) : "" // t304 弓伤害 tooltip
+                + (root.hotbar.toolType(root.hoveredItemId) === 7 ? "  攻击 1-" + root.hotbar.bowArrowMaxDamage() : "")
+                + (root.hoveredEnchantText.length > 0 ? "\n\n" + root.hoveredEnchantText : "")
+                + (root.hoveredAttackText.length > 0 ? "\n\n" + root.hoveredAttackText : "")) : "" // t304 弓伤害 tooltip
             color: "#f2f2f2"
             font.pixelSize: 12
         }

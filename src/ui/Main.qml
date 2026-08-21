@@ -11288,6 +11288,21 @@ Window {
                         const ench = hotbarVM.enchantListText(hotbarVM.enchantsAt(hotbarBar.hoveredSlot))
                         if (ench.length > 0) tip += "\n\n" + ench
                     }
+                    // t763 攻击力行（附魔数值可见性）：武器（剑 / 斧，itemAttackDamage>1）显「攻击: N」，
+                    //   N = round(base + 0.5*锐锋级) —— 与 Game 层 attackMob 同公式（t476 链），让锐锋加成
+                    //   在 HUD hover 上直接可见（此前附了锐锋只在实战生效、tooltip 无数字 → 用户以为没生效）。
+                    //   带锐锋时括注分解（锐锋 III +1.5）；镐 / 铲 / 徒手 1 不显（无战斗价值）。
+                    if (hotbarBar.hoveredSlot >= 0 && hotbarVM.itemAttackDamage(id) > 1) {
+                        const eArr = hotbarVM.enchantsAt(hotbarBar.hoveredSlot)
+                        let sharp = 0
+                        if (Array.isArray(eArr)) {
+                            for (let i = 0; i < 4; ++i) {
+                                if (((eArr[i] || 0) >> 8) === 1) { sharp = eArr[i] & 0xFF; break } // EnchantRegistry::Sharpness = 1
+                            }
+                        }
+                        const atk = Math.round(hotbarVM.itemAttackDamage(id) + 0.5 * sharp)
+                        tip += "\n\n攻击: " + atk + (sharp > 0 ? "（锐锋 " + hotbarVM.enchantLevelText(sharp) + " +" + (0.5 * sharp) + "）" : "")
+                    }
                     return _r >= 0 ? tip : ""
                 }
                 color: "#f2f2f2"

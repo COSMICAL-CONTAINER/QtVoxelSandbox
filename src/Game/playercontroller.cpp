@@ -2157,7 +2157,15 @@ void PlayerController::updateMining(float dt)
     //   → progress 增量同比放大（每级约缩短一半挖掘时间，明显可测）。effMul >= 1（level 0 = 1.0 无加成）。
     const int effLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::Efficiency) : 0;
     const float effMul = 1.0f + float(effLvl);
-    m_miningProgress += (dt * effMul) / miningTime;
+    // t763 水下挖掘惩罚 + 水中亲和（AquaAffinity）生效点（机制等价 MC 1.0「头入水挖掘 ×5 耗时，水中亲和
+    //   免除」）。此前 AquaAffinity 已注册但**无任何生效点**（附魔了也白附）。判定：眼睛格入水（eyeInWater）
+    //   且四件护甲水中亲和等级和 <=0 → miningTime ×kUnderwaterMiningTimeMul；带水中亲和 → 免除惩罚。
+    //   常量 5.0 可调（MC 1.0 惩罚倍率；越大水下裸挖越慢）。
+    constexpr float kUnderwaterMiningTimeMul = 5.0f; // 水下挖掘耗时倍率（无水中亲和时）
+    float timePenalty = 1.0f;
+    if (eyeInWater() && (m_hotbar ? m_hotbar->armorEnchantLevelSum(EnchantRegistry::AquaAffinity) : 0) <= 0)
+        timePenalty = kUnderwaterMiningTimeMul;
+    m_miningProgress += (dt * effMul) / (miningTime * timePenalty);
 
     // t165：不可挖方块（基岩 canMine=false）持续累积给「挥臂」反馈但**不显裂纹**（spec「一直不出现裂纹」）。
     //   可挖方块 progress 到 1.0 → 下方完成守卫 finishMiningAt 破块；不可挖方块 progress 到 1.0 **回绕**
