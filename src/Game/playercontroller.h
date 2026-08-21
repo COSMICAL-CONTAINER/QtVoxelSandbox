@@ -951,11 +951,13 @@ private:
     //   纯 Game/Physics（读射线 + 写 World），不改栅格语义。
     bool tryPlacePainting(int face);
     // t721 画作破坏主体（finishMiningAt 直挖 + dropUnsupportedPaintingsAround 失撑共用）：从 (px,py,pz)
-    //   （画格之一，可能已被清 Air）按 face flood-fill 收集整张画的格子集（±u 水平 / ±Y 垂直同 face 的
-    //   Painting 格），锚格读 index → drop 时 spawnItem 1× PaintingId（整张画只掉 1 件）→ 全部格子
-    //   setWaterSilent 清 Air（静默：避免 N 格 blockBroken 粒子/音风暴；主破坏格由 caller 走 setBlock
-    //   已清 + 已发一次事件）。drop 标志区分：直挖 = 生存才掉（主动破坏），失撑 = 恒掉（含创造，t571
-    //   自然掉落语义）。
+    //   （画格之一，可能已被清 Air）按 face flood-fill 收集候选格（±u 水平 / ±Y 垂直同 face 的 Painting
+    //   格）；终审修 M1：连通域不等于整张画（同面相邻两画平面相邻会被并入），画身份由域内锚格反解矩形
+    //   （index → paintingSize w×h）承载 —— 只清种子坐标所在矩形那一张（种子=被清锚格时退清域内不被
+    //   任何已识别矩形覆盖的残余格，邻画不误伤）。drop 时 spawnItem 1× PaintingId（整张画只掉 1 件）→
+    //   目标格 setWaterSilent 清 Air（静默：避免 N 格 blockBroken 粒子/音风暴；主破坏格由 caller 走
+    //   setBlock 已清 + 已发一次事件）。drop 标志区分：直挖 = 生存才掉（主动破坏），失撑 = 恒掉（含创造，
+    //   t571 自然掉落语义）。
     void removePaintingAt(int px, int py, int pz, int face, bool drop);
     // t721 画作支撑墙失撑掉落：破块后扫 4 水平邻的 Painting，解码其 state 朝向定位支撑墙格
     //   （paintingWallOffset），若支撑 == 刚破的格 → removePaintingAt（drop=true 恒掉，含创造）。

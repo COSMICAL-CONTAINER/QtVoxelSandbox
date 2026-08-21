@@ -1144,11 +1144,11 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   分层（PLAN §2）：生成属 Game/Physics（调 EntityManager），不写栅格（setBlock 已破）。
     if (m_entityManager && brokenId == BlockRegistry::MonsterEgg)
         m_entityManager->spawnMobTyped(x, y, z, EntityManager::MobSilverfish, QStringLiteral("#c8c2b8"), 0);
-    // t721 画作连通域移除（机制等价 MC 1.0 破画：整张画消失 + 只掉 1 个 painting 物品，非逐格掉）：
-    //   破坏任一画格 → removePaintingAt 按 brokenState 的 face flood-fill 同面 Painting 连通域（本格已被
-    //   上方 setBlock 清 Air；余格 BFS 收集后 setWaterSilent 静默清 —— 多格画逐格 blockBroken 会刷成
-    //   粒子/音风暴）。掉落受 drop 标志门控（主动破坏仅生存掉，t571①语义）；锚格 index 由连通域内读出
-    //   （破坏中间格时锚格仍在域内）。之后**不再进通用掉落链**（drop 分支的通用 dropId 路径会再掉一件
+    // t721 画作移除（机制等价 MC 1.0 破画：整张画消失 + 只掉 1 个 painting 物品，非逐格掉）：
+    //   破坏任一画格 → removePaintingAt 按 brokenState 的 face 圈定本张画的格子（本格已被上方 setBlock
+    //   清 Air；域内锚格反解矩形界定画身份，同面邻画不并入 —— 终审修 M1，余格 setWaterSilent 静默清
+    //   —— 多格画逐格 blockBroken 会刷成粒子/音风暴）。掉落受 drop 标志门控（主动破坏仅生存掉，t571①
+    //   语义）。之后**不再进通用掉落链**（drop 分支的通用 dropId 路径会再掉一件
     //   → return 前拦截；本格 setBlock 已发一次 blockBroken 粒子/音）。
     if (brokenId == BlockRegistry::Painting) {
         const int face = (brokenState & BlockRegistry::PaintingStateFaceMask)
@@ -1580,7 +1580,12 @@ bool PlayerController::tryPlacePainting(int face)
 }
 
 // t721 画作移除主体（见 playercontroller.h 头注释；直挖 + 失撑共用）。flood-fill 同 face 的 Painting
-// 连通域（±u 水平 / ±Y 垂直 —— 画恒占一个垂直于法线的格子平面，u = 观察者右向）= 整张画的格子集。
+// 连通域（±u 水平 / ±Y 垂直 —— 画恒占一个垂直于法线的格子平面，u = 观察者右向）只用于**圈出候选格**，
+// 不再等同「整张画的格子集」。终审修 M1：同面相邻两张画的格子本来就平面相邻，纯连通 BFS 会把邻画
+// 并进同一域（破 1 张清 2 张、整片只掉 1 件 → 生存物品损失）；画身份由锚格承载 —— 域内每个锚格（bit7）
+// 用其 index 反解矩形（paintingSize → w×h，锚格=左上、沿 u 扩 w、向下扩 h），只清「种子坐标所在矩形」
+// 那一张画。种子已被 caller 清掉且恰是锚格（矩形不可反解）时，退清「域内不被任何已识别矩形覆盖」的
+// 残余格（= 被毁那张画的余格；邻画已被各自锚格矩形完整覆盖 → 不误伤，机制等价 MC painting 逐实体独立）。
 void PlayerController::removePaintingAt(int px, int py, int pz, int face, bool drop)
 {
     if (!m_world) return;
@@ -1589,9 +1594,10 @@ void PlayerController::removePaintingAt(int px, int py, int pz, int face, bool d
     const quint8 faceBits = quint8((face & 3) << BlockRegistry::PaintingStateFaceShift);
     // BFS 收集连通域（种子 (px,py,pz) 允许已被清 Air —— 直挖路径主破坏格先走 setBlock；邻格侧种子恒是画）。
     struct Cell { int x, y, z; };
+    struct Rect { int ax, ay, az, w, h; }; // 画矩形：锚格(左上) + 沿 u 宽 w + 向下高 h
     std::vector<Cell> cells;
+    std::vector<Rect> rects;
     std::vector<Cell> frontier{{px, py, pz}};
-    int anchorIndex = -1;
     while (!frontier.empty()) {
         const Cell c = frontier.back();
         frontier.pop_back();
@@ -1609,7 +1615,12 @@ void PlayerController::removePaintingAt(int px, int py, int pz, int face, bool d
         cells.push_back(c);
         if (bid == BlockRegistry::Painting
             && (m_world->stateAt(c.x, c.y, c.z) & BlockRegistry::PaintingStateAnchorFlag)) {
-            anchorIndex = m_world->stateAt(c.x, c.y, c.z) & BlockRegistry::PaintingStateIndexMask;
+            // 终审修 M1（兼消 L4 死存储）：锚格 index 反解本画矩形，供下方按矩形圈定清理范围（旧代码只存
+            //   anchorIndex 不读 —— 掉落恒 1 件与 index 无关，头注释却暗示其驱动掉落，误导）。
+            Rect r{c.x, c.y, c.z, 1, 1};
+            BlockRegistry::paintingSize(int(m_world->stateAt(c.x, c.y, c.z)
+                                            & BlockRegistry::PaintingStateIndexMask), r.w, r.h);
+            rects.push_back(r);
         }
         // 4 向扩展（画面平面内：±u 水平 + ±Y 垂直）。
         frontier.push_back({c.x + ux, c.y, c.z + uz});
@@ -1617,13 +1628,35 @@ void PlayerController::removePaintingAt(int px, int py, int pz, int face, bool d
         frontier.push_back({c.x, c.y + 1, c.z});
         frontier.push_back({c.x, c.y - 1, c.z});
     }
+    // 矩形包含判定：格沿 u 的偏移 du ∈ [0,w) 且 y ∈ (ay-h, ay]（画自锚格向下展开 h 格）。
+    const auto inRect = [ux, uz](const Rect &r, int x, int y, int z) {
+        const int du = (x - r.ax) * ux + (z - r.az) * uz;
+        return du >= 0 && du < r.w && y <= r.ay && y > r.ay - r.h;
+    };
+    // 目标矩形 = 含种子坐标的锚格矩形（直挖清的是非锚格时，本画锚格仍在域内 → 仍可反解定位）。
+    const Rect *target = nullptr;
+    for (const Rect &r : rects) {
+        if (inRect(r, px, py, pz)) { target = &r; break; }
+    }
     // 掉落：整张画只 1 件 PaintingId（机制等价 MC 破画掉 1 个 painting item）。落点 = 种子格（玩家瞄的格）。
     if (drop)
         emit spawnItem(px, py, pz, RecipeRegistry::PaintingId, 1);
-    // 清域：setWaterSilent 静默清（不发 blockBroken —— 多格画的逐格粒子/音会刷成风暴；主破坏格由 caller
-    //   finishMiningAt 顶部的 setBlock 已清 + 已发一次事件；失撑路径种子格也在此静默清，同火把失撑模式）。
-    //   worldChanged 仍逐格发 → mesh / 呈现层 paintingHost 清孤儿（onWorldChanged 校验）。
+    // 清域（终审修 M1：只清目标画）：target 命中 → 仅清该矩形内格（邻画在其自身矩形外 → 完好保留）；
+    //   无 target（种子 = 被 caller 先清的锚格，本画矩形已不可反解）→ 清域内不被任何已识别矩形覆盖的
+    //   残余格（邻画格已被其锚格矩形覆盖 → 跳过）。setWaterSilent 静默清（不发 blockBroken —— 多格画的
+    //   逐格粒子/音会刷成风暴；主破坏格由 caller finishMiningAt 顶部的 setBlock 已清 + 已发一次事件；
+    //   失撑路径种子格也在此静默清，同火把失撑模式）。worldChanged 仍逐格发 → mesh / 呈现层 paintingHost
+    //   清孤儿（onWorldChanged 校验）。
     for (const Cell &c : cells) {
+        if (target) {
+            if (!inRect(*target, c.x, c.y, c.z)) continue; // 邻画的格 → 不清（终审修 M1）
+        } else {
+            bool covered = false;
+            for (const Rect &r : rects) {
+                if (inRect(r, c.x, c.y, c.z)) { covered = true; break; } // 邻画矩形内 → 不清
+            }
+            if (covered) continue;
+        }
         if (c.x == px && c.y == py && c.z == pz && m_world->blockAt(c.x, c.y, c.z) != BlockRegistry::Painting)
             continue; // 种子已被 caller 清（防御双清）
         m_world->setWaterSilent(c.x, c.y, c.z, BlockRegistry::Air, 0);
