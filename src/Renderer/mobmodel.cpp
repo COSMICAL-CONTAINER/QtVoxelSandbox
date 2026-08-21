@@ -578,7 +578,16 @@ void MobModel::rebuild()
         //   波浪式起伏，相位错开 → 游动时触腕飘动；walkPhase 驱动）。squid 水中持续漂移（moveSpeed 恒 >0）→ 触腕常驻
         //   摆动（区别于陆地 mob idle 时腿停）。mobModelYOff 见 Main.qml（触腕底本地 |y|≈0.46 贴 collision 底面）。
         //   局部原点 = 躯干中心；无「头朝 -Z」语义（squid 软体无固定前后，yawAt 仅驱动整体朝向 → 触腕环对称无所谓前）。
+        // t730 UV（MC 1.8 squid base 64×32；demo 包 512×256 实测 = 8×）：mantle 12×16×12 @ (0,0)（六面像素区
+        //   逐一实测 100% 不透明）+ 8 触腕**共用** 2×12×2 @ (48,0) 单区（vanilla 八触腕同 textureOffset，包内
+        //   仅画一根触腕）。本工程几何保原创比例（mantle 0.56×0.48×0.56 + 尖顶 0.30×0.26×0.30 + 触腕
+        //   0.09×0.30×0.09），UV 按 MC 原 size 采样 → pack 贴图各部对齐。尖端是 mantle 尖顶的延伸（vanilla
+        //   无独立尖顶盒）→ 复用 mantle texOffs（采样同区，视觉为 mantle 皮色）。pack 关时 writeMobUV 不读
+        //   texOffs（全脸 [0,1]² 程序贴图 mob_squid，零回归）。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(0, 0, 12, 16, 12);
         addBox( 0.00f,  0.08f,  0.00f, 0.28f, 0.24f, 0.28f, verts, idx, bMin, bMax); // 圆胖躯干（mantle 主体）
+        setMobTex(0, 0, 12, 16, 12);
         addBox( 0.00f,  0.45f,  0.00f, 0.15f, 0.13f, 0.15f, verts, idx, bMin, bMax); // 顶端小尖（mantle 尖顶）
         // 8 触腕（环绕躯干底沿八向分布，半径 0.20）：每条细垂直盒（half 0.045×0.15×0.045），顶端枢轴 y=-0.16（躯干底）。
         //   绕 X 轴摆动（前后波浪式起伏）：angle = 0.18·sin(walkPhase + i·π/4)，相位错开 → 触腕此起彼伏飘动（游动感）。
@@ -593,6 +602,8 @@ void MobModel::rebuild()
             const float tz = kSquidRingR * std::sin(ang);      // 触腕心 z
             const float swing = kSquidTentacleSwing * std::sin(m_walkPhase + float(i) * 0.7853982f);
             // 触腕心 y = 枢轴 y − 半高（顶端贴枢轴、底端下垂）。绕 (pivY, pivZ=tz) 的 X 轴旋转。
+            // t730：8 触腕共用 texOffs(48,0) 2×12×2（vanilla 单区复用，见分支头注释）。
+            setMobTex(48, 0, 2, 12, 2);
             addBoxRot(tx, kSquidPivotY - kSquidTentHy, tz, 0.045f, kSquidTentHy, 0.045f,
                       kSquidPivotY, tz, swing, verts, idx, bMin, bMax);
         }

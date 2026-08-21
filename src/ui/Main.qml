@@ -3698,6 +3698,10 @@ Window {
         // t728 燃烬者 pack 身体贴图（entity/blaze/blaze.png）：pack 命中 → MobModel T 字 UV 展开进该贴图 +
         //   packTextured=true；pack 关 → source 空 → 回退 mobEmberlingTex（entity_emberling 程序生成黄焰头）。
         Texture { id: mobEmberlingPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(17) : ""; generateMipmaps: false }
+        // t730 鱿鱼 pack 身体贴图（demo 包扁平 entity/squid.png，mobTextureSource 子目录 miss 后回退扁平命中）：
+        //   pack 命中 → MobModel box-UV 展开进该贴图（mantle 12×16×12 @ (0,0) + 8 触腕共用 2×12×2 @ (48,0)）+
+        //   packTextured=true；pack 关 → source 空 → 回退 mobSquidTex（程序生成 mob_squid）。
+        Texture { id: mobSquidPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(9) : ""; generateMipmaps: false }
 
         // t718 盔甲 layer 贴图（玩家 + 人形 mob 护甲壳共用；ArmorLayerBox 几何按 MC box-UV 从中采样）：
         //   5 tier × 2 layer = 10 张**静态** Texture 实例（tier/layer 各一——玩家与多个 mob 可同时穿不同
@@ -7506,14 +7510,19 @@ Window {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSquid
                                 geometry: MobModel {
                                     mobType: 9
+                                    // t730 pack 命中 entity 贴图 → box-UV 展开（mantle + 8 触腕区）；否则全脸 UV（程序生成 mob_squid）。
+                                    packTextured: mobSquidPackTex.source.toString().length > 0
                                     walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
+                                    // t730 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint：受击红 / 昼夜灰阶，
+                                    //   同 t597 近白 tint 规则——贴图原色完整保留，暗色乘贴图会读作「无贴图」）；
+                                    //   否则程序生成 mob_squid（tint 语义同旧版不变）。
                                     baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
-                                    baseColorMap: mobSquidTex
+                                    baseColorMap: mobSquidPackTex.source.toString().length > 0 ? mobSquidPackTex : mobSquidTex
                                 }
                                 // 眼（2 颗黑点；躯干前侧偏前 z=-0.29、y=0.10、x=±0.10）。同鸡眼纯色子 Model 模式。
                                 Model {

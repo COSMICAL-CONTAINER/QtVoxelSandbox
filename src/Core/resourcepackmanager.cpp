@@ -842,11 +842,12 @@ const QList<QPair<int, QString>> &itemFilenameMap()
 
 // t421「引擎 mob id（EntityManager::MobType）→ pack entity 子目录 + 标准贴图文件名」映射（功能性元数据，
 //   红线 §9 可随代码提交；贴图文件本身不进仓库）。mob id 取 EntityManager::MobType（pig=1/cow=2/sheep=3/
-//   shambler=4/bones=5/stalker=6/spider=7/chicken=8/snow_golem=12/iron_golem=13）。文件名用 MC 1.0 entity 子目录命名
+//   shambler=4/bones=5/stalker=6/spider=7/chicken=8/squid=9/snow_golem=12/iron_golem=13）。文件名用 MC 1.0 entity 子目录命名
 //   （entity/<mob>/<mob>.png，现网大多数包此布局；mobTextureSource 在子目录缺时自动回退扁平 entity/<mob>.png 兼容
 //   旧 / HD 包）。机制等价 MC 1.0 mob 外观，标识符 / 名称全原创（§9 区隔：Shambler↔zombie / Bones↔skeleton /
 //   Stalker↔creeper）。包内缺该 PNG 时 mobTextureSource 安全跳过（回退程序生成 / 纯色），故映射可慷慨：唯一要
-//   保证的是 id↔目录配对正确。Squid(9) 不映射（spec t421 未列；保留程序生成 mob_squid 贴图，pack 启用也不变）。
+//   保证的是 id↔目录配对正确。t730 起鱿鱼 Squid(9) 已映射（squid/squid.png，扁平回退 entity/squid.png；
+//   旧注「不映射保留程序生成」作废——miss 时仍自动回退程序生成 mob_squid 贴图，语义不变）。
 //   feat（雪/铁傀儡）：SnowGolem(12) → 扁平 entity/snow_golem.png（demo 包 1.8.2.2 实测扁平布局，无子目录；
 //   mobTextureSource 子目录探测 miss 后自动回退扁平命中）；IronGolem(13) → 子目录 entity/iron_golem/iron_golem.png
 //   （demo 包子目录布局，含 iron_golem.png + crackiness 系列）。两傀儡 pack 命中后 Main.qml delegate 把几何切到
@@ -867,6 +868,11 @@ const QList<QPair<int, QString>> &mobEntityMap()
         //   (0.16,0.10,0.10) 乘 pack 贴图致近乎全黑（修于 Main.qml，非本映射）。
         {7, QStringLiteral("spider/spider.png")},   // MobSpider → entity/spider/spider.png
         {8, QStringLiteral("chicken/chicken.png")}, // MobChicken → entity/chicken/chicken.png
+        // t730 鱿鱼（MobSquid，机制等价 MC 1.0 squid，§9 改名原创）：demo 包实存**扁平** entity/squid.png
+        //   （512×256 = base 64×32 的 8×，无子目录）——主候选 squid/squid.png 子目录 miss 后自动回退扁平命中
+        //   （mobTextureSource 两级探测，同雪傀儡）。像素实测布局：mantle 12×16×12 @ (0,0)（六面区 100% 不透明）
+        //   + 8 触腕共用 2×12×2 @ (48,0) 单区（mobmodel.cpp setMobTex 镜像，单一权威在 Renderer）。
+        {9, QStringLiteral("squid/squid.png")},  // MobSquid → entity/squid/squid.png（扁平回退 entity/squid.png）
         {12, QStringLiteral("snow_golem.png")},     // MobSnowGolem → entity/snow_golem.png（扁平；demo 包无子目录，mobTextureSource 子目录 miss 后回退扁平命中）
         {13, QStringLiteral("iron_golem/iron_golem.png")}, // MobIronGolem → entity/iron_golem/iron_golem.png（子目录；mobTextureSource 命中子目录）
         {16, QStringLiteral("enderman/enderman.png")}, // MobNightwalker → entity/enderman/enderman.png（t727 夜行者，机制等价 MC enderman，§9 改名；眼睛发光层走 entitySource("nightwalker_eyes") 独立取，不占本 body 表项）
@@ -2548,8 +2554,9 @@ const QList<MobHeadRegion> &mobHeadRegions()
         /* 蜘蛛   */ {  7, 32,  4,  8,  8,  8,  64,  32, false },
         /* 鸡     */ {  8,  0,  0,  4,  6,  3,  64,  32, false },
         /* 铁傀儡 */ { 13,  0,  0,  8, 10,  8, 128, 128, false },
-        // 雪傀儡（12）：头是南瓜方块非 entity 贴图；鱿鱼（9）/狼（10）/豹猫（11）/银鱼（14）：mobEntityMap
-        //   无映射（或无头部盒语义）→ 不进表（回退体色方块）。
+        // 雪傀儡（12）：头是南瓜方块非 entity 贴图；鱿鱼（9）：t730 起 mobEntityMap 已映射（squid.png）但鱿鱼
+        //   软体无「头部盒」语义（mantle 无脸）→ 仍不进头像表（图鉴回退体色方块）；狼（10）/豹猫（11）/银鱼（14）：
+        //   mobEntityMap 无映射 → 不进表（回退体色方块）。
     };
     return kRegions;
 }
