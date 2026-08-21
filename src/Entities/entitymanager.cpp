@@ -3645,6 +3645,40 @@ void EntityManager::dropUnsupportedDustAfterBlast(const std::vector<World::Destr
     }
 }
 
+// t744① 单格版：扫 (x,y,z) 的 6 邻机关族（Lever / WoodButton / StoneButton），state bit[3:1] 解码唯一
+//   附着格（mechAttachOffset），非完整立方（isFullCube，与放置预检同源）→ setWaterSilent 清 + 恒发
+//   explosionDroppedItem（爆炸系统事件的失撑掉落通道，同 t738/t739 口径：静默清免破块粒子/音 spam、
+//   支撑脱落是必然事件不走概率门）。机制等价 MC「机关附着面被移除即脱落」（玩家挖掘版 =
+//   PlayerController::dropUnsupportedMechAround，判定同源；本处差异仅写入口与掉落信号——爆炸是
+//   系统事件）。机关无碰撞不撑他机关 → 单趟扫即足够（无级联）；清后格 blockAt=Air → 重复扫不双掉。
+void EntityManager::dropUnsupportedMechAroundCell(int x, int y, int z, World *world)
+{
+    if (!world) return;
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &n : kNb) {
+        const int tx = x + n[0], ty = y + n[1], tz = z + n[2];
+        const quint8 tb = world->blockAt(tx, ty, tz);
+        if (tb != BlockRegistry::Lever && tb != BlockRegistry::WoodButton
+            && tb != BlockRegistry::StoneButton) continue;
+        int ax, ay, az;
+        BlockRegistry::mechAttachOffset(world->stateAt(tx, ty, tz), ax, ay, az);
+        if (BlockRegistry::isFullCube(world->blockAt(tx + ax, ty + ay, tz + az))) continue; // 支撑幸存 → 保留
+        world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0); // 静默清（mesh 重建走 worldChanged）
+        emit explosionDroppedItem(tx, ty, tz, BlockRegistry::dropId(tb)); // 脱落恒掉（不走概率门）
+    }
+}
+
+// t744① 爆炸失撑机关掉落（头文件注释详述语义）：destroyed 每破坏格调单格版扫 6 邻。覆盖两类失撑源：
+//   ① 支撑块被炸掉、机关在球外幸存（按钮贴的墙被炸）；② 支撑格是被链式引燃的 TNT（oldId==TntBlock
+//   的破坏格——TNT 转实体后其上的按钮/拉杆立即脱落，机制等价 MC 链式引燃的 TNT 不再是有效附着面）。
+void EntityManager::dropUnsupportedMechAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed,
+                                                  World *world)
+{
+    if (!world) return;
+    for (const World::DestroyedVoxel &d : destroyed)
+        dropUnsupportedMechAroundCell(d.x, d.y, d.z, world);
+}
+
 // t284 Stalker 爆炸（aiStalker fuse 满时调；详见头文件 detonateStalker 注释）。机制等价 MC 苦力怕球形爆炸。
 //   分层（PLAN §2）：向下写 World（setWaterSilent 破坏方块 + worldChanged 重建 mesh）+ 发语义信号
 //   （explosion 音/视反馈、mobAttackedPlayer 伤害玩家）；只读 World::blockAt 判定破坏目标。无向上依赖。
@@ -3708,6 +3742,9 @@ void EntityManager::detonateStalker(int idx, Entity &e, World *world, const QVec
         // t739 爆炸失撑红石粉掉落：支撑块被炸掉、粉本体在球外幸存 → 脱落为红石粉物品（不浮空残留；
         //   激活态照样掉，失效段电力即时重算断信号）。
         dropUnsupportedDustAfterBlast(destroyed, world);
+        // t744① 爆炸失撑机关掉落：按钮/拉杆的支撑块被炸（或支撑格是被链式引燃转实体的 TNT）→
+        //   机关脱落为掉落物（不悬空残留；含 destroyed 内 TntBlock 格 6 邻扫描）。
+        dropUnsupportedMechAfterBlast(destroyed, world);
     }
 
     // (b) 距离衰减伤害玩家：以玩家身体中心（脚位 + ~0.9，机制等价 MC 玩家受击采样身体中部）到爆炸中心计 3D 距离；
@@ -3808,6 +3845,9 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
     dropUnsupportedTorchesAfterBlast(destroyed, world);
     // t739 爆炸失撑红石粉掉落：支撑块被炸掉、粉本体在球外幸存 → 脱落为红石粉物品（同 Stalker 路径）。
     dropUnsupportedDustAfterBlast(destroyed, world);
+    // t744① 爆炸失撑机关掉落（同 Stalker 路径）：支撑块被炸 / 支撑格是被链式引燃转实体的 TNT →
+    //   按钮/拉杆脱落为掉落物（destroyed 含 TntBlock 格 → 其上机关一并扫掉）。
+    dropUnsupportedMechAfterBlast(destroyed, world);
     // 水中链式：destroyed 空（未破坏地形）→ 扫球内 TNT 方块单独引燃（水下 TNT 连锁不断，机制等价 MC 水中 TNT
     //   连锁；不破坏其它方块 / 无掉落）。立方盒 [cx±R, cy±R, cz±R] 逐格距中心 ≤ R 判，同 destroySphereSilent 口径。
     if (originInWater && world) {
@@ -3825,6 +3865,9 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
                                       ? float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * kPrimedTntFuseJitterSec : 0.0f;
                     world->clearBlockSilent(x, y, z); // 移除 TNT 方块（水中爆炸不毁地形，但 TNT 被引燃转实体）
                     spawnPrimedTnt(x, y, z, kChainFuseSec + jit); // 短引信（水下快连锁）
+                    // t744① 水下链式引燃的机关失撑掉落：本路径 destroyed 为空（不毁地形）→ AfterBlast 扫不到，
+                    //   但 clearBlockSilent 清 TNT 格同样使其上/旁的按钮/拉杆失撑 → 单格版显式补扫（同语义）。
+                    dropUnsupportedMechAroundCell(x, y, z, world);
                 }
     }
 

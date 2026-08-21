@@ -375,6 +375,82 @@ int main(int argc, char *argv[])
         tickN(w, 2);
     }
 
+    // P9 机关族逐态几何映射（t744 ②回归锁）：用户复盘「按钮放地面变正方形」，静态排查 + 全链 mesher dump
+    //   实证贴地态自 t662 起就是贴地扁薄盒（6/16×2/16×6/16，Y[0,2/16]）——报告疑含陈旧 exe 因素（同 t740
+    //   复盘）。本探针把「state 附着编码 → mechBoxes 几何」逐态断言锁进 harness（地面/四墙 × 激活两态 +
+    //   放置法线映射），未来任何把地面态画回墙面姿态 / 厚边离墙的回归直接 FAIL。纯 Core 断言（mechBoxes
+    //   静态，渲染与 raycastAABBs 选中同源——锁住渲染即同时锁住选体）。
+    {
+        bool ok = true;
+        const float t = 1.0f / 16.0f;
+        const quint8 mechIds[3] = { BR::Lever, BR::WoodButton, BR::StoneButton };
+        for (const quint8 id : mechIds) {
+            const bool isLever = (id == BR::Lever);
+            for (int active = 0; active <= 1; ++active) {
+                for (int attach = 0; attach <= 4; ++attach) {
+                    const quint8 state = quint8((active ? 1u : 0u)
+                                                | (quint8(attach) << BR::MechAttachShift));
+                    const auto boxes = BR::mechBoxes(id, state);
+                    if (boxes.empty()) { ok = false; continue; }
+                    // 全盒并集（按钮单盒；拉杆底座+摆棍取并集验「贴面侧」）。
+                    float minX = 9e9f, maxX = -9e9f, minY = 9e9f, maxY = -9e9f, minZ = 9e9f, maxZ = -9e9f;
+                    for (const auto &b : boxes) {
+                        minX = qMin(minX, b.minX); maxX = qMax(maxX, b.maxX);
+                        minY = qMin(minY, b.minY); maxY = qMax(maxY, b.maxY);
+                        minZ = qMin(minZ, b.minZ); maxZ = qMax(maxZ, b.maxZ);
+                    }
+                    const float th = active ? 1.0f : 2.0f; // 机关厚度单位（1/16）：按下压薄
+                    switch (attach) {
+                    case 0: // 贴地：并集贴格底（minY=0）且总高 ≤ 按钮 2/16（按下 1/16）/ 拉杆棍高 14/16
+                        if (qAbs(minY) > 1e-4f) ok = false;
+                        if (!isLever && maxY > (th + 0.5f) * t) ok = false;       // 按钮 = 贴地扁薄盒
+                        if (isLever && maxY > 14.0f * t) ok = false;              // 拉杆 = 贴地底座+棍（棍顶 14/16）
+                        if (isLever && boxes.size() < 3) ok = false;              // 底座 + 两段摆棍
+                        break;
+                    case 1: // 支撑在 +X：厚边/底座贴 x=1 格边（mechBoxes 厚度 ≤ th+0.5/16，不掉离墙）
+                        if (qAbs(maxX - 1.0f) > 1e-4f || minX < 1.0f - (th + 0.5f + (isLever ? 6.0f : 0.0f)) * t) ok = false;
+                        break;
+                    case 2: // 支撑在 -X：贴 x=0
+                        if (qAbs(minX) > 1e-4f || maxX > (th + 0.5f + (isLever ? 6.0f : 0.0f)) * t) ok = false;
+                        break;
+                    case 3: // 支撑在 +Z：贴 z=1
+                        if (qAbs(maxZ - 1.0f) > 1e-4f || minZ < 1.0f - (th + 0.5f + (isLever ? 6.0f : 0.0f)) * t) ok = false;
+                        break;
+                    default: // 支撑在 -Z：贴 z=0
+                        if (qAbs(minZ) > 1e-4f || maxZ > (th + 0.5f + (isLever ? 6.0f : 0.0f)) * t) ok = false;
+                        break;
+                    }
+                }
+            }
+        }
+        // 放置法线 → 附着编码映射（playercontroller placeBlock 写 state 的同一函数）：顶面贴地 / 四侧取反码
+        //   （MechAttachOnXX = 支撑块方向）/ 底面拒（-1，v1 不支持天花板挂装）。
+        if (BR::mechAttachFromNormal(0, 1, 0) != BR::MechAttachFloor) ok = false;
+        if (BR::mechAttachFromNormal(1, 0, 0) != BR::MechAttachOnNX) ok = false;
+        if (BR::mechAttachFromNormal(-1, 0, 0) != BR::MechAttachOnPX) ok = false;
+        if (BR::mechAttachFromNormal(0, 0, 1) != BR::MechAttachOnNZ) ok = false;
+        if (BR::mechAttachFromNormal(0, 0, -1) != BR::MechAttachOnPZ) ok = false;
+        if (BR::mechAttachFromNormal(0, -1, 0) != -1) ok = false;
+        // 附着解码 ↔ 几何贴边一致性：mechAttachOffset 给的支撑向必须与 mechBoxes 厚边所在侧同向
+        //   （OnPX → dx=+1 → 厚边在 x=1；失撑掉落扫描与渲染/选中读同一编码，锁三者同源）。
+        {
+            int dx, dy, dz;
+            BR::mechAttachOffset(quint8(BR::MechAttachOnPX << BR::MechAttachShift), dx, dy, dz);
+            if (dx != 1 || dy != 0 || dz != 0) ok = false;
+            BR::mechAttachOffset(quint8(BR::MechAttachOnNX << BR::MechAttachShift), dx, dy, dz);
+            if (dx != -1) ok = false;
+            BR::mechAttachOffset(quint8(BR::MechAttachOnPZ << BR::MechAttachShift), dx, dy, dz);
+            if (dz != 1) ok = false;
+            BR::mechAttachOffset(quint8(BR::MechAttachOnNZ << BR::MechAttachShift), dx, dy, dz);
+            if (dz != -1) ok = false;
+            BR::mechAttachOffset(0, dx, dy, dz);
+            if (dx != 0 || dy != -1 || dz != 0) ok = false; // 贴地 → 支撑在下方
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| mech per-attach geometry: floor=flat-thin-box, wall=flush-to-support, decode parity (t744)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

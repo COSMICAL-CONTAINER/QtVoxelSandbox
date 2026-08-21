@@ -502,6 +502,19 @@ public:
     // 无 state 附着编码可解）。setWaterSilent 已挂 notePowerWrite → 失效段电力即时重算断信号。
     // 去重：球内被炸的粉 blockAt=Air → 不再命中；上方粉清格后复扫不双掉。分层：向下写 World + 发语义信号。
     void dropUnsupportedDustAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed, World *world);
+    // t744① 爆炸失撑机关掉落（Stalker / TNT 两爆炸路径共用）：destroyed 列表内每破坏格扫 6 邻的机关族
+    //   （Lever / WoodButton / StoneButton——附着语义一族），state bit[3:1] 解码其唯一附着格
+    //   （mechAttachOffset），该格已非完整立方（isFullCube——与放置预检同源；爆炸把支撑块炸掉、机关
+    //   本体在球外幸存，含支撑格就是被链式引燃转实体的 TNT）→ setWaterSilent 清机关 + 恒发
+    //   explosionDroppedItem（支撑脱落是必然事件，不走 ~50% 破坏掉落概率门；机制等价 MC 爆炸震落
+    //   附着机关）。同玩家挖支撑块的 PlayerController::dropUnsupportedMechAround 语义（爆炸版）。
+    //   去重：球内被炸的机关 blockAt=Air → 不再命中；邻格清后复扫不双掉（机关无碰撞不撑他机关 → 无级联）。
+    //   分层：向下写 World（setWaterSilent）+ 发语义信号。dropUnsupportedMechAroundCell 是其单格版
+    //   （水下链式引燃路径复用——该路径 destroyed 为空但 clearBlockSilent 清 TNT 格同样使机关失撑）。
+    void dropUnsupportedMechAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed, World *world);
+    // t744① 单格版：扫 (x,y,z) 的 6 邻机关族失撑掉落（AfterBlast 逐破坏格调它；水下链式引燃的
+    //   clearBlockSilent 后单独调——那格不在 destroyed 列表里）。
+    void dropUnsupportedMechAroundCell(int x, int y, int z, World *world);
     // t490 第 i 个实体是否 PrimedTnt（kind==FallingBlock && primed）。QML delegate 据它对 FallingBlock 叠白闪脉冲
     //   （primed=true → baseColor 白闪；false → 普通下落方块原色）。越界 / 非 primed → false。
     Q_INVOKABLE bool isPrimedAt(int i) const;

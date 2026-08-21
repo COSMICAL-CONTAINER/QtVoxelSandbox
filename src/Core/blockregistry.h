@@ -2076,10 +2076,12 @@ public:
     static constexpr quint8 MechAttachMask     = 0x0E;   // bit[3:1] 掩码
     // 附着面取值（state >> MechAttachShift & 3 bit 后的 0..4；**语义 = 支撑块相对机关格的方向**）。
     static constexpr int MechAttachFloor = 0; // 贴地（支撑在下方）：机关立于所点方块顶面
-    static constexpr int MechAttachOnPX  = 1; // 支撑在 +X 邻（机关贴本格 x=0 面，挂 +X 墙的 -X 侧）
-    static constexpr int MechAttachOnNX  = 2; // 支撑在 -X 邻（机关贴本格 x=1 面）
-    static constexpr int MechAttachOnPZ  = 3; // 支撑在 +Z 邻（机关贴本格 z=0 面）
-    static constexpr int MechAttachOnNZ  = 4; // 支撑在 -Z 邻（机关贴本格 z=1 面）
+    // 机关贴墙面 = mechBoxes 厚边所在的格边（t705 修后厚边贴**支撑侧**；旧注释「x=0 / z=0 面」是 t705
+    //   修复前的镜像错版描述——按它写代码会复现「贴墙出现在墙背面悬空」，t744 ②逐态核对时勘误）。
+    static constexpr int MechAttachOnPX  = 1; // 支撑在 +X 邻 → 机关贴本格 x=1 面
+    static constexpr int MechAttachOnNX  = 2; // 支撑在 -X 邻 → 机关贴本格 x=0 面
+    static constexpr int MechAttachOnPZ  = 3; // 支撑在 +Z 邻 → 机关贴本格 z=1 面
+    static constexpr int MechAttachOnNZ  = 4; // 支撑在 -Z 邻 → 机关贴本格 z=0 面
     // t662 机关附着面解码：state → 支撑块相对偏移（dx/dy/dz）。越界值（>4）兜底贴地（防御脏 state）。
     //   playercontroller 失撑掉落（dropUnsupportedMechAround，同 torch/ladder 模式）与放置写入
     //   （mechAttachFromNormal 命中面法线 → 附着值）共用，单一权威。

@@ -2905,6 +2905,11 @@ void PlayerController::placeBlock()
                 if (BlockRegistry::isTnt(tb)) {
                     m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
                     m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸不链式）
+                    // t744① 机关失撑掉落：TNT 变引燃态实体后其格已清 —— 附着在该 TNT 上的按钮/拉杆
+                    //   （state 编码唯一支撑 = 本格）不得悬空残留，立即按 t662 失撑语义掉落（用户实测
+                    //   「按钮放 TNT 上、右键激活后按钮悬在原地」）。机制等价 MC 支撑方块消失 → 附着
+                    //   机关脱落；同火把 t214 / 木梯 t501 的「静默清路径也要扫失撑」补口。
+                    dropUnsupportedMechAround(tx, ty, tz);
                 } else if (BlockRegistry::isDispenser(tb) || BlockRegistry::isDropper(tb)) {
                     fireDispenserAt(tx, ty, tz, tb); // t628 发射器/投掷器：per-dispenser 冷却 + state 朝向发射
                 }
@@ -4704,6 +4709,9 @@ void PlayerController::scanTntTraps()
             if (BlockRegistry::isTnt(m_world->blockAt(tx, ty, tz))) {
                 m_world->clearBlockSilent(tx, ty, tz); // 移除 TNT 方块（点火专用静默清，绕过 occ 守卫）
                 m_entityManager->spawnPrimedTnt(tx, ty, tz); // 点燃（默认 fuse；爆炸链式传播）
+                // t744① 压力板点燃路径同右键机关路径：TNT 格被静默清 → 附着其上的按钮/拉杆立即失撑
+                //   掉落（同 t662 语义；clearBlockSilent 不经 finishMiningAt 的失撑扫描故须显式补）。
+                dropUnsupportedMechAround(tx, ty, tz);
                 break; // 本板单点点燃（链式引爆覆盖其余邻 TNT）
             }
         }
@@ -4950,6 +4958,9 @@ void PlayerController::firePowerTnt(int x, int y, int z)
     if (!BlockRegistry::isTnt(m_world->blockAt(x, y, z))) return; // 已非 TNT → no-op（防双触发）
     m_world->clearBlockSilent(x, y, z);             // 移除 TNT 方块（点火专用静默清）
     m_entityManager->spawnPrimedTnt(x, y, z);       // 点燃（默认 fuse；爆炸链式传播）
+    // t744① 红石电力点燃路径同右键机关 / 压力板路径：TNT 格被静默清 → 附着其上的按钮/拉杆立即
+    //   失撑掉落（同 t662 语义；clearBlockSilent 不经 finishMiningAt 的失撑扫描故须显式补）。
+    dropUnsupportedMechAround(x, y, z);
 }
 
 // t658 红石电力触发发射器 / 投掷器（powerDispenserTriggered → Main.qml 转发；见头注释）。该格仍是
