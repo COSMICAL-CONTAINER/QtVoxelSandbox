@@ -290,14 +290,15 @@ public:
     //   （§9 区隔）。达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
     Q_INVOKABLE int spawnFireball(const QVector3D &origin, const QVector3D &vel);
     // t729 暗渊之眼投射物（玩家右键 EndEyeId 掷出；机制等价 MC 1.0 末影之眼 ender eye —— 右键掷出寻路要塞）：
-    //   在 origin 处生成携带 3D 速度 vel（blocks/s，**直线**朝最近要塞末地传送门，速度 ~kEnderEyeSpeed=4）的
+    //   在 origin 处生成携带 3D 速度 vel（blocks/s，初速朝最近要塞末地传送门方向，速度 ~kEnderEyeSpeed=4）的
     //   小绿瞳珠实体。kind=EnderEye、pushable=false（玩家走碰不推）、halfW/halfH=0.16（小珠视觉 + 碰撞最小）。
     //   entity.enderEyeDistLeft = 随机 [kEnderEyeDistMin(10), Max(16)] 剩余飞行距离（blocks）→ tick 递减，<=0 即
     //   「判定结算」：80%（kEnderEyeDropChance）→ emit enderEyeBecameItem（呈现层转发 ItemEntityManager.spawnItem
     //   生成**掉落物实体**，可捡回 —— 机制等价 MC 末影之眼落地变掉落物）+ 移除；20% → 进入碎裂态（enderEyeShatter
     //   倒计 kEnderEyeShatterTime，QML 播缩小淡出 + 玻璃碎裂粒子）→ 归零移除**无掉落**。vx/vy/vz 复用 3D 速度
-    //   （不走 Mob 击退衰减分支，无冲突）。方向由 Game 层据 strongholdPortal 算（直线朝要塞）。达 kCap → 跳过 +
-    //   告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
+    //   （不走 Mob 击退衰减分支，无冲突）。t757：飞行目标改两段式（远=升空指示 / 近=下探逼近，见 tick 分支），
+    //   vel 只作初速（tick 内转向平滑接管），spawn 另记 enderEyeCruiseY = origin.y()+kEnderEyeClimbHeight。
+    //   达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
     Q_INVOKABLE int spawnEnderEye(const QVector3D &origin, const QVector3D &vel);
     // t729 供 QML delegate 判「暗渊之眼是否碎裂态」（enderEyeShatter>0 → 播缩小淡出 + 玻璃碎裂粒子动画，规避
     //   了「碎裂瞬间即移除 → 动画播不出」的呈现问题；动画由 delegate 播，C++ 延迟 kEnderEyeShatterTime 才释放
@@ -926,8 +927,11 @@ private:
         //   enderEyeShatter  >0 = 碎裂态倒计时（秒；tick 递减，期间 QML delegate 播缩小淡出 + 玻璃碎裂粒子动画
         //   （shatteringAt=true），归零 → 释放槽（无掉落物）。延迟移除让动画可见（同 mob deathTimer 窗口模式）。
         //   vx/vy/vz 复用作 EnderEye 3D 飞行速度（同 Arrow / Snowball / Fireball 复用约定，不走 Mob 击退衰减）。
+        //   t757 两段式新增 enderEyeCruiseY = 远段巡航高度（blocks；spawn 时 = 掷出眼位 Y + kEnderEyeClimbHeight。
+        //   远段（水平距传送门 > kEnderEyeNearDist）未到该高度前带爬升分量，到达后平飞，绝不向下；近段不读它）。
         float enderEyeDistLeft = 0.0f; // 剩余飞行距离（blocks；仅 kind==EnderEye 用）
         float enderEyeShatter = 0.0f;  // 碎裂态倒计时（秒；仅 kind==EnderEye 用；>0 = 正在碎裂动画，归零移除）
+        float enderEyeCruiseY = 0.0f;  // t757 远段巡航高度（blocks；仅 kind==EnderEye 远段用，spawn 时定死不随地形变）
         float suffocationTimer = 0.0f; // t254 窒息累积计时（头部嵌实体方块时累加，每 kSuffocationInterval 秒扣 1HP；机制同玩家 t160）
         float cactusDamageTimer = 0.0f; // t394 仙人掌接触伤害累积（mob AABB 接触 Cactus 时累加，每 kCactusDamageInterval 扣 1HP；离开归零）
         // t281 敌对 AI 态（仅 hostile=true 的 Mob 用；passive / FallingBlock 留默认不触发）：
@@ -1726,20 +1730,33 @@ private:
     static constexpr int   kFireballIgniteChance  = 20;    // 方块命中点燃概率（%）
     // t729 暗渊之眼投射物常量（机制等价 MC 1.0 末影之眼 ender eye：右键掷出、直线寻路要塞、飞距后落地变掉落物 /
     //   小概率碎裂无掉落）。数值为本工程小世界量身调，非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）：
-    //   - kEnderEyeSpeed：飞行速度（blocks/s；直线朝要塞传送门，玩家可侧身看它飞）。
+    //   - kEnderEyeSpeed：飞行速度（blocks/s；恒定模长，两段共用，玩家可侧身看它飞）。
     //   - kEnderEyeDistMin / Max：飞行判定距离随机带（blocks；飞这么多后判定 —— 机制等价 MC 末影之眼飞行一段后
     //     落地/碎裂，玩家据此逐步逼近要塞）。取 10..16：短跳虽够玩家跟追逐步逼近，又不横穿整张地图。
     //   - kEnderEyeDropChance：判定后「变掉落物」概率（80%，机制等价 MC 末影之眼大部分落地变掉落物可回收；
     //     20% 碎裂无掉落，防无限回收刷分 + 让「碎掉」这一结果存在）。
     //   - kEnderEyeShatterTime：碎裂动画窗口（秒；C++ 延迟移除，QML 在此窗口播缩小淡出 + 玻璃碎裂粒子）。
     //   - kEnderEyeHalfDim：半宽 / 半高（blocks；小绿瞳珠视觉 + 碰撞最小）。
+    //   t757 两段式定位（远指示 / 近逼近）：旧版掷出即直线朝地下传送门中心钻，远处玩家看不出方向指示还易丢眼；
+    //   改两段 —— 眼与传送门**水平距离** > kEnderEyeNearDist 时只升空平飞朝要塞方向指示（绝不向下钻地），
+    //   进入阈值内才恢复「朝传送门中心直线逼近（可下探）」。飞距判定（distLeft 递减 → 80/20 结算）两段通用不变：
+    //   - kEnderEyeNearDist：两段切换水平距离阈值（blocks；~50 格内要塞方向已明确，转入下探逼近段。取 50：
+    //     指示段足够长（本工程地图尺度）且逼近段覆盖结构外围，可调）。
+    //   - kEnderEyeClimbHeight：远段巡航高度 = 掷出眼位 Y + 本值（blocks；升到玩家上方合理高度后平飞 ——
+    //     树冠/丘陵之上、可远距目视的指示高度）。
+    //   - kEnderEyeTurnRate：每 tick 速度方向向目标方向指数趋近的速率（1/秒；帧率无关 blend = 1−exp(−rate·dt)）。
+    //     两段切换（50 格阈值）方向突变由它平滑成圆弧；取舍：单参数指数趋近同时覆盖「初速修正 / 阈值切换 /
+    //     阈值邻域抖动（来回穿越时方向连续）」三类过渡，免掉专用插值带 + 额外常量。
     static constexpr float kEnderEyeSpeed        = 4.0f;  // 暗渊之眼飞行速度（blocks/s）
     static constexpr float kEnderEyeDistMin      = 10.0f; // 判定飞行距离下界（blocks）
     static constexpr float kEnderEyeDistMax      = 16.0f; // 判定飞行距离上界（blocks）
     static constexpr int   kEnderEyeDropChance   = 80;    // 判定后变掉落物概率（%）
     static constexpr float kEnderEyeShatterTime  = 0.6f;  // 碎裂动画窗口（秒；延迟移除让动画可见）
     static constexpr float kEnderEyeHalfDim      = 0.16f; // 暗渊之眼半宽/半高（blocks）
-    static constexpr float kEnderEyeRiseOff      = 0.25f; // 飞行略升垂直偏置（blocks；每 tick 加的向上分量，机制等价 MC 末影之眼飞行略升）
+    static constexpr float kEnderEyeRiseOff      = 0.25f; // 飞行略升垂直偏置（blocks/s；t757 起仅保留在掷出初速方向里（Game 层 +0.25 上偏），tick 不再叠加 —— 远段爬升已并入两段转向）
+    static constexpr float kEnderEyeNearDist     = 50.0f; // t757 两段切换水平距离阈值（blocks；>50 远段升空指示 / ≤50 近段下探逼近）
+    static constexpr float kEnderEyeClimbHeight  = 8.0f;  // t757 远段巡航高度 = 掷出眼位 Y + 8（blocks；玩家上方合理指示高度）
+    static constexpr float kEnderEyeTurnRate     = 6.0f;  // t757 速度方向趋近速率（1/s；指数平滑，两段切换圆弧过渡）
     static constexpr float kIronGolemDetectRange   = 12.0f; // 铁傀儡敌对侦测范围（blocks；XZ）
     static constexpr float kIronGolemAttackRange   = 2.0f;  // 铁傀儡近战攻击 XZ 距离（blocks）
     static constexpr int   kIronGolemAttackDamage  = 8;     // 铁傀儡重拳伤害（HP；高伤害）

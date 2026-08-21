@@ -3697,11 +3697,14 @@ Window {
         Texture { id: mobEmberlingTex; source: "qrc:/textures/entity_emberling.png"; generateMipmaps: false }
         // t729 暗渊之眼（EnderEye）：小绿瞳珠实体贴图（build_mob.py 程序生成 16×16 entity_endereye.png —— 深绿珠身 +
         //   暗绿竖瞳 + 白高光，对齐 EndEyeId 0x23A 材料段图标观感，§9a 原创不照搬 MC）。EnderEye 小珠 delegate 全脸
-        //   [0,1]² 铺整张。pack 命中 ender_eye.png 时切包内 item 贴图（endereyePackTex）；pack 关 → 本程序图。
+        //   [0,1]² 铺整张。t757 改**满幅不透明**（旧版「圆珠 + 透明四角」在默认 alphaMode 的不透明 pass 下不吃
+        //   alpha，透明素落贴图 RGB 原值 → 黑角块 / pack 图标白块；满幅后任何 alpha 语义下都是整面绿珠）。
+        //   pack 命中 ender_eye.png 时切包内 item 贴图（endereyePackTex）；pack 关 / 包缺 → 本程序图。
         Texture { id: endereyeTex; source: "qrc:/textures/entity_endereye.png"; generateMipmaps: false }
         // t729 暗渊之眼 pack 实体贴图（item/ender_eye.png）：pack 启用且 resourcePack.itemIconSource(0x23A) 命中包内
         //   ender_eye item 图 → source 为 file:/// URL（alpha-test 透明底小眼珠，机制等价 MC 末影之眼观感）；pack 关 /
-        //   包缺 → source 空 → delegate 回退 endereyeTex（程序生成小绿瞳珠）。同其他 pack 实体贴图两级探测语义。
+        //   包缺 → source 空 → delegate 回退 endereyeTex（程序生成小绿瞳珠）。同其他 pack 实体贴图两级探测语义
+        //   （t497 QUrl 判空铁律：Texture.source 是 QUrl —— 判空走 .source.toString().length，.length 恒 undefined）。
         Texture { id: endereyePackTex; source: resourcePack.active ? resourcePack.itemIconSource(0x23A) : ""; generateMipmaps: false }
         // t727 夜行者眼睛发光层：透明底 + 亮紫白竖眼（build_mob.py 程序生成）。QML 顶层小盒铺这张（MobModel 头
         //   前上层）—— 机制等价末影人魅眼（§9 原创配色）。pack 命中 enderman_eyes 时切 pack 贴图（见下）。
@@ -6945,6 +6948,8 @@ Window {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: "#e8dcff" // 紫白魅眼底色（NoLighting 恒亮——夜里也醒目）
                                             // pack 命中 enderman_eyes → 贴图竖眼；否则程序生成 mob_nightwalker_eyes。
+                                            // t757 注：UnitCube 补 TexCoord0 后本贴图才真正上几何（旧版无 UV，
+                                            //   眼层实际只显 baseColor 兜底紫白条 —— 同暗渊之眼白块同根因）。
                                             baseColorMap: nightwalkerEyesPackTex.source.toString().length > 0 ? nightwalkerEyesPackTex : mobNightwalkerEyesTex
                                             alphaMode: PrincipledMaterial.Mask // 透明底 → 只显紫白竖眼（裁掉透明）
                                             alphaCutoff: 0.5
@@ -7940,7 +7945,15 @@ Window {
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
                                     // t729 pack 命中 → item ender_eye 贴图；pack 关 → entity_endereye 小绿瞳珠。
+                                    // t757 白贴图修复：① UnitCube 补 TexCoord0（旧版无 UV 属性，贴图材质采样未定义
+                                    //   → 白块/丢贴图）；② entity_endereye 改满幅不透明（透明四角在不透明 pass 落
+                                    //   RGB 原值）；③ alphaMode Mask —— pack item 图标是透明底 PNG，默认 alphaMode
+                                    //   不做裁剪（透明素吃 RGB 原值，多为白），Mask 裁掉 alpha<cutoff 素只显眼珠
+                                    //   （同 t727 夜行者眼层先例）。三态（pack 命中 / 关 / 边界 miss）都渲染正确：
+                                    //   满幅程序图全 alpha=1 不受 Mask 影响，pack 图标被裁成小眼珠。
                                     baseColorMap: endereyePackTex.source.toString().length > 0 ? endereyePackTex : endereyeTex
+                                    alphaMode: PrincipledMaterial.Mask
+                                    alphaCutoff: 0.5
                                 }
                             }
                         }

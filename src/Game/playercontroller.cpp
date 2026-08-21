@@ -3085,7 +3085,7 @@ void PlayerController::placeBlock()
     }
     // t729 暗渊之眼掷出（用户「直接右键的话是可以放出来生成他的实体，一样的贴图，并且会飞向最近的地下要塞结构的
     //   地方，就是那个3×3的传送门的地方移动一定的距离之后...重新变化为掉落物，或者直接碎掉」；机制等价 MC 1.0
-    //   末影之眼 ender eye）：手持 EndEyeId（0x23A，t726 合成产物）右键 → 从眼位朝**最近要塞末地传送门**直线掷出
+    //   末影之眼 ender eye）：手持 EndEyeId（0x23A，t726 合成产物）右键 → 从眼位朝**最近要塞末地传送门**掷出（t757 两段式：远段升空指示 / 近段下探，初速方向随段取）
     //   暗渊之眼（EntityManager::spawnEnderEye），速度 ~kEnderEyeUseSpeed=4（EntityManager::kEnderEyeSpeed 是 private
     //   不能跨层读，故本层自定同值常量，同箭/雪球本地常量模式）。朝向 = player眼位 → world.strongholdPortal* 中心格
     //   的水平方向 + 略向上偏置（机制等价 MC 末影之眼飞行略升）→ 归一化 × 速度。World::hasStronghold() 无要塞（世界
@@ -3096,21 +3096,36 @@ void PlayerController::placeBlock()
     //   不耗。分层：掷出属 Game/Physics（读视线 + 查 World::strongholdPortal* + 调 EntityManager），不改栅格语义。
     if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::EndEyeId) {
         constexpr float kPlayerEyeUseSpeed = 4.0f; // 玩家掷暗渊之眼速度（blocks/s；同 EntityManager::kEnderEyeSpeed）
+        constexpr float kPlayerEyeNearDist = 50.0f; // t757 两段切换阈值（blocks；同 EntityManager::kEnderEyeNearDist —— private 跨层不可读，同值自定，同上常量先例）
         const QVector3D eye = position();
-        // 目标 = 最近要塞末地传送门中心格（player脚位高度居中 + 中心格 → 朝其中心飞）。
-        QVector3D target;
-        if (m_world->hasStronghold())
-            target = QVector3D(float(m_world->strongholdPortalX()) + 0.5f,
-                               float(m_world->strongholdPortalY()),
-                               float(m_world->strongholdPortalZ()) + 0.5f);
-        else
-            target = eye + lookDirection(); // 无要塞（世界未建 / 空）→ 任意方向（兜底不崩）
-        QVector3D dir = target - eye;
+        // 初速方向（t757 两段式）：有要塞时按掷出点水平距离分段 —— 远段 = 水平朝传送门 + 单位爬升分量
+        //   （初速即远段目标方向，EntityManager tick 的转向平滑只做微修正，避免头几帧朝地下俯冲）；近段 =
+        //   朝传送门中心 + 略升偏置（t729 近段语义保留）。无要塞 / 就在传送门正上方（水平距 ~0）→ 视线朝向
+        //   任意方向（兜底不崩）。
+        QVector3D dir;
+        bool haveDir = false;
+        if (m_world->hasStronghold()) {
+            const float pdx = float(m_world->strongholdPortalX()) + 0.5f - eye.x();
+            const float pdz = float(m_world->strongholdPortalZ()) + 0.5f - eye.z();
+            const float horizDist = std::sqrt(pdx * pdx + pdz * pdz);
+            if (horizDist > 1e-3f) {
+                if (horizDist > kPlayerEyeNearDist) {
+                    // 远段：水平单位向量 + 爬升分量 1.0（与水平 1:1 ≈ 45° 起爬，对齐 EntityManager 远段满爬公式）
+                    dir = QVector3D(pdx / horizDist, 1.0f, pdz / horizDist).normalized();
+                } else {
+                    // 近段：直线朝传送门中心 + 略升（机制等价 MC 末影之眼飞距略升；tick 已不叠加，仅此初速含）
+                    dir = QVector3D(pdx, float(m_world->strongholdPortalY()) - eye.y(), pdz).normalized();
+                    dir.setY(dir.y() + 0.25f);
+                    dir = dir.normalized();
+                }
+                haveDir = true;
+            }
+        }
+        if (!haveDir)
+            dir = lookDirection(); // 兜底：无要塞 / 水平距 ~0 → 任意方向
         const float dlen = dir.length();
         if (dlen > 1e-3f) {
-            dir = dir / dlen;
-            dir.setY(dir.y() + 0.25f); // 飞行略升（机制等价 MC 末影之眼飞距略升；EntityManager tick 亦加 kEnderEyeRiseOff）
-            const QVector3D vel = dir.normalized() * kPlayerEyeUseSpeed;
+            const QVector3D vel = dir / dlen * kPlayerEyeUseSpeed;
             m_entityManager->spawnEnderEye(eye + lookDirection() * 0.5f, vel); // origin = 眼位 + 视前移 0.5（防贴墙入墙）
             if (m_mode != Creative)
                 m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 暗渊之眼（创造不耗）

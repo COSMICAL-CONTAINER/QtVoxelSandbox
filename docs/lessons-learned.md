@@ -785,6 +785,32 @@
 
 ---
 
+## 共享几何缺 UV 属性 → 贴图材质采样未定义（白块）；透明底贴图须 alphaMode Mask（t757 验证）
+
+> 元原则：**QQuick3DGeometry 只写 PositionSemantic（无 TexCoord0 属性）时，带 baseColorMap 的材质在其上
+> 采样是未定义行为**（本工程实测：贴图不应用 / 材质回退纯色——baseColor 默认白 → 「纯白无贴图」）。
+> 纯色材质用户不读 UV → 行为不变 → 缺陷长期潜伏，直到某个任务第一次给该几何上贴图才爆。**叠加因子：
+> 默认 alphaMode（Default）+ opacity 1 + 无 blendMode → 模型走不透明 pass、混合关闭，贴图 alpha 不生效，
+> 透明素直接落其 RGB 原值**——程序生成 PNG 透明区 RGB 多为 (0,0,0)（黑角），pack item 图标透明区 RGB 常为白
+> （白块）。两层叠加 = 「同一 delegate，程序图黑角 / pack 图白块」的组合症状。
+
+- **判别信号**：(1) 实体贴图「纯白 / 无贴图」，但 PNG 像素实测正常、qrc/CMake 注册正常、QML 判空绑定
+  （`.source.toString().length`）正确——静态链全绿仍白；(2) 全工程 grep 该几何的贴图消费者**唯二且全异常**
+  （其余用户全是纯色）；(3) 透明底贴图（item 图标复用为实体贴图）在不透明方块面上出现整面白 / 黑。
+- **修法**：共享几何补 `TexCoord0Semantic`（每面 [0,1]²，stride 扩 5 float；顶点位置不动 → 纯色用户零影响，
+  t757 UnitCube 先例）；或改用自带 UV 的既有盒几何（MinecartBox / BlockCube / ArmorLayerBox 族）。透明底
+  贴图材质补 `alphaMode: Mask; alphaCutoff: 0.5`（t727 夜行者眼层先例）；程序生成实体贴图一律**满幅不透明**
+  （圆珠+透明四角这种「好看」的 alpha 在全脸 UV 方块上没有意义）。
+- **同族风险**：任何「往纯色几何上第一次接贴图」的任务，先确认几何声明了 UV；「item 图标当实体贴图用」
+  （pack 命中路径）必配 Mask；夜行者眼层（t727）即同根因——被 baseColor 兜底色遮住两年没人发现，
+  UnitCube 补 UV 后才真正显出贴图竖眼。
+- **自测门槛**：改共享几何后除编译外，至少启动 exe 跑一帧含「该几何 + 贴图」的场景；「白块」类视觉缺陷
+  编译期全绿，只有像素能证明。
+- **证据**：t757 暗渊之眼白块——UnitCube（t31 起 Position-only）+ entity_endereye.png（16×16 透明底圆珠）；
+  修后满幅绿珠 + Mask，pack 命中 / 关 / 边界 miss 三态正常。
+
+---
+
 ## QML / QtQuick
 
 - **QtQuick3D 嵌套结构里材质（PrincipledMaterial 等）作用域的 `parent` 解析到**外层 Model**（材质的 3D 父节点，

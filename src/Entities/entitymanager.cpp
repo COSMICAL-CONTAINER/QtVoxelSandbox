@@ -544,11 +544,13 @@ void EntityManager::flushPendingShots()
     }
     m_pendingArrows.clear();
 }
-// t729 生成暗渊之眼投射物（玩家右键 EndEyeId 掷出；见头文件注释）：存 origin + 3D 速度 vel（blocks/s，直线弹道
-//   朝要塞传送门）+ kind=EnderEye + pushable=false + halfW/halfH=0.16（小绿瞳珠小体视觉 + 碰撞最小；命中检测走
-//   距离判定不读 halfW）。entity.enderEyeDistLeft = 随机 [kEnderEyeDistMin,Max]（10..16）剩余飞行距离 → tick 递减
-//   归零结算；enderEyeShatter=0（飞行态）。vx/vy/vz 复用 3D 速度（如 spawnFireball）。bump revision → QML Repeater
-//   追加 delegate（EnderEye 分支小绿瞳珠 Model）。达 kCap → 跳过 + 告警（防溢出）。返新槽索引（调试用）；达 kCap → -1。
+// t729 生成暗渊之眼投射物（玩家右键 EndEyeId 掷出；见头文件注释）：存 origin + 3D 速度 vel（blocks/s，初速方向
+//   由 Game 层算；t757 两段式接管后 vel 仅作初速，tick 内转向平滑修正）+ kind=EnderEye + pushable=false +
+//   halfW/halfH=0.16（小绿瞳珠小体视觉 + 碰撞最小；命中检测走距离判定不读 halfW）。entity.enderEyeDistLeft =
+//   随机 [kEnderEyeDistMin,Max]（10..16）剩余飞行距离 → tick 递减归零结算；enderEyeShatter=0（飞行态）；
+//   enderEyeCruiseY = origin.y()+kEnderEyeClimbHeight（t757 远段巡航高度）。vx/vy/vz 复用 3D 速度（如
+//   spawnFireball）。bump revision → QML Repeater 追加 delegate（EnderEye 分支小绿瞳珠 Model）。达 kCap →
+//   跳过 + 告警（防溢出）。返新槽索引（调试用）；达 kCap → -1。
 int EntityManager::spawnEnderEye(const QVector3D &origin, const QVector3D &vel)
 {
     if (m_liveCount >= kCap) {
@@ -568,6 +570,9 @@ int EntityManager::spawnEnderEye(const QVector3D &origin, const QVector3D &vel)
     e.enderEyeDistLeft = kEnderEyeDistMin
         + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kEnderEyeDistMax - kEnderEyeDistMin);
     e.enderEyeShatter = 0.0f; // 飞行态（非碎裂）
+    // t757 远段巡航高度：掷出眼位 + kEnderEyeClimbHeight（spawn 定死不随地形变 —— 眼睛无方块碰撞，
+    //   平飞穿山可接受；换算依据是「玩家上方的指示高度」而非地表，故以掷出点为基准最直观）。
+    e.enderEyeCruiseY = origin.y() + kEnderEyeClimbHeight;
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -4660,12 +4665,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             continue; // Fireball 不走 Mob AI / resting / 击退衰减
         }
 
-        // --- EnderEye（t729 暗渊之眼投射物）：直线朝要塞飞行 + 略升 + 飞距结算（变掉落物 / 碎裂无掉落）---
-        //   机制等价 MC 1.0 末影之眼 ender eye：右键掷出 → 直线寻路要塞（速度 ~kEnderEyeSpeed=4，玩家可侧身看它
-        //   飞）→ 飞行一段后判定：80% 变**掉落物实体**（emit enderEyeBecameItem，可捡回）、20% 碎裂（缩小淡出 +
-        //   玻璃碎裂粒子，无掉落）。本分支两态：飞行态（enderEyeShatter==0，直线位移 + 略升 + distLeft 递减）/
-        //   碎裂态（enderEyeShatter>0，仅倒计，QML delegate 播动画；归零释放槽无掉落）。无重力（非抛物）、无方块
-        //   碰撞（短跳穿破空气，机制等价 MC 末影之眼透过地形感应要塞；豆腐脑如穿墙亦可接受，距离短）。
+        // --- EnderEye（t729 暗渊之眼投射物；t757 两段式定位）：寻路要塞 + 飞距结算（变掉落物 / 碎裂无掉落）---
+        //   机制等价 MC 1.0 末影之眼 ender eye：右键掷出 → 寻路要塞（t757 远段升空平飞指示 / 近段下探逼近，
+        //   速度 ~kEnderEyeSpeed=4，玩家可侧身看它飞）→ 飞行一段后判定：80% 变**掉落物实体**（emit
+        //   enderEyeBecameItem，可捡回）、20% 碎裂（缩小淡出 + 玻璃碎裂粒子，无掉落）。本分支两态：飞行态
+        //   （enderEyeShatter==0，两段转向 + 位移 + distLeft 递减）/ 碎裂态（enderEyeShatter>0，仅倒计，QML
+        //   delegate 播动画；归零释放槽无掉落）。无重力（非抛物）、无方块碰撞（机制等价 MC 末影之眼透过地形
+        //   感应要塞；豆腐脑如穿墙亦可接受，距离短）。
         if (e.kind == EnderEye) {
             if (e.enderEyeShatter > 0.0f) {
                 // 碎裂态：倒计时（QML delegate 据 shatteringAt 播缩小淡出 + 玻璃碎裂粒子动画），归零 → 释放槽
@@ -4678,11 +4684,52 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
                 continue; // 碎裂态不走飞行 / Mob AI / resting
             }
-            // 飞行态：直线位移（速度恒定 ~kEnderEyeSpeed）+ **略升**（kEnderEyeRiseOff 向上偏置，机制等价 MC 末影
-            //   之眼飞行时微微抬升）+ 剩余距离递减（按速度长度，非仅水平）。
+            // 飞行态（t757 两段式）：每 tick 先按段算「目标方向」，再把当前速度方向向它指数趋近（平滑转向），
+            //   然后恒速 kEnderEyeSpeed 位移 + 剩余距离递减（按速度模长；两段通用不动）。
+            //   远段（与传送门水平距离 > kEnderEyeNearDist=50）：目标 = 水平朝要塞 + 未达巡航高度
+            //   （enderEyeCruiseY = 掷出眼位 + 8）时带爬升分量（缺口 >3 格满爬 1.0，与水平 1:1 ≈ 45°；临近
+            //   线性收敛到 0 → 平飞），垂直分量恒 >= 0 —— **绝不向下钻地**。旧版直线朝地下传送门中心钻，远处
+            //   玩家看不出方向指示还容易把眼丢进地形里；本段让眼升到玩家上空朝要塞平飞 = 空中方向指示。
+            //   平飞穿山可接受（眼睛本就无方块碰撞，机制等价「透过地形感应要塞」）。
+            //   近段（≤ 50）：目标 = 传送门中心方向（可下探逼近结构 —— t729 寻路语义保留，无缝衔接远段）。
+            //   无要塞（世界未建 / 空存档）：不算目标方向 → 保持 spawn 初速直线飞（Game 层初速已含 +0.25 略升
+            //   偏置，兜底不崩，同旧版行为；kEnderEyeRiseOff 由此只在初速里生效，tick 不再叠加）。
+            if (world->hasStronghold()) {
+                const float pdx = float(world->strongholdPortalX()) + 0.5f - e.pos.x();
+                const float pdz = float(world->strongholdPortalZ()) + 0.5f - e.pos.z();
+                const float horizDist = std::sqrt(pdx * pdx + pdz * pdz);
+                QVector3D desired;
+                if (horizDist > kEnderEyeNearDist) {
+                    // 远段：水平单位向量 + 爬升分量（缺口 >3 满爬 / 0..3 线性收敛 / 负值截 0 —— 绝不向下）
+                    const float gap = e.enderEyeCruiseY - e.pos.y();
+                    const float climb = gap > 3.0f ? 1.0f : std::max(gap, 0.0f) / 3.0f;
+                    desired = QVector3D(pdx / horizDist, climb, pdz / horizDist).normalized();
+                } else {
+                    // 近段：直线朝传送门中心（portalY 取格坐标同 t729 语义，可下探）
+                    desired = QVector3D(pdx,
+                                        float(world->strongholdPortalY()) - e.pos.y(),
+                                        pdz);
+                    const float dl = desired.length();
+                    if (dl > 1e-3f) desired = desired / dl;
+                }
+                // 指数趋近（帧率无关 blend = 1 − exp(−kEnderEyeTurnRate·dt)）：50 格阈值切换 / 初速与目标方向
+                //   的偏差都被平滑成圆弧（阈值邻域来回穿越时方向连续，无硬折角）。归一化后回写恒定模长
+                //   kEnderEyeSpeed —— 速度大小恒定，只转向（distLeft 按模长递减不受影响）。
+                QVector3D curDir(e.vx, e.vy, e.vz);
+                const float cl = curDir.length();
+                if (cl > 1e-4f) curDir = curDir / cl; else curDir = desired;
+                const float blend = 1.0f - std::exp(-kEnderEyeTurnRate * float(dt));
+                QVector3D nd = curDir + (desired - curDir) * blend;
+                const float nl = nd.length();
+                if (nl > 1e-4f) {
+                    nd = nd / nl * kEnderEyeSpeed;
+                    e.vx = nd.x();
+                    e.vy = nd.y();
+                    e.vz = nd.z();
+                }
+            }
             const float spd = std::sqrt(e.vx * e.vx + e.vy * e.vy + e.vz * e.vz);
-            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt) // 审查修 B13：去掉无意义 + 0.0f
-                                   + QVector3D(0.0f, kEnderEyeRiseOff, 0.0f) * float(dt);
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt); // t757：独立 rise 偏置移除（爬升并入远段方向），直线位移不变
             e.pos = next;
             if (spd > 1e-4f) e.enderEyeDistLeft -= spd * float(dt);
             dirty = true;
