@@ -679,8 +679,9 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     // ── t723 铁活板门（IronTrapdoor；机制等价 MC 1.0 iron trapdoor，属性注释见 blockregistry.h Id 枚举行）：
     //   合=水平薄板 / 开=竖直薄板（ShapeTrapdoor，同 WoodTrapdoor 几何 + state 编码）；仅红石驱动开合
     //   （右键无效应）。solid=false / hardness=5.0（金属）、Pickaxe、requiresTool=false（镐加速、空手慢挖
-    //   仍掉）；dropId=自身、maxStack=64。各面=iron_trapdoor(178)（格子板 + 两列栅格孔真透明；走 cutout
-    //   段渲染须 alpha discard——mesher 路由见 chunkgeometry t723 追加）。音色 GroupStone。配方：6 铁锭
+    //   仍掉）；dropId=自身、maxStack=64。大面=iron_trapdoor(178)（格子板 + 四孔栅格真透明；走 cutout
+    //   段渲染须 alpha discard——mesher 路由见 chunkgeometry t723 追加；t742 薄侧边=iron_block(112)）。
+    //   音色 GroupStone。配方：6 铁锭
     //   竖摆 2×3 → 1（工作台；同铁门形状——MC 1.0 实际横摆 3×2 与铁轨冲突，取竖摆避开，dev-plan 注明）。
     /* iron_trapdoor  */ {int(BlockRegistry::IronTrapdoor),     178,178,178,178, false, BlockRegistry::ShapeTrapdoor, 5.0f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::IronTrapdoor),     1, 64, "iron_trapdoor","铁活板门"},
     // ── t724 火焰（Fire；机制等价 MC 1.0 fire，属性注释见 blockregistry.h Id 枚举 Fire 行）：非实体光源格。
@@ -1594,10 +1595,14 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     if (isBed(blockId)) return 15;                    // t457 床 solid=false（低 3D 渲染）但仍是 opaque 实体木床 → 满遮光（同 Farmland/Cactus）
     switch (blockId) {
     case WoodTrapdoor: // 合=满遮（修「合活版门透光」）/ 开=全透
-    case IronTrapdoor: // t723 铁活板门同语义（合=水平满遮 / 开=竖直全透；仅红石开合——state 变化经电力 tick
-                       //   的 m_chunks.setBlock 静默写不触发 recomputeLightAround，开合透光差由下一次邻格
-                       //   光编辑自然收敛；机制等价优先，光照微滞后可接受）
         return (state & 1) ? 0 : 15;
+    case IronTrapdoor: // t742 铁活板门恒全透（区别 WoodTrapdoor 合=15）：贴图栅格孔真透明（cutout 透视），
+                       //   合态若仍满遮 15 → 天光种子柱被本格截断、本格 flood 光压到 0，而孔后邻面（如下方
+                       //   方块顶面）恰采本格光 → 「孔后放方块全黑、只有竖直缝看天光」（t742 修）。恒 0 后
+                       //   孔后邻面采到本格天光 → 孔洞通透可见后方面块贴图/天光（机制等价 MC 非不透明方块
+                       //   lightOpacity 0）；恒值亦免去红石开合 state 翻转的透光差（WoodTrapdoor 特有的
+                       //   微滞后在此不存在）。
+        return 0;
     case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
     case CobbleSlab:   return 7;                      // t412 圆石台阶半遮光（同 WoodSlab，半高占空比 0.5）
     case SpruceSlab:   return 7;                      // t466 云杉台阶半遮光（同 WoodSlab/CobbleSlab，半高占空比 0.5）

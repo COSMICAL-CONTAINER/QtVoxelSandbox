@@ -139,7 +139,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::WoodFence:         return "icon_wood_fence.png";         // 木栅栏：2D 柱档剪影
     case BlockRegistry::WoodDoor:          return "icon_wood_door.png";          // t644 木板门：3D 两格高薄板（--from-pack 上下半贴图，与放置态一致）
     case BlockRegistry::WoodTrapdoor:      return "icon_wood_trapdoor.png";      // 木活板门：3D 薄板
-    case BlockRegistry::IronTrapdoor:      return "icon_iron_trapdoor.png";      // t723 铁活板门：3D 薄板（--from-pack iron_trapdoor 格子板；红石 tab 条目）
+    case BlockRegistry::IronTrapdoor:      return "icon_iron_trapdoor.png";      // t723/t742 铁活板门：3D 薄板（顶面四孔透底 + 铁块侧边，--from-pack trapdoor 模式；红石 tab 条目）
     case BlockRegistry::WoodPressurePlate: return "icon_wood_pressure_plate.png";// 木板压力板：3D 更薄更小
     // t412 圆石变体图标：石质半方块 3D dimetric 立体图标（圆石贴图按实际形状投影，同木制半方块图标流程）。
     case BlockRegistry::CobbleSlab:          return "icon_cobble_slab.png";          // 圆石台阶：3D 半高盒

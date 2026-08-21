@@ -891,9 +891,11 @@ FROM_PACK = [
     ("spruce_door", "door", dict(upper="door_spruce_upper.png", lower="door_spruce_lower.png")),
     # t722 铁门：pack door_iron_upper/lower（HD 128px，1.8 老命名）两格高 3/16 薄板，与放置态一致。
     ("iron_door",   "door", dict(upper="door_iron_upper.png",   lower="door_iron_lower.png")),
-    # t723 铁活板门：合态薄板（全 footprint y[0,3/16]，同 wood_trapdoor 图标形状）；fill=pack iron_trapdoor
-    #   （格子板；栅格孔透明像素 fill 填均色——图标观感为薄板实体，放置态 cutout 透视孔更细）。
-    ("iron_trapdoor", "partial", dict(fill="iron_trapdoor.png", shape="trapdoor")),
+    # t742 铁活板门图标重做（用户「现像厚铁压力板」）：trapdoor 模式 —— 合态薄板（全 footprint
+    #   y[0,3/16]）顶面贴 pack iron_trapdoor（**alpha=keep 保孔洞透明** → 图标即带四孔的活板门造型，
+    #   与放置态 cutout 透视一致；旧 partial 模式 fill 把孔填均色 → 实心薄板观感 = 厚铁压力板）+
+    #   两侧面贴 iron_block（放置态 t742 薄侧边 = 铁块贴图，图标与放置同源）。
+    ("iron_trapdoor", "trapdoor", dict(top="iron_trapdoor.png", side="iron_block.png")),
     # t714 ④木半方块老图标重做（用户「木台阶/栅栏/楼梯等放置贴图对但图标旧」）：wood_slab / wood_stairs /
     #   wood_fence 旧图标是 t163/t169 程序 default_wood（16px 木板）烘的 dimetric——pack 激活时世界放置走
     #   HD oak_planks 而背包还是低清程序木纹 → 观感漂移。本段 partial 模式：pack oak_planks / spruce_planks
@@ -951,9 +953,14 @@ def _partial_y_mid(shape):
 
 def run_from_pack():
     """t644 批量转换入口：遍历 FROM_PACK 表，按方案渲染 pack 贴图图标 → textures/icon_<name>.png。
-    单块 pack 文件缺失 → 跳过该块（保留现有图标）并打印 SKIP（不中断整批）。"""
+    单块 pack 文件缺失 → 跳过该块（保留现有图标）并打印 SKIP（不中断整批）。
+    t742 追加按名过滤：`--from-pack <name> [<name> ...]` 只重生成点名条目（全量批跑会把无关 icon
+    一并重写 → git diff 不可控；点名重生成 = 单任务单图标最小改动面）。"""
+    only = set(a for a in sys.argv[1:] if a != "--from-pack") or None
     for entry in FROM_PACK:
         name, mode, spec = entry
+        if only is not None and name not in only:
+            continue
         try:
             if mode == "flat":
                 img = render_flat_pack(spec)
@@ -1030,6 +1037,15 @@ def run_from_pack():
                                         1.0 / 16.0, 15.0 / 16.0)],
                                       fill, fill,
                                       cy_local=W / 2.0 - (1.0 - 1.0 / 32.0) * v)
+            elif mode == "trapdoor":
+                # t742 铁活板门：合态薄板（y[0,3/16] 全 footprint）；顶面 pack iron_trapdoor 保透明孔
+                #   （load_pack_face alpha="keep" —— 四孔在图标上透底，与放置态 cutout 透视一致），
+                #   两侧面 iron_block（放置态薄侧边铁皮包边，partialblockgeometry t742 per-face 同源）。
+                #   竖直居中同 partial 模式 y_mid 公式（_partial_y_mid("trapdoor")=3/32）。
+                img = render_pack_box(_partial_shape_boxes("trapdoor"),
+                                      load_pack_face(spec["top"], alpha="keep"),
+                                      load_pack_face(spec["side"]),
+                                      cy_local=W / 2.0 - (1.0 - _partial_y_mid("trapdoor")) * v)
             elif mode == "partial":
                 # t714 ④/③ 木半方块 + 叶图标重做：pack fill 贴图按 slab/stairs/fence/cube 真实形状投影
                 #   （render_pack_box 子盒 + depth buffer，同 render_partial_3d 几何但贴图源换 pack）。

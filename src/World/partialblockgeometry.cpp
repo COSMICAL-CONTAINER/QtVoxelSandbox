@@ -345,14 +345,22 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::WoodTrapdoor:
-    case BlockRegistry::IronTrapdoor: { // t723 铁活板门（与 WoodTrapdoor 同几何；tile=iron_trapdoor 178 各面同贴图）
+    case BlockRegistry::IronTrapdoor: { // t723 铁活板门（与 WoodTrapdoor 同几何；大面 tile=iron_trapdoor 178）
         // 合：水平薄板贴地（y[0,0.1875]，全 footprint）。开：竖直薄板贴边（朝向 state[2:1]，0=+X 1=-X 2=+Z 3=-Z）。
         //   t723：铁活板门仅红石开合（bit0 由 World 电力接收器写），朝向位恒放置值 0（+X 贴边，右键无手开
         //   路径不更新朝向——机制等价 MC 1.0 铁活板门开门方向固定）。
+        // t742 铁活板门 per-face 薄侧边 = 铁块贴图（iron_block，同 t722 铁门薄边先例——铁皮包边观感；用户
+        //   「前后左右四侧面应是铁块，而非六面全格子板」）：大面（合态=±Y 顶/底、开态=板面 ±X/±Z 对）保留
+        //   iron_trapdoor 格子板（四孔栅格 cutout 透视只在顶/底大面），四个薄侧边走 iron_block。木活板门
+        //   ironSideTile=-1 → pushBox sideTile 不生效、全面同贴图（零回归，仅铁活板门变）。
         const bool open = (state & 1) != 0;
+        const int ironSideTile = (blockId == BlockRegistry::IronTrapdoor)
+            ? BlockRegistry::tileIndex(BlockRegistry::IronBlock, BlockRegistry::PosX) : -1;
         if (!open) {
+            // 合态水平薄板：大面法线轴 Y（顶/底=格子板）→ sideLargeAxis=1，±X/±Z 四立侧边贴 iron_block。
             pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, 0.1875f, 0.f, 1.f,
-                    tile, light, tileW, hx, hy, v0, v1);
+                    tile, light, tileW, hx, hy, v0, v1,
+                    /*topTile*/-1, /*bottomTile*/-1, ironSideTile, /*sideLargeAxis*/1);
         } else {
             const int facing = (state >> 1) & 3;
             float bx0 = 0.f, bx1 = 1.f, bz0 = 0.f, bz1 = 1.f;
@@ -363,7 +371,12 @@ int PartialBlockGeometry::append(
             case 2: bz0 = t0; bz1 = t1; break; // +Z 边
             case 3: bz0 = s0; bz1 = s1; break; // -Z 边
             }
-            pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.f, 1.f, bz0, bz1, tile, light, tileW, hx, hy, v0, v1);
+            // t742 开态竖直板：大面法线轴 = 板面朝向（薄轴对侧）——thinX（x 薄 3/16）→ 大面 ±X（axis 0）、
+            //   否则大面 ±Z（axis 2）；薄侧边（含顶/底 3/16 窄边）贴 iron_block（同铁门开态板面包边）。
+            const bool thinX = (bx1 - bx0) < 0.5f;
+            pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.f, 1.f, bz0, bz1,
+                    tile, light, tileW, hx, hy, v0, v1,
+                    /*topTile*/-1, /*bottomTile*/-1, ironSideTile, thinX ? 0 : 2);
         }
         break;
     }

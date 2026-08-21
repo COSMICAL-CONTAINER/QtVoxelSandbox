@@ -10,8 +10,8 @@ pack 侧 door_iron_upper.png 自带 4 孔窗实测）；下半 = 门板 + 底部
   - door_iron_upper（tile 176）：铁灰门板 + 铆钉列 + **下窗**（2×2 孔格栅——pack 实测窗区在
     中下部）；窗洞 alpha=0 真透明（cutout）。
   - door_iron_lower（tile 177）：铁灰门板 + 铆钉 + 底部横带 + 中央锁孔板（暗孔）。
-  - iron_trapdoor（tile 178）：铁灰格子板——四角铆钉 + 十字格条 + 中部栅格孔（pack 实测
-    两列 3+3 孔；透明孔 cutout 透视）。
+  - iron_trapdoor（tile 178）：铁灰格子板——四角铆钉 + 十字格条 + 四孔栅格（2×2 孔阵，pack 实测
+    同构孔位；透明孔 cutout 透视。t742 对齐 pack 四孔观感——旧 2 列×3 行 6 孔与放置态不一致）。
 
 输出（覆盖写入 textures/）：
   default_door_iron_upper.png  （tile 176，铁门上半：门板 + 下部 2×2 格栅窗）
@@ -127,8 +127,12 @@ def draw_lower():
 
 
 def draw_trapdoor():
-    """铁活板门：铁灰格子板——边框 + 十字格条 + 中部两列栅格孔（真透明，pack 实测构图意图：
-    边框实心、内部 2 列×3 行孔阵）+ 四角铆钉。"""
+    """铁活板门：铁灰格子板——边框 + 中央十字格条 + 四孔栅格（2×2 孔阵真透明，与 pack
+    iron_trapdoor.png 实测孔位同构：16 尺度 x/y ∈ [3,5] 与 [10,12]，3×3 孔）+ 四角铆钉。
+
+    t742 对齐 pack 四孔观感（旧 2 列×3 行 6 孔与 pack 激活时的放置态不一致——无包路径
+    也应显同款四孔格子板）。孔 alpha=0 真透明：cutout 段 discard 透视（引擎配合
+    lightOpacity 恒 0，孔后邻面透光可见）。"""
     c = np.zeros((TS, TS, 4), dtype=np.float64)
     c[..., 0:3] = IRON["plate"]
     c[..., 3] = 255.0
@@ -142,21 +146,20 @@ def draw_trapdoor():
             c[TS - 1 - k, i, 0:3] = IRON["edge"] if k == 0 else IRON["band"]
             c[i, k, 0:3] = IRON["edge"] if k == 0 else IRON["band"]
             c[i, TS - 1 - k, 0:3] = IRON["edge"] if k == 0 else IRON["band"]
-    # 中部栅格孔（2 列 × 3 行，真透明——pack iron_trapdoor.png 实测孔阵位）。
-    for y in (5, 8, 11):
-        for x in (4, 5, 10, 11):
-            c[y, x, 0:3] = IRON["hole"]
-            c[y, x, 3] = 0.0
-    # 中央十字格条（孔阵之间的实心格，压条色）。
-    for y in range(4, 13):
-        for x in (7, 8):
+    # 中央十字格条（孔阵之间的实心分隔，压条色）：竖条 x[6,9]、横条 y[6,9]。
+    for y in range(TS):
+        for x in (6, 7, 8):
             c[y, x, 0:3] = IRON["band"]
-    for x in range(4, 12):
-        for y in (6, 7, 9, 10):
+    for x in range(TS):
+        for y in (6, 7, 8):
             c[y, x, 0:3] = IRON["band"]
-            c[y, x, 3] = 255.0
-    # 四角铆钉（框角内侧 1px 亮点 + 暗晕）。
-    for (rx, ry) in ((3, 3), (TS - 4, 3), (3, TS - 4), (TS - 4, TS - 4)):
+    # 四栅格孔（2×2 孔阵，真透明 alpha=0——pack iron_trapdoor.png 实测孔位一一对应）。
+    for y0 in (3, 10):
+        for x0 in (3, 10):
+            c[y0:y0 + 3, x0:x0 + 3, 0:3] = IRON["hole"]
+            c[y0:y0 + 3, x0:x0 + 3, 3] = 0.0
+    # 四角铆钉（框角内侧空档 1px 亮点 + 暗晕；孔阵外、不与孔重叠）。
+    for (rx, ry) in ((2, 2), (TS - 3, 2), (2, TS - 3), (TS - 3, TS - 3)):
         c[ry, rx, 0:3] = IRON["rivet"]
         c[ry + 1, rx, 0:3] = IRON["band"]
     return c

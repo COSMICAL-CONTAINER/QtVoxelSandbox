@@ -963,9 +963,11 @@ public:
         //   门无手开路径 → 朝向不交互变化，开门方向固定）。solid=false（薄板不挡邻居面剔除；碰撞走
         //   shapeBoxes 子 AABB：合=顶站 3/16 / 开=竖直板挡人）、hardness=5.0（金属，同铁块量级）、
         //   toolType=Pickaxe + requiresTool=false（镐加速、空手慢挖仍掉；机制等价 MC 铁活板门无采掘门槛）、
-        //   dropId=自身、dropCount=1、maxStack=64。各面贴图=iron_trapdoor(178)（格子板 + 两列栅格孔真透明
-        //   —— 走 cutout 段渲染须 alpha discard 透视，同门族 t638① 模式）。lightOpacity 同 WoodTrapdoor：
-        //   合=满遮 15 / 开=全透 0（lightOpacity 特例行）。音色 GroupStone（金属质，同 IronDoor 族）。
+        //   dropId=自身、dropCount=1、maxStack=64。大面贴图=iron_trapdoor(178)（格子板 + 四孔栅格真透明
+        //   —— 走 cutout 段渲染须 alpha discard 透视，同门族 t638① 模式）；**t742 薄侧边=iron_block(112)**
+        //   （合态四个立侧面 / 开态窄棱边铁皮包边，同铁门薄边先例，见 partialblockgeometry trapdoor case）。
+        //   lightOpacity t742 起恒 0（区别 WoodTrapdoor 合=15：栅格孔真透明须透光——合态满遮会把孔后邻面
+        //   所采的本格 flood 光压黑 → 孔洞全黑；机制等价 MC 非不透明方块透光）。音色 GroupStone（金属质，同 IronDoor 族）。
         //   **进红石 tab 创造调色板**（铁活板门是红石机关件——仅红石驱动开合）。配方：6 铁锭横摆 3×2
         //   （顶 + 中两行满，机制等价 MC 1.0 iron trapdoor 6 iron ingot 横排 → 1）。与铁门（2×3 竖摆包围盒
         //   异形）/ 铁轨（t723 起补木棒多重集 {Iron:6, Stick:1} 异）互不冲突。终审修 L2：旧注释是 t722
@@ -1650,8 +1652,9 @@ public:
     //       tools/build_spruce.py 程序生成（§9 override (a)；零 MC 资产）。pack {175→spruce_leaves.png}。
     //   t717：176..178=铁门 / 铁活板门三张（R19.10 t722/t723 贴图前置；IronDoor/IronTrapdoor 方块后建）：
     //       176=door_iron_upper（铁门上半：门板 + 下部 2×2 格栅窗真透明 + 铆钉列）、177=door_iron_lower
-    //       （铁门下半：门板 + 锁孔板 + 底部横带）、178=iron_trapdoor（铁活板门：格子板 + 两列栅格孔真透明 +
-    //       四角铆钉）。tools/build_doors_iron.py 程序生成（§9 override (a)）。pack {176→door_iron_upper.png /
+    //       （铁门下半：门板 + 锁孔板 + 底部横带）、178=iron_trapdoor（铁活板门：格子板 + 2×2 四孔栅格
+    //       真透明 + 四角铆钉；t742 对齐 pack 四孔位）。tools/build_doors_iron.py 程序生成（§9 override (a)）。
+    //       pack {176→door_iron_upper.png /
     //       177→door_iron_lower.png / 178→iron_trapdoor.png}。本批无 BlockDef 引用（t722/t723 建 IronDoor/
     //       IronTrapdoor 时接 topTile/bottomTile/sideTile），static_assert 守卫随既有 kDefs 不变。
     static constexpr int AtlasTileCount = 179;
